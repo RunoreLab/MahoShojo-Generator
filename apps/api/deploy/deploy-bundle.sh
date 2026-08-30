@@ -1,11 +1,31 @@
 #!/bin/sh
 set -eu
 
-release_id="${1:-}"
-public_base_url="${2:-}"
+deploy_mode='publish'
+case "$#" in
+  2)
+    release_id="$1"
+    public_base_url="$2"
+    ;;
+  3)
+    [ "$1" = rollback ] || {
+      echo "用法：$0 <64 位 SHA-256> <https://public-origin>" >&2
+      echo "   或：$0 rollback <64 位 SHA-256> <https://public-origin>" >&2
+      exit 2
+    }
+    deploy_mode='rollback'
+    release_id="$2"
+    public_base_url="$3"
+    ;;
+  *)
+    echo "用法：$0 <64 位 SHA-256> <https://public-origin>" >&2
+    echo "   或：$0 rollback <64 位 SHA-256> <https://public-origin>" >&2
+    exit 2
+    ;;
+esac
 case "$release_id" in
   ''|*[!0-9a-f]*)
-    echo "用法：$0 <64 位 SHA-256> <https://public-origin>" >&2
+    echo "release id 必须是 64 位小写十六进制 SHA-256" >&2
     exit 2
     ;;
 esac
@@ -24,6 +44,9 @@ esac
 root_dir="${HONO_DEPLOY_ROOT_DIR:-/opt/mahoshojo-hono}"
 bind_port="${HONO_BIND_PORT:-8080}"
 redis_key_prefix="${HONO_REDIS_KEY_PREFIX:-}"
+redis_network_name="${HONO_REDIS_NETWORK_NAME:-mahoshojo-redis}"
+hosted_api_environment="${HONO_HOSTED_API_ENVIRONMENT:-}"
+runtime_image='node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32'
 case "$root_dir" in
   /) echo "部署根目录不得为文件系统根目录" >&2; exit 2 ;;
   /*) ;;
@@ -32,6 +55,60 @@ esac
 case "$bind_port" in
   ''|*[!0-9]*) echo "HONO_BIND_PORT 必须是数字" >&2; exit 2 ;;
 esac
+case "$redis_network_name" in
+  ''|*[!A-Za-z0-9_.-]*) echo "HONO_REDIS_NETWORK_NAME 必须是安全的 Docker network 名称" >&2; exit 2 ;;
+esac
+case "$hosted_api_environment" in
+  production|preview|local|test) ;;
+  *) echo "HONO_HOSTED_API_ENVIRONMENT 必须是 production、preview、local 或 test" >&2; exit 2 ;;
+esac
+case "$hosted_api_environment" in
+  production)
+    [ -z "$redis_key_prefix" ] || {
+      echo "production target 必须保持 HONO_REDIS_KEY_PREFIX 为空" >&2
+      exit 2
+    }
+    [ "$public_base_url" = 'https://homura.colanns.me' ] || {
+      echo "production target 必须使用 https://homura.colanns.me" >&2
+      exit 2
+    }
+    [ "$root_dir" = '/opt/mahoshojo-hono' ] || {
+      echo "production target 必须使用 /opt/mahoshojo-hono" >&2
+      exit 2
+    }
+    ;;
+  preview)
+    [ "$redis_key_prefix" = 'preview' ] || {
+      echo "preview target 必须显式设置 HONO_REDIS_KEY_PREFIX=preview" >&2
+      exit 2
+    }
+    [ "$public_base_url" = 'https://homura-preview.colanns.me' ] || {
+      echo "preview target 必须使用 https://homura-preview.colanns.me" >&2
+      exit 2
+    }
+    [ "$root_dir" = '/opt/mahoshojo-hono-preview' ] || {
+      echo "preview target 必须使用 /opt/mahoshojo-hono-preview" >&2
+      exit 2
+    }
+    ;;
+esac
+if [ "$deploy_mode" = rollback ]; then
+  case "$hosted_api_environment" in
+    production) ;;
+    test)
+      case "$root_dir" in
+        /opt/mahoshojo-hono|/opt/mahoshojo-hono-preview)
+          echo "production/preview 受管根不得使用 test rollback target" >&2
+          exit 2
+          ;;
+      esac
+      ;;
+    *)
+      echo "显式 rollback 只允许 production target" >&2
+      exit 2
+      ;;
+  esac
+fi
 
 releases_dir="$root_dir/releases"
 release_dir="$releases_dir/$release_id"
@@ -115,10 +192,44 @@ verify_release_tuple() {
   }
 
   manifest_lines="$(wc -l < "$tuple_dir/release.manifest" | tr -d ' ')"
-  case "$manifest_lines" in
-    3) ;;
-    4)
-      grep -Eq '^[0-9a-f]{64}  legacy-layout$' "$tuple_dir/release.manifest" || return 1
+  optional_manifest_lines=0
+  arena_gate_lines="$(grep -Ec '^[0-9a-f]{64}  arena-room-release-gate\.json$' \
+    "$tuple_dir/release.manifest" || true)"
+  case "$arena_gate_lines" in
+    0)
+      [ ! -e "$tuple_dir/arena-room-release-gate.json" ] \
+        && [ ! -L "$tuple_dir/arena-room-release-gate.json" ] || return 1
+      ;;
+    1)
+      optional_manifest_lines=$((optional_manifest_lines + 1))
+      [ -f "$tuple_dir/arena-room-release-gate.json" ] \
+        && [ ! -L "$tuple_dir/arena-room-release-gate.json" ] || return 1
+      ;;
+    *) return 1 ;;
+  esac
+  arena_gate_validator_lines="$(grep -Ec \
+    '^[0-9a-f]{64}  arena-room-release-gate-schema\.mjs$' \
+    "$tuple_dir/release.manifest" || true)"
+  case "$arena_gate_validator_lines" in
+    0)
+      [ ! -e "$tuple_dir/arena-room-release-gate-schema.mjs" ] \
+        && [ ! -L "$tuple_dir/arena-room-release-gate-schema.mjs" ] || return 1
+      ;;
+    1)
+      optional_manifest_lines=$((optional_manifest_lines + 1))
+      [ -f "$tuple_dir/arena-room-release-gate-schema.mjs" ] \
+        && [ ! -L "$tuple_dir/arena-room-release-gate-schema.mjs" ] || return 1
+      ;;
+    *) return 1 ;;
+  esac
+  legacy_manifest_lines="$(grep -Ec '^[0-9a-f]{64}  legacy-layout$' \
+    "$tuple_dir/release.manifest" || true)"
+  case "$legacy_manifest_lines" in
+    0)
+      [ ! -e "$tuple_dir/legacy-layout" ] && [ ! -L "$tuple_dir/legacy-layout" ] || return 1
+      ;;
+    1)
+      optional_manifest_lines=$((optional_manifest_lines + 1))
       [ -f "$tuple_dir/legacy-layout" ] && [ ! -L "$tuple_dir/legacy-layout" ] || return 1
       legacy_marker="$(cat "$tuple_dir/legacy-layout")"
       case "$legacy_marker" in
@@ -126,14 +237,23 @@ verify_release_tuple() {
         *) return 1 ;;
       esac
       ;;
-    *)
+    *) return 1 ;;
+  esac
+  if [ "$arena_gate_lines" -eq 1 ] && [ "$legacy_manifest_lines" -eq 1 ]; then
+    echo "legacy adoption tuple 不得声明 Arena Room reader capability" >&2
+    return 1
+  fi
+  if [ "$arena_gate_validator_lines" -eq 1 ] && [ "$arena_gate_lines" -ne 1 ]; then
+    echo "release gate schema validator 必须与 release gate 同时出现" >&2
+    return 1
+  fi
+  if [ "$manifest_lines" -ne $((3 + optional_manifest_lines)) ]; then
       echo "release.manifest 必须只覆盖规范 tuple 文件" >&2
       return 1
-      ;;
-  esac
-  grep -Eq '^[0-9a-f]{64}  index\.mjs$' "$tuple_dir/release.manifest" || return 1
-  grep -Eq '^[0-9a-f]{64}  compose\.yml$' "$tuple_dir/release.manifest" || return 1
-  grep -Eq '^[0-9a-f]{64}  deploy-bundle\.sh$' "$tuple_dir/release.manifest" || return 1
+  fi
+  [ "$(grep -Ec '^[0-9a-f]{64}  index\.mjs$' "$tuple_dir/release.manifest")" -eq 1 ] || return 1
+  [ "$(grep -Ec '^[0-9a-f]{64}  compose\.yml$' "$tuple_dir/release.manifest")" -eq 1 ] || return 1
+  [ "$(grep -Ec '^[0-9a-f]{64}  deploy-bundle\.sh$' "$tuple_dir/release.manifest")" -eq 1 ] || return 1
 
   (cd "$tuple_dir" && sha256sum -c release.sha256 >/dev/null)
   (cd "$tuple_dir" && sha256sum -c release.manifest >/dev/null)
@@ -196,11 +316,13 @@ validate_release_compose() {
 validate_release_runtime() {
   tuple_dir="$1"
   run_cancellable docker run --rm \
-    --network mahoshojo-redis \
+    --network "$redis_network_name" \
     --env-file "$runtime_env" \
     -e NODE_ENV=production \
+    -e HOSTED_API_ENVIRONMENT="$hosted_api_environment" \
     -e HONO_AUTH_MODE=bearer \
     -e HONO_CORS_ORIGINS='https://*.colanns.me' \
+    -e ARENA_ROOM_ALLOWED_ORIGINS='https://mahoshojo.colanns.me' \
     -e REDIS_HOST=redis \
     -e REDIS_PORT=6379 \
     -e REDIS_REQUIRED=true \
@@ -208,7 +330,7 @@ validate_release_runtime() {
     -e D1_REQUIRED=true \
     -e HONO_CONFIG_CHECK_ONLY=true \
     -v "$tuple_dir/index.mjs:/app/index.mjs:ro" \
-    node:22-alpine node /app/index.mjs >/dev/null
+    "$runtime_image" node /app/index.mjs >/dev/null
 }
 
 write_release_env() {
@@ -310,13 +432,18 @@ rollback_transaction() {
   rollback_had_previous="$2"
   rollback_previous_release_dir="$3"
   echo "新 release 未通过完整 contract，开始回滚 tuple" >&2
+  verify_release_tuple "$failed_release_dir" || {
+    echo "failed release tuple 已漂移，拒绝读取 rollback gate" >&2
+    return 1
+  }
   if [ "$rollback_had_previous" = true ]; then
+    verify_arena_room_rollback_gate \
+      "$failed_release_dir" "$rollback_previous_release_dir" || return 1
     restore_previous_tuple "$rollback_previous_release_dir" || return 1
     rm -f "$root_dir/current.next" || return 1
     return 0
   fi
 
-  verify_release_tuple "$failed_release_dir" || return 1
   validate_release_compose "$failed_release_dir" || return 1
   run_cancellable docker compose \
     --project-directory "$root_dir" -f "$failed_release_dir/compose.yml" \
@@ -325,6 +452,158 @@ rollback_transaction() {
   rm -f "$root_dir/current.next" || return 1
   rm -f "$release_env" || return 1
   rm -f "$format_file" || return 1
+}
+
+validate_arena_room_release_gate() {
+  validated_gate="$1"
+  validated_schema="$2"
+  shift 2
+  [ -f "$validated_gate" ] && [ ! -L "$validated_gate" ] || return 1
+  if [ -e "$validated_schema" ] || [ -L "$validated_schema" ]; then
+    [ -f "$validated_schema" ] && [ ! -L "$validated_schema" ] || return 1
+    run_cancellable docker run --rm \
+      --network none \
+      --read-only \
+      --cap-drop ALL \
+      --security-opt no-new-privileges \
+      -v "$validated_gate:/gate.json:ro" \
+      -v "$validated_schema:/gate-schema.mjs:ro" \
+      "$runtime_image" node /gate-schema.mjs --manifest /gate.json "$@" >/dev/null
+    return
+  fi
+
+  # GMR-09 schema validator first appeared after the initial gate-only tuple
+  # rollout.  Keep a deliberately narrow compatibility reader for those
+  # immutable historical tuples: only the exact writer-disabled gate is
+  # accepted, and no caller may ask this path to attest another contract.
+  [ "$#" -eq 0 ] || return 1
+  if ! run_cancellable docker run --rm \
+    --network none \
+    --read-only \
+    --cap-drop ALL \
+    --security-opt no-new-privileges \
+    -v "$validated_gate:/gate.json:ro" \
+    "$runtime_image" node --input-type=module -e '
+import { readFileSync } from "node:fs";
+
+const candidate = JSON.parse(readFileSync(process.argv[1], "utf8"));
+const expectedGate = {
+  schemaVersion: 1,
+  checkpointContract: "arena-room-authority-v2-generation-payload-digest-v1",
+  writerActivation: "disabled",
+  compatibleReaderRolloutRequired: true,
+  productionGoNoGoRequired: true,
+  rollback: {
+    minimumReaderContract: "arena-room-authority-v2-generation-payload-digest-v1",
+    generationStartMustBeDisabled: true,
+  },
+  rolloutOrder: [
+    "compatible-reader",
+    "writer-disabled-validation",
+    "production-go-no-go",
+    "writer-activation",
+  ],
+  evidence: {
+    legacyCheckpointReaderTest: "GMR-09 mixed-version checkpoint gate",
+    productionFeatureGateTest: "GMR-09 mixed-version gate",
+    rollbackShellGate: "verify_arena_room_rollback_gate",
+  },
+};
+const normalize = (value) => {
+  if (Array.isArray(value)) return value.map(normalize);
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(Object.keys(value).sort().map((key) => [key, normalize(value[key])]));
+  }
+  return value;
+};
+if (JSON.stringify(normalize(candidate)) !== JSON.stringify(normalize(expectedGate))) {
+  console.error("[arena-room-release-gate-compat] gate fields are not the exact writer-disabled schema");
+  process.exit(1);
+}
+console.log(JSON.stringify({
+  gate: "ARENA_ROOM_RELEASE_GATE_COMPAT",
+  writerActivation: candidate.writerActivation,
+  checkpointContract: candidate.checkpointContract,
+  status: "PASS",
+}));
+' /gate.json >/dev/null; then
+    echo "历史 gate-only release gate 兼容校验失败" >&2
+    return 1
+  fi
+}
+
+validate_arena_room_release_gate_if_present() {
+  validated_release_dir="$1"
+  validated_release_gate="$validated_release_dir/arena-room-release-gate.json"
+  validated_release_schema="$validated_release_dir/arena-room-release-gate-schema.mjs"
+  if [ ! -e "$validated_release_gate" ] && [ ! -L "$validated_release_gate" ]; then
+    [ ! -e "$validated_release_schema" ] && [ ! -L "$validated_release_schema" ]
+    return
+  fi
+  validate_arena_room_release_gate \
+    "$validated_release_gate" "$validated_release_schema" || {
+    echo "Arena Room release gate schema 校验失败" >&2
+    return 1
+  }
+}
+
+verify_arena_room_rollback_gate() {
+  failed_release_dir="$1"
+  target_release_dir="$2"
+  failed_gate="$failed_release_dir/arena-room-release-gate.json"
+  if [ ! -e "$failed_gate" ] && [ ! -L "$failed_gate" ]; then
+    return 0
+  fi
+  [ -f "$failed_gate" ] && [ ! -L "$failed_gate" ] || return 1
+  failed_gate_schema="$failed_release_dir/arena-room-release-gate-schema.mjs"
+  validate_arena_room_release_gate "$failed_gate" "$failed_gate_schema" || {
+    echo "Arena Room release gate schema 校验失败" >&2
+    return 1
+  }
+  writer_activation="$(
+    sed -n 's/^[[:space:]]*"writerActivation":[[:space:]]*"\([a-z]*\)"[,]*[[:space:]]*$/\1/p' \
+      "$failed_gate"
+  )"
+  case "$writer_activation" in
+    disabled) return 0 ;;
+    enabled) ;;
+    *)
+      echo "Arena Room release gate writerActivation 非法" >&2
+      return 1
+      ;;
+  esac
+  [ -f "$runtime_env" ] && [ ! -L "$runtime_env" ] || return 1
+  arena_generation_start_state="$(
+    sed -n 's/^ARENA_MULTIPLAYER_ENABLED=//p' "$runtime_env" | tail -n 1
+  )"
+  case "$arena_generation_start_state" in
+    ''|0|false|no|off) ;;
+    *)
+      echo "Arena multiplayer generation start 未关闭，拒绝自动回滚旧 reader" >&2
+      return 1
+      ;;
+  esac
+  verify_release_tuple "$target_release_dir" || return 1
+  target_gate="$target_release_dir/arena-room-release-gate.json"
+  [ -f "$target_gate" ] && [ ! -L "$target_gate" ] || {
+    echo "rollback target reader contract 不兼容" >&2
+    return 1
+  }
+  validate_arena_room_release_gate \
+    "$target_gate" "$failed_gate_schema" \
+    --expect-contract 'arena-room-authority-v2-generation-payload-digest-v1' || {
+      echo "rollback target reader contract schema 不兼容" >&2
+      return 1
+    }
+  target_reader_contract="$(
+    sed -n 's/^[[:space:]]*"checkpointContract":[[:space:]]*"\([A-Za-z0-9._:-]*\)"[,]*[[:space:]]*$/\1/p' \
+      "$target_gate"
+  )"
+  [ "$target_reader_contract" \
+    = 'arena-room-authority-v2-generation-payload-digest-v1' ] || {
+    echo "rollback target reader contract 不兼容" >&2
+    return 1
+  }
 }
 
 write_transaction() {
@@ -519,6 +798,19 @@ resolve_previous_release() {
   fi
 }
 
+verify_invoked_from_current_tuple() {
+  [ "$had_previous" = true ] || {
+    echo "显式 rollback 缺少可验证的 current tuple" >&2
+    return 1
+  }
+  invoked_script="$(realpath -e "$0")" || return 1
+  current_tuple_script="$previous_release_dir/deploy-bundle.sh"
+  [ "$invoked_script" = "$current_tuple_script" ] || {
+    echo "显式 rollback 只能由 current tuple 自带脚本发起" >&2
+    return 1
+  }
+}
+
 activate_release() {
   write_release_env "$release_dir" || return 1
   run_cancellable docker compose --project-directory "$root_dir" -f "$compose_file" \
@@ -571,7 +863,7 @@ trap 'handle_signal 129' HUP
 trap 'handle_signal 130' INT
 trap 'handle_signal 143' TERM
 
-for required_command in flock mktemp realpath; do
+for required_command in flock id mktemp realpath stat; do
   command -v "$required_command" >/dev/null 2>&1 || {
     echo "部署主机缺少必需工具：$required_command" >&2
     exit 1
@@ -587,6 +879,17 @@ done
   echo "部署根目录与 releases 必须是无符号链接的 canonical 路径" >&2
   exit 1
 }
+[ -f "$runtime_env" ] && [ ! -L "$runtime_env" ] || {
+  echo "Hono runtime env 不存在或不是普通文件" >&2
+  exit 1
+}
+runtime_env_mode="$(stat -c '%a' "$runtime_env")"
+runtime_env_owner_uid="$(stat -c '%u' "$runtime_env")"
+deploy_uid="$(id -u)"
+[ "$runtime_env_mode" = '600' ] && [ "$runtime_env_owner_uid" = "$deploy_uid" ] || {
+  echo "Hono runtime env 必须由当前部署用户所有且权限为 0600" >&2
+  exit 1
+}
 prepare_lock_file || {
   echo "deploy.lock 必须是受管普通文件" >&2
   exit 1
@@ -597,17 +900,81 @@ if ! flock -n 9; then
   exit 1
 fi
 
-[ -f "$runtime_env" ] && [ ! -L "$runtime_env" ] || {
-  echo "Hono runtime env 不存在或不是普通文件" >&2
-  exit 1
-}
 probe_dir="$(mktemp -d /tmp/mahoshojo-hono-probe.XXXXXX)"
 probe_headers="$probe_dir/headers"
 probe_body="$probe_dir/body"
 probe_status_file="$probe_dir/status"
 
+if [ "$deploy_mode" = rollback ]; then
+  verify_deployment_format || {
+    echo "显式 rollback 必须在合法 release-tuple-v2 marker 下执行" >&2
+    exit 1
+  }
+  resolve_previous_release
+  verify_invoked_from_current_tuple
+
+  recover_pending_transaction
+  previous_release_dir=''
+  had_previous=false
+  verify_deployment_format || {
+    echo "pending recovery 后缺少合法 release-tuple-v2 marker" >&2
+    exit 1
+  }
+  resolve_previous_release
+  verify_invoked_from_current_tuple
+  rollback_current_release_dir="$previous_release_dir"
+
+  verify_release_tuple "$rollback_current_release_dir"
+  verify_legacy_source_if_needed "$rollback_current_release_dir"
+  verify_release_tuple "$release_dir"
+  verify_legacy_source_if_needed "$release_dir"
+
+  validate_release_compose "$rollback_current_release_dir"
+  validate_release_runtime "$rollback_current_release_dir"
+  validate_arena_room_release_gate_if_present "$release_dir"
+  validate_release_compose "$release_dir"
+  validate_release_runtime "$release_dir"
+
+  if [ "$release_dir" = "$rollback_current_release_dir" ]; then
+    verify_public_contract || {
+      echo "current tuple 公网 contract probe 失败，拒绝报告幂等 rollback 成功" >&2
+      exit 1
+    }
+    echo "Hono 已位于 rollback target：$release_id"
+    echo "ROLLBACK_RELEASE_ID=$release_id"
+    exit 0
+  fi
+
+  verify_arena_room_rollback_gate \
+    "$rollback_current_release_dir" "$release_dir"
+  # target 激活后仍可能失败；写 journal 前先证明原 current 可安全恢复。
+  verify_arena_room_rollback_gate \
+    "$release_dir" "$rollback_current_release_dir"
+
+  write_transaction
+  if activate_release && verify_public_contract && promote_release \
+    && verify_deployment_format; then
+    clear_transaction
+    echo "Hono 已回退：$release_id"
+    echo "ROLLBACK_RELEASE_ID=$release_id"
+    exit 0
+  fi
+
+  if rollback_transaction \
+    "$release_dir" true "$rollback_current_release_dir"; then
+    clear_transaction
+  fi
+  exit 1
+fi
+
 recover_pending_transaction
 verify_release_tuple "$release_dir"
+validate_arena_room_release_gate \
+  "$release_dir/arena-room-release-gate.json" \
+  "$release_dir/arena-room-release-gate-schema.mjs" || {
+    echo "candidate Arena Room release gate schema 校验失败" >&2
+    exit 1
+  }
 validate_release_compose "$release_dir"
 validate_release_runtime "$release_dir"
 resolve_previous_release
@@ -616,6 +983,13 @@ if [ "$had_previous" = true ]; then
   verify_legacy_source_if_needed "$previous_release_dir"
   validate_release_compose "$previous_release_dir"
   validate_release_runtime "$previous_release_dir"
+  verify_arena_room_rollback_gate "$previous_release_dir" "$release_dir"
+  # candidate 激活失败时也必须能安全恢复 current tuple。
+  verify_arena_room_rollback_gate "$release_dir" "$previous_release_dir"
+fi
+rollback_baseline_release_id=''
+if [ "$had_previous" = true ]; then
+  rollback_baseline_release_id="${previous_release_dir##*/}"
 fi
 
 write_transaction
@@ -623,6 +997,7 @@ if activate_release && verify_public_contract && promote_release; then
   ensure_deployment_format
   clear_transaction
   echo "Hono 已发布：$release_id"
+  echo "ROLLBACK_BASELINE_RELEASE_ID=$rollback_baseline_release_id"
   exit 0
 fi
 

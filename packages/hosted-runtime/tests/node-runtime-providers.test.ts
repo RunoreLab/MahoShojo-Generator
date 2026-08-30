@@ -30,4 +30,22 @@ describe('Node AI provider URL boundary', () => {
       AI_PROVIDER_ALLOWED_ORIGINS: 'https://provider.example',
     })).toHaveLength(1);
   });
+
+  it('does not let NODE_ENV=development enable loopback HTTP on a production target', () => {
+    expect(parseAIProvidersFromEnv({
+      NODE_ENV: 'development',
+      HOSTED_API_ENVIRONMENT: 'production',
+      AI_API_KEY: 'server-secret',
+      AI_BASE_URL: 'http://127.0.0.1:11434/v1',
+    })).toEqual([]);
+  });
+
+  it('allows loopback HTTP only on an explicit local target', () => {
+    expect(parseAIProvidersFromEnv({
+      NODE_ENV: 'production',
+      HOSTED_API_ENVIRONMENT: 'local',
+      AI_API_KEY: 'server-secret',
+      AI_BASE_URL: 'http://127.0.0.1:11434/v1',
+    })).toHaveLength(1);
+  });
 });

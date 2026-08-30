@@ -348,6 +348,37 @@ describe('Arena companion service', () => {
     });
   });
 
+  it('typed terminal error 保留显式安全的 Provider 诊断', async () => {
+    const service = createArenaCompanionService({
+      generationService: generationService(async () => subscription([
+        {
+          id: '2-0',
+          type: 'error',
+          data: {
+            code: 'AI_UPSTREAM_REQUEST_FAILED',
+            status: 'failed',
+            error: 'AI_APICallError: 余额不足（HTTP 402）',
+            upstreamStatus: 402,
+          },
+        },
+      ])),
+      createGenerationRequestId: () => 'request-12345678',
+      projectUpdatedCombatants: async () => [],
+    });
+
+    const result = await service.generate(new Request('https://example.test/api/arena/generate', {
+      method: 'POST',
+      body: '{}',
+    }));
+
+    expect(result.status).toBe(502);
+    expect(await result.json()).toEqual({
+      code: 'AI_UPSTREAM_REQUEST_FAILED',
+      error: 'AI_APICallError: 余额不足（HTTP 402）',
+      generationId: 'arena_generation_1',
+    });
+  });
+
   it('typed stream 读取失败仍返回已分配的稳定 generationId', async () => {
     const service = createArenaCompanionService({
       generationService: generationService(async () => ({

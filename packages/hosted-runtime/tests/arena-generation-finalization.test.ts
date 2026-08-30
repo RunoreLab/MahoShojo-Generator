@@ -83,6 +83,15 @@ describe('Arena generation finalization', () => {
       status: 'completed',
       resultRef: 'r2://battle/generation-1',
     }));
+    expect(ports.persistCombatants).toHaveBeenCalledWith(expect.objectContaining({
+      idempotencyKey: 'arena-terminal:generation-1:combatants',
+    }));
+    expect(ports.applyStoryImpacts).toHaveBeenCalledWith(expect.objectContaining({
+      idempotencyKey: 'arena-terminal:generation-1:story-impacts',
+    }));
+    expect(ports.settleRatings).toHaveBeenCalledWith(expect.objectContaining({
+      idempotencyKey: 'arena-terminal:generation-1:ratings',
+    }));
   });
 
   it('重复 terminal claim 只读取已有结果，不重复业务副作用', async () => {
@@ -143,7 +152,11 @@ describe('Arena generation finalization', () => {
       status: 'failed',
       errorCode: 'ARENA_R2_STORAGE_FAILED',
       resultRef: null,
+      markdown: '',
     }));
+    expect(JSON.stringify(vi.mocked(failedPorts.claimTerminal).mock.calls)).not.toContain(
+      input.markdown,
+    );
     expect(failedPorts.completeTerminal).toHaveBeenCalledOnce();
     expect(failedPorts.settleRatings).not.toHaveBeenCalled();
   });
@@ -161,6 +174,12 @@ describe('Arena generation finalization', () => {
     });
     expect(ports.claimTerminal).toHaveBeenCalledTimes(2);
     expect(applyStoryImpacts).toHaveBeenCalledTimes(2);
+    expect(applyStoryImpacts.mock.calls[0]?.[0]).toMatchObject({
+      idempotencyKey: 'arena-terminal:generation-1:story-impacts',
+    });
+    expect(applyStoryImpacts.mock.calls[1]?.[0]).toMatchObject({
+      idempotencyKey: 'arena-terminal:generation-1:story-impacts',
+    });
     expect(ports.completeTerminal).toHaveBeenCalledTimes(1);
   });
 

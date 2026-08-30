@@ -10,7 +10,11 @@ import {
   createGenerateScenarioService,
   createGenerateScenarioStreamService,
 } from '../src/generate-scenario';
-import { completeStep, respondStep } from '../src/regular-generation';
+import {
+  completeStep,
+  createSafePublicAiError,
+  respondStep,
+} from '../src/regular-generation';
 
 const request = (path: string, body: unknown, method = 'POST'): Request => new Request(
   `https://example.test/api/${path}`,
@@ -172,6 +176,44 @@ describe('regular hosted generation services', () => {
       message: '服务器内部错误',
     });
     expect(serialized).not.toMatch(/free-prompt-secret-provider-url-canary|request-body-canary/u);
+  });
+
+  it('Free 只透传 runtime 显式标记的 Provider 安全诊断', async () => {
+    const errors: unknown[] = [];
+    const safeProviderError = createSafePublicAiError({
+      code: 'AI_UPSTREAM_REQUEST_FAILED',
+      message: 'AI_APICallError: 余额不足（HTTP 402）',
+      upstreamStatus: 402,
+      upstreamRequestId: 'req-free-402',
+    });
+    const service = createGenerateFreeService({
+      checkRateLimit: async () => null,
+      enforceSafety: async () => null,
+      generate: async () => {
+        throw safeProviderError;
+      },
+      normalizeOutput: async () => completeStep({}),
+      recordActivity: () => undefined,
+      buildResponse: () => new Response(null),
+      logError: (error) => errors.push(error),
+    });
+
+    const response = await service(request('generate-free', {
+      schema: 'general',
+      prompt: 'request-body-canary',
+      attachments: [],
+    }));
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({
+      error: '生成失败',
+      message: 'AI_APICallError: 余额不足（HTTP 402）',
+      code: 'AI_UPSTREAM_REQUEST_FAILED',
+      upstreamStatus: 402,
+      upstreamRequestId: 'req-free-402',
+    });
+    expect(errors).toEqual([safeProviderError]);
+    expect(JSON.stringify(errors)).not.toContain('余额不足');
   });
 
   it('Free 非流式保持 rate-limit -> safety -> generate -> activity -> normalize -> response 顺序', async () => {

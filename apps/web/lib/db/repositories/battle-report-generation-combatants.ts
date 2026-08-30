@@ -35,6 +35,12 @@ export type BattleReportGenerationCombatantDbRow = {
   created_at: string;
 };
 
+const D1_MAX_BOUND_PARAMETERS = 100;
+const COMBATANT_BOUND_PARAMETERS_PER_ROW = 14;
+const COMBATANT_INSERT_ROWS_PER_STATEMENT = Math.floor(
+  D1_MAX_BOUND_PARAMETERS / COMBATANT_BOUND_PARAMETERS_PER_ROW,
+);
+
 const toInt = (value: unknown, fallback = 0): number => {
   const n = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN;
   if (!Number.isFinite(n)) return fallback;
@@ -55,26 +61,33 @@ export const insertBattleReportGenerationCombatants = async (
 ): Promise<boolean> => {
   if (combatants.length === 0) return true;
 
-  await db
-    .insert(battleReportGenerationCombatants)
-    .values(
-      combatants.map((item) => ({
-        generationId: item.generationId,
-        sortIndex: item.sortIndex,
-        name: item.name,
-        type: item.type ?? null,
-        templateId: item.templateId ?? null,
-        isNative: typeof item.isNative === 'boolean' ? (item.isNative ? 1 : 0) : null,
-        isPreset: typeof item.isPreset === 'boolean' ? (item.isPreset ? 1 : 0) : null,
-        teamId: item.teamId ?? null,
-        characterGuidance: item.characterGuidance ?? null,
-        dataCardId: item.dataCardId ?? null,
-        dataCardUpdatedAt: item.dataCardUpdatedAt ?? null,
-        sizeChars: item.sizeChars ?? null,
-        sizeBytes: item.sizeBytes ?? null,
-        createdAt: createdAtIso,
-      })),
+  const rows = combatants.map((item) => ({
+    generationId: item.generationId,
+    sortIndex: item.sortIndex,
+    name: item.name,
+    type: item.type ?? null,
+    templateId: item.templateId ?? null,
+    isNative: typeof item.isNative === 'boolean' ? (item.isNative ? 1 : 0) : null,
+    isPreset: typeof item.isPreset === 'boolean' ? (item.isPreset ? 1 : 0) : null,
+    teamId: item.teamId ?? null,
+    characterGuidance: item.characterGuidance ?? null,
+    dataCardId: item.dataCardId ?? null,
+    dataCardUpdatedAt: item.dataCardUpdatedAt ?? null,
+    sizeChars: item.sizeChars ?? null,
+    sizeBytes: item.sizeBytes ?? null,
+    createdAt: createdAtIso,
+  }));
+  const inserts = [];
+  for (let start = 0; start < rows.length; start += COMBATANT_INSERT_ROWS_PER_STATEMENT) {
+    inserts.push(
+      db
+        .insert(battleReportGenerationCombatants)
+        .values(rows.slice(start, start + COMBATANT_INSERT_ROWS_PER_STATEMENT)),
     );
+  }
+  const [first, ...remaining] = inserts;
+  if (!first) return true;
+  await db.batch([first, ...remaining]);
 
   return true;
 };

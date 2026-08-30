@@ -1,6 +1,7 @@
 import { createActivityTokenService } from './activity-token';
 import type { NodeDataD1Client } from './data-ports';
 import type { SignatureService } from '../signature';
+import { parseHostedApiDeploymentTarget } from '@mahoshojo/hosted-api/deployment-target';
 
 export type AuthenticatedUserIdResolverOptions = {
   env?: Readonly<Record<string, string | undefined>>;
@@ -60,7 +61,8 @@ const parseTrustedBetterAuthUrl = (
   if (!raw) return null;
   try {
     const url = new URL(raw);
-    const localHttp = env.NODE_ENV !== 'production'
+    const deploymentTarget = parseHostedApiDeploymentTarget(env.HOSTED_API_ENVIRONMENT);
+    const localHttp = (deploymentTarget === 'local' || deploymentTarget === 'test')
       && url.protocol === 'http:'
       && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
     if (

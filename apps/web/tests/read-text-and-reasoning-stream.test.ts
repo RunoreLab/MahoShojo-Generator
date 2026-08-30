@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 
 import { readTextAndReasoningStreamFromResponse } from '@/lib/stream/read-text-and-reasoning-stream';
 
@@ -73,6 +73,32 @@ describe('stream/read-text-and-reasoning-stream', () => {
         label: '测试 SSE error',
       })
     ).rejects.toThrow('quota exceeded');
+  });
+
+  test('SSE error 事件会取消未结束 reader', async () => {
+    const cancel = vi.fn();
+    const response = new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(
+          encodeSse('error', { error: 'upstream failed' }),
+        ));
+      },
+      cancel,
+    }), { headers: { 'content-type': 'text/event-stream' } });
+
+    await expect(readTextAndReasoningStreamFromResponse(response))
+      .rejects.toThrow('upstream failed');
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  test('SSE EOF-before-done 不得作为成功结果返回', async () => {
+    const response = new Response(
+      encodeSse('markdown', { chunk: 'partial' }),
+      { headers: { 'content-type': 'text/event-stream' } },
+    );
+
+    await expect(readTextAndReasoningStreamFromResponse(response))
+      .rejects.toThrow(/done/u);
   });
 
   test('SSE 无 reasoning 事件时会收敛为 unavailable', async () => {

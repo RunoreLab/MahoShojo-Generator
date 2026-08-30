@@ -4,6 +4,11 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./deployment-target": {
+      "types": "./src/deployment-target.ts",
+      "import": "./src/deployment-target.ts",
+      "default": "./src/deployment-target.ts"
+    },
     "./hosted-dr": {
       "types": "./src/hosted-dr.ts",
       "import": "./src/hosted-dr.ts",

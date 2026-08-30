@@ -41,4 +41,25 @@ describe('Hosted authenticated user resolver', () => {
     }))).resolves.toBeNull();
     expect(client.prepare).not.toHaveBeenCalled();
   });
+
+  test('production target 不受 NODE_ENV=development 绕过而访问 loopback Better Auth', async () => {
+    const signatures = await createSignatures();
+    const fetcher = vi.fn<typeof fetch>();
+    const resolveUserId = createAuthenticatedUserIdResolver({
+      env: {
+        NODE_ENV: 'development',
+        HOSTED_API_ENVIRONMENT: 'production',
+        HONO_AUTH_MODE: 'hybrid',
+        BETTER_AUTH_URL: 'http://127.0.0.1:3000',
+      },
+      fetch: fetcher,
+      signatures,
+      getD1Client: () => null,
+    });
+
+    await expect(resolveUserId(new Request('https://example.test', {
+      headers: { cookie: 'better-auth.session_token=loopback-canary' },
+    }))).resolves.toBeNull();
+    expect(fetcher).not.toHaveBeenCalled();
+  });
 });

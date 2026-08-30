@@ -201,6 +201,48 @@ describe('RedisGenerationReplayStore', () => {
     expect(client.xRead).not.toHaveBeenCalled();
   });
 
+  it('按 event id 精确读取长事件流尾部，不受 replay batch 256 上限影响', async () => {
+    const client = createClient();
+    vi.mocked(client.eval).mockResolvedValueOnce([
+      'event',
+      JSON.stringify({
+        id: '1724570000000-300',
+        type: 'done',
+        data: '{"ok":true,"status":"completed"}',
+      }),
+    ]);
+    const store = createRedisGenerationReplayStore({ getClient: () => client });
+
+    await expect(store.readEvent({
+      generationId: 'generation-1234',
+      eventId: '1724570000000-300',
+    })).resolves.toEqual({
+      id: '1724570000000-300',
+      type: 'done',
+      data: { ok: true, status: 'completed' },
+    });
+
+    expect(client.eval).toHaveBeenCalledWith(
+      expect.stringContaining('GEN_READ_EVENT_V1'),
+      {
+        keys: ['mahoshojo:gen:v1:generation-1234:events'],
+        arguments: ['1724570000000-300'],
+      },
+    );
+    expect(client.xRead).not.toHaveBeenCalled();
+  });
+
+  it('精确 event 已被 trim 时返回 null', async () => {
+    const client = createClient();
+    vi.mocked(client.eval).mockResolvedValueOnce(['not-found', '']);
+    const store = createRedisGenerationReplayStore({ getClient: () => client });
+
+    await expect(store.readEvent({
+      generationId: 'generation-1234',
+      eventId: '1724570000000-1',
+    })).resolves.toBeNull();
+  });
+
   it('events key 被逐出时明确返回 stream-missing 且不进入 XREAD', async () => {
     const client = createClient();
     vi.mocked(client.eval).mockResolvedValueOnce(['stream-missing', '[]']);
@@ -312,20 +354,171 @@ describe('RedisGenerationReplayStore', () => {
     })).resolves.toEqual({ kind: 'forbidden' });
   });
 
-  it('terminal 更新使用 CAS，重复 finalization 不会再次生效', async () => {
+  it('terminal marker 与可见 terminal event 使用同一 CAS，重复 finalization 不会再次生效', async () => {
     const client = createClient();
-    vi.mocked(client.eval).mockResolvedValueOnce(1).mockResolvedValueOnce(0);
+    vi.mocked(client.eval)
+      .mockResolvedValueOnce([1, '1724570000000-9'])
+      .mockResolvedValueOnce(0);
     const store = createRedisGenerationReplayStore({ getClient: () => client });
     const input = {
       generationId: 'generation-1234',
       producerToken: reserveInput.producerToken,
       terminal: { status: 'completed' as const, resultRef: 'r2://report/1' },
+      terminalEvent: {
+        type: 'done',
+        data: { status: 'completed', ok: true, resultRef: 'r2://report/1' },
+      },
+      clearTerminalSnapshot: true as const,
       now: reserveInput.now,
     };
 
-    await expect(store.markTerminal(input)).resolves.toEqual({ owned: true, applied: true });
+    await expect(store.markTerminal(input)).resolves.toEqual({
+      owned: true,
+      applied: true,
+      event: {
+        id: '1724570000000-9',
+        type: 'done',
+        data: { status: 'completed', ok: true, resultRef: 'r2://report/1' },
+      },
+    });
     await expect(store.markTerminal(input)).resolves.toEqual({ owned: true, applied: false });
-    expect(vi.mocked(client.eval).mock.calls[0]?.[0]).toContain('GEN_TERMINAL_V1');
+    const [script, options] = vi.mocked(client.eval).mock.calls[0]!;
+    expect(script).toContain('GEN_TERMINAL_V2');
+    expect(script).toContain('XADD');
+    expect(options.keys).toEqual([
+      'mahoshojo:gen:v1:generation-1234:state',
+      'mahoshojo:gen:v1:generation-1234:events',
+    ]);
+  });
+
+  it('在执行 Lua 前拒绝 marker-only 或未决定 snapshot 的 terminal mutation', async () => {
+    const client = createClient();
+    const store = createRedisGenerationReplayStore({ getClient: () => client });
+    const unsafe = store as unknown as {
+      markTerminal(input: Record<string, unknown>): Promise<unknown>;
+    };
+
+    await expect(unsafe.markTerminal({
+      generationId: 'generation-1234',
+      producerToken: reserveInput.producerToken,
+      terminal: { status: 'failed', code: 'GENERATION_FAILED' },
+      now: reserveInput.now,
+    })).rejects.toThrow('REDIS_GENERATION_TERMINAL_EVIDENCE_INVALID');
+    await expect(unsafe.markTerminal({
+      generationId: 'generation-1234',
+      producerToken: reserveInput.producerToken,
+      terminal: { status: 'failed', code: 'GENERATION_FAILED' },
+      terminalEvent: {
+        type: 'error',
+        data: { ok: false, status: 'failed', code: 'GENERATION_FAILED' },
+      },
+      now: reserveInput.now,
+    })).rejects.toThrow('REDIS_GENERATION_TERMINAL_EVIDENCE_INVALID');
+    expect(client.eval).not.toHaveBeenCalled();
+  });
+
+  it('terminal snapshot 超预算时在同一 Lua CAS 清除旧 running snapshot', async () => {
+    const client = createClient();
+    vi.mocked(client.eval).mockResolvedValueOnce([1, '1724570000000-10']);
+    const store = createRedisGenerationReplayStore({ getClient: () => client });
+
+    await expect(store.markTerminal({
+      generationId: 'generation-1234',
+      producerToken: reserveInput.producerToken,
+      terminal: { status: 'failed', code: 'GENERATION_FAILED' },
+      terminalEvent: {
+        type: 'error',
+        data: { ok: false, status: 'failed', code: 'GENERATION_FAILED' },
+      },
+      clearTerminalSnapshot: true,
+      now: reserveInput.now,
+    })).resolves.toMatchObject({ owned: true, applied: true });
+
+    const [script, options] = vi.mocked(client.eval).mock.calls[0]!;
+    expect(script).toContain("ARGV[8] == '1'");
+    expect(script).toContain('state.snapshot = cjson.null');
+    expect(options.arguments.at(-1)).toBe('1');
+  });
+
+  it('只从 Redis 恢复有界的 Provider 安全投影', async () => {
+    const client = createClient();
+    const terminal = {
+      status: 'failed' as const,
+      code: 'AI_UPSTREAM_REQUEST_FAILED',
+      publicError: {
+        code: 'AI_UPSTREAM_REQUEST_FAILED' as const,
+        message: 'AI_APICallError: 余额不足（HTTP 402）',
+        upstreamStatus: 402,
+        upstreamRequestId: 'req-redis-402',
+      },
+    };
+    vi.mocked(client.get).mockResolvedValue(JSON.stringify({
+      actorHash: 'actor-hash',
+      reservationKey: 'reservation-key',
+      generationId: 'generation-1234',
+      generationRequestId: 'request-1234',
+      payloadHash: 'payload-sha256',
+      producerToken: reserveInput.producerToken,
+      status: 'failed',
+      lastEventId: '12-0',
+      updatedAt: reserveInput.now,
+      leaseExpiresAt: null,
+      snapshot: null,
+      terminal,
+      cancelRequested: false,
+    }));
+    const store = createRedisGenerationReplayStore({ getClient: () => client });
+
+    await expect(store.readState({ generationId: 'generation-1234' })).resolves.toMatchObject({
+      terminal,
+    });
+
+    vi.mocked(client.get).mockResolvedValue(JSON.stringify({
+      actorHash: 'actor-hash',
+      reservationKey: 'reservation-key',
+      generationId: 'generation-1234',
+      generationRequestId: 'request-1234',
+      payloadHash: 'payload-sha256',
+      producerToken: reserveInput.producerToken,
+      status: 'failed',
+      lastEventId: '12-0',
+      updatedAt: reserveInput.now,
+      leaseExpiresAt: null,
+      snapshot: {
+        status: 'running',
+        markdown: 'stale partial',
+        reasoning: '',
+        lastEventId: '11-0',
+        updatedAt: reserveInput.now,
+      },
+      terminal,
+      cancelRequested: false,
+    }));
+    await expect(store.readState({ generationId: 'generation-1234' })).rejects.toThrow(
+      'REDIS_GENERATION_STATE_INVALID',
+    );
+
+    vi.mocked(client.get).mockResolvedValue(JSON.stringify({
+      actorHash: 'actor-hash',
+      reservationKey: 'reservation-key',
+      generationId: 'generation-1234',
+      generationRequestId: 'request-1234',
+      payloadHash: 'payload-sha256',
+      producerToken: reserveInput.producerToken,
+      status: 'failed',
+      lastEventId: '12-0',
+      updatedAt: reserveInput.now,
+      leaseExpiresAt: null,
+      snapshot: null,
+      terminal: {
+        ...terminal,
+        publicError: { ...terminal.publicError, message: 'X'.repeat(2_001) },
+      },
+      cancelRequested: false,
+    }));
+    await expect(store.readState({ generationId: 'generation-1234' })).rejects.toThrow(
+      'REDIS_GENERATION_STATE_INVALID',
+    );
   });
 
   it('markRunning 原子观察 reserved cancel，阻止旧 producer 启动 Provider', async () => {

@@ -19,7 +19,12 @@ export type MemoryGenerationReplayStoreOptions = {
 const cloneState = (state: GenerationReplayStoreState): GenerationReplayStoreState => ({
   ...state,
   snapshot: state.snapshot ? { ...state.snapshot } : null,
-  terminal: state.terminal ? { ...state.terminal } : null,
+  terminal: state.terminal ? {
+    ...state.terminal,
+    ...(state.terminal.publicError
+      ? { publicError: { ...state.terminal.publicError } }
+      : {}),
+  } : null,
 });
 
 /**
@@ -324,6 +329,13 @@ export const createMemoryGenerationReplayStore = (
       return snapshot ? { ...snapshot } : null;
     },
 
+    async readEvent(input) {
+      prune();
+      const event = (events.get(input.generationId) ?? [])
+        .find((candidate) => candidate.id === input.eventId);
+      return event ? { ...event } : null;
+    },
+
     async readAfter(input) {
       prune();
       const retained = events.get(input.generationId) ?? [];
@@ -349,6 +361,13 @@ export const createMemoryGenerationReplayStore = (
 
     async markTerminal(input) {
       prune();
+      if (
+        !input.terminalEvent
+        || Boolean(input.terminalSnapshot) === (input.clearTerminalSnapshot === true)
+        || (input.terminalSnapshot && input.terminalSnapshot.status !== input.terminal.status)
+      ) {
+        throw new Error('MEMORY_GENERATION_TERMINAL_EVIDENCE_INVALID');
+      }
       const state = states.get(input.generationId);
       if (
         !state
@@ -358,14 +377,39 @@ export const createMemoryGenerationReplayStore = (
         return { owned: false, applied: false };
       }
       if (state.terminal) return { owned: true, applied: false };
+      let sequence = sequences.get(input.generationId) ?? 0;
+      sequence += 1;
+      const terminalEvent: GenerationStreamEvent = {
+        ...input.terminalEvent,
+        id: `${sequence}-0`,
+      };
+      sequences.set(input.generationId, sequence);
+      events.set(input.generationId, [
+        ...(events.get(input.generationId) ?? []),
+        terminalEvent,
+      ].slice(-maxEvents));
       writeState({
         ...state,
         status: input.terminal.status,
-        terminal: { ...input.terminal },
+        terminal: {
+          ...input.terminal,
+          ...(input.terminal.publicError
+            ? { publicError: { ...input.terminal.publicError } }
+            : {}),
+        },
+        lastEventId: terminalEvent.id,
+        snapshot: input.terminalSnapshot ? {
+          ...input.terminalSnapshot,
+          lastEventId: terminalEvent.id,
+        } : null,
         leaseExpiresAt: null,
         updatedAt: input.now,
       });
-      return { owned: true, applied: true };
+      return {
+        owned: true,
+        applied: true,
+        event: terminalEvent,
+      };
     },
 
     async readState(input) {

@@ -24,6 +24,9 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
+    env: {
+      NEXT_PUBLIC_HOSTED_API_ENVIRONMENT: 'test',
+    },
     globals: true,
     include: ['tests/**/*.test.{ts,tsx,js}'],
     setupFiles: ['tests/setup.ts'],

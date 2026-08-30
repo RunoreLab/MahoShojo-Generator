@@ -8,6 +8,10 @@ import {
   resolveHostedApiCorsOrigin,
 } from '@mahoshojo/hosted-api/hosted-dr';
 import type { HonoServerConfig } from '#/config';
+import {
+  registerArenaRoomHttpRoutes,
+  type ArenaRoomHttpDependencies,
+} from '#/arena-room/room-http';
 import { registerHealthRoutes } from '#/health';
 import { redisRateLimit } from '#/middleware/redis-rate-limit';
 import { requestMetadata, type HonoAppVariables } from '#/middleware/request-metadata';
@@ -28,11 +32,19 @@ export const isAllowedOrigin = (origin: string, allowedOrigins: string[]): strin
   return resolveHostedApiCorsOrigin(origin, allowedOrigins);
 };
 
+export const isExactAllowedOrigin = (origin: string, allowedOrigins: readonly string[]): boolean => (
+  origin !== '*' && allowedOrigins.includes(origin)
+);
+
 export const createHonoApp = (
   config: HonoServerConfig,
   redis: RedisService,
   telemetry: RuntimeTelemetryService = noopRuntimeTelemetry,
+  services: { readonly arenaRoom?: ArenaRoomHttpDependencies } = {},
 ) => {
+  if (config.arenaMultiplayerEnabled && !services.arenaRoom) {
+    throw new Error('Arena Room HTTP dependencies are required when multiplayer is enabled');
+  }
   const app = new Hono<{ Variables: HonoAppVariables }>();
 
   app.use('*', requestMetadata(telemetry));
@@ -47,20 +59,28 @@ export const createHonoApp = (
   }));
 
   app.use('/api/*', redisRateLimit(redis, {
-    namespace: `${config.redisKeyPrefix ? `${config.redisKeyPrefix}:` : ''}api`,
+    namespace: 'api',
     limit: 600,
     windowSeconds: 60,
     failureMode: config.redisRequired ? 'closed' : 'open',
     bypassPaths: REDIS_RATE_LIMIT_BYPASS_PATHS,
   }));
   app.use('/api/auth/*', redisRateLimit(redis, {
-    namespace: `${config.redisKeyPrefix ? `${config.redisKeyPrefix}:` : ''}auth`,
+    namespace: 'auth',
     limit: 30,
     windowSeconds: 60,
     failureMode: config.redisRequired ? 'closed' : 'open',
   }));
 
   registerHealthRoutes(app, config, redis);
+  if (config.arenaMultiplayerEnabled && services.arenaRoom) {
+    registerArenaRoomHttpRoutes(app, services.arenaRoom, {
+      isAllowedOrigin: (origin) => isExactAllowedOrigin(
+        origin,
+        config.arenaRoomAllowedOrigins,
+      ),
+    });
+  }
   registerRoutes(app);
 
   app.notFound((context) => context.json({

@@ -21,6 +21,7 @@ const originalEnvironment = {
 };
 
 const config: HonoServerConfig = {
+  arenaMultiplayerEnabled: false,
   host: '127.0.0.1',
   port: 8787,
   nodeEnv: 'test',
@@ -29,6 +30,7 @@ const config: HonoServerConfig = {
   redisRequired: false,
   d1Required: true,
   corsOrigins: ['http://localhost:3000'],
+  arenaRoomAllowedOrigins: ['http://localhost:3000'],
   authMode: 'hybrid',
 };
 
@@ -77,6 +79,7 @@ const configureTransport = (transport: D1TransportCase['transport']) => {
 
   if (transport === 'gateway') {
     process.env.D1_GATEWAY_URL = 'https://gateway.example.test';
+    process.env.D1_GATEWAY_HMAC_SECRET = 'g'.repeat(32);
     return;
   }
 
@@ -111,9 +114,13 @@ describe.each(transportCases)('D1 readiness：$name', ({ transport, expectedUrl 
     const response = await createHealthApp().request('/health/ready');
 
     expect(response.status).toBe(200);
+    expect(response.headers.get('cache-control')).toBe('no-store');
     expect(requestedUrl).toBe(expectedUrl);
     expect(await response.json()).toMatchObject({
       ok: true,
+      service: 'mahoshojo-hono',
+      placement: 'hono-primary',
+      contractVersion: 'g25e1-v1',
       dependencies: {
         d1: { configured: true, required: true, ready: true, transport },
       },
@@ -143,8 +150,12 @@ describe.each(transportCases)('D1 readiness：$name', ({ transport, expectedUrl 
     const response = await createHealthApp().request('/health/ready');
 
     expect(response.status).toBe(503);
+    expect(response.headers.get('cache-control')).toBe('no-store');
     expect(await response.json()).toMatchObject({
       ok: false,
+      service: 'mahoshojo-hono',
+      placement: 'hono-primary',
+      contractVersion: 'g25e1-v1',
       dependencies: {
         d1: { configured: true, required: true, ready: false, transport },
       },

@@ -29,7 +29,11 @@ import {
   StreamReadTimeoutError,
 } from '@/lib/stream/timeout';
 import { authStorage } from '@/lib/auth';
-import { generationApiFetch } from '@/lib/hono-api-client';
+import {
+  createGenerationApiIntent,
+  type GenerationApiIntent,
+} from '@/lib/hono-api-client';
+import { useGenerationApiIntentLatch } from '@/lib/use-generation-api-intent-latch';
 import { useNarrativeHistoryStore } from '../stores/useNarrativeHistoryStore';
 import { resolveApiErrorMessage } from '@/lib/client/apiError';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
@@ -44,8 +48,17 @@ import { normalizeCustomStoryLength } from '@/lib/story-length';
 import { buildCustomProviderRequestPayload } from '@/lib/ai/custom-provider';
 import type { GenerationRankingResponse } from '@/lib/arena/generation-ranking';
 import {
+  arenaGenerationConnectionNotice,
   openArenaGenerationStream,
+  type ArenaGenerationConnectionState,
 } from '@/lib/arena/resumable-generation-client';
+import { buildArenaRoomSharedConfigFromBattleState } from '@/lib/arena-room/shared-config';
+import {
+  dispatchArenaRoomGenerationRetry,
+  dispatchArenaRoomGenerationStart,
+  resolveArenaRoomGenerationAction,
+} from '../multiplayer/generation-bridge';
+import { useArenaRoomContext } from '../multiplayer/useArenaRoom';
 
 const sanitizeTextByShieldWords = (text: string): string => applyShieldWords(text).filteredText;
 
@@ -410,6 +423,7 @@ const checkSensitivePayload = async (
 };
 
 export const useBattleEngine = () => {
+  const generationApiIntentLatch = useGenerationApiIntentLatch();
   const queryClient = useQueryClient();
   const router = useClientRouteAdapter();
   const { updateFromMarkdown } = useStreamCombatantUpdater();
@@ -452,6 +466,7 @@ export const useBattleEngine = () => {
   const streamSoftTimeoutWarning = useBattleSelector((state) => state.streamSoftTimeoutWarning);
   const isRedoingUpdates = useBattleSelector((state) => state.isRedoingUpdates);
   const { handleResolveRandomPlaceholders } = useBattleActions();
+  const arenaRoomRuntime = useArenaRoomContext();
 
   const providerCooldownConfig = resolveArenaProviderCooldownConfig(userProviderConfig);
   const { currentMode: providerCooldownMode } = providerCooldownConfig;
@@ -487,6 +502,34 @@ export const useBattleEngine = () => {
   );
 
   const handleGenerate = useCallback(async () => {
+    let lastArenaConnectionState: ArenaGenerationConnectionState | null = null;
+    let recoveryNoticeActive = false;
+    const roomAction = arenaRoomRuntime
+      ? resolveArenaRoomGenerationAction(arenaRoomRuntime.state)
+      : { inRoom: false, canStart: true, canRetry: false, reason: null } as const;
+    if (roomAction.inRoom && roomAction.canRetry && arenaRoomRuntime) {
+      const outcome = await dispatchArenaRoomGenerationRetry({
+        controller: arenaRoomRuntime.controller,
+        state: arenaRoomRuntime.state,
+      });
+      if (outcome !== 'submitted') {
+        setError(outcome === 'stale'
+          ? '⚠️ 房间状态已变化，请确认最新状态后再重试。'
+          : '⚠️ 当前没有可安全重试的多人生成请求。');
+      }
+      return;
+    }
+    if (roomAction.inRoom && !roomAction.canStart) {
+      const message = roomAction.reason === 'member'
+        ? '⚠️ 多人房间仅房主可以启动生成，请等待房主操作。'
+        : roomAction.reason === 'unknown'
+          ? '⚠️ 上一次多人生成启动结果尚未确认，请等待服务器状态恢复，不要重复提交。'
+          : roomAction.reason === 'connection'
+            ? '⚠️ 房间连接尚未恢复，暂不能启动多人生成。'
+            : '⚠️ 当前房间已有生成任务，请等待其结束。';
+      setError(message);
+      return;
+    }
     if (isCooldown) {
       setError(`冷却中，请等待 ${remainingTime} 秒后再生成。`);
       return;
@@ -660,6 +703,27 @@ export const useBattleEngine = () => {
         requestBody.customProvider = customProviderPayload;
       }
 
+      if (roomAction.inRoom && arenaRoomRuntime) {
+        const sharedConfig = await buildArenaRoomSharedConfigFromBattleState(
+          useBattleStore.getState(),
+        );
+        const outcome = await dispatchArenaRoomGenerationStart({
+          controller: arenaRoomRuntime.controller,
+          state: arenaRoomRuntime.state,
+          sharedConfig,
+          generationRequestId,
+          generation: requestBody,
+        });
+        if (outcome !== 'submitted') {
+          throw new Error(
+            outcome === 'stale'
+              ? '房间 epoch 或配置 revision 已变化，请确认最新房间状态后再试。'
+              : '当前房间状态不允许启动生成。',
+          );
+        }
+        return;
+      }
+
       const authHeader = await authStorage.getAuthHeader();
       const requestHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
       if (authHeader) requestHeaders.Authorization = authHeader;
@@ -772,21 +836,42 @@ export const useBattleEngine = () => {
               }
               const endpoint = `/api/arena/generate-stream${query.toString() ? `?${query.toString()}` : ''}`;
               requestHeaders.Accept = 'text/event-stream';
+              let generationIntent: GenerationApiIntent | null = null;
                 const response = await openArenaGenerationStream({
                   endpoint,
                   body: requestBody,
                   generationRequestId,
                   headers: requestHeaders,
                   signal: abortController.signal,
-                  fetcher: generationApiFetch,
-                  onStateChange: (state) => {
-                    if (state === 'reconnecting') {
-                      setError('网络连接暂时中断，战报仍在服务器生成，正在恢复连接。');
-                    } else if (state === 'resuming') {
-                      setError('正在恢复同一场战报生成。');
-                    } else if (state === 'producer_lost') {
-                      setError('生成进程已丢失，无法安全自动重试。');
+                  fetcher: (input, init) => {
+                    if (input === endpoint && (init?.method ?? 'GET').toUpperCase() === 'POST') {
+                      generationIntent ??= generationApiIntentLatch.tryAcquire();
+                      if (!generationIntent) {
+                        throw new Error('已有生成请求正在处理中，请勿重复提交。');
+                      }
+                      return generationIntent.dispatch(input, init);
                     }
+                    return createGenerationApiIntent().dispatch(input, init);
+                  },
+                  onStateChange: (state) => {
+                    const previousState = lastArenaConnectionState;
+                    lastArenaConnectionState = state;
+                    if (
+                      state === 'generating'
+                      && previousState
+                      && ['recovering_initial', 'reconnecting', 'resuming'].includes(previousState)
+                    ) {
+                      recoveryNoticeActive = true;
+                      setError('连接已恢复，继续接收同一场战报。');
+                      return;
+                    }
+                    if (state === 'completed' && recoveryNoticeActive) {
+                      recoveryNoticeActive = false;
+                      setError(null);
+                      return;
+                    }
+                    const notice = arenaGenerationConnectionNotice(state);
+                    if (notice) setError(notice);
                   },
                 });
 
@@ -1217,7 +1302,10 @@ export const useBattleEngine = () => {
               }
 
 	              if (event === 'error') {
-	                const message = typeof payload?.error === 'string' ? payload.error : '服务器流式响应异常';
+	                const message = resolveApiErrorMessage({
+	                  payload,
+	                  fallback: '服务器流式响应异常',
+	                });
 	                const interruptedFromServer = isServerInterruptedPayload(payload, message);
 	                if (interruptedFromServer) {
 	                  isInterruptedAbort = true;
@@ -1586,7 +1674,9 @@ export const useBattleEngine = () => {
         }
       }
 
-      const response = await generationApiFetch('/api/generate-battle-story', {
+      const generationIntent = generationApiIntentLatch.tryAcquire();
+      if (!generationIntent) return;
+      const response = await generationIntent.dispatch('/api/generate-battle-story', {
         method: 'POST',
         headers: requestHeaders,
         body: JSON.stringify(requestBody),
@@ -1624,7 +1714,8 @@ export const useBattleEngine = () => {
 	      if (shouldTreatAsInterrupted) {
           const abortReason = sharedGenerationAbortController?.signal.reason;
           if (abortReason === STREAM_ABORT_REASON_USER) {
-            setError('已手动停止生成。当前预览可能不完整，但可继续查看。');
+            setError(arenaGenerationConnectionNotice(lastArenaConnectionState ?? 'unknown')
+              ?? '停止请求状态尚未确认；生成可能仍在后台继续，请稍后检查。');
           } else {
             const details = error instanceof Error ? error.message : '连接被中断';
             setError(buildStreamInterruptedMessage(details));
@@ -1641,6 +1732,7 @@ export const useBattleEngine = () => {
 	      setStreamSoftTimeoutWarning(null);
 	    }
   }, [
+    generationApiIntentLatch,
     queryClient,
     isCooldown,
     remainingTime,
@@ -1666,21 +1758,22 @@ export const useBattleEngine = () => {
     setIsGenerating,
     setIsStreaming,
     setStreamingMarkdown,
-	    setStreamReporterInfo,
-	    setStreamUserGuidance,
-	    setStreamCharacterGuidances,
-	    setStreamAiUsage,
-	    setStreamAiModel,
-	    setStreamNarrativeHistoryReadCount,
-      setStreamReasoning,
-      setStreamUpdateMetaDebug,
-      setStreamSoftTimeoutWarning,
-      setLatestAiImpacts,
-      setLastGenerationId,
-		    setCombatants,
-		    handleResolveRandomPlaceholders,
-	    redirectToArrested,
-	    startCooldown,
+    setStreamReporterInfo,
+    setStreamUserGuidance,
+    setStreamCharacterGuidances,
+    setStreamAiUsage,
+    setStreamAiModel,
+    setStreamNarrativeHistoryReadCount,
+    setStreamReasoning,
+    setStreamUpdateMetaDebug,
+    setStreamSoftTimeoutWarning,
+    setLatestAiImpacts,
+    setLastGenerationId,
+    setCombatants,
+    handleResolveRandomPlaceholders,
+    arenaRoomRuntime,
+    redirectToArrested,
+    startCooldown,
     updateFromMarkdown,
   ]);
 

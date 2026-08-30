@@ -324,6 +324,44 @@ const normalizeNativeAuthority = async (
   }
 };
 
+type NodeArenaGenerationSemanticAuthorityInput = {
+  readonly payload: Record<string, unknown>;
+  readonly signatures: SignatureService;
+  readonly trustedInternalGuidance: string | null;
+  readonly trustedPvpContext: ArenaTrustedPvpContext | null;
+};
+
+const applyNodeArenaGenerationSemanticAuthority = async (
+  input: NodeArenaGenerationSemanticAuthorityInput,
+): Promise<void> => {
+  if (input.trustedPvpContext) input.payload.pvpContext = input.trustedPvpContext;
+  else delete input.payload.pvpContext;
+  await normalizeNativeAuthority(input.payload, input.signatures);
+  delete input.payload.internalGuidance;
+  if (input.trustedInternalGuidance?.trim()) {
+    input.payload.internalGuidance = input.trustedInternalGuidance.trim();
+  }
+};
+
+export const canonicalizeNodeArenaGenerationSemanticPayload = async (
+  input: Readonly<{
+    payload: Readonly<Record<string, unknown>>;
+    signatures: SignatureService;
+    trustedInternalGuidance: string | null;
+    trustedPvpContext: ArenaTrustedPvpContext | null;
+  }>,
+): Promise<Record<string, unknown>> => {
+  const normalized = clonePayload(input.payload as Record<string, unknown>);
+  normalizeLegacyPayloadDefaults(normalized);
+  await applyNodeArenaGenerationSemanticAuthority({
+    payload: normalized,
+    signatures: input.signatures,
+    trustedInternalGuidance: input.trustedInternalGuidance,
+    trustedPvpContext: input.trustedPvpContext,
+  });
+  return redactArenaGenerationSemanticPayload(normalized);
+};
+
 const buildSafetyText = async (
   payload: Record<string, unknown>,
   signatures: SignatureService,
@@ -525,11 +563,12 @@ export const createNodeArenaGenerationExecutor = (
           error: 'PVP generation authority is invalid',
         }, 400);
       }
-      if (trustedPvpContext) normalized.pvpContext = trustedPvpContext;
-      else delete normalized.pvpContext;
-      await normalizeNativeAuthority(normalized, signatures);
-      delete normalized.internalGuidance;
-      if (trustedGuidance?.trim()) normalized.internalGuidance = trustedGuidance.trim();
+      await applyNodeArenaGenerationSemanticAuthority({
+        payload: normalized,
+        signatures,
+        trustedInternalGuidance: trustedGuidance,
+        trustedPvpContext,
+      });
       const season = await options.readSeasonContext?.().catch(() => null) ?? null;
       if (options.requireSeasonAuthority && season?.authorityAvailable !== true) {
         return jsonResponse({

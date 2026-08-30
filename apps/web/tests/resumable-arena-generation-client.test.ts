@@ -4,9 +4,13 @@ import {
   ARENA_GENERATION_ACTOR_TOKEN_HEADER,
   ARENA_GENERATION_ACTOR_TOKEN_KEY,
   ARENA_GENERATION_CLIENT_STATE_KEY,
+  arenaGenerationConnectionNotice,
   openArenaGenerationStream,
 } from '@/lib/arena/resumable-generation-client';
-import { STREAM_ABORT_REASON_CONTENT_POLICY } from '@/lib/stream/abort';
+import {
+  STREAM_ABORT_REASON_CONTENT_POLICY,
+  STREAM_ABORT_REASON_USER,
+} from '@/lib/stream/abort';
 
 class MemoryStorage {
   values = new Map<string, string>();
@@ -56,6 +60,13 @@ const readWithDeadline = async <T>(
 };
 
 describe('resumable Arena generation client', () => {
+  it('给取消确认与恢复状态提供稳定用户文案', () => {
+    expect(arenaGenerationConnectionNotice('cancelling')).toContain('正在请求服务器停止');
+    expect(arenaGenerationConnectionNotice('cancelled')).toContain('服务器已接受停止请求');
+    expect(arenaGenerationConnectionNotice('cancel_unconfirmed')).toContain('可能仍在后台继续');
+    expect(arenaGenerationConnectionNotice('reconnecting')).toContain('仍在服务器生成');
+    expect(arenaGenerationConnectionNotice('completed')).toBeNull();
+  });
   it('persists a bootstrap actor credential before the first POST', async () => {
     const storage = new MemoryStorage();
     const fetcher = vi.fn(async (_url: string, init?: RequestInit) => {
@@ -647,6 +658,7 @@ describe('resumable Arena generation client', () => {
     abortReason,
     cancelReason,
   ) => {
+    const states: string[] = [];
     const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
       void init;
       if (url.includes('/cancel')) return new Response(null, { status: 202 });
@@ -657,6 +669,7 @@ describe('resumable Arena generation client', () => {
       endpoint: '/api/arena/generate-stream',
       body: {}, headers: {}, fetcher, storage: new MemoryStorage(),
       generationRequestId: `request-${cancelReason}`, signal: abort.signal,
+      onStateChange: (state) => states.push(state),
     });
     const pendingRead = opened.body!.getReader().read();
 
@@ -673,6 +686,70 @@ describe('resumable Arena generation client', () => {
       method: 'POST',
       body: JSON.stringify({ reason: cancelReason }),
     });
+    expect(states).toContain('cancelling');
+    expect(states.at(-1)).toBe('cancelled');
+  });
+
+  it.each([
+    ['fetch reject', async () => { throw new Error('offline'); }],
+    ['server 503', async () => new Response(null, { status: 503 })],
+  ])('does not claim server cancellation when cancel %s', async (_label, cancelResponse) => {
+    const states: string[] = [];
+    const fetcher = vi.fn(async (url: string): Promise<Response> => {
+      if (url.includes('/cancel')) return cancelResponse();
+      return response(new ReadableStream<Uint8Array>({ start() {} }));
+    });
+    const abort = new AbortController();
+    const opened = await openArenaGenerationStream({
+      endpoint: '/api/arena/generate-stream',
+      body: {},
+      headers: {},
+      fetcher,
+      storage: new MemoryStorage(),
+      generationRequestId: `request-cancel-${_label.replace(/\s/gu, '-')}`,
+      signal: abort.signal,
+      onStateChange: (state) => states.push(state),
+    });
+    const pendingRead = opened.body!.getReader().read();
+
+    abort.abort(STREAM_ABORT_REASON_USER);
+
+    await expect(readWithDeadline(pendingRead)).resolves.toEqual({
+      value: undefined,
+      done: true,
+    });
+    expect(states).toContain('cancelling');
+    expect(states.at(-1)).toBe('cancel_unconfirmed');
+    expect(states).not.toContain('cancelled');
+  });
+
+  it('times out cancel confirmation instead of claiming cancellation', async () => {
+    const states: string[] = [];
+    const fetcher = vi.fn(async (url: string): Promise<Response> => {
+      if (url.includes('/cancel')) return new Promise<Response>(() => undefined);
+      return response(new ReadableStream<Uint8Array>({ start() {} }));
+    });
+    const abort = new AbortController();
+    const opened = await openArenaGenerationStream({
+      endpoint: '/api/arena/generate-stream',
+      body: {},
+      headers: {},
+      fetcher,
+      storage: new MemoryStorage(),
+      generationRequestId: 'request-cancel-timeout',
+      signal: abort.signal,
+      cancelConfirmationTimeoutMs: 5,
+      onStateChange: (state) => states.push(state),
+    });
+    const pendingRead = opened.body!.getReader().read();
+
+    abort.abort(STREAM_ABORT_REASON_USER);
+
+    await expect(readWithDeadline(pendingRead)).resolves.toEqual({
+      value: undefined,
+      done: true,
+    });
+    expect(states.at(-1)).toBe('cancel_unconfirmed');
   });
 
   it('does not resume after explicit abort wins during reconnect backoff', async () => {

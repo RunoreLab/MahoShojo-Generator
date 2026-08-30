@@ -11,6 +11,7 @@ describe('Hono route dispatcher', () => {
       id: 'items/[itemId]',
       pattern: '/api/items/:itemId',
       adapter: 'shared-service',
+      methods: ['GET'],
       load: async () => ({
         GET: async (request, context) => {
           const requestWithContext = request as Request & {
@@ -41,6 +42,7 @@ describe('Hono route dispatcher', () => {
       id: 'activity-write',
       pattern: '/api/activity-write',
       adapter: 'shared-service',
+      methods: ['POST'],
       load: async () => ({
         POST: async (request) => {
           const requestWithContext = request as Request & {
@@ -69,6 +71,7 @@ describe('Hono route dispatcher', () => {
       id: 'read-only',
       pattern: '/api/read-only',
       adapter: 'shared-service',
+      methods: ['GET'],
       load: async () => ({ GET: async () => Response.json({ ok: true }) }),
     };
     const app = new Hono();
@@ -77,5 +80,31 @@ describe('Hono route dispatcher', () => {
     const response = await app.request('/api/read-only', { method: 'POST' });
     expect(response.status).toBe(405);
     expect(response.headers.get('allow')).toBe('GET');
+    expect(await response.json()).toEqual({ error: 'Method not allowed' });
+  });
+
+  it('manifest method whitelist 优先于 adapter 意外导出的 handler', async () => {
+    let loaded = false;
+    const definition: RouteDefinition = {
+      id: 'write-only',
+      pattern: '/api/write-only',
+      adapter: 'shared-service',
+      methods: ['POST'],
+      load: async () => {
+        loaded = true;
+        return {
+          GET: async () => Response.json({ unsafe: true }),
+          POST: async () => Response.json({ ok: true }),
+        };
+      },
+    };
+    const app = new Hono();
+    app.all(definition.pattern, (context) => dispatchRoute(context, definition));
+
+    const response = await app.request('/api/write-only');
+    expect(response.status).toBe(405);
+    expect(response.headers.get('allow')).toBe('POST');
+    expect(await response.json()).toEqual({ error: 'Method not allowed' });
+    expect(loaded).toBe(false);
   });
 });

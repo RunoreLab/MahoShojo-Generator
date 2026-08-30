@@ -6,6 +6,7 @@ import {
   registerHostedRuntimeObserver,
 } from '@mahoshojo/hosted-runtime/telemetry';
 import { describe, expect, it, vi } from 'vitest';
+import { observeArenaRoomRuntime } from '#/arena-room/runtime-observer';
 import {
   HonoRuntimeTelemetry,
   instrumentStreamingResponse,
@@ -25,7 +26,7 @@ describe('Hono runtime telemetry', () => {
     const snapshot = telemetry.snapshot();
 
     expect(snapshot).toMatchObject({
-      schemaVersion: 4,
+      schemaVersion: 5,
       service: 'mahoshojo-hono',
       runtime: {
         origin: 'hono-node',
@@ -103,6 +104,11 @@ describe('Hono runtime telemetry', () => {
         outcome: 'ok',
         durationMs: 10,
       });
+      telemetry.observeRedisOperation({
+        operation: 'room',
+        outcome: 'unavailable',
+        durationMs: 0,
+      });
       telemetry.observeRedisServerStats({
         usedMemoryBytes: 1_024,
         evictedKeys: 2,
@@ -111,7 +117,7 @@ describe('Hono runtime telemetry', () => {
       });
 
       expect(telemetry.snapshot()).toMatchObject({
-        schemaVersion: 4,
+        schemaVersion: 5,
         aiUpstream: {
           attempts: {
             active: 1,
@@ -138,13 +144,14 @@ describe('Hono runtime telemetry', () => {
           rows: { read: 3, written: 1 },
         },
         redis: {
-          commands: 4,
-          outcomes: { ok: 3, error: 1, unavailable: 0 },
+          commands: 5,
+          outcomes: { ok: 3, error: 1, unavailable: 1 },
           byOperation: {
             connect: 1,
             ping: 1,
             'rate-limit': 1,
             generation: 1,
+            room: 1,
             info: 0,
           },
           latency: { samples: 4, totalMilliseconds: 28, maxMilliseconds: 10 },
@@ -184,7 +191,7 @@ describe('Hono runtime telemetry', () => {
       });
 
       expect(telemetry.snapshot()).toMatchObject({
-        schemaVersion: 4,
+        schemaVersion: 5,
         hostedGeneration: {
           byOperation: {
             'generate-magical-girl-details': 1,
@@ -359,6 +366,230 @@ describe('Hono runtime telemetry', () => {
       r2: 'success',
     });
     expect(JSON.stringify(logger.mock.calls)).not.toMatch(/prompt|正文|user:42/u);
+  });
+
+  it('聚合 Arena Room 固定低基数词汇与 active/peak gauges', () => {
+    const telemetry = new HonoRuntimeTelemetry();
+
+    telemetry.observeArenaRoomRuntime({
+      event: 'registry',
+      activeRooms: 2,
+      residentActors: 3,
+    });
+    telemetry.observeArenaRoomRuntime({
+      event: 'actor_queue',
+      queuedCurrent: 4,
+      roomQueuedCurrent: 3,
+      overloaded: true,
+    });
+    telemetry.observeArenaRoomRuntime({
+      event: 'actor_operation',
+      operation: 'command',
+      outcome: 'applied',
+      durationMs: 12,
+    });
+    telemetry.observeArenaRoomRuntime({
+      event: 'actor_operation',
+      operation: 'story',
+      outcome: 'idempotent',
+      durationMs: 18,
+    });
+    telemetry.observeArenaRoomRuntime({
+      event: 'checkpoint',
+      operation: 'save',
+      outcome: 'ok',
+      serializedBytes: 2_048,
+      durationMs: 7,
+    });
+    telemetry.observeArenaRoomRuntime({
+      event: 'checkpoint',
+      operation: 'load',
+      outcome: 'missing',
+      durationMs: 5,
+    });
+    telemetry.observeArenaRoomRuntime({ event: 'socket', action: 'opened' });
+    telemetry.observeArenaRoomRuntime({ event: 'socket', action: 'opened' });
+    telemetry.observeArenaRoomRuntime({ event: 'socket', action: 'closed' });
+    telemetry.observeArenaRoomRuntime({
+      event: 'socket_backlog',
+      queuedFrames: 6,
+      queuedBytes: 4_096,
+    });
+    telemetry.observeArenaRoomRuntime({ event: 'slow_consumer_resync_close' });
+    telemetry.observeArenaRoomRuntime({ event: 'sync', action: 'reconnect_attempt' });
+    telemetry.observeArenaRoomRuntime({ event: 'sync', action: 'delivery', mode: 'replay' });
+    telemetry.observeArenaRoomRuntime({ event: 'sync', action: 'resync_requested' });
+    telemetry.observeArenaRoomRuntime({ event: 'sync', action: 'resync_required' });
+    telemetry.observeArenaRoomRuntime({ event: 'publisher', action: 'started' });
+    telemetry.observeArenaRoomRuntime({ event: 'publisher', action: 'started' });
+    telemetry.observeArenaRoomRuntime({ event: 'publisher', action: 'finished' });
+    telemetry.observeArenaRoomRuntime({
+      event: 'publisher_backlog',
+      inFlightCurrent: 5,
+    });
+    telemetry.observeArenaRoomRuntime({
+      event: 'publisher_outcome',
+      outcome: 'published',
+    });
+    telemetry.observeArenaRoomRuntime({ event: 'incident', outcome: 'created' });
+    telemetry.observeArenaRoomRuntime({ event: 'incident', outcome: 'recovered' });
+    telemetry.observeArenaRoomRuntime({ event: 'incident', outcome: 'fenced' });
+    telemetry.observeArenaRoomRuntime({ event: 'incident', outcome: 'quarantined' });
+    telemetry.observeArenaRoomRuntime({ event: 'incident', outcome: 'replacement_required' });
+
+    expect(telemetry.snapshot()).toMatchObject({
+      schemaVersion: 5,
+      arenaRoom: {
+        registry: {
+          activeRooms: 2,
+          peakActiveRooms: 2,
+          residentActors: 3,
+          peakResidentActors: 3,
+        },
+        actor: {
+          queue: {
+            queuedCurrent: 4,
+            peakQueued: 4,
+            peakPerRoom: 3,
+            overloads: 1,
+          },
+          operations: {
+            byOperation: { command: 1, story: 1 },
+            outcomes: { applied: 1, idempotent: 1, rejected: 0, error: 0 },
+            latency: { samples: 2, totalMilliseconds: 30, maxMilliseconds: 18 },
+          },
+        },
+        checkpoints: {
+          byOperation: { load: 1, save: 1, refresh: 0, expire: 0, delete: 0 },
+          outcomes: { ok: 1, missing: 1, conflict: 0, error: 0, unavailable: 0 },
+          serializedBytes: { samples: 1, totalBytes: 2_048, maxBytes: 2_048 },
+          latency: { samples: 2, totalMilliseconds: 12, maxMilliseconds: 7 },
+        },
+        sockets: {
+          active: 1,
+          peakActive: 2,
+          opened: 2,
+          closed: 1,
+          slowConsumerResyncCloses: 1,
+          outbound: {
+            queuedFramesCurrent: 6,
+            peakQueuedFrames: 6,
+            queuedBytesCurrent: 4_096,
+            peakQueuedBytes: 4_096,
+          },
+        },
+        sync: {
+          reconnectAttempts: 1,
+          deliveries: { current: 0, replay: 1, snapshot: 0 },
+          resync: { requested: 1, required: 1 },
+        },
+        publishers: {
+          active: 1,
+          peakActive: 2,
+          started: 2,
+          finished: 1,
+          outcomes: { published: 1, rejected: 0, dropped: 0, error: 0 },
+          inFlight: { current: 5, peak: 5 },
+        },
+        incidents: {
+          created: 1,
+          recovered: 1,
+          fenced: 1,
+          quarantined: 1,
+          replacementRequired: 1,
+        },
+      },
+    });
+  });
+
+  it('Arena Room 区间导出重置 counters/durations，并将 peak 重置到 current', () => {
+    const telemetry = new HonoRuntimeTelemetry({ logger: vi.fn() });
+    telemetry.observeArenaRoomRuntime({
+      event: 'registry', activeRooms: 2, residentActors: 4,
+    });
+    telemetry.observeArenaRoomRuntime({
+      event: 'actor_queue', queuedCurrent: 5, roomQueuedCurrent: 3, overloaded: true,
+    });
+    telemetry.observeArenaRoomRuntime({ event: 'socket', action: 'opened' });
+    telemetry.observeArenaRoomRuntime({ event: 'socket', action: 'opened' });
+    telemetry.observeArenaRoomRuntime({ event: 'socket', action: 'closed' });
+    telemetry.observeArenaRoomRuntime({
+      event: 'socket_backlog', queuedFrames: 4, queuedBytes: 512,
+    });
+    telemetry.observeArenaRoomRuntime({ event: 'publisher', action: 'started' });
+    telemetry.observeArenaRoomRuntime({ event: 'publisher', action: 'started' });
+    telemetry.observeArenaRoomRuntime({ event: 'publisher', action: 'finished' });
+    telemetry.observeArenaRoomRuntime({ event: 'publisher_backlog', inFlightCurrent: 3 });
+    telemetry.observeArenaRoomRuntime({
+      event: 'actor_operation', operation: 'command', outcome: 'rejected', durationMs: 9,
+    });
+
+    telemetry.emitSnapshot();
+
+    expect(telemetry.snapshot().arenaRoom).toMatchObject({
+      registry: {
+        activeRooms: 2,
+        peakActiveRooms: 2,
+        residentActors: 4,
+        peakResidentActors: 4,
+      },
+      actor: {
+        queue: { queuedCurrent: 5, peakQueued: 5, peakPerRoom: 0, overloads: 0 },
+        operations: {
+          byOperation: { command: 0, story: 0 },
+          outcomes: { applied: 0, idempotent: 0, rejected: 0, error: 0 },
+          latency: { samples: 0 },
+        },
+      },
+      sockets: {
+        active: 1,
+        peakActive: 1,
+        opened: 0,
+        closed: 0,
+        outbound: {
+          queuedFramesCurrent: 4,
+          peakQueuedFrames: 4,
+          queuedBytesCurrent: 512,
+          peakQueuedBytes: 512,
+        },
+      },
+      publishers: {
+        active: 1,
+        peakActive: 1,
+        started: 0,
+        finished: 0,
+        inFlight: { current: 3, peak: 3 },
+      },
+    });
+  });
+
+  it('Arena Room observer 调用 fail-soft，且非法/敏感词不会进入快照维度', async () => {
+    expect(() => observeArenaRoomRuntime({
+      observeArenaRoomRuntime: () => {
+        throw new Error('observer-secret-canary');
+      },
+    }, { event: 'incident', outcome: 'created' })).not.toThrow();
+    expect(() => observeArenaRoomRuntime({
+      observeArenaRoomRuntime: () => Promise.reject(new Error('async-observer-secret-canary')),
+    }, { event: 'incident', outcome: 'created' })).not.toThrow();
+    await Promise.resolve();
+
+    const telemetry = new HonoRuntimeTelemetry();
+    telemetry.observeArenaRoomRuntime({
+      event: 'checkpoint',
+      operation: 'room-secret-canary' as 'load',
+      outcome: 'content-secret-canary' as 'error',
+      serializedBytes: 12,
+      durationMs: 1,
+    });
+    telemetry.observeArenaRoomRuntime({
+      event: 'incident',
+      outcome: 'user-42-secret-canary' as 'created',
+    });
+
+    const serialized = JSON.stringify(telemetry.snapshot().arenaRoom);
+    expect(serialized).not.toMatch(/room-secret-canary|content-secret-canary|user-42-secret-canary/u);
+    expect(JSON.parse(serialized)).toHaveProperty('checkpoints.byOperation.load');
   });
 
   it('资源导出先执行 Redis sampler，采样失败则 fail-soft 并继续导出', async () => {

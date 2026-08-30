@@ -45,7 +45,7 @@ import { AI_META_REQUEST_HEADER, AI_META_REQUEST_VALUE, readJsonWithAiMeta } fro
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { getAnswerLimitInfo, isAnswerOverLimit, QUESTIONNAIRE_NATIVE_MAX_ANSWER_CHARS } from '@/lib/questionnaire-limits';
 import { authStorage } from '@/lib/auth';
-import { generationApiFetch } from '@/lib/hono-api-client';
+import { useGenerationApiIntentLatch } from '@/lib/use-generation-api-intent-latch';
 import { buildCustomProviderRequestPayload } from '@/lib/ai/custom-provider';
 import { mapDataCardSourceMeta } from '@/lib/data-card-read-mappers';
 import {
@@ -294,6 +294,7 @@ const LOCAL_STORAGE_KEY = 'magicalGirlAnswersDraft'; // 定义本地存储的键
 const DETAILS_PREFERENCE_KEY = 'mahoshojo.details.preferences.v1';
 
 export const CreatorPage: React.FC = () => {
+  const generationApiIntentLatch = useGenerationApiIntentLatch();
   const router = useAppRouterAdapter();
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [selectedQuestionnaires, setSelectedQuestionnaires] = useState<QuestionnaireSelection[]>([]);
@@ -1836,7 +1837,9 @@ export const CreatorPage: React.FC = () => {
         streamAbortControllerRef.current?.abort(STREAM_ABORT_REASON_USER);
         streamAbortControllerRef.current = streamController;
       }
-      const response = await generationApiFetch(endpoint, {
+      const generationIntent = generationApiIntentLatch.tryAcquire();
+      if (!generationIntent) return;
+      const response = await generationIntent.dispatch(endpoint, {
         method: 'POST',
         headers: requestHeaders,
         body: JSON.stringify({

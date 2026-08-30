@@ -1,4 +1,4 @@
-const LOCAL_REQUEST_ORIGIN = 'https://mahoshojo.local';
+const LOCAL_REQUEST_ORIGIN = 'https://mahoshojo.invalid';
 
 const readHeader = (req: Request, name: string): string | null => {
   const headers = req.headers;

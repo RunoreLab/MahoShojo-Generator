@@ -139,6 +139,47 @@ describe('G25D Web workspace app ownership', () => {
     }
   });
 
+  it('keeps production Web type-checking fail-closed without loading test fixtures', () => {
+    const buildTsconfigPath = path.join(appDirectory, 'tsconfig.build.json');
+    expect(existsSync(buildTsconfigPath)).toBe(true);
+    if (!existsSync(buildTsconfigPath)) return;
+
+    const buildTsconfig = JSON.parse(readFileSync(buildTsconfigPath, 'utf8')) as {
+      extends?: string;
+      exclude?: string[];
+    };
+    const appManifest = JSON.parse(readFileSync(appManifestPath, 'utf8')) as {
+      scripts?: Record<string, string>;
+    };
+    const nextConfig = readFileSync(path.join(appDirectory, 'next.config.ts'), 'utf8');
+    const openNextConfig = readFileSync(path.join(appDirectory, 'open-next.config.ts'), 'utf8');
+
+    expect(buildTsconfig.extends).toBe('./tsconfig.json');
+    expect(buildTsconfig.exclude).toEqual(expect.arrayContaining([
+      'node_modules',
+      'scripts',
+      'tests',
+      '.open-next',
+      '.wrangler',
+    ]));
+    expect(nextConfig).toContain("tsconfigPath: 'tsconfig.build.json'");
+    expect(nextConfig).toContain('ignoreBuildErrors: true');
+    expect(appManifest.scripts?.['typecheck:build']).toContain(
+      'tsc --noEmit --pretty false -p tsconfig.build.json',
+    );
+    expect(appManifest.scripts?.['typecheck:build']).toContain(
+      'NODE_OPTIONS=--max-old-space-size=3072',
+    );
+    expect(appManifest.scripts?.['build:next']).toBe(
+      'pnpm run clean:next && pnpm run typecheck:build && next build '
+      + '&& node scripts/check-hosted-dr-client-bundle.mjs --dir .next/static',
+    );
+    expect(appManifest.scripts?.build).toContain('pnpm run build:next');
+    expect(appManifest.scripts?.['build:cf']).toContain('opennextjs-cloudflare build');
+    expect(appManifest.scripts?.['build:cf']).not.toContain('--skipNextBuild');
+    expect(openNextConfig).toContain("buildCommand: 'pnpm run build:next'");
+  });
+
   it('owns the effective Web lint policy in a single flat config', async () => {
     const flatConfigPath = path.join(appDirectory, 'eslint.config.mjs');
     const legacyConfigPath = path.join(appDirectory, '.eslintrc.json');
@@ -323,6 +364,16 @@ describe('phase 2.5C Hono API workspace app ownership', () => {
     expect(existsSync(path.join(rootDirectory, 'Dockerfile.hono'))).toBe(false);
     expect(existsSync(path.join(rootDirectory, 'compose.hono.yml'))).toBe(false);
     expect(existsSync(path.join(rootDirectory, 'deploy/hono'))).toBe(false);
+  });
+
+  it('本地 Hono Compose 显式声明 local target 与 loopback fault scope', () => {
+    const compose = readFileSync(path.join(appDirectory, 'compose.local.yml'), 'utf8');
+
+    expect(compose).toContain('HOSTED_API_ENVIRONMENT: local');
+    expect(compose).toContain('HOSTED_DR_LOCAL_FAULT_INJECTION: "true"');
+    expect(compose).toContain(
+      'R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:-${CLOUDFLARE_ACCOUNT_ID:?请配置 R2_ACCOUNT_ID 或 CLOUDFLARE_ACCOUNT_ID}}',
+    );
   });
 
   it('声明独立 app 生命周期，并由 root scripts 只做代理入口', () => {

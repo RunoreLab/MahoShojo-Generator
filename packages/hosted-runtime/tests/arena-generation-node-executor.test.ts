@@ -2,7 +2,10 @@ import { describe, expect, it, vi } from 'vitest';
 import { isArenaGenerationAuditableRejection } from '@mahoshojo/hosted-api/arena-generation/service';
 
 import { createArenaGenerationFinalizer } from '../src/arena-generation/finalization';
-import { createNodeArenaGenerationExecutor } from '../src/arena-generation/node-executor';
+import {
+  canonicalizeNodeArenaGenerationSemanticPayload,
+  createNodeArenaGenerationExecutor,
+} from '../src/arena-generation/node-executor';
 import type {
   GenerateWithAIOptions,
   RawGenerationConfig,
@@ -43,6 +46,58 @@ const signatureService: SignatureService = {
 };
 
 describe('Node Arena generation executor', () => {
+  it('canonicalizes retry identity with legacy defaults and server-derived native authority', async () => {
+    const base = {
+      combatants: [{
+        type: 'magical-girl',
+        isNative: true,
+        data: { name: 'A', signature: 'valid' },
+      }],
+      customProvider: { apiKey: 'byok-secret' },
+      internalGuidance: 'browser authority',
+      pvpContext: { roomId: 'forged', matchId: 'forged', roundId: 'forged' },
+    };
+    const canonicalize = (payload: Record<string, unknown>) => (
+      canonicalizeNodeArenaGenerationSemanticPayload({
+        payload,
+        signatures: signatureService,
+        trustedInternalGuidance: 'server guidance',
+        trustedPvpContext: { roomId: 'room-1', matchId: 'match-1', roundId: 'round-1' },
+      })
+    );
+
+    const implicitDefaults = await canonicalize(base);
+    const explicitDefaults = await canonicalize({
+      ...base,
+      mode: 'classic',
+      language: 'zh-CN',
+      readArenaHistory: true,
+      writeArenaHistory: true,
+      readCurrentState: true,
+      writeCurrentState: true,
+      readNarrativeHistory: false,
+      arenaFreeRankingEnabled: false,
+    });
+    expect(implicitDefaults).toEqual(explicitDefaults);
+    expect(implicitDefaults).toMatchObject({
+      internalGuidance: 'server guidance',
+      pvpContext: { roomId: 'room-1', matchId: 'match-1', roundId: 'round-1' },
+      combatants: [{ isNative: true, data: { name: 'A' } }],
+    });
+    expect(JSON.stringify(implicitDefaults)).not.toMatch(/byok-secret|signature/u);
+
+    const forged = await canonicalize({
+      ...base,
+      combatants: [{
+        type: 'magical-girl',
+        isNative: true,
+        data: { name: 'A', signature: 'forged' },
+      }],
+    });
+    expect(forged).toMatchObject({ combatants: [{ isNative: false }] });
+    expect(forged).not.toEqual(implicitDefaults);
+  });
+
   it('classifies a trusted PVP safety rejection as auditable without dispatching Provider', async () => {
     const generateWithStreamAI = vi.fn();
     const executor = createNodeArenaGenerationExecutor({

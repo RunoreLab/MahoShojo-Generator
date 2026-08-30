@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { DatabaseProvider } from '@mahoshojo/hosted-runtime/database-provider';
 import { createNextDrReadinessHandler } from '@/app/api/hosted/dr-readiness/handler';
 
@@ -48,5 +48,76 @@ describe('Next Hosted DR readiness adapter', () => {
     expect(response.status).toBe(200);
     expect(response.headers.get('cache-control')).toBe('no-store');
     expect(await response.text()).toBe('');
+  });
+
+  it('目标 capability 缺少 secret 时 readiness fail closed', async () => {
+    const openSession = vi.fn(provider.openSession);
+    const handler = createNextDrReadinessHandler({ ...provider, openSession }, {
+      deploymentTarget: 'production',
+      environment: {
+        HONO_CORS_ORIGINS: 'https://app.example.test',
+      },
+    });
+    const response = await handler(new Request(
+      'https://next.test/api/hosted/dr-readiness',
+      {
+        headers: {
+          'x-mahoshojo-hosted-dr-capability': 'generate-magical-girl',
+          'x-mahoshojo-hosted-dr-method': 'POST',
+        },
+      },
+    ));
+
+    expect(response.status).toBe(503);
+    expect(openSession).not.toHaveBeenCalled();
+  });
+
+  it('目标 capability 缺少 R2 binding 时 readiness fail closed', async () => {
+    const openSession = vi.fn(provider.openSession);
+    const handler = createNextDrReadinessHandler({ ...provider, openSession }, {
+      deploymentTarget: 'production',
+      environment: {
+        HONO_CORS_ORIGINS: 'https://app.example.test',
+        R2_ACCESS_KEY_ID: 'local-access-key',
+        R2_SECRET_ACCESS_KEY: 'local-secret-key',
+      },
+    });
+    const response = await handler(new Request(
+      'https://next.test/api/hosted/dr-readiness',
+      {
+        headers: {
+          'x-mahoshojo-hosted-dr-capability': 'arena/generations/[generationId]/stream',
+          'x-mahoshojo-hosted-dr-method': 'GET',
+        },
+      },
+    ));
+
+    expect(response.status).toBe(503);
+    expect(openSession).not.toHaveBeenCalled();
+  });
+
+  it('目标 capability 前置满足时回显低基数 identity', async () => {
+    const handler = createNextDrReadinessHandler(provider, {
+      deploymentTarget: 'production',
+      environment: {
+        HONO_CORS_ORIGINS: 'https://app.example.test',
+      },
+    });
+    const response = await handler(new Request(
+      'https://next.test/api/hosted/dr-readiness',
+      {
+        headers: {
+          'x-mahoshojo-hosted-dr-capability': 'generate-free',
+          'x-mahoshojo-hosted-dr-method': 'POST',
+        },
+      },
+    ));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      ok: true,
+      capabilityId: 'generate-free',
+      operationMethod: 'POST',
+    });
   });
 });

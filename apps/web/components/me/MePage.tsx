@@ -17,7 +17,7 @@ import { PvpMatchesPanel } from '@/components/me/PvpMatchesPanel';
 import { ProfileHeader } from '@/components/me/ProfileHeader';
 import { ProfileCardModal } from '@/components/me/ProfileCardModal';
 import { ProfileSettingsPanel } from '@/components/me/ProfileSettingsPanel';
-import { generationApiFetch } from '@/lib/hono-api-client';
+import { useGenerationApiIntentLatch } from '@/lib/use-generation-api-intent-latch';
 import { useAuth } from '@/lib/useAuth';
 
 type MeTab = 'reports' | 'pvp' | 'settings';
@@ -31,6 +31,7 @@ const parseMeTabFromSearch = (search: string): MeTab | null => {
 };
 
 export function MePage() {
+  const generationApiIntentLatch = useGenerationApiIntentLatch();
   const { user, userBadges, isAuthenticated, loading } = useAuth();
   const [tab, setTab] = useState<MeTab>('reports');
 
@@ -64,7 +65,9 @@ export function MePage() {
 
   const regenerateMutation = useMutation({
     mutationFn: async (generationId: string) => {
-      const res = await generationApiFetch(`/api/me/battle-reports/${generationId}/regenerate`, {
+      const generationIntent = generationApiIntentLatch.tryAcquire();
+      if (!generationIntent) throw new Error('已有生成请求正在处理中，请勿重复提交。');
+      const res = await generationIntent.dispatch(`/api/me/battle-reports/${generationId}/regenerate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({}),

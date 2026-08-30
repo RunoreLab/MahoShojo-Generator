@@ -24,6 +24,12 @@ import { jsonUtf8ByteLength } from './wire-size';
 const ChangeIdSchema = z.string().trim().min(1).max(MAX_OPAQUE_KEY_LENGTH);
 const AtomicGroupIdSchema = z.string().trim().min(1).max(MAX_OPAQUE_KEY_LENGTH);
 
+/** Proposal IDs are reused as canonical URL path segments by resolve/withdraw. */
+export const ArenaProposalIdSchema = OpaqueKeySchema.refine(
+  (value) => value !== '.' && value !== '..',
+  { message: 'proposalId must be addressable as one URL path segment' },
+);
+
 export const AbsentExpectedBaseSchema = z
   .object({
     kind: z.literal('absent'),
@@ -197,50 +203,38 @@ export const ArenaProposalStatusSchema = z.enum([
 ]);
 export type ArenaProposalStatus = z.infer<typeof ArenaProposalStatusSchema>;
 
-export const ArenaProposalSchema = z
-  .object({
-    proposalVersion: z.literal(PROPOSAL_VERSION),
-    proposalId: OpaqueKeySchema,
-    roomId: OpaqueKeySchema,
-    authorUserId: OpaqueKeySchema,
-    baseRevision: z.number().int().nonnegative(),
-    status: ArenaProposalStatusSchema,
-    changes: z.array(ArenaProposalChangeSchema).min(1).max(MAX_PROPOSAL_CHANGES),
-    createdAt: z.string().datetime({ offset: true }),
-    updatedAt: z.string().datetime({ offset: true }).optional(),
-  })
-  .strict()
-  .superRefine((proposal, context) => {
-    if (jsonUtf8ByteLength(proposal) > MAX_PROPOSAL_BYTES) {
-      context.addIssue({ code: 'custom', path: [], message: 'payload-too-large' });
-    }
-    const ids = proposal.changes.map((item) => item.changeId);
+export const ArenaProposalChangesSchema = z
+  .array(ArenaProposalChangeSchema)
+  .min(1)
+  .max(MAX_PROPOSAL_CHANGES)
+  .superRefine((changes, context) => {
+    const ids = changes.map((item) => item.changeId);
     if (new Set(ids).size !== ids.length) {
-      context.addIssue({ code: 'custom', path: ['changes'], message: 'changeId values must be unique' });
+      context.addIssue({ code: 'custom', path: [], message: 'changeId values must be unique' });
     }
     const idSet = new Set(ids);
-    proposal.changes.forEach((item, index) => {
+    changes.forEach((item, index) => {
       const dependencies = item.dependsOn ?? [];
       if (new Set(dependencies).size !== dependencies.length) {
-        context.addIssue({ code: 'custom', path: ['changes', index, 'dependsOn'], message: 'dependsOn values must be unique' });
+        context.addIssue({ code: 'custom', path: [index, 'dependsOn'], message: 'dependsOn values must be unique' });
       }
       dependencies.forEach((dependency) => {
         if (!idSet.has(dependency)) {
-          context.addIssue({ code: 'custom', path: ['changes', index, 'dependsOn'], message: 'dependsOn must reference a change in this proposal' });
+          context.addIssue({ code: 'custom', path: [index, 'dependsOn'], message: 'dependsOn must reference a change in this proposal' });
         }
         if (dependency === item.changeId) {
-          context.addIssue({ code: 'custom', path: ['changes', index, 'dependsOn'], message: 'a change cannot depend on itself' });
+          context.addIssue({ code: 'custom', path: [index, 'dependsOn'], message: 'a change cannot depend on itself' });
         }
       });
     });
 
     const graph = new Map<string, readonly string[]>();
-    proposal.changes.forEach((item) => graph.set(item.changeId, item.dependsOn ?? []));
+    changes.forEach((item) => graph.set(item.changeId, item.dependsOn ?? []));
     const visiting = new Set<string>();
     const visited = new Set<string>();
     const visit = (changeId: string, path: readonly string[]): void => {
       if (visiting.has(changeId)) {
-        context.addIssue({ code: 'custom', path: ['changes'], message: `dependsOn cycle detected: ${[...path, changeId].join(' -> ')}` });
+        context.addIssue({ code: 'custom', path: [], message: `dependsOn cycle detected: ${[...path, changeId].join(' -> ')}` });
         return;
       }
       if (visited.has(changeId)) return;
@@ -252,6 +246,25 @@ export const ArenaProposalSchema = z
       visited.add(changeId);
     };
     for (const changeId of graph.keys()) visit(changeId, []);
+  });
+
+export const ArenaProposalSchema = z
+  .object({
+    proposalVersion: z.literal(PROPOSAL_VERSION),
+    proposalId: ArenaProposalIdSchema,
+    roomId: OpaqueKeySchema,
+    authorUserId: OpaqueKeySchema,
+    baseRevision: z.number().int().nonnegative(),
+    status: ArenaProposalStatusSchema,
+    changes: ArenaProposalChangesSchema,
+    createdAt: z.string().datetime({ offset: true }),
+    updatedAt: z.string().datetime({ offset: true }).optional(),
+  })
+  .strict()
+  .superRefine((proposal, context) => {
+    if (jsonUtf8ByteLength(proposal) > MAX_PROPOSAL_BYTES) {
+      context.addIssue({ code: 'custom', path: [], message: 'payload-too-large' });
+    }
   });
 export type ArenaProposal = z.infer<typeof ArenaProposalSchema>;
 

@@ -7,6 +7,7 @@ import {
   createHostedApiCorsPreflightResponse,
   hasValidHostedApiProductionCorsOrigins,
   HOSTED_API_CORS_ORIGINS_ENVIRONMENT,
+  parseHostedApiDeploymentTarget,
   withHostedApiCorsHeaders,
 } from '@mahoshojo/hosted-api/hosted-dr';
 import hostedDrManifest from '../../../../config/hosted-dr-capabilities.json';
@@ -26,6 +27,7 @@ type HostedDrCapability = {
 };
 
 type GuardUnavailableCategory =
+  | 'environment'
   | 'contract'
   | 'method'
   | 'dr-mode'
@@ -40,9 +42,10 @@ type GuardUnavailableEvent = {
 };
 
 export type NextDrCapabilityGuardOptions = {
-  executionEnvironment?: string;
+  deploymentTarget?: string;
   environment?: Readonly<Record<string, string | undefined>>;
   provider?: DatabaseProvider;
+  operationMethod?: string;
   logUnavailable?(_event: GuardUnavailableEvent): void;
 };
 
@@ -76,7 +79,6 @@ const unavailableResponse = (): Response => new Response(JSON.stringify({
 });
 
 const methodNotAllowedResponse = (allow: string[]): Response => new Response(JSON.stringify({
-  code: 'METHOD_NOT_ALLOWED',
   error: 'Method not allowed',
 }), {
   status: 405,
@@ -130,12 +132,18 @@ export const withNextDrCapability = <Args extends unknown[]>(
   handler: NextRouteHandler<Args>,
   options: NextDrCapabilityGuardOptions = {},
 ): NextRouteHandler<Args> => async (request, ...args) => {
-  const executionEnvironment = options.executionEnvironment ?? process.env.NODE_ENV;
-  if (executionEnvironment === 'development' || executionEnvironment === 'test') {
+  const logUnavailable = options.logUnavailable ?? defaultLogUnavailable;
+  const deploymentTarget = parseHostedApiDeploymentTarget(
+    options.deploymentTarget ?? process.env.NEXT_PUBLIC_HOSTED_API_ENVIRONMENT,
+  );
+  if (deploymentTarget === 'local' || deploymentTarget === 'test') {
     return handler(request, ...args);
   }
+  if (deploymentTarget !== 'production' && deploymentTarget !== 'preview') {
+    logUnavailable({ capabilityId, category: 'environment' });
+    return unavailableResponse();
+  }
 
-  const logUnavailable = options.logUnavailable ?? defaultLogUnavailable;
   const capability = capabilities.get(capabilityId);
   if (!capability) {
     logUnavailable({ capabilityId, category: 'contract' });
@@ -158,7 +166,7 @@ export const withNextDrCapability = <Args extends unknown[]>(
     response,
     allowedOrigins,
   );
-  const method = request.method.toUpperCase();
+  const method = (options.operationMethod ?? request.method).trim().toUpperCase();
   const operation = capability.operations.find((candidate) => candidate.method === method);
   if (!operation) {
     logUnavailable({ capabilityId, category: 'method' });

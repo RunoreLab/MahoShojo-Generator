@@ -21,11 +21,22 @@ type HostedDrManifest = {
   contractVersion: string;
   controlPlane: {
     stableOrigin: string;
+    previewOrigin: string;
     primaryOrigin: string;
     drOrigin: string;
     mode: string;
     provisioning: string;
+    defaultMode: string;
+    managedControlPlane: string;
+    primaryProbePath: string;
+    drProbePath: string;
+    preflightTimeoutMs: number;
     corsOriginsEnvironment: string;
+    productionFallback: {
+      mode: string;
+      artifactReadiness: string;
+      productionPlacement: string;
+    };
   };
   capabilities: Array<{
     id: string;
@@ -36,10 +47,39 @@ type HostedDrManifest = {
       drMode: string;
       replayPolicy: string;
     }>;
+    contractStatus: string;
+    drillStatus: string;
     requiredSecrets: Array<{ name: string; minLength?: number }>;
     requiredBindings: string[];
     contractTests: string[];
   }>;
+};
+
+type HostedDrDrillManifest = {
+  schemaVersion: number;
+  drillVersion: string;
+  environment: string;
+  controlPlaneProvisioning: string;
+  productionStatus: string;
+  versionGate: {
+    maxContractVersionSkew: number;
+    stages: string[];
+  };
+  cases: Array<{
+    id: string;
+    acceptance: string[];
+    status: string;
+    scope: string[];
+    evidenceTests: string[];
+    proofLevel: string;
+    evidenceCommand: string;
+    evidenceAssertions: string[];
+  }>;
+  productionDrill: {
+    status: string;
+    requiredAuthorization: string[];
+    runbook: string;
+  };
 };
 
 const repositoryRoot = process.cwd();
@@ -66,19 +106,75 @@ describe('Hosted DR machine contract', () => {
 
   it('分离稳定与物理 HTTPS origin，且不伪报 production provisioning', () => {
     const manifest = readJson<HostedDrManifest>('config/hosted-dr-capabilities.json');
-    const { stableOrigin, primaryOrigin, drOrigin, mode, provisioning } = manifest.controlPlane;
+    const {
+      stableOrigin,
+      previewOrigin,
+      primaryOrigin,
+      drOrigin,
+      mode,
+      provisioning,
+      defaultMode,
+      managedControlPlane,
+      primaryProbePath,
+      drProbePath,
+      preflightTimeoutMs,
+      productionFallback,
+    } = manifest.controlPlane;
 
     expect(mode).toBe('active-passive');
     expect(provisioning).toBe('not-provisioned');
+    expect(defaultMode).toBe('client-preflight');
+    expect(managedControlPlane).toBe('optional-disabled');
+    expect(primaryProbePath).toBe('/api/health/ready');
+    expect(drProbePath).toBe('/api/hosted/dr-readiness');
+    expect(preflightTimeoutMs).toBe(1500);
+    expect(productionFallback).toEqual({
+      mode: 'same-origin-next',
+      artifactReadiness: 'deferred',
+      productionPlacement: 'not-observed',
+    });
     expect(manifest.controlPlane.corsOriginsEnvironment).toBe('HONO_CORS_ORIGINS');
-    expect(new Set([stableOrigin, primaryOrigin, drOrigin])).toHaveLength(3);
-    for (const origin of [stableOrigin, primaryOrigin, drOrigin]) {
+    expect(new Set([stableOrigin, previewOrigin, primaryOrigin, drOrigin])).toHaveLength(4);
+    for (const origin of [stableOrigin, previewOrigin, primaryOrigin, drOrigin]) {
       const parsed = new URL(origin);
       expect(parsed.protocol).toBe('https:');
       expect(parsed.pathname).toBe('/');
       expect(parsed.search).toBe('');
       expect(parsed.hash).toBe('');
     }
+  });
+
+  it('客户端投影包含公开 preflight 路由和最小 operation policy，且不包含 secret/binding', () => {
+    const manifest = readJson<HostedDrManifest>('config/hosted-dr-capabilities.json');
+    const generatedSource = readFileSync(
+      path.join(repositoryRoot, 'apps/web/config/hosted-dr-client.generated.ts'),
+      'utf8',
+    );
+
+    expect(generatedSource).toContain('hostedDrClientRouting');
+    expect(generatedSource).toContain(manifest.controlPlane.primaryOrigin);
+    expect(generatedSource).toContain(manifest.controlPlane.drOrigin);
+    expect(generatedSource).toContain(manifest.controlPlane.primaryProbePath);
+    expect(generatedSource).toContain(manifest.controlPlane.drProbePath);
+    expect(generatedSource).toContain('hostedDrClientOperations');
+    expect(generatedSource).toContain('/api/generate-free');
+    expect(generatedSource).toContain('new-request-only');
+    expect(generatedSource).toContain('/api/arena/generate');
+    expect(generatedSource).toContain('fail-closed');
+    for (const capability of manifest.capabilities) {
+      for (const secret of capability.requiredSecrets) {
+        expect(generatedSource).not.toContain(secret.name);
+      }
+      for (const binding of capability.requiredBindings) {
+        expect(generatedSource).not.toContain(binding);
+      }
+    }
+  });
+
+  it('把已执行的 G25E-2 safe-read drill 记录在 capability manifest', () => {
+    const manifest = readJson<HostedDrManifest>('config/hosted-dr-capabilities.json');
+    expect(manifest.capabilities.find(({ id }) => id === 'hosted/dr-readiness')?.drillStatus)
+      .toBe('verified');
   });
 
   it('每项 capability 都有双 adapter、contract tests 且不保存 secret 值', () => {
@@ -139,12 +235,125 @@ describe('Hosted DR machine contract', () => {
     }
   });
 
+  it('G25E-2 fault matrix 覆盖完整 case 且生产演练保持 deferred', () => {
+    const drill = readJson<HostedDrDrillManifest>('config/hosted-dr-drills.json');
+    const requiredCaseIds = [
+      'G25E2-HONO-UNAVAILABLE',
+      'G25E2-REDIS-UNAVAILABLE',
+      'G25E2-REDIS-EMPTY',
+      'G25E2-GATEWAY-UNAVAILABLE',
+      'G25E2-MIDFLIGHT-DISCONNECT',
+      'G25E2-D1-UNAVAILABLE',
+      'G25E2-DR-SECRET-MISSING',
+      'G25E2-VERSION-SKEW',
+      'G25E2-CUTBACK',
+    ];
+
+    expect(drill.schemaVersion).toBe(1);
+    expect(drill.drillVersion).toBe('g25e2-v1');
+    expect(drill.environment).toBe('local-fault-injection');
+    expect(drill.controlPlaneProvisioning).toBe('not-provisioned');
+    expect(drill.productionStatus).toBe('deferred');
+    expect(drill.cases.map(({ id }) => id)).toEqual(requiredCaseIds);
+    for (const entry of drill.cases) {
+      expect(entry.acceptance.length, entry.id).toBeGreaterThan(0);
+      expect(entry.scope.length, entry.id).toBeGreaterThan(0);
+      expect(entry.evidenceTests.length, entry.id).toBeGreaterThan(0);
+      expect(entry.proofLevel, entry.id).toMatch(/^isolated-/u);
+      expect(entry.evidenceCommand, entry.id).toMatch(/^pnpm run verify:hosted-dr(?::redis)?$/u);
+      expect(entry.evidenceAssertions.length, entry.id).toBeGreaterThan(0);
+      expect(entry.status, entry.id).toBe('verified');
+      for (const evidenceTest of entry.evidenceTests) {
+        expect(existsSync(path.join(repositoryRoot, evidenceTest)), `${entry.id}:${evidenceTest}`).toBe(true);
+      }
+    }
+  });
+
+  it.each([
+    {
+      label: '缺少 fault case',
+      mutate: (drill: HostedDrDrillManifest) => drill.cases.pop(),
+      expected: '完整 fault matrix',
+    },
+    {
+      label: '非法 case status',
+      mutate: (drill: HostedDrDrillManifest) => {
+        drill.cases[0]!.status = 'passing';
+      },
+      expected: 'drill status 非法',
+    },
+    {
+      label: '伪造 evidence path',
+      mutate: (drill: HostedDrDrillManifest) => {
+        drill.cases[0]!.evidenceTests = ['apps/api/tests/config.test.ts'];
+      },
+      expected: 'case marker',
+    },
+    {
+      label: '只在规范文档中伪造 case marker',
+      mutate: (drill: HostedDrDrillManifest) => {
+        drill.cases[0]!.evidenceTests = [
+          'docs/specs/2026-08-26_230557_G25E-2_Hosted_DR故障演练与Phase2.5退出审计设计.md',
+        ];
+      },
+      expected: '可执行 evidence',
+    },
+    {
+      label: '伪报 production drill',
+      mutate: (drill: HostedDrDrillManifest) => {
+        drill.productionStatus = 'verified';
+      },
+      expected: 'production drill 必须保持 deferred',
+    },
+  ])('validator 对 G25E-2 $label fail closed', ({ mutate, expected }) => {
+    const temporaryRoot = mkdtempSync(path.join(os.tmpdir(), 'hosted-dr-drills-'));
+    try {
+      const drill = readJson<HostedDrDrillManifest>('config/hosted-dr-drills.json');
+      mutate(drill);
+      const drillsPath = path.join(temporaryRoot, 'drills.json');
+      writeFileSync(drillsPath, `${JSON.stringify(drill)}\n`, 'utf8');
+
+      const result = spawnSync(process.execPath, [
+        path.join(repositoryRoot, 'scripts/check-hosted-dr-contract.mjs'),
+        '--drills',
+        drillsPath,
+      ], {
+        cwd: repositoryRoot,
+        encoding: 'utf8',
+      });
+
+      expect(result.status).toBe(1);
+      expect(`${result.stdout}\n${result.stderr}`).toContain(expected);
+    } finally {
+      rmSync(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
   it('把 validator 纳入 workspace gate', () => {
     const rootPackage = readJson<{ scripts: Record<string, string> }>('package.json');
     const webPackage = readJson<{ scripts: Record<string, string> }>('apps/web/package.json');
 
     expect(existsSync(path.join(repositoryRoot, 'scripts/check-hosted-dr-contract.mjs'))).toBe(true);
-    expect(rootPackage.scripts['check:hosted-dr']).toBe('node scripts/check-hosted-dr-contract.mjs');
+    expect(existsSync(path.join(repositoryRoot, 'scripts/verify-hosted-dr.mjs'))).toBe(true);
+    expect(existsSync(path.join(
+      repositoryRoot,
+      'apps/web/scripts/verify-hosted-dr-client-preflight.ts',
+    ))).toBe(true);
+    const executableVerifier = readFileSync(
+      path.join(repositoryRoot, 'scripts/verify-hosted-dr.mjs'),
+      'utf8',
+    );
+    expect(existsSync(path.join(repositoryRoot, 'config/hosted-dr-drills.json'))).toBe(true);
+    expect(rootPackage.scripts['check:hosted-dr']).toContain('check:hosted-dr:schema');
+    expect(rootPackage.scripts['verify:hosted-dr']).toContain('scripts/verify-hosted-dr.mjs');
+    expect(executableVerifier).toContain('G25E2-REDIS-EMPTY');
+    expect(executableVerifier).toContain('hosted.dr.evidence.integration.required');
+    expect(executableVerifier).toContain('verify:hosted-dr:client-preflight');
+    expect(webPackage.scripts['verify:hosted-dr:client-preflight']).toContain(
+      'verify-hosted-dr-client-preflight.ts',
+    );
+    expect(executableVerifier).not.toContain('drills.cases.length');
+    expect(rootPackage.scripts['ci:verify']).toContain('pnpm run verify:hosted-dr');
     expect(rootPackage.scripts['workspace:verify']).toContain('pnpm run check:hosted-dr');
     expect(webPackage.scripts.build).toContain('pnpm run check:hosted-dr');
     expect(webPackage.scripts['build:cf']).toContain('pnpm run check:hosted-dr');
@@ -177,6 +386,48 @@ describe('Hosted DR machine contract', () => {
 
   it.each([
     {
+      label: 'pattern',
+      mutate: (source: string) => source.replace(
+        'pattern: "/api/generate-free",',
+        'pattern: "/api/generate-free-drift",',
+      ),
+      expected: 'pattern drift',
+    },
+    {
+      label: 'method',
+      mutate: (source: string) => source.replace(
+        'id: "generate-free",\n    pattern: "/api/generate-free",\n    adapter: "shared-service",\n    methods: ["POST"],',
+        'id: "generate-free",\n    pattern: "/api/generate-free",\n    adapter: "shared-service",\n    methods: ["GET"],',
+      ),
+      expected: 'method drift',
+    },
+  ])('validator 对 generated Hono route $label drift fail closed', ({ mutate, expected }) => {
+    const temporaryRoot = mkdtempSync(path.join(os.tmpdir(), 'hosted-dr-routes-'));
+    try {
+      const source = mutate(readFileSync(
+        path.join(repositoryRoot, 'apps/api/src/generated/routes.ts'),
+        'utf8',
+      ));
+      const generatedRoutesPath = path.join(temporaryRoot, 'routes.ts');
+      writeFileSync(generatedRoutesPath, source, 'utf8');
+      const result = spawnSync(process.execPath, [
+        path.join(repositoryRoot, 'scripts/check-hosted-dr-contract.mjs'),
+        '--generated-routes',
+        generatedRoutesPath,
+      ], {
+        cwd: repositoryRoot,
+        encoding: 'utf8',
+      });
+
+      expect(result.status).toBe(1);
+      expect(`${result.stdout}\n${result.stderr}`).toContain(expected);
+    } finally {
+      rmSync(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    {
       label: 'application contract version drift',
       mutate: (manifest: HostedDrManifest) => {
         manifest.contractVersion = 'g25e1-v2';
@@ -200,6 +451,57 @@ describe('Hosted DR machine contract', () => {
       expected: '非幂等 operation 不得配置 safe replay',
     },
     {
+      label: 'fail-closed policy widening',
+      mutate: (manifest: HostedDrManifest) => {
+        const operation = manifest.capabilities.find(({ id }) => id === 'arena/generate')
+          ?.operations[0];
+        if (operation) operation.drMode = 'new-request-only';
+      },
+      expected: 'fail-closed contractStatus 不得投影为 DR eligible',
+    },
+    {
+      label: 'missing client preflight mode',
+      mutate: (manifest: HostedDrManifest) => {
+        manifest.controlPlane.defaultMode = 'managed-control-plane';
+      },
+      expected: '默认 routing mode 必须为 client-preflight',
+    },
+    {
+      label: 'invalid preflight timeout',
+      mutate: (manifest: HostedDrManifest) => {
+        manifest.controlPlane.preflightTimeoutMs = 30_000;
+      },
+      expected: 'preflightTimeoutMs 必须在 500..3000ms',
+    },
+    {
+      label: 'internal primary origin',
+      mutate: (manifest: HostedDrManifest) => {
+        manifest.controlPlane.primaryOrigin = 'https://127.0.0.1';
+      },
+      expected: 'public HTTPS origin',
+    },
+    {
+      label: 'trailing-dot internal primary origin',
+      mutate: (manifest: HostedDrManifest) => {
+        manifest.controlPlane.primaryOrigin = 'https://router.service.internal.';
+      },
+      expected: 'public HTTPS origin',
+    },
+    {
+      label: 'trailing-dot IP primary origin',
+      mutate: (manifest: HostedDrManifest) => {
+        manifest.controlPlane.primaryOrigin = 'https://127.0.0.1.';
+      },
+      expected: 'public HTTPS origin',
+    },
+    {
+      label: 'IPv6 primary origin',
+      mutate: (manifest: HostedDrManifest) => {
+        manifest.controlPlane.primaryOrigin = 'https://[::1]';
+      },
+      expected: 'public HTTPS origin',
+    },
+    {
       label: 'embedded secret value',
       mutate: (manifest: HostedDrManifest) => {
         const secret = manifest.capabilities.find(({ requiredSecrets }) => (
@@ -215,6 +517,28 @@ describe('Hosted DR machine contract', () => {
         manifest.controlPlane.provisioning = 'production';
       },
       expected: '缺少显式生产证据文件',
+    },
+    {
+      label: 'unsafe production fallback readiness',
+      mutate: (manifest: HostedDrManifest) => {
+        manifest.controlPlane.productionFallback = {
+          mode: 'same-origin-next',
+          artifactReadiness: 'verified',
+          productionPlacement: 'not-observed',
+        };
+      },
+      expected: 'production fallback 不得覆盖 fail-closed operation',
+    },
+    {
+      label: 'observed fallback without verified artifact',
+      mutate: (manifest: HostedDrManifest) => {
+        manifest.controlPlane.productionFallback = {
+          mode: 'same-origin-next',
+          artifactReadiness: 'deferred',
+          productionPlacement: 'observed',
+        };
+      },
+      expected: 'placement observed 必须先有 verified artifact readiness',
     },
     {
       label: 'missing contract test',
@@ -256,7 +580,19 @@ describe('Hosted DR machine contract', () => {
       manifest.controlPlane.provisioning = 'production';
       const manifestPath = path.join(temporaryRoot, 'manifest.json');
       const evidencePath = path.join(temporaryRoot, 'hosted-dr-production-evidence.json');
+      const clientProjectionPath = path.join(temporaryRoot, 'hosted-dr-client.generated.ts');
       writeFileSync(manifestPath, `${JSON.stringify(manifest)}\n`, 'utf8');
+      writeFileSync(
+        clientProjectionPath,
+        readFileSync(
+          path.join(repositoryRoot, 'apps/web/config/hosted-dr-client.generated.ts'),
+          'utf8',
+        ).replace(
+          'hostedDrControlPlaneProvisioning = "not-provisioned"',
+          'hostedDrControlPlaneProvisioning = "production"',
+        ),
+        'utf8',
+      );
       writeFileSync(evidencePath, `${JSON.stringify({
         schemaVersion: 1,
         environment: 'production',
@@ -271,6 +607,8 @@ describe('Hosted DR machine contract', () => {
         manifestPath,
         '--production-evidence',
         evidencePath,
+        '--client-projection',
+        clientProjectionPath,
       ], {
         cwd: repositoryRoot,
         encoding: 'utf8',

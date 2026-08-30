@@ -1,10 +1,10 @@
 import {
   createArenaGenerationService,
   type ArenaGenerationActor,
+  type ArenaGenerationApplicationService,
   type ArenaGenerationExecutor,
   type ArenaGenerationObserver,
   type ArenaGenerationRejectedTerminalRecorder,
-  type ArenaGenerationService,
   type ArenaGenerationTerminalStore,
   type GenerationReplayStore,
 } from '@mahoshojo/hosted-api/arena-generation/service';
@@ -87,7 +87,7 @@ export type NodeArenaGenerationServiceOptions = {
 
 export const createNodeArenaGenerationService = (
   options: NodeArenaGenerationServiceOptions,
-): ArenaGenerationService => {
+): ArenaGenerationApplicationService => {
   const env = options.env ?? process.env;
   const signatures = options.signatures ?? createEnvSignatureService({
     env,

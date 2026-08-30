@@ -45,6 +45,8 @@ describe('Hono route manifest', () => {
     expect(routeDefinitions).toHaveLength(23);
     expect(routeDefinitions.some((route) => route.pattern === '/api/auth/*')).toBe(false);
     expect(routeDefinitions.some((route) => route.pattern.startsWith('/api/pvp/'))).toBe(false);
+    expect(routeDefinitions.find((route) => route.id === 'generate-free')?.methods).toEqual(['POST']);
+    expect(routeDefinitions.find((route) => route.id === 'hosted/dr-readiness')?.methods).toEqual(['GET', 'HEAD']);
   });
 
   it('把常规生成 shared service 路由从 legacy Next 动态导入中移除', async () => {
@@ -85,8 +87,14 @@ describe('Hono route manifest', () => {
     expect(routeInventory.exitedRouteIds).toEqual(EXITED_ROUTE_IDS);
     expect(routeInventory.legacyRouteIds).toEqual([]);
     expect(routeInventory.sharedRouteIds?.length).toBe(23);
+    const hostedManifest = JSON.parse(readFileSync(
+      path.join(REPOSITORY_ROOT, 'config/hosted-dr-capabilities.json'),
+      'utf8',
+    )) as { capabilities: Array<{ id: string; operations: Array<{ method: string }> }> };
 
     for (const definition of sharedDefinitions) {
+      const capability = hostedManifest.capabilities.find(({ id }) => id === definition.id);
+      expect(definition.methods).toEqual(capability?.operations.map(({ method }) => method));
       const routeModule = await definition.load();
       expect(routeModule.POST ?? routeModule.GET).toEqual(expect.any(Function));
     }

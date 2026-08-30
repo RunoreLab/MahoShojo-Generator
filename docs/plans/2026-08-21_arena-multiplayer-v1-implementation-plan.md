@@ -1,5 +1,15 @@
 # 竞技场多人协作模式 v1 实施计划
 
+状态：`业务语义有效 / 运行时与 D1 directory 部分 superseded`
+最近修订：2026-08-28
+
+> 本计划的产品、Proposal、generation、security 与资源控制语义继续有效。Phase B 以后 DO-first 运行时由
+> [Arena 多人 Hono + Redis 首发实施计划](./2026-08-25_104400_Arena多人HonoRedis首发实施计划.md) 取代；
+> D1 Room Directory、migration、orphan reconciliation 与对应验收由
+> [Arena 多人 Redis-only Room Directory 决策](../decisions/2026-08-28_181500_Arena多人RedisOnly目录决策.md) 和
+> [Redis-only directory 规范修订](../specs/2026-08-28_150500_Arena多人v1移除D1目录RedisOnly规范修订.md)
+> 取代。下文相关段落只保存实施历史，不是当前 v1 runtime/schema 目标。
+
 ## 1. 目标
 
 在不复制竞技场页面、不改变既有战报生成核心语义的前提下，为 `/arena` 增加注册用户多人房间、配置同步、Proposal、共享战报与低成本实时传输。

@@ -14,6 +14,7 @@ import type {
   GenerationTerminal,
   GenerationStatus,
 } from '@mahoshojo/hosted-api/arena-generation/service';
+import { isSafePublicAiErrorProjection } from '@mahoshojo/hosted-api/regular-generation';
 
 const DEFAULT_ACTIVE_TTL_SECONDS = 3_600;
 const DEFAULT_TERMINAL_TTL_SECONDS = 2_700;
@@ -233,7 +234,10 @@ return 1
 `;
 
 const TERMINAL_SCRIPT = `
--- GEN_TERMINAL_V1
+-- GEN_TERMINAL_V2
+if ARGV[6] == '' then return redis.error_reply('GENERATION_TERMINAL_EVENT_REQUIRED') end
+if ARGV[7] == '' and ARGV[8] ~= '1' then return redis.error_reply('GENERATION_TERMINAL_SNAPSHOT_DECISION_REQUIRED') end
+if ARGV[7] ~= '' and ARGV[8] == '1' then return redis.error_reply('GENERATION_TERMINAL_SNAPSHOT_DECISION_CONFLICT') end
 local raw = redis.call('GET', KEYS[1])
 if not raw then return 0 end
 local state = cjson.decode(raw)
@@ -242,6 +246,25 @@ if state.terminal ~= nil and state.terminal ~= cjson.null then return 0 end
 if state.status ~= 'running' and state.status ~= 'reserved' and state.status ~= 'finalizing' then return -1 end
 if state.leaseExpiresAt == nil or state.leaseExpiresAt == cjson.null or state.leaseExpiresAt <= ARGV[3] then return -1 end
 local terminal = cjson.decode(ARGV[2])
+local terminalEvent = cjson.decode(ARGV[6])
+local terminalSnapshot = nil
+if ARGV[7] ~= '' then
+  terminalSnapshot = cjson.decode(ARGV[7])
+  if terminalSnapshot.status ~= terminal.status then return redis.error_reply('GENERATION_TERMINAL_SNAPSHOT_STATUS_INVALID') end
+end
+local terminalEventId = redis.call(
+  'XADD', KEYS[2], '*',
+  'type', terminalEvent.type,
+  'data', cjson.encode(terminalEvent.data)
+)
+redis.call('XTRIM', KEYS[2], 'MAXLEN', ARGV[5])
+state.lastEventId = terminalEventId
+if terminalSnapshot ~= nil then
+  terminalSnapshot.lastEventId = terminalEventId
+  state.snapshot = terminalSnapshot
+elseif ARGV[8] == '1' then
+  state.snapshot = cjson.null
+end
 state.status = terminal.status
 state.terminal = terminal
 state.leaseExpiresAt = cjson.null
@@ -249,7 +272,7 @@ state.updatedAt = ARGV[3]
 redis.call('SET', KEYS[1], cjson.encode(state), 'PX', ARGV[4])
 redis.call('PEXPIRE', KEYS[2], ARGV[4])
 redis.call('PEXPIRE', state.reservationKey, ARGV[4])
-return 1
+return { 1, terminalEventId }
 `;
 
 const CANCEL_SCRIPT = `
@@ -304,6 +327,21 @@ if #normalized == 0 then return { 'events', '[]' } end
 return { 'events', cjson.encode(normalized) }
 `;
 
+const READ_EVENT_SCRIPT = `
+-- GEN_READ_EVENT_V1
+local entries = redis.call('XRANGE', KEYS[1], ARGV[1], ARGV[1], 'COUNT', 1)
+if #entries == 0 then return { 'not-found', '' } end
+local fields = {}
+for index = 1, #entries[1][2], 2 do
+  fields[entries[1][2][index]] = entries[1][2][index + 1]
+end
+return { 'event', cjson.encode({
+  id = entries[1][1],
+  type = fields.type,
+  data = fields.data
+}) }
+`;
+
 const hashKeyPart = (value: string): string =>
   createHash('sha256').update(value).digest('hex').slice(0, 32);
 
@@ -356,6 +394,74 @@ const isGenerationStatus = (value: unknown): value is GenerationStatus => [
   'producer_lost',
 ].includes(String(value));
 
+const isTerminalStatus = (
+  value: unknown,
+): value is GenerationTerminal['status'] => (
+  value === 'completed'
+  || value === 'failed'
+  || value === 'cancelled'
+  || value === 'producer_lost'
+);
+
+const isRecord = (value: unknown): value is Record<string, unknown> => (
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+);
+
+const nullableString = (value: unknown): value is string | null => (
+  value === null || typeof value === 'string'
+);
+
+const parseStoredSnapshot = (value: unknown): GenerationSnapshot | null => {
+  if (value === null || value === undefined) return null;
+  if (!isRecord(value)) throw new Error('REDIS_GENERATION_STATE_INVALID');
+  const lastEventId = value.lastEventId ?? null;
+  const telemetry = value.telemetry ?? null;
+  const terminalResultRef = value.terminalResultRef ?? null;
+  if (
+    !isGenerationStatus(value.status)
+    || typeof value.markdown !== 'string'
+    || typeof value.reasoning !== 'string'
+    || !nullableString(lastEventId)
+    || typeof value.updatedAt !== 'string'
+    || (telemetry !== null && !isRecord(telemetry))
+    || !nullableString(terminalResultRef)
+  ) {
+    throw new Error('REDIS_GENERATION_STATE_INVALID');
+  }
+  return {
+    status: value.status,
+    markdown: value.markdown,
+    reasoning: value.reasoning,
+    lastEventId,
+    updatedAt: value.updatedAt,
+    telemetry: telemetry as Record<string, unknown> | null,
+    terminalResultRef,
+  };
+};
+
+const parseStoredTerminal = (value: unknown): GenerationTerminal | null => {
+  if (value === null || value === undefined) return null;
+  if (!isRecord(value) || !isTerminalStatus(value.status)) {
+    throw new Error('REDIS_GENERATION_STATE_INVALID');
+  }
+  const publicError = value.publicError;
+  if (
+    ('code' in value && typeof value.code !== 'string')
+    || ('resultRef' in value && !nullableString(value.resultRef))
+    || (publicError !== undefined && !isSafePublicAiErrorProjection(publicError))
+  ) {
+    throw new Error('REDIS_GENERATION_STATE_INVALID');
+  }
+  const code = value.code;
+  const resultRef = value.resultRef;
+  return {
+    status: value.status,
+    ...(code === undefined ? {} : { code: code as string }),
+    ...(resultRef === undefined ? {} : { resultRef: resultRef as string | null }),
+    ...(publicError === undefined ? {} : { publicError: { ...publicError } }),
+  };
+};
+
 const cancelReasonFromTaggedResult = (
   value: unknown,
   prefix: 'accepted:' | 'cancelled:',
@@ -369,9 +475,18 @@ const cancelReasonFromTaggedResult = (
 };
 
 const parseStoredState = (raw: string): StoredGenerationState => {
-  const parsed = JSON.parse(raw) as Partial<StoredGenerationState>;
+  let parsed: Partial<StoredGenerationState>;
+  try {
+    const candidate: unknown = JSON.parse(raw);
+    if (!isRecord(candidate)) throw new Error('REDIS_GENERATION_STATE_INVALID');
+    parsed = candidate as Partial<StoredGenerationState>;
+  } catch {
+    throw new Error('REDIS_GENERATION_STATE_INVALID');
+  }
   const preparationSeed = parsed.preparationSeed ?? null;
   const preparationVersion = parsed.preparationVersion ?? null;
+  const snapshot = parseStoredSnapshot(parsed.snapshot);
+  const terminal = parseStoredTerminal(parsed.terminal);
   if (
     typeof parsed.actorHash !== 'string'
     || typeof parsed.reservationKey !== 'string'
@@ -384,6 +499,15 @@ const parseStoredState = (raw: string): StoredGenerationState => {
     || ((preparationSeed === null) !== (preparationVersion === null))
     || (preparationSeed !== null && !isArenaPreparationSeed(preparationSeed))
     || (preparationVersion !== null && !isArenaPreparationVersion(preparationVersion))
+    || (terminal !== null && terminal.status !== parsed.status)
+    || (terminal === null && isTerminalStatus(parsed.status))
+    || (terminal !== null && typeof parsed.lastEventId !== 'string')
+    || (terminal !== null && parsed.leaseExpiresAt !== null)
+    || (terminal !== null && snapshot !== null && (
+      snapshot.status !== terminal.status
+      || snapshot.lastEventId !== parsed.lastEventId
+      || (snapshot.terminalResultRef ?? null) !== (terminal.resultRef ?? null)
+    ))
   ) {
     throw new Error('REDIS_GENERATION_STATE_INVALID');
   }
@@ -399,8 +523,8 @@ const parseStoredState = (raw: string): StoredGenerationState => {
     lastEventId: typeof parsed.lastEventId === 'string' ? parsed.lastEventId : null,
     updatedAt: parsed.updatedAt,
     leaseExpiresAt: typeof parsed.leaseExpiresAt === 'string' ? parsed.leaseExpiresAt : null,
-    snapshot: parsed.snapshot ?? null,
-    terminal: parsed.terminal ?? null,
+    snapshot,
+    terminal,
     cancelRequested: parsed.cancelRequested === true,
     cancelReason: isGenerationCancelReason(parsed.cancelReason)
       ? parsed.cancelReason
@@ -467,6 +591,32 @@ const parseAtomicRead = (raw: unknown): {
       });
     }),
   };
+};
+
+const parseExactEvent = (raw: unknown): GenerationStreamEvent | null => {
+  if (
+    !Array.isArray(raw)
+    || raw.length !== 2
+    || (raw[0] !== 'event' && raw[0] !== 'not-found')
+    || typeof raw[1] !== 'string'
+  ) throw new Error('REDIS_GENERATION_EVENT_READ_INVALID');
+  if (raw[0] === 'not-found') return null;
+  let entry: unknown;
+  try {
+    entry = JSON.parse(raw[1]);
+  } catch {
+    throw new Error('REDIS_GENERATION_EVENT_READ_INVALID');
+  }
+  if (!isRecord(entry)) throw new Error('REDIS_GENERATION_EVENT_READ_INVALID');
+  if (
+    typeof entry.id !== 'string'
+    || typeof entry.type !== 'string'
+    || typeof entry.data !== 'string'
+  ) throw new Error('REDIS_GENERATION_EVENT_READ_INVALID');
+  return parseEvent({
+    id: entry.id,
+    message: { type: entry.type, data: entry.data },
+  });
 };
 
 export const createRedisGenerationReplayStore = (
@@ -707,6 +857,13 @@ export const createRedisGenerationReplayStore = (
       return raw ? parseStoredState(raw).snapshot : null;
     },
 
+    async readEvent(input) {
+      return parseExactEvent(await options.getClient().eval(READ_EVENT_SCRIPT, {
+        keys: [eventsKey(input.generationId)],
+        arguments: [input.eventId],
+      }));
+    },
+
     async readAfter(input) {
       const client = options.getClient();
       const key = eventsKey(input.generationId);
@@ -733,6 +890,13 @@ export const createRedisGenerationReplayStore = (
     },
 
     async markTerminal(input) {
+      if (
+        !input.terminalEvent
+        || Boolean(input.terminalSnapshot) === (input.clearTerminalSnapshot === true)
+        || (input.terminalSnapshot && input.terminalSnapshot.status !== input.terminal.status)
+      ) {
+        throw new Error('REDIS_GENERATION_TERMINAL_EVIDENCE_INVALID');
+      }
       const raw = await options.getClient().eval(TERMINAL_SCRIPT, {
         keys: [stateKey(input.generationId), eventsKey(input.generationId)],
         arguments: [
@@ -740,8 +904,25 @@ export const createRedisGenerationReplayStore = (
           JSON.stringify(input.terminal),
           input.now,
           String(terminalTtlMs),
+          String(maxEvents),
+          input.terminalEvent ? JSON.stringify(input.terminalEvent) : '',
+          input.terminalSnapshot ? JSON.stringify(input.terminalSnapshot) : '',
+          input.clearTerminalSnapshot ? '1' : '0',
         ],
       });
+      if (
+        Array.isArray(raw)
+        && raw.length === 2
+        && raw[0] === 1
+        && typeof raw[1] === 'string'
+        && input.terminalEvent
+      ) {
+        return {
+          owned: true,
+          applied: true,
+          event: { ...input.terminalEvent, id: raw[1] },
+        };
+      }
       if (raw !== -1 && raw !== 0 && raw !== 1) {
         throw new Error('REDIS_GENERATION_TERMINAL_INVALID');
       }

@@ -5,9 +5,11 @@ import type {
   ArenaGenerationTerminalStore,
 } from '@mahoshojo/hosted-api/arena-generation/service';
 import type {
+  ArenaTerminalEffectInput,
   ArenaGenerationFinalizationPorts,
   ArenaTerminalClaimInput,
 } from './finalization';
+import { buildArenaTerminalEffectIdempotencyKey } from './finalization';
 import type { NodeDataD1Client } from '../node-runtime/data-ports';
 import { hashArenaCombatantBaseRevision } from '@mahoshojo/domain/arena-reconciliation';
 
@@ -36,7 +38,10 @@ export type NodeArenaGenerationPersistenceOptions = {
   getD1Client(): NodeDataD1Client | null;
   objectStore?: ArenaGenerationObjectStore;
   now?: () => Date;
-  settleRatings?(_generationId: string): Promise<void>;
+  settleRatings?(_input: {
+    generationId: string;
+    idempotencyKey: string;
+  }): Promise<void>;
   readRanking?(_generationId: string): Promise<unknown | null>;
 };
 
@@ -105,6 +110,11 @@ const parseExtra = (value: unknown): Record<string, unknown> | null => {
   } catch {
     return null;
   }
+};
+
+const stableErrorCodeOf = (value: unknown): string | null => {
+  const code = stringOf(value);
+  return code && /^[A-Z][A-Z0-9_]{1,79}$/u.test(code) ? code : null;
 };
 
 const readRejectedTerminalIdentity = async (
@@ -490,9 +500,9 @@ const materializeStoredTerminal = async (input: {
   const status = logicalTerminalStatus(input.row, extra);
   const requestId = stringOf(extra.generationRequestId);
   if (!status || !requestId) return null;
-  const resultRef = stringOf(extra.resultRef);
+  const resultRef = status === 'completed' ? stringOf(extra.resultRef) : null;
   const r2Key = stringOf(input.row['r2_key']);
-  let markdown = stringOf(input.row['output_preview']) ?? '';
+  let markdown = status === 'completed' ? stringOf(input.row['output_preview']) ?? '' : '';
   let contentAvailable = status !== 'completed';
   if (status === 'completed' && r2Key && resultRef) {
     if (input.objectStore) {
@@ -500,6 +510,7 @@ const materializeStoredTerminal = async (input: {
         markdown = await input.objectStore.getText(r2Key);
         contentAvailable = true;
       } catch {
+        markdown = '';
         contentAvailable = false;
       }
     }
@@ -512,6 +523,9 @@ const materializeStoredTerminal = async (input: {
     resultRef,
     markdown,
     reasoning: '',
+    errorCode: stableErrorCodeOf(extra.finalizationFailureCode)
+      ?? stableErrorCodeOf(extra.errorCode)
+      ?? stableErrorCodeOf(extra.rejectionCode),
     payloadHash: stringOf(extra.generationPayloadHash),
     contentAvailable,
   };
@@ -529,16 +543,21 @@ const persistFallbackCombatants = async (input: {
   for (let index = 0; index < fallback.length; index += 1) {
     const combatant = recordOf(fallback[index]);
     if (!combatant) continue;
+    const sortIndex = numberOf(combatant.sortIndex) ?? index;
     await input.client.prepare(`
-INSERT OR IGNORE INTO battle_report_generation_combatants (
+INSERT INTO battle_report_generation_combatants (
   generation_id, sort_index, name, type, template_id, is_native, is_preset,
   team_id, character_guidance, data_card_id, data_card_updated_at,
   size_chars, size_bytes, created_at
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?)
+SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?
+WHERE NOT EXISTS (
+  SELECT 1 FROM battle_report_generation_combatants
+  WHERE generation_id = ? AND sort_index = ?
+)
     `.trim()).bind(
       input.generationId,
-      numberOf(combatant.sortIndex) ?? index,
+      sortIndex,
       boundedString(combatant.name, 300) ?? `未知角色#${index + 1}`,
       boundedString(combatant.type, 64),
       boundedString(combatant.templateId, 256),
@@ -549,6 +568,8 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?)
       boundedString(combatant.dataCardId, 128),
       boundedString(combatant.dataCardUpdatedAt, 128),
       input.createdAt,
+      input.generationId,
+      sortIndex,
     ).run({ retry: 'none' });
   }
 };
@@ -617,8 +638,9 @@ ON CONFLICT(kind, owner_ref_id) DO UPDATE SET
       const pvp = recordOf(serverContext?.trustedPvpContext);
       const usage = recordOf(input.telemetry.usage);
       const extraJson = await buildExtraJson(input);
-      const markdownBytes = new TextEncoder().encode(input.markdown).byteLength;
-      const preview = input.markdown.slice(0, OUTPUT_PREVIEW_CHARS);
+      const terminalMarkdown = input.status === 'completed' ? input.markdown : '';
+      const markdownBytes = new TextEncoder().encode(terminalMarkdown).byteLength;
+      const preview = terminalMarkdown.slice(0, OUTPUT_PREVIEW_CHARS);
       let inserted: Awaited<ReturnType<ReturnType<NodeDataD1Client['prepare']>['run']>>;
       try {
         inserted = await client.prepare(`
@@ -677,9 +699,9 @@ VALUES (
         boundedString(input.telemetry.providerName, 128),
         boundedString(input.telemetry.providerType, 64),
         boundedString(input.telemetry.model, 256),
-        boundedString(report?.headline, 300) ?? headlineFromMarkdown(input.markdown),
-        boundedString(report?.winner, 300) ?? winnerFromMarkdown(input.markdown),
-        input.markdown.length,
+        boundedString(report?.headline, 300) ?? headlineFromMarkdown(terminalMarkdown),
+        boundedString(report?.winner, 300) ?? winnerFromMarkdown(terminalMarkdown),
+        terminalMarkdown.length,
         markdownBytes,
         numberOf(usage?.promptTokens),
         numberOf(usage?.completionTokens),
@@ -794,7 +816,13 @@ WHERE id = ?
       }
     },
 
-    async persistCombatants(input) {
+    async persistCombatants(input: ArenaTerminalEffectInput) {
+      if (
+        input.idempotencyKey
+        !== buildArenaTerminalEffectIdempotencyKey(input.generationId, 'combatants')
+      ) {
+        throw new Error('ARENA_COMBATANTS_IDEMPOTENCY_KEY_INVALID');
+      }
       const client = options.getD1Client();
       if (!client || !Array.isArray(input.payload.combatants)) return;
       const createdAt = now().toISOString();
@@ -807,12 +835,16 @@ WHERE id = ?
           ?? boundedString(data?.name, 300)
           ?? `未知角色#${index + 1}`;
         await client.prepare(`
-INSERT OR IGNORE INTO battle_report_generation_combatants (
+INSERT INTO battle_report_generation_combatants (
   generation_id, sort_index, name, type, template_id, is_native, is_preset,
   team_id, character_guidance, data_card_id, data_card_updated_at,
   size_chars, size_bytes, created_at
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+WHERE NOT EXISTS (
+  SELECT 1 FROM battle_report_generation_combatants
+  WHERE generation_id = ? AND sort_index = ?
+)
         `.trim()).bind(
           input.generationId,
           index,
@@ -828,17 +860,22 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           serialized ? serialized.length : null,
           serialized ? new TextEncoder().encode(serialized).byteLength : null,
           createdAt,
+          input.generationId,
+          index,
         ).run({ retry: 'none' });
       }
     },
 
-    async applyStoryImpacts() {
+    async applyStoryImpacts(_input: ArenaTerminalEffectInput) {
       // Local-card reconciliation authority is frozen into the existing battle
       // report extra_json during claimTerminal. The cards themselves stay local.
     },
 
     async settleRatings(input) {
-      await options.settleRatings?.(input.generationId);
+      await options.settleRatings?.({
+        generationId: input.generationId,
+        idempotencyKey: input.idempotencyKey,
+      });
     },
 
     async readRanking(input) {
@@ -928,7 +965,15 @@ export const createNodeArenaGenerationTerminalStore = (
           extra,
           createdAt: input.updatedAt,
         });
-        if (status === 'completed') await options.settleRatings?.(input.generationId);
+        if (status === 'completed') {
+          await options.settleRatings?.({
+            generationId: input.generationId,
+            idempotencyKey: buildArenaTerminalEffectIdempotencyKey(
+              input.generationId,
+              'ratings',
+            ),
+          });
+        }
         await client.prepare(`
 UPDATE battle_report_generations
 SET status = ?, ended_at = ?,
@@ -1005,6 +1050,7 @@ VALUES (?, ?, ?, 0, 'failed', 'stream', 'api/arena/generate-stream',
       resultRef: null,
       markdown: '',
       reasoning: '',
+      errorCode: stableErrorCodeOf(input.code),
       payloadHash: input.payloadHash,
       contentAvailable: true,
     };

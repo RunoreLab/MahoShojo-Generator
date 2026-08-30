@@ -1,0 +1,114 @@
+name: Repository CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - refactor/platform-rearchitecture
+      - preview
+  workflow_dispatch:
+
+concurrency:
+  group: repository-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify repository
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 11.3.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify repository
+        run: pnpm run ci:verify
+
+      - name: Verify Room Redis checkpoint
+        env:
+          HOSTED_API_ENVIRONMENT: local
+          REDIS_URL: redis://127.0.0.1:6379
+          ROOM_REDIS_VERIFY: 'true'
+          ROOM_REDIS_VERIFY_KEY_PREFIX: gmr10-room-ci
+        run: pnpm --filter @mahoshojo/api run verify:room-redis
+
+      - name: Verify Room generation Redis authority seam
+        env:
+          HOSTED_API_ENVIRONMENT: local
+          REDIS_URL: redis://127.0.0.1:6379
+          ROOM_GENERATION_REDIS_VERIFY: 'true'
+          ROOM_GENERATION_REDIS_VERIFY_KEY_PREFIX: gmr09-ci
+        run: pnpm --filter @mahoshojo/api run verify:room-generation-redis
+
+      - name: Verify Room generation process recovery
+        env:
+          HOSTED_API_ENVIRONMENT: local
+          REDIS_URL: redis://127.0.0.1:6379
+          ROOM_GENERATION_PROCESS_VERIFY: 'true'
+          ROOM_REDIS_VERIFY_KEY_PREFIX: gmr09-process-ci
+        run: pnpm --filter @mahoshojo/api run verify:room-generation-process-recovery
+
+      - name: Verify Room Redis restart recovery
+        env:
+          HOSTED_API_ENVIRONMENT: local
+          REDIS_URL: redis://127.0.0.1:6392
+          ROOM_REDIS_VERIFY: 'true'
+          ROOM_REDIS_VERIFY_KEY_PREFIX: gmr10-restart-ci
+        run: |
+          set -euo pipefail
+          restart_container="mahoshojo-room-redis-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          verify_token="ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cleanup() {
+            docker rm -f -- "$restart_container" >/dev/null 2>&1 || true
+          }
+          wait_for_redis() {
+            for _ in {1..50}; do
+              if docker exec "$restart_container" redis-cli ping | grep -qx PONG; then
+                return 0
+              fi
+              sleep 0.2
+            done
+            return 1
+          }
+          trap cleanup EXIT
+          docker run --detach --name "$restart_container" \
+            --publish 127.0.0.1:6392:6379 \
+            redis:7-alpine redis-server --appendonly yes --appendfsync always
+          wait_for_redis
+          ROOM_REDIS_VERIFY_PHASE=write ROOM_REDIS_VERIFY_TOKEN="$verify_token" \
+            pnpm --filter @mahoshojo/api run verify:room-redis
+          docker restart "$restart_container"
+          wait_for_redis
+          ROOM_REDIS_VERIFY_PHASE=read ROOM_REDIS_VERIFY_TOKEN="$verify_token" \
+            pnpm --filter @mahoshojo/api run verify:room-redis
+
+      - name: Verify Hosted DR Redis empty drill
+        env:
+          REDIS_URL: redis://127.0.0.1:6379/15
+        run: pnpm run verify:hosted-dr:redis

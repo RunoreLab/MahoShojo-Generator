@@ -1,10 +1,17 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { parse } from 'comment-json';
 import { describe, expect, test } from 'vitest';
 
 const HONO_WORKFLOW_PATH = resolve(process.cwd(), '.github/workflows/hono-deploy.yml');
 const CLOUDFLARE_WORKFLOW_PATH = resolve(process.cwd(), '.github/workflows/cloudflare-deploy.yml');
 const PREVIEW_WORKFLOW_PATH = resolve(process.cwd(), '.github/workflows/preview-deploy.yml');
+const WEB_WRANGLER_PATH = resolve(process.cwd(), 'apps/web/wrangler.jsonc');
+const WEB_ENV_EXAMPLE_PATH = resolve(process.cwd(), 'apps/web/env.example');
+const HONO_DEPLOY_GUIDE_PATH = resolve(
+  process.cwd(),
+  'docs/2026-08-22_034220_Hono服务部署与自动发布指南.md',
+);
 const HONO_COMPOSE_PATH = resolve(process.cwd(), 'apps/api/deploy/compose.yml');
 const HONO_DEPLOY_SCRIPT_PATH = resolve(process.cwd(), 'apps/api/deploy/deploy-bundle.sh');
 const HONO_INSTALL_SCRIPT_PATH = resolve(process.cwd(), 'apps/api/deploy/install-bundle.sh');
@@ -102,6 +109,7 @@ describe('Hono deployment workflow', () => {
     expect(deployJob).toMatch(
       new RegExp(`^    if: github\\.ref == '${escapeRegExp(PRODUCTION_BRANCH)}'\\s*$`, 'm'),
     );
+    expect(deployJob).toContain('HONO_HOSTED_API_ENVIRONMENT=production');
 
     const verificationStep = getStep(getJob(workflow, 'build'), 'Verify Hono authentication and runtime');
     expect(verificationStep).toContain('pnpm --filter @mahoshojo/api run test');
@@ -124,6 +132,10 @@ describe('Hono deployment workflow', () => {
     const workflow = readFileSync(CLOUDFLARE_WORKFLOW_PATH, 'utf8');
     const deployJob = getJob(workflow, 'deploy');
 
+    expect(deployJob).toMatch(
+      new RegExp(`^    if: github\\.ref == '${escapeRegExp(PRODUCTION_BRANCH)}'\\s*$`, 'm'),
+    );
+
     expect(getStep(deployJob, 'Build Cloudflare bundle')).toContain(
       'run: pnpm --filter @mahoshojo/web run build:cf',
     );
@@ -138,18 +150,51 @@ describe('Hono deployment workflow', () => {
     );
   });
 
+  test('Cloudflare production deploy fail-closes when the Arena finalization secret is absent', () => {
+    const wrangler = parse(readFileSync(WEB_WRANGLER_PATH, 'utf8'), undefined, true) as {
+      env?: {
+        production?: {
+          secrets?: { required?: string[] };
+        };
+      };
+    };
+    const webEnvExample = readFileSync(WEB_ENV_EXAMPLE_PATH, 'utf8');
+
+    expect(wrangler.env?.production?.secrets?.required).toContain(
+      'ARENA_FINALIZATION_HMAC_SECRET',
+    );
+    expect(webEnvExample).toContain('ARENA_FINALIZATION_HMAC_SECRET=');
+    expect(webEnvExample).toContain('必须与 Hono 使用同一个独立 secret');
+  });
+
   test('preview 分支串行发布隔离 Hono 后再发布 Cloudflare', () => {
     const workflow = readFileSync(PREVIEW_WORKFLOW_PATH, 'utf8');
+    const verifyJob = getJob(workflow, 'verify-and-build-hono');
+    const cloudflareBuildJob = getJob(workflow, 'verify-and-build-cloudflare');
     const honoJob = getJob(workflow, 'deploy-hono-preview');
     const cloudflareJob = getJob(workflow, 'deploy-cloudflare-preview');
 
+    for (const job of [verifyJob, honoJob, cloudflareJob]) {
+      expect(job).toMatch(/^    if: github\.ref == 'refs\/heads\/preview'\s*$/m);
+    }
     expect(workflow).toMatch(/branches:\s*\n\s*- preview/u);
     expect(honoJob).toContain('HONO_DEPLOY_ROOT_DIR: /opt/mahoshojo-hono-preview');
     expect(honoJob).toContain('HONO_CONTAINER_NAME: mahoshojo-hono-preview');
     expect(honoJob).toContain("HONO_BIND_PORT: '8081'");
-    expect(honoJob).toContain('HONO_REDIS_KEY_PREFIX: preview');
+    expect(honoJob).toContain('HONO_REDIS_KEY_PREFIX: ${{ vars.PREVIEW_REDIS_KEY_PREFIX }}');
+    expect(honoJob).toContain('HONO_REDIS_NETWORK_NAME: ${{ vars.PREVIEW_REDIS_NETWORK_NAME }}');
+    expect(honoJob).toContain('PREVIEW_VPS_HOST: ${{ vars.PREVIEW_VPS_HOST }}');
+    expect(honoJob).toContain('PREVIEW_VPS_USER: ${{ vars.PREVIEW_VPS_USER }}');
+    expect(honoJob).toContain('PREVIEW_VPS_SSH_PRIVATE_KEY: ${{ secrets.PREVIEW_VPS_SSH_PRIVATE_KEY }}');
+    expect(honoJob).toContain('PREVIEW_VPS_HOST_KEY: ${{ secrets.PREVIEW_VPS_HOST_KEY }}');
+    expect(honoJob).toContain('check:preview:environment -- --require-provisioned');
     expect(honoJob).toContain('https://homura-preview.colanns.me');
-    expect(cloudflareJob).toContain('needs: deploy-hono-preview');
+    expect(cloudflareBuildJob).toContain('needs: verify-and-build-hono');
+    expect(cloudflareBuildJob).toContain('run: pnpm --filter @mahoshojo/web run build:cf');
+    expect(honoJob).toContain('- verify-and-build-hono');
+    expect(honoJob).toContain('- verify-and-build-cloudflare');
+    expect(cloudflareJob).toContain('- deploy-hono-preview');
+    expect(cloudflareJob).toContain('- verify-and-build-cloudflare');
     expect(cloudflareJob).toContain(
       'NEXT_PUBLIC_HONO_API_ORIGIN: https://homura-preview.colanns.me',
     );
@@ -161,7 +206,7 @@ describe('Hono deployment workflow', () => {
     const buildJob = getJob(workflow, 'build');
     const containerBuildStep = getStep(buildJob, 'Verify Hono container build');
     const activeLines = getActiveRunLines(containerBuildStep);
-    const composeConfigCommand = 'sudo --preserve-env=HONO_RELEASE_DIR docker compose -f apps/api/deploy/compose.yml config --no-env-resolution';
+    const composeConfigCommand = 'sudo --preserve-env=HONO_RELEASE_DIR,HONO_HOSTED_API_ENVIRONMENT docker compose -f apps/api/deploy/compose.yml config --no-env-resolution';
     const composeEnvironmentSafetyCheck = 'sudo test ! -e "$COMPOSE_ENV_DIRECTORY"';
     const composeEnvironmentSymlinkCheck = 'sudo test ! -L "$COMPOSE_ENV_DIRECTORY"';
     const composeEnvironmentCleanupTrap = 'trap cleanup_compose_environment EXIT';
@@ -176,6 +221,7 @@ describe('Hono deployment workflow', () => {
 
     expectRequiredGateStep(containerBuildStep);
     expect(containerBuildStep).toContain('HONO_RELEASE_DIR: /tmp/mahoshojo-hono-release');
+    expect(containerBuildStep).toContain('HONO_HOSTED_API_ENVIRONMENT: production');
     expect(containerBuildStep).toContain(
       'COMPOSE_ENV_DIRECTORY: /opt/mahoshojo-hono',
     );
@@ -184,6 +230,9 @@ describe('Hono deployment workflow', () => {
     );
     expect(compose).toContain(
       '- ${HONO_DEPLOY_ROOT_DIR:-/opt/mahoshojo-hono}/.env.hono',
+    );
+    expect(compose).toContain(
+      'HOSTED_API_ENVIRONMENT: ${HONO_HOSTED_API_ENVIRONMENT:?HONO_HOSTED_API_ENVIRONMENT must be explicit}',
     );
     expect(activeLines).toContain(composeEnvironmentSafetyCheck);
     expect(activeLines).toContain(composeEnvironmentSymlinkCheck);
@@ -233,6 +282,7 @@ describe('Hono deployment workflow', () => {
     const healthProbe = 'if curl --fail --silent --show-error "$D1_GATEWAY_URL/health" >/dev/null; then';
     const runtimeVerifier = 'pnpm run verify:server:runtime';
     const arenaRedisVerifier = 'pnpm --filter @mahoshojo/api run verify:arena-redis';
+    const hostedDrRedisVerifier = 'REDIS_URL=redis://127.0.0.1:6379/15 pnpm run verify:hosted-dr:redis';
 
     expectRequiredGateStep(runtimeStep);
     expect(buildJob).toMatch(/^    services:\s*\n      redis:\s*$/m);
@@ -258,10 +308,14 @@ describe('Hono deployment workflow', () => {
     expect(activeLines).toContain(healthProbe);
     expect(activeLines).toContain('trap cleanup EXIT');
     expect(activeLines).toContain(arenaRedisVerifier);
+    expect(activeLines).toContain(hostedDrRedisVerifier);
     expect(activeLines.at(-1)).toBe(runtimeVerifier);
     expect(activeLines.indexOf(gatewayCommand)).toBeLessThan(activeLines.indexOf(healthProbe));
     expect(activeLines.indexOf(healthProbe)).toBeLessThan(activeLines.indexOf(runtimeVerifier));
     expect(activeLines.indexOf(arenaRedisVerifier)).toBeLessThan(
+      activeLines.indexOf(runtimeVerifier),
+    );
+    expect(activeLines.indexOf(hostedDrRedisVerifier)).toBeLessThan(
       activeLines.indexOf(runtimeVerifier),
     );
     expect(buildJob.indexOf('- name: Build single-file server')).toBeLessThan(
@@ -295,6 +349,45 @@ describe('Hono deployment workflow', () => {
     expect(installer).toContain('mktemp -d "$releases_dir/.upload.XXXXXX"');
     expect(installer).toContain('mv -Tn "$staging_dir" "$final_dir"');
     expect(installer.match(/verify_uploaded_tuple "\$final_dir" "\$release_id"/gu)).toHaveLength(2);
+  });
+
+  test('手工发布指南生成并上传当前七文件 release tuple', () => {
+    const guide = readFileSync(HONO_DEPLOY_GUIDE_PATH, 'utf8');
+
+    expect(guide).toContain(
+      'cp config/arena-room-release-gate.json apps/api/dist/arena-room-release-gate.json',
+    );
+    expect(guide).toContain(
+      'cp scripts/arena-room-release-gate-schema.mjs apps/api/dist/arena-room-release-gate-schema.mjs',
+    );
+    expect(guide).toMatch(
+      /sha256sum index\.mjs compose\.yml deploy-bundle\.sh \\\s+arena-room-release-gate\.json arena-room-release-gate-schema\.mjs > release\.manifest/u,
+    );
+    expect(guide).toMatch(
+      /scp apps\/api\/dist\/index\.mjs[\s\S]*apps\/api\/dist\/arena-room-release-gate\.json[\s\S]*apps\/api\/dist\/arena-room-release-gate-schema\.mjs[\s\S]*apps\/api\/dist\/release\.sha256/u,
+    );
+    expect(guide).toContain('精确七文件 tuple');
+    expect(guide).not.toContain('精确五文件 tuple');
+  });
+
+  test('手工回退指南从 immutable current tuple 发起并声明数据边界', () => {
+    const guide = readFileSync(HONO_DEPLOY_GUIDE_PATH, 'utf8');
+
+    expect(guide).toContain('ROLLBACK_BASELINE_RELEASE_ID=<previous-release-id>');
+    expect(guide).toContain(
+      'current_dir="$(readlink -f /opt/mahoshojo-hono/current)"',
+    );
+    expect(guide).toContain(
+      '"$current_dir/deploy-bundle.sh" rollback "$target_id" https://homura.colanns.me',
+    );
+    expect(guide).toContain('不得调用根旧 `deploy-bundle.sh`');
+    expect(guide).toContain('不得删除 `deployment-format` 或 `deploy.transaction`');
+    expect(guide).toContain('不得通过 full git revert');
+    expect(guide).toContain('不会 flush/restore Redis，也不会回滚 D1 或 R2');
+    expect(guide).toContain('wrangler versions list --env production --json');
+    expect(guide).toContain(
+      'wrangler rollback "$worker_version_id" --env production --yes --message "$rollback_reason"',
+    );
   });
 
   test('所有 Hono artifact 与部署生命周期都引用 apps/api owner', () => {

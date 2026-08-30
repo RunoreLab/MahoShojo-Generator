@@ -5,11 +5,29 @@ import {
   hasValidHostedApiProductionCorsOrigins,
   HOSTED_API_CORS_ALLOW_HEADERS,
   HOSTED_API_CORS_ALLOW_METHODS,
+  parseHostedApiDeploymentTarget,
   resolveHostedApiCorsOrigin,
   selectHostedDrRuntime,
   withHostedApiCorsHeaders,
   type HostedDrReadinessDatabaseProvider,
 } from '../src/hosted-dr';
+
+describe('Hosted deployment target contract', () => {
+  it.each(['production', 'preview', 'local', 'test'] as const)(
+    'accepts explicit %s target',
+    (target) => {
+      expect(parseHostedApiDeploymentTarget(target)).toBe(target);
+      expect(parseHostedApiDeploymentTarget(` ${target.toUpperCase()} `)).toBe(target);
+    },
+  );
+
+  it.each([undefined, '', 'development', 'staging', 'prod'])(
+    'rejects missing or unknown target: %s',
+    (target) => {
+      expect(parseHostedApiDeploymentTarget(target)).toBeNull();
+    },
+  );
+});
 
 describe('Hosted API cross-runtime CORS contract', () => {
   const allowedOrigins = ['https://app.example.test', 'https://*.colanns.me'];

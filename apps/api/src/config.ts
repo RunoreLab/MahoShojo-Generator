@@ -4,7 +4,15 @@ import {
   type HonoAuthMode,
 } from '#/auth/config';
 import { parseAIProvidersFromEnv } from '@mahoshojo/hosted-runtime/node-runtime/providers';
-import { hasValidHostedApiProductionCorsOrigins } from '@mahoshojo/hosted-api/hosted-dr';
+import { parseTrustedD1GatewayOrigin } from '@mahoshojo/hosted-runtime/node-runtime/d1-client';
+import {
+  evaluateHostedDrVersionGate,
+  hasValidHostedApiProductionCorsOrigins,
+  HOSTED_DR_CONTRACT_VERSION,
+  parseHostedApiDeploymentTarget,
+  resolveHostedApiCorsOrigin,
+  type HostedDrVersionGateInput,
+} from '@mahoshojo/hosted-api/hosted-dr';
 
 export type HonoServerConfig = {
   host: string;
@@ -15,21 +23,37 @@ export type HonoServerConfig = {
   redisRequired: boolean;
   d1Required: boolean;
   corsOrigins: string[];
+  arenaRoomAllowedOrigins: string[];
   authMode: HonoAuthMode;
+  arenaMultiplayerEnabled: boolean;
 };
 
 const hasText = (value: string | undefined): boolean => Boolean(value?.trim());
 
-const isTrustedHttpsOrigin = (value: string | undefined): boolean => {
-  if (!hasText(value)) return false;
+const parseTrustedHttpsOrigin = (value: string | undefined): string | null => {
+  if (!hasText(value)) return null;
   try {
     const url = new URL(value as string);
-    return url.protocol === 'https:'
-      && !url.username
-      && !url.password
-      && url.pathname === '/'
-      && !url.search
-      && !url.hash;
+    if (url.protocol !== 'https:'
+      || url.username
+      || url.password
+      || url.pathname !== '/'
+      || url.search
+      || url.hash) {
+      return null;
+    }
+    return url.origin;
+  } catch {
+    return null;
+  }
+};
+
+const isTrustedHttpsOrigin = (value: string | undefined): boolean =>
+  parseTrustedHttpsOrigin(value) !== null;
+
+const hasLoopbackRedisAuthority = (value: string): boolean => {
+  try {
+    return ['localhost', '127.0.0.1', '[::1]'].includes(new URL(value).hostname);
   } catch {
     return false;
   }
@@ -38,14 +62,53 @@ const isTrustedHttpsOrigin = (value: string | undefined): boolean => {
 const hasValidAiProviderConfig = (env: NodeJS.ProcessEnv): boolean =>
   parseAIProvidersFromEnv(env).length > 0;
 
+const validateHostedDrVersionGate = (env: NodeJS.ProcessEnv): void => {
+  const stage = env.HOSTED_DR_GATE_STAGE?.trim() || 'rollout';
+  const schemaState = env.HOSTED_DR_SCHEMA_STATE?.trim() || 'expanded';
+  const result = evaluateHostedDrVersionGate({
+    stage: stage as HostedDrVersionGateInput['stage'],
+    primaryContractVersion: env.HOSTED_DR_PRIMARY_CONTRACT_VERSION?.trim()
+      || HOSTED_DR_CONTRACT_VERSION,
+    drContractVersion: env.HOSTED_DR_DR_CONTRACT_VERSION?.trim() || HOSTED_DR_CONTRACT_VERSION,
+    clientContractVersion: env.HOSTED_DR_CLIENT_CONTRACT_VERSION?.trim()
+      || HOSTED_DR_CONTRACT_VERSION,
+    schemaState: schemaState as HostedDrVersionGateInput['schemaState'],
+    cleanupRequested: env.HOSTED_DR_CLEANUP_REQUESTED?.trim().toLowerCase() === 'true',
+  });
+  if (!result.allowed) {
+    throw new Error(`HOSTED_DR_VERSION_GATE_${result.reason.toUpperCase()}`);
+  }
+};
+
 const validateProductionEnvironment = (
   env: NodeJS.ProcessEnv,
   config: HonoServerConfig,
 ): void => {
-  if (config.nodeEnv !== 'production') return;
+  const deploymentTarget = parseHostedApiDeploymentTarget(env.HOSTED_API_ENVIRONMENT);
+  const protectedHostedTarget = deploymentTarget === 'production' || deploymentTarget === 'preview';
+  if (config.nodeEnv !== 'production' && !protectedHostedTarget) return;
 
   const problems: string[] = [];
+  if (!deploymentTarget) {
+    problems.push('HOSTED_API_ENVIRONMENT 必须显式设为 production、preview、local 或 test');
+  }
+  if (deploymentTarget === 'preview' && config.redisKeyPrefix !== 'preview') {
+    problems.push('preview target 的 REDIS_KEY_PREFIX 必须精确为 preview');
+  }
+  if (deploymentTarget === 'production' && config.redisKeyPrefix !== '') {
+    problems.push('production target 的 REDIS_KEY_PREFIX 必须为空');
+  }
+  if (protectedHostedTarget && config.arenaMultiplayerEnabled) {
+    problems.push('ARENA_MULTIPLAYER_ENABLED 在 Production Gate 前必须为 false');
+  }
   if (!config.redisUrl) problems.push('Redis 未配置（REDIS_URL 或 REDIS_HOST）');
+  if (protectedHostedTarget
+    && config.redisUrl
+    && hasLoopbackRedisAuthority(config.redisUrl)) {
+    problems.push('Redis loopback authority 不得用于 production/preview 容器部署');
+  }
+  if (!config.redisRequired) problems.push('REDIS_REQUIRED 生产模式必须为 true');
+  if (!config.d1Required) problems.push('D1_REQUIRED 生产模式必须为 true');
   if (!hasValidAiProviderConfig(env)) problems.push('AI_PROVIDERS_CONFIG/AI_API_KEY 缺失或无有效 provider');
   if ((env.SIGNATURE_SECRET_KEY?.trim().length ?? 0) < 32) {
     problems.push('SIGNATURE_SECRET_KEY 必须至少 32 个字符');
@@ -56,6 +119,14 @@ const validateProductionEnvironment = (
 
   const gatewayUrl = env.D1_GATEWAY_URL?.trim();
   if (gatewayUrl) {
+    const gatewayOrigin = parseTrustedD1GatewayOrigin(gatewayUrl, {
+      allowHttpLoopback:
+        env.HOSTED_DR_LOCAL_FAULT_INJECTION?.trim().toLowerCase() === 'true'
+        && (deploymentTarget === 'local' || deploymentTarget === 'test'),
+    });
+    if (!gatewayOrigin) {
+      problems.push('D1_GATEWAY_URL 必须是无凭据、路径、查询与片段的 HTTPS root origin');
+    }
     const gatewaySecret = env.D1_GATEWAY_HMAC_SECRET?.trim();
     const gatewayToken = env.D1_GATEWAY_TOKEN?.trim();
     if (!gatewaySecret && !gatewayToken) {
@@ -143,6 +214,50 @@ const readCorsOrigins = (): string[] => {
     .filter(Boolean);
 };
 
+const readArenaRoomAllowedOrigins = (): string[] => {
+  const raw = process.env.ARENA_ROOM_ALLOWED_ORIGINS?.trim();
+  if (!raw) return [];
+  return raw
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+};
+
+const isCanonicalArenaRoomOrigin = (value: string): boolean => {
+  if (value === '*' || value.includes('*')) return false;
+  try {
+    const url = new URL(value);
+    const loopbackHttp = url.protocol === 'http:'
+      && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
+    return (url.protocol === 'https:' || loopbackHttp)
+      && !url.username
+      && !url.password
+      && url.pathname === '/'
+      && !url.search
+      && !url.hash
+      && url.origin === value;
+  } catch {
+    return false;
+  }
+};
+
+const validateArenaRoomOrigins = (config: HonoServerConfig): void => {
+  if (!config.arenaMultiplayerEnabled) return;
+  if (
+    config.arenaRoomAllowedOrigins.length === 0
+    || config.arenaRoomAllowedOrigins.some((origin) => !isCanonicalArenaRoomOrigin(origin))
+  ) {
+    throw new Error(
+      'ARENA_ROOM_ALLOWED_ORIGINS 在 Arena multiplayer 启用时必须是非空、无 wildcard 的精确 HTTP(S) origin 列表',
+    );
+  }
+  if (config.arenaRoomAllowedOrigins.some((origin) => (
+    resolveHostedApiCorsOrigin(origin, config.corsOrigins) !== origin
+  ))) {
+    throw new Error('ARENA_ROOM_ALLOWED_ORIGINS 必须同时被 HONO_CORS_ORIGINS 覆盖');
+  }
+};
+
 const readRedisUrl = (): string | null => {
   const explicitUrl = process.env.REDIS_URL?.trim();
   if (explicitUrl) return explicitUrl;
@@ -169,7 +284,14 @@ const readRedisKeyPrefix = (): string => {
 
 export const readHonoServerConfig = (): HonoServerConfig => {
   const nodeEnv = process.env.NODE_ENV?.trim() || 'development';
+  const rawDeploymentTarget = process.env.HOSTED_API_ENVIRONMENT?.trim();
+  const deploymentTarget = parseHostedApiDeploymentTarget(process.env.HOSTED_API_ENVIRONMENT);
+  if (rawDeploymentTarget && !deploymentTarget) {
+    throw new Error('HOSTED_API_ENVIRONMENT 必须显式设为 production、preview、local 或 test');
+  }
+  const protectedHostedTarget = deploymentTarget === 'production' || deploymentTarget === 'preview';
   const redisUrl = readRedisUrl();
+  validateHostedDrVersionGate(process.env);
 
   const config: HonoServerConfig = {
     host: process.env.HONO_HOST?.trim() || '0.0.0.0',
@@ -177,11 +299,14 @@ export const readHonoServerConfig = (): HonoServerConfig => {
     nodeEnv,
     redisUrl,
     redisKeyPrefix: readRedisKeyPrefix(),
-    redisRequired: readBoolean('REDIS_REQUIRED', nodeEnv === 'production'),
-    d1Required: readBoolean('D1_REQUIRED', nodeEnv === 'production'),
+    redisRequired: readBoolean('REDIS_REQUIRED', nodeEnv === 'production' || protectedHostedTarget),
+    d1Required: readBoolean('D1_REQUIRED', nodeEnv === 'production' || protectedHostedTarget),
     corsOrigins: readCorsOrigins(),
+    arenaRoomAllowedOrigins: readArenaRoomAllowedOrigins(),
     authMode: readHonoAuthMode(),
+    arenaMultiplayerEnabled: readBoolean('ARENA_MULTIPLAYER_ENABLED', false),
   };
+  validateArenaRoomOrigins(config);
   validateProductionEnvironment(process.env, config);
   return config;
 };

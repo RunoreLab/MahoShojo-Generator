@@ -24,7 +24,7 @@ export const normalizePublicDataCardReferenceId = (value: string): string => {
   }
 
   try {
-    const url = new URL(trimmed, 'https://mahoshojo.local');
+    const url = new URL(trimmed, 'https://mahoshojo.invalid');
     const queryId =
       url.searchParams.get('dataCardId') ??
       url.searchParams.get('cardId') ??

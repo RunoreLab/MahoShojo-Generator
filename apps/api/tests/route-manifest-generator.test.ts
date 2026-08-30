@@ -17,6 +17,13 @@ async function createFixture(): Promise<string> {
     path.join(root, 'src/adapters/retained/one.ts'),
     'export const POST = () => {};\n',
   );
+  await writeFile(
+    path.join(root, 'config/hosted-dr-capabilities.json'),
+    JSON.stringify({
+      capabilities: [{ id: 'retained/one', operations: [{ method: 'POST' }] }],
+    }),
+    'utf8',
+  );
   return root;
 }
 
@@ -43,6 +50,7 @@ describe('Hono route manifest generator', () => {
 
     await generateHonoRouteManifest(root, {
       inventoryFile: path.join(root, 'config/hono-api-routes.json'),
+      capabilitiesFile: path.join(root, 'config/hosted-dr-capabilities.json'),
       log: () => {},
     });
 
@@ -62,6 +70,7 @@ describe('Hono route manifest generator', () => {
     });
     const options = {
       inventoryFile: path.join(root, 'config/hono-api-routes.json'),
+      capabilitiesFile: path.join(root, 'config/hosted-dr-capabilities.json'),
       log: () => {},
     };
     await expect(generateHonoRouteManifest(root, options))

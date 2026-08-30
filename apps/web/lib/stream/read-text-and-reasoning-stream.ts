@@ -240,20 +240,28 @@ export async function readTextAndReasoningStreamFromResponse(
     }
   };
 
-  while (true) {
-    const { value, done } = await readWithTimeout(reader);
-    if (done) break;
-    if (!value) continue;
-    sseBuffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n');
-    consumeSseBuffer(false);
-    if (sawDone) {
+  try {
+    while (true) {
+      const { value, done } = await readWithTimeout(reader);
+      if (done) break;
+      if (!value) continue;
+      sseBuffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n');
+      consumeSseBuffer(false);
+      if (!sawDone) continue;
       try {
-        void reader.cancel('sse_done').catch(() => {});
+        await reader.cancel('sse_done');
       } catch {
-        // ignore
+        // 明确 done 已经给出协议终态；底层 cancel 清理失败不覆盖成功结果。
       }
       break;
     }
+  } catch (error) {
+    try {
+      await reader.cancel('sse_error');
+    } catch {
+      // 保留原始协议/transport 错误；generation client 会单独投影 ambiguous。
+    }
+    throw error;
   }
 
   const flushed = decoder.decode();
@@ -261,6 +269,14 @@ export async function readTextAndReasoningStreamFromResponse(
     sseBuffer += flushed.replace(/\r\n/g, '\n');
   }
   consumeSseBuffer(true);
+  if (!sawDone) {
+    try {
+      await reader.cancel('sse_eof_before_done');
+    } catch {
+      // EOF 已经是不完整终态，cancel 清理失败不覆盖该错误。
+    }
+    throw new Error('SSE 流在明确 done 终态前结束。');
+  }
 
   const reasoningSnapshot = latestReasoning as AIReasoningEnvelope | null;
 

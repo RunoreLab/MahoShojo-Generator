@@ -1,11 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { createArenaRoomCheckpointCommit } from '@mahoshojo/multiplayer-core';
+
 const redisClient = vi.hoisted(() => ({
   close: vi.fn(async () => undefined),
   connect: vi.fn(async () => undefined),
   destroy: vi.fn(),
   eval: vi.fn(),
-  get: vi.fn(async () => null),
+  get: vi.fn<() => Promise<string | null>>(async () => null),
   info: vi.fn(),
   isOpen: true,
   isReady: true,
@@ -22,6 +24,7 @@ import {
   RedisRuntime,
   type RedisRuntimeObserver,
 } from '#/redis/runtime';
+import { createArenaRoomTransition } from './arena-room-fixtures';
 
 beforeEach(() => {
   vi.restoreAllMocks();
@@ -37,6 +40,114 @@ beforeEach(() => {
 });
 
 describe('RedisRuntime shutdown', () => {
+  it('Room Redis 命令记录固定 room latency/outcome，并向 checkpoint observer 透传', async () => {
+    const observeRedisOperation = vi.fn<RedisRuntimeObserver['observeRedisOperation']>();
+    const observeArenaRoomRuntime = vi.fn();
+    const redis = new RedisRuntime('redis://example.test:6379', true, {
+      observeRedisOperation,
+      observeRedisServerStats: vi.fn(),
+      observeArenaRoomRuntime,
+    });
+    const store = redis.getRoomStore();
+
+    await expect(store.load('room-1'))
+      .rejects.toThrow('REDIS_ROOM_CHECKPOINT_UNAVAILABLE');
+    await redis.connect();
+    await expect(store.load('room-1')).resolves.toBeNull();
+
+    expect(observeRedisOperation).toHaveBeenCalledWith({
+      operation: 'room',
+      outcome: 'unavailable',
+      durationMs: 0,
+    });
+    expect(observeRedisOperation).toHaveBeenCalledWith({
+      operation: 'room',
+      outcome: 'ok',
+      durationMs: expect.any(Number),
+    });
+    expect(observeArenaRoomRuntime).toHaveBeenCalledWith(expect.objectContaining({
+      event: 'checkpoint',
+      operation: 'load',
+      outcome: 'missing',
+    }));
+  });
+
+  it('Room Redis observer 抛错不改变 timeout fail-closed 结果', async () => {
+    vi.useFakeTimers();
+    redisClient.get.mockImplementation(() => new Promise(() => undefined));
+    const observeRedisOperation = vi.fn<RedisRuntimeObserver['observeRedisOperation']>(
+      (observation) => {
+        if (observation.operation === 'room') throw new Error('observer-secret-canary');
+      },
+    );
+    const redis = new RedisRuntime('redis://example.test:6379', true, {
+      observeRedisOperation,
+      observeRedisServerStats: vi.fn(),
+      observeArenaRoomRuntime: () => {
+        throw new Error('checkpoint-observer-secret-canary');
+      },
+    }, 100);
+    try {
+      await redis.connect();
+      const load = redis.getRoomStore().load('room-1');
+      const rejected = expect(load).rejects.toThrow('REDIS_ROOM_COMMAND_TIMEOUT');
+      await vi.advanceTimersByTimeAsync(100);
+
+      await rejected;
+      expect(redis.getStatus().lastError).toBe('REDIS_ROOM_COMMAND_TIMEOUT');
+      expect(observeRedisOperation).toHaveBeenCalledWith({
+        operation: 'room',
+        outcome: 'error',
+        durationMs: expect.any(Number),
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('只向 Room runtime 暴露窄 checkpoint port，并在 Redis 未 ready 时 fail closed', async () => {
+    const redis = new RedisRuntime('redis://example.test:6379', true);
+    const store = redis.getRoomStore();
+
+    await expect(store.load('room-1')).rejects.toThrow('REDIS_ROOM_CHECKPOINT_UNAVAILABLE');
+    await expect(store.save({
+      commit: createArenaRoomCheckpointCommit(createArenaRoomTransition()),
+    }))
+      .rejects.toThrow('REDIS_ROOM_CHECKPOINT_UNAVAILABLE');
+
+    await redis.connect();
+    await expect(store.load('room-1')).resolves.toBeNull();
+  });
+
+  it('Room ticket replay port 与 checkpoint 共用有界 Redis command/fail-closed 语义', async () => {
+    const redis = new RedisRuntime('redis://example.test:6379', true);
+    const replay = redis.getRoomTicketReplayStore();
+    const input = { jti: 'jti-1', nowMs: 1_000, expiresAtMs: 31_000 };
+
+    await expect(replay.consume(input)).rejects.toThrow('REDIS_ROOM_CHECKPOINT_UNAVAILABLE');
+    await redis.connect();
+    redisClient.eval.mockResolvedValueOnce('consumed');
+    await expect(replay.consume(input)).resolves.toEqual({ kind: 'consumed' });
+  });
+
+  it('Room checkpoint 命令永久 pending 时有界 fail closed 且不反射 Redis secret', async () => {
+    vi.useFakeTimers();
+    redisClient.get.mockImplementation(() => new Promise(() => undefined));
+    const redis = new RedisRuntime('redis://user:secret@example.test:6379', true, undefined, 100);
+    try {
+      await redis.connect();
+      const checkpoint = redis.getRoomStore().load('room-1');
+      const rejectedCheckpoint = expect(checkpoint).rejects.toThrow('REDIS_ROOM_COMMAND_TIMEOUT');
+      await vi.advanceTimersByTimeAsync(100);
+
+      await rejectedCheckpoint;
+      expect(redis.getStatus().lastError).toBe('REDIS_ROOM_COMMAND_TIMEOUT');
+      expect(JSON.stringify(redis.getStatus())).not.toMatch(/user:secret|example\.test/u);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('只向 route runtime 暴露窄 generation replay port，并在 Redis 未 ready 时 fail closed', async () => {
     const redis = new RedisRuntime('redis://example.test:6379', true);
     const store = redis.getGenerationReplayStore();
@@ -141,6 +252,78 @@ describe('RedisRuntime shutdown', () => {
     expect(JSON.stringify(observeRedisOperation.mock.calls)).not.toContain(
       'sensitive-user-id',
     );
+  });
+
+  it('G25E2-REDIS-PREFIX：RedisRuntime 本身为所有限流 namespace 加环境前缀', async () => {
+    const redis = new RedisRuntime(
+      'redis://example.test:6379',
+      true,
+      undefined,
+      undefined,
+      'preview',
+    );
+    await redis.connect();
+
+    await redis.consumeFixedWindow({
+      namespace: 'api',
+      identity: 'preview-user',
+      limit: 10,
+      windowSeconds: 60,
+    });
+
+    const [, options] = redisClient.eval.mock.calls.at(-1)! as unknown as [
+      string,
+      { keys: string[] },
+    ];
+    expect(options.keys[0]).toMatch(/^mahoshojo:rate-limit:preview:api:/u);
+  });
+
+  it('G25E2-REDIS-EMPTY：拒绝 malformed nested snapshot/terminal，避免把 Redis 垃圾投影成状态', async () => {
+    const redis = new RedisRuntime('redis://example.test:6379', true);
+    await redis.connect();
+    const store = redis.getGenerationReplayStore();
+    const baseState = {
+      actorHash: 'actor-hash',
+      reservationKey: 'reservation-key',
+      generationId: 'generation-nested-001',
+      generationRequestId: 'request-nested-001',
+      payloadHash: 'payload-hash',
+      producerToken: 'producer-token',
+      status: 'running',
+      updatedAt: '2026-08-25T04:00:00.000Z',
+      leaseExpiresAt: '2026-08-25T04:01:00.000Z',
+      cancelRequested: false,
+      snapshot: {
+        status: 'running',
+        markdown: 'partial',
+        reasoning: '',
+        lastEventId: null,
+        updatedAt: '2026-08-25T04:00:00.000Z',
+      },
+      terminal: null,
+    };
+
+    redisClient.get.mockResolvedValueOnce(JSON.stringify(baseState));
+    await expect(store.readState({ generationId: baseState.generationId })).resolves.toMatchObject({
+      snapshot: { status: 'running', markdown: 'partial' },
+      terminal: null,
+    });
+
+    redisClient.get.mockResolvedValueOnce(JSON.stringify({
+      ...baseState,
+      snapshot: { ...baseState.snapshot, status: 'not-a-generation-status' },
+    }));
+    await expect(store.readState({ generationId: baseState.generationId }))
+      .rejects.toThrow('REDIS_GENERATION_STATE_INVALID');
+
+    redisClient.get.mockResolvedValueOnce(JSON.stringify({
+      ...baseState,
+      snapshot: null,
+      status: 'completed',
+      terminal: { status: 'not-a-terminal-status', resultRef: null },
+    }));
+    await expect(store.readState({ generationId: baseState.generationId }))
+      .rejects.toThrow('REDIS_GENERATION_STATE_INVALID');
   });
 
   it('INFO 采样失败只产生固定错误指标，不抛出到 Redis 业务路径', async () => {

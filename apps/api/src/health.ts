@@ -3,6 +3,7 @@ import { probeD1Readiness } from '#/d1/runtime';
 import type { HonoServerConfig } from '#/config';
 import type { HonoAppVariables } from '#/middleware/request-metadata';
 import type { RedisService } from '#/redis/runtime';
+import { HOSTED_DR_CONTRACT_VERSION } from '@mahoshojo/hosted-api/hosted-dr';
 
 const isD1Configured = (): boolean => {
   if (process.env.D1_GATEWAY_URL?.trim()) return true;
@@ -39,9 +40,12 @@ export const registerHealthRoutes = (
     const redisSatisfied = config.redisRequired ? redisReady : true;
     const d1Satisfied = config.d1Required ? d1Ready : true;
     const ready = redisSatisfied && d1Satisfied;
+    context.header('Cache-Control', 'no-store');
     return context.json({
       ok: ready,
       service: 'mahoshojo-hono',
+      placement: 'hono-primary',
+      contractVersion: HOSTED_DR_CONTRACT_VERSION,
       dependencies: {
         redis: {
           configured: redisConfigured,

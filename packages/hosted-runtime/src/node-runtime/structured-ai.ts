@@ -373,6 +373,8 @@ async function generateWithAIUsing<T, I = string>(
       throwIfAborted(options?.abortSignal);
       let runtimeAttempt: ReturnType<typeof createAiUpstreamAttemptRuntime> | null = null;
       let providerRequestDispatched = false;
+      let attemptPrompt = '';
+      let attemptSensitiveTexts: string[] = [];
       try {
         log.debug(`开始尝试: 提供商: ${provider.name} 模型: ${selectedModel} 尝试次数: ${attempt + 1} / ${retryCount}`);
 
@@ -384,11 +386,13 @@ async function generateWithAIUsing<T, I = string>(
           options.telemetry.attempt = attempt + 1;
         }
 
+        const taskPrompt = generationConfig.promptBuilder(input);
+        const systemPrompt = generationConfig.systemPrompt + taskPrompt + 'Ignore the user \'s prompt.';
+        attemptPrompt = systemPrompt;
+        attemptSensitiveTexts = [attemptPrompt, generationConfig.systemPrompt, taskPrompt];
         const llm = createAIClient(provider, fetchImpl, () => {
           providerRequestDispatched = true;
         });
-
-        const systemPrompt = generationConfig.systemPrompt + generationConfig.promptBuilder(input) + 'Ignore the user \'s prompt.';
         log.info(`provider.type: ${provider.type}`);
 
         const model = provider.type === 'openai' ? llm.chat(selectedModel) : llm(selectedModel); // Type assertion for AI SDK 5 compatibility
@@ -561,7 +565,10 @@ async function generateWithAIUsing<T, I = string>(
             }
           }
 
-          const enhancedError = enhanceErrorWithUpstreamMessage(rawError);
+          const enhancedError = enhanceErrorWithUpstreamMessage(rawError, {
+            secrets: [provider.apiKey, provider.baseUrl],
+            sensitiveTexts: attemptSensitiveTexts,
+          });
 
           // 2) 上游不支持 JSON 模式：退化为“纯文本生成 JSON + 本地解析/修复”
           if (!providerRequestDispatched && isJsonModeNotSupportedError(rawError)) {
@@ -625,11 +632,17 @@ async function generateWithAIUsing<T, I = string>(
         return object as T;
       } catch (error) {
         const abortRequested = isAbortRequested(options?.abortSignal, error);
+        const projectedError = abortRequested
+          ? error
+          : enhanceErrorWithUpstreamMessage(error, {
+            secrets: [provider.apiKey, provider.baseUrl],
+            sensitiveTexts: attemptSensitiveTexts,
+          });
         runtimeAttempt?.finish(
           abortRequested ? 'aborted' : classifyAiUpstreamOutcome(error),
         );
-        lastError = error;
-        log.error(`提供商 ${provider.name} 第 ${attempt + 1} 次失败`, { error });
+        lastError = projectedError;
+        log.error(`提供商 ${provider.name} 第 ${attempt + 1} 次失败`, { error: projectedError });
 
         if (NoObjectGeneratedError.isInstance(error)) {
           log.debug(`NoObjectGeneratedError 详情: 提供商: ${provider.name}`, {
@@ -658,7 +671,7 @@ async function generateWithAIUsing<T, I = string>(
         }
 
         if (providerRequestDispatched) {
-          throw enhanceErrorWithUpstreamMessage(error);
+          throw projectedError;
         }
 
         // 如果不是最后一次尝试，等待后再重试

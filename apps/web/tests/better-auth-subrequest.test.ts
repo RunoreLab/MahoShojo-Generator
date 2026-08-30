@@ -76,4 +76,21 @@ describe('Better Auth subrequest target', () => {
     })).rejects.toThrow('BETTER_AUTH_URL');
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  test('production target 不受 NODE_ENV=development 绕过而访问 loopback Better Auth', async () => {
+    vi.stubEnv('NODE_ENV', 'development');
+    vi.stubEnv('NEXT_PUBLIC_HOSTED_API_ENVIRONMENT', 'production');
+    vi.stubEnv('BETTER_AUTH_URL', 'http://127.0.0.1:3000');
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(invokeBetterAuthSubrequest({
+      req: new Request('https://app.example.com/api/me/account/password', {
+        headers: { cookie: 'better-auth.session_token=loopback-canary' },
+      }),
+      path: '/api/auth/change-password',
+      body: {},
+    })).rejects.toThrow('BETTER_AUTH_URL');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });

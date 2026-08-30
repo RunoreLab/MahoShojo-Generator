@@ -10,8 +10,8 @@ const applyPostBattleUpdates = vi.fn();
 vi.mock('@/app/api/arena/generation-runtime', () => ({
   getCloudflareDrArenaGenerationService: () => ({ status }),
 }));
-vi.mock('@mahoshojo/hosted-runtime/node-runtime/d1-client', () => ({
-  getDefaultNodeD1Client: getD1Client,
+vi.mock('@/lib/hosted-dr/database-provider', () => ({
+  getNextHostedD1Client: getD1Client,
 }));
 vi.mock('@mahoshojo/hosted-runtime/arena-generation', () => ({
   readNodeArenaGenerationReconciliation: readReconciliation,
@@ -136,5 +136,19 @@ describe('Arena stream reconciliation handler', () => {
 
     expect(response.status).toBe(409);
     expect(readReconciliation).not.toHaveBeenCalled();
+  });
+
+  it('production 无 native binding 时即使 Gateway 已配置也在 ownership 查询前 fail closed', async () => {
+    vi.stubEnv('NEXT_PUBLIC_HOSTED_API_ENVIRONMENT', 'production');
+    vi.stubEnv('D1_GATEWAY_URL', 'https://gateway-secret-canary.example.test');
+    getD1Client.mockReturnValue(null);
+
+    const response = await appRouteHandler(request({ generationId, combatants }) as never);
+
+    expect(response.status).toBe(503);
+    await expect(response.text()).resolves.not.toContain('gateway-secret-canary');
+    expect(status).not.toHaveBeenCalled();
+    expect(readReconciliation).not.toHaveBeenCalled();
+    expect(applyPostBattleUpdates).not.toHaveBeenCalled();
   });
 });

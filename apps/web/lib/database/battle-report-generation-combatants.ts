@@ -27,6 +27,9 @@ type CombatantsRepoBundle = {
   ) => Promise<BattleReportGenerationCombatantRow[]>;
 };
 
+const COMBATANTS_WRITE_ERROR = 'combatants-write-failed';
+const COMBATANTS_READ_ERROR = 'combatants-read-failed';
+
 const readCombatantsRepoBundle = async (): Promise<CombatantsRepoBundle | null> => {
   try {
     const [{ getDrizzleDbFromRuntime }, repo] = await Promise.all([
@@ -59,10 +62,11 @@ export async function createBattleReportGenerationCombatants(
       new Date().toISOString(),
     );
     return { ok };
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'unknown error';
-    console.error('写入 battle_report_generation_combatants 失败:', { errorMessage, error });
-    return { ok: false, errorMessage };
+  } catch {
+    console.error('写入 battle_report_generation_combatants 失败:', {
+      errorClass: COMBATANTS_WRITE_ERROR,
+    });
+    return { ok: false, errorMessage: COMBATANTS_WRITE_ERROR };
   }
 }
 
@@ -90,8 +94,10 @@ export async function getBattleReportGenerationCombatantsByGenerationId(
     const bundle = await readCombatantsRepoBundle();
     if (!bundle) return [];
     return await bundle.listBattleReportGenerationCombatantsByGenerationId(bundle.db, generationId);
-  } catch (error) {
-    console.error('读取 battle_report_generation_combatants 失败:', error);
+  } catch {
+    console.error('读取 battle_report_generation_combatants 失败:', {
+      errorClass: COMBATANTS_READ_ERROR,
+    });
     return [];
   }
 }

@@ -24,8 +24,24 @@ vi.mock('@tanstack/react-query', () => ({
 }));
 
 vi.mock('@/components/arena/ArenaPage', () => ({
-  ArenaPage: function ArenaPageMock() {
-    return <main data-page="arena">完整竞技场</main>;
+  ArenaPage: function ArenaPageMock({ multiplayer }: {
+    multiplayer?: { enabled: boolean };
+  }) {
+    return (
+      <main
+        data-page="arena"
+        data-multiplayer={multiplayer?.enabled ? 'enabled' : 'disabled'}
+      >
+        完整竞技场
+      </main>
+    );
+  },
+}));
+
+vi.mock('@/config/arena-multiplayer', () => ({
+  arenaMultiplayerConfig: {
+    enabled: true,
+    origin: 'http://127.0.0.1:8787',
   },
 }));
 
@@ -100,8 +116,8 @@ describe('competition domain App Router pages', () => {
     const { default: ArenaStreamRoute, metadata: arenaStreamMetadata } = await import('@/app/arena-stream/page');
 
     expect(renderToStaticMarkup(<BattleRoute />)).toContain('data-page="battle"');
-    expect(renderToStaticMarkup(<ArenaRoute />)).toContain('data-page="arena"');
-    expect(renderToStaticMarkup(<ArenaStreamRoute />)).toContain('data-page="arena"');
+    expect(renderToStaticMarkup(<ArenaRoute />)).toContain('data-multiplayer="enabled"');
+    expect(renderToStaticMarkup(<ArenaStreamRoute />)).toContain('data-multiplayer="disabled"');
     expect(battleMetadata).toMatchObject({
       title: '魔法少女竞技场（简洁版） - MahoShojo Generator',
     });

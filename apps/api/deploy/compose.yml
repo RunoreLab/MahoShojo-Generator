@@ -1,6 +1,6 @@
 services:
   hono:
-    image: node:22-alpine
+    image: node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32
     container_name: ${HONO_CONTAINER_NAME:-mahoshojo-hono}
     init: true
     restart: unless-stopped
@@ -10,10 +10,12 @@ services:
       - ${HONO_DEPLOY_ROOT_DIR:-/opt/mahoshojo-hono}/.env.hono
     environment:
       NODE_ENV: production
+      HOSTED_API_ENVIRONMENT: ${HONO_HOSTED_API_ENVIRONMENT:?HONO_HOSTED_API_ENVIRONMENT must be explicit}
       HONO_HOST: 0.0.0.0
       HONO_PORT: 8787
       HONO_AUTH_MODE: bearer
       HONO_CORS_ORIGINS: "https://*.colanns.me"
+      ARENA_ROOM_ALLOWED_ORIGINS: "https://mahoshojo.colanns.me"
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_REQUIRED: "true"
@@ -45,4 +47,4 @@ services:
 networks:
   mahoshojo-redis:
     external: true
-    name: mahoshojo-redis
+    name: ${HONO_REDIS_NETWORK_NAME:-mahoshojo-redis}

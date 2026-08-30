@@ -1,0 +1,20 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "mahoshojo-admin-prework",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-29",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  // G3-P0 ships deny-all placeholders only. Production hostname, Access policy,
+  // stable principal mappings and environment overrides are deferred to G3-6.
+  "vars": {
+    "ADMIN_ACCESS_ISSUER": "https://unconfigured.cloudflareaccess.invalid",
+    "ADMIN_ACCESS_AUDIENCE": "UNCONFIGURED_DENY_ALL",
+    "ADMIN_ACCESS_JWKS_URL": "https://unconfigured.cloudflareaccess.invalid/cdn-cgi/access/certs",
+    "ADMIN_PRINCIPALS_JSON": "[]"
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 0.1
+  }
+}

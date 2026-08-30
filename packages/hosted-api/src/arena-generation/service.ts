@@ -3,6 +3,7 @@ import {
   encodeGenerationSseEvent,
   resolveResumeCursor,
 } from './sse';
+import type { SafePublicAiErrorProjection } from '../regular-generation';
 
 export const MAX_ARENA_CREATE_BODY_BYTES = 12 * 1_024 * 1_024;
 export const MAX_ARENA_CANCEL_BODY_BYTES = 1_024;
@@ -75,6 +76,7 @@ export type GenerationTerminal = {
   status: Extract<GenerationStatus, 'completed' | 'failed' | 'cancelled' | 'producer_lost'>;
   code?: string;
   resultRef?: string | null;
+  publicError?: SafePublicAiErrorProjection;
 };
 
 export type GenerationCancelReason = 'user' | 'content_policy';
@@ -192,6 +194,11 @@ export interface GenerationReplayStore {
     now: string;
   }): Promise<{ owned: boolean }>;
   readSnapshot(_input: { generationId: string }): Promise<GenerationSnapshot | null>;
+  /** Reads one exact retained event without applying the bounded subscriber batch limit. */
+  readEvent(_input: {
+    generationId: string;
+    eventId: string;
+  }): Promise<GenerationStreamEvent | null>;
   readAfter(_input: {
     generationId: string;
     after: string | null;
@@ -205,11 +212,25 @@ export interface GenerationReplayStore {
     generationId: string;
     producerToken: string;
     terminal: GenerationTerminal;
+    /** Written in the same store transaction as the terminal marker. */
+    terminalEvent: GenerationEventInput;
     now: string;
-  }): Promise<{
+  } & (
+    | {
+      /** Terminal snapshot committed atomically with marker/event. */
+      terminalSnapshot: GenerationSnapshot;
+      clearTerminalSnapshot?: false;
+    }
+    | {
+      terminalSnapshot?: never;
+      /** Atomically removes an older running snapshot when no bounded terminal snapshot fits. */
+      clearTerminalSnapshot: true;
+    }
+  )): Promise<{
     owned: boolean;
     applied: boolean;
     status?: GenerationTerminal['status'];
+    event?: GenerationStreamEvent;
   }>;
   readState(_input: {
     generationId: string;
@@ -331,6 +352,7 @@ export type ArenaGenerationTerminalRecord = {
   resultRef: string | null;
   markdown: string;
   reasoning: string;
+  errorCode?: string | null;
   payloadHash?: string | null;
   contentAvailable?: boolean;
 };
@@ -492,6 +514,41 @@ export type ArenaGenerationSubscription = Readonly<{
   events: ReadableStream<GenerationStreamEvent>;
 }>;
 
+export type ArenaGenerationOwnedProjection = Readonly<{
+  generationId: string;
+  generationRequestId: string;
+  status: GenerationStatus;
+  markdown: string;
+  resumeCursor: string | null;
+  updatedAt: string;
+  finalAuthoritative: boolean;
+  resultAvailable: boolean;
+  generationRecordId: string | null;
+  errorCode: string | null;
+}>;
+
+export type ArenaGenerationOwnedProjectionResult =
+  | Readonly<{ kind: 'found'; projection: ArenaGenerationOwnedProjection }>
+  | Readonly<{ kind: 'not-found' }>
+  | Readonly<{ kind: 'unavailable'; code: string }>;
+
+export type ArenaGenerationOwnedSubscriptionResult =
+  | Readonly<{ kind: 'subscribed'; subscription: ArenaGenerationSubscription }>
+  | Readonly<{ kind: 'not-found' }>
+  | Readonly<{ kind: 'unavailable'; code: string }>;
+
+export interface ArenaGenerationTrustedOwnedService {
+  readOwnedProjection(_input: {
+    actorKey: string;
+    generationId: string;
+  }): Promise<ArenaGenerationOwnedProjectionResult>;
+  resumeOwnedSubscription(_input: {
+    actorKey: string;
+    generationId: string;
+    after: string | null;
+  }): Promise<ArenaGenerationOwnedSubscriptionResult>;
+}
+
 export interface ArenaGenerationService {
   createSubscription(
     _request: Request,
@@ -506,6 +563,9 @@ export interface ArenaGenerationService {
   status(_request: Request, _params: ArenaGenerationRouteParams): Promise<Response>;
   cancel(_request: Request, _params: ArenaGenerationRouteParams): Promise<Response>;
 }
+
+export type ArenaGenerationApplicationService = ArenaGenerationService
+  & ArenaGenerationTrustedOwnedService;
 
 type ActiveProducer = {
   controller: AbortController;
@@ -784,7 +844,7 @@ const addLeaseDuration = (now: Date, durationMs: number): string => new Date(
 
 export const createArenaGenerationService = (
   dependencies: ArenaGenerationServiceDependencies,
-): ArenaGenerationService => {
+): ArenaGenerationApplicationService => {
   const heartbeatIntervalMs = dependencies.heartbeatIntervalMs ?? 15_000;
   const leaseDurationMs = dependencies.leaseDurationMs ?? 45_000;
   const replayPollMs = dependencies.replayPollMs ?? 1_000;
@@ -970,7 +1030,8 @@ export const createArenaGenerationService = (
         return enqueue(async () => {
           await flushPending();
           const now = dependencies.now().toISOString();
-          await append([{
+          const publicError = terminal.status === 'failed' ? terminal.publicError : undefined;
+          const terminalEvent: GenerationEventInput = {
             type: terminal.status === 'failed' || terminal.status === 'producer_lost'
               ? 'error'
               : 'done',
@@ -978,15 +1039,55 @@ export const createArenaGenerationService = (
               ok: terminal.status === 'completed',
               status: terminal.status,
               ...(terminal.code ? { code: terminal.code } : {}),
+              ...(terminal.resultRef ? { resultRef: terminal.resultRef } : {}),
+              ...(publicError ? {
+                error: publicError.message,
+                message: publicError.message,
+                ...(publicError.upstreamStatus === undefined
+                  ? {}
+                  : { upstreamStatus: publicError.upstreamStatus }),
+                ...(publicError.upstreamRequestId === undefined
+                  ? {}
+                  : { upstreamRequestId: publicError.upstreamRequestId }),
+              } : {}),
             },
-          }], now);
-          await dependencies.store.markTerminal({
-            generationId,
-            producerToken,
-            terminal,
-            now,
-          }).catch(() => ({ owned: true, applied: false }));
-          await writeSnapshot(terminal.status, now, terminal.resultRef ?? null);
+          };
+          const fullTerminalSnapshot = snapshot(terminal.status, now, terminal.resultRef ?? null);
+          const snapshotWithinBudget = encodedBytes(fullTerminalSnapshot) <= snapshotMaxBytes;
+          let terminalSnapshot = snapshotWithinBudget ? fullTerminalSnapshot : null;
+          if (!terminalSnapshot && terminal.status !== 'completed') {
+            const boundedTerminalSnapshot: GenerationSnapshot = {
+              ...fullTerminalSnapshot,
+              markdown: '',
+              reasoning: '',
+              telemetry: null,
+            };
+            if (encodedBytes(boundedTerminalSnapshot) <= snapshotMaxBytes) {
+              terminalSnapshot = boundedTerminalSnapshot;
+            }
+          }
+          if (!snapshotWithinBudget) {
+            observe({ event: 'redis_degraded', generationId, operation: 'snapshot_budget' });
+          }
+          let result: Awaited<ReturnType<GenerationReplayStore['markTerminal']>>;
+          try {
+            result = await dependencies.store.markTerminal({
+              generationId,
+              producerToken,
+              terminal,
+              terminalEvent,
+              ...(terminalSnapshot ? { terminalSnapshot } : { clearTerminalSnapshot: true }),
+              now,
+            });
+          } catch (error) {
+            observe({ event: 'redis_degraded', generationId, operation: 'mark_terminal' });
+            throw error;
+          }
+          if (!result.owned) {
+            onOwnershipLost();
+            throw new Error('GENERATION_PRODUCER_FENCED');
+          }
+          lastEventId = result.event?.id ?? lastEventId;
           observe({
             event: 'terminal',
             generationId,
@@ -1006,6 +1107,200 @@ export const createArenaGenerationService = (
       generationId,
       actorKey,
     }) ?? null;
+  };
+
+  const terminalEvidenceFromRecord = (
+    record: ArenaGenerationTerminalRecord,
+  ): {
+    terminal: GenerationTerminal;
+    terminalEvent: GenerationEventInput;
+  } => {
+    const terminal: GenerationTerminal = {
+      status: record.status,
+      ...(record.errorCode ? { code: record.errorCode } : {}),
+      ...(record.resultRef ? { resultRef: record.resultRef } : {}),
+    };
+    const terminalCode = terminal.status === 'producer_lost'
+      ? terminal.code ?? 'PRODUCER_OWNERSHIP_LOST'
+      : terminal.status === 'failed'
+        ? terminal.code ?? 'GENERATION_FAILED'
+        : terminal.code ?? null;
+    return {
+      terminal,
+      terminalEvent: {
+        type: terminal.status === 'failed' || terminal.status === 'producer_lost'
+          ? 'error'
+          : 'done',
+        data: {
+          ok: terminal.status === 'completed',
+          status: terminal.status,
+          ...(terminalCode ? { code: terminalCode } : {}),
+          ...(terminal.resultRef ? { resultRef: terminal.resultRef } : {}),
+        },
+      },
+    };
+  };
+
+  const terminalRecordMatchesIdentity = (input: {
+    record: ArenaGenerationTerminalRecord;
+    generationId: string;
+    generationRequestId: string;
+    acceptedPayloadHashes: readonly string[];
+  }): boolean => Boolean(
+    input.record.generationId === input.generationId
+    && input.record.generationRequestId === input.generationRequestId
+    && typeof input.record.payloadHash === 'string'
+    && input.acceptedPayloadHashes.includes(input.record.payloadHash)
+  );
+
+  const terminalStateEvidenceMatches = (input: {
+    state: GenerationReplayStoreState;
+    event: GenerationStreamEvent | null;
+    requireSnapshot?: boolean;
+  }): boolean => {
+    const { state, event } = input;
+    const terminal = state.terminal;
+    if (
+      !terminal
+      || !event
+      || !state.lastEventId
+      || event.id !== state.lastEventId
+      || state.status !== terminal.status
+      || state.leaseExpiresAt !== null
+      || !event.data
+      || typeof event.data !== 'object'
+    ) return false;
+    const eventData = event.data as {
+      code?: unknown;
+      ok?: unknown;
+      resultRef?: unknown;
+      status?: unknown;
+    };
+    const expectedType = terminal.status === 'failed' || terminal.status === 'producer_lost'
+      ? 'error'
+      : 'done';
+    const expectedCode = terminal.status === 'producer_lost'
+      ? terminal.code ?? 'PRODUCER_OWNERSHIP_LOST'
+      : terminal.status === 'failed'
+        ? terminal.code ?? 'GENERATION_FAILED'
+        : terminal.code ?? null;
+    if (
+      event.type !== expectedType
+      || eventData.status !== terminal.status
+      || eventData.ok !== (terminal.status === 'completed')
+      || (eventData.code ?? null) !== expectedCode
+      || (eventData.resultRef ?? null) !== (terminal.resultRef ?? null)
+    ) return false;
+    if (input.requireSnapshot && state.snapshot === null) return false;
+    return state.snapshot === null || (
+      state.snapshot.status === terminal.status
+      && state.snapshot.lastEventId === event.id
+      && (state.snapshot.terminalResultRef ?? null) === (terminal.resultRef ?? null)
+    );
+  };
+
+  const hasExactTerminalStateEvidence = async (
+    state: GenerationReplayStoreState,
+    requireSnapshot = false,
+  ): Promise<boolean> => {
+    if (!state.terminal || !state.lastEventId) return false;
+    const event = await dependencies.store.readEvent({
+      generationId: state.generationId,
+      eventId: state.lastEventId,
+    }).catch(() => null);
+    return terminalStateEvidenceMatches({ state, event, requireSnapshot });
+  };
+
+  const readBackTerminalEvidence = async (input: {
+    generationId: string;
+    actorKey: string;
+    record: ArenaGenerationTerminalRecord;
+    requireSnapshot: boolean;
+    acceptedPayloadHashes?: readonly string[];
+  }): Promise<GenerationReplayStoreState | null> => {
+    const { terminal } = terminalEvidenceFromRecord(input.record);
+    const durableState = await dependencies.store.readState({
+      generationId: input.generationId,
+      actorKey: input.actorKey,
+    }).catch(() => null);
+    const durableTerminalEvent = durableState?.lastEventId
+      ? await dependencies.store.readEvent({
+          generationId: input.generationId,
+          eventId: durableState.lastEventId,
+        }).catch(() => null)
+      : null;
+    const terminalEventMatches = durableState && terminalStateEvidenceMatches({
+      state: durableState,
+      event: durableTerminalEvent,
+      requireSnapshot: input.requireSnapshot,
+    });
+    if (!durableState || !durableTerminalEvent || !terminalEventMatches) return null;
+    const acceptedPayloadHashes = input.acceptedPayloadHashes ?? [durableState.payloadHash];
+    if (
+      durableState.generationId !== input.generationId
+      || !acceptedPayloadHashes.includes(durableState.payloadHash)
+      || !terminalRecordMatchesIdentity({
+        record: input.record,
+        generationId: input.generationId,
+        generationRequestId: durableState.generationRequestId,
+        acceptedPayloadHashes,
+      })
+      || durableState.status !== terminal.status
+      || durableState.terminal?.status !== terminal.status
+      || (durableState.terminal.resultRef ?? null) !== (terminal.resultRef ?? null)
+      || (durableState.terminal.code ?? null) !== (terminal.code ?? null)
+    ) return null;
+    return durableState;
+  };
+
+  const commitOwnedTerminalEvidence = async (input: {
+    generationId: string;
+    actorKey: string;
+    producerToken: string;
+    record: ArenaGenerationTerminalRecord;
+    priorState: GenerationReplayStoreState;
+    now: string;
+    acceptedPayloadHashes?: readonly string[];
+  }): Promise<GenerationReplayStoreState | null> => {
+    const { terminal, terminalEvent } = terminalEvidenceFromRecord(input.record);
+    const terminalSnapshot: GenerationSnapshot = {
+      status: terminal.status,
+      markdown: input.record.markdown,
+      reasoning: input.record.reasoning,
+      lastEventId: input.priorState.lastEventId,
+      updatedAt: input.now,
+      telemetry: input.priorState.snapshot?.telemetry ?? null,
+      terminalResultRef: terminal.resultRef ?? null,
+    };
+    const terminalContentAvailable = terminal.status !== 'completed'
+      || input.record.contentAvailable === true;
+    const snapshotWithinBudget = encodedBytes(terminalSnapshot) <= snapshotMaxBytes;
+    const persistTerminalSnapshot = terminalContentAvailable && snapshotWithinBudget;
+    if (terminalContentAvailable && !snapshotWithinBudget) {
+      observe({
+        event: 'redis_degraded',
+        generationId: input.generationId,
+        operation: 'snapshot_budget',
+      });
+    }
+    const committed = await dependencies.store.markTerminal({
+      generationId: input.generationId,
+      producerToken: input.producerToken,
+      terminal,
+      terminalEvent,
+      ...(persistTerminalSnapshot ? { terminalSnapshot } : { clearTerminalSnapshot: true }),
+      now: input.now,
+    }).catch(() => null);
+    if (!committed?.owned) return null;
+    return readBackTerminalEvidence({
+      generationId: input.generationId,
+      actorKey: input.actorKey,
+      record: input.record,
+      requireSnapshot: persistTerminalSnapshot,
+      ...(input.acceptedPayloadHashes
+        ? { acceptedPayloadHashes: input.acceptedPayloadHashes }
+        : {}),
+    });
   };
 
   const inspectOwnedFinalization = async (
@@ -1042,24 +1337,6 @@ export const createArenaGenerationService = (
     if (!leaseExpired) return { actor, state, terminalFallback: null };
 
     let terminalFallback = await readOwnedTerminal(generationId, actor.actorKey);
-    if (terminalFallback) {
-      const terminal: GenerationTerminal = {
-        status: terminalFallback.status,
-        ...(terminalFallback.resultRef ? { resultRef: terminalFallback.resultRef } : {}),
-      };
-      await dependencies.store.markTerminal({
-        generationId,
-        producerToken: state.producerToken,
-        terminal,
-        now: dependencies.now().toISOString(),
-      }).catch(() => ({ owned: true, applied: false }));
-      return {
-        actor,
-        terminalFallback,
-        state: { ...state, status: terminal.status, leaseExpiresAt: null, terminal },
-      };
-    }
-
     const now = dependencies.now().toISOString();
     const reaperToken = dependencies.createProducerToken?.() ?? crypto.randomUUID();
     const claimed = await dependencies.store.claimLeaseExpiry({
@@ -1079,61 +1356,108 @@ export const createArenaGenerationService = (
       return jsonResponse({ code: 'GENERATION_NOT_FOUND', error: 'Generation not found' }, 404);
     }
     if (claimed.kind === 'terminal') {
+      const concurrentTerminal = terminalFallback
+        ?? await readOwnedTerminal(generationId, actor.actorKey).catch(() => null);
+      const durableState = concurrentTerminal?.status === claimed.status
+        && terminalRecordMatchesIdentity({
+          record: concurrentTerminal,
+          generationId,
+          generationRequestId: state.generationRequestId,
+          acceptedPayloadHashes: [state.payloadHash],
+        })
+        ? await readBackTerminalEvidence({
+            generationId,
+            actorKey: actor.actorKey,
+            record: concurrentTerminal,
+            requireSnapshot: false,
+            acceptedPayloadHashes: [state.payloadHash],
+          })
+        : null;
+      if (!concurrentTerminal || !durableState) {
+        return jsonResponse({
+          code: 'GENERATION_TERMINAL_RECONCILIATION_PENDING',
+          error: 'Generation terminal reconciliation pending',
+        }, 503);
+      }
       return {
         actor,
-        terminalFallback: null,
-        state: {
-          ...state,
-          status: claimed.status,
-          leaseExpiresAt: null,
-          terminal: { status: claimed.status },
-        },
+        terminalFallback: concurrentTerminal,
+        state: durableState,
       };
     }
-    if (!dependencies.terminalStore?.reconcileExpiredLease) {
-      return jsonResponse({
-        code: 'GENERATION_TERMINAL_RECONCILIATION_PENDING',
-        error: 'Generation terminal reconciliation unavailable',
-      }, 503);
-    }
-    terminalFallback = await dependencies.terminalStore.reconcileExpiredLease({
-      generationId,
-      generationRequestId: claimed.generationRequestId,
-      actorKey: actor.actorKey,
-      payloadHash: claimed.payloadHash,
-      mode: claimed.mode,
-      updatedAt: now,
-      code: 'PRODUCER_LEASE_EXPIRED',
-    }).catch(() => null);
-    if (!terminalFallback) {
+    if (
+      claimed.generationRequestId !== state.generationRequestId
+      || claimed.payloadHash !== state.payloadHash
+    ) {
       return jsonResponse({
         code: 'GENERATION_TERMINAL_RECONCILIATION_PENDING',
         error: 'Generation terminal reconciliation pending',
       }, 503);
     }
-    const terminal: GenerationTerminal = {
-      status: terminalFallback.status,
-      ...(terminalFallback.resultRef ? { resultRef: terminalFallback.resultRef } : {}),
-    };
-    await dependencies.store.markTerminal({
+    if (terminalFallback && !terminalRecordMatchesIdentity({
+      record: terminalFallback,
       generationId,
+      generationRequestId: claimed.generationRequestId,
+      acceptedPayloadHashes: [claimed.payloadHash],
+    })) {
+      return jsonResponse({
+        code: 'GENERATION_TERMINAL_RECONCILIATION_PENDING',
+        error: 'Generation terminal reconciliation pending',
+      }, 503);
+    }
+    if (!terminalFallback) {
+      if (!dependencies.terminalStore?.reconcileExpiredLease) {
+        return jsonResponse({
+          code: 'GENERATION_TERMINAL_RECONCILIATION_PENDING',
+          error: 'Generation terminal reconciliation unavailable',
+        }, 503);
+      }
+      terminalFallback = await dependencies.terminalStore.reconcileExpiredLease({
+        generationId,
+        generationRequestId: claimed.generationRequestId,
+        actorKey: actor.actorKey,
+        payloadHash: claimed.payloadHash,
+        mode: claimed.mode,
+        updatedAt: now,
+        code: 'PRODUCER_LEASE_EXPIRED',
+      }).catch(() => null);
+    }
+    if (
+      !terminalFallback
+      || !terminalRecordMatchesIdentity({
+        record: terminalFallback,
+        generationId,
+        generationRequestId: claimed.generationRequestId,
+        acceptedPayloadHashes: [claimed.payloadHash],
+      })
+    ) {
+      return jsonResponse({
+        code: 'GENERATION_TERMINAL_RECONCILIATION_PENDING',
+        error: 'Generation terminal reconciliation pending',
+      }, 503);
+    }
+    const durableState = await commitOwnedTerminalEvidence({
+      generationId,
+      actorKey: actor.actorKey,
       producerToken: reaperToken,
-      terminal,
+      record: terminalFallback,
+      priorState: state,
       now,
-    }).catch(() => ({ owned: true, applied: false }));
+      acceptedPayloadHashes: [claimed.payloadHash],
+    });
+    if (!durableState) {
+      return jsonResponse({
+        code: 'GENERATION_TERMINAL_RECONCILIATION_PENDING',
+        error: 'Generation terminal reconciliation pending',
+      }, 503);
+    }
     if (terminalFallback.status === 'producer_lost') {
       observe({ event: 'producer_lost', generationId, reason: 'lease_expired' });
     }
     return {
       actor,
       terminalFallback,
-      state: {
-        ...state,
-        status: terminalFallback.status,
-        updatedAt: now,
-        leaseExpiresAt: null,
-        terminal,
-      },
+      state: durableState,
     };
   };
 
@@ -1186,6 +1510,16 @@ export const createArenaGenerationService = (
       if (!terminalFallback) {
         return jsonResponse({ code: 'GENERATION_NOT_FOUND', error: 'Generation not found' }, 404);
       }
+      if (terminalFallback.generationId !== generationId) {
+        return jsonResponse({ code: 'GENERATION_NOT_FOUND', error: 'Generation not found' }, 404);
+      }
+      const expectedGenerationId = await dependencies.deriveGenerationId({
+        actorKey: actor.actorKey,
+        generationRequestId: terminalFallback.generationRequestId,
+      }).catch(() => null);
+      if (expectedGenerationId !== generationId) {
+        return jsonResponse({ code: 'GENERATION_NOT_FOUND', error: 'Generation not found' }, 404);
+      }
       state = {
         actorKey: actor.actorKey,
         generationId: terminalFallback.generationId,
@@ -1213,8 +1547,57 @@ export const createArenaGenerationService = (
         cancelReason: terminalFallback.status === 'cancelled' ? 'user' : null,
       };
     }
-    if (state.actorKey !== actor.actorKey) {
+    if (state.actorKey !== actor.actorKey || state.generationId !== generationId) {
       return jsonResponse({ code: 'GENERATION_NOT_FOUND', error: 'Generation not found' }, 404);
+    }
+    if (state.terminal && !terminalFallback && !await hasExactTerminalStateEvidence(state)) {
+      return jsonResponse({
+        code: 'GENERATION_TERMINAL_RECONCILIATION_PENDING',
+        error: 'Generation terminal reconciliation pending',
+      }, 503);
+    }
+    if (terminalFallback && !terminalRecordMatchesIdentity({
+      record: terminalFallback,
+      generationId: state.generationId,
+      generationRequestId: state.generationRequestId,
+      acceptedPayloadHashes: [state.payloadHash],
+    })) {
+      return jsonResponse({
+        code: 'GENERATION_TERMINAL_RECONCILIATION_PENDING',
+        error: 'Generation terminal reconciliation pending',
+      }, 503);
+    }
+    if (
+      !terminalFallback
+      && state.status === 'completed'
+      && state.snapshot?.status !== 'completed'
+    ) {
+      const durable = await inspectOwnedFinalization(generationId, actor.actorKey)
+        .catch(() => ({ kind: 'not-found' as const }));
+      if (durable.kind === 'pending') {
+        return jsonResponse({
+          code: 'GENERATION_FINALIZATION_PENDING',
+          error: 'Generation durable finalization remains pending',
+        }, 503);
+      }
+      if (durable.kind === 'terminal') terminalFallback = durable.terminal;
+      if (durable.kind === 'not-found') {
+        return jsonResponse({
+          code: 'GENERATION_TERMINAL_CONTENT_UNAVAILABLE',
+          error: 'Generation terminal content unavailable',
+        }, 503);
+      }
+    }
+    if (terminalFallback && !terminalRecordMatchesIdentity({
+      record: terminalFallback,
+      generationId: state.generationId,
+      generationRequestId: state.generationRequestId,
+      acceptedPayloadHashes: [state.payloadHash],
+    })) {
+      return jsonResponse({
+        code: 'GENERATION_TERMINAL_RECONCILIATION_PENDING',
+        error: 'Generation terminal reconciliation pending',
+      }, 503);
     }
     if (terminalFallback) return { actor, state, terminalFallback };
     return reconcileOwnedActiveState(actor, state);
@@ -1233,6 +1616,40 @@ export const createArenaGenerationService = (
     return resolveOwnedStateForActor(actor, generationId);
   };
 
+  const ownedFailureFromResponse = async (
+    response: Response,
+  ): Promise<Extract<
+    ArenaGenerationOwnedProjectionResult,
+    { kind: 'not-found' | 'unavailable' }
+  >> => {
+    if (response.status === 404) return { kind: 'not-found' };
+    const allowedCodes = new Set([
+      'GENERATION_FINALIZATION_PENDING',
+      'GENERATION_STATE_UNAVAILABLE',
+      'GENERATION_TERMINAL_CONTENT_UNAVAILABLE',
+      'GENERATION_TERMINAL_RECONCILIATION_PENDING',
+    ]);
+    let code = 'GENERATION_STATE_UNAVAILABLE';
+    try {
+      const body = await response.clone().json() as { code?: unknown };
+      if (typeof body.code === 'string' && allowedCodes.has(body.code)) code = body.code;
+    } catch {
+      // The trusted seam intentionally projects no response body or diagnostic.
+    }
+    return { kind: 'unavailable', code };
+  };
+
+  const safeTerminalErrorCode = (
+    status: GenerationStatus,
+    candidate: string | null | undefined,
+  ): string | null => {
+    if (status !== 'failed' && status !== 'producer_lost') return null;
+    if (candidate && /^[A-Z][A-Z0-9_]{1,79}$/u.test(candidate)) return candidate;
+    return status === 'producer_lost'
+      ? 'PRODUCER_OWNERSHIP_LOST'
+      : 'GENERATION_FAILED';
+  };
+
   const createStatusResponse = (
     state: GenerationReplayStoreState,
     actor: ArenaGenerationActor,
@@ -1245,14 +1662,21 @@ export const createArenaGenerationService = (
       || state.status === 'finalizing',
     lastEventId: state.lastEventId,
     updatedAt: state.updatedAt,
-    ...(state.terminal?.resultRef ? { resultRef: state.terminal.resultRef } : {}),
+    ...(state.status === 'completed' && state.terminal?.resultRef
+      ? { resultRef: state.terminal.resultRef }
+      : {}),
   }, 200), actor);
+
+  const createTerminalContentUnavailableResponse = (): Response => jsonResponse({
+    code: 'GENERATION_TERMINAL_CONTENT_UNAVAILABLE',
+    error: 'Generation terminal content is temporarily unavailable',
+  }, 503);
 
   const createTerminalFallbackSubscription = (
     terminal: ArenaGenerationTerminalRecord,
     after: string | null = null,
   ): ArenaGenerationSubscription | Response => {
-    if (terminal.status === 'completed' && terminal.contentAvailable === false) {
+    if (terminal.status === 'completed' && terminal.contentAvailable !== true) {
       return jsonResponse({
         code: 'GENERATION_TERMINAL_CONTENT_UNAVAILABLE',
         error: 'Generation terminal content is temporarily unavailable',
@@ -1271,11 +1695,11 @@ export const createArenaGenerationService = (
     })();
     const snapshot: GenerationSnapshot = {
       status: terminal.status,
-      markdown: terminal.markdown,
-      reasoning: terminal.reasoning,
+      markdown: terminal.status === 'completed' ? terminal.markdown : '',
+      reasoning: terminal.status === 'completed' ? terminal.reasoning : '',
       lastEventId: null,
       updatedAt: terminal.updatedAt,
-      terminalResultRef: terminal.resultRef,
+      terminalResultRef: terminal.status === 'completed' ? terminal.resultRef : null,
     };
     const snapshotEvent: GenerationStreamEvent = {
       id: snapshotId,
@@ -1290,7 +1714,19 @@ export const createArenaGenerationService = (
       data: {
         ok: terminal.status === 'completed',
         status: terminal.status,
-        ...(terminal.resultRef ? { resultRef: terminal.resultRef } : {}),
+        ...(
+          terminal.status === 'failed' || terminal.status === 'producer_lost'
+            ? {
+              code: terminal.errorCode
+                ?? (terminal.status === 'producer_lost'
+                  ? 'PRODUCER_OWNERSHIP_LOST'
+                  : 'GENERATION_FAILED'),
+            }
+            : {}
+        ),
+        ...(terminal.status === 'completed' && terminal.resultRef
+          ? { resultRef: terminal.resultRef }
+          : {}),
       },
     };
     const stream = new ReadableStream<GenerationStreamEvent>({
@@ -1334,6 +1770,7 @@ export const createArenaGenerationService = (
   const createReplaySubscription = (
     generationId: string,
     generationRequestId: string,
+    payloadHash: string,
     after: string | null,
     actorKey: string,
     responseHeaders: Readonly<Record<string, string>> = {},
@@ -1383,7 +1820,13 @@ export const createArenaGenerationService = (
             const snapshotEvent: GenerationStreamEvent = {
               id: snapshotId,
               type: 'snapshot',
-              data: { ...snapshot, status: terminal.status },
+              data: {
+                ...snapshot,
+                status: terminal.status,
+                ...(terminal.status === 'completed'
+                  ? { terminalResultRef: terminal.resultRef ?? null }
+                  : { markdown: '', reasoning: '', terminalResultRef: null }),
+              },
             };
             const terminalEvent: GenerationStreamEvent = {
               id: terminalId,
@@ -1394,7 +1837,19 @@ export const createArenaGenerationService = (
                 ok: terminal.status === 'completed',
                 status: terminal.status,
                 ...(terminal.code ? { code: terminal.code } : {}),
-                ...(terminal.resultRef ? { resultRef: terminal.resultRef } : {}),
+                ...(terminal.status === 'completed' && terminal.resultRef
+                  ? { resultRef: terminal.resultRef }
+                  : {}),
+                ...(terminal.status === 'failed' && terminal.publicError ? {
+                  error: terminal.publicError.message,
+                  message: terminal.publicError.message,
+                  ...(terminal.publicError.upstreamStatus === undefined
+                    ? {}
+                    : { upstreamStatus: terminal.publicError.upstreamStatus }),
+                  ...(terminal.publicError.upstreamRequestId === undefined
+                    ? {}
+                    : { upstreamRequestId: terminal.publicError.upstreamRequestId }),
+                } : {}),
               },
             };
             controller.enqueue(snapshotEvent);
@@ -1412,7 +1867,16 @@ export const createArenaGenerationService = (
           const pipeTerminalFallback = async (
             fallback: ArenaGenerationTerminalRecord,
           ): Promise<void> => {
-            if (fallback.status === 'completed' && fallback.contentAvailable === false) {
+            if (!terminalRecordMatchesIdentity({
+              record: fallback,
+              generationId,
+              generationRequestId,
+              acceptedPayloadHashes: [payloadHash],
+            })) {
+              enqueueReplayError('GENERATION_TERMINAL_RECONCILIATION_PENDING');
+              return;
+            }
+            if (fallback.status === 'completed' && fallback.contentAvailable !== true) {
               throw new Error('GENERATION_TERMINAL_CONTENT_UNAVAILABLE');
             }
             const fallbackSubscription = createTerminalFallbackSubscription(fallback, cursor);
@@ -1449,6 +1913,10 @@ export const createArenaGenerationService = (
                 }
                 const state = await dependencies.store.readState({ generationId });
                 if (state?.terminal) {
+                  if (!await hasExactTerminalStateEvidence(state, true)) {
+                    enqueueReplayError('GENERATION_TERMINAL_RECONCILIATION_PENDING');
+                    return;
+                  }
                   enqueueTerminalSnapshot(snapshot, state.terminal);
                   return;
                 }
@@ -1477,6 +1945,10 @@ export const createArenaGenerationService = (
                 const snapshot = state?.snapshot
                   ?? await dependencies.store.readSnapshot({ generationId });
                 if (state?.terminal && snapshot) {
+                  if (!await hasExactTerminalStateEvidence(state, true)) {
+                    enqueueReplayError('GENERATION_TERMINAL_RECONCILIATION_PENDING');
+                    return;
+                  }
                   enqueueTerminalSnapshot(snapshot, state.terminal);
                   return;
                 }
@@ -1513,6 +1985,28 @@ export const createArenaGenerationService = (
                   return;
                 }
               } else {
+                let terminalBatchEvent: GenerationStreamEvent | undefined;
+                for (let index = batch.events.length - 1; index >= 0; index -= 1) {
+                  const candidate = batch.events[index]!;
+                  if (candidate.type === 'done' || candidate.type === 'error') {
+                    terminalBatchEvent = candidate;
+                    break;
+                  }
+                }
+                if (terminalBatchEvent) {
+                  const terminalState = await dependencies.store.readState({ generationId });
+                  if (
+                    !terminalState
+                    || terminalState.lastEventId !== terminalBatchEvent.id
+                    || !terminalStateEvidenceMatches({
+                      state: terminalState,
+                      event: terminalBatchEvent,
+                    })
+                  ) {
+                    enqueueReplayError('GENERATION_TERMINAL_RECONCILIATION_PENDING');
+                    return;
+                  }
+                }
                 let replayBytes = 0;
                 let sawTerminal = false;
                 for (const event of batch.events) {
@@ -1569,6 +2063,10 @@ export const createArenaGenerationService = (
               if (state.terminal && batch.events.length === 0) {
                 const snapshot = state.snapshot ?? await dependencies.store.readSnapshot({ generationId });
                 if (snapshot) {
+                  if (!await hasExactTerminalStateEvidence(state, true)) {
+                    enqueueReplayError('GENERATION_TERMINAL_RECONCILIATION_PENDING');
+                    return;
+                  }
                   enqueueTerminalSnapshot(snapshot, state.terminal);
                   return;
                 }
@@ -1613,12 +2111,14 @@ export const createArenaGenerationService = (
   const createReplayResponse = (
     generationId: string,
     generationRequestId: string,
+    payloadHash: string,
     after: string | null,
     actorKey: string,
     responseHeaders: Readonly<Record<string, string>> = {},
   ): Response => subscriptionToSseResponse(createReplaySubscription(
     generationId,
     generationRequestId,
+    payloadHash,
     after,
     actorKey,
     responseHeaders,
@@ -1844,12 +2344,39 @@ export const createArenaGenerationService = (
         }, 409), input.actor);
       }
       if (terminalFence?.created) {
-        await dependencies.store.markTerminal({
+        const terminalNow = dependencies.now().toISOString();
+        const priorState = await dependencies.store.readState({
           generationId,
-          producerToken: terminalFence.producerToken,
-          terminal: { status: 'failed', code: input.rejection.code },
-          now: dependencies.now().toISOString(),
-        }).catch(() => ({ owned: false, applied: false }));
+          actorKey: input.actor.actorKey,
+        }).catch(() => null);
+        if (priorState) {
+          const evidence = await commitOwnedTerminalEvidence({
+            generationId,
+            actorKey: input.actor.actorKey,
+            producerToken: terminalFence.producerToken,
+            record: {
+              generationId,
+              generationRequestId: input.generationRequestId,
+              status: 'failed',
+              updatedAt: terminalNow,
+              resultRef: null,
+              markdown: '',
+              reasoning: '',
+              errorCode: input.rejection.code,
+              payloadHash: priorState.payloadHash,
+              contentAvailable: true,
+            },
+            priorState,
+            now: terminalNow,
+          });
+          if (!evidence) {
+            observe({
+              event: 'redis_degraded',
+              generationId,
+              operation: 'rejection_terminal_evidence',
+            });
+          }
+        }
       }
     } catch {
       if (terminalFence?.created) {
@@ -1864,7 +2391,80 @@ export const createArenaGenerationService = (
     ), input.actor);
   };
 
-  const service: ArenaGenerationService = {
+  const service: ArenaGenerationApplicationService = {
+    async readOwnedProjection(input): Promise<ArenaGenerationOwnedProjectionResult> {
+      const owned = await resolveOwnedStateForActor(
+        { actorKey: input.actorKey },
+        input.generationId,
+      );
+      if (owned instanceof Response) return ownedFailureFromResponse(owned);
+      if (
+        owned.terminalFallback?.status === 'completed'
+        && owned.terminalFallback.contentAvailable !== true
+      ) {
+        return {
+          kind: 'unavailable',
+          code: 'GENERATION_TERMINAL_CONTENT_UNAVAILABLE',
+        };
+      }
+      const snapshot = owned.state.snapshot;
+      const finalAuthoritative = owned.state.status === 'completed'
+        || owned.state.status === 'failed'
+        || owned.state.status === 'cancelled'
+        || owned.state.status === 'producer_lost';
+      const resultAvailable = owned.state.status === 'completed' && Boolean(
+        owned.terminalFallback?.resultRef
+        ?? owned.state.terminal?.resultRef
+        ?? snapshot?.terminalResultRef,
+      );
+      return {
+        kind: 'found',
+        projection: Object.freeze({
+          generationId: owned.state.generationId,
+          generationRequestId: owned.state.generationRequestId,
+          status: owned.state.status,
+          markdown: owned.state.status === 'completed'
+            ? owned.terminalFallback?.markdown ?? snapshot?.markdown ?? ''
+            : owned.state.status === 'reserved'
+                || owned.state.status === 'running'
+                || owned.state.status === 'finalizing'
+              ? snapshot?.markdown ?? ''
+              : '',
+          resumeCursor: snapshot?.lastEventId ?? owned.state.lastEventId,
+          updatedAt: owned.terminalFallback?.updatedAt
+            ?? snapshot?.updatedAt
+            ?? owned.state.updatedAt,
+          finalAuthoritative,
+          resultAvailable,
+          generationRecordId: resultAvailable ? owned.state.generationId : null,
+          errorCode: safeTerminalErrorCode(
+            owned.state.status,
+            owned.terminalFallback?.errorCode ?? owned.state.terminal?.code,
+          ),
+        }),
+      };
+    },
+
+    async resumeOwnedSubscription(input): Promise<ArenaGenerationOwnedSubscriptionResult> {
+      const owned = await resolveOwnedStateForActor(
+        { actorKey: input.actorKey },
+        input.generationId,
+      );
+      if (owned instanceof Response) return ownedFailureFromResponse(owned);
+      const subscription = owned.terminalFallback
+        ? createTerminalFallbackSubscription(owned.terminalFallback, input.after)
+        : createReplaySubscription(
+          owned.state.generationId,
+          owned.state.generationRequestId,
+          owned.state.payloadHash,
+          input.after,
+          owned.actor.actorKey,
+          owned.actor.responseHeaders,
+        );
+      if (subscription instanceof Response) return ownedFailureFromResponse(subscription);
+      return { kind: 'subscribed', subscription };
+    },
+
     async create(request: Request): Promise<Response> {
       const subscription = await service.createSubscription(request);
       return subscription instanceof Response
@@ -1992,7 +2592,11 @@ export const createArenaGenerationService = (
         }
         if (durable.kind === 'terminal') {
           const terminal = durable.terminal;
-          if (!matchesPayloadHash(terminal.payloadHash)) {
+          if (
+            terminal.generationId !== generationId
+            || terminal.generationRequestId !== parsed.generationRequestId
+            || !matchesPayloadHash(terminal.payloadHash)
+          ) {
             observe({ event: 'request', generationId, outcome: 'conflict', inputBytes });
             return jsonResponse({
               code: 'GENERATION_REQUEST_CONFLICT',
@@ -2076,7 +2680,11 @@ export const createArenaGenerationService = (
         }
         if (durable.kind === 'terminal') {
           const terminal = durable.terminal;
-          if (!matchesPayloadHash(terminal.payloadHash)) {
+          if (
+            terminal.generationId !== generationId
+            || terminal.generationRequestId !== parsed.generationRequestId
+            || !matchesPayloadHash(terminal.payloadHash)
+          ) {
             await dependencies.store.releaseReservation({
               generationId,
               producerToken,
@@ -2087,15 +2695,29 @@ export const createArenaGenerationService = (
               error: 'generationRequestId 已用于不同请求',
             }, 409);
           }
-          await dependencies.store.markTerminal({
+          const reservedState = await dependencies.store.readState({
             generationId,
-            producerToken,
-            terminal: {
-              status: terminal.status,
-              ...(terminal.resultRef ? { resultRef: terminal.resultRef } : {}),
-            },
-            now: dependencies.now().toISOString(),
-          }).catch(() => ({ owned: true, applied: false }));
+            actorKey: actor.actorKey,
+          }).catch(() => null);
+          const durableState = reservedState
+            ? await commitOwnedTerminalEvidence({
+                generationId,
+                actorKey: actor.actorKey,
+                producerToken,
+                record: terminal,
+                priorState: reservedState,
+                now: dependencies.now().toISOString(),
+                acceptedPayloadHashes: splitMaterialization
+                  ? [payloadHash, legacyPayloadHash]
+                  : [payloadHash],
+              })
+            : null;
+          if (!durableState) {
+            return jsonResponse({
+              code: 'GENERATION_TERMINAL_RECONCILIATION_PENDING',
+              error: 'Generation terminal reconciliation pending',
+            }, 503);
+          }
           observe({ event: 'request', generationId, outcome: 'reused', inputBytes });
           const fallback = createTerminalFallbackSubscription(terminal);
           return fallback instanceof Response
@@ -2190,16 +2812,32 @@ export const createArenaGenerationService = (
             payload: prepared.executionPayload,
           });
         } catch {
-          const lostTerminal: GenerationTerminal = {
-            status: 'producer_lost',
-            code: 'PRODUCER_OWNERSHIP_UNAVAILABLE',
-          };
-          await dependencies.store.markTerminal({
+          const terminalNow = dependencies.now().toISOString();
+          const priorState = await dependencies.store.readState({
             generationId: reservation.generationId,
-            producerToken,
-            terminal: lostTerminal,
-            now: dependencies.now().toISOString(),
-          }).catch(() => ({ owned: true, applied: false }));
+            actorKey: actor.actorKey,
+          }).catch(() => null);
+          if (priorState) {
+            await commitOwnedTerminalEvidence({
+              generationId: reservation.generationId,
+              actorKey: actor.actorKey,
+              producerToken,
+              record: {
+                generationId: reservation.generationId,
+                generationRequestId: parsed.generationRequestId,
+                status: 'producer_lost',
+                updatedAt: terminalNow,
+                resultRef: null,
+                markdown: '',
+                reasoning: '',
+                errorCode: 'PRODUCER_OWNERSHIP_UNAVAILABLE',
+                payloadHash,
+                contentAvailable: true,
+              },
+              priorState,
+              now: terminalNow,
+            });
+          }
           observe({
             event: 'producer_lost',
             generationId: reservation.generationId,
@@ -2215,6 +2853,7 @@ export const createArenaGenerationService = (
         createReplaySubscription(
           reservation.generationId,
           parsed.generationRequestId,
+          payloadHash,
           null,
           actor.actorKey,
           prepared.responseHeaders,
@@ -2258,6 +2897,15 @@ export const createArenaGenerationService = (
         const durable = await inspectOwnedFinalization(generationId, actor.actorKey)
           .catch(() => ({ kind: 'not-found' as const }));
         if (durable.kind === 'terminal') {
+          if (
+            durable.terminal.generationId !== generationId
+            || durable.terminal.generationRequestId !== generationRequestId
+          ) {
+            return jsonResponse({
+              code: 'GENERATION_STATE_UNAVAILABLE',
+              error: 'Generation state unavailable',
+            }, 503);
+          }
           return withActorHeaders(jsonResponse({
             generationId,
             status: durable.terminal.status,
@@ -2339,6 +2987,12 @@ export const createArenaGenerationService = (
           error: 'Generation request not found',
         }, 404);
       }
+      if (
+        owned.terminalFallback?.status === 'completed'
+        && owned.terminalFallback.contentAvailable !== true
+      ) {
+        return createTerminalContentUnavailableResponse();
+      }
       return createStatusResponse(owned.state, owned.actor);
     },
 
@@ -2392,6 +3046,7 @@ export const createArenaGenerationService = (
         createReplayResponse(
           owned.state.generationId,
           owned.state.generationRequestId,
+          owned.state.payloadHash,
           after,
           owned.actor.actorKey,
         ),
@@ -2402,6 +3057,12 @@ export const createArenaGenerationService = (
     async status(request: Request, params: ArenaGenerationRouteParams): Promise<Response> {
       const owned = await resolveOwnedState(request, params.generationId);
       if (owned instanceof Response) return owned;
+      if (
+        owned.terminalFallback?.status === 'completed'
+        && owned.terminalFallback.contentAvailable !== true
+      ) {
+        return createTerminalContentUnavailableResponse();
+      }
       return createStatusResponse(owned.state, owned.actor);
     },
 

@@ -1,5 +1,5 @@
 import {
-  HOSTED_GENERATION_INTERNAL_MESSAGE,
+  buildHostedGenerationErrorPayload,
   createSafeHostedGenerationError,
   jsonResponse,
   type StepResult,
@@ -78,10 +78,10 @@ const runGeneration = async <Prepared, Execution, Generated>(
 
     dependencies.recordActivity(request);
     return await dependencies.buildResponse(request, preparedInput, generated.value);
-  } catch {
-    const safeError = createSafeHostedGenerationError();
+  } catch (error) {
+    const safeError = createSafeHostedGenerationError(error);
     dependencies.logError(safeError);
-    return options.buildErrorResponse(safeError);
+    return options.buildErrorResponse(error);
   }
 };
 
@@ -104,20 +104,17 @@ export const createQuestionnaireGenerationService = <Prepared, Execution, Genera
   try {
     const body = await request.json();
     return await runGeneration(request, body, options, dependencies);
-  } catch {
-    const safeError = createSafeHostedGenerationError();
+  } catch (error) {
+    const safeError = createSafeHostedGenerationError(error);
     dependencies.logError(safeError);
-    return options.buildErrorResponse(safeError);
+    return options.buildErrorResponse(error);
   }
 };
 
 export const generationErrorResponse = (
-  _error: unknown,
+  error: unknown,
   publicMessage: string,
 ): Response => jsonResponse(
-  {
-    error: publicMessage,
-    message: HOSTED_GENERATION_INTERNAL_MESSAGE,
-  },
+  buildHostedGenerationErrorPayload(error, publicMessage),
   500,
 );

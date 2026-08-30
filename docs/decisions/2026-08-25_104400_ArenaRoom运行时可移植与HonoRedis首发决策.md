@@ -1,9 +1,10 @@
 # Arena Room 运行时可移植与 Hono + Redis 首发决策
 
-状态：`accepted`
+状态：`accepted + 部分 superseded`
 日期：2026-08-25
 决策标识：`ADR-arena-room-portable-runtime-hono-redis-first`
 取代：`ADR-arena-room-deployment-realtime-authority`
+部分被取代：`ADR-arena-multiplayer-redis-only-room-directory`
 基线分支：`refactor/platform-rearchitecture`
 基线提交：`73e51e1e18e27eee7d09e36ff0ff8010e56e5d88`
 
@@ -34,6 +35,10 @@
 - WebSocket 鉴权、Origin、message authorization、大小限制和 backpressure 要求继续有效。
 
 本 ADR 只改变 **Room Authority 的运行时实现和故障恢复承诺**，不降低服务器权威、安全、幂等、排位或数据所有权要求。
+
+> **部分 superseding notice（2026-08-28）**：本文关于 D1 `arena_multiplayer_rooms`、directory orphan
+> reconciliation 的决定已被 [Arena 多人 Redis-only Room Directory 决策](./2026-08-28_181500_Arena多人RedisOnly目录决策.md)
+> 取代。其余 Hono + Redis 首发、Room authority、generation、security 与恢复边界继续有效。
 
 ## 2. 背景
 
@@ -73,8 +78,10 @@ apps/api / Hono HK
         │    ├─ optional fan-out Pub/Sub
         │    └─ optional bounded replay Stream
         │
+        ├─ Redis directory record / bounded public index
+        │    └─ derived discovery, revalidated against current checkpoint
         ├─ D1
-        │    └─ low-frequency room directory / durable business facts by domain
+        │    └─ existing durable business facts by domain（不含 v1 Room directory）
         │
         └─ R2 / generation persistence
              └─ final authoritative generation artifacts
@@ -240,7 +247,8 @@ updatedAt
 
 Room checkpoint 必须有 TTL/过期策略，避免用户直接关页后永久占用 Redis。
 
-TTL 只负责会话垃圾回收，不负责永久业务保留。D1 directory orphan 由低频 reconciliation / lazy cleanup 处理。
+TTL 只负责会话垃圾回收，不负责永久业务保留。Redis directory record/index 与 checkpoint 同一原子 lifecycle 维护；
+stale candidate 只允许在 current authority 重验后的 exact-CAS/lazy cleanup。
 
 ### 7.3 Presence 与 story delta
 
@@ -396,22 +404,15 @@ v1 不复制 Durable Object 单 alarm scheduler。
 - timer 丢失或进程重启不能导致已过期房间永久复活；
 - 清理必须幂等。
 
-## 12. D1 room directory 继续是派生索引
+## 12. Redis-only room directory 是派生索引
 
-D1 `arena_multiplayer_rooms` 可以继续用于：
+本节已由 `ADR-arena-multiplayer-redis-only-room-directory` 细化：v1 public/unlisted discovery 使用 Redis
+directory record 与有界 public index；create/recovery/close 与 checkpoint 在同一 Lua/CAS 边界维护，任何成功
+list/lookup/join 都重新验证 current open/epoch/host authority。
 
-- public/unlisted room discovery metadata；
-- host 房间列表；
-- 低频运维/reconciliation。
-
-但：
-
-- join 最终以当前 Hono Room runtime + Redis checkpoint 为准；
-- D1 残留行不能在 Redis checkpoint 已不存在时自动复活房间；
-- close/expire 先终止当前 runtime，再 best-effort 更新/删除 directory；
-- directory orphan 允许低频修复。
-
-如果未来要求整机故障后保持相同 roomId，必须另立 durable room registration 设计；本 ADR 不偷偷把 derived directory 提升为新的 room database。
+v1 不发布 `arena_multiplayer_rooms`，也不保留 Redis-to-D1 registration、projection、tombstone 或 reconciler。
+如果未来要求跨 Redis runtime 发现或整机故障后保持相同 `roomId`，必须另立 durable registration/ownership ADR，
+不能靠历史 D1 row 自动复活房间。
 
 ## 13. Cloudflare DR 的范围
 
@@ -521,6 +522,7 @@ v1 的明确承诺是：
 ## 20. 关联文档
 
 - [被取代：Arena Room 部署边界与实时权威决策](./2026-08-22_184800_ArenaRoom部署边界与实时权威决策.md)
+- [部分取代本文：Arena 多人 Redis-only Room Directory 决策](./2026-08-28_181500_Arena多人RedisOnly目录决策.md)
 - [Arena 多人 Hono + Redis 运行时实施规格修订](../specs/2026-08-25_104400_Arena多人HonoRedis运行时实施规格修订.md)
 - [Arena 多人 Hono + Redis 首发实施计划](../plans/2026-08-25_104400_Arena多人HonoRedis首发实施计划.md)
 - [Arena 多人协作 v1 规格](../specs/2026-08-21_arena-multiplayer-v1-spec.md)

@@ -10,7 +10,11 @@ describe('Arena finalization bridge', () => {
       const request = new Request(requestInput, init);
       const body = await request.clone().text();
       expect(await verifyArenaInternalRequest({ secret, request, body })).toBe(true);
-      expect(JSON.parse(body)).toEqual({ version: 1, generationId: 'generation-1' });
+      expect(JSON.parse(body)).toEqual({
+        version: 1,
+        generationId: 'generation-1',
+        idempotencyKey: 'arena-terminal:generation-1:ratings',
+      });
       return Response.json({ success: true, ranking: { generationId: 'generation-1' } });
     });
     const bridge = createArenaFinalizationBridge({
@@ -19,7 +23,10 @@ describe('Arena finalization bridge', () => {
       fetch: fetcher,
     });
 
-    await bridge.settleRatings('generation-1');
+    await bridge.settleRatings({
+      generationId: 'generation-1',
+      idempotencyKey: 'arena-terminal:generation-1:ratings',
+    });
     await expect(bridge.readRanking('generation-1')).resolves.toEqual({ generationId: 'generation-1' });
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
@@ -31,5 +38,20 @@ describe('Arena finalization bridge', () => {
     expect(() => createArenaFinalizationBridge({
       baseUrl: 'https://web.example', secret: 'short',
     })).toThrow('ARENA_FINALIZATION_SECRET_INVALID');
+  });
+
+  it('拒绝把另一个 generation 的 ratings effect key 带入 finalization', async () => {
+    const fetcher = vi.fn();
+    const bridge = createArenaFinalizationBridge({
+      baseUrl: 'https://web.example',
+      secret: 'arena-finalization-test-secret-32-bytes',
+      fetch: fetcher,
+    });
+
+    await expect(bridge.settleRatings({
+      generationId: 'generation-1',
+      idempotencyKey: 'arena-terminal:generation-2:ratings',
+    })).rejects.toThrow('ARENA_FINALIZATION_IDEMPOTENCY_KEY_INVALID');
+    expect(fetcher).not.toHaveBeenCalled();
   });
 });

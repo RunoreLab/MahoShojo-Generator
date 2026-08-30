@@ -76,5 +76,5 @@ describe('public contracts entrypoint portability', () => {
       expect(sortedRuntimeKeys).toEqual(sortedNamespaceKeys);
       expect(sortedRuntimeKeys).toEqual(expectedKeys);
     }
-  });
+  }, 30_000);
 });

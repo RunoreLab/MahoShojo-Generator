@@ -30,6 +30,7 @@ import {
   putChallengeRun,
   updateChallengeRun,
 } from '@/lib/challenge/storage';
+import { createAcceptedChallengeRunRecord } from '@/lib/challenge/run-record';
 import { grantChallengeUnlocks, listChallengeUnlocksByWorld } from '@/lib/challenge/unlocks';
 import type {
   ChallengeResolvedSourceCardLite,
@@ -1320,21 +1321,11 @@ export function useChallengeController() {
         }
       );
 
-      const nextRecord: ChallengeRunRecord = {
-        ...createChallengeRunRecord(bootstrapDraft),
-        ...accepted.runRecordPatch,
-        status: 'in_progress',
-        runSeed: accepted.runState.runSeed,
-        usedBootstrapReroll: bootstrapDraft.usedBootstrapReroll,
-        playerSnapshot: bootstrapDraft.playerSnapshot,
-        runState: accepted.runState,
-        currentNodeId: accepted.runState.currentNodeId,
-        visitedNodeCount: accepted.runState.visitedNodeCount,
-        lastResolvedNodeId: null,
-        lastCheckpointId: accepted.checkpoint.id,
-        updatedAt: accepted.runState.updatedAt,
-        finishedAt: null,
-      };
+      const nextRecord = createAcceptedChallengeRunRecord(
+        createChallengeRunRecord(bootstrapDraft),
+        accepted.runRecordPatch,
+        accepted.checkpoint.id,
+      );
 
       await putChallengeCheckpoint(accepted.checkpoint);
       await putChallengeRun(nextRecord);

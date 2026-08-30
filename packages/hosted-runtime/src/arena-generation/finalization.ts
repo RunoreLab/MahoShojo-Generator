@@ -17,6 +17,22 @@ export type ArenaTerminalClaimResult = {
   finalized: boolean;
 };
 
+export type ArenaTerminalEffect = 'combatants' | 'story-impacts' | 'ratings';
+
+export type ArenaTerminalEffectInput = ArenaTerminalClaimInput & {
+  /**
+   * Stable per-generation effect identity. Implementations MUST use it (or a
+   * deterministic identity derived from it) for idempotent writes because a
+   * transport timeout can cause the finalizer to call an effect again.
+   */
+  idempotencyKey: string;
+};
+
+export const buildArenaTerminalEffectIdempotencyKey = (
+  generationId: string,
+  effect: ArenaTerminalEffect,
+): string => `arena-terminal:${generationId}:${effect}`;
+
 export interface ArenaGenerationFinalizationPorts {
   storeOutput(_input: {
     generationId: string;
@@ -27,9 +43,9 @@ export interface ArenaGenerationFinalizationPorts {
   claimTerminal(_input: ArenaTerminalClaimInput): Promise<ArenaTerminalClaimResult>;
   completeTerminal(_input: ArenaTerminalClaimInput): Promise<void>;
   failTerminal(_input: ArenaTerminalClaimInput & { failureCode: string }): Promise<void>;
-  persistCombatants(_input: ArenaTerminalClaimInput): Promise<void>;
-  applyStoryImpacts(_input: ArenaTerminalClaimInput): Promise<void>;
-  settleRatings(_input: ArenaTerminalClaimInput): Promise<void>;
+  persistCombatants(_input: ArenaTerminalEffectInput): Promise<void>;
+  applyStoryImpacts(_input: ArenaTerminalEffectInput): Promise<void>;
+  settleRatings(_input: ArenaTerminalEffectInput): Promise<void>;
   readRanking(_input: {
     generationId: string;
     actorKey: string;
@@ -51,6 +67,13 @@ export const createArenaGenerationFinalizer = (
       // Telemetry is fail-soft and cannot change finalization behavior.
     }
   };
+  const effectInput = (
+    claim: ArenaTerminalClaimInput,
+    effect: ArenaTerminalEffect,
+  ): ArenaTerminalEffectInput => ({
+    ...claim,
+    idempotencyKey: buildArenaTerminalEffectIdempotencyKey(claim.generationId, effect),
+  });
   let resultRef: string | null = null;
   if (input.status === 'completed') {
     const startedAt = performance.now();
@@ -95,7 +118,7 @@ export const createArenaGenerationFinalizer = (
         payloadHash: input.payloadHash,
         payload: input.payload,
         metadata: input.metadata,
-        markdown: input.markdown,
+        markdown: '',
         telemetry: input.telemetry,
         status: 'failed',
         errorCode: 'ARENA_R2_STORAGE_FAILED',
@@ -106,7 +129,7 @@ export const createArenaGenerationFinalizer = (
         try {
           const claim = await ports.claimTerminal(failedClaim);
           if (!claim.finalized) {
-            await ports.persistCombatants(failedClaim);
+            await ports.persistCombatants(effectInput(failedClaim, 'combatants'));
             await ports.completeTerminal(failedClaim);
           }
           failureRecorded = true;
@@ -144,12 +167,13 @@ export const createArenaGenerationFinalizer = (
       const claim = await ports.claimTerminal({ ...claimInput, resultRef });
       resultRef = claim.resultRef;
       if (!claim.finalized) {
-        await ports.persistCombatants({ ...claimInput, resultRef });
+        const effectClaim = { ...claimInput, resultRef };
+        await ports.persistCombatants(effectInput(effectClaim, 'combatants'));
         if (input.status === 'completed') {
-          await ports.applyStoryImpacts({ ...claimInput, resultRef });
-          await ports.settleRatings({ ...claimInput, resultRef });
+          await ports.applyStoryImpacts(effectInput(effectClaim, 'story-impacts'));
+          await ports.settleRatings(effectInput(effectClaim, 'ratings'));
         }
-        await ports.completeTerminal({ ...claimInput, resultRef });
+        await ports.completeTerminal(effectClaim);
       }
       finalized = true;
     } catch (error) {

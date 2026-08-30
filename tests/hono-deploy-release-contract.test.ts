@@ -5,6 +5,8 @@ import { describe, expect, test } from 'vitest';
 const rootDirectory = process.cwd();
 const workflowPath = resolve(rootDirectory, '.github/workflows/hono-deploy.yml');
 const deployScriptPath = resolve(rootDirectory, 'apps/api/deploy/deploy-bundle.sh');
+const dockerfilePath = resolve(rootDirectory, 'apps/api/Dockerfile');
+const composePath = resolve(rootDirectory, 'apps/api/deploy/compose.yml');
 
 function readDeployScript(): string | null {
   expect(existsSync(deployScriptPath), 'apps/api 必须拥有 deploy-bundle.sh').toBe(true);
@@ -12,20 +14,60 @@ function readDeployScript(): string | null {
 }
 
 describe('Hono content-addressed release transaction', () => {
+  test('构建、Compose 与 runtime 预检使用同一 Node 镜像 digest', () => {
+    const dockerfile = readFileSync(dockerfilePath, 'utf8');
+    const compose = readFileSync(composePath, 'utf8');
+    const script = readDeployScript();
+    if (!script) return;
+
+    const imagePattern = 'node:22-alpine@sha256:[0-9a-f]{64}';
+    const dockerfileImages = [...dockerfile.matchAll(
+      new RegExp(`^FROM (${imagePattern})(?: AS [a-z]+)?$`, 'gmu'),
+    )].map((match) => match[1]);
+    const composeImage = compose.match(new RegExp(`^\\s*image: (${imagePattern})$`, 'mu'))?.[1];
+    const runtimeImage = script.match(
+      new RegExp(`^runtime_image='(${imagePattern})'$`, 'mu'),
+    )?.[1];
+
+    expect(dockerfileImages).toHaveLength(2);
+    expect(new Set(dockerfileImages)).toEqual(new Set([composeImage]));
+    expect(runtimeImage).toBe(composeImage);
+  });
+
   test('release id 覆盖 bundle、compose 与 deploy script 的完整 tuple', () => {
     const workflow = readFileSync(workflowPath, 'utf8');
 
-    expect(workflow).toMatch(/sha256sum\s+index\.mjs\s+compose\.yml\s+deploy-bundle\.sh\s*>\s*release\.manifest/);
+    expect(workflow).toMatch(/sha256sum\s+index\.mjs\s+compose\.yml\s+deploy-bundle\.sh\s+\\\s+arena-room-release-gate\.json\s+arena-room-release-gate-schema\.mjs\s*>\s*release\.manifest/);
     expect(workflow).toMatch(/sha256sum\s+release\.manifest\s*>\s*release\.sha256/);
     expect(workflow).toContain('artifact/release.manifest');
     expect(workflow).toContain('artifact/release.sha256');
+    expect(workflow).toContain('artifact/arena-room-release-gate.json');
+    expect(workflow).toContain('artifact/arena-room-release-gate-schema.mjs');
     expect(workflow).toContain("release_id=\"$(awk '{print $1}' artifact/release.sha256)\"");
 
     const script = readDeployScript();
     if (!script) return;
     expect(script).toContain('release.manifest');
     expect(script).toContain('release.sha256');
+    expect(script).toContain('arena-room-release-gate.json');
+    expect(script).toContain('arena-room-release-gate-schema.mjs');
+    expect(script).toContain('node /gate-schema.mjs --manifest /gate.json');
     expect(script).toMatch(/sha256sum\s+-c\s+["']?release\.manifest/);
+  });
+
+  test('release tuple 为 Arena Room 保留独立的精确网页 Origin 配置', () => {
+    const compose = readFileSync(composePath, 'utf8');
+    const script = readDeployScript();
+    if (!script) return;
+
+    expect(compose).toContain('HONO_CORS_ORIGINS: "https://*.colanns.me"');
+    expect(compose).toContain(
+      'ARENA_ROOM_ALLOWED_ORIGINS: "https://mahoshojo.colanns.me"',
+    );
+    expect(script).toContain("-e HONO_CORS_ORIGINS='https://*.colanns.me'");
+    expect(script).toContain(
+      "-e ARENA_ROOM_ALLOWED_ORIGINS='https://mahoshojo.colanns.me'",
+    );
   });
 
   test('新旧版本都使用各自 release-local compose，失败时恢复整个旧 tuple', () => {
@@ -59,6 +101,25 @@ describe('Hono content-addressed release transaction', () => {
     expect(activation).toBeGreaterThan(recovery);
   });
 
+  test('成功发布公开 rollback baseline，显式 rollback 仍复用同一 journal schema', () => {
+    const script = readDeployScript();
+    if (!script) return;
+
+    expect(script).toContain('ROLLBACK_BASELINE_RELEASE_ID=$rollback_baseline_release_id');
+    expect(script).toContain('ROLLBACK_RELEASE_ID=$release_id');
+    expect(script).toContain("[ \"$1\" = rollback ]");
+    expect(script).toContain('verify_deployment_format');
+    expect(script).toContain('realpath -e "$0"');
+    expect(script).toMatch(
+      /verify_arena_room_rollback_gate \\\s+"\$rollback_current_release_dir" "\$release_dir"/u,
+    );
+    expect(script).toContain(
+      'verify_arena_room_rollback_gate "$previous_release_dir" "$release_dir"',
+    );
+    expect(script).not.toContain('previous ->');
+    expect(script).not.toContain('previous.next');
+  });
+
   test('显式纳管旧文档布局并用 format marker 禁止 managed 状态降级', () => {
     const script = readDeployScript();
     if (!script) return;
@@ -82,6 +143,9 @@ describe('Hono content-addressed release transaction', () => {
     expect(script).toContain('validate_release_runtime "$release_dir"');
     expect(script).toContain('validate_release_runtime "$previous_release_dir"');
     expect(script).toContain('run_cancellable curl');
+    expect(script).toContain('hosted_api_environment="${HONO_HOSTED_API_ENVIRONMENT:-}"');
+    expect(script).not.toContain('HONO_HOSTED_API_ENVIRONMENT:-production');
+    expect(script).toContain('HONO_REDIS_KEY_PREFIX=preview');
   });
 
   test('公网 retained-route contract probe 位于部署事务内，失败会进入 rollback', () => {

@@ -2,8 +2,15 @@
 
 `preview` 分支由 `.github/workflows/preview-deploy.yml` 发布到同一 VPS 上的独立实例：部署目录
 `/opt/mahoshojo-hono-preview`、容器 `mahoshojo-hono-preview`、回环端口 `8081`、公网域名
-`homura-preview.colanns.me`。它与生产共用 D1 和 Redis，但通过 `REDIS_KEY_PREFIX=preview` 隔离限流与
-可恢复生成状态。完整初始化及回滚约束见 `docs/2026-08-26_223558_预览环境自动部署说明.md`。
+`homura-preview.colanns.me`。首期允许与生产共用 Redis 网络，但由 `RedisRuntime` 统一施加
+`REDIS_KEY_PREFIX=preview`，不暴露 destructive Redis command；D1、R2 与 authority secret 在 preview
+资源未专用纳管前保持 fail-closed。完整初始化及回滚约束见 `docs/2026-08-26_223558_预览环境自动部署说明.md`。
+
+生产 Hono 使用 D1 Gateway 时，`D1_GATEWAY_URL` 必须是无凭据、路径、查询或片段的 HTTPS root origin，并要求
+HMAC 或 Bearer transport credential。loopback HTTP 只可在显式 `HOSTED_DR_LOCAL_FAULT_INJECTION=true` 的
+local/test fault-injection 中使用；该身份由 `HOSTED_API_ENVIRONMENT` 显式声明，不从 `NODE_ENV` 推导，缺失或未知
+target 会在 production config check 中 fail closed。Gateway URL 与 runtime env 由同一 trust owner 管理，不使用
+同 owner 的重复 origin allowlist 自证安全；需要更强 egress policy 时应由独立 deploy/platform trust owner 提供。
 
 当前实现建立了可并行验证的 Hono Node 服务，不会改变原有 `pnpm dev` 和 Cloudflare Next 部署：
 
@@ -52,7 +59,7 @@ Next handler 换一个入口继续加载。
 ## 容量遥测
 
 Hono 主进程启动 `HonoRuntimeTelemetry`，默认每 60 秒向 stdout 输出一行固定
-`schemaVersion=4`、`event=hono.runtime.telemetry` 的 JSON。当前快照包含：
+`schemaVersion=5`、`event=hono.runtime.telemetry` 的 JSON。当前快照包含：
 
 - process 累计 CPU 时间与采样间隔 utilization、RSS、heap used/total/limit；
 - event-loop utilization、active/idle 时间与 delay samples/mean/p99/max；
@@ -63,6 +70,9 @@ Hono 主进程启动 `HonoRuntimeTelemetry`，默认每 60 秒向 stdout 输出�
 - Redis connect/ping/rate-limit/INFO 的固定 operation/outcome 与 latency；周期 `INFO MEMORY/STATS`
   提供 used memory、eviction 和 keyspace hit/miss。Redis 未连接时只记录 `unavailable`，不伪造 round-trip latency，
   server stats 尚未采到时显式为 `not-observed`；
+- Arena Room 的 open active/resident actor、actor queue/operation latency、checkpoint operation/bytes/latency、Room socket、
+  reconnect/replay/snapshot/resync、publisher backlog/drop 与固定 incident outcome；observer 只接受低基数 union，
+  不接受 room/user/ticket/generation ID、正文、错误原文或任意 metadata，异常时 fail-soft；
 - Arena request/resume/replay bytes/snapshot、provider attempt、generation duration、D1/R2 phase、cancel、
   producer-lost、Redis 与 terminal outcome 的固定低基数计数，以及 generation duration p50/p95/p99；terminal audit
   只记录 generation ID、固定 outcome/runtime 与聚合故障事实，不记录 actor、request body、prompt、正文或凭据；
@@ -78,6 +88,13 @@ Hono 主进程启动 `HonoRuntimeTelemetry`，默认每 60 秒向 stdout 输出�
 metrics endpoint。`RESOURCE-005` 中可由 Hono 进程、Hosted 调用 seam 和 Redis client 真实观测的最小集合
 已收口；入口控制面没有注入可信 DR selection/failover reason，继续显式 `not-observed/null`，不得根据部署
 角色或错误猜测。
+
+GMR-10 的机器可读故障证据由根目录 `config/arena-room-hardening-evidence.json` 与
+`pnpm run check:arena-room-hardening` 固定为十类 drill。真实 Redis/WSS verifier 必须显式设置
+`HOSTED_API_ENVIRONMENT=local|test`、loopback `REDIS_URL`、对应 opt-in 与非默认隔离 prefix；清理只覆盖各
+verifier 声明的隔离 Room/generation namespace，且运行时拒绝 default/production/preview/local/test 等保留 prefix，
+禁止 `FLUSH*`。`verify:room-hardening-load` 的固定非生产 workload 是 32 Room × 4 个真实 WSS
+client × 20 次权威 transition；输出仅为本地容量事实，`serviceLevelObjective` 固定为 `null`，不得外推生产 SLA。
 
 Hono 执行范围只包括 machine-readable 清单中明确保留的 API；具体清单以
 `config/hono-api-routes.json` 为准。已退出的 capability 与 `/api/tachie/generate` 继续由 Next.js Route Handler 承载。
@@ -100,6 +117,17 @@ liveness/dependency/capability readiness 外，Hono 对
 通配符只匹配相同协议和端口下的子域（包括多级子域），不匹配裸域 `colanns.me`。
 Hosted DR manifest shared route 的 Hono 与 Next/OpenNext adapter 复用同一 CORS policy；production 配置拒绝
 空值、`*`、HTTP、localhost/loopback 和非法 origin，不允许两侧出现宽松度漂移。
+
+Arena Room 使用独立的 `ARENA_ROOM_ALLOWED_ORIGINS`。多人功能启用时该列表必须非空，只能包含无凭据、
+path、query、fragment 或 wildcard 的精确网页 Origin，并且每一项还必须被 `HONO_CORS_ORIGINS` 覆盖。
+HTTP Room mutation 与浏览器 WebSocket 共用这份精确列表；这里填写发起请求的网页 Origin，不是 API/WSS
+目标 hostname。production/preview 在 GMR-11 前仍拒绝启用多人 writer，本配置不构成激活授权。
+
+Room create 叠加 `5/min` 突发限流与新 Room intent 的账号 `32/24h` 长窗口预算；已有 receipt 的结果确认
+不重复消耗新 Room 预算。公开 create 请求必须携带客户端生成的
+`creationRequestId`；服务端只在 Redis 保存账号绑定 key 下的请求摘要与 `roomId`，并与 checkpoint/directory
+同一 Lua 提交、保留 24 小时。同 ID、同 intent 可用于确认未知结果（包括 `unlisted` Room），同 ID 改 payload
+或 receipt 指向已结束 Room 时返回 `409`，不会创建 replacement。
 
 ## 鉴权
 
@@ -146,18 +174,23 @@ pnpm run deploy:d1-gateway
 Hono 服务配置相同的 `D1_GATEWAY_HMAC_SECRET`。生产建议再用 Cloudflare Access Service Token
 限制 Gateway 域名，Gateway 不应暴露为公共数据库 API。
 
-## 前端直连开关
+## 前端 Hosted 路由
 
-前端和服务端内部调用是否将白名单内的生成 API 请求到 Hono，由 `apps/web/config/hono-api.ts` 中的
-`honoApiConfig.enabled` 控制：`true` 使用 `config/hosted-dr-capabilities.json` 的 `stableOrigin`，`false` 继续使用同源
-Next.js/Cloudflare 路由。`homura.colanns.me` 只允许作为物理 Hono deploy/health origin，不得重新编码进客户端。
-稳定入口的控制面必须按 active-passive 选择 Hono primary 或 Next/OpenNext DR，且必须关闭“连接失败后透明跨 runtime
-重放 POST”的能力；generation 已有稳定 request ID 也不等于允许控制面盲目重试。该开关只影响
-`config/hono-api-routes.json` 中的路由，Tachie 始终使用原路由。
+生产 Web 使用 `apps/web/config/hono-api.ts` 的 `client-preflight` 模式。客户端从生成后的最小投影读取公开 Hono primary
+origin、同源 Next DR placement、probe path、timeout 和 route/method policy；它不直接读取完整 manifest。每个新的
+generation intent 在业务 dispatch 前最多探测 primary 一次，并只对 manifest 明确允许的 operation 最多探测 DR 一次。
+选择后固定 placement；POST/stream 一旦越过 dispatch boundary，任何断线、timeout 或未知终态都不得改发另一 runtime。
+Tachie 与其他 exited route 继续使用原同源 Next 路由。
+
+Hono 的 `GET /api/health/ready` 返回 `service=mahoshojo-hono`、`placement=hono-primary`、共享
+`contractVersion` 与 `Cache-Control: no-store`，并复用严格 production CORS；readiness 绕过 Redis 业务 limiter，但不会
+绕过全局连接/平台保护。probe 不携带 Authorization、Cookie、业务 body 或用户标识。Next DR probe 另以 generated canonical
+capability/method 触发目标 capability guard，并要求响应精确回显；该低基数 identity 不包含真实资源 ID 或用户输入。
 
 `config/hosted-dr-capabilities.json` 是 replay/secret/provider/contract/control-plane 的机器事实；当前
-`provisioning=not-provisioned`，只建立稳定入口 seam，不表示 Cloudflare LB/DNS 已启用。`pnpm check:hosted-dr`
-会阻断 route drift、不安全 replay、secret 值、缺 adapter/test/guard 与伪 production 状态。
+`defaultMode=client-preflight`、`managedControlPlane=optional-disabled`、`provisioning=not-provisioned`；后者不表示
+Cloudflare LB/DNS 已启用，也不再单独阻断 client-preflight build。`pnpm check:hosted-dr` 会阻断 route drift、内部/IP
+origin、不安全 replay、secret 值、缺 adapter/test/guard、projection drift 与伪 production 状态。
 
 ## 构建与容器运行
 
@@ -175,7 +208,9 @@ docker compose -f apps/api/compose.local.yml config
 ```
 
 Docker install layer 只复制 `@mahoshojo/api...` 的实际 workspace manifest 闭包，不把 D1 Gateway 或未来
-Admin/Desktop/Mobile app 带入 Hono image。
+Admin/Desktop/Mobile app 带入 Hono image。生产 Dockerfile、release-local Compose 与部署脚本的 runtime
+预检必须使用同一 `node:22-alpine@sha256:<digest>`；更新时三处同步修改并通过 release contract 测试，禁止通过
+Arcane 单独拉取浮动 tag 更新生产容器。
 
 生产启动会检查以下配置并在缺失时直接失败：Redis、有效 AI provider、32 字符以上的
 `SIGNATURE_SECRET_KEY`、明确的生产 CORS、D1 Gateway 凭据（或临时使用 Cloudflare 管理 API三项凭据），
@@ -203,8 +238,9 @@ reaper 对账，不伪造可对外读取的 failed/completed 终态。
 
 `.github/workflows/hono-deploy.yml` 继续保留受保护生产分支、Environment、SSH host key 和
 `cancel-in-progress: false` 门禁，但 build/container/artifact 路径只引用 `apps/api` owner。发布物由
-`index.mjs`、release-local `compose.yml` 和 `deploy-bundle.sh` 组成；`release.manifest` 覆盖完整 tuple，
-其 SHA-256 才是 release id。workflow 通过 `install-bundle.sh` 在 canonical `releases` 下创建随机 staging，
+`index.mjs`、release-local `compose.yml`、`deploy-bundle.sh`、Arena Room release gate 及其严格 schema validator
+组成；`release.manifest` 覆盖完整 tuple，其 SHA-256 才是 release id。workflow 通过 `install-bundle.sh` 在
+canonical `releases` 下创建随机 staging，
 上传后持 deploy lock 复验精确 tuple，再原子纳管最终目录；不会在校验前向最终 release 路径写文件。之后才
 执行 release-local deploy script。
 
@@ -215,6 +251,12 @@ reaper 对账，不伪造可对外读取的 failed/completed 终态。
 终止时则由下一次部署先恢复未完成事务。journal 缺字段、重复/额外字段或指向非 content-addressed release
 时保留证据并 fail closed。
 
+候选 gate 会在 Compose 激活前由无网络、只读、drop-all-capabilities 的固定 Node runtime 执行严格 JSON schema
+校验；回滚读取 failed gate 前会再次复验 failed tuple 的两层摘要。writer-enabled 回滚还会用同一 validator
+校验 target reader contract；历史 `legacy-layout + gate` tuple 被显式拒绝，不能冒认 compatible reader。
+初始 gate-only content-addressed tuple 只在字段与 accepted writer-disabled gate 完全精确匹配时使用隔离兼容 reader，供失败
+transaction 回滚；writer-enabled、malformed 或需要证明 target reader contract 的 gate-only tuple 均 fail closed。
+
 首次从旧生产布局升级时，脚本只接受旧手册记录的精确 schema：根 `.env` 单字段指向
 `releases/<64hex>`，该目录含普通 `index.mjs` 与精确 `index.mjs.sha256`，根目录含普通
 `compose.yml`/`deploy-bundle.sh`，且尚无 `current` 和 `deployment-format`。脚本复验 checksum、Compose
@@ -223,7 +265,9 @@ config 与旧 runtime 生产配置后，才复制成带 `legacy-layout` 标记�
 删除旧 release 的 `index.mjs`/`index.mjs.sha256` 或根 `compose.yml`。一旦写入
 `deployment-format=release-tuple-v2`，managed `.env`/`current` 缺失、不一致、checksum 损坏、含符号链接或
 config 无效都会在激活前 fail closed，不会重新降级纳管。部署主机必须提供 `flock`、`mktemp`、`realpath`、
-`sha256sum`、GNU `find -printf`、`cmp`、Docker Compose、`curl` 和标准 POSIX 工具。
+`stat`、`id`、`sha256sum`、GNU `find -printf`、`cmp`、Docker Compose、`curl` 和标准 POSIX 工具。
+`/opt/mahoshojo-hono/.env.hono` 必须是当前部署用户所有、权限为 `0600` 的普通文件且不得为符号链接；该门禁在
+创建部署锁和执行任何 Docker 命令前检查。
 G25C 只实现并在本地/fault-injection 验证该流程，没有执行 production deploy、切流或 credential 变更。
 
 生产切流只应将 `config/hono-api-routes.json` 中的精确路径转发到 Hono origin；其他 `/api/*` 继续访问 Next.js。前端继续使用

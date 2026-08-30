@@ -15,6 +15,10 @@ import path from 'node:path';
 import { afterEach, describe, expect, test } from 'vitest';
 
 const installerPath = path.resolve('apps/api/deploy/install-bundle.sh');
+const arenaRoomReleaseGatePath = path.resolve('config/arena-room-release-gate.json');
+const arenaRoomReleaseGateSchemaPath = path.resolve(
+  'scripts/arena-room-release-gate-schema.mjs',
+);
 const temporaryDirectories: string[] = [];
 const realMvPath = spawnSync('which', ['mv'], { encoding: 'utf8' }).stdout.trim();
 const sha256 = (content: string): string => createHash('sha256').update(content).digest('hex');
@@ -49,6 +53,11 @@ const writeTuple = (directory: string, label = 'fixture') => {
     'index.mjs': `console.info(${JSON.stringify(label)});\n`,
     'compose.yml': `services:\n  hono:\n    image: ${label}\n`,
     'deploy-bundle.sh': '#!/bin/sh\nexit 0\n',
+    'arena-room-release-gate.json': readFileSync(arenaRoomReleaseGatePath, 'utf8'),
+    'arena-room-release-gate-schema.mjs': readFileSync(
+      arenaRoomReleaseGateSchemaPath,
+      'utf8',
+    ),
   };
   const manifest = Object.entries(files)
     .map(([name, content]) => `${sha256(content)}  ${name}`)

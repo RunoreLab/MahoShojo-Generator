@@ -1,3 +1,5 @@
+import { parseHostedApiDeploymentTarget } from '@mahoshojo/hosted-api/deployment-target';
+
 const LOCAL_HTTP_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
 
 const invalidConfiguration = (reason: string): Error =>
@@ -22,7 +24,11 @@ export const parseTrustedBetterAuthBaseUrl = (
   if (url.username || url.password) {
     throw invalidConfiguration('不得包含 URL credentials');
   }
-  const allowLocalHttp = options.allowLocalHttp ?? process.env.NODE_ENV !== 'production';
+  const deploymentTarget = parseHostedApiDeploymentTarget(
+    process.env.NEXT_PUBLIC_HOSTED_API_ENVIRONMENT,
+  );
+  const allowLocalHttp = options.allowLocalHttp
+    ?? (deploymentTarget === 'local' || deploymentTarget === 'test');
   if (
     url.protocol !== 'https:'
     && !(allowLocalHttp && url.protocol === 'http:' && LOCAL_HTTP_HOSTS.has(url.hostname))

@@ -57,6 +57,7 @@ jobs:
       - name: Verify Hono container build
         env:
           HONO_RELEASE_DIR: /tmp/mahoshojo-hono-release
+          HONO_HOSTED_API_ENVIRONMENT: production
           COMPOSE_ENV_DIRECTORY: /opt/mahoshojo-hono
           COMPOSE_ENV_FILE: /opt/mahoshojo-hono/.env.hono
         run: |
@@ -71,21 +72,26 @@ jobs:
           trap cleanup_compose_environment EXIT
           sudo install -m 600 /dev/null "$COMPOSE_ENV_FILE"
           docker build --file apps/api/Dockerfile .
-          sudo --preserve-env=HONO_RELEASE_DIR docker compose -f apps/api/deploy/compose.yml config --no-env-resolution
+          sudo --preserve-env=HONO_RELEASE_DIR,HONO_HOSTED_API_ENVIRONMENT docker compose -f apps/api/deploy/compose.yml config --no-env-resolution
 
       - name: Build single-file server
         run: |
           pnpm --filter @mahoshojo/api run deploy:prepare
           cp apps/api/deploy/compose.yml apps/api/dist/compose.yml
           cp apps/api/deploy/deploy-bundle.sh apps/api/dist/deploy-bundle.sh
+          cp config/arena-room-release-gate.json apps/api/dist/arena-room-release-gate.json
+          cp scripts/arena-room-release-gate-schema.mjs apps/api/dist/arena-room-release-gate-schema.mjs
           cd apps/api/dist
-          sha256sum index.mjs compose.yml deploy-bundle.sh > release.manifest
+          sha256sum index.mjs compose.yml deploy-bundle.sh \
+            arena-room-release-gate.json arena-room-release-gate-schema.mjs > release.manifest
           sha256sum release.manifest > release.sha256
 
       - name: Verify Hono built runtime integration
         env:
           REDIS_URL: redis://127.0.0.1:6379
           D1_GATEWAY_URL: http://127.0.0.1:8788
+          HOSTED_API_ENVIRONMENT: local
+          HOSTED_DR_LOCAL_FAULT_INJECTION: 'true'
           D1_GATEWAY_HMAC_SECRET: g25c-ci-only-d1-gateway-hmac-secret
           HONO_AUTH_MODE: bearer
           HONO_CORS_ORIGINS: https://g25c-ci.example.invalid
@@ -131,6 +137,9 @@ jobs:
           fi
 
           pnpm --filter @mahoshojo/api run verify:arena-redis
+          ROOM_REDIS_VERIFY=true ROOM_REDIS_VERIFY_KEY_PREFIX=gmr10-deploy-build \
+            pnpm --filter @mahoshojo/api run verify:room-redis
+          REDIS_URL=redis://127.0.0.1:6379/15 pnpm run verify:hosted-dr:redis
           pnpm run verify:server:runtime
 
       - name: Upload bundle
@@ -141,6 +150,8 @@ jobs:
             apps/api/dist/index.mjs
             apps/api/dist/compose.yml
             apps/api/dist/deploy-bundle.sh
+            apps/api/dist/arena-room-release-gate.json
+            apps/api/dist/arena-room-release-gate-schema.mjs
             apps/api/dist/release.manifest
             apps/api/dist/release.sha256
           if-no-files-found: error
@@ -186,8 +197,8 @@ jobs:
           case "$upload_suffix" in
             ''|*[!A-Za-z0-9]*) echo "远端 upload staging 后缀非法" >&2; exit 1 ;;
           esac
-          scp -i ~/.ssh/deploy_key artifact/index.mjs artifact/compose.yml artifact/deploy-bundle.sh artifact/release.manifest artifact/release.sha256 "$VPS_USER@$VPS_HOST:$upload_dir/"
+          scp -i ~/.ssh/deploy_key artifact/index.mjs artifact/compose.yml artifact/deploy-bundle.sh artifact/arena-room-release-gate.json artifact/arena-room-release-gate-schema.mjs artifact/release.manifest artifact/release.sha256 "$VPS_USER@$VPS_HOST:$upload_dir/"
           installed_dir="$(ssh -i ~/.ssh/deploy_key "$VPS_USER@$VPS_HOST" "sh -s -- install '$release_id' '$upload_dir'" < apps/api/deploy/install-bundle.sh)"
           expected_dir="/opt/mahoshojo-hono/releases/$release_id"
           test "$installed_dir" = "$expected_dir"
-          ssh -i ~/.ssh/deploy_key "$VPS_USER@$VPS_HOST" "$installed_dir/deploy-bundle.sh $release_id https://homura.colanns.me"
+          ssh -i ~/.ssh/deploy_key "$VPS_USER@$VPS_HOST" "HONO_HOSTED_API_ENVIRONMENT=production '$installed_dir/deploy-bundle.sh' '$release_id' https://homura.colanns.me"

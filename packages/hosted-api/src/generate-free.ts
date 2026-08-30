@@ -1,7 +1,7 @@
 import { z } from 'zod/v3';
 import {
   CustomProviderRequestSchema,
-  HOSTED_GENERATION_INTERNAL_MESSAGE,
+  buildHostedGenerationErrorPayload,
   createSafeHostedGenerationError,
   jsonResponse,
   type CustomProviderRequest,
@@ -161,12 +161,9 @@ const createFreeService = <
     const output = await options.transformOutput(request, input, generated.value);
     if (!output.completed) return output.response;
     return await options.dependencies.buildResponse(request, input, output.value);
-  } catch {
-    options.dependencies.logError(createSafeHostedGenerationError());
-    return jsonResponse({
-      error: '生成失败',
-      message: HOSTED_GENERATION_INTERNAL_MESSAGE,
-    }, 500);
+  } catch (error) {
+    options.dependencies.logError(createSafeHostedGenerationError(error));
+    return jsonResponse(buildHostedGenerationErrorPayload(error, '生成失败'), 500);
   }
 };
 

@@ -540,7 +540,7 @@ export function PvpLobbyPage() {
                       onKeyDown={(e) => {
                         if (e.key === 'Enter') void handleJoin();
                       }}
-                      placeholder="例如：a1b2c3… 或 https://.../pvp/a1b2c3"
+                      placeholder="例如：a1b2c3… 或 https://example.invalid/pvp/a1b2c3"
                       inputMode="text"
                       autoCapitalize="none"
                       autoCorrect="off"

@@ -12,6 +12,7 @@ const honoApiRoutes = JSON.parse(readFileSync(
 )) as { exitedRouteIds: string[] };
 
 const config: HonoServerConfig = {
+  arenaMultiplayerEnabled: false,
   host: '127.0.0.1',
   port: 8787,
   nodeEnv: 'test',
@@ -20,6 +21,7 @@ const config: HonoServerConfig = {
   redisRequired: false,
   d1Required: false,
   corsOrigins: ['http://localhost:3000'],
+  arenaRoomAllowedOrigins: ['http://localhost:3000'],
   authMode: 'hybrid',
 };
 
@@ -70,6 +72,29 @@ describe('Hono server app', () => {
         redis: { configured: false, required: false, ready: false },
         d1: { configured: false, required: false, ready: false, transport: 'none' },
       },
+    });
+  });
+
+  it('公开 readiness 对受信 Web origin 返回精确 CORS 与 no-store contract', async () => {
+    const app = createHonoApp({
+      ...config,
+      corsOrigins: ['https://mahoshojo.colanns.me'],
+    }, createRedisStub());
+
+    const response = await app.request('/api/health/ready', {
+      headers: { Origin: 'https://mahoshojo.colanns.me' },
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('access-control-allow-origin')).toBe(
+      'https://mahoshojo.colanns.me',
+    );
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    expect(await response.json()).toMatchObject({
+      ok: true,
+      service: 'mahoshojo-hono',
+      placement: 'hono-primary',
+      contractVersion: 'g25e1-v1',
     });
   });
 
@@ -136,7 +161,7 @@ describe('Hono server app', () => {
     expect(JSON.stringify(errorSpy.mock.calls)).not.toContain('redis-url-secret-canary');
   });
 
-  it('共用 Redis 时使用环境前缀隔离限流键', async () => {
+  it('共用 Redis 时将环境前缀交给 RedisRuntime 统一隔离限流键', async () => {
     const redis = createRedisStub();
     const capturedNamespaces: string[] = [];
     redis.consumeFixedWindow = async (input) => {
@@ -147,7 +172,7 @@ describe('Hono server app', () => {
 
     await app.request('/api/auth/not-existing');
 
-    expect(capturedNamespaces).toEqual(['preview:api', 'preview:auth']);
+    expect(capturedNamespaces).toEqual(['api', 'auth']);
   });
 
   it('Redis 命令异常且为必需依赖时稳定返回 503', async () => {

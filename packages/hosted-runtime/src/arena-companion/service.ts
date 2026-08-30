@@ -228,6 +228,7 @@ type CollectedGeneration = {
   meta: Record<string, unknown>;
   telemetry: Record<string, unknown>;
   terminalError: string | null;
+  terminalErrorMessage: string | null;
   completed: boolean;
   occurredAt: string | null;
 };
@@ -252,6 +253,7 @@ const collectSubscription = async (
   let meta: Record<string, unknown> = {};
   let telemetry: Record<string, unknown> = {};
   let terminalError: string | null = null;
+  let terminalErrorMessage: string | null = null;
   let completed = false;
   let occurredAt: string | null = null;
   const reader = subscription.events.getReader();
@@ -280,13 +282,23 @@ const collectSubscription = async (
       }
       if (event.type === 'error') {
         terminalError = textOf(data.code) || 'GENERATION_FAILED';
+        terminalErrorMessage = textOf(data.error) || textOf(data.message) || null;
         break;
       }
     }
   } finally {
     reader.releaseLock();
   }
-  return { markdown, reasoning, meta, telemetry, terminalError, completed, occurredAt };
+  return {
+    markdown,
+    reasoning,
+    meta,
+    telemetry,
+    terminalError,
+    terminalErrorMessage,
+    completed,
+    occurredAt,
+  };
 };
 
 const operationFromRequest = (request: Request): ArenaCompanionOperation => (
@@ -353,7 +365,7 @@ export const createArenaCompanionService = (
     if (!collected.completed) {
       return jsonResponse({
         code: collected.terminalError ?? 'GENERATION_STREAM_INCOMPLETE',
-        error: 'Arena generation failed',
+        error: collected.terminalErrorMessage ?? 'Arena generation failed',
         generationId: upstream.generationId,
       }, 502, upstream.headers);
     }

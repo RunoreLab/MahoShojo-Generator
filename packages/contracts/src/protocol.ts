@@ -10,6 +10,7 @@ import {
   MAX_STORY_FRAME_BYTES,
 } from './limits';
 import {
+  ArenaProposalIdSchema,
   ResolvedArenaProposalStatusSchema,
   RoomStoredArenaProposalSchema,
   SubmittedArenaProposalSchema,
@@ -198,7 +199,7 @@ export const RoomEventSchema = z.discriminatedUnion('type', [
   z.object({
     ...ControlEventBaseSchema,
     type: z.literal('proposal.resolved'),
-    payload: z.object({ proposalId: OpaqueKeySchema, status: ResolvedArenaProposalStatusSchema }).strict(),
+    payload: z.object({ proposalId: ArenaProposalIdSchema, status: ResolvedArenaProposalStatusSchema }).strict(),
   }).strict(),
   z.object({ ...ControlEventBaseSchema, type: z.literal('generation.started'), payload: GenerationEventPayloadSchema }).strict(),
   z.object({ ...ControlEventBaseSchema, type: z.literal('generation.completed'), payload: GenerationCompletedPayloadSchema }).strict(),

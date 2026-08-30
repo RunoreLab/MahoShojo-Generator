@@ -4,12 +4,16 @@
 
 - 状态：`accepted` / v1 设计基线
 - 编写时间：2026-08-21
-- 最近修订：2026-08-22
+- 最近修订：2026-08-28（同步 Hono + Redis 与 Redis-only directory superseding 修订）
 - 适用项目：MahoShojo Generator
 - 目标功能：竞技场多人观看、配置同步与提案协作
-- 目标平台：Cloudflare Workers + Durable Objects + D1 + R2 + existing Arena generation service
-- 核心原则：产品/UI 继续复用现有竞技场；实时房间协调独立部署；不复制既有战报生成核心语义
-- 部署 ADR：`docs/decisions/2026-08-22_184800_ArenaRoom部署边界与实时权威决策.md`
+- 目标平台：Hono / Node + Redis Room runtime + existing D1/R2 generation durable facts
+- 核心原则：产品/UI 继续复用现有竞技场；客户端不可信、服务器权威；不复制既有战报生成核心语义
+- 当前部署 ADR：`docs/decisions/2026-08-25_104400_ArenaRoom运行时可移植与HonoRedis首发决策.md`
+
+> 实现优先级：本文的业务/wire/安全语义继续有效；DO/Hibernation 专属运行时表述由
+> `SPEC-arena-multiplayer-hono-redis-runtime-amendment-v1` 覆盖，D1 Room directory 表述由
+> `SPEC-arena-multiplayer-redis-only-directory-amendment-v1` 覆盖。账户、generation durable facts 等既有 D1 用途不受影响。
 
 ## 2. 背景与目标
 
@@ -324,7 +328,7 @@ v1 只定义：
 
 最后一名成员显式退出且房间已无人：
 
-- 删除 D1 directory entry；
+- 在 checkpoint terminal commit 的同一 Redis 原子边界删除 directory record/index；
 - 清理 Durable Object storage；
 - 房间销毁。
 
@@ -702,38 +706,20 @@ AI 流式输出转发给房间时：
 - 每条 token/chunk；
 - 临时 UI 状态。
 
-## 17. D1 使用原则
+## 17. Redis-only Room directory 原则
 
-D1 仅保存低频、跨对象查询所需事实。它是 **derived directory/index**，不是单房间 lifecycle 的真相源；目标 ArenaRoom DO 才是最终权威。
+Redis Room checkpoint 是活动 Room 的唯一 session authority。Room directory 使用同 Redis 故障域内的
+TTL-bound record 与有界 public sorted-set index，只提供 discovery 候选。
 
 因此：
 
-- public listing 可以依赖 D1；
-- join 必须最终由目标 DO 验证 room/membership；
-- DO 已 terminal/closed 时，D1 残留行不得使房间复活；
-- directory create/update/delete 必须幂等、可重试；
-- 允许低频 reconciliation 清理 orphan row，不用高频全表轮询维持一致。
-
-建议最小 directory：
-
-```sql
-arena_multiplayer_rooms (
-  id,
-  host_user_id,
-  title,
-  visibility,
-  status,
-  created_at,
-  last_activity_at
-)
-```
-
-索引应服务实际查询路径，例如：
-
-- `status, last_activity_at`
-- `host_user_id, status`
-
-不要通过 D1 持久化 presence。
+- public listing 查询有硬 limit/cursor，返回前重验 current checkpoint open/deadline/epoch/host；
+- join/ticket/membership 必须最终由 server authority + Redis checkpoint 验证；
+- absent/expired/terminal/malformed checkpoint 不得被 stale directory member 复活；
+- create/recovery/close 所需 directory mutation 与 checkpoint 在同一 Lua/CAS 边界内完成；
+- lazy cleanup 使用 exact raw/CAS，不得误删并发 replacement；
+- presence、heartbeat、story chunk 不写 directory；
+- Arena v1 不发布 `arena_multiplayer_rooms` 或任何 D1 Room directory migration。
 
 个人页若启用多人战报：
 
@@ -769,14 +755,14 @@ Room local persistence 只保存跨 hibernation 必须恢复的状态：
 
 1. 将 durable room state 标记为 closing/terminal，阻止新的 join/publish；
 2. 广播 `room.closing`；
-3. best-effort 幂等删除 D1 directory；
+3. 在 terminal checkpoint commit 的同一 Redis 原子边界删除 directory record/index；
 4. `ctx.storage.deleteAll()` 彻底清空 room storage。
 
 对于 compatibility date >= 2026-02-24 的 SQLite-backed Durable Object，`deleteAll()` 同时删除 active alarm。
 
-销毁后的“缺少 room metadata”必须解释为 **room 不存在**。join/reconnect 路径不得在发现空 storage 时自动初始化房间；只有经过授权的 create-room 流程才能创建新房间，因此 D1 orphan row 不能把已销毁 room 复活。
+销毁后的“缺少 room metadata”必须解释为 **room 不存在**。join/reconnect 路径不得在发现空 storage 时自动初始化房间；只有经过授权的 create-room 流程才能创建新房间，因此 stale Redis directory member 不能把已销毁 room 复活。
 
-销毁流程必须幂等；D1 删除失败由低频 reconciliation 修复。
+销毁流程必须幂等；directory cleanup 不得绕过 checkpoint exact authority fence。
 
 ## 19. 房间发现
 
@@ -890,7 +876,7 @@ v1 可支持：
 9. host explicit leave/close 关闭房间；单连接关闭不得模拟该命令。
 10. 房间销毁清理临时 Proposal/revision/runtime storage。
 11. 战报与角色更新沿用现有竞技场非持久语义，final result 以既有 generation storage 为权威。
-12. D1 不承担实时 presence 或高频 room state，且不是单房间 lifecycle 真相源。
+12. Redis directory 不承担 presence 或高频 story state，且不是单房间 lifecycle 真相源。
 13. WebSocket 健康时不得退化为固定频率轮询。
 14. accepted third-party change 只有实际进入 frozen snapshot 时才影响 `collaborativeInfluence`/provenance。
 15. stale Proposal 正确性不依赖保存无限历史，change 自带 typed BASE precondition。
@@ -928,7 +914,7 @@ v1 可支持：
 - last member 清理 room。
 - 一个 alarm scheduler 可同时正确处理 host-offline 与 room-idle deadline。
 - alarm retry / cleanup 可重复执行。
-- D1 orphan directory row 不会复活 closed DO。
+- stale Redis directory member 不会复活 absent/closed checkpoint。
 
 ### Generation
 
@@ -946,7 +932,7 @@ v1 可支持：
 - idle room 无固定轮询。
 - idle WebSocket 可 hibernate。
 - story delta 不按 token 调用 DO。
-- presence 不写 D1。
+- presence 不写 directory。
 - Proposal 不产生逐键写入。
 - room directory 查询使用索引。
 - 删除房间后 DO storage 为空。
@@ -955,7 +941,7 @@ v1 可支持：
 
 本设计遵循以下原则：
 
-> D1 管跨房间长期事实；Durable Object 管单房间协调事实；WebSocket 管实时事件；R2/既有 generation 存储管最终战报；AI 永远只生成一次；普通成员永远只订阅同一结果。
+> Redis checkpoint 管活动 Room session authority；Redis directory 只管 discovery 候选；WebSocket 管实时事件；D1/R2/既有 generation 存储管持久业务事实；AI 永远只生成一次；普通成员永远只订阅同一结果。
 
 外部设计依据：
 

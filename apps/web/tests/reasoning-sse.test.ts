@@ -5,6 +5,7 @@ import {
   encodeSseEvent,
   shouldUseClientSse,
 } from '@/lib/stream/reasoning-sse';
+import { createSafePublicAiError } from '@mahoshojo/hosted-api/regular-generation';
 
 describe('stream/reasoning-sse', () => {
   test('shouldUseClientSse 支持 query 与 Accept 双判定', () => {
@@ -106,8 +107,30 @@ describe('stream/reasoning-sse', () => {
     expect(serialized).not.toContain('sse-secret-canary');
   });
 
-  test('上游流读取失败时只返回固定错误码', async () => {
+  test('上游流读取失败时返回同一安全公共投影', async () => {
     const bridge = createReasoningSseBridge('流错误投影测试');
+    const safeError = createSafePublicAiError({
+      code: 'AI_UPSTREAM_REQUEST_FAILED',
+      message: 'AI_APICallError: 余额不足（HTTP 402）',
+      upstreamStatus: 402,
+      upstreamRequestId: 'req-stream-402',
+    });
+    const response = bridge.toResponse(new Response(new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.error(safeError);
+      },
+    })));
+
+    const serialized = await response.text();
+
+    expect(serialized).toContain('AI_UPSTREAM_REQUEST_FAILED');
+    expect(serialized).toContain('AI_APICallError: 余额不足（HTTP 402）');
+    expect(serialized).toContain('req-stream-402');
+    expect(serialized).toContain('"upstreamStatus":402');
+  });
+
+  test('未知流错误继续 generic 且不泄漏消息', async () => {
+    const bridge = createReasoningSseBridge('未知流错误投影测试');
     const response = bridge.toResponse(new Response(new ReadableStream<Uint8Array>({
       pull(controller) {
         controller.error(new Error('stream-secret-canary'));
@@ -116,7 +139,8 @@ describe('stream/reasoning-sse', () => {
 
     const serialized = await response.text();
 
-    expect(serialized).toContain('AI_UPSTREAM_REQUEST_FAILED');
+    expect(serialized).toContain('HOSTED_GENERATION_FAILED');
+    expect(serialized).toContain('服务器内部错误');
     expect(serialized).not.toContain('stream-secret-canary');
   });
 });

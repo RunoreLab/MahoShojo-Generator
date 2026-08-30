@@ -32,7 +32,7 @@ import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client
 import { AI_META_REQUEST_HEADER, AI_META_REQUEST_VALUE, readJsonWithAiMeta } from '@/lib/client/read-json-with-ai-meta';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { authStorage } from '@/lib/auth';
-import { generationApiFetch } from '@/lib/hono-api-client';
+import { useGenerationApiIntentLatch } from '@/lib/use-generation-api-intent-latch';
 import { STREAM_ABORT_REASON_USER } from '@/lib/stream/abort';
 import type { AIReasoningEnvelope } from '@/types/ai-reasoning';
 import type { CharacterCardPortraitAsset } from '@/types/visual-asset';
@@ -245,6 +245,7 @@ const buildFieldGuideForUi = (schemaId: FreeSchemaId): string => {
 };
 
 export function FreePage() {
+  const generationApiIntentLatch = useGenerationApiIntentLatch();
   const router = useAppRouterAdapter();
   const attachmentInputRef = useRef<HTMLInputElement>(null);
 
@@ -560,7 +561,9 @@ export function FreePage() {
         streamAbortControllerRef.current?.abort(STREAM_ABORT_REASON_USER);
         streamAbortControllerRef.current = streamController;
       }
-      const response = await generationApiFetch(endpoint, {
+      const generationIntent = generationApiIntentLatch.tryAcquire();
+      if (!generationIntent) return;
+      const response = await generationIntent.dispatch(endpoint, {
         method: 'POST',
         headers: requestHeaders,
         body: JSON.stringify(requestBody),

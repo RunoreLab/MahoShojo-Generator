@@ -22,7 +22,7 @@ import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client
 import { AI_META_REQUEST_HEADER, AI_META_REQUEST_VALUE, readJsonWithAiMeta } from '@/lib/client/read-json-with-ai-meta';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { authStorage } from '@/lib/auth';
-import { generationApiFetch } from '@/lib/hono-api-client';
+import { useGenerationApiIntentLatch } from '@/lib/use-generation-api-intent-latch';
 import { STREAM_ABORT_REASON_USER } from '@/lib/stream/abort';
 import { buildCustomProviderRequestPayload } from '@/lib/ai/custom-provider';
 import {
@@ -62,6 +62,7 @@ type RateLimitError = Error & {
 };
 
 export const ScenarioPage: React.FC = () => {
+  const generationApiIntentLatch = useGenerationApiIntentLatch();
   const router = useAppRouterAdapter();
   const [answers, setAnswers] = useState<Record<string, string>>(createInitialScenarioAnswers);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -336,7 +337,9 @@ export const ScenarioPage: React.FC = () => {
         streamAbortControllerRef.current?.abort(STREAM_ABORT_REASON_USER);
         streamAbortControllerRef.current = streamController;
       }
-      const response = await generationApiFetch(endpoint, {
+      const generationIntent = generationApiIntentLatch.tryAcquire();
+      if (!generationIntent) return;
+      const response = await generationIntent.dispatch(endpoint, {
         method: 'POST',
         headers: requestHeaders,
         body: JSON.stringify({
