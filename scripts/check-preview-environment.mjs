@@ -8,7 +8,6 @@ const REPOSITORY_ROOT = resolve(SCRIPT_DIRECTORY, '..');
 const WRANGLER_PATH = resolve(REPOSITORY_ROOT, 'apps/web/wrangler.jsonc');
 const WORKFLOW_PATH = resolve(REPOSITORY_ROOT, '.github/workflows/preview-deploy.yml');
 const ENVIRONMENT_PATH = resolve(REPOSITORY_ROOT, 'config/preview-environment.json');
-const SCHEMA_PATH = resolve(REPOSITORY_ROOT, 'config/hosted-dr-schema.json');
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const SAFE_REDIS_PREFIX_PATTERN = /^[a-z0-9_-]{1,32}$/u;
 
@@ -43,7 +42,6 @@ export const validatePreviewEnvironment = ({
   wrangler,
 }) => {
   const issues = [];
-  const schema = readJson(SCHEMA_PATH);
   const entries = readD1Entries(wrangler);
   const productionIds = new Set(
     entries
@@ -53,7 +51,7 @@ export const validatePreviewEnvironment = ({
   );
   const previewEntries = entries.filter(({ section }) => section === 'env.preview.d1_databases');
 
-  if (environment?.schemaVersion !== 1) issues.push('preview environment schemaVersion 必须为 1');
+  if (environment?.schemaVersion !== 2) issues.push('preview environment schemaVersion 必须为 2');
   if (environment?.environment !== 'preview') issues.push('preview environment 必须声明 environment=preview');
   if (!['not-provisioned', 'provisioned'].includes(environment?.status)) {
     issues.push('preview environment status 必须为 not-provisioned 或 provisioned');
@@ -65,6 +63,9 @@ export const validatePreviewEnvironment = ({
       issues.push(`preview resources.${resource} 未声明`);
     }
   }
+  if (environment?.resources?.d1 !== 'shared-production') {
+    issues.push('preview D1 必须明确声明 shared-production 模式');
+  }
   if (environment?.resources?.redis !== 'shared-prefix') {
     issues.push('preview Redis 必须明确声明 shared-prefix 逻辑隔离模式');
   }
@@ -74,29 +75,14 @@ export const validatePreviewEnvironment = ({
   if (environment?.redisIsolation?.requiredKeyPrefix !== 'preview') {
     issues.push('preview Redis 必须使用 preview key prefix');
   }
-  if (
-    environment?.schemaGate?.source !== 'config/hosted-dr-schema.json'
-    || environment?.schemaGate?.physicalProbe !== schema.physicalProbe?.status
-    || environment?.schemaGate?.activationRequires !== 'external-evidence'
-    || schema.physicalProbe?.activation !== 'require-external-evidence'
-  ) {
-    issues.push('preview schema gate 必须要求 isolated D1 external evidence');
-  }
-
-  if (previewEntries.length > 1) issues.push('preview 只能声明一个 D1 binding');
+  if (previewEntries.length !== 1) issues.push('preview 必须声明一个 production-shared D1 binding');
   for (const { entry } of previewEntries) {
     const databaseId = entry?.database_id;
     if (typeof databaseId !== 'string' || !UUID_PATTERN.test(databaseId)) {
       issues.push('preview D1 database_id 必须是合法 UUID');
-    } else if (productionIds.has(databaseId)) {
-      issues.push('preview D1 不得复用 production database_id');
+    } else if (!productionIds.has(databaseId)) {
+      issues.push('preview D1 必须复用 production database_id');
     }
-  }
-  if (environment?.status === 'not-provisioned' && previewEntries.length > 0) {
-    issues.push('preview status=not-provisioned 时不得存在 D1 binding');
-  }
-  if (environment?.status === 'provisioned' && previewEntries.length !== 1) {
-    issues.push('preview status=provisioned 必须存在一个独立 D1 binding');
   }
 
   if (typeof workflow !== 'string' || workflow.length === 0) {
@@ -136,7 +122,6 @@ export const validatePreviewEnvironment = ({
       'PREVIEW_DATA_ENVIRONMENT',
       'PREVIEW_REDIS_ISOLATION',
       'PREVIEW_ENV_FILE_PATH',
-      'PREVIEW_D1_SCHEMA_EVIDENCE_PATH',
     ];
     for (const name of requiredInputs) {
       if (!environmentValue(env, name)) issues.push(`${name} 未提供`);
@@ -146,8 +131,8 @@ export const validatePreviewEnvironment = ({
     if (previewDatabaseId && previewDatabaseId !== configuredPreviewId) {
       issues.push('PREVIEW_D1_DATABASE_ID 与 wrangler preview binding 不一致');
     }
-    if (previewDatabaseId && productionIds.has(previewDatabaseId)) {
-      issues.push('PREVIEW_D1_DATABASE_ID 不得指向 production D1');
+    if (previewDatabaseId && !productionIds.has(previewDatabaseId)) {
+      issues.push('PREVIEW_D1_DATABASE_ID 必须指向 production D1');
     }
     if (environmentValue(env, 'PREVIEW_VPS_USER') === 'root') {
       issues.push('PREVIEW_VPS_USER 不得为 root');
@@ -155,8 +140,8 @@ export const validatePreviewEnvironment = ({
     if (environmentValue(env, 'PREVIEW_REDIS_KEY_PREFIX') !== 'preview') {
       issues.push('PREVIEW_REDIS_KEY_PREFIX 必须为 preview');
     }
-    if (environmentValue(env, 'PREVIEW_DATA_ENVIRONMENT') !== 'isolated') {
-      issues.push('PREVIEW_DATA_ENVIRONMENT 必须为 isolated');
+    if (environmentValue(env, 'PREVIEW_DATA_ENVIRONMENT') !== 'shared-production') {
+      issues.push('PREVIEW_DATA_ENVIRONMENT 必须为 shared-production');
     }
     if (environmentValue(env, 'PREVIEW_REDIS_ISOLATION') !== 'prefix') {
       issues.push('PREVIEW_REDIS_ISOLATION 必须为 prefix');
@@ -167,10 +152,6 @@ export const validatePreviewEnvironment = ({
     }
     if (envFilePath === '/opt/mahoshojo-hono/.env.hono') {
       issues.push('PREVIEW_ENV_FILE_PATH 不得指向 production .env.hono');
-    }
-    const schemaEvidencePath = environmentValue(env, 'PREVIEW_D1_SCHEMA_EVIDENCE_PATH');
-    if (schemaEvidencePath && (!schemaEvidencePath.startsWith('/') || !schemaEvidencePath.endsWith('.json'))) {
-      issues.push('PREVIEW_D1_SCHEMA_EVIDENCE_PATH 必须是绝对路径下的 JSON evidence');
     }
   }
 
@@ -197,7 +178,7 @@ export const main = ({ argv = process.argv.slice(2), env = process.env } = {}) =
   if (!requireProvisioned && status === 'not-provisioned') {
     console.log('[check:preview:environment] DEFERRED：preview 资源尚未纳管，保持 fail-closed。');
   } else {
-    console.log('[check:preview:environment] 通过：preview 资源与部署输入满足隔离门禁。');
+    console.log('[check:preview:environment] 通过：preview 资源与部署输入满足门禁。');
   }
   return 0;
 };
