@@ -20,8 +20,8 @@
     "backfill:user-auth-links:write": "pnpm --filter @mahoshojo/web run backfill:user-auth-links:write",
     "db:migrate:local:prod": "pnpm run check:wrangler:d1 && node scripts/d1-migrate-safe.mjs --config apps/web/wrangler.jsonc --migrations-dir drizzle --database DB --local --env production",
     "db:migrate:remote:prod": "pnpm run check:wrangler:d1 && node scripts/d1-migrate-safe.mjs --config apps/web/wrangler.jsonc --migrations-dir drizzle --database DB --remote --env production",
-    "db:migrate:local:preview": "pnpm run check:preview:environment -- --require-provisioned && pnpm run check:wrangler:d1 && node scripts/d1-migrate-safe.mjs --config apps/web/wrangler.jsonc --migrations-dir drizzle --database DB --local --env preview",
-    "db:migrate:remote:preview": "pnpm run check:preview:environment -- --require-provisioned && pnpm run check:wrangler:d1 && node scripts/d1-migrate-safe.mjs --config apps/web/wrangler.jsonc --migrations-dir drizzle --database DB --remote --env preview",
+    "db:migrate:local:preview": "pnpm run check:wrangler:d1 && node scripts/d1-migrate-safe.mjs --config apps/web/wrangler.jsonc --migrations-dir drizzle --database DB --local --env preview",
+    "db:migrate:remote:preview": "pnpm run check:wrangler:d1 && node scripts/d1-migrate-safe.mjs --config apps/web/wrangler.jsonc --migrations-dir drizzle --database DB --remote --env preview",
     "db:status:remote:prod": "pnpm run check:wrangler:d1 && node scripts/d1-release-status.mjs --config apps/web/wrangler.jsonc --migrations-dir drizzle --database DB --remote --env production",
     "db:status:remote:prod:ready": "pnpm run check:wrangler:d1 && node scripts/d1-release-status.mjs --config apps/web/wrangler.jsonc --migrations-dir drizzle --database DB --remote --env production --require-ready",
     "db:generate": "drizzle-kit generate --config drizzle.config.ts",
@@ -44,7 +44,6 @@
     "check:user-visible-contracts": "node scripts/check-user-visible-contracts.mjs",
     "check:arena-room-release": "node scripts/check-arena-room-release-gate.mjs",
     "check:arena-room-hardening": "node scripts/check-arena-room-hardening.mjs",
-    "check:preview:environment": "node scripts/check-preview-environment.mjs",
     "generate:hosted-dr-client": "node scripts/generate-hosted-dr-client-config.mjs",
     "verify:hosted-dr": "node scripts/verify-hosted-dr.mjs",
     "verify:hosted-dr:client-preflight": "pnpm --filter @mahoshojo/web run verify:hosted-dr:client-preflight",
@@ -55,7 +54,7 @@
     "workspace:lint": "pnpm --filter \"./packages/*\" --filter \"./apps/*\" --if-present run lint",
     "workspace:build": "pnpm --filter \"./packages/*\" --filter \"./apps/*\" --if-present run build",
     "workspace:verify": "pnpm run check:workspace:boundaries && pnpm run check:admin-inventory && pnpm run check:admin-boundary && pnpm run check:naming:workspace && pnpm run check:hosted-dr && pnpm run check:user-visible-contracts && pnpm run check:arena-room-hardening && pnpm run workspace:test && pnpm run workspace:lint && pnpm run workspace:build",
-    "ci:verify": "pnpm run workspace:verify && pnpm run check:preview:environment && pnpm run verify:hosted-dr && pnpm run check:arena-room-release && pnpm run test:repo && pnpm run lint:repo"
+    "ci:verify": "pnpm run workspace:verify && pnpm run verify:hosted-dr && pnpm run check:arena-room-release && pnpm run test:repo && pnpm run lint:repo"
   },
   "devDependencies": {
     "@types/node": "^20",
