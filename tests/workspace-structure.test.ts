@@ -371,6 +371,9 @@ describe('phase 2.5C Hono API workspace app ownership', () => {
 
     expect(compose).toContain('HOSTED_API_ENVIRONMENT: local');
     expect(compose).toContain('HOSTED_DR_LOCAL_FAULT_INJECTION: "true"');
+    expect(compose).toContain(
+      'R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:-${CLOUDFLARE_ACCOUNT_ID:?请配置 R2_ACCOUNT_ID 或 CLOUDFLARE_ACCOUNT_ID}}',
+    );
   });
 
   it('声明独立 app 生命周期，并由 root scripts 只做代理入口', () => {
