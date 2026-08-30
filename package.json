@@ -42,9 +42,11 @@
     "check:hosted-dr:schema": "node scripts/check-hosted-dr-schema.mjs",
     "check:hosted-dr": "pnpm run check:hosted-dr:schema && node scripts/check-hosted-dr-contract.mjs",
     "check:user-visible-contracts": "node scripts/check-user-visible-contracts.mjs",
+    "check:arena-room-origins": "node scripts/generate-arena-room-client-config.mjs",
     "check:arena-room-release": "node scripts/check-arena-room-release-gate.mjs",
     "check:arena-room-hardening": "node scripts/check-arena-room-hardening.mjs",
     "generate:hosted-dr-client": "node scripts/generate-hosted-dr-client-config.mjs",
+    "generate:arena-room-client": "node scripts/generate-arena-room-client-config.mjs --write",
     "verify:hosted-dr": "node scripts/verify-hosted-dr.mjs",
     "verify:hosted-dr:client-preflight": "pnpm --filter @mahoshojo/web run verify:hosted-dr:client-preflight",
     "verify:hosted-dr:redis": "HOSTED_DR_LOCAL_FAULT_INJECTION=true pnpm --filter @mahoshojo/api run verify:hosted-dr:redis",
@@ -53,7 +55,7 @@
     "workspace:test": "pnpm --filter \"./packages/*\" --filter \"./apps/*\" --if-present run test",
     "workspace:lint": "pnpm --filter \"./packages/*\" --filter \"./apps/*\" --if-present run lint",
     "workspace:build": "pnpm --filter \"./packages/*\" --filter \"./apps/*\" --if-present run build",
-    "workspace:verify": "pnpm run check:workspace:boundaries && pnpm run check:admin-inventory && pnpm run check:admin-boundary && pnpm run check:naming:workspace && pnpm run check:hosted-dr && pnpm run check:user-visible-contracts && pnpm run check:arena-room-hardening && pnpm run workspace:test && pnpm run workspace:lint && pnpm run workspace:build",
+    "workspace:verify": "pnpm run check:workspace:boundaries && pnpm run check:admin-inventory && pnpm run check:admin-boundary && pnpm run check:naming:workspace && pnpm run check:hosted-dr && pnpm run check:user-visible-contracts && pnpm run check:arena-room-origins && pnpm run check:arena-room-hardening && pnpm run workspace:test && pnpm run workspace:lint && pnpm run workspace:build",
     "ci:verify": "pnpm run workspace:verify && pnpm run verify:hosted-dr && pnpm run check:arena-room-release && pnpm run test:repo && pnpm run lint:repo"
   },
   "devDependencies": {
