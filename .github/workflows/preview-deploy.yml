@@ -147,7 +147,6 @@ jobs:
           PREVIEW_DATA_ENVIRONMENT: ${{ vars.PREVIEW_DATA_ENVIRONMENT }}
           PREVIEW_REDIS_ISOLATION: ${{ vars.PREVIEW_REDIS_ISOLATION }}
           PREVIEW_ENV_FILE_PATH: ${{ vars.PREVIEW_ENV_FILE_PATH }}
-          PREVIEW_D1_SCHEMA_EVIDENCE_PATH: ${{ vars.PREVIEW_D1_SCHEMA_EVIDENCE_PATH }}
         run: pnpm run check:preview:environment -- --require-provisioned
 
       - name: Download release tuple

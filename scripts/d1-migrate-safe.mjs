@@ -7,7 +7,7 @@ const SPECIAL_MIGRATION_NAME = '0001_users_admin_flags.sql';
 const WRANGLER_WORKSPACE = '@mahoshojo/web';
 const D1_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
-const assertPreviewD1Provisioned = (options) => {
+const assertPreviewD1MatchesProduction = (options) => {
   if (options.env !== 'preview') return;
 
   const wranglerPath = resolve(process.cwd(), options.config || 'apps/web/wrangler.jsonc');
@@ -31,14 +31,14 @@ const assertPreviewD1Provisioned = (options) => {
     throw new Error('[db:migrate:safe] preview 资源尚未 provisioned，拒绝执行 migration');
   }
   if (!Array.isArray(previewDatabases) || previewDatabases.length !== 1) {
-    throw new Error('[db:migrate:safe] preview 必须显式配置一个独立 D1 binding');
+    throw new Error('[db:migrate:safe] preview 必须显式配置一个 production-shared D1 binding');
   }
   const previewId = previewDatabases[0]?.database_id;
   if (typeof previewId !== 'string' || !D1_UUID_PATTERN.test(previewId)) {
     throw new Error('[db:migrate:safe] preview D1 database_id 无效');
   }
-  if (productionIds.has(previewId)) {
-    throw new Error('[db:migrate:safe] preview migration 不得指向 production D1');
+  if (!productionIds.has(previewId)) {
+    throw new Error('[db:migrate:safe] preview migration 必须指向 production D1');
   }
 };
 
@@ -280,7 +280,7 @@ const applyRegularMigration = (options, migrationFilePath, migrationName) => {
 
 const main = () => {
   const options = parseArgs(process.argv.slice(2));
-  assertPreviewD1Provisioned(options);
+  assertPreviewD1MatchesProduction(options);
   const migrationsDir = resolve(process.cwd(), options.migrationsDir);
   const files = listMigrationFiles(migrationsDir);
 
