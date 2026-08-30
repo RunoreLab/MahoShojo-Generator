@@ -230,6 +230,9 @@ describe('Hono deployment workflow', () => {
     expect(containerBuildStep).toContain('HONO_RELEASE_DIR: /tmp/mahoshojo-hono-release');
     expect(containerBuildStep).toContain('HONO_HOSTED_API_ENVIRONMENT: production');
     expect(containerBuildStep).toContain(
+      'HONO_DEPLOY_CORS_ORIGINS: https://mahoshojo.colanns.me',
+    );
+    expect(containerBuildStep).toContain(
       'COMPOSE_ENV_DIRECTORY: /opt/mahoshojo-hono',
     );
     expect(containerBuildStep).toContain(

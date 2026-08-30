@@ -46,7 +46,10 @@ bind_port="${HONO_BIND_PORT:-8080}"
 redis_key_prefix="${HONO_REDIS_KEY_PREFIX:-}"
 redis_network_name="${HONO_REDIS_NETWORK_NAME:-mahoshojo-redis}"
 hosted_api_environment="${HONO_HOSTED_API_ENVIRONMENT:-}"
+web_origin='https://mahoshojo.colanns.me'
 runtime_image='node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32'
+HONO_DEPLOY_CORS_ORIGINS="$web_origin"
+export HONO_DEPLOY_CORS_ORIGINS
 case "$root_dir" in
   /) echo "部署根目录不得为文件系统根目录" >&2; exit 2 ;;
   /*) ;;
@@ -321,6 +324,7 @@ validate_release_runtime() {
     -e NODE_ENV=production \
     -e HOSTED_API_ENVIRONMENT="$hosted_api_environment" \
     -e HONO_AUTH_MODE=bearer \
+    -e HONO_CORS_ORIGINS="$web_origin" \
     -e REDIS_HOST=redis \
     -e REDIS_PORT=6379 \
     -e REDIS_REQUIRED=true \
@@ -825,7 +829,7 @@ verify_public_contract() {
     --dump-header "$probe_headers" --output "$probe_body" \
     --write-out '%{http_code}' \
     --request POST "$public_base_url/api/generate-magical-girl" \
-    --header 'Origin: https://mahoshojo.colanns.me' \
+    --header "Origin: $web_origin" \
     --header 'Content-Type: application/json' \
     --data '{}' > "$probe_status_file"; then
     return 1
@@ -833,7 +837,7 @@ verify_public_contract() {
   probe_status="$(cat "$probe_status_file")"
   [ "$probe_status" = '400' ] || return 1
   grep -Fq '"error":"Name is required"' "$probe_body" || return 1
-  grep -Fqi 'Access-Control-Allow-Origin: https://mahoshojo.colanns.me' "$probe_headers" || return 1
+  grep -Fqi "Access-Control-Allow-Origin: $web_origin" "$probe_headers" || return 1
 }
 
 promote_release() {

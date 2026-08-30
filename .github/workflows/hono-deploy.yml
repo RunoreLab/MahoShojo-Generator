@@ -58,6 +58,7 @@ jobs:
         env:
           HONO_RELEASE_DIR: /tmp/mahoshojo-hono-release
           HONO_HOSTED_API_ENVIRONMENT: production
+          HONO_DEPLOY_CORS_ORIGINS: https://mahoshojo.colanns.me
           COMPOSE_ENV_DIRECTORY: /opt/mahoshojo-hono
           COMPOSE_ENV_FILE: /opt/mahoshojo-hono/.env.hono
         run: |
