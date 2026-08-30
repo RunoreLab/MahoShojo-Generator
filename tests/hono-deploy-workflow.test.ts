@@ -289,6 +289,7 @@ describe('Hono deployment workflow', () => {
     const healthProbe = 'if curl --fail --silent --show-error "$D1_GATEWAY_URL/health" >/dev/null; then';
     const runtimeVerifier = 'pnpm run verify:server:runtime';
     const arenaRedisVerifier = 'pnpm --filter @mahoshojo/api run verify:arena-redis';
+    const roomRedisVerifier = 'pnpm --filter @mahoshojo/api run verify:room-redis';
     const hostedDrRedisVerifier = 'REDIS_URL=redis://127.0.0.1:6379/15 pnpm run verify:hosted-dr:redis';
 
     expectRequiredGateStep(runtimeStep);
@@ -315,14 +316,12 @@ describe('Hono deployment workflow', () => {
     expect(activeLines).toContain(healthProbe);
     expect(activeLines).toContain('trap cleanup EXIT');
     expect(activeLines).toContain(arenaRedisVerifier);
-    expect(activeLines).toContain(hostedDrRedisVerifier);
+    expect(activeLines).not.toContain(roomRedisVerifier);
+    expect(activeLines).not.toContain(hostedDrRedisVerifier);
     expect(activeLines.at(-1)).toBe(runtimeVerifier);
     expect(activeLines.indexOf(gatewayCommand)).toBeLessThan(activeLines.indexOf(healthProbe));
     expect(activeLines.indexOf(healthProbe)).toBeLessThan(activeLines.indexOf(runtimeVerifier));
     expect(activeLines.indexOf(arenaRedisVerifier)).toBeLessThan(
-      activeLines.indexOf(runtimeVerifier),
-    );
-    expect(activeLines.indexOf(hostedDrRedisVerifier)).toBeLessThan(
       activeLines.indexOf(runtimeVerifier),
     );
     expect(buildJob.indexOf('- name: Build single-file server')).toBeLessThan(
