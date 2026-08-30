@@ -64,6 +64,11 @@
       "limits": {
         "cpu_ms": 10000
       },
+      "secrets": {
+        "required": [
+          "ARENA_FINALIZATION_HMAC_SECRET"
+        ]
+      },
       "ratelimits": [
         {
           "name": "ARENA_RANKING_ACTOR_LIMITER",

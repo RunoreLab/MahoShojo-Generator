@@ -1,10 +1,13 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { parse } from 'comment-json';
 import { describe, expect, test } from 'vitest';
 
 const HONO_WORKFLOW_PATH = resolve(process.cwd(), '.github/workflows/hono-deploy.yml');
 const CLOUDFLARE_WORKFLOW_PATH = resolve(process.cwd(), '.github/workflows/cloudflare-deploy.yml');
 const PREVIEW_WORKFLOW_PATH = resolve(process.cwd(), '.github/workflows/preview-deploy.yml');
+const WEB_WRANGLER_PATH = resolve(process.cwd(), 'apps/web/wrangler.jsonc');
+const WEB_ENV_EXAMPLE_PATH = resolve(process.cwd(), 'apps/web/env.example');
 const HONO_COMPOSE_PATH = resolve(process.cwd(), 'apps/api/deploy/compose.yml');
 const HONO_DEPLOY_SCRIPT_PATH = resolve(process.cwd(), 'apps/api/deploy/deploy-bundle.sh');
 const HONO_INSTALL_SCRIPT_PATH = resolve(process.cwd(), 'apps/api/deploy/install-bundle.sh');
@@ -141,6 +144,23 @@ describe('Hono deployment workflow', () => {
     expect(getStep(getJob(previewWorkflow, 'deploy-cloudflare-preview'), 'Deploy Cloudflare preview')).toContain(
       'run: pnpm --filter @mahoshojo/web exec wrangler deploy --env preview --keep-vars',
     );
+  });
+
+  test('Cloudflare production deploy fail-closes when the Arena finalization secret is absent', () => {
+    const wrangler = parse(readFileSync(WEB_WRANGLER_PATH, 'utf8'), undefined, true) as {
+      env?: {
+        production?: {
+          secrets?: { required?: string[] };
+        };
+      };
+    };
+    const webEnvExample = readFileSync(WEB_ENV_EXAMPLE_PATH, 'utf8');
+
+    expect(wrangler.env?.production?.secrets?.required).toContain(
+      'ARENA_FINALIZATION_HMAC_SECRET',
+    );
+    expect(webEnvExample).toContain('ARENA_FINALIZATION_HMAC_SECRET=');
+    expect(webEnvExample).toContain('必须与 Hono 使用同一个独立 secret');
   });
 
   test('preview 分支串行发布隔离 Hono 后再发布 Cloudflare', () => {
