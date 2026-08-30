@@ -208,6 +208,10 @@ describe('Hono deployment workflow', () => {
     for (const job of [verifyJob, honoJob, cloudflareJob]) {
       expect(job).toMatch(/^    if: github\.ref == 'refs\/heads\/preview'\s*$/m);
     }
+    expect(workflow).not.toContain('Verify workspace and repository gates');
+    expect(workflow).not.toContain('run: pnpm run ci:verify');
+    expect(workflow).toContain('合并前已在本地或集成 CI 执行 `pnpm run ci:verify`');
+    expect(workflow).toContain('构建、发布与公网契约 canary');
     expect(workflow).toMatch(/branches:\s*\n\s*- preview/u);
     expect(honoJob).toContain('HONO_DEPLOY_ROOT_DIR: ${{ vars.HONO_DEPLOY_ROOT }}');
     expect(honoJob).toContain('HONO_CONTAINER_NAME: mahoshojo-hono-preview');
