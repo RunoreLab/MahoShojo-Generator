@@ -22,7 +22,10 @@ const redisBlockingPool = vi.hoisted(() => ({
   isOpen: true,
   on: vi.fn(),
   ping: vi.fn(async () => 'PONG'),
-  xRead: vi.fn(async () => null),
+  xRead: vi.fn<() => Promise<Array<{
+    name: string;
+    messages: Array<{ id: string; message: Record<string, string> }>;
+  }> | null>>(async () => null),
 }));
 
 vi.mock('redis', () => ({
@@ -195,32 +198,77 @@ describe('RedisRuntime shutdown', () => {
     })).resolves.toMatchObject({ kind: 'created', generationId: 'generation-1234' });
   });
 
-  it('generation 阻塞读使用隔离连接池，不与 append/snapshot 写入串行', async () => {
+  it('generation 阻塞读 pending 时 append 仍通过主连接先完成', async () => {
     const redis = new RedisRuntime('redis://example.test:6379', true);
     await redis.connect();
-    redisClient.eval.mockResolvedValueOnce(['events', '[]']);
-
-    await expect(redis.getGenerationReplayStore().readAfter({
+    let resolveXRead!: (value: Array<{
+      name: string;
+      messages: Array<{ id: string; message: Record<string, string> }>;
+    }>) => void;
+    redisClient.eval
+      .mockResolvedValueOnce(['events', '[]'])
+      .mockResolvedValueOnce(['1-0'])
+      .mockResolvedValueOnce([
+        'events',
+        JSON.stringify([{ id: '1-0', type: 'markdown', data: '{"chunk":"A"}' }]),
+      ]);
+    redisBlockingPool.xRead.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveXRead = resolve;
+    }));
+    const store = redis.getGenerationReplayStore();
+    const read = store.readAfter({
       generationId: 'generation-streaming-1',
       after: null,
       blockMs: 1_000,
-    })).resolves.toEqual({ kind: 'events', events: [] });
+    });
+    let readSettled = false;
+    void read.then(
+      () => {
+        readSettled = true;
+      },
+      () => {
+        readSettled = true;
+      },
+    );
+    await vi.waitFor(() => {
+      expect(redisBlockingPool.xRead).toHaveBeenCalledTimes(1);
+    });
 
-    expect(redisClient.eval).toHaveBeenCalledWith(
-      expect.stringContaining('GEN_READ_V1'),
+    await expect(store.appendEvents({
+      generationId: 'generation-streaming-1',
+      producerToken: 'producer-token-1',
+      events: [{ type: 'markdown', data: { chunk: 'A' } }],
+      now: '2026-08-25T04:00:00.000Z',
+    })).resolves.toEqual({
+      owned: true,
+      events: [{ id: '1-0', type: 'markdown', data: { chunk: 'A' } }],
+    });
+    expect(readSettled).toBe(false);
+    expect(redisClient.eval).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining('GEN_APPEND_V1'),
       expect.any(Object),
     );
-    expect(redisBlockingPool.xRead).toHaveBeenCalledTimes(1);
+
+    resolveXRead([{
+      name: 'mahoshojo:gen:v1:generation-streaming-1:events',
+      messages: [{ id: '1-0', message: { type: 'markdown', data: '{"chunk":"A"}' } }],
+    }]);
+    await expect(read).resolves.toEqual({
+      kind: 'events',
+      events: [{ id: '1-0', type: 'markdown', data: { chunk: 'A' } }],
+    });
     expect(redisClient.xRead).not.toHaveBeenCalled();
   });
 
-  it('generation 阻塞池用 socket inactivity timeout 回收失联的 blocking lease', async () => {
+  it('generation 阻塞池保留 inactivity timeout 并用更短 PING 保活最小连接', async () => {
     const redis = new RedisRuntime('redis://example.test:6379', true);
 
     await redis.connect();
 
     expect(vi.mocked(createClientPool)).toHaveBeenLastCalledWith(
       expect.objectContaining({
+        pingInterval: 1_000,
         socket: expect.objectContaining({
           socketTimeout: 3_000,
         }),
@@ -228,6 +276,7 @@ describe('RedisRuntime shutdown', () => {
       expect.objectContaining({
         acquireTimeout: 1_500,
         maximum: 32,
+        minimum: 1,
       }),
     );
   });

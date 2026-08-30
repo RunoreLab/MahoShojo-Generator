@@ -20,7 +20,19 @@ const DEFAULT_ACTIVE_TTL_SECONDS = 3_600;
 const DEFAULT_TERMINAL_TTL_SECONDS = 2_700;
 const DEFAULT_MAX_EVENTS = 2_048;
 const MAX_READ_EVENTS = 256;
+const MIN_BLOCKING_READ_MS = 1;
+const MAX_BLOCKING_READ_MS = 1_000;
 const KEY_PREFIX = 'mahoshojo:gen:v1';
+
+const normalizeBlockingReadMs = (blockMs: number): number => {
+  if (!Number.isFinite(blockMs)) {
+    return MAX_BLOCKING_READ_MS;
+  }
+  return Math.min(
+    MAX_BLOCKING_READ_MS,
+    Math.max(MIN_BLOCKING_READ_MS, Math.floor(blockMs)),
+  );
+};
 
 type RedisStreamMessage = {
   id: string;
@@ -883,7 +895,10 @@ export const createRedisGenerationReplayStore = (
 
       const tail = await client.xRead(
         [{ key, id: input.after ?? '0-0' }],
-        { BLOCK: Math.max(1, Math.floor(input.blockMs)), COUNT: MAX_READ_EVENTS },
+        {
+          BLOCK: normalizeBlockingReadMs(input.blockMs),
+          COUNT: MAX_READ_EVENTS,
+        },
       );
       if (!tail?.some((stream) => stream.messages.length > 0)) {
         return immediate;

@@ -28,8 +28,11 @@ import {
 
 const DEFAULT_REDIS_COMMAND_TIMEOUT_MS = 4_000;
 const GENERATION_BLOCKING_POOL_MAX_CONNECTIONS = 32;
-// Default XREAD blocks for 1s. Closing an otherwise silent socket at 3s keeps
-// a half-open command from retaining one of the bounded pool leases forever.
+const GENERATION_BLOCKING_PING_INTERVAL_MS = 1_000;
+// XREAD itself is capped at 1s. The outer command timeout only bounds the caller:
+// it cannot cancel an XREAD already written to Redis or release that pool lease.
+// Keep the 3s socket inactivity timeout as the fail-safe for a half-open connection,
+// while a shorter PING interval keeps the minimum idle connection healthy.
 const GENERATION_BLOCKING_SOCKET_TIMEOUT_MS = 3_000;
 
 export type RedisRuntimeOperation =
@@ -118,6 +121,7 @@ const createRedisClient = (redisUrl: string) => createClient({
 
 const createRedisBlockingPool = (redisUrl: string) => createClientPool({
   url: redisUrl,
+  pingInterval: GENERATION_BLOCKING_PING_INTERVAL_MS,
   socket: {
     connectTimeout: 5_000,
     socketTimeout: GENERATION_BLOCKING_SOCKET_TIMEOUT_MS,

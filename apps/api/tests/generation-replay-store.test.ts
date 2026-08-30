@@ -346,6 +346,28 @@ describe('RedisGenerationReplayStore', () => {
     );
   });
 
+  it.each([
+    { blockMs: 0, expectedBlockMs: 1 },
+    { blockMs: 10_000, expectedBlockMs: 1_000 },
+    { blockMs: Number.NaN, expectedBlockMs: 1_000 },
+  ])('将 XREAD BLOCK $blockMs 规范到安全范围', async ({ blockMs, expectedBlockMs }) => {
+    const client = createClient();
+    vi.mocked(client.eval).mockResolvedValueOnce(['events', '[]']);
+    vi.mocked(client.xRead).mockResolvedValueOnce(null);
+    const store = createRedisGenerationReplayStore({ getClient: () => client });
+
+    await expect(store.readAfter({
+      generationId: 'generation-1234',
+      after: '10-0',
+      blockMs,
+    })).resolves.toEqual({ kind: 'events', events: [] });
+
+    expect(client.xRead).toHaveBeenCalledWith(
+      [{ key: 'mahoshojo:gen:v1:generation-1234:events', id: '10-0' }],
+      { BLOCK: expectedBlockMs, COUNT: 256 },
+    );
+  });
+
   it('兼容 Redis Lua cjson 将空数组编码为空对象的返回形状', async () => {
     const client = createClient();
     vi.mocked(client.eval).mockResolvedValueOnce(['events', '{}']);
