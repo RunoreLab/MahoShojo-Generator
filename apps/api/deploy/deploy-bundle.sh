@@ -321,8 +321,6 @@ validate_release_runtime() {
     -e NODE_ENV=production \
     -e HOSTED_API_ENVIRONMENT="$hosted_api_environment" \
     -e HONO_AUTH_MODE=bearer \
-    -e HONO_CORS_ORIGINS='https://*.colanns.me' \
-    -e ARENA_ROOM_ALLOWED_ORIGINS='https://mahoshojo.colanns.me' \
     -e REDIS_HOST=redis \
     -e REDIS_PORT=6379 \
     -e REDIS_REQUIRED=true \
