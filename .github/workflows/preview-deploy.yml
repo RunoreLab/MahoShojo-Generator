@@ -248,7 +248,9 @@ jobs:
           IFS=',' read -r -a room_web_origins <<< "$PREVIEW_ARENA_ROOM_ALLOWED_ORIGINS"
           test "${#room_web_origins[@]}" -eq 3
           for room_web_origin in "${room_web_origins[@]}"; do
-            status="$(curl --silent --show-error --connect-timeout 5 --max-time 15 \
+            status="$(curl --silent --show-error \
+              --retry 5 --retry-delay 3 --retry-max-time 120 --retry-connrefused \
+              --connect-timeout 5 --max-time 15 \
               --dump-header "$probe_dir/http-headers" \
               --output "$probe_dir/http-body" --write-out '%{http_code}' \
               --header "Origin: $room_web_origin" \
@@ -256,7 +258,9 @@ jobs:
             test "$status" = 401
             grep -Fq '"code":"ROOM_AUTHENTICATION_REQUIRED"' "$probe_dir/http-body"
             grep -Fqi "Access-Control-Allow-Origin: $room_web_origin" "$probe_dir/http-headers"
-            status="$(curl --silent --show-error --connect-timeout 5 --max-time 15 --http1.1 \
+            status="$(curl --silent --show-error \
+              --retry 5 --retry-delay 3 --retry-max-time 120 --retry-connrefused \
+              --connect-timeout 5 --max-time 15 --http1.1 \
               --dump-header "$probe_dir/ws-headers" \
               --output "$probe_dir/ws-body" --write-out '%{http_code}' \
               --header "Origin: $room_web_origin" \

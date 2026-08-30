@@ -152,6 +152,9 @@ describe('Hono deployment workflow', () => {
     expect(roomActivationStep).toContain('/api/arena/rooms/v1/ws');
     expect(roomActivationStep).toContain('Sec-WebSocket-Protocol: mahoshojo.arena-room.v1');
     expect(roomActivationStep).toContain('Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==');
+    expect(roomActivationStep.match(
+      /--retry 5 --retry-delay 3 --retry-max-time 120 --retry-connrefused/gu,
+    )).toHaveLength(2);
     for (const variable of [
       'NEXT_PUBLIC_ARENA_MULTIPLAYER_ENABLED',
       'NEXT_PUBLIC_ARENA_ROOM_ORIGIN',
@@ -250,6 +253,9 @@ describe('Hono deployment workflow', () => {
     expect(previewRoomActivationStep).toContain(
       'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==',
     );
+    expect(previewRoomActivationStep.match(
+      /--retry 5 --retry-delay 3 --retry-max-time 120 --retry-connrefused/gu,
+    )).toHaveLength(2);
     expect(cloudflareJob).toContain(
       'NEXT_PUBLIC_HONO_API_ORIGIN: https://homura-preview.colanns.me',
     );
