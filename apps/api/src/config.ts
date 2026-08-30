@@ -51,6 +51,14 @@ const parseTrustedHttpsOrigin = (value: string | undefined): string | null => {
 const isTrustedHttpsOrigin = (value: string | undefined): boolean =>
   parseTrustedHttpsOrigin(value) !== null;
 
+const hasLoopbackRedisAuthority = (value: string): boolean => {
+  try {
+    return ['localhost', '127.0.0.1', '[::1]'].includes(new URL(value).hostname);
+  } catch {
+    return false;
+  }
+};
+
 const hasValidAiProviderConfig = (env: NodeJS.ProcessEnv): boolean =>
   parseAIProvidersFromEnv(env).length > 0;
 
@@ -94,6 +102,11 @@ const validateProductionEnvironment = (
     problems.push('ARENA_MULTIPLAYER_ENABLED 在 Production Gate 前必须为 false');
   }
   if (!config.redisUrl) problems.push('Redis 未配置（REDIS_URL 或 REDIS_HOST）');
+  if (protectedHostedTarget
+    && config.redisUrl
+    && hasLoopbackRedisAuthority(config.redisUrl)) {
+    problems.push('Redis loopback authority 不得用于 production/preview 容器部署');
+  }
   if (!config.redisRequired) problems.push('REDIS_REQUIRED 生产模式必须为 true');
   if (!config.d1Required) problems.push('D1_REQUIRED 生产模式必须为 true');
   if (!hasValidAiProviderConfig(env)) problems.push('AI_PROVIDERS_CONFIG/AI_API_KEY 缺失或无有效 provider');

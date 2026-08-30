@@ -175,6 +175,19 @@ describe('Hono server config', () => {
     },
   );
 
+  it.each([
+    ['REDIS_URL IPv4', 'REDIS_URL', 'redis://default:secret@127.0.0.1:6379'],
+    ['REDIS_URL localhost', 'REDIS_URL', 'redis://default:secret@localhost:6379'],
+    ['REDIS_URL IPv6', 'REDIS_URL', 'redis://default:secret@[::1]:6379'],
+    ['REDIS_HOST loopback', 'REDIS_HOST', '127.0.0.1'],
+  ])('production target 拒绝容器内 loopback Redis：%s', (_label, variable, value) => {
+    stubValidBearerProductionEnv();
+    if (variable === 'REDIS_HOST') vi.stubEnv('REDIS_URL', '');
+    vi.stubEnv(variable, value);
+
+    expect(() => readHonoServerConfig()).toThrow(/Redis.*loopback.*production\/preview/);
+  });
+
   it('拒绝未知 deployment target，不能静默降级为本机模式', () => {
     vi.stubEnv('NODE_ENV', 'development');
     vi.stubEnv('HOSTED_API_ENVIRONMENT', 'prodution');
