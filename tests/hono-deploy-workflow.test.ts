@@ -370,6 +370,26 @@ describe('Hono deployment workflow', () => {
     expect(guide).not.toContain('精确五文件 tuple');
   });
 
+  test('手工回退指南从 immutable current tuple 发起并声明数据边界', () => {
+    const guide = readFileSync(HONO_DEPLOY_GUIDE_PATH, 'utf8');
+
+    expect(guide).toContain('ROLLBACK_BASELINE_RELEASE_ID=<previous-release-id>');
+    expect(guide).toContain(
+      'current_dir="$(readlink -f /opt/mahoshojo-hono/current)"',
+    );
+    expect(guide).toContain(
+      '"$current_dir/deploy-bundle.sh" rollback "$target_id" https://homura.colanns.me',
+    );
+    expect(guide).toContain('不得调用根旧 `deploy-bundle.sh`');
+    expect(guide).toContain('不得删除 `deployment-format` 或 `deploy.transaction`');
+    expect(guide).toContain('不得通过 full git revert');
+    expect(guide).toContain('不会 flush/restore Redis，也不会回滚 D1 或 R2');
+    expect(guide).toContain('wrangler versions list --env production --json');
+    expect(guide).toContain(
+      'wrangler rollback "$worker_version_id" --env production --yes --message "$rollback_reason"',
+    );
+  });
+
   test('所有 Hono artifact 与部署生命周期都引用 apps/api owner', () => {
     const workflow = readFileSync(HONO_WORKFLOW_PATH, 'utf8');
     const buildJob = getJob(workflow, 'build');

@@ -1,11 +1,31 @@
 #!/bin/sh
 set -eu
 
-release_id="${1:-}"
-public_base_url="${2:-}"
+deploy_mode='publish'
+case "$#" in
+  2)
+    release_id="$1"
+    public_base_url="$2"
+    ;;
+  3)
+    [ "$1" = rollback ] || {
+      echo "用法：$0 <64 位 SHA-256> <https://public-origin>" >&2
+      echo "   或：$0 rollback <64 位 SHA-256> <https://public-origin>" >&2
+      exit 2
+    }
+    deploy_mode='rollback'
+    release_id="$2"
+    public_base_url="$3"
+    ;;
+  *)
+    echo "用法：$0 <64 位 SHA-256> <https://public-origin>" >&2
+    echo "   或：$0 rollback <64 位 SHA-256> <https://public-origin>" >&2
+    exit 2
+    ;;
+esac
 case "$release_id" in
   ''|*[!0-9a-f]*)
-    echo "用法：$0 <64 位 SHA-256> <https://public-origin>" >&2
+    echo "release id 必须是 64 位小写十六进制 SHA-256" >&2
     exit 2
     ;;
 esac
@@ -72,6 +92,23 @@ case "$hosted_api_environment" in
     }
     ;;
 esac
+if [ "$deploy_mode" = rollback ]; then
+  case "$hosted_api_environment" in
+    production) ;;
+    test)
+      case "$root_dir" in
+        /opt/mahoshojo-hono|/opt/mahoshojo-hono-preview)
+          echo "production/preview 受管根不得使用 test rollback target" >&2
+          exit 2
+          ;;
+      esac
+      ;;
+    *)
+      echo "显式 rollback 只允许 production target" >&2
+      exit 2
+      ;;
+  esac
+fi
 
 releases_dir="$root_dir/releases"
 release_dir="$releases_dir/$release_id"
@@ -495,20 +532,24 @@ console.log(JSON.stringify({
   fi
 }
 
+validate_arena_room_release_gate_if_present() {
+  validated_release_dir="$1"
+  validated_release_gate="$validated_release_dir/arena-room-release-gate.json"
+  validated_release_schema="$validated_release_dir/arena-room-release-gate-schema.mjs"
+  if [ ! -e "$validated_release_gate" ] && [ ! -L "$validated_release_gate" ]; then
+    [ ! -e "$validated_release_schema" ] && [ ! -L "$validated_release_schema" ]
+    return
+  fi
+  validate_arena_room_release_gate \
+    "$validated_release_gate" "$validated_release_schema" || {
+    echo "Arena Room release gate schema 校验失败" >&2
+    return 1
+  }
+}
+
 verify_arena_room_rollback_gate() {
   failed_release_dir="$1"
   target_release_dir="$2"
-  [ -f "$runtime_env" ] && [ ! -L "$runtime_env" ] || return 1
-  arena_generation_start_state="$(
-    sed -n 's/^ARENA_MULTIPLAYER_ENABLED=//p' "$runtime_env" | tail -n 1
-  )"
-  case "$arena_generation_start_state" in
-    ''|0|false|no|off) ;;
-    *)
-      echo "Arena multiplayer generation start 未关闭，拒绝自动回滚旧 reader" >&2
-      return 1
-      ;;
-  esac
   failed_gate="$failed_release_dir/arena-room-release-gate.json"
   if [ ! -e "$failed_gate" ] && [ ! -L "$failed_gate" ]; then
     return 0
@@ -528,6 +569,17 @@ verify_arena_room_rollback_gate() {
     enabled) ;;
     *)
       echo "Arena Room release gate writerActivation 非法" >&2
+      return 1
+      ;;
+  esac
+  [ -f "$runtime_env" ] && [ ! -L "$runtime_env" ] || return 1
+  arena_generation_start_state="$(
+    sed -n 's/^ARENA_MULTIPLAYER_ENABLED=//p' "$runtime_env" | tail -n 1
+  )"
+  case "$arena_generation_start_state" in
+    ''|0|false|no|off) ;;
+    *)
+      echo "Arena multiplayer generation start 未关闭，拒绝自动回滚旧 reader" >&2
       return 1
       ;;
   esac
@@ -746,6 +798,19 @@ resolve_previous_release() {
   fi
 }
 
+verify_invoked_from_current_tuple() {
+  [ "$had_previous" = true ] || {
+    echo "显式 rollback 缺少可验证的 current tuple" >&2
+    return 1
+  }
+  invoked_script="$(realpath -e "$0")" || return 1
+  current_tuple_script="$previous_release_dir/deploy-bundle.sh"
+  [ "$invoked_script" = "$current_tuple_script" ] || {
+    echo "显式 rollback 只能由 current tuple 自带脚本发起" >&2
+    return 1
+  }
+}
+
 activate_release() {
   write_release_env "$release_dir" || return 1
   run_cancellable docker compose --project-directory "$root_dir" -f "$compose_file" \
@@ -840,11 +905,76 @@ probe_headers="$probe_dir/headers"
 probe_body="$probe_dir/body"
 probe_status_file="$probe_dir/status"
 
+if [ "$deploy_mode" = rollback ]; then
+  verify_deployment_format || {
+    echo "显式 rollback 必须在合法 release-tuple-v2 marker 下执行" >&2
+    exit 1
+  }
+  resolve_previous_release
+  verify_invoked_from_current_tuple
+
+  recover_pending_transaction
+  previous_release_dir=''
+  had_previous=false
+  verify_deployment_format || {
+    echo "pending recovery 后缺少合法 release-tuple-v2 marker" >&2
+    exit 1
+  }
+  resolve_previous_release
+  verify_invoked_from_current_tuple
+  rollback_current_release_dir="$previous_release_dir"
+
+  verify_release_tuple "$rollback_current_release_dir"
+  verify_legacy_source_if_needed "$rollback_current_release_dir"
+  verify_release_tuple "$release_dir"
+  verify_legacy_source_if_needed "$release_dir"
+
+  validate_release_compose "$rollback_current_release_dir"
+  validate_release_runtime "$rollback_current_release_dir"
+  validate_arena_room_release_gate_if_present "$release_dir"
+  validate_release_compose "$release_dir"
+  validate_release_runtime "$release_dir"
+
+  if [ "$release_dir" = "$rollback_current_release_dir" ]; then
+    verify_public_contract || {
+      echo "current tuple 公网 contract probe 失败，拒绝报告幂等 rollback 成功" >&2
+      exit 1
+    }
+    echo "Hono 已位于 rollback target：$release_id"
+    echo "ROLLBACK_RELEASE_ID=$release_id"
+    exit 0
+  fi
+
+  verify_arena_room_rollback_gate \
+    "$rollback_current_release_dir" "$release_dir"
+  # target 激活后仍可能失败；写 journal 前先证明原 current 可安全恢复。
+  verify_arena_room_rollback_gate \
+    "$release_dir" "$rollback_current_release_dir"
+
+  write_transaction
+  if activate_release && verify_public_contract && promote_release \
+    && verify_deployment_format; then
+    clear_transaction
+    echo "Hono 已回退：$release_id"
+    echo "ROLLBACK_RELEASE_ID=$release_id"
+    exit 0
+  fi
+
+  if rollback_transaction \
+    "$release_dir" true "$rollback_current_release_dir"; then
+    clear_transaction
+  fi
+  exit 1
+fi
+
 recover_pending_transaction
 verify_release_tuple "$release_dir"
 validate_arena_room_release_gate \
   "$release_dir/arena-room-release-gate.json" \
-  "$release_dir/arena-room-release-gate-schema.mjs"
+  "$release_dir/arena-room-release-gate-schema.mjs" || {
+    echo "candidate Arena Room release gate schema 校验失败" >&2
+    exit 1
+  }
 validate_release_compose "$release_dir"
 validate_release_runtime "$release_dir"
 resolve_previous_release
@@ -853,6 +983,13 @@ if [ "$had_previous" = true ]; then
   verify_legacy_source_if_needed "$previous_release_dir"
   validate_release_compose "$previous_release_dir"
   validate_release_runtime "$previous_release_dir"
+  verify_arena_room_rollback_gate "$previous_release_dir" "$release_dir"
+  # candidate 激活失败时也必须能安全恢复 current tuple。
+  verify_arena_room_rollback_gate "$release_dir" "$previous_release_dir"
+fi
+rollback_baseline_release_id=''
+if [ "$had_previous" = true ]; then
+  rollback_baseline_release_id="${previous_release_dir##*/}"
 fi
 
 write_transaction
@@ -860,6 +997,7 @@ if activate_release && verify_public_contract && promote_release; then
   ensure_deployment_format
   clear_transaction
   echo "Hono 已发布：$release_id"
+  echo "ROLLBACK_BASELINE_RELEASE_ID=$rollback_baseline_release_id"
   exit 0
 fi
 

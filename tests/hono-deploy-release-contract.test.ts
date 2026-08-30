@@ -101,6 +101,25 @@ describe('Hono content-addressed release transaction', () => {
     expect(activation).toBeGreaterThan(recovery);
   });
 
+  test('成功发布公开 rollback baseline，显式 rollback 仍复用同一 journal schema', () => {
+    const script = readDeployScript();
+    if (!script) return;
+
+    expect(script).toContain('ROLLBACK_BASELINE_RELEASE_ID=$rollback_baseline_release_id');
+    expect(script).toContain('ROLLBACK_RELEASE_ID=$release_id');
+    expect(script).toContain("[ \"$1\" = rollback ]");
+    expect(script).toContain('verify_deployment_format');
+    expect(script).toContain('realpath -e "$0"');
+    expect(script).toMatch(
+      /verify_arena_room_rollback_gate \\\s+"\$rollback_current_release_dir" "\$release_dir"/u,
+    );
+    expect(script).toContain(
+      'verify_arena_room_rollback_gate "$previous_release_dir" "$release_dir"',
+    );
+    expect(script).not.toContain('previous ->');
+    expect(script).not.toContain('previous.next');
+  });
+
   test('显式纳管旧文档布局并用 format marker 禁止 managed 状态降级', () => {
     const script = readDeployScript();
     if (!script) return;
