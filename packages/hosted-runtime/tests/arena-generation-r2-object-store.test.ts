@@ -8,8 +8,21 @@ describe('Arena R2 object store', () => {
   });
 
   it('signs deterministic private object requests without exposing credentials in the URL', async () => {
-    const sign = vi.fn(async (url: string, init: RequestInit) => ({ ...init, url }));
-    const fetcher = vi.fn(async () => new Response('stored', { status: 200 }));
+    const sign = vi.fn(async (url: string, init: RequestInit) => new Request(url, {
+      ...init,
+      headers: new Headers({
+        ...Object.fromEntries(new Headers(init.headers)),
+        Authorization: 'AWS4-HMAC-SHA256 signed-request',
+      }),
+    }));
+    const fetcher = vi.fn(async (request: string | URL | Request) => {
+      expect(request).toBeInstanceOf(Request);
+      const signedRequest = request as Request;
+      expect(signedRequest.method).toBe('PUT');
+      expect(signedRequest.headers.get('authorization')).toBe('AWS4-HMAC-SHA256 signed-request');
+      expect((await signedRequest.clone().arrayBuffer()).byteLength).toBeGreaterThan(0);
+      return new Response('stored', { status: 200 });
+    });
     const store = createArenaR2ObjectStoreFromEnvironment({
       env: {
         R2_ACCESS_KEY_ID: 'access-secret',
@@ -31,6 +44,7 @@ describe('Arena R2 object store', () => {
       'https://r2.example.test/arena-output/v1/battle/generation-1/output.md',
       expect.objectContaining({ method: 'PUT' }),
     );
+    expect(fetcher).toHaveBeenCalledOnce();
     expect(JSON.stringify(sign.mock.calls)).not.toContain('private-secret');
   });
 });
