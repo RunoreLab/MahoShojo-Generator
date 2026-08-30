@@ -399,6 +399,44 @@ describe('Node Arena generation executor', () => {
     expect(inspectedText).not.toContain('CHARACTER_TAIL');
   });
 
+  it('stream safety keeps full user guidance but bounds character guidance to prompt parity', async () => {
+    let inspectedText = '';
+    const executor = createNodeArenaGenerationExecutor({
+      env: {},
+      finalizer,
+      signatureService,
+      enforceSafety: vi.fn(async ({ combinedText }) => {
+        inspectedText = combinedText;
+        return null;
+      }),
+      generateWithStreamAI: vi.fn(),
+    });
+    const userGuidance = `${'用'.repeat(200)}STREAM_USER_TAIL`;
+    const characterGuidance = `${'角'.repeat(100)}STREAM_CHARACTER_TAIL`;
+
+    const prepared = await executor.prepare!({
+      request: new Request('https://example.test/api/arena/generate-stream'),
+      actorKey: 'anonymous:test',
+      generationRequestId: 'request-stream-guidance-bounds',
+      payload: {
+        ...validPayload,
+        userGuidance,
+        combatants: validPayload.combatants.map((combatant, index) => ({
+          ...combatant,
+          ...(index === 0 ? { characterGuidance } : {}),
+        })),
+      },
+    });
+
+    if (
+      prepared instanceof Response
+      || isArenaGenerationAuditableRejection(prepared)
+    ) throw new Error('unexpected response');
+    expect(prepared.executionPayload.userGuidance).toBe(userGuidance);
+    expect(inspectedText).toContain('STREAM_USER_TAIL');
+    expect(inspectedText).not.toContain('STREAM_CHARACTER_TAIL');
+  });
+
   it('fail-closes invalid custom provider before reservation/provider dispatch', async () => {
     const generateWithStreamAI = vi.fn();
     const executor = createNodeArenaGenerationExecutor({
@@ -685,7 +723,7 @@ describe('Node Arena generation executor', () => {
       || isArenaGenerationAuditableRejection(prepared)
     ) throw new Error('unexpected response');
     const streamMeta = JSON.parse(decodeURIComponent(
-      prepared.responseHeaders['X-Mahoshojo-Stream-Meta'] ?? '',
+      prepared.responseHeaders?.['X-Mahoshojo-Stream-Meta'] ?? '',
     )) as Record<string, unknown>;
     expect(streamMeta.outputContract).toBe('structured-report');
 

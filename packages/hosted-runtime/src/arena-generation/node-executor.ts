@@ -391,10 +391,7 @@ const buildSafetyText = async (
       content: serializeForSafety(combatant.data),
       isNative: combatant.isNative === true,
     });
-    const rawGuidance = readString(combatant.characterGuidance);
-    const guidance = preserveLegacyNonStreamBounds
-      ? rawGuidance.slice(0, 100)
-      : rawGuidance;
+    const guidance = readString(combatant.characterGuidance).slice(0, 100);
     if (guidance) inputs.push({ type: 'userGuidance', content: guidance, isNative: false });
   }
   const rawUserGuidance = readString(payload.userGuidance);

@@ -81,11 +81,13 @@ describe('Node structured AI compatibility fallback', () => {
     expect(mocks.generateText).toHaveBeenCalledTimes(1);
   });
 
-  it('已 dispatch 的普通上游错误不触发可能重复计费的文本调用', async () => {
+  it('已 dispatch 的普通 5xx 即使提到 response_format 也不触发文本调用', async () => {
     const fetchImpl = vi.fn(async () => new Response('{}', { status: 500 }));
     mocks.generateObject.mockImplementationOnce(async ({ model }) => {
       await model.dispatch();
-      throw Object.assign(new Error('temporary upstream failure'), {
+      throw Object.assign(new Error(
+        'temporary upstream failure: response_format is not supported by this replica',
+      ), {
         name: 'AI_APICallError',
         statusCode: 500,
       });

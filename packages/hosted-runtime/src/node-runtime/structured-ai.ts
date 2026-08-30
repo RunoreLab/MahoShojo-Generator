@@ -93,6 +93,40 @@ const isJsonModeNotSupportedError = (error: unknown): boolean => {
   return false;
 };
 
+const EXPLICIT_STRUCTURED_CAPABILITY_REJECTION_STATUSES = new Set([400, 422]);
+
+const errorStatusCode = (error: unknown): number | null => {
+  if (!error || typeof error !== 'object') return null;
+  const record = error as { status?: unknown; statusCode?: unknown };
+  const value = typeof record.statusCode === 'number' ? record.statusCode : record.status;
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+};
+
+const errorName = (error: unknown): string => (
+  error && typeof error === 'object' && typeof (error as { name?: unknown }).name === 'string'
+    ? (error as { name: string }).name
+    : ''
+);
+
+const isExplicitStructuredCapabilityRejection = (input: {
+  rawError: unknown;
+  enhancedError: unknown;
+  providerRequestDispatched: boolean;
+}): boolean => {
+  const hasExplicitMessage = isJsonModeNotSupportedError(input.rawError)
+    || isJsonModeNotSupportedError(input.enhancedError);
+  if (!hasExplicitMessage) return false;
+  if (!input.providerRequestDispatched) return true;
+  if (NoObjectGeneratedError.isInstance(input.rawError)) return false;
+
+  const statusCode = errorStatusCode(input.rawError)
+    ?? errorStatusCode(input.enhancedError);
+  const name = errorName(input.rawError) || errorName(input.enhancedError);
+  return name === 'AI_APICallError'
+    && statusCode !== null
+    && EXPLICIT_STRUCTURED_CAPABILITY_REJECTION_STATUSES.has(statusCode);
+};
+
 const shouldForceTextJsonFallback = (modelId: string): boolean => {
   const normalized = typeof modelId === 'string' ? modelId.toLowerCase() : '';
 
@@ -575,10 +609,11 @@ async function generateWithAIUsing<T, I = string>(
           // rejected before generation. Even when it crossed the fetch boundary,
           // retrying the same provider/model as text JSON preserves the legacy
           // compatibility contract without blindly replaying a billable result.
-          if (
-            isJsonModeNotSupportedError(rawError)
-            || isJsonModeNotSupportedError(enhancedError)
-          ) {
+          if (isExplicitStructuredCapabilityRejection({
+            rawError,
+            enhancedError,
+            providerRequestDispatched,
+          })) {
             runtimeAttempt.finish(classifyAiUpstreamOutcome(enhancedError));
             log.warn('检测到上游不支持 JSON 模式，启用兼容回退（文本生成 JSON + 本地解析）', {
               provider: provider.name,
