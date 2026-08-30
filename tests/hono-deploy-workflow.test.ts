@@ -150,10 +150,13 @@ describe('Hono deployment workflow', () => {
     );
   });
 
-  test('Cloudflare production deploy fail-closes when the Arena finalization secret is absent', () => {
+  test('Cloudflare production 与 preview deploy 均要求 Arena finalization secret', () => {
     const wrangler = parse(readFileSync(WEB_WRANGLER_PATH, 'utf8'), undefined, true) as {
       env?: {
         production?: {
+          secrets?: { required?: string[] };
+        };
+        preview?: {
           secrets?: { required?: string[] };
         };
       };
@@ -161,6 +164,9 @@ describe('Hono deployment workflow', () => {
     const webEnvExample = readFileSync(WEB_ENV_EXAMPLE_PATH, 'utf8');
 
     expect(wrangler.env?.production?.secrets?.required).toContain(
+      'ARENA_FINALIZATION_HMAC_SECRET',
+    );
+    expect(wrangler.env?.preview?.secrets?.required).toContain(
       'ARENA_FINALIZATION_HMAC_SECRET',
     );
     expect(webEnvExample).toContain('ARENA_FINALIZATION_HMAC_SECRET=');

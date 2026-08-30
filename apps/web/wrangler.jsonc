@@ -112,6 +112,11 @@
         "enabled": true,
         "head_sampling_rate": 1
       },
+      "secrets": {
+        "required": [
+          "ARENA_FINALIZATION_HMAC_SECRET"
+        ]
+      },
       "ratelimits": [
         {
           "name": "ARENA_RANKING_ACTOR_LIMITER",
