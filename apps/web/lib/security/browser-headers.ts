@@ -4,6 +4,7 @@ type StaticHeader = {
 };
 
 type BrowserSecurityHeaderOptions = {
+  allowCloudflareInsights?: boolean;
   allowGoogleAnalytics?: boolean;
   allowTurnstile?: boolean;
   isProduction: boolean;
@@ -20,15 +21,11 @@ const LOCAL_HOSTNAMES = new Set([
 export function buildPermissionsPolicy(): string {
   return [
     'accelerometer=()',
-    'ambient-light-sensor=()',
     'autoplay=()',
-    'battery=()',
-    'bluetooth=()',
     'camera=()',
     'clipboard-read=(self)',
     'clipboard-write=(self)',
     'display-capture=()',
-    'document-domain=()',
     'fullscreen=(self)',
     'geolocation=()',
     'gyroscope=()',
@@ -56,6 +53,10 @@ export function buildContentSecurityPolicy(options: BrowserSecurityHeaderOptions
   if (options.allowTurnstile) {
     scriptSources.push('https://challenges.cloudflare.com');
     frameSources.push('https://challenges.cloudflare.com');
+  }
+
+  if (options.allowCloudflareInsights) {
+    scriptSources.push('https://static.cloudflareinsights.com');
   }
 
   if (options.allowGoogleAnalytics) {
