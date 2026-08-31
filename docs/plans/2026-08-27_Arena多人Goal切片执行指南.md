@@ -105,11 +105,11 @@ read authority / current state
 | `GMR-08` Proposal E2E | `DONE` | GMR-05,GMR-07 | typed Proposal server/UI 闭环 | 不扩展 private sharing |
 | `GMR-09` generation publisher | `DONE` | GMR-03,GMR-05,GMR-06R,GMR-07 | single producer + Room safe fan-out/resync | 不复制 AI lifecycle |
 | `GMR-10` hardening/fault/load audit | `DONE` | GMR-06R,GMR-08,GMR-09 | telemetry + failure drills + v1 exit audit | 不自动进入生产 activation |
-| `GMR-10P` product parity remediation | `IN_PROGRESS` | GMR-10 | A 至 F 已完成；G product parity E2E 与退出审计已解锁 | GMR-10P-G 完成前不激活 production |
-| `GMR-11` production activation review | `BLOCKED` | GMR-10,GMR-10P + Production Gate | 已完成的 Preview canary、ingress、release 与 rollback 基础设施保留；等待 GMR-10P 全部完成后重新独立审查 | 不执行 production activation |
+| `GMR-10P` product parity remediation | `DONE` | GMR-10 | A 至 G 全部完成；golden flow、durable verifier、full gate 与独立复审关闭 | 不自动激活 production |
+| `GMR-11` production activation review | `READY` | GMR-10,GMR-10P + Production Gate | GMR-10P 前置已关闭；须重新独立审查 production readiness，不沿用旧 go/no-go | 未获单独授权不执行 production activation |
 | `GMR-H` multi-instance / DO evaluation | `DEFERRED` | 真实指标触发 | 新 ADR/PoC 决策 | v1 不预建 |
 
-`GMR-06` 与 `GMR-07` 在 GMR-05 后 MAY 并行，但一个 `/goal` 仍只执行其中一个。2026-08-28 的 Redis-only superseding 修订把 `GMR-06R` 加为后续 generation/hardening 前置门禁；`GMR-08` 的已完成结果保留。GMR-10 的代码、真实故障/负载证据、最终复审与 full gate 已完成。2026-08-30 用户明确启动 GMR-11 收尾；回滚绑定、实时流整改、Preview Hono/Web 曝光及双成员 canary 已完成。2026-08-31 产品一致性修订在 GMR-10 与 GMR-11 之间插入 `GMR-10P`；当前 A 至 F 已完成，G 已解锁，GMR-11 在 GMR-10P-G 通过前有效状态为 `BLOCKED`。已完成的 GMR-11 基础设施保留，但不授权 production activation。真实 provider SSE 仍是可选 UX audit；GMR-H 继续保持 `DEFERRED`。
+`GMR-06` 与 `GMR-07` 在 GMR-05 后 MAY 并行，但一个 `/goal` 仍只执行其中一个。2026-08-28 的 Redis-only superseding 修订把 `GMR-06R` 加为后续 generation/hardening 前置门禁；`GMR-08` 的已完成结果保留。GMR-10 的代码、真实故障/负载证据、最终复审与 full gate 已完成。2026-08-30 用户明确启动 GMR-11 收尾；回滚绑定、实时流整改、Preview Hono/Web 曝光及双成员 canary 已完成。2026-08-31 产品一致性修订在 GMR-10 与 GMR-11 之间插入 `GMR-10P`；2026-09-01 A 至 G、golden/durable 证据、full gate 与独立复审均已关闭，GMR-10P 为 `DONE`。GMR-11 恢复为 `READY`，但仍须重新独立审查 production readiness，且不授权 production activation。真实 provider SSE 仍是可选 UX audit；GMR-H 继续保持 `DEFERRED`。
 
 ## 6. Goal 详细定义
 
@@ -785,7 +785,7 @@ validate -> pure derive -> conditional checkpoint
 
 ### GMR-10P product parity remediation
 
-**Status：`IN_PROGRESS`**
+**Status：`DONE`**
 
 该 Goal 以 accepted
 [Arena 多人产品一致性修订](../specs/2026-08-31_150000_Arena多人产品一致性与既有Arena复用修订.md)
@@ -793,18 +793,21 @@ validate -> pure derive -> conditional checkpoint
 [GMR-10P 实施计划](./2026-08-31_150000_Arena多人GMR-10P产品一致性整改实施计划.md)
 为权威入口。A 已完成真实 generation input、Room Shared Config、Proposal changes 与现有 Arena UI 的
 machine-readable coverage matrix，并在普通仓库验证中校验 gate 结构；production Hono workflow 在任何 deploy 前额外要求
-`GMR-10P-A` 至 `GMR-10P-G` 全部 `DONE`，当前按设计 fail closed。B 已完成 frozen authority
+`GMR-10P-A` 至 `GMR-10P-G` 全部 `DONE`，production parity gate 已转为 `READY`。B 已完成 frozen authority
 materialization、exact ref/host-local payload 校验、显式 config publish 与 host generation preflight；C 至 F 已完成 scoped
-Arena editor、完整 Proposal、共享 BattleResult 与轻量 room shell/management，G product parity E2E 与退出审计已解锁。整体
-Goal 在 G 完成前仍不得标记 `DONE`。
+Arena editor、完整 Proposal、共享 BattleResult 与轻量 room shell/management；G 已完成真实 hosted golden flow、Node WSS、
+loopback Redis durable verifier、full `ci:verify` 与两轮独立复审。最终 findings 为 Critical `0` / Important `0` /
+Minor `0`。完整证据见
+[GMR-10P 产品一致性实施与退出审计](../logs/2026-09-01_002500_Arena多人GMR-10P产品一致性实施与退出审计.md)。
 
 ### GMR-11 production activation review
 
-**Status：`BLOCKED`**
+**Status：`READY`**
 
 这是用户于 2026-08-30 明确启动的 production activation review，不是 GMR-10 自动续跑。旧版 go/no-go ceremony 已由
-2026-08-31 发布流程修订取代。2026-08-31 产品一致性修订又增加 `GMR-10P = DONE` 的强制依赖；在该依赖关闭前，
-本节以下已完成事实仅作为保留基础设施与历史证据，不授权继续上线。
+2026-08-31 发布流程修订取代。2026-08-31 产品一致性修订增加的 `GMR-10P = DONE` 强制依赖已于
+2026-09-01 关闭，因此本 Goal 恢复为可重新执行 production activation review 的 `READY`。本节以下已完成事实仍只作为
+保留基础设施与历史证据；不得沿用整改前的 go/no-go，也不授权自动上线。
 
 当前已完成 production activation 的代码路径：release tuple 绑定 writer capability、Hono 先于 Web 的发布依赖、shared
 Hono primary ingress、HTTP/WSS 发布探针与安全回滚；同时把

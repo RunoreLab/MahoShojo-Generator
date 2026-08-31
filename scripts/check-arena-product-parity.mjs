@@ -17,7 +17,7 @@ const argumentValue = (name, fallback) => {
 };
 
 const requireReady = process.argv.includes('--require-ready');
-const knownArguments = new Set(['--manifest', '--require-ready']);
+const knownArguments = new Set(['--', '--manifest', '--require-ready']);
 for (let index = 2; index < process.argv.length; index += 1) {
   const value = process.argv[index];
   if (!value.startsWith('--')) continue;

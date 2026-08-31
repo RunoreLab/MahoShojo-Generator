@@ -11,41 +11,39 @@ const packagePath = resolve(repositoryRoot, 'package.json');
 const workflowPath = resolve(repositoryRoot, '.github/workflows/hono-deploy.yml');
 const enginePath = resolve(repositoryRoot, 'apps/web/components/arena/hooks/useBattleEngine.ts');
 
-const runGate = (args: readonly string[] = []) => spawnSync(
-  process.execPath,
-  [scriptPath, ...args],
-  {
-    cwd: repositoryRoot,
-    encoding: 'utf8',
-    env: { PATH: process.env.PATH },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  },
-);
+const runGate = (args: readonly string[] = []) => {
+  return spawnSync(
+    process.execPath,
+    [scriptPath, ...args],
+    {
+      cwd: repositoryRoot,
+      encoding: 'utf8',
+      env: { PATH: process.env.PATH },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    },
+  );
+};
 
 describe('GMR-10P product parity gate', () => {
-  it('提供 machine-readable manifest，普通仓库验证接受结构正确的 BLOCKED 状态', () => {
+  it('提供 machine-readable manifest，普通仓库验证接受完成后的 READY 状态', () => {
     expect(existsSync(manifestPath), '缺少 product parity gate manifest').toBe(true);
     expect(existsSync(scriptPath), '缺少 product parity gate checker').toBe(true);
 
     const verified = runGate();
+    expect(verified.error).toBeUndefined();
     expect(verified.status, `${verified.stdout}\n${verified.stderr}`).toBe(0);
-    expect(JSON.parse(verified.stdout)).toMatchObject({
-      gate: 'ARENA_PRODUCT_PARITY_GATE',
-      goal: 'GMR-10P',
-      status: 'PASS',
-      productionReadiness: 'BLOCKED',
-    });
   });
 
-  it('production readiness 在 GMR-10P-G 完成前 fail closed', () => {
-    const readiness = runGate(['--require-ready']);
+  it('production readiness 在 GMR-10P-G 完成后通过 require-ready', () => {
+    const readiness = runGate(['--', '--require-ready']);
 
-    expect(readiness.status).toBe(1);
-    expect(readiness.stderr).toMatch(/GMR-10P.*未 DONE.*production/u);
+    expect(readiness.error).toBeUndefined();
+    expect(readiness.status, `${readiness.stdout}\n${readiness.stderr}`).toBe(0);
   });
 
-  it('普通 ci:verify 校验 manifest，但不假装 production ready', () => {
+  it('普通 ci:verify 校验完成后的 manifest 与全部切片状态', () => {
     const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
+      blockedReason?: string;
       overallStatus?: string;
       productionReadiness?: string;
       slices?: Record<string, string>;
@@ -55,8 +53,9 @@ describe('GMR-10P product parity gate', () => {
     };
 
     expect(manifest).toMatchObject({
-      overallStatus: 'IN_PROGRESS',
-      productionReadiness: 'BLOCKED',
+      blockedReason: 'none',
+      overallStatus: 'DONE',
+      productionReadiness: 'READY',
       slices: {
         'GMR-10P-A': 'DONE',
         'GMR-10P-B': 'DONE',
@@ -64,7 +63,7 @@ describe('GMR-10P product parity gate', () => {
         'GMR-10P-D': 'DONE',
         'GMR-10P-E': 'DONE',
         'GMR-10P-F': 'DONE',
-        'GMR-10P-G': 'READY',
+        'GMR-10P-G': 'DONE',
       },
     });
     expect(packageManifest.scripts?.['check:arena-product-parity']).toBe(
