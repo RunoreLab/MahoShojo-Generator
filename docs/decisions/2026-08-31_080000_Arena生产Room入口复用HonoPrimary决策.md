@@ -120,7 +120,8 @@ Browser `Origin` allowlist 继续是安全边界，但它描述的是**谁发起
 - `SPEC-arena-multiplayer-hono-redis-runtime-amendment-v1`；
 - Redis-only Room directory 修订；
 - Hosted DR 的 capability/no-replay/active-passive 边界；
-- production writer activation、request flag、Web exposure、rollback baseline 与人工 go/no-go 门禁。
+- production request flag、Web exposure、immutable writer capability 与 rollback baseline。后续发布流程已由
+  `SPEC-arena-room-primary-ingress-simplification-v1` 收敛为默认分支单流水线，不再保留人工 go/no-go token。
 
 ## 4. 不采用的方案
 

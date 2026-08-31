@@ -14,9 +14,6 @@ import {
   type HostedDrVersionGateInput,
 } from '@mahoshojo/hosted-api/hosted-dr';
 
-const ARENA_ROOM_CHECKPOINT_CONTRACT =
-  'arena-room-authority-v2-generation-payload-digest-v1';
-
 export type HonoServerConfig = {
   host: string;
   port: number;
@@ -104,14 +101,6 @@ const validateProductionEnvironment = (
   const arenaRoomWriterActivation = env.ARENA_ROOM_WRITER_ACTIVATION?.trim() || 'disabled';
   if (!['disabled', 'enabled'].includes(arenaRoomWriterActivation)) {
     problems.push('ARENA_ROOM_WRITER_ACTIVATION 必须是 disabled 或 enabled');
-  }
-  if (protectedHostedTarget && config.arenaMultiplayerEnabled) {
-    if (env.ARENA_ROOM_READER_ROLLOUT_CONTRACT !== ARENA_ROOM_CHECKPOINT_CONTRACT) {
-      problems.push('Arena writer activation 缺少 compatible reader rollout attestation');
-    }
-    if (env.ARENA_ROOM_PRODUCTION_GO_NO_GO !== 'approved') {
-      problems.push('Arena writer activation 缺少独立 production go/no-go approval');
-    }
   }
   if (!config.redisUrl) problems.push('Redis 未配置（REDIS_URL 或 REDIS_HOST）');
   if (protectedHostedTarget

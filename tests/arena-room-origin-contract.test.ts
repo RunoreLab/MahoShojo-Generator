@@ -81,7 +81,8 @@ describe('Arena Room ingress policy contract', () => {
     expect(manifest.targets.preview.allowedWebOrigins).toContain(
       'https://mahoshojo-next-preview.719147538.workers.dev',
     );
-    expect(previewWorkflow).toContain('PREVIEW_ARENA_ROOM_WRITER_ACTIVATION: enabled');
+    expect(previewWorkflow).toContain('--writer enabled');
+    expect(previewWorkflow).not.toContain('PREVIEW_ARENA_ROOM_WRITER_ACTIVATION');
     expect(previewWorkflow).toContain('scripts/prepare-arena-room-release-gate.mjs');
     expect(previewWorkflow).toContain('for room_web_origin in "${room_web_origins[@]}"');
     expect(previewWorkflow).toContain('Access-Control-Allow-Origin: $room_web_origin');

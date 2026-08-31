@@ -6,14 +6,14 @@ on:
       - feature/v0.2.0_Battle_Growth_MahoShojo
   workflow_dispatch:
     inputs:
-      arena_room_writer_activation:
-        description: Production Arena Room writer tuple；普通 push 只构建不部署
+      arena_multiplayer:
+        description: Arena multiplayer Web exposure；仅在紧急回退时选择 disabled
         required: true
-        default: disabled
+        default: enabled
         type: choice
         options:
-          - disabled
           - enabled
+          - disabled
 
 concurrency:
   group: hono-production
@@ -21,6 +21,7 @@ concurrency:
 
 permissions:
   contents: read
+  deployments: write
 
 env:
   VPS_HOST: ${{ vars.VPS_HOST }}
@@ -85,16 +86,12 @@ jobs:
           sudo --preserve-env=HONO_RELEASE_DIR,HONO_HOSTED_API_ENVIRONMENT,HONO_DEPLOY_CORS_ORIGINS docker compose -f apps/api/deploy/compose.yml config --no-env-resolution
 
       - name: Build single-file server
-        env:
-          HONO_ARENA_ROOM_WRITER_ACTIVATION: ${{ github.event_name == 'workflow_dispatch' && inputs.arena_room_writer_activation || 'disabled' }}
-          ARENA_ROOM_READER_ROLLOUT_CONTRACT: arena-room-authority-v2-generation-payload-digest-v1
-          ARENA_ROOM_PRODUCTION_GO_NO_GO: approved
         run: |
           pnpm --filter @mahoshojo/api run deploy:prepare
           cp apps/api/deploy/compose.yml apps/api/dist/compose.yml
           cp apps/api/deploy/deploy-bundle.sh apps/api/dist/deploy-bundle.sh
           node scripts/prepare-arena-room-release-gate.mjs \
-            --writer "$HONO_ARENA_ROOM_WRITER_ACTIVATION" \
+            --writer enabled \
             --output apps/api/dist/arena-room-release-gate.json
           cp scripts/arena-room-release-gate-schema.mjs apps/api/dist/arena-room-release-gate-schema.mjs
           cd apps/api/dist
@@ -172,7 +169,7 @@ jobs:
 
   deploy:
     needs: build
-    if: github.ref == 'refs/heads/feature/v0.2.0_Battle_Growth_MahoShojo' && github.event_name == 'workflow_dispatch'
+    if: github.ref == 'refs/heads/feature/v0.2.0_Battle_Growth_MahoShojo'
     runs-on: ubuntu-latest
     environment: hono-production
     steps:
@@ -215,3 +212,11 @@ jobs:
           expected_dir="/opt/mahoshojo-hono/releases/$release_id"
           test "$installed_dir" = "$expected_dir"
           ssh -i ~/.ssh/deploy_key "$VPS_USER@$VPS_HOST" "HONO_HOSTED_API_ENVIRONMENT=production '$installed_dir/deploy-bundle.sh' '$release_id' https://homura.colanns.me"
+
+  deploy-cloudflare:
+    needs: deploy
+    if: github.ref == 'refs/heads/feature/v0.2.0_Battle_Growth_MahoShojo'
+    uses: ./.github/workflows/cloudflare-deploy.yml
+    with:
+      arena_multiplayer_enabled: ${{ github.event_name != 'workflow_dispatch' || inputs.arena_multiplayer == 'enabled' }}
+    secrets: inherit

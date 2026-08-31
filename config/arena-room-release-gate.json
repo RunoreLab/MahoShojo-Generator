@@ -1,22 +1,9 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "checkpointContract": "arena-room-authority-v2-generation-payload-digest-v1",
-  "writerActivation": "disabled",
-  "compatibleReaderRolloutRequired": true,
-  "productionGoNoGoRequired": true,
+  "writerActivation": "enabled",
   "rollback": {
     "minimumReaderContract": "arena-room-authority-v2-generation-payload-digest-v1",
     "generationStartMustBeDisabled": true
-  },
-  "rolloutOrder": [
-    "compatible-reader",
-    "writer-disabled-validation",
-    "production-go-no-go",
-    "writer-activation"
-  ],
-  "evidence": {
-    "legacyCheckpointReaderTest": "GMR-09 mixed-version checkpoint gate",
-    "productionFeatureGateTest": "GMR-09 mixed-version gate",
-    "rollbackShellGate": "verify_arena_room_rollback_gate"
   }
 }

@@ -10,8 +10,9 @@ Arena 多人 v1 production ingress 重整与后续激活使用以下专项入口
 - [Arena 生产 Room 入口简化与架构重整规格](./specs/2026-08-31_080100_Arena生产Room入口简化与架构重整规格.md)
 - [Arena 多人生产激活与回滚实施计划](./plans/2026-08-30_231000_Arena多人生产激活与回滚实施计划.md)
 
-该专项冻结 Room HTTP/WSS 直接复用 Hosted Hono primary、caller Origin 与 service origin 分离，以及
-writer/request/Web 三层门禁；入口重整不授权 production deploy、DNS、secret、Redis 或 D1 mutation。
+该专项冻结 Room HTTP/WSS 直接复用 Hosted Hono primary、caller Origin 与 service origin 分离，以及“默认分支 push
+一次 CI -> Hono transaction/probe -> Cloudflare reusable deploy”的生产路径。运行控制只保留服务端 request kill switch
+与 Web exposure switch；writer capability 继续受 immutable release tuple 保护。
 
 Arena 战报正文存储与有限保留工作使用以下专项入口：
 

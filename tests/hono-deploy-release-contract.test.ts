@@ -98,7 +98,8 @@ describe('Hono content-addressed release transaction', () => {
     expect(script).toContain(
       'HONO_ARENA_ROOM_WRITER_ACTIVATION="$release_writer_activation"',
     );
-    expect(script).toContain('validate_arena_room_activation_attestations "$release_dir"');
+    expect(script).not.toContain('validate_arena_room_activation_attestations');
+    expect(script).not.toContain('ARENA_ROOM_PRODUCTION_GO_NO_GO');
     expect(script).toContain('validate_arena_room_runtime_allowed_origins "$release_dir"');
     expect(script).toContain('--header "Origin: $web_origin"');
     expect(script).toContain('"Access-Control-Allow-Origin: $web_origin"');

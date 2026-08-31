@@ -101,7 +101,7 @@ describe('Hono server config', () => {
   );
 
   it.each(['production', 'preview'])(
-    '%s target 仅在 tuple-bound writer 与 reader/go-no-go 证明同时成立时激活',
+    '%s target 由 request flag 与 tuple-bound writer capability 共同激活',
     (target) => {
       stubValidBearerProductionEnv();
       vi.stubEnv('HOSTED_API_ENVIRONMENT', target);
@@ -109,13 +109,6 @@ describe('Hono server config', () => {
       vi.stubEnv('ARENA_MULTIPLAYER_ENABLED', 'true');
       vi.stubEnv('ARENA_ROOM_WRITER_ACTIVATION', 'enabled');
 
-      expect(() => readHonoServerConfig()).toThrow(/compatible reader rollout attestation/iu);
-
-      vi.stubEnv(
-        'ARENA_ROOM_READER_ROLLOUT_CONTRACT',
-        'arena-room-authority-v2-generation-payload-digest-v1',
-      );
-      vi.stubEnv('ARENA_ROOM_PRODUCTION_GO_NO_GO', 'approved');
       expect(readHonoServerConfig().arenaMultiplayerEnabled).toBe(true);
     },
   );

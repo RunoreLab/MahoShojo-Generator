@@ -4,9 +4,6 @@ import {
   hostedDrPreviewOrigin,
 } from './hosted-dr-client.generated';
 
-const ARENA_ROOM_CHECKPOINT_CONTRACT =
-  'arena-room-authority-v2-generation-payload-digest-v1';
-
 type ArenaHostedApiConfig = {
   readonly enabled: boolean;
   readonly origin: string;
@@ -16,12 +13,6 @@ type ArenaHostedApiConfig = {
 export type ArenaMultiplayerConfig = {
   readonly enabled: boolean;
   readonly origin: string;
-};
-
-type ArenaMultiplayerActivation = {
-  readonly writerActivation?: string;
-  readonly readerContract?: string;
-  readonly goNoGo?: string;
 };
 
 const readFlag = (raw: string | undefined): boolean => {
@@ -35,11 +26,6 @@ const readFlag = (raw: string | undefined): boolean => {
 export const resolveArenaMultiplayerConfig = (
   rawFlag: string | undefined,
   hostedApi: ArenaHostedApiConfig,
-  activation: ArenaMultiplayerActivation = {
-    writerActivation: process.env.NEXT_PUBLIC_ARENA_ROOM_WRITER_ACTIVATION,
-    readerContract: process.env.NEXT_PUBLIC_ARENA_ROOM_READER_CONTRACT,
-    goNoGo: process.env.NEXT_PUBLIC_ARENA_ROOM_GO_NO_GO,
-  },
 ): ArenaMultiplayerConfig => {
   const enabled = readFlag(rawFlag);
   if (!enabled) return { enabled: false, origin: hostedApi.origin };
@@ -48,16 +34,6 @@ export const resolveArenaMultiplayerConfig = (
   }
   if (hostedApi.target !== 'production' && hostedApi.target !== 'preview') {
     return { enabled: true, origin: hostedApi.origin };
-  }
-
-  if (activation.writerActivation !== 'enabled') {
-    throw new Error('Arena multiplayer protected activation 缺少 writer activation 证明');
-  }
-  if (activation.readerContract !== ARENA_ROOM_CHECKPOINT_CONTRACT) {
-    throw new Error('Arena multiplayer protected activation 的 reader contract 不兼容');
-  }
-  if (activation.goNoGo !== 'approved') {
-    throw new Error('Arena multiplayer protected activation 缺少 go/no-go approval');
   }
 
   return {

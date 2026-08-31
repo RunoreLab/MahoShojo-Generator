@@ -4,7 +4,13 @@ import { pathToFileURL } from 'node:url';
 export const ARENA_ROOM_CHECKPOINT_CONTRACT =
   'arena-room-authority-v2-generation-payload-digest-v1';
 
-const expectedTopLevelKeys = [
+const expectedV2TopLevelKeys = [
+  'checkpointContract',
+  'rollback',
+  'schemaVersion',
+  'writerActivation',
+];
+const expectedV1TopLevelKeys = [
   'checkpointContract',
   'compatibleReaderRolloutRequired',
   'evidence',
@@ -44,16 +50,32 @@ const hasExactKeys = (value, expectedKeys) => (
 
 export const validateArenaRoomReleaseGate = (
   candidate,
-  { expectedWriterActivation, expectedContract = ARENA_ROOM_CHECKPOINT_CONTRACT } = {},
+  {
+    expectedWriterActivation,
+    expectedContract = ARENA_ROOM_CHECKPOINT_CONTRACT,
+    expectedSchemaVersion,
+  } = {},
 ) => {
   const failures = [];
   const fail = (message) => failures.push(message);
 
+  if (!isRecord(candidate) || ![1, 2].includes(candidate.schemaVersion)) {
+    fail('schemaVersion 必须为受支持的 1 或 2');
+    return failures;
+  }
+  if (
+    expectedSchemaVersion !== undefined
+    && candidate.schemaVersion !== expectedSchemaVersion
+  ) {
+    fail(`schemaVersion 必须为 ${expectedSchemaVersion}`);
+  }
+  const expectedTopLevelKeys = candidate.schemaVersion === 1
+    ? expectedV1TopLevelKeys
+    : expectedV2TopLevelKeys;
   if (!hasExactKeys(candidate, expectedTopLevelKeys)) {
     fail('顶层字段必须与 Arena Room release gate schema 精确一致');
     return failures;
   }
-  if (candidate.schemaVersion !== 1) fail('schemaVersion 必须为 1');
   if (candidate.checkpointContract !== expectedContract) {
     fail('checkpointContract 与期望 reader contract 不一致');
   }
@@ -66,15 +88,6 @@ export const validateArenaRoomReleaseGate = (
   ) {
     fail(`writerActivation 必须为 ${expectedWriterActivation}`);
   }
-  if (candidate.compatibleReaderRolloutRequired !== true) {
-    fail('compatibleReaderRolloutRequired 必须为 true');
-  }
-  if (candidate.productionGoNoGoRequired !== true) {
-    fail('productionGoNoGoRequired 必须为 true');
-  }
-  if (JSON.stringify(candidate.rolloutOrder) !== JSON.stringify(expectedRolloutOrder)) {
-    fail('rolloutOrder 必须保持 reader-first 与显式 production go/no-go');
-  }
   if (!hasExactKeys(candidate.rollback, expectedRollbackKeys)) {
     fail('rollback 字段必须与 schema 精确一致');
   } else {
@@ -85,11 +98,22 @@ export const validateArenaRoomReleaseGate = (
       fail('rollback.generationStartMustBeDisabled 必须为 true');
     }
   }
-  if (!hasExactKeys(candidate.evidence, expectedEvidenceKeys)) {
-    fail('evidence 字段必须与 schema 精确一致');
-  } else {
-    for (const [key, value] of Object.entries(expectedEvidence)) {
-      if (candidate.evidence[key] !== value) fail(`evidence.${key} 非法`);
+  if (candidate.schemaVersion === 1) {
+    if (candidate.compatibleReaderRolloutRequired !== true) {
+      fail('legacy compatibleReaderRolloutRequired 必须为 true');
+    }
+    if (candidate.productionGoNoGoRequired !== true) {
+      fail('legacy productionGoNoGoRequired 必须为 true');
+    }
+    if (JSON.stringify(candidate.rolloutOrder) !== JSON.stringify(expectedRolloutOrder)) {
+      fail('legacy rolloutOrder 不兼容');
+    }
+    if (!hasExactKeys(candidate.evidence, expectedEvidenceKeys)) {
+      fail('legacy evidence 字段必须与 schema 精确一致');
+    } else {
+      for (const [key, value] of Object.entries(expectedEvidence)) {
+        if (candidate.evidence[key] !== value) fail(`legacy evidence.${key} 非法`);
+      }
     }
   }
   return failures;
@@ -104,7 +128,12 @@ const readArgument = (arguments_, name, fallback) => {
 };
 
 export const runArenaRoomReleaseGateSchemaCli = (arguments_ = process.argv.slice(2)) => {
-  const allowedArguments = new Set(['--manifest', '--expect-writer', '--expect-contract']);
+  const allowedArguments = new Set([
+    '--manifest',
+    '--expect-writer',
+    '--expect-contract',
+    '--expect-schema',
+  ]);
   for (let index = 0; index < arguments_.length; index += 2) {
     const name = arguments_[index];
     if (!allowedArguments.has(name) || index + 1 >= arguments_.length) {
@@ -125,6 +154,16 @@ export const runArenaRoomReleaseGateSchemaCli = (arguments_ = process.argv.slice
     '--expect-contract',
     ARENA_ROOM_CHECKPOINT_CONTRACT,
   );
+  const rawExpectedSchemaVersion = readArgument(arguments_, '--expect-schema');
+  const expectedSchemaVersion = rawExpectedSchemaVersion === undefined
+    ? undefined
+    : Number(rawExpectedSchemaVersion);
+  if (
+    expectedSchemaVersion !== undefined
+    && ![1, 2].includes(expectedSchemaVersion)
+  ) {
+    throw new Error('--expect-schema 必须是 1 或 2');
+  }
 
   let manifest;
   try {
@@ -136,6 +175,7 @@ export const runArenaRoomReleaseGateSchemaCli = (arguments_ = process.argv.slice
   const failures = validateArenaRoomReleaseGate(manifest, {
     expectedWriterActivation,
     expectedContract,
+    expectedSchemaVersion,
   });
   if (failures.length > 0) {
     for (const failure of failures) {

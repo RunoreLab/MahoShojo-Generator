@@ -25,9 +25,6 @@ permissions:
 env:
   PREVIEW_ARENA_MULTIPLAYER_ENABLED: ${{ github.event_name == 'workflow_dispatch' && inputs.arena_multiplayer == 'disabled' && 'false' || 'true' }}
   PREVIEW_ARENA_ROOM_ALLOWED_ORIGINS: https://mahoshojo.colanns.me,https://maho-preview.colanns.me,https://mahoshojo-next-preview.719147538.workers.dev
-  PREVIEW_ARENA_ROOM_WRITER_ACTIVATION: enabled
-  PREVIEW_ARENA_ROOM_READER_CONTRACT: arena-room-authority-v2-generation-payload-digest-v1
-  PREVIEW_ARENA_ROOM_GO_NO_GO: approved
 
 # Preview 发布假定合并前已在本地或集成 CI 执行 `pnpm run ci:verify`；这里仅保留
 # 构建、发布与公网契约 canary，避免在每次 Preview 部署中重复执行耗时的整仓门禁。
@@ -55,16 +52,12 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build release tuple
-        env:
-          HONO_ARENA_ROOM_WRITER_ACTIVATION: enabled
-          ARENA_ROOM_READER_ROLLOUT_CONTRACT: arena-room-authority-v2-generation-payload-digest-v1
-          ARENA_ROOM_PRODUCTION_GO_NO_GO: approved
         run: |
           pnpm --filter @mahoshojo/api run deploy:prepare
           cp apps/api/deploy/compose.yml apps/api/dist/compose.yml
           cp apps/api/deploy/deploy-bundle.sh apps/api/dist/deploy-bundle.sh
           node scripts/prepare-arena-room-release-gate.mjs \
-            --writer "$HONO_ARENA_ROOM_WRITER_ACTIVATION" \
+            --writer enabled \
             --output apps/api/dist/arena-room-release-gate.json
           cp scripts/arena-room-release-gate-schema.mjs apps/api/dist/arena-room-release-gate-schema.mjs
           cd apps/api/dist
@@ -120,9 +113,6 @@ jobs:
           NEXT_PUBLIC_SAFETY_CHECK_POLICY: ${{ vars.NEXT_PUBLIC_SAFETY_CHECK_POLICY }}
           NEXT_PUBLIC_HOSTED_API_ENVIRONMENT: preview
           NEXT_PUBLIC_ARENA_MULTIPLAYER_ENABLED: ${{ env.PREVIEW_ARENA_MULTIPLAYER_ENABLED }}
-          NEXT_PUBLIC_ARENA_ROOM_WRITER_ACTIVATION: ${{ env.PREVIEW_ARENA_ROOM_WRITER_ACTIVATION }}
-          NEXT_PUBLIC_ARENA_ROOM_READER_CONTRACT: ${{ env.PREVIEW_ARENA_ROOM_READER_CONTRACT }}
-          NEXT_PUBLIC_ARENA_ROOM_GO_NO_GO: ${{ env.PREVIEW_ARENA_ROOM_GO_NO_GO }}
         run: |
           set -euo pipefail
           NEXT_PUBLIC_HONO_API_ORIGIN="$(node -p "require('./config/hosted-dr-capabilities.json').controlPlane.previewOrigin")"
@@ -225,9 +215,6 @@ jobs:
       - name: Verify Arena Room backend activation
         env:
           NEXT_PUBLIC_ARENA_MULTIPLAYER_ENABLED: ${{ env.PREVIEW_ARENA_MULTIPLAYER_ENABLED }}
-          NEXT_PUBLIC_ARENA_ROOM_WRITER_ACTIVATION: ${{ env.PREVIEW_ARENA_ROOM_WRITER_ACTIVATION }}
-          NEXT_PUBLIC_ARENA_ROOM_READER_CONTRACT: ${{ env.PREVIEW_ARENA_ROOM_READER_CONTRACT }}
-          NEXT_PUBLIC_ARENA_ROOM_GO_NO_GO: ${{ env.PREVIEW_ARENA_ROOM_GO_NO_GO }}
         run: |
           set -euo pipefail
           room_web_enabled=false
@@ -236,11 +223,6 @@ jobs:
             1|true|yes|on) room_web_enabled=true ;;
             *) echo 'NEXT_PUBLIC_ARENA_MULTIPLAYER_ENABLED 非法' >&2; exit 1 ;;
           esac
-          if [ "$room_web_enabled" = true ]; then
-            test "$NEXT_PUBLIC_ARENA_ROOM_WRITER_ACTIVATION" = enabled
-            test "$NEXT_PUBLIC_ARENA_ROOM_READER_CONTRACT" = arena-room-authority-v2-generation-payload-digest-v1
-            test "$NEXT_PUBLIC_ARENA_ROOM_GO_NO_GO" = approved
-          fi
           room_origin="$(node -p "require('./config/hosted-dr-capabilities.json').controlPlane.previewOrigin")"
           case "$room_origin" in
             https://*) room_origin="${room_origin%/}" ;;
@@ -297,9 +279,6 @@ jobs:
           NEXT_PUBLIC_SAFETY_CHECK_POLICY: ${{ vars.NEXT_PUBLIC_SAFETY_CHECK_POLICY }}
           NEXT_PUBLIC_HOSTED_API_ENVIRONMENT: preview
           NEXT_PUBLIC_ARENA_MULTIPLAYER_ENABLED: ${{ env.PREVIEW_ARENA_MULTIPLAYER_ENABLED }}
-          NEXT_PUBLIC_ARENA_ROOM_WRITER_ACTIVATION: ${{ env.PREVIEW_ARENA_ROOM_WRITER_ACTIVATION }}
-          NEXT_PUBLIC_ARENA_ROOM_READER_CONTRACT: ${{ env.PREVIEW_ARENA_ROOM_READER_CONTRACT }}
-          NEXT_PUBLIC_ARENA_ROOM_GO_NO_GO: ${{ env.PREVIEW_ARENA_ROOM_GO_NO_GO }}
         run: |
           set -euo pipefail
           NEXT_PUBLIC_HONO_API_ORIGIN="$(node -p "require('./config/hosted-dr-capabilities.json').controlPlane.previewOrigin")"

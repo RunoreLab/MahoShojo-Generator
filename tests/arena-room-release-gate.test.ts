@@ -33,32 +33,63 @@ const runSchema = (manifest: string, extraArgs: string[] = []) => {
 };
 
 describe('Arena Room release gate', () => {
-  it('keeps current writer disabled while executable reader/rollback evidence remains present', () => {
-    const result = run([]);
-    expect(result.status, result.stderr).toBe(0);
-    expect(JSON.parse(result.stdout)).toMatchObject({
+  it('defaults to an automatic writer-enabled v2 release without activation attestations', () => {
+    const verified = run(['--mode', 'deploy']);
+
+    expect(verified.status, verified.stderr).toBe(0);
+    expect(JSON.parse(verified.stdout)).toMatchObject({
       gate: 'ARENA_ROOM_RELEASE_GATE',
-      mode: 'verify',
-      writerActivation: 'disabled',
+      mode: 'deploy',
+      writerActivation: 'enabled',
       status: 'PASS',
+    });
+
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as Record<string, unknown>;
+    expect(manifest).toMatchObject({ schemaVersion: 2, writerActivation: 'enabled' });
+    expect(manifest).not.toHaveProperty('compatibleReaderRolloutRequired');
+    expect(manifest).not.toHaveProperty('productionGoNoGoRequired');
+    expect(manifest).not.toHaveProperty('rolloutOrder');
+    expect(manifest).not.toHaveProperty('evidence');
+  });
+
+  it('prepares the default writer-enabled release without operator environment evidence', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'arena-room-release-gate-automatic.'));
+    const output = join(directory, 'candidate.json');
+    const result = spawnSync(
+      process.execPath,
+      [prepareScript, '--output', output],
+      {
+        cwd: process.cwd(),
+        encoding: 'utf8',
+        env: { PATH: process.env.PATH },
+      },
+    );
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(readFileSync(output, 'utf8'))).toMatchObject({
+      schemaVersion: 2,
+      writerActivation: 'enabled',
     });
   });
 
-  it('fails writer activation closed without reader rollout and production go/no-go attestations', () => {
+  it('allows an explicit writer-disabled rollback artifact without operator attestations', () => {
     const directory = mkdtempSync(join(tmpdir(), 'arena-room-release-gate.'));
-    const enabledManifest = join(directory, 'enabled.json');
-    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as Record<string, unknown>;
-    writeFileSync(enabledManifest, JSON.stringify({ ...manifest, writerActivation: 'enabled' }));
+    const output = join(directory, 'disabled.json');
+    const prepared = spawnSync(
+      process.execPath,
+      [prepareScript, '--writer', 'disabled', '--output', output],
+      {
+        cwd: process.cwd(),
+        encoding: 'utf8',
+        env: { PATH: process.env.PATH },
+      },
+    );
 
-    const rejected = run(['--mode', 'deploy', '--manifest', enabledManifest]);
-    expect(rejected.status).toBe(1);
-    expect(rejected.stderr).toMatch(/compatible reader rollout.*production go\/no-go/su);
-
-    const accepted = run(['--mode', 'deploy', '--manifest', enabledManifest], {
-      ARENA_ROOM_READER_ROLLOUT_CONTRACT: String(manifest.checkpointContract),
-      ARENA_ROOM_PRODUCTION_GO_NO_GO: 'approved',
+    expect(prepared.status, prepared.stderr).toBe(0);
+    expect(JSON.parse(readFileSync(output, 'utf8'))).toMatchObject({
+      schemaVersion: 2,
+      writerActivation: 'disabled',
     });
-    expect(accepted.status, accepted.stderr).toBe(0);
   });
 
   it('requires generation start disabled and a compatible target reader before rollback', () => {
@@ -71,33 +102,6 @@ describe('Arena Room release gate', () => {
       ARENA_MULTIPLAYER_GENERATION_START_STATE: 'disabled',
       ARENA_ROOM_TARGET_READER_CONTRACT: 'arena-room-authority-v2-generation-payload-digest-v1',
     }).status).toBe(0);
-  });
-
-  it('prepares an immutable writer-enabled candidate only with exact attestations', () => {
-    const directory = mkdtempSync(join(tmpdir(), 'arena-room-release-gate-prepare.'));
-    const output = join(directory, 'candidate.json');
-    const runPrepare = (env: NodeJS.ProcessEnv = {}) => spawnSync(
-      process.execPath,
-      [prepareScript, '--writer', 'enabled', '--output', output],
-      {
-        cwd: process.cwd(),
-        encoding: 'utf8',
-        env: { PATH: process.env.PATH, ...env },
-      },
-    );
-
-    expect(runPrepare().status).toBe(1);
-    const accepted = runPrepare({
-      ARENA_ROOM_READER_ROLLOUT_CONTRACT:
-        'arena-room-authority-v2-generation-payload-digest-v1',
-      ARENA_ROOM_PRODUCTION_GO_NO_GO: 'approved',
-    });
-    expect(accepted.status, accepted.stderr).toBe(0);
-    expect(JSON.parse(readFileSync(output, 'utf8'))).toMatchObject({
-      writerActivation: 'enabled',
-      checkpointContract: 'arena-room-authority-v2-generation-payload-digest-v1',
-    });
-    expect(readFileSync(manifestPath, 'utf8')).toContain('"writerActivation": "disabled"');
   });
 
   it('validates the complete release-gate JSON schema instead of matching nested text', () => {
@@ -115,7 +119,7 @@ describe('Arena Room release gate', () => {
       },
     }));
     expect(nestedOnly.status).toBe(1);
-    expect(nestedOnly.stderr).toMatch(/字段/u);
+    expect(nestedOnly.stderr).toMatch(/schemaVersion|字段/u);
 
     const withUnexpectedField = JSON.parse(canonical) as Record<string, unknown>;
     withUnexpectedField.untrusted = true;

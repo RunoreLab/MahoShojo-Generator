@@ -32,6 +32,48 @@ const realSleepPath = spawnSync('which', ['sleep'], { encoding: 'utf8' }).stdout
 
 const sha256 = (content: string): string => createHash('sha256').update(content).digest('hex');
 
+const legacyWriterDisabledReleaseGate = Object.freeze({
+  schemaVersion: 1,
+  checkpointContract: 'arena-room-authority-v2-generation-payload-digest-v1',
+  writerActivation: 'disabled',
+  compatibleReaderRolloutRequired: true,
+  productionGoNoGoRequired: true,
+  rollback: {
+    minimumReaderContract: 'arena-room-authority-v2-generation-payload-digest-v1',
+    generationStartMustBeDisabled: true,
+  },
+  rolloutOrder: [
+    'compatible-reader',
+    'writer-disabled-validation',
+    'production-go-no-go',
+    'writer-activation',
+  ],
+  evidence: {
+    legacyCheckpointReaderTest: 'GMR-09 mixed-version checkpoint gate',
+    productionFeatureGateTest: 'GMR-09 mixed-version gate',
+    rollbackShellGate: 'verify_arena_room_rollback_gate',
+  },
+});
+
+const legacyV1ReleaseGateSchema = `
+import { readFileSync } from 'node:fs';
+
+const arguments_ = process.argv.slice(2);
+const readArgument = (name) => {
+  const index = arguments_.indexOf(name);
+  return index < 0 ? undefined : arguments_[index + 1];
+};
+const candidate = JSON.parse(readFileSync(readArgument('--manifest'), 'utf8'));
+if (candidate.schemaVersion !== 1) process.exit(1);
+if (candidate.checkpointContract !== 'arena-room-authority-v2-generation-payload-digest-v1') {
+  process.exit(1);
+}
+const expectedContract = readArgument('--expect-contract');
+if (expectedContract !== undefined && candidate.checkpointContract !== expectedContract) {
+  process.exit(1);
+}
+`;
+
 const writeExecutable = (filePath: string, content: string): void => {
   writeFileSync(filePath, content);
   chmodSync(filePath, 0o755);
@@ -101,6 +143,7 @@ const createRelease = (
 const createFixture = (options: {
   previousHasArenaRoomReleaseGate?: boolean;
   previousCheckpointContract?: string;
+  previousGateOverride?: Record<string, unknown>;
   previousGateSchemaOverride?: string;
   previousWriterActivation?: 'disabled' | 'enabled';
   targetHasArenaRoomReleaseGate?: boolean;
@@ -116,19 +159,13 @@ const createFixture = (options: {
   const commandLog = path.join(temporaryDirectory, 'commands.log');
   mkdirSync(path.join(rootDirectory, 'releases'), { recursive: true });
   mkdirSync(commandDirectory, { recursive: true });
-  writeFileSync(path.join(rootDirectory, '.env.hono'), [
-    'FIXTURE=true',
-    ...(options.targetWriterActivation === 'enabled' ? [
-      'ARENA_ROOM_READER_ROLLOUT_CONTRACT=arena-room-authority-v2-generation-payload-digest-v1',
-      'ARENA_ROOM_PRODUCTION_GO_NO_GO=approved',
-    ] : []),
-    '',
-  ].join('\n'));
+  writeFileSync(path.join(rootDirectory, '.env.hono'), 'FIXTURE=true\n');
   chmodSync(path.join(rootDirectory, '.env.hono'), 0o600);
 
   const previousRelease = createRelease(rootDirectory, 'previous', {
     includeArenaRoomReleaseGate: options.previousHasArenaRoomReleaseGate,
     checkpointContract: options.previousCheckpointContract,
+    releaseGateOverride: options.previousGateOverride,
     releaseGateSchemaOverride: options.previousGateSchemaOverride,
     writerActivation: options.previousWriterActivation,
   });
@@ -855,7 +892,10 @@ describe('Hono release-local deployment transaction', () => {
   });
 
   test('显式 rollback 可恢复无 Arena gate 的 adopted legacy target', () => {
-    const fixture = createFixture();
+    const fixture = createFixture({
+      previousWriterActivation: 'disabled',
+      targetWriterActivation: 'disabled',
+    });
     const legacy = installDocumentedLegacyLayout(fixture);
     const adoptedDirectory = getLegacyAdoptionDirectory(fixture, legacy);
     const published = runDeployment(fixture);
@@ -1277,31 +1317,32 @@ describe('Hono release-local deployment transaction', () => {
     );
   });
 
-  test('writer-disabled 历史 gate-only target rollback 使用窄化兼容校验', () => {
-    const fixture = createFixture({
-      targetIncludeArenaRoomReleaseGateSchema: false,
-      targetWriterActivation: 'disabled',
+  test('writer-disabled 历史 gate-only rollback target 使用窄化兼容校验', () => {
+    const fixture = createFixture();
+    const legacyTarget = createRelease(fixture.rootDirectory, 'legacy-gate-only', {
+      includeArenaRoomReleaseGateSchema: false,
+      releaseGateOverride: { ...legacyWriterDisabledReleaseGate },
     });
 
-    const result = runDeployment(fixture, {
-      probeStatus: '500',
+    const result = runRollback(fixture, {
+      targetReleaseId: legacyTarget.releaseId,
       validateGateSchema: true,
     });
     const commands = existsSync(fixture.commandLog)
       ? readFileSync(fixture.commandLog, 'utf8')
       : '';
 
-    expect(result.status).toBe(1);
+    expect(result.status, result.stderr).toBe(0);
     expect(commands).toContain('node --input-type=module -e');
     expect(commands).toContain(
-      `-f ${fixture.previousReleaseDirectory}/compose.yml up -d --force-recreate hono`,
+      `-f ${legacyTarget.releaseDirectory}/compose.yml up -d --force-recreate hono`,
     );
   });
 
-  test('pending failed writer-disabled gate-only tuple 可恢复并继续发布', () => {
+  test('pending failed writer-disabled gate-only tuple 可恢复但不得作为新 candidate 重发', () => {
     const fixture = createFixture({
       targetIncludeArenaRoomReleaseGateSchema: false,
-      targetWriterActivation: 'disabled',
+      targetGateOverride: { ...legacyWriterDisabledReleaseGate },
     });
     writeFileSync(
       path.join(fixture.rootDirectory, '.env'),
@@ -1320,27 +1361,31 @@ describe('Hono release-local deployment transaction', () => {
     const result = runDeployment(fixture, { validateGateSchema: true });
     const commands = readFileSync(fixture.commandLog, 'utf8');
 
-    expect(result.status, result.stderr).toBe(0);
+    expect(result.status).toBe(1);
     expect(commands).toContain('node --input-type=module -e');
-    expect(commands.indexOf(`-f ${fixture.previousReleaseDirectory}/compose.yml up`)).toBeLessThan(
-      commands.lastIndexOf(`-f ${fixture.releaseDirectory}/compose.yml up`),
+    expect(commands).toContain(
+      `-f ${fixture.previousReleaseDirectory}/compose.yml up -d --force-recreate hono`,
     );
     expect(existsSync(path.join(fixture.rootDirectory, 'deploy.transaction'))).toBe(false);
     expect(readlinkSync(path.join(fixture.rootDirectory, 'current'))).toBe(
-      fixture.releaseDirectory,
+      fixture.previousReleaseDirectory,
     );
   });
 
-  test('malformed gate-only tuple 在兼容迁移路径 fail closed', () => {
-    const fixture = createFixture({
-      targetIncludeArenaRoomReleaseGateSchema: false,
-      targetGateOverride: {
+  test('malformed gate-only rollback target 在兼容迁移路径 fail closed', () => {
+    const fixture = createFixture();
+    const malformedTarget = createRelease(fixture.rootDirectory, 'malformed-gate-only', {
+      includeArenaRoomReleaseGateSchema: false,
+      releaseGateOverride: {
         schemaVersion: 1,
         writerActivation: 'disabled',
       },
     });
 
-    const result = runDeployment(fixture, { validateGateSchema: true });
+    const result = runRollback(fixture, {
+      targetReleaseId: malformedTarget.releaseId,
+      validateGateSchema: true,
+    });
     const commands = existsSync(fixture.commandLog)
       ? readFileSync(fixture.commandLog, 'utf8')
       : '';
@@ -1351,13 +1396,20 @@ describe('Hono release-local deployment transaction', () => {
     expect(commands).not.toContain(`-f ${fixture.releaseDirectory}/compose.yml up`);
   });
 
-  test('writer-enabled gate-only tuple 不得借用兼容迁移路径', () => {
-    const fixture = createFixture({
-      targetIncludeArenaRoomReleaseGateSchema: false,
-      targetWriterActivation: 'enabled',
+  test('writer-enabled gate-only rollback target 不得借用兼容迁移路径', () => {
+    const fixture = createFixture();
+    const writerEnabledTarget = createRelease(fixture.rootDirectory, 'enabled-gate-only', {
+      includeArenaRoomReleaseGateSchema: false,
+      releaseGateOverride: {
+        ...legacyWriterDisabledReleaseGate,
+        writerActivation: 'enabled',
+      },
     });
 
-    const result = runDeployment(fixture, { validateGateSchema: true });
+    const result = runRollback(fixture, {
+      targetReleaseId: writerEnabledTarget.releaseId,
+      validateGateSchema: true,
+    });
     const commands = existsSync(fixture.commandLog)
       ? readFileSync(fixture.commandLog, 'utf8')
       : '';
@@ -1368,7 +1420,7 @@ describe('Hono release-local deployment transaction', () => {
     expect(commands).not.toContain(`-f ${fixture.releaseDirectory}/compose.yml up`);
   });
 
-  test('writer-enabled candidate 缺少 reader/go-no-go attestation 时在激活前 fail closed', () => {
+  test('writer-enabled candidate 不再依赖 reader/go-no-go operator attestation', () => {
     const fixture = createFixture({ targetWriterActivation: 'enabled' });
     writeFileSync(path.join(fixture.rootDirectory, '.env.hono'), 'FIXTURE=true\n');
     chmodSync(path.join(fixture.rootDirectory, '.env.hono'), 0o600);
@@ -1376,9 +1428,8 @@ describe('Hono release-local deployment transaction', () => {
     const result = runDeployment(fixture, { validateGateSchema: true });
     const commands = readFileSync(fixture.commandLog, 'utf8');
 
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain('compatible reader rollout attestation');
-    expect(commands).not.toContain(`-f ${fixture.releaseDirectory}/compose.yml up`);
+    expect(result.status, result.stderr).toBe(0);
+    expect(commands).toContain(`-f ${fixture.releaseDirectory}/compose.yml up`);
   });
 
   test('writer-enabled runtime 复用 Hono public origin 执行无凭据 Room HTTP/WSS 公网 probe', () => {
@@ -1386,8 +1437,6 @@ describe('Hono release-local deployment transaction', () => {
     writeFileSync(path.join(fixture.rootDirectory, '.env.hono'), [
       'FIXTURE=true',
       'ARENA_MULTIPLAYER_ENABLED=true',
-      'ARENA_ROOM_READER_ROLLOUT_CONTRACT=arena-room-authority-v2-generation-payload-digest-v1',
-      'ARENA_ROOM_PRODUCTION_GO_NO_GO=approved',
       '',
     ].join('\n'));
     chmodSync(path.join(fixture.rootDirectory, '.env.hono'), 0o600);
@@ -1498,6 +1547,28 @@ describe('Hono release-local deployment transaction', () => {
     expect(result.stderr).toContain('开始回滚 tuple');
     expect(readFileSync(fixture.commandLog, 'utf8')).toContain(
       `-f ${fixture.previousReleaseDirectory}/compose.yml up -d --force-recreate hono`,
+    );
+  });
+
+  test('v2 writer release 可在保留 v1 自校验的 production baseline 上原子发布', () => {
+    const fixture = createFixture({
+      previousGateOverride: { ...legacyWriterDisabledReleaseGate },
+      previousGateSchemaOverride: legacyV1ReleaseGateSchema,
+      targetWriterActivation: 'enabled',
+    });
+
+    const result = runDeployment(fixture, { validateGateSchema: true });
+    const commands = readFileSync(fixture.commandLog, 'utf8');
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(commands).toContain(
+      `-v ${fixture.previousReleaseDirectory}/arena-room-release-gate-schema.mjs:/gate-schema.mjs:ro`,
+    );
+    expect(commands).toContain(
+      `-v ${fixture.releaseDirectory}/arena-room-release-gate-schema.mjs:/gate-schema.mjs:ro`,
+    );
+    expect(readlinkSync(path.join(fixture.rootDirectory, 'current'))).toBe(
+      fixture.releaseDirectory,
     );
   });
 
@@ -2063,7 +2134,10 @@ describe('Hono release-local deployment transaction', () => {
   });
 
   test('旧文档布局会先纳管为可校验 tuple，新版失败后回滚到该 tuple', () => {
-    const fixture = createFixture();
+    const fixture = createFixture({
+      previousWriterActivation: 'disabled',
+      targetWriterActivation: 'disabled',
+    });
     const legacy = installDocumentedLegacyLayout(fixture);
 
     const result = runDeployment(fixture, { probeStatus: '500' });
@@ -2178,7 +2252,10 @@ describe('Hono release-local deployment transaction', () => {
   });
 
   test('legacy 纳管的 current 原子切换中断后可在下次启动完成恢复', () => {
-    const fixture = createFixture();
+    const fixture = createFixture({
+      previousWriterActivation: 'disabled',
+      targetWriterActivation: 'disabled',
+    });
     const legacy = installDocumentedLegacyLayout(fixture);
 
     const interrupted = runDeployment(fixture, { failPromotion: true });

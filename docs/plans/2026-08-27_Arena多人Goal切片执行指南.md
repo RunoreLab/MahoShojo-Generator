@@ -105,10 +105,10 @@ read authority / current state
 | `GMR-08` Proposal E2E | `DONE` | GMR-05,GMR-07 | typed Proposal server/UI 闭环 | 不扩展 private sharing |
 | `GMR-09` generation publisher | `DONE` | GMR-03,GMR-05,GMR-06R,GMR-07 | single producer + Room safe fan-out/resync | 不复制 AI lifecycle |
 | `GMR-10` hardening/fault/load audit | `DONE` | GMR-06R,GMR-08,GMR-09 | telemetry + failure drills + v1 exit audit | 不自动进入生产 activation |
-| `GMR-11` production activation review | `IN_PROGRESS` | GMR-10 + Production Gate | Preview Hono/Web 与双成员 canary 已完成；production Room ingress 改为复用 Hono primary，等待 go/no-go | 必须人工/平台授权 |
+| `GMR-11` production activation review | `IN_PROGRESS` | GMR-10 + Production Gate | Preview canary 与 production ingress 重整已完成；发布流程收敛为默认分支单流水线，等待生产环境核对与上线证据 | production 配置与发布受平台权限保护 |
 | `GMR-H` multi-instance / DO evaluation | `DEFERRED` | 真实指标触发 | 新 ADR/PoC 决策 | v1 不预建 |
 
-`GMR-06` 与 `GMR-07` 在 GMR-05 后 MAY 并行，但一个 `/goal` 仍只执行其中一个。2026-08-28 的 Redis-only superseding 修订把 `GMR-06R` 加为后续 generation/hardening 前置门禁；`GMR-08` 的已完成结果保留。GMR-10 的代码、真实故障/负载证据、最终复审与 full gate 已完成。2026-08-30 用户明确启动 GMR-11 收尾；默认关闭的激活门禁、回滚绑定、实时流整改、Preview Hono/Web writer 曝光及双成员 canary 已完成。真实 provider SSE 仍是可选 UX audit，可在后续授权窗口通过 shared Hono primary 执行；production activation 继续受平台配置、授权及公网证据阻断。GMR-H 继续保持 `DEFERRED`。
+`GMR-06` 与 `GMR-07` 在 GMR-05 后 MAY 并行，但一个 `/goal` 仍只执行其中一个。2026-08-28 的 Redis-only superseding 修订把 `GMR-06R` 加为后续 generation/hardening 前置门禁；`GMR-08` 的已完成结果保留。GMR-10 的代码、真实故障/负载证据、最终复审与 full gate 已完成。2026-08-30 用户明确启动 GMR-11 收尾；回滚绑定、实时流整改、Preview Hono/Web 曝光及双成员 canary 已完成。2026-08-31 后续修订删除一次性 reader/go-no-go attestation，production 改为一次 CI、Hono transaction/probe 后调用 Cloudflare 的自动路径。真实 provider SSE 仍是可选 UX audit；GMR-H 继续保持 `DEFERRED`。
 
 ## 6. Goal 详细定义
 
@@ -786,27 +786,29 @@ validate -> pure derive -> conditional checkpoint
 
 **Status：`IN_PROGRESS`**
 
-这是用户于 2026-08-30 明确启动的新 go/no-go，不是 GMR-10 自动续跑。
+这是用户于 2026-08-30 明确启动的 production activation review，不是 GMR-10 自动续跑。旧版 go/no-go ceremony 已由
+2026-08-31 发布流程修订取代。
 
-当前已完成 production activation 的默认关闭代码路径：release tuple 绑定 writer activation、reader-first/go-no-go
-attestation、Hono 先于 Web 的启用顺序、shared Hono primary ingress、HTTP/WSS 发布探针与安全回滚；同时把
+当前已完成 production activation 的代码路径：release tuple 绑定 writer capability、Hono 先于 Web 的发布依赖、shared
+Hono primary ingress、HTTP/WSS 发布探针与安全回滚；同时把
 generation delta 调为 `40 ms / 512 bytes`，隔离 Redis blocking replay connection，并摊销 running snapshot 写入。
 2026-08-31 accepted ADR 已覆盖旧的独立 Room hostname 前置，production Room 复用 Hosted Hono primary，并继续排除在
 Cloudflare DR 之外。Preview Hono 已按 request=false → writer-capable tuple → request=true 两阶段顺序激活并通过三个 exact Origin
 的 HTTP/WSS canary，Preview Web 多人面板与双成员 join/WSS/resync/reconnect 也已验证；production manifest 继续
 保持 optional Hosted control plane `not-provisioned`，但它不再阻断 Room。
 
-以下 production activation 前置仍未关闭：
+以下 production activation 前置需在发布时关闭：
 
 - production shared Hono primary readiness、Access/origin protection 与只读 contract 验证；
-- production runtime/GitHub variables、tuple writer enable 与 Web exposure 授权。
+- production runtime/GitHub secrets/variables 存在性、request flag 与 Web exposure 核对。
 
-production current 已是 writer-disabled compatible reader。上线后容量/告警观察完成前不得把本 Goal 标为
+production current 的历史 writer-disabled tuple 继续作为 compatible rollback baseline；默认分支的正常发布固定生成
+writer-enabled tuple。上线后容量/告警观察完成前不得把本 Goal 标为
 `DONE`。dual-path provider SSE 只是可选 UX audit，production fault drill 继续 `DEFERRED`，二者都不是本次
 activation 前置。
 
-本阶段没有 D1/Redis schema migration；最终激活必须继续维持 backend reader → backend writer → Web 的顺序，失败时
-先把 Web 与 request flag 关闭，再回退到 writer-disabled tuple。证据见
+本阶段没有 D1/Redis schema migration；最终激活维持 Hono transaction/probe → Web 的顺序，失败时先关闭 Web exposure
+与 request flag，再按 immutable baseline contract 回退。证据见
 [GMR-11 激活准备与实时流收尾日志](../logs/2026-08-30_183857_Arena多人GMR-11激活准备与实时流收尾日志.md)；
 production 的精确执行与回滚顺序见
 [Arena 多人生产激活与回滚实施计划](./2026-08-30_231000_Arena多人生产激活与回滚实施计划.md)。

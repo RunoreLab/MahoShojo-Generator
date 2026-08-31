@@ -2,7 +2,6 @@ import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import {
-  ARENA_ROOM_CHECKPOINT_CONTRACT,
   validateArenaRoomReleaseGate,
 } from './arena-room-release-gate-schema.mjs';
 
@@ -31,32 +30,23 @@ const outputPath = path.resolve(repositoryRoot, readArgument(
   '--output',
   'apps/api/dist/arena-room-release-gate.json',
 ));
-const writerActivation = readArgument('--writer', 'disabled');
-if (!['disabled', 'enabled'].includes(writerActivation)) {
-  throw new Error('--writer 必须为 disabled 或 enabled');
-}
-
 const source = JSON.parse(await readFile(sourcePath, 'utf8'));
-const sourceFailures = validateArenaRoomReleaseGate(source);
+const sourceFailures = validateArenaRoomReleaseGate(source, { expectedSchemaVersion: 2 });
 if (sourceFailures.length > 0) {
   throw new Error(`source release gate 非法：${sourceFailures.join('；')}`);
+}
+const writerActivation = readArgument('--writer', source.writerActivation);
+if (!['disabled', 'enabled'].includes(writerActivation)) {
+  throw new Error('--writer 必须为 disabled 或 enabled');
 }
 const candidate = { ...source, writerActivation };
 const candidateFailures = validateArenaRoomReleaseGate(candidate, {
   expectedWriterActivation: writerActivation,
+  expectedSchemaVersion: 2,
 });
 if (candidateFailures.length > 0) {
   throw new Error(`candidate release gate 非法：${candidateFailures.join('；')}`);
 }
-if (writerActivation === 'enabled') {
-  if (process.env.ARENA_ROOM_READER_ROLLOUT_CONTRACT !== ARENA_ROOM_CHECKPOINT_CONTRACT) {
-    throw new Error('writer activation 前缺少 compatible reader rollout attestation');
-  }
-  if (process.env.ARENA_ROOM_PRODUCTION_GO_NO_GO !== 'approved') {
-    throw new Error('writer activation 前缺少独立 production go/no-go');
-  }
-}
-
 await writeFile(outputPath, `${JSON.stringify(candidate, null, 2)}\n`, 'utf8');
 console.log(JSON.stringify({
   gate: 'ARENA_ROOM_RELEASE_GATE_PREPARED',

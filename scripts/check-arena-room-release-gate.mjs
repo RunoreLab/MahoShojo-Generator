@@ -20,33 +20,9 @@ const manifestPath = path.resolve(repositoryRoot, argument(
   'config/arena-room-release-gate.json',
 ));
 const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
-const failures = validateArenaRoomReleaseGate(manifest);
+const failures = validateArenaRoomReleaseGate(manifest, { expectedSchemaVersion: 2 });
 const fail = (message) => failures.push(message);
 const expectedContract = ARENA_ROOM_CHECKPOINT_CONTRACT;
-
-const sourceEvidence = [
-  [
-    'packages/multiplayer-core/tests/state-machine-review-regressions.test.ts',
-    manifest.evidence?.legacyCheckpointReaderTest,
-  ],
-  ['apps/api/tests/config.test.ts', manifest.evidence?.productionFeatureGateTest],
-  ['apps/api/deploy/deploy-bundle.sh', manifest.evidence?.rollbackShellGate],
-];
-for (const [relativePath, marker] of sourceEvidence) {
-  const source = readFileSync(path.join(repositoryRoot, relativePath), 'utf8');
-  if (typeof marker !== 'string' || !marker || !source.includes(marker)) {
-    fail(`${relativePath} 缺少 release gate evidence marker`);
-  }
-}
-
-if (mode === 'deploy' && manifest.writerActivation === 'enabled') {
-  if (process.env.ARENA_ROOM_READER_ROLLOUT_CONTRACT !== expectedContract) {
-    fail('writer activation 前缺少 compatible reader rollout attestation');
-  }
-  if (process.env.ARENA_ROOM_PRODUCTION_GO_NO_GO !== 'approved') {
-    fail('writer activation 前缺少独立 production go/no-go');
-  }
-}
 if (mode === 'rollback') {
   if (process.env.ARENA_MULTIPLAYER_GENERATION_START_STATE !== 'disabled') {
     fail('rollback 前必须关闭 Arena multiplayer generation start');

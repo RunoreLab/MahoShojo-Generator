@@ -121,7 +121,8 @@ Hosted DR manifest shared route 的 Hono 与 Next/OpenNext adapter 复用同一 
 Arena Room 使用独立的 `ARENA_ROOM_ALLOWED_ORIGINS`。多人功能启用时该列表必须非空，只能包含无凭据、
 path、query、fragment 或 wildcard 的精确网页 Origin，并且每一项还必须被 `HONO_CORS_ORIGINS` 覆盖。
 HTTP Room mutation 与浏览器 WebSocket 共用这份精确列表；这里填写发起请求的网页 Origin，不是 API/WSS
-目标 hostname。production/preview 在 GMR-11 前仍拒绝启用多人 writer，本配置不构成激活授权。
+目标 hostname。production/preview 是否接受多人 request 由各自的 `ARENA_MULTIPLAYER_ENABLED` 控制；writer capability
+由受 manifest 保护的 immutable release tuple 决定，本 Origin 配置本身不构成激活授权。
 
 Room create 叠加 `5/min` 突发限流与新 Room intent 的账号 `32/24h` 长窗口预算；已有 receipt 的结果确认
 不重复消耗新 Room 预算。公开 create 请求必须携带客户端生成的
@@ -244,6 +245,11 @@ canonical `releases` 下创建随机 staging，
 上传后持 deploy lock 复验精确 tuple，再原子纳管最终目录；不会在校验前向最终 release 路径写文件。之后才
 执行 release-local deploy script。
 
+默认分支 push 只由该 workflow 执行一次 `ci:verify`。Hono transaction 与公网 backend probe 成功后，它才调用
+`.github/workflows/cloudflare-deploy.yml` 发布 Web；Cloudflare workflow 不再独立监听 push 或重复 CI。正常发布固定生成
+writer-enabled tuple，runtime 是否接受 Room request 由 `.env.hono` 的 `ARENA_MULTIPLAYER_ENABLED` 决定。Cloudflare
+手工入口只用于 emergency disable Web exposure，不能单独开启多人。
+
 部署事务只有在配置预检、本机 readiness、`/health/ready` 和 retained shared route
 `/api/generate-magical-girl` 的公网 wire/CORS contract 全部通过后才原子 promotion `current`；任一步失败都
 恢复经过 checksum 与 `docker compose config` 复验的 previous release-local tuple。脚本以非阻塞
@@ -254,8 +260,8 @@ canonical `releases` 下创建随机 staging，
 候选 gate 会在 Compose 激活前由无网络、只读、drop-all-capabilities 的固定 Node runtime 执行严格 JSON schema
 校验；回滚读取 failed gate 前会再次复验 failed tuple 的两层摘要。writer-enabled 回滚还会用同一 validator
 校验 target reader contract；历史 `legacy-layout + gate` tuple 被显式拒绝，不能冒认 compatible reader。
-初始 gate-only content-addressed tuple 只在字段与 accepted writer-disabled gate 完全精确匹配时使用隔离兼容 reader，供失败
-transaction 回滚；writer-enabled、malformed 或需要证明 target reader contract 的 gate-only tuple 均 fail closed。
+初始 gate-only content-addressed tuple 只在字段与历史 accepted writer-disabled gate 完全精确匹配时使用隔离兼容 reader，
+供失败 transaction 回滚；writer-enabled、malformed 或 checkpoint contract 不匹配的 gate-only tuple 均 fail closed。
 
 首次从旧生产布局升级时，脚本只接受旧手册记录的精确 schema：根 `.env` 单字段指向
 `releases/<64hex>`，该目录含普通 `index.mjs` 与精确 `index.mjs.sha256`，根目录含普通

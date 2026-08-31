@@ -104,26 +104,23 @@ describe('Hono deployment workflow', () => {
     expect(workflow).not.toContain('- name: Verify public endpoint');
   });
 
-  test('gates the deploy job to the production branch', () => {
+  test('自动把默认分支发布为 writer-enabled production release', () => {
     const workflow = readFileSync(HONO_WORKFLOW_PATH, 'utf8');
     const buildJob = getJob(workflow, 'build');
     const deployJob = getJob(workflow, 'deploy');
 
     expect(deployJob).toMatch(
-      new RegExp(
-        `^    if: github\\.ref == '${escapeRegExp(PRODUCTION_BRANCH)}' && github\\.event_name == 'workflow_dispatch'\\s*$`,
-        'm',
-      ),
+      new RegExp(`^    if: github\\.ref == '${escapeRegExp(PRODUCTION_BRANCH)}'\\s*$`, 'm'),
     );
     expect(deployJob).toContain('HONO_HOSTED_API_ENVIRONMENT=production');
-    expect(workflow).toContain('arena_room_writer_activation:');
-    expect(workflow).toContain('default: disabled');
-    expect(workflow).toContain('- enabled');
+    expect(workflow).toContain('arena_multiplayer:');
+    expect(workflow).toContain('default: enabled');
+    expect(workflow).not.toContain('arena_room_writer_activation:');
     const releaseStep = getStep(buildJob, 'Build single-file server');
     expect(releaseStep).toContain('scripts/prepare-arena-room-release-gate.mjs');
-    expect(releaseStep).toContain('--writer "$HONO_ARENA_ROOM_WRITER_ACTIVATION"');
-    expect(releaseStep).toContain("github.event_name == 'workflow_dispatch'");
-    expect(releaseStep).toContain('inputs.arena_room_writer_activation');
+    expect(releaseStep).toContain('--writer enabled');
+    expect(releaseStep).not.toContain('ARENA_ROOM_READER_ROLLOUT_CONTRACT');
+    expect(releaseStep).not.toContain('ARENA_ROOM_PRODUCTION_GO_NO_GO');
     expect(releaseStep).not.toContain(
       'cp config/arena-room-release-gate.json apps/api/dist/arena-room-release-gate.json',
     );
@@ -135,62 +132,36 @@ describe('Hono deployment workflow', () => {
     expect(verificationStep).toContain('tests/hono-deploy-script.test.ts');
   });
 
-  test.each([
-    ['Hono', HONO_WORKFLOW_PATH, 'build'],
-    ['Cloudflare', CLOUDFLARE_WORKFLOW_PATH, 'deploy'],
-  ])('%s workflow verifies workspaces and repository gates through the unified entrypoint', (_, path, jobKey) => {
-    const workflow = readFileSync(path, 'utf8');
-    const verificationStep = getStep(getJob(workflow, jobKey), 'Verify workspace and repository gates');
+  test('production pipeline 只执行一次 unified repository gate', () => {
+    const honoWorkflow = readFileSync(HONO_WORKFLOW_PATH, 'utf8');
+    const cloudflareWorkflow = readFileSync(CLOUDFLARE_WORKFLOW_PATH, 'utf8');
+    const verificationStep = getStep(
+      getJob(honoWorkflow, 'build'),
+      'Verify workspace and repository gates',
+    );
 
     expect(verificationStep).toContain('run: pnpm run ci:verify');
+    expect(cloudflareWorkflow).not.toContain('Verify workspace and repository gates');
+    expect(cloudflareWorkflow).not.toContain('run: pnpm run ci:verify');
   });
 
   test('builds and deploys Cloudflare Web through the apps/web lifecycle', () => {
     const workflow = readFileSync(CLOUDFLARE_WORKFLOW_PATH, 'utf8');
     const deployJob = getJob(workflow, 'deploy');
 
-    expect(deployJob).toMatch(
-      new RegExp(`^    if: github\\.ref == '${escapeRegExp(PRODUCTION_BRANCH)}'\\s*$`, 'm'),
-    );
-    expect(workflow).toContain('cancel-in-progress: false');
+    expect(workflow).toContain('workflow_call:');
+    expect(workflow).not.toMatch(/^\s+push:/mu);
+    expect(workflow).toContain('confirm_disable_multiplayer:');
+    expect(workflow).toContain("github.event_name == 'workflow_dispatch' && 'false'");
 
     expect(getStep(deployJob, 'Build Cloudflare bundle')).toContain(
       'run: pnpm --filter @mahoshojo/web run build:cf',
     );
-    const roomActivationStep = getStep(deployJob, 'Verify Arena Room backend activation');
     const webBuildStep = getStep(deployJob, 'Build Cloudflare bundle');
-    expectRequiredGateStep(roomActivationStep);
-    expect(deployJob.indexOf('Verify Arena Room backend activation')).toBeLessThan(
-      deployJob.indexOf('Build Cloudflare bundle'),
-    );
-    expect(roomActivationStep).not.toContain('NEXT_PUBLIC_ARENA_ROOM_ORIGIN');
-    expect(roomActivationStep).toContain('config/hosted-dr-capabilities.json');
-    expect(roomActivationStep).toContain('controlPlane.primaryOrigin');
-    expect(workflow).not.toContain('arena_room_backend_ready:');
-    expect(roomActivationStep).not.toContain('ARENA_ROOM_BACKEND_READY');
-    expect(roomActivationStep).toContain('/api/arena/rooms/v1/ws');
-    expect(roomActivationStep).toContain('Sec-WebSocket-Protocol: mahoshojo.arena-room.v1');
-    expect(roomActivationStep).toContain('Sec-WebSocket-Key: $room_websocket_key');
-    expect(roomActivationStep).toContain('head -c 16 /dev/urandom');
-    expect(roomActivationStep).toContain('ROOM_TICKET_REQUIRED');
-    expect(roomActivationStep).toContain('room_web_enabled=false');
-    expect(roomActivationStep).not.toContain('false|no|off) exit 0');
-    expect(roomActivationStep).toContain('--dump-header "$probe_dir/http-headers"');
-    expect(roomActivationStep).toContain("grep -ic '^Access-Control-Allow-Origin:'");
-    expect(roomActivationStep).toContain(
-      "grep -Fixq 'Access-Control-Allow-Origin: https://mahoshojo.colanns.me'",
-    );
-    expect(roomActivationStep.match(
-      /--retry 5 --retry-delay 3 --retry-max-time 120 --retry-connrefused/gu,
-    )).toHaveLength(2);
-    for (const variable of [
-      'NEXT_PUBLIC_ARENA_MULTIPLAYER_ENABLED',
-      'NEXT_PUBLIC_ARENA_ROOM_WRITER_ACTIVATION',
-      'NEXT_PUBLIC_ARENA_ROOM_READER_CONTRACT',
-      'NEXT_PUBLIC_ARENA_ROOM_GO_NO_GO',
-    ]) {
-      expect(webBuildStep).toContain(variable);
-    }
+    expect(webBuildStep).toContain('NEXT_PUBLIC_ARENA_MULTIPLAYER_ENABLED');
+    expect(webBuildStep).not.toContain('NEXT_PUBLIC_ARENA_ROOM_WRITER_ACTIVATION');
+    expect(webBuildStep).not.toContain('NEXT_PUBLIC_ARENA_ROOM_READER_CONTRACT');
+    expect(webBuildStep).not.toContain('NEXT_PUBLIC_ARENA_ROOM_GO_NO_GO');
     expect(webBuildStep).not.toContain('NEXT_PUBLIC_ARENA_ROOM_ORIGIN');
     expect(getStep(deployJob, 'Deploy production')).toContain(
       'run: pnpm --filter @mahoshojo/web exec wrangler deploy --env production --keep-vars',
@@ -263,11 +234,11 @@ describe('Hono deployment workflow', () => {
     expect(cloudflareBuildJob).toContain('needs: verify-and-build-hono');
     expect(cloudflareBuildJob).toContain('pnpm --filter @mahoshojo/web run build:cf');
     expect(cloudflareBuildJob).not.toContain('NEXT_PUBLIC_ARENA_ROOM_ORIGIN');
-    expect(cloudflareBuildJob).toContain('NEXT_PUBLIC_ARENA_ROOM_WRITER_ACTIVATION');
+    expect(cloudflareBuildJob).not.toContain('NEXT_PUBLIC_ARENA_ROOM_WRITER_ACTIVATION');
     const releaseStep = getStep(verifyJob, 'Build release tuple');
-    expect(releaseStep).toContain('HONO_ARENA_ROOM_WRITER_ACTIVATION: enabled');
-    expect(releaseStep).toContain('ARENA_ROOM_READER_ROLLOUT_CONTRACT');
-    expect(releaseStep).toContain('ARENA_ROOM_PRODUCTION_GO_NO_GO: approved');
+    expect(releaseStep).toContain('--writer enabled');
+    expect(releaseStep).not.toContain('ARENA_ROOM_READER_ROLLOUT_CONTRACT');
+    expect(releaseStep).not.toContain('ARENA_ROOM_PRODUCTION_GO_NO_GO');
     expect(releaseStep).toContain('scripts/prepare-arena-room-release-gate.mjs');
     expect(releaseStep).not.toContain(
       'cp config/arena-room-release-gate.json apps/api/dist/arena-room-release-gate.json',
@@ -303,14 +274,10 @@ describe('Hono deployment workflow', () => {
     )).toHaveLength(2);
     expect(cloudflareJob).toContain('controlPlane.previewOrigin');
     expect(cloudflareJob).toContain('export NEXT_PUBLIC_HONO_API_ORIGIN');
-    for (const variable of [
-      'NEXT_PUBLIC_ARENA_MULTIPLAYER_ENABLED',
-      'NEXT_PUBLIC_ARENA_ROOM_WRITER_ACTIVATION',
-      'NEXT_PUBLIC_ARENA_ROOM_READER_CONTRACT',
-      'NEXT_PUBLIC_ARENA_ROOM_GO_NO_GO',
-    ]) {
-      expect(cloudflareJob).toContain(variable);
-    }
+    expect(cloudflareJob).toContain('NEXT_PUBLIC_ARENA_MULTIPLAYER_ENABLED');
+    expect(cloudflareJob).not.toContain('NEXT_PUBLIC_ARENA_ROOM_WRITER_ACTIVATION');
+    expect(cloudflareJob).not.toContain('NEXT_PUBLIC_ARENA_ROOM_READER_CONTRACT');
+    expect(cloudflareJob).not.toContain('NEXT_PUBLIC_ARENA_ROOM_GO_NO_GO');
     expect(cloudflareJob).not.toContain('NEXT_PUBLIC_ARENA_ROOM_ORIGIN');
     expect(workflow).toContain('arena_multiplayer:');
     expect(workflow).toContain("inputs.arena_multiplayer == 'disabled'");
@@ -478,7 +445,7 @@ describe('Hono deployment workflow', () => {
     const guide = readFileSync(HONO_DEPLOY_GUIDE_PATH, 'utf8');
 
     expect(guide).toContain('scripts/prepare-arena-room-release-gate.mjs');
-    expect(guide).toContain('--writer disabled');
+    expect(guide).toContain('--writer enabled');
     expect(guide).not.toContain(
       'cp config/arena-room-release-gate.json apps/api/dist/arena-room-release-gate.json',
     );

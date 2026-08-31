@@ -514,8 +514,17 @@ validate_arena_room_release_gate() {
   # GMR-09 schema validator first appeared after the initial gate-only tuple
   # rollout.  Keep a deliberately narrow compatibility reader for those
   # immutable historical tuples: only the exact writer-disabled gate is
-  # accepted, and no caller may ask this path to attest another contract.
-  [ "$#" -eq 0 ] || return 1
+  # accepted. Rollback compatibility may ask it to attest only the exact
+  # checkpoint contract already frozen into that historical tuple.
+  case "$#" in
+    0) ;;
+    2)
+      [ "$1" = --expect-contract ] \
+        && [ "$2" = 'arena-room-authority-v2-generation-payload-digest-v1' ] \
+        || return 1
+      ;;
+    *) return 1 ;;
+  esac
   if ! run_cancellable docker run --rm \
     --network none \
     --read-only \
@@ -599,30 +608,6 @@ read_runtime_env_value() {
   sed -n "s/^${runtime_key}=//p" "$runtime_env"
 }
 
-validate_arena_room_activation_attestations() {
-  activated_release_dir="$1"
-  activated_writer="$(
-    read_arena_room_writer_activation "$activated_release_dir"
-  )" || return 1
-  [ "$activated_writer" = enabled ] || return 0
-
-  activated_reader_contract="$(
-    read_runtime_env_value ARENA_ROOM_READER_ROLLOUT_CONTRACT
-  )" || return 1
-  [ "$activated_reader_contract" \
-    = 'arena-room-authority-v2-generation-payload-digest-v1' ] || {
-    echo 'writer activation 前缺少 compatible reader rollout attestation' >&2
-    return 1
-  }
-  activated_go_no_go="$(
-    read_runtime_env_value ARENA_ROOM_PRODUCTION_GO_NO_GO
-  )" || return 1
-  [ "$activated_go_no_go" = approved ] || {
-    echo 'writer activation 前缺少独立 production go/no-go' >&2
-    return 1
-  }
-}
-
 validate_arena_room_runtime_allowed_origins() {
   activated_release_dir="$1"
   activated_writer="$(
@@ -674,8 +659,9 @@ verify_arena_room_rollback_gate() {
     echo "rollback target reader contract 不兼容" >&2
     return 1
   }
+  target_gate_schema="$target_release_dir/arena-room-release-gate-schema.mjs"
   validate_arena_room_release_gate \
-    "$target_gate" "$failed_gate_schema" \
+    "$target_gate" "$target_gate_schema" \
     --expect-contract 'arena-room-authority-v2-generation-payload-digest-v1' || {
       echo "rollback target reader contract schema 不兼容" >&2
       return 1
@@ -1151,11 +1137,11 @@ recover_pending_transaction
 verify_release_tuple "$release_dir"
 validate_arena_room_release_gate \
   "$release_dir/arena-room-release-gate.json" \
-  "$release_dir/arena-room-release-gate-schema.mjs" || {
+  "$release_dir/arena-room-release-gate-schema.mjs" \
+  --expect-schema 2 || {
     echo "candidate Arena Room release gate schema 校验失败" >&2
     exit 1
   }
-validate_arena_room_activation_attestations "$release_dir"
 validate_release_compose "$release_dir"
 validate_release_runtime "$release_dir"
 validate_arena_room_runtime_allowed_origins "$release_dir"
