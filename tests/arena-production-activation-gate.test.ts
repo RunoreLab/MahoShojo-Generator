@@ -60,6 +60,7 @@ describe('GMR-11 production activation gate', () => {
       mkdirSync(path.join(tempRoot, 'scripts'), { recursive: true });
       mkdirSync(path.join(tempRoot, 'config'), { recursive: true });
       mkdirSync(path.join(tempRoot, 'docs', 'reviews'), { recursive: true });
+      mkdirSync(path.join(tempRoot, 'docs', 'plans'), { recursive: true });
       copyFileSync(
         path.join(repositoryRoot, 'scripts/check-arena-production-activation.mjs'),
         path.join(tempRoot, 'scripts/check-arena-production-activation.mjs'),
@@ -67,7 +68,36 @@ describe('GMR-11 production activation gate', () => {
       writeFileSync(path.join(tempRoot, 'app.txt'), 'reviewed source\n');
       writeFileSync(
         path.join(tempRoot, 'docs/reviews/gmr-11.md'),
-        '# GMR-11 独立 production readiness 审查\n\nGMR-11-PRODUCTION-ACTIVATION: APPROVED\n',
+        [
+          '---',
+          'review: GMR-11-PRODUCTION-ACTIVATION',
+          'decision: APPROVED',
+          'reviewer: Gate Test Reviewer',
+          'approvedAt: 2026-09-01T00:00:00.000Z',
+          '---',
+          'GMR-11-PRODUCTION-ACTIVATION: APPROVED',
+          '',
+          '# GMR-11 独立 production readiness 审查',
+          '',
+        ].join('\n'),
+      );
+      writeFileSync(
+        path.join(tempRoot, 'docs/reviews/multiline-marker.md'),
+        [
+          '---',
+          'review: GMR-11-PRODUCTION-ACTIVATION',
+          'decision: APPROVED',
+          'reviewer: Gate Test Reviewer',
+          'approvedAt: 2026-09-01T00:00:00.000Z',
+          '---',
+          'GMR-11-PRODUCTION-ACTIVATION:',
+          'APPROVED',
+          '',
+        ].join('\n'),
+      );
+      writeFileSync(
+        path.join(tempRoot, 'docs/plans/gmr-11-plan.md'),
+        '# GMR-11 计划\n\n```text\nGMR-11-PRODUCTION-ACTIVATION: APPROVED\n```\n',
       );
       writeFileSync(
         path.join(tempRoot, 'config/arena-production-activation-gate.json'),
@@ -108,9 +138,8 @@ describe('GMR-11 production activation gate', () => {
       const reviewedSourceDigest = digestResult.stdout.trim();
       expect(reviewedSourceDigest).toMatch(/^sha256:[0-9a-f]{64}$/u);
 
-      writeFileSync(
-        path.join(tempRoot, 'config/arena-production-activation-gate.json'),
-        `${JSON.stringify({
+      const manifestPath = path.join(tempRoot, 'config/arena-production-activation-gate.json');
+      const approvedManifest = {
           schemaVersion: 1,
           goal: 'GMR-11',
           reviewStatus: 'APPROVED',
@@ -118,8 +147,30 @@ describe('GMR-11 production activation gate', () => {
           reviewedSourceDigest,
           approvedAt: '2026-09-01T00:00:00.000Z',
           approvalEvidence: 'docs/reviews/gmr-11.md',
-        }, null, 2)}\n`,
-      );
+      };
+      const writeManifest = (value: Record<string, unknown>) => {
+        writeFileSync(manifestPath, `${JSON.stringify(value, null, 2)}\n`);
+      };
+      const commitManifest = (value: Record<string, unknown>, message: string) => {
+        writeManifest(value);
+        git(tempRoot, 'add', 'config/arena-production-activation-gate.json');
+        git(
+          tempRoot,
+          '-c',
+          'user.name=Gate Test',
+          '-c',
+          'user.email=gate-test@example.invalid',
+          '-c',
+          'commit.gpgsign=false',
+          'commit',
+          '--quiet',
+          '-m',
+          message,
+        );
+        return git(tempRoot, 'rev-parse', 'HEAD');
+      };
+
+      writeManifest(approvedManifest);
       git(tempRoot, 'add', 'config/arena-production-activation-gate.json');
       git(
         tempRoot,
@@ -143,6 +194,71 @@ describe('GMR-11 production activation gate', () => {
       ], tempRoot);
       expect(approved.status, approved.stderr).toBe(0);
       expect(approved.stdout).toMatch(/"status":"PASS"/u);
+
+      writeManifest({ ...approvedManifest, reviewStatus: 'READY' });
+      const dirtyManifest = run(process.execPath, [
+        'scripts/check-arena-production-activation.mjs',
+        '--require-approved',
+        '--commit',
+        approvalCommit,
+      ], tempRoot);
+      expect(dirtyManifest.status).toBe(1);
+      expect(dirtyManifest.stderr).toMatch(/工作区.*未提交|dirty worktree/iu);
+      writeManifest(approvedManifest);
+
+      const evidencePath = path.join(tempRoot, 'docs/reviews/gmr-11.md');
+      const validEvidence = readFileSync(evidencePath, 'utf8');
+      writeFileSync(evidencePath, `${validEvidence}\n未提交篡改\n`);
+      const dirtyEvidence = run(process.execPath, [
+        'scripts/check-arena-production-activation.mjs',
+        '--require-approved',
+        '--commit',
+        approvalCommit,
+      ], tempRoot);
+      expect(dirtyEvidence.status).toBe(1);
+      expect(dirtyEvidence.stderr).toMatch(/工作区.*未提交|dirty worktree/iu);
+      writeFileSync(evidencePath, validEvidence);
+
+      const planEvidenceCommit = commitManifest({
+        ...approvedManifest,
+        approvalEvidence: 'docs/plans/gmr-11-plan.md',
+      }, 'reject plan as approval evidence');
+      const planEvidence = run(process.execPath, [
+        'scripts/check-arena-production-activation.mjs',
+        '--require-approved',
+        '--commit',
+        planEvidenceCommit,
+      ], tempRoot);
+      expect(planEvidence.status).toBe(1);
+      expect(planEvidence.stderr).toMatch(/docs\/reviews/iu);
+
+      const multilineEvidenceCommit = commitManifest({
+        ...approvedManifest,
+        approvalEvidence: 'docs/reviews/multiline-marker.md',
+      }, 'reject multiline marker');
+      const multilineEvidence = run(process.execPath, [
+        'scripts/check-arena-production-activation.mjs',
+        '--require-approved',
+        '--commit',
+        multilineEvidenceCommit,
+      ], tempRoot);
+      expect(multilineEvidence.status).toBe(1);
+      expect(multilineEvidence.stderr).toMatch(/批准标记|approval marker/iu);
+
+      const nonCanonicalTimeCommit = commitManifest({
+        ...approvedManifest,
+        approvedAt: '2026-09-01 00:00:00Z',
+      }, 'reject non-canonical approval time');
+      const nonCanonicalTime = run(process.execPath, [
+        'scripts/check-arena-production-activation.mjs',
+        '--require-approved',
+        '--commit',
+        nonCanonicalTimeCommit,
+      ], tempRoot);
+      expect(nonCanonicalTime.status).toBe(1);
+      expect(nonCanonicalTime.stderr).toMatch(/approvedAt/u);
+
+      commitManifest(approvedManifest, 'restore valid approval');
 
       writeFileSync(path.join(tempRoot, 'app.txt'), 'unreviewed source change\n');
       git(tempRoot, 'add', 'app.txt');

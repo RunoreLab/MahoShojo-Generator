@@ -1,11 +1,10 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { lstatSync, readFileSync, realpathSync, writeSync } from 'node:fs';
+import { writeSync } from 'node:fs';
 import path from 'node:path';
 
 const repositoryRoot = process.cwd();
 const manifestRelativePath = 'config/arena-production-activation-gate.json';
-const manifestPath = path.join(repositoryRoot, manifestRelativePath);
 const args = process.argv.slice(2);
 
 let requireApproved = false;
@@ -64,6 +63,25 @@ const resolveCommit = (reference) => {
   return resolved;
 };
 
+const readCommitFile = (resolvedCommit, filePath) => {
+  const result = runGit(['show', `${resolvedCommit}:${filePath}`]);
+  if (result.status !== 0) {
+    throw new Error(`commit 文件无法读取：${resolvedCommit}:${filePath}`);
+  }
+  return result.stdout.toString('utf8');
+};
+
+const readCommitFileMode = (resolvedCommit, filePath) => {
+  const result = runGit(['ls-tree', resolvedCommit, '--', filePath]);
+  if (result.status !== 0) {
+    throw new Error(`commit 文件 mode 无法读取：${resolvedCommit}:${filePath}`);
+  }
+  const record = result.stdout.toString('utf8').trim();
+  const mode = record.split(' ', 1)[0];
+  if (!mode) throw new Error(`commit 文件不存在：${resolvedCommit}:${filePath}`);
+  return mode;
+};
+
 const calculateSourceDigest = (resolvedCommit) => {
   const result = runGit(['ls-tree', '-r', '-z', '--full-tree', resolvedCommit]);
   if (result.status !== 0) {
@@ -93,11 +111,18 @@ if (printSourceDigest) {
   }
 }
 
+let currentCommit;
+try {
+  currentCommit = resolveCommit('HEAD');
+} catch (error) {
+  exitWithError(error instanceof Error ? error.message : String(error), 1);
+}
+
 let manifest;
 try {
-  manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+  manifest = JSON.parse(readCommitFile(currentCommit, manifestRelativePath));
 } catch (error) {
-  exitWithError(`manifest 无法读取：${error instanceof Error ? error.message : String(error)}`, 1);
+  exitWithError(`HEAD manifest 无法读取：${error instanceof Error ? error.message : String(error)}`, 1);
 }
 
 const failures = [];
@@ -109,7 +134,6 @@ if (!['READY', 'APPROVED'].includes(manifest?.reviewStatus)) {
 
 const approved = manifest?.reviewStatus === 'APPROVED';
 let reviewedCommit;
-let currentCommit;
 
 if (approved) {
   if (typeof manifest.reviewedCommit !== 'string' || !/^[0-9a-f]{40}$/u.test(manifest.reviewedCommit)) {
@@ -136,48 +160,67 @@ if (approved) {
   }
 
   const evidence = manifest.approvalEvidence;
-  if (typeof evidence !== 'string' || path.posix.normalize(evidence) !== evidence || !evidence.startsWith('docs/')) {
-    failures.push('APPROVED 必须绑定 docs/ 下的独立审查证据');
-  } else {
-    const docsRoot = path.join(repositoryRoot, 'docs');
-    const evidencePath = path.resolve(repositoryRoot, evidence);
+  if (
+    typeof evidence !== 'string'
+    || path.posix.normalize(evidence) !== evidence
+    || !evidence.startsWith('docs/reviews/')
+    || evidence.length <= 'docs/reviews/'.length
+  ) {
+    failures.push('APPROVED 必须绑定 docs/reviews/ 下的独立审查证据');
+  } else if (reviewedCommit) {
     try {
-      const stat = lstatSync(evidencePath);
-      const realDocsRoot = realpathSync(docsRoot);
-      const realEvidencePath = realpathSync(evidencePath);
-      if (
-        !stat.isFile()
-        || stat.isSymbolicLink()
-        || !realEvidencePath.startsWith(`${realDocsRoot}${path.sep}`)
-      ) {
-        failures.push('approvalEvidence 必须是 docs/ 下的普通文件且不得为符号链接');
+      const reviewedMode = readCommitFileMode(reviewedCommit, evidence);
+      const currentMode = readCommitFileMode(currentCommit, evidence);
+      if (!['100644', '100755'].includes(reviewedMode) || reviewedMode !== currentMode) {
+        failures.push('approvalEvidence 必须在 reviewed/current commit 中保持同一普通文件 mode');
       }
-      const evidenceContent = readFileSync(evidencePath, 'utf8');
-      if (!evidenceContent.includes('GMR-11')) {
-        failures.push('approvalEvidence 必须明确记录 GMR-11 独立审查');
+
+      const evidenceContent = readCommitFile(reviewedCommit, evidence);
+      const currentEvidenceContent = readCommitFile(currentCommit, evidence);
+      if (evidenceContent !== currentEvidenceContent) {
+        failures.push('approvalEvidence 在 reviewed/current commit 之间发生漂移');
       }
-      if (!/^GMR-11-PRODUCTION-ACTIVATION:\s*APPROVED\s*$/mu.test(evidenceContent)) {
-        failures.push('approvalEvidence 必须包含独立批准标记');
+
+      const frontMatter = evidenceContent.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/u);
+      if (!frontMatter) {
+        failures.push('approvalEvidence 必须包含结构化审查 front matter');
+      } else {
+        const fields = new Map();
+        for (const line of frontMatter[1].split(/\r?\n/u)) {
+          const separator = line.indexOf(':');
+          if (separator < 0) continue;
+          fields.set(line.slice(0, separator).trim(), line.slice(separator + 1).trim());
+        }
+        if (fields.get('review') !== 'GMR-11-PRODUCTION-ACTIVATION') {
+          failures.push('approvalEvidence review 字段不匹配 GMR-11 production activation');
+        }
+        if (fields.get('decision') !== 'APPROVED') {
+          failures.push('approvalEvidence decision 必须为 APPROVED');
+        }
+        const reviewer = fields.get('reviewer');
+        if (
+          typeof reviewer !== 'string'
+          || reviewer.length < 2
+          || /^(?:todo|tbd|unknown|example)$/iu.test(reviewer)
+        ) {
+          failures.push('approvalEvidence 必须记录非占位 reviewer');
+        }
+        if (fields.get('approvedAt') !== manifest.approvedAt) {
+          failures.push('approvalEvidence approvedAt 必须与 manifest 完全一致');
+        }
+
+        const body = evidenceContent.slice(frontMatter[0].length);
+        const firstBodyLine = body.split(/\r?\n/u).find((line) => line.length > 0);
+        if (firstBodyLine !== 'GMR-11-PRODUCTION-ACTIVATION: APPROVED') {
+          failures.push('approvalEvidence 必须以单行独立批准标记开始正文');
+        }
       }
     } catch (error) {
       failures.push(`approvalEvidence 无法读取：${error instanceof Error ? error.message : String(error)}`);
     }
-
-    const trackedEvidence = runGit(['ls-files', '--error-unmatch', '--', evidence]);
-    if (trackedEvidence.status !== 0) failures.push('approvalEvidence 必须受 Git 跟踪');
-    if (reviewedCommit) {
-      const reviewedEvidence = runGit(['cat-file', '-e', `${reviewedCommit}:${evidence}`]);
-      if (reviewedEvidence.status !== 0) failures.push('approvalEvidence 必须存在于 reviewedCommit');
-    }
   }
 
-  try {
-    currentCommit = resolveCommit('HEAD');
-  } catch (error) {
-    failures.push(error instanceof Error ? error.message : String(error));
-  }
-
-  if (reviewedCommit && currentCommit) {
+  if (reviewedCommit) {
     const ancestry = runGit(['merge-base', '--is-ancestor', reviewedCommit, currentCommit]);
     if (ancestry.status !== 0) failures.push('reviewedCommit 必须是当前 release commit 的祖先');
 
@@ -204,14 +247,17 @@ if (approved) {
 }
 
 if (requireApproved) {
+  const trackedWorktree = runGit(['diff', '--quiet', 'HEAD', '--']);
+  if (trackedWorktree.status !== 0) {
+    failures.push('release 校验要求 tracked 工作区无未提交变更');
+  }
   if (!approved) failures.push('GMR-11 独立审查未批准，禁止启用 production Arena multiplayer');
   if (typeof commit !== 'string' || !/^[0-9a-f]{40}$/u.test(commit)) {
     failures.push('--require-approved 必须提供 40 位 --commit');
   } else {
     try {
       const releaseCommit = resolveCommit(commit);
-      const head = currentCommit ?? resolveCommit('HEAD');
-      if (releaseCommit !== head) failures.push('--commit 必须精确绑定当前 checkout HEAD');
+      if (releaseCommit !== currentCommit) failures.push('--commit 必须精确绑定当前 checkout HEAD');
     } catch (error) {
       failures.push(error instanceof Error ? error.message : String(error));
     }
