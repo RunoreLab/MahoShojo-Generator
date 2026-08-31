@@ -512,17 +512,19 @@ export default function DataCard({
           </button>
 
           {/* 详情按钮 */}
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onViewDetails?.();
-            }}
-            className="flex items-center gap-1 text-gray-500 hover:text-purple-500 transition-colors"
-            title="查看详细设定"
-          >
-            <Info className="w-4 h-4" />
-            <span className="text-xs">详情</span>
-          </button>
+          {onViewDetails ? (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onViewDetails();
+              }}
+              className="flex items-center gap-1 text-gray-500 hover:text-purple-500 transition-colors"
+              title="查看详细设定"
+            >
+              <Info className="w-4 h-4" />
+              <span className="text-xs">详情</span>
+            </button>
+          ) : null}
         </div>
       </div>
 

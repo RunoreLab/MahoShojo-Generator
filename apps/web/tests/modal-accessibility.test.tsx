@@ -196,8 +196,7 @@ describe('BattleDataModal accessibility and capabilities', () => {
     expect(dialog?.textContent).not.toContain('卡组导入');
     const detailButton = [...(dialog?.querySelectorAll('button') ?? [])]
       .find((button) => button.textContent?.trim() === '详情');
-    expect(detailButton).toBeDefined();
-    act(() => (detailButton as HTMLButtonElement).click());
+    expect(detailButton).toBeUndefined();
     expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(1);
 
     const selectionButton = dialog?.querySelector<HTMLButtonElement>('button[aria-label="选择角色一"]');

@@ -209,6 +209,20 @@ describe('Arena multiplayer panel real React interactions', () => {
     expect(mocks.create).toHaveBeenCalledTimes(1);
   });
 
+  it('创建或加入 pending notice 位于大厅 dialog 的可访问范围内', async () => {
+    await act(async () => button('打开多人房间').click());
+    mocks.state = {
+      ...readyState,
+      phase: 'connecting',
+      notice: '正在创建房间…',
+    };
+    await act(async () => root.render(<ArenaMultiplayerContextPanel {...props} />));
+
+    const dialog = container.querySelector<HTMLElement>('[role="dialog"][aria-modal="true"]');
+    expect(dialog?.textContent).toContain('正在创建房间…');
+    expect(dialog?.querySelector('[role="status"]')).not.toBeNull();
+  });
+
   it('真实输入与点击连接 discover/join controller action', async () => {
     await act(async () => button('打开多人房间').click());
     const input = container.querySelector<HTMLInputElement>('#arena-room-join-code');

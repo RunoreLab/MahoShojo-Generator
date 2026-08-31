@@ -107,7 +107,8 @@ const ArenaRoomLobbyDialog = ({
       description="创建房间，或从有界公开目录中选择并加入。"
       widthClassName="max-w-4xl"
     >
-          <div className="grid gap-4 lg:grid-cols-2">
+      <StatusNotice state={state} />
+      <div className="grid gap-4 lg:grid-cols-2">
             <fieldset className="space-y-3 rounded-xl border border-gray-200 bg-white/70 p-4 dark:border-gray-700 dark:bg-gray-900/60">
               <legend className="px-1 text-sm font-semibold text-gray-950 dark:text-gray-100">创建房间</legend>
               <div>
