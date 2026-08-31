@@ -60,7 +60,7 @@ const secondaryButtonClass = `${buttonClass} border-gray-300 bg-white text-gray-
 const inputClass = 'w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fuchsia-500 dark:border-gray-600 dark:bg-gray-950 dark:text-gray-100';
 
 const StatusNotice = ({ state }: { readonly state: ArenaRoomControllerState }) => (
-  <div aria-live="polite" aria-atomic="true" className="min-h-6 text-sm text-gray-700 dark:text-gray-200">
+  <div role="status" aria-live="polite" aria-atomic="true" className="min-h-6 text-sm text-gray-700 dark:text-gray-200">
     {state.notice ?? (state.phase === 'connected' ? '房间已连接' : '')}
   </div>
 );
@@ -364,6 +364,12 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
           </button>
         ) : null}
       </div>
+
+      {!session ? (
+        <div className="mt-2">
+          <StatusNotice state={state} />
+        </div>
+      ) : null}
 
       {session ? (
         <div className="mt-3">

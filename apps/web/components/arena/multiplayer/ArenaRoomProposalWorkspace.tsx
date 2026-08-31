@@ -45,7 +45,7 @@ type ProposalController = Pick<
   'reconnect' | 'submitProposal' | 'withdrawProposal'
 >;
 
-const buttonClass = 'rounded-lg border px-3 py-2 text-sm font-medium transition-colors motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fuchsia-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50';
+const buttonClass = 'min-h-10 rounded-lg border px-3 py-2 text-sm font-medium transition-colors motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fuchsia-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50';
 const primaryButtonClass = `${buttonClass} border-fuchsia-600 bg-fuchsia-600 text-white hover:bg-fuchsia-700`;
 const secondaryButtonClass = `${buttonClass} border-gray-300 bg-white text-gray-800 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800`;
 const dangerButtonClass = `${buttonClass} border-red-300 bg-white text-red-700 hover:bg-red-50 dark:border-red-800 dark:bg-gray-900 dark:text-red-300`;
@@ -179,16 +179,20 @@ const ProposalWorkspaceInner = ({
   const [characterPresetPage, setCharacterPresetPage] = useState(1);
   const [scenarioPresetPage, setScenarioPresetPage] = useState(1);
   const [newTeamName, setNewTeamName] = useState('');
+  const [collapsedGuidanceKeys, setCollapsedGuidanceKeys] = useState<ReadonlySet<string>>(new Set());
   const [preview, setPreview] = useState<readonly ArenaProposalChange[] | null>(null);
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [localError, setLocalError] = useState<string | null>(null);
   const submitLock = useRef(false);
 
   const selectedIds = useMemo(() => {
-    if (modalKind === 'character') return snapshot.combatants.flatMap((item) => item.reference ? [item.reference.id] : []);
-    if (modalKind === 'scenario') return snapshot.scenario?.reference ? [snapshot.scenario.reference.id] : [];
-    if (modalKind === 'auxScenario') return snapshot.auxScenarios.flatMap((item) => item.reference ? [item.reference.id] : []);
-    if (modalKind === 'material') return snapshot.materials.flatMap((item) => item.reference ? [item.reference.id] : []);
+    const isOnlineReference = (item: { source: string; key: string; reference: { id: string } | null }) => (
+      item.source === 'data-card' || item.key.startsWith('data-card:')
+    );
+    if (modalKind === 'character') return snapshot.combatants.flatMap((item) => item.reference && isOnlineReference(item) ? [item.reference.id] : []);
+    if (modalKind === 'scenario') return snapshot.scenario?.reference && isOnlineReference(snapshot.scenario) ? [snapshot.scenario.reference.id] : [];
+    if (modalKind === 'auxScenario') return snapshot.auxScenarios.flatMap((item) => item.reference && isOnlineReference(item) ? [item.reference.id] : []);
+    if (modalKind === 'material') return snapshot.materials.flatMap((item) => item.reference && isOnlineReference(item) ? [item.reference.id] : []);
     return [];
   }, [modalKind, snapshot.auxScenarios, snapshot.combatants, snapshot.materials, snapshot.scenario]);
 
@@ -378,8 +382,10 @@ const ProposalWorkspaceInner = ({
             ) : null}
           </CollapsibleSection>
           <CollapsibleSection title="👥 已选角色 / 分队" description={`已选 ${snapshot.combatants.length}`} defaultOpen keepMounted>
-            <div className="mb-3 flex gap-2">
+              <div className="mb-3 flex gap-2">
+              <label htmlFor="arena-room-proposal-new-team" className="sr-only">新队伍名称</label>
               <input
+                id="arena-room-proposal-new-team"
                 value={newTeamName}
                 onChange={(event) => setNewTeamName(event.target.value)}
                 maxLength={80}
@@ -491,8 +497,13 @@ const ProposalWorkspaceInner = ({
                   index={index}
                   total={snapshot.combatants.length}
                   capabilities={{ guidance: true, remove: true, reorder: true }}
-                  guidanceExpanded
-                  onToggleGuidance={() => undefined}
+                  guidanceExpanded={!collapsedGuidanceKeys.has(item.key)}
+                  onToggleGuidance={() => setCollapsedGuidanceKeys((current) => {
+                    const next = new Set(current);
+                    if (next.has(item.key)) next.delete(item.key);
+                    else next.add(item.key);
+                    return next;
+                  })}
                   onGuidanceChange={(value) => mutate((draft) => ({
                     ...draft,
                     combatants: draft.combatants.map((entry) => entry.key === item.key
@@ -623,6 +634,8 @@ const ProposalWorkspaceInner = ({
         selectionMode={modalKind === 'scenario' ? 'single' : 'multi'}
         selectedCardIds={selectedIds}
         selectedCountOverride={selectedIds.length}
+        allowDeckImport={false}
+        allowCardDetails={false}
         onSelectCard={modalKind === 'scenario' ? selectMainScenario : undefined}
         onToggleCard={modalKind && modalKind !== 'scenario' ? toggleCard : undefined}
         externalError={localError}

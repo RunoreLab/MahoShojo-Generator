@@ -38,6 +38,9 @@ vi.mock('@/components/BattleDataModal', () => ({
     titleOverride,
     onSelectCard,
     onToggleCard,
+    selectedCardIds,
+    allowDeckImport,
+    allowCardDetails,
   }: {
     readonly isOpen: boolean;
     readonly onClose: () => void;
@@ -46,6 +49,9 @@ vi.mock('@/components/BattleDataModal', () => ({
     readonly titleOverride?: string;
     readonly onSelectCard?: (card: unknown) => void;
     readonly onToggleCard?: (card: unknown, selected: boolean) => void;
+    readonly selectedCardIds?: readonly string[];
+    readonly allowDeckImport?: boolean;
+    readonly allowCardDetails?: boolean;
   }) => {
     if (!isOpen) return null;
     const isAuxScenario = titleOverride === '选择辅助情景';
@@ -77,6 +83,9 @@ vi.mock('@/components/BattleDataModal', () => ({
         data-testid="battle-data-modal"
         data-visible-tabs={visibleTabs.join(',')}
         data-selected-type={selectedType}
+        data-selected-card-ids={selectedCardIds?.join(',') ?? ''}
+        data-allow-deck-import={String(allowDeckImport)}
+        data-allow-card-details={String(allowCardDetails)}
       >
         <button type="button" onClick={select}>{actionLabel}</button>
         <button type="button" onClick={onClose}>关闭数据卡</button>
@@ -212,6 +221,8 @@ describe('Arena room Proposal workspace', () => {
     await act(async () => button('浏览在线角色库').click());
     const modal = container.querySelector('[data-testid="battle-data-modal"]');
     expect(modal?.getAttribute('data-visible-tabs')).toBe('public,recommended');
+    expect(modal?.getAttribute('data-allow-deck-import')).toBe('false');
+    expect(modal?.getAttribute('data-allow-card-details')).toBe('false');
     expect(container.textContent).not.toContain('上传');
     expect(container.textContent).not.toContain('粘贴');
     await act(async () => button('模拟选择角色').click());
@@ -220,9 +231,25 @@ describe('Arena room Proposal workspace', () => {
     const guidance = container.querySelector<HTMLTextAreaElement>('#arena-roster-guidance-data-card\\:character-public-1');
     if (!guidance) throw new Error('character guidance not found');
     await act(async () => setValue(guidance, '优先保护同伴'));
+    expect(container.querySelector('label[for="arena-roster-guidance-data-card:character-public-1"]')?.textContent)
+      .toContain('角色行动引导');
+    const guidanceRow = guidance.closest('.group');
+    const collapseGuidanceButton = [...(guidanceRow?.querySelectorAll('button') ?? [])]
+      .find((candidate) => candidate.textContent?.trim() === '收起');
+    if (!(collapseGuidanceButton instanceof HTMLButtonElement)) throw new Error('guidance collapse button not found');
+    await act(async () => collapseGuidanceButton.click());
+    expect(container.querySelector('#arena-roster-guidance-data-card\\:character-public-1')).toBeNull();
+    const reopenGuidanceButton = [...(guidanceRow?.querySelectorAll('button') ?? [])]
+      .find((candidate) => candidate.textContent?.trim() === '行动');
+    if (!(reopenGuidanceButton instanceof HTMLButtonElement)) throw new Error('guidance toggle button not found');
+    await act(async () => reopenGuidanceButton.click());
+    expect(container.querySelector('#arena-roster-guidance-data-card\\:character-public-1')).not.toBeNull();
 
     const teamName = container.querySelector<HTMLInputElement>('input[placeholder="新队伍名称"]');
     if (!teamName) throw new Error('team name input not found');
+    expect(teamName.id).toBe('arena-room-proposal-new-team');
+    expect(container.querySelector('label[for="arena-room-proposal-new-team"]')?.textContent)
+      .toContain('新队伍名称');
     await act(async () => setValue(teamName, '守护队'));
     await act(async () => button('新增队伍').click());
     const teamSelect = [...container.querySelectorAll<HTMLSelectElement>('select:not(#language-select)')].at(-1);
@@ -360,6 +387,46 @@ describe('Arena room Proposal workspace', () => {
       },
     } as const;
     expect(arenaProposalExpectedBaseSummary(change)).toBe('预期基线：preset:S00_old.json');
+  });
+
+  it('online data-card modal 不把仅存在于 preset namespace 的同名引用标为已选', async () => {
+    const presetOnlyConfig: ArenaRoomSharedConfig = {
+      ...sharedConfig,
+      combatants: [{
+        key: 'preset:character-public-1',
+        ref: {
+          id: 'character-public-1',
+          kind: 'character',
+          versionToken: 'sha256:preset',
+        },
+      }],
+    };
+    const editor = createRoomProposalArenaEditorSession({
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      revision: 7,
+      sharedConfig: presetOnlyConfig,
+    });
+    const presetOnlyState: ArenaRoomControllerState = {
+      ...state,
+      session: state.session ? {
+        ...state.session,
+        snapshot: { ...state.session.snapshot, sharedConfig: presetOnlyConfig },
+      } : null,
+    };
+    const controller = {
+      submitProposal: vi.fn(async () => undefined),
+      withdrawProposal: vi.fn(async () => undefined),
+      reconnect: vi.fn(),
+    } satisfies Pick<ArenaRoomController, 'reconnect' | 'submitProposal' | 'withdrawProposal'>;
+
+    await act(async () => root.render(
+      <ArenaRoomProposalWorkspaceView editor={editor} state={presetOnlyState} controller={controller} />,
+    ));
+    await act(async () => button('浏览在线角色库').click());
+    const modal = container.querySelector('[data-testid="battle-data-modal"]');
+    expect(modal?.getAttribute('data-selected-card-ids')).toBe('');
+    editor.dispose();
   });
 
   it('暴露共享列表移动控件并产生五类全序 typed change', async () => {

@@ -1,6 +1,6 @@
 // components/BattleDataModal.tsx
 
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef, useId } from 'react';
 import { createPortal } from 'react-dom';
 import DataCard from './DataCard';
 import SortSelector from './SortSelector';
@@ -44,6 +44,10 @@ interface BattleDataModalProps {
   selectedCountOverride?: number;
   maxSelected?: number;
   externalError?: string | null;
+  /** 是否允许从私有卡组批量导入；默认保持既有 Arena 行为。 */
+  allowDeckImport?: boolean;
+  /** 是否允许打开数据卡详情（以及详情中的举报等嵌套入口）；默认保持既有行为。 */
+  allowCardDetails?: boolean;
 }
 
 type BattleDataTab = 'my' | 'public' | 'recommended' | 'favorites' | 'pvpHand';
@@ -186,8 +190,15 @@ export default function BattleDataModal({
   selectedCountOverride,
   maxSelected,
   externalError,
+  allowDeckImport = true,
+  allowCardDetails = true,
 }: BattleDataModalProps) {
   const { isAuthenticated, user, userBadges } = useAuth();
+  const modalTitleId = useId();
+  const modalRef = useRef<HTMLDivElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
   const isComposingSearchRef = useRef(false);
   const publicFetchAbortControllerRef = useRef<AbortController | null>(null);
   const metaFetchAbortControllerRef = useRef<AbortController | null>(null);
@@ -250,6 +261,61 @@ export default function BattleDataModal({
   const [tagOptions, setTagOptions] = useState<ApiTag[]>([]);
   const [tagOptionsLoading, setTagOptionsLoading] = useState(false);
   const [tagOptionsError, setTagOptionsError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const previouslyFocused = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    const previousBodyOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    closeButtonRef.current?.focus();
+
+    const focusableSelector = [
+      'button:not([disabled])',
+      'a[href]',
+      'input:not([disabled])',
+      'select:not([disabled])',
+      'textarea:not([disabled])',
+      '[tabindex]:not([tabindex="-1"])',
+    ].join(',');
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+
+      const focusable = [...(modalRef.current?.querySelectorAll<HTMLElement>(focusableSelector) ?? [])]
+        .filter((element) => !element.hidden && element.getAttribute('aria-hidden') !== 'true');
+      if (focusable.length === 0) {
+        event.preventDefault();
+        modalRef.current?.focus();
+        return;
+      }
+
+      const first = focusable[0]!;
+      const last = focusable.at(-1)!;
+      const current = document.activeElement;
+      if (event.shiftKey && (current === first || !modalRef.current?.contains(current))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (current === last || !modalRef.current?.contains(current))) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      document.body.style.overflow = previousBodyOverflow;
+      if (previouslyFocused && document.contains(previouslyFocused)) {
+        previouslyFocused.focus();
+      }
+    };
+  }, [isOpen]);
 
   const buildPublicFilters = useCallback((source: Filters, tab: BattleDataTab) => {
     if (tab === 'recommended') {
@@ -696,7 +762,7 @@ export default function BattleDataModal({
   const selectedCount = typeof selectedCountOverride === 'number' ? selectedCountOverride : selectedIdSet.size;
   const atLimit = selectionMode === 'multi' && typeof maxSelected === 'number' && maxSelected > 0 && selectedCount >= maxSelected;
   const canToggle = selectionMode === 'multi' && typeof onToggleCard === 'function';
-  const canImportDeck = isAuthenticated && selectionMode === 'multi' && selectedType === 'character' && (typeof onToggleCard === 'function' || typeof onSelectCard === 'function');
+  const canImportDeck = allowDeckImport && isAuthenticated && selectionMode === 'multi' && selectedType === 'character' && (typeof onToggleCard === 'function' || typeof onSelectCard === 'function');
 
   // 处理卡片选择
   const handleSelectCard = async (card: any) => {
@@ -774,6 +840,7 @@ export default function BattleDataModal({
 
   const handleImportDeck = useCallback(async (deckId: string) => {
     if (!deckId) return;
+    if (!allowDeckImport) return;
     if (selectionMode !== 'multi') return;
 
     try {
@@ -829,7 +896,7 @@ export default function BattleDataModal({
     } catch (error) {
       console.error('导入卡组失败:', error);
     }
-  }, [canToggle, effectiveAllowedTypeSet, maxSelected, onSelectCard, onToggleCard, selectedCount, selectedIdSet, selectionMode]);
+  }, [allowDeckImport, canToggle, effectiveAllowedTypeSet, maxSelected, onSelectCard, onToggleCard, selectedCount, selectedIdSet, selectionMode]);
 
   const handleDownloadCard = useCallback((card: any) => {
     try {
@@ -1263,6 +1330,7 @@ export default function BattleDataModal({
     all: '素材',
   };
   const typeLabel = typeLabelMap[selectedType] ?? '数据';
+  const modalTitle = titleOverride || (isPvpHandTab ? '我的手牌' : `选择${typeLabel}数据卡`);
   const isFilterActive = useMemo(() => {
     return Boolean(
       publicFilters.author ||
@@ -1285,9 +1353,23 @@ export default function BattleDataModal({
 
   const modal = (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg p-6 w-[96vw] max-w-[90rem] h-[85vh] max-h-[90vh] overflow-hidden flex flex-col relative">
-        <button onClick={onClose} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 text-2xl z-10">×</button>
-		        <h2 className="text-xl font-bold pr-8">{titleOverride || (isPvpHandTab ? '我的手牌' : `选择${typeLabel}数据卡`)}</h2>
+      <div
+        ref={modalRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={modalTitleId}
+        aria-label={modalTitle}
+        tabIndex={-1}
+        className="bg-white rounded-lg p-6 w-[96vw] max-w-[90rem] h-[85vh] max-h-[90vh] overflow-hidden flex flex-col relative"
+      >
+        <button
+          type="button"
+          ref={closeButtonRef}
+          onClick={onClose}
+          aria-label={`关闭${modalTitle}`}
+          className="absolute right-4 top-4 z-10 inline-flex min-h-10 min-w-10 items-center justify-center text-gray-400 hover:text-gray-600 text-2xl"
+        >×</button>
+		        <h2 id={modalTitleId} className="text-xl font-bold pr-8">{modalTitle}</h2>
           {selectError && (
             <div className="mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
               {selectError}
@@ -1660,7 +1742,7 @@ export default function BattleDataModal({
 	                            详情
 	                          </button>
 	                          <button
-	                            className="px-3 py-2 rounded-lg text-sm text-white bg-gradient-to-r from-pink-500 to-purple-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                            className="min-h-10 px-3 py-2 rounded-lg text-sm text-white bg-gradient-to-r from-pink-500 to-purple-500 disabled:opacity-50 disabled:cursor-not-allowed"
 	                            onClick={() => pvpHandTab?.onChoose(card.snapshotId)}
 	                            disabled={disableChoose}
 	                            title={pvpHandTab?.hasChosenMe ? '你已选择过出战卡' : undefined}
@@ -1700,10 +1782,22 @@ export default function BattleDataModal({
                           void handleSelectCard(card);
                         }}
                       >
-	                      {showQuickToggle && (
-	                        <button
-	                          type="button"
-	                          className={`absolute top-2 right-2 z-20 inline-flex h-8 w-8 items-center justify-center rounded-full border-2 text-lg font-bold leading-none shadow-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 ${
+		                      {selectionMode === 'single' ? (
+		                        <button
+		                          type="button"
+		                          className="absolute right-2 top-2 z-20 inline-flex min-h-10 min-w-10 items-center justify-center rounded-full border border-transparent bg-emerald-500 px-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-emerald-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2"
+		                          onClick={(event) => {
+		                            event.stopPropagation();
+		                            void handleSelectCard(card);
+		                          }}
+		                          aria-label={`选择${card.name || typeLabel}`}
+		                        >
+		                          选择
+		                        </button>
+		                      ) : showQuickToggle && (
+		                        <button
+		                          type="button"
+		                          className={`absolute top-2 right-2 z-20 inline-flex min-h-10 min-w-10 items-center justify-center rounded-full border-2 text-lg font-bold leading-none shadow-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 ${
 	                            quickToggleDisabled
 	                              ? 'cursor-not-allowed border-gray-200 bg-gray-100 text-gray-400'
 	                              : isSelected
@@ -1744,7 +1838,7 @@ export default function BattleDataModal({
 	                        isRecommended={card.is_recommended === 1}
 	                        author={activeTab === 'my' ? '我' : (card.username || '未知')}
 	                        authorBadges={activeTab === 'my' ? currentUserEquippedBadges : (authorBadgesById[card.user_id] ?? [])}
-	                        onViewDetails={() => { setSelectedCard(card); setShowDetailsModal(true); }}
+		                        onViewDetails={allowCardDetails ? () => { setSelectedCard(card); setShowDetailsModal(true); } : undefined}
 	                        onAuthorClick={handleAuthorClick}
 	                        onToggleFavorite={enableFavorite ? (next) => handleFavoriteToggleForCard(card, next) : undefined}
 	                        onDownload={() => handleDownloadCard(card)}
@@ -1755,11 +1849,13 @@ export default function BattleDataModal({
 	              </div>
       )}
 
-      <DecksModal
-        isOpen={showDecksModal}
-        onClose={() => setShowDecksModal(false)}
-        onImportDeck={(deckId) => void handleImportDeck(deckId)}
-      />
+	      {allowDeckImport ? (
+	        <DecksModal
+	          isOpen={showDecksModal}
+	          onClose={() => setShowDecksModal(false)}
+	          onImportDeck={(deckId) => void handleImportDeck(deckId)}
+	        />
+	      ) : null}
 	          </div>
 
           {/* 分页与底部 */}
@@ -1799,7 +1895,7 @@ export default function BattleDataModal({
 	  </div>
 
 	  {/* 详情模态框 */}
-	  {selectedCard && (
+      {allowCardDetails && selectedCard && (
         <DataCardDetailsModal
           isOpen={showDetailsModal}
           onClose={() => {

@@ -1,7 +1,7 @@
 'use client';
 
 import type { ReactNode } from 'react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 
@@ -26,6 +26,14 @@ const joinClassNames = (...classNames: Array<string | null | undefined | false>)
 
 const DEFAULT_Z_INDEX_CLASS_NAME = 'z-50';
 const DEFAULT_MAX_WIDTH_CLASS_NAME = 'max-w-4xl';
+const FOCUSABLE_SELECTOR = [
+  'button:not([disabled])',
+  'a[href]',
+  'input:not([disabled])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])',
+].join(',');
 
 export const BASE_MODAL_ROOT_LAYOUT_CLASS_NAME = 'fixed inset-0 flex items-center justify-center p-4';
 export const BASE_MODAL_PANEL_LAYOUT_CLASS_NAME =
@@ -63,24 +71,62 @@ export function BaseModal({
   onClose,
 }: Props) {
   const [mounted, setMounted] = useState(false);
+  const titleId = useId();
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     setMounted(true);
   }, []);
 
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen || !mounted) return;
+    const previouslyFocused = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+    closeButtonRef.current?.focus();
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+
+      const focusable = [...(dialogRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR) ?? [])]
+        .filter((element) => !element.hidden && element.getAttribute('aria-hidden') !== 'true');
+      if (focusable.length === 0) {
+        event.preventDefault();
+        dialogRef.current?.focus();
+        return;
+      }
+
+      const first = focusable[0]!;
+      const last = focusable.at(-1)!;
+      const current = document.activeElement;
+      if (event.shiftKey && (current === first || !dialogRef.current?.contains(current))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (current === last || !dialogRef.current?.contains(current))) {
+        event.preventDefault();
+        first.focus();
+      }
     };
-    window.addEventListener('keydown', onKeyDown);
+
+    document.addEventListener('keydown', onKeyDown);
     return () => {
       document.body.style.overflow = prevOverflow;
-      window.removeEventListener('keydown', onKeyDown);
+      document.removeEventListener('keydown', onKeyDown);
+      if (previouslyFocused && document.contains(previouslyFocused)) {
+        previouslyFocused.focus();
+      }
     };
-  }, [isOpen, onClose]);
+  }, [isOpen, mounted]);
 
   const wrapper = useMemo(() => {
     if (!mounted) return null;
@@ -90,29 +136,35 @@ export function BaseModal({
   if (!isOpen || !wrapper) return null;
   const { rootClassName, panelClassName, headerClassName, bodyClassName, footerClassName } =
     getBaseModalLayoutClassNames({ maxWidthClassName, zIndexClassName });
+  const accessibleTitle = title || '对话框';
 
   return createPortal(
     <div className={rootClassName}>
       <button
         type="button"
-        aria-label="关闭"
+        aria-label="关闭对话框"
         className="absolute inset-0 bg-black/60"
         onClick={onClose}
       />
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
         className={panelClassName}
       >
         <div className={headerClassName}>
           <div className="min-w-0">
-            {title ? <div className="text-lg font-semibold text-gray-900 truncate">{title}</div> : null}
+            <div id={titleId} className="text-lg font-semibold text-gray-900 truncate">{accessibleTitle}</div>
             {description ? <div className="mt-1 text-sm text-gray-600">{description}</div> : null}
           </div>
           <button
+            ref={closeButtonRef}
             type="button"
             onClick={onClose}
-            className="rounded-lg p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+            aria-label="关闭对话框"
+            className="min-h-10 min-w-10 rounded-lg p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
           >
             <X className="h-5 w-5" />
           </button>

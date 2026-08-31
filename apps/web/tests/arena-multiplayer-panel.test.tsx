@@ -131,6 +131,15 @@ describe('Arena multiplayer panel accessibility/permissions', () => {
     expect(html).toContain('aria-live="polite"');
   });
 
+  it('无 session 的大厅入口仍播报 controller notice pending 状态', () => {
+    const html = render({
+      ...readyState,
+      notice: '正在确认上一项房间请求，请稍候…',
+    });
+    expect(html).toContain('正在确认上一项房间请求，请稍候…');
+    expect(html).toContain('role="status"');
+  });
+
   it('host/member 权限与 server contract 对齐', () => {
     const hostHtml = render({ ...readyState, phase: 'connected', session });
     expect(hostHtml).toContain('更新配置');
