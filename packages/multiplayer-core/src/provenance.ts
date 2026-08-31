@@ -31,7 +31,7 @@ const retainsRelativeOrder = (
 };
 
 /** A semantic target is replaced as one unit when a later accepted change owns it. */
-const collaborativeTarget = (change: ArenaProposalChange): string => {
+export const collaborativeChangeTarget = (change: ArenaProposalChange): string => {
   switch (change.type) {
     case 'addCombatant':
     case 'removeCombatant':
@@ -169,8 +169,8 @@ export const mergeCollaborativeChanges = (input: {
   for (const change of input.acceptedChanges) {
     if (hasCollaborativeChangeEffect(input.previousConfig, change)
       || !hasCollaborativeChangeEffect(input.nextConfig, change)) continue;
-    const target = collaborativeTarget(change);
-    const previousIndex = next.findIndex((candidate) => collaborativeTarget(candidate) === target);
+    const target = collaborativeChangeTarget(change);
+    const previousIndex = next.findIndex((candidate) => collaborativeChangeTarget(candidate) === target);
     if (previousIndex >= 0) next.splice(previousIndex, 1);
     next.push(deepClone(change));
   }

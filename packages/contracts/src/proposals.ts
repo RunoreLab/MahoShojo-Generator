@@ -293,6 +293,9 @@ export const RemoveMaterialChangeSchema = change({
   materialKey: StableObjectKeySchema,
   expectedBase: PresentExpectedBaseSchema(MaterialPresentValueSchema),
 }).superRefine((change, context) => {
+  if (change.materialKey.startsWith('preset:')) {
+    context.addIssue({ code: 'custom', path: ['materialKey'], message: 'material preset is unsupported without a server registry' });
+  }
   if (!targetKeyMatchesExpectedBase(change.materialKey, change.expectedBase)) {
     context.addIssue({ code: 'custom', path: ['expectedBase', 'ref'], message: 'expectedBase.ref identity must match materialKey' });
   }

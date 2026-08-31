@@ -21,7 +21,7 @@ import {
 import { z } from 'zod';
 
 import { ArenaMultiplayerCoreError } from './errors';
-import { hasCollaborativeChangeEffect } from './provenance';
+import { collaborativeChangeTarget, hasCollaborativeChangeEffect } from './provenance';
 
 export const ARENA_ROOM_AUTHORITY_STATE_VERSION = 2 as const;
 
@@ -182,13 +182,7 @@ export const ArenaRoomAuthorityStateSchema = z.object({
       });
     }
   });
-  const collaborativeTargets = state.collaborativeChanges.map((change) => JSON.stringify([
-    change.type,
-    'combatantKey' in change ? change.combatantKey : null,
-    'scenarioKey' in change ? change.scenarioKey : null,
-    'materialKey' in change ? change.materialKey : null,
-    'ref' in change && change.ref !== null ? change.ref.id : null,
-  ]));
+  const collaborativeTargets = state.collaborativeChanges.map(collaborativeChangeTarget);
   if (new Set(collaborativeTargets).size !== collaborativeTargets.length) {
     context.addIssue({ code: 'custom', path: ['collaborativeChanges'], message: 'collaborative provenance targets must be unique' });
   }

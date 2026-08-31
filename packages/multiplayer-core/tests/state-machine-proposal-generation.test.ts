@@ -131,6 +131,40 @@ describe('Arena Room Proposal authority transitions', () => {
     expect(resolved.events.every((event) => RoomEventSchema.safeParse(event).success)).toBe(true);
   });
 
+  it('retains distinct collaborative provenance for data-card and preset refs sharing one id', () => {
+    const changes = [{
+      changeId: 'add-online-c2',
+      type: 'addCombatant' as const,
+      ref: { id: 'character-2', kind: 'character' as const, versionToken: 'online-v1' },
+      expectedBase: { kind: 'absent' as const },
+    }, {
+      changeId: 'add-preset-c2',
+      type: 'addCombatant' as const,
+      key: 'preset:character-2',
+      ref: { id: 'character-2', kind: 'character' as const, versionToken: 'preset-v1' },
+      expectedBase: { kind: 'absent' as const },
+    }];
+    const submitted = submit(
+      createJoinedState(),
+      proposal(changes, 'proposal-ref-namespaces'),
+    ).nextState;
+    const resolved = success(transitionArenaRoomAt(submitted, {
+      type: 'resolve-proposal',
+      expectedRoomEpoch: 'epoch-1',
+      expectedRevision: 0,
+      proposalId: 'proposal-ref-namespaces',
+      resolution: 'accept-selected',
+      selectedChangeIds: changes.map((change) => change.changeId),
+      timestamp: '2026-08-27T16:02:00.000Z',
+    }, hostAuthority()));
+
+    expect(resolved.nextState.snapshot.sharedConfig.combatants).toEqual(expect.arrayContaining([
+      expect.objectContaining({ key: 'data-card:character-2' }),
+      expect.objectContaining({ key: 'preset:character-2' }),
+    ]));
+    expect(resolved.nextState.collaborativeChanges).toHaveLength(2);
+  });
+
   it('supports host rejection and author withdrawal without changing config revision', () => {
     const submitted = submit(createJoinedState()).nextState;
     const rejected = success(transitionArenaRoomAt(submitted, {

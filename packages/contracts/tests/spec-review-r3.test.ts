@@ -212,7 +212,7 @@ describe('spec review R3: proposal identity, snapshot membership, and raw frames
       },
       {
         schema: RemoveMaterialChangeSchema,
-        valid: { changeId: 'remove-m', type: 'removeMaterial', materialKey: 'preset:m1', expectedBase: { kind: 'present', ref: { id: 'm1', kind: 'material', versionToken: 'v1' } } },
+        valid: { changeId: 'remove-m', type: 'removeMaterial', materialKey: 'data-card:m1', expectedBase: { kind: 'present', ref: { id: 'm1', kind: 'material', versionToken: 'v1' } } },
         mismatch: { changeId: 'remove-m', type: 'removeMaterial', materialKey: 'data-card:other', expectedBase: { kind: 'present', ref: { id: 'm1', kind: 'material', versionToken: 'v1' } } },
         hostValid: { changeId: 'remove-m-host', type: 'removeMaterial', materialKey: hostMaterial.key, expectedBase: { kind: 'present', ref: hostMaterial } },
         hostMismatch: { changeId: 'remove-m-host', type: 'removeMaterial', materialKey: 'host-local:other', expectedBase: { kind: 'present', ref: hostMaterial } },
@@ -224,6 +224,16 @@ describe('spec review R3: proposal identity, snapshot membership, and raw frames
       expect(removeCase.schema.safeParse(removeCase.hostValid).success).toBe(true);
       expect(removeCase.schema.safeParse(removeCase.hostMismatch).success).toBe(false);
     }
+    expect(RemoveMaterialChangeSchema.safeParse({
+      changeId: 'remove-preset-material',
+      type: 'removeMaterial',
+      materialKey: 'preset:m1',
+      expectedBase: {
+        kind: 'present',
+        key: 'preset:m1',
+        ref: { id: 'm1', kind: 'material', versionToken: 'v1' },
+      },
+    }).success).toBe(false);
   });
 
   it('separates control and story object parsers with stable invalid-message errors', () => {
