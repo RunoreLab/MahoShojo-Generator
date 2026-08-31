@@ -2563,6 +2563,33 @@ describe('Arena generation lifecycle service', () => {
     });
   });
 
+  test('latches a running snapshot budget overflow instead of reserializing every later delta', async () => {
+    const store = new MemoryReplayStore();
+    const observeArenaGeneration = vi.fn();
+    const service = createService(store, {
+      execute: vi.fn(async ({ emit }) => {
+        await emit({ type: 'markdown', data: { chunk: 'X'.repeat(300) } });
+        await emit({ type: 'markdown', data: { chunk: 'Y'.repeat(300) } });
+        await emit({ type: 'markdown', data: { chunk: 'Z'.repeat(300) } });
+        return { status: 'completed' as const };
+      }),
+    }, {
+      deltaFlushBytes: 1,
+      snapshotFlushBytes: 1,
+      snapshotMaxBytes: 256,
+      observer: { observeArenaGeneration },
+    });
+
+    const response = await service.create(createRequest('request-snapshot-overflow-latch'));
+    await response.text();
+
+    const budgetObservations = observeArenaGeneration.mock.calls.filter(([observation]) => (
+      observation.event === 'redis_degraded' && observation.operation === 'snapshot_budget'
+    ));
+    expect(budgetObservations).toHaveLength(2);
+    expect(store.writeSnapshotCalls).toBe(0);
+  });
+
   test('oversized failed terminal clears the old running partial and keeps bounded terminal evidence', async () => {
     const store = new MemoryReplayStore();
     const service = createService(store, {

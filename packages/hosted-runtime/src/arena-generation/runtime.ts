@@ -6,6 +6,12 @@ import {
   isGenerationCancelReason,
 } from '@mahoshojo/hosted-api/arena-generation/service';
 import { readSafePublicAiError } from '@mahoshojo/hosted-api/regular-generation';
+import {
+  ARENA_RESOURCE_BUDGET,
+  countArenaReferenceItems,
+  evaluateArenaPromptBudget,
+  type ArenaHostedFundingMode,
+} from '@mahoshojo/hosted-api/arena-generation/resource-budget';
 import type {
   ArenaGenerationExecutor,
   ArenaGenerationExecutionInput,
@@ -20,12 +26,7 @@ import type {
 } from '@mahoshojo/hosted-api/arena-generation/service';
 import { createArenaStreamProjector } from './stream-projector';
 
-const MAX_ARENA_MATERIALS = 10;
-const MAX_ARENA_AUX_SCENARIOS = 10;
-const MAX_ARENA_ADJUDICATION_EVENTS = 100;
-const MAX_ARENA_QUESTIONNAIRES = 50;
-const MAX_ARENA_NARRATIVE_HISTORY = 50;
-export const MAX_ARENA_COMBATANTS = 32;
+export const MAX_ARENA_COMBATANTS = ARENA_RESOURCE_BUDGET.maxCombatants;
 const PREPARED_PAYLOAD_KEY = '__arenaGenerationRuntimeV1';
 export const ARENA_GENERATION_MATERIALIZATION_VERSION = 'arena-runtime-v1';
 const ARENA_RANDOM_DRAW_BUDGET = 4_096;
@@ -115,6 +116,13 @@ type ArenaPayloadValidationFailure = {
   code: string;
 };
 
+class ArenaOutputBudgetExceededError extends Error {
+  constructor() {
+    super('ARENA_OUTPUT_BUDGET_EXCEEDED');
+    this.name = 'ArenaOutputBudgetExceededError';
+  }
+}
+
 const validationFailure = (
   code: string,
   error: string,
@@ -123,6 +131,38 @@ const validationFailure = (
   code,
   response: jsonResponse({ code, error }, status),
 });
+
+const validateInfrastructureBudget = (
+  payload: Record<string, unknown>,
+): ArenaPayloadValidationFailure | null => {
+  const combatants = payload.combatants;
+  if (Array.isArray(combatants) && combatants.length > MAX_ARENA_COMBATANTS) {
+    return validationFailure(
+      'ARENA_PARTICIPANTS_LIMIT',
+      `角色最多 ${MAX_ARENA_COMBATANTS} 位`,
+      413,
+    );
+  }
+  if (
+    Array.isArray(payload.adjudicationEvents)
+    && payload.adjudicationEvents.length > ARENA_RESOURCE_BUDGET.maxAdjudicationEvents
+  ) {
+    return validationFailure(
+      'ARENA_ADJUDICATION_EVENTS_LIMIT',
+      `裁定事件最多 ${ARENA_RESOURCE_BUDGET.maxAdjudicationEvents} 个`,
+      413,
+    );
+  }
+  const referenceItems = countArenaReferenceItems(payload);
+  if (referenceItems > ARENA_RESOURCE_BUDGET.maxReferenceItemsSanity) {
+    return validationFailure(
+      'ARENA_REFERENCE_ITEMS_LIMIT',
+      `辅助情景、素材、问卷与叙事历史合计最多 ${ARENA_RESOURCE_BUDGET.maxReferenceItemsSanity} 项`,
+      413,
+    );
+  }
+  return null;
+};
 
 const validatePayload = (payload: Record<string, unknown>): ArenaPayloadValidationFailure | null => {
   const mode = typeof payload.mode === 'string' ? payload.mode : 'classic';
@@ -133,52 +173,6 @@ const validatePayload = (payload: Record<string, unknown>): ArenaPayloadValidati
       'ARENA_PARTICIPANTS_INVALID',
       `该模式至少需要 ${minimum} 位角色`,
       400,
-    );
-  }
-  if (combatants.length > MAX_ARENA_COMBATANTS) {
-    return validationFailure(
-      'ARENA_PARTICIPANTS_LIMIT',
-      `角色最多 ${MAX_ARENA_COMBATANTS} 位`,
-      413,
-    );
-  }
-  if (
-    Array.isArray(payload.auxScenarios)
-    && payload.auxScenarios.length > MAX_ARENA_AUX_SCENARIOS
-  ) {
-    return validationFailure('ARENA_AUX_SCENARIOS_LIMIT', '辅助情景最多 10 个', 400);
-  }
-  if (Array.isArray(payload.materials) && payload.materials.length > MAX_ARENA_MATERIALS) {
-    return validationFailure('ARENA_MATERIALS_LIMIT', '素材最多 10 个', 400);
-  }
-  if (
-    Array.isArray(payload.adjudicationEvents)
-    && payload.adjudicationEvents.length > MAX_ARENA_ADJUDICATION_EVENTS
-  ) {
-    return validationFailure(
-      'ARENA_ADJUDICATION_EVENTS_LIMIT',
-      `裁定事件最多 ${MAX_ARENA_ADJUDICATION_EVENTS} 个`,
-      413,
-    );
-  }
-  if (
-    Array.isArray(payload.questionnaires)
-    && payload.questionnaires.length > MAX_ARENA_QUESTIONNAIRES
-  ) {
-    return validationFailure(
-      'ARENA_QUESTIONNAIRES_LIMIT',
-      `问卷最多 ${MAX_ARENA_QUESTIONNAIRES} 份`,
-      413,
-    );
-  }
-  if (
-    Array.isArray(payload.narrativeHistory)
-    && payload.narrativeHistory.length > MAX_ARENA_NARRATIVE_HISTORY
-  ) {
-    return validationFailure(
-      'ARENA_NARRATIVE_HISTORY_LIMIT',
-      `叙事历史最多 ${MAX_ARENA_NARRATIVE_HISTORY} 条`,
-      413,
     );
   }
   if (payload.pvpContext !== undefined) {
@@ -196,6 +190,14 @@ const validatePayload = (payload: Record<string, unknown>): ArenaPayloadValidati
     }
   }
   return null;
+};
+
+const resolveFundingMode = (payload: Record<string, unknown>): ArenaHostedFundingMode => {
+  const context = payload.__arenaServerContextV1;
+  if (!context || typeof context !== 'object' || Array.isArray(context)) return 'hosted-system';
+  return (context as { fundingMode?: unknown }).fundingMode === 'hosted-byok'
+    ? 'hosted-byok'
+    : 'hosted-system';
 };
 
 const redactSemanticValue = (value: unknown): unknown => {
@@ -416,6 +418,7 @@ const errorCodeOf = (error: unknown, signal: AbortSignal): string => {
     );
   }
   if (error instanceof Error && error.name === 'AbortError') return 'GENERATION_ABORTED';
+  if (error instanceof ArenaOutputBudgetExceededError) return 'ARENA_OUTPUT_BUDGET_EXCEEDED';
   return 'GENERATION_FAILED';
 };
 
@@ -435,6 +438,8 @@ export const createArenaGenerationRuntime = (
     generationRequestId,
     payload,
   }): Promise<PreflightedArenaGeneration | ArenaGenerationAuditableRejection | Response> => {
+    const infrastructureFailure = validateInfrastructureBudget(payload);
+    if (infrastructureFailure) return infrastructureFailure.response;
     const authorizedPayload = dependencies.preparePayload
       ? await dependencies.preparePayload({
         request,
@@ -542,6 +547,25 @@ export const createArenaGenerationRuntime = (
       });
       throw error;
     }
+    const promptBudget = evaluateArenaPromptBudget({
+      fundingMode: resolveFundingMode(executionPayload),
+      prompt: prepared.prompt,
+    });
+    if (!promptBudget.allowed) {
+      return jsonResponse({
+        code: 'ARENA_PROMPT_BUDGET_EXCEEDED',
+        error: '最终 Prompt 超过当前渠道允许的估算 token 预算',
+        estimatedPromptTokens: promptBudget.estimatedPromptTokens,
+        maxEstimatedPromptTokens: promptBudget.maxEstimatedPromptTokens,
+      }, 413);
+    }
+    prepared = {
+      ...prepared,
+      metadata: {
+        ...prepared.metadata,
+        estimatedPromptTokens: promptBudget.estimatedPromptTokens,
+      },
+    };
     const reporterInfo = prepared.metadata.reporterInfo;
     const streamMeta = {
       ...(prepared.metadata.outputContract === 'structured-report'
@@ -606,6 +630,8 @@ export const createArenaGenerationRuntime = (
     const prepared = readPrepared(input.payload);
     const executionMetadata = { ...prepared.metadata };
     const decoder = new TextDecoder();
+    const outputEncoder = new TextEncoder();
+    let outputBytes = 0;
     let markdown = '';
     let telemetry: Record<string, unknown> = {};
     let reasoningEnded = false;
@@ -619,6 +645,13 @@ export const createArenaGenerationRuntime = (
     const projector = createArenaStreamProjector({
       expectsMeta: prepared.metadata.expectsMeta === true,
     });
+
+    const consumeOutputBudget = (text: string): void => {
+      outputBytes += outputEncoder.encode(text).byteLength;
+      if (outputBytes > ARENA_RESOURCE_BUDGET.maxOutputBytes) {
+        throw new ArenaOutputBudgetExceededError();
+      }
+    };
 
     const emit = async (event: GenerationEventInput): Promise<void> => input.emit(event);
     const finalizeOnce = async (
@@ -709,6 +742,7 @@ export const createArenaGenerationRuntime = (
             return;
           }
           if (event.type === 'reasoning-delta') {
+            consumeOutputBudget(event.text);
             await emit({
               type: 'reasoning',
               data: { source: 'sdk', status: 'thinking', chunk: event.text },
@@ -731,6 +765,7 @@ export const createArenaGenerationRuntime = (
           const chunk = decoder.decode(next.value, { stream: true });
           if (!chunk) continue;
           for (const projected of projector.push(chunk)) {
+            consumeOutputBudget(projected);
             markdown += projected;
             await emit({ type: 'markdown', data: { chunk: projected } });
           }
@@ -738,14 +773,19 @@ export const createArenaGenerationRuntime = (
         const tail = decoder.decode();
         if (tail) {
           for (const projected of projector.push(tail)) {
+            consumeOutputBudget(projected);
             markdown += projected;
             await emit({ type: 'markdown', data: { chunk: projected } });
           }
         }
+      } catch (error) {
+        await reader.cancel(error).catch(() => undefined);
+        throw error;
       } finally {
         reader.releaseLock();
       }
       for (const projected of projector.finish().markdown) {
+        consumeOutputBudget(projected);
         markdown += projected;
         await emit({ type: 'markdown', data: { chunk: projected } });
       }

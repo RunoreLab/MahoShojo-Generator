@@ -19,6 +19,11 @@
       "import": "./src/arena-generation/service.ts",
       "default": "./src/arena-generation/service.ts"
     },
+    "./arena-generation/resource-budget": {
+      "types": "./src/arena-generation/resource-budget.ts",
+      "import": "./src/arena-generation/resource-budget.ts",
+      "default": "./src/arena-generation/resource-budget.ts"
+    },
     "./arena-generation/sse": {
       "types": "./src/arena-generation/sse.ts",
       "import": "./src/arena-generation/sse.ts",

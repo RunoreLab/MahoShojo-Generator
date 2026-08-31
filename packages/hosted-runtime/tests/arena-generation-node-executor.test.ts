@@ -357,6 +357,43 @@ describe('Node Arena generation executor', () => {
     expect(generateWithStreamAI).not.toHaveBeenCalled();
   });
 
+  it('keeps built-in AI safety on the system-channel prompt budget for BYOK requests', async () => {
+    const generateWithStructuredAI = vi.fn();
+    const executor = createNodeArenaGenerationExecutor({
+      env: {
+        NEXT_PUBLIC_ENABLE_SENSITIVE_WORD_FILTER: 'false',
+        NEXT_PUBLIC_ENABLE_AI_SAFETY_CHECK: 'true',
+      },
+      finalizer,
+      signatureService,
+      generateWithStructuredAI,
+      generateWithStreamAI: vi.fn(),
+    });
+
+    const result = await executor.prepare!({
+      request: new Request('https://example.test/api/arena/generate-stream'),
+      actorKey: 'anonymous:test',
+      generationRequestId: 'request-byok-safety-budget',
+      payload: {
+        ...validPayload,
+        userGuidance: '安'.repeat(130_000),
+        customProvider: {
+          providerId: 'chatbox',
+          modelId: 'gpt-5.4',
+          apiKey: 'secret-value',
+        },
+      },
+    });
+
+    expect(result).toBeInstanceOf(Response);
+    expect((result as Response).status).toBe(413);
+    await expect((result as Response).json()).resolves.toMatchObject({
+      code: 'ARENA_SAFETY_PROMPT_BUDGET_EXCEEDED',
+      maxEstimatedPromptTokens: 128_000,
+    });
+    expect(generateWithStructuredAI).not.toHaveBeenCalled();
+  });
+
   it('keeps legacy non-stream guidance bounds before safety and prompting', async () => {
     let inspectedText = '';
     const inspected = vi.fn(async (input: { combinedText: string }) => {
@@ -605,7 +642,7 @@ describe('Node Arena generation executor', () => {
     ]);
   });
 
-  it('在 reservation 前拒绝超过 companion 兼容上限的辅助情景与素材', async () => {
+  it('allows reference collections above legacy per-type caps and rejects only aggregate sanity overflow', async () => {
     const executor = createNodeArenaGenerationExecutor({
       env: {},
       finalizer,
@@ -613,28 +650,37 @@ describe('Node Arena generation executor', () => {
       enforceSafety: vi.fn(async () => null),
       generateWithStreamAI: vi.fn(),
     });
-    const tooManyAux = await executor.prepare!({
+    const relaxed = await executor.prepare!({
       request: new Request('https://example.test/api/generate-battle-story'),
       actorKey: 'anonymous:test',
       generationRequestId: 'request-direct-node',
-      payload: { ...validPayload, auxScenarios: Array.from({ length: 11 }, () => ({})) },
+      payload: {
+        ...validPayload,
+        auxScenarios: Array.from({ length: 12 }, () => ({})),
+        materials: Array.from({ length: 12 }, () => ({})),
+      },
     });
-    const tooManyMaterials = await executor.prepare!({
+    const overflow = await executor.prepare!({
       request: new Request('https://example.test/api/arena/generate'),
       actorKey: 'anonymous:test',
       generationRequestId: 'request-direct-node',
-      payload: { ...validPayload, materials: Array.from({ length: 11 }, () => ({})) },
+      payload: {
+        ...validPayload,
+        narrativeHistory: Array.from({ length: 250 }, (_, index) => ({
+          content: `history-${index}`,
+          createdAt: new Date(index).toISOString(),
+        })),
+        narrativeHistoryReadLimit: 10,
+        readNarrativeHistory: true,
+        materials: Array.from({ length: 7 }, () => ({})),
+      },
     });
 
-    expect(tooManyAux).toBeInstanceOf(Response);
-    expect((tooManyAux as Response).status).toBe(400);
-    expect(await (tooManyAux as Response).json()).toMatchObject({
-      code: 'ARENA_AUX_SCENARIOS_LIMIT',
-    });
-    expect(tooManyMaterials).toBeInstanceOf(Response);
-    expect((tooManyMaterials as Response).status).toBe(400);
-    expect(await (tooManyMaterials as Response).json()).toMatchObject({
-      code: 'ARENA_MATERIALS_LIMIT',
+    expect(relaxed).not.toBeInstanceOf(Response);
+    expect(overflow).toBeInstanceOf(Response);
+    expect((overflow as Response).status).toBe(413);
+    expect(await (overflow as Response).json()).toMatchObject({
+      code: 'ARENA_REFERENCE_ITEMS_LIMIT',
     });
   });
 

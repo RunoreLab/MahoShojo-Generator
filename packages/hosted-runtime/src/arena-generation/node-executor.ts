@@ -13,7 +13,11 @@ import {
 } from './prompt';
 import { getSystemPrompt } from './compatibility-prompt';
 import { buildArenaStructuredReportSchema } from './structured-report';
-import { MAX_ARENA_MATERIALS, normalizeNodeArenaMaterials } from './materials';
+import { normalizeNodeArenaMaterials } from './materials';
+import {
+  evaluateArenaPromptBudget,
+  type ArenaHostedFundingMode,
+} from '@mahoshojo/hosted-api/arena-generation/resource-budget';
 import type { ArenaSeasonContext } from './season-context';
 import {
   createArenaInternalGuidanceAuthority,
@@ -210,9 +214,7 @@ const normalizeLegacyPayloadDefaults = (payload: Record<string, unknown>): void 
     ? payload.auxScenarios.filter((value) => value && typeof value === 'object' && !Array.isArray(value))
     : [];
   const rawMaterials = Array.isArray(payload.materials) ? payload.materials : [];
-  payload.materials = rawMaterials.length <= MAX_ARENA_MATERIALS
-    ? normalizeNodeArenaMaterials(rawMaterials)
-    : rawMaterials;
+  payload.materials = normalizeNodeArenaMaterials(rawMaterials);
   payload.questionnaires = Array.isArray(payload.questionnaires)
     ? payload.questionnaires.filter((value) => value && typeof value === 'object' && !Array.isArray(value))
     : [];
@@ -499,6 +501,7 @@ export const createNodeArenaGenerationExecutor = (
     : createNodeStructuredAiRuntime(aiDependencies);
   const generateWithStreamAI = options.generateWithStreamAI
     ?? rawRuntime!.generateWithStreamAI;
+  const enableAiSafetyCheck = readBoolean(env, 'NEXT_PUBLIC_ENABLE_AI_SAFETY_CHECK', false);
   const contentSafety = createContentSafetyService({
     defaults: {
       enableSensitiveWordFilter: readBoolean(
@@ -506,7 +509,7 @@ export const createNodeArenaGenerationExecutor = (
         'NEXT_PUBLIC_ENABLE_SENSITIVE_WORD_FILTER',
         true,
       ),
-      enableAiSafetyCheck: readBoolean(env, 'NEXT_PUBLIC_ENABLE_AI_SAFETY_CHECK', false),
+      enableAiSafetyCheck,
     },
     quickCheck: quickCheckForServer,
     generateWithAI: async <T>(
@@ -590,10 +593,15 @@ export const createNodeArenaGenerationExecutor = (
           error: 'Arena season authority unavailable',
         }, 503);
       }
+      const fundingMode: ArenaHostedFundingMode = customProviderResolution.value
+        && customProviderResolution.value.provider.id !== 'system'
+        ? 'hosted-byok'
+        : 'hosted-system';
       normalized.__arenaServerContextV1 = {
         startedAt,
         ipAnonymized: anonymizeIp(requestIp(request)),
         ...requestAuditContext,
+        fundingMode,
         ...(trustedPvpContext ? { trustedPvpContext } : {}),
         season,
         scenarioNative: normalized.scenario
@@ -608,6 +616,20 @@ export const createNodeArenaGenerationExecutor = (
     checkSafety: async ({ request, actorKey, payload }) => {
       const combinedText = await buildSafetyText(payload, signatures, safetyPolicy, enableBundle);
       if (!combinedText) return null;
+      if (enableAiSafetyCheck && !options.enforceSafety) {
+        const safetyBudget = evaluateArenaPromptBudget({
+          fundingMode: 'hosted-system',
+          prompt: combinedText,
+        });
+        if (!safetyBudget.allowed) {
+          return jsonResponse({
+            code: 'ARENA_SAFETY_PROMPT_BUDGET_EXCEEDED',
+            error: '安全检查输入超过默认渠道允许的估算 token 预算',
+            estimatedPromptTokens: safetyBudget.estimatedPromptTokens,
+            maxEstimatedPromptTokens: safetyBudget.maxEstimatedPromptTokens,
+          }, 413);
+        }
+      }
       if (options.enforceSafety) {
         return options.enforceSafety({ request, actorKey, payload, combinedText });
       }

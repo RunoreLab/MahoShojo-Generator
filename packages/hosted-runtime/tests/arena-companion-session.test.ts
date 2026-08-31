@@ -52,6 +52,46 @@ const parseEvents = (text: string) => text.trim().split(/\n\n/gu).map((block) =>
 });
 
 describe('Arena session companion service', () => {
+  it('允许引用集合超过旧的每类上限并交给统一聚合预算校验', async () => {
+    const createSubscription = vi.fn(async () => new Response(null, { status: 418 }));
+    const service = createArenaSessionCompanionService({
+      generationService: {
+        createSubscription,
+        create: () => response(),
+        cancelRequest: () => response(),
+        lookup: () => response(),
+        resume: () => response(),
+        status: () => response(),
+        cancel: () => response(),
+      },
+      signatures: {
+        generateSignature: async () => 'guidance-signature',
+        verifySignature: async () => true,
+      },
+      acquireRateLimit: () => ({
+        allowed: true,
+        retryAfterSeconds: 0,
+        release: vi.fn(),
+      }),
+    });
+    const body = requestBody() as ReturnType<typeof requestBody> & {
+      seed: ReturnType<typeof requestBody>['seed'] & {
+        auxScenarios: Array<Record<string, unknown>>;
+        materials: unknown[];
+      };
+    };
+    body.seed.auxScenarios = Array.from({ length: 12 }, () => ({}));
+    body.seed.materials = Array.from({ length: 12 }, () => ({}));
+
+    const result = await service.generateNext(new Request(
+      'https://example.test/api/arena/session/generate-next',
+      { method: 'POST', body: JSON.stringify(body) },
+    ));
+
+    expect(result.status).toBe(418);
+    expect(createSubscription).toHaveBeenCalledTimes(1);
+  });
+
   it('直接消费 typed subscription、签名内部引导并保留上游事件 id', async () => {
     const captured: Array<{ headers: Headers; body: Record<string, unknown> }> = [];
     const release = vi.fn();

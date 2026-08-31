@@ -10,6 +10,7 @@ import type {
   ArenaGenerationService,
   GenerationStreamEvent,
 } from '@mahoshojo/hosted-api/arena-generation/service';
+import { ARENA_RESOURCE_BUDGET } from '@mahoshojo/hosted-api/arena-generation/resource-budget';
 import { encodeGenerationSseEvent } from '@mahoshojo/hosted-api/arena-generation/sse';
 import type { SignatureService } from '../signature';
 import {
@@ -58,8 +59,12 @@ const SessionRequestSchema = z.object({
   seed: z.object({
     combatants: z.array(z.unknown()).min(1),
     scenario: z.record(z.unknown()).nullable().optional(),
-    auxScenarios: z.array(z.record(z.unknown())).max(10).optional(),
-    materials: z.array(z.unknown()).max(10).optional(),
+    auxScenarios: z.array(z.record(z.unknown()))
+      .max(ARENA_RESOURCE_BUDGET.maxReferenceItemsSanity)
+      .optional(),
+    materials: z.array(z.unknown())
+      .max(ARENA_RESOURCE_BUDGET.maxReferenceItemsSanity)
+      .optional(),
     adjudicationEvents: z.array(z.unknown()).optional(),
     questionnaires: z.array(z.object({
       id: z.string().min(1),
@@ -67,7 +72,7 @@ const SessionRequestSchema = z.object({
       kind: z.enum(['magical-girl', 'canshou']),
       useLore: z.boolean().optional(),
       loreMarkdown: z.string().optional(),
-    })).max(20).optional(),
+    })).max(ARENA_RESOURCE_BUDGET.maxReferenceItemsSanity).optional(),
     mode: z.enum(['classic', 'kizuna', 'daily', 'scenario']),
     storyLength: z.enum(['default', 'short', 'standard', 'detailed', 'long']).default('standard'),
     customStoryLength: z.string().optional(),

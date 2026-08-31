@@ -164,7 +164,7 @@ const materialJson = (value: unknown): string => {
 };
 const formatArenaMaterialsForPrompt = (raw: unknown): string => {
   if (!Array.isArray(raw) || raw.length === 0) return '';
-  const materials = raw.slice(0, 10).flatMap((item, index) => {
+  const materials = raw.flatMap((item, index) => {
     if (!isRecord(item)) return [];
     const name = typeof item.name === 'string' && item.name.trim()
       ? item.name.trim()

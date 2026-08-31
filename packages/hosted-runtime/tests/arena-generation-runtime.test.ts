@@ -300,6 +300,98 @@ describe('Arena generation runtime', () => {
     expect(dependencies.generate).not.toHaveBeenCalled();
   });
 
+  it('rejects aggregate reference collections above the infrastructure sanity budget before safety', async () => {
+    const dependencies = createDependencies();
+    const runtime = createArenaGenerationRuntime(dependencies);
+
+    const prepared = await runtime.prepare!({
+      request: new Request('https://example.test/api/arena/generate-stream'),
+      actorKey: 'user:42',
+      generationRequestId: 'request-reference-sanity',
+      payload: {
+        ...payload,
+        materials: Array.from({ length: 257 }, (_, index) => ({ id: `material-${index}` })),
+      },
+    });
+
+    expect(prepared).toBeInstanceOf(Response);
+    expect((prepared as Response).status).toBe(413);
+    expect(await (prepared as Response).json()).toMatchObject({
+      code: 'ARENA_REFERENCE_ITEMS_LIMIT',
+    });
+    expect(dependencies.checkSafety).not.toHaveBeenCalled();
+    expect(dependencies.generate).not.toHaveBeenCalled();
+  });
+
+  it('applies the system prompt budget while allowing the same hosted BYOK prompt', async () => {
+    const oversizedForSystem = '界'.repeat(130_000);
+    const buildPrompt = vi.fn(async () => ({
+      prompt: oversizedForSystem,
+      metadata: {},
+    }));
+    const runtime = createArenaGenerationRuntime(createDependencies({ buildPrompt }));
+    const request = new Request('https://example.test/api/arena/generate-stream');
+    const prepare = (fundingMode: 'hosted-system' | 'hosted-byok') => runtime.prepare!({
+      request,
+      actorKey: 'user:42',
+      generationRequestId: `request-${fundingMode}`,
+      payload: {
+        ...payload,
+        __arenaServerContextV1: { fundingMode },
+      },
+    });
+
+    const system = await prepare('hosted-system');
+    const byok = await prepare('hosted-byok');
+
+    expect(system).toBeInstanceOf(Response);
+    expect((system as Response).status).toBe(413);
+    expect(await (system as Response).json()).toMatchObject({
+      code: 'ARENA_PROMPT_BUDGET_EXCEEDED',
+      estimatedPromptTokens: 130_000,
+      maxEstimatedPromptTokens: 128_000,
+    });
+    expect(byok).not.toBeInstanceOf(Response);
+  });
+
+  it('fails generation when combined reasoning and markdown exceed the shared output byte budget', async () => {
+    const output = 'X'.repeat(4 * 1_024 * 1_024 + 1);
+    const dependencies = createDependencies({
+      generate: vi.fn(async () => ({ body: stream(output), telemetry: {} })),
+    });
+    const runtime = createArenaGenerationRuntime(dependencies);
+    const prepared = await runtime.prepare!({
+      request: new Request('https://example.test/api/arena/generate-stream'),
+      actorKey: 'user:42',
+      generationRequestId: 'request-output-budget',
+      payload,
+    });
+    if (prepared instanceof Response || isArenaGenerationAuditableRejection(prepared)) {
+      throw new Error('unexpected response');
+    }
+
+    const terminal = await runtime.execute({
+      generationId: 'generation-output-budget',
+      generationRequestId: 'request-output-budget',
+      actorKey: 'user:42',
+      producerToken: 'producer-output-budget',
+      payloadHash: 'payload-output-budget',
+      payload: prepared.executionPayload,
+      signal: new AbortController().signal,
+      emit: vi.fn(async () => undefined),
+      claimFinalization: vi.fn(async () => ({ kind: 'claimed' as const })),
+    });
+
+    expect(terminal).toMatchObject({
+      status: 'failed',
+      code: 'ARENA_OUTPUT_BUDGET_EXCEEDED',
+    });
+    expect(dependencies.finalize).toHaveBeenCalledWith(expect.objectContaining({
+      status: 'failed',
+      errorCode: 'ARENA_OUTPUT_BUDGET_EXCEEDED',
+    }));
+  });
+
   it('slow Provider stream emits compatible deltas and finalizes exactly once', async () => {
     const dependencies = createDependencies();
     const runtime = createArenaGenerationRuntime(dependencies);

@@ -4,9 +4,10 @@ import {
   resolveResumeCursor,
 } from './sse';
 import type { SafePublicAiErrorProjection } from '../regular-generation';
+import { ARENA_RESOURCE_BUDGET } from './resource-budget';
 
-export const MAX_ARENA_CREATE_BODY_BYTES = 12 * 1_024 * 1_024;
-export const MAX_ARENA_CANCEL_BODY_BYTES = 1_024;
+export const MAX_ARENA_CREATE_BODY_BYTES = ARENA_RESOURCE_BUDGET.hardBodyBytes;
+export const MAX_ARENA_CANCEL_BODY_BYTES = ARENA_RESOURCE_BUDGET.cancelBodyBytes;
 export const ARENA_PREPARATION_SEED_BYTES = 32;
 export const ARENA_SEEDED_RESERVATION_HASH_VERSION = 'arena-seeded-reservation-v1';
 const ARENA_PREPARATION_SEED_PATTERN = new RegExp(
@@ -913,6 +914,7 @@ export const createArenaGenerationService = (
     let pendingBytes = 0;
     let pendingSnapshotBytes = 0;
     let lastSnapshotAtMs: number | null = null;
+    let runningSnapshotBudgetExceeded = false;
     let flushTimer: ReturnType<typeof setTimeout> | null = null;
     let operation = Promise.resolve();
 
@@ -937,6 +939,7 @@ export const createArenaGenerationService = (
     ): Promise<boolean> => {
       const nextSnapshot = snapshot(status, now, terminalResultRef);
       if (encodedBytes(nextSnapshot) > snapshotMaxBytes) {
+        if (status === 'running') runningSnapshotBudgetExceeded = true;
         observe({ event: 'redis_degraded', generationId, operation: 'snapshot_budget' });
         return false;
       }
@@ -986,7 +989,11 @@ export const createArenaGenerationService = (
         || forceSnapshot
         || nowMs - lastSnapshotAtMs >= snapshotFlushIntervalMs
         || pendingSnapshotBytes >= snapshotFlushBytes;
-      if (snapshotDue && await writeSnapshot('running', now)) {
+      if (
+        !runningSnapshotBudgetExceeded
+        && snapshotDue
+        && await writeSnapshot('running', now)
+      ) {
         lastSnapshotAtMs = nowMs;
         pendingSnapshotBytes = 0;
       }
