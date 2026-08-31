@@ -556,7 +556,19 @@ export type ArenaGenerationOwnedSubscriptionResult =
   | Readonly<{ kind: 'not-found' }>
   | Readonly<{ kind: 'unavailable'; code: string }>;
 
+export type ArenaGenerationOwnedCancelResult =
+  | Readonly<{ kind: 'accepted'; cancelReason: GenerationCancelReason }>
+  | Readonly<{ kind: 'finalizing' }>
+  | Readonly<{ kind: 'terminal'; status: GenerationTerminal['status'] }>
+  | Readonly<{ kind: 'forbidden' }>
+  | Readonly<{ kind: 'not-found' }>;
+
 export interface ArenaGenerationTrustedOwnedService {
+  cancelOwned(_input: {
+    actorKey: string;
+    generationId: string;
+    reason: GenerationCancelReason;
+  }): Promise<ArenaGenerationOwnedCancelResult>;
   readOwnedProjection(_input: {
     actorKey: string;
     generationId: string;
@@ -2563,6 +2575,35 @@ export const createArenaGenerationService = (
   };
 
   const service: ArenaGenerationApplicationService = {
+    async cancelOwned(input): Promise<ArenaGenerationOwnedCancelResult> {
+      const result = await dependencies.store.requestCancel({
+        generationId: input.generationId,
+        actorKey: input.actorKey,
+        reason: input.reason,
+        now: dependencies.now().toISOString(),
+      });
+      if (result.kind === 'accepted') {
+        const producer = activeProducers.get(input.generationId);
+        if (producer && !producer.controller.signal.aborted) {
+          producer.controller.abort(result.cancelReason);
+        }
+        observe({
+          event: 'cancel',
+          generationId: input.generationId,
+          reason: result.cancelReason,
+          outcome: 'accepted',
+        });
+      } else if (result.kind === 'terminal') {
+        observe({
+          event: 'cancel',
+          generationId: input.generationId,
+          reason: input.reason,
+          outcome: 'terminal',
+        });
+      }
+      return result;
+    },
+
     async readOwnedProjection(input): Promise<ArenaGenerationOwnedProjectionResult> {
       const owned = await resolveOwnedStateForActor(
         { actorKey: input.actorKey },

@@ -125,6 +125,7 @@ describe('Arena Proposal Hono authority composition', () => {
         memberships,
         proposals,
         generations: {
+          cancel: vi.fn(async () => { throw new Error('not used'); }),
           start: vi.fn(async () => { throw new Error('not used'); }),
           read: vi.fn(async () => { throw new Error('not used'); }),
         },

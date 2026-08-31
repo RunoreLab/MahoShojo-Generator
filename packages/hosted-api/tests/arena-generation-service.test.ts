@@ -2178,6 +2178,93 @@ describe('Arena generation lifecycle service', () => {
     expect(store.states.get('generation-1')?.terminal?.status).toBe('cancelled');
   });
 
+  test('trusted cancelOwned binds the exact server actor and aborts the active producer once', async () => {
+    const store = new MemoryReplayStore();
+    let abortCount = 0;
+    let resolveAbort!: () => void;
+    const aborted = new Promise<void>((resolve) => { resolveAbort = resolve; });
+    const resolveActor = vi.fn(async () => ({ actorKey: 'pvp-room:room-1' }));
+    const service = createArenaGenerationService({
+      store,
+      executor: {
+        execute: vi.fn(async ({ signal }) => {
+          signal.addEventListener('abort', () => {
+            abortCount += 1;
+            resolveAbort();
+          }, { once: true });
+          await aborted;
+          return { status: 'cancelled' as const, code: 'USER_CANCELLED' };
+        }),
+      },
+      resolveActor,
+      deriveGenerationId: async () => 'generation-1',
+      now: () => new Date('2026-08-25T04:00:00.000Z'),
+      hashPayload: async (payload) => `hash:${JSON.stringify(payload)}`,
+    });
+    const stream = await service.create(createRequest('request-trusted-cancel'));
+    const resolverCallsBeforeCancel = resolveActor.mock.calls.length;
+
+    await expect(service.cancelOwned({
+      actorKey: 'pvp-room:other-room',
+      generationId: 'generation-1',
+      reason: 'user',
+    })).resolves.toEqual({ kind: 'forbidden' });
+    const repeated = await service.cancelOwned({
+      actorKey: 'pvp-room:room-1',
+      generationId: 'generation-1',
+      reason: 'user',
+    });
+    expect(repeated.kind === 'accepted' || repeated.kind === 'terminal').toBe(true);
+    await expect(service.cancelOwned({
+      actorKey: 'pvp-room:room-1',
+      generationId: 'generation-1',
+      reason: 'user',
+    })).resolves.toEqual({ kind: 'accepted', cancelReason: 'user' });
+
+    await aborted;
+    await readResponseText(stream);
+    expect(abortCount).toBe(1);
+    expect(resolveActor).toHaveBeenCalledTimes(resolverCallsBeforeCancel);
+  });
+
+  test('trusted cancelOwned returns terminal state idempotently without touching another owner', async () => {
+    const store = new MemoryReplayStore();
+    store.states.set('generation-terminal', {
+      actorKey: 'pvp-room:room-1',
+      generationId: 'generation-terminal',
+      generationRequestId: 'request-terminal',
+      payloadHash: 'hash:terminal',
+      producerToken: 'producer-terminal',
+      status: 'completed',
+      lastEventId: null,
+      updatedAt: '2026-08-25T04:00:00.000Z',
+      leaseExpiresAt: null,
+      snapshot: null,
+      terminal: {
+        status: 'completed',
+        resultRef: 'r2://report/terminal',
+      },
+      cancelRequested: false,
+      cancelReason: null,
+      preparationSeed: null,
+      preparationVersion: null,
+    });
+    const service = createService(store, {
+      execute: vi.fn(async () => ({ status: 'completed' as const })),
+    });
+
+    await expect(service.cancelOwned({
+      actorKey: 'pvp-room:other-room',
+      generationId: 'generation-terminal',
+      reason: 'user',
+    })).resolves.toEqual({ kind: 'forbidden' });
+    await expect(service.cancelOwned({
+      actorKey: 'pvp-room:room-1',
+      generationId: 'generation-terminal',
+      reason: 'user',
+    })).resolves.toEqual({ kind: 'terminal', status: 'completed' });
+  });
+
   test('content-policy cancel reaches the matching producer with its fixed reason', async () => {
     const store = new MemoryReplayStore();
     let resolveAbort!: () => void;

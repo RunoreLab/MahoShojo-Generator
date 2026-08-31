@@ -480,6 +480,7 @@ describe('Room signed-ticket real Node upgrade', () => {
         roomId: 'room-1',
         accountUserId: 101,
         targetUserId: member.member.userId,
+        expectedRoomEpoch: roomEpoch,
       });
       await expect(within(close, 'kick-close')).resolves.toEqual({
         code: 1008,

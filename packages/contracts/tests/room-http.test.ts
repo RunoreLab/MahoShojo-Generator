@@ -6,9 +6,11 @@ import {
   ARENA_ROOM_WEBSOCKET_PATH,
   ArenaRoomCreateRequestSchema,
   ArenaRoomEpochMutationRequestSchema,
+  ArenaRoomGenerationCancelRequestSchema,
   ArenaRoomHttpErrorResponseSchema,
   ArenaRoomJoinRequestSchema,
   ArenaRoomLeaveResponseSchema,
+  ArenaRoomMemberKickRequestSchema,
   ArenaRoomGenerationStartRequestSchema,
   ArenaRoomGenerationViewResponseSchema,
   ArenaRoomProposalMutationResponseSchema,
@@ -47,7 +49,29 @@ describe('Arena Room HTTP product contract', () => {
       config: '/api/arena/rooms/v1/:roomId/config',
       generations: '/api/arena/rooms/v1/:roomId/generations',
       generation: '/api/arena/rooms/v1/:roomId/generations/:generationId',
+      generationCancel: '/api/arena/rooms/v1/:roomId/generations/:generationId/cancel',
+      memberKick: '/api/arena/rooms/v1/:roomId/members/:targetUserId/kick',
     });
+  });
+
+  it('kick/cancel DTO 只接受 room epoch fence，不接受客户端 authority 镜像', () => {
+    const request = { expectedRoomEpoch: 'epoch-1' };
+    expect(ArenaRoomMemberKickRequestSchema.parse(request)).toEqual(request);
+    expect(ArenaRoomGenerationCancelRequestSchema.parse(request)).toEqual(request);
+    for (const injected of [
+      { role: 'host' },
+      { accountUserId: 101 },
+      { actorUserId: 'host-1' },
+      { targetMembershipState: 'active' },
+      { generationState: 'running' },
+      { actorKey: 'pvp-room:room-1' },
+      { secret: 'secret-canary' },
+    ]) {
+      expect(ArenaRoomMemberKickRequestSchema.safeParse({ ...request, ...injected }).success)
+        .toBe(false);
+      expect(ArenaRoomGenerationCancelRequestSchema.safeParse({ ...request, ...injected }).success)
+        .toBe(false);
+    }
   });
 
   it('配置发布 DTO 只接受 exact authority fence 与 Shared Config', () => {

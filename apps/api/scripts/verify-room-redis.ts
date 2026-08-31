@@ -1282,6 +1282,9 @@ try {
         }),
       };
       const generationPort = {
+        async cancelOwned() {
+          return { kind: 'not-found' as const };
+        },
         async deriveGenerationId() {
           return generationId;
         },

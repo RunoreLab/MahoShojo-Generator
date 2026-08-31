@@ -6,6 +6,7 @@ import {
 } from '@mahoshojo/contracts/arena-room';
 import type {
   ArenaGenerationApplicationService,
+  ArenaGenerationOwnedCancelResult,
   ArenaGenerationOwnedProjectionResult,
   ArenaGenerationSubscription,
   GenerationStatus,
@@ -64,6 +65,9 @@ export type ArenaRoomGenerationSubscriptionResult =
 
 export type ArenaRoomGenerationProjectionResult = ArenaGenerationOwnedProjectionResult;
 
+export type ArenaRoomGenerationCancelResult = ArenaGenerationOwnedCancelResult
+  | Readonly<{ kind: 'unavailable'; code: 'GENERATION_STATE_UNAVAILABLE' }>;
+
 export type ArenaRoomGenerationIdentityInput = Readonly<{
   roomId: string;
   generationRequestId: string;
@@ -94,6 +98,7 @@ export type ArenaRoomGenerationResumeInput = ArenaRoomGenerationOwnedInput & Rea
 }>;
 
 export interface ArenaRoomGenerationPort {
+  cancelOwned(_input: ArenaRoomGenerationOwnedInput): Promise<ArenaRoomGenerationCancelResult>;
   deriveGenerationId(_input: ArenaRoomGenerationIdentityInput): Promise<string>;
   hashSemanticPayload(_input: ArenaRoomGenerationSemanticPayloadInput): Promise<string>;
   startFromHostRequest(_input: ArenaRoomGenerationStartInput): Promise<ArenaRoomGenerationStartResult>;
@@ -106,7 +111,7 @@ export interface ArenaRoomGenerationPort {
 type ArenaRoomGenerationPortDependencies = Readonly<{
   generationService: Pick<
     ArenaGenerationApplicationService,
-    'createSubscription' | 'readOwnedProjection' | 'resumeOwnedSubscription'
+    'cancelOwned' | 'createSubscription' | 'readOwnedProjection' | 'resumeOwnedSubscription'
   >;
   pvpAuthority: Readonly<{
     sign(_input: {
@@ -352,6 +357,18 @@ const projectRejectedResponse = async (response: Response): Promise<
 export const createArenaRoomGenerationPort = (
   dependencies: ArenaRoomGenerationPortDependencies,
 ): ArenaRoomGenerationPort => Object.freeze({
+  async cancelOwned(input: ArenaRoomGenerationOwnedInput): Promise<ArenaRoomGenerationCancelResult> {
+    try {
+      return await dependencies.generationService.cancelOwned({
+        actorKey: actorKeyForRoom(input.roomId),
+        generationId: input.generationId,
+        reason: 'user',
+      });
+    } catch {
+      return { kind: 'unavailable', code: 'GENERATION_STATE_UNAVAILABLE' };
+    }
+  },
+
   deriveGenerationId: (input: ArenaRoomGenerationIdentityInput) => dependencies.deriveGenerationId({
     actorKey: actorKeyForRoom(input.roomId),
     generationRequestId: input.generationRequestId,

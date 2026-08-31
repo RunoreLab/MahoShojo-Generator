@@ -276,6 +276,7 @@ describe('Arena Room generation internal port', () => {
 
   it('fixes actor ownership for deterministic id, read, and resume without exposing diagnostics', async () => {
     const generationService = {
+      cancelOwned: vi.fn(async () => ({ kind: 'accepted' as const, cancelReason: 'user' as const })),
       readOwnedProjection: vi.fn(async () => ({
         kind: 'found' as const,
         projection: {
@@ -334,6 +335,10 @@ describe('Arena Room generation internal port', () => {
     expect(projection).toMatchObject({ kind: 'found', projection: { markdown: 'baseline' } });
     expect(projection).not.toHaveProperty('projection.roomSafeResult');
     expect(JSON.stringify(projection)).not.toMatch(/reasoning|provider/u);
+    await expect(port.cancelOwned({
+      roomId: 'room-1',
+      generationId: 'arena_generation_1',
+    })).resolves.toEqual({ kind: 'accepted', cancelReason: 'user' });
     const resumed = await port.resumeOwnedSubscription({
       roomId: 'room-1',
       generationId: 'arena_generation_1',
@@ -348,6 +353,11 @@ describe('Arena Room generation internal port', () => {
       actorKey: 'pvp-room:room-1',
       generationId: 'arena_generation_1',
     });
+    expect(generationService.cancelOwned).toHaveBeenCalledWith({
+      actorKey: 'pvp-room:room-1',
+      generationId: 'arena_generation_1',
+      reason: 'user',
+    });
     expect(generationService.resumeOwnedSubscription).toHaveBeenCalledWith({
       actorKey: 'pvp-room:room-1',
       generationId: 'arena_generation_1',
@@ -357,6 +367,26 @@ describe('Arena Room generation internal port', () => {
     await expect(readAll(resumed.subscription.events)).resolves.toEqual([
       { id: '5-1', type: 'markdown', chunk: 'resumed' },
     ]);
+  });
+
+  it('maps trusted cancel failures to a stable unavailable result', async () => {
+    const generationService = {
+      cancelOwned: vi.fn(async () => {
+        throw new Error('provider/internal cancel diagnostic');
+      }),
+    } as unknown as ArenaGenerationApplicationService;
+    const port = createArenaRoomGenerationPort({
+      generationService,
+      pvpAuthority: { sign: vi.fn() },
+      internalGuidanceAuthority: { sign: vi.fn() },
+      deriveGenerationId: vi.fn(async () => 'arena_generation_1'),
+      canonicalizeSemanticPayload,
+    });
+
+    await expect(port.cancelOwned({
+      roomId: 'room-1',
+      generationId: 'arena_generation_1',
+    })).resolves.toEqual({ kind: 'unavailable', code: 'GENERATION_STATE_UNAVAILABLE' });
   });
 
   it('strictly projects only the completed durable Room-safe result allowlist', async () => {

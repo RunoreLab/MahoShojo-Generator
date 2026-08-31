@@ -58,6 +58,8 @@ export const ARENA_ROOM_HTTP_ROUTES = Object.freeze({
   proposalWithdraw: `${ARENA_ROOM_HTTP_BASE_PATH}/:roomId/proposals/:proposalId/withdraw`,
   generations: `${ARENA_ROOM_HTTP_BASE_PATH}/:roomId/generations`,
   generation: `${ARENA_ROOM_HTTP_BASE_PATH}/:roomId/generations/:generationId`,
+  generationCancel: `${ARENA_ROOM_HTTP_BASE_PATH}/:roomId/generations/:generationId/cancel`,
+  memberKick: `${ARENA_ROOM_HTTP_BASE_PATH}/:roomId/members/:targetUserId/kick`,
 });
 
 export const MAX_ARENA_ROOM_HTTP_TICKET_BYTES = 4_096;
@@ -89,6 +91,14 @@ export const ArenaRoomTicketRequestSchema = z.object({
 }).strict();
 
 export const ArenaRoomEpochMutationRequestSchema = z.object({
+  expectedRoomEpoch: OpaqueKeySchema,
+}).strict();
+
+export const ArenaRoomMemberKickRequestSchema = z.object({
+  expectedRoomEpoch: OpaqueKeySchema,
+}).strict();
+
+export const ArenaRoomGenerationCancelRequestSchema = z.object({
   expectedRoomEpoch: OpaqueKeySchema,
 }).strict();
 
@@ -385,6 +395,10 @@ export type ArenaRoomCreateRequest = z.infer<typeof ArenaRoomCreateRequestSchema
 export type ArenaRoomJoinRequest = z.infer<typeof ArenaRoomJoinRequestSchema>;
 export type ArenaRoomTicketRequest = z.infer<typeof ArenaRoomTicketRequestSchema>;
 export type ArenaRoomEpochMutationRequest = z.infer<typeof ArenaRoomEpochMutationRequestSchema>;
+export type ArenaRoomMemberKickRequest = z.infer<typeof ArenaRoomMemberKickRequestSchema>;
+export type ArenaRoomGenerationCancelRequest = z.infer<
+  typeof ArenaRoomGenerationCancelRequestSchema
+>;
 export type ArenaRoomPublishConfigRequest = z.infer<
   typeof ArenaRoomPublishConfigRequestSchema
 >;

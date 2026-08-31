@@ -1,5 +1,6 @@
 import type {
   ArenaMultiplayerGenerationSnapshot,
+  ArenaRoomGenerationCancelRequest,
   ArenaRoomGenerationStartRequest,
   ArenaRoomGenerationViewResponse,
 } from '@mahoshojo/contracts/arena-room';
@@ -60,6 +61,12 @@ export class ArenaRoomGenerationError extends Error {
 }
 
 export type ArenaRoomGenerationService = {
+  cancel(input: {
+    readonly roomId: string;
+    readonly generationId: string;
+    readonly accountUserId: number;
+    readonly request: ArenaRoomGenerationCancelRequest;
+  }): Promise<ArenaRoomGenerationViewResponse>;
   start(input: {
     readonly roomId: string;
     readonly accountUserId: number;
@@ -538,6 +545,39 @@ export const createArenaRoomGenerationService = (
   };
 
   return Object.freeze({
+    async cancel(input) {
+      const membership = await resolveMembership(input.roomId, input.accountUserId);
+      const state = membership.actor.getSnapshot();
+      if (!state) return fail('ROOM_GENERATION_NOT_FOUND');
+      const caller = state.memberAuthority.find((entry) => (
+        entry.accountUserId === input.accountUserId
+      ));
+      if (!caller || caller.member.membershipState !== 'active' || caller.member.role !== 'host') {
+        return fail('ROOM_PERMISSION_DENIED');
+      }
+      if (state.snapshot.roomEpoch !== input.request.expectedRoomEpoch) {
+        return fail('ROOM_EPOCH_STALE');
+      }
+      const mirror = state.snapshot.activeGeneration;
+      if (!mirror || mirror.generationId !== input.generationId) {
+        return fail('ROOM_GENERATION_NOT_FOUND');
+      }
+      const terminal = mirror.state === 'completed'
+        || mirror.state === 'failed'
+        || mirror.state === 'cancelled';
+      if (!terminal) {
+        const cancellation = await options.generation.cancelOwned({
+          roomId: membership.roomId,
+          generationId: input.generationId,
+        });
+        if (cancellation.kind === 'unavailable') return fail('ROOM_GENERATION_UNAVAILABLE');
+        if (cancellation.kind === 'forbidden' || cancellation.kind === 'not-found') {
+          return fail('ROOM_GENERATION_NOT_FOUND');
+        }
+      }
+      return readProjection(membership, input.generationId, false);
+    },
+
     async start(input) {
       const membership = await resolveMembership(input.roomId, input.accountUserId);
       if (membership.member.role !== 'host') return fail('ROOM_PERMISSION_DENIED');

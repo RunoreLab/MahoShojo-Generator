@@ -122,6 +122,7 @@ const createDependencies = (
       roomEpoch: session.roomEpoch,
       member: session.member,
     })),
+    kick: vi.fn(async () => session),
     getSession: vi.fn(async () => session),
   } as unknown as ArenaRoomMembershipService,
   directory: {
@@ -160,6 +161,13 @@ const createDependencies = (
     })),
   } satisfies ArenaRoomProposalService,
   generations: {
+    cancel: vi.fn(async () => ({
+      ...generationView,
+      generation: { ...generationView.generation, state: 'cancelled' as const },
+      status: 'cancelled' as const,
+      markdown: '',
+      nextChunkSeq: 0,
+    })),
     start: vi.fn(async () => generationView),
     read: vi.fn(async () => generationView),
   } satisfies ArenaRoomGenerationService,
@@ -994,5 +1002,106 @@ describe('Arena Room HTTP product routes', () => {
       expect(response.status).toBe(status);
       expect(await response.json()).toMatchObject({ code });
     }
+  });
+
+  it('kick/cancel 路由重新认证账号，只接受 strict epoch fence 并返回权威视图', async () => {
+    const dependencies = createDependencies();
+    const app = createHonoApp(config, createRedisStub(), undefined, {
+      arenaRoom: dependencies,
+    });
+    const body = { expectedRoomEpoch: session.roomEpoch };
+    const kick = await app.request(
+      `/api/arena/rooms/v1/${session.roomId}/members/member-2/kick`,
+      createRequest(body),
+    );
+    const cancel = await app.request(
+      `/api/arena/rooms/v1/${session.roomId}/generations/generation-1/cancel`,
+      createRequest(body),
+    );
+
+    expect(kick.status).toBe(200);
+    await expect(kick.json()).resolves.toMatchObject({
+      roomId: session.roomId,
+      self: { role: 'host' },
+    });
+    expect(dependencies.memberships.kick).toHaveBeenCalledWith({
+      roomId: session.roomId,
+      accountUserId: 101,
+      targetUserId: 'member-2',
+      expectedRoomEpoch: session.roomEpoch,
+    });
+    expect(cancel.status).toBe(200);
+    await expect(cancel.json()).resolves.toMatchObject({
+      roomId: session.roomId,
+      status: 'cancelled',
+      generation: { generationId: 'generation-1', state: 'cancelled' },
+    });
+    expect(dependencies.generations.cancel).toHaveBeenCalledWith({
+      roomId: session.roomId,
+      generationId: 'generation-1',
+      accountUserId: 101,
+      request: body,
+    });
+    expect(dependencies.rateLimit).toHaveBeenCalledWith({
+      operation: 'kick',
+      accountUserId: 101,
+      roomId: session.roomId,
+      limit: 30,
+      windowSeconds: 60,
+    });
+    expect(dependencies.rateLimit).toHaveBeenCalledWith({
+      operation: 'generationCancel',
+      accountUserId: 101,
+      roomId: session.roomId,
+      limit: 10,
+      windowSeconds: 60,
+    });
+
+    vi.mocked(dependencies.generations.cancel).mockRejectedValueOnce(
+      new Error('provider-internal-secret-canary'),
+    );
+    const unknown = await app.request(
+      `/api/arena/rooms/v1/${session.roomId}/generations/generation-1/cancel`,
+      createRequest(body),
+    );
+    expect(unknown.status).toBe(503);
+    expect(await unknown.text()).not.toContain('provider-internal-secret-canary');
+  });
+
+  it('kick/cancel 拒绝 authority 镜像、越界 path 与伪造 host，不触发 mutation', async () => {
+    const dependencies = createDependencies();
+    const app = createHonoApp(config, createRedisStub(), undefined, {
+      arenaRoom: dependencies,
+    });
+    const injected = {
+      expectedRoomEpoch: session.roomEpoch,
+      role: 'host',
+      accountUserId: 999,
+      actorKey: `pvp-room:${session.roomId}`,
+      secret: 'secret-canary',
+    };
+    const [kick, cancel, longTarget, longGeneration] = await Promise.all([
+      app.request(
+        `/api/arena/rooms/v1/${session.roomId}/members/member-2/kick`,
+        createRequest(injected),
+      ),
+      app.request(
+        `/api/arena/rooms/v1/${session.roomId}/generations/generation-1/cancel`,
+        createRequest(injected),
+      ),
+      app.request(
+        `/api/arena/rooms/v1/${session.roomId}/members/${'x'.repeat(300)}/kick`,
+        createRequest({ expectedRoomEpoch: session.roomEpoch }),
+      ),
+      app.request(
+        `/api/arena/rooms/v1/${session.roomId}/generations/${'x'.repeat(300)}/cancel`,
+        createRequest({ expectedRoomEpoch: session.roomEpoch }),
+      ),
+    ]);
+
+    expect([kick.status, cancel.status, longTarget.status, longGeneration.status])
+      .toEqual([400, 400, 400, 400]);
+    expect(dependencies.memberships.kick).not.toHaveBeenCalled();
+    expect(dependencies.generations.cancel).not.toHaveBeenCalled();
   });
 });

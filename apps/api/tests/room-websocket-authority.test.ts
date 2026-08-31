@@ -280,6 +280,7 @@ describe('Arena Room ticket -> membership -> presence WSS authority', () => {
       roomId: 'room-1',
       accountUserId: 101,
       targetUserId: harness.member.member.userId,
+      expectedRoomEpoch: harness.host.roomEpoch,
     });
     expect(connected.closes.at(-1)).toEqual({ code: 1008, reason: 'membership-revoked' });
     await expect(harness.authority.authorize(requestForTicket(unconsumed)))
@@ -327,6 +328,7 @@ describe('Arena Room ticket -> membership -> presence WSS authority', () => {
       roomId: 'room-1',
       accountUserId: 101,
       targetUserId: harness.member.member.userId,
+      expectedRoomEpoch: harness.host.roomEpoch,
     });
     releaseFinalResolution();
     await activation;

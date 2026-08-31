@@ -365,6 +365,7 @@ describe('Arena Room membership service', () => {
       roomId: 'room-1',
       accountUserId: 101,
       targetUserId: member.member.userId,
+      expectedRoomEpoch: host.roomEpoch,
     });
     await expect(service.join({
       roomId: 'room-1',
@@ -378,6 +379,58 @@ describe('Arena Room membership service', () => {
       expectedRoomEpoch: host.roomEpoch,
     });
     expect(store.state?.lifecycle).toMatchObject({ status: 'closed' });
+  });
+
+  it('kick 以 server host authority 与 epoch fence 决策，禁止 self/host 并对重复撤销幂等', async () => {
+    const { service } = createHarness();
+    const host = await service.create({
+      accountUserId: 101,
+      displayName: 'Host',
+      sharedConfig: createArenaRoomState().snapshot.sharedConfig,
+    });
+    const member = await service.join({
+      roomId: host.roomId,
+      accountUserId: 202,
+      displayName: 'Member',
+    });
+
+    await expect(service.kick({
+      roomId: host.roomId,
+      accountUserId: 202,
+      targetUserId: host.member.userId,
+      expectedRoomEpoch: 'epoch-stale',
+    })).rejects.toMatchObject({ code: 'ROOM_PERMISSION_DENIED' });
+    await expect(service.kick({
+      roomId: host.roomId,
+      accountUserId: 101,
+      targetUserId: member.member.userId,
+      expectedRoomEpoch: 'epoch-stale',
+    })).rejects.toMatchObject({ code: 'ROOM_EPOCH_STALE' });
+    await expect(service.kick({
+      roomId: host.roomId,
+      accountUserId: 101,
+      targetUserId: host.member.userId,
+      expectedRoomEpoch: host.roomEpoch,
+    })).rejects.toMatchObject({ code: 'ROOM_PERMISSION_DENIED' });
+
+    const kicked = await service.kick({
+      roomId: host.roomId,
+      accountUserId: 101,
+      targetUserId: member.member.userId,
+      expectedRoomEpoch: host.roomEpoch,
+    });
+    const duplicate = await service.kick({
+      roomId: host.roomId,
+      accountUserId: 101,
+      targetUserId: member.member.userId,
+      expectedRoomEpoch: host.roomEpoch,
+    });
+
+    expect(kicked).toMatchObject({
+      member: { userId: host.member.userId, role: 'host', membershipState: 'active' },
+      snapshot: { members: [{ userId: host.member.userId }] },
+    });
+    expect(duplicate).toEqual(kicked);
   });
 
   it('普通 member 显式 leave 不受 socket 数量影响，重复 leave 幂等', async () => {

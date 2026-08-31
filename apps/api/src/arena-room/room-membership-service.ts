@@ -95,7 +95,8 @@ export type ArenaRoomMembershipService = {
     readonly roomId: string;
     readonly accountUserId: number;
     readonly targetUserId: string;
-  }): Promise<ArenaRoomMembershipView>;
+    readonly expectedRoomEpoch: string;
+  }): Promise<ArenaRoomSessionView>;
   resolveActiveByAccount(input: {
     readonly roomId: string;
     readonly accountUserId: number;
@@ -469,14 +470,27 @@ export const createArenaRoomMembershipService = (
     },
 
     async kick(input) {
-      if (!validAccountUserId(input.accountUserId)) return fail('ROOM_INPUT_INVALID');
+      const expectedRoomEpoch = OpaqueKeySchema.safeParse(input.expectedRoomEpoch);
+      const targetUserId = OpaqueKeySchema.safeParse(input.targetUserId);
+      if (
+        !validAccountUserId(input.accountUserId)
+        || !expectedRoomEpoch.success
+        || !targetUserId.success
+      ) return fail('ROOM_INPUT_INVALID');
       const { actor, state } = await recoverOpenActor(input.roomId);
       const caller = activeRecordByAccount(state, input.accountUserId);
-      const target = activeRecordByUser(state, input.targetUserId);
       if (!caller || caller.member.membershipState !== 'active') {
         return fail('ROOM_MEMBERSHIP_NOT_ACTIVE');
       }
+      if (caller.member.role !== 'host') return fail('ROOM_PERMISSION_DENIED');
+      if (state.snapshot.roomEpoch !== expectedRoomEpoch.data) return fail('ROOM_EPOCH_STALE');
+      if (caller.member.userId === targetUserId.data) return fail('ROOM_PERMISSION_DENIED');
+      const target = activeRecordByUser(state, targetUserId.data);
       if (!target) return fail('ROOM_MEMBERSHIP_NOT_ACTIVE');
+      if (target.member.role === 'host') return fail('ROOM_PERMISSION_DENIED');
+      if (target.member.membershipState === 'revoked') {
+        return sessionView(input.roomId, state, caller.member);
+      }
       const result = await actor.execute({
         authority: {
           kind: 'authenticated-user',
@@ -485,16 +499,17 @@ export const createArenaRoomMembershipService = (
         },
         command: {
           type: 'kick-member',
-          expectedRoomEpoch: state.snapshot.roomEpoch,
-          targetUserId: input.targetUserId,
+          expectedRoomEpoch: expectedRoomEpoch.data,
+          targetUserId: targetUserId.data,
           timestamp: now(),
         },
       });
       if (!result.ok) return fail('ROOM_MEMBERSHIP_TRANSITION_DENIED');
-      const current = result.nextState.memberAuthority.find((entry) => (
-        entry.member.userId === input.targetUserId
-      ))?.member ?? target.member;
-      return view(input.roomId, result.nextState.snapshot.roomEpoch, current);
+      const currentCaller = activeRecordByAccount(result.nextState, input.accountUserId);
+      if (!currentCaller || currentCaller.member.membershipState !== 'active') {
+        return fail('ROOM_MEMBERSHIP_NOT_ACTIVE');
+      }
+      return sessionView(input.roomId, result.nextState, currentCaller.member);
     },
 
     async resolveActiveByAccount(input) {

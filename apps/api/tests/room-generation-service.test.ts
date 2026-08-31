@@ -123,6 +123,10 @@ const createHarness = async () => {
     })),
   } satisfies ArenaRoomGenerationMaterializer;
   const generation = {
+    cancelOwned: vi.fn<ArenaRoomGenerationPort['cancelOwned']>(async () => ({
+      kind: 'accepted' as const,
+      cancelReason: 'user' as const,
+    })),
     deriveGenerationId: vi.fn<ArenaRoomGenerationPort['deriveGenerationId']>(
       async () => 'generation-1',
     ),
@@ -858,5 +862,109 @@ describe('Arena Room generation coordinator', () => {
       finalAuthoritative: true,
     });
     expect(harness.generation.readOwnedProjection).toHaveBeenCalledTimes(2);
+  });
+
+  it('cancel 重新确认 host/epoch/current generation，并以 trusted owner cancel 后权威 reconcile', async () => {
+    const harness = await createHarness();
+    const member = await harness.memberships.join({
+      roomId: 'room-1',
+      accountUserId: 202,
+      displayName: 'Member',
+    });
+    await harness.service.start({
+      roomId: 'room-1',
+      accountUserId: 101,
+      request: startRequest(),
+      sourceRequest: sourceRequest(),
+    });
+    vi.mocked(harness.generation.readOwnedProjection).mockResolvedValue({
+      kind: 'found',
+      projection: {
+        generationId: 'generation-1',
+        generationRequestId: 'request-1234',
+        status: 'cancelled',
+        markdown: '# 不得作为终态正文',
+        resumeCursor: null,
+        updatedAt: '2026-08-28T00:03:00.000Z',
+        finalAuthoritative: true,
+        resultAvailable: false,
+        generationRecordId: null,
+        errorCode: null,
+      },
+    });
+
+    await expect(harness.service.cancel({
+      roomId: 'room-1',
+      generationId: 'generation-1',
+      accountUserId: 202,
+      request: { expectedRoomEpoch: member.roomEpoch },
+    })).rejects.toMatchObject({ code: 'ROOM_PERMISSION_DENIED' });
+    await expect(harness.service.cancel({
+      roomId: 'room-1',
+      generationId: 'generation-1',
+      accountUserId: 101,
+      request: { expectedRoomEpoch: 'epoch-stale' },
+    })).rejects.toMatchObject({ code: 'ROOM_EPOCH_STALE' });
+    await expect(harness.service.cancel({
+      roomId: 'room-1',
+      generationId: 'generation-other',
+      accountUserId: 101,
+      request: { expectedRoomEpoch: 'epoch-1' },
+    })).rejects.toMatchObject({ code: 'ROOM_GENERATION_NOT_FOUND' });
+
+    const cancelled = await harness.service.cancel({
+      roomId: 'room-1',
+      generationId: 'generation-1',
+      accountUserId: 101,
+      request: { expectedRoomEpoch: 'epoch-1' },
+    });
+    const duplicate = await harness.service.cancel({
+      roomId: 'room-1',
+      generationId: 'generation-1',
+      accountUserId: 101,
+      request: { expectedRoomEpoch: 'epoch-1' },
+    });
+
+    expect(harness.generation.cancelOwned).toHaveBeenCalledTimes(1);
+    expect(harness.generation.cancelOwned).toHaveBeenCalledWith({
+      roomId: 'room-1',
+      generationId: 'generation-1',
+    });
+    expect(cancelled).toMatchObject({
+      status: 'cancelled',
+      markdown: '',
+      generation: { generationId: 'generation-1', state: 'cancelled' },
+    });
+    expect(duplicate).toEqual(cancelled);
+    harness.finishPublisher();
+  });
+
+  it('cancel 对 trusted owner mismatch/unavailable fail closed', async () => {
+    for (const result of [
+      { kind: 'forbidden' as const },
+      { kind: 'not-found' as const },
+      { kind: 'unavailable' as const, code: 'GENERATION_STATE_UNAVAILABLE' as const },
+    ]) {
+      const harness = await createHarness();
+      await harness.service.start({
+        roomId: 'room-1',
+        accountUserId: 101,
+        request: startRequest(),
+        sourceRequest: sourceRequest(),
+      });
+      vi.mocked(harness.generation.cancelOwned).mockResolvedValueOnce(result);
+
+      await expect(harness.service.cancel({
+        roomId: 'room-1',
+        generationId: 'generation-1',
+        accountUserId: 101,
+        request: { expectedRoomEpoch: 'epoch-1' },
+      })).rejects.toMatchObject({
+        code: result.kind === 'unavailable'
+          ? 'ROOM_GENERATION_UNAVAILABLE'
+          : 'ROOM_GENERATION_NOT_FOUND',
+      });
+      harness.finishPublisher();
+    }
   });
 });
