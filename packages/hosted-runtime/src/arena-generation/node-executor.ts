@@ -41,6 +41,7 @@ import { parseAIProvidersFromEnv } from '../node-runtime/providers';
 import { createNodeRawStreamAiRuntime } from '../node-runtime/raw-stream-ai';
 import { createNodeStructuredAiRuntime } from '../node-runtime/structured-ai';
 import { quickCheckForServer } from '../node-runtime/sensitive-word-filter';
+import { isAiPreDispatchRetrySafe } from '../node-runtime/retry-safety';
 import type { SignatureService } from '../signature';
 import {
   LoadBalanceStrategy,
@@ -738,6 +739,7 @@ export const createNodeArenaGenerationExecutor = (
           } catch (error) {
             lastStructuredError = error;
             if (signal.aborted) throw error;
+            if (!isAiPreDispatchRetrySafe(error)) throw error;
           }
         }
         if (!structuredResult || typeof structuredResult !== 'object') {
@@ -763,6 +765,7 @@ export const createNodeArenaGenerationExecutor = (
         } catch (error) {
           lastError = error;
           if (signal.aborted) throw error;
+          if (!isAiPreDispatchRetrySafe(error)) throw error;
         }
       }
       if (!result) throw lastError ?? new Error('ARENA_PROVIDER_UNAVAILABLE');

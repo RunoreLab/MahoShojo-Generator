@@ -27,6 +27,7 @@ import {
   createAiUpstreamAttemptRuntime,
   classifyAiUpstreamOutcome,
 } from '../ai-upstream';
+import { markAiRetrySafety } from './retry-safety';
 
 // 延迟函数
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -683,7 +684,10 @@ async function generateWithAIUsing<T, I = string>(
         runtimeAttempt?.finish(
           abortRequested ? 'aborted' : classifyAiUpstreamOutcome(error),
         );
-        lastError = projectedError;
+        lastError = markAiRetrySafety(
+          projectedError,
+          providerRequestDispatched ? 'non-replayable' : 'pre-dispatch-safe',
+        );
         log.error(`提供商 ${provider.name} 第 ${attempt + 1} 次失败`, { error: projectedError });
 
         if (NoObjectGeneratedError.isInstance(error)) {
@@ -713,7 +717,7 @@ async function generateWithAIUsing<T, I = string>(
         }
 
         if (providerRequestDispatched) {
-          throw projectedError;
+          throw lastError;
         }
 
         // 如果不是最后一次尝试，等待后再重试
@@ -729,7 +733,10 @@ async function generateWithAIUsing<T, I = string>(
   }
 
   log.error('所有 AI Provider 尝试均失败');
-  throw enhanceErrorWithUpstreamMessage(lastError);
+  throw markAiRetrySafety(
+    enhanceErrorWithUpstreamMessage(lastError),
+    'pre-dispatch-safe',
+  );
 }
 
 export const createNodeStructuredAiRuntime = (dependencies: NodeAiRuntimeDependencies) => ({

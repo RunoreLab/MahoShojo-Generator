@@ -638,9 +638,12 @@ describe('Node Arena generation executor', () => {
     });
   });
 
-  it('uses the strict-ranked model fallback order until a provider attempt succeeds', async () => {
+  it('uses the strict-ranked model fallback order after an explicit pre-dispatch failure', async () => {
     const generateWithStreamAI = vi.fn()
-      .mockRejectedValueOnce(new Error('first model unavailable'))
+      .mockRejectedValueOnce(Object.assign(
+        new Error('first model unavailable before dispatch'),
+        { retrySafety: 'pre-dispatch-safe' as const },
+      ))
       .mockResolvedValueOnce({ response: new Response('body') });
     const executor = createNodeArenaGenerationExecutor({
       env: {},
@@ -686,6 +689,102 @@ describe('Node Arena generation executor', () => {
       'gemma-4-31b-it',
       'gemma-3-27b-it',
     ]);
+  });
+
+  it('does not try a second strict-ranked stream model after an unclassified dispatch failure', async () => {
+    const generateWithStreamAI = vi.fn()
+      .mockRejectedValueOnce(new Error('provider returned 500 after dispatch'))
+      .mockResolvedValueOnce({ response: new Response('must not be used') });
+    const executor = createNodeArenaGenerationExecutor({
+      env: {},
+      finalizer,
+      signatureService,
+      enforceSafety: vi.fn(async () => null),
+      generateWithStreamAI,
+    });
+    const prepared = await executor.prepare!({
+      request: new Request('https://example.test/api/arena/generate-stream'),
+      actorKey: 'anonymous:test',
+      generationRequestId: 'request-no-replay-stream',
+      payload: {
+        ...validPayload,
+        readArenaHistory: false,
+        readCurrentState: false,
+        readNarrativeHistory: false,
+        writeArenaHistory: false,
+        writeCurrentState: false,
+        isDowngrade: true,
+      },
+    });
+    if (prepared instanceof Response || isArenaGenerationAuditableRejection(prepared)) {
+      throw new Error('unexpected response');
+    }
+
+    const terminal = await executor.execute({
+      generationId: 'generation-no-replay-stream',
+      generationRequestId: 'request-no-replay-stream',
+      actorKey: 'anonymous:test',
+      producerToken: 'producer-token-no-replay-stream',
+      payloadHash: 'payload-hash-no-replay-stream',
+      payload: prepared.executionPayload,
+      signal: new AbortController().signal,
+      emit: vi.fn(async () => undefined),
+      claimFinalization: vi.fn(async () => ({ kind: 'claimed' as const })),
+    });
+
+    expect(terminal.status).toBe('failed');
+    expect(generateWithStreamAI).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not try a second strict-ranked structured model after an unclassified dispatch failure', async () => {
+    const generateWithStructuredAI = vi.fn()
+      .mockRejectedValueOnce(new Error('provider returned 500 after dispatch'))
+      .mockResolvedValueOnce({
+        headline: 'must not be used',
+        article: { body: 'must not be used', analysis: 'must not be used' },
+        officialReport: { winner: 'A', conclusion: 'must not be used' },
+        impacts: [],
+      });
+    const executor = createNodeArenaGenerationExecutor({
+      env: {},
+      finalizer,
+      signatureService,
+      enforceSafety: vi.fn(async () => null),
+      generateWithStructuredAI,
+      generateWithStreamAI: vi.fn(),
+    });
+    const prepared = await executor.prepare!({
+      request: new Request('https://example.test/api/arena/generate'),
+      actorKey: 'anonymous:test',
+      generationRequestId: 'request-no-replay-structured',
+      payload: {
+        ...validPayload,
+        readArenaHistory: false,
+        readCurrentState: false,
+        readNarrativeHistory: false,
+        writeArenaHistory: false,
+        writeCurrentState: false,
+        isDowngrade: true,
+      },
+    });
+    if (prepared instanceof Response || isArenaGenerationAuditableRejection(prepared)) {
+      throw new Error('unexpected response');
+    }
+
+    const terminal = await executor.execute({
+      generationId: 'generation-no-replay-structured',
+      generationRequestId: 'request-no-replay-structured',
+      actorKey: 'anonymous:test',
+      producerToken: 'producer-token-no-replay-structured',
+      payloadHash: 'payload-hash-no-replay-structured',
+      payload: prepared.executionPayload,
+      signal: new AbortController().signal,
+      emit: vi.fn(async () => undefined),
+      claimFinalization: vi.fn(async () => ({ kind: 'claimed' as const })),
+    });
+
+    expect(terminal.status).toBe('failed');
+    expect(generateWithStructuredAI).toHaveBeenCalledTimes(1);
   });
 
   it('preserves the public non-strict downgrade model contract', async () => {

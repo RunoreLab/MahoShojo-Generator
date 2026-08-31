@@ -29,6 +29,7 @@ import {
     classifyAiUpstreamOutcome,
     createAiUpstreamAttemptRuntime,
 } from '../ai-upstream';
+import { markAiRetrySafety } from './retry-safety';
 
 export const classifyStreamRuntimeOutcome = classifyAiUpstreamOutcome;
 
@@ -591,7 +592,10 @@ async function generateWithStreamAIUsing(
                     secrets: [provider.apiKey, provider.baseUrl],
                     sensitiveTexts: [generationConfig.prompt],
                 });
-                lastError = enhancedError;
+                lastError = markAiRetrySafety(
+                    enhancedError,
+                    providerRequestDispatched ? 'non-replayable' : 'pre-dispatch-safe',
+                );
                 log.error(`提供商 ${provider.name} 第 ${attempt + 1} 次失败`, { error: enhancedError });
 
                 if (NoObjectGeneratedError.isInstance(error)) {
@@ -610,7 +614,7 @@ async function generateWithStreamAIUsing(
                 }
 
                 if (providerRequestDispatched) {
-                    throw enhancedError;
+                    throw lastError;
                 }
 
                 // 如果不是最后一次尝试，等待后再重试
@@ -626,7 +630,10 @@ async function generateWithStreamAIUsing(
     }
 
     log.error('所有 AI Provider 尝试均失败');
-    throw enhanceErrorWithUpstreamMessage(lastError);
+    throw markAiRetrySafety(
+        enhanceErrorWithUpstreamMessage(lastError),
+        'pre-dispatch-safe',
+    );
 }
 
 export const createNodeRawStreamAiRuntime = (dependencies: NodeAiRuntimeDependencies) => ({
