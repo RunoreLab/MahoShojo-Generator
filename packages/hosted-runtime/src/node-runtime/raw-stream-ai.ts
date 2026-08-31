@@ -30,6 +30,7 @@ import {
     createAiUpstreamAttemptRuntime,
 } from '../ai-upstream';
 import { markAiRetrySafety } from './retry-safety';
+import { createSafePublicAiError } from '@mahoshojo/hosted-api/regular-generation';
 
 export const classifyStreamRuntimeOutcome = classifyAiUpstreamOutcome;
 
@@ -307,6 +308,9 @@ async function generateWithStreamAIUsing(
 	                        ...resolvedSettings.diagnostics,
 	                    });
 	                }
+	                const thinkingDisabledApplied =
+	                    resolvedSettings.thinkingResolution.requestedMode === 'disabled' &&
+	                    resolvedSettings.thinkingResolution.disposition === 'applied';
 
 		                const looksLikeTrivialEmptyOutput = (text: string) => {
 		                    const trimmed = text.trim().replace(/^\uFEFF/, '');
@@ -378,6 +382,7 @@ async function generateWithStreamAIUsing(
 	                    if (chunk.type !== 'reasoning-start' && chunk.type !== 'reasoning-delta' && chunk.type !== 'reasoning-end') {
 	                        return;
 	                    }
+	                    if (thinkingDisabledApplied) return;
 	                    await options?.onReasoningEvent?.(chunk);
 	                };
 
@@ -410,6 +415,8 @@ async function generateWithStreamAIUsing(
 	                });
 	                const prefetchedChunks: RawUnifiedStreamChunk[] = [];
 	                let prefetchedText = '';
+	                let textChars = 0;
+	                let reasoningChars = 0;
 	                let prefetchedDone = false;
 	                let trivialCandidate = '';
 	                let pendingWhitespace = false;
@@ -460,7 +467,10 @@ async function generateWithStreamAIUsing(
 	                    prefetchedChunks.push(mapped);
 	                    if (mapped.type === 'text-delta') {
 	                        prefetchedText += mapped.text;
+                            textChars += mapped.text.replace(/[\s\uFEFF]/gu, '').length;
                             observeTextForEmptyOutput(mapped.text);
+	                    } else if (mapped.type === 'reasoning-delta') {
+	                        reasoningChars += mapped.text.length;
 	                    }
                     runtimeAttempt.recordTtfb();
 	                    // 低延迟优先：拿到首个有效 chunk（文本或 reasoning）后立即交由上层持续消费。
@@ -515,10 +525,36 @@ async function generateWithStreamAIUsing(
                                 const { done, value } = await readWithTimeout(reader);
                                 if (done) {
                                     if (isTrivialAtTerminal()) {
-                                        const emptyOutputError = new Error(EMPTY_OUTPUT_ERROR_MESSAGE);
+                                        const isThinkingDisabledReasoningOnly =
+                                            thinkingDisabledApplied && textChars === 0 && reasoningChars > 0;
+                                        const emptyOutputError = isThinkingDisabledReasoningOnly
+                                            ? createSafePublicAiError({
+                                                code: 'THINKING_DISABLED_REASONING_ONLY',
+                                                message: '模型在已关闭思考的情况下未返回可安全显示的正文，请重试或切换模型。',
+                                            })
+                                            : new Error(EMPTY_OUTPUT_ERROR_MESSAGE);
+                                        if (isThinkingDisabledReasoningOnly) {
+                                            if (options?.telemetry) {
+                                                options.telemetry.reasoning = {
+                                                    status: 'error',
+                                                    source: 'sdk',
+                                                    anomalyFlags: ['thinking_disabled_reasoning_only'],
+                                                    errorMessage: 'THINKING_DISABLED_REASONING_ONLY',
+                                                };
+                                            }
+                                            log.warn('关闭思考后上游仅返回 reasoning 通道', {
+                                                code: 'THINKING_DISABLED_REASONING_ONLY',
+                                                provider: provider.name,
+                                                model: selectedModel,
+                                                reasoningChars,
+                                                textChars,
+                                            });
+                                        }
                                         outcomeRecorder.recordClassification({
                                             outcome: 'failure',
-                                            errorClass: 'empty_output',
+                                            errorClass: isThinkingDisabledReasoningOnly
+                                                ? 'reasoning_only'
+                                                : 'empty_output',
                                         });
                                         runtimeAttempt.finish('error');
                                         controller.error(emptyOutputError);
@@ -534,7 +570,10 @@ async function generateWithStreamAIUsing(
                                 if (!mapped) continue;
                                 runtimeAttempt.recordTtfb();
                                 if (mapped.type === 'text-delta') {
+                                    textChars += mapped.text.replace(/[\s\uFEFF]/gu, '').length;
                                     observeTextForEmptyOutput(mapped.text);
+	                            } else if (mapped.type === 'reasoning-delta') {
+	                                reasoningChars += mapped.text.length;
                                 }
                                 try {
                                     await emitReasoningEvent(mapped);

@@ -54,6 +54,14 @@ export const resolveGenerationSettings = (
   const thinkingOverride = userOverrides?.thinking;
   const thinkingCapability = capabilities.thinking;
   const thinkingMode: 'default' | 'disabled' | 'enabled' = thinkingOverride?.mode ?? 'default';
+  let thinkingDisposition: ResolvedGenerationSettings['thinkingResolution']['disposition'] =
+    thinkingMode === 'default'
+      ? 'default'
+      : thinkingCapability.support === 'unsupported'
+        ? 'unsupported'
+        : thinkingCapability.support === 'unknown'
+          ? 'unknown'
+          : 'applied';
   const deepSeekThinkingActive =
     thinkingCapability.adapter === 'deepseek-thinking-toggle' && thinkingMode !== 'disabled';
 
@@ -112,6 +120,7 @@ export const resolveGenerationSettings = (
     const effort = thinkingOverride?.mode === 'enabled' ? thinkingOverride.effort : undefined;
     if (thinkingMode === 'disabled' && thinkingCapability.canDisable === false) {
       omitted.push({ field: 'thinking', reason: 'cannot-disable' });
+      thinkingDisposition = 'cannot-disable';
     } else {
       let effectiveEffort = effort;
       if (
@@ -130,6 +139,8 @@ export const resolveGenerationSettings = (
       );
       if (options) {
         providerOptions = { ...(providerOptions ?? {}), ...options };
+      } else if (thinkingMode !== 'default') {
+        thinkingDisposition = 'unknown';
       }
     }
   } else {
@@ -139,6 +150,10 @@ export const resolveGenerationSettings = (
   return {
     standardOptions,
     ...(providerOptions ? { providerOptions } : {}),
+    thinkingResolution: {
+      requestedMode: thinkingMode,
+      disposition: thinkingDisposition,
+    },
     diagnostics: { omitted, warnings },
   };
 };

@@ -101,6 +101,10 @@ describe('resolveGenerationSettings - thinking', () => {
     expect(result.providerOptions).toEqual({
       google: { thinkingConfig: { thinkingBudget: 0 } },
     });
+    expect(result.thinkingResolution).toEqual({
+      requestedMode: 'disabled',
+      disposition: 'applied',
+    });
   });
 
   it('DeepSeek：enabled → thinking.type=enabled', () => {
@@ -125,6 +129,23 @@ describe('resolveGenerationSettings - thinking', () => {
       { providerId: 'custom-vendor', modelId: 'custom-model' },
     );
     expect(result.providerOptions).toBeUndefined();
+    expect(result.thinkingResolution).toEqual({
+      requestedMode: 'enabled',
+      disposition: 'unknown',
+    });
+  });
+
+  it('不能关闭 Thinking 的已知模型保留 cannot-disable 解析结果', () => {
+    const result = resolve(
+      { thinking: { mode: 'disabled' } },
+      { providerId: 'google-cloudflare', modelId: 'gemini-3.6-flash' },
+    );
+
+    expect(result.providerOptions).toBeUndefined();
+    expect(result.thinkingResolution).toEqual({
+      requestedMode: 'disabled',
+      disposition: 'cannot-disable',
+    });
   });
 });
 

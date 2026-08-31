@@ -9,6 +9,7 @@ export const PUBLIC_AI_ERROR_CODES = Object.freeze([
   'AI_UPSTREAM_TIMEOUT',
   'AI_REQUEST_ABORTED',
   'AI_PROVIDER_REDIRECT_BLOCKED',
+  'THINKING_DISABLED_REASONING_ONLY',
 ] as const);
 
 export type PublicAiErrorCode = typeof PUBLIC_AI_ERROR_CODES[number];

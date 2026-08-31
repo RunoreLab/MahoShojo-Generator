@@ -18,6 +18,11 @@ export type UserThinkingOverride =
   | { mode: 'disabled' }
   | { mode: 'enabled'; effort?: ThinkingEffort };
 
+export type ThinkingResolution = {
+  requestedMode: UserThinkingOverride['mode'];
+  disposition: 'applied' | 'default' | 'unsupported' | 'unknown' | 'cannot-disable';
+};
+
 /**
  * 用户希望在“生成时如何调用模型”的覆盖项。
  * 只表达意图，是否真正发送由模型能力层（Resolver）决定。
@@ -111,6 +116,8 @@ export interface ResolvedGenerationSettings {
   };
   /** Provider 专属参数（如 google.thinkingConfig、openai.reasoningEffort）。 */
   providerOptions?: GenerationProviderOptions;
+  /** Thinking 用户意图是否确实转换成了可下发的 Provider 参数。 */
+  thinkingResolution: ThinkingResolution;
   /** 诊断信息。 */
   diagnostics: {
     omitted: OmittedField[];

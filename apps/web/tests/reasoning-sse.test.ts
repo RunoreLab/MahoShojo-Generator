@@ -129,6 +129,24 @@ describe('stream/reasoning-sse', () => {
     expect(serialized).toContain('"upstreamStatus":402');
   });
 
+  test('关闭思考但仅收到 reasoning 时保留稳定公共异常码', async () => {
+    const bridge = createReasoningSseBridge('reasoning-only 异常测试');
+    const safeError = createSafePublicAiError({
+      code: 'THINKING_DISABLED_REASONING_ONLY',
+      message: '模型在已关闭思考的情况下未返回可安全显示的正文，请重试或切换模型。',
+    });
+    const response = bridge.toResponse(new Response(new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.error(safeError);
+      },
+    })));
+
+    const serialized = await response.text();
+
+    expect(serialized).toContain('THINKING_DISABLED_REASONING_ONLY');
+    expect(serialized).toContain('未返回可安全显示的正文');
+  });
+
   test('未知流错误继续 generic 且不泄漏消息', async () => {
     const bridge = createReasoningSseBridge('未知流错误投影测试');
     const response = bridge.toResponse(new Response(new ReadableStream<Uint8Array>({
