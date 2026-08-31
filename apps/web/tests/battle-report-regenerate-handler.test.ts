@@ -104,4 +104,58 @@ describe('battle report regenerate handler', () => {
     });
     expect(mocks.getBattleReportGenerationByIdLite).toHaveBeenCalledWith('generation-1');
   });
+
+  it('blocks regeneration when a restored snapshot field contains sensitive text', async () => {
+    mocks.quickCheck.mockImplementation(async (text: string) => ({
+      hasSensitiveWords: text.includes('快照敏感词'),
+    }));
+    mocks.getBattleReportGenerationByIdLite.mockResolvedValue({
+      id: 'generation-sensitive-snapshot',
+      user_id: 7,
+      pvp_match_id: null,
+      output_preview: '# 正常战报\n\n正文没有命中词。',
+      output_has_sensitive_words: 0,
+      generation_mode: 'stream',
+      endpoint: 'api/arena/generate-stream',
+      mode: 'classic',
+      scenario_title: null,
+      headline: null,
+      winner: null,
+      ai_model: null,
+      prompt_tokens: null,
+      completion_tokens: null,
+      total_tokens: null,
+      cached_tokens: null,
+      reasoning_tokens: null,
+      extra_json: JSON.stringify({
+        battleReportRenderSnapshotV1: {
+          version: 1,
+          adjudicationResults: [{
+            depth: 0,
+            description: '快照敏感词',
+            type: 'binary',
+            roll: 42,
+            outcome: '成功',
+            details: '掷骰详情',
+          }],
+        },
+      }),
+    });
+
+    const response = await appRouteHandler(new Request(
+      'https://example.test/api/me/battle-reports/generation-sensitive-snapshot/regenerate',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      },
+    ));
+
+    expect(response.status).toBe(403);
+    expect(mocks.quickCheck).toHaveBeenCalledWith(expect.stringContaining('快照敏感词'));
+    expect(mocks.updateBattleReportGenerationOutputHasSensitiveWords).toHaveBeenCalledWith(
+      'generation-sensitive-snapshot',
+      true,
+    );
+  });
 });

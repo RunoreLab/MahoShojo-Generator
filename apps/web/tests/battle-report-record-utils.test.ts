@@ -14,6 +14,7 @@ vi.mock('@/lib/r2', () => ({
 }));
 
 import {
+  buildBattleReportRenderSnapshotSafetyText,
   buildBattleReportGenerationCombatantInserts,
   extractBattleReportGenerationErrorMessage,
   extractBattleReportRenderSnapshotV1,
@@ -52,6 +53,33 @@ describe('battle-report-record-utils', () => {
       battleReportRenderSnapshotV1: { ...snapshot, apiKey: 'secret' },
     }))).toBeNull();
     expect(extractBattleReportRenderSnapshotV1('{bad json')).toBeNull();
+  });
+
+  test('buildBattleReportRenderSnapshotSafetyText: 覆盖所有可回显文本字段', () => {
+    const text = buildBattleReportRenderSnapshotSafetyText({
+      version: 1,
+      reporterInfo: { name: '记者名', publication: '刊物名' },
+      userGuidance: '用户引导',
+      characterGuidances: [{ characterName: '角色名', guidance: '角色引导' }],
+      adjudicationResults: [{
+        depth: 0,
+        description: '判定描述',
+        type: 'binary',
+        roll: 42,
+        outcome: '判定结果',
+        details: '判定详情',
+      }],
+      narrativeHistoryReadCount: 3,
+    });
+
+    expect(text).toContain('记者名');
+    expect(text).toContain('刊物名');
+    expect(text).toContain('用户引导');
+    expect(text).toContain('角色名');
+    expect(text).toContain('角色引导');
+    expect(text).toContain('判定描述');
+    expect(text).toContain('判定结果');
+    expect(text).toContain('判定详情');
   });
 
   test('buildBattleReportGenerationCombatantInserts: 为预设角色生成标准写库行', () => {

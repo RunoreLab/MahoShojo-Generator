@@ -474,6 +474,41 @@ describe('Node Arena generation executor', () => {
     expect(inspectedText).not.toContain('STREAM_CHARACTER_TAIL');
   });
 
+  it('includes manual adjudication event drafts in the authoritative input safety check', async () => {
+    let inspectedText = '';
+    const executor = createNodeArenaGenerationExecutor({
+      env: {},
+      finalizer,
+      signatureService,
+      enforceSafety: vi.fn(async ({ combinedText }) => {
+        inspectedText = combinedText;
+        return null;
+      }),
+      generateWithStreamAI: vi.fn(),
+    });
+
+    const prepared = await executor.prepare!({
+      request: new Request('https://example.test/api/arena/generate-stream'),
+      actorKey: 'anonymous:test',
+      generationRequestId: 'request-adjudication-safety',
+      payload: {
+        ...validPayload,
+        adjudicationEvents: [{
+          id: 'event-1',
+          description: 'ADJUDICATION_SAFETY_MARKER',
+          type: 'binary',
+          probability: 50,
+        }],
+      },
+    });
+
+    if (
+      prepared instanceof Response
+      || isArenaGenerationAuditableRejection(prepared)
+    ) throw new Error('unexpected response');
+    expect(inspectedText).toContain('ADJUDICATION_SAFETY_MARKER');
+  });
+
   it('fail-closes invalid custom provider before reservation/provider dispatch', async () => {
     const generateWithStreamAI = vi.fn();
     const executor = createNodeArenaGenerationExecutor({

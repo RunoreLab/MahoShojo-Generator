@@ -163,7 +163,7 @@
     {
       "id": "me/battle-reports/[generationId]/regenerate",
       "files": [
-        { "path": "apps/web/app/api/me/battle-reports/[generationId]/regenerate/handler.ts", "sha256": "189b88330bd4ef3e22c89b00d03aab6347feb8fb93d324eeca63c136151b15ca" },
+        { "path": "apps/web/app/api/me/battle-reports/[generationId]/regenerate/handler.ts", "sha256": "c2aa97a841141c868d280f16d4c578c157af7b723d05522c3c740727e8dae423" },
         { "path": "apps/web/app/api/me/battle-reports/[generationId]/regenerate/route.ts", "sha256": "9406f3e016d9a1a161d1dd28f9e003412ce75bc71cefd3510036e734a3f0c436" }
       ]
     }

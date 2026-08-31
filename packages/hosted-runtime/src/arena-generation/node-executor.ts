@@ -409,6 +409,13 @@ const buildSafetyText = async (
       isNative: false,
     });
   }
+  if (Array.isArray(payload.adjudicationEvents)) {
+    inputs.push({
+      type: 'userGuidance',
+      content: serializeForSafety(payload.adjudicationEvents),
+      isNative: false,
+    });
+  }
   if (Array.isArray(payload.questionnaires)) {
     inputs.push({
       type: 'userGuidance',

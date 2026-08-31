@@ -3,6 +3,7 @@ import {
   updateBattleReportGenerationOutputHasSensitiveWords,
 } from '@/lib/database/battle-report-generations';
 import {
+  buildBattleReportRenderSnapshotSafetyText,
   extractBattleReportRenderSnapshotV1,
   extractBattleReportGenerationErrorMessage,
   loadBattleReportGenerationOutputText,
@@ -58,11 +59,15 @@ async function handler(req: Request): Promise<Response> {
     return json({ error: '该战报未保存可重生正文，可能已失败或已被清理。' }, { status: 409 });
   }
   const flaggedSensitive = record.output_has_sensitive_words;
+  const renderSnapshot = extractBattleReportRenderSnapshotV1(record.extra_json);
 
   const hasPreviewText = Boolean(outputPreview && outputPreview.trim());
   let contentBlocked = flaggedSensitive === 1;
   if (hasPreviewText) {
-    const sensitiveCheck = await quickCheck(outputPreview);
+    const snapshotSafetyText = buildBattleReportRenderSnapshotSafetyText(renderSnapshot);
+    const sensitiveCheck = await quickCheck(
+      snapshotSafetyText ? `${outputPreview}\n${snapshotSafetyText}` : outputPreview,
+    );
     contentBlocked = Boolean(sensitiveCheck.hasSensitiveWords);
     await updateBattleReportGenerationOutputHasSensitiveWords(record.id, contentBlocked);
   }
@@ -90,7 +95,7 @@ async function handler(req: Request): Promise<Response> {
     cachedTokens: record.cached_tokens,
     reasoningTokens: record.reasoning_tokens,
     userGuidance,
-    renderSnapshot: extractBattleReportRenderSnapshotV1(record.extra_json),
+    renderSnapshot,
   });
 
   return json({

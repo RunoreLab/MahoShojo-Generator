@@ -38,6 +38,25 @@ export function extractBattleReportRenderSnapshotV1(
   }
 }
 
+export function buildBattleReportRenderSnapshotSafetyText(
+  snapshot: BattleReportRenderSnapshotV1 | null | undefined,
+): string {
+  if (!snapshot) return '';
+
+  const text: string[] = [];
+  if (snapshot.reporterInfo) {
+    text.push(snapshot.reporterInfo.name, snapshot.reporterInfo.publication);
+  }
+  if (snapshot.userGuidance) text.push(snapshot.userGuidance);
+  for (const guidance of snapshot.characterGuidances ?? []) {
+    text.push(guidance.characterName, guidance.guidance);
+  }
+  for (const result of snapshot.adjudicationResults ?? []) {
+    text.push(result.description, result.outcome, result.details);
+  }
+  return text.filter(Boolean).join('\n');
+}
+
 export function buildBattleReportGenerationCombatantInserts(
   generationId: string,
   combatants: unknown,
