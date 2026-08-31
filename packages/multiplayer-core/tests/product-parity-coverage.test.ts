@@ -173,13 +173,13 @@ describe('GMR-10P Arena 产品一致性覆盖矩阵', () => {
     expect(matrix.arenaUi.teamDisplayName.gap).toMatch(/Proposal.*rename/u);
     for (const key of ['combatants', 'scenario', 'auxScenarios', 'materials'] as const) {
       expect(matrix.generationRequest[key]).toMatchObject({
-        classification: 'deferred-with-reason',
+        classification: 'shared/proposable',
         single: 'derived',
-        roomHost: 'deferred',
-        roomProposal: 'forbidden',
+        roomHost: 'materialized',
+        roomProposal: 'derived',
       });
-      expect(matrix.generationRequest[key].reason).toMatch(/payload|正文|素材/u);
-      expect(matrix.generationRequest[key].gap).toMatch(/GMR-10P-B.*frozen Shared Config/u);
+      expect(matrix.generationRequest[key].reason).toMatch(/materialize/u);
+      expect(matrix.generationRequest[key].gap).toBeUndefined();
     }
   });
 

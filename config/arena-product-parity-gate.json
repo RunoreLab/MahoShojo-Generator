@@ -6,12 +6,12 @@
   "productionReadiness": "BLOCKED",
   "slices": {
     "GMR-10P-A": "DONE",
-    "GMR-10P-B": "IN_PROGRESS",
-    "GMR-10P-C": "BLOCKED",
+    "GMR-10P-B": "DONE",
+    "GMR-10P-C": "READY",
     "GMR-10P-D": "BLOCKED",
     "GMR-10P-E": "BLOCKED",
     "GMR-10P-F": "BLOCKED",
     "GMR-10P-G": "BLOCKED"
   },
-  "blockedReason": "GMR-10P-B 至 GMR-10P-G 尚未完成；production activation 必须保持 fail closed。"
+  "blockedReason": "GMR-10P-C 至 GMR-10P-G 尚未完成；production activation 必须保持 fail closed。"
 }

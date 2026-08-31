@@ -69,18 +69,17 @@ const derivedSharedProposable = (
   testIds: ['GMR10P-A-SHARED-PROPOSAL-COVERAGE'],
 });
 
-const deferredMaterialization = (
+const materializedSharedPayload = (
   reason: string,
   contractChangeTypes: readonly string[],
 ): ArenaProductParityCoverageEntry => coverageEntry({
-  classification: 'deferred-with-reason',
+  classification: 'shared/proposable',
   single: 'derived',
-  roomHost: 'deferred',
-  roomProposal: 'forbidden',
+  roomHost: 'materialized',
+  roomProposal: 'derived',
   contractChangeTypes,
-  testIds: ['GMR10P-A-EXPLICIT-GAPS'],
+  testIds: ['GMR10P-A-SHARED-PROPOSAL-COVERAGE'],
   reason,
-  gap: 'GMR-10P-B 必须从 frozen Shared Config + exact canonical/request-scoped payload materialize，不能信任 host local 同名字段。',
 });
 
 const classified = (
@@ -122,8 +121,8 @@ export const ARENA_PRODUCT_PARITY_COVERAGE = {
     }, {
       reason: '幂等 generation identity 由发起端/runtime 使用，不属于 Room Shared Config。',
     }),
-    combatants: deferredMaterialization(
-      '该字段是完整角色 payload 容器；可提案的角色 ref/guidance/team 语义另由 Shared Config 分类。',
+    combatants: materializedSharedPayload(
+      '完整角色 payload 已由 frozen Shared Config 的 ref/stub 与 exact canonical/request-scoped payload materialize。',
       ['addCombatant', 'removeCombatant', 'setCharacterGuidance', 'assignTeam'],
     ),
     mode: derivedSharedProposable(['setBattleMode']),
@@ -133,16 +132,16 @@ export const ARENA_PRODUCT_PARITY_COVERAGE = {
       reason: '排位开关影响生成，但当前被定义为 host-only Arena control，尚未进入 Shared Config。',
     }),
     userGuidance: derivedSharedProposable(['setUserGuidance']),
-    scenario: deferredMaterialization(
-      '该字段是展开后的情景正文；member 只可提案 exact ref，正文由 server canonical materializer 或 host-local map 提供。',
+    scenario: materializedSharedPayload(
+      '展开后的情景正文由 frozen exact ref 或 request-scoped host-local map materialize。',
       ['setScenario'],
     ),
-    auxScenarios: deferredMaterialization(
-      '该字段是展开后的辅助情景正文；member 只可提案 exact ref，正文由 server canonical materializer 或 host-local map 提供。',
+    auxScenarios: materializedSharedPayload(
+      '展开后的辅助情景正文由 frozen exact ref 或 request-scoped host-local map materialize。',
       ['addAuxScenario', 'removeAuxScenario'],
     ),
-    materials: deferredMaterialization(
-      '该字段包含展开后的素材正文；member 只可提案 exact ref，正文由 server canonical materializer 或 host-local map 提供。',
+    materials: materializedSharedPayload(
+      '展开后的素材正文由 frozen exact ref 或 request-scoped host-local map materialize。',
       ['addMaterial', 'removeMaterial'],
     ),
     scenarioTitle: derivedSharedProposable(['setScenario']),
@@ -193,7 +192,7 @@ export const ARENA_PRODUCT_PARITY_COVERAGE = {
     questionnaires: classified('deferred-with-reason', {
       single: 'derived', roomHost: 'deferred', roomProposal: 'forbidden',
     }, {
-      reason: 'questionnaire lore 当前携带展开内容，需在 GMR-10P-B 设计 exact-ref materialization。',
+      reason: 'questionnaire lore 当前携带展开内容；进入 Shared Config/Proposal 前仍需新增可验证 exact-ref materialization contract。',
     }),
     customProvider: classified('host-runtime-only', {
       single: 'editable', roomHost: 'host-only', roomProposal: 'forbidden',
