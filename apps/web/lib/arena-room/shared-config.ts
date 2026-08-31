@@ -169,7 +169,7 @@ const normalizeCombatant = async (
   }
   const displayName = displayNameFrom(combatant.data, combatant.filename);
   return {
-    key: localKey('character', combatant.filename || displayName, index),
+    key: text(combatant.arenaRoomKey) || localKey('character', combatant.filename || displayName, index),
     displayName,
     type: combatant.type,
     source: 'host-local',
@@ -194,7 +194,7 @@ const normalizeScenario = async (
   }
   const displayName = displayNameFrom(scenario.content, scenario.fileName ?? '本地情景');
   return {
-    key: localKey('scenario', scenario.fileName ?? displayName, index),
+    key: text(scenario.arenaRoomKey) || localKey('scenario', scenario.fileName ?? displayName, index),
     displayName,
     type: 'scenario',
     source: 'host-local',
@@ -218,7 +218,7 @@ const normalizeMaterial = async (
   }
   const displayName = text(material.name) || material.fileName || '本地素材';
   return {
-    key: localKey('material', material.id || displayName, index),
+    key: text(material.arenaRoomKey) || localKey('material', material.id || displayName, index),
     displayName,
     type: 'material',
     source: 'host-local',

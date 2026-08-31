@@ -12,6 +12,8 @@ export interface ArenaMaterialState {
   name: string;
   content: unknown;
   fileName: string | null;
+  /** 从多人 authority materialize 后保留原始 opaque resource key。 */
+  arenaRoomKey?: string;
   sourceDataCardId?: string;
   sourceDataCardUpdatedAt?: string;
   sourceKind: ArenaMaterialSourceKind;

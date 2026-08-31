@@ -185,6 +185,7 @@ describe('Arena Proposal panel real React interactions', () => {
     await act(async () => root.render(
       <ArenaProposalPanel state={stateFor(host, [proposal])} controller={controller} workspace={createWorkspace()} />,
     ));
+    await act(async () => button('待处理提案 (1)').click());
     const checkboxes = [...container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')];
     expect(checkboxes).toHaveLength(2);
     await act(async () => checkboxes[1]!.click());
@@ -243,12 +244,18 @@ describe('Arena Proposal panel real React interactions', () => {
         changeId: 'language',
         type: 'setSelectedLanguage',
         value: 'en-US',
-        expectedBase: { kind: 'value', value: 'zh-CN' },
+        expectedBase: { kind: 'value', value: 'ja-JP' },
       }],
     };
     await act(async () => root.render(
       <ArenaProposalPanel state={stateFor(host, [expanded])} controller={controller} workspace={createWorkspace()} />,
     ));
+    await act(async () => button('待处理提案 (1)').click());
+    expect(container.textContent).toContain('成员');
+    expect(container.textContent).toContain('BASE：');
+    expect(container.textContent).toContain('CURRENT：');
+    expect(container.textContent).toContain('PROPOSED：');
+    expect(container.textContent).toContain('same-target conflict');
     expect(container.textContent).toContain('新增队伍 B 队');
     expect(container.textContent).toContain('移除队伍 team:a');
     expect(container.textContent).toContain('队伍 team:c 改名为 C 队新名');

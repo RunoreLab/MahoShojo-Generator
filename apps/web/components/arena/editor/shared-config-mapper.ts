@@ -133,7 +133,9 @@ const localCombatantKey = (combatant: Combatant, index: number): string => {
   if ('data' in combatant) {
     if (text(combatant.sourceDataCardId)) return `data-card:${combatant.sourceDataCardId}`;
     if (combatant.isPreset) return `preset:${combatant.filename}`;
-    return text(combatant.adjudicationSourceKey) || `local-combatant:${index}`;
+    return text(combatant.arenaRoomKey)
+      || text(combatant.adjudicationSourceKey)
+      || `local-combatant:${index}`;
   }
   return `random:${combatant.id}`;
 };
@@ -150,7 +152,7 @@ const localScenarioView = (
   return Object.freeze({
     key: sourceDataCardId
       ? `data-card:${sourceDataCardId}`
-      : text(scenario.adjudicationSourceKey) || fallbackKey,
+      : text(scenario.arenaRoomKey) || text(scenario.adjudicationSourceKey) || fallbackKey,
     name: text(scenario.sourceDataCardName)
       || recordName(scenario.content)
       || text(scenario.fileName)
@@ -173,7 +175,9 @@ const localMaterialView = (
     ? 'data-card' as const
     : material.isNative ? 'preset' as const : 'host-local' as const;
   return Object.freeze({
-    key: sourceDataCardId ? `data-card:${sourceDataCardId}` : `local-material:${material.id || index}`,
+    key: sourceDataCardId
+      ? `data-card:${sourceDataCardId}`
+      : text(material.arenaRoomKey) || `local-material:${material.id || index}`,
     name: text(material.name) || '未命名素材',
     source,
     access: 'full' as const,

@@ -10,7 +10,9 @@ import {
 import type {
   ArenaProposal,
   ArenaProposalChange,
+  ArenaRoomSharedConfig,
 } from '@mahoshojo/contracts/arena-room';
+import { detectProposalConflicts } from '@mahoshojo/multiplayer-core';
 
 import type {
   ArenaRoomController,
@@ -57,6 +59,16 @@ const expectedBaseSummary = (change: ArenaProposalChange): string => {
   return typeof expected.value === 'string'
     ? `预期基线：${safeText(expected.value || '空值')}`
     : '预期基线：已绑定安全值';
+};
+
+const safeJsonSummary = (value: unknown): string => {
+  if (value === undefined) return '无';
+  if (typeof value === 'string') return safeText(value || '空值', 120);
+  try {
+    return safeText(JSON.stringify(value), 160);
+  } catch {
+    return '不可序列化值';
+  }
 };
 
 export const arenaProposalChangeSummary = (change: ArenaProposalChange): string => {
@@ -108,12 +120,16 @@ const HostProposalCard = ({
   proposal,
   revision,
   roomEpoch,
+  currentConfig,
+  authorDisplayName,
   controller,
   disabled,
 }: {
   readonly proposal: ArenaProposal;
   readonly revision: number;
   readonly roomEpoch: string;
+  readonly currentConfig: ArenaRoomSharedConfig;
+  readonly authorDisplayName: string;
   readonly controller: ProposalController;
   readonly disabled: boolean;
 }) => {
@@ -122,6 +138,10 @@ const HostProposalCard = ({
   );
   const actionLock = useRef(false);
   const validationError = arenaProposalSelectionError(proposal.changes, selected);
+  const conflictByChangeId = new Map(
+    detectProposalConflicts(currentConfig, proposal.changes)
+      .map((conflict) => [conflict.changeId, conflict] as const),
+  );
 
   const resolve = async (resolution: 'accept-selected' | 'reject'): Promise<void> => {
     if (actionLock.current || disabled) return;
@@ -141,17 +161,20 @@ const HostProposalCard = ({
 
   return (
     <li className="rounded-xl border border-gray-200 bg-white/80 p-3 dark:border-gray-700 dark:bg-gray-900/70">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="font-mono text-xs text-gray-700 dark:text-gray-300">
-          {proposal.proposalId}
-        </p>
-        <span className="text-xs text-gray-600 dark:text-gray-400">
-          基线 revision {proposal.baseRevision}
-        </span>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <p className="text-sm font-semibold text-gray-950 dark:text-gray-100">{authorDisplayName}</p>
+          <p className="mt-1 text-xs text-gray-600 dark:text-gray-400">
+            提交于 {proposal.createdAt} · BASE revision {proposal.baseRevision}
+          </p>
+        </div>
+        <p className="font-mono text-xs text-gray-500 dark:text-gray-400">{proposal.proposalId}</p>
       </div>
       <fieldset className="mt-3 space-y-2">
         <legend className="text-sm font-semibold text-gray-950 dark:text-gray-100">逐项审阅</legend>
-        {proposal.changes.map((change) => (
+        {proposal.changes.map((change) => {
+          const conflict = conflictByChangeId.get(change.changeId);
+          return (
           <label key={change.changeId} className="flex items-start gap-2 rounded-lg border border-gray-200 p-2 text-sm dark:border-gray-700">
             <input
               type="checkbox"
@@ -167,9 +190,24 @@ const HostProposalCard = ({
             <span>
               <span className="font-medium text-gray-950 dark:text-gray-100">{arenaProposalChangeSummary(change)}</span>
               <ArenaProposalSelectionDetails change={change} />
+              <span className="mt-1 block text-xs text-gray-600 dark:text-gray-400">
+                BASE：{safeJsonSummary(change.expectedBase)}
+              </span>
+              <span className="block text-xs text-gray-600 dark:text-gray-400">
+                CURRENT：{conflict ? safeJsonSummary(conflict.current) : '与 BASE 一致'}
+              </span>
+              <span className="block text-xs text-gray-600 dark:text-gray-400">
+                PROPOSED：{arenaProposalChangeSummary(change)}
+              </span>
+              {conflict ? (
+                <span className="mt-1 block font-medium text-red-700 dark:text-red-300">
+                  same-target conflict · {conflict.code} · {conflict.target}
+                </span>
+              ) : null}
             </span>
           </label>
-        ))}
+          );
+        })}
       </fieldset>
       <div aria-live="polite" className="mt-2 min-h-5 text-xs text-red-700 dark:text-red-300">
         {validationError ?? ''}
@@ -204,16 +242,21 @@ const HostProposalInbox = ({
   readonly controller: ProposalController;
 }) => {
   const session = state.session;
+  const [open, setOpen] = useState(false);
   if (!session) return null;
   const disabled = state.proposalOperation !== null || state.proposalResultUnknown;
+  const proposals = session.snapshot.proposals;
   return (
-    <section aria-labelledby="arena-proposal-inbox-heading" className="rounded-xl border border-gray-200 bg-white/50 p-4 dark:border-gray-700 dark:bg-gray-950/20">
-      <h3 id="arena-proposal-inbox-heading" className="text-sm font-semibold text-gray-950 dark:text-gray-100">
-        Proposal 审阅箱
-      </h3>
-      <p className="mt-1 text-xs text-gray-600 dark:text-gray-400">
-        客户端选择只用于表达意图；服务器会再次校验 revision、引用权限与 expectedBase。
-      </p>
+    <section aria-labelledby="arena-proposal-inbox-heading" className="rounded-xl border border-gray-200 bg-white/50 p-3 dark:border-gray-700 dark:bg-gray-950/20">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h3 id="arena-proposal-inbox-heading" className="text-sm font-semibold text-gray-950 dark:text-gray-100">待处理提案</h3>
+          <p className="mt-1 text-xs text-gray-600 dark:text-gray-400">审阅在 Modal 中完成，不占用 Arena 主编辑区。</p>
+        </div>
+        <button type="button" className={secondaryButtonClass} onClick={() => setOpen(true)}>
+          待处理提案 ({proposals.length})
+        </button>
+      </div>
       {state.proposalResultUnknown ? (
         <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
           <p>上次审阅结果未知，已冻结重复处理。</p>
@@ -222,22 +265,39 @@ const HostProposalInbox = ({
           </button>
         </div>
       ) : null}
-      {session.snapshot.proposals.length === 0 ? (
-        <p className="mt-3 text-sm text-gray-600 dark:text-gray-400">暂无待处理 Proposal</p>
-      ) : (
-        <ul className="mt-3 space-y-3" aria-label="待审阅 Proposal">
-          {session.snapshot.proposals.map((proposal) => (
-            <HostProposalCard
-              key={`${proposal.proposalId}:${proposal.updatedAt ?? proposal.createdAt}`}
-              proposal={proposal}
-              revision={session.snapshot.revision}
-              roomEpoch={session.roomEpoch}
-              controller={controller}
-              disabled={disabled}
-            />
-          ))}
-        </ul>
-      )}
+      {open ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 sm:p-6">
+          <section role="dialog" aria-modal="true" aria-labelledby="arena-proposal-review-heading" className="flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl dark:bg-gray-950">
+            <div className="flex items-start justify-between gap-3 border-b p-4 dark:border-gray-800">
+              <div>
+                <h3 id="arena-proposal-review-heading" className="font-semibold text-gray-950 dark:text-gray-100">Proposal Review</h3>
+                <p className="mt-1 text-xs text-gray-600 dark:text-gray-400">服务器仍会校验 revision、引用权限、expectedBase、依赖与原子组。</p>
+              </div>
+              <button type="button" className={secondaryButtonClass} onClick={() => setOpen(false)}>关闭</button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto p-4">
+              {proposals.length === 0 ? (
+                <p className="text-sm text-gray-600 dark:text-gray-400">暂无待处理 Proposal</p>
+              ) : (
+                <ul className="space-y-3" aria-label="待审阅 Proposal">
+                  {proposals.map((proposal) => (
+                    <HostProposalCard
+                      key={`${proposal.proposalId}:${proposal.updatedAt ?? proposal.createdAt}`}
+                      proposal={proposal}
+                      revision={session.snapshot.revision}
+                      roomEpoch={session.roomEpoch}
+                      currentConfig={session.snapshot.sharedConfig}
+                      authorDisplayName={session.snapshot.members.find((member) => member.userId === proposal.authorUserId)?.displayName ?? '未知成员'}
+                      controller={controller}
+                      disabled={disabled}
+                    />
+                  ))}
+                </ul>
+              )}
+            </div>
+          </section>
+        </div>
+      ) : null}
     </section>
   );
 };
@@ -252,13 +312,13 @@ const MemberProposalEntry = ({
   readonly workspace: ArenaRoomProposalWorkspace;
 }) => {
   const session = state.session;
-  if (!session) return null;
   const editor = workspace.editor;
   const editorState = useSyncExternalStore(
     editor?.store.subscribe ?? (() => () => undefined),
     editor?.store.getState ?? (() => null),
     editor?.store.getInitialState ?? (() => null),
   );
+  if (!session) return null;
   const disabled = state.proposalOperation !== null || state.proposalResultUnknown;
 
   return (

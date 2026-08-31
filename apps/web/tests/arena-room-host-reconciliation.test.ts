@@ -178,4 +178,34 @@ describe('Arena room host reconciliation', () => {
     })).rejects.toThrow(/版本/u);
     expect(useBattleStore.getState().combatants).toBe(before.combatants);
   });
+
+  it('显式同步房间时用 published host-local payload 放弃本地正文冲突', async () => {
+    const published = await buildArenaRoomHostWorkspaceBundleFromBattleState(
+      useBattleStore.getState(),
+    );
+    useBattleStore.setState((state) => ({
+      combatants: state.combatants.map((combatant) => 'data' in combatant
+        ? { ...combatant, data: { name: '未发布的本地修改' } }
+        : combatant),
+    }));
+    const dirtyBundle = await buildArenaRoomHostWorkspaceBundleFromBattleState(
+      useBattleStore.getState(),
+    );
+
+    await applyArenaRoomAuthorityToBattleStore(published.sharedConfig, {
+      currentBundle: dirtyBundle,
+      hostLocalPayloads: published.hostLocalPayloads,
+      loadPublicCard: async () => {
+        throw new Error('不应读取 online card');
+      },
+    });
+
+    const restored = useBattleStore.getState();
+    expect(restored.combatants[0]).toMatchObject({
+      data: { name: '房主本地角色' },
+      arenaRoomKey: published.sharedConfig.combatants[0]!.key,
+    });
+    const rebuilt = await buildArenaRoomHostWorkspaceBundleFromBattleState(restored);
+    expect(rebuilt.sharedConfig).toEqual(published.sharedConfig);
+  });
 });

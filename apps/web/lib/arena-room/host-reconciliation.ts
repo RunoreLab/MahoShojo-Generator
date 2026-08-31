@@ -1,5 +1,6 @@
 import {
   ArenaRoomSharedConfigSchema,
+  type ArenaRoomHostLocalPayload,
   type ArenaRoomSharedConfig,
 } from '@mahoshojo/contracts/arena-room';
 
@@ -38,6 +39,7 @@ export type ArenaRoomPublicCardLoader = (id: string) => Promise<unknown>;
 export type ArenaRoomAuthorityMaterializationOptions = Readonly<{
   currentBundle: ArenaRoomHostWorkspaceBundle;
   loadPublicCard: ArenaRoomPublicCardLoader;
+  hostLocalPayloads?: readonly ArenaRoomHostLocalPayload[];
 }>;
 
 const cloneJson = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
@@ -186,6 +188,9 @@ export const applyArenaRoomAuthorityToBattleStore = async (
   const currentCombatants = existingByNormalizedKey(currentConfig.combatants, current.combatants);
   const currentAuxScenarios = existingByNormalizedKey(currentConfig.auxScenarios, current.auxScenarios);
   const currentMaterials = existingByNormalizedKey(currentConfig.materials, current.materials);
+  const hostLocalPayloads = new Map(
+    (options.hostLocalPayloads ?? []).map((entry) => [entry.key, entry] as const),
+  );
 
   const usedTeamIds = new Set(current.teams.map((team) => team.id));
   const currentTeams = existingByNormalizedKey(currentConfig.teams, current.teams);
@@ -215,6 +220,19 @@ export const applyArenaRoomAuthorityToBattleStore = async (
       combatant = cloneJson(existing.value);
     } else if ('ref' in entry && entry.key.startsWith('data-card:')) {
       combatant = await publicCombatant(entry, options.loadPublicCard);
+    } else if (!('ref' in entry)) {
+      const localPayload = hostLocalPayloads.get(entry.key);
+      if (!localPayload || localPayload.kind !== 'character') {
+        throw new Error(`房间角色 ${entry.key} 缺少可确定 materialize 的本地来源`);
+      }
+      combatant = {
+        type: entry.type,
+        data: cloneJson(localPayload.payload),
+        filename: `${entry.displayName}.json`,
+        isValid: true,
+        isPreset: false,
+        arenaRoomKey: entry.key,
+      };
     } else {
       throw new Error(`房间角色 ${entry.key} 缺少可确定 materialize 的本地来源`);
     }
@@ -235,6 +253,17 @@ export const applyArenaRoomAuthorityToBattleStore = async (
       scenario = cloneJson(existing.value);
     } else if ('ref' in config.scenario && config.scenario.key.startsWith('data-card:')) {
       scenario = await publicScenario(config.scenario, options.loadPublicCard);
+    } else if (!('ref' in config.scenario)) {
+      const localPayload = hostLocalPayloads.get(config.scenario.key);
+      if (!localPayload || localPayload.kind !== 'scenario' || !isRecord(localPayload.payload)) {
+        throw new Error(`房间主情景 ${config.scenario.key} 缺少可确定 materialize 的本地来源`);
+      }
+      scenario = {
+        content: cloneJson(localPayload.payload),
+        fileName: `${config.scenario.displayName}.json`,
+        isNative: false,
+        arenaRoomKey: config.scenario.key,
+      };
     } else {
       throw new Error(`房间主情景 ${config.scenario.key} 缺少可确定 materialize 的本地来源`);
     }
@@ -242,11 +271,22 @@ export const applyArenaRoomAuthorityToBattleStore = async (
 
   const auxScenarios: AuxiliaryScenarioState[] = await Promise.all(config.auxScenarios.map(async (entry) => {
     const existing = currentAuxScenarios.get(entry.key);
-    const resolved = existing && sameSource(entry, existing.normalized)
-      ? cloneJson(existing.value)
-      : 'ref' in entry && entry.key.startsWith('data-card:')
-        ? await publicScenario(entry, options.loadPublicCard)
-        : null;
+    let resolved: ScenarioState | AuxiliaryScenarioState | null = null;
+    if (existing && sameSource(entry, existing.normalized)) {
+      resolved = cloneJson(existing.value);
+    } else if ('ref' in entry && entry.key.startsWith('data-card:')) {
+      resolved = await publicScenario(entry, options.loadPublicCard);
+    } else if (!('ref' in entry)) {
+      const localPayload = hostLocalPayloads.get(entry.key);
+      if (localPayload?.kind === 'scenario' && isRecord(localPayload.payload)) {
+        resolved = {
+          content: cloneJson(localPayload.payload),
+          fileName: `${entry.displayName}.json`,
+          isNative: false,
+          arenaRoomKey: entry.key,
+        };
+      }
+    }
     if (!resolved?.content) {
       throw new Error(`房间辅助情景 ${entry.key} 缺少可确定 materialize 的本地来源`);
     }
@@ -264,6 +304,20 @@ export const applyArenaRoomAuthorityToBattleStore = async (
     if (existing && sameSource(entry, existing.normalized)) return cloneJson(existing.value);
     if ('ref' in entry && entry.key.startsWith('data-card:')) {
       return publicMaterial(entry, options.loadPublicCard);
+    }
+    if (!('ref' in entry)) {
+      const localPayload = hostLocalPayloads.get(entry.key);
+      if (localPayload?.kind === 'material') {
+        return {
+          ...buildArenaMaterialState({
+            payload: localPayload.payload,
+            id: `room-material-${entry.key}`,
+            sourceDataCardName: entry.displayName,
+            isNative: false,
+          }),
+          arenaRoomKey: entry.key,
+        };
+      }
     }
     throw new Error(`房间素材 ${entry.key} 缺少可确定 materialize 的本地来源`);
   }));

@@ -11,6 +11,7 @@ import {
 import { arenaRoomHostWorkspaceAuthorityFromSession } from '@/lib/arena-room/host-workspace';
 import { useBattleStore } from '@/components/arena/stores/useBattleStore';
 import { ArenaProposalPanel } from './ArenaProposalPanel';
+import { ArenaHostConfigPanel } from './ArenaHostConfigPanel';
 import { useArenaRoom, useArenaRoomContext } from './useArenaRoom';
 
 export type ArenaMultiplayerPanelProps = {
@@ -25,6 +26,7 @@ export type ArenaMultiplayerPanelViewProps = {
   readonly state: ArenaRoomControllerState;
   readonly authLoading: boolean;
   readonly actionPending?: boolean;
+  readonly hostConfigContent?: ReactNode;
   readonly proposalContent?: ReactNode;
   readonly roomTitle: string;
   readonly visibility: RoomDirectoryVisibility;
@@ -384,6 +386,8 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
             </ul>
           </div>
 
+          {props.hostConfigContent}
+
           {props.proposalContent}
 
           <ArenaRoomGenerationReport state={state} />
@@ -452,7 +456,13 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
 }
 
 export function ArenaMultiplayerPanel(props: ArenaMultiplayerPanelProps) {
-  const { controller, state, hostWorkspace, proposalWorkspace } = useArenaRoom({
+  const {
+    controller,
+    state,
+    hostWorkspace,
+    hostReconciliation,
+    proposalWorkspace,
+  } = useArenaRoom({
     enabled: props.enabled,
     authenticated: props.isAuthenticated && !props.authLoading,
     origin: props.origin,
@@ -463,6 +473,7 @@ export function ArenaMultiplayerPanel(props: ArenaMultiplayerPanelProps) {
       controller={controller}
       state={state}
       hostWorkspace={hostWorkspace}
+      hostReconciliation={hostReconciliation}
       proposalWorkspace={proposalWorkspace}
     />
   );
@@ -472,6 +483,7 @@ type ArenaMultiplayerPanelRuntimeProps = ArenaMultiplayerPanelProps & {
   readonly controller: ReturnType<typeof useArenaRoom>['controller'];
   readonly state: ReturnType<typeof useArenaRoom>['state'];
   readonly hostWorkspace: ReturnType<typeof useArenaRoom>['hostWorkspace'];
+  readonly hostReconciliation: ReturnType<typeof useArenaRoom>['hostReconciliation'];
   readonly proposalWorkspace: ReturnType<typeof useArenaRoom>['proposalWorkspace'];
 };
 
@@ -479,6 +491,7 @@ function ArenaMultiplayerPanelRuntime({
   controller,
   state,
   hostWorkspace,
+  hostReconciliation,
   proposalWorkspace,
   ...props
 }: ArenaMultiplayerPanelRuntimeProps) {
@@ -521,6 +534,12 @@ function ArenaMultiplayerPanelRuntime({
       state={viewState}
       authLoading={props.authLoading}
       actionPending={preparingCreate}
+      hostConfigContent={(
+        <ArenaHostConfigPanel
+          controllerState={viewState}
+          reconciliation={hostReconciliation}
+        />
+      )}
       proposalContent={(
         <ArenaProposalPanel
           state={viewState}
@@ -569,6 +588,7 @@ export function ArenaMultiplayerContextPanel(props: ArenaMultiplayerPanelProps) 
       controller={runtime.controller}
       state={runtime.state}
       hostWorkspace={runtime.hostWorkspace}
+      hostReconciliation={runtime.hostReconciliation}
       proposalWorkspace={runtime.proposalWorkspace}
     />
   );

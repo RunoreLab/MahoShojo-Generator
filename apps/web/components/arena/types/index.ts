@@ -82,6 +82,8 @@ export interface CombatantData {
   isNonStandard?: boolean;
   wasCorrected?: boolean;
   teamId?: number;
+  /** 从多人 authority materialize 后保留原始 opaque resource key。 */
+  arenaRoomKey?: string;
   adjudicationSourceKey?: string;
   /** 用户对该角色的行动/想法引导（可选，最多 100 字）。 */
   characterGuidance?: string;
@@ -110,6 +112,8 @@ export interface ScenarioState {
   content: Record<string, unknown> | null;
   fileName: string | null;
   isNative: boolean;
+  /** 从多人 authority materialize 后保留原始 opaque resource key。 */
+  arenaRoomKey?: string;
   adjudicationSourceKey?: string;
   sourceDataCardId?: string;
   sourceDataCardDescription?: string;

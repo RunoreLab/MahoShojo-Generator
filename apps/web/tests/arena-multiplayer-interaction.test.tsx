@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ArenaRoomSharedConfig } from '@mahoshojo/contracts/arena-room';
 import type { ArenaRoomControllerState } from '@/lib/arena-room/controller';
+import type { ArenaRoomHostReconciliationState } from '@/components/arena/multiplayer/useArenaRoomHostReconciliation';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -21,11 +22,15 @@ const mocks = vi.hoisted(() => ({
   submitProposal: vi.fn(async () => undefined),
   resolveProposal: vi.fn(async () => undefined),
   withdrawProposal: vi.fn(async () => undefined),
+  publishConfig: vi.fn(async () => undefined),
+  publishLocal: vi.fn(async () => undefined),
+  syncRoom: vi.fn(async () => undefined),
   reconnect: vi.fn(),
   reset: vi.fn(),
   syncProposalWorkspace: vi.fn(),
   discardProposalWorkspace: vi.fn(),
   state: null as ArenaRoomControllerState | null,
+  reconciliationState: { kind: 'idle' } as ArenaRoomHostReconciliationState,
 }));
 
 vi.mock('@/components/arena/multiplayer/useArenaRoom', () => ({
@@ -40,6 +45,7 @@ vi.mock('@/components/arena/multiplayer/useArenaRoom', () => ({
       submitProposal: mocks.submitProposal,
       resolveProposal: mocks.resolveProposal,
       withdrawProposal: mocks.withdrawProposal,
+      publishConfig: mocks.publishConfig,
       getSnapshot: () => mocks.state,
       reconnect: mocks.reconnect,
       reset: mocks.reset,
@@ -51,6 +57,12 @@ vi.mock('@/components/arena/multiplayer/useArenaRoom', () => ({
       startFromRoom: vi.fn(),
       retainFor: vi.fn(),
       clear: vi.fn(),
+    },
+    hostReconciliation: {
+      state: mocks.reconciliationState,
+      publishLocal: mocks.publishLocal,
+      syncRoom: mocks.syncRoom,
+      dismiss: vi.fn(),
     },
     proposalWorkspace: {
       editor: null,
@@ -154,6 +166,7 @@ const flush = async (): Promise<void> => {
 
 beforeEach(async () => {
   mocks.state = readyState;
+  mocks.reconciliationState = { kind: 'idle' };
   mocks.buildWorkspaceBundle.mockResolvedValue({
     sharedConfig,
     hostLocalPayloads: [],
@@ -313,5 +326,56 @@ describe('Arena multiplayer panel real React interactions', () => {
     await act(async () => root.render(<ArenaMultiplayerPanel {...props} />));
     await act(async () => button('重新确认配置发布').click());
     expect(mocks.reconnect).toHaveBeenCalledOnce();
+  });
+
+  it('host 通过显式动作发布本地 working copy，冲突时提供三种 reconciliation 入口', async () => {
+    const host = {
+      userId: 'host-1',
+      role: 'host' as const,
+      displayName: '房主',
+      membershipState: 'active' as const,
+    };
+    mocks.state = {
+      ...readyState,
+      phase: 'connected',
+      session: {
+        protocolVersion: 1,
+        roomId: 'room-1',
+        roomEpoch: 'epoch-1',
+        self: host,
+        snapshot: {
+          protocolVersion: 1,
+          schemaVersion: 1,
+          roomId: 'room-1',
+          roomEpoch: 'epoch-1',
+          revision: 2,
+          controlSeq: 0,
+          sharedConfig,
+          members: [host],
+          proposals: [],
+          activeGeneration: null,
+        },
+      },
+    };
+    await act(async () => root.render(<ArenaMultiplayerPanel {...props} />));
+    await act(async () => button('更新房间配置').click());
+    expect(mocks.publishLocal).toHaveBeenCalledOnce();
+
+    mocks.reconciliationState = {
+      kind: 'conflicted',
+      revision: 3,
+      reasons: ['shared-config'],
+      roomConfig: { ...sharedConfig, battleMode: 'daily' },
+      localConfig: sharedConfig,
+    };
+    await act(async () => root.render(<ArenaMultiplayerPanel {...props} />));
+    expect(container.textContent).toContain('房间配置已更新，但本地 Arena 同时有未发布修改');
+    await act(async () => button('查看差异').click());
+    expect(container.querySelector('[role="dialog"][aria-modal="true"]')).not.toBeNull();
+    await act(async () => button('关闭').click());
+    await act(async () => button('同步房间配置').click());
+    await act(async () => button('保留本地修改并重新发布').click());
+    expect(mocks.syncRoom).toHaveBeenCalledOnce();
+    expect(mocks.publishLocal).toHaveBeenCalledTimes(2);
   });
 });

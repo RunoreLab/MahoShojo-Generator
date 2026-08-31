@@ -247,6 +247,9 @@ describe('Arena room Proposal workspace', () => {
     await act(async () => narrativeRead.click());
 
     await act(async () => button('预览提案').click());
+    expect(container.textContent).toContain('BASE revision 7');
+    expect(container.textContent).toContain('PROPOSED：');
+    expect(container.textContent).toContain('将提交');
     expect(container.textContent).toContain('新增角色');
     expect(container.textContent).toContain('新增队伍');
     expect(container.textContent).toContain('主情景改为 scenario-public-main');

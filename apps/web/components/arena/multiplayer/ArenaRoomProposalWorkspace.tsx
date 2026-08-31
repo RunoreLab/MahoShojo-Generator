@@ -61,6 +61,7 @@ const proposalId = (): string => {
 };
 
 const ProposalPreviewDialog = ({
+  baselineRevision,
   changes,
   selected,
   disabled,
@@ -68,6 +69,7 @@ const ProposalPreviewDialog = ({
   onClose,
   onSubmit,
 }: {
+  readonly baselineRevision: number;
   readonly changes: readonly ArenaProposalChange[];
   readonly selected: ReadonlySet<string>;
   readonly disabled: boolean;
@@ -87,7 +89,7 @@ const ProposalPreviewDialog = ({
         <div className="flex items-center justify-between gap-3 border-b p-4 dark:border-gray-800">
           <div>
             <h3 id="arena-proposal-preview-heading" className="font-semibold text-gray-950 dark:text-gray-100">预览提案</h3>
-            <p className="mt-1 text-xs text-gray-600 dark:text-gray-400">逐项检查 typed diff；依赖与原子组会再次校验。</p>
+            <p className="mt-1 text-xs text-gray-600 dark:text-gray-400">BASE revision {baselineRevision} · 逐项检查 typed diff；依赖与原子组会再次校验。</p>
           </div>
           <button type="button" className={secondaryButtonClass} onClick={onClose}>关闭</button>
         </div>
@@ -109,12 +111,15 @@ const ProposalPreviewDialog = ({
               <span>
                 <span className="font-medium text-gray-950 dark:text-gray-100">{arenaProposalChangeSummary(change)}</span>
                 <ArenaProposalSelectionDetails change={change} />
+                <span className="mt-1 block text-xs text-gray-600 dark:text-gray-400">BASE：{JSON.stringify(change.expectedBase)}</span>
+                <span className="block text-xs text-gray-600 dark:text-gray-400">PROPOSED：{arenaProposalChangeSummary(change)}</span>
               </span>
             </label>
           ))}
         </fieldset>
         <div className="border-t p-4 dark:border-gray-800">
-          <div aria-live="polite" className="min-h-5 text-xs text-red-700 dark:text-red-300">{validationError ?? ''}</div>
+          <div className="text-xs text-gray-600 dark:text-gray-400">将提交 {selected.size} / {changes.length} 项变更</div>
+          <div aria-live="polite" className="mt-1 min-h-5 text-xs text-red-700 dark:text-red-300">{validationError ?? ''}</div>
           <button
             type="button"
             className={`${primaryButtonClass} mt-2`}
@@ -430,6 +435,7 @@ const ProposalWorkspaceInner = ({
 
       {preview ? (
         <ProposalPreviewDialog
+          baselineRevision={snapshot.baselineRevision ?? 0}
           changes={preview}
           selected={selected}
           disabled={disabled}

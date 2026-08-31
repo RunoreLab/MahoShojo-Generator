@@ -27,6 +27,7 @@ import {
   type ArenaRoomController,
   type ArenaRoomSocket,
 } from '@/lib/arena-room/controller';
+import { useArenaRoomHostReconciliation } from './useArenaRoomHostReconciliation';
 
 type UseArenaRoomOptions = {
   readonly enabled: boolean;
@@ -133,7 +134,19 @@ export const useArenaRoom = (options: UseArenaRoomOptions) => {
     },
   }), [controller, proposalEditor]);
 
-  return { controller, state, hostWorkspace, proposalWorkspace };
+  const hostReconciliation = useArenaRoomHostReconciliation({
+    controller,
+    controllerState: state,
+    hostWorkspace,
+  });
+
+  return {
+    controller,
+    state,
+    hostWorkspace,
+    hostReconciliation,
+    proposalWorkspace,
+  };
 };
 
 export type ArenaRoomRuntime = ReturnType<typeof useArenaRoom>;
