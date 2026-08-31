@@ -36,6 +36,15 @@ const canonicalAutomatedEvidence = Object.freeze({
     'apps/web/tests/arena-generation-prompt-parity.test.ts',
     'apps/web/tests/ai-structured-output-boundary.test.ts',
   ],
+  'arena-resource-budget-and-single-parse': [
+    'packages/hosted-api/tests/arena-generation-resource-budget.test.ts',
+    'packages/hosted-api/tests/arena-generation-service.test.ts',
+    'packages/hosted-runtime/tests/arena-generation-runtime.test.ts',
+    'packages/hosted-runtime/tests/arena-generation-node-executor.test.ts',
+    'packages/hosted-runtime/tests/arena-companion-service.test.ts',
+    'packages/hosted-runtime/tests/arena-companion-session.test.ts',
+    'packages/hosted-runtime/tests/arena-generation-actor.test.ts',
+  ],
   'provider-public-error-and-secret-canaries': [
     'apps/web/tests/ai-error-extraction.test.ts',
     'packages/hosted-api/tests/public-ai-error.test.ts',
@@ -220,6 +229,32 @@ if (plainStreamDecision?.decision !== 'plain-stream-retired') {
     const authority = readFileSync(authorityPath, 'utf8');
     if (!authority.includes('plain-stream') || !authority.includes('MUST 单调迁移为 `sse`')) {
       fail('plain-stream authority 未固定 sse 单调迁移要求');
+    }
+  }
+}
+
+const arenaResourceBudgetDecision = (contracts.intentionalChanges ?? []).find(
+  (entry) => entry.id === 'arena-generation-resource-budget',
+);
+const expectedArenaResourceBudgetDecision = 'hosted-system-final-prompt-budget-is-128k-estimated-tokens-hosted-byok-is-1m-while-12mib-body-32-combatant-100-adjudication-256-reference-item-and-4mib-output-budgets-remain-common';
+if (arenaResourceBudgetDecision?.decision !== expectedArenaResourceBudgetDecision) {
+  fail('Arena resource budget 必须明确区分 system/BYOK Prompt 预算并保留共同基础设施硬边界');
+} else {
+  const authorityPath = path.join(repositoryRoot, arenaResourceBudgetDecision.authority ?? '');
+  if (!existsSync(authorityPath)) {
+    fail(`Arena resource budget accepted authority 不存在：${arenaResourceBudgetDecision.authority ?? '<missing>'}`);
+  } else {
+    const authority = readFileSync(authorityPath, 'utf8');
+    for (const requiredText of [
+      '`hosted-system` 为 `128,000`',
+      '`hosted-byok`\n   为 `1,000,000`',
+      '合计最多 `256` 项',
+      '合计最多 `4 MiB`',
+      'typed parsed-payload seam',
+    ]) {
+      if (!authority.includes(requiredText)) {
+        fail(`Arena resource budget authority 缺少规范文本：${requiredText}`);
+      }
     }
   }
 }

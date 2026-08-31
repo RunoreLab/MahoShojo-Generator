@@ -11,6 +11,7 @@
       "family-level-success-and-error-projection",
       "exited-source-hash-and-basic-error-wire",
       "arena-service-client-replay-cancel-seams",
+      "arena-resource-budget-and-single-parse",
       "provider-public-error-and-secret-canaries",
       "infrastructure-copy-map",
       "client-preflight-routing-and-zero-replay"
@@ -37,6 +38,15 @@
         "packages/hosted-runtime/tests/structured-ai-compatibility.test.ts",
         "apps/web/tests/arena-generation-prompt-parity.test.ts",
         "apps/web/tests/ai-structured-output-boundary.test.ts"
+      ],
+      "arena-resource-budget-and-single-parse": [
+        "packages/hosted-api/tests/arena-generation-resource-budget.test.ts",
+        "packages/hosted-api/tests/arena-generation-service.test.ts",
+        "packages/hosted-runtime/tests/arena-generation-runtime.test.ts",
+        "packages/hosted-runtime/tests/arena-generation-node-executor.test.ts",
+        "packages/hosted-runtime/tests/arena-companion-service.test.ts",
+        "packages/hosted-runtime/tests/arena-companion-session.test.ts",
+        "packages/hosted-runtime/tests/arena-generation-actor.test.ts"
       ],
       "provider-public-error-and-secret-canaries": [
         "apps/web/tests/ai-error-extraction.test.ts",
@@ -191,8 +201,13 @@
       "authority": "docs/specs/2026-08-25_111500_Hosted长生成断网可恢复流实施规格.md"
     },
     {
-      "id": "arena-resource-and-native-authority",
-      "decision": "server-enforces-bounded-request-collections-and-reverifies-native-signatures-instead-of-trusting-client-isNative",
+      "id": "arena-native-authority",
+      "decision": "server-reverifies-native-signatures-instead-of-trusting-client-isNative",
+      "authority": "docs/specs/2026-08-31_063734_Arena双生成契约回归修正规格.md"
+    },
+    {
+      "id": "arena-generation-resource-budget",
+      "decision": "hosted-system-final-prompt-budget-is-128k-estimated-tokens-hosted-byok-is-1m-while-12mib-body-32-combatant-100-adjudication-256-reference-item-and-4mib-output-budgets-remain-common",
       "authority": "docs/specs/2026-08-31_063734_Arena双生成契约回归修正规格.md"
     },
     {
@@ -243,9 +258,13 @@
     "packages/hosted-api/tests/public-ai-error.test.ts",
     "packages/hosted-api/tests/regular-generation.test.ts",
     "packages/hosted-api/tests/arena-generation-service.test.ts",
+    "packages/hosted-api/tests/arena-generation-resource-budget.test.ts",
+    "packages/hosted-runtime/tests/arena-generation-runtime.test.ts",
     "packages/hosted-runtime/tests/arena-generation-prompt.test.ts",
     "packages/hosted-runtime/tests/arena-generation-node-executor.test.ts",
     "packages/hosted-runtime/tests/arena-companion-service.test.ts",
+    "packages/hosted-runtime/tests/arena-companion-session.test.ts",
+    "packages/hosted-runtime/tests/arena-generation-actor.test.ts",
     "packages/hosted-runtime/tests/structured-ai-compatibility.test.ts",
     "apps/web/tests/arena-generation-prompt-parity.test.ts",
     "apps/web/tests/ai-structured-output-boundary.test.ts",
