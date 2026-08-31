@@ -44,6 +44,7 @@ import { ArenaPageLinks } from './shared/ArenaPageLinks';
 import { ArenaRankingLinks } from './shared/ArenaRankingLinks';
 import { ArenaRoomProvider } from './multiplayer/useArenaRoom';
 import { ArenaEditorWorkspaceBoundary } from './multiplayer/ArenaRoomProposalWorkspace';
+import { ArenaRoomDialog } from './multiplayer/ArenaRoomDialog';
 import {
   countArenaSelectedReferenceItems,
   getArenaReferenceRemainingCapacity,
@@ -416,35 +417,23 @@ export function ArenaPage({ multiplayer }: ArenaPageProps = {}) {
         </div>
       </div>
 
-      {showImageModal && savedImageUrl && (
-        <div
-          className="fixed inset-0 bg-black flex items-center justify-center z-50"
-          style={{ backgroundColor: 'rgba(0, 0, 0, 0.7)', paddingLeft: '2rem', paddingRight: '2rem' }}
+      {showImageModal && savedImageUrl ? (
+        <ArenaRoomDialog
+          open
+          titleId="arena-saved-image-dialog-heading"
+          title="保存战报图片"
+          description="长按图片保存到相册。"
+          widthClassName="max-w-lg"
+          onClose={() => {
+            setShowImageModal(false);
+            setSavedImageUrl(null);
+          }}
         >
-          <div className="bg-white rounded-lg max-w-lg w-full max-h-[80vh] overflow-auto relative">
-            <div className="sticky top-0 z-10 bg-white/95 backdrop-blur flex justify-end p-2">
-              <button
-                onClick={() => {
-                  setShowImageModal(false);
-                  setSavedImageUrl(null);
-                }}
-                aria-label="关闭"
-                className="text-gray-500 hover:text-gray-700 text-3xl leading-none"
-              >
-                ×
-              </button>
-            </div>
-            <div className="px-4 pb-4">
-              <p className="text-center text-sm text-gray-600" style={{ marginTop: '0.5rem' }}>
-                📱 长按图片保存到相册
-              </p>
-              <div className="items-center flex flex-col" style={{ padding: '0.5rem' }}>
-                <img src={savedImageUrl} alt="魔法少女战斗报告" className="w-full h-auto rounded-lg mx-auto" />
-              </div>
-            </div>
+          <div aria-label="战报图片" className="items-center flex flex-col p-2">
+            <img src={savedImageUrl} alt="魔法少女战斗报告" className="w-full h-auto rounded-lg mx-auto" />
           </div>
-        </div>
-      )}
+        </ArenaRoomDialog>
+      ) : null}
 
       <BattleDataModal
         isOpen={showBattleDataModal}

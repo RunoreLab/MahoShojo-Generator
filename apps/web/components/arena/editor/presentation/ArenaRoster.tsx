@@ -76,7 +76,7 @@ export function ArenaRosterRow({
               type="button"
               onClick={() => canMove?.(index, index - 1)}
               disabled={disabled || !canMove || index === 0}
-              className="w-6 h-6 text-xs rounded border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+              className="min-h-10 min-w-10 text-xs rounded border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
               aria-label={`上移 ${item.displayName}`}
               title="上移"
             >
@@ -86,7 +86,7 @@ export function ArenaRosterRow({
               type="button"
               onClick={() => canMove?.(index, index + 1)}
               disabled={disabled || !canMove || index === total - 1}
-              className="w-6 h-6 text-xs rounded border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+              className="min-h-10 min-w-10 text-xs rounded border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
               aria-label={`下移 ${item.displayName}`}
               title="下移"
             >
@@ -119,7 +119,7 @@ export function ArenaRosterRow({
                 <button
                   type="button"
                   onClick={onToggleGuidance}
-                  className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200"
+                  className="min-h-10 px-3 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200"
                   disabled={disabled}
                   title="为该角色输入行动/想法引导（最多100字）"
                 >
@@ -130,7 +130,7 @@ export function ArenaRosterRow({
                 <button
                   type="button"
                   onClick={onShowDetails}
-                  className="text-xs bg-gray-200 text-gray-700 px-2 py-1 rounded hover:bg-gray-300"
+                  className="min-h-10 px-3 text-xs bg-gray-200 text-gray-700 rounded hover:bg-gray-300"
                   disabled={disabled}
                 >
                   详情
@@ -141,7 +141,7 @@ export function ArenaRosterRow({
                   type="button"
                   onClick={onDownload}
                   disabled={disabled}
-                  className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200"
+                  className="min-h-10 px-3 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200"
                 >
                   下载
                 </button>
@@ -151,7 +151,7 @@ export function ArenaRosterRow({
                   type="button"
                   onClick={onCopy}
                   disabled={disabled}
-                  className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded hover:bg-green-200 w-16"
+                  className="min-h-10 px-3 text-xs bg-green-100 text-green-700 rounded hover:bg-green-200 w-20"
                 >
                   {copied ? '已复制!' : '复制'}
                 </button>
@@ -160,7 +160,7 @@ export function ArenaRosterRow({
                 <button
                   type="button"
                   onClick={onRemove}
-                  className={`w-5 h-5 bg-red-200 text-red-700 rounded-full flex items-center justify-center text-xs font-bold transition-colors flex-shrink-0 ${
+                  className={`min-h-10 min-w-10 bg-red-200 text-red-700 rounded-full flex items-center justify-center text-xs font-bold transition-colors flex-shrink-0 ${
                     disabled ? 'opacity-50 cursor-not-allowed' : 'hover:bg-red-300'
                   }`}
                   aria-label={`移除 ${item.displayName}`}

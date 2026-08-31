@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState, type ChangeEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
 
 import type { RoomDirectoryVisibility } from '@mahoshojo/contracts/arena-room';
 
@@ -34,6 +34,7 @@ export type ArenaMultiplayerPanelViewProps = {
   readonly actionPending?: boolean;
   readonly hostConfigContent?: ReactNode;
   readonly proposalContent?: ReactNode;
+  readonly proposalWorkspaceActive?: boolean;
   readonly roomTitle: string;
   readonly visibility: RoomDirectoryVisibility;
   readonly joinCode: string;
@@ -315,6 +316,9 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
   const [managementConfirmation, setManagementConfirmation] = useState<
     'cancel' | 'close' | 'leave' | null
   >(null);
+  useEffect(() => {
+    if (props.proposalWorkspaceActive) setProposalsOpen(false);
+  }, [props.proposalWorkspaceActive]);
   if (state.phase === 'disabled') return null;
 
   const busy = Boolean(props.actionPending)
@@ -331,19 +335,20 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
 
   return (
     <section
-      aria-labelledby="arena-multiplayer-heading"
-      className="mt-5 rounded-2xl border border-fuchsia-200 bg-fuchsia-50/70 p-4 dark:border-fuchsia-900 dark:bg-fuchsia-950/20 sm:p-5"
+      aria-labelledby={session ? 'arena-multiplayer-heading' : undefined}
+      aria-label={!session ? '多人模式' : undefined}
+      data-arena-multiplayer-entry={!session ? 'compact' : undefined}
+      className={session
+        ? 'mt-5 rounded-2xl border border-fuchsia-200 bg-fuchsia-50/70 p-4 dark:border-fuchsia-900 dark:bg-fuchsia-950/20 sm:p-5'
+        : 'mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-fuchsia-200 bg-fuchsia-50/70 px-3 py-2 dark:border-fuchsia-900 dark:bg-fuchsia-950/20'}
       data-arena-multiplayer="v1"
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 id="arena-multiplayer-heading" className="text-lg font-semibold text-gray-950 dark:text-gray-50">
-            Arena 多人房间
-          </h2>
-          {!session ? (
-            <p className="mt-1 text-sm text-gray-700 dark:text-gray-300">
-              房间状态由服务器维护；本地角色与情景只共享安全摘要。
-            </p>
+          {session ? (
+            <h2 id="arena-multiplayer-heading" className="text-lg font-semibold text-gray-950 dark:text-gray-50">
+              Arena 多人房间
+            </h2>
           ) : null}
         </div>
         {!session && !props.authLoading && (state.phase === 'ready' || state.phase === 'listing') ? (
@@ -360,14 +365,16 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
         ) : null}
       </div>
 
-      <div className="mt-3">
-        <StatusNotice state={state} />
-        {state.error ? (
-          <p role="alert" className="mt-2 text-sm font-medium text-red-700 dark:text-red-300">
-            {state.error}
-          </p>
-        ) : null}
-      </div>
+      {session ? (
+        <div className="mt-3">
+          <StatusNotice state={state} />
+          {state.error ? (
+            <p role="alert" className="mt-2 text-sm font-medium text-red-700 dark:text-red-300">
+              {state.error}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
 
       {props.authLoading ? (
         <p className="mt-4 text-sm text-gray-700 dark:text-gray-300">正在确认登录状态…</p>
@@ -716,6 +723,7 @@ function ArenaMultiplayerPanelRuntime({
           workspace={proposalWorkspace}
         />
       )}
+      proposalWorkspaceActive={Boolean(proposalWorkspace.editor)}
       roomTitle={roomTitle}
       visibility={visibility}
       joinCode={joinCode}

@@ -85,16 +85,15 @@ export function ArenaHostConfigPanel({
       ) : null}
 
       {diffOpen && status.kind === 'conflicted' ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 sm:p-6">
-          <section role="dialog" aria-modal="true" aria-labelledby="arena-host-config-diff-heading" className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl dark:bg-gray-950">
-            <div className="flex items-center justify-between gap-3 border-b p-4 dark:border-gray-800">
+          <section aria-labelledby="arena-host-config-diff-heading" className="mt-3 rounded-xl border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-950">
+            <div className="flex items-center justify-between gap-3 border-b pb-3 dark:border-gray-800">
               <div>
                 <h3 id="arena-host-config-diff-heading" className="font-semibold text-gray-950 dark:text-gray-100">Room authority / 本地 working copy</h3>
                 <p className="mt-1 text-xs text-gray-600 dark:text-gray-400">仅展示 safe Shared Config，不包含 host-local 正文。</p>
               </div>
               <button type="button" className={secondaryButtonClass} onClick={() => setDiffOpen(false)}>关闭</button>
             </div>
-            <div className="grid min-h-0 flex-1 gap-3 overflow-y-auto p-4 lg:grid-cols-2">
+            <div className="grid gap-3 pt-3 lg:grid-cols-2">
               <div>
                 <h4 className="text-sm font-semibold">ROOM · revision {status.revision}</h4>
                 <pre className="mt-2 overflow-auto rounded-lg bg-gray-950 p-3 text-xs text-gray-100">{JSON.stringify(status.roomConfig, null, 2)}</pre>
@@ -105,7 +104,6 @@ export function ArenaHostConfigPanel({
               </div>
             </div>
           </section>
-        </div>
       ) : null}
     </section>
   );

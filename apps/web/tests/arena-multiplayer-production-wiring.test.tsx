@@ -391,8 +391,10 @@ describe('Arena multiplayer production client/hook wiring', () => {
     await act(async () => button('提案').click());
     await act(async () => button('同步房间配置').click());
     await flush();
+    expect(container.querySelector('#arena-room-proposals-dialog-heading')).toBeNull();
     await setTextField('arena-story-guidance', 'production 成员建议');
     await act(async () => button('预览提案').click());
+    expect(container.querySelectorAll('[role="dialog"][aria-modal="true"]')).toHaveLength(1);
     await act(async () => button('提交 Proposal').click());
     await flush();
 
@@ -519,7 +521,7 @@ describe('Arena multiplayer production client/hook wiring', () => {
     await act(async () => WiringSocket.instances[0]!.open());
 
     await act(async () => button('提案').click());
-    await act(async () => button('待处理提案 (1)').click());
+    expect(container.querySelectorAll('[role="dialog"][aria-modal="true"]')).toHaveLength(1);
     await act(async () => button('接受所选').click());
     await flush();
     const resolveCall = calls.find((call) => requestPath(call.url).endsWith('/resolve'));

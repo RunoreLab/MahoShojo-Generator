@@ -188,6 +188,15 @@ afterEach(async () => {
 });
 
 describe('Arena multiplayer panel real React interactions', () => {
+  it('未加入房间时只显示紧凑多人入口，不占用常驻说明区', async () => {
+    const panel = container.querySelector<HTMLElement>('[data-arena-multiplayer="v1"]');
+    expect(panel).not.toBeNull();
+    expect(panel?.getAttribute('data-arena-multiplayer-entry')).toBe('compact');
+    expect(panel?.textContent).toContain('打开多人房间');
+    expect(panel?.textContent).not.toContain('Arena 多人房间');
+    expect(panel?.textContent).not.toContain('房间状态由服务器维护');
+  });
+
   it('create 的安全映射窗口使用同步锁，双击只提交一个房间', async () => {
     await act(async () => button('打开多人房间').click());
     await act(async () => {
@@ -250,6 +259,7 @@ describe('Arena multiplayer panel real React interactions', () => {
     const dialog = container.querySelector<HTMLElement>('[role="dialog"][aria-modal="true"]');
     expect(dialog).not.toBeNull();
     expect(document.activeElement?.textContent).toBe('关闭');
+    expect(document.body.style.overflow).toBe('hidden');
 
     await act(async () => {
       document.dispatchEvent(new KeyboardEvent('keydown', {
@@ -266,6 +276,7 @@ describe('Arena multiplayer panel real React interactions', () => {
     });
     expect(container.querySelector('[role="dialog"]')).toBeNull();
     expect(document.activeElement).toBe(trigger);
+    expect(document.body.style.overflow).toBe('');
   });
 
   it('unauthenticated/disabled 真实挂载不暴露 Room action', async () => {
@@ -513,7 +524,7 @@ describe('Arena multiplayer panel real React interactions', () => {
     await act(async () => root.render(<ArenaMultiplayerPanel {...props} />));
     expect(container.textContent).toContain('房间配置已更新，但本地 Arena 同时有未发布修改');
     await act(async () => button('查看差异').click());
-    expect(container.querySelector('[role="dialog"][aria-modal="true"]')).not.toBeNull();
+    expect(container.querySelectorAll('[role="dialog"][aria-modal="true"]')).toHaveLength(1);
     const diffClose = container.querySelector<HTMLButtonElement>(
       '[aria-labelledby="arena-host-config-diff-heading"] button',
     );

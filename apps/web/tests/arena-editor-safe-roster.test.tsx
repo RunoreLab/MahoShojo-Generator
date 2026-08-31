@@ -148,4 +148,33 @@ describe('Arena editor safe roster presentation', () => {
     expect(moveMaterial).not.toHaveBeenCalled();
     expect(moveRoster).not.toHaveBeenCalled();
   });
+
+  it('共享列表的移动与移除按钮提供适合触屏的最小触控尺寸', async () => {
+    await act(async () => root.render(
+      <>
+        <ArenaRosterRow
+          item={safeStub}
+          index={1}
+          total={3}
+          capabilities={{ reorder: true, remove: true }}
+          onMove={() => {}}
+          onRemove={() => {}}
+        />
+        <ArenaAuxScenarioList
+          items={[{ key: 'scenario-1', title: '雨夜' }, { key: 'scenario-2', title: '白昼' }]}
+          onMove={() => {}}
+          onRemove={() => {}}
+        />
+        <ArenaMaterialList
+          items={[{ key: 'material-1', name: '车站资料', sourceLabel: '公开' }]}
+          onMove={() => {}}
+          onRemove={() => {}}
+        />
+      </>,
+    ));
+
+    for (const button of container.querySelectorAll('button[aria-label^="上移"], button[aria-label^="下移"], button[aria-label^="移除"]')) {
+      expect(button.className).toMatch(/(?:min-w-10|min-h-10|w-10|h-10)/);
+    }
+  });
 });
