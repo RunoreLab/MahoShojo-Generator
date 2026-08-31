@@ -1321,6 +1321,19 @@ try {
               generationRecordId: durableProjectionStatus === 'completed'
                 ? `generation-record-${token}`
                 : null,
+              ...(durableProjectionStatus === 'completed' ? {
+                roomSafeResult: {
+                  version: 1,
+                  format: 'stream-markdown',
+                  mode: 'classic',
+                  reporterInfo: { name: 'Redis Verifier', publication: 'Room Daily' },
+                  combatantUpdates: [{
+                    combatantKey: 'data-card:character-1',
+                    displayName: 'Verifier character-1',
+                    impact: '完成 Redis 恢复验证',
+                  }],
+                },
+              } : {}),
               errorCode: null,
             },
           };
@@ -1414,7 +1427,9 @@ try {
       });
       if (
         generationStartCount !== 1
-        || materializationCount !== 2
+        // 活跃 publisher 已证明同一 reservation 正在执行；duplicate start 应直接读取
+        // 该权威进度，不再依赖 exact-ref resolver 可用性或重复 materialization。
+        || materializationCount !== 1
         || JSON.stringify(await readerStore.load(generationRoomId)).includes(generationSecretCanary)
       ) {
         throw new Error('ROOM_REDIS_GENERATION_DUPLICATE_OR_SECRET_FAILED');
@@ -1535,6 +1550,7 @@ try {
         || !authoritativeFinal.finalAuthoritative
         || authoritativeFinal.generationRecordId !== `generation-record-${token}`
         || authoritativeFinal.markdown !== '# Redis 恢复后的权威终态\n'
+        || authoritativeFinal.result?.combatantUpdates?.[0]?.impact !== '完成 Redis 恢复验证'
         || JSON.stringify(completedGenerationState).includes(generationSecretCanary)
       ) {
         throw new Error('ROOM_REDIS_GENERATION_AUTHORITATIVE_FINAL_FAILED');
