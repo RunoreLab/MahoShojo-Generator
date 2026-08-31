@@ -8,7 +8,7 @@ import {
   type ArenaGenerationTerminalStore,
   type GenerationReplayStore,
 } from '@mahoshojo/hosted-api/arena-generation/service';
-import { createArenaGenerationActorResolver } from './actor';
+import { createArenaGenerationActorResolvers } from './actor';
 import {
   createNodeArenaGenerationExecutor,
   type NodeArenaGenerationExecutorOptions,
@@ -71,6 +71,12 @@ export type NodeArenaGenerationServiceOptions = {
   signatures?: SignatureService;
   pvpSignatures?: SignatureService;
   resolveActor?(_request: Request): Promise<ArenaGenerationActor | null>;
+  resolveCreateActor?(_input: {
+    request: Request;
+    actor: ArenaGenerationActor;
+    generationRequestId: string;
+    payload: Readonly<Record<string, unknown>>;
+  }): Promise<ArenaGenerationActor | null>;
   executor?: ArenaGenerationExecutor;
   executorOptions?: Omit<
     NodeArenaGenerationExecutorOptions,
@@ -98,7 +104,7 @@ export const createNodeArenaGenerationService = (
     logger: options.executorOptions?.logger ?? silentLogger,
     purpose: ARENA_PVP_GENERATION_SIGNATURE_PURPOSE,
   });
-  const resolveActor = options.resolveActor ?? createArenaGenerationActorResolver({
+  const actorResolvers = createArenaGenerationActorResolvers({
     env,
     fetch: options.fetch,
     signatures,
@@ -106,6 +112,8 @@ export const createNodeArenaGenerationService = (
     getD1Client: options.getD1Client,
     now: options.now,
   });
+  const resolveActor = options.resolveActor ?? actorResolvers.resolveActor;
+  const resolveCreateActor = options.resolveCreateActor ?? actorResolvers.resolveCreateActor;
   let executor = options.executor;
   if (!executor) {
     if (!options.executorOptions?.finalizer) {
@@ -124,6 +132,7 @@ export const createNodeArenaGenerationService = (
     store: options.store,
     executor,
     resolveActor,
+    resolveCreateActor,
     deriveGenerationId: options.deriveGenerationId ?? deriveArenaGenerationId,
     hashPayload: hashArenaGenerationPayload,
     now: options.now ?? (() => new Date()),

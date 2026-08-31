@@ -339,6 +339,74 @@ const createService = (
 });
 
 describe('Arena generation lifecycle service', () => {
+  test('trusted parsed seam does not consume or parse the request body again', async () => {
+    const prepare = vi.fn(async ({ payload, actorKey }) => {
+      expect(payload).toEqual({ value: 'already-parsed' });
+      expect(actorKey).toBe('user:42');
+      return Response.json({ code: 'TEST_STOP' }, { status: 409 });
+    });
+    const service = createService(new MemoryReplayStore(), {
+      prepare,
+      execute: vi.fn(async () => ({ status: 'completed' as const })),
+    });
+    const request = new Request('https://example.test/api/arena/generate-stream', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer test-actor' },
+      body: 'this body must remain unread',
+    });
+
+    const response = await service.createParsedSubscription(request, {
+      generationRequestId: 'request-parsed-seam',
+      payload: { value: 'already-parsed' },
+      bodyBytes: 128,
+    });
+
+    expect(response).toBeInstanceOf(Response);
+    expect((response as Response).status).toBe(409);
+    expect(request.bodyUsed).toBe(false);
+    expect(prepare).toHaveBeenCalledTimes(1);
+  });
+
+  test('resolves payload-dependent operation actor after the single body parse', async () => {
+    const resolveCreateActor = vi.fn(async ({ generationRequestId, payload }) => {
+      expect(generationRequestId).toBe('request-operation-actor');
+      expect(payload).toEqual({ roomId: 'room-1' });
+      return { actorKey: 'pvp-room:room-1' };
+    });
+    const prepare = vi.fn(async ({ actorKey }) => {
+      expect(actorKey).toBe('pvp-room:room-1');
+      return Response.json({ code: 'TEST_STOP' }, { status: 409 });
+    });
+    const service = createArenaGenerationService({
+      store: new MemoryReplayStore(),
+      executor: {
+        prepare,
+        execute: vi.fn(async () => ({ status: 'completed' as const })),
+      },
+      resolveActor: async () => ({ actorKey: 'user:42' }),
+      resolveCreateActor,
+      deriveGenerationId: async () => 'generation-1',
+      now: () => new Date('2026-08-25T04:00:00.000Z'),
+      hashPayload: async (payload) => `hash:${JSON.stringify(payload)}`,
+    });
+
+    const response = await service.createSubscription(new Request(
+      'https://example.test/api/arena/generate-stream',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          generationRequestId: 'request-operation-actor',
+          roomId: 'room-1',
+        }),
+      },
+    ));
+
+    expect(response).toBeInstanceOf(Response);
+    expect((response as Response).status).toBe(409);
+    expect(resolveCreateActor).toHaveBeenCalledTimes(1);
+    expect(prepare).toHaveBeenCalledTimes(1);
+  });
+
   test('G25E2-VERSION-SKEW：rollout 保持 authenticated authority 读写与 public contract 兼容', async () => {
     expect(evaluateHostedDrVersionGate({
       stage: 'rollout',

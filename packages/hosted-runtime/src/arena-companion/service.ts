@@ -99,7 +99,10 @@ const isGenerationRequestId = (value: unknown): value is string => (
 
 export const readArenaCompanionJsonPayload = async (
   request: Request,
-): Promise<Record<string, unknown> | Response> => {
+): Promise<Readonly<{
+  payload: Record<string, unknown>;
+  bodyBytes: number;
+}> | Response> => {
   if (request.method !== 'POST') {
     return jsonResponse({ code: 'METHOD_NOT_ALLOWED', error: 'Method not allowed' }, 405);
   }
@@ -142,8 +145,10 @@ export const readArenaCompanionJsonPayload = async (
   }
   try {
     const parsed = JSON.parse(new TextDecoder().decode(body)) as unknown;
-    return recordOf(parsed)
-      ?? jsonResponse({ code: 'INVALID_REQUEST', error: '请求体必须是对象' }, 400);
+    const payload = recordOf(parsed);
+    return payload
+      ? { payload, bodyBytes }
+      : jsonResponse({ code: 'INVALID_REQUEST', error: '请求体必须是对象' }, 400);
   } catch {
     return jsonResponse({ code: 'INVALID_JSON', error: '请求体必须是 JSON' }, 400);
   }
@@ -313,6 +318,7 @@ const rebuildRequest = (
   payload: Record<string, unknown>,
   generationRequestId: string,
   operation: ArenaCompanionOperation,
+  includeBody: boolean,
 ): Request => {
   const headers = new Headers(source.headers);
   headers.set('Content-Type', 'application/json; charset=utf-8');
@@ -321,11 +327,13 @@ const rebuildRequest = (
   return new Request(source.url, {
     method: 'POST',
     headers,
-    body: JSON.stringify({
-      ...payload,
-      forceStreamMeta: true,
-      generationRequestId,
-    }),
+    ...(includeBody ? {
+      body: JSON.stringify({
+        ...payload,
+        forceStreamMeta: true,
+        generationRequestId,
+      }),
+    } : {}),
     signal: source.signal,
   });
 };
@@ -337,8 +345,9 @@ export const createArenaCompanionService = (
     request: Request,
     requestedOperation?: ArenaCompanionOperation,
   ): Promise<Response> {
-    const payload = await readArenaCompanionJsonPayload(request);
-    if (payload instanceof Response) return payload;
+    const parsedBody = await readArenaCompanionJsonPayload(request);
+    if (parsedBody instanceof Response) return parsedBody;
+    const { payload, bodyBytes } = parsedBody;
     if ('generationRequestId' in payload && !isGenerationRequestId(payload.generationRequestId)) {
       return jsonResponse({
         code: 'INVALID_GENERATION_REQUEST_ID',
@@ -349,9 +358,16 @@ export const createArenaCompanionService = (
       ? payload.generationRequestId.trim()
       : options.createGenerationRequestId?.() ?? crypto.randomUUID();
     const operation = requestedOperation ?? operationFromRequest(request);
-    const upstream = await options.generationService.createSubscription(
-      rebuildRequest(request, payload, generationRequestId, operation),
-    );
+    const upstreamPayload: Record<string, unknown> = { ...payload, forceStreamMeta: true };
+    delete upstreamPayload.generationRequestId;
+    const upstream = options.generationService.createParsedSubscription
+      ? await options.generationService.createParsedSubscription(
+        rebuildRequest(request, upstreamPayload, generationRequestId, operation, false),
+        { generationRequestId, payload: upstreamPayload, bodyBytes },
+      )
+      : await options.generationService.createSubscription(
+        rebuildRequest(request, payload, generationRequestId, operation, true),
+      );
     if (upstream instanceof Response) return upstream;
     let collected: CollectedGeneration;
     try {

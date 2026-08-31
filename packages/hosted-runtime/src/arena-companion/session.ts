@@ -227,6 +227,7 @@ const createUpstreamRequest = (input: {
   request: Request;
   body: Record<string, unknown>;
   guidanceSignature: string;
+  includeBody: boolean;
 }): Request => {
   const headers = new Headers(input.request.headers);
   headers.delete('content-length');
@@ -236,7 +237,7 @@ const createUpstreamRequest = (input: {
   return new Request(input.request.url, {
     method: 'POST',
     headers,
-    body: JSON.stringify(input.body),
+    ...(input.includeBody ? { body: JSON.stringify(input.body) } : {}),
     signal: input.request.signal,
   });
 };
@@ -259,9 +260,9 @@ export const createArenaSessionCompanionService = (
         // Telemetry transport failures must not affect session execution.
       }
     };
-    const raw = await readArenaCompanionJsonPayload(request);
-    if (raw instanceof Response) return raw;
-    const parsed = SessionRequestSchema.safeParse(raw);
+    const parsedBody = await readArenaCompanionJsonPayload(request);
+    if (parsedBody instanceof Response) return parsedBody;
+    const parsed = SessionRequestSchema.safeParse(parsedBody.payload);
     if (!parsed.success) return jsonResponse({ error: '请求参数无效' }, 400);
     const payload = parsed.data;
     const customProviderResolution = resolveArenaCustomProvider(payload.customProvider);
@@ -369,15 +370,30 @@ export const createArenaSessionCompanionService = (
         }
         : null;
       options.recordActivity?.(request);
-      subscription = await options.generationService.createSubscription(createUpstreamRequest({
-        request,
-        body: buildArenaSessionUpstreamRequestBody(
-          payload,
-          internalGuidance,
-          customProviderPayload,
-        ),
-        guidanceSignature,
-      }));
+      const upstreamBody = buildArenaSessionUpstreamRequestBody(
+        payload,
+        internalGuidance,
+        customProviderPayload,
+      );
+      const parsedUpstreamPayload = { ...upstreamBody };
+      delete parsedUpstreamPayload.generationRequestId;
+      subscription = options.generationService.createParsedSubscription
+        ? await options.generationService.createParsedSubscription(createUpstreamRequest({
+          request,
+          body: parsedUpstreamPayload,
+          guidanceSignature,
+          includeBody: false,
+        }), {
+          generationRequestId: payload.generationRequestId,
+          payload: parsedUpstreamPayload,
+          bodyBytes: parsedBody.bodyBytes,
+        })
+        : await options.generationService.createSubscription(createUpstreamRequest({
+          request,
+          body: upstreamBody,
+          guidanceSignature,
+          includeBody: true,
+        }));
     } catch (error) {
       releaseOnce();
       return jsonResponse({

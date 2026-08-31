@@ -6,7 +6,7 @@ import type {
 } from '@mahoshojo/hosted-api/arena-generation/service';
 import { createArenaCompanionRouteService } from '../src/arena-companion';
 import { createArenaCompanionService } from '../src/arena-companion/service';
-import { createArenaGenerationActorResolver } from '../src/arena-generation/actor';
+import { createArenaGenerationActorResolvers } from '../src/arena-generation/actor';
 import {
   ARENA_PVP_GENERATION_SIGNATURE_HEADER,
   ARENA_PVP_GENERATION_SIGNATURE_PURPOSE,
@@ -18,8 +18,10 @@ const response = (): Promise<Response> => Promise.resolve(new Response(null));
 
 const generationService = (
   createSubscription: ArenaGenerationService['createSubscription'],
+  createParsedSubscription?: NonNullable<ArenaGenerationService['createParsedSubscription']>,
 ): ArenaGenerationService => ({
   createSubscription,
+  ...(createParsedSubscription ? { createParsedSubscription } : {}),
   create: () => response(),
   cancelRequest: () => response(),
   lookup: () => response(),
@@ -71,7 +73,7 @@ describe('Arena companion service', () => {
       pvpContext: { roomId: 'room-1', matchId: 'match-1', roundId: 'round-1' },
     };
     const signature = await pvpAuthority.sign({ generationRequestId, payload });
-    const resolveActor = createArenaGenerationActorResolver({
+    const { resolveActor, resolveCreateActor } = createArenaGenerationActorResolvers({
       env: { ...env, HONO_AUTH_MODE: 'bearer' },
       signatures,
       pvpSignatures,
@@ -83,12 +85,29 @@ describe('Arena companion service', () => {
         })),
       }),
     });
-    const createSubscription = vi.fn(async (request: Request) => {
-      await expect(resolveActor(request)).resolves.toEqual({ actorKey: 'pvp-room:room-1' });
+    const createSubscription = vi.fn();
+    const createParsedSubscription = vi.fn(async (
+      request: Request,
+      command: Parameters<NonNullable<ArenaGenerationService['createParsedSubscription']>>[1],
+    ) => {
+      const actor = await resolveActor(request);
+      expect(actor).toEqual({ actorKey: 'user:42' });
+      await expect(resolveCreateActor({
+        request,
+        actor: actor!,
+        generationRequestId: command.generationRequestId,
+        payload: command.payload,
+      })).resolves.toEqual({ actorKey: 'pvp-room:room-1' });
+      expect(command).toMatchObject({
+        generationRequestId,
+        payload: { ...payload, forceStreamMeta: true },
+      });
+      expect(command.bodyBytes).toBeGreaterThan(0);
+      expect(request.body).toBeNull();
       return Response.json({ code: 'TEST_STOP' }, { status: 409 });
     });
     const service = createArenaCompanionService({
-      generationService: generationService(createSubscription),
+      generationService: generationService(createSubscription, createParsedSubscription),
       createGenerationRequestId: () => generationRequestId,
       projectUpdatedCombatants: vi.fn(async () => []),
     });
@@ -107,7 +126,8 @@ describe('Arena companion service', () => {
     ));
 
     expect(result.status).toBe(409);
-    expect(createSubscription).toHaveBeenCalledTimes(1);
+    expect(createParsedSubscription).toHaveBeenCalledTimes(1);
+    expect(createSubscription).not.toHaveBeenCalled();
   });
 
   it('preserves the durable terminal marker when projecting a failed fallback', async () => {

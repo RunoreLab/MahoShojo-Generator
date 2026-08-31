@@ -94,14 +94,19 @@ describe('Arena session companion service', () => {
 
   it('直接消费 typed subscription、签名内部引导并保留上游事件 id', async () => {
     const captured: Array<{ headers: Headers; body: Record<string, unknown> }> = [];
+    const createSubscription = vi.fn();
     const release = vi.fn();
     const observeLifecycle = vi.fn();
     const generationService: ArenaGenerationService = {
-      createSubscription: async (request) => {
+      createSubscription,
+      createParsedSubscription: async (request, command) => {
         captured.push({
           headers: request.headers,
-          body: await request.json() as Record<string, unknown>,
+          body: command.payload,
         });
+        expect(command.generationRequestId).toBe('story-request-1234');
+        expect(command.bodyBytes).toBeGreaterThan(0);
+        expect(request.body).toBeNull();
         return {
           generationId: 'arena_story_generation',
           generationRequestId: 'story-request-1234',
@@ -158,10 +163,10 @@ describe('Arena session companion service', () => {
     expect(captured[0]!.headers.get('x-mahoshojo-arena-internal-guidance-signature'))
       .toBe('guidance-signature');
     expect(captured[0]!.body).toMatchObject({
-      generationRequestId: 'story-request-1234',
       forceStreamMeta: true,
       internalGuidance: expect.stringContaining('连续战报会话'),
     });
+    expect(createSubscription).not.toHaveBeenCalled();
     expect(events.map(({ event, id }) => [event, id])).toEqual([
       ['session_meta', null],
       ['markdown', '10-0'],

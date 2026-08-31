@@ -477,10 +477,22 @@ export type ArenaGenerationActor = {
   responseHeaders?: Readonly<Record<string, string>>;
 };
 
+export type ArenaGenerationCreateCommand = Readonly<{
+  generationRequestId: string;
+  payload: Record<string, unknown>;
+  bodyBytes: number;
+}>;
+
 export type ArenaGenerationServiceDependencies = {
   store: GenerationReplayStore;
   executor: ArenaGenerationExecutor;
   resolveActor(_request: Request): Promise<ArenaGenerationActor | null>;
+  resolveCreateActor?(_input: {
+    request: Request;
+    actor: ArenaGenerationActor;
+    generationRequestId: string;
+    payload: Readonly<Record<string, unknown>>;
+  }): Promise<ArenaGenerationActor | null>;
   deriveGenerationId(_input: {
     actorKey: string;
     generationRequestId: string;
@@ -556,6 +568,10 @@ export interface ArenaGenerationService {
   createSubscription(
     _request: Request,
   ): Promise<ArenaGenerationSubscription | Response>;
+  createParsedSubscription?(
+    _request: Request,
+    _command: ArenaGenerationCreateCommand,
+  ): Promise<ArenaGenerationSubscription | Response>;
   create(_request: Request): Promise<Response>;
   cancelRequest(_request: Request): Promise<Response>;
   lookup(
@@ -567,8 +583,16 @@ export interface ArenaGenerationService {
   cancel(_request: Request, _params: ArenaGenerationRouteParams): Promise<Response>;
 }
 
+export interface ArenaGenerationParsedPayloadService {
+  createParsedSubscription(
+    _request: Request,
+    _command: ArenaGenerationCreateCommand,
+  ): Promise<ArenaGenerationSubscription | Response>;
+}
+
 export type ArenaGenerationApplicationService = ArenaGenerationService
-  & ArenaGenerationTrustedOwnedService;
+  & ArenaGenerationTrustedOwnedService
+  & ArenaGenerationParsedPayloadService;
 
 type ActiveProducer = {
   controller: AbortController;
@@ -776,7 +800,7 @@ const readOptionalCancelPayload = async (
 
 const parseCreatePayload = async (
   request: Request,
-): Promise<{ generationRequestId: string; payload: Record<string, unknown> } | Response> => {
+): Promise<ArenaGenerationCreateCommand | Response> => {
   if (request.method !== 'POST') {
     return jsonResponse({ code: 'METHOD_NOT_ALLOWED', error: 'Method not allowed' }, 405);
   }
@@ -790,10 +814,10 @@ const parseCreatePayload = async (
   }
 
   let body: unknown;
+  let bodyBytes = 0;
   try {
     const reader = request.body?.getReader();
     const chunks: Uint8Array[] = [];
-    let bodyBytes = 0;
     if (reader) {
       try {
         while (true) {
@@ -838,7 +862,7 @@ const parseCreatePayload = async (
     }, 400);
   }
   delete payload.generationRequestId;
-  return { generationRequestId, payload };
+  return { generationRequestId, payload, bodyBytes };
 };
 
 const addLeaseDuration = (now: Date, durationMs: number): string => new Date(
@@ -862,6 +886,7 @@ export const createArenaGenerationService = (
   const splitMaterialization = hasPreflight && hasMaterialize;
   const materializationVersion = dependencies.executor.materializationVersion;
   const activeProducers = new Map<string, ActiveProducer>();
+  const parsedCreateCommands = new WeakMap<Request, ArenaGenerationCreateCommand>();
   const observe = (observation: ArenaGenerationObservation): void => {
     try {
       dependencies.observer?.observeArenaGeneration(observation);
@@ -2522,16 +2547,72 @@ export const createArenaGenerationService = (
         : subscriptionToSseResponse(subscription);
     },
 
+    async createParsedSubscription(
+      request: Request,
+      command: ArenaGenerationCreateCommand,
+    ): Promise<ArenaGenerationSubscription | Response> {
+      if (request.method !== 'POST') {
+        return jsonResponse({ code: 'METHOD_NOT_ALLOWED', error: 'Method not allowed' }, 405);
+      }
+      const generationRequestId = typeof command?.generationRequestId === 'string'
+        ? command.generationRequestId.trim()
+        : '';
+      if (!isGenerationRequestId(generationRequestId)) {
+        return jsonResponse({
+          code: 'INVALID_GENERATION_REQUEST_ID',
+          error: 'generationRequestId 无效',
+        }, 400);
+      }
+      if (
+        !command.payload
+        || typeof command.payload !== 'object'
+        || Array.isArray(command.payload)
+      ) {
+        return jsonResponse({ code: 'INVALID_REQUEST', error: '请求体必须是对象' }, 400);
+      }
+      if (
+        !Number.isSafeInteger(command.bodyBytes)
+        || command.bodyBytes < 0
+        || command.bodyBytes > MAX_ARENA_CREATE_BODY_BYTES
+      ) {
+        return jsonResponse({
+          code: 'ARENA_REQUEST_TOO_LARGE',
+          error: '请求体超过允许的大小',
+        }, 413);
+      }
+      const payload = { ...command.payload };
+      delete payload.generationRequestId;
+      parsedCreateCommands.set(request, {
+        generationRequestId,
+        payload,
+        bodyBytes: command.bodyBytes,
+      });
+      try {
+        return await service.createSubscription(request);
+      } finally {
+        parsedCreateCommands.delete(request);
+      }
+    },
+
     async createSubscription(
       request: Request,
     ): Promise<ArenaGenerationSubscription | Response> {
       if (request.method !== 'POST') {
         return jsonResponse({ code: 'METHOD_NOT_ALLOWED', error: 'Method not allowed' }, 405);
       }
-      const actor = await dependencies.resolveActor(request);
+      let actor = await dependencies.resolveActor(request);
       if (!actor) return jsonResponse({ code: 'UNAUTHORIZED', error: 'Unauthorized' }, 401);
-      const parsed = await parseCreatePayload(request);
+      const parsed = parsedCreateCommands.get(request) ?? await parseCreatePayload(request);
       if (parsed instanceof Response) return parsed;
+      if (dependencies.resolveCreateActor) {
+        actor = await dependencies.resolveCreateActor({
+          request,
+          actor,
+          generationRequestId: parsed.generationRequestId,
+          payload: parsed.payload,
+        });
+        if (!actor) return jsonResponse({ code: 'UNAUTHORIZED', error: 'Unauthorized' }, 401);
+      }
 
       let semanticPayload: Record<string, unknown>;
       let materializationPayload: Record<string, unknown> | null = null;

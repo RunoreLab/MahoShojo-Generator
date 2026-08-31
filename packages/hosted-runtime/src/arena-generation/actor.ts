@@ -1,5 +1,4 @@
 import {
-  MAX_ARENA_CREATE_BODY_BYTES,
   type ArenaGenerationActor,
 } from '@mahoshojo/hosted-api/arena-generation/service';
 import type { NodeDataD1Client } from '../node-runtime/data-ports';
@@ -32,6 +31,16 @@ export type ArenaGenerationActorResolverOptions = {
 };
 
 type ArenaActorResolver = (_request: Request) => Promise<ArenaGenerationActor | null>;
+
+export type ArenaGenerationActorResolvers = Readonly<{
+  resolveActor: ArenaActorResolver;
+  resolveCreateActor(_input: {
+    request: Request;
+    actor: ArenaGenerationActor;
+    generationRequestId: string;
+    payload: Readonly<Record<string, unknown>>;
+  }): Promise<ArenaGenerationActor | null>;
+}>;
 
 const encodeToken = (token: ArenaAnonymousToken): string => {
   const bytes = new TextEncoder().encode(JSON.stringify(token));
@@ -77,9 +86,9 @@ const readBootstrapAnonymousId = (value: string): string | null => {
   return match?.[1]?.toLowerCase() ?? null;
 };
 
-export const createArenaGenerationActorResolver = (
+export const createArenaGenerationActorResolvers = (
   options: ArenaGenerationActorResolverOptions,
-): ArenaActorResolver => {
+): ArenaGenerationActorResolvers => {
   const env = options.env ?? process.env;
   const now = options.now ?? (() => new Date());
   const createAnonymousId = options.createAnonymousId ?? (() => crypto.randomUUID());
@@ -95,51 +104,22 @@ export const createArenaGenerationActorResolver = (
     ? createArenaPvpGenerationAuthority(options.pvpSignatures)
     : null;
 
-  const readPvpOperationActor = async (
-    request: Request,
+  const resolvePvpOperationActor = async (
+    input: {
+      request: Request;
+      generationRequestId: string;
+      payload: Readonly<Record<string, unknown>>;
+    },
   ): Promise<ArenaGenerationActor | null> => {
     if (!pvpAuthority) return null;
-    const signature = request.headers.get(ARENA_PVP_GENERATION_SIGNATURE_HEADER)?.trim() ?? '';
+    const signature = input.request.headers
+      .get(ARENA_PVP_GENERATION_SIGNATURE_HEADER)?.trim() ?? '';
     if (!/^[0-9a-f]{64}$/u.test(signature)) return null;
-    const contentLength = Number(request.headers.get('content-length'));
-    if (Number.isFinite(contentLength) && contentLength > MAX_ARENA_CREATE_BODY_BYTES) return null;
     try {
-      const reader = request.clone().body?.getReader();
-      const chunks: Uint8Array[] = [];
-      let bodyBytes = 0;
-      if (reader) {
-        try {
-          while (true) {
-            const next = await reader.read();
-            if (next.done) break;
-            bodyBytes += next.value.byteLength;
-            if (bodyBytes > MAX_ARENA_CREATE_BODY_BYTES) {
-              await reader.cancel('arena PVP actor body exceeds byte limit').catch(() => undefined);
-              return null;
-            }
-            chunks.push(next.value);
-          }
-        } finally {
-          reader.releaseLock();
-        }
-      }
-      const body = new Uint8Array(bodyBytes);
-      let offset = 0;
-      for (const chunk of chunks) {
-        body.set(chunk, offset);
-        offset += chunk.byteLength;
-      }
-      const parsed = JSON.parse(new TextDecoder().decode(body)) as unknown;
-      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
-      const requestPayload = { ...(parsed as Record<string, unknown>) };
-      const generationRequestId = typeof requestPayload.generationRequestId === 'string'
-        ? requestPayload.generationRequestId
-        : '';
-      delete requestPayload.generationRequestId;
       const pvpContext = await pvpAuthority.resolve({
-        request,
-        generationRequestId,
-        payload: requestPayload,
+        request: input.request,
+        generationRequestId: input.generationRequestId,
+        payload: input.payload,
       });
       return pvpContext ? { actorKey: `pvp-room:${pvpContext.roomId}` } : null;
     } catch {
@@ -183,7 +163,7 @@ export const createArenaGenerationActorResolver = (
     return issueAnonymousActor(createAnonymousId());
   };
 
-  return async (request): Promise<ArenaGenerationActor | null> => {
+  const resolveActor = async (request: Request): Promise<ArenaGenerationActor | null> => {
     const authentication = await resolveAuthentication(request);
     if (authentication.status === 'denied') return null;
     const userId = authentication.status === 'authenticated'
@@ -202,10 +182,26 @@ export const createArenaGenerationActorResolver = (
 
     const pvpSignature = request.headers.get(ARENA_PVP_GENERATION_SIGNATURE_HEADER)?.trim() ?? '';
     if (pvpSignature) {
-      if (!authenticatedActor) return null;
-      return readPvpOperationActor(request);
+      if (!authenticatedActor || !pvpAuthority || !/^[0-9a-f]{64}$/u.test(pvpSignature)) {
+        return null;
+      }
+      return authenticatedActor;
     }
     if (authenticatedActor) return authenticatedActor;
     return readAnonymousActor(request);
   };
+
+  return Object.freeze({
+    resolveActor,
+    async resolveCreateActor(input): Promise<ArenaGenerationActor | null> {
+      const pvpSignature = input.request.headers
+        .get(ARENA_PVP_GENERATION_SIGNATURE_HEADER)?.trim() ?? '';
+      if (!pvpSignature) return input.actor;
+      return resolvePvpOperationActor(input);
+    },
+  });
 };
+
+export const createArenaGenerationActorResolver = (
+  options: ArenaGenerationActorResolverOptions,
+): ArenaActorResolver => createArenaGenerationActorResolvers(options).resolveActor;
