@@ -76,6 +76,10 @@ import {
   type CreatorTemplateId,
 } from '@/lib/creator/templates';
 import { createDefaultBuildRuleInputs, loadBuildRulePresetIndex, tryLoadBuildRulePresetById } from '@/lib/creator/build-rules';
+import {
+  readCreatorBuildRulePreference,
+  writeCreatorBuildRulePreference,
+} from '@/lib/creator/build-rule-preferences';
 import { reconcileCreatorBuildRuleSelection } from '@/lib/creator/build-rule-selection';
 import {
   filterCreatorQuestionnairePresetEntries,
@@ -362,6 +366,7 @@ export const CreatorPage: React.FC = () => {
   const [freeformBrief, setFreeformBrief] = useState('');
   const [selectedBuildRuleIds, setSelectedBuildRuleIds] = useState<string[]>(['arena-trpg-lite']);
   const [primaryBuildRuleId, setPrimaryBuildRuleId] = useState<string | null>('arena-trpg-lite');
+  const hasExplicitBuildRulePreferenceRef = useRef(false);
   const [buildRuleInputsById, setBuildRuleInputsById] = useState<Record<string, Record<string, unknown>>>(() => ({
     'arena-trpg-lite': createDefaultBuildRuleInputs('arena-trpg-lite'),
   }));
@@ -758,6 +763,24 @@ export const CreatorPage: React.FC = () => {
       .then(data => setLanguages(data))
       .catch(err => console.error("Failed to load languages:", err));
   }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const preference = readCreatorBuildRulePreference(window.localStorage);
+    if (!preference) return;
+
+    hasExplicitBuildRulePreferenceRef.current = true;
+    setSelectedBuildRuleIds(preference.selectedRuleIds);
+    setPrimaryBuildRuleId(preference.primaryRuleId);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !hasExplicitBuildRulePreferenceRef.current) return;
+    writeCreatorBuildRulePreference(window.localStorage, {
+      selectedRuleIds: selectedBuildRuleIds,
+      primaryRuleId: primaryBuildRuleId,
+    });
+  }, [selectedBuildRuleIds, primaryBuildRuleId]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
@@ -2056,6 +2079,7 @@ export const CreatorPage: React.FC = () => {
   };
 
   const handleToggleBuildRule = useCallback((ruleId: string) => {
+    hasExplicitBuildRulePreferenceRef.current = true;
     setSelectedBuildRuleIds((current) => {
       if (current.includes(ruleId)) {
         const next = current.filter((item) => item !== ruleId);
@@ -2076,6 +2100,7 @@ export const CreatorPage: React.FC = () => {
   }, []);
 
   const handleSelectPrimaryBuildRule = useCallback((ruleId: string) => {
+    hasExplicitBuildRulePreferenceRef.current = true;
     setPrimaryBuildRuleId(ruleId);
     setSelectedBuildRuleIds((current) => (current.includes(ruleId) ? current : [...current, ruleId]));
     setBuildRuleInputsById((currentInputs) => ({
