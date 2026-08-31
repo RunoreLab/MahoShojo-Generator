@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import { describe, expect, it, vi } from 'vitest';
 
 import {
@@ -18,6 +20,21 @@ const historySettings = {
   isNarrativeHistoryUnlimited: false,
   writeNarrativeHistory: true,
 };
+
+const canonicalJsonValue = (value: unknown): unknown => {
+  if (Array.isArray(value)) return value.map(canonicalJsonValue);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.keys(value as Record<string, unknown>)
+    .sort()
+    .map((key) => [key, canonicalJsonValue((value as Record<string, unknown>)[key])]));
+};
+
+const contentVersion = (value: Record<string, unknown>): string => (
+  `sha256:${createHash('sha256').update(JSON.stringify(canonicalJsonValue(value))).digest('hex')}`
+);
+
+const defaultLocalCharacter = { name: '本地角色', content: '本地正文' };
+const defaultLocalScenario = { title: '本地辅助情景', content: '辅助正文' };
 
 const sharedConfig = () => ({
   battleMode: 'scenario' as const,
@@ -44,6 +61,7 @@ const sharedConfig = () => ({
       displayName: '本地角色',
       type: 'general-character' as const,
       source: 'host-local' as const,
+      contentVersion: contentVersion(defaultLocalCharacter),
       characterGuidance: '本地角色引导',
     },
   ],
@@ -65,6 +83,7 @@ const sharedConfig = () => ({
     displayName: '本地辅助情景',
     type: 'scenario' as const,
     source: 'host-local' as const,
+    contentVersion: contentVersion(defaultLocalScenario),
   }],
   materials: [{
     key: 'data-card:online-material',
@@ -132,12 +151,12 @@ describe('Arena Room authoritative generation materializer', () => {
         {
           key: 'host-local:character:2:local',
           kind: 'character',
-          payload: { name: '本地角色', content: '本地正文' },
+          payload: defaultLocalCharacter,
         },
         {
           key: 'host-local:scenario:0:aux',
           kind: 'scenario',
-          payload: { title: '本地辅助情景', content: '辅助正文' },
+          payload: defaultLocalScenario,
         },
       ],
       hostRuntime: {
@@ -244,8 +263,19 @@ describe('Arena Room authoritative generation materializer', () => {
     ], 'ARENA_ROOM_HOST_LOCAL_PAYLOAD_TYPE_MISMATCH'],
   ])('%s host-local payload fail closed', async (_name, hostLocalPayloads, code) => {
     const harness = createHarness();
+    const config = sharedConfig();
+    for (const entry of config.combatants) {
+      if (!('source' in entry)) continue;
+      const payload = hostLocalPayloads.find((item) => item.key === entry.key)?.payload;
+      if (payload) entry.contentVersion = contentVersion(payload);
+    }
+    for (const entry of config.auxScenarios) {
+      if (!('source' in entry)) continue;
+      const payload = hostLocalPayloads.find((item) => item.key === entry.key)?.payload;
+      if (payload) entry.contentVersion = contentVersion(payload);
+    }
     await expect(harness.materializer.materialize({
-      sharedConfig: sharedConfig(),
+      sharedConfig: config,
       hostAccountUserId: 101,
       hostLocalPayloads: hostLocalPayloads as never,
       hostRuntime: {},
@@ -283,6 +313,21 @@ describe('Arena Room authoritative generation materializer', () => {
     })).rejects.toMatchObject({ code: 'ARENA_ROOM_HOST_LOCAL_CONTENT_VERSION_MISMATCH' });
   });
 
+  it('legacy host-local stub 缺少内容版本时 generation fail closed', async () => {
+    const harness = createHarness();
+    const config = sharedConfig();
+    delete (config.combatants[2]! as { contentVersion?: string }).contentVersion;
+    await expect(harness.materializer.materialize({
+      sharedConfig: config,
+      hostAccountUserId: 101,
+      hostLocalPayloads: [
+        { key: 'host-local:character:2:local', kind: 'character', payload: defaultLocalCharacter },
+        { key: 'host-local:scenario:0:aux', kind: 'scenario', payload: defaultLocalScenario },
+      ],
+      hostRuntime: {},
+    })).rejects.toMatchObject({ code: 'ARENA_ROOM_HOST_LOCAL_CONTENT_VERSION_MISSING' });
+  });
+
   it('canonical resolver 的 exact ref 不一致时 fail closed', async () => {
     const harness = createHarness();
     harness.content.resolveOnline.mockResolvedValueOnce(canonical(
@@ -292,8 +337,8 @@ describe('Arena Room authoritative generation materializer', () => {
       sharedConfig: sharedConfig(),
       hostAccountUserId: 101,
       hostLocalPayloads: [
-        { key: 'host-local:character:2:local', kind: 'character', payload: { name: '本地角色' } },
-        { key: 'host-local:scenario:0:aux', kind: 'scenario', payload: { title: '辅助情景' } },
+        { key: 'host-local:character:2:local', kind: 'character', payload: defaultLocalCharacter },
+        { key: 'host-local:scenario:0:aux', kind: 'scenario', payload: defaultLocalScenario },
       ],
       hostRuntime: {},
     })).rejects.toBeInstanceOf(ArenaRoomGenerationMaterializationError);

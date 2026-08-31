@@ -17,6 +17,7 @@ export type ArenaRoomGenerationMaterializationErrorCode =
   | 'ARENA_ROOM_HOST_LOCAL_PAYLOAD_INVALID'
   | 'ARENA_ROOM_HOST_LOCAL_PAYLOAD_KIND_MISMATCH'
   | 'ARENA_ROOM_HOST_LOCAL_PAYLOAD_MISMATCH'
+  | 'ARENA_ROOM_HOST_LOCAL_CONTENT_VERSION_MISSING'
   | 'ARENA_ROOM_HOST_LOCAL_CONTENT_VERSION_MISMATCH'
   | 'ARENA_ROOM_HOST_LOCAL_PAYLOAD_TYPE_MISMATCH'
   | 'ARENA_ROOM_HOST_RUNTIME_INVALID'
@@ -208,10 +209,12 @@ export const createArenaRoomGenerationMaterializer = (
         if (!local || !isPlainRecord(local.payload)) {
           return fail('ARENA_ROOM_HOST_LOCAL_PAYLOAD_INVALID');
         }
-        if (
-          entry.contentVersion !== undefined
-          && contentVersion(local.payload) !== entry.contentVersion
-        ) return fail('ARENA_ROOM_HOST_LOCAL_CONTENT_VERSION_MISMATCH');
+        if (entry.contentVersion === undefined) {
+          return fail('ARENA_ROOM_HOST_LOCAL_CONTENT_VERSION_MISSING');
+        }
+        if (contentVersion(local.payload) !== entry.contentVersion) {
+          return fail('ARENA_ROOM_HOST_LOCAL_CONTENT_VERSION_MISMATCH');
+        }
         return Object.freeze({
           payload: local.payload,
           displayName: entry.displayName,

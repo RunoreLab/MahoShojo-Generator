@@ -198,8 +198,8 @@ export const createArenaRoomHostWorkspace = (): ArenaRoomHostWorkspace => {
       ...authority.sharedConfig.materials,
     ].filter((entry) => 'source' in entry);
     if (localEntries.some((entry) => (
-      entry.contentVersion !== undefined
-      && baseline!.digests.get(entry.key) !== entry.contentVersion
+      entry.contentVersion === undefined
+      || baseline!.digests.get(entry.key) !== entry.contentVersion
     ))) return null;
     return startInputs(authority.sharedConfig, payloads);
   };
