@@ -3,6 +3,7 @@ import {
   updateBattleReportGenerationOutputHasSensitiveWords,
 } from '@/lib/database/battle-report-generations';
 import {
+  extractBattleReportRenderSnapshotV1,
   extractBattleReportGenerationErrorMessage,
   loadBattleReportGenerationOutputText,
 } from '@/lib/arena/battle-report-record-utils';
@@ -89,6 +90,7 @@ async function handler(req: Request): Promise<Response> {
     cachedTokens: record.cached_tokens,
     reasoningTokens: record.reasoning_tokens,
     userGuidance,
+    renderSnapshot: extractBattleReportRenderSnapshotV1(record.extra_json),
   });
 
   return json({

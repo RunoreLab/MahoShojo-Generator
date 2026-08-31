@@ -4,3 +4,4 @@ export * from './game-card';
 export * from './ai-execution';
 export * from './provider-profile';
 export * from './api';
+export * from './battle-report-render-snapshot';

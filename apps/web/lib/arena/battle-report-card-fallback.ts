@@ -1,4 +1,5 @@
 import type { NewsReport } from '@/components/BattleReportCard';
+import type { BattleReportRenderSnapshotV1 } from '@mahoshojo/contracts';
 import { summarizeStreamBattleReportPreview } from '@/lib/arena/stream-report-summary';
 import {
   extractStreamTelemetryMeta,
@@ -155,6 +156,27 @@ export type BattleReportCardHydrateResult = {
   liveBody?: string;
 };
 
+const applyRenderSnapshot = (
+  report: NewsReport,
+  snapshot: BattleReportRenderSnapshotV1 | null | undefined,
+  explicitUserGuidance: string | undefined,
+): NewsReport => {
+  if (!snapshot) return report;
+
+  const merged: NewsReport = {
+    ...report,
+    ...(snapshot.reporterInfo ? { reporterInfo: snapshot.reporterInfo } : {}),
+    ...(snapshot.userGuidance ? { userGuidance: snapshot.userGuidance } : {}),
+    ...(snapshot.characterGuidances ? { characterGuidances: snapshot.characterGuidances } : {}),
+    ...(snapshot.adjudicationResults ? { adjudicationResults: snapshot.adjudicationResults } : {}),
+    ...(typeof snapshot.narrativeHistoryReadCount === 'number'
+      ? { narrativeHistoryReadCount: snapshot.narrativeHistoryReadCount }
+      : {}),
+  };
+  if (explicitUserGuidance) merged.userGuidance = explicitUserGuidance;
+  return merged;
+};
+
 export async function hydrateBattleReportCardFromGenerationRecord(input: {
   generationMode: string | null | undefined;
   endpoint: string | null | undefined;
@@ -170,6 +192,7 @@ export async function hydrateBattleReportCardFromGenerationRecord(input: {
   cachedTokens: number | null;
   reasoningTokens: number | null;
   userGuidance?: string;
+  renderSnapshot?: BattleReportRenderSnapshotV1 | null;
 }): Promise<BattleReportCardHydrateResult> {
   const generationMode = typeof input.generationMode === 'string' ? input.generationMode : '';
   const endpoint = typeof input.endpoint === 'string' ? input.endpoint : '';
@@ -248,7 +271,7 @@ export async function hydrateBattleReportCardFromGenerationRecord(input: {
     }
 
     // 非流式：优先用结构化 report.article.body；若 preview 为截断 JSON，则 body 可能缺失，不强行塞 JSON。
-    return { report: merged };
+    return { report: applyRenderSnapshot(merged, input.renderSnapshot, userGuidance) };
   }
 
   // 2) 其余非空内容按 Markdown 解析；只有 stream consumer 需要保留 liveBody。
@@ -301,7 +324,8 @@ export async function hydrateBattleReportCardFromGenerationRecord(input: {
     report.narrativeHistoryReadCount = telemetryExtracted.meta.narrativeHistoryReadCount;
   }
 
+  const renderedReport = applyRenderSnapshot(report, input.renderSnapshot, userGuidance);
   return generationMode === 'stream'
-    ? { report, liveBody: stripped }
-    : { report };
+    ? { report: renderedReport, liveBody: stripped }
+    : { report: renderedReport };
 }

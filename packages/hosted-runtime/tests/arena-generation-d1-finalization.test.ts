@@ -311,6 +311,65 @@ describe('Arena D1/R2 finalization ports', () => {
     });
   });
 
+  it.each([
+    ['stream', 'api/arena/generate-stream', 'stream-markdown'],
+    ['non-stream', 'api/arena/generate', 'structured-report'],
+  ] as const)('persists the %s render snapshot without rerolling or leaking undeclared metadata', async (
+    _label,
+    endpoint,
+    outputContract,
+  ) => {
+    const client = sequentialD1([result([], 1)]);
+    const ports = createNodeArenaGenerationFinalizationPorts({
+      getD1Client: () => client,
+      now: () => new Date('2026-08-25T04:00:00.000Z'),
+    });
+    const adjudicationResults = [{
+      depth: 0,
+      description: '攻击是否命中？',
+      type: 'binary',
+      roll: 42,
+      outcome: '成功',
+      details: '掷骰(42) vs 成功率(65%)',
+    }];
+
+    await ports.claimTerminal({
+      ...claimInput,
+      payload: {
+        ...claimInput.payload,
+        __arenaServerContextV1: {
+          endpoint,
+          deliveryMode: outputContract === 'structured-report' ? 'non-stream' : 'stream',
+        },
+      },
+      metadata: {
+        outputContract,
+        reporterInfo: { name: '测试记者', publication: 'A.R.E.N.A.' },
+        userGuidance: '保持克制',
+        characterGuidances: [{ characterName: '角色甲', guidance: '保护队友' }],
+        adjudicationResults,
+        narrativeHistoryReadCount: 3,
+        rawReasoning: 'must-not-enter-render-snapshot',
+        apiKey: 'must-not-enter-render-snapshot',
+      },
+    });
+
+    const serializedExtra = client.boundCalls
+      .flat()
+      .find((value) => typeof value === 'string' && value.includes('generationOwnerHash'));
+    expect(serializedExtra).toEqual(expect.any(String));
+    const extra = JSON.parse(serializedExtra as string);
+    expect(extra.battleReportRenderSnapshotV1).toEqual({
+      version: 1,
+      reporterInfo: { name: '测试记者', publication: 'A.R.E.N.A.' },
+      userGuidance: '保持克制',
+      characterGuidances: [{ characterName: '角色甲', guidance: '保护队友' }],
+      adjudicationResults,
+      narrativeHistoryReadCount: 3,
+    });
+    expect(JSON.stringify(extra.battleReportRenderSnapshotV1)).not.toContain('must-not-enter-render-snapshot');
+  });
+
   it('writes PVP columns only from the trusted server context', async () => {
     const unsignedClient = sequentialD1([result([], 1)]);
     const unsignedPorts = createNodeArenaGenerationFinalizationPorts({
@@ -554,6 +613,14 @@ describe('Arena D1/R2 finalization ports', () => {
             currentStateSummary: 'x'.repeat(10_000),
           })),
         },
+        adjudicationResults: Array.from({ length: 16 }, (_, index) => ({
+          depth: 0,
+          description: `event-${index}`,
+          type: 'binary',
+          roll: 50,
+          outcome: '成功',
+          details: 'x'.repeat(2_000),
+        })),
       },
     };
 
@@ -571,6 +638,8 @@ describe('Arena D1/R2 finalization ports', () => {
       .toBeLessThanOrEqual(MAX_ARENA_TERMINAL_EXTRA_JSON_BYTES);
     expect(JSON.parse(serializedExtra as string).combatantsFallback)
       .toHaveLength(MAX_ARENA_TERMINAL_COMBATANTS);
+    expect(JSON.parse(serializedExtra as string).battleReportRenderSnapshotV1.adjudicationResults)
+      .toHaveLength(16);
     const combatantWrites = vi.mocked(client.prepare).mock.calls.filter(([sql]) => (
       sql.includes('battle_report_generation_combatants')
       && sql.includes('WHERE NOT EXISTS')

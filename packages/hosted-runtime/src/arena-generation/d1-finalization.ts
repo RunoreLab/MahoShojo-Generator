@@ -9,6 +9,7 @@ import type {
   ArenaGenerationFinalizationPorts,
   ArenaTerminalClaimInput,
 } from './finalization';
+import { parseBattleReportRenderSnapshotV1 } from '@mahoshojo/contracts';
 import { parseArenaStructuredReportJson } from './structured-report';
 import { buildArenaTerminalEffectIdempotencyKey } from './finalization';
 import type { NodeDataD1Client } from '../node-runtime/data-ports';
@@ -327,6 +328,28 @@ const buildExtraJson = async (
   const report = terminalReport(input);
   const officialReport = recordOf(report?.officialReport);
   const scenario = recordOf(input.payload.scenario);
+  const snapshotReporterInfo = recordOf(input.metadata.reporterInfo);
+  const battleReportRenderSnapshotV1 = parseBattleReportRenderSnapshotV1({
+    version: 1,
+    ...(snapshotReporterInfo ? {
+      reporterInfo: {
+        name: snapshotReporterInfo.name,
+        publication: snapshotReporterInfo.publication,
+      },
+    } : {}),
+    ...(typeof input.metadata.userGuidance === 'string'
+      ? { userGuidance: input.metadata.userGuidance }
+      : {}),
+    ...(Array.isArray(input.metadata.characterGuidances)
+      ? { characterGuidances: input.metadata.characterGuidances }
+      : {}),
+    ...(Array.isArray(input.metadata.adjudicationResults)
+      ? { adjudicationResults: input.metadata.adjudicationResults }
+      : {}),
+    ...(typeof input.metadata.narrativeHistoryReadCount === 'number'
+      ? { narrativeHistoryReadCount: input.metadata.narrativeHistoryReadCount }
+      : {}),
+  });
   const reconciliationCandidate = {
     report: {
       headline: boundedString(report?.headline, 300) ?? headlineFromMarkdown(input.markdown) ?? '',
@@ -407,11 +430,13 @@ const buildExtraJson = async (
     resolvedModelOverride: boundedString(input.telemetry.model, 256),
     combatantsFallback,
     localCardReconciliation,
+    ...(battleReportRenderSnapshotV1 ? { battleReportRenderSnapshotV1 } : {}),
   };
   if (jsonBytes(candidate) <= MAX_ARENA_TERMINAL_EXTRA_JSON_BYTES) return candidate;
   const compact = {
     ...authority,
     combatantsFallback,
+    ...(battleReportRenderSnapshotV1 ? { battleReportRenderSnapshotV1 } : {}),
     localCardReconciliation: {
       available: false,
       reason: 'manifest_budget_exceeded',
@@ -423,6 +448,7 @@ const buildExtraJson = async (
   return {
     ...authority,
     combatantsFallback: [],
+    ...(battleReportRenderSnapshotV1 ? { battleReportRenderSnapshotV1 } : {}),
     localCardReconciliation: {
       available: false,
       reason: 'manifest_budget_exceeded',

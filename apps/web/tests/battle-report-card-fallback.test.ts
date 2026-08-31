@@ -3,6 +3,60 @@ import { describe, expect, it } from 'vitest';
 import { hydrateBattleReportCardFromGenerationRecord } from '@/lib/arena/battle-report-card-fallback';
 
 describe('hydrateBattleReportCardFromGenerationRecord', () => {
+  it.each([
+    ['stream', '# 快照战报\n\n正文。\n\n## 胜利者\n角色甲'],
+    ['non-stream', JSON.stringify({
+      headline: '快照战报',
+      reporterInfo: { name: '模型记者', publication: '模型来源' },
+      article: { body: '正文。', analysis: '' },
+      officialReport: { winner: '角色甲', conclusion: '' },
+    })],
+  ] as const)('restores the %s render snapshot without rerolling adjudication results', async (
+    generationMode,
+    outputPreview,
+  ) => {
+    const adjudicationResults = [{
+      depth: 0,
+      description: '攻击是否命中？',
+      type: 'binary' as const,
+      roll: 42,
+      outcome: '成功',
+      details: '掷骰(42) vs 成功率(65%)',
+    }];
+
+    const result = await hydrateBattleReportCardFromGenerationRecord({
+      generationMode,
+      endpoint: generationMode === 'stream' ? 'api/arena/generate-stream' : 'api/arena/generate',
+      mode: 'classic',
+      scenarioTitle: null,
+      headline: null,
+      winner: null,
+      outputPreview,
+      aiModel: null,
+      promptTokens: null,
+      completionTokens: null,
+      totalTokens: null,
+      cachedTokens: null,
+      reasoningTokens: null,
+      renderSnapshot: {
+        version: 1,
+        reporterInfo: { name: '即时记者', publication: 'A.R.E.N.A.' },
+        userGuidance: '保持克制',
+        characterGuidances: [{ characterName: '角色甲', guidance: '保护队友' }],
+        adjudicationResults,
+        narrativeHistoryReadCount: 3,
+      },
+    });
+
+    expect(result.report).toMatchObject({
+      reporterInfo: { name: '即时记者', publication: 'A.R.E.N.A.' },
+      userGuidance: '保持克制',
+      characterGuidances: [{ characterName: '角色甲', guidance: '保护队友' }],
+      adjudicationResults,
+      narrativeHistoryReadCount: 3,
+    });
+  });
+
   it('hydrates stream preview and strips telemetry meta', async () => {
     const markdown = `
 # 破晓之战

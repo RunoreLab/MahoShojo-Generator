@@ -16,6 +16,7 @@ vi.mock('@/lib/r2', () => ({
 import {
   buildBattleReportGenerationCombatantInserts,
   extractBattleReportGenerationErrorMessage,
+  extractBattleReportRenderSnapshotV1,
   loadBattleReportGenerationOutputText,
 } from '@/lib/arena/battle-report-record-utils';
 
@@ -29,6 +30,28 @@ describe('battle-report-record-utils', () => {
     expect(extractBattleReportGenerationErrorMessage('')).toBeNull();
     expect(extractBattleReportGenerationErrorMessage('{"stage":"x"}')).toBeNull();
     expect(extractBattleReportGenerationErrorMessage('{"errorMessage":"  上游限流  "}')).toBe('上游限流');
+  });
+
+  test('extractBattleReportRenderSnapshotV1: 只恢复通过共享 contract 的版本化快照', () => {
+    const snapshot = {
+      version: 1,
+      adjudicationResults: [{
+        depth: 0,
+        description: '攻击是否命中？',
+        type: 'binary',
+        roll: 42,
+        outcome: '成功',
+        details: '掷骰(42) vs 成功率(65%)',
+      }],
+    };
+
+    expect(extractBattleReportRenderSnapshotV1(JSON.stringify({
+      battleReportRenderSnapshotV1: snapshot,
+    }))).toEqual(snapshot);
+    expect(extractBattleReportRenderSnapshotV1(JSON.stringify({
+      battleReportRenderSnapshotV1: { ...snapshot, apiKey: 'secret' },
+    }))).toBeNull();
+    expect(extractBattleReportRenderSnapshotV1('{bad json')).toBeNull();
   });
 
   test('buildBattleReportGenerationCombatantInserts: 为预设角色生成标准写库行', () => {

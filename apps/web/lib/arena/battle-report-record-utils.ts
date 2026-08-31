@@ -1,6 +1,10 @@
 import type { BattleReportGenerationCombatantInsert } from '@/lib/database/battle-report-generation-combatants';
 import { getLargeObjectByOwnerRef } from '@/lib/database/large-objects';
 import { getObjectText } from '@/lib/r2';
+import {
+  parseBattleReportRenderSnapshotV1,
+  type BattleReportRenderSnapshotV1,
+} from '@mahoshojo/contracts';
 
 const normalizeOptionalString = (value: unknown): string | null => {
   if (typeof value !== 'string') return null;
@@ -16,6 +20,19 @@ export function extractBattleReportGenerationErrorMessage(extraJson: string | nu
     const errorMessage = normalizeOptionalString(parsed?.errorMessage);
     if (!errorMessage) return null;
     return errorMessage.length <= 300 ? errorMessage : `${errorMessage.slice(0, 300)}…`;
+  } catch {
+    return null;
+  }
+}
+
+export function extractBattleReportRenderSnapshotV1(
+  extraJson: string | null | undefined,
+): BattleReportRenderSnapshotV1 | null {
+  if (typeof extraJson !== 'string' || !extraJson.trim()) return null;
+
+  try {
+    const parsed = JSON.parse(extraJson) as Record<string, unknown>;
+    return parseBattleReportRenderSnapshotV1(parsed?.battleReportRenderSnapshotV1);
   } catch {
     return null;
   }
