@@ -147,6 +147,27 @@ describe('Arena multiplayer generation bridge', () => {
     expect(JSON.stringify(state)).not.toContain('secret-must-stay-transient');
   });
 
+  it('matrix 外 generation 字段在离开 bridge 前 fail closed', async () => {
+    const state = stateFor('host');
+    const startGeneration = vi.fn(async () => {});
+    const controller = {
+      getSnapshot: () => state,
+      startGeneration,
+    } as unknown as ArenaRoomController;
+
+    await expect(dispatchArenaRoomGenerationStart({
+      controller,
+      state,
+      sharedConfig,
+      generationRequestId: 'request-unclassified-1',
+      generation: {
+        generationRequestId: 'request-unclassified-1',
+        unclassifiedSemantic: { shadowAuthority: true },
+      },
+    })).rejects.toThrow('ARENA_GENERATION_FIELD_UNCLASSIFIED:unclassifiedSemantic');
+    expect(startGeneration).not.toHaveBeenCalled();
+  });
+
   it('starting/unavailable 只开放显式 retry，不把它误当成新 start', async () => {
     const base = stateFor('host', 'unavailable');
     const mirror = {

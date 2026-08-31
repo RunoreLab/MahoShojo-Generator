@@ -1,4 +1,5 @@
 import type { ArenaRoomSharedConfig } from '@mahoshojo/contracts/arena-room';
+import { assertArenaGenerationRequestFieldsClassified } from '@mahoshojo/multiplayer-core';
 
 import type {
   ArenaRoomController,
@@ -102,7 +103,7 @@ export const dispatchArenaRoomGenerationStart = async (
     expectedRevision: captured.snapshot.revision,
     generationRequestId: options.generationRequestId,
     sharedConfig: options.sharedConfig,
-    generation: options.generation,
+    generation: assertArenaGenerationRequestFieldsClassified(options.generation),
   });
   return 'submitted';
 };

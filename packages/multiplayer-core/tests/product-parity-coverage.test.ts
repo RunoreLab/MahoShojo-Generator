@@ -99,6 +99,17 @@ describe('GMR-10P Arena 产品一致性覆盖矩阵', () => {
     ]);
   });
 
+  it('运行时拒绝 matrix 外 generation semantic field', () => {
+    const classified = { generationRequestId: 'request-1', combatants: [] };
+
+    expect(multiplayerCore.assertArenaGenerationRequestFieldsClassified(classified)).toBe(classified);
+    expect(() => multiplayerCore.assertArenaGenerationRequestFieldsClassified({
+      ...classified,
+      unclassifiedSemantic: true,
+    }))
+      .toThrow('ARENA_GENERATION_FIELD_UNCLASSIFIED:unclassifiedSemantic');
+  });
+
   it('[GMR10P-A-SHARED-PROPOSAL-COVERAGE] 覆盖 SharedConfig 与 Proposal variant', () => {
     const matrix = coverage();
     const sharedConfigTopLevelFields = new Set(

@@ -408,6 +408,26 @@ export type ArenaGenerationRequestCoverageShape = Readonly<
   Record<ArenaGenerationRequestSemanticField, unknown>
 >;
 
+const classifiedGenerationRequestFields = new Set<string>(
+  Object.keys(ARENA_PRODUCT_PARITY_COVERAGE.generationRequest),
+);
+
+/**
+ * Runtime counterpart of defineArenaGenerationRequest. It intentionally checks
+ * only whether every supplied semantic field has a matrix row; B owns value
+ * materialization and server authority validation.
+ */
+export const assertArenaGenerationRequestFieldsClassified = <
+  const Request extends Readonly<Record<string, unknown>>,
+>(request: Request): Request => {
+  for (const field of Object.keys(request)) {
+    if (!classifiedGenerationRequestFields.has(field)) {
+      throw new Error(`ARENA_GENERATION_FIELD_UNCLASSIFIED:${field}`);
+    }
+  }
+  return request;
+};
+
 type RejectUnclassifiedGenerationFields<Request extends ArenaGenerationRequestCoverageShape> =
   Request & Record<Exclude<keyof Request, ArenaGenerationRequestSemanticField>, never>;
 
