@@ -202,6 +202,18 @@ export const createArenaGenerationActorResolvers = (
   });
 };
 
+/**
+ * @deprecated PVP create 需要 parsed payload authority；生产代码应使用
+ * `createArenaGenerationActorResolvers` 的两阶段 resolver。
+ */
 export const createArenaGenerationActorResolver = (
   options: ArenaGenerationActorResolverOptions,
-): ArenaActorResolver => createArenaGenerationActorResolvers(options).resolveActor;
+): ArenaActorResolver => {
+  const { resolveActor } = createArenaGenerationActorResolvers(options);
+  return (request) => {
+    if (request.headers.has(ARENA_PVP_GENERATION_SIGNATURE_HEADER)) {
+      return Promise.resolve(null);
+    }
+    return resolveActor(request);
+  };
+};

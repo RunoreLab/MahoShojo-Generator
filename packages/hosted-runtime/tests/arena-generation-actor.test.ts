@@ -99,6 +99,23 @@ describe('Arena generation actor resolver', () => {
       .resolves.toBeNull();
   });
 
+  it('legacy 单阶段 resolver 对 PVP 请求 fail closed', async () => {
+    const signatures = await createSignatures();
+    const resolveActor = createArenaGenerationActorResolver({
+      env: { HONO_AUTH_MODE: 'bearer' },
+      signatures,
+      pvpSignatures: signatures,
+      getD1Client: () => d1([{ id: 42 }]),
+    });
+
+    await expect(resolveActor(new Request('https://example.test', {
+      headers: {
+        Authorization: 'Bearer caller-one',
+        [ARENA_PVP_GENERATION_SIGNATURE_HEADER]: 'a'.repeat(64),
+      },
+    }))).resolves.toBeNull();
+  });
+
   it('keeps anonymous ownership stable across network changes with a signed token', async () => {
     const signatures = await createSignatures();
     const resolveActor = createArenaGenerationActorResolver({
