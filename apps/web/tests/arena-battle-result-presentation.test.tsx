@@ -50,6 +50,8 @@ import {
   BattleResultPresentation,
   type BattleResultPresentationProps,
 } from '@/components/arena/components/BattleResultPresentation';
+import { ArenaRoomGenerationResult } from '@/components/arena/multiplayer/ArenaMultiplayerPanel';
+import type { ArenaRoomControllerState } from '@/lib/arena-room/controller';
 
 const render = (props: BattleResultPresentationProps) => renderToStaticMarkup(
   <BattleResultPresentation {...props} />,
@@ -138,5 +140,88 @@ describe('BattleResultPresentation', () => {
     expect(onSaveImage).toHaveBeenCalledWith('blob:room-report');
     await act(async () => root.unmount());
     container.remove();
+  });
+
+  it('GMR-10P-G host/member 由同一权威终态得到完全一致的共享战报呈现', () => {
+    const stateFor = (role: 'host' | 'member'): ArenaRoomControllerState => ({
+      phase: 'connected',
+      rooms: [],
+      session: {
+        protocolVersion: 1,
+        roomId: 'room-golden',
+        roomEpoch: 'epoch-golden',
+        self: {
+          userId: role === 'host' ? 'host-1' : 'member-1',
+          role,
+          displayName: role,
+          membershipState: 'active',
+        },
+        snapshot: {
+          protocolVersion: 1,
+          schemaVersion: 1,
+          roomId: 'room-golden',
+          roomEpoch: 'epoch-golden',
+          revision: 1,
+          controlSeq: 4,
+          sharedConfig: {} as never,
+          members: [],
+          proposals: [],
+          activeGeneration: null,
+        },
+      },
+      notice: null,
+      error: null,
+      unknownOperation: null,
+      proposalOperation: null,
+      proposalResultUnknown: false,
+      configPublishPending: false,
+      configPublishResultUnknown: false,
+      managementOperation: null,
+      managementResultUnknown: false,
+      generation: {
+        mirror: null,
+        phase: 'completed',
+        status: 'completed',
+        authoritativeMarkdown: '# 权威终局',
+        markdown: '# 权威终局',
+        storyCursor: { generationId: 'generation-golden', chunkSeq: 3 },
+        gap: null,
+        finalAuthoritative: true,
+        generationRecordId: 'record-golden',
+        errorCode: null,
+        pendingRequestId: null,
+        startResultUnknown: false,
+        result: {
+          version: 1,
+          format: 'stream-markdown',
+          mode: 'scenario',
+          scenarioDisplayName: '守城战',
+          reporterInfo: { name: '记者', publication: '房间日报' },
+          sharedGuidance: '以协作守城为主线',
+          ai: {
+            model: 'safe-model-name',
+            usage: { promptTokens: 12, completionTokens: 34, totalTokens: 46 },
+          },
+          combatantUpdates: [{
+            combatantKey: 'data-card:character-2',
+            displayName: '角色二',
+            impact: '守住北门',
+            currentStateSummary: '轻伤但仍可行动',
+          }],
+        },
+      },
+    });
+
+    const hostHtml = renderToStaticMarkup(<ArenaRoomGenerationResult state={stateFor('host')} />);
+    const memberHtml = renderToStaticMarkup(<ArenaRoomGenerationResult state={stateFor('member')} />);
+
+    expect(memberHtml).toBe(hostHtml);
+    expect(memberHtml).toContain('data-testid="streaming-report-card"');
+    expect(memberHtml).toContain('# 权威终局');
+    expect(memberHtml).toContain('角色二');
+    expect(memberHtml).toContain('轻伤但仍可行动');
+    expect(memberHtml).not.toContain('重做角色更新');
+    expect(memberHtml).not.toContain('应用手动修改');
+    expect(memberHtml).not.toContain('provider-secret');
   });
 });
