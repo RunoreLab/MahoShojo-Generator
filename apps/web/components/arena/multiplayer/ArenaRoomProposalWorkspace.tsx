@@ -3,6 +3,8 @@
 import { useMemo, useRef, useState } from 'react';
 
 import BattleDataModal from '@/components/BattleDataModal';
+import { PresetGridPicker } from '@/components/PresetGridPicker';
+import { ScenarioPresetGridPicker } from '@/components/ScenarioPresetGridPicker';
 import { CollapsibleSection } from '@/components/shared/CollapsibleSection';
 import { ONLINE_DATA_CARD_TYPES } from '@mahoshojo/contracts/data-cards';
 import type {
@@ -24,6 +26,9 @@ import { BattleSettings } from '../components/BattleSettings';
 import { StoryOptions } from '../components/StoryOptions';
 import { useLanguagesQuery } from '../hooks/useArenaData';
 import type { ArenaRoomController, ArenaRoomControllerState } from '@/lib/arena-room/controller';
+import { PRESET_LIST, type Preset } from '@/lib/presets';
+import { SCENARIO_PRESET_LIST, type ScenarioPreset } from '@/lib/scenario-presets';
+import { ARENA_ROOM_PRESET_CATALOG } from '@/lib/arena-room/generated/arena-room-preset-catalog';
 import {
   ArenaProposalSelectionDetails,
   ArenaMemberProposalStatus,
@@ -44,6 +49,14 @@ const buttonClass = 'rounded-lg border px-3 py-2 text-sm font-medium transition-
 const primaryButtonClass = `${buttonClass} border-fuchsia-600 bg-fuchsia-600 text-white hover:bg-fuchsia-700`;
 const secondaryButtonClass = `${buttonClass} border-gray-300 bg-white text-gray-800 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800`;
 const dangerButtonClass = `${buttonClass} border-red-300 bg-white text-red-700 hover:bg-red-50 dark:border-red-800 dark:bg-gray-900 dark:text-red-300`;
+
+const proposalCharacterPresets: Preset[] = PRESET_LIST.filter((preset) => (
+  ARENA_ROOM_PRESET_CATALOG.some((entry) => entry.kind === 'character' && entry.id === preset.filename)
+));
+
+const proposalScenarioPresets: ScenarioPreset[] = SCENARIO_PRESET_LIST.filter((preset) => (
+  ARENA_ROOM_PRESET_CATALOG.some((entry) => entry.kind === 'scenario' && entry.id === preset.filename)
+));
 
 const readText = (value: unknown): string => typeof value === 'string' ? value.trim() : '';
 
@@ -163,6 +176,8 @@ const ProposalWorkspaceInner = ({
   const snapshot = useArenaEditorSelector((value) => value);
   const { data: languages } = useLanguagesQuery();
   const [modalKind, setModalKind] = useState<ModalKind | null>(null);
+  const [characterPresetPage, setCharacterPresetPage] = useState(1);
+  const [scenarioPresetPage, setScenarioPresetPage] = useState(1);
   const [newTeamName, setNewTeamName] = useState('');
   const [preview, setPreview] = useState<readonly ArenaProposalChange[] | null>(null);
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
@@ -176,6 +191,19 @@ const ProposalWorkspaceInner = ({
     if (modalKind === 'material') return snapshot.materials.flatMap((item) => item.reference ? [item.reference.id] : []);
     return [];
   }, [modalKind, snapshot.auxScenarios, snapshot.combatants, snapshot.materials, snapshot.scenario]);
+
+  const selectedCharacterPresetFilenames = useMemo(
+    () => snapshot.combatants
+      .filter((item) => item.source === 'preset')
+      .map((item) => item.key.slice('preset:'.length)),
+    [snapshot.combatants],
+  );
+  const selectedScenarioPresetFilenames = useMemo(() => [
+    ...(snapshot.scenario?.source === 'preset' ? [snapshot.scenario.key.slice('preset:'.length)] : []),
+    ...snapshot.auxScenarios
+      .filter((item) => item.source === 'preset')
+      .map((item) => item.key.slice('preset:'.length)),
+  ], [snapshot.auxScenarios, snapshot.scenario]);
 
   const mutate = (update: (draft: ArenaRoomSharedConfig) => ArenaRoomSharedConfig): void => {
     try {
@@ -254,6 +282,43 @@ const ProposalWorkspaceInner = ({
     }
   };
 
+  const toggleCharacterPreset = (preset: Preset): void => {
+    const key = `preset:${preset.filename}`;
+    const entry = ARENA_ROOM_PRESET_CATALOG.find((item) => item.kind === 'character' && item.id === preset.filename);
+    if (!entry) return setLocalError('预设角色元数据不可用，请刷新后重试');
+    mutate((draft) => ({
+      ...draft,
+      combatants: draft.combatants.some((item) => item.key === key)
+        ? draft.combatants.filter((item) => item.key !== key)
+        : [...draft.combatants, {
+            key,
+            ref: { id: entry.id, kind: 'character' as const, versionToken: entry.versionToken },
+          }],
+      teams: draft.combatants.some((item) => item.key === key)
+        ? draft.teams.map((team) => ({
+            ...team,
+            combatantKeys: team.combatantKeys.filter((item) => item !== key),
+          }))
+        : draft.teams,
+    }));
+  };
+
+  const toggleScenarioPreset = (preset: ScenarioPreset): void => {
+    const key = `preset:${preset.filename}`;
+    const entry = ARENA_ROOM_PRESET_CATALOG.find((item) => item.kind === 'scenario' && item.id === preset.filename);
+    if (!entry) return setLocalError('预设情景元数据不可用，请刷新后重试');
+    mutate((draft) => {
+      if (draft.scenario?.key === key) return { ...draft, scenario: null };
+      if (draft.auxScenarios.some((item) => item.key === key)) {
+        return { ...draft, auxScenarios: draft.auxScenarios.filter((item) => item.key !== key) };
+      }
+      const next = { key, ref: { id: entry.id, kind: 'scenario' as const, versionToken: entry.versionToken } };
+      return draft.scenario === null
+        ? { ...draft, scenario: next }
+        : { ...draft, auxScenarios: [...draft.auxScenarios, next] };
+    });
+  };
+
   const buildPreview = (): void => {
     try {
       const result = editor.preview();
@@ -298,6 +363,19 @@ const ProposalWorkspaceInner = ({
         <div className="min-w-0 space-y-4">
           <CollapsibleSection title="🌐 在线角色库" description="仅公开且审核通过的数据卡" defaultOpen>
             <button type="button" className={primaryButtonClass} onClick={() => setModalKind('character')}>浏览在线角色库</button>
+            {editor.capabilities.canAddPresetRefs ? (
+              <div className="mt-3 border-t pt-3 dark:border-gray-800">
+                <PresetGridPicker
+                  title="选择内置预设角色"
+                  presets={proposalCharacterPresets}
+                  currentPage={characterPresetPage}
+                  onPageChange={setCharacterPresetPage}
+                  disabled={disabled}
+                  selectedFilenames={selectedCharacterPresetFilenames}
+                  onToggle={toggleCharacterPreset}
+                />
+              </div>
+            ) : null}
           </CollapsibleSection>
           <CollapsibleSection title="👥 已选角色 / 分队" description={`已选 ${snapshot.combatants.length}`} defaultOpen keepMounted>
             <div className="mb-3 flex gap-2">
@@ -400,7 +478,9 @@ const ProposalWorkspaceInner = ({
               items={snapshot.combatants.map((item) => ({
                 ...item,
                 displayName: item.name,
-                typeLabel: item.type ?? (item.access === 'stub' ? '房主本地角色' : '在线角色'),
+                typeLabel: item.type ?? (
+                  item.source === 'preset' ? '内置预设' : item.access === 'stub' ? '房主本地角色' : '在线角色'
+                ),
                 guidance: item.characterGuidance,
               }))}
               emptyLabel="房间配置没有角色"
@@ -473,6 +553,19 @@ const ProposalWorkspaceInner = ({
               {snapshot.scenario ? <button type="button" className={dangerButtonClass} onClick={() => mutate((draft) => ({ ...draft, scenario: null }))}>清除主情景</button> : null}
               <button type="button" className={secondaryButtonClass} onClick={() => setModalKind('auxScenario')}>选择辅助情景</button>
             </div>
+            {editor.capabilities.canAddPresetRefs ? (
+              <div className="mt-3 border-t pt-3 dark:border-gray-800">
+                <ScenarioPresetGridPicker
+                  title="选择内置预设情景（可作主情景或辅助情景）"
+                  presets={proposalScenarioPresets}
+                  currentPage={scenarioPresetPage}
+                  onPageChange={setScenarioPresetPage}
+                  disabled={disabled}
+                  selectedFilenames={selectedScenarioPresetFilenames}
+                  onToggle={toggleScenarioPreset}
+                />
+              </div>
+            ) : null}
             <ArenaAuxScenarioList
               items={snapshot.auxScenarios.map((item) => ({ key: item.key, title: item.name }))}
               disabled={disabled}
@@ -488,9 +581,16 @@ const ProposalWorkspaceInner = ({
           </CollapsibleSection>
           <CollapsibleSection title="📎 素材注入" description={`已选 ${snapshot.materials.length}`} defaultOpen={false} keepMounted>
             <button type="button" className={secondaryButtonClass} onClick={() => setModalKind('material')}>浏览在线数据卡</button>
+            <p className="mt-2 text-xs text-gray-500">内置素材预设暂缓：当前无 server-known material registry，避免未验证 payload 进入 Proposal。</p>
             <div className="mt-3">
               <ArenaMaterialList
-                items={snapshot.materials.map((item) => ({ key: item.key, name: item.name, sourceLabel: '公开在线数据卡' }))}
+                items={snapshot.materials.map((item) => ({
+                  key: item.key,
+                  name: item.name,
+                  sourceLabel: item.source === 'preset'
+                    ? '内置预设'
+                    : item.source === 'host-local' ? '房主本地素材' : '公开在线数据卡',
+                }))}
                 disabled={disabled}
                 onMove={(fromIndex, toIndex) => mutate((draft) => ({
                   ...draft,

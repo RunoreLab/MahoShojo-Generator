@@ -196,6 +196,30 @@ describe('GMR-10P Arena 产品一致性覆盖矩阵', () => {
     }
   });
 
+  it('preset 角色/情景进入 shared/proposable，material preset 保持有理由 deferred', () => {
+    const matrix = coverage();
+    expect(matrix.arenaUi.combatantPreset).toMatchObject({
+      classification: 'shared/proposable',
+      roomProposal: 'editable',
+      contractChangeTypes: ['addCombatant'],
+    });
+    expect(matrix.arenaUi.scenarioPreset).toMatchObject({
+      classification: 'shared/proposable',
+      roomProposal: 'editable',
+      contractChangeTypes: ['setScenario'],
+    });
+    expect(matrix.arenaUi.auxScenarioPreset).toMatchObject({
+      classification: 'shared/proposable',
+      roomProposal: 'editable',
+      contractChangeTypes: ['addAuxScenario'],
+    });
+    expect(matrix.arenaUi.materialPreset).toMatchObject({
+      classification: 'deferred-with-reason',
+      roomProposal: 'deferred',
+      reason: expect.stringMatching(/server.*registry|registry.*material/u),
+    });
+  });
+
   it('[GMR10P-A-ARENA-UI-CONTRACT] 以现有 Arena UI 而非三字段 editor 作为 contract', () => {
     const matrix = coverage();
 

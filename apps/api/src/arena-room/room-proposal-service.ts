@@ -21,7 +21,13 @@ import {
   ArenaDataCardRefVerifierError,
   type ArenaDataCardRefVerifier,
 } from './arena-data-card-ref-verifier';
-import { canonicalArenaRoomSharedConfigRefs } from './arena-room-shared-config-refs';
+import {
+  ArenaRoomPresetRefVerifierError,
+  canonicalArenaRoomSharedConfigRefs,
+  verifyArenaRoomPresetRefs,
+  verifyArenaRoomSharedConfigPresetRefs,
+} from './arena-room-shared-config-refs';
+import type { ArenaRoomGenerationPresetResolver } from './room-generation-preset-registry';
 import type {
   ArenaRoomMembershipService,
   ResolvedArenaRoomMembership,
@@ -80,6 +86,7 @@ export type ArenaRoomProposalService = {
 export type ArenaRoomProposalServiceOptions = {
   readonly memberships: Pick<ArenaRoomMembershipService, 'resolveActiveByAccount'>;
   readonly references: ArenaDataCardRefVerifier;
+  readonly presets?: Pick<ArenaRoomGenerationPresetResolver, 'resolve'>;
   readonly now?: () => string;
 };
 
@@ -180,8 +187,13 @@ const uniqueRefs = (refs: readonly DataCardRef[]): readonly DataCardRef[] => {
   });
 };
 
+const presetChange = (change: ArenaProposalChange): boolean => (
+  ('key' in change && typeof change.key === 'string' && change.key.startsWith('preset:'))
+);
+
 const introducedRefs = (changes: readonly ArenaProposalChange[]): readonly DataCardRef[] => (
   uniqueRefs(changes.flatMap((change) => {
+    if (presetChange(change)) return [];
     switch (change.type) {
       case 'addCombatant':
       case 'addAuxScenario':
@@ -191,6 +203,28 @@ const introducedRefs = (changes: readonly ArenaProposalChange[]): readonly DataC
     }
   }))
 );
+
+const introducedPresetRefs = (changes: readonly ArenaProposalChange[]): readonly DataCardRef[] => (
+  uniqueRefs(changes.flatMap((change) => {
+    if (!presetChange(change)) return [];
+    switch (change.type) {
+      case 'addCombatant':
+      case 'addAuxScenario': return [change.ref];
+      case 'setScenario': return change.ref === null ? [] : [change.ref];
+      default: return [];
+    }
+  }))
+);
+
+const mapPresetReferenceError = (error: unknown): never => {
+  if (!(error instanceof ArenaRoomPresetRefVerifierError)) throw error;
+  switch (error.code) {
+    case 'ARENA_ROOM_PRESET_REF_INPUT_INVALID': return fail('ROOM_PROPOSAL_INPUT_INVALID');
+    case 'ARENA_ROOM_PRESET_REF_NOT_FOUND':
+    case 'ARENA_ROOM_PRESET_REF_VERSION_MISMATCH': return fail('ROOM_REFERENCE_STALE');
+    default: return fail('ROOM_REFERENCE_UNAVAILABLE');
+  }
+};
 
 const hostAccountUserId = (state: ArenaRoomAuthorityState): number => {
   const host = state.memberAuthority.find((record) => (
@@ -280,6 +314,14 @@ export const createArenaRoomProposalService = (
         refs: introducedRefs(request.data.changes),
         hostAccountUserId: hostAccountUserId(membership.state),
       });
+      try {
+        await verifyArenaRoomPresetRefs({
+          presets: options.presets,
+          refs: introducedPresetRefs(request.data.changes),
+        });
+      } catch (error) {
+        mapPresetReferenceError(error);
+      }
       const timestamp = monotonicTimestamp(now, membership.state);
       const proposal = ArenaProposalSchema.parse({
         proposalVersion: 1,
@@ -340,6 +382,14 @@ export const createArenaRoomProposalService = (
           refs: canonicalArenaRoomSharedConfigRefs(applied.config),
           hostAccountUserId: membership.accountUserId,
         });
+        try {
+          await verifyArenaRoomSharedConfigPresetRefs({
+            presets: options.presets,
+            sharedConfig: applied.config,
+          });
+        } catch (error) {
+          mapPresetReferenceError(error);
+        }
       }
 
       const timestamp = monotonicTimestamp(now, membership.state);

@@ -3,7 +3,7 @@ import type {
   ArenaRoomSharedConfig,
 } from '@mahoshojo/contracts/arena-room';
 
-import { canonicalDataCardKey, deepClone, deepEqual } from './utils';
+import { canonicalResourceKey, deepClone, deepEqual } from './utils';
 
 const assignmentOf = (config: ArenaRoomSharedConfig, combatantKey: string): string | null => {
   for (const team of config.teams) {
@@ -35,7 +35,7 @@ const collaborativeTarget = (change: ArenaProposalChange): string => {
   switch (change.type) {
     case 'addCombatant':
     case 'removeCombatant':
-      return `combatant:${change.type === 'addCombatant' ? canonicalDataCardKey(change.ref.id) : change.combatantKey}`;
+      return `combatant:${change.type === 'addCombatant' ? canonicalResourceKey(change.ref.id, change.key) : change.combatantKey}`;
     case 'setCharacterGuidance':
       return `combatant-guidance:${change.combatantKey}`;
     case 'assignTeam':
@@ -59,12 +59,12 @@ const collaborativeTarget = (change: ArenaProposalChange): string => {
       return 'scenario';
     case 'addAuxScenario':
     case 'removeAuxScenario':
-      return `aux-scenario:${change.type === 'addAuxScenario' ? canonicalDataCardKey(change.ref.id) : change.scenarioKey}`;
+      return `aux-scenario:${change.type === 'addAuxScenario' ? canonicalResourceKey(change.ref.id, change.key) : change.scenarioKey}`;
     case 'reorderAuxScenarios':
       return 'aux-scenarios-order';
     case 'addMaterial':
     case 'removeMaterial':
-      return `material:${change.type === 'addMaterial' ? canonicalDataCardKey(change.ref.id) : change.materialKey}`;
+      return `material:${change.type === 'addMaterial' ? canonicalResourceKey(change.ref.id, change.key) : change.materialKey}`;
     case 'reorderMaterials':
       return 'materials-order';
     case 'setUserGuidance':
@@ -84,7 +84,7 @@ export const hasCollaborativeChangeEffect = (
   switch (change.type) {
     case 'addCombatant':
       return refMatches(
-        config.combatants.find((entry) => entry.key === canonicalDataCardKey(change.ref.id)),
+        config.combatants.find((entry) => entry.key === canonicalResourceKey(change.ref.id, change.key)),
         change.ref,
       );
     case 'removeCombatant':
@@ -121,7 +121,7 @@ export const hasCollaborativeChangeEffect = (
         : refMatches(config.scenario ?? undefined, change.ref);
     case 'addAuxScenario':
       return refMatches(
-        config.auxScenarios.find((entry) => entry.key === canonicalDataCardKey(change.ref.id)),
+        config.auxScenarios.find((entry) => entry.key === canonicalResourceKey(change.ref.id, change.key)),
         change.ref,
       );
     case 'removeAuxScenario':
@@ -130,7 +130,7 @@ export const hasCollaborativeChangeEffect = (
       return retainsRelativeOrder(config.auxScenarios.map((entry) => entry.key), change.value);
     case 'addMaterial':
       return refMatches(
-        config.materials.find((entry) => entry.key === canonicalDataCardKey(change.ref.id)),
+        config.materials.find((entry) => entry.key === canonicalResourceKey(change.ref.id, change.key)),
         change.ref,
       );
     case 'removeMaterial':

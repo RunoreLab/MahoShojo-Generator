@@ -73,6 +73,66 @@ describe('typed Arena Proposal changes', () => {
     }).success).toBe(false);
   });
 
+  it('preserves the preset namespace on v1 additions while rejecting material presets', () => {
+    expect(ArenaProposalChangeSchema.safeParse({
+      changeId: 'preset-combatant',
+      type: 'addCombatant',
+      key: 'preset:c1',
+      ref: { id: 'c1', kind: 'character', versionToken: 'sha256:1' },
+      expectedBase: { kind: 'absent' },
+    }).success).toBe(true);
+    expect(ArenaProposalChangeSchema.safeParse({
+      changeId: 'preset-scenario',
+      type: 'setScenario',
+      key: 'preset:s1',
+      ref: { id: 's1', kind: 'scenario', versionToken: 'sha256:2' },
+      expectedBase: { kind: 'ref', ref: null },
+    }).success).toBe(true);
+    expect(ArenaProposalChangeSchema.safeParse({
+      changeId: 'preset-aux',
+      type: 'addAuxScenario',
+      key: 'preset:s2',
+      ref: { id: 's2', kind: 'scenario', versionToken: 'sha256:3' },
+      expectedBase: { kind: 'absent' },
+    }).success).toBe(true);
+    expect(ArenaProposalChangeSchema.safeParse({
+      changeId: 'preset-material',
+      type: 'addMaterial',
+      key: 'preset:m1',
+      ref: { id: 'm1', kind: 'material', versionToken: 'sha256:4' },
+      expectedBase: { kind: 'absent' },
+    }).success).toBe(false);
+  });
+
+  it('requires expectedBase namespace keys to match their ref and rejects keys for null refs', () => {
+    expect(ArenaProposalChangeSchema.safeParse({
+      changeId: 'mismatched-expected-base',
+      type: 'removeCombatant',
+      combatantKey: 'preset:c1',
+      expectedBase: {
+        kind: 'present',
+        key: 'preset:c2',
+        ref: { id: 'c1', kind: 'character', versionToken: 'sha256:1' },
+      },
+    }).success).toBe(false);
+    expect(ArenaProposalChangeSchema.safeParse({
+      changeId: 'null-ref-with-key',
+      type: 'setScenario',
+      key: 'preset:s1',
+      ref: null,
+      expectedBase: { kind: 'ref', ref: null },
+    }).success).toBe(false);
+    expect(ArenaProposalChangeSchema.safeParse({
+      changeId: 'ambiguous-preset-removal',
+      type: 'removeCombatant',
+      combatantKey: 'preset:c1',
+      expectedBase: {
+        kind: 'present',
+        ref: { id: 'c1', kind: 'character', versionToken: 'sha256:1' },
+      },
+    }).success).toBe(false);
+  });
+
   it.each([
     ['reorderCombatants', {}, ['data-card:a', 'data-card:b', 'data-card:c']],
     ['reorderTeams', {}, ['team-a', 'team-b', 'team-c']],

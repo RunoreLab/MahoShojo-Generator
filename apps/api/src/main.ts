@@ -103,6 +103,7 @@ if (process.env.HONO_CONFIG_CHECK_ONLY === 'true') {
   const roomProposals = createArenaRoomProposalService({
     memberships: roomMemberships,
     references: roomReferences,
+    presets: roomPresetGenerationContent,
   });
   const roomConfigs = createArenaRoomConfigService({
     memberships: roomMemberships,

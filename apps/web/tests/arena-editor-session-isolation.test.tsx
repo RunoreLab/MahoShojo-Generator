@@ -114,7 +114,7 @@ describe('Arena editor scoped sessions', () => {
       canUploadLocalPayload: false,
       canPasteLocalPayload: false,
       canBrowsePrivateCards: false,
-      canAddPresetRefs: false,
+      canAddPresetRefs: true,
       canEditSharedConfig: true,
       canStartGeneration: false,
     });
@@ -150,6 +150,26 @@ describe('Arena editor scoped sessions', () => {
     expect(source.sharedConfig.battleMode).toBe('daily');
     expect([...collectKeys(session.store.getState())].filter((key) => forbiddenProposalKeys.has(key)))
       .toEqual([]);
+  });
+
+  it('proposal session keeps preset refs as safe namespace-only changes', () => {
+    const session = createRoomProposalArenaEditorSession(snapshot());
+    session.update((draft) => ({
+      ...draft,
+      combatants: [...draft.combatants, {
+        key: 'preset:M00_white_lily.json',
+        ref: { id: 'M00_white_lily.json', kind: 'character', versionToken: `sha256:${'a'.repeat(64)}` },
+      }],
+    }));
+
+    const preview = session.preview();
+    expect(preview.changes).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: 'addCombatant',
+        key: 'preset:M00_white_lily.json',
+        ref: expect.not.objectContaining({ payload: expect.anything() }),
+      }),
+    ]));
   });
 
   it('strictly rejects payload-shaped or provider-shaped proposal snapshot fields', () => {

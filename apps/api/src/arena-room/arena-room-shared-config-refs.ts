@@ -78,6 +78,14 @@ export const verifyArenaRoomSharedConfigPresetRefs = async (input: {
   readonly sharedConfig: ArenaRoomSharedConfig;
 }): Promise<void> => {
   const refs = canonicalArenaRoomSharedConfigPresetRefs(input.sharedConfig);
+  await verifyArenaRoomPresetRefs({ presets: input.presets, refs });
+};
+
+export const verifyArenaRoomPresetRefs = async (input: {
+  readonly presets?: Pick<ArenaRoomGenerationPresetResolver, 'resolve'>;
+  readonly refs: readonly DataCardRef[];
+}): Promise<void> => {
+  const refs = input.refs;
   if (refs.length === 0) return;
   if (!input.presets) {
     throw new ArenaRoomPresetRefVerifierError('ARENA_ROOM_PRESET_REF_RESOLVER_UNAVAILABLE');

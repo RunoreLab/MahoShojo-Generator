@@ -50,7 +50,7 @@ export const ValueExpectedBaseSchema = <T extends z.ZodTypeAny>(valueSchema: T) 
   z.object({ kind: z.literal('value'), value: valueSchema }).strict();
 
 export const PresentExpectedBaseSchema = <T extends z.ZodTypeAny>(valueSchema: T) =>
-  z.object({ kind: z.literal('present'), ref: valueSchema }).strict();
+  z.object({ kind: z.literal('present'), ref: valueSchema, key: StableObjectKeySchema.optional() }).strict();
 
 const ChangeMetadataSchema = z
   .object({
@@ -82,22 +82,54 @@ const targetKeyMatchesExpectedRef = (targetKey: string, expectedRef: unknown): b
   return false;
 };
 
+const targetKeyMatchesExpectedBase = (
+  targetKey: string,
+  expectedBase: { key?: string; ref: unknown },
+): boolean => expectedBase.key === undefined
+  ? !targetKey.startsWith('preset:') && targetKeyMatchesExpectedRef(targetKey, expectedBase.ref)
+  : targetKey === expectedBase.key && targetKeyMatchesExpectedRef(targetKey, expectedBase.ref);
+
+const proposalRefKeyMatches = (
+  key: string | undefined,
+  ref: { id: string },
+  allowPreset: boolean,
+): boolean => key === undefined
+  ? true
+  : (key === `data-card:${ref.id}` || (allowPreset && key === `preset:${ref.id}`));
+
+const proposalRefKeyRefinement = <T extends { key?: string; ref?: { id: string } | null }>(
+  change: T,
+  context: z.RefinementCtx,
+  allowPreset: boolean,
+): void => {
+  if (change.ref === undefined || change.ref === null) {
+    if (change.key !== undefined) {
+      context.addIssue({ code: 'custom', path: ['key'], message: 'null/absent ref cannot carry a namespace key' });
+    }
+    return;
+  }
+  if (!proposalRefKeyMatches(change.key, change.ref, allowPreset)) {
+    context.addIssue({ code: 'custom', path: ['key'], message: 'proposal key must identify its ref namespace and id' });
+  }
+};
+
 export const RefExpectedBaseSchema = z
-  .object({ kind: z.literal('ref'), ref: ScenarioValueSchema })
+  .object({ kind: z.literal('ref'), ref: ScenarioValueSchema, key: StableObjectKeySchema.optional() })
   .strict();
 
 export const AddCombatantChangeSchema = change({
   type: z.literal('addCombatant'),
+  key: StableObjectKeySchema.optional(),
   ref: CharacterRefSchema,
   expectedBase: AbsentExpectedBaseSchema,
-});
+}).superRefine((value, context) => proposalRefKeyRefinement(value, context, true));
 
 export const RemoveCombatantChangeSchema = change({
   type: z.literal('removeCombatant'),
   combatantKey: StableObjectKeySchema,
   expectedBase: PresentExpectedBaseSchema(CharacterPresentValueSchema),
 }).superRefine((change, context) => {
-  if (!targetKeyMatchesExpectedRef(change.combatantKey, change.expectedBase.ref)) {
+  if (!targetKeyMatchesExpectedBase(change.combatantKey, change.expectedBase)) {
     context.addIssue({ code: 'custom', path: ['expectedBase', 'ref'], message: 'expectedBase.ref identity must match combatantKey' });
   }
 });
@@ -219,38 +251,49 @@ export const SetSelectedLanguageChangeSchema = change({
 
 export const SetScenarioChangeSchema = change({
   type: z.literal('setScenario'),
+  key: StableObjectKeySchema.optional(),
   ref: ScenarioProposedValueSchema,
   expectedBase: RefExpectedBaseSchema,
+}).superRefine((value, context) => {
+  proposalRefKeyRefinement(value, context, true);
+  if (value.expectedBase.key !== undefined && !targetKeyMatchesExpectedRef(
+    value.expectedBase.key,
+    value.expectedBase.ref,
+  )) {
+    context.addIssue({ code: 'custom', path: ['expectedBase', 'key'], message: 'expectedBase.key must identify its ref id' });
+  }
 });
 
 export const AddAuxScenarioChangeSchema = change({
   type: z.literal('addAuxScenario'),
+  key: StableObjectKeySchema.optional(),
   ref: ScenarioRefSchema,
   expectedBase: AbsentExpectedBaseSchema,
-});
+}).superRefine((value, context) => proposalRefKeyRefinement(value, context, true));
 
 export const RemoveAuxScenarioChangeSchema = change({
   type: z.literal('removeAuxScenario'),
   scenarioKey: StableObjectKeySchema,
   expectedBase: PresentExpectedBaseSchema(ScenarioPresentValueSchema),
 }).superRefine((change, context) => {
-  if (!targetKeyMatchesExpectedRef(change.scenarioKey, change.expectedBase.ref)) {
+  if (!targetKeyMatchesExpectedBase(change.scenarioKey, change.expectedBase)) {
     context.addIssue({ code: 'custom', path: ['expectedBase', 'ref'], message: 'expectedBase.ref identity must match scenarioKey' });
   }
 });
 
 export const AddMaterialChangeSchema = change({
   type: z.literal('addMaterial'),
+  key: StableObjectKeySchema.optional(),
   ref: MaterialRefSchema,
   expectedBase: AbsentExpectedBaseSchema,
-});
+}).superRefine((value, context) => proposalRefKeyRefinement(value, context, false));
 
 export const RemoveMaterialChangeSchema = change({
   type: z.literal('removeMaterial'),
   materialKey: StableObjectKeySchema,
   expectedBase: PresentExpectedBaseSchema(MaterialPresentValueSchema),
 }).superRefine((change, context) => {
-  if (!targetKeyMatchesExpectedRef(change.materialKey, change.expectedBase.ref)) {
+  if (!targetKeyMatchesExpectedBase(change.materialKey, change.expectedBase)) {
     context.addIssue({ code: 'custom', path: ['expectedBase', 'ref'], message: 'expectedBase.ref identity must match materialKey' });
   }
 });

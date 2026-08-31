@@ -38,6 +38,16 @@ export const isOnlineRef = (value: unknown): value is { id: string; kind: string
 
 export const canonicalDataCardKey = (id: string): string => `data-card:${id}`;
 
+export const canonicalPresetKey = (id: string): string => `preset:${id}`;
+
+export const canonicalResourceKey = (id: string, key?: string): string => (
+  key ?? canonicalDataCardKey(id)
+);
+
+export const isCanonicalResourceKey = (key: string, id: string): boolean => (
+  key === canonicalDataCardKey(id) || key === canonicalPresetKey(id)
+);
+
 export const isCanonicalDataCardKey = (key: string, id: string): boolean => key === canonicalDataCardKey(id);
 
 export const hasVersionDrift = (expected: unknown, current: unknown): boolean => (

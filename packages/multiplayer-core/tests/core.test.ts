@@ -303,7 +303,7 @@ describe('Arena shared config diff', () => {
     });
   });
 
-  it('supports team rename/language while failing closed for preset and host-local additions', () => {
+  it('supports team rename/language while failing closed for host-local additions', () => {
     const base = baseConfig();
     expect(diffArenaSharedConfig(base, {
       ...base,
@@ -313,10 +313,12 @@ describe('Arena shared config diff', () => {
       ...base,
       selectedLanguage: 'en-US',
     })).toEqual([expect.objectContaining({ type: 'setSelectedLanguage', value: 'en-US' })]);
-    expect(() => diffArenaSharedConfig(base, {
+    expect(diffArenaSharedConfig(base, {
       ...base,
       combatants: [...base.combatants, { key: 'preset:c3', ref: ref('c3', 'character') }],
-    })).toThrowError(/data-card|preset|represent/i);
+    })).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'addCombatant', key: 'preset:c3' }),
+    ]));
     expect(() => diffArenaSharedConfig(base, {
       ...base,
       materials: [...base.materials, {
@@ -326,6 +328,101 @@ describe('Arena shared config diff', () => {
         source: 'host-local',
       }],
     })).toThrowError(/host-local|represent/i);
+  });
+
+  it('preserves preset namespace through diff and apply for combatant/scenario/auxiliary scenario', () => {
+    const base = { ...baseConfig(), scenario: null };
+    const working = {
+      ...base,
+      combatants: [
+        ...base.combatants,
+        { key: 'preset:c3', ref: ref('c3', 'character', 'sha256:3') },
+      ],
+      scenario: { key: 'preset:s2', ref: ref('s2', 'scenario', 'sha256:2') },
+      auxScenarios: [{ key: 'preset:aux2', ref: ref('aux2', 'scenario', 'sha256:4') }],
+    };
+    const changes = diffArenaSharedConfig(base, working);
+    expect(changes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'addCombatant', key: 'preset:c3' }),
+      expect.objectContaining({ type: 'setScenario', key: 'preset:s2' }),
+      expect.objectContaining({ type: 'addAuxScenario', key: 'preset:aux2' }),
+    ]));
+    const applied = applyArenaProposal(
+      { roomId: 'room-1', config: base, revision: 7 },
+      makeProposal(changes),
+    );
+    expect(applied.status).toBe('accepted');
+    expect(applied.config).toEqual(working);
+  });
+
+  it('treats data-card and preset entries with the same id as distinct proposal targets', () => {
+    const current = baseConfig();
+    const change = {
+      changeId: 'add-preset-c1',
+      type: 'addCombatant' as const,
+      key: 'preset:c1',
+      ref: ref('c1', 'character'),
+      expectedBase: { kind: 'absent' as const },
+    };
+    expect(detectProposalConflicts(current, [change])).toEqual([]);
+    const applied = applyArenaProposal(
+      { roomId: 'room-1', config: current, revision: 7 },
+      makeProposal([change], 'proposal-namespace-collision'),
+    );
+    expect(applied.status).toBe('accepted');
+    expect(applied.config.combatants.map((entry) => entry.key)).toContain('preset:c1');
+  });
+
+  it('accepts removal when a present expectedBase preserves the preset namespace', () => {
+    const current = {
+      ...baseConfig(),
+      combatants: [
+        ...baseConfig().combatants,
+        { key: 'preset:c3', ref: ref('c3', 'character', 'sha256:3') },
+      ],
+    };
+    const change = {
+      changeId: 'remove-preset-c3',
+      type: 'removeCombatant' as const,
+      combatantKey: 'preset:c3',
+      expectedBase: {
+        kind: 'present' as const,
+        key: 'preset:c3',
+        ref: ref('c3', 'character', 'sha256:3'),
+      },
+    };
+
+    expect(detectProposalConflicts(current, [change])).toEqual([]);
+    const applied = applyArenaProposal(
+      { roomId: 'room-1', config: current, revision: 7 },
+      makeProposal([change], 'proposal-remove-preset'),
+    );
+    expect(applied.status).toBe('accepted');
+    expect(applied.config.combatants.map((entry) => entry.key)).not.toContain('preset:c3');
+  });
+
+  it('reports the current namespace when a scenario expectedBase points at a different ref namespace', () => {
+    const current = {
+      ...baseConfig(),
+      scenario: { key: 'data-card:s1', ref: ref('s1', 'scenario') },
+    };
+    const change = {
+      changeId: 'replace-preset-s1',
+      type: 'setScenario' as const,
+      key: 'preset:s2',
+      ref: ref('s2', 'scenario'),
+      expectedBase: {
+        kind: 'ref' as const,
+        key: 'preset:s1',
+        ref: ref('s1', 'scenario'),
+      },
+    };
+    expect(detectProposalConflicts(current, [change])).toEqual([
+      expect.objectContaining({
+        code: 'precondition-failed',
+        current: expect.objectContaining({ key: 'data-card:s1' }),
+      }),
+    ]);
   });
 
   it('emits dependency-bound reorder changes when collection insertion is not append-only', () => {

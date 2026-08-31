@@ -51,11 +51,16 @@ const refIdentity = (value: unknown): string => {
   return '已绑定目标';
 };
 
-const expectedBaseSummary = (change: ArenaProposalChange): string => {
+const namespacedRefIdentity = (ref: { readonly id: string }, key?: string): string => (
+  `${key?.startsWith('preset:') ? '预设' : '在线'}:${safeText(ref.id)}`
+);
+
+export const arenaProposalExpectedBaseSummary = (change: ArenaProposalChange): string => {
   const expected = change.expectedBase;
   if (expected.kind === 'absent') return '预期基线：目标不存在';
-  if (expected.kind === 'ref') return `预期基线：${refIdentity(expected.ref)}`;
-  if (expected.kind === 'present') return `预期基线：${refIdentity(expected.ref)}`;
+  if (expected.kind === 'ref' || expected.kind === 'present') {
+    return `预期基线：${typeof expected.key === 'string' ? safeText(expected.key) : refIdentity(expected.ref)}`;
+  }
   return typeof expected.value === 'string'
     ? `预期基线：${safeText(expected.value || '空值')}`
     : '预期基线：已绑定安全值';
@@ -73,7 +78,7 @@ const safeJsonSummary = (value: unknown): string => {
 
 export const arenaProposalChangeSummary = (change: ArenaProposalChange): string => {
   switch (change.type) {
-    case 'addCombatant': return `新增角色 ${change.ref.id}`;
+    case 'addCombatant': return `新增角色 ${namespacedRefIdentity(change.ref, change.key)}`;
     case 'removeCombatant': return `移除角色 ${change.combatantKey}`;
     case 'setCharacterGuidance': return `修改角色引导 ${change.combatantKey}`;
     case 'assignTeam': return `调整队伍 ${change.combatantKey}`;
@@ -85,8 +90,8 @@ export const arenaProposalChangeSummary = (change: ArenaProposalChange): string 
     case 'reorderTeamCombatants': return `调整队伍 ${change.teamKey} 内角色顺序`;
     case 'setBattleMode': return `战斗模式改为 ${change.value}`;
     case 'setSelectedLanguage': return `语言改为 ${change.value}`;
-    case 'setScenario': return change.ref === null ? '清除主情景' : `主情景改为 ${change.ref.id}`;
-    case 'addAuxScenario': return `新增辅助情景 ${change.ref.id}`;
+    case 'setScenario': return change.ref === null ? '清除主情景' : `主情景改为 ${namespacedRefIdentity(change.ref, change.key)}`;
+    case 'addAuxScenario': return `新增辅助情景 ${namespacedRefIdentity(change.ref, change.key)}`;
     case 'removeAuxScenario': return `移除辅助情景 ${change.scenarioKey}`;
     case 'reorderAuxScenarios': return '调整辅助情景顺序';
     case 'addMaterial': return `新增素材 ${change.ref.id}`;
@@ -140,7 +145,7 @@ export const arenaProposalChangeProposedSummary = (change: ArenaProposalChange):
 
 export const ArenaProposalSelectionDetails = ({ change }: { readonly change: ArenaProposalChange }) => (
   <span className="mt-1 block text-xs text-gray-600 dark:text-gray-400">
-    {expectedBaseSummary(change)}
+    {arenaProposalExpectedBaseSummary(change)}
     {change.dependsOn?.length ? ` · 依赖 ${change.dependsOn.join('、')}` : ''}
     {change.atomicGroupId ? ` · 原子组 ${change.atomicGroupId}` : ''}
   </span>

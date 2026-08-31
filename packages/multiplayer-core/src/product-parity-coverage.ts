@@ -279,10 +279,11 @@ export const ARENA_PRODUCT_PARITY_COVERAGE = {
       ['addCombatant'],
       ['GMR10P-A-ARENA-UI-CONTRACT'],
     ),
-    combatantPreset: classified('shared/host-only', {
-      single: 'editable', roomHost: 'editable', roomProposal: 'deferred',
+    combatantPreset: classified('shared/proposable', {
+      single: 'editable', roomHost: 'editable', roomProposal: 'editable',
     }, {
-      reason: 'host 可发布 stable preset ref；member proposal 需等待 server-known preset registry。',
+      contractChangeTypes: ['addCombatant'],
+      reason: '角色 preset 以 server-known stable ref 进入 Shared Config 与 Proposal。',
     }),
     combatantLocalUpload: classified('forbidden', {
       single: 'editable', roomHost: 'host-only', roomProposal: 'forbidden',
@@ -307,6 +308,7 @@ export const ARENA_PRODUCT_PARITY_COVERAGE = {
       ['GMR10P-A-ARENA-UI-CONTRACT'],
     ),
     scenario: sharedProposable(['setScenario'], ['GMR10P-A-ARENA-UI-CONTRACT']),
+    scenarioPreset: sharedProposable(['setScenario'], ['GMR10P-A-ARENA-UI-CONTRACT']),
     scenarioLocalUpload: classified('forbidden', {
       single: 'editable', roomHost: 'host-only', roomProposal: 'forbidden',
     }, {
@@ -321,6 +323,7 @@ export const ARENA_PRODUCT_PARITY_COVERAGE = {
       ['addAuxScenario', 'removeAuxScenario', 'reorderAuxScenarios'],
       ['GMR10P-A-ARENA-UI-CONTRACT'],
     ),
+    auxScenarioPreset: sharedProposable(['addAuxScenario'], ['GMR10P-A-ARENA-UI-CONTRACT']),
     auxScenarioLocalUpload: classified('forbidden', {
       single: 'editable', roomHost: 'host-only', roomProposal: 'forbidden',
     }, {
@@ -335,6 +338,11 @@ export const ARENA_PRODUCT_PARITY_COVERAGE = {
       ['addMaterial', 'removeMaterial', 'reorderMaterials'],
       ['GMR10P-A-ARENA-UI-CONTRACT'],
     ),
+    materialPreset: classified('deferred-with-reason', {
+      single: 'editable', roomHost: 'deferred', roomProposal: 'deferred',
+    }, {
+      reason: 'material preset 暂无 server-known registry，禁止进入 Shared Config/Proposal。',
+    }),
     materialLocalUpload: classified('forbidden', {
       single: 'editable', roomHost: 'host-only', roomProposal: 'forbidden',
     }, {

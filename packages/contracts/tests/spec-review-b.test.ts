@@ -61,6 +61,10 @@ describe('spec review B: typed refs and stable collection keys', () => {
     expect(ArenaRoomSharedConfigSchema.safeParse({ ...baseConfig, scenario: { ...baseConfig.scenario, key: 'scenario-title' } }).success).toBe(false);
     expect(ArenaRoomSharedConfigSchema.safeParse({ ...baseConfig, scenario: { ...baseConfig.scenario, key: 'preset:scenario' } }).success).toBe(false);
     expect(ArenaRoomSharedConfigSchema.safeParse({ ...baseConfig, scenario: { ...baseConfig.scenario, key: 'preset:s1' } }).success).toBe(true);
+    expect(ArenaRoomSharedConfigSchema.safeParse({
+      ...baseConfig,
+      materials: [{ key: 'preset:m1', ref: ref('m1', 'material') }],
+    }).success).toBe(false);
   });
 
   it('requires team combatant keys to exist and assigns a combatant to at most one team', () => {

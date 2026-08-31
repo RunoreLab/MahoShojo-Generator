@@ -12,7 +12,7 @@ import {
 import { ArenaMultiplayerCoreError } from './errors';
 import { detectProposalConflicts, type ArenaProposalConflict } from './conflicts';
 import { validateProposalChanges, type ProposalSelectionIssue, type ProposalSelectionValidation } from './selection';
-import { canonicalDataCardKey, deepClone } from './utils';
+import { canonicalResourceKey, deepClone } from './utils';
 
 export interface ArenaProposalState {
   readonly roomId: string;
@@ -106,7 +106,7 @@ const reorderByKeys = <Entry extends { readonly key: string }>(
 const applyChange = (config: ArenaRoomSharedConfig, change: ArenaProposalChange): void => {
   switch (change.type) {
     case 'addCombatant': {
-      config.combatants.push({ key: canonicalDataCardKey(change.ref.id), ref: deepClone(change.ref) });
+      config.combatants.push({ key: canonicalResourceKey(change.ref.id, change.key), ref: deepClone(change.ref) });
       return;
     }
     case 'removeCombatant': {
@@ -180,10 +180,10 @@ const applyChange = (config: ArenaRoomSharedConfig, change: ArenaProposalChange)
     case 'setScenario':
       config.scenario = change.ref === null
         ? null
-        : { key: canonicalDataCardKey(change.ref.id), ref: deepClone(change.ref) };
+        : { key: canonicalResourceKey(change.ref.id, change.key), ref: deepClone(change.ref) };
       return;
     case 'addAuxScenario':
-      config.auxScenarios.push({ key: canonicalDataCardKey(change.ref.id), ref: deepClone(change.ref) });
+      config.auxScenarios.push({ key: canonicalResourceKey(change.ref.id, change.key), ref: deepClone(change.ref) });
       return;
     case 'removeAuxScenario':
       config.auxScenarios = config.auxScenarios.filter((entry) => entry.key !== change.scenarioKey);
@@ -192,7 +192,7 @@ const applyChange = (config: ArenaRoomSharedConfig, change: ArenaProposalChange)
       config.auxScenarios = reorderByKeys(config.auxScenarios, change.value);
       return;
     case 'addMaterial':
-      config.materials.push({ key: canonicalDataCardKey(change.ref.id), ref: deepClone(change.ref) });
+      config.materials.push({ key: canonicalResourceKey(change.ref.id, change.key), ref: deepClone(change.ref) });
       return;
     case 'removeMaterial':
       config.materials = config.materials.filter((entry) => entry.key !== change.materialKey);

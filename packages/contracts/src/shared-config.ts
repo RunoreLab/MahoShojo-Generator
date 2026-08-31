@@ -55,6 +55,8 @@ export type TeamAssignment = z.infer<typeof TeamAssignmentSchema>;
 const isOnlineKeyForRef = (key: string, id: string): boolean =>
   key === `data-card:${id}` || key === `preset:${id}`;
 
+const isServerKnownPresetKey = (key: string): boolean => key.startsWith('preset:');
+
 const OnlineCombatantEntrySchema = z
   .object({
     key: StableObjectKeySchema,
@@ -108,6 +110,9 @@ export const MaterialEntrySchema = z.union([
   if ('ref' in entry) {
     if (!isOnlineKeyForRef(entry.key, entry.ref.id)) {
       context.addIssue({ code: 'custom', path: ['key'], message: 'online material key must identify its ref id' });
+    }
+    if (isServerKnownPresetKey(entry.key)) {
+      context.addIssue({ code: 'custom', path: ['key'], message: 'material preset is unsupported: server-known registry is unavailable' });
     }
   }
 });

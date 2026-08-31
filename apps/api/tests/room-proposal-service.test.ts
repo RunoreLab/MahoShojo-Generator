@@ -8,6 +8,11 @@ import {
   type ArenaDataCardRefVerifierD1Statement,
 } from '#/arena-room/arena-data-card-ref-verifier';
 import {
+  ArenaRoomGenerationPresetResolverError,
+  type ArenaRoomGenerationPresetResolver,
+} from '#/arena-room/room-generation-preset-registry';
+import type { ArenaRoomGenerationCanonicalContent } from '#/arena-room/room-generation-materializer';
+import {
   createRoomActorRegistry,
   type RoomActorCheckpointStore,
 } from '#/arena-room/room-actor-registry';
@@ -69,7 +74,27 @@ const guidanceChange = (value = '成员建议') => ({
   expectedBase: { kind: 'value' as const, value: '' },
 });
 
-const createHarness = async () => {
+const createPresetResolver = (
+  errorCode?: ConstructorParameters<typeof ArenaRoomGenerationPresetResolverError>[0],
+): ArenaRoomGenerationPresetResolver => ({
+  resolve: vi.fn(async ({ ref }): Promise<ArenaRoomGenerationCanonicalContent> => {
+    if (errorCode) throw new ArenaRoomGenerationPresetResolverError(errorCode);
+    return {
+      ref,
+      payload: { codename: '白百合' },
+      displayName: '白百合',
+      sourceType: 'character',
+    };
+  }),
+});
+
+const presetRef = {
+  id: 'preset-c1',
+  kind: 'character' as const,
+  versionToken: 'sha256:1',
+};
+
+const createHarness = async (presets?: ArenaRoomGenerationPresetResolver) => {
   const store = new MemoryRoomStore();
   let userIndex = 0;
   let timestampIndex = 0;
@@ -91,6 +116,7 @@ const createHarness = async () => {
   const memberships = createArenaRoomMembershipService({
     actors,
     references: createTestArenaDataCardRefVerifier(),
+    ...(presets === undefined ? {} : { presets }),
     createUserId: () => `user-${++userIndex}`,
     now: () => timestamps[Math.min(++timestampIndex, timestamps.length - 1)]!,
   });
@@ -137,12 +163,183 @@ const createHarness = async () => {
   const service = createArenaRoomProposalService({
     memberships,
     references,
+    ...(presets === undefined ? {} : { presets }),
     now: () => timestamps[Math.min(++timestampIndex, timestamps.length - 1)]!,
   });
   return { actors, host, member, memberships, references, service, store };
 };
 
 describe('Arena Room Proposal application service', () => {
+  it('submit/resolve routes preset refs through the server-known resolver before checkpoint', async () => {
+    const presets = createPresetResolver();
+    const harness = await createHarness(presets);
+    const change = {
+      changeId: 'preset-combatant',
+      type: 'addCombatant' as const,
+      key: 'preset:preset-c1',
+      ref: presetRef,
+      expectedBase: { kind: 'absent' as const },
+    };
+    await harness.service.submit({
+      roomId: 'room-1',
+      accountUserId: 202,
+      request: {
+        proposalId: 'proposal-preset',
+        expectedRoomEpoch: 'epoch-1',
+        baseRevision: 0,
+        changes: [change],
+      },
+    });
+    expect(presets.resolve).toHaveBeenCalledWith({ ref: presetRef });
+    vi.mocked(presets.resolve).mockClear();
+    const before = harness.store.saveCount;
+    await expect(harness.service.resolve({
+      roomId: 'room-1',
+      proposalId: 'proposal-preset',
+      accountUserId: 101,
+      request: {
+        expectedRoomEpoch: 'epoch-1',
+        expectedRevision: 0,
+        resolution: 'accept-selected',
+        selectedChangeIds: [change.changeId],
+      },
+    })).resolves.toMatchObject({ status: 'accepted', revision: 1 });
+    expect(presets.resolve).toHaveBeenCalledWith({ ref: presetRef });
+    expect(harness.store.saveCount).toBe(before + 1);
+    expect(harness.store.state?.snapshot.sharedConfig.combatants).toContainEqual({
+      key: 'preset:preset-c1',
+      ref: presetRef,
+    });
+  });
+
+  it.each([
+    ['stale', 'ARENA_ROOM_PRESET_VERSION_MISMATCH', 'ROOM_REFERENCE_STALE'],
+    ['not found', 'ARENA_ROOM_PRESET_NOT_FOUND', 'ROOM_REFERENCE_STALE'],
+  ] as const)('submit preset %s fails before checkpoint', async (_label, resolverCode, publicCode) => {
+    const harness = await createHarness(createPresetResolver(resolverCode));
+    const before = harness.store.saveCount;
+    await expect(harness.service.submit({
+      roomId: 'room-1',
+      accountUserId: 202,
+      request: {
+        proposalId: `proposal-preset-${_label}`,
+        expectedRoomEpoch: 'epoch-1',
+        baseRevision: 0,
+        changes: [{
+          changeId: 'preset-combatant',
+          type: 'addCombatant',
+          key: 'preset:preset-c1',
+          ref: presetRef,
+          expectedBase: { kind: 'absent' },
+        }],
+      },
+    })).rejects.toMatchObject({ code: publicCode });
+    expect(harness.store.saveCount).toBe(before);
+    expect(harness.store.state?.snapshot.proposals).toEqual([]);
+  });
+
+  it('preset submit fails closed when resolver is not injected', async () => {
+    const harness = await createHarness();
+    await expect(harness.service.submit({
+      roomId: 'room-1',
+      accountUserId: 202,
+      request: {
+        proposalId: 'proposal-preset-unavailable',
+        expectedRoomEpoch: 'epoch-1',
+        baseRevision: 0,
+        changes: [{
+          changeId: 'preset-combatant',
+          type: 'addCombatant',
+          key: 'preset:preset-c1',
+          ref: presetRef,
+          expectedBase: { kind: 'absent' },
+        }],
+      },
+    })).rejects.toMatchObject({ code: 'ROOM_REFERENCE_UNAVAILABLE' });
+    expect(harness.store.state?.snapshot.proposals).toEqual([]);
+  });
+
+  it.each([
+    ['stale', 'ARENA_ROOM_PRESET_VERSION_MISMATCH'],
+    ['not found', 'ARENA_ROOM_PRESET_NOT_FOUND'],
+  ] as const)('resolve preset %s fails before checkpoint and preserves pending proposal', async (_label, resolverCode) => {
+    const presets = createPresetResolver();
+    const harness = await createHarness(presets);
+    const change = {
+      changeId: 'preset-combatant',
+      type: 'addCombatant' as const,
+      key: 'preset:preset-c1',
+      ref: presetRef,
+      expectedBase: { kind: 'absent' as const },
+    };
+    await harness.service.submit({
+      roomId: 'room-1',
+      accountUserId: 202,
+      request: {
+        proposalId: `proposal-resolve-preset-${_label}`,
+        expectedRoomEpoch: 'epoch-1',
+        baseRevision: 0,
+        changes: [change],
+      },
+    });
+    vi.mocked(presets.resolve).mockRejectedValueOnce(
+      new ArenaRoomGenerationPresetResolverError(resolverCode),
+    );
+    const before = harness.store.saveCount;
+    await expect(harness.service.resolve({
+      roomId: 'room-1',
+      proposalId: `proposal-resolve-preset-${_label}`,
+      accountUserId: 101,
+      request: {
+        expectedRoomEpoch: 'epoch-1',
+        expectedRevision: 0,
+        resolution: 'accept-selected',
+        selectedChangeIds: [change.changeId],
+      },
+    })).rejects.toMatchObject({ code: 'ROOM_REFERENCE_STALE' });
+    expect(harness.store.saveCount).toBe(before);
+    expect(harness.store.state?.snapshot.proposals).toHaveLength(1);
+    expect(harness.store.state?.snapshot.sharedConfig.combatants).toHaveLength(1);
+  });
+
+  it('resolve preset fails closed without resolver and does not mutate', async () => {
+    const presets = createPresetResolver();
+    const harness = await createHarness(presets);
+    const change = {
+      changeId: 'preset-combatant',
+      type: 'addCombatant' as const,
+      key: 'preset:preset-c1',
+      ref: presetRef,
+      expectedBase: { kind: 'absent' as const },
+    };
+    await harness.service.submit({
+      roomId: 'room-1',
+      accountUserId: 202,
+      request: {
+        proposalId: 'proposal-resolve-preset-unavailable',
+        expectedRoomEpoch: 'epoch-1',
+        baseRevision: 0,
+        changes: [change],
+      },
+    });
+    const serviceWithoutPresets = createArenaRoomProposalService({
+      memberships: harness.memberships,
+      references: harness.references,
+    });
+    const before = harness.store.saveCount;
+    await expect(serviceWithoutPresets.resolve({
+      roomId: 'room-1',
+      proposalId: 'proposal-resolve-preset-unavailable',
+      accountUserId: 101,
+      request: {
+        expectedRoomEpoch: 'epoch-1',
+        expectedRevision: 0,
+        resolution: 'accept-selected',
+        selectedChangeIds: [change.changeId],
+      },
+    })).rejects.toMatchObject({ code: 'ROOM_REFERENCE_UNAVAILABLE' });
+    expect(harness.store.saveCount).toBe(before);
+  });
   it('server-normalizes authority metadata and only returns after checkpoint/fanout', async () => {
     const harness = await createHarness();
     const actor = await harness.actors.recover('room-1');

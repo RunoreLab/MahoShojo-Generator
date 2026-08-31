@@ -5,7 +5,7 @@ import {
   type ArenaRoomSharedConfig,
 } from '@mahoshojo/contracts/arena-room';
 
-import { deepClone, deepEqual, hasVersionDrift } from './utils';
+import { canonicalResourceKey, deepClone, deepEqual, hasVersionDrift } from './utils';
 
 export type ProposalConflictCode = 'precondition-failed' | 'reference-changed' | 'invalid-change';
 
@@ -21,11 +21,15 @@ export interface ArenaProposalConflict {
 type SemanticValue =
   | { readonly kind: 'absent' }
   | { readonly kind: 'value'; readonly value: unknown }
-  | { readonly kind: 'ref'; readonly ref: unknown };
+  | { readonly kind: 'ref'; readonly ref: unknown; readonly targetKey?: string };
 
 const absent = (): SemanticValue => ({ kind: 'absent' });
 const value = (input: unknown): SemanticValue => ({ kind: 'value', value: deepClone(input) });
-const reference = (input: unknown): SemanticValue => ({ kind: 'ref', ref: deepClone(input) });
+const reference = (input: unknown, targetKey?: string): SemanticValue => ({
+  kind: 'ref',
+  ref: deepClone(input),
+  ...(targetKey === undefined ? {} : { targetKey }),
+});
 
 const currentCombatant = (config: ArenaRoomSharedConfig, key: string) => config.combatants.find((entry) => entry.key === key);
 const currentAuxScenario = (config: ArenaRoomSharedConfig, key: string) => config.auxScenarios.find((entry) => entry.key === key);
@@ -50,12 +54,12 @@ const currentAssignment = (config: ArenaRoomSharedConfig, combatantKey: string):
 const currentSemanticValue = (config: ArenaRoomSharedConfig, change: ArenaProposalChange): SemanticValue => {
   switch (change.type) {
     case 'addCombatant': {
-      const entry = currentCombatant(config, `data-card:${change.ref.id}`);
-      return entry ? { kind: 'ref', ref: entryReference(entry) } : absent();
+      const entry = currentCombatant(config, canonicalResourceKey(change.ref.id, change.key));
+      return entry ? reference(entryReference(entry), entry.key) : absent();
     }
     case 'removeCombatant': {
       const entry = currentCombatant(config, change.combatantKey);
-      return entry ? { kind: 'ref', ref: entryReference(entry) } : absent();
+      return entry ? reference(entryReference(entry), entry.key) : absent();
     }
     case 'setCharacterGuidance': {
       const entry = currentCombatant(config, change.combatantKey);
@@ -90,24 +94,24 @@ const currentSemanticValue = (config: ArenaRoomSharedConfig, change: ArenaPropos
     case 'setSelectedLanguage':
       return value(config.selectedLanguage);
     case 'setScenario':
-      return reference(config.scenario === null ? null : entryReference(config.scenario));
+      return reference(config.scenario === null ? null : entryReference(config.scenario), config.scenario?.key);
     case 'addAuxScenario': {
-      const entry = currentAuxScenario(config, `data-card:${change.ref.id}`);
-      return entry ? { kind: 'ref', ref: entryReference(entry) } : absent();
+      const entry = currentAuxScenario(config, canonicalResourceKey(change.ref.id, change.key));
+      return entry ? reference(entryReference(entry), entry.key) : absent();
     }
     case 'removeAuxScenario': {
       const entry = currentAuxScenario(config, change.scenarioKey);
-      return entry ? { kind: 'ref', ref: entryReference(entry) } : absent();
+      return entry ? reference(entryReference(entry), entry.key) : absent();
     }
     case 'reorderAuxScenarios':
       return value(config.auxScenarios.map((entry) => entry.key));
     case 'addMaterial': {
-      const entry = currentMaterial(config, `data-card:${change.ref.id}`);
-      return entry ? { kind: 'ref', ref: entryReference(entry) } : absent();
+      const entry = currentMaterial(config, canonicalResourceKey(change.ref.id, change.key));
+      return entry ? reference(entryReference(entry), entry.key) : absent();
     }
     case 'removeMaterial': {
       const entry = currentMaterial(config, change.materialKey);
-      return entry ? { kind: 'ref', ref: entryReference(entry) } : absent();
+      return entry ? reference(entryReference(entry), entry.key) : absent();
     }
     case 'reorderMaterials':
       return value(config.materials.map((entry) => entry.key));
@@ -122,7 +126,7 @@ const currentSemanticValue = (config: ArenaRoomSharedConfig, change: ArenaPropos
 
 const targetOf = (change: ArenaProposalChange): string => {
   switch (change.type) {
-    case 'addCombatant': return `combatant:data-card:${change.ref.id}`;
+    case 'addCombatant': return `combatant:${canonicalResourceKey(change.ref.id, change.key)}`;
     case 'removeCombatant':
     case 'setCharacterGuidance':
     case 'assignTeam': return `combatant:${change.combatantKey}`;
@@ -135,10 +139,10 @@ const targetOf = (change: ArenaProposalChange): string => {
     case 'setBattleMode': return 'battleMode';
     case 'setSelectedLanguage': return 'selectedLanguage';
     case 'setScenario': return 'scenario';
-    case 'addAuxScenario': return `auxScenario:data-card:${change.ref.id}`;
+    case 'addAuxScenario': return `auxScenario:${canonicalResourceKey(change.ref.id, change.key)}`;
     case 'removeAuxScenario': return `auxScenario:${change.scenarioKey}`;
     case 'reorderAuxScenarios': return 'auxScenarios:order';
-    case 'addMaterial': return `material:data-card:${change.ref.id}`;
+    case 'addMaterial': return `material:${canonicalResourceKey(change.ref.id, change.key)}`;
     case 'removeMaterial': return `material:${change.materialKey}`;
     case 'reorderMaterials': return 'materials:order';
     case 'setUserGuidance': return 'userGuidance';
@@ -153,7 +157,11 @@ const currentForReport = (semantic: SemanticValue, expected: unknown): unknown =
   const expectedKind = expected && typeof expected === 'object' && !Array.isArray(expected) && 'kind' in expected
     ? (expected as { kind?: unknown }).kind
     : undefined;
-  return { kind: expectedKind === 'ref' ? 'ref' : 'present', ref: deepClone(semantic.ref) };
+  return {
+    kind: expectedKind === 'ref' ? 'ref' : 'present',
+    ref: deepClone(semantic.ref),
+    ...(semantic.targetKey === undefined ? {} : { key: semantic.targetKey }),
+  };
 };
 
 const expectedForReport = (change: ArenaProposalChange): unknown => deepClone(change.expectedBase);
@@ -185,6 +193,18 @@ const compare = (change: ArenaProposalChange, current: SemanticValue): ArenaProp
   }
   const expectedRef = expected.kind === 'ref' ? expected.ref : expected.ref;
   if (current.kind !== 'ref') return conflictFor(change, 'precondition-failed', current);
+  const expectedKey = 'key' in expected
+    ? expected.key
+    : expectedRef && typeof expectedRef === 'object' && 'id' in expectedRef
+        ? canonicalResourceKey((expectedRef as { id: string }).id)
+        : expectedRef && typeof expectedRef === 'object' && 'source' in expectedRef
+          && (expectedRef as { source?: unknown }).source === 'host-local'
+          && 'key' in expectedRef
+          ? (expectedRef as { key: string }).key
+          : undefined;
+  if (expectedKey !== undefined && current.targetKey !== expectedKey) {
+    return conflictFor(change, 'precondition-failed', current);
+  }
   if (hasVersionDrift(expectedRef, current.ref)) return conflictFor(change, 'reference-changed', current);
   return deepEqual(expectedRef, current.ref) ? null : conflictFor(change, 'precondition-failed', current);
 };

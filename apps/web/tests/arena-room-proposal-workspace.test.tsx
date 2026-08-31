@@ -8,6 +8,7 @@ import type { ArenaRoomSharedConfig } from '@mahoshojo/contracts/arena-room';
 
 import { createRoomProposalArenaEditorSession } from '@/components/arena/editor';
 import { ArenaRoomProposalWorkspaceView } from '@/components/arena/multiplayer/ArenaRoomProposalWorkspace';
+import { arenaProposalExpectedBaseSummary } from '@/components/arena/multiplayer/ArenaProposalPanel';
 import type {
   ArenaRoomController,
   ArenaRoomControllerState,
@@ -204,6 +205,10 @@ describe('Arena room Proposal workspace', () => {
       <ArenaRoomProposalWorkspaceView editor={editor} state={state} controller={controller} />,
     ));
 
+    const curatedPresetToggle = container.querySelector<HTMLButtonElement>('button[aria-label="选择预设角色：翠雀"]');
+    if (!curatedPresetToggle) throw new Error('curated preset picker item not found');
+    await act(async () => curatedPresetToggle.click());
+
     await act(async () => button('浏览在线角色库').click());
     const modal = container.querySelector('[data-testid="battle-data-modal"]');
     expect(modal?.getAttribute('data-visible-tabs')).toBe('public,recommended');
@@ -231,6 +236,9 @@ describe('Arena room Proposal workspace', () => {
     await act(async () => button('选择辅助情景').click());
     await act(async () => button('模拟选择辅助情景').click());
     await act(async () => button('关闭数据卡').click());
+    const curatedScenarioToggle = container.querySelector<HTMLButtonElement>('button[aria-label="选择预设情景：谨遵女王之意（A.R.E.N.A.）"]');
+    if (!curatedScenarioToggle) throw new Error('curated scenario picker item not found');
+    await act(async () => curatedScenarioToggle.click());
     await act(async () => button('浏览在线数据卡').click());
     await act(async () => button('模拟选择素材').click());
     await act(async () => button('关闭数据卡').click());
@@ -258,7 +266,7 @@ describe('Arena room Proposal workspace', () => {
     expect(container.textContent).toContain('将提交');
     expect(container.textContent).toContain('新增角色');
     expect(container.textContent).toContain('新增队伍');
-    expect(container.textContent).toContain('主情景改为 scenario-public-main');
+    expect(container.textContent).toContain('主情景改为 在线:scenario-public-main');
     expect(container.textContent).toContain('新增辅助情景');
     expect(container.textContent).toContain('新增素材');
     expect(container.textContent).toContain('语言改为 en-US');
@@ -305,14 +313,53 @@ describe('Arena room Proposal workspace', () => {
     ]));
     expect(JSON.stringify(intent)).not.toContain('"content"');
     expect(JSON.stringify(intent)).not.toContain('"data"');
-    expect(intent?.changes.find((change) => change.type === 'addCombatant')).toMatchObject({
+    expect(JSON.stringify(intent)).not.toContain('"payload"');
+    expect(JSON.stringify(intent)).not.toContain('"sourcePath"');
+    expect(intent?.changes.find((change) => change.type === 'addCombatant' && change.ref.id === 'character-public-1')).toMatchObject({
       ref: {
         id: 'character-public-1',
         kind: 'character',
         versionToken: 'version-character-public-1',
       },
     });
+    expect(intent?.changes.find((change) => change.type === 'addCombatant' && change.ref.id === 'M01_centaurea.json')).toMatchObject({
+      key: 'preset:M01_centaurea.json',
+      ref: {
+        id: 'M01_centaurea.json',
+        versionToken: expect.stringMatching(/^sha256:/),
+      },
+    });
+    expect(intent?.changes.find((change) => change.type === 'addAuxScenario' && change.ref.id === 'S01_queen_will.json')).toMatchObject({
+      key: 'preset:S01_queen_will.json',
+      ref: {
+        kind: 'scenario',
+        versionToken: expect.stringMatching(/^sha256:/),
+      },
+    });
     editor.dispose();
+  });
+
+  it('expectedBase 摘要保留 preset namespace', () => {
+    const change = {
+      type: 'setScenario',
+      changeId: 'scenario-preset-summary',
+      key: 'preset:S01_queen_will.json',
+      ref: {
+        id: 'S01_queen_will.json',
+        kind: 'scenario',
+        versionToken: 'sha256:test',
+      },
+      expectedBase: {
+        kind: 'ref',
+        key: 'preset:S00_old.json',
+        ref: {
+          id: 'S00_old.json',
+          kind: 'scenario',
+          versionToken: 'sha256:old',
+        },
+      },
+    } as const;
+    expect(arenaProposalExpectedBaseSummary(change)).toBe('预期基线：preset:S00_old.json');
   });
 
   it('暴露共享列表移动控件并产生五类全序 typed change', async () => {

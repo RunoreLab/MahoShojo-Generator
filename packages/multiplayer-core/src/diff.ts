@@ -20,7 +20,7 @@ import {
   arrayEqual,
   deepClone,
   deepEqual,
-  isCanonicalDataCardKey,
+  isCanonicalResourceKey,
   isOnlineRef,
 } from './utils';
 
@@ -99,10 +99,13 @@ function requireOnlineAddition(
   entry: unknown,
   target: string,
 ): asserts entry is { key: string; ref: { id: string; kind: string; versionToken: string } } {
-  if (!onlineEntry(entry)) unsupportedChange(`${target} addition is host-local/preset or otherwise not an online data-card entry`);
+  if (!onlineEntry(entry)) unsupportedChange(`${target} addition is host-local or otherwise not a stable ref entry`);
   const online = entry as { key: string; ref: { id: string; kind: string; versionToken: string } };
-  if (!isCanonicalDataCardKey(online.key, online.ref.id)) {
-    unsupportedChange(`${target} addition must use canonical data-card key`);
+  if (!isCanonicalResourceKey(online.key, online.ref.id)) {
+    unsupportedChange(`${target} addition must use canonical data-card or preset key`);
+  }
+  if (target === 'material' && online.key.startsWith('preset:')) {
+    unsupportedChange('material preset additions are not supported without a server registry');
   }
 }
 
@@ -188,6 +191,7 @@ export const diffArenaSharedConfig = (
       type: 'addCombatant',
       ref: deepClone(entry.ref),
       expectedBase: { kind: 'absent' },
+      ...(entry.key.startsWith('data-card:') ? {} : { key: entry.key }),
     }));
   }
   for (const entry of base.combatants) {
@@ -201,7 +205,11 @@ export const diffArenaSharedConfig = (
       changeId,
       type: 'removeCombatant',
       combatantKey: entry.key,
-      expectedBase: { kind: 'present', ref: expectedCombatantRef(entry) },
+      expectedBase: {
+        kind: 'present',
+        ref: expectedCombatantRef(entry),
+        ...(entry.key.startsWith('data-card:') ? {} : { key: entry.key }),
+      },
     }));
   }
   for (const entry of working.combatants) {
@@ -360,14 +368,19 @@ export const diffArenaSharedConfig = (
   const workingScenario = working.scenario;
   if (baseScenario === null ? workingScenario !== null : workingScenario === null) {
     const workingScenarioRef = workingScenario !== null && 'ref' in workingScenario ? workingScenario.ref : undefined;
-    if (workingScenario !== null && (!workingScenarioRef || !isCanonicalDataCardKey(workingScenario.key, workingScenarioRef.id))) {
-      unsupportedChange('scenario host-local/preset addition is not representable by Arena Proposal v1');
+    if (workingScenario !== null && (!workingScenarioRef || !isCanonicalResourceKey(workingScenario.key, workingScenarioRef.id))) {
+      unsupportedChange('scenario host-local addition is not representable by Arena Proposal v1');
     }
     changes.push(makeChange({
       changeId: nextId(),
       type: 'setScenario',
       ref: workingScenario === null ? null : deepClone(workingScenarioRef!),
-      expectedBase: { kind: 'ref', ref: baseScenario === null ? null : expectedScenarioRef(baseScenario) },
+      expectedBase: {
+        kind: 'ref',
+        ref: baseScenario === null ? null : expectedScenarioRef(baseScenario),
+        ...(baseScenario !== null && !baseScenario.key.startsWith('data-card:') ? { key: baseScenario.key } : {}),
+      },
+      ...(workingScenario !== null && !workingScenario.key.startsWith('data-card:') ? { key: workingScenario.key } : {}),
     }));
   } else if (baseScenario !== null && workingScenario !== null) {
     if (hostEntry(baseScenario) || hostEntry(workingScenario)) {
@@ -376,14 +389,19 @@ export const diffArenaSharedConfig = (
       }
     } else if (!deepEqual(baseScenario, workingScenario)) {
       const workingScenarioRef = ('ref' in workingScenario ? workingScenario.ref : undefined);
-      if (!workingScenarioRef || !isCanonicalDataCardKey(workingScenario.key, workingScenarioRef.id)) {
-        unsupportedChange('scenario reference changes must use canonical data-card key');
+      if (!workingScenarioRef || !isCanonicalResourceKey(workingScenario.key, workingScenarioRef.id)) {
+        unsupportedChange('scenario reference changes must use canonical data-card or preset key');
       }
       changes.push(makeChange({
         changeId: nextId(),
         type: 'setScenario',
         ref: deepClone(workingScenarioRef!),
-        expectedBase: { kind: 'ref', ref: expectedScenarioRef(baseScenario) },
+        expectedBase: {
+          kind: 'ref',
+          ref: expectedScenarioRef(baseScenario),
+          ...(baseScenario.key.startsWith('data-card:') ? {} : { key: baseScenario.key }),
+        },
+        ...(workingScenario.key.startsWith('data-card:') ? {} : { key: workingScenario.key }),
       }));
     }
   }
@@ -415,6 +433,7 @@ export const diffArenaSharedConfig = (
           type: 'addAuxScenario',
           ref: deepClone(entryRef) as ScenarioDataCardRef,
           expectedBase: { kind: 'absent' },
+          ...(entry.key.startsWith('data-card:') ? {} : { key: entry.key }),
         }));
       } else {
         const changeId = nextId();
@@ -424,6 +443,7 @@ export const diffArenaSharedConfig = (
           type: 'addMaterial',
           ref: deepClone(entryRef) as MaterialDataCardRef,
           expectedBase: { kind: 'absent' },
+          ...(entry.key.startsWith('data-card:') ? {} : { key: entry.key }),
         }));
       }
     }
@@ -436,7 +456,11 @@ export const diffArenaSharedConfig = (
           changeId,
           type: 'removeAuxScenario',
           scenarioKey: entry.key,
-          expectedBase: { kind: 'present', ref: expectedScenarioRef(entry as AuxiliaryScenarioEntry) },
+          expectedBase: {
+            kind: 'present',
+            ref: expectedScenarioRef(entry as AuxiliaryScenarioEntry),
+            ...(entry.key.startsWith('data-card:') ? {} : { key: entry.key }),
+          },
         }));
       } else {
         const changeId = nextId();
@@ -445,7 +469,11 @@ export const diffArenaSharedConfig = (
           changeId,
           type: 'removeMaterial',
           materialKey: entry.key,
-          expectedBase: { kind: 'present', ref: expectedMaterialRef(entry as MaterialEntry) },
+          expectedBase: {
+            kind: 'present',
+            ref: expectedMaterialRef(entry as MaterialEntry),
+            ...(entry.key.startsWith('data-card:') ? {} : { key: entry.key }),
+          },
         }));
       }
     }
