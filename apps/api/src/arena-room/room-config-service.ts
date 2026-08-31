@@ -13,7 +13,12 @@ import {
   ArenaDataCardRefVerifierError,
   type ArenaDataCardRefVerifier,
 } from './arena-data-card-ref-verifier';
-import { verifyArenaRoomSharedConfigRefs } from './arena-room-shared-config-refs';
+import {
+  ArenaRoomPresetRefVerifierError,
+  verifyArenaRoomSharedConfigPresetRefs,
+  verifyArenaRoomSharedConfigRefs,
+} from './arena-room-shared-config-refs';
+import type { ArenaRoomGenerationPresetResolver } from './room-generation-preset-registry';
 import type {
   ArenaRoomMembershipService,
   ArenaRoomSessionView,
@@ -49,6 +54,7 @@ export type ArenaRoomConfigService = {
 export type ArenaRoomConfigServiceOptions = {
   readonly memberships: Pick<ArenaRoomMembershipService, 'resolveActiveByAccount'>;
   readonly references?: ArenaDataCardRefVerifier;
+  readonly presets?: Pick<ArenaRoomGenerationPresetResolver, 'resolve'>;
   readonly now?: () => string;
 };
 
@@ -99,6 +105,16 @@ const mapReferenceError = (error: unknown): never => {
   }
 };
 
+const mapPresetReferenceError = (error: unknown): never => {
+  if (!(error instanceof ArenaRoomPresetRefVerifierError)) throw error;
+  switch (error.code) {
+    case 'ARENA_ROOM_PRESET_REF_INPUT_INVALID': return fail('ROOM_CONFIG_INPUT_INVALID');
+    case 'ARENA_ROOM_PRESET_REF_NOT_FOUND':
+    case 'ARENA_ROOM_PRESET_REF_VERSION_MISMATCH': return fail('ROOM_REFERENCE_STALE');
+    default: return fail('ROOM_REFERENCE_UNAVAILABLE');
+  }
+};
+
 export const createArenaRoomConfigService = (
   options: ArenaRoomConfigServiceOptions,
 ): ArenaRoomConfigService => {
@@ -133,6 +149,14 @@ export const createArenaRoomConfigService = (
         });
       } catch (error) {
         mapReferenceError(error);
+      }
+      try {
+        await verifyArenaRoomSharedConfigPresetRefs({
+          presets: options.presets,
+          sharedConfig: request.data.sharedConfig,
+        });
+      } catch (error) {
+        mapPresetReferenceError(error);
       }
       let result;
       try {

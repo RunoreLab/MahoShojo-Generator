@@ -5,6 +5,11 @@ import {
   type ArenaDataCardRefVerifier,
 } from '#/arena-room/arena-data-card-ref-verifier';
 import {
+  ArenaRoomGenerationPresetResolverError,
+  type ArenaRoomGenerationPresetResolver,
+} from '#/arena-room/room-generation-preset-registry';
+import type { ArenaRoomGenerationCanonicalContent } from '#/arena-room/room-generation-materializer';
+import {
   createRoomActorRegistry,
   type RoomActorCheckpointStore,
 } from '#/arena-room/room-actor-registry';
@@ -80,7 +85,36 @@ const config = () => ({
   },
 });
 
-const createHarness = async (references: ArenaDataCardRefVerifier | null = createTestArenaDataCardRefVerifier()) => {
+const presetConfig = () => ({
+  ...config(),
+  combatants: [{
+    key: 'preset:M00_white_lily.json',
+    ref: {
+      id: 'M00_white_lily.json',
+      kind: 'character' as const,
+      versionToken: `sha256:${'1'.repeat(64)}`,
+    },
+  }],
+});
+
+const createPresetResolver = (
+  errorCode?: ConstructorParameters<typeof ArenaRoomGenerationPresetResolverError>[0],
+): ArenaRoomGenerationPresetResolver => ({
+  resolve: vi.fn(async ({ ref }): Promise<ArenaRoomGenerationCanonicalContent> => {
+    if (errorCode) throw new ArenaRoomGenerationPresetResolverError(errorCode);
+    return {
+      ref,
+      payload: { codename: '白百合' },
+      displayName: '白百合',
+      sourceType: 'character',
+    };
+  }),
+});
+
+const createHarness = async (
+  references: ArenaDataCardRefVerifier | null = createTestArenaDataCardRefVerifier(),
+  presets?: ArenaRoomGenerationPresetResolver,
+) => {
   const store = new MemoryRoomStore();
   let userIndex = 0;
   let timestampIndex = 0;
@@ -115,6 +149,7 @@ const createHarness = async (references: ArenaDataCardRefVerifier | null = creat
   const service = createArenaRoomConfigService({
     memberships,
     ...(references === null ? {} : { references }),
+    ...(presets === undefined ? {} : { presets }),
     now: () => timestamps[Math.min(++timestampIndex, timestamps.length - 1)]!,
   });
   return { host, memberships, service, store };
@@ -279,6 +314,64 @@ describe('Arena Room config application service', () => {
       ],
       hostAccountUserId: 101,
     });
+  });
+
+  it('publish 在 checkpoint 前用 server-known resolver exact 验证 preset ref', async () => {
+    const presets = createPresetResolver();
+    const harness = await createHarness(undefined, presets);
+    const before = harness.store.saveCount;
+
+    await expect(harness.service.publish({
+      roomId: 'room-1',
+      accountUserId: 101,
+      request: {
+        expectedRoomEpoch: 'epoch-1',
+        expectedRevision: 0,
+        sharedConfig: presetConfig(),
+      },
+    })).resolves.toMatchObject({ snapshot: { sharedConfig: presetConfig() } });
+
+    expect(presets.resolve).toHaveBeenCalledWith({ ref: presetConfig().combatants[0]!.ref });
+    expect(harness.store.saveCount).toBe(before + 1);
+  });
+
+  it.each([
+    ['stale', 'ARENA_ROOM_PRESET_VERSION_MISMATCH', 'ROOM_REFERENCE_STALE'],
+    ['not found', 'ARENA_ROOM_PRESET_NOT_FOUND', 'ROOM_REFERENCE_STALE'],
+  ] as const)('publish 在 preset %s 时不写入 checkpoint', async (_label, errorCode, expectedCode) => {
+    const harness = await createHarness(undefined, createPresetResolver(errorCode));
+    const before = harness.store.saveCount;
+
+    await expect(harness.service.publish({
+      roomId: 'room-1',
+      accountUserId: 101,
+      request: {
+        expectedRoomEpoch: 'epoch-1',
+        expectedRevision: 0,
+        sharedConfig: presetConfig(),
+      },
+    })).rejects.toEqual(new ArenaRoomConfigError(expectedCode));
+
+    expect(harness.store.saveCount).toBe(before);
+    expect(harness.store.state?.snapshot.revision).toBe(0);
+  });
+
+  it('Shared Config 含 preset ref 但未注入 resolver 时 fail closed', async () => {
+    const harness = await createHarness();
+    const before = harness.store.saveCount;
+
+    await expect(harness.service.publish({
+      roomId: 'room-1',
+      accountUserId: 101,
+      request: {
+        expectedRoomEpoch: 'epoch-1',
+        expectedRevision: 0,
+        sharedConfig: presetConfig(),
+      },
+    })).rejects.toEqual(new ArenaRoomConfigError('ROOM_REFERENCE_UNAVAILABLE'));
+
+    expect(harness.store.saveCount).toBe(before);
+    expect(harness.store.state?.snapshot.revision).toBe(0);
   });
 
   it('Shared Config 含 online ref 但未注入 verifier 时 fail closed', async () => {

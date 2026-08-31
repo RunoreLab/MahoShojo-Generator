@@ -21,7 +21,12 @@ import {
   ArenaDataCardRefVerifierError,
   type ArenaDataCardRefVerifier,
 } from './arena-data-card-ref-verifier';
-import { verifyArenaRoomSharedConfigRefs } from './arena-room-shared-config-refs';
+import {
+  ArenaRoomPresetRefVerifierError,
+  verifyArenaRoomSharedConfigPresetRefs,
+  verifyArenaRoomSharedConfigRefs,
+} from './arena-room-shared-config-refs';
+import type { ArenaRoomGenerationPresetResolver } from './room-generation-preset-registry';
 import {
   RoomActor,
   RoomActorRegistry,
@@ -123,6 +128,7 @@ export type ArenaRoomMembershipServiceOptions = {
   readonly actors: RoomActorRegistry;
   readonly creationReceipts?: Pick<RedisRoomStore, 'loadCreationReceipt'>;
   readonly references?: ArenaDataCardRefVerifier;
+  readonly presets?: Pick<ArenaRoomGenerationPresetResolver, 'resolve'>;
   readonly createUserId?: () => string;
   readonly now?: () => string;
 };
@@ -140,6 +146,16 @@ const mapReferenceError = (error: unknown): never => {
   switch (error.code) {
     case 'ARENA_DATA_CARD_REF_VERSION_MISMATCH': return fail('ROOM_REFERENCE_STALE');
     case 'ARENA_DATA_CARD_REF_NOT_READABLE': return fail('ROOM_REFERENCE_DENIED');
+    default: return fail('ROOM_REFERENCE_UNAVAILABLE');
+  }
+};
+
+const mapPresetReferenceError = (error: unknown): never => {
+  if (!(error instanceof ArenaRoomPresetRefVerifierError)) throw error;
+  switch (error.code) {
+    case 'ARENA_ROOM_PRESET_REF_INPUT_INVALID': return fail('ROOM_INPUT_INVALID');
+    case 'ARENA_ROOM_PRESET_REF_NOT_FOUND':
+    case 'ARENA_ROOM_PRESET_REF_VERSION_MISMATCH': return fail('ROOM_REFERENCE_STALE');
     default: return fail('ROOM_REFERENCE_UNAVAILABLE');
   }
 };
@@ -349,6 +365,14 @@ export const createArenaRoomMembershipService = (
         });
       } catch (error) {
         mapReferenceError(error);
+      }
+      try {
+        await verifyArenaRoomSharedConfigPresetRefs({
+          presets: options.presets,
+          sharedConfig: sharedConfig.data,
+        });
+      } catch (error) {
+        mapPresetReferenceError(error);
       }
       const userId = createUserId();
       let result;

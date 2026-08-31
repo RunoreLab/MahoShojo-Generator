@@ -84,15 +84,16 @@ if (process.env.HONO_CONFIG_CHECK_ONLY === 'true') {
   const roomReferences = createArenaDataCardRefVerifier({
     getClient: getHonoPrimaryD1Client,
   });
+  const roomPresetGenerationContent = createArenaRoomGenerationPresetResolver();
   const roomMemberships = createArenaRoomMembershipService({
     actors: roomActors,
     creationReceipts: roomStore,
     references: roomReferences,
+    presets: roomPresetGenerationContent,
   });
   const roomOnlineGenerationContent = createArenaRoomGenerationOnlineContentResolver({
     getClient: getHonoPrimaryD1Client,
   });
-  const roomPresetGenerationContent = createArenaRoomGenerationPresetResolver();
   const roomGenerationMaterializer = createArenaRoomGenerationMaterializer({
     content: {
       resolveOnline: (input) => roomOnlineGenerationContent.resolve(input),
@@ -106,6 +107,7 @@ if (process.env.HONO_CONFIG_CHECK_ONLY === 'true') {
   const roomConfigs = createArenaRoomConfigService({
     memberships: roomMemberships,
     references: roomReferences,
+    presets: roomPresetGenerationContent,
   });
   const roomGenerations = createArenaRoomGenerationService({
     memberships: roomMemberships,
