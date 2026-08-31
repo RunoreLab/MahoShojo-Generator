@@ -88,15 +88,31 @@ const configureTransport = (transport: D1TransportCase['transport']) => {
   process.env.CLOUDFLARE_API_TOKEN = 'token_x';
 };
 
-const createHealthApp = () => {
+const createHealthApp = (redis: RedisService = redisStub) => {
   const app = new Hono<{ Variables: HonoAppVariables }>();
-  registerHealthRoutes(app, config, redisStub);
+  registerHealthRoutes(app, config, redis);
   return app;
 };
 
 afterEach(() => {
   vi.unstubAllGlobals();
   restoreEnvironment();
+});
+
+describe('Hono liveness', () => {
+  it('不读取 Redis 或 D1', async () => {
+    configureTransport('gateway');
+    const fetchMock = vi.fn(async () => Response.json({ success: true }));
+    const redisPing = vi.fn(async () => true);
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await createHealthApp({ ...redisStub, ping: redisPing })
+      .request('/health/live');
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(redisPing).not.toHaveBeenCalled();
+  });
 });
 
 describe.each(transportCases)('D1 readiness：$name', ({ transport, expectedUrl }) => {

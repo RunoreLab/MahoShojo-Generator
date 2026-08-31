@@ -38,7 +38,7 @@ type StatementInput = {
 const MAX_BODY_BYTES = 512 * 1024;
 const MAX_SQL_CHARS = 100_000;
 const MAX_BATCH_STATEMENTS = 50;
-const MAX_PARAMS = 1_000;
+const MAX_PARAMS = 100;
 const MAX_CLOCK_SKEW_MS = 60_000;
 const FORBIDDEN_SQL_TOKENS = new Set([
   'ALTER',

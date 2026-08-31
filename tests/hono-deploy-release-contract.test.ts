@@ -34,6 +34,15 @@ describe('Hono content-addressed release transaction', () => {
     expect(runtimeImage).toBe(composeImage);
   });
 
+  test('Compose 存活检查不轮询 Redis 或 D1 readiness', () => {
+    const compose = readFileSync(composePath, 'utf8');
+    const healthcheck = compose.match(/\n    healthcheck:\n(?<body>(?:      .*\n)+)/u)?.groups?.body;
+
+    expect(healthcheck).toContain('http://127.0.0.1:8787/health/live');
+    expect(healthcheck).not.toContain('/health/ready');
+    expect(healthcheck).toContain('interval: 30s');
+  });
+
   test('release id 覆盖 bundle、compose 与 deploy script 的完整 tuple', () => {
     const workflow = readFileSync(workflowPath, 'utf8');
 
