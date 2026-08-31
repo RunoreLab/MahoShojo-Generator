@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "goal": "GMR-10P",
+  "acceptedSpec": "SPEC-arena-multiplayer-product-parity-amendment-v1",
+  "overallStatus": "IN_PROGRESS",
+  "productionReadiness": "BLOCKED",
+  "slices": {
+    "GMR-10P-A": "DONE",
+    "GMR-10P-B": "READY",
+    "GMR-10P-C": "BLOCKED",
+    "GMR-10P-D": "BLOCKED",
+    "GMR-10P-E": "BLOCKED",
+    "GMR-10P-F": "BLOCKED",
+    "GMR-10P-G": "BLOCKED"
+  },
+  "blockedReason": "GMR-10P-B 至 GMR-10P-G 尚未完成；production activation 必须保持 fail closed。"
+}

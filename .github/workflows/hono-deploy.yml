@@ -59,6 +59,11 @@ jobs:
       - name: Verify workspace and repository gates
         run: pnpm run ci:verify
 
+      - name: Require Arena product parity for production
+        run: |
+          set -euo pipefail
+          pnpm run check:arena-product-parity -- --require-ready
+
       - name: Verify Hono authentication and runtime
         run: |
           pnpm --filter @mahoshojo/api run test

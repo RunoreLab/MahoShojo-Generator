@@ -2,6 +2,7 @@
 
 import { useCallback, useMemo } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
+import { defineArenaGenerationRequest } from '@mahoshojo/multiplayer-core';
 
 import type { NewsReport } from '@/components/BattleReportCard';
 import { persistArrestedBackup, type ArrestedBackupDraftItem, type ArrestedBackupTriggerSource } from '@/lib/arrested-backup';
@@ -645,7 +646,26 @@ export const useBattleEngine = () => {
         : undefined;
 
       const generationRequestId = crypto.randomUUID();
-      const requestBody: Record<string, unknown> = {
+      const questionnaireSelections = selectedQuestionnaires.length > 0
+        ? selectedQuestionnaires.map((selection) => ({
+          source: selection.source,
+          kind: selection.questionnaire.kind,
+          presetId: selection.source === 'preset' ? selection.questionnaire.id : undefined,
+          dataCardId: selection.source === 'database' ? selection.dataCardId : undefined,
+          useLore: selection.useLore === false ? false : undefined,
+        }))
+        : undefined;
+      const questionnaires = selectedQuestionnaires.length > 0
+        ? selectedQuestionnaires.map((selection) => ({
+          id: selection.questionnaire.id,
+          title: selection.questionnaire.title,
+          kind: selection.questionnaire.kind,
+          useLore: selection.useLore === false ? false : undefined,
+          loreMarkdown: selection.questionnaire.loreMarkdown ?? undefined,
+        }))
+        : undefined;
+      const customProviderPayload = buildCustomProviderRequestPayload(userProviderConfig);
+      const requestBody = defineArenaGenerationRequest({
         generationRequestId,
         combatants: freshCombatants.map((combatant) => ({
           type: combatant.type,
@@ -684,29 +704,10 @@ export const useBattleEngine = () => {
         adjudicationEvents,
         storyLength,
         customStoryLength: normalizeCustomStoryLength(customStoryLength) || undefined,
-      };
-
-      if (selectedQuestionnaires.length > 0) {
-        requestBody.questionnaireSelections = selectedQuestionnaires.map((selection) => ({
-          source: selection.source,
-          kind: selection.questionnaire.kind,
-          presetId: selection.source === 'preset' ? selection.questionnaire.id : undefined,
-          dataCardId: selection.source === 'database' ? selection.dataCardId : undefined,
-          useLore: selection.useLore === false ? false : undefined,
-        }));
-        requestBody.questionnaires = selectedQuestionnaires.map((selection) => ({
-          id: selection.questionnaire.id,
-          title: selection.questionnaire.title,
-          kind: selection.questionnaire.kind,
-          useLore: selection.useLore === false ? false : undefined,
-          loreMarkdown: selection.questionnaire.loreMarkdown ?? undefined,
-        }));
-      }
-
-      const customProviderPayload = buildCustomProviderRequestPayload(userProviderConfig);
-      if (customProviderPayload) {
-        requestBody.customProvider = customProviderPayload;
-      }
+        questionnaireSelections,
+        questionnaires,
+        customProvider: customProviderPayload ?? undefined,
+      });
 
       if (roomAction.inRoom && arenaRoomRuntime) {
         const sharedConfig = await buildArenaRoomSharedConfigFromBattleState(
