@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
+import { useRef, useState, type ChangeEvent, type ReactNode } from 'react';
 
 import type { RoomDirectoryVisibility } from '@mahoshojo/contracts/arena-room';
 
@@ -14,6 +14,7 @@ import { ArenaProposalPanel } from './ArenaProposalPanel';
 import { ArenaHostConfigPanel } from './ArenaHostConfigPanel';
 import { useArenaRoom, useArenaRoomContext } from './useArenaRoom';
 import { BattleResultPresentation } from '../components/BattleResultPresentation';
+import { ArenaRoomDialog } from './ArenaRoomDialog';
 
 export type ArenaMultiplayerPanelProps = {
   readonly enabled: boolean;
@@ -21,6 +22,9 @@ export type ArenaMultiplayerPanelProps = {
   readonly authLoading: boolean;
   readonly isAuthenticated: boolean;
   readonly displayName: string;
+};
+
+export type ArenaMultiplayerResultProps = {
   readonly onSaveImage?: (imageUrl: string) => void;
 };
 
@@ -30,7 +34,6 @@ export type ArenaMultiplayerPanelViewProps = {
   readonly actionPending?: boolean;
   readonly hostConfigContent?: ReactNode;
   readonly proposalContent?: ReactNode;
-  readonly onSaveImage?: (imageUrl: string) => void;
   readonly roomTitle: string;
   readonly visibility: RoomDirectoryVisibility;
   readonly joinCode: string;
@@ -43,6 +46,8 @@ export type ArenaMultiplayerPanelViewProps = {
   readonly onJoin: (roomId: string) => void;
   readonly onLeave: () => void;
   readonly onClose: () => void;
+  readonly onKick?: (targetUserId: string) => void;
+  readonly onCancelGeneration?: () => void;
   readonly onReconnect: () => void;
   readonly onRetryUnknown: () => void;
   readonly onReset: () => void;
@@ -92,47 +97,15 @@ const ArenaRoomLobbyDialog = ({
   readonly onClose: () => void;
   readonly busy: boolean;
 }) => {
-  const closeButtonRef = useRef<HTMLButtonElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    closeButtonRef.current?.focus();
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [onClose, open]);
-  if (!open) return null;
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 sm:p-6">
-      <section
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="arena-room-lobby-heading"
-        className="flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-fuchsia-200 bg-white shadow-2xl dark:border-fuchsia-900 dark:bg-gray-950"
-      >
-        <div className="flex items-start justify-between gap-3 border-b border-gray-200 p-4 dark:border-gray-800">
-          <div>
-            <h3 id="arena-room-lobby-heading" className="text-lg font-semibold text-gray-950 dark:text-gray-50">
-              多人房间
-            </h3>
-            <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
-              创建房间，或从有界公开目录中选择并加入。
-            </p>
-          </div>
-          <button
-            ref={closeButtonRef}
-            type="button"
-            className={secondaryButtonClass}
-            aria-label="关闭多人房间窗口"
-            onClick={onClose}
-          >
-            关闭
-          </button>
-        </div>
-
-        <div className="min-h-0 flex-1 overflow-y-auto p-4">
+    <ArenaRoomDialog
+      open={open}
+      onClose={onClose}
+      titleId="arena-room-lobby-heading"
+      title="多人房间"
+      description="创建房间，或从有界公开目录中选择并加入。"
+      widthClassName="max-w-4xl"
+    >
           <div className="grid gap-4 lg:grid-cols-2">
             <fieldset className="space-y-3 rounded-xl border border-gray-200 bg-white/70 p-4 dark:border-gray-700 dark:bg-gray-900/60">
               <legend className="px-1 text-sm font-semibold text-gray-950 dark:text-gray-100">创建房间</legend>
@@ -230,13 +203,11 @@ const ArenaRoomLobbyDialog = ({
               </div>
             ) : null}
           </section>
-        </div>
-      </section>
-    </div>
+    </ArenaRoomDialog>
   );
 };
 
-const ArenaRoomGenerationReport = ({ state, onSaveImage }: {
+export const ArenaRoomGenerationResult = ({ state, onSaveImage }: {
   readonly state: ArenaRoomControllerState;
   readonly onSaveImage?: (imageUrl: string) => void;
 }) => {
@@ -333,11 +304,30 @@ const ArenaRoomGenerationReport = ({ state, onSaveImage }: {
 export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps) {
   const { state } = props;
   const [lobbyOpen, setLobbyOpen] = useState(false);
+  const [configOpen, setConfigOpen] = useState(false);
+  const [proposalsOpen, setProposalsOpen] = useState(false);
+  const [membersOpen, setMembersOpen] = useState(false);
+  const [managementOpen, setManagementOpen] = useState(false);
+  const [kickConfirmation, setKickConfirmation] = useState<{
+    readonly targetUserId: string;
+    readonly displayName: string;
+  } | null>(null);
+  const [managementConfirmation, setManagementConfirmation] = useState<
+    'cancel' | 'close' | 'leave' | null
+  >(null);
   if (state.phase === 'disabled') return null;
 
   const busy = Boolean(props.actionPending)
+    || (state.managementOperation !== null && state.managementOperation !== undefined)
     || ['connecting', 'listing', 'reconnecting'].includes(state.phase);
   const session = state.session;
+  const activeMembers = session?.snapshot.members.filter((member) => (
+    member.membershipState === 'active'
+  )) ?? [];
+  const host = activeMembers.find((member) => member.role === 'host');
+  const activeGeneration = session?.snapshot.activeGeneration;
+  const canCancelGeneration = session?.self.role === 'host'
+    && (activeGeneration?.state === 'starting' || activeGeneration?.state === 'running');
 
   return (
     <section
@@ -350,9 +340,11 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
           <h2 id="arena-multiplayer-heading" className="text-lg font-semibold text-gray-950 dark:text-gray-50">
             Arena 多人房间
           </h2>
-          <p className="mt-1 text-sm text-gray-700 dark:text-gray-300">
-            房间状态由服务器维护；本地角色与情景只共享安全摘要。
-          </p>
+          {!session ? (
+            <p className="mt-1 text-sm text-gray-700 dark:text-gray-300">
+              房间状态由服务器维护；本地角色与情景只共享安全摘要。
+            </p>
+          ) : null}
         </div>
         {!session && !props.authLoading && (state.phase === 'ready' || state.phase === 'listing') ? (
           <button
@@ -384,64 +376,211 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
           多人房间需要登录后使用
         </p>
       ) : session ? (
-        <div className="mt-4 space-y-4">
-          <dl className="grid gap-3 text-sm sm:grid-cols-3">
-            <div>
-              <dt className="text-gray-600 dark:text-gray-400">房间码</dt>
-              <dd className="mt-1 break-all font-mono text-gray-950 dark:text-gray-100">{session.roomId}</dd>
+        <div className="mt-3">
+          <div
+            className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-fuchsia-200 bg-white/80 p-3 dark:border-fuchsia-900 dark:bg-gray-900/70"
+            data-arena-room-compact-shell="v1"
+          >
+            <p className="min-w-0 text-sm text-gray-800 dark:text-gray-200">
+              房间 <span className="font-mono font-semibold">{session.roomId}</span>
+              <span aria-hidden="true"> · </span>
+              房主 {host?.displayName ?? '未知'}
+              <span aria-hidden="true"> · </span>
+              {activeMembers.length} 人
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <button type="button" className={secondaryButtonClass} onClick={() => setConfigOpen(true)}>
+                {session.self.role === 'host' ? '更新配置' : '同步配置'}
+              </button>
+              <button type="button" className={secondaryButtonClass} onClick={() => setProposalsOpen(true)}>
+                提案
+              </button>
+              <button type="button" className={secondaryButtonClass} onClick={() => setMembersOpen(true)}>
+                成员
+              </button>
+              <button type="button" className={secondaryButtonClass} onClick={() => setManagementOpen(true)}>
+                {session.self.role === 'host' ? '房间管理' : '房间管理 / 退出'}
+              </button>
             </div>
-            <div>
-              <dt className="text-gray-600 dark:text-gray-400">身份</dt>
-              <dd className="mt-1 font-medium text-gray-950 dark:text-gray-100">
-                {session.self.role === 'host' ? '房主' : '成员'}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-gray-600 dark:text-gray-400">连接状态</dt>
-              <dd className="mt-1 font-medium text-gray-950 dark:text-gray-100">{state.phase}</dd>
-            </div>
-          </dl>
-
-          <div>
-            <h3 className="text-sm font-semibold text-gray-950 dark:text-gray-100">房间成员</h3>
-            <ul className="mt-2 grid gap-2 sm:grid-cols-2" aria-label="房间成员列表">
-              {session.snapshot.members.map((member) => (
-                <li key={member.userId} className="rounded-xl border border-gray-200 bg-white/80 px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900/70">
-                  <span className="font-medium text-gray-950 dark:text-gray-100">{member.displayName}</span>
-                  <span className="ml-2 text-gray-600 dark:text-gray-400">
-                    {member.role === 'host' ? '房主' : '成员'} · {member.membershipState === 'active' ? '在房间' : '已离开'}
-                  </span>
-                </li>
-              ))}
-            </ul>
           </div>
 
-          {props.hostConfigContent}
-
-          {props.proposalContent}
-
-          <ArenaRoomGenerationReport state={state} onSaveImage={props.onSaveImage} />
-
-          <div className="flex flex-wrap gap-2">
-            {state.phase === 'degraded' || state.phase === 'reconnecting' || state.configPublishResultUnknown ? (
+          <div className="mt-2 flex flex-wrap gap-2">
+            {state.phase === 'degraded'
+            || state.phase === 'reconnecting'
+            || state.configPublishResultUnknown
+            || state.managementResultUnknown ? (
               <button type="button" className={secondaryButtonClass} onClick={props.onReconnect}>
-                {state.configPublishResultUnknown ? '重新确认配置发布' : '重新连接'}
+                {state.managementResultUnknown
+                  ? '重新确认管理动作'
+                  : state.configPublishResultUnknown
+                    ? '重新确认配置发布'
+                    : '重新连接'}
               </button>
             ) : null}
             {state.phase === 'replacement' || state.phase === 'closed' ? (
               <button type="button" className={secondaryButtonClass} onClick={props.onReset}>
                 返回房间大厅
               </button>
+            ) : null}
+          </div>
+
+          <ArenaRoomDialog
+            open={configOpen}
+            onClose={() => setConfigOpen(false)}
+            titleId="arena-room-config-dialog-heading"
+            title={session.self.role === 'host' ? '更新房间配置' : '同步房间配置'}
+            description="主编辑区继续作为 Arena 配置的唯一编辑入口。"
+          >
+            {props.hostConfigContent ?? (
+              <p className="text-sm text-gray-700 dark:text-gray-300">
+                房间权威配置会自动同步到主编辑区；如有本地冲突，请先比较后再选择。
+              </p>
+            )}
+          </ArenaRoomDialog>
+
+          <ArenaRoomDialog
+            open={proposalsOpen}
+            onClose={() => setProposalsOpen(false)}
+            titleId="arena-room-proposals-dialog-heading"
+            title="房间提案"
+            description="成员在主编辑区编辑，房主在此审阅 typed diff。"
+            widthClassName="max-w-5xl"
+          >
+            {props.proposalContent ?? (
+              <p className="text-sm text-gray-700 dark:text-gray-300">当前没有待处理提案。</p>
+            )}
+          </ArenaRoomDialog>
+
+          <ArenaRoomDialog
+            open={membersOpen}
+            onClose={() => {
+              setKickConfirmation(null);
+              setMembersOpen(false);
+            }}
+            titleId="arena-room-members-dialog-heading"
+            title="房间成员"
+            description={`当前 ${activeMembers.length} 人在线`}
+          >
+            {kickConfirmation ? (
+              <div role="alertdialog" aria-label="确认移除成员" className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-950 dark:border-red-900 dark:bg-red-950/30 dark:text-red-100">
+                <p>确定将“{kickConfirmation.displayName}”移出当前房间吗？</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    className={primaryButtonClass}
+                    disabled={busy}
+                    onClick={() => {
+                      props.onKick?.(kickConfirmation.targetUserId);
+                      setKickConfirmation(null);
+                    }}
+                  >
+                    确认移除成员
+                  </button>
+                  <button type="button" className={secondaryButtonClass} onClick={() => setKickConfirmation(null)}>
+                    取消
+                  </button>
+                </div>
+              </div>
+            ) : null}
+            <ul className="grid gap-2 sm:grid-cols-2" aria-label="房间成员列表">
+              {activeMembers.map((member) => (
+                <li key={member.userId} className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white/80 px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900/70">
+                  <span>
+                    <span className="font-medium text-gray-950 dark:text-gray-100">{member.displayName}</span>
+                    <span className="ml-2 text-gray-600 dark:text-gray-400">
+                      {member.role === 'host' ? '房主' : '成员'}
+                    </span>
+                  </span>
+                  {session.self.role === 'host' && member.role !== 'host' && member.userId !== session.self.userId ? (
+                    <button
+                      type="button"
+                      className={secondaryButtonClass}
+                      disabled={busy}
+                      onClick={() => setKickConfirmation({
+                        targetUserId: member.userId,
+                        displayName: member.displayName,
+                      })}
+                    >
+                      移除
+                    </button>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          </ArenaRoomDialog>
+
+          <ArenaRoomDialog
+            open={managementOpen}
+            onClose={() => {
+              setManagementConfirmation(null);
+              setManagementOpen(false);
+            }}
+            titleId="arena-room-management-dialog-heading"
+            title={session.self.role === 'host' ? '房间管理' : '退出房间'}
+            description="所有管理动作都会由服务器重新校验身份与房间 epoch。"
+          >
+            {managementConfirmation ? (
+              <div role="alertdialog" aria-label="确认房间管理动作" className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-950 dark:border-red-900 dark:bg-red-950/30 dark:text-red-100">
+                <p>
+                  {managementConfirmation === 'close'
+                    ? '确定关闭房间吗？所有成员都会断开。'
+                    : managementConfirmation === 'leave'
+                      ? '确定离开当前房间吗？'
+                      : '确定停止当前战报生成吗？'}
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    className={primaryButtonClass}
+                    disabled={busy}
+                    onClick={() => {
+                      if (managementConfirmation === 'close') props.onClose();
+                      else if (managementConfirmation === 'leave') props.onLeave();
+                      else props.onCancelGeneration?.();
+                      setManagementConfirmation(null);
+                    }}
+                  >
+                    {managementConfirmation === 'close'
+                      ? '确认关闭房间'
+                      : managementConfirmation === 'leave'
+                        ? '确认离开房间'
+                        : '确认停止生成'}
+                  </button>
+                  <button type="button" className={secondaryButtonClass} onClick={() => setManagementConfirmation(null)}>
+                    取消
+                  </button>
+                </div>
+              </div>
             ) : session.self.role === 'host' ? (
-              <button type="button" className={secondaryButtonClass} disabled={busy} onClick={props.onClose}>
-                关闭房间
-              </button>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className={secondaryButtonClass}
+                  disabled={busy || !canCancelGeneration}
+                  onClick={() => setManagementConfirmation('cancel')}
+                >
+                  停止当前生成
+                </button>
+                <button
+                  type="button"
+                  className={secondaryButtonClass}
+                  disabled={busy}
+                  onClick={() => setManagementConfirmation('close')}
+                >
+                  关闭房间
+                </button>
+              </div>
             ) : (
-              <button type="button" className={secondaryButtonClass} disabled={busy} onClick={props.onLeave}>
+              <button
+                type="button"
+                className={secondaryButtonClass}
+                disabled={busy}
+                onClick={() => setManagementConfirmation('leave')}
+              >
                 离开房间
               </button>
             )}
-          </div>
+          </ArenaRoomDialog>
         </div>
       ) : state.phase === 'unknown' ? (
         <div className="mt-4 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
@@ -577,7 +716,6 @@ function ArenaMultiplayerPanelRuntime({
           workspace={proposalWorkspace}
         />
       )}
-      onSaveImage={props.onSaveImage}
       roomTitle={roomTitle}
       visibility={visibility}
       joinCode={joinCode}
@@ -599,6 +737,8 @@ function ArenaMultiplayerPanelRuntime({
       }}
       onLeave={() => { void controller.leave(); }}
       onClose={() => { void controller.close(); }}
+      onKick={(targetUserId) => { void controller.kickMember(targetUserId); }}
+      onCancelGeneration={() => { void controller.cancelGeneration(); }}
       onReconnect={controller.reconnect}
       onRetryUnknown={() => { void controller.retryUnknownOperation(); }}
       onReset={() => {
@@ -623,4 +763,11 @@ export function ArenaMultiplayerContextPanel(props: ArenaMultiplayerPanelProps) 
       proposalWorkspace={runtime.proposalWorkspace}
     />
   );
+}
+
+/** Production result adapter: keeps the room report in the existing Arena result region. */
+export function ArenaMultiplayerContextResult({ onSaveImage }: ArenaMultiplayerResultProps) {
+  const runtime = useArenaRoomContext();
+  if (!runtime?.state.session) return null;
+  return <ArenaRoomGenerationResult state={runtime.state} onSaveImage={onSaveImage} />;
 }

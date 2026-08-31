@@ -2,9 +2,15 @@
 
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { ArenaMultiplayerPanel } from '@/components/arena/multiplayer/ArenaMultiplayerPanel';
+import {
+  ArenaMultiplayerContextPanel,
+  type ArenaMultiplayerPanelProps,
+} from '@/components/arena/multiplayer/ArenaMultiplayerPanel';
+import { ArenaEditorWorkspaceBoundary } from '@/components/arena/multiplayer/ArenaRoomProposalWorkspace';
+import { ArenaRoomProvider } from '@/components/arena/multiplayer/useArenaRoom';
 import { useBattleStore } from '@/components/arena/stores/useBattleStore';
 import { authStorage } from '@/lib/auth';
 
@@ -104,6 +110,7 @@ class WiringSocket {
 
 let container: HTMLDivElement;
 let root: Root;
+let queryClient: QueryClient;
 
 const props = {
   enabled: true,
@@ -112,6 +119,23 @@ const props = {
   isAuthenticated: true,
   displayName: '测试玩家',
 };
+
+const requestPath = (input: string): string => new URL(input, 'http://test.local').pathname;
+
+const productionTree = (panelProps: ArenaMultiplayerPanelProps) => (
+  <ArenaRoomProvider
+    enabled={panelProps.enabled}
+    authenticated={panelProps.isAuthenticated && !panelProps.authLoading}
+    origin={panelProps.origin}
+  >
+    <QueryClientProvider client={queryClient}>
+      <ArenaMultiplayerContextPanel {...panelProps} />
+      <ArenaEditorWorkspaceBoundary>
+        <div data-arena-editor-placeholder="v1" />
+      </ArenaEditorWorkspaceBoundary>
+    </QueryClientProvider>
+  </ArenaRoomProvider>
+);
 
 const flush = async (): Promise<void> => {
   await act(async () => {
@@ -129,6 +153,10 @@ const button = (label: string): HTMLButtonElement => {
 };
 
 const enterJoinCode = async (): Promise<void> => {
+  if (!container.querySelector('#arena-room-join-code')) {
+    await act(async () => button('打开多人房间').click());
+    await flush();
+  }
   const input = container.querySelector<HTMLInputElement>('#arena-room-join-code');
   if (!input) throw new Error('join input missing');
   await act(async () => {
@@ -138,11 +166,14 @@ const enterJoinCode = async (): Promise<void> => {
   });
 };
 
-const setTextArea = async (id: string, value: string): Promise<void> => {
-  const input = container.querySelector<HTMLTextAreaElement>(`#${id}`);
-  if (!input) throw new Error(`textarea not found: ${id}`);
+const setTextField = async (id: string, value: string): Promise<void> => {
+  const input = container.querySelector<HTMLInputElement | HTMLTextAreaElement>(`#${id}`);
+  if (!input) throw new Error(`text field not found: ${id}`);
   await act(async () => {
-    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set
+    const prototype = input instanceof HTMLTextAreaElement
+      ? HTMLTextAreaElement.prototype
+      : HTMLInputElement.prototype;
+    Object.getOwnPropertyDescriptor(prototype, 'value')?.set
       ?.call(input, value);
     input.dispatchEvent(new Event('input', { bubbles: true }));
   });
@@ -152,6 +183,7 @@ beforeEach(() => {
   WiringSocket.instances = [];
   vi.stubGlobal('WebSocket', WiringSocket);
   vi.spyOn(authStorage, 'getAuthHeader').mockResolvedValue('Bearer verified-key');
+  queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   container = document.createElement('div');
   document.body.append(container);
   root = createRoot(container);
@@ -159,6 +191,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   await act(async () => root.unmount());
+  queryClient.clear();
   container.remove();
   vi.useRealTimers();
   vi.unstubAllGlobals();
@@ -170,13 +203,13 @@ describe('Arena multiplayer production client/hook wiring', () => {
     vi.stubGlobal('fetch', fetcher);
 
     await act(async () => root.render(
-      <ArenaMultiplayerPanel {...props} enabled={false} />,
+      productionTree({ ...props, enabled: false }),
     ));
     await flush();
-    expect(container.innerHTML).toBe('');
+    expect(container.querySelector('[data-arena-multiplayer]')).toBeNull();
 
     await act(async () => root.render(
-      <ArenaMultiplayerPanel {...props} isAuthenticated={false} />,
+      productionTree({ ...props, isAuthenticated: false }),
     ));
     await flush();
     expect(container.textContent).toContain('多人房间需要登录后使用');
@@ -193,6 +226,9 @@ describe('Arena multiplayer production client/hook wiring', () => {
       const fetcher = vi.fn<typeof fetch>(async (input, init) => {
         const url = String(input);
         calls.push({ url, init });
+        if (requestPath(url) === '/api/arena/rooms/v1') {
+          return Response.json({ protocolVersion: 1, items: [], nextCursor: null });
+        }
         if (url.endsWith('/join')) return Response.json(session);
         if (url.endsWith('/ticket')) {
           return Response.json({
@@ -215,30 +251,33 @@ describe('Arena multiplayer production client/hook wiring', () => {
         throw new Error(`unexpected Room request: ${url}`);
       });
       vi.stubGlobal('fetch', fetcher);
-      await act(async () => root.render(<ArenaMultiplayerPanel {...props} />));
+      await act(async () => root.render(productionTree(props)));
       await enterJoinCode();
       await act(async () => button('加入房间').click());
       await flush();
 
       expect(WiringSocket.instances).toHaveLength(1);
       expect(WiringSocket.instances[0]).toMatchObject({
-        url: 'ws://127.0.0.1:8787/api/arena/rooms/v1/ws?ticket=ticket-2',
+        url: 'ws://127.0.0.1:8787/api/arena/rooms/v1/ws?ticket=ticket-3',
         protocol: 'mahoshojo.arena-room.v1',
       });
       await act(async () => WiringSocket.instances[0]!.open());
       const exitLabel = role === 'host' ? '关闭房间' : '离开房间';
+      await act(async () => button(role === 'host' ? '房间管理' : '房间管理 / 退出').click());
       await act(async () => button(exitLabel).click());
+      await act(async () => button(role === 'host' ? '确认关闭房间' : '确认离开房间').click());
       await flush();
 
-      expect(calls.map((call) => new URL(call.url).pathname)).toEqual([
+      expect(calls.map((call) => requestPath(call.url))).toEqual([
+        '/api/arena/rooms/v1',
         '/api/arena/rooms/v1/room-1/join',
         '/api/arena/rooms/v1/room-1/ticket',
         `/api/arena/rooms/v1/room-1/${role === 'host' ? 'close' : 'leave'}`,
       ]);
-      expect(JSON.parse(String(calls[2]?.init?.body))).toEqual({
+      expect(JSON.parse(String(calls[3]?.init?.body))).toEqual({
         expectedRoomEpoch: 'epoch-1',
       });
-      expect(new Headers(calls[0]?.init?.headers).get('authorization'))
+      expect(new Headers(calls[1]?.init?.headers).get('authorization'))
         .toBe('Bearer verified-key');
     },
   );
@@ -248,6 +287,9 @@ describe('Arena multiplayer production client/hook wiring', () => {
     let ticketIndex = 0;
     const fetcher = vi.fn<typeof fetch>(async (input) => {
       const url = String(input);
+      if (requestPath(url) === '/api/arena/rooms/v1') {
+        return Response.json({ protocolVersion: 1, items: [], nextCursor: null });
+      }
       if (url.endsWith('/join')) return Response.json(sessionFor('member'));
       if (url.endsWith('/ticket')) {
         ticketIndex += 1;
@@ -264,7 +306,7 @@ describe('Arena multiplayer production client/hook wiring', () => {
       throw new Error(`unexpected Room request: ${url}`);
     });
     vi.stubGlobal('fetch', fetcher);
-    await act(async () => root.render(<ArenaMultiplayerPanel {...props} />));
+    await act(async () => root.render(productionTree(props)));
     await enterJoinCode();
     await act(async () => button('加入房间').click());
     await flush();
@@ -284,7 +326,7 @@ describe('Arena multiplayer production client/hook wiring', () => {
     await act(async () => WiringSocket.instances[1]!.closed(1008, 'membership-revoked'));
     expect(container.textContent).toContain('原房间无法恢复');
     await act(async () => button('返回房间大厅').click());
-    expect(container.textContent).toContain('创建多人房间');
+    expect(container.textContent).toContain('打开多人房间');
   });
 
   it('member 通过 production panel/client/WSS 提交并撤回，HTTP ack 不越权修改 snapshot', async () => {
@@ -294,6 +336,11 @@ describe('Arena multiplayer production client/hook wiring', () => {
     const fetcher = vi.fn<typeof fetch>(async (input, init) => {
       const url = String(input);
       calls.push({ url, init });
+      if (url.endsWith('/languages.json')) return Response.json([]);
+      if (requestPath(url) === '/api/auth/verify') return Response.json({ success: false });
+      if (requestPath(url) === '/api/arena/rooms/v1') {
+        return Response.json({ protocolVersion: 1, items: [], nextCursor: null });
+      }
       if (url.endsWith('/join')) return Response.json(memberSession);
       if (url.endsWith('/ticket')) {
         return Response.json({
@@ -335,19 +382,21 @@ describe('Arena multiplayer production client/hook wiring', () => {
       throw new Error(`unexpected Room request: ${url}`);
     });
     vi.stubGlobal('fetch', fetcher);
-    await act(async () => root.render(<ArenaMultiplayerPanel {...props} />));
+    await act(async () => root.render(productionTree(props)));
     await enterJoinCode();
     await act(async () => button('加入房间').click());
     await flush();
     await act(async () => WiringSocket.instances[0]!.open());
 
-    await act(async () => button('同步当前房间配置').click());
-    await setTextArea('arena-proposal-user-guidance', 'production 成员建议');
-    await act(async () => button('预览 typed diff').click());
+    await act(async () => button('提案').click());
+    await act(async () => button('同步房间配置').click());
+    await flush();
+    await setTextField('arena-story-guidance', 'production 成员建议');
+    await act(async () => button('预览提案').click());
     await act(async () => button('提交 Proposal').click());
     await flush();
 
-    const submitCall = calls.find((call) => new URL(call.url).pathname.endsWith('/proposals'));
+    const submitCall = calls.find((call) => requestPath(call.url).endsWith('/proposals'));
     if (!submitCall) throw new Error('submit call missing');
     const intent = JSON.parse(String(submitCall.init?.body)) as {
       proposalId: string;
@@ -391,7 +440,7 @@ describe('Arena multiplayer production client/hook wiring', () => {
 
     await act(async () => button('撤回 Proposal').click());
     await flush();
-    const withdrawCall = calls.find((call) => new URL(call.url).pathname.endsWith('/withdraw'));
+    const withdrawCall = calls.find((call) => requestPath(call.url).endsWith('/withdraw'));
     expect(JSON.parse(String(withdrawCall?.init?.body))).toEqual({
       expectedRoomEpoch: 'epoch-1',
     });
@@ -437,6 +486,9 @@ describe('Arena multiplayer production client/hook wiring', () => {
     const fetcher = vi.fn<typeof fetch>(async (input, init) => {
       const url = String(input);
       calls.push({ url, init });
+      if (requestPath(url) === '/api/arena/rooms/v1') {
+        return Response.json({ protocolVersion: 1, items: [], nextCursor: null });
+      }
       if (url.endsWith('/join')) return Response.json(hostSession);
       if (url.endsWith('/ticket')) return Response.json({
         protocolVersion: 1,
@@ -460,15 +512,17 @@ describe('Arena multiplayer production client/hook wiring', () => {
       throw new Error(`unexpected Room request: ${url}`);
     });
     vi.stubGlobal('fetch', fetcher);
-    await act(async () => root.render(<ArenaMultiplayerPanel {...props} />));
+    await act(async () => root.render(productionTree(props)));
     await enterJoinCode();
     await act(async () => button('加入房间').click());
     await flush();
     await act(async () => WiringSocket.instances[0]!.open());
 
+    await act(async () => button('提案').click());
+    await act(async () => button('待处理提案 (1)').click());
     await act(async () => button('接受所选').click());
     await flush();
-    const resolveCall = calls.find((call) => new URL(call.url).pathname.endsWith('/resolve'));
+    const resolveCall = calls.find((call) => requestPath(call.url).endsWith('/resolve'));
     expect(JSON.parse(String(resolveCall?.init?.body))).toEqual({
       expectedRoomEpoch: 'epoch-1',
       expectedRevision: 0,
@@ -504,6 +558,11 @@ describe('Arena multiplayer production client/hook wiring', () => {
     let ticketIndex = 0;
     const fetcher = vi.fn<typeof fetch>(async (input) => {
       const url = String(input);
+      if (url.endsWith('/languages.json')) return Response.json([]);
+      if (requestPath(url) === '/api/auth/verify') return Response.json({ success: false });
+      if (requestPath(url) === '/api/arena/rooms/v1') {
+        return Response.json({ protocolVersion: 1, items: [], nextCursor: null });
+      }
       if (url.endsWith('/join')) return Response.json(memberSession);
       if (url.endsWith('/ticket')) {
         ticketIndex += 1;
@@ -530,20 +589,23 @@ describe('Arena multiplayer production client/hook wiring', () => {
       throw new Error(`unexpected Room request: ${url}`);
     });
     vi.stubGlobal('fetch', fetcher);
-    await act(async () => root.render(<ArenaMultiplayerPanel {...props} />));
+    await act(async () => root.render(productionTree(props)));
     await enterJoinCode();
     await act(async () => button('加入房间').click());
     await flush();
     await act(async () => WiringSocket.instances[0]!.open());
-    await act(async () => button('同步当前房间配置').click());
-    await setTextArea('arena-proposal-user-guidance', 'unknown 对账建议');
-    await act(async () => button('预览 typed diff').click());
+    await act(async () => button('提案').click());
+    await act(async () => button('同步房间配置').click());
+    await flush();
+    await setTextField('arena-story-guidance', 'unknown 对账建议');
+    await act(async () => button('预览提案').click());
     await act(async () => button('提交 Proposal').click());
     await flush();
 
     expect(proposalCalls).toBe(1);
     expect(container.textContent).toContain('上次 Proposal 请求结果未知');
-    await act(async () => button('提交 Proposal').click());
+    expect(button('预览提案').disabled).toBe(true);
+    await act(async () => button('预览提案').click());
     await flush();
     expect(proposalCalls).toBe(1);
 

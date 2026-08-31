@@ -57,6 +57,13 @@ const ArenaMultiplayerPanel = dynamic(
   { ssr: false },
 );
 
+const ArenaMultiplayerResult = dynamic(
+  () => import('./multiplayer/ArenaMultiplayerPanel').then((module) => (
+    module.ArenaMultiplayerContextResult
+  )),
+  { ssr: false },
+);
+
 type ArenaPageProps = {
   readonly multiplayer?: {
     readonly enabled: boolean;
@@ -211,7 +218,6 @@ export function ArenaPage({ multiplayer }: ArenaPageProps = {}) {
                 authLoading={authLoading}
                 isAuthenticated={isAuthenticated}
                 displayName={user?.username ?? '玩家'}
-                onSaveImage={handleSaveImage}
               />
             ) : null}
 
@@ -394,6 +400,9 @@ export function ArenaPage({ multiplayer }: ArenaPageProps = {}) {
             </ArenaEditorWorkspaceBoundary>
           </div>
 
+          {multiplayer?.enabled ? (
+            <ArenaMultiplayerResult onSaveImage={handleSaveImage} />
+          ) : null}
           <BattleResult onSaveImage={handleSaveImage} />
           <BattleStorySessionPanel onSaveImage={handleSaveImage} />
 

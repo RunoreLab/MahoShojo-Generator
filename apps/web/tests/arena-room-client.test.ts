@@ -511,4 +511,57 @@ describe('Arena Room browser client', () => {
       code: 'ROOM_RESPONSE_INVALID',
     });
   });
+
+  it('kick/cancel 只编码 epoch intent 与 path identity，不把客户端权限写入 body', async () => {
+    const kickedSession = {
+      ...session,
+      roomId: 'room/1',
+      snapshot: { ...snapshot, roomId: 'room/1' },
+    };
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json(kickedSession))
+      .mockResolvedValueOnce(Response.json(generationView));
+    const client = createArenaRoomClient({
+      origin: 'https://api.example.test',
+      fetch: fetcher,
+      getAuthHeader: async () => 'Bearer verified-key',
+    });
+
+    await expect(client.kick('room/1', 'member/1', 'epoch-1')).resolves.toEqual(kickedSession);
+    await expect(client.cancelGeneration('room/1', 'generation-1', 'epoch-1'))
+      .resolves.toEqual(generationView);
+
+    expect(String(fetcher.mock.calls[0]?.[0])).toBe(
+      'https://api.example.test/api/arena/rooms/v1/room%2F1/members/member%2F1/kick',
+    );
+    expect(String(fetcher.mock.calls[1]?.[0])).toBe(
+      'https://api.example.test/api/arena/rooms/v1/room%2F1/generations/generation-1/cancel',
+    );
+    for (const [, init] of fetcher.mock.calls) {
+      expect(JSON.parse(String(init?.body))).toEqual({ expectedRoomEpoch: 'epoch-1' });
+      expect(String(init?.body)).not.toMatch(/role|account|userId|secret|state/iu);
+      expect(new Headers(init?.headers).get('authorization')).toBe('Bearer verified-key');
+    }
+  });
+
+  it('kick/cancel 对网络、5xx、畸形成功与 identity mismatch 均单发并进入 unknown', async () => {
+    const outcomes: Array<() => Promise<Response>> = [
+      async () => { throw new TypeError('connection reset after write'); },
+      async () => Response.json({ code: 'ROOM_UNAVAILABLE', error: '暂不可用' }, { status: 503 }),
+      async () => Response.json({ ok: true }),
+      async () => Response.json({ ...generationView, roomId: 'room-other' }),
+    ];
+
+    for (const outcome of outcomes) {
+      const fetcher = vi.fn<typeof fetch>(outcome);
+      const client = createArenaRoomClient({
+        origin: 'https://api.example.test',
+        fetch: fetcher,
+        getAuthHeader: async () => 'Bearer verified-key',
+      });
+      await expect(client.cancelGeneration('room/1', 'generation-1', 'epoch-1'))
+        .rejects.toMatchObject({ code: 'ROOM_RESULT_UNKNOWN' });
+      expect(fetcher).toHaveBeenCalledOnce();
+    }
+  });
 });

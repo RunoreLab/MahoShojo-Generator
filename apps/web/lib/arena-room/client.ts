@@ -3,6 +3,7 @@ import {
   ArenaRoomCreateRequestSchema,
   ArenaRoomEpochMutationRequestSchema,
   ArenaRoomGenerationStartRequestSchema,
+  ArenaRoomGenerationCancelRequestSchema,
   ArenaRoomGenerationViewResponseSchema,
   ArenaRoomHttpErrorResponseSchema,
   ArenaRoomJoinRequestSchema,
@@ -12,6 +13,7 @@ import {
   ArenaRoomProposalSubmitRequestSchema,
   ArenaRoomProposalWithdrawRequestSchema,
   ArenaRoomPublishConfigRequestSchema,
+  ArenaRoomMemberKickRequestSchema,
   ArenaRoomSessionResponseSchema,
   ArenaRoomTicketRequestSchema,
   ArenaRoomTicketResponseSchema,
@@ -19,6 +21,7 @@ import {
   RoomDirectoryPageSchema,
   type ArenaRoomCreateRequest,
   type ArenaRoomGenerationStartRequest,
+  type ArenaRoomGenerationCancelRequest,
   type ArenaRoomGenerationViewResponse,
   type ArenaRoomJoinRequest,
   type ArenaRoomLeaveResponse,
@@ -26,6 +29,7 @@ import {
   type ArenaRoomProposalResolveRequest,
   type ArenaRoomProposalSubmitRequest,
   type ArenaRoomPublishConfigRequest,
+  type ArenaRoomMemberKickRequest,
   type ArenaRoomSessionResponse,
   type ArenaRoomTicketRequest,
   type ArenaRoomTicketResponse,
@@ -62,6 +66,11 @@ export type ArenaRoomClient = {
   issueTicket(roomId: string, request: ArenaRoomTicketRequest): Promise<ArenaRoomTicketResponse>;
   leave(roomId: string, expectedRoomEpoch: string): Promise<ArenaRoomLeaveResponse>;
   close(roomId: string, expectedRoomEpoch: string): Promise<ArenaRoomLeaveResponse>;
+  kick(
+    roomId: string,
+    targetUserId: string,
+    expectedRoomEpoch: ArenaRoomMemberKickRequest['expectedRoomEpoch'],
+  ): Promise<ArenaRoomSessionResponse>;
   submitProposal(
     roomId: string,
     request: ArenaRoomProposalSubmitRequest,
@@ -87,6 +96,11 @@ export type ArenaRoomClient = {
   getGenerationView(
     roomId: string,
     generationId: string,
+  ): Promise<ArenaRoomGenerationViewResponse>;
+  cancelGeneration(
+    roomId: string,
+    generationId: string,
+    expectedRoomEpoch: ArenaRoomGenerationCancelRequest['expectedRoomEpoch'],
   ): Promise<ArenaRoomGenerationViewResponse>;
   buildWebSocketUrl(ticket: ArenaRoomTicketResponse): string;
 };
@@ -271,21 +285,68 @@ export const createArenaRoomClient = (options: ClientOptions): ArenaRoomClient =
     },
 
     async leave(roomId, expectedRoomEpoch) {
-      return request({
+      const result = await request({
         path: pathFor(roomId, 'leave'),
         method: 'POST',
         body: ArenaRoomEpochMutationRequestSchema.parse({ expectedRoomEpoch }),
         schema: ArenaRoomLeaveResponseSchema,
+        unknownResult: true,
       });
+      if (result.roomId !== roomId || result.outcome !== 'left') {
+        throw new ArenaRoomClientError(
+          'ROOM_RESULT_UNKNOWN',
+          null,
+          '请求可能已提交，请先确认房间状态，不要重复提交',
+        );
+      }
+      return result;
     },
 
     async close(roomId, expectedRoomEpoch) {
-      return request({
+      const result = await request({
         path: pathFor(roomId, 'close'),
         method: 'POST',
         body: ArenaRoomEpochMutationRequestSchema.parse({ expectedRoomEpoch }),
         schema: ArenaRoomLeaveResponseSchema,
+        unknownResult: true,
       });
+      if (result.roomId !== roomId || result.outcome !== 'closed') {
+        throw new ArenaRoomClientError(
+          'ROOM_RESULT_UNKNOWN',
+          null,
+          '请求可能已提交，请先确认房间状态，不要重复提交',
+        );
+      }
+      return result;
+    },
+
+    async kick(roomId, targetUserId, expectedRoomEpoch) {
+      const parsed = ArenaRoomMemberKickRequestSchema.parse({ expectedRoomEpoch });
+      const nextSession = await request({
+        path: pathFor(roomId, `members/${encodeURIComponent(targetUserId)}/kick`),
+        method: 'POST',
+        body: parsed,
+        schema: ArenaRoomSessionResponseSchema,
+        unknownResult: true,
+      });
+      const targetStillActive = nextSession.snapshot.members.some((member) => (
+        member.userId === targetUserId && member.membershipState === 'active'
+      ));
+      if (
+        nextSession.roomId !== roomId
+        || nextSession.roomEpoch !== parsed.expectedRoomEpoch
+        || nextSession.snapshot.roomId !== roomId
+        || nextSession.snapshot.roomEpoch !== parsed.expectedRoomEpoch
+        || nextSession.self.role !== 'host'
+        || targetStillActive
+      ) {
+        throw new ArenaRoomClientError(
+          'ROOM_RESULT_UNKNOWN',
+          null,
+          '请求可能已提交，请先确认房间状态，不要重复提交',
+        );
+      }
+      return nextSession;
     },
 
     async submitProposal(roomId, input) {
@@ -375,6 +436,29 @@ export const createArenaRoomClient = (options: ClientOptions): ArenaRoomClient =
         schema: ArenaRoomGenerationViewResponseSchema,
       });
       return assertGenerationViewIdentity(view, roomId, generationId);
+    },
+
+    async cancelGeneration(roomId, generationId, expectedRoomEpoch) {
+      const parsed = ArenaRoomGenerationCancelRequestSchema.parse({ expectedRoomEpoch });
+      const view = await request({
+        path: pathFor(roomId, `generations/${encodeURIComponent(generationId)}/cancel`),
+        method: 'POST',
+        body: parsed,
+        schema: ArenaRoomGenerationViewResponseSchema,
+        unknownResult: true,
+      });
+      if (
+        view.roomId !== roomId
+        || view.roomEpoch !== parsed.expectedRoomEpoch
+        || view.generation.generationId !== generationId
+      ) {
+        throw new ArenaRoomClientError(
+          'ROOM_RESULT_UNKNOWN',
+          null,
+          '请求可能已提交，请先确认房间状态，不要重复提交',
+        );
+      }
+      return view;
     },
 
     buildWebSocketUrl(ticket) {

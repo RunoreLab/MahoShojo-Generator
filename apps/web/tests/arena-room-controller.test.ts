@@ -159,6 +159,7 @@ const createHarness = () => {
     issueTicket: vi.fn(async () => ticket(`ticket-${++ticketIndex}`)),
     leave: vi.fn(async () => ({ protocolVersion: 1, roomId: 'room-1', outcome: 'left' })),
     close: vi.fn(async () => ({ protocolVersion: 1, roomId: 'room-1', outcome: 'closed' })),
+    kick: vi.fn(async () => session),
     submitProposal: vi.fn(async (roomId, request) => ({
       protocolVersion: 1,
       roomId,
@@ -192,6 +193,7 @@ const createHarness = () => {
     publishConfig: vi.fn(async () => session),
     startGeneration: vi.fn(async () => generationView),
     getGenerationView: vi.fn(async () => generationView),
+    cancelGeneration: vi.fn(async () => generationView),
     buildWebSocketUrl: vi.fn((issued) => `wss://room.test/ws?ticket=${issued.ticket}`),
   };
   const sockets: FakeSocket[] = [];
@@ -1528,6 +1530,163 @@ describe('Arena Room browser controller', () => {
     expect(controller.getSnapshot().generation).toMatchObject({
       mirror: { generationId: 'generation-2' },
       markdown: '',
+    });
+  });
+
+  it('成员管理使用单飞锁并安装 kick 后的服务器权威 session', async () => {
+    const { client, controller } = createHarness();
+    const member = {
+      userId: 'member-1',
+      role: 'member' as const,
+      displayName: '成员',
+      membershipState: 'active' as const,
+    };
+    const withMember = {
+      ...session,
+      snapshot: { ...snapshot, members: [snapshot.members[0]!, member] },
+    };
+    vi.mocked(client.create).mockResolvedValueOnce(withMember);
+    vi.mocked(client.kick).mockResolvedValueOnce({
+      ...withMember,
+      snapshot: {
+        ...withMember.snapshot,
+        members: [snapshot.members[0]!, { ...member, membershipState: 'revoked' as const }],
+      },
+    });
+    await controller.create({
+      displayName: '房主',
+      directory: { title: '测试房', visibility: 'public' },
+      sharedConfig,
+    });
+
+    await Promise.all([controller.kickMember('member-1'), controller.kickMember('member-1')]);
+
+    expect(client.kick).toHaveBeenCalledOnce();
+    expect(client.kick).toHaveBeenCalledWith('room-1', 'member-1', 'epoch-1');
+    expect(controller.getSnapshot().managementOperation).toBeNull();
+    expect(controller.getSnapshot().managementResultUnknown).toBe(false);
+    expect(controller.getSnapshot().session?.snapshot.members.find(
+      (candidate) => candidate.userId === 'member-1',
+    )?.membershipState).toBe('revoked');
+  });
+
+  it('cancel accepted 但仍 running 时不声称已取消，并等待权威终态解除管理锁', async () => {
+    const { client, controller, sockets } = createHarness();
+    const generatingSession = {
+      ...session,
+      snapshot: { ...snapshot, activeGeneration: generationMirror },
+    };
+    vi.mocked(client.create).mockResolvedValueOnce(generatingSession);
+    await controller.create({
+      displayName: '房主',
+      directory: { title: '测试房', visibility: 'public' },
+      sharedConfig,
+    });
+
+    await Promise.all([controller.cancelGeneration(), controller.cancelGeneration()]);
+
+    expect(client.cancelGeneration).toHaveBeenCalledOnce();
+    expect(client.cancelGeneration).toHaveBeenCalledWith('room-1', 'generation-1', 'epoch-1');
+    expect(controller.getSnapshot().managementOperation).toBe('cancel-generation');
+    expect(controller.getSnapshot().notice).toContain('等待服务器权威终态');
+    expect(controller.getSnapshot().notice).not.toContain('已取消');
+
+    vi.mocked(client.getGenerationView).mockResolvedValueOnce({
+      ...generationView,
+      generation: {
+        ...generationMirror,
+        state: 'cancelled',
+        finishedAt: '2026-08-28T00:03:00.000Z',
+      },
+      status: 'cancelled',
+      finalAuthoritative: true,
+    });
+    sockets[0]!.message(JSON.stringify({
+      protocolVersion: 1,
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      controlSeq: 1,
+      timestamp: '2026-08-28T00:03:00.000Z',
+      type: 'generation.completed',
+      payload: {
+        generationRequestId: generationMirror.generationRequestId,
+        generationId: generationMirror.generationId,
+        attempt: generationMirror.attempt,
+        configRevision: generationMirror.configRevision,
+        snapshotDigest: generationMirror.snapshotDigest,
+        collaborativeInfluence: generationMirror.collaborativeInfluence,
+        participantUserIds: generationMirror.participantUserIds,
+        generationRecordId: 'record-cancelled',
+      },
+    }));
+
+    await vi.waitFor(() => expect(controller.getSnapshot()).toMatchObject({
+      managementOperation: null,
+      managementResultUnknown: false,
+      generation: { status: 'cancelled', finalAuthoritative: true },
+    }));
+    expect(controller.getSnapshot().notice).toContain('服务器确认取消');
+  });
+
+  it('kick 结果未知只通过 GET 对账，不盲目重放 mutation', async () => {
+    const { client, controller } = createHarness();
+    const member = {
+      userId: 'member-1',
+      role: 'member' as const,
+      displayName: '成员',
+      membershipState: 'active' as const,
+    };
+    const withMember = {
+      ...session,
+      snapshot: { ...snapshot, members: [snapshot.members[0]!, member] },
+    };
+    vi.mocked(client.create).mockResolvedValueOnce(withMember);
+    vi.mocked(client.kick).mockRejectedValueOnce(new ArenaRoomClientError(
+      'ROOM_RESULT_UNKNOWN',
+      null,
+      '请求结果未知',
+    ));
+    vi.mocked(client.getSession).mockResolvedValueOnce(session);
+    await controller.create({
+      displayName: '房主',
+      directory: { title: '测试房', visibility: 'public' },
+      sharedConfig,
+    });
+
+    await controller.kickMember('member-1');
+    expect(controller.getSnapshot().managementResultUnknown).toBe(true);
+    controller.reconnect();
+    await vi.waitFor(() => expect(controller.getSnapshot().managementResultUnknown).toBe(false));
+    expect(client.kick).toHaveBeenCalledOnce();
+    expect(client.getSession).toHaveBeenCalled();
+  });
+
+  it('close 使用同一管理锁，reset 后迟到结果不能污染新状态', async () => {
+    const { client, controller } = createHarness();
+    let resolveClose!: (value: { protocolVersion: 1; roomId: string; outcome: 'closed' }) => void;
+    vi.mocked(client.close).mockImplementationOnce(() => new Promise((resolve) => {
+      resolveClose = resolve;
+    }));
+    await controller.create({
+      displayName: '房主',
+      directory: { title: '测试房', visibility: 'public' },
+      sharedConfig,
+    });
+
+    const first = controller.close();
+    const second = controller.close();
+    expect(client.close).toHaveBeenCalledOnce();
+    expect(controller.getSnapshot().managementOperation).toBe('close');
+
+    controller.reset();
+    resolveClose({ protocolVersion: 1, roomId: 'room-1', outcome: 'closed' });
+    await Promise.all([first, second]);
+
+    expect(controller.getSnapshot()).toMatchObject({
+      phase: 'ready',
+      session: null,
+      managementOperation: null,
+      managementResultUnknown: false,
     });
   });
 

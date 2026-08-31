@@ -14,6 +14,8 @@ const mocks = vi.hoisted(() => ({
   buildWorkspaceBundle: vi.fn(),
   capturePublished: vi.fn(),
   close: vi.fn(async () => undefined),
+  kickMember: vi.fn(async () => undefined),
+  cancelGeneration: vi.fn(async () => undefined),
   create: vi.fn(async () => undefined),
   discover: vi.fn(async () => undefined),
   discoverMore: vi.fn(async () => undefined),
@@ -37,6 +39,8 @@ vi.mock('@/components/arena/multiplayer/useArenaRoom', () => ({
   useArenaRoom: () => ({
     controller: {
       close: mocks.close,
+      kickMember: mocks.kickMember,
+      cancelGeneration: mocks.cancelGeneration,
       create: mocks.create,
       discover: mocks.discover,
       discoverMore: mocks.discoverMore,
@@ -238,6 +242,32 @@ describe('Arena multiplayer panel real React interactions', () => {
     expect(container.textContent).not.toContain('Development Gate');
   });
 
+  it('房间 Modal 锁定键盘焦点，Escape 后恢复到触发按钮', async () => {
+    const trigger = button('打开多人房间');
+    trigger.focus();
+    await act(async () => trigger.click());
+
+    const dialog = container.querySelector<HTMLElement>('[role="dialog"][aria-modal="true"]');
+    expect(dialog).not.toBeNull();
+    expect(document.activeElement?.textContent).toBe('关闭');
+
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'Tab',
+        shiftKey: true,
+        bubbles: true,
+      }));
+    });
+    expect(dialog?.contains(document.activeElement)).toBe(true);
+    expect(document.activeElement?.textContent).not.toBe('关闭');
+
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  });
+
   it('unauthenticated/disabled 真实挂载不暴露 Room action', async () => {
     mocks.state = { ...readyState, phase: 'unauthenticated' };
     await act(async () => root.render(<ArenaMultiplayerPanel {...props} isAuthenticated={false} />));
@@ -288,6 +318,9 @@ describe('Arena multiplayer panel real React interactions', () => {
       },
     };
     await act(async () => root.render(<ArenaMultiplayerPanel {...props} />));
+    expect(container.querySelector('#arena-room-proposals-dialog-heading')).toBeNull();
+    await act(async () => button('提案').click());
+    expect(container.querySelector('#arena-room-proposals-dialog-heading')).not.toBeNull();
     expect(container.textContent).toContain('配置提案');
     expect(container.textContent).toContain('同步房间配置');
     expect(container.textContent).not.toContain('Proposal 审阅箱');
@@ -328,6 +361,114 @@ describe('Arena multiplayer panel real React interactions', () => {
     expect(mocks.reconnect).toHaveBeenCalledOnce();
   });
 
+  it('host 通过成员/管理 Modal 执行 kick、cancel 与 close 的确认动作', async () => {
+    const host = {
+      userId: 'host-1',
+      role: 'host' as const,
+      displayName: '房主',
+      membershipState: 'active' as const,
+    };
+    const member = {
+      userId: 'member-1',
+      role: 'member' as const,
+      displayName: '成员',
+      membershipState: 'active' as const,
+    };
+    mocks.state = {
+      ...readyState,
+      phase: 'connected',
+      session: {
+        protocolVersion: 1,
+        roomId: 'room-1',
+        roomEpoch: 'epoch-1',
+        self: host,
+        snapshot: {
+          protocolVersion: 1,
+          schemaVersion: 1,
+          roomId: 'room-1',
+          roomEpoch: 'epoch-1',
+          revision: 0,
+          controlSeq: 0,
+          sharedConfig,
+          members: [host, member],
+          proposals: [],
+          activeGeneration: {
+            generationRequestId: 'request-12345678',
+            generationId: 'generation-1',
+            attempt: 1,
+            state: 'running',
+            configRevision: 0,
+            snapshotDigest: 'sha256:generation',
+            collaborativeInfluence: true,
+            participantUserIds: [1, 2],
+            startedAt: '2026-08-31T00:00:00.000Z',
+          },
+        },
+      },
+    };
+    await act(async () => root.render(<ArenaMultiplayerPanel {...props} />));
+
+    await act(async () => button('成员').click());
+    await act(async () => button('移除').click());
+    expect(container.textContent).toContain('确定将“成员”移出当前房间吗');
+    await act(async () => button('确认移除成员').click());
+    expect(mocks.kickMember).toHaveBeenCalledWith('member-1');
+    await act(async () => button('关闭').click());
+
+    await act(async () => button('房间管理').click());
+    await act(async () => button('停止当前生成').click());
+    await act(async () => button('确认停止生成').click());
+    expect(mocks.cancelGeneration).toHaveBeenCalledOnce();
+
+    await act(async () => button('关闭房间').click());
+    await act(async () => button('确认关闭房间').click());
+    expect(mocks.close).toHaveBeenCalledOnce();
+  });
+
+  it('member 离开房间需要显式确认', async () => {
+    const host = {
+      userId: 'host-1',
+      role: 'host' as const,
+      displayName: '房主',
+      membershipState: 'active' as const,
+    };
+    const member = {
+      userId: 'member-1',
+      role: 'member' as const,
+      displayName: '成员',
+      membershipState: 'active' as const,
+    };
+    mocks.state = {
+      ...readyState,
+      phase: 'connected',
+      session: {
+        protocolVersion: 1,
+        roomId: 'room-1',
+        roomEpoch: 'epoch-1',
+        self: member,
+        snapshot: {
+          protocolVersion: 1,
+          schemaVersion: 1,
+          roomId: 'room-1',
+          roomEpoch: 'epoch-1',
+          revision: 0,
+          controlSeq: 0,
+          sharedConfig,
+          members: [host, member],
+          proposals: [],
+          activeGeneration: null,
+        },
+      },
+    };
+    await act(async () => root.render(<ArenaMultiplayerPanel {...props} />));
+
+    await act(async () => button('房间管理 / 退出').click());
+    await act(async () => button('离开房间').click());
+    expect(mocks.leave).not.toHaveBeenCalled();
+    await act(async () => button('确认离开房间').click());
+    expect(mocks.leave).toHaveBeenCalledOnce();
+  });
+
   it('host 通过显式动作发布本地 working copy，冲突时提供三种 reconciliation 入口', async () => {
     const host = {
       userId: 'host-1',
@@ -358,6 +499,7 @@ describe('Arena multiplayer panel real React interactions', () => {
       },
     };
     await act(async () => root.render(<ArenaMultiplayerPanel {...props} />));
+    await act(async () => button('更新配置').click());
     await act(async () => button('更新房间配置').click());
     expect(mocks.publishLocal).toHaveBeenCalledOnce();
 
@@ -372,7 +514,11 @@ describe('Arena multiplayer panel real React interactions', () => {
     expect(container.textContent).toContain('房间配置已更新，但本地 Arena 同时有未发布修改');
     await act(async () => button('查看差异').click());
     expect(container.querySelector('[role="dialog"][aria-modal="true"]')).not.toBeNull();
-    await act(async () => button('关闭').click());
+    const diffClose = container.querySelector<HTMLButtonElement>(
+      '[aria-labelledby="arena-host-config-diff-heading"] button',
+    );
+    if (!diffClose) throw new Error('diff close button missing');
+    await act(async () => diffClose.click());
     await act(async () => button('同步房间配置').click());
     await act(async () => button('保留本地修改并重新发布').click());
     expect(mocks.syncRoom).toHaveBeenCalledOnce();
