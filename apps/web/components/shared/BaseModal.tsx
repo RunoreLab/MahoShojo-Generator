@@ -58,7 +58,12 @@ export const useBaseModalAccessibility = ({
     const fallbackFocus = fallbackFocusRef?.current ?? null;
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
-    initialFocusRef.current?.focus();
+    const initialFocus = initialFocusRef.current;
+    if (initialFocus && !initialFocus.disabled) {
+      initialFocus.focus();
+    } else {
+      dialogRef.current?.focus();
+    }
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {

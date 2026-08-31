@@ -213,6 +213,25 @@ describe('DataCardReportModal accessibility contract', () => {
     expect(document.activeElement).toBe(trigger);
     trigger.remove();
   });
+
+  it('focuses the dialog itself while all report actions are disabled', () => {
+    flushSync(() => root.render(
+      <DataCardReportModal
+        isOpen
+        cardName="角色一"
+        reasons={[{ code: 'plagiarism', label: '疑似抄袭', description: '高度近似搬运' }]}
+        initialReport={null}
+        submitting
+        error={null}
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+      />,
+    ));
+
+    const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
+    expect(dialog).not.toBeNull();
+    expect(document.activeElement).toBe(dialog);
+  });
 });
 
 describe('BattleDataModal accessibility and capabilities', () => {
