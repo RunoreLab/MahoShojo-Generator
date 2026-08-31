@@ -15,6 +15,10 @@ import {
   ArenaRoomGenerationError,
   type ArenaRoomGenerationService,
 } from '#/arena-room/room-generation-service';
+import {
+  ArenaRoomConfigError,
+  type ArenaRoomConfigService,
+} from '#/arena-room/room-config-service';
 import type { RedisService } from '#/redis/runtime';
 import { createArenaRoomState } from './arena-room-fixtures';
 
@@ -159,6 +163,9 @@ const createDependencies = (
     start: vi.fn(async () => generationView),
     read: vi.fn(async () => generationView),
   } satisfies ArenaRoomGenerationService,
+  configs: {
+    publish: vi.fn(async () => session),
+  } satisfies ArenaRoomConfigService,
   rateLimit: vi.fn(async () => allowRateLimit()),
   ...overrides,
 });
@@ -346,6 +353,114 @@ describe('Arena Room HTTP product routes', () => {
       },
     );
     expect(oversized.status).toBe(413);
+  });
+
+  it('显式 config publish 只接收 strict intent，并返回 checkpoint 产生的安全 session', async () => {
+    const published = {
+      ...session,
+      snapshot: {
+        ...session.snapshot,
+        revision: session.snapshot.revision + 1,
+        sharedConfig: { ...session.snapshot.sharedConfig, userGuidance: '显式发布' },
+      },
+    };
+    const dependencies = createDependencies({
+      configs: { publish: vi.fn(async () => published) },
+    });
+    const app = createHonoApp(config, createRedisStub(), undefined, {
+      arenaRoom: dependencies,
+    });
+    const request = {
+      expectedRoomEpoch: session.roomEpoch,
+      expectedRevision: session.snapshot.revision,
+      sharedConfig: published.snapshot.sharedConfig,
+    };
+
+    const response = await app.request(
+      `/api/arena/rooms/v1/${session.roomId}/config`,
+      createRequest(request),
+    );
+
+    expect(response.status).toBe(200);
+    expect(dependencies.configs.publish).toHaveBeenCalledWith({
+      roomId: session.roomId,
+      accountUserId: 101,
+      request,
+    });
+    expect(await response.json()).toMatchObject({
+      roomId: session.roomId,
+      roomEpoch: session.roomEpoch,
+      self: { userId: self.userId, role: 'host' },
+      snapshot: { revision: 1, sharedConfig: published.snapshot.sharedConfig },
+    });
+
+    const injected = await app.request(
+      `/api/arena/rooms/v1/${session.roomId}/config`,
+      createRequest({ ...request, payload: { providerApiKey: 'secret-canary' } }),
+    );
+    expect(injected.status).toBe(400);
+    expect(dependencies.configs.publish).toHaveBeenCalledTimes(1);
+    expect(await injected.text()).not.toContain('secret-canary');
+  });
+
+  it.each([
+    ['ROOM_PERMISSION_DENIED', 403, 'ROOM_FORBIDDEN'],
+    ['ROOM_EPOCH_STALE', 409, 'ROOM_CONFLICT'],
+    ['ROOM_REVISION_STALE', 409, 'ROOM_CONFLICT'],
+    ['ROOM_TRANSITION_DENIED', 409, 'ROOM_CONFLICT'],
+  ] as const)('config publish fail closed: %s', async (serviceCode, status, wireCode) => {
+    const dependencies = createDependencies();
+    vi.mocked(dependencies.configs.publish).mockRejectedValueOnce(
+      new ArenaRoomConfigError(serviceCode),
+    );
+    const app = createHonoApp(config, createRedisStub(), undefined, {
+      arenaRoom: dependencies,
+    });
+
+    const response = await app.request(
+      `/api/arena/rooms/v1/${session.roomId}/config`,
+      createRequest({
+        expectedRoomEpoch: session.roomEpoch,
+        expectedRevision: session.snapshot.revision,
+        sharedConfig: session.snapshot.sharedConfig,
+      }),
+    );
+
+    expect(response.status).toBe(status);
+    expect(await response.json()).toMatchObject({ code: wireCode });
+  });
+
+  it('config publish 受独立 account/room limiter 保护，超额时不触发 authority', async () => {
+    const dependencies = createDependencies({
+      rateLimit: vi.fn(async () => ({
+        allowed: false,
+        limit: 10,
+        remaining: 0,
+        retryAfterSeconds: 9,
+      })),
+    });
+    const app = createHonoApp(config, createRedisStub(), undefined, {
+      arenaRoom: dependencies,
+    });
+
+    const response = await app.request(
+      `/api/arena/rooms/v1/${session.roomId}/config`,
+      createRequest({
+        expectedRoomEpoch: session.roomEpoch,
+        expectedRevision: session.snapshot.revision,
+        sharedConfig: session.snapshot.sharedConfig,
+      }),
+    );
+
+    expect(response.status).toBe(429);
+    expect(dependencies.rateLimit).toHaveBeenCalledWith({
+      operation: 'configPublish',
+      accountUserId: 101,
+      roomId: session.roomId,
+      limit: 10,
+      windowSeconds: 60,
+    });
+    expect(dependencies.configs.publish).not.toHaveBeenCalled();
   });
 
   it('多人 generation read 只传认证 account/room/generation，并稳定映射恢复错误', async () => {

@@ -128,6 +128,9 @@ describe('Arena Proposal Hono authority composition', () => {
           start: vi.fn(async () => { throw new Error('not used'); }),
           read: vi.fn(async () => { throw new Error('not used'); }),
         },
+        configs: {
+          publish: vi.fn(async () => { throw new Error('not used'); }),
+        },
         directory: { discoverPublic: vi.fn(async () => ({ items: [], nextCursor: null })) },
         websocketAuthority: { issue: vi.fn(async () => 'ticket') },
         rateLimit: vi.fn(async () => ({

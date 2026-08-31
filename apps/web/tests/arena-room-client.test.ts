@@ -333,6 +333,100 @@ describe('Arena Room browser client', () => {
     }
   });
 
+  it('config publish 严格编码 intent，并验证 room/epoch/host self/权威 session', async () => {
+    const request = {
+      expectedRoomEpoch: 'epoch-1',
+      expectedRevision: 0,
+      sharedConfig: { ...snapshot.sharedConfig, userGuidance: '显式发布' },
+    };
+    const published = {
+      ...session,
+      roomId: 'room/1',
+      snapshot: {
+        ...snapshot,
+        roomId: 'room/1',
+        revision: 1,
+        sharedConfig: request.sharedConfig,
+      },
+    };
+    const fetcher = vi.fn<typeof fetch>(async () => Response.json(published));
+    const client = createArenaRoomClient({
+      origin: 'https://api.example.test',
+      fetch: fetcher,
+      getAuthHeader: async () => 'Bearer verified-key',
+    });
+
+    await expect(client.publishConfig('room/1', request)).resolves.toEqual(published);
+    expect(fetcher).toHaveBeenCalledOnce();
+    const [url, init] = fetcher.mock.calls[0]!;
+    expect(String(url)).toBe('https://api.example.test/api/arena/rooms/v1/room%2F1/config');
+    expect(init).toMatchObject({ method: 'POST', credentials: 'omit' });
+    expect(JSON.parse(String(init?.body))).toEqual(request);
+
+    await expect(client.publishConfig('room/1', {
+      ...request,
+      payload: { providerApiKey: 'secret-canary' },
+    } as never)).rejects.toThrow();
+    expect(fetcher).toHaveBeenCalledOnce();
+  });
+
+  it('config publish 对 network/5xx/malformed/identity mismatch 均单发并标记 unknown', async () => {
+    const request = {
+      expectedRoomEpoch: 'epoch-1',
+      expectedRevision: 0,
+      sharedConfig: { ...snapshot.sharedConfig, userGuidance: '显式发布' },
+    };
+    const valid = {
+      ...session,
+      snapshot: { ...snapshot, revision: 1, sharedConfig: request.sharedConfig },
+    };
+    const member = { ...snapshot.members[0], userId: 'member-1', role: 'member' as const };
+    const outcomes: Array<() => Promise<Response>> = [
+      async () => { throw new TypeError('connection reset after write'); },
+      async () => Response.json({
+        code: 'ROOM_UNAVAILABLE',
+        error: '房间运行时暂不可用',
+      }, { status: 503 }),
+      async () => Response.json({ ok: true, malformed: true }),
+      async () => Response.json({
+        ...valid,
+        roomId: 'room-other',
+        snapshot: { ...valid.snapshot, roomId: 'room-other' },
+      }),
+      async () => Response.json({
+        ...valid,
+        roomEpoch: 'epoch-other',
+        snapshot: { ...valid.snapshot, roomEpoch: 'epoch-other' },
+      }),
+      async () => Response.json({
+        ...valid,
+        self: member,
+        snapshot: { ...valid.snapshot, members: [member] },
+      }),
+      async () => Response.json({
+        ...valid,
+        snapshot: { ...valid.snapshot, revision: 2 },
+      }),
+      async () => Response.json({
+        ...valid,
+        snapshot: { ...valid.snapshot, sharedConfig: snapshot.sharedConfig },
+      }),
+    ];
+
+    for (const outcome of outcomes) {
+      const fetcher = vi.fn<typeof fetch>(outcome);
+      const client = createArenaRoomClient({
+        origin: 'https://api.example.test',
+        fetch: fetcher,
+        getAuthHeader: async () => 'Bearer verified-key',
+      });
+      await expect(client.publishConfig('room-1', request)).rejects.toMatchObject({
+        code: 'ROOM_RESULT_UNKNOWN',
+      });
+      expect(fetcher).toHaveBeenCalledOnce();
+    }
+  });
+
   it('generation start 只发送一次完整 transient payload，并严格使用 bearer/omit/encoded URL', async () => {
     const fetcher = vi.fn<typeof fetch>(async () => Response.json(generationView, { status: 202 }));
     const client = createArenaRoomClient({
@@ -345,9 +439,9 @@ describe('Arena Room browser client', () => {
       expectedRevision: 0,
       generationRequestId: 'request-12345678',
       sharedConfig: snapshot.sharedConfig,
+      hostLocalPayloads: [],
       generation: {
-        prompt: '完整生成请求',
-        providerCredential: 'test-secret-canary',
+        customProvider: { apiKey: 'test-secret-canary' },
       },
     };
 
@@ -367,7 +461,8 @@ describe('Arena Room browser client', () => {
       expectedRevision: 0,
       generationRequestId: 'request-12345678',
       sharedConfig: snapshot.sharedConfig,
-      generation: { prompt: '完整生成请求' },
+      hostLocalPayloads: [],
+      generation: {},
     };
     const outcomes: Array<() => Promise<Response>> = [
       async () => { throw new TypeError('connection reset after write'); },

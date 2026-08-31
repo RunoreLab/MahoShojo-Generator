@@ -15,6 +15,7 @@ import {
   ArenaRoomProposalResolveRequestSchema,
   ArenaRoomProposalSubmitRequestSchema,
   ArenaRoomProposalWithdrawRequestSchema,
+  ArenaRoomPublishConfigRequestSchema,
   ArenaRoomSessionResponseSchema,
   ArenaRoomTicketRequestSchema,
   ArenaRoomTicketResponseSchema,
@@ -49,6 +50,10 @@ import {
   ArenaRoomGenerationError,
   type ArenaRoomGenerationService,
 } from './room-generation-service';
+import {
+  ArenaRoomConfigError,
+  type ArenaRoomConfigService,
+} from './room-config-service';
 
 type ArenaRoomHttpContext = Context<{ Variables: HonoAppVariables }>;
 
@@ -76,6 +81,7 @@ export type ArenaRoomHttpDependencies = {
   readonly websocketAuthority: Pick<ArenaRoomWebSocketAuthority, 'issue'>;
   readonly proposals: Pick<ArenaRoomProposalService, 'resolve' | 'submit' | 'withdraw'>;
   readonly generations: Pick<ArenaRoomGenerationService, 'read' | 'start'>;
+  readonly configs: Pick<ArenaRoomConfigService, 'publish'>;
   readonly rateLimit: (input: {
     readonly operation: ArenaRoomHttpOperation;
     readonly accountUserId: number;
@@ -91,6 +97,7 @@ export type ArenaRoomHttpRegistrationOptions = {
 
 type ArenaRoomHttpOperation =
   | 'close'
+  | 'configPublish'
   | 'create'
   | 'createBudget'
   | 'discover'
@@ -116,6 +123,7 @@ const OPERATION_LIMITS: Readonly<Record<
   ticket: { limit: 60, windowSeconds: 60 },
   leave: { limit: 20, windowSeconds: 60 },
   close: { limit: 10, windowSeconds: 60 },
+  configPublish: { limit: 10, windowSeconds: 60 },
   generationStart: { limit: 5, windowSeconds: 60 },
   generationRead: { limit: 120, windowSeconds: 60 },
   proposalSubmit: { limit: 20, windowSeconds: 60 },
@@ -219,6 +227,20 @@ const mapServiceError = (context: ArenaRoomHttpContext, error: unknown): Respons
       case 'ROOM_GENERATION_UNAVAILABLE':
       case 'ROOM_OPERATION_UNKNOWN':
       case 'ROOM_REFERENCE_UNAVAILABLE':
+        return unavailable(context);
+    }
+  }
+  if (error instanceof ArenaRoomConfigError) {
+    switch (error.code) {
+      case 'ROOM_CONFIG_INPUT_INVALID':
+        return invalidRequest(context);
+      case 'ROOM_PERMISSION_DENIED':
+        return context.json(errorBody('ROOM_FORBIDDEN', '没有此房间配置发布权限'), 403);
+      case 'ROOM_EPOCH_STALE':
+      case 'ROOM_REVISION_STALE':
+      case 'ROOM_TRANSITION_DENIED':
+        return context.json(errorBody('ROOM_CONFLICT', '房间配置已发生变化'), 409);
+      case 'ROOM_OPERATION_UNKNOWN':
         return unavailable(context);
     }
   }
@@ -551,6 +573,33 @@ export const registerArenaRoomHttpRoutes = (
         accountUserId: authorization.accountUserId,
       });
       noStore(context);
+      return context.json(sessionResponse(session), 200);
+    } catch (error) {
+      return mapServiceError(context, error);
+    }
+  });
+
+  app.post(ARENA_ROOM_HTTP_ROUTES.config, async (context) => {
+    const roomId = parseRoomId(context);
+    if (roomId instanceof Response) return roomId;
+    const authorization = await authenticateAndLimit(
+      context,
+      dependencies,
+      options,
+      'configPublish',
+      roomId,
+    );
+    if (!authorization.accepted) return authorization.response;
+    try {
+      const request = parseRequest(
+        ArenaRoomPublishConfigRequestSchema,
+        await readBoundedBody(context.req.raw),
+      );
+      const session = await dependencies.configs.publish({
+        roomId,
+        accountUserId: authorization.accountUserId,
+        request,
+      });
       return context.json(sessionResponse(session), 200);
     } catch (error) {
       return mapServiceError(context, error);

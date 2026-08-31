@@ -11,6 +11,7 @@ import {
   ArenaRoomProposalResolveRequestSchema,
   ArenaRoomProposalSubmitRequestSchema,
   ArenaRoomProposalWithdrawRequestSchema,
+  ArenaRoomPublishConfigRequestSchema,
   ArenaRoomSessionResponseSchema,
   ArenaRoomTicketRequestSchema,
   ArenaRoomTicketResponseSchema,
@@ -24,6 +25,7 @@ import {
   type ArenaRoomProposalMutationResponse,
   type ArenaRoomProposalResolveRequest,
   type ArenaRoomProposalSubmitRequest,
+  type ArenaRoomPublishConfigRequest,
   type ArenaRoomSessionResponse,
   type ArenaRoomTicketRequest,
   type ArenaRoomTicketResponse,
@@ -74,6 +76,10 @@ export type ArenaRoomClient = {
     proposalId: string,
     expectedRoomEpoch: string,
   ): Promise<ArenaRoomProposalMutationResponse>;
+  publishConfig(
+    roomId: string,
+    request: ArenaRoomPublishConfigRequest,
+  ): Promise<ArenaRoomSessionResponse>;
   startGeneration(
     roomId: string,
     request: ArenaRoomGenerationStartRequest,
@@ -310,6 +316,34 @@ export const createArenaRoomClient = (options: ClientOptions): ArenaRoomClient =
         schema: ArenaRoomProposalMutationResponseSchema,
         unknownResult: true,
       });
+    },
+
+    async publishConfig(roomId, input) {
+      const parsed = ArenaRoomPublishConfigRequestSchema.parse(input);
+      const session = await request({
+        path: pathFor(roomId, 'config'),
+        method: 'POST',
+        body: parsed,
+        schema: ArenaRoomSessionResponseSchema,
+        unknownResult: true,
+      });
+      if (
+        session.roomId !== roomId
+        || session.roomEpoch !== parsed.expectedRoomEpoch
+        || session.self.role !== 'host'
+        || (
+          session.snapshot.revision !== parsed.expectedRevision
+          && session.snapshot.revision !== parsed.expectedRevision + 1
+        )
+        || JSON.stringify(session.snapshot.sharedConfig) !== JSON.stringify(parsed.sharedConfig)
+      ) {
+        throw new ArenaRoomClientError(
+          'ROOM_RESULT_UNKNOWN',
+          null,
+          '请求可能已提交，请先确认房间状态，不要重复提交',
+        );
+      }
+      return session;
     },
 
     async startGeneration(roomId, input) {

@@ -1,0 +1,132 @@
+import {
+  ArenaRoomPublishConfigRequestSchema,
+  OpaqueKeySchema,
+  type ArenaRoomPublishConfigRequest,
+} from '@mahoshojo/contracts/arena-room';
+import {
+  projectArenaRoomSnapshotForViewer,
+  type ArenaRoomAuthorityState,
+  type ArenaRoomTransitionFailure,
+} from '@mahoshojo/multiplayer-core';
+
+import type {
+  ArenaRoomMembershipService,
+  ArenaRoomSessionView,
+  ResolvedArenaRoomMembership,
+} from './room-membership-service';
+
+export type ArenaRoomConfigErrorCode =
+  | 'ROOM_CONFIG_INPUT_INVALID'
+  | 'ROOM_EPOCH_STALE'
+  | 'ROOM_OPERATION_UNKNOWN'
+  | 'ROOM_PERMISSION_DENIED'
+  | 'ROOM_REVISION_STALE'
+  | 'ROOM_TRANSITION_DENIED';
+
+export class ArenaRoomConfigError extends Error {
+  constructor(readonly code: ArenaRoomConfigErrorCode) {
+    super(code);
+    this.name = 'ArenaRoomConfigError';
+  }
+}
+
+export type ArenaRoomConfigService = {
+  publish(input: {
+    readonly roomId: string;
+    readonly accountUserId: number;
+    readonly request: ArenaRoomPublishConfigRequest | unknown;
+  }): Promise<ArenaRoomSessionView>;
+};
+
+export type ArenaRoomConfigServiceOptions = {
+  readonly memberships: Pick<ArenaRoomMembershipService, 'resolveActiveByAccount'>;
+  readonly now?: () => string;
+};
+
+const fail = (code: ArenaRoomConfigErrorCode): never => {
+  throw new ArenaRoomConfigError(code);
+};
+
+const validAccountUserId = (value: number): boolean => (
+  Number.isSafeInteger(value) && value > 0
+);
+
+const sessionView = (
+  membership: ResolvedArenaRoomMembership,
+  state: ArenaRoomAuthorityState,
+): ArenaRoomSessionView => ({
+  roomId: state.snapshot.roomId,
+  roomEpoch: state.snapshot.roomEpoch,
+  member: structuredClone(membership.member),
+  snapshot: projectArenaRoomSnapshotForViewer(state.snapshot, membership.member.userId),
+});
+
+const monotonicTimestamp = (now: () => string, state: ArenaRoomAuthorityState): string => {
+  const supplied = Date.parse(now());
+  const current = Date.parse(state.lifecycle.updatedAt);
+  if (!Number.isFinite(supplied)) return fail('ROOM_CONFIG_INPUT_INVALID');
+  return new Date(Math.max(supplied, current)).toISOString();
+};
+
+const mapTransitionFailure = (failure: ArenaRoomTransitionFailure): never => {
+  switch (failure.reason) {
+    case 'room-epoch-mismatch': return fail('ROOM_EPOCH_STALE');
+    case 'room-revision-mismatch': return fail('ROOM_REVISION_STALE');
+    case 'host-required':
+    case 'member-not-active': return fail('ROOM_PERMISSION_DENIED');
+    case 'invalid-command':
+    case 'invalid-state': return fail('ROOM_CONFIG_INPUT_INVALID');
+    default: return fail('ROOM_TRANSITION_DENIED');
+  }
+};
+
+export const createArenaRoomConfigService = (
+  options: ArenaRoomConfigServiceOptions,
+): ArenaRoomConfigService => {
+  const now = options.now ?? (() => new Date().toISOString());
+
+  return Object.freeze({
+    async publish(input) {
+      const roomId = OpaqueKeySchema.safeParse(input.roomId);
+      const request = ArenaRoomPublishConfigRequestSchema.safeParse(input.request);
+      if (!roomId.success || !validAccountUserId(input.accountUserId) || !request.success) {
+        return fail('ROOM_CONFIG_INPUT_INVALID');
+      }
+      const membership = await options.memberships.resolveActiveByAccount({
+        roomId: roomId.data,
+        accountUserId: input.accountUserId,
+      });
+      const current = membership.state;
+      if (current.snapshot.roomEpoch !== request.data.expectedRoomEpoch) {
+        return fail('ROOM_EPOCH_STALE');
+      }
+      if (current.snapshot.revision !== request.data.expectedRevision) {
+        return fail('ROOM_REVISION_STALE');
+      }
+      if (membership.member.role !== 'host' || membership.member.membershipState !== 'active') {
+        return fail('ROOM_PERMISSION_DENIED');
+      }
+      let result;
+      try {
+        result = await membership.actor.execute({
+          authority: {
+            kind: 'authenticated-user',
+            actorUserId: membership.member.userId,
+            accountUserId: membership.accountUserId,
+          },
+          command: {
+            type: 'publish-config',
+            expectedRoomEpoch: request.data.expectedRoomEpoch,
+            expectedRevision: request.data.expectedRevision,
+            sharedConfig: request.data.sharedConfig,
+            timestamp: monotonicTimestamp(now, current),
+          },
+        });
+      } catch {
+        return fail('ROOM_OPERATION_UNKNOWN');
+      }
+      if (!result.ok) return mapTransitionFailure(result);
+      return sessionView(membership, result.nextState);
+    },
+  });
+};

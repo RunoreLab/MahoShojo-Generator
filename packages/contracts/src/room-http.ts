@@ -46,6 +46,7 @@ export const ARENA_ROOM_HTTP_ROUTES = Object.freeze({
   ticket: `${ARENA_ROOM_HTTP_BASE_PATH}/:roomId/ticket`,
   leave: `${ARENA_ROOM_HTTP_BASE_PATH}/:roomId/leave`,
   close: `${ARENA_ROOM_HTTP_BASE_PATH}/:roomId/close`,
+  config: `${ARENA_ROOM_HTTP_BASE_PATH}/:roomId/config`,
   proposals: `${ARENA_ROOM_HTTP_BASE_PATH}/:roomId/proposals`,
   proposalResolve: `${ARENA_ROOM_HTTP_BASE_PATH}/:roomId/proposals/:proposalId/resolve`,
   proposalWithdraw: `${ARENA_ROOM_HTTP_BASE_PATH}/:roomId/proposals/:proposalId/withdraw`,
@@ -83,6 +84,12 @@ export const ArenaRoomTicketRequestSchema = z.object({
 
 export const ArenaRoomEpochMutationRequestSchema = z.object({
   expectedRoomEpoch: OpaqueKeySchema,
+}).strict();
+
+export const ArenaRoomPublishConfigRequestSchema = z.object({
+  expectedRoomEpoch: OpaqueKeySchema,
+  expectedRevision: RoomRevisionSchema,
+  sharedConfig: ArenaRoomSharedConfigSchema,
 }).strict();
 
 /** Client intent only; authority/provenance fields are injected by the server. */
@@ -320,6 +327,9 @@ export type ArenaRoomCreateRequest = z.infer<typeof ArenaRoomCreateRequestSchema
 export type ArenaRoomJoinRequest = z.infer<typeof ArenaRoomJoinRequestSchema>;
 export type ArenaRoomTicketRequest = z.infer<typeof ArenaRoomTicketRequestSchema>;
 export type ArenaRoomEpochMutationRequest = z.infer<typeof ArenaRoomEpochMutationRequestSchema>;
+export type ArenaRoomPublishConfigRequest = z.infer<
+  typeof ArenaRoomPublishConfigRequestSchema
+>;
 export type ArenaRoomProposalSubmitRequest = z.infer<typeof ArenaRoomProposalSubmitRequestSchema>;
 export type ArenaRoomProposalResolveRequest = z.infer<typeof ArenaRoomProposalResolveRequestSchema>;
 export type ArenaRoomProposalWithdrawRequest = z.infer<typeof ArenaRoomProposalWithdrawRequestSchema>;

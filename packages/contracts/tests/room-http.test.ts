@@ -15,6 +15,7 @@ import {
   ArenaRoomProposalResolveRequestSchema,
   ArenaRoomProposalSubmitRequestSchema,
   ArenaRoomProposalWithdrawRequestSchema,
+  ArenaRoomPublishConfigRequestSchema,
   ArenaRoomSessionResponseSchema,
   ArenaRoomTicketRequestSchema,
   ArenaRoomTicketResponseSchema,
@@ -43,9 +44,29 @@ describe('Arena Room HTTP product contract', () => {
       proposals: '/api/arena/rooms/v1/:roomId/proposals',
       proposalResolve: '/api/arena/rooms/v1/:roomId/proposals/:proposalId/resolve',
       proposalWithdraw: '/api/arena/rooms/v1/:roomId/proposals/:proposalId/withdraw',
+      config: '/api/arena/rooms/v1/:roomId/config',
       generations: '/api/arena/rooms/v1/:roomId/generations',
       generation: '/api/arena/rooms/v1/:roomId/generations/:generationId',
     });
+  });
+
+  it('配置发布 DTO 只接受 exact authority fence 与 Shared Config', () => {
+    const request = {
+      expectedRoomEpoch: canonicalRoomSnapshot.roomEpoch,
+      expectedRevision: canonicalRoomSnapshot.revision,
+      sharedConfig: canonicalRoomSnapshot.sharedConfig,
+    };
+    expect(ArenaRoomPublishConfigRequestSchema.parse(request)).toEqual(request);
+    for (const injected of [
+      { roomId: canonicalRoomSnapshot.roomId },
+      { accountUserId: 7 },
+      { actorUserId: canonicalRoomSnapshot.members[0]?.userId },
+      { payload: { providerApiKey: 'secret-canary' } },
+      { secret: 'secret-canary' },
+    ]) {
+      expect(ArenaRoomPublishConfigRequestSchema.safeParse({ ...request, ...injected }).success)
+        .toBe(false);
+    }
   });
 
   it('多人生成 DTO 严格分离 client intent、完整临时 payload 与安全成员投影', () => {

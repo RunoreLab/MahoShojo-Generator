@@ -171,6 +171,7 @@ const createHarness = () => {
       status: 'withdrawn' as const,
       result: 'applied' as const,
     })),
+    publishConfig: vi.fn(async () => session),
     startGeneration: vi.fn(async () => generationView),
     getGenerationView: vi.fn(async () => generationView),
     buildWebSocketUrl: vi.fn((issued) => `wss://room.test/ws?ticket=${issued.ticket}`),
@@ -498,6 +499,164 @@ describe('Arena Room browser controller', () => {
       session: { snapshot: { controlSeq: 1, proposals: [{ proposalId: 'proposal-stable' }] } },
     }));
     expect(client.issueTicket).toHaveBeenCalledTimes(2);
+  });
+
+  it('config publish 重做 host/epoch/revision fence，并拒绝 stale intent', async () => {
+    const { client, controller } = createHarness();
+    await controller.create({
+      displayName: '房主',
+      directory: { title: '测试房', visibility: 'public' },
+      sharedConfig,
+    });
+
+    await controller.publishConfig({
+      expectedRoomEpoch: 'epoch-stale',
+      expectedRevision: 0,
+      sharedConfig: { ...sharedConfig, userGuidance: '不能发布' },
+    });
+    await controller.publishConfig({
+      expectedRoomEpoch: 'epoch-1',
+      expectedRevision: 7,
+      sharedConfig: { ...sharedConfig, userGuidance: '仍不能发布' },
+    });
+
+    expect(client.publishConfig).not.toHaveBeenCalled();
+    expect(controller.getSnapshot()).toMatchObject({
+      configPublishPending: false,
+      configPublishResultUnknown: false,
+      notice: null,
+      error: '房间配置已发生变化，请重新确认后再发布',
+      session: { snapshot: { revision: 0, sharedConfig } },
+    });
+  });
+
+  it('config publish single-flight 且不乐观递增 revision，只安装权威 response', async () => {
+    const { client, controller } = createHarness();
+    const desired = { ...sharedConfig, userGuidance: '显式发布' };
+    const published = {
+      ...session,
+      snapshot: {
+        ...snapshot,
+        revision: 1,
+        controlSeq: 1,
+        sharedConfig: desired,
+      },
+    };
+    let resolvePublish!: (value: typeof published) => void;
+    vi.mocked(client.publishConfig).mockImplementationOnce(() => new Promise((resolve) => {
+      resolvePublish = resolve;
+    }));
+    await controller.create({
+      displayName: '房主',
+      directory: { title: '测试房', visibility: 'public' },
+      sharedConfig,
+    });
+    const request = {
+      expectedRoomEpoch: 'epoch-1',
+      expectedRevision: 0,
+      sharedConfig: desired,
+    };
+
+    const first = controller.publishConfig(request);
+    const concurrent = controller.publishConfig(request);
+    expect(client.publishConfig).toHaveBeenCalledOnce();
+    expect(client.publishConfig).toHaveBeenCalledWith('room-1', request);
+    expect(controller.getSnapshot()).toMatchObject({
+      configPublishPending: true,
+      configPublishResultUnknown: false,
+      session: { snapshot: { revision: 0, sharedConfig } },
+    });
+
+    resolvePublish(published);
+    await Promise.all([first, concurrent]);
+    expect(controller.getSnapshot()).toMatchObject({
+      configPublishPending: false,
+      configPublishResultUnknown: false,
+      notice: '房间配置已更新',
+      error: null,
+      session: { snapshot: { revision: 1, controlSeq: 1, sharedConfig: desired } },
+    });
+  });
+
+  it('config publish unknown 不伪造 revision，并由匹配的权威事件对账', async () => {
+    const { client, controller, sockets } = createHarness();
+    const desired = { ...sharedConfig, userGuidance: '结果未知' };
+    vi.mocked(client.publishConfig).mockRejectedValueOnce(new ArenaRoomClientError(
+      'ROOM_RESULT_UNKNOWN',
+      503,
+      '请求可能已提交，请先确认房间状态，不要重复提交',
+    ));
+    await controller.create({
+      displayName: '房主',
+      directory: { title: '测试房', visibility: 'public' },
+      sharedConfig,
+    });
+
+    await controller.publishConfig({
+      expectedRoomEpoch: 'epoch-1',
+      expectedRevision: 0,
+      sharedConfig: desired,
+    });
+    await controller.publishConfig({
+      expectedRoomEpoch: 'epoch-1',
+      expectedRevision: 0,
+      sharedConfig: desired,
+    });
+
+    expect(client.publishConfig).toHaveBeenCalledOnce();
+    expect(controller.getSnapshot()).toMatchObject({
+      configPublishPending: false,
+      configPublishResultUnknown: true,
+      notice: '请求可能已提交，请先确认房间状态，不要重复提交',
+      error: null,
+      session: { snapshot: { revision: 0, sharedConfig } },
+    });
+
+    sockets[0]!.message(JSON.stringify({
+      protocolVersion: 1,
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      controlSeq: 1,
+      timestamp: '2026-08-31T00:02:00.000Z',
+      type: 'room.config.updated',
+      payload: { revision: 1, sharedConfig: desired },
+    }));
+    expect(controller.getSnapshot()).toMatchObject({
+      configPublishResultUnknown: false,
+      notice: '房间配置已更新',
+      session: { snapshot: { revision: 1, sharedConfig: desired } },
+    });
+  });
+
+  it('reset/dispose 使在途 config publish response 失效', async () => {
+    for (const cleanup of ['reset', 'dispose'] as const) {
+      const { client, controller } = createHarness();
+      const desired = { ...sharedConfig, userGuidance: cleanup };
+      const published = {
+        ...session,
+        snapshot: { ...snapshot, revision: 1, controlSeq: 1, sharedConfig: desired },
+      };
+      let resolvePublish!: (value: typeof published) => void;
+      vi.mocked(client.publishConfig).mockImplementationOnce(() => new Promise((resolve) => {
+        resolvePublish = resolve;
+      }));
+      await controller.create({
+        displayName: '房主',
+        directory: { title: '测试房', visibility: 'public' },
+        sharedConfig,
+      });
+      const publishing = controller.publishConfig({
+        expectedRoomEpoch: 'epoch-1',
+        expectedRevision: 0,
+        sharedConfig: desired,
+      });
+
+      controller[cleanup]();
+      resolvePublish(published);
+      await publishing;
+
+      expect(controller.getSnapshot().session?.snapshot.revision ?? 0).toBe(0);
+    }
   });
 
   it('Proposal unknown 只由同一 proposal 的权威事件解锁', async () => {
@@ -839,7 +998,7 @@ describe('Arena Room browser controller', () => {
     expect(member.client.startGeneration).not.toHaveBeenCalled();
   });
 
-  it('start response 绑定 pending host config 时同步已 checkpoint 的 revision/config，不覆盖更新状态', async () => {
+  it('start response 不再把 request config/revision 伪装成已显式发布的权威状态', async () => {
     const host = createHarness();
     const pendingConfig = { ...sharedConfig, userGuidance: '最终房主配置' };
     vi.mocked(host.client.startGeneration).mockResolvedValueOnce({
@@ -856,8 +1015,8 @@ describe('Arena Room browser controller', () => {
       sharedConfig: pendingConfig,
     });
     expect(host.controller.getSnapshot().session?.snapshot).toMatchObject({
-      revision: 1,
-      sharedConfig: pendingConfig,
+      revision: 0,
+      sharedConfig,
       activeGeneration: { generationId: 'generation-1', configRevision: 1 },
     });
   });

@@ -1,4 +1,5 @@
 import {
+  ArenaRoomPublishConfigRequestSchema,
   parseRoomServerTransportFrame,
   type ArenaRoomCreateRequest,
   type ArenaRoomGenerationProjectionStatus,
@@ -6,6 +7,7 @@ import {
   type ArenaRoomGenerationViewResponse,
   type ArenaRoomProposalResolveRequest,
   type ArenaRoomProposalSubmitRequest,
+  type ArenaRoomPublishConfigRequest,
   type ArenaRoomSessionResponse,
   type GenerationMirror,
   type RoomControlCursor,
@@ -43,6 +45,8 @@ export type ArenaRoomControllerState = {
   readonly unknownOperation: 'create' | 'join' | null;
   readonly proposalOperation: 'resolve' | 'submit' | 'withdraw' | null;
   readonly proposalResultUnknown: boolean;
+  readonly configPublishPending: boolean;
+  readonly configPublishResultUnknown: boolean;
   readonly generation: ArenaRoomGenerationControllerView;
 };
 
@@ -120,6 +124,7 @@ export type ArenaRoomController = {
   submitProposal(request: ArenaRoomProposalSubmitRequest): Promise<void>;
   resolveProposal(proposalId: string, request: ArenaRoomProposalResolveRequest): Promise<void>;
   withdrawProposal(proposalId: string): Promise<void>;
+  publishConfig(request: ArenaRoomPublishConfigRequest): Promise<void>;
   startGeneration(request: ArenaRoomGenerationStartRequest): Promise<void>;
   retryGenerationStart(): Promise<void>;
   reconnect(): void;
@@ -151,6 +156,8 @@ const READY_STATE: ArenaRoomControllerState = Object.freeze({
   unknownOperation: null,
   proposalOperation: null,
   proposalResultUnknown: false,
+  configPublishPending: false,
+  configPublishResultUnknown: false,
   generation: EMPTY_GENERATION_VIEW,
 });
 
@@ -162,6 +169,10 @@ const phaseForAccess = (access: { enabled: boolean; authenticated: boolean }) =>
 
 const safeErrorMessage = (error: unknown): string => (
   error instanceof ArenaRoomClientError ? error.message : '房间运行时暂不可用'
+);
+
+const sameSharedConfig = (left: unknown, right: unknown): boolean => (
+  JSON.stringify(left) === JSON.stringify(right)
 );
 
 const defaultReconnectDelay = (attempt: number): number => (
@@ -310,6 +321,13 @@ export const createArenaRoomController = (
   let pendingGenerationStartRequest: ArenaRoomGenerationStartRequest | null = null;
   let generationFence = 0;
   let unknownProposalMutation: UnknownProposalMutation | null = null;
+  let configPublishOperation = 0;
+  let configPublishPending = false;
+  let configPublishIntent: Readonly<{
+    roomId: string;
+    selfUserId: string;
+    request: ArenaRoomPublishConfigRequest;
+  }> | null = null;
   let disposed = false;
   let unresolvedCreateResult = false;
   let unresolvedCreateNotice: string | null = null;
@@ -335,6 +353,12 @@ export const createArenaRoomController = (
     && access.authenticated
   );
 
+  const invalidateConfigPublish = (): void => {
+    configPublishOperation += 1;
+    configPublishPending = false;
+    configPublishIntent = null;
+  };
+
   const clearReconnectTimer = (): void => {
     if (reconnectTimer === null) return;
     clearTimer(reconnectTimer);
@@ -353,6 +377,7 @@ export const createArenaRoomController = (
   };
 
   const enterReplacement = (): void => {
+    invalidateConfigPublish();
     clearReconnectTimer();
     detachSocket(true);
     publish({
@@ -637,6 +662,20 @@ export const createArenaRoomController = (
         return;
       }
       const epochChanged = current.roomEpoch !== event.roomEpoch;
+      const configReconciled = !epochChanged
+        && state.configPublishResultUnknown
+        && configPublishIntent?.roomId === event.roomId
+        && configPublishIntent.request.expectedRoomEpoch === event.roomEpoch
+        && (
+          event.payload.revision === configPublishIntent.request.expectedRevision
+          || event.payload.revision === configPublishIntent.request.expectedRevision + 1
+        )
+        && sameSharedConfig(
+          event.payload.sharedConfig,
+          configPublishIntent.request.sharedConfig,
+        );
+      if (epochChanged) invalidateConfigPublish();
+      else if (configReconciled) configPublishIntent = null;
       unknownProposalMutation = null;
       generationFence += 1;
       publish({
@@ -651,6 +690,15 @@ export const createArenaRoomController = (
         ...(epochChanged ? { notice: '房间已由服务器恢复，需要重新同步' } : {}),
         proposalOperation: null,
         proposalResultUnknown: false,
+        ...(configReconciled ? {
+          configPublishPending: false,
+          configPublishResultUnknown: false,
+          notice: '房间配置已更新',
+          error: null,
+        } : epochChanged ? {
+          configPublishPending: false,
+          configPublishResultUnknown: false,
+        } : {}),
       });
       if (event.payload.activeGeneration) void requestGenerationRecovery('baseline');
       return;
@@ -664,6 +712,7 @@ export const createArenaRoomController = (
     ) {
       const next = replaceMember(current, event);
       if (event.type === 'room.member.left' && event.payload.member.userId === current.self.userId) {
+        invalidateConfigPublish();
         detachSocket(true);
         publish({
           phase: 'closed',
@@ -678,6 +727,15 @@ export const createArenaRoomController = (
     }
 
     if (event.type === 'room.config.updated') {
+      const configReconciled = state.configPublishResultUnknown
+        && configPublishIntent?.roomId === event.roomId
+        && configPublishIntent.request.expectedRoomEpoch === event.roomEpoch
+        && event.payload.revision === configPublishIntent.request.expectedRevision + 1
+        && sameSharedConfig(
+          event.payload.sharedConfig,
+          configPublishIntent.request.sharedConfig,
+        );
+      if (configReconciled) configPublishIntent = null;
       publish({
         session: {
           ...current,
@@ -688,6 +746,12 @@ export const createArenaRoomController = (
             sharedConfig: event.payload.sharedConfig,
           },
         },
+        ...(configReconciled ? {
+          configPublishPending: false,
+          configPublishResultUnknown: false,
+          notice: '房间配置已更新',
+          error: null,
+        } : {}),
       });
       return;
     }
@@ -770,6 +834,7 @@ export const createArenaRoomController = (
     }
 
     if (event.type === 'room.closing') {
+      invalidateConfigPublish();
       detachSocket(true);
       publish({ phase: 'closed', notice: '房间已关闭', error: null });
       return;
@@ -1040,6 +1105,160 @@ export const createArenaRoomController = (
     }
   };
 
+  const runConfigPublish = async (
+    input: ArenaRoomPublishConfigRequest,
+  ): Promise<void> => {
+    if (disposed || !access.enabled || !access.authenticated) return;
+    const parsed = ArenaRoomPublishConfigRequestSchema.safeParse(input);
+    if (!parsed.success) {
+      publish({
+        configPublishPending: false,
+        configPublishResultUnknown: false,
+        notice: null,
+        error: '房间配置请求无效',
+      });
+      return;
+    }
+    const request = parsed.data;
+    const current = state.session;
+    if (
+      disposed
+      || !access.enabled
+      || !access.authenticated
+      || !current
+      || configPublishPending
+      || state.configPublishResultUnknown
+    ) return;
+    if (
+      current.self.role !== 'host'
+      || current.self.membershipState !== 'active'
+    ) {
+      publish({
+        configPublishPending: false,
+        configPublishResultUnknown: false,
+        notice: null,
+        error: '只有当前房主可以更新房间配置',
+      });
+      return;
+    }
+    if (
+      request.expectedRoomEpoch !== current.roomEpoch
+      || request.expectedRevision !== current.snapshot.revision
+    ) {
+      publish({
+        configPublishPending: false,
+        configPublishResultUnknown: false,
+        notice: null,
+        error: '房间配置已发生变化，请重新确认后再发布',
+      });
+      return;
+    }
+
+    configPublishPending = true;
+    configPublishOperation += 1;
+    const operation = configPublishOperation;
+    const captured = {
+      roomId: current.roomId,
+      roomEpoch: current.roomEpoch,
+      revision: current.snapshot.revision,
+      controlSeq: current.snapshot.controlSeq,
+      selfUserId: current.self.userId,
+    };
+    configPublishIntent = {
+      roomId: current.roomId,
+      selfUserId: current.self.userId,
+      request,
+    };
+    publish({
+      configPublishPending: true,
+      configPublishResultUnknown: false,
+      notice: '正在更新房间配置…',
+      error: null,
+    });
+    try {
+      const authoritative = await options.client.publishConfig(current.roomId, request);
+      const latest = state.session;
+      if (
+        disposed
+        || operation !== configPublishOperation
+        || !latest
+        || latest.roomId !== captured.roomId
+        || latest.roomEpoch !== captured.roomEpoch
+        || latest.self.userId !== captured.selfUserId
+        || latest.self.role !== 'host'
+        || latest.self.membershipState !== 'active'
+      ) return;
+      const responseMatchesIntent = authoritative.roomId === captured.roomId
+        && authoritative.roomEpoch === captured.roomEpoch
+        && authoritative.self.userId === captured.selfUserId
+        && authoritative.self.role === 'host'
+        && authoritative.snapshot.controlSeq >= captured.controlSeq
+        && (
+          authoritative.snapshot.revision === captured.revision
+          || authoritative.snapshot.revision === captured.revision + 1
+        )
+        && sameSharedConfig(authoritative.snapshot.sharedConfig, request.sharedConfig);
+      if (!responseMatchesIntent) {
+        publish({
+          configPublishPending: false,
+          configPublishResultUnknown: true,
+          notice: '配置发布结果无法确认，请先同步房间权威状态',
+          error: null,
+        });
+        return;
+      }
+      const canInstall = latest.snapshot.revision === captured.revision
+        && latest.snapshot.controlSeq === captured.controlSeq;
+      const alreadyInstalled = latest.snapshot.revision === authoritative.snapshot.revision
+        && latest.snapshot.controlSeq >= authoritative.snapshot.controlSeq
+        && sameSharedConfig(latest.snapshot.sharedConfig, request.sharedConfig);
+      if (!canInstall && !alreadyInstalled) {
+        configPublishIntent = null;
+        publish({
+          configPublishPending: false,
+          configPublishResultUnknown: false,
+          notice: '房间状态已变化，未安装过期的配置响应',
+          error: null,
+        });
+        return;
+      }
+      configPublishIntent = null;
+      publish({
+        ...(canInstall ? { session: authoritative } : {}),
+        configPublishPending: false,
+        configPublishResultUnknown: false,
+        notice: '房间配置已更新',
+        error: null,
+      });
+    } catch (error) {
+      if (
+        disposed
+        || operation !== configPublishOperation
+        || state.session?.roomId !== captured.roomId
+        || state.session.roomEpoch !== captured.roomEpoch
+        || state.session.self.userId !== captured.selfUserId
+      ) return;
+      if (error instanceof ArenaRoomClientError && error.code === 'ROOM_RESULT_UNKNOWN') {
+        publish({
+          configPublishPending: false,
+          configPublishResultUnknown: true,
+          notice: error.message,
+          error: null,
+        });
+      } else {
+        configPublishIntent = null;
+        publish({
+          configPublishPending: false,
+          configPublishResultUnknown: false,
+          notice: null,
+          error: safeErrorMessage(error),
+        });
+      }
+    } finally {
+      if (operation === configPublishOperation) configPublishPending = false;
+    }
+  };
+
   const runGenerationStart = async (
     request: ArenaRoomGenerationStartRequest,
     retry = false,
@@ -1104,25 +1323,6 @@ export const createArenaRoomController = (
         generationId: view.generation.generationId,
         attempt: view.generation.attempt,
       })) return;
-      const installedSession = state.session;
-      if (
-        installedSession
-        && installedSession.roomId === expectedRoomId
-        && installedSession.roomEpoch === expectedRoomEpoch
-        && installedSession.snapshot.revision === request.expectedRevision
-        && view.generation.configRevision === request.expectedRevision + 1
-      ) {
-        publish({
-          session: {
-            ...installedSession,
-            snapshot: {
-              ...installedSession.snapshot,
-              revision: view.generation.configRevision,
-              sharedConfig: request.sharedConfig,
-            },
-          },
-        });
-      }
       publish({ notice: '多人生成已进入房间权威流程', error: null });
     } catch (error) {
       if (
@@ -1179,6 +1379,7 @@ export const createArenaRoomController = (
       proposalMutationGeneration += 1;
       generationStartOperation += 1;
       generationFence += 1;
+      invalidateConfigPublish();
       proposalMutationPending = false;
       generationStartPending = false;
       pendingGenerationStartRequest = null;
@@ -1230,6 +1431,7 @@ export const createArenaRoomController = (
       proposalMutationGeneration += 1;
       generationStartOperation += 1;
       generationFence += 1;
+      invalidateConfigPublish();
       proposalMutationPending = false;
       generationStartPending = false;
       pendingGenerationStartRequest = null;
@@ -1262,6 +1464,7 @@ export const createArenaRoomController = (
       proposalMutationGeneration += 1;
       generationStartOperation += 1;
       generationFence += 1;
+      invalidateConfigPublish();
       proposalMutationPending = false;
       generationStartPending = false;
       pendingGenerationStartRequest = null;
@@ -1340,6 +1543,7 @@ export const createArenaRoomController = (
       proposalMutationGeneration += 1;
       generationStartOperation += 1;
       generationFence += 1;
+      invalidateConfigPublish();
       proposalMutationPending = false;
       generationStartPending = false;
       pendingGenerationStartRequest = null;
@@ -1362,6 +1566,7 @@ export const createArenaRoomController = (
       proposalMutationGeneration += 1;
       generationStartOperation += 1;
       generationFence += 1;
+      invalidateConfigPublish();
       proposalMutationPending = false;
       generationStartPending = false;
       pendingGenerationStartRequest = null;
@@ -1396,6 +1601,10 @@ export const createArenaRoomController = (
       ));
     },
 
+    async publishConfig(request) {
+      await runConfigPublish(request);
+    },
+
     async startGeneration(request) {
       await runGenerationStart(request);
     },
@@ -1424,6 +1633,7 @@ export const createArenaRoomController = (
       proposalMutationGeneration += 1;
       generationStartOperation += 1;
       generationFence += 1;
+      invalidateConfigPublish();
       proposalMutationPending = false;
       generationStartPending = false;
       pendingGenerationStartRequest = null;
@@ -1445,6 +1655,7 @@ export const createArenaRoomController = (
       proposalMutationGeneration += 1;
       generationStartOperation += 1;
       generationFence += 1;
+      invalidateConfigPublish();
       proposalMutationPending = false;
       generationStartPending = false;
       pendingGenerationStartRequest = null;

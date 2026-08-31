@@ -18,6 +18,7 @@ import type { ArenaRoomHttpDependencies } from '#/arena-room/room-http';
 import { createRoomActorRegistry } from '#/arena-room/room-actor-registry';
 import { createArenaRoomMembershipService } from '#/arena-room/room-membership-service';
 import { createArenaRoomProposalService } from '#/arena-room/room-proposal-service';
+import { createArenaRoomConfigService } from '#/arena-room/room-config-service';
 import { createArenaRoomGenerationService } from '#/arena-room/room-generation-service';
 import {
   createArenaRoomTicketCodec,
@@ -101,6 +102,9 @@ if (process.env.HONO_CONFIG_CHECK_ONLY === 'true') {
     memberships: roomMemberships,
     references: roomReferences,
   });
+  const roomConfigs = createArenaRoomConfigService({
+    memberships: roomMemberships,
+  });
   const roomGenerations = createArenaRoomGenerationService({
     memberships: roomMemberships,
     materializer: roomGenerationMaterializer,
@@ -130,6 +134,7 @@ if (process.env.HONO_CONFIG_CHECK_ONLY === 'true') {
         }),
         memberships: roomMemberships,
         proposals: roomProposals,
+        configs: roomConfigs,
         generations: roomGenerations,
         directory: roomDirectory,
         websocketAuthority: roomWebSocketAuthority,
