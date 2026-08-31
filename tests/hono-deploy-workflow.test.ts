@@ -266,7 +266,10 @@ describe('Hono deployment workflow', () => {
       'Sec-WebSocket-Key: $room_websocket_key',
     );
     expect(previewRoomActivationStep).toContain('head -c 16 /dev/urandom');
-    expect(previewRoomActivationStep).toContain('ROOM_TICKET_REQUIRED');
+    expect(previewRoomActivationStep).not.toContain(
+      'grep -Fq \'"code":"ROOM_TICKET_REQUIRED"\'',
+    );
+    expect(previewRoomActivationStep).toContain('upgrade rejection body');
     expect(previewRoomActivationStep).toContain('room_web_enabled=false');
     expect(previewRoomActivationStep).not.toContain('false|no|off) exit 0');
     expect(previewRoomActivationStep.match(

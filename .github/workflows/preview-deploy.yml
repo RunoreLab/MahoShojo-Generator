@@ -264,7 +264,8 @@ jobs:
               "$room_origin/api/arena/rooms/v1/ws")"
             if [ "$room_web_enabled" = true ]; then
               test "$status" = 401
-              grep -Fq '"code":"ROOM_TICKET_REQUIRED"' "$probe_dir/ws-body"
+              # @hono/node-server keeps the upgrade rejection body empty;
+              # authority tests pin ROOM_TICKET_REQUIRED and this wire gate pins 401.
             else
               case "$status" in 2??|101) echo 'Room WSS 在 Web disabled 时意外成功' >&2; exit 1 ;; esac
             fi

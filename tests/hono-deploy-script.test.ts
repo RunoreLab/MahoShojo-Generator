@@ -378,7 +378,7 @@ if [ -n "$headers" ]; then
 fi
 if [ -n "$body" ]; then
   case "$all_arguments" in
-    *"/api/arena/rooms/v1/ws"*) printf '%s' '{"code":"ROOM_TICKET_REQUIRED"}' > "$body" ;;
+    *"/api/arena/rooms/v1/ws"*) : > "$body" ;;
     *"/api/arena/rooms/v1"*) printf '%s' '{"code":"ROOM_AUTHENTICATION_REQUIRED"}' > "$body" ;;
     *) printf '%s' '{"error":"Name is required"}' > "$body" ;;
   esac

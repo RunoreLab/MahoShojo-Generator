@@ -117,7 +117,8 @@ describe('Hono content-addressed release transaction', () => {
       '--header "Sec-WebSocket-Key: $room_websocket_key"',
     );
     expect(script).toContain('head -c 16 /dev/urandom');
-    expect(script).toContain('"code":"ROOM_TICKET_REQUIRED"');
+    expect(script).not.toContain('"code":"ROOM_TICKET_REQUIRED"');
+    expect(script).toContain('upgrade rejection body');
     expect(script).toContain('room_runtime_active');
     expect(script).toContain("2??|101) return 1");
   });

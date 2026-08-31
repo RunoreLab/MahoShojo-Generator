@@ -992,7 +992,9 @@ verify_public_contract() {
     probe_status="$(cat "$probe_status_file")"
     if [ "$room_runtime_active" = true ]; then
       [ "$probe_status" = '401' ] || return 1
-      grep -Fq '"code":"ROOM_TICKET_REQUIRED"' "$probe_body" || return 1
+      # @hono/node-server sends the upgrade rejection status and headers but
+      # leaves the upgrade rejection body empty. The authority unit contract
+      # separately pins ROOM_TICKET_REQUIRED; the public wire gate pins 401.
     else
       case "$probe_status" in 2??|101) return 1 ;; esac
     fi
