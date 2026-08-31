@@ -1,8 +1,7 @@
 'use client';
 
 import SaveToCloudButton from '@/components/SaveToCloudButton';
-import BattleReportCard, { NewsReport, type BattleReportIllustrationAsset } from '@/components/BattleReportCard';
-import StreamingBattleReportCard from '@/components/stream/StreamingBattleReportCard';
+import { NewsReport, type BattleReportIllustrationAsset } from '@/components/BattleReportCard';
 
 import { useEffect, useMemo, useState } from 'react';
 import { useBattleStore } from '../stores/useBattleStore';
@@ -11,13 +10,12 @@ import { getCombatantDisplayName } from '../utils/characterValidator';
 import { toBattleReportMarkdown } from '../utils/battleReportMarkdown';
 import { inferTemplate } from '@/lib/data-card-converter';
 import { precheckBattleReportForRedo } from '@/lib/arena/redo-updates';
-import { resolveAdjudicationOutcomeTone } from '@/lib/adjudicator/presentation';
-import { AdjudicationResult } from '@/types/arena';
 import { BattleStoreState, CombatantData, UpdatedCombatantData } from '../types';
 import { MarkdownBlock } from '@/components/MarkdownBlock';
 import { CollapsibleSection } from '@/components/shared/CollapsibleSection';
 import { JsonSizeIndicator } from '@/components/shared/JsonSizeIndicator';
 import { BattleIllustrationPanel } from './BattleIllustrationPanel';
+import { BattleResultPresentation } from './BattleResultPresentation';
 import { resolveBattleReportCardManualWidthPx } from '../utils/battleReportCardWidth';
 
 interface BattleResultProps {
@@ -147,86 +145,40 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
 
   return (
     <>
-      {adjudicationResults && (
-        <div className="card mt-6">
-          <CollapsibleSection
-            title="🎲 随机判定结果"
-            description={`共 ${adjudicationResults.length} 条`}
-            defaultOpen={false}
-            storageKey="arena.section.adjudicationResults.open"
-            variant="plain"
-            titleClassName="text-lg font-bold text-gray-800"
-            headerClassName="mb-3"
-          >
-            <div className="space-y-2">
-              {adjudicationResults.map((result: AdjudicationResult, index: number) => {
-                const outcomeTone = resolveAdjudicationOutcomeTone(result.outcome);
-                return (
-                  <div
-                    key={index}
-                    className="p-3 bg-gray-50 border border-gray-200 rounded-lg text-sm"
-                    style={{ marginLeft: `${result.depth * 20}px` }}
-                  >
-                    {result.depth > 0 && <span className="text-gray-400">↳ </span>}
-                    <span className="font-semibold text-gray-700">{result.description}</span>
-                    <p className="text-gray-600 mt-1">
-                      判定结果:{' '}
-                      <span
-                        className={`font-bold ${
-                          outcomeTone === 'success'
-                            ? 'text-green-600'
-                            : outcomeTone === 'failure'
-                              ? 'text-red-600'
-                              : 'text-blue-600'
-                        }`}
-                      >
-                        {result.outcome}
-                      </span>{' '}
-                      ({result.details})
-                    </p>
-                  </div>
-                );
-              })}
-            </div>
-          </CollapsibleSection>
-        </div>
-      )}
-
-      {generationMode === 'stream' ? (
-        isGenerating || streamingMarkdown !== null ? (
-          <div className="mt-6">
-            <StreamingBattleReportCard
-              content={streamingMarkdown ?? ''}
-              onSaveImage={onSaveImage}
-              mode={battleMode}
-              scenarioName={scenarioDisplayName}
-              reporterInfo={streamReporterInfo}
-              userGuidance={streamUserGuidance}
-              characterGuidances={streamCharacterGuidances}
-              adjudicationResults={adjudicationResults}
-              aiUsage={streamAiUsage}
-              aiModel={streamAiModel}
-              narrativeHistoryReadCount={streamNarrativeHistoryReadCount}
-              aiReasoning={streamReasoning}
-              isStreaming={isGenerating}
-              softTimeoutWarning={streamSoftTimeoutWarning}
-              onStopGeneration={stopGeneration}
-              illustrationAsset={illustrationAsset}
-              cardWidthPx={battleReportCardWidthPx}
-            />
-          </div>
-        ) : null
-      ) : (
-        newsReport && (
-          <BattleReportCard
-            report={newsReport as NewsReport}
-            onSaveImage={onSaveImage}
-            mode={battleMode}
-            illustrationAsset={illustrationAsset}
-            cardWidthPx={battleReportCardWidthPx}
-          />
-        )
-      )}
+      <BattleResultPresentation
+        report={generationMode === 'stream'
+          ? isGenerating || streamingMarkdown !== null
+            ? {
+                format: 'stream-markdown',
+                content: streamingMarkdown ?? '',
+                mode: battleMode,
+                scenarioName: scenarioDisplayName,
+                reporterInfo: streamReporterInfo,
+                userGuidance: streamUserGuidance,
+                characterGuidances: streamCharacterGuidances,
+                aiUsage: streamAiUsage,
+                aiModel: streamAiModel,
+                narrativeHistoryReadCount: streamNarrativeHistoryReadCount,
+                aiReasoning: streamReasoning,
+                isStreaming: isGenerating,
+                softTimeoutWarning: streamSoftTimeoutWarning,
+                onStopGeneration: stopGeneration,
+                illustrationAsset,
+                cardWidthPx: battleReportCardWidthPx,
+              }
+            : null
+          : newsReport
+            ? {
+                format: 'structured-report',
+                report: newsReport as NewsReport,
+                mode: battleMode,
+                illustrationAsset,
+                cardWidthPx: battleReportCardWidthPx,
+              }
+            : null}
+        onSaveImage={onSaveImage}
+        adjudicationResults={adjudicationResults}
+      />
 
       {shouldShowIllustrationPanel && (
         <BattleIllustrationPanel

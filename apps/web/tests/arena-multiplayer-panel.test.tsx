@@ -166,11 +166,30 @@ describe('Arena multiplayer panel accessibility/permissions', () => {
         authoritativeMarkdown: '# 最终战报',
         finalAuthoritative: true,
         generationRecordId: 'record-1',
+        result: {
+          version: 1,
+          format: 'stream-markdown',
+          mode: 'classic',
+          reporterInfo: { name: '房间记者', publication: 'Arena 日报' },
+          ai: { model: 'safe-model-name' },
+          combatantUpdates: [{
+            combatantKey: 'host-local:character:1',
+            displayName: '角色',
+            impact: '守住了阵地',
+          }],
+        },
       },
     });
     expect(completed).toContain('房间战报');
     expect(completed).toContain('权威终态');
-    expect(completed).toContain('# 最终战报');
+    expect(completed).toContain('data-arena-battle-result-presentation="v1"');
+    expect(completed).toContain('最终战报');
+    expect(completed).toContain('房间记者');
+    expect(completed).toContain('战后角色变化');
+    expect(completed).not.toContain('重做角色更新');
+    expect(completed).not.toContain('应用手动修改');
+    expect(completed).not.toContain('下载更新设定');
+    expect(completed).not.toContain('保存到云端');
 
     const unknown = render({
       ...readyState,

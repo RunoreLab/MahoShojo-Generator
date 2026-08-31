@@ -211,6 +211,7 @@ export function ArenaPage({ multiplayer }: ArenaPageProps = {}) {
                 authLoading={authLoading}
                 isAuthenticated={isAuthenticated}
                 displayName={user?.username ?? '玩家'}
+                onSaveImage={handleSaveImage}
               />
             ) : null}
 

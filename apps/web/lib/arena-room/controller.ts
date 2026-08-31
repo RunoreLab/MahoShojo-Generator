@@ -3,6 +3,7 @@ import {
   parseRoomServerTransportFrame,
   type ArenaRoomCreateRequest,
   type ArenaRoomGenerationProjectionStatus,
+  type ArenaRoomGenerationResult,
   type ArenaRoomGenerationStartRequest,
   type ArenaRoomGenerationViewResponse,
   type ArenaRoomProposalResolveRequest,
@@ -82,6 +83,7 @@ export type ArenaRoomGenerationControllerView = {
   readonly errorCode: string | null;
   readonly pendingRequestId: string | null;
   readonly startResultUnknown: boolean;
+  readonly result: ArenaRoomGenerationResult | null;
 };
 
 type ProposalMutationOperation = 'resolve' | 'submit' | 'withdraw';
@@ -148,6 +150,7 @@ const EMPTY_GENERATION_VIEW: ArenaRoomGenerationControllerView = Object.freeze({
   errorCode: null,
   pendingRequestId: null,
   startResultUnknown: false,
+  result: null,
 });
 
 const READY_STATE: ArenaRoomControllerState = Object.freeze({
@@ -499,6 +502,7 @@ export const createArenaRoomController = (
         errorCode: view.errorCode ?? null,
         pendingRequestId: null,
         startResultUnknown: false,
+        result: view.result ?? null,
       },
     });
     return true;
@@ -835,6 +839,7 @@ export const createArenaRoomController = (
         generation,
       });
       if (event.type !== 'generation.started') void requestGenerationRecovery('terminal');
+      else void requestGenerationRecovery('baseline');
       return;
     }
 

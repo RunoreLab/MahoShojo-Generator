@@ -88,6 +88,24 @@ const generationView = {
   finalAuthoritative: false,
 };
 
+const generationResult = {
+  version: 1 as const,
+  format: 'stream-markdown' as const,
+  mode: 'classic' as const,
+  reporterInfo: { name: '安全记者', publication: '房间日报' },
+  sharedGuidance: '保护车站',
+  ai: {
+    model: 'safe-model-name',
+    usage: { promptTokens: 12, completionTokens: 34, totalTokens: 46 },
+  },
+  combatantUpdates: [{
+    combatantKey: 'host-local:character:1',
+    displayName: '角色',
+    impact: '守住车站',
+    currentStateSummary: '轻伤',
+  }],
+};
+
 const generationStartRequest = {
   expectedRoomEpoch: 'epoch-1',
   expectedRevision: 0,
@@ -1165,6 +1183,9 @@ describe('Arena Room browser controller', () => {
         participantUserIds: generationMirror.participantUserIds,
       },
     }));
+    expect(client.getGenerationView).toHaveBeenCalledOnce();
+    resolveRecovery({ ...generationView, markdown: '' });
+    await vi.waitFor(() => expect(controller.getSnapshot().generation.phase).toBe('running'));
     const story = (chunkSeq: number, delta: string) => JSON.stringify({
       protocolVersion: 1,
       type: 'story.delta',
@@ -1200,7 +1221,7 @@ describe('Arena Room browser controller', () => {
         receivedChunkSeq: 3,
       },
     });
-    expect(client.getGenerationView).toHaveBeenCalledOnce();
+    expect(client.getGenerationView).toHaveBeenCalledTimes(2);
 
     resolveRecovery({
       ...generationView,
@@ -1213,6 +1234,47 @@ describe('Arena Room browser controller', () => {
       authoritativeMarkdown: '权威全文',
       storyCursor: { generationId: 'generation-1', chunkSeq: 3 },
       gap: null,
+    }));
+  });
+
+  it('generation.started 立即读取权威基线，避免晚加入客户端从错误 chunk 起点拼接', async () => {
+    const { client, controller, sockets } = createHarness();
+    let resolveBaseline!: (value: typeof generationView) => void;
+    vi.mocked(client.getGenerationView).mockImplementation(() => new Promise((resolve) => {
+      resolveBaseline = resolve;
+    }));
+    await controller.create({
+      displayName: '房主',
+      directory: { title: '测试房', visibility: 'public' },
+      sharedConfig,
+    });
+    sockets[0]!.open();
+    sockets[0]!.message(JSON.stringify({
+      protocolVersion: 1,
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      controlSeq: 1,
+      timestamp: '2026-08-28T00:01:00.000Z',
+      type: 'generation.started',
+      payload: {
+        generationRequestId: generationMirror.generationRequestId,
+        generationId: generationMirror.generationId,
+        attempt: generationMirror.attempt,
+        configRevision: generationMirror.configRevision,
+        snapshotDigest: generationMirror.snapshotDigest,
+        collaborativeInfluence: generationMirror.collaborativeInfluence,
+        participantUserIds: generationMirror.participantUserIds,
+      },
+    }));
+
+    expect(client.getGenerationView).toHaveBeenCalledOnce();
+    expect(controller.getSnapshot().generation.phase).toBe('resyncing');
+
+    resolveBaseline({ ...generationView, markdown: '已生成基线', nextChunkSeq: 2 });
+    await vi.waitFor(() => expect(controller.getSnapshot().generation).toMatchObject({
+      phase: 'running',
+      markdown: '已生成基线',
+      storyCursor: { generationId: 'generation-1', chunkSeq: 1 },
     }));
   });
 
@@ -1245,6 +1307,9 @@ describe('Arena Room browser controller', () => {
         participantUserIds: generationMirror.participantUserIds,
       },
     }));
+    expect(client.getGenerationView).toHaveBeenCalledOnce();
+    resolveRecovery(generationView);
+    await vi.waitFor(() => expect(controller.getSnapshot().generation.phase).toBe('running'));
     sockets[0]!.message(JSON.stringify({
       protocolVersion: 1,
       roomId: 'room-1',
@@ -1272,7 +1337,7 @@ describe('Arena Room browser controller', () => {
       phase: 'resyncing',
       finalAuthoritative: false,
     });
-    expect(client.getGenerationView).toHaveBeenCalledOnce();
+    expect(client.getGenerationView).toHaveBeenCalledTimes(2);
 
     resolveRecovery({
       ...generationView,
@@ -1286,6 +1351,7 @@ describe('Arena Room browser controller', () => {
       nextChunkSeq: 2,
       finalAuthoritative: true,
       generationRecordId: 'record-1',
+      result: generationResult,
     });
     await vi.waitFor(() => expect(controller.getSnapshot().generation).toMatchObject({
       phase: 'completed',
@@ -1293,6 +1359,7 @@ describe('Arena Room browser controller', () => {
       markdown: '# 最终权威报告',
       finalAuthoritative: true,
       generationRecordId: 'record-1',
+      result: generationResult,
     }));
   });
 

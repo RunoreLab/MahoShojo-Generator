@@ -13,6 +13,7 @@ import { useBattleStore } from '@/components/arena/stores/useBattleStore';
 import { ArenaProposalPanel } from './ArenaProposalPanel';
 import { ArenaHostConfigPanel } from './ArenaHostConfigPanel';
 import { useArenaRoom, useArenaRoomContext } from './useArenaRoom';
+import { BattleResultPresentation } from '../components/BattleResultPresentation';
 
 export type ArenaMultiplayerPanelProps = {
   readonly enabled: boolean;
@@ -20,6 +21,7 @@ export type ArenaMultiplayerPanelProps = {
   readonly authLoading: boolean;
   readonly isAuthenticated: boolean;
   readonly displayName: string;
+  readonly onSaveImage?: (imageUrl: string) => void;
 };
 
 export type ArenaMultiplayerPanelViewProps = {
@@ -28,6 +30,7 @@ export type ArenaMultiplayerPanelViewProps = {
   readonly actionPending?: boolean;
   readonly hostConfigContent?: ReactNode;
   readonly proposalContent?: ReactNode;
+  readonly onSaveImage?: (imageUrl: string) => void;
   readonly roomTitle: string;
   readonly visibility: RoomDirectoryVisibility;
   readonly joinCode: string;
@@ -233,8 +236,9 @@ const ArenaRoomLobbyDialog = ({
   );
 };
 
-const ArenaRoomGenerationReport = ({ state }: {
+const ArenaRoomGenerationReport = ({ state, onSaveImage }: {
   readonly state: ArenaRoomControllerState;
+  readonly onSaveImage?: (imageUrl: string) => void;
 }) => {
   const generation = state.generation;
   if (generation.phase === 'idle' && !generation.markdown) return null;
@@ -284,10 +288,36 @@ const ArenaRoomGenerationReport = ({ state }: {
           错误代码：{generation.errorCode}
         </p>
       ) : null}
-      {generation.markdown ? (
-        <div className="mt-3 whitespace-pre-wrap break-words text-sm leading-7 text-gray-900 dark:text-gray-100">
-          {generation.markdown}
-        </div>
+      {generation.phase !== 'unknown' && (
+        generation.markdown
+        || generation.phase === 'running'
+        || generation.phase === 'starting'
+        || generation.phase === 'resyncing'
+        || generation.phase === 'completed'
+      ) ? (
+        <BattleResultPresentation
+          report={{
+            format: 'stream-markdown',
+            content: generation.markdown,
+            isStreaming: generation.phase === 'running'
+              || generation.phase === 'starting'
+              || generation.phase === 'resyncing',
+            mode: generation.result?.mode,
+            scenarioName: generation.result?.scenarioDisplayName,
+            reporterInfo: generation.result?.reporterInfo ?? null,
+            userGuidance: generation.result?.sharedGuidance ?? null,
+            characterGuidances: generation.result?.characterGuidances?.map((guidance) => ({
+              characterName: guidance.displayName,
+              guidance: guidance.guidance,
+            })) ?? null,
+            aiUsage: generation.result?.ai?.usage ?? null,
+            aiModel: generation.result?.ai?.model ?? null,
+            narrativeHistoryReadCount: generation.result?.narrativeHistoryReadCount ?? null,
+          }}
+          onSaveImage={onSaveImage}
+          adjudicationResults={generation.result?.adjudicationResults ?? null}
+          combatantUpdates={generation.result?.combatantUpdates ?? null}
+        />
       ) : generation.phase !== 'unknown' ? (
         <p className="mt-3 text-sm text-gray-600 dark:text-gray-400">等待服务器发布战报内容…</p>
       ) : null}
@@ -390,7 +420,7 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
 
           {props.proposalContent}
 
-          <ArenaRoomGenerationReport state={state} />
+          <ArenaRoomGenerationReport state={state} onSaveImage={props.onSaveImage} />
 
           <div className="flex flex-wrap gap-2">
             {state.phase === 'degraded' || state.phase === 'reconnecting' || state.configPublishResultUnknown ? (
@@ -547,6 +577,7 @@ function ArenaMultiplayerPanelRuntime({
           workspace={proposalWorkspace}
         />
       )}
+      onSaveImage={props.onSaveImage}
       roomTitle={roomTitle}
       visibility={visibility}
       joinCode={joinCode}
