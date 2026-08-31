@@ -36,10 +36,6 @@ export const readMagicTeaPartyDraft = (sessionId: string): string | null => {
 export const writeMagicTeaPartyDraft = (sessionId: string, value: string): void => {
   if (typeof window === 'undefined') return;
   if (!sessionId) return;
-  if (!value.trim()) {
-    safeRemove(buildKey(sessionId));
-    return;
-  }
   const capped = value.length > MAX_DRAFT_CHARS ? value.slice(0, MAX_DRAFT_CHARS) : value;
   safeSet(buildKey(sessionId), capped);
 };

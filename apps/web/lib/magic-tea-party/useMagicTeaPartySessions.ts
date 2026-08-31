@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent, Dispatch, SetStateAction } from 'react';
 
 import type { UserAIProviderConfig } from '@/components/AiProviderSelector';
@@ -276,6 +276,7 @@ export function useMagicTeaPartySessions(options: UseMagicTeaPartySessionsOption
   const [activeSession, setActiveSession] = useState<MagicTeaPartySession | null>(null);
   const [messages, setMessages] = useState<MagicTeaPartyMessage[]>([]);
   const [preferences, setPreferences] = useState(() => DEFAULT_MAGIC_TEA_PARTY_PREFERENCES);
+  const activeSessionLoadRevisionRef = useRef(0);
 
   useEffect(() => {
     migrateMagicTeaPartyLocalStorage();
@@ -310,9 +311,12 @@ export function useMagicTeaPartySessions(options: UseMagicTeaPartySessionsOption
   );
 
   const refreshActiveSession = useCallback(async (sessionId: string) => {
+    const loadRevision = ++activeSessionLoadRevisionRef.current;
     const session = await getMagicTeaPartySession(sessionId);
+    if (loadRevision !== activeSessionLoadRevisionRef.current) return;
     setActiveSession(session);
     const nextMessagesRaw = await listMagicTeaPartyMessages(sessionId);
+    if (loadRevision !== activeSessionLoadRevisionRef.current) return;
 
     const patchedMessages = nextMessagesRaw.map((message) => {
       if (message.role !== 'assistant') return message;
@@ -408,6 +412,7 @@ export function useMagicTeaPartySessions(options: UseMagicTeaPartySessionsOption
             updatedAt: Date.now(),
           };
           await putMagicTeaPartySession(updatedSession);
+          if (loadRevision !== activeSessionLoadRevisionRef.current) return;
           setActiveSession(updatedSession);
           setSessions((prev) => sortSessionsByUpdatedAtDesc([updatedSession, ...prev.filter((item) => item.id !== updatedSession.id)]));
         }
@@ -438,6 +443,7 @@ export function useMagicTeaPartySessions(options: UseMagicTeaPartySessionsOption
 
   useEffect(() => {
     if (!activeSessionId) {
+      activeSessionLoadRevisionRef.current += 1;
       setActiveSession(null);
       setMessages([]);
       return;
