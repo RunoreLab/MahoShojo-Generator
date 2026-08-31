@@ -61,6 +61,7 @@ export const createRoomHostArenaEditorSession = (
   const single = createSingleArenaEditorSession();
   let metadata = normalizeMetadata(input);
   let metadataRevision = 0;
+  let localEditObserved = false;
   let disposed = false;
   let cachedSingleState: ArenaEditorState | null = null;
   let cachedMetadataRevision = -1;
@@ -70,29 +71,38 @@ export const createRoomHostArenaEditorSession = (
     if (disposed) throw new Error('Arena editor session is disposed');
   };
   const singleActions = single.store.getState().actions;
+  const markEdited = (): void => {
+    localEditObserved = true;
+  };
   const actions: ArenaEditorActions = Object.freeze({
     setBattleMode(value) {
       assertActive();
+      markEdited();
       singleActions.setBattleMode(value);
     },
     setStoryLength(value) {
       assertActive();
+      markEdited();
       singleActions.setStoryLength(value);
     },
     setCustomStoryLength(value) {
       assertActive();
+      markEdited();
       singleActions.setCustomStoryLength(value);
     },
     setSelectedLanguage(value) {
       assertActive();
+      markEdited();
       singleActions.setSelectedLanguage(value);
     },
     setUserGuidance(value) {
       assertActive();
+      markEdited();
       singleActions.setUserGuidance(value);
     },
     updateHistorySettings(value) {
       assertActive();
+      markEdited();
       singleActions.updateHistorySettings(value);
     },
   });
@@ -106,6 +116,9 @@ export const createRoomHostArenaEditorSession = (
     ) {
       cachedSingleState = singleState;
       cachedMetadataRevision = metadataRevision;
+      const workspaceStatus = localEditObserved && metadata.workspaceStatus.kind === 'clean'
+        ? Object.freeze({ kind: 'dirty' as const, reasons: Object.freeze(['shared-config' as const]) })
+        : metadata.workspaceStatus;
       cachedState = Object.freeze({
         ...singleState,
         mode: 'room-host' as const,
@@ -113,8 +126,8 @@ export const createRoomHostArenaEditorSession = (
         baselineEpoch: metadata.authority.roomEpoch,
         baselineRevision: metadata.authority.revision,
         baselineConfig: cloneArenaEditorSharedConfig(metadata.authority.sharedConfig),
-        dirty: isDirty(metadata.workspaceStatus),
-        workspaceStatus: metadata.workspaceStatus,
+        dirty: isDirty(workspaceStatus),
+        workspaceStatus,
         disposed,
         actions,
       });
@@ -144,6 +157,7 @@ export const createRoomHostArenaEditorSession = (
     syncAuthority(nextInput) {
       assertActive();
       metadata = normalizeMetadata(nextInput);
+      localEditObserved = false;
       notifyMetadata();
     },
     async exportSharedConfig(): Promise<ArenaRoomSharedConfig> {

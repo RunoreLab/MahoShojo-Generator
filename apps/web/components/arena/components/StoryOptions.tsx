@@ -5,27 +5,33 @@ import { ReactNode } from 'react';
 import AiProviderSelector from '@/components/AiProviderSelector';
 import { config as appConfig } from '@/lib/config';
 import { StoryOptionsControl } from '../editor/presentation/StoryOptionsControl';
+import {
+  useArenaEditorActions,
+  useArenaEditorSelector,
+  useArenaEditorSession,
+} from '../editor';
 
 import { useBattleStore } from '../stores/useBattleStore';
-import { BattleStoreState, LanguageOption } from '../types';
+import { LanguageOption } from '../types';
 
 interface StoryOptionsProps {
   languages: LanguageOption[] | undefined;
   afterUserGuidance?: ReactNode;
 }
 
+function HostOnlyAiProviderSelector() {
+  const setUserProviderConfig = useBattleStore((state) => state.setUserProviderConfig);
+  return <AiProviderSelector onConfigChange={setUserProviderConfig} />;
+}
+
 export function StoryOptions({ languages, afterUserGuidance }: StoryOptionsProps) {
-  const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
-  const storyLength = useBattleSelector((state) => state.storyLength);
-  const setStoryLength = useBattleSelector((state) => state.setStoryLength);
-  const customStoryLength = useBattleSelector((state) => state.customStoryLength);
-  const setCustomStoryLength = useBattleSelector((state) => state.setCustomStoryLength);
-  const selectedLanguage = useBattleSelector((state) => state.selectedLanguage);
-  const setSelectedLanguage = useBattleSelector((state) => state.setSelectedLanguage);
-  const settings = useBattleSelector((state) => state.settings);
-  const updateSettings = useBattleSelector((state) => state.updateSettings);
-  const isGenerating = useBattleSelector((state) => state.isGenerating);
-  const setUserProviderConfig = useBattleSelector((state) => state.setUserProviderConfig);
+  const session = useArenaEditorSession();
+  const storyLength = useArenaEditorSelector((state) => state.storyLength);
+  const customStoryLength = useArenaEditorSelector((state) => state.customStoryLength);
+  const selectedLanguage = useArenaEditorSelector((state) => state.selectedLanguage);
+  const userGuidance = useArenaEditorSelector((state) => state.userGuidance);
+  const isGenerating = useArenaEditorSelector((state) => state.busy);
+  const actions = useArenaEditorActions();
 
   return (
     <>
@@ -33,18 +39,20 @@ export function StoryOptions({ languages, afterUserGuidance }: StoryOptionsProps
         disabled={isGenerating}
         enableUserGuidance={appConfig.ENABLE_ARENA_USER_GUIDANCE}
         languages={languages}
-        userGuidance={settings.userGuidance}
-        onUserGuidanceChange={(value) => updateSettings({ userGuidance: value })}
+        userGuidance={userGuidance}
+        onUserGuidanceChange={actions.setUserGuidance}
         afterUserGuidance={afterUserGuidance}
         storyLength={storyLength}
-        onStoryLengthChange={setStoryLength}
+        onStoryLengthChange={actions.setStoryLength}
         customStoryLength={customStoryLength}
-        onCustomStoryLengthChange={setCustomStoryLength}
+        onCustomStoryLengthChange={actions.setCustomStoryLength}
         selectedLanguage={selectedLanguage}
-        onSelectedLanguageChange={setSelectedLanguage}
+        onSelectedLanguageChange={actions.setSelectedLanguage}
       />
 
-      <AiProviderSelector onConfigChange={setUserProviderConfig} />
+      {session.capabilities.canUseHostOnlyGenerationOptions ? (
+        <HostOnlyAiProviderSelector />
+      ) : null}
     </>
   );
 }

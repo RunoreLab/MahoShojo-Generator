@@ -100,6 +100,7 @@ export type ArenaEditorState = Readonly<{
   selectedLanguage: string;
   userGuidance: string;
   historySettings: SharedHistorySettings;
+  busy: boolean;
   roomId: string | null;
   baselineEpoch: string | null;
   baselineRevision: number | null;

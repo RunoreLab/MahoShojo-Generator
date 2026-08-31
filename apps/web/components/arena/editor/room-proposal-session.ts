@@ -28,7 +28,7 @@ export const ROOM_PROPOSAL_ARENA_EDITOR_CAPABILITIES: ArenaEditorCapabilities = 
   canUploadLocalPayload: false,
   canPasteLocalPayload: false,
   canBrowsePrivateCards: false,
-  canAddPresetRefs: true,
+  canAddPresetRefs: false,
   canEditSharedConfig: true,
   canPublishRoomConfig: false,
   canStartGeneration: false,

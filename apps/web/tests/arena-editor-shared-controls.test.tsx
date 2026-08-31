@@ -7,6 +7,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BattleModeControl } from '@/components/arena/editor/presentation/BattleModeControl';
 import { SharedBattleSettingsControl } from '@/components/arena/editor/presentation/SharedBattleSettingsControl';
 import { StoryOptionsControl } from '@/components/arena/editor/presentation/StoryOptionsControl';
+import {
+  ArenaEditorSessionProvider,
+  createRoomProposalArenaEditorSession,
+} from '@/components/arena/editor';
+import { BattleModeSwitcher } from '@/components/arena/components/BattleModeSwitcher';
+import { StoryOptions } from '@/components/arena/components/StoryOptions';
+import { useBattleStore } from '@/components/arena/stores/useBattleStore';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -88,5 +95,43 @@ describe('Arena editor shared controlled presentations', () => {
     expect(container.textContent).toContain('叙事历史（战报正文）');
     expect(container.textContent).not.toContain('AI 提供商');
     expect(container.textContent).not.toContain('战报卡片宽度');
+  });
+
+  it('真实 wrapper 通过 Context 修改 detached proposal 而不污染 single store', async () => {
+    useBattleStore.setState({ battleMode: 'classic' });
+    const session = createRoomProposalArenaEditorSession({
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      revision: 1,
+      sharedConfig: {
+        battleMode: 'daily',
+        combatants: [{
+          key: 'data-card:c1',
+          ref: { id: 'c1', kind: 'character', versionToken: 'v1' },
+        }],
+        teams: [],
+        scenario: null,
+        auxScenarios: [],
+        materials: [],
+        userGuidance: '',
+        storyLength: 'default',
+        customStoryLength: null,
+        selectedLanguage: 'zh-CN',
+        historySettings,
+      },
+    });
+    await act(async () => root.render(
+      <ArenaEditorSessionProvider session={session}>
+        <BattleModeSwitcher />
+        <StoryOptions languages={[{ code: 'zh-CN', name: '简体中文' }]} />
+      </ArenaEditorSessionProvider>,
+    ));
+
+    const scenarioButton = [...container.querySelectorAll('button')]
+      .find((button) => button.textContent?.includes('情景模式'));
+    await act(async () => scenarioButton?.click());
+    expect(session.exportSharedConfig().battleMode).toBe('scenario');
+    expect(useBattleStore.getState().battleMode).toBe('classic');
+    expect(container.textContent).not.toContain('AI 提供商');
   });
 });

@@ -115,6 +115,7 @@ describe('Arena editor scoped sessions', () => {
       canUploadLocalPayload: false,
       canPasteLocalPayload: false,
       canBrowsePrivateCards: false,
+      canAddPresetRefs: false,
       canEditSharedConfig: true,
       canStartGeneration: false,
     });
@@ -273,6 +274,10 @@ describe('Arena editor scoped sessions', () => {
 
     session.store.getState().actions.setBattleMode('kizuna');
     expect(useBattleStore.getState().battleMode).toBe('kizuna');
+    expect(session.store.getState()).toMatchObject({
+      dirty: true,
+      workspaceStatus: { kind: 'dirty', reasons: ['shared-config'] },
+    });
 
     session.syncAuthority({
       authority: snapshot({ revision: 4, sharedConfig: config({ battleMode: 'daily' }) }),

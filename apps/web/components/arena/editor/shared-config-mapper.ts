@@ -24,6 +24,7 @@ export type ArenaEditorViewProjection = Readonly<{
   selectedLanguage: string;
   userGuidance: string;
   historySettings: ArenaRoomSharedConfig['historySettings'];
+  busy: boolean;
 }>;
 
 const freezeArray = <T>(input: readonly T[]): readonly T[] => Object.freeze(input);
@@ -114,6 +115,7 @@ export const mapSharedConfigToArenaEditorView = (
     selectedLanguage: config.selectedLanguage,
     userGuidance: config.userGuidance,
     historySettings: Object.freeze({ ...config.historySettings }),
+    busy: false,
   });
 };
 
@@ -253,5 +255,6 @@ export const mapBattleStoreToArenaEditorView = (
       isNarrativeHistoryUnlimited: state.settings.isNarrativeHistoryUnlimited,
       writeNarrativeHistory: state.settings.writeNarrativeHistory,
     }),
+    busy: state.isGenerating,
   });
 };
