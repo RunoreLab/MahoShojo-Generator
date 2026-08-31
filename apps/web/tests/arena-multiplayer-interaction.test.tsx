@@ -221,6 +221,8 @@ describe('Arena multiplayer panel real React interactions', () => {
     const dialog = container.querySelector<HTMLElement>('[role="dialog"][aria-modal="true"]');
     expect(dialog?.textContent).toContain('正在创建房间…');
     expect(dialog?.querySelector('[role="status"]')).not.toBeNull();
+    expect([...container.querySelectorAll('[role="status"]')]
+      .filter((status) => status.textContent?.includes('正在创建房间…'))).toHaveLength(1);
   });
 
   it('真实输入与点击连接 discover/join controller action', async () => {
