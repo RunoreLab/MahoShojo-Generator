@@ -1,30 +1,103 @@
-import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { lstatSync, readFileSync, realpathSync, writeSync } from 'node:fs';
 import path from 'node:path';
 
-const repositoryRoot = path.resolve(import.meta.dirname, '..');
-const manifestPath = path.join(repositoryRoot, 'config/arena-production-activation-gate.json');
+const repositoryRoot = process.cwd();
+const manifestRelativePath = 'config/arena-production-activation-gate.json';
+const manifestPath = path.join(repositoryRoot, manifestRelativePath);
 const args = process.argv.slice(2);
-const requireApproved = args.includes('--require-approved');
-const commitFlagIndex = args.indexOf('--commit');
-const commit = commitFlagIndex >= 0 ? args[commitFlagIndex + 1] : undefined;
-const knownArgs = new Set(['--require-approved', '--commit']);
+
+let requireApproved = false;
+let printSourceDigest = false;
+let commit;
+
+const exitWithError = (message, status = 2) => {
+  writeSync(2, `[arena-production-activation] ${message}\n`);
+  process.exit(status);
+};
 
 for (let index = 0; index < args.length; index += 1) {
   const arg = args[index];
-  if (!arg || knownArgs.has(arg)) {
-    if (arg === '--commit') index += 1;
+  if (arg === '--require-approved') {
+    requireApproved = true;
     continue;
   }
-  console.error(`[arena-production-activation] 未知参数：${arg}`);
-  process.exit(2);
+  if (arg === '--print-source-digest') {
+    printSourceDigest = true;
+    continue;
+  }
+  if (arg === '--commit') {
+    const value = args[index + 1];
+    if (!value || value.startsWith('--')) {
+      exitWithError('--commit 缺少 commit 参数');
+    }
+    if (commit !== undefined) {
+      exitWithError('--commit 不得重复');
+    }
+    commit = value;
+    index += 1;
+    continue;
+  }
+  exitWithError(`未知参数：${arg}`);
+}
+
+if (requireApproved && printSourceDigest) {
+  exitWithError('--require-approved 与 --print-source-digest 不得同时使用');
+}
+
+const runGit = (gitArgs) => spawnSync('git', gitArgs, {
+  cwd: repositoryRoot,
+  encoding: 'buffer',
+  maxBuffer: 32 * 1024 * 1024,
+});
+
+const resolveCommit = (reference) => {
+  const result = runGit(['rev-parse', '--verify', `${reference}^{commit}`]);
+  if (result.status !== 0) {
+    throw new Error(`无法解析 commit：${reference}`);
+  }
+  const resolved = result.stdout.toString('utf8').trim();
+  if (!/^[0-9a-f]{40}$/u.test(resolved)) {
+    throw new Error(`commit 不是 40 位 Git object id：${reference}`);
+  }
+  return resolved;
+};
+
+const calculateSourceDigest = (resolvedCommit) => {
+  const result = runGit(['ls-tree', '-r', '-z', '--full-tree', resolvedCommit]);
+  if (result.status !== 0) {
+    throw new Error(`无法读取 commit 源码树：${resolvedCommit}`);
+  }
+
+  const hash = createHash('sha256');
+  hash.update('arena-production-activation-source-v1\0');
+  for (const record of result.stdout.subarray(0, -1).toString('utf8').split('\0')) {
+    const tabIndex = record.indexOf('\t');
+    if (tabIndex < 0) continue;
+    const filePath = record.slice(tabIndex + 1);
+    if (filePath === manifestRelativePath) continue;
+    hash.update(record);
+    hash.update('\0');
+  }
+  return `sha256:${hash.digest('hex')}`;
+};
+
+if (printSourceDigest) {
+  try {
+    const resolvedCommit = resolveCommit(commit ?? 'HEAD');
+    writeSync(1, `${calculateSourceDigest(resolvedCommit)}\n`);
+    process.exit(0);
+  } catch (error) {
+    exitWithError(error instanceof Error ? error.message : String(error), 1);
+  }
 }
 
 let manifest;
 try {
   manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
 } catch (error) {
-  console.error(`[arena-production-activation] manifest 无法读取：${error instanceof Error ? error.message : String(error)}`);
-  process.exit(1);
+  exitWithError(`manifest 无法读取：${error instanceof Error ? error.message : String(error)}`, 1);
 }
 
 const failures = [];
@@ -35,18 +108,87 @@ if (!['READY', 'APPROVED'].includes(manifest?.reviewStatus)) {
 }
 
 const approved = manifest?.reviewStatus === 'APPROVED';
+let reviewedCommit;
+let currentCommit;
+
 if (approved) {
   if (typeof manifest.reviewedCommit !== 'string' || !/^[0-9a-f]{40}$/u.test(manifest.reviewedCommit)) {
     failures.push('APPROVED 必须绑定 40 位 reviewedCommit');
+  } else {
+    try {
+      reviewedCommit = resolveCommit(manifest.reviewedCommit);
+    } catch (error) {
+      failures.push(error instanceof Error ? error.message : String(error));
+    }
+  }
+  if (
+    typeof manifest.reviewedSourceDigest !== 'string'
+    || !/^sha256:[0-9a-f]{64}$/u.test(manifest.reviewedSourceDigest)
+  ) {
+    failures.push('APPROVED 必须绑定 reviewedSourceDigest');
   }
   if (typeof manifest.approvedAt !== 'string' || Number.isNaN(Date.parse(manifest.approvedAt))) {
     failures.push('APPROVED 必须记录 approvedAt');
   }
-  if (typeof manifest.approvalEvidence !== 'string' || !manifest.approvalEvidence.startsWith('docs/')) {
+
+  const evidence = manifest.approvalEvidence;
+  if (typeof evidence !== 'string' || path.posix.normalize(evidence) !== evidence || !evidence.startsWith('docs/')) {
     failures.push('APPROVED 必须绑定 docs/ 下的独立审查证据');
+  } else {
+    const docsRoot = path.join(repositoryRoot, 'docs');
+    const evidencePath = path.resolve(repositoryRoot, evidence);
+    try {
+      const stat = lstatSync(evidencePath);
+      const realDocsRoot = realpathSync(docsRoot);
+      const realEvidencePath = realpathSync(evidencePath);
+      if (
+        !stat.isFile()
+        || stat.isSymbolicLink()
+        || !realEvidencePath.startsWith(`${realDocsRoot}${path.sep}`)
+      ) {
+        failures.push('approvalEvidence 必须是 docs/ 下的普通文件且不得为符号链接');
+      }
+      if (!readFileSync(evidencePath, 'utf8').includes('GMR-11')) {
+        failures.push('approvalEvidence 必须明确记录 GMR-11 独立审查');
+      }
+    } catch (error) {
+      failures.push(`approvalEvidence 无法读取：${error instanceof Error ? error.message : String(error)}`);
+    }
+
+    const trackedEvidence = runGit(['ls-files', '--error-unmatch', '--', evidence]);
+    if (trackedEvidence.status !== 0) failures.push('approvalEvidence 必须受 Git 跟踪');
+    if (reviewedCommit) {
+      const reviewedEvidence = runGit(['cat-file', '-e', `${reviewedCommit}:${evidence}`]);
+      if (reviewedEvidence.status !== 0) failures.push('approvalEvidence 必须存在于 reviewedCommit');
+    }
+  }
+
+  try {
+    currentCommit = resolveCommit('HEAD');
+  } catch (error) {
+    failures.push(error instanceof Error ? error.message : String(error));
+  }
+
+  if (reviewedCommit && currentCommit) {
+    const ancestry = runGit(['merge-base', '--is-ancestor', reviewedCommit, currentCommit]);
+    if (ancestry.status !== 0) failures.push('reviewedCommit 必须是当前 release commit 的祖先');
+
+    try {
+      const reviewedDigest = calculateSourceDigest(reviewedCommit);
+      const currentDigest = calculateSourceDigest(currentCommit);
+      if (manifest.reviewedSourceDigest !== reviewedDigest) {
+        failures.push('reviewedSourceDigest 与 reviewedCommit 源码树摘要不一致');
+      }
+      if (manifest.reviewedSourceDigest !== currentDigest) {
+        failures.push('当前 release commit 源码树摘要与独立审查结果不一致');
+      }
+    } catch (error) {
+      failures.push(error instanceof Error ? error.message : String(error));
+    }
   }
 } else if (
   manifest?.reviewedCommit !== null
+  || manifest?.reviewedSourceDigest !== null
   || manifest?.approvedAt !== null
   || manifest?.approvalEvidence !== null
 ) {
@@ -57,20 +199,26 @@ if (requireApproved) {
   if (!approved) failures.push('GMR-11 独立审查未批准，禁止启用 production Arena multiplayer');
   if (typeof commit !== 'string' || !/^[0-9a-f]{40}$/u.test(commit)) {
     failures.push('--require-approved 必须提供 40 位 --commit');
-  } else if (approved && manifest.reviewedCommit !== commit) {
-    failures.push('当前 release commit 与 GMR-11 reviewedCommit 不一致');
+  } else {
+    try {
+      const releaseCommit = resolveCommit(commit);
+      const head = currentCommit ?? resolveCommit('HEAD');
+      if (releaseCommit !== head) failures.push('--commit 必须精确绑定当前 checkout HEAD');
+    } catch (error) {
+      failures.push(error instanceof Error ? error.message : String(error));
+    }
   }
 }
 
 if (failures.length > 0) {
-  for (const failure of failures) console.error(`[arena-production-activation] ${failure}`);
-  process.exit(1);
+  writeSync(2, failures.map((failure) => `[arena-production-activation] ${failure}\n`).join(''));
+  process.exitCode = 1;
+} else {
+  writeSync(1, `${JSON.stringify({
+    gate: 'ARENA_PRODUCTION_ACTIVATION_GATE',
+    goal: manifest.goal,
+    reviewStatus: manifest.reviewStatus,
+    mode: requireApproved ? 'require-approved' : 'validate',
+    status: 'PASS',
+  })}\n`);
 }
-
-console.log(JSON.stringify({
-  gate: 'ARENA_PRODUCTION_ACTIVATION_GATE',
-  goal: manifest.goal,
-  reviewStatus: manifest.reviewStatus,
-  mode: requireApproved ? 'require-approved' : 'validate',
-  status: 'PASS',
-}));

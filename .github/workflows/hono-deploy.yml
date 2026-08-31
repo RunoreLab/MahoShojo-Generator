@@ -43,6 +43,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
@@ -66,7 +68,7 @@ jobs:
 
       - name: Require GMR-11 production activation approval
         if: github.event_name == 'workflow_dispatch' && inputs.arena_multiplayer == 'enabled'
-        run: pnpm run check:arena-production-activation -- --require-approved --commit "$GITHUB_SHA"
+        run: pnpm run check:arena-production-activation --require-approved --commit "$GITHUB_SHA"
 
       - name: Verify Hono authentication and runtime
         run: |
