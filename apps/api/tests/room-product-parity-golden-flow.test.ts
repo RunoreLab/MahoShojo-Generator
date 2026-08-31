@@ -1,6 +1,20 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import type { ArenaRoomGenerationPort } from '#/arena-generation/room-generation-port';
+import {
+  createArenaGenerationService,
+  type ArenaGenerationExecutor,
+  type ArenaGenerationTerminalStore,
+} from '@mahoshojo/hosted-api/arena-generation/service';
+import {
+  createMemoryGenerationReplayStore,
+} from '@mahoshojo/hosted-api/arena-generation/memory-replay-store';
+import {
+  canonicalizeNodeArenaGenerationSemanticPayload,
+  deriveArenaGenerationId,
+  hashArenaGenerationPayload,
+} from '@mahoshojo/hosted-runtime/arena-generation';
+
+import { createArenaRoomGenerationPort } from '#/arena-generation/room-generation-port';
 import {
   createRoomActorRegistry,
   type RoomActorCheckpointStore,
@@ -12,7 +26,6 @@ import {
 import { createArenaRoomGenerationService } from '#/arena-room/room-generation-service';
 import { createArenaRoomMembershipService } from '#/arena-room/room-membership-service';
 import { createArenaRoomProposalService } from '#/arena-room/room-proposal-service';
-import type { RoomGenerationPublisher } from '#/arena-room/room-generation-publisher';
 import {
   checkpointPredecessorOf,
   consumeArenaRoomCheckpointCommit,
@@ -226,37 +239,104 @@ describe('GMR-10P-G product parity golden flow', () => {
         'material-1', 'material', 'material-v1', '城防图', { title: '城防图', content: '素材正文' },
       )],
     ]);
+    const resolveOnline = vi.fn(async ({ ref }: {
+      ref: { id: string; kind: 'character' | 'scenario' | 'material'; versionToken: string };
+    }) => canonicalContent.get(ref.id)!);
     const materializer = createArenaRoomGenerationMaterializer({
       content: {
-        resolveOnline: vi.fn(async ({ ref }) => canonicalContent.get(ref.id)!),
+        resolveOnline,
         resolvePreset: vi.fn(async () => { throw new Error('golden flow 不使用 preset'); }),
       },
     });
-    const providerStart = vi.fn<ArenaRoomGenerationPort['startFromHostRequest']>(async () => ({
-      kind: 'subscribed' as const,
-      subscription: {
-        generationId: 'generation-golden',
-        generationRequestId: 'request-golden',
-        events: new ReadableStream({ start(controller) { controller.close(); } }),
+    const replayStore = createMemoryGenerationReplayStore({
+      now: () => Date.parse(timestamps[4]!),
+    });
+    const roomSafeResult = {
+      version: 1 as const,
+      format: 'stream-markdown' as const,
+      mode: 'scenario' as const,
+      scenarioDisplayName: '守城战',
+      sharedGuidance: '以协作守城为主线',
+      characterGuidances: [
+        {
+          combatantKey: 'data-card:character-1',
+          displayName: '角色一',
+          guidance: '守住北门',
+        },
+        {
+          combatantKey: 'data-card:character-2',
+          displayName: '角色二',
+          guidance: '支援前线',
+        },
+      ],
+      language: 'ja-JP',
+      storyLength: 'standard',
+      report: { headline: '守护队守住北门', winner: '守护队' },
+      combatantUpdates: [{
+        combatantKey: 'data-card:character-1',
+        displayName: '角色一',
+        impact: '守住北门并保护队友',
+      }],
+    };
+    let releaseProvider!: () => void;
+    let markProviderStarted!: () => void;
+    const providerGate = new Promise<void>((resolve) => { releaseProvider = resolve; });
+    const providerStarted = new Promise<void>((resolve) => { markProviderStarted = resolve; });
+    const hostedExecute = vi.fn<ArenaGenerationExecutor['execute']>(async (input) => {
+      markProviderStarted();
+      await input.emit({ type: 'markdown', data: { chunk: '# 守护队守住北门\n' } });
+      await providerGate;
+      return { status: 'completed', resultRef: 'r2:generation-golden' };
+    });
+    const terminalStore = {
+      async readOwnedTerminal({ generationId, actorKey }) {
+        const state = await replayStore.readState({ generationId, actorKey });
+        if (state?.status !== 'completed' || state.terminal?.status !== 'completed') return null;
+        return {
+          generationId: state.generationId,
+          generationRequestId: state.generationRequestId,
+          status: 'completed' as const,
+          updatedAt: state.updatedAt,
+          resultRef: state.terminal.resultRef ?? null,
+          markdown: state.snapshot?.markdown ?? '',
+          reasoning: state.snapshot?.reasoning ?? '',
+          payloadHash: state.payloadHash,
+          contentAvailable: true,
+          roomSafeResult,
+        };
       },
-    }));
-    const generation = {
-      cancelOwned: vi.fn(async () => ({ kind: 'accepted' as const, cancelReason: 'user' as const })),
-      deriveGenerationId: vi.fn(async () => 'generation-golden'),
-      hashSemanticPayload: vi.fn(async () => `sha256:${'a'.repeat(64)}`),
-      startFromHostRequest: providerStart,
-      readOwnedProjection: vi.fn(async () => ({ kind: 'not-found' as const })),
-      resumeOwnedSubscription: vi.fn(async () => ({ kind: 'not-found' as const })),
-    } satisfies ArenaRoomGenerationPort;
-    const publisher = {
-      attach: vi.fn(() => new Promise<never>(() => undefined)),
-      getProgress: vi.fn(() => ({ markdown: '', nextChunkSeq: 0 })),
-    } satisfies RoomGenerationPublisher;
+    } satisfies ArenaGenerationTerminalStore;
+    const hostedGeneration = createArenaGenerationService({
+      store: replayStore,
+      terminalStore,
+      executor: { execute: hostedExecute },
+      resolveActor: async () => ({ actorKey: `pvp-room:${host.roomId}` }),
+      deriveGenerationId: deriveArenaGenerationId,
+      hashPayload: hashArenaGenerationPayload,
+      now: () => new Date(timestamps[4]!),
+      replayPollMs: 1,
+      deltaFlushIntervalMs: 1,
+      deltaFlushBytes: 1,
+    });
+    const generation = createArenaRoomGenerationPort({
+      generationService: hostedGeneration,
+      pvpAuthority: { sign: async () => 'golden-pvp-signature' },
+      internalGuidanceAuthority: { sign: async () => 'golden-guidance-signature' },
+      deriveGenerationId: deriveArenaGenerationId,
+      canonicalizeSemanticPayload: (input) => canonicalizeNodeArenaGenerationSemanticPayload({
+        payload: input.payload,
+        signatures: {
+          generateSignature: async () => null,
+          verifySignature: async () => false,
+        },
+        trustedInternalGuidance: input.trustedInternalGuidance,
+        trustedPvpContext: input.trustedPvpContext,
+      }),
+    });
     const generations = createArenaRoomGenerationService({
       memberships,
       materializer,
       generation,
-      createPublisher: () => publisher,
       now: () => timestamps[4]!,
     });
     const request = {
@@ -276,6 +356,7 @@ describe('GMR-10P-G product parity golden flow', () => {
       request,
       sourceRequest: new Request('https://api.example.test/arena-room-generation'),
     });
+    await providerStarted;
     await generations.start({
       roomId: host.roomId,
       accountUserId: 101,
@@ -283,9 +364,15 @@ describe('GMR-10P-G product parity golden flow', () => {
       sourceRequest: new Request('https://api.example.test/arena-room-generation'),
     });
 
-    expect(providerStart).toHaveBeenCalledTimes(1);
-    expect(providerStart).toHaveBeenCalledWith(expect.objectContaining({
-      roomId: host.roomId,
+    expect(hostedExecute).toHaveBeenCalledTimes(1);
+    expect(resolveOnline.mock.calls.map(([input]) => input.ref)).toEqual([
+      { id: 'character-1', kind: 'character', versionToken: 'character-v1' },
+      { id: 'character-2', kind: 'character', versionToken: 'character-v2' },
+      { id: 'scenario-1', kind: 'scenario', versionToken: 'scenario-v1' },
+      { id: 'material-1', kind: 'material', versionToken: 'material-v1' },
+    ]);
+    expect(hostedExecute).toHaveBeenCalledWith(expect.objectContaining({
+      actorKey: `pvp-room:${host.roomId}`,
       generationRequestId: 'request-golden',
       payload: expect.objectContaining({
         mode: 'scenario',
@@ -300,18 +387,62 @@ describe('GMR-10P-G product parity golden flow', () => {
         ],
         teamNames: { 1: '守护队' },
         customProvider: { apiKey: 'provider-secret-golden-canary' },
-      }),
-      multiplayerSnapshot: expect.objectContaining({
-        configRevision: 1,
-        sharedConfig: acceptedConfig(),
-        participantUserIds: [101, 202],
+        multiplayerGenerationSnapshot: expect.objectContaining({
+          configRevision: 1,
+          sharedConfig: acceptedConfig(),
+          participantUserIds: [101, 202],
+        }),
       }),
     }));
-    expect(store.state?.snapshot.activeGeneration).toMatchObject({
-      generationId: 'generation-golden',
-      configRevision: 1,
-      state: 'starting',
+    releaseProvider();
+    const generationId = await generation.deriveGenerationId({
+      roomId: host.roomId,
+      generationRequestId: 'request-golden',
     });
+    const completedProjection = await vi.waitFor(async () => {
+      const result = await generation.readOwnedProjection({ roomId: host.roomId, generationId });
+      expect(result).toMatchObject({
+        kind: 'found',
+        projection: {
+          status: 'completed',
+          markdown: '# 守护队守住北门\n',
+          finalAuthoritative: true,
+          resultAvailable: true,
+          generationRecordId: generationId,
+          roomSafeResult,
+        },
+      });
+      return result;
+    });
+    expect(completedProjection).toMatchObject({ kind: 'found' });
+
+    const hostView = await generations.read({
+      roomId: host.roomId,
+      generationId,
+      accountUserId: 101,
+    });
+    const memberView = await generations.read({
+      roomId: host.roomId,
+      generationId,
+      accountUserId: 202,
+    });
+    expect(hostView).toMatchObject({
+      status: 'completed',
+      markdown: '# 守护队守住北门\n',
+      finalAuthoritative: true,
+      generationRecordId: generationId,
+      result: roomSafeResult,
+    });
+    expect(memberView).toEqual(hostView);
+    expect(store.state?.snapshot.activeGeneration).toMatchObject({
+      generationId,
+      configRevision: 1,
+      state: 'completed',
+    });
+    expect(store.state?.generationLedger).toContainEqual(expect.objectContaining({
+      generationRecordId: generationId,
+      mirror: expect.objectContaining({ generationId, state: 'completed' }),
+    }));
     expect(JSON.stringify(store.state)).not.toContain('provider-secret-golden-canary');
   });
 });

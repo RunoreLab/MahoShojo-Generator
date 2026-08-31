@@ -5,6 +5,7 @@ import {
   type ArenaGenerationExecutor,
   type GenerationReplayStore,
 } from '@mahoshojo/hosted-api/arena-generation/service';
+import { ArenaRoomGenerationResultSchema } from '@mahoshojo/contracts/arena-room';
 import {
   canonicalizeNodeArenaGenerationSemanticPayload,
   createArenaGenerationFinalizer,
@@ -129,6 +130,18 @@ const createVerifierD1Adapter = (): NodeDataD1Client => ({
           generationRows.set(generationId, {
             id: generationId,
             status: parameters[4],
+            mode: parameters[8],
+            scenario_title: parameters[10],
+            language: parameters[13],
+            story_length: parameters[14],
+            ai_model: parameters[32],
+            headline: parameters[33],
+            winner: parameters[34],
+            prompt_tokens: parameters[37],
+            completion_tokens: parameters[38],
+            total_tokens: parameters[39],
+            cached_tokens: parameters[40],
+            reasoning_tokens: parameters[41],
             updated_at: parameters.at(-1),
             output_preview: parameters[extraIndex - 1],
             extra_json: parameters[extraIndex],
@@ -208,6 +221,15 @@ const readAll = async <T>(stream: ReadableStream<T>): Promise<T[]> => {
   } finally {
     reader.releaseLock();
   }
+};
+
+const hasVerifierRoomSafeResult = (value: unknown): boolean => {
+  const parsed = ArenaRoomGenerationResultSchema.safeParse(value);
+  return parsed.success
+    && parsed.data.mode === 'classic'
+    && Boolean(parsed.data.combatantUpdates?.some((update) => (
+      update.combatantKey === 'data-card:character-1'
+    )));
 };
 
 const waitFor = async <T>(
@@ -596,6 +618,7 @@ try {
     terminal?.markdown !== expectedMarkdown
     || terminal.resultRef === null
     || terminal.contentAvailable !== true
+    || !hasVerifierRoomSafeResult(terminal.roomSafeResult)
     || await terminalStore.readOwnedTerminal({ generationId, actorKey: `${actorKey}:other` }) !== null
   ) throw new Error('ROOM_GENERATION_DURABLE_D1_R2_AUTHORITY_INVALID');
 
@@ -635,6 +658,10 @@ try {
     || recoveredView.status !== 'completed'
     || recoveredView.markdown !== expectedMarkdown
     || recoveredView.generationRecordId !== generationId
+    || recoveredView.result?.mode !== 'classic'
+    || !recoveredView.result.combatantUpdates?.some((update) => (
+      update.combatantKey === 'data-card:character-1'
+    ))
     || providerStarts !== 1
   ) throw new Error('ROOM_GENERATION_DURABLE_PROCESS_RECOVERY_INVALID');
 
