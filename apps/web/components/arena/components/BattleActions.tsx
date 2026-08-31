@@ -16,6 +16,7 @@ import { NarrativeHistoryModal } from './NarrativeHistoryModal';
 import { useNarrativeHistoryStore } from '../stores/useNarrativeHistoryStore';
 import { resolveArenaRoomGenerationAction } from '../multiplayer/generation-bridge';
 import { useArenaRoomContext } from '../multiplayer/useArenaRoom';
+import { ArenaRoomGenerationPreflightDialog } from '../multiplayer/ArenaRoomGenerationPreflightDialog';
 
 const normalizeArenaHistoryReadLimitForEstimate = (value: unknown): number | null => {
   if (value === null) return null;
@@ -97,6 +98,8 @@ export function BattleActions({ showAdvancedUtilities = true }: { showAdvancedUt
     providerCooldownMode,
     otherRemainingTime,
     streamSoftTimeoutWarning,
+    arenaRoomGenerationPreflight,
+    resolveArenaRoomGenerationPreflight,
   } = useBattleEngine();
   const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
   const combatants = useBattleSelector((state) => state.combatants);
@@ -243,6 +246,13 @@ export function BattleActions({ showAdvancedUtilities = true }: { showAdvancedUt
 
   return (
     <>
+      <ArenaRoomGenerationPreflightDialog
+        isOpen={arenaRoomGenerationPreflight !== null}
+        reasons={arenaRoomGenerationPreflight?.reasons ?? []}
+        canUseRoom={arenaRoomGenerationPreflight?.canUseRoom ?? false}
+        busy={arenaRoomGenerationPreflight?.busy ?? false}
+        onChoice={resolveArenaRoomGenerationPreflight}
+      />
       <div className="flex items-center justify-center gap-2 flex-wrap">
         <button
           onClick={() => handleGenerate()}

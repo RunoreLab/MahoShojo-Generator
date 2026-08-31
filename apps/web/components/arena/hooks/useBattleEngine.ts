@@ -1,8 +1,9 @@
 'use client';
 
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { defineArenaGenerationRequest } from '@mahoshojo/multiplayer-core';
+import { ArenaRoomHostRuntimeGenerationSchema } from '@mahoshojo/contracts/arena-room';
 
 import type { NewsReport } from '@/components/BattleReportCard';
 import { persistArrestedBackup, type ArrestedBackupDraftItem, type ArrestedBackupTriggerSource } from '@/lib/arrested-backup';
@@ -58,7 +59,13 @@ import {
   openArenaGenerationStream,
   type ArenaGenerationConnectionState,
 } from '@/lib/arena/resumable-generation-client';
-import { buildArenaRoomSharedConfigFromBattleState } from '@/lib/arena-room/shared-config';
+import { buildArenaRoomHostWorkspaceBundleFromBattleState } from '@/lib/arena-room/shared-config';
+import {
+  areArenaRoomSharedConfigsEqual,
+  arenaRoomHostWorkspaceAuthorityFromSession,
+  type ArenaRoomHostWorkspaceComparison,
+  type ArenaRoomHostWorkspaceDirtyReason,
+} from '@/lib/arena-room/host-workspace';
 import {
   dispatchArenaRoomGenerationRetry,
   dispatchArenaRoomGenerationStart,
@@ -67,6 +74,14 @@ import {
 import { useArenaRoomContext } from '../multiplayer/useArenaRoom';
 
 const sanitizeTextByShieldWords = (text: string): string => applyShieldWords(text).filteredText;
+
+export type ArenaRoomGenerationPreflightChoice = 'cancel' | 'publish' | 'use-room';
+
+export type ArenaRoomGenerationPreflightPrompt = Readonly<{
+  reasons: readonly ArenaRoomHostWorkspaceDirtyReason[];
+  canUseRoom: boolean;
+  busy: boolean;
+}>;
 
 let sharedGenerationAbortController: AbortController | null = null;
 
@@ -473,6 +488,42 @@ export const useBattleEngine = () => {
   const isRedoingUpdates = useBattleSelector((state) => state.isRedoingUpdates);
   const { handleResolveRandomPlaceholders } = useBattleActions();
   const arenaRoomRuntime = useArenaRoomContext();
+  const [arenaRoomGenerationPreflight, setArenaRoomGenerationPreflight] = useState<ArenaRoomGenerationPreflightPrompt | null>(null);
+  const pendingArenaRoomGenerationPreflight = useRef<{
+    resolve: (choice: ArenaRoomGenerationPreflightChoice) => void;
+  } | null>(null);
+
+  const requestArenaRoomGenerationPreflight = useCallback((
+    comparison: Extract<ArenaRoomHostWorkspaceComparison, { kind: 'dirty' }>,
+  ): Promise<ArenaRoomGenerationPreflightChoice> => {
+    pendingArenaRoomGenerationPreflight.current?.resolve('cancel');
+    return new Promise((resolve) => {
+      pendingArenaRoomGenerationPreflight.current = { resolve };
+      setArenaRoomGenerationPreflight({
+        reasons: comparison.reasons,
+        canUseRoom: comparison.room !== null,
+        busy: false,
+      });
+    });
+  }, []);
+
+  const resolveArenaRoomGenerationPreflight = useCallback((choice: ArenaRoomGenerationPreflightChoice) => {
+    const pending = pendingArenaRoomGenerationPreflight.current;
+    if (!pending) return;
+    pendingArenaRoomGenerationPreflight.current = null;
+    if (choice === 'publish') {
+      setArenaRoomGenerationPreflight((current) => current ? { ...current, busy: true } : null);
+    } else {
+      setArenaRoomGenerationPreflight(null);
+    }
+    pending.resolve(choice);
+  }, []);
+
+  useEffect(() => () => {
+    const pending = pendingArenaRoomGenerationPreflight.current;
+    pendingArenaRoomGenerationPreflight.current = null;
+    pending?.resolve('cancel');
+  }, []);
 
   const providerCooldownConfig = resolveArenaProviderCooldownConfig(userProviderConfig);
   const { currentMode: providerCooldownMode } = providerCooldownConfig;
@@ -598,9 +649,11 @@ export const useBattleEngine = () => {
         materials.length > 0 ? JSON.stringify(materials.map((item) => item.content)) : '',
       ];
 
-      for (const payload of sensitiveTargets) {
-        if (payload && (await checkSensitivePayload(payload, { onRedirect: redirectToArrested }))) {
-          return;
+      if (!roomAction.inRoom) {
+        for (const payload of sensitiveTargets) {
+          if (payload && (await checkSensitivePayload(payload, { onRedirect: redirectToArrested }))) {
+            return;
+          }
         }
       }
 
@@ -665,7 +718,7 @@ export const useBattleEngine = () => {
         }))
         : undefined;
       const customProviderPayload = buildCustomProviderRequestPayload(userProviderConfig);
-      const requestBody = defineArenaGenerationRequest({
+      const requestBody = roomAction.inRoom ? null : defineArenaGenerationRequest({
         generationRequestId,
         combatants: freshCombatants.map((combatant) => ({
           type: combatant.type,
@@ -710,15 +763,93 @@ export const useBattleEngine = () => {
       });
 
       if (roomAction.inRoom && arenaRoomRuntime) {
-        const sharedConfig = await buildArenaRoomSharedConfigFromBattleState(
-          useBattleStore.getState(),
+        const capturedAuthority = arenaRoomHostWorkspaceAuthorityFromSession(
+          arenaRoomRuntime.state.session,
         );
+        if (!capturedAuthority) {
+          throw new Error('当前房间 host 权威已变化，请同步后重试。');
+        }
+        const bundle = await buildArenaRoomHostWorkspaceBundleFromBattleState(useBattleStore.getState());
+        const preflightState = arenaRoomRuntime.controller.getSnapshot();
+        let authority = arenaRoomHostWorkspaceAuthorityFromSession(preflightState.session);
+        if (
+          !authority
+          || authority.roomId !== capturedAuthority.roomId
+          || authority.roomEpoch !== capturedAuthority.roomEpoch
+          || authority.ownerUserId !== capturedAuthority.ownerUserId
+          || authority.revision !== capturedAuthority.revision
+        ) {
+          throw new Error('构建多人生成输入时房间权威已变化，请确认最新状态后重试。');
+        }
+
+        const comparison = arenaRoomRuntime.hostWorkspace.compare(authority, bundle);
+        let startInputs = comparison.kind === 'clean' ? comparison.start : null;
+        if (comparison.kind === 'dirty') {
+          const choice = await requestArenaRoomGenerationPreflight(comparison);
+          if (choice === 'cancel') return;
+          if (choice === 'use-room') {
+            if (!comparison.room) {
+              throw new Error('缺少完整的 host-local 发布基线，无法按当前房间配置启动。');
+            }
+            startInputs = comparison.room;
+          } else {
+            await arenaRoomRuntime.controller.publishConfig({
+              expectedRoomEpoch: authority.roomEpoch,
+              expectedRevision: authority.revision,
+              sharedConfig: comparison.current.sharedConfig,
+            });
+            const publishedState = arenaRoomRuntime.controller.getSnapshot();
+            const publishedAuthority = arenaRoomHostWorkspaceAuthorityFromSession(publishedState.session);
+            if (
+              publishedState.configPublishPending
+              || publishedState.configPublishResultUnknown
+              || !publishedAuthority
+              || publishedAuthority.roomId !== authority.roomId
+              || publishedAuthority.roomEpoch !== authority.roomEpoch
+              || publishedAuthority.ownerUserId !== authority.ownerUserId
+              || !areArenaRoomSharedConfigsEqual(
+                publishedAuthority.sharedConfig,
+                comparison.current.sharedConfig,
+              )
+            ) {
+              throw new Error('房间配置发布结果无法确认，请先同步房间权威状态。');
+            }
+            arenaRoomRuntime.hostWorkspace.capturePublished(publishedAuthority, bundle);
+            authority = publishedAuthority;
+            startInputs = comparison.current;
+          }
+        }
+        if (!startInputs) throw new Error('无法解析多人生成所需的权威配置。');
+
+        const selectedSensitiveTargets = [
+          JSON.stringify(startInputs.sharedConfig),
+          ...startInputs.hostLocalPayloads.map((payload) => JSON.stringify(payload.payload)),
+          narrativeHistoryForRequest ? JSON.stringify(narrativeHistoryForRequest) : '',
+          adjudicationEvents.length > 0 ? JSON.stringify(adjudicationEvents) : '',
+          questionnaires ? JSON.stringify(questionnaires) : '',
+        ];
+        for (const payload of selectedSensitiveTargets) {
+          if (payload && await checkSensitivePayload(payload, { onRedirect: redirectToArrested })) {
+            return;
+          }
+        }
+
+        const generation = ArenaRoomHostRuntimeGenerationSchema.parse({
+          customProvider: customProviderPayload,
+          isDowngrade: false,
+          narrativeHistory: narrativeHistoryForRequest,
+          adjudicationEvents,
+          questionnaireSelections,
+          questionnaires,
+        });
+        const dispatchState = arenaRoomRuntime.controller.getSnapshot();
         const outcome = await dispatchArenaRoomGenerationStart({
           controller: arenaRoomRuntime.controller,
-          state: arenaRoomRuntime.state,
-          sharedConfig,
+          state: dispatchState,
+          sharedConfig: startInputs.sharedConfig,
+          hostLocalPayloads: startInputs.hostLocalPayloads,
           generationRequestId,
-          generation: requestBody,
+          generation,
         });
         if (outcome !== 'submitted') {
           throw new Error(
@@ -729,6 +860,7 @@ export const useBattleEngine = () => {
         }
         return;
       }
+      if (!requestBody) throw new Error('无法构造单人生成请求。');
 
       const authHeader = await authStorage.getAuthHeader();
       const requestHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -1749,6 +1881,7 @@ export const useBattleEngine = () => {
 	      }
 	    } finally {
         sharedGenerationAbortController = null;
+	      setArenaRoomGenerationPreflight(null);
 	      setIsGenerating(false);
 	      setIsStreaming(false);
 	      setStreamSoftTimeoutWarning(null);
@@ -1794,6 +1927,7 @@ export const useBattleEngine = () => {
     setCombatants,
     handleResolveRandomPlaceholders,
     arenaRoomRuntime,
+    requestArenaRoomGenerationPreflight,
     redirectToArrested,
     startCooldown,
     updateFromMarkdown,
@@ -2030,5 +2164,7 @@ export const useBattleEngine = () => {
     providerCooldownMode,
     otherRemainingTime,
     streamSoftTimeoutWarning,
+    arenaRoomGenerationPreflight,
+    resolveArenaRoomGenerationPreflight,
   };
 };

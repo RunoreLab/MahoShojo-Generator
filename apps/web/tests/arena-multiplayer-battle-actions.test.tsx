@@ -11,6 +11,12 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 const mocks = vi.hoisted(() => ({
   handleGenerate: vi.fn(async () => {}),
   stopGeneration: vi.fn(),
+  resolvePreflight: vi.fn(),
+  preflight: null as null | {
+    reasons: readonly ('baseline-missing' | 'host-local-content' | 'shared-config')[];
+    canUseRoom: boolean;
+    busy: boolean;
+  },
   roomState: null as ArenaRoomControllerState | null,
 }));
 
@@ -24,6 +30,8 @@ vi.mock('@/components/arena/hooks/useBattleEngine', () => ({
     providerCooldownMode: 'system',
     otherRemainingTime: 0,
     streamSoftTimeoutWarning: null,
+    arenaRoomGenerationPreflight: mocks.preflight,
+    resolveArenaRoomGenerationPreflight: mocks.resolvePreflight,
   }),
 }));
 
@@ -135,6 +143,8 @@ let container: HTMLDivElement;
 
 beforeEach(() => {
   mocks.handleGenerate.mockClear();
+  mocks.resolvePreflight.mockClear();
+  mocks.preflight = null;
   mocks.roomState = null;
   container = document.createElement('div');
   document.body.append(container);
@@ -186,5 +196,26 @@ describe('Arena multiplayer BattleActions authority gate', () => {
     button = await render();
     expect(button.disabled).toBe(false);
     expect(button.textContent).toContain('确认并重试同一次启动');
+  });
+
+  it('dirty preflight 只暴露显式发布、沿用房间与取消三个决策', async () => {
+    mocks.roomState = stateFor('host');
+    mocks.preflight = {
+      reasons: ['shared-config', 'host-local-content'],
+      canUseRoom: true,
+      busy: false,
+    };
+    await render();
+
+    const buttons = Array.from(document.body.querySelectorAll<HTMLButtonElement>('button'));
+    const publish = buttons.find((button) => button.textContent?.includes('更新房间配置并开始'));
+    const useRoom = buttons.find((button) => button.textContent?.includes('按当前房间配置开始'));
+    const cancel = buttons.find((button) => button.textContent?.trim() === '取消');
+    expect(publish).toBeTruthy();
+    expect(useRoom).toBeTruthy();
+    expect(cancel).toBeTruthy();
+
+    await act(async () => useRoom!.click());
+    expect(mocks.resolvePreflight).toHaveBeenCalledWith('use-room');
   });
 });

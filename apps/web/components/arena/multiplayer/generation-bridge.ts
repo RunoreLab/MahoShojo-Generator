@@ -1,5 +1,9 @@
-import type { ArenaRoomSharedConfig } from '@mahoshojo/contracts/arena-room';
-import { assertArenaGenerationRequestFieldsClassified } from '@mahoshojo/multiplayer-core';
+import {
+  ArenaRoomGenerationStartRequestSchema,
+  type ArenaRoomHostLocalPayload,
+  type ArenaRoomHostRuntimeGeneration,
+  type ArenaRoomSharedConfig,
+} from '@mahoshojo/contracts/arena-room';
 
 import type {
   ArenaRoomController,
@@ -70,9 +74,10 @@ type DispatchArenaRoomGenerationStartOptions = {
   readonly controller: ArenaRoomController;
   readonly state: ArenaRoomControllerState;
   readonly sharedConfig: ArenaRoomSharedConfig;
+  readonly hostLocalPayloads: readonly ArenaRoomHostLocalPayload[];
   readonly generationRequestId: string;
-  /** Request-scoped full payload; this function never stores it in Room state. */
-  readonly generation: Record<string, unknown>;
+  /** Request-scoped host-only runtime fields; Room-shared semantics are materialized server-side. */
+  readonly generation: ArenaRoomHostRuntimeGeneration;
 };
 
 export const dispatchArenaRoomGenerationStart = async (
@@ -98,12 +103,13 @@ export const dispatchArenaRoomGenerationStart = async (
     return 'stale';
   }
 
-  await options.controller.startGeneration({
+  await options.controller.startGeneration(ArenaRoomGenerationStartRequestSchema.parse({
     expectedRoomEpoch: captured.roomEpoch,
     expectedRevision: captured.snapshot.revision,
     generationRequestId: options.generationRequestId,
     sharedConfig: options.sharedConfig,
-    generation: assertArenaGenerationRequestFieldsClassified(options.generation),
-  });
+    hostLocalPayloads: options.hostLocalPayloads,
+    generation: options.generation,
+  }));
   return 'submitted';
 };

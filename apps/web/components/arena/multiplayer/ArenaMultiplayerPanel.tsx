@@ -5,7 +5,10 @@ import { useRef, useState, type ChangeEvent, type ReactNode } from 'react';
 import type { RoomDirectoryVisibility } from '@mahoshojo/contracts/arena-room';
 
 import type { ArenaRoomControllerState } from '@/lib/arena-room/controller';
-import { buildArenaRoomSharedConfigFromBattleState } from '@/lib/arena-room/shared-config';
+import {
+  buildArenaRoomHostWorkspaceBundleFromBattleState,
+} from '@/lib/arena-room/shared-config';
+import { arenaRoomHostWorkspaceAuthorityFromSession } from '@/lib/arena-room/host-workspace';
 import { useBattleStore } from '@/components/arena/stores/useBattleStore';
 import { ArenaProposalPanel } from './ArenaProposalPanel';
 import { useArenaRoom, useArenaRoomContext } from './useArenaRoom';
@@ -321,7 +324,7 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
 }
 
 export function ArenaMultiplayerPanel(props: ArenaMultiplayerPanelProps) {
-  const { controller, state } = useArenaRoom({
+  const { controller, state, hostWorkspace } = useArenaRoom({
     enabled: props.enabled,
     authenticated: props.isAuthenticated && !props.authLoading,
     origin: props.origin,
@@ -331,6 +334,7 @@ export function ArenaMultiplayerPanel(props: ArenaMultiplayerPanelProps) {
       {...props}
       controller={controller}
       state={state}
+      hostWorkspace={hostWorkspace}
     />
   );
 }
@@ -338,11 +342,13 @@ export function ArenaMultiplayerPanel(props: ArenaMultiplayerPanelProps) {
 type ArenaMultiplayerPanelRuntimeProps = ArenaMultiplayerPanelProps & {
   readonly controller: ReturnType<typeof useArenaRoom>['controller'];
   readonly state: ReturnType<typeof useArenaRoom>['state'];
+  readonly hostWorkspace: ReturnType<typeof useArenaRoom>['hostWorkspace'];
 };
 
 function ArenaMultiplayerPanelRuntime({
   controller,
   state,
+  hostWorkspace,
   ...props
 }: ArenaMultiplayerPanelRuntimeProps) {
   const [roomTitle, setRoomTitle] = useState(() => `${props.displayName || '玩家'} 的房间`);
@@ -359,14 +365,18 @@ function ArenaMultiplayerPanelRuntime({
     setPreparingCreate(true);
     setInputError(null);
     try {
-      const sharedConfig = await buildArenaRoomSharedConfigFromBattleState(
+      const bundle = await buildArenaRoomHostWorkspaceBundleFromBattleState(
         useBattleStore.getState(),
       );
       await controller.create({
         displayName: props.displayName || '玩家',
         directory: { title: roomTitle, visibility },
-        sharedConfig,
+        sharedConfig: bundle.sharedConfig,
       });
+      const authority = arenaRoomHostWorkspaceAuthorityFromSession(
+        controller.getSnapshot().session,
+      );
+      if (authority) hostWorkspace.capturePublished(authority, bundle);
     } catch {
       setInputError('当前竞技场配置无法安全共享，请检查角色、版本与数量限制');
     } finally {
@@ -420,6 +430,7 @@ export function ArenaMultiplayerContextPanel(props: ArenaMultiplayerPanelProps) 
       {...props}
       controller={runtime.controller}
       state={runtime.state}
+      hostWorkspace={runtime.hostWorkspace}
     />
   );
 }

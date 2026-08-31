@@ -42,6 +42,12 @@ const sharedConfig: ArenaRoomSharedConfig = {
   },
 };
 
+const hostLocalPayloads = [{
+  key: 'host-local:character:1',
+  kind: 'character' as const,
+  payload: { codename: '角色', magicConstruct: '测试术式' },
+}];
+
 const stateFor = (
   role: 'host' | 'member',
   generationPhase: ArenaRoomControllerState['generation']['phase'] = 'idle',
@@ -121,8 +127,6 @@ describe('Arena multiplayer generation bridge', () => {
       startGeneration,
     } as unknown as ArenaRoomController;
     const generation = {
-      generationRequestId: 'request-stable-1',
-      combatants: [{ data: { name: '角色' } }],
       customProvider: { apiKey: 'secret-must-stay-transient' },
     };
 
@@ -130,6 +134,7 @@ describe('Arena multiplayer generation bridge', () => {
       controller,
       state,
       sharedConfig,
+      hostLocalPayloads,
       generationRequestId: 'request-stable-1',
       generation,
     });
@@ -141,6 +146,7 @@ describe('Arena multiplayer generation bridge', () => {
       expectedRevision: 4,
       generationRequestId: 'request-stable-1',
       sharedConfig,
+      hostLocalPayloads,
       generation,
     });
     expect(JSON.stringify(state)).toBe(before);
@@ -159,12 +165,12 @@ describe('Arena multiplayer generation bridge', () => {
       controller,
       state,
       sharedConfig,
+      hostLocalPayloads,
       generationRequestId: 'request-unclassified-1',
       generation: {
-        generationRequestId: 'request-unclassified-1',
         unclassifiedSemantic: { shadowAuthority: true },
       },
-    })).rejects.toThrow('ARENA_GENERATION_FIELD_UNCLASSIFIED:unclassifiedSemantic');
+    })).rejects.toThrow();
     expect(startGeneration).not.toHaveBeenCalled();
   });
 
@@ -241,8 +247,9 @@ describe('Arena multiplayer generation bridge', () => {
       controller,
       state: captured,
       sharedConfig,
+      hostLocalPayloads,
       generationRequestId: 'request-stale-1',
-      generation: { generationRequestId: 'request-stale-1' },
+      generation: {},
     })).resolves.toBe('stale');
     expect(startGeneration).not.toHaveBeenCalled();
   });

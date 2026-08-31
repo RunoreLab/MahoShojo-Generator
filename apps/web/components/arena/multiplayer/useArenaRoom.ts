@@ -13,6 +13,10 @@ import {
 
 import { createArenaRoomClient } from '@/lib/arena-room/client';
 import {
+  arenaRoomHostWorkspaceAuthorityFromSession,
+  createArenaRoomHostWorkspace,
+} from '@/lib/arena-room/host-workspace';
+import {
   createArenaRoomController,
   type ArenaRoomController,
   type ArenaRoomSocket,
@@ -30,14 +34,18 @@ type LifecycleToken = {
 };
 
 export const useArenaRoom = (options: UseArenaRoomOptions) => {
-  const controller = useMemo(() => {
+  const { controller, hostWorkspace } = useMemo(() => {
     const client = createArenaRoomClient({ origin: options.origin });
-    return createArenaRoomController({
+    const nextController = createArenaRoomController({
       client,
       createSocket: (url, protocol) => (
         new WebSocket(url, protocol) as unknown as ArenaRoomSocket
       ),
     });
+    return {
+      controller: nextController,
+      hostWorkspace: createArenaRoomHostWorkspace(),
+    };
   }, [options.origin]);
   const lifecycle = useRef<LifecycleToken | null>(null);
 
@@ -71,7 +79,11 @@ export const useArenaRoom = (options: UseArenaRoomOptions) => {
     controller.getSnapshot,
   );
 
-  return { controller, state };
+  useEffect(() => {
+    hostWorkspace.retainFor(arenaRoomHostWorkspaceAuthorityFromSession(state.session));
+  }, [hostWorkspace, state.session]);
+
+  return { controller, state, hostWorkspace };
 };
 
 export type ArenaRoomRuntime = ReturnType<typeof useArenaRoom>;

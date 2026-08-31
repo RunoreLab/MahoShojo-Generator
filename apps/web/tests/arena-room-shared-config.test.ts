@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  buildArenaRoomHostWorkspaceBundleFromBattleState,
   buildArenaRoomSharedConfigFromBattleState,
   type ArenaRoomBattleStateSource,
 } from '@/lib/arena-room/shared-config';
@@ -161,6 +162,48 @@ describe('Arena Room Battle store projection', () => {
     expect(firstVersion).toMatch(/^sha256:[0-9a-f]{64}$/u);
     expect(repeatedVersion).toBe(firstVersion);
     expect(changedVersion).not.toBe(firstVersion);
+  });
+
+  it('host workspace bundle 只携带 frozen config 实际引用的本地正文与内容摘要', async () => {
+    const bundle = await buildArenaRoomHostWorkspaceBundleFromBattleState(source());
+
+    expect(bundle.hostLocalPayloads).toEqual([
+      {
+        key: expect.stringMatching(/^host-local:character:/u),
+        kind: 'character',
+        payload: { name: '本地残兽', secret: 'host-only-payload' },
+      },
+      {
+        key: expect.stringMatching(/^host-local:scenario:/u),
+        kind: 'scenario',
+        payload: { title: '本地情景', hidden: 'host-only' },
+      },
+      {
+        key: expect.stringMatching(/^host-local:material:/u),
+        kind: 'material',
+        payload: { secret: 'host-only-material' },
+      },
+    ]);
+    expect(bundle.hostLocalContentDigests).toHaveLength(3);
+    expect(bundle.hostLocalContentDigests.every((entry) => (
+      /^sha256:[0-9a-f]{64}$/u.test(entry.digest)
+    ))).toBe(true);
+    expect(JSON.stringify(bundle.sharedConfig)).not.toContain('host-only');
+    expect(JSON.stringify(bundle.hostLocalPayloads)).not.toContain('provider-secret');
+  });
+
+  it('本地正文变化会改变 workspace digest，但不会偷渡进 safe SharedConfig', async () => {
+    const first = await buildArenaRoomHostWorkspaceBundleFromBattleState(source());
+    const changedSource = source();
+    if ('data' in changedSource.combatants[2]!) {
+      changedSource.combatants[2]!.data = { name: '本地残兽', secret: '已修改正文' };
+    }
+    const changed = await buildArenaRoomHostWorkspaceBundleFromBattleState(changedSource);
+
+    expect(changed.sharedConfig).toEqual(first.sharedConfig);
+    const localKey = first.hostLocalPayloads[0]!.key;
+    expect(changed.hostLocalContentDigests.find((entry) => entry.key === localKey)?.digest)
+      .not.toBe(first.hostLocalContentDigests.find((entry) => entry.key === localKey)?.digest);
   });
 
   it('在线 ref 缺 version、random placeholder、重复 key 与超限 roster 均拒绝', async () => {

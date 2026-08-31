@@ -1,6 +1,8 @@
 import {
+  ArenaRoomHostLocalPayloadSchema,
   MAX_AUX_SCENARIOS as MAX_ROOM_AUX_SCENARIOS,
   MAX_MATERIALS as MAX_ROOM_MATERIALS,
+  type ArenaRoomHostLocalPayload,
   type ArenaRoomSharedConfig,
 } from '@mahoshojo/contracts/arena-room';
 import {
@@ -37,6 +39,17 @@ type DataCardKind = 'character' | 'material' | 'scenario';
 type NormalizedCombatant = ArenaRoomNormalizedSource['combatants'][number];
 type NormalizedScenario = Exclude<ArenaRoomNormalizedSource['scenario'], null>;
 type NormalizedMaterial = ArenaRoomNormalizedSource['materials'][number];
+
+export type ArenaRoomHostLocalContentDigest = Readonly<{
+  key: string;
+  digest: string;
+}>;
+
+export type ArenaRoomHostWorkspaceBundle = Readonly<{
+  sharedConfig: ArenaRoomSharedConfig;
+  hostLocalPayloads: readonly ArenaRoomHostLocalPayload[];
+  hostLocalContentDigests: readonly ArenaRoomHostLocalContentDigest[];
+}>;
 
 const text = (value: unknown): string => typeof value === 'string' ? value.trim() : '';
 
@@ -210,9 +223,9 @@ const normalizeMaterial = async (
   };
 };
 
-export const buildArenaRoomSharedConfigFromBattleState = async (
+export const buildArenaRoomHostWorkspaceBundleFromBattleState = async (
   source: ArenaRoomBattleStateSource,
-): Promise<ArenaRoomSharedConfig> => {
+): Promise<ArenaRoomHostWorkspaceBundle> => {
   if (source.auxScenarios.length > MAX_ROOM_AUX_SCENARIOS) {
     throw new Error(`多人房间最多支持 ${MAX_ROOM_AUX_SCENARIOS} 个辅助情景`);
   }
@@ -236,7 +249,7 @@ export const buildArenaRoomSharedConfigFromBattleState = async (
   });
   const customStoryLength = text(source.customStoryLength) || null;
 
-  return buildArenaRoomSharedConfig({
+  const sharedConfig = buildArenaRoomSharedConfig({
     battleMode: source.battleMode,
     combatants,
     teams: source.teams.map((team) => ({
@@ -264,4 +277,55 @@ export const buildArenaRoomSharedConfigFromBattleState = async (
       writeNarrativeHistory: source.settings.writeNarrativeHistory,
     },
   });
+
+  const hostLocalPayloads: ArenaRoomHostLocalPayload[] = [];
+  const addHostLocalPayload = (
+    key: string,
+    kind: DataCardKind,
+    payload: unknown,
+  ): void => {
+    const canonicalPayload = stableJsonValue(payload, new WeakSet());
+    hostLocalPayloads.push(ArenaRoomHostLocalPayloadSchema.parse({
+      key,
+      kind,
+      payload: canonicalPayload,
+    }));
+  };
+  source.combatants.forEach((combatant, index) => {
+    const entry = combatants[index];
+    if (entry && 'source' in entry && 'data' in combatant) {
+      addHostLocalPayload(entry.key, 'character', combatant.data);
+    }
+  });
+  if (scenario && 'source' in scenario && source.scenario.content !== null) {
+    addHostLocalPayload(scenario.key, 'scenario', source.scenario.content);
+  }
+  source.auxScenarios.forEach((auxScenario, index) => {
+    const entry = auxScenarios[index];
+    if (entry && 'source' in entry) {
+      addHostLocalPayload(entry.key, 'scenario', auxScenario.content);
+    }
+  });
+  source.materials.forEach((material, index) => {
+    const entry = materials[index];
+    if (entry && 'source' in entry) {
+      addHostLocalPayload(entry.key, 'material', material.content);
+    }
+  });
+  const hostLocalContentDigests = await Promise.all(hostLocalPayloads.map(async (entry) => ({
+    key: entry.key,
+    digest: await contentDigest(entry.payload),
+  })));
+
+  return Object.freeze({
+    sharedConfig,
+    hostLocalPayloads: Object.freeze(hostLocalPayloads),
+    hostLocalContentDigests: Object.freeze(hostLocalContentDigests),
+  });
 };
+
+export const buildArenaRoomSharedConfigFromBattleState = async (
+  source: ArenaRoomBattleStateSource,
+): Promise<ArenaRoomSharedConfig> => (
+  await buildArenaRoomHostWorkspaceBundleFromBattleState(source)
+).sharedConfig;

@@ -10,7 +10,8 @@ import type { ArenaRoomControllerState } from '@/lib/arena-room/controller';
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 const mocks = vi.hoisted(() => ({
-  buildSharedConfig: vi.fn(),
+  buildWorkspaceBundle: vi.fn(),
+  capturePublished: vi.fn(),
   close: vi.fn(async () => undefined),
   create: vi.fn(async () => undefined),
   discover: vi.fn(async () => undefined),
@@ -35,15 +36,22 @@ vi.mock('@/components/arena/multiplayer/useArenaRoom', () => ({
       submitProposal: mocks.submitProposal,
       resolveProposal: mocks.resolveProposal,
       withdrawProposal: mocks.withdrawProposal,
+      getSnapshot: () => mocks.state,
       reconnect: mocks.reconnect,
       reset: mocks.reset,
     },
     state: mocks.state,
+    hostWorkspace: {
+      capturePublished: mocks.capturePublished,
+      compare: vi.fn(),
+      retainFor: vi.fn(),
+      clear: vi.fn(),
+    },
   }),
 }));
 
 vi.mock('@/lib/arena-room/shared-config', () => ({
-  buildArenaRoomSharedConfigFromBattleState: mocks.buildSharedConfig,
+  buildArenaRoomHostWorkspaceBundleFromBattleState: mocks.buildWorkspaceBundle,
 }));
 
 vi.mock('@/components/arena/stores/useBattleStore', () => ({
@@ -134,7 +142,11 @@ const flush = async (): Promise<void> => {
 
 beforeEach(async () => {
   mocks.state = readyState;
-  mocks.buildSharedConfig.mockResolvedValue(sharedConfig);
+  mocks.buildWorkspaceBundle.mockResolvedValue({
+    sharedConfig,
+    hostLocalPayloads: [],
+    hostLocalContentDigests: [],
+  });
   container = document.createElement('div');
   document.body.append(container);
   root = createRoot(container);
@@ -154,7 +166,7 @@ describe('Arena multiplayer panel real React interactions', () => {
     });
     await flush();
 
-    expect(mocks.buildSharedConfig).toHaveBeenCalledTimes(1);
+    expect(mocks.buildWorkspaceBundle).toHaveBeenCalledTimes(1);
     expect(mocks.create).toHaveBeenCalledTimes(1);
   });
 
