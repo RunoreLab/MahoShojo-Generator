@@ -68,29 +68,37 @@ export function PresetGridPicker({
           return (
             <div
               key={preset.filename}
-              onClick={() => !itemDisabled && onToggle(preset)}
               className={`relative p-3 border rounded-lg transition-all duration-200 ${
                 itemDisabled ? 'bg-gray-200 border-gray-300 text-gray-500 cursor-not-allowed' : `${bgColor} cursor-pointer`
               }`}
             >
+              <button
+                type="button"
+                aria-label={`${isSelected ? '取消选择' : '选择'}预设角色：${preset.name}`}
+                aria-pressed={isSelected}
+                disabled={itemDisabled}
+                onClick={() => onToggle(preset)}
+                className="absolute inset-0 z-0 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed"
+              />
               <a
                 href={`/presets/${encodeURIComponent(preset.filename)}`}
                 download={preset.filename}
-                onClick={(e) => e.stopPropagation()}
                 title="下载预设 JSON"
                 aria-label={`下载预设：${preset.name}`}
-                className="absolute right-2 top-2 z-10 inline-flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white/80 text-gray-600 shadow-sm backdrop-blur transition-colors hover:bg-white hover:text-blue-600"
+                className="absolute right-1 top-1 z-20 inline-flex min-h-10 min-w-10 items-center justify-center rounded-full border border-gray-200 bg-white/80 text-gray-600 shadow-sm backdrop-blur transition-colors hover:bg-white hover:text-blue-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
               >
                 <Download className="h-4 w-4" />
               </a>
-              <p className={`font-semibold ${textColor}`}>{isLoading ? '加载中...' : preset.name}</p>
-              <p
-                className={`text-xs mt-1 ${
-                  isSelected ? (preset.type === 'canshou' ? 'text-red-800' : 'text-pink-800') : 'text-gray-600'
-                }`}
-              >
-                {preset.description}
-              </p>
+              <div className="pointer-events-none relative z-10 pr-10">
+                <p className={`font-semibold ${textColor}`}>{isLoading ? '加载中...' : preset.name}</p>
+                <p
+                  className={`text-xs mt-1 ${
+                    isSelected ? (preset.type === 'canshou' ? 'text-red-800' : 'text-pink-800') : 'text-gray-600'
+                  }`}
+                >
+                  {preset.description}
+                </p>
+              </div>
             </div>
           );
         })}
@@ -99,9 +107,10 @@ export function PresetGridPicker({
       {presets.length > PRESETS_PER_PAGE && (
         <div className="flex justify-center items-center mt-4 space-x-2">
           <button
+            type="button"
             onClick={() => onPageChange(Math.max(1, currentPage - 1))}
             disabled={disabled || currentPage === 1}
-            className={`px-3 py-1 rounded text-sm ${
+            className={`min-h-10 px-3 py-1 rounded text-sm ${
               currentPage === 1 || disabled ? 'bg-gray-200 text-gray-400' : 'bg-pink-100 text-pink-700 hover:bg-pink-200'
             }`}
           >
@@ -111,9 +120,10 @@ export function PresetGridPicker({
             第 {currentPage} / {totalPages} 页
           </span>
           <button
+            type="button"
             onClick={() => onPageChange(Math.min(totalPages, currentPage + 1))}
             disabled={disabled || currentPage === totalPages}
-            className={`px-3 py-1 rounded text-sm ${
+            className={`min-h-10 px-3 py-1 rounded text-sm ${
               currentPage === totalPages || disabled ? 'bg-gray-200 text-gray-400' : 'bg-pink-100 text-pink-700 hover:bg-pink-200'
             }`}
           >
