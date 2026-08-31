@@ -8,8 +8,32 @@ export type ArenaProductParityClassification =
   | 'forbidden'
   | 'deferred-with-reason';
 
+export type ArenaProductParityModeCapability =
+  | 'editable'
+  | 'derived'
+  | 'materialized'
+  | 'read-only'
+  | 'host-only'
+  | 'local-only'
+  | 'forbidden'
+  | 'deferred'
+  | 'not-applicable';
+
+export const ARENA_PRODUCT_PARITY_TEST_IDS = [
+  'GMR10P-A-EXACT-GENERATION-FIELDS',
+  'GMR10P-A-SHARED-PROPOSAL-COVERAGE',
+  'GMR10P-A-ARENA-UI-CONTRACT',
+  'GMR10P-A-EXPLICIT-GAPS',
+] as const;
+export type ArenaProductParityTestId = typeof ARENA_PRODUCT_PARITY_TEST_IDS[number];
+
 export interface ArenaProductParityCoverageEntry {
   readonly classification: ArenaProductParityClassification;
+  readonly single: ArenaProductParityModeCapability;
+  readonly roomHost: ArenaProductParityModeCapability;
+  readonly roomProposal: ArenaProductParityModeCapability;
+  readonly contractChangeTypes: readonly string[];
+  readonly testIds: readonly ArenaProductParityTestId[];
   readonly reason?: string;
   readonly gap?: string;
 }
@@ -18,9 +42,68 @@ type SharedConfigCoverageEntry = ArenaProductParityCoverageEntry & {
   readonly rootField: keyof ArenaRoomSharedConfig;
 };
 
-const sharedProposable = {
+const coverageEntry = <const Entry extends ArenaProductParityCoverageEntry>(
+  entry: Entry,
+): Entry => entry;
+
+const sharedProposable = (
+  contractChangeTypes: readonly string[],
+  testIds: readonly ArenaProductParityTestId[] = ['GMR10P-A-SHARED-PROPOSAL-COVERAGE'],
+): ArenaProductParityCoverageEntry => coverageEntry({
   classification: 'shared/proposable',
-} as const satisfies ArenaProductParityCoverageEntry;
+  single: 'editable',
+  roomHost: 'editable',
+  roomProposal: 'editable',
+  contractChangeTypes,
+  testIds,
+});
+
+const derivedSharedProposable = (
+  contractChangeTypes: readonly string[],
+): ArenaProductParityCoverageEntry => coverageEntry({
+  classification: 'shared/proposable',
+  single: 'derived',
+  roomHost: 'materialized',
+  roomProposal: 'derived',
+  contractChangeTypes,
+  testIds: ['GMR10P-A-SHARED-PROPOSAL-COVERAGE'],
+});
+
+const deferredMaterialization = (
+  reason: string,
+  contractChangeTypes: readonly string[],
+): ArenaProductParityCoverageEntry => coverageEntry({
+  classification: 'deferred-with-reason',
+  single: 'derived',
+  roomHost: 'deferred',
+  roomProposal: 'forbidden',
+  contractChangeTypes,
+  testIds: ['GMR10P-A-EXPLICIT-GAPS'],
+  reason,
+  gap: 'GMR-10P-B 必须从 frozen Shared Config + exact canonical/request-scoped payload materialize，不能信任 host local 同名字段。',
+});
+
+const classified = (
+  classification: ArenaProductParityClassification,
+  modes: Readonly<{
+    single: ArenaProductParityModeCapability;
+    roomHost: ArenaProductParityModeCapability;
+    roomProposal: ArenaProductParityModeCapability;
+  }>,
+  options: Readonly<{
+    contractChangeTypes?: readonly string[];
+    testIds?: readonly ArenaProductParityTestId[];
+    reason?: string;
+    gap?: string;
+  }>,
+): ArenaProductParityCoverageEntry => coverageEntry({
+  classification,
+  ...modes,
+  contractChangeTypes: options.contractChangeTypes ?? [],
+  testIds: options.testIds ?? ['GMR10P-A-EXPLICIT-GAPS'],
+  ...(options.reason === undefined ? {} : { reason: options.reason }),
+  ...(options.gap === undefined ? {} : { gap: options.gap }),
+});
 
 /**
  * GMR-10P-A 的 machine-readable 产品覆盖基线。
@@ -34,209 +117,286 @@ export const ARENA_PRODUCT_PARITY_COVERAGE = {
   contractSource: 'existing-arena-ui',
   legacyMiniEditorIsProductContract: false,
   generationRequest: {
-    generationRequestId: {
-      classification: 'host-runtime-only',
+    generationRequestId: classified('host-runtime-only', {
+      single: 'derived', roomHost: 'derived', roomProposal: 'not-applicable',
+    }, {
       reason: '幂等 generation identity 由发起端/runtime 使用，不属于 Room Shared Config。',
-    },
-    combatants: {
-      ...sharedProposable,
-      gap: 'GMR-10P-B 仍需从 frozen Shared Config materialize 完整 payload，不能继续信任 host local 同名字段。',
-    },
-    mode: sharedProposable,
-    arenaFreeRankingEnabled: {
-      classification: 'shared/host-only',
+    }),
+    combatants: deferredMaterialization(
+      '该字段是完整角色 payload 容器；可提案的角色 ref/guidance/team 语义另由 Shared Config 分类。',
+      ['addCombatant', 'removeCombatant', 'setCharacterGuidance', 'assignTeam'],
+    ),
+    mode: derivedSharedProposable(['setBattleMode']),
+    arenaFreeRankingEnabled: classified('shared/host-only', {
+      single: 'editable', roomHost: 'host-only', roomProposal: 'forbidden',
+    }, {
       reason: '排位开关影响生成，但当前被定义为 host-only Arena control，尚未进入 Shared Config。',
-    },
-    userGuidance: sharedProposable,
-    scenario: sharedProposable,
-    auxScenarios: sharedProposable,
-    materials: sharedProposable,
-    scenarioTitle: sharedProposable,
-    scenarioFileName: sharedProposable,
-    scenarioSourceDataCardId: sharedProposable,
-    scenarioSourceDataCardUpdatedAt: sharedProposable,
-    teams: sharedProposable,
-    teamNames: {
-      classification: 'shared/host-only',
+    }),
+    userGuidance: derivedSharedProposable(['setUserGuidance']),
+    scenario: deferredMaterialization(
+      '该字段是展开后的情景正文；member 只可提案 exact ref，正文由 server canonical materializer 或 host-local map 提供。',
+      ['setScenario'],
+    ),
+    auxScenarios: deferredMaterialization(
+      '该字段是展开后的辅助情景正文；member 只可提案 exact ref，正文由 server canonical materializer 或 host-local map 提供。',
+      ['addAuxScenario', 'removeAuxScenario'],
+    ),
+    materials: deferredMaterialization(
+      '该字段包含展开后的素材正文；member 只可提案 exact ref，正文由 server canonical materializer 或 host-local map 提供。',
+      ['addMaterial', 'removeMaterial'],
+    ),
+    scenarioTitle: derivedSharedProposable(['setScenario']),
+    scenarioFileName: derivedSharedProposable(['setScenario']),
+    scenarioSourceDataCardId: derivedSharedProposable(['setScenario']),
+    scenarioSourceDataCardUpdatedAt: derivedSharedProposable(['setScenario']),
+    teams: derivedSharedProposable(['assignTeam']),
+    teamNames: classified('shared/host-only', {
+      single: 'editable', roomHost: 'materialized', roomProposal: 'deferred',
+    }, {
       gap: 'Shared Config 已保存 team display name，但 Proposal 缺少 rename team change。',
-    },
-    language: {
-      classification: 'shared/host-only',
+    }),
+    language: classified('shared/host-only', {
+      single: 'editable', roomHost: 'materialized', roomProposal: 'deferred',
+    }, {
       gap: 'Shared Config 已保存 selectedLanguage，但 Proposal 缺少 setLanguage change。',
-    },
-    readArenaHistory: sharedProposable,
-    arenaHistoryReadLimit: sharedProposable,
-    writeArenaHistory: sharedProposable,
-    readCurrentState: sharedProposable,
-    writeCurrentState: sharedProposable,
-    readNarrativeHistory: sharedProposable,
-    writeNarrativeHistory: sharedProposable,
-    narrativeHistoryReadLimit: sharedProposable,
-    narrativeHistory: {
-      classification: 'local-only',
+    }),
+    readArenaHistory: derivedSharedProposable(['setHistorySettings']),
+    arenaHistoryReadLimit: derivedSharedProposable(['setHistorySettings']),
+    writeArenaHistory: derivedSharedProposable(['setHistorySettings']),
+    readCurrentState: derivedSharedProposable(['setHistorySettings']),
+    writeCurrentState: derivedSharedProposable(['setHistorySettings']),
+    readNarrativeHistory: derivedSharedProposable(['setHistorySettings']),
+    writeNarrativeHistory: derivedSharedProposable(['setHistorySettings']),
+    narrativeHistoryReadLimit: derivedSharedProposable(['setHistorySettings']),
+    narrativeHistory: classified('local-only', {
+      single: 'local-only', roomHost: 'host-only', roomProposal: 'forbidden',
+    }, {
       reason: '历史正文来自 host local store；Room 只共享是否读取与上限，不广播正文。',
-    },
-    isDowngrade: {
-      classification: 'host-runtime-only',
+    }),
+    isDowngrade: classified('host-runtime-only', {
+      single: 'derived', roomHost: 'host-only', roomProposal: 'not-applicable',
+    }, {
       reason: '传输/兼容降级标记不属于多人产品共享语义。',
-    },
-    adjudicationEvents: {
-      classification: 'deferred-with-reason',
+    }),
+    adjudicationEvents: classified('deferred-with-reason', {
+      single: 'editable', roomHost: 'deferred', roomProposal: 'deferred',
+    }, {
       reason: 'adjudication 配置尚未进入 Shared Config 或 Proposal；需先定义安全投影与 materialization。',
-    },
-    storyLength: sharedProposable,
-    customStoryLength: sharedProposable,
-    questionnaireSelections: {
-      classification: 'deferred-with-reason',
+    }),
+    storyLength: derivedSharedProposable(['setStoryLength']),
+    customStoryLength: derivedSharedProposable(['setStoryLength']),
+    questionnaireSelections: classified('deferred-with-reason', {
+      single: 'editable', roomHost: 'deferred', roomProposal: 'deferred',
+    }, {
       reason: 'questionnaire selections 尚未进入 Shared Config 或 Proposal，需先建立可验证 ref。',
-    },
-    questionnaires: {
-      classification: 'deferred-with-reason',
+    }),
+    questionnaires: classified('deferred-with-reason', {
+      single: 'derived', roomHost: 'deferred', roomProposal: 'forbidden',
+    }, {
       reason: 'questionnaire lore 当前携带展开内容，需在 GMR-10P-B 设计 exact-ref materialization。',
-    },
-    customProvider: {
-      classification: 'host-runtime-only',
+    }),
+    customProvider: classified('host-runtime-only', {
+      single: 'editable', roomHost: 'host-only', roomProposal: 'forbidden',
+    }, {
       reason: 'Provider、model、credential 只允许 request-scoped host runtime 使用。',
-    },
+    }),
   },
   roomSharedConfig: {
-    battleMode: { ...sharedProposable, rootField: 'battleMode' },
-    combatants: { ...sharedProposable, rootField: 'combatants' },
-    'combatants.characterGuidance': { ...sharedProposable, rootField: 'combatants' },
-    teams: { ...sharedProposable, rootField: 'teams' },
-    'teams.combatantKeys': { ...sharedProposable, rootField: 'teams' },
+    battleMode: { ...sharedProposable(['setBattleMode']), rootField: 'battleMode' },
+    combatants: {
+      ...sharedProposable(['addCombatant', 'removeCombatant']),
+      rootField: 'combatants',
+    },
+    'combatants.characterGuidance': {
+      ...sharedProposable(['setCharacterGuidance']),
+      rootField: 'combatants',
+    },
+    teams: { ...sharedProposable(['assignTeam']), rootField: 'teams' },
+    'teams.combatantKeys': { ...sharedProposable(['assignTeam']), rootField: 'teams' },
     'teams.displayName': {
-      classification: 'shared/host-only',
+      ...classified('shared/host-only', {
+        single: 'editable', roomHost: 'editable', roomProposal: 'deferred',
+      }, {
+        gap: 'Room 保存 team display name，但 Proposal 没有 rename team change。',
+      }),
       rootField: 'teams',
-      gap: 'Room 保存 team display name，但 Proposal 没有 rename team change。',
     },
-    scenario: { ...sharedProposable, rootField: 'scenario' },
-    auxScenarios: { ...sharedProposable, rootField: 'auxScenarios' },
-    materials: { ...sharedProposable, rootField: 'materials' },
-    userGuidance: { ...sharedProposable, rootField: 'userGuidance' },
-    storyLength: { ...sharedProposable, rootField: 'storyLength' },
-    customStoryLength: { ...sharedProposable, rootField: 'customStoryLength' },
+    scenario: { ...sharedProposable(['setScenario']), rootField: 'scenario' },
+    auxScenarios: {
+      ...sharedProposable(['addAuxScenario', 'removeAuxScenario']),
+      rootField: 'auxScenarios',
+    },
+    materials: {
+      ...sharedProposable(['addMaterial', 'removeMaterial']),
+      rootField: 'materials',
+    },
+    userGuidance: { ...sharedProposable(['setUserGuidance']), rootField: 'userGuidance' },
+    storyLength: { ...sharedProposable(['setStoryLength']), rootField: 'storyLength' },
+    customStoryLength: {
+      ...sharedProposable(['setStoryLength']),
+      rootField: 'customStoryLength',
+    },
     selectedLanguage: {
-      classification: 'shared/host-only',
+      ...classified('shared/host-only', {
+        single: 'editable', roomHost: 'editable', roomProposal: 'deferred',
+      }, {
+        gap: 'Room 保存 selectedLanguage，但 Proposal 没有 setLanguage change。',
+      }),
       rootField: 'selectedLanguage',
-      gap: 'Room 保存 selectedLanguage，但 Proposal 没有 setLanguage change。',
     },
-    historySettings: { ...sharedProposable, rootField: 'historySettings' },
-    'historySettings.readArenaHistory': { ...sharedProposable, rootField: 'historySettings' },
-    'historySettings.readArenaHistoryLimit': { ...sharedProposable, rootField: 'historySettings' },
-    'historySettings.isArenaHistoryUnlimited': { ...sharedProposable, rootField: 'historySettings' },
-    'historySettings.writeArenaHistory': { ...sharedProposable, rootField: 'historySettings' },
-    'historySettings.readCurrentState': { ...sharedProposable, rootField: 'historySettings' },
-    'historySettings.writeCurrentState': { ...sharedProposable, rootField: 'historySettings' },
-    'historySettings.readNarrativeHistory': { ...sharedProposable, rootField: 'historySettings' },
-    'historySettings.readNarrativeHistoryLimit': { ...sharedProposable, rootField: 'historySettings' },
-    'historySettings.isNarrativeHistoryUnlimited': { ...sharedProposable, rootField: 'historySettings' },
-    'historySettings.writeNarrativeHistory': { ...sharedProposable, rootField: 'historySettings' },
+    historySettings: { ...sharedProposable(['setHistorySettings']), rootField: 'historySettings' },
+    'historySettings.readArenaHistory': { ...sharedProposable(['setHistorySettings']), rootField: 'historySettings' },
+    'historySettings.readArenaHistoryLimit': { ...sharedProposable(['setHistorySettings']), rootField: 'historySettings' },
+    'historySettings.isArenaHistoryUnlimited': { ...sharedProposable(['setHistorySettings']), rootField: 'historySettings' },
+    'historySettings.writeArenaHistory': { ...sharedProposable(['setHistorySettings']), rootField: 'historySettings' },
+    'historySettings.readCurrentState': { ...sharedProposable(['setHistorySettings']), rootField: 'historySettings' },
+    'historySettings.writeCurrentState': { ...sharedProposable(['setHistorySettings']), rootField: 'historySettings' },
+    'historySettings.readNarrativeHistory': { ...sharedProposable(['setHistorySettings']), rootField: 'historySettings' },
+    'historySettings.readNarrativeHistoryLimit': { ...sharedProposable(['setHistorySettings']), rootField: 'historySettings' },
+    'historySettings.isNarrativeHistoryUnlimited': { ...sharedProposable(['setHistorySettings']), rootField: 'historySettings' },
+    'historySettings.writeNarrativeHistory': { ...sharedProposable(['setHistorySettings']), rootField: 'historySettings' },
   } satisfies Readonly<Record<string, SharedConfigCoverageEntry>>,
   proposalChanges: {
-    addCombatant: sharedProposable,
-    removeCombatant: sharedProposable,
-    setCharacterGuidance: sharedProposable,
-    assignTeam: sharedProposable,
-    setBattleMode: sharedProposable,
-    setScenario: sharedProposable,
-    addAuxScenario: sharedProposable,
-    removeAuxScenario: sharedProposable,
-    addMaterial: sharedProposable,
-    removeMaterial: sharedProposable,
-    setUserGuidance: sharedProposable,
-    setStoryLength: sharedProposable,
-    setHistorySettings: sharedProposable,
+    addCombatant: sharedProposable(['addCombatant']),
+    removeCombatant: sharedProposable(['removeCombatant']),
+    setCharacterGuidance: sharedProposable(['setCharacterGuidance']),
+    assignTeam: sharedProposable(['assignTeam']),
+    setBattleMode: sharedProposable(['setBattleMode']),
+    setScenario: sharedProposable(['setScenario']),
+    addAuxScenario: sharedProposable(['addAuxScenario']),
+    removeAuxScenario: sharedProposable(['removeAuxScenario']),
+    addMaterial: sharedProposable(['addMaterial']),
+    removeMaterial: sharedProposable(['removeMaterial']),
+    setUserGuidance: sharedProposable(['setUserGuidance']),
+    setStoryLength: sharedProposable(['setStoryLength']),
+    setHistorySettings: sharedProposable(['setHistorySettings']),
   },
   arenaUi: {
-    battleMode: sharedProposable,
-    combatantRoster: sharedProposable,
-    combatantOnlineDataCard: sharedProposable,
-    combatantPreset: {
-      classification: 'shared/host-only',
+    battleMode: sharedProposable(['setBattleMode'], ['GMR10P-A-ARENA-UI-CONTRACT']),
+    combatantRoster: sharedProposable(
+      ['addCombatant', 'removeCombatant'],
+      ['GMR10P-A-ARENA-UI-CONTRACT'],
+    ),
+    combatantOnlineDataCard: sharedProposable(
+      ['addCombatant'],
+      ['GMR10P-A-ARENA-UI-CONTRACT'],
+    ),
+    combatantPreset: classified('shared/host-only', {
+      single: 'editable', roomHost: 'editable', roomProposal: 'deferred',
+    }, {
       reason: 'host 可发布 stable preset ref；member proposal 需等待 server-known preset registry。',
-    },
-    combatantLocalUpload: {
-      classification: 'forbidden',
+    }),
+    combatantLocalUpload: classified('forbidden', {
+      single: 'editable', roomHost: 'host-only', roomProposal: 'forbidden',
+    }, {
       reason: 'member Proposal 禁止上传本地 payload。',
-    },
-    combatantLocalPaste: {
-      classification: 'forbidden',
+    }),
+    combatantLocalPaste: classified('forbidden', {
+      single: 'editable', roomHost: 'host-only', roomProposal: 'forbidden',
+    }, {
       reason: 'member Proposal 禁止粘贴本地 payload。',
-    },
-    characterGuidance: sharedProposable,
-    teamAssignment: sharedProposable,
-    teamDisplayName: {
-      classification: 'shared/host-only',
+    }),
+    characterGuidance: sharedProposable(
+      ['setCharacterGuidance'],
+      ['GMR10P-A-ARENA-UI-CONTRACT'],
+    ),
+    teamAssignment: sharedProposable(['assignTeam'], ['GMR10P-A-ARENA-UI-CONTRACT']),
+    teamDisplayName: classified('shared/host-only', {
+      single: 'editable', roomHost: 'editable', roomProposal: 'deferred',
+    }, {
       gap: 'Arena UI 可编辑 team display name，但 Proposal 缺少 rename team change。',
-    },
-    scenario: sharedProposable,
-    scenarioLocalUpload: {
-      classification: 'forbidden',
+    }),
+    scenario: sharedProposable(['setScenario'], ['GMR10P-A-ARENA-UI-CONTRACT']),
+    scenarioLocalUpload: classified('forbidden', {
+      single: 'editable', roomHost: 'host-only', roomProposal: 'forbidden',
+    }, {
       reason: 'member Proposal 禁止上传本地情景。',
-    },
-    scenarioLocalPaste: {
-      classification: 'forbidden',
+    }),
+    scenarioLocalPaste: classified('forbidden', {
+      single: 'editable', roomHost: 'host-only', roomProposal: 'forbidden',
+    }, {
       reason: 'member Proposal 禁止粘贴本地情景。',
-    },
-    auxScenarios: sharedProposable,
-    auxScenarioLocalUpload: {
-      classification: 'forbidden',
+    }),
+    auxScenarios: sharedProposable(
+      ['addAuxScenario', 'removeAuxScenario'],
+      ['GMR10P-A-ARENA-UI-CONTRACT'],
+    ),
+    auxScenarioLocalUpload: classified('forbidden', {
+      single: 'editable', roomHost: 'host-only', roomProposal: 'forbidden',
+    }, {
       reason: 'member Proposal 禁止上传本地辅助情景。',
-    },
-    auxScenarioLocalPaste: {
-      classification: 'forbidden',
+    }),
+    auxScenarioLocalPaste: classified('forbidden', {
+      single: 'editable', roomHost: 'host-only', roomProposal: 'forbidden',
+    }, {
       reason: 'member Proposal 禁止粘贴本地辅助情景。',
-    },
-    materials: sharedProposable,
-    materialLocalUpload: {
-      classification: 'forbidden',
+    }),
+    materials: sharedProposable(
+      ['addMaterial', 'removeMaterial'],
+      ['GMR10P-A-ARENA-UI-CONTRACT'],
+    ),
+    materialLocalUpload: classified('forbidden', {
+      single: 'editable', roomHost: 'host-only', roomProposal: 'forbidden',
+    }, {
       reason: 'member Proposal 禁止上传本地素材。',
-    },
-    materialLocalPaste: {
-      classification: 'forbidden',
+    }),
+    materialLocalPaste: classified('forbidden', {
+      single: 'editable', roomHost: 'host-only', roomProposal: 'forbidden',
+    }, {
       reason: 'member Proposal 禁止粘贴本地素材。',
-    },
-    userGuidance: sharedProposable,
-    storyLength: sharedProposable,
-    customStoryLength: sharedProposable,
-    selectedLanguage: {
-      classification: 'shared/host-only',
+    }),
+    userGuidance: sharedProposable(['setUserGuidance'], ['GMR10P-A-ARENA-UI-CONTRACT']),
+    storyLength: sharedProposable(['setStoryLength'], ['GMR10P-A-ARENA-UI-CONTRACT']),
+    customStoryLength: sharedProposable(['setStoryLength'], ['GMR10P-A-ARENA-UI-CONTRACT']),
+    selectedLanguage: classified('shared/host-only', {
+      single: 'editable', roomHost: 'editable', roomProposal: 'deferred',
+    }, {
       gap: 'Arena UI 可编辑 selectedLanguage，但 Proposal 缺少 setLanguage change。',
-    },
-    historySettings: sharedProposable,
-    narrativeHistory: {
-      classification: 'local-only',
+    }),
+    historySettings: sharedProposable(
+      ['setHistorySettings'],
+      ['GMR10P-A-ARENA-UI-CONTRACT'],
+    ),
+    narrativeHistory: classified('local-only', {
+      single: 'local-only', roomHost: 'host-only', roomProposal: 'forbidden',
+    }, {
       reason: '正文保留在 host local store，Room 只共享安全读写设置。',
-    },
-    questionnaireLore: {
-      classification: 'deferred-with-reason',
+    }),
+    questionnaireLore: classified('deferred-with-reason', {
+      single: 'editable', roomHost: 'deferred', roomProposal: 'deferred',
+    }, {
       reason: '需要先定义 questionnaire/lore exact ref、权限与 Shared Config/Proposal materialization。',
-    },
-    questionnaireLocalUpload: {
-      classification: 'forbidden',
+    }),
+    questionnaireLocalUpload: classified('forbidden', {
+      single: 'editable', roomHost: 'host-only', roomProposal: 'forbidden',
+    }, {
       reason: 'member Proposal 禁止上传本地 questionnaire/lore payload。',
-    },
-    questionnaireLocalPaste: {
-      classification: 'forbidden',
+    }),
+    questionnaireLocalPaste: classified('forbidden', {
+      single: 'editable', roomHost: 'host-only', roomProposal: 'forbidden',
+    }, {
       reason: 'member Proposal 禁止粘贴本地 questionnaire/lore payload。',
-    },
-    adjudicationEvents: {
-      classification: 'deferred-with-reason',
+    }),
+    adjudicationEvents: classified('deferred-with-reason', {
+      single: 'editable', roomHost: 'deferred', roomProposal: 'deferred',
+    }, {
       reason: '需要先定义可共享 adjudication 安全子集与 Shared Config/Proposal contract。',
-    },
-    arenaFreeRankingEnabled: {
-      classification: 'shared/host-only',
+    }),
+    arenaFreeRankingEnabled: classified('shared/host-only', {
+      single: 'editable', roomHost: 'host-only', roomProposal: 'forbidden',
+    }, {
       reason: '排位是 host-only Arena control，member Proposal 不得改动。',
-    },
-    customProvider: {
-      classification: 'host-runtime-only',
+    }),
+    customProvider: classified('host-runtime-only', {
+      single: 'editable', roomHost: 'host-only', roomProposal: 'forbidden',
+    }, {
       reason: 'Provider 与 credential 不进入 Room authority。',
-    },
-    generationMode: {
-      classification: 'host-runtime-only',
+    }),
+    generationMode: classified('host-runtime-only', {
+      single: 'editable', roomHost: 'host-only', roomProposal: 'forbidden',
+    }, {
       reason: 'stream/non-stream transport selection 不进入 Room authority。',
-    },
+    }),
   },
 } as const;
 

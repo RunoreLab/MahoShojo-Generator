@@ -15,8 +15,25 @@ const classifications = [
   'deferred-with-reason',
 ] as const;
 
+const modeCapabilities = [
+  'editable',
+  'derived',
+  'materialized',
+  'read-only',
+  'host-only',
+  'local-only',
+  'forbidden',
+  'deferred',
+  'not-applicable',
+] as const;
+
 type CoverageEntry = {
   readonly classification: typeof classifications[number];
+  readonly single: typeof modeCapabilities[number];
+  readonly roomHost: typeof modeCapabilities[number];
+  readonly roomProposal: typeof modeCapabilities[number];
+  readonly contractChangeTypes: readonly string[];
+  readonly testIds: readonly string[];
   readonly reason?: string;
   readonly gap?: string;
 };
@@ -46,7 +63,7 @@ const actualProposalChangeTypes = (): string[] => ArenaProposalChangeSchema.opti
   .sort();
 
 describe('GMR-10P Arena 产品一致性覆盖矩阵', () => {
-  it('逐项分类 useBattleEngine 当前 generation request 字段', () => {
+  it('[GMR10P-A-EXACT-GENERATION-FIELDS] 逐项分类 useBattleEngine 当前 generation request 字段', () => {
     expect(Object.keys(coverage().generationRequest).sort()).toEqual([
       'adjudicationEvents',
       'arenaFreeRankingEnabled',
@@ -82,7 +99,7 @@ describe('GMR-10P Arena 产品一致性覆盖矩阵', () => {
     ]);
   });
 
-  it('覆盖 ArenaRoomSharedConfig 全部顶层字段和 ArenaProposalChange 全部 variant', () => {
+  it('[GMR10P-A-SHARED-PROPOSAL-COVERAGE] 覆盖 SharedConfig 与 Proposal variant', () => {
     const matrix = coverage();
     const sharedConfigTopLevelFields = new Set(
       Object.values(matrix.roomSharedConfig).map((entry) => Reflect.get(entry, 'rootField')),
@@ -95,7 +112,7 @@ describe('GMR-10P Arena 产品一致性覆盖矩阵', () => {
     expect(Object.keys(matrix.proposalChanges)).toHaveLength(13);
   });
 
-  it('每项都有合法分类，deferred 项必须说明原因', () => {
+  it('每项都有 §11.1 mode、contract change 与 test ID 列', () => {
     const matrix = coverage();
     const entries = [
       ...Object.values(matrix.generationRequest),
@@ -104,16 +121,36 @@ describe('GMR-10P Arena 产品一致性覆盖矩阵', () => {
       ...Object.values(matrix.arenaUi),
     ];
 
+    const knownTestIds = new Set(
+      Reflect.get(multiplayerCore, 'ARENA_PRODUCT_PARITY_TEST_IDS') as readonly string[],
+    );
+    const actualProposalTypes = new Set(actualProposalChangeTypes());
+
     expect(entries.length).toBeGreaterThan(60);
     for (const entry of entries) {
       expect(classifications).toContain(entry.classification);
+      expect(modeCapabilities).toContain(entry.single);
+      expect(modeCapabilities).toContain(entry.roomHost);
+      expect(modeCapabilities).toContain(entry.roomProposal);
+      expect(Array.isArray(entry.contractChangeTypes)).toBe(true);
+      expect(entry.testIds.length).toBeGreaterThan(0);
+      entry.testIds.forEach((testId) => expect(knownTestIds).toContain(testId));
+      entry.contractChangeTypes.forEach((changeType) => (
+        expect(actualProposalTypes).toContain(changeType)
+      ));
       if (entry.classification === 'deferred-with-reason') {
         expect(entry.reason?.trim().length).toBeGreaterThan(0);
+      }
+      if (entry.classification === 'shared/proposable') {
+        expect(entry.contractChangeTypes.length).toBeGreaterThan(0);
+      }
+      if (entry.classification === 'forbidden') {
+        expect(entry.roomProposal).toBe('forbidden');
       }
     }
   });
 
-  it('显式记录 language、questionnaire/lore、adjudication 与 team display name 缺口', () => {
+  it('[GMR10P-A-EXPLICIT-GAPS] 显式记录 authority 与产品覆盖缺口', () => {
     const matrix = coverage();
 
     expect(matrix.generationRequest.language.gap).toMatch(/Proposal.*setLanguage/u);
@@ -123,9 +160,19 @@ describe('GMR-10P Arena 产品一致性覆盖矩阵', () => {
     expect(matrix.generationRequest.teamNames.gap).toMatch(/team display name.*Proposal/u);
     expect(matrix.arenaUi.selectedLanguage.gap).toMatch(/Proposal.*setLanguage/u);
     expect(matrix.arenaUi.teamDisplayName.gap).toMatch(/Proposal.*rename/u);
+    for (const key of ['combatants', 'scenario', 'auxScenarios', 'materials'] as const) {
+      expect(matrix.generationRequest[key]).toMatchObject({
+        classification: 'deferred-with-reason',
+        single: 'derived',
+        roomHost: 'deferred',
+        roomProposal: 'forbidden',
+      });
+      expect(matrix.generationRequest[key].reason).toMatch(/payload|正文|素材/u);
+      expect(matrix.generationRequest[key].gap).toMatch(/GMR-10P-B.*frozen Shared Config/u);
+    }
   });
 
-  it('以现有 Arena UI 而非旧三字段 mini editor 作为产品 contract', () => {
+  it('[GMR10P-A-ARENA-UI-CONTRACT] 以现有 Arena UI 而非三字段 editor 作为 contract', () => {
     const matrix = coverage();
 
     expect(matrix.contractSource).toBe('existing-arena-ui');
