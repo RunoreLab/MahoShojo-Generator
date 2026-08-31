@@ -7,11 +7,11 @@
   "slices": {
     "GMR-10P-A": "DONE",
     "GMR-10P-B": "DONE",
-    "GMR-10P-C": "READY",
-    "GMR-10P-D": "BLOCKED",
-    "GMR-10P-E": "BLOCKED",
-    "GMR-10P-F": "BLOCKED",
-    "GMR-10P-G": "BLOCKED"
+    "GMR-10P-C": "DONE",
+    "GMR-10P-D": "DONE",
+    "GMR-10P-E": "DONE",
+    "GMR-10P-F": "DONE",
+    "GMR-10P-G": "READY"
   },
-  "blockedReason": "GMR-10P-C 至 GMR-10P-G 尚未完成；production activation 必须保持 fail closed。"
+  "blockedReason": "GMR-10P-G product parity E2E 与退出审计尚未完成；production activation 必须保持 fail closed。"
 }

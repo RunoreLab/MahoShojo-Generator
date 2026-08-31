@@ -14,7 +14,12 @@ const enginePath = resolve(repositoryRoot, 'apps/web/components/arena/hooks/useB
 const runGate = (args: readonly string[] = []) => spawnSync(
   process.execPath,
   [scriptPath, ...args],
-  { cwd: repositoryRoot, encoding: 'utf8', env: { PATH: process.env.PATH } },
+  {
+    cwd: repositoryRoot,
+    encoding: 'utf8',
+    env: { PATH: process.env.PATH },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  },
 );
 
 describe('GMR-10P product parity gate', () => {
@@ -54,8 +59,12 @@ describe('GMR-10P product parity gate', () => {
       productionReadiness: 'BLOCKED',
       slices: {
         'GMR-10P-A': 'DONE',
-        'GMR-10P-B': 'IN_PROGRESS',
-        'GMR-10P-G': 'BLOCKED',
+        'GMR-10P-B': 'DONE',
+        'GMR-10P-C': 'DONE',
+        'GMR-10P-D': 'DONE',
+        'GMR-10P-E': 'DONE',
+        'GMR-10P-F': 'DONE',
+        'GMR-10P-G': 'READY',
       },
     });
     expect(packageManifest.scripts?.['check:arena-product-parity']).toBe(
@@ -85,7 +94,7 @@ describe('GMR-10P product parity gate', () => {
 
     expect(source).toContain('defineArenaGenerationRequest');
     expect(source).toMatch(
-      /const requestBody = defineArenaGenerationRequest\(\{[\s\S]*?generationRequestId,[\s\S]*?customProvider:/u,
+      /const requestBody = roomAction\.inRoom \? null : defineArenaGenerationRequest\(\{[\s\S]*?generationRequestId,[\s\S]*?customProvider:/u,
     );
   });
 });
