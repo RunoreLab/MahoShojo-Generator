@@ -12,7 +12,7 @@ import { arenaRoomHostWorkspaceAuthorityFromSession } from '@/lib/arena-room/hos
 import { useBattleStore } from '@/components/arena/stores/useBattleStore';
 import { ArenaProposalPanel } from './ArenaProposalPanel';
 import { ArenaHostConfigPanel } from './ArenaHostConfigPanel';
-import { useArenaRoom, useArenaRoomContext } from './useArenaRoom';
+import { useArenaRoomContext } from './useArenaRoom';
 import { BattleResultPresentation } from '../components/BattleResultPresentation';
 import { ArenaRoomDialog } from './ArenaRoomDialog';
 
@@ -631,36 +631,14 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
   );
 }
 
-export function ArenaMultiplayerPanel(props: ArenaMultiplayerPanelProps) {
-  const {
-    controller,
-    state,
-    hostWorkspace,
-    hostReconciliation,
-    proposalWorkspace,
-  } = useArenaRoom({
-    enabled: props.enabled,
-    authenticated: props.isAuthenticated && !props.authLoading,
-    origin: props.origin,
-  });
-  return (
-    <ArenaMultiplayerPanelRuntime
-      {...props}
-      controller={controller}
-      state={state}
-      hostWorkspace={hostWorkspace}
-      hostReconciliation={hostReconciliation}
-      proposalWorkspace={proposalWorkspace}
-    />
-  );
-}
+type ArenaRoomRuntimeContext = NonNullable<ReturnType<typeof useArenaRoomContext>>;
 
 type ArenaMultiplayerPanelRuntimeProps = ArenaMultiplayerPanelProps & {
-  readonly controller: ReturnType<typeof useArenaRoom>['controller'];
-  readonly state: ReturnType<typeof useArenaRoom>['state'];
-  readonly hostWorkspace: ReturnType<typeof useArenaRoom>['hostWorkspace'];
-  readonly hostReconciliation: ReturnType<typeof useArenaRoom>['hostReconciliation'];
-  readonly proposalWorkspace: ReturnType<typeof useArenaRoom>['proposalWorkspace'];
+  readonly controller: ArenaRoomRuntimeContext['controller'];
+  readonly state: ArenaRoomRuntimeContext['state'];
+  readonly hostWorkspace: ArenaRoomRuntimeContext['hostWorkspace'];
+  readonly hostReconciliation: ArenaRoomRuntimeContext['hostReconciliation'];
+  readonly proposalWorkspace: ArenaRoomRuntimeContext['proposalWorkspace'];
 };
 
 function ArenaMultiplayerPanelRuntime({

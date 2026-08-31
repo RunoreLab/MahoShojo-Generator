@@ -36,7 +36,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@/components/arena/multiplayer/useArenaRoom', () => ({
-  useArenaRoom: () => ({
+  useArenaRoomContext: () => ({
     controller: {
       close: mocks.close,
       kickMember: mocks.kickMember,
@@ -84,7 +84,7 @@ vi.mock('@/components/arena/stores/useBattleStore', () => ({
   useBattleStore: { getState: vi.fn(() => ({ safe: 'battle-state' })) },
 }));
 
-import { ArenaMultiplayerPanel } from '@/components/arena/multiplayer/ArenaMultiplayerPanel';
+import { ArenaMultiplayerContextPanel } from '@/components/arena/multiplayer/ArenaMultiplayerPanel';
 
 const readyState: ArenaRoomControllerState = {
   phase: 'ready',
@@ -179,7 +179,7 @@ beforeEach(async () => {
   container = document.createElement('div');
   document.body.append(container);
   root = createRoot(container);
-  await act(async () => root.render(<ArenaMultiplayerPanel {...props} />));
+  await act(async () => root.render(<ArenaMultiplayerContextPanel {...props} />));
 });
 
 afterEach(async () => {
@@ -241,7 +241,7 @@ describe('Arena multiplayer panel real React interactions', () => {
       directoryNextCursor: 'cursor-page-2',
       directoryLoadingMore: false,
     };
-    await act(async () => root.render(<ArenaMultiplayerPanel {...props} />));
+    await act(async () => root.render(<ArenaMultiplayerContextPanel {...props} />));
     await act(async () => button('打开多人房间').click());
 
     expect(container.querySelector('[role="dialog"][aria-modal="true"]')).not.toBeNull();
@@ -281,12 +281,12 @@ describe('Arena multiplayer panel real React interactions', () => {
 
   it('unauthenticated/disabled 真实挂载不暴露 Room action', async () => {
     mocks.state = { ...readyState, phase: 'unauthenticated' };
-    await act(async () => root.render(<ArenaMultiplayerPanel {...props} isAuthenticated={false} />));
+    await act(async () => root.render(<ArenaMultiplayerContextPanel {...props} isAuthenticated={false} />));
     expect(container.textContent).toContain('多人房间需要登录后使用');
     expect(container.querySelectorAll('button')).toHaveLength(0);
 
     mocks.state = { ...readyState, phase: 'disabled' };
-    await act(async () => root.render(<ArenaMultiplayerPanel {...props} enabled={false} />));
+    await act(async () => root.render(<ArenaMultiplayerContextPanel {...props} enabled={false} />));
     expect(container.innerHTML).toBe('');
     expect(mocks.create).not.toHaveBeenCalled();
     expect(mocks.discover).not.toHaveBeenCalled();
@@ -328,7 +328,7 @@ describe('Arena multiplayer panel real React interactions', () => {
         },
       },
     };
-    await act(async () => root.render(<ArenaMultiplayerPanel {...props} />));
+    await act(async () => root.render(<ArenaMultiplayerContextPanel {...props} />));
     expect(container.querySelector('#arena-room-proposals-dialog-heading')).toBeNull();
     await act(async () => button('提案').click());
     expect(container.querySelector('#arena-room-proposals-dialog-heading')).not.toBeNull();
@@ -367,7 +367,7 @@ describe('Arena multiplayer panel real React interactions', () => {
         },
       },
     };
-    await act(async () => root.render(<ArenaMultiplayerPanel {...props} />));
+    await act(async () => root.render(<ArenaMultiplayerContextPanel {...props} />));
     await act(async () => button('重新确认配置发布').click());
     expect(mocks.reconnect).toHaveBeenCalledOnce();
   });
@@ -417,7 +417,7 @@ describe('Arena multiplayer panel real React interactions', () => {
         },
       },
     };
-    await act(async () => root.render(<ArenaMultiplayerPanel {...props} />));
+    await act(async () => root.render(<ArenaMultiplayerContextPanel {...props} />));
 
     await act(async () => button('成员').click());
     await act(async () => button('移除').click());
@@ -471,7 +471,7 @@ describe('Arena multiplayer panel real React interactions', () => {
         },
       },
     };
-    await act(async () => root.render(<ArenaMultiplayerPanel {...props} />));
+    await act(async () => root.render(<ArenaMultiplayerContextPanel {...props} />));
 
     await act(async () => button('房间管理 / 退出').click());
     await act(async () => button('离开房间').click());
@@ -509,7 +509,7 @@ describe('Arena multiplayer panel real React interactions', () => {
         },
       },
     };
-    await act(async () => root.render(<ArenaMultiplayerPanel {...props} />));
+    await act(async () => root.render(<ArenaMultiplayerContextPanel {...props} />));
     await act(async () => button('更新配置').click());
     await act(async () => button('更新房间配置').click());
     expect(mocks.publishLocal).toHaveBeenCalledOnce();
@@ -521,7 +521,7 @@ describe('Arena multiplayer panel real React interactions', () => {
       roomConfig: { ...sharedConfig, battleMode: 'daily' },
       localConfig: sharedConfig,
     };
-    await act(async () => root.render(<ArenaMultiplayerPanel {...props} />));
+    await act(async () => root.render(<ArenaMultiplayerContextPanel {...props} />));
     expect(container.textContent).toContain('房间配置已更新，但本地 Arena 同时有未发布修改');
     await act(async () => button('查看差异').click());
     expect(container.querySelectorAll('[role="dialog"][aria-modal="true"]')).toHaveLength(1);
