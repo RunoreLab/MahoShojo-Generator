@@ -10,6 +10,9 @@ import { createHonoApp } from '#/app';
 import { readHonoServerConfig } from '#/config';
 import { configureHonoArenaGenerationRuntime } from '#/arena-generation/runtime';
 import { createArenaDataCardRefVerifier } from '#/arena-room/arena-data-card-ref-verifier';
+import { createArenaRoomGenerationOnlineContentResolver } from '#/arena-room/room-generation-content-resolver';
+import { createArenaRoomGenerationMaterializer } from '#/arena-room/room-generation-materializer';
+import { createArenaRoomGenerationPresetResolver } from '#/arena-room/room-generation-preset-registry';
 import { createArenaRoomDirectoryService } from '#/arena-room/room-directory-service';
 import type { ArenaRoomHttpDependencies } from '#/arena-room/room-http';
 import { createRoomActorRegistry } from '#/arena-room/room-actor-registry';
@@ -84,13 +87,23 @@ if (process.env.HONO_CONFIG_CHECK_ONLY === 'true') {
   const roomReferences = createArenaDataCardRefVerifier({
     getClient: getHonoPrimaryD1Client,
   });
+  const roomOnlineGenerationContent = createArenaRoomGenerationOnlineContentResolver({
+    getClient: getHonoPrimaryD1Client,
+  });
+  const roomPresetGenerationContent = createArenaRoomGenerationPresetResolver();
+  const roomGenerationMaterializer = createArenaRoomGenerationMaterializer({
+    content: {
+      resolveOnline: (input) => roomOnlineGenerationContent.resolve(input),
+      resolvePreset: (input) => roomPresetGenerationContent.resolve(input),
+    },
+  });
   const roomProposals = createArenaRoomProposalService({
     memberships: roomMemberships,
     references: roomReferences,
   });
   const roomGenerations = createArenaRoomGenerationService({
     memberships: roomMemberships,
-    references: roomReferences,
+    materializer: roomGenerationMaterializer,
     generation: roomGenerationPort,
     observer: telemetry,
     onBackgroundError: () => {

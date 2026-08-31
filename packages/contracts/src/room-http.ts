@@ -7,7 +7,9 @@ import {
   RoomRevisionSchema,
 } from './protocol';
 import {
+  DataCardKindSchema,
   DisplayNameSchema,
+  HostLocalObjectKeySchema,
   OpaqueKeySchema,
   WireErrorMessageSchema,
   WireReasonSchema,
@@ -17,7 +19,13 @@ import {
   ArenaProposalChangesSchema,
   ResolvedArenaProposalStatusSchema,
 } from './proposals';
-import { MAX_PROPOSAL_CHANGES } from './limits';
+import {
+  MAX_AUX_SCENARIOS,
+  MAX_COMBATANTS,
+  MAX_MATERIALS,
+  MAX_PROPOSAL_CHANGES,
+} from './limits';
+import { SafeJsonValueSchema } from './json-value';
 import {
   RoomDirectoryTitleSchema,
   RoomDirectoryVisibilitySchema,
@@ -104,14 +112,53 @@ export const ArenaRoomProposalWithdrawRequestSchema = z.object({
   expectedRoomEpoch: OpaqueKeySchema,
 }).strict();
 
-/** Full generation payload is request-scoped and MUST NOT enter Room durable/wire state. */
+export const MAX_ARENA_ROOM_HOST_LOCAL_PAYLOADS = (
+  MAX_COMBATANTS + MAX_AUX_SCENARIOS + MAX_MATERIALS + 1
+);
+
+const SafeJsonObjectSchema = SafeJsonValueSchema.refine(
+  (value) => typeof value === 'object' && value !== null && !Array.isArray(value),
+  { message: 'payload must be a plain JSON object' },
+);
+
+export const ArenaRoomHostLocalPayloadSchema = z.object({
+  key: HostLocalObjectKeySchema,
+  kind: DataCardKindSchema,
+  payload: SafeJsonObjectSchema,
+}).strict();
+
+/**
+ * Only request-scoped host runtime/local/deferred fields are accepted here.
+ * Every Room-shared semantic is rebuilt from the frozen Shared Config.
+ */
+export const ArenaRoomHostRuntimeGenerationSchema = z.object({
+  customProvider: SafeJsonValueSchema.optional(),
+  isDowngrade: z.boolean().optional(),
+  narrativeHistory: SafeJsonValueSchema.optional(),
+  adjudicationEvents: SafeJsonValueSchema.optional(),
+  questionnaireSelections: SafeJsonValueSchema.optional(),
+  questionnaires: SafeJsonValueSchema.optional(),
+}).strict();
+
+/** Request-scoped payloads MUST NOT enter Room durable/wire state. */
 export const ArenaRoomGenerationStartRequestSchema = z.object({
   expectedRoomEpoch: OpaqueKeySchema,
   expectedRevision: RoomRevisionSchema,
   generationRequestId: ArenaGenerationRequestIdSchema,
   sharedConfig: ArenaRoomSharedConfigSchema,
-  generation: z.record(z.string(), z.unknown()),
-}).strict();
+  hostLocalPayloads: z.array(ArenaRoomHostLocalPayloadSchema)
+    .max(MAX_ARENA_ROOM_HOST_LOCAL_PAYLOADS),
+  generation: ArenaRoomHostRuntimeGenerationSchema,
+}).strict().superRefine((request, context) => {
+  const keys = request.hostLocalPayloads.map((entry) => entry.key);
+  if (new Set(keys).size !== keys.length) {
+    context.addIssue({
+      code: 'custom',
+      path: ['hostLocalPayloads'],
+      message: 'host-local payload keys must be unique',
+    });
+  }
+});
 
 export const ArenaRoomGenerationProjectionStatusSchema = z.enum([
   'reserved',
@@ -277,6 +324,10 @@ export type ArenaRoomProposalSubmitRequest = z.infer<typeof ArenaRoomProposalSub
 export type ArenaRoomProposalResolveRequest = z.infer<typeof ArenaRoomProposalResolveRequestSchema>;
 export type ArenaRoomProposalWithdrawRequest = z.infer<typeof ArenaRoomProposalWithdrawRequestSchema>;
 export type ArenaRoomGenerationStartRequest = z.infer<typeof ArenaRoomGenerationStartRequestSchema>;
+export type ArenaRoomHostLocalPayload = z.infer<typeof ArenaRoomHostLocalPayloadSchema>;
+export type ArenaRoomHostRuntimeGeneration = z.infer<
+  typeof ArenaRoomHostRuntimeGenerationSchema
+>;
 export type ArenaRoomGenerationProjectionStatus = z.infer<
   typeof ArenaRoomGenerationProjectionStatusSchema
 >;

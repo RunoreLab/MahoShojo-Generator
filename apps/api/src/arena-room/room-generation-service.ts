@@ -15,10 +15,12 @@ import type {
   ArenaRoomGenerationPort,
   ArenaRoomGenerationSubscription,
 } from '../arena-generation/room-generation-port';
+import { ArenaRoomGenerationContentResolverError } from './room-generation-content-resolver';
 import {
-  ArenaDataCardRefVerifierError,
-  type ArenaDataCardRefVerifier,
-} from './arena-data-card-ref-verifier';
+  ArenaRoomGenerationMaterializationError,
+  type ArenaRoomGenerationMaterializer,
+} from './room-generation-materializer';
+import { ArenaRoomGenerationPresetResolverError } from './room-generation-preset-registry';
 import type {
   ArenaRoomMembershipService,
   ResolvedArenaRoomMembership,
@@ -31,7 +33,6 @@ import {
 import {
   createArenaRoomGenerationSnapshot,
   createArenaRoomGenerationSnapshotFromFrozen,
-  listArenaRoomGenerationRefs,
 } from './room-generation-snapshot';
 import {
   observeArenaRoomRuntime,
@@ -74,7 +75,7 @@ export type ArenaRoomGenerationService = {
 
 export type ArenaRoomGenerationServiceOptions = {
   readonly memberships: Pick<ArenaRoomMembershipService, 'resolveActiveByAccount'>;
-  readonly references: ArenaDataCardRefVerifier;
+  readonly materializer: ArenaRoomGenerationMaterializer;
   readonly generation: ArenaRoomGenerationPort;
   readonly createPublisher?: (
     options: RoomGenerationPublisherOptions,
@@ -113,12 +114,6 @@ const validAccountUserId = (value: number): boolean => (
   Number.isSafeInteger(value) && value > 0
 );
 
-const userAuthority = (membership: ResolvedArenaRoomMembership) => ({
-  kind: 'authenticated-user' as const,
-  actorUserId: membership.member.userId,
-  accountUserId: membership.accountUserId,
-});
-
 const monotonicTimestamp = (
   now: () => string,
   state: ArenaRoomAuthorityState,
@@ -133,14 +128,44 @@ const publisherExpiry = (timestamp: string): string => (
   new Date(Date.parse(timestamp) + 24 * 60 * 60 * 1_000).toISOString()
 );
 
-const mapReferenceError = (error: unknown): never => {
-  if (!(error instanceof ArenaDataCardRefVerifierError)) throw error;
-  switch (error.code) {
-    case 'ARENA_DATA_CARD_REF_VERSION_MISMATCH': return fail('ROOM_REFERENCE_STALE');
-    case 'ARENA_DATA_CARD_REF_NOT_READABLE': return fail('ROOM_REFERENCE_DENIED');
-    case 'ARENA_DATA_CARD_REF_INPUT_INVALID': return fail('ROOM_GENERATION_INPUT_INVALID');
-    default: return fail('ROOM_REFERENCE_UNAVAILABLE');
+const mapMaterializationError = (error: unknown): never => {
+  if (error instanceof ArenaRoomGenerationMaterializationError) {
+    switch (error.code) {
+      case 'ARENA_ROOM_REFERENCE_STALE': return fail('ROOM_REFERENCE_STALE');
+      case 'ARENA_ROOM_GENERATION_CONFIG_INVALID':
+      case 'ARENA_ROOM_HOST_IDENTITY_INVALID':
+      case 'ARENA_ROOM_HOST_LOCAL_PAYLOAD_INVALID':
+      case 'ARENA_ROOM_HOST_LOCAL_PAYLOAD_KIND_MISMATCH':
+      case 'ARENA_ROOM_HOST_LOCAL_PAYLOAD_MISMATCH':
+      case 'ARENA_ROOM_HOST_LOCAL_PAYLOAD_TYPE_MISMATCH':
+      case 'ARENA_ROOM_HOST_RUNTIME_INVALID':
+      case 'ARENA_ROOM_REFERENCE_CONTENT_INVALID':
+        return fail('ROOM_GENERATION_INPUT_INVALID');
+    }
   }
+  if (error instanceof ArenaRoomGenerationContentResolverError) {
+    switch (error.code) {
+      case 'ARENA_ROOM_REFERENCE_VERSION_MISMATCH': return fail('ROOM_REFERENCE_STALE');
+      case 'ARENA_ROOM_REFERENCE_NOT_READABLE': return fail('ROOM_REFERENCE_DENIED');
+      case 'ARENA_ROOM_REFERENCE_CONTENT_INVALID':
+      case 'ARENA_ROOM_REFERENCE_INPUT_INVALID':
+      case 'ARENA_ROOM_REFERENCE_METADATA_INVALID':
+        return fail('ROOM_GENERATION_INPUT_INVALID');
+      case 'ARENA_ROOM_REFERENCE_D1_FAILED':
+      case 'ARENA_ROOM_REFERENCE_D1_UNAVAILABLE':
+        return fail('ROOM_REFERENCE_UNAVAILABLE');
+    }
+  }
+  if (error instanceof ArenaRoomGenerationPresetResolverError) {
+    switch (error.code) {
+      case 'ARENA_ROOM_PRESET_VERSION_MISMATCH': return fail('ROOM_REFERENCE_STALE');
+      case 'ARENA_ROOM_PRESET_NOT_FOUND': return fail('ROOM_REFERENCE_DENIED');
+      case 'ARENA_ROOM_PRESET_CONTENT_INVALID':
+      case 'ARENA_ROOM_PRESET_INPUT_INVALID':
+        return fail('ROOM_GENERATION_INPUT_INVALID');
+    }
+  }
+  throw error;
 };
 
 const mapTransitionFailure = (reason: string): never => {
@@ -246,17 +271,20 @@ export const createArenaRoomGenerationService = (
     return options.memberships.resolveActiveByAccount({ roomId, accountUserId });
   };
 
-  const verifyRefs = async (
+  const materialize = async (
     snapshot: ArenaMultiplayerGenerationSnapshot,
     hostAccountUserId: number,
-  ): Promise<void> => {
+    request: ArenaRoomGenerationStartRequest,
+  ): Promise<Readonly<Record<string, unknown>>> => {
     try {
-      await options.references.verify({
-        refs: listArenaRoomGenerationRefs(snapshot.sharedConfig),
+      return await options.materializer.materialize({
+        sharedConfig: snapshot.sharedConfig,
         hostAccountUserId,
+        hostLocalPayloads: request.hostLocalPayloads,
+        hostRuntime: request.generation,
       });
     } catch (error) {
-      mapReferenceError(error);
+      return mapMaterializationError(error);
     }
   };
 
@@ -530,10 +558,15 @@ export const createArenaRoomGenerationService = (
         if (snapshot.snapshotDigest !== historical.mirror.snapshotDigest) {
           return fail('ROOM_GENERATION_CONFLICT');
         }
+        const generationPayload = await materialize(
+          snapshot,
+          membership.accountUserId,
+          input.request,
+        );
         const generationPayloadDigest = await options.generation.hashSemanticPayload({
           roomId: membership.roomId,
           generationRequestId: snapshot.generationRequestId,
-          payload: input.request.generation,
+          payload: generationPayload,
           internalGuidance: ARENA_ROOM_INTERNAL_GUIDANCE,
           pvpContext: { matchId: generationId, roundId: 'attempt-1' },
           multiplayerSnapshot: snapshot,
@@ -560,7 +593,6 @@ export const createArenaRoomGenerationService = (
         if (historical.mirror.state !== 'starting' && historical.mirror.state !== 'running') {
           return fail('ROOM_GENERATION_CONFLICT');
         }
-        await verifyRefs(snapshot, membership.accountUserId);
         const timestamp = monotonicTimestamp(now, current);
         const reservation = await membership.actor.execute({
           authority: issueArenaRoomGenerationReservationAuthority({
@@ -592,7 +624,7 @@ export const createArenaRoomGenerationService = (
         return startSubscription({
           membership,
           sourceRequest: input.sourceRequest,
-          generationPayload: input.request.generation,
+          generationPayload,
           snapshot,
           generationId,
         });
@@ -605,28 +637,20 @@ export const createArenaRoomGenerationService = (
       if (membership.state.snapshot.revision !== input.request.expectedRevision) {
         return fail('ROOM_REVISION_STALE');
       }
-      let state = membership.state;
+      const state = membership.state;
       if (JSON.stringify(state.snapshot.sharedConfig) !== JSON.stringify(input.request.sharedConfig)) {
-        const timestamp = monotonicTimestamp(now, state);
-        const published = await membership.actor.execute({
-          authority: userAuthority(membership),
-          command: {
-            type: 'publish-config',
-            expectedRoomEpoch: state.snapshot.roomEpoch,
-            expectedRevision: state.snapshot.revision,
-            sharedConfig: input.request.sharedConfig,
-            timestamp,
-          },
-        });
-        if (!published.ok) return mapTransitionFailure(published.reason);
-        state = published.nextState;
+        return fail('ROOM_GENERATION_CONFLICT');
       }
       const snapshot = createArenaRoomGenerationSnapshot(state, input.request.generationRequestId);
-      await verifyRefs(snapshot, membership.accountUserId);
+      const generationPayload = await materialize(
+        snapshot,
+        membership.accountUserId,
+        input.request,
+      );
       const generationPayloadDigest = await options.generation.hashSemanticPayload({
         roomId: membership.roomId,
         generationRequestId: snapshot.generationRequestId,
-        payload: input.request.generation,
+        payload: generationPayload,
         internalGuidance: ARENA_ROOM_INTERNAL_GUIDANCE,
         pvpContext: { matchId: generationId, roundId: 'attempt-1' },
         multiplayerSnapshot: snapshot,
@@ -662,7 +686,7 @@ export const createArenaRoomGenerationService = (
       return startSubscription({
         membership,
         sourceRequest: input.sourceRequest,
-        generationPayload: input.request.generation,
+        generationPayload,
         snapshot,
         generationId,
       });

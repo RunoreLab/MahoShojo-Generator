@@ -31,6 +31,7 @@ import {
 } from '../src/arena-room/room-generation-service';
 import { createArenaRoomMembershipService } from '../src/arena-room/room-membership-service';
 import { RedisRuntime } from '../src/redis/runtime';
+import { createRoomGenerationVerifierMaterializer } from './room-generation-verifier-materializer';
 import { requireSafeRoomVerifierPrefix } from './room-verifier-safety';
 
 const redisUrl = process.env.REDIS_URL?.trim();
@@ -420,7 +421,7 @@ try {
   const port = createHostedPort(runtime.getGenerationReplayStore());
   const coordinator = createArenaRoomGenerationService({
     memberships,
-    references: { verify: async (input) => input.refs },
+    materializer: createRoomGenerationVerifierMaterializer(),
     generation: port,
     now: () => new Date().toISOString(),
   });
@@ -429,9 +430,8 @@ try {
     expectedRevision: host.snapshot.revision,
     generationRequestId,
     sharedConfig: sharedConfig(),
+    hostLocalPayloads: [],
     generation: {
-      mode: 'classic',
-      combatants: [{ data: { name: 'Verifier' } }],
       customProvider: { apiKey: `secret-${token}` },
     },
   };
@@ -534,7 +534,7 @@ try {
   const activeRecoveredPort = createHostedPort(runtime.getGenerationReplayStore());
   const activeRecoveredCoordinator = createArenaRoomGenerationService({
     memberships: activeRecoveredMemberships,
-    references: { verify: async (input) => input.refs },
+    materializer: createRoomGenerationVerifierMaterializer(),
     generation: activeRecoveredPort,
     now: () => new Date().toISOString(),
   });
@@ -614,7 +614,7 @@ try {
   const recoveredPort = createHostedPort(recoveredRuntime.getGenerationReplayStore());
   const recoveredCoordinator = createArenaRoomGenerationService({
     memberships: recoveredMemberships,
-    references: { verify: async (input) => input.refs },
+    materializer: createRoomGenerationVerifierMaterializer(),
     generation: recoveredPort,
     now: () => new Date().toISOString(),
   });

@@ -6,7 +6,7 @@
   "productionReadiness": "BLOCKED",
   "slices": {
     "GMR-10P-A": "DONE",
-    "GMR-10P-B": "READY",
+    "GMR-10P-B": "IN_PROGRESS",
     "GMR-10P-C": "BLOCKED",
     "GMR-10P-D": "BLOCKED",
     "GMR-10P-E": "BLOCKED",

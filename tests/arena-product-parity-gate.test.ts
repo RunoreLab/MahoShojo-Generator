@@ -54,7 +54,7 @@ describe('GMR-10P product parity gate', () => {
       productionReadiness: 'BLOCKED',
       slices: {
         'GMR-10P-A': 'DONE',
-        'GMR-10P-B': 'READY',
+        'GMR-10P-B': 'IN_PROGRESS',
         'GMR-10P-G': 'BLOCKED',
       },
     });

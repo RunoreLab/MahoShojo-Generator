@@ -105,11 +105,11 @@ read authority / current state
 | `GMR-08` Proposal E2E | `DONE` | GMR-05,GMR-07 | typed Proposal server/UI 闭环 | 不扩展 private sharing |
 | `GMR-09` generation publisher | `DONE` | GMR-03,GMR-05,GMR-06R,GMR-07 | single producer + Room safe fan-out/resync | 不复制 AI lifecycle |
 | `GMR-10` hardening/fault/load audit | `DONE` | GMR-06R,GMR-08,GMR-09 | telemetry + failure drills + v1 exit audit | 不自动进入生产 activation |
-| `GMR-10P` product parity remediation | `IN_PROGRESS` | GMR-10 | A 已完成 authority/coverage re-baseline 与 production fail-closed gate；B authoritative materialization / preflight 已就绪 | GMR-10P-G 完成前不激活 production |
+| `GMR-10P` product parity remediation | `IN_PROGRESS` | GMR-10 | A 已完成；B server authoritative materialization 已实施，host preflight 仍在进行 | GMR-10P-G 完成前不激活 production |
 | `GMR-11` production activation review | `BLOCKED` | GMR-10,GMR-10P + Production Gate | 已完成的 Preview canary、ingress、release 与 rollback 基础设施保留；等待 GMR-10P 全部完成后重新独立审查 | 不执行 production activation |
 | `GMR-H` multi-instance / DO evaluation | `DEFERRED` | 真实指标触发 | 新 ADR/PoC 决策 | v1 不预建 |
 
-`GMR-06` 与 `GMR-07` 在 GMR-05 后 MAY 并行，但一个 `/goal` 仍只执行其中一个。2026-08-28 的 Redis-only superseding 修订把 `GMR-06R` 加为后续 generation/hardening 前置门禁；`GMR-08` 的已完成结果保留。GMR-10 的代码、真实故障/负载证据、最终复审与 full gate 已完成。2026-08-30 用户明确启动 GMR-11 收尾；回滚绑定、实时流整改、Preview Hono/Web 曝光及双成员 canary 已完成。2026-08-31 产品一致性修订在 GMR-10 与 GMR-11 之间插入 `GMR-10P`；当前 A 已完成、B 已就绪，GMR-11 在 GMR-10P-G 通过前有效状态为 `BLOCKED`。已完成的 GMR-11 基础设施保留，但不授权 production activation。真实 provider SSE 仍是可选 UX audit；GMR-H 继续保持 `DEFERRED`。
+`GMR-06` 与 `GMR-07` 在 GMR-05 后 MAY 并行，但一个 `/goal` 仍只执行其中一个。2026-08-28 的 Redis-only superseding 修订把 `GMR-06R` 加为后续 generation/hardening 前置门禁；`GMR-08` 的已完成结果保留。GMR-10 的代码、真实故障/负载证据、最终复审与 full gate 已完成。2026-08-30 用户明确启动 GMR-11 收尾；回滚绑定、实时流整改、Preview Hono/Web 曝光及双成员 canary 已完成。2026-08-31 产品一致性修订在 GMR-10 与 GMR-11 之间插入 `GMR-10P`；当前 A 已完成、B 正在实施，GMR-11 在 GMR-10P-G 通过前有效状态为 `BLOCKED`。已完成的 GMR-11 基础设施保留，但不授权 production activation。真实 provider SSE 仍是可选 UX audit；GMR-H 继续保持 `DEFERRED`。
 
 ## 6. Goal 详细定义
 
@@ -793,8 +793,8 @@ validate -> pure derive -> conditional checkpoint
 [GMR-10P 实施计划](./2026-08-31_150000_Arena多人GMR-10P产品一致性整改实施计划.md)
 为权威入口。A 已完成真实 generation input、Room Shared Config、Proposal changes 与现有 Arena UI 的
 machine-readable coverage matrix，并在普通仓库验证中校验 gate 结构；production Hono workflow 在任何 deploy 前额外要求
-`GMR-10P-A` 至 `GMR-10P-G` 全部 `DONE`，当前按设计 fail closed。下一串行切片为 B：frozen Room authority
-materialization 与 host generation preflight。
+`GMR-10P-A` 至 `GMR-10P-G` 全部 `DONE`，当前按设计 fail closed。B 的 server authoritative
+materialization 已实施；host generation preflight 仍在进行，因此 B 与整体 Goal 都不得标记 `DONE`。
 
 ### GMR-11 production activation review
 

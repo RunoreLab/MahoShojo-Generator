@@ -20,6 +20,7 @@ import { createRoomActorRegistry } from '../src/arena-room/room-actor-registry';
 import { createArenaRoomMembershipService } from '../src/arena-room/room-membership-service';
 import { RedisRuntime } from '../src/redis/runtime';
 import { requireSafeRoomVerifierPrefix } from './room-verifier-safety';
+import { createRoomGenerationVerifierMaterializer } from './room-generation-verifier-materializer';
 
 const redisUrl = process.env.REDIS_URL?.trim();
 if (!redisUrl) throw new Error('Room generation process verifier 需要 REDIS_URL');
@@ -183,7 +184,7 @@ const runProducerProcess = async (): Promise<never> => {
   const port = createPort(runtime, executor);
   const coordinator = createArenaRoomGenerationService({
     memberships,
-    references: { verify: async (input) => input.refs },
+    materializer: createRoomGenerationVerifierMaterializer(),
     generation: port,
   });
   await coordinator.start({
@@ -194,9 +195,8 @@ const runProducerProcess = async (): Promise<never> => {
       expectedRevision: host.snapshot.revision,
       generationRequestId,
       sharedConfig: sharedConfig(),
+      hostLocalPayloads: [],
       generation: {
-        mode: 'classic',
-        combatants: [{ data: { name: 'Process verifier' } }],
         customProvider: { apiKey: secretCanary },
       },
     },
@@ -348,7 +348,7 @@ const runParent = async (): Promise<void> => {
     });
     const coordinator = createArenaRoomGenerationService({
       memberships,
-      references: { verify: async (input) => input.refs },
+      materializer: createRoomGenerationVerifierMaterializer(),
       generation: port,
     });
     const recovered = await waitFor(
@@ -407,9 +407,8 @@ const runParent = async (): Promise<void> => {
         expectedRevision: checkpoint.snapshot.revision,
         generationRequestId,
         sharedConfig: sharedConfig(),
+        hostLocalPayloads: [],
         generation: {
-          mode: 'classic',
-          combatants: [{ data: { name: 'Process verifier' } }],
           customProvider: { apiKey: secretCanary },
         },
       },

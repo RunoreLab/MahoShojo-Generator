@@ -305,10 +305,10 @@ describe('Arena Room HTTP product routes', () => {
       expectedRevision: authority.snapshot.revision,
       generationRequestId: 'request-1234',
       sharedConfig: authority.snapshot.sharedConfig,
+      hostLocalPayloads: [],
       generation: {
-        internalGuidance: '多人生成',
         customProvider: { apiKey: secret },
-        padding: 'x'.repeat(70 * 1_024),
+        narrativeHistory: [{ content: 'x'.repeat(70 * 1_024) }],
       },
     };
     const response = await app.request(

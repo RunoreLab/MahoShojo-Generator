@@ -11,6 +11,11 @@ import {
   createArenaRoomGenerationService,
 } from '#/arena-room/room-generation-service';
 import type { ArenaRoomGenerationPort } from '#/arena-generation/room-generation-port';
+import {
+  ArenaRoomGenerationMaterializationError,
+  type ArenaRoomGenerationMaterializer,
+} from '#/arena-room/room-generation-materializer';
+import { ArenaRoomGenerationContentResolverError } from '#/arena-room/room-generation-content-resolver';
 import type {
   RoomGenerationPublisher,
   RoomGenerationPublisherOptions,
@@ -109,14 +114,23 @@ const createHarness = async () => {
     displayName: 'Host',
     sharedConfig: sharedConfig(),
   });
-  const references = { verify: vi.fn(async (input) => input.refs) };
+  const materializer = {
+    materialize: vi.fn<ArenaRoomGenerationMaterializer['materialize']>(async (input) => ({
+      mode: input.sharedConfig.battleMode,
+      combatants: input.sharedConfig.combatants,
+      userGuidance: input.sharedConfig.userGuidance,
+      ...input.hostRuntime,
+    })),
+  } satisfies ArenaRoomGenerationMaterializer;
   const generation = {
     deriveGenerationId: vi.fn<ArenaRoomGenerationPort['deriveGenerationId']>(
       async () => 'generation-1',
     ),
     hashSemanticPayload: vi.fn<ArenaRoomGenerationPort['hashSemanticPayload']>(
       async (input) => `sha256:${
-        input.payload.mode === 'scenario' ? 'b'.repeat(64) : 'a'.repeat(64)
+        (input.payload.customProvider as { apiKey?: string } | undefined)?.apiKey === 'changed-secret'
+          ? 'b'.repeat(64)
+          : 'a'.repeat(64)
       }`,
     ),
     startFromHostRequest: vi.fn<ArenaRoomGenerationPort['startFromHostRequest']>(async () => ({
@@ -144,7 +158,7 @@ const createHarness = async () => {
   const onBackgroundError = vi.fn();
   const service = createArenaRoomGenerationService({
     memberships,
-    references,
+    materializer,
     generation,
     createPublisher,
     observer: { observeArenaRoomRuntime },
@@ -155,7 +169,7 @@ const createHarness = async () => {
     store,
     memberships,
     session,
-    references,
+    materializer,
     generation,
     publisher,
     observeArenaRoomRuntime,
@@ -171,17 +185,16 @@ const startRequest = (config = sharedConfig()) => ({
   expectedRevision: 0,
   generationRequestId: 'request-1234',
   sharedConfig: config,
+  hostLocalPayloads: [],
   generation: {
     customProvider: { apiKey: 'provider-secret-canary' },
   },
 });
 
 describe('Arena Room generation coordinator', () => {
-  it('先 publish/config refs/reservation checkpoint，再调用 existing generation 且 duplicate 不二次启动', async () => {
+  it('从当前 Room authority 物化，先 hash/reservation checkpoint 再调用 existing generation，duplicate 不二次启动', async () => {
     const harness = await createHarness();
-    const pending = sharedConfig();
-    pending.userGuidance = '房主尚未发布的最终配置';
-    const request = startRequest(pending);
+    const request = startRequest();
     const view = await harness.service.start({
       roomId: 'room-1',
       accountUserId: 101,
@@ -191,31 +204,36 @@ describe('Arena Room generation coordinator', () => {
 
     expect(harness.store.order).toEqual([
       'checkpoint:config',
-      'checkpoint:config',
       'checkpoint:starting',
     ]);
-    expect(harness.references.verify).toHaveBeenCalledWith({
-      refs: [{ id: 'character-1', kind: 'character', versionToken: 'v1' }],
+    expect(harness.materializer.materialize).toHaveBeenCalledWith({
+      sharedConfig: request.sharedConfig,
       hostAccountUserId: 101,
+      hostLocalPayloads: [],
+      hostRuntime: request.generation,
     });
     expect(harness.generation.startFromHostRequest).toHaveBeenCalledTimes(1);
     const start = vi.mocked(harness.generation.startFromHostRequest).mock.calls[0]![0];
     expect(start).toMatchObject({
       roomId: 'room-1',
       generationRequestId: 'request-1234',
-      payload: request.generation,
+      payload: expect.objectContaining({
+        mode: 'classic',
+        userGuidance: '',
+        customProvider: request.generation.customProvider,
+      }),
       internalGuidance: ARENA_ROOM_INTERNAL_GUIDANCE,
       pvpContext: { matchId: 'generation-1', roundId: 'attempt-1' },
       multiplayerSnapshot: {
-        configRevision: 1,
-        sharedConfig: pending,
+        configRevision: 0,
+        sharedConfig: request.sharedConfig,
         participantUserIds: [101],
       },
     });
     expect(view).toMatchObject({
       roomId: 'room-1',
       status: 'reserved',
-      generation: { generationId: 'generation-1', state: 'starting', configRevision: 1 },
+      generation: { generationId: 'generation-1', state: 'starting', configRevision: 0 },
     });
     expect(JSON.stringify(harness.store.state)).not.toContain('provider-secret-canary');
     expect(harness.createPublisher).toHaveBeenCalledTimes(1);
@@ -238,6 +256,45 @@ describe('Arena Room generation coordinator', () => {
       event: 'publisher',
       action: 'finished',
     }));
+  });
+
+  it('请求 sharedConfig 与 Room authority 不同时拒绝，不再隐式 publish', async () => {
+    const harness = await createHarness();
+    const stale = sharedConfig();
+    stale.userGuidance = '尚未发布的 host 本地修改';
+    await expect(harness.service.start({
+      roomId: 'room-1',
+      accountUserId: 101,
+      request: startRequest(stale),
+      sourceRequest: sourceRequest(),
+    })).rejects.toMatchObject({ code: 'ROOM_GENERATION_CONFLICT' });
+    expect(harness.store.order).toEqual(['checkpoint:config']);
+    expect(harness.materializer.materialize).not.toHaveBeenCalled();
+    expect(harness.generation.hashSemanticPayload).not.toHaveBeenCalled();
+    expect(harness.generation.startFromHostRequest).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      new ArenaRoomGenerationContentResolverError('ARENA_ROOM_REFERENCE_VERSION_MISMATCH'),
+      'ROOM_REFERENCE_STALE',
+    ],
+    [
+      new ArenaRoomGenerationMaterializationError('ARENA_ROOM_HOST_LOCAL_PAYLOAD_MISMATCH'),
+      'ROOM_GENERATION_INPUT_INVALID',
+    ],
+  ])('materialization fail closed (%s) 且不 hash/reserve/start provider', async (error, code) => {
+    const harness = await createHarness();
+    harness.materializer.materialize.mockRejectedValueOnce(error);
+    await expect(harness.service.start({
+      roomId: 'room-1',
+      accountUserId: 101,
+      request: startRequest(),
+      sourceRequest: sourceRequest(),
+    })).rejects.toMatchObject({ code });
+    expect(harness.store.order).toEqual(['checkpoint:config']);
+    expect(harness.generation.hashSemanticPayload).not.toHaveBeenCalled();
+    expect(harness.generation.startFromHostRequest).not.toHaveBeenCalled();
   });
 
   it('注入 publisher 同步抛错仍关闭 lifecycle gauge 并只走 background error', async () => {
@@ -284,7 +341,7 @@ describe('Arena Room generation coordinator', () => {
     };
     const unavailable = createArenaRoomGenerationService({
       memberships: harness.memberships,
-      references: harness.references,
+      materializer: harness.materializer,
       generation: unavailablePort,
       createPublisher: harness.createPublisher,
       now: () => '2026-08-28T00:02:00.000Z',
@@ -307,7 +364,7 @@ describe('Arena Room generation coordinator', () => {
     };
     const recovered = createArenaRoomGenerationService({
       memberships: harness.memberships,
-      references: harness.references,
+      materializer: harness.materializer,
       generation: notFoundPort,
       createPublisher: harness.createPublisher,
       now: () => '2026-08-28T00:02:00.000Z',
@@ -344,7 +401,7 @@ describe('Arena Room generation coordinator', () => {
     };
     const restarted = createArenaRoomGenerationService({
       memberships: harness.memberships,
-      references: harness.references,
+      materializer: harness.materializer,
       generation: historicalPort,
       createPublisher: harness.createPublisher,
       now: () => '2026-08-28T00:02:00.000Z',
@@ -354,7 +411,10 @@ describe('Arena Room generation coordinator', () => {
       accountUserId: 101,
       request: {
         ...request,
-        generation: { ...request.generation, mode: 'scenario' },
+        generation: {
+          ...request.generation,
+          customProvider: { apiKey: 'changed-secret' },
+        },
       },
       sourceRequest: sourceRequest(),
     })).rejects.toMatchObject({ code: 'ROOM_GENERATION_CONFLICT' });
@@ -484,7 +544,7 @@ describe('Arena Room generation coordinator', () => {
     });
     const restarted = createArenaRoomGenerationService({
       memberships: harness.memberships,
-      references: harness.references,
+      materializer: harness.materializer,
       generation: harness.generation,
       createPublisher: harness.createPublisher,
       now: () => '2026-08-28T00:02:00.000Z',
@@ -538,7 +598,7 @@ describe('Arena Room generation coordinator', () => {
     });
     const restarted = createArenaRoomGenerationService({
       memberships: harness.memberships,
-      references: harness.references,
+      materializer: harness.materializer,
       generation: harness.generation,
       createPublisher: harness.createPublisher,
       now: () => '2026-08-28T00:03:00.000Z',
@@ -699,7 +759,7 @@ describe('Arena Room generation coordinator', () => {
       });
     const restarted = createArenaRoomGenerationService({
       memberships: harness.memberships,
-      references: harness.references,
+      materializer: harness.materializer,
       generation: harness.generation,
       createPublisher: harness.createPublisher,
       now: () => '2026-08-28T00:05:00.000Z',

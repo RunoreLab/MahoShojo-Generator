@@ -54,10 +54,14 @@ describe('Arena Room HTTP product contract', () => {
       expectedRevision: 3,
       generationRequestId: 'request-1234',
       sharedConfig: canonicalRoomSnapshot.sharedConfig,
+      hostLocalPayloads: [{
+        key: 'host-local:character:0:test',
+        kind: 'character' as const,
+        payload: { name: '本地角色' },
+      }],
       generation: {
-        mode: 'classic',
-        combatants: [{ name: '角色' }],
         customProvider: { apiKey: 'request-only-secret' },
+        narrativeHistory: [{ content: '只在本次请求内' }],
       },
     };
     expect(ArenaRoomGenerationStartRequestSchema.parse(request)).toEqual(request);
@@ -79,6 +83,36 @@ describe('Arena Room HTTP product contract', () => {
     expect(ArenaRoomGenerationStartRequestSchema.safeParse({
       ...request,
       generation: [],
+    }).success).toBe(false);
+    for (const forbiddenSharedSemantic of [
+      { mode: 'scenario' },
+      { combatants: [{ data: { name: '伪造角色' } }] },
+      { scenario: { title: '伪造情景' } },
+      { materials: [{ content: '伪造素材' }] },
+      { language: 'en-US' },
+      { readArenaHistory: false },
+      { arenaFreeRankingEnabled: true },
+    ]) {
+      expect(ArenaRoomGenerationStartRequestSchema.safeParse({
+        ...request,
+        generation: { ...request.generation, ...forbiddenSharedSemantic },
+      }).success).toBe(false);
+    }
+    expect(ArenaRoomGenerationStartRequestSchema.safeParse({
+      ...request,
+      hostLocalPayloads: [{
+        key: 'host-local:character:0:test',
+        kind: 'character',
+        payload: { constructor: { polluted: true } },
+      }],
+    }).success).toBe(false);
+    expect(ArenaRoomGenerationStartRequestSchema.safeParse({
+      ...request,
+      hostLocalPayloads: [{
+        key: 'host-local:character:0:test',
+        kind: 'character',
+        payload: ['not-an-object'],
+      }],
     }).success).toBe(false);
 
     const response = {

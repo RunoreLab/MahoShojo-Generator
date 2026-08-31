@@ -84,6 +84,9 @@ importers:
       '@mahoshojo/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@mahoshojo/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
       '@mahoshojo/hosted-api':
         specifier: workspace:*
         version: link:../../packages/hosted-api

@@ -33,7 +33,6 @@ import {
 import { createArenaRoomMembershipService } from '../src/arena-room/room-membership-service';
 import { createArenaRoomProposalService } from '../src/arena-room/room-proposal-service';
 import { createArenaRoomGenerationService } from '../src/arena-room/room-generation-service';
-import type { ArenaDataCardRefVerifier } from '../src/arena-room/arena-data-card-ref-verifier';
 import type {
   ArenaRoomGenerationEvent,
   ArenaRoomGenerationPort,
@@ -51,6 +50,7 @@ import {
 } from '../src/arena-room/room-websocket-gateway';
 import { RedisRuntime } from '../src/redis/runtime';
 import { requireSafeRoomVerifierPrefix } from './room-verifier-safety';
+import { createRoomGenerationVerifierMaterializer } from './room-generation-verifier-materializer';
 
 const redisUrl = process.env.REDIS_URL?.trim();
 if (!redisUrl) throw new Error('Room Redis verifier 需要 REDIS_URL');
@@ -1267,7 +1267,7 @@ try {
       const generationSecretCanary = `provider-secret-${token}`;
       let generationStartCount = 0;
       let generationResumeCount = 0;
-      let referenceVerifyCount = 0;
+      let materializationCount = 0;
       let durableProjectionStatus: 'completed' | 'running' = 'running';
       let primaryStreamController: ReadableStreamDefaultController<
         ArenaRoomGenerationEvent
@@ -1348,28 +1348,23 @@ try {
           };
         },
       } satisfies ArenaRoomGenerationPort;
-      const generationReferences: ArenaDataCardRefVerifier = {
-        async verify(input) {
-          referenceVerifyCount += 1;
-          return input.refs;
-        },
-      };
+      const generationMaterializer = createRoomGenerationVerifierMaterializer(() => {
+        materializationCount += 1;
+      });
       const generationService = createArenaRoomGenerationService({
         memberships: generationMemberships,
-        references: generationReferences,
+        materializer: generationMaterializer,
         generation: generationPort,
         now: () => new Date(generationNow).toISOString(),
       });
       const generationConfig = sharedConfig();
-      generationConfig.userGuidance = 'Redis generation pending config';
       const generationRequest = {
         expectedRoomEpoch: generationHost.roomEpoch,
         expectedRevision: 0,
         generationRequestId,
         sharedConfig: generationConfig,
+        hostLocalPayloads: [],
         generation: {
-          generationRequestId,
-          internalGuidance: '验证 Redis Room generation publisher',
           customProvider: { apiKey: generationSecretCanary },
         },
       };
@@ -1416,7 +1411,7 @@ try {
       });
       if (
         generationStartCount !== 1
-        || referenceVerifyCount !== 1
+        || materializationCount !== 2
         || JSON.stringify(await readerStore.load(generationRoomId)).includes(generationSecretCanary)
       ) {
         throw new Error('ROOM_REDIS_GENERATION_DUPLICATE_OR_SECRET_FAILED');
@@ -1454,7 +1449,7 @@ try {
       });
       const recoveredGenerationService = createArenaRoomGenerationService({
         memberships: recoveredMemberships,
-        references: generationReferences,
+        materializer: generationMaterializer,
         generation: generationPort,
         now: () => new Date(generationNow).toISOString(),
       });
