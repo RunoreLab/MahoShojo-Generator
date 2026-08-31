@@ -30,8 +30,15 @@ const collaborativeTarget = (change: ArenaProposalChange): string => {
       return `combatant-guidance:${change.combatantKey}`;
     case 'assignTeam':
       return `combatant-team:${change.combatantKey}`;
+    case 'addTeam':
+    case 'removeTeam':
+      return `team:${change.teamKey}`;
+    case 'renameTeam':
+      return `team-name:${change.teamKey}`;
     case 'setBattleMode':
       return 'battle-mode';
+    case 'setSelectedLanguage':
+      return 'selected-language';
     case 'setScenario':
       return 'scenario';
     case 'addAuxScenario':
@@ -69,8 +76,17 @@ export const hasCollaborativeChangeEffect = (
     case 'assignTeam':
       return config.combatants.some((entry) => entry.key === change.combatantKey)
         && assignmentOf(config, change.combatantKey) === change.teamKey;
+    case 'addTeam': {
+      return config.teams.some((entry) => entry.key === change.teamKey);
+    }
+    case 'removeTeam':
+      return !config.teams.some((entry) => entry.key === change.teamKey);
+    case 'renameTeam':
+      return config.teams.find((entry) => entry.key === change.teamKey)?.displayName === change.value;
     case 'setBattleMode':
       return config.battleMode === change.value;
+    case 'setSelectedLanguage':
+      return config.selectedLanguage === change.value;
     case 'setScenario':
       return change.ref === null
         ? config.scenario === null

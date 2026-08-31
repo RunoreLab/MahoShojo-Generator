@@ -303,20 +303,20 @@ describe('Arena shared config diff', () => {
     });
   });
 
-  it('fails closed for team structure, array reorder, language, preset additions, and host-local additions', () => {
+  it('supports team rename/language while failing closed for array reorder, preset additions, and host-local additions', () => {
     const base = baseConfig();
     expect(() => diffArenaSharedConfig(base, {
       ...base,
       teams: [{ ...base.teams[1] }, { ...base.teams[0] }],
     })).toThrowError(/array reorder|reorder/i);
-    expect(() => diffArenaSharedConfig(base, {
+    expect(diffArenaSharedConfig(base, {
       ...base,
       teams: [{ ...base.teams[0], displayName: 'renamed' }, base.teams[1]],
-    })).toThrowError(/team/i);
-    expect(() => diffArenaSharedConfig(base, {
+    })).toEqual([expect.objectContaining({ type: 'renameTeam', teamKey: 'team:a', value: 'renamed' })]);
+    expect(diffArenaSharedConfig(base, {
       ...base,
       selectedLanguage: 'en-US',
-    })).toThrowError(/language|unsupported/i);
+    })).toEqual([expect.objectContaining({ type: 'setSelectedLanguage', value: 'en-US' })]);
     expect(() => diffArenaSharedConfig(base, {
       ...base,
       combatants: [...base.combatants, { key: 'preset:c3', ref: ref('c3', 'character') }],

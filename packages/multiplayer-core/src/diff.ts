@@ -40,14 +40,6 @@ const hostEntry = (entry: unknown): boolean => (
   && entry.source === 'host-local'
 );
 
-const assertOrder = (baseKeys: readonly string[], workingKeys: readonly string[], target: string): void => {
-  const baseSet = new Set(baseKeys);
-  const workingSet = new Set(workingKeys);
-  const commonBase = baseKeys.filter((key) => workingSet.has(key));
-  const commonWorking = workingKeys.filter((key) => baseSet.has(key));
-  if (!arrayEqual(commonBase, commonWorking)) arrayReorder(target);
-};
-
 const assertNestedOrder = (
   base: readonly string[],
   working: readonly string[],
@@ -83,6 +75,9 @@ const assertTeamApplyOrder = (
   base: ArenaRoomSharedConfig,
   working: ArenaRoomSharedConfig,
   removedCombatantKeys: ReadonlySet<string>,
+  structural: readonly Extract<ArenaProposalChange, {
+    type: 'addTeam' | 'removeTeam' | 'renameTeam';
+  }>[],
   assignments: readonly Extract<ArenaProposalChange, { type: 'assignTeam' }>[],
 ): void => {
   const simulated = new Map(base.teams.map((team) => [team.key, [...team.combatantKeys]]));
@@ -91,6 +86,10 @@ const assertTeamApplyOrder = (
       const index = team.indexOf(key);
       if (index >= 0) team.splice(index, 1);
     }
+  }
+  for (const change of structural) {
+    if (change.type === 'addTeam') simulated.set(change.teamKey, []);
+    if (change.type === 'removeTeam') simulated.delete(change.teamKey);
   }
   for (const change of assignments) {
     const target = change.teamKey === null ? undefined : simulated.get(change.teamKey);
@@ -185,10 +184,6 @@ export const diffArenaSharedConfig = (
   const nextId = changeIdFactory();
   const changes: ArenaProposalChange[] = [];
 
-  if (base.selectedLanguage !== working.selectedLanguage) {
-    unsupportedChange('selectedLanguage changes are not representable by Arena Proposal v1');
-  }
-
   const baseCombatantKeys = base.combatants.map(entryKey);
   const workingCombatantKeys = working.combatants.map(entryKey);
   assertAppendApplyOrder(baseCombatantKeys, workingCombatantKeys, 'combatants');
@@ -243,16 +238,42 @@ export const diffArenaSharedConfig = (
 
   const baseTeamKeys = base.teams.map(entryKey);
   const workingTeamKeys = working.teams.map(entryKey);
-  assertOrder(baseTeamKeys, workingTeamKeys, 'teams');
+  assertAppendApplyOrder(baseTeamKeys, workingTeamKeys, 'teams');
   const baseTeams = new Map(base.teams.map((team) => [team.key, team]));
   const workingTeams = new Map(working.teams.map((team) => [team.key, team]));
-  if (baseTeams.size !== workingTeams.size || [...baseTeams.keys()].some((key) => !workingTeams.has(key))) {
-    unsupportedChange('team creation, deletion, or renaming is not representable by Arena Proposal v1');
+  const addedTeamIds = new Map<string, string>();
+  for (const team of working.teams) {
+    if (baseTeams.has(team.key)) continue;
+    const changeId = nextId();
+    addedTeamIds.set(team.key, changeId);
+    changes.push(makeChange({
+      changeId,
+      type: 'addTeam',
+      teamKey: team.key,
+      displayName: team.displayName,
+      expectedBase: { kind: 'absent' },
+    }));
+  }
+  for (const team of base.teams) {
+    if (workingTeams.has(team.key)) continue;
+    changes.push(makeChange({
+      changeId: nextId(),
+      type: 'removeTeam',
+      teamKey: team.key,
+      expectedBase: { kind: 'present', ref: deepClone(team) },
+    }));
   }
   for (const baseTeam of base.teams) {
-    const workingTeam = workingTeams.get(baseTeam.key)!;
+    const workingTeam = workingTeams.get(baseTeam.key);
+    if (!workingTeam) continue;
     if (baseTeam.displayName !== workingTeam.displayName) {
-      unsupportedChange(`team ${baseTeam.key} rename is not representable by Arena Proposal v1`);
+      changes.push(makeChange({
+        changeId: nextId(),
+        type: 'renameTeam',
+        teamKey: baseTeam.key,
+        value: workingTeam.displayName,
+        expectedBase: { kind: 'value', value: baseTeam.displayName },
+      }));
     }
     assertNestedOrder(baseTeam.combatantKeys, workingTeam.combatantKeys, `team ${baseTeam.key} combatants`);
   }
@@ -260,20 +281,31 @@ export const diffArenaSharedConfig = (
     const previousAssignment = baseCombatants.has(entry.key) ? assignmentOf(base, entry.key) : null;
     const nextAssignment = assignmentOf(working, entry.key);
     if (previousAssignment === nextAssignment) continue;
+    if (nextAssignment === null && previousAssignment !== null && !workingTeams.has(previousAssignment)) {
+      continue;
+    }
+    const dependencies = [
+      ...(addedCombatantIds.has(entry.key) ? [addedCombatantIds.get(entry.key)!] : []),
+      ...(nextAssignment !== null && addedTeamIds.has(nextAssignment) ? [addedTeamIds.get(nextAssignment)!] : []),
+    ];
     changes.push(makeChange({
       changeId: nextId(),
       type: 'assignTeam',
       combatantKey: entry.key,
       teamKey: nextAssignment,
       expectedBase: { kind: 'value', value: previousAssignment },
-      ...(addedCombatantIds.has(entry.key) ? { dependsOn: [addedCombatantIds.get(entry.key)!] } : {}),
+      ...(dependencies.length > 0 ? { dependsOn: dependencies } : {}),
     }));
   }
+  const structuralTeamChanges = changes.filter((change): change is Extract<ArenaProposalChange, {
+    type: 'addTeam' | 'removeTeam' | 'renameTeam';
+  }> => change.type === 'addTeam' || change.type === 'removeTeam' || change.type === 'renameTeam');
   const assignmentChanges = changes.filter((change): change is Extract<ArenaProposalChange, { type: 'assignTeam' }> => change.type === 'assignTeam');
   assertTeamApplyOrder(
     base,
     working,
     new Set(base.combatants.filter((entry) => !workingCombatants.has(entry.key)).map((entry) => entry.key)),
+    structuralTeamChanges,
     assignmentChanges,
   );
 
@@ -283,6 +315,14 @@ export const diffArenaSharedConfig = (
       type: 'setBattleMode',
       value: working.battleMode,
       expectedBase: { kind: 'value', value: base.battleMode },
+    }));
+  }
+  if (base.selectedLanguage !== working.selectedLanguage) {
+    changes.push(makeChange({
+      changeId: nextId(),
+      type: 'setSelectedLanguage',
+      value: working.selectedLanguage,
+      expectedBase: { kind: 'value', value: base.selectedLanguage },
     }));
   }
 

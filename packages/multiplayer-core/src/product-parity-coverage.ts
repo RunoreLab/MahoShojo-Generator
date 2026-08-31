@@ -148,17 +148,9 @@ export const ARENA_PRODUCT_PARITY_COVERAGE = {
     scenarioFileName: derivedSharedProposable(['setScenario']),
     scenarioSourceDataCardId: derivedSharedProposable(['setScenario']),
     scenarioSourceDataCardUpdatedAt: derivedSharedProposable(['setScenario']),
-    teams: derivedSharedProposable(['assignTeam']),
-    teamNames: classified('shared/host-only', {
-      single: 'editable', roomHost: 'materialized', roomProposal: 'deferred',
-    }, {
-      gap: 'Shared Config 已保存 team display name，但 Proposal 缺少 rename team change。',
-    }),
-    language: classified('shared/host-only', {
-      single: 'editable', roomHost: 'materialized', roomProposal: 'deferred',
-    }, {
-      gap: 'Shared Config 已保存 selectedLanguage，但 Proposal 缺少 setLanguage change。',
-    }),
+    teams: derivedSharedProposable(['addTeam', 'removeTeam', 'assignTeam']),
+    teamNames: derivedSharedProposable(['addTeam', 'renameTeam']),
+    language: derivedSharedProposable(['setSelectedLanguage']),
     readArenaHistory: derivedSharedProposable(['setHistorySettings']),
     arenaHistoryReadLimit: derivedSharedProposable(['setHistorySettings']),
     writeArenaHistory: derivedSharedProposable(['setHistorySettings']),
@@ -210,16 +202,9 @@ export const ARENA_PRODUCT_PARITY_COVERAGE = {
       ...sharedProposable(['setCharacterGuidance']),
       rootField: 'combatants',
     },
-    teams: { ...sharedProposable(['assignTeam']), rootField: 'teams' },
+    teams: { ...sharedProposable(['addTeam', 'removeTeam', 'assignTeam']), rootField: 'teams' },
     'teams.combatantKeys': { ...sharedProposable(['assignTeam']), rootField: 'teams' },
-    'teams.displayName': {
-      ...classified('shared/host-only', {
-        single: 'editable', roomHost: 'editable', roomProposal: 'deferred',
-      }, {
-        gap: 'Room 保存 team display name，但 Proposal 没有 rename team change。',
-      }),
-      rootField: 'teams',
-    },
+    'teams.displayName': { ...sharedProposable(['addTeam', 'renameTeam']), rootField: 'teams' },
     scenario: { ...sharedProposable(['setScenario']), rootField: 'scenario' },
     auxScenarios: {
       ...sharedProposable(['addAuxScenario', 'removeAuxScenario']),
@@ -235,14 +220,7 @@ export const ARENA_PRODUCT_PARITY_COVERAGE = {
       ...sharedProposable(['setStoryLength']),
       rootField: 'customStoryLength',
     },
-    selectedLanguage: {
-      ...classified('shared/host-only', {
-        single: 'editable', roomHost: 'editable', roomProposal: 'deferred',
-      }, {
-        gap: 'Room 保存 selectedLanguage，但 Proposal 没有 setLanguage change。',
-      }),
-      rootField: 'selectedLanguage',
-    },
+    selectedLanguage: { ...sharedProposable(['setSelectedLanguage']), rootField: 'selectedLanguage' },
     historySettings: { ...sharedProposable(['setHistorySettings']), rootField: 'historySettings' },
     'historySettings.readArenaHistory': { ...sharedProposable(['setHistorySettings']), rootField: 'historySettings' },
     'historySettings.readArenaHistoryLimit': { ...sharedProposable(['setHistorySettings']), rootField: 'historySettings' },
@@ -260,7 +238,11 @@ export const ARENA_PRODUCT_PARITY_COVERAGE = {
     removeCombatant: sharedProposable(['removeCombatant']),
     setCharacterGuidance: sharedProposable(['setCharacterGuidance']),
     assignTeam: sharedProposable(['assignTeam']),
+    addTeam: sharedProposable(['addTeam']),
+    removeTeam: sharedProposable(['removeTeam']),
+    renameTeam: sharedProposable(['renameTeam']),
     setBattleMode: sharedProposable(['setBattleMode']),
+    setSelectedLanguage: sharedProposable(['setSelectedLanguage']),
     setScenario: sharedProposable(['setScenario']),
     addAuxScenario: sharedProposable(['addAuxScenario']),
     removeAuxScenario: sharedProposable(['removeAuxScenario']),
@@ -299,12 +281,14 @@ export const ARENA_PRODUCT_PARITY_COVERAGE = {
       ['setCharacterGuidance'],
       ['GMR10P-A-ARENA-UI-CONTRACT'],
     ),
-    teamAssignment: sharedProposable(['assignTeam'], ['GMR10P-A-ARENA-UI-CONTRACT']),
-    teamDisplayName: classified('shared/host-only', {
-      single: 'editable', roomHost: 'editable', roomProposal: 'deferred',
-    }, {
-      gap: 'Arena UI 可编辑 team display name，但 Proposal 缺少 rename team change。',
-    }),
+    teamAssignment: sharedProposable(
+      ['addTeam', 'removeTeam', 'assignTeam'],
+      ['GMR10P-A-ARENA-UI-CONTRACT'],
+    ),
+    teamDisplayName: sharedProposable(
+      ['addTeam', 'renameTeam'],
+      ['GMR10P-A-ARENA-UI-CONTRACT'],
+    ),
     scenario: sharedProposable(['setScenario'], ['GMR10P-A-ARENA-UI-CONTRACT']),
     scenarioLocalUpload: classified('forbidden', {
       single: 'editable', roomHost: 'host-only', roomProposal: 'forbidden',
@@ -347,11 +331,10 @@ export const ARENA_PRODUCT_PARITY_COVERAGE = {
     userGuidance: sharedProposable(['setUserGuidance'], ['GMR10P-A-ARENA-UI-CONTRACT']),
     storyLength: sharedProposable(['setStoryLength'], ['GMR10P-A-ARENA-UI-CONTRACT']),
     customStoryLength: sharedProposable(['setStoryLength'], ['GMR10P-A-ARENA-UI-CONTRACT']),
-    selectedLanguage: classified('shared/host-only', {
-      single: 'editable', roomHost: 'editable', roomProposal: 'deferred',
-    }, {
-      gap: 'Arena UI 可编辑 selectedLanguage，但 Proposal 缺少 setLanguage change。',
-    }),
+    selectedLanguage: sharedProposable(
+      ['setSelectedLanguage'],
+      ['GMR10P-A-ARENA-UI-CONTRACT'],
+    ),
     historySettings: sharedProposable(
       ['setHistorySettings'],
       ['GMR10P-A-ARENA-UI-CONTRACT'],

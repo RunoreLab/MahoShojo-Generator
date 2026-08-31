@@ -5,19 +5,21 @@ import {
   BattleModeSchema,
   CharacterDataCardRefSchema,
   CustomStoryLengthSchema,
+  DisplayNameSchema,
   GuidanceSchema,
   GlobalGuidanceSchema,
   HostLocalCombatantStubSchema,
   HostLocalMaterialStubSchema,
   HostLocalScenarioStubSchema,
   MaterialDataCardRefSchema,
+  LanguageSchema,
   OpaqueKeySchema,
   ScenarioDataCardRefSchema,
   StableObjectKeySchema,
   StoryLengthSchema,
 } from './primitives';
 import { ArenaContractError } from './errors';
-import { SharedHistorySettingsSchema } from './shared-config';
+import { SharedHistorySettingsSchema, TeamAssignmentSchema } from './shared-config';
 import { PROPOSAL_VERSION } from './versions';
 import { jsonUtf8ByteLength } from './wire-size';
 
@@ -107,10 +109,40 @@ export const AssignTeamChangeSchema = change({
   expectedBase: ValueExpectedBaseSchema(OpaqueKeySchema.nullable()),
 });
 
+export const AddTeamChangeSchema = change({
+  type: z.literal('addTeam'),
+  teamKey: OpaqueKeySchema,
+  displayName: DisplayNameSchema,
+  expectedBase: AbsentExpectedBaseSchema,
+});
+
+export const RemoveTeamChangeSchema = change({
+  type: z.literal('removeTeam'),
+  teamKey: OpaqueKeySchema,
+  expectedBase: PresentExpectedBaseSchema(TeamAssignmentSchema),
+}).superRefine((change, context) => {
+  if (change.teamKey !== change.expectedBase.ref.key) {
+    context.addIssue({ code: 'custom', path: ['expectedBase', 'ref', 'key'], message: 'expectedBase.ref identity must match teamKey' });
+  }
+});
+
+export const RenameTeamChangeSchema = change({
+  type: z.literal('renameTeam'),
+  teamKey: OpaqueKeySchema,
+  value: DisplayNameSchema,
+  expectedBase: ValueExpectedBaseSchema(DisplayNameSchema),
+});
+
 export const SetBattleModeChangeSchema = change({
   type: z.literal('setBattleMode'),
   value: BattleModeSchema,
   expectedBase: ValueExpectedBaseSchema(BattleModeSchema),
+});
+
+export const SetSelectedLanguageChangeSchema = change({
+  type: z.literal('setSelectedLanguage'),
+  value: LanguageSchema,
+  expectedBase: ValueExpectedBaseSchema(LanguageSchema),
 });
 
 export const SetScenarioChangeSchema = change({
@@ -180,7 +212,11 @@ export const ArenaProposalChangeSchema = z.discriminatedUnion('type', [
   RemoveCombatantChangeSchema,
   SetCharacterGuidanceChangeSchema,
   AssignTeamChangeSchema,
+  AddTeamChangeSchema,
+  RemoveTeamChangeSchema,
+  RenameTeamChangeSchema,
   SetBattleModeChangeSchema,
+  SetSelectedLanguageChangeSchema,
   SetScenarioChangeSchema,
   AddAuxScenarioChangeSchema,
   RemoveAuxScenarioChangeSchema,

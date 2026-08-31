@@ -82,6 +82,9 @@ const changeTargetExists = (config: ArenaRoomSharedConfig, change: ArenaProposal
       return config.auxScenarios.some((entry) => entry.key === change.scenarioKey);
     case 'removeMaterial':
       return config.materials.some((entry) => entry.key === change.materialKey);
+    case 'removeTeam':
+    case 'renameTeam':
+      return config.teams.some((team) => team.key === change.teamKey);
     default:
       return true;
   }
@@ -130,8 +133,25 @@ const applyChange = (config: ArenaRoomSharedConfig, change: ArenaProposalChange)
       }
       return;
     }
+    case 'addTeam':
+      if (config.teams.some((team) => team.key === change.teamKey)) {
+        throw new ArenaMultiplayerCoreError('unsupported-change', `team ${change.teamKey} already exists`);
+      }
+      config.teams.push({ key: change.teamKey, displayName: change.displayName, combatantKeys: [] });
+      return;
+    case 'removeTeam':
+      config.teams = config.teams.filter((team) => team.key !== change.teamKey);
+      return;
+    case 'renameTeam':
+      config.teams = config.teams.map((team) => team.key === change.teamKey
+        ? { ...team, displayName: change.value }
+        : team);
+      return;
     case 'setBattleMode':
       config.battleMode = change.value;
+      return;
+    case 'setSelectedLanguage':
+      config.selectedLanguage = change.value;
       return;
     case 'setScenario':
       config.scenario = change.ref === null

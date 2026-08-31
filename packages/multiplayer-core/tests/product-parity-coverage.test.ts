@@ -120,7 +120,7 @@ describe('GMR-10P Arena 产品一致性覆盖矩阵', () => {
       [...ArenaRoomSharedConfigSchema.keyof().options].sort(),
     );
     expect(Object.keys(matrix.proposalChanges).sort()).toEqual(actualProposalChangeTypes());
-    expect(Object.keys(matrix.proposalChanges)).toHaveLength(13);
+    expect(Object.keys(matrix.proposalChanges)).toHaveLength(17);
   });
 
   it('每项都有 §11.1 mode、contract change 与 test ID 列', () => {
@@ -164,13 +164,19 @@ describe('GMR-10P Arena 产品一致性覆盖矩阵', () => {
   it('[GMR10P-A-EXPLICIT-GAPS] 显式记录 authority 与产品覆盖缺口', () => {
     const matrix = coverage();
 
-    expect(matrix.generationRequest.language.gap).toMatch(/Proposal.*setLanguage/u);
+    expect(matrix.generationRequest.language).toMatchObject({
+      classification: 'shared/proposable',
+      contractChangeTypes: ['setSelectedLanguage'],
+    });
     expect(matrix.generationRequest.questionnaireSelections.reason).toMatch(/Shared Config.*Proposal/u);
     expect(matrix.generationRequest.questionnaires.reason).toMatch(/lore.*materialization/u);
     expect(matrix.generationRequest.adjudicationEvents.reason).toMatch(/Shared Config.*Proposal/u);
-    expect(matrix.generationRequest.teamNames.gap).toMatch(/team display name.*Proposal/u);
-    expect(matrix.arenaUi.selectedLanguage.gap).toMatch(/Proposal.*setLanguage/u);
-    expect(matrix.arenaUi.teamDisplayName.gap).toMatch(/Proposal.*rename/u);
+    expect(matrix.generationRequest.teamNames).toMatchObject({
+      classification: 'shared/proposable',
+      contractChangeTypes: ['addTeam', 'renameTeam'],
+    });
+    expect(matrix.arenaUi.selectedLanguage.classification).toBe('shared/proposable');
+    expect(matrix.arenaUi.teamDisplayName.classification).toBe('shared/proposable');
     for (const key of ['combatants', 'scenario', 'auxScenarios', 'materials'] as const) {
       expect(matrix.generationRequest[key]).toMatchObject({
         classification: 'shared/proposable',

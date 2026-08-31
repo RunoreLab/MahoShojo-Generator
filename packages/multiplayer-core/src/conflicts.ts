@@ -30,6 +30,7 @@ const reference = (input: unknown): SemanticValue => ({ kind: 'ref', ref: deepCl
 const currentCombatant = (config: ArenaRoomSharedConfig, key: string) => config.combatants.find((entry) => entry.key === key);
 const currentAuxScenario = (config: ArenaRoomSharedConfig, key: string) => config.auxScenarios.find((entry) => entry.key === key);
 const currentMaterial = (config: ArenaRoomSharedConfig, key: string) => config.materials.find((entry) => entry.key === key);
+const currentTeam = (config: ArenaRoomSharedConfig, key: string) => config.teams.find((entry) => entry.key === key);
 
 const entryReference = (entry: unknown): unknown => {
   if (entry && typeof entry === 'object' && !Array.isArray(entry) && 'ref' in entry) {
@@ -64,8 +65,22 @@ const currentSemanticValue = (config: ArenaRoomSharedConfig, change: ArenaPropos
       const assignment = currentAssignment(config, change.combatantKey);
       return assignment === undefined ? absent() : value(assignment);
     }
+    case 'addTeam': {
+      const team = currentTeam(config, change.teamKey);
+      return team ? reference(team) : absent();
+    }
+    case 'removeTeam': {
+      const team = currentTeam(config, change.teamKey);
+      return team ? reference(team) : absent();
+    }
+    case 'renameTeam': {
+      const team = currentTeam(config, change.teamKey);
+      return team ? value(team.displayName) : absent();
+    }
     case 'setBattleMode':
       return value(config.battleMode);
+    case 'setSelectedLanguage':
+      return value(config.selectedLanguage);
     case 'setScenario':
       return reference(config.scenario === null ? null : entryReference(config.scenario));
     case 'addAuxScenario': {
@@ -99,7 +114,11 @@ const targetOf = (change: ArenaProposalChange): string => {
     case 'removeCombatant':
     case 'setCharacterGuidance':
     case 'assignTeam': return `combatant:${change.combatantKey}`;
+    case 'addTeam':
+    case 'removeTeam': return `team:${change.teamKey}`;
+    case 'renameTeam': return `team:${change.teamKey}:displayName`;
     case 'setBattleMode': return 'battleMode';
+    case 'setSelectedLanguage': return 'selectedLanguage';
     case 'setScenario': return 'scenario';
     case 'addAuxScenario': return `auxScenario:data-card:${change.ref.id}`;
     case 'removeAuxScenario': return `auxScenario:${change.scenarioKey}`;
