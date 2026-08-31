@@ -3,6 +3,7 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ArenaProposal } from '@mahoshojo/contracts/arena-room';
 
 import { ArenaProposalPanel } from '@/components/arena/multiplayer/ArenaProposalPanel';
 import type {
@@ -79,7 +80,7 @@ const proposal = {
 
 const stateFor = (
   self: typeof host | typeof member,
-  proposals: readonly (typeof proposal)[] = [],
+  proposals: readonly ArenaProposal[] = [],
 ): ArenaRoomControllerState => ({
   phase: 'connected',
   rooms: [],
@@ -228,5 +229,46 @@ describe('Arena Proposal panel real React interactions', () => {
       expectedRevision: 0,
       resolution: 'reject',
     });
+  });
+
+  it('host 审阅显示 language 与 team structure typed changes', async () => {
+    const controller = createController();
+    const expanded: ArenaProposal = {
+      ...proposal,
+      proposalId: 'proposal-expanded',
+      changes: [{
+        changeId: 'team-add',
+        type: 'addTeam',
+        teamKey: 'team:b',
+        displayName: 'B 队',
+        expectedBase: { kind: 'absent' },
+      }, {
+        changeId: 'team-remove',
+        type: 'removeTeam',
+        teamKey: 'team:a',
+        expectedBase: {
+          kind: 'present',
+          ref: { key: 'team:a', displayName: 'A 队', combatantKeys: [] },
+        },
+      }, {
+        changeId: 'team-rename',
+        type: 'renameTeam',
+        teamKey: 'team:c',
+        value: 'C 队新名',
+        expectedBase: { kind: 'value', value: 'C 队' },
+      }, {
+        changeId: 'language',
+        type: 'setSelectedLanguage',
+        value: 'en-US',
+        expectedBase: { kind: 'value', value: 'zh-CN' },
+      }],
+    };
+    await act(async () => root.render(
+      <ArenaProposalPanel state={stateFor(host, [expanded])} controller={controller} />,
+    ));
+    expect(container.textContent).toContain('新增队伍 B 队');
+    expect(container.textContent).toContain('移除队伍 team:a');
+    expect(container.textContent).toContain('队伍 team:c 改名为 C 队新名');
+    expect(container.textContent).toContain('语言改为 en-US');
   });
 });

@@ -73,7 +73,11 @@ const changeSummary = (change: ArenaProposalChange): string => {
     case 'removeCombatant': return `移除角色 ${change.combatantKey}`;
     case 'setCharacterGuidance': return `修改角色引导 ${change.combatantKey}`;
     case 'assignTeam': return `调整队伍 ${change.combatantKey}`;
+    case 'addTeam': return `新增队伍 ${change.displayName}`;
+    case 'removeTeam': return `移除队伍 ${change.teamKey}`;
+    case 'renameTeam': return `队伍 ${change.teamKey} 改名为 ${safeText(change.value)}`;
     case 'setBattleMode': return `战斗模式改为 ${change.value}`;
+    case 'setSelectedLanguage': return `语言改为 ${change.value}`;
     case 'setScenario': return change.ref === null ? '清除主情景' : `主情景改为 ${change.ref.id}`;
     case 'addAuxScenario': return `新增辅助情景 ${change.ref.id}`;
     case 'removeAuxScenario': return `移除辅助情景 ${change.scenarioKey}`;
