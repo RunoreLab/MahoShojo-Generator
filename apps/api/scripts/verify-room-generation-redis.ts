@@ -30,9 +30,9 @@ import {
   ARENA_ROOM_INTERNAL_GUIDANCE,
   createArenaRoomGenerationService,
 } from '../src/arena-room/room-generation-service';
-import { createArenaRoomMembershipService } from '../src/arena-room/room-membership-service';
 import { RedisRuntime } from '../src/redis/runtime';
 import { createRoomGenerationVerifierMaterializer } from './room-generation-verifier-materializer';
+import { createRoomVerifierMembershipService } from './room-verifier-membership';
 import { requireSafeRoomVerifierPrefix } from './room-verifier-safety';
 
 const redisUrl = process.env.REDIS_URL?.trim();
@@ -429,7 +429,7 @@ try {
     now: Date.now,
   });
   let nextUser = 0;
-  const memberships = createArenaRoomMembershipService({
+  const memberships = createRoomVerifierMembershipService({
     actors: roomActors,
     createUserId: () => `durable-user-${++nextUser}`,
     now: () => new Date().toISOString(),
@@ -556,7 +556,7 @@ try {
     recoveryTimestamp: () => new Date().toISOString(),
     now: Date.now,
   });
-  const activeRecoveredMemberships = createArenaRoomMembershipService({
+  const activeRecoveredMemberships = createRoomVerifierMembershipService({
     actors: activeRecoveredActors,
     now: () => new Date().toISOString(),
   });
@@ -637,7 +637,7 @@ try {
     recoveryTimestamp: () => new Date().toISOString(),
     now: Date.now,
   });
-  const recoveredMemberships = createArenaRoomMembershipService({
+  const recoveredMemberships = createRoomVerifierMembershipService({
     actors: recoveredActors,
     now: () => new Date().toISOString(),
   });

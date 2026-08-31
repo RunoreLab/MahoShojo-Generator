@@ -20,7 +20,6 @@ import WebSocket from 'ws';
 
 import { createArenaRoomRedisKeyspace } from '../src/arena-room/redis-room-keyspace';
 import { createRoomActorRegistry } from '../src/arena-room/room-actor-registry';
-import { createArenaRoomMembershipService } from '../src/arena-room/room-membership-service';
 import type {
   ArenaRoomRuntimeObservation,
   ArenaRoomRuntimeObserver,
@@ -46,6 +45,7 @@ import {
   type RedisServerStatsObservation,
 } from '../src/redis/runtime';
 import { requireSafeRoomVerifierPrefix } from './room-verifier-safety';
+import { createRoomVerifierMembershipService } from './room-verifier-membership';
 
 const OUTBOUND_QUEUE_MAX_BYTES = 256 * 1_024;
 const ACTOR_QUEUE_MAX_COMMANDS = 64;
@@ -542,7 +542,7 @@ const runRoomHardeningLoadVerifier = async (
         };
       },
     });
-    const memberships = createArenaRoomMembershipService({
+    const memberships = createRoomVerifierMembershipService({
       actors,
       createUserId: () => {
         const index = userIdentityIndex;

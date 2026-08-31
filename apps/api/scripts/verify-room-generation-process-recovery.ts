@@ -17,10 +17,10 @@ import { createClient } from 'redis';
 import { createArenaRoomGenerationPort } from '../src/arena-generation/room-generation-port';
 import { createArenaRoomGenerationService } from '../src/arena-room/room-generation-service';
 import { createRoomActorRegistry } from '../src/arena-room/room-actor-registry';
-import { createArenaRoomMembershipService } from '../src/arena-room/room-membership-service';
 import { RedisRuntime } from '../src/redis/runtime';
 import { requireSafeRoomVerifierPrefix } from './room-verifier-safety';
 import { createRoomGenerationVerifierMaterializer } from './room-generation-verifier-materializer';
+import { createRoomVerifierMembershipService } from './room-verifier-membership';
 
 const redisUrl = process.env.REDIS_URL?.trim();
 if (!redisUrl) throw new Error('Room generation process verifier 需要 REDIS_URL');
@@ -160,7 +160,7 @@ const runProducerProcess = async (): Promise<never> => {
     createRoomIdentity: () => ({ roomId, roomEpoch: 'epoch-process-1' }),
   });
   let nextUser = 0;
-  const memberships = createArenaRoomMembershipService({
+  const memberships = createRoomVerifierMembershipService({
     actors,
     createUserId: () => `process-user-${++nextUser}`,
   });
@@ -338,7 +338,7 @@ const runParent = async (): Promise<void> => {
       store: runtime.getRoomStore(),
       createRoomEpoch: () => 'epoch-process-2',
     });
-    const memberships = createArenaRoomMembershipService({ actors });
+    const memberships = createRoomVerifierMembershipService({ actors });
     let recoveryProviderStarts = 0;
     const port = createPort(runtime, {
       async execute() {

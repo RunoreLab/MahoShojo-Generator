@@ -13,7 +13,6 @@ import WebSocket from 'ws';
 import { createArenaRoomDirectoryService } from '../src/arena-room/room-directory-service';
 import { createArenaRoomRedisKeyspace } from '../src/arena-room/redis-room-keyspace';
 import { createRoomActorRegistry } from '../src/arena-room/room-actor-registry';
-import { createArenaRoomMembershipService } from '../src/arena-room/room-membership-service';
 import {
   createArenaRoomTicketCodec,
   createArenaRoomTicketSignatureService,
@@ -31,6 +30,7 @@ import {
 import type { ArenaRoomRuntimeObservation } from '../src/arena-room/runtime-observer';
 import { RedisRuntime } from '../src/redis/runtime';
 import { requireSafeRoomVerifierPrefix } from './room-verifier-safety';
+import { createRoomVerifierMembershipService } from './room-verifier-membership';
 
 const redisUrl = process.env.REDIS_URL?.trim();
 if (!redisUrl) throw new Error('Room hardening faults verifier 需要 REDIS_URL');
@@ -213,7 +213,7 @@ const honoRestartRedisSurvivor = async () => {
       store: firstRuntime.getRoomStore(),
       createRoomIdentity: () => ({ roomId, roomEpoch: 'restart-epoch-1' }),
     });
-    const memberships = createArenaRoomMembershipService({
+    const memberships = createRoomVerifierMembershipService({
       actors: firstActors,
       createUserId: () => 'restart-host',
     });
@@ -251,7 +251,7 @@ const honoRestartRedisSurvivor = async () => {
       store: secondRuntime.getRoomStore(),
       createRoomEpoch: () => 'restart-epoch-2',
     });
-    const recoveredMemberships = createArenaRoomMembershipService({ actors: secondActors });
+    const recoveredMemberships = createRoomVerifierMembershipService({ actors: secondActors });
     const secondApp = new Hono();
     secondApp.get('/hardening/restart-room/:roomId', async (context) => context.json(
       await recoveredMemberships.getSession({
@@ -312,7 +312,7 @@ const exactCheckpointLoss = async () => {
       store: runtime.getRoomStore(),
       createRoomIdentity: () => ({ roomId, roomEpoch: 'loss-epoch-1' }),
     });
-    const initialMemberships = createArenaRoomMembershipService({
+    const initialMemberships = createRoomVerifierMembershipService({
       actors: initialActors,
       createUserId: () => 'loss-host',
     });
@@ -340,7 +340,7 @@ const exactCheckpointLoss = async () => {
       observer,
       createRoomIdentity: () => ({ roomId: replacementRoomId, roomEpoch: 'loss-epoch-2' }),
     });
-    const recoveredMemberships = createArenaRoomMembershipService({
+    const recoveredMemberships = createRoomVerifierMembershipService({
       actors: recoveredActors,
       createUserId: () => 'replacement-host',
     });
@@ -428,7 +428,7 @@ const vpsUnreachable = async () => {
       store: runtime.getRoomStore(),
       createRoomIdentity: () => ({ roomId, roomEpoch: 'vps-epoch-1' }),
     });
-    const memberships = createArenaRoomMembershipService({
+    const memberships = createRoomVerifierMembershipService({
       actors,
       createUserId: () => 'vps-host',
     });

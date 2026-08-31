@@ -30,7 +30,6 @@ import {
   roomDirectoryPublicIndexMember,
   serializeStoredRoomDirectoryRecord,
 } from '../src/arena-room/room-directory-record';
-import { createArenaRoomMembershipService } from '../src/arena-room/room-membership-service';
 import { createArenaRoomProposalService } from '../src/arena-room/room-proposal-service';
 import { createArenaRoomGenerationService } from '../src/arena-room/room-generation-service';
 import type {
@@ -51,6 +50,7 @@ import {
 import { RedisRuntime } from '../src/redis/runtime';
 import { requireSafeRoomVerifierPrefix } from './room-verifier-safety';
 import { createRoomGenerationVerifierMaterializer } from './room-generation-verifier-materializer';
+import { createRoomVerifierMembershipService } from './room-verifier-membership';
 
 const redisUrl = process.env.REDIS_URL?.trim();
 if (!redisUrl) throw new Error('Room Redis verifier 需要 REDIS_URL');
@@ -995,7 +995,7 @@ try {
         now: nowAt(THIRD_TIMESTAMP),
       });
       let proposalUserIndex = 0;
-      const proposalMemberships = createArenaRoomMembershipService({
+      const proposalMemberships = createRoomVerifierMembershipService({
         actors: proposalActors,
         createUserId: () => `proposal-user-${++proposalUserIndex}`,
         now: () => NEXT_TIMESTAMP,
@@ -1247,7 +1247,7 @@ try {
         now: () => generationNow,
       });
       let generationUserIndex = 0;
-      const generationMemberships = createArenaRoomMembershipService({
+      const generationMemberships = createRoomVerifierMembershipService({
         actors: generationActors,
         createUserId: () => `generation-user-${++generationUserIndex}`,
         now: () => NEXT_TIMESTAMP,
@@ -1461,7 +1461,7 @@ try {
         recoveryTimestamp: () => new Date(generationNow).toISOString(),
         now: () => generationNow,
       });
-      const recoveredMemberships = createArenaRoomMembershipService({
+      const recoveredMemberships = createRoomVerifierMembershipService({
         actors: recoveredGenerationActors,
         now: () => new Date(generationNow).toISOString(),
       });
@@ -1571,7 +1571,7 @@ try {
         now: () => directoryNow,
         checkpointRefreshIntervalMs: 1_000,
       });
-      const directoryMemberships = createArenaRoomMembershipService({
+      const directoryMemberships = createRoomVerifierMembershipService({
         actors: directoryActors,
         createUserId: () => `directory-user-${++directoryUserIndex}`,
         now: () => NEXT_TIMESTAMP,
@@ -1803,7 +1803,7 @@ try {
         recoveryTimestamp: () => NEXT_TIMESTAMP,
         now: nowAt(TIMESTAMP),
       });
-      const unknownMemberships = createArenaRoomMembershipService({
+      const unknownMemberships = createRoomVerifierMembershipService({
         actors: unknownActors,
         creationReceipts: unknownCountedStore,
         createUserId: () => 'directory-unknown-host',
@@ -1890,7 +1890,7 @@ try {
         createTimestamp: () => TIMESTAMP,
         now: nowAt(TIMESTAMP),
       });
-      const paginationMemberships = createArenaRoomMembershipService({
+      const paginationMemberships = createRoomVerifierMembershipService({
         actors: paginationActors,
         createUserId: () => `directory-page-host-${++paginationUser}`,
         now: () => TIMESTAMP,
@@ -2138,7 +2138,7 @@ try {
         createTimestamp: () => TIMESTAMP,
         now: nowAt(NEXT_TIMESTAMP),
       });
-      const disconnectedMemberships = createArenaRoomMembershipService({
+      const disconnectedMemberships = createRoomVerifierMembershipService({
         actors: disconnectedActors,
         createUserId: () => `directory-disconnected-host-${++disconnectedUserIndex}`,
         now: () => NEXT_TIMESTAMP,
@@ -2287,7 +2287,7 @@ try {
         createTimestamp: () => TIMESTAMP,
         now: nowAt(NEXT_TIMESTAMP),
       });
-      const authorityMemberships = createArenaRoomMembershipService({
+      const authorityMemberships = createRoomVerifierMembershipService({
         actors: authorityActors,
         createUserId: () => 'authority-host-1',
         now: () => NEXT_TIMESTAMP,
