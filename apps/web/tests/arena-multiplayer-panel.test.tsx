@@ -99,6 +99,7 @@ const render = (state: ArenaRoomControllerState, overrides = {}) => renderToStat
     onJoinCodeChange={vi.fn()}
     onCreate={vi.fn()}
     onDiscover={vi.fn()}
+    onDiscoverMore={vi.fn()}
     onJoin={vi.fn()}
     onLeave={vi.fn()}
     onClose={vi.fn()}
@@ -117,14 +118,12 @@ describe('Arena multiplayer panel accessibility/permissions', () => {
     expect(html).not.toContain('/api/arena/rooms');
   });
 
-  it('ready view 使用可访问 label/fieldset 与 keyboard button', () => {
+  it('ready view 只保留紧凑入口且不显示内部 Development Gate', () => {
     const html = render(readyState);
-    expect(html).toContain('<fieldset');
-    expect(html).toContain('for="arena-room-title"');
-    expect(html).toContain('id="arena-room-title"');
-    expect(html).toContain('for="arena-room-join-code"');
-    expect(html).toContain('创建多人房间');
-    expect(html).toContain('发现公开房间');
+    expect(html).toContain('打开多人房间');
+    expect(html).not.toContain('<fieldset');
+    expect(html).not.toContain('创建多人房间');
+    expect(html).not.toContain('Development Gate');
     expect(html).toContain('type="button"');
     expect(html).toContain('aria-live="polite"');
   });

@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState, type ChangeEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
 
 import type { RoomDirectoryVisibility } from '@mahoshojo/contracts/arena-room';
 
@@ -34,6 +34,7 @@ export type ArenaMultiplayerPanelViewProps = {
   readonly onJoinCodeChange: (value: string) => void;
   readonly onCreate: () => void;
   readonly onDiscover: () => void;
+  readonly onDiscoverMore: () => void;
   readonly onJoin: (roomId: string) => void;
   readonly onLeave: () => void;
   readonly onClose: () => void;
@@ -52,6 +53,183 @@ const StatusNotice = ({ state }: { readonly state: ArenaRoomControllerState }) =
     {state.notice ?? (state.phase === 'connected' ? '房间已连接' : '')}
   </div>
 );
+
+const ArenaRoomLobbyDialog = ({
+  open,
+  onClose,
+  state,
+  busy,
+  roomTitle,
+  visibility,
+  joinCode,
+  onRoomTitleChange,
+  onVisibilityChange,
+  onJoinCodeChange,
+  onCreate,
+  onDiscover,
+  onDiscoverMore,
+  onJoin,
+}: Pick<
+  ArenaMultiplayerPanelViewProps,
+  | 'state'
+  | 'roomTitle'
+  | 'visibility'
+  | 'joinCode'
+  | 'onRoomTitleChange'
+  | 'onVisibilityChange'
+  | 'onJoinCodeChange'
+  | 'onCreate'
+  | 'onDiscover'
+  | 'onDiscoverMore'
+  | 'onJoin'
+> & {
+  readonly open: boolean;
+  readonly onClose: () => void;
+  readonly busy: boolean;
+}) => {
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    closeButtonRef.current?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onClose, open]);
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 sm:p-6">
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="arena-room-lobby-heading"
+        className="flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-fuchsia-200 bg-white shadow-2xl dark:border-fuchsia-900 dark:bg-gray-950"
+      >
+        <div className="flex items-start justify-between gap-3 border-b border-gray-200 p-4 dark:border-gray-800">
+          <div>
+            <h3 id="arena-room-lobby-heading" className="text-lg font-semibold text-gray-950 dark:text-gray-50">
+              多人房间
+            </h3>
+            <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
+              创建房间，或从有界公开目录中选择并加入。
+            </p>
+          </div>
+          <button
+            ref={closeButtonRef}
+            type="button"
+            className={secondaryButtonClass}
+            aria-label="关闭多人房间窗口"
+            onClick={onClose}
+          >
+            关闭
+          </button>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto p-4">
+          <div className="grid gap-4 lg:grid-cols-2">
+            <fieldset className="space-y-3 rounded-xl border border-gray-200 bg-white/70 p-4 dark:border-gray-700 dark:bg-gray-900/60">
+              <legend className="px-1 text-sm font-semibold text-gray-950 dark:text-gray-100">创建房间</legend>
+              <div>
+                <label htmlFor="arena-room-title" className="mb-1 block text-sm font-medium text-gray-800 dark:text-gray-200">
+                  房间标题
+                </label>
+                <input
+                  id="arena-room-title"
+                  className={inputClass}
+                  maxLength={80}
+                  required
+                  value={roomTitle}
+                  onChange={(event: ChangeEvent<HTMLInputElement>) => onRoomTitleChange(event.target.value)}
+                />
+              </div>
+              <div>
+                <label htmlFor="arena-room-visibility" className="mb-1 block text-sm font-medium text-gray-800 dark:text-gray-200">
+                  可发现性
+                </label>
+                <select
+                  id="arena-room-visibility"
+                  className={inputClass}
+                  value={visibility}
+                  onChange={(event: ChangeEvent<HTMLSelectElement>) => onVisibilityChange(event.target.value as RoomDirectoryVisibility)}
+                >
+                  <option value="public">公开发现</option>
+                  <option value="unlisted">仅凭房间码</option>
+                </select>
+              </div>
+              <button type="button" className={primaryButtonClass} disabled={busy || !roomTitle.trim()} onClick={onCreate}>
+                创建多人房间
+              </button>
+            </fieldset>
+
+            <fieldset className="space-y-3 rounded-xl border border-gray-200 bg-white/70 p-4 dark:border-gray-700 dark:bg-gray-900/60">
+              <legend className="px-1 text-sm font-semibold text-gray-950 dark:text-gray-100">凭房间码加入</legend>
+              <div>
+                <label htmlFor="arena-room-join-code" className="mb-1 block text-sm font-medium text-gray-800 dark:text-gray-200">
+                  房间码
+                </label>
+                <input
+                  id="arena-room-join-code"
+                  className={inputClass}
+                  maxLength={256}
+                  value={joinCode}
+                  onChange={(event: ChangeEvent<HTMLInputElement>) => onJoinCodeChange(event.target.value)}
+                />
+              </div>
+              <button type="button" className={primaryButtonClass} disabled={busy || !joinCode.trim()} onClick={() => onJoin(joinCode.trim())}>
+                加入房间
+              </button>
+            </fieldset>
+          </div>
+
+          <section aria-labelledby="arena-public-room-heading" className="mt-4 rounded-xl border border-gray-200 p-4 dark:border-gray-700">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h4 id="arena-public-room-heading" className="text-sm font-semibold text-gray-950 dark:text-gray-100">公开房间</h4>
+              <button type="button" className={secondaryButtonClass} disabled={busy} onClick={onDiscover}>
+                {state.phase === 'listing' ? '正在加载…' : state.error ? '重试' : '刷新'}
+              </button>
+            </div>
+            {state.error ? (
+              <p role="alert" className="mt-3 text-sm text-red-700 dark:text-red-300">{state.error}</p>
+            ) : null}
+            {state.phase === 'listing' && state.rooms.length === 0 ? (
+              <p role="status" className="mt-3 text-sm text-gray-600 dark:text-gray-400">正在加载公开房间…</p>
+            ) : state.rooms.length === 0 ? (
+              <p className="mt-3 text-sm text-gray-600 dark:text-gray-400">暂无公开房间</p>
+            ) : (
+              <ul className="mt-3 grid max-h-64 gap-2 overflow-y-auto pr-1 sm:grid-cols-2" aria-label="公开房间列表">
+                {state.rooms.map((room) => (
+                  <li key={room.roomId} className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white/80 p-3 dark:border-gray-700 dark:bg-gray-900/70">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-gray-950 dark:text-gray-100">{room.title}</p>
+                      <p className="truncate font-mono text-xs text-gray-600 dark:text-gray-400">{room.roomId}</p>
+                    </div>
+                    <button type="button" className={secondaryButtonClass} disabled={busy} onClick={() => onJoin(room.roomId)}>
+                      加入
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {state.directoryNextCursor ? (
+              <div className="mt-3 flex justify-center">
+                <button
+                  type="button"
+                  className={secondaryButtonClass}
+                  disabled={Boolean(state.directoryLoadingMore)}
+                  onClick={onDiscoverMore}
+                >
+                  {state.directoryLoadingMore ? '正在加载更多…' : '加载更多'}
+                </button>
+              </div>
+            ) : null}
+          </section>
+        </div>
+      </section>
+    </div>
+  );
+};
 
 const ArenaRoomGenerationReport = ({ state }: {
   readonly state: ArenaRoomControllerState;
@@ -122,6 +300,7 @@ const ArenaRoomGenerationReport = ({ state }: {
 
 export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps) {
   const { state } = props;
+  const [lobbyOpen, setLobbyOpen] = useState(false);
   if (state.phase === 'disabled') return null;
 
   const busy = Boolean(props.actionPending)
@@ -143,9 +322,18 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
             房间状态由服务器维护；本地角色与情景只共享安全摘要。
           </p>
         </div>
-        <span className="rounded-full border border-fuchsia-300 px-2.5 py-1 text-xs font-medium text-fuchsia-900 dark:border-fuchsia-700 dark:text-fuchsia-100">
-          Development Gate
-        </span>
+        {!session && !props.authLoading && (state.phase === 'ready' || state.phase === 'listing') ? (
+          <button
+            type="button"
+            className={primaryButtonClass}
+            onClick={() => {
+              setLobbyOpen(true);
+              props.onDiscover();
+            }}
+          >
+            打开多人房间
+          </button>
+        ) : null}
       </div>
 
       <div className="mt-3">
@@ -242,82 +430,22 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
           返回房间大厅
         </button>
       ) : (
-        <div className="mt-4 grid gap-4 lg:grid-cols-2">
-          <fieldset className="space-y-3 rounded-xl border border-gray-200 bg-white/70 p-4 dark:border-gray-700 dark:bg-gray-900/60">
-            <legend className="px-1 text-sm font-semibold text-gray-950 dark:text-gray-100">创建房间</legend>
-            <div>
-              <label htmlFor="arena-room-title" className="mb-1 block text-sm font-medium text-gray-800 dark:text-gray-200">
-                房间标题
-              </label>
-              <input
-                id="arena-room-title"
-                className={inputClass}
-                maxLength={80}
-                required
-                value={props.roomTitle}
-                onChange={(event: ChangeEvent<HTMLInputElement>) => props.onRoomTitleChange(event.target.value)}
-              />
-            </div>
-            <div>
-              <label htmlFor="arena-room-visibility" className="mb-1 block text-sm font-medium text-gray-800 dark:text-gray-200">
-                可发现性
-              </label>
-              <select
-                id="arena-room-visibility"
-                className={inputClass}
-                value={props.visibility}
-                onChange={(event: ChangeEvent<HTMLSelectElement>) => props.onVisibilityChange(event.target.value as RoomDirectoryVisibility)}
-              >
-                <option value="public">公开发现</option>
-                <option value="unlisted">仅凭房间码</option>
-              </select>
-            </div>
-            <button type="button" className={primaryButtonClass} disabled={busy || !props.roomTitle.trim()} onClick={props.onCreate}>
-              创建多人房间
-            </button>
-          </fieldset>
-
-          <fieldset className="space-y-3 rounded-xl border border-gray-200 bg-white/70 p-4 dark:border-gray-700 dark:bg-gray-900/60">
-            <legend className="px-1 text-sm font-semibold text-gray-950 dark:text-gray-100">发现或加入</legend>
-            <button type="button" className={secondaryButtonClass} disabled={busy} onClick={props.onDiscover}>
-              发现公开房间
-            </button>
-            <div>
-              <label htmlFor="arena-room-join-code" className="mb-1 block text-sm font-medium text-gray-800 dark:text-gray-200">
-                房间码
-              </label>
-              <input
-                id="arena-room-join-code"
-                className={inputClass}
-                maxLength={256}
-                value={props.joinCode}
-                onChange={(event: ChangeEvent<HTMLInputElement>) => props.onJoinCodeChange(event.target.value)}
-              />
-            </div>
-            <button type="button" className={primaryButtonClass} disabled={busy || !props.joinCode.trim()} onClick={() => props.onJoin(props.joinCode.trim())}>
-              加入房间
-            </button>
-          </fieldset>
-
-          {state.rooms.length > 0 ? (
-            <div className="lg:col-span-2">
-              <h3 className="text-sm font-semibold text-gray-950 dark:text-gray-100">公开房间</h3>
-              <ul className="mt-2 grid gap-2 sm:grid-cols-2" aria-label="公开房间列表">
-                {state.rooms.map((room) => (
-                  <li key={room.roomId} className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white/80 p-3 dark:border-gray-700 dark:bg-gray-900/70">
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-medium text-gray-950 dark:text-gray-100">{room.title}</p>
-                      <p className="truncate font-mono text-xs text-gray-600 dark:text-gray-400">{room.roomId}</p>
-                    </div>
-                    <button type="button" className={secondaryButtonClass} disabled={busy} onClick={() => props.onJoin(room.roomId)}>
-                      加入
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-        </div>
+        <ArenaRoomLobbyDialog
+          open={lobbyOpen}
+          onClose={() => setLobbyOpen(false)}
+          state={state}
+          busy={busy}
+          roomTitle={props.roomTitle}
+          visibility={props.visibility}
+          joinCode={props.joinCode}
+          onRoomTitleChange={props.onRoomTitleChange}
+          onVisibilityChange={props.onVisibilityChange}
+          onJoinCodeChange={props.onJoinCodeChange}
+          onCreate={props.onCreate}
+          onDiscover={props.onDiscover}
+          onDiscoverMore={props.onDiscoverMore}
+          onJoin={props.onJoin}
+        />
       )}
     </section>
   );
@@ -405,6 +533,7 @@ function ArenaMultiplayerPanelRuntime({
       }}
       onCreate={() => { void createRoom(); }}
       onDiscover={() => { void controller.discover(); }}
+      onDiscoverMore={() => { void controller.discoverMore(); }}
       onJoin={(roomId) => {
         setInputError(null);
         void controller.join(roomId, props.displayName || '玩家');

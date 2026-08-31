@@ -225,6 +225,40 @@ describe('Arena Room browser controller', () => {
     expect(controller.getSnapshot().phase).toBe('unauthenticated');
   });
 
+  it('公开房间发现保留 cursor，加载第二页时有界追加并去重', async () => {
+    const { client, controller } = createHarness();
+    const room = (roomId: string) => ({
+      roomId,
+      title: `房间 ${roomId}`,
+      visibility: 'public' as const,
+      status: 'open' as const,
+      createdAt: '2026-08-28T00:00:00.000Z',
+      lastActivityAt: '2026-08-28T00:01:00.000Z',
+    });
+    vi.mocked(client.discover)
+      .mockResolvedValueOnce({ items: [room('room-1'), room('room-2')], nextCursor: 'cursor-page-2' })
+      .mockResolvedValueOnce({ items: [room('room-2'), room('room-3')], nextCursor: null });
+
+    await controller.discover();
+    expect(client.discover).toHaveBeenNthCalledWith(1, { limit: 20 });
+    expect(controller.getSnapshot()).toMatchObject({
+      rooms: [room('room-1'), room('room-2')],
+      directoryNextCursor: 'cursor-page-2',
+      directoryLoadingMore: false,
+    });
+
+    await controller.discoverMore();
+    expect(client.discover).toHaveBeenNthCalledWith(2, { limit: 20, cursor: 'cursor-page-2' });
+    expect(controller.getSnapshot()).toMatchObject({
+      rooms: [room('room-1'), room('room-2'), room('room-3')],
+      directoryNextCursor: null,
+      directoryLoadingMore: false,
+    });
+
+    await controller.discoverMore();
+    expect(client.discover).toHaveBeenCalledTimes(2);
+  });
+
   it('忽略 access/reset 后才返回的旧 HTTP 结果', async () => {
     const first = createHarness();
     let resolveCreate!: (value: typeof session) => void;

@@ -39,6 +39,8 @@ export type ArenaRoomControllerPhase =
 export type ArenaRoomControllerState = {
   readonly phase: ArenaRoomControllerPhase;
   readonly rooms: readonly RoomDirectoryEntry[];
+  readonly directoryNextCursor?: string | null;
+  readonly directoryLoadingMore?: boolean;
   readonly session: ArenaRoomSessionResponse | null;
   readonly notice: string | null;
   readonly error: string | null;
@@ -116,6 +118,7 @@ export type ArenaRoomController = {
   subscribe(listener: () => void): () => void;
   setAccess(access: { readonly enabled: boolean; readonly authenticated: boolean }): void;
   discover(): Promise<void>;
+  discoverMore(): Promise<void>;
   create(request: ArenaRoomCreateIntent): Promise<void>;
   join(roomId: string, displayName: string): Promise<void>;
   retryUnknownOperation(): Promise<void>;
@@ -150,6 +153,8 @@ const EMPTY_GENERATION_VIEW: ArenaRoomGenerationControllerView = Object.freeze({
 const READY_STATE: ArenaRoomControllerState = Object.freeze({
   phase: 'ready',
   rooms: [],
+  directoryNextCursor: null,
+  directoryLoadingMore: false,
   session: null,
   notice: null,
   error: null,
@@ -1425,13 +1430,21 @@ export const createArenaRoomController = (
       if (disposed || !access.enabled || !access.authenticated) return;
       operationGeneration += 1;
       const generation = operationGeneration;
-      publish({ phase: 'listing', error: null });
+      publish({
+        phase: 'listing',
+        rooms: [],
+        directoryNextCursor: null,
+        directoryLoadingMore: false,
+        error: null,
+      });
       try {
         const page = await options.client.discover({ limit: 20 });
         if (!operationIsCurrent(generation)) return;
         publish({
           phase: unresolvedCreateResult ? 'unknown' : 'ready',
           rooms: page.items,
+          directoryNextCursor: page.nextCursor,
+          directoryLoadingMore: false,
           error: null,
         });
       } catch (error) {
@@ -1440,6 +1453,33 @@ export const createArenaRoomController = (
         } else {
           failOperation(error, generation);
         }
+      }
+    },
+
+    async discoverMore() {
+      if (disposed || !access.enabled || !access.authenticated) return;
+      const cursor = state.directoryNextCursor;
+      if (!cursor || state.directoryLoadingMore || state.phase !== 'ready') return;
+      operationGeneration += 1;
+      const generation = operationGeneration;
+      publish({ directoryLoadingMore: true, error: null });
+      try {
+        const page = await options.client.discover({ limit: 20, cursor });
+        if (!operationIsCurrent(generation)) return;
+        const byRoomId = new Map(state.rooms.map((room) => [room.roomId, room]));
+        page.items.forEach((room) => byRoomId.set(room.roomId, room));
+        publish({
+          rooms: [...byRoomId.values()],
+          directoryNextCursor: page.nextCursor,
+          directoryLoadingMore: false,
+          error: null,
+        });
+      } catch (error) {
+        if (!operationIsCurrent(generation)) return;
+        publish({
+          directoryLoadingMore: false,
+          error: safeErrorMessage(error),
+        });
       }
     },
 

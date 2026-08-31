@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   close: vi.fn(async () => undefined),
   create: vi.fn(async () => undefined),
   discover: vi.fn(async () => undefined),
+  discoverMore: vi.fn(async () => undefined),
   join: vi.fn(async () => undefined),
   leave: vi.fn(async () => undefined),
   submitProposal: vi.fn(async () => undefined),
@@ -31,6 +32,7 @@ vi.mock('@/components/arena/multiplayer/useArenaRoom', () => ({
       close: mocks.close,
       create: mocks.create,
       discover: mocks.discover,
+      discoverMore: mocks.discoverMore,
       join: mocks.join,
       leave: mocks.leave,
       submitProposal: mocks.submitProposal,
@@ -163,6 +165,7 @@ afterEach(async () => {
 
 describe('Arena multiplayer panel real React interactions', () => {
   it('create 的安全映射窗口使用同步锁，双击只提交一个房间', async () => {
+    await act(async () => button('打开多人房间').click());
     await act(async () => {
       button('创建多人房间').click();
       button('创建多人房间').click();
@@ -174,7 +177,7 @@ describe('Arena multiplayer panel real React interactions', () => {
   });
 
   it('真实输入与点击连接 discover/join controller action', async () => {
-    await act(async () => button('发现公开房间').click());
+    await act(async () => button('打开多人房间').click());
     const input = container.querySelector<HTMLInputElement>('#arena-room-join-code');
     if (!input) throw new Error('join input missing');
     await act(async () => {
@@ -189,6 +192,30 @@ describe('Arena multiplayer panel real React interactions', () => {
 
     expect(mocks.discover).toHaveBeenCalledTimes(1);
     expect(mocks.join).toHaveBeenCalledWith('room-visible-1', '测试玩家');
+  });
+
+  it('公开房间 Modal 有界展示 cursor 第二页入口', async () => {
+    mocks.state = {
+      ...readyState,
+      rooms: [{
+        roomId: 'room-page-1',
+        title: '第一页房间',
+        visibility: 'public',
+        status: 'open',
+        createdAt: '2026-08-28T00:00:00.000Z',
+        lastActivityAt: '2026-08-28T00:01:00.000Z',
+      }],
+      directoryNextCursor: 'cursor-page-2',
+      directoryLoadingMore: false,
+    };
+    await act(async () => root.render(<ArenaMultiplayerPanel {...props} />));
+    await act(async () => button('打开多人房间').click());
+
+    expect(container.querySelector('[role="dialog"][aria-modal="true"]')).not.toBeNull();
+    expect(container.querySelector('[aria-label="公开房间列表"]')?.className).toContain('max-h-64');
+    await act(async () => button('加载更多').click());
+    expect(mocks.discoverMore).toHaveBeenCalledOnce();
+    expect(container.textContent).not.toContain('Development Gate');
   });
 
   it('unauthenticated/disabled 真实挂载不暴露 Room action', async () => {
