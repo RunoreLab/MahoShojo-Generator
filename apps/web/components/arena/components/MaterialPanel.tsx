@@ -3,6 +3,7 @@
 import { ChangeEvent, useRef, useState } from 'react';
 
 import { DisclosureButton } from '@/components/shared/CollapsibleSection';
+import { ArenaMaterialList } from '../editor/presentation/ArenaMaterialList';
 
 import { useBattleActions } from '../hooks/useBattleActions';
 import { useBattleStore } from '../stores/useBattleStore';
@@ -146,57 +147,17 @@ export function MaterialPanel({ onOpenMaterialModal }: MaterialPanelProps) {
         )}
       </div>
 
-      {materials.length > 0 ? (
-        <ul className="space-y-2 text-sm">
-          {materials.map((material, index) => {
-            const canMoveUp = index > 0;
-            const canMoveDown = index < materials.length - 1;
-            return (
-              <li key={material.id} className="rounded-lg border border-gray-200 bg-white/80 p-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="break-words font-semibold text-gray-800">{material.name}</div>
-                    <div className="mt-1 flex flex-wrap gap-2 text-xs text-gray-500">
-                      <span>{formatSourceLabel(material.sourceKind, material.sourceType)}</span>
-                      {material.fileName ? <span>{material.fileName}</span> : null}
-                    </div>
-                  </div>
-                  <div className="flex shrink-0 gap-1">
-                    <button
-                      type="button"
-                      onClick={() => moveMaterial(index, index - 1)}
-                      disabled={isGenerating || !canMoveUp}
-                      className="rounded border px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-40"
-                    >
-                      ↑
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => moveMaterial(index, index + 1)}
-                      disabled={isGenerating || !canMoveDown}
-                      className="rounded border px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-40"
-                    >
-                      ↓
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => removeMaterial(material.id)}
-                      disabled={isGenerating}
-                      className="rounded border border-red-200 px-2 py-1 text-xs text-red-600 disabled:cursor-not-allowed disabled:opacity-40"
-                    >
-                      移除
-                    </button>
-                  </div>
-                </div>
-              </li>
-            );
-          })}
-        </ul>
-      ) : (
-        <div className="rounded-lg border border-dashed border-gray-200 bg-white/50 px-3 py-4 text-center text-sm text-gray-500">
-          未添加素材
-        </div>
-      )}
+      <ArenaMaterialList
+        items={materials.map((material) => ({
+          key: material.id,
+          name: material.name,
+          sourceLabel: formatSourceLabel(material.sourceKind, material.sourceType),
+          fileName: material.fileName,
+        }))}
+        disabled={isGenerating}
+        onMove={moveMaterial}
+        onRemove={removeMaterial}
+      />
     </div>
   );
 }

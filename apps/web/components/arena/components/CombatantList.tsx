@@ -17,6 +17,7 @@ import {
 
 import { useBattleActions } from '../hooks/useBattleActions';
 import { useBattleStore } from '../stores/useBattleStore';
+import { ArenaRosterList, ArenaRosterRow } from '../editor/presentation/ArenaRoster';
 import { formatCombatantCount, isCombatantLimitReached } from '../types';
 import type { BattleStoreState, Combatant, CombatantData } from '../types';
 import { getCombatantDisplayName } from '../utils/characterValidator';
@@ -519,125 +520,63 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
       generationParticipant?.queues.strict.tier ? '严格' : (generationParticipant?.queues.free.tier ? '自由' : '');
     const tierToShow = generationTier ?? tierBadge?.tier ?? (isPlaceholder ? null : (entityKey ? '无牌' : '未登记'));
     const tierLabelToShow = generationTier ? generationTierLabel : (tierBadge?.label ?? '');
-    const typeDisplay = isPlaceholder
+    const typeLabel = isPlaceholder
       ? combatant.type === 'random-magical-girl'
-        ? '(随机魔法少女)'
-        : '(随机残兽)'
-      : `(${COMBATANT_TYPE_LABELS[data!.type]})`;
-    const canMoveUp = index > 0;
-    const canMoveDown = index < combatants.length - 1;
+        ? '随机魔法少女'
+        : '随机残兽'
+      : COMBATANT_TYPE_LABELS[data!.type];
 
     return (
-      <div key={key} className="group rounded-lg bg-white/70 border border-gray-300 px-2 py-2">
-        <div className="flex items-start gap-2">
-          <div className="flex flex-col gap-1 pt-0.5">
-            <button
-              type="button"
-              onClick={() => moveCombatant(index, index - 1)}
-              disabled={isGenerating || !canMoveUp}
-              className="w-6 h-6 text-xs rounded border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
-              aria-label="上移"
-              title="上移"
-            >
-              ↑
-            </button>
-            <button
-              type="button"
-              onClick={() => moveCombatant(index, index + 1)}
-              disabled={isGenerating || !canMoveDown}
-              className="w-6 h-6 text-xs rounded border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
-              aria-label="下移"
-              title="下移"
-            >
-              ↓
-            </button>
-          </div>
-
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-col sm:flex-row sm:items-start sm:gap-2">
-              <div className="min-w-0 flex-1">
-                <div className="text-sm font-medium text-gray-800 leading-snug break-words line-clamp-3" title={displayName}>
-                  {displayName}
-                </div>
-                <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-500">
-                  <span className="whitespace-nowrap">{typeDisplay}</span>
-                  {!isPlaceholder && data?.isValid && <span className="text-green-600 whitespace-nowrap">(原生)</span>}
-                  {!isPlaceholder && data?.isPreset && <span className="text-purple-600 whitespace-nowrap">(预设)</span>}
-                  {!isPlaceholder && data?.isNonStandard && (
-                    <span className="text-orange-500 font-semibold whitespace-nowrap">(非规范格式)</span>
-                  )}
-                  {!isPlaceholder && data?.wasCorrected && <span className="text-yellow-600 whitespace-nowrap">(格式已修正)</span>}
-                  {!isPlaceholder && tierToShow && (
-                    <span className="flex flex-wrap items-center gap-1 min-w-0">
-                      <TierBadge tier={tierToShow} />
-                      {typeof techLevel === 'string' && techLevel.trim() ? (
-                        <TechBadge mode="level" techScore={techScore} techLevel={techLevel} />
-                      ) : null}
-                      {tierLabelToShow ? <span className="text-[10px] text-gray-500">({tierLabelToShow})</span> : null}
-                    </span>
-                  )}
-                  </div>
-              </div>
-
-              <div className="mt-2 sm:mt-0 flex flex-wrap items-center justify-end gap-2 w-full sm:w-auto">
-                {!isPlaceholder && (
-                  <>
-                    <button
-                      onClick={() => setGuidanceOpenFor((prev) => (prev === key ? null : key))}
-                      className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200"
-                      disabled={isGenerating}
-                      title="为该角色输入行动/想法引导（最多100字）"
-                    >
-                      行动
-                    </button>
-                    <button
-                      onClick={() => onShowDetails(combatant as CombatantData)}
-                      className="text-xs bg-gray-200 text-gray-700 px-2 py-1 rounded hover:bg-gray-300"
-                      disabled={isGenerating}
-                    >
-                      详情
-                    </button>
-                    {(combatant as CombatantData).wasCorrected && (
-                      <>
-                        <button
-                          onClick={() => downloadJson(combatant as CombatantData)}
-                          disabled={isGenerating}
-                          className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200"
-                        >
-                          下载
-                        </button>
-                        <button
-                          onClick={() => copyJson(combatant as CombatantData)}
-                          disabled={isGenerating}
-                          className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded hover:bg-green-200 w-16"
-                        >
-                          {copiedStatus[(combatant as CombatantData).filename] ? '已复制!' : '复制'}
-                        </button>
-                      </>
-                    )}
-                  </>
-                )}
-                <button
-                  onClick={() => !isGenerating && removeCombatant(getCombatantIdentifier(combatant))}
-                  className={`w-5 h-5 bg-red-200 text-red-700 rounded-full flex items-center justify-center text-xs font-bold transition-colors flex-shrink-0 ${
-                    isGenerating ? 'opacity-50 cursor-not-allowed' : 'hover:bg-red-300'
-                  }`}
-                  aria-label={`移除 ${displayName}`}
-                  disabled={isGenerating}
-                >
-                  X
-                </button>
-              </div>
-            </div>
-
-            {!isPlaceholder && guidanceOpenFor !== key && data?.characterGuidance?.trim() && (
-              <div className="mt-1 text-xs text-gray-500 italic break-words">
-                行动引导：{data.characterGuidance.trim()}
-              </div>
-            )}
-
-            {!isPlaceholder && (
-              <div className="mt-1 text-xs text-gray-600">
+      <ArenaRosterRow
+        key={key}
+        item={{
+          key,
+          displayName,
+          typeLabel,
+          guidance: guidanceValue,
+          tags: !isPlaceholder ? (
+            <>
+              {data?.isValid ? <span className="text-green-600 whitespace-nowrap">(原生)</span> : null}
+              {data?.isPreset ? <span className="text-purple-600 whitespace-nowrap">(预设)</span> : null}
+              {data?.isNonStandard ? (
+                <span className="text-orange-500 font-semibold whitespace-nowrap">(非规范格式)</span>
+              ) : null}
+              {data?.wasCorrected ? <span className="text-yellow-600 whitespace-nowrap">(格式已修正)</span> : null}
+            </>
+          ) : undefined,
+        }}
+        index={index}
+        total={combatants.length}
+        disabled={isGenerating}
+        capabilities={{
+          reorder: true,
+          remove: true,
+          guidance: !isPlaceholder,
+          details: !isPlaceholder,
+          download: Boolean(data?.wasCorrected),
+          copy: Boolean(data?.wasCorrected),
+          ranking: !isPlaceholder,
+        }}
+        guidanceExpanded={!isPlaceholder && guidanceOpenFor === key}
+        copied={Boolean(data && copiedStatus[data.filename])}
+        rankingBadge={!isPlaceholder && tierToShow ? (
+          <span className="flex flex-wrap items-center gap-1 min-w-0">
+            <TierBadge tier={tierToShow} />
+            {typeof techLevel === 'string' && techLevel.trim() ? (
+              <TechBadge mode="level" techScore={techScore} techLevel={techLevel} />
+            ) : null}
+            {tierLabelToShow ? <span className="text-[10px] text-gray-500">({tierLabelToShow})</span> : null}
+          </span>
+        ) : undefined}
+        onMove={moveCombatant}
+        onToggleGuidance={!isPlaceholder ? () => setGuidanceOpenFor((prev) => (prev === key ? null : key)) : undefined}
+        onGuidanceChange={data ? (value) => updateCombatantCharacterGuidance(data.filename, value) : undefined}
+        onShowDetails={data ? () => onShowDetails(data) : undefined}
+        onDownload={data ? () => downloadJson(data) : undefined}
+        onCopy={data ? () => void copyJson(data) : undefined}
+        onRemove={() => removeCombatant(getCombatantIdentifier(combatant))}
+        ranking={!isPlaceholder ? (
+          <>
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1 min-w-0">
                   <span className="whitespace-normal break-words sm:whitespace-nowrap">
                     技术值：{typeof techScore === 'number' ? techScore : '-'}
@@ -726,49 +665,9 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
                     ) : null}
                   </div>
                 ) : null}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {!isPlaceholder && guidanceOpenFor === key && (
-          <div className="mt-2 ml-8 p-2 rounded bg-white/70 border border-gray-300">
-            <div className="text-xs text-gray-700 mb-1">角色行动引导（可选，最多100字）</div>
-            <textarea
-              className="w-full text-xs border border-gray-300 rounded px-2 py-1 bg-white disabled:opacity-50"
-              rows={3}
-              maxLength={100}
-              disabled={isGenerating}
-              placeholder="例如：谨慎试探、优先保护同伴、尽量不杀、被恐惧支配、隐藏身份等"
-              value={guidanceValue}
-              onChange={(e) => updateCombatantCharacterGuidance((combatant as CombatantData).filename, e.target.value)}
-            />
-            <div className="mt-1 flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500">
-              <span>{Array.from(guidanceValue).length}/100</span>
-              <div className="flex items-center gap-2">
-                {guidanceValue.trim() ? (
-                  <button
-                    type="button"
-                    className="px-2 py-1 rounded bg-gray-100 text-gray-600 hover:bg-gray-200 disabled:opacity-50"
-                    onClick={() => updateCombatantCharacterGuidance((combatant as CombatantData).filename, '')}
-                    disabled={isGenerating}
-                  >
-                    清空
-                  </button>
-                ) : null}
-                <button
-                  type="button"
-                  className="px-2 py-1 rounded bg-gray-200 text-gray-700 hover:bg-gray-300 disabled:opacity-50"
-                  onClick={() => setGuidanceOpenFor(null)}
-                  disabled={isGenerating}
-                >
-                  收起
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
+          </>
+        ) : undefined}
+      />
     );
   };
 
@@ -817,7 +716,18 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
         </button>
       </div>
 
-      {!hasAnyTeam && <div className="mt-2 space-y-2">{combatants.map((c, idx) => renderCombatantRow(c, idx))}</div>}
+      {!hasAnyTeam && (
+        <ArenaRosterList
+          className="mt-2 space-y-2"
+          items={combatants.map((combatant) => ({
+            key: getCombatantKey(combatant),
+            displayName: 'id' in combatant ? combatant.filename : getCombatantDisplayName(combatant.data),
+            typeLabel: 'id' in combatant ? combatant.type : combatant.type,
+            combatant,
+          }))}
+          renderItem={(item, index) => renderCombatantRow(item.combatant, index)}
+        />
+      )}
 
       {hasAnyTeam && (
         <div className="mt-2 space-y-2">

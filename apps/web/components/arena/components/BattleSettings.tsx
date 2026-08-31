@@ -2,12 +2,10 @@
 
 import { useMemo } from 'react';
 
-import { ArenaDataSettingsPanel } from '@/components/shared/ArenaDataSettingsPanel';
-
 import { useBattleStore } from '../stores/useBattleStore';
 import { BattleStoreState, CombatantData } from '../types';
+import { SharedBattleSettingsControl } from '../editor/presentation/SharedBattleSettingsControl';
 import { BattleReportCardWidthSettings } from './BattleReportCardWidthSettings';
-import { NarrativeHistorySettings } from './NarrativeHistorySettings';
 
 export function BattleSettings() {
   const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
@@ -23,13 +21,12 @@ export function BattleSettings() {
 
   return (
     <>
-      <ArenaDataSettingsPanel
+      <SharedBattleSettingsControl
         value={settings}
         onChange={updateSettings}
         disabled={isGenerating}
         combatantCountForEstimate={readableCombatantCount}
       />
-      <NarrativeHistorySettings value={settings} onChange={updateSettings} disabled={isGenerating} />
       <BattleReportCardWidthSettings value={settings} onChange={updateSettings} disabled={isGenerating} />
     </>
   );

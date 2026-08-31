@@ -3,6 +3,7 @@
 import { ScenarioPickerPanel } from '@/components/shared/ScenarioPickerPanel';
 import { ScenarioPresetGridPicker } from '@/components/ScenarioPresetGridPicker';
 import { CollapsibleSection, DisclosureButton } from '@/components/shared/CollapsibleSection';
+import { ArenaAuxScenarioList } from '../editor/presentation/ArenaScenarioList';
 
 import { ChangeEvent, useMemo, useRef, useState } from 'react';
 
@@ -333,70 +334,22 @@ export function ScenarioPanel({
           )}
         </div>
 
-        {auxScenarios.length > 0 && (
-          <ul className="list-disc list-inside text-sm text-gray-600 mt-3 space-y-2">
-            {auxScenarios.map((item, index) => {
-              const title =
-                (typeof (item.content as any)?.title === 'string' && (item.content as any).title.trim())
-                  ? (item.content as any).title.trim()
-                  : (item.fileName || `辅助情景 ${index + 1}`).replace(/\.json$/i, '');
-              const canMoveUp = index > 0;
-              const canMoveDown = index < auxScenarios.length - 1;
-
-              return (
-                <li key={item.id} className="flex justify-between items-start gap-2">
-                  <div className="flex flex-col gap-1 pt-0.5">
-                    <button
-                      type="button"
-                      onClick={() => moveAuxScenario(index, index - 1)}
-                      disabled={isGenerating || !canMoveUp}
-                      className="w-6 h-6 text-xs rounded border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
-                      aria-label={`上移 ${title}`}
-                      title="上移"
-                    >
-                      ↑
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => moveAuxScenario(index, index + 1)}
-                      disabled={isGenerating || !canMoveDown}
-                      className="w-6 h-6 text-xs rounded border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
-                      aria-label={`下移 ${title}`}
-                      title="下移"
-                    >
-                      ↓
-                    </button>
-                  </div>
-
-                  <div className="flex items-center flex-grow min-w-0">
-                    <span className="break-words mr-2" title={title}>
-                      {title}
-                      {item.isNative && <span className="text-xs text-green-600 ml-1">(原生)</span>}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center flex-shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (isGenerating) return;
-                        removeAuxScenario(item.id);
-                        setError(null);
-                      }}
-                      className={`w-5 h-5 bg-red-200 text-red-700 rounded-full flex items-center justify-center text-xs font-bold transition-colors flex-shrink-0 ${
-                        isGenerating ? 'opacity-50 cursor-not-allowed' : 'hover:bg-red-300'
-                      }`}
-                      aria-label={`移除 ${title}`}
-                      disabled={isGenerating}
-                    >
-                      X
-                    </button>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-        )}
+        <ArenaAuxScenarioList
+          items={auxScenarios.map((item, index) => ({
+            key: item.id,
+            title:
+              (typeof (item.content as any)?.title === 'string' && (item.content as any).title.trim())
+                ? (item.content as any).title.trim()
+                : (item.fileName || `辅助情景 ${index + 1}`).replace(/\.json$/i, ''),
+            isNative: item.isNative,
+          }))}
+          disabled={isGenerating}
+          onMove={moveAuxScenario}
+          onRemove={(id) => {
+            removeAuxScenario(id);
+            setError(null);
+          }}
+        />
       </CollapsibleSection>
     </>
   );

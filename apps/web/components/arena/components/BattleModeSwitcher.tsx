@@ -2,7 +2,7 @@
 
 import { useBattleStore } from '../stores/useBattleStore';
 import { BattleStoreState } from '../types';
-import { BattleModeSelector, type BattleModeKey } from '@/components/shared/BattleModeSelector';
+import { BattleModeControl } from '../editor/presentation/BattleModeControl';
 
 export function BattleModeSwitcher() {
   const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
@@ -11,8 +11,8 @@ export function BattleModeSwitcher() {
   const isGenerating = useBattleSelector((state) => state.isGenerating);
 
   return (
-    <BattleModeSelector
-      value={battleMode as BattleModeKey}
+    <BattleModeControl
+      value={battleMode}
       onChange={(next) => setBattleMode(next)}
       disabled={isGenerating}
     />

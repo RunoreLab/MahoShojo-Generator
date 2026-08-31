@@ -4,7 +4,7 @@ import { ReactNode } from 'react';
 
 import AiProviderSelector from '@/components/AiProviderSelector';
 import { config as appConfig } from '@/lib/config';
-import { StoryOptionsPanel } from '@/components/shared/StoryOptionsPanel';
+import { StoryOptionsControl } from '../editor/presentation/StoryOptionsControl';
 
 import { useBattleStore } from '../stores/useBattleStore';
 import { BattleStoreState, LanguageOption } from '../types';
@@ -29,8 +29,8 @@ export function StoryOptions({ languages, afterUserGuidance }: StoryOptionsProps
 
   return (
     <>
-      <StoryOptionsPanel
-        isGenerating={isGenerating}
+      <StoryOptionsControl
+        disabled={isGenerating}
         enableUserGuidance={appConfig.ENABLE_ARENA_USER_GUIDANCE}
         languages={languages}
         userGuidance={settings.userGuidance}
