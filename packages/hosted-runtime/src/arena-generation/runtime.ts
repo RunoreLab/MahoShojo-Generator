@@ -635,6 +635,8 @@ export const createArenaGenerationRuntime = (
     let markdown = '';
     let telemetry: Record<string, unknown> = {};
     let reasoningEnded = false;
+    let reasoningOperation = Promise.resolve();
+    let reasoningFailure: unknown = null;
     let finalizationStarted = false;
     let durableFinalizationAttempted = false;
     let finalizationClaimIndeterminate = false;
@@ -654,6 +656,43 @@ export const createArenaGenerationRuntime = (
     };
 
     const emit = async (event: GenerationEventInput): Promise<void> => input.emit(event);
+    const queueReasoningEvent = (event: ArenaReasoningEvent): Promise<void> => {
+      if (reasoningFailure) return reasoningOperation;
+      let projected: GenerationEventInput;
+      try {
+        if (event.type === 'reasoning-start') {
+          projected = {
+            type: 'reasoning',
+            data: { source: 'sdk', status: 'thinking', chunk: '' },
+          };
+        } else if (event.type === 'reasoning-delta') {
+          consumeOutputBudget(event.text);
+          projected = {
+            type: 'reasoning',
+            data: { source: 'sdk', status: 'thinking', chunk: event.text },
+          };
+        } else {
+          reasoningEnded = true;
+          projected = {
+            type: 'reasoning_done',
+            data: { source: 'sdk', status: 'done' },
+          };
+        }
+      } catch (error) {
+        reasoningFailure = error;
+        return reasoningOperation;
+      }
+      reasoningOperation = reasoningOperation
+        .then(() => emit(projected))
+        .catch((error: unknown) => {
+          reasoningFailure ??= error;
+        });
+      return reasoningOperation;
+    };
+    const flushReasoningEvents = async (): Promise<void> => {
+      await reasoningOperation;
+      if (reasoningFailure) throw reasoningFailure;
+    };
     const finalizeOnce = async (
       status: ArenaGenerationFinalizationInput['status'],
       errorCode: string | null,
@@ -733,47 +772,28 @@ export const createArenaGenerationRuntime = (
         payload: input.payload,
         prompt: prepared.prompt,
         signal: input.signal,
-        onReasoning: async (event) => {
-          if (event.type === 'reasoning-start') {
-            await emit({
-              type: 'reasoning',
-              data: { source: 'sdk', status: 'thinking', chunk: '' },
-            });
-            return;
-          }
-          if (event.type === 'reasoning-delta') {
-            consumeOutputBudget(event.text);
-            await emit({
-              type: 'reasoning',
-              data: { source: 'sdk', status: 'thinking', chunk: event.text },
-            });
-            return;
-          }
-          reasoningEnded = true;
-          await emit({
-            type: 'reasoning_done',
-            data: { source: 'sdk', status: 'done' },
-          });
-        },
+        onReasoning: queueReasoningEvent,
       });
       telemetry = upstream.telemetry;
+      await flushReasoningEvents();
       const reader = upstream.body.getReader();
       try {
         while (true) {
           const next = await readWithAbort(reader, input.signal);
+          await flushReasoningEvents();
           if (next.done) break;
           const chunk = decoder.decode(next.value, { stream: true });
           if (!chunk) continue;
+          consumeOutputBudget(chunk);
           for (const projected of projector.push(chunk)) {
-            consumeOutputBudget(projected);
             markdown += projected;
             await emit({ type: 'markdown', data: { chunk: projected } });
           }
         }
         const tail = decoder.decode();
         if (tail) {
+          consumeOutputBudget(tail);
           for (const projected of projector.push(tail)) {
-            consumeOutputBudget(projected);
             markdown += projected;
             await emit({ type: 'markdown', data: { chunk: projected } });
           }
@@ -785,10 +805,10 @@ export const createArenaGenerationRuntime = (
         reader.releaseLock();
       }
       for (const projected of projector.finish().markdown) {
-        consumeOutputBudget(projected);
         markdown += projected;
         await emit({ type: 'markdown', data: { chunk: projected } });
       }
+      await flushReasoningEvents();
       const { metaEvent } = projector.result();
       if (metaEvent) {
         if (

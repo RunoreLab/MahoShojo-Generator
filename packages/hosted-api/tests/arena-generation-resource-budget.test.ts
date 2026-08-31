@@ -20,7 +20,20 @@ describe('Arena resource budget', () => {
 
   it('uses the shared text estimator for CJK and non-CJK input', () => {
     expect(estimateTokensFromText('魔法少女abcd')).toBe(5);
+    expect(estimateTokensFromText('あいうえ한글')).toBe(6);
+    expect(estimateTokensFromText('😀')).toBe(4);
     expect(estimateTokensFromText('')).toBe(0);
+  });
+
+  it('does not let non-ASCII scripts bypass the system prompt budget', () => {
+    expect(evaluateArenaPromptBudget({
+      fundingMode: 'hosted-system',
+      prompt: 'あ'.repeat(129_000),
+    })).toMatchObject({
+      allowed: false,
+      estimatedPromptTokens: 129_000,
+      maxEstimatedPromptTokens: 128_000,
+    });
   });
 
   it('keeps platform ceilings common while loosening only BYOK prompt spend', () => {

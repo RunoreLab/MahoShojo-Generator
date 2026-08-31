@@ -392,6 +392,101 @@ describe('Arena generation runtime', () => {
     }));
   });
 
+  it('counts hidden stream metadata against the provider output byte budget', async () => {
+    const hiddenMeta = `<!-- MAHOSHOJO_ARENA_META ${'X'.repeat(4 * 1_024 * 1_024)}`;
+    const dependencies = createDependencies({
+      buildPrompt: vi.fn(async () => ({
+        prompt: 'system\n\nuser',
+        metadata: { expectsMeta: true },
+      })),
+      generate: vi.fn(async () => ({ body: stream('visible body', hiddenMeta), telemetry: {} })),
+    });
+    const runtime = createArenaGenerationRuntime(dependencies);
+    const prepared = await runtime.prepare!({
+      request: new Request('https://example.test/api/arena/generate-stream'),
+      actorKey: 'user:42',
+      generationRequestId: 'request-hidden-meta-budget',
+      payload,
+    });
+    if (prepared instanceof Response || isArenaGenerationAuditableRejection(prepared)) {
+      throw new Error('unexpected response');
+    }
+
+    const terminal = await runtime.execute({
+      generationId: 'generation-hidden-meta-budget',
+      generationRequestId: 'request-hidden-meta-budget',
+      actorKey: 'user:42',
+      producerToken: 'producer-hidden-meta-budget',
+      payloadHash: 'payload-hidden-meta-budget',
+      payload: prepared.executionPayload,
+      signal: new AbortController().signal,
+      emit: vi.fn(async () => undefined),
+      claimFinalization: vi.fn(async () => ({ kind: 'claimed' as const })),
+    });
+
+    expect(terminal).toMatchObject({
+      status: 'failed',
+      code: 'ARENA_OUTPUT_BUDGET_EXCEEDED',
+    });
+  });
+
+  it('propagates a late asynchronously bridged reasoning budget failure before finalization', async () => {
+    const generate = vi.fn(async (input: Parameters<ArenaGenerationRuntimeDependencies['generate']>[0]) => {
+      const encoder = new TextEncoder();
+      let pullCount = 0;
+      return {
+        telemetry: {},
+        body: new ReadableStream<Uint8Array>({
+          async pull(controller) {
+            pullCount += 1;
+            if (pullCount === 1) {
+              controller.enqueue(encoder.encode('visible body'));
+              return;
+            }
+            await new Promise((resolve) => setTimeout(resolve, 0));
+            void input.onReasoning({
+              type: 'reasoning-delta',
+              text: 'R'.repeat(4 * 1_024 * 1_024 + 1),
+            }).catch(() => undefined);
+            controller.close();
+          },
+        }),
+      };
+    });
+    const dependencies = createDependencies({ generate });
+    const runtime = createArenaGenerationRuntime(dependencies);
+    const prepared = await runtime.prepare!({
+      request: new Request('https://example.test/api/arena/generate-stream'),
+      actorKey: 'user:42',
+      generationRequestId: 'request-late-reasoning-budget',
+      payload,
+    });
+    if (prepared instanceof Response || isArenaGenerationAuditableRejection(prepared)) {
+      throw new Error('unexpected response');
+    }
+
+    const terminal = await runtime.execute({
+      generationId: 'generation-late-reasoning-budget',
+      generationRequestId: 'request-late-reasoning-budget',
+      actorKey: 'user:42',
+      producerToken: 'producer-late-reasoning-budget',
+      payloadHash: 'payload-late-reasoning-budget',
+      payload: prepared.executionPayload,
+      signal: new AbortController().signal,
+      emit: vi.fn(async () => undefined),
+      claimFinalization: vi.fn(async () => ({ kind: 'claimed' as const })),
+    });
+
+    expect(terminal).toMatchObject({
+      status: 'failed',
+      code: 'ARENA_OUTPUT_BUDGET_EXCEEDED',
+    });
+    expect(dependencies.finalize).toHaveBeenCalledWith(expect.objectContaining({
+      status: 'failed',
+      errorCode: 'ARENA_OUTPUT_BUDGET_EXCEEDED',
+    }));
+  });
+
   it('slow Provider stream emits compatible deltas and finalizes exactly once', async () => {
     const dependencies = createDependencies();
     const runtime = createArenaGenerationRuntime(dependencies);

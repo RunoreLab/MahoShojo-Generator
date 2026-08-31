@@ -28,14 +28,20 @@ export const countArenaReferenceItems = (
 
 export const estimateTokensFromText = (text: string): number => {
   if (!text) return 0;
-  let cjk = 0;
-  let nonCjk = 0;
+  let ascii = 0;
+  let nonAsciiEstimate = 0;
   for (const character of text) {
     const codePoint = character.codePointAt(0) ?? 0;
-    if (codePoint >= 0x4e00 && codePoint <= 0x9fff) cjk += 1;
-    else nonCjk += 1;
+    if (codePoint <= 0x7f) {
+      ascii += 1;
+    } else {
+      // 服务端门禁不能沿用“所有非 CJK 都按拉丁文本四字符一 token”的乐观估算。
+      // BMP 非 ASCII 至少按一 code point 一 token；astral symbol（常见于 emoji）按
+      // 四字节 UTF-8 的保守上界计数，避免多语种或 emoji 绕过系统渠道预算。
+      nonAsciiEstimate += codePoint > 0xffff ? 4 : 1;
+    }
   }
-  return Math.max(1, Math.ceil(cjk + nonCjk / 4));
+  return Math.max(1, Math.ceil(nonAsciiEstimate + ascii / 4));
 };
 
 export type ArenaPromptBudgetEvaluation = Readonly<{
