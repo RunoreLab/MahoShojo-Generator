@@ -10,7 +10,7 @@ export type ArenaMaterialItemView = {
 type ArenaMaterialListProps = {
   items: readonly ArenaMaterialItemView[];
   disabled?: boolean;
-  onMove: (fromIndex: number, toIndex: number) => void;
+  onMove?: (fromIndex: number, toIndex: number) => void;
   onRemove: (key: string) => void;
   emptyLabel?: string;
 };
@@ -44,7 +44,7 @@ export function ArenaMaterialList({
               </div>
             </div>
             <div className="flex shrink-0 gap-1">
-              <button
+              {onMove ? <button
                 type="button"
                 onClick={() => onMove(index, index - 1)}
                 disabled={disabled || index === 0}
@@ -52,8 +52,8 @@ export function ArenaMaterialList({
                 aria-label={`上移 ${material.name}`}
               >
                 ↑
-              </button>
-              <button
+              </button> : null}
+              {onMove ? <button
                 type="button"
                 onClick={() => onMove(index, index + 1)}
                 disabled={disabled || index === items.length - 1}
@@ -61,7 +61,7 @@ export function ArenaMaterialList({
                 aria-label={`下移 ${material.name}`}
               >
                 ↓
-              </button>
+              </button> : null}
               <button
                 type="button"
                 onClick={() => onRemove(material.key)}

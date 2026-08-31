@@ -23,6 +23,8 @@ const mocks = vi.hoisted(() => ({
   withdrawProposal: vi.fn(async () => undefined),
   reconnect: vi.fn(),
   reset: vi.fn(),
+  syncProposalWorkspace: vi.fn(),
+  discardProposalWorkspace: vi.fn(),
   state: null as ArenaRoomControllerState | null,
 }));
 
@@ -49,6 +51,11 @@ vi.mock('@/components/arena/multiplayer/useArenaRoom', () => ({
       startFromRoom: vi.fn(),
       retainFor: vi.fn(),
       clear: vi.fn(),
+    },
+    proposalWorkspace: {
+      editor: null,
+      syncFromRoom: mocks.syncProposalWorkspace,
+      discard: mocks.discardProposalWorkspace,
     },
   }),
 }));
@@ -268,8 +275,8 @@ describe('Arena multiplayer panel real React interactions', () => {
       },
     };
     await act(async () => root.render(<ArenaMultiplayerPanel {...props} />));
-    expect(container.textContent).toContain('Shared Config 草稿');
-    expect(container.textContent).toContain('同步当前房间配置');
+    expect(container.textContent).toContain('配置提案');
+    expect(container.textContent).toContain('同步房间配置');
     expect(container.textContent).not.toContain('Proposal 审阅箱');
   });
 

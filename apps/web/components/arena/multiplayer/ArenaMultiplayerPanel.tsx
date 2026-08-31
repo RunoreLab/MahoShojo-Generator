@@ -452,7 +452,7 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
 }
 
 export function ArenaMultiplayerPanel(props: ArenaMultiplayerPanelProps) {
-  const { controller, state, hostWorkspace } = useArenaRoom({
+  const { controller, state, hostWorkspace, proposalWorkspace } = useArenaRoom({
     enabled: props.enabled,
     authenticated: props.isAuthenticated && !props.authLoading,
     origin: props.origin,
@@ -463,6 +463,7 @@ export function ArenaMultiplayerPanel(props: ArenaMultiplayerPanelProps) {
       controller={controller}
       state={state}
       hostWorkspace={hostWorkspace}
+      proposalWorkspace={proposalWorkspace}
     />
   );
 }
@@ -471,12 +472,14 @@ type ArenaMultiplayerPanelRuntimeProps = ArenaMultiplayerPanelProps & {
   readonly controller: ReturnType<typeof useArenaRoom>['controller'];
   readonly state: ReturnType<typeof useArenaRoom>['state'];
   readonly hostWorkspace: ReturnType<typeof useArenaRoom>['hostWorkspace'];
+  readonly proposalWorkspace: ReturnType<typeof useArenaRoom>['proposalWorkspace'];
 };
 
 function ArenaMultiplayerPanelRuntime({
   controller,
   state,
   hostWorkspace,
+  proposalWorkspace,
   ...props
 }: ArenaMultiplayerPanelRuntimeProps) {
   const [roomTitle, setRoomTitle] = useState(() => `${props.displayName || '玩家'} 的房间`);
@@ -518,7 +521,13 @@ function ArenaMultiplayerPanelRuntime({
       state={viewState}
       authLoading={props.authLoading}
       actionPending={preparingCreate}
-      proposalContent={<ArenaProposalPanel state={viewState} controller={controller} />}
+      proposalContent={(
+        <ArenaProposalPanel
+          state={viewState}
+          controller={controller}
+          workspace={proposalWorkspace}
+        />
+      )}
       roomTitle={roomTitle}
       visibility={visibility}
       joinCode={joinCode}
@@ -560,6 +569,7 @@ export function ArenaMultiplayerContextPanel(props: ArenaMultiplayerPanelProps) 
       controller={runtime.controller}
       state={runtime.state}
       hostWorkspace={runtime.hostWorkspace}
+      proposalWorkspace={runtime.proposalWorkspace}
     />
   );
 }

@@ -7,9 +7,15 @@ import {
   useEffect,
   useMemo,
   useRef,
+  useState,
   useSyncExternalStore,
   type ReactNode,
 } from 'react';
+
+import {
+  createRoomProposalArenaEditorSession,
+  type RoomProposalArenaEditorSession,
+} from '@/components/arena/editor';
 
 import { createArenaRoomClient } from '@/lib/arena-room/client';
 import {
@@ -33,6 +39,12 @@ type LifecycleToken = {
   readonly token: symbol;
 };
 
+export type ArenaRoomProposalWorkspace = Readonly<{
+  editor: RoomProposalArenaEditorSession | null;
+  syncFromRoom(): void;
+  discard(): void;
+}>;
+
 export const useArenaRoom = (options: UseArenaRoomOptions) => {
   const { controller, hostWorkspace } = useMemo(() => {
     const client = createArenaRoomClient({ origin: options.origin });
@@ -48,6 +60,8 @@ export const useArenaRoom = (options: UseArenaRoomOptions) => {
     };
   }, [options.origin]);
   const lifecycle = useRef<LifecycleToken | null>(null);
+  const proposalEditorRef = useRef<RoomProposalArenaEditorSession | null>(null);
+  const [proposalEditor, setProposalEditor] = useState<RoomProposalArenaEditorSession | null>(null);
 
   useEffect(() => {
     controller.setAccess({
@@ -83,7 +97,43 @@ export const useArenaRoom = (options: UseArenaRoomOptions) => {
     hostWorkspace.retainFor(arenaRoomHostWorkspaceAuthorityFromSession(state.session));
   }, [hostWorkspace, state.session]);
 
-  return { controller, state, hostWorkspace };
+  useEffect(() => {
+    const session = state.session;
+    const editor = proposalEditorRef.current;
+    if (!session || session.self.role !== 'member') {
+      if (editor) {
+        editor.dispose();
+        proposalEditorRef.current = null;
+        setProposalEditor(null);
+      }
+      return;
+    }
+    if (editor) editor.sync(session.snapshot);
+  }, [state.session]);
+
+  useEffect(() => () => {
+    proposalEditorRef.current?.dispose();
+    proposalEditorRef.current = null;
+  }, []);
+
+  const proposalWorkspace = useMemo<ArenaRoomProposalWorkspace>(() => Object.freeze({
+    editor: proposalEditor,
+    syncFromRoom() {
+      const session = controller.getSnapshot().session;
+      if (!session || session.self.role !== 'member') return;
+      proposalEditorRef.current?.dispose();
+      const next = createRoomProposalArenaEditorSession(session.snapshot);
+      proposalEditorRef.current = next;
+      setProposalEditor(next);
+    },
+    discard() {
+      proposalEditorRef.current?.dispose();
+      proposalEditorRef.current = null;
+      setProposalEditor(null);
+    },
+  }), [controller, proposalEditor]);
+
+  return { controller, state, hostWorkspace, proposalWorkspace };
 };
 
 export type ArenaRoomRuntime = ReturnType<typeof useArenaRoom>;

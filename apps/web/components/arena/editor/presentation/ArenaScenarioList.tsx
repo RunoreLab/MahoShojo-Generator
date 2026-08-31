@@ -9,7 +9,7 @@ export type ArenaAuxScenarioItemView = {
 type ArenaAuxScenarioListProps = {
   items: readonly ArenaAuxScenarioItemView[];
   disabled?: boolean;
-  onMove: (fromIndex: number, toIndex: number) => void;
+  onMove?: (fromIndex: number, toIndex: number) => void;
   onRemove: (key: string) => void;
 };
 
@@ -26,7 +26,7 @@ export function ArenaAuxScenarioList({
     <ul className="list-disc list-inside text-sm text-gray-600 mt-3 space-y-2">
       {items.map((item, index) => (
         <li key={item.key} className="flex justify-between items-start gap-2">
-          <div className="flex flex-col gap-1 pt-0.5">
+          {onMove ? <div className="flex flex-col gap-1 pt-0.5">
             <button
               type="button"
               onClick={() => onMove(index, index - 1)}
@@ -47,7 +47,7 @@ export function ArenaAuxScenarioList({
             >
               ↓
             </button>
-          </div>
+          </div> : null}
 
           <div className="flex items-center flex-grow min-w-0">
             <span className="break-words mr-2" title={item.title}>

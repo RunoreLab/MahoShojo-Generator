@@ -10,6 +10,7 @@ import type {
   ArenaRoomController,
   ArenaRoomControllerState,
 } from '@/lib/arena-room/controller';
+import type { ArenaRoomProposalWorkspace } from '@/components/arena/multiplayer/useArenaRoom';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -119,6 +120,12 @@ const createController = () => ({
   'reconnect' | 'resolveProposal' | 'submitProposal' | 'withdrawProposal'
 >;
 
+const createWorkspace = (): ArenaRoomProposalWorkspace => ({
+  editor: null,
+  syncFromRoom: vi.fn(),
+  discard: vi.fn(),
+});
+
 let container: HTMLDivElement;
 let root: Root;
 
@@ -127,15 +134,6 @@ const button = (label: string): HTMLButtonElement => {
     .find((candidate) => candidate.textContent?.trim() === label);
   if (!(target instanceof HTMLButtonElement)) throw new Error(`button not found: ${label}`);
   return target;
-};
-
-const setTextArea = async (id: string, value: string): Promise<void> => {
-  const input = container.querySelector<HTMLTextAreaElement>(`#${id}`);
-  if (!input) throw new Error(`textarea not found: ${id}`);
-  await act(async () => {
-    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(input, value);
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-  });
 };
 
 beforeEach(() => {
@@ -151,46 +149,31 @@ afterEach(async () => {
 });
 
 describe('Arena Proposal panel real React interactions', () => {
-  it('member 本地编辑不联网，typed preview 双击只提交一个最小 intent', async () => {
+  it('member 同步入口只建立 detached workspace，不在 panel 内复制配置表单', async () => {
     const controller = createController();
+    const workspace = createWorkspace();
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
     await act(async () => root.render(
       <ArenaProposalPanel
         state={stateFor(member)}
         controller={controller}
-        createProposalId={() => 'proposal-stable'}
+        workspace={workspace}
       />,
     ));
 
-    await act(async () => button('同步当前房间配置').click());
-    await setTextArea('arena-proposal-user-guidance', '成员建议');
-    await act(async () => button('预览 typed diff').click());
-    await act(async () => {
-      button('提交 Proposal').click();
-      button('提交 Proposal').click();
-      await Promise.resolve();
-    });
+    await act(async () => button('同步房间配置').click());
 
     expect(fetchSpy).not.toHaveBeenCalled();
-    expect(controller.submitProposal).toHaveBeenCalledOnce();
-    expect(controller.submitProposal).toHaveBeenCalledWith({
-      proposalId: 'proposal-stable',
-      expectedRoomEpoch: 'epoch-1',
-      baseRevision: 0,
-      changes: [{
-        changeId: 'change-1',
-        type: 'setUserGuidance',
-        value: '成员建议',
-        expectedBase: { kind: 'value', value: '' },
-      }],
-    });
+    expect(workspace.syncFromRoom).toHaveBeenCalledOnce();
+    expect(controller.submitProposal).not.toHaveBeenCalled();
+    expect(container.querySelector('#arena-proposal-user-guidance')).toBeNull();
     fetchSpy.mockRestore();
   });
 
   it('member 只能撤回 projected 自己的 pending Proposal', async () => {
     const controller = createController();
     await act(async () => root.render(
-      <ArenaProposalPanel state={stateFor(member, [proposal])} controller={controller} />,
+      <ArenaProposalPanel state={stateFor(member, [proposal])} controller={controller} workspace={createWorkspace()} />,
     ));
     await act(async () => button('撤回 Proposal').click());
     expect(controller.withdrawProposal).toHaveBeenCalledWith('proposal-atomic');
@@ -200,7 +183,7 @@ describe('Arena Proposal panel real React interactions', () => {
   it('host per-change 选择缺失 atomic closure 时禁用接受，完整选择后提交 revision fence', async () => {
     const controller = createController();
     await act(async () => root.render(
-      <ArenaProposalPanel state={stateFor(host, [proposal])} controller={controller} />,
+      <ArenaProposalPanel state={stateFor(host, [proposal])} controller={controller} workspace={createWorkspace()} />,
     ));
     const checkboxes = [...container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')];
     expect(checkboxes).toHaveLength(2);
@@ -264,7 +247,7 @@ describe('Arena Proposal panel real React interactions', () => {
       }],
     };
     await act(async () => root.render(
-      <ArenaProposalPanel state={stateFor(host, [expanded])} controller={controller} />,
+      <ArenaProposalPanel state={stateFor(host, [expanded])} controller={controller} workspace={createWorkspace()} />,
     ));
     expect(container.textContent).toContain('新增队伍 B 队');
     expect(container.textContent).toContain('移除队伍 team:a');

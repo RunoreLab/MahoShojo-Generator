@@ -43,6 +43,7 @@ import { ArenaCommunitySection } from './shared/ArenaCommunitySection';
 import { ArenaPageLinks } from './shared/ArenaPageLinks';
 import { ArenaRankingLinks } from './shared/ArenaRankingLinks';
 import { ArenaRoomProvider } from './multiplayer/useArenaRoom';
+import { ArenaEditorWorkspaceBoundary } from './multiplayer/ArenaRoomProposalWorkspace';
 import {
   countArenaSelectedReferenceItems,
   getArenaReferenceRemainingCapacity,
@@ -213,7 +214,8 @@ export function ArenaPage({ multiplayer }: ArenaPageProps = {}) {
               />
             ) : null}
 
-            <div className="mt-6 grid gap-5 xl:grid-cols-[minmax(320px,420px)_minmax(0,1fr)] 2xl:grid-cols-[minmax(340px,440px)_minmax(0,1fr)] xl:items-start">
+            <ArenaEditorWorkspaceBoundary>
+              <div className="mt-6 grid gap-5 xl:grid-cols-[minmax(320px,420px)_minmax(0,1fr)] 2xl:grid-cols-[minmax(340px,440px)_minmax(0,1fr)] xl:items-start">
               <div className="min-w-0 space-y-4">
                 <CollapsibleSection
                   title="🎴 预设角色"
@@ -387,7 +389,8 @@ export function ArenaPage({ multiplayer }: ArenaPageProps = {}) {
                   <ArenaCommunitySection />
                 </CollapsibleSection>
               </div>
-            </div>
+              </div>
+            </ArenaEditorWorkspaceBoundary>
           </div>
 
           <BattleResult onSaveImage={handleSaveImage} />
