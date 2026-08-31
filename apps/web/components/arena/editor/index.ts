@@ -12,10 +12,6 @@ export {
   type ArenaEditorViewProjection,
 } from './shared-config-mapper';
 export {
-  ROOM_HOST_ARENA_EDITOR_CAPABILITIES,
-  createRoomHostArenaEditorSession,
-} from './room-host-session';
-export {
   ROOM_PROPOSAL_ARENA_EDITOR_CAPABILITIES,
   createRoomProposalArenaEditorSession,
 } from './room-proposal-session';
@@ -40,7 +36,5 @@ export type {
   ArenaEditorWorkspaceStatus,
   ArenaProposalEditorSnapshotInput,
   ArenaRoomProposalPreview,
-  RoomHostArenaEditorSession,
-  RoomHostArenaEditorSessionInput,
   RoomProposalArenaEditorSession,
 } from './types';

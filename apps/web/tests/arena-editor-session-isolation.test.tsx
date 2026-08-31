@@ -5,7 +5,6 @@ import type { ArenaRoomSharedConfig } from '@mahoshojo/contracts/arena-room';
 
 import {
   ArenaEditorSessionProvider,
-  createRoomHostArenaEditorSession,
   createRoomProposalArenaEditorSession,
   createSingleArenaEditorSession,
   useArenaEditorSelector,
@@ -250,79 +249,6 @@ describe('Arena editor scoped sessions', () => {
     expect(session.store.getState().storyLength).toBe('short');
     expect(notifications).toBeGreaterThanOrEqual(3);
     unsubscribe();
-  });
-
-  it('room-host decorates single behavior with room authority and workspace metadata', () => {
-    useBattleStore.setState((state) => ({
-      battleMode: 'classic',
-      combatants: [{
-        type: 'general-character',
-        data: { name: '房主本地角色' },
-        filename: '房主本地角色',
-        isValid: true,
-        isPreset: false,
-        adjudicationSourceKey: 'host-local:character:1',
-        characterGuidance: '安全角色引导',
-      }],
-      teams: [],
-      scenario: { content: null, fileName: null, isNative: false },
-      auxScenarios: [],
-      materials: [],
-      storyLength: 'default',
-      customStoryLength: '',
-      selectedLanguage: 'zh-CN',
-      settings: {
-        ...state.settings,
-        ...historySettings(),
-        userGuidance: '',
-      },
-    }));
-    const session = createRoomHostArenaEditorSession({
-      authority: snapshot(),
-      workspaceStatus: { kind: 'clean' },
-    });
-
-    expect(session.capabilities).toMatchObject({
-      canUploadLocalPayload: true,
-      canBrowsePrivateCards: true,
-      canPublishRoomConfig: true,
-      canStartGeneration: true,
-    });
-    expect(session.store.getState()).toMatchObject({
-      mode: 'room-host',
-      baselineRevision: 3,
-      workspaceStatus: { kind: 'clean' },
-      dirty: false,
-    });
-
-    session.store.getState().actions.setBattleMode('kizuna');
-    expect(useBattleStore.getState().battleMode).toBe('kizuna');
-    expect(session.store.getState()).toMatchObject({
-      dirty: true,
-      workspaceStatus: { kind: 'dirty', reasons: ['shared-config'] },
-    });
-
-    session.store.getState().actions.setBattleMode('classic');
-    expect(session.store.getState()).toMatchObject({
-      dirty: false,
-      workspaceStatus: { kind: 'clean' },
-    });
-    session.store.getState().actions.setBattleMode('kizuna');
-
-    session.syncAuthority({
-      authority: snapshot({ revision: 4, sharedConfig: config({ battleMode: 'daily' }) }),
-      workspaceStatus: { kind: 'dirty', reasons: ['shared-config'] },
-    });
-    expect(session.store.getState()).toMatchObject({
-      baselineRevision: 4,
-      workspaceStatus: { kind: 'dirty', reasons: ['shared-config'] },
-      dirty: true,
-      battleMode: 'kizuna',
-    });
-
-    expect(() => createRoomHostArenaEditorSession({
-      authority: snapshot({ revision: -1 }),
-    })).toThrow();
   });
 
   it('injects either session through one Context selector API', () => {

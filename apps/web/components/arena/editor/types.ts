@@ -153,14 +153,3 @@ export type RoomProposalArenaEditorSession = ArenaEditorSession & Readonly<{
     selectedChangeIds?: readonly string[],
   ): ArenaRoomProposalSubmitRequest;
 }>;
-
-export type RoomHostArenaEditorSessionInput = Readonly<{
-  authority: ArenaProposalEditorSnapshotInput;
-  workspaceStatus?: ArenaEditorWorkspaceStatus;
-}>;
-
-export type RoomHostArenaEditorSession = ArenaEditorSession & Readonly<{
-  mode: 'room-host';
-  syncAuthority(input: RoomHostArenaEditorSessionInput): void;
-  exportSharedConfig(): Promise<ArenaRoomSharedConfig>;
-}>;
