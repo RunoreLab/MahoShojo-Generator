@@ -230,7 +230,14 @@ const view = (input: {
       : '';
   const nextChunkSeq = active ? input.progress?.nextChunkSeq ?? 0 : 0;
   const failed = status === 'failed' || status === 'producer_lost';
-  if (completed && (!input.projection?.resultAvailable || !input.projection.generationRecordId)) {
+  if (
+    completed
+    && (
+      !input.projection?.resultAvailable
+      || !input.projection.generationRecordId
+      || !input.projection.roomSafeResult
+    )
+  ) {
     return fail('ROOM_GENERATION_UNAVAILABLE');
   }
   return ArenaRoomGenerationViewResponseSchema.parse({
@@ -243,6 +250,7 @@ const view = (input: {
     nextChunkSeq,
     finalAuthoritative: completed,
     ...(completed ? { generationRecordId: input.projection!.generationRecordId! } : {}),
+    ...(completed ? { result: input.projection!.roomSafeResult! } : {}),
     ...(failed ? { errorCode: input.projection?.errorCode ?? 'GENERATION_FAILED' } : {}),
   });
 };

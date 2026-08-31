@@ -357,6 +357,8 @@ export type ArenaGenerationTerminalRecord = {
   payloadHash?: string | null;
   contentAvailable?: boolean;
   contentUnavailableReason?: 'not-found' | 'temporary' | null;
+  /** Strictly sanitized by the durable terminal adapter; callers must parse again at wire boundary. */
+  roomSafeResult?: Readonly<Record<string, unknown>> | null;
 };
 
 export interface ArenaGenerationTerminalStore {
@@ -541,6 +543,7 @@ export type ArenaGenerationOwnedProjection = Readonly<{
   resultAvailable: boolean;
   generationRecordId: string | null;
   errorCode: string | null;
+  roomSafeResult?: Readonly<Record<string, unknown>>;
 }>;
 
 export type ArenaGenerationOwnedProjectionResult =
@@ -2566,10 +2569,28 @@ export const createArenaGenerationService = (
         input.generationId,
       );
       if (owned instanceof Response) return ownedFailureFromResponse(owned);
-      const terminalContentExpired = isTerminalContentExpired(owned.terminalFallback);
+      let terminalFallback = owned.terminalFallback;
       if (
-        owned.terminalFallback?.status === 'completed'
-        && owned.terminalFallback.contentAvailable !== true
+        owned.state.status === 'completed'
+        && !terminalFallback?.roomSafeResult
+        && dependencies.terminalStore
+      ) {
+        const durable = await readOwnedTerminal(input.generationId, input.actorKey)
+          .catch(() => null);
+        if (
+          durable?.status === 'completed'
+          && terminalRecordMatchesIdentity({
+            record: durable,
+            generationId: owned.state.generationId,
+            generationRequestId: owned.state.generationRequestId,
+            acceptedPayloadHashes: [owned.state.payloadHash],
+          })
+        ) terminalFallback = durable;
+      }
+      const terminalContentExpired = isTerminalContentExpired(terminalFallback);
+      if (
+        terminalFallback?.status === 'completed'
+        && terminalFallback.contentAvailable !== true
         && !terminalContentExpired
       ) {
         return {
@@ -2585,8 +2606,8 @@ export const createArenaGenerationService = (
       const resultAvailable = owned.state.status === 'completed'
         && !terminalContentExpired
         && Boolean(
-        owned.terminalFallback?.resultRef
-        ?? owned.state.terminal?.resultRef
+          terminalFallback?.resultRef
+          ?? owned.state.terminal?.resultRef
         ?? snapshot?.terminalResultRef,
       );
       return {
@@ -2598,14 +2619,14 @@ export const createArenaGenerationService = (
           markdown: owned.state.status === 'completed'
             ? terminalContentExpired
               ? ''
-              : owned.terminalFallback?.markdown ?? snapshot?.markdown ?? ''
+              : terminalFallback?.markdown ?? snapshot?.markdown ?? ''
             : owned.state.status === 'reserved'
                 || owned.state.status === 'running'
                 || owned.state.status === 'finalizing'
               ? snapshot?.markdown ?? ''
               : '',
           resumeCursor: snapshot?.lastEventId ?? owned.state.lastEventId,
-          updatedAt: owned.terminalFallback?.updatedAt
+          updatedAt: terminalFallback?.updatedAt
             ?? snapshot?.updatedAt
             ?? owned.state.updatedAt,
           finalAuthoritative,
@@ -2613,8 +2634,11 @@ export const createArenaGenerationService = (
           generationRecordId: resultAvailable ? owned.state.generationId : null,
           errorCode: safeTerminalErrorCode(
             owned.state.status,
-            owned.terminalFallback?.errorCode ?? owned.state.terminal?.code,
+            terminalFallback?.errorCode ?? owned.state.terminal?.code,
           ),
+          ...(owned.state.status === 'completed' && terminalFallback?.roomSafeResult
+            ? { roomSafeResult: terminalFallback.roomSafeResult }
+            : {}),
         }),
       };
     },

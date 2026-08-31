@@ -235,6 +235,7 @@ export const createArenaRoomGenerationMaterializer = (
           return fail('ARENA_ROOM_HOST_LOCAL_PAYLOAD_TYPE_MISMATCH');
         }
         return Object.freeze({
+          roomCombatantKey: entry.key,
           type: inferred,
           data: resolved.payload,
           isNative: true,

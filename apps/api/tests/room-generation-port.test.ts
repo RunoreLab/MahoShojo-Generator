@@ -139,7 +139,17 @@ describe('Arena Room generation internal port', () => {
         return {
           generationId: 'arena_generation_1',
           generationRequestId,
-          headers: { 'x-private-provider-diagnostic': 'must-not-escape' },
+          headers: {
+            'X-Mahoshojo-Stream-Meta': encodeURIComponent(JSON.stringify({
+              mode: 'classic',
+              reporterInfo: { name: '测试记者', publication: 'A.R.E.N.A.' },
+              userGuidance: '保持克制',
+              narrativeHistoryReadCount: 3,
+              rawReasoning: 'must-not-escape',
+              providerDiagnostic: { requestId: 'must-not-escape' },
+            })),
+            'x-private-provider-diagnostic': 'must-not-escape',
+          },
           events: eventStream([
             { id: '1-0', type: 'markdown', data: { chunk: '安全正文' } },
             { id: '1-1', type: 'reasoning', data: { chunk: 'private reasoning' } },
@@ -231,6 +241,17 @@ describe('Arena Room generation internal port', () => {
     expect(receivedRequest!.signal.aborted).toBe(true);
 
     if (result.kind !== 'subscribed') throw new Error('expected subscription');
+    expect(result.subscription.roomSafeMetadata).toEqual({
+      version: 1,
+      format: 'stream-markdown',
+      mode: 'classic',
+      reporterInfo: { name: '测试记者', publication: 'A.R.E.N.A.' },
+      sharedGuidance: '保持克制',
+      narrativeHistoryReadCount: 3,
+    });
+    expect(JSON.stringify(result.subscription.roomSafeMetadata)).not.toMatch(
+      /rawReasoning|providerDiagnostic|must-not-escape/u,
+    );
     const events = await readAll(result.subscription.events);
     expect(events).toEqual([
       { id: '1-0', type: 'markdown', chunk: '安全正文' },
@@ -268,6 +289,14 @@ describe('Arena Room generation internal port', () => {
           resultAvailable: false,
           generationRecordId: null,
           errorCode: null,
+          roomSafeResult: {
+            version: 1,
+            format: 'stream-markdown',
+            mode: 'classic',
+            reporterInfo: { name: '测试记者', publication: 'A.R.E.N.A.' },
+            report: { headline: '安全标题' },
+            ai: { model: 'gpt-safe', usage: { totalTokens: 30 } },
+          },
           reasoning: 'hidden reasoning despite an unsound adapter',
           providerDiagnostic: { requestId: 'hidden-provider-request' },
         },
@@ -303,6 +332,7 @@ describe('Arena Room generation internal port', () => {
       generationId: 'arena_generation_1',
     });
     expect(projection).toMatchObject({ kind: 'found', projection: { markdown: 'baseline' } });
+    expect(projection).not.toHaveProperty('projection.roomSafeResult');
     expect(JSON.stringify(projection)).not.toMatch(/reasoning|provider/u);
     const resumed = await port.resumeOwnedSubscription({
       roomId: 'room-1',
@@ -327,5 +357,66 @@ describe('Arena Room generation internal port', () => {
     await expect(readAll(resumed.subscription.events)).resolves.toEqual([
       { id: '5-1', type: 'markdown', chunk: 'resumed' },
     ]);
+  });
+
+  it('strictly projects only the completed durable Room-safe result allowlist', async () => {
+    const generationService = {
+      readOwnedProjection: vi.fn(async () => ({
+        kind: 'found' as const,
+        projection: {
+          generationId: 'arena_generation_1',
+          generationRequestId: 'request-room-completed-1',
+          status: 'completed' as const,
+          markdown: '# 权威终态正文',
+          resumeCursor: '9-0',
+          updatedAt: '2026-08-28T11:00:00.000Z',
+          finalAuthoritative: true,
+          resultAvailable: true,
+          generationRecordId: 'arena_generation_1',
+          errorCode: null,
+          roomSafeResult: {
+            version: 1,
+            format: 'stream-markdown',
+            mode: 'classic',
+            reporterInfo: { name: '测试记者', publication: 'A.R.E.N.A.' },
+            report: { headline: '安全标题' },
+            ai: { model: 'gpt-safe', usage: { totalTokens: 30 } },
+          },
+          reasoning: 'hidden reasoning despite an unsound adapter',
+          extra_json: { apiKey: 'hidden-provider-key' },
+          updatedCombatants: [{ data: { private: true } }],
+        },
+      })),
+    } as unknown as ArenaGenerationApplicationService;
+    const port = createArenaRoomGenerationPort({
+      generationService,
+      pvpAuthority: { sign: vi.fn() },
+      internalGuidanceAuthority: { sign: vi.fn() },
+      deriveGenerationId: vi.fn(async () => 'arena_generation_1'),
+      canonicalizeSemanticPayload,
+    });
+
+    const result = await port.readOwnedProjection({
+      roomId: 'room-1',
+      generationId: 'arena_generation_1',
+    });
+
+    expect(result).toMatchObject({
+      kind: 'found',
+      projection: {
+        status: 'completed',
+        roomSafeResult: {
+          version: 1,
+          format: 'stream-markdown',
+          mode: 'classic',
+          reporterInfo: { name: '测试记者', publication: 'A.R.E.N.A.' },
+          report: { headline: '安全标题' },
+          ai: { model: 'gpt-safe', usage: { totalTokens: 30 } },
+        },
+      },
+    });
+    expect(JSON.stringify(result)).not.toMatch(
+      /extra_json|hidden-provider-key|reasoning|updatedCombatants|private/u,
+    );
   });
 });

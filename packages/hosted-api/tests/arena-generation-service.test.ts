@@ -3011,6 +3011,13 @@ describe('Arena generation lifecycle service', () => {
         reasoning: '',
         payloadHash: 'payload-hash',
         contentAvailable: true,
+        roomSafeResult: {
+          version: 1,
+          format: 'stream-markdown',
+          mode: 'classic',
+          report: { headline: '权威标题' },
+          providerDiagnostic: 'must-be-presanitized-by-terminal-adapter',
+        },
       });
     const service = createService(store, {
       execute: vi.fn(async () => ({ status: 'completed' as const })),
@@ -3029,9 +3036,55 @@ describe('Arena generation lifecycle service', () => {
         resumeCursor: '1-0',
         finalAuthoritative: true,
         resultAvailable: true,
+        roomSafeResult: {
+          version: 1,
+          format: 'stream-markdown',
+          mode: 'classic',
+          report: { headline: '权威标题' },
+          providerDiagnostic: 'must-be-presanitized-by-terminal-adapter',
+        },
       }),
     });
     expect(readOwnedTerminal).toHaveBeenCalledTimes(2);
+  });
+
+  test('completed owned projection reloads the durable Room-safe result after service recovery', async () => {
+    const store = new MemoryReplayStore();
+    const readOwnedTerminal = vi.fn(async () => ({
+      generationId: 'generation-1',
+      generationRequestId: 'request-1',
+      status: 'completed' as const,
+      updatedAt: '2026-08-25T03:30:00.000Z',
+      resultRef: 'r2:terminal',
+      markdown: 'durable completed report',
+      reasoning: '',
+      payloadHash: 'hash:{"value":"same"}',
+      contentAvailable: true,
+      roomSafeResult: { version: 1, format: 'stream-markdown', mode: 'classic' },
+    }));
+    const service = createService(store, {
+      execute: vi.fn(async ({ emit }) => {
+        await emit({ type: 'markdown', data: { chunk: 'durable completed report' } });
+        return { status: 'completed' as const, resultRef: 'r2:terminal' };
+      }),
+    }, { terminalStore: { readOwnedTerminal } });
+    const response = await service.create(createRequest('request-1'));
+    await response.text();
+
+    await expect(service.readOwnedProjection({
+      actorKey: 'user:42',
+      generationId: 'generation-1',
+    })).resolves.toMatchObject({
+      kind: 'found',
+      projection: {
+        status: 'completed',
+        roomSafeResult: { version: 1, format: 'stream-markdown', mode: 'classic' },
+      },
+    });
+    expect(readOwnedTerminal).toHaveBeenCalledWith({
+      generationId: 'generation-1',
+      actorKey: 'user:42',
+    });
   });
 
   test('expired Redis lease adopts a durable completed finalization instead of overwriting it', async () => {

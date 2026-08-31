@@ -117,6 +117,9 @@ describe('Arena generation runtime', () => {
     expect(first.responseHeaders?.['X-Mahoshojo-Stream-Meta']).toBe(
       second.responseHeaders?.['X-Mahoshojo-Stream-Meta'],
     );
+    expect(JSON.parse(decodeURIComponent(
+      first.responseHeaders?.['X-Mahoshojo-Stream-Meta'] ?? '',
+    ))).toMatchObject({ mode: 'classic' });
     expect(JSON.stringify(preflight.semanticPayload)).not.toContain('byok-secret');
     expect(JSON.stringify(first.executionPayload)).toContain('byok-secret');
   });

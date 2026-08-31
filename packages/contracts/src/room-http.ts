@@ -7,10 +7,15 @@ import {
   RoomRevisionSchema,
 } from './protocol';
 import {
+  BattleModeSchema,
   DataCardKindSchema,
   DisplayNameSchema,
+  GlobalGuidanceSchema,
+  GuidanceSchema,
   HostLocalObjectKeySchema,
+  LanguageSchema,
   OpaqueKeySchema,
+  StableObjectKeySchema,
   WireErrorMessageSchema,
   WireReasonSchema,
 } from './primitives';
@@ -26,6 +31,7 @@ import {
   MAX_PROPOSAL_CHANGES,
 } from './limits';
 import { SafeJsonValueSchema } from './json-value';
+import { BattleReportAdjudicationResultSchema } from './battle-report-render-snapshot';
 import {
   RoomDirectoryTitleSchema,
   RoomDirectoryVisibilitySchema,
@@ -177,6 +183,49 @@ export const ArenaRoomGenerationProjectionStatusSchema = z.enum([
   'producer_lost',
 ]);
 
+const ArenaRoomGenerationUsageSchema = z.object({
+  promptTokens: z.number().int().nonnegative().optional(),
+  completionTokens: z.number().int().nonnegative().optional(),
+  totalTokens: z.number().int().nonnegative().optional(),
+  cachedTokens: z.number().int().nonnegative().optional(),
+  reasoningTokens: z.number().int().nonnegative().optional(),
+}).strict();
+
+export const ArenaRoomGenerationResultSchema = z.object({
+  version: z.literal(1),
+  format: z.literal('stream-markdown'),
+  reporterInfo: z.object({
+    name: z.string().max(300),
+    publication: z.string().max(300),
+  }).strict().optional(),
+  mode: BattleModeSchema,
+  scenarioDisplayName: DisplayNameSchema.optional(),
+  sharedGuidance: GlobalGuidanceSchema.optional(),
+  characterGuidances: z.array(z.object({
+    combatantKey: StableObjectKeySchema,
+    displayName: DisplayNameSchema,
+    guidance: GuidanceSchema,
+  }).strict()).max(MAX_COMBATANTS).optional(),
+  language: LanguageSchema.optional(),
+  storyLength: z.string().trim().min(1).max(32).optional(),
+  adjudicationResults: z.array(BattleReportAdjudicationResultSchema).max(2_100).optional(),
+  narrativeHistoryReadCount: z.number().int().nonnegative().max(1_000_000).optional(),
+  report: z.object({
+    headline: z.string().max(300).optional(),
+    winner: z.string().max(300).optional(),
+  }).strict().optional(),
+  ai: z.object({
+    model: z.string().max(256).optional(),
+    usage: ArenaRoomGenerationUsageSchema.optional(),
+  }).strict().optional(),
+  combatantUpdates: z.array(z.object({
+    combatantKey: StableObjectKeySchema,
+    displayName: DisplayNameSchema,
+    impact: z.string().max(2_000).optional(),
+    currentStateSummary: z.string().max(2_000).optional(),
+  }).strict()).max(MAX_COMBATANTS).optional(),
+}).strict();
+
 export const ArenaRoomGenerationViewResponseSchema = z.object({
   protocolVersion: z.literal(PROTOCOL_VERSION),
   roomId: OpaqueKeySchema,
@@ -187,6 +236,7 @@ export const ArenaRoomGenerationViewResponseSchema = z.object({
   nextChunkSeq: z.number().int().nonnegative(),
   finalAuthoritative: z.boolean(),
   generationRecordId: OpaqueKeySchema.optional(),
+  result: ArenaRoomGenerationResultSchema.optional(),
   errorCode: WireReasonSchema.optional(),
 }).strict().superRefine((response, context) => {
   const expectedMirrorState = (() => {
@@ -208,14 +258,22 @@ export const ArenaRoomGenerationViewResponseSchema = z.object({
     });
   }
   if (response.status === 'completed') {
-    if (!response.finalAuthoritative || response.generationRecordId === undefined) {
+    if (
+      !response.finalAuthoritative
+      || response.generationRecordId === undefined
+      || response.result === undefined
+    ) {
       context.addIssue({
         code: 'custom',
         path: ['finalAuthoritative'],
         message: 'completed projection must identify authoritative final content',
       });
     }
-  } else if (response.finalAuthoritative || response.generationRecordId !== undefined) {
+  } else if (
+    response.finalAuthoritative
+    || response.generationRecordId !== undefined
+    || response.result !== undefined
+  ) {
     context.addIssue({
       code: 'custom',
       path: ['generationRecordId'],
@@ -344,6 +402,7 @@ export type ArenaRoomGenerationProjectionStatus = z.infer<
 export type ArenaRoomGenerationViewResponse = z.infer<
   typeof ArenaRoomGenerationViewResponseSchema
 >;
+export type ArenaRoomGenerationResult = z.infer<typeof ArenaRoomGenerationResultSchema>;
 export type ArenaRoomSessionResponse = z.infer<typeof ArenaRoomSessionResponseSchema>;
 export type ArenaRoomTicketResponse = z.infer<typeof ArenaRoomTicketResponseSchema>;
 export type ArenaRoomLeaveResponse = z.infer<typeof ArenaRoomLeaveResponseSchema>;

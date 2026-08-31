@@ -568,6 +568,23 @@ export const createArenaGenerationRuntime = (
     };
     const reporterInfo = prepared.metadata.reporterInfo;
     const streamMeta = {
+      ...(typeof executionPayload.mode === 'string' && executionPayload.mode.trim()
+        ? { mode: executionPayload.mode.trim() }
+        : {}),
+      ...(typeof executionPayload.scenarioTitle === 'string'
+        && executionPayload.scenarioTitle.trim()
+        ? { scenarioDisplayName: executionPayload.scenarioTitle.trim() }
+        : {}),
+      ...(typeof executionPayload.language === 'string' && executionPayload.language.trim()
+        ? { language: executionPayload.language.trim() }
+        : {}),
+      ...(typeof executionPayload.customStoryLength === 'string'
+        && executionPayload.customStoryLength.trim()
+        ? { storyLength: executionPayload.customStoryLength.trim() }
+        : typeof executionPayload.storyLength === 'string'
+          && executionPayload.storyLength.trim()
+          ? { storyLength: executionPayload.storyLength.trim() }
+          : {}),
       ...(prepared.metadata.outputContract === 'structured-report'
         || prepared.metadata.outputContract === 'stream-markdown'
         ? { outputContract: prepared.metadata.outputContract }

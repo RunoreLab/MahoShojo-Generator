@@ -408,6 +408,12 @@ describe('Arena Room generation coordinator', () => {
         resultAvailable: true,
         generationRecordId: 'generation-1',
         errorCode: null,
+        roomSafeResult: {
+          version: 1,
+          format: 'stream-markdown',
+          mode: 'classic',
+          report: { headline: '权威标题' },
+        },
       },
     });
     const restarted = createArenaRoomGenerationService({
@@ -647,6 +653,12 @@ describe('Arena Room generation coordinator', () => {
         resultAvailable: true,
         generationRecordId: 'generation-1',
         errorCode: null,
+        roomSafeResult: {
+          version: 1,
+          format: 'stream-markdown',
+          mode: 'classic',
+          report: { headline: '权威标题' },
+        },
       },
     });
     const restarted = createArenaRoomGenerationService({
@@ -665,6 +677,12 @@ describe('Arena Room generation coordinator', () => {
       markdown: '# 来自 R2/D1 terminal fallback 的完整战报',
       finalAuthoritative: true,
       generationRecordId: 'generation-1',
+      result: {
+        version: 1,
+        format: 'stream-markdown',
+        mode: 'classic',
+        report: { headline: '权威标题' },
+      },
       generation: { state: 'completed' },
     });
     expect(harness.generation.resumeOwnedSubscription).not.toHaveBeenCalled();
@@ -728,6 +746,13 @@ describe('Arena Room generation coordinator', () => {
         resultAvailable: scenario.resultAvailable,
         generationRecordId: scenario.generationRecordId,
         errorCode: scenario.errorCode,
+        ...(scenario.status === 'completed' ? {
+          roomSafeResult: {
+            version: 1 as const,
+            format: 'stream-markdown' as const,
+            mode: 'classic' as const,
+          },
+        } : {}),
       },
     });
 
@@ -808,6 +833,11 @@ describe('Arena Room generation coordinator', () => {
           finalAuthoritative: true,
           resultAvailable: true,
           generationRecordId: 'generation-1',
+          roomSafeResult: {
+            version: 1,
+            format: 'stream-markdown',
+            mode: 'classic',
+          },
         },
       });
     const restarted = createArenaRoomGenerationService({

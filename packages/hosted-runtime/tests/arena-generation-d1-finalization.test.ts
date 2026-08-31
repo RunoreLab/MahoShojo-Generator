@@ -93,8 +93,8 @@ const claimInput = {
     mode: 'classic',
     language: 'zh-CN',
     combatants: [
-      { type: 'magical-girl', data: { name: 'A' } },
-      { type: 'magical-girl', data: { name: 'B' } },
+      { roomCombatantKey: 'data-card:character-a', type: 'magical-girl', data: { name: 'A' } },
+      { roomCombatantKey: 'host-local:character:1:b', type: 'magical-girl', data: { name: 'B' } },
     ],
   },
   metadata: {
@@ -367,6 +367,9 @@ describe('Arena D1/R2 finalization ports', () => {
       adjudicationResults,
       narrativeHistoryReadCount: 3,
     });
+    expect(extra.combatantsFallback.map((entry: Record<string, unknown>) => (
+      entry.roomCombatantKey
+    ))).toEqual(['data-card:character-a', 'host-local:character:1:b']);
     expect(JSON.stringify(extra.battleReportRenderSnapshotV1)).not.toContain('must-not-enter-render-snapshot');
   });
 
@@ -718,12 +721,58 @@ ORDER BY sort_index
       status: 'completed',
       updated_at: '2026-08-25T04:00:00.000Z',
       output_preview: 'preview',
+      mode: 'classic',
+      scenario_title: '雨夜车站',
+      language: 'zh-CN',
+      story_length: 'standard',
+      ai_provider_name: 'must-not-project-provider-name',
+      ai_provider_type: 'must-not-project-provider-type',
+      ai_model: 'gpt-safe',
+      headline: '雨夜决战',
+      winner: '角色甲',
+      prompt_tokens: 10,
+      completion_tokens: 20,
+      total_tokens: 30,
+      cached_tokens: 2,
+      reasoning_tokens: 4,
       extra_json: JSON.stringify({
         generationRequestId: 'request-1',
         generationOwnerHash: ownerHash,
         generationPayloadHash: 'payload-hash-1',
+        generationTerminalStatus: 'completed',
         finalizationCompleted: true,
         resultRef: 'r2:key',
+        battleReportRenderSnapshotV1: {
+          version: 1,
+          reporterInfo: { name: '测试记者', publication: 'A.R.E.N.A.' },
+          userGuidance: '保持克制',
+          characterGuidances: [{ characterName: '角色甲', guidance: '保护队友' }],
+          adjudicationResults: [{
+            depth: 0,
+            description: '攻击是否命中？',
+            type: 'binary',
+            roll: 42,
+            outcome: '成功',
+            details: '掷骰(42) vs 成功率(65%)',
+          }],
+          narrativeHistoryReadCount: 3,
+        },
+        combatantsFallback: [{
+          sortIndex: 0,
+          roomCombatantKey: 'data-card:character-1',
+          name: '角色甲',
+          privatePayload: { apiKey: 'must-not-leak' },
+        }],
+        localCardReconciliation: {
+          impacts: [{
+            characterName: '角色甲',
+            impact: '受轻伤',
+            currentStateSummary: '仍可行动',
+            fullCharacter: { private: true },
+          }],
+        },
+        rawReasoning: 'must-not-leak',
+        providerDiagnostic: { requestId: 'must-not-leak' },
       }),
       r2_key: 'key',
     }])]);
@@ -735,10 +784,51 @@ ORDER BY sort_index
       },
     });
 
-    await expect(store.readOwnedTerminal({
+    const terminal = await store.readOwnedTerminal({
       generationId: 'generation-1',
       actorKey: 'anonymous:anon-id-1',
-    })).resolves.toMatchObject({ markdown: 'full body', generationRequestId: 'request-1' });
+    });
+    expect(terminal).toMatchObject({
+      markdown: 'full body',
+      generationRequestId: 'request-1',
+      roomSafeResult: {
+        version: 1,
+        format: 'stream-markdown',
+        reporterInfo: { name: '测试记者', publication: 'A.R.E.N.A.' },
+        mode: 'classic',
+        scenarioDisplayName: '雨夜车站',
+        sharedGuidance: '保持克制',
+        characterGuidances: [{
+          combatantKey: 'data-card:character-1',
+          displayName: '角色甲',
+          guidance: '保护队友',
+        }],
+        language: 'zh-CN',
+        storyLength: 'standard',
+        adjudicationResults: expect.any(Array),
+        narrativeHistoryReadCount: 3,
+        report: { headline: '雨夜决战', winner: '角色甲' },
+        ai: {
+          model: 'gpt-safe',
+          usage: {
+            promptTokens: 10,
+            completionTokens: 20,
+            totalTokens: 30,
+            cachedTokens: 2,
+            reasoningTokens: 4,
+          },
+        },
+        combatantUpdates: [{
+          combatantKey: 'data-card:character-1',
+          displayName: '角色甲',
+          impact: '受轻伤',
+          currentStateSummary: '仍可行动',
+        }],
+      },
+    });
+    expect(JSON.stringify(terminal?.roomSafeResult)).not.toMatch(
+      /extra_json|must-not-leak|must-not-project-provider|rawReasoning|providerDiagnostic|privatePayload|fullCharacter/u,
+    );
     await expect(store.readOwnedTerminal({
       generationId: 'generation-1',
       actorKey: 'anonymous:other-id',
@@ -774,6 +864,45 @@ ORDER BY sort_index
       errorCode: 'AI_UPSTREAM_REQUEST_FAILED',
       markdown: '',
       contentAvailable: true,
+    });
+  });
+
+  it('projects a minimal safe result for a legacy completed row with only a valid mode', async () => {
+    const ownerHash = await crypto.subtle.digest(
+      'SHA-256',
+      new TextEncoder().encode('anonymous:anon-id-1'),
+    ).then((bytes) => Array.from(
+      new Uint8Array(bytes),
+      (byte) => byte.toString(16).padStart(2, '0'),
+    ).join(''));
+    const client = sequentialD1([result([{
+      id: 'generation-legacy-1',
+      status: 'completed',
+      updated_at: '2026-08-25T04:00:00.000Z',
+      mode: 'classic',
+      extra_json: JSON.stringify({
+        generationRequestId: 'request-legacy-1',
+        generationOwnerHash: ownerHash,
+        generationPayloadHash: 'payload-hash-legacy-1',
+        generationTerminalStatus: 'completed',
+        finalizationCompleted: true,
+        resultRef: 'r2:legacy',
+      }),
+      r2_key: 'legacy-key',
+    }])]);
+    const store = createNodeArenaGenerationTerminalStore({
+      getD1Client: () => client,
+      objectStore: {
+        put: vi.fn(),
+        getText: vi.fn(async () => ({ kind: 'found' as const, text: 'legacy full body' })),
+      },
+    });
+
+    await expect(store.readOwnedTerminal({
+      generationId: 'generation-legacy-1',
+      actorKey: 'anonymous:anon-id-1',
+    })).resolves.toMatchObject({
+      roomSafeResult: { version: 1, format: 'stream-markdown', mode: 'classic' },
     });
   });
 

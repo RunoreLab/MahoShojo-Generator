@@ -178,6 +178,65 @@ describe('Arena Room HTTP product contract', () => {
       finalAuthoritative: false,
       generationRecordId: 'r2:record',
     }).success).toBe(false);
+
+    const completed = {
+      ...response,
+      status: 'completed' as const,
+      generation: { ...response.generation, state: 'completed' as const },
+      markdown: '# 权威终态正文',
+      nextChunkSeq: 0,
+      finalAuthoritative: true,
+      generationRecordId: 'generation-1',
+      result: {
+        version: 1 as const,
+        format: 'stream-markdown' as const,
+        reporterInfo: { name: '测试记者', publication: 'A.R.E.N.A.' },
+        mode: 'classic',
+        scenarioDisplayName: '雨夜车站',
+        sharedGuidance: '保持克制',
+        characterGuidances: [{ combatantKey: 'data-card:1', displayName: '角色甲', guidance: '保护队友' }],
+        language: 'zh-CN',
+        storyLength: 'standard',
+        adjudicationResults: [{
+          depth: 0,
+          description: '攻击是否命中？',
+          type: 'binary' as const,
+          roll: 42,
+          outcome: '成功',
+          details: '掷骰(42) vs 成功率(65%)',
+        }],
+        narrativeHistoryReadCount: 3,
+        report: { headline: '雨夜决战', winner: '角色甲' },
+        ai: {
+          model: 'gpt-safe',
+          usage: { promptTokens: 10, completionTokens: 20, totalTokens: 30 },
+        },
+        combatantUpdates: [{
+          combatantKey: 'data-card:1',
+          displayName: '角色甲',
+          impact: '受轻伤',
+          currentStateSummary: '仍可行动',
+        }],
+      },
+    };
+    expect(ArenaRoomGenerationViewResponseSchema.parse(completed)).toEqual(completed);
+    expect(ArenaRoomGenerationViewResponseSchema.safeParse({
+      ...response,
+      result: completed.result,
+    }).success).toBe(false);
+    for (const leakedResultField of [
+      { extra_json: { providerApiKey: 'secret' } },
+      { reasoning: 'hidden chain of thought' },
+      { providerDiagnostic: { requestId: 'upstream-secret' } },
+      { ai: { ...completed.result.ai, providerName: 'must-not-pass' } },
+      { ai: { ...completed.result.ai, providerType: 'must-not-pass' } },
+      { updatedCombatants: [{ data: { private: true } }] },
+    ]) {
+      expect(ArenaRoomGenerationViewResponseSchema.safeParse({
+        ...completed,
+        result: { ...completed.result, ...leakedResultField },
+      }).success).toBe(false);
+    }
   });
 
   it('Proposal mutation DTO 只接受 client intent 与 typed changes，并保持 strict', () => {

@@ -1,6 +1,8 @@
 import {
   ArenaMultiplayerGenerationSnapshotSchema,
+  ArenaRoomGenerationResultSchema,
   type ArenaMultiplayerGenerationSnapshot,
+  type ArenaRoomGenerationResult,
 } from '@mahoshojo/contracts/arena-room';
 import type {
   ArenaGenerationApplicationService,
@@ -47,6 +49,7 @@ export type ArenaRoomGenerationEvent =
 export type ArenaRoomGenerationSubscription = Readonly<{
   generationId: string;
   generationRequestId: string;
+  roomSafeMetadata?: ArenaRoomGenerationResult;
   events: ReadableStream<ArenaRoomGenerationEvent>;
 }>;
 
@@ -242,19 +245,54 @@ const projectEvent = (
 
 const projectSubscription = (
   subscription: ArenaGenerationSubscription,
-): ArenaRoomGenerationSubscription => Object.freeze({
-  generationId: subscription.generationId,
-  generationRequestId: subscription.generationRequestId,
-  events: subscription.events.pipeThrough(new TransformStream<
-    GenerationStreamEvent,
-    ArenaRoomGenerationEvent
-  >({
-    transform(event, controller) {
-      const projected = projectEvent(subscription.generationId, event);
-      if (projected) controller.enqueue(projected);
-    },
-  })),
-});
+): ArenaRoomGenerationSubscription => {
+  const rawHeader = Object.entries(subscription.headers).find(
+    ([name]) => name.toLowerCase() === 'x-mahoshojo-stream-meta',
+  )?.[1];
+  let roomSafeMetadata: ArenaRoomGenerationResult | undefined;
+  if (rawHeader) {
+    try {
+      const decoded = recordOf(JSON.parse(decodeURIComponent(rawHeader)));
+      const reporter = recordOf(decoded?.reporterInfo);
+      const candidate = {
+        version: 1,
+        format: 'stream-markdown',
+        ...(reporter ? {
+          reporterInfo: { name: reporter.name, publication: reporter.publication },
+        } : {}),
+        mode: decoded?.mode,
+        ...(decoded?.scenarioDisplayName === undefined
+          ? {} : { scenarioDisplayName: decoded.scenarioDisplayName }),
+        ...(decoded?.userGuidance === undefined
+          ? {} : { sharedGuidance: decoded.userGuidance }),
+        ...(decoded?.language === undefined ? {} : { language: decoded.language }),
+        ...(decoded?.storyLength === undefined ? {} : { storyLength: decoded.storyLength }),
+        ...(decoded?.adjudicationResults === undefined
+          ? {} : { adjudicationResults: decoded.adjudicationResults }),
+        ...(decoded?.narrativeHistoryReadCount === undefined
+          ? {} : { narrativeHistoryReadCount: decoded.narrativeHistoryReadCount }),
+      };
+      const parsed = ArenaRoomGenerationResultSchema.safeParse(candidate);
+      if (parsed.success) roomSafeMetadata = parsed.data;
+    } catch {
+      // Malformed or unrecognized headers never cross the Room projection boundary.
+    }
+  }
+  return Object.freeze({
+    generationId: subscription.generationId,
+    generationRequestId: subscription.generationRequestId,
+    ...(roomSafeMetadata ? { roomSafeMetadata } : {}),
+    events: subscription.events.pipeThrough(new TransformStream<
+      GenerationStreamEvent,
+      ArenaRoomGenerationEvent
+    >({
+      transform(event, controller) {
+        const projected = projectEvent(subscription.generationId, event);
+        if (projected) controller.enqueue(projected);
+      },
+    })),
+  });
+};
 
 const projectOwnedProjectionResult = (
   result: ArenaGenerationOwnedProjectionResult,
@@ -267,6 +305,9 @@ const projectOwnedProjectionResult = (
     };
   }
   const projection = result.projection;
+  const roomSafeResult = projection.status === 'completed'
+    ? ArenaRoomGenerationResultSchema.safeParse(projection.roomSafeResult)
+    : null;
   const errorCode = projection.status === 'failed' || projection.status === 'producer_lost'
     ? safeErrorCode(
       projection.errorCode,
@@ -288,6 +329,7 @@ const projectOwnedProjectionResult = (
       resultAvailable: projection.resultAvailable,
       generationRecordId: projection.generationRecordId,
       errorCode,
+      ...(roomSafeResult?.success ? { roomSafeResult: roomSafeResult.data } : {}),
     }),
   };
 };
