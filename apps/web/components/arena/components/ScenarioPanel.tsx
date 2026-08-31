@@ -8,9 +8,14 @@ import { ChangeEvent, useMemo, useRef, useState } from 'react';
 
 import { useBattleStore } from '../stores/useBattleStore';
 import { useBattleActions } from '../hooks/useBattleActions';
-import { BattleStoreState, MAX_AUX_SCENARIOS } from '../types';
+import { BattleStoreState } from '../types';
 import { useScenarioPresetQuery } from '../hooks/useArenaData';
 import type { ScenarioPreset } from '@/lib/scenario-presets';
+import {
+  canAddArenaReferenceItems,
+  countArenaSelectedReferenceItems,
+  MAX_ARENA_REFERENCE_ITEMS,
+} from '@/lib/arena/resource-budget';
 
 const getScenarioTitle = (content: Record<string, unknown> | null) => {
   if (!content) return '';
@@ -34,6 +39,8 @@ export function ScenarioPanel({
   const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
   const scenario = useBattleSelector((state) => state.scenario);
   const auxScenarios = useBattleSelector((state) => state.auxScenarios);
+  const materials = useBattleSelector((state) => state.materials);
+  const selectedQuestionnaires = useBattleSelector((state) => state.selectedQuestionnaires);
   const isGenerating = useBattleSelector((state) => state.isGenerating);
   const isMatching = useBattleSelector((state) => state.isMatching);
   const setError = useBattleSelector((state) => state.setError);
@@ -109,8 +116,12 @@ export function ScenarioPanel({
     }
 
     const hasMainScenario = Boolean(scenario.content);
-    if (hasMainScenario && auxScenarios.length >= MAX_AUX_SCENARIOS) {
-      setError(`❌ 最多只能添加 ${MAX_AUX_SCENARIOS} 个辅助情景。`);
+    if (hasMainScenario && !canAddArenaReferenceItems({
+      auxScenarios,
+      materials,
+      selectedQuestionnaires,
+    })) {
+      setError(`❌ 参考项（辅助情景、素材和问卷）合计最多 ${MAX_ARENA_REFERENCE_ITEMS} 项。`);
       return;
     }
 
@@ -170,7 +181,14 @@ export function ScenarioPanel({
     }
   };
 
-  const canAddAuxScenario = Boolean(scenario.content);
+  const referenceItemCount = countArenaSelectedReferenceItems({
+    auxScenarios,
+    materials,
+    selectedQuestionnaires,
+  });
+  const hasMainScenario = Boolean(scenario.content);
+  const hasReferenceCapacity = referenceItemCount < MAX_ARENA_REFERENCE_ITEMS;
+  const canAddAuxScenario = hasMainScenario && hasReferenceCapacity;
 
   return (
     <>
@@ -218,7 +236,7 @@ export function ScenarioPanel({
 
       <CollapsibleSection
         title="辅助情景（可选）"
-        description={`已选 ${auxScenarios.length}/${MAX_AUX_SCENARIOS}（需先选择主情景）`}
+        description={`已选辅助情景 ${auxScenarios.length}；参考项合计 ${referenceItemCount}/${MAX_ARENA_REFERENCE_ITEMS}`}
         defaultOpen={false}
         disabled={isGenerating}
         storageKey="arena.section.auxScenario.open"
@@ -239,7 +257,10 @@ export function ScenarioPanel({
       >
         <p className="text-xs text-gray-500">
           辅助情景会和主情景一起加入提示词。
-          {!canAddAuxScenario && <span className="text-red-500 ml-1">（请先选择主情景）</span>}
+          {!hasMainScenario && <span className="text-red-500 ml-1">（请先选择主情景）</span>}
+          {hasMainScenario && !hasReferenceCapacity && (
+            <span className="text-red-500 ml-1">（参考项总预算已用尽）</span>
+          )}
         </p>
 
         <div className="flex gap-2 mt-3">

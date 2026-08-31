@@ -11,6 +11,10 @@ import {
   parseQuestionnaireDataCardPayload,
   type QuestionnairePresetEntry,
 } from '@/lib/questionnaires';
+import {
+  countArenaSelectedReferenceItems,
+  MAX_ARENA_REFERENCE_ITEMS,
+} from '@/lib/arena/resource-budget';
 
 import { useBattleStore } from '../stores/useBattleStore';
 import { BattleStoreState } from '../types';
@@ -38,6 +42,8 @@ const requireLore = (questionnaire: { title?: string; loreMarkdown?: string | nu
 export function QuestionnaireLorePanel() {
   const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
   const selectedQuestionnaires = useBattleSelector((state) => state.selectedQuestionnaires);
+  const auxScenarios = useBattleSelector((state) => state.auxScenarios);
+  const materials = useBattleSelector((state) => state.materials);
   const addQuestionnaireSelection = useBattleSelector((state) => state.addQuestionnaireSelection);
   const removeQuestionnaireSelection = useBattleSelector((state) => state.removeQuestionnaireSelection);
   const setQuestionnaireSelections = useBattleSelector((state) => state.setQuestionnaireSelections);
@@ -64,6 +70,13 @@ export function QuestionnaireLorePanel() {
   const [pasteQuestionnaireError, setPasteQuestionnaireError] = useState<string | null>(null);
 
   const loreText = useMemo(() => formatLoreText(selectedQuestionnaires), [selectedQuestionnaires]);
+  const referenceItemCount = countArenaSelectedReferenceItems({
+    auxScenarios,
+    materials,
+    selectedQuestionnaires,
+  });
+  const hasReferenceCapacity = referenceItemCount < MAX_ARENA_REFERENCE_ITEMS;
+  const referenceLimitMessage = `参考项（辅助情景、素材和问卷）合计最多 ${MAX_ARENA_REFERENCE_ITEMS} 项。`;
 
   useEffect(() => {
     let cancelled = false;
@@ -90,6 +103,7 @@ export function QuestionnaireLorePanel() {
 
   const handleSelectQuestionnaireCard = useCallback((card: any) => {
     try {
+      if (!hasReferenceCapacity) throw new Error(referenceLimitMessage);
       const rawData = parseQuestionnaireDataCardPayload(card);
       const cardSourceMeta = mapDataCardSourceMeta(card);
       const fallbackKind = rawData?.kind === 'canshou' ? 'canshou' : 'magical-girl';
@@ -111,7 +125,7 @@ export function QuestionnaireLorePanel() {
     } catch (error) {
       setQuestionnairePickerError(error instanceof Error ? error.message : '解析问卷失败');
     }
-  }, [addQuestionnaireSelection]);
+  }, [addQuestionnaireSelection, hasReferenceCapacity, referenceLimitMessage]);
 
   const handleOpenQuestionnaireDetails = useCallback((selection: BattleStoreState['selectedQuestionnaires'][number]) => {
     const baseId = selection.source === 'database'
@@ -136,6 +150,10 @@ export function QuestionnaireLorePanel() {
   }, []);
 
   const handleAddPreset = useCallback(async (presetId: string) => {
+    if (!hasReferenceCapacity) {
+      setPresetError(referenceLimitMessage);
+      return;
+    }
     const matched = presetEntries.find((item) => item.id === presetId);
     if (!matched) {
       setPresetError('未找到对应预设');
@@ -159,9 +177,13 @@ export function QuestionnaireLorePanel() {
     } catch (error) {
       setPresetError(error instanceof Error ? error.message : '加载预设失败');
     }
-  }, [addQuestionnaireSelection, presetEntries]);
+  }, [addQuestionnaireSelection, hasReferenceCapacity, presetEntries, referenceLimitMessage]);
 
   const handlePasteQuestionnaireImport = useCallback(() => {
+    if (!hasReferenceCapacity) {
+      setPasteQuestionnaireError(referenceLimitMessage);
+      return;
+    }
     if (!pasteQuestionnaireText.trim()) {
       setPasteQuestionnaireError('请先粘贴问卷 JSON');
       return;
@@ -184,7 +206,7 @@ export function QuestionnaireLorePanel() {
     } catch (error) {
       setPasteQuestionnaireError(error instanceof Error ? error.message : '问卷 JSON 解析失败');
     }
-  }, [addQuestionnaireSelection, pasteQuestionnaireText]);
+  }, [addQuestionnaireSelection, hasReferenceCapacity, pasteQuestionnaireText, referenceLimitMessage]);
 
   const handleClearAll = useCallback(() => {
     setQuestionnaireSelections([]);
@@ -220,7 +242,7 @@ export function QuestionnaireLorePanel() {
                 setShowQuestionnairePicker(true);
                 setQuestionnairePickerError(null);
               }}
-              disabled={isGenerating}
+              disabled={isGenerating || !hasReferenceCapacity}
             >
               选择云端问卷
             </button>
@@ -231,7 +253,7 @@ export function QuestionnaireLorePanel() {
                 setShowPasteImport((prev) => !prev);
                 setPasteQuestionnaireError(null);
               }}
-              disabled={isGenerating}
+              disabled={isGenerating || !hasReferenceCapacity}
             >
               {showPasteImport ? '收起粘贴' : '粘贴 JSON'}
             </button>
@@ -247,7 +269,7 @@ export function QuestionnaireLorePanel() {
             <select
               className="input-field text-sm"
               style={{ cursor: 'pointer', width: 'min(420px, 100%)' }}
-              disabled={isGenerating}
+              disabled={isGenerating || !hasReferenceCapacity}
               defaultValue=""
               onChange={(e) => {
                 const id = e.target.value;
@@ -279,7 +301,7 @@ export function QuestionnaireLorePanel() {
               onChange={(e) => setPasteQuestionnaireText(e.target.value)}
               placeholder="在此粘贴问卷 JSON（必须包含 loreMarkdown）"
               className="w-full h-36 p-3 border rounded-lg text-xs font-mono bg-gray-50 text-gray-900"
-              disabled={isGenerating}
+              disabled={isGenerating || !hasReferenceCapacity}
             />
             <div className="mt-2 flex items-center justify-between gap-2 flex-wrap">
               <div className="text-xs text-gray-500">
@@ -289,7 +311,7 @@ export function QuestionnaireLorePanel() {
                 type="button"
                 className="px-3 py-2 text-xs font-semibold rounded bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
                 onClick={handlePasteQuestionnaireImport}
-                disabled={isGenerating}
+                disabled={isGenerating || !hasReferenceCapacity}
               >
                 导入
               </button>
@@ -303,7 +325,9 @@ export function QuestionnaireLorePanel() {
           ) : (
             <div className="space-y-2">
               <div className="flex items-center justify-between gap-2 flex-wrap">
-                <div className="text-xs text-gray-600">已选 {selectedQuestionnaires.length} 张</div>
+                <div className="text-xs text-gray-600">
+                  已选问卷 {selectedQuestionnaires.length}；参考项合计 {referenceItemCount}/{MAX_ARENA_REFERENCE_ITEMS}
+                </div>
                 <TokenIndicator text={loreText} />
               </div>
               <ul className="space-y-2">

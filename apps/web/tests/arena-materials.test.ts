@@ -81,7 +81,7 @@ describe('arena materials', () => {
     expect(block).not.toContain('nested-signature');
   });
 
-  test('请求侧素材规范化限制最多 10 个，且不会读取辅助情景', () => {
+  test('请求侧素材规范化不再按旧的单类 10 项静默截断', () => {
     const raw = Array.from({ length: 12 }, (_, index) => ({
       id: `m-${index}`,
       name: `素材 ${index}`,
@@ -92,9 +92,9 @@ describe('arena materials', () => {
 
     const normalized = normalizeArenaMaterialsForRequest(raw);
 
-    expect(normalized).toHaveLength(10);
+    expect(normalized).toHaveLength(12);
     expect(normalized[0]?.name).toBe('素材 0');
-    expect(normalized[9]?.name).toBe('素材 9');
+    expect(normalized[11]?.name).toBe('素材 11');
     expect(normalizeArenaMaterialsForRequest(undefined)).toEqual([]);
   });
 });

@@ -188,4 +188,29 @@ describe('Arena Room Battle store projection', () => {
     }));
     await expect(buildArenaRoomSharedConfigFromBattleState(overflow)).rejects.toThrow();
   });
+
+  it('单人引用项放宽后仍明确拒绝超过多人 wire contract 的投影', async () => {
+    const tooManyAuxScenarios = source();
+    tooManyAuxScenarios.auxScenarios = Array.from({ length: 11 }, (_, index) => ({
+      id: `aux-${index}`,
+      content: { title: `辅助情景 ${index}` },
+      fileName: `aux-${index}.json`,
+      isNative: false,
+    }));
+    await expect(buildArenaRoomSharedConfigFromBattleState(tooManyAuxScenarios))
+      .rejects.toThrow('多人房间最多支持 10 个辅助情景');
+
+    const tooManyMaterials = source();
+    tooManyMaterials.materials = Array.from({ length: 11 }, (_, index) => ({
+      id: `material-${index}`,
+      name: `素材 ${index}`,
+      content: {},
+      fileName: null,
+      sourceKind: 'raw-json',
+      sourceType: 'raw-json',
+      isNative: false,
+    }));
+    await expect(buildArenaRoomSharedConfigFromBattleState(tooManyMaterials))
+      .rejects.toThrow('多人房间最多支持 10 个素材');
+  });
 });

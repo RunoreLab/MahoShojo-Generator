@@ -9,8 +9,6 @@ import {
   isCombatantLimitReached,
   MAX_COMBATANTS,
   ScenarioState,
-  MAX_AUX_SCENARIOS,
-  MAX_ARENA_MATERIALS,
 } from '../types';
 import {
   DEFAULT_BATTLE_REPORT_CARD_WIDTH_MODE,
@@ -18,6 +16,7 @@ import {
 } from '../utils/battleReportCardWidth';
 import type { AdjudicatorEvent } from '@/types/arena';
 import { buildAdjudicationSourceKey, filterAdjudicationEventsBySources } from '@/lib/arena/adjudication-events';
+import { canAddArenaReferenceItems } from '@/lib/arena/resource-budget';
 
 const normalizeSourceKey = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
 
@@ -309,7 +308,7 @@ export const useBattleStore = create<BattleStoreState>()(
 
       addAuxScenario: (scenario) =>
         set((state) => {
-          if (state.auxScenarios.length >= MAX_AUX_SCENARIOS) {
+          if (!canAddArenaReferenceItems(state)) {
             return state;
           }
           return { auxScenarios: [...state.auxScenarios, scenario] };
@@ -350,6 +349,12 @@ export const useBattleStore = create<BattleStoreState>()(
         })),
       setAuxScenarios: (scenarios) =>
         set((state) => {
+          if (!canAddArenaReferenceItems({
+            ...state,
+            auxScenarios: [],
+          }, scenarios.length)) {
+            return state;
+          }
           const nextKeys = new Set(scenarios.map(getScenarioSourceKey).filter(Boolean));
           const removedKeys = state.auxScenarios
             .map(getScenarioSourceKey)
@@ -364,7 +369,7 @@ export const useBattleStore = create<BattleStoreState>()(
 
       addMaterial: (material) =>
         set((state) => {
-          if (state.materials.length >= MAX_ARENA_MATERIALS) {
+          if (!canAddArenaReferenceItems(state)) {
             return state;
           }
           return { materials: [...state.materials, material] };
@@ -389,7 +394,12 @@ export const useBattleStore = create<BattleStoreState>()(
         }),
 
       clearMaterials: () => set({ materials: [] }),
-      setMaterials: (materials) => set({ materials }),
+      setMaterials: (materials) =>
+        set((state) => (
+          canAddArenaReferenceItems({ ...state, materials: [] }, materials.length)
+            ? { materials }
+            : state
+        )),
 
       setAdjudicationEvents: (events) => set({ adjudicationEvents: events }),
       appendAdjudicationEvents: (events, sourceKey) =>
@@ -434,6 +444,7 @@ export const useBattleStore = create<BattleStoreState>()(
             return true;
           });
           if (isDuplicate) return state;
+          if (!canAddArenaReferenceItems(state)) return state;
 
           const usedSelectionIds = new Set<string>();
           state.selectedQuestionnaires.forEach((item) => {
@@ -470,7 +481,12 @@ export const useBattleStore = create<BattleStoreState>()(
           ),
         })),
 
-      setQuestionnaireSelections: (selections) => set({ selectedQuestionnaires: selections }),
+      setQuestionnaireSelections: (selections) =>
+        set((state) => (
+          canAddArenaReferenceItems({ ...state, selectedQuestionnaires: [] }, selections.length)
+            ? { selectedQuestionnaires: selections }
+            : state
+        )),
 
       toggleQuestionnaireSelectionLore: (selectionId, enabled) =>
         set((state) => ({

@@ -1,4 +1,8 @@
-import type { ArenaRoomSharedConfig } from '@mahoshojo/contracts/arena-room';
+import {
+  MAX_AUX_SCENARIOS as MAX_ROOM_AUX_SCENARIOS,
+  MAX_MATERIALS as MAX_ROOM_MATERIALS,
+  type ArenaRoomSharedConfig,
+} from '@mahoshojo/contracts/arena-room';
 import {
   buildArenaRoomSharedConfig,
   type ArenaRoomNormalizedSource,
@@ -209,6 +213,12 @@ const normalizeMaterial = async (
 export const buildArenaRoomSharedConfigFromBattleState = async (
   source: ArenaRoomBattleStateSource,
 ): Promise<ArenaRoomSharedConfig> => {
+  if (source.auxScenarios.length > MAX_ROOM_AUX_SCENARIOS) {
+    throw new Error(`多人房间最多支持 ${MAX_ROOM_AUX_SCENARIOS} 个辅助情景`);
+  }
+  if (source.materials.length > MAX_ROOM_MATERIALS) {
+    throw new Error(`多人房间最多支持 ${MAX_ROOM_MATERIALS} 个素材`);
+  }
   const combatants = await Promise.all(source.combatants.map(normalizeCombatant));
   const scenario = source.battleMode === 'scenario' && source.scenario.content !== null
     ? await normalizeScenario(source.scenario, 0)

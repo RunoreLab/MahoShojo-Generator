@@ -6,6 +6,10 @@ import { inferTemplate } from '@/lib/data-card-converter';
 import { buildAdjudicationSourceKey, markAdjudicationEventsWithSource } from '@/lib/arena/adjudication-events';
 import { buildArenaMaterialState } from '@/lib/arena/materials';
 import {
+  canAddArenaReferenceItems,
+  MAX_ARENA_REFERENCE_ITEMS,
+} from '@/lib/arena/resource-budget';
+import {
   mapDataCardRuntimeSourceInfo,
   mapPublicDataCardRowToBattleSelectionPayload,
   stripBattleSelectionTransportMeta,
@@ -18,8 +22,6 @@ import {
   BattleStoreState,
   CombatantData,
   isCombatantLimitReached,
-  MAX_ARENA_MATERIALS,
-  MAX_AUX_SCENARIOS,
   MAX_COMBATANTS,
   RandomCombatantPlaceholder,
 } from '../types';
@@ -46,6 +48,9 @@ const verifyOrigin = async (payload: any): Promise<boolean> => {
 const loadingCards = new Set<string>();
 
 const createClientId = (prefix: string): string => `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+const hasArenaReferenceCapacity = (): boolean => canAddArenaReferenceItems(useBattleStore.getState());
+const arenaReferenceLimitMessage = `参考项（辅助情景、素材和问卷）合计最多 ${MAX_ARENA_REFERENCE_ITEMS} 项。`;
 
 export const useBattleActions = () => {
   const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
@@ -375,8 +380,8 @@ export const useBattleActions = () => {
         return;
       }
 
-      if (useBattleStore.getState().auxScenarios.length >= MAX_AUX_SCENARIOS) {
-        setError(`❌ 最多只能添加 ${MAX_AUX_SCENARIOS} 个辅助情景。`);
+      if (!hasArenaReferenceCapacity()) {
+        setError(`❌ ${arenaReferenceLimitMessage}`);
         return;
       }
       if (sourceDataCardId && useBattleStore.getState().auxScenarios.some((item) => item.sourceDataCardId === sourceDataCardId)) {
@@ -434,8 +439,8 @@ export const useBattleActions = () => {
       setError('❌ 请先选择主情景，再添加辅助情景。');
       return;
     }
-    if (useBattleStore.getState().auxScenarios.length >= MAX_AUX_SCENARIOS) {
-      setError(`最多只能选择 ${MAX_AUX_SCENARIOS} 个辅助情景。`);
+    if (!hasArenaReferenceCapacity()) {
+      setError(arenaReferenceLimitMessage);
       return;
     }
     useBattleStore.getState().setIsMatching('scenario');
@@ -489,8 +494,8 @@ export const useBattleActions = () => {
       if (!useBattleStore.getState().scenario.content) {
         throw new Error('请先选择主情景，再添加辅助情景。');
       }
-      if (useBattleStore.getState().auxScenarios.length >= MAX_AUX_SCENARIOS) {
-        throw new Error(`最多只能添加 ${MAX_AUX_SCENARIOS} 个辅助情景。`);
+      if (!hasArenaReferenceCapacity()) {
+        throw new Error(arenaReferenceLimitMessage);
       }
 
       const text = await file.text();
@@ -539,8 +544,8 @@ export const useBattleActions = () => {
       if (!useBattleStore.getState().scenario.content) {
         throw new Error('请先选择主情景，再添加辅助情景。');
       }
-      if (useBattleStore.getState().auxScenarios.length >= MAX_AUX_SCENARIOS) {
-        throw new Error(`最多只能添加 ${MAX_AUX_SCENARIOS} 个辅助情景。`);
+      if (!hasArenaReferenceCapacity()) {
+        throw new Error(arenaReferenceLimitMessage);
       }
 
       const parsed = ScenarioSchema.safeParse(JSON.parse(text));
@@ -568,8 +573,8 @@ export const useBattleActions = () => {
       const errors: string[] = [];
       for (const file of Array.from(files)) {
         try {
-          if (useBattleStore.getState().materials.length >= MAX_ARENA_MATERIALS) {
-            errors.push(`${file.name}: 最多只能添加 ${MAX_ARENA_MATERIALS} 个素材。`);
+          if (!hasArenaReferenceCapacity()) {
+            errors.push(`${file.name}: ${arenaReferenceLimitMessage}`);
             continue;
           }
           const json = JSON.parse(await file.text());
@@ -592,8 +597,8 @@ export const useBattleActions = () => {
     async (text: string, options?: { fileName?: string }) => {
       const trimmed = text.trim();
       if (!trimmed) return;
-      if (useBattleStore.getState().materials.length >= MAX_ARENA_MATERIALS) {
-        throw new Error(`最多只能添加 ${MAX_ARENA_MATERIALS} 个素材。`);
+      if (!hasArenaReferenceCapacity()) {
+        throw new Error(arenaReferenceLimitMessage);
       }
       const json = JSON.parse(trimmed);
       const isNative = await verifyOrigin(json).catch(() => false);
@@ -624,8 +629,8 @@ export const useBattleActions = () => {
         return;
       }
 
-      if (useBattleStore.getState().materials.length >= MAX_ARENA_MATERIALS) {
-        setError(`❌ 最多只能添加 ${MAX_ARENA_MATERIALS} 个素材。`);
+      if (!hasArenaReferenceCapacity()) {
+        setError(`❌ ${arenaReferenceLimitMessage}`);
         return;
       }
       if (sourceDataCardId && useBattleStore.getState().materials.some((item) => item.sourceDataCardId === sourceDataCardId)) {

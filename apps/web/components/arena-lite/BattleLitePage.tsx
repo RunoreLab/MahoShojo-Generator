@@ -28,7 +28,6 @@ import {
   type CombatantData,
   formatCombatantCount,
   hasCombatantLimit,
-  MAX_ARENA_MATERIALS,
   MAX_COMBATANTS,
 } from '@/components/arena/types';
 import { getCombatantDisplayName } from '@/components/arena/utils/characterValidator';
@@ -41,6 +40,11 @@ import { BattleLiteInheritedContextNotice } from './BattleLiteInheritedContextNo
 import { BattleLiteScenarioSection } from './BattleLiteScenarioSection';
 import { BattleLiteStoryOptions } from './BattleLiteStoryOptions';
 import { buildBattleLiteInheritedSummary } from './battle-lite-inherited-summary';
+import {
+  countArenaSelectedReferenceItems,
+  getArenaReferenceRemainingCapacity,
+  MAX_ARENA_REFERENCE_ITEMS,
+} from '@/lib/arena/resource-budget';
 
 export function BattleLitePage() {
   const { isAuthenticated } = useAuth();
@@ -73,6 +77,16 @@ export function BattleLitePage() {
     [combatants],
   );
   const characterMaxSelected = hasCombatantLimit(MAX_COMBATANTS) ? MAX_COMBATANTS : undefined;
+  const referenceItemCount = countArenaSelectedReferenceItems({
+    auxScenarios,
+    materials,
+    selectedQuestionnaires,
+  });
+  const materialMaxSelected = materials.length + getArenaReferenceRemainingCapacity({
+    auxScenarios,
+    materials,
+    selectedQuestionnaires,
+  });
 
   const selectedCharacterDataCardIds = useMemo(() => {
     const out: string[] = [];
@@ -240,7 +254,7 @@ export function BattleLitePage() {
 
               <CollapsibleSection
                 title="📎 素材注入"
-                description={`已选 ${materials.length}/${MAX_ARENA_MATERIALS}`}
+                description={`已选素材 ${materials.length}；参考项合计 ${referenceItemCount}/${MAX_ARENA_REFERENCE_ITEMS}`}
                 defaultOpen={false}
                 disabled={isGenerating}
                 keepMounted
@@ -360,7 +374,7 @@ export function BattleLitePage() {
             : (dataModalType === 'material' ? selectedMaterialDataCardIds : selectedScenarioDataCardIds)
         }
         selectedCountOverride={dataModalType === 'character' ? combatants.length : (dataModalType === 'material' ? materials.length : undefined)}
-        maxSelected={dataModalType === 'character' ? characterMaxSelected : (dataModalType === 'material' ? MAX_ARENA_MATERIALS : undefined)}
+        maxSelected={dataModalType === 'character' ? characterMaxSelected : (dataModalType === 'material' ? materialMaxSelected : undefined)}
       />
 
       {selectedCombatant ? (

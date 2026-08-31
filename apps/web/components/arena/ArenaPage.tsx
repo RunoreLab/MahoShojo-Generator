@@ -34,8 +34,6 @@ import {
   CombatantData,
   formatCombatantCount,
   hasCombatantLimit,
-  MAX_AUX_SCENARIOS,
-  MAX_ARENA_MATERIALS,
   MAX_COMBATANTS,
 } from './types';
 import { useBattleActions } from './hooks/useBattleActions';
@@ -45,6 +43,11 @@ import { ArenaCommunitySection } from './shared/ArenaCommunitySection';
 import { ArenaPageLinks } from './shared/ArenaPageLinks';
 import { ArenaRankingLinks } from './shared/ArenaRankingLinks';
 import { ArenaRoomProvider } from './multiplayer/useArenaRoom';
+import {
+  countArenaSelectedReferenceItems,
+  getArenaReferenceRemainingCapacity,
+  MAX_ARENA_REFERENCE_ITEMS,
+} from '@/lib/arena/resource-budget';
 
 const ArenaMultiplayerPanel = dynamic(
   () => import('./multiplayer/ArenaMultiplayerPanel').then((module) => (
@@ -73,6 +76,7 @@ export function ArenaPage({ multiplayer }: ArenaPageProps = {}) {
   const scenario = useBattleStore((state: BattleStoreState) => state.scenario);
   const auxScenarios = useBattleStore((state: BattleStoreState) => state.auxScenarios);
   const materials = useBattleStore((state: BattleStoreState) => state.materials);
+  const selectedQuestionnaires = useBattleStore((state: BattleStoreState) => state.selectedQuestionnaires);
   const battleMode = useBattleStore((state: BattleStoreState) => state.battleMode);
   const isGenerating = useBattleStore((state: BattleStoreState) => state.isGenerating);
   const isMatching = useBattleStore((state: BattleStoreState) => state.isMatching);
@@ -93,6 +97,16 @@ export function ArenaPage({ multiplayer }: ArenaPageProps = {}) {
     [combatants],
   );
   const characterMaxSelected = hasCombatantLimit(MAX_COMBATANTS) ? MAX_COMBATANTS : undefined;
+  const referenceItemCount = countArenaSelectedReferenceItems({
+    auxScenarios,
+    materials,
+    selectedQuestionnaires,
+  });
+  const referenceRemainingCapacity = getArenaReferenceRemainingCapacity({
+    auxScenarios,
+    materials,
+    selectedQuestionnaires,
+  });
 
   const scenarioSummary = useMemo(() => {
     if (battleMode !== 'scenario') return '当前未启用情景模式';
@@ -288,7 +302,7 @@ export function ArenaPage({ multiplayer }: ArenaPageProps = {}) {
 
                 <CollapsibleSection
                   title="📎 素材注入"
-                  description={`已选 ${materials.length}/${MAX_ARENA_MATERIALS}`}
+                  description={`已选素材 ${materials.length}；参考项合计 ${referenceItemCount}/${MAX_ARENA_REFERENCE_ITEMS}`}
                   defaultOpen={false}
                   disabled={isGenerating}
                   keepMounted
@@ -461,7 +475,11 @@ export function ArenaPage({ multiplayer }: ArenaPageProps = {}) {
         maxSelected={
           dataModalType === 'character'
             ? characterMaxSelected
-            : (dataModalType === 'auxScenario' ? MAX_AUX_SCENARIOS : (dataModalType === 'material' ? MAX_ARENA_MATERIALS : undefined))
+            : (
+              dataModalType === 'auxScenario'
+                ? auxScenarios.length + referenceRemainingCapacity
+                : (dataModalType === 'material' ? materials.length + referenceRemainingCapacity : undefined)
+            )
         }
       />
 

@@ -1,7 +1,9 @@
 import { parseWantuCard } from '@/lib/wantu-card/adapter';
 import { isWantuDataCard, convertWantuDataCardToArenaMaterialPayload } from '@/lib/wantu-card/wantu-data-card';
+import { MAX_ARENA_REFERENCE_ITEMS } from '@/lib/arena/resource-budget';
 
-export const MAX_ARENA_MATERIALS = 10;
+/** 单人 Arena 中素材可独占的最大引用项数；实际与辅助情景、问卷共享总预算。 */
+export const MAX_ARENA_MATERIALS = MAX_ARENA_REFERENCE_ITEMS;
 
 export type ArenaMaterialSourceKind = 'wantu-card' | 'mahoshojo-data-card' | 'raw-json';
 
@@ -209,7 +211,6 @@ const isArenaMaterialLike = (value: unknown): value is Partial<ArenaMaterialStat
 export const normalizeArenaMaterialsForRequest = (raw: unknown): ArenaMaterialState[] => {
   if (!Array.isArray(raw)) return [];
   return raw
-    .slice(0, MAX_ARENA_MATERIALS)
     .map((item) => {
       if (isArenaMaterialLike(item)) {
         return buildArenaMaterialState({

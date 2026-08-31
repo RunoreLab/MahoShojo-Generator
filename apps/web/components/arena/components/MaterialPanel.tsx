@@ -6,7 +6,11 @@ import { DisclosureButton } from '@/components/shared/CollapsibleSection';
 
 import { useBattleActions } from '../hooks/useBattleActions';
 import { useBattleStore } from '../stores/useBattleStore';
-import { BattleStoreState, MAX_ARENA_MATERIALS } from '../types';
+import { BattleStoreState } from '../types';
+import {
+  countArenaSelectedReferenceItems,
+  MAX_ARENA_REFERENCE_ITEMS,
+} from '@/lib/arena/resource-budget';
 
 type MaterialPanelProps = {
   onOpenMaterialModal: () => void;
@@ -26,6 +30,8 @@ export function MaterialPanel({ onOpenMaterialModal }: MaterialPanelProps) {
   const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
   const isGenerating = useBattleSelector((state) => state.isGenerating);
   const setError = useBattleSelector((state) => state.setError);
+  const auxScenarios = useBattleSelector((state) => state.auxScenarios);
+  const selectedQuestionnaires = useBattleSelector((state) => state.selectedQuestionnaires);
   const {
     materials,
     handleMaterialUpload,
@@ -38,6 +44,12 @@ export function MaterialPanel({ onOpenMaterialModal }: MaterialPanelProps) {
   const [isPasteVisible, setIsPasteVisible] = useState(false);
   const [pastedJson, setPastedJson] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
+  const referenceItemCount = countArenaSelectedReferenceItems({
+    auxScenarios,
+    materials,
+    selectedQuestionnaires,
+  });
+  const hasReferenceCapacity = referenceItemCount < MAX_ARENA_REFERENCE_ITEMS;
 
   const onFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
     try {
@@ -62,7 +74,7 @@ export function MaterialPanel({ onOpenMaterialModal }: MaterialPanelProps) {
         <button
           type="button"
           onClick={onOpenMaterialModal}
-          disabled={isGenerating || materials.length >= MAX_ARENA_MATERIALS}
+          disabled={isGenerating || !hasReferenceCapacity}
           className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
         >
           浏览在线数据卡
@@ -79,7 +91,7 @@ export function MaterialPanel({ onOpenMaterialModal }: MaterialPanelProps) {
           清空
         </button>
         <div className="text-xs text-gray-500">
-          已选 {materials.length}/{MAX_ARENA_MATERIALS}
+          已选素材 {materials.length}；参考项合计 {referenceItemCount}/{MAX_ARENA_REFERENCE_ITEMS}
         </div>
       </div>
 
@@ -94,7 +106,7 @@ export function MaterialPanel({ onOpenMaterialModal }: MaterialPanelProps) {
           multiple
           accept=".json,application/json"
           onChange={onFileChange}
-          disabled={isGenerating || materials.length >= MAX_ARENA_MATERIALS}
+          disabled={isGenerating || !hasReferenceCapacity}
           className="input-field cursor-pointer file:mr-4 file:rounded-full file:border-0 file:bg-emerald-50 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-emerald-700 hover:file:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
         />
       </div>
@@ -103,7 +115,7 @@ export function MaterialPanel({ onOpenMaterialModal }: MaterialPanelProps) {
         <DisclosureButton
           open={isPasteVisible}
           onToggle={() => setIsPasteVisible((prev) => !prev)}
-          disabled={isGenerating || materials.length >= MAX_ARENA_MATERIALS}
+          disabled={isGenerating || !hasReferenceCapacity}
           className="text-emerald-700 hover:underline"
         >
           {isPasteVisible ? '收起素材粘贴区域' : '展开素材粘贴区域'}
@@ -121,7 +133,7 @@ export function MaterialPanel({ onOpenMaterialModal }: MaterialPanelProps) {
             <button
               type="button"
               onClick={() => void onPaste()}
-              disabled={!pastedJson.trim() || isGenerating || materials.length >= MAX_ARENA_MATERIALS}
+              disabled={!pastedJson.trim() || isGenerating || !hasReferenceCapacity}
               className="generate-button mb-0 mt-2"
               style={{
                 backgroundColor: '#059669',

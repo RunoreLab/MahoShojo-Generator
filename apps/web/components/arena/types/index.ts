@@ -7,10 +7,12 @@ import type { QuestionnaireDefinition } from '@/lib/questionnaires';
 import type { AIReasoningEnvelope } from '@/types/ai-reasoning';
 import type { ArenaMaterialState } from '@/lib/arena/materials';
 import { MAX_ARENA_MATERIALS } from '@/lib/arena/materials';
+import { MAX_ARENA_REFERENCE_ITEMS } from '@/lib/arena/resource-budget';
 
 /** 参战角色上限；为 null 代表不限制数量。 */
 export const MAX_COMBATANTS: number | null = null;
-export const MAX_AUX_SCENARIOS = 10;
+/** 单人 Arena 中辅助情景可独占的最大引用项数；实际与素材、问卷共享总预算。 */
+export const MAX_AUX_SCENARIOS = MAX_ARENA_REFERENCE_ITEMS;
 export { MAX_ARENA_MATERIALS };
 export const ARENA_STATE_PREF_KEY = 'arena-history-state-preferences-v1';
 export type { ArenaMaterialState };
