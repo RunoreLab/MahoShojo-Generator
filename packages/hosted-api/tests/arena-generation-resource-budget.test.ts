@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ARENA_RESOURCE_BUDGET,
   countArenaReferenceItems,
+  estimateArenaPromptBudgetTokens,
   estimateTokensFromText,
   evaluateArenaPromptBudget,
 } from '../src/arena-generation/resource-budget';
@@ -26,12 +27,25 @@ describe('Arena resource budget', () => {
   });
 
   it('does not let non-ASCII scripts bypass the system prompt budget', () => {
+    expect(estimateArenaPromptBudgetTokens('あ한😀A')).toBe(11);
+    expect(estimateArenaPromptBudgetTokens('\uE000')).toBe(3);
     expect(evaluateArenaPromptBudget({
       fundingMode: 'hosted-system',
-      prompt: 'あ'.repeat(129_000),
+      prompt: 'あ'.repeat(43_000),
     })).toMatchObject({
       allowed: false,
       estimatedPromptTokens: 129_000,
+      maxEstimatedPromptTokens: 128_000,
+    });
+  });
+
+  it('does not let adversarial ASCII bypass the system prompt budget', () => {
+    expect(evaluateArenaPromptBudget({
+      fundingMode: 'hosted-system',
+      prompt: '~'.repeat(128_001),
+    })).toMatchObject({
+      allowed: false,
+      estimatedPromptTokens: 128_001,
       maxEstimatedPromptTokens: 128_000,
     });
   });

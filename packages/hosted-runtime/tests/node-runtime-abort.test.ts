@@ -135,6 +135,45 @@ describe('Node AI runtime abort contract', () => {
     expect(mocks.streamText).toHaveBeenCalledTimes(1);
   });
 
+  test('reasoning 回调失败时立即取消仍在输出的 raw Provider stream', async () => {
+    let cancelledWith: unknown = null;
+    const upstream = new ReadableStream<unknown>({
+      start(controller) {
+        controller.enqueue({ type: 'reasoning-delta', text: '超限推理' });
+        controller.enqueue({ type: 'text-delta', text: '不应继续消费' });
+      },
+      cancel(reason) {
+        cancelledWith = reason;
+      },
+    });
+    mocks.streamText.mockReturnValueOnce({
+      fullStream: upstream,
+      usage: Promise.resolve({}),
+      finishReason: Promise.resolve(null),
+    });
+    const { createNodeRawStreamAiRuntime } = await import('../src/node-runtime');
+    const runtime = createNodeRawStreamAiRuntime({ providers: [provider('reasoning-budget')] });
+    const callbackError = new Error('ARENA_OUTPUT_BUDGET_EXCEEDED');
+
+    const result = await runtime.generateWithStreamAI(
+      { prompt: 'reasoning callback failure' },
+      {
+        onReasoningEvent: async () => {
+          throw callbackError;
+        },
+      },
+    );
+
+    await expect(Promise.race([
+      result.response.text(),
+      new Promise<string>((_, reject) => setTimeout(
+        () => reject(new Error('reasoning callback was not propagated')),
+        100,
+      )),
+    ])).rejects.toThrow('ARENA_OUTPUT_BUDGET_EXCEEDED');
+    expect(cancelledWith).toBe(callbackError);
+  });
+
   test('signal 已中止时，即使 SDK 抛普通 Error，structured attempt 仍以 aborted 结束', async () => {
     const terminals: unknown[] = [];
     registerHostedRuntimeObserver({

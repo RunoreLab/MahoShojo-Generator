@@ -657,7 +657,7 @@ export const createArenaGenerationRuntime = (
 
     const emit = async (event: GenerationEventInput): Promise<void> => input.emit(event);
     const queueReasoningEvent = (event: ArenaReasoningEvent): Promise<void> => {
-      if (reasoningFailure) return reasoningOperation;
+      if (reasoningFailure) return Promise.reject(reasoningFailure);
       let projected: GenerationEventInput;
       try {
         if (event.type === 'reasoning-start') {
@@ -680,12 +680,13 @@ export const createArenaGenerationRuntime = (
         }
       } catch (error) {
         reasoningFailure = error;
-        return reasoningOperation;
+        return Promise.reject(error);
       }
       reasoningOperation = reasoningOperation
         .then(() => emit(projected))
         .catch((error: unknown) => {
           reasoningFailure ??= error;
+          throw error;
         });
       return reasoningOperation;
     };

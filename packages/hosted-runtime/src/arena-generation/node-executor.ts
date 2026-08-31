@@ -687,9 +687,7 @@ export const createNodeArenaGenerationExecutor = (
         abortSignal: signal,
         streamReadTimeoutMode: 'hard',
         telemetry,
-        onReasoningEvent: (event) => {
-          void onReasoning(event);
-        },
+        onReasoningEvent: (event) => onReasoning(event),
         ...(providerOverride ? { providerOverride } : {}),
         ...(loadBalanceStrategy ? { loadBalanceStrategy } : {}),
         ...(customProvider ? {

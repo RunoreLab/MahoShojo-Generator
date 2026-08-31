@@ -103,7 +103,7 @@ export interface GenerateWithAIOptions {
   abortSignal?: AbortSignal;
   streamReadTimeoutMode?: StreamReadTimeoutMode;
   telemetry?: AiTelemetry;
-  onReasoningEvent?(_event: RawReasoningStreamEvent): void;
+  onReasoningEvent?(_event: RawReasoningStreamEvent): void | Promise<void>;
   channelContext?: AiChannelContext;
   generationSettingsContext?: GenerationSettingsContext;
 }

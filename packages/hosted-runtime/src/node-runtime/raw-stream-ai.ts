@@ -374,15 +374,11 @@ async function generateWithStreamAIUsing(
 	                    return null;
 	                };
 
-	                const emitReasoningEvent = (chunk: RawUnifiedStreamChunk) => {
+	                const emitReasoningEvent = async (chunk: RawUnifiedStreamChunk): Promise<void> => {
 	                    if (chunk.type !== 'reasoning-start' && chunk.type !== 'reasoning-delta' && chunk.type !== 'reasoning-end') {
 	                        return;
 	                    }
-	                    try {
-	                        options?.onReasoningEvent?.(chunk);
-	                    } catch (reasoningError) {
-	                        log.warn('reasoning 回调执行失败（已忽略）', { reasoningError });
-	                    }
+	                    await options?.onReasoningEvent?.(chunk);
 	                };
 
 	                // 预检流：仅做“连接可用”探测，避免等待正文首字导致流式首屏阻塞。
@@ -487,16 +483,30 @@ async function generateWithStreamAIUsing(
 		                }
 
 	                // 创建一个新的 ReadableStream，将已预取 part 与剩余流合并；正文走 text-delta，reasoning 走回调。
-	                const combinedStream = new ReadableStream<RawUnifiedStreamChunk>({
-                    start(controller) {
-                        for (const chunk of prefetchedChunks) {
-                            emitReasoningEvent(chunk);
-                            controller.enqueue(chunk);
+	                const cancelUpstream = async (reason: unknown): Promise<void> => {
+                        try {
+                            await reader.cancel(reason);
+                        } catch {
+                            // reader 可能已经关闭或失败
                         }
-                        // 预取已耗尽且上游已结束：在首包路径上完成 attempt
-                        if (prefetchedDone) {
-                            outcomeRecorder.recordSuccess();
-                            runtimeAttempt.finish('success');
+                    };
+
+	                const combinedStream = new ReadableStream<RawUnifiedStreamChunk>({
+                    async start(controller) {
+                        try {
+                            for (const chunk of prefetchedChunks) {
+                                await emitReasoningEvent(chunk);
+                                controller.enqueue(chunk);
+                            }
+                            // 预取已耗尽且上游已结束：在首包路径上完成 attempt
+                            if (prefetchedDone) {
+                                outcomeRecorder.recordSuccess();
+                                runtimeAttempt.finish('success');
+                            }
+                        } catch (reasoningError) {
+                            await cancelUpstream(reasoningError);
+                            finishAttemptFromError(reasoningError);
+                            controller.error(reasoningError);
                         }
                     },
                     async pull(controller) {
@@ -526,11 +536,12 @@ async function generateWithStreamAIUsing(
                                 if (mapped.type === 'text-delta') {
                                     observeTextForEmptyOutput(mapped.text);
                                 }
-                                emitReasoningEvent(mapped);
+                                await emitReasoningEvent(mapped);
                                 controller.enqueue(mapped);
                                 return;
                             }
                         } catch (streamError) {
+                            await cancelUpstream(streamError);
                             const interrupted = finishAttemptFromError(streamError);
                             const projectedStreamError = enhanceErrorWithUpstreamMessage(
                                 capturedError ?? streamError,

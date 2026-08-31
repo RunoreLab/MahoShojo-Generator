@@ -348,7 +348,7 @@ describe('Arena generation runtime', () => {
     expect((system as Response).status).toBe(413);
     expect(await (system as Response).json()).toMatchObject({
       code: 'ARENA_PROMPT_BUDGET_EXCEEDED',
-      estimatedPromptTokens: 130_000,
+      estimatedPromptTokens: 390_000,
       maxEstimatedPromptTokens: 128_000,
     });
     expect(byok).not.toBeInstanceOf(Response);
