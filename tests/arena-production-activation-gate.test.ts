@@ -72,7 +72,7 @@ describe('GMR-11 production activation gate', () => {
           '---',
           'review: GMR-11-PRODUCTION-ACTIVATION',
           'decision: APPROVED',
-          'reviewer: Gate Test Reviewer',
+          'reviewer: github:gate-test-reviewer',
           'approvedAt: 2026-09-01T00:00:00.000Z',
           '---',
           'GMR-11-PRODUCTION-ACTIVATION: APPROVED',
@@ -87,7 +87,7 @@ describe('GMR-11 production activation gate', () => {
           '---',
           'review: GMR-11-PRODUCTION-ACTIVATION',
           'decision: APPROVED',
-          'reviewer: Gate Test Reviewer',
+          'reviewer: github:gate-test-reviewer',
           'approvedAt: 2026-09-01T00:00:00.000Z',
           '---',
           'GMR-11-PRODUCTION-ACTIVATION:',
@@ -98,6 +98,33 @@ describe('GMR-11 production activation gate', () => {
       writeFileSync(
         path.join(tempRoot, 'docs/plans/gmr-11-plan.md'),
         '# GMR-11 计划\n\n```text\nGMR-11-PRODUCTION-ACTIVATION: APPROVED\n```\n',
+      );
+      writeFileSync(
+        path.join(tempRoot, 'docs/reviews/placeholder-reviewer.md'),
+        [
+          '---',
+          'review: GMR-11-PRODUCTION-ACTIVATION',
+          'decision: APPROVED',
+          'reviewer: <independent-reviewer>',
+          'approvedAt: 2026-09-01T00:00:00.000Z',
+          '---',
+          'GMR-11-PRODUCTION-ACTIVATION: APPROVED',
+          '',
+        ].join('\n'),
+      );
+      writeFileSync(
+        path.join(tempRoot, 'docs/reviews/duplicate-reviewer.md'),
+        [
+          '---',
+          'review: GMR-11-PRODUCTION-ACTIVATION',
+          'decision: APPROVED',
+          'reviewer: github:gate-test-reviewer',
+          'reviewer: github:second-reviewer',
+          'approvedAt: 2026-09-01T00:00:00.000Z',
+          '---',
+          'GMR-11-PRODUCTION-ACTIVATION: APPROVED',
+          '',
+        ].join('\n'),
       );
       writeFileSync(
         path.join(tempRoot, 'config/arena-production-activation-gate.json'),
@@ -244,6 +271,32 @@ describe('GMR-11 production activation gate', () => {
       ], tempRoot);
       expect(multilineEvidence.status).toBe(1);
       expect(multilineEvidence.stderr).toMatch(/批准标记|approval marker/iu);
+
+      const placeholderReviewerCommit = commitManifest({
+        ...approvedManifest,
+        approvalEvidence: 'docs/reviews/placeholder-reviewer.md',
+      }, 'reject placeholder reviewer');
+      const placeholderReviewer = run(process.execPath, [
+        'scripts/check-arena-production-activation.mjs',
+        '--require-approved',
+        '--commit',
+        placeholderReviewerCommit,
+      ], tempRoot);
+      expect(placeholderReviewer.status).toBe(1);
+      expect(placeholderReviewer.stderr).toMatch(/reviewer/iu);
+
+      const duplicateReviewerCommit = commitManifest({
+        ...approvedManifest,
+        approvalEvidence: 'docs/reviews/duplicate-reviewer.md',
+      }, 'reject duplicate reviewer');
+      const duplicateReviewer = run(process.execPath, [
+        'scripts/check-arena-production-activation.mjs',
+        '--require-approved',
+        '--commit',
+        duplicateReviewerCommit,
+      ], tempRoot);
+      expect(duplicateReviewer.status).toBe(1);
+      expect(duplicateReviewer.stderr).toMatch(/front matter|重复字段|duplicate/iu);
 
       const nonCanonicalTimeCommit = commitManifest({
         ...approvedManifest,

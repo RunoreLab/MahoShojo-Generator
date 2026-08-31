@@ -185,11 +185,20 @@ if (approved) {
       if (!frontMatter) {
         failures.push('approvalEvidence 必须包含结构化审查 front matter');
       } else {
+        const expectedFields = new Set(['review', 'decision', 'reviewer', 'approvedAt']);
         const fields = new Map();
+        let fieldsAreStrict = true;
         for (const line of frontMatter[1].split(/\r?\n/u)) {
-          const separator = line.indexOf(':');
-          if (separator < 0) continue;
-          fields.set(line.slice(0, separator).trim(), line.slice(separator + 1).trim());
+          const match = line.match(/^([A-Za-z][A-Za-z0-9]*):[ \t]*(.*?)\s*$/u);
+          const key = match?.[1];
+          if (!key || !expectedFields.has(key) || fields.has(key)) {
+            fieldsAreStrict = false;
+            continue;
+          }
+          fields.set(key, match[2]);
+        }
+        if (!fieldsAreStrict || fields.size !== expectedFields.size) {
+          failures.push('approvalEvidence front matter 必须且只能包含四个唯一的受支持字段');
         }
         if (fields.get('review') !== 'GMR-11-PRODUCTION-ACTIVATION') {
           failures.push('approvalEvidence review 字段不匹配 GMR-11 production activation');
@@ -198,12 +207,14 @@ if (approved) {
           failures.push('approvalEvidence decision 必须为 APPROVED');
         }
         const reviewer = fields.get('reviewer');
+        const reviewerLogin = typeof reviewer === 'string'
+          ? reviewer.match(/^github:([a-z\d](?:[a-z\d-]{0,37}[a-z\d])?)$/iu)?.[1]
+          : undefined;
         if (
-          typeof reviewer !== 'string'
-          || reviewer.length < 2
-          || /^(?:todo|tbd|unknown|example)$/iu.test(reviewer)
+          !reviewerLogin
+          || reviewerLogin.includes('--')
         ) {
-          failures.push('approvalEvidence 必须记录非占位 reviewer');
+          failures.push('approvalEvidence reviewer 必须是 canonical github:<login> 标识');
         }
         if (fields.get('approvedAt') !== manifest.approvedAt) {
           failures.push('approvalEvidence approvedAt 必须与 manifest 完全一致');
