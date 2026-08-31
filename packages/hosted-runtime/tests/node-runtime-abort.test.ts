@@ -135,12 +135,12 @@ describe('Node AI runtime abort contract', () => {
     expect(mocks.streamText).toHaveBeenCalledTimes(1);
   });
 
-  test('reasoning 回调失败时立即取消仍在输出的 raw Provider stream', async () => {
+  test('正文首包后的 reasoning 回调失败保留原始错误并立即取消 raw Provider stream', async () => {
     let cancelledWith: unknown = null;
     const upstream = new ReadableStream<unknown>({
       start(controller) {
+        controller.enqueue({ type: 'text-delta', text: '正文首包' });
         controller.enqueue({ type: 'reasoning-delta', text: '超限推理' });
-        controller.enqueue({ type: 'text-delta', text: '不应继续消费' });
       },
       cancel(reason) {
         cancelledWith = reason;
@@ -170,7 +170,7 @@ describe('Node AI runtime abort contract', () => {
         () => reject(new Error('reasoning callback was not propagated')),
         100,
       )),
-    ])).rejects.toThrow('ARENA_OUTPUT_BUDGET_EXCEEDED');
+    ])).rejects.toBe(callbackError);
     expect(cancelledWith).toBe(callbackError);
   });
 

@@ -536,7 +536,14 @@ async function generateWithStreamAIUsing(
                                 if (mapped.type === 'text-delta') {
                                     observeTextForEmptyOutput(mapped.text);
                                 }
-                                await emitReasoningEvent(mapped);
+                                try {
+                                    await emitReasoningEvent(mapped);
+                                } catch (reasoningError) {
+                                    await cancelUpstream(reasoningError);
+                                    finishAttemptFromError(reasoningError);
+                                    controller.error(reasoningError);
+                                    return;
+                                }
                                 controller.enqueue(mapped);
                                 return;
                             }
