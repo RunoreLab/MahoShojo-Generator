@@ -167,6 +167,7 @@ interface DataCardDetailsModalProps {
     updatedAt?: string;
   };
   pendingNotice?: string;
+  fallbackFocusRef?: React.RefObject<HTMLElement | null>;
 }
 
 export default function DataCardDetailsModal({
@@ -179,6 +180,7 @@ export default function DataCardDetailsModal({
   isOwner = false,
   adminTagEditor = false,
   initialReportCapability = null,
+  fallbackFocusRef,
 }: DataCardDetailsModalProps) {
   const titleId = React.useId();
   const dialogRef = useRef<HTMLDivElement | null>(null);
@@ -228,12 +230,14 @@ export default function DataCardDetailsModal({
   const descriptionText = card.description?.trim() ? card.description : '暂无简介';
   const tagSectionRef = useRef<HTMLDivElement | null>(null);
   const tagSearchInputRef = useRef<HTMLInputElement | null>(null);
+  const moreActionsButtonRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
     if (!isOpen) return;
     const previouslyFocused = document.activeElement instanceof HTMLElement
       ? document.activeElement
       : null;
+    const fallbackFocus = fallbackFocusRef?.current ?? null;
     const previousBodyOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     closeButtonRef.current?.focus();
@@ -242,9 +246,11 @@ export default function DataCardDetailsModal({
       document.body.style.overflow = previousBodyOverflow;
       if (previouslyFocused && document.contains(previouslyFocused)) {
         previouslyFocused.focus();
+      } else {
+        fallbackFocus?.focus();
       }
     };
-  }, [isOpen]);
+  }, [fallbackFocusRef, isOpen]);
 
   const handleDialogKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (isReportModalOpen) return;
@@ -789,7 +795,8 @@ export default function DataCardDetailsModal({
       <div
         ref={dialogRef}
         role="dialog"
-        aria-modal="true"
+        aria-modal={isReportModalOpen ? undefined : 'true'}
+        aria-hidden={isReportModalOpen ? 'true' : undefined}
         aria-labelledby={titleId}
         tabIndex={-1}
         onKeyDown={handleDialogKeyDown}
@@ -823,6 +830,7 @@ export default function DataCardDetailsModal({
           <div className="relative flex items-center gap-2">
             {canShowReportActions ? (
               <button
+                ref={moreActionsButtonRef}
                 type="button"
                 onClick={() => setIsMoreActionsOpen((prev) => !prev)}
                 className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
@@ -1241,6 +1249,7 @@ export default function DataCardDetailsModal({
       </div>
       <DataCardReportModal
         isOpen={isReportModalOpen}
+        fallbackFocusRef={moreActionsButtonRef}
         cardName={card.name}
         reasons={reportCapability?.reasons ?? []}
         initialReport={reportCapability?.myActiveReport ?? null}

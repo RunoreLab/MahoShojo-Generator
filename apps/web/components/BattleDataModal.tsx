@@ -1902,6 +1902,7 @@ export default function BattleDataModal({
       {allowCardDetails && selectedCard && (
         <DataCardDetailsModal
           isOpen={showDetailsModal}
+          fallbackFocusRef={closeButtonRef}
           onClose={() => {
             setShowDetailsModal(false);
             setSelectedCard(null);

@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { BaseModal } from '@/components/shared/BaseModal';
 import BattleDataModal from '@/components/BattleDataModal';
+import { DataCardReportModal } from '@/components/data-card-reports/DataCardReportModal';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -166,6 +167,54 @@ describe('BaseModal accessibility contract', () => {
   });
 });
 
+describe('DataCardReportModal accessibility contract', () => {
+  it('is a labelled topmost dialog with focus trap, Escape close, and trigger restore', async () => {
+    const trigger = document.createElement('button');
+    trigger.type = 'button';
+    trigger.textContent = '举报此卡';
+    document.body.append(trigger);
+    trigger.focus();
+
+    const Harness = () => {
+      const [open, setOpen] = useState(true);
+      return (
+        <DataCardReportModal
+          isOpen={open}
+          cardName="角色一"
+          reasons={[{ code: 'plagiarism', label: '疑似抄袭', description: '高度近似搬运' }]}
+          initialReport={null}
+          submitting={false}
+          error={null}
+          onClose={() => setOpen(false)}
+          onSubmit={vi.fn()}
+        />
+      );
+    };
+
+    flushSync(() => root.render(<Harness />));
+    const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
+    expect(dialog).not.toBeNull();
+    expect(dialog?.getAttribute('aria-modal')).toBe('true');
+    const labelledBy = dialog?.getAttribute('aria-labelledby');
+    expect(document.getElementById(labelledBy ?? '')?.textContent).toContain('举报数据卡');
+    const cancelButton = [...(dialog?.querySelectorAll<HTMLButtonElement>('button') ?? [])]
+      .find((button) => button.textContent?.trim() === '取消');
+    expect(document.activeElement).toBe(cancelButton);
+
+    const submitButton = [...(dialog?.querySelectorAll<HTMLButtonElement>('button') ?? [])]
+      .find((button) => button.textContent?.trim() === '提交举报');
+    const firstFocusable = dialog?.querySelector<HTMLElement>('input:not([disabled])');
+    submitButton?.focus();
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
+    expect(document.activeElement).toBe(firstFocusable);
+
+    act(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+    trigger.remove();
+  });
+});
+
 describe('BattleDataModal accessibility and capabilities', () => {
   it('renders a labelled dialog with keyboard-native single selection and restores focus on close', async () => {
     const trigger = document.createElement('button');
@@ -259,7 +308,8 @@ describe('BattleDataModal accessibility and capabilities', () => {
 
     act(() => detailsClose?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
     expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(1);
-    expect(document.activeElement).toBe(detailButton);
+    expect(outerDialog?.contains(document.activeElement)).toBe(true);
+    if (document.contains(detailButton)) expect(document.activeElement).toBe(detailButton);
   });
 
 });

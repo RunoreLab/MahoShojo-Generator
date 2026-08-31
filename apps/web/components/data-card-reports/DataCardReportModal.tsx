@@ -6,6 +6,7 @@ import {
   BASE_MODAL_HEADER_LAYOUT_CLASS_NAME,
   BASE_MODAL_PANEL_LAYOUT_CLASS_NAME,
   getBaseModalLayoutClassNames,
+  useBaseModalAccessibility,
 } from '@/components/shared/BaseModal';
 import {
   extractPublicDataCardReferenceIds,
@@ -27,6 +28,7 @@ export type DataCardReportModalProps = {
   error: string | null;
   onClose: () => void;
   onSubmit: (draft: DataCardReportDraft) => void;
+  fallbackFocusRef?: React.RefObject<HTMLElement | null>;
 };
 
 const serializeReferences = (
@@ -105,11 +107,17 @@ export function DataCardReportModal({
   error,
   onClose,
   onSubmit,
+  fallbackFocusRef,
 }: DataCardReportModalProps) {
   const [reasonCode, setReasonCode] = useState(reasons[0]?.code ?? 'plagiarism');
   const [details, setDetails] = useState('');
   const [publicDataCardRefs, setPublicDataCardRefs] = useState('');
   const [encyclopediaRefs, setEncyclopediaRefs] = useState('');
+  const { dialogRef, initialFocusRef, titleId } = useBaseModalAccessibility({
+    isOpen,
+    onClose,
+    fallbackFocusRef,
+  });
 
   useEffect(() => {
     if (!isOpen) return;
@@ -124,9 +132,16 @@ export function DataCardReportModal({
 
   return (
     <div className={[rootClassName, 'bg-black/60'].join(' ')}>
-      <div className={[BASE_MODAL_PANEL_LAYOUT_CLASS_NAME, 'max-w-2xl rounded-2xl bg-white shadow-2xl'].join(' ')}>
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        className={[BASE_MODAL_PANEL_LAYOUT_CLASS_NAME, 'max-w-2xl rounded-2xl bg-white shadow-2xl'].join(' ')}
+      >
         <div className={[BASE_MODAL_HEADER_LAYOUT_CLASS_NAME, 'border-b border-gray-200 px-6 py-4'].join(' ')}>
-          <div className="text-lg font-semibold text-gray-900">
+          <div id={titleId} className="text-lg font-semibold text-gray-900">
             {initialReport ? '编辑我的举报' : '举报数据卡'}
           </div>
           <div className="mt-1 text-sm text-gray-500">目标：{cardName}</div>
@@ -209,6 +224,7 @@ export function DataCardReportModal({
         <div className={[BASE_MODAL_FOOTER_LAYOUT_CLASS_NAME, 'border-t border-gray-200 px-6 py-4'].join(' ')}>
           <div className="flex items-center justify-end gap-3">
             <button
+              ref={initialFocusRef}
               type="button"
               onClick={onClose}
               className="rounded-xl border border-gray-200 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
