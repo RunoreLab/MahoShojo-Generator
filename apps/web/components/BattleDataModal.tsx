@@ -1906,6 +1906,7 @@ export default function BattleDataModal({
           onClose={() => {
             setShowDetailsModal(false);
             setSelectedCard(null);
+            closeButtonRef.current?.focus();
           }}
           card={{
             id: selectedCard.id,
