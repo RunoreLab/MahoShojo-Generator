@@ -15,11 +15,14 @@ import type { NodeDataD1Client } from '../node-runtime/data-ports';
 import { hashArenaCombatantBaseRevision } from '@mahoshojo/domain/arena-reconciliation';
 
 const OUTPUT_KIND = 'battle_report_generation_output';
-const OUTPUT_PREVIEW_CHARS = 120_000;
 const LOCAL_RECONCILIATION_MAX_BYTES = 64 * 1_024;
 export const MAX_ARENA_TERMINAL_COMBATANTS = 32;
 export const MAX_ARENA_TERMINAL_EXTRA_JSON_BYTES = 96 * 1_024;
 const MAX_ARENA_TERMINAL_IMPACTS = 32;
+
+export type ArenaGenerationObjectReadResult =
+  | Readonly<{ kind: 'found'; text: string }>
+  | Readonly<{ kind: 'not-found' }>;
 
 export type ArenaGenerationObjectStore = {
   put(_input: {
@@ -32,7 +35,7 @@ export type ArenaGenerationObjectStore = {
     storedBytes: number;
     contentEncoding: string | null;
   }>;
-  getText(_key: string): Promise<string>;
+  getText(_key: string): Promise<ArenaGenerationObjectReadResult>;
 };
 
 export type NodeArenaGenerationPersistenceOptions = {
@@ -530,16 +533,25 @@ const materializeStoredTerminal = async (input: {
   if (!status || !requestId) return null;
   const resultRef = status === 'completed' ? stringOf(extra.resultRef) : null;
   const r2Key = stringOf(input.row['r2_key']);
-  let markdown = status === 'completed' ? stringOf(input.row['output_preview']) ?? '' : '';
+  let markdown = '';
   let contentAvailable = status !== 'completed';
-  if (status === 'completed' && r2Key && resultRef) {
-    if (input.objectStore) {
+  let contentUnavailableReason: 'not-found' | 'temporary' | undefined;
+  if (status === 'completed') {
+    if (!r2Key || !resultRef) {
+      contentUnavailableReason = 'not-found';
+    } else if (!input.objectStore) {
+      contentUnavailableReason = 'temporary';
+    } else {
       try {
-        markdown = await input.objectStore.getText(r2Key);
-        contentAvailable = true;
+        const stored = await input.objectStore.getText(r2Key);
+        if (stored.kind === 'found') {
+          markdown = stored.text;
+          contentAvailable = true;
+        } else {
+          contentUnavailableReason = 'not-found';
+        }
       } catch {
-        markdown = '';
-        contentAvailable = false;
+        contentUnavailableReason = 'temporary';
       }
     }
   }
@@ -556,6 +568,7 @@ const materializeStoredTerminal = async (input: {
       ?? stableErrorCodeOf(extra.rejectionCode),
     payloadHash: stringOf(extra.generationPayloadHash),
     contentAvailable,
+    contentUnavailableReason,
   };
 };
 
@@ -669,7 +682,6 @@ ON CONFLICT(kind, owner_ref_id) DO UPDATE SET
       const extraJson = await buildExtraJson(input);
       const terminalMarkdown = input.status === 'completed' ? input.markdown : '';
       const markdownBytes = new TextEncoder().encode(terminalMarkdown).byteLength;
-      const preview = terminalMarkdown.slice(0, OUTPUT_PREVIEW_CHARS);
       let inserted: Awaited<ReturnType<ReturnType<NodeDataD1Client['prepare']>['run']>>;
       try {
         inserted = await client.prepare(`
@@ -740,7 +752,7 @@ VALUES (
         numberOf(usage?.cachedTokens),
         numberOf(usage?.reasoningTokens),
         boundedString(input.payload.userGuidance, 600),
-        preview || null,
+        null,
         JSON.stringify(extraJson),
         endedAt.toISOString(),
         endedAt.toISOString(),

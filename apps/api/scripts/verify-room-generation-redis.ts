@@ -267,8 +267,9 @@ try {
     },
     async getText(key: string) {
       const value = objects.get(key);
-      if (value === undefined) throw new Error('ROOM_GENERATION_DURABLE_R2_NOT_FOUND');
-      return value;
+      return value === undefined
+        ? { kind: 'not-found' as const }
+        : { kind: 'found' as const, text: value };
     },
   };
   let ratingSettlementInvocations = 0;

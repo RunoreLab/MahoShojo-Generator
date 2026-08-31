@@ -356,6 +356,7 @@ export type ArenaGenerationTerminalRecord = {
   errorCode?: string | null;
   payloadHash?: string | null;
   contentAvailable?: boolean;
+  contentUnavailableReason?: 'not-found' | 'temporary' | null;
 };
 
 export interface ArenaGenerationTerminalStore {
@@ -901,6 +902,25 @@ export const createArenaGenerationService = (
       return 0;
     }
   };
+  const selectTerminalSnapshotWithinBudget = (
+    fullSnapshot: GenerationSnapshot,
+    contentAvailable = true,
+  ): { snapshot: GenerationSnapshot | null; overBudget: boolean } => {
+    if (!contentAvailable) return { snapshot: null, overBudget: false };
+    if (encodedBytes(fullSnapshot) <= snapshotMaxBytes) {
+      return { snapshot: fullSnapshot, overBudget: false };
+    }
+    const compactSnapshot: GenerationSnapshot = {
+      ...fullSnapshot,
+      ...(fullSnapshot.status === 'completed' ? {} : { markdown: '' }),
+      reasoning: '',
+      telemetry: null,
+    };
+    return {
+      snapshot: encodedBytes(compactSnapshot) <= snapshotMaxBytes ? compactSnapshot : null,
+      overBudget: true,
+    };
+  };
 
   if (!Number.isFinite(deltaFlushIntervalMs) || deltaFlushIntervalMs < 1) {
     throw new Error('deltaFlushIntervalMs 必须是正有限数字');
@@ -1119,20 +1139,10 @@ export const createArenaGenerationService = (
             },
           };
           const fullTerminalSnapshot = snapshot(terminal.status, now, terminal.resultRef ?? null);
-          const snapshotWithinBudget = encodedBytes(fullTerminalSnapshot) <= snapshotMaxBytes;
-          let terminalSnapshot = snapshotWithinBudget ? fullTerminalSnapshot : null;
-          if (!terminalSnapshot && terminal.status !== 'completed') {
-            const boundedTerminalSnapshot: GenerationSnapshot = {
-              ...fullTerminalSnapshot,
-              markdown: '',
-              reasoning: '',
-              telemetry: null,
-            };
-            if (encodedBytes(boundedTerminalSnapshot) <= snapshotMaxBytes) {
-              terminalSnapshot = boundedTerminalSnapshot;
-            }
-          }
-          if (!snapshotWithinBudget) {
+          const selectedTerminalSnapshot = selectTerminalSnapshotWithinBudget(
+            fullTerminalSnapshot,
+          );
+          if (selectedTerminalSnapshot.overBudget) {
             observe({ event: 'redis_degraded', generationId, operation: 'snapshot_budget' });
           }
           let result: Awaited<ReturnType<GenerationReplayStore['markTerminal']>>;
@@ -1142,7 +1152,9 @@ export const createArenaGenerationService = (
               producerToken,
               terminal,
               terminalEvent,
-              ...(terminalSnapshot ? { terminalSnapshot } : { clearTerminalSnapshot: true }),
+              ...(selectedTerminalSnapshot.snapshot
+                ? { terminalSnapshot: selectedTerminalSnapshot.snapshot }
+                : { clearTerminalSnapshot: true }),
               now,
             });
           } catch (error) {
@@ -1340,9 +1352,12 @@ export const createArenaGenerationService = (
     };
     const terminalContentAvailable = terminal.status !== 'completed'
       || input.record.contentAvailable === true;
-    const snapshotWithinBudget = encodedBytes(terminalSnapshot) <= snapshotMaxBytes;
-    const persistTerminalSnapshot = terminalContentAvailable && snapshotWithinBudget;
-    if (terminalContentAvailable && !snapshotWithinBudget) {
+    const selectedTerminalSnapshot = selectTerminalSnapshotWithinBudget(
+      terminalSnapshot,
+      terminalContentAvailable,
+    );
+    const persistTerminalSnapshot = selectedTerminalSnapshot.snapshot !== null;
+    if (selectedTerminalSnapshot.overBudget) {
       observe({
         event: 'redis_degraded',
         generationId: input.generationId,
@@ -1354,7 +1369,9 @@ export const createArenaGenerationService = (
       producerToken: input.producerToken,
       terminal,
       terminalEvent,
-      ...(persistTerminalSnapshot ? { terminalSnapshot } : { clearTerminalSnapshot: true }),
+      ...(selectedTerminalSnapshot.snapshot
+        ? { terminalSnapshot: selectedTerminalSnapshot.snapshot }
+        : { clearTerminalSnapshot: true }),
       now: input.now,
     }).catch(() => null);
     if (!committed?.owned) return null;
@@ -1692,6 +1709,7 @@ export const createArenaGenerationService = (
     const allowedCodes = new Set([
       'GENERATION_FINALIZATION_PENDING',
       'GENERATION_STATE_UNAVAILABLE',
+      'GENERATION_TERMINAL_CONTENT_EXPIRED',
       'GENERATION_TERMINAL_CONTENT_UNAVAILABLE',
       'GENERATION_TERMINAL_RECONCILIATION_PENDING',
     ]);
@@ -1738,15 +1756,43 @@ export const createArenaGenerationService = (
     error: 'Generation terminal content is temporarily unavailable',
   }, 503);
 
+  const isTerminalContentExpired = (
+    terminal: ArenaGenerationTerminalRecord | null,
+  ): terminal is ArenaGenerationTerminalRecord => Boolean(
+    terminal?.status === 'completed'
+    && terminal.contentAvailable !== true
+    && terminal.contentUnavailableReason === 'not-found'
+  );
+
+  const createExpiredTerminalStatusResponse = (
+    state: GenerationReplayStoreState,
+    terminal: ArenaGenerationTerminalRecord,
+    actor: ArenaGenerationActor,
+  ): Response => withActorHeaders(jsonResponse({
+    generationId: state.generationId,
+    generationRequestId: state.generationRequestId,
+    status: 'completed',
+    resumable: false,
+    lastEventId: state.lastEventId,
+    updatedAt: terminal.updatedAt,
+    finalAuthoritative: true,
+    resultAvailable: false,
+    contentRetention: 'expired',
+  }, 200), actor);
+
+  const createTerminalContentExpiredResponse = (): Response => jsonResponse({
+    code: 'GENERATION_TERMINAL_CONTENT_EXPIRED',
+    error: 'Generation terminal content retention has expired',
+  }, 410);
+
   const createTerminalFallbackSubscription = (
     terminal: ArenaGenerationTerminalRecord,
     after: string | null = null,
   ): ArenaGenerationSubscription | Response => {
     if (terminal.status === 'completed' && terminal.contentAvailable !== true) {
-      return jsonResponse({
-        code: 'GENERATION_TERMINAL_CONTENT_UNAVAILABLE',
-        error: 'Generation terminal content is temporarily unavailable',
-      }, 503);
+      return isTerminalContentExpired(terminal)
+        ? createTerminalContentExpiredResponse()
+        : createTerminalContentUnavailableResponse();
     }
     const [snapshotId, terminalId] = (() => {
       if (!after) return ['0-0', '0-1'];
@@ -1874,6 +1920,49 @@ export const createArenaGenerationService = (
             cursor = id;
             controller.close();
           };
+          const enqueueExpiredTerminal = (
+            terminal: ArenaGenerationTerminalRecord,
+          ): void => {
+            const snapshotId = nextSyntheticId();
+            cursor = snapshotId;
+            const terminalId = nextSyntheticId();
+            const snapshotEvent: GenerationStreamEvent = {
+              id: snapshotId,
+              type: 'snapshot',
+              data: {
+                status: 'completed',
+                markdown: '',
+                reasoning: '',
+                lastEventId: null,
+                updatedAt: terminal.updatedAt,
+                telemetry: null,
+                terminalResultRef: null,
+              },
+            };
+            const terminalEvent: GenerationStreamEvent = {
+              id: terminalId,
+              type: 'done',
+              data: {
+                ok: true,
+                status: 'completed',
+                code: 'GENERATION_TERMINAL_CONTENT_EXPIRED',
+                resultAvailable: false,
+                contentRetention: 'expired',
+              },
+            };
+            controller.enqueue(snapshotEvent);
+            controller.enqueue(terminalEvent);
+            observe({
+              event: 'replay',
+              generationId,
+              events: 2,
+              bytes: encodeGenerationSseEvent(snapshotEvent).byteLength
+                + encodeGenerationSseEvent(terminalEvent).byteLength,
+              snapshotBootstrap: true,
+            });
+            cursor = terminalId;
+            controller.close();
+          };
           const enqueueTerminalSnapshot = (
             snapshot: GenerationSnapshot,
             terminal: GenerationTerminal,
@@ -1943,6 +2032,10 @@ export const createArenaGenerationService = (
               return;
             }
             if (fallback.status === 'completed' && fallback.contentAvailable !== true) {
+              if (isTerminalContentExpired(fallback)) {
+                enqueueExpiredTerminal(fallback);
+                return;
+              }
               throw new Error('GENERATION_TERMINAL_CONTENT_UNAVAILABLE');
             }
             const fallbackSubscription = createTerminalFallbackSubscription(fallback, cursor);
@@ -2473,9 +2566,11 @@ export const createArenaGenerationService = (
         input.generationId,
       );
       if (owned instanceof Response) return ownedFailureFromResponse(owned);
+      const terminalContentExpired = isTerminalContentExpired(owned.terminalFallback);
       if (
         owned.terminalFallback?.status === 'completed'
         && owned.terminalFallback.contentAvailable !== true
+        && !terminalContentExpired
       ) {
         return {
           kind: 'unavailable',
@@ -2487,7 +2582,9 @@ export const createArenaGenerationService = (
         || owned.state.status === 'failed'
         || owned.state.status === 'cancelled'
         || owned.state.status === 'producer_lost';
-      const resultAvailable = owned.state.status === 'completed' && Boolean(
+      const resultAvailable = owned.state.status === 'completed'
+        && !terminalContentExpired
+        && Boolean(
         owned.terminalFallback?.resultRef
         ?? owned.state.terminal?.resultRef
         ?? snapshot?.terminalResultRef,
@@ -2499,7 +2596,9 @@ export const createArenaGenerationService = (
           generationRequestId: owned.state.generationRequestId,
           status: owned.state.status,
           markdown: owned.state.status === 'completed'
-            ? owned.terminalFallback?.markdown ?? snapshot?.markdown ?? ''
+            ? terminalContentExpired
+              ? ''
+              : owned.terminalFallback?.markdown ?? snapshot?.markdown ?? ''
             : owned.state.status === 'reserved'
                 || owned.state.status === 'running'
                 || owned.state.status === 'finalizing'
@@ -3122,7 +3221,13 @@ export const createArenaGenerationService = (
         owned.terminalFallback?.status === 'completed'
         && owned.terminalFallback.contentAvailable !== true
       ) {
-        return createTerminalContentUnavailableResponse();
+        return isTerminalContentExpired(owned.terminalFallback)
+          ? createExpiredTerminalStatusResponse(
+              owned.state,
+              owned.terminalFallback,
+              owned.actor,
+            )
+          : createTerminalContentUnavailableResponse();
       }
       return createStatusResponse(owned.state, owned.actor);
     },
@@ -3192,7 +3297,13 @@ export const createArenaGenerationService = (
         owned.terminalFallback?.status === 'completed'
         && owned.terminalFallback.contentAvailable !== true
       ) {
-        return createTerminalContentUnavailableResponse();
+        return isTerminalContentExpired(owned.terminalFallback)
+          ? createExpiredTerminalStatusResponse(
+              owned.state,
+              owned.terminalFallback,
+              owned.actor,
+            )
+          : createTerminalContentUnavailableResponse();
       }
       return createStatusResponse(owned.state, owned.actor);
     },

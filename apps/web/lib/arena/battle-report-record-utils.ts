@@ -97,6 +97,15 @@ export async function loadBattleReportGenerationOutputText(input: {
     };
   }
 
+  if (r2.status === 404) {
+    return {
+      outputText: '',
+      source: 'r2',
+      hasStoredOutput: false,
+      readError: null,
+    };
+  }
+
   return {
     outputText: '',
     source: 'r2',

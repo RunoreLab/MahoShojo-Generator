@@ -408,6 +408,25 @@ describe('Arena D1/R2 finalization ports', () => {
     expect(JSON.stringify(client.boundCalls)).not.toContain(failedMarkdown);
   });
 
+  it('stops writing completed terminal Markdown into the D1 output preview', async () => {
+    const client = sequentialD1([result([], 1)]);
+    const ports = createNodeArenaGenerationFinalizationPorts({
+      getD1Client: () => client,
+      now: () => new Date('2026-08-25T04:00:00.000Z'),
+    });
+
+    await ports.claimTerminal(claimInput);
+
+    const insertSql = vi.mocked(client.prepare).mock.calls[0]?.[0] ?? '';
+    const columns = insertSql
+      .match(/battle_report_generations\s*\(([\s\S]*?)\)\s*VALUES/u)?.[1]
+      ?.split(',')
+      .map((column) => column.trim()) ?? [];
+    const outputPreviewIndex = columns.indexOf('output_preview');
+    expect(outputPreviewIndex).toBeGreaterThan(-1);
+    expect(client.boundCalls[0]?.[outputPreviewIndex]).toBeNull();
+  });
+
   it('reconciles an indeterminate INSERT error before reporting terminal failure', async () => {
     const ownerHash = await crypto.subtle.digest(
       'SHA-256',
@@ -641,7 +660,10 @@ ORDER BY sort_index
     }])]);
     const store = createNodeArenaGenerationTerminalStore({
       getD1Client: () => client,
-      objectStore: { put: vi.fn(), getText: vi.fn(async () => 'full body') },
+      objectStore: {
+        put: vi.fn(),
+        getText: vi.fn(async () => ({ kind: 'found' as const, text: 'full body' })),
+      },
     });
 
     await expect(store.readOwnedTerminal({
@@ -719,6 +741,44 @@ ORDER BY sort_index
     })).resolves.toMatchObject({
       markdown: '',
       contentAvailable: false,
+      contentUnavailableReason: 'temporary',
+    });
+  });
+
+  it('classifies an expired R2 object as not-found without exposing the historical preview', async () => {
+    const ownerHash = await crypto.subtle.digest(
+      'SHA-256',
+      new TextEncoder().encode('anonymous:anon-id-1'),
+    ).then((bytes) => Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, '0')).join(''));
+    const client = sequentialD1([result([{
+      id: 'generation-1',
+      status: 'completed',
+      updated_at: '2026-08-25T04:00:00.000Z',
+      output_preview: 'truncated historical preview',
+      extra_json: JSON.stringify({
+        generationRequestId: 'request-1',
+        generationOwnerHash: ownerHash,
+        generationPayloadHash: 'payload-hash-1',
+        finalizationCompleted: true,
+        resultRef: 'r2:key',
+      }),
+      r2_key: 'key',
+    }])]);
+    const store = createNodeArenaGenerationTerminalStore({
+      getD1Client: () => client,
+      objectStore: {
+        put: vi.fn(),
+        getText: vi.fn(async () => ({ kind: 'not-found' as const })),
+      },
+    });
+
+    await expect(store.readOwnedTerminal({
+      generationId: 'generation-1',
+      actorKey: 'anonymous:anon-id-1',
+    })).resolves.toMatchObject({
+      markdown: '',
+      contentAvailable: false,
+      contentUnavailableReason: 'not-found',
     });
   });
 
@@ -747,7 +807,11 @@ ORDER BY sort_index
     await expect(store.readOwnedTerminal({
       generationId: 'generation-1',
       actorKey: 'anonymous:anon-id-1',
-    })).resolves.toMatchObject({ contentAvailable: false });
+    })).resolves.toMatchObject({
+      markdown: '',
+      contentAvailable: false,
+      contentUnavailableReason: 'not-found',
+    });
   });
 
   it('reports an actor-owned incomplete finalization without treating it as not found', async () => {
@@ -833,7 +897,9 @@ ORDER BY sort_index
     })).resolves.toMatchObject({
       status: 'completed',
       resultRef: 'r2:key',
-      markdown: 'preview',
+      markdown: '',
+      contentAvailable: false,
+      contentUnavailableReason: 'not-found',
     });
     expect(settleRatings).toHaveBeenCalledWith({
       generationId: 'generation-1',
