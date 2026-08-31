@@ -16,6 +16,11 @@ import {
 } from '../utils/battleReportCardWidth';
 import type { AdjudicatorEvent } from '@/types/arena';
 import { buildAdjudicationSourceKey, filterAdjudicationEventsBySources } from '@/lib/arena/adjudication-events';
+import {
+  ARENA_ADJUDICATION_DRAFT_VERSION,
+  createArenaAdjudicationDraft,
+  restoreArenaAdjudicationDraft,
+} from '@/lib/arena/adjudication-draft-persistence';
 import { canAddArenaReferenceItems } from '@/lib/arena/resource-budget';
 
 const normalizeSourceKey = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
@@ -501,9 +506,19 @@ export const useBattleStore = create<BattleStoreState>()(
       name: 'arena-storage',
       storage: createJSONStorage(createStorage),
       merge: (persistedState, currentState) => {
-        const merged = { ...currentState, ...(persistedState as any) };
-        if ((persistedState as any)?.settings && typeof (persistedState as any).settings === 'object') {
-          merged.settings = { ...currentState.settings, ...(persistedState as any).settings };
+        const persisted = persistedState && typeof persistedState === 'object'
+          ? persistedState as Record<string, unknown>
+          : {};
+        const persistedWithoutDraft = { ...persisted };
+        delete persistedWithoutDraft.adjudicationDraftV1;
+        delete persistedWithoutDraft.adjudicationEvents;
+        const merged = {
+          ...currentState,
+          ...persistedWithoutDraft,
+          adjudicationEvents: restoreArenaAdjudicationDraft(persisted),
+        } as BattleStoreState;
+        if (persisted.settings && typeof persisted.settings === 'object') {
+          merged.settings = { ...currentState.settings, ...(persisted.settings as Partial<BattleSettings>) };
         }
         return merged;
       },
@@ -515,10 +530,10 @@ export const useBattleStore = create<BattleStoreState>()(
         customStoryLength: state.customStoryLength,
         selectedLanguage: state.selectedLanguage,
         settings: state.settings,
-        adjudicationEvents: state.adjudicationEvents.filter(
-          (event) => !normalizeSourceKey(event.sourceKey)
-        ),
+        adjudicationDraftV1: createArenaAdjudicationDraft(state.adjudicationEvents),
       }),
+      version: ARENA_ADJUDICATION_DRAFT_VERSION,
+      migrate: (persistedState) => persistedState,
     }
   )
 );

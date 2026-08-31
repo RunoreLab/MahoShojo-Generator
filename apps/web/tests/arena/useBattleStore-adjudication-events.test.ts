@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, test } from 'vitest';
 
 import { useBattleStore } from '@/components/arena/stores/useBattleStore';
+import {
+  ARENA_ADJUDICATION_DRAFT_VERSION,
+  parseArenaAdjudicationDraft,
+} from '@/lib/arena/adjudication-draft-persistence';
 
 const resetStore = () => {
   useBattleStore.setState(useBattleStore.getInitialState(), true);
@@ -90,8 +94,45 @@ describe('useBattleStore adjudication event cleanup', () => {
 
     const persisted = JSON.parse(localStorage.getItem('arena-storage') ?? '{}');
 
-    expect(persisted.state?.adjudicationEvents).toEqual([
-      { id: 'evt-manual', description: '手工草稿', type: 'binary', probability: 65 },
+    expect(persisted.state?.adjudicationEvents).toBeUndefined();
+    expect(persisted.state?.adjudicationDraftV1).toMatchObject({
+      version: ARENA_ADJUDICATION_DRAFT_VERSION,
+      events: [
+        { id: 'evt-manual', description: '手工草稿', type: 'binary', probability: 65 },
+      ],
+    });
+    expect(persisted.state?.adjudicationDraftV1.updatedAt).toEqual(expect.any(Number));
+  });
+
+  test('恢复时隔离损坏事件，并过滤旧版本中依赖卡片来源的事件', async () => {
+    localStorage.setItem('arena-storage', JSON.stringify({
+      state: {
+        adjudicationEvents: [
+          { id: 'evt-card', description: '孤儿卡片事件', type: 'binary', probability: 50, sourceKey: 'data_card:deleted' },
+          { id: 'evt-manual', description: '旧版手工草稿', type: 'binary', probability: 70 },
+          { id: 'evt-bad', description: 42, type: 'binary', probability: 50 },
+        ],
+      },
+      version: 0,
+    }));
+
+    await useBattleStore.persist.rehydrate();
+
+    expect(useBattleStore.getState().adjudicationEvents).toEqual([
+      { id: 'evt-manual', description: '旧版手工草稿', type: 'binary', probability: 70 },
     ]);
+  });
+
+  test('未知版本或非数组草稿不会进入运行时状态', () => {
+    expect(parseArenaAdjudicationDraft({
+      version: ARENA_ADJUDICATION_DRAFT_VERSION + 1,
+      updatedAt: Date.now(),
+      events: [],
+    })).toEqual([]);
+    expect(parseArenaAdjudicationDraft({
+      version: ARENA_ADJUDICATION_DRAFT_VERSION,
+      updatedAt: Date.now(),
+      events: { id: 'not-an-array' },
+    })).toEqual([]);
   });
 });
