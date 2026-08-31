@@ -256,6 +256,13 @@ describe('Arena room Proposal workspace', () => {
     expect(container.textContent).toContain('新增辅助情景');
     expect(container.textContent).toContain('新增素材');
     expect(container.textContent).toContain('语言改为 en-US');
+    expect(container.textContent).toContain(
+      'PROPOSED：角色 data-card:character-public-1 引导改为“优先保护同伴”',
+    );
+    expect(container.textContent).toContain(
+      'PROPOSED：角色 data-card:character-public-1 分配至队伍 team:',
+    );
+    expect(container.textContent).toContain('叙事历史 读取=开(10)、写入=关');
 
     await act(async () => {
       button('提交 Proposal').click();

@@ -27,6 +27,7 @@ import type { ArenaRoomController, ArenaRoomControllerState } from '@/lib/arena-
 import {
   ArenaProposalSelectionDetails,
   arenaProposalChangeSummary,
+  arenaProposalChangeProposedSummary,
   arenaProposalSelectionError,
 } from './ArenaProposalPanel';
 import { useArenaRoomContext } from './useArenaRoom';
@@ -112,7 +113,7 @@ const ProposalPreviewDialog = ({
                 <span className="font-medium text-gray-950 dark:text-gray-100">{arenaProposalChangeSummary(change)}</span>
                 <ArenaProposalSelectionDetails change={change} />
                 <span className="mt-1 block text-xs text-gray-600 dark:text-gray-400">BASE：{JSON.stringify(change.expectedBase)}</span>
-                <span className="block text-xs text-gray-600 dark:text-gray-400">PROPOSED：{arenaProposalChangeSummary(change)}</span>
+                <span className="block text-xs text-gray-600 dark:text-gray-400">PROPOSED：{arenaProposalChangeProposedSummary(change)}</span>
               </span>
             </label>
           ))}

@@ -93,6 +93,40 @@ export const arenaProposalChangeSummary = (change: ArenaProposalChange): string 
   }
 };
 
+const enabledSummary = (enabled: boolean): string => enabled ? '开' : '关';
+
+const historyReadSummary = (
+  enabled: boolean,
+  unlimited: boolean,
+  limit: number,
+): string => {
+  if (!enabled) return '关';
+  return unlimited ? '开(无限)' : `开(${limit})`;
+};
+
+export const arenaProposalChangeProposedSummary = (change: ArenaProposalChange): string => {
+  switch (change.type) {
+    case 'setCharacterGuidance':
+      return change.value === null
+        ? `清空角色 ${change.combatantKey} 引导`
+        : `角色 ${change.combatantKey} 引导改为“${safeText(change.value, 120)}”`;
+    case 'assignTeam':
+      return change.teamKey === null
+        ? `角色 ${change.combatantKey} 取消队伍分配`
+        : `角色 ${change.combatantKey} 分配至队伍 ${change.teamKey}`;
+    case 'setHistorySettings': {
+      const value = change.value;
+      return [
+        `竞技场历史 读取=${historyReadSummary(value.readArenaHistory, value.isArenaHistoryUnlimited, value.readArenaHistoryLimit)}、写入=${enabledSummary(value.writeArenaHistory)}`,
+        `当前状态 读取=${enabledSummary(value.readCurrentState)}、写入=${enabledSummary(value.writeCurrentState)}`,
+        `叙事历史 读取=${historyReadSummary(value.readNarrativeHistory, value.isNarrativeHistoryUnlimited, value.readNarrativeHistoryLimit)}、写入=${enabledSummary(value.writeNarrativeHistory)}`,
+      ].join('；');
+    }
+    default:
+      return arenaProposalChangeSummary(change);
+  }
+};
+
 export const ArenaProposalSelectionDetails = ({ change }: { readonly change: ArenaProposalChange }) => (
   <span className="mt-1 block text-xs text-gray-600 dark:text-gray-400">
     {expectedBaseSummary(change)}
@@ -197,7 +231,7 @@ const HostProposalCard = ({
                 CURRENT：{conflict ? safeJsonSummary(conflict.current) : '与 BASE 一致'}
               </span>
               <span className="block text-xs text-gray-600 dark:text-gray-400">
-                PROPOSED：{arenaProposalChangeSummary(change)}
+                PROPOSED：{arenaProposalChangeProposedSummary(change)}
               </span>
               {conflict ? (
                 <span className="mt-1 block font-medium text-red-700 dark:text-red-300">

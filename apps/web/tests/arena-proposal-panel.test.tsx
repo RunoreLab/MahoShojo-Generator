@@ -245,6 +245,27 @@ describe('Arena Proposal panel real React interactions', () => {
         type: 'setSelectedLanguage',
         value: 'en-US',
         expectedBase: { kind: 'value', value: 'ja-JP' },
+      }, {
+        changeId: 'character-guidance',
+        type: 'setCharacterGuidance',
+        combatantKey: 'data-card:character-1',
+        value: '保护后排并等待支援',
+        expectedBase: { kind: 'value', value: null },
+      }, {
+        changeId: 'team-assignment',
+        type: 'assignTeam',
+        combatantKey: 'data-card:character-1',
+        teamKey: 'team:b',
+        expectedBase: { kind: 'value', value: null },
+      }, {
+        changeId: 'history-settings',
+        type: 'setHistorySettings',
+        value: {
+          ...sharedConfig.historySettings,
+          readNarrativeHistory: true,
+          readNarrativeHistoryLimit: 7,
+        },
+        expectedBase: { kind: 'value', value: sharedConfig.historySettings },
       }],
     };
     await act(async () => root.render(
@@ -260,5 +281,12 @@ describe('Arena Proposal panel real React interactions', () => {
     expect(container.textContent).toContain('移除队伍 team:a');
     expect(container.textContent).toContain('队伍 team:c 改名为 C 队新名');
     expect(container.textContent).toContain('语言改为 en-US');
+    expect(container.textContent).toContain(
+      'PROPOSED：角色 data-card:character-1 引导改为“保护后排并等待支援”',
+    );
+    expect(container.textContent).toContain(
+      'PROPOSED：角色 data-card:character-1 分配至队伍 team:b',
+    );
+    expect(container.textContent).toContain('叙事历史 读取=开(7)、写入=关');
   });
 });
