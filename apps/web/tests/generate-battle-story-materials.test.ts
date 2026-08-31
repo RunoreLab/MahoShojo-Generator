@@ -18,11 +18,12 @@ describe('generate-battle-story context wiring', () => {
     expect(prompt).toContain('!strictRankedMatch');
   });
 
-  test('companion endpoint 复用 shared Arena 辅助情景约束', () => {
+  test('companion endpoint 复用 shared Arena 聚合引用预算', () => {
     const runtime = readSharedRuntimeSource('runtime.ts');
     const prompt = readSharedRuntimeSource('prompt.ts');
 
-    expect(runtime).toContain("validationFailure('ARENA_AUX_SCENARIOS_LIMIT'");
+    expect(runtime).toContain('countArenaReferenceItems(payload)');
+    expect(runtime).toContain("'ARENA_REFERENCE_ITEMS_LIMIT'");
     expect(prompt).toContain('Array.isArray(payload.auxScenarios)');
   });
 });
