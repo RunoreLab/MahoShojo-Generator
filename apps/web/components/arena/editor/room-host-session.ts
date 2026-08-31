@@ -1,6 +1,9 @@
 import type { ArenaRoomSharedConfig } from '@mahoshojo/contracts/arena-room';
 
-import { cloneArenaEditorSharedConfig } from './shared-config-mapper';
+import {
+  cloneArenaEditorSharedConfig,
+  mapSharedConfigToArenaEditorView,
+} from './shared-config-mapper';
 import { createSingleArenaEditorSession } from './single-session';
 import type {
   ArenaEditorActions,
@@ -55,13 +58,58 @@ const normalizeMetadata = (
 
 const isDirty = (status: ArenaEditorWorkspaceStatus): boolean => status.kind !== 'clean';
 
+const sharedProjectionSignature = (state: ReturnType<typeof mapSharedConfigToArenaEditorView>): string => (
+  JSON.stringify({
+    combatants: state.combatants.map((entry) => ({
+      key: entry.key,
+      reference: entry.reference,
+      localName: entry.reference ? null : entry.name,
+      localType: entry.reference ? null : entry.type,
+      characterGuidance: entry.characterGuidance,
+      teamKey: entry.teamKey,
+    })),
+    teams: state.teams.map((entry) => ({
+      key: entry.key,
+      name: entry.name,
+      combatantKeys: entry.combatantKeys,
+    })),
+    scenario: state.scenario && {
+      key: state.scenario.key,
+      reference: state.scenario.reference,
+      localName: state.scenario.reference ? null : state.scenario.name,
+    },
+    auxScenarios: state.auxScenarios.map((entry) => ({
+      key: entry.key,
+      reference: entry.reference,
+      localName: entry.reference ? null : entry.name,
+    })),
+    materials: state.materials.map((entry) => ({
+      key: entry.key,
+      reference: entry.reference,
+      localName: entry.reference ? null : entry.name,
+    })),
+    battleMode: state.battleMode,
+    storyLength: state.storyLength,
+    customStoryLength: state.customStoryLength,
+    selectedLanguage: state.selectedLanguage,
+    userGuidance: state.userGuidance,
+    historySettings: state.historySettings,
+  })
+);
+
+const matchesAuthority = (
+  state: ArenaEditorState,
+  authority: ArenaProposalEditorSnapshotInput,
+): boolean => sharedProjectionSignature(state) === sharedProjectionSignature(
+  mapSharedConfigToArenaEditorView(authority.sharedConfig),
+);
+
 export const createRoomHostArenaEditorSession = (
   input: RoomHostArenaEditorSessionInput,
 ): RoomHostArenaEditorSession => {
   const single = createSingleArenaEditorSession();
   let metadata = normalizeMetadata(input);
   let metadataRevision = 0;
-  let localEditObserved = false;
   let disposed = false;
   let cachedSingleState: ArenaEditorState | null = null;
   let cachedMetadataRevision = -1;
@@ -71,38 +119,29 @@ export const createRoomHostArenaEditorSession = (
     if (disposed) throw new Error('Arena editor session is disposed');
   };
   const singleActions = single.store.getState().actions;
-  const markEdited = (): void => {
-    localEditObserved = true;
-  };
   const actions: ArenaEditorActions = Object.freeze({
     setBattleMode(value) {
       assertActive();
-      markEdited();
       singleActions.setBattleMode(value);
     },
     setStoryLength(value) {
       assertActive();
-      markEdited();
       singleActions.setStoryLength(value);
     },
     setCustomStoryLength(value) {
       assertActive();
-      markEdited();
       singleActions.setCustomStoryLength(value);
     },
     setSelectedLanguage(value) {
       assertActive();
-      markEdited();
       singleActions.setSelectedLanguage(value);
     },
     setUserGuidance(value) {
       assertActive();
-      markEdited();
       singleActions.setUserGuidance(value);
     },
     updateHistorySettings(value) {
       assertActive();
-      markEdited();
       singleActions.updateHistorySettings(value);
     },
   });
@@ -116,7 +155,8 @@ export const createRoomHostArenaEditorSession = (
     ) {
       cachedSingleState = singleState;
       cachedMetadataRevision = metadataRevision;
-      const workspaceStatus = localEditObserved && metadata.workspaceStatus.kind === 'clean'
+      const workspaceStatus = metadata.workspaceStatus.kind === 'clean'
+        && !matchesAuthority(singleState, metadata.authority)
         ? Object.freeze({ kind: 'dirty' as const, reasons: Object.freeze(['shared-config' as const]) })
         : metadata.workspaceStatus;
       cachedState = Object.freeze({
@@ -157,7 +197,6 @@ export const createRoomHostArenaEditorSession = (
     syncAuthority(nextInput) {
       assertActive();
       metadata = normalizeMetadata(nextInput);
-      localEditObserved = false;
       notifyMetadata();
     },
     async exportSharedConfig(): Promise<ArenaRoomSharedConfig> {

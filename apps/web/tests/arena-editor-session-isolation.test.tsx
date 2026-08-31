@@ -253,7 +253,30 @@ describe('Arena editor scoped sessions', () => {
   });
 
   it('room-host decorates single behavior with room authority and workspace metadata', () => {
-    useBattleStore.setState({ battleMode: 'classic' });
+    useBattleStore.setState((state) => ({
+      battleMode: 'classic',
+      combatants: [{
+        type: 'general-character',
+        data: { name: '房主本地角色' },
+        filename: '房主本地角色',
+        isValid: true,
+        isPreset: false,
+        adjudicationSourceKey: 'host-local:character:1',
+        characterGuidance: '安全角色引导',
+      }],
+      teams: [],
+      scenario: { content: null, fileName: null, isNative: false },
+      auxScenarios: [],
+      materials: [],
+      storyLength: 'default',
+      customStoryLength: '',
+      selectedLanguage: 'zh-CN',
+      settings: {
+        ...state.settings,
+        ...historySettings(),
+        userGuidance: '',
+      },
+    }));
     const session = createRoomHostArenaEditorSession({
       authority: snapshot(),
       workspaceStatus: { kind: 'clean' },
@@ -278,6 +301,13 @@ describe('Arena editor scoped sessions', () => {
       dirty: true,
       workspaceStatus: { kind: 'dirty', reasons: ['shared-config'] },
     });
+
+    session.store.getState().actions.setBattleMode('classic');
+    expect(session.store.getState()).toMatchObject({
+      dirty: false,
+      workspaceStatus: { kind: 'clean' },
+    });
+    session.store.getState().actions.setBattleMode('kizuna');
 
     session.syncAuthority({
       authority: snapshot({ revision: 4, sharedConfig: config({ battleMode: 'daily' }) }),
