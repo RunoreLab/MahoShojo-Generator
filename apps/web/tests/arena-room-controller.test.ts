@@ -628,6 +628,37 @@ describe('Arena Room browser controller', () => {
     });
   });
 
+  it('幂等 config publish 响应丢失且无事件时主动拉取权威 session 解锁', async () => {
+    const { client, controller, sockets } = createHarness();
+    vi.mocked(client.publishConfig).mockRejectedValueOnce(new ArenaRoomClientError(
+      'ROOM_RESULT_UNKNOWN',
+      503,
+      '请求可能已提交，请先确认房间状态，不要重复提交',
+    ));
+    await controller.create({
+      displayName: '房主',
+      directory: { title: '测试房', visibility: 'public' },
+      sharedConfig,
+    });
+    sockets[0]!.open();
+    await controller.publishConfig({
+      expectedRoomEpoch: 'epoch-1',
+      expectedRevision: 0,
+      sharedConfig,
+    });
+    expect(controller.getSnapshot().configPublishResultUnknown).toBe(true);
+
+    vi.mocked(client.getSession).mockResolvedValueOnce(session);
+    controller.reconnect();
+    await vi.waitFor(() => expect(client.getSession).toHaveBeenCalledWith('room-1'));
+    await vi.waitFor(() => expect(controller.getSnapshot()).toMatchObject({
+      configPublishPending: false,
+      configPublishResultUnknown: false,
+      session: { roomEpoch: 'epoch-1', snapshot: { revision: 0, sharedConfig } },
+    }));
+    expect(client.issueTicket).toHaveBeenCalledTimes(2);
+  });
+
   it('reset/dispose 使在途 config publish response 失效', async () => {
     for (const cleanup of ['reset', 'dispose'] as const) {
       const { client, controller } = createHarness();

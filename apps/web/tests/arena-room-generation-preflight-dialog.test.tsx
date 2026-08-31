@@ -30,6 +30,7 @@ describe('Arena Room generation preflight dialog', () => {
         isOpen
         reasons={['shared-config', 'host-local-content']}
         canUseRoom
+        canPublish
         busy={false}
         onChoice={onChoice}
       />,
@@ -53,6 +54,7 @@ describe('Arena Room generation preflight dialog', () => {
         isOpen
         reasons={['baseline-missing']}
         canUseRoom={false}
+        canPublish
         busy={false}
         onChoice={onChoice}
       />,
@@ -64,5 +66,23 @@ describe('Arena Room generation preflight dialog', () => {
     if (!(publish instanceof HTMLButtonElement)) throw new Error('publish button missing');
     await act(async () => publish.click());
     expect(onChoice).toHaveBeenCalledWith('publish');
+  });
+
+  it('working copy 无法安全投影时禁用发布，但允许沿用已发布 Room baseline', async () => {
+    await act(async () => root.render(
+      <ArenaRoomGenerationPreflightDialog
+        isOpen
+        reasons={['working-copy-invalid']}
+        canUseRoom
+        canPublish={false}
+        busy={false}
+        onChoice={vi.fn()}
+      />,
+    ));
+    const buttons = [...document.body.querySelectorAll('button')];
+    expect(buttons.find((button) => button.textContent?.includes('更新房间配置并开始')))
+      .toHaveProperty('disabled', true);
+    expect(buttons.find((button) => button.textContent?.includes('按当前房间配置开始')))
+      .toHaveProperty('disabled', false);
   });
 });

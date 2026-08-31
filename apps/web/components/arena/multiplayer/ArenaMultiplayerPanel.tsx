@@ -201,9 +201,9 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
           <ArenaRoomGenerationReport state={state} />
 
           <div className="flex flex-wrap gap-2">
-            {state.phase === 'degraded' || state.phase === 'reconnecting' ? (
+            {state.phase === 'degraded' || state.phase === 'reconnecting' || state.configPublishResultUnknown ? (
               <button type="button" className={secondaryButtonClass} onClick={props.onReconnect}>
-                重新连接
+                {state.configPublishResultUnknown ? '重新确认配置发布' : '重新连接'}
               </button>
             ) : null}
             {state.phase === 'replacement' || state.phase === 'closed' ? (

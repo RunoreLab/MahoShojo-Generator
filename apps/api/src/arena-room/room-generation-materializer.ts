@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import {
   ArenaRoomHostLocalPayloadSchema,
   ArenaRoomHostRuntimeGenerationSchema,
@@ -15,6 +17,7 @@ export type ArenaRoomGenerationMaterializationErrorCode =
   | 'ARENA_ROOM_HOST_LOCAL_PAYLOAD_INVALID'
   | 'ARENA_ROOM_HOST_LOCAL_PAYLOAD_KIND_MISMATCH'
   | 'ARENA_ROOM_HOST_LOCAL_PAYLOAD_MISMATCH'
+  | 'ARENA_ROOM_HOST_LOCAL_CONTENT_VERSION_MISMATCH'
   | 'ARENA_ROOM_HOST_LOCAL_PAYLOAD_TYPE_MISMATCH'
   | 'ARENA_ROOM_HOST_RUNTIME_INVALID'
   | 'ARENA_ROOM_REFERENCE_CONTENT_INVALID'
@@ -68,6 +71,18 @@ const canonicalRefMatches = (left: DataCardRef, right: DataCardRef): boolean => 
   left.id === right.id
   && left.kind === right.kind
   && left.versionToken === right.versionToken
+);
+
+const canonicalJsonValue = (value: unknown): unknown => {
+  if (Array.isArray(value)) return value.map(canonicalJsonValue);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.keys(value as Record<string, unknown>)
+    .sort()
+    .map((key) => [key, canonicalJsonValue((value as Record<string, unknown>)[key])]));
+};
+
+const contentVersion = (payload: Readonly<Record<string, unknown>>): string => (
+  `sha256:${createHash('sha256').update(JSON.stringify(canonicalJsonValue(payload))).digest('hex')}`
 );
 
 const characterType = (payload: unknown): 'magical-girl' | 'canshou' | 'general-character' => {
@@ -193,6 +208,10 @@ export const createArenaRoomGenerationMaterializer = (
         if (!local || !isPlainRecord(local.payload)) {
           return fail('ARENA_ROOM_HOST_LOCAL_PAYLOAD_INVALID');
         }
+        if (
+          entry.contentVersion !== undefined
+          && contentVersion(local.payload) !== entry.contentVersion
+        ) return fail('ARENA_ROOM_HOST_LOCAL_CONTENT_VERSION_MISMATCH');
         return Object.freeze({
           payload: local.payload,
           displayName: entry.displayName,

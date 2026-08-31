@@ -9,6 +9,7 @@ type Props = Readonly<{
   isOpen: boolean;
   reasons: readonly ArenaRoomHostWorkspaceDirtyReason[];
   canUseRoom: boolean;
+  canPublish: boolean;
   busy: boolean;
   onChoice: (choice: ArenaRoomGenerationPreflightChoice) => void;
 }>;
@@ -19,12 +20,14 @@ const reasonText: Readonly<Record<ArenaRoomHostWorkspaceDirtyReason, string>> = 
   'shared-config': '本地编辑与房间权威配置不同。',
   'host-local-content': '本地角色、情景或素材的完整正文已变更。',
   'baseline-missing': '当前页面没有这个房间的 host-local 发布基线。',
+  'working-copy-invalid': '本地 working copy 当前无法安全投影为房间配置。',
 };
 
 export function ArenaRoomGenerationPreflightDialog({
   isOpen,
   reasons,
   canUseRoom,
+  canPublish,
   busy,
   onChoice,
 }: Props) {
@@ -58,7 +61,7 @@ export function ArenaRoomGenerationPreflightDialog({
           <button
             type="button"
             className={`${buttonClass} border-fuchsia-600 bg-fuchsia-600 text-white hover:bg-fuchsia-700`}
-            disabled={busy}
+            disabled={busy || !canPublish}
             onClick={() => onChoice('publish')}
           >
             更新房间配置并开始
@@ -74,6 +77,11 @@ export function ArenaRoomGenerationPreflightDialog({
         {!canUseRoom ? (
           <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900" role="status">
             缺少完整的 host-local 基线，无法安全地“按当前房间配置”启动；请显式更新房间或取消。
+          </p>
+        ) : null}
+        {!canPublish ? (
+          <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900" role="status">
+            当前本地 working copy 无法安全发布；可以沿用已发布的房间配置，或取消后修正本地编辑。
           </p>
         ) : null}
       </div>

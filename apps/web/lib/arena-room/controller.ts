@@ -952,7 +952,7 @@ export const createArenaRoomController = (
     await connectSession(session, false, generation);
   };
 
-  const reconcileUnknownProposal = async (
+  const reconcileUnknownMutations = async (
     current: ArenaRoomSessionResponse,
     generation: number,
   ): Promise<void> => {
@@ -964,18 +964,37 @@ export const createArenaRoomController = (
       error: null,
     });
     try {
+      const pendingConfigIntent = configPublishIntent;
+      const hadConfigUnknown = state.configPublishResultUnknown;
       const authoritative = await options.client.getSession(current.roomId);
       if (
         disposed
         || generation !== operationGeneration
         || authoritative.roomId !== current.roomId
+        || authoritative.self.userId !== current.self.userId
       ) return;
+      const configConfirmed = hadConfigUnknown
+        && pendingConfigIntent?.roomId === authoritative.roomId
+        && pendingConfigIntent.selfUserId === authoritative.self.userId
+        && authoritative.self.role === 'host'
+        && authoritative.self.membershipState === 'active'
+        && pendingConfigIntent.request.expectedRoomEpoch === authoritative.roomEpoch
+        && (
+          authoritative.snapshot.revision === pendingConfigIntent.request.expectedRevision
+          || authoritative.snapshot.revision === pendingConfigIntent.request.expectedRevision + 1
+        )
+        && sameSharedConfig(
+          authoritative.snapshot.sharedConfig,
+          pendingConfigIntent.request.sharedConfig,
+        );
       controlCursor = {
         roomEpoch: authoritative.roomEpoch,
         controlSeq: authoritative.snapshot.controlSeq,
       };
       reconnectAttempts = 0;
       unknownProposalMutation = null;
+      configPublishIntent = null;
+      configPublishPending = false;
       generationFence += 1;
       publish({
         session: authoritative,
@@ -985,7 +1004,13 @@ export const createArenaRoomController = (
         ),
         proposalOperation: null,
         proposalResultUnknown: false,
-        notice: '已取得房间权威快照，正在重新连接…',
+        configPublishPending: false,
+        configPublishResultUnknown: false,
+        notice: hadConfigUnknown
+          ? configConfirmed
+            ? '已从房间权威快照确认配置发布，正在重新连接…'
+            : '已取得房间权威快照；先前配置发布未成为当前权威，请重新确认'
+          : '已取得房间权威快照，正在重新连接…',
         error: null,
       });
       if (authoritative.snapshot.activeGeneration) void requestGenerationRecovery('baseline');
@@ -1621,8 +1646,8 @@ export const createArenaRoomController = (
       proposalMutationGeneration += 1;
       proposalMutationPending = false;
       reconnectAttempts = 0;
-      if (state.proposalResultUnknown) {
-        void reconcileUnknownProposal(state.session, operationGeneration);
+      if (state.proposalResultUnknown || state.configPublishResultUnknown) {
+        void reconcileUnknownMutations(state.session, operationGeneration);
         return;
       }
       scheduleReconnect(false);

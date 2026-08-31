@@ -14,7 +14,7 @@ export type ArenaRoomGenerationAction = {
   readonly inRoom: boolean;
   readonly canStart: boolean;
   readonly canRetry: boolean;
-  readonly reason: 'active' | 'connection' | 'member' | 'recovery' | 'unknown' | null;
+  readonly reason: 'active' | 'config-unknown' | 'connection' | 'member' | 'recovery' | 'unknown' | null;
 };
 
 export const resolveArenaRoomGenerationAction = (
@@ -27,6 +27,9 @@ export const resolveArenaRoomGenerationAction = (
   }
   if (state.phase !== 'connected') {
     return { inRoom: true, canStart: false, canRetry: false, reason: 'connection' };
+  }
+  if (state.configPublishResultUnknown) {
+    return { inRoom: true, canStart: false, canRetry: false, reason: 'config-unknown' };
   }
   const retryableUnknown = state.generation.startResultUnknown
     && state.generation.phase === 'unknown'

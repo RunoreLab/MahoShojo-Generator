@@ -21,6 +21,7 @@ export const StableObjectKeySchema = z
   .regex(/^(data-card|preset|host-local):.+$/)
   .max(MAX_OPAQUE_KEY_LENGTH);
 export const HostLocalObjectKeySchema = StableObjectKeySchema.regex(/^host-local:.+$/);
+export const HostLocalContentVersionSchema = z.string().regex(/^sha256:[0-9a-f]{64}$/u);
 export const DisplayNameSchema = nonEmptyTrimmedString(MAX_DISPLAY_NAME_LENGTH);
 export const GuidanceSchema = z.string().max(MAX_CHARACTER_GUIDANCE_LENGTH);
 /** Canonical schema reused by SharedConfig.userGuidance and its proposal change. */
@@ -63,6 +64,7 @@ export const HostLocalCombatantStubSchema = z
     displayName: DisplayNameSchema,
     type: CombatantTypeSchema,
     source: z.literal('host-local'),
+    contentVersion: HostLocalContentVersionSchema.optional(),
     characterGuidance: GuidanceSchema.optional(),
   })
   .strict();
@@ -72,6 +74,7 @@ const HostLocalStubBaseSchema = z.object({
   key: HostLocalObjectKeySchema,
   displayName: DisplayNameSchema,
   source: z.literal('host-local'),
+  contentVersion: HostLocalContentVersionSchema.optional(),
   guidance: GuidanceSchema.optional(),
 });
 

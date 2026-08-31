@@ -61,6 +61,7 @@ const projectCombatant = (value: unknown): unknown => {
       type: value.type,
       source: 'host-local',
     };
+    if (value.contentVersion !== undefined) output.contentVersion = value.contentVersion;
     if (value.characterGuidance !== undefined) output.characterGuidance = value.characterGuidance;
     return output;
   }
@@ -84,6 +85,7 @@ const projectScenarioOrMaterial = (value: unknown): unknown => {
       type: value.type,
       source: 'host-local',
     };
+    if (value.contentVersion !== undefined) output.contentVersion = value.contentVersion;
     if (value.guidance !== undefined) output.guidance = value.guidance;
     return output;
   }

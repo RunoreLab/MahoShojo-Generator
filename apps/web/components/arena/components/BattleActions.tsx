@@ -223,6 +223,7 @@ export function BattleActions({ showAdvancedUtilities = true }: { showAdvancedUt
   const getButtonText = () => {
     if (roomAction.inRoom && roomAction.reason === 'member') return '等待房主开始生成';
     if (roomAction.inRoom && roomAction.reason === 'unknown') return '正在确认上次启动结果…';
+    if (roomAction.inRoom && roomAction.reason === 'config-unknown') return '正在确认房间配置发布…';
     if (roomAction.inRoom && roomAction.reason === 'recovery') return '确认并重试同一次启动';
     if (roomAction.inRoom && roomAction.reason === 'connection') return '等待房间重新连接…';
     if (roomAction.inRoom && roomAction.reason === 'active') return '房间战报生成中…';
@@ -250,6 +251,7 @@ export function BattleActions({ showAdvancedUtilities = true }: { showAdvancedUt
         isOpen={arenaRoomGenerationPreflight !== null}
         reasons={arenaRoomGenerationPreflight?.reasons ?? []}
         canUseRoom={arenaRoomGenerationPreflight?.canUseRoom ?? false}
+        canPublish={arenaRoomGenerationPreflight?.canPublish ?? false}
         busy={arenaRoomGenerationPreflight?.busy ?? false}
         onChoice={resolveArenaRoomGenerationPreflight}
       />
@@ -260,9 +262,9 @@ export function BattleActions({ showAdvancedUtilities = true }: { showAdvancedUt
             isGenerating ||
             isCooldown ||
             (roomAction.inRoom && !roomAction.canStart && !roomAction.canRetry) ||
-            (battleMode === 'daily' || battleMode === 'scenario'
+            (!roomAction.inRoom && (battleMode === 'daily' || battleMode === 'scenario'
               ? combatants.length < 1
-              : combatants.length < 2)
+              : combatants.length < 2))
           }
           className="generate-button"
         >

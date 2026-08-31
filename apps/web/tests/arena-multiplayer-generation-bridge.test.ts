@@ -59,6 +59,8 @@ const stateFor = (
   unknownOperation: null,
   proposalOperation: null,
   proposalResultUnknown: false,
+  configPublishPending: false,
+  configPublishResultUnknown: false,
   session: {
     protocolVersion: 1,
     roomId: 'room-1',
@@ -115,6 +117,15 @@ describe('Arena multiplayer generation bridge', () => {
       canStart: false,
       canRetry: true,
       reason: 'recovery',
+    });
+    expect(resolveArenaRoomGenerationAction({
+      ...stateFor('host'),
+      configPublishResultUnknown: true,
+    })).toMatchObject({
+      inRoom: true,
+      canStart: false,
+      canRetry: false,
+      reason: 'config-unknown',
     });
   });
 

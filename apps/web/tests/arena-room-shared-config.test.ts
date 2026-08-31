@@ -192,7 +192,7 @@ describe('Arena Room Battle store projection', () => {
     expect(JSON.stringify(bundle.hostLocalPayloads)).not.toContain('provider-secret');
   });
 
-  it('本地正文变化会改变 workspace digest，但不会偷渡进 safe SharedConfig', async () => {
+  it('本地正文变化会改变公开内容版本与 workspace digest，但不会偷渡正文', async () => {
     const first = await buildArenaRoomHostWorkspaceBundleFromBattleState(source());
     const changedSource = source();
     if ('data' in changedSource.combatants[2]!) {
@@ -200,10 +200,16 @@ describe('Arena Room Battle store projection', () => {
     }
     const changed = await buildArenaRoomHostWorkspaceBundleFromBattleState(changedSource);
 
-    expect(changed.sharedConfig).toEqual(first.sharedConfig);
     const localKey = first.hostLocalPayloads[0]!.key;
-    expect(changed.hostLocalContentDigests.find((entry) => entry.key === localKey)?.digest)
-      .not.toBe(first.hostLocalContentDigests.find((entry) => entry.key === localKey)?.digest);
+    const firstDigest = first.hostLocalContentDigests.find((entry) => entry.key === localKey)?.digest;
+    const changedDigest = changed.hostLocalContentDigests.find((entry) => entry.key === localKey)?.digest;
+    expect(changedDigest).not.toBe(firstDigest);
+    expect(changed.sharedConfig).not.toEqual(first.sharedConfig);
+    expect(changed.sharedConfig.combatants[2]).toMatchObject({
+      key: localKey,
+      contentVersion: changedDigest,
+    });
+    expect(JSON.stringify(changed.sharedConfig)).not.toContain('已修改正文');
   });
 
   it('在线 ref 缺 version、random placeholder、重复 key 与超限 roster 均拒绝', async () => {

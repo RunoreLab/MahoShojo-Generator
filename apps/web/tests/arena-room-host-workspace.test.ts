@@ -6,13 +6,14 @@ import {
 } from '@/lib/arena-room/host-workspace';
 import type { ArenaRoomHostWorkspaceBundle } from '@/lib/arena-room/shared-config';
 
-const sharedConfig = (guidance = '') => ({
+const sharedConfig = (guidance = '', contentVersion = `sha256:${'a'.repeat(64)}`) => ({
   battleMode: 'classic' as const,
   combatants: [{
     key: 'host-local:character:0:one',
     displayName: '本地角色',
     type: 'general-character' as const,
     source: 'host-local' as const,
+    contentVersion,
   }],
   teams: [],
   scenario: null,
@@ -41,7 +42,7 @@ const bundle = (
   digest = `sha256:${'a'.repeat(64)}`,
   guidance = '',
 ): ArenaRoomHostWorkspaceBundle => ({
-  sharedConfig: sharedConfig(guidance),
+  sharedConfig: sharedConfig(guidance, digest),
   hostLocalPayloads: [{
     key: 'host-local:character:0:one',
     kind: 'character',
@@ -85,7 +86,7 @@ describe('Arena Room host workspace baseline', () => {
     const comparison = workspace.compare(authority(), changed);
     expect(comparison).toMatchObject({
       kind: 'dirty',
-      reasons: ['host-local-content'],
+      reasons: ['shared-config', 'host-local-content'],
     });
     if (comparison.kind !== 'dirty') throw new Error('expected dirty');
     expect(comparison.current.hostLocalPayloads[0]!.payload).toMatchObject({ secret: 'changed-body' });
@@ -136,5 +137,15 @@ describe('Arena Room host workspace baseline', () => {
     };
     const comparison = workspace.compare(authority('', { sharedConfig: config }), onlineBundle);
     expect(comparison).toMatchObject({ kind: 'clean', start: { hostLocalPayloads: [] } });
+  });
+
+  it('working copy 无法投影时仍可从已发布 baseline 取得 Room 启动输入', () => {
+    const workspace = createArenaRoomHostWorkspace();
+    workspace.capturePublished(authority(), bundle());
+    expect(workspace.startFromRoom(authority())).toMatchObject({
+      sharedConfig: { combatants: [{ contentVersion: `sha256:${'a'.repeat(64)}` }] },
+      hostLocalPayloads: [{ payload: { secret: 'baseline-body' } }],
+    });
+    expect(workspace.startFromRoom(authority('', { roomEpoch: 'epoch-other' }))).toBeNull();
   });
 });

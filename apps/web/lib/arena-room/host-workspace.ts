@@ -24,7 +24,8 @@ export type ArenaRoomGenerationStartInputs = Readonly<{
 export type ArenaRoomHostWorkspaceDirtyReason =
   | 'baseline-missing'
   | 'host-local-content'
-  | 'shared-config';
+  | 'shared-config'
+  | 'working-copy-invalid';
 
 export type ArenaRoomHostWorkspaceComparison =
   | Readonly<{
@@ -47,6 +48,9 @@ export type ArenaRoomHostWorkspace = Readonly<{
     authority: ArenaRoomHostWorkspaceAuthority,
     bundle: ArenaRoomHostWorkspaceBundle,
   ): ArenaRoomHostWorkspaceComparison;
+  startFromRoom(
+    authority: ArenaRoomHostWorkspaceAuthority,
+  ): ArenaRoomGenerationStartInputs | null;
   retainFor(authority: ArenaRoomHostWorkspaceAuthority | null): void;
   clear(): void;
 }>;
@@ -178,6 +182,28 @@ const startInputs = (
 export const createArenaRoomHostWorkspace = (): ArenaRoomHostWorkspace => {
   let baseline: Baseline | null = null;
 
+  const startFromRoom = (
+    authority: ArenaRoomHostWorkspaceAuthority,
+  ): ArenaRoomGenerationStartInputs | null => {
+    const expected = expectedLocalKinds(authority.sharedConfig);
+    if (!expected) return null;
+    if (expected.size === 0) return startInputs(authority.sharedConfig, []);
+    if (!baseline || !sameAuthorityOwner(baseline, authority)) return null;
+    const payloads = selectExactPayloads(authority.sharedConfig, baseline.payloads);
+    if (!payloads) return null;
+    const localEntries = [
+      ...authority.sharedConfig.combatants,
+      ...(authority.sharedConfig.scenario ? [authority.sharedConfig.scenario] : []),
+      ...authority.sharedConfig.auxScenarios,
+      ...authority.sharedConfig.materials,
+    ].filter((entry) => 'source' in entry);
+    if (localEntries.some((entry) => (
+      entry.contentVersion !== undefined
+      && baseline!.digests.get(entry.key) !== entry.contentVersion
+    ))) return null;
+    return startInputs(authority.sharedConfig, payloads);
+  };
+
   return Object.freeze({
     capturePublished(authority, bundle) {
       const normalized = normalizeBundle(bundle);
@@ -204,9 +230,7 @@ export const createArenaRoomHostWorkspace = (): ArenaRoomHostWorkspace => {
         authority.sharedConfig,
         normalized.payloads,
       );
-      const baselineRoomPayloads = relevantBaseline && expected
-        ? selectExactPayloads(authority.sharedConfig, relevantBaseline.payloads)
-        : null;
+      const roomStart = startFromRoom(authority);
       const hasLocalAuthority = (expected?.size ?? 0) > 0;
       const contentMatches = !hasLocalAuthority || (
         relevantBaseline !== null
@@ -232,11 +256,11 @@ export const createArenaRoomHostWorkspace = (): ArenaRoomHostWorkspace => {
         kind: 'dirty' as const,
         reasons: Object.freeze(reasons),
         current: startInputs(normalized.sharedConfig, normalized.payloads),
-        room: baselineRoomPayloads
-          ? startInputs(authority.sharedConfig, baselineRoomPayloads)
-          : null,
+        room: roomStart,
       });
     },
+
+    startFromRoom,
 
     retainFor(authority) {
       if (!authority || (baseline && !sameAuthorityOwner(baseline, authority))) {

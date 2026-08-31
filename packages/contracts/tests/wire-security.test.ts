@@ -57,14 +57,23 @@ describe('Arena Room allowlisted wire projection', () => {
       displayName: 'local scenario',
       type: 'scenario',
       source: 'host-local',
+      contentVersion: `sha256:${'a'.repeat(64)}`,
       guidance: '保持悬念',
-    })).toMatchObject({ source: 'host-local' });
+    })).toMatchObject({ source: 'host-local', contentVersion: `sha256:${'a'.repeat(64)}` });
     expect(HostLocalMaterialStubSchema.parse({
       key: 'host-local:m1',
       displayName: 'local material',
       type: 'material',
       source: 'host-local',
+      contentVersion: `sha256:${'b'.repeat(64)}`,
       guidance: '只作为背景',
-    })).toMatchObject({ source: 'host-local' });
+    })).toMatchObject({ source: 'host-local', contentVersion: `sha256:${'b'.repeat(64)}` });
+    expect(HostLocalCombatantStubSchema.safeParse({
+      key: 'host-local:c2',
+      displayName: 'local character',
+      type: 'general-character',
+      source: 'host-local',
+      contentVersion: 'not-a-digest',
+    }).success).toBe(false);
   });
 });

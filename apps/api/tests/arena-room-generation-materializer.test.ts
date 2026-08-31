@@ -268,6 +268,21 @@ describe('Arena Room authoritative generation materializer', () => {
     })).rejects.toMatchObject({ code: 'ARENA_ROOM_HOST_LOCAL_PAYLOAD_MISMATCH' });
   });
 
+  it('host-local payload 必须匹配 frozen stub 的安全内容版本', async () => {
+    const harness = createHarness();
+    const config = sharedConfig();
+    Object.assign(config.combatants[2]!, { contentVersion: `sha256:${'0'.repeat(64)}` });
+    await expect(harness.materializer.materialize({
+      sharedConfig: config,
+      hostAccountUserId: 101,
+      hostLocalPayloads: [
+        { key: 'host-local:character:2:local', kind: 'character', payload: { name: '本地角色' } },
+        { key: 'host-local:scenario:0:aux', kind: 'scenario', payload: { title: '辅助情景' } },
+      ],
+      hostRuntime: {},
+    })).rejects.toMatchObject({ code: 'ARENA_ROOM_HOST_LOCAL_CONTENT_VERSION_MISMATCH' });
+  });
+
   it('canonical resolver 的 exact ref 不一致时 fail closed', async () => {
     const harness = createHarness();
     harness.content.resolveOnline.mockResolvedValueOnce(canonical(

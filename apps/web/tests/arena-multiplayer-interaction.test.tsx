@@ -44,6 +44,7 @@ vi.mock('@/components/arena/multiplayer/useArenaRoom', () => ({
     hostWorkspace: {
       capturePublished: mocks.capturePublished,
       compare: vi.fn(),
+      startFromRoom: vi.fn(),
       retainFor: vi.fn(),
       clear: vi.fn(),
     },
@@ -69,6 +70,8 @@ const readyState: ArenaRoomControllerState = {
   unknownOperation: null,
   proposalOperation: null,
   proposalResultUnknown: false,
+  configPublishPending: false,
+  configPublishResultUnknown: false,
   generation: {
     mirror: null,
     phase: 'idle',
@@ -241,5 +244,40 @@ describe('Arena multiplayer panel real React interactions', () => {
     expect(container.textContent).toContain('Shared Config 草稿');
     expect(container.textContent).toContain('同步当前房间配置');
     expect(container.textContent).not.toContain('Proposal 审阅箱');
+  });
+
+  it('config publish unknown 在 connected 状态提供主动权威对账入口', async () => {
+    const host = {
+      userId: 'host-1',
+      role: 'host' as const,
+      displayName: '房主',
+      membershipState: 'active' as const,
+    };
+    mocks.state = {
+      ...readyState,
+      phase: 'connected',
+      configPublishResultUnknown: true,
+      session: {
+        protocolVersion: 1,
+        roomId: 'room-1',
+        roomEpoch: 'epoch-1',
+        self: host,
+        snapshot: {
+          protocolVersion: 1,
+          schemaVersion: 1,
+          roomId: 'room-1',
+          roomEpoch: 'epoch-1',
+          revision: 0,
+          controlSeq: 0,
+          sharedConfig,
+          members: [host],
+          proposals: [],
+          activeGeneration: null,
+        },
+      },
+    };
+    await act(async () => root.render(<ArenaMultiplayerPanel {...props} />));
+    await act(async () => button('重新确认配置发布').click());
+    expect(mocks.reconnect).toHaveBeenCalledOnce();
   });
 });

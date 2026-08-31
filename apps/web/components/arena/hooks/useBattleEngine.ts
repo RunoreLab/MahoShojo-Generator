@@ -63,7 +63,7 @@ import { buildArenaRoomHostWorkspaceBundleFromBattleState } from '@/lib/arena-ro
 import {
   areArenaRoomSharedConfigsEqual,
   arenaRoomHostWorkspaceAuthorityFromSession,
-  type ArenaRoomHostWorkspaceComparison,
+  type ArenaRoomGenerationStartInputs,
   type ArenaRoomHostWorkspaceDirtyReason,
 } from '@/lib/arena-room/host-workspace';
 import {
@@ -80,6 +80,7 @@ export type ArenaRoomGenerationPreflightChoice = 'cancel' | 'publish' | 'use-roo
 export type ArenaRoomGenerationPreflightPrompt = Readonly<{
   reasons: readonly ArenaRoomHostWorkspaceDirtyReason[];
   canUseRoom: boolean;
+  canPublish: boolean;
   busy: boolean;
 }>;
 
@@ -494,14 +495,19 @@ export const useBattleEngine = () => {
   } | null>(null);
 
   const requestArenaRoomGenerationPreflight = useCallback((
-    comparison: Extract<ArenaRoomHostWorkspaceComparison, { kind: 'dirty' }>,
+    input: Readonly<{
+      reasons: readonly ArenaRoomHostWorkspaceDirtyReason[];
+      canUseRoom: boolean;
+      canPublish: boolean;
+    }>,
   ): Promise<ArenaRoomGenerationPreflightChoice> => {
     pendingArenaRoomGenerationPreflight.current?.resolve('cancel');
     return new Promise((resolve) => {
       pendingArenaRoomGenerationPreflight.current = { resolve };
       setArenaRoomGenerationPreflight({
-        reasons: comparison.reasons,
-        canUseRoom: comparison.room !== null,
+        reasons: input.reasons,
+        canUseRoom: input.canUseRoom,
+        canPublish: input.canPublish,
         busy: false,
       });
     });
@@ -579,6 +585,8 @@ export const useBattleEngine = () => {
     if (roomAction.inRoom && !roomAction.canStart) {
       const message = roomAction.reason === 'member'
         ? '⚠️ 多人房间仅房主可以启动生成，请等待房主操作。'
+        : roomAction.reason === 'config-unknown'
+          ? '⚠️ 上一次房间配置发布结果尚未确认，请先重新确认权威快照。'
         : roomAction.reason === 'unknown'
           ? '⚠️ 上一次多人生成启动结果尚未确认，请等待服务器状态恢复，不要重复提交。'
           : roomAction.reason === 'connection'
@@ -598,12 +606,12 @@ export const useBattleEngine = () => {
     // 计算总角色数（包括占位符，因为它们会被解析为真实角色）
     const totalCombatants = combatants.length;
 
-    if (totalCombatants < minParticipants) {
+    if (!roomAction.inRoom && totalCombatants < minParticipants) {
       setError(`⚠️ 该模式至少需要 ${minParticipants} 位角色。`);
       return;
     }
 
-    if (battleMode === 'scenario' && !scenario.content) {
+    if (!roomAction.inRoom && battleMode === 'scenario' && !scenario.content) {
       setError('⚠️ 情景模式下，请先上传一个情景文件。');
       return;
     }
@@ -632,7 +640,7 @@ export const useBattleEngine = () => {
     setLastGenerationId(null);
 
     try {
-      await handleResolveRandomPlaceholders();
+      if (!roomAction.inRoom) await handleResolveRandomPlaceholders();
 
       const freshCombatants = useBattleStore.getState().combatants.filter((item): item is CombatantData => 'data' in item);
 
@@ -769,9 +777,15 @@ export const useBattleEngine = () => {
         if (!capturedAuthority) {
           throw new Error('当前房间 host 权威已变化，请同步后重试。');
         }
-        const bundle = await buildArenaRoomHostWorkspaceBundleFromBattleState(useBattleStore.getState());
+        let bundle: Awaited<ReturnType<typeof buildArenaRoomHostWorkspaceBundleFromBattleState>> | null = null;
+        try {
+          bundle = await buildArenaRoomHostWorkspaceBundleFromBattleState(useBattleStore.getState());
+        } catch {
+          // A stale/partial working copy must not prevent the host from selecting
+          // an already-published Room baseline.
+        }
         const preflightState = arenaRoomRuntime.controller.getSnapshot();
-        let authority = arenaRoomHostWorkspaceAuthorityFromSession(preflightState.session);
+        const authority = arenaRoomHostWorkspaceAuthorityFromSession(preflightState.session);
         if (
           !authority
           || authority.roomId !== capturedAuthority.roomId
@@ -782,41 +796,59 @@ export const useBattleEngine = () => {
           throw new Error('构建多人生成输入时房间权威已变化，请确认最新状态后重试。');
         }
 
-        const comparison = arenaRoomRuntime.hostWorkspace.compare(authority, bundle);
-        let startInputs = comparison.kind === 'clean' ? comparison.start : null;
-        if (comparison.kind === 'dirty') {
-          const choice = await requestArenaRoomGenerationPreflight(comparison);
+        let startInputs: ArenaRoomGenerationStartInputs | null = null;
+        if (!bundle) {
+          const roomStart = arenaRoomRuntime.hostWorkspace.startFromRoom(authority);
+          const choice = await requestArenaRoomGenerationPreflight({
+            reasons: ['working-copy-invalid'],
+            canUseRoom: roomStart !== null,
+            canPublish: false,
+          });
           if (choice === 'cancel') return;
-          if (choice === 'use-room') {
-            if (!comparison.room) {
-              throw new Error('缺少完整的 host-local 发布基线，无法按当前房间配置启动。');
-            }
-            startInputs = comparison.room;
-          } else {
-            await arenaRoomRuntime.controller.publishConfig({
-              expectedRoomEpoch: authority.roomEpoch,
-              expectedRevision: authority.revision,
-              sharedConfig: comparison.current.sharedConfig,
+          if (choice !== 'use-room' || !roomStart) {
+            throw new Error('本地 working copy 无法安全发布，且缺少可用的房间 host-local 基线。');
+          }
+          startInputs = roomStart;
+        } else {
+          const comparison = arenaRoomRuntime.hostWorkspace.compare(authority, bundle);
+          startInputs = comparison.kind === 'clean' ? comparison.start : null;
+          if (comparison.kind === 'dirty') {
+            const choice = await requestArenaRoomGenerationPreflight({
+              reasons: comparison.reasons,
+              canUseRoom: comparison.room !== null,
+              canPublish: true,
             });
-            const publishedState = arenaRoomRuntime.controller.getSnapshot();
-            const publishedAuthority = arenaRoomHostWorkspaceAuthorityFromSession(publishedState.session);
-            if (
-              publishedState.configPublishPending
-              || publishedState.configPublishResultUnknown
-              || !publishedAuthority
-              || publishedAuthority.roomId !== authority.roomId
-              || publishedAuthority.roomEpoch !== authority.roomEpoch
-              || publishedAuthority.ownerUserId !== authority.ownerUserId
-              || !areArenaRoomSharedConfigsEqual(
-                publishedAuthority.sharedConfig,
-                comparison.current.sharedConfig,
-              )
-            ) {
-              throw new Error('房间配置发布结果无法确认，请先同步房间权威状态。');
+            if (choice === 'cancel') return;
+            if (choice === 'use-room') {
+              if (!comparison.room) {
+                throw new Error('缺少完整的 host-local 发布基线，无法按当前房间配置启动。');
+              }
+              startInputs = comparison.room;
+            } else {
+              await arenaRoomRuntime.controller.publishConfig({
+                expectedRoomEpoch: authority.roomEpoch,
+                expectedRevision: authority.revision,
+                sharedConfig: comparison.current.sharedConfig,
+              });
+              const publishedState = arenaRoomRuntime.controller.getSnapshot();
+              const publishedAuthority = arenaRoomHostWorkspaceAuthorityFromSession(publishedState.session);
+              if (
+                publishedState.configPublishPending
+                || publishedState.configPublishResultUnknown
+                || !publishedAuthority
+                || publishedAuthority.roomId !== authority.roomId
+                || publishedAuthority.roomEpoch !== authority.roomEpoch
+                || publishedAuthority.ownerUserId !== authority.ownerUserId
+                || !areArenaRoomSharedConfigsEqual(
+                  publishedAuthority.sharedConfig,
+                  comparison.current.sharedConfig,
+                )
+              ) {
+                throw new Error('房间配置发布结果无法确认，请先同步房间权威状态。');
+              }
+              arenaRoomRuntime.hostWorkspace.capturePublished(publishedAuthority, bundle);
+              startInputs = comparison.current;
             }
-            arenaRoomRuntime.hostWorkspace.capturePublished(publishedAuthority, bundle);
-            authority = publishedAuthority;
-            startInputs = comparison.current;
           }
         }
         if (!startInputs) throw new Error('无法解析多人生成所需的权威配置。');

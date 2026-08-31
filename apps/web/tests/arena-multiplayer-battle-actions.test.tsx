@@ -13,8 +13,9 @@ const mocks = vi.hoisted(() => ({
   stopGeneration: vi.fn(),
   resolvePreflight: vi.fn(),
   preflight: null as null | {
-    reasons: readonly ('baseline-missing' | 'host-local-content' | 'shared-config')[];
+    reasons: readonly ('baseline-missing' | 'host-local-content' | 'shared-config' | 'working-copy-invalid')[];
     canUseRoom: boolean;
+    canPublish: boolean;
     busy: boolean;
   },
   roomState: null as ArenaRoomControllerState | null,
@@ -142,6 +143,7 @@ let root: Root;
 let container: HTMLDivElement;
 
 beforeEach(() => {
+  battleState.combatants.splice(0, battleState.combatants.length, { data: { name: '甲' } }, { data: { name: '乙' } });
   mocks.handleGenerate.mockClear();
   mocks.resolvePreflight.mockClear();
   mocks.preflight = null;
@@ -198,11 +200,21 @@ describe('Arena multiplayer BattleActions authority gate', () => {
     expect(button.textContent).toContain('确认并重试同一次启动');
   });
 
+  it('房间 host 不被 stale 本地人数门禁阻断，仍可进入 Room authority preflight', async () => {
+    mocks.roomState = stateFor('host');
+    battleState.combatants.splice(0, battleState.combatants.length);
+    const button = await render();
+    expect(button.disabled).toBe(false);
+    await act(async () => button.click());
+    expect(mocks.handleGenerate).toHaveBeenCalledOnce();
+  });
+
   it('dirty preflight 只暴露显式发布、沿用房间与取消三个决策', async () => {
     mocks.roomState = stateFor('host');
     mocks.preflight = {
       reasons: ['shared-config', 'host-local-content'],
       canUseRoom: true,
+      canPublish: true,
       busy: false,
     };
     await render();

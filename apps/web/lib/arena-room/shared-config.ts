@@ -173,6 +173,7 @@ const normalizeCombatant = async (
     displayName,
     type: combatant.type,
     source: 'host-local',
+    contentVersion: await contentDigest(combatant.data),
     ...(guidance ? { characterGuidance: guidance } : {}),
   };
 };
@@ -197,6 +198,7 @@ const normalizeScenario = async (
     displayName,
     type: 'scenario',
     source: 'host-local',
+    contentVersion: await contentDigest(scenario.content),
   };
 };
 
@@ -220,6 +222,7 @@ const normalizeMaterial = async (
     displayName,
     type: 'material',
     source: 'host-local',
+    contentVersion: await contentDigest(material.content),
   };
 };
 
