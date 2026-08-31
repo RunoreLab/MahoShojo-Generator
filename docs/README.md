@@ -4,6 +4,15 @@
 
 ## 当前权威入口
 
+Arena 多人 v1 production ingress 重整与后续激活使用以下专项入口：
+
+- [Arena 生产 Room 入口复用 Hono Primary 决策](./decisions/2026-08-31_080000_Arena生产Room入口复用HonoPrimary决策.md)
+- [Arena 生产 Room 入口简化与架构重整规格](./specs/2026-08-31_080100_Arena生产Room入口简化与架构重整规格.md)
+- [Arena 多人生产激活与回滚实施计划](./plans/2026-08-30_231000_Arena多人生产激活与回滚实施计划.md)
+
+该专项冻结 Room HTTP/WSS 直接复用 Hosted Hono primary、caller Origin 与 service origin 分离，以及
+writer/request/Web 三层门禁；入口重整不授权 production deploy、DNS、secret、Redis 或 D1 mutation。
+
 Arena 战报正文存储与有限保留工作使用以下专项入口：
 
 - [Arena 战报正文分层与有限保留实施规格](./specs/2026-08-31_102000_Arena战报正文分层与有限保留实施规格.md)

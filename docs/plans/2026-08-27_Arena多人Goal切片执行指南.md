@@ -105,10 +105,10 @@ read authority / current state
 | `GMR-08` Proposal E2E | `DONE` | GMR-05,GMR-07 | typed Proposal server/UI 闭环 | 不扩展 private sharing |
 | `GMR-09` generation publisher | `DONE` | GMR-03,GMR-05,GMR-06R,GMR-07 | single producer + Room safe fan-out/resync | 不复制 AI lifecycle |
 | `GMR-10` hardening/fault/load audit | `DONE` | GMR-06R,GMR-08,GMR-09 | telemetry + failure drills + v1 exit audit | 不自动进入生产 activation |
-| `GMR-11` production activation review | `IN_PROGRESS` | GMR-10 + Production Gate | Preview Hono/Web 与双成员 canary 已完成；等待 production logical origin 与 go/no-go | 必须人工/平台授权 |
+| `GMR-11` production activation review | `IN_PROGRESS` | GMR-10 + Production Gate | Preview Hono/Web 与双成员 canary 已完成；production Room ingress 改为复用 Hono primary，等待 go/no-go | 必须人工/平台授权 |
 | `GMR-H` multi-instance / DO evaluation | `DEFERRED` | 真实指标触发 | 新 ADR/PoC 决策 | v1 不预建 |
 
-`GMR-06` 与 `GMR-07` 在 GMR-05 后 MAY 并行，但一个 `/goal` 仍只执行其中一个。2026-08-28 的 Redis-only superseding 修订把 `GMR-06R` 加为后续 generation/hardening 前置门禁；`GMR-08` 的已完成结果保留。GMR-10 的代码、真实故障/负载证据、最终复审与 full gate 已完成。2026-08-30 用户明确启动 GMR-11 收尾；默认关闭的激活门禁、回滚绑定、实时流整改、Preview Hono/Web writer 曝光及双成员 canary 已完成。Preview 没有独立 stable API proxy，因此真实 provider SSE 延后到 production logical origin provision 后按需执行 dual-path canary；production activation 仍受平台配置、授权及公网证据阻断。GMR-H 继续保持 `DEFERRED`。
+`GMR-06` 与 `GMR-07` 在 GMR-05 后 MAY 并行，但一个 `/goal` 仍只执行其中一个。2026-08-28 的 Redis-only superseding 修订把 `GMR-06R` 加为后续 generation/hardening 前置门禁；`GMR-08` 的已完成结果保留。GMR-10 的代码、真实故障/负载证据、最终复审与 full gate 已完成。2026-08-30 用户明确启动 GMR-11 收尾；默认关闭的激活门禁、回滚绑定、实时流整改、Preview Hono/Web writer 曝光及双成员 canary 已完成。真实 provider SSE 仍是可选 UX audit，可在后续授权窗口通过 shared Hono primary 执行；production activation 继续受平台配置、授权及公网证据阻断。GMR-H 继续保持 `DEFERRED`。
 
 ## 6. Goal 详细定义
 
@@ -789,16 +789,16 @@ validate -> pure derive -> conditional checkpoint
 这是用户于 2026-08-30 明确启动的新 go/no-go，不是 GMR-10 自动续跑。
 
 当前已完成 production activation 的默认关闭代码路径：release tuple 绑定 writer activation、reader-first/go-no-go
-attestation、Hono 先于 Web 的启用顺序、Room 专用 logical-origin provisioning、HTTP/WSS 发布探针与安全回滚；同时把
+attestation、Hono 先于 Web 的启用顺序、shared Hono primary ingress、HTTP/WSS 发布探针与安全回滚；同时把
 generation delta 调为 `40 ms / 512 bytes`，隔离 Redis blocking replay connection，并摊销 running snapshot 写入。
-用户已确认 production logical Room origin 为 `https://api.mahoshojo.colanns.me`，并确认 Room v1 排除在 Cloudflare DR
-之外。Preview Hono 已按 request=false → writer-capable tuple → request=true 两阶段顺序激活并通过三个 exact Origin
+2026-08-31 accepted ADR 已覆盖旧的独立 Room hostname 前置，production Room 复用 Hosted Hono primary，并继续排除在
+Cloudflare DR 之外。Preview Hono 已按 request=false → writer-capable tuple → request=true 两阶段顺序激活并通过三个 exact Origin
 的 HTTP/WSS canary，Preview Web 多人面板与双成员 join/WSS/resync/reconnect 也已验证；production manifest 继续
-`not-provisioned`。
+保持 optional Hosted control plane `not-provisioned`，但它不再阻断 Room。
 
 以下 production activation 前置仍未关闭：
 
-- production stable logical HTTPS/WSS routing、Access/origin protection 与 provisioning；
+- production shared Hono primary readiness、Access/origin protection 与只读 contract 验证；
 - production runtime/GitHub variables、tuple writer enable 与 Web exposure 授权。
 
 production current 已是 writer-disabled compatible reader。上线后容量/告警观察完成前不得把本 Goal 标为

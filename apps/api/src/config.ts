@@ -112,9 +112,6 @@ const validateProductionEnvironment = (
     if (env.ARENA_ROOM_PRODUCTION_GO_NO_GO !== 'approved') {
       problems.push('Arena writer activation 缺少独立 production go/no-go approval');
     }
-    if (!isTrustedHttpsOrigin(env.ARENA_ROOM_LOGICAL_ORIGIN)) {
-      problems.push('ARENA_ROOM_LOGICAL_ORIGIN 必须是已 provision 的 HTTPS root origin');
-    }
   }
   if (!config.redisUrl) problems.push('Redis 未配置（REDIS_URL 或 REDIS_HOST）');
   if (protectedHostedTarget

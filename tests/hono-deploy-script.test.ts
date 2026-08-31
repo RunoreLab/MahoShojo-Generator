@@ -348,7 +348,12 @@ if [ -n "$body" ]; then
 fi
 probe_status="\${HONO_DEPLOY_TEST_PROBE_STATUS:-400}"
 case "$all_arguments" in
+  *"/api/arena/rooms/v1/ws"*)
+    probe_status="\${HONO_DEPLOY_TEST_ROOM_WS_PROBE_STATUS:-\${HONO_DEPLOY_TEST_ROOM_PROBE_STATUS:-$probe_status}}"
+    [ "$probe_status" = 400 ] && probe_status=401
+    ;;
   *"/api/arena/rooms/v1"*)
+    probe_status="\${HONO_DEPLOY_TEST_ROOM_PROBE_STATUS:-$probe_status}"
     [ "$probe_status" = 400 ] && probe_status=401
     ;;
 esac
@@ -388,6 +393,8 @@ const runDeployment = (
     holdFile?: string;
     hostedApiEnvironment?: string | null;
     probeStatus?: string;
+    roomProbeStatus?: string;
+    roomWsProbeStatus?: string;
     publicBaseUrl?: string;
     raceAdoptionCanary?: string;
     redisKeyPrefix?: string;
@@ -423,6 +430,8 @@ const runDeployment = (
       HONO_DEPLOY_TEST_HOLD_FILE: options.holdFile ?? '',
       HONO_DEPLOY_TEST_COMMAND_LOG: fixture.commandLog,
       HONO_DEPLOY_TEST_PROBE_STATUS: options.probeStatus ?? '400',
+      HONO_DEPLOY_TEST_ROOM_PROBE_STATUS: options.roomProbeStatus ?? '',
+      HONO_DEPLOY_TEST_ROOM_WS_PROBE_STATUS: options.roomWsProbeStatus ?? '',
       HONO_DEPLOY_TEST_RACE_ADOPTION_CANARY: options.raceAdoptionCanary ?? '',
       HONO_DEPLOY_TEST_VALIDATE_GATE_SCHEMA: options.validateGateSchema ? 'true' : 'false',
       HONO_DEPLOY_TEST_REAL_ID: realIdPath,
@@ -1231,7 +1240,6 @@ describe('Hono release-local deployment transaction', () => {
       [
         'FIXTURE=true',
         'ARENA_MULTIPLAYER_ENABLED=true',
-        'ARENA_ROOM_LOGICAL_ORIGIN=https://api.example.test',
         '',
       ].join('\n'),
     );
@@ -1373,14 +1381,13 @@ describe('Hono release-local deployment transaction', () => {
     expect(commands).not.toContain(`-f ${fixture.releaseDirectory}/compose.yml up`);
   });
 
-  test('writer-enabled runtime 通过 logical origin 执行无凭据 Room HTTP/WSS 公网 probe', () => {
+  test('writer-enabled runtime 复用 Hono public origin 执行无凭据 Room HTTP/WSS 公网 probe', () => {
     const fixture = createFixture({ targetWriterActivation: 'enabled' });
     writeFileSync(path.join(fixture.rootDirectory, '.env.hono'), [
       'FIXTURE=true',
       'ARENA_MULTIPLAYER_ENABLED=true',
       'ARENA_ROOM_READER_ROLLOUT_CONTRACT=arena-room-authority-v2-generation-payload-digest-v1',
       'ARENA_ROOM_PRODUCTION_GO_NO_GO=approved',
-      'ARENA_ROOM_LOGICAL_ORIGIN=https://api.example.test',
       '',
     ].join('\n'));
     chmodSync(path.join(fixture.rootDirectory, '.env.hono'), 0o600);
@@ -1389,12 +1396,36 @@ describe('Hono release-local deployment transaction', () => {
     const commands = readFileSync(fixture.commandLog, 'utf8');
 
     expect(result.status, result.stderr).toBe(0);
-    expect(commands).toContain('https://api.example.test/api/arena/rooms/v1');
-    expect(commands).toContain('https://api.example.test/api/arena/rooms/v1/ws');
+    expect(commands).toContain('https://example.test/api/arena/rooms/v1');
+    expect(commands).toContain('https://example.test/api/arena/rooms/v1/ws');
+    expect(commands).not.toContain('https://api.example.test');
     expect(commands).toContain('--http1.1');
     expect(commands).toContain('Origin: https://mahoshojo.colanns.me');
     expect(commands).toContain('Sec-WebSocket-Protocol: mahoshojo.arena-room.v1');
-    expect(commands).toContain('Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==');
+    expect(commands).toMatch(/Sec-WebSocket-Key: [A-Za-z0-9+/]{22}==/u);
+  });
+
+  test('writer/request disabled 时 Room probe 仍拒绝意外成功响应', () => {
+    const fixture = createFixture({ targetWriterActivation: 'disabled' });
+
+    const result = runDeployment(fixture, { roomProbeStatus: '200' });
+    const commands = readFileSync(fixture.commandLog, 'utf8');
+
+    expect(result.status).toBe(1);
+    expect(commands).toContain('https://example.test/api/arena/rooms/v1');
+  });
+
+  test('writer/request disabled 时 WSS probe 仍拒绝意外 101', () => {
+    const fixture = createFixture({ targetWriterActivation: 'disabled' });
+
+    const result = runDeployment(fixture, {
+      roomProbeStatus: '401',
+      roomWsProbeStatus: '101',
+    });
+    const commands = readFileSync(fixture.commandLog, 'utf8');
+
+    expect(result.status).toBe(1);
+    expect(commands).toContain('https://example.test/api/arena/rooms/v1/ws');
   });
 
   test('writer-enabled rollback 在 target reader contract 缺失时 fail closed', () => {

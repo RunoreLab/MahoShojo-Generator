@@ -1,19 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
 import { resolveArenaMultiplayerConfig } from '@/config/arena-multiplayer';
+import {
+  hostedDrClientRouting,
+  hostedDrPreviewOrigin,
+  hostedDrStableOrigin,
+} from '@/config/hosted-dr-client.generated';
 
 describe('Arena multiplayer browser feature flag', () => {
-  const roomTargets = {
-    production: {
-      logicalOrigin: 'https://api.example.test',
-      provisioning: 'provisioned' as const,
-    },
-    preview: {
-      logicalOrigin: 'https://preview-api.example.test',
-      provisioning: 'provisioned' as const,
-    },
-  };
-
   it('默认关闭且 flag off 不依赖 Hono placement', () => {
     expect(resolveArenaMultiplayerConfig(undefined, {
       enabled: false,
@@ -45,40 +39,34 @@ describe('Arena multiplayer browser feature flag', () => {
     }
   });
 
-  it('protected target 仅接受已 provision 的独立 logical Room origin 与发布证明', () => {
+  it('protected target 从 Hosted manifest 选择 Hono ingress 并保留发布证明', () => {
     const checkpointContract = 'arena-room-authority-v2-generation-payload-digest-v1';
     expect(resolveArenaMultiplayerConfig('true', {
       enabled: true,
-      origin: 'https://homura.example.test',
-      target: 'production',
-    }, {
       origin: 'https://api.example.test',
-      writerActivation: 'enabled',
-      readerContract: checkpointContract,
-      goNoGo: 'approved',
-      targets: roomTargets,
-    })).toEqual({ enabled: true, origin: 'https://api.example.test' });
-
-    expect(() => resolveArenaMultiplayerConfig('true', {
-      enabled: true,
-      origin: 'https://homura.example.test',
       target: 'production',
     }, {
-      origin: 'https://homura.example.test',
       writerActivation: 'enabled',
       readerContract: checkpointContract,
       goNoGo: 'approved',
-      targets: roomTargets,
-    })).toThrow(/logical Room origin/iu);
+    })).toEqual({ enabled: true, origin: hostedDrClientRouting.primaryOrigin });
+
+    expect(resolveArenaMultiplayerConfig('true', {
+      enabled: true,
+      origin: 'https://stable-control-plane.example.test',
+      target: 'preview',
+    }, {
+      writerActivation: 'enabled',
+      readerContract: checkpointContract,
+      goNoGo: 'approved',
+    })).toEqual({ enabled: true, origin: hostedDrPreviewOrigin });
   });
 
   it('protected target 拒绝 writer/reader/go-no-go 任一证明缺失', () => {
     const baseActivation = {
-      origin: 'https://api.example.test',
       writerActivation: 'enabled',
       readerContract: 'arena-room-authority-v2-generation-payload-digest-v1',
       goNoGo: 'approved',
-      targets: roomTargets,
     };
     const hostedApi = {
       enabled: true,
@@ -100,42 +88,17 @@ describe('Arena multiplayer browser feature flag', () => {
     })).toThrow(/go.no.go/iu);
   });
 
-  it('Room provisioning 与 Hosted DR control plane 解耦，preview 可独立开启而 production 仍 fail closed', () => {
+  it('Room endpoint 不受 optional Hosted DR control-plane provisioning 门禁影响', () => {
     const checkpointContract = 'arena-room-authority-v2-generation-payload-digest-v1';
     expect(resolveArenaMultiplayerConfig('true', {
       enabled: true,
-      origin: 'https://homura-preview.example.test',
-      target: 'preview',
-    }, {
-      origin: 'https://preview-api.example.test',
-      writerActivation: 'enabled',
-      readerContract: checkpointContract,
-      goNoGo: 'approved',
-      targets: {
-        ...roomTargets,
-        production: {
-          ...roomTargets.production,
-          provisioning: 'not-provisioned',
-        },
-      },
-    })).toEqual({ enabled: true, origin: 'https://preview-api.example.test' });
-
-    expect(() => resolveArenaMultiplayerConfig('true', {
-      enabled: true,
-      origin: 'https://homura.example.test',
+      origin: hostedDrStableOrigin,
       target: 'production',
     }, {
-      origin: 'https://api.example.test',
       writerActivation: 'enabled',
       readerContract: checkpointContract,
       goNoGo: 'approved',
-      targets: {
-        ...roomTargets,
-        production: {
-          ...roomTargets.production,
-          provisioning: 'not-provisioned',
-        },
-      },
-    })).toThrow(/provision/iu);
+    })).toEqual({ enabled: true, origin: hostedDrClientRouting.primaryOrigin });
+    expect(hostedDrClientRouting.primaryOrigin).not.toBe(hostedDrStableOrigin);
   });
 });

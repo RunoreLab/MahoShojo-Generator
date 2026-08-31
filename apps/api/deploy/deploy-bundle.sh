@@ -134,12 +134,13 @@ transaction_active=false
 active_child_pid=''
 probe_dir=''
 probe_headers=''
+probe_headers_normalized=''
 probe_body=''
 probe_status_file=''
 
 cleanup_probe() {
   if [ -n "$probe_dir" ]; then
-    rm -f "$probe_headers" "$probe_body" "$probe_status_file"
+    rm -f "$probe_headers" "$probe_headers_normalized" "$probe_body" "$probe_status_file"
     rmdir "$probe_dir" 2>/dev/null || true
   fi
 }
@@ -936,7 +937,7 @@ activate_release() {
 verify_public_contract() {
   run_cancellable curl --fail --silent --show-error --retry 6 --retry-delay 5 \
     --connect-timeout 5 --max-time 15 \
-    "$public_base_url/health/ready" >/dev/null || return 1
+    "$public_base_url/api/health/ready" >/dev/null || return 1
   if ! run_cancellable curl --silent --show-error --retry 6 --retry-delay 5 \
     --connect-timeout 5 --max-time 15 \
     --dump-header "$probe_headers" --output "$probe_body" \
@@ -962,47 +963,54 @@ verify_public_contract() {
       ;;
     *) return 1 ;;
   esac
-  if [ "$room_runtime_active" = true ]; then
-    room_logical_origin="$(read_runtime_env_value ARENA_ROOM_LOGICAL_ORIGIN)" || return 1
-    case "$room_logical_origin" in
-      https://*) room_logical_origin="${room_logical_origin%/}" ;;
-      *) return 1 ;;
-    esac
-    room_probe_origins="$web_origin"
-    if [ "$hosted_api_environment" = preview ]; then
-      room_probe_origins="$web_origin $preview_web_origin $preview_cloudflare_web_origin"
+  room_probe_origins="$web_origin"
+  if [ "$hosted_api_environment" = preview ]; then
+    room_probe_origins="$web_origin $preview_web_origin $preview_cloudflare_web_origin"
+  fi
+  for room_probe_origin in $room_probe_origins; do
+    if ! run_cancellable curl --silent --show-error --retry 6 --retry-delay 5 \
+      --connect-timeout 5 --max-time 15 \
+      --dump-header "$probe_headers" --output "$probe_body" \
+      --write-out '%{http_code}' \
+      --header "Origin: $room_probe_origin" \
+      "$public_base_url/api/arena/rooms/v1" > "$probe_status_file"; then
+      return 1
     fi
-    for room_probe_origin in $room_probe_origins; do
-      if ! run_cancellable curl --silent --show-error --retry 6 --retry-delay 5 \
-        --connect-timeout 5 --max-time 15 \
-        --dump-header "$probe_headers" --output "$probe_body" \
-        --write-out '%{http_code}' \
-        --header "Origin: $room_probe_origin" \
-        "$room_logical_origin/api/arena/rooms/v1" > "$probe_status_file"; then
-        return 1
-      fi
-      probe_status="$(cat "$probe_status_file")"
+    probe_status="$(cat "$probe_status_file")"
+    if [ "$room_runtime_active" = true ]; then
       [ "$probe_status" = '401' ] || return 1
       grep -Fq '"code":"ROOM_AUTHENTICATION_REQUIRED"' "$probe_body" || return 1
-      grep -Fqi "Access-Control-Allow-Origin: $room_probe_origin" "$probe_headers" || return 1
+      tr -d '\r' < "$probe_headers" > "$probe_headers_normalized" || return 1
+      [ "$(grep -ic '^Access-Control-Allow-Origin:' "$probe_headers_normalized")" = 1 ] \
+        || return 1
+      grep -Fixq "Access-Control-Allow-Origin: $room_probe_origin" \
+        "$probe_headers_normalized" || return 1
+    else
+      case "$probe_status" in 2??|101) return 1 ;; esac
+    fi
 
-      if ! run_cancellable curl --silent --show-error --retry 6 --retry-delay 5 --http1.1 \
-        --connect-timeout 5 --max-time 15 \
-        --dump-header "$probe_headers" --output "$probe_body" \
-        --write-out '%{http_code}' \
-        --header "Origin: $room_probe_origin" \
-        --header 'Connection: Upgrade' \
-        --header 'Upgrade: websocket' \
-        --header 'Sec-WebSocket-Version: 13' \
-        --header 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
-        --header 'Sec-WebSocket-Protocol: mahoshojo.arena-room.v1' \
-        "$room_logical_origin/api/arena/rooms/v1/ws" > "$probe_status_file"; then
-        return 1
-      fi
-      probe_status="$(cat "$probe_status_file")"
+    room_websocket_key="$(head -c 16 /dev/urandom | base64)" || return 1
+    if ! run_cancellable curl --silent --show-error --retry 6 --retry-delay 5 --http1.1 \
+      --connect-timeout 5 --max-time 15 \
+      --dump-header "$probe_headers" --output "$probe_body" \
+      --write-out '%{http_code}' \
+      --header "Origin: $room_probe_origin" \
+      --header 'Connection: Upgrade' \
+      --header 'Upgrade: websocket' \
+      --header 'Sec-WebSocket-Version: 13' \
+      --header "Sec-WebSocket-Key: $room_websocket_key" \
+      --header 'Sec-WebSocket-Protocol: mahoshojo.arena-room.v1' \
+      "$public_base_url/api/arena/rooms/v1/ws" > "$probe_status_file"; then
+      return 1
+    fi
+    probe_status="$(cat "$probe_status_file")"
+    if [ "$room_runtime_active" = true ]; then
       [ "$probe_status" = '401' ] || return 1
-    done
-  fi
+      grep -Fq '"code":"ROOM_TICKET_REQUIRED"' "$probe_body" || return 1
+    else
+      case "$probe_status" in 2??|101) return 1 ;; esac
+    fi
+  done
 }
 
 promote_release() {
@@ -1030,7 +1038,7 @@ trap 'handle_signal 129' HUP
 trap 'handle_signal 130' INT
 trap 'handle_signal 143' TERM
 
-for required_command in flock id mktemp realpath stat; do
+for required_command in base64 flock head id mktemp realpath stat; do
   command -v "$required_command" >/dev/null 2>&1 || {
     echo "部署主机缺少必需工具：$required_command" >&2
     exit 1
@@ -1069,6 +1077,7 @@ fi
 
 probe_dir="$(mktemp -d /tmp/mahoshojo-hono-probe.XXXXXX)"
 probe_headers="$probe_dir/headers"
+probe_headers_normalized="$probe_dir/headers.normalized"
 probe_body="$probe_dir/body"
 probe_status_file="$probe_dir/status"
 

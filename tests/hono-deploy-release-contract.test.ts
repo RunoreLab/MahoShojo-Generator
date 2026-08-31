@@ -105,15 +105,20 @@ describe('Hono content-addressed release transaction', () => {
     expect(script).toContain('--header "Origin: $room_probe_origin"');
     expect(script).toContain('"Access-Control-Allow-Origin: $room_probe_origin"');
     expect(script).not.toMatch(/-e ARENA_ROOM_ALLOWED_ORIGINS=/u);
-    expect(script).toContain('$room_logical_origin/api/arena/rooms/v1');
-    expect(script).toContain('$room_logical_origin/api/arena/rooms/v1/ws');
+    expect(script).toContain('$public_base_url/api/arena/rooms/v1');
+    expect(script).toContain('$public_base_url/api/arena/rooms/v1/ws');
+    expect(script).not.toContain('ARENA_ROOM_LOGICAL_ORIGIN');
     expect(script).toContain("--header 'Upgrade: websocket'");
     expect(script).toContain(
       "--header 'Sec-WebSocket-Protocol: mahoshojo.arena-room.v1'",
     );
     expect(script).toContain(
-      "--header 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ=='",
+      '--header "Sec-WebSocket-Key: $room_websocket_key"',
     );
+    expect(script).toContain('head -c 16 /dev/urandom');
+    expect(script).toContain('"code":"ROOM_TICKET_REQUIRED"');
+    expect(script).toContain('room_runtime_active');
+    expect(script).toContain("2??|101) return 1");
   });
 
   test('新旧版本都使用各自 release-local compose，失败时恢复整个旧 tuple', () => {
@@ -203,7 +208,7 @@ describe('Hono content-addressed release transaction', () => {
     expect(workflow).toMatch(/deploy-bundle\.sh[^\n]*https:\/\/homura\.colanns\.me/);
 
     expect(script).toContain('verify_public_contract');
-    expect(script).toContain('/health/ready');
+    expect(script).toContain('$public_base_url/api/health/ready');
     expect(script).toContain('/api/generate-magical-girl');
     expect(script).toContain('[ "$probe_status" = \'400\' ]');
     expect(script).toContain('Name is required');

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { createArenaRoomClient } from '@/lib/arena-room/client';
+import { hostedDrClientRouting } from '@/config/hosted-dr-client.generated';
 
 const snapshot = {
   protocolVersion: 1,
@@ -211,6 +212,33 @@ describe('Arena Room browser client', () => {
     expect(client.buildWebSocketUrl(ticket)).toBe(
       'wss://api.example.test/api/arena/rooms/v1/ws?ticket=signed.ticket%3Fsecret',
     );
+  });
+
+  it('shared Hono primary 同时派生 Room HTTPS 与 WSS endpoint', async () => {
+    const fetcher = vi.fn<typeof fetch>(async () => Response.json({
+      protocolVersion: 1,
+      ticket: 'signed-ticket',
+      expiresInSeconds: 45,
+      websocket: {
+        path: '/api/arena/rooms/v1/ws',
+        protocol: 'mahoshojo.arena-room.v1',
+      },
+    }));
+    const client = createArenaRoomClient({
+      origin: hostedDrClientRouting.primaryOrigin,
+      fetch: fetcher,
+      getAuthHeader: async () => 'Bearer verified-key',
+    });
+
+    const ticket = await client.issueTicket('room-1', {});
+    const [requestUrl] = fetcher.mock.calls[0]!;
+    expect(String(requestUrl)).toBe(
+      `${hostedDrClientRouting.primaryOrigin}/api/arena/rooms/v1/room-1/ticket`,
+    );
+    const websocketUrl = new URL(client.buildWebSocketUrl(ticket));
+    expect(websocketUrl.protocol).toBe('wss:');
+    expect(websocketUrl.host).toBe(new URL(hostedDrClientRouting.primaryOrigin).host);
+    expect(websocketUrl.pathname).toBe('/api/arena/rooms/v1/ws');
   });
 
   it('Proposal 三类 mutation 严格编码 intent，结果未知时每次只发送一次', async () => {

@@ -116,7 +116,6 @@ describe('Hono server config', () => {
         'arena-room-authority-v2-generation-payload-digest-v1',
       );
       vi.stubEnv('ARENA_ROOM_PRODUCTION_GO_NO_GO', 'approved');
-      vi.stubEnv('ARENA_ROOM_LOGICAL_ORIGIN', 'https://api.example.test');
       expect(readHonoServerConfig().arenaMultiplayerEnabled).toBe(true);
     },
   );
