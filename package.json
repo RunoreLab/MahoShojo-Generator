@@ -48,6 +48,7 @@
     "generate:arena-room-presets": "node scripts/generate-arena-room-preset-registry.mjs",
     "check:arena-room-presets": "node scripts/generate-arena-room-preset-registry.mjs --check",
     "check:arena-product-parity": "node scripts/check-arena-product-parity.mjs",
+    "check:arena-production-activation": "node scripts/check-arena-production-activation.mjs",
     "verify:arena-product-parity-ready": "node scripts/verify-arena-product-parity-ready.mjs",
     "generate:hosted-dr-client": "node scripts/generate-hosted-dr-client-config.mjs",
     "verify:hosted-dr": "node scripts/verify-hosted-dr.mjs",
@@ -58,7 +59,7 @@
     "workspace:test": "pnpm --workspace-concurrency=1 --filter \"./packages/*\" --filter \"./apps/*\" --if-present run test",
     "workspace:lint": "pnpm --filter \"./packages/*\" --filter \"./apps/*\" --if-present run lint",
     "workspace:build": "pnpm --filter \"./packages/*\" --filter \"./apps/*\" --if-present run build",
-    "workspace:verify": "pnpm run check:workspace:boundaries && pnpm run check:admin-inventory && pnpm run check:admin-boundary && pnpm run check:naming:workspace && pnpm run check:hosted-dr && pnpm run check:user-visible-contracts && pnpm run check:arena-room-origins && pnpm run check:arena-room-hardening && pnpm run check:arena-room-presets && pnpm run check:arena-product-parity && pnpm run workspace:test && pnpm run workspace:lint && pnpm run workspace:build",
+    "workspace:verify": "pnpm run check:workspace:boundaries && pnpm run check:admin-inventory && pnpm run check:admin-boundary && pnpm run check:naming:workspace && pnpm run check:hosted-dr && pnpm run check:user-visible-contracts && pnpm run check:arena-room-origins && pnpm run check:arena-room-hardening && pnpm run check:arena-room-presets && pnpm run check:arena-product-parity && pnpm run check:arena-production-activation && pnpm run workspace:test && pnpm run workspace:lint && pnpm run workspace:build",
     "ci:verify": "pnpm run workspace:verify && pnpm run verify:hosted-dr && pnpm run check:arena-room-release && pnpm run test:repo && pnpm run lint:repo"
   },
   "devDependencies": {

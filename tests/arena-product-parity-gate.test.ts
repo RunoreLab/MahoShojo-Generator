@@ -77,14 +77,17 @@ describe('GMR-10P product parity gate', () => {
 
   it('production Hono pipeline 在任何 deploy 前强制 require-ready', () => {
     const workflow = readFileSync(workflowPath, 'utf8');
+    const ciStep = workflow.indexOf('pnpm run ci:verify');
     const gateStep = workflow.indexOf('- name: Require Arena product parity for production');
     const deployJob = workflow.indexOf('\n  deploy:');
 
+    expect(ciStep).toBeGreaterThan(-1);
     expect(gateStep).toBeGreaterThan(-1);
-    expect(workflow).toContain('pnpm run check:arena-product-parity -- --require-ready');
+    expect(workflow).toContain('pnpm run verify:arena-product-parity-ready');
     expect(workflow).not.toMatch(
       /- name: Require Arena product parity for production[\s\S]*?continue-on-error:/u,
     );
+    expect(ciStep).toBeLessThan(gateStep);
     expect(gateStep).toBeLessThan(deployJob);
   });
 
