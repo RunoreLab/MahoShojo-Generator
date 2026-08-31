@@ -4,6 +4,14 @@
 
 ## 当前权威入口
 
+Arena 战报正文存储与有限保留工作使用以下专项入口：
+
+- [Arena 战报正文分层与有限保留实施规格](./specs/2026-08-31_102000_Arena战报正文分层与有限保留实施规格.md)
+- [R2 战报 540 天 Lifecycle 上线 Runbook](./runbooks/2026-08-31_102100_R2战报540天Lifecycle上线Runbook.md)
+- [D1、R2、Redis 存储优化实施计划](./plans/2026-08-31_102200_D1_R2_Redis存储优化实施计划.md)
+
+该专项冻结 D1 metadata、existing Redis replay 与 finite R2 的正文分层；540 天是基于 2026-08-31 已知 bucket 数据的候选值，production Lifecycle 在账户其他 R2 使用和现有规则完成管理权限 read-back 前仍为 blocked。
+
 平台重整、本地优先、Monorepo、管理后台、Desktop/Mobile、本地库、Direct AI、发行与服务器权威相关工作，从下列主题页进入：
 
 - [低成本 Hosted DR 与客户端预检切换主题](./topics/2026-08-29_070000_低成本HostedDR与客户端预检切换.md)
