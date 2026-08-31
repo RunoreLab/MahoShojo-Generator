@@ -81,6 +81,15 @@ beforeEach(() => {
     if (url.includes('/api/data-card-meta-batch')) {
       return jsonResponse({ success: true, items: {} });
     }
+    if (url.includes('/api/data-card-meta?')) {
+      return jsonResponse({
+        success: true,
+        dataCardId: card.id,
+        tags: [],
+        metrics: null,
+        ratings: { strict: null, free: null },
+      });
+    }
     if (url.includes('/api/badges/batch')) {
       return jsonResponse({ success: true, items: {} });
     }
@@ -211,6 +220,46 @@ describe('BattleDataModal accessibility and capabilities', () => {
     expect(document.body.style.overflow).toBe('');
     expect(document.activeElement).toBe(trigger);
     trigger.remove();
+  });
+
+  it('keeps card details as the topmost keyboard modal and restores its trigger', async () => {
+    flushSync(() => root.render(
+      <BattleDataModal
+        isOpen
+        onClose={vi.fn()}
+        selectedType="character"
+        visibleTabs={['public']}
+        selectionMode="single"
+        onSelectCard={vi.fn()}
+        allowDeckImport={false}
+      />,
+    ));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const outerDialog = document.querySelector<HTMLElement>('[role="dialog"]');
+    const detailButton = [...(outerDialog?.querySelectorAll<HTMLButtonElement>('button') ?? [])]
+      .find((button) => button.textContent?.trim() === '详情');
+    expect(detailButton).toBeDefined();
+    detailButton?.focus();
+    act(() => detailButton?.click());
+
+    const dialogs = [...document.querySelectorAll<HTMLElement>('[role="dialog"]')];
+    expect(dialogs).toHaveLength(2);
+    const detailsDialog = dialogs.at(-1);
+    expect(detailsDialog?.getAttribute('aria-modal')).toBe('true');
+    const detailsClose = detailsDialog?.querySelector<HTMLButtonElement>('button[aria-label^="关闭"]');
+    expect(detailsClose).not.toBeNull();
+    expect(document.activeElement).toBe(detailsClose);
+
+    const detailsFocusable = [...(detailsDialog?.querySelectorAll<HTMLElement>('button:not([disabled]), [tabindex]:not([tabindex="-1"])') ?? [])];
+    const lastDetailsFocusable = detailsFocusable.at(-1);
+    lastDetailsFocusable?.focus();
+    lastDetailsFocusable?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
+    expect(document.activeElement).toBe(detailsClose);
+
+    act(() => detailsClose?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(1);
+    expect(document.activeElement).toBe(detailButton);
   });
 
 });

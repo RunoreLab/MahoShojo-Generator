@@ -220,6 +220,8 @@ export default function BattleDataModal({
   const [sortBy, setSortBy] = useState<'likes' | 'usage' | 'favorites' | 'created_at'>('created_at');
   const [selectedCard, setSelectedCard] = useState<any | null>(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
+  const detailsModalOpenRef = useRef(false);
+  detailsModalOpenRef.current = allowCardDetails && showDetailsModal && selectedCard !== null;
   const [selectError, setSelectError] = useState<string | null>(null);
   const cardsPerPage = 12;
   const [cardMetaById, setCardMetaById] = useState<Record<string, { techScore: number | null; techLevel: string | null; strictTier: string | null; isNative: boolean | null }>>({});
@@ -280,6 +282,7 @@ export default function BattleDataModal({
       '[tabindex]:not([tabindex="-1"])',
     ].join(',');
     const onKeyDown = (event: KeyboardEvent) => {
+      if (detailsModalOpenRef.current) return;
       if (event.key === 'Escape') {
         event.preventDefault();
         onCloseRef.current();
@@ -1356,7 +1359,8 @@ export default function BattleDataModal({
       <div
         ref={modalRef}
         role="dialog"
-        aria-modal="true"
+        aria-modal={detailsModalOpenRef.current ? undefined : 'true'}
+        aria-hidden={detailsModalOpenRef.current ? 'true' : undefined}
         aria-labelledby={modalTitleId}
         aria-label={modalTitle}
         tabIndex={-1}

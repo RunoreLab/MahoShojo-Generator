@@ -180,6 +180,9 @@ export default function DataCardDetailsModal({
   adminTagEditor = false,
   initialReportCapability = null,
 }: DataCardDetailsModalProps) {
+  const titleId = React.useId();
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
   const canEditTags = isOwner || adminTagEditor;
   const [tagScope, setTagScope] = useState<'user' | 'system' | 'admin'>(adminTagEditor ? 'admin' : 'user');
   const [metaNonce, setMetaNonce] = useState(0);
@@ -225,6 +228,61 @@ export default function DataCardDetailsModal({
   const descriptionText = card.description?.trim() ? card.description : '暂无简介';
   const tagSectionRef = useRef<HTMLDivElement | null>(null);
   const tagSearchInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const previouslyFocused = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    const previousBodyOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    closeButtonRef.current?.focus();
+
+    return () => {
+      document.body.style.overflow = previousBodyOverflow;
+      if (previouslyFocused && document.contains(previouslyFocused)) {
+        previouslyFocused.focus();
+      }
+    };
+  }, [isOpen]);
+
+  const handleDialogKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (isReportModalOpen) return;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      onClose();
+      return;
+    }
+    if (event.key !== 'Tab') return;
+
+    const focusableSelector = [
+      'button:not([disabled])',
+      'a[href]',
+      'input:not([disabled])',
+      'select:not([disabled])',
+      'textarea:not([disabled])',
+      '[tabindex]:not([tabindex="-1"])',
+    ].join(',');
+    const focusable = [...(dialogRef.current?.querySelectorAll<HTMLElement>(focusableSelector) ?? [])]
+      .filter((element) => !element.hidden && element.getAttribute('aria-hidden') !== 'true');
+    if (focusable.length === 0) {
+      event.preventDefault();
+      dialogRef.current?.focus();
+      return;
+    }
+
+    const first = focusable[0]!;
+    const last = focusable.at(-1)!;
+    const current = document.activeElement;
+    if (event.shiftKey && current === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && current === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
 
   const reloadMeta = useCallback(async (dataCardId: string) => {
     const requestId = (metaRequestIdRef.current += 1);
@@ -728,7 +786,15 @@ export default function DataCardDetailsModal({
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        onKeyDown={handleDialogKeyDown}
+        className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col"
+      >
         {/* 头部 */}
         <div className="flex items-center justify-between p-6 border-b">
           <div className="flex items-center gap-3">
@@ -748,7 +814,7 @@ export default function DataCardDetailsModal({
               />
             </div>
             <div>
-              <h2 className="text-xl font-bold text-gray-800" title={fullName}>
+              <h2 id={titleId} className="text-xl font-bold text-gray-800" title={fullName}>
                 {displayName}
               </h2>
               <p className="text-xs text-gray-500 mt-1">类型：{cardTypeLabel}</p>
@@ -766,7 +832,10 @@ export default function DataCardDetailsModal({
               </button>
             ) : null}
             <button
+              type="button"
+              ref={closeButtonRef}
               onClick={onClose}
+              aria-label={`关闭${cardTypeLabel}详情`}
               className="text-gray-400 hover:text-gray-600 p-2 rounded-lg hover:bg-gray-100"
             >
               <X className="w-5 h-5" />
