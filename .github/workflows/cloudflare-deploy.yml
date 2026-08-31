@@ -70,7 +70,7 @@ jobs:
           NEXT_PUBLIC_GA_ID: ${{ vars.NEXT_PUBLIC_GA_ID }}
           NEXT_PUBLIC_SAFETY_CHECK_POLICY: ${{ vars.NEXT_PUBLIC_SAFETY_CHECK_POLICY }}
           NEXT_PUBLIC_HOSTED_API_ENVIRONMENT: production
-          NEXT_PUBLIC_ARENA_MULTIPLAYER_ENABLED: ${{ github.event_name == 'workflow_dispatch' && 'false' || (inputs.arena_multiplayer_enabled && 'true' || 'false') }}
+          NEXT_PUBLIC_ARENA_MULTIPLAYER_ENABLED: ${{ inputs.arena_multiplayer_enabled && 'true' || 'false' }}
         run: pnpm --filter @mahoshojo/web run build:cf
 
       - name: Deploy production

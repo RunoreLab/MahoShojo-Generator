@@ -7,13 +7,13 @@ on:
   workflow_dispatch:
     inputs:
       arena_multiplayer:
-        description: Arena multiplayer Web exposure；仅在紧急回退时选择 disabled
+        description: Arena multiplayer Web exposure；仅在 GMR-11 独立审查批准后显式选择 enabled
         required: true
-        default: enabled
+        default: disabled
         type: choice
         options:
-          - enabled
           - disabled
+          - enabled
 
 concurrency:
   group: hono-production
@@ -62,7 +62,7 @@ jobs:
       - name: Require Arena product parity for production
         run: |
           set -euo pipefail
-          pnpm run check:arena-product-parity -- --require-ready
+          pnpm run verify:arena-product-parity-ready
 
       - name: Verify Hono authentication and runtime
         run: |
@@ -92,11 +92,12 @@ jobs:
 
       - name: Build single-file server
         run: |
+          writer_activation="${{ github.event_name == 'workflow_dispatch' && inputs.arena_multiplayer == 'enabled' && 'enabled' || 'disabled' }}"
           pnpm --filter @mahoshojo/api run deploy:prepare
           cp apps/api/deploy/compose.yml apps/api/dist/compose.yml
           cp apps/api/deploy/deploy-bundle.sh apps/api/dist/deploy-bundle.sh
           node scripts/prepare-arena-room-release-gate.mjs \
-            --writer enabled \
+            --writer "$writer_activation" \
             --output apps/api/dist/arena-room-release-gate.json
           cp scripts/arena-room-release-gate-schema.mjs apps/api/dist/arena-room-release-gate-schema.mjs
           cd apps/api/dist
@@ -110,6 +111,12 @@ jobs:
           D1_GATEWAY_URL: http://127.0.0.1:8788
           HOSTED_API_ENVIRONMENT: local
           HOSTED_DR_LOCAL_FAULT_INJECTION: 'true'
+          ROOM_REDIS_VERIFY: 'true'
+          ROOM_REDIS_VERIFY_KEY_PREFIX: gmr10p_ci
+          ROOM_GENERATION_REDIS_VERIFY: 'true'
+          ROOM_GENERATION_REDIS_VERIFY_KEY_PREFIX: gmr10p_generation_ci
+          ROOM_GENERATION_PROCESS_VERIFY: 'true'
+          ROOM_GENERATION_PROCESS_VERIFY_TOKEN: gmr10p-ci-process
           D1_GATEWAY_HMAC_SECRET: g25c-ci-only-d1-gateway-hmac-secret
           HONO_AUTH_MODE: bearer
           HONO_CORS_ORIGINS: https://g25c-ci.example.invalid
@@ -155,6 +162,9 @@ jobs:
           fi
 
           pnpm --filter @mahoshojo/api run verify:arena-redis
+          pnpm --filter @mahoshojo/api run verify:room-redis
+          pnpm --filter @mahoshojo/api run verify:room-generation-redis
+          pnpm --filter @mahoshojo/api run verify:room-generation-process-recovery
           pnpm run verify:server:runtime
 
       - name: Upload bundle
@@ -223,5 +233,5 @@ jobs:
     if: github.ref == 'refs/heads/feature/v0.2.0_Battle_Growth_MahoShojo'
     uses: ./.github/workflows/cloudflare-deploy.yml
     with:
-      arena_multiplayer_enabled: ${{ github.event_name != 'workflow_dispatch' || inputs.arena_multiplayer == 'enabled' }}
+      arena_multiplayer_enabled: ${{ github.event_name == 'workflow_dispatch' && inputs.arena_multiplayer == 'enabled' }}
     secrets: inherit

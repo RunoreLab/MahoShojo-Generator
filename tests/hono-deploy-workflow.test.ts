@@ -104,7 +104,7 @@ describe('Hono deployment workflow', () => {
     expect(workflow).not.toContain('- name: Verify public endpoint');
   });
 
-  test('自动把默认分支发布为 writer-enabled production release', () => {
+  test('默认 production release 保持 Room writer disabled，只有显式 GMR-11 激活才启用', () => {
     const workflow = readFileSync(HONO_WORKFLOW_PATH, 'utf8');
     const buildJob = getJob(workflow, 'build');
     const deployJob = getJob(workflow, 'deploy');
@@ -114,11 +114,18 @@ describe('Hono deployment workflow', () => {
     );
     expect(deployJob).toContain('HONO_HOSTED_API_ENVIRONMENT=production');
     expect(workflow).toContain('arena_multiplayer:');
-    expect(workflow).toContain('default: enabled');
+    expect(workflow).toContain('default: disabled');
+    expect(workflow).toContain(
+      "arena_multiplayer_enabled: ${{ github.event_name == 'workflow_dispatch' && inputs.arena_multiplayer == 'enabled' }}",
+    );
     expect(workflow).not.toContain('arena_room_writer_activation:');
     const releaseStep = getStep(buildJob, 'Build single-file server');
     expect(releaseStep).toContain('scripts/prepare-arena-room-release-gate.mjs');
-    expect(releaseStep).toContain('--writer enabled');
+    expect(releaseStep).toContain(
+      "github.event_name == 'workflow_dispatch' && inputs.arena_multiplayer == 'enabled'",
+    );
+    expect(releaseStep).toContain('--writer "$writer_activation"');
+    expect(releaseStep).not.toContain('--writer enabled');
     expect(releaseStep).not.toContain('ARENA_ROOM_READER_ROLLOUT_CONTRACT');
     expect(releaseStep).not.toContain('ARENA_ROOM_PRODUCTION_GO_NO_GO');
     expect(releaseStep).not.toContain(
@@ -145,6 +152,18 @@ describe('Hono deployment workflow', () => {
     expect(cloudflareWorkflow).not.toContain('run: pnpm run ci:verify');
   });
 
+  test('production build 显式绑定 GMR-10P READY 交互与权威证据入口', () => {
+    const workflow = readFileSync(HONO_WORKFLOW_PATH, 'utf8');
+    const parityStep = getStep(
+      getJob(workflow, 'build'),
+      'Require Arena product parity for production',
+    );
+
+    expectRequiredGateStep(parityStep);
+    expect(parityStep).toContain('pnpm run verify:arena-product-parity-ready');
+    expect(parityStep).not.toContain('pnpm run check:arena-product-parity -- --require-ready');
+  });
+
   test('builds and deploys Cloudflare Web through the apps/web lifecycle', () => {
     const workflow = readFileSync(CLOUDFLARE_WORKFLOW_PATH, 'utf8');
     const deployJob = getJob(workflow, 'deploy');
@@ -152,7 +171,7 @@ describe('Hono deployment workflow', () => {
     expect(workflow).toContain('workflow_call:');
     expect(workflow).not.toMatch(/^\s+push:/mu);
     expect(workflow).toContain('confirm_disable_multiplayer:');
-    expect(workflow).toContain("github.event_name == 'workflow_dispatch' && 'false'");
+    expect(workflow).toContain("inputs.arena_multiplayer_enabled && 'true' || 'false'");
 
     expect(getStep(deployJob, 'Build Cloudflare bundle')).toContain(
       'run: pnpm --filter @mahoshojo/web run build:cf',
@@ -377,6 +396,8 @@ describe('Hono deployment workflow', () => {
     const runtimeVerifier = 'pnpm run verify:server:runtime';
     const arenaRedisVerifier = 'pnpm --filter @mahoshojo/api run verify:arena-redis';
     const roomRedisVerifier = 'pnpm --filter @mahoshojo/api run verify:room-redis';
+    const roomGenerationRedisVerifier = 'pnpm --filter @mahoshojo/api run verify:room-generation-redis';
+    const roomProcessRecoveryVerifier = 'pnpm --filter @mahoshojo/api run verify:room-generation-process-recovery';
     const hostedDrRedisVerifier = 'REDIS_URL=redis://127.0.0.1:6379/15 pnpm run verify:hosted-dr:redis';
 
     expectRequiredGateStep(runtimeStep);
@@ -403,13 +424,21 @@ describe('Hono deployment workflow', () => {
     expect(activeLines).toContain(healthProbe);
     expect(activeLines).toContain('trap cleanup EXIT');
     expect(activeLines).toContain(arenaRedisVerifier);
-    expect(activeLines).not.toContain(roomRedisVerifier);
+    expect(activeLines).toContain(roomRedisVerifier);
+    expect(activeLines).toContain(roomGenerationRedisVerifier);
+    expect(activeLines).toContain(roomProcessRecoveryVerifier);
     expect(activeLines).not.toContain(hostedDrRedisVerifier);
     expect(activeLines.at(-1)).toBe(runtimeVerifier);
     expect(activeLines.indexOf(gatewayCommand)).toBeLessThan(activeLines.indexOf(healthProbe));
     expect(activeLines.indexOf(healthProbe)).toBeLessThan(activeLines.indexOf(runtimeVerifier));
     expect(activeLines.indexOf(arenaRedisVerifier)).toBeLessThan(
       activeLines.indexOf(runtimeVerifier),
+    );
+    expect(activeLines.indexOf(roomRedisVerifier)).toBeLessThan(
+      activeLines.indexOf(roomGenerationRedisVerifier),
+    );
+    expect(activeLines.indexOf(roomGenerationRedisVerifier)).toBeLessThan(
+      activeLines.indexOf(roomProcessRecoveryVerifier),
     );
     expect(buildJob.indexOf('- name: Build single-file server')).toBeLessThan(
       buildJob.indexOf(runtimeStep),

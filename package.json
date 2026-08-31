@@ -48,6 +48,7 @@
     "generate:arena-room-presets": "node scripts/generate-arena-room-preset-registry.mjs",
     "check:arena-room-presets": "node scripts/generate-arena-room-preset-registry.mjs --check",
     "check:arena-product-parity": "node scripts/check-arena-product-parity.mjs",
+    "verify:arena-product-parity-ready": "node scripts/verify-arena-product-parity-ready.mjs",
     "generate:hosted-dr-client": "node scripts/generate-hosted-dr-client-config.mjs",
     "verify:hosted-dr": "node scripts/verify-hosted-dr.mjs",
     "verify:hosted-dr:client-preflight": "pnpm --filter @mahoshojo/web run verify:hosted-dr:client-preflight",
