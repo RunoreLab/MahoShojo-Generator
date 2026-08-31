@@ -67,7 +67,7 @@ describe('GMR-11 production activation gate', () => {
       writeFileSync(path.join(tempRoot, 'app.txt'), 'reviewed source\n');
       writeFileSync(
         path.join(tempRoot, 'docs/reviews/gmr-11.md'),
-        '# GMR-11 独立 production readiness 审查\n\n结论：批准。\n',
+        '# GMR-11 独立 production readiness 审查\n\nGMR-11-PRODUCTION-ACTIVATION: APPROVED\n',
       );
       writeFileSync(
         path.join(tempRoot, 'config/arena-production-activation-gate.json'),

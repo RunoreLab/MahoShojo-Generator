@@ -127,7 +127,11 @@ if (approved) {
   ) {
     failures.push('APPROVED 必须绑定 reviewedSourceDigest');
   }
-  if (typeof manifest.approvedAt !== 'string' || Number.isNaN(Date.parse(manifest.approvedAt))) {
+  if (
+    typeof manifest.approvedAt !== 'string'
+    || Number.isNaN(Date.parse(manifest.approvedAt))
+    || new Date(manifest.approvedAt).toISOString() !== manifest.approvedAt
+  ) {
     failures.push('APPROVED 必须记录 approvedAt');
   }
 
@@ -148,8 +152,12 @@ if (approved) {
       ) {
         failures.push('approvalEvidence 必须是 docs/ 下的普通文件且不得为符号链接');
       }
-      if (!readFileSync(evidencePath, 'utf8').includes('GMR-11')) {
+      const evidenceContent = readFileSync(evidencePath, 'utf8');
+      if (!evidenceContent.includes('GMR-11')) {
         failures.push('approvalEvidence 必须明确记录 GMR-11 独立审查');
+      }
+      if (!/^GMR-11-PRODUCTION-ACTIVATION:\s*APPROVED\s*$/mu.test(evidenceContent)) {
+        failures.push('approvalEvidence 必须包含独立批准标记');
       }
     } catch (error) {
       failures.push(`approvalEvidence 无法读取：${error instanceof Error ? error.message : String(error)}`);
