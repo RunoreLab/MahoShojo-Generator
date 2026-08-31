@@ -22,6 +22,7 @@ describe('GMR-10P repeatable READY verification entrypoint', () => {
       'scripts/check-arena-product-parity.mjs',
       'tests/room-product-parity-golden-flow.test.ts',
       'tests/arena-multiplayer-production-wiring.test.tsx',
+      'tests/arena-multiplayer-interaction.test.tsx',
       'tests/arena-room-proposal-workspace.test.tsx',
       'tests/arena-proposal-panel.test.tsx',
       'tests/arena-battle-result-presentation.test.tsx',

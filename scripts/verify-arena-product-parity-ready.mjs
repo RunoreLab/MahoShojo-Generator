@@ -22,9 +22,10 @@ const steps = [
   {
     label: 'Web production wiring/Proposal/BattleResult',
     args: [
-      '--filter', '@mahoshojo/web', 'exec', 'vitest', 'run',
-      'tests/arena-multiplayer-production-wiring.test.tsx',
-      'tests/arena-room-proposal-workspace.test.tsx',
+       '--filter', '@mahoshojo/web', 'exec', 'vitest', 'run',
+       'tests/arena-multiplayer-production-wiring.test.tsx',
+       'tests/arena-multiplayer-interaction.test.tsx',
+       'tests/arena-room-proposal-workspace.test.tsx',
       'tests/arena-proposal-panel.test.tsx',
       'tests/arena-battle-result-presentation.test.tsx',
     ],
