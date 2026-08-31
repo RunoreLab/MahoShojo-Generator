@@ -148,6 +148,7 @@ export const createArenaRoomGenerationOnlineContentResolver = (
     }
     if (rows.length !== 1) return fail('ARENA_ROOM_REFERENCE_NOT_READABLE');
     const row = rows[0]!;
+    if (!isRecord(row)) return fail('ARENA_ROOM_REFERENCE_METADATA_INVALID');
     const type = OnlineDataCardTypeSchema.safeParse(row.type);
     const name = DisplayNameSchema.safeParse(row.name);
     const visibility = integerVisibility(row.is_public);

@@ -123,4 +123,19 @@ describe('Arena Room generation online canonical content resolver', () => {
     expect(error).toBeInstanceOf(ArenaRoomGenerationContentResolverError);
     expect(String(error)).not.toMatch(/providerApiKey|secret|SELECT|data_cards/u);
   });
+
+  it.each([
+    ['null', null],
+    ['array', []],
+    ['primitive', 'not-a-row'],
+  ])('D1 %s row fail closed 为 metadata invalid', async (_name, malformedRow) => {
+    const { client } = createClient(() => [
+      malformedRow as unknown as Record<string, unknown>,
+    ]);
+    const resolver = createArenaRoomGenerationOnlineContentResolver({ getClient: () => client });
+    await expect(resolver.resolve({
+      ref: ref(),
+      hostAccountUserId: 7,
+    })).rejects.toMatchObject({ code: 'ARENA_ROOM_REFERENCE_METADATA_INVALID' });
+  });
 });

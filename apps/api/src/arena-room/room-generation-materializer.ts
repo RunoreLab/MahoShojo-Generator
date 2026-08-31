@@ -154,17 +154,23 @@ export const createArenaRoomGenerationMaterializer = (
 
       const config = configResult.data;
       const expectedLocalKinds = new Map<string, DataCardRef['kind']>();
+      const expectLocalKind = (key: string, kind: DataCardRef['kind']): void => {
+        if (expectedLocalKinds.has(key)) {
+          return fail('ARENA_ROOM_HOST_LOCAL_PAYLOAD_MISMATCH');
+        }
+        expectedLocalKinds.set(key, kind);
+      };
       for (const combatant of config.combatants) {
-        if ('source' in combatant) expectedLocalKinds.set(combatant.key, 'character');
+        if ('source' in combatant) expectLocalKind(combatant.key, 'character');
       }
       if (config.scenario && 'source' in config.scenario) {
-        expectedLocalKinds.set(config.scenario.key, 'scenario');
+        expectLocalKind(config.scenario.key, 'scenario');
       }
       for (const scenario of config.auxScenarios) {
-        if ('source' in scenario) expectedLocalKinds.set(scenario.key, 'scenario');
+        if ('source' in scenario) expectLocalKind(scenario.key, 'scenario');
       }
       for (const material of config.materials) {
-        if ('source' in material) expectedLocalKinds.set(material.key, 'material');
+        if ('source' in material) expectLocalKind(material.key, 'material');
       }
       if (
         expectedLocalKinds.size !== localByKey.size

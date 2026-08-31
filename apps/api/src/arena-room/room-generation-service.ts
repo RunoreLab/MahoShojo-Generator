@@ -558,23 +558,6 @@ export const createArenaRoomGenerationService = (
         if (snapshot.snapshotDigest !== historical.mirror.snapshotDigest) {
           return fail('ROOM_GENERATION_CONFLICT');
         }
-        const generationPayload = await materialize(
-          snapshot,
-          membership.accountUserId,
-          input.request,
-        );
-        const generationPayloadDigest = await options.generation.hashSemanticPayload({
-          roomId: membership.roomId,
-          generationRequestId: snapshot.generationRequestId,
-          payload: generationPayload,
-          internalGuidance: ARENA_ROOM_INTERNAL_GUIDANCE,
-          pvpContext: { matchId: generationId, roundId: 'attempt-1' },
-          multiplayerSnapshot: snapshot,
-        }).catch(() => fail('ROOM_OPERATION_UNKNOWN'));
-        if (
-          historical.generationPayloadDigest === undefined
-          || historical.generationPayloadDigest !== generationPayloadDigest
-        ) return fail('ROOM_GENERATION_CONFLICT');
         const current = membership.actor.getSnapshot();
         if (!current) return fail('ROOM_GENERATION_NOT_FOUND');
         const key = publisherKey(current, generationId);
@@ -593,6 +576,23 @@ export const createArenaRoomGenerationService = (
         if (historical.mirror.state !== 'starting' && historical.mirror.state !== 'running') {
           return fail('ROOM_GENERATION_CONFLICT');
         }
+        const generationPayload = await materialize(
+          snapshot,
+          membership.accountUserId,
+          input.request,
+        );
+        const generationPayloadDigest = await options.generation.hashSemanticPayload({
+          roomId: membership.roomId,
+          generationRequestId: snapshot.generationRequestId,
+          payload: generationPayload,
+          internalGuidance: ARENA_ROOM_INTERNAL_GUIDANCE,
+          pvpContext: { matchId: generationId, roundId: 'attempt-1' },
+          multiplayerSnapshot: snapshot,
+        }).catch(() => fail('ROOM_OPERATION_UNKNOWN'));
+        if (
+          historical.generationPayloadDigest === undefined
+          || historical.generationPayloadDigest !== generationPayloadDigest
+        ) return fail('ROOM_GENERATION_CONFLICT');
         const timestamp = monotonicTimestamp(now, current);
         const reservation = await membership.actor.execute({
           authority: issueArenaRoomGenerationReservationAuthority({

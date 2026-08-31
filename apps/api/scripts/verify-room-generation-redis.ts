@@ -419,9 +419,10 @@ try {
   });
   await memberships.join({ roomId, accountUserId: 202, displayName: 'Durable Member' });
   const port = createHostedPort(runtime.getGenerationReplayStore());
+  const generationMaterializer = createRoomGenerationVerifierMaterializer();
   const coordinator = createArenaRoomGenerationService({
     memberships,
-    materializer: createRoomGenerationVerifierMaterializer(),
+    materializer: generationMaterializer,
     generation: port,
     now: () => new Date().toISOString(),
   });
@@ -479,10 +480,16 @@ try {
     participantUserIds: historical.mirror.participantUserIds,
     sharedConfig: generationRequest.sharedConfig,
   });
+  const retryPayload = await generationMaterializer.materialize({
+    sharedConfig: generationRequest.sharedConfig,
+    hostAccountUserId: 101,
+    hostLocalPayloads: generationRequest.hostLocalPayloads,
+    hostRuntime: generationRequest.generation,
+  });
   const retryPayloadDigest = await port.hashSemanticPayload({
     roomId,
     generationRequestId,
-    payload: generationRequest.generation,
+    payload: retryPayload,
     internalGuidance: ARENA_ROOM_INTERNAL_GUIDANCE,
     pvpContext: { matchId: generationId, roundId: 'attempt-1' },
     multiplayerSnapshot: retrySnapshot,

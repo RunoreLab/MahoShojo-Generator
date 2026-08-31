@@ -252,6 +252,22 @@ describe('Arena Room authoritative generation materializer', () => {
     })).rejects.toMatchObject({ code });
   });
 
+  it('host-local key 跨语义集合复用时 fail closed', async () => {
+    const harness = createHarness();
+    const config = sharedConfig();
+    config.auxScenarios[0]!.key = config.combatants[2]!.key;
+    await expect(harness.materializer.materialize({
+      sharedConfig: config,
+      hostAccountUserId: 101,
+      hostLocalPayloads: [{
+        key: 'host-local:character:2:local',
+        kind: 'scenario',
+        payload: { name: '同一 payload 不得同时充当角色与情景' },
+      }],
+      hostRuntime: {},
+    })).rejects.toMatchObject({ code: 'ARENA_ROOM_HOST_LOCAL_PAYLOAD_MISMATCH' });
+  });
+
   it('canonical resolver 的 exact ref 不一致时 fail closed', async () => {
     const harness = createHarness();
     harness.content.resolveOnline.mockResolvedValueOnce(canonical(

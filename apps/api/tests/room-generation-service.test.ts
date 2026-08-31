@@ -379,6 +379,59 @@ describe('Arena Room generation coordinator', () => {
     expect(notFoundPort.startFromHostRequest).toHaveBeenCalledTimes(1);
   });
 
+  it('历史 durable terminal 先返回权威结果，不被后续 ref stale 遮蔽', async () => {
+    const harness = await createHarness();
+    const request = startRequest();
+    await harness.service.start({
+      roomId: 'room-1',
+      accountUserId: 101,
+      request,
+      sourceRequest: sourceRequest(),
+    });
+    harness.finishPublisher();
+    await Promise.resolve();
+
+    harness.materializer.materialize.mockClear();
+    harness.materializer.materialize.mockRejectedValue(
+      new ArenaRoomGenerationMaterializationError('ARENA_ROOM_REFERENCE_STALE'),
+    );
+    vi.mocked(harness.generation.readOwnedProjection).mockResolvedValue({
+      kind: 'found',
+      projection: {
+        generationId: 'generation-1',
+        generationRequestId: 'request-1234',
+        status: 'completed',
+        markdown: '# 已存在的权威终态',
+        resumeCursor: null,
+        updatedAt: '2026-08-28T00:02:00.000Z',
+        finalAuthoritative: true,
+        resultAvailable: true,
+        generationRecordId: 'generation-1',
+        errorCode: null,
+      },
+    });
+    const restarted = createArenaRoomGenerationService({
+      memberships: harness.memberships,
+      materializer: harness.materializer,
+      generation: harness.generation,
+      createPublisher: harness.createPublisher,
+      now: () => '2026-08-28T00:02:00.000Z',
+    });
+
+    await expect(restarted.start({
+      roomId: 'room-1',
+      accountUserId: 101,
+      request,
+      sourceRequest: sourceRequest(),
+    })).resolves.toMatchObject({
+      status: 'completed',
+      markdown: '# 已存在的权威终态',
+      finalAuthoritative: true,
+    });
+    expect(harness.materializer.materialize).not.toHaveBeenCalled();
+    expect(harness.generation.startFromHostRequest).toHaveBeenCalledTimes(1);
+  });
+
   it('历史 not-found 只允许 exact semantic payload；terminal ledger 永不再次 POST', async () => {
     const harness = await createHarness();
     const request = startRequest();
