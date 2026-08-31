@@ -127,6 +127,20 @@ describe('GMR-11 production activation gate', () => {
         ].join('\n'),
       );
       writeFileSync(
+        path.join(tempRoot, 'docs/reviews/unknown-field.md'),
+        [
+          '---',
+          'review: GMR-11-PRODUCTION-ACTIVATION',
+          'decision: APPROVED',
+          'reviewer: github:gate-test-reviewer',
+          'approvedAt: 2026-09-01T00:00:00.000Z',
+          'attestation: untrusted-extra-field',
+          '---',
+          'GMR-11-PRODUCTION-ACTIVATION: APPROVED',
+          '',
+        ].join('\n'),
+      );
+      writeFileSync(
         path.join(tempRoot, 'config/arena-production-activation-gate.json'),
         `${JSON.stringify({
           schemaVersion: 1,
@@ -297,6 +311,19 @@ describe('GMR-11 production activation gate', () => {
       ], tempRoot);
       expect(duplicateReviewer.status).toBe(1);
       expect(duplicateReviewer.stderr).toMatch(/front matter|重复字段|duplicate/iu);
+
+      const unknownFieldCommit = commitManifest({
+        ...approvedManifest,
+        approvalEvidence: 'docs/reviews/unknown-field.md',
+      }, 'reject unknown evidence field');
+      const unknownField = run(process.execPath, [
+        'scripts/check-arena-production-activation.mjs',
+        '--require-approved',
+        '--commit',
+        unknownFieldCommit,
+      ], tempRoot);
+      expect(unknownField.status).toBe(1);
+      expect(unknownField.stderr).toMatch(/front matter|受支持字段|supported field/iu);
 
       const nonCanonicalTimeCommit = commitManifest({
         ...approvedManifest,
