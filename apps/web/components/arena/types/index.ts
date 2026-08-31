@@ -56,6 +56,8 @@ export type StreamUpdateMetaDebug = {
 
 export interface BattleTeam {
   id: number;
+  /** 多人 authority 中的 opaque team key；存在时发布必须原样保留。 */
+  roomKey?: string;
   /** 分队名称（会传递给 AI）。 */
   name: string;
   /** 是否在列表中折叠。 */

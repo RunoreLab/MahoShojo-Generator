@@ -187,7 +187,10 @@ const localMaterialView = (
 export const mapBattleStoreToArenaEditorView = (
   state: BattleStoreState,
 ): ArenaEditorViewProjection => {
-  const teamKeyById = new Map(state.teams.map((team) => [team.id, `team:${team.id}`]));
+  const teamKeyById = new Map(state.teams.map((team) => [
+    team.id,
+    team.roomKey?.trim() || `team:${team.id}`,
+  ]));
   const combatants = state.combatants.map((combatant, index): ArenaEditorCombatantView => {
     const key = localCombatantKey(combatant, index);
     if (!('data' in combatant)) {
@@ -226,10 +229,10 @@ export const mapBattleStoreToArenaEditorView = (
   return Object.freeze({
     combatants: freezeArray(combatants),
     teams: freezeArray(state.teams.map((team): ArenaEditorTeamView => Object.freeze({
-      key: `team:${team.id}`,
+      key: team.roomKey?.trim() || `team:${team.id}`,
       name: team.name,
       combatantKeys: freezeArray(combatants
-        .filter((combatant) => combatant.teamKey === `team:${team.id}`)
+        .filter((combatant) => combatant.teamKey === (team.roomKey?.trim() || `team:${team.id}`))
         .map((combatant) => combatant.key)),
     }))),
     scenario: localScenarioView(state.scenario, 'local-scenario:main'),

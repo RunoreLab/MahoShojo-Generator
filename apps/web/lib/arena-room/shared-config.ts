@@ -256,7 +256,7 @@ export const buildArenaRoomHostWorkspaceBundleFromBattleState = async (
     battleMode: source.battleMode,
     combatants,
     teams: source.teams.map((team) => ({
-      key: `team:${team.id}`,
+      key: text(team.roomKey) || `team:${team.id}`,
       displayName: text(team.name) || `队伍 ${team.id}`,
       combatantKeys: combatantKeysByTeam.get(team.id) ?? [],
     })),
