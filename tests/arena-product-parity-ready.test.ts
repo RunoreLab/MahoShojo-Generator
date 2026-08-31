@@ -21,15 +21,20 @@ describe('GMR-10P repeatable READY verification entrypoint', () => {
     for (const requiredPath of [
       'scripts/check-arena-product-parity.mjs',
       'tests/room-product-parity-golden-flow.test.ts',
+      'tests/room-verifier-membership-composition.test.ts',
       'tests/arena-multiplayer-production-wiring.test.tsx',
       'tests/arena-multiplayer-interaction.test.tsx',
       'tests/arena-room-proposal-workspace.test.tsx',
       'tests/arena-proposal-panel.test.tsx',
       'tests/arena-battle-result-presentation.test.tsx',
+      'tests/modal-accessibility.test.tsx',
+      'tests/arena-multiplayer-panel.test.tsx',
       'tests/product-parity-coverage.test.ts',
       'tests/gmr10p-proposal-contract-expansion.test.ts',
+      'tests/state-machine-proposal-generation.test.ts',
       'tests/room-http.test.ts',
       'tests/proposal.test.ts',
+      'tests/spec-review-r3.test.ts',
       'tests/wire-security.test.ts',
     ]) {
       expect(source, `READY verifier 未绑定 ${requiredPath}`).toContain(requiredPath);

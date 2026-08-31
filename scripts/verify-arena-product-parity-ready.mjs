@@ -18,6 +18,7 @@ const steps = [
       'tests/room-config-service.test.ts',
       'tests/room-membership-service.test.ts',
       'tests/room-proposal-service.test.ts',
+      'tests/room-verifier-membership-composition.test.ts',
     ],
   },
   {
@@ -31,6 +32,8 @@ const steps = [
       'tests/arena-preset-picker-accessibility.test.tsx',
       'tests/arena-proposal-panel.test.tsx',
       'tests/arena-battle-result-presentation.test.tsx',
+      'tests/modal-accessibility.test.tsx',
+      'tests/arena-multiplayer-panel.test.tsx',
     ],
   },
   {
@@ -40,6 +43,7 @@ const steps = [
       'tests/product-parity-coverage.test.ts',
       'tests/gmr10p-proposal-contract-expansion.test.ts',
       'tests/core.test.ts',
+      'tests/state-machine-proposal-generation.test.ts',
     ],
   },
   {
@@ -49,6 +53,7 @@ const steps = [
       'tests/room-http.test.ts',
       'tests/proposal.test.ts',
       'tests/spec-review-b.test.ts',
+      'tests/spec-review-r3.test.ts',
       'tests/wire-security.test.ts',
     ],
   },
