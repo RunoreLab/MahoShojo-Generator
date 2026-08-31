@@ -155,6 +155,7 @@ export const ArenaRoomHostLocalPayloadSchema = z.object({
  * Every Room-shared semantic is rebuilt from the frozen Shared Config.
  */
 export const ArenaRoomHostRuntimeGenerationSchema = z.object({
+  arenaFreeRankingEnabled: z.boolean().optional(),
   customProvider: SafeJsonValueSchema.optional(),
   isDowngrade: z.boolean().optional(),
   narrativeHistory: SafeJsonValueSchema.optional(),

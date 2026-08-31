@@ -107,6 +107,7 @@ describe('Arena Room HTTP product contract', () => {
       generation: {
         customProvider: { apiKey: 'request-only-secret' },
         narrativeHistory: [{ content: '只在本次请求内' }],
+        arenaFreeRankingEnabled: true,
       },
     };
     expect(ArenaRoomGenerationStartRequestSchema.parse(request)).toEqual(request);
@@ -136,7 +137,6 @@ describe('Arena Room HTTP product contract', () => {
       { materials: [{ content: '伪造素材' }] },
       { language: 'en-US' },
       { readArenaHistory: false },
-      { arenaFreeRankingEnabled: true },
     ]) {
       expect(ArenaRoomGenerationStartRequestSchema.safeParse({
         ...request,

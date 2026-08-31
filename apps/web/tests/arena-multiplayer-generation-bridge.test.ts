@@ -1,3 +1,5 @@
+import { readFile } from 'node:fs/promises';
+
 import { describe, expect, it, vi } from 'vitest';
 
 import type { ArenaRoomSharedConfig } from '@mahoshojo/contracts/arena-room';
@@ -139,6 +141,7 @@ describe('Arena multiplayer generation bridge', () => {
     } as unknown as ArenaRoomController;
     const generation = {
       customProvider: { apiKey: 'secret-must-stay-transient' },
+      arenaFreeRankingEnabled: true,
     };
 
     const outcome = await dispatchArenaRoomGenerationStart({
@@ -162,6 +165,18 @@ describe('Arena multiplayer generation bridge', () => {
     });
     expect(JSON.stringify(state)).toBe(before);
     expect(JSON.stringify(state)).not.toContain('secret-must-stay-transient');
+  });
+
+  it('Web 房间生成构造保留 host-only 自由排位开关', async () => {
+    const source = await readFile(
+      new URL('../components/arena/hooks/useBattleEngine.ts', import.meta.url),
+      'utf8',
+    );
+    const generationConstruction = source.match(
+      /const generation = ArenaRoomHostRuntimeGenerationSchema\.parse\(\{([\s\S]*?)\n\s*\}\);/u,
+    );
+
+    expect(generationConstruction?.[1]).toContain('arenaFreeRankingEnabled,');
   });
 
   it('matrix 外 generation 字段在离开 bridge 前 fail closed', async () => {

@@ -867,6 +867,7 @@ export const useBattleEngine = () => {
         }
 
         const generation = ArenaRoomHostRuntimeGenerationSchema.parse({
+          arenaFreeRankingEnabled,
           customProvider: customProviderPayload,
           isDowngrade: false,
           narrativeHistory: narrativeHistoryForRequest,
