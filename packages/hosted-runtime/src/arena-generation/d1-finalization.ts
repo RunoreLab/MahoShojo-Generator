@@ -624,7 +624,9 @@ const buildRoomSafeResult = (
       ? {} : { reasoningTokens: numberOf(row.reasoning_tokens)! }),
   };
   const ai = {
-    ...(boundedString(row.ai_model, 256) ? { model: boundedString(row.ai_model, 256)! } : {}),
+    ...(boundedString(row['ai_model'], 256)
+      ? { model: boundedString(row['ai_model'], 256)! }
+      : {}),
     ...(Object.keys(usage).length > 0 ? { usage } : {}),
   };
   const report = {
@@ -641,8 +643,9 @@ const buildRoomSafeResult = (
     ...(render?.userGuidance !== undefined ? { sharedGuidance: render.userGuidance } : {}),
     ...(characterGuidances && characterGuidances.length > 0 ? { characterGuidances } : {}),
     ...(boundedString(row.language, 32) ? { language: boundedString(row.language, 32)! } : {}),
-    ...(boundedString(row.story_length, 32)
-      ? { storyLength: boundedString(row.story_length, 32)! } : {}),
+    ...(boundedString(row['story_length'], 32)
+      ? { storyLength: boundedString(row['story_length'], 32)! }
+      : {}),
     ...(render?.adjudicationResults ? { adjudicationResults: render.adjudicationResults } : {}),
     ...(render?.narrativeHistoryReadCount === undefined
       ? {} : { narrativeHistoryReadCount: render.narrativeHistoryReadCount }),
