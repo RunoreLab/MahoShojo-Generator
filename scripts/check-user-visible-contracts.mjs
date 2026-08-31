@@ -24,6 +24,7 @@ const canonicalAutomatedEvidence = Object.freeze({
   ],
   'exited-source-hash-and-basic-error-wire': [
     'apps/web/tests/exited-api-contract.test.ts',
+    'apps/web/tests/battle-report-regenerate-handler.test.ts',
   ],
   'arena-service-client-replay-cancel-seams': [
     'apps/web/tests/arena-generation-fault-injection.test.ts',

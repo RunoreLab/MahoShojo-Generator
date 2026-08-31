@@ -26,7 +26,8 @@
         "packages/hosted-api/tests/regular-generation.test.ts"
       ],
       "exited-source-hash-and-basic-error-wire": [
-        "apps/web/tests/exited-api-contract.test.ts"
+        "apps/web/tests/exited-api-contract.test.ts",
+        "apps/web/tests/battle-report-regenerate-handler.test.ts"
       ],
       "arena-service-client-replay-cancel-seams": [
         "apps/web/tests/arena-generation-fault-injection.test.ts",
@@ -162,7 +163,7 @@
     {
       "id": "me/battle-reports/[generationId]/regenerate",
       "files": [
-        { "path": "apps/web/app/api/me/battle-reports/[generationId]/regenerate/handler.ts", "sha256": "db8ded819b5814f22974253dc09b7b9c361f06f4235decafed9147067f496bec" },
+        { "path": "apps/web/app/api/me/battle-reports/[generationId]/regenerate/handler.ts", "sha256": "189b88330bd4ef3e22c89b00d03aab6347feb8fb93d324eeca63c136151b15ca" },
         { "path": "apps/web/app/api/me/battle-reports/[generationId]/regenerate/route.ts", "sha256": "9406f3e016d9a1a161d1dd28f9e003412ce75bc71cefd3510036e734a3f0c436" }
       ]
     }
@@ -255,6 +256,7 @@
     "tests/hosted-dr-client-bundle.test.ts",
     "apps/web/tests/arena-generation-fault-injection.test.ts",
     "apps/web/tests/exited-api-contract.test.ts",
+    "apps/web/tests/battle-report-regenerate-handler.test.ts",
     "apps/web/tests/resumable-arena-generation-client.test.ts",
     "packages/hosted-api/tests/public-ai-error.test.ts",
     "packages/hosted-api/tests/regular-generation.test.ts",
