@@ -123,7 +123,7 @@ export const ARENA_PRODUCT_PARITY_COVERAGE = {
     }),
     combatants: materializedSharedPayload(
       '完整角色 payload 已由 frozen Shared Config 的 ref/stub 与 exact canonical/request-scoped payload materialize。',
-      ['addCombatant', 'removeCombatant', 'setCharacterGuidance', 'assignTeam'],
+      ['addCombatant', 'removeCombatant', 'reorderCombatants', 'setCharacterGuidance', 'assignTeam'],
     ),
     mode: derivedSharedProposable(['setBattleMode']),
     arenaFreeRankingEnabled: classified('shared/host-only', {
@@ -138,17 +138,23 @@ export const ARENA_PRODUCT_PARITY_COVERAGE = {
     ),
     auxScenarios: materializedSharedPayload(
       '展开后的辅助情景正文由 frozen exact ref 或 request-scoped host-local map materialize。',
-      ['addAuxScenario', 'removeAuxScenario'],
+      ['addAuxScenario', 'removeAuxScenario', 'reorderAuxScenarios'],
     ),
     materials: materializedSharedPayload(
       '展开后的素材正文由 frozen exact ref 或 request-scoped host-local map materialize。',
-      ['addMaterial', 'removeMaterial'],
+      ['addMaterial', 'removeMaterial', 'reorderMaterials'],
     ),
     scenarioTitle: derivedSharedProposable(['setScenario']),
     scenarioFileName: derivedSharedProposable(['setScenario']),
     scenarioSourceDataCardId: derivedSharedProposable(['setScenario']),
     scenarioSourceDataCardUpdatedAt: derivedSharedProposable(['setScenario']),
-    teams: derivedSharedProposable(['addTeam', 'removeTeam', 'assignTeam']),
+    teams: derivedSharedProposable([
+      'addTeam',
+      'removeTeam',
+      'reorderTeams',
+      'assignTeam',
+      'reorderTeamCombatants',
+    ]),
     teamNames: derivedSharedProposable(['addTeam', 'renameTeam']),
     language: derivedSharedProposable(['setSelectedLanguage']),
     readArenaHistory: derivedSharedProposable(['setHistorySettings']),
@@ -195,23 +201,29 @@ export const ARENA_PRODUCT_PARITY_COVERAGE = {
   roomSharedConfig: {
     battleMode: { ...sharedProposable(['setBattleMode']), rootField: 'battleMode' },
     combatants: {
-      ...sharedProposable(['addCombatant', 'removeCombatant']),
+      ...sharedProposable(['addCombatant', 'removeCombatant', 'reorderCombatants']),
       rootField: 'combatants',
     },
     'combatants.characterGuidance': {
       ...sharedProposable(['setCharacterGuidance']),
       rootField: 'combatants',
     },
-    teams: { ...sharedProposable(['addTeam', 'removeTeam', 'assignTeam']), rootField: 'teams' },
-    'teams.combatantKeys': { ...sharedProposable(['assignTeam']), rootField: 'teams' },
+    teams: {
+      ...sharedProposable(['addTeam', 'removeTeam', 'reorderTeams', 'assignTeam', 'reorderTeamCombatants']),
+      rootField: 'teams',
+    },
+    'teams.combatantKeys': {
+      ...sharedProposable(['assignTeam', 'reorderTeamCombatants']),
+      rootField: 'teams',
+    },
     'teams.displayName': { ...sharedProposable(['addTeam', 'renameTeam']), rootField: 'teams' },
     scenario: { ...sharedProposable(['setScenario']), rootField: 'scenario' },
     auxScenarios: {
-      ...sharedProposable(['addAuxScenario', 'removeAuxScenario']),
+      ...sharedProposable(['addAuxScenario', 'removeAuxScenario', 'reorderAuxScenarios']),
       rootField: 'auxScenarios',
     },
     materials: {
-      ...sharedProposable(['addMaterial', 'removeMaterial']),
+      ...sharedProposable(['addMaterial', 'removeMaterial', 'reorderMaterials']),
       rootField: 'materials',
     },
     userGuidance: { ...sharedProposable(['setUserGuidance']), rootField: 'userGuidance' },
@@ -241,6 +253,11 @@ export const ARENA_PRODUCT_PARITY_COVERAGE = {
     addTeam: sharedProposable(['addTeam']),
     removeTeam: sharedProposable(['removeTeam']),
     renameTeam: sharedProposable(['renameTeam']),
+    reorderCombatants: sharedProposable(['reorderCombatants']),
+    reorderTeams: sharedProposable(['reorderTeams']),
+    reorderTeamCombatants: sharedProposable(['reorderTeamCombatants']),
+    reorderAuxScenarios: sharedProposable(['reorderAuxScenarios']),
+    reorderMaterials: sharedProposable(['reorderMaterials']),
     setBattleMode: sharedProposable(['setBattleMode']),
     setSelectedLanguage: sharedProposable(['setSelectedLanguage']),
     setScenario: sharedProposable(['setScenario']),
@@ -255,7 +272,7 @@ export const ARENA_PRODUCT_PARITY_COVERAGE = {
   arenaUi: {
     battleMode: sharedProposable(['setBattleMode'], ['GMR10P-A-ARENA-UI-CONTRACT']),
     combatantRoster: sharedProposable(
-      ['addCombatant', 'removeCombatant'],
+      ['addCombatant', 'removeCombatant', 'reorderCombatants'],
       ['GMR10P-A-ARENA-UI-CONTRACT'],
     ),
     combatantOnlineDataCard: sharedProposable(
@@ -282,7 +299,7 @@ export const ARENA_PRODUCT_PARITY_COVERAGE = {
       ['GMR10P-A-ARENA-UI-CONTRACT'],
     ),
     teamAssignment: sharedProposable(
-      ['addTeam', 'removeTeam', 'assignTeam'],
+      ['addTeam', 'removeTeam', 'reorderTeams', 'assignTeam', 'reorderTeamCombatants'],
       ['GMR10P-A-ARENA-UI-CONTRACT'],
     ),
     teamDisplayName: sharedProposable(
@@ -301,7 +318,7 @@ export const ARENA_PRODUCT_PARITY_COVERAGE = {
       reason: 'member Proposal 禁止粘贴本地情景。',
     }),
     auxScenarios: sharedProposable(
-      ['addAuxScenario', 'removeAuxScenario'],
+      ['addAuxScenario', 'removeAuxScenario', 'reorderAuxScenarios'],
       ['GMR10P-A-ARENA-UI-CONTRACT'],
     ),
     auxScenarioLocalUpload: classified('forbidden', {
@@ -315,7 +332,7 @@ export const ARENA_PRODUCT_PARITY_COVERAGE = {
       reason: 'member Proposal 禁止粘贴本地辅助情景。',
     }),
     materials: sharedProposable(
-      ['addMaterial', 'removeMaterial'],
+      ['addMaterial', 'removeMaterial', 'reorderMaterials'],
       ['GMR10P-A-ARENA-UI-CONTRACT'],
     ),
     materialLocalUpload: classified('forbidden', {

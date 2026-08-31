@@ -219,7 +219,7 @@ describe('Arena proposal local editor model', () => {
       .toEqual(['mode', 'guidance']);
   });
 
-  it('reports empty and unsupported edits explicitly', () => {
+  it('reports empty edits and emits a typed full-order combatant change', () => {
     const clean = createArenaProposalEditor(snapshot());
     expect(thrown(() => previewArenaProposal(clean)).code).toBe('empty-proposal');
 
@@ -232,9 +232,13 @@ describe('Arena proposal local editor model', () => {
       ...draft,
       combatants: [draft.combatants[1]!, draft.combatants[0]!],
     }));
-    const error = thrown(() => previewArenaProposal(reordered));
-    expect(error.code).toBe('unsupported-change');
-    expect(error.message).toMatch(/reorder/u);
+    expect(previewArenaProposal(reordered).changes).toEqual([
+      expect.objectContaining({
+        type: 'reorderCombatants',
+        value: ['data-card:c2', 'data-card:c1'],
+        expectedBase: { kind: 'value', value: ['data-card:c1', 'data-card:c2'] },
+      }),
+    ]);
   });
 
   it('keeps a dirty same-epoch draft and marks it stale when revision advances', () => {

@@ -1,6 +1,13 @@
 import { z } from 'zod';
 
-import { MAX_OPAQUE_KEY_LENGTH, MAX_PROPOSAL_BYTES, MAX_PROPOSAL_CHANGES } from './limits';
+import {
+  MAX_AUX_SCENARIOS,
+  MAX_COMBATANTS,
+  MAX_MATERIALS,
+  MAX_OPAQUE_KEY_LENGTH,
+  MAX_PROPOSAL_BYTES,
+  MAX_PROPOSAL_CHANGES,
+} from './limits';
 import {
   BattleModeSchema,
   CharacterDataCardRefSchema,
@@ -133,6 +140,71 @@ export const RenameTeamChangeSchema = change({
   expectedBase: ValueExpectedBaseSchema(DisplayNameSchema),
 });
 
+const exactOrderSchema = (keySchema: z.ZodType<string>, maximum: number, minimum = 0) => (
+  z.array(keySchema).min(minimum).max(maximum)
+);
+
+const validateExactReorder = (
+  reorder: Readonly<{
+    value: readonly string[];
+    expectedBase: Readonly<{ value: readonly string[] }>;
+  }>,
+  context: z.RefinementCtx,
+): void => {
+  const proposed = reorder.value;
+  const expected = reorder.expectedBase.value;
+  if (new Set(proposed).size !== proposed.length) {
+    context.addIssue({ code: 'custom', path: ['value'], message: 'ordered keys must be unique' });
+  }
+  if (new Set(expected).size !== expected.length) {
+    context.addIssue({ code: 'custom', path: ['expectedBase', 'value'], message: 'expected ordered keys must be unique' });
+  }
+  const expectedSet = new Set(expected);
+  if (proposed.length !== expected.length || proposed.some((key) => !expectedSet.has(key))) {
+    context.addIssue({ code: 'custom', path: ['value'], message: 'proposed and expected orders must contain the exact same keys' });
+  }
+  if (proposed.length === expected.length && proposed.every((key, index) => key === expected[index])) {
+    context.addIssue({ code: 'custom', path: ['value'], message: 'reorder must change key order' });
+  }
+};
+
+const CombatantOrderSchema = exactOrderSchema(StableObjectKeySchema, MAX_COMBATANTS, 1);
+const TeamOrderSchema = exactOrderSchema(OpaqueKeySchema, MAX_COMBATANTS);
+const TeamCombatantOrderSchema = exactOrderSchema(StableObjectKeySchema, MAX_COMBATANTS);
+const AuxScenarioOrderSchema = exactOrderSchema(StableObjectKeySchema, MAX_AUX_SCENARIOS);
+const MaterialOrderSchema = exactOrderSchema(StableObjectKeySchema, MAX_MATERIALS);
+
+export const ReorderCombatantsChangeSchema = change({
+  type: z.literal('reorderCombatants'),
+  value: CombatantOrderSchema,
+  expectedBase: ValueExpectedBaseSchema(CombatantOrderSchema),
+}).superRefine(validateExactReorder);
+
+export const ReorderTeamsChangeSchema = change({
+  type: z.literal('reorderTeams'),
+  value: TeamOrderSchema,
+  expectedBase: ValueExpectedBaseSchema(TeamOrderSchema),
+}).superRefine(validateExactReorder);
+
+export const ReorderTeamCombatantsChangeSchema = change({
+  type: z.literal('reorderTeamCombatants'),
+  teamKey: OpaqueKeySchema,
+  value: TeamCombatantOrderSchema,
+  expectedBase: ValueExpectedBaseSchema(TeamCombatantOrderSchema),
+}).superRefine(validateExactReorder);
+
+export const ReorderAuxScenariosChangeSchema = change({
+  type: z.literal('reorderAuxScenarios'),
+  value: AuxScenarioOrderSchema,
+  expectedBase: ValueExpectedBaseSchema(AuxScenarioOrderSchema),
+}).superRefine(validateExactReorder);
+
+export const ReorderMaterialsChangeSchema = change({
+  type: z.literal('reorderMaterials'),
+  value: MaterialOrderSchema,
+  expectedBase: ValueExpectedBaseSchema(MaterialOrderSchema),
+}).superRefine(validateExactReorder);
+
 export const SetBattleModeChangeSchema = change({
   type: z.literal('setBattleMode'),
   value: BattleModeSchema,
@@ -215,6 +287,11 @@ export const ArenaProposalChangeSchema = z.discriminatedUnion('type', [
   AddTeamChangeSchema,
   RemoveTeamChangeSchema,
   RenameTeamChangeSchema,
+  ReorderCombatantsChangeSchema,
+  ReorderTeamsChangeSchema,
+  ReorderTeamCombatantsChangeSchema,
+  ReorderAuxScenariosChangeSchema,
+  ReorderMaterialsChangeSchema,
   SetBattleModeChangeSchema,
   SetSelectedLanguageChangeSchema,
   SetScenarioChangeSchema,

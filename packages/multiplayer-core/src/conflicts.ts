@@ -77,6 +77,14 @@ const currentSemanticValue = (config: ArenaRoomSharedConfig, change: ArenaPropos
       const team = currentTeam(config, change.teamKey);
       return team ? value(team.displayName) : absent();
     }
+    case 'reorderCombatants':
+      return value(config.combatants.map((entry) => entry.key));
+    case 'reorderTeams':
+      return value(config.teams.map((team) => team.key));
+    case 'reorderTeamCombatants': {
+      const team = currentTeam(config, change.teamKey);
+      return team ? value(team.combatantKeys) : absent();
+    }
     case 'setBattleMode':
       return value(config.battleMode);
     case 'setSelectedLanguage':
@@ -91,6 +99,8 @@ const currentSemanticValue = (config: ArenaRoomSharedConfig, change: ArenaPropos
       const entry = currentAuxScenario(config, change.scenarioKey);
       return entry ? { kind: 'ref', ref: entryReference(entry) } : absent();
     }
+    case 'reorderAuxScenarios':
+      return value(config.auxScenarios.map((entry) => entry.key));
     case 'addMaterial': {
       const entry = currentMaterial(config, `data-card:${change.ref.id}`);
       return entry ? { kind: 'ref', ref: entryReference(entry) } : absent();
@@ -99,6 +109,8 @@ const currentSemanticValue = (config: ArenaRoomSharedConfig, change: ArenaPropos
       const entry = currentMaterial(config, change.materialKey);
       return entry ? { kind: 'ref', ref: entryReference(entry) } : absent();
     }
+    case 'reorderMaterials':
+      return value(config.materials.map((entry) => entry.key));
     case 'setUserGuidance':
       return value(config.userGuidance);
     case 'setStoryLength':
@@ -117,13 +129,18 @@ const targetOf = (change: ArenaProposalChange): string => {
     case 'addTeam':
     case 'removeTeam': return `team:${change.teamKey}`;
     case 'renameTeam': return `team:${change.teamKey}:displayName`;
+    case 'reorderCombatants': return 'combatants:order';
+    case 'reorderTeams': return 'teams:order';
+    case 'reorderTeamCombatants': return `team:${change.teamKey}:combatants:order`;
     case 'setBattleMode': return 'battleMode';
     case 'setSelectedLanguage': return 'selectedLanguage';
     case 'setScenario': return 'scenario';
     case 'addAuxScenario': return `auxScenario:data-card:${change.ref.id}`;
     case 'removeAuxScenario': return `auxScenario:${change.scenarioKey}`;
+    case 'reorderAuxScenarios': return 'auxScenarios:order';
     case 'addMaterial': return `material:data-card:${change.ref.id}`;
     case 'removeMaterial': return `material:${change.materialKey}`;
+    case 'reorderMaterials': return 'materials:order';
     case 'setUserGuidance': return 'userGuidance';
     case 'setStoryLength': return 'storyLength';
     case 'setHistorySettings': return 'historySettings';

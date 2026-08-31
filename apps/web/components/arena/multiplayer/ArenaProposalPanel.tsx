@@ -80,13 +80,18 @@ export const arenaProposalChangeSummary = (change: ArenaProposalChange): string 
     case 'addTeam': return `新增队伍 ${change.displayName}`;
     case 'removeTeam': return `移除队伍 ${change.teamKey}`;
     case 'renameTeam': return `队伍 ${change.teamKey} 改名为 ${safeText(change.value)}`;
+    case 'reorderCombatants': return '调整角色顺序';
+    case 'reorderTeams': return '调整队伍顺序';
+    case 'reorderTeamCombatants': return `调整队伍 ${change.teamKey} 内角色顺序`;
     case 'setBattleMode': return `战斗模式改为 ${change.value}`;
     case 'setSelectedLanguage': return `语言改为 ${change.value}`;
     case 'setScenario': return change.ref === null ? '清除主情景' : `主情景改为 ${change.ref.id}`;
     case 'addAuxScenario': return `新增辅助情景 ${change.ref.id}`;
     case 'removeAuxScenario': return `移除辅助情景 ${change.scenarioKey}`;
+    case 'reorderAuxScenarios': return '调整辅助情景顺序';
     case 'addMaterial': return `新增素材 ${change.ref.id}`;
     case 'removeMaterial': return `移除素材 ${change.materialKey}`;
+    case 'reorderMaterials': return '调整素材顺序';
     case 'setUserGuidance': return `全局引导改为“${safeText(change.value || '空值')}”`;
     case 'setStoryLength': return `故事长度改为 ${change.value}`;
     case 'setHistorySettings': return '修改共享历史读取/写入设置';
@@ -106,6 +111,12 @@ const historyReadSummary = (
 
 export const arenaProposalChangeProposedSummary = (change: ArenaProposalChange): string => {
   switch (change.type) {
+    case 'reorderCombatants':
+    case 'reorderTeams':
+    case 'reorderTeamCombatants':
+    case 'reorderAuxScenarios':
+    case 'reorderMaterials':
+      return `${arenaProposalChangeSummary(change)}：${change.value.map((key) => safeText(key)).join(' → ')}`;
     case 'setCharacterGuidance':
       return change.value === null
         ? `清空角色 ${change.combatantKey} 引导`
@@ -276,20 +287,18 @@ const HostProposalInbox = ({
   readonly controller: ProposalController;
 }) => {
   const session = state.session;
-  const [open, setOpen] = useState(false);
   if (!session) return null;
   const disabled = state.proposalOperation !== null || state.proposalResultUnknown;
   const proposals = session.snapshot.proposals;
   return (
     <section aria-labelledby="arena-proposal-inbox-heading" className="rounded-xl border border-gray-200 bg-white/50 p-3 dark:border-gray-700 dark:bg-gray-950/20">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h3 id="arena-proposal-inbox-heading" className="text-sm font-semibold text-gray-950 dark:text-gray-100">待处理提案</h3>
-          <p className="mt-1 text-xs text-gray-600 dark:text-gray-400">审阅在 Modal 中完成，不占用 Arena 主编辑区。</p>
-        </div>
-        <button type="button" className={secondaryButtonClass} onClick={() => setOpen(true)}>
+      <div>
+        <h3 id="arena-proposal-inbox-heading" className="text-sm font-semibold text-gray-950 dark:text-gray-100">
           待处理提案 ({proposals.length})
-        </button>
+        </h3>
+        <p className="mt-1 text-xs text-gray-600 dark:text-gray-400">
+          在当前房间提案窗口审阅 typed diff，不占用 Arena 主编辑区。
+        </p>
       </div>
       {state.proposalResultUnknown ? (
         <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
@@ -299,39 +308,27 @@ const HostProposalInbox = ({
           </button>
         </div>
       ) : null}
-      {open ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 sm:p-6">
-          <section role="dialog" aria-modal="true" aria-labelledby="arena-proposal-review-heading" className="flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl dark:bg-gray-950">
-            <div className="flex items-start justify-between gap-3 border-b p-4 dark:border-gray-800">
-              <div>
-                <h3 id="arena-proposal-review-heading" className="font-semibold text-gray-950 dark:text-gray-100">Proposal Review</h3>
-                <p className="mt-1 text-xs text-gray-600 dark:text-gray-400">服务器仍会校验 revision、引用权限、expectedBase、依赖与原子组。</p>
-              </div>
-              <button type="button" className={secondaryButtonClass} onClick={() => setOpen(false)}>关闭</button>
-            </div>
-            <div className="min-h-0 flex-1 overflow-y-auto p-4">
-              {proposals.length === 0 ? (
-                <p className="text-sm text-gray-600 dark:text-gray-400">暂无待处理 Proposal</p>
-              ) : (
-                <ul className="space-y-3" aria-label="待审阅 Proposal">
-                  {proposals.map((proposal) => (
-                    <HostProposalCard
-                      key={`${proposal.proposalId}:${proposal.updatedAt ?? proposal.createdAt}`}
-                      proposal={proposal}
-                      revision={session.snapshot.revision}
-                      roomEpoch={session.roomEpoch}
-                      currentConfig={session.snapshot.sharedConfig}
-                      authorDisplayName={session.snapshot.members.find((member) => member.userId === proposal.authorUserId)?.displayName ?? '未知成员'}
-                      controller={controller}
-                      disabled={disabled}
-                    />
-                  ))}
-                </ul>
-              )}
-            </div>
-          </section>
-        </div>
-      ) : null}
+      <p className="mt-3 text-xs text-gray-600 dark:text-gray-400">
+        服务器仍会校验 revision、引用权限、expectedBase、依赖与原子组。
+      </p>
+      {proposals.length === 0 ? (
+        <p className="mt-3 text-sm text-gray-600 dark:text-gray-400">暂无待处理 Proposal</p>
+      ) : (
+        <ul className="mt-3 space-y-3" aria-label="待审阅 Proposal">
+          {proposals.map((proposal) => (
+            <HostProposalCard
+              key={`${proposal.proposalId}:${proposal.updatedAt ?? proposal.createdAt}`}
+              proposal={proposal}
+              revision={session.snapshot.revision}
+              roomEpoch={session.roomEpoch}
+              currentConfig={session.snapshot.sharedConfig}
+              authorDisplayName={session.snapshot.members.find((member) => member.userId === proposal.authorUserId)?.displayName ?? '未知成员'}
+              controller={controller}
+              disabled={disabled}
+            />
+          ))}
+        </ul>
+      )}
     </section>
   );
 };
@@ -353,7 +350,6 @@ const MemberProposalEntry = ({
     editor?.store.getInitialState ?? (() => null),
   );
   if (!session) return null;
-  const disabled = state.proposalOperation !== null || state.proposalResultUnknown;
 
   return (
     <section aria-labelledby="arena-proposal-editor-heading" className="rounded-xl border border-gray-200 bg-white/50 p-3 dark:border-gray-700 dark:bg-gray-950/20">
@@ -388,6 +384,26 @@ const MemberProposalEntry = ({
           房间 revision 已更新；当前草稿仍绑定旧基线 {editorState.baselineRevision}。
         </p>
       ) : null}
+      <ArenaMemberProposalStatus state={state} controller={controller} />
+    </section>
+  );
+};
+
+export function ArenaMemberProposalStatus({
+  state,
+  controller,
+}: {
+  readonly state: ArenaRoomControllerState;
+  readonly controller: Pick<ArenaRoomController, 'reconnect' | 'withdrawProposal'>;
+}) {
+  const session = state.session;
+  if (!session || session.self.role !== 'member') return null;
+  const disabled = state.proposalOperation !== null || state.proposalResultUnknown;
+  const proposals = session.snapshot.proposals.filter((proposal) => (
+    proposal.authorUserId === session.self.userId
+  ));
+  return (
+    <>
       {state.proposalResultUnknown ? (
         <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
           <p>上次 Proposal 请求结果未知，已冻结重复提交。</p>
@@ -397,11 +413,11 @@ const MemberProposalEntry = ({
         </div>
       ) : null}
 
-      {session.snapshot.proposals.length > 0 ? (
+      {proposals.length > 0 ? (
         <div className="mt-4">
           <h4 className="text-sm font-semibold text-gray-950 dark:text-gray-100">我的待处理 Proposal</h4>
           <ul className="mt-2 space-y-2">
-            {session.snapshot.proposals.map((proposal) => (
+            {proposals.map((proposal) => (
               <li key={proposal.proposalId} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-gray-200 p-2 dark:border-gray-700">
                 <span className="font-mono text-xs">{proposal.proposalId}</span>
                 <button
@@ -417,9 +433,9 @@ const MemberProposalEntry = ({
           </ul>
         </div>
       ) : null}
-    </section>
+    </>
   );
-};
+}
 
 export function ArenaProposalPanel(props: ArenaProposalPanelProps) {
   const session = props.state.session;

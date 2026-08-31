@@ -20,6 +20,16 @@ const refMatches = (
   && 'ref' in entry
   && deepEqual(entry.ref, expectedRef);
 
+const retainsRelativeOrder = (
+  currentKeys: readonly string[],
+  orderedKeys: readonly string[],
+): boolean => {
+  const currentSet = new Set(currentKeys);
+  if (orderedKeys.some((key) => !currentSet.has(key))) return false;
+  const orderedSet = new Set(orderedKeys);
+  return deepEqual(currentKeys.filter((key) => orderedSet.has(key)), orderedKeys);
+};
+
 /** A semantic target is replaced as one unit when a later accepted change owns it. */
 const collaborativeTarget = (change: ArenaProposalChange): string => {
   switch (change.type) {
@@ -35,6 +45,12 @@ const collaborativeTarget = (change: ArenaProposalChange): string => {
       return `team:${change.teamKey}`;
     case 'renameTeam':
       return `team-name:${change.teamKey}`;
+    case 'reorderCombatants':
+      return 'combatants-order';
+    case 'reorderTeams':
+      return 'teams-order';
+    case 'reorderTeamCombatants':
+      return `team-combatants-order:${change.teamKey}`;
     case 'setBattleMode':
       return 'battle-mode';
     case 'setSelectedLanguage':
@@ -44,9 +60,13 @@ const collaborativeTarget = (change: ArenaProposalChange): string => {
     case 'addAuxScenario':
     case 'removeAuxScenario':
       return `aux-scenario:${change.type === 'addAuxScenario' ? canonicalDataCardKey(change.ref.id) : change.scenarioKey}`;
+    case 'reorderAuxScenarios':
+      return 'aux-scenarios-order';
     case 'addMaterial':
     case 'removeMaterial':
       return `material:${change.type === 'addMaterial' ? canonicalDataCardKey(change.ref.id) : change.materialKey}`;
+    case 'reorderMaterials':
+      return 'materials-order';
     case 'setUserGuidance':
       return 'user-guidance';
     case 'setStoryLength':
@@ -83,6 +103,14 @@ export const hasCollaborativeChangeEffect = (
       return !config.teams.some((entry) => entry.key === change.teamKey);
     case 'renameTeam':
       return config.teams.find((entry) => entry.key === change.teamKey)?.displayName === change.value;
+    case 'reorderCombatants':
+      return retainsRelativeOrder(config.combatants.map((entry) => entry.key), change.value);
+    case 'reorderTeams':
+      return retainsRelativeOrder(config.teams.map((team) => team.key), change.value);
+    case 'reorderTeamCombatants': {
+      const team = config.teams.find((entry) => entry.key === change.teamKey);
+      return team !== undefined && retainsRelativeOrder(team.combatantKeys, change.value);
+    }
     case 'setBattleMode':
       return config.battleMode === change.value;
     case 'setSelectedLanguage':
@@ -98,6 +126,8 @@ export const hasCollaborativeChangeEffect = (
       );
     case 'removeAuxScenario':
       return !config.auxScenarios.some((entry) => entry.key === change.scenarioKey);
+    case 'reorderAuxScenarios':
+      return retainsRelativeOrder(config.auxScenarios.map((entry) => entry.key), change.value);
     case 'addMaterial':
       return refMatches(
         config.materials.find((entry) => entry.key === canonicalDataCardKey(change.ref.id)),
@@ -105,6 +135,8 @@ export const hasCollaborativeChangeEffect = (
       );
     case 'removeMaterial':
       return !config.materials.some((entry) => entry.key === change.materialKey);
+    case 'reorderMaterials':
+      return retainsRelativeOrder(config.materials.map((entry) => entry.key), change.value);
     case 'setUserGuidance':
       return config.userGuidance === change.value;
     case 'setStoryLength':

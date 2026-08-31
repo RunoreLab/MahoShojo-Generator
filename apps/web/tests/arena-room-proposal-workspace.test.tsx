@@ -196,7 +196,9 @@ describe('Arena room Proposal workspace', () => {
     });
     const controller = {
       submitProposal: vi.fn(async () => undefined),
-    } satisfies Pick<ArenaRoomController, 'submitProposal'>;
+      withdrawProposal: vi.fn(async () => undefined),
+      reconnect: vi.fn(),
+    } satisfies Pick<ArenaRoomController, 'reconnect' | 'submitProposal' | 'withdrawProposal'>;
 
     await act(async () => root.render(
       <ArenaRoomProposalWorkspaceView editor={editor} state={state} controller={controller} />,
@@ -246,7 +248,11 @@ describe('Arena room Proposal workspace', () => {
     if (!narrativeRead) throw new Error('narrative history checkbox not found');
     await act(async () => narrativeRead.click());
 
-    await act(async () => button('预览提案').click());
+    const previewTrigger = button('预览提案');
+    previewTrigger.focus();
+    await act(async () => previewTrigger.click());
+    expect(container.querySelectorAll('[role="dialog"][aria-modal="true"]')).toHaveLength(1);
+    expect(document.activeElement?.textContent).toBe('关闭');
     expect(container.textContent).toContain('BASE revision 7');
     expect(container.textContent).toContain('PROPOSED：');
     expect(container.textContent).toContain('将提交');
@@ -263,6 +269,13 @@ describe('Arena room Proposal workspace', () => {
       'PROPOSED：角色 data-card:character-public-1 分配至队伍 team:',
     );
     expect(container.textContent).toContain('叙事历史 读取=开(10)、写入=关');
+
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.activeElement).toBe(previewTrigger);
+    await act(async () => previewTrigger.click());
 
     await act(async () => {
       button('提交 Proposal').click();
@@ -299,6 +312,76 @@ describe('Arena room Proposal workspace', () => {
         versionToken: 'version-character-public-1',
       },
     });
+    editor.dispose();
+  });
+
+  it('暴露共享列表移动控件并产生五类全序 typed change', async () => {
+    const reorderableConfig: ArenaRoomSharedConfig = {
+      ...sharedConfig,
+      battleMode: 'scenario',
+      combatants: [
+        { key: 'data-card:character-one', ref: { id: 'character-one', kind: 'character', versionToken: 'v1' } },
+        { key: 'data-card:character-two', ref: { id: 'character-two', kind: 'character', versionToken: 'v1' } },
+        { key: 'data-card:character-three', ref: { id: 'character-three', kind: 'character', versionToken: 'v1' } },
+      ],
+      teams: [
+        { key: 'team:a', displayName: 'A 队', combatantKeys: ['data-card:character-one', 'data-card:character-two'] },
+        { key: 'team:b', displayName: 'B 队', combatantKeys: ['data-card:character-three'] },
+      ],
+      auxScenarios: [
+        { key: 'data-card:aux-one', ref: { id: 'aux-one', kind: 'scenario', versionToken: 'v1' } },
+        { key: 'data-card:aux-two', ref: { id: 'aux-two', kind: 'scenario', versionToken: 'v1' } },
+      ],
+      materials: [
+        { key: 'data-card:material-one', ref: { id: 'material-one', kind: 'material', versionToken: 'v1' } },
+        { key: 'data-card:material-two', ref: { id: 'material-two', kind: 'material', versionToken: 'v1' } },
+      ],
+    };
+    const editor = createRoomProposalArenaEditorSession({
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      revision: 7,
+      sharedConfig: reorderableConfig,
+    });
+    const reorderState: ArenaRoomControllerState = {
+      ...state,
+      session: state.session ? {
+        ...state.session,
+        snapshot: { ...state.session.snapshot, sharedConfig: reorderableConfig },
+      } : null,
+    };
+    const controller = {
+      submitProposal: vi.fn(async () => undefined),
+      withdrawProposal: vi.fn(async () => undefined),
+      reconnect: vi.fn(),
+    } satisfies Pick<ArenaRoomController, 'reconnect' | 'submitProposal' | 'withdrawProposal'>;
+
+    await act(async () => root.render(
+      <ArenaRoomProposalWorkspaceView editor={editor} state={reorderState} controller={controller} />,
+    ));
+    const move = async (label: string): Promise<void> => {
+      const target = container.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
+      if (!target) throw new Error(`move button not found: ${label}`);
+      await act(async () => target.click());
+    };
+
+    await move('下移 character-one');
+    await move('下移队伍 A 队');
+    await move('下移 A 队内 character-one');
+    await move('下移 aux-one');
+    await move('下移 material-one');
+
+    expect(editor.preview().changes.map((change) => change.type)).toEqual([
+      'reorderCombatants',
+      'reorderTeams',
+      'reorderTeamCombatants',
+      'reorderAuxScenarios',
+      'reorderMaterials',
+    ]);
+    await act(async () => button('预览提案').click());
+    expect(container.textContent).toContain('调整角色顺序');
+    expect(container.textContent).toContain('调整队伍 team:a 内角色顺序');
+    expect(container.textContent).toContain('调整素材顺序');
     editor.dispose();
   });
 });

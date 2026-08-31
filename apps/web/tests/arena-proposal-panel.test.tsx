@@ -185,7 +185,8 @@ describe('Arena Proposal panel real React interactions', () => {
     await act(async () => root.render(
       <ArenaProposalPanel state={stateFor(host, [proposal])} controller={controller} workspace={createWorkspace()} />,
     ));
-    await act(async () => button('待处理提案 (1)').click());
+    expect(container.textContent).toContain('待处理提案 (1)');
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
     const checkboxes = [...container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')];
     expect(checkboxes).toHaveLength(2);
     await act(async () => checkboxes[1]!.click());
@@ -246,6 +247,32 @@ describe('Arena Proposal panel real React interactions', () => {
         value: 'en-US',
         expectedBase: { kind: 'value', value: 'ja-JP' },
       }, {
+        changeId: 'combatant-order',
+        type: 'reorderCombatants',
+        value: ['data-card:character-2', 'data-card:character-1'],
+        expectedBase: { kind: 'value', value: ['data-card:character-1', 'data-card:character-2'] },
+      }, {
+        changeId: 'team-order',
+        type: 'reorderTeams',
+        value: ['team:b', 'team:a'],
+        expectedBase: { kind: 'value', value: ['team:a', 'team:b'] },
+      }, {
+        changeId: 'team-combatant-order',
+        type: 'reorderTeamCombatants',
+        teamKey: 'team:a',
+        value: ['data-card:character-2', 'data-card:character-1'],
+        expectedBase: { kind: 'value', value: ['data-card:character-1', 'data-card:character-2'] },
+      }, {
+        changeId: 'aux-order',
+        type: 'reorderAuxScenarios',
+        value: ['data-card:aux-2', 'data-card:aux-1'],
+        expectedBase: { kind: 'value', value: ['data-card:aux-1', 'data-card:aux-2'] },
+      }, {
+        changeId: 'material-order',
+        type: 'reorderMaterials',
+        value: ['data-card:material-2', 'data-card:material-1'],
+        expectedBase: { kind: 'value', value: ['data-card:material-1', 'data-card:material-2'] },
+      }, {
         changeId: 'character-guidance',
         type: 'setCharacterGuidance',
         combatantKey: 'data-card:character-1',
@@ -271,7 +298,7 @@ describe('Arena Proposal panel real React interactions', () => {
     await act(async () => root.render(
       <ArenaProposalPanel state={stateFor(host, [expanded])} controller={controller} workspace={createWorkspace()} />,
     ));
-    await act(async () => button('待处理提案 (1)').click());
+    expect(container.textContent).toContain('待处理提案 (1)');
     expect(container.textContent).toContain('成员');
     expect(container.textContent).toContain('BASE：');
     expect(container.textContent).toContain('CURRENT：');
@@ -281,6 +308,11 @@ describe('Arena Proposal panel real React interactions', () => {
     expect(container.textContent).toContain('移除队伍 team:a');
     expect(container.textContent).toContain('队伍 team:c 改名为 C 队新名');
     expect(container.textContent).toContain('语言改为 en-US');
+    expect(container.textContent).toContain('调整角色顺序');
+    expect(container.textContent).toContain('调整队伍顺序');
+    expect(container.textContent).toContain('调整队伍 team:a 内角色顺序');
+    expect(container.textContent).toContain('调整辅助情景顺序');
+    expect(container.textContent).toContain('调整素材顺序');
     expect(container.textContent).toContain(
       'PROPOSED：角色 data-card:character-1 引导改为“保护后排并等待支援”',
     );

@@ -15,7 +15,7 @@ import {
   type DataCardRef,
 } from '@mahoshojo/contracts/arena-room';
 
-import { arrayReorder, unsupportedChange } from './errors';
+import { unsupportedChange } from './errors';
 import {
   arrayEqual,
   deepClone,
@@ -40,46 +40,30 @@ const hostEntry = (entry: unknown): boolean => (
   && entry.source === 'host-local'
 );
 
-const assertNestedOrder = (
-  base: readonly string[],
-  working: readonly string[],
-  target: string,
-): void => {
-  const baseSet = new Set(base);
-  const workingSet = new Set(working);
-  const commonBase = base.filter((key) => workingSet.has(key));
-  const commonWorking = working.filter((key) => baseSet.has(key));
-  if (!arrayEqual(commonBase, commonWorking)) arrayReorder(target);
-};
-
 /**
  * Collection additions are applied by appending and removals by filtering the
- * existing sequence. Validate the exact sequence that those semantics produce,
- * including insertions mixed with retained entries.
+ * existing sequence. Return the exact staged order before a typed reorder.
  */
-const assertAppendApplyOrder = (
+const stagedAppendApplyOrder = (
   baseKeys: readonly string[],
   workingKeys: readonly string[],
-  target: string,
-): void => {
+): string[] => {
   const workingSet = new Set(workingKeys);
   const baseSet = new Set(baseKeys);
-  const simulated = [
+  return [
     ...baseKeys.filter((key) => workingSet.has(key)),
     ...workingKeys.filter((key) => !baseSet.has(key)),
   ];
-  if (!arrayEqual(simulated, workingKeys)) arrayReorder(target);
 };
 
-const assertTeamApplyOrder = (
+const stagedTeamApplyOrder = (
   base: ArenaRoomSharedConfig,
-  working: ArenaRoomSharedConfig,
   removedCombatantKeys: ReadonlySet<string>,
   structural: readonly Extract<ArenaProposalChange, {
     type: 'addTeam' | 'removeTeam' | 'renameTeam';
   }>[],
   assignments: readonly Extract<ArenaProposalChange, { type: 'assignTeam' }>[],
-): void => {
+): Map<string, string[]> => {
   const simulated = new Map(base.teams.map((team) => [team.key, [...team.combatantKeys]]));
   for (const team of simulated.values()) {
     for (const key of removedCombatantKeys) {
@@ -103,12 +87,7 @@ const assertTeamApplyOrder = (
     }
     if (target) target.push(change.combatantKey);
   }
-  for (const team of working.teams) {
-    const result = simulated.get(team.key);
-    if (!result || !arrayEqual(result, team.combatantKeys)) {
-      arrayReorder(`team ${team.key} combatants`);
-    }
-  }
+  return simulated;
 };
 
 const changeIdFactory = (): (() => string) => {
@@ -186,16 +165,24 @@ export const diffArenaSharedConfig = (
 
   const baseCombatantKeys = base.combatants.map(entryKey);
   const workingCombatantKeys = working.combatants.map(entryKey);
-  assertAppendApplyOrder(baseCombatantKeys, workingCombatantKeys, 'combatants');
   const baseCombatants = new Map(base.combatants.map((entry) => [entry.key, entry]));
   const workingCombatants = new Map(working.combatants.map((entry) => [entry.key, entry]));
   const addedCombatantIds = new Map<string, string>();
+  const combatantOrderDependencies: string[] = [];
+  const teamOrderDependencies = new Map<string, Set<string>>();
+  const dependTeamOrderOn = (teamKey: string | null, changeId: string): void => {
+    if (teamKey === null) return;
+    const dependencies = teamOrderDependencies.get(teamKey) ?? new Set<string>();
+    dependencies.add(changeId);
+    teamOrderDependencies.set(teamKey, dependencies);
+  };
 
   for (const entry of working.combatants) {
     if (baseCombatants.has(entry.key)) continue;
     requireOnlineAddition(entry, 'combatant');
     const changeId = nextId();
     addedCombatantIds.set(entry.key, changeId);
+    combatantOrderDependencies.push(changeId);
     changes.push(makeChange({
       changeId,
       type: 'addCombatant',
@@ -206,6 +193,10 @@ export const diffArenaSharedConfig = (
   for (const entry of base.combatants) {
     if (workingCombatants.has(entry.key)) continue;
     const changeId = nextId();
+    combatantOrderDependencies.push(changeId);
+    for (const team of base.teams) {
+      if (team.combatantKeys.includes(entry.key)) dependTeamOrderOn(team.key, changeId);
+    }
     changes.push(makeChange({
       changeId,
       type: 'removeCombatant',
@@ -217,6 +208,17 @@ export const diffArenaSharedConfig = (
     const previous = baseCombatants.get(entry.key);
     if (!previous) continue;
     compareStableEntry(previous, entry, `combatant ${entry.key}`, true);
+  }
+
+  const stagedCombatantKeys = stagedAppendApplyOrder(baseCombatantKeys, workingCombatantKeys);
+  if (!arrayEqual(stagedCombatantKeys, workingCombatantKeys)) {
+    changes.push(makeChange({
+      changeId: nextId(),
+      type: 'reorderCombatants',
+      value: deepClone(workingCombatantKeys),
+      expectedBase: { kind: 'value', value: stagedCombatantKeys },
+      ...(combatantOrderDependencies.length > 0 ? { dependsOn: combatantOrderDependencies } : {}),
+    }));
   }
 
   for (const entry of working.combatants) {
@@ -238,14 +240,16 @@ export const diffArenaSharedConfig = (
 
   const baseTeamKeys = base.teams.map(entryKey);
   const workingTeamKeys = working.teams.map(entryKey);
-  assertAppendApplyOrder(baseTeamKeys, workingTeamKeys, 'teams');
   const baseTeams = new Map(base.teams.map((team) => [team.key, team]));
   const workingTeams = new Map(working.teams.map((team) => [team.key, team]));
   const addedTeamIds = new Map<string, string>();
+  const topLevelTeamOrderDependencies: string[] = [];
   for (const team of working.teams) {
     if (baseTeams.has(team.key)) continue;
     const changeId = nextId();
     addedTeamIds.set(team.key, changeId);
+    topLevelTeamOrderDependencies.push(changeId);
+    dependTeamOrderOn(team.key, changeId);
     changes.push(makeChange({
       changeId,
       type: 'addTeam',
@@ -256,8 +260,10 @@ export const diffArenaSharedConfig = (
   }
   for (const team of base.teams) {
     if (workingTeams.has(team.key)) continue;
+    const changeId = nextId();
+    topLevelTeamOrderDependencies.push(changeId);
     changes.push(makeChange({
-      changeId: nextId(),
+      changeId,
       type: 'removeTeam',
       teamKey: team.key,
       expectedBase: { kind: 'present', ref: deepClone(team) },
@@ -275,7 +281,16 @@ export const diffArenaSharedConfig = (
         expectedBase: { kind: 'value', value: baseTeam.displayName },
       }));
     }
-    assertNestedOrder(baseTeam.combatantKeys, workingTeam.combatantKeys, `team ${baseTeam.key} combatants`);
+  }
+  const stagedTeamKeys = stagedAppendApplyOrder(baseTeamKeys, workingTeamKeys);
+  if (!arrayEqual(stagedTeamKeys, workingTeamKeys)) {
+    changes.push(makeChange({
+      changeId: nextId(),
+      type: 'reorderTeams',
+      value: deepClone(workingTeamKeys),
+      expectedBase: { kind: 'value', value: stagedTeamKeys },
+      ...(topLevelTeamOrderDependencies.length > 0 ? { dependsOn: topLevelTeamOrderDependencies } : {}),
+    }));
   }
   for (const entry of working.combatants) {
     const previousAssignment = baseCombatants.has(entry.key) ? assignmentOf(base, entry.key) : null;
@@ -288,8 +303,11 @@ export const diffArenaSharedConfig = (
       ...(addedCombatantIds.has(entry.key) ? [addedCombatantIds.get(entry.key)!] : []),
       ...(nextAssignment !== null && addedTeamIds.has(nextAssignment) ? [addedTeamIds.get(nextAssignment)!] : []),
     ];
+    const changeId = nextId();
+    dependTeamOrderOn(previousAssignment, changeId);
+    dependTeamOrderOn(nextAssignment, changeId);
     changes.push(makeChange({
-      changeId: nextId(),
+      changeId,
       type: 'assignTeam',
       combatantKey: entry.key,
       teamKey: nextAssignment,
@@ -301,13 +319,25 @@ export const diffArenaSharedConfig = (
     type: 'addTeam' | 'removeTeam' | 'renameTeam';
   }> => change.type === 'addTeam' || change.type === 'removeTeam' || change.type === 'renameTeam');
   const assignmentChanges = changes.filter((change): change is Extract<ArenaProposalChange, { type: 'assignTeam' }> => change.type === 'assignTeam');
-  assertTeamApplyOrder(
+  const stagedTeamCombatants = stagedTeamApplyOrder(
     base,
-    working,
     new Set(base.combatants.filter((entry) => !workingCombatants.has(entry.key)).map((entry) => entry.key)),
     structuralTeamChanges,
     assignmentChanges,
   );
+  for (const team of working.teams) {
+    const stagedKeys = stagedTeamCombatants.get(team.key);
+    if (!stagedKeys || arrayEqual(stagedKeys, team.combatantKeys)) continue;
+    const dependencies = [...(teamOrderDependencies.get(team.key) ?? [])];
+    changes.push(makeChange({
+      changeId: nextId(),
+      type: 'reorderTeamCombatants',
+      teamKey: team.key,
+      value: deepClone(team.combatantKeys),
+      expectedBase: { kind: 'value', value: deepClone(stagedKeys) },
+      ...(dependencies.length > 0 ? { dependsOn: dependencies } : {}),
+    }));
+  }
 
   if (base.battleMode !== working.battleMode) {
     changes.push(makeChange({
@@ -370,23 +400,27 @@ export const diffArenaSharedConfig = (
   ): void => {
     const baseKeys = baseEntries.map(entryKey);
     const workingKeys = workingEntries.map(entryKey);
-    assertAppendApplyOrder(baseKeys, workingKeys, `${target}s`);
     const baseMap = new Map(baseEntries.map((entry) => [entry.key, entry]));
     const workingMap = new Map(workingEntries.map((entry) => [entry.key, entry]));
+    const orderDependencies: string[] = [];
     for (const entry of workingEntries) {
       if (baseMap.has(entry.key)) continue;
       requireOnlineAddition(entry, target);
       const entryRef = refOf(entry);
       if (target === 'auxScenario') {
+        const changeId = nextId();
+        orderDependencies.push(changeId);
         changes.push(makeChange({
-          changeId: nextId(),
+          changeId,
           type: 'addAuxScenario',
           ref: deepClone(entryRef) as ScenarioDataCardRef,
           expectedBase: { kind: 'absent' },
         }));
       } else {
+        const changeId = nextId();
+        orderDependencies.push(changeId);
         changes.push(makeChange({
-          changeId: nextId(),
+          changeId,
           type: 'addMaterial',
           ref: deepClone(entryRef) as MaterialDataCardRef,
           expectedBase: { kind: 'absent' },
@@ -396,15 +430,19 @@ export const diffArenaSharedConfig = (
     for (const entry of baseEntries) {
       if (workingMap.has(entry.key)) continue;
       if (target === 'auxScenario') {
+        const changeId = nextId();
+        orderDependencies.push(changeId);
         changes.push(makeChange({
-          changeId: nextId(),
+          changeId,
           type: 'removeAuxScenario',
           scenarioKey: entry.key,
           expectedBase: { kind: 'present', ref: expectedScenarioRef(entry as AuxiliaryScenarioEntry) },
         }));
       } else {
+        const changeId = nextId();
+        orderDependencies.push(changeId);
         changes.push(makeChange({
-          changeId: nextId(),
+          changeId,
           type: 'removeMaterial',
           materialKey: entry.key,
           expectedBase: { kind: 'present', ref: expectedMaterialRef(entry as MaterialEntry) },
@@ -414,6 +452,16 @@ export const diffArenaSharedConfig = (
     for (const entry of workingEntries) {
       const previous = baseMap.get(entry.key);
       if (previous) compareStableEntry(previous, entry, `${target} ${entry.key}`);
+    }
+    const stagedKeys = stagedAppendApplyOrder(baseKeys, workingKeys);
+    if (!arrayEqual(stagedKeys, workingKeys)) {
+      changes.push(makeChange({
+        changeId: nextId(),
+        type: target === 'auxScenario' ? 'reorderAuxScenarios' : 'reorderMaterials',
+        value: deepClone(workingKeys),
+        expectedBase: { kind: 'value', value: stagedKeys },
+        ...(orderDependencies.length > 0 ? { dependsOn: orderDependencies } : {}),
+      }));
     }
   };
 

@@ -303,12 +303,8 @@ describe('Arena shared config diff', () => {
     });
   });
 
-  it('supports team rename/language while failing closed for array reorder, preset additions, and host-local additions', () => {
+  it('supports team rename/language while failing closed for preset and host-local additions', () => {
     const base = baseConfig();
-    expect(() => diffArenaSharedConfig(base, {
-      ...base,
-      teams: [{ ...base.teams[1] }, { ...base.teams[0] }],
-    })).toThrowError(/array reorder|reorder/i);
     expect(diffArenaSharedConfig(base, {
       ...base,
       teams: [{ ...base.teams[0], displayName: 'renamed' }, base.teams[1]],
@@ -332,32 +328,95 @@ describe('Arena shared config diff', () => {
     })).toThrowError(/host-local|represent/i);
   });
 
-  it('fails closed when a collection insertion is not the append position reproducible by apply', () => {
+  it('emits dependency-bound reorder changes when collection insertion is not append-only', () => {
     const base = baseConfig();
-    expect(() => diffArenaSharedConfig(base, {
+    const working = {
       ...base,
       combatants: [base.combatants[0], online('c3', 'character'), base.combatants[1]],
-    })).toThrowError(/order|reorder|append/i);
-    expect(() => diffArenaSharedConfig(base, {
-      ...base,
       auxScenarios: [base.auxScenarios[0], online('aux-middle', 'scenario'), base.auxScenarios[1]],
-    })).toThrowError(/order|reorder|append/i);
-    expect(() => diffArenaSharedConfig(base, {
-      ...base,
       materials: [base.materials[0], online('mat-middle', 'material'), base.materials[1]],
-    })).toThrowError(/order|reorder|append/i);
+    };
+    const changes = diffArenaSharedConfig(base, working);
+    for (const [reorderType, addType] of [
+      ['reorderCombatants', 'addCombatant'],
+      ['reorderAuxScenarios', 'addAuxScenario'],
+      ['reorderMaterials', 'addMaterial'],
+    ] as const) {
+      const reorder = changes.find((change) => change.type === reorderType);
+      const addition = changes.find((change) => change.type === addType);
+      expect(reorder?.dependsOn).toContain(addition?.changeId);
+      expect(validateProposalChanges(changes, reorder ? [reorder.changeId] : []).issues).toEqual(
+        expect.arrayContaining([expect.objectContaining({ code: 'dependency-not-selected' })]),
+      );
+    }
+    expect(changes.find((change) => change.type === 'reorderCombatants')).toMatchObject({
+      value: ['data-card:c1', 'data-card:c3', 'data-card:c2'],
+      expectedBase: { kind: 'value', value: ['data-card:c1', 'data-card:c2', 'data-card:c3'] },
+    });
+    expect(applyArenaProposal(proposalState(base, 7), makeProposal(changes))).toMatchObject({
+      status: 'accepted',
+      config: working,
+      revision: 8,
+    });
   });
 
-  it('fails closed when team assignment append semantics cannot reproduce the working order', () => {
+  it('emits staged team-combatant reorder after assignment append', () => {
     const base = baseConfig();
-    expect(() => diffArenaSharedConfig(base, {
+    const working = {
       ...base,
       combatants: [...base.combatants, online('c3', 'character')],
       teams: [
         { key: 'team:a', displayName: 'A', combatantKeys: ['data-card:c3', 'data-card:c1'] },
         { key: 'team:b', displayName: 'B', combatantKeys: [] },
       ],
-    })).toThrowError(/order|reorder|append/i);
+    };
+    const changes = diffArenaSharedConfig(base, working);
+    const assignment = changes.find((change) => change.type === 'assignTeam');
+    const reorder = changes.find((change) => change.type === 'reorderTeamCombatants');
+    expect(reorder).toMatchObject({
+      teamKey: 'team:a',
+      value: ['data-card:c3', 'data-card:c1'],
+      expectedBase: { kind: 'value', value: ['data-card:c1', 'data-card:c3'] },
+    });
+    expect(reorder?.dependsOn).toContain(assignment?.changeId);
+    expect(applyArenaProposal(proposalState(base, 7), makeProposal(changes))).toMatchObject({
+      status: 'accepted',
+      config: working,
+      revision: 8,
+    });
+  });
+
+  it('round-trips pure shared collection reorder and conflicts on concurrent order drift', () => {
+    const base = baseConfig();
+    const working = {
+      ...base,
+      combatants: [...base.combatants].reverse(),
+      teams: [...base.teams].reverse(),
+      auxScenarios: [...base.auxScenarios].reverse(),
+      materials: [...base.materials].reverse(),
+    };
+    const changes = diffArenaSharedConfig(base, working);
+    expect(changes.map((change) => change.type)).toEqual([
+      'reorderCombatants',
+      'reorderTeams',
+      'reorderAuxScenarios',
+      'reorderMaterials',
+    ]);
+    expect(applyArenaProposal(proposalState(base, 7), makeProposal(changes))).toMatchObject({
+      status: 'accepted',
+      config: working,
+      revision: 8,
+    });
+    expect(detectProposalConflicts({
+      ...base,
+      combatants: [...base.combatants, online('authority-add', 'character')],
+    }, changes)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        changeId: changes[0]?.changeId,
+        code: 'precondition-failed',
+        target: 'combatants:order',
+      }),
+    ]));
   });
 });
 

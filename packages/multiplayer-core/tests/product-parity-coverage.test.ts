@@ -120,7 +120,14 @@ describe('GMR-10P Arena 产品一致性覆盖矩阵', () => {
       [...ArenaRoomSharedConfigSchema.keyof().options].sort(),
     );
     expect(Object.keys(matrix.proposalChanges).sort()).toEqual(actualProposalChangeTypes());
-    expect(Object.keys(matrix.proposalChanges)).toHaveLength(17);
+    expect(Object.keys(matrix.proposalChanges)).toHaveLength(22);
+    expect(matrix.roomSharedConfig.combatants.contractChangeTypes).toContain('reorderCombatants');
+    expect(matrix.roomSharedConfig.teams.contractChangeTypes).toContain('reorderTeams');
+    expect(matrix.roomSharedConfig['teams.combatantKeys'].contractChangeTypes)
+      .toContain('reorderTeamCombatants');
+    expect(matrix.roomSharedConfig.auxScenarios.contractChangeTypes)
+      .toContain('reorderAuxScenarios');
+    expect(matrix.roomSharedConfig.materials.contractChangeTypes).toContain('reorderMaterials');
   });
 
   it('每项都有 §11.1 mode、contract change 与 test ID 列', () => {

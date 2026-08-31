@@ -26,14 +26,19 @@ import { useLanguagesQuery } from '../hooks/useArenaData';
 import type { ArenaRoomController, ArenaRoomControllerState } from '@/lib/arena-room/controller';
 import {
   ArenaProposalSelectionDetails,
+  ArenaMemberProposalStatus,
   arenaProposalChangeSummary,
   arenaProposalChangeProposedSummary,
   arenaProposalSelectionError,
 } from './ArenaProposalPanel';
+import { ArenaRoomDialog } from './ArenaRoomDialog';
 import { useArenaRoomContext } from './useArenaRoom';
 
 type ModalKind = 'character' | 'scenario' | 'auxScenario' | 'material';
-type ProposalController = Pick<ArenaRoomController, 'submitProposal'>;
+type ProposalController = Pick<
+  ArenaRoomController,
+  'reconnect' | 'submitProposal' | 'withdrawProposal'
+>;
 
 const buttonClass = 'rounded-lg border px-3 py-2 text-sm font-medium transition-colors motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fuchsia-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50';
 const primaryButtonClass = `${buttonClass} border-fuchsia-600 bg-fuchsia-600 text-white hover:bg-fuchsia-700`;
@@ -41,6 +46,24 @@ const secondaryButtonClass = `${buttonClass} border-gray-300 bg-white text-gray-
 const dangerButtonClass = `${buttonClass} border-red-300 bg-white text-red-700 hover:bg-red-50 dark:border-red-800 dark:bg-gray-900 dark:text-red-300`;
 
 const readText = (value: unknown): string => typeof value === 'string' ? value.trim() : '';
+
+const moveItem = <Item,>(
+  items: readonly Item[],
+  fromIndex: number,
+  toIndex: number,
+): Item[] => {
+  const next = [...items];
+  if (
+    fromIndex < 0
+    || fromIndex >= next.length
+    || toIndex < 0
+    || toIndex >= next.length
+    || fromIndex === toIndex
+  ) return next;
+  const [item] = next.splice(fromIndex, 1);
+  if (item !== undefined) next.splice(toIndex, 0, item);
+  return next;
+};
 
 const toExactRef = <Kind extends DataCardRef['kind']>(
   card: unknown,
@@ -80,21 +103,15 @@ const ProposalPreviewDialog = ({
 }) => {
   const validationError = arenaProposalSelectionError(changes, selected);
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 sm:p-6">
-      <section
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="arena-proposal-preview-heading"
-        className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl dark:bg-gray-950"
-      >
-        <div className="flex items-center justify-between gap-3 border-b p-4 dark:border-gray-800">
-          <div>
-            <h3 id="arena-proposal-preview-heading" className="font-semibold text-gray-950 dark:text-gray-100">预览提案</h3>
-            <p className="mt-1 text-xs text-gray-600 dark:text-gray-400">BASE revision {baselineRevision} · 逐项检查 typed diff；依赖与原子组会再次校验。</p>
-          </div>
-          <button type="button" className={secondaryButtonClass} onClick={onClose}>关闭</button>
-        </div>
-        <fieldset className="min-h-0 flex-1 space-y-2 overflow-y-auto p-4">
+    <ArenaRoomDialog
+      open
+      titleId="arena-proposal-preview-heading"
+      title="预览提案"
+      description={`BASE revision ${baselineRevision} · 逐项检查 typed diff；依赖与原子组会再次校验。`}
+      onClose={onClose}
+      widthClassName="max-w-3xl"
+    >
+        <fieldset className="space-y-2">
           <legend className="sr-only">选择提交变更</legend>
           {changes.map((change) => (
             <label key={change.changeId} className="flex items-start gap-2 rounded-lg border border-gray-200 p-3 text-sm dark:border-gray-700">
@@ -118,7 +135,7 @@ const ProposalPreviewDialog = ({
             </label>
           ))}
         </fieldset>
-        <div className="border-t p-4 dark:border-gray-800">
+        <div className="mt-4 border-t pt-4 dark:border-gray-800">
           <div className="text-xs text-gray-600 dark:text-gray-400">将提交 {selected.size} / {changes.length} 项变更</div>
           <div aria-live="polite" className="mt-1 min-h-5 text-xs text-red-700 dark:text-red-300">{validationError ?? ''}</div>
           <button
@@ -130,8 +147,7 @@ const ProposalPreviewDialog = ({
             提交 Proposal
           </button>
         </div>
-      </section>
-    </div>
+    </ArenaRoomDialog>
   );
 };
 
@@ -276,6 +292,7 @@ const ProposalWorkspaceInner = ({
       </div>
       {snapshot.stale ? <p role="status" className="mt-3 rounded-lg bg-amber-50 p-2 text-sm text-amber-900">房间配置已更新；当前草稿仍绑定旧基线，请重新同步后再提交。</p> : null}
       {localError ? <p role="alert" className="mt-3 text-sm text-red-700 dark:text-red-300">{localError}</p> : null}
+      <ArenaMemberProposalStatus state={state} controller={controller} />
 
       <div className="mt-4 grid gap-5 xl:grid-cols-[minmax(320px,420px)_minmax(0,1fr)]">
         <div className="min-w-0 space-y-4">
@@ -295,23 +312,86 @@ const ProposalWorkspaceInner = ({
             </div>
             {snapshot.teams.length > 0 ? (
               <ul className="mb-3 space-y-2" aria-label="提案队伍">
-                {snapshot.teams.map((team) => (
-                  <li key={team.key} className="flex items-center gap-2 rounded-lg border bg-white/80 p-2">
-                    <input
-                      aria-label={`队伍 ${team.name} 名称`}
-                      className="min-w-0 flex-1 rounded border px-2 py-1 text-sm"
-                      value={team.name}
-                      onChange={(event) => mutate((draft) => ({
+                {snapshot.teams.map((team, teamIndex) => (
+                  <li key={team.key} className="rounded-lg border bg-white/80 p-2">
+                    <div className="flex items-center gap-2">
+                      <div className="flex flex-col gap-1">
+                        <button
+                          type="button"
+                          className="min-h-10 min-w-10 rounded border text-xs disabled:cursor-not-allowed disabled:opacity-40"
+                          aria-label={`上移队伍 ${team.name}`}
+                          disabled={disabled || teamIndex === 0}
+                          onClick={() => mutate((draft) => ({
+                            ...draft,
+                            teams: moveItem(draft.teams, teamIndex, teamIndex - 1),
+                          }))}
+                        >↑</button>
+                        <button
+                          type="button"
+                          className="min-h-10 min-w-10 rounded border text-xs disabled:cursor-not-allowed disabled:opacity-40"
+                          aria-label={`下移队伍 ${team.name}`}
+                          disabled={disabled || teamIndex === snapshot.teams.length - 1}
+                          onClick={() => mutate((draft) => ({
+                            ...draft,
+                            teams: moveItem(draft.teams, teamIndex, teamIndex + 1),
+                          }))}
+                        >↓</button>
+                      </div>
+                      <input
+                        aria-label={`队伍 ${team.name} 名称`}
+                        className="min-w-0 flex-1 rounded border px-2 py-1 text-sm"
+                        value={team.name}
+                        onChange={(event) => mutate((draft) => ({
+                          ...draft,
+                          teams: draft.teams.map((item) => item.key === team.key
+                            ? { ...item, displayName: event.target.value }
+                            : item),
+                        }))}
+                      />
+                      <button type="button" className={dangerButtonClass} onClick={() => mutate((draft) => ({
                         ...draft,
-                        teams: draft.teams.map((item) => item.key === team.key
-                          ? { ...item, displayName: event.target.value }
-                          : item),
-                      }))}
-                    />
-                    <button type="button" className={dangerButtonClass} onClick={() => mutate((draft) => ({
-                      ...draft,
-                      teams: draft.teams.filter((item) => item.key !== team.key),
-                    }))}>移除</button>
+                        teams: draft.teams.filter((item) => item.key !== team.key),
+                      }))}>移除</button>
+                    </div>
+                    {team.combatantKeys.length > 0 ? (
+                      <ul className="mt-2 space-y-1" aria-label={`${team.name} 队内角色顺序`}>
+                        {team.combatantKeys.map((combatantKey, combatantIndex) => {
+                          const combatantName = snapshot.combatants.find((item) => item.key === combatantKey)?.name
+                            ?? combatantKey;
+                          return (
+                            <li key={combatantKey} className="flex items-center justify-between gap-2 text-xs">
+                              <span className="min-w-0 truncate">{combatantName}</span>
+                              <span className="flex shrink-0 gap-1">
+                                <button
+                                  type="button"
+                                  className="min-h-10 min-w-10 rounded border disabled:cursor-not-allowed disabled:opacity-40"
+                                  aria-label={`上移 ${team.name}内 ${combatantName}`}
+                                  disabled={disabled || combatantIndex === 0}
+                                  onClick={() => mutate((draft) => ({
+                                    ...draft,
+                                    teams: draft.teams.map((entry) => entry.key === team.key
+                                      ? { ...entry, combatantKeys: moveItem(entry.combatantKeys, combatantIndex, combatantIndex - 1) }
+                                      : entry),
+                                  }))}
+                                >↑</button>
+                                <button
+                                  type="button"
+                                  className="min-h-10 min-w-10 rounded border disabled:cursor-not-allowed disabled:opacity-40"
+                                  aria-label={`下移 ${team.name}内 ${combatantName}`}
+                                  disabled={disabled || combatantIndex === team.combatantKeys.length - 1}
+                                  onClick={() => mutate((draft) => ({
+                                    ...draft,
+                                    teams: draft.teams.map((entry) => entry.key === team.key
+                                      ? { ...entry, combatantKeys: moveItem(entry.combatantKeys, combatantIndex, combatantIndex + 1) }
+                                      : entry),
+                                  }))}
+                                >↓</button>
+                              </span>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    ) : null}
                   </li>
                 ))}
               </ul>
@@ -330,7 +410,7 @@ const ProposalWorkspaceInner = ({
                   item={item}
                   index={index}
                   total={snapshot.combatants.length}
-                  capabilities={{ guidance: true, remove: true }}
+                  capabilities={{ guidance: true, remove: true, reorder: true }}
                   guidanceExpanded
                   onToggleGuidance={() => undefined}
                   onGuidanceChange={(value) => mutate((draft) => ({
@@ -338,6 +418,10 @@ const ProposalWorkspaceInner = ({
                     combatants: draft.combatants.map((entry) => entry.key === item.key
                       ? { ...entry, ...(value.trim() ? { characterGuidance: value } : { characterGuidance: undefined }) }
                       : entry),
+                  }))}
+                  onMove={(fromIndex, toIndex) => mutate((draft) => ({
+                    ...draft,
+                    combatants: moveItem(draft.combatants, fromIndex, toIndex),
                   }))}
                   onRemove={() => mutate((draft) => ({
                     ...draft,
@@ -391,6 +475,11 @@ const ProposalWorkspaceInner = ({
             </div>
             <ArenaAuxScenarioList
               items={snapshot.auxScenarios.map((item) => ({ key: item.key, title: item.name }))}
+              disabled={disabled}
+              onMove={(fromIndex, toIndex) => mutate((draft) => ({
+                ...draft,
+                auxScenarios: moveItem(draft.auxScenarios, fromIndex, toIndex),
+              }))}
               onRemove={(key) => mutate((draft) => ({
                 ...draft,
                 auxScenarios: draft.auxScenarios.filter((item) => item.key !== key),
@@ -402,6 +491,11 @@ const ProposalWorkspaceInner = ({
             <div className="mt-3">
               <ArenaMaterialList
                 items={snapshot.materials.map((item) => ({ key: item.key, name: item.name, sourceLabel: '公开在线数据卡' }))}
+                disabled={disabled}
+                onMove={(fromIndex, toIndex) => mutate((draft) => ({
+                  ...draft,
+                  materials: moveItem(draft.materials, fromIndex, toIndex),
+                }))}
                 onRemove={(key) => mutate((draft) => ({
                   ...draft,
                   materials: draft.materials.filter((item) => item.key !== key),

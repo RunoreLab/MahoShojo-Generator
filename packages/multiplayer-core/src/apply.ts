@@ -84,10 +84,23 @@ const changeTargetExists = (config: ArenaRoomSharedConfig, change: ArenaProposal
       return config.materials.some((entry) => entry.key === change.materialKey);
     case 'removeTeam':
     case 'renameTeam':
+    case 'reorderTeamCombatants':
       return config.teams.some((team) => team.key === change.teamKey);
     default:
       return true;
   }
+};
+
+const reorderByKeys = <Entry extends { readonly key: string }>(
+  entries: readonly Entry[],
+  orderedKeys: readonly string[],
+): Entry[] => {
+  const byKey = new Map(entries.map((entry) => [entry.key, entry]));
+  return orderedKeys.map((key) => {
+    const entry = byKey.get(key);
+    if (!entry) throw new ArenaMultiplayerCoreError('unsupported-change', `reorder key ${key} is absent`);
+    return entry;
+  });
 };
 
 const applyChange = (config: ArenaRoomSharedConfig, change: ArenaProposalChange): void => {
@@ -147,6 +160,17 @@ const applyChange = (config: ArenaRoomSharedConfig, change: ArenaProposalChange)
         ? { ...team, displayName: change.value }
         : team);
       return;
+    case 'reorderCombatants':
+      config.combatants = reorderByKeys(config.combatants, change.value);
+      return;
+    case 'reorderTeams':
+      config.teams = reorderByKeys(config.teams, change.value);
+      return;
+    case 'reorderTeamCombatants':
+      config.teams = config.teams.map((team) => team.key === change.teamKey
+        ? { ...team, combatantKeys: [...change.value] }
+        : team);
+      return;
     case 'setBattleMode':
       config.battleMode = change.value;
       return;
@@ -164,11 +188,17 @@ const applyChange = (config: ArenaRoomSharedConfig, change: ArenaProposalChange)
     case 'removeAuxScenario':
       config.auxScenarios = config.auxScenarios.filter((entry) => entry.key !== change.scenarioKey);
       return;
+    case 'reorderAuxScenarios':
+      config.auxScenarios = reorderByKeys(config.auxScenarios, change.value);
+      return;
     case 'addMaterial':
       config.materials.push({ key: canonicalDataCardKey(change.ref.id), ref: deepClone(change.ref) });
       return;
     case 'removeMaterial':
       config.materials = config.materials.filter((entry) => entry.key !== change.materialKey);
+      return;
+    case 'reorderMaterials':
+      config.materials = reorderByKeys(config.materials, change.value);
       return;
     case 'setUserGuidance':
       config.userGuidance = change.value;

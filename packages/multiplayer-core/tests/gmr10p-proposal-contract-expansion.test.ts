@@ -160,7 +160,7 @@ describe('GMR-10P-D Proposal 共享配置扩面', () => {
     ]);
   });
 
-  it('team reorder 与 team 内 reorder 仍明确拒绝', () => {
+  it('team reorder 与 team 内 reorder 生成 typed change 并精确 apply', () => {
     const base = {
       ...config(),
       teams: [
@@ -168,14 +168,40 @@ describe('GMR-10P-D Proposal 共享配置扩面', () => {
         { key: 'team:b', displayName: 'B', combatantKeys: [] },
       ],
     };
-    expect(() => diffArenaSharedConfig(base, {
+    const reorderedTeams = {
       ...base,
       teams: [base.teams[1], base.teams[0]],
-    })).toThrow(/reorder/i);
-    expect(() => diffArenaSharedConfig(base, {
+    };
+    const teamChanges = diffArenaSharedConfig(base, reorderedTeams);
+    expect(teamChanges).toEqual([
+      expect.objectContaining({
+        type: 'reorderTeams',
+        value: ['team:b', 'team:a'],
+        expectedBase: { kind: 'value', value: ['team:a', 'team:b'] },
+      }),
+    ]);
+    expect(applyArenaProposal(
+      { roomId: 'room-1', config: base, revision: 4 },
+      proposal(teamChanges),
+    )).toMatchObject({ status: 'accepted', config: reorderedTeams, revision: 5 });
+
+    const reorderedTeamCombatants = {
       ...base,
       teams: [{ ...base.teams[0], combatantKeys: ['data-card:c2', 'data-card:c1'] }, base.teams[1]],
-    })).toThrow(/reorder/i);
+    };
+    const teamCombatantChanges = diffArenaSharedConfig(base, reorderedTeamCombatants);
+    expect(teamCombatantChanges).toEqual([
+      expect.objectContaining({
+        type: 'reorderTeamCombatants',
+        teamKey: 'team:a',
+        value: ['data-card:c2', 'data-card:c1'],
+        expectedBase: { kind: 'value', value: ['data-card:c1', 'data-card:c2'] },
+      }),
+    ]);
+    expect(applyArenaProposal(
+      { roomId: 'room-1', config: base, revision: 4 },
+      proposal(teamCombatantChanges),
+    )).toMatchObject({ status: 'accepted', config: reorderedTeamCombatants, revision: 5 });
   });
 
   it('team rename 不会抹掉既有 team creation provenance', () => {
@@ -197,5 +223,43 @@ describe('GMR-10P-D Proposal 共享配置扩面', () => {
       previousConfig: withTeam,
       nextConfig: renamed,
     }).map((change) => change.type)).toEqual(['addTeam', 'renameTeam']);
+  });
+
+  it('reorder provenance 在新 key 追加后保留相对顺序，后续 reorder 接管同一 target', () => {
+    const base = {
+      ...config(),
+      teams: [
+        { key: 'team:a', displayName: 'A', combatantKeys: ['data-card:c1'] },
+        { key: 'team:b', displayName: 'B', combatantKeys: ['data-card:c2'] },
+      ],
+    };
+    const reversed = { ...base, teams: [base.teams[1], base.teams[0]] };
+    const first = diffArenaSharedConfig(base, reversed);
+    const appended = {
+      ...reversed,
+      teams: [...reversed.teams, { key: 'team:c', displayName: 'C', combatantKeys: [] }],
+    };
+    expect(mergeCollaborativeChanges({
+      previousChanges: first,
+      acceptedChanges: [],
+      previousConfig: reversed,
+      nextConfig: appended,
+    }).map((change) => change.type)).toEqual(['reorderTeams']);
+
+    const reorderedAgain = {
+      ...appended,
+      teams: [appended.teams[1], appended.teams[0], appended.teams[2]],
+    };
+    const second = diffArenaSharedConfig(appended, reorderedAgain);
+    const merged = mergeCollaborativeChanges({
+      previousChanges: first,
+      acceptedChanges: second,
+      previousConfig: appended,
+      nextConfig: reorderedAgain,
+    });
+    expect(merged.filter((change) => change.type === 'reorderTeams')).toHaveLength(1);
+    expect(merged.find((change) => change.type === 'reorderTeams')).toMatchObject({
+      value: ['team:a', 'team:b', 'team:c'],
+    });
   });
 });
