@@ -81,12 +81,13 @@ if (process.env.HONO_CONFIG_CHECK_ONLY === 'true') {
     },
   });
   roomActors.startIdleSweeper();
+  const roomReferences = createArenaDataCardRefVerifier({
+    getClient: getHonoPrimaryD1Client,
+  });
   const roomMemberships = createArenaRoomMembershipService({
     actors: roomActors,
     creationReceipts: roomStore,
-  });
-  const roomReferences = createArenaDataCardRefVerifier({
-    getClient: getHonoPrimaryD1Client,
+    references: roomReferences,
   });
   const roomOnlineGenerationContent = createArenaRoomGenerationOnlineContentResolver({
     getClient: getHonoPrimaryD1Client,
@@ -104,6 +105,7 @@ if (process.env.HONO_CONFIG_CHECK_ONLY === 'true') {
   });
   const roomConfigs = createArenaRoomConfigService({
     memberships: roomMemberships,
+    references: roomReferences,
   });
   const roomGenerations = createArenaRoomGenerationService({
     memberships: roomMemberships,

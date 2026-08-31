@@ -1,5 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
+import {
+  ArenaDataCardRefVerifierError,
+  type ArenaDataCardRefVerifier,
+} from '#/arena-room/arena-data-card-ref-verifier';
 import {
   checkpointPredecessorOf,
   consumeArenaRoomCheckpointCommit,
@@ -14,7 +18,10 @@ import {
   createArenaRoomMembershipService,
 } from '#/arena-room/room-membership-service';
 import type { RoomDirectoryRecord } from '#/arena-room/room-directory-record';
-import { createArenaRoomState } from './arena-room-fixtures';
+import {
+  createArenaRoomState,
+  createTestArenaDataCardRefVerifier,
+} from './arena-room-fixtures';
 
 class MemoryRoomStore implements RoomActorCheckpointStore {
   state: ArenaRoomAuthorityState | null = null;
@@ -67,7 +74,7 @@ class MemoryRoomStore implements RoomActorCheckpointStore {
   }
 }
 
-const createHarness = () => {
+const createHarness = (references: ArenaDataCardRefVerifier | null = createTestArenaDataCardRefVerifier()) => {
   const store = new MemoryRoomStore();
   let userIndex = 0;
   let nowIndex = 0;
@@ -87,6 +94,7 @@ const createHarness = () => {
   const service = createArenaRoomMembershipService({
     actors: registry,
     creationReceipts: store,
+    ...(references === null ? {} : { references }),
     createUserId: () => `server-user-${++userIndex}`,
     now: () => timestamps[Math.min(++nowIndex, timestamps.length - 1)]!,
   });
@@ -94,6 +102,38 @@ const createHarness = () => {
 };
 
 describe('Arena Room membership service', () => {
+  it('create 在 canonical ref 复验失败时不创建房间', async () => {
+    const references: ArenaDataCardRefVerifier = {
+      verify: vi.fn(async () => {
+        throw new ArenaDataCardRefVerifierError('ARENA_DATA_CARD_REF_NOT_READABLE');
+      }),
+    };
+    const { service, store } = createHarness(references);
+
+    await expect(service.create({
+      accountUserId: 101,
+      displayName: 'Host',
+      sharedConfig: createArenaRoomState().snapshot.sharedConfig,
+    })).rejects.toEqual(new ArenaRoomMembershipError('ROOM_REFERENCE_DENIED'));
+
+    expect(references.verify).toHaveBeenCalledWith({
+      refs: [{ id: 'character-1', kind: 'character', versionToken: 'v1' }],
+      hostAccountUserId: 101,
+    });
+    expect(store.state).toBeNull();
+  });
+
+  it('Shared Config 含 online ref 但未注入 verifier 时 fail closed', async () => {
+    const { service, store } = createHarness(null);
+
+    await expect(service.create({
+      accountUserId: 101,
+      displayName: 'Host',
+      sharedConfig: createArenaRoomState().snapshot.sharedConfig,
+    })).rejects.toEqual(new ArenaRoomMembershipError('ROOM_REFERENCE_UNAVAILABLE'));
+    expect(store.state).toBeNull();
+  });
+
   it('只暴露安全 session snapshot，host close 使用固定 lifecycle seam', async () => {
     const { service, store } = createHarness();
     const created = await service.create({
@@ -178,6 +218,7 @@ describe('Arena Room membership service', () => {
     const service = createArenaRoomMembershipService({
       actors: preparedRegistry,
       createUserId: () => 'host-1',
+      references: createTestArenaDataCardRefVerifier(),
     });
 
     await expect(service.create({
@@ -475,6 +516,7 @@ describe('Arena Room membership service', () => {
     });
     const original = createArenaRoomMembershipService({
       actors: originalRegistry,
+      references: createTestArenaDataCardRefVerifier(),
       createUserId: () => 'host-1',
     });
     await original.create({
@@ -520,6 +562,7 @@ describe('Arena Room membership service', () => {
       actors: registry,
       createUserId: () => 'host-1',
       now: () => now,
+      references: createTestArenaDataCardRefVerifier(),
     });
     await service.create({
       accountUserId: 101,

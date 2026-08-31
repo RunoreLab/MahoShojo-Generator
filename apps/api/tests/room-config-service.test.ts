@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  ArenaDataCardRefVerifierError,
+  type ArenaDataCardRefVerifier,
+} from '#/arena-room/arena-data-card-ref-verifier';
+import {
   createRoomActorRegistry,
   type RoomActorCheckpointStore,
 } from '#/arena-room/room-actor-registry';
@@ -9,6 +13,7 @@ import {
   ArenaRoomConfigError,
   createArenaRoomConfigService,
 } from '#/arena-room/room-config-service';
+import { createTestArenaDataCardRefVerifier } from './arena-room-fixtures';
 import {
   checkpointPredecessorOf,
   consumeArenaRoomCheckpointCommit,
@@ -75,7 +80,7 @@ const config = () => ({
   },
 });
 
-const createHarness = async () => {
+const createHarness = async (references: ArenaDataCardRefVerifier | null = createTestArenaDataCardRefVerifier()) => {
   const store = new MemoryRoomStore();
   let userIndex = 0;
   let timestampIndex = 0;
@@ -93,6 +98,7 @@ const createHarness = async () => {
   });
   const memberships = createArenaRoomMembershipService({
     actors,
+    references: createTestArenaDataCardRefVerifier(),
     createUserId: () => `user-${++userIndex}`,
     now: () => timestamps[Math.min(++timestampIndex, timestamps.length - 1)]!,
   });
@@ -108,6 +114,7 @@ const createHarness = async () => {
   });
   const service = createArenaRoomConfigService({
     memberships,
+    ...(references === null ? {} : { references }),
     now: () => timestamps[Math.min(++timestampIndex, timestamps.length - 1)]!,
   });
   return { host, memberships, service, store };
@@ -205,5 +212,87 @@ describe('Arena Room config application service', () => {
       revision: 0,
       sharedConfig: { userGuidance: '' },
     });
+  });
+
+  it('房主 publish 在 canonical ref 复验失败时不写入 checkpoint', async () => {
+    const references: ArenaDataCardRefVerifier = {
+      verify: vi.fn(async () => {
+        throw new ArenaDataCardRefVerifierError('ARENA_DATA_CARD_REF_VERSION_MISMATCH');
+      }),
+    };
+    const harness = await createHarness(references);
+
+    await expect(harness.service.publish({
+      roomId: 'room-1',
+      accountUserId: 101,
+      request: {
+        expectedRoomEpoch: 'epoch-1',
+        expectedRevision: 0,
+        sharedConfig: config(),
+      },
+    })).rejects.toEqual(new ArenaRoomConfigError('ROOM_REFERENCE_STALE'));
+
+    expect(references.verify).toHaveBeenCalledWith({
+      refs: [{ id: 'character-1', kind: 'character', versionToken: 'v1' }],
+      hostAccountUserId: 101,
+    });
+    expect(harness.store.state?.snapshot).toMatchObject({ revision: 0 });
+  });
+
+  it('publish 将 Shared Config 中全部 online refs 一次性交给 verifier', async () => {
+    const references: ArenaDataCardRefVerifier = {
+      verify: vi.fn(async ({ refs }) => refs),
+    };
+    const harness = await createHarness(references);
+    const sharedConfig = {
+      ...config(),
+      scenario: {
+        key: 'data-card:scenario-1',
+        ref: { id: 'scenario-1', kind: 'scenario' as const, versionToken: 's1' },
+      },
+      auxScenarios: [{
+        key: 'data-card:scenario-2',
+        ref: { id: 'scenario-2', kind: 'scenario' as const, versionToken: 's2' },
+      }],
+      materials: [{
+        key: 'data-card:material-1',
+        ref: { id: 'material-1', kind: 'material' as const, versionToken: 'm1' },
+      }],
+    };
+
+    await harness.service.publish({
+      roomId: 'room-1',
+      accountUserId: 101,
+      request: {
+        expectedRoomEpoch: 'epoch-1',
+        expectedRevision: 0,
+        sharedConfig,
+      },
+    });
+
+    expect(references.verify).toHaveBeenCalledWith({
+      refs: [
+        { id: 'character-1', kind: 'character', versionToken: 'v1' },
+        { id: 'scenario-1', kind: 'scenario', versionToken: 's1' },
+        { id: 'scenario-2', kind: 'scenario', versionToken: 's2' },
+        { id: 'material-1', kind: 'material', versionToken: 'm1' },
+      ],
+      hostAccountUserId: 101,
+    });
+  });
+
+  it('Shared Config 含 online ref 但未注入 verifier 时 fail closed', async () => {
+    const harness = await createHarness(null);
+
+    await expect(harness.service.publish({
+      roomId: 'room-1',
+      accountUserId: 101,
+      request: {
+        expectedRoomEpoch: 'epoch-1',
+        expectedRevision: 0,
+        sharedConfig: config(),
+      },
+    })).rejects.toEqual(new ArenaRoomConfigError('ROOM_REFERENCE_UNAVAILABLE'));
+    expect(harness.store.state?.snapshot.revision).toBe(0);
   });
 });

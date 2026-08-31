@@ -9,6 +9,11 @@ import {
   type ArenaRoomTransitionFailure,
 } from '@mahoshojo/multiplayer-core';
 
+import {
+  ArenaDataCardRefVerifierError,
+  type ArenaDataCardRefVerifier,
+} from './arena-data-card-ref-verifier';
+import { verifyArenaRoomSharedConfigRefs } from './arena-room-shared-config-refs';
 import type {
   ArenaRoomMembershipService,
   ArenaRoomSessionView,
@@ -20,6 +25,9 @@ export type ArenaRoomConfigErrorCode =
   | 'ROOM_EPOCH_STALE'
   | 'ROOM_OPERATION_UNKNOWN'
   | 'ROOM_PERMISSION_DENIED'
+  | 'ROOM_REFERENCE_DENIED'
+  | 'ROOM_REFERENCE_STALE'
+  | 'ROOM_REFERENCE_UNAVAILABLE'
   | 'ROOM_REVISION_STALE'
   | 'ROOM_TRANSITION_DENIED';
 
@@ -40,6 +48,7 @@ export type ArenaRoomConfigService = {
 
 export type ArenaRoomConfigServiceOptions = {
   readonly memberships: Pick<ArenaRoomMembershipService, 'resolveActiveByAccount'>;
+  readonly references?: ArenaDataCardRefVerifier;
   readonly now?: () => string;
 };
 
@@ -80,6 +89,16 @@ const mapTransitionFailure = (failure: ArenaRoomTransitionFailure): never => {
   }
 };
 
+const mapReferenceError = (error: unknown): never => {
+  if (!(error instanceof ArenaDataCardRefVerifierError)) throw error;
+  switch (error.code) {
+    case 'ARENA_DATA_CARD_REF_VERSION_MISMATCH': return fail('ROOM_REFERENCE_STALE');
+    case 'ARENA_DATA_CARD_REF_NOT_READABLE': return fail('ROOM_REFERENCE_DENIED');
+    case 'ARENA_DATA_CARD_REF_INPUT_INVALID': return fail('ROOM_CONFIG_INPUT_INVALID');
+    default: return fail('ROOM_REFERENCE_UNAVAILABLE');
+  }
+};
+
 export const createArenaRoomConfigService = (
   options: ArenaRoomConfigServiceOptions,
 ): ArenaRoomConfigService => {
@@ -105,6 +124,15 @@ export const createArenaRoomConfigService = (
       }
       if (membership.member.role !== 'host' || membership.member.membershipState !== 'active') {
         return fail('ROOM_PERMISSION_DENIED');
+      }
+      try {
+        await verifyArenaRoomSharedConfigRefs({
+          references: options.references,
+          sharedConfig: request.data.sharedConfig,
+          hostAccountUserId: membership.accountUserId,
+        });
+      } catch (error) {
+        mapReferenceError(error);
       }
       let result;
       try {

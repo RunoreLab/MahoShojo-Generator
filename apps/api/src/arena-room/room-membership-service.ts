@@ -18,6 +18,11 @@ import {
 } from '@mahoshojo/multiplayer-core';
 
 import {
+  ArenaDataCardRefVerifierError,
+  type ArenaDataCardRefVerifier,
+} from './arena-data-card-ref-verifier';
+import { verifyArenaRoomSharedConfigRefs } from './arena-room-shared-config-refs';
+import {
   RoomActor,
   RoomActorRegistry,
 } from './room-actor-registry';
@@ -35,7 +40,10 @@ export type ArenaRoomMembershipErrorCode =
   | 'ROOM_MEMBERSHIP_REVOKED'
   | 'ROOM_MEMBERSHIP_TRANSITION_DENIED'
   | 'ROOM_PERMISSION_DENIED'
-  | 'ROOM_NOT_FOUND';
+  | 'ROOM_NOT_FOUND'
+  | 'ROOM_REFERENCE_DENIED'
+  | 'ROOM_REFERENCE_STALE'
+  | 'ROOM_REFERENCE_UNAVAILABLE';
 
 export class ArenaRoomMembershipError extends Error {
   constructor(readonly code: ArenaRoomMembershipErrorCode) {
@@ -114,6 +122,7 @@ export type ArenaRoomMembershipService = {
 export type ArenaRoomMembershipServiceOptions = {
   readonly actors: RoomActorRegistry;
   readonly creationReceipts?: Pick<RedisRoomStore, 'loadCreationReceipt'>;
+  readonly references?: ArenaDataCardRefVerifier;
   readonly createUserId?: () => string;
   readonly now?: () => string;
 };
@@ -125,6 +134,15 @@ const fail = (code: ArenaRoomMembershipErrorCode): never => {
 const validAccountUserId = (value: number): boolean => (
   Number.isSafeInteger(value) && value > 0
 );
+
+const mapReferenceError = (error: unknown): never => {
+  if (!(error instanceof ArenaDataCardRefVerifierError)) throw error;
+  switch (error.code) {
+    case 'ARENA_DATA_CARD_REF_VERSION_MISMATCH': return fail('ROOM_REFERENCE_STALE');
+    case 'ARENA_DATA_CARD_REF_NOT_READABLE': return fail('ROOM_REFERENCE_DENIED');
+    default: return fail('ROOM_REFERENCE_UNAVAILABLE');
+  }
+};
 
 const canonicalJsonValue = (value: unknown): unknown => {
   if (Array.isArray(value)) return value.map(canonicalJsonValue);
@@ -322,6 +340,15 @@ export const createArenaRoomMembershipService = (
         }
       } else if (input.requireExistingCreationReceipt === true) {
         return fail('ROOM_INPUT_INVALID');
+      }
+      try {
+        await verifyArenaRoomSharedConfigRefs({
+          references: options.references,
+          sharedConfig: sharedConfig.data,
+          hostAccountUserId: input.accountUserId,
+        });
+      } catch (error) {
+        mapReferenceError(error);
       }
       const userId = createUserId();
       let result;

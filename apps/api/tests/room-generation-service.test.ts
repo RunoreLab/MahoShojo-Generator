@@ -28,6 +28,7 @@ import {
   issueArenaRoomTrustedTime,
   type ArenaRoomAuthorityState,
 } from '@mahoshojo/multiplayer-core';
+import { createTestArenaDataCardRefVerifier } from './arena-room-fixtures';
 
 class MemoryRoomStore implements RoomActorCheckpointStore {
   state: ArenaRoomAuthorityState | null = null;
@@ -106,6 +107,7 @@ const createHarness = async () => {
   });
   const memberships = createArenaRoomMembershipService({
     actors,
+    references: createTestArenaDataCardRefVerifier(),
     createUserId: () => `user-${++user}`,
     now: () => '2026-08-28T00:00:30.000Z',
   });

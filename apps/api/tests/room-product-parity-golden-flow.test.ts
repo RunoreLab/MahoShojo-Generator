@@ -26,6 +26,7 @@ import {
 import { createArenaRoomGenerationService } from '#/arena-room/room-generation-service';
 import { createArenaRoomMembershipService } from '#/arena-room/room-membership-service';
 import { createArenaRoomProposalService } from '#/arena-room/room-proposal-service';
+import { createTestArenaDataCardRefVerifier } from './arena-room-fixtures';
 import {
   checkpointPredecessorOf,
   consumeArenaRoomCheckpointCommit,
@@ -153,6 +154,7 @@ describe('GMR-10P-G product parity golden flow', () => {
     });
     const memberships = createArenaRoomMembershipService({
       actors,
+      references: createTestArenaDataCardRefVerifier(),
       createUserId: () => `user-${++userIndex}`,
       now: () => timestamps[Math.min(++timestampIndex, timestamps.length - 1)]!,
     });

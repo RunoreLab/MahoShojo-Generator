@@ -21,6 +21,7 @@ import {
   consumeArenaRoomCheckpointCommit,
   type ArenaRoomAuthorityState,
 } from '@mahoshojo/multiplayer-core';
+import { createTestArenaDataCardRefVerifier } from './arena-room-fixtures';
 
 class MemoryRoomStore implements RoomActorCheckpointStore {
   state: ArenaRoomAuthorityState | null = null;
@@ -89,6 +90,7 @@ const createHarness = async () => {
   });
   const memberships = createArenaRoomMembershipService({
     actors,
+    references: createTestArenaDataCardRefVerifier(),
     createUserId: () => `user-${++userIndex}`,
     now: () => timestamps[Math.min(++timestampIndex, timestamps.length - 1)]!,
   });

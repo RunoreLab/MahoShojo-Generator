@@ -31,7 +31,10 @@ import type {
   ArenaRoomRuntimeObservation,
   ArenaRoomRuntimeObserver,
 } from '#/arena-room/runtime-observer';
-import { createArenaRoomState } from './arena-room-fixtures';
+import {
+  createArenaRoomState,
+  createTestArenaDataCardRefVerifier,
+} from './arena-room-fixtures';
 
 class MemoryRoomStore implements RoomActorCheckpointStore {
   state: ArenaRoomAuthorityState | null = null;
@@ -121,6 +124,7 @@ const createHarness = async (
   });
   const memberships = createArenaRoomMembershipService({
     actors,
+    references: createTestArenaDataCardRefVerifier(),
     createUserId: () => `server-user-${++userIndex}`,
     now: () => new Date(now).toISOString(),
   });

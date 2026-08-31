@@ -15,7 +15,10 @@ import {
   type ArenaRoomAuthorityState,
 } from '@mahoshojo/multiplayer-core';
 
-import { createArenaRoomState } from './arena-room-fixtures';
+import {
+  createArenaRoomState,
+  createTestArenaDataCardRefVerifier,
+} from './arena-room-fixtures';
 
 class MemoryRoomStore implements RoomActorCheckpointStore {
   state: ArenaRoomAuthorityState | null = null;
@@ -96,6 +99,7 @@ describe('Arena Proposal Hono authority composition', () => {
     });
     const memberships = createArenaRoomMembershipService({
       actors,
+      references: createTestArenaDataCardRefVerifier(),
       createUserId: () => `server-user-${++userIndex}`,
       now: () => '2026-08-28T00:01:00.000Z',
     });

@@ -8,7 +8,6 @@ import {
   type ArenaProposalChange,
   type ArenaRoomProposalMutationResult,
   type ArenaRoomProposalMutationStatus,
-  type ArenaRoomSharedConfig,
   type DataCardRef,
 } from '@mahoshojo/contracts/arena-room';
 import {
@@ -22,6 +21,7 @@ import {
   ArenaDataCardRefVerifierError,
   type ArenaDataCardRefVerifier,
 } from './arena-data-card-ref-verifier';
+import { canonicalArenaRoomSharedConfigRefs } from './arena-room-shared-config-refs';
 import type {
   ArenaRoomMembershipService,
   ResolvedArenaRoomMembership,
@@ -192,18 +192,6 @@ const introducedRefs = (changes: readonly ArenaProposalChange[]): readonly DataC
   }))
 );
 
-const canonicalConfigRefs = (config: ArenaRoomSharedConfig): readonly DataCardRef[] => {
-  const entries = [
-    ...config.combatants,
-    ...(config.scenario === null ? [] : [config.scenario]),
-    ...config.auxScenarios,
-    ...config.materials,
-  ];
-  return uniqueRefs(entries.flatMap((entry) => (
-    entry.key.startsWith('data-card:') && 'ref' in entry ? [entry.ref] : []
-  )));
-};
-
 const hostAccountUserId = (state: ArenaRoomAuthorityState): number => {
   const host = state.memberAuthority.find((record) => (
     record.member.role === 'host' && record.member.membershipState === 'active'
@@ -349,7 +337,7 @@ export const createArenaRoomProposalService = (
         }, proposal, request.data.selectedChangeIds);
         if (applied.status === 'rejected') return fail('ROOM_PROPOSAL_CONFLICT');
         await verifyRefs(options.references, {
-          refs: canonicalConfigRefs(applied.config),
+          refs: canonicalArenaRoomSharedConfigRefs(applied.config),
           hostAccountUserId: membership.accountUserId,
         });
       }

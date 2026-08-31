@@ -42,7 +42,10 @@ import {
   createRoomWebSocketApp,
   createRoomWebSocketServer,
 } from '#/arena-room/room-websocket-transport';
-import { createArenaRoomState } from './arena-room-fixtures';
+import {
+  createArenaRoomState,
+  createTestArenaDataCardRefVerifier,
+} from './arena-room-fixtures';
 
 class MemoryRoomStore implements RoomActorCheckpointStore {
   state: ArenaRoomAuthorityState | null = null;
@@ -146,6 +149,7 @@ describe('Room signed-ticket real Node upgrade', () => {
     });
     const memberships = createArenaRoomMembershipService({
       actors,
+      references: createTestArenaDataCardRefVerifier(),
       createUserId: () => `server-user-${++userIndex}`,
       now: () => '2026-08-28T00:01:00.000Z',
     });
@@ -507,6 +511,7 @@ describe('Room signed-ticket real Node upgrade', () => {
     });
     const memberships = createArenaRoomMembershipService({
       actors,
+      references: createTestArenaDataCardRefVerifier(),
       createUserId: () => 'host-dead-socket',
       now: () => '2026-08-28T00:10:00.000Z',
     });

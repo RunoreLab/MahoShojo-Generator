@@ -4,6 +4,7 @@ import {
   type ArenaRoomAuthorityState,
   type ArenaRoomTransitionSuccess,
 } from '@mahoshojo/multiplayer-core';
+import type { ArenaDataCardRefVerifier } from '#/arena-room/arena-data-card-ref-verifier';
 
 export const ARENA_ROOM_TEST_TIMESTAMP = '2026-08-28T00:00:00.000Z';
 export const ARENA_ROOM_NEXT_TIMESTAMP = '2026-08-28T00:01:00.000Z';
@@ -11,6 +12,10 @@ export const ARENA_ROOM_TEST_DEADLINES = {
   hostOfflineDeadline: '2026-08-28T00:45:00.000Z',
   roomIdleDeadline: '2026-08-28T12:00:00.000Z',
 } as const;
+
+export const createTestArenaDataCardRefVerifier = (): ArenaDataCardRefVerifier => ({
+  verify: async ({ refs }) => refs,
+});
 
 const sharedConfig = () => ({
   battleMode: 'classic' as const,

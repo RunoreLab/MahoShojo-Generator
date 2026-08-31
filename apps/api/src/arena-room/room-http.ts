@@ -179,6 +179,11 @@ const mapServiceError = (context: ArenaRoomHttpContext, error: unknown): Respons
       case 'ROOM_MEMBERSHIP_REVOKED':
       case 'ROOM_PERMISSION_DENIED':
         return context.json(errorBody('ROOM_FORBIDDEN', '没有此房间操作权限'), 403);
+      case 'ROOM_REFERENCE_DENIED':
+      case 'ROOM_REFERENCE_STALE':
+        return context.json(errorBody('ROOM_CONFLICT', '房间配置引用已发生变化'), 409);
+      case 'ROOM_REFERENCE_UNAVAILABLE':
+        return unavailable(context);
       case 'ROOM_INPUT_INVALID':
         return invalidRequest(context);
       case 'ROOM_MEMBERSHIP_TRANSITION_DENIED':
@@ -242,11 +247,14 @@ const mapServiceError = (context: ArenaRoomHttpContext, error: unknown): Respons
         return invalidRequest(context);
       case 'ROOM_PERMISSION_DENIED':
         return context.json(errorBody('ROOM_FORBIDDEN', '没有此房间配置发布权限'), 403);
+      case 'ROOM_REFERENCE_DENIED':
+      case 'ROOM_REFERENCE_STALE':
       case 'ROOM_EPOCH_STALE':
       case 'ROOM_REVISION_STALE':
       case 'ROOM_TRANSITION_DENIED':
         return context.json(errorBody('ROOM_CONFLICT', '房间配置已发生变化'), 409);
       case 'ROOM_OPERATION_UNKNOWN':
+      case 'ROOM_REFERENCE_UNAVAILABLE':
         return unavailable(context);
     }
   }

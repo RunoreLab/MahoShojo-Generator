@@ -163,6 +163,7 @@ describe('Arena Room authoritative generation materializer', () => {
         customProvider: { apiKey: 'request-only-secret' },
         narrativeHistory: [{ content: '本地历史正文' }],
         isDowngrade: true,
+        arenaFreeRankingEnabled: true,
       },
     });
 
@@ -182,6 +183,7 @@ describe('Arena Room authoritative generation materializer', () => {
       writeNarrativeHistory: true,
       narrativeHistory: [{ content: '本地历史正文' }],
       isDowngrade: true,
+      arenaFreeRankingEnabled: true,
       customProvider: { apiKey: 'request-only-secret' },
       teams: { 1: ['线上角色', '本地角色'] },
       teamNames: { 1: '红队' },
