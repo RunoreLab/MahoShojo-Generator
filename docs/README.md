@@ -10,9 +10,19 @@ Arena 多人 v1 production ingress 重整与后续激活使用以下专项入口
 - [Arena 生产 Room 入口简化与架构重整规格](./specs/2026-08-31_080100_Arena生产Room入口简化与架构重整规格.md)
 - [Arena 多人生产激活与回滚实施计划](./plans/2026-08-30_231000_Arena多人生产激活与回滚实施计划.md)
 
-该专项冻结 Room HTTP/WSS 直接复用 Hosted Hono primary、caller Origin 与 service origin 分离，以及“默认分支 push
-一次 CI -> Hono transaction/probe -> Cloudflare reusable deploy”的生产路径。运行控制只保留服务端 request kill switch
-与 Web exposure switch；writer capability 继续受 immutable release tuple 保护。
+Arena 多人 GMR-10P 产品一致性整改使用以下权威入口：
+
+- [Arena 多人产品一致性与既有 Arena 复用修订](./specs/2026-08-31_150000_Arena多人产品一致性与既有Arena复用修订.md)
+- [Arena 多人 GMR-10P 产品一致性整改实施计划](./plans/2026-08-31_150000_Arena多人GMR-10P产品一致性整改实施计划.md)
+- [Arena 多人 GMR-10P 产品一致性实施与退出审计](./logs/2026-09-01_002500_Arena多人GMR-10P产品一致性实施与退出审计.md)
+
+GMR-10P 当前为 `DONE`，只把 GMR-11 恢复为 `READY`；它不等于 production activation 已批准。GMR-11 当前门禁仍为
+`READY`，正常 push 保持 writer-disabled，显式 enabled dispatch 也会在缺少独立批准记录时 fail closed。机器状态以
+[`config/arena-production-activation-gate.json`](../config/arena-production-activation-gate.json) 为准。
+
+production ingress 专项冻结 Room HTTP/WSS 直接复用 Hosted Hono primary、caller Origin 与 service origin 分离，以及
+GMR-11 批准后的“默认分支 push 一次 CI -> Hono transaction/probe -> Cloudflare reusable deploy”目标路径。运行控制只保留
+服务端 request kill switch 与 Web exposure switch；writer capability 继续受 immutable release tuple 和独立批准门禁保护。
 
 Arena 战报正文存储与有限保留工作使用以下专项入口：
 

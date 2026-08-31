@@ -796,8 +796,10 @@ machine-readable coverage matrix，并在普通仓库验证中校验 gate 结构
 `GMR-10P-A` 至 `GMR-10P-G` 全部 `DONE`，production parity gate 已转为 `READY`。B 已完成 frozen authority
 materialization、exact ref/host-local payload 校验、显式 config publish 与 host generation preflight；C 至 F 已完成 scoped
 Arena editor、完整 Proposal、共享 BattleResult 与轻量 room shell/management；G 已完成真实 hosted golden flow、Node WSS、
-loopback Redis durable verifier、full `ci:verify` 与两轮独立复审。最终 findings 为 Critical `0` / Important `0` /
-Minor `0`。完整证据见
+loopback Redis durable verifier、focused READY、full `ci:verify` 与综合独立复审。focused READY 最终覆盖 API
+`5 files / 65 tests`、Web `9 / 51`、multiplayer-core `4 / 60`、contracts `5 / 55`；复审发现的 authority namespace、
+modal/a11y、verifier composition、GMR-11 gate 与文档口径问题均已整改并由原审查者复看关闭。最终 findings 为
+Critical `0` / Important `0` / Minor `0`。完整证据见
 [GMR-10P 产品一致性实施与退出审计](../logs/2026-09-01_002500_Arena多人GMR-10P产品一致性实施与退出审计.md)。
 
 ### GMR-11 production activation review
@@ -823,9 +825,10 @@ Cloudflare DR 之外。Preview Hono 已按 request=false → writer-capable tupl
 - production runtime/GitHub secrets/variables 存在性、request flag 与 Web exposure 核对。
 
 production current 的历史 writer-disabled tuple 继续作为 compatible rollback baseline；默认分支的正常发布固定生成
-writer-enabled tuple。上线后容量/告警观察完成前不得把本 Goal 标为
-`DONE`。dual-path provider SSE 只是可选 UX audit，production fault drill 继续 `DEFERRED`，二者都不是本次
-activation 前置。
+writer-enabled tuple 是独立批准后的目标态。当前门禁仍为 `READY`：正常 push 固定生成 writer-disabled tuple，只有显式
+enabled dispatch 才请求 writer-enabled，且必须先通过 reviewed commit、源码树摘要与独立批准证据校验。完成 GMR-11
+批准和对应 workflow 切换前不得把目标态描述成当前事实。上线后容量/告警观察完成前不得把本 Goal 标为 `DONE`。
+dual-path provider SSE 只是可选 UX audit，production fault drill 继续 `DEFERRED`，二者都不是本次 activation 前置。
 
 本阶段没有 D1/Redis schema migration；最终激活维持 Hono transaction/probe → Web 的顺序，失败时先关闭 Web exposure
 与 request flag，再按 immutable baseline contract 回退。证据见
