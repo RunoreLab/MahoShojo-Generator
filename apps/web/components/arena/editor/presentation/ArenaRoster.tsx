@@ -64,7 +64,8 @@ export function ArenaRosterRow({
 }: ArenaRosterRowProps) {
   const guidanceValue = item.guidance ?? '';
   const canMove = capabilities.reorder ? onMove : undefined;
-  const canEditGuidance = Boolean(capabilities.guidance && onToggleGuidance && onGuidanceChange);
+  const toggleGuidance = capabilities.guidance ? onToggleGuidance : undefined;
+  const updateGuidance = capabilities.guidance ? onGuidanceChange : undefined;
 
   return (
     <div className="group rounded-lg bg-white/70 border border-gray-300 px-2 py-2">
@@ -185,7 +186,7 @@ export function ArenaRosterRow({
         </div>
       </div>
 
-      {guidanceExpanded && canEditGuidance ? (
+      {guidanceExpanded && toggleGuidance && updateGuidance ? (
         <div className="mt-2 ml-8 p-2 rounded bg-white/70 border border-gray-300">
           <label className="text-xs text-gray-700 mb-1 block" htmlFor={`arena-roster-guidance-${item.key}`}>
             角色行动引导（可选，最多100字）
@@ -198,7 +199,7 @@ export function ArenaRosterRow({
             disabled={disabled}
             placeholder="例如：谨慎试探、优先保护同伴、尽量不杀、被恐惧支配、隐藏身份等"
             value={guidanceValue}
-            onChange={(event) => onGuidanceChange(event.target.value)}
+            onChange={(event) => updateGuidance(event.target.value)}
           />
           <div className="mt-1 flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500">
             <span>{Array.from(guidanceValue).length}/100</span>
@@ -207,7 +208,7 @@ export function ArenaRosterRow({
                 <button
                   type="button"
                   className="px-2 py-1 rounded bg-gray-100 text-gray-600 hover:bg-gray-200 disabled:opacity-50"
-                  onClick={() => onGuidanceChange('')}
+                  onClick={() => updateGuidance('')}
                   disabled={disabled}
                 >
                   清空
@@ -216,7 +217,7 @@ export function ArenaRosterRow({
               <button
                 type="button"
                 className="px-2 py-1 rounded bg-gray-200 text-gray-700 hover:bg-gray-300 disabled:opacity-50"
-                onClick={onToggleGuidance}
+                onClick={toggleGuidance}
                 disabled={disabled}
               >
                 收起
