@@ -8,6 +8,7 @@ const resetStore = () => {
 
 describe('useBattleStore adjudication event cleanup', () => {
   beforeEach(() => {
+    localStorage.clear();
     resetStore();
   });
 
@@ -79,5 +80,18 @@ describe('useBattleStore adjudication event cleanup', () => {
     useBattleStore.getState().clearAdjudicationEvents();
 
     expect(useBattleStore.getState().adjudicationEvents).toEqual([]);
+  });
+
+  test('持久化手工判定草稿，但排除依赖未恢复卡片来源的事件', () => {
+    useBattleStore.getState().setAdjudicationEvents([
+      { id: 'evt-card', description: '卡片事件', type: 'binary', probability: 50, sourceKey: 'data_card:card-a' },
+      { id: 'evt-manual', description: '手工草稿', type: 'binary', probability: 65 },
+    ]);
+
+    const persisted = JSON.parse(localStorage.getItem('arena-storage') ?? '{}');
+
+    expect(persisted.state?.adjudicationEvents).toEqual([
+      { id: 'evt-manual', description: '手工草稿', type: 'binary', probability: 65 },
+    ]);
   });
 });

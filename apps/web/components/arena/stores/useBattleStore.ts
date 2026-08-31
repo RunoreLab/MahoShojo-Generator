@@ -515,6 +515,9 @@ export const useBattleStore = create<BattleStoreState>()(
         customStoryLength: state.customStoryLength,
         selectedLanguage: state.selectedLanguage,
         settings: state.settings,
+        adjudicationEvents: state.adjudicationEvents.filter(
+          (event) => !normalizeSourceKey(event.sourceKey)
+        ),
       }),
     }
   )
