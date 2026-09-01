@@ -173,7 +173,7 @@ export const patchGenerationCharacterEffect = (input: Readonly<{
   const matchingHistoryIndices = requestedImpact === null
     ? []
     : historyEntries.reduce<number[]>((indices, entry, index) => {
-      if (recordOf(recordOf(entry)?.metadata)?.generation_id === generationId) indices.push(index);
+      if (recordOf(recordOf(entry)?.metadata)?.['generation_id'] === generationId) indices.push(index);
       return indices;
     }, []);
 
@@ -192,7 +192,7 @@ export const patchGenerationCharacterEffect = (input: Readonly<{
   const currentState = recordOf(characterData.current_state);
   if (
     requestedState !== null
-    && currentState?.generation_id !== generationId
+    && currentState?.['generation_id'] !== generationId
     && (!allowCreate || currentState !== null)
   ) {
     availabilityIssues.push(issue(patch, 'currentStateSummary', '未找到本次 generation 的当前状态'));
@@ -244,7 +244,7 @@ export const patchGenerationCharacterEffect = (input: Readonly<{
   }
 
   if (requestedState !== null) {
-    if (currentState?.generation_id === generationId) {
+    if (currentState?.['generation_id'] === generationId) {
       if (currentState.summary !== requestedState) {
         characterData.current_state = {
           ...currentState,
