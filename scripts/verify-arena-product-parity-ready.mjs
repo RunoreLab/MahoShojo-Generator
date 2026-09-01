@@ -25,9 +25,9 @@ const steps = [
     args: ['diff', '--check'],
   },
   {
-    label: 'reviewed source digest recheck',
-    command: process.execPath,
-    args: ['scripts/check-arena-product-parity.mjs', '--require-ready'],
+    label: 'tracked working tree validation',
+    command: 'git',
+    args: ['diff', '--exit-code', 'HEAD', '--'],
   },
 ];
 

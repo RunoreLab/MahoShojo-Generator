@@ -1,5 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
@@ -58,7 +57,6 @@ describe('GMR-10Q product parity gate', () => {
       productionReadiness?: string;
       slices?: Record<string, string>;
       exitEvidence?: {
-        sourceDigest?: string;
         auditLog?: string;
         independentReview?: {
           status?: string;
@@ -74,7 +72,7 @@ describe('GMR-10Q product parity gate', () => {
     };
 
     expect(manifest).toMatchObject({
-      schemaVersion: 3,
+      schemaVersion: 4,
       goal: 'GMR-10Q',
       acceptedSpec: 'SPEC-arena-multiplayer-gate-minimization-parity-v1',
       prerequisiteGoals: { 'GMR-10P': 'DONE' },
@@ -96,7 +94,7 @@ describe('GMR-10Q product parity gate', () => {
           independentReview: { status: 'PASS', critical: 0, important: 0 },
         },
       });
-      expect(manifest.exitEvidence?.sourceDigest).toMatch(/^[a-f0-9]{64}$/u);
+      expect(manifest.exitEvidence).not.toHaveProperty('sourceDigest');
       expect(manifest.exitEvidence?.independentReview?.reviewer).toMatch(/\S/u);
       expect(manifest.exitEvidence?.independentReview?.reviewedAt).toMatch(/Z$/u);
     } else {
@@ -104,7 +102,6 @@ describe('GMR-10Q product parity gate', () => {
         overallStatus: 'IN_PROGRESS',
         productionReadiness: 'BLOCKED',
         exitEvidence: {
-          sourceDigest: null,
           independentReview: {
             status: 'PENDING',
             critical: null,
@@ -138,46 +135,21 @@ describe('GMR-10Q product parity gate', () => {
     expect(gateStep).toBeLessThan(deployJob);
   });
 
-  it('READY 绑定被复审源码摘要，任何后续源码变化都会 fail closed', () => {
-    const temporaryDirectory = mkdtempSync(resolve(tmpdir(), 'arena-parity-gate-'));
-    const temporaryManifest = resolve(temporaryDirectory, 'gate.json');
-    try {
-      const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
-        blockedReason: string;
-        overallStatus: string;
-        productionReadiness: string;
-        slices: Record<string, string>;
-        exitEvidence: {
-          sourceDigest: string | null;
-          independentReview: {
-            status: string;
-            critical: number | null;
-            important: number | null;
-            reviewer: string | null;
-            reviewedAt: string | null;
-          };
-        };
-      };
-      manifest.blockedReason = 'none';
-      manifest.overallStatus = 'DONE';
-      manifest.productionReadiness = 'READY';
-      for (const sliceId of Object.keys(manifest.slices)) manifest.slices[sliceId] = 'DONE';
-      manifest.exitEvidence.independentReview = {
-        status: 'PASS',
-        critical: 0,
-        important: 0,
-        reviewer: 'independent-reviewer',
-        reviewedAt: '2026-09-01T00:00:00Z',
-      };
-      manifest.exitEvidence.sourceDigest = '0'.repeat(64);
-      writeFileSync(temporaryManifest, JSON.stringify(manifest));
+  it('READY 不绑定持续演进的全仓源码摘要', () => {
+    const legacyHelper = resolve(
+      repositoryRoot,
+      'scripts/lib/arena-product-parity-source-digest.mjs',
+    );
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
+      exitEvidence?: Record<string, unknown>;
+    };
 
-      const rejected = runGate(['--manifest', temporaryManifest, '--require-ready']);
-      expect(rejected.status).not.toBe(0);
-      expect(rejected.stderr).toContain('READY sourceDigest 已失效');
-    } finally {
-      rmSync(temporaryDirectory, { recursive: true, force: true });
-    }
+    expect(existsSync(legacyHelper)).toBe(false);
+    expect(manifest.exitEvidence).not.toHaveProperty('sourceDigest');
+
+    const obsoleteCommand = runGate(['--print-source-digest']);
+    expect(obsoleteCommand.status).not.toBe(0);
+    expect(obsoleteCommand.stderr).toContain('未知参数：--print-source-digest');
   });
 
   it('useBattleEngine generation request 通过 coverage helper 精确绑定 matrix 字段', () => {

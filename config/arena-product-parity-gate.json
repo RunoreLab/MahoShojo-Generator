@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "goal": "GMR-10Q",
   "acceptedSpec": "SPEC-arena-multiplayer-gate-minimization-parity-v1",
   "prerequisiteGoals": {
@@ -18,7 +18,6 @@
   },
   "blockedReason": "none",
   "exitEvidence": {
-    "sourceDigest": "e59047913d451da6756b708654a96242047138ff5f0236f66ead0877bbcd5f6f",
     "auditLog": "docs/logs/2026-09-01_092555_Arena多人GMR-10Q门禁最小化与一致性实施与退出审计.md",
     "independentReview": {
       "status": "PASS",

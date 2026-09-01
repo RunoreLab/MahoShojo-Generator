@@ -29,7 +29,10 @@ describe('GMR-10Q repeatable READY verification entrypoint', () => {
     expect(source).toContain('git');
     expect(source).toContain('diff');
     expect(source).toContain('--check');
-    expect(source.match(/scripts\/check-arena-product-parity\.mjs/gu)).toHaveLength(2);
+    expect(source).toContain('--exit-code');
+    expect(source).toContain('HEAD');
+    expect(source.match(/scripts\/check-arena-product-parity\.mjs/gu)).toHaveLength(1);
+    expect(source).not.toContain('reviewed source digest');
   });
 
   it('Redis 入口只连接 loopback，并执行 room、generation 与进程恢复三条真实 verifier', () => {

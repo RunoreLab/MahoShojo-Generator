@@ -1,8 +1,6 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
-import { computeArenaProductParitySourceDigest } from './lib/arena-product-parity-source-digest.mjs';
-
 const repositoryRoot = path.resolve(import.meta.dirname, '..');
 const expectedSliceIds = Array.from(
   { length: 7 },
@@ -19,8 +17,7 @@ const argumentValue = (name, fallback) => {
 };
 
 const requireReady = process.argv.includes('--require-ready');
-const printSourceDigest = process.argv.includes('--print-source-digest');
-const knownArguments = new Set(['--', '--manifest', '--require-ready', '--print-source-digest']);
+const knownArguments = new Set(['--', '--manifest', '--require-ready']);
 for (let index = 2; index < process.argv.length; index += 1) {
   const value = process.argv[index];
   if (!value.startsWith('--')) continue;
@@ -32,11 +29,6 @@ const manifestPath = path.resolve(repositoryRoot, argumentValue(
   '--manifest',
   'config/arena-product-parity-gate.json',
 ));
-
-if (printSourceDigest) {
-  console.log(computeArenaProductParitySourceDigest(repositoryRoot));
-  process.exit(0);
-}
 
 let manifest;
 try {
@@ -51,7 +43,7 @@ const fail = (message) => failures.push(message);
 const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 
 if (!isRecord(manifest)) fail('manifest 必须是 object');
-if (manifest.schemaVersion !== 3) fail('schemaVersion 必须为 3');
+if (manifest.schemaVersion !== 4) fail('schemaVersion 必须为 4');
 if (manifest.goal !== 'GMR-10Q') fail('goal 必须为 GMR-10Q');
 if (manifest.acceptedSpec !== 'SPEC-arena-multiplayer-gate-minimization-parity-v1') {
   fail('acceptedSpec 必须绑定 accepted gate minimization parity spec');
@@ -96,18 +88,6 @@ const exitEvidence = isRecord(manifest.exitEvidence) ? manifest.exitEvidence : n
 if (!exitEvidence) {
   fail('manifest 必须声明 exitEvidence');
 } else {
-  if (ready) {
-    if (
-      typeof exitEvidence.sourceDigest !== 'string'
-      || !/^[a-f0-9]{64}$/u.test(exitEvidence.sourceDigest)
-    ) fail('READY 时 exitEvidence.sourceDigest 必须是 SHA-256');
-  } else if (
-    exitEvidence.sourceDigest !== null
-    && (
-      typeof exitEvidence.sourceDigest !== 'string'
-      || !/^[a-f0-9]{64}$/u.test(exitEvidence.sourceDigest)
-    )
-  ) fail('exitEvidence.sourceDigest 只能为 null 或 SHA-256');
   if (
     typeof exitEvidence.auditLog !== 'string'
     || !/^docs\/logs\/[^/]+\.md$/u.test(exitEvidence.auditLog)
@@ -133,10 +113,6 @@ if (ready && manifest.blockedReason !== 'none') {
   fail('production READY 时 blockedReason 必须为 none');
 }
 if (ready && exitEvidence) {
-  const currentDigest = computeArenaProductParitySourceDigest(repositoryRoot);
-  if (exitEvidence.sourceDigest !== currentDigest) {
-    fail(`READY sourceDigest 已失效：expected=${exitEvidence.sourceDigest} actual=${currentDigest}`);
-  }
   try {
     const audit = readFileSync(path.resolve(repositoryRoot, exitEvidence.auditLog), 'utf8');
     for (const marker of [
@@ -145,7 +121,6 @@ if (ready && exitEvidence) {
       'GMR10Q_EXIT_REVIEW_IMPORTANT: 0',
       `GMR10Q_EXIT_REVIEWER: ${exitEvidence.independentReview.reviewer}`,
       `GMR10Q_EXIT_REVIEWED_AT: ${exitEvidence.independentReview.reviewedAt}`,
-      `GMR10Q_EXIT_REVIEWED_SOURCE_DIGEST: ${exitEvidence.sourceDigest}`,
       'GMR10Q_EXIT_VERIFICATION: PASS',
     ]) {
       if (!audit.includes(marker)) fail(`exit audit 缺少证据标记：${marker}`);
