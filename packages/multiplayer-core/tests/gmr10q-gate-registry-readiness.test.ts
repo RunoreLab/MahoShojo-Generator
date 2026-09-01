@@ -341,6 +341,14 @@ describe('GMR-10Q machine-readable gate/capability registry', () => {
       gateCode: 'ROOM_CONFIG_APPLY_VALIDATION',
       testId: expect.stringContaining('materialize 到 host BattleStore'),
     });
+    expect(workflowByCapability.get('result-save-image')).toMatchObject({
+      gateCode: 'RESULT_PRESENTATION_PARITY',
+      testId: expect.stringContaining('保存图片动作'),
+    });
+    expect(workflowByCapability.get('runtime-provider')).toMatchObject({
+      gateCode: 'RUNTIME_PROVIDER_CONFIG',
+      testId: expect.stringContaining('definitive downstream rejection'),
+    });
     for (const entry of ARENA_STATE_MACHINE_FAILURE_REASON_REGISTRY) {
       expect(gateCodes.has(entry.gateCode), `${entry.reason} -> ${entry.gateCode}`).toBe(true);
       expect(ARENA_GATE_TEST_EVIDENCE).toContain(entry.testId);
@@ -372,6 +380,8 @@ describe('GMR-10Q machine-readable gate/capability registry', () => {
         `it("${marker}"`,
         `test('${marker}'`,
         `test("${marker}"`,
+        `)('${marker}'`,
+        `)("${marker}"`,
       ].some((definition) => source.includes(definition)), testId).toBe(true);
     }
   });

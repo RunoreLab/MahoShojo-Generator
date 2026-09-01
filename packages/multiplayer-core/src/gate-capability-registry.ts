@@ -80,6 +80,8 @@ export const ARENA_GATE_TEST_EVIDENCE = [
   'apps/api/tests/arena-room-generation-materializer.test.ts::canonical resolver 的 exact ref 不一致时 fail closed',
   'apps/api/tests/arena-room-generation-materializer.test.ts::host-local payload 必须匹配 frozen stub 的安全内容版本',
   'apps/web/tests/arena-room-host-reconciliation.test.ts::把新 authority 确定性 materialize 到 host BattleStore，并保留 opaque team key',
+  'apps/web/tests/arena-battle-result-presentation.test.tsx::房间 viewer 可以沿用主战报卡的保存图片动作',
+  'apps/api/tests/room-generation-service.test.ts::definitive downstream rejection %s 终结 Room attempt 并保留具体原因',
 ] as const;
 export type ArenaGateTestEvidence = typeof ARENA_GATE_TEST_EVIDENCE[number];
 
@@ -683,10 +685,10 @@ export const ARENA_GATE_WORKFLOW_CAPABILITY_REGISTRY = Object.freeze([
   ['runtime-body', 'RUNTIME_BODY_LIMIT', 39],
   ['runtime-token', 'RUNTIME_PROMPT_BUDGET', 7],
   ['runtime-output', 'RUNTIME_OUTPUT_LIMIT', 40],
-  ['runtime-provider', 'RUNTIME_PROVIDER_CONFIG', 7],
+  ['runtime-provider', 'RUNTIME_PROVIDER_CONFIG', 46],
   ['runtime-single-producer', 'RUNTIME_SINGLE_PRODUCER', 13],
   ['result-presentation', 'RESULT_PRESENTATION_PARITY', 26],
-  ['result-save-image', 'RESULT_PRESENTATION_PARITY', 26],
+  ['result-save-image', 'RESULT_PRESENTATION_PARITY', 45],
   ['result-narrative-history-write', 'RESULT_HOST_WRITE_AUTHORITY', 20],
   ['result-private-write-actions-deferred', 'RESULT_PRIVATE_WRITE_ACTIONS_DEFERRED', 26],
   ['web-local-validation', 'WEB_LOCAL_VALIDATION', 18],
