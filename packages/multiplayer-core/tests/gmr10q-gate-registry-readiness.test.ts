@@ -152,6 +152,7 @@ describe('GMR-10Q machine-readable gate/capability registry', () => {
       'ROOM_CONFIG_REFERENCE_LIMIT',
       'ROOM_CONFIG_FRAME_LIMIT',
       'ROOM_CONFIG_PUBLISH_FENCE',
+      'ROOM_CONFIG_APPLY_VALIDATION',
       'PROPOSAL_PENDING_LIMIT',
       'PROPOSAL_HISTORY_BOUND',
       'PROPOSAL_ACTION_AUTHORITY',
@@ -325,6 +326,21 @@ describe('GMR-10Q machine-readable gate/capability registry', () => {
       expect(gateCodes.has(entry.gateCode), `${entry.capability} -> ${entry.gateCode}`).toBe(true);
       expect(ARENA_GATE_TEST_EVIDENCE).toContain(entry.testId);
     }
+    const workflowByCapability = new Map(
+      ARENA_GATE_WORKFLOW_CAPABILITY_REGISTRY.map((entry) => [entry.capability, entry]),
+    );
+    expect(workflowByCapability.get('proposal-history-limit')).toMatchObject({
+      gateCode: 'PROPOSAL_HISTORY_BOUND',
+      testId: expect.stringContaining('removes terminal Proposals'),
+    });
+    expect(workflowByCapability.get('shared-config-publish')).toMatchObject({
+      gateCode: 'ROOM_CONFIG_PUBLISH_FENCE',
+      testId: expect.stringContaining('publishes only semantic config changes'),
+    });
+    expect(workflowByCapability.get('shared-config-apply')).toMatchObject({
+      gateCode: 'ROOM_CONFIG_APPLY_VALIDATION',
+      testId: expect.stringContaining('materialize 到 host BattleStore'),
+    });
     for (const entry of ARENA_STATE_MACHINE_FAILURE_REASON_REGISTRY) {
       expect(gateCodes.has(entry.gateCode), `${entry.reason} -> ${entry.gateCode}`).toBe(true);
       expect(ARENA_GATE_TEST_EVIDENCE).toContain(entry.testId);
