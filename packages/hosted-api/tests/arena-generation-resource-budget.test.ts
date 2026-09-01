@@ -8,7 +8,6 @@ import {
 import {
   ARENA_RESOURCE_BUDGET,
   countArenaReferenceItems,
-  estimateArenaPromptBudgetTokens,
   estimateTokensFromText,
   evaluateArenaPromptBudget,
 } from '../src/arena-generation/resource-budget';
@@ -42,23 +41,30 @@ describe('Arena resource budget', () => {
     expect(estimateTokensFromText('')).toBe(0);
   });
 
-  it('does not let non-ASCII scripts bypass the system prompt budget', () => {
-    expect(estimateArenaPromptBudgetTokens('あ한😀A')).toBe(11);
-    expect(estimateArenaPromptBudgetTokens('\uE000')).toBe(3);
+  it('uses the shared approximation instead of UTF-8 bytes for CJK prompt budgets', () => {
     expect(evaluateArenaPromptBudget({
       fundingMode: 'hosted-system',
-      prompt: 'あ'.repeat(43_000),
+      prompt: 'あ'.repeat(100_000),
     })).toMatchObject({
-      allowed: false,
-      estimatedPromptTokens: 129_000,
+      allowed: true,
+      estimatedPromptTokens: 100_000,
       maxEstimatedPromptTokens: 128_000,
     });
   });
 
-  it('does not let adversarial ASCII bypass the system prompt budget', () => {
+  it('uses the shared four-characters-per-token approximation for ASCII prompt budgets', () => {
     expect(evaluateArenaPromptBudget({
       fundingMode: 'hosted-system',
-      prompt: '~'.repeat(128_001),
+      prompt: '~'.repeat(400_000),
+    })).toMatchObject({
+      allowed: true,
+      estimatedPromptTokens: 100_000,
+      maxEstimatedPromptTokens: 128_000,
+    });
+
+    expect(evaluateArenaPromptBudget({
+      fundingMode: 'hosted-system',
+      prompt: '~'.repeat(512_001),
     })).toMatchObject({
       allowed: false,
       estimatedPromptTokens: 128_001,
@@ -72,7 +78,11 @@ describe('Arena resource budget', () => {
     expect(evaluateArenaPromptBudget({
       fundingMode: 'hosted-system',
       prompt,
-    })).toMatchObject({ allowed: false, maxEstimatedPromptTokens: 128_000 });
+    })).toMatchObject({
+      allowed: false,
+      estimatedPromptTokens: 129_000,
+      maxEstimatedPromptTokens: 128_000,
+    });
     expect(evaluateArenaPromptBudget({
       fundingMode: 'hosted-byok',
       prompt,
