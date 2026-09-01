@@ -40,7 +40,7 @@ describe('Arena resumable stream transport cutover', () => {
     expect(routeSource).not.toMatch(/export const (?:GET|HEAD|OPTIONS|PUT|PATCH)/u);
   });
 
-  it('preserves nested battle-story generation identity, SSE ids and base revision fencing', () => {
+  it('preserves nested battle-story generation identity and SSE ids without card hash fencing', () => {
     const proxySource = readFileSync('app/api/arena/session/generate-next/handler.ts', 'utf8');
     const serviceSource = readFileSync('../../packages/hosted-runtime/src/arena-companion/session.ts', 'utf8');
     const hookSource = readFileSync('components/arena/hooks/useBattleStorySession.ts', 'utf8');
@@ -50,7 +50,7 @@ describe('Arena resumable stream transport cutover', () => {
     expect(serviceSource).toContain('encodeGenerationSseEvent(event)');
     expect(serviceSource).not.toContain('parseGenerationSseBlock');
     expect(serviceSource).not.toMatch(/\bfetch\s*\(/u);
-    expect(hookSource).toContain('baseRevisionHash');
+    expect(hookSource).not.toContain('baseRevisionHash');
     expect(hookSource).toContain('generationRequestId: crypto.randomUUID()');
   });
 

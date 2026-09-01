@@ -5,26 +5,30 @@ import { describe, expect, it } from 'vitest';
 import { buildArenaReconciliationRetryPayload } from '@/lib/arena/reconciliation-retry';
 
 describe('Arena 角色更新恢复', () => {
-  it('仅使用同一 generation 与当前卡片基线重试服务端冻结的对账 effect', async () => {
+  it('仅使用同一 generation 与保留稳定身份 wrapper 的当前卡片重试冻结 effect', async () => {
     const payload = await buildArenaReconciliationRetryPayload('generation-retry-001', [
       {
         type: 'magical-girl',
         data: { name: '小锦', signature: 'signed' },
         isValid: true,
-        isPreset: false,
+        isPreset: true,
+        filename: 'C01_egg.json',
+        sourceDataCardId: 'card-1',
+        roomCombatantKey: 'data-card:card-1',
         characterGuidance: '保持冷静',
       },
     ]);
 
     expect(payload).toEqual({
       generationId: 'generation-retry-001',
-      baseRevisionHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
       combatants: [
         {
           type: 'magical-girl',
           data: { name: '小锦', signature: 'signed' },
-          isNative: true,
-          isPreset: false,
+          isPreset: true,
+          filename: 'C01_egg.json',
+          sourceDataCardId: 'card-1',
+          roomCombatantKey: 'data-card:card-1',
           characterGuidance: '保持冷静',
         },
       ],
@@ -65,5 +69,19 @@ describe('Arena 角色更新恢复', () => {
     expect(repairSource).toContain('lastGenerationRepairContext');
     expect(repairSource).not.toContain('/api/arena/redo-combatant-updates');
     expect(repairSource).toContain('startCooldown()');
+  });
+
+  it('角色对账 transport 与 domain exports 不再包含完整卡片 baseRevisionHash', () => {
+    const sources = [
+      'app/api/arena/update-combatants-after-stream/handler.ts',
+      'components/arena/hooks/useStreamCombatantUpdater.ts',
+      'components/arena/hooks/useBattleStorySession.ts',
+      'lib/arena/reconciliation-retry.ts',
+      '../../packages/domain/package.json',
+      '../../packages/domain/src/index.ts',
+      '../../packages/hosted-runtime/src/arena-generation/d1-finalization.ts',
+    ].map((path) => readFileSync(path, 'utf8'));
+
+    expect(sources.join('\n')).not.toContain('baseRevisionHash');
   });
 });

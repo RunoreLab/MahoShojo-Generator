@@ -57,7 +57,6 @@ import { readScenarioBattleStoryConfig } from '@/lib/scenario-battle-story';
 import { readTextAndReasoningStreamFromResponse } from '@/lib/stream/read-text-and-reasoning-stream';
 import { STREAM_ABORT_REASON_USER } from '@/lib/stream/abort';
 import { buildStreamSoftTimeoutMessage } from '@/lib/stream/timeout';
-import { hashArenaCombatantBaseRevision } from '@mahoshojo/domain/arena-reconciliation';
 
 import { useBattleStore } from '../stores/useBattleStore';
 import { BattleStoreState, Combatant, CombatantData } from '../types';
@@ -792,13 +791,11 @@ export function useBattleStorySession() {
           ? input.meta.impacts
           : (input.digest.impactDigest ?? []);
 
-      const baseRevisionHash = await hashArenaCombatantBaseRevision(input.workingCombatants);
       const response = await fetch('/api/arena/update-combatants-after-stream', {
         method: 'POST',
         headers: withArenaGenerationActorToken(await buildRequestHeaders(false)),
         body: JSON.stringify({
           generationId: input.generationId,
-          baseRevisionHash,
           combatants: input.workingCombatants,
           report: {
             headline,
@@ -827,7 +824,10 @@ export function useBattleStorySession() {
       }
 
       const payload = (await response.json()) as {
-        updatedCombatants?: Array<Record<string, unknown>>;
+        updatedCombatants?: Array<{
+          combatantIndex: number;
+          data: Record<string, unknown>;
+        }>;
       };
 
       return {

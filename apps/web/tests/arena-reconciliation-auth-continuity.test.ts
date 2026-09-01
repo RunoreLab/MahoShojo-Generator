@@ -77,13 +77,15 @@ describe('Arena reconciliation authentication continuity', () => {
     expect(readOwnedReconciliation).toBeTypeOf('function');
     if (!buildGenerationApiHeaders || !readOwnedReconciliation) return;
 
-    const manifest = { rosterCount: 2, baseRevisionHash: 'a'.repeat(64) };
+    const manifest = { writeArenaHistory: true };
+    const roster = [{ sortIndex: 0, name: 'A', type: 'magical-girl' }];
     const terminalRow = {
       status: 'completed',
       extra_json: JSON.stringify({
         generationOwnerHash: await sha256('user:42'),
         finalizationCompleted: true,
         localCardReconciliation: manifest,
+        combatantsFallback: roster,
       }),
     };
     const client = sequentialD1([
@@ -116,7 +118,10 @@ describe('Arena reconciliation authentication continuity', () => {
       client,
       generationId: 'generation-1234',
       actorKey: actor!.actorKey,
-    })).resolves.toEqual({ kind: 'found', reconciliation: manifest });
+    })).resolves.toEqual({
+      kind: 'found',
+      reconciliation: { ...manifest, roster },
+    });
 
     const anonymousClient = sequentialD1([[terminalRow]]);
     const anonymousActor = await createArenaGenerationActorResolver({

@@ -370,6 +370,8 @@ describe('Arena D1/R2 finalization ports', () => {
     expect(extra.combatantsFallback.map((entry: Record<string, unknown>) => (
       entry.roomCombatantKey
     ))).toEqual(['data-card:character-a', 'host-local:character:1:b']);
+    expect(extra.localCardReconciliation).not.toHaveProperty('baseRevisionHash');
+    expect(JSON.stringify(extra)).not.toContain('baseRevisionHash');
     expect(JSON.stringify(extra.battleReportRenderSnapshotV1)).not.toContain('must-not-enter-render-snapshot');
   });
 
@@ -1121,7 +1123,11 @@ ORDER BY sort_index
     expect(readOwnedReconciliation).toBeTypeOf('function');
     if (!readOwnedReconciliation) return;
 
-    const payload = { rosterCount: 2, writeArenaHistory: true };
+    const payload = { writeArenaHistory: true };
+    const roster = [
+      { sortIndex: 0, name: 'A', type: 'magical-girl', dataCardId: 'card-a' },
+      { sortIndex: 1, name: 'B', type: 'general-character', templateId: 'B.json' },
+    ];
     const ownerHash = await crypto.subtle.digest(
       'SHA-256',
       new TextEncoder().encode('user:42'),
@@ -1135,6 +1141,7 @@ ORDER BY sort_index
         generationOwnerHash: ownerHash,
         finalizationCompleted: true,
         localCardReconciliation: payload,
+        combatantsFallback: roster,
       }),
     };
     const foundClient = sequentialD1([result([completedRow])]);
@@ -1143,7 +1150,10 @@ ORDER BY sort_index
       client: foundClient,
       generationId: 'generation-1',
       actorKey: 'user:42',
-    })).resolves.toEqual({ kind: 'found', reconciliation: payload });
+    })).resolves.toEqual({
+      kind: 'found',
+      reconciliation: { ...payload, roster },
+    });
     await expect(readOwnedReconciliation({
       client: sequentialD1([result([completedRow])]),
       generationId: 'generation-1',

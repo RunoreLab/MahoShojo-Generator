@@ -16,7 +16,6 @@ import {
 import { parseArenaStructuredReportJson } from './structured-report';
 import { buildArenaTerminalEffectIdempotencyKey } from './finalization';
 import type { NodeDataD1Client } from '../node-runtime/data-ports';
-import { hashArenaCombatantBaseRevision } from '@mahoshojo/domain/arena-reconciliation';
 
 const OUTPUT_KIND = 'battle_report_generation_output';
 const LOCAL_RECONCILIATION_MAX_BYTES = 64 * 1_024;
@@ -329,9 +328,6 @@ const buildExtraJson = async (
         dataCardUpdatedAt: boundedString(combatant?.sourceDataCardUpdatedAt, 128),
       };
     });
-  const baseRevisionHash = await hashArenaCombatantBaseRevision(
-    boundedCombatants,
-  );
   const report = terminalReport(input);
   const officialReport = recordOf(report?.officialReport);
   const scenario = recordOf(input.payload.scenario);
@@ -357,6 +353,13 @@ const buildExtraJson = async (
       ? { narrativeHistoryReadCount: input.metadata.narrativeHistoryReadCount }
       : {}),
   });
+  const impactRosterQueues = new Map<string, number[]>();
+  for (const combatant of combatantsFallback) {
+    const key = combatant.name.replace(/\s+/gu, '').toLocaleLowerCase();
+    const indexes = impactRosterQueues.get(key) ?? [];
+    indexes.push(combatant.sortIndex);
+    impactRosterQueues.set(key, indexes);
+  }
   const reconciliationCandidate = {
     report: {
       headline: boundedString(report?.headline, 300) ?? headlineFromMarkdown(input.markdown) ?? '',
@@ -371,14 +374,22 @@ const buildExtraJson = async (
     impacts: terminalImpacts(input).slice(0, MAX_ARENA_TERMINAL_IMPACTS).flatMap((impact) => {
       const characterName = boundedString(impact.characterName, 300);
       if (!characterName) return [];
+      const explicitIndex = numberOf(impact.combatantIndex);
+      const queuedIndex = impactRosterQueues
+        .get(characterName.replace(/\s+/gu, '').toLocaleLowerCase())
+        ?.shift();
+      const combatantIndex = explicitIndex !== null
+        && explicitIndex >= 0
+        && explicitIndex < combatantsFallback.length
+        ? explicitIndex
+        : queuedIndex;
       return [{
+        ...(combatantIndex === undefined ? {} : { combatantIndex }),
         characterName,
         impact: boundedString(impact.impact, 2_000),
         currentStateSummary: boundedString(impact.currentStateSummary, 2_000),
       }];
     }),
-    rosterCount: combatantsFallback.length,
-    baseRevisionHash,
     userGuidance: boundedString(input.payload.userGuidance, 600),
     scenario: {
       title: boundedString(scenario?.title, 300) ?? boundedString(scenario?.name, 300),
@@ -392,8 +403,6 @@ const buildExtraJson = async (
     : {
       available: false,
       reason: 'manifest_budget_exceeded',
-      baseRevisionHash,
-      rosterCount: combatantsFallback.length,
     };
   const authority = {
     generationRequestId: boundedString(input.generationRequestId, 128),
@@ -447,8 +456,6 @@ const buildExtraJson = async (
     localCardReconciliation: {
       available: false,
       reason: 'manifest_budget_exceeded',
-      baseRevisionHash,
-      rosterCount: combatantsFallback.length,
     },
   };
   if (jsonBytes(compact) <= MAX_ARENA_TERMINAL_EXTRA_JSON_BYTES) return compact;
@@ -459,8 +466,6 @@ const buildExtraJson = async (
     localCardReconciliation: {
       available: false,
       reason: 'manifest_budget_exceeded',
-      baseRevisionHash,
-      rosterCount: combatantsFallback.length,
     },
   };
 };
@@ -1281,8 +1286,11 @@ LIMIT 1
     return { kind: 'unavailable', reason: 'finalization_pending' };
   }
   const reconciliation = recordOf(extra.localCardReconciliation);
+  const roster = Array.isArray(extra.combatantsFallback)
+    ? extra.combatantsFallback.slice(0, MAX_ARENA_TERMINAL_COMBATANTS)
+    : [];
   return reconciliation
-    ? { kind: 'found', reconciliation }
+    ? { kind: 'found', reconciliation: { ...reconciliation, roster } }
     : { kind: 'unavailable', reason: 'manifest_missing' };
 };
 

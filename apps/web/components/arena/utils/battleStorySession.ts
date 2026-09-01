@@ -53,14 +53,6 @@ const getCombatantName = (combatant: CombatantData | Record<string, unknown>): s
   return normalizeText(raw);
 };
 
-const normalizeNameToken = (value: string): string => {
-  return value
-    .trim()
-    .replace(/^[“”"'「」『』《》【】\[\]（）()]+|[“”"'「」『』《》【】\[\]（）()]+$/g, '')
-    .replace(/\s+/g, '')
-    .toLowerCase();
-};
-
 const buildScenarioTitle = (scenario: ScenarioState): string => {
   return (
     normalizeText((scenario.content as any)?.title) ||
@@ -346,7 +338,10 @@ export const resolveBattleStoryChapterCardSnapshot = (
 
 export const mergeUpdatedCombatantsIntoWorkingCombatants = (
   workingCombatants: unknown[],
-  updatedCombatants: Array<Record<string, unknown>>
+  updatedCombatants: Array<{
+    combatantIndex: number;
+    data: Record<string, unknown>;
+  }>
 ): Array<Record<string, unknown>> => {
   if (!Array.isArray(workingCombatants) || workingCombatants.length === 0) return [];
   if (!Array.isArray(updatedCombatants) || updatedCombatants.length === 0) {
@@ -355,24 +350,19 @@ export const mergeUpdatedCombatantsIntoWorkingCombatants = (
     );
   }
 
-  const updateByName = new Map<string, Record<string, unknown>>();
-  updatedCombatants.forEach((combatant) => {
-    const name = getCombatantName(combatant);
-    if (!name) return;
-    updateByName.set(normalizeNameToken(name), combatant);
-  });
+  const updateByIndex = new Map(updatedCombatants.flatMap((entry) => (
+    Number.isSafeInteger(entry.combatantIndex)
+      && entry.combatantIndex >= 0
+      && entry.data
+      && typeof entry.data === 'object'
+      ? [[entry.combatantIndex, entry.data] as const]
+      : []
+  )));
 
   return workingCombatants
     .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
-    .map((combatant) => {
-      const currentData =
-        combatant.data && typeof combatant.data === 'object'
-          ? (combatant.data as Record<string, unknown>)
-          : null;
-      const currentName = currentData ? getCombatantName(currentData) : '';
-      if (!currentName) return combatant;
-
-      const matched = updateByName.get(normalizeNameToken(currentName));
+    .map((combatant, combatantIndex) => {
+      const matched = updateByIndex.get(combatantIndex);
       if (!matched) return combatant;
 
       return {

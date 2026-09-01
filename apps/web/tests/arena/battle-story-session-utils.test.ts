@@ -136,19 +136,22 @@ describe('battle story session utils', () => {
     expect(snapshot.workingCombatants[0]?.characterGuidance).toBe('保护同伴');
   });
 
-  test('mergeUpdatedCombatantsIntoWorkingCombatants 会按角色名合并更新结果', () => {
+  test('mergeUpdatedCombatantsIntoWorkingCombatants 会按 index 合并重复名角色', () => {
     const merged = mergeUpdatedCombatantsIntoWorkingCombatants(
       [
         { type: 'magical-girl', data: { codename: '白百合', hp: 100 } },
-        { type: 'canshou', data: { name: '裂爪', hp: 80 } },
+        { type: 'canshou', data: { codename: '白百合', hp: 80 } },
       ],
       [
-        { codename: '白百合', hp: 60, current_state: { mood: '疲惫' } },
+        {
+          combatantIndex: 1,
+          data: { codename: '白百合', hp: 60, current_state: { mood: '疲惫' } },
+        },
       ]
     );
 
-    expect((merged[0]?.data as any)?.hp).toBe(60);
-    expect((merged[1]?.data as any)?.hp).toBe(80);
+    expect((merged[0]?.data as any)?.hp).toBe(100);
+    expect((merged[1]?.data as any)?.hp).toBe(60);
   });
 
   test('resolveBattleStorySummaryRefreshPlan 会在新增章节达到阈值后返回摘要计划', () => {

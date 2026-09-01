@@ -11,7 +11,6 @@ import {
   buildArenaReconciliationRetryPayload,
   projectArenaReconciliationCombatants,
 } from '@/lib/arena/reconciliation-retry';
-import { hashArenaCombatantBaseRevision } from '@mahoshojo/domain/arena-reconciliation';
 import { useBattleStore } from '../stores/useBattleStore';
 import { BattleStoreState, CombatantData } from '../types';
 
@@ -19,7 +18,6 @@ const log = getLogger('stream-combatant-updater');
 
 interface UpdateCombatantsPayload {
   generationId?: string;
-  baseRevisionHash?: string;
   combatants: any[];
   report?: {
     headline: string;
@@ -266,18 +264,9 @@ export const useStreamCombatantUpdater = () => {
           locks?: { request<T>(_name: string, _callback: () => Promise<T>): Promise<T> };
         }).locks
         : undefined;
-      const effectStorage = (() => {
-        try {
-          return typeof window === 'undefined' ? null : window.localStorage;
-        } catch {
-          return null;
-        }
-      })();
       const result = payload.generationId
         ? await runArenaGenerationEffectOnce({
           generationId: payload.generationId,
-          baseRevisionHash: payload.baseRevisionHash ?? '',
-          storage: effectStorage,
           locks,
           effect: execute,
         })
@@ -288,17 +277,27 @@ export const useStreamCombatantUpdater = () => {
       }
 
       if (result.updatedCombatants && result.updatedCombatants.length > 0) {
-        setUpdatedCombatants(result.updatedCombatants);
-        // 合并更新后的数据到当前角色列表
+        const indexedUpdates = result.updatedCombatants.flatMap((value: unknown) => {
+          if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+          const entry = value as { combatantIndex?: unknown; data?: unknown };
+          return typeof entry.combatantIndex === 'number'
+            && Number.isSafeInteger(entry.combatantIndex)
+            && entry.combatantIndex >= 0
+            && entry.data
+            && typeof entry.data === 'object'
+            && !Array.isArray(entry.data)
+            ? [{ combatantIndex: entry.combatantIndex, data: entry.data }]
+            : [];
+        });
+        setUpdatedCombatants(indexedUpdates.map((entry: { data: any }) => entry.data));
         const currentCombatants = useBattleStore.getState().combatants;
-        const updatedRoster = currentCombatants.map((combatant) => {
+        const updateByIndex = new Map(indexedUpdates.map((entry: {
+          combatantIndex: number;
+          data: any;
+        }) => [entry.combatantIndex, entry.data]));
+        const updatedRoster = currentCombatants.map((combatant, combatantIndex) => {
           if (!('data' in combatant)) return combatant;
-
-          const updated = result.updatedCombatants.find(
-            (item: any) =>
-              (item.codename || item.name) === (combatant.data.codename || combatant.data.name)
-          );
-
+          const updated = updateByIndex.get(combatantIndex);
           return updated ? { ...combatant, data: updated } : combatant;
         });
 
@@ -373,13 +372,9 @@ export const useStreamCombatantUpdater = () => {
         }
       }
 
-      const projectedCombatants = projectArenaReconciliationCombatants(combatants);
       const payload: UpdateCombatantsPayload = {
         ...(generationId ? { generationId } : {}),
-        ...(generationId
-          ? { baseRevisionHash: await hashArenaCombatantBaseRevision(projectedCombatants) }
-          : {}),
-        combatants: projectedCombatants,
+        combatants: projectArenaReconciliationCombatants(combatants),
         report: {
           headline: headline || '魔法少女速报',
           mode: mode,

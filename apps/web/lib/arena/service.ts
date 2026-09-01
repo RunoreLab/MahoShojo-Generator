@@ -26,16 +26,15 @@ export const applyPostBattleUpdates = async (
         writeArenaHistory: boolean;
         writeCurrentState: boolean;
         generationId?: string;
-        baseRevisionHash?: string;
+        combatantIndices?: number[];
         scenarioNativeOverride?: boolean;
     }
-): Promise<any[]> => {
+): Promise<Array<{ combatantIndex: number; data: any }>> => {
     const updatedCombatants = [];
     const participantNames = combatants.map(c => c.data.codename || c.data.name);
     const nowISO = new Date().toISOString();
     const { writeArenaHistory, writeCurrentState } = options;
     const generationId = options.generationId?.trim() || null;
-    const baseRevisionHash = options.baseRevisionHash?.trim() || null;
 
     const nameToNativenessMap = new Map<string, boolean[]>();
     combatants.forEach(c => {
@@ -60,7 +59,8 @@ export const applyPostBattleUpdates = async (
         ?? (scenario ? await verifySignature(scenario) : true);
     const isAnyNonNative = combatants.some(c => !c.isNative || conflictingNames.has(c.data.codename || c.data.name)) || (report.mode === 'scenario' && !isScenarioNative);
 
-    for (const combatant of combatants) {
+    for (let combatantIndex = 0; combatantIndex < combatants.length; combatantIndex += 1) {
+        const combatant = combatants[combatantIndex];
         const characterData = JSON.parse(JSON.stringify(combatant.data));
         const characterName = characterData.codename || characterData.name;
         const characterGuidance =
@@ -104,14 +104,12 @@ export const applyPostBattleUpdates = async (
             }
             const alreadyApplied = generationId && history.entries.some(
                 (entry: ArenaHistoryEntry) => entry.metadata?.generation_id === generationId
-                    && (!baseRevisionHash
-                        || !entry.metadata?.base_revision_hash
-                        || entry.metadata.base_revision_hash === baseRevisionHash)
             );
             if (!alreadyApplied) {
                 history.attributes.updated_at = nowISO;
                 const lastEntryId = history.entries.length > 0 ? history.entries[history.entries.length - 1].id : 0;
-                const characterImpact = impacts.find(i => i.characterName === characterName)?.impact || "在此次事件中获得了成长。";
+                const characterImpact = impacts[combatantIndex]?.impact
+                    || "在此次事件中获得了成长。";
 
                 const newEntry: ArenaHistoryEntry = {
                     id: lastEntryId + 1,
@@ -126,7 +124,6 @@ export const applyPostBattleUpdates = async (
                         scenario_title: getScenarioTitle(scenario),
                         non_native_data_involved: isAnyNonNative,
                         ...(generationId ? { generation_id: generationId } : {}),
-                        ...(baseRevisionHash ? { base_revision_hash: baseRevisionHash } : {}),
                     },
                 };
 
@@ -137,12 +134,9 @@ export const applyPostBattleUpdates = async (
         }
 
         if (writeCurrentState) {
-            const summary = impacts.find(i => i.characterName === characterName)?.currentStateSummary?.trim();
+            const summary = impacts[combatantIndex]?.currentStateSummary?.trim();
             const currentStateAlreadyApplied = generationId
-                && characterData.current_state?.generation_id === generationId
-                && (!baseRevisionHash
-                    || !characterData.current_state?.base_revision_hash
-                    || characterData.current_state.base_revision_hash === baseRevisionHash);
+                && characterData.current_state?.generation_id === generationId;
             if (summary && !currentStateAlreadyApplied) {
                 const nextState = characterData.current_state ?? { summary: '', fields: [] };
                 characterData.current_state = {
@@ -150,7 +144,6 @@ export const applyPostBattleUpdates = async (
                     summary,
                     updated_at: nowISO,
                     ...(generationId ? { generation_id: generationId } : {}),
-                    ...(baseRevisionHash ? { base_revision_hash: baseRevisionHash } : {}),
                 };
                 didMutate = true;
             }
@@ -163,7 +156,10 @@ export const applyPostBattleUpdates = async (
                 delete characterData.signature;
             }
 
-            updatedCombatants.push(characterData);
+            updatedCombatants.push({
+                combatantIndex: options.combatantIndices?.[combatantIndex] ?? combatantIndex,
+                data: characterData,
+            });
         }
     }
 

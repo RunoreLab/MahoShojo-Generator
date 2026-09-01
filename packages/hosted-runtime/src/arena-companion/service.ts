@@ -48,7 +48,6 @@ export type ArenaCompanionProjectInput = {
   writeCurrentState: boolean;
   generationId: string;
   occurredAt: string;
-  baseRevisionHash: string | null;
 };
 
 export type ArenaCompanionServiceOptions = {
@@ -459,7 +458,6 @@ export const createArenaCompanionService = (
         writeCurrentState,
         generationId: upstream.generationId,
         occurredAt: collected.occurredAt ?? new Date(0).toISOString(),
-        baseRevisionHash: textOf(payload.baseRevisionHash) || null,
       });
     } catch {
       return jsonResponse({

@@ -39,11 +39,6 @@
       "import": "./src/arena-ranked-model-policy.ts",
       "default": "./src/arena-ranked-model-policy.ts"
     },
-    "./arena-reconciliation": {
-      "types": "./src/arena-reconciliation.ts",
-      "import": "./src/arena-reconciliation.ts",
-      "default": "./src/arena-reconciliation.ts"
-    },
     "./arena-character-repair": {
       "types": "./src/arena-character-repair.ts",
       "import": "./src/arena-character-repair.ts",

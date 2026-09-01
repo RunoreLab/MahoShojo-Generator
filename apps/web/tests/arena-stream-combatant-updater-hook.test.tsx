@@ -74,4 +74,59 @@ describe('useStreamCombatantUpdater', () => {
     await act(async () => root.unmount());
     container.remove();
   });
+
+  it('重复角色名只按服务端返回的 combatantIndex 合并', async () => {
+    const combatants = [
+      {
+        type: 'general-character' as const,
+        filename: 'a.json',
+        isValid: false,
+        isPreset: false,
+        data: { name: '同名角色', marker: 'first' },
+      },
+      {
+        type: 'general-character' as const,
+        filename: 'b.json',
+        isValid: false,
+        isPreset: false,
+        data: { name: '同名角色', marker: 'second' },
+      },
+    ];
+    useBattleStore.setState({ combatants, updatedCombatants: [] });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      success: true,
+      updatedCombatants: [{
+        combatantIndex: 1,
+        data: { name: '同名角色', marker: 'updated-second' },
+      }],
+      warnings: [],
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })));
+
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => root.render(<Harness />));
+    if (!currentHook) throw new Error('updater hook 未挂载');
+
+    await act(async () => currentHook!.updateCombatants({
+      generationId: 'generation-duplicate-name',
+      combatants: combatants.map((combatant) => ({
+        type: combatant.type,
+        data: combatant.data,
+        isNative: false,
+        isPreset: false,
+        filename: combatant.filename,
+      })),
+    }));
+
+    expect(useBattleStore.getState().combatants.map((item) => (
+      'data' in item ? item.data.marker : null
+    ))).toEqual(['first', 'updated-second']);
+    expect(useBattleStore.getState().updatedCombatants).toEqual([
+      { name: '同名角色', marker: 'updated-second' },
+    ]);
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
 });

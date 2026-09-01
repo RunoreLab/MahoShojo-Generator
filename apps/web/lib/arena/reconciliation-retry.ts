@@ -1,20 +1,39 @@
-import { hashArenaCombatantBaseRevision } from '@mahoshojo/domain/arena-reconciliation';
-
 export type ArenaReconciliationRetryCombatant = Readonly<{
   type: unknown;
   data: unknown;
   isValid?: boolean;
   isPreset?: boolean;
+  filename?: unknown;
+  sourceDataCardId?: unknown;
+  dataCardId?: unknown;
+  sourceDataCardUpdatedAt?: unknown;
+  roomCombatantKey?: unknown;
+  arenaRoomKey?: unknown;
   characterGuidance?: unknown;
 }>;
+
+const text = (value: unknown): string | null => (
+  typeof value === 'string' && value.trim() ? value.trim() : null
+);
 
 export const projectArenaReconciliationCombatants = (
   combatants: readonly ArenaReconciliationRetryCombatant[],
 ) => combatants.map((combatant) => ({
   type: combatant.type,
   data: combatant.data,
-  isNative: combatant.isValid === true,
   isPreset: combatant.isPreset,
+  ...(text(combatant.filename) ? { filename: text(combatant.filename) } : {}),
+  ...(text(combatant.sourceDataCardId)
+    ? { sourceDataCardId: text(combatant.sourceDataCardId) }
+    : text(combatant.dataCardId)
+    ? { dataCardId: text(combatant.dataCardId) }
+    : {}),
+  ...(text(combatant.sourceDataCardUpdatedAt)
+    ? { sourceDataCardUpdatedAt: text(combatant.sourceDataCardUpdatedAt) }
+    : {}),
+  ...(text(combatant.roomCombatantKey) || text(combatant.arenaRoomKey)
+    ? { roomCombatantKey: text(combatant.roomCombatantKey) ?? text(combatant.arenaRoomKey) }
+    : {}),
   characterGuidance: typeof combatant.characterGuidance === 'string'
     ? combatant.characterGuidance
     : null,
@@ -23,11 +42,7 @@ export const projectArenaReconciliationCombatants = (
 export const buildArenaReconciliationRetryPayload = async (
   generationId: string,
   combatants: readonly ArenaReconciliationRetryCombatant[],
-) => {
-  const projectedCombatants = projectArenaReconciliationCombatants(combatants);
-  return {
-    generationId: generationId.trim(),
-    baseRevisionHash: await hashArenaCombatantBaseRevision(projectedCombatants),
-    combatants: projectedCombatants,
-  };
-};
+) => ({
+  generationId: generationId.trim(),
+  combatants: projectArenaReconciliationCombatants(combatants),
+});
