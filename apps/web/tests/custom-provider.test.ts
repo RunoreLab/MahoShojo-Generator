@@ -160,12 +160,16 @@ describe('custom provider helpers', () => {
     if (parsed.ok) expect(parsed.value?.generationOverrides?.temperature).toBe(0.6);
   });
 
-  it('竞技场生成请求复用请求 payload helper，避免丢失最大输出 Tokens', async () => {
-    const source = await readFile('components/arena/hooks/useBattleEngine.ts', 'utf8');
+  it('现存竞技场 AI 生成请求复用 payload helper，退役角色重做入口不再接收 provider', async () => {
+    const [source, retiredRedoSource] = await Promise.all([
+      readFile('components/arena/hooks/useBattleEngine.ts', 'utf8'),
+      readFile('app/api/arena/redo-combatant-updates/handler.ts', 'utf8'),
+    ]);
     const helperCalls = source.match(/buildCustomProviderRequestPayload\(userProviderConfig\)/g) ?? [];
 
-    expect(helperCalls.length).toBeGreaterThanOrEqual(2);
+    expect(helperCalls).toHaveLength(1);
     expect(source).not.toMatch(/customProvider\s*=\s*\{[\s\S]{0,240}providerId:\s*userProviderConfig\.providerId/);
+    expect(retiredRedoSource).not.toContain('customProvider');
   });
 
   it('DeepSeek V4 模型识别覆盖普通与带命名空间的 modelId', () => {
