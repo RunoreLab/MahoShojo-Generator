@@ -27,6 +27,7 @@ import {
   buildArenaMaterialState,
   type ArenaMaterialState,
 } from '@/lib/arena/materials';
+import { verifyArenaContentOrigin } from '@/lib/arena/verify-origin';
 import {
   buildAdjudicationSourceKey,
   filterAdjudicationEventsBySources,
@@ -43,11 +44,13 @@ type SharedScenarioEntry = NonNullable<ArenaRoomSharedConfig['scenario']>;
 type SharedMaterialEntry = ArenaRoomSharedConfig['materials'][number];
 
 export type ArenaRoomPublicCardLoader = (id: string) => Promise<unknown>;
+export type ArenaRoomOriginVerifier = (payload: unknown) => Promise<boolean>;
 
 export type ArenaRoomAuthorityMaterializationOptions = Readonly<{
   currentBundle: ArenaRoomHostWorkspaceBundle;
   loadPublicCard: ArenaRoomPublicCardLoader;
   hostLocalPayloads?: readonly ArenaRoomHostLocalPayload[];
+  verifyOrigin?: ArenaRoomOriginVerifier;
 }>;
 
 const cloneJson = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
@@ -156,6 +159,7 @@ const loadExactPresetPayload = async (
 const publicCombatant = async (
   entry: Extract<SharedEntry, { ref: unknown }>,
   loadPublicCard: ArenaRoomPublicCardLoader,
+  verifyOrigin: ArenaRoomOriginVerifier,
 ): Promise<CombatantData> => {
   const payload = await loadExactPublicPayload(entry.ref, loadPublicCard);
   const cleaned = stripBattleSelectionTransportMeta(payload);
@@ -165,7 +169,7 @@ const publicCombatant = async (
     type: inferCombatantType(cleaned),
     data: cloneJson(cleaned),
     filename: `${source.sourceDataCardName || displayName}.json`,
-    isValid: true,
+    isValid: await verifyOrigin(cleaned),
     isPreset: false,
     isNonStandard: false,
     sourceDataCardId: entry.ref.id,
@@ -202,6 +206,7 @@ const presetCombatant = async (
 const publicScenario = async (
   entry: Extract<SharedScenarioEntry, { ref: unknown }>,
   loadPublicCard: ArenaRoomPublicCardLoader,
+  verifyOrigin: ArenaRoomOriginVerifier,
 ): Promise<ScenarioState> => {
   const payload = await loadExactPublicPayload(entry.ref, loadPublicCard);
   const cleaned = stripBattleSelectionTransportMeta(payload);
@@ -209,7 +214,7 @@ const publicScenario = async (
   return {
     content: cloneJson(cleaned),
     fileName: `${source.sourceDataCardName || entry.ref.id}.json`,
-    isNative: false,
+    isNative: await verifyOrigin(cleaned),
     sourceDataCardId: entry.ref.id,
     sourceDataCardUpdatedAt: entry.ref.versionToken,
     sourceDataCardName: source.sourceDataCardName,
@@ -238,8 +243,10 @@ const presetScenario = async (
 const publicMaterial = async (
   entry: Extract<SharedMaterialEntry, { ref: unknown }>,
   loadPublicCard: ArenaRoomPublicCardLoader,
+  verifyOrigin: ArenaRoomOriginVerifier,
 ): Promise<ArenaMaterialState> => {
   const payload = await loadExactPublicPayload(entry.ref, loadPublicCard);
+  const cleaned = stripBattleSelectionTransportMeta(payload);
   const source = mapDataCardRuntimeSourceInfo(payload);
   return buildArenaMaterialState({
     payload,
@@ -247,7 +254,7 @@ const publicMaterial = async (
     sourceDataCardId: entry.ref.id,
     sourceDataCardUpdatedAt: entry.ref.versionToken,
     sourceDataCardName: source.sourceDataCardName,
-    isNative: false,
+    isNative: await verifyOrigin(cleaned),
   });
 };
 
@@ -274,6 +281,7 @@ export const applyArenaRoomAuthorityToBattleStore = async (
 ): Promise<void> => {
   const config = ArenaRoomSharedConfigSchema.parse(input);
   const current = useBattleStore.getState();
+  const verifyOrigin = options.verifyOrigin ?? verifyArenaContentOrigin;
   const currentConfig = options.currentBundle.sharedConfig;
   const currentCombatants = existingByNormalizedKey(currentConfig.combatants, current.combatants);
   const currentAuxScenarios = existingByNormalizedKey(currentConfig.auxScenarios, current.auxScenarios);
@@ -330,7 +338,7 @@ export const applyArenaRoomAuthorityToBattleStore = async (
     if (existing && sameSource(entry, existing.normalized)) {
       combatant = cloneJson(existing.value);
     } else if ('ref' in entry && entry.key.startsWith('data-card:')) {
-      combatant = await publicCombatant(entry, options.loadPublicCard);
+      combatant = await publicCombatant(entry, options.loadPublicCard, verifyOrigin);
     } else if ('ref' in entry && entry.key.startsWith('preset:')) {
       combatant = await presetCombatant(entry);
     } else if (!('ref' in entry)) {
@@ -342,7 +350,7 @@ export const applyArenaRoomAuthorityToBattleStore = async (
         type: entry.type,
         data: cloneJson(localPayload.payload),
         filename: `${entry.displayName}.json`,
-        isValid: true,
+        isValid: await verifyOrigin(localPayload.payload),
         isPreset: false,
         arenaRoomKey: entry.key,
       };
@@ -365,7 +373,7 @@ export const applyArenaRoomAuthorityToBattleStore = async (
     if (existing && sameSource(config.scenario, existing.normalized)) {
       scenario = cloneJson(existing.value);
     } else if ('ref' in config.scenario && config.scenario.key.startsWith('data-card:')) {
-      scenario = await publicScenario(config.scenario, options.loadPublicCard);
+      scenario = await publicScenario(config.scenario, options.loadPublicCard, verifyOrigin);
     } else if ('ref' in config.scenario && config.scenario.key.startsWith('preset:')) {
       scenario = await presetScenario(config.scenario);
     } else if (!('ref' in config.scenario)) {
@@ -376,7 +384,7 @@ export const applyArenaRoomAuthorityToBattleStore = async (
       scenario = {
         content: cloneJson(localPayload.payload),
         fileName: `${config.scenario.displayName}.json`,
-        isNative: false,
+        isNative: await verifyOrigin(localPayload.payload),
         arenaRoomKey: config.scenario.key,
       };
     } else {
@@ -390,7 +398,7 @@ export const applyArenaRoomAuthorityToBattleStore = async (
     if (existing && sameSource(entry, existing.normalized)) {
       resolved = cloneJson(existing.value);
     } else if ('ref' in entry && entry.key.startsWith('data-card:')) {
-      resolved = await publicScenario(entry, options.loadPublicCard);
+      resolved = await publicScenario(entry, options.loadPublicCard, verifyOrigin);
     } else if ('ref' in entry && entry.key.startsWith('preset:')) {
       resolved = await presetScenario(entry);
     } else if (!('ref' in entry)) {
@@ -399,7 +407,7 @@ export const applyArenaRoomAuthorityToBattleStore = async (
         resolved = {
           content: cloneJson(localPayload.payload),
           fileName: `${entry.displayName}.json`,
-          isNative: false,
+          isNative: await verifyOrigin(localPayload.payload),
           arenaRoomKey: entry.key,
         };
       }
@@ -420,7 +428,7 @@ export const applyArenaRoomAuthorityToBattleStore = async (
     const existing = currentMaterials.get(entry.key);
     if (existing && sameSource(entry, existing.normalized)) return cloneJson(existing.value);
     if ('ref' in entry && entry.key.startsWith('data-card:')) {
-      return publicMaterial(entry, options.loadPublicCard);
+      return publicMaterial(entry, options.loadPublicCard, verifyOrigin);
     }
     if (!('ref' in entry)) {
       const localPayload = hostLocalPayloads.get(entry.key);
@@ -430,7 +438,7 @@ export const applyArenaRoomAuthorityToBattleStore = async (
             payload: localPayload.payload,
             id: `room-material-${entry.key}`,
             sourceDataCardName: entry.displayName,
-            isNative: false,
+            isNative: await verifyOrigin(localPayload.payload),
           }),
           arenaRoomKey: entry.key,
         };

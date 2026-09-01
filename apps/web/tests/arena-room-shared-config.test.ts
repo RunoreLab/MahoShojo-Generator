@@ -234,7 +234,7 @@ describe('Arena Room Battle store projection', () => {
       .resolves.toMatchObject({ combatants: [{ displayName: '未签名本地角色' }] });
   });
 
-  it('在线引用缺版本和随机占位符会一次返回稳定、定位明确的多个问题', async () => {
+  it('随机占位符不是可共享性问题，其他引用问题仍能稳定定位', async () => {
     const missingVersion = source();
     if ('data' in missingVersion.combatants[1]!) {
       delete missingVersion.combatants[1]!.sourceDataCardUpdatedAt;
@@ -248,28 +248,90 @@ describe('Arena Room Battle store projection', () => {
     const result = await tryBuildArenaRoomHostWorkspaceBundleFromBattleState(missingVersion);
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error('expected shareability issues');
-    expect(result.issues).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        code: 'ROOM_GENERATION_RANDOM_COMBATANT_UNRESOLVED',
-        target: 'combatants[0]',
-        message: expect.stringContaining('随机角色占位符'),
-        action: expect.any(String),
-      }),
+    expect(result.issues).toEqual([
       expect.objectContaining({
         code: 'ROOM_REFERENCE_VERSION_REQUIRED',
         target: 'combatants[2]',
         message: expect.stringContaining('缺少版本'),
         action: expect.any(String),
       }),
-    ]));
+    ]);
     await expect(buildArenaRoomSharedConfigFromBattleState(missingVersion)).rejects.toMatchObject({
       name: 'ArenaRoomShareabilityError',
-      message: expect.stringMatching(/随机角色占位符.*缺少版本/u),
-      issues: expect.arrayContaining([
-        expect.objectContaining({ code: 'ROOM_GENERATION_RANDOM_COMBATANT_UNRESOLVED' }),
-        expect.objectContaining({ code: 'ROOM_REFERENCE_VERSION_REQUIRED' }),
-      ]),
+      message: expect.stringContaining('缺少版本'),
+      issues: [expect.objectContaining({ code: 'ROOM_REFERENCE_VERSION_REQUIRED' })],
     } satisfies Partial<ArenaRoomShareabilityError>);
+  });
+
+  it('混合角色投影只省略随机占位符，保留正常角色、队伍引用与其他设置', async () => {
+    const mixed = source();
+    mixed.combatants = [{
+      type: 'random-magical-girl',
+      id: 'random-first',
+      filename: '随机魔法少女',
+      teamId: 1,
+    }, {
+      type: 'canshou',
+      data: { name: '可共享的正常角色' },
+      filename: 'normal.json',
+      isValid: false,
+      isPreset: false,
+      teamId: 1,
+    }, {
+      type: 'random-canshou',
+      id: 'random-last',
+      filename: '随机残兽',
+      teamId: 1,
+    }];
+    mixed.settings.userGuidance = '保留本地设置';
+
+    const bundle = await buildArenaRoomHostWorkspaceBundleFromBattleState(mixed);
+
+    expect(bundle.sharedConfig).toMatchObject({
+      battleMode: 'scenario',
+      combatants: [{
+        key: expect.stringMatching(/^host-local:character:/u),
+        displayName: '可共享的正常角色',
+      }],
+      teams: [{
+        key: 'team:1',
+        combatantKeys: [expect.stringMatching(/^host-local:character:/u)],
+      }],
+      scenario: expect.objectContaining({ displayName: '本地情景' }),
+      userGuidance: '保留本地设置',
+    });
+    expect(bundle.sharedConfig.teams[0]!.combatantKeys).toEqual([
+      bundle.sharedConfig.combatants[0]!.key,
+    ]);
+    expect(bundle.hostLocalPayloads).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        key: bundle.sharedConfig.combatants[0]!.key,
+        kind: 'character',
+        payload: { name: '可共享的正常角色' },
+      }),
+    ]));
+  });
+
+  it('纯随机角色草稿也可建房，投影为空角色但不丢失模式和设置', async () => {
+    const randomOnly = source();
+    randomOnly.combatants = [{
+      type: 'random-magical-girl',
+      id: 'random-only',
+      filename: '随机魔法少女',
+      teamId: 1,
+    }];
+    randomOnly.settings.userGuidance = '建房后再生成角色';
+
+    const bundle = await buildArenaRoomHostWorkspaceBundleFromBattleState(randomOnly);
+
+    expect(bundle.sharedConfig).toMatchObject({
+      battleMode: 'scenario',
+      combatants: [],
+      teams: [{ key: 'team:1', combatantKeys: [] }],
+      scenario: expect.objectContaining({ displayName: '本地情景' }),
+      userGuidance: '建房后再生成角色',
+    });
+    expect(bundle.hostLocalPayloads.some((entry) => entry.kind === 'character')).toBe(false);
   });
 
   it('角色数与 canonical runtime 的 32 位容量一致', async () => {

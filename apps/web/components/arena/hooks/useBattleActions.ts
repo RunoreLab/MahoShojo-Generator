@@ -15,6 +15,7 @@ import {
   stripBattleSelectionTransportMeta,
 } from '@/lib/data-card-read-mappers';
 import { generateRandomCanshou, generateRandomMagicalGirl } from '@/lib/random-character-generator';
+import { verifyArenaContentOrigin as verifyOrigin } from '@/lib/arena/verify-origin';
 
 import { useBattleStore } from '../stores/useBattleStore';
 import {
@@ -33,17 +34,6 @@ import {
 import { parseCombatantsFromText } from '../utils/fileParser';
 import { ScenarioSchema } from '../utils/schemas';
 
-const verifyOrigin = async (payload: any): Promise<boolean> => {
-  const response = await fetch('/api/verify-origin', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  if (!response.ok) return false;
-  const { isValid } = await response.json();
-  return Boolean(isValid);
-};
-
 // 追踪正在处理中的卡片，防止重复点击
 const loadingCards = new Set<string>();
 
@@ -51,6 +41,24 @@ const createClientId = (prefix: string): string => `${prefix}-${Date.now()}-${Ma
 
 const hasArenaReferenceCapacity = (): boolean => canAddArenaReferenceItems(useBattleStore.getState());
 const arenaReferenceLimitMessage = `参考项（辅助情景、素材和问卷）合计最多 ${MAX_ARENA_REFERENCE_ITEMS} 项。`;
+
+export const materializeRandomCombatants = (
+  placeholders: readonly RandomCombatantPlaceholder[],
+): CombatantData[] => placeholders.map((placeholder) => {
+  const data = placeholder.type === 'random-magical-girl'
+    ? generateRandomMagicalGirl()
+    : generateRandomCanshou();
+  return {
+    type: data.codename ? 'magical-girl' : 'canshou',
+    data,
+    filename: `${placeholder.filename} - ${data.codename || data.name}`,
+    // 本地随机生成器不持有签名能力，不得自行授予原生标记。
+    isValid: false,
+    isPreset: false,
+    isNonStandard: false,
+    teamId: placeholder.teamId,
+  };
+});
 
 export const useBattleActions = () => {
   const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
@@ -665,18 +673,7 @@ export const useBattleActions = () => {
     const placeholders = combatants.filter((item): item is RandomCombatantPlaceholder => 'id' in item);
     if (placeholders.length === 0) return;
     setError('正在生成随机角色...');
-    const generatedCharacters = placeholders.map((placeholder) =>
-      placeholder.type === 'random-magical-girl' ? generateRandomMagicalGirl() : generateRandomCanshou()
-    );
-    const newCombatantData: CombatantData[] = generatedCharacters.map((data, index) => ({
-      type: data.codename ? 'magical-girl' : 'canshou',
-      data,
-      filename: `${placeholders[index].filename} - ${data.codename || data.name}`,
-      isValid: true,
-      isPreset: false,
-      isNonStandard: false,
-      teamId: placeholders[index].teamId,
-    }));
+    const newCombatantData = materializeRandomCombatants(placeholders);
     const existing = combatants.filter((item): item is CombatantData => !('id' in item));
     setCombatants([...existing, ...newCombatantData]);
     setError(null);

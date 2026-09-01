@@ -1,7 +1,6 @@
 import {
   ARENA_CANONICAL_CAPABILITIES,
   ArenaRoomHostLocalPayloadSchema,
-  type ArenaRoomHttpErrorCode,
   type ArenaRoomHostLocalPayload,
   type ArenaRoomSharedConfig,
 } from '@mahoshojo/contracts/arena-room';
@@ -54,7 +53,6 @@ export type ArenaRoomHostWorkspaceBundle = Readonly<{
 export type ArenaRoomShareabilityIssueCode =
   | 'ROOM_COMBATANT_LIMIT'
   | 'ROOM_REFERENCE_LIMIT'
-  | Extract<ArenaRoomHttpErrorCode, 'ROOM_GENERATION_RANDOM_COMBATANT_UNRESOLVED'>
   | 'ROOM_REFERENCE_ID_REQUIRED'
   | 'ROOM_REFERENCE_VERSION_REQUIRED'
   | 'ROOM_PRESET_ID_REQUIRED'
@@ -262,13 +260,9 @@ const presetEntry = async (
 const normalizeCombatant = async (
   combatant: Combatant,
   index: number,
-): Promise<NormalizedCombatant> => {
+): Promise<NormalizedCombatant | null> => {
   if (!('data' in combatant)) {
-    return normalizationError(
-      'ROOM_GENERATION_RANDOM_COMBATANT_UNRESOLVED',
-      '随机角色占位符还没有实际角色内容。',
-      '请先生成或选择具体角色，再同步到房间。',
-    );
+    return null;
   }
   const guidance = text(combatant.characterGuidance);
   if (text(combatant.sourceDataCardId)) {
@@ -356,10 +350,11 @@ export const buildArenaRoomHostWorkspaceBundleFromBattleState = async (
 
 const normalizeEntries = async <TInput, TOutput>(
   entries: readonly TInput[],
-  normalize: (entry: TInput, index: number) => Promise<TOutput>,
+  normalize: (entry: TInput, index: number) => Promise<TOutput | null>,
   target: string,
 ): Promise<Readonly<{
   values: readonly TOutput[];
+  valuesByIndex: readonly (TOutput | null)[];
   issues: readonly ArenaRoomShareabilityIssue[];
 }>> => {
   const settled = await Promise.all(entries.map(async (entry, index) => {
@@ -371,6 +366,7 @@ const normalizeEntries = async <TInput, TOutput>(
   }));
   return {
     values: settled.flatMap((entry) => entry.value === null ? [] : [entry.value]),
+    valuesByIndex: settled.map((entry) => entry.value),
     issues: settled.flatMap((entry) => entry.issue === null ? [] : [entry.issue]),
   };
 };
@@ -401,7 +397,11 @@ const buildArenaRoomHostWorkspaceBundle = async (
     normalizeEntries(source.combatants, normalizeCombatant, 'combatants'),
     source.battleMode === 'scenario' && source.scenario.content !== null
       ? normalizeEntries([source.scenario], normalizeScenario, 'scenario')
-      : Promise.resolve({ values: [] as readonly NormalizedScenario[], issues: [] as readonly ArenaRoomShareabilityIssue[] }),
+      : Promise.resolve({
+          values: [] as readonly NormalizedScenario[],
+          valuesByIndex: [] as readonly (NormalizedScenario | null)[],
+          issues: [] as readonly ArenaRoomShareabilityIssue[],
+        }),
     normalizeEntries(source.auxScenarios, normalizeScenario, 'auxScenarios'),
     normalizeEntries(source.materials, normalizeMaterial, 'materials'),
   ]);
@@ -420,11 +420,12 @@ const buildArenaRoomHostWorkspaceBundle = async (
   const materials = materialResult.values;
   const combatantKeysByTeam = new Map<number, string[]>();
   source.combatants.forEach((combatant, index) => {
-    if (!('data' in combatant) || combatant.teamId === undefined || combatant.teamId === null) {
+    const entry = combatantResult.valuesByIndex[index];
+    if (!entry || combatant.teamId === undefined || combatant.teamId === null) {
       return;
     }
     const keys = combatantKeysByTeam.get(combatant.teamId) ?? [];
-    keys.push(combatants[index]!.key);
+    keys.push(entry.key);
     combatantKeysByTeam.set(combatant.teamId, keys);
   });
   const customStoryLength = text(source.customStoryLength) || null;
@@ -480,7 +481,7 @@ const buildArenaRoomHostWorkspaceBundle = async (
     }));
   };
   source.combatants.forEach((combatant, index) => {
-    const entry = combatants[index];
+    const entry = combatantResult.valuesByIndex[index];
     if (entry && 'source' in entry && 'data' in combatant) {
       addHostLocalPayload(entry.key, 'character', combatant.data);
     }

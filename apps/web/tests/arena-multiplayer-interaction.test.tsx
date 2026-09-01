@@ -280,10 +280,10 @@ describe('Arena multiplayer panel real React interactions', () => {
     mocks.tryBuildWorkspaceBundle.mockResolvedValueOnce({
       ok: false,
       issues: [{
-        code: 'ROOM_GENERATION_RANDOM_COMBATANT_UNRESOLVED',
-        target: 'combatants[0]',
-        message: '随机角色占位符还没有实际角色内容。',
-        action: '请先选择具体角色。',
+        code: 'ROOM_PAYLOAD_JSON_INVALID',
+        target: 'combatants[0].data',
+        message: '本地角色内容无法转换为 JSON。',
+        action: '请重新导入该角色。',
       }, {
         code: 'ROOM_REFERENCE_VERSION_REQUIRED',
         target: 'materials[2]',
@@ -309,8 +309,8 @@ describe('Arena multiplayer panel real React interactions', () => {
       expect.objectContaining({ sharedConfig: emptySharedConfig }),
     );
     expect(container.textContent).toContain('房间已创建，但当前本地配置尚未同步');
-    expect(container.textContent).toContain('随机角色占位符还没有实际角色内容');
-    expect(container.textContent).toContain('请先选择具体角色');
+    expect(container.textContent).toContain('本地角色内容无法转换为 JSON');
+    expect(container.textContent).toContain('请重新导入该角色');
     expect(container.textContent).toContain('在线素材引用缺少版本信息');
     expect(container.textContent).toContain('请刷新该在线素材');
     expect(container.textContent).not.toContain('当前竞技场配置无法安全共享');
@@ -320,10 +320,10 @@ describe('Arena multiplayer panel real React interactions', () => {
     mocks.tryBuildWorkspaceBundle.mockResolvedValueOnce({
       ok: false,
       issues: [{
-        code: 'ROOM_GENERATION_RANDOM_COMBATANT_UNRESOLVED',
-        target: 'combatants[0]',
-        message: '随机角色占位符还没有实际角色内容。',
-        action: '请先选择具体角色。',
+        code: 'ROOM_PAYLOAD_JSON_INVALID',
+        target: 'combatants[0].data',
+        message: '本地角色内容无法转换为 JSON。',
+        action: '请重新导入该角色。',
       }],
     });
     mocks.create.mockImplementationOnce(async () => {

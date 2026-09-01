@@ -121,10 +121,12 @@ describe('Arena room host reconciliation', () => {
         : id.startsWith('material') ? 'material' : 'scenario';
       return publicRow(id, type);
     });
+    const verifyOrigin = vi.fn(async () => false);
 
     await applyArenaRoomAuthorityToBattleStore(target, {
       currentBundle: baselineBundle,
       loadPublicCard,
+      verifyOrigin,
     });
 
     const synchronized = useBattleStore.getState();
@@ -149,9 +151,14 @@ describe('Arena room host reconciliation', () => {
     expect(synchronized.combatants[1]).toMatchObject({
       sourceDataCardId: 'character-public',
       sourceDataCardUpdatedAt: 'version-character-public',
+      isValid: false,
       teamId: synchronized.teams[0]!.id,
     });
+    expect(synchronized.scenario.isNative).toBe(false);
+    expect(synchronized.auxScenarios[0]!.isNative).toBe(false);
+    expect(synchronized.materials[0]!.isNative).toBe(false);
     expect(loadPublicCard).toHaveBeenCalledTimes(4);
+    expect(verifyOrigin).toHaveBeenCalledTimes(4);
 
     const rebuilt = await buildArenaRoomHostWorkspaceBundleFromBattleState(synchronized);
     expect(rebuilt.sharedConfig).toEqual(target);
@@ -195,9 +202,11 @@ describe('Arena room host reconciliation', () => {
       useBattleStore.getState(),
     );
 
+    const verifyOrigin = vi.fn(async () => false);
     await applyArenaRoomAuthorityToBattleStore(published.sharedConfig, {
       currentBundle: dirtyBundle,
       hostLocalPayloads: published.hostLocalPayloads,
+      verifyOrigin,
       loadPublicCard: async () => {
         throw new Error('不应读取 online card');
       },
@@ -206,8 +215,10 @@ describe('Arena room host reconciliation', () => {
     const restored = useBattleStore.getState();
     expect(restored.combatants[0]).toMatchObject({
       data: { name: '房主本地角色' },
+      isValid: false,
       arenaRoomKey: published.sharedConfig.combatants[0]!.key,
     });
+    expect(verifyOrigin).toHaveBeenCalledWith({ name: '房主本地角色' });
     const rebuilt = await buildArenaRoomHostWorkspaceBundleFromBattleState(restored);
     expect(rebuilt.sharedConfig).toEqual(published.sharedConfig);
   });
@@ -254,10 +265,12 @@ describe('Arena room host reconciliation', () => {
       }
       return new Response(null, { status: 404 });
     });
+    const verifyOrigin = vi.fn(async () => false);
 
     try {
       await applyArenaRoomAuthorityToBattleStore(target, {
         currentBundle: baselineBundle,
+        verifyOrigin,
         loadPublicCard: async () => {
           throw new Error('不应读取 online card');
         },
@@ -270,11 +283,13 @@ describe('Arena room host reconciliation', () => {
     expect(synchronized.combatants.at(-1)).toMatchObject({
       filename: characterPreset!.id,
       isPreset: true,
+      isValid: true,
     });
     expect(synchronized.scenario).toMatchObject({
       fileName: scenarioPreset!.id,
       isNative: true,
     });
+    expect(verifyOrigin).not.toHaveBeenCalled();
     const rebuilt = await buildArenaRoomHostWorkspaceBundleFromBattleState(synchronized);
     expect(rebuilt.sharedConfig).toEqual(target);
   });

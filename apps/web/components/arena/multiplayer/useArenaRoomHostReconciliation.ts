@@ -15,6 +15,7 @@ import type {
 import {
   applyArenaRoomAuthorityToBattleStore,
 } from '@/lib/arena-room/host-reconciliation';
+import { verifyArenaContentOrigin } from '@/lib/arena/verify-origin';
 import {
   areArenaRoomSharedConfigsEqual,
   arenaRoomHostWorkspaceAuthorityFromSession,
@@ -119,6 +120,7 @@ export const useArenaRoomHostReconciliation = ({
       currentBundle,
       loadPublicCard,
       hostLocalPayloads: roomStart?.hostLocalPayloads,
+      verifyOrigin: verifyArenaContentOrigin,
     });
     const synchronizedBundle = await buildArenaRoomHostWorkspaceBundleFromBattleState(
       useBattleStore.getState(),
