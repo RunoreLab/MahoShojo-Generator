@@ -134,6 +134,9 @@ describe('GMR-10Q machine-readable gate/capability registry', () => {
       if (entry.reasonCategory !== 'product-parity') {
         expect(entry.reason.trim().length).toBeGreaterThan(0);
       }
+      if (entry.reasonCategory === 'explicit-product-non-goal') {
+        expect(entry.nextCondition?.trim().length).toBeGreaterThan(0);
+      }
       expect(entry.currentUserMessage ?? '').not.toMatch(
         /无法安全共享|Proposal|typed diff|\bBASE\b|\bCURRENT\b|\bPROPOSED\b/u,
       );
@@ -150,7 +153,9 @@ describe('GMR-10Q machine-readable gate/capability registry', () => {
       'ROOM_CONFIG_FRAME_LIMIT',
       'ROOM_CONFIG_PUBLISH_FENCE',
       'PROPOSAL_PENDING_LIMIT',
+      'PROPOSAL_HISTORY_BOUND',
       'PROPOSAL_ACTION_AUTHORITY',
+      'PROPOSAL_STATE_FENCE',
       'COLLABORATION_PRODUCT_TERMINOLOGY',
       'GENERATION_COMBATANTS_EMPTY',
       'GENERATION_COMBATANTS_INSUFFICIENT',
@@ -160,6 +165,7 @@ describe('GMR-10Q machine-readable gate/capability registry', () => {
       'RUNTIME_PROMPT_BUDGET',
       'RUNTIME_OUTPUT_LIMIT',
       'RESULT_HOST_WRITE_AUTHORITY',
+      'RESULT_PRIVATE_WRITE_ACTIONS_DEFERRED',
     ]) expect(byCode.has(code), code).toBe(true);
     expect(byCode.get('ROOM_MEMBER_LIMIT')?.layer).toBe('room-lifecycle');
     expect(byCode.get('PROPOSAL_PENDING_LIMIT')?.layer).toBe('collaboration');
@@ -204,6 +210,12 @@ describe('GMR-10Q machine-readable gate/capability registry', () => {
     for (const entry of groups.flatMap((group) => Object.values(group))) {
       if (entry.classification === 'deferred-with-reason') {
         expect(entry.reason?.trim().length).toBeGreaterThan(0);
+        expect(entry.nextCondition?.trim().length).toBeGreaterThan(0);
+      }
+    }
+    for (const entry of ARENA_GATE_CAPABILITY_REGISTRY) {
+      if (entry.reasonCategory === 'explicit-product-non-goal') {
+        expect(entry.reason.trim().length).toBeGreaterThan(0);
         expect(entry.nextCondition?.trim().length).toBeGreaterThan(0);
       }
     }
@@ -286,10 +298,10 @@ describe('GMR-10Q machine-readable gate/capability registry', () => {
         'proposal-resolve',
         'proposal-submit',
         'proposal-withdraw',
-        'result-manual-apply',
-        'result-redo',
-        'result-save',
-        'result-update',
+        'result-narrative-history-write',
+        'result-presentation',
+        'result-private-write-actions-deferred',
+        'result-save-image',
         'room-close',
         'room-create',
         'room-join',
@@ -317,9 +329,16 @@ describe('GMR-10Q machine-readable gate/capability registry', () => {
       expect(gateCodes.has(entry.gateCode), `${entry.reason} -> ${entry.gateCode}`).toBe(true);
       expect(ARENA_GATE_TEST_EVIDENCE).toContain(entry.testId);
     }
+    const failureGateByReason = new Map(
+      ARENA_STATE_MACHINE_FAILURE_REASON_REGISTRY.map((entry) => [entry.reason, entry.gateCode]),
+    );
+    expect(failureGateByReason.get('proposal-pending-limit-reached')).toBe('PROPOSAL_PENDING_LIMIT');
+    expect(failureGateByReason.get('proposal-not-found')).toBe('PROPOSAL_STATE_FENCE');
+    expect(failureGateByReason.get('proposal-author-required')).toBe('PROPOSAL_ACTION_AUTHORITY');
+    expect(failureGateByReason.get('proposal-selection-invalid')).toBe('PROPOSAL_REVISION_CONFLICT');
   });
 
-  it('所有 testId 都指向仓库中真实存在的测试 marker', () => {
+  it('所有 testId 都绑定仓库中真实执行的 it/test case，而不是注释 marker', () => {
     const repositoryRoot = resolve(process.cwd(), '../..');
     const evidence = new Set([
       ...ARENA_GATE_TEST_EVIDENCE,
@@ -331,7 +350,13 @@ describe('GMR-10Q machine-readable gate/capability registry', () => {
       const [relativeFile, marker] = testId.split('::');
       expect(relativeFile, testId).toMatch(/\.test\.tsx?$/u);
       expect(marker?.length, testId).toBeGreaterThan(0);
-      expect(readFileSync(resolve(repositoryRoot, relativeFile!), 'utf8'), testId).toContain(marker);
+      const source = readFileSync(resolve(repositoryRoot, relativeFile!), 'utf8');
+      expect([
+        `it('${marker}'`,
+        `it("${marker}"`,
+        `test('${marker}'`,
+        `test("${marker}"`,
+      ].some((definition) => source.includes(definition)), testId).toBe(true);
     }
   });
 });
