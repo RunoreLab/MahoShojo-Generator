@@ -11,9 +11,11 @@ const resetStore = () => {
 };
 
 describe('useBattleStore adjudication event cleanup', () => {
-  beforeEach(() => {
-    localStorage.clear();
+  beforeEach(async () => {
     resetStore();
+    localStorage.clear();
+    await useBattleStore.persist.rehydrate();
+    localStorage.clear();
   });
 
   test('removing a combatant clears only adjudication events from the same source', () => {
