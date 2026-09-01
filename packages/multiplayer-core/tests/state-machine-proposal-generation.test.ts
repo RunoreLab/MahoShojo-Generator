@@ -303,7 +303,10 @@ describe('Arena Room Proposal authority transitions', () => {
       expectedRoomEpoch: 'epoch-1',
       proposal: proposal([guidanceChange()], 'proposal-pending-overflow'),
       timestamp: NEXT_TIMESTAMP,
-    }, memberAuthority()))).toMatchObject({ code: 'capability-denied', reason: 'member-limit-reached' });
+    }, memberAuthority()))).toMatchObject({
+      code: 'capability-denied',
+      reason: 'proposal-pending-limit-reached',
+    });
   });
 
   it('resolves a semantic no-op without incrementing revision or collaborative provenance', () => {

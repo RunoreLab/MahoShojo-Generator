@@ -91,6 +91,7 @@
     "build": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@mahoshojo/contracts": "workspace:*",
     "zod": "^4.1.13"
   },
   "devDependencies": {

@@ -507,6 +507,9 @@ importers:
 
   packages/hosted-api:
     dependencies:
+      '@mahoshojo/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       zod:
         specifier: ^4.1.13
         version: 4.3.6

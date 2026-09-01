@@ -25,9 +25,8 @@ import {
   ResolvedArenaProposalStatusSchema,
 } from './proposals';
 import {
-  MAX_AUX_SCENARIOS,
+  MAX_ARENA_REFERENCE_ITEMS,
   MAX_COMBATANTS,
-  MAX_MATERIALS,
   MAX_PROPOSAL_CHANGES,
 } from './limits';
 import { SafeJsonValueSchema } from './json-value';
@@ -136,7 +135,7 @@ export const ArenaRoomProposalWithdrawRequestSchema = z.object({
 }).strict();
 
 export const MAX_ARENA_ROOM_HOST_LOCAL_PAYLOADS = (
-  MAX_COMBATANTS + MAX_AUX_SCENARIOS + MAX_MATERIALS + 1
+  MAX_COMBATANTS + MAX_ARENA_REFERENCE_ITEMS + 1
 );
 
 const SafeJsonObjectSchema = SafeJsonValueSchema.refine(
@@ -384,6 +383,16 @@ export const ArenaRoomHttpErrorCodeSchema = z.enum([
   'ROOM_CONFLICT',
   'ROOM_RATE_LIMITED',
   'ROOM_UNAVAILABLE',
+  'ROOM_GENERATION_COMBATANTS_EMPTY',
+  'ROOM_GENERATION_COMBATANTS_INSUFFICIENT',
+  'ROOM_GENERATION_SCENARIO_REQUIRED',
+  'ROOM_MEMBER_LIMIT_REACHED',
+  'ROOM_PROPOSAL_PENDING_LIMIT_REACHED',
+  'ROOM_CONFIG_FRAME_TOO_LARGE',
+  'ROOM_HOST_LOCAL_PAYLOAD_MISSING_OR_MISMATCH',
+  'ROOM_HOST_LOCAL_CONTENT_VERSION_MISSING',
+  'ROOM_HOST_LOCAL_CONTENT_VERSION_MISMATCH',
+  'ROOM_REFERENCE_STALE',
 ]);
 
 export const ArenaRoomHttpErrorResponseSchema = z.object({

@@ -1,6 +1,9 @@
+import { ARENA_CANONICAL_CAPABILITIES } from './arena-capabilities';
+
 /** Shared wire-contract safety ceilings. Runtime TTLs and alarm values do not belong here. */
 export const MAX_ROOM_MEMBERS = 8;
-export const MAX_COMBATANTS = 10;
+export const MAX_COMBATANTS = ARENA_CANONICAL_CAPABILITIES.maxCombatants;
+export const MAX_ARENA_REFERENCE_ITEMS = ARENA_CANONICAL_CAPABILITIES.maxReferenceItemsSanity;
 export const MAX_PENDING_PROPOSALS_PER_MEMBER = 8;
 export const MAX_PROPOSAL_CHANGES = 32;
 export const MAX_CONTROL_MESSAGE_BYTES = 64 * 1024;
@@ -13,8 +16,10 @@ export const MAX_GENERATION_BRIDGE_BATCH_BYTES = 64 * 1024;
 export const MAX_PROPOSAL_BYTES = 64 * 1024;
 export const MAX_CHARACTER_GUIDANCE_LENGTH = 100;
 export const MAX_GLOBAL_GUIDANCE_LENGTH = 200;
-export const MAX_AUX_SCENARIOS = 10;
-export const MAX_MATERIALS = 10;
+/** @deprecated Use the cumulative MAX_ARENA_REFERENCE_ITEMS budget. */
+export const MAX_AUX_SCENARIOS = MAX_ARENA_REFERENCE_ITEMS;
+/** @deprecated Use the cumulative MAX_ARENA_REFERENCE_ITEMS budget. */
+export const MAX_MATERIALS = MAX_ARENA_REFERENCE_ITEMS;
 export const MAX_OPAQUE_KEY_LENGTH = 256;
 export const MAX_DISPLAY_NAME_LENGTH = 200;
 export const MAX_CUSTOM_STORY_LENGTH = 32;

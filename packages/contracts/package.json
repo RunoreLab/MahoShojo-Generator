@@ -14,6 +14,11 @@
       "import": "./src/arena-room.ts",
       "default": "./src/arena-room.ts"
     },
+    "./arena-capabilities": {
+      "types": "./src/arena-capabilities.ts",
+      "import": "./src/arena-capabilities.ts",
+      "default": "./src/arena-capabilities.ts"
+    },
     "./data-cards": {
       "types": "./src/data-cards.ts",
       "import": "./src/data-cards.ts",

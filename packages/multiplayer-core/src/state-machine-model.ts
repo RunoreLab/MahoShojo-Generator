@@ -596,6 +596,7 @@ export type ArenaRoomTransitionFailureReason =
   | 'member-history-limit-reached'
   | 'member-id-conflict'
   | 'proposal-id-conflict'
+  | 'proposal-pending-limit-reached'
   | 'proposal-history-limit-reached'
   | 'proposal-not-found'
   | 'proposal-not-submitted'

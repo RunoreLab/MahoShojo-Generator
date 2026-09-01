@@ -1,9 +1,8 @@
 import { z } from 'zod';
 
 import {
-  MAX_AUX_SCENARIOS,
+  MAX_ARENA_REFERENCE_ITEMS,
   MAX_COMBATANTS,
-  MAX_MATERIALS,
   MAX_OPAQUE_KEY_LENGTH,
   MAX_PROPOSAL_BYTES,
   MAX_PROPOSAL_CHANGES,
@@ -203,8 +202,8 @@ const validateExactReorder = (
 const CombatantOrderSchema = exactOrderSchema(StableObjectKeySchema, MAX_COMBATANTS, 1);
 const TeamOrderSchema = exactOrderSchema(OpaqueKeySchema, MAX_COMBATANTS);
 const TeamCombatantOrderSchema = exactOrderSchema(StableObjectKeySchema, MAX_COMBATANTS);
-const AuxScenarioOrderSchema = exactOrderSchema(StableObjectKeySchema, MAX_AUX_SCENARIOS);
-const MaterialOrderSchema = exactOrderSchema(StableObjectKeySchema, MAX_MATERIALS);
+const AuxScenarioOrderSchema = exactOrderSchema(StableObjectKeySchema, MAX_ARENA_REFERENCE_ITEMS);
+const MaterialOrderSchema = exactOrderSchema(StableObjectKeySchema, MAX_ARENA_REFERENCE_ITEMS);
 
 export const ReorderCombatantsChangeSchema = change({
   type: z.literal('reorderCombatants'),

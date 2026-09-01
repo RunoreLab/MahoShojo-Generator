@@ -510,7 +510,7 @@ const submitProposal = (
     item.authorUserId === actor.actorUserId && item.status === 'submitted'
   )).length;
   if (pendingCount >= MAX_PENDING_PROPOSALS_PER_MEMBER) {
-    return transitionFailure('capability-denied', 'member-limit-reached');
+    return transitionFailure('capability-denied', 'proposal-pending-limit-reached');
   }
   const next = cloneState(state);
   next.snapshot.proposals.push(deepClone(command.proposal));

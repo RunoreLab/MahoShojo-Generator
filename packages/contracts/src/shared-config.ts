@@ -2,10 +2,9 @@ import { z } from 'zod';
 
 import { ArenaContractError } from './errors';
 import {
-  MAX_AUX_SCENARIOS,
+  MAX_ARENA_REFERENCE_ITEMS,
   MAX_COMBATANTS,
   MAX_HISTORY_LIMIT,
-  MAX_MATERIALS,
   MAX_OPAQUE_KEY_LENGTH,
 } from './limits';
 import {
@@ -121,11 +120,11 @@ export type MaterialEntry = z.infer<typeof MaterialEntrySchema>;
 export const ArenaRoomSharedConfigSchema = z
   .object({
     battleMode: BattleModeSchema,
-    combatants: z.array(CombatantEntrySchema).min(1).max(MAX_COMBATANTS),
+    combatants: z.array(CombatantEntrySchema).max(MAX_COMBATANTS),
     teams: z.array(TeamAssignmentSchema).max(MAX_COMBATANTS),
     scenario: ScenarioEntrySchema,
-    auxScenarios: z.array(AuxiliaryScenarioEntrySchema).max(MAX_AUX_SCENARIOS),
-    materials: z.array(MaterialEntrySchema).max(MAX_MATERIALS),
+    auxScenarios: z.array(AuxiliaryScenarioEntrySchema).max(MAX_ARENA_REFERENCE_ITEMS),
+    materials: z.array(MaterialEntrySchema).max(MAX_ARENA_REFERENCE_ITEMS),
     userGuidance: GlobalGuidanceSchema,
     storyLength: StoryLengthSchema,
     customStoryLength: CustomStoryLengthSchema.nullable(),
@@ -147,6 +146,15 @@ export const ArenaRoomSharedConfigSchema = z
     validateUniqueKeys(auxiliaryScenarioKeys, 'auxScenarios');
     validateUniqueKeys(materialKeys, 'materials');
     validateUniqueKeys(teamKeys, 'teams');
+
+    const referenceItemCount = config.auxScenarios.length + config.materials.length;
+    if (referenceItemCount > MAX_ARENA_REFERENCE_ITEMS) {
+      context.addIssue({
+        code: 'custom',
+        path: ['auxScenarios'],
+        message: `auxScenarios and materials must contain at most ${MAX_ARENA_REFERENCE_ITEMS} references in total`,
+      });
+    }
 
     const knownCombatants = new Set(combatantKeys);
     const assignedCombatants = new Set<string>();

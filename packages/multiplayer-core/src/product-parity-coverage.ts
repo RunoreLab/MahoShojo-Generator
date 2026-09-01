@@ -36,6 +36,7 @@ export interface ArenaProductParityCoverageEntry {
   readonly testIds: readonly ArenaProductParityTestId[];
   readonly reason?: string;
   readonly gap?: string;
+  readonly nextCondition?: string;
 }
 
 type SharedConfigCoverageEntry = ArenaProductParityCoverageEntry & {
@@ -94,6 +95,7 @@ const classified = (
     testIds?: readonly ArenaProductParityTestId[];
     reason?: string;
     gap?: string;
+    nextCondition?: string;
   }>,
 ): ArenaProductParityCoverageEntry => coverageEntry({
   classification,
@@ -102,6 +104,7 @@ const classified = (
   testIds: options.testIds ?? ['GMR10P-A-EXPLICIT-GAPS'],
   ...(options.reason === undefined ? {} : { reason: options.reason }),
   ...(options.gap === undefined ? {} : { gap: options.gap }),
+  ...(options.nextCondition === undefined ? {} : { nextCondition: options.nextCondition }),
 });
 
 /**
@@ -179,6 +182,7 @@ export const ARENA_PRODUCT_PARITY_COVERAGE = {
       single: 'editable', roomHost: 'deferred', roomProposal: 'deferred',
     }, {
       reason: 'adjudication 配置尚未进入 Shared Config 或 Proposal；需先定义安全投影与 materialization。',
+      nextCondition: '完成 adjudication 安全字段 allowlist、typed Proposal 与 host materialization contract 后启用。',
     }),
     storyLength: derivedSharedProposable(['setStoryLength']),
     customStoryLength: derivedSharedProposable(['setStoryLength']),
@@ -186,11 +190,13 @@ export const ARENA_PRODUCT_PARITY_COVERAGE = {
       single: 'editable', roomHost: 'deferred', roomProposal: 'deferred',
     }, {
       reason: 'questionnaire selections 尚未进入 Shared Config 或 Proposal，需先建立可验证 ref。',
+      nextCondition: 'questionnaire registry 提供 stable ID、exact version 与权限复验后进入 Shared Config。',
     }),
     questionnaires: classified('deferred-with-reason', {
       single: 'derived', roomHost: 'deferred', roomProposal: 'forbidden',
     }, {
       reason: 'questionnaire lore 当前携带展开内容；进入 Shared Config/Proposal 前仍需新增可验证 exact-ref materialization contract。',
+      nextCondition: 'questionnaire/lore exact-ref materializer 与累计 reference budget 接入后启用。',
     }),
     customProvider: classified('host-runtime-only', {
       single: 'editable', roomHost: 'host-only', roomProposal: 'forbidden',
@@ -342,6 +348,7 @@ export const ARENA_PRODUCT_PARITY_COVERAGE = {
       single: 'editable', roomHost: 'deferred', roomProposal: 'deferred',
     }, {
       reason: 'material preset 暂无 server-known registry，禁止进入 Shared Config/Proposal。',
+      nextCondition: 'material preset registry 能按 stable ID 解析并验证 digest/version 后启用。',
     }),
     materialLocalUpload: classified('forbidden', {
       single: 'editable', roomHost: 'host-only', roomProposal: 'forbidden',
@@ -369,10 +376,16 @@ export const ARENA_PRODUCT_PARITY_COVERAGE = {
     }, {
       reason: '正文保留在 host local store，Room 只共享安全读写设置。',
     }),
+    narrativeHistoryResultWrite: classified('local-only', {
+      single: 'local-only', roomHost: 'host-only', roomProposal: 'forbidden',
+    }, {
+      reason: '结果写入沿用单人本地叙事历史语义，但 member 不得写入 host 的私有历史。',
+    }),
     questionnaireLore: classified('deferred-with-reason', {
       single: 'editable', roomHost: 'deferred', roomProposal: 'deferred',
     }, {
       reason: '需要先定义 questionnaire/lore exact ref、权限与 Shared Config/Proposal materialization。',
+      nextCondition: 'UI 与 contract 共同接入 exact-ref questionnaire/lore registry 后启用且不得静默丢弃。',
     }),
     questionnaireLocalUpload: classified('forbidden', {
       single: 'editable', roomHost: 'host-only', roomProposal: 'forbidden',
@@ -388,6 +401,7 @@ export const ARENA_PRODUCT_PARITY_COVERAGE = {
       single: 'editable', roomHost: 'deferred', roomProposal: 'deferred',
     }, {
       reason: '需要先定义可共享 adjudication 安全子集与 Shared Config/Proposal contract。',
+      nextCondition: '安全子集、typed change、冲突语义与 materializer 测试全部落地后启用。',
     }),
     arenaFreeRankingEnabled: classified('shared/host-only', {
       single: 'editable', roomHost: 'host-only', roomProposal: 'forbidden',

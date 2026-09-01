@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { ARENA_CANONICAL_CAPABILITIES } from '@mahoshojo/contracts/arena-capabilities';
+
 import {
   ARENA_RESOURCE_BUDGET,
   countArenaReferenceItems,
@@ -9,6 +11,13 @@ import {
 } from '../src/arena-generation/resource-budget';
 
 describe('Arena resource budget', () => {
+  it('从 dependency-neutral canonical source 继承角色与参考项容量', () => {
+    expect(ARENA_RESOURCE_BUDGET.maxCombatants)
+      .toBe(ARENA_CANONICAL_CAPABILITIES.maxCombatants);
+    expect(ARENA_RESOURCE_BUDGET.maxReferenceItemsSanity)
+      .toBe(ARENA_CANONICAL_CAPABILITIES.maxReferenceItemsSanity);
+  });
+
   it('counts all model-reference collections against one aggregate sanity budget', () => {
     expect(countArenaReferenceItems({
       auxScenarios: Array.from({ length: 3 }),
