@@ -28,15 +28,9 @@ export const projectArenaReconciliationCombatants = (
     : text(combatant.dataCardId)
     ? { dataCardId: text(combatant.dataCardId) }
     : {}),
-  ...(text(combatant.sourceDataCardUpdatedAt)
-    ? { sourceDataCardUpdatedAt: text(combatant.sourceDataCardUpdatedAt) }
-    : {}),
   ...(text(combatant.roomCombatantKey) || text(combatant.arenaRoomKey)
     ? { roomCombatantKey: text(combatant.roomCombatantKey) ?? text(combatant.arenaRoomKey) }
     : {}),
-  characterGuidance: typeof combatant.characterGuidance === 'string'
-    ? combatant.characterGuidance
-    : null,
 }));
 
 export const buildArenaReconciliationRetryPayload = async (

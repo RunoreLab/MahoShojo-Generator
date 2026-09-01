@@ -4,6 +4,7 @@ import { applyPostBattleUpdates } from '@/lib/arena/service';
 import { getLogger } from '@/lib/logger';
 import { verifySignature } from '@/lib/signature';
 import {
+  isCanonicalArenaCharacterPreset,
   readOwnedNodeArenaGenerationReconciliation,
   resolveArenaCombatantNativeAuthority,
 } from '@mahoshojo/hosted-runtime/arena-generation';
@@ -51,6 +52,8 @@ type CombatantIdentity = Readonly<{
   isPreset: boolean;
   name: string | null;
   type: string | null;
+  native: boolean;
+  characterGuidance: string | null;
   value: Record<string, unknown>;
 }>;
 
@@ -70,13 +73,13 @@ const currentIdentity = (value: unknown, position: number): CombatantIdentity | 
     dataCardIds: stringSet(
       combatant.sourceDataCardId,
       combatant.dataCardId,
-      data.sourceDataCardId,
-      data.dataCardId,
     ),
     presetTemplates: stringSet(combatant.filename, combatant.templateId, data.templateId),
     isPreset: combatant.isPreset === true,
     name: stringOf(data.codename) ?? stringOf(data.name),
     type: stringOf(combatant.type),
+    native: false,
+    characterGuidance: null,
     value: combatant,
   };
 };
@@ -93,6 +96,8 @@ const rosterIdentity = (value: unknown, position: number): CombatantIdentity | n
     isPreset: combatant.isPreset === true,
     name: stringOf(combatant.name),
     type: stringOf(combatant.type),
+    native: combatant.isNative === true,
+    characterGuidance: stringOf(combatant.characterGuidance),
     value: combatant,
   };
 };
@@ -126,33 +131,44 @@ const matchCombatants = (
   const unmatchedRoster = new Set(roster.map((identity) => identity.position));
   const matches: CombatantMatch[] = [];
 
-  const assignUnique = (
+  const assignBidirectionallyUnique = (
     predicate: (candidate: CombatantIdentity, frozen: CombatantIdentity) => boolean,
   ): void => {
-    for (const candidate of current) {
-      if (!unmatchedCurrent.has(candidate.position)) continue;
-      const candidates = roster.filter((frozen) => (
+    const pairs = current.flatMap((candidate) => {
+      if (!unmatchedCurrent.has(candidate.position)) return [];
+      return roster.flatMap((frozen) => (
         unmatchedRoster.has(frozen.position) && predicate(candidate, frozen)
+          ? [{ candidate, frozen }]
+          : []
       ));
-      if (candidates.length !== 1) continue;
-      const frozen = candidates[0];
+    });
+    const currentCounts = new Map<number, number>();
+    const rosterCounts = new Map<number, number>();
+    for (const pair of pairs) {
+      currentCounts.set(pair.candidate.position, (currentCounts.get(pair.candidate.position) ?? 0) + 1);
+      rosterCounts.set(pair.frozen.position, (rosterCounts.get(pair.frozen.position) ?? 0) + 1);
+    }
+    for (const { candidate, frozen } of pairs) {
+      if (currentCounts.get(candidate.position) !== 1 || rosterCounts.get(frozen.position) !== 1) {
+        continue;
+      }
       unmatchedCurrent.delete(candidate.position);
       unmatchedRoster.delete(frozen.position);
       matches.push({ current: candidate, roster: frozen });
     }
   };
 
-  assignUnique((candidate, frozen) => Boolean(
+  assignBidirectionallyUnique((candidate, frozen) => Boolean(
     candidate.roomCombatantKey
       && frozen.roomCombatantKey
       && candidate.roomCombatantKey === frozen.roomCombatantKey,
   ));
-  assignUnique((candidate, frozen) => (
+  assignBidirectionallyUnique((candidate, frozen) => (
     candidate.dataCardIds.size > 0
       && frozen.dataCardIds.size > 0
       && setsIntersect(candidate.dataCardIds, frozen.dataCardIds)
   ));
-  assignUnique((candidate, frozen) => (
+  assignBidirectionallyUnique((candidate, frozen) => (
     candidate.isPreset
       && frozen.isPreset
       && candidate.presetTemplates.size > 0
@@ -176,30 +192,22 @@ const matchCombatants = (
     const key = identityKey(identity);
     if (key) rosterCounts.set(key, (rosterCounts.get(key) ?? 0) + 1);
   }
-  assignUnique((candidate, frozen) => {
+  const hasStableClaim = (identity: CombatantIdentity): boolean => Boolean(
+    identity.roomCombatantKey
+      || identity.dataCardIds.size > 0
+      || (identity.isPreset && identity.presetTemplates.size > 0),
+  );
+  assignBidirectionallyUnique((candidate, frozen) => {
     const key = identityKey(candidate);
     return Boolean(
       key
+      && !hasStableClaim(candidate)
+      && !hasStableClaim(frozen)
       && key === identityKey(frozen)
       && currentCounts.get(key) === 1
       && rosterCounts.get(key) === 1,
     );
   });
-
-  for (const candidate of current) {
-    if (!unmatchedCurrent.has(candidate.position)) continue;
-    const frozen = roster.find((identity) => (
-      unmatchedRoster.has(identity.position)
-      && identity.sortIndex === candidate.position
-      && identity.type === candidate.type
-      && nameToken(identity.name) === nameToken(candidate.name)
-      && Boolean(nameToken(candidate.name))
-    ));
-    if (!frozen) continue;
-    unmatchedCurrent.delete(candidate.position);
-    unmatchedRoster.delete(frozen.position);
-    matches.push({ current: candidate, roster: frozen });
-  }
 
   const invalidCurrentIndexes = currentValues.flatMap((_, index) => (
     current.some((identity) => identity.position === index) ? [] : [index]
@@ -312,7 +320,7 @@ async function handler(req: NextRequest): Promise<Response> {
       code: 'ARENA_RECONCILIATION_ROSTER_COMBATANT_MISSING',
       message: '本次 generation roster 中的角色未出现在当前卡片列表，已跳过。',
     }));
-    const warnings = [...unmatchedCurrent, ...unmatchedRoster];
+    const warnings: Array<Record<string, unknown>> = [...unmatchedCurrent, ...unmatchedRoster];
     if (reconciliation.matches.length === 0) {
       return json({
         code: 'ARENA_RECONCILIATION_ROSTER_MISMATCH',
@@ -331,38 +339,96 @@ async function handler(req: NextRequest): Promise<Response> {
     }
     const uniqueRosterNameIndexes = new Map<string, number>();
     const duplicateRosterNames = new Set<string>();
-    for (const match of reconciliation.matches) {
-      const token = nameToken(match.roster.name);
+    for (const frozen of roster.flatMap((value, index) => {
+      const identity = rosterIdentity(value, index);
+      return identity ? [identity] : [];
+    })) {
+      const token = nameToken(frozen.name);
       if (!token) continue;
       if (uniqueRosterNameIndexes.has(token)) duplicateRosterNames.add(token);
-      else uniqueRosterNameIndexes.set(token, match.roster.sortIndex);
+      else uniqueRosterNameIndexes.set(token, frozen.sortIndex);
     }
+    const warnedAmbiguousImpactNames = new Set<string>();
     for (const impact of impacts) {
       if (integerOf(impact.combatantIndex) !== null) continue;
       const token = nameToken(stringOf(impact.characterName));
-      const index = duplicateRosterNames.has(token) ? null : uniqueRosterNameIndexes.get(token);
-      if (index !== undefined && index !== null && !impactByRosterIndex.has(index)) {
+      if (duplicateRosterNames.has(token)) {
+        if (token && !warnedAmbiguousImpactNames.has(token)) {
+          warnedAmbiguousImpactNames.add(token);
+          warnings.push({
+            characterName: stringOf(impact.characterName),
+            code: 'ARENA_RECONCILIATION_IMPACT_AMBIGUOUS',
+            message: '旧战报中的同名角色影响无法唯一归属，已跳过该影响。',
+          });
+        }
+        continue;
+      }
+      const index = uniqueRosterNameIndexes.get(token);
+      if (index !== undefined && !impactByRosterIndex.has(index)) {
         impactByRosterIndex.set(index, impact);
       }
     }
 
+    const frozenRoster = roster.flatMap((value, index) => {
+      const identity = rosterIdentity(value, index);
+      return identity ? [identity] : [];
+    });
+    const nativeStatesByName = new Map<string, Set<boolean>>();
+    for (const frozen of frozenRoster) {
+      const token = nameToken(frozen.name);
+      if (!token) continue;
+      const states = nativeStatesByName.get(token) ?? new Set<boolean>();
+      states.add(frozen.native);
+      nativeStatesByName.set(token, states);
+    }
+    const conflictingNativeNames = new Set(
+      [...nativeStatesByName.entries()]
+        .filter(([, states]) => states.has(true) && states.has(false))
+        .map(([token]) => token),
+    );
+
     const verifiedCombatants = await Promise.all(reconciliation.matches.map(async (match) => {
-      let isNative = false;
+      let currentNative = false;
       try {
-        isNative = await resolveArenaCombatantNativeAuthority(match.current.value, verifySignature);
+        currentNative = await resolveArenaCombatantNativeAuthority(
+          match.current.value,
+          verifySignature,
+        );
       } catch {
         log.warn('角色原生 authority 检查失败，将按非原生继续', {
           generationId,
           combatantIndex: match.current.position,
         });
       }
-      if (match.current.value.isNative === true && !isNative) {
+      if (match.current.value.isNative === true && !currentNative) {
         log.warn('角色声称原生但服务器 authority 无效，将视为非原生', {
           generationId,
           combatantIndex: match.current.position,
         });
       }
-      return { ...match.current.value, isNative };
+      const currentData = recordOf(match.current.value.data)!;
+      const currentTemplateId = stringOf(currentData.templateId);
+      const canonicalPreset = currentNative
+        && match.roster.isPreset
+        && await isCanonicalArenaCharacterPreset(match.current.value).catch(() => false);
+      const hasCausalNativeIdentity = Boolean(
+        currentNative
+        && match.roster.native
+        && (
+          (currentTemplateId && match.roster.presetTemplates.has(currentTemplateId))
+          || (canonicalPreset && setsIntersect(
+            match.current.presetTemplates,
+            match.roster.presetTemplates,
+          ))
+        )
+        && !conflictingNativeNames.has(nameToken(match.roster.name)),
+      );
+      return {
+        type: match.current.type,
+        data: currentData,
+        isNative: hasCausalNativeIdentity,
+        characterGuidance: match.roster.characterGuidance,
+      };
     }));
     const mappedImpacts = reconciliation.matches.map((match) => ({
       ...(impactByRosterIndex.get(match.roster.sortIndex) ?? {}),
@@ -382,6 +448,10 @@ async function handler(req: NextRequest): Promise<Response> {
         generationId,
         combatantIndices: reconciliation.matches.map((match) => match.current.position),
         scenarioNativeOverride: scenarioAuthority?.isNative === true,
+        participantNames: frozenRoster.map((identity) => identity.name ?? '未知角色'),
+        nonNativeDataInvolved: frozenRoster.some((identity) => !identity.native)
+          || (stringOf(report.mode) === 'scenario' && scenarioAuthority?.isNative !== true),
+        conflictingNativeNames: [...conflictingNativeNames],
         writeArenaHistory: authoritative.writeArenaHistory === true,
         writeCurrentState: authoritative.writeCurrentState === true,
       },

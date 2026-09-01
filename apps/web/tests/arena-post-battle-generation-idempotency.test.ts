@@ -39,4 +39,36 @@ describe('Arena post-battle generation idempotency', () => {
     expect(first[0].data.current_state).not.toHaveProperty('base_revision_hash');
     expect(second).toEqual([]);
   });
+
+  it('局部更新沿用完整 frozen roster 上下文并同步 native 降级', async () => {
+    const result = await applyPostBattleUpdates([{
+      type: 'magical-girl',
+      isNative: true,
+      characterGuidance: '生成时冻结的引导',
+      data: { name: '双生', templateId: 'magical-girl:twin', signature: 'old-signature' },
+    }], {
+      headline: '终局战报',
+      mode: 'classic',
+      officialReport: { winner: '双生' },
+    } as never, [{ characterName: '双生', impact: '成长' }], null, null, {
+      writeArenaHistory: true,
+      writeCurrentState: false,
+      generationId: 'generation-2',
+      combatantIndices: [0],
+      participantNames: ['双生', '双生'],
+      nonNativeDataInvolved: true,
+      conflictingNativeNames: ['双生'],
+    });
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ combatantIndex: 0, isNative: false });
+    expect(result[0]!.data).not.toHaveProperty('signature');
+    expect(result[0]!.data.arena_history.entries[0]).toMatchObject({
+      participants: ['双生', '双生'],
+      metadata: {
+        character_guidance: '生成时冻结的引导',
+        non_native_data_involved: true,
+      },
+    });
+  });
 });

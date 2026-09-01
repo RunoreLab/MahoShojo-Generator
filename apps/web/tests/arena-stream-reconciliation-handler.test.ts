@@ -4,6 +4,7 @@ const resolveActor = vi.fn();
 const getD1Client = vi.fn();
 const readOwnedReconciliation = vi.fn();
 const resolveNativeAuthority = vi.fn();
+const isCanonicalPreset = vi.fn();
 const applyPostBattleUpdates = vi.fn();
 
 vi.mock('@/app/api/arena/generation-runtime', () => ({
@@ -15,6 +16,7 @@ vi.mock('@/lib/hosted-dr/database-provider', () => ({
 vi.mock('@mahoshojo/hosted-runtime/arena-generation', () => ({
   readOwnedNodeArenaGenerationReconciliation: readOwnedReconciliation,
   resolveArenaCombatantNativeAuthority: resolveNativeAuthority,
+  isCanonicalArenaCharacterPreset: isCanonicalPreset,
 }));
 vi.mock('@/lib/signature', () => ({ verifySignature: vi.fn() }));
 vi.mock('@/lib/arena/service', () => ({ applyPostBattleUpdates }));
@@ -31,6 +33,8 @@ const roster = [
     name: 'A',
     type: 'magical-girl',
     dataCardId: 'card-a',
+    templateId: 'magical-girl:a',
+    isNative: true,
     isPreset: false,
   },
   {
@@ -82,6 +86,7 @@ describe('Arena stream reconciliation handler', () => {
     resolveNativeAuthority.mockImplementation(async (
       value: { data?: { signature?: string } },
     ) => value.data?.signature === 'valid');
+    isCanonicalPreset.mockResolvedValue(false);
     applyPostBattleUpdates.mockImplementation(async (
       combatants: Array<{ data: Record<string, unknown> }>,
       _report: unknown,
@@ -100,7 +105,12 @@ describe('Arena stream reconciliation handler', () => {
       type: 'magical-girl',
       sourceDataCardId: 'card-a',
       isNative: true,
-      data: { name: 'A（本地改名）', note: 'generation 后新增正文', signature: 'valid' },
+      data: {
+        name: 'A（本地改名）',
+        templateId: 'magical-girl:a',
+        note: 'generation 后新增正文',
+        signature: 'valid',
+      },
     }];
 
     const response = await appRouteHandler(request({ generationId, combatants }) as never);
@@ -119,7 +129,12 @@ describe('Arena stream reconciliation handler', () => {
       }],
     });
     expect(applyPostBattleUpdates).toHaveBeenCalledWith(
-      [{ ...combatants[0], isNative: true }],
+      [{
+        type: combatants[0]!.type,
+        data: combatants[0]!.data,
+        isNative: true,
+        characterGuidance: null,
+      }],
       authoritativePayload.report,
       [{ combatantIndex: 0, characterName: 'A（本地改名）', impact: 'A 的服务器影响' }],
       authoritativePayload.userGuidance,
@@ -142,13 +157,51 @@ describe('Arena stream reconciliation handler', () => {
 
     expect(response.status).toBe(200);
     expect(applyPostBattleUpdates).toHaveBeenCalledWith(
-      [{ ...combatants[0], isNative: false }],
+      [{
+        type: combatants[0]!.type,
+        data: combatants[0]!.data,
+        isNative: false,
+        characterGuidance: null,
+      }],
       expect.anything(),
       [expect.objectContaining({ characterName: '内置角色', impact: 'B 的服务器影响' })],
       expect.anything(),
       expect.anything(),
       expect.objectContaining({ combatantIndices: [0] }),
     );
+  });
+
+  it('canonical bundled preset 以服务器 digest 绑定 frozen filename 后保留 native', async () => {
+    readOwnedReconciliation.mockResolvedValueOnce({
+      kind: 'found',
+      reconciliation: {
+        ...authoritativePayload,
+        roster: [{
+          sortIndex: 0,
+          name: '内置角色',
+          type: 'general-character',
+          templateId: 'C01_bundled.json',
+          isPreset: true,
+          isNative: true,
+        }],
+        impacts: [{ combatantIndex: 0, characterName: '内置角色', impact: '冻结影响' }],
+      },
+    });
+    resolveNativeAuthority.mockResolvedValueOnce(true);
+    isCanonicalPreset.mockResolvedValueOnce(true);
+    const combatants = [{
+      type: 'general-character',
+      filename: 'C01_bundled.json',
+      isPreset: true,
+      data: { name: '内置角色', templateId: '通用角色' },
+    }];
+
+    const response = await appRouteHandler(request({ generationId, combatants }) as never);
+
+    expect(response.status).toBe(200);
+    expect(applyPostBattleUpdates.mock.calls[0]?.[0]).toEqual([
+      expect.objectContaining({ isNative: true }),
+    ]);
   });
 
   it('mixed roster 局部更新可信匹配并逐角色返回 warning', async () => {
@@ -205,6 +258,68 @@ describe('Arena stream reconciliation handler', () => {
     expect(applyPostBattleUpdates).not.toHaveBeenCalled();
   });
 
+  it('不读取卡片正文内可伪造的 dataCardId 作为 roster identity', async () => {
+    const response = await appRouteHandler(request({
+      generationId,
+      combatants: [{
+        type: 'magical-girl',
+        data: { name: '陌生角色', dataCardId: 'card-a', signature: 'valid' },
+      }],
+    }) as never);
+
+    expect(response.status).toBe(409);
+    expect(applyPostBattleUpdates).not.toHaveBeenCalled();
+  });
+
+  it('多个 current 同时声明一个 frozen identity 时全部按 ambiguous 跳过', async () => {
+    const response = await appRouteHandler(request({
+      generationId,
+      combatants: [{
+        type: 'magical-girl',
+        sourceDataCardId: 'card-a',
+        data: { name: 'A', templateId: 'magical-girl:a', signature: 'valid' },
+      }, {
+        type: 'magical-girl',
+        sourceDataCardId: 'card-a',
+        data: { name: '伪造声明', templateId: 'magical-girl:other', signature: 'valid' },
+      }],
+    }) as never);
+
+    expect(response.status).toBe(409);
+    const result = await response.json();
+    expect(result.errors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ combatantIndex: 0 }),
+      expect.objectContaining({ combatantIndex: 1 }),
+    ]));
+    expect(applyPostBattleUpdates).not.toHaveBeenCalled();
+  });
+
+  it('无稳定 identity 的同名同 type 重复角色不按 slot 猜测', async () => {
+    readOwnedReconciliation.mockResolvedValueOnce({
+      kind: 'found',
+      reconciliation: {
+        ...authoritativePayload,
+        roster: [{ sortIndex: 0, name: '同名', type: 'magical-girl', isNative: false }, {
+          sortIndex: 1,
+          name: '同名',
+          type: 'magical-girl',
+          isNative: false,
+        }],
+      },
+    });
+
+    const response = await appRouteHandler(request({
+      generationId,
+      combatants: [{ type: 'magical-girl', data: { name: '同名' } }, {
+        type: 'magical-girl',
+        data: { name: '同名' },
+      }],
+    }) as never);
+
+    expect(response.status).toBe(409);
+    expect(applyPostBattleUpdates).not.toHaveBeenCalled();
+  });
+
   it('伪造 isNative 或 authority 检查异常都降级为 false 后继续', async () => {
     const combatants = [
       {
@@ -229,9 +344,143 @@ describe('Arena stream reconciliation handler', () => {
 
     expect(response.status).toBe(200);
     expect(applyPostBattleUpdates.mock.calls[0]?.[0]).toEqual([
-      { ...combatants[0], isNative: false },
-      { ...combatants[1], isNative: false },
+      {
+        type: combatants[0]!.type,
+        data: combatants[0]!.data,
+        isNative: false,
+        characterGuidance: null,
+      },
+      {
+        type: combatants[1]!.type,
+        data: combatants[1]!.data,
+        isNative: false,
+        characterGuidance: null,
+      },
     ]);
+  });
+
+  it('客户端包装 ID 只能定位候选，不能把另一张有效签名卡变成可重签目标', async () => {
+    readOwnedReconciliation.mockResolvedValueOnce({
+      kind: 'found',
+      reconciliation: {
+        ...authoritativePayload,
+        roster: [{
+          sortIndex: 0,
+          name: 'A',
+          type: 'magical-girl',
+          dataCardId: 'card-a',
+          templateId: 'magical-girl:a',
+          isNative: true,
+          characterGuidance: '生成时冻结的引导',
+        }],
+        impacts: [{ combatantIndex: 0, characterName: 'A', impact: '冻结影响' }],
+      },
+    });
+    const combatants = [{
+      type: 'magical-girl',
+      sourceDataCardId: 'card-a',
+      characterGuidance: '客户端事后注入的引导',
+      data: {
+        name: '另一张卡',
+        templateId: 'magical-girl:other',
+        signature: 'valid',
+      },
+    }];
+
+    const response = await appRouteHandler(request({ generationId, combatants }) as never);
+
+    expect(response.status).toBe(200);
+    expect(applyPostBattleUpdates.mock.calls[0]?.[0]).toEqual([{
+      type: 'magical-girl',
+      data: combatants[0]!.data,
+      isNative: false,
+      characterGuidance: '生成时冻结的引导',
+    }]);
+  });
+
+  it('局部提交仍使用完整 frozen roster 计算参与者与原生冲突', async () => {
+    readOwnedReconciliation.mockResolvedValueOnce({
+      kind: 'found',
+      reconciliation: {
+        ...authoritativePayload,
+        roster: [{
+          sortIndex: 0,
+          name: '双生',
+          type: 'magical-girl',
+          dataCardId: 'card-native',
+          templateId: 'magical-girl:twin',
+          isNative: true,
+        }, {
+          sortIndex: 1,
+          name: '双生',
+          type: 'magical-girl',
+          dataCardId: 'card-local',
+          isNative: false,
+        }],
+        impacts: [{ combatantIndex: 0, characterName: '双生', impact: '冻结影响' }],
+      },
+    });
+    const combatants = [{
+      type: 'magical-girl',
+      sourceDataCardId: 'card-native',
+      data: { name: '双生', templateId: 'magical-girl:twin', signature: 'valid' },
+    }];
+
+    const response = await appRouteHandler(request({ generationId, combatants }) as never);
+
+    expect(response.status).toBe(200);
+    expect(applyPostBattleUpdates.mock.calls[0]?.[0]).toEqual([
+      expect.objectContaining({ isNative: false }),
+    ]);
+    expect(applyPostBattleUpdates.mock.calls[0]?.[5]).toMatchObject({
+      participantNames: ['双生', '双生'],
+      nonNativeDataInvolved: true,
+      conflictingNativeNames: ['双生'],
+    });
+  });
+
+  it('旧 name-only impact 按完整 frozen roster 判重，不猜给局部提交的同名角色', async () => {
+    readOwnedReconciliation.mockResolvedValueOnce({
+      kind: 'found',
+      reconciliation: {
+        ...authoritativePayload,
+        roster: [{
+          sortIndex: 0,
+          name: '同名角色',
+          type: 'magical-girl',
+          dataCardId: 'card-one',
+          isNative: false,
+        }, {
+          sortIndex: 1,
+          name: '同名角色',
+          type: 'magical-girl',
+          dataCardId: 'card-two',
+          isNative: false,
+        }],
+        impacts: [{ characterName: '同名角色', impact: '无法唯一归属的旧影响' }],
+      },
+    });
+
+    const response = await appRouteHandler(request({
+      generationId,
+      combatants: [{
+        type: 'magical-girl',
+        sourceDataCardId: 'card-one',
+        data: { name: '同名角色' },
+      }],
+    }) as never);
+
+    expect(response.status).toBe(200);
+    await expect(response.clone().json()).resolves.toMatchObject({
+      warnings: expect.arrayContaining([expect.objectContaining({
+        code: 'ARENA_RECONCILIATION_IMPACT_AMBIGUOUS',
+        characterName: '同名角色',
+      })]),
+    });
+    expect(applyPostBattleUpdates.mock.calls[0]?.[2]).toEqual([{
+      combatantIndex: 0,
+      characterName: '同名角色',
+    }]);
   });
 
   it('requires an owned completed generation before claiming the effect', async () => {

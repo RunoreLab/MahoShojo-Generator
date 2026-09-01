@@ -29,7 +29,6 @@ describe('Arena 角色更新恢复', () => {
           filename: 'C01_egg.json',
           sourceDataCardId: 'card-1',
           roomCombatantKey: 'data-card:card-1',
-          characterGuidance: '保持冷静',
         },
       ],
     });

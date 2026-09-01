@@ -28,10 +28,14 @@ export const applyPostBattleUpdates = async (
         generationId?: string;
         combatantIndices?: number[];
         scenarioNativeOverride?: boolean;
+        participantNames?: string[];
+        nonNativeDataInvolved?: boolean;
+        conflictingNativeNames?: string[];
     }
-): Promise<Array<{ combatantIndex: number; data: any }>> => {
+): Promise<Array<{ combatantIndex: number; data: any; isNative: boolean }>> => {
     const updatedCombatants = [];
-    const participantNames = combatants.map(c => c.data.codename || c.data.name);
+    const participantNames = options.participantNames
+        ?? combatants.map(c => c.data.codename || c.data.name);
     const nowISO = new Date().toISOString();
     const { writeArenaHistory, writeCurrentState } = options;
     const generationId = options.generationId?.trim() || null;
@@ -45,19 +49,25 @@ export const applyPostBattleUpdates = async (
         nameToNativenessMap.get(name)!.push(c.isNative);
     });
 
-    const conflictingNames = new Set<string>();
+    const normalizeName = (name: unknown): string => typeof name === 'string'
+        ? name.replace(/\s+/gu, '').toLocaleLowerCase()
+        : '';
+    const conflictingNames = new Set(
+        options.conflictingNativeNames?.map(normalizeName).filter(Boolean) ?? [],
+    );
     for (const [name, nativenessStates] of nameToNativenessMap.entries()) {
         const hasNative = nativenessStates.includes(true);
         const hasNonNative = nativenessStates.includes(false);
         if (hasNative && hasNonNative) {
-            conflictingNames.add(name);
+            conflictingNames.add(normalizeName(name));
             log.warn(`检测到原生性冲突的角色名称: "${name}"。该角色的所有实例在此次战斗中将被视为非原生处理。`);
         }
     }
 
     const isScenarioNative = options.scenarioNativeOverride
         ?? (scenario ? await verifySignature(scenario) : true);
-    const isAnyNonNative = combatants.some(c => !c.isNative || conflictingNames.has(c.data.codename || c.data.name)) || (report.mode === 'scenario' && !isScenarioNative);
+    const isAnyNonNative = options.nonNativeDataInvolved
+        ?? (combatants.some(c => !c.isNative || conflictingNames.has(normalizeName(c.data.codename || c.data.name))) || (report.mode === 'scenario' && !isScenarioNative));
 
     for (let combatantIndex = 0; combatantIndex < combatants.length; combatantIndex += 1) {
         const combatant = combatants[combatantIndex];
@@ -82,7 +92,7 @@ export const applyPostBattleUpdates = async (
                     : 'general-character';
 
         let shouldSign = combatant.isNative;
-        if (conflictingNames.has(characterName)) {
+        if (conflictingNames.has(normalizeName(characterName))) {
             shouldSign = false;
         }
         let didMutate = false;
@@ -159,6 +169,7 @@ export const applyPostBattleUpdates = async (
             updatedCombatants.push({
                 combatantIndex: options.combatantIndices?.[combatantIndex] ?? combatantIndex,
                 data: characterData,
+                isNative: shouldSign,
             });
         }
     }

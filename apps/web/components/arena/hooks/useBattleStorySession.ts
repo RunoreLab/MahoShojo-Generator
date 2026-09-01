@@ -48,11 +48,14 @@ import { useGenerationApiIntentLatch } from '@/lib/use-generation-api-intent-lat
 import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { useProviderModeCooldown } from '@/lib/cooldown';
-import { extractHeadlineFromMarkdown, extractWinnerFromText } from '@/lib/arena/battle-report-log-utils';
 import {
   captureArenaGenerationActorToken,
   withArenaGenerationActorToken,
 } from '@/lib/arena/resumable-generation-client';
+import {
+  buildArenaReconciliationRetryPayload,
+  type ArenaReconciliationRetryCombatant,
+} from '@/lib/arena/reconciliation-retry';
 import { readScenarioBattleStoryConfig } from '@/lib/scenario-battle-story';
 import { readTextAndReasoningStreamFromResponse } from '@/lib/stream/read-text-and-reasoning-stream';
 import { STREAM_ABORT_REASON_USER } from '@/lib/stream/abort';
@@ -765,61 +768,45 @@ export function useBattleStorySession() {
       if (!input.seed.settings.writeArenaHistory && !input.seed.settings.writeCurrentState) {
         return { workingCombatants: input.workingCombatants };
       }
-
-      const headline =
-        (typeof input.meta?.report === 'object' && typeof (input.meta.report as any)?.headline === 'string'
-          ? (input.meta.report as any).headline.trim()
-          : '') ||
-        input.digest.chapterTitle.trim() ||
-        extractHeadlineFromMarkdown(input.markdown) ||
-        '魔法少女速报';
-
-      const winner =
-        input.digest.winner?.trim() ||
-        extractWinnerFromText(input.markdown) ||
-        '未知';
-
-      if (input.seed.settings.writeArenaHistory && (!headline || headline === '魔法少女速报' || !winner || winner === '未知')) {
+      if (!input.generationId) {
         return {
           workingCombatants: input.workingCombatants,
-          warning: '⚠️ 本章正文已保存，但未能稳定识别标题或胜利者，角色状态未同步到连续会话。',
+          warning: '⚠️ 本章正文已保存，但缺少服务器 generationId，角色状态未同步到连续会话。',
         };
       }
 
-      const impacts =
-        Array.isArray(input.meta?.impacts) && input.meta?.impacts.length > 0
-          ? input.meta.impacts
-          : (input.digest.impactDigest ?? []);
-
+      const reconciliationPayload = await buildArenaReconciliationRetryPayload(
+        input.generationId,
+        input.workingCombatants as ArenaReconciliationRetryCombatant[],
+      );
       const response = await fetch('/api/arena/update-combatants-after-stream', {
         method: 'POST',
         headers: withArenaGenerationActorToken(await buildRequestHeaders(false)),
-        body: JSON.stringify({
-          generationId: input.generationId,
-          combatants: input.workingCombatants,
-          report: {
-            headline,
-            mode: input.mode,
-            officialReport: {
-              winner,
-            },
-          },
-          impacts,
-          userGuidance: input.userGuidance || null,
-          scenario: input.seed.scenario ?? null,
-          writeArenaHistory: input.seed.settings.writeArenaHistory,
-          writeCurrentState: input.seed.settings.writeCurrentState,
-        }),
+        body: JSON.stringify(reconciliationPayload),
       });
 
       if (!response.ok) {
         const { payload } = await readJsonOrTextFromResponse(response);
+        const payloadRecord = payload && typeof payload === 'object' && !Array.isArray(payload)
+          ? payload as Record<string, unknown>
+          : null;
+        const details = Array.isArray(payloadRecord?.errors)
+          ? payloadRecord.errors.flatMap((value) => {
+            if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+            const message = (value as { message?: unknown }).message;
+            return typeof message === 'string' && message.trim() ? [message.trim()] : [];
+          })
+          : [];
+        const baseMessage = resolveApiErrorMessage({
+          payload,
+          fallback: '角色更新失败',
+        });
         return {
           workingCombatants: input.workingCombatants,
-          warning: `⚠️ 本章正文已保存，但角色状态同步失败：${resolveApiErrorMessage({
-            payload,
-            fallback: '角色更新失败',
-          })}`,
+          warning: `⚠️ 本章正文已保存，但角色状态同步失败：${[
+            baseMessage,
+            ...details,
+          ].join('；')}`,
         };
       }
 
@@ -827,14 +814,25 @@ export function useBattleStorySession() {
         updatedCombatants?: Array<{
           combatantIndex: number;
           data: Record<string, unknown>;
+          isNative: boolean;
         }>;
+        warnings?: Array<{ message?: unknown }>;
       };
+
+      const warningMessage = Array.isArray(payload.warnings)
+        ? payload.warnings.flatMap((warning) => (
+          typeof warning?.message === 'string' && warning.message.trim()
+            ? [warning.message.trim()]
+            : []
+        )).join('；')
+        : '';
 
       return {
         workingCombatants: mergeUpdatedCombatantsIntoWorkingCombatants(
           input.workingCombatants,
           Array.isArray(payload.updatedCombatants) ? payload.updatedCombatants : []
         ),
+        ...(warningMessage ? { warning: `⚠️ ${warningMessage}` } : {}),
       };
     },
     [buildRequestHeaders]

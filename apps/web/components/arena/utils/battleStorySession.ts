@@ -341,6 +341,7 @@ export const mergeUpdatedCombatantsIntoWorkingCombatants = (
   updatedCombatants: Array<{
     combatantIndex: number;
     data: Record<string, unknown>;
+    isNative: boolean;
   }>
 ): Array<Record<string, unknown>> => {
   if (!Array.isArray(workingCombatants) || workingCombatants.length === 0) return [];
@@ -355,7 +356,7 @@ export const mergeUpdatedCombatantsIntoWorkingCombatants = (
       && entry.combatantIndex >= 0
       && entry.data
       && typeof entry.data === 'object'
-      ? [[entry.combatantIndex, entry.data] as const]
+      ? [[entry.combatantIndex, entry] as const]
       : []
   )));
 
@@ -367,7 +368,8 @@ export const mergeUpdatedCombatantsIntoWorkingCombatants = (
 
       return {
         ...combatant,
-        data: matched,
+        data: matched.data,
+        isNative: matched.isNative,
       };
     });
 };
