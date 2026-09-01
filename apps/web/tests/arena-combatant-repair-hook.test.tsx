@@ -48,6 +48,7 @@ afterEach(() => {
     updatedCombatants: [],
     lastGenerationId: null,
     repairAppliedGenerationId: null,
+    isCombatantMutationPending: false,
     isGenerating: false,
   });
 });
@@ -182,6 +183,54 @@ describe('useCombatantRepair', () => {
     expect(mocks.startCooldown).not.toHaveBeenCalled();
     expect(useBattleStore.getState().lastGenerationId).toBe('generation-new-002');
 
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it('权威角色更新占用写入锁时拒绝应用本地修复', async () => {
+    const originalCombatant = {
+      type: 'general-character' as const,
+      filename: '角色-a.json',
+      isValid: false,
+      isPreset: false,
+      data: { name: '角色 A' },
+    };
+    useBattleStore.setState((state) => ({
+      combatants: [originalCombatant],
+      generationMode: 'stream',
+      streamingMarkdown: `# 锁定战报\n\n## 胜利者\n\n- 角色 A\n\n${'完整正文。'.repeat(40)}`,
+      lastGenerationId: 'generation-lock-001',
+      repairAppliedGenerationId: null,
+      settings: {
+        ...state.settings,
+        writeArenaHistory: true,
+        writeCurrentState: false,
+      },
+      isGenerating: false,
+    }));
+
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => root.render(<Harness />));
+    if (!currentHook) throw new Error('repair hook 未挂载');
+
+    act(() => currentHook!.setDraftText(JSON.stringify({
+      impacts: [{
+        combatantIndex: 0,
+        characterName: '角色 A',
+        impact: '不得应用的修复',
+      }],
+    })));
+    expect(useBattleStore.getState().tryBeginCombatantMutation()).toBe(true);
+
+    await act(async () => currentHook!.applyArenaRepairDraft());
+
+    expect(currentHook!.repairError).toContain('角色更新正在进行');
+    expect(useBattleStore.getState().combatants).toEqual([originalCombatant]);
+    expect(useBattleStore.getState().repairAppliedGenerationId).toBeNull();
+
+    useBattleStore.getState().endCombatantMutation();
     await act(async () => root.unmount());
     container.remove();
   });

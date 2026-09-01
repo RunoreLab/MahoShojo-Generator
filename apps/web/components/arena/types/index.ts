@@ -220,6 +220,8 @@ export interface BattleStoreState {
   error: string | null;
   isGenerating: boolean;
   isRedoingUpdates: boolean;
+  /** 权威角色更新与本地 repair 共用的进程内写入锁。 */
+  isCombatantMutationPending: boolean;
   isMatching: 'character' | 'scenario' | null;
   loadingPreset: string | null;
   userProviderConfig: UserAIProviderConfig | null;
@@ -288,6 +290,8 @@ export interface BattleStoreState {
   setError: (message: string | null) => void;
   setIsGenerating: (state: boolean) => void;
   setIsRedoingUpdates: (state: boolean) => void;
+  tryBeginCombatantMutation: () => boolean;
+  endCombatantMutation: () => void;
   setIsMatching: (target: 'character' | 'scenario' | null) => void;
   setLoadingPreset: (filename: string | null) => void;
   setUserProviderConfig: (config: UserAIProviderConfig | null) => void;

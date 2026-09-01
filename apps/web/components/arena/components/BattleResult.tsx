@@ -170,12 +170,13 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
             variant="plain"
             titleClassName="text-lg font-bold text-gray-800"
             headerClassName="mb-3"
-            headerRight={
+            headerRight={!combatantRepair.isInRoom ? (
               <button
                 onClick={() => handleRetryUpdates()}
                 disabled={
                   isGenerating
                   || isRedoingUpdates
+                  || combatantRepair.isCombatantMutationPending
                   || !lastGenerationId
                   || combatantRepair.isRepairAppliedForGeneration
                 }
@@ -188,7 +189,7 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
               >
                 {isRedoingUpdates ? '重试中...' : '重试角色更新'}
               </button>
-            }
+            ) : undefined}
           >
             <div className="space-y-4">
               {combatantRepair.hasRepairContext && !combatantRepair.isInRoom && (
@@ -273,6 +274,7 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
                           isGenerating
                           || combatantRepair.isGeneratingDraft
                           || combatantRepair.isApplyingRepair
+                          || combatantRepair.isCombatantMutationPending
                           || !combatantRepair.draftText.trim()
                         }
                         className="rounded-lg bg-purple-600 px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-purple-700 disabled:cursor-not-allowed disabled:opacity-60"

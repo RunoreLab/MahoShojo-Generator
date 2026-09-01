@@ -152,6 +152,7 @@ export const useBattleStore = create<BattleStoreState>()(
       error: null,
       isGenerating: false,
       isRedoingUpdates: false,
+      isCombatantMutationPending: false,
       isMatching: null,
       loadingPreset: null,
       userProviderConfig: null,
@@ -444,6 +445,16 @@ export const useBattleStore = create<BattleStoreState>()(
       setError: (message) => set({ error: message }),
       setIsGenerating: (stateValue) => set({ isGenerating: stateValue }),
       setIsRedoingUpdates: (stateValue) => set({ isRedoingUpdates: stateValue }),
+      tryBeginCombatantMutation: () => {
+        let acquired = false;
+        set((state) => {
+          if (state.isCombatantMutationPending) return state;
+          acquired = true;
+          return { isCombatantMutationPending: true };
+        });
+        return acquired;
+      },
+      endCombatantMutation: () => set({ isCombatantMutationPending: false }),
       setIsMatching: (target) => set({ isMatching: target }),
       setLoadingPreset: (filename) => set({ loadingPreset: filename }),
       setUserProviderConfig: (config) => set({ userProviderConfig: config }),

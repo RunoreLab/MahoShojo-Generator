@@ -42,12 +42,16 @@ describe('Arena 角色更新恢复', () => {
     const retryEnd = engineSource.indexOf('\n  return {', retryStart);
     const retrySource = engineSource.slice(retryStart, retryEnd);
 
-    expect(engineSource).toContain('retryGenerationUpdate(lastGenerationId, roster)');
+    expect(engineSource).toContain('retryGenerationUpdate(lastGenerationId, roster, () =>');
+    expect(engineSource).toContain('arenaRoomRuntime?.controller.getSnapshot().session');
+    expect(engineSource).toContain('state.tryBeginCombatantMutation()');
+    expect(engineSource).toContain('currentState.repairAppliedGenerationId === lastGenerationId');
     expect(engineSource).not.toContain("fetch('/api/arena/redo-combatant-updates'");
     expect(engineSource).not.toContain('handleApplyManualMetaUpdates');
     expect(engineSource).not.toContain('本次无需重试角色更新');
     expect(engineSource).toContain('state.repairAppliedGenerationId === lastGenerationId');
     expect(resultSource).toContain('重试角色更新');
+    expect(resultSource).toContain('headerRight={!combatantRepair.isInRoom ?');
     expect(resultSource).toContain('重试应用本次服务器已生成的角色更新');
     expect(resultSource).toContain('canWriteUpdates || Boolean(lastGenerationId) || updatedCombatants.length > 0');
     expect(resultSource).not.toContain('重做角色更新');

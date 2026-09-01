@@ -1883,6 +1883,10 @@ export const useBattleEngine = () => {
     const lastGenerationId = state.lastGenerationId?.trim();
     const roster = state.combatants.filter((item): item is CombatantData => 'data' in item);
 
+    if (arenaRoomRuntime?.controller.getSnapshot().session) {
+      setError('⚠️ 多人房间内的角色更新由 Room 权威流程处理，不能在本地重试。');
+      return;
+    }
     if (roster.length === 0) {
       setError('⚠️ 没有可更新的参战角色。');
       return;
@@ -1895,17 +1899,34 @@ export const useBattleEngine = () => {
       setError('⚠️ 当前角色已应用本次战报的自定义修复，基线已变化，无法再执行同 generation 的服务器权威重试。');
       return;
     }
+    if (!state.tryBeginCombatantMutation()) {
+      setError('⚠️ 角色更新正在进行，请等待当前操作完成后再试。');
+      return;
+    }
 
     setIsRedoingUpdates(true);
     setError(null);
     try {
-      await retryGenerationUpdate(lastGenerationId, roster);
+      await retryGenerationUpdate(lastGenerationId, roster, () => {
+        if (arenaRoomRuntime?.controller.getSnapshot().session) return false;
+        const currentState = useBattleStore.getState();
+        if (currentState.lastGenerationId?.trim() !== lastGenerationId) return false;
+        if (currentState.repairAppliedGenerationId === lastGenerationId) return false;
+        if (!currentState.isCombatantMutationPending) return false;
+        const currentRoster = currentState.combatants.filter(
+          (item): item is CombatantData => 'data' in item,
+        );
+        return currentRoster.length === roster.length
+          && currentRoster.every((combatant, index) => combatant === roster[index]);
+      });
     } catch (error) {
       setError(`⚠️ 重试角色更新失败：${error instanceof Error ? error.message : '发生未知错误，请重试。'}`);
     } finally {
+      useBattleStore.getState().endCombatantMutation();
       setIsRedoingUpdates(false);
     }
   }, [
+    arenaRoomRuntime,
     retryGenerationUpdate,
     setError,
     setIsRedoingUpdates,

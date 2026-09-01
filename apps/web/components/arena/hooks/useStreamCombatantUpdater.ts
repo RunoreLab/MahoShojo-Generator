@@ -39,6 +39,10 @@ interface UpdateCombatantsPayload {
   writeCurrentState?: boolean;
 }
 
+interface UpdateCombatantsOptions {
+  canCommit?: () => boolean;
+}
+
 const normalizeRosterNames = (combatants: CombatantData[]): string[] => {
   const names = combatants
     .map((c) => (c?.data?.codename || c?.data?.name || '').toString().trim())
@@ -232,7 +236,10 @@ export const useStreamCombatantUpdater = () => {
    * 2. 接收签名后的数据
    * 3. 更新本地状态
    */
-  const updateCombatants = useCallback(async (payload: UpdateCombatantsPayload) => {
+  const updateCombatants = useCallback(async (
+    payload: UpdateCombatantsPayload,
+    options: UpdateCombatantsOptions = {},
+  ) => {
     setIsUpdating(true);
     setUpdateError(null);
 
@@ -275,6 +282,10 @@ export const useStreamCombatantUpdater = () => {
           effect: execute,
         })
         : await execute();
+
+      if (options.canCommit && !options.canCommit()) {
+        throw new Error('角色更新上下文已变化，已丢弃过期的服务器响应。');
+      }
 
       if (result.updatedCombatants && result.updatedCombatants.length > 0) {
         setUpdatedCombatants(result.updatedCombatants);
@@ -389,8 +400,15 @@ export const useStreamCombatantUpdater = () => {
   );
 
   const retryGenerationUpdate = useCallback(
-    async (generationId: string, combatants: CombatantData[]) => (
-      updateCombatants(await buildArenaReconciliationRetryPayload(generationId, combatants))
+    async (
+      generationId: string,
+      combatants: CombatantData[],
+      canCommit?: () => boolean,
+    ) => (
+      updateCombatants(
+        await buildArenaReconciliationRetryPayload(generationId, combatants),
+        { canCommit },
+      )
     ),
     [updateCombatants]
   );

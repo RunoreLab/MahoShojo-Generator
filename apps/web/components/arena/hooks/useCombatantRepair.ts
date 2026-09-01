@@ -92,6 +92,9 @@ export const useCombatantRepair = () => {
   const scenario = useBattleSelector((state) => state.scenario);
   const userProviderConfig = useBattleSelector((state) => state.userProviderConfig);
   const isGenerating = useBattleSelector((state) => state.isGenerating);
+  const isCombatantMutationPending = useBattleSelector(
+    (state) => state.isCombatantMutationPending,
+  );
   const setCombatants = useBattleSelector((state) => state.setCombatants);
   const setUpdatedCombatants = useBattleSelector((state) => state.setUpdatedCombatants);
   const setLatestAiImpacts = useBattleSelector((state) => state.setLatestAiImpacts);
@@ -258,6 +261,10 @@ export const useCombatantRepair = () => {
       setRepairError(report.error);
       return;
     }
+    if (!useBattleStore.getState().tryBeginCombatantMutation()) {
+      setRepairError('角色更新正在进行，请等待当前操作完成后再应用修复。');
+      return;
+    }
 
     setIsApplyingRepair(true);
     setRepairError(null);
@@ -329,6 +336,7 @@ export const useCombatantRepair = () => {
     } catch (error) {
       setRepairError(error instanceof Error ? error.message : '应用角色修复失败。');
     } finally {
+      useBattleStore.getState().endCombatantMutation();
       setIsApplyingRepair(false);
     }
   }, [
@@ -356,6 +364,7 @@ export const useCombatantRepair = () => {
     applyArenaRepairDraft,
     isGeneratingDraft,
     isApplyingRepair,
+    isCombatantMutationPending,
     repairError,
     repairNotice,
     isCooldown,
