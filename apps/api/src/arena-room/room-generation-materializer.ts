@@ -14,9 +14,9 @@ import { inferCharacterKind } from '@mahoshojo/domain/data-cards';
 export type ArenaRoomGenerationMaterializationErrorCode =
   | 'ARENA_ROOM_GENERATION_CONFIG_INVALID'
   | 'ARENA_ROOM_HOST_IDENTITY_INVALID'
+  | 'ARENA_ROOM_HOST_LOCAL_PAYLOAD_MISSING'
   | 'ARENA_ROOM_HOST_LOCAL_PAYLOAD_INVALID'
   | 'ARENA_ROOM_HOST_LOCAL_PAYLOAD_KIND_MISMATCH'
-  | 'ARENA_ROOM_HOST_LOCAL_PAYLOAD_MISMATCH'
   | 'ARENA_ROOM_HOST_LOCAL_CONTENT_VERSION_MISSING'
   | 'ARENA_ROOM_HOST_LOCAL_CONTENT_VERSION_MISMATCH'
   | 'ARENA_ROOM_HOST_LOCAL_PAYLOAD_TYPE_MISMATCH'
@@ -24,8 +24,16 @@ export type ArenaRoomGenerationMaterializationErrorCode =
   | 'ARENA_ROOM_REFERENCE_CONTENT_INVALID'
   | 'ARENA_ROOM_REFERENCE_STALE';
 
+export type ArenaRoomGenerationMaterializationTarget = Readonly<{
+  kind: 'room' | 'combatant' | 'scenario' | 'material';
+  displayName?: string;
+}>;
+
 export class ArenaRoomGenerationMaterializationError extends Error {
-  constructor(readonly code: ArenaRoomGenerationMaterializationErrorCode) {
+  constructor(
+    readonly code: ArenaRoomGenerationMaterializationErrorCode,
+    readonly target?: ArenaRoomGenerationMaterializationTarget,
+  ) {
     super(code);
     this.name = 'ArenaRoomGenerationMaterializationError';
   }
@@ -57,8 +65,11 @@ export type ArenaRoomGenerationMaterializer = Readonly<{
   }>): Promise<Readonly<Record<string, unknown>>>;
 }>;
 
-const fail = (code: ArenaRoomGenerationMaterializationErrorCode): never => {
-  throw new ArenaRoomGenerationMaterializationError(code);
+const fail = (
+  code: ArenaRoomGenerationMaterializationErrorCode,
+  target?: ArenaRoomGenerationMaterializationTarget,
+): never => {
+  throw new ArenaRoomGenerationMaterializationError(code, target);
 };
 
 const isPlainRecord = (value: unknown): value is Record<string, unknown> => (
@@ -104,6 +115,24 @@ const parseDisplayName = (value: unknown): string => {
   const normalized = value.trim();
   if (normalized.length === 0) return fail('ARENA_ROOM_REFERENCE_CONTENT_INVALID');
   return normalized;
+};
+
+type SharedEntry = ArenaRoomSharedConfig['combatants'][number]
+  | Exclude<ArenaRoomSharedConfig['scenario'], null>
+  | ArenaRoomSharedConfig['auxScenarios'][number]
+  | ArenaRoomSharedConfig['materials'][number];
+
+const targetForEntry = (entry: SharedEntry): ArenaRoomGenerationMaterializationTarget => {
+  if ('source' in entry) {
+    if (entry.type === 'scenario') return { kind: 'scenario', displayName: entry.displayName };
+    if (entry.type === 'material') return { kind: 'material', displayName: entry.displayName };
+    return { kind: 'combatant', displayName: entry.displayName };
+  }
+  switch (entry.ref.kind) {
+    case 'character': return { kind: 'combatant' };
+    case 'scenario': return { kind: 'scenario' };
+    case 'material': return { kind: 'material' };
+  }
 };
 
 type ResolvedEntry = Readonly<{
@@ -163,57 +192,66 @@ export const createArenaRoomGenerationMaterializer = (
       const localByKey = new Map<string, ArenaRoomHostLocalPayload>();
       for (const payload of localPayloads) {
         if (localByKey.has(payload.key)) {
-          return fail('ARENA_ROOM_HOST_LOCAL_PAYLOAD_MISMATCH');
+          return fail('ARENA_ROOM_HOST_LOCAL_PAYLOAD_INVALID', { kind: 'room' });
         }
         localByKey.set(payload.key, payload);
       }
 
       const config = configResult.data;
-      const expectedLocalKinds = new Map<string, DataCardRef['kind']>();
-      const expectLocalKind = (key: string, kind: DataCardRef['kind']): void => {
+      const expectedLocalKinds = new Map<string, Readonly<{
+        kind: DataCardRef['kind'];
+        target: ArenaRoomGenerationMaterializationTarget;
+      }>>();
+      const expectLocalKind = (entry: SharedEntry, kind: DataCardRef['kind']): void => {
+        const key = entry.key;
         if (expectedLocalKinds.has(key)) {
-          return fail('ARENA_ROOM_HOST_LOCAL_PAYLOAD_MISMATCH');
+          return fail('ARENA_ROOM_HOST_LOCAL_PAYLOAD_INVALID', { kind: 'room' });
         }
-        expectedLocalKinds.set(key, kind);
+        expectedLocalKinds.set(key, { kind, target: targetForEntry(entry) });
       };
       for (const combatant of config.combatants) {
-        if ('source' in combatant) expectLocalKind(combatant.key, 'character');
+        if ('source' in combatant) expectLocalKind(combatant, 'character');
       }
       if (config.scenario && 'source' in config.scenario) {
-        expectLocalKind(config.scenario.key, 'scenario');
+        expectLocalKind(config.scenario, 'scenario');
       }
       for (const scenario of config.auxScenarios) {
-        if ('source' in scenario) expectLocalKind(scenario.key, 'scenario');
+        if ('source' in scenario) expectLocalKind(scenario, 'scenario');
       }
       for (const material of config.materials) {
-        if ('source' in material) expectLocalKind(material.key, 'material');
+        if ('source' in material) expectLocalKind(material, 'material');
       }
-      if (
-        expectedLocalKinds.size !== localByKey.size
-        || [...expectedLocalKinds.keys()].some((key) => !localByKey.has(key))
-      ) return fail('ARENA_ROOM_HOST_LOCAL_PAYLOAD_MISMATCH');
-      for (const [key, expectedKind] of expectedLocalKinds) {
-        if (localByKey.get(key)?.kind !== expectedKind) {
-          return fail('ARENA_ROOM_HOST_LOCAL_PAYLOAD_KIND_MISMATCH');
+      for (const [key, expected] of expectedLocalKinds) {
+        if (!localByKey.has(key)) {
+          return fail('ARENA_ROOM_HOST_LOCAL_PAYLOAD_MISSING', expected.target);
+        }
+      }
+      if ([...localByKey.keys()].some((key) => !expectedLocalKinds.has(key))) {
+        return fail('ARENA_ROOM_HOST_LOCAL_PAYLOAD_INVALID', { kind: 'room' });
+      }
+      for (const [key, expected] of expectedLocalKinds) {
+        if (localByKey.get(key)?.kind !== expected.kind) {
+          return fail('ARENA_ROOM_HOST_LOCAL_PAYLOAD_KIND_MISMATCH', expected.target);
         }
       }
 
       const resolveEntry = async (
-        entry: ArenaRoomSharedConfig['combatants'][number]
-          | Exclude<ArenaRoomSharedConfig['scenario'], null>
-          | ArenaRoomSharedConfig['auxScenarios'][number]
-          | ArenaRoomSharedConfig['materials'][number],
+        entry: SharedEntry,
       ): Promise<ResolvedEntry> => {
         if ('ref' in entry) return resolveCanonical(entry, input.hostAccountUserId);
         const local = localByKey.get(entry.key);
-        if (!local || !isPlainRecord(local.payload)) {
-          return fail('ARENA_ROOM_HOST_LOCAL_PAYLOAD_INVALID');
+        const target = targetForEntry(entry);
+        if (!local) {
+          return fail('ARENA_ROOM_HOST_LOCAL_PAYLOAD_MISSING', target);
+        }
+        if (!isPlainRecord(local.payload)) {
+          return fail('ARENA_ROOM_HOST_LOCAL_PAYLOAD_INVALID', target);
         }
         if (entry.contentVersion === undefined) {
-          return fail('ARENA_ROOM_HOST_LOCAL_CONTENT_VERSION_MISSING');
+          return fail('ARENA_ROOM_HOST_LOCAL_CONTENT_VERSION_MISSING', target);
         }
         if (contentVersion(local.payload) !== entry.contentVersion) {
-          return fail('ARENA_ROOM_HOST_LOCAL_CONTENT_VERSION_MISMATCH');
+          return fail('ARENA_ROOM_HOST_LOCAL_CONTENT_VERSION_MISMATCH', target);
         }
         return Object.freeze({
           payload: local.payload,
@@ -232,7 +270,7 @@ export const createArenaRoomGenerationMaterializer = (
         const entry = config.combatants[index]!;
         const inferred = characterType(resolved.payload);
         if ('source' in entry && inferred !== entry.type) {
-          return fail('ARENA_ROOM_HOST_LOCAL_PAYLOAD_TYPE_MISMATCH');
+          return fail('ARENA_ROOM_HOST_LOCAL_PAYLOAD_TYPE_MISMATCH', targetForEntry(entry));
         }
         return Object.freeze({
           roomCombatantKey: entry.key,

@@ -184,6 +184,7 @@ const createRequest = (body: Record<string, unknown>) => ({
     authorization: 'Bearer legacy-key',
     'content-type': 'application/json',
     origin: 'http://localhost:3000',
+    'x-mahoshojo-arena-error-taxonomy': '2',
   },
   body: JSON.stringify(body),
 });
@@ -399,22 +400,96 @@ describe('Arena Room HTTP product routes', () => {
       '情景模式需要主情景',
     ],
     [
-      new ArenaRoomGenerationError('ROOM_HOST_LOCAL_PAYLOAD_MISSING_OR_MISMATCH'),
+      new ArenaRoomGenerationError('ROOM_GENERATION_COMBATANT_LIMIT'),
       400,
-      'ROOM_HOST_LOCAL_PAYLOAD_MISSING_OR_MISMATCH',
-      '重新载入本地内容',
+      'ROOM_GENERATION_COMBATANT_LIMIT',
+      '运行时上限 32 位',
+    ],
+    [
+      new ArenaRoomGenerationError('ROOM_RUNTIME_BODY_LIMIT'),
+      413,
+      'ROOM_RUNTIME_BODY_LIMIT',
+      '12 MiB',
+    ],
+    [
+      new ArenaRoomGenerationError('ROOM_RUNTIME_REFERENCE_LIMIT'),
+      400,
+      'ROOM_RUNTIME_REFERENCE_LIMIT',
+      '运行时上限 256 项',
+    ],
+    [
+      new ArenaRoomGenerationError('ROOM_RUNTIME_ADJUDICATION_LIMIT'),
+      400,
+      'ROOM_RUNTIME_ADJUDICATION_LIMIT',
+      '运行时上限 100 项',
+    ],
+    [
+      new ArenaRoomGenerationError('ROOM_RUNTIME_PROMPT_BUDGET_EXCEEDED'),
+      400,
+      'ROOM_RUNTIME_PROMPT_BUDGET_EXCEEDED',
+      '生成提示词超过当前渠道的安全预算',
+    ],
+    [
+      new ArenaRoomGenerationError('ROOM_PROVIDER_CONFIG_INVALID'),
+      400,
+      'ROOM_PROVIDER_CONFIG_INVALID',
+      '检查服务商、模型和 API Key',
+    ],
+    [
+      new ArenaRoomGenerationError(
+        'ROOM_HOST_LOCAL_PAYLOAD_MISSING',
+        undefined,
+        { kind: 'combatant', displayName: '星野' },
+      ),
+      400,
+      'ROOM_HOST_LOCAL_PAYLOAD_MISSING',
+      '角色「星野」',
+    ],
+    [
+      new ArenaRoomGenerationError(
+        'ROOM_HOST_LOCAL_PAYLOAD_INVALID',
+        undefined,
+        { kind: 'room' },
+      ),
+      400,
+      'ROOM_HOST_LOCAL_PAYLOAD_INVALID',
+      '本地内容列表',
+    ],
+    [
+      new ArenaRoomGenerationError(
+        'ROOM_HOST_LOCAL_KIND_MISMATCH',
+        undefined,
+        { kind: 'scenario', displayName: '雨夜' },
+      ),
+      400,
+      'ROOM_HOST_LOCAL_KIND_MISMATCH',
+      '情景「雨夜」',
+    ],
+    [
+      new ArenaRoomGenerationError(
+        'ROOM_HOST_LOCAL_DIGEST_MISMATCH',
+        undefined,
+        { kind: 'material', displayName: '银剑' },
+      ),
+      409,
+      'ROOM_HOST_LOCAL_DIGEST_MISMATCH',
+      '素材「银剑」',
+    ],
+    [
+      new ArenaRoomGenerationError(
+        'ROOM_HOST_LOCAL_TYPE_MISMATCH',
+        undefined,
+        { kind: 'combatant', displayName: '星野' },
+      ),
+      400,
+      'ROOM_HOST_LOCAL_TYPE_MISMATCH',
+      '角色「星野」',
     ],
     [
       new ArenaRoomGenerationError('ROOM_HOST_LOCAL_CONTENT_VERSION_MISSING'),
       400,
       'ROOM_HOST_LOCAL_CONTENT_VERSION_MISSING',
       '重新发布房间配置',
-    ],
-    [
-      new ArenaRoomGenerationError('ROOM_HOST_LOCAL_CONTENT_VERSION_MISMATCH'),
-      409,
-      'ROOM_HOST_LOCAL_CONTENT_VERSION_MISMATCH',
-      '本地内容已发生变化',
     ],
     [
       new ArenaRoomGenerationError('ROOM_REFERENCE_STALE'),
@@ -435,20 +510,177 @@ describe('Arena Room HTTP product routes', () => {
     });
     const response = await app.request(
       `/api/arena/rooms/v1/${authority.snapshot.roomId}/generations`,
-      createRequest({
+      {
+        ...createRequest({
         expectedRoomEpoch: authority.snapshot.roomEpoch,
         expectedRevision: authority.snapshot.revision,
         generationRequestId: 'request-1234',
         sharedConfig: authority.snapshot.sharedConfig,
         hostLocalPayloads: [],
         generation: {},
-      }),
+        }),
+        headers: {
+          ...createRequest({}).headers,
+          'x-mahoshojo-arena-error-taxonomy': '2',
+        },
+      },
     );
 
     expect(response.status).toBe(status);
     const errorBody = await response.json() as { code: string; error: string };
     expect(errorBody).toMatchObject({ code: wireCode });
     expect(errorBody.error).toContain(message);
+  });
+
+  it('granular error taxonomy 需显式协商，旧客户端与未知版本仍收到 v1 coarse code', async () => {
+    const serviceError = new ArenaRoomGenerationError('ROOM_GENERATION_COMBATANTS_EMPTY', {
+      code: 'GENERATION_COMBATANTS_EMPTY',
+      gate: 'generation-readiness',
+      severity: 'blocking',
+      target: { kind: 'combatant' },
+      params: { current: 0, required: 1 },
+      messageKey: 'arena.multiplayer.gate.generationCombatantsEmpty',
+      userAction: '至少添加 1 位参战角色后再开始生成。',
+    });
+    const dependencies = createDependencies();
+    vi.mocked(dependencies.generations.start).mockRejectedValue(serviceError);
+    const app = createHonoApp(config, createRedisStub(), undefined, {
+      arenaRoom: dependencies,
+    });
+    const body = {
+      expectedRoomEpoch: authority.snapshot.roomEpoch,
+      expectedRevision: authority.snapshot.revision,
+      generationRequestId: 'request-1234',
+      sharedConfig: authority.snapshot.sharedConfig,
+      hostLocalPayloads: [],
+      generation: {},
+    };
+
+    for (const taxonomyVersion of [undefined, '999'] as const) {
+      const request = createRequest(body);
+      const headers: Record<string, string> = { ...request.headers };
+      if (taxonomyVersion === undefined) {
+        delete headers['x-mahoshojo-arena-error-taxonomy'];
+      } else {
+        headers['x-mahoshojo-arena-error-taxonomy'] = taxonomyVersion;
+      }
+      const response = await app.request(
+        `/api/arena/rooms/v1/${authority.snapshot.roomId}/generations`,
+        {
+          ...request,
+          headers,
+        },
+      );
+      expect(response.status).toBe(409);
+      expect(await response.json()).toMatchObject({
+        code: 'ROOM_CONFLICT',
+        error: expect.stringContaining('至少需要 1 位'),
+      });
+    }
+
+    const negotiatedRequest = createRequest(body);
+    const negotiated = await app.request(
+      `/api/arena/rooms/v1/${authority.snapshot.roomId}/generations`,
+      {
+        ...negotiatedRequest,
+        headers: {
+          ...negotiatedRequest.headers,
+          'x-mahoshojo-arena-error-taxonomy': '2',
+        },
+      },
+    );
+    expect(negotiated.status).toBe(409);
+    expect(await negotiated.json()).toMatchObject({
+      code: 'ROOM_GENERATION_COMBATANTS_EMPTY',
+    });
+    expect(negotiated.headers.get('vary')).toContain('x-mahoshojo-arena-error-taxonomy');
+    expect(negotiated.headers.get('cache-control')).toBe('no-store');
+  });
+
+  it('schema preflight 保留角色、累计引用与版本缺失的可行动原因', async () => {
+    const dependencies = createDependencies();
+    const app = createHonoApp(config, createRedisStub(), undefined, {
+      arenaRoom: dependencies,
+    });
+    const combatants = Array.from({ length: 33 }, (_, index) => ({
+      key: `data-card:character-${index}`,
+      ref: { id: `character-${index}`, kind: 'character', versionToken: 'v1' },
+    }));
+    const generationRequest = {
+      expectedRoomEpoch: authority.snapshot.roomEpoch,
+      expectedRevision: authority.snapshot.revision,
+      generationRequestId: 'request-1234',
+      sharedConfig: { ...authority.snapshot.sharedConfig, combatants, teams: [] },
+      hostLocalPayloads: [],
+      generation: {},
+    };
+    const generationLimit = await app.request(
+      `/api/arena/rooms/v1/${authority.snapshot.roomId}/generations`,
+      createRequest(generationRequest),
+    );
+    expect(generationLimit.status).toBe(400);
+    expect(await generationLimit.json()).toMatchObject({
+      code: 'ROOM_GENERATION_COMBATANT_LIMIT',
+      error: expect.stringMatching(/33.*32/u),
+    });
+
+    const configLimit = await app.request('/api/arena/rooms/v1', createRequest({
+      creationRequestId: 'create-request-limits',
+      displayName: '房主',
+      directory: { title: '容量测试', visibility: 'public' },
+      sharedConfig: generationRequest.sharedConfig,
+    }));
+    expect(configLimit.status).toBe(400);
+    expect(await configLimit.json()).toMatchObject({
+      code: 'ROOM_CONFIG_COMBATANT_LIMIT',
+      error: expect.stringMatching(/33.*32/u),
+    });
+
+    const auxScenarios = Array.from({ length: 128 }, (_, index) => ({
+      key: `data-card:scenario-${index}`,
+      ref: { id: `scenario-${index}`, kind: 'scenario', versionToken: 'v1' },
+    }));
+    const materials = Array.from({ length: 129 }, (_, index) => ({
+      key: `data-card:material-${index}`,
+      ref: { id: `material-${index}`, kind: 'material', versionToken: 'v1' },
+    }));
+    const referenceLimit = await app.request('/api/arena/rooms/v1', createRequest({
+      creationRequestId: 'create-request-refs',
+      displayName: '房主',
+      directory: { title: '引用容量测试', visibility: 'public' },
+      sharedConfig: {
+        ...authority.snapshot.sharedConfig,
+        auxScenarios,
+        materials,
+      },
+    }));
+    expect(referenceLimit.status).toBe(400);
+    expect(await referenceLimit.json()).toMatchObject({
+      code: 'ROOM_CONFIG_REFERENCE_LIMIT',
+      error: expect.stringMatching(/257.*256/u),
+    });
+
+    const missingVersionCombatant = {
+      key: 'data-card:missing-version',
+      ref: { id: 'missing-version', kind: 'character' },
+    };
+    const missingVersion = await app.request('/api/arena/rooms/v1', createRequest({
+      creationRequestId: 'create-request-version',
+      displayName: '房主',
+      directory: { title: '版本测试', visibility: 'public' },
+      sharedConfig: {
+        ...authority.snapshot.sharedConfig,
+        combatants: [missingVersionCombatant],
+        teams: [],
+      },
+    }));
+    expect(missingVersion.status).toBe(400);
+    expect(await missingVersion.json()).toMatchObject({
+      code: 'ROOM_REFERENCE_VERSION_MISSING',
+      error: expect.stringContaining('角色 1'),
+    });
+    expect(dependencies.memberships.create).not.toHaveBeenCalled();
+    expect(dependencies.generations.start).not.toHaveBeenCalled();
   });
 
   it('显式 config publish 只接收 strict intent，并返回 checkpoint 产生的安全 session', async () => {
@@ -1103,7 +1335,10 @@ describe('Arena Room HTTP product routes', () => {
         arenaRoom: dependencies,
       });
       const response = await app.request(`/api/arena/rooms/v1/${session.roomId}/session`, {
-        headers: { authorization: 'Bearer legacy-key' },
+        headers: {
+          authorization: 'Bearer legacy-key',
+          'x-mahoshojo-arena-error-taxonomy': '2',
+        },
       });
       expect(response.status).toBe(status);
       const body = await response.json() as { code: string; error: string };

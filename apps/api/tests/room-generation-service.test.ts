@@ -339,16 +339,32 @@ describe('Arena Room generation coordinator', () => {
       'ROOM_REFERENCE_STALE',
     ],
     [
-      new ArenaRoomGenerationMaterializationError('ARENA_ROOM_HOST_LOCAL_PAYLOAD_MISMATCH'),
-      'ROOM_HOST_LOCAL_PAYLOAD_MISSING_OR_MISMATCH',
+      new ArenaRoomGenerationMaterializationError(
+        'ARENA_ROOM_HOST_LOCAL_PAYLOAD_MISSING',
+        { kind: 'combatant', displayName: '星野' },
+      ),
+      'ROOM_HOST_LOCAL_PAYLOAD_MISSING',
     ],
     [
-      new ArenaRoomGenerationMaterializationError('ARENA_ROOM_HOST_LOCAL_PAYLOAD_KIND_MISMATCH'),
-      'ROOM_HOST_LOCAL_PAYLOAD_MISSING_OR_MISMATCH',
+      new ArenaRoomGenerationMaterializationError(
+        'ARENA_ROOM_HOST_LOCAL_PAYLOAD_INVALID',
+        { kind: 'room' },
+      ),
+      'ROOM_HOST_LOCAL_PAYLOAD_INVALID',
     ],
     [
-      new ArenaRoomGenerationMaterializationError('ARENA_ROOM_HOST_LOCAL_PAYLOAD_TYPE_MISMATCH'),
-      'ROOM_HOST_LOCAL_PAYLOAD_MISSING_OR_MISMATCH',
+      new ArenaRoomGenerationMaterializationError(
+        'ARENA_ROOM_HOST_LOCAL_PAYLOAD_KIND_MISMATCH',
+        { kind: 'scenario', displayName: '雨夜' },
+      ),
+      'ROOM_HOST_LOCAL_KIND_MISMATCH',
+    ],
+    [
+      new ArenaRoomGenerationMaterializationError(
+        'ARENA_ROOM_HOST_LOCAL_PAYLOAD_TYPE_MISMATCH',
+        { kind: 'combatant', displayName: '星野' },
+      ),
+      'ROOM_HOST_LOCAL_TYPE_MISMATCH',
     ],
     [
       new ArenaRoomGenerationMaterializationError('ARENA_ROOM_HOST_LOCAL_CONTENT_VERSION_MISSING'),
@@ -356,7 +372,7 @@ describe('Arena Room generation coordinator', () => {
     ],
     [
       new ArenaRoomGenerationMaterializationError('ARENA_ROOM_HOST_LOCAL_CONTENT_VERSION_MISMATCH'),
-      'ROOM_HOST_LOCAL_CONTENT_VERSION_MISMATCH',
+      'ROOM_HOST_LOCAL_DIGEST_MISMATCH',
     ],
   ])('materialization fail closed (%s) 且不 hash/reserve/start provider', async (error, code) => {
     const harness = await createHarness();
@@ -366,7 +382,12 @@ describe('Arena Room generation coordinator', () => {
       accountUserId: 101,
       request: startRequest(),
       sourceRequest: sourceRequest(),
-    })).rejects.toMatchObject({ code });
+    })).rejects.toMatchObject({
+      code,
+      target: error instanceof ArenaRoomGenerationMaterializationError
+        ? error.target
+        : undefined,
+    });
     expect(harness.store.order).toEqual(['checkpoint:config']);
     expect(harness.generation.hashSemanticPayload).not.toHaveBeenCalled();
     expect(harness.generation.startFromHostRequest).not.toHaveBeenCalled();
@@ -597,21 +618,40 @@ describe('Arena Room generation coordinator', () => {
     expect(historicalPort.startFromHostRequest).not.toHaveBeenCalled();
   });
 
-  it('definitive preflight rejection 终结 Room attempt；5xx unknown 保留 starting 等待对账', async () => {
+  it.each([
+    ['ARENA_CONTENT_POLICY_REJECTED', 400, 'ROOM_GENERATION_CONFLICT'],
+    ['ARENA_REQUEST_TOO_LARGE', 413, 'ROOM_RUNTIME_BODY_LIMIT'],
+    ['ARENA_PARTICIPANTS_LIMIT', 400, 'ROOM_GENERATION_COMBATANT_LIMIT'],
+    ['ARENA_REFERENCE_ITEMS_LIMIT', 400, 'ROOM_RUNTIME_REFERENCE_LIMIT'],
+    ['ARENA_ADJUDICATION_EVENTS_LIMIT', 400, 'ROOM_RUNTIME_ADJUDICATION_LIMIT'],
+    ['ARENA_PROMPT_BUDGET_EXCEEDED', 400, 'ROOM_RUNTIME_PROMPT_BUDGET_EXCEEDED'],
+    ['ARENA_SAFETY_PROMPT_BUDGET_EXCEEDED', 400, 'ROOM_RUNTIME_PROMPT_BUDGET_EXCEEDED'],
+    ['ARENA_CUSTOM_PROVIDER_INVALID', 400, 'ROOM_PROVIDER_CONFIG_INVALID'],
+    ['ARENA_PROVIDER_UNKNOWN', 400, 'ROOM_PROVIDER_CONFIG_INVALID'],
+    ['ARENA_PROVIDER_KEY_EMPTY', 400, 'ROOM_PROVIDER_CONFIG_INVALID'],
+    ['GENERATION_REQUEST_CONFLICT', 409, 'ROOM_GENERATION_CONFLICT'],
+  ] as const)('definitive downstream rejection %s 终结 Room attempt 并保留具体原因', async (
+    downstreamCode,
+    status,
+    expectedCode,
+  ) => {
     const rejected = await createHarness();
     vi.mocked(rejected.generation.startFromHostRequest).mockResolvedValueOnce({
       kind: 'rejected',
-      status: 400,
-      code: 'ARENA_CONTENT_POLICY_REJECTED',
+      status,
+      code: downstreamCode,
     });
     await expect(rejected.service.start({
       roomId: 'room-1',
       accountUserId: 101,
       request: startRequest(),
       sourceRequest: sourceRequest(),
-    })).rejects.toMatchObject({ code: 'ROOM_GENERATION_CONFLICT' });
+    })).rejects.toMatchObject({ code: expectedCode });
     expect(rejected.store.state?.snapshot.activeGeneration?.state).toBe('cancelled');
     expect(rejected.publisher.attach).not.toHaveBeenCalled();
+  });
+
+  it('5xx unknown 保留 starting 等待对账，不误终结可能已启动的 producer', async () => {
 
     const unknown = await createHarness();
     vi.mocked(unknown.generation.startFromHostRequest).mockResolvedValueOnce({
@@ -628,19 +668,6 @@ describe('Arena Room generation coordinator', () => {
     expect(unknown.store.state?.snapshot.activeGeneration?.state).toBe('starting');
     expect(unknown.publisher.attach).not.toHaveBeenCalled();
 
-    const conflict = await createHarness();
-    vi.mocked(conflict.generation.startFromHostRequest).mockResolvedValueOnce({
-      kind: 'rejected',
-      status: 409,
-      code: 'GENERATION_REQUEST_CONFLICT',
-    });
-    await expect(conflict.service.start({
-      roomId: 'room-1',
-      accountUserId: 101,
-      request: startRequest(),
-      sourceRequest: sourceRequest(),
-    })).rejects.toMatchObject({ code: 'ROOM_GENERATION_CONFLICT' });
-    expect(conflict.store.state?.snapshot.activeGeneration?.state).toBe('starting');
   });
 
   it('active member 只能读取 current generation；running projection 先 reconcile Room 再只读 resume attach', async () => {

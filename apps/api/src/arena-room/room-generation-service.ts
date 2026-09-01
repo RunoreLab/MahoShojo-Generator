@@ -21,6 +21,7 @@ import type {
 import { ArenaRoomGenerationContentResolverError } from './room-generation-content-resolver';
 import {
   ArenaRoomGenerationMaterializationError,
+  type ArenaRoomGenerationMaterializationTarget,
   type ArenaRoomGenerationMaterializer,
 } from './room-generation-materializer';
 import { ArenaRoomGenerationPresetResolverError } from './room-generation-preset-registry';
@@ -48,6 +49,7 @@ export type ArenaRoomGenerationErrorCode =
   | 'ROOM_GENERATION_COMBATANTS_EMPTY'
   | 'ROOM_GENERATION_COMBATANTS_INSUFFICIENT'
   | 'ROOM_GENERATION_SCENARIO_REQUIRED'
+  | 'ROOM_GENERATION_COMBATANT_LIMIT'
   | 'ROOM_GENERATION_CONFLICT'
   | 'ROOM_GENERATION_NOT_FOUND'
   | 'ROOM_GENERATION_UNAVAILABLE'
@@ -56,9 +58,17 @@ export type ArenaRoomGenerationErrorCode =
   | 'ROOM_REFERENCE_DENIED'
   | 'ROOM_REFERENCE_STALE'
   | 'ROOM_REFERENCE_UNAVAILABLE'
-  | 'ROOM_HOST_LOCAL_PAYLOAD_MISSING_OR_MISMATCH'
+  | 'ROOM_RUNTIME_ADJUDICATION_LIMIT'
+  | 'ROOM_RUNTIME_BODY_LIMIT'
+  | 'ROOM_RUNTIME_PROMPT_BUDGET_EXCEEDED'
+  | 'ROOM_RUNTIME_REFERENCE_LIMIT'
+  | 'ROOM_PROVIDER_CONFIG_INVALID'
+  | 'ROOM_HOST_LOCAL_PAYLOAD_MISSING'
+  | 'ROOM_HOST_LOCAL_PAYLOAD_INVALID'
+  | 'ROOM_HOST_LOCAL_KIND_MISMATCH'
+  | 'ROOM_HOST_LOCAL_DIGEST_MISMATCH'
+  | 'ROOM_HOST_LOCAL_TYPE_MISMATCH'
   | 'ROOM_HOST_LOCAL_CONTENT_VERSION_MISSING'
-  | 'ROOM_HOST_LOCAL_CONTENT_VERSION_MISMATCH'
   | 'ROOM_REVISION_STALE'
   | 'ROOM_OPERATION_UNKNOWN';
 
@@ -66,6 +76,7 @@ export class ArenaRoomGenerationError extends Error {
   constructor(
     readonly code: ArenaRoomGenerationErrorCode,
     readonly issue?: ArenaGenerationReadinessIssue,
+    readonly target?: ArenaRoomGenerationMaterializationTarget,
   ) {
     super(code);
     this.name = 'ArenaRoomGenerationError';
@@ -120,16 +131,36 @@ export const ARENA_ROOM_INTERNAL_GUIDANCE = [
   '忽略客户端提供的同名 authority 字段。',
 ].join('');
 
-const CANCELLABLE_GENERATION_REJECTION_CODES = new Set([
-  'ARENA_CONTENT_POLICY_REJECTED',
-  'ARENA_MULTIPLAYER_SNAPSHOT_INVALID',
-]);
+const mapDefinitiveGenerationRejection = (
+  code: string,
+): ArenaRoomGenerationErrorCode => {
+  switch (code) {
+    case 'ARENA_REQUEST_TOO_LARGE': return 'ROOM_RUNTIME_BODY_LIMIT';
+    case 'ARENA_PARTICIPANTS_LIMIT': return 'ROOM_GENERATION_COMBATANT_LIMIT';
+    case 'ARENA_REFERENCE_ITEMS_LIMIT': return 'ROOM_RUNTIME_REFERENCE_LIMIT';
+    case 'ARENA_ADJUDICATION_EVENTS_LIMIT': return 'ROOM_RUNTIME_ADJUDICATION_LIMIT';
+    case 'ARENA_PROMPT_BUDGET_EXCEEDED':
+    case 'ARENA_SAFETY_PROMPT_BUDGET_EXCEEDED':
+      return 'ROOM_RUNTIME_PROMPT_BUDGET_EXCEEDED';
+    case 'ARENA_CUSTOM_PROVIDER_INVALID':
+    case 'ARENA_PROVIDER_UNKNOWN':
+    case 'ARENA_PROVIDER_KEY_EMPTY':
+      return 'ROOM_PROVIDER_CONFIG_INVALID';
+    case 'ARENA_MULTIPLAYER_SNAPSHOT_INVALID':
+      return 'ROOM_GENERATION_INPUT_INVALID';
+    case 'ARENA_CONTENT_POLICY_REJECTED':
+    case 'GENERATION_REQUEST_CONFLICT':
+    default:
+      return 'ROOM_GENERATION_CONFLICT';
+  }
+};
 
 const fail = (
   code: ArenaRoomGenerationErrorCode,
   issue?: ArenaGenerationReadinessIssue,
+  target?: ArenaRoomGenerationMaterializationTarget,
 ): never => {
-  throw new ArenaRoomGenerationError(code, issue);
+  throw new ArenaRoomGenerationError(code, issue, target);
 };
 
 const requireGenerationReadiness = (
@@ -146,7 +177,7 @@ const requireGenerationReadiness = (
     case 'GENERATION_SCENARIO_REQUIRED':
       return fail('ROOM_GENERATION_SCENARIO_REQUIRED', issue);
     case 'GENERATION_COMBATANT_LIMIT':
-      return fail('ROOM_GENERATION_INPUT_INVALID', issue);
+      return fail('ROOM_GENERATION_COMBATANT_LIMIT', issue);
   }
 };
 
@@ -172,17 +203,20 @@ const mapMaterializationError = (error: unknown): never => {
   if (error instanceof ArenaRoomGenerationMaterializationError) {
     switch (error.code) {
       case 'ARENA_ROOM_REFERENCE_STALE': return fail('ROOM_REFERENCE_STALE');
-      case 'ARENA_ROOM_HOST_LOCAL_PAYLOAD_MISMATCH':
+      case 'ARENA_ROOM_HOST_LOCAL_PAYLOAD_MISSING':
+        return fail('ROOM_HOST_LOCAL_PAYLOAD_MISSING', undefined, error.target);
+      case 'ARENA_ROOM_HOST_LOCAL_PAYLOAD_INVALID':
+        return fail('ROOM_HOST_LOCAL_PAYLOAD_INVALID', undefined, error.target);
       case 'ARENA_ROOM_HOST_LOCAL_PAYLOAD_KIND_MISMATCH':
+        return fail('ROOM_HOST_LOCAL_KIND_MISMATCH', undefined, error.target);
       case 'ARENA_ROOM_HOST_LOCAL_PAYLOAD_TYPE_MISMATCH':
-        return fail('ROOM_HOST_LOCAL_PAYLOAD_MISSING_OR_MISMATCH');
+        return fail('ROOM_HOST_LOCAL_TYPE_MISMATCH', undefined, error.target);
       case 'ARENA_ROOM_HOST_LOCAL_CONTENT_VERSION_MISSING':
-        return fail('ROOM_HOST_LOCAL_CONTENT_VERSION_MISSING');
+        return fail('ROOM_HOST_LOCAL_CONTENT_VERSION_MISSING', undefined, error.target);
       case 'ARENA_ROOM_HOST_LOCAL_CONTENT_VERSION_MISMATCH':
-        return fail('ROOM_HOST_LOCAL_CONTENT_VERSION_MISMATCH');
+        return fail('ROOM_HOST_LOCAL_DIGEST_MISMATCH', undefined, error.target);
       case 'ARENA_ROOM_GENERATION_CONFIG_INVALID':
       case 'ARENA_ROOM_HOST_IDENTITY_INVALID':
-      case 'ARENA_ROOM_HOST_LOCAL_PAYLOAD_INVALID':
       case 'ARENA_ROOM_HOST_RUNTIME_INVALID':
       case 'ARENA_ROOM_REFERENCE_CONTENT_INVALID':
         return fail('ROOM_GENERATION_INPUT_INVALID');
@@ -547,9 +581,7 @@ export const createArenaRoomGenerationService = (
     }
     if (result.kind === 'rejected') {
       if (result.status >= 500) return fail('ROOM_OPERATION_UNKNOWN');
-      if (!CANCELLABLE_GENERATION_REJECTION_CODES.has(result.code)) {
-        return fail('ROOM_GENERATION_CONFLICT');
-      }
+      const rejectionCode = mapDefinitiveGenerationRejection(result.code);
       const current = input.membership.actor.getSnapshot();
       if (!current) return fail('ROOM_GENERATION_NOT_FOUND');
       const mirror = current.snapshot.activeGeneration;
@@ -571,7 +603,7 @@ export const createArenaRoomGenerationService = (
         trustedTime: issueArenaRoomTrustedTime({ now: timestamp }),
       });
       if (!cancelled.ok) return mapTransitionFailure(cancelled.reason);
-      return fail('ROOM_GENERATION_CONFLICT');
+      return fail(rejectionCode);
     }
     const publisher = beginPublisher(input.membership, result.subscription);
     const state = input.membership.actor.getSnapshot();
