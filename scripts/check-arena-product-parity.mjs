@@ -118,8 +118,12 @@ if (!exitEvidence) {
     exitEvidence.independentReview.status !== 'PASS'
       || exitEvidence.independentReview.critical !== 0
       || exitEvidence.independentReview.important !== 0
+      || typeof exitEvidence.independentReview.reviewer !== 'string'
+      || exitEvidence.independentReview.reviewer.trim() === ''
+      || typeof exitEvidence.independentReview.reviewedAt !== 'string'
+      || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/u.test(exitEvidence.independentReview.reviewedAt)
   )) {
-    fail('独立复审必须 PASS 且 Critical/Important 均为 0');
+    fail('独立复审必须绑定 reviewer/reviewedAt，PASS 且 Critical/Important 均为 0');
   } else if (!ready && !['PENDING', 'PASS'].includes(exitEvidence.independentReview.status)) {
     fail('未 READY 时 independentReview.status 只能为 PENDING 或 PASS');
   }
@@ -139,6 +143,9 @@ if (ready && exitEvidence) {
       'GMR10Q_EXIT_REVIEW_STATUS: PASS',
       'GMR10Q_EXIT_REVIEW_CRITICAL: 0',
       'GMR10Q_EXIT_REVIEW_IMPORTANT: 0',
+      `GMR10Q_EXIT_REVIEWER: ${exitEvidence.independentReview.reviewer}`,
+      `GMR10Q_EXIT_REVIEWED_AT: ${exitEvidence.independentReview.reviewedAt}`,
+      `GMR10Q_EXIT_REVIEWED_SOURCE_DIGEST: ${exitEvidence.sourceDigest}`,
       'GMR10Q_EXIT_VERIFICATION: PASS',
     ]) {
       if (!audit.includes(marker)) fail(`exit audit 缺少证据标记：${marker}`);

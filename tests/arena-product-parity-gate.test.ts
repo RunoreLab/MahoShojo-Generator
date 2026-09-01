@@ -60,7 +60,13 @@ describe('GMR-10Q product parity gate', () => {
       exitEvidence?: {
         sourceDigest?: string;
         auditLog?: string;
-        independentReview?: { status?: string; critical?: number; important?: number };
+        independentReview?: {
+          status?: string;
+          critical?: number | null;
+          important?: number | null;
+          reviewer?: string | null;
+          reviewedAt?: string | null;
+        };
       };
     };
     const packageManifest = JSON.parse(readFileSync(packagePath, 'utf8')) as {
@@ -91,13 +97,21 @@ describe('GMR-10Q product parity gate', () => {
         },
       });
       expect(manifest.exitEvidence?.sourceDigest).toMatch(/^[a-f0-9]{64}$/u);
+      expect(manifest.exitEvidence?.independentReview?.reviewer).toMatch(/\S/u);
+      expect(manifest.exitEvidence?.independentReview?.reviewedAt).toMatch(/Z$/u);
     } else {
       expect(manifest).toMatchObject({
         overallStatus: 'IN_PROGRESS',
         productionReadiness: 'BLOCKED',
         exitEvidence: {
           sourceDigest: null,
-          independentReview: { status: 'PENDING', critical: null, important: null },
+          independentReview: {
+            status: 'PENDING',
+            critical: null,
+            important: null,
+            reviewer: null,
+            reviewedAt: null,
+          },
         },
       });
     }
@@ -135,14 +149,26 @@ describe('GMR-10Q product parity gate', () => {
         slices: Record<string, string>;
         exitEvidence: {
           sourceDigest: string | null;
-          independentReview: { status: string; critical: number | null; important: number | null };
+          independentReview: {
+            status: string;
+            critical: number | null;
+            important: number | null;
+            reviewer: string | null;
+            reviewedAt: string | null;
+          };
         };
       };
       manifest.blockedReason = 'none';
       manifest.overallStatus = 'DONE';
       manifest.productionReadiness = 'READY';
       for (const sliceId of Object.keys(manifest.slices)) manifest.slices[sliceId] = 'DONE';
-      manifest.exitEvidence.independentReview = { status: 'PASS', critical: 0, important: 0 };
+      manifest.exitEvidence.independentReview = {
+        status: 'PASS',
+        critical: 0,
+        important: 0,
+        reviewer: 'independent-reviewer',
+        reviewedAt: '2026-09-01T00:00:00Z',
+      };
       manifest.exitEvidence.sourceDigest = '0'.repeat(64);
       writeFileSync(temporaryManifest, JSON.stringify(manifest));
 

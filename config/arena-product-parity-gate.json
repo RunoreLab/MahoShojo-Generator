@@ -23,7 +23,9 @@
     "independentReview": {
       "status": "PENDING",
       "critical": null,
-      "important": null
+      "important": null,
+      "reviewer": null,
+      "reviewedAt": null
     }
   }
 }
