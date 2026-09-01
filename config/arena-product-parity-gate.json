@@ -18,14 +18,14 @@
   },
   "blockedReason": "none",
   "exitEvidence": {
-    "sourceDigest": "2f0021b12ead6be613d216ec4f32e21d249fda2dcbc3211d1d77d1f45f7db5cc",
+    "sourceDigest": "e59047913d451da6756b708654a96242047138ff5f0236f66ead0877bbcd5f6f",
     "auditLog": "docs/logs/2026-09-01_092555_Arena多人GMR-10Q门禁最小化与一致性实施与退出审计.md",
     "independentReview": {
       "status": "PASS",
       "critical": 0,
       "important": 0,
       "reviewer": "codex:/root/review_arena_reconciliation_fix",
-      "reviewedAt": "2026-09-01T04:29:24Z"
+      "reviewedAt": "2026-09-01T04:32:12Z"
     }
   }
 }
