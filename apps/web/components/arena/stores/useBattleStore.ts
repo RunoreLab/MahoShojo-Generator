@@ -143,6 +143,7 @@ export const useBattleStore = create<BattleStoreState>()(
       customStoryLength: '',
       selectedLanguage: 'zh-CN',
       lastGenerationId: null,
+      repairAppliedGenerationId: null,
       settings: defaultSettings,
       adjudicationEvents: [],
       adjudicationResults: null,
@@ -173,7 +174,16 @@ export const useBattleStore = create<BattleStoreState>()(
       setStoryLength: (storyLength) => set({ storyLength }),
       setCustomStoryLength: (customStoryLength) => set({ customStoryLength }),
       setSelectedLanguage: (selectedLanguage) => set({ selectedLanguage }),
-      setLastGenerationId: (lastGenerationId) => set({ lastGenerationId }),
+      setLastGenerationId: (lastGenerationId) => set((state) => ({
+        lastGenerationId,
+        repairAppliedGenerationId:
+          state.repairAppliedGenerationId === lastGenerationId
+            ? state.repairAppliedGenerationId
+            : null,
+      })),
+      setRepairAppliedGenerationId: (repairAppliedGenerationId) => set({
+        repairAppliedGenerationId,
+      }),
       updateSettings: (incoming) =>
         set((state) => ({
           settings: {

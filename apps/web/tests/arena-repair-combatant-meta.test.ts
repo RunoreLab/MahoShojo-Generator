@@ -169,6 +169,29 @@ describe('Arena AI repair metadata endpoint', () => {
     expect(mocks.recordUserActivityFromRequest).not.toHaveBeenCalled();
   });
 
+  it('复用现有 custom Provider 与 generation overrides 契约', async () => {
+    const response = await appRouteHandler(request({
+      customProvider: {
+        providerId: 'system',
+        modelId: 'default',
+        apiKey: '',
+        generationOverrides: { temperature: 0.6 },
+      },
+    }) as never);
+
+    expect(response.status).toBe(200);
+    const [, generationConfig, providerOptions] = mocks.generateWithAI.mock.calls[0]!;
+    expect(generationConfig).toMatchObject({
+      generationSettingsContext: {
+        providerId: 'system',
+        userOverrides: { temperature: 0.6 },
+      },
+    });
+    expect(providerOptions).toMatchObject({
+      channelContext: expect.objectContaining({ providerId: 'system' }),
+    });
+  });
+
   it('拒绝关闭全部 repair 字段、过量 roster 与不完整战报', async () => {
     const noFields = await appRouteHandler(request({
       writeArenaHistory: false,

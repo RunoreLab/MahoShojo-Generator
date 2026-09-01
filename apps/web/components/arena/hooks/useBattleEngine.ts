@@ -1891,6 +1891,10 @@ export const useBattleEngine = () => {
       setError('⚠️ 本次战报缺少 generationId，无法安全重试角色更新。');
       return;
     }
+    if (state.repairAppliedGenerationId === lastGenerationId) {
+      setError('⚠️ 当前角色已应用本次战报的自定义修复，基线已变化，无法再执行同 generation 的服务器权威重试。');
+      return;
+    }
 
     setIsRedoingUpdates(true);
     setError(null);

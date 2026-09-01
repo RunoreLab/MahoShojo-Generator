@@ -210,6 +210,8 @@ export interface BattleStoreState {
   selectedLanguage: string;
   /** 最近一次生成战报的 generationId（用于排位结算展示）。 */
   lastGenerationId: string | null;
+  /** 当前 roster 已应用非权威 repair 的 generation；同 generation 权威重试必须禁用。 */
+  repairAppliedGenerationId: string | null;
   settings: BattleSettings;
   adjudicationEvents: AdjudicatorEvent[];
   adjudicationResults: AdjudicationResult[] | null;
@@ -241,6 +243,7 @@ export interface BattleStoreState {
   setCustomStoryLength: (length: string) => void;
   setSelectedLanguage: (language: string) => void;
   setLastGenerationId: (generationId: string | null) => void;
+  setRepairAppliedGenerationId: (generationId: string | null) => void;
   updateSettings: (settings: Partial<BattleSettings>) => void;
 
   addCombatant: (combatant: Combatant) => void;
