@@ -611,6 +611,49 @@ describe('RedisGenerationReplayStore', () => {
     );
   });
 
+  it('从 Redis 恢复 completed 未归档告警而不改判失败', async () => {
+    const client = createClient();
+    vi.mocked(client.get).mockResolvedValue(JSON.stringify({
+      actorHash: 'actor-hash',
+      reservationKey: 'reservation-key',
+      generationId: 'generation-1234',
+      generationRequestId: 'request-1234',
+      payloadHash: 'payload-sha256',
+      producerToken: reserveInput.producerToken,
+      status: 'completed',
+      lastEventId: '12-0',
+      updatedAt: reserveInput.now,
+      leaseExpiresAt: null,
+      snapshot: {
+        status: 'completed',
+        markdown: '本次连接内仍可读取的完整正文',
+        reasoning: '',
+        lastEventId: '12-0',
+        updatedAt: reserveInput.now,
+        terminalResultRef: null,
+        persistenceWarning: 'OUTPUT_NOT_ARCHIVED',
+      },
+      terminal: {
+        status: 'completed',
+        resultRef: null,
+        persistenceWarning: 'OUTPUT_NOT_ARCHIVED',
+      },
+      cancelRequested: false,
+    }));
+    const store = createRedisGenerationReplayStore({ getClient: () => client });
+
+    await expect(store.readState({ generationId: 'generation-1234' })).resolves.toMatchObject({
+      status: 'completed',
+      snapshot: {
+        persistenceWarning: 'OUTPUT_NOT_ARCHIVED',
+      },
+      terminal: {
+        status: 'completed',
+        persistenceWarning: 'OUTPUT_NOT_ARCHIVED',
+      },
+    });
+  });
+
   it('markRunning 原子观察 reserved cancel，阻止旧 producer 启动 Provider', async () => {
     const client = createClient();
     vi.mocked(client.eval).mockResolvedValue('cancelled:content_policy');

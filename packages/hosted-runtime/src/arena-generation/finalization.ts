@@ -3,12 +3,14 @@ import type {
   ArenaGenerationFinalizationResult,
 } from './runtime';
 import type { ArenaGenerationObserver } from '@mahoshojo/hosted-api/arena-generation/service';
+import { ARENA_OUTPUT_NOT_ARCHIVED_WARNING } from '@mahoshojo/hosted-api/arena-generation/service';
 
 export type ArenaTerminalClaimInput = Omit<
   ArenaGenerationFinalizationInput,
   'signal'
 > & {
   resultRef: string | null;
+  persistenceWarning?: typeof ARENA_OUTPUT_NOT_ARCHIVED_WARNING;
 };
 
 export type ArenaTerminalClaimResult = {
@@ -76,10 +78,10 @@ export const createArenaGenerationFinalizer = (
     idempotencyKey: buildArenaTerminalEffectIdempotencyKey(claim.generationId, effect),
   });
   let resultRef: string | null = null;
+  let persistenceWarning: typeof ARENA_OUTPUT_NOT_ARCHIVED_WARNING | undefined;
   if (input.status === 'completed') {
     const startedAt = performance.now();
     const bytes = new TextEncoder().encode(input.markdown).byteLength;
-    let storageError: unknown = null;
     for (let attempt = 0; attempt < 3 && !resultRef; attempt += 1) {
       try {
         resultRef = await ports.storeOutput({
@@ -92,8 +94,7 @@ export const createArenaGenerationFinalizer = (
           signal: input.signal,
         }).then((result) => result.resultRef);
         if (!resultRef) throw new Error('ARENA_R2_RESULT_REF_MISSING');
-      } catch (error) {
-        storageError = error;
+      } catch {
         resultRef = null;
       }
     }
@@ -115,39 +116,7 @@ export const createArenaGenerationFinalizer = (
         durationMs: performance.now() - startedAt,
         bytes,
       });
-      const failedClaim: ArenaTerminalClaimInput = {
-        generationId: input.generationId,
-        generationRequestId: input.generationRequestId,
-        actorKey: input.actorKey,
-        payloadHash: input.payloadHash,
-        payload: input.payload,
-        metadata: input.metadata,
-        markdown: '',
-        telemetry: input.telemetry,
-        status: 'failed',
-        errorCode: 'ARENA_R2_STORAGE_FAILED',
-        resultRef: null,
-      };
-      let failureRecorded = false;
-      for (let attempt = 0; attempt < 3 && !failureRecorded; attempt += 1) {
-        try {
-          const claim = await ports.claimTerminal(failedClaim);
-          if (!claim.finalized) {
-            await ports.persistCombatants(effectInput(failedClaim, 'combatants'));
-            await ports.completeTerminal(failedClaim);
-          }
-          failureRecorded = true;
-        } catch {
-          // Bounded retry uses the deterministic terminal claim as the idempotency gate.
-        }
-      }
-      if (!failureRecorded) {
-        await ports.failTerminal({
-          ...failedClaim,
-          failureCode: 'ARENA_R2_STORAGE_FAILED',
-        }).catch(() => undefined);
-      }
-      throw storageError ?? new Error('ARENA_R2_STORAGE_FAILED');
+      persistenceWarning = ARENA_OUTPUT_NOT_ARCHIVED_WARNING;
     }
   }
 
@@ -163,6 +132,7 @@ export const createArenaGenerationFinalizer = (
     status: input.status,
     errorCode: input.errorCode,
     resultRef,
+    ...(persistenceWarning ? { persistenceWarning } : {}),
   };
   let finalized = false;
   let lastError: unknown = null;
@@ -194,5 +164,9 @@ export const createArenaGenerationFinalizer = (
       actorKey: input.actorKey,
     }).catch(() => null)
     : null;
-  return { resultRef, ranking };
+  return {
+    resultRef,
+    ranking,
+    ...(persistenceWarning ? { persistenceWarning } : {}),
+  };
 };

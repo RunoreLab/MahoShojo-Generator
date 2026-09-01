@@ -4,6 +4,7 @@ import type {
   ArenaGenerationTerminalRecord,
   ArenaGenerationTerminalStore,
 } from '@mahoshojo/hosted-api/arena-generation/service';
+import { ARENA_OUTPUT_NOT_ARCHIVED_WARNING } from '@mahoshojo/hosted-api/arena-generation/service';
 import type {
   ArenaTerminalEffectInput,
   ArenaGenerationFinalizationPorts,
@@ -375,14 +376,14 @@ const buildExtraJson = async (
       const characterName = boundedString(impact.characterName, 300);
       if (!characterName) return [];
       const explicitIndex = numberOf(impact.combatantIndex);
-      const queuedIndex = impactRosterQueues
-        .get(characterName.replace(/\s+/gu, '').toLocaleLowerCase())
-        ?.shift();
-      const combatantIndex = explicitIndex !== null
+      const hasValidExplicitIndex = explicitIndex !== null
         && explicitIndex >= 0
-        && explicitIndex < combatantsFallback.length
+        && explicitIndex < combatantsFallback.length;
+      const combatantIndex = hasValidExplicitIndex
         ? explicitIndex
-        : queuedIndex;
+        : impactRosterQueues
+          .get(characterName.replace(/\s+/gu, '').toLocaleLowerCase())
+          ?.shift();
       return [{
         ...(combatantIndex === undefined ? {} : { combatantIndex }),
         characterName,
@@ -411,6 +412,7 @@ const buildExtraJson = async (
     generationTerminalStatus: input.status,
     finalizationCompleted: false,
     resultRef: boundedString(input.resultRef, 512),
+    persistenceWarning: input.persistenceWarning ?? null,
     errorCode: boundedString(input.errorCode, 80),
   };
   const candidate = {
@@ -682,9 +684,15 @@ const materializeStoredTerminal = async (input: {
   const r2Key = stringOf(input.row['r2_key']);
   let markdown = '';
   let contentAvailable = status !== 'completed';
-  let contentUnavailableReason: 'not-found' | 'temporary' | undefined;
+  let contentUnavailableReason: 'not-archived' | 'not-found' | 'temporary' | undefined;
+  let persistenceWarning = extra.persistenceWarning === ARENA_OUTPUT_NOT_ARCHIVED_WARNING
+    ? ARENA_OUTPUT_NOT_ARCHIVED_WARNING
+    : undefined;
   if (status === 'completed') {
-    if (!r2Key || !resultRef) {
+    if (!resultRef) {
+      contentUnavailableReason = 'not-archived';
+      persistenceWarning = ARENA_OUTPUT_NOT_ARCHIVED_WARNING;
+    } else if (!r2Key) {
       contentUnavailableReason = 'not-found';
     } else if (!input.objectStore) {
       contentUnavailableReason = 'temporary';
@@ -714,6 +722,7 @@ const materializeStoredTerminal = async (input: {
       ?? stableErrorCodeOf(extra.errorCode)
       ?? stableErrorCodeOf(extra.rejectionCode),
     payloadHash: stringOf(extra.generationPayloadHash),
+    persistenceWarning,
     contentAvailable,
     contentUnavailableReason,
     roomSafeResult: status === 'completed' ? buildRoomSafeResult(input.row, extra) : null,

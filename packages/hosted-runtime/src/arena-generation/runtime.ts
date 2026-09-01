@@ -1,5 +1,6 @@
 import {
   ArenaGenerationFinalizationPendingError,
+  type ArenaGenerationPersistenceWarning,
   generationCancelCode,
   isArenaGenerationAuditableRejection,
   isArenaPreparationSeed,
@@ -63,6 +64,7 @@ export type ArenaGenerationFinalizationInput = {
 export type ArenaGenerationFinalizationResult = {
   resultRef: string | null;
   ranking: unknown | null;
+  persistenceWarning?: ArenaGenerationPersistenceWarning;
 };
 
 export interface ArenaGenerationRuntimeDependencies {
@@ -872,7 +874,13 @@ export const createArenaGenerationRuntime = (
       if (finalization.ranking !== null) {
         await emit({ type: 'ranking', data: finalization.ranking });
       }
-      return { status: 'completed', resultRef: finalization.resultRef };
+      return {
+        status: 'completed',
+        resultRef: finalization.resultRef,
+        ...(finalization.persistenceWarning
+          ? { persistenceWarning: finalization.persistenceWarning }
+          : {}),
+      };
     } catch (error) {
       if (!providerSettled && providerStartedAt !== null) {
         providerSettled = true;

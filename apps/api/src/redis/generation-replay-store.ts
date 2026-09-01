@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 
 import {
+  ARENA_OUTPUT_NOT_ARCHIVED_WARNING,
   isArenaPreparationSeed,
   isArenaPreparationVersion,
   isGenerationCancelReason,
@@ -423,12 +424,17 @@ const nullableString = (value: unknown): value is string | null => (
   value === null || typeof value === 'string'
 );
 
+const isPersistenceWarning = (value: unknown): boolean => (
+  value === ARENA_OUTPUT_NOT_ARCHIVED_WARNING
+);
+
 const parseStoredSnapshot = (value: unknown): GenerationSnapshot | null => {
   if (value === null || value === undefined) return null;
   if (!isRecord(value)) throw new Error('REDIS_GENERATION_STATE_INVALID');
   const lastEventId = value.lastEventId ?? null;
   const telemetry = value.telemetry ?? null;
   const terminalResultRef = value.terminalResultRef ?? null;
+  const persistenceWarning = value.persistenceWarning;
   if (
     !isGenerationStatus(value.status)
     || typeof value.markdown !== 'string'
@@ -437,6 +443,7 @@ const parseStoredSnapshot = (value: unknown): GenerationSnapshot | null => {
     || typeof value.updatedAt !== 'string'
     || (telemetry !== null && !isRecord(telemetry))
     || !nullableString(terminalResultRef)
+    || (persistenceWarning !== undefined && !isPersistenceWarning(persistenceWarning))
   ) {
     throw new Error('REDIS_GENERATION_STATE_INVALID');
   }
@@ -448,6 +455,9 @@ const parseStoredSnapshot = (value: unknown): GenerationSnapshot | null => {
     updatedAt: value.updatedAt,
     telemetry: telemetry as Record<string, unknown> | null,
     terminalResultRef,
+    ...(persistenceWarning === undefined ? {} : {
+      persistenceWarning: ARENA_OUTPUT_NOT_ARCHIVED_WARNING,
+    }),
   };
 };
 
@@ -460,6 +470,7 @@ const parseStoredTerminal = (value: unknown): GenerationTerminal | null => {
   if (
     ('code' in value && typeof value.code !== 'string')
     || ('resultRef' in value && !nullableString(value.resultRef))
+    || ('persistenceWarning' in value && !isPersistenceWarning(value.persistenceWarning))
     || (publicError !== undefined && !isSafePublicAiErrorProjection(publicError))
   ) {
     throw new Error('REDIS_GENERATION_STATE_INVALID');
@@ -470,6 +481,9 @@ const parseStoredTerminal = (value: unknown): GenerationTerminal | null => {
     status: value.status,
     ...(code === undefined ? {} : { code: code as string }),
     ...(resultRef === undefined ? {} : { resultRef: resultRef as string | null }),
+    ...(!('persistenceWarning' in value) ? {} : {
+      persistenceWarning: ARENA_OUTPUT_NOT_ARCHIVED_WARNING,
+    }),
     ...(publicError === undefined ? {} : { publicError: { ...publicError } }),
   };
 };
@@ -519,6 +533,7 @@ const parseStoredState = (raw: string): StoredGenerationState => {
       snapshot.status !== terminal.status
       || snapshot.lastEventId !== parsed.lastEventId
       || (snapshot.terminalResultRef ?? null) !== (terminal.resultRef ?? null)
+      || (snapshot.persistenceWarning ?? null) !== (terminal.persistenceWarning ?? null)
     ))
   ) {
     throw new Error('REDIS_GENERATION_STATE_INVALID');

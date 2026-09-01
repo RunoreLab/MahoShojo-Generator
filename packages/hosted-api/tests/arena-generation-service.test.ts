@@ -3,6 +3,7 @@ import { describe, expect, test, vi } from 'vitest';
 import {
   ArenaGenerationFinalizationPendingError,
   createArenaGenerationService,
+  isArenaGenerationDispatchReady,
   MAX_ARENA_CREATE_BODY_BYTES,
   type ArenaGenerationExecutor,
   type ArenaGenerationRejectedTerminalRecorder,
@@ -339,6 +340,18 @@ const createService = (
 });
 
 describe('Arena generation lifecycle service', () => {
+  test('dispatch readiness requires D1/signing but does not require an archive object store', () => {
+    expect(isArenaGenerationDispatchReady({
+      d1Available: true,
+      signatureSecret: 'x'.repeat(32),
+      finalizationBridgeReady: true,
+    })).toBe(true);
+    expect(isArenaGenerationDispatchReady({
+      d1Available: false,
+      signatureSecret: 'x'.repeat(32),
+      finalizationBridgeReady: true,
+    })).toBe(false);
+  });
   test('trusted parsed seam does not consume or parse the request body again', async () => {
     const prepare = vi.fn(async ({ payload, actorKey }) => {
       expect(payload).toEqual({ value: 'already-parsed' });
@@ -3827,6 +3840,71 @@ describe('Arena generation lifecycle service', () => {
       kind: 'unavailable',
       code: 'GENERATION_TERMINAL_CONTENT_EXPIRED',
     });
+  });
+
+  test('reports a completed unarchived output as completed with a narrow warning', async () => {
+    const store = new MemoryReplayStore();
+    const terminalStore: ArenaGenerationTerminalStore = {
+      readOwnedTerminal: vi.fn(async () => ({
+        generationId: 'generation-1',
+        generationRequestId: 'request-1',
+        status: 'completed' as const,
+        updatedAt: '2026-08-25T04:00:00.000Z',
+        resultRef: null,
+        markdown: '',
+        reasoning: '',
+        payloadHash: 'payload-hash',
+        persistenceWarning: 'OUTPUT_NOT_ARCHIVED' as const,
+        contentAvailable: false,
+        contentUnavailableReason: 'not-archived' as const,
+      })),
+    };
+    const service = createService(store, {
+      execute: vi.fn(async () => ({ status: 'completed' as const })),
+    }, { terminalStore });
+
+    const status = await service.status(new Request(
+      'https://example.test/api/arena/generations/generation-1',
+    ), { generationId: 'generation-1' });
+    const lookup = await service.lookup(new Request(
+      'https://example.test/api/arena/generation-requests/request-1',
+    ), { generationRequestId: 'request-1' });
+    const projection = await service.readOwnedProjection({
+      actorKey: 'user:42',
+      generationId: 'generation-1',
+    });
+    const resumed = await service.resume(new Request(
+      'https://example.test/api/arena/generations/generation-1/stream',
+    ), { generationId: 'generation-1' });
+    const resumedBody = await resumed.text();
+
+    for (const response of [status, lookup]) {
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({
+        status: 'completed',
+        resumable: false,
+        finalAuthoritative: true,
+        resultAvailable: false,
+        persistenceWarning: 'OUTPUT_NOT_ARCHIVED',
+        replayUnavailable: true,
+      });
+    }
+    expect(projection).toEqual({
+      kind: 'found',
+      projection: expect.objectContaining({
+        status: 'completed',
+        finalAuthoritative: true,
+        resultAvailable: false,
+        persistenceWarning: 'OUTPUT_NOT_ARCHIVED',
+        replayUnavailable: true,
+      }),
+    });
+    expect(resumed.status).toBe(200);
+    expect(resumedBody).toContain('event: done');
+    expect(resumedBody).toContain('"status":"completed"');
+    expect(resumedBody).toContain('"persistenceWarning":"OUTPUT_NOT_ARCHIVED"');
+    expect(resumedBody).toContain('"replayUnavailable":true');
+    expect(resumedBody).not.toContain('event: error');
   });
 
   test('keeps an expired terminal completed when durable fallback wins an SSE replay race', async () => {

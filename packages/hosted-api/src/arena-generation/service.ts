@@ -63,6 +63,9 @@ export type GenerationStreamEvent = GenerationEventInput & {
   id: string;
 };
 
+export const ARENA_OUTPUT_NOT_ARCHIVED_WARNING = 'OUTPUT_NOT_ARCHIVED' as const;
+export type ArenaGenerationPersistenceWarning = typeof ARENA_OUTPUT_NOT_ARCHIVED_WARNING;
+
 export type GenerationSnapshot = {
   status: GenerationStatus;
   markdown: string;
@@ -71,12 +74,14 @@ export type GenerationSnapshot = {
   updatedAt: string;
   telemetry?: Record<string, unknown> | null;
   terminalResultRef?: string | null;
+  persistenceWarning?: ArenaGenerationPersistenceWarning | null;
 };
 
 export type GenerationTerminal = {
   status: Extract<GenerationStatus, 'completed' | 'failed' | 'cancelled' | 'producer_lost'>;
   code?: string;
   resultRef?: string | null;
+  persistenceWarning?: ArenaGenerationPersistenceWarning;
   publicError?: SafePublicAiErrorProjection;
 };
 
@@ -87,6 +92,16 @@ export const isGenerationCancelReason = (value: unknown): value is GenerationCan
 
 export const generationCancelCode = (reason: GenerationCancelReason): string =>
   reason === 'content_policy' ? 'CONTENT_POLICY_CANCELLED' : 'USER_CANCELLED';
+
+export const isArenaGenerationDispatchReady = (input: Readonly<{
+  d1Available: boolean;
+  signatureSecret: string;
+  finalizationBridgeReady: boolean;
+}>): boolean => (
+  input.d1Available
+  && input.signatureSecret.trim().length >= 32
+  && input.finalizationBridgeReady
+);
 
 export type GenerationReplayStoreState = {
   actorKey: string;
@@ -355,8 +370,9 @@ export type ArenaGenerationTerminalRecord = {
   reasoning: string;
   errorCode?: string | null;
   payloadHash?: string | null;
+  persistenceWarning?: ArenaGenerationPersistenceWarning | null;
   contentAvailable?: boolean;
-  contentUnavailableReason?: 'not-found' | 'temporary' | null;
+  contentUnavailableReason?: 'not-archived' | 'not-found' | 'temporary' | null;
   /** Strictly sanitized by the durable terminal adapter; callers must parse again at wire boundary. */
   roomSafeResult?: Readonly<Record<string, unknown>> | null;
 };
@@ -546,6 +562,8 @@ export type ArenaGenerationOwnedProjection = Readonly<{
   resultAvailable: boolean;
   generationRecordId: string | null;
   errorCode: string | null;
+  persistenceWarning?: ArenaGenerationPersistenceWarning;
+  replayUnavailable?: boolean;
   roomSafeResult?: Readonly<Record<string, unknown>>;
 }>;
 
@@ -985,6 +1003,7 @@ export const createArenaGenerationService = (
       status: GenerationStatus,
       updatedAt: string,
       terminalResultRef: string | null = null,
+      persistenceWarning: ArenaGenerationPersistenceWarning | null = null,
     ): GenerationSnapshot => ({
       status,
       markdown,
@@ -993,6 +1012,7 @@ export const createArenaGenerationService = (
       updatedAt,
       telemetry,
       terminalResultRef,
+      ...(persistenceWarning ? { persistenceWarning } : {}),
     });
 
     const writeSnapshot = async (
@@ -1144,6 +1164,11 @@ export const createArenaGenerationService = (
               status: terminal.status,
               ...(terminal.code ? { code: terminal.code } : {}),
               ...(terminal.resultRef ? { resultRef: terminal.resultRef } : {}),
+              ...(terminal.persistenceWarning ? {
+                persistenceWarning: terminal.persistenceWarning,
+                replayUnavailable: true,
+                resultAvailable: false,
+              } : {}),
               ...(publicError ? {
                 error: publicError.message,
                 message: publicError.message,
@@ -1156,7 +1181,12 @@ export const createArenaGenerationService = (
               } : {}),
             },
           };
-          const fullTerminalSnapshot = snapshot(terminal.status, now, terminal.resultRef ?? null);
+          const fullTerminalSnapshot = snapshot(
+            terminal.status,
+            now,
+            terminal.resultRef ?? null,
+            terminal.persistenceWarning ?? null,
+          );
           const selectedTerminalSnapshot = selectTerminalSnapshotWithinBudget(
             fullTerminalSnapshot,
           );
@@ -1215,6 +1245,9 @@ export const createArenaGenerationService = (
       status: record.status,
       ...(record.errorCode ? { code: record.errorCode } : {}),
       ...(record.resultRef ? { resultRef: record.resultRef } : {}),
+      ...(record.persistenceWarning ? {
+        persistenceWarning: record.persistenceWarning,
+      } : {}),
     };
     const terminalCode = terminal.status === 'producer_lost'
       ? terminal.code ?? 'PRODUCER_OWNERSHIP_LOST'
@@ -1232,6 +1265,11 @@ export const createArenaGenerationService = (
           status: terminal.status,
           ...(terminalCode ? { code: terminalCode } : {}),
           ...(terminal.resultRef ? { resultRef: terminal.resultRef } : {}),
+          ...(terminal.persistenceWarning ? {
+            persistenceWarning: terminal.persistenceWarning,
+            replayUnavailable: true,
+            resultAvailable: false,
+          } : {}),
         },
       },
     };
@@ -1270,6 +1308,7 @@ export const createArenaGenerationService = (
       code?: unknown;
       ok?: unknown;
       resultRef?: unknown;
+      persistenceWarning?: unknown;
       status?: unknown;
     };
     const expectedType = terminal.status === 'failed' || terminal.status === 'producer_lost'
@@ -1286,12 +1325,14 @@ export const createArenaGenerationService = (
       || eventData.ok !== (terminal.status === 'completed')
       || (eventData.code ?? null) !== expectedCode
       || (eventData.resultRef ?? null) !== (terminal.resultRef ?? null)
+      || (eventData.persistenceWarning ?? null) !== (terminal.persistenceWarning ?? null)
     ) return false;
     if (input.requireSnapshot && state.snapshot === null) return false;
     return state.snapshot === null || (
       state.snapshot.status === terminal.status
       && state.snapshot.lastEventId === event.id
       && (state.snapshot.terminalResultRef ?? null) === (terminal.resultRef ?? null)
+      && (state.snapshot.persistenceWarning ?? null) === (terminal.persistenceWarning ?? null)
     );
   };
 
@@ -1345,6 +1386,8 @@ export const createArenaGenerationService = (
       || durableState.terminal?.status !== terminal.status
       || (durableState.terminal.resultRef ?? null) !== (terminal.resultRef ?? null)
       || (durableState.terminal.code ?? null) !== (terminal.code ?? null)
+      || (durableState.terminal.persistenceWarning ?? null)
+        !== (terminal.persistenceWarning ?? null)
     ) return null;
     return durableState;
   };
@@ -1367,6 +1410,9 @@ export const createArenaGenerationService = (
       updatedAt: input.now,
       telemetry: input.priorState.snapshot?.telemetry ?? null,
       terminalResultRef: terminal.resultRef ?? null,
+      ...(terminal.persistenceWarning ? {
+        persistenceWarning: terminal.persistenceWarning,
+      } : {}),
     };
     const terminalContentAvailable = terminal.status !== 'completed'
       || input.record.contentAvailable === true;
@@ -1639,10 +1685,16 @@ export const createArenaGenerationService = (
           lastEventId: null,
           updatedAt: terminalFallback.updatedAt,
           terminalResultRef: terminalFallback.resultRef,
+          ...(terminalFallback.persistenceWarning ? {
+            persistenceWarning: terminalFallback.persistenceWarning,
+          } : {}),
         },
         terminal: {
           status: terminalFallback.status,
           resultRef: terminalFallback.resultRef,
+          ...(terminalFallback.persistenceWarning ? {
+            persistenceWarning: terminalFallback.persistenceWarning,
+          } : {}),
         },
         cancelRequested: terminalFallback.status === 'cancelled',
         cancelReason: terminalFallback.status === 'cancelled' ? 'user' : null,
@@ -1767,6 +1819,14 @@ export const createArenaGenerationService = (
     ...(state.status === 'completed' && state.terminal?.resultRef
       ? { resultRef: state.terminal.resultRef }
       : {}),
+    ...(state.status === 'completed' && state.terminal?.persistenceWarning
+      ? {
+        finalAuthoritative: true,
+        resultAvailable: false,
+        persistenceWarning: state.terminal.persistenceWarning,
+        replayUnavailable: true,
+      }
+      : {}),
   }, 200), actor);
 
   const createTerminalContentUnavailableResponse = (): Response => jsonResponse({
@@ -1781,6 +1841,31 @@ export const createArenaGenerationService = (
     && terminal.contentAvailable !== true
     && terminal.contentUnavailableReason === 'not-found'
   );
+
+  const isTerminalContentNotArchived = (
+    terminal: ArenaGenerationTerminalRecord | null,
+  ): terminal is ArenaGenerationTerminalRecord => Boolean(
+    terminal?.status === 'completed'
+    && terminal.contentAvailable !== true
+    && terminal.contentUnavailableReason === 'not-archived'
+  );
+
+  const createNotArchivedTerminalStatusResponse = (
+    state: GenerationReplayStoreState,
+    terminal: ArenaGenerationTerminalRecord,
+    actor: ArenaGenerationActor,
+  ): Response => withActorHeaders(jsonResponse({
+    generationId: state.generationId,
+    generationRequestId: state.generationRequestId,
+    status: 'completed',
+    resumable: false,
+    lastEventId: state.lastEventId,
+    updatedAt: terminal.updatedAt,
+    finalAuthoritative: true,
+    resultAvailable: false,
+    persistenceWarning: ARENA_OUTPUT_NOT_ARCHIVED_WARNING,
+    replayUnavailable: true,
+  }, 200), actor);
 
   const createExpiredTerminalStatusResponse = (
     state: GenerationReplayStoreState,
@@ -1807,7 +1892,11 @@ export const createArenaGenerationService = (
     terminal: ArenaGenerationTerminalRecord,
     after: string | null = null,
   ): ArenaGenerationSubscription | Response => {
-    if (terminal.status === 'completed' && terminal.contentAvailable !== true) {
+    if (
+      terminal.status === 'completed'
+      && terminal.contentAvailable !== true
+      && !isTerminalContentNotArchived(terminal)
+    ) {
       return isTerminalContentExpired(terminal)
         ? createTerminalContentExpiredResponse()
         : createTerminalContentUnavailableResponse();
@@ -1830,6 +1919,9 @@ export const createArenaGenerationService = (
       lastEventId: null,
       updatedAt: terminal.updatedAt,
       terminalResultRef: terminal.status === 'completed' ? terminal.resultRef : null,
+      ...(isTerminalContentNotArchived(terminal) ? {
+        persistenceWarning: ARENA_OUTPUT_NOT_ARCHIVED_WARNING,
+      } : {}),
     };
     const snapshotEvent: GenerationStreamEvent = {
       id: snapshotId,
@@ -1857,6 +1949,11 @@ export const createArenaGenerationService = (
         ...(terminal.status === 'completed' && terminal.resultRef
           ? { resultRef: terminal.resultRef }
           : {}),
+        ...(isTerminalContentNotArchived(terminal) ? {
+          persistenceWarning: ARENA_OUTPUT_NOT_ARCHIVED_WARNING,
+          replayUnavailable: true,
+          resultAvailable: false,
+        } : {}),
       },
     };
     const stream = new ReadableStream<GenerationStreamEvent>({
@@ -1997,7 +2094,12 @@ export const createArenaGenerationService = (
                 ...snapshot,
                 status: terminal.status,
                 ...(terminal.status === 'completed'
-                  ? { terminalResultRef: terminal.resultRef ?? null }
+                  ? {
+                    terminalResultRef: terminal.resultRef ?? null,
+                    ...(terminal.persistenceWarning
+                      ? { persistenceWarning: terminal.persistenceWarning }
+                      : {}),
+                  }
                   : { markdown: '', reasoning: '', terminalResultRef: null }),
               },
             };
@@ -2013,6 +2115,11 @@ export const createArenaGenerationService = (
                 ...(terminal.status === 'completed' && terminal.resultRef
                   ? { resultRef: terminal.resultRef }
                   : {}),
+                ...(terminal.persistenceWarning ? {
+                  persistenceWarning: terminal.persistenceWarning,
+                  replayUnavailable: true,
+                  resultAvailable: false,
+                } : {}),
                 ...(terminal.status === 'failed' && terminal.publicError ? {
                   error: terminal.publicError.message,
                   message: terminal.publicError.message,
@@ -2054,7 +2161,9 @@ export const createArenaGenerationService = (
                 enqueueExpiredTerminal(fallback);
                 return;
               }
-              throw new Error('GENERATION_TERMINAL_CONTENT_UNAVAILABLE');
+              if (!isTerminalContentNotArchived(fallback)) {
+                throw new Error('GENERATION_TERMINAL_CONTENT_UNAVAILABLE');
+              }
             }
             const fallbackSubscription = createTerminalFallbackSubscription(fallback, cursor);
             if (fallbackSubscription instanceof Response) {
@@ -2632,10 +2741,12 @@ export const createArenaGenerationService = (
         ) terminalFallback = durable;
       }
       const terminalContentExpired = isTerminalContentExpired(terminalFallback);
+      const terminalContentNotArchived = isTerminalContentNotArchived(terminalFallback);
       if (
         terminalFallback?.status === 'completed'
         && terminalFallback.contentAvailable !== true
         && !terminalContentExpired
+        && !terminalContentNotArchived
       ) {
         return {
           kind: 'unavailable',
@@ -2649,6 +2760,7 @@ export const createArenaGenerationService = (
         || owned.state.status === 'producer_lost';
       const resultAvailable = owned.state.status === 'completed'
         && !terminalContentExpired
+        && !terminalContentNotArchived
         && Boolean(
           terminalFallback?.resultRef
           ?? owned.state.terminal?.resultRef
@@ -2680,6 +2792,10 @@ export const createArenaGenerationService = (
             owned.state.status,
             terminalFallback?.errorCode ?? owned.state.terminal?.code,
           ),
+          ...(terminalContentNotArchived ? {
+            persistenceWarning: ARENA_OUTPUT_NOT_ARCHIVED_WARNING,
+            replayUnavailable: true,
+          } : {}),
           ...(owned.state.status === 'completed' && terminalFallback?.roomSafeResult
             ? { roomSafeResult: terminalFallback.roomSafeResult }
             : {}),
@@ -3289,13 +3405,19 @@ export const createArenaGenerationService = (
         owned.terminalFallback?.status === 'completed'
         && owned.terminalFallback.contentAvailable !== true
       ) {
-        return isTerminalContentExpired(owned.terminalFallback)
-          ? createExpiredTerminalStatusResponse(
+        return isTerminalContentNotArchived(owned.terminalFallback)
+          ? createNotArchivedTerminalStatusResponse(
               owned.state,
               owned.terminalFallback,
               owned.actor,
             )
-          : createTerminalContentUnavailableResponse();
+          : isTerminalContentExpired(owned.terminalFallback)
+            ? createExpiredTerminalStatusResponse(
+              owned.state,
+              owned.terminalFallback,
+              owned.actor,
+            )
+            : createTerminalContentUnavailableResponse();
       }
       return createStatusResponse(owned.state, owned.actor);
     },
@@ -3365,13 +3487,19 @@ export const createArenaGenerationService = (
         owned.terminalFallback?.status === 'completed'
         && owned.terminalFallback.contentAvailable !== true
       ) {
-        return isTerminalContentExpired(owned.terminalFallback)
-          ? createExpiredTerminalStatusResponse(
+        return isTerminalContentNotArchived(owned.terminalFallback)
+          ? createNotArchivedTerminalStatusResponse(
               owned.state,
               owned.terminalFallback,
               owned.actor,
             )
-          : createTerminalContentUnavailableResponse();
+          : isTerminalContentExpired(owned.terminalFallback)
+            ? createExpiredTerminalStatusResponse(
+              owned.state,
+              owned.terminalFallback,
+              owned.actor,
+            )
+            : createTerminalContentUnavailableResponse();
       }
       return createStatusResponse(owned.state, owned.actor);
     },

@@ -21,7 +21,10 @@ import {
   createArenaCompanionRouteService,
   createNodeArenaRepairMetaService,
 } from '@mahoshojo/hosted-runtime/arena-companion';
-import type { ArenaGenerationObserver } from '@mahoshojo/hosted-api/arena-generation/service';
+import {
+  isArenaGenerationDispatchReady,
+  type ArenaGenerationObserver,
+} from '@mahoshojo/hosted-api/arena-generation/service';
 import type { ArenaTerminalEffectInput } from '@mahoshojo/hosted-runtime/arena-generation';
 import { recordUserActivityFromRequest } from '@mahoshojo/hosted-runtime/node-runtime/data-ports';
 import { createEnvSignatureService } from '@mahoshojo/hosted-runtime/node-runtime/env-signature';
@@ -112,7 +115,11 @@ export const configureHonoArenaGenerationRuntime = (
       readinessCheck: async () => {
         const signatureSecret = process.env.SIGNATURE_SECRET_KEY?.trim() ?? '';
         const bridgeSecretReady = !bridge || finalizationSecret.length >= 32;
-        if (!getD1Client() || !objectStore || signatureSecret.length < 32 || !bridgeSecretReady) {
+        if (!isArenaGenerationDispatchReady({
+          d1Available: Boolean(getD1Client()),
+          signatureSecret,
+          finalizationBridgeReady: bridgeSecretReady,
+        })) {
           return new Response(JSON.stringify({
             code: 'ARENA_GENERATION_CAPABILITY_UNAVAILABLE',
             error: 'Arena generation durable capability unavailable',

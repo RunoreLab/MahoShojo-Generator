@@ -808,6 +808,67 @@ describe.sequential('Arena resumable generation fault-injection matrix', () => {
     });
   });
 
+  it('keeps Provider/D1/Redis completed when permanent R2 archival fails', async () => {
+    const counts = emptyCounts();
+    const ports: ArenaGenerationFinalizationPorts = {
+      ...successfulPorts(counts),
+      async storeOutput() {
+        counts.storage += 1;
+        throw new Error('injected permanent R2 outage');
+      },
+    };
+    const { provider, service, store } = createHarness({ ports });
+
+    const initial = await service.create(request());
+    const initialBody = await initial.text();
+    const duplicate = await service.create(request());
+    const duplicateBody = await duplicate.text();
+    const resumed = await service.resume(new Request(
+      `https://example.test/api/arena/generations/${generationId}/stream`,
+    ), { generationId });
+    const resumedBody = await resumed.text();
+    const status = await service.status(new Request(
+      `https://example.test/api/arena/generations/${generationId}`,
+    ), { generationId });
+    const state = await store.readState({ generationId, actorKey });
+
+    for (const body of [initialBody, duplicateBody, resumedBody]) {
+      expect(body).toContain('event: done');
+      expect(body).toContain('"status":"completed"');
+      expect(body).toContain('"persistenceWarning":"OUTPUT_NOT_ARCHIVED"');
+      expect(body).not.toContain('event: error');
+    }
+    expect(provider).toHaveBeenCalledOnce();
+    expect(status.status).toBe(200);
+    await expect(status.json()).resolves.toMatchObject({
+      status: 'completed',
+      resultAvailable: false,
+      persistenceWarning: 'OUTPUT_NOT_ARCHIVED',
+      replayUnavailable: true,
+    });
+    expect(counts).toEqual({
+      storage: 3,
+      claim: 1,
+      combatants: 1,
+      impacts: 1,
+      ratings: 1,
+      complete: 1,
+    });
+    expect(state).toMatchObject({
+      status: 'completed',
+      snapshot: {
+        status: 'completed',
+        markdown: '# fault matrix\nterminal body',
+        persistenceWarning: 'OUTPUT_NOT_ARCHIVED',
+      },
+      terminal: {
+        status: 'completed',
+        resultRef: null,
+        persistenceWarning: 'OUTPUT_NOT_ARCHIVED',
+      },
+    });
+  });
+
   it('leaves permanent R2+D1 failure pending until lease reaping and never replays Provider', async () => {
     let currentTime = new Date('2026-08-25T04:00:00.000Z');
     let reconciliationCount = 0;

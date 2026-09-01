@@ -156,7 +156,11 @@ describe('Arena generation finalization', () => {
     const failed = createArenaGenerationFinalizer(failedPorts, {
       observer: { observeArenaGeneration },
     });
-    await expect(failed(input)).rejects.toThrow('r2-secret-canary');
+    await expect(failed(input)).resolves.toEqual({
+      resultRef: null,
+      ranking: { success: true },
+      persistenceWarning: 'OUTPUT_NOT_ARCHIVED',
+    });
     expect(observeArenaGeneration).toHaveBeenCalledWith(expect.objectContaining({
       event: 'storage',
       storage: 'r2',
@@ -167,16 +171,17 @@ describe('Arena generation finalization', () => {
     expect(failedPorts.storeOutput).toHaveBeenCalledTimes(3);
     expect(failedPorts.claimTerminal).toHaveBeenCalledWith(expect.objectContaining({
       generationId: input.generationId,
-      status: 'failed',
-      errorCode: 'ARENA_R2_STORAGE_FAILED',
+      status: 'completed',
+      errorCode: null,
       resultRef: null,
-      markdown: '',
+      markdown: input.markdown,
+      persistenceWarning: 'OUTPUT_NOT_ARCHIVED',
     }));
-    expect(JSON.stringify(vi.mocked(failedPorts.claimTerminal).mock.calls)).not.toContain(
-      input.markdown,
-    );
     expect(failedPorts.completeTerminal).toHaveBeenCalledOnce();
-    expect(failedPorts.settleRatings).not.toHaveBeenCalled();
+    expect(failedPorts.persistCombatants).toHaveBeenCalledOnce();
+    expect(failedPorts.applyStoryImpacts).toHaveBeenCalledOnce();
+    expect(failedPorts.settleRatings).toHaveBeenCalledOnce();
+    expect(failedPorts.failTerminal).not.toHaveBeenCalled();
   });
 
   it('retries a transient post-claim failure through the idempotent D1 terminal claim', async () => {

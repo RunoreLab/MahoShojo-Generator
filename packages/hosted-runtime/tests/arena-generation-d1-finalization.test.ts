@@ -311,6 +311,42 @@ describe('Arena D1/R2 finalization ports', () => {
     });
   });
 
+  it('does not consume a duplicate-name impact queue entry for an explicit combatant index', async () => {
+    const client = sequentialD1([result([], 1)]);
+    const ports = createNodeArenaGenerationFinalizationPorts({
+      getD1Client: () => client,
+      now: () => new Date('2026-08-25T04:00:00.000Z'),
+    });
+
+    await ports.claimTerminal({
+      ...claimInput,
+      payload: {
+        ...claimInput.payload,
+        combatants: [
+          { type: 'magical-girl', data: { name: '同名角色' } },
+          { type: 'magical-girl', data: { name: '同名角色' } },
+        ],
+      },
+      metadata: {
+        streamMeta: {
+          impacts: [
+            { combatantIndex: 1, characterName: '同名角色', impact: '显式目标' },
+            { characterName: '同名角色', impact: '队列目标' },
+          ],
+        },
+      },
+    });
+
+    const serializedExtra = client.boundCalls
+      .flat()
+      .find((value) => typeof value === 'string' && value.includes('localCardReconciliation'));
+    expect(serializedExtra).toEqual(expect.any(String));
+    expect(JSON.parse(serializedExtra as string).localCardReconciliation.impacts).toEqual([
+      expect.objectContaining({ combatantIndex: 1, impact: '显式目标' }),
+      expect.objectContaining({ combatantIndex: 0, impact: '队列目标' }),
+    ]);
+  });
+
   it.each([
     ['stream', 'api/arena/generate-stream', 'stream-markdown'],
     ['non-stream', 'api/arena/generate', 'structured-report'],
@@ -982,7 +1018,7 @@ ORDER BY sort_index
     });
   });
 
-  it('does not expose a completed preview when the required R2 object index is missing', async () => {
+  it('classifies completed output without an archive pointer as not archived', async () => {
     const ownerHash = await crypto.subtle.digest(
       'SHA-256',
       new TextEncoder().encode('anonymous:anon-id-1'),
@@ -998,7 +1034,7 @@ ORDER BY sort_index
         generationPayloadHash: 'payload-hash-1',
         generationTerminalStatus: 'completed',
         finalizationCompleted: true,
-        resultRef: 'r2:key',
+        resultRef: null,
       }),
       r2_key: null,
     }])]);
@@ -1009,8 +1045,10 @@ ORDER BY sort_index
       actorKey: 'anonymous:anon-id-1',
     })).resolves.toMatchObject({
       markdown: '',
+      resultRef: null,
       contentAvailable: false,
-      contentUnavailableReason: 'not-found',
+      contentUnavailableReason: 'not-archived',
+      persistenceWarning: 'OUTPUT_NOT_ARCHIVED',
     });
   });
 

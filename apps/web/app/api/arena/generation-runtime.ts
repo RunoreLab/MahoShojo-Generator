@@ -1,4 +1,5 @@
 import { createUnavailableGenerationReplayStore } from '@mahoshojo/hosted-api/arena-generation/unavailable-replay-store';
+import { isArenaGenerationDispatchReady } from '@mahoshojo/hosted-api/arena-generation/service';
 import {
   ARENA_PVP_GENERATION_SIGNATURE_PURPOSE,
   createArenaGenerationActorResolvers,
@@ -66,7 +67,11 @@ const buildRuntime = () => {
       requireSeasonAuthority: true,
       readinessCheck: async () => {
         const signatureSecret = process.env.SIGNATURE_SECRET_KEY?.trim() ?? '';
-        if (!getD1Client() || !objectStore || signatureSecret.length < 32) {
+        if (!isArenaGenerationDispatchReady({
+          d1Available: Boolean(getD1Client()),
+          signatureSecret,
+          finalizationBridgeReady: true,
+        })) {
           return new Response(JSON.stringify({
             code: 'ARENA_GENERATION_CAPABILITY_UNAVAILABLE',
             error: 'Arena generation durable capability unavailable',
