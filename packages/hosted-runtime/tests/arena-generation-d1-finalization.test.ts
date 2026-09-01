@@ -347,6 +347,42 @@ describe('Arena D1/R2 finalization ports', () => {
     ]);
   });
 
+  it('从同名 impact 队列移除已被显式 index 占用的角色', async () => {
+    const client = sequentialD1([result([], 1)]);
+    const ports = createNodeArenaGenerationFinalizationPorts({
+      getD1Client: () => client,
+      now: () => new Date('2026-08-25T04:00:00.000Z'),
+    });
+
+    await ports.claimTerminal({
+      ...claimInput,
+      payload: {
+        ...claimInput.payload,
+        combatants: [
+          { type: 'magical-girl', data: { name: '同名角色' } },
+          { type: 'magical-girl', data: { name: '同名角色' } },
+        ],
+      },
+      metadata: {
+        streamMeta: {
+          impacts: [
+            { combatantIndex: 0, characterName: '同名角色', impact: '显式目标' },
+            { characterName: '同名角色', impact: '队列目标' },
+          ],
+        },
+      },
+    });
+
+    const serializedExtra = client.boundCalls
+      .flat()
+      .find((value) => typeof value === 'string' && value.includes('localCardReconciliation'));
+    expect(serializedExtra).toEqual(expect.any(String));
+    expect(JSON.parse(serializedExtra as string).localCardReconciliation.impacts).toEqual([
+      expect.objectContaining({ combatantIndex: 0, impact: '显式目标' }),
+      expect.objectContaining({ combatantIndex: 1, impact: '队列目标' }),
+    ]);
+  });
+
   it.each([
     ['stream', 'api/arena/generate-stream', 'stream-markdown'],
     ['non-stream', 'api/arena/generate', 'structured-report'],

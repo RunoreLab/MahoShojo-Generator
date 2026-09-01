@@ -161,7 +161,22 @@ export const applyPostBattleUpdates = async (
 
         if (didMutate) {
             if (shouldSign) {
-                characterData.signature = await generateSignature(characterData);
+                try {
+                    const signature = await generateSignature(characterData);
+                    if (signature) {
+                        characterData.signature = signature;
+                    } else {
+                        shouldSign = false;
+                        delete characterData.signature;
+                    }
+                } catch {
+                    shouldSign = false;
+                    delete characterData.signature;
+                    log.warn('角色战后签名失败，将按非原生结果继续', {
+                        characterName,
+                        generationId,
+                    });
+                }
             } else {
                 delete characterData.signature;
             }

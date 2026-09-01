@@ -117,9 +117,11 @@ export const useStreamCombatantUpdater = () => {
           data: any;
           isNative: boolean;
         }) => [entry.combatantIndex, entry] as const));
-        const updatedRoster = currentCombatants.map((combatant, combatantIndex) => {
+        let readableCombatantIndex = 0;
+        const updatedRoster = currentCombatants.map((combatant) => {
           if (!('data' in combatant)) return combatant;
-          const updated = updateByIndex.get(combatantIndex);
+          const updated = updateByIndex.get(readableCombatantIndex);
+          readableCombatantIndex += 1;
           return updated
             ? { ...combatant, data: updated.data, isValid: updated.isNative }
             : combatant;

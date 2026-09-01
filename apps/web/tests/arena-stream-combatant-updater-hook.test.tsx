@@ -180,6 +180,58 @@ describe('useStreamCombatantUpdater', () => {
     container.remove();
   });
 
+  it('combatantIndex 以提交的可读角色数组为坐标，不受随机占位符偏移', async () => {
+    const placeholder = {
+      type: 'random-magical-girl' as const,
+      id: 'random-slot-1',
+      filename: 'random-slot-1',
+    };
+    const first = {
+      type: 'general-character' as const,
+      filename: 'a.json',
+      isValid: false,
+      isPreset: false,
+      data: { name: '角色 A', marker: 'first' },
+    };
+    const second = {
+      type: 'general-character' as const,
+      filename: 'b.json',
+      isValid: true,
+      isPreset: false,
+      data: { name: '角色 B', marker: 'second' },
+    };
+    useBattleStore.setState({ combatants: [placeholder, first, second], updatedCombatants: [] });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      success: true,
+      updatedCombatants: [{
+        combatantIndex: 1,
+        data: { name: '角色 B', marker: 'updated-second' },
+        isNative: false,
+      }],
+      warnings: [],
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })));
+
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => root.render(<Harness />));
+    if (!currentHook) throw new Error('updater hook 未挂载');
+
+    await act(async () => currentHook!.updateCombatants({
+      generationId: 'generation-placeholder-index',
+      combatants: [first, second],
+    }));
+
+    const roster = useBattleStore.getState().combatants;
+    expect(roster[0]).toEqual(placeholder);
+    expect('data' in roster[1]! ? roster[1].data.marker : null).toBe('first');
+    expect('data' in roster[2]! ? roster[2].data.marker : null).toBe('updated-second');
+    expect('data' in roster[2]! ? roster[2].isValid : null).toBe(false);
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
   it('响应到达前 roster 被替换时不按旧 index 覆盖新卡', async () => {
     const originalCombatant = {
       type: 'general-character' as const,

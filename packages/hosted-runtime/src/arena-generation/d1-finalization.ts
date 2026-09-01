@@ -383,6 +383,13 @@ const buildExtraJson = async (
       const hasValidExplicitIndex = explicitIndex !== null
         && explicitIndex >= 0
         && explicitIndex < combatantsFallback.length;
+      if (hasValidExplicitIndex && explicitIndex !== null) {
+        const explicitCombatant = combatantsFallback[explicitIndex];
+        const explicitKey = explicitCombatant?.name.replace(/\s+/gu, '').toLocaleLowerCase();
+        const explicitQueue = explicitKey ? impactRosterQueues.get(explicitKey) : undefined;
+        const queuedPosition = explicitQueue?.indexOf(explicitIndex) ?? -1;
+        if (explicitQueue && queuedPosition >= 0) explicitQueue.splice(queuedPosition, 1);
+      }
       const combatantIndex = hasValidExplicitIndex
         ? explicitIndex
         : impactRosterQueues
