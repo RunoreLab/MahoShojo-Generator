@@ -104,6 +104,62 @@ describe('useBattleStore adjudication event cleanup', () => {
     expect(persisted.state?.adjudicationDraftV1.updatedAt).toEqual(expect.any(Number));
   });
 
+  test('generation repair Provider 快照只保留在内存，不进入持久化存储', () => {
+    useBattleStore.getState().setLastGenerationRepairContext({
+      generationId: 'generation-memory-only-001',
+      customProvider: {
+        providerId: 'openai-compatible',
+        modelId: 'generation-model',
+        apiKey: 'secret-generation-key',
+        generationOverrides: {
+          temperature: 0.7,
+          thinking: { mode: 'enabled', effort: 'high' },
+        },
+      },
+    });
+
+    expect(useBattleStore.getState().lastGenerationRepairContext).toMatchObject({
+      generationId: 'generation-memory-only-001',
+      customProvider: { apiKey: 'secret-generation-key' },
+    });
+    const persistedRaw = localStorage.getItem('arena-storage') ?? '';
+    const persisted = JSON.parse(persistedRaw);
+    expect(persistedRaw).not.toContain('secret-generation-key');
+    expect(persisted.state?.lastGenerationId).toBeUndefined();
+    expect(persisted.state?.lastGenerationRepairContext).toBeUndefined();
+    expect(persisted.state?.userProviderConfig).toBeUndefined();
+  });
+
+  test('恢复旧版本时主动剥离曾被错误持久化的 Provider secret 与 generation 上下文', async () => {
+    localStorage.setItem('arena-storage', JSON.stringify({
+      state: {
+        lastGenerationId: 'generation-stale-secret-001',
+        lastGenerationRepairContext: {
+          generationId: 'generation-stale-secret-001',
+          customProvider: {
+            providerId: 'openai-compatible',
+            modelId: 'stale-model',
+            apiKey: 'stale-secret-key',
+          },
+        },
+        repairAppliedGenerationId: 'generation-stale-secret-001',
+        userProviderConfig: {
+          providerId: 'openai-compatible',
+          modelId: 'stale-model',
+          apiKey: 'stale-secret-key',
+        },
+      },
+      version: ARENA_ADJUDICATION_DRAFT_VERSION,
+    }));
+
+    await useBattleStore.persist.rehydrate();
+
+    expect(useBattleStore.getState().lastGenerationId).toBeNull();
+    expect(useBattleStore.getState().lastGenerationRepairContext).toBeNull();
+    expect(useBattleStore.getState().repairAppliedGenerationId).toBeNull();
+    expect(useBattleStore.getState().userProviderConfig).toBeNull();
+  });
+
   test('恢复时隔离损坏事件，并过滤旧版本中依赖卡片来源的事件', async () => {
     localStorage.setItem('arena-storage', JSON.stringify({
       state: {

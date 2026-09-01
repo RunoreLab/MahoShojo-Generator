@@ -6,6 +6,7 @@ import { createJSONStorage, persist } from 'zustand/middleware';
 import {
   BattleStoreState,
   BattleSettings,
+  type ArenaGenerationRepairContext,
   isCombatantLimitReached,
   MAX_COMBATANTS,
   ScenarioState,
@@ -24,6 +25,27 @@ import {
 import { canAddArenaReferenceItems } from '@/lib/arena/resource-budget';
 
 const normalizeSourceKey = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
+
+const cloneGenerationRepairContext = (
+  context: ArenaGenerationRepairContext | null,
+): ArenaGenerationRepairContext | null => {
+  if (!context) return null;
+  const customProvider = context.customProvider;
+  return {
+    generationId: context.generationId,
+    customProvider: customProvider ? {
+      ...customProvider,
+      ...(customProvider.generationOverrides ? {
+        generationOverrides: {
+          ...customProvider.generationOverrides,
+          ...(customProvider.generationOverrides.thinking ? {
+            thinking: { ...customProvider.generationOverrides.thinking },
+          } : {}),
+        },
+      } : {}),
+    } : null,
+  };
+};
 
 const getCombatantSourceKey = (combatant: unknown): string => {
   if (!combatant || typeof combatant !== 'object') return '';
@@ -143,6 +165,7 @@ export const useBattleStore = create<BattleStoreState>()(
       customStoryLength: '',
       selectedLanguage: 'zh-CN',
       lastGenerationId: null,
+      lastGenerationRepairContext: null,
       repairAppliedGenerationId: null,
       settings: defaultSettings,
       adjudicationEvents: [],
@@ -177,11 +200,27 @@ export const useBattleStore = create<BattleStoreState>()(
       setSelectedLanguage: (selectedLanguage) => set({ selectedLanguage }),
       setLastGenerationId: (lastGenerationId) => set((state) => ({
         lastGenerationId,
+        lastGenerationRepairContext:
+          state.lastGenerationRepairContext?.generationId === lastGenerationId
+            ? state.lastGenerationRepairContext
+            : null,
         repairAppliedGenerationId:
           state.repairAppliedGenerationId === lastGenerationId
             ? state.repairAppliedGenerationId
             : null,
       })),
+      setLastGenerationRepairContext: (context) => set((state) => {
+        const clonedContext = cloneGenerationRepairContext(context);
+        const lastGenerationId = clonedContext?.generationId ?? null;
+        return {
+          lastGenerationId,
+          lastGenerationRepairContext: clonedContext,
+          repairAppliedGenerationId:
+            state.repairAppliedGenerationId === lastGenerationId
+              ? state.repairAppliedGenerationId
+              : null,
+        };
+      }),
       setRepairAppliedGenerationId: (repairAppliedGenerationId) => set({
         repairAppliedGenerationId,
       }),
@@ -534,6 +573,10 @@ export const useBattleStore = create<BattleStoreState>()(
         const persistedWithoutDraft = { ...persisted };
         delete persistedWithoutDraft.adjudicationDraftV1;
         delete persistedWithoutDraft.adjudicationEvents;
+        delete persistedWithoutDraft.lastGenerationId;
+        delete persistedWithoutDraft.lastGenerationRepairContext;
+        delete persistedWithoutDraft.repairAppliedGenerationId;
+        delete persistedWithoutDraft.userProviderConfig;
         const merged = {
           ...currentState,
           ...persistedWithoutDraft,

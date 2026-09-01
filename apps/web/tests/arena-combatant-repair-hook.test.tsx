@@ -2,12 +2,12 @@
 
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   startCooldown: vi.fn(),
-  getAuthHeader: vi.fn().mockResolvedValue('Bearer test-token'),
-  getActivityHeaders: vi.fn().mockResolvedValue({ 'x-mahoshojo-user-id': '7' }),
+  dispatch: vi.fn((input: RequestInfo | URL, init?: RequestInit) => fetch(input, init)),
+  captureActorToken: vi.fn(),
 }));
 
 vi.mock('@/lib/cooldown', () => ({
@@ -17,11 +17,18 @@ vi.mock('@/lib/cooldown', () => ({
     startCooldown: mocks.startCooldown,
   }),
 }));
-vi.mock('@/lib/auth', () => ({
-  authStorage: {
-    getAuthHeader: mocks.getAuthHeader,
-    getActivityHeaders: mocks.getActivityHeaders,
+vi.mock('@/lib/use-generation-api-intent-latch', () => ({
+  useGenerationApiIntentLatch: () => ({
+    tryAcquire: () => ({ dispatch: mocks.dispatch }),
+  }),
+}));
+vi.mock('@/lib/arena/resumable-generation-client', () => ({
+  withArenaGenerationActorToken: (headers: HeadersInit) => {
+    const result = new Headers(headers);
+    result.set('X-Mahoshojo-Generation-Actor-Token', 'actor-token');
+    return result;
   },
+  captureArenaGenerationActorToken: mocks.captureActorToken,
 }));
 vi.mock('@/components/arena/multiplayer/useArenaRoom', () => ({
   useArenaRoomContext: () => null,
@@ -37,6 +44,10 @@ const Harness = () => {
   return <pre data-testid="draft">{currentHook.draftText}</pre>;
 };
 
+beforeEach(() => {
+  vi.clearAllMocks();
+});
+
 afterEach(() => {
   currentHook = null;
   vi.unstubAllGlobals();
@@ -47,6 +58,7 @@ afterEach(() => {
     latestAiImpacts: null,
     updatedCombatants: [],
     lastGenerationId: null,
+    lastGenerationRepairContext: null,
     repairAppliedGenerationId: null,
     isCombatantMutationPending: false,
     isGenerating: false,
@@ -77,7 +89,20 @@ describe('useCombatantRepair', () => {
       latestAiImpacts: null,
       updatedCombatants: [],
       lastGenerationId: 'generation-hook-repair-001',
+      lastGenerationRepairContext: {
+        generationId: 'generation-hook-repair-001',
+        customProvider: {
+          providerId: 'openai-compatible',
+          modelId: 'generation-model',
+          apiKey: 'generation-key',
+        },
+      },
       repairAppliedGenerationId: null,
+      userProviderConfig: {
+        providerId: 'anthropic-compatible',
+        modelId: 'current-ui-model',
+        apiKey: 'current-ui-key',
+      },
       settings: {
         ...state.settings,
         writeArenaHistory: true,
@@ -113,10 +138,8 @@ describe('useCombatantRepair', () => {
     expect(fetchMock).toHaveBeenCalledOnce();
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe('/api/arena/repair-combatant-meta');
-    expect(init.headers).toMatchObject({
-      Authorization: 'Bearer test-token',
-      'x-mahoshojo-user-id': '7',
-    });
+    expect(new Headers(init.headers).get('X-Mahoshojo-Generation-Actor-Token'))
+      .toBe('actor-token');
     expect(JSON.parse(String(init.body))).toMatchObject({
       generationId: 'generation-hook-repair-001',
       mode: 'classic',
@@ -125,9 +148,17 @@ describe('useCombatantRepair', () => {
       combatants: [{
         type: 'magical-girl',
         isNative: true,
+        filename: null,
         data: { name: '角色 A', signature: 'signed-a' },
       }],
+      customProvider: {
+        providerId: 'openai-compatible',
+        modelId: 'generation-model',
+        apiKey: 'generation-key',
+      },
     });
+    expect(String(init.body)).not.toContain('current-ui-key');
+    expect(mocks.captureActorToken).toHaveBeenCalledOnce();
     expect(currentHook!.draftText).toContain('AI 草稿影响');
     expect(useBattleStore.getState().combatants).toEqual([originalCombatant]);
     expect(useBattleStore.getState().updatedCombatants).toEqual([]);
@@ -150,6 +181,10 @@ describe('useCombatantRepair', () => {
       generationMode: 'stream',
       streamingMarkdown: `# 旧战报\n\n## 胜利者\n\n- 角色 A\n\n${'完整正文。'.repeat(40)}`,
       lastGenerationId: 'generation-stale-001',
+      lastGenerationRepairContext: {
+        generationId: 'generation-stale-001',
+        customProvider: null,
+      },
       repairAppliedGenerationId: null,
       settings: {
         ...state.settings,
@@ -182,6 +217,44 @@ describe('useCombatantRepair', () => {
     expect(currentHook!.repairError).toContain('上下文已变化');
     expect(mocks.startCooldown).not.toHaveBeenCalled();
     expect(useBattleStore.getState().lastGenerationId).toBe('generation-new-002');
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it('generation Provider 内存快照缺失时不发送 AI 修复请求', async () => {
+    useBattleStore.setState((state) => ({
+      combatants: [{
+        type: 'general-character',
+        filename: '角色-a.json',
+        isValid: false,
+        isPreset: false,
+        data: { name: '角色 A' },
+      }],
+      generationMode: 'stream',
+      streamingMarkdown: `# 战报\n\n## 胜利者\n\n- 角色 A\n\n${'完整正文。'.repeat(40)}`,
+      lastGenerationId: 'generation-context-missing-001',
+      lastGenerationRepairContext: null,
+      settings: {
+        ...state.settings,
+        writeArenaHistory: true,
+        writeCurrentState: false,
+      },
+      isGenerating: false,
+    }));
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => root.render(<Harness />));
+    if (!currentHook) throw new Error('repair hook 未挂载');
+
+    await act(async () => currentHook!.generateAiRepairDraft());
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(currentHook!.repairError).toContain('缺少 generationId 或角色 roster');
 
     await act(async () => root.unmount());
     container.remove();

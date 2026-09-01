@@ -11,7 +11,8 @@ export const ARENA_COMPANION_PLACEMENT_HEADER = 'x-mahoshojo-arena-execution-pla
 
 export type ArenaCompanionOperation = 'arena/generate' | 'generate-battle-story';
 export type ArenaCompanionResponseOperation = ArenaCompanionOperation
-  | 'arena/session/generate-next';
+  | 'arena/session/generate-next'
+  | 'arena/repair-combatant-meta';
 export type ArenaCompanionPlacement = 'hono-primary' | 'next-dr';
 
 export const withArenaCompanionResponseMarkers = (

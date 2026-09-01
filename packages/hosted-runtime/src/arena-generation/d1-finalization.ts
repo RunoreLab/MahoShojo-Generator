@@ -1285,3 +1285,75 @@ LIMIT 1
     ? { kind: 'found', reconciliation }
     : { kind: 'unavailable', reason: 'manifest_missing' };
 };
+
+export type OwnedNodeArenaGenerationProvenanceResult =
+  | Readonly<{
+    kind: 'found';
+    provenance: Readonly<{
+      customProviderId: string | null;
+      customModelId: string | null;
+      aiProviderName: string;
+      aiProviderType: 'openai' | 'google' | 'deepseek';
+      aiModel: string;
+    }>;
+  }>
+  | Readonly<{
+    kind: 'not-found';
+    reason: 'row_missing' | 'owner_mismatch';
+  }>
+  | Readonly<{
+    kind: 'unavailable';
+    reason: 'generation_not_completed' | 'finalization_pending' | 'provenance_missing';
+  }>;
+
+export const readOwnedNodeArenaGenerationProvenance = async (input: {
+  client: NodeDataD1Client;
+  generationId: string;
+  actorKey: string;
+}): Promise<OwnedNodeArenaGenerationProvenanceResult> => {
+  const stored = await input.client.prepare(`
+SELECT
+  status,
+  custom_provider_id,
+  custom_model_id,
+  ai_provider_name,
+  ai_provider_type,
+  ai_model,
+  extra_json
+FROM battle_report_generations
+WHERE id = ?
+LIMIT 1
+  `.trim()).bind(input.generationId).all({ retry: 'safe-read' });
+  const row = stored.results[0];
+  if (!row) return { kind: 'not-found', reason: 'row_missing' };
+  const extra = parseExtra(row.extra_json);
+  if (!extra || extra.generationOwnerHash !== await sha256(input.actorKey)) {
+    return { kind: 'not-found', reason: 'owner_mismatch' };
+  }
+  if (row.status !== 'completed') {
+    return { kind: 'unavailable', reason: 'generation_not_completed' };
+  }
+  if (extra.finalizationCompleted !== true) {
+    return { kind: 'unavailable', reason: 'finalization_pending' };
+  }
+  const aiProviderName = stringOf(row.ai_provider_name);
+  const aiProviderType = stringOf(row.ai_provider_type);
+  const aiModel = stringOf(row.ai_model);
+  if (
+    !aiProviderName
+    || !aiModel
+    || !['openai', 'google', 'deepseek'].includes(aiProviderType ?? '')
+  ) {
+    return { kind: 'unavailable', reason: 'provenance_missing' };
+  }
+  return {
+    kind: 'found',
+    provenance: {
+      customProviderId: stringOf(row.custom_provider_id),
+      customModelId: stringOf(row.custom_model_id),
+      aiProviderName,
+      aiProviderType: aiProviderType as 'openai' | 'google' | 'deepseek',
+      aiModel,
+    },
+  };
+};

@@ -279,6 +279,13 @@ describe('Hono runtime telemetry', () => {
       outcome: 'success',
       durationMs: 18,
     });
+    telemetry.observeArenaGeneration({
+      event: 'companion',
+      operation: 'arena/repair-combatant-meta',
+      placement: 'hono-primary',
+      outcome: 'rejected',
+      durationMs: 7,
+    });
     telemetry.observeArenaGeneration({ event: 'client_disconnect', generationId: 'generation-1' });
     telemetry.observeArenaGeneration({
       event: 'resume', generationId: 'generation-1', outcome: 'attempt',
@@ -322,10 +329,11 @@ describe('Hono runtime telemetry', () => {
           arenaGenerate: 0,
           generateBattleStory: 0,
           arenaSessionGenerateNext: 1,
+          arenaRepairCombatantMeta: 1,
         },
-        byPlacement: { honoPrimary: 1, nextDr: 0 },
-        outcomes: { success: 1, rejected: 0, failure: 0, cancelled: 0 },
-        duration: { samples: 1, totalMilliseconds: 18, maxMilliseconds: 18 },
+        byPlacement: { honoPrimary: 2, nextDr: 0 },
+        outcomes: { success: 1, rejected: 1, failure: 0, cancelled: 0 },
+        duration: { samples: 2, totalMilliseconds: 25, maxMilliseconds: 18 },
       },
       clientDisconnects: 1,
       resume: {

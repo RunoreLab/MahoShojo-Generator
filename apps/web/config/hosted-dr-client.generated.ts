@@ -71,6 +71,14 @@ export const hostedDrClientOperations = [
     "contractStatus": "verified"
   },
   {
+    "route": "/api/arena/repair-combatant-meta",
+    "method": "POST",
+    "requestClass": "non-idempotent-operation",
+    "drMode": "fail-closed",
+    "replayPolicy": "never-after-dispatch",
+    "contractStatus": "fail-closed-verified"
+  },
+  {
     "route": "/api/arena/session/generate-next",
     "method": "POST",
     "requestClass": "non-idempotent-operation",

@@ -169,6 +169,7 @@ export type HonoRuntimeTelemetrySnapshot = {
         arenaGenerate: number;
         generateBattleStory: number;
         arenaSessionGenerateNext: number;
+        arenaRepairCombatantMeta: number;
       };
       byPlacement: { honoPrimary: number; nextDr: number };
       outcomes: { success: number; rejected: number; failure: number; cancelled: number };
@@ -581,6 +582,7 @@ export class HonoRuntimeTelemetry implements
     arenaGenerate: 0,
     generateBattleStory: 0,
     arenaSessionGenerateNext: 0,
+    arenaRepairCombatantMeta: 0,
   };
 
   private readonly arenaCompanionByPlacement = { honoPrimary: 0, nextDr: 0 };
@@ -909,7 +911,9 @@ export class HonoRuntimeTelemetry implements
           ? 'arenaGenerate'
           : observation.operation === 'generate-battle-story'
             ? 'generateBattleStory'
-            : 'arenaSessionGenerateNext';
+            : observation.operation === 'arena/session/generate-next'
+              ? 'arenaSessionGenerateNext'
+              : 'arenaRepairCombatantMeta';
         const placement = observation.placement === 'hono-primary' ? 'honoPrimary' : 'nextDr';
         this.arenaCompanionByOperation[operation] += 1;
         this.arenaCompanionByPlacement[placement] += 1;
@@ -1545,6 +1549,7 @@ export class HonoRuntimeTelemetry implements
       arenaGenerate: 0,
       generateBattleStory: 0,
       arenaSessionGenerateNext: 0,
+      arenaRepairCombatantMeta: 0,
     });
     Object.assign(this.arenaCompanionByPlacement, { honoPrimary: 0, nextDr: 0 });
     Object.assign(this.arenaCompanionOutcomes, {

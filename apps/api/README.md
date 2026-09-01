@@ -41,14 +41,17 @@ subscriber 只通过 `Last-Event-ID`/`after` 恢复同一 generation，不会把
 D1 claim 与确定性 R2 snapshot 兜底，只有显式 cancel 才中止 generation-owned signal。Phase 2.5B 退出审计将
 14 条 capability 从 Hono 执行清单退出；G25R 只让 `arena/generate-stream` 精确 re-entry，另新增四条 generation
 控制面 shared route。G25H-1 又将 `arena/generate`、`generate-battle-story` 与
-`arena/session/generate-next` 归位为 Hono primary + Next DR shared companion service。G25H-2 继续将
+`arena/session/generate-next` 归位为 Hono primary + Next DR shared companion service。角色修复
+`arena/repair-combatant-meta` 也进入同一 Hosted companion runtime：它先从 D1 核验 generation 归属、完成态、
+finalization 与实际 Provider/model provenance，再按原生成通道精确执行 AI 修复；BYOK 只接受客户端保存的
+该次生成内存快照，不允许切换 Provider 后降级或回退。G25H-2 继续将
 Details 与 Sublimation 的 generate/stream 四路归位到同一 shared service/runtime；Next/OpenNext 只保留带
 `next-dr` lifecycle observation 的薄 adapter，Hono 不通过公开 Web URL 回取 preset 或执行 AI self-hop。G25E-1
 增加 `GET|HEAD /api/hosted/dr-readiness` 代表性 safe-read 双入口；Hono adapter 使用同一 application contract 与
 `hono-d1-primary` provider，固定执行 `SELECT 1 AS ok`，并绕过 Redis 限速依赖以免把 Redis 故障伪装成 D1 capability
-结果。因此当前 registry 为 23 条 shared route，同时仍有 6 条 exited capability 对应的 Next 公开 route 保持原有实现、wire、鉴权和数据语义，未来若要重新进入 Hono，必须先形成 shared seam 和
+结果。因此当前 registry 为 24 条 shared route，同时仍有 6 条 exited capability 对应的 Next 公开 route 保持原有实现、wire、鉴权和数据语义，未来若要重新进入 Hono，必须先形成 shared seam 和
 副作用/replay 证据。生成器在 `legacyRouteIds` 非空时 fail closed，生成的 registry 也不再拥有动态导入
-legacy Next handler 的 adapter 类型或代码路径。当前 registry 为 `23 shared-service / 6 exited / 0 legacy-next`；
+legacy Next handler 的 adapter 类型或代码路径。当前 registry 为 `24 shared-service / 6 exited / 0 legacy-next`；
 Hono source、manifest、测试、生成器和 bundle 构建已由 `apps/api` 独占。生成后的实际 registry 为
 `apps/api/src/generated/routes.ts`，不得手工修改。
 

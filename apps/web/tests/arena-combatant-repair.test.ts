@@ -190,7 +190,8 @@ describe('Arena repair UI contract', () => {
     const hookSource = readFileSync('components/arena/hooks/useCombatantRepair.ts', 'utf8');
     const resultSource = readFileSync('components/arena/components/BattleResult.tsx', 'utf8');
 
-    expect(hookSource).toContain("fetch('/api/arena/repair-combatant-meta'");
+    expect(hookSource).toContain("generationIntent.dispatch('/api/arena/repair-combatant-meta'");
+    expect(hookSource).toContain('lastGenerationRepairContext');
     expect(hookSource).not.toContain('/api/arena/redo-combatant-updates');
     expect(hookSource).toContain('applyArenaRepairDraft');
     expect(hookSource).toContain('setRepairAppliedGenerationId');

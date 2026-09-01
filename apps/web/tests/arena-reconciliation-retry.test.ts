@@ -61,7 +61,8 @@ describe('Arena 角色更新恢复', () => {
     expect(resultSource).toContain('AI 重新生成修复草稿');
     expect(resultSource).toContain('手动编辑修复草稿');
     expect(resultSource).toContain('应用修复');
-    expect(repairSource).toContain("fetch('/api/arena/repair-combatant-meta'");
+    expect(repairSource).toContain("generationIntent.dispatch('/api/arena/repair-combatant-meta'");
+    expect(repairSource).toContain('lastGenerationRepairContext');
     expect(repairSource).not.toContain('/api/arena/redo-combatant-updates');
     expect(repairSource).toContain('startCooldown()');
   });

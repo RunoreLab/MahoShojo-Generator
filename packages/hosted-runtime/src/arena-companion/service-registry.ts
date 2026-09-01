@@ -4,7 +4,9 @@ import type {
 } from './service';
 import type { ArenaSessionCompanionService } from './session';
 
-type ArenaCompanionRouteService = ArenaCompanionService & ArenaSessionCompanionService;
+type ArenaCompanionRouteService = ArenaCompanionService
+& ArenaSessionCompanionService
+& Readonly<{ repairCombatantMeta(_request: Request): Promise<Response> }>;
 
 let configuredService: ArenaCompanionRouteService | null = null;
 
@@ -30,4 +32,7 @@ export const registeredArenaCompanionRouteService: ArenaCompanionRouteService = 
     configuredService?.generate(request, operation) ?? unavailable()
   ),
   generateNext: (request: Request) => configuredService?.generateNext(request) ?? unavailable(),
+  repairCombatantMeta: (request: Request) => (
+    configuredService?.repairCombatantMeta(request) ?? unavailable()
+  ),
 });

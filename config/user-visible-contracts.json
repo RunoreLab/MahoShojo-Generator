@@ -122,6 +122,7 @@
     "arena/generations/[generationId]",
     "arena/generations/[generationId]/cancel",
     "arena/generations/[generationId]/stream",
+    "arena/repair-combatant-meta",
     "hosted/dr-readiness"
   ],
   "exitedRoutes": [

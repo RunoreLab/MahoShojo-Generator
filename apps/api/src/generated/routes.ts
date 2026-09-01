@@ -52,6 +52,13 @@ export const routeDefinitions: RouteDefinition[] = [
     load: () => import("../adapters/arena/generate-stream") as unknown as Promise<RouteModule>,
   },
   {
+    id: "arena/repair-combatant-meta",
+    pattern: "/api/arena/repair-combatant-meta",
+    adapter: "shared-service",
+    methods: ["POST"],
+    load: () => import("../adapters/arena/repair-combatant-meta") as unknown as Promise<RouteModule>,
+  },
+  {
     id: "creator/generate",
     pattern: "/api/creator/generate",
     adapter: "shared-service",

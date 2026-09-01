@@ -160,6 +160,27 @@
       "drillStatus": "pending-g25e-2"
     },
     {
+      "id": "arena/repair-combatant-meta",
+      "route": "/api/arena/repair-combatant-meta",
+      "operations": [
+        { "method": "POST", "requestClass": "non-idempotent-operation", "drMode": "fail-closed", "replayPolicy": "never-after-dispatch" }
+      ],
+      "requiredSecrets": [
+        { "name": "SIGNATURE_SECRET_KEY", "minLength": 32 }
+      ],
+      "requiredBindings": ["DB"],
+      "primaryDatabaseProvider": "hono-d1-primary",
+      "drDatabaseProvider": "cloudflare-d1-binding",
+      "consistency": "primary",
+      "contractTests": [
+        "packages/hosted-runtime/tests/arena-repair-meta.test.ts",
+        "apps/api/tests/arena-companion-adapters.test.ts",
+        "apps/web/tests/arena-repair-combatant-meta.test.ts"
+      ],
+      "contractStatus": "fail-closed-verified",
+      "drillStatus": "pending-g25e-2"
+    },
+    {
       "id": "arena/session/generate-next",
       "route": "/api/arena/session/generate-next",
       "operations": [

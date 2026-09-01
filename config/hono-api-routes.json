@@ -15,6 +15,7 @@
     "arena/generations/[generationId]/cancel",
     "arena/generations/[generationId]",
     "arena/generations/[generationId]/stream",
+    "arena/repair-combatant-meta",
     "arena/session/generate-next",
     "creator/generate",
     "creator/generate-stream",

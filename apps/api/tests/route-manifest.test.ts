@@ -16,7 +16,7 @@ const EXITED_ROUTE_IDS = [
 ] as const;
 
 describe('Hono route manifest', () => {
-  it('只挂载已经脱离 legacy Next import 的二十三条 shared capability', () => {
+  it('只挂载已经脱离 legacy Next import 的二十四条 shared capability', () => {
     expect(routeDefinitions.map((route) => route.id).sort()).toEqual([
       'arena/generate',
       'arena/generate-stream',
@@ -24,6 +24,7 @@ describe('Hono route manifest', () => {
       'arena/generations/[generationId]',
       'arena/generations/[generationId]/cancel',
       'arena/generations/[generationId]/stream',
+      'arena/repair-combatant-meta',
       'arena/session/generate-next',
       'creator/generate',
       'creator/generate-stream',
@@ -42,7 +43,7 @@ describe('Hono route manifest', () => {
       'generate-sublimation-stream',
       'hosted/dr-readiness',
     ]);
-    expect(routeDefinitions).toHaveLength(23);
+    expect(routeDefinitions).toHaveLength(24);
     expect(routeDefinitions.some((route) => route.pattern === '/api/auth/*')).toBe(false);
     expect(routeDefinitions.some((route) => route.pattern.startsWith('/api/pvp/'))).toBe(false);
     expect(routeDefinitions.find((route) => route.id === 'generate-free')?.methods).toEqual(['POST']);
@@ -58,6 +59,7 @@ describe('Hono route manifest', () => {
       'arena/generations/[generationId]',
       'arena/generations/[generationId]/cancel',
       'arena/generations/[generationId]/stream',
+      'arena/repair-combatant-meta',
       'arena/session/generate-next',
       'creator/generate',
       'creator/generate-stream',
@@ -86,7 +88,7 @@ describe('Hono route manifest', () => {
     };
     expect(routeInventory.exitedRouteIds).toEqual(EXITED_ROUTE_IDS);
     expect(routeInventory.legacyRouteIds).toEqual([]);
-    expect(routeInventory.sharedRouteIds?.length).toBe(23);
+    expect(routeInventory.sharedRouteIds?.length).toBe(24);
     const hostedManifest = JSON.parse(readFileSync(
       path.join(REPOSITORY_ROOT, 'config/hosted-dr-capabilities.json'),
       'utf8',

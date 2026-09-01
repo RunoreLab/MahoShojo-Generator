@@ -1186,4 +1186,63 @@ ORDER BY sort_index
       'FROM battle_report_generations',
     ));
   });
+
+  it('reads exact Provider provenance only for the completed finalized owner', async () => {
+    const readOwnedProvenance = (
+      arenaD1Finalization as typeof arenaD1Finalization & {
+        readOwnedNodeArenaGenerationProvenance?: (_input: {
+          client: NodeDataD1Client;
+          generationId: string;
+          actorKey: string;
+        }) => Promise<unknown>;
+      }
+    ).readOwnedNodeArenaGenerationProvenance;
+    expect(readOwnedProvenance).toBeTypeOf('function');
+    if (!readOwnedProvenance) return;
+
+    const ownerHash = await crypto.subtle.digest(
+      'SHA-256',
+      new TextEncoder().encode('user:42'),
+    ).then((bytes) => Array.from(
+      new Uint8Array(bytes),
+      (byte) => byte.toString(16).padStart(2, '0'),
+    ).join(''));
+    const completedRow = {
+      status: 'completed',
+      custom_provider_id: 'kourichat',
+      custom_model_id: 'gpt-5.5',
+      ai_provider_name: 'KouriChat',
+      ai_provider_type: 'openai',
+      ai_model: 'gpt-5.5',
+      extra_json: JSON.stringify({
+        generationOwnerHash: ownerHash,
+        finalizationCompleted: true,
+      }),
+    };
+
+    await expect(readOwnedProvenance({
+      client: sequentialD1([result([completedRow])]),
+      generationId: 'generation-1',
+      actorKey: 'user:42',
+    })).resolves.toEqual({
+      kind: 'found',
+      provenance: {
+        customProviderId: 'kourichat',
+        customModelId: 'gpt-5.5',
+        aiProviderName: 'KouriChat',
+        aiProviderType: 'openai',
+        aiModel: 'gpt-5.5',
+      },
+    });
+    await expect(readOwnedProvenance({
+      client: sequentialD1([result([completedRow])]),
+      generationId: 'generation-1',
+      actorKey: 'user:7',
+    })).resolves.toEqual({ kind: 'not-found', reason: 'owner_mismatch' });
+    await expect(readOwnedProvenance({
+      client: sequentialD1([result([{ ...completedRow, ai_model: null }])]),
+      generationId: 'generation-1',
+      actorKey: 'user:42',
+    })).resolves.toEqual({ kind: 'unavailable', reason: 'provenance_missing' });
+  });
 });

@@ -62,8 +62,10 @@ import {
 } from '@/lib/arena/generation-ranking';
 import {
   arenaGenerationConnectionNotice,
+  captureArenaGenerationActorToken,
   openArenaGenerationStream,
   type ArenaGenerationConnectionState,
+  withArenaGenerationActorToken,
 } from '@/lib/arena/resumable-generation-client';
 import { buildArenaRoomHostWorkspaceBundleFromBattleState } from '@/lib/arena-room/shared-config';
 import {
@@ -389,7 +391,9 @@ export const useBattleEngine = () => {
   const setStreamUpdateMetaDebug = useBattleSelector((state) => state.setStreamUpdateMetaDebug);
   const setStreamSoftTimeoutWarning = useBattleSelector((state) => state.setStreamSoftTimeoutWarning);
   const setLatestAiImpacts = useBattleSelector((state) => state.setLatestAiImpacts);
-  const setLastGenerationId = useBattleSelector((state) => state.setLastGenerationId);
+  const setLastGenerationRepairContext = useBattleSelector(
+    (state) => state.setLastGenerationRepairContext,
+  );
   const setCombatants = useBattleSelector((state) => state.setCombatants);
   const isGenerating = useBattleSelector((state) => state.isGenerating);
   const streamSoftTimeoutWarning = useBattleSelector((state) => state.streamSoftTimeoutWarning);
@@ -556,7 +560,7 @@ export const useBattleEngine = () => {
     setStreamUpdateMetaDebug(null);
     setStreamSoftTimeoutWarning(null);
     setLatestAiImpacts(null);
-    setLastGenerationId(null);
+    setLastGenerationRepairContext(null);
 
     try {
       // 房间房主与单人模式共用随机角色解析；随后的 bundle
@@ -635,6 +639,30 @@ export const useBattleEngine = () => {
         }))
         : undefined;
       const customProviderPayload = buildCustomProviderRequestPayload(userProviderConfig);
+      const generationProviderSnapshot = customProviderPayload ? {
+        ...customProviderPayload,
+        ...(customProviderPayload.generationOverrides ? {
+          generationOverrides: {
+            ...customProviderPayload.generationOverrides,
+            ...(customProviderPayload.generationOverrides.thinking ? {
+              thinking: { ...customProviderPayload.generationOverrides.thinking },
+            } : {}),
+          },
+        } : {}),
+      } : null;
+      let capturedGenerationId: string | null = null;
+      const captureGenerationRepairContext = (generationId: string): void => {
+        const normalizedGenerationId = generationId.trim();
+        if (!normalizedGenerationId) return;
+        if (capturedGenerationId && capturedGenerationId !== normalizedGenerationId) {
+          throw new Error('生成响应返回了冲突的 generationId，已拒绝保存角色修复上下文。');
+        }
+        capturedGenerationId = normalizedGenerationId;
+        setLastGenerationRepairContext({
+          generationId: normalizedGenerationId,
+          customProvider: generationProviderSnapshot,
+        });
+      };
       const requestBody = roomAction.inRoom ? null : defineArenaGenerationRequest({
         generationRequestId,
         combatants: freshCombatants.map((combatant) => ({
@@ -810,13 +838,16 @@ export const useBattleEngine = () => {
       if (!requestBody) throw new Error('无法构造单人生成请求。');
 
       const authHeader = await authStorage.getAuthHeader();
-      const requestHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (authHeader) requestHeaders.Authorization = authHeader;
-      Object.assign(requestHeaders, await authStorage.getActivityHeaders());
+      const baseRequestHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (authHeader) baseRequestHeaders.Authorization = authHeader;
+      Object.assign(baseRequestHeaders, await authStorage.getActivityHeaders());
+      const requestHeaders = Object.fromEntries(
+        withArenaGenerationActorToken(baseRequestHeaders).entries(),
+      );
 
       const applyBattleResult = async (result: BattleApiResponse, origin: 'battle' | 'battle-stream') => {
         if (typeof result.generationId === 'string' && result.generationId.trim()) {
-          setLastGenerationId(result.generationId.trim());
+          captureGenerationRepairContext(result.generationId);
         }
 
         const backupItems = buildBattleBackupItems(
@@ -1009,7 +1040,7 @@ export const useBattleEngine = () => {
               const resumableGenerationId = response.headers
                 .get('x-mahoshojo-generation-id')
                 ?.trim();
-              if (resumableGenerationId) setLastGenerationId(resumableGenerationId);
+              if (resumableGenerationId) captureGenerationRepairContext(resumableGenerationId);
 	          if (debugSseEnabled) {
 	            console.info('SSE 调试：响应信息', {
 	              status: response.status,
@@ -1026,7 +1057,7 @@ export const useBattleEngine = () => {
               const parsed = JSON.parse(decodeURIComponent(metaHeader));
               const generationId = typeof parsed?.generationId === 'string' ? parsed.generationId.trim() : '';
               if (generationId) {
-                setLastGenerationId(generationId);
+                captureGenerationRepairContext(generationId);
               }
 
               const reporterInfo = parsed?.reporterInfo;
@@ -1776,6 +1807,7 @@ export const useBattleEngine = () => {
         headers: requestHeaders,
         body: JSON.stringify(requestBody),
       });
+      captureArenaGenerationActorToken(response);
       if (!response.ok) {
         const text = await response.text();
         let json: any = null;
@@ -1864,7 +1896,7 @@ export const useBattleEngine = () => {
     setStreamUpdateMetaDebug,
     setStreamSoftTimeoutWarning,
     setLatestAiImpacts,
-    setLastGenerationId,
+    setLastGenerationRepairContext,
     setCombatants,
     handleResolveRandomPlaceholders,
     arenaRoomRuntime,

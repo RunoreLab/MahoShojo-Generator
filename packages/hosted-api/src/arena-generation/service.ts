@@ -409,7 +409,10 @@ export interface ArenaGenerationRejectedTerminalRecorder {
 export type ArenaGenerationObservation =
   | {
     event: 'companion';
-    operation: 'arena/generate' | 'generate-battle-story' | 'arena/session/generate-next';
+    operation: 'arena/generate'
+      | 'generate-battle-story'
+      | 'arena/session/generate-next'
+      | 'arena/repair-combatant-meta';
     placement: 'hono-primary' | 'next-dr';
     outcome: 'success' | 'rejected' | 'failure' | 'cancelled';
     durationMs: number;

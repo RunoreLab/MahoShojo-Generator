@@ -1,5 +1,6 @@
 import type { NewsReport } from '@/components/BattleReportCard';
 import type { UserAIProviderConfig } from '@/components/AiProviderSelector';
+import type { CustomProviderPayload } from '@/lib/ai/custom-provider';
 import type { Preset } from '@/lib/presets';
 import type { AdjudicatorEvent, AdjudicationResult, CharacterCurrentState } from '@/types/arena';
 import type { NormalizedStreamUpdateMeta } from '@/lib/arena/stream-meta';
@@ -72,6 +73,15 @@ export interface UpdatedCombatantData {
   current_state?: CharacterCurrentState | null;
   [key: string]: any;
 }
+
+/**
+ * 只在当前页面进程中保留的生成时 Provider 快照。
+ * BYOK apiKey 不得进入 Zustand persist、D1、日志或遥测。
+ */
+export type ArenaGenerationRepairContext = Readonly<{
+  generationId: string;
+  customProvider: CustomProviderPayload | null;
+}>;
 
 export interface CombatantData {
   type: CombatantType;
@@ -210,6 +220,8 @@ export interface BattleStoreState {
   selectedLanguage: string;
   /** 最近一次生成战报的 generationId（用于排位结算展示）。 */
   lastGenerationId: string | null;
+  /** 当前 generation 对应的原始 Provider 请求快照；只允许内存态。 */
+  lastGenerationRepairContext: ArenaGenerationRepairContext | null;
   /** 当前 roster 已应用非权威 repair 的 generation；同 generation 权威重试必须禁用。 */
   repairAppliedGenerationId: string | null;
   settings: BattleSettings;
@@ -245,6 +257,7 @@ export interface BattleStoreState {
   setCustomStoryLength: (length: string) => void;
   setSelectedLanguage: (language: string) => void;
   setLastGenerationId: (generationId: string | null) => void;
+  setLastGenerationRepairContext: (context: ArenaGenerationRepairContext | null) => void;
   setRepairAppliedGenerationId: (generationId: string | null) => void;
   updateSettings: (settings: Partial<BattleSettings>) => void;
 

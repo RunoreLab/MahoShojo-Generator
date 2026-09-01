@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ArenaCharacterRepairPatch } from '@mahoshojo/domain/arena-character-repair';
 
-import { buildCustomProviderRequestPayload } from '@/lib/ai/custom-provider';
 import {
   normalizeArenaRepairDraft,
   prepareAndApplyArenaCombatantRepair,
@@ -12,7 +11,11 @@ import { precheckBattleReportForRedo } from '@/lib/arena/redo-updates';
 import { verifyArenaContentOrigin } from '@/lib/arena/verify-origin';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { useProviderModeCooldown } from '@/lib/cooldown';
-import { authStorage } from '@/lib/auth';
+import {
+  captureArenaGenerationActorToken,
+  withArenaGenerationActorToken,
+} from '@/lib/arena/resumable-generation-client';
+import { useGenerationApiIntentLatch } from '@/lib/use-generation-api-intent-latch';
 
 import { useArenaRoomContext } from '../multiplayer/useArenaRoom';
 import { useBattleStore } from '../stores/useBattleStore';
@@ -85,12 +88,14 @@ export const useCombatantRepair = () => {
   const streamingMarkdown = useBattleSelector((state) => state.streamingMarkdown);
   const newsReport = useBattleSelector((state) => state.newsReport);
   const lastGenerationId = useBattleSelector((state) => state.lastGenerationId);
+  const lastGenerationRepairContext = useBattleSelector(
+    (state) => state.lastGenerationRepairContext,
+  );
   const repairAppliedGenerationId = useBattleSelector((state) => state.repairAppliedGenerationId);
   const latestAiImpacts = useBattleSelector((state) => state.latestAiImpacts);
   const battleMode = useBattleSelector((state) => state.battleMode);
   const settings = useBattleSelector((state) => state.settings);
   const scenario = useBattleSelector((state) => state.scenario);
-  const userProviderConfig = useBattleSelector((state) => state.userProviderConfig);
   const isGenerating = useBattleSelector((state) => state.isGenerating);
   const isCombatantMutationPending = useBattleSelector(
     (state) => state.isCombatantMutationPending,
@@ -104,7 +109,9 @@ export const useCombatantRepair = () => {
   const arenaRoomRuntime = useArenaRoomContext();
   const isInRoom = Boolean(arenaRoomRuntime?.state.session);
 
-  const providerCooldownConfig = resolveArenaProviderCooldownConfig(userProviderConfig);
+  const providerCooldownConfig = resolveArenaProviderCooldownConfig(
+    lastGenerationRepairContext?.customProvider ?? null,
+  );
   const { isCooldown, remainingTime, startCooldown } = useProviderModeCooldown({
     baseKey: ARENA_PROVIDER_COOLDOWN_BASE_KEY,
     ...providerCooldownConfig,
@@ -117,6 +124,7 @@ export const useCombatantRepair = () => {
   const [repairNotice, setRepairNotice] = useState<string | null>(null);
   const draftGenerationRef = useRef<string | null>(null);
   const seededGenerationRef = useRef<string | null>(null);
+  const generationApiIntentLatch = useGenerationApiIntentLatch();
 
   const roster = useMemo(
     () => combatants.filter((item): item is CombatantData => 'data' in item),
@@ -130,16 +138,21 @@ export const useCombatantRepair = () => {
   const repairContextIsCurrent = useCallback((
     generationId: string,
     capturedRoster: readonly CombatantData[],
+    capturedRepairContext = lastGenerationRepairContext,
   ): boolean => {
     if (arenaRoomRuntime?.controller.getSnapshot().session) return false;
     const currentState = useBattleStore.getState();
     if (currentState.lastGenerationId !== generationId) return false;
+    if (
+      capturedRepairContext
+      && currentState.lastGenerationRepairContext !== capturedRepairContext
+    ) return false;
     const currentRoster = currentState.combatants.filter(
       (item): item is CombatantData => 'data' in item,
     );
     return currentRoster.length === capturedRoster.length
       && currentRoster.every((combatant, index) => combatant === capturedRoster[index]);
-  }, [arenaRoomRuntime]);
+  }, [arenaRoomRuntime, lastGenerationRepairContext]);
 
   useEffect(() => {
     if (draftGenerationRef.current === lastGenerationId) return;
@@ -164,7 +177,11 @@ export const useCombatantRepair = () => {
       setRepairError('多人房间结果保持只读；请离开房间后在普通单人战报中使用角色修复。');
       return;
     }
-    if (!lastGenerationId || roster.length === 0) {
+    if (
+      !lastGenerationId
+      || roster.length === 0
+      || lastGenerationRepairContext?.generationId !== lastGenerationId
+    ) {
       setRepairError('本次战报缺少 generationId 或角色 roster，无法生成修复草稿。');
       return;
     }
@@ -181,14 +198,14 @@ export const useCombatantRepair = () => {
     setRepairError(null);
     setRepairNotice(null);
     try {
-      const customProvider = buildCustomProviderRequestPayload(userProviderConfig);
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      const authHeader = await authStorage.getAuthHeader();
-      if (authHeader) headers.Authorization = authHeader;
-      Object.assign(headers, await authStorage.getActivityHeaders());
-      const response = await fetch('/api/arena/repair-combatant-meta', {
+      const capturedRepairContext = lastGenerationRepairContext;
+      const generationIntent = generationApiIntentLatch.tryAcquire();
+      if (!generationIntent) {
+        throw new Error('已有生成请求正在处理中，请勿重复提交。');
+      }
+      const response = await generationIntent.dispatch('/api/arena/repair-combatant-meta', {
         method: 'POST',
-        headers,
+        headers: withArenaGenerationActorToken({ 'Content-Type': 'application/json' }),
         credentials: 'include',
         body: JSON.stringify({
           generationId: lastGenerationId,
@@ -197,6 +214,7 @@ export const useCombatantRepair = () => {
             data: combatant.data,
             isNative: combatant.isValid,
             isPreset: combatant.isPreset,
+            filename: combatant.isPreset ? combatant.filename : null,
           })),
           battleReportMarkdown: reportMarkdown,
           mode: battleMode,
@@ -204,9 +222,12 @@ export const useCombatantRepair = () => {
           scenario: battleMode === 'scenario' ? scenario.content : undefined,
           writeArenaHistory: settings.writeArenaHistory,
           writeCurrentState: settings.writeCurrentState,
-          ...(customProvider ? { customProvider } : {}),
+          ...(capturedRepairContext.customProvider
+            ? { customProvider: capturedRepairContext.customProvider }
+            : {}),
         }),
       });
+      captureArenaGenerationActorToken(response);
       const payload = await response.json().catch(() => ({})) as RepairEndpointResponse;
       if (!response.ok) {
         throw new Error(formatHttpErrorMessage({
@@ -219,7 +240,7 @@ export const useCombatantRepair = () => {
         draft: JSON.stringify({ impacts: payload.impacts }),
         combatants: roster,
       });
-      if (!repairContextIsCurrent(lastGenerationId, roster)) {
+      if (!repairContextIsCurrent(lastGenerationId, roster, capturedRepairContext)) {
         throw new Error('角色或 generation 上下文已变化，旧的 AI 修复草稿已丢弃。');
       }
       setDraftText(JSON.stringify({ impacts: normalized }, null, 2));
@@ -235,6 +256,8 @@ export const useCombatantRepair = () => {
     isCooldown,
     isInRoom,
     lastGenerationId,
+    lastGenerationRepairContext,
+    generationApiIntentLatch,
     remainingTime,
     repairContextIsCurrent,
     reportMarkdown,
@@ -244,7 +267,6 @@ export const useCombatantRepair = () => {
     settings.writeArenaHistory,
     settings.writeCurrentState,
     startCooldown,
-    userProviderConfig,
   ]);
 
   const applyArenaRepairDraft = useCallback(async () => {
@@ -375,7 +397,8 @@ export const useCombatantRepair = () => {
       lastGenerationId && repairAppliedGenerationId === lastGenerationId,
     ),
     canGenerateAiDraft: Boolean(
-      settings.writeArenaHistory || settings.writeCurrentState
+      (settings.writeArenaHistory || settings.writeCurrentState)
+      && lastGenerationRepairContext?.generationId === lastGenerationId
     ),
     isGenerating,
   };

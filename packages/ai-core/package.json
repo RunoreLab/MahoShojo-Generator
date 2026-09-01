@@ -23,6 +23,11 @@
       "types": "./src/game-card-generation.ts",
       "import": "./src/game-card-generation.ts",
       "default": "./src/game-card-generation.ts"
+    },
+    "./arena-repair-meta": {
+      "types": "./src/arena-repair-meta.ts",
+      "import": "./src/arena-repair-meta.ts",
+      "default": "./src/arena-repair-meta.ts"
     }
   },
   "scripts": {
