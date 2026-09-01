@@ -36,6 +36,7 @@ export type ArenaGenerationConnectionState =
   | 'cancelled'
   | 'cancel_unconfirmed'
   | 'producer_lost'
+  | 'interrupted'
   | 'unknown';
 
 export const arenaGenerationConnectionNotice = (
@@ -55,8 +56,16 @@ export const arenaGenerationConnectionNotice = (
   if (state === 'cancel_unconfirmed') {
     return '未能确认服务器已收到停止请求；生成可能仍在后台继续，请稍后检查。';
   }
+  if (state === 'interrupted') {
+    return '战报连接恢复次数已耗尽；已接收正文会保留，但保存与恢复状态暂时无法确认。';
+  }
   return null;
 };
+
+export const mergeArenaGenerationSnapshotMarkdown = (
+  deliveredMarkdown: string,
+  snapshotMarkdown: string,
+): string => snapshotMarkdown || deliveredMarkdown;
 
 export type PersistedArenaGeneration = {
   version: 1 | 2 | 3;
@@ -726,8 +735,16 @@ export const openArenaGenerationStream = async (
           if (!stopped) controller.close();
         } catch (error) {
           if (!stopped) {
-            updateState('failed');
-            controller.error(error);
+            if (
+              error instanceof Error
+              && error.message === 'ARENA_RESUME_ATTEMPTS_EXHAUSTED'
+            ) {
+              updateState('interrupted');
+              controller.close();
+            } else {
+              updateState('failed');
+              controller.error(error);
+            }
           }
         } finally {
           if (explicitlyAborted) {

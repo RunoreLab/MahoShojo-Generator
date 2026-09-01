@@ -90,10 +90,41 @@ describe('memory generation replay store', () => {
       producerToken,
       now: '2026-08-25T00:00:03.000Z',
       leaseExpiresAt: '2026-08-25T00:01:03.000Z',
+      terminal: { status: 'completed' },
     })).resolves.toEqual({ kind: 'cancelled', cancelReason: 'content_policy' });
     await expect(store.readState({ generationId: 'generation-1' })).resolves.toMatchObject({
       cancelRequested: true,
       cancelReason: 'content_policy',
+      intendedTerminal: { status: 'cancelled', code: 'CONTENT_POLICY_CANCELLED' },
+    });
+  });
+
+  it('carries a completed terminal intent into an expired-lease claim', async () => {
+    const store = createMemoryGenerationReplayStore();
+    await reserve(store);
+    await store.markRunning({
+      generationId: 'generation-1',
+      producerToken,
+      now: '2026-08-25T00:00:00.000Z',
+      leaseExpiresAt: '2026-08-25T00:01:00.000Z',
+    });
+    await store.claimFinalization({
+      generationId: 'generation-1',
+      producerToken,
+      now: '2026-08-25T00:00:01.000Z',
+      leaseExpiresAt: '2026-08-25T00:01:01.000Z',
+      terminal: { status: 'completed' },
+    });
+
+    await expect(store.claimLeaseExpiry({
+      generationId: 'generation-1',
+      actorKey: 'user:1',
+      reaperToken: 'reaper-token',
+      now: '2026-08-25T00:02:00.000Z',
+      leaseExpiresAt: '2026-08-25T00:03:00.000Z',
+    })).resolves.toMatchObject({
+      kind: 'claimed',
+      intendedTerminal: { status: 'completed' },
     });
   });
 

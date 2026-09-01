@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
 
 import {
-  ARENA_OUTPUT_NOT_ARCHIVED_WARNING,
+  generationCancelCode,
+  isArenaGenerationPersistenceWarning,
   isArenaPreparationSeed,
   isArenaPreparationVersion,
   isGenerationCancelReason,
@@ -130,8 +131,16 @@ if state.leaseExpiresAt == nil or state.leaseExpiresAt == cjson.null or state.le
 state.status = 'finalizing'
 state.updatedAt = ARGV[2]
 state.leaseExpiresAt = ARGV[3]
+if ARGV[5] ~= '' then state.intendedTerminal = cjson.decode(ARGV[5]) end
 if state.cancelRequested == true and state.cancelReason ~= 'content_policy' then
   state.cancelReason = 'user'
+end
+if state.cancelRequested == true then
+  if state.cancelReason == 'content_policy' then
+    state.intendedTerminal = cjson.decode(ARGV[7])
+  else
+    state.intendedTerminal = cjson.decode(ARGV[6])
+  end
 end
 redis.call('SET', KEYS[1], cjson.encode(state), 'PX', ARGV[4])
 redis.call('PEXPIRE', state.reservationKey, ARGV[4])
@@ -162,7 +171,11 @@ state.updatedAt = ARGV[2]
 state.leaseExpiresAt = ARGV[4]
 redis.call('SET', KEYS[1], cjson.encode(state), 'PX', ARGV[5])
 redis.call('PEXPIRE', state.reservationKey, ARGV[5])
-return { 'claimed', state.generationRequestId, state.payloadHash, state.mode or '' }
+local intendedTerminal = ''
+if state.intendedTerminal ~= nil and state.intendedTerminal ~= cjson.null then
+  intendedTerminal = cjson.encode(state.intendedTerminal)
+end
+return { 'claimed', state.generationRequestId, state.payloadHash, state.mode or '', intendedTerminal }
 `;
 
 const RELEASE_RESERVATION_SCRIPT = `
@@ -280,6 +293,7 @@ elseif ARGV[8] == '1' then
 end
 state.status = terminal.status
 state.terminal = terminal
+state.intendedTerminal = cjson.null
 state.leaseExpiresAt = cjson.null
 state.updatedAt = ARGV[3]
 redis.call('SET', KEYS[1], cjson.encode(state), 'PX', ARGV[4])
@@ -424,10 +438,6 @@ const nullableString = (value: unknown): value is string | null => (
   value === null || typeof value === 'string'
 );
 
-const isPersistenceWarning = (value: unknown): boolean => (
-  value === ARENA_OUTPUT_NOT_ARCHIVED_WARNING
-);
-
 const parseStoredSnapshot = (value: unknown): GenerationSnapshot | null => {
   if (value === null || value === undefined) return null;
   if (!isRecord(value)) throw new Error('REDIS_GENERATION_STATE_INVALID');
@@ -443,7 +453,7 @@ const parseStoredSnapshot = (value: unknown): GenerationSnapshot | null => {
     || typeof value.updatedAt !== 'string'
     || (telemetry !== null && !isRecord(telemetry))
     || !nullableString(terminalResultRef)
-    || (persistenceWarning !== undefined && !isPersistenceWarning(persistenceWarning))
+    || (persistenceWarning !== undefined && !isArenaGenerationPersistenceWarning(persistenceWarning))
   ) {
     throw new Error('REDIS_GENERATION_STATE_INVALID');
   }
@@ -456,7 +466,7 @@ const parseStoredSnapshot = (value: unknown): GenerationSnapshot | null => {
     telemetry: telemetry as Record<string, unknown> | null,
     terminalResultRef,
     ...(persistenceWarning === undefined ? {} : {
-      persistenceWarning: ARENA_OUTPUT_NOT_ARCHIVED_WARNING,
+      persistenceWarning,
     }),
   };
 };
@@ -467,10 +477,12 @@ const parseStoredTerminal = (value: unknown): GenerationTerminal | null => {
     throw new Error('REDIS_GENERATION_STATE_INVALID');
   }
   const publicError = value.publicError;
+  const persistenceWarning = value.persistenceWarning;
   if (
     ('code' in value && typeof value.code !== 'string')
     || ('resultRef' in value && !nullableString(value.resultRef))
-    || ('persistenceWarning' in value && !isPersistenceWarning(value.persistenceWarning))
+    || (persistenceWarning !== undefined
+      && !isArenaGenerationPersistenceWarning(persistenceWarning))
     || (publicError !== undefined && !isSafePublicAiErrorProjection(publicError))
   ) {
     throw new Error('REDIS_GENERATION_STATE_INVALID');
@@ -481,8 +493,8 @@ const parseStoredTerminal = (value: unknown): GenerationTerminal | null => {
     status: value.status,
     ...(code === undefined ? {} : { code: code as string }),
     ...(resultRef === undefined ? {} : { resultRef: resultRef as string | null }),
-    ...(!('persistenceWarning' in value) ? {} : {
-      persistenceWarning: ARENA_OUTPUT_NOT_ARCHIVED_WARNING,
+    ...(persistenceWarning === undefined ? {} : {
+      persistenceWarning,
     }),
     ...(publicError === undefined ? {} : { publicError: { ...publicError } }),
   };
@@ -513,6 +525,7 @@ const parseStoredState = (raw: string): StoredGenerationState => {
   const preparationVersion = parsed.preparationVersion ?? null;
   const snapshot = parseStoredSnapshot(parsed.snapshot);
   const terminal = parseStoredTerminal(parsed.terminal);
+  const intendedTerminal = parseStoredTerminal(parsed.intendedTerminal);
   if (
     typeof parsed.actorHash !== 'string'
     || typeof parsed.reservationKey !== 'string'
@@ -552,6 +565,7 @@ const parseStoredState = (raw: string): StoredGenerationState => {
     leaseExpiresAt: typeof parsed.leaseExpiresAt === 'string' ? parsed.leaseExpiresAt : null,
     snapshot,
     terminal,
+    intendedTerminal,
     cancelRequested: parsed.cancelRequested === true,
     cancelReason: isGenerationCancelReason(parsed.cancelReason)
       ? parsed.cancelReason
@@ -698,6 +712,7 @@ export const createRedisGenerationReplayStore = (
         leaseExpiresAt: input.leaseExpiresAt,
         snapshot: null,
         terminal: null,
+        intendedTerminal: null,
         cancelRequested: false,
         cancelReason: null,
         preparationSeed,
@@ -751,6 +766,15 @@ export const createRedisGenerationReplayStore = (
           input.now,
           input.leaseExpiresAt,
           String(activeTtlMs),
+          input.terminal ? JSON.stringify(input.terminal) : '',
+          JSON.stringify({
+            status: 'cancelled',
+            code: generationCancelCode('user'),
+          }),
+          JSON.stringify({
+            status: 'cancelled',
+            code: generationCancelCode('content_policy'),
+          }),
         ],
       });
       const cancelReason = cancelReasonFromTaggedResult(result, 'cancelled:');
@@ -783,12 +807,16 @@ export const createRedisGenerationReplayStore = (
         && typeof result[1] === 'string'
         && typeof result[2] === 'string'
         && typeof result[3] === 'string'
+        && (result[4] === undefined || typeof result[4] === 'string')
       ) {
         return {
           kind: 'claimed' as const,
           generationRequestId: result[1],
           payloadHash: result[2],
           mode: result[3] || null,
+          ...(result[4]
+            ? { intendedTerminal: parseStoredTerminal(JSON.parse(result[4])) }
+            : {}),
         };
       }
       if (kind === 'not-expired' || kind === 'forbidden' || kind === 'not-found') {

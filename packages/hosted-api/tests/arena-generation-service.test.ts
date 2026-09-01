@@ -65,6 +65,7 @@ class MemoryReplayStore implements GenerationReplayStore {
       leaseExpiresAt: input.leaseExpiresAt,
       snapshot: null,
       terminal: null,
+      intendedTerminal: null,
       cancelRequested: false,
       cancelReason: null,
       preparationSeed: input.preparationSeed ?? null,
@@ -112,6 +113,9 @@ class MemoryReplayStore implements GenerationReplayStore {
       status: 'finalizing',
       updatedAt: input.now,
       leaseExpiresAt: input.leaseExpiresAt,
+      intendedTerminal: state.cancelRequested
+        ? { status: 'cancelled', code: 'USER_CANCELLED' }
+        : input.terminal ?? state.intendedTerminal ?? null,
     });
     return state.cancelRequested
       ? { kind: 'cancelled' as const, cancelReason: state.cancelReason ?? 'user' as const }
@@ -138,6 +142,7 @@ class MemoryReplayStore implements GenerationReplayStore {
       generationRequestId: state.generationRequestId,
       payloadHash: state.payloadHash,
       mode: state.mode ?? null,
+      intendedTerminal: state.intendedTerminal ?? null,
     };
   }
 
@@ -236,6 +241,7 @@ class MemoryReplayStore implements GenerationReplayStore {
       ...state,
       status: input.terminal.status,
       terminal: input.terminal,
+      intendedTerminal: null,
       lastEventId: event?.id ?? state.lastEventId,
       snapshot: input.terminalSnapshot ? {
         ...input.terminalSnapshot,
@@ -1933,7 +1939,7 @@ describe('Arena generation lifecycle service', () => {
     expect(execute).toHaveBeenCalledOnce();
   });
 
-  test('an already-open replay stream reaps an expired pending finalization without Provider replay', async () => {
+  test('an expired completed intent stays pending instead of becoming producer_lost', async () => {
     const store = new MemoryReplayStore();
     let currentTime = new Date('2026-08-25T04:00:00.000Z');
     const execute = vi.fn(async (input: Parameters<ArenaGenerationExecutor['execute']>[0]) => {
@@ -1942,16 +1948,13 @@ describe('Arena generation lifecycle service', () => {
     });
     const terminalStore: ArenaGenerationTerminalStore = {
       readOwnedTerminal: vi.fn(async () => null),
-      reconcileExpiredLease: vi.fn(async (input) => ({
-        generationId: input.generationId,
-        generationRequestId: input.generationRequestId,
-        status: 'producer_lost' as const,
-        updatedAt: input.updatedAt,
-        resultRef: null,
-        markdown: '',
-        reasoning: '',
-        payloadHash: input.payloadHash,
-      })),
+      inspectOwnedFinalization: vi.fn()
+        .mockResolvedValueOnce({ kind: 'not-found' as const })
+        .mockResolvedValue({
+          kind: 'pending' as const,
+          payloadHash: 'hash:{"value":"same"}',
+        }),
+      reconcileExpiredLease: vi.fn(async () => { throw new Error('must not reap intent'); }),
     };
     const service = createService(store, { execute }, {
       terminalStore,
@@ -1960,11 +1963,23 @@ describe('Arena generation lifecycle service', () => {
     });
 
     const response = await service.create(createRequest('request-1'));
+    await vi.waitFor(() => {
+      expect(store.states.get('generation-1')?.status).toBe('finalizing');
+    });
     currentTime = new Date('2026-08-25T04:01:00.000Z');
-    const body = await response.text();
+    const status = await service.status(new Request(
+      'https://example.test/api/arena/generations/generation-1',
+    ), { generationId: 'generation-1' });
+    await response.body?.cancel();
 
-    expect(body).toContain('producer_lost');
-    expect(terminalStore.reconcileExpiredLease).toHaveBeenCalledOnce();
+    expect(status.status).toBe(503);
+    await expect(status.json()).resolves.toMatchObject({
+      code: 'GENERATION_FINALIZATION_PENDING',
+    });
+    expect(terminalStore.reconcileExpiredLease).not.toHaveBeenCalled();
+    expect(store.events.get('generation-1') ?? []).not.toContainEqual(
+      expect.objectContaining({ type: 'error' }),
+    );
     expect(execute).toHaveBeenCalledOnce();
   });
 

@@ -62,6 +62,7 @@ import {
 import {
   arenaGenerationConnectionNotice,
   captureArenaGenerationActorToken,
+  mergeArenaGenerationSnapshotMarkdown,
   openArenaGenerationStream,
   type ArenaGenerationConnectionState,
   withArenaGenerationActorToken,
@@ -104,6 +105,7 @@ const isStreamInterruptedError = (error: unknown): boolean => {
   if (message.includes('流式读取超时') || message.includes('流式生成超时')) return true;
   if (message.includes('timeout') || message.includes('timed out')) return true;
   if (message.includes('aborted') || message.includes('中断')) return true;
+  if (message.includes('arena_resume_attempts_exhausted')) return true;
   return false;
 };
 
@@ -1339,9 +1341,15 @@ export const useBattleEngine = () => {
               if (event === 'snapshot') {
                 const markdown = typeof payload?.markdown === 'string' ? payload.markdown : '';
                 const reasoning = typeof payload?.reasoning === 'string' ? payload.reasoning : '';
-                accumulatedText = markdown;
-                lastCheckedLength = 0;
-                setStreamingMarkdown(sanitizeTextByShieldWords(markdown));
+                const mergedMarkdown = mergeArenaGenerationSnapshotMarkdown(
+                  accumulatedText,
+                  markdown,
+                );
+                if (mergedMarkdown !== accumulatedText || !accumulatedText) {
+                  accumulatedText = mergedMarkdown;
+                  lastCheckedLength = 0;
+                  setStreamingMarkdown(sanitizeTextByShieldWords(mergedMarkdown));
+                }
                 setStreamReasoning(reasoning
                   ? appendReasoningDelta(null, sanitizeTextByShieldWords(reasoning), {
                     source: 'sdk',
@@ -1457,6 +1465,9 @@ export const useBattleEngine = () => {
               }
 
               if (event === 'done') {
+                if (typeof payload?.persistenceWarning === 'string') {
+                  setError('⚠️ 战报已生成并保留当前正文，但保存或断线恢复能力暂时不可用。');
+                }
                 const currentReasoning = useBattleStore.getState().streamReasoning;
                 if (!currentReasoning) {
                   markReasoningStatusInStore('unavailable', { source: 'sdk' });
@@ -1609,7 +1620,8 @@ export const useBattleEngine = () => {
 	          }
 
 	          if (sseEndedWithoutDone) {
-	            setError(buildStreamInterruptedMessage('连接结束但未收到 done 事件'));
+	            setError(arenaGenerationConnectionNotice(lastArenaConnectionState ?? 'unknown')
+	              ?? buildStreamInterruptedMessage('连接结束但未收到 done 事件'));
 	            startCooldown();
 	            return;
 	          }

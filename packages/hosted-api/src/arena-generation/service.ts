@@ -64,7 +64,17 @@ export type GenerationStreamEvent = GenerationEventInput & {
 };
 
 export const ARENA_OUTPUT_NOT_ARCHIVED_WARNING = 'OUTPUT_NOT_ARCHIVED' as const;
-export type ArenaGenerationPersistenceWarning = typeof ARENA_OUTPUT_NOT_ARCHIVED_WARNING;
+export const ARENA_PERSISTENCE_UNAVAILABLE_WARNING = 'PERSISTENCE_UNAVAILABLE' as const;
+export type ArenaGenerationPersistenceWarning =
+  | typeof ARENA_OUTPUT_NOT_ARCHIVED_WARNING
+  | typeof ARENA_PERSISTENCE_UNAVAILABLE_WARNING;
+
+export const isArenaGenerationPersistenceWarning = (
+  value: unknown,
+): value is ArenaGenerationPersistenceWarning => (
+  value === ARENA_OUTPUT_NOT_ARCHIVED_WARNING
+  || value === ARENA_PERSISTENCE_UNAVAILABLE_WARNING
+);
 
 export type GenerationSnapshot = {
   status: GenerationStatus;
@@ -116,6 +126,8 @@ export type GenerationReplayStoreState = {
   leaseExpiresAt: string | null;
   snapshot: GenerationSnapshot | null;
   terminal: GenerationTerminal | null;
+  /** Terminal selected after complete Provider output, before auxiliary persistence settles. */
+  intendedTerminal?: GenerationTerminal | null;
   cancelRequested: boolean;
   cancelReason?: GenerationCancelReason | null;
   preparationSeed?: string | null;
@@ -164,6 +176,7 @@ export interface GenerationReplayStore {
     producerToken: string;
     now: string;
     leaseExpiresAt: string;
+    terminal?: GenerationTerminal;
   }): Promise<ArenaGenerationFinalizationClaim>;
   claimLeaseExpiry(_input: {
     generationId: string;
@@ -177,6 +190,7 @@ export interface GenerationReplayStore {
       generationRequestId: string;
       payloadHash: string;
       mode: string | null;
+      intendedTerminal?: GenerationTerminal | null;
     }
     | { kind: 'terminal'; status: GenerationTerminal['status'] }
     | { kind: 'not-expired' }
@@ -1553,6 +1567,19 @@ export const createArenaGenerationService = (
       }, 503);
     }
     if (!terminalFallback) {
+      if (claimed.intendedTerminal) {
+        const durable = await inspectOwnedFinalization(generationId, actor.actorKey)
+          .catch(() => ({ kind: 'not-found' as const }));
+        if (durable.kind === 'terminal') terminalFallback = durable.terminal;
+        if (durable.kind !== 'terminal') {
+          return jsonResponse({
+            code: 'GENERATION_FINALIZATION_PENDING',
+            error: 'Generation durable finalization remains pending',
+          }, 503);
+        }
+      }
+    }
+    if (!terminalFallback) {
       if (!dependencies.terminalStore?.reconcileExpiredLease) {
         return jsonResponse({
           code: 'GENERATION_TERMINAL_RECONCILIATION_PENDING',
@@ -2467,6 +2494,7 @@ export const createArenaGenerationService = (
           producerToken: input.producerToken,
           now: claimNow.toISOString(),
           leaseExpiresAt: addLeaseDuration(claimNow, leaseDurationMs),
+          ...(_terminal.status === 'completed' ? { terminal: _terminal } : {}),
         });
         if (claimed.kind === 'fenced') loseOwnership();
         if (claimed.kind === 'cancelled' && !controller.signal.aborted) {

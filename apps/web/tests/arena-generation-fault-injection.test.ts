@@ -869,7 +869,7 @@ describe.sequential('Arena resumable generation fault-injection matrix', () => {
     });
   });
 
-  it('leaves permanent R2+D1 failure pending until lease reaping and never replays Provider', async () => {
+  it('keeps complete output successful when R2 and D1 persistence are unavailable', async () => {
     let currentTime = new Date('2026-08-25T04:00:00.000Z');
     let reconciliationCount = 0;
     const failedPorts: ArenaGenerationFinalizationPorts = {
@@ -907,20 +907,24 @@ describe.sequential('Arena resumable generation fault-injection matrix', () => {
 
     const response = await service.create(request());
     await vi.waitFor(async () => {
-      expect((await store.readState({ generationId, actorKey }))?.status).toBe('finalizing');
+      expect((await store.readState({ generationId, actorKey }))?.status).toBe('completed');
     });
     currentTime = new Date('2026-08-25T04:01:00.000Z');
-    expect(await response.text()).toContain('producer_lost');
+    const body = await response.text();
 
     const evidence: FaultEvidence = {
-      scenario: 'permanent-r2+d1+lease-reaper', generationRequestId, generationId,
+      scenario: 'permanent-r2+d1+completed-degraded', generationRequestId, generationId,
       createAttempts: 1, disconnects: 0, resumeAttempts: 0, resumeSuccesses: 0,
       cancelAttempts: 0, providerStarts: provider.mock.calls.length,
-      terminal: 'producer_lost', redis: 'terminal', d1: 'producer_lost', r2: 'failed',
+      terminal: 'completed', redis: 'terminal', d1: 'none', r2: 'failed',
       sideEffects: emptyCounts(),
     };
-    expect(evidence).toMatchObject({ providerStarts: 1, terminal: 'producer_lost' });
-    expect(reconciliationCount).toBe(1);
+    expect(body).toContain('event: done');
+    expect(body).toContain('"status":"completed"');
+    expect(body).toContain('"persistenceWarning":"PERSISTENCE_UNAVAILABLE"');
+    expect(body).not.toContain('event: error');
+    expect(evidence).toMatchObject({ providerStarts: 1, terminal: 'completed' });
+    expect(reconciliationCount).toBe(0);
   });
 
   it('fails reservation closed before Provider and records no durable side effect', async () => {

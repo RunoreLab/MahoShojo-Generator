@@ -3,14 +3,18 @@ import type {
   ArenaGenerationFinalizationResult,
 } from './runtime';
 import type { ArenaGenerationObserver } from '@mahoshojo/hosted-api/arena-generation/service';
-import { ARENA_OUTPUT_NOT_ARCHIVED_WARNING } from '@mahoshojo/hosted-api/arena-generation/service';
+import {
+  ARENA_OUTPUT_NOT_ARCHIVED_WARNING,
+  ARENA_PERSISTENCE_UNAVAILABLE_WARNING,
+  type ArenaGenerationPersistenceWarning,
+} from '@mahoshojo/hosted-api/arena-generation/service';
 
 export type ArenaTerminalClaimInput = Omit<
   ArenaGenerationFinalizationInput,
   'signal'
 > & {
   resultRef: string | null;
-  persistenceWarning?: typeof ARENA_OUTPUT_NOT_ARCHIVED_WARNING;
+  persistenceWarning?: ArenaGenerationPersistenceWarning;
 };
 
 export type ArenaTerminalClaimResult = {
@@ -55,6 +59,13 @@ export interface ArenaGenerationFinalizationPorts {
   }): Promise<unknown | null>;
 }
 
+const isTerminalAuthorityConflict = (error: unknown): boolean => {
+  const code = error instanceof Error ? error.message : String(error);
+  return code === 'ARENA_TERMINAL_CLAIM_CONFLICT'
+    || code === 'ARENA_PRODUCER_LOST_TERMINAL_CONFLICT'
+    || code === 'ARENA_TERMINAL_STATUS_INVALID';
+};
+
 export const createArenaGenerationFinalizer = (
   ports: ArenaGenerationFinalizationPorts,
   options: { observer?: ArenaGenerationObserver } = {},
@@ -78,7 +89,7 @@ export const createArenaGenerationFinalizer = (
     idempotencyKey: buildArenaTerminalEffectIdempotencyKey(claim.generationId, effect),
   });
   let resultRef: string | null = null;
-  let persistenceWarning: typeof ARENA_OUTPUT_NOT_ARCHIVED_WARNING | undefined;
+  let persistenceWarning: ArenaGenerationPersistenceWarning | undefined;
   if (input.status === 'completed') {
     const startedAt = performance.now();
     const bytes = new TextEncoder().encode(input.markdown).byteLength;
@@ -136,6 +147,7 @@ export const createArenaGenerationFinalizer = (
   };
   let finalized = false;
   let lastError: unknown = null;
+  let authorityConflictDetected = false;
   for (let attempt = 0; attempt < 3 && !finalized; attempt += 1) {
     try {
       const claim = await ports.claimTerminal({ ...claimInput, resultRef });
@@ -152,9 +164,17 @@ export const createArenaGenerationFinalizer = (
       finalized = true;
     } catch (error) {
       lastError = error;
+      authorityConflictDetected ||= isTerminalAuthorityConflict(error);
     }
   }
   if (!finalized) {
+    if (input.status === 'completed' && !authorityConflictDetected) {
+      return {
+        resultRef,
+        ranking: null,
+        persistenceWarning: ARENA_PERSISTENCE_UNAVAILABLE_WARNING,
+      };
+    }
     throw lastError ?? new Error('ARENA_TERMINAL_FINALIZATION_FAILED');
   }
 

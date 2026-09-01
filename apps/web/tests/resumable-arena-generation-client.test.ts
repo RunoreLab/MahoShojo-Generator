@@ -5,6 +5,7 @@ import {
   ARENA_GENERATION_ACTOR_TOKEN_KEY,
   ARENA_GENERATION_CLIENT_STATE_KEY,
   arenaGenerationConnectionNotice,
+  mergeArenaGenerationSnapshotMarkdown,
   openArenaGenerationStream,
   readPersistedArenaGeneration,
 } from '@/lib/arena/resumable-generation-client';
@@ -66,11 +67,17 @@ const readWithDeadline = async <T>(
 };
 
 describe('resumable Arena generation client', () => {
+  it('does not let an empty not-archived snapshot erase delivered markdown', () => {
+    expect(mergeArenaGenerationSnapshotMarkdown('# 已交付正文', '')).toBe('# 已交付正文');
+    expect(mergeArenaGenerationSnapshotMarkdown('# 旧正文', '# 权威快照')).toBe('# 权威快照');
+  });
+
   it('给取消确认与恢复状态提供稳定用户文案', () => {
     expect(arenaGenerationConnectionNotice('cancelling')).toContain('正在请求服务器停止');
     expect(arenaGenerationConnectionNotice('cancelled')).toContain('服务器已接受停止请求');
     expect(arenaGenerationConnectionNotice('cancel_unconfirmed')).toContain('可能仍在后台继续');
     expect(arenaGenerationConnectionNotice('reconnecting')).toContain('仍在服务器生成');
+    expect(arenaGenerationConnectionNotice('interrupted')).toContain('已接收正文会保留');
     expect(arenaGenerationConnectionNotice('completed')).toBeNull();
   });
 
@@ -973,6 +980,47 @@ describe('resumable Arena generation client', () => {
       ['/api/arena/generations/generation-transient/stream', 'GET'],
       ['/api/arena/generations/generation-transient/stream', 'GET'],
     ]);
+  });
+
+  it('keeps delivered markdown and reports interruption after resume attempts are exhausted', async () => {
+    let delivered = false;
+    const partial = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (delivered) {
+          controller.error(new Error('network lost'));
+          return;
+        }
+        delivered = true;
+        controller.enqueue(new TextEncoder().encode(
+          'id: 1-0\nevent: markdown\ndata: {"chunk":"# 已交付正文"}\n\n',
+        ));
+      },
+    });
+    const states: string[] = [];
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(response(partial, 'generation-partial'))
+      .mockResolvedValue(new Response(JSON.stringify({ code: 'STATE_UNAVAILABLE' }), {
+        status: 503,
+        headers: { 'Content-Type': 'application/json' },
+      }));
+
+    const opened = await openArenaGenerationStream({
+      endpoint: '/api/arena/generate-stream',
+      body: { mode: 'classic', partial: true },
+      headers: {},
+      fetcher,
+      storage: new MemoryStorage(),
+      generationRequestId: 'request-partial-resume',
+      maxReconnectAttempts: 1,
+      baseReconnectDelayMs: 1,
+      random: () => 0,
+      onStateChange: (state) => states.push(state),
+    });
+
+    await expect(opened.text()).resolves.toContain('# 已交付正文');
+    expect(states).toContain('interrupted');
+    expect(states.at(-1)).toBe('interrupted');
+    expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
   });
 
   it('does not use an unscoped v1 pointer to resume a possibly different request body', async () => {

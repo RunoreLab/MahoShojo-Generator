@@ -727,6 +727,44 @@ describe('RedisGenerationReplayStore', () => {
     },
   );
 
+  it('persists completed intent in finalization CAS and returns it to the lease reaper', async () => {
+    const client = createClient();
+    vi.mocked(client.eval)
+      .mockResolvedValueOnce('claimed')
+      .mockResolvedValueOnce([
+        'claimed',
+        reserveInput.generationRequestId,
+        reserveInput.payloadHash,
+        'classic',
+        JSON.stringify({ status: 'completed' }),
+      ]);
+    const store = createRedisGenerationReplayStore({ getClient: () => client });
+
+    await store.claimFinalization({
+      generationId: reserveInput.generationId,
+      producerToken: reserveInput.producerToken,
+      now: reserveInput.now,
+      leaseExpiresAt: reserveInput.leaseExpiresAt,
+      terminal: { status: 'completed' },
+    });
+    await expect(store.claimLeaseExpiry({
+      generationId: reserveInput.generationId,
+      actorKey: reserveInput.actorKey,
+      reaperToken: 'reaper-token-1',
+      now: '2026-08-25T04:02:00.000Z',
+      leaseExpiresAt: '2026-08-25T04:03:00.000Z',
+    })).resolves.toMatchObject({
+      kind: 'claimed',
+      intendedTerminal: { status: 'completed' },
+    });
+
+    const [claimScript, claimOptions] = vi.mocked(client.eval).mock.calls[0]!;
+    expect(claimScript).toContain('state.intendedTerminal');
+    expect(claimOptions.arguments).toContain(JSON.stringify({ status: 'completed' }));
+    const [reaperScript] = vi.mocked(client.eval).mock.calls[1]!;
+    expect(reaperScript).toContain('state.intendedTerminal');
+  });
+
   it('expired lease reaper CAS rotates producer ownership before durable terminal write', async () => {
     const client = createClient();
     vi.mocked(client.eval).mockResolvedValue([

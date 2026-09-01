@@ -219,7 +219,33 @@ describe('Arena generation finalization', () => {
     expect(ports.completeTerminal).toHaveBeenCalledTimes(1);
   });
 
-  it.each(['completed', 'failed', 'cancelled'] as const)(
+  it('keeps completed output successful when auxiliary D1 finalization is unavailable', async () => {
+    const ports = createPorts({
+      claimTerminal: vi.fn(async () => { throw new Error('ARENA_D1_UNAVAILABLE'); }),
+    });
+    const finalize = createArenaGenerationFinalizer(ports);
+
+    await expect(finalize(input)).resolves.toEqual({
+      resultRef: 'r2://battle/generation-1',
+      ranking: null,
+      persistenceWarning: 'PERSISTENCE_UNAVAILABLE',
+    });
+    expect(ports.claimTerminal).toHaveBeenCalledTimes(3);
+    expect(ports.persistCombatants).not.toHaveBeenCalled();
+    expect(ports.readRanking).not.toHaveBeenCalled();
+  });
+
+  it('keeps a durable terminal identity conflict fail closed', async () => {
+    const ports = createPorts({
+      claimTerminal: vi.fn(async () => { throw new Error('ARENA_TERMINAL_CLAIM_CONFLICT'); }),
+    });
+    const finalize = createArenaGenerationFinalizer(ports);
+
+    await expect(finalize(input)).rejects.toThrow('ARENA_TERMINAL_CLAIM_CONFLICT');
+    expect(ports.claimTerminal).toHaveBeenCalledTimes(3);
+  });
+
+  it.each(['failed', 'cancelled'] as const)(
     '%s terminal 在 post-claim finalization 重试耗尽后保留真实终态并保持 pending',
     async (status) => {
       const failure = new Error('D1_POST_CLAIM_UNAVAILABLE');
@@ -231,7 +257,7 @@ describe('Arena generation finalization', () => {
       await expect(finalize({
         ...input,
         status,
-        errorCode: status === 'completed' ? null : `GENERATION_${status.toUpperCase()}`,
+        errorCode: `GENERATION_${status.toUpperCase()}`,
       })).rejects.toThrow('D1_POST_CLAIM_UNAVAILABLE');
       expect(ports.claimTerminal).toHaveBeenCalledTimes(3);
       expect(ports.failTerminal).not.toHaveBeenCalled();
