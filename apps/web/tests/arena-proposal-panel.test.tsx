@@ -175,7 +175,7 @@ describe('Arena Proposal panel real React interactions', () => {
     await act(async () => root.render(
       <ArenaProposalPanel state={stateFor(member, [proposal])} controller={controller} workspace={createWorkspace()} />,
     ));
-    await act(async () => button('撤回 Proposal').click());
+    await act(async () => button('撤回提案').click());
     expect(controller.withdrawProposal).toHaveBeenCalledWith('proposal-atomic');
     expect(container.textContent).not.toContain('接受所选');
   });
@@ -190,7 +190,7 @@ describe('Arena Proposal panel real React interactions', () => {
     const checkboxes = [...container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')];
     expect(checkboxes).toHaveLength(2);
     await act(async () => checkboxes[1]!.click());
-    expect(container.textContent).toContain('所选变更缺少依赖或拆分了原子组');
+    expect(container.textContent).toContain('所选变更缺少依赖或拆分了联动变更组');
     expect(button('接受所选').disabled).toBe(true);
     expect(controller.resolveProposal).not.toHaveBeenCalled();
 
@@ -300,10 +300,10 @@ describe('Arena Proposal panel real React interactions', () => {
     ));
     expect(container.textContent).toContain('待处理提案 (1)');
     expect(container.textContent).toContain('成员');
-    expect(container.textContent).toContain('BASE：');
-    expect(container.textContent).toContain('CURRENT：');
-    expect(container.textContent).toContain('PROPOSED：');
-    expect(container.textContent).toContain('same-target conflict');
+    expect(container.textContent).toContain('提案基准：');
+    expect(container.textContent).toContain('当前房间值：');
+    expect(container.textContent).toContain('建议值：');
+    expect(container.textContent).toContain('与当前房间修改冲突');
     expect(container.textContent).toContain('新增队伍 B 队');
     expect(container.textContent).toContain('移除队伍 team:a');
     expect(container.textContent).toContain('队伍 team:c 改名为 C 队新名');
@@ -314,11 +314,23 @@ describe('Arena Proposal panel real React interactions', () => {
     expect(container.textContent).toContain('调整辅助情景顺序');
     expect(container.textContent).toContain('调整素材顺序');
     expect(container.textContent).toContain(
-      'PROPOSED：角色 data-card:character-1 引导改为“保护后排并等待支援”',
+      '建议值：角色 data-card:character-1 引导改为“保护后排并等待支援”',
     );
     expect(container.textContent).toContain(
-      'PROPOSED：角色 data-card:character-1 分配至队伍 team:b',
+      '建议值：角色 data-card:character-1 分配至队伍 team:b',
     );
     expect(container.textContent).toContain('叙事历史 读取=开(7)、写入=关');
+    for (const exposedTerm of [
+      'Proposal',
+      'typed diff',
+      'BASE',
+      'CURRENT',
+      'PROPOSED',
+      'same-target conflict',
+      'revision',
+      'incarnation',
+    ]) {
+      expect(container.textContent).not.toContain(exposedTerm);
+    }
   });
 });

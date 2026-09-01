@@ -395,7 +395,7 @@ describe('Arena multiplayer production client/hook wiring', () => {
     await setTextField('arena-story-guidance', 'production 成员建议');
     await act(async () => button('预览提案').click());
     expect(container.querySelectorAll('[role="dialog"][aria-modal="true"]')).toHaveLength(1);
-    await act(async () => button('提交 Proposal').click());
+    await act(async () => button('提交提案').click());
     await flush();
 
     const submitCall = calls.find((call) => requestPath(call.url).endsWith('/proposals'));
@@ -416,7 +416,7 @@ describe('Arena multiplayer production client/hook wiring', () => {
       }],
     });
     expect(JSON.stringify(intent)).not.toMatch(/providerApiKey|userProviderConfig|credential/u);
-    expect(container.textContent).not.toContain('我的待处理 Proposal');
+    expect(container.textContent).not.toContain('我的待处理提案');
     expect(useBattleStore.getState()).toBe(battleBefore);
 
     const proposal = {
@@ -438,15 +438,15 @@ describe('Arena multiplayer production client/hook wiring', () => {
       type: 'proposal.submitted',
       payload: { proposal },
     })));
-    expect(container.textContent).toContain('我的待处理 Proposal');
+    expect(container.textContent).toContain('我的待处理提案');
 
-    await act(async () => button('撤回 Proposal').click());
+    await act(async () => button('撤回提案').click());
     await flush();
     const withdrawCall = calls.find((call) => requestPath(call.url).endsWith('/withdraw'));
     expect(JSON.parse(String(withdrawCall?.init?.body))).toEqual({
       expectedRoomEpoch: 'epoch-1',
     });
-    expect(container.textContent).toContain('我的待处理 Proposal');
+    expect(container.textContent).toContain('我的待处理提案');
 
     await act(async () => WiringSocket.instances[0]!.message(JSON.stringify({
       protocolVersion: 1,
@@ -601,11 +601,11 @@ describe('Arena multiplayer production client/hook wiring', () => {
     await flush();
     await setTextField('arena-story-guidance', 'unknown 对账建议');
     await act(async () => button('预览提案').click());
-    await act(async () => button('提交 Proposal').click());
+    await act(async () => button('提交提案').click());
     await flush();
 
     expect(proposalCalls).toBe(1);
-    expect(container.textContent).toContain('上次 Proposal 请求结果未知');
+    expect(container.textContent).toContain('上次提案请求结果未知');
     expect(button('预览提案').disabled).toBe(true);
     await act(async () => button('预览提案').click());
     await flush();
@@ -616,6 +616,6 @@ describe('Arena multiplayer production client/hook wiring', () => {
     expect(fetcher.mock.calls.some(([input]) => String(input).endsWith('/session'))).toBe(true);
     expect(ticketIndex).toBe(2);
     expect(WiringSocket.instances).toHaveLength(2);
-    expect(container.textContent).not.toContain('上次 Proposal 请求结果未知');
+    expect(container.textContent).not.toContain('上次提案请求结果未知');
   });
 });

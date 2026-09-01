@@ -288,8 +288,8 @@ describe('Arena room Proposal workspace', () => {
     await act(async () => previewTrigger.click());
     expect(container.querySelectorAll('[role="dialog"][aria-modal="true"]')).toHaveLength(1);
     expect(document.activeElement?.textContent).toBe('关闭');
-    expect(container.textContent).toContain('BASE revision 7');
-    expect(container.textContent).toContain('PROPOSED：');
+    expect(container.textContent).toContain('基于房间配置版本 7');
+    expect(container.textContent).toContain('建议值：');
     expect(container.textContent).toContain('将提交');
     expect(container.textContent).toContain('新增角色');
     expect(container.textContent).toContain('新增队伍');
@@ -298,12 +298,15 @@ describe('Arena room Proposal workspace', () => {
     expect(container.textContent).toContain('新增素材');
     expect(container.textContent).toContain('语言改为 en-US');
     expect(container.textContent).toContain(
-      'PROPOSED：角色 data-card:character-public-1 引导改为“优先保护同伴”',
+      '建议值：角色 data-card:character-public-1 引导改为“优先保护同伴”',
     );
     expect(container.textContent).toContain(
-      'PROPOSED：角色 data-card:character-public-1 分配至队伍 team:',
+      '建议值：角色 data-card:character-public-1 分配至队伍 team:',
     );
     expect(container.textContent).toContain('叙事历史 读取=开(10)、写入=关');
+    for (const exposedTerm of ['Proposal', 'typed diff', 'BASE', 'PROPOSED', 'revision', 'server-known', 'payload']) {
+      expect(container.textContent).not.toContain(exposedTerm);
+    }
 
     await act(async () => {
       document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
@@ -313,7 +316,7 @@ describe('Arena room Proposal workspace', () => {
     await act(async () => previewTrigger.click());
 
     await act(async () => {
-      button('提交 Proposal').click();
+      button('提交提案').click();
       await Promise.resolve();
     });
 
@@ -386,7 +389,7 @@ describe('Arena room Proposal workspace', () => {
         },
       },
     } as const;
-    expect(arenaProposalExpectedBaseSummary(change)).toBe('预期基线：preset:S00_old.json');
+    expect(arenaProposalExpectedBaseSummary(change)).toBe('提案基准：preset:S00_old.json');
   });
 
   it('online data-card modal 不把仅存在于 preset namespace 的同名引用标为已选', async () => {

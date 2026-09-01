@@ -11,7 +11,8 @@ import type { ArenaRoomHostReconciliationState } from '@/components/arena/multip
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 const mocks = vi.hoisted(() => ({
-  buildWorkspaceBundle: vi.fn(),
+  tryBuildWorkspaceBundle: vi.fn(),
+  createCanonicalDraftBundle: vi.fn(),
   capturePublished: vi.fn(),
   close: vi.fn(async () => undefined),
   kickMember: vi.fn(async () => undefined),
@@ -77,7 +78,8 @@ vi.mock('@/components/arena/multiplayer/useArenaRoom', () => ({
 }));
 
 vi.mock('@/lib/arena-room/shared-config', () => ({
-  buildArenaRoomHostWorkspaceBundleFromBattleState: mocks.buildWorkspaceBundle,
+  tryBuildArenaRoomHostWorkspaceBundleFromBattleState: mocks.tryBuildWorkspaceBundle,
+  createArenaRoomCanonicalEmptyDraftBundle: mocks.createCanonicalDraftBundle,
 }));
 
 vi.mock('@/components/arena/stores/useBattleStore', () => ({
@@ -143,6 +145,42 @@ const sharedConfig: ArenaRoomSharedConfig = {
   },
 };
 
+const emptySharedConfig: ArenaRoomSharedConfig = {
+  ...sharedConfig,
+  combatants: [],
+};
+
+const connectedHostState = (config: ArenaRoomSharedConfig): ArenaRoomControllerState => {
+  const host = {
+    userId: 'host-1',
+    role: 'host' as const,
+    displayName: '测试玩家',
+    membershipState: 'active' as const,
+  };
+  return {
+    ...readyState,
+    phase: 'connected',
+    session: {
+      protocolVersion: 1,
+      roomId: 'room-created',
+      roomEpoch: 'epoch-created',
+      self: host,
+      snapshot: {
+        protocolVersion: 1,
+        schemaVersion: 1,
+        roomId: 'room-created',
+        roomEpoch: 'epoch-created',
+        revision: 0,
+        controlSeq: 0,
+        sharedConfig: config,
+        members: [host],
+        proposals: [],
+        activeGeneration: null,
+      },
+    },
+  };
+};
+
 const props = {
   enabled: true,
   origin: 'http://127.0.0.1:8787',
@@ -171,10 +209,15 @@ const flush = async (): Promise<void> => {
 beforeEach(async () => {
   mocks.state = readyState;
   mocks.reconciliationState = { kind: 'idle' };
-  mocks.buildWorkspaceBundle.mockResolvedValue({
+  const bundle = {
     sharedConfig,
     hostLocalPayloads: [],
     hostLocalContentDigests: [],
+  };
+  mocks.tryBuildWorkspaceBundle.mockResolvedValue({ ok: true, bundle });
+  mocks.createCanonicalDraftBundle.mockReturnValue({
+    ...bundle,
+    sharedConfig: emptySharedConfig,
   });
   container = document.createElement('div');
   document.body.append(container);
@@ -205,8 +248,96 @@ describe('Arena multiplayer panel real React interactions', () => {
     });
     await flush();
 
-    expect(mocks.buildWorkspaceBundle).toHaveBeenCalledTimes(1);
+    expect(mocks.tryBuildWorkspaceBundle).toHaveBeenCalledTimes(1);
     expect(mocks.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('空角色草稿直接创建房间，不进入降级或错误路径', async () => {
+    mocks.tryBuildWorkspaceBundle.mockResolvedValueOnce({
+      ok: true,
+      bundle: {
+        sharedConfig: emptySharedConfig,
+        hostLocalPayloads: [],
+        hostLocalContentDigests: [],
+      },
+    });
+    mocks.create.mockImplementationOnce(async () => {
+      mocks.state = connectedHostState(emptySharedConfig);
+    });
+
+    await act(async () => button('打开多人房间').click());
+    await act(async () => button('创建多人房间').click());
+    await flush();
+
+    expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({
+      sharedConfig: expect.objectContaining({ combatants: [] }),
+    }));
+    expect(mocks.createCanonicalDraftBundle).not.toHaveBeenCalled();
+    expect(container.textContent).not.toContain('当前本地配置尚未同步');
+  });
+
+  it('本地配置不可共享时仍以 canonical 空草稿创建，成功后列出所有问题', async () => {
+    mocks.tryBuildWorkspaceBundle.mockResolvedValueOnce({
+      ok: false,
+      issues: [{
+        code: 'ROOM_GENERATION_RANDOM_COMBATANT_UNRESOLVED',
+        target: 'combatants[0]',
+        message: '随机角色占位符还没有实际角色内容。',
+        action: '请先选择具体角色。',
+      }, {
+        code: 'ROOM_REFERENCE_VERSION_REQUIRED',
+        target: 'materials[2]',
+        message: '在线素材引用缺少版本信息。',
+        action: '请刷新该在线素材。',
+      }],
+    });
+    mocks.create.mockImplementationOnce(async () => {
+      mocks.state = connectedHostState(emptySharedConfig);
+    });
+
+    await act(async () => button('打开多人房间').click());
+    await act(async () => button('创建多人房间').click());
+    await flush();
+    await act(async () => root.render(<ArenaMultiplayerContextPanel {...props} />));
+
+    expect(mocks.create).toHaveBeenCalledOnce();
+    expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({
+      sharedConfig: emptySharedConfig,
+    }));
+    expect(mocks.capturePublished).toHaveBeenCalledWith(
+      expect.objectContaining({ roomId: 'room-created' }),
+      expect.objectContaining({ sharedConfig: emptySharedConfig }),
+    );
+    expect(container.textContent).toContain('房间已创建，但当前本地配置尚未同步');
+    expect(container.textContent).toContain('随机角色占位符还没有实际角色内容');
+    expect(container.textContent).toContain('请先选择具体角色');
+    expect(container.textContent).toContain('在线素材引用缺少版本信息');
+    expect(container.textContent).toContain('请刷新该在线素材');
+    expect(container.textContent).not.toContain('当前竞技场配置无法安全共享');
+  });
+
+  it('空草稿降级创建未取得房间权威时不误报创建成功', async () => {
+    mocks.tryBuildWorkspaceBundle.mockResolvedValueOnce({
+      ok: false,
+      issues: [{
+        code: 'ROOM_GENERATION_RANDOM_COMBATANT_UNRESOLVED',
+        target: 'combatants[0]',
+        message: '随机角色占位符还没有实际角色内容。',
+        action: '请先选择具体角色。',
+      }],
+    });
+    mocks.create.mockImplementationOnce(async () => {
+      mocks.state = { ...readyState, error: '房间服务暂不可用' };
+    });
+
+    await act(async () => button('打开多人房间').click());
+    await act(async () => button('创建多人房间').click());
+    await flush();
+    await act(async () => root.render(<ArenaMultiplayerContextPanel {...props} />));
+
+    expect(mocks.createCanonicalDraftBundle).toHaveBeenCalledOnce();
+    expect(container.textContent).toContain('房间服务暂不可用');
+    expect(container.textContent).not.toContain('房间已创建，但当前本地配置尚未同步');
   });
 
   it('创建或加入 pending notice 位于大厅 dialog 的可访问范围内', async () => {
@@ -550,5 +681,14 @@ describe('Arena multiplayer panel real React interactions', () => {
     await act(async () => button('保留本地修改并重新发布').click());
     expect(mocks.syncRoom).toHaveBeenCalledOnce();
     expect(mocks.publishLocal).toHaveBeenCalledTimes(2);
+    for (const exposedTerm of [
+      'Room authority',
+      'working copy',
+      'revision',
+      'host-local',
+      'safe Shared Config',
+    ]) {
+      expect(container.textContent).not.toContain(exposedTerm);
+    }
   });
 });

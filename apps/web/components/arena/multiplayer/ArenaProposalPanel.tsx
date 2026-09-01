@@ -57,13 +57,13 @@ const namespacedRefIdentity = (ref: { readonly id: string }, key?: string): stri
 
 export const arenaProposalExpectedBaseSummary = (change: ArenaProposalChange): string => {
   const expected = change.expectedBase;
-  if (expected.kind === 'absent') return '预期基线：目标不存在';
+  if (expected.kind === 'absent') return '提案基准：目标不存在';
   if (expected.kind === 'ref' || expected.kind === 'present') {
-    return `预期基线：${typeof expected.key === 'string' ? safeText(expected.key) : refIdentity(expected.ref)}`;
+    return `提案基准：${typeof expected.key === 'string' ? safeText(expected.key) : refIdentity(expected.ref)}`;
   }
   return typeof expected.value === 'string'
-    ? `预期基线：${safeText(expected.value || '空值')}`
-    : '预期基线：已绑定安全值';
+    ? `提案基准：${safeText(expected.value || '空值')}`
+    : '提案基准：已绑定安全值';
 };
 
 const safeJsonSummary = (value: unknown): string => {
@@ -147,7 +147,7 @@ export const ArenaProposalSelectionDetails = ({ change }: { readonly change: Are
   <span className="mt-1 block text-xs text-gray-600 dark:text-gray-400">
     {arenaProposalExpectedBaseSummary(change)}
     {change.dependsOn?.length ? ` · 依赖 ${change.dependsOn.join('、')}` : ''}
-    {change.atomicGroupId ? ` · 原子组 ${change.atomicGroupId}` : ''}
+    {change.atomicGroupId ? ` · 联动变更组 ${change.atomicGroupId}` : ''}
   </span>
 );
 
@@ -161,7 +161,7 @@ export const arenaProposalSelectionError = (
     return null;
   } catch (error) {
     return error instanceof ArenaProposalEditorError
-      ? '所选变更缺少依赖或拆分了原子组'
+      ? '所选变更缺少依赖或拆分了联动变更组'
       : '所选变更无效';
   }
 };
@@ -215,7 +215,7 @@ const HostProposalCard = ({
         <div>
           <p className="text-sm font-semibold text-gray-950 dark:text-gray-100">{authorDisplayName}</p>
           <p className="mt-1 text-xs text-gray-600 dark:text-gray-400">
-            提交于 {proposal.createdAt} · BASE revision {proposal.baseRevision}
+            提交于 {proposal.createdAt} · 基于房间配置版本 {proposal.baseRevision}
           </p>
         </div>
         <p className="font-mono text-xs text-gray-500 dark:text-gray-400">{proposal.proposalId}</p>
@@ -241,17 +241,21 @@ const HostProposalCard = ({
               <span className="font-medium text-gray-950 dark:text-gray-100">{arenaProposalChangeSummary(change)}</span>
               <ArenaProposalSelectionDetails change={change} />
               <span className="mt-1 block text-xs text-gray-600 dark:text-gray-400">
-                BASE：{safeJsonSummary(change.expectedBase)}
+                提案基准：{safeJsonSummary(change.expectedBase)}
               </span>
               <span className="block text-xs text-gray-600 dark:text-gray-400">
-                CURRENT：{conflict ? safeJsonSummary(conflict.current) : '与 BASE 一致'}
+                当前房间值：{conflict ? safeJsonSummary(conflict.current) : '与提案基准一致'}
               </span>
               <span className="block text-xs text-gray-600 dark:text-gray-400">
-                PROPOSED：{arenaProposalChangeProposedSummary(change)}
+                建议值：{arenaProposalChangeProposedSummary(change)}
               </span>
               {conflict ? (
-                <span className="mt-1 block font-medium text-red-700 dark:text-red-300">
-                  same-target conflict · {conflict.code} · {conflict.target}
+                <span
+                  className="mt-1 block font-medium text-red-700 dark:text-red-300"
+                  data-conflict-code={conflict.code}
+                  data-conflict-target={conflict.target}
+                >
+                  与当前房间修改冲突，请确认后再接受。
                 </span>
               ) : null}
             </span>
@@ -302,7 +306,7 @@ const HostProposalInbox = ({
           待处理提案 ({proposals.length})
         </h3>
         <p className="mt-1 text-xs text-gray-600 dark:text-gray-400">
-          在当前房间提案窗口审阅 typed diff，不占用 Arena 主编辑区。
+          在当前房间提案窗口逐项审阅配置变更，不占用 Arena 主编辑区。
         </p>
       </div>
       {state.proposalResultUnknown ? (
@@ -314,12 +318,12 @@ const HostProposalInbox = ({
         </div>
       ) : null}
       <p className="mt-3 text-xs text-gray-600 dark:text-gray-400">
-        服务器仍会校验 revision、引用权限、expectedBase、依赖与原子组。
+        服务器仍会校验当前房间配置版本、引用权限、提案基准、依赖与联动变更组。
       </p>
       {proposals.length === 0 ? (
-        <p className="mt-3 text-sm text-gray-600 dark:text-gray-400">暂无待处理 Proposal</p>
+        <p className="mt-3 text-sm text-gray-600 dark:text-gray-400">暂无待处理提案</p>
       ) : (
-        <ul className="mt-3 space-y-3" aria-label="待审阅 Proposal">
+        <ul className="mt-3 space-y-3" aria-label="待审阅提案">
           {proposals.map((proposal) => (
             <HostProposalCard
               key={`${proposal.proposalId}:${proposal.updatedAt ?? proposal.createdAt}`}
@@ -365,8 +369,8 @@ const MemberProposalEntry = ({
           </h3>
           <p className="mt-1 text-xs text-gray-600 dark:text-gray-400">
             {editorState
-              ? `Arena 主编辑区已进入提案模式 · BASE revision ${editorState.baselineRevision}`
-              : '同步权威配置后，Arena 主编辑区会切换到隔离的提案模式。'}
+              ? `Arena 主编辑区已进入提案模式 · 基于房间配置版本 ${editorState.baselineRevision}`
+              : '同步房间已发布配置后，Arena 主编辑区会切换到隔离的提案模式。'}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -382,11 +386,11 @@ const MemberProposalEntry = ({
       </div>
       {editorState?.replacementRequired ? (
         <p role="alert" className="mt-3 rounded-lg border border-red-300 bg-red-50 p-2 text-sm text-red-800 dark:border-red-800 dark:bg-red-950/30 dark:text-red-200">
-          房间 incarnation 已变化，旧草稿禁止提交；请重新同步。
+          房间实例已变化，旧草稿禁止提交；请重新同步。
         </p>
       ) : editorState?.stale ? (
         <p className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
-          房间 revision 已更新；当前草稿仍绑定旧基线 {editorState.baselineRevision}。
+          房间配置版本已更新；当前草稿仍绑定版本 {editorState.baselineRevision}。
         </p>
       ) : null}
       <ArenaMemberProposalStatus state={state} controller={controller} />
@@ -411,7 +415,7 @@ export function ArenaMemberProposalStatus({
     <>
       {state.proposalResultUnknown ? (
         <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
-          <p>上次 Proposal 请求结果未知，已冻结重复提交。</p>
+          <p>上次提案请求结果未知，已冻结重复提交。</p>
           <button type="button" className={`${secondaryButtonClass} mt-2`} onClick={controller.reconnect}>
             重新连接并对账
           </button>
@@ -420,7 +424,7 @@ export function ArenaMemberProposalStatus({
 
       {proposals.length > 0 ? (
         <div className="mt-4">
-          <h4 className="text-sm font-semibold text-gray-950 dark:text-gray-100">我的待处理 Proposal</h4>
+          <h4 className="text-sm font-semibold text-gray-950 dark:text-gray-100">我的待处理提案</h4>
           <ul className="mt-2 space-y-2">
             {proposals.map((proposal) => (
               <li key={proposal.proposalId} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-gray-200 p-2 dark:border-gray-700">
@@ -431,7 +435,7 @@ export function ArenaMemberProposalStatus({
                   disabled={disabled}
                   onClick={() => { void controller.withdrawProposal(proposal.proposalId); }}
                 >
-                  撤回 Proposal
+                  撤回提案
                 </button>
               </li>
             ))}

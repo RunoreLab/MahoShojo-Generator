@@ -4,6 +4,10 @@ import {
   type ArenaRoomHostRuntimeGeneration,
   type ArenaRoomSharedConfig,
 } from '@mahoshojo/contracts/arena-room';
+import {
+  evaluateArenaGenerationReadiness,
+  type ArenaGenerationReadinessIssue,
+} from '@mahoshojo/multiplayer-core';
 
 import type {
   ArenaRoomController,
@@ -15,6 +19,23 @@ export type ArenaRoomGenerationAction = {
   readonly canStart: boolean;
   readonly canRetry: boolean;
   readonly reason: 'active' | 'config-unknown' | 'connection' | 'member' | 'recovery' | 'unknown' | null;
+};
+
+export class ArenaRoomGenerationReadinessError extends Error {
+  public readonly issues: readonly ArenaGenerationReadinessIssue[];
+
+  public constructor(issues: readonly ArenaGenerationReadinessIssue[]) {
+    super(issues.map((issue) => issue.userAction).join(' '));
+    this.name = 'ArenaRoomGenerationReadinessError';
+    this.issues = Object.freeze([...issues]);
+  }
+}
+
+export const assertArenaRoomGenerationReady = (
+  sharedConfig: ArenaRoomSharedConfig,
+): void => {
+  const evaluation = evaluateArenaGenerationReadiness(sharedConfig);
+  if (!evaluation.ready) throw new ArenaRoomGenerationReadinessError(evaluation.issues);
 };
 
 export const resolveArenaRoomGenerationAction = (
@@ -105,6 +126,8 @@ export const dispatchArenaRoomGenerationStart = async (
   ) {
     return 'stale';
   }
+
+  assertArenaRoomGenerationReady(options.sharedConfig);
 
   await options.controller.startGeneration(ArenaRoomGenerationStartRequestSchema.parse({
     expectedRoomEpoch: captured.roomEpoch,

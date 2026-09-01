@@ -6,7 +6,9 @@ import type { RoomDirectoryVisibility } from '@mahoshojo/contracts/arena-room';
 
 import type { ArenaRoomControllerState } from '@/lib/arena-room/controller';
 import {
-  buildArenaRoomHostWorkspaceBundleFromBattleState,
+  createArenaRoomCanonicalEmptyDraftBundle,
+  tryBuildArenaRoomHostWorkspaceBundleFromBattleState,
+  type ArenaRoomShareabilityIssue,
 } from '@/lib/arena-room/shared-config';
 import { arenaRoomHostWorkspaceAuthorityFromSession } from '@/lib/arena-room/host-workspace';
 import { useBattleStore } from '@/components/arena/stores/useBattleStore';
@@ -35,6 +37,7 @@ export type ArenaMultiplayerPanelViewProps = {
   readonly hostConfigContent?: ReactNode;
   readonly proposalContent?: ReactNode;
   readonly proposalWorkspaceActive?: boolean;
+  readonly localConfigSyncIssues?: readonly ArenaRoomShareabilityIssue[];
   readonly roomTitle: string;
   readonly visibility: RoomDirectoryVisibility;
   readonly joinCode: string;
@@ -380,6 +383,23 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
               {state.error}
             </p>
           ) : null}
+          {props.localConfigSyncIssues && props.localConfigSyncIssues.length > 0 ? (
+            <div
+              role="status"
+              className="mt-2 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100"
+            >
+              <p className="font-medium">房间已创建，但当前本地配置尚未同步。</p>
+              <p className="mt-1">房间已使用空草稿；请处理以下内容后再更新房间配置：</p>
+              <ul className="mt-2 list-disc space-y-2 pl-5">
+                {props.localConfigSyncIssues.map((issue, index) => (
+                  <li key={`${issue.code}:${issue.target}:${index}`} data-shareability-target={issue.target}>
+                    <span>{issue.message}</span>
+                    <span className="block text-xs opacity-90">处理建议：{issue.action}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
         </div>
       ) : null}
 
@@ -447,7 +467,7 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
           >
             {props.hostConfigContent ?? (
               <p className="text-sm text-gray-700 dark:text-gray-300">
-                房间权威配置会自动同步到主编辑区；如有本地冲突，请先比较后再选择。
+                当前房间配置会自动同步到主编辑区；如有本地冲突，请先比较后再选择。
               </p>
             )}
           </ArenaRoomDialog>
@@ -457,7 +477,7 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
             onClose={() => setProposalsOpen(false)}
             titleId="arena-room-proposals-dialog-heading"
             title="房间提案"
-            description="成员在主编辑区编辑，房主在此审阅 typed diff。"
+            description="成员在主编辑区编辑，房主在此逐项审阅配置变更。"
             widthClassName="max-w-5xl"
           >
             {props.proposalContent ?? (
@@ -531,7 +551,7 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
             }}
             titleId="arena-room-management-dialog-heading"
             title={session.self.role === 'host' ? '房间管理' : '退出房间'}
-            description="所有管理动作都会由服务器重新校验身份与房间 epoch。"
+            description="所有管理动作都会由服务器重新校验身份与房间实例。"
           >
             {managementConfirmation ? (
               <div role="alertdialog" aria-label="确认房间管理动作" className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-950 dark:border-red-900 dark:bg-red-950/30 dark:text-red-100">
@@ -600,7 +620,7 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
         <div className="mt-4 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
           <p>
             {state.unknownOperation === 'join'
-              ? '服务器可能已经处理加入请求。可以读取当前 membership 确认结果，不会重复提交加入。'
+              ? '服务器可能已经处理加入请求。可以读取当前成员状态确认结果，不会重复提交加入。'
               : '服务器可能已经创建房间。可以使用同一创建请求 ID 安全确认结果，包括非公开房间。'}
           </p>
           <div className="mt-3 flex flex-wrap gap-2">
@@ -660,6 +680,7 @@ function ArenaMultiplayerPanelRuntime({
   const [visibility, setVisibility] = useState<RoomDirectoryVisibility>('public');
   const [joinCode, setJoinCode] = useState('');
   const [inputError, setInputError] = useState<string | null>(null);
+  const [localConfigSyncIssues, setLocalConfigSyncIssues] = useState<readonly ArenaRoomShareabilityIssue[]>([]);
   const [preparingCreate, setPreparingCreate] = useState(false);
   const createLock = useRef(false);
   const viewState = inputError ? { ...state, error: inputError } : state;
@@ -669,10 +690,14 @@ function ArenaMultiplayerPanelRuntime({
     createLock.current = true;
     setPreparingCreate(true);
     setInputError(null);
+    setLocalConfigSyncIssues([]);
     try {
-      const bundle = await buildArenaRoomHostWorkspaceBundleFromBattleState(
+      const buildResult = await tryBuildArenaRoomHostWorkspaceBundleFromBattleState(
         useBattleStore.getState(),
       );
+      const bundle = buildResult.ok
+        ? buildResult.bundle
+        : createArenaRoomCanonicalEmptyDraftBundle();
       await controller.create({
         displayName: props.displayName || '玩家',
         directory: { title: roomTitle, visibility },
@@ -681,9 +706,14 @@ function ArenaMultiplayerPanelRuntime({
       const authority = arenaRoomHostWorkspaceAuthorityFromSession(
         controller.getSnapshot().session,
       );
-      if (authority) hostWorkspace.capturePublished(authority, bundle);
-    } catch {
-      setInputError('当前竞技场配置无法安全共享，请检查角色、版本与数量限制');
+      if (authority) {
+        hostWorkspace.capturePublished(authority, bundle);
+        if (!buildResult.ok) setLocalConfigSyncIssues(buildResult.issues);
+      }
+    } catch (error) {
+      setInputError(error instanceof Error && error.message.trim()
+        ? `创建房间时发生本地错误：${error.message}`
+        : '创建房间时无法读取当前本地配置，请重试。');
     } finally {
       createLock.current = false;
       setPreparingCreate(false);
@@ -709,6 +739,7 @@ function ArenaMultiplayerPanelRuntime({
         />
       )}
       proposalWorkspaceActive={Boolean(proposalWorkspace.editor)}
+      localConfigSyncIssues={localConfigSyncIssues}
       roomTitle={roomTitle}
       visibility={visibility}
       joinCode={joinCode}
@@ -736,6 +767,7 @@ function ArenaMultiplayerPanelRuntime({
       onRetryUnknown={() => { void controller.retryUnknownOperation(); }}
       onReset={() => {
         setInputError(null);
+        setLocalConfigSyncIssues([]);
         controller.reset();
       }}
     />

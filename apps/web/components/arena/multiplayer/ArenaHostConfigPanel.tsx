@@ -12,7 +12,7 @@ const primaryButtonClass = `${buttonClass} border-fuchsia-600 bg-fuchsia-600 tex
 const secondaryButtonClass = `${buttonClass} border-gray-300 bg-white text-gray-800 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100`;
 
 const reasonLabel: Readonly<Record<ArenaRoomHostWorkspaceDirtyReason, string>> = {
-  'baseline-missing': '缺少房主本地 payload baseline',
+  'baseline-missing': '缺少房主本地内容的已发布基准',
   'host-local-content': '房主本地正文已修改',
   'shared-config': '共享配置有未发布修改',
   'working-copy-invalid': '当前 Arena 配置无法安全发布',
@@ -39,7 +39,7 @@ export function ArenaHostConfigPanel({
         <div>
           <h3 id="arena-host-config-heading" className="text-sm font-semibold text-gray-950 dark:text-gray-100">房间配置</h3>
           <p className="mt-1 text-xs text-gray-600 dark:text-gray-400">
-            本地编辑不会逐键联网；只有显式更新才覆盖 Room authority。
+            本地编辑不会逐项联网；只有显式更新才会更改房间已发布配置。
           </p>
         </div>
         <button
@@ -56,12 +56,18 @@ export function ArenaHostConfigPanel({
 
       {status.kind === 'synced' ? (
         <p role="status" className="mt-3 text-sm text-emerald-700 dark:text-emerald-300">
-          {status.message}（revision {status.revision}）
+          {status.message}（房间配置版本 {status.revision}）
         </p>
       ) : status.kind === 'error' ? (
-        <p role="alert" className="mt-3 text-sm text-red-700 dark:text-red-300">{status.message}</p>
+        <p
+          role="alert"
+          data-error-code={status.code}
+          className="mt-3 text-sm text-red-700 dark:text-red-300"
+        >
+          {status.message}
+        </p>
       ) : status.kind === 'synchronizing' && status.action !== 'publish' ? (
-        <p role="status" className="mt-3 text-sm text-gray-700 dark:text-gray-300">正在同步房间权威配置…</p>
+        <p role="status" className="mt-3 text-sm text-gray-700 dark:text-gray-300">正在同步当前房间配置…</p>
       ) : null}
 
       {status.kind === 'conflicted' ? (
@@ -88,19 +94,19 @@ export function ArenaHostConfigPanel({
           <section aria-labelledby="arena-host-config-diff-heading" className="mt-3 rounded-xl border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-950">
             <div className="flex items-center justify-between gap-3 border-b pb-3 dark:border-gray-800">
               <div>
-                <h3 id="arena-host-config-diff-heading" className="font-semibold text-gray-950 dark:text-gray-100">Room authority / 本地 working copy</h3>
-                <p className="mt-1 text-xs text-gray-600 dark:text-gray-400">仅展示 safe Shared Config，不包含 host-local 正文。</p>
+                <h3 id="arena-host-config-diff-heading" className="font-semibold text-gray-950 dark:text-gray-100">房间已发布配置 / 本地编辑草稿</h3>
+                <p className="mt-1 text-xs text-gray-600 dark:text-gray-400">仅展示可共享的配置字段，不包含房主本地正文。</p>
               </div>
               <button type="button" className={secondaryButtonClass} onClick={() => setDiffOpen(false)}>关闭</button>
             </div>
             <div className="grid gap-3 pt-3 lg:grid-cols-2">
               <div>
-                <h4 className="text-sm font-semibold">ROOM · revision {status.revision}</h4>
+                <h4 className="text-sm font-semibold">当前房间 · 配置版本 {status.revision}</h4>
                 <pre className="mt-2 overflow-auto rounded-lg bg-gray-950 p-3 text-xs text-gray-100">{JSON.stringify(status.roomConfig, null, 2)}</pre>
               </div>
               <div>
-                <h4 className="text-sm font-semibold">LOCAL</h4>
-                <pre className="mt-2 overflow-auto rounded-lg bg-gray-950 p-3 text-xs text-gray-100">{status.localConfig ? JSON.stringify(status.localConfig, null, 2) : '当前 working copy 无法安全投影'}</pre>
+                <h4 className="text-sm font-semibold">本地编辑草稿</h4>
+                <pre className="mt-2 overflow-auto rounded-lg bg-gray-950 p-3 text-xs text-gray-100">{status.localConfig ? JSON.stringify(status.localConfig, null, 2) : '当前本地草稿无法转换为可共享配置'}</pre>
               </div>
             </div>
           </section>

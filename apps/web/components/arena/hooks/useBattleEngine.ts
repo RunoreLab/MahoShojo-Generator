@@ -4,6 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { defineArenaGenerationRequest } from '@mahoshojo/multiplayer-core';
 import { ArenaRoomHostRuntimeGenerationSchema } from '@mahoshojo/contracts/arena-room';
+import {
+  ARENA_CANONICAL_CAPABILITIES,
+  evaluateArenaBasicGenerationReadiness,
+} from '@mahoshojo/contracts/arena-capabilities';
 
 import type { NewsReport } from '@/components/BattleReportCard';
 import { persistArrestedBackup, type ArrestedBackupDraftItem, type ArrestedBackupTriggerSource } from '@/lib/arrested-backup';
@@ -42,7 +46,10 @@ import { useNarrativeHistoryStore } from '../stores/useNarrativeHistoryStore';
 import { resolveApiErrorMessage } from '@/lib/client/apiError';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { appendReasoningDelta, normalizeReasoningSource, updateReasoningStatus } from '@/lib/ai/reasoning-normalizer';
-import { limitNarrativeHistoryEntriesForPrompt } from '@/lib/narrative-history';
+import {
+  appendArenaNarrativeHistoryResult,
+  materializeArenaNarrativeHistoryForRequest,
+} from '@/lib/arena-room/narrative-history-runtime';
 import type { AIReasoningSource } from '@/types/ai-reasoning';
 import {
   ARENA_PROVIDER_COOLDOWN_BASE_KEY,
@@ -67,6 +74,7 @@ import {
   type ArenaRoomHostWorkspaceDirtyReason,
 } from '@/lib/arena-room/host-workspace';
 import {
+  assertArenaRoomGenerationReady,
   dispatchArenaRoomGenerationRetry,
   dispatchArenaRoomGenerationStart,
   resolveArenaRoomGenerationAction,
@@ -234,34 +242,6 @@ const extractTitleFromBattleMarkdown = (markdown: string): string => {
     return line.slice(0, 120);
   }
   return '未命名战报';
-};
-
-const appendNarrativeHistoryIfEnabled = async (payload: {
-  enabled: boolean;
-  title: string;
-  contentMarkdown: string;
-  generationId?: string | null;
-}): Promise<void> => {
-  try {
-    if (!payload.enabled) return;
-    const title = (payload.title ?? '').toString().trim();
-    const content = (payload.contentMarkdown ?? '').toString().trim();
-    if (!content) return;
-
-    const [titleCheck, contentCheck] = await Promise.all([
-      quickCheck(title || '未命名战报'),
-      quickCheck(content),
-    ]);
-
-    useNarrativeHistoryStore.getState().appendEntry({
-      title: (titleCheck.filteredText || title || '未命名战报').trim(),
-      content: (contentCheck.filteredText || content).trim(),
-      generationId: payload.generationId,
-    });
-  } catch (error) {
-    // 叙事历史是“增强功能”，失败不应影响战报生成主流程（localStorage 配额/浏览器异常等）
-    console.warn('写入叙事历史失败（已忽略）', error);
-  }
 };
 
 const sanitizeReportByShieldWords = (report: NewsReport): NewsReport => ({
@@ -600,18 +580,30 @@ export const useBattleEngine = () => {
       return;
     }
 
-    const minParticipants = battleMode === 'daily' || battleMode === 'scenario' ? 1 : 2;
     const shouldUseScenario = battleMode === 'scenario' && Boolean(scenario.content);
 
     // 计算总角色数（包括占位符，因为它们会被解析为真实角色）
     const totalCombatants = combatants.length;
+    const basicReadinessIssues = evaluateArenaBasicGenerationReadiness({
+      battleMode,
+      combatantCount: totalCombatants,
+      hasScenario: Boolean(scenario.content),
+    });
 
-    if (!roomAction.inRoom && totalCombatants < minParticipants) {
-      setError(`⚠️ 该模式至少需要 ${minParticipants} 位角色。`);
+    const combatantIssue = basicReadinessIssues.find((issue) => (
+      issue.code === 'GENERATION_COMBATANTS_EMPTY'
+      || issue.code === 'GENERATION_COMBATANTS_INSUFFICIENT'
+    ));
+    if (!roomAction.inRoom && combatantIssue) {
+      const required = ARENA_CANONICAL_CAPABILITIES.minCombatantsByMode[battleMode];
+      setError(`⚠️ 该模式至少需要 ${required} 位角色。`);
       return;
     }
 
-    if (!roomAction.inRoom && battleMode === 'scenario' && !scenario.content) {
+    if (
+      !roomAction.inRoom
+      && basicReadinessIssues.some((issue) => issue.code === 'GENERATION_SCENARIO_REQUIRED')
+    ) {
       setError('⚠️ 情景模式下，请先上传一个情景文件。');
       return;
     }
@@ -640,7 +632,9 @@ export const useBattleEngine = () => {
     setLastGenerationId(null);
 
     try {
-      if (!roomAction.inRoom) await handleResolveRandomPlaceholders();
+      // 房间房主与单人模式共用随机角色解析；随后的 bundle
+      // 对比会将新角色作为本地草稿，仍需显式更新房间配置。
+      await handleResolveRandomPlaceholders();
 
       const freshCombatants = useBattleStore.getState().combatants.filter((item): item is CombatantData => 'data' in item);
 
@@ -687,24 +681,12 @@ export const useBattleEngine = () => {
 
       const numericLimit = settings.isArenaHistoryUnlimited ? null : Math.max(1, settings.readArenaHistoryLimit);
       const arenaHistoryReadLimit = settings.readArenaHistory ? numericLimit ?? null : undefined;
-      const narrativeHistoryReadLimit = settings.readNarrativeHistory
-        ? (settings.isNarrativeHistoryUnlimited ? null : Math.max(1, settings.readNarrativeHistoryLimit))
-        : undefined;
-      const narrativeHistoryForRequest = settings.readNarrativeHistory
-        ? (() => {
-          const ordered = useNarrativeHistoryStore
-            .getState()
-            .entries.filter((entry) => typeof entry?.content === 'string' && entry.content.trim());
-          const limited = limitNarrativeHistoryEntriesForPrompt(ordered, narrativeHistoryReadLimit);
-
-          return limited.map((entry) => ({
-            title: entry.title,
-            content: entry.content,
-            createdAt: entry.createdAt,
-            updatedAt: entry.updatedAt,
-          }));
-        })()
-        : undefined;
+      const localNarrativeHistory = materializeArenaNarrativeHistoryForRequest(
+        settings,
+        useNarrativeHistoryStore.getState().entries,
+      );
+      const narrativeHistoryReadLimit = localNarrativeHistory.readLimit;
+      const narrativeHistoryForRequest = localNarrativeHistory.entries;
 
       const generationRequestId = crypto.randomUUID();
       const questionnaireSelections = selectedQuestionnaires.length > 0
@@ -775,13 +757,13 @@ export const useBattleEngine = () => {
           arenaRoomRuntime.state.session,
         );
         if (!capturedAuthority) {
-          throw new Error('当前房间 host 权威已变化，请同步后重试。');
+          throw new Error('当前房间权威已变化，请同步后重试。');
         }
         let bundle: Awaited<ReturnType<typeof buildArenaRoomHostWorkspaceBundleFromBattleState>> | null = null;
         try {
           bundle = await buildArenaRoomHostWorkspaceBundleFromBattleState(useBattleStore.getState());
         } catch {
-          // A stale/partial working copy must not prevent the host from selecting
+          // A stale or partial local draft must not prevent the host from selecting
           // an already-published Room baseline.
         }
         const preflightState = arenaRoomRuntime.controller.getSnapshot();
@@ -806,7 +788,7 @@ export const useBattleEngine = () => {
           });
           if (choice === 'cancel') return;
           if (choice !== 'use-room' || !roomStart) {
-            throw new Error('本地 working copy 无法安全发布，且缺少可用的房间 host-local 基线。');
+            throw new Error('本地编辑草稿无法发布，且缺少可用的房主本地内容发布基准。');
           }
           startInputs = roomStart;
         } else {
@@ -821,7 +803,7 @@ export const useBattleEngine = () => {
             if (choice === 'cancel') return;
             if (choice === 'use-room') {
               if (!comparison.room) {
-                throw new Error('缺少完整的 host-local 发布基线，无法按当前房间配置启动。');
+                throw new Error('缺少完整的房主本地内容发布基准，无法按当前房间配置启动。');
               }
               startInputs = comparison.room;
             } else {
@@ -851,12 +833,17 @@ export const useBattleEngine = () => {
             }
           }
         }
-        if (!startInputs) throw new Error('无法解析多人生成所需的权威配置。');
+        if (!startInputs) throw new Error('无法读取多人生成所需的当前房间配置。');
+        assertArenaRoomGenerationReady(startInputs.sharedConfig);
+        const roomNarrativeHistory = materializeArenaNarrativeHistoryForRequest(
+          startInputs.sharedConfig.historySettings,
+          useNarrativeHistoryStore.getState().entries,
+        );
 
         const selectedSensitiveTargets = [
           JSON.stringify(startInputs.sharedConfig),
           ...startInputs.hostLocalPayloads.map((payload) => JSON.stringify(payload.payload)),
-          narrativeHistoryForRequest ? JSON.stringify(narrativeHistoryForRequest) : '',
+          roomNarrativeHistory.entries ? JSON.stringify(roomNarrativeHistory.entries) : '',
           adjudicationEvents.length > 0 ? JSON.stringify(adjudicationEvents) : '',
           questionnaires ? JSON.stringify(questionnaires) : '',
         ];
@@ -870,7 +857,7 @@ export const useBattleEngine = () => {
           arenaFreeRankingEnabled,
           customProvider: customProviderPayload,
           isDowngrade: false,
-          narrativeHistory: narrativeHistoryForRequest,
+          narrativeHistory: roomNarrativeHistory.entries,
           adjudicationEvents,
           questionnaireSelections,
           questionnaires,
@@ -887,7 +874,7 @@ export const useBattleEngine = () => {
         if (outcome !== 'submitted') {
           throw new Error(
             outcome === 'stale'
-              ? '房间 epoch 或配置 revision 已变化，请确认最新房间状态后再试。'
+              ? '房间实例或配置版本已变化，请确认最新房间状态后再试。'
               : '当前房间状态不允许启动生成。',
           );
         }
@@ -966,15 +953,12 @@ export const useBattleEngine = () => {
         });
         setCombatants(updatedRoster);
 
-        try {
-          await appendNarrativeHistoryIfEnabled({
-            enabled: settings.writeNarrativeHistory,
+        if (settings.writeNarrativeHistory) {
+          await appendArenaNarrativeHistoryResult({
             title: reportWithScenario.headline,
             contentMarkdown: toBattleReportMarkdown(reportWithScenario),
-            generationId: result.generationId,
+            generationId: result.generationId ?? null,
           });
-        } catch (error) {
-          console.warn('写入叙事历史失败（已忽略）', error);
         }
 
         return false;
@@ -1814,15 +1798,12 @@ export const useBattleEngine = () => {
             setError('⚠️ 战报正文为空，但检测到角色更新元数据，已尝试继续更新角色数据。');
           }
 
-          try {
-            await appendNarrativeHistoryIfEnabled({
-              enabled: settings.writeNarrativeHistory,
+          if (settings.writeNarrativeHistory) {
+            await appendArenaNarrativeHistoryResult({
               title: extractTitleFromBattleMarkdown(markdownForUi),
               contentMarkdown: markdownForUi,
-              generationId: resumableGenerationId,
+              generationId: resumableGenerationId ?? null,
             });
-          } catch (error) {
-            console.warn('写入叙事历史失败（已忽略）', error);
           }
 
           startCooldown();

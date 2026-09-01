@@ -846,7 +846,7 @@ export const createArenaRoomController = (
         ...(state.proposalResultUnknown && !reconciledUnknown ? {} : {
           proposalOperation: null,
           proposalResultUnknown: false,
-          notice: event.type === 'proposal.submitted' ? 'Proposal 已进入房间' : 'Proposal 已更新',
+          notice: event.type === 'proposal.submitted' ? '提案已进入房间' : '提案已更新',
           error: null,
         }),
       });
@@ -871,10 +871,10 @@ export const createArenaRoomController = (
           proposalOperation: null,
           proposalResultUnknown: false,
           notice: event.payload.status === 'withdrawn'
-            ? 'Proposal 已撤回'
+            ? '提案已撤回'
             : event.payload.status === 'rejected'
-              ? 'Proposal 已拒绝'
-              : 'Proposal 已应用',
+              ? '提案已拒绝'
+              : '提案已应用',
           error: null,
         }),
       });
@@ -1168,10 +1168,10 @@ export const createArenaRoomController = (
     publish({
       proposalOperation: operation,
       notice: operation === 'submit'
-        ? '正在提交 Proposal…'
+        ? '正在提交提案…'
         : operation === 'resolve'
-          ? '正在处理 Proposal…'
-          : '正在撤回 Proposal…',
+          ? '正在处理提案…'
+          : '正在撤回提案…',
       error: null,
     });
     try {
@@ -1596,7 +1596,7 @@ export const createArenaRoomController = (
           managementResultUnknown: true,
           notice: intent.operation === 'close'
             ? '房间仍可读取；关闭结果尚未确认，未重复提交请求'
-            : 'membership 仍可读取；离开结果尚未确认，未重复提交请求',
+            : '成员状态仍可读取；离开结果尚未确认，未重复提交请求',
           error: null,
         });
         scheduleReconnect(false);

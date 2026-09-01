@@ -2,7 +2,10 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import type { ArenaRoomSharedConfig } from '@mahoshojo/contracts/arena-room';
+import type {
+  ArenaRoomHttpErrorCode,
+  ArenaRoomSharedConfig,
+} from '@mahoshojo/contracts/arena-room';
 
 import { useBattleStore } from '@/components/arena/stores/useBattleStore';
 import type {
@@ -42,8 +45,18 @@ export type ArenaRoomHostReconciliationState =
     }>
   | Readonly<{
       kind: 'error';
+      code: ArenaRoomHostReconciliationErrorCode;
       message: string;
     }>;
+
+export type ArenaRoomHostReconciliationErrorCode = Extract<
+  ArenaRoomHttpErrorCode,
+  'ROOM_GENERATION_RECONCILIATION_REQUIRED'
+>;
+
+export const ARENA_ROOM_HOST_RECONCILIATION_ERROR_CODE: ArenaRoomHostReconciliationErrorCode = (
+  'ROOM_GENERATION_RECONCILIATION_REQUIRED'
+);
 
 export type ArenaRoomHostReconciliation = Readonly<{
   state: ArenaRoomHostReconciliationState;
@@ -69,6 +82,15 @@ const currentAuthority = (
 ): ArenaRoomHostWorkspaceAuthority | null => (
   arenaRoomHostWorkspaceAuthorityFromSession(controller.getSnapshot().session)
 );
+
+const reconciliationErrorState = (
+  error: unknown,
+  fallback: string,
+): Extract<ArenaRoomHostReconciliationState, { readonly kind: 'error' }> => Object.freeze({
+  kind: 'error',
+  code: ARENA_ROOM_HOST_RECONCILIATION_ERROR_CODE,
+  message: error instanceof Error && error.message.trim() ? error.message : fallback,
+});
 
 export const useArenaRoomHostReconciliation = ({
   controller,
@@ -105,7 +127,7 @@ export const useArenaRoomHostReconciliation = ({
       synchronizedBundle.sharedConfig,
       authority.sharedConfig,
     )) {
-      throw new Error('房间 authority materialize 后仍不一致');
+      throw new Error('同步后的本地配置仍与当前房间配置不一致');
     }
     hostWorkspace.capturePublished(authority, synchronizedBundle);
     observedAuthorityRef.current = authority;
@@ -140,7 +162,7 @@ export const useArenaRoomHostReconciliation = ({
         || controllerSnapshot.configPublishResultUnknown
         || !areArenaRoomSharedConfigsEqual(published.sharedConfig, bundle.sharedConfig)
       ) {
-        throw new Error('配置发布结果尚未由房间 authority 确认');
+        throw new Error('房间尚未确认配置更新结果，请重新连接并核对');
       }
       hostWorkspace.capturePublished(published, bundle);
       observedAuthorityRef.current = published;
@@ -150,10 +172,7 @@ export const useArenaRoomHostReconciliation = ({
         message: '房间配置已更新',
       });
     } catch (error) {
-      setState({
-        kind: 'error',
-        message: error instanceof Error ? error.message : '更新房间配置失败',
-      });
+      setState(reconciliationErrorState(error, '更新房间配置失败'));
     } finally {
       actionLockRef.current = false;
     }
@@ -167,10 +186,7 @@ export const useArenaRoomHostReconciliation = ({
     try {
       await installAuthority(authority, 'sync-room');
     } catch (error) {
-      setState({
-        kind: 'error',
-        message: error instanceof Error ? error.message : '同步房间配置失败',
-      });
+      setState(reconciliationErrorState(error, '同步房间配置失败'));
     } finally {
       actionLockRef.current = false;
     }
@@ -218,10 +234,7 @@ export const useArenaRoomHostReconciliation = ({
         await installAuthority(authority, 'auto');
       } catch (error) {
         if (cancelled) return;
-        setState({
-          kind: 'error',
-          message: error instanceof Error ? error.message : '房间配置 reconciliation 失败',
-        });
+        setState(reconciliationErrorState(error, '自动同步房间配置失败'));
       }
     })();
     return () => {

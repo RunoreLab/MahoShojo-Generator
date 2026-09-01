@@ -17,10 +17,10 @@ type Props = Readonly<{
 const buttonClass = 'rounded-xl border px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fuchsia-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50';
 
 const reasonText: Readonly<Record<ArenaRoomHostWorkspaceDirtyReason, string>> = {
-  'shared-config': '本地编辑与房间权威配置不同。',
+  'shared-config': '本地编辑与当前房间配置不同。',
   'host-local-content': '本地角色、情景或素材的完整正文已变更。',
-  'baseline-missing': '当前页面没有这个房间的 host-local 发布基线。',
-  'working-copy-invalid': '本地 working copy 当前无法安全投影为房间配置。',
+  'baseline-missing': '当前页面没有这个房间的本地内容发布基准。',
+  'working-copy-invalid': '当前本地编辑草稿无法转换为可共享的房间配置。',
 };
 
 export function ArenaRoomGenerationPreflightDialog({
@@ -76,12 +76,12 @@ export function ArenaRoomGenerationPreflightDialog({
         </ul>
         {!canUseRoom ? (
           <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900" role="status">
-            缺少完整的 host-local 基线，无法安全地“按当前房间配置”启动；请显式更新房间或取消。
+            缺少完整的本地内容发布基准，无法安全地“按当前房间配置”启动；请显式更新房间或取消。
           </p>
         ) : null}
         {!canPublish ? (
           <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900" role="status">
-            当前本地 working copy 无法安全发布；可以沿用已发布的房间配置，或取消后修正本地编辑。
+            当前本地编辑草稿无法发布；可以沿用已发布的房间配置，或取消后修正本地编辑。
           </p>
         ) : null}
       </div>

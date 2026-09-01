@@ -223,4 +223,26 @@ describe('useArenaRoomHostReconciliation', () => {
       reasons: ['shared-config'],
     });
   });
+
+  it('自动同步失败时返回稳定的 reconciliation code，不依赖文案判断', async () => {
+    const workspace = {
+      compare: vi.fn(),
+      startFromRoom: vi.fn(),
+      capturePublished: vi.fn(),
+      retainFor: vi.fn(),
+      clear: vi.fn(),
+    } satisfies ArenaRoomHostWorkspace;
+    mocks.buildBundle.mockRejectedValueOnce(new Error('本地草稿无法读取'));
+
+    await act(async () => root.render(<Harness state={currentState} workspace={workspace} />));
+    currentState = stateAt(2, config('daily'));
+    await act(async () => root.render(<Harness state={currentState} workspace={workspace} />));
+    await flush();
+
+    expect(latest?.state).toMatchObject({
+      kind: 'error',
+      code: 'ROOM_GENERATION_RECONCILIATION_REQUIRED',
+      message: '本地草稿无法读取',
+    });
+  });
 });

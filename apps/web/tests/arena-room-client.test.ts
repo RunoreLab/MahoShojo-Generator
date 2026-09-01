@@ -115,6 +115,7 @@ describe('Arena Room browser client', () => {
     expect(String(url)).toBe('http://127.0.0.1:8787/api/arena/rooms/v1');
     expect(init).toMatchObject({ method: 'POST', credentials: 'omit' });
     expect(new Headers(init?.headers).get('authorization')).toBe('Bearer verified-key');
+    expect(new Headers(init?.headers).get('x-mahoshojo-arena-error-taxonomy')).toBe('2');
     expect(JSON.parse(String(init?.body))).toEqual(request);
   });
 
@@ -502,6 +503,7 @@ describe('Arena Room browser client', () => {
     );
     expect(init).toMatchObject({ method: 'GET', credentials: 'omit' });
     expect(init?.body).toBeUndefined();
+    expect(new Headers(init?.headers).get('x-mahoshojo-arena-error-taxonomy')).toBe('2');
 
     fetcher.mockResolvedValueOnce(Response.json({
       ...generationView,

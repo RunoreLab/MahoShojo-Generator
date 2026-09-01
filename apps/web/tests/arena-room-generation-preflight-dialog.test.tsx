@@ -36,9 +36,12 @@ describe('Arena Room generation preflight dialog', () => {
       />,
     ));
 
-    expect(document.body.textContent).toContain('本地编辑与房间权威配置不同');
+    expect(document.body.textContent).toContain('本地编辑与当前房间配置不同');
     expect(document.body.textContent).toContain('更新房间配置并开始');
     expect(document.body.textContent).toContain('按当前房间配置开始');
+    for (const exposedTerm of ['host-local', 'working copy', 'Room baseline']) {
+      expect(document.body.textContent).not.toContain(exposedTerm);
+    }
     const useRoom = [...document.body.querySelectorAll('button')].find((button) => (
       button.textContent?.includes('按当前房间配置开始')
     ));
@@ -84,5 +87,7 @@ describe('Arena Room generation preflight dialog', () => {
       .toHaveProperty('disabled', true);
     expect(buttons.find((button) => button.textContent?.includes('按当前房间配置开始')))
       .toHaveProperty('disabled', false);
+    expect(document.body.textContent).not.toContain('working copy');
+    expect(document.body.textContent).not.toContain('Room baseline');
   });
 });

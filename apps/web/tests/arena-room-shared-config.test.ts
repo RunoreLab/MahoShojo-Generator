@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  ArenaRoomShareabilityError,
   buildArenaRoomHostWorkspaceBundleFromBattleState,
   buildArenaRoomSharedConfigFromBattleState,
+  tryBuildArenaRoomHostWorkspaceBundleFromBattleState,
   type ArenaRoomBattleStateSource,
 } from '@/lib/arena-room/shared-config';
 
@@ -212,45 +214,105 @@ describe('Arena Room Battle store projection', () => {
     expect(JSON.stringify(changed.sharedConfig)).not.toContain('已修改正文');
   });
 
-  it('在线 ref 缺 version、random placeholder、重复 key 与超限 roster 均拒绝', async () => {
+  it('允许空角色草稿和未签名的本地角色进入普通多人房间', async () => {
+    const empty = source();
+    empty.battleMode = 'classic';
+    empty.combatants = [];
+    empty.teams = [];
+    empty.scenario = { content: null, fileName: null, isNative: false };
+    expect((await buildArenaRoomSharedConfigFromBattleState(empty)).combatants).toEqual([]);
+
+    const unsignedLocal = source();
+    unsignedLocal.combatants = [{
+      type: 'magical-girl',
+      data: { name: '未签名本地角色' },
+      filename: 'unsigned-local.json',
+      isValid: false,
+      isPreset: false,
+    }];
+    await expect(buildArenaRoomSharedConfigFromBattleState(unsignedLocal))
+      .resolves.toMatchObject({ combatants: [{ displayName: '未签名本地角色' }] });
+  });
+
+  it('在线引用缺版本和随机占位符会一次返回稳定、定位明确的多个问题', async () => {
     const missingVersion = source();
     if ('data' in missingVersion.combatants[1]!) {
       delete missingVersion.combatants[1]!.sourceDataCardUpdatedAt;
     }
-    await expect(buildArenaRoomSharedConfigFromBattleState(missingVersion)).rejects.toThrow();
-
-    const random = source();
-    random.combatants = [{
+    missingVersion.combatants.unshift({
       type: 'random-magical-girl',
       id: 'random-1',
       filename: 'random',
-    }];
-    await expect(buildArenaRoomSharedConfigFromBattleState(random)).rejects.toThrow(/随机占位符/u);
+    });
 
-    const overflow = source();
-    overflow.combatants = Array.from({ length: 11 }, (_, index) => ({
+    const result = await tryBuildArenaRoomHostWorkspaceBundleFromBattleState(missingVersion);
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('expected shareability issues');
+    expect(result.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: 'ROOM_GENERATION_RANDOM_COMBATANT_UNRESOLVED',
+        target: 'combatants[0]',
+        message: expect.stringContaining('随机角色占位符'),
+        action: expect.any(String),
+      }),
+      expect.objectContaining({
+        code: 'ROOM_REFERENCE_VERSION_REQUIRED',
+        target: 'combatants[2]',
+        message: expect.stringContaining('缺少版本'),
+        action: expect.any(String),
+      }),
+    ]));
+    await expect(buildArenaRoomSharedConfigFromBattleState(missingVersion)).rejects.toMatchObject({
+      name: 'ArenaRoomShareabilityError',
+      message: expect.stringMatching(/随机角色占位符.*缺少版本/u),
+      issues: expect.arrayContaining([
+        expect.objectContaining({ code: 'ROOM_GENERATION_RANDOM_COMBATANT_UNRESOLVED' }),
+        expect.objectContaining({ code: 'ROOM_REFERENCE_VERSION_REQUIRED' }),
+      ]),
+    } satisfies Partial<ArenaRoomShareabilityError>);
+  });
+
+  it('角色数与 canonical runtime 的 32 位容量一致', async () => {
+    const atLimit = source();
+    atLimit.battleMode = 'daily';
+    atLimit.teams = [];
+    atLimit.combatants = Array.from({ length: 32 }, (_, index) => ({
       type: 'magical-girl' as const,
       data: { name: `本地 ${index}` },
       filename: `local-${index}.json`,
       isValid: true,
       isPreset: false,
     }));
-    await expect(buildArenaRoomSharedConfigFromBattleState(overflow)).rejects.toThrow();
+    await expect(buildArenaRoomSharedConfigFromBattleState(atLimit))
+      .resolves.toMatchObject({ combatants: expect.arrayContaining([expect.any(Object)]) });
+
+    const overflow = source();
+    overflow.combatants = Array.from({ length: 33 }, (_, index) => ({
+      type: 'magical-girl' as const,
+      data: { name: `本地 ${index}` },
+      filename: `local-${index}.json`,
+      isValid: true,
+      isPreset: false,
+    }));
+    const result = await tryBuildArenaRoomHostWorkspaceBundleFromBattleState(overflow);
+    expect(result).toMatchObject({
+      ok: false,
+      issues: [expect.objectContaining({
+        code: 'ROOM_COMBATANT_LIMIT',
+        target: 'combatants',
+      })],
+    });
   });
 
-  it('单人引用项放宽后仍明确拒绝超过多人 wire contract 的投影', async () => {
-    const tooManyAuxScenarios = source();
-    tooManyAuxScenarios.auxScenarios = Array.from({ length: 11 }, (_, index) => ({
+  it('辅助情景与素材不再各自限制 10 个，而是共享 256 个引用的累计预算', async () => {
+    const withinBudget = source();
+    withinBudget.auxScenarios = Array.from({ length: 11 }, (_, index) => ({
       id: `aux-${index}`,
       content: { title: `辅助情景 ${index}` },
       fileName: `aux-${index}.json`,
       isNative: false,
     }));
-    await expect(buildArenaRoomSharedConfigFromBattleState(tooManyAuxScenarios))
-      .rejects.toThrow('多人房间最多支持 10 个辅助情景');
-
-    const tooManyMaterials = source();
-    tooManyMaterials.materials = Array.from({ length: 11 }, (_, index) => ({
+    withinBudget.materials = Array.from({ length: 11 }, (_, index) => ({
       id: `material-${index}`,
       name: `素材 ${index}`,
       content: {},
@@ -259,7 +321,34 @@ describe('Arena Room Battle store projection', () => {
       sourceType: 'raw-json',
       isNative: false,
     }));
-    await expect(buildArenaRoomSharedConfigFromBattleState(tooManyMaterials))
-      .rejects.toThrow('多人房间最多支持 10 个素材');
+    await expect(buildArenaRoomSharedConfigFromBattleState(withinBudget)).resolves.toMatchObject({
+      auxScenarios: expect.arrayContaining([expect.any(Object)]),
+      materials: expect.arrayContaining([expect.any(Object)]),
+    });
+
+    const overflow = source();
+    overflow.auxScenarios = Array.from({ length: 128 }, (_, index) => ({
+      id: `aux-${index}`,
+      content: { title: `辅助情景 ${index}` },
+      fileName: `aux-${index}.json`,
+      isNative: false,
+    }));
+    overflow.materials = Array.from({ length: 129 }, (_, index) => ({
+      id: `material-${index}`,
+      name: `素材 ${index}`,
+      content: {},
+      fileName: null,
+      sourceKind: 'raw-json',
+      sourceType: 'raw-json',
+      isNative: false,
+    }));
+    const result = await tryBuildArenaRoomHostWorkspaceBundleFromBattleState(overflow);
+    expect(result).toMatchObject({
+      ok: false,
+      issues: [expect.objectContaining({
+        code: 'ROOM_REFERENCE_LIMIT',
+        target: 'auxScenarios,materials',
+      })],
+    });
   });
 });

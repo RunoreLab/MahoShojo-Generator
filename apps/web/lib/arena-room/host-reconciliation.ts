@@ -85,11 +85,11 @@ const loadExactPublicPayload = async (
     ? payload._cardType
     : '';
   if (source.sourceDataCardId !== ref.id || source.sourceDataCardUpdatedAt !== ref.versionToken) {
-    throw new Error(`在线数据卡 ${ref.id} 版本与房间 authority 不一致`);
+    throw new Error(`在线数据卡 ${ref.id} 的版本与当前房间配置不一致`);
   }
   const kindMatches = ref.kind === 'material' || payloadType === ref.kind;
   if (!kindMatches || !isPublicVisibility(payload._isPublic)) {
-    throw new Error(`在线数据卡 ${ref.id} 类型或公开状态不满足房间 authority`);
+    throw new Error(`在线数据卡 ${ref.id} 的类型或公开状态不满足当前房间配置`);
   }
   const cleaned = stripBattleSelectionTransportMeta(payload);
   if (!isRecord(cleaned)) throw new Error(`在线数据卡 ${ref.id} 正文无效`);
@@ -223,7 +223,7 @@ export const applyArenaRoomAuthorityToBattleStore = async (
     } else if (!('ref' in entry)) {
       const localPayload = hostLocalPayloads.get(entry.key);
       if (!localPayload || localPayload.kind !== 'character') {
-        throw new Error(`房间角色 ${entry.key} 缺少可确定 materialize 的本地来源`);
+        throw new Error(`房间角色 ${entry.key} 缺少可恢复的本地正文`);
       }
       combatant = {
         type: entry.type,
@@ -234,7 +234,7 @@ export const applyArenaRoomAuthorityToBattleStore = async (
         arenaRoomKey: entry.key,
       };
     } else {
-      throw new Error(`房间角色 ${entry.key} 缺少可确定 materialize 的本地来源`);
+      throw new Error(`房间角色 ${entry.key} 缺少可恢复的本地正文`);
     }
     if (!('data' in combatant)) throw new Error(`房间角色 ${entry.key} 不能是随机占位符`);
     return {
@@ -256,7 +256,7 @@ export const applyArenaRoomAuthorityToBattleStore = async (
     } else if (!('ref' in config.scenario)) {
       const localPayload = hostLocalPayloads.get(config.scenario.key);
       if (!localPayload || localPayload.kind !== 'scenario' || !isRecord(localPayload.payload)) {
-        throw new Error(`房间主情景 ${config.scenario.key} 缺少可确定 materialize 的本地来源`);
+        throw new Error(`房间主情景 ${config.scenario.key} 缺少可恢复的本地正文`);
       }
       scenario = {
         content: cloneJson(localPayload.payload),
@@ -265,7 +265,7 @@ export const applyArenaRoomAuthorityToBattleStore = async (
         arenaRoomKey: config.scenario.key,
       };
     } else {
-      throw new Error(`房间主情景 ${config.scenario.key} 缺少可确定 materialize 的本地来源`);
+      throw new Error(`房间主情景 ${config.scenario.key} 缺少可恢复的本地正文`);
     }
   }
 
@@ -288,7 +288,7 @@ export const applyArenaRoomAuthorityToBattleStore = async (
       }
     }
     if (!resolved?.content) {
-      throw new Error(`房间辅助情景 ${entry.key} 缺少可确定 materialize 的本地来源`);
+      throw new Error(`房间辅助情景 ${entry.key} 缺少可恢复的本地正文`);
     }
     return {
       ...resolved,
@@ -319,7 +319,7 @@ export const applyArenaRoomAuthorityToBattleStore = async (
         };
       }
     }
-    throw new Error(`房间素材 ${entry.key} 缺少可确定 materialize 的本地来源`);
+    throw new Error(`房间素材 ${entry.key} 缺少可恢复的本地正文`);
   }));
 
   useBattleStore.setState((state): Partial<BattleStoreState> => ({

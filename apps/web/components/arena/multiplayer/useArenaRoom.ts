@@ -28,6 +28,7 @@ import {
   type ArenaRoomSocket,
 } from '@/lib/arena-room/controller';
 import { useArenaRoomHostReconciliation } from './useArenaRoomHostReconciliation';
+import { useArenaRoomNarrativeHistoryResultWriter } from './useArenaRoomNarrativeHistoryResultWriter';
 
 type UseArenaRoomOptions = {
   readonly enabled: boolean;
@@ -93,6 +94,7 @@ export const useArenaRoom = (options: UseArenaRoomOptions) => {
     controller.getSnapshot,
     controller.getSnapshot,
   );
+  useArenaRoomNarrativeHistoryResultWriter(state);
 
   useEffect(() => {
     hostWorkspace.retainFor(arenaRoomHostWorkspaceAuthorityFromSession(state.session));

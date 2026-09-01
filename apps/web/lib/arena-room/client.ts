@@ -1,5 +1,7 @@
 import {
   ARENA_ROOM_HTTP_BASE_PATH,
+  ARENA_ROOM_ERROR_TAXONOMY_HEADER,
+  ARENA_ROOM_ERROR_TAXONOMY_VERSION,
   ArenaRoomCreateRequestSchema,
   ArenaRoomEpochMutationRequestSchema,
   ArenaRoomGenerationStartRequestSchema,
@@ -162,6 +164,7 @@ export const createArenaRoomClient = (options: ClientOptions): ArenaRoomClient =
         credentials: 'omit',
         headers: {
           authorization: authHeader,
+          [ARENA_ROOM_ERROR_TAXONOMY_HEADER]: ARENA_ROOM_ERROR_TAXONOMY_VERSION,
           ...(input.body === undefined ? {} : { 'content-type': 'application/json' }),
         },
         ...(input.body === undefined ? {} : { body: JSON.stringify(input.body) }),

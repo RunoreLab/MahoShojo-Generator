@@ -120,7 +120,7 @@ const ProposalPreviewDialog = ({
       open
       titleId="arena-proposal-preview-heading"
       title="预览提案"
-      description={`BASE revision ${baselineRevision} · 逐项检查 typed diff；依赖与原子组会再次校验。`}
+      description={`基于房间配置版本 ${baselineRevision} · 逐项检查配置变更；依赖与联动变更组会再次校验。`}
       onClose={onClose}
       widthClassName="max-w-3xl"
     >
@@ -142,8 +142,8 @@ const ProposalPreviewDialog = ({
               <span>
                 <span className="font-medium text-gray-950 dark:text-gray-100">{arenaProposalChangeSummary(change)}</span>
                 <ArenaProposalSelectionDetails change={change} />
-                <span className="mt-1 block text-xs text-gray-600 dark:text-gray-400">BASE：{JSON.stringify(change.expectedBase)}</span>
-                <span className="block text-xs text-gray-600 dark:text-gray-400">PROPOSED：{arenaProposalChangeProposedSummary(change)}</span>
+                <span className="mt-1 block text-xs text-gray-600 dark:text-gray-400">提案基准：{JSON.stringify(change.expectedBase)}</span>
+                <span className="block text-xs text-gray-600 dark:text-gray-400">建议值：{arenaProposalChangeProposedSummary(change)}</span>
               </span>
             </label>
           ))}
@@ -157,7 +157,7 @@ const ProposalPreviewDialog = ({
             disabled={disabled || Boolean(validationError)}
             onClick={onSubmit}
           >
-            提交 Proposal
+            提交提案
           </button>
         </div>
     </ArenaRoomDialog>
@@ -342,7 +342,7 @@ const ProposalWorkspaceInner = ({
       setPreview(null);
       setLocalError(null);
     } catch {
-      setLocalError('Proposal 提交失败，请根据房间权威状态重试');
+      setLocalError('提案提交失败，请根据最新房间配置重试');
     } finally {
       submitLock.current = false;
     }
@@ -355,7 +355,7 @@ const ProposalWorkspaceInner = ({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 id="arena-room-proposal-workspace-heading" className="text-lg font-semibold text-gray-950 dark:text-gray-100">Arena 提案编辑模式</h2>
-          <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">隔离草稿 · BASE revision {snapshot.baselineRevision} · 本地编辑不联网</p>
+          <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">隔离草稿 · 基于房间配置版本 {snapshot.baselineRevision} · 本地编辑不联网</p>
         </div>
         <button type="button" className={primaryButtonClass} disabled={!snapshot.dirty || disabled} onClick={buildPreview}>预览提案</button>
       </div>
@@ -592,7 +592,7 @@ const ProposalWorkspaceInner = ({
           </CollapsibleSection>
           <CollapsibleSection title="📎 素材注入" description={`已选 ${snapshot.materials.length}`} defaultOpen={false} keepMounted>
             <button type="button" className={secondaryButtonClass} onClick={() => setModalKind('material')}>浏览在线数据卡</button>
-            <p className="mt-2 text-xs text-gray-500">内置素材预设暂缓：当前无 server-known material registry，避免未验证 payload 进入 Proposal。</p>
+            <p className="mt-2 text-xs text-gray-500">内置素材预设暂不可用：目前没有经过服务器确认的素材目录，避免未验证的正文进入提案。</p>
             <div className="mt-3">
               <ArenaMaterialList
                 items={snapshot.materials.map((item) => ({
@@ -617,7 +617,7 @@ const ProposalWorkspaceInner = ({
           <CollapsibleSection title="⚙️ 读写设置" description="复用 Arena 历史设置" defaultOpen={false} keepMounted>
             <BattleSettings />
           </CollapsibleSection>
-          <CollapsibleSection title="🧠 故事引导" description="Provider 与本地判定能力在提案模式中不可用" defaultOpen keepMounted>
+          <CollapsibleSection title="🧠 故事引导" description="模型服务与本地判定能力在提案模式中不可用" defaultOpen keepMounted>
             <StoryOptions languages={languages} />
           </CollapsibleSection>
         </div>
