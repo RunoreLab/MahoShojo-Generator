@@ -1,44 +1,27 @@
 #!/bin/sh
 set -eu
 
-deploy_mode='publish'
-case "$#" in
-  2)
-    release_id="$1"
-    public_base_url="$2"
-    ;;
-  3)
-    [ "$1" = rollback ] || {
-      echo "用法：$0 <64 位 SHA-256> <https://public-origin>" >&2
-      echo "   或：$0 rollback <64 位 SHA-256> <https://public-origin>" >&2
-      exit 2
-    }
-    deploy_mode='rollback'
-    release_id="$2"
-    public_base_url="$3"
-    ;;
-  *)
-    echo "用法：$0 <64 位 SHA-256> <https://public-origin>" >&2
-    echo "   或：$0 rollback <64 位 SHA-256> <https://public-origin>" >&2
-    exit 2
-    ;;
-esac
-case "$release_id" in
-  ''|*[!0-9a-f]*)
-    echo "release id 必须是 64 位小写十六进制 SHA-256" >&2
-    exit 2
-    ;;
-esac
-if [ "${#release_id}" -ne 64 ]; then
-  echo "release id 必须是 64 位 SHA-256" >&2
+usage() {
+  echo "用法：$0 publish <64 位 SHA-256> <https://public-origin>" >&2
+  echo "   或：$0 rollback <64 位 SHA-256> <https://public-origin>" >&2
   exit 2
-fi
+}
+
+[ "$#" -eq 3 ] || usage
+mode="$1"
+release_id="$2"
+public_base_url="$3"
+case "$mode" in publish|rollback) ;; *) usage ;; esac
+case "$release_id" in
+  ''|*[!0-9a-f]*) echo 'release id 必须是 64 位小写十六进制 SHA-256' >&2; exit 2 ;;
+esac
+[ "${#release_id}" -eq 64 ] || {
+  echo 'release id 必须是 64 位小写十六进制 SHA-256' >&2
+  exit 2
+}
 case "$public_base_url" in
   https://*) public_base_url="${public_base_url%/}" ;;
-  *)
-    echo "公网 contract probe 必须使用明确的 HTTPS origin" >&2
-    exit 2
-    ;;
+  *) echo '公网 probe 必须使用明确的 HTTPS origin' >&2; exit 2 ;;
 esac
 
 root_dir="${HONO_DEPLOY_ROOT_DIR:-/opt/mahoshojo-hono}"
@@ -46,265 +29,146 @@ bind_port="${HONO_BIND_PORT:-8080}"
 redis_key_prefix="${HONO_REDIS_KEY_PREFIX:-}"
 redis_network_name="${HONO_REDIS_NETWORK_NAME:-mahoshojo-redis}"
 hosted_api_environment="${HONO_HOSTED_API_ENVIRONMENT:-}"
+container_name="${HONO_CONTAINER_NAME:-mahoshojo-hono}"
+runtime_image='node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32'
 web_origin='https://mahoshojo.colanns.me'
 preview_web_origin='https://maho-preview.colanns.me'
 preview_cors_origin='https://*.colanns.me'
 preview_cloudflare_web_origin='https://mahoshojo-next-preview.719147538.workers.dev'
 cors_origins="$web_origin"
 room_allowed_origins="$web_origin"
-runtime_image='node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32'
-case "$root_dir" in
-  /) echo "部署根目录不得为文件系统根目录" >&2; exit 2 ;;
-  /*) ;;
-  *) echo "部署根目录必须是绝对路径" >&2; exit 2 ;;
-esac
-case "$bind_port" in
-  ''|*[!0-9]*) echo "HONO_BIND_PORT 必须是数字" >&2; exit 2 ;;
-esac
+
+case "$root_dir" in /|''|[!/]*) echo '部署根目录必须是非根绝对路径' >&2; exit 2 ;; esac
+case "$bind_port" in ''|*[!0-9]*) echo 'HONO_BIND_PORT 必须是数字' >&2; exit 2 ;; esac
 case "$redis_network_name" in
-  ''|*[!A-Za-z0-9_.-]*) echo "HONO_REDIS_NETWORK_NAME 必须是安全的 Docker network 名称" >&2; exit 2 ;;
+  ''|*[!A-Za-z0-9_.-]*) echo 'HONO_REDIS_NETWORK_NAME 非法' >&2; exit 2 ;;
 esac
-case "$hosted_api_environment" in
-  production|preview|local|test) ;;
-  *) echo "HONO_HOSTED_API_ENVIRONMENT 必须是 production、preview、local 或 test" >&2; exit 2 ;;
+case "$container_name" in
+  ''|*[!A-Za-z0-9_.-]*) echo 'HONO_CONTAINER_NAME 非法' >&2; exit 2 ;;
 esac
+
 case "$hosted_api_environment" in
   production)
-    [ -z "$redis_key_prefix" ] || {
-      echo "production target 必须保持 HONO_REDIS_KEY_PREFIX 为空" >&2
-      exit 2
-    }
-    [ "$public_base_url" = 'https://homura.colanns.me' ] || {
-      echo "production target 必须使用 https://homura.colanns.me" >&2
-      exit 2
-    }
-    [ "$root_dir" = '/opt/mahoshojo-hono' ] || {
-      echo "production target 必须使用 /opt/mahoshojo-hono" >&2
+    [ "$root_dir" = '/opt/mahoshojo-hono' ] \
+      && [ "$public_base_url" = 'https://homura.colanns.me' ] \
+      && [ -z "$redis_key_prefix" ] || {
+      echo 'production target 路径、origin 或 Redis prefix 非法' >&2
       exit 2
     }
     ;;
   preview)
+    [ "$root_dir" = '/opt/mahoshojo-hono-preview' ] \
+      && [ "$public_base_url" = 'https://homura-preview.colanns.me' ] \
+      && [ "$redis_key_prefix" = 'preview' ] || {
+      echo 'preview target 路径、origin 或 Redis prefix 非法' >&2
+      exit 2
+    }
     cors_origins="$web_origin,$preview_cors_origin,$preview_cloudflare_web_origin"
     room_allowed_origins="$web_origin,$preview_web_origin,$preview_cloudflare_web_origin"
-    [ "$redis_key_prefix" = 'preview' ] || {
-      echo "preview target 必须显式设置 HONO_REDIS_KEY_PREFIX=preview" >&2
-      exit 2
-    }
-    [ "$public_base_url" = 'https://homura-preview.colanns.me' ] || {
-      echo "preview target 必须使用 https://homura-preview.colanns.me" >&2
-      exit 2
-    }
-    [ "$root_dir" = '/opt/mahoshojo-hono-preview' ] || {
-      echo "preview target 必须使用 /opt/mahoshojo-hono-preview" >&2
-      exit 2
-    }
     ;;
+  test)
+    case "$root_dir" in
+      /opt/mahoshojo-hono|/opt/mahoshojo-hono-preview)
+        if [ "$mode" = rollback ]; then
+          echo '显式 rollback 只允许 production/preview target' >&2
+        else
+          echo 'test target 不得使用 production/preview 受管根' >&2
+        fi
+        exit 2
+        ;;
+    esac
+    ;;
+  *) echo 'HONO_HOSTED_API_ENVIRONMENT 必须是 production、preview 或 test' >&2; exit 2 ;;
 esac
-HONO_DEPLOY_CORS_ORIGINS="$cors_origins"
-export HONO_DEPLOY_CORS_ORIGINS
-if [ "$deploy_mode" = rollback ]; then
-  case "$hosted_api_environment" in
-    production|preview) ;;
-    test)
-      case "$root_dir" in
-        /opt/mahoshojo-hono|/opt/mahoshojo-hono-preview)
-          echo "production/preview 受管根不得使用 test rollback target" >&2
-          exit 2
-          ;;
-      esac
-      ;;
-    *)
-      echo "显式 rollback 只允许 production/preview target" >&2
-      exit 2
-      ;;
-  esac
-fi
+export HONO_DEPLOY_CORS_ORIGINS="$cors_origins"
 
 releases_dir="$root_dir/releases"
 release_dir="$releases_dir/$release_id"
-compose_file="$release_dir/compose.yml"
 runtime_env="$root_dir/.env.hono"
-release_env="$root_dir/.env"
-transaction_file="$root_dir/deploy.transaction"
-format_file="$root_dir/deployment-format"
+current_link="$root_dir/current"
 lock_file="$root_dir/deploy.lock"
 previous_release_dir=''
 had_previous=false
-transaction_active=false
-active_child_pid=''
-probe_dir=''
-probe_headers=''
-probe_headers_normalized=''
-probe_body=''
-probe_status_file=''
 
-cleanup_probe() {
-  if [ -n "$probe_dir" ]; then
-    rm -f "$probe_headers" "$probe_headers_normalized" "$probe_body" "$probe_status_file"
-    rmdir "$probe_dir" 2>/dev/null || true
-  fi
+is_release_dir() {
+  candidate="$1"
+  candidate_id="${candidate##*/}"
+  case "$candidate_id" in ''|*[!0-9a-f]*) return 1 ;; esac
+  [ "${#candidate_id}" -eq 64 ] \
+    && [ "$candidate" = "$releases_dir/$candidate_id" ] \
+    && [ -d "$candidate" ] \
+    && [ ! -L "$candidate" ]
 }
 
-prepare_lock_file() {
-  if [ -e "$lock_file" ] || [ -L "$lock_file" ]; then
-    [ -f "$lock_file" ] && [ ! -L "$lock_file" ] || return 1
-    return 0
-  fi
-
-  lock_temp="$(mktemp "$root_dir/.deploy.lock.next.XXXXXX")" || return 1
-  chmod 600 "$lock_temp" || {
-    rm -f "$lock_temp"
+verify_release() {
+  candidate="$1"
+  is_release_dir "$candidate" || {
+    echo 'release 不属于受管目录' >&2
     return 1
   }
-  if ! ln "$lock_temp" "$lock_file" 2>/dev/null; then
-    rm -f "$lock_temp"
-    [ -f "$lock_file" ] && [ ! -L "$lock_file" ]
-    return
-  fi
-  rm -f "$lock_temp"
-}
-
-is_managed_release_dir() {
-  candidate_release_dir="$1"
-  candidate_release_id="${candidate_release_dir##*/}"
-  case "$candidate_release_id" in
-    ''|*[!0-9a-f]*) return 1 ;;
-  esac
-  [ "${#candidate_release_id}" -eq 64 ] || return 1
-  [ "$candidate_release_dir" = "$releases_dir/$candidate_release_id" ] || return 1
-  [ -d "$candidate_release_dir" ] && [ ! -L "$candidate_release_dir" ]
-}
-
-verify_release_tuple() {
-  tuple_dir="$1"
-  is_managed_release_dir "$tuple_dir" || {
-    echo "release 不属于受管 content-addressed 目录" >&2
-    return 1
-  }
-  tuple_id="${tuple_dir##*/}"
-  for release_file in \
-    index.mjs \
-    compose.yml \
-    deploy-bundle.sh \
-    release.manifest \
-    release.sha256
-  do
-    [ -f "$tuple_dir/$release_file" ] && [ ! -L "$tuple_dir/$release_file" ] || {
-      echo "release tuple 缺少受管普通文件：$release_file" >&2
+  candidate_id="${candidate##*/}"
+  for asset in index.mjs compose.yml deploy-bundle.sh release.manifest release.sha256; do
+    [ -f "$candidate/$asset" ] && [ ! -L "$candidate/$asset" ] || {
+      echo "release 缺少普通文件：$asset" >&2
       return 1
     }
   done
-
-  expected_release_line="$tuple_id  release.manifest"
-  [ "$(wc -l < "$tuple_dir/release.sha256" | tr -d ' ')" -eq 1 ] || return 1
-  [ "$(sed -n '1p' "$tuple_dir/release.sha256")" = "$expected_release_line" ] || {
-    echo "release id 与 release.manifest 摘要不匹配" >&2
+  [ "$(wc -l < "$candidate/release.manifest" | tr -d ' ')" -eq 3 ] || return 1
+  [ "$(wc -l < "$candidate/release.sha256" | tr -d ' ')" -eq 1 ] || return 1
+  [ "$(cat "$candidate/release.sha256")" = "$candidate_id  release.manifest" ] || {
+    echo 'release id 与 manifest 摘要不一致' >&2
     return 1
   }
-
-  manifest_lines="$(wc -l < "$tuple_dir/release.manifest" | tr -d ' ')"
-  arena_gate_lines="$(grep -Ec '^[0-9a-f]{64}  arena-room-release-gate\.json$' \
-    "$tuple_dir/release.manifest" || true)"
-  arena_gate_validator_lines="$(grep -Ec \
-    '^[0-9a-f]{64}  arena-room-release-gate-schema\.mjs$' \
-    "$tuple_dir/release.manifest" || true)"
-  legacy_manifest_lines="$(grep -Ec '^[0-9a-f]{64}  legacy-layout$' \
-    "$tuple_dir/release.manifest" || true)"
-  case "$manifest_lines:$arena_gate_lines:$arena_gate_validator_lines:$legacy_manifest_lines" in
-    3:0:0:0)
-      tuple_file_count=5
-      ;;
-    5:1:1:0)
-      # 历史七件套中的两个 gate 文件只作为 checksum 覆盖的不透明资产保留。
-      tuple_file_count=7
-      [ -f "$tuple_dir/arena-room-release-gate.json" ] \
-        && [ ! -L "$tuple_dir/arena-room-release-gate.json" ] || return 1
-      [ -f "$tuple_dir/arena-room-release-gate-schema.mjs" ] \
-        && [ ! -L "$tuple_dir/arena-room-release-gate-schema.mjs" ] || return 1
-      ;;
-    4:0:0:1)
-      tuple_file_count=6
-      [ -f "$tuple_dir/legacy-layout" ] && [ ! -L "$tuple_dir/legacy-layout" ] || return 1
-      legacy_marker="$(cat "$tuple_dir/legacy-layout")"
-      case "$legacy_marker" in
-        root-release-layout-v1:*) ;;
-        *) return 1 ;;
-      esac
-      ;;
-    *)
-      echo "release.manifest 不是受支持的 release tuple" >&2
-      return 1
-      ;;
-  esac
-  [ "$(find "$tuple_dir" -mindepth 1 -maxdepth 1 -printf '%f\n' | wc -l \
-    | tr -d ' ')" -eq "$tuple_file_count" ] || return 1
-  [ "$(grep -Ec '^[0-9a-f]{64}  index\.mjs$' "$tuple_dir/release.manifest")" -eq 1 ] || return 1
-  [ "$(grep -Ec '^[0-9a-f]{64}  compose\.yml$' "$tuple_dir/release.manifest")" -eq 1 ] || return 1
-  [ "$(grep -Ec '^[0-9a-f]{64}  deploy-bundle\.sh$' "$tuple_dir/release.manifest")" -eq 1 ] || return 1
-
-  (cd "$tuple_dir" && sha256sum -c release.sha256 >/dev/null)
-  (cd "$tuple_dir" && sha256sum -c release.manifest >/dev/null)
-}
-
-verify_legacy_release() {
-  legacy_release_dir="$1"
-  is_managed_release_dir "$legacy_release_dir" || return 1
-  legacy_release_id="${legacy_release_dir##*/}"
-  [ -f "$legacy_release_dir/index.mjs" ] \
-    && [ ! -L "$legacy_release_dir/index.mjs" ] \
-    && [ -f "$legacy_release_dir/index.mjs.sha256" ] \
-    && [ ! -L "$legacy_release_dir/index.mjs.sha256" ] || return 1
-  [ "$(wc -l < "$legacy_release_dir/index.mjs.sha256" | tr -d ' ')" -eq 1 ] || return 1
-  [ "$(sed -n '1p' "$legacy_release_dir/index.mjs.sha256")" \
-    = "$legacy_release_id  index.mjs" ] || return 1
-  for forbidden_legacy_file in \
-    compose.yml deploy-bundle.sh release.manifest release.sha256 legacy-layout
-  do
-    [ ! -e "$legacy_release_dir/$forbidden_legacy_file" ] \
-      && [ ! -L "$legacy_release_dir/$forbidden_legacy_file" ] || return 1
+  for asset in index.mjs compose.yml deploy-bundle.sh; do
+    [ "$(grep -Ec "^[0-9a-f]{64}  ${asset}$" "$candidate/release.manifest")" -eq 1 ] \
+      || return 1
   done
-  (cd "$legacy_release_dir" && sha256sum -c index.mjs.sha256 >/dev/null)
+  (cd "$candidate" && sha256sum -c release.sha256 >/dev/null)
+  (cd "$candidate" && sha256sum -c release.manifest >/dev/null)
 }
 
-verify_legacy_source_if_needed() {
-  tuple_dir="$1"
-  if [ ! -f "$tuple_dir/legacy-layout" ]; then
-    return 0
-  fi
-  legacy_marker="$(cat "$tuple_dir/legacy-layout")"
-  legacy_source_id="${legacy_marker#root-release-layout-v1:}"
-  case "$legacy_source_id" in
-    ''|*[!0-9a-f]*) return 1 ;;
+read_runtime_value() {
+  key="$1"
+  count="$(grep -Ec "^${key}=" "$runtime_env" || true)"
+  [ "$count" -le 1 ] || {
+    echo "Hono runtime env 存在重复键：$key" >&2
+    return 1
+  }
+  [ "$count" -eq 1 ] && sed -n "s/^${key}=//p" "$runtime_env" || true
+}
+
+multiplayer_is_enabled() {
+  value="$(read_runtime_value ARENA_MULTIPLAYER_ENABLED)" || return 1
+  value="$(printf '%s' "$value" | tr '[:upper:]' '[:lower:]')"
+  case "$value" in
+    1|true|yes|on) return 0 ;;
+    ''|0|false|no|off) return 1 ;;
+    *) echo 'ARENA_MULTIPLAYER_ENABLED 必须是 boolean 值' >&2; return 2 ;;
   esac
-  [ "${#legacy_source_id}" -eq 64 ] || return 1
-  legacy_source_dir="$releases_dir/$legacy_source_id"
-  verify_legacy_release "$legacy_source_dir" || {
-    echo "legacy source release 已漂移，拒绝伪回滚" >&2
-    return 1
-  }
-  cmp -s "$legacy_source_dir/index.mjs" "$tuple_dir/index.mjs" || {
-    echo "legacy source index.mjs 已漂移，拒绝伪回滚" >&2
-    return 1
-  }
-  [ -f "$root_dir/compose.yml" ] && [ ! -L "$root_dir/compose.yml" ] || return 1
-  cmp -s "$root_dir/compose.yml" "$tuple_dir/compose.yml" || {
-    echo "legacy root compose.yml 已漂移，拒绝伪回滚" >&2
+}
+
+validate_arena_room_runtime_allowed_origins() {
+  _release_dir="$1"
+  if multiplayer_is_enabled; then
+    multiplayer_status=0
+  else
+    multiplayer_status=$?
+  fi
+  [ "$multiplayer_status" -ne 2 ] || return 1
+  [ "$multiplayer_status" -eq 0 ] || return 0
+  case "$hosted_api_environment" in production|preview) ;; *) return 0 ;; esac
+  configured_origins="$(read_runtime_value ARENA_ROOM_ALLOWED_ORIGINS)" || return 1
+  [ "$configured_origins" = "$room_allowed_origins" ] || {
+    echo 'ARENA_ROOM_ALLOWED_ORIGINS 与 target exact-set 不一致' >&2
     return 1
   }
 }
 
-validate_release_compose() {
-  tuple_dir="$1"
-  run_cancellable env \
-    HONO_RELEASE_DIR="$tuple_dir" \
-    docker compose \
-    --project-directory "$root_dir" \
-    -f "$tuple_dir/compose.yml" config >/dev/null
-}
-
-validate_release_runtime() {
-  tuple_dir="$1"
-  run_cancellable docker run --rm \
+validate_release_config() {
+  candidate="$1"
+  HONO_RELEASE_DIR="$candidate" docker compose \
+    --project-directory "$root_dir" -f "$candidate/compose.yml" config >/dev/null
+  docker run --rm \
     --network "$redis_network_name" \
     --env-file "$runtime_env" \
     -e NODE_ENV=production \
@@ -317,631 +181,181 @@ validate_release_runtime() {
     -e REDIS_KEY_PREFIX="$redis_key_prefix" \
     -e D1_REQUIRED=true \
     -e HONO_CONFIG_CHECK_ONLY=true \
-    -v "$tuple_dir/index.mjs:/app/index.mjs:ro" \
+    -v "$candidate/index.mjs:/app/index.mjs:ro" \
     "$runtime_image" node /app/index.mjs >/dev/null
 }
 
-write_release_env() {
-  target_release_dir="$1"
-  release_env_temp="$(mktemp "$root_dir/.env.next.XXXXXX")" || return 1
-  if ! printf 'HONO_RELEASE_DIR=%s\n' "$target_release_dir" > "$release_env_temp" \
-    || ! chmod 600 "$release_env_temp" \
-    || ! mv -f "$release_env_temp" "$release_env"; then
-    rm -f "$release_env_temp"
-    return 1
-  fi
-}
-
-verify_deployment_format() {
-  [ -f "$format_file" ] && [ ! -L "$format_file" ] || return 1
-  [ "$(wc -l < "$format_file" | tr -d ' ')" -eq 1 ] || return 1
-  [ "$(cat "$format_file")" = 'release-tuple-v2' ]
-}
-
-ensure_deployment_format() {
-  if [ -e "$format_file" ] || [ -L "$format_file" ]; then
-    verify_deployment_format
-    return
-  fi
-  format_temp="$(mktemp "$root_dir/.deployment-format.next.XXXXXX")" || return 1
-  if ! printf 'release-tuple-v2\n' > "$format_temp" \
-    || ! chmod 644 "$format_temp" \
-    || ! mv -f "$format_temp" "$format_file"; then
-    rm -f "$format_temp"
-    return 1
-  fi
-}
-
-point_current_to() {
-  target_release_dir="$1"
-  rm -f "$root_dir/current.next" || return 1
-  ln -s "$target_release_dir" "$root_dir/current.next" || return 1
-  mv -Tf "$root_dir/current.next" "$root_dir/current" || return 1
-}
-
-remove_current_if_target() {
-  target_release_dir="$1"
-  if [ -L "$root_dir/current" ]; then
-    current_target="$(readlink "$root_dir/current")"
-    if [ "$current_target" = "$target_release_dir" ]; then
-      rm -f "$root_dir/current"
-      return
-    fi
-    return 1
-  fi
-  [ ! -e "$root_dir/current" ]
-}
-
-run_cancellable() {
-  "$@" &
-  active_child_pid=$!
-  if wait "$active_child_pid"; then
-    child_status=0
-  else
-    child_status=$?
-  fi
-  active_child_pid=''
-  return "$child_status"
-}
-
-wait_for_local_readiness() {
+activate_release() {
+  candidate="$1"
+  HONO_RELEASE_DIR="$candidate" docker compose \
+    --project-directory "$root_dir" -f "$candidate/compose.yml" \
+    up -d --force-recreate hono
   attempt=0
-  while [ "$attempt" -lt 24 ]; do
-    if run_cancellable curl --fail --silent --show-error --connect-timeout 2 --max-time 4 \
+  while [ "$attempt" -lt 30 ]; do
+    if curl --fail --silent --show-error --connect-timeout 2 --max-time 4 \
       "http://127.0.0.1:$bind_port/health/ready" >/dev/null; then
       return 0
     fi
     attempt=$((attempt + 1))
-    run_cancellable sleep 5 || return 1
+    sleep 2
   done
   return 1
 }
 
-restore_previous_tuple() {
-  target_release_dir="$1"
-  verify_release_tuple "$target_release_dir" || return 1
-  verify_legacy_source_if_needed "$target_release_dir" || return 1
-  validate_release_compose "$target_release_dir" || return 1
-  validate_release_runtime "$target_release_dir" || return 1
-  write_release_env "$target_release_dir" || return 1
-  run_cancellable docker compose \
-    --project-directory "$root_dir" -f "$target_release_dir/compose.yml" \
-    up -d --force-recreate hono || return 1
-  wait_for_local_readiness || return 1
-  if [ -L "$root_dir/current" ] \
-    && [ "$(readlink "$root_dir/current")" = "$target_release_dir" ]; then
-    return 0
-  fi
-  point_current_to "$target_release_dir"
+point_current_to() {
+  candidate="$1"
+  rm -f "$root_dir/current.next"
+  ln -s "$candidate" "$root_dir/current.next"
+  mv -Tf "$root_dir/current.next" "$current_link"
 }
 
-rollback_transaction() {
-  failed_release_dir="$1"
-  rollback_had_previous="$2"
-  rollback_previous_release_dir="$3"
-  echo "新 release 未通过完整 contract，开始回滚 tuple" >&2
-  verify_release_tuple "$failed_release_dir" || {
-    echo "failed release tuple 已漂移，拒绝继续回滚" >&2
-    return 1
-  }
-  if [ "$rollback_had_previous" = true ]; then
-    restore_previous_tuple "$rollback_previous_release_dir" || return 1
-    rm -f "$root_dir/current.next" || return 1
-    return 0
-  fi
-
-  validate_release_compose "$failed_release_dir" || return 1
-  run_cancellable docker compose \
-    --project-directory "$root_dir" -f "$failed_release_dir/compose.yml" \
-    down || return 1
-  remove_current_if_target "$failed_release_dir" || return 1
-  rm -f "$root_dir/current.next" || return 1
-  rm -f "$release_env" || return 1
-  rm -f "$format_file" || return 1
+verify_public_health() {
+  curl --fail --silent --show-error --retry 6 --retry-delay 2 \
+    --connect-timeout 5 --max-time 15 \
+    "$public_base_url/api/health/ready" >/dev/null
 }
 
-read_runtime_env_value() {
-  runtime_key="$1"
-  runtime_value_count="$(grep -Ec "^${runtime_key}=" "$runtime_env" || true)"
-  [ "$runtime_value_count" -le 1 ] || {
-    echo "Hono runtime env 存在重复键：$runtime_key" >&2
-    return 1
-  }
-  if [ "$runtime_value_count" -eq 0 ]; then
-    return 0
-  fi
-  sed -n "s/^${runtime_key}=//p" "$runtime_env"
+probe_dir=''
+cleanup_probe() {
+  [ -z "$probe_dir" ] || rm -rf "$probe_dir"
 }
-
-release_uses_direct_multiplayer_flag() {
-  release_format_dir="$1"
-  ! grep -Eq '^[0-9a-f]{64}  (arena-room-release-gate\.json|legacy-layout)$' \
-    "$release_format_dir/release.manifest"
-}
-
-read_arena_multiplayer_enabled() {
-  configured_multiplayer="$(
-    read_runtime_env_value ARENA_MULTIPLAYER_ENABLED
-  )" || return 1
-  normalized_multiplayer="$(
-    printf '%s' "$configured_multiplayer" | tr '[:upper:]' '[:lower:]'
-  )"
-  case "$normalized_multiplayer" in
-    ''|0|false|no|off) printf '%s\n' false ;;
-    1|true|yes|on) printf '%s\n' true ;;
-    *)
-      echo 'ARENA_MULTIPLAYER_ENABLED 必须是 boolean 值' >&2
-      return 1
-      ;;
-  esac
-}
-
-arena_room_runtime_active() {
-  activated_release_dir="$1"
-  if ! release_uses_direct_multiplayer_flag "$activated_release_dir"; then
-    printf '%s\n' false
-    return 0
-  fi
-  read_arena_multiplayer_enabled
-}
-
-validate_arena_room_runtime_allowed_origins() {
-  activated_release_dir="$1"
-  activated_multiplayer="$(
-    arena_room_runtime_active "$activated_release_dir"
-  )" || return 1
-  [ "$activated_multiplayer" = true ] || return 0
-  case "$hosted_api_environment" in
-    production|preview) ;;
-    *) return 0 ;;
-  esac
-
-  activated_allowed_origins="$(
-    read_runtime_env_value ARENA_ROOM_ALLOWED_ORIGINS
-  )" || return 1
-  [ "$activated_allowed_origins" = "$room_allowed_origins" ] || {
-    echo '启用 Arena multiplayer 前 ARENA_ROOM_ALLOWED_ORIGINS 与 target exact-set 不一致' >&2
-    return 1
-  }
-}
-
-write_transaction() {
-  transaction_temp="$(mktemp "$root_dir/.deploy.transaction.next.XXXXXX")" || return 1
-  printf '%s\n' \
-    'TRANSACTION_STATE=pending' \
-    "TARGET_RELEASE_DIR=$release_dir" \
-    "HAD_PREVIOUS=$had_previous" \
-    "PREVIOUS_RELEASE_DIR=$previous_release_dir" \
-    > "$transaction_temp" || {
-      rm -f "$transaction_temp"
-      return 1
-    }
-  if ! chmod 600 "$transaction_temp" \
-    || ! mv -f "$transaction_temp" "$transaction_file"; then
-    rm -f "$transaction_temp"
-    return 1
-  fi
-  transaction_active=true
-}
-
-clear_transaction() {
-  rm -f "$transaction_file" || return 1
-  transaction_active=false
-}
-
-read_transaction_field() {
-  transaction_key="$1"
-  [ "$(grep -c "^$transaction_key=" "$transaction_file")" -eq 1 ] || return 1
-  sed -n "s/^$transaction_key=//p" "$transaction_file"
-}
-
-recover_pending_transaction() {
-  if [ ! -e "$transaction_file" ] && [ ! -L "$transaction_file" ]; then
-    return 0
-  fi
-  [ -f "$transaction_file" ] && [ ! -L "$transaction_file" ] || return 1
-  [ "$(wc -l < "$transaction_file" | tr -d ' ')" -eq 4 ] || return 1
-  recovery_state="$(read_transaction_field TRANSACTION_STATE)" || return 1
-  recovery_target="$(read_transaction_field TARGET_RELEASE_DIR)" || return 1
-  recovery_had_previous="$(read_transaction_field HAD_PREVIOUS)" || return 1
-  recovery_previous="$(read_transaction_field PREVIOUS_RELEASE_DIR)" || return 1
-  [ "$recovery_state" = pending ] || return 1
-  is_managed_release_dir "$recovery_target" || return 1
-  case "$recovery_had_previous" in
-    true) is_managed_release_dir "$recovery_previous" || return 1 ;;
-    false) [ -z "$recovery_previous" ] || return 1 ;;
-    *) return 1 ;;
-  esac
-
-  echo "发现未完成部署事务，先恢复 previous tuple" >&2
-  rollback_transaction "$recovery_target" "$recovery_had_previous" "$recovery_previous" || {
-    echo "未完成事务恢复失败，保留 journal 并 fail closed" >&2
-    return 1
-  }
-  clear_transaction
-}
-
-adopt_legacy_layout() {
-  legacy_release_dir="$1"
-  legacy_release_id="${legacy_release_dir##*/}"
-  legacy_index="$legacy_release_dir/index.mjs"
-  legacy_compose="$root_dir/compose.yml"
-  verify_legacy_release "$legacy_release_dir" || return 1
-  [ -f "$legacy_compose" ] && [ ! -L "$legacy_compose" ] || return 1
-  [ -f "$root_dir/deploy-bundle.sh" ] \
-    && [ ! -L "$root_dir/deploy-bundle.sh" ] || return 1
-
-  umask 077
-  adoption_staging="$(mktemp -d "$releases_dir/.legacy-adopt.XXXXXX")" || return 1
-  cp "$legacy_index" "$adoption_staging/index.mjs" || return 1
-  cp "$legacy_compose" "$adoption_staging/compose.yml" || return 1
-  cp "$release_dir/deploy-bundle.sh" "$adoption_staging/deploy-bundle.sh" || return 1
-  chmod 755 "$adoption_staging/deploy-bundle.sh" || return 1
-  printf 'root-release-layout-v1:%s\n' \
-    "$legacy_release_id" > "$adoption_staging/legacy-layout" || return 1
-  (cd "$adoption_staging" && sha256sum \
-    index.mjs compose.yml deploy-bundle.sh legacy-layout > release.manifest) || return 1
-  adoption_id="$(sha256sum "$adoption_staging/release.manifest" | awk '{print $1}')"
-  adoption_dir="$releases_dir/$adoption_id"
-  printf '%s  release.manifest\n' "$adoption_id" > "$adoption_staging/release.sha256" || return 1
-
-  reuse_adoption=false
-  if [ -e "$adoption_dir" ] || [ -L "$adoption_dir" ]; then
-    reuse_adoption=true
-  else
-    mv -Tn "$adoption_staging" "$adoption_dir" || return 1
-    if [ -e "$adoption_staging" ] || [ -L "$adoption_staging" ]; then
-      reuse_adoption=true
-    fi
-  fi
-  if [ "$reuse_adoption" = true ]; then
-    verify_release_tuple "$adoption_dir" || return 1
-    [ -f "$adoption_dir/legacy-layout" ] || return 1
-    rm -rf "$adoption_staging" || return 1
-  fi
-  verify_release_tuple "$adoption_dir" || return 1
-  verify_legacy_source_if_needed "$adoption_dir" || return 1
-  validate_release_compose "$adoption_dir" || return 1
-  validate_release_runtime "$adoption_dir" || return 1
-  write_release_env "$adoption_dir" || return 1
-  point_current_to "$adoption_dir" || return 1
-  ensure_deployment_format || return 1
-  adopted_release_dir="$adoption_dir"
-}
-
-resolve_previous_release() {
-  has_managed_format=false
-  if [ -e "$format_file" ] || [ -L "$format_file" ]; then
-    verify_deployment_format || {
-      echo "deployment-format 非法，拒绝推断部署状态" >&2
-      return 1
-    }
-    has_managed_format=true
-  fi
-
-  if [ -e "$release_env" ] || [ -L "$release_env" ]; then
-    [ -f "$release_env" ] && [ ! -L "$release_env" ] || {
-      echo "当前 release 环境文件不是受管普通文件" >&2
-      return 1
-    }
-    [ "$(wc -l < "$release_env" | tr -d ' ')" -eq 1 ] || {
-      echo "当前 release 环境文件必须只有一个规范字段" >&2
-      return 1
-    }
-    candidate_previous="$(sed -n 's/^HONO_RELEASE_DIR=//p' "$release_env")"
-    [ -n "$candidate_previous" ] && is_managed_release_dir "$candidate_previous" || {
-      echo "当前 release 环境文件指向非法目录" >&2
-      return 1
-    }
-
-    if [ -e "$candidate_previous/release.manifest" ] \
-      || [ -L "$candidate_previous/release.manifest" ]; then
-      verify_release_tuple "$candidate_previous" \
-        && verify_legacy_source_if_needed "$candidate_previous" || {
-          echo "当前 managed release tuple 无法验证" >&2
-          return 1
-        }
-
-      if [ -L "$root_dir/current" ]; then
-        [ "$(readlink "$root_dir/current")" = "$candidate_previous" ] || {
-          echo "current 与 release 环境文件不一致" >&2
-          return 1
-        }
-      elif [ "$has_managed_format" = false ] \
-        && [ ! -e "$root_dir/current" ] \
-        && [ -f "$candidate_previous/legacy-layout" ]; then
-        echo "恢复未完成的 legacy 纳管元数据" >&2
-        point_current_to "$candidate_previous" || return 1
-      else
-        echo "current 缺失或不是受管符号链接" >&2
-        return 1
-      fi
-
-      ensure_deployment_format || return 1
-      previous_release_dir="$candidate_previous"
-      had_previous=true
-      return 0
-    fi
-
-    [ "$has_managed_format" = false ] || {
-      echo "managed format 不得降级纳管旧 release" >&2
-      return 1
-    }
-    [ ! -e "$root_dir/current" ] && [ ! -L "$root_dir/current" ] || {
-      echo "旧布局不应存在 current 指针" >&2
-      return 1
-    }
-    verify_legacy_release "$candidate_previous" || {
-      echo "旧 release 不符合可纳管 schema" >&2
-      return 1
-    }
-    adopt_legacy_layout "$candidate_previous" || return 1
-    previous_release_dir="$adopted_release_dir"
-    had_previous=true
-    return 0
-  fi
-
-  if [ "$has_managed_format" = true ]; then
-    echo "managed format 缺少 release 环境文件" >&2
-    return 1
-  fi
-  if [ -e "$root_dir/current" ] || [ -L "$root_dir/current" ]; then
-    echo "current 存在但缺少 release 环境文件" >&2
-    return 1
-  fi
-
-  if [ -e "$root_dir/compose.yml" ] || [ -L "$root_dir/compose.yml" ] \
-    || [ -e "$root_dir/deploy-bundle.sh" ] || [ -L "$root_dir/deploy-bundle.sh" ]; then
-    echo "检测到不完整旧布局，缺少可校验 .env，拒绝无回滚发布" >&2
-    return 1
-  fi
-}
-
-verify_invoked_from_current_tuple() {
-  [ "$had_previous" = true ] || {
-    echo "显式 rollback 缺少可验证的 current tuple" >&2
-    return 1
-  }
-  invoked_script="$(realpath -e "$0")" || return 1
-  current_tuple_script="$previous_release_dir/deploy-bundle.sh"
-  [ "$invoked_script" = "$current_tuple_script" ] || {
-    echo "显式 rollback 只能由 current tuple 自带脚本发起" >&2
-    return 1
-  }
-}
-
-activate_release() {
-  write_release_env "$release_dir" || return 1
-  run_cancellable docker compose --project-directory "$root_dir" -f "$compose_file" \
-    up -d --force-recreate hono || return 1
-  wait_for_local_readiness
-}
+trap cleanup_probe EXIT
 
 verify_public_contract() {
-  run_cancellable curl --fail --silent --show-error --retry 6 --retry-delay 5 \
+  verify_public_health || return 1
+  probe_dir="$(mktemp -d /tmp/mahoshojo-hono-probe.XXXXXX)" || return 1
+  probe_headers="$probe_dir/headers"
+  probe_body="$probe_dir/body"
+  probe_status="$probe_dir/status"
+  normalized_headers="$probe_dir/headers.normalized"
+
+  curl --silent --show-error --retry 6 --retry-delay 2 \
     --connect-timeout 5 --max-time 15 \
-    "$public_base_url/api/health/ready" >/dev/null || return 1
-  if ! run_cancellable curl --silent --show-error --retry 6 --retry-delay 5 \
-    --connect-timeout 5 --max-time 15 \
-    --dump-header "$probe_headers" --output "$probe_body" \
-    --write-out '%{http_code}' \
+    --dump-header "$probe_headers" --output "$probe_body" --write-out '%{http_code}' \
     --request POST "$public_base_url/api/generate-magical-girl" \
-    --header "Origin: $web_origin" \
-    --header 'Content-Type: application/json' \
-    --data '{}' > "$probe_status_file"; then
-    return 1
-  fi
-  probe_status="$(cat "$probe_status_file")"
-  [ "$probe_status" = '400' ] || return 1
-  grep -Fq '"error":"Name is required"' "$probe_body" || return 1
-  grep -Fqi "Access-Control-Allow-Origin: $web_origin" "$probe_headers" || return 1
+    --header "Origin: $web_origin" --header 'Content-Type: application/json' \
+    --data '{}' > "$probe_status" || return 1
+  [ "$(cat "$probe_status")" = 400 ] \
+    && grep -Fq '"error":"Name is required"' "$probe_body" \
+    && grep -Fqi "Access-Control-Allow-Origin: $web_origin" "$probe_headers" \
+    || return 1
 
-  room_runtime_active="$(arena_room_runtime_active "$release_dir")" || return 1
+  if multiplayer_is_enabled; then
+    multiplayer_status=0
+  else
+    multiplayer_status=$?
+  fi
+  [ "$multiplayer_status" -ne 2 ] || return 1
   room_probe_origins="$web_origin"
-  if [ "$hosted_api_environment" = preview ]; then
-    room_probe_origins="$web_origin $preview_web_origin $preview_cloudflare_web_origin"
-  fi
+  [ "$hosted_api_environment" != preview ] \
+    || room_probe_origins="$web_origin $preview_web_origin $preview_cloudflare_web_origin"
   for room_probe_origin in $room_probe_origins; do
-    if ! run_cancellable curl --silent --show-error --retry 6 --retry-delay 5 \
+    curl --silent --show-error --retry 6 --retry-delay 2 \
       --connect-timeout 5 --max-time 15 \
-      --dump-header "$probe_headers" --output "$probe_body" \
-      --write-out '%{http_code}' \
+      --dump-header "$probe_headers" --output "$probe_body" --write-out '%{http_code}' \
       --header "Origin: $room_probe_origin" \
-      "$public_base_url/api/arena/rooms/v1" > "$probe_status_file"; then
-      return 1
-    fi
-    probe_status="$(cat "$probe_status_file")"
-    if [ "$room_runtime_active" = true ]; then
-      [ "$probe_status" = '401' ] || return 1
-      grep -Fq '"code":"ROOM_AUTHENTICATION_REQUIRED"' "$probe_body" || return 1
-      tr -d '\r' < "$probe_headers" > "$probe_headers_normalized" || return 1
-      [ "$(grep -ic '^Access-Control-Allow-Origin:' "$probe_headers_normalized")" = 1 ] \
+      "$public_base_url/api/arena/rooms/v1" > "$probe_status" || return 1
+    room_status="$(cat "$probe_status")"
+    if [ "$multiplayer_status" -eq 0 ]; then
+      [ "$room_status" = 401 ] || return 1
+      tr -d '\r' < "$probe_headers" > "$normalized_headers"
+      grep -Fixq "Access-Control-Allow-Origin: $room_probe_origin" "$normalized_headers" \
         || return 1
-      grep -Fixq "Access-Control-Allow-Origin: $room_probe_origin" \
-        "$probe_headers_normalized" || return 1
     else
-      case "$probe_status" in 2??|101) return 1 ;; esac
+      case "$room_status" in 101|2??) return 1 ;; esac
     fi
 
-    room_websocket_key="$(head -c 16 /dev/urandom | base64)" || return 1
-    if ! run_cancellable curl --silent --show-error --retry 6 --retry-delay 5 --http1.1 \
+    websocket_key="$(head -c 16 /dev/urandom | base64)" || return 1
+    curl --silent --show-error --retry 6 --retry-delay 2 --http1.1 \
       --connect-timeout 5 --max-time 15 \
-      --dump-header "$probe_headers" --output "$probe_body" \
-      --write-out '%{http_code}' \
+      --dump-header "$probe_headers" --output "$probe_body" --write-out '%{http_code}' \
       --header "Origin: $room_probe_origin" \
-      --header 'Connection: Upgrade' \
-      --header 'Upgrade: websocket' \
+      --header 'Connection: Upgrade' --header 'Upgrade: websocket' \
       --header 'Sec-WebSocket-Version: 13' \
-      --header "Sec-WebSocket-Key: $room_websocket_key" \
+      --header "Sec-WebSocket-Key: $websocket_key" \
       --header 'Sec-WebSocket-Protocol: mahoshojo.arena-room.v1' \
-      "$public_base_url/api/arena/rooms/v1/ws" > "$probe_status_file"; then
-      return 1
-    fi
-    probe_status="$(cat "$probe_status_file")"
-    if [ "$room_runtime_active" = true ]; then
-      [ "$probe_status" = '401' ] || return 1
-      # @hono/node-server sends the upgrade rejection status and headers but
-      # leaves the upgrade rejection body empty. The authority unit contract
-      # separately pins ROOM_TICKET_REQUIRED; the public wire gate pins 401.
+      "$public_base_url/api/arena/rooms/v1/ws" > "$probe_status" || return 1
+    websocket_status="$(cat "$probe_status")"
+    if [ "$multiplayer_status" -eq 0 ]; then
+      [ "$websocket_status" = 401 ] || return 1
     else
-      case "$probe_status" in 2??|101) return 1 ;; esac
+      case "$websocket_status" in 101|2??) return 1 ;; esac
     fi
   done
 }
 
-promote_release() {
-  point_current_to "$release_dir"
+restore_previous() {
+  if [ "$had_previous" = true ]; then
+    echo 'candidate 未通过部署检查，恢复 previous release' >&2
+    activate_release "$previous_release_dir" && verify_public_health
+    return
+  fi
+  echo '首次发布未通过部署检查，停止 candidate' >&2
+  HONO_RELEASE_DIR="$release_dir" docker compose \
+    --project-directory "$root_dir" -f "$release_dir/compose.yml" down
 }
 
-handle_signal() {
-  signal_exit_code="$1"
-  trap - HUP INT TERM
-  if [ -n "$active_child_pid" ]; then
-    kill -TERM "$active_child_pid" 2>/dev/null || true
-    wait "$active_child_pid" 2>/dev/null || true
-    active_child_pid=''
-  fi
-  if [ "$transaction_active" = true ]; then
-    if rollback_transaction "$release_dir" "$had_previous" "$previous_release_dir"; then
-      clear_transaction
-    fi
-  fi
-  exit "$signal_exit_code"
-}
-
-trap cleanup_probe 0
-trap 'handle_signal 129' HUP
-trap 'handle_signal 130' INT
-trap 'handle_signal 143' TERM
-
-for required_command in base64 flock head id mktemp realpath stat; do
-  command -v "$required_command" >/dev/null 2>&1 || {
-    echo "部署主机缺少必需工具：$required_command" >&2
+for command_name in base64 curl docker flock head id mktemp realpath sha256sum stat; do
+  command -v "$command_name" >/dev/null 2>&1 || {
+    echo "部署主机缺少必需工具：$command_name" >&2
     exit 1
   }
 done
 [ -d "$root_dir" ] && [ ! -L "$root_dir" ] \
-  && [ -d "$releases_dir" ] && [ ! -L "$releases_dir" ] || {
-  echo "部署根目录或 releases 目录不存在" >&2
-  exit 1
-}
-[ "$(realpath -e "$root_dir")" = "$root_dir" ] \
+  && [ -d "$releases_dir" ] && [ ! -L "$releases_dir" ] \
+  && [ "$(realpath -e "$root_dir")" = "$root_dir" ] \
   && [ "$(realpath -e "$releases_dir")" = "$releases_dir" ] || {
-  echo "部署根目录与 releases 必须是无符号链接的 canonical 路径" >&2
+  echo '部署根目录与 releases 必须是 canonical 普通目录' >&2
   exit 1
 }
-[ -f "$runtime_env" ] && [ ! -L "$runtime_env" ] || {
-  echo "Hono runtime env 不存在或不是普通文件" >&2
+[ -f "$runtime_env" ] && [ ! -L "$runtime_env" ] \
+  && [ "$(stat -c '%a' "$runtime_env")" = 600 ] \
+  && [ "$(stat -c '%u' "$runtime_env")" = "$(id -u)" ] || {
+  echo 'Hono runtime env 必须是当前用户所有的 0600 普通文件' >&2
   exit 1
 }
-runtime_env_mode="$(stat -c '%a' "$runtime_env")"
-runtime_env_owner_uid="$(stat -c '%u' "$runtime_env")"
-deploy_uid="$(id -u)"
-[ "$runtime_env_mode" = '600' ] && [ "$runtime_env_owner_uid" = "$deploy_uid" ] || {
-  echo "Hono runtime env 必须由当前部署用户所有且权限为 0600" >&2
-  exit 1
-}
-prepare_lock_file || {
-  echo "deploy.lock 必须是受管普通文件" >&2
-  exit 1
-}
-exec 9>>"$lock_file"
-if ! flock -n 9; then
-  echo "另一个部署事务正在执行" >&2
-  exit 1
-fi
-
-probe_dir="$(mktemp -d /tmp/mahoshojo-hono-probe.XXXXXX)"
-probe_headers="$probe_dir/headers"
-probe_headers_normalized="$probe_dir/headers.normalized"
-probe_body="$probe_dir/body"
-probe_status_file="$probe_dir/status"
-
-if [ "$deploy_mode" = rollback ]; then
-  verify_deployment_format || {
-    echo "显式 rollback 必须在合法 release-tuple-v2 marker 下执行" >&2
-    exit 1
-  }
-  resolve_previous_release
-  verify_invoked_from_current_tuple
-
-  recover_pending_transaction
-  previous_release_dir=''
-  had_previous=false
-  verify_deployment_format || {
-    echo "pending recovery 后缺少合法 release-tuple-v2 marker" >&2
-    exit 1
-  }
-  resolve_previous_release
-  verify_invoked_from_current_tuple
-  rollback_current_release_dir="$previous_release_dir"
-
-  verify_release_tuple "$rollback_current_release_dir"
-  verify_legacy_source_if_needed "$rollback_current_release_dir"
-  verify_release_tuple "$release_dir"
-  verify_legacy_source_if_needed "$release_dir"
-
-  validate_release_compose "$rollback_current_release_dir"
-  validate_release_runtime "$rollback_current_release_dir"
-  validate_arena_room_runtime_allowed_origins "$rollback_current_release_dir"
-  validate_release_compose "$release_dir"
-  validate_release_runtime "$release_dir"
-  validate_arena_room_runtime_allowed_origins "$release_dir"
-
-  if [ "$release_dir" = "$rollback_current_release_dir" ]; then
-    verify_public_contract || {
-      echo "current tuple 公网 contract probe 失败，拒绝报告幂等 rollback 成功" >&2
-      exit 1
-    }
-    echo "Hono 已位于 rollback target：$release_id"
-    echo "ROLLBACK_RELEASE_ID=$release_id"
-    exit 0
-  fi
-
-  write_transaction
-  if activate_release && verify_public_contract && promote_release \
-    && verify_deployment_format; then
-    clear_transaction
-    echo "Hono 已回退：$release_id"
-    echo "ROLLBACK_RELEASE_ID=$release_id"
-    exit 0
-  fi
-
-  if rollback_transaction \
-    "$release_dir" true "$rollback_current_release_dir"; then
-    clear_transaction
-  fi
-  exit 1
-fi
-
-recover_pending_transaction
-verify_release_tuple "$release_dir"
-validate_release_compose "$release_dir"
-validate_release_runtime "$release_dir"
+verify_release "$release_dir"
 validate_arena_room_runtime_allowed_origins "$release_dir"
-resolve_previous_release
-if [ "$had_previous" = true ]; then
-  verify_release_tuple "$previous_release_dir"
-  verify_legacy_source_if_needed "$previous_release_dir"
-  validate_release_compose "$previous_release_dir"
-  validate_release_runtime "$previous_release_dir"
-  validate_arena_room_runtime_allowed_origins "$previous_release_dir"
-fi
-rollback_baseline_release_id=''
-if [ "$had_previous" = true ]; then
-  rollback_baseline_release_id="${previous_release_dir##*/}"
-fi
 
-write_transaction
-if activate_release && verify_public_contract && promote_release; then
-  ensure_deployment_format
-  clear_transaction
-  echo "Hono 已发布：$release_id"
-  echo "ROLLBACK_BASELINE_RELEASE_ID=$rollback_baseline_release_id"
+if [ -e "$current_link" ] || [ -L "$current_link" ]; then
+  [ -L "$current_link" ] || {
+    echo 'current 必须是指向 release 的符号链接' >&2
+    exit 1
+  }
+  previous_release_dir="$(readlink "$current_link")"
+  is_release_dir "$previous_release_dir" && verify_release "$previous_release_dir" || {
+    echo 'current 指向的 previous release 无法验证' >&2
+    exit 1
+  }
+  had_previous=true
+fi
+[ "$mode" != rollback ] || [ "$had_previous" = true ] || {
+  echo '显式 rollback 需要已存在的 current release' >&2
+  exit 1
+}
+
+[ ! -L "$lock_file" ] || { echo 'deploy.lock 不得是符号链接' >&2; exit 1; }
+: >> "$lock_file"
+chmod 600 "$lock_file"
+exec 9> "$lock_file"
+flock -n 9 || { echo '已有 Hono 部署正在运行' >&2; exit 1; }
+
+if [ "$had_previous" = true ]; then
+  validate_release_config "$previous_release_dir"
+fi
+validate_release_config "$release_dir"
+if activate_release "$release_dir" && verify_public_contract; then
+  point_current_to "$release_dir"
+  if [ "$mode" = rollback ]; then
+    echo "ROLLBACK_RELEASE_ID=$release_id"
+  else
+    echo "RELEASE_ID=$release_id"
+  fi
   exit 0
 fi
 
-if rollback_transaction "$release_dir" "$had_previous" "$previous_release_dir"; then
-  clear_transaction
-fi
+restore_previous || {
+  echo 'candidate 失败且 previous release 恢复失败，请人工处理' >&2
+  exit 1
+}
 exit 1

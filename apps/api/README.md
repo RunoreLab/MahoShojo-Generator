@@ -241,43 +241,35 @@ reaper 对账，不伪造可对外读取的 failed/completed 终态。
 ## GitHub Actions 自动发布
 
 `.github/workflows/hono-deploy.yml` 继续保留受保护生产分支、Environment、SSH host key 和
-`cancel-in-progress: false` 门禁，但 build/container/artifact 路径只引用 `apps/api` owner。发布物由
+`cancel-in-progress: false`，build/container/artifact 路径只引用 `apps/api` owner。发布物由
 `index.mjs`、release-local `compose.yml` 与 `deploy-bundle.sh` 组成；`release.manifest` 覆盖这三个运行资产，
-其 SHA-256 才是 release id，连同 manifest 本身构成精确五文件 release tuple。workflow 通过 `install-bundle.sh` 在
-canonical `releases` 下创建随机 staging，
-上传后持 deploy lock 复验精确 tuple，再原子纳管最终目录；不会在校验前向最终 release 路径写文件。之后才
-执行 release-local deploy script。
+其 SHA-256 是 release id，连同 manifest 本身构成五文件 release。workflow 校验 release id 后直接创建
+`releases/<release-id>`、上传五个文件并执行目录内的 `deploy-bundle.sh`；不再使用独立 installer、随机 staging
+或历史 tuple 兼容层。
 
-默认分支 push 只由该 workflow 执行一次 `ci:verify`。Hono transaction 与公网 backend probe 成功后，它才调用
+默认分支 push 只由该 workflow 执行一次 `ci:verify`。Hono 发布与公网 smoke 成功后，它才调用
 `.github/workflows/cloudflare-deploy.yml` 发布 Web；Cloudflare workflow 不再独立监听 push 或重复 CI。runtime 是否接受
 Room request 由 `.env.hono` 的 `ARENA_MULTIPLAYER_ENABLED` 决定；workflow 手工入口只控制 Web exposure，
-不会覆盖服务器 flag。历史七文件 tuple 仅为 previous rollback 按自身 manifest checksum 兼容，不再解析其中 gate 语义。
+不会覆盖服务器 flag。
 
-部署事务只有在配置预检、本机 readiness、`/health/ready` 和 retained shared route
-`/api/generate-magical-girl` 的公网 wire/CORS contract 全部通过后才原子 promotion `current`；任一步失败都
-恢复经过 checksum 与 `docker compose config` 复验的 previous release-local tuple。脚本以非阻塞
-`flock` 阻止并发部署，并在激活前原子写入 `deploy.transaction`；TERM/INT/HUP 会触发回滚，进程被强制
-终止时则由下一次部署先恢复未完成事务。journal 缺字段、重复/额外字段或指向非 content-addressed release
-时保留证据并 fail closed。
+脚本先复验 candidate 和当前 `current`（如有），执行 release-local Compose 与固定 Node runtime 配置预检，
+再启动 candidate。只有本机 readiness、公网 `/api/health/ready`、`/api/generate-magical-girl` CORS wire，
+以及 Room HTTP/WebSocket 鉴权 smoke 全部通过后，才原子切换 `current`。任一步失败都会在当前发布进程内重启
+previous release；首次发布失败则停止 candidate。
 
-候选 gate 会在 Compose 激活前由无网络、只读、drop-all-capabilities 的固定 Node runtime 执行严格 JSON schema
-校验；回滚读取 failed gate 前会再次复验 failed tuple 的两层摘要。writer-enabled 回滚还会用同一 validator
-校验 target reader contract；历史 `legacy-layout + gate` tuple 被显式拒绝，不能冒认 compatible reader。
-初始 gate-only content-addressed tuple 只在字段与历史 accepted writer-disabled gate 完全精确匹配时使用隔离兼容 reader，
-供失败 transaction 回滚；writer-enabled、malformed 或 checkpoint contract 不匹配的 gate-only tuple 均 fail closed。
+脚本只保留一个非阻塞 `flock` 防止并发发布，不写 persistent journal，也不在下一次启动时推断历史事务。
+旧布局、旧 gate tuple 和 format marker 不再受支持。显式回滚直接选择仍保留在 `releases/<release-id>` 的
+五文件 release，并运行：
 
-首次从旧生产布局升级时，脚本只接受旧手册记录的精确 schema：根 `.env` 单字段指向
-`releases/<64hex>`，该目录含普通 `index.mjs` 与精确 `index.mjs.sha256`，根目录含普通
-`compose.yml`/`deploy-bundle.sh`，且尚无 `current` 和 `deployment-format`。脚本复验 checksum、Compose
-config 与旧 runtime 生产配置后，才复制成带 `legacy-layout` 标记的可校验 tuple并登记为 rollback baseline；
-新版 contract 失败会真实重启该 baseline。至少在首次新版成功并度过约定 rollback window 前，不得改写或
-删除旧 release 的 `index.mjs`/`index.mjs.sha256` 或根 `compose.yml`。一旦写入
-`deployment-format=release-tuple-v2`，managed `.env`/`current` 缺失、不一致、checksum 损坏、含符号链接或
-config 无效都会在激活前 fail closed，不会重新降级纳管。部署主机必须提供 `flock`、`mktemp`、`realpath`、
-`stat`、`id`、`sha256sum`、GNU `find -printf`、`cmp`、Docker Compose、`curl` 和标准 POSIX 工具。
-`/opt/mahoshojo-hono/.env.hono` 必须是当前部署用户所有、权限为 `0600` 的普通文件且不得为符号链接；该门禁在
-创建部署锁和执行任何 Docker 命令前检查。
-G25C 只实现并在本地/fault-injection 验证该流程，没有执行 production deploy、切流或 credential 变更。
+```bash
+current_dir="$(readlink -f /opt/mahoshojo-hono/current)"
+target_id='<64-hex-release-id>'
+"$current_dir/deploy-bundle.sh" rollback "$target_id" https://homura.colanns.me
+```
+
+回滚与普通发布使用同一套 checksum、配置与 smoke；它只切换 Hono release，不修改 Redis、D1 或 R2 数据。
+部署主机必须提供 Docker Compose、`curl`、`flock`、`mktemp`、`realpath`、`stat`、`id`、`sha256sum` 和标准
+POSIX 工具。`.env.hono` 必须是当前部署用户所有、权限为 `0600` 的普通文件且不得为符号链接。
 
 生产切流只应将 `config/hono-api-routes.json` 中的精确路径转发到 Hono origin；其他 `/api/*` 继续访问 Next.js。前端继续使用
 同源相对路径，旧 Next API 至少保留两个发布周期用于回滚。Arena generation 的 create 与后续 control 请求在一次 generation

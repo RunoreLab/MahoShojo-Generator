@@ -129,7 +129,7 @@ jobs:
       HONO_PUBLIC_ORIGIN: ${{ vars.HONO_PUBLIC_ORIGIN }}
       HONO_REDIS_KEY_PREFIX: preview
     steps:
-      - name: Checkout deployment installer
+      - name: Checkout deployment files
         uses: actions/checkout@v6
 
       - name: Download release tuple
@@ -162,19 +162,22 @@ jobs:
             ''|*[!0-9a-f]*) echo "artifact release id 非法" >&2; exit 1 ;;
           esac
           test "${#release_id}" -eq 64
-          upload_dir="$(ssh -i ~/.ssh/deploy_key "$VPS_USER@$VPS_HOST" "HONO_DEPLOY_ROOT_DIR='$HONO_DEPLOY_ROOT_DIR' sh -s -- create" < apps/api/deploy/install-bundle.sh)"
-          case "$upload_dir" in
-            "$HONO_DEPLOY_ROOT_DIR"/releases/.upload.*) ;;
-            *) echo "远端返回了非法 upload staging" >&2; exit 1 ;;
+          case "$HONO_DEPLOY_ROOT_DIR" in
+            /opt/mahoshojo-hono-preview) ;;
+            *) echo "Preview 部署根目录非法" >&2; exit 1 ;;
           esac
-          upload_suffix="${upload_dir##*/.upload.}"
-          case "$upload_suffix" in
-            ''|*[!A-Za-z0-9]*) echo "远端 upload staging 后缀非法" >&2; exit 1 ;;
-          esac
-          scp -i ~/.ssh/deploy_key artifact/index.mjs artifact/compose.yml artifact/deploy-bundle.sh artifact/release.manifest artifact/release.sha256 "$VPS_USER@$VPS_HOST:$upload_dir/"
-          installed_dir="$(ssh -i ~/.ssh/deploy_key "$VPS_USER@$VPS_HOST" "HONO_DEPLOY_ROOT_DIR='$HONO_DEPLOY_ROOT_DIR' sh -s -- install '$release_id' '$upload_dir'" < apps/api/deploy/install-bundle.sh)"
-          test "$installed_dir" = "$HONO_DEPLOY_ROOT_DIR/releases/$release_id"
-          ssh -i ~/.ssh/deploy_key "$VPS_USER@$VPS_HOST" "HONO_DEPLOY_ROOT_DIR='$HONO_DEPLOY_ROOT_DIR' HONO_CONTAINER_NAME='$HONO_CONTAINER_NAME' HONO_BIND_PORT='$HONO_BIND_PORT' HONO_REDIS_KEY_PREFIX='$HONO_REDIS_KEY_PREFIX' HONO_HOSTED_API_ENVIRONMENT=preview '$installed_dir/deploy-bundle.sh' '$release_id' '$HONO_PUBLIC_ORIGIN'"
+          release_dir="$HONO_DEPLOY_ROOT_DIR/releases/$release_id"
+          ssh -i ~/.ssh/deploy_key "$VPS_USER@$VPS_HOST" \
+            "test -d '$HONO_DEPLOY_ROOT_DIR/releases' && test ! -L '$HONO_DEPLOY_ROOT_DIR/releases' && if test -e '$release_dir' || test -L '$release_dir'; then test -d '$release_dir' && test ! -L '$release_dir'; else mkdir -- '$release_dir'; fi"
+          scp -i ~/.ssh/deploy_key \
+            artifact/index.mjs \
+            artifact/compose.yml \
+            artifact/deploy-bundle.sh \
+            artifact/release.manifest \
+            artifact/release.sha256 \
+            "$VPS_USER@$VPS_HOST:$release_dir/"
+          ssh -i ~/.ssh/deploy_key "$VPS_USER@$VPS_HOST" \
+            "chmod 755 '$release_dir/deploy-bundle.sh' && HONO_DEPLOY_ROOT_DIR='$HONO_DEPLOY_ROOT_DIR' HONO_CONTAINER_NAME='$HONO_CONTAINER_NAME' HONO_BIND_PORT='$HONO_BIND_PORT' HONO_REDIS_KEY_PREFIX='$HONO_REDIS_KEY_PREFIX' HONO_HOSTED_API_ENVIRONMENT=preview '$release_dir/deploy-bundle.sh' publish '$release_id' '$HONO_PUBLIC_ORIGIN'"
 
   deploy-cloudflare-preview:
     name: Deploy Cloudflare preview

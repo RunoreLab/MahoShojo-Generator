@@ -170,7 +170,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: hono-production
     steps:
-      - name: Checkout deployment installer
+      - name: Checkout deployment files
         uses: actions/checkout@v6
 
       - name: Download bundle
@@ -190,25 +190,24 @@ jobs:
 
       - name: Upload release
         run: |
+          set -euo pipefail
           release_id="$(awk '{print $1}' artifact/release.sha256)"
           case "$release_id" in
             ''|*[!0-9a-f]*) echo "artifact release id 非法" >&2; exit 1 ;;
           esac
           test "${#release_id}" -eq 64
-          upload_dir="$(ssh -i ~/.ssh/deploy_key "$VPS_USER@$VPS_HOST" 'sh -s -- create' < apps/api/deploy/install-bundle.sh)"
-          case "$upload_dir" in
-            /opt/mahoshojo-hono/releases/.upload.*) ;;
-            *) echo "远端返回了非法 upload staging" >&2; exit 1 ;;
-          esac
-          upload_suffix="${upload_dir##*/.upload.}"
-          case "$upload_suffix" in
-            ''|*[!A-Za-z0-9]*) echo "远端 upload staging 后缀非法" >&2; exit 1 ;;
-          esac
-          scp -i ~/.ssh/deploy_key artifact/index.mjs artifact/compose.yml artifact/deploy-bundle.sh artifact/release.manifest artifact/release.sha256 "$VPS_USER@$VPS_HOST:$upload_dir/"
-          installed_dir="$(ssh -i ~/.ssh/deploy_key "$VPS_USER@$VPS_HOST" "sh -s -- install '$release_id' '$upload_dir'" < apps/api/deploy/install-bundle.sh)"
-          expected_dir="/opt/mahoshojo-hono/releases/$release_id"
-          test "$installed_dir" = "$expected_dir"
-          ssh -i ~/.ssh/deploy_key "$VPS_USER@$VPS_HOST" "HONO_HOSTED_API_ENVIRONMENT=production '$installed_dir/deploy-bundle.sh' '$release_id' https://homura.colanns.me"
+          release_dir="/opt/mahoshojo-hono/releases/$release_id"
+          ssh -i ~/.ssh/deploy_key "$VPS_USER@$VPS_HOST" \
+            "test -d /opt/mahoshojo-hono/releases && test ! -L /opt/mahoshojo-hono/releases && if test -e '$release_dir' || test -L '$release_dir'; then test -d '$release_dir' && test ! -L '$release_dir'; else mkdir -- '$release_dir'; fi"
+          scp -i ~/.ssh/deploy_key \
+            artifact/index.mjs \
+            artifact/compose.yml \
+            artifact/deploy-bundle.sh \
+            artifact/release.manifest \
+            artifact/release.sha256 \
+            "$VPS_USER@$VPS_HOST:$release_dir/"
+          ssh -i ~/.ssh/deploy_key "$VPS_USER@$VPS_HOST" \
+            "chmod 755 '$release_dir/deploy-bundle.sh' && HONO_HOSTED_API_ENVIRONMENT=production '$release_dir/deploy-bundle.sh' publish '$release_id' https://homura.colanns.me"
 
   deploy-cloudflare:
     needs: deploy
