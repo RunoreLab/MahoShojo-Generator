@@ -7,8 +7,8 @@ import {
   createNodeArenaGenerationTerminalStore,
   MAX_ARENA_TERMINAL_COMBATANTS,
   MAX_ARENA_TERMINAL_EXTRA_JSON_BYTES,
-  readNodeArenaGenerationReconciliation,
 } from '../src/arena-generation/d1-finalization';
+import * as arenaD1Finalization from '../src/arena-generation/d1-finalization';
 import type { NodeDataD1Client } from '../src/node-runtime/data-ports';
 import type { ArenaGenerationRejectedTerminalRecordInput } from '@mahoshojo/hosted-api/arena-generation/service';
 
@@ -1108,21 +1108,81 @@ ORDER BY sort_index
     ));
   });
 
-  it('reads bounded local-card reconciliation authority without persisting client cards', async () => {
+  it('reads bounded local-card reconciliation only for the completed finalized owner', async () => {
+    const readOwnedReconciliation = (
+      arenaD1Finalization as typeof arenaD1Finalization & {
+        readOwnedNodeArenaGenerationReconciliation?: (_input: {
+          client: NodeDataD1Client;
+          generationId: string;
+          actorKey: string;
+        }) => Promise<unknown>;
+      }
+    ).readOwnedNodeArenaGenerationReconciliation;
+    expect(readOwnedReconciliation).toBeTypeOf('function');
+    if (!readOwnedReconciliation) return;
+
     const payload = { rosterCount: 2, writeArenaHistory: true };
-    const client = sequentialD1([result([{
+    const ownerHash = await crypto.subtle.digest(
+      'SHA-256',
+      new TextEncoder().encode('user:42'),
+    ).then((bytes) => Array.from(
+      new Uint8Array(bytes),
+      (byte) => byte.toString(16).padStart(2, '0'),
+    ).join(''));
+    const completedRow = {
       status: 'completed',
       extra_json: JSON.stringify({
+        generationOwnerHash: ownerHash,
         finalizationCompleted: true,
         localCardReconciliation: payload,
       }),
-    }])]);
+    };
+    const foundClient = sequentialD1([result([completedRow])]);
 
-    await expect(readNodeArenaGenerationReconciliation({
-      client,
+    await expect(readOwnedReconciliation({
+      client: foundClient,
       generationId: 'generation-1',
-    })).resolves.toEqual(payload);
-    expect(client.prepare).toHaveBeenCalledWith(expect.stringContaining(
+      actorKey: 'user:42',
+    })).resolves.toEqual({ kind: 'found', reconciliation: payload });
+    await expect(readOwnedReconciliation({
+      client: sequentialD1([result([completedRow])]),
+      generationId: 'generation-1',
+      actorKey: 'user:7',
+    })).resolves.toEqual({ kind: 'not-found', reason: 'owner_mismatch' });
+    await expect(readOwnedReconciliation({
+      client: sequentialD1([result()]),
+      generationId: 'generation-1',
+      actorKey: 'user:42',
+    })).resolves.toEqual({ kind: 'not-found', reason: 'row_missing' });
+    await expect(readOwnedReconciliation({
+      client: sequentialD1([result([{
+        ...completedRow,
+        extra_json: JSON.stringify({
+          generationOwnerHash: ownerHash,
+          finalizationCompleted: false,
+          localCardReconciliation: payload,
+        }),
+      }])]),
+      generationId: 'generation-1',
+      actorKey: 'user:42',
+    })).resolves.toEqual({ kind: 'unavailable', reason: 'finalization_pending' });
+    await expect(readOwnedReconciliation({
+      client: sequentialD1([result([{ ...completedRow, status: 'failed' }])]),
+      generationId: 'generation-1',
+      actorKey: 'user:42',
+    })).resolves.toEqual({ kind: 'unavailable', reason: 'generation_not_completed' });
+    await expect(readOwnedReconciliation({
+      client: sequentialD1([result([{
+        status: 'completed',
+        extra_json: JSON.stringify({
+          generationOwnerHash: ownerHash,
+          finalizationCompleted: true,
+        }),
+      }])]),
+      generationId: 'generation-1',
+      actorKey: 'user:42',
+    })).resolves.toEqual({ kind: 'unavailable', reason: 'manifest_missing' });
+    expect(foundClient.prepare).toHaveBeenCalledWith(expect.stringContaining(
       'FROM battle_report_generations',
     ));
   });

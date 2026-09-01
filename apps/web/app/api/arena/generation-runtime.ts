@@ -1,5 +1,7 @@
 import { createUnavailableGenerationReplayStore } from '@mahoshojo/hosted-api/arena-generation/unavailable-replay-store';
 import {
+  ARENA_PVP_GENERATION_SIGNATURE_PURPOSE,
+  createArenaGenerationActorResolvers,
   createArenaGenerationFinalizer,
   createArenaSeasonContextReader,
   createArenaR2ObjectStoreFromEnvironment,
@@ -7,20 +9,26 @@ import {
   createNodeArenaGenerationService,
   createNodeArenaGenerationTerminalStore,
 } from '@mahoshojo/hosted-runtime/arena-generation';
+import { createEnvSignatureService } from '@mahoshojo/hosted-runtime/node-runtime/env-signature';
 
 import { readGenerationRankingForGeneration } from '@/app/api/arena/generation-ranking/handler';
 import { settleArenaRatingsForGeneration } from '@/lib/database/arena-ratings';
 import { cloudflareArenaGenerationObserver } from '@/app/api/arena/generation-telemetry';
 import { getNextHostedD1Client } from '@/lib/hosted-dr/database-provider';
 
-const globalKey = '__mahoshojoArenaGenerationDrServiceV2';
+const globalKey = '__mahoshojoArenaGenerationDrRuntimeV3';
 
-type GlobalWithArenaGeneration = typeof globalThis & {
-  [globalKey]?: ReturnType<typeof createNodeArenaGenerationService>;
-};
-
-const buildService = (): ReturnType<typeof createNodeArenaGenerationService> => {
+const buildRuntime = () => {
   const getD1Client = getNextHostedD1Client;
+  const signatures = createEnvSignatureService();
+  const pvpSignatures = createEnvSignatureService({
+    purpose: ARENA_PVP_GENERATION_SIGNATURE_PURPOSE,
+  });
+  const actorResolvers = createArenaGenerationActorResolvers({
+    signatures,
+    pvpSignatures,
+    getD1Client,
+  });
   const objectStore = createArenaR2ObjectStoreFromEnvironment();
   const seasonContextBaseUrl = process.env.ARENA_SEASON_CONTEXT_URL?.trim()
     || process.env.BETTER_AUTH_URL?.trim()
@@ -37,7 +45,7 @@ const buildService = (): ReturnType<typeof createNodeArenaGenerationService> => 
     settleRatings: settleArenaRatingsForGeneration,
     readRanking: readGenerationRankingForGeneration,
   });
-  return createNodeArenaGenerationService({
+  const service = createNodeArenaGenerationService({
     store: createUnavailableGenerationReplayStore(),
     terminalStore: createNodeArenaGenerationTerminalStore({
       getD1Client,
@@ -45,6 +53,10 @@ const buildService = (): ReturnType<typeof createNodeArenaGenerationService> => 
       settleRatings: settleArenaRatingsForGeneration,
     }),
     getD1Client,
+    signatures,
+    pvpSignatures,
+    resolveActor: actorResolvers.resolveActor,
+    resolveCreateActor: actorResolvers.resolveCreateActor,
     observer: cloudflareArenaGenerationObserver,
     executorOptions: {
       finalizer: createArenaGenerationFinalizer(persistence, {
@@ -67,10 +79,26 @@ const buildService = (): ReturnType<typeof createNodeArenaGenerationService> => 
       },
     },
   });
+  return Object.freeze({
+    service,
+    resolveActor: actorResolvers.resolveActor,
+  });
 };
 
-export const getCloudflareDrArenaGenerationService = () => {
+type ArenaGenerationDrRuntime = ReturnType<typeof buildRuntime>;
+
+type GlobalWithArenaGeneration = typeof globalThis & {
+  [globalKey]?: ArenaGenerationDrRuntime;
+};
+
+const getRuntime = (): ArenaGenerationDrRuntime => {
   const scope = globalThis as GlobalWithArenaGeneration;
-  scope[globalKey] ??= buildService();
+  scope[globalKey] ??= buildRuntime();
   return scope[globalKey];
 };
+
+export const getCloudflareDrArenaGenerationService = () => getRuntime().service;
+
+export const resolveCloudflareDrArenaGenerationActor = (request: Request) => (
+  getRuntime().resolveActor(request)
+);

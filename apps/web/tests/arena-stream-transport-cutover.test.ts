@@ -53,4 +53,18 @@ describe('Arena resumable stream transport cutover', () => {
     expect(hookSource).toContain('baseRevisionHash');
     expect(hookSource).toContain('generationRequestId: crypto.randomUUID()');
   });
+
+  it('reuses create authentication semantics for every local-card reconciliation request', () => {
+    const updaterSource = readFileSync('components/arena/hooks/useStreamCombatantUpdater.ts', 'utf8');
+    const storySessionSource = readFileSync('components/arena/hooks/useBattleStorySession.ts', 'utf8');
+
+    expect(updaterSource).toContain('buildGenerationApiHeaders');
+    expect(updaterSource).toContain('authStorage');
+    expect(updaterSource).toMatch(
+      /withArenaGenerationActorToken\(await buildGenerationApiHeaders\([\s\S]*?authStorage/u,
+    );
+    expect(storySessionSource).toContain(
+      'withArenaGenerationActorToken(await buildRequestHeaders(false))',
+    );
+  });
 });

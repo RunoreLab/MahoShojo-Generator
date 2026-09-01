@@ -145,7 +145,7 @@ const isPotentiallyMutatingMethod = (method: string): boolean => (
   method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS'
 );
 
-const buildGenerationApiHeaders = async (
+export const buildGenerationApiHeaders = async (
   auth: GenerationApiAuth,
   headersInit: HeadersInit | undefined,
 ): Promise<Headers> => {

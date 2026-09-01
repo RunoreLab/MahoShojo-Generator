@@ -1243,10 +1243,25 @@ VALUES (?, ?, ?, 0, 'failed', 'stream', 'api/arena/generate-stream',
   },
 });
 
-export const readNodeArenaGenerationReconciliation = async (input: {
+export type OwnedNodeArenaGenerationReconciliationResult =
+  | Readonly<{
+    kind: 'found';
+    reconciliation: Record<string, unknown>;
+  }>
+  | Readonly<{
+    kind: 'not-found';
+    reason: 'row_missing' | 'owner_mismatch';
+  }>
+  | Readonly<{
+    kind: 'unavailable';
+    reason: 'generation_not_completed' | 'finalization_pending' | 'manifest_missing';
+  }>;
+
+export const readOwnedNodeArenaGenerationReconciliation = async (input: {
   client: NodeDataD1Client;
   generationId: string;
-}): Promise<Record<string, unknown> | null> => {
+  actorKey: string;
+}): Promise<OwnedNodeArenaGenerationReconciliationResult> => {
   const stored = await input.client.prepare(`
 SELECT status, extra_json
 FROM battle_report_generations
@@ -1254,8 +1269,19 @@ WHERE id = ?
 LIMIT 1
   `.trim()).bind(input.generationId).all({ retry: 'safe-read' });
   const row = stored.results[0];
-  if (row?.status !== 'completed') return null;
+  if (!row) return { kind: 'not-found', reason: 'row_missing' };
   const extra = parseExtra(row['extra_json']);
-  if (extra?.finalizationCompleted !== true) return null;
-  return recordOf(extra?.localCardReconciliation);
+  if (!extra || extra.generationOwnerHash !== await sha256(input.actorKey)) {
+    return { kind: 'not-found', reason: 'owner_mismatch' };
+  }
+  if (row.status !== 'completed') {
+    return { kind: 'unavailable', reason: 'generation_not_completed' };
+  }
+  if (extra.finalizationCompleted !== true) {
+    return { kind: 'unavailable', reason: 'finalization_pending' };
+  }
+  const reconciliation = recordOf(extra.localCardReconciliation);
+  return reconciliation
+    ? { kind: 'found', reconciliation }
+    : { kind: 'unavailable', reason: 'manifest_missing' };
 };

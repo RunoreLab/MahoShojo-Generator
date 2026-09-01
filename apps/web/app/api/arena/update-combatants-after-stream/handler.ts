@@ -1,9 +1,9 @@
-import { getCloudflareDrArenaGenerationService } from '@/app/api/arena/generation-runtime';
+import { resolveCloudflareDrArenaGenerationActor } from '@/app/api/arena/generation-runtime';
 import { applyPostBattleUpdates } from '@/lib/arena/service';
 import { getLogger } from '@/lib/logger';
 import { verifySignature } from '@/lib/signature';
 import {
-  readNodeArenaGenerationReconciliation,
+  readOwnedNodeArenaGenerationReconciliation,
 } from '@mahoshojo/hosted-runtime/arena-generation';
 import { NextRequest } from 'next/server';
 import { hashArenaCombatantBaseRevision } from '@mahoshojo/domain/arena-reconciliation';
@@ -66,31 +66,78 @@ async function handler(req: NextRequest): Promise<Response> {
     }, 503);
   }
 
-  const ownershipRequest = new Request(req.url, {
-    method: 'GET',
-    headers: req.headers,
-  });
-  const statusResponse = await getCloudflareDrArenaGenerationService().status(
-    ownershipRequest,
-    { generationId },
-  );
-  if (!statusResponse.ok) return statusResponse;
-  const generation = await statusResponse.json().catch(() => null) as { status?: unknown } | null;
-  if (generation?.status !== 'completed') {
+  let actor: Awaited<ReturnType<typeof resolveCloudflareDrArenaGenerationActor>>;
+  try {
+    actor = await resolveCloudflareDrArenaGenerationActor(req);
+  } catch {
+    log.error('解析 Arena reconciliation actor 失败', {
+      generationId,
+      reason: 'actor_resolver_failed',
+    });
     return json({
-      code: 'ARENA_RECONCILIATION_GENERATION_NOT_COMPLETED',
-      error: 'Generation is not completed',
+      code: 'ARENA_RECONCILIATION_ACTOR_UNAVAILABLE',
+      error: 'Arena reconciliation actor unavailable',
+    }, 503);
+  }
+  if (!actor) {
+    return json({
+      code: 'UNAUTHORIZED',
+      error: 'Unauthorized',
+    }, 401);
+  }
+
+  let ownedReconciliation: Awaited<ReturnType<typeof readOwnedNodeArenaGenerationReconciliation>>;
+  try {
+    ownedReconciliation = await readOwnedNodeArenaGenerationReconciliation({
+      client,
+      generationId,
+      actorKey: actor.actorKey,
+    });
+  } catch {
+    log.error('读取 Arena reconciliation durable authority 失败', {
+      generationId,
+      reason: 'd1_read_failed',
+    });
+    return json({
+      code: 'ARENA_RECONCILIATION_DURABLE_READ_FAILED',
+      error: 'Arena reconciliation durable authority unavailable',
+    }, 503);
+  }
+  if (ownedReconciliation.kind === 'not-found') {
+    log.warn('未找到请求 actor 拥有的 Arena reconciliation', {
+      generationId,
+      reason: ownedReconciliation.reason,
+    });
+    return json({
+      code: 'ARENA_RECONCILIATION_NOT_FOUND',
+      error: 'Generation reconciliation not found',
+    }, 404);
+  }
+  if (ownedReconciliation.kind === 'unavailable') {
+    log.warn('Arena reconciliation authority 尚不可用', {
+      generationId,
+      reason: ownedReconciliation.reason,
+    });
+    if (ownedReconciliation.reason === 'generation_not_completed') {
+      return json({
+        code: 'ARENA_RECONCILIATION_GENERATION_NOT_COMPLETED',
+        error: 'Generation is not completed',
+      }, 409);
+    }
+    if (ownedReconciliation.reason === 'finalization_pending') {
+      return json({
+        code: 'ARENA_RECONCILIATION_FINALIZATION_PENDING',
+        error: 'Generation reconciliation finalization remains pending',
+      }, 503);
+    }
+    return json({
+      code: 'ARENA_RECONCILIATION_MANIFEST_UNAVAILABLE',
+      error: 'Generation reconciliation manifest unavailable',
     }, 409);
   }
 
   try {
-    const authoritative = await readNodeArenaGenerationReconciliation({ client, generationId });
-    if (!authoritative) {
-      return json({
-        code: 'ARENA_RECONCILIATION_NOT_FOUND',
-        error: 'Generation reconciliation effect not found',
-      }, 409);
-    }
+    const authoritative = ownedReconciliation.reconciliation;
     if (authoritative.available === false) {
       return json({
         code: 'ARENA_RECONCILIATION_MANIFEST_UNAVAILABLE',

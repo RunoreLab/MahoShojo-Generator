@@ -795,9 +795,7 @@ export function useBattleStorySession() {
       const baseRevisionHash = await hashArenaCombatantBaseRevision(input.workingCombatants);
       const response = await fetch('/api/arena/update-combatants-after-stream', {
         method: 'POST',
-        headers: withArenaGenerationActorToken({
-          'Content-Type': 'application/json',
-        }),
+        headers: withArenaGenerationActorToken(await buildRequestHeaders(false)),
         body: JSON.stringify({
           generationId: input.generationId,
           baseRevisionHash,
@@ -839,7 +837,7 @@ export function useBattleStorySession() {
         ),
       };
     },
-    []
+    [buildRequestHeaders]
   );
 
   const runGeneration = useCallback(

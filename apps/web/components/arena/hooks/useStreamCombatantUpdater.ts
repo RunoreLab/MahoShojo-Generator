@@ -5,6 +5,8 @@ import { getLogger } from '@/lib/logger';
 import { extractHeadlineFromMarkdown, extractWinnerFromText } from '@/lib/arena/battle-report-log-utils';
 import { runArenaGenerationEffectOnce } from '@/lib/arena/generation-effect-ledger';
 import { withArenaGenerationActorToken } from '@/lib/arena/resumable-generation-client';
+import { authStorage } from '@/lib/auth';
+import { buildGenerationApiHeaders } from '@/lib/hono-api-client';
 import { hashArenaCombatantBaseRevision } from '@mahoshojo/domain/arena-reconciliation';
 import { useBattleStore } from '../stores/useBattleStore';
 import { BattleStoreState, CombatantData } from '../types';
@@ -234,9 +236,10 @@ export const useStreamCombatantUpdater = () => {
       const execute = async () => {
         const response = await fetch('/api/arena/update-combatants-after-stream', {
           method: 'POST',
-          headers: withArenaGenerationActorToken({
-            'Content-Type': 'application/json',
-          }),
+          headers: withArenaGenerationActorToken(await buildGenerationApiHeaders(
+            authStorage,
+            { 'Content-Type': 'application/json' },
+          )),
           body: JSON.stringify(payload),
         });
 
