@@ -69,6 +69,9 @@
           "ARENA_FINALIZATION_HMAC_SECRET"
         ]
       },
+      "vars": {
+        "HONO_CORS_ORIGINS": "https://mahoshojo.colanns.me"
+      },
       "ratelimits": [
         {
           "name": "ARENA_RANKING_ACTOR_LIMITER",
@@ -116,6 +119,9 @@
         "required": [
           "ARENA_FINALIZATION_HMAC_SECRET"
         ]
+      },
+      "vars": {
+        "HONO_CORS_ORIGINS": "https://mahoshojo.colanns.me,https://*.colanns.me,https://mahoshojo-next-preview.719147538.workers.dev"
       },
       "ratelimits": [
         {
