@@ -79,6 +79,37 @@ const createRequest = (body: unknown): Request => new Request(
   },
 );
 
+const createPrepareDependencies = (
+  overrides: Partial<GenerateCreatorRuntimeDependencies> = {},
+): GenerateCreatorRuntimeDependencies => ({
+  presetIndex: { presets: [] },
+  canshouLore: '',
+  findProvider: () => null,
+  resolveModel: () => null,
+  loadPreset: async () => null,
+  loadDataCard: async () => null,
+  resolveBuildRules: () => [],
+  validateCreatorRequest: () => undefined,
+  buildCreatorPromptInput: (input) => ({
+    template: input.template,
+    userIntent: input.freeformBrief ?? '',
+    questionnaireSummary: '',
+    buildRuleProjection: { primary: null, references: [] },
+  }),
+  buildPersistedCreationInputs: () => ({}),
+  getRandomFlowers: () => '',
+  checkRateLimit: async () => null,
+  enforceSafety: async () => null,
+  generateWithAI: async () => { throw new Error('unexpected generation'); },
+  sign: async () => null,
+  recordActivity: () => undefined,
+  buildResponse: () => new Response(),
+  logInfo: () => undefined,
+  logWarn: () => undefined,
+  logError: () => undefined,
+  ...overrides,
+});
+
 describe('generate creator hosted runtime', () => {
   it('持有原生问卷信任、build rule、prompt/schema 与持久化/签名 finalize 顺序', async () => {
     const events: string[] = [];
@@ -285,5 +316,81 @@ describe('generate creator hosted runtime', () => {
       buildRules: [],
     });
     expect(signedPayloads[1]).not.toHaveProperty('buildState');
+  });
+
+  it('保留已知 build-rule validation 的 400 可行动文案', async () => {
+    const runtime = createGenerateCreatorRuntime(createPrepareDependencies({
+      resolveBuildRules: () => { throw new Error('BUILD_RULE_INPUTS_REQUIRED'); },
+    }));
+
+    const response = await runtime.service(createRequest({ freeformBrief: '已有补充说明' }));
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: '创作请求无效',
+      message: 'BUILD_RULE_INPUTS_REQUIRED',
+    });
+  });
+
+  it('拒绝把伪装成 validation 的内部细节作为 400 透传', async () => {
+    const runtime = createGenerateCreatorRuntime(createPrepareDependencies({
+      resolveBuildRules: () => {
+        throw new Error('BUILD_RULE_PRESET_NOT_FOUND:/srv/creator/private-preset.json');
+      },
+    }));
+
+    const response = await runtime.service(createRequest({ freeformBrief: '已有补充说明' }));
+    const body = await response.text();
+
+    expect(response.status).toBe(500);
+    expect(body).toContain('创作失败');
+    expect(body).not.toContain('/srv/creator/private-preset.json');
+  });
+
+  it('prompt 构造内部异常返回 500 且不泄漏 Provider secret', async () => {
+    const providerSecret = 'creator-provider-secret-canary';
+    const runtime = createGenerateCreatorRuntime(createPrepareDependencies({
+      buildCreatorPromptInput: () => {
+        throw new Error(`Prompt adapter failed at /srv/creator/private.ts: ${providerSecret}`);
+      },
+    }));
+
+    const response = await runtime.service(createRequest({
+      freeformBrief: '已有补充说明',
+      customProvider: {
+        providerId: 'proxy',
+        modelId: 'model',
+        apiKey: providerSecret,
+      },
+    }));
+    const body = await response.text();
+
+    expect(response.status).toBe(500);
+    expect(body).toContain('Prompt adapter failed');
+    expect(body).not.toContain(providerSecret);
+    expect(body).not.toContain('/srv/creator/private.ts');
+  });
+
+  it('Provider 解析内部异常沿用稳定 500 文案', async () => {
+    const providerSecret = 'creator-provider-resolution-secret-canary';
+    const runtime = createGenerateCreatorRuntime(createPrepareDependencies({
+      findProvider: () => {
+        throw new Error(`Provider registry failed: ${providerSecret}`);
+      },
+    }));
+
+    const response = await runtime.service(createRequest({
+      freeformBrief: '已有补充说明',
+      customProvider: {
+        providerId: 'proxy',
+        modelId: 'model',
+        apiKey: providerSecret,
+      },
+    }));
+    const body = await response.text();
+
+    expect(response.status).toBe(500);
+    expect(body).toContain('服务器内部错误');
+    expect(body).not.toContain(providerSecret);
   });
 });
