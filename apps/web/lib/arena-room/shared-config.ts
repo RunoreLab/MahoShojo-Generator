@@ -190,7 +190,7 @@ const stableJsonValue = (value: unknown, seen: WeakSet<object>): unknown => {
   );
 };
 
-const contentDigest = async (value: unknown): Promise<string> => {
+export const computeArenaRoomContentDigest = async (value: unknown): Promise<string> => {
   const canonical = JSON.stringify(stableJsonValue(value, new WeakSet()));
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(canonical));
   const hex = Array.from(new Uint8Array(digest), (byte) => (
@@ -198,6 +198,8 @@ const contentDigest = async (value: unknown): Promise<string> => {
   )).join('');
   return `sha256:${hex}`;
 };
+
+const contentDigest = computeArenaRoomContentDigest;
 
 const localKey = (kind: DataCardKind, label: string, index: number): string => {
   let hash = 0x811c9dc5;

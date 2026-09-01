@@ -3,9 +3,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ArenaRoomSharedConfig } from '@mahoshojo/contracts/arena-room';
 
 import { useBattleStore } from '@/components/arena/stores/useBattleStore';
+import M01Centaurea from '@/public/presets/M01_centaurea.json';
+import S01QueenWill from '@/public/scenario-presets/S01_queen_will.json';
 import {
   applyArenaRoomAuthorityToBattleStore,
 } from '@/lib/arena-room/host-reconciliation';
+import { ARENA_ROOM_PRESET_CATALOG } from '@/lib/arena-room/generated/arena-room-preset-catalog';
 import { buildArenaRoomHostWorkspaceBundleFromBattleState } from '@/lib/arena-room/shared-config';
 
 const publicRow = (id: string, type: 'character' | 'scenario' | 'material') => ({
@@ -207,5 +210,166 @@ describe('Arena room host reconciliation', () => {
     });
     const rebuilt = await buildArenaRoomHostWorkspaceBundleFromBattleState(restored);
     expect(rebuilt.sharedConfig).toEqual(published.sharedConfig);
+  });
+
+  it('成员新增的 canonical 角色与情景 preset 可 materialize 到房主 Arena 编辑区', async () => {
+    const baselineBundle = await buildArenaRoomHostWorkspaceBundleFromBattleState(
+      useBattleStore.getState(),
+    );
+    const characterPreset = ARENA_ROOM_PRESET_CATALOG.find((entry) => (
+      entry.kind === 'character' && entry.id === 'M01_centaurea.json'
+    ));
+    const scenarioPreset = ARENA_ROOM_PRESET_CATALOG.find((entry) => (
+      entry.kind === 'scenario' && entry.id === 'S01_queen_will.json'
+    ));
+    expect(characterPreset).toBeDefined();
+    expect(scenarioPreset).toBeDefined();
+    const target: ArenaRoomSharedConfig = {
+      ...baselineBundle.sharedConfig,
+      battleMode: 'scenario',
+      combatants: [...baselineBundle.sharedConfig.combatants, {
+        key: `preset:${characterPreset!.id}`,
+        ref: {
+          id: characterPreset!.id,
+          kind: 'character',
+          versionToken: characterPreset!.versionToken,
+        },
+      }],
+      scenario: {
+        key: `preset:${scenarioPreset!.id}`,
+        ref: {
+          id: scenarioPreset!.id,
+          kind: 'scenario',
+          versionToken: scenarioPreset!.versionToken,
+        },
+      },
+    };
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.endsWith(`/presets/${characterPreset!.id}`)) {
+        return new Response(JSON.stringify(M01Centaurea), { status: 200 });
+      }
+      if (url.endsWith(`/scenario-presets/${scenarioPreset!.id}`)) {
+        return new Response(JSON.stringify(S01QueenWill), { status: 200 });
+      }
+      return new Response(null, { status: 404 });
+    });
+
+    try {
+      await applyArenaRoomAuthorityToBattleStore(target, {
+        currentBundle: baselineBundle,
+        loadPublicCard: async () => {
+          throw new Error('不应读取 online card');
+        },
+      });
+    } finally {
+      fetchSpy.mockRestore();
+    }
+
+    const synchronized = useBattleStore.getState();
+    expect(synchronized.combatants.at(-1)).toMatchObject({
+      filename: characterPreset!.id,
+      isPreset: true,
+    });
+    expect(synchronized.scenario).toMatchObject({
+      fileName: scenarioPreset!.id,
+      isNative: true,
+    });
+    const rebuilt = await buildArenaRoomHostWorkspaceBundleFromBattleState(synchronized);
+    expect(rebuilt.sharedConfig).toEqual(target);
+  });
+
+  it('preset 响应正文与 frozen versionToken 不一致时 fail closed 且不写入 BattleStore', async () => {
+    const before = useBattleStore.getState();
+    const baselineBundle = await buildArenaRoomHostWorkspaceBundleFromBattleState(before);
+    const characterPreset = ARENA_ROOM_PRESET_CATALOG.find((entry) => (
+      entry.kind === 'character' && entry.id === 'M01_centaurea.json'
+    ));
+    expect(characterPreset).toBeDefined();
+    const target: ArenaRoomSharedConfig = {
+      ...baselineBundle.sharedConfig,
+      combatants: [...baselineBundle.sharedConfig.combatants, {
+        key: `preset:${characterPreset!.id}`,
+        ref: {
+          id: characterPreset!.id,
+          kind: 'character',
+          versionToken: characterPreset!.versionToken,
+        },
+      }],
+    };
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      ...M01Centaurea,
+      codename: '被篡改的预设正文',
+    }), { status: 200 }));
+
+    try {
+      await expect(applyArenaRoomAuthorityToBattleStore(target, {
+        currentBundle: baselineBundle,
+        loadPublicCard: async () => {
+          throw new Error('不应读取 online card');
+        },
+      })).rejects.toThrow(/正文.*版本/u);
+    } finally {
+      fetchSpy.mockRestore();
+    }
+    expect(useBattleStore.getState().combatants).toBe(before.combatants);
+  });
+
+  it('Room reconciliation 只清理已删除来源的判定事件，保留手工项与仍有效来源', async () => {
+    useBattleStore.setState((state) => ({
+      battleMode: 'scenario',
+      combatants: [...state.combatants, {
+        type: 'general-character',
+        data: { name: '将被删除的角色' },
+        filename: '将删除角色.json',
+        isValid: true,
+        isPreset: false,
+      }],
+      scenario: {
+        content: { title: '将被替换的情景' },
+        fileName: '旧情景.json',
+        isNative: false,
+      },
+      adjudicationEvents: [{
+        id: 'manual-event',
+        description: '房主手工判定',
+        type: 'binary',
+      }, {
+        id: 'retained-event',
+        description: '仍有效角色来源',
+        type: 'binary',
+        sourceKey: 'file:房主本地角色.json',
+      }, {
+        id: 'removed-event',
+        description: '已删除角色来源',
+        type: 'binary',
+        sourceKey: 'file:将删除角色.json',
+      }, {
+        id: 'replaced-scenario-event',
+        description: '已替换情景来源',
+        type: 'binary',
+        sourceKey: 'file:旧情景.json',
+      }],
+    }));
+    const baselineBundle = await buildArenaRoomHostWorkspaceBundleFromBattleState(
+      useBattleStore.getState(),
+    );
+    const target: ArenaRoomSharedConfig = {
+      ...baselineBundle.sharedConfig,
+      combatants: [baselineBundle.sharedConfig.combatants[0]!],
+      scenario: null,
+    };
+
+    await applyArenaRoomAuthorityToBattleStore(target, {
+      currentBundle: baselineBundle,
+      loadPublicCard: async () => {
+        throw new Error('不应读取 online card');
+      },
+    });
+
+    expect(useBattleStore.getState().adjudicationEvents.map((event) => event.id)).toEqual([
+      'manual-event',
+      'retained-event',
+    ]);
   });
 });

@@ -27,8 +27,16 @@ import {
   buildArenaMaterialState,
   type ArenaMaterialState,
 } from '@/lib/arena/materials';
+import {
+  buildAdjudicationSourceKey,
+  filterAdjudicationEventsBySources,
+} from '@/lib/arena/adjudication-events';
 
-import type { ArenaRoomHostWorkspaceBundle } from './shared-config';
+import { ARENA_ROOM_PRESET_CATALOG } from './generated/arena-room-preset-catalog';
+import {
+  computeArenaRoomContentDigest,
+  type ArenaRoomHostWorkspaceBundle,
+} from './shared-config';
 
 type SharedEntry = ArenaRoomSharedConfig['combatants'][number];
 type SharedScenarioEntry = NonNullable<ArenaRoomSharedConfig['scenario']>;
@@ -46,6 +54,32 @@ const cloneJson = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
   typeof value === 'object' && value !== null && !Array.isArray(value)
+);
+
+const text = (value: unknown): string => typeof value === 'string' ? value.trim() : '';
+
+const combatantAdjudicationSourceKey = (combatant: Combatant): string => (
+  text('adjudicationSourceKey' in combatant ? combatant.adjudicationSourceKey : '')
+  || buildAdjudicationSourceKey({
+    sourceDataCardId: 'sourceDataCardId' in combatant ? text(combatant.sourceDataCardId) : '',
+    sourceFileName: 'filename' in combatant ? text(combatant.filename) : '',
+    sourceLabel: 'sourceDataCardName' in combatant
+      ? text(combatant.sourceDataCardName) || text(combatant.filename)
+      : 'filename' in combatant ? text(combatant.filename) : '',
+  })
+  || ''
+);
+
+const scenarioAdjudicationSourceKey = (
+  scenario: ScenarioState | AuxiliaryScenarioState,
+): string => (
+  text(scenario.adjudicationSourceKey)
+  || buildAdjudicationSourceKey({
+    sourceDataCardId: text(scenario.sourceDataCardId),
+    sourceFileName: text(scenario.fileName),
+    sourceLabel: text(scenario.sourceDataCardName) || text(scenario.fileName),
+  })
+  || ''
 );
 
 const sameReference = (
@@ -96,6 +130,29 @@ const loadExactPublicPayload = async (
   return payload;
 };
 
+const loadExactPresetPayload = async (
+  ref: { readonly id: string; readonly kind: string; readonly versionToken: string },
+): Promise<Record<string, unknown>> => {
+  const catalogEntry = ARENA_ROOM_PRESET_CATALOG.find((entry) => (
+    entry.id === ref.id && entry.kind === ref.kind
+  ));
+  if (!catalogEntry || catalogEntry.versionToken !== ref.versionToken) {
+    throw new Error(`预设内容 ${ref.id} 的版本与当前房间配置不一致`);
+  }
+  const basePath = ref.kind === 'character'
+    ? '/presets/'
+    : ref.kind === 'scenario' ? '/scenario-presets/' : null;
+  if (!basePath) throw new Error(`房间暂不支持 ${ref.kind} 类型的预设内容`);
+  const response = await fetch(`${basePath}${encodeURIComponent(ref.id)}`);
+  if (!response.ok) throw new Error(`预设内容 ${ref.id} 暂时无法读取`);
+  const payload: unknown = await response.json();
+  if (!isRecord(payload)) throw new Error(`预设内容 ${ref.id} 正文无效`);
+  if (await computeArenaRoomContentDigest(payload) !== ref.versionToken) {
+    throw new Error(`预设内容 ${ref.id} 的正文与当前房间配置版本不一致`);
+  }
+  return payload;
+};
+
 const publicCombatant = async (
   entry: Extract<SharedEntry, { ref: unknown }>,
   loadPublicCard: ArenaRoomPublicCardLoader,
@@ -124,6 +181,24 @@ const publicCombatant = async (
   };
 };
 
+const presetCombatant = async (
+  entry: Extract<SharedEntry, { ref: unknown }>,
+): Promise<CombatantData> => {
+  const payload = await loadExactPresetPayload(entry.ref);
+  const adjudicationSourceKey = buildAdjudicationSourceKey({
+    sourceFileName: entry.ref.id,
+  });
+  return {
+    type: inferCombatantType(payload),
+    data: cloneJson(payload),
+    filename: entry.ref.id,
+    isValid: true,
+    isPreset: true,
+    isNonStandard: false,
+    ...(adjudicationSourceKey ? { adjudicationSourceKey } : {}),
+  };
+};
+
 const publicScenario = async (
   entry: Extract<SharedScenarioEntry, { ref: unknown }>,
   loadPublicCard: ArenaRoomPublicCardLoader,
@@ -142,6 +217,21 @@ const publicScenario = async (
     sourceDataCardCreatedAt: source.sourceDataCardCreatedAt,
     sourceIsPublic: true,
     sourceAuthor: source.sourceAuthor,
+  };
+};
+
+const presetScenario = async (
+  entry: Extract<SharedScenarioEntry, { ref: unknown }>,
+): Promise<ScenarioState> => {
+  const payload = await loadExactPresetPayload(entry.ref);
+  const adjudicationSourceKey = buildAdjudicationSourceKey({
+    sourceFileName: entry.ref.id,
+  });
+  return {
+    content: cloneJson(payload),
+    fileName: entry.ref.id,
+    isNative: true,
+    ...(adjudicationSourceKey ? { adjudicationSourceKey } : {}),
   };
 };
 
@@ -191,6 +281,27 @@ export const applyArenaRoomAuthorityToBattleStore = async (
   const hostLocalPayloads = new Map(
     (options.hostLocalPayloads ?? []).map((entry) => [entry.key, entry] as const),
   );
+  const invalidAdjudicationSourceKeys = new Set<string>();
+  currentConfig.combatants.forEach((entry, index) => {
+    const next = config.combatants.find((candidate) => candidate.key === entry.key);
+    if (next && sameSource(entry, next)) return;
+    const sourceKey = current.combatants[index]
+      ? combatantAdjudicationSourceKey(current.combatants[index]!)
+      : '';
+    if (sourceKey) invalidAdjudicationSourceKeys.add(sourceKey);
+  });
+  if (currentConfig.scenario && (!config.scenario || !sameSource(currentConfig.scenario, config.scenario))) {
+    const sourceKey = scenarioAdjudicationSourceKey(current.scenario);
+    if (sourceKey) invalidAdjudicationSourceKeys.add(sourceKey);
+  }
+  currentConfig.auxScenarios.forEach((entry, index) => {
+    const next = config.auxScenarios.find((candidate) => candidate.key === entry.key);
+    if (next && sameSource(entry, next)) return;
+    const sourceKey = current.auxScenarios[index]
+      ? scenarioAdjudicationSourceKey(current.auxScenarios[index]!)
+      : '';
+    if (sourceKey) invalidAdjudicationSourceKeys.add(sourceKey);
+  });
 
   const usedTeamIds = new Set(current.teams.map((team) => team.id));
   const currentTeams = existingByNormalizedKey(currentConfig.teams, current.teams);
@@ -220,6 +331,8 @@ export const applyArenaRoomAuthorityToBattleStore = async (
       combatant = cloneJson(existing.value);
     } else if ('ref' in entry && entry.key.startsWith('data-card:')) {
       combatant = await publicCombatant(entry, options.loadPublicCard);
+    } else if ('ref' in entry && entry.key.startsWith('preset:')) {
+      combatant = await presetCombatant(entry);
     } else if (!('ref' in entry)) {
       const localPayload = hostLocalPayloads.get(entry.key);
       if (!localPayload || localPayload.kind !== 'character') {
@@ -253,6 +366,8 @@ export const applyArenaRoomAuthorityToBattleStore = async (
       scenario = cloneJson(existing.value);
     } else if ('ref' in config.scenario && config.scenario.key.startsWith('data-card:')) {
       scenario = await publicScenario(config.scenario, options.loadPublicCard);
+    } else if ('ref' in config.scenario && config.scenario.key.startsWith('preset:')) {
+      scenario = await presetScenario(config.scenario);
     } else if (!('ref' in config.scenario)) {
       const localPayload = hostLocalPayloads.get(config.scenario.key);
       if (!localPayload || localPayload.kind !== 'scenario' || !isRecord(localPayload.payload)) {
@@ -276,6 +391,8 @@ export const applyArenaRoomAuthorityToBattleStore = async (
       resolved = cloneJson(existing.value);
     } else if ('ref' in entry && entry.key.startsWith('data-card:')) {
       resolved = await publicScenario(entry, options.loadPublicCard);
+    } else if ('ref' in entry && entry.key.startsWith('preset:')) {
+      resolved = await presetScenario(entry);
     } else if (!('ref' in entry)) {
       const localPayload = hostLocalPayloads.get(entry.key);
       if (localPayload?.kind === 'scenario' && isRecord(localPayload.payload)) {
@@ -337,6 +454,9 @@ export const applyArenaRoomAuthorityToBattleStore = async (
       ...config.historySettings,
       userGuidance: config.userGuidance,
     },
-    adjudicationEvents: [],
+    adjudicationEvents: filterAdjudicationEventsBySources(
+      state.adjudicationEvents,
+      [...invalidAdjudicationSourceKeys],
+    ),
   }));
 };
