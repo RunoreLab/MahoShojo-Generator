@@ -20,6 +20,16 @@ GMR-10P 当前为 `DONE`，只把 GMR-11 恢复为 `READY`；它不等于 produc
 `READY`，正常 push 保持 writer-disabled，显式 enabled dispatch 也会在缺少独立批准记录时 fail closed。机器状态以
 [`config/arena-production-activation-gate.json`](../config/arena-production-activation-gate.json) 为准。
 
+Arena 多人 GMR-10Q 门禁最小化与单人一致性整改使用以下权威入口：
+
+- [Arena 多人门禁分层、最小化与单人一致性修订](./specs/2026-09-01_073000_Arena多人门禁分层最小化与单人一致性修订.md)
+- [Arena 多人 GMR-10Q 门禁最小化与一致性整改实施计划](./plans/2026-09-01_073000_Arena多人GMR-10Q门禁最小化与一致性整改实施计划.md)
+- [Arena 多人 GMR-10Q 门禁最小化与一致性实施与退出审计](./logs/2026-09-01_092555_Arena多人GMR-10Q门禁最小化与一致性实施与退出审计.md)
+
+GMR-10Q 当前为 `DONE`：房间存在、配置共享、协作、生成就绪、runtime 资源与结果权限已分层，0 角色可先建房，
+角色/参考项容量继承 canonical Arena/runtime，未声明例外的多人语义默认继承单人。GMR-11 因此恢复为 `READY`，但
+production activation 的独立批准字段仍为空，本状态不代表已部署、切流或获准上线。
+
 production ingress 专项冻结 Room HTTP/WSS 直接复用 Hosted Hono primary、caller Origin 与 service origin 分离，以及
 GMR-11 批准后的“默认分支 push 一次 CI -> Hono transaction/probe -> Cloudflare reusable deploy”目标路径。运行控制只保留
 服务端 request kill switch 与 Web exposure switch；writer capability 继续受 immutable release tuple 和独立批准门禁保护。
