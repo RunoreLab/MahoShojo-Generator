@@ -14,6 +14,7 @@ import {
 import { getSystemPrompt } from './compatibility-prompt';
 import { buildArenaStructuredReportSchema } from './structured-report';
 import { normalizeNodeArenaMaterials } from './materials';
+import { resolveArenaCombatantNativeAuthority } from './native-authority';
 import {
   evaluateArenaPromptBudget,
   type ArenaHostedFundingMode,
@@ -321,7 +322,10 @@ const normalizeNativeAuthority = async (
         ? { ...(combatant.data as Record<string, unknown>) }
         : combatant.data;
       combatant.data = data;
-      combatant.isNative = await signatures.verifySignature(data);
+      combatant.isNative = await resolveArenaCombatantNativeAuthority(
+        combatant,
+        (value) => signatures.verifySignature(value),
+      );
       return combatant;
     }));
   }

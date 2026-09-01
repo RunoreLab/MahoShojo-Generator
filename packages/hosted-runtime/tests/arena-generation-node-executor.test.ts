@@ -1,4 +1,7 @@
+import { readFile } from 'node:fs/promises';
+
 import { describe, expect, it, vi } from 'vitest';
+import { hashArenaCombatantBaseRevision } from '@mahoshojo/domain/arena-reconciliation';
 import { isArenaGenerationAuditableRejection } from '@mahoshojo/hosted-api/arena-generation/service';
 
 import { createArenaGenerationFinalizer } from '../src/arena-generation/finalization';
@@ -42,6 +45,31 @@ const signatureService: SignatureService = {
 };
 
 describe('Node Arena generation executor', () => {
+  it('keeps canonical preset native authority identical to the browser base revision', async () => {
+    const data = JSON.parse(await readFile(
+      new URL('../../../apps/web/public/presets/C01_egg.json', import.meta.url),
+      'utf8',
+    )) as Record<string, unknown>;
+    const browserCombatants = [{
+      type: 'character',
+      filename: 'C01_egg.json',
+      isNative: true,
+      isPreset: true,
+      data,
+    }];
+
+    const canonical = await canonicalizeNodeArenaGenerationSemanticPayload({
+      payload: { combatants: browserCombatants },
+      signatures: signatureService,
+      trustedInternalGuidance: null,
+      trustedPvpContext: null,
+    });
+
+    expect(canonical).toMatchObject({ combatants: [{ isNative: true }] });
+    await expect(hashArenaCombatantBaseRevision(canonical.combatants as unknown[]))
+      .resolves.toBe(await hashArenaCombatantBaseRevision(browserCombatants));
+  });
+
   it('canonicalizes retry identity with legacy defaults and server-derived native authority', async () => {
     const base = {
       combatants: [{

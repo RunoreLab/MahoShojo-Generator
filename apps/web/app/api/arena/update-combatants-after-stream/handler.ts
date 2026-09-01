@@ -4,6 +4,7 @@ import { getLogger } from '@/lib/logger';
 import { verifySignature } from '@/lib/signature';
 import {
   readOwnedNodeArenaGenerationReconciliation,
+  resolveArenaCombatantNativeAuthority,
 } from '@mahoshojo/hosted-runtime/arena-generation';
 import { NextRequest } from 'next/server';
 import { hashArenaCombatantBaseRevision } from '@mahoshojo/domain/arena-reconciliation';
@@ -146,9 +147,42 @@ async function handler(req: NextRequest): Promise<Response> {
     }
     const expectedBaseRevisionHash = stringOf(authoritative.baseRevisionHash);
     const actualBaseRevisionHash = await hashArenaCombatantBaseRevision(combatants);
+    const verifiedCombatants = await Promise.all(combatants.map(async (value) => {
+      const combatant = recordOf(value)!;
+      const data = recordOf(combatant.data);
+      const isNative = await resolveArenaCombatantNativeAuthority(combatant, verifySignature);
+      if (combatant.isNative === true && !isNative) {
+        log.warn('角色声称原生但服务器 authority 无效，将视为非原生', {
+          generationId,
+          character: stringOf(data?.codename) ?? stringOf(data?.name),
+        });
+      }
+      return { ...combatant, isNative };
+    }));
+    const currentAuthorityBaseRevisionHash = await hashArenaCombatantBaseRevision(
+      verifiedCombatants,
+    );
+    // Compatibility for generations frozen before canonical bundled presets
+    // gained digest-based authority. Those rows derived every native flag from
+    // the card signature, so exact unsigned presets were persisted as false.
+    const signatureOnlyCombatants = await Promise.all(combatants.map(async (value) => {
+      const combatant = recordOf(value)!;
+      return {
+        ...combatant,
+        isNative: await verifySignature(recordOf(combatant.data)),
+      };
+    }));
+    const signatureOnlyBaseRevisionHash = await hashArenaCombatantBaseRevision(
+      signatureOnlyCombatants,
+    );
+    const clientMatchesCurrentAuthority = currentAuthorityBaseRevisionHash === baseRevisionHash;
+    const matchesCurrentRevision = expectedBaseRevisionHash === baseRevisionHash
+      && clientMatchesCurrentAuthority;
+    const matchesSignatureOnlyRevision = expectedBaseRevisionHash === signatureOnlyBaseRevisionHash
+      && clientMatchesCurrentAuthority;
     if (
       !expectedBaseRevisionHash
-      || expectedBaseRevisionHash !== baseRevisionHash
+      || (!matchesCurrentRevision && !matchesSignatureOnlyRevision)
       || actualBaseRevisionHash !== baseRevisionHash
     ) {
       return json({
@@ -166,19 +200,6 @@ async function handler(req: NextRequest): Promise<Response> {
         error: 'Combatant roster does not match the generation roster',
       }, 409);
     }
-
-    const verifiedCombatants = await Promise.all(combatants.map(async (value) => {
-      const combatant = recordOf(value)!;
-      const data = recordOf(combatant.data);
-      if (combatant.isNative === true && (!data || !await verifySignature(data))) {
-        log.warn('角色声称原生但签名无效，将视为非原生', {
-          generationId,
-          character: stringOf(data?.codename) ?? stringOf(data?.name),
-        });
-        return { ...combatant, isNative: false };
-      }
-      return combatant;
-    }));
 
     const report = recordOf(authoritative.report);
     const impacts = Array.isArray(authoritative.impacts) ? authoritative.impacts : [];

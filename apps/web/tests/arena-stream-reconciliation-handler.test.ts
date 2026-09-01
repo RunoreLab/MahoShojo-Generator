@@ -7,6 +7,7 @@ const getD1Client = vi.fn();
 const readReconciliation = vi.fn();
 const readOwnedReconciliation = vi.fn();
 const verifySignature = vi.fn();
+const resolveNativeAuthority = vi.fn();
 const applyPostBattleUpdates = vi.fn();
 
 vi.mock('@/app/api/arena/generation-runtime', () => ({
@@ -19,6 +20,7 @@ vi.mock('@/lib/hosted-dr/database-provider', () => ({
 vi.mock('@mahoshojo/hosted-runtime/arena-generation', () => ({
   readNodeArenaGenerationReconciliation: readReconciliation,
   readOwnedNodeArenaGenerationReconciliation: readOwnedReconciliation,
+  resolveArenaCombatantNativeAuthority: resolveNativeAuthority,
 }));
 vi.mock('@/lib/signature', () => ({ verifySignature }));
 vi.mock('@/lib/arena/service', () => ({ applyPostBattleUpdates }));
@@ -76,6 +78,9 @@ describe('Arena stream reconciliation handler', () => {
       reconciliation: authoritativePayload,
     });
     verifySignature.mockResolvedValue(true);
+    resolveNativeAuthority.mockImplementation(async (
+      value: { isNative?: unknown },
+    ) => value.isNative === true);
     applyPostBattleUpdates.mockResolvedValue([{ name: 'A', arena_history: {} }]);
   });
 
@@ -125,6 +130,115 @@ describe('Arena stream reconciliation handler', () => {
       success: true,
     });
     expect(applyPostBattleUpdates).toHaveBeenCalledOnce();
+  });
+
+  it('uses the same server authority resolver before signing canonical presets', async () => {
+    resolveNativeAuthority.mockResolvedValue(true);
+    const response = await appRouteHandler(request({ generationId, combatants }) as never);
+
+    expect(response.status).toBe(200);
+    expect(resolveNativeAuthority).toHaveBeenCalledTimes(2);
+    expect(applyPostBattleUpdates).toHaveBeenCalledWith(
+      combatants,
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
+  it('accepts an exact preset generation frozen by the legacy signature-only authority bug', async () => {
+    const presetCombatants = [{
+      type: 'character',
+      filename: 'C01_egg.json',
+      isNative: true,
+      isPreset: true,
+      data: { name: '内置角色' },
+    }];
+    const browserHash = await hashArenaCombatantBaseRevision(presetCombatants);
+    const signatureOnlyHash = await hashArenaCombatantBaseRevision([
+      { ...presetCombatants[0], isNative: false },
+    ]);
+    readOwnedReconciliation.mockResolvedValueOnce({
+      kind: 'found',
+      reconciliation: {
+        ...authoritativePayload,
+        rosterCount: 1,
+        baseRevisionHash: signatureOnlyHash,
+      },
+    });
+    verifySignature.mockResolvedValue(false);
+    resolveNativeAuthority.mockResolvedValue(true);
+
+    const response = await appRouteHandler(new Request(
+      'http://localhost/api/arena/update-combatants-after-stream',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Mahoshojo-Generation-Actor-Token': 'signed.actor',
+        },
+        body: JSON.stringify({
+          generationId,
+          combatants: presetCombatants,
+          baseRevisionHash: browserHash,
+        }),
+      },
+    ) as never);
+
+    expect(response.status).toBe(200);
+    expect(applyPostBattleUpdates).toHaveBeenCalledWith(
+      presetCombatants,
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
+  it('does not extend legacy preset compatibility to an unsigned non-canonical card', async () => {
+    const forgedCombatants = [{
+      type: 'character',
+      filename: 'forged.json',
+      isNative: true,
+      isPreset: true,
+      data: { name: '伪造 preset' },
+    }];
+    const browserHash = await hashArenaCombatantBaseRevision(forgedCombatants);
+    const signatureOnlyHash = await hashArenaCombatantBaseRevision([
+      { ...forgedCombatants[0], isNative: false },
+    ]);
+    readOwnedReconciliation.mockResolvedValueOnce({
+      kind: 'found',
+      reconciliation: {
+        ...authoritativePayload,
+        rosterCount: 1,
+        baseRevisionHash: signatureOnlyHash,
+      },
+    });
+    verifySignature.mockResolvedValue(false);
+    resolveNativeAuthority.mockResolvedValue(false);
+
+    const response = await appRouteHandler(new Request(
+      'http://localhost/api/arena/update-combatants-after-stream',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Mahoshojo-Generation-Actor-Token': 'signed.actor',
+        },
+        body: JSON.stringify({
+          generationId,
+          combatants: forgedCombatants,
+          baseRevisionHash: browserHash,
+        }),
+      },
+    ) as never);
+
+    expect(response.status).toBe(409);
+    expect(applyPostBattleUpdates).not.toHaveBeenCalled();
   });
 
   it('rejects local cards that no longer match the frozen base revision', async () => {

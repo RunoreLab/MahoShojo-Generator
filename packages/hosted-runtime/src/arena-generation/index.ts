@@ -8,6 +8,7 @@ export * from './finalization-bridge';
 export * from './internal-authority';
 export * from './internal-http-auth';
 export * from './materials';
+export * from './native-authority';
 export * from './node-executor';
 export * from './prompt';
 export * from './runtime';
