@@ -1336,9 +1336,9 @@ LIMIT 1
   if (extra.finalizationCompleted !== true) {
     return { kind: 'unavailable', reason: 'finalization_pending' };
   }
-  const aiProviderName = stringOf(row.ai_provider_name);
-  const aiProviderType = stringOf(row.ai_provider_type);
-  const aiModel = stringOf(row.ai_model);
+  const aiProviderName = stringOf(row['ai_provider_name']);
+  const aiProviderType = stringOf(row['ai_provider_type']);
+  const aiModel = stringOf(row['ai_model']);
   if (
     !aiProviderName
     || !aiModel
@@ -1349,8 +1349,8 @@ LIMIT 1
   return {
     kind: 'found',
     provenance: {
-      customProviderId: stringOf(row.custom_provider_id),
-      customModelId: stringOf(row.custom_model_id),
+      customProviderId: stringOf(row['custom_provider_id']),
+      customModelId: stringOf(row['custom_model_id']),
       aiProviderName,
       aiProviderType: aiProviderType as 'openai' | 'google' | 'deepseek',
       aiModel,
