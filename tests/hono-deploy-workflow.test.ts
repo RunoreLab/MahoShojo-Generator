@@ -139,15 +139,22 @@ describe('Hono deployment workflow', () => {
     expect(verificationStep).toContain('tests/hono-deploy-script.test.ts');
   });
 
-  test('production pipeline 只执行一次 unified repository gate', () => {
+  test('production pipeline 由 READY verifier 执行一次 unified repository gate', () => {
     const honoWorkflow = readFileSync(HONO_WORKFLOW_PATH, 'utf8');
     const cloudflareWorkflow = readFileSync(CLOUDFLARE_WORKFLOW_PATH, 'utf8');
-    const verificationStep = getStep(
+    const parityStep = getStep(
       getJob(honoWorkflow, 'build'),
-      'Verify workspace and repository gates',
+      'Require Arena product parity for production',
+    );
+    const readyVerifier = readFileSync(
+      resolve(process.cwd(), 'scripts/verify-arena-product-parity-ready.mjs'),
+      'utf8',
     );
 
-    expect(verificationStep).toContain('run: pnpm run ci:verify');
+    expect(parityStep).toContain('pnpm run verify:arena-product-parity-ready');
+    expect(parityStep).toContain('ARENA_PRODUCT_PARITY_REDIS_URL: redis://127.0.0.1:6379');
+    expect(readyVerifier).toContain("args: ['run', 'ci:verify']");
+    expect(honoWorkflow).not.toContain('run: pnpm run ci:verify');
     expect(cloudflareWorkflow).not.toContain('Verify workspace and repository gates');
     expect(cloudflareWorkflow).not.toContain('run: pnpm run ci:verify');
   });

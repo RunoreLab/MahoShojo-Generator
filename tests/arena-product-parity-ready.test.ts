@@ -8,7 +8,7 @@ const packagePath = resolve(repositoryRoot, 'package.json');
 const scriptPath = resolve(repositoryRoot, 'scripts/verify-arena-product-parity-ready.mjs');
 
 describe('GMR-10Q repeatable READY verification entrypoint', () => {
-  it('binds the required API/Web/coverage/contracts suites without recursive repo verification', () => {
+  it('把 READY 绑定到完整 CI、真实 Redis verifier 与工作树检查', () => {
     expect(existsSync(scriptPath), '缺少 GMR-10Q READY 可重复验证脚本').toBe(true);
     const packageManifest = JSON.parse(readFileSync(packagePath, 'utf8')) as {
       scripts?: Record<string, string>;
@@ -20,39 +20,31 @@ describe('GMR-10Q repeatable READY verification entrypoint', () => {
     const source = readFileSync(scriptPath, 'utf8');
     for (const requiredPath of [
       'scripts/check-arena-product-parity.mjs',
-      'tests/room-product-parity-golden-flow.test.ts',
-      'tests/room-generation-service.test.ts',
-      'tests/arena-room-generation-materializer.test.ts',
-      'tests/room-http.test.ts',
-      'tests/room-verifier-membership-composition.test.ts',
-      'tests/arena-multiplayer-production-wiring.test.tsx',
-      'tests/arena-multiplayer-interaction.test.tsx',
-      'tests/arena-multiplayer-generation-bridge.test.ts',
-      'tests/arena-room-shared-config.test.ts',
-      'tests/arena-room-generation-preflight-dialog.test.tsx',
-      'tests/arena-room-host-reconciliation.test.ts',
-      'tests/arena-multiplayer-narrative-history-parity.test.tsx',
-      'tests/arena-room-proposal-workspace.test.tsx',
-      'tests/arena-proposal-panel.test.tsx',
-      'tests/arena-battle-result-presentation.test.tsx',
-      'tests/modal-accessibility.test.tsx',
-      'tests/arena-multiplayer-panel.test.tsx',
-      'tests/product-parity-coverage.test.ts',
-      'tests/gmr10q-gate-registry-readiness.test.ts',
-      'tests/gmr10p-proposal-contract-expansion.test.ts',
-      'tests/state-machine-proposal-generation.test.ts',
-      'tests/room-http.test.ts',
-      'tests/gmr10q-gate-minimization.test.ts',
-      'tests/gmr10q-error-taxonomy.test.ts',
-      'tests/proposal.test.ts',
-      'tests/spec-review-r3.test.ts',
-      'tests/wire-security.test.ts',
+      'scripts/verify-arena-product-parity-redis.mjs',
     ]) {
       expect(source, `READY verifier 未绑定 ${requiredPath}`).toContain(requiredPath);
     }
     expect(source).toContain('--require-ready');
-    expect(source).not.toContain('test:repo');
-    expect(source).not.toContain('ci:verify');
-    expect(source).not.toContain('tests/arena-product-parity-gate.test.ts');
+    expect(source).toContain('ci:verify');
+    expect(source).toContain('git');
+    expect(source).toContain('diff');
+    expect(source).toContain('--check');
+  });
+
+  it('Redis 入口只连接 loopback，并执行 room、generation 与进程恢复三条真实 verifier', () => {
+    const redisScriptPath = resolve(
+      repositoryRoot,
+      'scripts/verify-arena-product-parity-redis.mjs',
+    );
+    expect(existsSync(redisScriptPath)).toBe(true);
+    const source = readFileSync(redisScriptPath, 'utf8');
+
+    expect(source).toContain('127.0.0.1');
+    expect(source).toContain('verify:room-redis');
+    expect(source).toContain('verify:room-generation-redis');
+    expect(source).toContain('verify:room-generation-process-recovery');
+    expect(source).toContain('ROOM_REDIS_VERIFY=true');
+    expect(source).toContain('ROOM_GENERATION_REDIS_VERIFY=true');
+    expect(source).toContain('ROOM_GENERATION_PROCESS_VERIFY=true');
   });
 });
