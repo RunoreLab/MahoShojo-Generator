@@ -1,7 +1,7 @@
 'use client';
 
 import { create } from 'zustand';
-import { createJSONStorage, persist } from 'zustand/middleware';
+import { persist } from 'zustand/middleware';
 
 import {
   BattleStoreState,
@@ -23,6 +23,7 @@ import {
   restoreArenaAdjudicationDraft,
 } from '@/lib/arena/adjudication-draft-persistence';
 import { canAddArenaReferenceItems } from '@/lib/arena/resource-budget';
+import { createHydrationSafeJsonStorage } from '@/lib/zustand-persist-storage';
 
 const normalizeSourceKey = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
 
@@ -565,8 +566,8 @@ export const useBattleStore = create<BattleStoreState>()(
     }),
     {
       name: 'arena-storage',
-      storage: createJSONStorage(createStorage),
-      // SSR 与 hydration 首帧都使用默认状态；ArenaPage mount 后再读取 localStorage。
+      storage: createHydrationSafeJsonStorage(createStorage),
+      // SSR 与 hydration 首帧都使用默认状态；路由 boundary mount 后再读取 localStorage。
       skipHydration: true,
       merge: (persistedState, currentState) => {
         const persisted = persistedState && typeof persistedState === 'object'

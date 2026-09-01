@@ -29,7 +29,6 @@ import { BattleModeSwitcher } from './components/BattleModeSwitcher';
 import { GenerationModeSwitcher } from './components/GenerationModeSwitcher';
 import { RankingQuickActions } from './components/RankingQuickActions';
 import { useBattleStore } from './stores/useBattleStore';
-import { useNarrativeHistoryStore } from './stores/useNarrativeHistoryStore';
 import {
   BattleStoreState,
   CombatantData,
@@ -91,13 +90,6 @@ export function ArenaPage({ multiplayer }: ArenaPageProps = {}) {
   const isGenerating = useBattleStore((state: BattleStoreState) => state.isGenerating);
   const isMatching = useBattleStore((state: BattleStoreState) => state.isMatching);
   const error = useBattleStore((state: BattleStoreState) => state.error);
-
-  useEffect(() => {
-    void Promise.allSettled([
-      useBattleStore.persist.rehydrate(),
-      useNarrativeHistoryStore.persist.rehydrate(),
-    ]);
-  }, []);
 
   const {
     handleSelectDataCard,

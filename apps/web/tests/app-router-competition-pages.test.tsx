@@ -38,6 +38,14 @@ vi.mock('@/components/arena/ArenaPage', () => ({
   },
 }));
 
+vi.mock('@/components/arena/ArenaPersistedStateBoundary', () => ({
+  ArenaPersistedStateBoundary: function ArenaPersistedStateBoundaryMock({ children }: {
+    children?: React.ReactNode;
+  }) {
+    return <>{children}</>;
+  },
+}));
+
 vi.mock('@/config/arena-multiplayer', () => ({
   arenaMultiplayerConfig: {
     enabled: true,

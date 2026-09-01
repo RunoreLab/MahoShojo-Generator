@@ -1,7 +1,7 @@
 'use client';
 
 import { create } from 'zustand';
-import { createJSONStorage, persist } from 'zustand/middleware';
+import { persist } from 'zustand/middleware';
 
 import { randomUUID } from '@/lib/crypto';
 import {
@@ -12,6 +12,7 @@ import {
   type NarrativeHistorySort,
 } from '@/lib/narrative-history';
 import type { NarrativeHistoryEntry } from '@/types/arena';
+import { createHydrationSafeJsonStorage } from '@/lib/zustand-persist-storage';
 
 export const NARRATIVE_HISTORY_STORAGE_KEY = 'arena-narrative-history-v1';
 export type { NarrativeHistorySort } from '@/lib/narrative-history';
@@ -157,7 +158,7 @@ export const useNarrativeHistoryStore = create<NarrativeHistoryStoreState>()(
     {
       name: NARRATIVE_HISTORY_STORAGE_KEY,
       version: 2,
-      // 避免客户端首帧先于 React hydration 同步读取 localStorage。
+      // 避免客户端首帧先于 React hydration 同步读取 localStorage；由路由 boundary 显式恢复。
       skipHydration: true,
       migrate: (persistedState, version) => {
         const state = (persistedState ?? {}) as Partial<NarrativeHistoryStoreState> & Record<string, unknown>;
@@ -189,7 +190,7 @@ export const useNarrativeHistoryStore = create<NarrativeHistoryStoreState>()(
               : 'updated_desc',
         };
       },
-      storage: createJSONStorage(createStorage),
+      storage: createHydrationSafeJsonStorage(createStorage),
       partialize: (state) => ({
         entries: state.entries,
         lastUpdatedAt: state.lastUpdatedAt,
