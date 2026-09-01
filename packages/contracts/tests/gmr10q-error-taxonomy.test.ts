@@ -2,17 +2,25 @@ import { describe, expect, it } from 'vitest';
 
 import {
   ARENA_ROOM_ERROR_TAXONOMY,
+  ARENA_ROOM_ERROR_TAXONOMY_ACCEPT,
+  ARENA_ROOM_ERROR_TAXONOMY_ACCEPT_PARAMETER,
   ARENA_ROOM_ERROR_TAXONOMY_HEADER,
   ARENA_ROOM_ERROR_TAXONOMY_VERSION,
   ARENA_ROOM_HOSTED_ERROR_CODES,
+  ARENA_ROOM_HTTP_LEGACY_CODE_BY_CODE,
   ARENA_ROOM_HTTP_ERROR_CODES,
+  ARENA_ROOM_LEGACY_HTTP_ERROR_CODES,
   evaluateArenaBasicGenerationReadiness,
+  isArenaRoomErrorTaxonomyAccepted,
 } from '../src/arena-room';
 
 describe('GMR-10Q canonical Arena error taxonomy', () => {
   it('[GMR10Q-CONTRACT-TAXONOMY] 协商版本与 HTTP code 是可枚举的稳定 contract', () => {
     expect(ARENA_ROOM_ERROR_TAXONOMY_HEADER).toBe('x-mahoshojo-arena-error-taxonomy');
     expect(ARENA_ROOM_ERROR_TAXONOMY_VERSION).toBe('2');
+    expect(ARENA_ROOM_ERROR_TAXONOMY_ACCEPT_PARAMETER).toBe('arena-error-taxonomy');
+    expect(ARENA_ROOM_ERROR_TAXONOMY_ACCEPT)
+      .toBe('application/json; arena-error-taxonomy=2');
     expect(ARENA_ROOM_HTTP_ERROR_CODES).toEqual([
       'ROOM_AUTHENTICATION_REQUIRED',
       'ROOM_AUTHENTICATION_DENIED',
@@ -57,6 +65,46 @@ describe('GMR-10Q canonical Arena error taxonomy', () => {
     expect(ARENA_ROOM_HTTP_ERROR_CODES).toContain(
       'ROOM_HOST_LOCAL_PAYLOAD_MISSING_OR_MISMATCH',
     );
+  });
+
+  it('旧客户端基线 code 与 0bb6b883 contract 精确一致，所有新 code 都有基线降级', () => {
+    expect(ARENA_ROOM_LEGACY_HTTP_ERROR_CODES).toEqual([
+      'ROOM_AUTHENTICATION_REQUIRED',
+      'ROOM_AUTHENTICATION_DENIED',
+      'ROOM_FORBIDDEN',
+      'ROOM_NOT_FOUND',
+      'ROOM_PAYLOAD_TOO_LARGE',
+      'ROOM_REQUEST_INVALID',
+      'ROOM_CONFLICT',
+      'ROOM_RATE_LIMITED',
+      'ROOM_UNAVAILABLE',
+    ]);
+    expect(Object.keys(ARENA_ROOM_HTTP_LEGACY_CODE_BY_CODE).sort())
+      .toEqual([...ARENA_ROOM_HTTP_ERROR_CODES].sort());
+    expect(Object.values(ARENA_ROOM_HTTP_LEGACY_CODE_BY_CODE).every((code) => (
+      ARENA_ROOM_LEGACY_HTTP_ERROR_CODES.includes(code)
+    ))).toBe(true);
+    expect(ARENA_ROOM_HTTP_LEGACY_CODE_BY_CODE).toMatchObject({
+      ROOM_MEMBER_LIMIT_REACHED: 'ROOM_CONFLICT',
+      ROOM_PROPOSAL_PENDING_LIMIT_REACHED: 'ROOM_CONFLICT',
+      ROOM_CONFIG_FRAME_TOO_LARGE: 'ROOM_PAYLOAD_TOO_LARGE',
+      ROOM_GENERATION_COMBATANTS_EMPTY: 'ROOM_CONFLICT',
+      ROOM_HOST_LOCAL_PAYLOAD_MISSING: 'ROOM_REQUEST_INVALID',
+      ROOM_HOST_LOCAL_DIGEST_MISMATCH: 'ROOM_CONFLICT',
+      ROOM_REFERENCE_STALE: 'ROOM_CONFLICT',
+    });
+  });
+
+  it('Accept 参数可在不引入自定义请求头的情况下显式协商细分错误', () => {
+    expect(isArenaRoomErrorTaxonomyAccepted(ARENA_ROOM_ERROR_TAXONOMY_ACCEPT)).toBe(true);
+    expect(isArenaRoomErrorTaxonomyAccepted(
+      'text/plain; q=0.1, Application/JSON; charset=utf-8; ARENA-ERROR-TAXONOMY="2"',
+    )).toBe(true);
+    expect(isArenaRoomErrorTaxonomyAccepted('application/json')).toBe(false);
+    expect(isArenaRoomErrorTaxonomyAccepted('application/json; arena-error-taxonomy=1'))
+      .toBe(false);
+    expect(isArenaRoomErrorTaxonomyAccepted('*/*; arena-error-taxonomy=2')).toBe(false);
+    expect(isArenaRoomErrorTaxonomyAccepted(null)).toBe(false);
   });
 
   it('显式映射 domain code、公开 HTTP code 与 Hosted runtime code', () => {

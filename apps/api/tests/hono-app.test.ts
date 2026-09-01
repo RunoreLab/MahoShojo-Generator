@@ -306,6 +306,7 @@ describe('Hono server app', () => {
         'Access-Control-Request-Headers': [
           'authorization',
           'content-type',
+          'x-mahoshojo-arena-error-taxonomy',
           'x-mahoshojo-activity-token',
           'x-mahoshojo-ai-meta',
           'x-mahoshojo-generation-actor-token',
@@ -319,6 +320,9 @@ describe('Hono server app', () => {
     expect(response.headers.get('access-control-allow-origin')).toBe('https://mahoshojo.colanns.me');
     expect(response.headers.get('access-control-allow-credentials')).toBeNull();
     expect(response.headers.get('access-control-allow-headers')?.toLowerCase()).toContain('authorization');
+    expect(response.headers.get('access-control-allow-headers')?.toLowerCase()).toContain(
+      'x-mahoshojo-arena-error-taxonomy',
+    );
     expect(response.headers.get('access-control-allow-headers')?.toLowerCase()).toContain(
       'x-mahoshojo-activity-token',
     );

@@ -228,8 +228,8 @@ snapshot 与 replay；Redis 不可用时 create 必须在 Provider 前 fail clos
 恢复已完成 D1/R2 terminal，不以 process memory 替代 active lifecycle。
 
 Arena create 先认证，再按原始字节增量读取；超过 12 MiB 的首个字节立即取消并在 Provider 前返回 413。
-combatants 最多 32，裁定事件
-最多 100，questionnaire/narrative-history 各 50，aux-scenario/material 各 10。D1 terminal
+combatants 最多 32，裁定事件最多 100，questionnaire/narrative-history 各 50；共享房间配置中的
+aux-scenario 与 material 累计最多 256，四类引用进入 Hosted runtime 后仍合计受 256 项 sanity budget 约束。D1 terminal
 `extra_json` 最大 96 KiB，local reconciliation 候选最大 64 KiB，combatant fallback/终态角色行各最多
 32。blocking replay 唤醒后会通过 Lua 重新验证 cursor；过期 producer 的 heartbeat、append 和
 finalization mutation 均被 fenced。durable finalization 失败时 Redis 保持 `finalizing`，交给 expired-lease

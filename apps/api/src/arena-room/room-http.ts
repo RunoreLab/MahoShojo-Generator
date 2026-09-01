@@ -33,7 +33,10 @@ import {
   PROTOCOL_VERSION,
   RoomDirectoryPageSchema,
   RoomDirectoryPageQuerySchema,
+  isArenaRoomErrorTaxonomyAccepted,
+  resolveArenaRoomLegacyHttpErrorCode,
   type ArenaRoomHttpErrorCode,
+  type ArenaRoomLegacyHttpErrorCode,
 } from '@mahoshojo/contracts/arena-room';
 import { ARENA_RESOURCE_BUDGET } from '@mahoshojo/hosted-api/arena-generation/resource-budget';
 
@@ -176,14 +179,16 @@ const errorBody = (code: ArenaRoomHttpErrorCode, error: string, retryAfterSecond
 
 const hasNegotiatedGranularErrors = (context: ArenaRoomHttpContext): boolean => (
   context.req.header(ARENA_ROOM_ERROR_TAXONOMY_HEADER) === ARENA_ROOM_ERROR_TAXONOMY_VERSION
+  || isArenaRoomErrorTaxonomyAccepted(context.req.header('accept'))
 );
 
 const negotiatedErrorBody = (
   context: ArenaRoomHttpContext,
   code: ArenaRoomHttpErrorCode,
-  legacyCode: ArenaRoomHttpErrorCode,
   error: string,
+  legacyCode: ArenaRoomLegacyHttpErrorCode = resolveArenaRoomLegacyHttpErrorCode(code),
 ) => {
+  context.header('vary', 'Accept', { append: true });
   context.header('vary', ARENA_ROOM_ERROR_TAXONOMY_HEADER, { append: true });
   context.header('cache-control', 'no-store');
   return errorBody(hasNegotiatedGranularErrors(context) ? code : legacyCode, error);
@@ -205,7 +210,6 @@ const mapServiceError = (context: ArenaRoomHttpContext, error: unknown): Respons
         return context.json(negotiatedErrorBody(
           context,
           error.issue.code,
-          'ROOM_PAYLOAD_TOO_LARGE',
           `配置提案超过 ${MAX_PROPOSAL_BYTES / 1_024} KiB 的大小限制；请拆分或精简变更后重试。`,
         ), 413);
       }
@@ -218,7 +222,6 @@ const mapServiceError = (context: ArenaRoomHttpContext, error: unknown): Respons
       return context.json(negotiatedErrorBody(
         context,
         error.issue.code,
-        'ROOM_REQUEST_INVALID',
         `当前有 ${error.issue.current ?? '?'} 位参战角色，最多支持 ${error.issue.maximum ?? 32} 位；请移除多余角色后再开始生成。`,
       ), 400);
     }
@@ -226,7 +229,6 @@ const mapServiceError = (context: ArenaRoomHttpContext, error: unknown): Respons
       return context.json(negotiatedErrorBody(
         context,
         error.issue.code,
-        'ROOM_REQUEST_INVALID',
         `当前有 ${error.issue.current ?? '?'} 位参战角色，房间配置最多支持 ${error.issue.maximum ?? 32} 位；请移除多余角色后重试。`,
       ), 400);
     }
@@ -234,7 +236,6 @@ const mapServiceError = (context: ArenaRoomHttpContext, error: unknown): Respons
       return context.json(negotiatedErrorBody(
         context,
         error.issue.code,
-        'ROOM_REQUEST_INVALID',
         `当前共有 ${error.issue.current ?? '?'} 个辅助情景与素材，累计最多支持 ${error.issue.maximum ?? 256} 个；请移除多余内容后重试。`,
       ), 400);
     }
@@ -242,7 +243,6 @@ const mapServiceError = (context: ArenaRoomHttpContext, error: unknown): Respons
       return context.json(negotiatedErrorBody(
         context,
         error.issue.code,
-        'ROOM_REQUEST_INVALID',
         '房间配置包含无法安全共享的字段或引用关系；请检查标记的配置项后重试。',
       ), 400);
     }
@@ -250,7 +250,6 @@ const mapServiceError = (context: ArenaRoomHttpContext, error: unknown): Respons
       return context.json(negotiatedErrorBody(
         context,
         error.issue.code,
-        'ROOM_REQUEST_INVALID',
         `当前配置提案有 ${error.issue.current ?? '?'} 项变更，单个提案最多支持 ${error.issue.maximum ?? MAX_PROPOSAL_CHANGES} 项；请拆分后重试。`,
       ), 400);
     }
@@ -258,7 +257,6 @@ const mapServiceError = (context: ArenaRoomHttpContext, error: unknown): Respons
       return context.json(negotiatedErrorBody(
         context,
         error.issue.code,
-        'ROOM_REQUEST_INVALID',
         `${error.issue.target ?? '数据卡'}缺少版本信息；请刷新或重新选择该数据卡后重试。`,
       ), 400);
     }
@@ -280,12 +278,10 @@ const mapServiceError = (context: ArenaRoomHttpContext, error: unknown): Respons
       case 'ROOM_REFERENCE_DENIED':
         return context.json(negotiatedErrorBody(context,
           'ROOM_REFERENCE_DENIED',
-          'ROOM_CONFLICT',
           '当前账号无权将对应数据卡加入房间；请改用可访问的数据卡或联系作者调整权限。',
         ), hasNegotiatedGranularErrors(context) ? 403 : 409);
       case 'ROOM_REFERENCE_STALE':
         return context.json(negotiatedErrorBody(context,
-          'ROOM_REFERENCE_STALE',
           'ROOM_REFERENCE_STALE',
           '数据卡版本已更新，请重新同步或重新选择对应数据卡后重试。',
         ), 409);
@@ -298,12 +294,10 @@ const mapServiceError = (context: ArenaRoomHttpContext, error: unknown): Respons
       case 'ROOM_MEMBER_LIMIT_REACHED':
         return context.json(negotiatedErrorBody(context,
           'ROOM_MEMBER_LIMIT_REACHED',
-          'ROOM_MEMBER_LIMIT_REACHED',
           `房间最多容纳 ${MAX_ROOM_MEMBERS} 人，当前已有 ${MAX_ROOM_MEMBERS} 人；请等待有成员退出后重试。`,
         ), 409);
       case 'ROOM_CONFIG_FRAME_TOO_LARGE':
         return context.json(negotiatedErrorBody(context,
-          'ROOM_CONFIG_FRAME_TOO_LARGE',
           'ROOM_CONFIG_FRAME_TOO_LARGE',
           '房间配置快照超过 64 KiB，请减少角色、情景、素材或引导内容后重试。',
         ), 413);
@@ -331,18 +325,15 @@ const mapServiceError = (context: ArenaRoomHttpContext, error: unknown): Respons
       case 'ROOM_PROPOSAL_PENDING_LIMIT_REACHED':
         return context.json(negotiatedErrorBody(context,
           'ROOM_PROPOSAL_PENDING_LIMIT_REACHED',
-          'ROOM_PROPOSAL_PENDING_LIMIT_REACHED',
           `每位成员最多保留 ${MAX_PENDING_PROPOSALS_PER_MEMBER} 个待处理提案，当前已有 ${MAX_PENDING_PROPOSALS_PER_MEMBER} 个；请先撤回或等待处理现有提案。`,
         ), 409);
       case 'ROOM_PROPOSAL_BYTE_LIMIT':
         return context.json(negotiatedErrorBody(context,
           'ROOM_PROPOSAL_BYTE_LIMIT',
-          'ROOM_PAYLOAD_TOO_LARGE',
           `配置提案超过 ${MAX_PROPOSAL_BYTES / 1_024} KiB 的大小限制；请拆分或精简变更后重试。`,
         ), 413);
       case 'ROOM_CONFIG_FRAME_TOO_LARGE':
         return context.json(negotiatedErrorBody(context,
-          'ROOM_CONFIG_FRAME_TOO_LARGE',
           'ROOM_CONFIG_FRAME_TOO_LARGE',
           '房间快照超过 64 KiB，请减少配置内容或先处理现有提案后重试。',
         ), 413);
@@ -354,12 +345,10 @@ const mapServiceError = (context: ArenaRoomHttpContext, error: unknown): Respons
       case 'ROOM_REFERENCE_DENIED':
         return context.json(negotiatedErrorBody(context,
           'ROOM_REFERENCE_DENIED',
-          'ROOM_CONFLICT',
           '配置提案引用的数据卡不可用于当前房间；请改用房主可访问的数据卡后重新提交。',
         ), hasNegotiatedGranularErrors(context) ? 403 : 409);
       case 'ROOM_REFERENCE_STALE':
         return context.json(negotiatedErrorBody(context,
-          'ROOM_REFERENCE_STALE',
           'ROOM_REFERENCE_STALE',
           '提案引用的数据卡已更新，请重新同步或重新选择数据卡后再提交。',
         ), 409);
@@ -386,7 +375,6 @@ const mapServiceError = (context: ArenaRoomHttpContext, error: unknown): Respons
         const required = numericParam('required', 1);
         return context.json(negotiatedErrorBody(context,
           'ROOM_GENERATION_COMBATANTS_EMPTY',
-          'ROOM_GENERATION_COMBATANTS_EMPTY',
           `当前有 ${current} 位参战角色，至少需要 ${required} 位；请添加角色后再开始生成。`,
         ), 409);
       }
@@ -400,91 +388,76 @@ const mapServiceError = (context: ArenaRoomHttpContext, error: unknown): Respons
                 : '当前模式';
         return context.json(negotiatedErrorBody(context,
           'ROOM_GENERATION_COMBATANTS_INSUFFICIENT',
-          'ROOM_GENERATION_COMBATANTS_INSUFFICIENT',
           `${mode}当前有 ${current} 位参战角色，至少需要 ${required} 位；请继续添加角色。`,
         ), 409);
       }
       case 'ROOM_GENERATION_SCENARIO_REQUIRED':
         return context.json(negotiatedErrorBody(context,
           'ROOM_GENERATION_SCENARIO_REQUIRED',
-          'ROOM_GENERATION_SCENARIO_REQUIRED',
           '情景模式需要主情景，请先选择或载入主情景后再开始生成。',
         ), 409);
       case 'ROOM_GENERATION_COMBATANT_LIMIT':
         return context.json(negotiatedErrorBody(context,
           'ROOM_GENERATION_COMBATANT_LIMIT',
-          'ROOM_REQUEST_INVALID',
           `参战角色超过运行时上限 ${ARENA_RESOURCE_BUDGET.maxCombatants} 位；请移除多余角色后再开始生成。`,
         ), 400);
       case 'ROOM_RUNTIME_BODY_LIMIT':
         return context.json(negotiatedErrorBody(context,
           'ROOM_RUNTIME_BODY_LIMIT',
-          'ROOM_PAYLOAD_TOO_LARGE',
           `生成请求超过运行时 ${ARENA_RESOURCE_BUDGET.hardBodyBytes / 1_024 / 1_024} MiB 的正文上限；请减少角色、情景、素材或叙事历史后重试。`,
         ), 413);
       case 'ROOM_RUNTIME_REFERENCE_LIMIT':
         return context.json(negotiatedErrorBody(context,
           'ROOM_RUNTIME_REFERENCE_LIMIT',
-          'ROOM_REQUEST_INVALID',
           `辅助情景、素材、问卷与叙事历史累计超过运行时上限 ${ARENA_RESOURCE_BUDGET.maxReferenceItemsSanity} 项；请减少引用内容后重试。`,
         ), 400);
       case 'ROOM_RUNTIME_ADJUDICATION_LIMIT':
         return context.json(negotiatedErrorBody(context,
           'ROOM_RUNTIME_ADJUDICATION_LIMIT',
-          'ROOM_REQUEST_INVALID',
           `裁定事件超过运行时上限 ${ARENA_RESOURCE_BUDGET.maxAdjudicationEvents} 项；请减少裁定记录后重试。`,
         ), 400);
       case 'ROOM_RUNTIME_PROMPT_BUDGET_EXCEEDED':
         return context.json(negotiatedErrorBody(context,
           'ROOM_RUNTIME_PROMPT_BUDGET_EXCEEDED',
-          'ROOM_REQUEST_INVALID',
           '生成提示词超过当前渠道的安全预算；请缩短角色、情景、素材、引导或叙事历史内容后重试。',
         ), 400);
       case 'ROOM_PROVIDER_CONFIG_INVALID':
         return context.json(negotiatedErrorBody(context,
           'ROOM_PROVIDER_CONFIG_INVALID',
-          'ROOM_REQUEST_INVALID',
           '当前生成渠道配置无效；请检查服务商、模型和 API Key 后重试。',
         ), 400);
       case 'ROOM_HOST_LOCAL_PAYLOAD_MISSING':
         return context.json(negotiatedErrorBody(context,
           'ROOM_HOST_LOCAL_PAYLOAD_MISSING',
-          'ROOM_HOST_LOCAL_PAYLOAD_MISSING_OR_MISMATCH',
           `${targetLabel}来自房主本地文件，但当前页面无法取得完整内容；请房主重新载入后重试。`,
         ), 400);
       case 'ROOM_HOST_LOCAL_PAYLOAD_INVALID':
         return context.json(negotiatedErrorBody(context,
           'ROOM_HOST_LOCAL_PAYLOAD_INVALID',
-          'ROOM_HOST_LOCAL_PAYLOAD_MISSING_OR_MISMATCH',
           '房主本地内容列表不完整或包含重复项；请重新载入内容并更新房间配置。',
         ), 400);
       case 'ROOM_HOST_LOCAL_KIND_MISMATCH':
         return context.json(negotiatedErrorBody(context,
           'ROOM_HOST_LOCAL_KIND_MISMATCH',
-          'ROOM_HOST_LOCAL_PAYLOAD_MISSING_OR_MISMATCH',
           `${targetLabel}的内容类别与房间配置不一致；请重新选择正确类别的文件。`,
         ), 400);
       case 'ROOM_HOST_LOCAL_TYPE_MISMATCH':
         return context.json(negotiatedErrorBody(context,
           'ROOM_HOST_LOCAL_TYPE_MISMATCH',
-          'ROOM_HOST_LOCAL_PAYLOAD_MISSING_OR_MISMATCH',
           `${targetLabel}的角色类型与房间配置不一致；请重新载入该角色或更新房间配置。`,
         ), 400);
       case 'ROOM_HOST_LOCAL_DIGEST_MISMATCH':
         return context.json(negotiatedErrorBody(context,
           'ROOM_HOST_LOCAL_DIGEST_MISMATCH',
-          'ROOM_HOST_LOCAL_CONTENT_VERSION_MISMATCH',
           `${targetLabel}在加入房间配置后已发生变化；请重新载入并更新房间配置。`,
         ), 409);
       case 'ROOM_HOST_LOCAL_CONTENT_VERSION_MISSING':
         return context.json(negotiatedErrorBody(context,
           'ROOM_HOST_LOCAL_CONTENT_VERSION_MISSING',
-          'ROOM_HOST_LOCAL_CONTENT_VERSION_MISSING',
           `${targetLabel}缺少本地内容版本；请由房主重新发布房间配置后重试。`,
         ), 400);
       case 'ROOM_CONFIG_FRAME_TOO_LARGE':
         return context.json(negotiatedErrorBody(context,
-          'ROOM_CONFIG_FRAME_TOO_LARGE',
           'ROOM_CONFIG_FRAME_TOO_LARGE',
           '房间快照超过 64 KiB，请减少配置内容后再开始生成。',
         ), 413);
@@ -495,8 +468,8 @@ const mapServiceError = (context: ArenaRoomHttpContext, error: unknown): Respons
       case 'ROOM_REFERENCE_DENIED':
         return context.json(negotiatedErrorBody(context,
           'ROOM_REFERENCE_DENIED',
-          'ROOM_FORBIDDEN',
           '生成所需的数据卡当前不可读取；请重新选择有权限的数据卡并更新房间配置。',
+          'ROOM_FORBIDDEN',
         ), 403);
       case 'ROOM_GENERATION_NOT_FOUND':
         return context.json(errorBody('ROOM_NOT_FOUND', '房间生成不存在'), 404);
@@ -506,7 +479,6 @@ const mapServiceError = (context: ArenaRoomHttpContext, error: unknown): Respons
         return context.json(errorBody('ROOM_CONFLICT', '房间生成状态已发生变化'), 409);
       case 'ROOM_REFERENCE_STALE':
         return context.json(negotiatedErrorBody(context,
-          'ROOM_REFERENCE_STALE',
           'ROOM_REFERENCE_STALE',
           '数据卡加入房间后已更新，请重新同步或重新选择对应数据卡后重试。',
         ), 409);
@@ -521,7 +493,6 @@ const mapServiceError = (context: ArenaRoomHttpContext, error: unknown): Respons
       case 'ROOM_CONFIG_FRAME_TOO_LARGE':
         return context.json(negotiatedErrorBody(context,
           'ROOM_CONFIG_FRAME_TOO_LARGE',
-          'ROOM_CONFIG_FRAME_TOO_LARGE',
           '房间配置快照超过 64 KiB，请减少角色、情景、素材或引导内容后重试。',
         ), 413);
       case 'ROOM_CONFIG_INPUT_INVALID':
@@ -535,12 +506,10 @@ const mapServiceError = (context: ArenaRoomHttpContext, error: unknown): Respons
       case 'ROOM_REFERENCE_DENIED':
         return context.json(negotiatedErrorBody(context,
           'ROOM_REFERENCE_DENIED',
-          'ROOM_CONFLICT',
           '房间配置引用的数据卡当前不可读取；请重新选择有权限的数据卡后再发布。',
         ), hasNegotiatedGranularErrors(context) ? 403 : 409);
       case 'ROOM_REFERENCE_STALE':
         return context.json(negotiatedErrorBody(context,
-          'ROOM_REFERENCE_STALE',
           'ROOM_REFERENCE_STALE',
           '房间配置引用的数据卡已更新，请重新同步或重新选择数据卡后再发布。',
         ), 409);

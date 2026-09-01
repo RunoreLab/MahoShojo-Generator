@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { ARENA_ROOM_ERROR_TAXONOMY_ACCEPT } from '@mahoshojo/contracts/arena-room';
 
 import type { HonoServerConfig } from '#/config';
 import { createHonoApp } from '#/app';
@@ -532,7 +533,7 @@ describe('Arena Room HTTP product routes', () => {
     expect(errorBody.error).toContain(message);
   });
 
-  it('granular error taxonomy 需显式协商，旧客户端与未知版本保留既有 v1 精确 code', async () => {
+  it('granular error taxonomy 需显式协商，旧客户端与未知版本只收到 0bb6b883 基线 code', async () => {
     const serviceError = new ArenaRoomGenerationError('ROOM_GENERATION_COMBATANTS_EMPTY', {
       code: 'GENERATION_COMBATANTS_EMPTY',
       gate: 'generation-readiness',
@@ -573,35 +574,47 @@ describe('Arena Room HTTP product routes', () => {
       );
       expect(response.status).toBe(409);
       expect(await response.json()).toMatchObject({
-        code: 'ROOM_GENERATION_COMBATANTS_EMPTY',
+        code: 'ROOM_CONFLICT',
         error: expect.stringContaining('至少需要 1 位'),
       });
     }
 
     const negotiatedRequest = createRequest(body);
+    const acceptHeaders: Record<string, string> = { ...negotiatedRequest.headers };
+    delete acceptHeaders['x-mahoshojo-arena-error-taxonomy'];
+    acceptHeaders.accept = ARENA_ROOM_ERROR_TAXONOMY_ACCEPT;
     const negotiated = await app.request(
       `/api/arena/rooms/v1/${authority.snapshot.roomId}/generations`,
       {
         ...negotiatedRequest,
-        headers: {
-          ...negotiatedRequest.headers,
-          'x-mahoshojo-arena-error-taxonomy': '2',
-        },
+        headers: acceptHeaders,
       },
     );
     expect(negotiated.status).toBe(409);
     expect(await negotiated.json()).toMatchObject({
       code: 'ROOM_GENERATION_COMBATANTS_EMPTY',
     });
+    expect(negotiated.headers.get('vary')).toContain('Accept');
     expect(negotiated.headers.get('vary')).toContain('x-mahoshojo-arena-error-taxonomy');
     expect(negotiated.headers.get('cache-control')).toBe('no-store');
+
+    const customHeaderNegotiated = await app.request(
+      `/api/arena/rooms/v1/${authority.snapshot.roomId}/generations`,
+      createRequest(body),
+    );
+    expect(customHeaderNegotiated.status).toBe(409);
+    expect(await customHeaderNegotiated.json()).toMatchObject({
+      code: 'ROOM_GENERATION_COMBATANTS_EMPTY',
+    });
   });
 
   it.each([
-    [new ArenaRoomGenerationError('ROOM_HOST_LOCAL_PAYLOAD_MISSING'), 400, 'ROOM_HOST_LOCAL_PAYLOAD_MISSING_OR_MISMATCH'],
-    [new ArenaRoomGenerationError('ROOM_HOST_LOCAL_DIGEST_MISMATCH'), 409, 'ROOM_HOST_LOCAL_CONTENT_VERSION_MISMATCH'],
-    [new ArenaRoomGenerationError('ROOM_HOST_LOCAL_CONTENT_VERSION_MISSING'), 400, 'ROOM_HOST_LOCAL_CONTENT_VERSION_MISSING'],
-  ] as const)('v1 客户端可解析细分前的 host-local 兼容 code：%s', async (
+    [new ArenaRoomGenerationError('ROOM_HOST_LOCAL_PAYLOAD_MISSING'), 400, 'ROOM_REQUEST_INVALID'],
+    [new ArenaRoomGenerationError('ROOM_HOST_LOCAL_DIGEST_MISMATCH'), 409, 'ROOM_CONFLICT'],
+    [new ArenaRoomGenerationError('ROOM_HOST_LOCAL_CONTENT_VERSION_MISSING'), 400, 'ROOM_REQUEST_INVALID'],
+    [new ArenaRoomGenerationError('ROOM_REFERENCE_STALE'), 409, 'ROOM_CONFLICT'],
+    [new ArenaRoomGenerationError('ROOM_CONFIG_FRAME_TOO_LARGE'), 413, 'ROOM_PAYLOAD_TOO_LARGE'],
+  ] as const)('旧客户端只收到 0bb6b883 可解析的生成错误 code：%s', async (
     serviceError,
     status,
     legacyCode,

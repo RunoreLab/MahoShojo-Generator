@@ -1,10 +1,27 @@
 /**
- * Client opt-in header for Arena Room granular error taxonomy negotiation.
- * Version 2 negotiated responses replace the ambiguous host-local combined error.
- * The legacy code remains parseable for rolling compatibility with v1 clients.
+ * Arena Room granular error taxonomy negotiation. New browser clients should
+ * prefer the CORS-safelisted Accept parameter; the custom header remains for
+ * non-browser and already deployed clients whose API supports its preflight.
+ * Unnegotiated responses use only the pre-taxonomy nine-code baseline.
  */
 export const ARENA_ROOM_ERROR_TAXONOMY_HEADER = 'x-mahoshojo-arena-error-taxonomy' as const;
 export const ARENA_ROOM_ERROR_TAXONOMY_VERSION = '2' as const;
+export const ARENA_ROOM_ERROR_TAXONOMY_ACCEPT_PARAMETER = 'arena-error-taxonomy' as const;
+export const ARENA_ROOM_ERROR_TAXONOMY_ACCEPT = `application/json; ${ARENA_ROOM_ERROR_TAXONOMY_ACCEPT_PARAMETER}=${ARENA_ROOM_ERROR_TAXONOMY_VERSION}` as const;
+
+/** HTTP error codes understood by clients built from the pre-taxonomy contract. */
+export const ARENA_ROOM_LEGACY_HTTP_ERROR_CODES = [
+  'ROOM_AUTHENTICATION_REQUIRED',
+  'ROOM_AUTHENTICATION_DENIED',
+  'ROOM_FORBIDDEN',
+  'ROOM_NOT_FOUND',
+  'ROOM_PAYLOAD_TOO_LARGE',
+  'ROOM_REQUEST_INVALID',
+  'ROOM_CONFLICT',
+  'ROOM_RATE_LIMITED',
+  'ROOM_UNAVAILABLE',
+] as const;
+export type ArenaRoomLegacyHttpErrorCode = typeof ARENA_ROOM_LEGACY_HTTP_ERROR_CODES[number];
 
 export const ARENA_ROOM_HTTP_ERROR_CODES = [
   'ROOM_AUTHENTICATION_REQUIRED',
@@ -49,6 +66,84 @@ export const ARENA_ROOM_HTTP_ERROR_CODES = [
   'ROOM_PROVIDER_CONFIG_INVALID',
 ] as const;
 export type ArenaRoomHttpErrorCode = typeof ARENA_ROOM_HTTP_ERROR_CODES[number];
+
+/**
+ * Canonical fallback used when the client has not opted into taxonomy v2.
+ * Callers may retain an older context-specific status/code pair (for example
+ * reference denial during generation), but every fallback must remain inside
+ * the pre-taxonomy nine-code union above.
+ */
+export const ARENA_ROOM_HTTP_LEGACY_CODE_BY_CODE = Object.freeze({
+  ROOM_AUTHENTICATION_REQUIRED: 'ROOM_AUTHENTICATION_REQUIRED',
+  ROOM_AUTHENTICATION_DENIED: 'ROOM_AUTHENTICATION_DENIED',
+  ROOM_FORBIDDEN: 'ROOM_FORBIDDEN',
+  ROOM_NOT_FOUND: 'ROOM_NOT_FOUND',
+  ROOM_PAYLOAD_TOO_LARGE: 'ROOM_PAYLOAD_TOO_LARGE',
+  ROOM_REQUEST_INVALID: 'ROOM_REQUEST_INVALID',
+  ROOM_CONFLICT: 'ROOM_CONFLICT',
+  ROOM_RATE_LIMITED: 'ROOM_RATE_LIMITED',
+  ROOM_UNAVAILABLE: 'ROOM_UNAVAILABLE',
+  ROOM_GENERATION_COMBATANTS_EMPTY: 'ROOM_CONFLICT',
+  ROOM_GENERATION_COMBATANTS_INSUFFICIENT: 'ROOM_CONFLICT',
+  ROOM_GENERATION_SCENARIO_REQUIRED: 'ROOM_CONFLICT',
+  ROOM_GENERATION_COMBATANT_LIMIT: 'ROOM_REQUEST_INVALID',
+  ROOM_GENERATION_RANDOM_COMBATANT_UNRESOLVED: 'ROOM_CONFLICT',
+  ROOM_GENERATION_RECONCILIATION_REQUIRED: 'ROOM_CONFLICT',
+  ROOM_MEMBER_LIMIT_REACHED: 'ROOM_CONFLICT',
+  ROOM_PROPOSAL_PENDING_LIMIT_REACHED: 'ROOM_CONFLICT',
+  ROOM_PROPOSAL_CHANGE_LIMIT: 'ROOM_REQUEST_INVALID',
+  ROOM_PROPOSAL_BYTE_LIMIT: 'ROOM_PAYLOAD_TOO_LARGE',
+  ROOM_CONFIG_FRAME_TOO_LARGE: 'ROOM_PAYLOAD_TOO_LARGE',
+  ROOM_CONFIG_SHAREABILITY_INVALID: 'ROOM_REQUEST_INVALID',
+  ROOM_CONFIG_COMBATANT_LIMIT: 'ROOM_REQUEST_INVALID',
+  ROOM_CONFIG_REFERENCE_LIMIT: 'ROOM_REQUEST_INVALID',
+  ROOM_HOST_LOCAL_PAYLOAD_MISSING: 'ROOM_REQUEST_INVALID',
+  ROOM_HOST_LOCAL_PAYLOAD_INVALID: 'ROOM_REQUEST_INVALID',
+  ROOM_HOST_LOCAL_KIND_MISMATCH: 'ROOM_REQUEST_INVALID',
+  ROOM_HOST_LOCAL_DIGEST_MISMATCH: 'ROOM_CONFLICT',
+  ROOM_HOST_LOCAL_TYPE_MISMATCH: 'ROOM_REQUEST_INVALID',
+  ROOM_HOST_LOCAL_PAYLOAD_MISSING_OR_MISMATCH: 'ROOM_REQUEST_INVALID',
+  ROOM_HOST_LOCAL_CONTENT_VERSION_MISSING: 'ROOM_REQUEST_INVALID',
+  ROOM_HOST_LOCAL_CONTENT_VERSION_MISMATCH: 'ROOM_CONFLICT',
+  ROOM_REFERENCE_VERSION_MISSING: 'ROOM_REQUEST_INVALID',
+  ROOM_REFERENCE_STALE: 'ROOM_CONFLICT',
+  ROOM_REFERENCE_DENIED: 'ROOM_CONFLICT',
+  ROOM_RUNTIME_BODY_LIMIT: 'ROOM_PAYLOAD_TOO_LARGE',
+  ROOM_RUNTIME_REFERENCE_LIMIT: 'ROOM_REQUEST_INVALID',
+  ROOM_RUNTIME_ADJUDICATION_LIMIT: 'ROOM_REQUEST_INVALID',
+  ROOM_RUNTIME_PROMPT_BUDGET_EXCEEDED: 'ROOM_REQUEST_INVALID',
+  ROOM_PROVIDER_CONFIG_INVALID: 'ROOM_REQUEST_INVALID',
+} satisfies Readonly<Record<ArenaRoomHttpErrorCode, ArenaRoomLegacyHttpErrorCode>>);
+
+export const resolveArenaRoomLegacyHttpErrorCode = (
+  code: ArenaRoomHttpErrorCode,
+): ArenaRoomLegacyHttpErrorCode => ARENA_ROOM_HTTP_LEGACY_CODE_BY_CODE[code];
+
+/**
+ * Accept is a CORS-safelisted request header, so clients can use this path
+ * during a client-first rolling deploy without requiring an old API to allow
+ * a new custom request header in preflight.
+ */
+export const isArenaRoomErrorTaxonomyAccepted = (
+  acceptHeader: string | null | undefined,
+): boolean => {
+  if (!acceptHeader) return false;
+  return acceptHeader.split(',').some((range) => {
+    const [rawMediaType, ...rawParameters] = range.split(';');
+    if (rawMediaType?.trim().toLowerCase() !== 'application/json') return false;
+    return rawParameters.some((rawParameter) => {
+      const separator = rawParameter.indexOf('=');
+      if (separator < 0) return false;
+      const name = rawParameter.slice(0, separator).trim().toLowerCase();
+      const rawValue = rawParameter.slice(separator + 1).trim();
+      const value = rawValue.startsWith('"') && rawValue.endsWith('"')
+        ? rawValue.slice(1, -1)
+        : rawValue;
+      return name === ARENA_ROOM_ERROR_TAXONOMY_ACCEPT_PARAMETER
+        && value === ARENA_ROOM_ERROR_TAXONOMY_VERSION;
+    });
+  });
+};
 
 export const ARENA_ROOM_HOSTED_ERROR_CODES = [
   'ARENA_REQUEST_TOO_LARGE',
