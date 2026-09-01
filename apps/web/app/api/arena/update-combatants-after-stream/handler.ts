@@ -53,6 +53,7 @@ type CombatantIdentity = Readonly<{
   name: string | null;
   type: string | null;
   native: boolean;
+  nativeSignature: string | null;
   characterGuidance: string | null;
   value: Record<string, unknown>;
 }>;
@@ -79,6 +80,7 @@ const currentIdentity = (value: unknown, position: number): CombatantIdentity | 
     name: stringOf(data.codename) ?? stringOf(data.name),
     type: stringOf(combatant.type),
     native: false,
+    nativeSignature: null,
     characterGuidance: null,
     value: combatant,
   };
@@ -97,6 +99,7 @@ const rosterIdentity = (value: unknown, position: number): CombatantIdentity | n
     name: stringOf(combatant.name),
     type: stringOf(combatant.type),
     native: combatant.isNative === true,
+    nativeSignature: stringOf(combatant.nativeSignature),
     characterGuidance: stringOf(combatant.characterGuidance),
     value: combatant,
   };
@@ -407,7 +410,7 @@ async function handler(req: NextRequest): Promise<Response> {
         });
       }
       const currentData = recordOf(match.current.value.data)!;
-      const currentTemplateId = stringOf(currentData.templateId);
+      const currentSignature = stringOf(currentData.signature);
       const canonicalPreset = currentNative
         && match.roster.isPreset
         && await isCanonicalArenaCharacterPreset(match.current.value).catch(() => false);
@@ -415,7 +418,7 @@ async function handler(req: NextRequest): Promise<Response> {
         currentNative
         && match.roster.native
         && (
-          (currentTemplateId && match.roster.presetTemplates.has(currentTemplateId))
+          (currentSignature && currentSignature === match.roster.nativeSignature)
           || (canonicalPreset && setsIntersect(
             match.current.presetTemplates,
             match.roster.presetTemplates,

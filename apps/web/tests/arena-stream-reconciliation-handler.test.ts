@@ -34,6 +34,7 @@ const roster = [
     type: 'magical-girl',
     dataCardId: 'card-a',
     templateId: 'magical-girl:a',
+    nativeSignature: 'valid',
     isNative: true,
     isPreset: false,
   },
@@ -370,6 +371,7 @@ describe('Arena stream reconciliation handler', () => {
           type: 'magical-girl',
           dataCardId: 'card-a',
           templateId: 'magical-girl:a',
+          nativeSignature: 'signature-a',
           isNative: true,
           characterGuidance: '生成时冻结的引导',
         }],
@@ -382,7 +384,7 @@ describe('Arena stream reconciliation handler', () => {
       characterGuidance: '客户端事后注入的引导',
       data: {
         name: '另一张卡',
-        templateId: 'magical-girl:other',
+        templateId: 'magical-girl:a',
         signature: 'valid',
       },
     }];
@@ -409,6 +411,7 @@ describe('Arena stream reconciliation handler', () => {
           type: 'magical-girl',
           dataCardId: 'card-native',
           templateId: 'magical-girl:twin',
+          nativeSignature: 'valid',
           isNative: true,
         }, {
           sortIndex: 1,

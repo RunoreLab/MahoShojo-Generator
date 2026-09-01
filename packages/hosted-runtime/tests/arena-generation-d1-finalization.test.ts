@@ -373,6 +373,12 @@ describe('Arena D1/R2 finalization ports', () => {
       ...claimInput,
       payload: {
         ...claimInput.payload,
+        combatants: [{
+          roomCombatantKey: 'data-card:character-a',
+          type: 'magical-girl',
+          isNative: true,
+          data: { name: 'A', signature: 'signature-a' },
+        }, claimInput.payload.combatants[1]],
         __arenaServerContextV1: {
           endpoint,
           deliveryMode: outputContract === 'structured-report' ? 'non-stream' : 'stream',
@@ -406,6 +412,11 @@ describe('Arena D1/R2 finalization ports', () => {
     expect(extra.combatantsFallback.map((entry: Record<string, unknown>) => (
       entry.roomCombatantKey
     ))).toEqual(['data-card:character-a', 'host-local:character:1:b']);
+    expect(extra.combatantsFallback[0]).toMatchObject({
+      isNative: true,
+      nativeSignature: 'signature-a',
+    });
+    expect(extra.combatantsFallback[1]).not.toHaveProperty('nativeSignature');
     expect(extra.localCardReconciliation).not.toHaveProperty('baseRevisionHash');
     expect(JSON.stringify(extra)).not.toContain('baseRevisionHash');
     expect(JSON.stringify(extra.battleReportRenderSnapshotV1)).not.toContain('must-not-enter-render-snapshot');

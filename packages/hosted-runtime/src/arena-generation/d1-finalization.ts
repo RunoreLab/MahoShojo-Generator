@@ -310,6 +310,9 @@ const buildExtraJson = async (
       const combatant = recordOf(value);
       const data = recordOf(combatant?.data);
       const roomCombatantKey = boundedString(combatant?.roomCombatantKey, 512);
+      const nativeSignature = combatant?.isNative === true
+        ? boundedString(data?.signature, 512)
+        : null;
       return {
         sortIndex,
         ...(roomCombatantKey && /^(data-card|preset|host-local):.+$/u.test(roomCombatantKey)
@@ -322,6 +325,7 @@ const buildExtraJson = async (
         templateId: boundedString(combatant?.filename, 256)
           ?? boundedString(data?.templateId, 256),
         isNative: combatant?.isNative === true,
+        ...(nativeSignature ? { nativeSignature } : {}),
         isPreset: combatant?.isPreset === true,
         teamId: numberOf(combatant?.teamId),
         characterGuidance: boundedString(combatant?.characterGuidance, 100),
