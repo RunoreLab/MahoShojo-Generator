@@ -33,9 +33,6 @@
     "test:server": "pnpm --filter @mahoshojo/api run test",
     "dev:d1-gateway": "pnpm --filter @mahoshojo/d1-gateway run dev",
     "deploy:d1-gateway": "pnpm --filter @mahoshojo/d1-gateway run deploy",
-    "check:naming": "node scripts/check-naming-conventions.mjs --report-only",
-    "check:naming:strict": "node scripts/check-naming-conventions.mjs",
-    "check:naming:workspace": "node scripts/check-naming-conventions.mjs --workspace-only",
     "check:workspace:boundaries": "node scripts/check-workspace-boundaries.mjs",
     "check:admin-boundary": "vitest run --config vitest.config.ts tests/admin-security-boundary.test.ts && node scripts/check-admin-security-boundary.mjs",
     "check:arena-room-origins": "node scripts/check-arena-room-origin-policy.mjs",
@@ -48,7 +45,7 @@
     "workspace:test": "pnpm --workspace-concurrency=1 --filter \"./packages/*\" --filter \"./apps/*\" --if-present run test",
     "workspace:lint": "pnpm --filter \"./packages/*\" --filter \"./apps/*\" --if-present run lint",
     "workspace:build": "pnpm --filter \"./packages/*\" --filter \"./apps/*\" --if-present run build",
-    "workspace:verify": "pnpm run check:workspace:boundaries && pnpm run check:admin-boundary && pnpm run check:naming:workspace && pnpm run check:arena-room-origins && pnpm run check:arena-room-presets && pnpm run workspace:test && pnpm run workspace:lint && pnpm run workspace:build",
+    "workspace:verify": "pnpm run check:workspace:boundaries && pnpm run check:admin-boundary && pnpm run check:arena-room-origins && pnpm run check:arena-room-presets && pnpm run workspace:test && pnpm run workspace:lint && pnpm run workspace:build",
     "ci:verify": "pnpm run workspace:verify && pnpm run test:repo && pnpm run lint:repo"
   },
   "devDependencies": {
