@@ -31,6 +31,81 @@ export const buildRedoCombatantUpdatesSchema = (options: {
     .describe('基于战报，为每位角色生成可写入的更新摘要 JSON。');
 };
 
+const repairTextSchema = z.string().refine(
+  (value) => Array.from(value).length <= 2000,
+  '单项角色修复文本最多 2000 个 Unicode code point。'
+);
+
+/**
+ * AI 修复通道只生成按 roster index 对齐的内容 patch。这里在 schema 层同时
+ * 验证完整覆盖、index 唯一性与名称绑定，避免名称重复或模型乱序造成错写。
+ */
+export const buildRepairCombatantMetaSchema = (options: {
+  combatantNames: string[];
+  enableImpactText: boolean;
+  enableCurrentState: boolean;
+}) => {
+  const { combatantNames, enableImpactText, enableCurrentState } = options;
+  const itemSchema = z.object({
+    combatantIndex: z.number().int().describe('角色在请求 roster 中从 0 开始的 index。'),
+    characterName: z.string().describe('该 index 对应的角色名称，必须与请求完全一致。'),
+    impact: repairTextSchema.optional().describe(
+      '该角色在此次事件中的成长、感悟或变化（1-2 句话）。'
+    ),
+    currentStateSummary: repairTextSchema.optional().describe(
+      '该角色在此次事件结束后的即时状态概述（1-2 句话）。'
+    ),
+  }).strict();
+
+  return z.object({
+    impacts: z.array(itemSchema).length(combatantNames.length),
+  }).strict().superRefine((value, context) => {
+    const seenIndexes = new Set<number>();
+    value.impacts.forEach((impact, arrayIndex) => {
+      const combatantIndex = impact.combatantIndex;
+      if (combatantIndex < 0 || combatantIndex >= combatantNames.length) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['impacts', arrayIndex, 'combatantIndex'],
+          message: 'combatantIndex 超出 roster 范围。',
+        });
+        return;
+      }
+      if (seenIndexes.has(combatantIndex)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['impacts', arrayIndex, 'combatantIndex'],
+          message: 'combatantIndex 不得重复。',
+        });
+      }
+      seenIndexes.add(combatantIndex);
+      if (impact.characterName !== combatantNames[combatantIndex]) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['impacts', arrayIndex, 'characterName'],
+          message: 'characterName 与 combatantIndex 对应的 roster 名称不一致。',
+        });
+      }
+      if (enableImpactText !== (typeof impact.impact === 'string')) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['impacts', arrayIndex, 'impact'],
+          message: enableImpactText ? 'impact 已启用且必须提供。' : 'impact 未启用且不得提供。',
+        });
+      }
+      if (enableCurrentState !== (typeof impact.currentStateSummary === 'string')) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['impacts', arrayIndex, 'currentStateSummary'],
+          message: enableCurrentState
+            ? 'currentStateSummary 已启用且必须提供。'
+            : 'currentStateSummary 未启用且不得提供。',
+        });
+      }
+    });
+  }).describe('按 roster index 严格对齐的 Arena 角色修复内容 patch。');
+};
+
 const stripMarkdown = (text: string): string =>
   text
     .replace(/\*\*(.*?)\*\*/g, '$1')
@@ -196,5 +271,50 @@ ${combatants
 
 【战报】
 ${compactJsonForPrompt(battleReportMarkdown, 12000)}
+`.trim();
+};
+
+export const createRepairCombatantMetaPrompt = (input: {
+  battleReportMarkdown: string;
+  combatants: Array<{
+    name: string;
+    type: string;
+    currentState?: unknown;
+  }>;
+  mode: string;
+  winner: string;
+  writeArenaHistory: boolean;
+  writeCurrentState: boolean;
+}): string => {
+  const enabledFields: string[] = [];
+  if (input.writeArenaHistory) enabledFields.push('impact');
+  if (input.writeCurrentState) enabledFields.push('currentStateSummary');
+
+  return `
+请根据战报为每位参战角色生成可编辑的“角色元数据修复草稿”。
+
+必须遵守：
+1) 只输出与 schema 匹配的 JSON，不输出解释、Markdown 或角色卡。
+2) impacts 必须完整覆盖 roster；每个 combatantIndex 从 0 开始且只出现一次。
+3) characterName 必须与同一 combatantIndex 的 roster 名称逐字一致；不得按名称猜测 index。
+4) 只生成以下字段：${enabledFields.join('、')}。
+5) 每项内容不超过 2000 个 Unicode code point，并且只总结战报已经发生的内容。
+6) 这是供用户审阅的草稿，不要生成签名、身份字段或完整角色数据。
+7) 战报标注的胜利者为「${input.winner}」，生成内容不得与其矛盾。
+
+【模式】${input.mode}
+
+【角色 roster】
+${input.combatants.map((combatant, index) => {
+  const stateText = combatant.currentState
+    ? compactJsonForPrompt(combatant.currentState, 700)
+    : '';
+  return `- combatantIndex=${index}; characterName=${JSON.stringify(combatant.name)}; type=${combatant.type}${
+    stateText ? `\n  当前状态快照：\n  ${stateText.replace(/\n/g, '\n  ')}` : ''
+  }`;
+}).join('\n')}
+
+【战报】
+${compactJsonForPrompt(input.battleReportMarkdown, 12000)}
 `.trim();
 };
