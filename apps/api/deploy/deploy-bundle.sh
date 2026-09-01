@@ -100,7 +100,7 @@ is_release_dir() {
     && [ ! -L "$candidate" ]
 }
 
-verify_release() {
+verify_release_identity() {
   candidate="$1"
   is_release_dir "$candidate" || {
     echo 'release 不属于受管目录' >&2
@@ -113,7 +113,6 @@ verify_release() {
       return 1
     }
   done
-  [ "$(wc -l < "$candidate/release.manifest" | tr -d ' ')" -eq 3 ] || return 1
   [ "$(wc -l < "$candidate/release.sha256" | tr -d ' ')" -eq 1 ] || return 1
   [ "$(cat "$candidate/release.sha256")" = "$candidate_id  release.manifest" ] || {
     echo 'release id 与 manifest 摘要不一致' >&2
@@ -124,6 +123,38 @@ verify_release() {
       || return 1
   done
   (cd "$candidate" && sha256sum -c release.sha256 >/dev/null)
+}
+
+verify_release() {
+  candidate="$1"
+  verify_release_identity "$candidate" || return 1
+  [ "$(wc -l < "$candidate/release.manifest" | tr -d ' ')" -eq 3 ] || return 1
+  (cd "$candidate" && sha256sum -c release.manifest >/dev/null)
+}
+
+verify_previous_release() {
+  candidate="$1"
+  verify_release_identity "$candidate" || return 1
+  manifest_lines="$(wc -l < "$candidate/release.manifest" | tr -d ' ')"
+  case "$manifest_lines" in
+    3) ;;
+    4)
+      [ "$(grep -Ec '^[0-9a-f]{64}  legacy-layout$' "$candidate/release.manifest")" -eq 1 ] \
+        && [ -f "$candidate/legacy-layout" ] \
+        && [ ! -L "$candidate/legacy-layout" ] || return 1
+      ;;
+    5)
+      for retired_asset in arena-room-release-gate.json arena-room-release-gate-schema.mjs; do
+        [ "$(grep -Ec "^[0-9a-f]{64}  ${retired_asset}$" "$candidate/release.manifest")" -eq 1 ] \
+          && [ -f "$candidate/$retired_asset" ] \
+          && [ ! -L "$candidate/$retired_asset" ] || return 1
+      done
+      ;;
+    *)
+      echo 'previous release manifest 不是可迁移格式' >&2
+      return 1
+      ;;
+  esac
   (cd "$candidate" && sha256sum -c release.manifest >/dev/null)
 }
 
@@ -323,7 +354,7 @@ if [ -e "$current_link" ] || [ -L "$current_link" ]; then
     exit 1
   }
   previous_release_dir="$(readlink "$current_link")"
-  is_release_dir "$previous_release_dir" && verify_release "$previous_release_dir" || {
+  is_release_dir "$previous_release_dir" && verify_previous_release "$previous_release_dir" || {
     echo 'current 指向的 previous release 无法验证' >&2
     exit 1
   }

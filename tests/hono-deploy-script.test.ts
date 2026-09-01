@@ -28,11 +28,16 @@ type Fixture = {
   rootDirectory: string;
 };
 
-function writeRelease(rootDirectory: string, label: string): string {
+function writeRelease(
+  rootDirectory: string,
+  label: string,
+  extraFiles: Readonly<Record<string, string>> = {},
+): string {
   const files = {
     'index.mjs': `console.info(${JSON.stringify(label)});\n`,
     'compose.yml': `services:\n  hono:\n    image: ${label}\n`,
     'deploy-bundle.sh': readFileSync(deployScriptPath, 'utf8'),
+    ...extraFiles,
   };
   const manifest = Object.entries(files)
     .map(([name, content]) => `${sha256(content)}  ${name}`)
@@ -57,7 +62,10 @@ function writeExecutable(filePath: string, source: string): void {
   chmodSync(filePath, 0o755);
 }
 
-function createFixture(): Fixture {
+function createFixture(options: {
+  candidateExtraFiles?: Readonly<Record<string, string>>;
+  previousExtraFiles?: Readonly<Record<string, string>>;
+} = {}): Fixture {
   const temporaryDirectory = mkdtempSync(path.join(tmpdir(), 'mahoshojo-deploy-test-'));
   temporaryDirectories.push(temporaryDirectory);
   const rootDirectory = path.join(temporaryDirectory, 'root');
@@ -135,8 +143,16 @@ case "$url" in
 esac
 `);
 
-  const previousId = writeRelease(rootDirectory, 'previous');
-  const candidateId = writeRelease(rootDirectory, 'candidate');
+  const previousId = writeRelease(
+    rootDirectory,
+    'previous',
+    options.previousExtraFiles,
+  );
+  const candidateId = writeRelease(
+    rootDirectory,
+    'candidate',
+    options.candidateExtraFiles,
+  );
   symlinkSync(
     path.join(rootDirectory, 'releases', previousId),
     path.join(rootDirectory, 'current'),
@@ -221,6 +237,59 @@ describe('Hono release deployment', () => {
     const curlLog = readFileSync(fixture.curlLog, 'utf8');
     expect(curlLog).toContain('/api/arena/rooms/v1');
     expect(curlLog).toContain('/api/arena/rooms/v1/ws');
+  });
+
+  test.each([
+    ['已退役 gate 资产', {
+      'arena-room-release-gate.json': '{}\n',
+      'arena-room-release-gate-schema.mjs': 'export {};\n',
+    }],
+    ['legacy adoption marker', {
+      'legacy-layout': `root-release-layout-v1:${'a'.repeat(64)}\n`,
+    }],
+  ] as const)('可从包含%s的 checksum previous release 直接发布', (_label, previousExtraFiles) => {
+    const fixture = createFixture({
+      previousExtraFiles,
+    });
+
+    const result = runDeploy(fixture);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(readlinkSync(path.join(fixture.rootDirectory, 'current'))).toBe(
+      path.join(fixture.rootDirectory, 'releases', fixture.candidateId),
+    );
+  });
+
+  test('candidate 失败时可直接恢复 checksum 历史 previous release', () => {
+    const fixture = createFixture({
+      previousExtraFiles: {
+        'arena-room-release-gate.json': '{}\n',
+        'arena-room-release-gate-schema.mjs': 'export {};\n',
+      },
+    });
+
+    const result = runDeploy(fixture, 'publish', fixture.candidateId, {
+      DEPLOY_TEST_FAIL_PUBLIC_RELEASE: fixture.candidateId,
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(readlinkSync(path.join(fixture.rootDirectory, 'current'))).toContain(fixture.previousId);
+    expect(readFileSync(fixture.activeFile, 'utf8').trim()).toContain(fixture.previousId);
+  });
+
+  test('历史资产兼容不放宽新 candidate manifest', () => {
+    const fixture = createFixture({
+      candidateExtraFiles: {
+        'arena-room-release-gate.json': '{}\n',
+        'arena-room-release-gate-schema.mjs': 'export {};\n',
+      },
+    });
+
+    const result = runDeploy(fixture);
+
+    expect(result.status).not.toBe(0);
+    expect(readlinkSync(path.join(fixture.rootDirectory, 'current'))).toContain(fixture.previousId);
+    expect(readFileSync(fixture.dockerLog, 'utf8')).not.toContain(fixture.candidateId);
   });
 
   test('candidate 本机 readiness 失败时恢复 previous release', () => {
