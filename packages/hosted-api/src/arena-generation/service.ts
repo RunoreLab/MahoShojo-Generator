@@ -2500,7 +2500,16 @@ export const createArenaGenerationService = (
           });
         }, heartbeatIntervalMs);
         const terminal = await executionPromise;
-        await replayWriter.finish(terminal);
+        try {
+          await replayWriter.finish(terminal);
+        } catch (error) {
+          if (terminal.status !== 'completed') throw error;
+          // The Provider result has already been delivered and durable finalization
+          // has already decided success. A Redis terminal projection failure may
+          // leave replay/finalization pending, but must not manufacture a failed
+          // generation and overwrite the completed intent.
+          return;
+        }
       } catch (error) {
         const terminal: GenerationTerminal = controller.signal.reason === 'producer_lost'
           ? { status: 'producer_lost', code: 'PRODUCER_OWNERSHIP_LOST' }

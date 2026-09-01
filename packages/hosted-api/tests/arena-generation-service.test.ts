@@ -1876,6 +1876,37 @@ describe('Arena generation lifecycle service', () => {
     expect(execute).toHaveBeenCalledOnce();
   });
 
+  test('does not rewrite a completed executor result as failed when Redis terminal projection fails', async () => {
+    const store = new MemoryReplayStore();
+    const markTerminal = vi.spyOn(store, 'markTerminal')
+      .mockRejectedValueOnce(new Error('Redis terminal write unavailable'));
+    const execute = vi.fn(async (input: Parameters<ArenaGenerationExecutor['execute']>[0]) => {
+      await input.emit({ type: 'markdown', data: { chunk: '完整战报正文' } });
+      await input.claimFinalization({ status: 'completed' });
+      return { status: 'completed' as const };
+    });
+    const service = createService(store, { execute });
+
+    const response = await service.create(createRequest('request-1'));
+    await vi.waitFor(() => {
+      expect(markTerminal).toHaveBeenCalledTimes(1);
+    });
+    await response.body?.cancel();
+
+    expect(markTerminal).toHaveBeenCalledWith(expect.objectContaining({
+      terminal: expect.objectContaining({ status: 'completed' }),
+    }));
+    expect(store.events.get('generation-1') ?? []).not.toContainEqual(
+      expect.objectContaining({ type: 'error' }),
+    );
+    expect(store.states.get('generation-1')).toMatchObject({
+      status: 'finalizing',
+      terminal: null,
+      snapshot: expect.objectContaining({ markdown: '完整战报正文' }),
+    });
+    expect(execute).toHaveBeenCalledOnce();
+  });
+
   test('an indeterminate finalization claim cannot be converted into a Redis-only terminal', async () => {
     const store = new MemoryReplayStore();
     const execute = vi.fn(async (input: Parameters<ArenaGenerationExecutor['execute']>[0]) => {
