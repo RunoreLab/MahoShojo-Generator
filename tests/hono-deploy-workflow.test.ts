@@ -152,7 +152,7 @@ describe('Hono deployment workflow', () => {
     expect(cloudflareWorkflow).not.toContain('run: pnpm run ci:verify');
   });
 
-  test('production build 显式绑定 GMR-10P READY 交互与权威证据入口', () => {
+  test('production build 显式绑定 GMR-10Q READY 交互与权威证据入口', () => {
     const workflow = readFileSync(HONO_WORKFLOW_PATH, 'utf8');
     const parityStep = getStep(
       getJob(workflow, 'build'),

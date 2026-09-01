@@ -4,7 +4,7 @@ import path from 'node:path';
 const repositoryRoot = path.resolve(import.meta.dirname, '..');
 const expectedSliceIds = Array.from(
   { length: 7 },
-  (_, index) => `GMR-10P-${String.fromCharCode('A'.charCodeAt(0) + index)}`,
+  (_, index) => `GMR-10Q-${String.fromCharCode('A'.charCodeAt(0) + index)}`,
 );
 const allowedSliceStatuses = new Set(['BLOCKED', 'READY', 'IN_PROGRESS', 'DONE']);
 
@@ -43,10 +43,17 @@ const fail = (message) => failures.push(message);
 const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 
 if (!isRecord(manifest)) fail('manifest 必须是 object');
-if (manifest.schemaVersion !== 1) fail('schemaVersion 必须为 1');
-if (manifest.goal !== 'GMR-10P') fail('goal 必须为 GMR-10P');
-if (manifest.acceptedSpec !== 'SPEC-arena-multiplayer-product-parity-amendment-v1') {
-  fail('acceptedSpec 必须绑定 accepted product parity spec');
+if (manifest.schemaVersion !== 2) fail('schemaVersion 必须为 2');
+if (manifest.goal !== 'GMR-10Q') fail('goal 必须为 GMR-10Q');
+if (manifest.acceptedSpec !== 'SPEC-arena-multiplayer-gate-minimization-parity-v1') {
+  fail('acceptedSpec 必须绑定 accepted gate minimization parity spec');
+}
+if (
+  !isRecord(manifest.prerequisiteGoals)
+  || Object.keys(manifest.prerequisiteGoals).length !== 1
+  || manifest.prerequisiteGoals['GMR-10P'] !== 'DONE'
+) {
+  fail('prerequisiteGoals 必须精确记录 GMR-10P=DONE');
 }
 if (!['IN_PROGRESS', 'DONE'].includes(manifest.overallStatus)) {
   fail('overallStatus 只能为 IN_PROGRESS 或 DONE');
@@ -59,7 +66,7 @@ if (!isRecord(manifest.slices)) {
 } else {
   const actualSliceIds = Object.keys(manifest.slices).sort();
   if (JSON.stringify(actualSliceIds) !== JSON.stringify(expectedSliceIds)) {
-    fail('slices 必须精确枚举 GMR-10P-A 至 GMR-10P-G');
+    fail('slices 必须精确枚举 GMR-10Q-A 至 GMR-10Q-G');
   }
   for (const sliceId of expectedSliceIds) {
     if (!allowedSliceStatuses.has(manifest.slices[sliceId])) {
@@ -81,10 +88,10 @@ if (ready && manifest.blockedReason !== 'none') {
   fail('production READY 时 blockedReason 必须为 none');
 }
 if (!ready && manifest.productionReadiness !== 'BLOCKED') {
-  fail('GMR-10P 未完整 DONE 时 productionReadiness 必须为 BLOCKED');
+  fail('GMR-10Q 未完整 DONE 时 productionReadiness 必须为 BLOCKED');
 }
 if (requireReady && !ready) {
-  fail('GMR-10P 未 DONE，production readiness 必须 fail closed');
+  fail('GMR-10Q 未 DONE，production readiness 必须 fail closed');
 }
 
 if (failures.length > 0) {

@@ -7,9 +7,9 @@ const repositoryRoot = process.cwd();
 const packagePath = resolve(repositoryRoot, 'package.json');
 const scriptPath = resolve(repositoryRoot, 'scripts/verify-arena-product-parity-ready.mjs');
 
-describe('GMR-10P repeatable READY verification entrypoint', () => {
+describe('GMR-10Q repeatable READY verification entrypoint', () => {
   it('binds the required API/Web/coverage/contracts suites without recursive repo verification', () => {
-    expect(existsSync(scriptPath), '缺少 GMR-10P READY 可重复验证脚本').toBe(true);
+    expect(existsSync(scriptPath), '缺少 GMR-10Q READY 可重复验证脚本').toBe(true);
     const packageManifest = JSON.parse(readFileSync(packagePath, 'utf8')) as {
       scripts?: Record<string, string>;
     };
@@ -21,18 +21,29 @@ describe('GMR-10P repeatable READY verification entrypoint', () => {
     for (const requiredPath of [
       'scripts/check-arena-product-parity.mjs',
       'tests/room-product-parity-golden-flow.test.ts',
+      'tests/room-generation-service.test.ts',
+      'tests/arena-room-generation-materializer.test.ts',
+      'tests/room-http.test.ts',
       'tests/room-verifier-membership-composition.test.ts',
       'tests/arena-multiplayer-production-wiring.test.tsx',
       'tests/arena-multiplayer-interaction.test.tsx',
+      'tests/arena-multiplayer-generation-bridge.test.ts',
+      'tests/arena-room-shared-config.test.ts',
+      'tests/arena-room-generation-preflight-dialog.test.tsx',
+      'tests/arena-room-host-reconciliation.test.ts',
+      'tests/arena-multiplayer-narrative-history-parity.test.tsx',
       'tests/arena-room-proposal-workspace.test.tsx',
       'tests/arena-proposal-panel.test.tsx',
       'tests/arena-battle-result-presentation.test.tsx',
       'tests/modal-accessibility.test.tsx',
       'tests/arena-multiplayer-panel.test.tsx',
       'tests/product-parity-coverage.test.ts',
+      'tests/gmr10q-gate-registry-readiness.test.ts',
       'tests/gmr10p-proposal-contract-expansion.test.ts',
       'tests/state-machine-proposal-generation.test.ts',
       'tests/room-http.test.ts',
+      'tests/gmr10q-gate-minimization.test.ts',
+      'tests/gmr10q-error-taxonomy.test.ts',
       'tests/proposal.test.ts',
       'tests/spec-review-r3.test.ts',
       'tests/wire-security.test.ts',

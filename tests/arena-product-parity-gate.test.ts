@@ -24,7 +24,7 @@ const runGate = (args: readonly string[] = []) => {
   );
 };
 
-describe('GMR-10P product parity gate', () => {
+describe('GMR-10Q product parity gate', () => {
   it('提供 machine-readable manifest，普通仓库验证接受完成后的 READY 状态', () => {
     expect(existsSync(manifestPath), '缺少 product parity gate manifest').toBe(true);
     expect(existsSync(scriptPath), '缺少 product parity gate checker').toBe(true);
@@ -34,7 +34,7 @@ describe('GMR-10P product parity gate', () => {
     expect(verified.status, `${verified.stdout}\n${verified.stderr}`).toBe(0);
   });
 
-  it('production readiness 在 GMR-10P-G 完成后通过 require-ready', () => {
+  it('production readiness 在 GMR-10Q-G 完成后通过 require-ready', () => {
     const readiness = runGate(['--', '--require-ready']);
 
     expect(readiness.error).toBeUndefined();
@@ -53,17 +53,20 @@ describe('GMR-10P product parity gate', () => {
     };
 
     expect(manifest).toMatchObject({
+      goal: 'GMR-10Q',
+      acceptedSpec: 'SPEC-arena-multiplayer-gate-minimization-parity-v1',
+      prerequisiteGoals: { 'GMR-10P': 'DONE' },
       blockedReason: 'none',
       overallStatus: 'DONE',
       productionReadiness: 'READY',
       slices: {
-        'GMR-10P-A': 'DONE',
-        'GMR-10P-B': 'DONE',
-        'GMR-10P-C': 'DONE',
-        'GMR-10P-D': 'DONE',
-        'GMR-10P-E': 'DONE',
-        'GMR-10P-F': 'DONE',
-        'GMR-10P-G': 'DONE',
+        'GMR-10Q-A': 'DONE',
+        'GMR-10Q-B': 'DONE',
+        'GMR-10Q-C': 'DONE',
+        'GMR-10Q-D': 'DONE',
+        'GMR-10Q-E': 'DONE',
+        'GMR-10Q-F': 'DONE',
+        'GMR-10Q-G': 'DONE',
       },
     });
     expect(packageManifest.scripts?.['check:arena-product-parity']).toBe(
