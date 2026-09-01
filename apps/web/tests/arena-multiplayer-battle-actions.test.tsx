@@ -5,6 +5,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ArenaRoomControllerState } from '@/lib/arena-room/controller';
+import type { UserAIProviderConfig } from '@/lib/ai/custom-provider';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -19,6 +20,7 @@ const mocks = vi.hoisted(() => ({
     busy: boolean;
   },
   roomState: null as ArenaRoomControllerState | null,
+  tokenIndicatorProps: null as Record<string, unknown> | null,
 }));
 
 vi.mock('@/components/arena/hooks/useBattleEngine', () => ({
@@ -55,6 +57,7 @@ const battleState = {
     isNarrativeHistoryUnlimited: false,
   },
   teams: [],
+  userProviderConfig: null as UserAIProviderConfig | null,
 };
 
 vi.mock('@/components/arena/stores/useBattleStore', () => ({
@@ -76,7 +79,12 @@ vi.mock('@/components/arena/multiplayer/useArenaRoom', () => ({
 vi.mock('@/components/ai/ProviderCooldownNotice', () => ({
   ProviderCooldownNotice: () => null,
 }));
-vi.mock('@/components/shared/TokenIndicator', () => ({ TokenIndicator: () => null }));
+vi.mock('@/components/shared/TokenIndicator', () => ({
+  TokenIndicator: (props: Record<string, unknown>) => {
+    mocks.tokenIndicatorProps = props;
+    return null;
+  },
+}));
 vi.mock('@/components/shared/CollapsibleSection', () => ({
   CollapsibleSection: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
 }));
@@ -148,6 +156,8 @@ beforeEach(() => {
   mocks.resolvePreflight.mockClear();
   mocks.preflight = null;
   mocks.roomState = null;
+  mocks.tokenIndicatorProps = null;
+  battleState.userProviderConfig = null;
   container = document.createElement('div');
   document.body.append(container);
   root = createRoot(container);
@@ -158,10 +168,38 @@ afterEach(async () => {
   container.remove();
 });
 
-const render = async () => {
-  await act(async () => root.render(<BattleActions showAdvancedUtilities={false} />));
+const render = async (showAdvancedUtilities = false) => {
+  await act(async () => root.render(<BattleActions showAdvancedUtilities={showAdvancedUtilities} />));
   return container.querySelector<HTMLButtonElement>('.generate-button')!;
 };
+
+describe('Arena context budget indicator', () => {
+  it('uses the 128k hosted-system application budget', async () => {
+    await render(true);
+
+    expect(mocks.tokenIndicatorProps).toMatchObject({
+      maxTokens: 128_000,
+      warnTokens: 102_400,
+      budgetLabel: '当前默认渠道应用预算',
+    });
+  });
+
+  it('uses the 1M Hosted BYOK application budget for a valid custom Provider', async () => {
+    battleState.userProviderConfig = {
+      providerId: 'chatbox',
+      modelId: 'gpt-5.4',
+      apiKey: 'test-api-key',
+    };
+
+    await render(true);
+
+    expect(mocks.tokenIndicatorProps).toMatchObject({
+      maxTokens: 1_000_000,
+      warnTokens: 800_000,
+      budgetLabel: 'Hosted BYOK 应用预算',
+    });
+  });
+});
 
 describe('Arena multiplayer BattleActions authority gate', () => {
   it('feature-off / 非房间页面继续调用既有单人生成动作', async () => {

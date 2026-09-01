@@ -4,6 +4,8 @@ import {
 } from '@mahoshojo/hosted-api/arena-generation/resource-budget';
 
 export const MAX_ARENA_REFERENCE_ITEMS = ARENA_RESOURCE_BUDGET.maxReferenceItemsSanity;
+export const ARENA_ESTIMATED_PROMPT_TOKEN_BUDGETS =
+  ARENA_RESOURCE_BUDGET.maxEstimatedPromptTokens;
 
 export type ArenaReferenceCollections = Readonly<{
   auxScenarios?: readonly unknown[];

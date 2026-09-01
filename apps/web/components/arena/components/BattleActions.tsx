@@ -8,6 +8,8 @@ import { formatDateTime } from '@/lib/constants';
 import { CollapsibleSection } from '@/components/shared/CollapsibleSection';
 import { StreamStopButton } from '@/components/shared/StreamStopButton';
 import { limitNarrativeHistoryEntriesForPrompt } from '@/lib/narrative-history';
+import { buildCustomProviderRequestPayload } from '@/lib/ai/custom-provider';
+import { ARENA_ESTIMATED_PROMPT_TOKEN_BUDGETS } from '@/lib/arena/resource-budget';
 
 import { useBattleStore } from '../stores/useBattleStore';
 import { useBattleEngine } from '../hooks/useBattleEngine';
@@ -111,6 +113,7 @@ export function BattleActions({ showAdvancedUtilities = true }: { showAdvancedUt
   const storyLength = useBattleSelector((state) => state.storyLength);
   const settings = useBattleSelector((state) => state.settings);
   const teamsState = useBattleSelector((state) => state.teams);
+  const userProviderConfig = useBattleSelector((state) => state.userProviderConfig);
   const [showNarrativeModal, setShowNarrativeModal] = useState(false);
   const narrativeCount = useNarrativeHistoryStore((state) => state.entries.length);
   const narrativeLastUpdatedAt = useNarrativeHistoryStore((state) => state.lastUpdatedAt);
@@ -118,6 +121,14 @@ export function BattleActions({ showAdvancedUtilities = true }: { showAdvancedUt
   const roomAction = arenaRoomRuntime
     ? resolveArenaRoomGenerationAction(arenaRoomRuntime.state)
     : { inRoom: false, canStart: true, canRetry: false, reason: null } as const;
+  const customProviderPayload = buildCustomProviderRequestPayload(userProviderConfig);
+  const promptFundingMode = customProviderPayload?.providerId === 'system' || !customProviderPayload
+    ? 'hosted-system'
+    : 'hosted-byok';
+  const maxEstimatedPromptTokens = ARENA_ESTIMATED_PROMPT_TOKEN_BUDGETS[promptFundingMode];
+  const promptBudgetLabel = promptFundingMode === 'hosted-byok'
+    ? 'Hosted BYOK 应用预算'
+    : '当前默认渠道应用预算';
 
   const estimatePayloadText = (() => {
     const readableCombatants = combatants.filter((item): item is any => 'data' in item);
@@ -316,6 +327,9 @@ export function BattleActions({ showAdvancedUtilities = true }: { showAdvancedUt
 
             <TokenIndicator
               text={estimatePayloadText}
+              maxTokens={maxEstimatedPromptTokens}
+              warnTokens={Math.round(maxEstimatedPromptTokens * 0.8)}
+              budgetLabel={promptBudgetLabel}
               warningText="⚠️ 预计上下文较长，可能更易超时/失败。可尝试关闭“叙事历史读取”或“历战记录读取”，或减少历史条目/参战角色。"
             />
           </CollapsibleSection>
