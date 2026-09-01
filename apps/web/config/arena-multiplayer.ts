@@ -2,7 +2,7 @@ import { honoApiConfig } from './hono-api';
 import {
   hostedDrClientRouting,
   hostedDrPreviewOrigin,
-} from './hosted-dr-client.generated';
+} from './hosted-routing';
 
 type ArenaHostedApiConfig = {
   readonly enabled: boolean;

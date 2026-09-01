@@ -21,13 +21,22 @@ import {
   resolveGenerationApiUrl,
 } from '@/lib/hono-api-client';
 import { honoApiConfig, resolveHostedApiConfig } from '@/config/hono-api';
-import hostedDrManifest from '../../../config/hosted-dr-capabilities.json';
+import hostedRouting from '../../../config/hosted-routing.json';
 import honoApiRoutes from '../../../config/hono-api-routes.json';
 import { readTextAndReasoningStreamFromResponse } from '@/lib/stream/read-text-and-reasoning-stream';
 
 const originalEnabled = honoApiConfig.enabled;
 const originalOrigin = honoApiConfig.origin;
 const originalRoutingMode = honoApiConfig.routingMode;
+const hostedDrManifest = {
+  contractVersion: hostedRouting.contractVersion,
+  controlPlane: {
+    stableOrigin: hostedRouting.origins.stable,
+    previewOrigin: hostedRouting.origins.preview,
+    primaryOrigin: hostedRouting.origins.primary,
+    drOrigin: hostedRouting.origins.dr,
+  },
+};
 
 afterEach(() => {
   honoApiConfig.enabled = originalEnabled;
@@ -195,34 +204,24 @@ describe('Hono API 客户端', () => {
     )).toBe(false);
   });
 
-  test('客户端配置只消费 generated 最小投影，并包含 preflight 所需公开 origin/policy', () => {
+  test('客户端只消费小型 routing config，并包含 preflight 所需公开 origin/policy', () => {
     const source = readFileSync(path.join(process.cwd(), 'config/hono-api.ts'), 'utf8');
-    const generatedSource = readFileSync(
-      path.join(process.cwd(), 'config/hosted-dr-client.generated.ts'),
+    const routingSource = readFileSync(
+      path.join(process.cwd(), 'config/hosted-routing.ts'),
       'utf8',
     );
 
     expect(honoApiConfig.origin).toBe(hostedDrManifest.controlPlane.stableOrigin);
     expect(honoApiConfig.enabled).toBe(false);
-    expect(source).toContain('hosted-dr-client.generated');
+    expect(source).toContain('hosted-routing');
     expect(source).toContain('NEXT_PUBLIC_HONO_API_ORIGIN');
     expect(source).not.toContain('hosted-dr-capabilities.json');
-    expect(generatedSource).toContain(hostedDrManifest.controlPlane.stableOrigin);
-    expect(generatedSource).toContain(hostedDrManifest.controlPlane.previewOrigin);
-    expect(generatedSource).toContain('hostedDrControlPlaneProvisioning');
-    expect(generatedSource).toContain('hostedDrProductionFallbackReadiness');
-    expect(generatedSource).toContain('hostedDrClientRouting');
-    expect(generatedSource).toContain('hostedDrClientOperations');
-    for (const publicOrigin of [
-      hostedDrManifest.controlPlane.primaryOrigin,
-      hostedDrManifest.controlPlane.drOrigin,
-    ]) {
-      expect(generatedSource).toContain(publicOrigin);
-    }
+    expect(routingSource).toContain('hostedDrClientRouting');
+    expect(routingSource).toContain('hostedDrClientOperations');
     expect(source).not.toContain('hosted-dr-capabilities.json');
-    expect(generatedSource).not.toContain('SIGNATURE_SECRET_KEY');
-    expect(generatedSource).not.toContain('R2_SECRET_ACCESS_KEY');
-    expect(generatedSource).not.toContain('R2_OBJECT_STORE');
+    expect(routingSource).not.toContain('SIGNATURE_SECRET_KEY');
+    expect(routingSource).not.toContain('R2_SECRET_ACCESS_KEY');
+    expect(routingSource).not.toContain('R2_OBJECT_STORE');
   });
 
   test('显式 deployment target 与 activation state 共同决定 Hosted placement', () => {
@@ -239,31 +238,7 @@ describe('Hono API 客户端', () => {
       target: 'production',
     });
     expect(resolveHostedApiConfig(undefined, 'production', {
-      defaultMode: 'managed-control-plane',
-      managedControlPlane: 'optional-disabled',
-      controlPlaneProvisioning: 'not-provisioned',
-      productionFallbackReadiness: 'verified',
-    })).toEqual({
-      enabled: false,
-      origin: hostedDrManifest.controlPlane.stableOrigin,
-      routingMode: 'static-next',
-      target: 'production',
-    });
-    expect(resolveHostedApiConfig(undefined, 'production', {
-      defaultMode: 'managed-control-plane',
-      managedControlPlane: 'production',
-      controlPlaneProvisioning: 'production',
-      productionFallbackReadiness: 'deferred',
-    })).toEqual({
-      enabled: true,
-      origin: hostedDrManifest.controlPlane.stableOrigin,
-      routingMode: 'managed-control-plane',
-      target: 'production',
-    });
-    expect(resolveHostedApiConfig(undefined, 'production', {
       activationCandidate: true,
-      controlPlaneProvisioning: 'not-provisioned',
-      productionFallbackReadiness: 'deferred',
     })).toEqual({
       enabled: false,
       origin: hostedDrManifest.controlPlane.stableOrigin,
@@ -275,14 +250,12 @@ describe('Hono API 客户端', () => {
       'production',
       {
         activationCandidate: true,
-        controlPlaneProvisioning: 'not-provisioned',
-        productionFallbackReadiness: 'deferred',
       },
     )).toThrow(/candidate.*NEXT_PUBLIC_HONO_API_ORIGIN/);
     expect(() => resolveHostedApiConfig(
       hostedDrManifest.controlPlane.previewOrigin,
       'production',
-    )).toThrow(/production.*generated origin/);
+    )).toThrow(/production.*routing origin/);
     expect(resolveHostedApiConfig(
       hostedDrManifest.controlPlane.previewOrigin,
       'preview',
@@ -425,7 +398,7 @@ describe('Hono API 客户端', () => {
     expect(drHeaders.get('x-mahoshojo-user-id')).toBe('7');
   });
 
-  test('client-preflight 不向 DR dispatch fail-closed operation', async () => {
+  test('client-preflight 不向 DR dispatch 未声明 operation', async () => {
     honoApiConfig.enabled = true;
     honoApiConfig.origin = hostedDrManifest.controlPlane.primaryOrigin;
     honoApiConfig.routingMode = 'client-preflight';
@@ -433,7 +406,7 @@ describe('Hono API 客户端', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(createGenerationApiIntent().dispatch('/api/arena/generate', { method: 'POST' }))
-      .rejects.toMatchObject({ code: 'DR_NOT_ELIGIBLE' });
+      .rejects.toMatchObject({ code: 'OPERATION_NOT_DECLARED' });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 

@@ -1,0 +1,36 @@
+{
+  "contractVersion": "g25e1-v1",
+  "origins": {
+    "stable": "https://api.mahoshojo.colanns.me",
+    "preview": "https://homura-preview.colanns.me",
+    "primary": "https://homura.colanns.me",
+    "dr": "https://mahoshojo.colanns.me"
+  },
+  "probes": {
+    "primaryPath": "/api/health/ready",
+    "drPath": "/api/hosted/dr-readiness",
+    "preflightTimeoutMs": 1500
+  },
+  "operations": [
+    { "route": "/api/arena/generation-requests/[generationRequestId]", "method": "GET", "safety": "safe-read" },
+    { "route": "/api/arena/generations/[generationId]", "method": "GET", "safety": "safe-read" },
+    { "route": "/api/arena/generations/[generationId]/cancel", "method": "POST", "safety": "durably-idempotent" },
+    { "route": "/api/arena/generations/[generationId]/stream", "method": "GET", "safety": "safe-read" },
+    { "route": "/api/creator/generate", "method": "POST", "safety": "new-non-idempotent" },
+    { "route": "/api/creator/generate-stream", "method": "POST", "safety": "new-non-idempotent" },
+    { "route": "/api/generate-canshou", "method": "POST", "safety": "new-non-idempotent" },
+    { "route": "/api/generate-canshou-stream", "method": "POST", "safety": "new-non-idempotent" },
+    { "route": "/api/generate-free", "method": "POST", "safety": "new-non-idempotent" },
+    { "route": "/api/generate-free-stream", "method": "POST", "safety": "new-non-idempotent" },
+    { "route": "/api/generate-game-card", "method": "POST", "safety": "new-non-idempotent" },
+    { "route": "/api/generate-magical-girl", "method": "POST", "safety": "new-non-idempotent" },
+    { "route": "/api/generate-magical-girl-details", "method": "POST", "safety": "new-non-idempotent" },
+    { "route": "/api/generate-magical-girl-details-stream", "method": "POST", "safety": "new-non-idempotent" },
+    { "route": "/api/generate-scenario", "method": "POST", "safety": "new-non-idempotent" },
+    { "route": "/api/generate-scenario-stream", "method": "POST", "safety": "new-non-idempotent" },
+    { "route": "/api/generate-sublimation", "method": "POST", "safety": "new-non-idempotent" },
+    { "route": "/api/generate-sublimation-stream", "method": "POST", "safety": "new-non-idempotent" },
+    { "route": "/api/hosted/dr-readiness", "method": "GET", "safety": "safe-read" },
+    { "route": "/api/hosted/dr-readiness", "method": "HEAD", "safety": "safe-read" }
+  ]
+}

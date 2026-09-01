@@ -19,27 +19,27 @@ describe('Arena Room ingress policy contract', () => {
 
   it('只保留 caller-origin policy，Room service origin 复用 Hosted Hono ingress', () => {
     const hostedDr = JSON.parse(readFileSync(
-      resolve(process.cwd(), 'config/hosted-dr-capabilities.json'),
+      resolve(process.cwd(), 'config/hosted-routing.json'),
       'utf8',
     )) as {
-      controlPlane: {
-        primaryOrigin: string;
-        previewOrigin: string;
-        stableOrigin: string;
+      origins: {
+        primary: string;
+        preview: string;
+        stable: string;
       };
     };
 
     expect(manifest.authority).toBe('hono-redis-single-writer');
     expect(manifest.cloudflareDr).toBe('excluded');
     for (const origin of [
-      hostedDr.controlPlane.primaryOrigin,
-      hostedDr.controlPlane.previewOrigin,
+      hostedDr.origins.primary,
+      hostedDr.origins.preview,
     ]) {
       const parsed = new URL(origin);
       expect(parsed.protocol).toBe('https:');
       expect(parsed.origin).toBe(origin);
     }
-    expect(hostedDr.controlPlane.primaryOrigin).not.toBe(hostedDr.controlPlane.stableOrigin);
+    expect(hostedDr.origins.primary).not.toBe(hostedDr.origins.stable);
     expect(Object.keys(manifest.targets.production)).toEqual(['allowedWebOrigins']);
     expect(Object.keys(manifest.targets.preview)).toEqual(['allowedWebOrigins']);
     expect(JSON.stringify(manifest)).not.toContain('logicalOrigin');

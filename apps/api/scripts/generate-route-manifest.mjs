@@ -4,7 +4,6 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const defaultAppRoot = path.resolve(scriptDirectory, '..');
-const defaultCapabilitiesFile = path.resolve(defaultAppRoot, '..', '..', 'config', 'hosted-dr-capabilities.json');
 
 const normalizeRouteIds = (routeIds, fieldName) => routeIds.map((routeId) => {
   if (typeof routeId !== 'string' || !routeId.trim()) {
@@ -27,6 +26,7 @@ const readRouteInventory = async (inventoryFile) => {
   const exitedRouteIds = payload?.exitedRouteIds;
   const legacyRouteIds = payload?.legacyRouteIds;
   const sharedRouteIds = payload?.sharedRouteIds;
+  const methods = payload?.methods;
   if (
     !Array.isArray(exitedRouteIds)
     || !Array.isArray(legacyRouteIds)
@@ -35,6 +35,13 @@ const readRouteInventory = async (inventoryFile) => {
     throw new Error(
       'config/hono-api-routes.json 必须提供 exitedRouteIds、legacyRouteIds 与 sharedRouteIds 数组',
     );
+  }
+  if (
+    typeof methods !== 'object'
+    || methods === null
+    || Array.isArray(methods)
+  ) {
+    throw new Error('config/hono-api-routes.json 必须提供 methods 对象');
   }
   if (legacyRouteIds.length > 0) {
     throw new Error('Phase 2.5B 结构退出后 legacyRouteIds 必须为空');
@@ -49,7 +56,29 @@ const readRouteInventory = async (inventoryFile) => {
   if (new Set(inventoryRouteIds).size !== inventoryRouteIds.length) {
     throw new Error('exitedRouteIds 与 sharedRouteIds 不得重复或重叠');
   }
-  return normalizedSharedRouteIds;
+  const normalizedMethods = new Map();
+  for (const routeId of normalizedSharedRouteIds) {
+    const routeMethods = methods[routeId];
+    if (!Array.isArray(routeMethods) || routeMethods.length === 0) {
+      throw new Error(`共享 Hono route 缺少 methods：${routeId}`);
+    }
+    const normalizedRouteMethods = routeMethods.map((method) => {
+      if (typeof method !== 'string' || !/^[A-Z]+$/u.test(method)) {
+        throw new Error(`共享 Hono route methods 非法：${routeId}`);
+      }
+      return method;
+    });
+    if (new Set(normalizedRouteMethods).size !== normalizedRouteMethods.length) {
+      throw new Error(`共享 Hono route methods 重复：${routeId}`);
+    }
+    normalizedMethods.set(routeId, normalizedRouteMethods);
+  }
+  for (const routeId of Object.keys(methods)) {
+    if (!normalizedMethods.has(routeId)) {
+      throw new Error(`methods 包含非 shared route：${routeId}`);
+    }
+  }
+  return { routeIds: normalizedSharedRouteIds, methods: normalizedMethods };
 };
 
 const toHonoSegment = (segment) => {
@@ -60,32 +89,6 @@ const toHonoSegment = (segment) => {
 };
 
 const toRoutePath = (routeId) => `/api/${routeId.split('/').map(toHonoSegment).join('/')}`;
-
-const readCapabilityMethods = async (capabilitiesFile, sharedRouteIds) => {
-  const payload = JSON.parse(await readFile(capabilitiesFile, 'utf8'));
-  if (!Array.isArray(payload?.capabilities)) {
-    throw new Error('Hosted DR capability manifest 必须提供 capabilities 数组');
-  }
-  const methodsByRouteId = new Map();
-  for (const capability of payload.capabilities) {
-    const routeId = capability?.id;
-    const methods = capability?.operations?.map((operation) => operation?.method);
-    if (typeof routeId !== 'string' || !Array.isArray(methods) || methods.length === 0
-      || methods.some((method) => typeof method !== 'string')) {
-      throw new Error(`Hosted DR capability 缺少有效 operations：${routeId ?? '<missing-id>'}`);
-    }
-    if (methodsByRouteId.has(routeId)) {
-      throw new Error(`Hosted DR capability id 重复：${routeId}`);
-    }
-    methodsByRouteId.set(routeId, methods);
-  }
-  for (const routeId of sharedRouteIds) {
-    if (!methodsByRouteId.has(routeId)) {
-      throw new Error(`共享 Hono route 缺少 Hosted DR capability methods：${routeId}`);
-    }
-  }
-  return methodsByRouteId;
-};
 
 const routeRank = (routePath) => {
   const segments = routePath.split('/').filter(Boolean);
@@ -99,13 +102,13 @@ export const generateHonoRouteManifest = async (
   appRoot = defaultAppRoot,
   {
     inventoryFile = path.resolve(appRoot, '..', '..', 'config', 'hono-api-routes.json'),
-    capabilitiesFile = defaultCapabilitiesFile,
     log = console.log,
   } = {},
 ) => {
   const adapterRoot = path.join(appRoot, 'src', 'adapters');
   const outputFile = path.join(appRoot, 'src', 'generated', 'routes.ts');
-  const sharedRouteIds = await readRouteInventory(inventoryFile);
+  const inventory = await readRouteInventory(inventoryFile);
+  const sharedRouteIds = inventory.routeIds;
 
   for (const routeId of sharedRouteIds) {
     const adapterPath = path.join(adapterRoot, `${routeId}.ts`);
@@ -116,14 +119,12 @@ export const generateHonoRouteManifest = async (
     }
   }
 
-  const methodsByRouteId = await readCapabilityMethods(capabilitiesFile, sharedRouteIds);
-
   const definitions = sharedRouteIds
     .map((routeId) => ({
       routeId,
       routePath: toRoutePath(routeId),
       importPath: `../adapters/${routeId}`,
-      methods: methodsByRouteId.get(routeId),
+      methods: inventory.methods.get(routeId),
     }))
     .sort((left, right) => routeRank(right.routePath) - routeRank(left.routePath)
       || left.routePath.localeCompare(right.routePath));

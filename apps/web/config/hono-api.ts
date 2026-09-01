@@ -1,10 +1,8 @@
 import {
-  hostedDrControlPlaneProvisioning,
   hostedDrClientRouting,
   hostedDrPreviewOrigin,
-  hostedDrProductionFallbackReadiness,
   hostedDrStableOrigin,
-} from './hosted-dr-client.generated';
+} from './hosted-routing';
 import {
   parseHostedApiDeploymentTarget,
   type HostedApiDeploymentTarget,
@@ -33,15 +31,10 @@ const isLoopbackDevelopmentOrigin = (origin: string): boolean => {
 
 type HostedApiActivation = {
   activationCandidate?: boolean;
-  controlPlaneProvisioning: 'not-provisioned' | 'preview' | 'production';
-  defaultMode?: 'client-preflight' | 'managed-control-plane';
-  managedControlPlane?: 'optional-disabled' | 'preview' | 'production';
-  productionFallbackReadiness: 'deferred' | 'verified';
 };
 
 export type HostedApiRoutingMode =
   | 'client-preflight'
-  | 'managed-control-plane'
   | 'static-hono'
   | 'static-next';
 
@@ -66,17 +59,10 @@ export const resolveHostedApiConfig = (
     activationCandidate: parseHostedDrActivationCandidate(
       process.env[HOSTED_DR_ACTIVATION_CANDIDATE_ENVIRONMENT],
     ),
-    controlPlaneProvisioning: hostedDrControlPlaneProvisioning,
-    defaultMode: hostedDrClientRouting.defaultMode,
-    managedControlPlane: hostedDrClientRouting.managedControlPlane,
-    productionFallbackReadiness: hostedDrProductionFallbackReadiness,
   },
 ): HostedApiConfig => {
   const origin = configuredOrigin?.trim();
   const target = resolveDeploymentTarget(deploymentTarget);
-  const defaultMode = activation.defaultMode ?? hostedDrClientRouting.defaultMode;
-  const managedControlPlane = activation.managedControlPlane
-    ?? hostedDrClientRouting.managedControlPlane;
 
   if (target === 'production') {
     if (activation.activationCandidate === true) {
@@ -94,40 +80,15 @@ export const resolveHostedApiConfig = (
     }
     if (origin) {
       throw new Error(
-        'client-preflight production 禁止通过 NEXT_PUBLIC_HONO_API_ORIGIN 覆盖 generated origin',
+        'client-preflight production 禁止通过 NEXT_PUBLIC_HONO_API_ORIGIN 覆盖 routing origin',
       );
     }
-    if (defaultMode === 'client-preflight') {
-      if (managedControlPlane !== 'optional-disabled') {
-        throw new Error('client-preflight 默认模式要求 managed control plane 为 optional-disabled');
-      }
-      return {
-        enabled: true,
-        origin: hostedDrClientRouting.primaryOrigin,
-        routingMode: 'client-preflight',
-        target,
-      };
-    }
-    if (
-      activation.controlPlaneProvisioning === 'production'
-      && managedControlPlane === 'production'
-    ) {
-      return {
-        enabled: true,
-        origin: hostedDrStableOrigin,
-        routingMode: 'managed-control-plane',
-        target,
-      };
-    }
-    if (!origin && activation.productionFallbackReadiness === 'verified') {
-      return {
-        enabled: false,
-        origin: hostedDrStableOrigin,
-        routingMode: 'static-next',
-        target,
-      };
-    }
-    throw new Error('production Hosted placement 未就绪，拒绝构建');
+    return {
+      enabled: true,
+      origin: hostedDrClientRouting.primaryOrigin,
+      routingMode: 'client-preflight',
+      target,
+    };
   }
 
   if (target === 'preview') {
@@ -140,7 +101,7 @@ export const resolveHostedApiConfig = (
       };
     }
     throw new Error(
-      'preview 环境必须显式使用 manifest 声明的 preview origin，且不得回退到 stable origin',
+      'preview 环境必须显式使用 Hosted routing 声明的 preview origin，且不得回退到 stable origin',
     );
   }
 
@@ -163,6 +124,6 @@ export const resolveHostedApiConfig = (
 export const honoApiConfig: HostedApiConfig = resolveHostedApiConfig(
   process.env.NEXT_PUBLIC_HONO_API_ORIGIN,
   process.env.NEXT_PUBLIC_HOSTED_API_ENVIRONMENT,
-  // Production client-preflight consumes the generated public physical origins;
-  // preview/local remain explicit and the optional managed control plane stays inert.
+  // Production client-preflight consumes the small public routing config;
+  // preview/local remain explicit.
 );

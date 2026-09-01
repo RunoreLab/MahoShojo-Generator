@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { createArenaRoomClient } from '@/lib/arena-room/client';
-import { hostedDrClientRouting } from '@/config/hosted-dr-client.generated';
+import { hostedDrClientRouting } from '@/config/hosted-routing';
 
 const snapshot = {
   protocolVersion: 1,

@@ -255,7 +255,7 @@ describe('Hono deployment workflow', () => {
     expect(cloudflareJob).toContain('- deploy-hono-preview');
     expect(cloudflareJob).toContain('- verify-and-build-cloudflare');
     expect(cloudflareJob).not.toContain('Verify Arena Room backend activation');
-    expect(cloudflareJob).toContain('controlPlane.previewOrigin');
+    expect(cloudflareJob).toContain("require('./config/hosted-routing.json').origins.preview");
     expect(cloudflareJob).toContain('export NEXT_PUBLIC_HONO_API_ORIGIN');
     expect(cloudflareJob).toContain('NEXT_PUBLIC_ARENA_MULTIPLAYER_ENABLED');
     expect(cloudflareJob).not.toContain('NEXT_PUBLIC_ARENA_ROOM_WRITER_ACTIVATION');

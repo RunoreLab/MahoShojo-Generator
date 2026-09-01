@@ -17,13 +17,6 @@ async function createFixture(): Promise<string> {
     path.join(root, 'src/adapters/retained/one.ts'),
     'export const POST = () => {};\n',
   );
-  await writeFile(
-    path.join(root, 'config/hosted-dr-capabilities.json'),
-    JSON.stringify({
-      capabilities: [{ id: 'retained/one', operations: [{ method: 'POST' }] }],
-    }),
-    'utf8',
-  );
   return root;
 }
 
@@ -46,11 +39,11 @@ describe('Hono route manifest generator', () => {
       exitedRouteIds: ['exited/one'],
       legacyRouteIds: [],
       sharedRouteIds: ['retained/one'],
+      methods: { 'retained/one': ['POST'] },
     });
 
     await generateHonoRouteManifest(root, {
       inventoryFile: path.join(root, 'config/hono-api-routes.json'),
-      capabilitiesFile: path.join(root, 'config/hosted-dr-capabilities.json'),
       log: () => {},
     });
 
@@ -67,10 +60,10 @@ describe('Hono route manifest generator', () => {
       exitedRouteIds: ['exited/one'],
       legacyRouteIds: ['legacy/one'],
       sharedRouteIds: ['retained/one'],
+      methods: { 'retained/one': ['POST'] },
     });
     const options = {
       inventoryFile: path.join(root, 'config/hono-api-routes.json'),
-      capabilitiesFile: path.join(root, 'config/hosted-dr-capabilities.json'),
       log: () => {},
     };
     await expect(generateHonoRouteManifest(root, options))
@@ -80,6 +73,7 @@ describe('Hono route manifest generator', () => {
       exitedRouteIds: ['retained/one'],
       legacyRouteIds: [],
       sharedRouteIds: ['retained/one'],
+      methods: { 'retained/one': ['POST'] },
     });
     await expect(generateHonoRouteManifest(root, options))
       .rejects.toThrow('不得重复或重叠');
@@ -103,6 +97,7 @@ describe('Hono route manifest generator', () => {
       exitedRouteIds: ['exited/one'],
       legacyRouteIds: [],
       sharedRouteIds: ['retained/no-adapter'],
+      methods: { 'retained/no-adapter': ['POST'] },
     });
     await expect(generateHonoRouteManifest(root, options))
       .rejects.toThrow('共享 Hono route adapter 不存在');
@@ -111,8 +106,38 @@ describe('Hono route manifest generator', () => {
       exitedRouteIds: ['exited/one'],
       legacyRouteIds: [],
       sharedRouteIds: ['../outside'],
+      methods: { '../outside': ['POST'] },
     });
     await expect(generateHonoRouteManifest(root, options))
       .rejects.toThrow('sharedRouteIds 包含非法 routeId');
+  });
+
+  it('fails closed when the canonical route inventory omits or adds methods', async () => {
+    const root = await createFixture();
+    const options = {
+      inventoryFile: path.join(root, 'config/hono-api-routes.json'),
+      log: () => {},
+    };
+
+    await writeInventory(root, {
+      exitedRouteIds: [],
+      legacyRouteIds: [],
+      sharedRouteIds: ['retained/one'],
+      methods: {},
+    });
+    await expect(generateHonoRouteManifest(root, options))
+      .rejects.toThrow('共享 Hono route 缺少 methods：retained/one');
+
+    await writeInventory(root, {
+      exitedRouteIds: [],
+      legacyRouteIds: [],
+      sharedRouteIds: ['retained/one'],
+      methods: {
+        'retained/one': ['POST'],
+        'unknown/route': ['GET'],
+      },
+    });
+    await expect(generateHonoRouteManifest(root, options))
+      .rejects.toThrow('methods 包含非 shared route：unknown/route');
   });
 });

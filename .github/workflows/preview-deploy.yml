@@ -108,7 +108,7 @@ jobs:
           NEXT_PUBLIC_ARENA_MULTIPLAYER_ENABLED: ${{ env.PREVIEW_ARENA_MULTIPLAYER_ENABLED }}
         run: |
           set -euo pipefail
-          NEXT_PUBLIC_HONO_API_ORIGIN="$(node -p "require('./config/hosted-dr-capabilities.json').controlPlane.previewOrigin")"
+          NEXT_PUBLIC_HONO_API_ORIGIN="$(node -p "require('./config/hosted-routing.json').origins.preview")"
           export NEXT_PUBLIC_HONO_API_ORIGIN
           pnpm --filter @mahoshojo/web run build:cf
 
@@ -216,7 +216,7 @@ jobs:
           NEXT_PUBLIC_ARENA_MULTIPLAYER_ENABLED: ${{ env.PREVIEW_ARENA_MULTIPLAYER_ENABLED }}
         run: |
           set -euo pipefail
-          NEXT_PUBLIC_HONO_API_ORIGIN="$(node -p "require('./config/hosted-dr-capabilities.json').controlPlane.previewOrigin")"
+          NEXT_PUBLIC_HONO_API_ORIGIN="$(node -p "require('./config/hosted-routing.json').origins.preview")"
           export NEXT_PUBLIC_HONO_API_ORIGIN
           pnpm --filter @mahoshojo/web run build:cf
 

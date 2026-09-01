@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { hostedDrClientRouting } from '@/config/hosted-dr-client.generated';
+import { hostedDrClientRouting } from '@/config/hosted-routing';
 import {
   lookupHostedDrClientOperation,
   selectHostedDrPlacement,
@@ -95,7 +95,7 @@ describe('Hosted DR client preflight selector', () => {
     expect(decision.drProbe?.outcome).toBe('protocol-error');
   });
 
-  it('隔离验证可以注入 loopback routing，而 production 默认仍来自 generated projection', async () => {
+  it('隔离验证可以注入 loopback routing，而 production 默认仍来自小型运行配置', async () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(Response.json({ ok: false }, { status: 503 }))
       .mockResolvedValueOnce(readyResponse('next-dr', {
@@ -121,7 +121,7 @@ describe('Hosted DR client preflight selector', () => {
     ]);
   });
 
-  it('fail-closed operation 在 primary non-ready 时不探测 DR', async () => {
+  it('未列入 Next DR 的 operation 在 primary non-ready 时不探测 DR', async () => {
     const fetcher = vi.fn(async () => Response.json({ ok: false }, { status: 503 }));
 
     const decision = await selectHostedDrPlacement({
@@ -132,8 +132,8 @@ describe('Hosted DR client preflight selector', () => {
 
     expect(decision).toMatchObject({
       placement: 'unavailable',
-      reason: 'DR_NOT_ELIGIBLE',
-      routeFamily: '/api/arena/generate',
+      reason: 'OPERATION_NOT_DECLARED',
+      routeFamily: 'undeclared',
     });
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
@@ -161,7 +161,7 @@ describe('Hosted DR client preflight selector', () => {
       'GET',
     )).toMatchObject({
       route: '/api/arena/generations/[generationId]/stream',
-      drMode: 'safe-read',
+      safety: 'safe-read',
     });
     expect(lookupHostedDrClientOperation(
       '/api/arena/generations/generation-1/extra/stream',
@@ -293,7 +293,7 @@ describe('Hosted DR client preflight selector', () => {
 
     expect(decision).toMatchObject({
       placement: 'unavailable',
-      reason: 'DR_NOT_ELIGIBLE',
+      reason: 'OPERATION_NOT_DECLARED',
       primaryProbe: { outcome: 'timeout' },
     });
     expect(fetcher).toHaveBeenCalledTimes(1);

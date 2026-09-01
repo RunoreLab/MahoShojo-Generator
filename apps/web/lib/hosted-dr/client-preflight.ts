@@ -1,14 +1,14 @@
 import {
   hostedDrClientOperations,
   hostedDrClientRouting,
-} from '@/config/hosted-dr-client.generated';
+  type HostedDrClientOperation,
+} from '@/config/hosted-routing';
 import { isHostedDrContractVersionCompatible } from '@mahoshojo/hosted-api/hosted-dr';
 import {
   HOSTED_DR_CAPABILITY_HEADER,
   HOSTED_DR_OPERATION_METHOD_HEADER,
 } from '@/lib/hosted-dr/probe-contract';
 
-export type HostedDrClientOperation = (typeof hostedDrClientOperations)[number];
 export type HostedDrClientRouting = Readonly<{
   primaryOrigin: string;
   drOrigin: string;
@@ -107,19 +107,8 @@ export const lookupHostedDrClientOperation = (
 export const isHostedDrOperationEligible = (
   operation: HostedDrClientOperation,
 ): boolean => (
-  operation.contractStatus === 'verified'
-  && (
-    (
-      operation.requestClass === 'safe-read'
-      && operation.drMode === 'safe-read'
-      && operation.replayPolicy === 'safe-read-only'
-    )
-    || (
-      operation.requestClass === 'non-idempotent-operation'
-      && operation.drMode === 'new-request-only'
-      && operation.replayPolicy === 'never-after-dispatch'
-    )
-  )
+  operation.safety === 'safe-read'
+  || operation.safety === 'new-non-idempotent'
 );
 
 const hasNoStore = (response: Response): boolean => (

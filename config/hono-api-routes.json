@@ -33,5 +33,31 @@
     "generate-sublimation",
     "generate-sublimation-stream",
     "hosted/dr-readiness"
-  ]
+  ],
+  "methods": {
+    "arena/generate": ["POST"],
+    "arena/generate-stream": ["DELETE", "POST"],
+    "arena/generation-requests/[generationRequestId]": ["GET"],
+    "arena/generations/[generationId]/cancel": ["POST"],
+    "arena/generations/[generationId]": ["GET"],
+    "arena/generations/[generationId]/stream": ["GET"],
+    "arena/repair-combatant-meta": ["POST"],
+    "arena/session/generate-next": ["POST"],
+    "creator/generate": ["POST"],
+    "creator/generate-stream": ["POST"],
+    "generate-battle-story": ["POST"],
+    "generate-canshou": ["POST"],
+    "generate-canshou-stream": ["POST"],
+    "generate-free": ["POST"],
+    "generate-free-stream": ["POST"],
+    "generate-game-card": ["POST"],
+    "generate-magical-girl": ["POST"],
+    "generate-magical-girl-details": ["POST"],
+    "generate-magical-girl-details-stream": ["POST"],
+    "generate-scenario": ["POST"],
+    "generate-scenario-stream": ["POST"],
+    "generate-sublimation": ["POST"],
+    "generate-sublimation-stream": ["POST"],
+    "hosted/dr-readiness": ["GET", "HEAD"]
+  }
 }

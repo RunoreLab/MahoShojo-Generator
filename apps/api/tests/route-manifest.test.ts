@@ -85,18 +85,13 @@ describe('Hono route manifest', () => {
       exitedRouteIds?: string[];
       legacyRouteIds?: string[];
       sharedRouteIds?: string[];
+      methods?: Record<string, string[]>;
     };
     expect(routeInventory.exitedRouteIds).toEqual(EXITED_ROUTE_IDS);
     expect(routeInventory.legacyRouteIds).toEqual([]);
     expect(routeInventory.sharedRouteIds?.length).toBe(24);
-    const hostedManifest = JSON.parse(readFileSync(
-      path.join(REPOSITORY_ROOT, 'config/hosted-dr-capabilities.json'),
-      'utf8',
-    )) as { capabilities: Array<{ id: string; operations: Array<{ method: string }> }> };
-
     for (const definition of sharedDefinitions) {
-      const capability = hostedManifest.capabilities.find(({ id }) => id === definition.id);
-      expect(definition.methods).toEqual(capability?.operations.map(({ method }) => method));
+      expect(definition.methods).toEqual(routeInventory.methods?.[definition.id]);
       const routeModule = await definition.load();
       expect(routeModule.POST ?? routeModule.GET).toEqual(expect.any(Function));
     }

@@ -12,7 +12,7 @@ import {
   type HostedDrDecisionReason,
   type HostedPlacementDecision,
 } from '@/lib/hosted-dr/client-preflight';
-import { hostedDrClientRouting } from '@/config/hosted-dr-client.generated';
+import { hostedDrClientRouting } from '@/config/hosted-routing';
 import {
   createHostedDrSelectionTelemetry,
   createHostedDrTerminalTelemetry,
@@ -307,9 +307,7 @@ export const createPinnedGenerationApiSafeReadDispatcher = (
       const operation = lookupHostedDrClientOperation(input, method);
       const isVerifiedSafeRead = (method === 'GET' || method === 'HEAD')
         && operation !== null
-        && operation.requestClass === 'safe-read'
-        && operation.drMode === 'safe-read'
-        && operation.replayPolicy === 'safe-read-only'
+        && operation.safety === 'safe-read'
         && isHostedDrOperationEligible(operation);
       if (!isVerifiedSafeRead) {
         throw new Error('PINNED_GENERATION_SAFE_READ_NOT_ALLOWED');

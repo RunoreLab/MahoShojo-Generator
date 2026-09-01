@@ -5,7 +5,7 @@ import {
   hostedDrClientRouting,
   hostedDrPreviewOrigin,
   hostedDrStableOrigin,
-} from '@/config/hosted-dr-client.generated';
+} from '@/config/hosted-routing';
 
 describe('Arena multiplayer browser feature flag', () => {
   it('production 只凭单一公开 flag 启用，并从 Hosted manifest 选择 ingress', () => {

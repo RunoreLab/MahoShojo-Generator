@@ -4,7 +4,7 @@ import { once } from 'node:events';
 import type { AddressInfo } from 'node:net';
 
 import { honoApiConfig } from '../config/hono-api';
-import { hostedDrClientRouting } from '../config/hosted-dr-client.generated';
+import { hostedDrClientRouting } from '../config/hosted-routing';
 import {
   createGenerationApiIntent,
   type GenerationApiClientError,
