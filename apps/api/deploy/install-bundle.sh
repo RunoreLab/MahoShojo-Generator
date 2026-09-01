@@ -61,12 +61,10 @@ verify_uploaded_tuple() {
   [ -d "$verified_dir" ] && [ ! -L "$verified_dir" ] || return 1
   [ "$(realpath -e "$verified_dir")" = "$verified_dir" ] || return 1
   [ "$(find "$verified_dir" -mindepth 1 -maxdepth 1 -printf '%f\n' | wc -l \
-    | tr -d ' ')" -eq 7 ] || return 1
+    | tr -d ' ')" -eq 5 ] || return 1
 
   for verified_file in \
-    index.mjs compose.yml deploy-bundle.sh arena-room-release-gate.json \
-    arena-room-release-gate-schema.mjs \
-    release.manifest release.sha256
+    index.mjs compose.yml deploy-bundle.sh release.manifest release.sha256
   do
     [ -f "$verified_dir/$verified_file" ] \
       && [ ! -L "$verified_dir/$verified_file" ] || return 1
@@ -74,14 +72,10 @@ verify_uploaded_tuple() {
   [ "$(wc -l < "$verified_dir/release.sha256" | tr -d ' ')" -eq 1 ] || return 1
   [ "$(sed -n '1p' "$verified_dir/release.sha256")" \
     = "$verified_release_id  release.manifest" ] || return 1
-  [ "$(wc -l < "$verified_dir/release.manifest" | tr -d ' ')" -eq 5 ] || return 1
+  [ "$(wc -l < "$verified_dir/release.manifest" | tr -d ' ')" -eq 3 ] || return 1
   grep -Eq '^[0-9a-f]{64}  index\.mjs$' "$verified_dir/release.manifest" || return 1
   grep -Eq '^[0-9a-f]{64}  compose\.yml$' "$verified_dir/release.manifest" || return 1
   grep -Eq '^[0-9a-f]{64}  deploy-bundle\.sh$' "$verified_dir/release.manifest" || return 1
-  grep -Eq '^[0-9a-f]{64}  arena-room-release-gate\.json$' \
-    "$verified_dir/release.manifest" || return 1
-  grep -Eq '^[0-9a-f]{64}  arena-room-release-gate-schema\.mjs$' \
-    "$verified_dir/release.manifest" || return 1
   (cd "$verified_dir" && sha256sum -c release.sha256 >/dev/null)
   (cd "$verified_dir" && sha256sum -c release.manifest >/dev/null)
 }
@@ -92,8 +86,6 @@ remove_staging() {
     "$removed_staging_dir/index.mjs" \
     "$removed_staging_dir/compose.yml" \
     "$removed_staging_dir/deploy-bundle.sh" \
-    "$removed_staging_dir/arena-room-release-gate.json" \
-    "$removed_staging_dir/arena-room-release-gate-schema.mjs" \
     "$removed_staging_dir/release.manifest" \
     "$removed_staging_dir/release.sha256" || return 1
   rmdir "$removed_staging_dir"
@@ -152,9 +144,7 @@ case "$mode" in
         exit 1
       }
       for compared_file in \
-        index.mjs compose.yml deploy-bundle.sh arena-room-release-gate.json \
-        arena-room-release-gate-schema.mjs \
-        release.manifest release.sha256
+        index.mjs compose.yml deploy-bundle.sh release.manifest release.sha256
       do
         cmp -s "$staging_dir/$compared_file" "$final_dir/$compared_file" || {
           echo "既有最终 release 与上传 tuple 不一致" >&2

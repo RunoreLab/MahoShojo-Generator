@@ -24,8 +24,10 @@ describe('production deployment pipeline', () => {
       /deploy-cloudflare:\s*[\s\S]*?needs: deploy[\s\S]*?uses: \.\/\.github\/workflows\/cloudflare-deploy\.yml/u,
     );
     expect(honoWorkflow).toContain('secrets: inherit');
-    expect(honoWorkflow).toContain('--writer "$writer_activation"');
-    expect(honoWorkflow).not.toContain('--writer enabled');
+    expect(honoWorkflow).not.toContain('--writer');
+    expect(honoWorkflow).toContain(
+      'Hono runtime 由服务器 ARENA_MULTIPLAYER_ENABLED 控制',
+    );
 
     expect(cloudflareWorkflow).toMatch(/workflow_call:/u);
     expect(cloudflareWorkflow).not.toMatch(/^\s+push:/mu);

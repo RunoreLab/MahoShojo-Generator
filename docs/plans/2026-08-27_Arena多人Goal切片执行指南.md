@@ -6,6 +6,10 @@
 适用分支：`refactor/platform-rearchitecture` 及从其切出的 Arena 多人功能分支/工作树
 首个基线：`cbe29d8c3aff16c9a87a9c7e20d03056d7d5af85`
 
+历史说明：本文记录的 Room release gate、writer activation 与 reader compatibility 发布门禁已由
+[平台复杂度预算与故障降级决策](../decisions/2026-09-01_193200_平台复杂度预算与故障降级决策.md)
+取代，不再是当前实现或发布要求；auth、authority、fence、资源上限与真实行为测试仍适用。
+
 ## 1. 用途与权威边界
 
 本文用于把 Arena 多人 Hono + Redis v1 拆成适合 Codex `/goal` 持续推进的**单轮可验证切片**。它是执行索引、状态总账和停止条件，不是新的产品规格或架构 ADR。

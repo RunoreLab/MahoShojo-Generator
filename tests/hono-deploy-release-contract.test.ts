@@ -43,24 +43,22 @@ describe('Hono content-addressed release transaction', () => {
     expect(healthcheck).toContain('interval: 30s');
   });
 
-  test('release id 覆盖 bundle、compose 与 deploy script 的完整 tuple', () => {
+  test('release id 覆盖 bundle、compose 与 deploy script 的精确五件套', () => {
     const workflow = readFileSync(workflowPath, 'utf8');
 
-    expect(workflow).toMatch(/sha256sum\s+index\.mjs\s+compose\.yml\s+deploy-bundle\.sh\s+\\\s+arena-room-release-gate\.json\s+arena-room-release-gate-schema\.mjs\s*>\s*release\.manifest/);
+    expect(workflow).toMatch(/sha256sum\s+index\.mjs\s+compose\.yml\s+deploy-bundle\.sh\s*>\s*release\.manifest/);
     expect(workflow).toMatch(/sha256sum\s+release\.manifest\s*>\s*release\.sha256/);
     expect(workflow).toContain('artifact/release.manifest');
     expect(workflow).toContain('artifact/release.sha256');
-    expect(workflow).toContain('artifact/arena-room-release-gate.json');
-    expect(workflow).toContain('artifact/arena-room-release-gate-schema.mjs');
+    expect(workflow).not.toContain('artifact/arena-room-release-gate.json');
+    expect(workflow).not.toContain('artifact/arena-room-release-gate-schema.mjs');
     expect(workflow).toContain("release_id=\"$(awk '{print $1}' artifact/release.sha256)\"");
 
     const script = readDeployScript();
     if (!script) return;
     expect(script).toContain('release.manifest');
     expect(script).toContain('release.sha256');
-    expect(script).toContain('arena-room-release-gate.json');
-    expect(script).toContain('arena-room-release-gate-schema.mjs');
-    expect(script).toContain('node /gate-schema.mjs --manifest /gate.json');
+    expect(script).not.toContain('node /gate-schema.mjs --manifest /gate.json');
     expect(script).toMatch(/sha256sum\s+-c\s+["']?release\.manifest/);
   });
 
@@ -74,9 +72,7 @@ describe('Hono content-addressed release transaction', () => {
     expect(compose).toContain(
       'HONO_CORS_ORIGINS: ${HONO_DEPLOY_CORS_ORIGINS:?HONO_DEPLOY_CORS_ORIGINS must be explicit}',
     );
-    expect(compose).toContain(
-      'ARENA_ROOM_WRITER_ACTIVATION: ${HONO_ARENA_ROOM_WRITER_ACTIVATION:-disabled}',
-    );
+    expect(compose).not.toContain('ARENA_ROOM_WRITER_ACTIVATION');
     expect(compose).not.toMatch(/^\s+ARENA_ROOM_ALLOWED_ORIGINS:/mu);
     expect(script).toContain('--env-file "$runtime_env"');
     expect(script).toContain("web_origin='https://mahoshojo.colanns.me'");
@@ -94,10 +90,8 @@ describe('Hono content-addressed release transaction', () => {
       'room_allowed_origins="$web_origin,$preview_web_origin,$preview_cloudflare_web_origin"',
     );
     expect(script).toContain('-e HONO_CORS_ORIGINS="$cors_origins"');
-    expect(script).toContain('-e ARENA_ROOM_WRITER_ACTIVATION="$tuple_writer_activation"');
-    expect(script).toContain(
-      'HONO_ARENA_ROOM_WRITER_ACTIVATION="$release_writer_activation"',
-    );
+    expect(script).not.toContain('ARENA_ROOM_WRITER_ACTIVATION');
+    expect(script).toContain('ARENA_MULTIPLAYER_ENABLED');
     expect(script).not.toContain('validate_arena_room_activation_attestations');
     expect(script).not.toContain('ARENA_ROOM_PRODUCTION_GO_NO_GO');
     expect(script).toContain('validate_arena_room_runtime_allowed_origins "$release_dir"');
@@ -163,12 +157,9 @@ describe('Hono content-addressed release transaction', () => {
     expect(script).toContain("[ \"$1\" = rollback ]");
     expect(script).toContain('verify_deployment_format');
     expect(script).toContain('realpath -e "$0"');
-    expect(script).toMatch(
-      /verify_arena_room_rollback_gate \\\s+"\$rollback_current_release_dir" "\$release_dir"/u,
-    );
-    expect(script).toContain(
-      'verify_arena_room_rollback_gate "$previous_release_dir" "$release_dir"',
-    );
+    expect(script).not.toContain('verify_arena_room_rollback_gate');
+    expect(script).toContain('verify_release_tuple "$rollback_current_release_dir"');
+    expect(script).toContain('verify_release_tuple "$release_dir"');
     expect(script).not.toContain('previous ->');
     expect(script).not.toContain('previous.next');
   });

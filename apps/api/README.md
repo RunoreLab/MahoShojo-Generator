@@ -124,8 +124,8 @@ Hosted DR manifest shared route 的 Hono 与 Next/OpenNext adapter 复用同一 
 Arena Room 使用独立的 `ARENA_ROOM_ALLOWED_ORIGINS`。多人功能启用时该列表必须非空，只能包含无凭据、
 path、query、fragment 或 wildcard 的精确网页 Origin，并且每一项还必须被 `HONO_CORS_ORIGINS` 覆盖。
 HTTP Room mutation 与浏览器 WebSocket 共用这份精确列表；这里填写发起请求的网页 Origin，不是 API/WSS
-目标 hostname。production/preview 是否接受多人 request 由各自的 `ARENA_MULTIPLAYER_ENABLED` 控制；writer capability
-由受 manifest 保护的 immutable release tuple 决定，本 Origin 配置本身不构成激活授权。
+目标 hostname。production/preview 是否接受多人 request 只由各自 `.env.hono` 的
+`ARENA_MULTIPLAYER_ENABLED` 控制，本 Origin 配置本身不构成激活授权。
 
 Room create 叠加 `5/min` 突发限流与新 Room intent 的账号 `32/24h` 长窗口预算；已有 receipt 的结果确认
 不重复消耗新 Room 预算。公开 create 请求必须携带客户端生成的
@@ -242,16 +242,16 @@ reaper 对账，不伪造可对外读取的 failed/completed 终态。
 
 `.github/workflows/hono-deploy.yml` 继续保留受保护生产分支、Environment、SSH host key 和
 `cancel-in-progress: false` 门禁，但 build/container/artifact 路径只引用 `apps/api` owner。发布物由
-`index.mjs`、release-local `compose.yml`、`deploy-bundle.sh`、Arena Room release gate 及其严格 schema validator
-组成；`release.manifest` 覆盖完整 tuple，其 SHA-256 才是 release id。workflow 通过 `install-bundle.sh` 在
+`index.mjs`、release-local `compose.yml` 与 `deploy-bundle.sh` 组成；`release.manifest` 覆盖这三个运行资产，
+其 SHA-256 才是 release id，连同 manifest 本身构成精确五文件 release tuple。workflow 通过 `install-bundle.sh` 在
 canonical `releases` 下创建随机 staging，
 上传后持 deploy lock 复验精确 tuple，再原子纳管最终目录；不会在校验前向最终 release 路径写文件。之后才
 执行 release-local deploy script。
 
 默认分支 push 只由该 workflow 执行一次 `ci:verify`。Hono transaction 与公网 backend probe 成功后，它才调用
-`.github/workflows/cloudflare-deploy.yml` 发布 Web；Cloudflare workflow 不再独立监听 push 或重复 CI。正常发布固定生成
-writer-enabled tuple，runtime 是否接受 Room request 由 `.env.hono` 的 `ARENA_MULTIPLAYER_ENABLED` 决定。Cloudflare
-手工入口只用于 emergency disable Web exposure，不能单独开启多人。
+`.github/workflows/cloudflare-deploy.yml` 发布 Web；Cloudflare workflow 不再独立监听 push 或重复 CI。runtime 是否接受
+Room request 由 `.env.hono` 的 `ARENA_MULTIPLAYER_ENABLED` 决定；workflow 手工入口只控制 Web exposure，
+不会覆盖服务器 flag。历史七文件 tuple 仅为 previous rollback 按自身 manifest checksum 兼容，不再解析其中 gate 语义。
 
 部署事务只有在配置预检、本机 readiness、`/health/ready` 和 retained shared route
 `/api/generate-magical-girl` 的公网 wire/CORS contract 全部通过后才原子 promotion `current`；任一步失败都

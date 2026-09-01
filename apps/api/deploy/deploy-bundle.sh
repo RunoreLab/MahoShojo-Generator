@@ -203,44 +203,27 @@ verify_release_tuple() {
   }
 
   manifest_lines="$(wc -l < "$tuple_dir/release.manifest" | tr -d ' ')"
-  optional_manifest_lines=0
   arena_gate_lines="$(grep -Ec '^[0-9a-f]{64}  arena-room-release-gate\.json$' \
     "$tuple_dir/release.manifest" || true)"
-  case "$arena_gate_lines" in
-    0)
-      [ ! -e "$tuple_dir/arena-room-release-gate.json" ] \
-        && [ ! -L "$tuple_dir/arena-room-release-gate.json" ] || return 1
-      ;;
-    1)
-      optional_manifest_lines=$((optional_manifest_lines + 1))
-      [ -f "$tuple_dir/arena-room-release-gate.json" ] \
-        && [ ! -L "$tuple_dir/arena-room-release-gate.json" ] || return 1
-      ;;
-    *) return 1 ;;
-  esac
   arena_gate_validator_lines="$(grep -Ec \
     '^[0-9a-f]{64}  arena-room-release-gate-schema\.mjs$' \
     "$tuple_dir/release.manifest" || true)"
-  case "$arena_gate_validator_lines" in
-    0)
-      [ ! -e "$tuple_dir/arena-room-release-gate-schema.mjs" ] \
-        && [ ! -L "$tuple_dir/arena-room-release-gate-schema.mjs" ] || return 1
+  legacy_manifest_lines="$(grep -Ec '^[0-9a-f]{64}  legacy-layout$' \
+    "$tuple_dir/release.manifest" || true)"
+  case "$manifest_lines:$arena_gate_lines:$arena_gate_validator_lines:$legacy_manifest_lines" in
+    3:0:0:0)
+      tuple_file_count=5
       ;;
-    1)
-      optional_manifest_lines=$((optional_manifest_lines + 1))
+    5:1:1:0)
+      # 历史七件套中的两个 gate 文件只作为 checksum 覆盖的不透明资产保留。
+      tuple_file_count=7
+      [ -f "$tuple_dir/arena-room-release-gate.json" ] \
+        && [ ! -L "$tuple_dir/arena-room-release-gate.json" ] || return 1
       [ -f "$tuple_dir/arena-room-release-gate-schema.mjs" ] \
         && [ ! -L "$tuple_dir/arena-room-release-gate-schema.mjs" ] || return 1
       ;;
-    *) return 1 ;;
-  esac
-  legacy_manifest_lines="$(grep -Ec '^[0-9a-f]{64}  legacy-layout$' \
-    "$tuple_dir/release.manifest" || true)"
-  case "$legacy_manifest_lines" in
-    0)
-      [ ! -e "$tuple_dir/legacy-layout" ] && [ ! -L "$tuple_dir/legacy-layout" ] || return 1
-      ;;
-    1)
-      optional_manifest_lines=$((optional_manifest_lines + 1))
+    4:0:0:1)
+      tuple_file_count=6
       [ -f "$tuple_dir/legacy-layout" ] && [ ! -L "$tuple_dir/legacy-layout" ] || return 1
       legacy_marker="$(cat "$tuple_dir/legacy-layout")"
       case "$legacy_marker" in
@@ -248,20 +231,13 @@ verify_release_tuple() {
         *) return 1 ;;
       esac
       ;;
-    *) return 1 ;;
-  esac
-  if [ "$arena_gate_lines" -eq 1 ] && [ "$legacy_manifest_lines" -eq 1 ]; then
-    echo "legacy adoption tuple 不得声明 Arena Room reader capability" >&2
-    return 1
-  fi
-  if [ "$arena_gate_validator_lines" -eq 1 ] && [ "$arena_gate_lines" -ne 1 ]; then
-    echo "release gate schema validator 必须与 release gate 同时出现" >&2
-    return 1
-  fi
-  if [ "$manifest_lines" -ne $((3 + optional_manifest_lines)) ]; then
-      echo "release.manifest 必须只覆盖规范 tuple 文件" >&2
+    *)
+      echo "release.manifest 不是受支持的 release tuple" >&2
       return 1
-  fi
+      ;;
+  esac
+  [ "$(find "$tuple_dir" -mindepth 1 -maxdepth 1 -printf '%f\n' | wc -l \
+    | tr -d ' ')" -eq "$tuple_file_count" ] || return 1
   [ "$(grep -Ec '^[0-9a-f]{64}  index\.mjs$' "$tuple_dir/release.manifest")" -eq 1 ] || return 1
   [ "$(grep -Ec '^[0-9a-f]{64}  compose\.yml$' "$tuple_dir/release.manifest")" -eq 1 ] || return 1
   [ "$(grep -Ec '^[0-9a-f]{64}  deploy-bundle\.sh$' "$tuple_dir/release.manifest")" -eq 1 ] || return 1
@@ -317,30 +293,10 @@ verify_legacy_source_if_needed() {
   }
 }
 
-read_arena_room_writer_activation() {
-  tuple_dir="$1"
-  tuple_gate="$tuple_dir/arena-room-release-gate.json"
-  if [ ! -e "$tuple_gate" ] && [ ! -L "$tuple_gate" ]; then
-    printf '%s\n' disabled
-    return 0
-  fi
-  [ -f "$tuple_gate" ] && [ ! -L "$tuple_gate" ] || return 1
-  tuple_writer_activation="$(
-    sed -n 's/^[[:space:]]*"writerActivation":[[:space:]]*"\([a-z]*\)"[,]*[[:space:]]*$/\1/p' \
-      "$tuple_gate"
-  )"
-  case "$tuple_writer_activation" in
-    disabled|enabled) printf '%s\n' "$tuple_writer_activation" ;;
-    *) return 1 ;;
-  esac
-}
-
 validate_release_compose() {
   tuple_dir="$1"
-  tuple_writer_activation="$(read_arena_room_writer_activation "$tuple_dir")" || return 1
   run_cancellable env \
     HONO_RELEASE_DIR="$tuple_dir" \
-    HONO_ARENA_ROOM_WRITER_ACTIVATION="$tuple_writer_activation" \
     docker compose \
     --project-directory "$root_dir" \
     -f "$tuple_dir/compose.yml" config >/dev/null
@@ -348,7 +304,6 @@ validate_release_compose() {
 
 validate_release_runtime() {
   tuple_dir="$1"
-  tuple_writer_activation="$(read_arena_room_writer_activation "$tuple_dir")" || return 1
   run_cancellable docker run --rm \
     --network "$redis_network_name" \
     --env-file "$runtime_env" \
@@ -356,7 +311,6 @@ validate_release_runtime() {
     -e HOSTED_API_ENVIRONMENT="$hosted_api_environment" \
     -e HONO_AUTH_MODE=bearer \
     -e HONO_CORS_ORIGINS="$cors_origins" \
-    -e ARENA_ROOM_WRITER_ACTIVATION="$tuple_writer_activation" \
     -e REDIS_HOST=redis \
     -e REDIS_PORT=6379 \
     -e REDIS_REQUIRED=true \
@@ -450,12 +404,7 @@ restore_previous_tuple() {
   validate_release_compose "$target_release_dir" || return 1
   validate_release_runtime "$target_release_dir" || return 1
   write_release_env "$target_release_dir" || return 1
-  target_writer_activation="$(
-    read_arena_room_writer_activation "$target_release_dir"
-  )" || return 1
-  run_cancellable env \
-    HONO_ARENA_ROOM_WRITER_ACTIVATION="$target_writer_activation" \
-    docker compose \
+  run_cancellable docker compose \
     --project-directory "$root_dir" -f "$target_release_dir/compose.yml" \
     up -d --force-recreate hono || return 1
   wait_for_local_readiness || return 1
@@ -472,12 +421,10 @@ rollback_transaction() {
   rollback_previous_release_dir="$3"
   echo "新 release 未通过完整 contract，开始回滚 tuple" >&2
   verify_release_tuple "$failed_release_dir" || {
-    echo "failed release tuple 已漂移，拒绝读取 rollback gate" >&2
+    echo "failed release tuple 已漂移，拒绝继续回滚" >&2
     return 1
   }
   if [ "$rollback_had_previous" = true ]; then
-    verify_arena_room_rollback_gate \
-      "$failed_release_dir" "$rollback_previous_release_dir" || return 1
     restore_previous_tuple "$rollback_previous_release_dir" || return 1
     rm -f "$root_dir/current.next" || return 1
     return 0
@@ -493,108 +440,6 @@ rollback_transaction() {
   rm -f "$format_file" || return 1
 }
 
-validate_arena_room_release_gate() {
-  validated_gate="$1"
-  validated_schema="$2"
-  shift 2
-  [ -f "$validated_gate" ] && [ ! -L "$validated_gate" ] || return 1
-  if [ -e "$validated_schema" ] || [ -L "$validated_schema" ]; then
-    [ -f "$validated_schema" ] && [ ! -L "$validated_schema" ] || return 1
-    run_cancellable docker run --rm \
-      --network none \
-      --read-only \
-      --cap-drop ALL \
-      --security-opt no-new-privileges \
-      -v "$validated_gate:/gate.json:ro" \
-      -v "$validated_schema:/gate-schema.mjs:ro" \
-      "$runtime_image" node /gate-schema.mjs --manifest /gate.json "$@" >/dev/null
-    return
-  fi
-
-  # GMR-09 schema validator first appeared after the initial gate-only tuple
-  # rollout.  Keep a deliberately narrow compatibility reader for those
-  # immutable historical tuples: only the exact writer-disabled gate is
-  # accepted. Rollback compatibility may ask it to attest only the exact
-  # checkpoint contract already frozen into that historical tuple.
-  case "$#" in
-    0) ;;
-    2)
-      [ "$1" = --expect-contract ] \
-        && [ "$2" = 'arena-room-authority-v2-generation-payload-digest-v1' ] \
-        || return 1
-      ;;
-    *) return 1 ;;
-  esac
-  if ! run_cancellable docker run --rm \
-    --network none \
-    --read-only \
-    --cap-drop ALL \
-    --security-opt no-new-privileges \
-    -v "$validated_gate:/gate.json:ro" \
-    "$runtime_image" node --input-type=module -e '
-import { readFileSync } from "node:fs";
-
-const candidate = JSON.parse(readFileSync(process.argv[1], "utf8"));
-const expectedGate = {
-  schemaVersion: 1,
-  checkpointContract: "arena-room-authority-v2-generation-payload-digest-v1",
-  writerActivation: "disabled",
-  compatibleReaderRolloutRequired: true,
-  productionGoNoGoRequired: true,
-  rollback: {
-    minimumReaderContract: "arena-room-authority-v2-generation-payload-digest-v1",
-    generationStartMustBeDisabled: true,
-  },
-  rolloutOrder: [
-    "compatible-reader",
-    "writer-disabled-validation",
-    "production-go-no-go",
-    "writer-activation",
-  ],
-  evidence: {
-    legacyCheckpointReaderTest: "GMR-09 mixed-version checkpoint gate",
-    productionFeatureGateTest: "GMR-09 mixed-version gate",
-    rollbackShellGate: "verify_arena_room_rollback_gate",
-  },
-};
-const normalize = (value) => {
-  if (Array.isArray(value)) return value.map(normalize);
-  if (value !== null && typeof value === "object") {
-    return Object.fromEntries(Object.keys(value).sort().map((key) => [key, normalize(value[key])]));
-  }
-  return value;
-};
-if (JSON.stringify(normalize(candidate)) !== JSON.stringify(normalize(expectedGate))) {
-  console.error("[arena-room-release-gate-compat] gate fields are not the exact writer-disabled schema");
-  process.exit(1);
-}
-console.log(JSON.stringify({
-  gate: "ARENA_ROOM_RELEASE_GATE_COMPAT",
-  writerActivation: candidate.writerActivation,
-  checkpointContract: candidate.checkpointContract,
-  status: "PASS",
-}));
-' /gate.json >/dev/null; then
-    echo "历史 gate-only release gate 兼容校验失败" >&2
-    return 1
-  fi
-}
-
-validate_arena_room_release_gate_if_present() {
-  validated_release_dir="$1"
-  validated_release_gate="$validated_release_dir/arena-room-release-gate.json"
-  validated_release_schema="$validated_release_dir/arena-room-release-gate-schema.mjs"
-  if [ ! -e "$validated_release_gate" ] && [ ! -L "$validated_release_gate" ]; then
-    [ ! -e "$validated_release_schema" ] && [ ! -L "$validated_release_schema" ]
-    return
-  fi
-  validate_arena_room_release_gate \
-    "$validated_release_gate" "$validated_release_schema" || {
-    echo "Arena Room release gate schema 校验失败" >&2
-    return 1
-  }
-}
-
 read_runtime_env_value() {
   runtime_key="$1"
   runtime_value_count="$(grep -Ec "^${runtime_key}=" "$runtime_env" || true)"
@@ -608,12 +453,44 @@ read_runtime_env_value() {
   sed -n "s/^${runtime_key}=//p" "$runtime_env"
 }
 
+release_uses_direct_multiplayer_flag() {
+  release_format_dir="$1"
+  ! grep -Eq '^[0-9a-f]{64}  (arena-room-release-gate\.json|legacy-layout)$' \
+    "$release_format_dir/release.manifest"
+}
+
+read_arena_multiplayer_enabled() {
+  configured_multiplayer="$(
+    read_runtime_env_value ARENA_MULTIPLAYER_ENABLED
+  )" || return 1
+  normalized_multiplayer="$(
+    printf '%s' "$configured_multiplayer" | tr '[:upper:]' '[:lower:]'
+  )"
+  case "$normalized_multiplayer" in
+    ''|0|false|no|off) printf '%s\n' false ;;
+    1|true|yes|on) printf '%s\n' true ;;
+    *)
+      echo 'ARENA_MULTIPLAYER_ENABLED 必须是 boolean 值' >&2
+      return 1
+      ;;
+  esac
+}
+
+arena_room_runtime_active() {
+  activated_release_dir="$1"
+  if ! release_uses_direct_multiplayer_flag "$activated_release_dir"; then
+    printf '%s\n' false
+    return 0
+  fi
+  read_arena_multiplayer_enabled
+}
+
 validate_arena_room_runtime_allowed_origins() {
   activated_release_dir="$1"
-  activated_writer="$(
-    read_arena_room_writer_activation "$activated_release_dir"
+  activated_multiplayer="$(
+    arena_room_runtime_active "$activated_release_dir"
   )" || return 1
-  [ "$activated_writer" = enabled ] || return 0
+  [ "$activated_multiplayer" = true ] || return 0
   case "$hosted_api_environment" in
     production|preview) ;;
     *) return 0 ;;
@@ -623,84 +500,9 @@ validate_arena_room_runtime_allowed_origins() {
     read_runtime_env_value ARENA_ROOM_ALLOWED_ORIGINS
   )" || return 1
   [ "$activated_allowed_origins" = "$room_allowed_origins" ] || {
-    echo 'writer activation 前 ARENA_ROOM_ALLOWED_ORIGINS 与 target exact-set 不一致' >&2
+    echo '启用 Arena multiplayer 前 ARENA_ROOM_ALLOWED_ORIGINS 与 target exact-set 不一致' >&2
     return 1
   }
-}
-
-verify_arena_room_rollback_gate() {
-  failed_release_dir="$1"
-  target_release_dir="$2"
-  failed_gate="$failed_release_dir/arena-room-release-gate.json"
-  if [ ! -e "$failed_gate" ] && [ ! -L "$failed_gate" ]; then
-    return 0
-  fi
-  [ -f "$failed_gate" ] && [ ! -L "$failed_gate" ] || return 1
-  failed_gate_schema="$failed_release_dir/arena-room-release-gate-schema.mjs"
-  validate_arena_room_release_gate "$failed_gate" "$failed_gate_schema" || {
-    echo "Arena Room release gate schema 校验失败" >&2
-    return 1
-  }
-  writer_activation="$(
-    sed -n 's/^[[:space:]]*"writerActivation":[[:space:]]*"\([a-z]*\)"[,]*[[:space:]]*$/\1/p' \
-      "$failed_gate"
-  )"
-  case "$writer_activation" in
-    disabled) return 0 ;;
-    enabled) ;;
-    *)
-      echo "Arena Room release gate writerActivation 非法" >&2
-      return 1
-      ;;
-  esac
-  verify_release_tuple "$target_release_dir" || return 1
-  target_gate="$target_release_dir/arena-room-release-gate.json"
-  [ -f "$target_gate" ] && [ ! -L "$target_gate" ] || {
-    echo "rollback target reader contract 不兼容" >&2
-    return 1
-  }
-  target_gate_schema="$target_release_dir/arena-room-release-gate-schema.mjs"
-  validate_arena_room_release_gate \
-    "$target_gate" "$target_gate_schema" \
-    --expect-contract 'arena-room-authority-v2-generation-payload-digest-v1' || {
-      echo "rollback target reader contract schema 不兼容" >&2
-      return 1
-    }
-  target_reader_contract="$(
-    sed -n 's/^[[:space:]]*"checkpointContract":[[:space:]]*"\([A-Za-z0-9._:-]*\)"[,]*[[:space:]]*$/\1/p' \
-      "$target_gate"
-  )"
-  [ "$target_reader_contract" \
-    = 'arena-room-authority-v2-generation-payload-digest-v1' ] || {
-    echo "rollback target reader contract 不兼容" >&2
-    return 1
-  }
-}
-
-verify_arena_room_explicit_rollback_start_gate() {
-  current_release_dir="$1"
-  target_release_dir="$2"
-  current_writer_activation="$(
-    read_arena_room_writer_activation "$current_release_dir"
-  )" || return 1
-  target_writer_activation="$(
-    read_arena_room_writer_activation "$target_release_dir"
-  )" || return 1
-  if [ "$current_writer_activation" != enabled ] \
-    && [ "$target_writer_activation" != enabled ]; then
-    return 0
-  fi
-
-  arena_generation_start_state="$(
-    read_runtime_env_value ARENA_MULTIPLAYER_ENABLED
-  )" || return 1
-  case "$arena_generation_start_state" in
-    ''|0|false|no|off) ;;
-    *)
-      echo "Arena multiplayer generation start 未关闭，拒绝回滚到 writer-enabled target" >&2
-      return 1
-      ;;
-  esac
 }
 
 write_transaction() {
@@ -910,12 +712,7 @@ verify_invoked_from_current_tuple() {
 
 activate_release() {
   write_release_env "$release_dir" || return 1
-  release_writer_activation="$(
-    read_arena_room_writer_activation "$release_dir"
-  )" || return 1
-  run_cancellable env \
-    HONO_ARENA_ROOM_WRITER_ACTIVATION="$release_writer_activation" \
-    docker compose --project-directory "$root_dir" -f "$compose_file" \
+  run_cancellable docker compose --project-directory "$root_dir" -f "$compose_file" \
     up -d --force-recreate hono || return 1
   wait_for_local_readiness
 }
@@ -939,16 +736,7 @@ verify_public_contract() {
   grep -Fq '"error":"Name is required"' "$probe_body" || return 1
   grep -Fqi "Access-Control-Allow-Origin: $web_origin" "$probe_headers" || return 1
 
-  active_writer="$(read_arena_room_writer_activation "$release_dir")" || return 1
-  requested_state="$(read_runtime_env_value ARENA_MULTIPLAYER_ENABLED)" || return 1
-  room_runtime_active=false
-  case "$requested_state" in
-    ''|0|[Ff][Aa][Ll][Ss][Ee]|[Nn][Oo]|[Oo][Ff][Ff]) ;;
-    1|[Tt][Rr][Uu][Ee]|[Yy][Ee][Ss]|[Oo][Nn])
-      [ "$active_writer" = enabled ] && room_runtime_active=true
-      ;;
-    *) return 1 ;;
-  esac
+  room_runtime_active="$(arena_room_runtime_active "$release_dir")" || return 1
   room_probe_origins="$web_origin"
   if [ "$hosted_api_environment" = preview ]; then
     room_probe_origins="$web_origin $preview_web_origin $preview_cloudflare_web_origin"
@@ -1096,7 +884,6 @@ if [ "$deploy_mode" = rollback ]; then
   validate_release_compose "$rollback_current_release_dir"
   validate_release_runtime "$rollback_current_release_dir"
   validate_arena_room_runtime_allowed_origins "$rollback_current_release_dir"
-  validate_arena_room_release_gate_if_present "$release_dir"
   validate_release_compose "$release_dir"
   validate_release_runtime "$release_dir"
   validate_arena_room_runtime_allowed_origins "$release_dir"
@@ -1110,14 +897,6 @@ if [ "$deploy_mode" = rollback ]; then
     echo "ROLLBACK_RELEASE_ID=$release_id"
     exit 0
   fi
-
-  verify_arena_room_explicit_rollback_start_gate \
-    "$rollback_current_release_dir" "$release_dir"
-  verify_arena_room_rollback_gate \
-    "$rollback_current_release_dir" "$release_dir"
-  # target 激活后仍可能失败；写 journal 前先证明原 current 可安全恢复。
-  verify_arena_room_rollback_gate \
-    "$release_dir" "$rollback_current_release_dir"
 
   write_transaction
   if activate_release && verify_public_contract && promote_release \
@@ -1137,13 +916,6 @@ fi
 
 recover_pending_transaction
 verify_release_tuple "$release_dir"
-validate_arena_room_release_gate \
-  "$release_dir/arena-room-release-gate.json" \
-  "$release_dir/arena-room-release-gate-schema.mjs" \
-  --expect-schema 2 || {
-    echo "candidate Arena Room release gate schema 校验失败" >&2
-    exit 1
-  }
 validate_release_compose "$release_dir"
 validate_release_runtime "$release_dir"
 validate_arena_room_runtime_allowed_origins "$release_dir"
@@ -1154,9 +926,6 @@ if [ "$had_previous" = true ]; then
   validate_release_compose "$previous_release_dir"
   validate_release_runtime "$previous_release_dir"
   validate_arena_room_runtime_allowed_origins "$previous_release_dir"
-  verify_arena_room_rollback_gate "$previous_release_dir" "$release_dir"
-  # candidate 激活失败时也必须能安全恢复 current tuple。
-  verify_arena_room_rollback_gate "$release_dir" "$previous_release_dir"
 fi
 rollback_baseline_release_id=''
 if [ "$had_previous" = true ]; then

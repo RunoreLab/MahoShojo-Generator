@@ -104,7 +104,7 @@ describe('Hono deployment workflow', () => {
     expect(workflow).not.toContain('- name: Verify public endpoint');
   });
 
-  test('默认 production release 保持 Room writer disabled，只有显式 feature flag 才启用', () => {
+  test('production workflow input 只控制 Web exposure，Hono 使用服务器 feature flag', () => {
     const workflow = readFileSync(HONO_WORKFLOW_PATH, 'utf8');
     const buildJob = getJob(workflow, 'build');
     const deployJob = getJob(workflow, 'deploy');
@@ -119,13 +119,15 @@ describe('Hono deployment workflow', () => {
       "arena_multiplayer_enabled: ${{ github.event_name == 'workflow_dispatch' && inputs.arena_multiplayer == 'enabled' }}",
     );
     expect(workflow).not.toContain('arena_room_writer_activation:');
-    const releaseStep = getStep(buildJob, 'Build single-file server');
-    expect(releaseStep).toContain('scripts/prepare-arena-room-release-gate.mjs');
-    expect(releaseStep).toContain(
-      "github.event_name == 'workflow_dispatch' && inputs.arena_multiplayer == 'enabled'",
+    expect(workflow).toContain(
+      '仅控制 Cloudflare Web exposure；Hono runtime 由服务器 ARENA_MULTIPLAYER_ENABLED 控制',
     );
-    expect(releaseStep).toContain('--writer "$writer_activation"');
-    expect(releaseStep).not.toContain('--writer enabled');
+    const releaseStep = getStep(buildJob, 'Build single-file server');
+    expect(releaseStep).toContain(
+      'sha256sum index.mjs compose.yml deploy-bundle.sh > release.manifest',
+    );
+    expect(releaseStep).not.toContain('inputs.arena_multiplayer');
+    expect(releaseStep).not.toContain('arena-room-release-gate');
     expect(releaseStep).not.toContain('ARENA_ROOM_READER_ROLLOUT_CONTRACT');
     expect(releaseStep).not.toContain('ARENA_ROOM_PRODUCTION_GO_NO_GO');
     expect(releaseStep).not.toContain(
@@ -239,10 +241,12 @@ describe('Hono deployment workflow', () => {
     expect(cloudflareBuildJob).not.toContain('NEXT_PUBLIC_ARENA_ROOM_ORIGIN');
     expect(cloudflareBuildJob).not.toContain('NEXT_PUBLIC_ARENA_ROOM_WRITER_ACTIVATION');
     const releaseStep = getStep(verifyJob, 'Build release tuple');
-    expect(releaseStep).toContain('--writer enabled');
+    expect(releaseStep).toContain(
+      'sha256sum index.mjs compose.yml deploy-bundle.sh > release.manifest',
+    );
     expect(releaseStep).not.toContain('ARENA_ROOM_READER_ROLLOUT_CONTRACT');
     expect(releaseStep).not.toContain('ARENA_ROOM_PRODUCTION_GO_NO_GO');
-    expect(releaseStep).toContain('scripts/prepare-arena-room-release-gate.mjs');
+    expect(releaseStep).not.toContain('arena-room-release-gate');
     expect(releaseStep).not.toContain(
       'cp config/arena-room-release-gate.json apps/api/dist/arena-room-release-gate.json',
     );
@@ -250,34 +254,7 @@ describe('Hono deployment workflow', () => {
     expect(honoJob).toContain('- verify-and-build-cloudflare');
     expect(cloudflareJob).toContain('- deploy-hono-preview');
     expect(cloudflareJob).toContain('- verify-and-build-cloudflare');
-    const previewRoomActivationStep = getStep(
-      cloudflareJob,
-      'Verify Arena Room backend activation',
-    );
-    expectRequiredGateStep(previewRoomActivationStep);
-    expect(cloudflareJob.indexOf('Verify Arena Room backend activation')).toBeLessThan(
-      cloudflareJob.indexOf('Build Cloudflare preview bundle'),
-    );
-    expect(previewRoomActivationStep).not.toContain('NEXT_PUBLIC_ARENA_ROOM_ORIGIN');
-    expect(previewRoomActivationStep).toContain('config/hosted-dr-capabilities.json');
-    expect(previewRoomActivationStep).toContain('controlPlane.previewOrigin');
-    expect(previewRoomActivationStep).toContain('/api/arena/rooms/v1/ws');
-    expect(previewRoomActivationStep).toContain(
-      'Sec-WebSocket-Protocol: mahoshojo.arena-room.v1',
-    );
-    expect(previewRoomActivationStep).toContain(
-      'Sec-WebSocket-Key: $room_websocket_key',
-    );
-    expect(previewRoomActivationStep).toContain('head -c 16 /dev/urandom');
-    expect(previewRoomActivationStep).not.toContain(
-      'grep -Fq \'"code":"ROOM_TICKET_REQUIRED"\'',
-    );
-    expect(previewRoomActivationStep).toContain('upgrade rejection body');
-    expect(previewRoomActivationStep).toContain('room_web_enabled=false');
-    expect(previewRoomActivationStep).not.toContain('false|no|off) exit 0');
-    expect(previewRoomActivationStep.match(
-      /--retry 5 --retry-delay 3 --retry-max-time 120 --retry-connrefused/gu,
-    )).toHaveLength(2);
+    expect(cloudflareJob).not.toContain('Verify Arena Room backend activation');
     expect(cloudflareJob).toContain('controlPlane.previewOrigin');
     expect(cloudflareJob).toContain('export NEXT_PUBLIC_HONO_API_ORIGIN');
     expect(cloudflareJob).toContain('NEXT_PUBLIC_ARENA_MULTIPLAYER_ENABLED');
@@ -457,25 +434,17 @@ describe('Hono deployment workflow', () => {
     expect(installer.match(/verify_uploaded_tuple "\$final_dir" "\$release_id"/gu)).toHaveLength(2);
   });
 
-  test('手工发布指南生成并上传当前七文件 release tuple', () => {
+  test('手工发布指南生成并上传当前五文件 release tuple', () => {
     const guide = readFileSync(HONO_DEPLOY_GUIDE_PATH, 'utf8');
 
-    expect(guide).toContain('scripts/prepare-arena-room-release-gate.mjs');
-    expect(guide).toContain('--writer enabled');
-    expect(guide).not.toContain(
-      'cp config/arena-room-release-gate.json apps/api/dist/arena-room-release-gate.json',
-    );
-    expect(guide).toContain(
-      'cp scripts/arena-room-release-gate-schema.mjs apps/api/dist/arena-room-release-gate-schema.mjs',
+    expect(guide).not.toContain('scripts/prepare-arena-room-release-gate.mjs');
+    expect(guide).toMatch(
+      /sha256sum index\.mjs compose\.yml deploy-bundle\.sh > release\.manifest/u,
     );
     expect(guide).toMatch(
-      /sha256sum index\.mjs compose\.yml deploy-bundle\.sh \\\s+arena-room-release-gate\.json arena-room-release-gate-schema\.mjs > release\.manifest/u,
+      /scp apps\/api\/dist\/index\.mjs[\s\S]*apps\/api\/dist\/compose\.yml[\s\S]*apps\/api\/dist\/deploy-bundle\.sh[\s\S]*apps\/api\/dist\/release\.manifest[\s\S]*apps\/api\/dist\/release\.sha256/u,
     );
-    expect(guide).toMatch(
-      /scp apps\/api\/dist\/index\.mjs[\s\S]*apps\/api\/dist\/arena-room-release-gate\.json[\s\S]*apps\/api\/dist\/arena-room-release-gate-schema\.mjs[\s\S]*apps\/api\/dist\/release\.sha256/u,
-    );
-    expect(guide).toContain('精确七文件 tuple');
-    expect(guide).not.toContain('精确五文件 tuple');
+    expect(guide).toContain('精确五文件 tuple');
   });
 
   test('手工回退指南从 immutable current tuple 发起并声明数据边界', () => {

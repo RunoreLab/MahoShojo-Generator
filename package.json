@@ -41,7 +41,6 @@
     "check:hosted-dr:schema": "node scripts/check-hosted-dr-schema.mjs",
     "check:hosted-dr": "pnpm run check:hosted-dr:schema && node scripts/check-hosted-dr-contract.mjs",
     "check:arena-room-origins": "node scripts/check-arena-room-origin-policy.mjs",
-    "check:arena-room-release": "node scripts/check-arena-room-release-gate.mjs",
     "generate:arena-room-presets": "node scripts/generate-arena-room-preset-registry.mjs",
     "check:arena-room-presets": "node scripts/generate-arena-room-preset-registry.mjs --check",
     "generate:hosted-dr-client": "node scripts/generate-hosted-dr-client-config.mjs",
@@ -54,7 +53,7 @@
     "workspace:lint": "pnpm --filter \"./packages/*\" --filter \"./apps/*\" --if-present run lint",
     "workspace:build": "pnpm --filter \"./packages/*\" --filter \"./apps/*\" --if-present run build",
     "workspace:verify": "pnpm run check:workspace:boundaries && pnpm run check:admin-boundary && pnpm run check:naming:workspace && pnpm run check:hosted-dr && pnpm run check:arena-room-origins && pnpm run check:arena-room-presets && pnpm run workspace:test && pnpm run workspace:lint && pnpm run workspace:build",
-    "ci:verify": "pnpm run workspace:verify && pnpm run verify:hosted-dr && pnpm run check:arena-room-release && pnpm run test:repo && pnpm run lint:repo"
+    "ci:verify": "pnpm run workspace:verify && pnpm run verify:hosted-dr && pnpm run test:repo && pnpm run lint:repo"
   },
   "devDependencies": {
     "@types/node": "^20",

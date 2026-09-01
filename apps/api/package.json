@@ -22,7 +22,7 @@
     "verify:room-hardening-faults": "tsx scripts/verify-room-hardening-faults.ts",
     "verify:room-hardening-load": "node --import tsx scripts/verify-room-hardening-load.ts",
     "verify:hosted-dr:redis": "tsx scripts/verify-hosted-dr-redis.ts",
-    "deploy:prepare": "pnpm --dir ../.. run check:arena-room-release -- --mode deploy && node scripts/generate-route-manifest.mjs && node scripts/build.mjs"
+    "deploy:prepare": "node scripts/generate-route-manifest.mjs && node scripts/build.mjs"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.1",

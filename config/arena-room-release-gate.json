@@ -1,9 +1,0 @@
-{
-  "schemaVersion": 2,
-  "checkpointContract": "arena-room-authority-v2-generation-payload-digest-v1",
-  "writerActivation": "enabled",
-  "rollback": {
-    "minimumReaderContract": "arena-room-authority-v2-generation-payload-digest-v1",
-    "generationStartMustBeDisabled": true
-  }
-}

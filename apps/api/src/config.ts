@@ -98,10 +98,6 @@ const validateProductionEnvironment = (
   if (deploymentTarget === 'production' && config.redisKeyPrefix !== '') {
     problems.push('production target 的 REDIS_KEY_PREFIX 必须为空');
   }
-  const arenaRoomWriterActivation = env.ARENA_ROOM_WRITER_ACTIVATION?.trim() || 'disabled';
-  if (!['disabled', 'enabled'].includes(arenaRoomWriterActivation)) {
-    problems.push('ARENA_ROOM_WRITER_ACTIVATION 必须是 disabled 或 enabled');
-  }
   if (!config.redisUrl) problems.push('Redis 未配置（REDIS_URL 或 REDIS_HOST）');
   if (protectedHostedTarget
     && config.redisUrl
@@ -195,12 +191,6 @@ const readBoolean = (name: string, fallback: boolean): boolean => {
   if (['1', 'true', 'yes', 'on'].includes(raw)) return true;
   if (['0', 'false', 'no', 'off'].includes(raw)) return false;
   throw new Error(`${name} 必须是 true/false、1/0、yes/no 或 on/off`);
-};
-
-const readArenaRoomWriterActivation = (): 'disabled' | 'enabled' => {
-  const value = process.env.ARENA_ROOM_WRITER_ACTIVATION?.trim() || 'disabled';
-  if (value === 'disabled' || value === 'enabled') return value;
-  throw new Error('ARENA_ROOM_WRITER_ACTIVATION 必须是 disabled 或 enabled');
 };
 
 const readPort = (): number => {
@@ -297,10 +287,6 @@ export const readHonoServerConfig = (): HonoServerConfig => {
     throw new Error('HOSTED_API_ENVIRONMENT 必须显式设为 production、preview、local 或 test');
   }
   const protectedHostedTarget = deploymentTarget === 'production' || deploymentTarget === 'preview';
-  const arenaMultiplayerRequested = readBoolean('ARENA_MULTIPLAYER_ENABLED', false);
-  const arenaRoomWriterActivation = protectedHostedTarget
-    ? readArenaRoomWriterActivation()
-    : 'disabled';
   const redisUrl = readRedisUrl();
   validateHostedDrVersionGate(process.env);
 
@@ -315,9 +301,7 @@ export const readHonoServerConfig = (): HonoServerConfig => {
     corsOrigins: readCorsOrigins(),
     arenaRoomAllowedOrigins: readArenaRoomAllowedOrigins(),
     authMode: readHonoAuthMode(),
-    arenaMultiplayerEnabled: arenaMultiplayerRequested && (
-      !protectedHostedTarget || arenaRoomWriterActivation === 'enabled'
-    ),
+    arenaMultiplayerEnabled: readBoolean('ARENA_MULTIPLAYER_ENABLED', false),
   };
   validateArenaRoomOrigins(config);
   validateProductionEnvironment(process.env, config);

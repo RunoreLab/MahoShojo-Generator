@@ -89,35 +89,36 @@ describe('Hono server config', () => {
   });
 
   it.each(['production', 'preview'])(
-    'GMR-09 mixed-version gate：%s target 的 writer-disabled tuple 即使收到请求也保持 Arena multiplayer 关闭',
+    '%s target 直接由 ARENA_MULTIPLAYER_ENABLED 启用 Arena multiplayer',
     (target) => {
       stubValidBearerProductionEnv();
       vi.stubEnv('HOSTED_API_ENVIRONMENT', target);
       vi.stubEnv('REDIS_KEY_PREFIX', target === 'preview' ? 'preview' : '');
       vi.stubEnv('ARENA_MULTIPLAYER_ENABLED', 'true');
-
-      expect(readHonoServerConfig().arenaMultiplayerEnabled).toBe(false);
-    },
-  );
-
-  it.each(['production', 'preview'])(
-    '%s target 由 request flag 与 tuple-bound writer capability 共同激活',
-    (target) => {
-      stubValidBearerProductionEnv();
-      vi.stubEnv('HOSTED_API_ENVIRONMENT', target);
-      vi.stubEnv('REDIS_KEY_PREFIX', target === 'preview' ? 'preview' : '');
-      vi.stubEnv('ARENA_MULTIPLAYER_ENABLED', 'true');
-      vi.stubEnv('ARENA_ROOM_WRITER_ACTIVATION', 'enabled');
 
       expect(readHonoServerConfig().arenaMultiplayerEnabled).toBe(true);
     },
   );
 
-  it('protected target 拒绝非法 tuple-bound writer activation 状态', () => {
+  it.each(['production', 'preview'])(
+    '%s target 的 feature flag 是 Room runtime kill switch',
+    (target) => {
+      stubValidBearerProductionEnv();
+      vi.stubEnv('HOSTED_API_ENVIRONMENT', target);
+      vi.stubEnv('REDIS_KEY_PREFIX', target === 'preview' ? 'preview' : '');
+      vi.stubEnv('ARENA_MULTIPLAYER_ENABLED', 'false');
+      vi.stubEnv('ARENA_ROOM_WRITER_ACTIVATION', 'enabled');
+
+      expect(readHonoServerConfig().arenaMultiplayerEnabled).toBe(false);
+    },
+  );
+
+  it('忽略历史 ARENA_ROOM_WRITER_ACTIVATION，不把它作为第二套门禁', () => {
     stubValidBearerProductionEnv();
+    vi.stubEnv('ARENA_MULTIPLAYER_ENABLED', 'true');
     vi.stubEnv('ARENA_ROOM_WRITER_ACTIVATION', 'sometimes');
 
-    expect(() => readHonoServerConfig()).toThrow(/ARENA_ROOM_WRITER_ACTIVATION/);
+    expect(readHonoServerConfig().arenaMultiplayerEnabled).toBe(true);
   });
 
   it('读取共享 Redis 的环境隔离前缀', () => {

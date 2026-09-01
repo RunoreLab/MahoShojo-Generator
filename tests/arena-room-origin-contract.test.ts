@@ -81,11 +81,12 @@ describe('Arena Room ingress policy contract', () => {
     expect(manifest.targets.preview.allowedWebOrigins).toContain(
       'https://mahoshojo-next-preview.719147538.workers.dev',
     );
-    expect(previewWorkflow).toContain('--writer enabled');
     expect(previewWorkflow).not.toContain('PREVIEW_ARENA_ROOM_WRITER_ACTIVATION');
-    expect(previewWorkflow).toContain('scripts/prepare-arena-room-release-gate.mjs');
-    expect(previewWorkflow).toContain('for room_web_origin in "${room_web_origins[@]}"');
-    expect(previewWorkflow).toContain('Access-Control-Allow-Origin: $room_web_origin');
+    expect(previewWorkflow).not.toContain('arena-room-release-gate');
+    expect(previewWorkflow).not.toContain('Verify Arena Room backend activation');
+    expect(previewWorkflow).toContain(
+      'Hono runtime 由服务器 ARENA_MULTIPLAYER_ENABLED 控制',
+    );
     expect(deployScript).toContain(
       'validate_arena_room_runtime_allowed_origins "$release_dir"',
     );
