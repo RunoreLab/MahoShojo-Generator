@@ -124,6 +124,20 @@ export const useCombatantRepair = () => {
     return newsReport ? toBattleReportMarkdown(newsReport) : '';
   }, [generationMode, newsReport, streamingMarkdown]);
 
+  const repairContextIsCurrent = useCallback((
+    generationId: string,
+    capturedRoster: readonly CombatantData[],
+  ): boolean => {
+    if (arenaRoomRuntime?.controller.getSnapshot().session) return false;
+    const currentState = useBattleStore.getState();
+    if (currentState.lastGenerationId !== generationId) return false;
+    const currentRoster = currentState.combatants.filter(
+      (item): item is CombatantData => 'data' in item,
+    );
+    return currentRoster.length === capturedRoster.length
+      && currentRoster.every((combatant, index) => combatant === capturedRoster[index]);
+  }, [arenaRoomRuntime]);
+
   useEffect(() => {
     if (draftGenerationRef.current === lastGenerationId) return;
     draftGenerationRef.current = lastGenerationId;
@@ -202,6 +216,9 @@ export const useCombatantRepair = () => {
         draft: JSON.stringify({ impacts: payload.impacts }),
         combatants: roster,
       });
+      if (!repairContextIsCurrent(lastGenerationId, roster)) {
+        throw new Error('角色或 generation 上下文已变化，旧的 AI 修复草稿已丢弃。');
+      }
       setDraftText(JSON.stringify({ impacts: normalized }, null, 2));
       setRepairNotice('AI 修复草稿已生成；请检查并编辑，确认后再应用。');
       startCooldown();
@@ -216,6 +233,7 @@ export const useCombatantRepair = () => {
     isInRoom,
     lastGenerationId,
     remainingTime,
+    repairContextIsCurrent,
     reportMarkdown,
     roster,
     scenario.content,
@@ -280,6 +298,10 @@ export const useCombatantRepair = () => {
         setRepairNotice('草稿内容与当前角色数据相同，未修改角色，也未改变其信任状态。');
         return;
       }
+      if (!repairContextIsCurrent(lastGenerationId, roster)) {
+        setRepairError('角色、generation 或 Room 上下文已变化，本次修复未写入。');
+        return;
+      }
 
       let readableIndex = 0;
       const mergedCombatants = combatants.map((combatant) => {
@@ -316,6 +338,7 @@ export const useCombatantRepair = () => {
     isInRoom,
     lastGenerationId,
     reportMarkdown,
+    repairContextIsCurrent,
     roster,
     scenario.content,
     scenario.fileName,

@@ -136,4 +136,53 @@ describe('useCombatantRepair', () => {
     await act(async () => root.unmount());
     container.remove();
   });
+
+  it('generation 在 AI 请求期间变化时丢弃旧草稿', async () => {
+    useBattleStore.setState((state) => ({
+      combatants: [{
+        type: 'general-character',
+        filename: '角色-a.json',
+        isValid: false,
+        isPreset: false,
+        data: { name: '角色 A' },
+      }],
+      generationMode: 'stream',
+      streamingMarkdown: `# 旧战报\n\n## 胜利者\n\n- 角色 A\n\n${'完整正文。'.repeat(40)}`,
+      lastGenerationId: 'generation-stale-001',
+      repairAppliedGenerationId: null,
+      settings: {
+        ...state.settings,
+        writeArenaHistory: true,
+        writeCurrentState: false,
+      },
+      isGenerating: false,
+    }));
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => {
+      useBattleStore.getState().setLastGenerationId('generation-new-002');
+      return new Response(JSON.stringify({
+        success: true,
+        impacts: [{
+          combatantIndex: 0,
+          characterName: '角色 A',
+          impact: '不得写入的新草稿',
+        }],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }));
+
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => root.render(<Harness />));
+    if (!currentHook) throw new Error('repair hook 未挂载');
+
+    await act(async () => currentHook!.generateAiRepairDraft());
+
+    expect(currentHook!.draftText).not.toContain('不得写入的新草稿');
+    expect(currentHook!.repairError).toContain('上下文已变化');
+    expect(mocks.startCooldown).not.toHaveBeenCalled();
+    expect(useBattleStore.getState().lastGenerationId).toBe('generation-new-002');
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
 });
