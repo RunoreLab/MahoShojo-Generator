@@ -1887,10 +1887,6 @@ export const useBattleEngine = () => {
       setError('⚠️ 没有可更新的参战角色。');
       return;
     }
-    if (!(settings.writeArenaHistory || settings.writeCurrentState)) {
-      setError('⚠️ 已关闭历战记录/当前状态写入，本次无需重试角色更新。');
-      return;
-    }
     if (!lastGenerationId) {
       setError('⚠️ 本次战报缺少 generationId，无法安全重试角色更新。');
       return;
@@ -1909,8 +1905,6 @@ export const useBattleEngine = () => {
     retryGenerationUpdate,
     setError,
     setIsRedoingUpdates,
-    settings.writeArenaHistory,
-    settings.writeCurrentState,
   ]);
 
   return {

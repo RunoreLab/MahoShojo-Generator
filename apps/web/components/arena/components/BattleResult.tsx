@@ -68,6 +68,8 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
     [combatants]
   );
   const canWriteUpdates = settings.writeArenaHistory || settings.writeCurrentState;
+  const shouldShowCombatantUpdates =
+    canWriteUpdates || Boolean(lastGenerationId) || updatedCombatants.length > 0;
   const streamMetaDebugSummary = useMemo(() => {
     if (!streamUpdateMetaDebug) return null;
     const sourceLabel = streamUpdateMetaDebug.source === 'sse' ? 'SSE' : '注释解析';
@@ -156,7 +158,7 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
         />
       )}
 
-      {hasBattleReport && canWriteUpdates && (
+      {hasBattleReport && shouldShowCombatantUpdates && (
         <div className="card mt-6">
           <CollapsibleSection
             title="角色更新"
