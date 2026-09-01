@@ -349,6 +349,18 @@ describe('GMR-10Q machine-readable gate/capability registry', () => {
       gateCode: 'RUNTIME_PROVIDER_CONFIG',
       testId: expect.stringContaining('definitive downstream rejection'),
     });
+    expect(workflowByCapability.get('runtime-funding')).toMatchObject({
+      gateCode: 'RUNTIME_PROMPT_BUDGET',
+      testId: expect.stringContaining('system prompt budget'),
+    });
+    expect(workflowByCapability.get('runtime-token')).toMatchObject({
+      gateCode: 'RUNTIME_PROMPT_BUDGET',
+      testId: expect.stringContaining('system prompt budget'),
+    });
+    expect(workflowByCapability.get('runtime-output')).toMatchObject({
+      gateCode: 'RUNTIME_OUTPUT_LIMIT',
+      testId: expect.stringContaining('combined reasoning and markdown'),
+    });
     for (const entry of ARENA_STATE_MACHINE_FAILURE_REASON_REGISTRY) {
       expect(gateCodes.has(entry.gateCode), `${entry.reason} -> ${entry.gateCode}`).toBe(true);
       expect(ARENA_GATE_TEST_EVIDENCE).toContain(entry.testId);

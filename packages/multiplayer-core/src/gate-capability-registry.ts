@@ -82,6 +82,8 @@ export const ARENA_GATE_TEST_EVIDENCE = [
   'apps/web/tests/arena-room-host-reconciliation.test.ts::把新 authority 确定性 materialize 到 host BattleStore，并保留 opaque team key',
   'apps/web/tests/arena-battle-result-presentation.test.tsx::房间 viewer 可以沿用主战报卡的保存图片动作',
   'apps/api/tests/room-generation-service.test.ts::definitive downstream rejection %s 终结 Room attempt 并保留具体原因',
+  'packages/hosted-runtime/tests/arena-generation-runtime.test.ts::applies the system prompt budget while allowing the same hosted BYOK prompt',
+  'packages/hosted-runtime/tests/arena-generation-runtime.test.ts::fails generation when combined reasoning and markdown exceed the shared output byte budget',
 ] as const;
 export type ArenaGateTestEvidence = typeof ARENA_GATE_TEST_EVIDENCE[number];
 
@@ -400,7 +402,7 @@ export const ARENA_GATE_CAPABILITY_REGISTRY: readonly ArenaGateCapabilityRegistr
   }),
   gate({
     code: 'RUNTIME_OUTPUT_LIMIT', condition: 'provider 输出不得超过 Hosted output byte ceiling', layer: 'runtime-resource',
-    currentSource: 'packages/hosted-api/src/arena-generation/resource-budget.ts', singleEquivalent: '单人与多人调用同一 Hosted output pipeline',
+    currentSource: 'packages/hosted-runtime/src/arena-generation/runtime.ts', singleEquivalent: '单人与多人调用同一 Hosted output pipeline',
     canonicalSource: 'packages/hosted-api/src/arena-generation/resource-budget.ts', reasonCategory: 'resource/concurrency',
     reason: '限制单次流式缓存、持久化与 fan-out 正文大小。', userAction: '缩短目标故事长度或拆分生成。',
     currentUserMessage: null, messageKey: 'arena.multiplayer.gate.runtimeOutputLimit', testId: 'GMR10Q-A-RUNTIME-BUDGET',
@@ -681,10 +683,10 @@ export const ARENA_GATE_WORKFLOW_CAPABILITY_REGISTRY = Object.freeze([
   ['generation-reference', 'REFERENCE_STALE', 42],
   ['generation-host-local', 'HOST_LOCAL_PAYLOAD_MISSING', 43],
   ['generation-reconciliation', 'GENERATION_RECONCILIATION', 27],
-  ['runtime-funding', 'RUNTIME_PROMPT_BUDGET', 7],
+  ['runtime-funding', 'RUNTIME_PROMPT_BUDGET', 47],
   ['runtime-body', 'RUNTIME_BODY_LIMIT', 39],
-  ['runtime-token', 'RUNTIME_PROMPT_BUDGET', 7],
-  ['runtime-output', 'RUNTIME_OUTPUT_LIMIT', 40],
+  ['runtime-token', 'RUNTIME_PROMPT_BUDGET', 47],
+  ['runtime-output', 'RUNTIME_OUTPUT_LIMIT', 48],
   ['runtime-provider', 'RUNTIME_PROVIDER_CONFIG', 46],
   ['runtime-single-producer', 'RUNTIME_SINGLE_PRODUCER', 13],
   ['result-presentation', 'RESULT_PRESENTATION_PARITY', 26],
