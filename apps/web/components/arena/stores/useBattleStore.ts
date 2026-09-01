@@ -148,7 +148,7 @@ export const useBattleStore = create<BattleStoreState>()(
       materials: [],
       selectedQuestionnaires: [],
       battleMode: 'classic',
-      generationMode: 'non-stream',
+      generationMode: 'stream',
       arenaFreeRankingEnabled: false,
       isStreaming: false,
       streamingMarkdown: null,

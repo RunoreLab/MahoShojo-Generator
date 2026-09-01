@@ -47,6 +47,27 @@ describe('Arena persisted store hydration boundary', () => {
     expect(useNarrativeHistoryStore.getState().entries).toHaveLength(1);
   });
 
+  it('defaults a new Arena profile to streaming generation', async () => {
+    const { useBattleStore } = await import('@/components/arena/stores/useBattleStore');
+
+    expect(useBattleStore.getState().generationMode).toBe('stream');
+    await useBattleStore.persist.rehydrate();
+    expect(useBattleStore.getState().generationMode).toBe('stream');
+  });
+
+  it('preserves an explicitly persisted non-stream preference', async () => {
+    localStorage.setItem('arena-storage', JSON.stringify({
+      state: { generationMode: 'non-stream' },
+      version: 1,
+    }));
+
+    const { useBattleStore } = await import('@/components/arena/stores/useBattleStore');
+
+    expect(useBattleStore.getState().generationMode).toBe('stream');
+    await useBattleStore.persist.rehydrate();
+    expect(useBattleStore.getState().generationMode).toBe('non-stream');
+  });
+
   it('does not overwrite persisted battle settings when state changes before hydration', async () => {
     localStorage.setItem('arena-storage', JSON.stringify({
       state: {
