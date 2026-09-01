@@ -132,11 +132,10 @@ describe('Hono deployment workflow', () => {
       'cp config/arena-room-release-gate.json apps/api/dist/arena-room-release-gate.json',
     );
 
-    const verificationStep = getStep(getJob(workflow, 'build'), 'Verify Hono authentication and runtime');
-    expect(verificationStep).toContain('pnpm --filter @mahoshojo/api run test');
-    expect(verificationStep).toContain('pnpm exec vitest run');
-    expect(verificationStep).toContain('tests/hono-deploy-workflow.test.ts');
-    expect(verificationStep).toContain('tests/hono-deploy-script.test.ts');
+    const verificationStep = getStep(getJob(workflow, 'build'), 'Verify workspace and repository');
+    expect(verificationStep).toContain('run: pnpm run ci:verify');
+    expect(workflow.match(/pnpm run ci:verify/gu)).toHaveLength(1);
+    expect(workflow).not.toContain('Verify Hono authentication and runtime');
   });
 
   test('production build 不再绑定 GMR source/evidence 门禁', () => {

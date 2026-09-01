@@ -56,10 +56,8 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Verify Hono authentication and runtime
-        run: |
-          pnpm --filter @mahoshojo/api run test
-          pnpm exec vitest run tests/apps-api-source-ownership.test.ts tests/hosted-runtime-ownership.test.ts tests/hono-deploy-workflow.test.ts tests/hono-deploy-release-contract.test.ts tests/hono-deploy-installer.test.ts tests/hono-deploy-script.test.ts
+      - name: Verify workspace and repository
+        run: pnpm run ci:verify
 
       - name: Verify Hono container build
         env:

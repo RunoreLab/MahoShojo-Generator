@@ -2,13 +2,18 @@
 
 日期：2026-08-28
 
-状态：`accepted goal / completed`
+状态：`partially-superseded`（真实 telemetry/fault/resource 行为继续有效；machine evidence 已退出）
 
 实现基线：`14d0e58d`
 
 实现 checkpoints：`0684bb61`、`65bff17e`、`eb66f6d9`、`c68fcd39`
 
 审查整改 checkpoints：`c63cd9b4`、`3a0c833f`、`7cae4b7f`、`bf2bb98c`
+
+取代说明：本文关于有界队列、payload 上限、membership/ticket、Redis/process loss、reconnect 和低基数 telemetry 的
+真实行为要求继续有效；固定十类 drill、owner/command/assertion 文案、machine evidence manifest 与退出审计门禁已由
+[平台复杂度预算与故障降级决策](../decisions/2026-09-01_193200_平台复杂度预算与故障降级决策.md)
+撤回。当前由普通 fault/resource 测试和按需非生产 verifier 保护。
 
 上位口径：
 

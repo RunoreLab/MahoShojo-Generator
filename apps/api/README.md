@@ -92,8 +92,8 @@ metrics endpoint。`RESOURCE-005` 中可由 Hono 进程、Hosted 调用 seam 和
 已收口；入口控制面没有注入可信 DR selection/failover reason，继续显式 `not-observed/null`，不得根据部署
 角色或错误猜测。
 
-GMR-10 的机器可读故障证据由根目录 `config/arena-room-hardening-evidence.json` 与
-`pnpm run check:arena-room-hardening` 固定为十类 drill。真实 Redis/WSS verifier 必须显式设置
+Room hardening 由真实 fault/resource 测试和按需 verifier 保护，不再维护独立 evidence manifest 或固定十类 drill
+登记表。Redis/WSS verifier 必须显式设置
 `HOSTED_API_ENVIRONMENT=local|test`、loopback `REDIS_URL`、对应 opt-in 与非默认隔离 prefix；清理只覆盖各
 verifier 声明的隔离 Room/generation namespace，且运行时拒绝 default/production/preview/local/test 等保留 prefix，
 禁止 `FLUSH*`。`verify:room-hardening-load` 的固定非生产 workload 是 32 Room × 4 个真实 WSS
