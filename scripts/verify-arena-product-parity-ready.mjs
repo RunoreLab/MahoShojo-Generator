@@ -24,6 +24,11 @@ const steps = [
     command: 'git',
     args: ['diff', '--check'],
   },
+  {
+    label: 'reviewed source digest recheck',
+    command: process.execPath,
+    args: ['scripts/check-arena-product-parity.mjs', '--require-ready'],
+  },
 ];
 
 for (const step of steps) {
