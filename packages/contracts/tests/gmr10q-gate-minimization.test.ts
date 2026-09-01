@@ -76,6 +76,7 @@ describe('GMR-10Q contract 门禁最小化', () => {
       'ROOM_HOST_LOCAL_KIND_MISMATCH',
       'ROOM_HOST_LOCAL_DIGEST_MISMATCH',
       'ROOM_HOST_LOCAL_TYPE_MISMATCH',
+      'ROOM_HOST_LOCAL_PAYLOAD_MISSING_OR_MISMATCH',
       'ROOM_HOST_LOCAL_CONTENT_VERSION_MISSING',
       'ROOM_HOST_LOCAL_CONTENT_VERSION_MISMATCH',
       'ROOM_REFERENCE_STALE',
@@ -86,6 +87,10 @@ describe('GMR-10Q contract 门禁最小化', () => {
       expect(ArenaRoomHttpErrorResponseSchema.parse({ code, error: '可行动错误说明' }))
         .toEqual({ code, error: '可行动错误说明' });
     }
+    expect(ArenaRoomHttpErrorResponseSchema.parse({
+      code: 'ROOM_HOST_LOCAL_PAYLOAD_MISSING_OR_MISMATCH',
+      error: '本地内容不完整',
+    })).toMatchObject({ code: 'ROOM_HOST_LOCAL_PAYLOAD_MISSING_OR_MISMATCH' });
   });
 
   it('允许空 roster 安全共享，同时保留唯一键和 team 引用完整性', () => {

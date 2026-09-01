@@ -170,6 +170,33 @@ const createHarness = async (presets?: ArenaRoomGenerationPresetResolver) => {
 };
 
 describe('Arena Room Proposal application service', () => {
+  it('客户端请求仍在 64 KiB 内但服务端补齐权威字段后超限时返回独立字节错误', async () => {
+    const harness = await createHarness();
+    const keys = Array.from(
+      { length: 32 },
+      (_, index) => `data-card:${String(index).padStart(2, '0')}:${'x'.repeat(110)}`,
+    );
+    const request = {
+      proposalId: 'proposal-byte-boundary-xxx',
+      expectedRoomEpoch: 'epoch-1',
+      baseRevision: 0,
+      changes: Array.from({ length: 8 }, (_, index) => ({
+        changeId: `reorder-${index}`,
+        type: 'reorderCombatants' as const,
+        value: [...keys].reverse(),
+        expectedBase: { kind: 'value' as const, value: keys },
+      })),
+    };
+    expect(new TextEncoder().encode(JSON.stringify(request)).byteLength).toBeLessThanOrEqual(64 * 1_024);
+
+    await expect(harness.service.submit({
+      roomId: 'room-1',
+      accountUserId: 202,
+      request,
+    })).rejects.toMatchObject({ code: 'ROOM_PROPOSAL_BYTE_LIMIT' });
+    expect(harness.store.state?.snapshot.proposals).toEqual([]);
+  });
+
   it('单成员待处理提案达到上限时返回独立容量错误', async () => {
     const harness = await createHarness();
     for (let index = 0; index < 8; index += 1) {

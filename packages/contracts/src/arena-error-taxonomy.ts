@@ -1,6 +1,7 @@
 /**
  * Client opt-in header for Arena Room granular error taxonomy negotiation.
- * Version 2 removes the ambiguous host-local combined error.
+ * Version 2 negotiated responses replace the ambiguous host-local combined error.
+ * The legacy code remains parseable for rolling compatibility with v1 clients.
  */
 export const ARENA_ROOM_ERROR_TAXONOMY_HEADER = 'x-mahoshojo-arena-error-taxonomy' as const;
 export const ARENA_ROOM_ERROR_TAXONOMY_VERSION = '2' as const;
@@ -34,6 +35,8 @@ export const ARENA_ROOM_HTTP_ERROR_CODES = [
   'ROOM_HOST_LOCAL_KIND_MISMATCH',
   'ROOM_HOST_LOCAL_DIGEST_MISMATCH',
   'ROOM_HOST_LOCAL_TYPE_MISMATCH',
+  /** @deprecated v1 compatibility response; v2 clients receive a specific host-local code. */
+  'ROOM_HOST_LOCAL_PAYLOAD_MISSING_OR_MISMATCH',
   'ROOM_HOST_LOCAL_CONTENT_VERSION_MISSING',
   'ROOM_HOST_LOCAL_CONTENT_VERSION_MISMATCH',
   'ROOM_REFERENCE_VERSION_MISSING',
@@ -56,7 +59,14 @@ export const ARENA_ROOM_HOSTED_ERROR_CODES = [
   'ARENA_SAFETY_PROMPT_BUDGET_EXCEEDED',
   'ARENA_CUSTOM_PROVIDER_INVALID',
   'ARENA_PROVIDER_UNKNOWN',
+  'ARENA_MODEL_UNKNOWN',
   'ARENA_PROVIDER_KEY_EMPTY',
+  'ARENA_PARTICIPANTS_INVALID',
+  'ARENA_PVP_CONTEXT_INVALID',
+  'ARENA_MULTIPLAYER_SNAPSHOT_INVALID',
+  'ARENA_MATERIALIZATION_VERSION_UNSUPPORTED',
+  'ARENA_CONTENT_POLICY_REJECTED',
+  'GENERATION_REQUEST_CONFLICT',
 ] as const;
 export type ArenaRoomHostedErrorCode = typeof ARENA_ROOM_HOSTED_ERROR_CODES[number];
 
@@ -80,8 +90,21 @@ export const ARENA_ROOM_ERROR_TAXONOMY = Object.freeze([
   taxonomyEntry({ domainCode: 'FORBIDDEN', httpCode: 'ROOM_FORBIDDEN', hostedCodes: [] }),
   taxonomyEntry({ domainCode: 'ROOM_NOT_FOUND', httpCode: 'ROOM_NOT_FOUND', hostedCodes: [] }),
   taxonomyEntry({ domainCode: 'PAYLOAD_TOO_LARGE', httpCode: 'ROOM_PAYLOAD_TOO_LARGE', hostedCodes: [] }),
-  taxonomyEntry({ domainCode: 'REQUEST_INVALID', httpCode: 'ROOM_REQUEST_INVALID', hostedCodes: [] }),
-  taxonomyEntry({ domainCode: 'CONFLICT', httpCode: 'ROOM_CONFLICT', hostedCodes: [] }),
+  taxonomyEntry({
+    domainCode: 'REQUEST_INVALID',
+    httpCode: 'ROOM_REQUEST_INVALID',
+    hostedCodes: [
+      'ARENA_PARTICIPANTS_INVALID',
+      'ARENA_PVP_CONTEXT_INVALID',
+      'ARENA_MULTIPLAYER_SNAPSHOT_INVALID',
+      'ARENA_MATERIALIZATION_VERSION_UNSUPPORTED',
+    ],
+  }),
+  taxonomyEntry({
+    domainCode: 'CONFLICT',
+    httpCode: 'ROOM_CONFLICT',
+    hostedCodes: ['ARENA_CONTENT_POLICY_REJECTED', 'GENERATION_REQUEST_CONFLICT'],
+  }),
   taxonomyEntry({ domainCode: 'RATE_LIMITED', httpCode: 'ROOM_RATE_LIMITED', hostedCodes: [] }),
   taxonomyEntry({ domainCode: 'UNAVAILABLE', httpCode: 'ROOM_UNAVAILABLE', hostedCodes: [] }),
   taxonomyEntry({ domainCode: 'GENERATION_COMBATANTS_EMPTY', httpCode: 'ROOM_GENERATION_COMBATANTS_EMPTY', hostedCodes: [] }),
@@ -103,6 +126,7 @@ export const ARENA_ROOM_ERROR_TAXONOMY = Object.freeze([
   taxonomyEntry({ domainCode: 'HOST_LOCAL_KIND_MISMATCH', httpCode: 'ROOM_HOST_LOCAL_KIND_MISMATCH', hostedCodes: [] }),
   taxonomyEntry({ domainCode: 'HOST_LOCAL_DIGEST_MISMATCH', httpCode: 'ROOM_HOST_LOCAL_DIGEST_MISMATCH', hostedCodes: [] }),
   taxonomyEntry({ domainCode: 'HOST_LOCAL_TYPE_MISMATCH', httpCode: 'ROOM_HOST_LOCAL_TYPE_MISMATCH', hostedCodes: [] }),
+  taxonomyEntry({ domainCode: 'HOST_LOCAL_PAYLOAD_MISSING_OR_MISMATCH_LEGACY', httpCode: 'ROOM_HOST_LOCAL_PAYLOAD_MISSING_OR_MISMATCH', hostedCodes: [] }),
   taxonomyEntry({ domainCode: 'HOST_LOCAL_CONTENT_VERSION_MISSING', httpCode: 'ROOM_HOST_LOCAL_CONTENT_VERSION_MISSING', hostedCodes: [] }),
   taxonomyEntry({ domainCode: 'HOST_LOCAL_CONTENT_VERSION_MISMATCH', httpCode: 'ROOM_HOST_LOCAL_CONTENT_VERSION_MISMATCH', hostedCodes: [] }),
   taxonomyEntry({ domainCode: 'REFERENCE_VERSION_MISSING', httpCode: 'ROOM_REFERENCE_VERSION_MISSING', hostedCodes: [] }),
@@ -119,7 +143,12 @@ export const ARENA_ROOM_ERROR_TAXONOMY = Object.freeze([
   taxonomyEntry({
     domainCode: 'PROVIDER_CONFIG_INVALID',
     httpCode: 'ROOM_PROVIDER_CONFIG_INVALID',
-    hostedCodes: ['ARENA_CUSTOM_PROVIDER_INVALID', 'ARENA_PROVIDER_UNKNOWN', 'ARENA_PROVIDER_KEY_EMPTY'],
+    hostedCodes: [
+      'ARENA_CUSTOM_PROVIDER_INVALID',
+      'ARENA_PROVIDER_UNKNOWN',
+      'ARENA_MODEL_UNKNOWN',
+      'ARENA_PROVIDER_KEY_EMPTY',
+    ],
   }),
 ] as const);
 

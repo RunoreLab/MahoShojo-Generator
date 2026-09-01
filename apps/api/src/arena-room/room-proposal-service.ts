@@ -41,6 +41,7 @@ export type ArenaRoomProposalErrorCode =
   | 'ROOM_PROPOSAL_CONFLICT'
   | 'ROOM_PROPOSAL_INPUT_INVALID'
   | 'ROOM_PROPOSAL_NOT_FOUND'
+  | 'ROOM_PROPOSAL_BYTE_LIMIT'
   | 'ROOM_PROPOSAL_PENDING_LIMIT_REACHED'
   | 'ROOM_REFERENCE_DENIED'
   | 'ROOM_REFERENCE_STALE'
@@ -328,7 +329,7 @@ export const createArenaRoomProposalService = (
         mapPresetReferenceError(error);
       }
       const timestamp = monotonicTimestamp(now, membership.state);
-      const proposal = ArenaProposalSchema.parse({
+      const parsedProposal = ArenaProposalSchema.safeParse({
         proposalVersion: 1,
         proposalId: request.data.proposalId,
         roomId: membership.state.snapshot.roomId,
@@ -338,6 +339,13 @@ export const createArenaRoomProposalService = (
         changes: request.data.changes,
         createdAt: timestamp,
       });
+      if (!parsedProposal.success) {
+        if (parsedProposal.error.issues.some((issue) => issue.message === 'payload-too-large')) {
+          return fail('ROOM_PROPOSAL_BYTE_LIMIT');
+        }
+        return fail('ROOM_PROPOSAL_INPUT_INVALID');
+      }
+      const proposal = parsedProposal.data;
 
       let transition: ArenaRoomTransitionSuccess;
       try {

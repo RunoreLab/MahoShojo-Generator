@@ -245,6 +245,19 @@ describe('GMR-10Q machine-readable gate/capability registry', () => {
     }
   });
 
+  it('[GMR10Q-PRODUCER-BINDING] inventory 每一项都绑定实际 producer source，而非仅在登记表中自证', () => {
+    const repositoryRoot = resolve(process.cwd(), '../..');
+    for (const category of ARENA_GATE_SOURCE_CATEGORIES) {
+      const source = readFileSync(resolve(repositoryRoot, category.currentSource), 'utf8');
+      for (const item of category.classifiedItems) {
+        const sourceToken = category.category === 'product-parity-semantic-key'
+          ? item.slice(item.indexOf(':') + 1)
+          : item;
+        expect(source, `${category.currentSource} -> ${item}`).toContain(sourceToken);
+      }
+    }
+  });
+
   it('domain error 显式映射公开 HTTP code，且 mapping 与 canonical taxonomy 一致', () => {
     expect(ARENA_GATE_DOMAIN_HTTP_CODE_MAP).toEqual(Object.fromEntries(
       ARENA_ROOM_ERROR_TAXONOMY.map(({ domainCode, httpCode, hostedCodes }) => [

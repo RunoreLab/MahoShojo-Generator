@@ -133,7 +133,7 @@ export const ARENA_ROOM_INTERNAL_GUIDANCE = [
 
 const mapDefinitiveGenerationRejection = (
   code: string,
-): ArenaRoomGenerationErrorCode => {
+): ArenaRoomGenerationErrorCode | null => {
   switch (code) {
     case 'ARENA_REQUEST_TOO_LARGE': return 'ROOM_RUNTIME_BODY_LIMIT';
     case 'ARENA_PARTICIPANTS_LIMIT': return 'ROOM_GENERATION_COMBATANT_LIMIT';
@@ -144,14 +144,19 @@ const mapDefinitiveGenerationRejection = (
       return 'ROOM_RUNTIME_PROMPT_BUDGET_EXCEEDED';
     case 'ARENA_CUSTOM_PROVIDER_INVALID':
     case 'ARENA_PROVIDER_UNKNOWN':
+    case 'ARENA_MODEL_UNKNOWN':
     case 'ARENA_PROVIDER_KEY_EMPTY':
       return 'ROOM_PROVIDER_CONFIG_INVALID';
+    case 'ARENA_PARTICIPANTS_INVALID':
+    case 'ARENA_PVP_CONTEXT_INVALID':
     case 'ARENA_MULTIPLAYER_SNAPSHOT_INVALID':
+    case 'ARENA_MATERIALIZATION_VERSION_UNSUPPORTED':
       return 'ROOM_GENERATION_INPUT_INVALID';
     case 'ARENA_CONTENT_POLICY_REJECTED':
     case 'GENERATION_REQUEST_CONFLICT':
-    default:
       return 'ROOM_GENERATION_CONFLICT';
+    default:
+      return null;
   }
 };
 
@@ -580,8 +585,15 @@ export const createArenaRoomGenerationService = (
       return fail('ROOM_OPERATION_UNKNOWN');
     }
     if (result.kind === 'rejected') {
-      if (result.status >= 500) return fail('ROOM_OPERATION_UNKNOWN');
       const rejectionCode = mapDefinitiveGenerationRejection(result.code);
+      if (
+        rejectionCode === null
+        || result.status < 400
+        || result.status >= 500
+        || result.status === 408
+        || result.status === 425
+        || result.status === 429
+      ) return fail('ROOM_OPERATION_UNKNOWN');
       const current = input.membership.actor.getSnapshot();
       if (!current) return fail('ROOM_GENERATION_NOT_FOUND');
       const mirror = current.snapshot.activeGeneration;

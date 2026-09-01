@@ -628,7 +628,12 @@ describe('Arena Room generation coordinator', () => {
     ['ARENA_SAFETY_PROMPT_BUDGET_EXCEEDED', 400, 'ROOM_RUNTIME_PROMPT_BUDGET_EXCEEDED'],
     ['ARENA_CUSTOM_PROVIDER_INVALID', 400, 'ROOM_PROVIDER_CONFIG_INVALID'],
     ['ARENA_PROVIDER_UNKNOWN', 400, 'ROOM_PROVIDER_CONFIG_INVALID'],
+    ['ARENA_MODEL_UNKNOWN', 400, 'ROOM_PROVIDER_CONFIG_INVALID'],
     ['ARENA_PROVIDER_KEY_EMPTY', 400, 'ROOM_PROVIDER_CONFIG_INVALID'],
+    ['ARENA_PARTICIPANTS_INVALID', 400, 'ROOM_GENERATION_INPUT_INVALID'],
+    ['ARENA_PVP_CONTEXT_INVALID', 400, 'ROOM_GENERATION_INPUT_INVALID'],
+    ['ARENA_MULTIPLAYER_SNAPSHOT_INVALID', 400, 'ROOM_GENERATION_INPUT_INVALID'],
+    ['ARENA_MATERIALIZATION_VERSION_UNSUPPORTED', 400, 'ROOM_GENERATION_INPUT_INVALID'],
     ['GENERATION_REQUEST_CONFLICT', 409, 'ROOM_GENERATION_CONFLICT'],
   ] as const)('definitive downstream rejection %s 终结 Room attempt 并保留具体原因', async (
     downstreamCode,
@@ -651,13 +656,16 @@ describe('Arena Room generation coordinator', () => {
     expect(rejected.publisher.attach).not.toHaveBeenCalled();
   });
 
-  it('5xx unknown 保留 starting 等待对账，不误终结可能已启动的 producer', async () => {
-
+  it.each([
+    [503, 'GENERATION_RESERVATION_UNAVAILABLE'],
+    [400, 'UNKNOWN_DETERMINISM'],
+    [429, 'ARENA_PROVIDER_UNKNOWN'],
+  ] as const)('%s / %s 不确定拒绝保留 starting 等待对账', async (status, code) => {
     const unknown = await createHarness();
     vi.mocked(unknown.generation.startFromHostRequest).mockResolvedValueOnce({
       kind: 'rejected',
-      status: 503,
-      code: 'GENERATION_RESERVATION_UNAVAILABLE',
+      status,
+      code,
     });
     await expect(unknown.service.start({
       roomId: 'room-1',
@@ -667,7 +675,6 @@ describe('Arena Room generation coordinator', () => {
     })).rejects.toMatchObject({ code: 'ROOM_OPERATION_UNKNOWN' });
     expect(unknown.store.state?.snapshot.activeGeneration?.state).toBe('starting');
     expect(unknown.publisher.attach).not.toHaveBeenCalled();
-
   });
 
   it('active member 只能读取 current generation；running projection 先 reconcile Room 再只读 resume attach', async () => {

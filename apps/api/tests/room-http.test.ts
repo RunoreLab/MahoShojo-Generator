@@ -532,7 +532,7 @@ describe('Arena Room HTTP product routes', () => {
     expect(errorBody.error).toContain(message);
   });
 
-  it('granular error taxonomy 需显式协商，旧客户端与未知版本仍收到 v1 coarse code', async () => {
+  it('granular error taxonomy 需显式协商，旧客户端与未知版本保留既有 v1 精确 code', async () => {
     const serviceError = new ArenaRoomGenerationError('ROOM_GENERATION_COMBATANTS_EMPTY', {
       code: 'GENERATION_COMBATANTS_EMPTY',
       gate: 'generation-readiness',
@@ -573,7 +573,7 @@ describe('Arena Room HTTP product routes', () => {
       );
       expect(response.status).toBe(409);
       expect(await response.json()).toMatchObject({
-        code: 'ROOM_CONFLICT',
+        code: 'ROOM_GENERATION_COMBATANTS_EMPTY',
         error: expect.stringContaining('至少需要 1 位'),
       });
     }
@@ -595,6 +595,95 @@ describe('Arena Room HTTP product routes', () => {
     });
     expect(negotiated.headers.get('vary')).toContain('x-mahoshojo-arena-error-taxonomy');
     expect(negotiated.headers.get('cache-control')).toBe('no-store');
+  });
+
+  it.each([
+    [new ArenaRoomGenerationError('ROOM_HOST_LOCAL_PAYLOAD_MISSING'), 400, 'ROOM_HOST_LOCAL_PAYLOAD_MISSING_OR_MISMATCH'],
+    [new ArenaRoomGenerationError('ROOM_HOST_LOCAL_DIGEST_MISMATCH'), 409, 'ROOM_HOST_LOCAL_CONTENT_VERSION_MISMATCH'],
+    [new ArenaRoomGenerationError('ROOM_HOST_LOCAL_CONTENT_VERSION_MISSING'), 400, 'ROOM_HOST_LOCAL_CONTENT_VERSION_MISSING'],
+  ] as const)('v1 客户端可解析细分前的 host-local 兼容 code：%s', async (
+    serviceError,
+    status,
+    legacyCode,
+  ) => {
+    const dependencies = createDependencies();
+    vi.mocked(dependencies.generations.start).mockRejectedValueOnce(serviceError);
+    const app = createHonoApp(config, createRedisStub(), undefined, { arenaRoom: dependencies });
+    const request = createRequest({
+      expectedRoomEpoch: authority.snapshot.roomEpoch,
+      expectedRevision: authority.snapshot.revision,
+      generationRequestId: 'request-legacy-host-local',
+      sharedConfig: authority.snapshot.sharedConfig,
+      hostLocalPayloads: [],
+      generation: {},
+    });
+    const headers: Record<string, string> = { ...request.headers };
+    delete headers['x-mahoshojo-arena-error-taxonomy'];
+    const response = await app.request(
+      `/api/arena/rooms/v1/${authority.snapshot.roomId}/generations`,
+      { ...request, headers },
+    );
+    expect(response.status).toBe(status);
+    expect(await response.json()).toMatchObject({ code: legacyCode });
+  });
+
+  it('v1 客户端保留 reference denied 的既有 code 与状态语义', async () => {
+    const membershipDependencies = createDependencies();
+    vi.mocked(membershipDependencies.memberships.getSession).mockRejectedValueOnce(
+      new ArenaRoomMembershipError('ROOM_REFERENCE_DENIED'),
+    );
+    const membershipApp = createHonoApp(config, createRedisStub(), undefined, {
+      arenaRoom: membershipDependencies,
+    });
+    const membershipResponse = await membershipApp.request(
+      `/api/arena/rooms/v1/${session.roomId}/session`,
+      { headers: { authorization: 'Bearer legacy-key' } },
+    );
+    expect(membershipResponse.status).toBe(409);
+    expect(await membershipResponse.json()).toMatchObject({ code: 'ROOM_CONFLICT' });
+
+    const proposalDependencies = createDependencies();
+    vi.mocked(proposalDependencies.proposals.submit).mockRejectedValueOnce(
+      new ArenaRoomProposalError('ROOM_REFERENCE_DENIED'),
+    );
+    const proposalApp = createHonoApp(config, createRedisStub(), undefined, {
+      arenaRoom: proposalDependencies,
+    });
+    const proposalRequest = createRequest({
+      proposalId: 'proposal-legacy-reference-denied',
+      expectedRoomEpoch: session.roomEpoch,
+      baseRevision: session.snapshot.revision,
+      changes: [guidanceChangeForHttp()],
+    });
+    const proposalHeaders: Record<string, string> = { ...proposalRequest.headers };
+    delete proposalHeaders['x-mahoshojo-arena-error-taxonomy'];
+    const proposalResponse = await proposalApp.request(
+      `/api/arena/rooms/v1/${session.roomId}/proposals`,
+      { ...proposalRequest, headers: proposalHeaders },
+    );
+    expect(proposalResponse.status).toBe(409);
+    expect(await proposalResponse.json()).toMatchObject({ code: 'ROOM_CONFLICT' });
+
+    const configDependencies = createDependencies();
+    vi.mocked(configDependencies.configs.publish).mockRejectedValueOnce(
+      new ArenaRoomConfigError('ROOM_REFERENCE_DENIED'),
+    );
+    const configApp = createHonoApp(config, createRedisStub(), undefined, {
+      arenaRoom: configDependencies,
+    });
+    const configRequest = createRequest({
+      expectedRoomEpoch: session.roomEpoch,
+      expectedRevision: session.snapshot.revision,
+      sharedConfig: session.snapshot.sharedConfig,
+    });
+    const configHeaders: Record<string, string> = { ...configRequest.headers };
+    delete configHeaders['x-mahoshojo-arena-error-taxonomy'];
+    const configResponse = await configApp.request(
+      `/api/arena/rooms/v1/${session.roomId}/config`,
+      { ...configRequest, headers: configHeaders },
+    );
+    expect(configResponse.status).toBe(409);
+    expect(await configResponse.json()).toMatchObject({ code: 'ROOM_CONFLICT' });
   });
 
   it('schema preflight 保留角色、累计引用与版本缺失的可行动原因', async () => {
@@ -679,6 +768,21 @@ describe('Arena Room HTTP product routes', () => {
       code: 'ROOM_REFERENCE_VERSION_MISSING',
       error: expect.stringContaining('角色 1'),
     });
+
+    const invalidShareability = await app.request('/api/arena/rooms/v1', createRequest({
+      creationRequestId: 'create-request-invalid-team',
+      displayName: '房主',
+      directory: { title: '引用关系测试', visibility: 'public' },
+      sharedConfig: {
+        ...authority.snapshot.sharedConfig,
+        teams: [{ key: 'team-1', displayName: '一队', combatantKeys: ['missing-combatant'] }],
+      },
+    }));
+    expect(invalidShareability.status).toBe(400);
+    expect(await invalidShareability.json()).toMatchObject({
+      code: 'ROOM_CONFIG_SHAREABILITY_INVALID',
+      error: expect.stringContaining('房间配置'),
+    });
     expect(dependencies.memberships.create).not.toHaveBeenCalled();
     expect(dependencies.generations.start).not.toHaveBeenCalled();
   });
@@ -734,7 +838,7 @@ describe('Arena Room HTTP product routes', () => {
   it.each([
     ['ROOM_CONFIG_FRAME_TOO_LARGE', 413, 'ROOM_CONFIG_FRAME_TOO_LARGE'],
     ['ROOM_PERMISSION_DENIED', 403, 'ROOM_FORBIDDEN'],
-    ['ROOM_REFERENCE_DENIED', 409, 'ROOM_CONFLICT'],
+    ['ROOM_REFERENCE_DENIED', 403, 'ROOM_REFERENCE_DENIED'],
     ['ROOM_REFERENCE_STALE', 409, 'ROOM_REFERENCE_STALE'],
     ['ROOM_REFERENCE_UNAVAILABLE', 503, 'ROOM_UNAVAILABLE'],
     ['ROOM_EPOCH_STALE', 409, 'ROOM_CONFLICT'],
@@ -1009,7 +1113,7 @@ describe('Arena Room HTTP product routes', () => {
     for (const [proposalCode, status, code] of [
       ['ROOM_PROPOSAL_PENDING_LIMIT_REACHED', 409, 'ROOM_PROPOSAL_PENDING_LIMIT_REACHED'],
       ['ROOM_REFERENCE_STALE', 409, 'ROOM_REFERENCE_STALE'],
-      ['ROOM_REFERENCE_DENIED', 409, 'ROOM_CONFLICT'],
+      ['ROOM_REFERENCE_DENIED', 403, 'ROOM_REFERENCE_DENIED'],
       ['ROOM_PERMISSION_DENIED', 403, 'ROOM_FORBIDDEN'],
       ['ROOM_OPERATION_UNKNOWN', 503, 'ROOM_UNAVAILABLE'],
     ] as const) {
@@ -1114,7 +1218,7 @@ describe('Arena Room HTTP product routes', () => {
     expect(dependencies.proposals.submit).not.toHaveBeenCalled();
   });
 
-  it('Proposal route 对 malformed JSON、bad UTF-8 与 oversized body 分别稳定返回 400/413', async () => {
+  it('Proposal route 对 malformed JSON、bad UTF-8、change limit 与 byte limit 返回独立错误', async () => {
     const dependencies = createDependencies();
     const app = createHonoApp(config, createRedisStub(), undefined, {
       arenaRoom: dependencies,
@@ -1124,6 +1228,7 @@ describe('Arena Room HTTP product routes', () => {
       authorization: 'Bearer legacy-key',
       'content-type': 'application/json',
       origin: 'http://localhost:3000',
+      'x-mahoshojo-arena-error-taxonomy': '2',
     };
     const malformed = await app.request(path, {
       method: 'POST',
@@ -1140,11 +1245,28 @@ describe('Arena Room HTTP product routes', () => {
       headers,
       body: JSON.stringify({ padding: 'x'.repeat(64 * 1_024) }),
     });
+    const tooManyChanges = await app.request(path, createRequest({
+      proposalId: 'proposal-too-many-changes',
+      expectedRoomEpoch: session.roomEpoch,
+      baseRevision: session.snapshot.revision,
+      changes: Array.from({ length: 33 }, (_, index) => ({
+        ...guidanceChangeForHttp(),
+        changeId: `guidance-${index}`,
+      })),
+    }));
 
     expect(malformed.status).toBe(400);
     expect(invalidUtf8.status).toBe(400);
     expect(oversized.status).toBe(413);
-    expect(await oversized.json()).toMatchObject({ code: 'ROOM_PAYLOAD_TOO_LARGE' });
+    expect(await oversized.json()).toMatchObject({
+      code: 'ROOM_PROPOSAL_BYTE_LIMIT',
+      error: expect.stringMatching(/64 KiB/u),
+    });
+    expect(tooManyChanges.status).toBe(400);
+    expect(await tooManyChanges.json()).toMatchObject({
+      code: 'ROOM_PROPOSAL_CHANGE_LIMIT',
+      error: expect.stringMatching(/33.*32/u),
+    });
     expect(dependencies.proposals.submit).not.toHaveBeenCalled();
   });
 
@@ -1322,7 +1444,7 @@ describe('Arena Room HTTP product routes', () => {
       ['ROOM_CLOSED', 404, 'ROOM_NOT_FOUND'],
       ['ROOM_NOT_FOUND', 404, 'ROOM_NOT_FOUND'],
       ['ROOM_PERMISSION_DENIED', 403, 'ROOM_FORBIDDEN'],
-      ['ROOM_REFERENCE_DENIED', 409, 'ROOM_CONFLICT'],
+      ['ROOM_REFERENCE_DENIED', 403, 'ROOM_REFERENCE_DENIED'],
       ['ROOM_REFERENCE_STALE', 409, 'ROOM_REFERENCE_STALE'],
       ['ROOM_REFERENCE_UNAVAILABLE', 503, 'ROOM_UNAVAILABLE'],
       ['ROOM_MEMBERSHIP_TRANSITION_DENIED', 409, 'ROOM_CONFLICT'],

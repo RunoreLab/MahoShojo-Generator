@@ -48,6 +48,18 @@ export const ARENA_GATE_TEST_EVIDENCE = [
   'packages/multiplayer-core/tests/state-machine-recovery.test.ts::Arena Room recovery transition',
   'packages/multiplayer-core/tests/state-machine-review-regressions.test.ts::GMR-01 independent review regressions',
   'packages/hosted-api/tests/arena-generation-service.test.ts::Arena generation lifecycle service',
+  'apps/web/tests/arena-multiplayer-interaction.test.tsx::空角色草稿直接创建房间，不进入降级或错误路径',
+  'apps/web/tests/arena-multiplayer-interaction.test.tsx::本地配置不可共享时仍以 canonical 空草稿创建，成功后列出所有问题',
+  'apps/web/tests/arena-room-shared-config.test.ts::角色数与 canonical runtime 的 32 位容量一致',
+  'apps/web/tests/arena-room-shared-config.test.ts::辅助情景与素材不再各自限制 10 个，而是共享 256 个引用的累计预算',
+  'apps/web/tests/arena-room-shared-config.test.ts::在线引用缺版本和随机占位符会一次返回稳定、定位明确的多个问题',
+  'apps/web/tests/arena-proposal-panel.test.tsx::host 审阅显示 language 与 team structure typed changes',
+  'apps/web/tests/arena-multiplayer-narrative-history-parity.test.tsx::GMR10Q-F-NARRATIVE-HISTORY-PARITY',
+  'apps/web/tests/arena-multiplayer-generation-bridge.test.ts::多人房主与单人一致地先解析随机角色，再构建可发布草稿',
+  'apps/web/tests/arena-multiplayer-interaction.test.tsx::config publish unknown 在 connected 状态提供主动权威对账入口',
+  'apps/api/tests/room-http.test.ts::schema preflight 保留角色、累计引用与版本缺失的可行动原因',
+  'apps/api/tests/room-http.test.ts::Proposal route 对 malformed JSON、bad UTF-8、change limit 与 byte limit 返回独立错误',
+  'apps/api/tests/room-http.test.ts::granular error taxonomy 需显式协商，旧客户端与未知版本保留既有 v1 精确 code',
 ] as const;
 export type ArenaGateTestEvidence = typeof ARENA_GATE_TEST_EVIDENCE[number];
 
@@ -60,11 +72,31 @@ const testEvidenceByLayer: Readonly<Record<ArenaGateLayer, ArenaGateTestEvidence
   'result-action': ARENA_GATE_TEST_EVIDENCE[6],
 };
 
+const testEvidenceByCode: Readonly<Partial<Record<string, ArenaGateTestEvidence>>> = {
+  ROOM_EMPTY_DRAFT_ALLOWED: ARENA_GATE_TEST_EVIDENCE[14],
+  ROOM_CONFIG_SCHEMA: ARENA_GATE_TEST_EVIDENCE[15],
+  ROOM_CONFIG_COMBATANT_LIMIT: ARENA_GATE_TEST_EVIDENCE[16],
+  ROOM_CONFIG_REFERENCE_LIMIT: ARENA_GATE_TEST_EVIDENCE[17],
+  ROOM_SHAREABILITY_ISSUES: ARENA_GATE_TEST_EVIDENCE[18],
+  COLLABORATION_PRODUCT_TERMINOLOGY: ARENA_GATE_TEST_EVIDENCE[19],
+  GENERATION_RANDOM_COMBATANT_RESOLUTION: ARENA_GATE_TEST_EVIDENCE[21],
+  RESULT_HOST_WRITE_AUTHORITY: ARENA_GATE_TEST_EVIDENCE[20],
+  RESULT_PRESENTATION_PARITY: ARENA_GATE_TEST_EVIDENCE[20],
+  NARRATIVE_HISTORY_SETTINGS_PARITY: ARENA_GATE_TEST_EVIDENCE[20],
+  NARRATIVE_HISTORY_BODY_LOCAL: ARENA_GATE_TEST_EVIDENCE[20],
+  GENERATION_RECONCILIATION: ARENA_GATE_TEST_EVIDENCE[22],
+  WEB_LOCAL_VALIDATION: ARENA_GATE_TEST_EVIDENCE[18],
+  CONTRACT_SCHEMA_AND_LIMITS: ARENA_GATE_TEST_EVIDENCE[23],
+  PROPOSAL_RESOURCE_AND_ATOMICITY: ARENA_GATE_TEST_EVIDENCE[24],
+};
+
 const gate = (
   entry: ArenaGateCapabilityRegistryEntry,
 ): ArenaGateCapabilityRegistryEntry => Object.freeze({
   ...entry,
-  testId: entry.testId.includes('::') ? entry.testId : testEvidenceByLayer[entry.layer],
+  testId: entry.testId.includes('::')
+    ? entry.testId
+    : testEvidenceByCode[entry.code] ?? testEvidenceByLayer[entry.layer],
 });
 
 /** GMR-10Q-A gate/capability inventory and test binding. */
@@ -104,6 +136,13 @@ export const ARENA_GATE_CAPABILITY_REGISTRY: readonly ArenaGateCapabilityRegistr
     canonicalSource: 'packages/contracts/src/shared-config.ts', reasonCategory: 'security/privacy',
     reason: 'Room 只共享安全投影，不广播 secret 或 host-local 正文。', userAction: '修正具体配置项后重新更新房间配置。',
     currentUserMessage: '房间配置存在不支持共享的字段或无效引用，请查看具体问题后修正。', messageKey: 'arena.multiplayer.gate.roomConfigSchema', testId: 'GMR10Q-B-DRAFT-SHAREABILITY',
+  }),
+  gate({
+    code: 'ROOM_EMPTY_DRAFT_ALLOWED', condition: '空角色列表是可创建、可共享、但尚不可生成的合法房间草稿', layer: 'room-shareability',
+    currentSource: 'apps/web/components/arena/multiplayer/ArenaMultiplayerPanel.tsx', singleEquivalent: '单人 Arena 可先配置空草稿，开始生成时再校验角色',
+    canonicalSource: 'packages/contracts/src/shared-config.ts', reasonCategory: 'product-parity',
+    reason: '建房存在性与生成完整性属于不同阶段，空角色只应阻止生成。', userAction: '可先创建房间；开始生成前至少添加 1 位角色。',
+    currentUserMessage: null, messageKey: 'arena.multiplayer.capability.roomEmptyDraftAllowed', testId: 'GMR10Q-B-EMPTY-DRAFT',
   }),
   gate({
     code: 'ROOM_CONFIG_COMBATANT_LIMIT', condition: 'Shared Config 角色数不得超过 canonical runtime 容量', layer: 'room-shareability',
@@ -208,6 +247,13 @@ export const ARENA_GATE_CAPABILITY_REGISTRY: readonly ArenaGateCapabilityRegistr
     currentUserMessage: null, messageKey: 'arena.multiplayer.gate.generationScenarioRequired', testId: 'GMR10Q-F-SCENARIO-PARITY',
   }),
   gate({
+    code: 'GENERATION_RANDOM_COMBATANT_RESOLUTION', condition: '开始多人生成前按单人语义解析随机角色占位符', layer: 'generation-readiness',
+    currentSource: 'apps/web/components/arena/multiplayer/generation-bridge.ts', singleEquivalent: '单人 Arena 在生成前解析随机角色',
+    canonicalSource: 'apps/web/components/arena/hooks/useBattleEngine.ts', reasonCategory: 'product-parity',
+    reason: '多人不得把随机占位符当作另一套非法配置，也不得把未解析占位符发送到 runtime。', userAction: '保留随机角色配置；生成时若没有可选角色，再按具体提示补充角色。',
+    currentUserMessage: null, messageKey: 'arena.multiplayer.gate.generationRandomCombatantResolution', testId: 'GMR10Q-F-RANDOM-COMBATANT-PARITY',
+  }),
+  gate({
     code: 'GENERATION_COMBATANT_LIMIT', condition: '生成角色数超过 canonical runtime 容量', layer: 'generation-readiness',
     currentSource: 'packages/multiplayer-core/src/generation-readiness.ts', singleEquivalent: '单人生成同样受 runtime 32 位上限约束',
     canonicalSource: 'packages/contracts/src/arena-capabilities.ts', reasonCategory: 'product-parity',
@@ -303,7 +349,7 @@ export const ARENA_GATE_CAPABILITY_REGISTRY: readonly ArenaGateCapabilityRegistr
   }),
   gate({
     code: 'NARRATIVE_HISTORY_BODY_LOCAL', condition: '叙事历史正文只在房主 runtime/request scope materialize', layer: 'generation-readiness',
-    currentSource: 'packages/contracts/src/room-http.ts', singleEquivalent: '单人从用户本地叙事历史读取正文',
+    currentSource: 'apps/web/lib/arena-room/narrative-history-runtime.ts', singleEquivalent: '单人从用户本地叙事历史读取正文',
     canonicalSource: 'packages/multiplayer-core/src/product-parity-coverage.ts', reasonCategory: 'security/privacy',
     reason: '叙事历史正文属于本地/私有数据，不因多人 parity 广播给成员。', userAction: '由房主保留并载入本地历史；成员只同步安全设置和结果摘要。',
     currentUserMessage: null, messageKey: 'arena.multiplayer.capability.narrativeHistoryBodyLocal', testId: ARENA_GATE_TEST_EVIDENCE[6],
@@ -403,6 +449,7 @@ export const ARENA_GATE_SOURCE_INVENTORY = Object.freeze({
     'ROOM_HOST_LOCAL_PAYLOAD_MISSING', 'ROOM_HOST_LOCAL_PAYLOAD_INVALID',
     'ROOM_HOST_LOCAL_KIND_MISMATCH', 'ROOM_HOST_LOCAL_DIGEST_MISMATCH',
     'ROOM_HOST_LOCAL_TYPE_MISMATCH', 'ROOM_HOST_LOCAL_CONTENT_VERSION_MISSING',
+    'ROOM_HOST_LOCAL_PAYLOAD_MISSING_OR_MISMATCH',
     'ROOM_HOST_LOCAL_CONTENT_VERSION_MISMATCH', 'ROOM_REFERENCE_VERSION_MISSING',
     'ROOM_REFERENCE_STALE', 'ROOM_REFERENCE_DENIED', 'ROOM_RUNTIME_BODY_LIMIT',
     'ROOM_RUNTIME_REFERENCE_LIMIT', 'ROOM_RUNTIME_ADJUDICATION_LIMIT',
