@@ -19,7 +19,7 @@ type Counters = {
   primaryPostCount: number;
   drPostCount: number;
 };
-type EvidenceCase = Counters & {
+type VerificationCase = Counters & {
   id: string;
   passed: boolean;
   operationId: string;
@@ -163,7 +163,7 @@ const main = async () => {
   const primaryOrigin = await listen(primaryServer);
   const drOrigin = await listen(drServer);
   const original = { ...honoApiConfig };
-  const evidence: EvidenceCase[] = [];
+  const cases: VerificationCase[] = [];
 
   try {
     honoApiConfig.enabled = true;
@@ -204,7 +204,7 @@ const main = async () => {
         await response.text();
       } catch (error) {
         const expectedCode = id === 'PRIMARY-UNAVAILABLE-FAIL-CLOSED'
-          ? 'DR_NOT_ELIGIBLE'
+          ? 'OPERATION_NOT_DECLARED'
           : 'AMBIGUOUS_OPERATION_OUTCOME';
         assert.equal((error as GenerationApiClientError).code, expectedCode);
       }
@@ -219,7 +219,7 @@ const main = async () => {
         terminalClass: terminal.terminalClass,
       };
       assert.deepEqual(actual, expectedByCase[id]);
-      evidence.push({
+      cases.push({
         id,
         passed: true,
         operationId: expectedOperationId,
@@ -247,9 +247,9 @@ const main = async () => {
     );
 
     process.stdout.write(`${JSON.stringify({
-      event: 'hosted.dr.client-preflight.evidence',
+      event: 'hosted.dr.client-preflight.verification',
       environment: 'isolated-loopback',
-      cases: evidence,
+      cases,
     })}\n`);
   } finally {
     Object.assign(honoApiConfig, original);

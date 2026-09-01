@@ -16,34 +16,6 @@ export {
   type HostedApiDeploymentTarget,
 } from './deployment-target';
 
-export type HostedDrVersionGateStage = 'expand' | 'rollout' | 'contract';
-
-export type HostedDrVersionSchemaState = 'expanded' | 'contracted';
-
-export type HostedDrVersionGateInput = {
-  stage: HostedDrVersionGateStage;
-  primaryContractVersion: string;
-  drContractVersion: string;
-  clientContractVersion: string;
-  schemaState: HostedDrVersionSchemaState;
-  cleanupRequested?: boolean;
-};
-
-export type HostedDrVersionGateReason =
-  | 'compatible'
-  | 'invalid-version'
-  | 'invalid-stage'
-  | 'family-mismatch'
-  | 'skew-too-large'
-  | 'client-incompatible'
-  | 'expand-required'
-  | 'cleanup-blocked';
-
-export type HostedDrVersionGateResult = {
-  allowed: boolean;
-  reason: HostedDrVersionGateReason;
-};
-
 export type HostedDrSelectionInput = {
   requestClass: HostedDrRequestClass;
   dispatchState: HostedDrDispatchState;
@@ -113,54 +85,6 @@ export const isHostedDrContractVersionCompatible = (
     && runtime.family === client.family
     && Math.abs(runtime.version - client.version) <= HOSTED_DR_MAX_VERSION_SKEW
   );
-};
-
-const deniedHostedDrVersionGate = (
-  reason: Exclude<HostedDrVersionGateReason, 'compatible'>,
-): HostedDrVersionGateResult => ({ allowed: false, reason });
-
-/**
- * Pure expand/rollout/contract gate for short-lived Hono/DR version skew.
- * It never mutates schema, deploys an artifact, or retries a request.
- */
-export const evaluateHostedDrVersionGate = (
-  input: HostedDrVersionGateInput,
-): HostedDrVersionGateResult => {
-  if (input.stage !== 'expand' && input.stage !== 'rollout' && input.stage !== 'contract') {
-    return deniedHostedDrVersionGate('invalid-stage');
-  }
-  const primary = parseHostedDrContractVersion(input.primaryContractVersion);
-  const dr = parseHostedDrContractVersion(input.drContractVersion);
-  const client = parseHostedDrContractVersion(input.clientContractVersion);
-  if (!primary || !dr || !client) return deniedHostedDrVersionGate('invalid-version');
-  if (primary.family !== dr.family || primary.family !== client.family) {
-    return deniedHostedDrVersionGate('family-mismatch');
-  }
-  if (Math.abs(primary.version - dr.version) > HOSTED_DR_MAX_VERSION_SKEW) {
-    return deniedHostedDrVersionGate('skew-too-large');
-  }
-  if (client.version !== primary.version && client.version !== dr.version) {
-    return deniedHostedDrVersionGate('client-incompatible');
-  }
-  if (
-    (input.stage === 'expand' || input.stage === 'rollout')
-    && input.schemaState !== 'expanded'
-  ) {
-    return deniedHostedDrVersionGate('expand-required');
-  }
-  if (input.stage === 'contract') {
-    const aligned = primary.version === dr.version && dr.version === client.version;
-    if (
-      input.cleanupRequested === true
-      && (!aligned || input.schemaState !== 'contracted')
-    ) {
-      return deniedHostedDrVersionGate('cleanup-blocked');
-    }
-    if (!aligned || input.schemaState !== 'contracted') {
-      return deniedHostedDrVersionGate('cleanup-blocked');
-    }
-  }
-  return { allowed: true, reason: 'compatible' };
 };
 
 const matchesHostedWildcardOrigin = (origin: string, rule: string): boolean => {

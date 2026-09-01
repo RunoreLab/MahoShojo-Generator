@@ -12,7 +12,6 @@ import {
   type GenerationReplayStoreState,
   type GenerationStreamEvent,
 } from '../src/arena-generation/service';
-import { evaluateHostedDrVersionGate } from '../src/hosted-dr';
 
 const readResponseText = async (response: Response): Promise<string> => response.text();
 
@@ -420,15 +419,7 @@ describe('Arena generation lifecycle service', () => {
     expect(prepare).toHaveBeenCalledTimes(1);
   });
 
-  test('G25E2-VERSION-SKEW：rollout 保持 authenticated authority 读写与 public contract 兼容', async () => {
-    expect(evaluateHostedDrVersionGate({
-      stage: 'rollout',
-      primaryContractVersion: 'g25e1-v1',
-      drContractVersion: 'g25e1-v2',
-      clientContractVersion: 'g25e1-v1',
-      schemaState: 'expanded',
-    })).toEqual({ allowed: true, reason: 'compatible' });
-
+  test('相邻 materialization version 保持 authenticated authority 读写兼容', async () => {
     const createVersionedRequest = (payload: Record<string, unknown>) => new Request(
       'https://example.test/api/arena/generate-stream',
       {

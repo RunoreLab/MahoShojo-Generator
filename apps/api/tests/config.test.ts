@@ -307,26 +307,6 @@ describe('Hono server config', () => {
     expect(() => readHonoServerConfig()).toThrow(/ARENA_FINALIZATION_URL/);
   });
 
-  it('G25E2-VERSION-SKEW：生产启动路径接受 rollout 阶段一个版本的兼容偏差', () => {
-    stubValidBearerProductionEnv();
-    vi.stubEnv('HOSTED_DR_GATE_STAGE', 'rollout');
-    vi.stubEnv('HOSTED_DR_PRIMARY_CONTRACT_VERSION', 'g25e1-v2');
-    vi.stubEnv('HOSTED_DR_DR_CONTRACT_VERSION', 'g25e1-v1');
-    vi.stubEnv('HOSTED_DR_CLIENT_CONTRACT_VERSION', 'g25e1-v1');
-    vi.stubEnv('HOSTED_DR_SCHEMA_STATE', 'expanded');
-
-    expect(readHonoServerConfig().nodeEnv).toBe('production');
-  });
-
-  it('G25E2-VERSION-SKEW：生产启动路径拒绝跨 family 或过大 skew', () => {
-    stubValidBearerProductionEnv();
-    vi.stubEnv('HOSTED_DR_PRIMARY_CONTRACT_VERSION', 'g25e2-v2');
-    vi.stubEnv('HOSTED_DR_DR_CONTRACT_VERSION', 'g25e1-v1');
-    vi.stubEnv('HOSTED_DR_CLIENT_CONTRACT_VERSION', 'g25e1-v1');
-
-    expect(() => readHonoServerConfig()).toThrow(/HOSTED_DR_VERSION_GATE/);
-  });
-
   it('拒绝未知鉴权模式', () => {
     vi.stubEnv('HONO_AUTH_MODE', 'cookie-only');
     expect(() => readHonoServerConfig()).toThrow(/HONO_AUTH_MODE 必须是 hybrid 或 bearer/);

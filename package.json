@@ -38,13 +38,9 @@
     "check:naming:workspace": "node scripts/check-naming-conventions.mjs --workspace-only",
     "check:workspace:boundaries": "node scripts/check-workspace-boundaries.mjs",
     "check:admin-boundary": "vitest run --config vitest.config.ts tests/admin-security-boundary.test.ts && node scripts/check-admin-security-boundary.mjs",
-    "check:hosted-dr:schema": "node scripts/check-hosted-dr-schema.mjs",
-    "check:hosted-dr": "pnpm run check:hosted-dr:schema && node scripts/check-hosted-dr-contract.mjs",
     "check:arena-room-origins": "node scripts/check-arena-room-origin-policy.mjs",
     "generate:arena-room-presets": "node scripts/generate-arena-room-preset-registry.mjs",
     "check:arena-room-presets": "node scripts/generate-arena-room-preset-registry.mjs --check",
-    "generate:hosted-dr-client": "node scripts/generate-hosted-dr-client-config.mjs",
-    "verify:hosted-dr": "node scripts/verify-hosted-dr.mjs",
     "verify:hosted-dr:client-preflight": "pnpm --filter @mahoshojo/web run verify:hosted-dr:client-preflight",
     "verify:hosted-dr:redis": "HOSTED_DR_LOCAL_FAULT_INJECTION=true pnpm --filter @mahoshojo/api run verify:hosted-dr:redis",
     "test:repo": "vitest run --config vitest.config.ts",
@@ -52,8 +48,8 @@
     "workspace:test": "pnpm --workspace-concurrency=1 --filter \"./packages/*\" --filter \"./apps/*\" --if-present run test",
     "workspace:lint": "pnpm --filter \"./packages/*\" --filter \"./apps/*\" --if-present run lint",
     "workspace:build": "pnpm --filter \"./packages/*\" --filter \"./apps/*\" --if-present run build",
-    "workspace:verify": "pnpm run check:workspace:boundaries && pnpm run check:admin-boundary && pnpm run check:naming:workspace && pnpm run check:hosted-dr && pnpm run check:arena-room-origins && pnpm run check:arena-room-presets && pnpm run workspace:test && pnpm run workspace:lint && pnpm run workspace:build",
-    "ci:verify": "pnpm run workspace:verify && pnpm run verify:hosted-dr && pnpm run test:repo && pnpm run lint:repo"
+    "workspace:verify": "pnpm run check:workspace:boundaries && pnpm run check:admin-boundary && pnpm run check:naming:workspace && pnpm run check:arena-room-origins && pnpm run check:arena-room-presets && pnpm run workspace:test && pnpm run workspace:lint && pnpm run workspace:build",
+    "ci:verify": "pnpm run workspace:verify && pnpm run test:repo && pnpm run lint:repo"
   },
   "devDependencies": {
     "@types/node": "^20",

@@ -28,7 +28,7 @@ Phase 2.5C 建立的 10 条 shared-service route 包括 `generate-magical-girl`�
 generate/stream。Hono 从 `apps/api/src/adapters/*` 加载这些 adapter，不再动态导入对应 Next route；Next wrapper
 继续保留，两个 runtime 使用同一默认 service composition，业务顺序与错误 wire 由
 `@mahoshojo/hosted-api` 负责。G25R 又让 `arena/generate-stream` 与 generation request lookup/stream/status/cancel 四条控制面
-通过 server-owned lifecycle 精确进入 shared manifest；稳定逻辑入口为：
+通过 server-owned lifecycle 精确进入 shared route registry；稳定逻辑入口为：
 
 - `POST /api/arena/generate-stream`；
 - `GET /api/arena/generation-requests/:generationRequestId`；
@@ -52,7 +52,7 @@ Details 与 Sublimation 的 generate/stream 四路归位到同一 shared service
 结果。因此当前 registry 为 24 条 shared route，同时仍有 6 条 exited capability 对应的 Next 公开 route 保持原有实现、wire、鉴权和数据语义，未来若要重新进入 Hono，必须先形成 shared seam 和
 副作用/replay 证据。生成器在 `legacyRouteIds` 非空时 fail closed，生成的 registry 也不再拥有动态导入
 legacy Next handler 的 adapter 类型或代码路径。当前 registry 为 `24 shared-service / 6 exited / 0 legacy-next`；
-Hono source、manifest、测试、生成器和 bundle 构建已由 `apps/api` 独占。生成后的实际 registry 为
+Hono source、route inventory、测试、生成器和 bundle 构建已由 `apps/api` 独占。生成后的实际 registry 为
 `apps/api/src/generated/routes.ts`，不得手工修改。
 
 `check:workspace:boundaries` 还会扫描 `apps/api/src/adapters`，禁止 shared adapter 回导 root legacy route 或
@@ -118,7 +118,7 @@ liveness/dependency/capability readiness 外，Hono 对
 
 `HONO_CORS_ORIGINS` 支持逗号分隔的精确来源，也支持形如 `https://*.colanns.me` 的子域通配符。
 通配符只匹配相同协议和端口下的子域（包括多级子域），不匹配裸域 `colanns.me`。
-Hosted DR manifest shared route 的 Hono 与 Next/OpenNext adapter 复用同一 CORS policy；production 配置拒绝
+Hosted DR shared route 的 Hono 与 Next/OpenNext adapter 复用同一 CORS policy；production 配置拒绝
 空值、`*`、HTTP、localhost/loopback 和非法 origin，不允许两侧出现宽松度漂移。
 
 Arena Room 使用独立的 `ARENA_ROOM_ALLOWED_ORIGINS`。多人功能启用时该列表必须非空，只能包含无凭据、
@@ -180,21 +180,21 @@ Hono 服务配置相同的 `D1_GATEWAY_HMAC_SECRET`。生产建议再用 Cloudfl
 
 ## 前端 Hosted 路由
 
-生产 Web 使用 `apps/web/config/hono-api.ts` 的 `client-preflight` 模式。客户端从生成后的最小投影读取公开 Hono primary
-origin、同源 Next DR placement、probe path、timeout 和 route/method policy；它不直接读取完整 manifest。每个新的
-generation intent 在业务 dispatch 前最多探测 primary 一次，并只对 manifest 明确允许的 operation 最多探测 DR 一次。
+生产 Web 使用 `apps/web/config/hono-api.ts` 的 `client-preflight` 模式。客户端从 `config/hosted-routing.json` 读取公开
+Hono primary、同源 Next DR placement、probe path、timeout 和最小 route/method safety；Hono route/method inventory
+独立由 `config/hono-api-routes.json` 持有。每个新的 generation intent 在业务 dispatch 前最多探测 primary 一次，
+并只对运行配置明确允许的 operation 最多探测 DR 一次。
 选择后固定 placement；POST/stream 一旦越过 dispatch boundary，任何断线、timeout 或未知终态都不得改发另一 runtime。
 Tachie 与其他 exited route 继续使用原同源 Next 路由。
 
 Hono 的 `GET /api/health/ready` 返回 `service=mahoshojo-hono`、`placement=hono-primary`、共享
 `contractVersion` 与 `Cache-Control: no-store`，并复用严格 production CORS；readiness 绕过 Redis 业务 limiter，但不会
-绕过全局连接/平台保护。probe 不携带 Authorization、Cookie、业务 body 或用户标识。Next DR probe 另以 generated canonical
+绕过全局连接/平台保护。probe 不携带 Authorization、Cookie、业务 body 或用户标识。Next DR probe 另以 canonical
 capability/method 触发目标 capability guard，并要求响应精确回显；该低基数 identity 不包含真实资源 ID 或用户输入。
 
-`config/hosted-dr-capabilities.json` 是 replay/secret/provider/contract/control-plane 的机器事实；当前
-`defaultMode=client-preflight`、`managedControlPlane=optional-disabled`、`provisioning=not-provisioned`；后者不表示
-Cloudflare LB/DNS 已启用，也不再单独阻断 client-preflight build。`pnpm check:hosted-dr` 会阻断 route drift、内部/IP
-origin、不安全 replay、secret 值、缺 adapter/test/guard、projection drift 与伪 production 状态。
+旧 capability/schema/drill manifest 和生成投影已经退场。普通 route/fault tests 保护真实行为，客户端 bundle scanner
+继续拒绝 secret/binding 名称与内部 endpoint；Cloudflare LB/DNS evidence、projection drift 和历史 drill 状态不再作为
+build/merge 门禁。readiness 的 contract compatibility 与 dispatch 后禁止跨 runtime 重放仍保留。
 
 ## 构建与容器运行
 

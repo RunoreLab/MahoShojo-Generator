@@ -10,8 +10,9 @@
 - environment contract：`env.example` 与 `.dev.vars`；真实 secret 不进入仓库；
 - tests/operations：`tests/` 与 app-specific `scripts/`。
 
-跨 runtime 的 Hono route inventory 仍由仓库根 `config/hono-api-routes.json` 持有，replay/secret/provider/control-plane
-契约由 `config/hosted-dr-capabilities.json` 持有；D1 migration history 仍由根 `drizzle/` 持有。Web 不导入其他 app source。
+跨 runtime 的 Hono route/method inventory 由仓库根 `config/hono-api-routes.json` 持有；公开 origin、probe 与 Web DR
+operation safety 由小型 `config/hosted-routing.json` 持有。secret、binding 与 DatabaseProvider 约束留在实际服务端代码，
+D1 migration history 仍由根 `drizzle/` 持有。Web 不导入其他 app source。
 
 ## Local lifecycle
 
@@ -27,28 +28,27 @@ pnpm --filter @mahoshojo/web build:cf
 
 ## Readiness
 
-Web 应用不提供会绕过真实 Route Handler 或 DR capability 检查的通用“假健康”接口。G25E-1 新增的
-`GET|HEAD /api/hosted/dr-readiness` 是 manifest 中明确登记的代表性 safe-read capability：它与 Hono 共用
+Web 应用不提供会绕过真实 Route Handler 或 DR capability 检查的通用“假健康”接口。
+`GET|HEAD /api/hosted/dr-readiness` 是运行配置明确登记的代表性 safe-read operation：它与 Hono 共用
 `@mahoshojo/hosted-api` contract，只通过 native `DB.withSession()` 执行固定查询，缺 binding/session/query 时固定
-503，且不返回 bookmark、SQL、URL 或 secret。client-preflight 会额外发送 generated canonical capability/method header；
-handler 复用同一 capability guard 检查目标 operation 的 secret、binding、database provider/consistency，并只接受精确
+503，且不返回 bookmark、SQL、URL 或 secret。client-preflight 会额外发送 canonical capability/method header；
+handler 复用同一 capability guard 检查目标 operation 的实际 secret、binding 与 database session，并只接受精确
 回显，因此通用 readiness 不会被误当成全部业务 readiness。G25D 的
 发布前 readiness 定义为：`check:wrangler:d1`、全量 test/lint、Next production build、OpenNext Cloudflare
 build 与 `wrangler deploy --dry-run --env preview` 全部通过；运行时的 capability readiness 继续由各个
-server-owned adapter fail closed。所有 manifest shared Next route 在 production 进入 service 前经过统一 guard；
-`fail-closed` capability、缺必要 secret 或缺 native D1 Sessions 时不调用 handler，也不回退 Hono HTTP D1 路径。
-production cross-origin 请求还必须配置 manifest 指定的 `HONO_CORS_ORIGINS`；空值、`*`、HTTP、
+server-owned adapter fail closed。所有 shared Next route 在 production 进入 service 前经过统一 guard；未列入 Web DR
+运行规则的 route、缺必要 secret 或缺 native D1 Sessions 时不调用 handler，也不回退 Hono HTTP D1 路径。
+production cross-origin 请求还必须配置 `HONO_CORS_ORIGINS`；空值、`*`、HTTP、
 localhost/loopback 或非法 origin 均 fail closed，OPTIONS 与实际响应复用同一 policy。非 production 本地开发可显式
 使用既有 HTTP D1 adapter，但不会被标记成 native binding，也不能作为 DR 验收证据。
-production 默认使用 manifest 生成的 `client-preflight` 最小投影：每个新 generation intent 先以无凭据、`no-store`
+production 默认使用小型运行配置的 `client-preflight`：每个新 generation intent 先以无凭据、`no-store`
 的有界 GET 探测 Hono primary；只有 primary non-ready 且 route + method 明确为 `safe-read` 或已验证
-`new-request-only` 时，才再探测同源 Next DR 并固定唯一 placement。`fail-closed`、未登记或 policy pending 的 operation
+`new-non-idempotent` 时，才再探测同源 Next DR 并固定唯一 placement。未登记或 `durably-idempotent` 的 operation
 不会探测或 dispatch DR；业务 fetch 一旦调用，写操作的 transport、未知 5xx、SSE EOF-before-done 或 stream 断链只记录
 ambiguous outcome，不跨 runtime 重放；明确 SSE `done` / `error` 分别作为成功/失败终态释放 intent latch。production 不接受
-`NEXT_PUBLIC_HONO_API_ORIGIN` 覆盖；preview 仍必须显式使用 manifest 的 `previewOrigin`，
-local/test 只允许 loopback。`controlPlane.provisioning=not-provisioned` 只表示可选 managed control plane 未纳管，
-不会阻断当前 client-preflight production build。Next 与 OpenNext build 在产物生成后都会执行 Hosted DR client bundle
-safety gate：完整公开 routing projection 必须存在，所有客户端 JavaScript 中的 manifest secret/binding 名称与静态 internal/IP
+`NEXT_PUBLIC_HONO_API_ORIGIN` 覆盖；preview 仍必须显式使用小型 routing config 的 preview origin，local/test 只允许
+loopback。Next 与 OpenNext build 在产物生成后都会执行 Hosted DR client bundle safety gate：完整公开 routing token 必须存在，
+所有客户端 JavaScript 中的服务端 secret/binding 名称与静态 internal/IP
 endpoint 必须 absent；只对 framework URL parser 的精确 synthetic fixture 做受限豁免。该 gate 失败时构建 fail closed。
 
 ## Deploy 与 rollback
@@ -58,8 +58,8 @@ endpoint 必须 absent；只对 framework URL parser 的精确 synthetic fixture
 历史 production control-plane bootstrap seam 仍保留在独立 `dr-candidate` Wrangler environment，但状态是
 `optional-disabled` / `reference-only`，不进入默认 workflow 或 build。只有未来重新形成 accepted ADR、预算与生产授权后，
 才可显式同时设置
-`NEXT_PUBLIC_HOSTED_API_ENVIRONMENT=production` 与 `HOSTED_DR_ACTIVATION_CANDIDATE=true` 才允许在 manifest
-仍为 `not-provisioned` 时构建 bootstrap artifact；`dr-candidate` 强制 `assets.run_worker_first=true` 并使用独立的
+`NEXT_PUBLIC_HOSTED_API_ENVIRONMENT=production` 与 `HOSTED_DR_ACTIVATION_CANDIDATE=true` 才允许构建 bootstrap
+artifact；`dr-candidate` 强制 `assets.run_worker_first=true` 并使用独立的
 最外层 Worker entry，在 Cloudflare static assets、OpenNext image handler 与 Next middleware 之前只放行
 `GET|HEAD /api/hosted/dr-readiness`，其余路径固定 503。Next
 middleware 同时保留防御性限制，非法 candidate 开关同样 fail closed。candidate 使用独立

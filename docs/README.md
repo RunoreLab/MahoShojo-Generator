@@ -65,6 +65,8 @@ Arena 战后角色更新的权威对账与可编辑修复使用以下专项入�
 - [低成本 Hosted DR 与客户端预检切换主题](./topics/2026-08-29_070000_低成本HostedDR与客户端预检切换.md)
   - Hosted Hono/Next DR、流量选择、付费控制面、故障切换与重放边界的当前专项入口；
   - 在该专项范围内，本文档列出的新 ADR/spec 优先于较早的 stable control plane / Cloudflare LB 目标口径。
+  - 2026-09-01 复杂度预算 ADR 已进一步撤回大型 manifest/generated projection/version gate/evidence CI；
+    `config/hosted-routing.json`、真实 fault tests 与 dispatch 后 no-replay 是当前口径。
   - 当前仓库实现与审查证据见 [低成本 Hosted DR 客户端预检实施与审查日志](./logs/2026-08-29_085000_低成本HostedDR客户端预检实施与审查日志.md)。
 - [平台重整与本地优先架构主题](./topics/2026-08-22_022000_平台重整与本地优先架构.md)
   - 平台重整、Local-first、Monorepo、应用边界、管理后台、Desktop/Mobile、数据所有权与发行的综合入口。

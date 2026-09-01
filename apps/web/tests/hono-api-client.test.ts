@@ -205,23 +205,18 @@ describe('Hono API 客户端', () => {
   });
 
   test('客户端只消费小型 routing config，并包含 preflight 所需公开 origin/policy', () => {
-    const source = readFileSync(path.join(process.cwd(), 'config/hono-api.ts'), 'utf8');
-    const routingSource = readFileSync(
-      path.join(process.cwd(), 'config/hosted-routing.ts'),
-      'utf8',
-    );
-
     expect(honoApiConfig.origin).toBe(hostedDrManifest.controlPlane.stableOrigin);
     expect(honoApiConfig.enabled).toBe(false);
-    expect(source).toContain('hosted-routing');
-    expect(source).toContain('NEXT_PUBLIC_HONO_API_ORIGIN');
-    expect(source).not.toContain('hosted-dr-capabilities.json');
-    expect(routingSource).toContain('hostedDrClientRouting');
-    expect(routingSource).toContain('hostedDrClientOperations');
-    expect(source).not.toContain('hosted-dr-capabilities.json');
-    expect(routingSource).not.toContain('SIGNATURE_SECRET_KEY');
-    expect(routingSource).not.toContain('R2_SECRET_ACCESS_KEY');
-    expect(routingSource).not.toContain('R2_OBJECT_STORE');
+    expect(hostedRouting.probes).toEqual({
+      primaryPath: '/api/health/ready',
+      drPath: '/api/hosted/dr-readiness',
+      preflightTimeoutMs: 1500,
+    });
+    expect(hostedRouting.operations).toContainEqual({
+      route: '/api/generate-free',
+      method: 'POST',
+      safety: 'new-non-idempotent',
+    });
   });
 
   test('显式 deployment target 与 activation state 共同决定 Hosted placement', () => {

@@ -6,12 +6,9 @@ import {
 import { parseAIProvidersFromEnv } from '@mahoshojo/hosted-runtime/node-runtime/providers';
 import { parseTrustedD1GatewayOrigin } from '@mahoshojo/hosted-runtime/node-runtime/d1-client';
 import {
-  evaluateHostedDrVersionGate,
   hasValidHostedApiProductionCorsOrigins,
-  HOSTED_DR_CONTRACT_VERSION,
   parseHostedApiDeploymentTarget,
   resolveHostedApiCorsOrigin,
-  type HostedDrVersionGateInput,
 } from '@mahoshojo/hosted-api/hosted-dr';
 
 export type HonoServerConfig = {
@@ -61,24 +58,6 @@ const hasLoopbackRedisAuthority = (value: string): boolean => {
 
 const hasValidAiProviderConfig = (env: NodeJS.ProcessEnv): boolean =>
   parseAIProvidersFromEnv(env).length > 0;
-
-const validateHostedDrVersionGate = (env: NodeJS.ProcessEnv): void => {
-  const stage = env.HOSTED_DR_GATE_STAGE?.trim() || 'rollout';
-  const schemaState = env.HOSTED_DR_SCHEMA_STATE?.trim() || 'expanded';
-  const result = evaluateHostedDrVersionGate({
-    stage: stage as HostedDrVersionGateInput['stage'],
-    primaryContractVersion: env.HOSTED_DR_PRIMARY_CONTRACT_VERSION?.trim()
-      || HOSTED_DR_CONTRACT_VERSION,
-    drContractVersion: env.HOSTED_DR_DR_CONTRACT_VERSION?.trim() || HOSTED_DR_CONTRACT_VERSION,
-    clientContractVersion: env.HOSTED_DR_CLIENT_CONTRACT_VERSION?.trim()
-      || HOSTED_DR_CONTRACT_VERSION,
-    schemaState: schemaState as HostedDrVersionGateInput['schemaState'],
-    cleanupRequested: env.HOSTED_DR_CLEANUP_REQUESTED?.trim().toLowerCase() === 'true',
-  });
-  if (!result.allowed) {
-    throw new Error(`HOSTED_DR_VERSION_GATE_${result.reason.toUpperCase()}`);
-  }
-};
 
 const validateProductionEnvironment = (
   env: NodeJS.ProcessEnv,
@@ -288,8 +267,6 @@ export const readHonoServerConfig = (): HonoServerConfig => {
   }
   const protectedHostedTarget = deploymentTarget === 'production' || deploymentTarget === 'preview';
   const redisUrl = readRedisUrl();
-  validateHostedDrVersionGate(process.env);
-
   const config: HonoServerConfig = {
     host: process.env.HONO_HOST?.trim() || '0.0.0.0',
     port: readPort(),
