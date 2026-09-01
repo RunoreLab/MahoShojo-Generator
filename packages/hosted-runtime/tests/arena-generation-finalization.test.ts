@@ -94,6 +94,19 @@ describe('Arena generation finalization', () => {
     }));
   });
 
+  it('ranking 读取失败降级为 null，不推翻已完成的 generation', async () => {
+    const ports = createPorts({
+      readRanking: vi.fn(async () => { throw new Error('RANKING_READ_UNAVAILABLE'); }),
+    });
+    const finalize = createArenaGenerationFinalizer(ports);
+
+    await expect(finalize(input)).resolves.toEqual({
+      resultRef: 'r2://battle/generation-1',
+      ranking: null,
+    });
+    expect(ports.completeTerminal).toHaveBeenCalledOnce();
+  });
+
   it('按输出契约为 R2 标注 Markdown 或 structured JSON', async () => {
     const markdownPorts = createPorts();
     await createArenaGenerationFinalizer(markdownPorts)(input);
