@@ -363,6 +363,94 @@ describe('Arena Room HTTP product routes', () => {
     expect(oversized.status).toBe(413);
   });
 
+  it.each([
+    [
+      new ArenaRoomGenerationError('ROOM_GENERATION_COMBATANTS_EMPTY', {
+        code: 'GENERATION_COMBATANTS_EMPTY',
+        gate: 'generation-readiness',
+        severity: 'blocking',
+        target: { kind: 'combatant' },
+        params: { current: 0, required: 1 },
+        messageKey: 'arena.multiplayer.gate.generationCombatantsEmpty',
+        userAction: '至少添加 1 位参战角色后再开始生成。',
+      }),
+      409,
+      'ROOM_GENERATION_COMBATANTS_EMPTY',
+      '当前有 0 位参战角色，至少需要 1 位',
+    ],
+    [
+      new ArenaRoomGenerationError('ROOM_GENERATION_COMBATANTS_INSUFFICIENT', {
+        code: 'GENERATION_COMBATANTS_INSUFFICIENT',
+        gate: 'generation-readiness',
+        severity: 'blocking',
+        target: { kind: 'combatant' },
+        params: { current: 1, required: 2, mode: 'classic' },
+        messageKey: 'arena.multiplayer.gate.generationCombatantsInsufficient',
+        userAction: '当前模式至少需要 2 位参战角色，请继续添加角色。',
+      }),
+      409,
+      'ROOM_GENERATION_COMBATANTS_INSUFFICIENT',
+      '经典模式当前有 1 位参战角色，至少需要 2 位',
+    ],
+    [
+      new ArenaRoomGenerationError('ROOM_GENERATION_SCENARIO_REQUIRED'),
+      409,
+      'ROOM_GENERATION_SCENARIO_REQUIRED',
+      '情景模式需要主情景',
+    ],
+    [
+      new ArenaRoomGenerationError('ROOM_HOST_LOCAL_PAYLOAD_MISSING_OR_MISMATCH'),
+      400,
+      'ROOM_HOST_LOCAL_PAYLOAD_MISSING_OR_MISMATCH',
+      '重新载入本地内容',
+    ],
+    [
+      new ArenaRoomGenerationError('ROOM_HOST_LOCAL_CONTENT_VERSION_MISSING'),
+      400,
+      'ROOM_HOST_LOCAL_CONTENT_VERSION_MISSING',
+      '重新发布房间配置',
+    ],
+    [
+      new ArenaRoomGenerationError('ROOM_HOST_LOCAL_CONTENT_VERSION_MISMATCH'),
+      409,
+      'ROOM_HOST_LOCAL_CONTENT_VERSION_MISMATCH',
+      '本地内容已发生变化',
+    ],
+    [
+      new ArenaRoomGenerationError('ROOM_REFERENCE_STALE'),
+      409,
+      'ROOM_REFERENCE_STALE',
+      '数据卡加入房间后已更新',
+    ],
+  ] as const)('generation 门禁和 host-local 错误保持独立 wire code：%s', async (
+    serviceError,
+    status,
+    wireCode,
+    message,
+  ) => {
+    const dependencies = createDependencies();
+    vi.mocked(dependencies.generations.start).mockRejectedValueOnce(serviceError);
+    const app = createHonoApp(config, createRedisStub(), undefined, {
+      arenaRoom: dependencies,
+    });
+    const response = await app.request(
+      `/api/arena/rooms/v1/${authority.snapshot.roomId}/generations`,
+      createRequest({
+        expectedRoomEpoch: authority.snapshot.roomEpoch,
+        expectedRevision: authority.snapshot.revision,
+        generationRequestId: 'request-1234',
+        sharedConfig: authority.snapshot.sharedConfig,
+        hostLocalPayloads: [],
+        generation: {},
+      }),
+    );
+
+    expect(response.status).toBe(status);
+    const errorBody = await response.json() as { code: string; error: string };
+    expect(errorBody).toMatchObject({ code: wireCode });
+    expect(errorBody.error).toContain(message);
+  });
+
   it('显式 config publish 只接收 strict intent，并返回 checkpoint 产生的安全 session', async () => {
     const published = {
       ...session,
@@ -412,9 +500,10 @@ describe('Arena Room HTTP product routes', () => {
   });
 
   it.each([
+    ['ROOM_CONFIG_FRAME_TOO_LARGE', 413, 'ROOM_CONFIG_FRAME_TOO_LARGE'],
     ['ROOM_PERMISSION_DENIED', 403, 'ROOM_FORBIDDEN'],
     ['ROOM_REFERENCE_DENIED', 409, 'ROOM_CONFLICT'],
-    ['ROOM_REFERENCE_STALE', 409, 'ROOM_CONFLICT'],
+    ['ROOM_REFERENCE_STALE', 409, 'ROOM_REFERENCE_STALE'],
     ['ROOM_REFERENCE_UNAVAILABLE', 503, 'ROOM_UNAVAILABLE'],
     ['ROOM_EPOCH_STALE', 409, 'ROOM_CONFLICT'],
     ['ROOM_REVISION_STALE', 409, 'ROOM_CONFLICT'],
@@ -438,7 +527,11 @@ describe('Arena Room HTTP product routes', () => {
     );
 
     expect(response.status).toBe(status);
-    expect(await response.json()).toMatchObject({ code: wireCode });
+    const body = await response.json() as { code: string; error: string };
+    expect(body).toMatchObject({ code: wireCode });
+    if (serviceCode === 'ROOM_CONFIG_FRAME_TOO_LARGE') {
+      expect(body.error).toContain('64 KiB');
+    }
   });
 
   it('config publish 受独立 account/room limiter 保护，超额时不触发 authority', async () => {
@@ -682,7 +775,8 @@ describe('Arena Room HTTP product routes', () => {
 
   it('Proposal stale/permission/unknown 使用稳定泛化错误，unknown 不自动重放', async () => {
     for (const [proposalCode, status, code] of [
-      ['ROOM_REFERENCE_STALE', 409, 'ROOM_CONFLICT'],
+      ['ROOM_PROPOSAL_PENDING_LIMIT_REACHED', 409, 'ROOM_PROPOSAL_PENDING_LIMIT_REACHED'],
+      ['ROOM_REFERENCE_STALE', 409, 'ROOM_REFERENCE_STALE'],
       ['ROOM_REFERENCE_DENIED', 409, 'ROOM_CONFLICT'],
       ['ROOM_PERMISSION_DENIED', 403, 'ROOM_FORBIDDEN'],
       ['ROOM_OPERATION_UNKNOWN', 503, 'ROOM_UNAVAILABLE'],
@@ -709,7 +803,12 @@ describe('Arena Room HTTP product routes', () => {
         }),
       );
       expect(response.status).toBe(status);
-      expect(await response.json()).toMatchObject({ code });
+      const body = await response.json() as { code: string; error: string };
+      expect(body).toMatchObject({ code });
+      if (proposalCode === 'ROOM_PROPOSAL_PENDING_LIMIT_REACHED') {
+        expect(body.error).toContain('最多保留 8 个');
+        expect(body.error).toContain('当前已有 8 个');
+      }
       expect(dependencies.proposals.submit).toHaveBeenCalledOnce();
     }
   });
@@ -987,11 +1086,12 @@ describe('Arena Room HTTP product routes', () => {
 
   it('membership error 不泄漏 closed/not-found 差异，permission 与 conflict 可判别', async () => {
     for (const [membershipCode, status, code] of [
+      ['ROOM_MEMBER_LIMIT_REACHED', 409, 'ROOM_MEMBER_LIMIT_REACHED'],
       ['ROOM_CLOSED', 404, 'ROOM_NOT_FOUND'],
       ['ROOM_NOT_FOUND', 404, 'ROOM_NOT_FOUND'],
       ['ROOM_PERMISSION_DENIED', 403, 'ROOM_FORBIDDEN'],
       ['ROOM_REFERENCE_DENIED', 409, 'ROOM_CONFLICT'],
-      ['ROOM_REFERENCE_STALE', 409, 'ROOM_CONFLICT'],
+      ['ROOM_REFERENCE_STALE', 409, 'ROOM_REFERENCE_STALE'],
       ['ROOM_REFERENCE_UNAVAILABLE', 503, 'ROOM_UNAVAILABLE'],
       ['ROOM_MEMBERSHIP_TRANSITION_DENIED', 409, 'ROOM_CONFLICT'],
     ] as const) {
@@ -1006,7 +1106,12 @@ describe('Arena Room HTTP product routes', () => {
         headers: { authorization: 'Bearer legacy-key' },
       });
       expect(response.status).toBe(status);
-      expect(await response.json()).toMatchObject({ code });
+      const body = await response.json() as { code: string; error: string };
+      expect(body).toMatchObject({ code });
+      if (membershipCode === 'ROOM_MEMBER_LIMIT_REACHED') {
+        expect(body.error).toContain('最多容纳 8 人');
+        expect(body.error).toContain('当前已有 8 人');
+      }
     }
   });
 

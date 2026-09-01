@@ -23,6 +23,8 @@ import {
   ArenaRoomTicketResponseSchema,
   MAX_CONTROL_MESSAGE_BYTES,
   MAX_ARENA_ROOM_GENERATION_START_BYTES,
+  MAX_PENDING_PROPOSALS_PER_MEMBER,
+  MAX_ROOM_MEMBERS,
   OpaqueKeySchema,
   PROTOCOL_VERSION,
   RoomDirectoryPageSchema,
@@ -150,7 +152,7 @@ const errorBody = (code: ArenaRoomHttpErrorCode, error: string, retryAfterSecond
   ...(retryAfterSeconds === undefined ? {} : { retryAfterSeconds }),
 });
 
-const invalidRequest = (context: ArenaRoomHttpContext, message = 'Room 请求无效') => (
+const invalidRequest = (context: ArenaRoomHttpContext, message = '房间请求无效') => (
   context.json(errorBody('ROOM_REQUEST_INVALID', message), 400)
 );
 
@@ -162,7 +164,10 @@ const unavailable = (context: ArenaRoomHttpContext) => {
 const mapServiceError = (context: ArenaRoomHttpContext, error: unknown): Response => {
   if (error instanceof ArenaRoomRequestError) {
     if (error.kind === 'too-large') {
-      return context.json(errorBody('ROOM_PAYLOAD_TOO_LARGE', 'Room 请求体过大'), 413);
+      return context.json(errorBody(
+        'ROOM_PAYLOAD_TOO_LARGE',
+        '房间请求内容超过大小限制，请减少内容后重试。',
+      ), 413);
     }
     return invalidRequest(context);
   }
@@ -172,7 +177,7 @@ const mapServiceError = (context: ArenaRoomHttpContext, error: unknown): Respons
       case 'ROOM_NOT_FOUND':
         return context.json(errorBody('ROOM_NOT_FOUND', '房间不存在或已关闭'), 404);
       case 'ROOM_EPOCH_STALE':
-        return context.json(errorBody('ROOM_CONFLICT', '房间 incarnation 已发生变化'), 409);
+        return context.json(errorBody('ROOM_CONFLICT', '房间实例已变化，请重新进入房间后重试。'), 409);
       case 'ROOM_CREATION_REQUEST_CONFLICT':
         return context.json(errorBody('ROOM_CONFLICT', '创建请求已绑定其他意图或结果已过期'), 409);
       case 'ROOM_MEMBERSHIP_NOT_ACTIVE':
@@ -180,14 +185,28 @@ const mapServiceError = (context: ArenaRoomHttpContext, error: unknown): Respons
       case 'ROOM_PERMISSION_DENIED':
         return context.json(errorBody('ROOM_FORBIDDEN', '没有此房间操作权限'), 403);
       case 'ROOM_REFERENCE_DENIED':
-      case 'ROOM_REFERENCE_STALE':
         return context.json(errorBody('ROOM_CONFLICT', '房间配置引用已发生变化'), 409);
+      case 'ROOM_REFERENCE_STALE':
+        return context.json(errorBody(
+          'ROOM_REFERENCE_STALE',
+          '数据卡版本已更新，请重新同步或重新选择对应数据卡后重试。',
+        ), 409);
       case 'ROOM_REFERENCE_UNAVAILABLE':
         return unavailable(context);
       case 'ROOM_INPUT_INVALID':
         return invalidRequest(context);
       case 'ROOM_MEMBERSHIP_TRANSITION_DENIED':
         return context.json(errorBody('ROOM_CONFLICT', '房间状态已发生变化'), 409);
+      case 'ROOM_MEMBER_LIMIT_REACHED':
+        return context.json(errorBody(
+          'ROOM_MEMBER_LIMIT_REACHED',
+          `房间最多容纳 ${MAX_ROOM_MEMBERS} 人，当前已有 ${MAX_ROOM_MEMBERS} 人；请等待有成员退出后重试。`,
+        ), 409);
+      case 'ROOM_CONFIG_FRAME_TOO_LARGE':
+        return context.json(errorBody(
+          'ROOM_CONFIG_FRAME_TOO_LARGE',
+          '房间配置快照超过 64 KiB，请减少角色、情景、素材或引导内容后重试。',
+        ), 413);
     }
   }
   if (error instanceof RoomDirectoryServiceError) {
@@ -208,21 +227,85 @@ const mapServiceError = (context: ArenaRoomHttpContext, error: unknown): Respons
       case 'ROOM_PERMISSION_DENIED':
         return context.json(errorBody('ROOM_FORBIDDEN', '没有此房间操作权限'), 403);
       case 'ROOM_PROPOSAL_NOT_FOUND':
-        return context.json(errorBody('ROOM_NOT_FOUND', 'Proposal 不存在'), 404);
+        return context.json(errorBody('ROOM_NOT_FOUND', '提案不存在'), 404);
+      case 'ROOM_PROPOSAL_PENDING_LIMIT_REACHED':
+        return context.json(errorBody(
+          'ROOM_PROPOSAL_PENDING_LIMIT_REACHED',
+          `每位成员最多保留 ${MAX_PENDING_PROPOSALS_PER_MEMBER} 个待处理提案，当前已有 ${MAX_PENDING_PROPOSALS_PER_MEMBER} 个；请先撤回或等待处理现有提案。`,
+        ), 409);
+      case 'ROOM_CONFIG_FRAME_TOO_LARGE':
+        return context.json(errorBody(
+          'ROOM_CONFIG_FRAME_TOO_LARGE',
+          '房间快照超过 64 KiB，请减少配置内容或先处理现有提案后重试。',
+        ), 413);
       case 'ROOM_EPOCH_STALE':
       case 'ROOM_PROPOSAL_CONFLICT':
       case 'ROOM_REFERENCE_DENIED':
-      case 'ROOM_REFERENCE_STALE':
       case 'ROOM_REVISION_STALE':
       case 'ROOM_TRANSITION_DENIED':
         return context.json(errorBody('ROOM_CONFLICT', '房间状态已发生变化'), 409);
+      case 'ROOM_REFERENCE_STALE':
+        return context.json(errorBody(
+          'ROOM_REFERENCE_STALE',
+          '提案引用的数据卡已更新，请重新同步或重新选择数据卡后再提交。',
+        ), 409);
       case 'ROOM_OPERATION_UNKNOWN':
       case 'ROOM_REFERENCE_UNAVAILABLE':
         return unavailable(context);
     }
   }
   if (error instanceof ArenaRoomGenerationError) {
+    const issueParams = error.issue?.params;
+    const numericParam = (key: string, fallback: number): number => (
+      typeof issueParams?.[key] === 'number' ? issueParams[key] : fallback
+    );
     switch (error.code) {
+      case 'ROOM_GENERATION_COMBATANTS_EMPTY': {
+        const current = numericParam('current', 0);
+        const required = numericParam('required', 1);
+        return context.json(errorBody(
+          'ROOM_GENERATION_COMBATANTS_EMPTY',
+          `当前有 ${current} 位参战角色，至少需要 ${required} 位；请添加角色后再开始生成。`,
+        ), 409);
+      }
+      case 'ROOM_GENERATION_COMBATANTS_INSUFFICIENT': {
+        const current = numericParam('current', 0);
+        const required = numericParam('required', 1);
+        const mode = issueParams?.mode === 'classic' ? '经典模式'
+          : issueParams?.mode === 'kizuna' ? '羁绊模式'
+            : issueParams?.mode === 'daily' ? '日常模式'
+              : issueParams?.mode === 'scenario' ? '情景模式'
+                : '当前模式';
+        return context.json(errorBody(
+          'ROOM_GENERATION_COMBATANTS_INSUFFICIENT',
+          `${mode}当前有 ${current} 位参战角色，至少需要 ${required} 位；请继续添加角色。`,
+        ), 409);
+      }
+      case 'ROOM_GENERATION_SCENARIO_REQUIRED':
+        return context.json(errorBody(
+          'ROOM_GENERATION_SCENARIO_REQUIRED',
+          '情景模式需要主情景，请先选择或载入主情景后再开始生成。',
+        ), 409);
+      case 'ROOM_HOST_LOCAL_PAYLOAD_MISSING_OR_MISMATCH':
+        return context.json(errorBody(
+          'ROOM_HOST_LOCAL_PAYLOAD_MISSING_OR_MISMATCH',
+          '房间配置引用的本地内容不完整，请在房主当前页面重新载入本地内容后重试。',
+        ), 400);
+      case 'ROOM_HOST_LOCAL_CONTENT_VERSION_MISSING':
+        return context.json(errorBody(
+          'ROOM_HOST_LOCAL_CONTENT_VERSION_MISSING',
+          '房间配置缺少本地内容版本，请由房主重新发布房间配置后重试。',
+        ), 400);
+      case 'ROOM_HOST_LOCAL_CONTENT_VERSION_MISMATCH':
+        return context.json(errorBody(
+          'ROOM_HOST_LOCAL_CONTENT_VERSION_MISMATCH',
+          '本地内容已发生变化，请重新载入内容并更新房间配置后重试。',
+        ), 409);
+      case 'ROOM_CONFIG_FRAME_TOO_LARGE':
+        return context.json(errorBody(
+          'ROOM_CONFIG_FRAME_TOO_LARGE',
+          '房间快照超过 64 KiB，请减少配置内容后再开始生成。',
+        ), 413);
       case 'ROOM_GENERATION_INPUT_INVALID':
         return invalidRequest(context);
       case 'ROOM_PERMISSION_DENIED':
@@ -232,9 +315,13 @@ const mapServiceError = (context: ArenaRoomHttpContext, error: unknown): Respons
         return context.json(errorBody('ROOM_NOT_FOUND', '房间生成不存在'), 404);
       case 'ROOM_EPOCH_STALE':
       case 'ROOM_GENERATION_CONFLICT':
-      case 'ROOM_REFERENCE_STALE':
       case 'ROOM_REVISION_STALE':
         return context.json(errorBody('ROOM_CONFLICT', '房间生成状态已发生变化'), 409);
+      case 'ROOM_REFERENCE_STALE':
+        return context.json(errorBody(
+          'ROOM_REFERENCE_STALE',
+          '数据卡加入房间后已更新，请重新同步或重新选择对应数据卡后重试。',
+        ), 409);
       case 'ROOM_GENERATION_UNAVAILABLE':
       case 'ROOM_OPERATION_UNKNOWN':
       case 'ROOM_REFERENCE_UNAVAILABLE':
@@ -243,16 +330,25 @@ const mapServiceError = (context: ArenaRoomHttpContext, error: unknown): Respons
   }
   if (error instanceof ArenaRoomConfigError) {
     switch (error.code) {
+      case 'ROOM_CONFIG_FRAME_TOO_LARGE':
+        return context.json(errorBody(
+          'ROOM_CONFIG_FRAME_TOO_LARGE',
+          '房间配置快照超过 64 KiB，请减少角色、情景、素材或引导内容后重试。',
+        ), 413);
       case 'ROOM_CONFIG_INPUT_INVALID':
         return invalidRequest(context);
       case 'ROOM_PERMISSION_DENIED':
         return context.json(errorBody('ROOM_FORBIDDEN', '没有此房间配置发布权限'), 403);
       case 'ROOM_REFERENCE_DENIED':
-      case 'ROOM_REFERENCE_STALE':
       case 'ROOM_EPOCH_STALE':
       case 'ROOM_REVISION_STALE':
       case 'ROOM_TRANSITION_DENIED':
         return context.json(errorBody('ROOM_CONFLICT', '房间配置已发生变化'), 409);
+      case 'ROOM_REFERENCE_STALE':
+        return context.json(errorBody(
+          'ROOM_REFERENCE_STALE',
+          '房间配置引用的数据卡已更新，请重新同步或重新选择数据卡后再发布。',
+        ), 409);
       case 'ROOM_OPERATION_UNKNOWN':
       case 'ROOM_REFERENCE_UNAVAILABLE':
         return unavailable(context);
@@ -380,7 +476,7 @@ const consumeRateLimit = async (
   if (result.allowed) return null;
   context.header('retry-after', String(result.retryAfterSeconds));
   return context.json(
-    errorBody('ROOM_RATE_LIMITED', 'Room 请求过于频繁', result.retryAfterSeconds),
+    errorBody('ROOM_RATE_LIMITED', '房间请求过于频繁，请稍后重试。', result.retryAfterSeconds),
     429,
   );
 };

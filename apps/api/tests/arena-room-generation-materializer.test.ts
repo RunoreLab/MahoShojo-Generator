@@ -203,14 +203,17 @@ describe('Arena Room authoritative generation materializer', () => {
         characterGuidance: '接受后的角色引导',
         sourceDataCardId: 'online-character',
         sourceDataCardUpdatedAt: 'character-v1',
+        isNative: false,
       }),
       expect.objectContaining({
         roomCombatantKey: 'preset:M00_white_lily.json',
-        type: 'magical-girl', data: { codename: '白百合', magicConstruct: '花' }, isPreset: true,
+        type: 'magical-girl', data: { codename: '白百合', magicConstruct: '花' },
+        isNative: true, isPreset: true,
       }),
       expect.objectContaining({
         roomCombatantKey: 'host-local:character:2:local',
         type: 'general-character', data: { name: '本地角色', content: '本地正文' }, teamId: 1,
+        isNative: false,
       }),
     ]);
     expect(payload.materials).toEqual([

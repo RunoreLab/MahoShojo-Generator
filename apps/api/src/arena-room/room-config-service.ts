@@ -26,6 +26,7 @@ import type {
 } from './room-membership-service';
 
 export type ArenaRoomConfigErrorCode =
+  | 'ROOM_CONFIG_FRAME_TOO_LARGE'
   | 'ROOM_CONFIG_INPUT_INVALID'
   | 'ROOM_EPOCH_STALE'
   | 'ROOM_OPERATION_UNKNOWN'
@@ -91,6 +92,7 @@ const mapTransitionFailure = (failure: ArenaRoomTransitionFailure): never => {
     case 'member-not-active': return fail('ROOM_PERMISSION_DENIED');
     case 'invalid-command':
     case 'invalid-state': return fail('ROOM_CONFIG_INPUT_INVALID');
+    case 'room-snapshot-too-large': return fail('ROOM_CONFIG_FRAME_TOO_LARGE');
     default: return fail('ROOM_TRANSITION_DENIED');
   }
 };

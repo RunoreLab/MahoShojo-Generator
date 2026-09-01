@@ -38,12 +38,14 @@ import type {
 
 export type ArenaRoomMembershipErrorCode =
   | 'ROOM_CLOSED'
+  | 'ROOM_CONFIG_FRAME_TOO_LARGE'
   | 'ROOM_EPOCH_STALE'
   | 'ROOM_INPUT_INVALID'
   | 'ROOM_CREATION_REQUEST_CONFLICT'
   | 'ROOM_MEMBERSHIP_NOT_ACTIVE'
   | 'ROOM_MEMBERSHIP_REVOKED'
   | 'ROOM_MEMBERSHIP_TRANSITION_DENIED'
+  | 'ROOM_MEMBER_LIMIT_REACHED'
   | 'ROOM_PERMISSION_DENIED'
   | 'ROOM_NOT_FOUND'
   | 'ROOM_REFERENCE_DENIED'
@@ -406,7 +408,12 @@ export const createArenaRoomMembershipService = (
         }
         throw error;
       }
-      if (!result.result.ok) return fail('ROOM_MEMBERSHIP_TRANSITION_DENIED');
+      if (!result.result.ok) {
+        if (result.result.reason === 'room-snapshot-too-large') {
+          return fail('ROOM_CONFIG_FRAME_TOO_LARGE');
+        }
+        return fail('ROOM_MEMBERSHIP_TRANSITION_DENIED');
+      }
       const member = result.result.nextState.snapshot.members.find((entry) => entry.userId === userId);
       if (!member) return fail('ROOM_MEMBERSHIP_TRANSITION_DENIED');
       return sessionView(result.roomId, result.result.nextState, member);
@@ -451,6 +458,7 @@ export const createArenaRoomMembershipService = (
           return sessionView(input.roomId, current, concurrent.member);
         }
         if (concurrent?.member.membershipState === 'revoked') return fail('ROOM_MEMBERSHIP_REVOKED');
+        if (result.reason === 'member-limit-reached') return fail('ROOM_MEMBER_LIMIT_REACHED');
         return fail('ROOM_MEMBERSHIP_TRANSITION_DENIED');
       }
       const member = result.nextState.snapshot.members.find((entry) => entry.userId === userId);

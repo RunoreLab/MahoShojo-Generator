@@ -17,6 +17,9 @@ import {
 } from '#/arena-room/room-generation-materializer';
 import { ArenaRoomGenerationContentResolverError } from '#/arena-room/room-generation-content-resolver';
 import type {
+  ArenaRoomSharedConfig,
+} from '@mahoshojo/contracts/arena-room';
+import type {
   RoomGenerationPublisher,
   RoomGenerationPublisherOptions,
   RoomGenerationPublishResult,
@@ -57,12 +60,18 @@ class MemoryRoomStore implements RoomActorCheckpointStore {
   }
 }
 
-const sharedConfig = () => ({
+const sharedConfig = (): ArenaRoomSharedConfig => ({
   battleMode: 'classic' as const,
-  combatants: [{
-    key: 'data-card:character-1',
-    ref: { id: 'character-1', kind: 'character' as const, versionToken: 'v1' },
-  }],
+  combatants: [
+    {
+      key: 'data-card:character-1',
+      ref: { id: 'character-1', kind: 'character' as const, versionToken: 'v1' },
+    },
+    {
+      key: 'data-card:character-2',
+      ref: { id: 'character-2', kind: 'character' as const, versionToken: 'v1' },
+    },
+  ],
   teams: [],
   scenario: null,
   auxScenarios: [],
@@ -96,7 +105,7 @@ const subscription = () => ({
   events: new ReadableStream({ start(controller) { controller.close(); } }),
 });
 
-const createHarness = async () => {
+const createHarness = async (authorityConfig = sharedConfig()) => {
   const store = new MemoryRoomStore();
   let user = 0;
   const actors = createRoomActorRegistry({
@@ -114,7 +123,7 @@ const createHarness = async () => {
   const session = await memberships.create({
     accountUserId: 101,
     displayName: 'Host',
-    sharedConfig: sharedConfig(),
+    sharedConfig: authorityConfig,
   });
   const materializer = {
     materialize: vi.fn<ArenaRoomGenerationMaterializer['materialize']>(async (input) => ({
@@ -198,6 +207,50 @@ const startRequest = (config = sharedConfig()) => ({
 });
 
 describe('Arena Room generation coordinator', () => {
+  it.each([
+    [
+      '空角色草稿',
+      { ...sharedConfig(), battleMode: 'daily', combatants: [] } as ArenaRoomSharedConfig,
+      'ROOM_GENERATION_COMBATANTS_EMPTY',
+    ],
+    [
+      '经典模式人数不足',
+      {
+        ...sharedConfig(),
+        combatants: sharedConfig().combatants.slice(0, 1),
+      } as ArenaRoomSharedConfig,
+      'ROOM_GENERATION_COMBATANTS_INSUFFICIENT',
+    ],
+    [
+      '情景模式缺少主情景',
+      {
+        ...sharedConfig(),
+        battleMode: 'scenario',
+        combatants: sharedConfig().combatants.slice(0, 1),
+        scenario: null,
+      } as ArenaRoomSharedConfig,
+      'ROOM_GENERATION_SCENARIO_REQUIRED',
+    ],
+  ] as const)('%s 可以作为房间草稿保存，但开始生成时在物化/预留/provider 前拒绝', async (
+    _label,
+    authorityConfig,
+    code,
+  ) => {
+    const harness = await createHarness(authorityConfig);
+
+    await expect(harness.service.start({
+      roomId: 'room-1',
+      accountUserId: 101,
+      request: startRequest(authorityConfig),
+      sourceRequest: sourceRequest(),
+    })).rejects.toMatchObject({ code });
+
+    expect(harness.store.order).toEqual(['checkpoint:config']);
+    expect(harness.materializer.materialize).not.toHaveBeenCalled();
+    expect(harness.generation.hashSemanticPayload).not.toHaveBeenCalled();
+    expect(harness.generation.startFromHostRequest).not.toHaveBeenCalled();
+  });
+
   it('从当前 Room authority 物化，先 hash/reservation checkpoint 再调用 existing generation，duplicate 不二次启动', async () => {
     const harness = await createHarness();
     const request = startRequest();
@@ -287,7 +340,23 @@ describe('Arena Room generation coordinator', () => {
     ],
     [
       new ArenaRoomGenerationMaterializationError('ARENA_ROOM_HOST_LOCAL_PAYLOAD_MISMATCH'),
-      'ROOM_GENERATION_INPUT_INVALID',
+      'ROOM_HOST_LOCAL_PAYLOAD_MISSING_OR_MISMATCH',
+    ],
+    [
+      new ArenaRoomGenerationMaterializationError('ARENA_ROOM_HOST_LOCAL_PAYLOAD_KIND_MISMATCH'),
+      'ROOM_HOST_LOCAL_PAYLOAD_MISSING_OR_MISMATCH',
+    ],
+    [
+      new ArenaRoomGenerationMaterializationError('ARENA_ROOM_HOST_LOCAL_PAYLOAD_TYPE_MISMATCH'),
+      'ROOM_HOST_LOCAL_PAYLOAD_MISSING_OR_MISMATCH',
+    ],
+    [
+      new ArenaRoomGenerationMaterializationError('ARENA_ROOM_HOST_LOCAL_CONTENT_VERSION_MISSING'),
+      'ROOM_HOST_LOCAL_CONTENT_VERSION_MISSING',
+    ],
+    [
+      new ArenaRoomGenerationMaterializationError('ARENA_ROOM_HOST_LOCAL_CONTENT_VERSION_MISMATCH'),
+      'ROOM_HOST_LOCAL_CONTENT_VERSION_MISMATCH',
     ],
   ])('materialization fail closed (%s) 且不 hash/reserve/start provider', async (error, code) => {
     const harness = await createHarness();

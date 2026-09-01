@@ -6,9 +6,11 @@ import type {
 } from '@mahoshojo/contracts/arena-room';
 import { ArenaRoomGenerationViewResponseSchema } from '@mahoshojo/contracts/arena-room';
 import {
+  evaluateArenaGenerationReadiness,
   issueArenaRoomGenerationPublisherAuthority,
   issueArenaRoomGenerationReservationAuthority,
   issueArenaRoomTrustedTime,
+  type ArenaGenerationReadinessIssue,
   type ArenaRoomAuthorityState,
 } from '@mahoshojo/multiplayer-core';
 
@@ -41,7 +43,11 @@ import {
 } from './runtime-observer';
 
 export type ArenaRoomGenerationErrorCode =
+  | 'ROOM_CONFIG_FRAME_TOO_LARGE'
   | 'ROOM_EPOCH_STALE'
+  | 'ROOM_GENERATION_COMBATANTS_EMPTY'
+  | 'ROOM_GENERATION_COMBATANTS_INSUFFICIENT'
+  | 'ROOM_GENERATION_SCENARIO_REQUIRED'
   | 'ROOM_GENERATION_CONFLICT'
   | 'ROOM_GENERATION_NOT_FOUND'
   | 'ROOM_GENERATION_UNAVAILABLE'
@@ -50,11 +56,17 @@ export type ArenaRoomGenerationErrorCode =
   | 'ROOM_REFERENCE_DENIED'
   | 'ROOM_REFERENCE_STALE'
   | 'ROOM_REFERENCE_UNAVAILABLE'
+  | 'ROOM_HOST_LOCAL_PAYLOAD_MISSING_OR_MISMATCH'
+  | 'ROOM_HOST_LOCAL_CONTENT_VERSION_MISSING'
+  | 'ROOM_HOST_LOCAL_CONTENT_VERSION_MISMATCH'
   | 'ROOM_REVISION_STALE'
   | 'ROOM_OPERATION_UNKNOWN';
 
 export class ArenaRoomGenerationError extends Error {
-  constructor(readonly code: ArenaRoomGenerationErrorCode) {
+  constructor(
+    readonly code: ArenaRoomGenerationErrorCode,
+    readonly issue?: ArenaGenerationReadinessIssue,
+  ) {
     super(code);
     this.name = 'ArenaRoomGenerationError';
   }
@@ -113,8 +125,29 @@ const CANCELLABLE_GENERATION_REJECTION_CODES = new Set([
   'ARENA_MULTIPLAYER_SNAPSHOT_INVALID',
 ]);
 
-const fail = (code: ArenaRoomGenerationErrorCode): never => {
-  throw new ArenaRoomGenerationError(code);
+const fail = (
+  code: ArenaRoomGenerationErrorCode,
+  issue?: ArenaGenerationReadinessIssue,
+): never => {
+  throw new ArenaRoomGenerationError(code, issue);
+};
+
+const requireGenerationReadiness = (
+  config: Parameters<typeof evaluateArenaGenerationReadiness>[0],
+): void => {
+  const evaluation = evaluateArenaGenerationReadiness(config);
+  const issue = evaluation.issues[0];
+  if (!issue) return;
+  switch (issue.code) {
+    case 'GENERATION_COMBATANTS_EMPTY':
+      return fail('ROOM_GENERATION_COMBATANTS_EMPTY', issue);
+    case 'GENERATION_COMBATANTS_INSUFFICIENT':
+      return fail('ROOM_GENERATION_COMBATANTS_INSUFFICIENT', issue);
+    case 'GENERATION_SCENARIO_REQUIRED':
+      return fail('ROOM_GENERATION_SCENARIO_REQUIRED', issue);
+    case 'GENERATION_COMBATANT_LIMIT':
+      return fail('ROOM_GENERATION_INPUT_INVALID', issue);
+  }
 };
 
 const validAccountUserId = (value: number): boolean => (
@@ -139,12 +172,17 @@ const mapMaterializationError = (error: unknown): never => {
   if (error instanceof ArenaRoomGenerationMaterializationError) {
     switch (error.code) {
       case 'ARENA_ROOM_REFERENCE_STALE': return fail('ROOM_REFERENCE_STALE');
+      case 'ARENA_ROOM_HOST_LOCAL_PAYLOAD_MISMATCH':
+      case 'ARENA_ROOM_HOST_LOCAL_PAYLOAD_KIND_MISMATCH':
+      case 'ARENA_ROOM_HOST_LOCAL_PAYLOAD_TYPE_MISMATCH':
+        return fail('ROOM_HOST_LOCAL_PAYLOAD_MISSING_OR_MISMATCH');
+      case 'ARENA_ROOM_HOST_LOCAL_CONTENT_VERSION_MISSING':
+        return fail('ROOM_HOST_LOCAL_CONTENT_VERSION_MISSING');
+      case 'ARENA_ROOM_HOST_LOCAL_CONTENT_VERSION_MISMATCH':
+        return fail('ROOM_HOST_LOCAL_CONTENT_VERSION_MISMATCH');
       case 'ARENA_ROOM_GENERATION_CONFIG_INVALID':
       case 'ARENA_ROOM_HOST_IDENTITY_INVALID':
       case 'ARENA_ROOM_HOST_LOCAL_PAYLOAD_INVALID':
-      case 'ARENA_ROOM_HOST_LOCAL_PAYLOAD_KIND_MISMATCH':
-      case 'ARENA_ROOM_HOST_LOCAL_PAYLOAD_MISMATCH':
-      case 'ARENA_ROOM_HOST_LOCAL_PAYLOAD_TYPE_MISMATCH':
       case 'ARENA_ROOM_HOST_RUNTIME_INVALID':
       case 'ARENA_ROOM_REFERENCE_CONTENT_INVALID':
         return fail('ROOM_GENERATION_INPUT_INVALID');
@@ -185,6 +223,7 @@ const mapTransitionFailure = (reason: string): never => {
     case 'generation-id-conflict':
     case 'generation-request-conflict':
     case 'generation-transition-invalid': return fail('ROOM_GENERATION_CONFLICT');
+    case 'room-snapshot-too-large': return fail('ROOM_CONFIG_FRAME_TOO_LARGE');
     default: return fail('ROOM_OPERATION_UNKNOWN');
   }
 };
@@ -624,6 +663,7 @@ export const createArenaRoomGenerationService = (
         if (historical.mirror.state !== 'starting' && historical.mirror.state !== 'running') {
           return fail('ROOM_GENERATION_CONFLICT');
         }
+        requireGenerationReadiness(snapshot.sharedConfig);
         const generationPayload = await materialize(
           snapshot,
           membership.accountUserId,
@@ -689,6 +729,7 @@ export const createArenaRoomGenerationService = (
       if (JSON.stringify(state.snapshot.sharedConfig) !== JSON.stringify(input.request.sharedConfig)) {
         return fail('ROOM_GENERATION_CONFLICT');
       }
+      requireGenerationReadiness(state.snapshot.sharedConfig);
       const snapshot = createArenaRoomGenerationSnapshot(state, input.request.generationRequestId);
       const generationPayload = await materialize(
         snapshot,

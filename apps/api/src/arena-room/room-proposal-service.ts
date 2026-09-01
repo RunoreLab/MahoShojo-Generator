@@ -34,12 +34,14 @@ import type {
 } from './room-membership-service';
 
 export type ArenaRoomProposalErrorCode =
+  | 'ROOM_CONFIG_FRAME_TOO_LARGE'
   | 'ROOM_EPOCH_STALE'
   | 'ROOM_OPERATION_UNKNOWN'
   | 'ROOM_PERMISSION_DENIED'
   | 'ROOM_PROPOSAL_CONFLICT'
   | 'ROOM_PROPOSAL_INPUT_INVALID'
   | 'ROOM_PROPOSAL_NOT_FOUND'
+  | 'ROOM_PROPOSAL_PENDING_LIMIT_REACHED'
   | 'ROOM_REFERENCE_DENIED'
   | 'ROOM_REFERENCE_STALE'
   | 'ROOM_REFERENCE_UNAVAILABLE'
@@ -161,6 +163,9 @@ const mapTransitionFailure = (failure: ArenaRoomTransitionFailure): never => {
     case 'proposal-id-conflict':
     case 'proposal-not-submitted':
     case 'proposal-selection-invalid': return fail('ROOM_PROPOSAL_CONFLICT');
+    case 'proposal-pending-limit-reached':
+      return fail('ROOM_PROPOSAL_PENDING_LIMIT_REACHED');
+    case 'room-snapshot-too-large': return fail('ROOM_CONFIG_FRAME_TOO_LARGE');
     case 'invalid-command':
     case 'invalid-state': return fail('ROOM_PROPOSAL_INPUT_INVALID');
     default: return fail('ROOM_TRANSITION_DENIED');

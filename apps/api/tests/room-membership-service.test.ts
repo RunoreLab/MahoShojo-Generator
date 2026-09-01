@@ -137,6 +137,40 @@ const createHarness = (
 };
 
 describe('Arena Room membership service', () => {
+  it('允许以空角色草稿创建房间，并允许未签名的 host-local 角色按普通模式准入', async () => {
+    const emptyHarness = createHarness();
+    const emptyConfig = {
+      ...createArenaRoomState().snapshot.sharedConfig,
+      combatants: [],
+    };
+    await expect(emptyHarness.service.create({
+      accountUserId: 101,
+      displayName: 'Host',
+      sharedConfig: emptyConfig,
+    })).resolves.toMatchObject({
+      snapshot: { sharedConfig: { combatants: [] } },
+    });
+
+    const localHarness = createHarness();
+    const localConfig = {
+      ...createArenaRoomState().snapshot.sharedConfig,
+      battleMode: 'daily' as const,
+      combatants: [{
+        key: 'host-local:character:unsigned',
+        displayName: '未签名本地角色',
+        type: 'general-character' as const,
+        source: 'host-local' as const,
+      }],
+    };
+    await expect(localHarness.service.create({
+      accountUserId: 101,
+      displayName: 'Host',
+      sharedConfig: localConfig,
+    })).resolves.toMatchObject({
+      snapshot: { sharedConfig: { combatants: localConfig.combatants } },
+    });
+  });
+
   it('create 在 canonical ref 复验失败时不创建房间', async () => {
     const references: ArenaDataCardRefVerifier = {
       verify: vi.fn(async () => {
@@ -405,6 +439,29 @@ describe('Arena Room membership service', () => {
     expect(store.state?.snapshot.members).toHaveLength(2);
     expect(store.state?.memberAuthority.filter((entry) => entry.accountUserId === 202))
       .toHaveLength(1);
+  });
+
+  it('房间成员达到上限时返回独立容量错误，不伪装成普通状态冲突', async () => {
+    const { service, store } = createHarness();
+    await service.create({
+      accountUserId: 101,
+      displayName: 'Host',
+      sharedConfig: createArenaRoomState().snapshot.sharedConfig,
+    });
+    for (let index = 0; index < 7; index += 1) {
+      await service.join({
+        roomId: 'room-1',
+        accountUserId: 200 + index,
+        displayName: `Member ${index + 1}`,
+      });
+    }
+
+    await expect(service.join({
+      roomId: 'room-1',
+      accountUserId: 999,
+      displayName: 'Overflow',
+    })).rejects.toMatchObject({ code: 'ROOM_MEMBER_LIMIT_REACHED' });
+    expect(store.state?.snapshot.members).toHaveLength(8);
   });
 
   it('session snapshot 只向 host 暴露全部 Proposal，member 只能看到自己的 Proposal', async () => {

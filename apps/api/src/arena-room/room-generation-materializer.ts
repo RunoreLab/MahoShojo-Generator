@@ -238,7 +238,10 @@ export const createArenaRoomGenerationMaterializer = (
           roomCombatantKey: entry.key,
           type: inferred,
           data: resolved.payload,
-          isNative: true,
+          // Shared Config only carries stable content identity, not a verified
+          // signature verdict. Ordinary generation admits every source; strict
+          // ranking must never infer native provenance from admission alone.
+          isNative: resolved.source === 'preset',
           isPreset: resolved.source === 'preset',
           filename: resolved.source === 'preset' && 'ref' in entry ? entry.ref.id : null,
           teamId: teamIds.get(entry.key) ?? null,

@@ -170,6 +170,37 @@ const createHarness = async (presets?: ArenaRoomGenerationPresetResolver) => {
 };
 
 describe('Arena Room Proposal application service', () => {
+  it('单成员待处理提案达到上限时返回独立容量错误', async () => {
+    const harness = await createHarness();
+    for (let index = 0; index < 8; index += 1) {
+      await harness.service.submit({
+        roomId: 'room-1',
+        accountUserId: 202,
+        request: {
+          proposalId: `proposal-pending-${index}`,
+          expectedRoomEpoch: 'epoch-1',
+          baseRevision: 0,
+          changes: [{
+            ...guidanceChange(`成员建议 ${index}`),
+            changeId: `guidance-${index}`,
+          }],
+        },
+      });
+    }
+
+    await expect(harness.service.submit({
+      roomId: 'room-1',
+      accountUserId: 202,
+      request: {
+        proposalId: 'proposal-pending-overflow',
+        expectedRoomEpoch: 'epoch-1',
+        baseRevision: 0,
+        changes: [guidanceChange('超出上限')],
+      },
+    })).rejects.toMatchObject({ code: 'ROOM_PROPOSAL_PENDING_LIMIT_REACHED' });
+    expect(harness.store.state?.snapshot.proposals).toHaveLength(8);
+  });
+
   it('submit/resolve routes preset refs through the server-known resolver before checkpoint', async () => {
     const presets = createPresetResolver();
     const harness = await createHarness(presets);

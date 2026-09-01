@@ -156,6 +156,47 @@ const createHarness = async (
 };
 
 describe('Arena Room config application service', () => {
+  it('空角色草稿可以显式发布，不把生成完整性混入共享配置门禁', async () => {
+    const harness = await createHarness();
+    const draft = { ...config(), combatants: [] };
+
+    await expect(harness.service.publish({
+      roomId: 'room-1',
+      accountUserId: 101,
+      request: {
+        expectedRoomEpoch: 'epoch-1',
+        expectedRevision: 0,
+        sharedConfig: draft,
+      },
+    })).resolves.toMatchObject({
+      snapshot: { revision: 1, sharedConfig: { combatants: [] } },
+    });
+  });
+
+  it('配置快照超过 64 KiB 时返回独立帧容量错误', async () => {
+    const harness = await createHarness();
+    const oversized = {
+      ...config(),
+      auxScenarios: Array.from({ length: 256 }, (_, index) => ({
+        key: `host-local:scenario:${index}:${'x'.repeat(210)}`,
+        displayName: `辅助情景 ${index} ${'长'.repeat(80)}`,
+        type: 'scenario' as const,
+        source: 'host-local' as const,
+      })),
+    };
+
+    await expect(harness.service.publish({
+      roomId: 'room-1',
+      accountUserId: 101,
+      request: {
+        expectedRoomEpoch: 'epoch-1',
+        expectedRevision: 0,
+        sharedConfig: oversized,
+      },
+    })).rejects.toMatchObject({ code: 'ROOM_CONFIG_FRAME_TOO_LARGE' });
+    expect(harness.store.state?.snapshot.revision).toBe(0);
+  });
+
   it('房主以 exact epoch/revision 发布并只在 Redis checkpoint 后取得权威 session', async () => {
     const harness = await createHarness();
     const before = harness.store.saveCount;
