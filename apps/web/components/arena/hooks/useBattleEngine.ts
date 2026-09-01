@@ -25,7 +25,6 @@ import { BattleAiImpact, BattleApiResponse, BattleStoreState, CombatantData } fr
 import { useBattleActions } from './useBattleActions';
 import { useStreamCombatantUpdater } from './useStreamCombatantUpdater';
 import { toBattleReportMarkdown } from '../utils/battleReportMarkdown';
-import { precheckBattleReportForRedo } from '@/lib/arena/redo-updates';
 import { extractStreamTelemetryMeta, extractStreamUpdateMeta, stripStreamUpdateMetaComment } from '@/lib/arena/stream-meta';
 import {
   buildStreamSoftTimeoutMessage,
@@ -151,78 +150,6 @@ const normalizeBattleAiImpacts = (input: unknown): BattleAiImpact[] => {
   }
 
   return Array.from(deduped.values());
-};
-
-const normalizeNameTokenForImpact = (name: string): string => {
-  return name
-    .trim()
-    .replace(/^[“”"'「」『』《》【】\[\]（）()]+|[“”"'「」『』《》【】\[\]（）()]+$/g, '')
-    .replace(/\s+/g, '')
-    .toLowerCase();
-};
-
-const getUniqueRosterNames = (roster: CombatantData[]): string[] => {
-  const names = roster
-    .map((item) => (item?.data?.codename || item?.data?.name || '').toString().trim())
-    .filter(Boolean);
-  return Array.from(new Set(names));
-};
-
-const validateManualMetaImpacts = (
-  impacts: BattleAiImpact[],
-  roster: CombatantData[],
-  settings: { writeArenaHistory: boolean }
-): string | null => {
-  if (!Array.isArray(impacts) || impacts.length === 0) {
-    return '未解析到有效 impacts，请至少提供包含 characterName 的 impacts 数组。';
-  }
-
-  const rosterNames = getUniqueRosterNames(roster);
-  if (rosterNames.length === 0) {
-    return '当前没有可更新的参战角色。';
-  }
-
-  const rosterTokenToName = new Map<string, string>();
-  for (const name of rosterNames) {
-    const token = normalizeNameTokenForImpact(name);
-    if (token) rosterTokenToName.set(token, name);
-  }
-
-  const impactTokenToImpact = new Map<string, BattleAiImpact>();
-  const unknownNames: string[] = [];
-
-  for (const impact of impacts) {
-    const token = normalizeNameTokenForImpact(impact.characterName);
-    if (!token) continue;
-    if (!rosterTokenToName.has(token)) {
-      unknownNames.push(impact.characterName);
-      continue;
-    }
-    if (!impactTokenToImpact.has(token)) {
-      impactTokenToImpact.set(token, impact);
-    }
-  }
-
-  const missingNames = rosterNames.filter((name) => !impactTokenToImpact.has(normalizeNameTokenForImpact(name)));
-  if (missingNames.length > 0) {
-    return `impacts 未覆盖全部参战角色，缺少：${missingNames.join('、')}。`;
-  }
-
-  if (unknownNames.length > 0) {
-    const uniqueUnknownNames = Array.from(new Set(unknownNames));
-    return `impacts 包含不在本场参战名单中的角色：${uniqueUnknownNames.join('、')}。`;
-  }
-
-  if (settings.writeArenaHistory) {
-    const missingImpactText = Array.from(impactTokenToImpact.values())
-      .filter((item) => !item.impact || !item.impact.trim())
-      .map((item) => item.characterName);
-    if (missingImpactText.length > 0) {
-      return `已开启历战写入时，每位角色都必须提供 impact，缺少：${missingImpactText.join('、')}。`;
-    }
-  }
-
-  return null;
 };
 
 const isServerInterruptedPayload = (payload: any, fallbackMessage: string): boolean => {
@@ -428,7 +355,7 @@ export const useBattleEngine = () => {
   const generationApiIntentLatch = useGenerationApiIntentLatch();
   const queryClient = useQueryClient();
   const router = useClientRouteAdapter();
-  const { updateFromMarkdown } = useStreamCombatantUpdater();
+  const { updateFromMarkdown, retryGenerationUpdate } = useStreamCombatantUpdater();
   const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
   const combatants = useBattleSelector((state) => state.combatants);
   const battleMode = useBattleSelector((state) => state.battleMode);
@@ -1951,226 +1878,45 @@ export const useBattleEngine = () => {
     sharedGenerationAbortController?.abort(STREAM_ABORT_REASON_USER);
   }, []);
 
-  const handleRedoUpdates = useCallback(async () => {
-    if (isCooldown) {
-      setError(`冷却中，请等待 ${remainingTime} 秒后再重做更新。`);
-      return;
-    }
-
-    const shouldUseScenario = battleMode === 'scenario' && Boolean(scenario.content);
-    const roster = useBattleStore.getState().combatants.filter((item): item is CombatantData => 'data' in item);
+  const handleRetryUpdates = useCallback(async () => {
+    const state = useBattleStore.getState();
+    const lastGenerationId = state.lastGenerationId?.trim();
+    const roster = state.combatants.filter((item): item is CombatantData => 'data' in item);
 
     if (roster.length === 0) {
       setError('⚠️ 没有可更新的参战角色。');
       return;
     }
-
     if (!(settings.writeArenaHistory || settings.writeCurrentState)) {
-      setError('⚠️ 已关闭历战记录/当前状态写入，本次无需重做角色更新。');
+      setError('⚠️ 已关闭历战记录/当前状态写入，本次无需重试角色更新。');
       return;
     }
-
-    const state = useBattleStore.getState();
-    const reportMarkdown =
-      generationMode === 'stream'
-        ? (state.streamingMarkdown ?? '').trim()
-        : (state.newsReport ? toBattleReportMarkdown(state.newsReport) : '').trim();
-
-    const redoPrecheck = precheckBattleReportForRedo(reportMarkdown, battleMode);
-    if (!redoPrecheck.ok) {
-      setError(`⚠️ ${redoPrecheck.error}`);
+    if (!lastGenerationId) {
+      setError('⚠️ 本次战报缺少 generationId，无法安全重试角色更新。');
       return;
     }
 
     setIsRedoingUpdates(true);
     setError(null);
-
     try {
-      const requestBody: Record<string, unknown> = {
-        combatants: roster.map((combatant) => ({
-          type: combatant.type,
-          data: combatant.data,
-          isNative: combatant.isValid,
-          isPreset: combatant.isPreset,
-        })),
-        battleReportMarkdown: reportMarkdown,
-        mode: battleMode,
-        userGuidance: settings.userGuidance,
-        scenario: shouldUseScenario ? scenario.content : undefined,
-        writeArenaHistory: settings.writeArenaHistory,
-        writeCurrentState: settings.writeCurrentState,
-      };
-
-      const customProviderPayload = buildCustomProviderRequestPayload(userProviderConfig);
-      if (customProviderPayload) {
-        requestBody.customProvider = customProviderPayload;
-      }
-
-      const response = await fetch('/api/arena/redo-combatant-updates', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestBody),
-      });
-
-      if (!response.ok) {
-        const text = await response.text();
-        let json: any = null;
-        try {
-          json = JSON.parse(text);
-        } catch {
-          if (response.status === 524) {
-            throw new Error('Cloudflare 超时（HTTP 524），请稍后重试。');
-          }
-          const serverMessage = resolveApiErrorMessage({ payload: text, fallback: '服务器响应异常' });
-          throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: '服务器响应异常' }));
-        }
-
-        if (json.shouldRedirect) {
-          redirectToArrested(json.reason || '使用危险符文');
-          return;
-        }
-        const serverMessage = resolveApiErrorMessage({ payload: json, fallback: '生成失败' });
-        throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: '生成失败' }));
-      }
-
-      const result = await response.json();
-      const updated = Array.isArray(result.updatedCombatants) ? result.updatedCombatants : [];
-
-      setUpdatedCombatants(updated);
-      const updatedRoster = roster.map((combatant) => {
-        const next = updated.find(
-          (item: any) => (item.codename || item.name) === (combatant.data.codename || combatant.data.name)
-        );
-        return next ? { ...combatant, data: next } : combatant;
-      });
-      setCombatants(updatedRoster);
-
-      startCooldown();
+      await retryGenerationUpdate(lastGenerationId, roster);
     } catch (error) {
-      setError(`⚠️ 重做角色更新失败：${error instanceof Error ? error.message : '发生未知错误，请重试。'}`);
+      setError(`⚠️ 重试角色更新失败：${error instanceof Error ? error.message : '发生未知错误，请重试。'}`);
     } finally {
       setIsRedoingUpdates(false);
     }
   }, [
-    isCooldown,
-    remainingTime,
-    battleMode,
-    generationMode,
-    scenario.content,
-    settings.userGuidance,
-    settings.writeArenaHistory,
-    settings.writeCurrentState,
-    userProviderConfig,
-    setCombatants,
-    setError,
-    setUpdatedCombatants,
-    setIsRedoingUpdates,
-    redirectToArrested,
-    startCooldown,
-  ]);
-
-  const handleApplyManualMetaUpdates = useCallback(async (manualMetaInput: string): Promise<boolean> => {
-    const input = typeof manualMetaInput === 'string' ? manualMetaInput.trim() : '';
-    if (!input) {
-      setError('⚠️ 请先输入可解析的 meta 数据。');
-      return false;
-    }
-
-    const shouldUseScenario = battleMode === 'scenario' && Boolean(scenario.content);
-    const roster = useBattleStore.getState().combatants.filter((item): item is CombatantData => 'data' in item);
-
-    if (roster.length === 0) {
-      setError('⚠️ 没有可更新的参战角色。');
-      return false;
-    }
-
-    if (!(settings.writeArenaHistory || settings.writeCurrentState)) {
-      setError('⚠️ 已关闭历战记录/当前状态写入，本次无需应用手动更新。');
-      return false;
-    }
-
-    const state = useBattleStore.getState();
-    const reportMarkdown =
-      generationMode === 'stream'
-        ? (state.streamingMarkdown ?? '').trim()
-        : (state.newsReport ? toBattleReportMarkdown(state.newsReport) : '').trim();
-
-    setIsRedoingUpdates(true);
-    setError(null);
-
-    try {
-      const wrappedInput = `<!-- MAHOSHOJO_ARENA_META ${input} -->`;
-      const extracted = await extractStreamUpdateMeta(wrappedInput);
-      if (!extracted?.meta) {
-        throw new Error('无法解析输入内容，请确认是 JSON 对象/数组或 MAHOSHOJO_ARENA_META 注释。');
-      }
-
-      const impacts = normalizeBattleAiImpacts(extracted.meta.impacts);
-      const impactsValidationError = validateManualMetaImpacts(impacts, roster, {
-        writeArenaHistory: settings.writeArenaHistory,
-      });
-      if (impactsValidationError) {
-        throw new Error(impactsValidationError);
-      }
-
-      const metaOverride = {
-        ...(extracted.meta.report ? { report: extracted.meta.report } : {}),
-        impacts,
-      };
-
-      await updateFromMarkdown(
-        reportMarkdown,
-        roster,
-        battleMode,
-        {
-          userGuidance: settings.userGuidance,
-          writeArenaHistory: settings.writeArenaHistory,
-          writeCurrentState: settings.writeCurrentState,
-        },
-        shouldUseScenario ? scenario.content : null,
-        metaOverride
-      );
-
-      const rawMax = 8_000;
-      setStreamUpdateMetaDebug({
-        source: 'inline',
-        parseOk: true,
-        error: null,
-        meta: {
-          ...extracted.meta,
-          impacts,
-        },
-        raw: input.length > rawMax ? input.slice(0, rawMax) : input,
-        rawTruncated: input.length > rawMax,
-      });
-      setLatestAiImpacts(impacts);
-
-      return true;
-    } catch (error) {
-      setError(`⚠️ 手动应用更新失败：${error instanceof Error ? error.message : '发生未知错误，请重试。'}`);
-      return false;
-    } finally {
-      setIsRedoingUpdates(false);
-    }
-  }, [
-    battleMode,
-    generationMode,
-    scenario.content,
-    settings.userGuidance,
-    settings.writeArenaHistory,
-    settings.writeCurrentState,
+    retryGenerationUpdate,
     setError,
     setIsRedoingUpdates,
-    setLatestAiImpacts,
-    setStreamUpdateMetaDebug,
-    updateFromMarkdown,
+    settings.writeArenaHistory,
+    settings.writeCurrentState,
   ]);
 
   return {
     handleGenerate,
     stopGeneration,
-    handleRedoUpdates,
-    handleApplyManualMetaUpdates,
+    handleRetryUpdates,
     isGenerating,
     isRedoingUpdates,
     isCooldown,

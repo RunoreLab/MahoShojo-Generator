@@ -7,9 +7,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useBattleStore } from '../stores/useBattleStore';
 import { useBattleEngine } from '../hooks/useBattleEngine';
 import { getCombatantDisplayName } from '../utils/characterValidator';
-import { toBattleReportMarkdown } from '../utils/battleReportMarkdown';
 import { inferTemplate } from '@/lib/data-card-converter';
-import { precheckBattleReportForRedo } from '@/lib/arena/redo-updates';
 import { BattleStoreState, CombatantData, UpdatedCombatantData } from '../types';
 import { MarkdownBlock } from '@/components/MarkdownBlock';
 import { CollapsibleSection } from '@/components/shared/CollapsibleSection';
@@ -23,7 +21,7 @@ interface BattleResultProps {
 }
 
 export function BattleResult({ onSaveImage }: BattleResultProps) {
-  const { handleRedoUpdates, handleApplyManualMetaUpdates, stopGeneration, isCooldown, remainingTime, isRedoingUpdates } = useBattleEngine();
+  const { handleRetryUpdates, stopGeneration, isRedoingUpdates } = useBattleEngine();
   const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
   const adjudicationResults = useBattleSelector((state) => state.adjudicationResults);
   const newsReport = useBattleSelector((state) => state.newsReport);
@@ -47,8 +45,6 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
   const battleMode = useBattleSelector((state) => state.battleMode);
   const scenario = useBattleSelector((state) => state.scenario);
   const [illustrationAsset, setIllustrationAsset] = useState<BattleReportIllustrationAsset | null>(null);
-  const [manualMetaInput, setManualMetaInput] = useState('');
-  const [manualMetaMessage, setManualMetaMessage] = useState<string | null>(null);
   const battleReportCardWidthPx = resolveBattleReportCardManualWidthPx(settings);
 
   const scenarioDisplayName = useMemo(() => {
@@ -72,11 +68,6 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
     [combatants]
   );
   const canWriteUpdates = settings.writeArenaHistory || settings.writeCurrentState;
-  const reportMarkdownForRedo =
-    generationMode === 'stream'
-      ? (streamingMarkdown ?? '').trim()
-      : (newsReport ? toBattleReportMarkdown(newsReport as NewsReport) : '').trim();
-  const redoPrecheck = precheckBattleReportForRedo(reportMarkdownForRedo, battleMode);
   const streamMetaDebugSummary = useMemo(() => {
     if (!streamUpdateMetaDebug) return null;
     const sourceLabel = streamUpdateMetaDebug.source === 'sse' ? 'SSE' : '注释解析';
@@ -92,14 +83,6 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
       return '';
     }
   }, [streamUpdateMetaDebug?.meta]);
-  const manualMetaDefault = useMemo(() => {
-    if (streamMetaParsedJson) return streamMetaParsedJson;
-    if (typeof streamUpdateMetaDebug?.raw === 'string' && streamUpdateMetaDebug.raw.trim()) {
-      return streamUpdateMetaDebug.raw;
-    }
-    return '';
-  }, [streamMetaParsedJson, streamUpdateMetaDebug?.raw]);
-
   const downloadUpdatedJson = (characterData: any) => {
     const name = characterData.codename || characterData.name;
     const jsonData = JSON.stringify(characterData, null, 2);
@@ -123,25 +106,6 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
       setIllustrationAsset(null);
     }
   }, [hasBattleReport]);
-
-  useEffect(() => {
-    setManualMetaInput(manualMetaDefault);
-    setManualMetaMessage(null);
-  }, [manualMetaDefault, lastGenerationId]);
-
-  const handleResetManualMetaInput = () => {
-    setManualMetaInput(manualMetaDefault);
-    setManualMetaMessage(manualMetaDefault ? '已恢复为当前解析结果。' : '当前暂无可恢复的解析结果。');
-  };
-
-  const handleApplyManualMeta = async () => {
-    const ok = await handleApplyManualMetaUpdates(manualMetaInput);
-    if (ok) {
-      setManualMetaMessage('手动修改已应用，角色更新完成。');
-    } else {
-      setManualMetaMessage('应用失败，请检查 JSON 与角色名是否完整匹配。');
-    }
-  };
 
   return (
     <>
@@ -204,18 +168,14 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
             headerClassName="mb-3"
             headerRight={
               <button
-                onClick={() => handleRedoUpdates()}
-                disabled={isGenerating || isRedoingUpdates || isCooldown || !redoPrecheck.ok}
+                onClick={() => handleRetryUpdates()}
+                disabled={isGenerating || isRedoingUpdates || !lastGenerationId}
                 className="px-3 py-1.5 text-xs font-semibold text-white bg-purple-500 rounded-lg hover:bg-purple-600 transition-colors disabled:opacity-60 disabled:cursor-not-allowed shrink-0"
-                title={
-                  isCooldown
-                    ? `冷却中，请等待 ${remainingTime} 秒`
-                    : !redoPrecheck.ok
-                      ? redoPrecheck.error
-                      : '基于战报重做角色更新'
-                }
+                title={lastGenerationId
+                  ? '重试应用本次服务器已生成的角色更新'
+                  : '本次战报缺少 generationId，无法安全重试'}
               >
-                {isCooldown ? `冷却中 ${remainingTime}s` : isRedoingUpdates ? '重做中...' : '重做角色更新'}
+                {isRedoingUpdates ? '重试中...' : '重试角色更新'}
               </button>
             }
           >
@@ -253,50 +213,12 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
                         </div>
                       </div>
                     )}
-                    <div className="p-3 border border-gray-200 rounded-lg bg-white">
-                      <div className="font-medium text-gray-700">手动修正并应用</div>
-                      <div className="mt-1 text-xs text-gray-500">
-                        支持粘贴 JSON 对象/数组或 MAHOSHOJO_ARENA_META 注释。应用后会直接更新当前角色数据。
-                      </div>
-                      <textarea
-                        value={manualMetaInput}
-                        onChange={(event) => {
-                          setManualMetaInput(event.target.value);
-                          setManualMetaMessage(null);
-                        }}
-                        spellCheck={false}
-                        rows={12}
-                        className="mt-2 w-full rounded-lg border border-gray-300 bg-slate-950 text-slate-100 p-2 text-xs font-mono leading-relaxed focus:outline-none focus:ring-2 focus:ring-purple-400"
-                        placeholder={'{"version":1,"impacts":[{"characterName":"角色名","impact":"变化","currentStateSummary":"状态"}]}'}
-                      />
-                      {manualMetaMessage && (
-                        <div className="mt-2 text-xs text-gray-600">{manualMetaMessage}</div>
-                      )}
-                      <div className="mt-2 flex flex-wrap gap-2">
-                        <button
-                          onClick={handleResetManualMetaInput}
-                          type="button"
-                          disabled={isGenerating || isRedoingUpdates}
-                          className="px-3 py-1.5 text-xs font-semibold text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-                        >
-                          恢复当前解析结果
-                        </button>
-                        <button
-                          onClick={() => void handleApplyManualMeta()}
-                          type="button"
-                          disabled={isGenerating || isRedoingUpdates || !manualMetaInput.trim()}
-                          className="px-3 py-1.5 text-xs font-semibold text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-                        >
-                          {isRedoingUpdates ? '应用中...' : '应用手动修改'}
-                        </button>
-                      </div>
-                    </div>
                   </div>
                 </CollapsibleSection>
               )}
               {updatedCombatants.length === 0 && (
                 <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-600">
-                  本次尚未产生可展示的角色更新。你仍可点击“重做角色更新”，让 AI 基于战报生成（或修正）历战记录/当前状态摘要。
+                  本次尚未产生可展示的角色更新。你可以点击“重试角色更新”，重试应用本次服务器已生成的历战记录/当前状态摘要。
                 </div>
               )}
               {updatedCombatants.map((character: UpdatedCombatantData) => {

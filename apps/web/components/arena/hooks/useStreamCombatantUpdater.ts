@@ -7,6 +7,10 @@ import { runArenaGenerationEffectOnce } from '@/lib/arena/generation-effect-ledg
 import { withArenaGenerationActorToken } from '@/lib/arena/resumable-generation-client';
 import { authStorage } from '@/lib/auth';
 import { buildGenerationApiHeaders } from '@/lib/hono-api-client';
+import {
+  buildArenaReconciliationRetryPayload,
+  projectArenaReconciliationCombatants,
+} from '@/lib/arena/reconciliation-retry';
 import { hashArenaCombatantBaseRevision } from '@mahoshojo/domain/arena-reconciliation';
 import { useBattleStore } from '../stores/useBattleStore';
 import { BattleStoreState, CombatantData } from '../types';
@@ -17,7 +21,7 @@ interface UpdateCombatantsPayload {
   generationId?: string;
   baseRevisionHash?: string;
   combatants: any[];
-  report: {
+  report?: {
     headline: string;
     mode: string;
     officialReport: {
@@ -358,15 +362,7 @@ export const useStreamCombatantUpdater = () => {
         }
       }
 
-      const projectedCombatants = combatants.map((c) => ({
-        type: c.type,
-        data: c.data,
-        isNative: c.isValid,
-        isPreset: c.isPreset,
-        characterGuidance: typeof (c as any).characterGuidance === 'string'
-          ? (c as any).characterGuidance
-          : null,
-      }));
+      const projectedCombatants = projectArenaReconciliationCombatants(combatants);
       const payload: UpdateCombatantsPayload = {
         ...(generationId ? { generationId } : {}),
         ...(generationId
@@ -392,9 +388,17 @@ export const useStreamCombatantUpdater = () => {
     [updateCombatants]
   );
 
+  const retryGenerationUpdate = useCallback(
+    async (generationId: string, combatants: CombatantData[]) => (
+      updateCombatants(await buildArenaReconciliationRetryPayload(generationId, combatants))
+    ),
+    [updateCombatants]
+  );
+
   return {
     updateCombatants,
     updateFromMarkdown,
+    retryGenerationUpdate,
     isUpdating,
     updateError,
   };
