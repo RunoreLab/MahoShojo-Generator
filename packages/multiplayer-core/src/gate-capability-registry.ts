@@ -1,11 +1,13 @@
 import {
   ARENA_CANONICAL_CAPABILITIES,
+  ARENA_ROOM_ERROR_TAXONOMY,
   MAX_CONTROL_FRAME_BYTES,
   MAX_PENDING_PROPOSALS_PER_MEMBER,
   MAX_ROOM_MEMBERS,
 } from '@mahoshojo/contracts/arena-room';
 
 import type { ArenaGateLayer } from './gate-types';
+import { ARENA_PRODUCT_PARITY_SEMANTIC_KEYS } from './product-parity-coverage';
 
 export type ArenaGateReasonCategory =
   | 'product-parity'
@@ -31,9 +33,39 @@ export interface ArenaGateCapabilityRegistryEntry {
   readonly canonicalValue?: number;
 }
 
+export const ARENA_GATE_TEST_EVIDENCE = [
+  'packages/contracts/tests/gmr10q-gate-minimization.test.ts::[GMR10Q-CONTRACT-LIMITS]',
+  'packages/contracts/tests/gmr10q-error-taxonomy.test.ts::[GMR10Q-CONTRACT-TAXONOMY]',
+  'packages/multiplayer-core/tests/gmr10q-gate-registry-readiness.test.ts::[GMR10Q-READINESS]',
+  'packages/multiplayer-core/tests/gmr10q-gate-registry-readiness.test.ts::[GMR10Q-CANONICAL-INVENTORY]',
+  'packages/multiplayer-core/tests/state-machine-lifecycle.test.ts::Arena Room runtime-neutral lifecycle transitions',
+  'packages/multiplayer-core/tests/state-machine-proposal-generation.test.ts::Arena Room Proposal authority transitions',
+  'packages/multiplayer-core/tests/product-parity-coverage.test.ts::GMR-10P Arena 产品一致性覆盖矩阵',
+  'packages/hosted-api/tests/arena-generation-resource-budget.test.ts::Arena resource budget',
+  'packages/contracts/tests/proposal.test.ts::typed Arena Proposal changes',
+  'packages/multiplayer-core/tests/core.test.ts::proposal selection and conflicts',
+  'packages/multiplayer-core/tests/state-machine-presence.test.ts::Arena Room durable presence deadlines',
+  'packages/multiplayer-core/tests/state-machine-recovery.test.ts::Arena Room recovery transition',
+  'packages/multiplayer-core/tests/state-machine-review-regressions.test.ts::GMR-01 independent review regressions',
+  'packages/hosted-api/tests/arena-generation-service.test.ts::Arena generation lifecycle service',
+] as const;
+export type ArenaGateTestEvidence = typeof ARENA_GATE_TEST_EVIDENCE[number];
+
+const testEvidenceByLayer: Readonly<Record<ArenaGateLayer, ArenaGateTestEvidence>> = {
+  'room-lifecycle': ARENA_GATE_TEST_EVIDENCE[4],
+  'room-shareability': ARENA_GATE_TEST_EVIDENCE[0],
+  collaboration: ARENA_GATE_TEST_EVIDENCE[5],
+  'generation-readiness': ARENA_GATE_TEST_EVIDENCE[2],
+  'runtime-resource': ARENA_GATE_TEST_EVIDENCE[7],
+  'result-action': ARENA_GATE_TEST_EVIDENCE[6],
+};
+
 const gate = (
   entry: ArenaGateCapabilityRegistryEntry,
-): ArenaGateCapabilityRegistryEntry => Object.freeze(entry);
+): ArenaGateCapabilityRegistryEntry => Object.freeze({
+  ...entry,
+  testId: entry.testId.includes('::') ? entry.testId : testEvidenceByLayer[entry.layer],
+});
 
 /** GMR-10Q-A gate/capability inventory and test binding. */
 export const ARENA_GATE_CAPABILITY_REGISTRY: readonly ArenaGateCapabilityRegistryEntry[] = Object.freeze([
@@ -71,7 +103,7 @@ export const ARENA_GATE_CAPABILITY_REGISTRY: readonly ArenaGateCapabilityRegistr
     currentSource: 'packages/contracts/src/shared-config.ts', singleEquivalent: '单人 Arena 使用同一生成语义但保留完整本地 payload',
     canonicalSource: 'packages/contracts/src/shared-config.ts', reasonCategory: 'security/privacy',
     reason: 'Room 只共享安全投影，不广播 secret 或 host-local 正文。', userAction: '修正具体配置项后重新更新房间配置。',
-    currentUserMessage: '当前竞技场配置无法安全共享，请检查角色、版本与数量限制。', messageKey: 'arena.multiplayer.gate.roomConfigSchema', testId: 'GMR10Q-B-DRAFT-SHAREABILITY',
+    currentUserMessage: '房间配置存在不支持共享的字段或无效引用，请查看具体问题后修正。', messageKey: 'arena.multiplayer.gate.roomConfigSchema', testId: 'GMR10Q-B-DRAFT-SHAREABILITY',
   }),
   gate({
     code: 'ROOM_CONFIG_COMBATANT_LIMIT', condition: 'Shared Config 角色数不得超过 canonical runtime 容量', layer: 'room-shareability',
@@ -109,7 +141,7 @@ export const ARENA_GATE_CAPABILITY_REGISTRY: readonly ArenaGateCapabilityRegistr
     currentSource: 'apps/web/components/arena/multiplayer/ArenaMultiplayerPanel.tsx', singleEquivalent: '单人 Arena 在具体字段附近展示 validation',
     canonicalSource: 'packages/multiplayer-core/src/gate-types.ts', reasonCategory: 'product-parity',
     reason: 'Room 可先创建，未同步配置需要逐项可行动诊断。', userAction: '按具体问题修正后点击更新房间配置。',
-    currentUserMessage: '当前竞技场配置无法安全共享，请检查角色、版本与数量限制。', messageKey: 'arena.multiplayer.gate.roomShareabilityIssues', testId: 'GMR10Q-E-STRUCTURED-ISSUES',
+    currentUserMessage: '请先处理下方列出的配置问题，再更新房间配置。', messageKey: 'arena.multiplayer.gate.roomShareabilityIssues', testId: 'GMR10Q-E-STRUCTURED-ISSUES',
   }),
   gate({
     code: 'ROOM_CONFIG_PUBLISH_FENCE', condition: '发布/应用 Shared Config 需要房主 authority 与 exact revision fence', layer: 'room-shareability',
@@ -152,7 +184,7 @@ export const ARENA_GATE_CAPABILITY_REGISTRY: readonly ArenaGateCapabilityRegistr
     currentSource: 'apps/web/components/arena/multiplayer/ArenaProposalPanel.tsx', singleEquivalent: '单人 Arena 使用面向用户的中文配置术语',
     canonicalSource: 'docs/specs/2026-09-01_073000_Arena多人门禁分层最小化与单人一致性修订.md', reasonCategory: 'product-parity',
     reason: 'Proposal/revision/BASE 等协议术语不是面向普通用户的产品语言。', userAction: '按“配置提案、房间配置版本、提案基准/当前值/建议值”理解和操作。',
-    currentUserMessage: 'Proposal / typed diff / BASE / CURRENT / PROPOSED / revision', messageKey: 'arena.multiplayer.capability.collaborationProductTerminology', testId: 'GMR10Q-E-TERMINOLOGY',
+    currentUserMessage: '配置提案 / 配置变更明细 / 提案基准 / 当前房间值 / 建议值 / 房间配置版本', messageKey: 'arena.multiplayer.capability.collaborationProductTerminology', testId: 'GMR10Q-E-TERMINOLOGY',
   }),
   gate({
     code: 'GENERATION_COMBATANTS_EMPTY', condition: '开始生成时 roster 为空', layer: 'generation-readiness',
@@ -246,7 +278,7 @@ export const ARENA_GATE_CAPABILITY_REGISTRY: readonly ArenaGateCapabilityRegistr
     currentSource: 'apps/web/components/arena/components/BattleResult.tsx', singleEquivalent: '单人用户可写回自己的本地角色、当前状态与历史',
     canonicalSource: 'packages/multiplayer-core/src/product-parity-coverage.ts', reasonCategory: 'authorization/authority',
     reason: '成员看到权威结果不等于获得房主私有存储写权限。', userAction: '成员可查看结果；需要写回时由房主执行。',
-    currentUserMessage: null, messageKey: 'arena.multiplayer.gate.resultHostWriteAuthority', testId: 'GMR10Q-F-RESULT-ACTION-PARITY',
+    currentUserMessage: null, messageKey: 'arena.multiplayer.gate.resultHostWriteAuthority', testId: ARENA_GATE_TEST_EVIDENCE[6],
   }),
   gate({
     code: 'RESULT_PRESENTATION_PARITY', condition: '多人权威结果复用单人 Arena presentation', layer: 'result-action',
@@ -267,13 +299,249 @@ export const ARENA_GATE_CAPABILITY_REGISTRY: readonly ArenaGateCapabilityRegistr
     currentSource: 'packages/contracts/src/shared-config.ts', singleEquivalent: '单人叙事历史 read/write 开关与 limit/unlimited 语义保持一致',
     canonicalSource: 'packages/multiplayer-core/src/product-parity-coverage.ts', reasonCategory: 'product-parity',
     reason: '只共享安全选择即可维持用户可感知语义。', userAction: '在 Arena 历史设置中调整叙事历史读取、写入和上限。',
-    currentUserMessage: null, messageKey: 'arena.multiplayer.capability.narrativeHistorySettingsParity', testId: 'GMR10Q-F-NARRATIVE-HISTORY-PARITY',
+    currentUserMessage: null, messageKey: 'arena.multiplayer.capability.narrativeHistorySettingsParity', testId: ARENA_GATE_TEST_EVIDENCE[6],
   }),
   gate({
     code: 'NARRATIVE_HISTORY_BODY_LOCAL', condition: '叙事历史正文只在房主 runtime/request scope materialize', layer: 'generation-readiness',
     currentSource: 'packages/contracts/src/room-http.ts', singleEquivalent: '单人从用户本地叙事历史读取正文',
     canonicalSource: 'packages/multiplayer-core/src/product-parity-coverage.ts', reasonCategory: 'security/privacy',
     reason: '叙事历史正文属于本地/私有数据，不因多人 parity 广播给成员。', userAction: '由房主保留并载入本地历史；成员只同步安全设置和结果摘要。',
-    currentUserMessage: null, messageKey: 'arena.multiplayer.capability.narrativeHistoryBodyLocal', testId: 'GMR10Q-F-NARRATIVE-HISTORY-PARITY',
+    currentUserMessage: null, messageKey: 'arena.multiplayer.capability.narrativeHistoryBodyLocal', testId: ARENA_GATE_TEST_EVIDENCE[6],
+  }),
+  gate({
+    code: 'ROOM_PRESENCE_AUTHORITY', condition: 'presence 只更新连接状态与受信 deadline，不改变 membership', layer: 'room-lifecycle',
+    currentSource: 'packages/multiplayer-core/src/state-machine.ts', singleEquivalent: '单人没有共享 presence authority',
+    canonicalSource: 'packages/multiplayer-core/src/state-machine-model.ts', reasonCategory: 'distributed-consistency',
+    reason: '连接状态必须与成员资格分离并由受信时间驱动。', userAction: '重新连接并同步当前房间状态。',
+    currentUserMessage: null, messageKey: 'arena.multiplayer.gate.roomPresenceAuthority', testId: ARENA_GATE_TEST_EVIDENCE[10],
+  }),
+  gate({
+    code: 'ROOM_KICK_HOST_REQUIRED', condition: '只有房主可撤销其他活跃成员资格', layer: 'room-lifecycle',
+    currentSource: 'packages/multiplayer-core/src/state-machine.ts', singleEquivalent: '单人没有共享成员踢出动作',
+    canonicalSource: 'packages/multiplayer-core/src/state-machine-model.ts', reasonCategory: 'authorization/authority',
+    reason: '成员资格撤销是房主最小 authority 动作。', userAction: '请房主执行移出成员操作。',
+    currentUserMessage: null, messageKey: 'arena.multiplayer.gate.roomKickHostRequired', testId: '',
+  }),
+  gate({
+    code: 'ROOM_RECOVERY_FENCE', condition: '恢复必须匹配 incarnation、scope 与既有 durable state', layer: 'room-lifecycle',
+    currentSource: 'packages/multiplayer-core/src/state-machine.ts', singleEquivalent: '单人本地恢复不重建共享 authority',
+    canonicalSource: 'packages/multiplayer-core/src/state-machine-model.ts', reasonCategory: 'distributed-consistency',
+    reason: '防止旧进程或伪造 capability 复活过期房间。', userAction: '重新进入当前房间实例。',
+    currentUserMessage: null, messageKey: 'arena.multiplayer.gate.roomRecoveryFence', testId: ARENA_GATE_TEST_EVIDENCE[11],
+  }),
+  gate({
+    code: 'PROPOSAL_RESOURCE_AND_ATOMICITY', condition: '提案受 change/byte/history/dependsOn/atomic/precondition 约束', layer: 'collaboration',
+    currentSource: 'packages/contracts/src/proposals.ts', singleEquivalent: '单人编辑无需跨成员提案队列，但仍使用字段 validation',
+    canonicalSource: 'packages/contracts/src/proposals.ts', reasonCategory: 'resource/concurrency',
+    reason: '有界 typed change 与原子前置条件保护共享配置一致性。', userAction: '拆分过大提案，并基于最新房间配置重新提交。',
+    currentUserMessage: null, messageKey: 'arena.multiplayer.gate.proposalResourceAndAtomicity', testId: ARENA_GATE_TEST_EVIDENCE[8],
+  }),
+  gate({
+    code: 'GENERATION_RECONCILIATION', condition: '生成结果按 identity/attempt/terminal fence 对账', layer: 'generation-readiness',
+    currentSource: 'packages/multiplayer-core/src/state-machine.ts', singleEquivalent: '单人同样按 generationRequestId 幂等恢复',
+    canonicalSource: 'packages/multiplayer-core/src/state-machine-model.ts', reasonCategory: 'distributed-consistency',
+    reason: '未知结果不得通过第二个 producer 静默重跑。', userAction: '恢复并查询原生成状态后再决定重试。',
+    currentUserMessage: null, messageKey: 'arena.multiplayer.gate.generationReconciliation', testId: '',
+  }),
+  gate({
+    code: 'RUNTIME_ADJUDICATION_LIMIT', condition: 'adjudication event 数量不得超过 Hosted sanity ceiling', layer: 'runtime-resource',
+    currentSource: 'packages/hosted-api/src/arena-generation/resource-budget.ts', singleEquivalent: '单人与多人使用同一 Hosted ceiling',
+    canonicalSource: 'packages/hosted-api/src/arena-generation/resource-budget.ts', reasonCategory: 'resource/concurrency',
+    reason: '限制规则裁定输入体积与 provider 成本。', userAction: '减少裁定事件后重新生成。',
+    currentUserMessage: null, messageKey: 'arena.multiplayer.gate.runtimeAdjudicationLimit', testId: '',
+  }),
+  gate({
+    code: 'RUNTIME_PROVIDER_CONFIG', condition: 'provider/model/credential 配置由 host runtime 校验且不进入 Room', layer: 'runtime-resource',
+    currentSource: 'packages/hosted-api/src/arena-generation/service.ts', singleEquivalent: '单人与多人使用相同 provider 校验',
+    canonicalSource: 'packages/contracts/src/arena-error-taxonomy.ts', reasonCategory: 'security/privacy',
+    reason: 'provider credential 是 host-local secret，且无效配置必须在调用前失败。', userAction: '由房主修正模型、Provider 或凭据配置。',
+    currentUserMessage: null, messageKey: 'arena.multiplayer.gate.runtimeProviderConfig', testId: '',
+  }),
+  gate({
+    code: 'WEB_LOCAL_VALIDATION', condition: 'Web 本地检查只做即时反馈，authority 仍由服务端复验', layer: 'room-shareability',
+    currentSource: 'apps/web/lib/arena-room/shared-config.ts', singleEquivalent: '单人 UI 使用同一内容 validation',
+    canonicalSource: 'packages/contracts/src/shared-config.ts', reasonCategory: 'security/privacy',
+    reason: '客户端 validation 不得替代共享 contract 与服务器 authority。', userAction: '按字段提示修正；服务端仍可能返回更精确的权限或版本错误。',
+    currentUserMessage: null, messageKey: 'arena.multiplayer.capability.webLocalValidation', testId: '',
+  }),
+  gate({
+    code: 'CONTRACT_SCHEMA_AND_LIMITS', condition: 'wire schema 与 canonical limits 是所有 producer/consumer 的共同边界', layer: 'room-shareability',
+    currentSource: 'packages/contracts/src/shared-config.ts', singleEquivalent: '单人/多人共用可共享语义和 runtime capacity',
+    canonicalSource: 'packages/contracts/src/arena-capabilities.ts', reasonCategory: 'product-parity',
+    reason: '避免 Web、API 与 Hosted runtime 各自维护 magic limit。', userAction: '修正具体 schema issue 或减少到公开容量内。',
+    currentUserMessage: null, messageKey: 'arena.multiplayer.gate.contractSchemaAndLimits', testId: '',
   }),
 ]);
+
+export const ARENA_GATE_SOURCE_INVENTORY = Object.freeze({
+  stateMachineFailureReasons: [
+    'invalid-state', 'invalid-command', 'invalid-authority-context', 'state-required',
+    'state-already-exists', 'room-epoch-mismatch', 'room-epoch-reuse',
+    'room-revision-mismatch', 'room-closed', 'host-required', 'member-required',
+    'member-not-active', 'member-limit-reached', 'member-history-limit-reached',
+    'member-id-conflict', 'proposal-id-conflict', 'proposal-pending-limit-reached',
+    'proposal-history-limit-reached', 'proposal-not-found', 'proposal-not-submitted',
+    'proposal-author-required', 'proposal-selection-invalid', 'proposal-conflict',
+    'generation-active', 'generation-history-limit-reached', 'generation-request-conflict',
+    'generation-id-conflict', 'generation-identity-mismatch', 'generation-attempt-mismatch',
+    'generation-transition-invalid', 'generation-terminal-conflict', 'authority-scope-mismatch',
+    'authority-scope-expired', 'deadline-not-reached', 'invalid-trusted-time',
+    'command-timestamp-mismatch', 'command-timestamp-regression',
+    'collaborative-history-limit-reached', 'room-snapshot-too-large',
+  ],
+  roomHttpErrorCodes: [
+    'ROOM_AUTHENTICATION_REQUIRED', 'ROOM_AUTHENTICATION_DENIED', 'ROOM_FORBIDDEN',
+    'ROOM_NOT_FOUND', 'ROOM_PAYLOAD_TOO_LARGE', 'ROOM_REQUEST_INVALID', 'ROOM_CONFLICT',
+    'ROOM_RATE_LIMITED', 'ROOM_UNAVAILABLE', 'ROOM_GENERATION_COMBATANTS_EMPTY',
+    'ROOM_GENERATION_COMBATANTS_INSUFFICIENT', 'ROOM_GENERATION_SCENARIO_REQUIRED',
+    'ROOM_GENERATION_COMBATANT_LIMIT', 'ROOM_GENERATION_RANDOM_COMBATANT_UNRESOLVED',
+    'ROOM_GENERATION_RECONCILIATION_REQUIRED', 'ROOM_MEMBER_LIMIT_REACHED',
+    'ROOM_PROPOSAL_PENDING_LIMIT_REACHED', 'ROOM_PROPOSAL_CHANGE_LIMIT',
+    'ROOM_PROPOSAL_BYTE_LIMIT', 'ROOM_CONFIG_FRAME_TOO_LARGE',
+    'ROOM_CONFIG_SHAREABILITY_INVALID',
+    'ROOM_CONFIG_COMBATANT_LIMIT', 'ROOM_CONFIG_REFERENCE_LIMIT',
+    'ROOM_HOST_LOCAL_PAYLOAD_MISSING', 'ROOM_HOST_LOCAL_PAYLOAD_INVALID',
+    'ROOM_HOST_LOCAL_KIND_MISMATCH', 'ROOM_HOST_LOCAL_DIGEST_MISMATCH',
+    'ROOM_HOST_LOCAL_TYPE_MISMATCH', 'ROOM_HOST_LOCAL_CONTENT_VERSION_MISSING',
+    'ROOM_HOST_LOCAL_CONTENT_VERSION_MISMATCH', 'ROOM_REFERENCE_VERSION_MISSING',
+    'ROOM_REFERENCE_STALE', 'ROOM_REFERENCE_DENIED', 'ROOM_RUNTIME_BODY_LIMIT',
+    'ROOM_RUNTIME_REFERENCE_LIMIT', 'ROOM_RUNTIME_ADJUDICATION_LIMIT',
+    'ROOM_RUNTIME_PROMPT_BUDGET_EXCEEDED', 'ROOM_PROVIDER_CONFIG_INVALID',
+  ],
+  generationReadinessIssueCodes: [
+    'GENERATION_COMBATANTS_EMPTY', 'GENERATION_COMBATANTS_INSUFFICIENT',
+    'GENERATION_SCENARIO_REQUIRED', 'GENERATION_COMBATANT_LIMIT',
+  ],
+  runtimeResourceBudgetKeys: [
+    'hardBodyBytes', 'cancelBodyBytes', 'maxCombatants', 'maxAdjudicationEvents',
+    'maxReferenceItemsSanity', 'maxOutputBytes', 'maxEstimatedPromptTokens',
+  ],
+  productParitySemanticKeys: Object.freeze(Object.entries(ARENA_PRODUCT_PARITY_SEMANTIC_KEYS)
+    .flatMap(([group, keys]) => keys.map((key) => `${group}:${key}`))),
+});
+
+export const ARENA_GATE_SOURCE_CATEGORIES = Object.freeze([
+  Object.freeze({
+    category: 'state-machine-failure-reason',
+    currentSource: 'packages/multiplayer-core/src/state-machine-model.ts',
+    classifiedItems: ARENA_GATE_SOURCE_INVENTORY.stateMachineFailureReasons,
+  }),
+  Object.freeze({
+    category: 'room-http-error-code',
+    currentSource: 'packages/contracts/src/arena-error-taxonomy.ts',
+    classifiedItems: ARENA_GATE_SOURCE_INVENTORY.roomHttpErrorCodes,
+  }),
+  Object.freeze({
+    category: 'generation-readiness-code',
+    currentSource: 'packages/multiplayer-core/src/generation-readiness.ts',
+    classifiedItems: ARENA_GATE_SOURCE_INVENTORY.generationReadinessIssueCodes,
+  }),
+  Object.freeze({
+    category: 'runtime-resource-budget-key',
+    currentSource: 'packages/hosted-api/src/arena-generation/resource-budget.ts',
+    classifiedItems: ARENA_GATE_SOURCE_INVENTORY.runtimeResourceBudgetKeys,
+  }),
+  Object.freeze({
+    category: 'product-parity-semantic-key',
+    currentSource: 'packages/multiplayer-core/src/product-parity-coverage.ts',
+    classifiedItems: ARENA_GATE_SOURCE_INVENTORY.productParitySemanticKeys,
+  }),
+]);
+
+export const ARENA_GATE_DOMAIN_HTTP_CODE_MAP = Object.freeze(Object.fromEntries(
+  ARENA_ROOM_ERROR_TAXONOMY.map(({ domainCode, httpCode, hostedCodes }) => [
+    domainCode,
+    Object.freeze({ httpCode, hostedCodes }),
+  ]),
+));
+
+const classifyStateReasons = (
+  reasons: readonly string[],
+  gateCode: string,
+  testId: ArenaGateTestEvidence,
+) => reasons.map((reason) => Object.freeze({ reason, gateCode, testId }));
+
+/** Exhaustive classification of the runtime-enumerable state-machine reason inventory. */
+export const ARENA_STATE_MACHINE_FAILURE_REASON_REGISTRY = Object.freeze([
+  ...classifyStateReasons([
+    'invalid-state', 'invalid-command', 'state-required', 'state-already-exists',
+  ], 'CONTRACT_SCHEMA_AND_LIMITS', ARENA_GATE_TEST_EVIDENCE[12]),
+  ...classifyStateReasons([
+    'invalid-authority-context', 'authority-scope-mismatch', 'authority-scope-expired',
+    'room-epoch-reuse', 'invalid-trusted-time', 'command-timestamp-mismatch',
+    'command-timestamp-regression',
+  ], 'ROOM_RECOVERY_FENCE', ARENA_GATE_TEST_EVIDENCE[11]),
+  ...classifyStateReasons([
+    'room-epoch-mismatch', 'room-revision-mismatch',
+  ], 'ROOM_CONFIG_PUBLISH_FENCE', ARENA_GATE_TEST_EVIDENCE[4]),
+  ...classifyStateReasons([
+    'room-closed', 'host-required',
+  ], 'ROOM_CLOSE_HOST_REQUIRED', ARENA_GATE_TEST_EVIDENCE[4]),
+  ...classifyStateReasons([
+    'member-required', 'member-not-active',
+  ], 'ROOM_LEAVE_MEMBERSHIP_REQUIRED', ARENA_GATE_TEST_EVIDENCE[4]),
+  ...classifyStateReasons([
+    'member-limit-reached', 'member-history-limit-reached', 'member-id-conflict',
+  ], 'ROOM_MEMBER_LIMIT', ARENA_GATE_TEST_EVIDENCE[4]),
+  ...classifyStateReasons([
+    'proposal-id-conflict', 'proposal-pending-limit-reached',
+    'proposal-history-limit-reached', 'proposal-not-found', 'proposal-not-submitted',
+    'proposal-author-required', 'proposal-selection-invalid', 'proposal-conflict',
+    'collaborative-history-limit-reached',
+  ], 'PROPOSAL_RESOURCE_AND_ATOMICITY', ARENA_GATE_TEST_EVIDENCE[9]),
+  ...classifyStateReasons([
+    'generation-active', 'generation-history-limit-reached', 'generation-request-conflict',
+    'generation-id-conflict', 'generation-identity-mismatch', 'generation-attempt-mismatch',
+    'generation-transition-invalid', 'generation-terminal-conflict',
+  ], 'GENERATION_RECONCILIATION', ARENA_GATE_TEST_EVIDENCE[5]),
+  ...classifyStateReasons([
+    'deadline-not-reached',
+  ], 'ROOM_PRESENCE_AUTHORITY', ARENA_GATE_TEST_EVIDENCE[10]),
+  ...classifyStateReasons([
+    'room-snapshot-too-large',
+  ], 'ROOM_CONFIG_FRAME_LIMIT', ARENA_GATE_TEST_EVIDENCE[12]),
+]);
+
+export const ARENA_GATE_WORKFLOW_CAPABILITY_REGISTRY = Object.freeze([
+  ['room-create', 'ROOM_CREATE_AUTH_REQUIRED', 4],
+  ['room-join', 'ROOM_MEMBER_LIMIT', 4],
+  ['room-leave', 'ROOM_LEAVE_MEMBERSHIP_REQUIRED', 4],
+  ['room-close', 'ROOM_CLOSE_HOST_REQUIRED', 4],
+  ['room-presence', 'ROOM_PRESENCE_AUTHORITY', 10],
+  ['room-kick', 'ROOM_KICK_HOST_REQUIRED', 4],
+  ['room-recovery', 'ROOM_RECOVERY_FENCE', 11],
+  ['shared-config-build', 'ROOM_CONFIG_SCHEMA', 0],
+  ['shared-config-publish', 'ROOM_CONFIG_PUBLISH_FENCE', 5],
+  ['shared-config-apply', 'ROOM_CONFIG_PUBLISH_FENCE', 5],
+  ['proposal-submit', 'PROPOSAL_ACTION_AUTHORITY', 5],
+  ['proposal-resolve', 'PROPOSAL_ACTION_AUTHORITY', 5],
+  ['proposal-withdraw', 'PROPOSAL_ACTION_AUTHORITY', 5],
+  ['proposal-byte-limit', 'PROPOSAL_RESOURCE_AND_ATOMICITY', 8],
+  ['proposal-change-limit', 'PROPOSAL_RESOURCE_AND_ATOMICITY', 8],
+  ['proposal-pending-limit', 'PROPOSAL_PENDING_LIMIT', 5],
+  ['proposal-history-limit', 'PROPOSAL_RESOURCE_AND_ATOMICITY', 5],
+  ['proposal-depends-on', 'PROPOSAL_RESOURCE_AND_ATOMICITY', 9],
+  ['proposal-atomic-apply', 'PROPOSAL_RESOURCE_AND_ATOMICITY', 9],
+  ['proposal-precondition', 'PROPOSAL_REVISION_CONFLICT', 9],
+  ['generation-readiness', 'GENERATION_COMBATANTS_EMPTY', 2],
+  ['generation-reference', 'REFERENCE_STALE', 1],
+  ['generation-host-local', 'HOST_LOCAL_PAYLOAD_MISSING', 1],
+  ['generation-reconciliation', 'GENERATION_RECONCILIATION', 13],
+  ['runtime-funding', 'RUNTIME_PROMPT_BUDGET', 7],
+  ['runtime-body', 'RUNTIME_BODY_LIMIT', 13],
+  ['runtime-token', 'RUNTIME_PROMPT_BUDGET', 7],
+  ['runtime-output', 'RUNTIME_OUTPUT_LIMIT', 13],
+  ['runtime-provider', 'RUNTIME_PROVIDER_CONFIG', 7],
+  ['runtime-single-producer', 'RUNTIME_SINGLE_PRODUCER', 13],
+  ['result-save', 'RESULT_HOST_WRITE_AUTHORITY', 6],
+  ['result-update', 'RESULT_HOST_WRITE_AUTHORITY', 6],
+  ['result-redo', 'RESULT_HOST_WRITE_AUTHORITY', 6],
+  ['result-manual-apply', 'RESULT_HOST_WRITE_AUTHORITY', 6],
+  ['web-local-validation', 'WEB_LOCAL_VALIDATION', 0],
+  ['contracts-schemas', 'CONTRACT_SCHEMA_AND_LIMITS', 0],
+  ['contracts-limits', 'CONTRACT_SCHEMA_AND_LIMITS', 0],
+].map(([capability, gateCode, evidenceIndex]) => Object.freeze({
+  capability: String(capability),
+  gateCode: String(gateCode),
+  testId: ARENA_GATE_TEST_EVIDENCE[Number(evidenceIndex)]!,
+})));

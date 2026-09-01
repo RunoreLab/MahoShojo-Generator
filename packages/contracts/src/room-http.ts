@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { ARENA_ROOM_HTTP_ERROR_CODES } from './arena-error-taxonomy';
+
 import {
   ArenaRoomSnapshotSchema,
   GenerationMirrorSchema,
@@ -373,27 +375,7 @@ export const ArenaRoomProposalMutationResponseSchema = z.object({
   result: ArenaRoomProposalMutationResultSchema,
 }).strict();
 
-export const ArenaRoomHttpErrorCodeSchema = z.enum([
-  'ROOM_AUTHENTICATION_REQUIRED',
-  'ROOM_AUTHENTICATION_DENIED',
-  'ROOM_FORBIDDEN',
-  'ROOM_NOT_FOUND',
-  'ROOM_PAYLOAD_TOO_LARGE',
-  'ROOM_REQUEST_INVALID',
-  'ROOM_CONFLICT',
-  'ROOM_RATE_LIMITED',
-  'ROOM_UNAVAILABLE',
-  'ROOM_GENERATION_COMBATANTS_EMPTY',
-  'ROOM_GENERATION_COMBATANTS_INSUFFICIENT',
-  'ROOM_GENERATION_SCENARIO_REQUIRED',
-  'ROOM_MEMBER_LIMIT_REACHED',
-  'ROOM_PROPOSAL_PENDING_LIMIT_REACHED',
-  'ROOM_CONFIG_FRAME_TOO_LARGE',
-  'ROOM_HOST_LOCAL_PAYLOAD_MISSING_OR_MISMATCH',
-  'ROOM_HOST_LOCAL_CONTENT_VERSION_MISSING',
-  'ROOM_HOST_LOCAL_CONTENT_VERSION_MISMATCH',
-  'ROOM_REFERENCE_STALE',
-]);
+export const ArenaRoomHttpErrorCodeSchema = z.enum(ARENA_ROOM_HTTP_ERROR_CODES);
 
 export const ArenaRoomHttpErrorResponseSchema = z.object({
   code: ArenaRoomHttpErrorCodeSchema,
@@ -433,5 +415,4 @@ export type ArenaRoomLeaveResponse = z.infer<typeof ArenaRoomLeaveResponseSchema
 export type ArenaRoomProposalMutationStatus = z.infer<typeof ArenaRoomProposalMutationStatusSchema>;
 export type ArenaRoomProposalMutationResult = z.infer<typeof ArenaRoomProposalMutationResultSchema>;
 export type ArenaRoomProposalMutationResponse = z.infer<typeof ArenaRoomProposalMutationResponseSchema>;
-export type ArenaRoomHttpErrorCode = z.infer<typeof ArenaRoomHttpErrorCodeSchema>;
 export type ArenaRoomHttpErrorResponse = z.infer<typeof ArenaRoomHttpErrorResponseSchema>;

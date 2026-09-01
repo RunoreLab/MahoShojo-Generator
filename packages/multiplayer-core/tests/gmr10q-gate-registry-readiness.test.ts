@@ -1,18 +1,34 @@
 import {
   ARENA_CANONICAL_CAPABILITIES,
+  ARENA_ROOM_ERROR_TAXONOMY,
+  ARENA_ROOM_HTTP_ERROR_CODES,
+  ARENA_RUNTIME_RESOURCE_BUDGET_KEYS,
   ArenaRoomSharedConfigSchema,
+  evaluateArenaBasicGenerationReadiness,
 } from '@mahoshojo/contracts/arena-room';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
   ARENA_GATE_CAPABILITY_REGISTRY,
+  ARENA_GATE_DOMAIN_HTTP_CODE_MAP,
+  ARENA_GATE_SOURCE_CATEGORIES,
+  ARENA_GATE_SOURCE_INVENTORY,
+  ARENA_GATE_TEST_EVIDENCE,
+  ARENA_GATE_WORKFLOW_CAPABILITY_REGISTRY,
+  ARENA_GENERATION_READINESS_ISSUE_CODES,
+  ARENA_GENERATION_REQUEST_SEMANTIC_KEYS,
+  ARENA_PRODUCT_PARITY_SEMANTIC_KEYS,
   ARENA_PRODUCT_PARITY_COVERAGE,
+  ARENA_ROOM_TRANSITION_FAILURE_REASONS,
+  ARENA_STATE_MACHINE_FAILURE_REASON_REGISTRY,
   evaluateArenaGenerationReadiness,
 } from '../src/index';
 import { baseConfig } from './state-machine-fixtures';
 
 describe('GMR-10Q generation readiness', () => {
-  it('共享 schema 接受空 roster，但 readiness 返回稳定且可行动的结构化 issue', () => {
+  it('[GMR10Q-READINESS] 共享 schema 接受空 roster，但 readiness 返回稳定且可行动的结构化 issue', () => {
     const draft = { ...baseConfig(), battleMode: 'daily' as const, combatants: [] };
 
     expect(ArenaRoomSharedConfigSchema.safeParse(draft).success).toBe(true);
@@ -36,6 +52,9 @@ describe('GMR-10Q generation readiness', () => {
       ...oneCombatant,
       battleMode: 'daily',
     })).toEqual({ ready: true, issues: [] });
+    expect(evaluateArenaBasicGenerationReadiness({
+      battleMode: 'classic', combatantCount: 1, hasScenario: false,
+    })).toEqual([{ code: 'GENERATION_COMBATANTS_INSUFFICIENT', current: 1, required: 2 }]);
     expect(evaluateArenaGenerationReadiness({
       ...oneCombatant,
       battleMode: 'classic',
@@ -115,6 +134,9 @@ describe('GMR-10Q machine-readable gate/capability registry', () => {
       if (entry.reasonCategory !== 'product-parity') {
         expect(entry.reason.trim().length).toBeGreaterThan(0);
       }
+      expect(entry.currentUserMessage ?? '').not.toMatch(
+        /无法安全共享|Proposal|typed diff|\bBASE\b|\bCURRENT\b|\bPROPOSED\b/u,
+      );
     }
   });
 
@@ -184,6 +206,119 @@ describe('GMR-10Q machine-readable gate/capability registry', () => {
         expect(entry.reason?.trim().length).toBeGreaterThan(0);
         expect(entry.nextCondition?.trim().length).toBeGreaterThan(0);
       }
+    }
+  });
+
+  it('[GMR10Q-CANONICAL-INVENTORY] 对真实 source inventory 做精确集合比对', () => {
+    expect([...ARENA_GATE_SOURCE_INVENTORY.stateMachineFailureReasons].sort())
+      .toEqual([...ARENA_ROOM_TRANSITION_FAILURE_REASONS].sort());
+    expect(ARENA_STATE_MACHINE_FAILURE_REASON_REGISTRY.map((entry) => entry.reason).sort())
+      .toEqual([...ARENA_ROOM_TRANSITION_FAILURE_REASONS].sort());
+    expect(new Set(ARENA_STATE_MACHINE_FAILURE_REASON_REGISTRY.map((entry) => entry.reason)).size)
+      .toBe(ARENA_ROOM_TRANSITION_FAILURE_REASONS.length);
+    expect([...ARENA_GATE_SOURCE_INVENTORY.roomHttpErrorCodes].sort())
+      .toEqual([...ARENA_ROOM_HTTP_ERROR_CODES].sort());
+    expect([...ARENA_GATE_SOURCE_INVENTORY.generationReadinessIssueCodes].sort())
+      .toEqual([...ARENA_GENERATION_READINESS_ISSUE_CODES].sort());
+    expect([...ARENA_GATE_SOURCE_INVENTORY.runtimeResourceBudgetKeys].sort())
+      .toEqual([...ARENA_RUNTIME_RESOURCE_BUDGET_KEYS].sort());
+    expect([...ARENA_GATE_SOURCE_INVENTORY.productParitySemanticKeys].sort())
+      .toEqual(Object.entries(ARENA_PRODUCT_PARITY_SEMANTIC_KEYS)
+        .flatMap(([group, keys]) => keys.map((key) => `${group}:${key}`))
+        .sort());
+    expect(Object.keys(ARENA_PRODUCT_PARITY_COVERAGE.generationRequest).sort())
+      .toEqual([...ARENA_GENERATION_REQUEST_SEMANTIC_KEYS].sort());
+    for (const group of ['roomSharedConfig', 'proposalChanges', 'arenaUi'] as const) {
+      expect(Object.keys(ARENA_PRODUCT_PARITY_COVERAGE[group]).sort())
+        .toEqual([...ARENA_PRODUCT_PARITY_SEMANTIC_KEYS[group]].sort());
+    }
+    expect(ARENA_GATE_SOURCE_CATEGORIES.map((entry) => entry.category).sort()).toEqual([
+      'generation-readiness-code',
+      'product-parity-semantic-key',
+      'room-http-error-code',
+      'runtime-resource-budget-key',
+      'state-machine-failure-reason',
+    ]);
+    for (const source of ARENA_GATE_SOURCE_CATEGORIES) {
+      expect(source.currentSource.length).toBeGreaterThan(0);
+      expect(source.classifiedItems.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('domain error 显式映射公开 HTTP code，且 mapping 与 canonical taxonomy 一致', () => {
+    expect(ARENA_GATE_DOMAIN_HTTP_CODE_MAP).toEqual(Object.fromEntries(
+      ARENA_ROOM_ERROR_TAXONOMY.map(({ domainCode, httpCode, hostedCodes }) => [
+        domainCode,
+        { httpCode, hostedCodes },
+      ]),
+    ));
+  });
+
+  it('create 到 result/Web/contract 的关键 workflow capability 均被 registry 分类', () => {
+    expect(ARENA_GATE_WORKFLOW_CAPABILITY_REGISTRY.map((entry) => entry.capability).sort())
+      .toEqual([
+        'contracts-limits',
+        'contracts-schemas',
+        'generation-host-local',
+        'generation-readiness',
+        'generation-reconciliation',
+        'generation-reference',
+        'proposal-atomic-apply',
+        'proposal-byte-limit',
+        'proposal-change-limit',
+        'proposal-depends-on',
+        'proposal-history-limit',
+        'proposal-pending-limit',
+        'proposal-precondition',
+        'proposal-resolve',
+        'proposal-submit',
+        'proposal-withdraw',
+        'result-manual-apply',
+        'result-redo',
+        'result-save',
+        'result-update',
+        'room-close',
+        'room-create',
+        'room-join',
+        'room-kick',
+        'room-leave',
+        'room-presence',
+        'room-recovery',
+        'runtime-body',
+        'runtime-funding',
+        'runtime-output',
+        'runtime-provider',
+        'runtime-single-producer',
+        'runtime-token',
+        'shared-config-apply',
+        'shared-config-build',
+        'shared-config-publish',
+        'web-local-validation',
+      ]);
+    const gateCodes = new Set(ARENA_GATE_CAPABILITY_REGISTRY.map((entry) => entry.code));
+    for (const entry of ARENA_GATE_WORKFLOW_CAPABILITY_REGISTRY) {
+      expect(gateCodes.has(entry.gateCode), `${entry.capability} -> ${entry.gateCode}`).toBe(true);
+      expect(ARENA_GATE_TEST_EVIDENCE).toContain(entry.testId);
+    }
+    for (const entry of ARENA_STATE_MACHINE_FAILURE_REASON_REGISTRY) {
+      expect(gateCodes.has(entry.gateCode), `${entry.reason} -> ${entry.gateCode}`).toBe(true);
+      expect(ARENA_GATE_TEST_EVIDENCE).toContain(entry.testId);
+    }
+  });
+
+  it('所有 testId 都指向仓库中真实存在的测试 marker', () => {
+    const repositoryRoot = resolve(process.cwd(), '../..');
+    const evidence = new Set([
+      ...ARENA_GATE_TEST_EVIDENCE,
+      ...ARENA_GATE_CAPABILITY_REGISTRY.map((entry) => entry.testId),
+      ...ARENA_GATE_WORKFLOW_CAPABILITY_REGISTRY.map((entry) => entry.testId),
+      ...ARENA_STATE_MACHINE_FAILURE_REASON_REGISTRY.map((entry) => entry.testId),
+    ]);
+    for (const testId of evidence) {
+      const [relativeFile, marker] = testId.split('::');
+      expect(relativeFile, testId).toMatch(/\.test\.tsx?$/u);
+      expect(marker?.length, testId).toBeGreaterThan(0);
+      expect(readFileSync(resolve(repositoryRoot, relativeFile!), 'utf8'), testId).toContain(marker);
     }
   });
 });

@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { ARENA_CANONICAL_CAPABILITIES } from '@mahoshojo/contracts/arena-capabilities';
+import {
+  ARENA_CANONICAL_CAPABILITIES,
+  ARENA_RUNTIME_RESOURCE_BUDGET_KEYS,
+} from '@mahoshojo/contracts/arena-capabilities';
 
 import {
   ARENA_RESOURCE_BUDGET,
@@ -11,6 +14,10 @@ import {
 } from '../src/arena-generation/resource-budget';
 
 describe('Arena resource budget', () => {
+  it('[GMR10Q-RUNTIME-BUDGET-KEYS] canonical inventory 精确覆盖 runtime budget', () => {
+    expect(Object.keys(ARENA_RESOURCE_BUDGET).sort())
+      .toEqual([...ARENA_RUNTIME_RESOURCE_BUDGET_KEYS].sort());
+  });
   it('从 dependency-neutral canonical source 继承角色与参考项容量', () => {
     expect(ARENA_RESOURCE_BUDGET.maxCombatants)
       .toBe(ARENA_CANONICAL_CAPABILITIES.maxCombatants);

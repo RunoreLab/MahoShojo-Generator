@@ -579,46 +579,50 @@ export const ArenaRoomCommandSchema = z.union([
  */
 export type ArenaRoomCommand = z.infer<typeof ArenaRoomCommandSchema>;
 
-export type ArenaRoomTransitionFailureReason =
-  | 'invalid-state'
-  | 'invalid-command'
-  | 'invalid-authority-context'
-  | 'state-required'
-  | 'state-already-exists'
-  | 'room-epoch-mismatch'
-  | 'room-epoch-reuse'
-  | 'room-revision-mismatch'
-  | 'room-closed'
-  | 'host-required'
-  | 'member-required'
-  | 'member-not-active'
-  | 'member-limit-reached'
-  | 'member-history-limit-reached'
-  | 'member-id-conflict'
-  | 'proposal-id-conflict'
-  | 'proposal-pending-limit-reached'
-  | 'proposal-history-limit-reached'
-  | 'proposal-not-found'
-  | 'proposal-not-submitted'
-  | 'proposal-author-required'
-  | 'proposal-selection-invalid'
-  | 'proposal-conflict'
-  | 'generation-active'
-  | 'generation-history-limit-reached'
-  | 'generation-request-conflict'
-  | 'generation-id-conflict'
-  | 'generation-identity-mismatch'
-  | 'generation-attempt-mismatch'
-  | 'generation-transition-invalid'
-  | 'generation-terminal-conflict'
-  | 'authority-scope-mismatch'
-  | 'authority-scope-expired'
-  | 'deadline-not-reached'
-  | 'invalid-trusted-time'
-  | 'command-timestamp-mismatch'
-  | 'command-timestamp-regression'
-  | 'collaborative-history-limit-reached'
-  | 'room-snapshot-too-large';
+export const ARENA_ROOM_TRANSITION_FAILURE_REASONS = [
+  'invalid-state',
+  'invalid-command',
+  'invalid-authority-context',
+  'state-required',
+  'state-already-exists',
+  'room-epoch-mismatch',
+  'room-epoch-reuse',
+  'room-revision-mismatch',
+  'room-closed',
+  'host-required',
+  'member-required',
+  'member-not-active',
+  'member-limit-reached',
+  'member-history-limit-reached',
+  'member-id-conflict',
+  'proposal-id-conflict',
+  'proposal-pending-limit-reached',
+  'proposal-history-limit-reached',
+  'proposal-not-found',
+  'proposal-not-submitted',
+  'proposal-author-required',
+  'proposal-selection-invalid',
+  'proposal-conflict',
+  'generation-active',
+  'generation-history-limit-reached',
+  'generation-request-conflict',
+  'generation-id-conflict',
+  'generation-identity-mismatch',
+  'generation-attempt-mismatch',
+  'generation-transition-invalid',
+  'generation-terminal-conflict',
+  'authority-scope-mismatch',
+  'authority-scope-expired',
+  'deadline-not-reached',
+  'invalid-trusted-time',
+  'command-timestamp-mismatch',
+  'command-timestamp-regression',
+  'collaborative-history-limit-reached',
+  'room-snapshot-too-large',
+] as const;
+export type ArenaRoomTransitionFailureReason = (
+  typeof ARENA_ROOM_TRANSITION_FAILURE_REASONS
+)[number];
 
 export interface ArenaRoomTransitionFailure {
   readonly ok: false;

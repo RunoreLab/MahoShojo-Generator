@@ -1,3 +1,5 @@
+import { ARENA_ROOM_ERROR_TAXONOMY_HEADER } from '@mahoshojo/contracts/arena-room';
+
 export type HostedDrRequestClass =
   | 'safe-read'
   | 'durably-idempotent-command'
@@ -55,6 +57,7 @@ export const HOSTED_API_CORS_ORIGINS_ENVIRONMENT = 'HONO_CORS_ORIGINS' as const;
 export const HOSTED_API_CORS_ALLOW_HEADERS = [
   'Content-Type',
   'Authorization',
+  ARENA_ROOM_ERROR_TAXONOMY_HEADER,
   'X-Request-Id',
   'X-Mahoshojo-Activity-Token',
   'X-Mahoshojo-Generation-Actor-Token',

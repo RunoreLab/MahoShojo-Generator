@@ -1,4 +1,5 @@
 export * from './arena-capabilities';
+export * from './arena-error-taxonomy';
 export * from './errors';
 export * from './generation-bridge';
 export * from './generation-snapshot';

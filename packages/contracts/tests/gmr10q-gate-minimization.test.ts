@@ -63,7 +63,7 @@ const reorder = (type: 'reorderAuxScenarios' | 'reorderMaterials', keys: readonl
 });
 
 describe('GMR-10Q contract 门禁最小化', () => {
-  it('暴露稳定且具体的 Room HTTP gate error codes，同时保持响应结构兼容', () => {
+  it('[GMR10Q-CONTRACT-LIMITS] 暴露稳定且具体的 Room HTTP gate error codes，同时保持响应结构兼容', () => {
     const codes = [
       'ROOM_GENERATION_COMBATANTS_EMPTY',
       'ROOM_GENERATION_COMBATANTS_INSUFFICIENT',
@@ -71,7 +71,11 @@ describe('GMR-10Q contract 门禁最小化', () => {
       'ROOM_MEMBER_LIMIT_REACHED',
       'ROOM_PROPOSAL_PENDING_LIMIT_REACHED',
       'ROOM_CONFIG_FRAME_TOO_LARGE',
-      'ROOM_HOST_LOCAL_PAYLOAD_MISSING_OR_MISMATCH',
+      'ROOM_HOST_LOCAL_PAYLOAD_MISSING',
+      'ROOM_HOST_LOCAL_PAYLOAD_INVALID',
+      'ROOM_HOST_LOCAL_KIND_MISMATCH',
+      'ROOM_HOST_LOCAL_DIGEST_MISMATCH',
+      'ROOM_HOST_LOCAL_TYPE_MISMATCH',
       'ROOM_HOST_LOCAL_CONTENT_VERSION_MISSING',
       'ROOM_HOST_LOCAL_CONTENT_VERSION_MISMATCH',
       'ROOM_REFERENCE_STALE',
@@ -117,10 +121,21 @@ describe('GMR-10Q contract 门禁最小化', () => {
       auxScenarios: Array.from({ length: 128 }, (_, index) => scenario(index)),
       materials: Array.from({ length: 128 }, (_, index) => material(index)),
     })).success).toBe(true);
-    expect(ArenaRoomSharedConfigSchema.safeParse(config({
+    const overLimit = ArenaRoomSharedConfigSchema.safeParse(config({
       auxScenarios: Array.from({ length: 128 }, (_, index) => scenario(index)),
       materials: Array.from({ length: 129 }, (_, index) => material(index)),
-    })).success).toBe(false);
+    }));
+    expect(overLimit.success).toBe(false);
+    if (!overLimit.success) {
+      expect(overLimit.error.issues).toContainEqual(expect.objectContaining({
+        code: 'custom',
+        params: {
+          gateCode: 'ROOM_CONFIG_REFERENCE_LIMIT',
+          current: 257,
+          maximum: 256,
+        },
+      }));
+    }
   });
 
   it('排序 contract 不再保留旧的每类 10 项上限', () => {

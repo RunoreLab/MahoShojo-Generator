@@ -152,6 +152,11 @@ export const ArenaRoomSharedConfigSchema = z
       context.addIssue({
         code: 'custom',
         path: ['auxScenarios'],
+        params: {
+          gateCode: 'ROOM_CONFIG_REFERENCE_LIMIT',
+          current: referenceItemCount,
+          maximum: MAX_ARENA_REFERENCE_ITEMS,
+        },
         message: `auxScenarios and materials must contain at most ${MAX_ARENA_REFERENCE_ITEMS} references in total`,
       });
     }
