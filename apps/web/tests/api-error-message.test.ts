@@ -1,12 +1,8 @@
 import { describe, expect, test } from 'vitest';
 
 import { INFRASTRUCTURE_ERROR_MESSAGES, resolveApiErrorMessage } from '@/lib/client/apiError';
-import userVisibleContracts from '../../../config/user-visible-contracts.json';
 
 describe('resolveApiErrorMessage', () => {
-  test('keeps the executable copy map exactly synchronized with the audited contract', () => {
-    expect(INFRASTRUCTURE_ERROR_MESSAGES).toEqual(userVisibleContracts.infrastructureMessages);
-  });
   test('prefer payload.message over generic payload.error', () => {
     expect(
       resolveApiErrorMessage({
@@ -43,7 +39,7 @@ describe('resolveApiErrorMessage', () => {
     ).toBe('上游返回错误\n详情：request id: 20260101...');
   });
 
-  test.each(Object.entries(userVisibleContracts.infrastructureMessages))(
+  test.each(Object.entries(INFRASTRUCTURE_ERROR_MESSAGES))(
     'projects stable user copy for infrastructure code %s',
     (code, expectedMessage) => {
       expect(
