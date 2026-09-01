@@ -1,6 +1,6 @@
 import { OnlineDataCardTypeSchema } from '@mahoshojo/contracts/data-cards';
 import { SafeJsonValueSchema, type JsonValue } from '@mahoshojo/contracts/json-value';
-import { z } from 'zod';
+import { z } from './zod';
 
 export const LOCAL_CARD_SCHEMA_VERSION = 1 as const;
 export const LocalCardSchemaVersionSchema = z.literal(LOCAL_CARD_SCHEMA_VERSION);

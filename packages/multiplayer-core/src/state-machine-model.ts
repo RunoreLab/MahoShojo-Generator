@@ -18,7 +18,7 @@ import {
   type ArenaRoomSnapshot,
   type ControlRoomEvent,
 } from '@mahoshojo/contracts/arena-room';
-import { z } from 'zod';
+import { z } from './zod';
 
 import { ArenaMultiplayerCoreError } from './errors';
 import { collaborativeChangeTarget, hasCollaborativeChangeEffect } from './provenance';

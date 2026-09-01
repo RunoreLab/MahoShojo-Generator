@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z } from './zod';
 
 export type JsonPrimitiveValue = string | number | boolean | null;
 export type JsonValue = JsonPrimitiveValue | JsonValue[] | { [key: string]: JsonValue };

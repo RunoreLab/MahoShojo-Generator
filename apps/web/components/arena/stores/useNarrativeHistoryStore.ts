@@ -157,6 +157,8 @@ export const useNarrativeHistoryStore = create<NarrativeHistoryStoreState>()(
     {
       name: NARRATIVE_HISTORY_STORAGE_KEY,
       version: 2,
+      // 避免客户端首帧先于 React hydration 同步读取 localStorage。
+      skipHydration: true,
       migrate: (persistedState, version) => {
         const state = (persistedState ?? {}) as Partial<NarrativeHistoryStoreState> & Record<string, unknown>;
         const rawEntries = Array.isArray(state.entries) ? state.entries : [];

@@ -1,5 +1,7 @@
 'use client';
 
+import '@/lib/zod-jitless';
+
 import { GoogleAnalytics } from '@next/third-parties/google';
 import { usePathname } from 'next/navigation';
 import type { ReactNode } from 'react';

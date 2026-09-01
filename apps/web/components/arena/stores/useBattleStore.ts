@@ -566,6 +566,8 @@ export const useBattleStore = create<BattleStoreState>()(
     {
       name: 'arena-storage',
       storage: createJSONStorage(createStorage),
+      // SSR 与 hydration 首帧都使用默认状态；ArenaPage mount 后再读取 localStorage。
+      skipHydration: true,
       merge: (persistedState, currentState) => {
         const persisted = persistedState && typeof persistedState === 'object'
           ? persistedState as Record<string, unknown>

@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z } from './zod';
 
 import { ArenaContractError } from './errors';
 import { MAX_CONTROL_FRAME_BYTES } from './limits';

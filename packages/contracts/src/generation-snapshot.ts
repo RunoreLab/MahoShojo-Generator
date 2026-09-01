@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z } from './zod';
 
 import { ArenaContractError } from './errors';
 import { MAX_SNAPSHOT_DIGEST_LENGTH } from './limits';

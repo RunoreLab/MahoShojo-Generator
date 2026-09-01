@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z } from './zod';
 
 export const ONLINE_DATA_CARD_TYPES = [
   'character',

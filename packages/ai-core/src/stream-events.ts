@@ -8,7 +8,7 @@ import {
   type AiExecutionResult,
   type AiExecutionUsage,
 } from '@mahoshojo/contracts/ai-execution';
-import { z } from 'zod';
+import { z } from './zod';
 
 export const AI_STREAM_MAX_DELTA_CHARS = 65_536;
 

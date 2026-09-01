@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z } from './zod';
 
 import { ARENA_ROOM_HTTP_ERROR_CODES } from './arena-error-taxonomy';
 

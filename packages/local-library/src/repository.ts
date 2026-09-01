@@ -1,5 +1,5 @@
 import { OnlineDataCardTypeSchema } from '@mahoshojo/contracts/data-cards';
-import { z } from 'zod';
+import { z } from './zod';
 
 import { LocalCardIdSchema, LocalCardRecordV1Schema, type LocalCardRecordV1 } from './record';
 

@@ -55,6 +55,7 @@ describe('browser security headers', () => {
     expect(policy).toContain('https://www.googletagmanager.com');
     expect(policy).toContain(`script-src-attr 'none'`);
     expect(policy).toContain('upgrade-insecure-requests');
+    expect(policy).not.toContain(`'unsafe-eval'`);
   });
 
   test('开发环境 CSP 会保留 Next 开发调试所需的 unsafe-eval', () => {

@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z } from './zod';
 
 import { MAX_GENERATION_BRIDGE_BATCH_BYTES, MAX_STORY_BATCH_BYTES } from './limits';
 import { ArenaContractError, ArenaErrorCodeSchema } from './errors';
