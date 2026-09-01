@@ -4,6 +4,18 @@
 
 ## 当前权威入口
 
+平台机制简化、复杂度预算和 Arena 多人发布使用以下最新权威入口：
+
+- [平台复杂度预算与故障降级决策](./decisions/2026-09-01_193200_平台复杂度预算与故障降级决策.md)
+- [平台机制简化实施计划](./plans/2026-09-01_193201_平台机制简化实施计划.md)
+- [Arena 多人发布最小检查清单](./runbooks/2026-09-01_193300_Arena多人发布最小检查清单.md)
+- [平台机制简化建议](./reports/2026-09-01_185700_平台机制简化建议.md)
+
+该 ADR 已接受并覆盖与其冲突的旧口径：Arena 普通战后更新不再由完整角色
+`baseRevisionHash` / provenance 连续性阻断；GMR-10Q、GMR-11、source digest、review evidence
+和多层 release gate 不再是多人发布前置；已经交付的 AI 结果也不应仅因附加归档失败被改判失败。
+认证授权、严格排位、secret、多人 host/member 权限、Provider 防重复 dispatch 与有界资源限制仍然有效。
+
 Arena 多人 v1 production ingress 重整与后续激活使用以下专项入口：
 
 - [Arena 生产 Room 入口复用 Hono Primary 决策](./decisions/2026-08-31_080000_Arena生产Room入口复用HonoPrimary决策.md)
@@ -16,9 +28,8 @@ Arena 多人 GMR-10P 产品一致性整改使用以下权威入口：
 - [Arena 多人 GMR-10P 产品一致性整改实施计划](./plans/2026-08-31_150000_Arena多人GMR-10P产品一致性整改实施计划.md)
 - [Arena 多人 GMR-10P 产品一致性实施与退出审计](./logs/2026-09-01_002500_Arena多人GMR-10P产品一致性实施与退出审计.md)
 
-GMR-10P 当前为 `DONE`，只把 GMR-11 恢复为 `READY`；它不等于 production activation 已批准。GMR-11 当前门禁仍为
-`READY`，正常 push 保持 writer-disabled，显式 enabled dispatch 也会在缺少独立批准记录时 fail closed。机器状态以
-[`config/arena-production-activation-gate.json`](../config/arena-production-activation-gate.json) 为准。
+GMR-10P 的历史整改状态为 `DONE`。原 GMR-11 reviewed source / production activation 证明门禁已由上述复杂度预算
+ADR 撤回；当前发布判断以正常 CI、feature flag、运行时 smoke、health 与回滚能力为准。
 
 Arena 多人 GMR-10Q 门禁最小化与单人一致性整改使用以下权威入口：
 
@@ -26,13 +37,12 @@ Arena 多人 GMR-10Q 门禁最小化与单人一致性整改使用以下权威�
 - [Arena 多人 GMR-10Q 门禁最小化与一致性整改实施计划](./plans/2026-09-01_073000_Arena多人GMR-10Q门禁最小化与一致性整改实施计划.md)
 - [Arena 多人 GMR-10Q 门禁最小化与一致性实施与退出审计](./logs/2026-09-01_092555_Arena多人GMR-10Q门禁最小化与一致性实施与退出审计.md)
 
-GMR-10Q 当前为 `DONE`：房间存在、配置共享、协作、生成就绪、runtime 资源与结果权限已分层，0 角色可先建房，
-角色/参考项容量继承 canonical Arena/runtime，未声明例外的多人语义默认继承单人。GMR-11 因此恢复为 `READY`，但
-production activation 的独立批准字段仍为空，本状态不代表已部署、切流或获准上线。
+GMR-10Q 的历史整改状态为 `DONE`：房间存在、配置共享、协作、生成就绪、runtime 资源与结果权限已分层，0 角色可先建房，
+角色/参考项容量继承 canonical Arena/runtime，未声明例外的多人语义默认继承单人。其 machine evidence 不再构成发布条件。
 
-production ingress 专项冻结 Room HTTP/WSS 直接复用 Hosted Hono primary、caller Origin 与 service origin 分离，以及
-GMR-11 批准后的“默认分支 push 一次 CI -> Hono transaction/probe -> Cloudflare reusable deploy”目标路径。运行控制只保留
-服务端 request kill switch 与 Web exposure switch；writer capability 继续受 immutable release tuple 和独立批准门禁保护。
+production ingress 专项关于 Room HTTP/WSS 直接复用 Hosted Hono primary、caller Origin 与 service origin 分离的架构结论
+继续有效；旧的 immutable release tuple 与独立 source-review 批准门禁由最新复杂度预算 ADR 取代。运行控制继续保留
+服务端 request kill switch 与 Web exposure switch。
 
 Arena 战报正文存储与有限保留工作使用以下专项入口：
 
@@ -47,7 +57,8 @@ Arena 战后角色更新的权威对账与可编辑修复使用以下专项入�
 - [Arena 战后角色更新双信任通道规格](./specs/2026-09-01_133000_Arena战后角色更新双信任通道规格.md)
 - [Arena 战后角色可编辑修复实施计划](./plans/2026-09-01_133100_Arena战后角色可编辑修复实施计划.md)
 
-该专项保留 G25R generation owner、冻结 effect、base revision 与原生重签门禁；用户/AI 修复只产生 unsigned、non-canonical 的本地角色派生版本，不反向修改服务器比赛事实。
+该专项关于 generation owner、服务器冻结 effect，以及用户/AI 修复只产生 unsigned、non-canonical 本地派生版本的边界继续有效；
+完整角色 base revision 与 provenance 连续性作为普通战后更新许可的要求，已由最新复杂度预算 ADR 撤回。
 
 平台重整、本地优先、Monorepo、管理后台、Desktop/Mobile、本地库、Direct AI、发行与服务器权威相关工作，从下列主题页进入：
 
