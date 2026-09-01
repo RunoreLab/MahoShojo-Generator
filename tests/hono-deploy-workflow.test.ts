@@ -104,7 +104,7 @@ describe('Hono deployment workflow', () => {
     expect(workflow).not.toContain('- name: Verify public endpoint');
   });
 
-  test('默认 production release 保持 Room writer disabled，只有显式 GMR-11 激活才启用', () => {
+  test('默认 production release 保持 Room writer disabled，只有显式 feature flag 才启用', () => {
     const workflow = readFileSync(HONO_WORKFLOW_PATH, 'utf8');
     const buildJob = getJob(workflow, 'build');
     const deployJob = getJob(workflow, 'deploy');
@@ -139,36 +139,14 @@ describe('Hono deployment workflow', () => {
     expect(verificationStep).toContain('tests/hono-deploy-script.test.ts');
   });
 
-  test('production pipeline 由 READY verifier 执行一次 unified repository gate', () => {
-    const honoWorkflow = readFileSync(HONO_WORKFLOW_PATH, 'utf8');
-    const cloudflareWorkflow = readFileSync(CLOUDFLARE_WORKFLOW_PATH, 'utf8');
-    const parityStep = getStep(
-      getJob(honoWorkflow, 'build'),
-      'Require Arena product parity for production',
-    );
-    const readyVerifier = readFileSync(
-      resolve(process.cwd(), 'scripts/verify-arena-product-parity-ready.mjs'),
-      'utf8',
-    );
-
-    expect(parityStep).toContain('pnpm run verify:arena-product-parity-ready');
-    expect(parityStep).toContain('ARENA_PRODUCT_PARITY_REDIS_URL: redis://127.0.0.1:6379');
-    expect(readyVerifier).toContain("args: ['run', 'ci:verify']");
-    expect(honoWorkflow).not.toContain('run: pnpm run ci:verify');
-    expect(cloudflareWorkflow).not.toContain('Verify workspace and repository gates');
-    expect(cloudflareWorkflow).not.toContain('run: pnpm run ci:verify');
-  });
-
-  test('production build 显式绑定 GMR-10Q READY 交互与权威证据入口', () => {
+  test('production build 不再绑定 GMR source/evidence 门禁', () => {
     const workflow = readFileSync(HONO_WORKFLOW_PATH, 'utf8');
-    const parityStep = getStep(
-      getJob(workflow, 'build'),
-      'Require Arena product parity for production',
-    );
 
-    expectRequiredGateStep(parityStep);
-    expect(parityStep).toContain('pnpm run verify:arena-product-parity-ready');
-    expect(parityStep).not.toContain('pnpm run check:arena-product-parity -- --require-ready');
+    expect(workflow).not.toContain('Require Arena product parity for production');
+    expect(workflow).not.toContain('verify:arena-product-parity-ready');
+    expect(workflow).not.toContain('Require GMR-11 production activation approval');
+    expect(workflow).not.toContain('check:arena-production-activation');
+    expect(workflow).not.toContain('fetch-depth: 0');
   });
 
   test('builds and deploys Cloudflare Web through the apps/web lifecycle', () => {

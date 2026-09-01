@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { defineArenaGenerationRequest } from '@mahoshojo/multiplayer-core';
 import { ArenaRoomHostRuntimeGenerationSchema } from '@mahoshojo/contracts/arena-room';
 import {
   ARENA_CANONICAL_CAPABILITIES,
@@ -663,7 +662,7 @@ export const useBattleEngine = () => {
           customProvider: generationProviderSnapshot,
         });
       };
-      const requestBody = roomAction.inRoom ? null : defineArenaGenerationRequest({
+      const requestBody = roomAction.inRoom ? null : {
         generationRequestId,
         combatants: freshCombatants.map((combatant) => ({
           type: combatant.type,
@@ -705,7 +704,7 @@ export const useBattleEngine = () => {
         questionnaireSelections,
         questionnaires,
         customProvider: customProviderPayload ?? undefined,
-      });
+      };
 
       if (roomAction.inRoom && arenaRoomRuntime) {
         const capturedAuthority = arenaRoomHostWorkspaceAuthorityFromSession(

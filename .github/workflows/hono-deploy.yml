@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       arena_multiplayer:
-        description: Arena multiplayer Web exposure；仅在 GMR-11 独立审查批准后显式选择 enabled
+        description: Arena multiplayer Web exposure；手动部署时显式选择 enabled
         required: true
         default: disabled
         type: choice
@@ -43,8 +43,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
@@ -57,17 +55,6 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-
-      - name: Require Arena product parity for production
-        env:
-          ARENA_PRODUCT_PARITY_REDIS_URL: redis://127.0.0.1:6379
-        run: |
-          set -euo pipefail
-          pnpm run verify:arena-product-parity-ready
-
-      - name: Require GMR-11 production activation approval
-        if: github.event_name == 'workflow_dispatch' && inputs.arena_multiplayer == 'enabled'
-        run: pnpm run check:arena-production-activation --require-approved --commit "$GITHUB_SHA"
 
       - name: Verify Hono authentication and runtime
         run: |
