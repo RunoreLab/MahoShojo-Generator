@@ -44,6 +44,11 @@
       "import": "./src/arena-reconciliation.ts",
       "default": "./src/arena-reconciliation.ts"
     },
+    "./arena-character-repair": {
+      "types": "./src/arena-character-repair.ts",
+      "import": "./src/arena-character-repair.ts",
+      "default": "./src/arena-character-repair.ts"
+    },
     "./arena-battle-story-session": {
       "types": "./src/arena-battle-story-session.ts",
       "import": "./src/arena-battle-story-session.ts",
