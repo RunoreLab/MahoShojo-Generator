@@ -430,8 +430,49 @@ describe('Arena session companion service', () => {
     ));
 
     expect(result.status).toBe(500);
+    await expect(result.json()).resolves.toMatchObject({
+      error: '生成失败',
+      message: 'chapter id unavailable',
+    });
     expect(rateRelease).toHaveBeenCalledTimes(1);
     expect(createSubscription).not.toHaveBeenCalled();
+  });
+
+  it('subscription 建立失败时只返回经清洗的可行动诊断', async () => {
+    const service = createArenaSessionCompanionService({
+      generationService: {
+        createSubscription: vi.fn(),
+        createParsedSubscription: async () => {
+          throw new Error(
+            'AI_APICallError: 余额不足，请更换 Provider；Authorization: Bearer companion-secret-canary',
+          );
+        },
+        create: () => response(),
+        cancelRequest: () => response(),
+        lookup: () => response(),
+        resume: () => response(),
+        status: () => response(),
+        cancel: () => response(),
+      },
+      signatures: {
+        generateSignature: async () => 'guidance-signature',
+        verifySignature: async () => true,
+      },
+      acquireRateLimit: () => ({ allowed: true, retryAfterSeconds: 0, release: vi.fn() }),
+    });
+
+    const result = await service.generateNext(new Request(
+      'https://example.test/api/arena/session/generate-next',
+      { method: 'POST', body: JSON.stringify(requestBody()) },
+    ));
+
+    expect(result.status).toBe(500);
+    const body = await result.text();
+    expect(JSON.parse(body)).toMatchObject({
+      error: '生成失败',
+      message: expect.stringContaining('余额不足，请更换 Provider'),
+    });
+    expect(body).not.toContain('companion-secret-canary');
   });
 
   it('subscription stream 已锁定时 fail closed 并释放 lease', async () => {

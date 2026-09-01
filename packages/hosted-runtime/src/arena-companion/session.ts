@@ -25,6 +25,7 @@ import {
   ARENA_COMPANION_OPERATION_HEADER,
   readArenaCompanionJsonPayload,
 } from './service';
+import { sanitizePublicErrorMessage } from '../node-runtime/error-extraction';
 
 const SessionRequestSchema = z.object({
   sessionId: z.string().min(1),
@@ -398,7 +399,10 @@ export const createArenaSessionCompanionService = (
       releaseOnce();
       return jsonResponse({
         error: '生成失败',
-        message: error instanceof Error ? error.message : '未知错误',
+        message: sanitizePublicErrorMessage(error, {
+          fallbackMessage: '生成服务暂时不可用，请稍后重试',
+          secrets: [resolvedCustomProvider?.apiKey ?? '', guidanceSignature],
+        }),
       }, 500);
     }
     if (subscription instanceof Response) {
