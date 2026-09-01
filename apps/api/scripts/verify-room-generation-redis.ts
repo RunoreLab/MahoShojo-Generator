@@ -186,6 +186,9 @@ const sharedConfig = () => ({
   combatants: [{
     key: 'data-card:character-1',
     ref: { id: 'character-1', kind: 'character' as const, versionToken: 'v1' },
+  }, {
+    key: 'data-card:character-2',
+    ref: { id: 'character-2', kind: 'character' as const, versionToken: 'v1' },
   }],
   teams: [],
   scenario: null,

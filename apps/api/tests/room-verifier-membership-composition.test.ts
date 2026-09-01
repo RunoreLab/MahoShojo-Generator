@@ -33,4 +33,16 @@ describe('Room verifier membership composition', () => {
     expect(source).toContain('createRoomVerifierMembershipService');
     expect(source).not.toMatch(/\bcreateArenaRoomMembershipService\s*\(/u);
   });
+
+  it.each(verifierScripts.slice(0, 3))('%s 的 classic generation 夹具满足 canonical 最低人数', (filename) => {
+    const source = readFileSync(path.join(apiRoot, 'scripts', filename), 'utf8');
+    const sharedConfigStart = source.indexOf('const sharedConfig = () => ({');
+    const sharedConfigEnd = source.indexOf('\n});', sharedConfigStart);
+    const sharedConfigSource = source.slice(sharedConfigStart, sharedConfigEnd);
+
+    expect(sharedConfigStart).toBeGreaterThanOrEqual(0);
+    expect(sharedConfigEnd).toBeGreaterThan(sharedConfigStart);
+    expect(sharedConfigSource).toContain("battleMode: 'classic'");
+    expect(sharedConfigSource.match(/kind: 'character'/gu)).toHaveLength(2);
+  });
 });
