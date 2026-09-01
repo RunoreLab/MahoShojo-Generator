@@ -95,6 +95,7 @@ export const useBattleActions = () => {
       sourceDataCardUpdatedAt?: string;
       sourceIsPublic?: boolean;
       sourceAuthor?: string;
+      isPreset?: boolean;
     }): Promise<AuxiliaryScenarioState> => {
       const parsed = ScenarioSchema.safeParse(input.rawScenario);
       if (!parsed.success) {
@@ -114,6 +115,7 @@ export const useBattleActions = () => {
         content: parsed.data,
         fileName: input.fileName,
         isNative,
+        isPreset: input.isPreset === true,
         ...(adjudicationSourceKey ? { adjudicationSourceKey } : {}),
         sourceDataCardId: input.sourceDataCardId,
         sourceDataCardUpdatedAt: input.sourceDataCardUpdatedAt,
@@ -264,6 +266,7 @@ export const useBattleActions = () => {
             content: cleanedCardData,
             fileName: `${sourceDataCardName || resolvedName}.json`,
             isNative,
+            isPreset: false,
             ...(adjudicationSourceKey ? { adjudicationSourceKey } : {}),
             sourceDataCardId,
             sourceDataCardDescription,
@@ -486,6 +489,7 @@ export const useBattleActions = () => {
         content: parsed.data,
         fileName: file.name,
         isNative,
+        isPreset: false,
         ...(adjudicationSourceKey ? { adjudicationSourceKey } : {}),
       });
       appendAdjudicationEvents((parsed.data as any).adjudicationEvents, scenarioLabel, adjudicationSourceKey);
@@ -520,7 +524,7 @@ export const useBattleActions = () => {
   );
 
   const handleScenarioPaste = useCallback(
-    async (text: string, options?: { fileName?: string }) => {
+    async (text: string, options?: { fileName?: string; isPreset?: boolean }) => {
       const parsed = ScenarioSchema.safeParse(JSON.parse(text));
       if (!parsed.success) {
         throw new Error(parsed.error.issues[0]?.message || '情景文件缺少必需字段');
@@ -536,6 +540,7 @@ export const useBattleActions = () => {
         content: parsed.data,
         fileName: scenarioFileName,
         isNative,
+        isPreset: options?.isPreset === true,
         ...(adjudicationSourceKey ? { adjudicationSourceKey } : {}),
       });
       appendAdjudicationEvents((parsed.data as any).adjudicationEvents, scenarioLabel, adjudicationSourceKey);
@@ -545,7 +550,7 @@ export const useBattleActions = () => {
   );
 
   const handleAuxScenarioPaste = useCallback(
-    async (text: string, options?: { fileName?: string }) => {
+    async (text: string, options?: { fileName?: string; isPreset?: boolean }) => {
       if (useBattleStore.getState().battleMode !== 'scenario') {
         throw new Error('仅在情景模式下可添加辅助情景。');
       }
@@ -567,6 +572,7 @@ export const useBattleActions = () => {
       const built = await buildAuxScenario({
         rawScenario: parsed.data,
         fileName: scenarioFileName,
+        isPreset: options?.isPreset === true,
       });
       addAuxScenario(built);
       appendAdjudicationEvents((parsed.data as any).adjudicationEvents, scenarioLabel, built.adjudicationSourceKey);

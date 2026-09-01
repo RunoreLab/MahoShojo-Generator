@@ -215,6 +215,7 @@ const publicScenario = async (
     content: cloneJson(cleaned),
     fileName: `${source.sourceDataCardName || entry.ref.id}.json`,
     isNative: await verifyOrigin(cleaned),
+    isPreset: false,
     sourceDataCardId: entry.ref.id,
     sourceDataCardUpdatedAt: entry.ref.versionToken,
     sourceDataCardName: source.sourceDataCardName,
@@ -236,6 +237,7 @@ const presetScenario = async (
     content: cloneJson(payload),
     fileName: entry.ref.id,
     isNative: true,
+    isPreset: true,
     ...(adjudicationSourceKey ? { adjudicationSourceKey } : {}),
   };
 };
@@ -255,6 +257,7 @@ const publicMaterial = async (
     sourceDataCardUpdatedAt: entry.ref.versionToken,
     sourceDataCardName: source.sourceDataCardName,
     isNative: await verifyOrigin(cleaned),
+    isPreset: false,
   });
 };
 
@@ -283,7 +286,14 @@ export const applyArenaRoomAuthorityToBattleStore = async (
   const current = useBattleStore.getState();
   const verifyOrigin = options.verifyOrigin ?? verifyArenaContentOrigin;
   const currentConfig = options.currentBundle.sharedConfig;
-  const currentCombatants = existingByNormalizedKey(currentConfig.combatants, current.combatants);
+  // shared config 不包含随机占位符，所有按序配对必须使用同样的可共享角色投影。
+  const currentShareableCombatants = current.combatants.filter(
+    (combatant): combatant is CombatantData => 'data' in combatant,
+  );
+  const currentCombatants = existingByNormalizedKey(
+    currentConfig.combatants,
+    currentShareableCombatants,
+  );
   const currentAuxScenarios = existingByNormalizedKey(currentConfig.auxScenarios, current.auxScenarios);
   const currentMaterials = existingByNormalizedKey(currentConfig.materials, current.materials);
   const hostLocalPayloads = new Map(
@@ -293,8 +303,8 @@ export const applyArenaRoomAuthorityToBattleStore = async (
   currentConfig.combatants.forEach((entry, index) => {
     const next = config.combatants.find((candidate) => candidate.key === entry.key);
     if (next && sameSource(entry, next)) return;
-    const sourceKey = current.combatants[index]
-      ? combatantAdjudicationSourceKey(current.combatants[index]!)
+    const sourceKey = currentShareableCombatants[index]
+      ? combatantAdjudicationSourceKey(currentShareableCombatants[index]!)
       : '';
     if (sourceKey) invalidAdjudicationSourceKeys.add(sourceKey);
   });
@@ -365,7 +375,12 @@ export const applyArenaRoomAuthorityToBattleStore = async (
     };
   }));
 
-  let scenario: ScenarioState = { content: null, fileName: null, isNative: false };
+  let scenario: ScenarioState = {
+    content: null,
+    fileName: null,
+    isNative: false,
+    isPreset: false,
+  };
   if (config.scenario) {
     const existing = currentConfig.scenario && current.scenario.content !== null
       ? { normalized: currentConfig.scenario, value: current.scenario }
@@ -385,6 +400,7 @@ export const applyArenaRoomAuthorityToBattleStore = async (
         content: cloneJson(localPayload.payload),
         fileName: `${config.scenario.displayName}.json`,
         isNative: await verifyOrigin(localPayload.payload),
+        isPreset: false,
         arenaRoomKey: config.scenario.key,
       };
     } else {
@@ -408,6 +424,7 @@ export const applyArenaRoomAuthorityToBattleStore = async (
           content: cloneJson(localPayload.payload),
           fileName: `${entry.displayName}.json`,
           isNative: await verifyOrigin(localPayload.payload),
+          isPreset: false,
           arenaRoomKey: entry.key,
         };
       }
@@ -439,6 +456,7 @@ export const applyArenaRoomAuthorityToBattleStore = async (
             id: `room-material-${entry.key}`,
             sourceDataCardName: entry.displayName,
             isNative: await verifyOrigin(localPayload.payload),
+            isPreset: false,
           }),
           arenaRoomKey: entry.key,
         };

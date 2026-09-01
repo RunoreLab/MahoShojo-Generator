@@ -146,12 +146,15 @@ const localScenarioView = (
 ): ArenaEditorScenarioView | null => {
   if (scenario.content === null) return null;
   const sourceDataCardId = text(scenario.sourceDataCardId);
+  const isPreset = scenario.isPreset === true;
   const source = sourceDataCardId
     ? 'data-card' as const
-    : scenario.isNative ? 'preset' as const : 'host-local' as const;
+    : isPreset ? 'preset' as const : 'host-local' as const;
   return Object.freeze({
     key: sourceDataCardId
       ? `data-card:${sourceDataCardId}`
+      : isPreset && text(scenario.fileName)
+        ? `preset:${text(scenario.fileName)}`
       : text(scenario.arenaRoomKey) || text(scenario.adjudicationSourceKey) || fallbackKey,
     name: text(scenario.sourceDataCardName)
       || recordName(scenario.content)
@@ -171,12 +174,15 @@ const localMaterialView = (
   index: number,
 ): ArenaEditorMaterialView => {
   const sourceDataCardId = text(material.sourceDataCardId);
+  const isPreset = material.isPreset === true;
   const source = sourceDataCardId
     ? 'data-card' as const
-    : material.isNative ? 'preset' as const : 'host-local' as const;
+    : isPreset ? 'preset' as const : 'host-local' as const;
   return Object.freeze({
     key: sourceDataCardId
       ? `data-card:${sourceDataCardId}`
+      : isPreset && text(material.fileName)
+        ? `preset:${text(material.fileName)}`
       : text(material.arenaRoomKey) || `local-material:${material.id || index}`,
     name: text(material.name) || '未命名素材',
     source,

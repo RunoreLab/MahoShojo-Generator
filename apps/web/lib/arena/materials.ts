@@ -18,7 +18,10 @@ export interface ArenaMaterialState {
   sourceDataCardUpdatedAt?: string;
   sourceKind: ArenaMaterialSourceKind;
   sourceType: string;
+  /** 内容签名验证结果，不代表其来自内置预设。 */
   isNative: boolean;
+  /** 仅当素材由当前应用的内置预设目录选入时为 true。 */
+  isPreset?: boolean;
 }
 
 export type BuildArenaMaterialStateInput = {
@@ -31,6 +34,7 @@ export type BuildArenaMaterialStateInput = {
   sourceKind?: ArenaMaterialSourceKind;
   sourceType?: string;
   isNative?: boolean;
+  isPreset?: boolean;
 };
 
 const TRANSPORT_META_KEYS = new Set([
@@ -162,6 +166,7 @@ export const buildArenaMaterialState = (input: BuildArenaMaterialStateInput): Ar
       sourceKind: 'wantu-card',
       sourceType,
       isNative: input.isNative === true,
+      isPreset: input.isPreset === true,
     };
   }
 
@@ -180,6 +185,7 @@ export const buildArenaMaterialState = (input: BuildArenaMaterialStateInput): Ar
         sourceKind: 'mahoshojo-data-card',
         sourceType,
         isNative: input.isNative === true,
+        isPreset: input.isPreset === true,
       };
     }
   }
@@ -200,6 +206,7 @@ export const buildArenaMaterialState = (input: BuildArenaMaterialStateInput): Ar
     sourceKind,
     sourceType,
     isNative: input.isNative === true,
+    isPreset: input.isPreset === true,
   };
 };
 
@@ -225,6 +232,7 @@ export const normalizeArenaMaterialsForRequest = (raw: unknown): ArenaMaterialSt
           sourceType: normalizeText(item.sourceType),
           sourceDataCardName: normalizeText(item.name),
           isNative: item.isNative === true,
+          isPreset: item.isPreset === true,
         });
       }
       return buildArenaMaterialState({ payload: item });

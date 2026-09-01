@@ -111,7 +111,10 @@ export type Combatant = CombatantData | RandomCombatantPlaceholder;
 export interface ScenarioState {
   content: Record<string, unknown> | null;
   fileName: string | null;
+  /** 内容签名验证结果，不代表其来自内置预设。 */
   isNative: boolean;
+  /** 仅当内容由当前应用的内置情景目录选入时为 true。 */
+  isPreset?: boolean;
   /** 从多人 authority materialize 后保留原始 opaque resource key。 */
   arenaRoomKey?: string;
   adjudicationSourceKey?: string;

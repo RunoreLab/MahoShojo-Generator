@@ -45,9 +45,11 @@ export function BattleLiteScenarioSection({
 
     const title = getScenarioTitle(scenario.content);
     return presets
-      .filter((preset) => scenario.fileName === preset.filename || (title && preset.title === title))
+      .filter((preset) => scenario.isPreset === true && (
+        scenario.fileName === preset.filename || (title && preset.title === title)
+      ))
       .map((preset) => preset.filename);
-  }, [scenario.content, scenario.fileName, scenarioPresetQuery.data]);
+  }, [scenario.content, scenario.fileName, scenario.isPreset, scenarioPresetQuery.data]);
 
   const scenarioSummary = useMemo(() => {
     const title = getScenarioTitle(scenario.content);
@@ -58,7 +60,9 @@ export function BattleLiteScenarioSection({
     if (isGenerating) return;
 
     const currentTitle = getScenarioTitle(scenario.content);
-    const isSelected = scenario.fileName === preset.filename || (currentTitle && preset.title === currentTitle);
+    const isSelected = scenario.isPreset === true && (
+      scenario.fileName === preset.filename || (currentTitle && preset.title === currentTitle)
+    );
 
     if (isSelected) {
       clearScenario();
@@ -73,7 +77,7 @@ export function BattleLiteScenarioSection({
         throw new Error(`无法加载预设情景：${preset.title}`);
       }
       const text = await response.text();
-      await handleScenarioPaste(text, { fileName: preset.filename });
+      await handleScenarioPaste(text, { fileName: preset.filename, isPreset: true });
       setError(null);
     } catch (error) {
       const message = error instanceof Error ? error.message : '无法加载预设情景';

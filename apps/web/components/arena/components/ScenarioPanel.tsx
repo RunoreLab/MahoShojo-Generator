@@ -79,11 +79,14 @@ export function ScenarioPanel({
 
     presets.forEach((preset) => {
       const matchesMain =
+        scenario.isPreset === true &&
         Boolean(scenario.content) &&
         (scenario.fileName === preset.filename || (mainTitle && preset.title === mainTitle));
       const matchesAux = auxScenarios.some((aux) => {
         const auxTitle = getScenarioTitle(aux.content);
-        return aux.fileName === preset.filename || (auxTitle && auxTitle === preset.title);
+        return aux.isPreset === true && (
+          aux.fileName === preset.filename || (auxTitle && auxTitle === preset.title)
+        );
       });
 
       if (matchesMain || matchesAux) {
@@ -92,17 +95,20 @@ export function ScenarioPanel({
     });
 
     return Array.from(selected);
-  }, [auxScenarios, scenario.content, scenario.fileName, scenarioPresetQuery.data]);
+  }, [auxScenarios, scenario.content, scenario.fileName, scenario.isPreset, scenarioPresetQuery.data]);
 
   const handleToggleScenarioPreset = async (preset: ScenarioPreset) => {
     if (isGenerating) return;
     const mainTitle = getScenarioTitle(scenario.content);
     const isMainSelected =
+      scenario.isPreset === true &&
       Boolean(scenario.content) &&
       (scenario.fileName === preset.filename || (mainTitle && preset.title === mainTitle));
     const matchedAux = auxScenarios.find((aux) => {
       const auxTitle = getScenarioTitle(aux.content);
-      return aux.fileName === preset.filename || (auxTitle && auxTitle === preset.title);
+      return aux.isPreset === true && (
+        aux.fileName === preset.filename || (auxTitle && auxTitle === preset.title)
+      );
     });
 
     if (isMainSelected) {
@@ -134,9 +140,9 @@ export function ScenarioPanel({
       }
       const text = await response.text();
       if (hasMainScenario) {
-        await handleAuxScenarioPaste(text, { fileName: preset.filename });
+        await handleAuxScenarioPaste(text, { fileName: preset.filename, isPreset: true });
       } else {
-        await handleScenarioPaste(text, { fileName: preset.filename });
+        await handleScenarioPaste(text, { fileName: preset.filename, isPreset: true });
       }
       setError(null);
     } catch (error) {

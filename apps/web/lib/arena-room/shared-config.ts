@@ -303,7 +303,7 @@ const normalizeScenario = async (
       scenario.sourceDataCardUpdatedAt,
     );
   }
-  if (scenario.isNative) {
+  if (scenario.isPreset === true) {
     return presetEntry('scenario', scenario.fileName, scenario.content);
   }
   const displayName = displayNameFrom(scenario.content, scenario.fileName ?? '本地情景');
@@ -327,7 +327,7 @@ const normalizeMaterial = async (
       material.sourceDataCardUpdatedAt,
     );
   }
-  if (material.isNative) {
+  if (material.isPreset === true) {
     return presetEntry('material', material.fileName, material.content);
   }
   const displayName = text(material.name) || material.fileName || '本地素材';
@@ -375,11 +375,12 @@ const buildArenaRoomHostWorkspaceBundle = async (
   source: ArenaRoomBattleStateSource,
 ): Promise<ArenaRoomHostWorkspaceBundleBuildResult> => {
   const limitIssues: ArenaRoomShareabilityIssue[] = [];
-  if (source.combatants.length > ARENA_CANONICAL_CAPABILITIES.maxCombatants) {
+  const projectedCombatantCount = source.combatants.filter((combatant) => 'data' in combatant).length;
+  if (projectedCombatantCount > ARENA_CANONICAL_CAPABILITIES.maxCombatants) {
     limitIssues.push(Object.freeze({
       code: 'ROOM_COMBATANT_LIMIT',
       target: 'combatants',
-      message: `当前有 ${source.combatants.length} 位角色，多人竞技场最多支持 ${ARENA_CANONICAL_CAPABILITIES.maxCombatants} 位。`,
+      message: `当前有 ${projectedCombatantCount} 位可共享角色，多人竞技场最多支持 ${ARENA_CANONICAL_CAPABILITIES.maxCombatants} 位。`,
       action: '请移除多余角色后再同步。',
     }));
   }

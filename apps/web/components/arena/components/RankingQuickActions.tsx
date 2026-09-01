@@ -90,6 +90,7 @@ const buildStrictSetupMissingReasons = (input: {
   requiredStoryGuidance: string;
   requiredScenarioPresetFilename: string | null;
   scenarioFileName: string | null;
+  scenarioIsPreset: boolean;
   rankableCombatants: CombatantData[];
   userGuidance: string;
   selectedLanguage: string;
@@ -147,7 +148,9 @@ const buildStrictSetupMissingReasons = (input: {
     if (!input.scenarioEnabled) reasons.push('需启用「情景模式」并选择主情景');
     if (input.requiredScenarioPresetFilename) {
       const fileName = typeof input.scenarioFileName === 'string' ? input.scenarioFileName.trim() : '';
-      if (fileName !== input.requiredScenarioPresetFilename) reasons.push('需选择赛季指定的「预设情景」');
+      if (!input.scenarioIsPreset || fileName !== input.requiredScenarioPresetFilename) {
+        reasons.push('需选择赛季指定的「预设情景」');
+      }
     }
   } else if (input.scenarioEnabled) {
     reasons.push('需关闭「情景模式」');
@@ -372,6 +375,7 @@ export function RankingQuickActions() {
         requiredStoryGuidance: seasonStrictRules.storyGuidance,
         requiredScenarioPresetFilename: seasonStrictRules.scenarioPresetFilename,
         scenarioFileName: typeof scenario.fileName === 'string' ? scenario.fileName : null,
+        scenarioIsPreset: scenario.isPreset === true,
         rankableCombatants,
         userGuidance: settings.userGuidance,
         selectedLanguage,
@@ -399,6 +403,7 @@ export function RankingQuickActions() {
       rankableCombatants,
       scenario.content,
       scenario.fileName,
+      scenario.isPreset,
       selectedLanguage,
       seasonStrictRules.mode,
       seasonStrictRules.questionnaireLoreAllowed,
@@ -619,7 +624,7 @@ export function RankingQuickActions() {
         const res = await fetch(`/scenario-presets/${encodeURIComponent(filename)}`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const text = await res.text();
-        await handleScenarioPaste(text, { fileName: filename });
+        await handleScenarioPaste(text, { fileName: filename, isPreset: true });
         setAdjudicationEvents([]);
       } catch (error) {
         setError(`❌ 无法应用赛季预设情景：${error instanceof Error ? error.message : '未知错误'}`);
@@ -743,7 +748,9 @@ export function RankingQuickActions() {
       if (!scenario.content) reasons.push('season-scenario-missing');
       if (seasonStrictRules.scenarioPresetFilename) {
         const fileName = typeof scenario.fileName === 'string' ? scenario.fileName.trim() : '';
-        if (fileName !== seasonStrictRules.scenarioPresetFilename) reasons.push('season-scenario-preset-mismatch');
+        if (scenario.isPreset !== true || fileName !== seasonStrictRules.scenarioPresetFilename) {
+          reasons.push('season-scenario-preset-mismatch');
+        }
       }
       if (auxScenarios.length > 0) reasons.push('season-aux-scenarios-not-allowed');
     }
@@ -767,6 +774,7 @@ export function RankingQuickActions() {
     readableCombatants,
     scenario.content,
     scenario.fileName,
+    scenario.isPreset,
     selectedLanguage,
     questionnaireLoreEnabled,
     questionnaireLoreIds,

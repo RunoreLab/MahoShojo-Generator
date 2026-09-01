@@ -7,6 +7,25 @@ import {
 } from '@/lib/arena/materials';
 
 describe('arena materials', () => {
+  test('原生验签与预设来源分开保存', () => {
+    const signedLocal = buildArenaMaterialState({
+      payload: { title: '签名本地素材' },
+      fileName: 'signed-local.json',
+      isNative: true,
+    });
+    const explicitPreset = buildArenaMaterialState({
+      payload: { title: '明确预设素材' },
+      fileName: 'preset.json',
+      isNative: false,
+      isPreset: true,
+    });
+
+    expect(signedLocal).toMatchObject({ isNative: true, isPreset: false });
+    expect(explicitPreset).toMatchObject({ isNative: false, isPreset: true });
+    expect(normalizeArenaMaterialsForRequest([explicitPreset]))
+      .toEqual([expect.objectContaining({ isNative: false, isPreset: true })]);
+  });
+
   test('任意万途 Card 包括 character 都可作为素材', () => {
     const card = {
       cardKind: 'character',

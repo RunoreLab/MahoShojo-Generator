@@ -155,8 +155,11 @@ describe('Arena room host reconciliation', () => {
       teamId: synchronized.teams[0]!.id,
     });
     expect(synchronized.scenario.isNative).toBe(false);
+    expect(synchronized.scenario.isPreset).toBe(false);
     expect(synchronized.auxScenarios[0]!.isNative).toBe(false);
+    expect(synchronized.auxScenarios[0]!.isPreset).toBe(false);
     expect(synchronized.materials[0]!.isNative).toBe(false);
+    expect(synchronized.materials[0]!.isPreset).toBe(false);
     expect(loadPublicCard).toHaveBeenCalledTimes(4);
     expect(verifyOrigin).toHaveBeenCalledTimes(4);
 
@@ -288,6 +291,7 @@ describe('Arena room host reconciliation', () => {
     expect(synchronized.scenario).toMatchObject({
       fileName: scenarioPreset!.id,
       isNative: true,
+      isPreset: true,
     });
     expect(verifyOrigin).not.toHaveBeenCalled();
     const rebuilt = await buildArenaRoomHostWorkspaceBundleFromBattleState(synchronized);
@@ -385,6 +389,69 @@ describe('Arena room host reconciliation', () => {
     expect(useBattleStore.getState().adjudicationEvents.map((event) => event.id)).toEqual([
       'manual-event',
       'retained-event',
+    ]);
+  });
+
+  it('混合随机占位符时按可共享角色序列重建，不错配正文或判定来源', async () => {
+    useBattleStore.setState({
+      combatants: [{
+        type: 'random-magical-girl',
+        id: 'random-before-real-combatants',
+        filename: '随机魔法少女',
+      }, {
+        type: 'general-character',
+        data: { name: '保留角色 A' },
+        filename: 'A.json',
+        isValid: false,
+        isPreset: false,
+        adjudicationSourceKey: 'file:A.json',
+      }, {
+        type: 'general-character',
+        data: { name: '删除角色 B' },
+        filename: 'B.json',
+        isValid: false,
+        isPreset: false,
+        adjudicationSourceKey: 'file:B.json',
+      }],
+      adjudicationEvents: [{
+        id: 'manual-mixed',
+        description: '手工判定',
+        type: 'binary',
+      }, {
+        id: 'retained-a',
+        description: '角色 A 判定',
+        type: 'binary',
+        sourceKey: 'file:A.json',
+      }, {
+        id: 'removed-b',
+        description: '角色 B 判定',
+        type: 'binary',
+        sourceKey: 'file:B.json',
+      }],
+    });
+    const baselineBundle = await buildArenaRoomHostWorkspaceBundleFromBattleState(
+      useBattleStore.getState(),
+    );
+    expect(baselineBundle.sharedConfig.combatants).toHaveLength(2);
+    const target: ArenaRoomSharedConfig = {
+      ...baselineBundle.sharedConfig,
+      combatants: [baselineBundle.sharedConfig.combatants[0]!],
+    };
+
+    await applyArenaRoomAuthorityToBattleStore(target, {
+      currentBundle: baselineBundle,
+      loadPublicCard: async () => {
+        throw new Error('不应读取 online card');
+      },
+    });
+
+    const synchronized = useBattleStore.getState();
+    expect(synchronized.combatants).toEqual([
+      expect.objectContaining({ data: { name: '保留角色 A' }, filename: 'A.json' }),
+    ]);
+    expect(synchronized.adjudicationEvents.map((event) => event.id)).toEqual([
+      'manual-mixed',
+      'retained-a',
     ]);
   });
 });

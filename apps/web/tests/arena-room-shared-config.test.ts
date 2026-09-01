@@ -234,6 +234,73 @@ describe('Arena Room Battle store projection', () => {
       .resolves.toMatchObject({ combatants: [{ displayName: '未签名本地角色' }] });
   });
 
+  it('验签结果不代表预设来源，签名本地情景和素材仍投影为 host-local', async () => {
+    const signedLocal = source();
+    signedLocal.scenario = {
+      content: { title: '已验签本地主情景' },
+      fileName: 'signed-local-scenario.json',
+      isNative: true,
+      isPreset: false,
+    };
+    signedLocal.auxScenarios = [{
+      id: 'signed-local-aux',
+      content: { title: '已验签本地辅助情景' },
+      fileName: 'signed-local-aux.json',
+      isNative: true,
+      isPreset: false,
+    }];
+    signedLocal.materials = [{
+      id: 'signed-local-material',
+      name: '已验签本地素材',
+      content: { title: '已验签本地素材' },
+      fileName: 'signed-local-material.json',
+      sourceKind: 'raw-json',
+      sourceType: 'raw-json',
+      isNative: true,
+      isPreset: false,
+    }];
+
+    const bundle = await buildArenaRoomHostWorkspaceBundleFromBattleState(signedLocal);
+
+    expect(bundle.sharedConfig.scenario).toMatchObject({
+      key: expect.stringMatching(/^host-local:scenario:/u),
+      source: 'host-local',
+    });
+    expect(bundle.sharedConfig.auxScenarios[0]).toMatchObject({
+      key: expect.stringMatching(/^host-local:scenario:/u),
+      source: 'host-local',
+    });
+    expect(bundle.sharedConfig.materials[0]).toMatchObject({
+      key: expect.stringMatching(/^host-local:material:/u),
+      source: 'host-local',
+    });
+    expect(bundle.hostLocalPayloads.map((entry) => entry.key)).toEqual(expect.arrayContaining([
+      bundle.sharedConfig.scenario!.key,
+      bundle.sharedConfig.auxScenarios[0]!.key,
+      bundle.sharedConfig.materials[0]!.key,
+    ]));
+  });
+
+  it('显式标记的内置情景才投影为 preset，不依赖 isNative', async () => {
+    const preset = source();
+    preset.scenario = {
+      content: { title: '显式预设情景' },
+      fileName: 'explicit-preset.json',
+      isNative: false,
+      isPreset: true,
+    };
+
+    const bundle = await buildArenaRoomHostWorkspaceBundleFromBattleState(preset);
+
+    expect(bundle.sharedConfig.scenario).toMatchObject({
+      key: 'preset:explicit-preset.json',
+      ref: { id: 'explicit-preset.json', kind: 'scenario' },
+    });
+    expect(bundle.hostLocalPayloads.some((entry) => (
+      entry.key === 'preset:explicit-preset.json'
+    ))).toBe(false);
+  });
+
   it('随机占位符不是可共享性问题，其他引用问题仍能稳定定位', async () => {
     const missingVersion = source();
     if ('data' in missingVersion.combatants[1]!) {
@@ -338,30 +405,41 @@ describe('Arena Room Battle store projection', () => {
     const atLimit = source();
     atLimit.battleMode = 'daily';
     atLimit.teams = [];
-    atLimit.combatants = Array.from({ length: 32 }, (_, index) => ({
+    atLimit.settings.userGuidance = '保留 32 位实体的草稿设置';
+    atLimit.combatants = [...Array.from({ length: 32 }, (_, index) => ({
       type: 'magical-girl' as const,
       data: { name: `本地 ${index}` },
       filename: `local-${index}.json`,
       isValid: true,
       isPreset: false,
-    }));
-    await expect(buildArenaRoomSharedConfigFromBattleState(atLimit))
-      .resolves.toMatchObject({ combatants: expect.arrayContaining([expect.any(Object)]) });
+    })), {
+      type: 'random-canshou',
+      id: 'random-over-shareability-boundary',
+      filename: '随机残兽',
+    }];
+    const atLimitProjection = await buildArenaRoomSharedConfigFromBattleState(atLimit);
+    expect(atLimitProjection.combatants).toHaveLength(32);
+    expect(atLimitProjection.userGuidance).toBe('保留 32 位实体的草稿设置');
 
     const overflow = source();
-    overflow.combatants = Array.from({ length: 33 }, (_, index) => ({
+    overflow.combatants = [...Array.from({ length: 33 }, (_, index) => ({
       type: 'magical-girl' as const,
       data: { name: `本地 ${index}` },
       filename: `local-${index}.json`,
       isValid: true,
       isPreset: false,
-    }));
+    })), {
+      type: 'random-canshou',
+      id: 'random-after-overflow',
+      filename: '随机残兽',
+    }];
     const result = await tryBuildArenaRoomHostWorkspaceBundleFromBattleState(overflow);
     expect(result).toMatchObject({
       ok: false,
       issues: [expect.objectContaining({
         code: 'ROOM_COMBATANT_LIMIT',
         target: 'combatants',
+        message: expect.stringContaining('当前有 33 位可共享角色'),
       })],
     });
   });

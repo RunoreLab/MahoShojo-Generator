@@ -80,6 +80,7 @@ const defaultScenario: ScenarioState = {
   content: null,
   fileName: null,
   isNative: false,
+  isPreset: false,
 };
 
 const defaultSettings: BattleSettings = {
