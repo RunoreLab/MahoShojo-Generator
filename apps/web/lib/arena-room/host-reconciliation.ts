@@ -51,6 +51,7 @@ export type ArenaRoomAuthorityMaterializationOptions = Readonly<{
   loadPublicCard: ArenaRoomPublicCardLoader;
   hostLocalPayloads?: readonly ArenaRoomHostLocalPayload[];
   verifyOrigin?: ArenaRoomOriginVerifier;
+  commitIf?: () => boolean;
 }>;
 
 const cloneJson = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
@@ -465,6 +466,9 @@ export const applyArenaRoomAuthorityToBattleStore = async (
     throw new Error(`房间素材 ${entry.key} 缺少可恢复的本地正文`);
   }));
 
+  if (options.commitIf && !options.commitIf()) {
+    throw new Error('房间配置同步期间状态已变化，未覆盖新的本地修改');
+  }
   useBattleStore.setState((state): Partial<BattleStoreState> => ({
     battleMode: config.battleMode,
     combatants,

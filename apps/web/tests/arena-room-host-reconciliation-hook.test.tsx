@@ -19,7 +19,14 @@ import type { ArenaRoomHostWorkspace } from '@/lib/arena-room/host-workspace';
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 const mocks = vi.hoisted(() => ({
-  applyAuthority: vi.fn(async () => undefined),
+  applyAuthority: vi.fn(async (
+    _config: unknown,
+    options: { readonly commitIf?: () => boolean },
+  ) => {
+    if (options.commitIf && !options.commitIf()) {
+      throw new Error('房间配置同步期间状态已变化，未覆盖新的本地修改');
+    }
+  }),
   buildBundle: vi.fn(),
 }));
 
@@ -243,6 +250,60 @@ describe('useArenaRoomHostReconciliation', () => {
       kind: 'error',
       code: 'ROOM_GENERATION_RECONCILIATION_REQUIRED',
       message: '本地草稿无法读取',
+    });
+  });
+
+  it('同步等待期间 authority 再次更新时废弃旧任务且不 capture 过期 baseline', async () => {
+    let releaseApply!: () => void;
+    const applyPending = new Promise<void>((resolve) => {
+      releaseApply = resolve;
+    });
+    let capturedCommitIf: (() => boolean) | undefined;
+    mocks.applyAuthority.mockImplementationOnce(async (_config, options) => {
+      capturedCommitIf = options.commitIf;
+      await applyPending;
+      if (options.commitIf && !options.commitIf()) {
+        throw new Error('房间配置同步期间状态已变化，未覆盖新的本地修改');
+      }
+    });
+    const capturePublished = vi.fn();
+    const workspace = {
+      compare: vi.fn()
+        .mockReturnValueOnce({
+          kind: 'clean',
+          start: { sharedConfig: config('classic'), hostLocalPayloads: [] },
+        })
+        .mockReturnValueOnce({
+          kind: 'dirty',
+          reasons: ['shared-config'] as const,
+          current: { sharedConfig: config('classic'), hostLocalPayloads: [] },
+          room: { sharedConfig: config('classic'), hostLocalPayloads: [] },
+        }),
+      startFromRoom: vi.fn(() => ({ sharedConfig: config('daily'), hostLocalPayloads: [] })),
+      capturePublished,
+      retainFor: vi.fn(),
+      clear: vi.fn(),
+    } satisfies ArenaRoomHostWorkspace;
+    mocks.buildBundle.mockResolvedValue(bundle(config('classic')));
+
+    await act(async () => root.render(<Harness state={currentState} workspace={workspace} />));
+    currentState = stateAt(2, config('daily'));
+    await act(async () => root.render(<Harness state={currentState} workspace={workspace} />));
+    await flush();
+    expect(capturedCommitIf).toBeTypeOf('function');
+
+    currentState = stateAt(3, config('scenario'));
+    await act(async () => root.render(<Harness state={currentState} workspace={workspace} />));
+    await flush();
+    expect(capturedCommitIf?.()).toBe(false);
+
+    releaseApply();
+    await flush();
+
+    expect(capturePublished).not.toHaveBeenCalled();
+    expect(latest?.state).toMatchObject({
+      kind: 'conflicted',
+      revision: 3,
     });
   });
 });

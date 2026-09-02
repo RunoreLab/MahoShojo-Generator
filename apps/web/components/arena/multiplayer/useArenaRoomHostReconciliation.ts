@@ -70,6 +70,15 @@ const authorityIdentity = (authority: ArenaRoomHostWorkspaceAuthority): string =
   `${authority.roomId}\n${authority.roomEpoch}\n${authority.ownerUserId}`
 );
 
+const isSameAuthorityRevision = (
+  left: ArenaRoomHostWorkspaceAuthority | null,
+  right: ArenaRoomHostWorkspaceAuthority,
+): boolean => Boolean(
+  left
+  && authorityIdentity(left) === authorityIdentity(right)
+  && left.revision === right.revision,
+);
+
 const loadPublicCard = async (id: string): Promise<unknown> => {
   const result = await fetchPublicDataCardRowById(id);
   if (result.kind === 'success') return result.card;
@@ -106,14 +115,17 @@ export const useArenaRoomHostReconciliation = ({
   const observedAuthorityRef = useRef<ArenaRoomHostWorkspaceAuthority | null>(null);
   const processingKeyRef = useRef<string | null>(null);
   const actionLockRef = useRef(false);
+  const operationGenerationRef = useRef(0);
 
   const installAuthority = useCallback(async (
     authority: ArenaRoomHostWorkspaceAuthority,
     action: 'auto' | 'sync-room',
+    operationGeneration: number,
   ): Promise<void> => {
     setState({ kind: 'synchronizing', action });
+    const battleStateAtStart = useBattleStore.getState();
     const currentBundle = await buildArenaRoomHostWorkspaceBundleFromBattleState(
-      useBattleStore.getState(),
+      battleStateAtStart,
     );
     const roomStart = hostWorkspace.startFromRoom(authority);
     await applyArenaRoomAuthorityToBattleStore(authority.sharedConfig, {
@@ -121,10 +133,27 @@ export const useArenaRoomHostReconciliation = ({
       loadPublicCard,
       hostLocalPayloads: roomStart?.hostLocalPayloads,
       verifyOrigin: verifyArenaContentOrigin,
+      commitIf: () => (
+        operationGenerationRef.current === operationGeneration
+        && useBattleStore.getState() === battleStateAtStart
+        && isSameAuthorityRevision(currentAuthority(controller), authority)
+      ),
     });
+    if (
+      operationGenerationRef.current !== operationGeneration
+      || !isSameAuthorityRevision(currentAuthority(controller), authority)
+    ) return;
+    const synchronizedState = useBattleStore.getState();
     const synchronizedBundle = await buildArenaRoomHostWorkspaceBundleFromBattleState(
-      useBattleStore.getState(),
+      synchronizedState,
     );
+    if (
+      operationGenerationRef.current !== operationGeneration
+      || useBattleStore.getState() !== synchronizedState
+      || !isSameAuthorityRevision(currentAuthority(controller), authority)
+    ) {
+      throw new Error('房间配置同步期间状态已变化，未覆盖新的本地修改');
+    }
     if (!areArenaRoomSharedConfigsEqual(
       synchronizedBundle.sharedConfig,
       authority.sharedConfig,
@@ -140,12 +169,13 @@ export const useArenaRoomHostReconciliation = ({
         ? '房间配置已更新，并同步到 Arena 编辑区'
         : '已放弃本地冲突修改并同步当前房间配置',
     });
-  }, [hostWorkspace]);
+  }, [controller, hostWorkspace]);
 
   const publishLocal = useCallback(async (): Promise<void> => {
     if (actionLockRef.current) return;
     const authority = currentAuthority(controller);
     if (!authority) return;
+    const operationGeneration = ++operationGenerationRef.current;
     actionLockRef.current = true;
     setState({ kind: 'synchronizing', action: 'publish' });
     try {
@@ -161,6 +191,8 @@ export const useArenaRoomHostReconciliation = ({
       const controllerSnapshot = controller.getSnapshot();
       if (
         !published
+        || operationGenerationRef.current !== operationGeneration
+        || authorityIdentity(published) !== authorityIdentity(authority)
         || controllerSnapshot.configPublishResultUnknown
         || !areArenaRoomSharedConfigsEqual(published.sharedConfig, bundle.sharedConfig)
       ) {
@@ -174,6 +206,7 @@ export const useArenaRoomHostReconciliation = ({
         message: '房间配置已更新',
       });
     } catch (error) {
+      if (operationGenerationRef.current !== operationGeneration) return;
       setState(reconciliationErrorState(error, '更新房间配置失败'));
     } finally {
       actionLockRef.current = false;
@@ -184,19 +217,26 @@ export const useArenaRoomHostReconciliation = ({
     if (actionLockRef.current) return;
     const authority = currentAuthority(controller);
     if (!authority) return;
+    const operationGeneration = ++operationGenerationRef.current;
     actionLockRef.current = true;
     try {
-      await installAuthority(authority, 'sync-room');
+      await installAuthority(authority, 'sync-room', operationGeneration);
     } catch (error) {
+      if (operationGenerationRef.current !== operationGeneration) return;
       setState(reconciliationErrorState(error, '同步房间配置失败'));
     } finally {
       actionLockRef.current = false;
     }
   }, [controller, installAuthority]);
 
+  useEffect(() => () => {
+    operationGenerationRef.current += 1;
+  }, []);
+
   useEffect(() => {
     const authority = arenaRoomHostWorkspaceAuthorityFromSession(controllerState.session);
     if (!authority) {
+      operationGenerationRef.current += 1;
       observedAuthorityRef.current = null;
       processingKeyRef.current = null;
       setState({ kind: 'idle' });
@@ -204,6 +244,7 @@ export const useArenaRoomHostReconciliation = ({
     }
     const previous = observedAuthorityRef.current;
     if (!previous || authorityIdentity(previous) !== authorityIdentity(authority)) {
+      operationGenerationRef.current += 1;
       observedAuthorityRef.current = authority;
       processingKeyRef.current = null;
       setState({ kind: 'idle' });
@@ -214,6 +255,7 @@ export const useArenaRoomHostReconciliation = ({
     if (processingKeyRef.current === processingKey) return;
     processingKeyRef.current = processingKey;
     observedAuthorityRef.current = authority;
+    const operationGeneration = ++operationGenerationRef.current;
 
     let cancelled = false;
     void (async () => {
@@ -222,7 +264,7 @@ export const useArenaRoomHostReconciliation = ({
           useBattleStore.getState(),
         );
         const comparison = hostWorkspace.compare(previous, bundle);
-        if (cancelled) return;
+        if (cancelled || operationGenerationRef.current !== operationGeneration) return;
         if (comparison.kind === 'dirty') {
           setState({
             kind: 'conflicted',
@@ -233,16 +275,24 @@ export const useArenaRoomHostReconciliation = ({
           });
           return;
         }
-        await installAuthority(authority, 'auto');
+        await installAuthority(authority, 'auto', operationGeneration);
       } catch (error) {
-        if (cancelled) return;
+        if (
+          cancelled
+          || operationGenerationRef.current !== operationGeneration
+          || !isSameAuthorityRevision(currentAuthority(controller), authority)
+        ) return;
         setState(reconciliationErrorState(error, '自动同步房间配置失败'));
       }
     })();
     return () => {
       cancelled = true;
+      if (operationGenerationRef.current === operationGeneration) {
+        operationGenerationRef.current += 1;
+      }
     };
   }, [
+    controller,
     controllerState.session,
     hostWorkspace,
     installAuthority,

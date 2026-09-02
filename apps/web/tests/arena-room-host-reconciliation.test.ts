@@ -192,6 +192,24 @@ describe('Arena room host reconciliation', () => {
     expect(useBattleStore.getState().combatants).toBe(before.combatants);
   });
 
+  it('materialize 完成前工作区已变化时不覆盖新的本地修改', async () => {
+    const before = useBattleStore.getState();
+    const baselineBundle = await buildArenaRoomHostWorkspaceBundleFromBattleState(before);
+
+    await expect(applyArenaRoomAuthorityToBattleStore({
+      ...baselineBundle.sharedConfig,
+      userGuidance: '远端新配置',
+    }, {
+      currentBundle: baselineBundle,
+      loadPublicCard: async () => {
+        throw new Error('不应读取 online card');
+      },
+      commitIf: () => false,
+    })).rejects.toThrow(/状态已变化/u);
+
+    expect(useBattleStore.getState()).toBe(before);
+  });
+
   it('显式同步房间时用 published host-local payload 放弃本地正文冲突', async () => {
     const published = await buildArenaRoomHostWorkspaceBundleFromBattleState(
       useBattleStore.getState(),
