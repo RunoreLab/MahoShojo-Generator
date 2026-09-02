@@ -1,10 +1,15 @@
 import type {
   ArenaMultiplayerGenerationSnapshot,
   ArenaRoomGenerationCancelRequest,
+  ArenaRoomGenerationHistoryResponse,
   ArenaRoomGenerationStartRequest,
   ArenaRoomGenerationViewResponse,
 } from '@mahoshojo/contracts/arena-room';
-import { ArenaRoomGenerationViewResponseSchema } from '@mahoshojo/contracts/arena-room';
+import {
+  ArenaRoomGenerationHistoryResponseSchema,
+  ArenaRoomGenerationViewResponseSchema,
+  MAX_ARENA_ROOM_GENERATION_HISTORY_ITEMS,
+} from '@mahoshojo/contracts/arena-room';
 import {
   evaluateArenaGenerationReadiness,
   issueArenaRoomGenerationPublisherAuthority,
@@ -96,6 +101,10 @@ export type ArenaRoomGenerationService = {
     readonly request: ArenaRoomGenerationStartRequest;
     readonly sourceRequest: Request;
   }): Promise<ArenaRoomGenerationViewResponse>;
+  list(input: {
+    readonly roomId: string;
+    readonly accountUserId: number;
+  }): Promise<ArenaRoomGenerationHistoryResponse>;
   read(input: {
     readonly roomId: string;
     readonly generationId: string;
@@ -296,10 +305,11 @@ const publisherKey = (
 const view = (input: {
   readonly state: ArenaRoomAuthorityState;
   readonly generationId: string;
+  readonly mirror?: ArenaRoomGenerationViewResponse['generation'];
   readonly projection?: OwnedProjection;
   readonly progress?: { readonly markdown: string; readonly nextChunkSeq: number };
 }): ArenaRoomGenerationViewResponse => {
-  const mirror = input.state.snapshot.activeGeneration;
+  const mirror = input.mirror ?? input.state.snapshot.activeGeneration;
   if (!mirror || mirror.generationId !== input.generationId) {
     return fail('ROOM_GENERATION_NOT_FOUND');
   }
@@ -560,6 +570,70 @@ export const createArenaRoomGenerationService = (
       generationId,
       projection: result.projection,
       ...(publisher ? { progress: publisher.getProgress() } : {}),
+    });
+  };
+
+  const readHistoricalProjection = async (
+    membership: ResolvedArenaRoomMembership,
+    generationId: string,
+  ): Promise<ArenaRoomGenerationViewResponse> => {
+    const initial = membership.actor.getSnapshot();
+    if (
+      !initial
+      || initial.snapshot.roomEpoch !== membership.roomEpoch
+      || initial.snapshot.roomId !== membership.roomId
+    ) return fail('ROOM_GENERATION_NOT_FOUND');
+    const record = initial.generationLedger.find(({ mirror }) => (
+      mirror.generationId === generationId
+    ));
+    if (!record || initial.snapshot.activeGeneration?.generationId === generationId) {
+      return fail('ROOM_GENERATION_NOT_FOUND');
+    }
+
+    let result = await options.generation.readOwnedProjection({
+      roomId: membership.roomId,
+      generationId,
+    });
+    if (result.kind === 'not-found') return fail('ROOM_GENERATION_NOT_FOUND');
+    if (result.kind === 'unavailable') return fail('ROOM_GENERATION_UNAVAILABLE');
+    const projectionIsActive = result.projection.status === 'reserved'
+      || result.projection.status === 'running'
+      || result.projection.status === 'finalizing';
+    if (projectionIsActive) {
+      result = await options.generation.readOwnedProjection({
+        roomId: membership.roomId,
+        generationId,
+      });
+      if (result.kind !== 'found') return fail('ROOM_GENERATION_UNAVAILABLE');
+      if (
+        result.projection.status === 'reserved'
+        || result.projection.status === 'running'
+        || result.projection.status === 'finalizing'
+      ) return fail('ROOM_GENERATION_UNAVAILABLE');
+    }
+    if (
+      result.projection.generationId !== record.mirror.generationId
+      || result.projection.generationRequestId !== record.mirror.generationRequestId
+    ) return fail('ROOM_GENERATION_NOT_FOUND');
+
+    const current = membership.actor.getSnapshot();
+    if (
+      !current
+      || current.snapshot.roomEpoch !== membership.roomEpoch
+      || current.snapshot.roomId !== membership.roomId
+    ) return fail('ROOM_GENERATION_NOT_FOUND');
+    const currentRecord = current.generationLedger.find(({ mirror }) => (
+      mirror.generationId === generationId
+      && mirror.generationRequestId === record.mirror.generationRequestId
+    ));
+    if (!currentRecord || current.snapshot.activeGeneration?.generationId === generationId) {
+      return fail('ROOM_GENERATION_NOT_FOUND');
+    }
+    return view({
+      state: current,
+      generationId,
+      mirror: currentRecord.mirror,
+      projection: result.projection,
     });
   };
 
@@ -825,13 +899,43 @@ export const createArenaRoomGenerationService = (
       });
     },
 
+    async list(input) {
+      const membership = await resolveMembership(input.roomId, input.accountUserId);
+      return ArenaRoomGenerationHistoryResponseSchema.parse({
+        protocolVersion: 1,
+        roomId: membership.roomId,
+        roomEpoch: membership.roomEpoch,
+        items: membership.state.generationLedger
+          .slice(-MAX_ARENA_ROOM_GENERATION_HISTORY_ITEMS)
+          .reverse()
+          .map(({ mirror }) => ({
+            generationId: mirror.generationId,
+            state: mirror.state,
+            configRevision: mirror.configRevision,
+            collaborativeInfluence: mirror.collaborativeInfluence,
+            startedAt: mirror.startedAt,
+            ...(mirror.finishedAt === undefined ? {} : { finishedAt: mirror.finishedAt }),
+          })),
+      });
+    },
+
     async read(input) {
       const membership = await resolveMembership(input.roomId, input.accountUserId);
-      const active = membership.state.snapshot.activeGeneration;
-      if (!active || active.generationId !== input.generationId) {
+      const state = membership.actor.getSnapshot();
+      if (
+        !state
+        || state.snapshot.roomEpoch !== membership.roomEpoch
+        || state.snapshot.roomId !== membership.roomId
+      ) return fail('ROOM_GENERATION_NOT_FOUND');
+      const record = state.generationLedger.find(({ mirror }) => (
+        mirror.generationId === input.generationId
+      ));
+      if (!record) {
         return fail('ROOM_GENERATION_NOT_FOUND');
       }
-      return readProjection(membership, input.generationId, true);
+      return state.snapshot.activeGeneration?.generationId === input.generationId
+        ? readProjection(membership, input.generationId, true)
+        : readHistoricalProjection(membership, input.generationId);
     },
   });
 };

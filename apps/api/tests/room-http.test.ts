@@ -87,6 +87,20 @@ const generationView = {
   finalAuthoritative: false,
 };
 
+const generationHistory = {
+  protocolVersion: 1 as const,
+  roomId: authority.snapshot.roomId,
+  roomEpoch: authority.snapshot.roomEpoch,
+  items: [{
+    generationId: 'generation-1',
+    state: 'completed' as const,
+    configRevision: authority.snapshot.revision,
+    collaborativeInfluence: false,
+    startedAt: '2026-08-28T00:00:00.000Z',
+    finishedAt: '2026-08-28T00:03:00.000Z',
+  }],
+};
+
 const createDependencies = (
   overrides: Partial<ArenaRoomHttpDependencies> = {},
 ): ArenaRoomHttpDependencies => ({
@@ -169,6 +183,7 @@ const createDependencies = (
       markdown: '',
       nextChunkSeq: 0,
     })),
+    list: vi.fn(async () => generationHistory),
     start: vi.fn(async () => generationView),
     read: vi.fn(async () => generationView),
   } satisfies ArenaRoomGenerationService,
@@ -941,6 +956,33 @@ describe('Arena Room HTTP product routes', () => {
     );
     expect(unavailable.status).toBe(503);
     expect(await unavailable.json()).toMatchObject({ code: 'ROOM_UNAVAILABLE' });
+  });
+
+  it('多人 generation history 只传认证 account/room，并返回 no-store 的严格列表', async () => {
+    const dependencies = createDependencies();
+    const app = createHonoApp(config, createRedisStub(), undefined, {
+      arenaRoom: dependencies,
+    });
+
+    const response = await app.request(
+      `/api/arena/rooms/v1/${authority.snapshot.roomId}/generations`,
+      { headers: { authorization: 'Bearer legacy-key' } },
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    expect(dependencies.generations.list).toHaveBeenCalledWith({
+      roomId: authority.snapshot.roomId,
+      accountUserId: 101,
+    });
+    expect(dependencies.rateLimit).toHaveBeenCalledWith({
+      operation: 'generationRead',
+      accountUserId: 101,
+      roomId: authority.snapshot.roomId,
+      limit: 120,
+      windowSeconds: 60,
+    });
+    expect(await response.json()).toEqual(generationHistory);
   });
 
   it('discover/join/session/ticket/leave/close 使用窄 service 且返回 versioned wire', async () => {

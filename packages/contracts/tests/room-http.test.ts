@@ -7,6 +7,7 @@ import {
   ArenaRoomCreateRequestSchema,
   ArenaRoomEpochMutationRequestSchema,
   ArenaRoomGenerationCancelRequestSchema,
+  ArenaRoomGenerationHistoryResponseSchema,
   ArenaRoomHttpErrorResponseSchema,
   ArenaRoomJoinRequestSchema,
   ArenaRoomLeaveResponseSchema,
@@ -261,6 +262,46 @@ describe('Arena Room HTTP product contract', () => {
         result: { ...completed.result, ...leakedResultField },
       }).success).toBe(false);
     }
+  });
+
+  it('生成历史只暴露有界的房间安全摘要', () => {
+    const response = {
+      protocolVersion: 1,
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      items: [{
+        generationId: 'generation-1',
+        state: 'completed' as const,
+        configRevision: 3,
+        collaborativeInfluence: true,
+        startedAt: '2026-08-28T00:00:00.000Z',
+        finishedAt: '2026-08-28T00:03:00.000Z',
+      }],
+    };
+
+    expect(ArenaRoomGenerationHistoryResponseSchema.parse(response)).toEqual(response);
+    for (const leaked of [
+      { generationRequestId: 'request-1234' },
+      { snapshotDigest: `sha256:${'a'.repeat(64)}` },
+      { participantUserIds: [101, 202] },
+      { generationPayloadDigest: `sha256:${'b'.repeat(64)}` },
+      { generationRecordId: 'record-1' },
+      { provider: 'private-provider' },
+      { prompt: 'private-prompt' },
+      { secret: 'secret-canary' },
+    ]) {
+      expect(ArenaRoomGenerationHistoryResponseSchema.safeParse({
+        ...response,
+        items: [{ ...response.items[0], ...leaked }],
+      }).success).toBe(false);
+    }
+    expect(ArenaRoomGenerationHistoryResponseSchema.safeParse({
+      ...response,
+      items: Array.from({ length: 65 }, (_, index) => ({
+        ...response.items[0],
+        generationId: `generation-${index}`,
+      })),
+    }).success).toBe(false);
   });
 
   it('Proposal mutation DTO 只接受 client intent 与 typed changes，并保持 strict', () => {

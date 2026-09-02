@@ -10,6 +10,7 @@ import {
   ArenaRoomCreateRequestSchema,
   ArenaRoomEpochMutationRequestSchema,
   ArenaRoomGenerationCancelRequestSchema,
+  ArenaRoomGenerationHistoryResponseSchema,
   ArenaRoomGenerationStartRequestSchema,
   ArenaRoomGenerationViewResponseSchema,
   ArenaRoomJoinRequestSchema,
@@ -92,7 +93,7 @@ export type ArenaRoomHttpDependencies = {
   readonly directory: Pick<ArenaRoomDirectoryService, 'discoverPublic'>;
   readonly websocketAuthority: Pick<ArenaRoomWebSocketAuthority, 'issue'>;
   readonly proposals: Pick<ArenaRoomProposalService, 'resolve' | 'submit' | 'withdraw'>;
-  readonly generations: Pick<ArenaRoomGenerationService, 'cancel' | 'read' | 'start'>;
+  readonly generations: Pick<ArenaRoomGenerationService, 'cancel' | 'list' | 'read' | 'start'>;
   readonly configs: Pick<ArenaRoomConfigService, 'publish'>;
   readonly rateLimit: (input: {
     readonly operation: ArenaRoomHttpOperation;
@@ -1121,6 +1122,28 @@ export const registerArenaRoomHttpRoutes = (
         sourceRequest,
       });
       return context.json(ArenaRoomGenerationViewResponseSchema.parse(view), 202);
+    } catch (error) {
+      return mapServiceError(context, error);
+    }
+  });
+
+  app.get(ARENA_ROOM_HTTP_ROUTES.generations, async (context) => {
+    const roomId = parseRoomId(context);
+    if (roomId instanceof Response) return roomId;
+    const authorization = await authenticateAndLimit(
+      context,
+      dependencies,
+      options,
+      'generationRead',
+      roomId,
+    );
+    if (!authorization.accepted) return authorization.response;
+    try {
+      const history = await dependencies.generations.list({
+        roomId,
+        accountUserId: authorization.accountUserId,
+      });
+      return context.json(ArenaRoomGenerationHistoryResponseSchema.parse(history), 200);
     } catch (error) {
       return mapServiceError(context, error);
     }

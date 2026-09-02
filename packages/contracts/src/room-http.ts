@@ -5,6 +5,7 @@ import { ARENA_ROOM_HTTP_ERROR_CODES } from './arena-error-taxonomy';
 import {
   ArenaRoomSnapshotSchema,
   GenerationMirrorSchema,
+  GenerationStateSchema,
   RoomMemberSchema,
   RoomRevisionSchema,
 } from './protocol';
@@ -15,6 +16,7 @@ import {
   GlobalGuidanceSchema,
   GuidanceSchema,
   HostLocalObjectKeySchema,
+  IsoTimestampSchema,
   LanguageSchema,
   OpaqueKeySchema,
   StableObjectKeySchema,
@@ -66,6 +68,7 @@ export const ARENA_ROOM_HTTP_ROUTES = Object.freeze({
 export const MAX_ARENA_ROOM_HTTP_TICKET_BYTES = 4_096;
 export const MAX_ARENA_ROOM_GENERATION_START_BYTES = 12 * 1_024 * 1_024;
 export const MAX_ARENA_ROOM_GENERATION_MARKDOWN_LENGTH = 12 * 1_024 * 1_024;
+export const MAX_ARENA_ROOM_GENERATION_HISTORY_ITEMS = 64;
 
 export const ArenaGenerationRequestIdSchema = z.string()
   .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/u);
@@ -194,6 +197,23 @@ export const ArenaRoomGenerationProjectionStatusSchema = z.enum([
   'cancelled',
   'producer_lost',
 ]);
+
+export const ArenaRoomGenerationHistoryItemSchema = z.object({
+  generationId: OpaqueKeySchema,
+  state: GenerationStateSchema,
+  configRevision: RoomRevisionSchema,
+  collaborativeInfluence: z.boolean(),
+  startedAt: IsoTimestampSchema,
+  finishedAt: IsoTimestampSchema.optional(),
+}).strict();
+
+export const ArenaRoomGenerationHistoryResponseSchema = z.object({
+  protocolVersion: z.literal(PROTOCOL_VERSION),
+  roomId: OpaqueKeySchema,
+  roomEpoch: OpaqueKeySchema,
+  items: z.array(ArenaRoomGenerationHistoryItemSchema)
+    .max(MAX_ARENA_ROOM_GENERATION_HISTORY_ITEMS),
+}).strict();
 
 const ArenaRoomGenerationUsageSchema = z.object({
   promptTokens: z.number().int().nonnegative().optional(),
@@ -404,6 +424,12 @@ export type ArenaRoomHostRuntimeGeneration = z.infer<
 >;
 export type ArenaRoomGenerationProjectionStatus = z.infer<
   typeof ArenaRoomGenerationProjectionStatusSchema
+>;
+export type ArenaRoomGenerationHistoryItem = z.infer<
+  typeof ArenaRoomGenerationHistoryItemSchema
+>;
+export type ArenaRoomGenerationHistoryResponse = z.infer<
+  typeof ArenaRoomGenerationHistoryResponseSchema
 >;
 export type ArenaRoomGenerationViewResponse = z.infer<
   typeof ArenaRoomGenerationViewResponseSchema
