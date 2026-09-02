@@ -147,7 +147,10 @@ const flush = async (): Promise<void> => {
 
 const button = (label: string): HTMLButtonElement => {
   const match = [...document.body.querySelectorAll('button')]
-    .find((candidate) => candidate.textContent?.trim() === label);
+    .find((candidate) => (
+      candidate.textContent?.trim() === label
+      || candidate.getAttribute('aria-label')?.split('，')[0] === label
+    ));
   if (!(match instanceof HTMLButtonElement)) throw new Error(`button not found: ${label}`);
   return match;
 };
