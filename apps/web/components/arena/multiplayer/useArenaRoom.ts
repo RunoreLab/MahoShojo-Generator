@@ -111,7 +111,13 @@ export const useArenaRoom = (options: UseArenaRoomOptions) => {
       }
       return;
     }
-    if (editor) editor.sync(session.snapshot);
+    if (editor) {
+      editor.sync(session.snapshot);
+      return;
+    }
+    const next = createRoomProposalArenaEditorSession(session.snapshot);
+    proposalEditorRef.current = next;
+    setProposalEditor(next);
   }, [state.session]);
 
   useEffect(() => () => {

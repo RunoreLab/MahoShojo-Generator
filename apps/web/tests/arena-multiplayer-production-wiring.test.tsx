@@ -146,18 +146,18 @@ const flush = async (): Promise<void> => {
 };
 
 const button = (label: string): HTMLButtonElement => {
-  const match = [...container.querySelectorAll('button')]
+  const match = [...document.body.querySelectorAll('button')]
     .find((candidate) => candidate.textContent?.trim() === label);
   if (!(match instanceof HTMLButtonElement)) throw new Error(`button not found: ${label}`);
   return match;
 };
 
 const enterJoinCode = async (): Promise<void> => {
-  if (!container.querySelector('#arena-room-join-code')) {
+  if (!document.body.querySelector('#arena-room-join-code')) {
     await act(async () => button('打开多人房间').click());
     await flush();
   }
-  const input = container.querySelector<HTMLInputElement>('#arena-room-join-code');
+  const input = document.body.querySelector<HTMLInputElement>('#arena-room-join-code');
   if (!input) throw new Error('join input missing');
   await act(async () => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
@@ -226,6 +226,8 @@ describe('Arena multiplayer production client/hook wiring', () => {
       const fetcher = vi.fn<typeof fetch>(async (input, init) => {
         const url = String(input);
         calls.push({ url, init });
+        if (url.endsWith('/languages.json')) return Response.json([]);
+        if (requestPath(url) === '/api/auth/verify') return Response.json({ success: false });
         if (requestPath(url) === '/api/arena/rooms/v1') {
           return Response.json({ protocolVersion: 1, items: [], nextCursor: null });
         }
@@ -268,16 +270,17 @@ describe('Arena multiplayer production client/hook wiring', () => {
       await act(async () => button(role === 'host' ? '确认关闭房间' : '确认离开房间').click());
       await flush();
 
-      expect(calls.map((call) => requestPath(call.url))).toEqual([
+      const roomCalls = calls.filter((call) => requestPath(call.url).startsWith('/api/arena/rooms/v1'));
+      expect(roomCalls.map((call) => requestPath(call.url))).toEqual([
         '/api/arena/rooms/v1',
         '/api/arena/rooms/v1/room-1/join',
         '/api/arena/rooms/v1/room-1/ticket',
         `/api/arena/rooms/v1/room-1/${role === 'host' ? 'close' : 'leave'}`,
       ]);
-      expect(JSON.parse(String(calls[3]?.init?.body))).toEqual({
+      expect(JSON.parse(String(roomCalls[3]?.init?.body))).toEqual({
         expectedRoomEpoch: 'epoch-1',
       });
-      expect(new Headers(calls[1]?.init?.headers).get('authorization'))
+      expect(new Headers(roomCalls[1]?.init?.headers).get('authorization'))
         .toBe('Bearer verified-key');
     },
   );
@@ -388,13 +391,11 @@ describe('Arena multiplayer production client/hook wiring', () => {
     await flush();
     await act(async () => WiringSocket.instances[0]!.open());
 
-    await act(async () => button('提案').click());
-    await act(async () => button('同步房间配置').click());
-    await flush();
-    expect(container.querySelector('#arena-room-proposals-dialog-heading')).toBeNull();
+    expect(container.textContent).toContain('Arena 提案编辑模式');
+    expect(document.body.querySelector('#arena-room-proposals-dialog-heading')).toBeNull();
     await setTextField('arena-story-guidance', 'production 成员建议');
     await act(async () => button('预览提案').click());
-    expect(container.querySelectorAll('[role="dialog"][aria-modal="true"]')).toHaveLength(1);
+    expect(document.body.querySelectorAll('[role="dialog"][aria-modal="true"]')).toHaveLength(1);
     await act(async () => button('提交提案').click());
     await flush();
 
@@ -521,7 +522,7 @@ describe('Arena multiplayer production client/hook wiring', () => {
     await act(async () => WiringSocket.instances[0]!.open());
 
     await act(async () => button('提案').click());
-    expect(container.querySelectorAll('[role="dialog"][aria-modal="true"]')).toHaveLength(1);
+    expect(document.body.querySelectorAll('[role="dialog"][aria-modal="true"]')).toHaveLength(1);
     await act(async () => button('接受所选').click());
     await flush();
     const resolveCall = calls.find((call) => requestPath(call.url).endsWith('/resolve'));
@@ -531,7 +532,7 @@ describe('Arena multiplayer production client/hook wiring', () => {
       resolution: 'accept-selected',
       selectedChangeIds: ['guidance-1'],
     });
-    expect(container.textContent).toContain(proposal.proposalId);
+    expect(document.body.textContent).toContain(proposal.proposalId);
 
     await act(async () => WiringSocket.instances[0]!.message(JSON.stringify({
       protocolVersion: 1,
@@ -551,7 +552,7 @@ describe('Arena multiplayer production client/hook wiring', () => {
       type: 'proposal.resolved',
       payload: { proposalId: proposal.proposalId, status: 'accepted' },
     })));
-    expect(container.textContent).not.toContain(proposal.proposalId);
+    expect(document.body.textContent).not.toContain(proposal.proposalId);
   });
 
   it('malformed Proposal 2xx 只发一次并冻结，projected session snapshot 对账后才解锁', async () => {
@@ -596,9 +597,7 @@ describe('Arena multiplayer production client/hook wiring', () => {
     await act(async () => button('加入房间').click());
     await flush();
     await act(async () => WiringSocket.instances[0]!.open());
-    await act(async () => button('提案').click());
-    await act(async () => button('同步房间配置').click());
-    await flush();
+    expect(container.textContent).toContain('Arena 提案编辑模式');
     await setTextField('arena-story-guidance', 'unknown 对账建议');
     await act(async () => button('预览提案').click());
     await act(async () => button('提交提案').click());
