@@ -261,6 +261,21 @@ describe('Arena multiplayer panel accessibility/permissions', () => {
     }
   });
 
+  it('terminal phase 即使残留 session 也不渲染可交互房间壳', () => {
+    for (const phase of ['closed', 'replacement'] as const) {
+      const html = render({
+        ...readyState,
+        phase,
+        session,
+        notice: phase === 'closed' ? '已离开房间' : '原房间无法恢复',
+      });
+      expect(html).toContain('返回房间大厅');
+      expect(html).toContain(phase === 'closed' ? '已离开房间' : '原房间无法恢复');
+      expect(html).not.toContain('更新配置');
+      expect(html).not.toContain('房间管理');
+    }
+  });
+
   it('create 结果未知时隐藏重复创建入口并提供显式对账动作', () => {
     const html = render({
       ...readyState,

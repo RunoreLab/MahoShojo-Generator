@@ -1661,6 +1661,66 @@ describe('Arena Room browser controller', () => {
     expect(client.getSession).toHaveBeenCalled();
   });
 
+  it('leave 成功后立即结束本地房间会话并保留一次性提示', async () => {
+    const { client, controller } = createHarness();
+    const memberSession = {
+      ...session,
+      self: {
+        userId: 'member-1',
+        role: 'member' as const,
+        displayName: '成员',
+        membershipState: 'active' as const,
+      },
+      snapshot: {
+        ...snapshot,
+        members: [
+          snapshot.members[0]!,
+          {
+            userId: 'member-1',
+            role: 'member' as const,
+            displayName: '成员',
+            membershipState: 'active' as const,
+          },
+        ],
+        activeGeneration: generationMirror,
+      },
+    };
+    vi.mocked(client.join).mockResolvedValueOnce(memberSession);
+    await controller.join('room-1', '成员');
+
+    await controller.leave();
+
+    expect(client.leave).toHaveBeenCalledWith('room-1', 'epoch-1');
+    expect(controller.getSnapshot()).toMatchObject({
+      phase: 'ready',
+      session: null,
+      notice: '已离开房间',
+      managementOperation: null,
+      managementResultUnknown: false,
+      generation: { phase: 'idle', mirror: null, markdown: '' },
+    });
+  });
+
+  it('close 成功后立即结束本地房间会话', async () => {
+    const { controller } = createHarness();
+    await controller.create({
+      displayName: '房主',
+      directory: { title: '测试房', visibility: 'public' },
+      sharedConfig,
+    });
+
+    await controller.close();
+
+    expect(controller.getSnapshot()).toMatchObject({
+      phase: 'ready',
+      session: null,
+      notice: '房间已关闭',
+      managementOperation: null,
+      managementResultUnknown: false,
+      generation: { phase: 'idle', mirror: null, markdown: '' },
+    });
+  });
+
   it('close 使用同一管理锁，reset 后迟到结果不能污染新状态', async () => {
     const { client, controller } = createHarness();
     let resolveClose!: (value: { protocolVersion: 1; roomId: string; outcome: 'closed' }) => void;

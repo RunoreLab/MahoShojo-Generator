@@ -8,11 +8,15 @@ import { X } from 'lucide-react';
 type Props = {
   isOpen: boolean;
   title?: ReactNode;
+  titleId?: string;
   description?: ReactNode;
   children: ReactNode;
   footer?: ReactNode;
   maxWidthClassName?: string;
   zIndexClassName?: string;
+  closeOnBackdrop?: boolean;
+  closeButtonContent?: ReactNode;
+  closeButtonAriaLabel?: string;
   onClose: () => void;
 };
 
@@ -136,19 +140,24 @@ export const getBaseModalLayoutClassNames = ({
 export function BaseModal({
   isOpen,
   title,
+  titleId: providedTitleId,
   description,
   children,
   footer,
   maxWidthClassName,
   zIndexClassName,
+  closeOnBackdrop = true,
+  closeButtonContent,
+  closeButtonAriaLabel = '关闭对话框',
   onClose,
 }: Props) {
   const [mounted, setMounted] = useState(false);
   const {
     dialogRef,
     initialFocusRef: closeButtonRef,
-    titleId,
+    titleId: generatedTitleId,
   } = useBaseModalAccessibility({ isOpen: isOpen && mounted, onClose });
+  const titleId = providedTitleId ?? generatedTitleId;
 
   useEffect(() => {
     setMounted(true);
@@ -168,9 +177,11 @@ export function BaseModal({
     <div className={rootClassName}>
       <button
         type="button"
-        aria-label="关闭对话框"
+        aria-label={closeOnBackdrop ? closeButtonAriaLabel : undefined}
+        aria-hidden={!closeOnBackdrop}
+        tabIndex={closeOnBackdrop ? 0 : -1}
         className="absolute inset-0 bg-black/60"
-        onClick={onClose}
+        onClick={closeOnBackdrop ? onClose : undefined}
       />
       <div
         ref={dialogRef}
@@ -189,10 +200,10 @@ export function BaseModal({
             ref={closeButtonRef}
             type="button"
             onClick={onClose}
-            aria-label="关闭对话框"
+            aria-label={closeButtonAriaLabel}
             className="min-h-10 min-w-10 rounded-lg p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
           >
-            <X className="h-5 w-5" />
+            {closeButtonContent ?? <X className="h-5 w-5" />}
           </button>
         </div>
 

@@ -328,7 +328,9 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
   const busy = Boolean(props.actionPending)
     || (state.managementOperation !== null && state.managementOperation !== undefined)
     || ['connecting', 'listing', 'reconnecting'].includes(state.phase);
-  const session = state.session;
+  const session = state.phase === 'closed' || state.phase === 'replacement'
+    ? null
+    : state.session;
   const activeMembers = session?.snapshot.members.filter((member) => (
     member.membershipState === 'active'
   )) ?? [];

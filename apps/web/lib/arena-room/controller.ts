@@ -412,15 +412,37 @@ export const createArenaRoomController = (
     if (close) current.close(1000, 'client-disconnect');
   };
 
-  const enterReplacement = (): void => {
+  const finishRoomSession = (input: {
+    readonly notice: string;
+    readonly phase?: ArenaRoomControllerPhase;
+  }): void => {
+    operationGeneration += 1;
+    proposalMutationGeneration += 1;
+    generationStartOperation += 1;
+    generationFence += 1;
     invalidateConfigPublish();
     invalidateManagementMutation();
+    proposalMutationPending = false;
+    generationStartPending = false;
+    pendingGenerationStartRequest = null;
+    pendingCreateRequest = null;
+    pendingJoinRoomId = null;
+    unknownProposalMutation = null;
     clearReconnectTimer();
     detachSocket(true);
+    reconnectAttempts = 0;
+    controlCursor = undefined;
     publish({
+      ...READY_STATE,
+      phase: input.phase ?? phaseForAccess(access),
+      notice: input.notice,
+    });
+  };
+
+  const enterReplacement = (): void => {
+    finishRoomSession({
       phase: 'replacement',
       notice: '原房间无法恢复，请房主创建新房间',
-      error: null,
     });
   };
 
@@ -772,16 +794,8 @@ export const createArenaRoomController = (
         && unknownManagementMutation.targetUserId === event.payload.member.userId;
       if (kickReconciled) unknownManagementMutation = null;
       if (event.type === 'room.member.left' && event.payload.member.userId === current.self.userId) {
-        invalidateConfigPublish();
-        invalidateManagementMutation();
-        detachSocket(true);
-        publish({
-          phase: 'closed',
-          session: next,
-          managementOperation: null,
-          managementResultUnknown: false,
+        finishRoomSession({
           notice: '房间成员资格已结束',
-          error: null,
         });
         return;
       }
@@ -905,15 +919,8 @@ export const createArenaRoomController = (
     }
 
     if (event.type === 'room.closing') {
-      invalidateConfigPublish();
-      invalidateManagementMutation();
-      detachSocket(true);
-      publish({
-        phase: 'closed',
-        managementOperation: null,
-        managementResultUnknown: false,
+      finishRoomSession({
         notice: '房间已关闭',
-        error: null,
       });
       return;
     }
@@ -1639,14 +1646,10 @@ export const createArenaRoomController = (
         && error.code === 'ROOM_NOT_FOUND'
       ) {
         unknownManagementMutation = null;
-        publish({
-          phase: 'closed',
-          managementOperation: null,
-          managementResultUnknown: false,
+        finishRoomSession({
           notice: intent.operation === 'close'
             ? '已从服务器确认房间关闭'
             : '已从服务器确认离开房间',
-          error: null,
         });
         return;
       }
@@ -2005,12 +2008,8 @@ export const createArenaRoomController = (
       try {
         await options.client.leave(roomId, roomEpoch);
         if (!operationIsCurrent(generation)) return;
-        publish({
-          phase: 'closed',
-          managementOperation: null,
-          managementResultUnknown: false,
+        finishRoomSession({
           notice: '已离开房间',
-          error: null,
         });
       } catch (error) {
         if (!operationIsCurrent(generation)) return;
@@ -2070,12 +2069,8 @@ export const createArenaRoomController = (
       try {
         await options.client.close(roomId, roomEpoch);
         if (!operationIsCurrent(generation)) return;
-        publish({
-          phase: 'closed',
-          managementOperation: null,
-          managementResultUnknown: false,
+        finishRoomSession({
           notice: '房间已关闭',
-          error: null,
         });
       } catch (error) {
         if (!operationIsCurrent(generation)) return;

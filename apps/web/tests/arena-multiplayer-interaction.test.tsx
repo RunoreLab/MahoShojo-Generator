@@ -193,7 +193,7 @@ let container: HTMLDivElement;
 let root: Root;
 
 const button = (label: string): HTMLButtonElement => {
-  const match = [...container.querySelectorAll('button')]
+  const match = [...document.body.querySelectorAll('button')]
     .find((candidate) => candidate.textContent?.trim() === label);
   if (!(match instanceof HTMLButtonElement)) throw new Error(`button not found: ${label}`);
   return match;
@@ -336,7 +336,7 @@ describe('Arena multiplayer panel real React interactions', () => {
     await act(async () => root.render(<ArenaMultiplayerContextPanel {...props} />));
 
     expect(mocks.createCanonicalDraftBundle).toHaveBeenCalledOnce();
-    expect(container.textContent).toContain('房间服务暂不可用');
+    expect(document.body.textContent).toContain('房间服务暂不可用');
     expect(container.textContent).not.toContain('房间已创建，但当前本地配置尚未同步');
   });
 
@@ -349,16 +349,16 @@ describe('Arena multiplayer panel real React interactions', () => {
     };
     await act(async () => root.render(<ArenaMultiplayerContextPanel {...props} />));
 
-    const dialog = container.querySelector<HTMLElement>('[role="dialog"][aria-modal="true"]');
+    const dialog = document.body.querySelector<HTMLElement>('[role="dialog"][aria-modal="true"]');
     expect(dialog?.textContent).toContain('正在创建房间…');
     expect(dialog?.querySelector('[role="status"]')).not.toBeNull();
-    expect([...container.querySelectorAll('[role="status"]')]
+    expect([...document.body.querySelectorAll('[role="status"]')]
       .filter((status) => status.textContent?.includes('正在创建房间…'))).toHaveLength(1);
   });
 
   it('真实输入与点击连接 discover/join controller action', async () => {
     await act(async () => button('打开多人房间').click());
-    const input = container.querySelector<HTMLInputElement>('#arena-room-join-code');
+    const input = document.body.querySelector<HTMLInputElement>('#arena-room-join-code');
     if (!input) throw new Error('join input missing');
     await act(async () => {
       const setter = Object.getOwnPropertyDescriptor(
@@ -391,8 +391,9 @@ describe('Arena multiplayer panel real React interactions', () => {
     await act(async () => root.render(<ArenaMultiplayerContextPanel {...props} />));
     await act(async () => button('打开多人房间').click());
 
-    expect(container.querySelector('[role="dialog"][aria-modal="true"]')).not.toBeNull();
-    expect(container.querySelector('[aria-label="公开房间列表"]')?.className).toContain('max-h-64');
+    expect(container.querySelector('[role="dialog"][aria-modal="true"]')).toBeNull();
+    expect(document.body.querySelector('[role="dialog"][aria-modal="true"]')).not.toBeNull();
+    expect(document.body.querySelector('[aria-label="公开房间列表"]')?.className).toContain('max-h-64');
     await act(async () => button('加载更多').click());
     expect(mocks.discoverMore).toHaveBeenCalledOnce();
     expect(container.textContent).not.toContain('Development Gate');
@@ -403,8 +404,10 @@ describe('Arena multiplayer panel real React interactions', () => {
     trigger.focus();
     await act(async () => trigger.click());
 
-    const dialog = container.querySelector<HTMLElement>('[role="dialog"][aria-modal="true"]');
+    const dialog = document.body.querySelector<HTMLElement>('[role="dialog"][aria-modal="true"]');
     expect(dialog).not.toBeNull();
+    expect(container.contains(dialog)).toBe(false);
+    expect(dialog?.parentElement?.parentElement).toBe(document.body);
     expect(document.activeElement?.textContent).toBe('关闭');
     expect(document.body.style.overflow).toBe('hidden');
 
@@ -421,7 +424,7 @@ describe('Arena multiplayer panel real React interactions', () => {
     await act(async () => {
       document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     });
-    expect(container.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
     expect(document.activeElement).toBe(trigger);
     expect(document.body.style.overflow).toBe('');
   });
@@ -476,12 +479,12 @@ describe('Arena multiplayer panel real React interactions', () => {
       },
     };
     await act(async () => root.render(<ArenaMultiplayerContextPanel {...props} />));
-    expect(container.querySelector('#arena-room-proposals-dialog-heading')).toBeNull();
+    expect(document.body.querySelector('#arena-room-proposals-dialog-heading')).toBeNull();
     await act(async () => button('提案').click());
-    expect(container.querySelector('#arena-room-proposals-dialog-heading')).not.toBeNull();
-    expect(container.textContent).toContain('配置提案');
-    expect(container.textContent).toContain('同步房间配置');
-    expect(container.textContent).not.toContain('Proposal 审阅箱');
+    expect(document.body.querySelector('#arena-room-proposals-dialog-heading')).not.toBeNull();
+    expect(document.body.textContent).toContain('配置提案');
+    expect(document.body.textContent).toContain('同步房间配置');
+    expect(document.body.textContent).not.toContain('Proposal 审阅箱');
   });
 
   it('config publish unknown 在 connected 状态提供主动权威对账入口', async () => {
@@ -568,7 +571,7 @@ describe('Arena multiplayer panel real React interactions', () => {
 
     await act(async () => button('成员').click());
     await act(async () => button('移除').click());
-    expect(container.textContent).toContain('确定将“成员”移出当前房间吗');
+    expect(document.body.textContent).toContain('确定将“成员”移出当前房间吗');
     await act(async () => button('确认移除成员').click());
     expect(mocks.kickMember).toHaveBeenCalledWith('member-1');
     await act(async () => button('关闭').click());
@@ -669,10 +672,10 @@ describe('Arena multiplayer panel real React interactions', () => {
       localConfig: sharedConfig,
     };
     await act(async () => root.render(<ArenaMultiplayerContextPanel {...props} />));
-    expect(container.textContent).toContain('房间配置已更新，但本地 Arena 同时有未发布修改');
+    expect(document.body.textContent).toContain('房间配置已更新，但本地 Arena 同时有未发布修改');
     await act(async () => button('查看差异').click());
-    expect(container.querySelectorAll('[role="dialog"][aria-modal="true"]')).toHaveLength(1);
-    const diffClose = container.querySelector<HTMLButtonElement>(
+    expect(document.body.querySelectorAll('[role="dialog"][aria-modal="true"]')).toHaveLength(1);
+    const diffClose = document.body.querySelector<HTMLButtonElement>(
       '[aria-labelledby="arena-host-config-diff-heading"] button',
     );
     if (!diffClose) throw new Error('diff close button missing');
@@ -688,7 +691,7 @@ describe('Arena multiplayer panel real React interactions', () => {
       'host-local',
       'safe Shared Config',
     ]) {
-      expect(container.textContent).not.toContain(exposedTerm);
+      expect(document.body.textContent).not.toContain(exposedTerm);
     }
   });
 });
