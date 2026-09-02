@@ -2210,8 +2210,8 @@ describe('Arena Room browser controller', () => {
     expect(client.getSession).toHaveBeenCalledOnce();
   });
 
-  it('kick 结果未知且 epoch 已轮换时安装新权威并按新 epoch 重放移除意图', async () => {
-    const { client, controller } = createHarness();
+  it('kick 结果未知且 epoch 已轮换时按新权威重放移除意图并重建控制传输', async () => {
+    const { client, controller, sockets } = createHarness();
     const member = {
       userId: 'member-1',
       role: 'member' as const,
@@ -2253,13 +2253,15 @@ describe('Arena Room browser controller', () => {
 
     await controller.kickMember('member-1');
     expect(controller.getSnapshot().managementResultUnknown).toBe(true);
+    expect(sockets).toHaveLength(1);
     controller.reconnect();
 
     await vi.waitFor(() => expect(controller.getSnapshot()).toMatchObject({
+      phase: 'reconnecting',
       session: { roomEpoch: 'epoch-2' },
       managementOperation: null,
       managementResultUnknown: false,
-      notice: '已移除成员 成员',
+      notice: '正在重新连接…',
     }));
     expect(controller.getSnapshot().session?.snapshot.members.find(
       (candidate) => candidate.userId === 'member-1',
@@ -2267,6 +2269,138 @@ describe('Arena Room browser controller', () => {
     expect(client.kick).toHaveBeenCalledTimes(2);
     expect(client.kick).toHaveBeenLastCalledWith('room-1', 'member-1', 'epoch-2');
     expect(client.getSession).toHaveBeenCalledOnce();
+    expect(client.issueTicket).toHaveBeenCalledTimes(2);
+    expect(client.issueTicket).toHaveBeenLastCalledWith('room-1', {
+      reconnect: { control: { roomEpoch: 'epoch-2', controlSeq: revokedSession.snapshot.controlSeq } },
+    });
+    expect(sockets).toHaveLength(2);
+    sockets[1]!.open();
+    expect(controller.getSnapshot().phase).toBe('connected');
+
+    sockets[1]!.message(JSON.stringify({
+      protocolVersion: 1,
+      roomId: 'room-1',
+      roomEpoch: 'epoch-2',
+      controlSeq: revokedSession.snapshot.controlSeq + 1,
+      timestamp: '2026-08-28T00:06:00.000Z',
+      type: 'room.member.joined',
+      payload: {
+        member: {
+          userId: 'member-2',
+          role: 'member' as const,
+          displayName: '新成员',
+          membershipState: 'active' as const,
+          joinedAt: '2026-08-28T00:06:00.000Z',
+        },
+      },
+    }));
+    expect(controller.getSnapshot().session?.snapshot.members.some(
+      (candidate) => candidate.userId === 'member-2',
+    )).toBe(true);
+  });
+
+  it('kick 结果未知且 epoch 已轮换、目标已不在房间时安装新权威并重建控制传输', async () => {
+    const { client, controller, sockets } = createHarness();
+    const member = {
+      userId: 'member-1',
+      role: 'member' as const,
+      displayName: '成员',
+      membershipState: 'active' as const,
+    };
+    const withMember = {
+      ...session,
+      snapshot: { ...snapshot, members: [snapshot.members[0]!, member] },
+    };
+    const recoveredRevoked = {
+      ...withMember,
+      roomEpoch: 'epoch-2',
+      snapshot: {
+        ...withMember.snapshot,
+        roomEpoch: 'epoch-2',
+        controlSeq: 1,
+        members: [snapshot.members[0]!, { ...member, membershipState: 'revoked' as const }],
+      },
+    };
+    vi.mocked(client.create).mockResolvedValueOnce(withMember);
+    vi.mocked(client.kick).mockRejectedValueOnce(new ArenaRoomClientError(
+      'ROOM_RESULT_UNKNOWN',
+      null,
+      '请求结果未知',
+    ));
+    vi.mocked(client.getSession).mockResolvedValueOnce(recoveredRevoked);
+    await controller.create({
+      displayName: '房主',
+      directory: { title: '测试房', visibility: 'public' },
+      sharedConfig,
+    });
+
+    await controller.kickMember('member-1');
+    expect(controller.getSnapshot().managementResultUnknown).toBe(true);
+    expect(sockets).toHaveLength(1);
+    controller.reconnect();
+
+    await vi.waitFor(() => expect(controller.getSnapshot()).toMatchObject({
+      phase: 'reconnecting',
+      session: { roomEpoch: 'epoch-2' },
+      managementOperation: null,
+      managementResultUnknown: false,
+    }));
+    expect(client.kick).toHaveBeenCalledOnce();
+    expect(client.issueTicket).toHaveBeenCalledTimes(2);
+    expect(client.issueTicket).toHaveBeenLastCalledWith('room-1', {
+      reconnect: { control: { roomEpoch: 'epoch-2', controlSeq: 1 } },
+    });
+    expect(sockets).toHaveLength(2);
+    sockets[1]!.open();
+    expect(controller.getSnapshot().phase).toBe('connected');
+  });
+
+  it('cancel-generation 结果未知且 epoch 已轮换时安装新权威并重建控制传输', async () => {
+    const { client, controller, sockets } = createHarness();
+    const generatingSession = {
+      ...session,
+      snapshot: { ...snapshot, activeGeneration: generationMirror },
+    };
+    const recoveredGenerating = {
+      ...generatingSession,
+      roomEpoch: 'epoch-2',
+      snapshot: { ...generatingSession.snapshot, roomEpoch: 'epoch-2', controlSeq: 1 },
+    };
+    vi.mocked(client.create).mockResolvedValueOnce(generatingSession);
+    vi.mocked(client.cancelGeneration).mockRejectedValueOnce(new ArenaRoomClientError(
+      'ROOM_RESULT_UNKNOWN',
+      null,
+      '请求结果未知',
+    ));
+    await controller.create({
+      displayName: '房主',
+      directory: { title: '测试房', visibility: 'public' },
+      sharedConfig,
+    });
+    vi.mocked(client.getGenerationView).mockResolvedValueOnce({
+      ...generationView,
+      roomEpoch: 'epoch-2',
+    });
+    vi.mocked(client.getSession).mockResolvedValueOnce(recoveredGenerating);
+
+    await controller.cancelGeneration();
+    expect(controller.getSnapshot().managementResultUnknown).toBe(true);
+    expect(sockets).toHaveLength(1);
+    controller.reconnect();
+
+    await vi.waitFor(() => expect(controller.getSnapshot()).toMatchObject({
+      phase: 'reconnecting',
+      session: { roomEpoch: 'epoch-2' },
+      managementOperation: null,
+      managementResultUnknown: false,
+    }));
+    expect(client.issueTicket).toHaveBeenCalledTimes(2);
+    expect(client.issueTicket).toHaveBeenLastCalledWith('room-1', {
+      reconnect: { control: { roomEpoch: 'epoch-2', controlSeq: 1 } },
+    });
+    expect(sockets).toHaveLength(2);
+    sockets[1]!.open();
+    expect(controller.getSnapshot().phase).toBe('connected');
   });
 
   it('leave 重放被确定性拒绝时解除 unknown 并显示真实错误', async () => {

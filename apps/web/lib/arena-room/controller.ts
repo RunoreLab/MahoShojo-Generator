@@ -1579,11 +1579,13 @@ export const createArenaRoomController = (
    * Room recovery 会保留成员并轮换 roomEpoch，因此对账时 epoch 不一致
    * 不能静默放弃：先安装新权威（必要时重置生成视图并触发权威基线恢复），
    * 再基于新 epoch 重新评估管理 intent。epoch 未变化时只安装 session。
+   * 返回 epoch 是否轮换；轮换后旧 WSS 控制面随旧实例终结，
+   * 留在房间的调用方必须据此重建控制传输。
    */
   const installRebasedAuthoritativeSession = (
     authoritative: ArenaRoomSessionResponse,
     notice: string,
-  ): void => {
+  ): boolean => {
     const epochChanged = authoritative.roomEpoch !== state.session?.roomEpoch;
     controlCursor = {
       roomEpoch: authoritative.roomEpoch,
@@ -1591,7 +1593,7 @@ export const createArenaRoomController = (
     };
     if (!epochChanged) {
       publish({ session: authoritative, notice });
-      return;
+      return false;
     }
     generationFence += 1;
     publish({
@@ -1600,6 +1602,7 @@ export const createArenaRoomController = (
       notice,
     });
     if (authoritative.snapshot.activeGeneration) void requestGenerationRecovery('baseline');
+    return true;
   };
 
   const reconcileUnknownManagementMutation = async (): Promise<void> => {
@@ -1607,8 +1610,10 @@ export const createArenaRoomController = (
     const intent = unknownManagementMutation;
     if (!current || !intent || disposed) return;
     const operation = managementMutationGeneration;
+    const reconnectGeneration = operationGeneration;
     publish({ notice: '正在读取服务器权威状态并确认管理动作…', error: null });
     let resubmitted = false;
+    let epochRebased = false;
     try {
       if (intent.operation === 'kick') {
         const authoritative = await options.client.getSession(current.roomId);
@@ -1624,19 +1629,23 @@ export const createArenaRoomController = (
         ));
         if (!targetActive) {
           unknownManagementMutation = null;
-          installRebasedAuthoritativeSession(authoritative, '已从房间权威状态确认成员移除');
+          const rebased = installRebasedAuthoritativeSession(
+            authoritative,
+            '已从房间权威状态确认成员移除',
+          );
           publish({
             managementOperation: null,
             managementResultUnknown: false,
             error: null,
           });
+          if (rebased) await connectSession(authoritative, true, reconnectGeneration);
           return;
         }
         // 权威状态证明目标仍在房间、kick 尚未生效：安全重放同一幂等 intent
         // （服务端对已撤销目标幂等返回，且带 expectedRoomEpoch fence）。
         // epoch 已因 Room recovery 轮换时先安装新权威 session，再以新 epoch 重放。
         if (authoritative.roomEpoch !== current.roomEpoch) {
-          installRebasedAuthoritativeSession(
+          epochRebased = installRebasedAuthoritativeSession(
             authoritative,
             '房间已恢复为新实例，正在重新执行成员移除…',
           );
@@ -1669,6 +1678,7 @@ export const createArenaRoomController = (
           notice: `已移除成员 ${target?.displayName ?? intent.targetUserId}`,
           error: null,
         });
+        if (epochRebased) await connectSession(replayed, true, reconnectGeneration);
         return;
       }
 
@@ -1685,7 +1695,7 @@ export const createArenaRoomController = (
         // epoch 已因 Room recovery 轮换时先安装新权威 session，再以新 epoch 重放，
         // 否则旧 epoch fence 会让重放永远无法收敛。
         if (authoritative.roomEpoch !== current.roomEpoch) {
-          installRebasedAuthoritativeSession(
+          epochRebased = installRebasedAuthoritativeSession(
             authoritative,
             '房间已恢复为新实例，正在重新执行操作…',
           );
@@ -1734,7 +1744,7 @@ export const createArenaRoomController = (
         const terminal = active !== null
           && (active.state === 'completed' || active.state === 'failed' || active.state === 'cancelled');
         unknownManagementMutation = null;
-        installRebasedAuthoritativeSession(
+        const rebasedEpoch = installRebasedAuthoritativeSession(
           rebased,
           terminal ? '生成已进入服务器权威终态' : '房间已恢复为新实例，请重新执行停止生成',
         );
@@ -1743,6 +1753,7 @@ export const createArenaRoomController = (
           managementResultUnknown: false,
           error: null,
         });
+        if (rebasedEpoch) await connectSession(rebased, true, reconnectGeneration);
         return;
       }
       installAuthoritativeGenerationView(authoritative, {
@@ -1786,8 +1797,10 @@ export const createArenaRoomController = (
         && isDeterministicMutationRejection(error)
       ) {
         // 重放被服务器确定性拒绝：结果不再是“未知”，解除 unknown 并呈现真实错误。
+        // leave/close 的发起动作已拆除本地 socket，必须重连；kick 在 epoch
+        // 未轮换时旧 socket 仍存活，但轮换后旧实例 socket 已终结，同样必须重连。
         unknownManagementMutation = null;
-        if (intent.operation !== 'kick') scheduleReconnect(false);
+        if (intent.operation !== 'kick' || epochRebased) scheduleReconnect(false);
         publish({
           managementOperation: null,
           managementResultUnknown: false,
