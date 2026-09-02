@@ -371,7 +371,7 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
         ) : null}
       </div>
 
-      {!session && !lobbyOpen ? (
+      {!session && (!lobbyOpen || state.phase === 'closed' || state.phase === 'replacement') ? (
         <div className="mt-2">
           <StatusNotice state={state} />
         </div>
