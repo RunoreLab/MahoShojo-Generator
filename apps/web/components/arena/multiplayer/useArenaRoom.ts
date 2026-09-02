@@ -32,6 +32,7 @@ import {
   type ArenaRoomSocket,
 } from '@/lib/arena-room/controller';
 import { useArenaRoomHostReconciliation } from './useArenaRoomHostReconciliation';
+import { useArenaRoomLatestCompletedHistory } from './useArenaRoomLatestCompletedHistory';
 import { useArenaRoomNarrativeHistoryResultWriter } from './useArenaRoomNarrativeHistoryResultWriter';
 
 type UseArenaRoomOptions = {
@@ -190,6 +191,14 @@ export const useArenaRoom = (options: UseArenaRoomOptions) => {
     hostWorkspace,
   });
 
+  const latestGenerationHistory = useArenaRoomLatestCompletedHistory({
+    reader: generationHistory,
+    sessionKey: state.session
+      ? `${state.session.roomId}\n${state.session.roomEpoch}\n${state.session.self.userId}`
+      : null,
+    enabled: state.generation.phase === 'idle' && !state.generation.markdown,
+  });
+
   return {
     controller,
     state,
@@ -197,6 +206,7 @@ export const useArenaRoom = (options: UseArenaRoomOptions) => {
     hostReconciliation,
     proposalWorkspace,
     generationHistory,
+    latestGenerationHistory,
   };
 };
 

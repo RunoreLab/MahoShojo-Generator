@@ -79,6 +79,11 @@ vi.mock('@/components/arena/multiplayer/useArenaRoom', () => ({
       list: mocks.listGenerationHistory,
       read: mocks.readGenerationHistory,
     },
+    latestGenerationHistory: {
+      status: 'idle',
+      latest: null,
+      completedCount: 0,
+    },
   }),
 }));
 

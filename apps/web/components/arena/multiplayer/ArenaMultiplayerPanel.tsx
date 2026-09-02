@@ -15,6 +15,8 @@ import { useBattleStore } from '@/components/arena/stores/useBattleStore';
 import { ArenaProposalPanel } from './ArenaProposalPanel';
 import { ArenaHostConfigPanel } from './ArenaHostConfigPanel';
 import { useArenaRoomContext } from './useArenaRoom';
+import type { ArenaRoomLatestCompletedHistory } from './useArenaRoomLatestCompletedHistory';
+import { ArenaRoomLatestHistoryResult } from './ArenaRoomLatestHistoryResult';
 import { BattleResultPresentation } from '../components/BattleResultPresentation';
 import { ArenaRoomDialog } from './ArenaRoomDialog';
 import { ArenaRoomGenerationHistory } from './ArenaRoomGenerationHistory';
@@ -41,6 +43,7 @@ export type ArenaMultiplayerPanelViewProps = {
   readonly hostConfigStatus?: 'idle' | 'synchronizing' | 'synced' | 'attention';
   readonly proposalWorkspaceActive?: boolean;
   readonly localConfigSyncIssues?: readonly ArenaRoomShareabilityIssue[];
+  readonly generationHistoryCount?: number;
   readonly roomTitle: string;
   readonly visibility: RoomDirectoryVisibility;
   readonly joinCode: string;
@@ -493,7 +496,9 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
                 ) : null}
               </button>
               <button type="button" className={secondaryButtonClass} onClick={() => setGenerationHistoryOpen(true)}>
-                历史战报
+                {props.generationHistoryCount !== undefined && props.generationHistoryCount > 0
+                  ? `历史战报（${props.generationHistoryCount}）`
+                  : '历史战报'}
               </button>
               <button type="button" className={secondaryButtonClass} onClick={() => setRoomOpen(true)}>
                 房间
@@ -781,6 +786,7 @@ type ArenaMultiplayerPanelRuntimeProps = ArenaMultiplayerPanelProps & {
   readonly hostReconciliation: ArenaRoomRuntimeContext['hostReconciliation'];
   readonly proposalWorkspace: ArenaRoomRuntimeContext['proposalWorkspace'];
   readonly generationHistory: ArenaRoomRuntimeContext['generationHistory'];
+  readonly latestGenerationHistory: ArenaRoomLatestCompletedHistory;
 };
 
 function ArenaMultiplayerPanelRuntime({
@@ -790,6 +796,7 @@ function ArenaMultiplayerPanelRuntime({
   hostReconciliation,
   proposalWorkspace,
   generationHistory,
+  latestGenerationHistory,
   ...props
 }: ArenaMultiplayerPanelRuntimeProps) {
   const [roomTitle, setRoomTitle] = useState(() => `${props.displayName || '玩家'} 的房间`);
@@ -866,6 +873,7 @@ function ArenaMultiplayerPanelRuntime({
         : hostReconciliation.state.kind}
       proposalWorkspaceActive={Boolean(proposalWorkspace.editor)}
       localConfigSyncIssues={localConfigSyncIssues}
+      generationHistoryCount={latestGenerationHistory.completedCount}
       roomTitle={roomTitle}
       visibility={visibility}
       joinCode={joinCode}
@@ -913,6 +921,7 @@ export function ArenaMultiplayerContextPanel(props: ArenaMultiplayerPanelProps) 
       hostReconciliation={runtime.hostReconciliation}
       proposalWorkspace={runtime.proposalWorkspace}
       generationHistory={runtime.generationHistory}
+      latestGenerationHistory={runtime.latestGenerationHistory}
     />
   );
 }
@@ -921,5 +930,9 @@ export function ArenaMultiplayerContextPanel(props: ArenaMultiplayerPanelProps) 
 export function ArenaMultiplayerContextResult({ onSaveImage }: ArenaMultiplayerResultProps) {
   const runtime = useArenaRoomContext();
   if (!runtime?.state.session) return null;
-  return <ArenaRoomGenerationResult state={runtime.state} onSaveImage={onSaveImage} />;
+  const generation = runtime.state.generation;
+  if (generation.phase !== 'idle' || generation.markdown) {
+    return <ArenaRoomGenerationResult state={runtime.state} onSaveImage={onSaveImage} />;
+  }
+  return <ArenaRoomLatestHistoryResult history={runtime.latestGenerationHistory} onSaveImage={onSaveImage} />;
 }

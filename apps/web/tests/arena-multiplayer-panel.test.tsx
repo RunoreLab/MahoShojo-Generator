@@ -140,6 +140,23 @@ describe('Arena multiplayer panel accessibility/permissions', () => {
     expect(html).toContain('role="status"');
   });
 
+  it('历史战报入口在有已完成记录时显示有界数量', () => {
+    const base = render({ ...readyState, phase: 'connected', session });
+    expect(base).toContain('历史战报');
+
+    const counted = render(
+      { ...readyState, phase: 'connected', session },
+      { generationHistoryCount: 3 },
+    );
+    expect(counted).toContain('历史战报（3）');
+
+    const capped = render(
+      { ...readyState, phase: 'connected', session },
+      { generationHistoryCount: 0 },
+    );
+    expect(capped).not.toContain('历史战报（');
+  });
+
   it('host/member 权限与 server contract 对齐', () => {
     const hostHtml = render({ ...readyState, phase: 'connected', session });
     expect(hostHtml).toContain('配置');

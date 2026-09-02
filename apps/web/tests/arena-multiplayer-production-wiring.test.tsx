@@ -235,6 +235,9 @@ describe('Arena multiplayer production client/hook wiring', () => {
           return Response.json({ protocolVersion: 1, items: [], nextCursor: null });
         }
         if (url.endsWith('/join')) return Response.json(session);
+        if (url.endsWith('/generations')) {
+          return Response.json({ protocolVersion: 1, roomId: 'room-1', roomEpoch: 'epoch-1', items: [] });
+        }
         if (url.endsWith('/ticket')) {
           return Response.json({
             protocolVersion: 1,
@@ -278,9 +281,10 @@ describe('Arena multiplayer production client/hook wiring', () => {
         '/api/arena/rooms/v1',
         '/api/arena/rooms/v1/room-1/join',
         '/api/arena/rooms/v1/room-1/ticket',
+        '/api/arena/rooms/v1/room-1/generations',
         `/api/arena/rooms/v1/room-1/${role === 'host' ? 'close' : 'leave'}`,
       ]);
-      expect(JSON.parse(String(roomCalls[3]?.init?.body))).toEqual({
+      expect(JSON.parse(String(roomCalls[4]?.init?.body))).toEqual({
         expectedRoomEpoch: 'epoch-1',
       });
       expect(new Headers(roomCalls[1]?.init?.headers).get('authorization'))
@@ -297,6 +301,9 @@ describe('Arena multiplayer production client/hook wiring', () => {
         return Response.json({ protocolVersion: 1, items: [], nextCursor: null });
       }
       if (url.endsWith('/join')) return Response.json(sessionFor('member'));
+      if (url.endsWith('/generations')) {
+        return Response.json({ protocolVersion: 1, roomId: 'room-1', roomEpoch: 'epoch-1', items: [] });
+      }
       if (url.endsWith('/ticket')) {
         ticketIndex += 1;
         return Response.json({
@@ -384,6 +391,9 @@ describe('Arena multiplayer production client/hook wiring', () => {
           status: 'withdrawn',
           result: 'applied',
         });
+      }
+      if (url.endsWith('/generations')) {
+        return Response.json({ protocolVersion: 1, roomId: 'room-1', roomEpoch: 'epoch-1', items: [] });
       }
       throw new Error(`unexpected Room request: ${url}`);
     });
@@ -515,6 +525,9 @@ describe('Arena multiplayer production client/hook wiring', () => {
         status: 'accepted',
         result: 'applied',
       });
+      if (url.endsWith('/generations')) {
+        return Response.json({ protocolVersion: 1, roomId: 'room-1', roomEpoch: 'epoch-1', items: [] });
+      }
       throw new Error(`unexpected Room request: ${url}`);
     });
     vi.stubGlobal('fetch', fetcher);
@@ -591,6 +604,9 @@ describe('Arena multiplayer production client/hook wiring', () => {
           ...memberSession,
           snapshot: { ...memberSession.snapshot, controlSeq: 1, proposals: [] },
         });
+      }
+      if (url.endsWith('/generations')) {
+        return Response.json({ protocolVersion: 1, roomId: 'room-1', roomEpoch: 'epoch-1', items: [] });
       }
       throw new Error(`unexpected Room request: ${url}`);
     });
