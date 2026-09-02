@@ -106,6 +106,7 @@ describe('Arena Room generation preflight dialog', () => {
 
     expect(document.body.textContent).toContain('当前还有 3 个待处理提案');
     expect(document.body.textContent).toContain('继续生成不会应用这些提案');
+    expect(document.body.textContent).not.toContain('当前本地编辑草稿无法发布');
     expect(document.body.querySelector('[role="alert"]')).not.toBeNull();
   });
 });

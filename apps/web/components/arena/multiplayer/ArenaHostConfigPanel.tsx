@@ -39,7 +39,7 @@ export function ArenaHostConfigPanel({
         <div>
           <h3 id="arena-host-config-heading" className="text-sm font-semibold text-gray-950 dark:text-gray-100">房间配置</h3>
           <p className="mt-1 text-xs text-gray-600 dark:text-gray-400">
-            本地编辑不会逐项联网；只有显式更新才会更改房间已发布配置。
+            本地编辑不会逐项联网；开始生成时仅在无提案、无冲突且发布基线一致时自动更新，其他情况会先请你确认。
           </p>
         </div>
         <button

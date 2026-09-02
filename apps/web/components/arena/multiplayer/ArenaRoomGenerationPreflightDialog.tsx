@@ -90,7 +90,7 @@ export function ArenaRoomGenerationPreflightDialog({
             缺少完整的本地内容发布基准，无法安全地“按当前房间配置”启动；请显式更新房间或取消。
           </p>
         ) : null}
-        {!canPublish ? (
+        {!canPublish && reasons.length > 0 ? (
           <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900" role="status">
             当前本地编辑草稿无法发布；可以沿用已发布的房间配置，或取消后修正本地编辑。
           </p>
