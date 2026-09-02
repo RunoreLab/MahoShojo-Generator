@@ -184,6 +184,7 @@ describe('Arena Room ticket -> membership -> presence WSS authority', () => {
     if (!actor) throw new Error('actor missing');
     const snapshotDigest = `sha256:${'a'.repeat(64)}`;
     const expiresAt = '2026-08-28T01:00:00.000Z';
+    const beforeReserve = actor.getSnapshot()!;
     harness.setNow('2026-08-28T00:01:00.000Z');
     await actor.execute({
       authority: issueArenaRoomGenerationReservationAuthority({
@@ -203,6 +204,7 @@ describe('Arena Room ticket -> membership -> presence WSS authority', () => {
         type: 'reserve-generation',
         expectedRoomEpoch: 'epoch-1',
         expectedRevision: 0,
+        expectedControlSeq: beforeReserve.snapshot.controlSeq,
         generationRequestId: 'request-1',
         generationId: 'generation-1',
         attempt: 1,
@@ -395,6 +397,7 @@ describe('Arena Room ticket -> membership -> presence WSS authority', () => {
         type: 'publish-config',
         expectedRoomEpoch: 'epoch-1',
         expectedRevision: 0,
+        expectedControlSeq: state.snapshot.controlSeq,
         sharedConfig: { ...state.snapshot.sharedConfig, userGuidance: 'changed' },
         timestamp: '2026-08-28T00:01:00.000Z',
       },

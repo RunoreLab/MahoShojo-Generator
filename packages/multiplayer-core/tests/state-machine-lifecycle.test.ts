@@ -236,6 +236,7 @@ describe('Arena Room runtime-neutral lifecycle transitions', () => {
       type: 'publish-config',
       expectedRoomEpoch: 'epoch-1',
       expectedRevision: 9,
+      expectedControlSeq: state.snapshot.controlSeq,
       sharedConfig: { ...baseConfig(), userGuidance: 'stale' },
       timestamp: NEXT_TIMESTAMP,
     }, hostAuthority()))).toMatchObject({ code: 'stale', reason: 'room-revision-mismatch' });
@@ -248,6 +249,7 @@ describe('Arena Room runtime-neutral lifecycle transitions', () => {
       type: 'publish-config',
       expectedRoomEpoch: 'epoch-1',
       expectedRevision: 0,
+      expectedControlSeq: state.snapshot.controlSeq,
       sharedConfig: publishedConfig,
       timestamp: NEXT_TIMESTAMP,
     }, hostAuthority()));
@@ -262,6 +264,7 @@ describe('Arena Room runtime-neutral lifecycle transitions', () => {
       type: 'publish-config',
       expectedRoomEpoch: 'epoch-1',
       expectedRevision: 1,
+      expectedControlSeq: published.nextState.snapshot.controlSeq,
       sharedConfig: publishedConfig,
       timestamp: NEXT_TIMESTAMP,
     }, hostAuthority()));
@@ -272,6 +275,7 @@ describe('Arena Room runtime-neutral lifecycle transitions', () => {
       type: 'publish-config',
       expectedRoomEpoch: 'epoch-1',
       expectedRevision: 0,
+      expectedControlSeq: joined.snapshot.controlSeq,
       sharedConfig: publishedConfig,
       timestamp: NEXT_TIMESTAMP,
     }, memberAuthority()))).toMatchObject({ code: 'forbidden', reason: 'host-required' });

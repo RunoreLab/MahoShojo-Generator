@@ -278,12 +278,14 @@ describe('Room signed-ticket real Node upgrade', () => {
         generationPayloadDigest: `sha256:${'b'.repeat(64)}`,
         expiresAt,
       });
+      const beforeReserve = actor.getSnapshot()!;
       await actor.execute({
         authority: reservationAuthority,
         command: {
           type: 'reserve-generation',
           expectedRoomEpoch: roomEpoch,
           expectedRevision: configRevision,
+          expectedControlSeq: beforeReserve.snapshot.controlSeq,
           generationRequestId: 'request-real-ws-story',
           generationId: 'generation-real-ws-story',
           attempt: 1,

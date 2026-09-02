@@ -90,6 +90,8 @@ const createRunningActor = async (options: { running?: boolean } = {}) => {
   });
   const actor = actors.get(ROOM_ID);
   if (!actor) throw new Error('expected RoomActor');
+  const createdState = actor.getSnapshot();
+  if (!createdState) throw new Error('expected room state');
 
   now = Date.parse('2026-08-28T00:01:00.000Z');
   const reservation = await actor.execute({
@@ -110,6 +112,7 @@ const createRunningActor = async (options: { running?: boolean } = {}) => {
       type: 'reserve-generation',
       expectedRoomEpoch: ROOM_EPOCH,
       expectedRevision: 0,
+      expectedControlSeq: createdState.snapshot.controlSeq,
       generationRequestId: GENERATION_REQUEST_ID,
       generationId: GENERATION_ID,
       attempt: 1,

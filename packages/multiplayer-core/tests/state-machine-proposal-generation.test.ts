@@ -332,10 +332,11 @@ describe('Arena Room Proposal authority transitions', () => {
 });
 
 describe('Arena Room authoritative generation transitions', () => {
-  const reserveCommand = () => ({
+  const reserveCommand = (state = createJoinedState()) => ({
     type: 'reserve-generation' as const,
     expectedRoomEpoch: 'epoch-1',
     expectedRevision: 0,
+    expectedControlSeq: state.snapshot.controlSeq,
     generationRequestId: 'request-1',
     generationId: 'generation-1',
     attempt: 1,
@@ -389,14 +390,14 @@ describe('Arena Room authoritative generation transitions', () => {
 
     const duplicate = success(transitionArenaRoomAt(
       reserved.nextState,
-      reserveCommand(),
+      reserveCommand(reserved.nextState),
       generationReservationAuthority(),
     ));
     expect(duplicate.kind).toBe('idempotent');
     expect(duplicate.events).toEqual([]);
 
     expect(failure(transitionArenaRoomAt(reserved.nextState, {
-      ...reserveCommand(),
+      ...reserveCommand(reserved.nextState),
       generationPayloadDigest: `sha256:${'c'.repeat(64)}`,
     }, generationReservationAuthority(
       'request-1',
@@ -408,16 +409,17 @@ describe('Arena Room authoritative generation transitions', () => {
       .toMatchObject({ code: 'conflict', reason: 'generation-request-conflict' });
 
     expect(failure(transitionArenaRoomAt(reserved.nextState, {
-      ...reserveCommand(),
+      ...reserveCommand(reserved.nextState),
       generationId: 'generation-conflict',
     }, generationReservationAuthority('request-1', 'generation-conflict'))))
       .toMatchObject({ code: 'conflict', reason: 'generation-request-conflict' });
   });
 
   it('derives participant and collaboration provenance from trusted authority state', () => {
+    const joinedForClean = createJoinedState();
     const clean = success(transitionArenaRoomAt(
-      createJoinedState(),
-      reserveCommand(),
+      joinedForClean,
+      reserveCommand(joinedForClean),
       generationReservationAuthority(),
     ));
     expect(clean.nextState.snapshot.activeGeneration).toMatchObject({
@@ -436,7 +438,7 @@ describe('Arena Room authoritative generation transitions', () => {
       timestamp: '2026-08-27T16:02:00.000Z',
     }, hostAuthority())).nextState;
     const collaborative = success(transitionArenaRoomAt(accepted, {
-      ...reserveCommand(),
+      ...reserveCommand(accepted),
       expectedRevision: 1,
       generationRequestId: 'request-collaborative',
       generationId: 'generation-collaborative',
@@ -451,11 +453,12 @@ describe('Arena Room authoritative generation transitions', () => {
       type: 'publish-config',
       expectedRoomEpoch: 'epoch-1',
       expectedRevision: 1,
+      expectedControlSeq: accepted.snapshot.controlSeq,
       sharedConfig: { ...accepted.snapshot.sharedConfig, userGuidance: '房主覆盖' },
       timestamp: '2026-08-27T16:03:00.000Z',
     }, hostAuthority())).nextState;
     const overridden = success(transitionArenaRoomAt(hostOverride, {
-      ...reserveCommand(),
+      ...reserveCommand(hostOverride),
       expectedRevision: 2,
       generationRequestId: 'request-host-override',
       generationId: 'generation-host-override',
@@ -466,11 +469,12 @@ describe('Arena Room authoritative generation transitions', () => {
       type: 'publish-config',
       expectedRoomEpoch: 'epoch-1',
       expectedRevision: 1,
+      expectedControlSeq: accepted.snapshot.controlSeq,
       sharedConfig: { ...accepted.snapshot.sharedConfig, battleMode: 'kizuna' },
       timestamp: '2026-08-27T16:03:00.000Z',
     }, hostAuthority())).nextState;
     const retained = success(transitionArenaRoomAt(unrelatedHostPublish, {
-      ...reserveCommand(),
+      ...reserveCommand(unrelatedHostPublish),
       expectedRevision: 2,
       generationRequestId: 'request-retained-collaboration',
       generationId: 'generation-retained-collaboration',
@@ -525,7 +529,7 @@ describe('Arena Room authoritative generation transitions', () => {
       expect.objectContaining({ type: 'setStoryLength', value: 'long' }),
     ]);
     const reserved = success(transitionArenaRoomAt(accepted, {
-      ...reserveCommand(),
+      ...reserveCommand(accepted),
       expectedRevision: 1,
       generationRequestId: 'request-story-length',
       generationId: 'generation-story-length',

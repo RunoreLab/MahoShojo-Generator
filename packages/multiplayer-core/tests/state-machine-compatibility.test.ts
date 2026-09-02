@@ -56,6 +56,7 @@ describe('Arena Room state-machine compatibility and portability', () => {
       type: 'publish-config',
       expectedRoomEpoch: 'epoch_01JARENA',
       expectedRevision: 7,
+      expectedControlSeq: parsedCurrent.snapshot.controlSeq,
       sharedConfig: {
         ...parsedCurrent.snapshot.sharedConfig,
         userGuidance: 'current fixture transition',
@@ -137,6 +138,7 @@ describe('Arena Room state-machine compatibility and portability', () => {
       type: 'publish-config',
       expectedRoomEpoch: 'epoch-1',
       expectedRevision: 0,
+      expectedControlSeq: created.nextState.snapshot.controlSeq,
       sharedConfig: created.nextState.snapshot.sharedConfig,
       timestamp: TEST_TIMESTAMP,
     }, {

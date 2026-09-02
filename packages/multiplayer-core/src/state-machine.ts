@@ -454,10 +454,7 @@ const publishConfig = (
     return transitionFailure('stale', 'room-revision-mismatch');
   }
   if (deepEqual(state.snapshot.sharedConfig, command.sharedConfig)) return finishIdempotent(state);
-  if (
-    command.expectedControlSeq !== undefined
-    && command.expectedControlSeq !== state.snapshot.controlSeq
-  ) {
+  if (command.expectedControlSeq !== state.snapshot.controlSeq) {
     return transitionFailure('stale', 'room-control-seq-mismatch');
   }
   const next = cloneState(state);
@@ -710,10 +707,7 @@ const reserveGeneration = (
   if (state.generationLedger.some((record) => record.mirror.generationId === command.generationId)) {
     return transitionFailure('conflict', 'generation-id-conflict');
   }
-  if (
-    command.expectedControlSeq !== undefined
-    && command.expectedControlSeq !== state.snapshot.controlSeq
-  ) {
+  if (command.expectedControlSeq !== state.snapshot.controlSeq) {
     return transitionFailure('stale', 'room-control-seq-mismatch');
   }
   if (command.expectedRevision !== state.snapshot.revision) {

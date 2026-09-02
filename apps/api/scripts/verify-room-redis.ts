@@ -230,6 +230,7 @@ const publish = (state: ArenaRoomAuthorityState): ArenaRoomTransitionSuccess => 
     type: 'publish-config',
     expectedRoomEpoch: state.snapshot.roomEpoch,
     expectedRevision: state.snapshot.revision,
+    expectedControlSeq: state.snapshot.controlSeq,
     sharedConfig: { ...state.snapshot.sharedConfig, userGuidance: 'restart-recovery-acknowledged' },
     timestamp: NEXT_TIMESTAMP,
   }, hostAuthority);
@@ -392,12 +393,16 @@ try {
     if (!created.ok || created.kind !== 'applied') {
       throw new Error('ROOM_ACTOR_RESTART_WRITE_CREATE_FAILED');
     }
+    const actor = registry.get(roomId);
+    const actorState = actor?.getSnapshot();
+    if (!actorState) throw new Error('ROOM_ACTOR_RESTART_WRITE_ACTOR_MISSING');
     const mutated = await registry.execute({
       roomId,
       command: {
         type: 'publish-config',
         expectedRoomEpoch: 'epoch-1',
         expectedRevision: 0,
+        expectedControlSeq: actorState.snapshot.controlSeq,
         sharedConfig: { ...sharedConfig(), userGuidance: 'restart-recovery-acknowledged' },
         timestamp: NEXT_TIMESTAMP,
       },
@@ -962,6 +967,7 @@ try {
         authority: hostAuthority,
       })).result;
       if (!actorCreated.ok) throw new Error('ROOM_ACTOR_CREATE_FAILED');
+      const oldActorSnapshot = oldActorRegistry.get(actorRoomId)?.getSnapshot();
       const recoveredActorRegistry = createRoomActorRegistry({
         store: readerStore,
         createRoomEpoch: () => 'actor-epoch-2',
@@ -978,6 +984,7 @@ try {
           type: 'publish-config',
           expectedRoomEpoch: 'actor-epoch-1',
           expectedRevision: 0,
+          expectedControlSeq: oldActorSnapshot?.snapshot.controlSeq ?? 0,
           sharedConfig: { ...sharedConfig(), userGuidance: 'late-old-actor' },
           timestamp: NEXT_TIMESTAMP,
         },

@@ -494,7 +494,7 @@ export const PublishArenaRoomConfigCommandSchema = z.object({
   type: z.literal('publish-config'),
   ...epochCommand,
   expectedRevision: RoomRevisionSchema,
-  expectedControlSeq: z.number().int().nonnegative().optional(),
+  expectedControlSeq: z.number().int().nonnegative(),
   sharedConfig: ArenaRoomSharedConfigSchema,
 }).strict();
 
@@ -527,7 +527,7 @@ export const ReserveArenaRoomGenerationCommandSchema = z.object({
   type: z.literal('reserve-generation'),
   ...epochCommand,
   expectedRevision: RoomRevisionSchema,
-  expectedControlSeq: z.number().int().nonnegative().optional(),
+  expectedControlSeq: z.number().int().nonnegative(),
   generationRequestId: OpaqueKeySchema,
   generationId: OpaqueKeySchema,
   attempt: z.number().int().min(1),

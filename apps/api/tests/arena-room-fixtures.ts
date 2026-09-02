@@ -88,6 +88,7 @@ export const publishArenaRoomTransition = (
     type: 'publish-config',
     expectedRoomEpoch: state.snapshot.roomEpoch,
     expectedRevision: state.snapshot.revision,
+    expectedControlSeq: state.snapshot.controlSeq,
     sharedConfig: { ...state.snapshot.sharedConfig, userGuidance: '已确认写入' },
     timestamp: ARENA_ROOM_NEXT_TIMESTAMP,
   }, hostAuthority);
