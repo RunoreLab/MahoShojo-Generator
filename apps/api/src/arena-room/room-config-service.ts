@@ -88,6 +88,7 @@ const mapTransitionFailure = (failure: ArenaRoomTransitionFailure): never => {
   switch (failure.reason) {
     case 'room-epoch-mismatch': return fail('ROOM_EPOCH_STALE');
     case 'room-revision-mismatch': return fail('ROOM_REVISION_STALE');
+    case 'room-control-seq-mismatch': return fail('ROOM_REVISION_STALE');
     case 'host-required':
     case 'member-not-active': return fail('ROOM_PERMISSION_DENIED');
     case 'invalid-command':
@@ -140,6 +141,10 @@ export const createArenaRoomConfigService = (
       if (current.snapshot.revision !== request.data.expectedRevision) {
         return fail('ROOM_REVISION_STALE');
       }
+      if (
+        request.data.expectedControlSeq !== undefined
+        && current.snapshot.controlSeq !== request.data.expectedControlSeq
+      ) return fail('ROOM_REVISION_STALE');
       if (membership.member.role !== 'host' || membership.member.membershipState !== 'active') {
         return fail('ROOM_PERMISSION_DENIED');
       }
@@ -172,6 +177,9 @@ export const createArenaRoomConfigService = (
             type: 'publish-config',
             expectedRoomEpoch: request.data.expectedRoomEpoch,
             expectedRevision: request.data.expectedRevision,
+            ...(request.data.expectedControlSeq === undefined
+              ? {}
+              : { expectedControlSeq: request.data.expectedControlSeq }),
             sharedConfig: request.data.sharedConfig,
             timestamp: monotonicTimestamp(now, current),
           },

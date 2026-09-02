@@ -175,6 +175,8 @@ export const useArenaRoomHostReconciliation = ({
     if (actionLockRef.current) return;
     const authority = currentAuthority(controller);
     if (!authority) return;
+    const expectedControlSeq = controller.getSnapshot().session?.snapshot.controlSeq;
+    if (expectedControlSeq === undefined) return;
     const operationGeneration = ++operationGenerationRef.current;
     actionLockRef.current = true;
     setState({ kind: 'synchronizing', action: 'publish' });
@@ -185,6 +187,7 @@ export const useArenaRoomHostReconciliation = ({
       await controller.publishConfig({
         expectedRoomEpoch: authority.roomEpoch,
         expectedRevision: authority.revision,
+        expectedControlSeq,
         sharedConfig: bundle.sharedConfig,
       });
       const published = currentAuthority(controller);

@@ -272,6 +272,7 @@ const mapTransitionFailure = (reason: string): never => {
   switch (reason) {
     case 'room-epoch-mismatch': return fail('ROOM_EPOCH_STALE');
     case 'room-revision-mismatch': return fail('ROOM_REVISION_STALE');
+    case 'room-control-seq-mismatch': return fail('ROOM_GENERATION_CONFLICT');
     case 'host-required':
     case 'member-required': return fail('ROOM_PERMISSION_DENIED');
     case 'generation-active':
@@ -879,6 +880,9 @@ export const createArenaRoomGenerationService = (
             type: 'reserve-generation',
             expectedRoomEpoch: current.snapshot.roomEpoch,
             expectedRevision: snapshot.configRevision,
+            ...(input.request.expectedControlSeq === undefined
+              ? {}
+              : { expectedControlSeq: input.request.expectedControlSeq }),
             generationRequestId: snapshot.generationRequestId,
             generationId,
             attempt: 1,
@@ -904,6 +908,10 @@ export const createArenaRoomGenerationService = (
       if (membership.state.snapshot.revision !== input.request.expectedRevision) {
         return fail('ROOM_REVISION_STALE');
       }
+      if (
+        input.request.expectedControlSeq !== undefined
+        && membership.state.snapshot.controlSeq !== input.request.expectedControlSeq
+      ) return fail('ROOM_GENERATION_CONFLICT');
       const state = membership.state;
       if (JSON.stringify(state.snapshot.sharedConfig) !== JSON.stringify(input.request.sharedConfig)) {
         return fail('ROOM_GENERATION_CONFLICT');
@@ -942,6 +950,9 @@ export const createArenaRoomGenerationService = (
           type: 'reserve-generation',
           expectedRoomEpoch: state.snapshot.roomEpoch,
           expectedRevision: snapshot.configRevision,
+          ...(input.request.expectedControlSeq === undefined
+            ? {}
+            : { expectedControlSeq: input.request.expectedControlSeq }),
           generationRequestId: snapshot.generationRequestId,
           generationId,
           attempt: 1,

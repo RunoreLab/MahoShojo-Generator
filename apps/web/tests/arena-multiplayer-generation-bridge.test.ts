@@ -207,6 +207,7 @@ describe('Arena multiplayer generation bridge', () => {
     expect(startGeneration).toHaveBeenCalledWith({
       expectedRoomEpoch: 'epoch-1',
       expectedRevision: 4,
+      expectedControlSeq: 8,
       generationRequestId: 'request-stable-1',
       sharedConfig,
       hostLocalPayloads,

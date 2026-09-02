@@ -270,6 +270,23 @@ describe('Arena Room config application service', () => {
     expect(harness.store.state?.snapshot.sharedConfig.userGuidance).toBe('');
   });
 
+  it('controlSeq 已变化时拒绝写入不同配置，防止忽略在途 Proposal', async () => {
+    const harness = await createHarness();
+    const currentControlSeq = harness.store.state!.snapshot.controlSeq;
+
+    await expect(harness.service.publish({
+      roomId: 'room-1',
+      accountUserId: 101,
+      request: {
+        expectedRoomEpoch: 'epoch-1',
+        expectedRevision: 0,
+        expectedControlSeq: currentControlSeq - 1,
+        sharedConfig: { ...config(), userGuidance: '不得静默发布' },
+      },
+    })).rejects.toEqual(new ArenaRoomConfigError('ROOM_REVISION_STALE'));
+    expect(harness.store.state?.snapshot.sharedConfig.userGuidance).toBe('');
+  });
+
   it('Redis CAS conflict 进入 unknown/fail-closed，绝不安装未 checkpoint 的 revision', async () => {
     const harness = await createHarness();
     harness.store.conflictNextSave = true;

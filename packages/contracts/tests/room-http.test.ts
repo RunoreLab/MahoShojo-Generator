@@ -80,6 +80,7 @@ describe('Arena Room HTTP product contract', () => {
     const request = {
       expectedRoomEpoch: canonicalRoomSnapshot.roomEpoch,
       expectedRevision: canonicalRoomSnapshot.revision,
+      expectedControlSeq: canonicalRoomSnapshot.controlSeq,
       sharedConfig: canonicalRoomSnapshot.sharedConfig,
     };
     expect(ArenaRoomPublishConfigRequestSchema.parse(request)).toEqual(request);
@@ -99,6 +100,7 @@ describe('Arena Room HTTP product contract', () => {
     const request = {
       expectedRoomEpoch: 'epoch-1',
       expectedRevision: 3,
+      expectedControlSeq: 7,
       generationRequestId: 'request-1234',
       sharedConfig: canonicalRoomSnapshot.sharedConfig,
       hostLocalPayloads: [{

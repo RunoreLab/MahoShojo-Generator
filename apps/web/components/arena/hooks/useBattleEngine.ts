@@ -804,9 +804,11 @@ export const useBattleEngine = () => {
               const beforePublishProposalFingerprint = pendingProposalFingerprint(
                 beforePublishState.session?.snapshot.proposals ?? [],
               );
+              const beforePublishControlSeq = beforePublishState.session?.snapshot.controlSeq;
               if (
                 beforePublishState.configPublishPending
                 || beforePublishState.configPublishResultUnknown
+                || beforePublishControlSeq === undefined
                 || !beforePublishAuthority
                 || beforePublishAuthority.roomId !== authority.roomId
                 || beforePublishAuthority.roomEpoch !== authority.roomEpoch
@@ -819,6 +821,7 @@ export const useBattleEngine = () => {
               await arenaRoomRuntime.controller.publishConfig({
                 expectedRoomEpoch: authority.roomEpoch,
                 expectedRevision: authority.revision,
+                expectedControlSeq: beforePublishControlSeq,
                 sharedConfig: comparison.current.sharedConfig,
               });
               const publishedState = arenaRoomRuntime.controller.getSnapshot();

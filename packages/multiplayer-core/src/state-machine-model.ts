@@ -494,6 +494,7 @@ export const PublishArenaRoomConfigCommandSchema = z.object({
   type: z.literal('publish-config'),
   ...epochCommand,
   expectedRevision: RoomRevisionSchema,
+  expectedControlSeq: z.number().int().nonnegative().optional(),
   sharedConfig: ArenaRoomSharedConfigSchema,
 }).strict();
 
@@ -526,6 +527,7 @@ export const ReserveArenaRoomGenerationCommandSchema = z.object({
   type: z.literal('reserve-generation'),
   ...epochCommand,
   expectedRevision: RoomRevisionSchema,
+  expectedControlSeq: z.number().int().nonnegative().optional(),
   generationRequestId: OpaqueKeySchema,
   generationId: OpaqueKeySchema,
   attempt: z.number().int().min(1),
@@ -588,6 +590,7 @@ export const ARENA_ROOM_TRANSITION_FAILURE_REASONS = [
   'room-epoch-mismatch',
   'room-epoch-reuse',
   'room-revision-mismatch',
+  'room-control-seq-mismatch',
   'room-closed',
   'host-required',
   'member-required',

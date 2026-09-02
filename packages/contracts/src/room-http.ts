@@ -109,6 +109,7 @@ export const ArenaRoomGenerationCancelRequestSchema = z.object({
 export const ArenaRoomPublishConfigRequestSchema = z.object({
   expectedRoomEpoch: OpaqueKeySchema,
   expectedRevision: RoomRevisionSchema,
+  expectedControlSeq: z.number().int().nonnegative().optional(),
   sharedConfig: ArenaRoomSharedConfigSchema,
 }).strict();
 
@@ -172,6 +173,7 @@ export const ArenaRoomHostRuntimeGenerationSchema = z.object({
 export const ArenaRoomGenerationStartRequestSchema = z.object({
   expectedRoomEpoch: OpaqueKeySchema,
   expectedRevision: RoomRevisionSchema,
+  expectedControlSeq: z.number().int().nonnegative().optional(),
   generationRequestId: ArenaGenerationRequestIdSchema,
   sharedConfig: ArenaRoomSharedConfigSchema,
   hostLocalPayloads: z.array(ArenaRoomHostLocalPayloadSchema)

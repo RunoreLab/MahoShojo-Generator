@@ -343,6 +343,32 @@ describe('Arena Room authoritative generation transitions', () => {
     timestamp: '2026-08-27T16:04:00.000Z',
   });
 
+  it('Proposal 在途变更 controlSeq 后原子拒绝过期的配置发布与生成预约', () => {
+    const clean = createJoinedState();
+    const expectedControlSeq = clean.snapshot.controlSeq;
+    const submitted = submit(clean).nextState;
+
+    expect(failure(transitionArenaRoomAt(submitted, {
+      type: 'publish-config',
+      expectedRoomEpoch: 'epoch-1',
+      expectedRevision: 0,
+      expectedControlSeq,
+      sharedConfig: { ...submitted.snapshot.sharedConfig, userGuidance: '房主本地修改' },
+      timestamp: '2026-08-27T16:04:00.000Z',
+    }, hostAuthority()))).toMatchObject({
+      code: 'stale',
+      reason: 'room-control-seq-mismatch',
+    });
+
+    expect(failure(transitionArenaRoomAt(submitted, {
+      ...reserveCommand(),
+      expectedControlSeq,
+    }, generationReservationAuthority()))).toMatchObject({
+      code: 'stale',
+      reason: 'room-control-seq-mismatch',
+    });
+  });
+
   it('reserves one immutable attempt and treats an exact duplicate as idempotent', () => {
     const state = createJoinedState();
     const reserved = success(transitionArenaRoomAt(state, reserveCommand(), generationReservationAuthority()));

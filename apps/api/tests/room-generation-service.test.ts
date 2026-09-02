@@ -759,6 +759,18 @@ describe('Arena Room generation coordinator', () => {
     expect(harness.generation.startFromHostRequest).not.toHaveBeenCalled();
   });
 
+  it('controlSeq 已变化时在 materialize 前拒绝生成，覆盖确认后的新 Proposal', async () => {
+    const harness = await createHarness();
+    await expect(harness.service.start({
+      roomId: 'room-1',
+      accountUserId: 101,
+      request: { ...startRequest(), expectedControlSeq: 99 },
+      sourceRequest: sourceRequest(),
+    })).rejects.toMatchObject({ code: 'ROOM_GENERATION_CONFLICT' });
+    expect(harness.materializer.materialize).not.toHaveBeenCalled();
+    expect(harness.generation.startFromHostRequest).not.toHaveBeenCalled();
+  });
+
   it.each([
     [
       new ArenaRoomGenerationContentResolverError('ARENA_ROOM_REFERENCE_VERSION_MISMATCH'),

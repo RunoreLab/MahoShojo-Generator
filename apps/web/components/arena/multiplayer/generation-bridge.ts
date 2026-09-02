@@ -132,6 +132,7 @@ export const dispatchArenaRoomGenerationStart = async (
   await options.controller.startGeneration(ArenaRoomGenerationStartRequestSchema.parse({
     expectedRoomEpoch: captured.roomEpoch,
     expectedRevision: captured.snapshot.revision,
+    expectedControlSeq: captured.snapshot.controlSeq,
     generationRequestId: options.generationRequestId,
     sharedConfig: options.sharedConfig,
     hostLocalPayloads: options.hostLocalPayloads,
