@@ -142,10 +142,9 @@ describe('Arena multiplayer panel accessibility/permissions', () => {
 
   it('host/member 权限与 server contract 对齐', () => {
     const hostHtml = render({ ...readyState, phase: 'connected', session });
-    expect(hostHtml).toContain('更新配置');
+    expect(hostHtml).toContain('配置');
     expect(hostHtml).toContain('提案');
-    expect(hostHtml).toContain('成员');
-    expect(hostHtml).toContain('房间管理');
+    expect(hostHtml).toContain('>房间</button>');
     expect(hostHtml).not.toContain('aria-label="房间成员列表"');
     expect(hostHtml).not.toContain('房间战报');
     expect(hostHtml).not.toContain('关闭房间');
@@ -166,10 +165,10 @@ describe('Arena multiplayer panel accessibility/permissions', () => {
       phase: 'connected',
       session: memberSession,
     });
-    expect(memberHtml).toContain('同步配置');
+    expect(memberHtml).not.toContain('同步配置');
     expect(memberHtml).toContain('提案');
-    expect(memberHtml).toContain('成员');
-    expect(memberHtml).toContain('房间管理 / 退出');
+    expect(memberHtml).toContain('>房间</button>');
+    expect(memberHtml).not.toContain('房间管理 / 退出');
     expect(memberHtml).not.toContain('离开房间');
     expect(memberHtml).not.toContain('关闭房间');
   });

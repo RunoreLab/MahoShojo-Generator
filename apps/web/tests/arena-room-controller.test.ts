@@ -389,6 +389,25 @@ describe('Arena Room browser controller', () => {
     });
   });
 
+  it('非房间终态的正常 socket 关闭会重连而不清除 session', async () => {
+    const { client, controller, runNextTimer, sockets } = createHarness();
+    await controller.create({
+      displayName: '房主',
+      directory: { title: '测试房', visibility: 'public' },
+      sharedConfig,
+    });
+    sockets[0]!.open();
+
+    sockets[0]!.closed(1000, 'maintenance');
+
+    expect(controller.getSnapshot()).toMatchObject({
+      phase: 'reconnecting',
+      session: { roomId: 'room-1', roomEpoch: 'epoch-1' },
+    });
+    await runNextTimer();
+    expect(client.issueTicket).toHaveBeenCalledTimes(2);
+  });
+
   it('room.closing 权威事件立即结束本地房间会话', async () => {
     const { controller, sockets } = createHarness();
     await controller.create({
@@ -1822,7 +1841,7 @@ describe('Arena Room browser controller', () => {
     });
   });
 
-  it('leave 结果未知后用 session not found 对账为已离开', async () => {
+  it('leave 结果未知后用 session not found 对账为会话已结束', async () => {
     const { client, controller } = createHarness();
     const memberSession = {
       ...session,
@@ -1855,7 +1874,7 @@ describe('Arena Room browser controller', () => {
       session: null,
       managementOperation: null,
       managementResultUnknown: false,
-      notice: '已从服务器确认离开房间',
+      notice: '已确认当前房间会话已结束',
     }));
     expect(client.leave).toHaveBeenCalledOnce();
     expect(client.getSession).toHaveBeenCalledOnce();

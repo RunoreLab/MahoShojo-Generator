@@ -554,7 +554,7 @@ describe('Arena multiplayer panel real React interactions', () => {
     expect(mocks.reconnect).toHaveBeenCalledOnce();
   });
 
-  it('host 通过成员/管理 Modal 执行 kick、cancel 与 close 的确认动作', async () => {
+  it('host 通过统一房间 Modal 执行 kick、cancel 与 close 的确认动作', async () => {
     const host = {
       userId: 'host-1',
       role: 'host' as const,
@@ -601,18 +601,16 @@ describe('Arena multiplayer panel real React interactions', () => {
     };
     await act(async () => root.render(<ArenaMultiplayerContextPanel {...props} />));
 
-    await act(async () => button('成员').click());
+    await act(async () => button('房间').click());
     await act(async () => button('移除').click());
     expect(document.body.textContent).toContain('确定将“成员”移出当前房间吗');
     await act(async () => button('确认移除成员').click());
     expect(mocks.kickMember).toHaveBeenCalledWith('member-1');
-    await act(async () => button('关闭').click());
-
-    await act(async () => button('房间管理').click());
     await act(async () => button('停止当前生成').click());
     await act(async () => button('确认停止生成').click());
     expect(mocks.cancelGeneration).toHaveBeenCalledOnce();
 
+    await act(async () => button('房间').click());
     await act(async () => button('关闭房间').click());
     await act(async () => button('确认关闭房间').click());
     expect(mocks.close).toHaveBeenCalledOnce();
@@ -655,11 +653,17 @@ describe('Arena multiplayer panel real React interactions', () => {
     };
     await act(async () => root.render(<ArenaMultiplayerContextPanel {...props} />));
 
-    await act(async () => button('房间管理 / 退出').click());
+    await act(async () => button('房间').click());
     await act(async () => button('离开房间').click());
     expect(mocks.leave).not.toHaveBeenCalled();
     await act(async () => button('确认离开房间').click());
     expect(mocks.leave).toHaveBeenCalledOnce();
+    expect(document.body.querySelector('#arena-room-overview-dialog-heading')).toBeNull();
+
+    mocks.state = { ...readyState, notice: '已离开房间' };
+    await act(async () => root.render(<ArenaMultiplayerContextPanel {...props} />));
+    await flush();
+    expect(document.activeElement).toBe(document.body.querySelector('[data-arena-multiplayer="v1"]'));
   });
 
   it('host 通过显式动作发布本地 working copy，冲突时提供三种 reconciliation 入口', async () => {
@@ -692,9 +696,10 @@ describe('Arena multiplayer panel real React interactions', () => {
       },
     };
     await act(async () => root.render(<ArenaMultiplayerContextPanel {...props} />));
-    await act(async () => button('更新配置').click());
+    await act(async () => button('配置').click());
     await act(async () => button('更新房间配置').click());
     expect(mocks.publishLocal).toHaveBeenCalledOnce();
+    await act(async () => button('关闭').click());
 
     mocks.reconciliationState = {
       kind: 'conflicted',
@@ -704,6 +709,8 @@ describe('Arena multiplayer panel real React interactions', () => {
       localConfig: sharedConfig,
     };
     await act(async () => root.render(<ArenaMultiplayerContextPanel {...props} />));
+    expect(button('配置待处理')).not.toBeNull();
+    await act(async () => button('配置待处理').click());
     expect(document.body.textContent).toContain('房间配置已更新，但本地 Arena 同时有未发布修改');
     await act(async () => button('查看差异').click());
     expect(document.body.querySelectorAll('[role="dialog"][aria-modal="true"]')).toHaveLength(1);

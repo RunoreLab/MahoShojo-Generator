@@ -268,7 +268,7 @@ describe('Arena multiplayer production client/hook wiring', () => {
       });
       await act(async () => WiringSocket.instances[0]!.open());
       const exitLabel = role === 'host' ? '关闭房间' : '离开房间';
-      await act(async () => button(role === 'host' ? '房间管理' : '房间管理 / 退出').click());
+      await act(async () => button('房间').click());
       await act(async () => button(exitLabel).click());
       await act(async () => button(role === 'host' ? '确认关闭房间' : '确认离开房间').click());
       await flush();

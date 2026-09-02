@@ -31,7 +31,7 @@ export function ArenaRoomDialog({
       description={description}
       maxWidthClassName={widthClassName}
       closeOnBackdrop={false}
-      closeButtonAriaLabel={`关闭${typeof title === 'string' ? title : '窗口'}`}
+      closeButtonAriaLabel={`关闭“${typeof title === 'string' ? title : '房间'}”对话框`}
       closeButtonContent="关闭"
       onClose={onClose}
     >

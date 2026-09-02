@@ -996,7 +996,7 @@ export const createArenaRoomController = (
       current.onclose = (event) => {
         if (socket !== current || disposed) return;
         socket = null;
-        if (event.code === 1000) {
+        if (event.code === 1000 && event.reason === 'room-closed') {
           finishRoomSession({
             notice: '房间已关闭',
           });
@@ -1643,9 +1643,9 @@ export const createArenaRoomController = (
         unknownManagementMutation = null;
         finishRoomSession({
           notice: intent.operation === 'close' && error.code === 'ROOM_NOT_FOUND'
-            ? '已从服务器确认房间关闭'
+            ? '已确认当前房间会话已结束'
             : intent.operation === 'leave'
-              ? '已从服务器确认离开房间'
+              ? '已确认当前房间会话已结束'
               : '房间会话已结束',
         });
         return;
