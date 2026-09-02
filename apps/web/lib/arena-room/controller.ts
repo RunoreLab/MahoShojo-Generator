@@ -1638,7 +1638,7 @@ export const createArenaRoomController = (
       if (
         intent.operation !== 'cancel-generation'
         && error instanceof ArenaRoomClientError
-        && (error.code === 'ROOM_NOT_FOUND' || error.code === 'ROOM_FORBIDDEN')
+        && error.code === 'ROOM_NOT_FOUND'
       ) {
         unknownManagementMutation = null;
         finishRoomSession({
@@ -2012,7 +2012,7 @@ export const createArenaRoomController = (
         if (!operationIsCurrent(generation)) return;
         if (
           error instanceof ArenaRoomClientError
-          && (error.code === 'ROOM_FORBIDDEN' || error.code === 'ROOM_NOT_FOUND')
+          && error.code === 'ROOM_NOT_FOUND'
         ) {
           finishRoomSession({ notice: '房间成员资格已结束' });
           return;
@@ -2026,10 +2026,11 @@ export const createArenaRoomController = (
             error: null,
           });
         } else {
+          scheduleReconnect(false);
           publish({
             managementOperation: null,
             managementResultUnknown: false,
-            notice: null,
+            notice: '离开房间失败，正在重新连接…',
             error: safeErrorMessage(error),
           });
         }
@@ -2080,7 +2081,7 @@ export const createArenaRoomController = (
         if (!operationIsCurrent(generation)) return;
         if (
           error instanceof ArenaRoomClientError
-          && (error.code === 'ROOM_FORBIDDEN' || error.code === 'ROOM_NOT_FOUND')
+          && error.code === 'ROOM_NOT_FOUND'
         ) {
           finishRoomSession({ notice: '房间已结束' });
           return;
@@ -2094,10 +2095,11 @@ export const createArenaRoomController = (
             error: null,
           });
         } else {
+          scheduleReconnect(false);
           publish({
             managementOperation: null,
             managementResultUnknown: false,
-            notice: null,
+            notice: '关闭房间失败，正在重新连接…',
             error: safeErrorMessage(error),
           });
         }

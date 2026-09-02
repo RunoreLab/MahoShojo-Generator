@@ -1822,7 +1822,7 @@ describe('Arena Room browser controller', () => {
     });
   });
 
-  it('leave 结果未知后用 membership forbidden 对账为已离开', async () => {
+  it('leave 结果未知后用 session not found 对账为已离开', async () => {
     const { client, controller } = createHarness();
     const memberSession = {
       ...session,
@@ -1840,9 +1840,9 @@ describe('Arena Room browser controller', () => {
       '请求结果未知',
     ));
     vi.mocked(client.getSession).mockRejectedValueOnce(new ArenaRoomClientError(
-      'ROOM_FORBIDDEN',
-      403,
-      '没有此房间操作权限',
+      'ROOM_NOT_FOUND',
+      404,
+      '房间会话不存在或已结束',
     ));
     await controller.join('room-1', '成员');
 
@@ -1861,7 +1861,7 @@ describe('Arena Room browser controller', () => {
     expect(client.getSession).toHaveBeenCalledOnce();
   });
 
-  it('leave 直接返回 membership forbidden 时结束失效的本地会话', async () => {
+  it('leave 直接返回通用 forbidden 时保留会话并显示失败原因', async () => {
     const { client, controller } = createHarness();
     const memberSession = {
       ...session,
@@ -1883,9 +1883,10 @@ describe('Arena Room browser controller', () => {
     await controller.leave();
 
     expect(controller.getSnapshot()).toMatchObject({
-      phase: 'ready',
-      session: null,
-      notice: '房间成员资格已结束',
+      phase: 'reconnecting',
+      session: memberSession,
+      notice: '离开房间失败，正在重新连接…',
+      error: '没有此房间操作权限',
       managementOperation: null,
       managementResultUnknown: false,
     });

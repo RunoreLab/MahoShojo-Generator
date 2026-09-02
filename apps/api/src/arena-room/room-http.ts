@@ -985,6 +985,13 @@ export const registerArenaRoomHttpRoutes = (
       noStore(context);
       return context.json(sessionResponse(session), 200);
     } catch (error) {
+      if (
+        error instanceof ArenaRoomMembershipError
+        && (error.code === 'ROOM_MEMBERSHIP_NOT_ACTIVE'
+          || error.code === 'ROOM_MEMBERSHIP_REVOKED')
+      ) {
+        return context.json(errorBody('ROOM_NOT_FOUND', '房间会话不存在或已结束'), 404);
+      }
       return mapServiceError(context, error);
     }
   });
