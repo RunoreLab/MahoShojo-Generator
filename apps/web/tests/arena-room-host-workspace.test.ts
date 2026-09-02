@@ -106,6 +106,20 @@ describe('Arena Room host workspace baseline', () => {
     });
   });
 
+  it('仅在已捕获 baseline 仍对应同一权威 revision 时允许自动发布', () => {
+    const workspace = createArenaRoomHostWorkspace();
+    workspace.capturePublished(authority(), bundle());
+    const localChange = bundle(
+      { name: '本地角色', secret: 'changed-body' },
+      `sha256:${'b'.repeat(64)}`,
+      '房主本地修改',
+    );
+
+    expect(workspace.canAutoPublish(authority(), localChange)).toBe(true);
+    expect(workspace.canAutoPublish(authority('', { revision: 4 }), localChange)).toBe(false);
+    expect(workspace.canAutoPublish(authority('', { roomEpoch: 'epoch-2' }), localChange)).toBe(false);
+  });
+
   it('缺少当前 room/epoch/owner baseline 时 host-local 按房间启动 fail closed', () => {
     const workspace = createArenaRoomHostWorkspace();
     const comparison = workspace.compare(authority(), bundle());

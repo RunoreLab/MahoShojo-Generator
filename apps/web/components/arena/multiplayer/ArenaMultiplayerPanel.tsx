@@ -338,6 +338,9 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
   const activeGeneration = session?.snapshot.activeGeneration;
   const canCancelGeneration = session?.self.role === 'host'
     && (activeGeneration?.state === 'starting' || activeGeneration?.state === 'running');
+  const pendingProposalCount = session?.self.role === 'host'
+    ? session.snapshot.proposals.length
+    : 0;
 
   return (
     <section
@@ -428,8 +431,21 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
               <button type="button" className={secondaryButtonClass} onClick={() => setConfigOpen(true)}>
                 {session.self.role === 'host' ? '更新配置' : '同步配置'}
               </button>
-              <button type="button" className={secondaryButtonClass} onClick={() => setProposalsOpen(true)}>
+              <button
+                type="button"
+                className={`${secondaryButtonClass} relative`}
+                aria-label={pendingProposalCount > 0 ? `提案，${pendingProposalCount} 个待处理` : '提案'}
+                onClick={() => setProposalsOpen(true)}
+              >
                 提案
+                {pendingProposalCount > 0 ? (
+                  <span
+                    aria-hidden="true"
+                    className="absolute -right-2 -top-2 inline-flex min-h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1 text-[11px] font-bold leading-none text-white ring-2 ring-white dark:ring-gray-900"
+                  >
+                    {pendingProposalCount > 99 ? '99+' : pendingProposalCount}
+                  </span>
+                ) : null}
               </button>
               <button type="button" className={secondaryButtonClass} onClick={() => setMembersOpen(true)}>
                 成员

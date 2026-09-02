@@ -10,6 +10,7 @@ type Props = Readonly<{
   reasons: readonly ArenaRoomHostWorkspaceDirtyReason[];
   canUseRoom: boolean;
   canPublish: boolean;
+  pendingProposalCount?: number;
   busy: boolean;
   onChoice: (choice: ArenaRoomGenerationPreflightChoice) => void;
 }>;
@@ -28,6 +29,7 @@ export function ArenaRoomGenerationPreflightDialog({
   reasons,
   canUseRoom,
   canPublish,
+  pendingProposalCount = 0,
   busy,
   onChoice,
 }: Props) {
@@ -70,10 +72,19 @@ export function ArenaRoomGenerationPreflightDialog({
       )}
     >
       <div className="space-y-3 text-sm text-gray-700">
-        <p>检测到未发布的本地修改，不会因为点击“开始生成”而静默覆盖房间。</p>
-        <ul className="list-disc space-y-1 pl-5">
-          {reasons.map((reason) => <li key={reason}>{reasonText[reason]}</li>)}
-        </ul>
+        {pendingProposalCount > 0 ? (
+          <p className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 font-medium text-red-900" role="alert">
+            当前还有 {pendingProposalCount} 个待处理提案；继续生成不会应用这些提案。
+          </p>
+        ) : null}
+        {reasons.length > 0 ? (
+          <>
+            <p>检测到未发布的本地修改，不会因为点击“开始生成”而静默覆盖房间。</p>
+            <ul className="list-disc space-y-1 pl-5">
+              {reasons.map((reason) => <li key={reason}>{reasonText[reason]}</li>)}
+            </ul>
+          </>
+        ) : null}
         {!canUseRoom ? (
           <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900" role="status">
             缺少完整的本地内容发布基准，无法安全地“按当前房间配置”启动；请显式更新房间或取消。

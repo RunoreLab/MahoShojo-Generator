@@ -90,4 +90,22 @@ describe('Arena Room generation preflight dialog', () => {
     expect(document.body.textContent).not.toContain('working copy');
     expect(document.body.textContent).not.toContain('Room baseline');
   });
+
+  it('有待处理提案时醒目提示继续生成不会应用提案', async () => {
+    await act(async () => root.render(
+      <ArenaRoomGenerationPreflightDialog
+        isOpen
+        reasons={[]}
+        canUseRoom
+        canPublish={false}
+        pendingProposalCount={3}
+        busy={false}
+        onChoice={vi.fn()}
+      />,
+    ));
+
+    expect(document.body.textContent).toContain('当前还有 3 个待处理提案');
+    expect(document.body.textContent).toContain('继续生成不会应用这些提案');
+    expect(document.body.querySelector('[role="alert"]')).not.toBeNull();
+  });
 });

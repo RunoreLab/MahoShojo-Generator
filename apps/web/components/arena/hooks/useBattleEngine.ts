@@ -81,6 +81,10 @@ import {
   resolveArenaRoomGenerationAction,
 } from '../multiplayer/generation-bridge';
 import { useArenaRoomContext } from '../multiplayer/useArenaRoom';
+import {
+  canAutoPublishArenaRoomHostDraft,
+  pendingProposalFingerprint,
+} from '../multiplayer/generation-preflight';
 
 const sanitizeTextByShieldWords = (text: string): string => applyShieldWords(text).filteredText;
 
@@ -90,6 +94,7 @@ export type ArenaRoomGenerationPreflightPrompt = Readonly<{
   reasons: readonly ArenaRoomHostWorkspaceDirtyReason[];
   canUseRoom: boolean;
   canPublish: boolean;
+  pendingProposalCount: number;
   busy: boolean;
 }>;
 
@@ -411,6 +416,7 @@ export const useBattleEngine = () => {
       reasons: readonly ArenaRoomHostWorkspaceDirtyReason[];
       canUseRoom: boolean;
       canPublish: boolean;
+      pendingProposalCount?: number;
     }>,
   ): Promise<ArenaRoomGenerationPreflightChoice> => {
     pendingArenaRoomGenerationPreflight.current?.resolve('cancel');
@@ -420,6 +426,7 @@ export const useBattleEngine = () => {
         reasons: input.reasons,
         canUseRoom: input.canUseRoom,
         canPublish: input.canPublish,
+        pendingProposalCount: input.pendingProposalCount ?? 0,
         busy: false,
       });
     });
@@ -564,8 +571,8 @@ export const useBattleEngine = () => {
     setLastGenerationRepairContext(null);
 
     try {
-      // 房间房主与单人模式共用随机角色解析；随后的 bundle
-      // 对比会将新角色作为本地草稿，仍需显式更新房间配置。
+      // 房间房主与单人模式共用随机角色解析；随后的 bundle 对比会把
+      // 新角色视为本地草稿，只有权威 revision/提案/冲突门禁均满足时才自动发布。
       await handleResolveRandomPlaceholders();
 
       const freshCombatants = useBattleStore.getState().combatants.filter((item): item is CombatantData => 'data' in item);
@@ -733,6 +740,10 @@ export const useBattleEngine = () => {
         ) {
           throw new Error('构建多人生成输入时房间权威已变化，请确认最新状态后重试。');
         }
+        const proposalFingerprint = pendingProposalFingerprint(
+          preflightState.session?.snapshot.proposals ?? [],
+        );
+        const pendingProposalCount = preflightState.session?.snapshot.proposals.length ?? 0;
 
         let startInputs: ArenaRoomGenerationStartInputs | null = null;
         if (!bundle) {
@@ -741,6 +752,7 @@ export const useBattleEngine = () => {
             reasons: ['working-copy-invalid'],
             canUseRoom: roomStart !== null,
             canPublish: false,
+            pendingProposalCount,
           });
           if (choice === 'cancel') return;
           if (choice !== 'use-room' || !roomStart) {
@@ -750,12 +762,32 @@ export const useBattleEngine = () => {
         } else {
           const comparison = arenaRoomRuntime.hostWorkspace.compare(authority, bundle);
           startInputs = comparison.kind === 'clean' ? comparison.start : null;
-          if (comparison.kind === 'dirty') {
+          if (comparison.kind === 'clean' && pendingProposalCount > 0) {
             const choice = await requestArenaRoomGenerationPreflight({
-              reasons: comparison.reasons,
-              canUseRoom: comparison.room !== null,
-              canPublish: true,
+              reasons: [],
+              canUseRoom: true,
+              canPublish: false,
+              pendingProposalCount,
             });
+            if (choice === 'cancel') return;
+            if (choice !== 'use-room') {
+              throw new Error('请先确认待处理提案，再选择是否按当前房间配置生成。');
+            }
+          }
+          if (comparison.kind === 'dirty') {
+            const automaticallyPublish = canAutoPublishArenaRoomHostDraft({
+              pendingProposalCount,
+              reconciliationKind: arenaRoomRuntime.hostReconciliation.state.kind,
+              workspaceAllows: arenaRoomRuntime.hostWorkspace.canAutoPublish(authority, bundle),
+            });
+            const choice = automaticallyPublish
+              ? 'publish'
+              : await requestArenaRoomGenerationPreflight({
+                  reasons: comparison.reasons,
+                  canUseRoom: comparison.room !== null,
+                  canPublish: true,
+                  pendingProposalCount,
+                });
             if (choice === 'cancel') return;
             if (choice === 'use-room') {
               if (!comparison.room) {
@@ -763,6 +795,25 @@ export const useBattleEngine = () => {
               }
               startInputs = comparison.room;
             } else {
+              const beforePublishState = arenaRoomRuntime.controller.getSnapshot();
+              const beforePublishAuthority = arenaRoomHostWorkspaceAuthorityFromSession(
+                beforePublishState.session,
+              );
+              const beforePublishProposalFingerprint = pendingProposalFingerprint(
+                beforePublishState.session?.snapshot.proposals ?? [],
+              );
+              if (
+                beforePublishState.configPublishPending
+                || beforePublishState.configPublishResultUnknown
+                || !beforePublishAuthority
+                || beforePublishAuthority.roomId !== authority.roomId
+                || beforePublishAuthority.roomEpoch !== authority.roomEpoch
+                || beforePublishAuthority.ownerUserId !== authority.ownerUserId
+                || beforePublishAuthority.revision !== authority.revision
+                || beforePublishProposalFingerprint !== proposalFingerprint
+              ) {
+                throw new Error('房间配置或提案列表已变化，请确认最新状态后重试。');
+              }
               await arenaRoomRuntime.controller.publishConfig({
                 expectedRoomEpoch: authority.roomEpoch,
                 expectedRevision: authority.revision,
@@ -777,6 +828,7 @@ export const useBattleEngine = () => {
                 || publishedAuthority.roomId !== authority.roomId
                 || publishedAuthority.roomEpoch !== authority.roomEpoch
                 || publishedAuthority.ownerUserId !== authority.ownerUserId
+                || publishedAuthority.revision !== authority.revision + 1
                 || !areArenaRoomSharedConfigsEqual(
                   publishedAuthority.sharedConfig,
                   comparison.current.sharedConfig,
@@ -790,6 +842,13 @@ export const useBattleEngine = () => {
           }
         }
         if (!startInputs) throw new Error('无法读取多人生成所需的当前房间配置。');
+        const beforeStartState = arenaRoomRuntime.controller.getSnapshot();
+        const beforeStartProposalFingerprint = pendingProposalFingerprint(
+          beforeStartState.session?.snapshot.proposals ?? [],
+        );
+        if (beforeStartProposalFingerprint !== proposalFingerprint) {
+          throw new Error('待处理提案列表已变化，请重新确认后再开始生成。');
+        }
         assertArenaRoomGenerationReady(startInputs.sharedConfig);
         const roomNarrativeHistory = materializeArenaNarrativeHistoryForRequest(
           startInputs.sharedConfig.historySettings,

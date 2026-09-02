@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
     reasons: readonly ('baseline-missing' | 'host-local-content' | 'shared-config' | 'working-copy-invalid')[];
     canUseRoom: boolean;
     canPublish: boolean;
+    pendingProposalCount: number;
     busy: boolean;
   },
   roomState: null as ArenaRoomControllerState | null,
@@ -253,6 +254,7 @@ describe('Arena multiplayer BattleActions authority gate', () => {
       reasons: ['shared-config', 'host-local-content'],
       canUseRoom: true,
       canPublish: true,
+      pendingProposalCount: 0,
       busy: false,
     };
     await render();

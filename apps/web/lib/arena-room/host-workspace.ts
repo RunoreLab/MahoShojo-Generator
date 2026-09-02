@@ -51,6 +51,10 @@ export type ArenaRoomHostWorkspace = Readonly<{
   startFromRoom(
     authority: ArenaRoomHostWorkspaceAuthority,
   ): ArenaRoomGenerationStartInputs | null;
+  canAutoPublish(
+    authority: ArenaRoomHostWorkspaceAuthority,
+    bundle: ArenaRoomHostWorkspaceBundle,
+  ): boolean;
   retainFor(authority: ArenaRoomHostWorkspaceAuthority | null): void;
   clear(): void;
 }>;
@@ -72,6 +76,7 @@ type Baseline = Readonly<{
   roomId: string;
   roomEpoch: string;
   ownerUserId: string;
+  revision: number;
   payloads: readonly ArenaRoomHostLocalPayload[];
   digests: ReadonlyMap<string, string>;
 }>;
@@ -214,6 +219,7 @@ export const createArenaRoomHostWorkspace = (): ArenaRoomHostWorkspace => {
         roomId: authority.roomId,
         roomEpoch: authority.roomEpoch,
         ownerUserId: authority.ownerUserId,
+        revision: authority.revision,
         payloads: Object.freeze(normalized.payloads.map((entry) => structuredClone(entry))),
         digests: new Map(normalized.digests),
       });
@@ -261,6 +267,20 @@ export const createArenaRoomHostWorkspace = (): ArenaRoomHostWorkspace => {
     },
 
     startFromRoom,
+
+    canAutoPublish(authority, bundle) {
+      if (
+        !baseline
+        || !sameAuthorityOwner(baseline, authority)
+        || baseline.revision !== authority.revision
+      ) return false;
+      try {
+        normalizeBundle(bundle);
+        return true;
+      } catch {
+        return false;
+      }
+    },
 
     retainFor(authority) {
       if (!authority || (baseline && !sameAuthorityOwner(baseline, authority))) {

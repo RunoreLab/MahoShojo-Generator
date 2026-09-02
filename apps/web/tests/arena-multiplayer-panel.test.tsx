@@ -174,6 +174,44 @@ describe('Arena multiplayer panel accessibility/permissions', () => {
     expect(memberHtml).not.toContain('关闭房间');
   });
 
+  it('仅向房主显示待处理提案数字 badge', () => {
+    const proposal = {
+      proposalVersion: 1 as const,
+      proposalId: 'proposal-pending-1',
+      roomId: 'room-1',
+      authorUserId: 'member-1',
+      baseRevision: 0,
+      status: 'submitted' as const,
+      changes: [{
+        changeId: 'guidance-1',
+        type: 'setUserGuidance' as const,
+        value: '成员建议',
+        expectedBase: { kind: 'value' as const, value: '' },
+      }],
+      createdAt: '2026-09-02T00:00:00.000Z',
+    };
+    const hostState = {
+      ...readyState,
+      phase: 'connected' as const,
+      session: {
+        ...session,
+        snapshot: { ...session.snapshot, proposals: [proposal, { ...proposal, proposalId: 'proposal-pending-2' }] },
+      },
+    };
+    const hostHtml = render(hostState);
+    expect(hostHtml).toContain('aria-label="提案，2 个待处理"');
+    expect(hostHtml).toContain('bg-red-600');
+
+    const memberHtml = render({
+      ...hostState,
+      session: {
+        ...hostState.session,
+        self: { ...session.self, role: 'member' as const, userId: 'member-1' },
+      },
+    });
+    expect(memberHtml).not.toContain('个待处理');
+  });
+
   it('显示多人生成预览，并明确区分权威终态与结果未知', () => {
     const completedState: ArenaRoomControllerState = {
       ...readyState,

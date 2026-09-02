@@ -263,6 +263,7 @@ export function BattleActions({ showAdvancedUtilities = true }: { showAdvancedUt
         reasons={arenaRoomGenerationPreflight?.reasons ?? []}
         canUseRoom={arenaRoomGenerationPreflight?.canUseRoom ?? false}
         canPublish={arenaRoomGenerationPreflight?.canPublish ?? false}
+        pendingProposalCount={arenaRoomGenerationPreflight?.pendingProposalCount ?? 0}
         busy={arenaRoomGenerationPreflight?.busy ?? false}
         onChoice={resolveArenaRoomGenerationPreflight}
       />
