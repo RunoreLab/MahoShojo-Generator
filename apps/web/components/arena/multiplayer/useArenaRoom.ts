@@ -16,6 +16,10 @@ import {
   createRoomProposalArenaEditorSession,
   type RoomProposalArenaEditorSession,
 } from '@/components/arena/editor';
+import type {
+  ArenaRoomGenerationHistoryResponse,
+  ArenaRoomGenerationViewResponse,
+} from '@mahoshojo/contracts/arena-room';
 
 import { createArenaRoomClient } from '@/lib/arena-room/client';
 import {
@@ -47,8 +51,13 @@ export type ArenaRoomProposalWorkspace = Readonly<{
   discard(): void;
 }>;
 
+export type ArenaRoomGenerationHistoryReader = Readonly<{
+  list(): Promise<ArenaRoomGenerationHistoryResponse>;
+  read(generationId: string): Promise<ArenaRoomGenerationViewResponse>;
+}>;
+
 export const useArenaRoom = (options: UseArenaRoomOptions) => {
-  const { controller, hostWorkspace } = useMemo(() => {
+  const { client, controller, hostWorkspace } = useMemo(() => {
     const client = createArenaRoomClient({ origin: options.origin });
     const nextController = createArenaRoomController({
       client,
@@ -57,6 +66,7 @@ export const useArenaRoom = (options: UseArenaRoomOptions) => {
       ),
     });
     return {
+      client,
       controller: nextController,
       hostWorkspace: createArenaRoomHostWorkspace(),
     };
@@ -142,6 +152,44 @@ export const useArenaRoom = (options: UseArenaRoomOptions) => {
     },
   }), [controller, proposalEditor]);
 
+  const generationHistory = useMemo<ArenaRoomGenerationHistoryReader>(() => {
+    const captureSession = () => {
+      const session = controller.getSnapshot().session;
+      if (!session) throw new Error('当前不在多人房间中');
+      return session;
+    };
+    const assertSameSession = (captured: ReturnType<typeof captureSession>) => {
+      const current = controller.getSnapshot().session;
+      if (
+        !current
+        || current.roomId !== captured.roomId
+        || current.roomEpoch !== captured.roomEpoch
+        || current.self.userId !== captured.self.userId
+      ) throw new Error('房间会话已变化，请重新打开历史战报');
+      return current;
+    };
+    return Object.freeze({
+      async list() {
+        const captured = captureSession();
+        const result = await client.listGenerationHistory(captured.roomId);
+        assertSameSession(captured);
+        if (result.roomEpoch !== captured.roomEpoch) {
+          throw new Error('历史战报属于其他房间实例，已拒绝显示');
+        }
+        return result;
+      },
+      async read(generationId) {
+        const captured = captureSession();
+        const result = await client.getGenerationView(captured.roomId, generationId);
+        assertSameSession(captured);
+        if (result.roomEpoch !== captured.roomEpoch) {
+          throw new Error('历史战报属于其他房间实例，已拒绝显示');
+        }
+        return result;
+      },
+    });
+  }, [client, controller]);
+
   const hostReconciliation = useArenaRoomHostReconciliation({
     controller,
     controllerState: state,
@@ -154,6 +202,7 @@ export const useArenaRoom = (options: UseArenaRoomOptions) => {
     hostWorkspace,
     hostReconciliation,
     proposalWorkspace,
+    generationHistory,
   };
 };
 

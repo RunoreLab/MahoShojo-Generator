@@ -17,6 +17,7 @@ import { ArenaHostConfigPanel } from './ArenaHostConfigPanel';
 import { useArenaRoomContext } from './useArenaRoom';
 import { BattleResultPresentation } from '../components/BattleResultPresentation';
 import { ArenaRoomDialog } from './ArenaRoomDialog';
+import { ArenaRoomGenerationHistory } from './ArenaRoomGenerationHistory';
 
 export type ArenaMultiplayerPanelProps = {
   readonly enabled: boolean;
@@ -36,6 +37,7 @@ export type ArenaMultiplayerPanelViewProps = {
   readonly actionPending?: boolean;
   readonly hostConfigContent?: ReactNode;
   readonly proposalContent?: ReactNode;
+  readonly generationHistoryContent?: ReactNode;
   readonly proposalWorkspaceActive?: boolean;
   readonly localConfigSyncIssues?: readonly ArenaRoomShareabilityIssue[];
   readonly roomTitle: string;
@@ -311,6 +313,7 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
   const [lobbyOpen, setLobbyOpen] = useState(false);
   const [configOpen, setConfigOpen] = useState(false);
   const [proposalsOpen, setProposalsOpen] = useState(false);
+  const [generationHistoryOpen, setGenerationHistoryOpen] = useState(false);
   const [membersOpen, setMembersOpen] = useState(false);
   const [managementOpen, setManagementOpen] = useState(false);
   const [kickConfirmation, setKickConfirmation] = useState<{
@@ -450,6 +453,9 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
               <button type="button" className={secondaryButtonClass} onClick={() => setMembersOpen(true)}>
                 成员
               </button>
+              <button type="button" className={secondaryButtonClass} onClick={() => setGenerationHistoryOpen(true)}>
+                历史战报
+              </button>
               <button type="button" className={secondaryButtonClass} onClick={() => setManagementOpen(true)}>
                 {session.self.role === 'host' ? '房间管理' : '房间管理 / 退出'}
               </button>
@@ -500,6 +506,19 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
           >
             {props.proposalContent ?? (
               <p className="text-sm text-gray-700 dark:text-gray-300">当前没有待处理提案。</p>
+            )}
+          </ArenaRoomDialog>
+
+          <ArenaRoomDialog
+            open={generationHistoryOpen}
+            onClose={() => setGenerationHistoryOpen(false)}
+            titleId="arena-room-generation-history-dialog-heading"
+            title="历史战报"
+            description="当前房间成员可查看本房间实例内近期生成的权威战报。"
+            widthClassName="max-w-5xl"
+          >
+            {props.generationHistoryContent ?? (
+              <p className="text-sm text-gray-700 dark:text-gray-300">当前没有可查看的历史战报。</p>
             )}
           </ArenaRoomDialog>
 
@@ -684,6 +703,7 @@ type ArenaMultiplayerPanelRuntimeProps = ArenaMultiplayerPanelProps & {
   readonly hostWorkspace: ArenaRoomRuntimeContext['hostWorkspace'];
   readonly hostReconciliation: ArenaRoomRuntimeContext['hostReconciliation'];
   readonly proposalWorkspace: ArenaRoomRuntimeContext['proposalWorkspace'];
+  readonly generationHistory: ArenaRoomRuntimeContext['generationHistory'];
 };
 
 function ArenaMultiplayerPanelRuntime({
@@ -692,6 +712,7 @@ function ArenaMultiplayerPanelRuntime({
   hostWorkspace,
   hostReconciliation,
   proposalWorkspace,
+  generationHistory,
   ...props
 }: ArenaMultiplayerPanelRuntimeProps) {
   const [roomTitle, setRoomTitle] = useState(() => `${props.displayName || '玩家'} 的房间`);
@@ -756,6 +777,7 @@ function ArenaMultiplayerPanelRuntime({
           workspace={proposalWorkspace}
         />
       )}
+      generationHistoryContent={<ArenaRoomGenerationHistory reader={generationHistory} />}
       proposalWorkspaceActive={Boolean(proposalWorkspace.editor)}
       localConfigSyncIssues={localConfigSyncIssues}
       roomTitle={roomTitle}
@@ -804,6 +826,7 @@ export function ArenaMultiplayerContextPanel(props: ArenaMultiplayerPanelProps) 
       hostWorkspace={runtime.hostWorkspace}
       hostReconciliation={runtime.hostReconciliation}
       proposalWorkspace={runtime.proposalWorkspace}
+      generationHistory={runtime.generationHistory}
     />
   );
 }

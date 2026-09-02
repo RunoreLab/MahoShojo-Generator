@@ -32,6 +32,8 @@ const mocks = vi.hoisted(() => ({
   reset: vi.fn(),
   syncProposalWorkspace: vi.fn(),
   discardProposalWorkspace: vi.fn(),
+  listGenerationHistory: vi.fn(),
+  readGenerationHistory: vi.fn(),
   state: null as ArenaRoomControllerState | null,
   reconciliationState: { kind: 'idle' } as ArenaRoomHostReconciliationState,
 }));
@@ -60,6 +62,7 @@ vi.mock('@/components/arena/multiplayer/useArenaRoom', () => ({
       capturePublished: mocks.capturePublished,
       compare: vi.fn(),
       startFromRoom: vi.fn(),
+      canAutoPublish: vi.fn(() => false),
       retainFor: vi.fn(),
       clear: vi.fn(),
     },
@@ -73,6 +76,10 @@ vi.mock('@/components/arena/multiplayer/useArenaRoom', () => ({
       editor: null,
       syncFromRoom: mocks.syncProposalWorkspace,
       discard: mocks.discardProposalWorkspace,
+    },
+    generationHistory: {
+      list: mocks.listGenerationHistory,
+      read: mocks.readGenerationHistory,
     },
   }),
 }));
@@ -218,6 +225,19 @@ beforeEach(async () => {
   mocks.createCanonicalDraftBundle.mockReturnValue({
     ...bundle,
     sharedConfig: emptySharedConfig,
+  });
+  mocks.listGenerationHistory.mockResolvedValue({
+    protocolVersion: 1,
+    roomId: 'room-created',
+    roomEpoch: 'epoch-created',
+    items: [{
+      generationId: 'generation-history-1',
+      state: 'completed',
+      configRevision: 0,
+      collaborativeInfluence: false,
+      startedAt: '2026-09-02T00:00:00.000Z',
+      finishedAt: '2026-09-02T00:03:00.000Z',
+    }],
   });
   container = document.createElement('div');
   document.body.append(container);
@@ -485,6 +505,18 @@ describe('Arena multiplayer panel real React interactions', () => {
     expect(document.body.textContent).toContain('配置提案');
     expect(document.body.textContent).toContain('同步房间配置');
     expect(document.body.textContent).not.toContain('Proposal 审阅箱');
+  });
+
+  it('connected 房间成员可从全屏 dialog 打开历史战报列表', async () => {
+    mocks.state = connectedHostState(sharedConfig);
+    await act(async () => root.render(<ArenaMultiplayerContextPanel {...props} />));
+
+    await act(async () => button('历史战报').click());
+    await flush();
+
+    expect(document.body.querySelector('#arena-room-generation-history-dialog-heading')).not.toBeNull();
+    expect(mocks.listGenerationHistory).toHaveBeenCalledOnce();
+    expect(document.body.textContent).toContain('已完成 · 配置版本 0');
   });
 
   it('config publish unknown 在 connected 状态提供主动权威对账入口', async () => {

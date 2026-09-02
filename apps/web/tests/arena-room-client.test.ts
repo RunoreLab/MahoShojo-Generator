@@ -80,6 +80,20 @@ const generationView = {
   finalAuthoritative: false,
 };
 
+const generationHistory = {
+  protocolVersion: 1 as const,
+  roomId: 'room/1',
+  roomEpoch: 'epoch-1',
+  items: [{
+    generationId: 'generation-1',
+    state: 'completed' as const,
+    configRevision: 0,
+    collaborativeInfluence: true,
+    startedAt: '2026-08-28T00:01:00.000Z',
+    finishedAt: '2026-08-28T00:03:00.000Z',
+  }],
+};
+
 describe('Arena Room browser client', () => {
   it('没有 verified bearer 时不发请求', async () => {
     const fetcher = vi.fn<typeof fetch>();
@@ -516,6 +530,29 @@ describe('Arena Room browser client', () => {
       generation: { ...generationMirror, generationId: 'generation-other' },
     }));
     await expect(client.getGenerationView('room/1', 'generation-1')).rejects.toMatchObject({
+      code: 'ROOM_RESPONSE_INVALID',
+    });
+  });
+
+  it('generation history 对 room path 编码并严格验证 room identity', async () => {
+    const fetcher = vi.fn<typeof fetch>(async () => Response.json(generationHistory));
+    const client = createArenaRoomClient({
+      origin: 'https://api.example.test',
+      fetch: fetcher,
+      getAuthHeader: async () => 'Bearer verified-key',
+    });
+
+    await expect(client.listGenerationHistory('room/1')).resolves.toEqual(generationHistory);
+    expect(String(fetcher.mock.calls[0]?.[0])).toBe(
+      'https://api.example.test/api/arena/rooms/v1/room%2F1/generations',
+    );
+
+    const mismatched = createArenaRoomClient({
+      origin: 'https://api.example.test',
+      fetch: vi.fn<typeof fetch>(async () => Response.json({ ...generationHistory, roomId: 'other-room' })),
+      getAuthHeader: async () => 'Bearer verified-key',
+    });
+    await expect(mismatched.listGenerationHistory('room/1')).rejects.toMatchObject({
       code: 'ROOM_RESPONSE_INVALID',
     });
   });

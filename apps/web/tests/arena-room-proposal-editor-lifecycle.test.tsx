@@ -5,6 +5,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type {
+  ArenaRoomGenerationHistoryResponse,
   ArenaRoomSessionResponse,
   ArenaRoomSharedConfig,
 } from '@mahoshojo/contracts/arena-room';
@@ -36,14 +37,19 @@ const mocks = vi.hoisted(() => {
   };
   return {
     controller,
+    getGenerationView: vi.fn(),
     hostWorkspace: { retainFor: vi.fn() },
+    listGenerationHistory: vi.fn(),
     listeners,
     runtime,
   };
 });
 
 vi.mock('@/lib/arena-room/client', () => ({
-  createArenaRoomClient: vi.fn(() => ({})),
+  createArenaRoomClient: vi.fn(() => ({
+    getGenerationView: mocks.getGenerationView,
+    listGenerationHistory: mocks.listGenerationHistory,
+  })),
 }));
 
 vi.mock('@/lib/arena-room/controller', () => ({
@@ -193,6 +199,8 @@ const installState = async (next: ArenaRoomControllerState): Promise<void> => {
 };
 
 beforeEach(() => {
+  mocks.getGenerationView.mockReset();
+  mocks.listGenerationHistory.mockReset();
   mocks.runtime.state = stateWith(null);
   mocks.listeners.clear();
   latest = null;
@@ -266,6 +274,26 @@ describe('useArenaRoom proposal editor lifecycle', () => {
       stale: true,
       replacementRequired: true,
     });
+  });
+
+  it('房间会话变化后拒绝迟到的历史战报列表', async () => {
+    let resolveHistory!: (value: ArenaRoomGenerationHistoryResponse) => void;
+    mocks.listGenerationHistory.mockReturnValue(new Promise((resolve) => {
+      resolveHistory = resolve;
+    }));
+    await act(async () => root.render(<Harness />));
+    await installState(stateWith(session()));
+
+    const request = latest?.generationHistory.list();
+    await installState(stateWith(null));
+    resolveHistory({
+      protocolVersion: 1,
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      items: [],
+    });
+
+    await expect(request).rejects.toThrow('房间会话已变化');
   });
 
   it('显式同步强制重建，且离开 member 生命周期或卸载时释放 editor', async () => {
