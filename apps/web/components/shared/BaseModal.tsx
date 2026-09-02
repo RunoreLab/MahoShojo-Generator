@@ -126,15 +126,21 @@ export const getBaseModalLayoutClassNames = ({
   rootClassName: joinClassNames(BASE_MODAL_ROOT_LAYOUT_CLASS_NAME, zIndexClassName),
   panelClassName: joinClassNames(
     BASE_MODAL_PANEL_LAYOUT_CLASS_NAME,
-    'rounded-xl border border-white/10 bg-white shadow-2xl',
+    'rounded-xl border border-gray-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-950',
     maxWidthClassName,
   ),
   headerClassName: joinClassNames(
     BASE_MODAL_HEADER_LAYOUT_CLASS_NAME,
-    'flex items-start justify-between gap-3 border-b px-5 py-4',
+    'flex items-start justify-between gap-3 border-b border-gray-200 px-5 py-4 dark:border-gray-800',
   ),
-  bodyClassName: joinClassNames(BASE_MODAL_BODY_LAYOUT_CLASS_NAME, 'px-5 py-4'),
-  footerClassName: joinClassNames(BASE_MODAL_FOOTER_LAYOUT_CLASS_NAME, 'border-t bg-gray-50 px-5 py-3'),
+  bodyClassName: joinClassNames(
+    BASE_MODAL_BODY_LAYOUT_CLASS_NAME,
+    'px-5 py-4 text-gray-900 dark:bg-gray-950 dark:text-gray-100',
+  ),
+  footerClassName: joinClassNames(
+    BASE_MODAL_FOOTER_LAYOUT_CLASS_NAME,
+    'border-t border-gray-200 bg-gray-50 px-5 py-3 dark:border-gray-800 dark:bg-gray-900',
+  ),
 });
 
 export function BaseModal({
@@ -193,15 +199,15 @@ export function BaseModal({
       >
         <div className={headerClassName}>
           <div className="min-w-0">
-            <div id={titleId} className="text-lg font-semibold text-gray-900 truncate">{accessibleTitle}</div>
-            {description ? <div className="mt-1 text-sm text-gray-600">{description}</div> : null}
+            <div id={titleId} className="truncate text-lg font-semibold text-gray-900 dark:text-gray-100">{accessibleTitle}</div>
+            {description ? <div className="mt-1 text-sm text-gray-600 dark:text-gray-400">{description}</div> : null}
           </div>
           <button
             ref={closeButtonRef}
             type="button"
             onClick={onClose}
             aria-label={closeButtonAriaLabel}
-            className="min-h-10 min-w-10 rounded-lg p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+            className="min-h-10 min-w-10 rounded-lg p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100"
           >
             {closeButtonContent ?? <X className="h-5 w-5" />}
           </button>

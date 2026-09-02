@@ -446,6 +446,13 @@ export const createArenaRoomController = (
     });
   };
 
+  const enterMembershipRevoked = (): void => {
+    finishRoomSession({
+      phase: 'replacement',
+      notice: '当前成员资格已结束，原房间无法恢复',
+    });
+  };
+
   const scheduleReconnect = (degraded: boolean): void => {
     if (disposed || !access.enabled || !access.authenticated || !state.session) return;
     clearReconnectTimer();
@@ -732,7 +739,8 @@ export const createArenaRoomController = (
     if (event.type === 'room.snapshot') {
       const self = event.payload.members.find((member) => member.userId === current.self.userId);
       if (!self || self.membershipState !== 'active') {
-        enterReplacement();
+        if (current.self.role === 'member') enterMembershipRevoked();
+        else enterReplacement();
         return;
       }
       const epochChanged = current.roomEpoch !== event.roomEpoch;
@@ -1003,7 +1011,8 @@ export const createArenaRoomController = (
           return;
         }
         if (event.code === 1008 && event.reason === 'membership-revoked') {
-          enterReplacement();
+          if (state.session?.self.role === 'member') enterMembershipRevoked();
+          else enterReplacement();
           return;
         }
         scheduleReconnect(event.code === 1008 && event.reason !== 'room-epoch-stale');

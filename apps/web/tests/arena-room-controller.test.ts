@@ -1074,6 +1074,30 @@ describe('Arena Room browser controller', () => {
     expect(second.queued).toHaveLength(0);
   });
 
+  it('member 收到 membership-revoked 时提示成员资格结束而不是要求创建房间', async () => {
+    const harness = createHarness();
+    const member = {
+      userId: 'user-member',
+      role: 'member' as const,
+      displayName: '成员',
+      membershipState: 'active' as const,
+    };
+    vi.mocked(harness.client.join).mockResolvedValueOnce({
+      ...session,
+      self: member,
+      snapshot: { ...snapshot, members: [...snapshot.members, member] },
+    });
+    await harness.controller.join('room-1', '成员');
+    harness.sockets[0]!.open();
+    harness.sockets[0]!.closed(1008, 'membership-revoked');
+
+    expect(harness.controller.getSnapshot()).toMatchObject({
+      phase: 'replacement',
+      session: null,
+      notice: '当前成员资格已结束，原房间无法恢复',
+    });
+  });
+
   it('post-open 1013 不清零跨连接预算，重连最终有界熔断', async () => {
     const { client, controller, runNextTimer, sockets } = createHarness();
     await controller.create({

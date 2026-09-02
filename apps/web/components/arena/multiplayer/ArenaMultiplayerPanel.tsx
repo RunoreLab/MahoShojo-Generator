@@ -324,6 +324,12 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
     'cancel' | 'close' | 'leave' | null
   >(null);
   const panelRef = useRef<HTMLElement>(null);
+  const kickConfirmationActionRef = useRef<HTMLButtonElement>(null);
+  const kickTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const managementConfirmationActionRef = useRef<HTMLButtonElement>(null);
+  const cancelGenerationTriggerRef = useRef<HTMLButtonElement>(null);
+  const closeRoomTriggerRef = useRef<HTMLButtonElement>(null);
+  const leaveRoomTriggerRef = useRef<HTMLButtonElement>(null);
   const session = state.phase === 'closed' || state.phase === 'replacement'
     ? null
     : state.session;
@@ -337,6 +343,12 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
     if (!hadSession || session) return;
     queueMicrotask(() => panelRef.current?.focus());
   }, [session]);
+  useEffect(() => {
+    if (kickConfirmation) kickConfirmationActionRef.current?.focus();
+  }, [kickConfirmation]);
+  useEffect(() => {
+    if (managementConfirmation) managementConfirmationActionRef.current?.focus();
+  }, [managementConfirmation]);
   if (state.phase === 'disabled') return null;
 
   const busy = Boolean(props.actionPending)
@@ -565,17 +577,27 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
                 <p>确定将“{kickConfirmation.displayName}”移出当前房间吗？</p>
                 <div className="mt-3 flex flex-wrap gap-2">
                   <button
+                    ref={kickConfirmationActionRef}
                     type="button"
                     className={primaryButtonClass}
                     disabled={busy}
                     onClick={() => {
-                      props.onKick?.(kickConfirmation.targetUserId);
+                      const targetUserId = kickConfirmation.targetUserId;
                       setKickConfirmation(null);
+                      setRoomOpen(false);
+                      props.onKick?.(targetUserId);
                     }}
                   >
                     确认移除成员
                   </button>
-                  <button type="button" className={secondaryButtonClass} onClick={() => setKickConfirmation(null)}>
+                  <button
+                    type="button"
+                    className={secondaryButtonClass}
+                    onClick={() => {
+                      setKickConfirmation(null);
+                      queueMicrotask(() => kickTriggerRef.current?.focus());
+                    }}
+                  >
                     取消
                   </button>
                 </div>
@@ -599,7 +621,8 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
                         type="button"
                         className={secondaryButtonClass}
                         disabled={busy}
-                        onClick={() => {
+                        onClick={(event) => {
+                          kickTriggerRef.current = event.currentTarget;
                           setManagementConfirmation(null);
                           setKickConfirmation({
                             targetUserId: member.userId,
@@ -630,6 +653,7 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
                   </p>
                   <div className="mt-3 flex flex-wrap gap-2">
                     <button
+                      ref={managementConfirmationActionRef}
                       type="button"
                       className={primaryButtonClass}
                       disabled={busy}
@@ -648,7 +672,19 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
                           ? '确认离开房间'
                           : '确认停止生成'}
                     </button>
-                    <button type="button" className={secondaryButtonClass} onClick={() => setManagementConfirmation(null)}>
+                    <button
+                      type="button"
+                      className={secondaryButtonClass}
+                      onClick={() => {
+                        const operation = managementConfirmation;
+                        setManagementConfirmation(null);
+                        queueMicrotask(() => {
+                          if (operation === 'cancel') cancelGenerationTriggerRef.current?.focus();
+                          else if (operation === 'close') closeRoomTriggerRef.current?.focus();
+                          else leaveRoomTriggerRef.current?.focus();
+                        });
+                      }}
+                    >
                       取消
                     </button>
                   </div>
@@ -656,6 +692,7 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
               ) : session.self.role === 'host' ? (
                 <div className="mt-3 flex flex-wrap gap-2">
                   <button
+                    ref={cancelGenerationTriggerRef}
                     type="button"
                     className={secondaryButtonClass}
                     disabled={busy || !canCancelGeneration}
@@ -667,6 +704,7 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
                     停止当前生成
                   </button>
                   <button
+                    ref={closeRoomTriggerRef}
                     type="button"
                     className={secondaryButtonClass}
                     disabled={busy}
@@ -680,6 +718,7 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
                 </div>
               ) : (
                 <button
+                  ref={leaveRoomTriggerRef}
                   type="button"
                   className={`${secondaryButtonClass} mt-3`}
                   disabled={busy}

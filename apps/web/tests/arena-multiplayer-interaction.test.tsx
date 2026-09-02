@@ -621,11 +621,21 @@ describe('Arena multiplayer panel real React interactions', () => {
     await act(async () => root.render(<ArenaMultiplayerContextPanel {...props} />));
 
     await act(async () => button('房间').click());
-    await act(async () => button('移除').click());
+    const removeMember = button('移除');
+    removeMember.focus();
+    await act(async () => removeMember.click());
     expect(document.body.textContent).toContain('确定将“成员”移出当前房间吗');
+    expect(document.activeElement?.textContent).toBe('确认移除成员');
+    await act(async () => button('取消').click());
+    expect(document.activeElement).toBe(removeMember);
+    await act(async () => removeMember.click());
     await act(async () => button('确认移除成员').click());
     expect(mocks.kickMember).toHaveBeenCalledWith('member-1');
+    expect(document.body.querySelector('#arena-room-overview-dialog-heading')).toBeNull();
+
+    await act(async () => button('房间').click());
     await act(async () => button('停止当前生成').click());
+    expect(document.activeElement?.textContent).toBe('确认停止生成');
     await act(async () => button('确认停止生成').click());
     expect(mocks.cancelGeneration).toHaveBeenCalledOnce();
 
@@ -673,8 +683,15 @@ describe('Arena multiplayer panel real React interactions', () => {
     await act(async () => root.render(<ArenaMultiplayerContextPanel {...props} />));
 
     await act(async () => button('房间').click());
-    await act(async () => button('离开房间').click());
+    const leaveRoom = button('离开房间');
+    leaveRoom.focus();
+    await act(async () => leaveRoom.click());
     expect(mocks.leave).not.toHaveBeenCalled();
+    expect(document.activeElement?.textContent).toBe('确认离开房间');
+    await act(async () => button('取消').click());
+    const restoredLeaveRoom = button('离开房间');
+    expect(document.activeElement).toBe(restoredLeaveRoom);
+    await act(async () => restoredLeaveRoom.click());
     await act(async () => button('确认离开房间').click());
     expect(mocks.leave).toHaveBeenCalledOnce();
     expect(document.body.querySelector('#arena-room-overview-dialog-heading')).toBeNull();

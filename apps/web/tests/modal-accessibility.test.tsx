@@ -145,6 +145,8 @@ describe('BaseModal accessibility contract', () => {
     const closeButton = dialog?.querySelector<HTMLButtonElement>('button[aria-label^="关闭"]');
     expect(closeButton).not.toBeNull();
     expect(document.activeElement).toBe(closeButton);
+    expect(dialog?.className).toContain('dark:bg-gray-950');
+    expect(dialog?.querySelector('[id]')?.className).toContain('dark:text-gray-100');
 
     const focusable = [...(dialog?.querySelectorAll<HTMLElement>('button:not([disabled]), [tabindex]:not([tabindex="-1"])') ?? [])];
     const lastFocusable = focusable.at(-1);
