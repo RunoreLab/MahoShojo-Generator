@@ -56,25 +56,33 @@ type HookHarness = {
   }>;
   setSessionKey(sessionKey: string | null): void;
   setEnabled(enabled: boolean): void;
+  setRefreshKey(refreshKey: string): void;
 };
 
 const renderHook = (
   reader: ArenaRoomGenerationHistoryReader,
-  initial: { readonly sessionKey: string | null; readonly enabled: boolean },
+  initial: {
+    readonly sessionKey: string | null;
+    readonly enabled: boolean;
+    readonly refreshKey?: string;
+  },
 ): HookHarness => {
   const harness: {
     states: Array<{ status: string; completedCount: number; hasLatest: boolean }>;
     sessionKey: string | null;
     enabled: boolean;
+    refreshKey: string;
   } = {
     states: [],
     sessionKey: initial.sessionKey,
     enabled: initial.enabled,
+    refreshKey: initial.refreshKey ?? '',
   };
   const Probe = (): null => {
     const state = useArenaRoomLatestCompletedHistory({
       reader,
       sessionKey: harness.sessionKey,
+      refreshKey: harness.refreshKey,
       enabled: harness.enabled,
     });
     harness.states.push({
@@ -96,6 +104,11 @@ const renderHook = (
     },
     setEnabled(enabled: boolean) {
       harness.enabled = enabled;
+      harness.states.splice(0, harness.states.length);
+      act(() => root.render(<Probe />));
+    },
+    setRefreshKey(refreshKey: string) {
+      harness.refreshKey = refreshKey;
       harness.states.splice(0, harness.states.length);
       act(() => root.render(<Probe />));
     },
@@ -199,6 +212,67 @@ describe('useArenaRoomLatestCompletedHistory', () => {
     harness.setSessionKey(null);
     await settle();
     expect(harness.states.at(-1)).toEqual({ status: 'idle', completedCount: 0, hasLatest: false });
+  });
+
+  it('同一会话内 generation 进入权威终态后刷新计数，不受 enabled 门禁限制', async () => {
+    const refreshedItem = {
+      ...completedItem,
+      generationId: 'generation-10',
+      finishedAt: '2026-09-01T09:00:00.000Z',
+    };
+    const reader: ArenaRoomGenerationHistoryReader = {
+      list: vi.fn()
+        .mockResolvedValueOnce(historyResponse)
+        .mockResolvedValueOnce({ ...historyResponse, items: [refreshedItem, completedItem] }),
+      read: vi.fn(async () => availableView),
+    };
+    const harness = renderHook(reader, { sessionKey: 'room-1\nepoch-1\nuser-1', enabled: true });
+    await settle();
+    expect(harness.states.at(-1)).toEqual({ status: 'ready', completedCount: 1, hasLatest: true });
+
+    harness.setEnabled(false);
+    await settle();
+    expect(reader.list).toHaveBeenCalledOnce();
+
+    harness.setRefreshKey('generation-10');
+    await settle();
+
+    expect(reader.list).toHaveBeenCalledTimes(2);
+    expect(harness.states.at(-1)).toEqual({ status: 'ready', completedCount: 2, hasLatest: true });
+  });
+
+  it('refreshKey 未变化时 enabled 翻转不重复拉取 summary', async () => {
+    const reader: ArenaRoomGenerationHistoryReader = {
+      list: vi.fn(async () => historyResponse),
+      read: vi.fn(async () => availableView),
+    };
+    const harness = renderHook(reader, { sessionKey: 'room-1\nepoch-1\nuser-1', enabled: true });
+    await settle();
+
+    harness.setEnabled(false);
+    await settle();
+    harness.setEnabled(true);
+    await settle();
+    expect(reader.list).toHaveBeenCalledOnce();
+  });
+
+  it('新会话首次加载仍受 enabled 门禁限制', async () => {
+    const reader: ArenaRoomGenerationHistoryReader = {
+      list: vi.fn(async () => historyResponse),
+      read: vi.fn(async () => availableView),
+    };
+    const harness = renderHook(reader, { sessionKey: null, enabled: false });
+    await settle();
+    expect(reader.list).not.toHaveBeenCalled();
+
+    harness.setSessionKey('room-2\nepoch-2\nuser-1');
+    await settle();
+    expect(reader.list).not.toHaveBeenCalled();
+
+    harness.setEnabled(true);
+    await settle();
+    expect(reader.list).toHaveBeenCalledOnce();
+    expect(harness.states.at(-1)).toEqual({ status: 'ready', completedCount: 1, hasLatest: true });
   });
 });
 

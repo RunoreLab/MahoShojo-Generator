@@ -191,11 +191,20 @@ export const useArenaRoom = (options: UseArenaRoomOptions) => {
     hostWorkspace,
   });
 
+  const activeGeneration = state.session?.snapshot.activeGeneration;
+  const latestHistoryRefreshKey = activeGeneration
+    && (activeGeneration.state === 'completed'
+      || activeGeneration.state === 'failed'
+      || activeGeneration.state === 'cancelled')
+    ? activeGeneration.generationId
+    : '';
+
   const latestGenerationHistory = useArenaRoomLatestCompletedHistory({
     reader: generationHistory,
     sessionKey: state.session
       ? `${state.session.roomId}\n${state.session.roomEpoch}\n${state.session.self.userId}`
       : null,
+    refreshKey: latestHistoryRefreshKey,
     enabled: state.generation.phase === 'idle' && !state.generation.markdown,
   });
 
