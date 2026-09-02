@@ -1566,6 +1566,7 @@ export const createArenaRoomController = (
     if (!current || !intent || disposed) return;
     const operation = managementMutationGeneration;
     publish({ notice: '正在读取服务器权威状态并确认管理动作…', error: null });
+    let resubmitted = false;
     try {
       if (intent.operation === 'kick') {
         const authoritative = await options.client.getSession(current.roomId);
@@ -1579,16 +1580,47 @@ export const createArenaRoomController = (
         const targetActive = authoritative.snapshot.members.some((member) => (
           member.userId === intent.targetUserId && member.membershipState === 'active'
         ));
+        if (!targetActive) {
+          unknownManagementMutation = null;
+          publish({
+            session: authoritative,
+            managementOperation: null,
+            managementResultUnknown: false,
+            notice: '已从房间权威状态确认成员移除',
+            error: null,
+          });
+          return;
+        }
+        // 权威状态证明目标仍在房间、kick 尚未生效：安全重放同一幂等 intent
+        // （服务端对已撤销目标幂等返回，且带 expectedRoomEpoch fence）。
+        resubmitted = true;
+        const replayed = await options.client.kick(
+          current.roomId,
+          intent.targetUserId,
+          current.roomEpoch,
+        );
+        if (
+          disposed
+          || operation !== managementMutationGeneration
+          || state.session?.roomId !== current.roomId
+          || state.session.roomEpoch !== current.roomEpoch
+          || state.session.self.userId !== current.self.userId
+        ) return;
+        unknownManagementMutation = null;
+        controlCursor = {
+          roomEpoch: replayed.roomEpoch,
+          controlSeq: replayed.snapshot.controlSeq,
+        };
+        const target = authoritative.snapshot.members.find((member) => (
+          member.userId === intent.targetUserId
+        ));
         publish({
-          session: authoritative,
-          managementOperation: targetActive ? 'kick' : null,
-          managementResultUnknown: targetActive,
-          notice: targetActive
-            ? '服务器仍未确认移除结果；未重复提交请求'
-            : '已从房间权威状态确认成员移除',
+          session: replayed,
+          managementOperation: null,
+          managementResultUnknown: false,
+          notice: `已移除成员 ${target?.displayName ?? intent.targetUserId}`,
           error: null,
         });
-        if (!targetActive) unknownManagementMutation = null;
         return;
       }
 
@@ -1601,16 +1633,25 @@ export const createArenaRoomController = (
           || authoritative.roomEpoch !== current.roomEpoch
           || authoritative.self.userId !== current.self.userId
         ) return;
-        publish({
-          session: authoritative,
-          managementOperation: intent.operation,
-          managementResultUnknown: true,
-          notice: intent.operation === 'close'
-            ? '房间仍可读取；关闭结果尚未确认，未重复提交请求'
-            : '成员状态仍可读取；离开结果尚未确认，未重复提交请求',
-          error: null,
+        // 权威状态仍可读取证明 intent 尚未生效（成员仍 active / 房间仍开放）：
+        // 安全重放同一幂等 intent，让未提交与已提交两种方向都收敛到终态。
+        resubmitted = true;
+        if (intent.operation === 'leave') {
+          await options.client.leave(current.roomId, current.roomEpoch);
+        } else {
+          await options.client.close(current.roomId, current.roomEpoch);
+        }
+        if (
+          disposed
+          || operation !== managementMutationGeneration
+          || state.session?.roomId !== current.roomId
+          || state.session.roomEpoch !== current.roomEpoch
+          || state.session.self.userId !== current.self.userId
+        ) return;
+        unknownManagementMutation = null;
+        finishRoomSession({
+          notice: intent.operation === 'leave' ? '已离开房间' : '房间已关闭',
         });
-        scheduleReconnect(false);
         return;
       }
 
@@ -1661,9 +1702,12 @@ export const createArenaRoomController = (
       }
       publish({
         managementResultUnknown: true,
-        notice: '管理动作结果仍无法确认；未重复提交请求',
+        notice: resubmitted
+          ? '管理动作已再次提交，结果仍无法确认；请稍后重新确认'
+          : '管理动作结果仍无法确认；未重复提交请求',
         error: safeErrorMessage(error),
       });
+      if (resubmitted) scheduleReconnect(false);
     }
   };
 

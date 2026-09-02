@@ -1942,6 +1942,186 @@ describe('Arena Room browser controller', () => {
     });
   });
 
+  it('leave 结果未知且会话仍可读取时安全重放同一离开意图并收敛终态', async () => {
+    const { client, controller } = createHarness();
+    const memberSession = {
+      ...session,
+      self: {
+        userId: 'member-1',
+        role: 'member' as const,
+        displayName: '成员',
+        membershipState: 'active' as const,
+      },
+    };
+    vi.mocked(client.join).mockResolvedValueOnce(memberSession);
+    vi.mocked(client.leave)
+      .mockRejectedValueOnce(new ArenaRoomClientError(
+        'ROOM_RESULT_UNKNOWN',
+        null,
+        '请求结果未知',
+      ))
+      .mockResolvedValueOnce({ protocolVersion: 1, roomId: 'room-1', outcome: 'left' });
+    vi.mocked(client.getSession).mockResolvedValueOnce(memberSession);
+    await controller.join('room-1', '成员');
+
+    await controller.leave();
+    expect(controller.getSnapshot().managementResultUnknown).toBe(true);
+    controller.reconnect();
+
+    await vi.waitFor(() => expect(controller.getSnapshot()).toMatchObject({
+      phase: 'ready',
+      session: null,
+      managementOperation: null,
+      managementResultUnknown: false,
+      notice: '已离开房间',
+    }));
+    expect(client.leave).toHaveBeenCalledTimes(2);
+    expect(client.leave).toHaveBeenLastCalledWith('room-1', 'epoch-1');
+    expect(client.getSession).toHaveBeenCalledOnce();
+  });
+
+  it('leave 结果未知且重放仍未知时保持 unknown 并按再次提交提示', async () => {
+    const { client, controller } = createHarness();
+    const memberSession = {
+      ...session,
+      self: {
+        userId: 'member-1',
+        role: 'member' as const,
+        displayName: '成员',
+        membershipState: 'active' as const,
+      },
+    };
+    vi.mocked(client.join).mockResolvedValueOnce(memberSession);
+    vi.mocked(client.leave).mockRejectedValue(new ArenaRoomClientError(
+      'ROOM_RESULT_UNKNOWN',
+      null,
+      '请求结果未知',
+    ));
+    vi.mocked(client.getSession).mockResolvedValue(memberSession);
+    await controller.join('room-1', '成员');
+
+    await controller.leave();
+    controller.reconnect();
+
+    await vi.waitFor(() => expect(controller.getSnapshot()).toMatchObject({
+      phase: 'reconnecting',
+      session: memberSession,
+      managementOperation: 'leave',
+      managementResultUnknown: true,
+    }));
+    expect(client.leave).toHaveBeenCalledTimes(2);
+  });
+
+  it('leave 对账遇到通用 forbidden 时保持 unknown，不误判为已离开', async () => {
+    const { client, controller } = createHarness();
+    const memberSession = {
+      ...session,
+      self: {
+        userId: 'member-1',
+        role: 'member' as const,
+        displayName: '成员',
+        membershipState: 'active' as const,
+      },
+    };
+    vi.mocked(client.join).mockResolvedValueOnce(memberSession);
+    vi.mocked(client.leave).mockRejectedValueOnce(new ArenaRoomClientError(
+      'ROOM_RESULT_UNKNOWN',
+      null,
+      '请求结果未知',
+    ));
+    vi.mocked(client.getSession).mockRejectedValueOnce(new ArenaRoomClientError(
+      'ROOM_FORBIDDEN',
+      403,
+      '没有此房间操作权限',
+    ));
+    await controller.join('room-1', '成员');
+
+    await controller.leave();
+    controller.reconnect();
+
+    await vi.waitFor(() => expect(controller.getSnapshot()).toMatchObject({
+      session: memberSession,
+      managementOperation: 'leave',
+      managementResultUnknown: true,
+      notice: '管理动作结果仍无法确认；未重复提交请求',
+    }));
+    expect(client.leave).toHaveBeenCalledOnce();
+  });
+
+  it('close 结果未知且房间仍开放时安全重放同一关闭意图并收敛终态', async () => {
+    const { client, controller } = createHarness();
+    vi.mocked(client.close)
+      .mockRejectedValueOnce(new ArenaRoomClientError(
+        'ROOM_RESULT_UNKNOWN',
+        null,
+        '请求结果未知',
+      ))
+      .mockResolvedValueOnce({ protocolVersion: 1, roomId: 'room-1', outcome: 'closed' });
+    vi.mocked(client.getSession).mockResolvedValueOnce(session);
+    await controller.create({
+      displayName: '房主',
+      directory: { title: '测试房', visibility: 'public' },
+      sharedConfig,
+    });
+
+    await controller.close();
+    expect(controller.getSnapshot().managementResultUnknown).toBe(true);
+    controller.reconnect();
+
+    await vi.waitFor(() => expect(controller.getSnapshot()).toMatchObject({
+      phase: 'ready',
+      session: null,
+      managementOperation: null,
+      managementResultUnknown: false,
+      notice: '房间已关闭',
+    }));
+    expect(client.close).toHaveBeenCalledTimes(2);
+    expect(client.close).toHaveBeenLastCalledWith('room-1', 'epoch-1');
+    expect(client.getSession).toHaveBeenCalledOnce();
+  });
+
+  it('kick 结果未知且目标仍在房间时安全重放同一移除意图并安装权威会话', async () => {
+    const { client, controller } = createHarness();
+    const member = {
+      userId: 'member-1',
+      role: 'member' as const,
+      displayName: '成员',
+      membershipState: 'active' as const,
+    };
+    const withMember = {
+      ...session,
+      snapshot: { ...snapshot, members: [snapshot.members[0]!, member] },
+    };
+    vi.mocked(client.create).mockResolvedValueOnce(withMember);
+    vi.mocked(client.kick)
+      .mockRejectedValueOnce(new ArenaRoomClientError(
+        'ROOM_RESULT_UNKNOWN',
+        null,
+        '请求结果未知',
+      ))
+      .mockResolvedValueOnce(session);
+    vi.mocked(client.getSession).mockResolvedValueOnce(withMember);
+    await controller.create({
+      displayName: '房主',
+      directory: { title: '测试房', visibility: 'public' },
+      sharedConfig,
+    });
+
+    await controller.kickMember('member-1');
+    expect(controller.getSnapshot().managementResultUnknown).toBe(true);
+    controller.reconnect();
+
+    await vi.waitFor(() => expect(controller.getSnapshot()).toMatchObject({
+      session,
+      managementOperation: null,
+      managementResultUnknown: false,
+      notice: '已移除成员 成员',
+    }));
+    expect(client.kick).toHaveBeenCalledTimes(2);
+    expect(client.kick).toHaveBeenLastCalledWith('room-1', 'member-1', 'epoch-1');
+    expect(client.getSession).toHaveBeenCalledOnce();
+  });
+
   it('close 成功后立即结束本地房间会话', async () => {
     const { controller } = createHarness();
     await controller.create({
