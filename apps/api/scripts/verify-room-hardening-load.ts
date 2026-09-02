@@ -14,6 +14,10 @@ import {
   type ArenaRoomSharedConfig,
   type RoomServerTransportMessage,
 } from '@mahoshojo/contracts/arena-room';
+import type {
+  ArenaRoomAuthorityState,
+  ArenaRoomCommand,
+} from '@mahoshojo/multiplayer-core';
 import { Hono } from 'hono';
 import { createClient } from 'redis';
 import WebSocket from 'ws';
@@ -277,6 +281,28 @@ const sharedConfig = (): ArenaRoomSharedConfig => ({
     isNarrativeHistoryUnlimited: false,
     writeNarrativeHistory: false,
   },
+});
+
+/**
+ * 以强类型构造 state-machine command：RoomActor.execute 的 boundary 参数是
+ * unknown，直接传匿名对象会在 command contract 增加必填字段（如
+ * expectedControlSeq）时静默失效；返回 ArenaRoomCommand 让缺失字段在
+ * 编译期暴露，而不是在 workload 运行时被 schema 校验拒绝。
+ */
+const publishConfigCommand = (input: {
+  readonly state: ArenaRoomAuthorityState;
+  readonly userGuidance: string;
+  readonly timestamp: string;
+}): ArenaRoomCommand => ({
+  type: 'publish-config',
+  expectedRoomEpoch: input.state.snapshot.roomEpoch,
+  expectedRevision: input.state.snapshot.revision,
+  expectedControlSeq: input.state.snapshot.controlSeq,
+  sharedConfig: {
+    ...input.state.snapshot.sharedConfig,
+    userGuidance: input.userGuidance,
+  },
+  timestamp: input.timestamp,
 });
 
 const percentile = (values: readonly number[], target: number): number | null => {
@@ -655,16 +681,11 @@ const runRoomHardeningLoadVerifier = async (
             actorUserId: room.hostUserId,
             accountUserId: room.accountUserId,
           },
-          command: {
-            type: 'publish-config',
-            expectedRoomEpoch: state.snapshot.roomEpoch,
-            expectedRevision: state.snapshot.revision,
-            sharedConfig: {
-              ...state.snapshot.sharedConfig,
-              userGuidance: `hardening-load-${roomIndex}-${transitionIndex}`,
-            },
+          command: publishConfigCommand({
+            state,
+            userGuidance: `hardening-load-${roomIndex}-${transitionIndex}`,
             timestamp,
-          },
+          }),
         });
         if (!result.ok || result.kind !== 'applied') {
           throw new Error('ROOM_HARDENING_LOAD_AUTHORITY_TRANSITION_REJECTED');
