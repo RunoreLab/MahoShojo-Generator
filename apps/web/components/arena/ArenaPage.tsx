@@ -8,7 +8,6 @@ import DataCardDetailsModal from '@/components/DataCardDetailsModal';
 import Footer from '@/components/Footer';
 import { ErrorMessage } from '@/components/ErrorMessage';
 import { useAuth } from '@/lib/useAuth';
-import { CollapsibleSection } from '@/components/shared/CollapsibleSection';
 import { ONLINE_DATA_CARD_TYPES } from '@mahoshojo/contracts/data-cards';
 
 import { BattleHeader } from './components/BattleHeader';
@@ -45,6 +44,7 @@ import { ArenaRankingLinks } from './shared/ArenaRankingLinks';
 import { ArenaRoomProvider } from './multiplayer/useArenaRoom';
 import { ArenaEditorWorkspaceBoundary } from './multiplayer/ArenaRoomProposalWorkspace';
 import { ArenaRoomDialog } from './multiplayer/ArenaRoomDialog';
+import { ArenaEditorWorkspaceLayout } from './editor/ArenaEditorWorkspaceLayout';
 import {
   countArenaSelectedReferenceItems,
   getArenaReferenceRemainingCapacity,
@@ -223,181 +223,143 @@ export function ArenaPage({ multiplayer }: ArenaPageProps = {}) {
             ) : null}
 
             <ArenaEditorWorkspaceBoundary>
-              <div className="mt-6 grid gap-5 xl:grid-cols-[minmax(320px,420px)_minmax(0,1fr)] 2xl:grid-cols-[minmax(340px,440px)_minmax(0,1fr)] xl:items-start">
-              <div className="min-w-0 space-y-4">
-                <CollapsibleSection
-                  title="🎴 预设角色"
-                  description={`已选 ${formatCombatantCount(presetCombatantCount, MAX_COMBATANTS)}`}
-                  defaultOpen
-                  disabled={isGenerating}
-                  storageKey="arena.section.presetCharacters.open"
-                >
-                  <PresetSelector />
-                </CollapsibleSection>
-
-                <CollapsibleSection
-                  title="🌐 在线角色库 / 随机匹配"
-                  description={`当前已选 ${formatCombatantCount(combatants.length, MAX_COMBATANTS)}`}
-                  defaultOpen
-                  disabled={isGenerating}
-                  storageKey="arena.section.characterDatabase.open"
-                >
-                  <DatabaseSelector
-                    className="!mb-0"
-                    title={null}
-                    onOpenCharacterModal={handleOpenCharacterDataModal}
-                    onRandomMatchCharacter={() => handleRandomMatch('character')}
-                    isAuthenticated={isAuthenticated}
-                    isGenerating={isGenerating}
-                    isMatching={isMatching}
-                    combatantCount={combatants.length}
-                  />
-                  <div className="mt-1 text-xs text-gray-600">
-                    提示：浏览在线角色库可选择公开/私有数据卡；随机匹配仅从公开角色库中抽取。
-                  </div>
-                </CollapsibleSection>
-
-                <CollapsibleSection
-                  title="📁 本地导入（上传 / 粘贴）"
-                  description="支持上传多个 .json 或直接粘贴文本"
-                  defaultOpen
-                  disabled={isGenerating}
-                  keepMounted
-                  storageKey="arena.section.localImport.open"
-                >
-                  <RosterUploader />
-                </CollapsibleSection>
-
-                <CollapsibleSection
-                  title="👥 已选角色 / 分队"
-                  description={`已选 ${formatCombatantCount(combatants.length, MAX_COMBATANTS)}`}
-                  defaultOpen
-                  disabled={isGenerating}
-                  keepMounted
-                  storageKey="arena.section.combatants.open"
-                >
-                  <CombatantList onShowDetails={(combatant) => setSelectedCombatant(combatant)} />
-                </CollapsibleSection>
-              </div>
-
-              <div className="min-w-0 space-y-4">
-                <CollapsibleSection
-                  title="🎮 模式选择"
-                  description="不同模式会影响输出风格与计分规则"
-                  defaultOpen
-                  disabled={isGenerating}
-                  storageKey="arena.section.battleMode.open"
-                >
-                  <BattleModeSwitcher />
-                </CollapsibleSection>
-
-                {battleMode === 'scenario' && (
-                  <CollapsibleSection
-                    title="🎭 情景设置"
-                    description={scenarioSummary}
-                    defaultOpen
-                    autoOpen={scenario.content === null}
-                    disabled={isGenerating}
-                    keepMounted
-                    storageKey="arena.section.scenario.open"
-                  >
-                    <ScenarioPanel
-                      onOpenScenarioModal={handleOpenScenarioDataModal}
-                      onRandomMatchScenario={() => handleRandomMatch('scenario')}
-                      onOpenAuxScenarioModal={handleOpenAuxScenarioDataModal}
-                      isAuthenticated={isAuthenticated}
-                    />
-                  </CollapsibleSection>
-                )}
-
-                <CollapsibleSection
-                  title="📎 素材注入"
-                  description={`已选素材 ${materials.length}；参考项合计 ${referenceItemCount}/${MAX_ARENA_REFERENCE_ITEMS}`}
-                  defaultOpen={false}
-                  disabled={isGenerating}
-                  keepMounted
-                  storageKey="arena.section.materials.open"
-                >
-                  <MaterialPanel onOpenMaterialModal={handleOpenMaterialDataModal} />
-                </CollapsibleSection>
-
-                <CollapsibleSection
-                  title="🏁 排位与快速设置"
-                  description="用于排位计分相关的一键检查/修复（高级）"
-                  defaultOpen={false}
-                  disabled={isGenerating}
-                  keepMounted
-                  storageKey="arena.section.rankingQuickActions.open"
-                >
-                  <RankingQuickActions />
-                </CollapsibleSection>
-
-                <CollapsibleSection
-                  title="⚙️ 读写设置（历战 / 当前状态 / 叙事历史）"
-                  description="建议保留默认；上下文过长或失败时可在这里精简"
-                  defaultOpen={false}
-                  disabled={isGenerating}
-                  keepMounted
-                  storageKey="arena.section.battleSettings.open"
-                >
-                  <BattleSettings />
-                </CollapsibleSection>
-
-                <CollapsibleSection
-                  title="🧠 故事引导 / 判定 / AI 模型"
-                  description="这里的设置会直接影响生成风格与稳定性"
-                  defaultOpen
-                  disabled={isGenerating}
-                  keepMounted
-                  storageKey="arena.section.storyOptions.open"
-                >
-                  <StoryOptions
-                    languages={languages}
-                    afterUserGuidance={(
+              <ArenaEditorWorkspaceLayout
+                disabled={isGenerating}
+                sections={[
+                  {
+                    kind: 'presetCharacters',
+                    description: `已选 ${formatCombatantCount(presetCombatantCount, MAX_COMBATANTS)}`,
+                    defaultOpen: true,
+                    content: <PresetSelector />,
+                  },
+                  {
+                    kind: 'characterDatabase',
+                    description: `当前已选 ${formatCombatantCount(combatants.length, MAX_COMBATANTS)}`,
+                    defaultOpen: true,
+                    content: (
                       <>
-                        <QuestionnaireLorePanel />
-                        <AdjudicatorPanel />
+                        <DatabaseSelector
+                          className="!mb-0"
+                          title={null}
+                          onOpenCharacterModal={handleOpenCharacterDataModal}
+                          onRandomMatchCharacter={() => handleRandomMatch('character')}
+                          isAuthenticated={isAuthenticated}
+                          isGenerating={isGenerating}
+                          isMatching={isMatching}
+                          combatantCount={combatants.length}
+                        />
+                        <div className="mt-1 text-xs text-gray-600">
+                          提示：浏览在线角色库可选择公开/私有数据卡；随机匹配仅从公开角色库中抽取。
+                        </div>
                       </>
-                    )}
-                  />
-                </CollapsibleSection>
-
-                <CollapsibleSection
-                  title="⚡ 生成方式"
-                  description="流式生成可边生成边阅读；非流式适合一次性结果"
-                  defaultOpen={false}
-                  disabled={isGenerating}
-                  storageKey="arena.section.generationMode.open"
-                >
-                  <GenerationModeSwitcher />
-                </CollapsibleSection>
-
-                <CollapsibleSection
-                  title="🚀 开始生成"
-                  description="确认设置后点击按钮生成战报"
-                  collapsible={false}
-                >
-                  <BattleActions />
-                  {error && (
-                    <ErrorMessage
-                      message={error}
-                      className={`p-4 rounded-md mt-3 text-sm ${
-                        error.startsWith('❌') ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800'
-                      }`}
-                    />
-                  )}
-                </CollapsibleSection>
-
-                <CollapsibleSection
-                  title="💬 社区"
-                  description="QQ群 / 腾讯频道"
-                  defaultOpen={false}
-                  storageKey="arena.section.community.open"
-                >
-                  <ArenaCommunitySection />
-                </CollapsibleSection>
-              </div>
-              </div>
+                    ),
+                  },
+                  {
+                    kind: 'localImport',
+                    description: '支持上传多个 .json 或直接粘贴文本',
+                    defaultOpen: true,
+                    keepMounted: true,
+                    content: <RosterUploader />,
+                  },
+                  {
+                    kind: 'roster',
+                    description: `已选 ${formatCombatantCount(combatants.length, MAX_COMBATANTS)}`,
+                    defaultOpen: true,
+                    keepMounted: true,
+                    content: <CombatantList onShowDetails={(combatant) => setSelectedCombatant(combatant)} />,
+                  },
+                  {
+                    kind: 'battleMode',
+                    description: '不同模式会影响输出风格与计分规则',
+                    defaultOpen: true,
+                    content: <BattleModeSwitcher />,
+                  },
+                  ...(battleMode === 'scenario' ? [{
+                    kind: 'scenario' as const,
+                    description: scenarioSummary,
+                    defaultOpen: true,
+                    autoOpen: scenario.content === null,
+                    keepMounted: true,
+                    content: (
+                      <ScenarioPanel
+                        onOpenScenarioModal={handleOpenScenarioDataModal}
+                        onRandomMatchScenario={() => handleRandomMatch('scenario')}
+                        onOpenAuxScenarioModal={handleOpenAuxScenarioDataModal}
+                        isAuthenticated={isAuthenticated}
+                      />
+                    ),
+                  }] : []),
+                  {
+                    kind: 'materials',
+                    description: `已选素材 ${materials.length}；参考项合计 ${referenceItemCount}/${MAX_ARENA_REFERENCE_ITEMS}`,
+                    defaultOpen: false,
+                    keepMounted: true,
+                    content: <MaterialPanel onOpenMaterialModal={handleOpenMaterialDataModal} />,
+                  },
+                  {
+                    kind: 'ranking',
+                    description: '用于排位计分相关的一键检查/修复（高级）',
+                    defaultOpen: false,
+                    keepMounted: true,
+                    content: <RankingQuickActions />,
+                  },
+                  {
+                    kind: 'settings',
+                    description: '建议保留默认；上下文过长或失败时可在这里精简',
+                    defaultOpen: false,
+                    keepMounted: true,
+                    content: <BattleSettings />,
+                  },
+                  {
+                    kind: 'story',
+                    description: '这里的设置会直接影响生成风格与稳定性',
+                    defaultOpen: true,
+                    keepMounted: true,
+                    content: (
+                      <StoryOptions
+                        languages={languages}
+                        afterUserGuidance={(
+                          <>
+                            <QuestionnaireLorePanel />
+                            <AdjudicatorPanel />
+                          </>
+                        )}
+                      />
+                    ),
+                  },
+                  {
+                    kind: 'generationMode',
+                    description: '流式生成可边生成边阅读；非流式适合一次性结果',
+                    defaultOpen: false,
+                    content: <GenerationModeSwitcher />,
+                  },
+                  {
+                    kind: 'generationActions',
+                    description: '确认设置后点击按钮生成战报',
+                    collapsible: false,
+                    content: (
+                      <>
+                        <BattleActions />
+                        {error && (
+                          <ErrorMessage
+                            message={error}
+                            className={`p-4 rounded-md mt-3 text-sm ${
+                              error.startsWith('❌') ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800'
+                            }`}
+                          />
+                        )}
+                      </>
+                    ),
+                  },
+                  {
+                    kind: 'community',
+                    description: 'QQ群 / 腾讯频道',
+                    defaultOpen: false,
+                    disabled: false,
+                    content: <ArenaCommunitySection />,
+                  },
+                ]}
+              />
             </ArenaEditorWorkspaceBoundary>
           </div>
 

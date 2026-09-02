@@ -5,13 +5,13 @@ import { useMemo, useRef, useState } from 'react';
 import BattleDataModal from '@/components/BattleDataModal';
 import { PresetGridPicker } from '@/components/PresetGridPicker';
 import { ScenarioPresetGridPicker } from '@/components/ScenarioPresetGridPicker';
-import { CollapsibleSection } from '@/components/shared/CollapsibleSection';
 import { ONLINE_DATA_CARD_TYPES } from '@mahoshojo/contracts/data-cards';
 import type {
   ArenaProposalChange,
   ArenaRoomSharedConfig,
   DataCardRef,
 } from '@mahoshojo/contracts/arena-room';
+import { MAX_COMBATANTS } from '@mahoshojo/contracts/arena-room';
 
 import {
   ArenaEditorSessionProvider,
@@ -24,6 +24,8 @@ import { ArenaAuxScenarioList } from '../editor/presentation/ArenaScenarioList';
 import { BattleModeSwitcher } from '../components/BattleModeSwitcher';
 import { BattleSettings } from '../components/BattleSettings';
 import { StoryOptions } from '../components/StoryOptions';
+import { DatabaseSelector } from '../components/DatabaseSelector';
+import { ArenaEditorWorkspaceLayout } from '../editor/ArenaEditorWorkspaceLayout';
 import { useLanguagesQuery } from '../hooks/useArenaData';
 import type { ArenaRoomController, ArenaRoomControllerState } from '@/lib/arena-room/controller';
 import { PRESET_LIST, type Preset } from '@/lib/presets';
@@ -176,8 +178,10 @@ const ProposalWorkspaceInner = ({
   const snapshot = useArenaEditorSelector((value) => value);
   const { data: languages } = useLanguagesQuery();
   const [modalKind, setModalKind] = useState<ModalKind | null>(null);
-  const [characterPresetPage, setCharacterPresetPage] = useState(1);
+  const [magicalGirlPresetPage, setMagicalGirlPresetPage] = useState(1);
+  const [canshouPresetPage, setCanshouPresetPage] = useState(1);
   const [scenarioPresetPage, setScenarioPresetPage] = useState(1);
+  const [isMatching, setIsMatching] = useState(false);
   const [newTeamName, setNewTeamName] = useState('');
   const [collapsedGuidanceKeys, setCollapsedGuidanceKeys] = useState<ReadonlySet<string>>(new Set());
   const [preview, setPreview] = useState<readonly ArenaProposalChange[] | null>(null);
@@ -307,6 +311,36 @@ const ProposalWorkspaceInner = ({
     }));
   };
 
+  const randomMatchCharacter = async (): Promise<void> => {
+    if (isMatching || disabled || snapshot.combatants.length >= MAX_COMBATANTS) return;
+    setIsMatching(true);
+    setLocalError(null);
+    try {
+      const response = await fetch('/api/random-public-card?type=character');
+      const result = await response.json() as {
+        readonly success?: boolean;
+        readonly card?: unknown;
+        readonly error?: string;
+      };
+      if (!response.ok || result.success !== true || !result.card) {
+        throw new Error(result.error || '无法获取随机公开角色');
+      }
+      const ref = toExactRef(result.card, 'character');
+      const key = `data-card:${ref.id}`;
+      mutate((draft) => ({
+        ...draft,
+        combatants: [
+          ...draft.combatants.filter((item) => item.key !== key),
+          { key, ref },
+        ],
+      }));
+    } catch (error) {
+      setLocalError(`随机匹配失败：${error instanceof Error ? error.message : '未知错误'}`);
+    } finally {
+      setIsMatching(false);
+    }
+  };
+
   const toggleScenarioPreset = (preset: ScenarioPreset): void => {
     const key = `preset:${preset.filename}`;
     const entry = ARENA_ROOM_PRESET_CATALOG.find((item) => item.kind === 'scenario' && item.id === preset.filename);
@@ -363,25 +397,70 @@ const ProposalWorkspaceInner = ({
       {localError ? <p role="alert" className="mt-3 text-sm text-red-700 dark:text-red-300">{localError}</p> : null}
       <ArenaMemberProposalStatus state={state} controller={controller} />
 
-      <div className="mt-4 grid gap-5 xl:grid-cols-[minmax(320px,420px)_minmax(0,1fr)]">
-        <div className="min-w-0 space-y-4">
-          <CollapsibleSection title="🌐 在线角色库" description="仅公开且审核通过的数据卡" defaultOpen>
-            <button type="button" className={primaryButtonClass} onClick={() => setModalKind('character')}>浏览在线角色库</button>
-            {editor.capabilities.canAddPresetRefs ? (
-              <div className="mt-3 border-t pt-3 dark:border-gray-800">
+      <ArenaEditorWorkspaceLayout
+        disabled={disabled}
+        sections={[
+          {
+            kind: 'presetCharacters',
+            description: `已选 ${selectedCharacterPresetFilenames.length}`,
+            defaultOpen: true,
+            content: editor.capabilities.canAddPresetRefs ? (
+              <>
                 <PresetGridPicker
-                  title="选择内置预设角色"
-                  presets={proposalCharacterPresets}
-                  currentPage={characterPresetPage}
-                  onPageChange={setCharacterPresetPage}
+                  title="选择预设魔法少女"
+                  presets={proposalCharacterPresets.filter((preset) => preset.type === 'magical-girl')}
+                  currentPage={magicalGirlPresetPage}
+                  onPageChange={setMagicalGirlPresetPage}
                   disabled={disabled}
+                  maxSelected={MAX_COMBATANTS}
+                  selectedCountOverride={snapshot.combatants.length}
                   selectedFilenames={selectedCharacterPresetFilenames}
                   onToggle={toggleCharacterPreset}
                 />
-              </div>
-            ) : null}
-          </CollapsibleSection>
-          <CollapsibleSection title="👥 已选角色 / 分队" description={`已选 ${snapshot.combatants.length}`} defaultOpen keepMounted>
+                <PresetGridPicker
+                  title="选择预设残兽"
+                  presets={proposalCharacterPresets.filter((preset) => preset.type === 'canshou')}
+                  currentPage={canshouPresetPage}
+                  onPageChange={setCanshouPresetPage}
+                  disabled={disabled}
+                  maxSelected={MAX_COMBATANTS}
+                  selectedCountOverride={snapshot.combatants.length}
+                  selectedFilenames={selectedCharacterPresetFilenames}
+                  onToggle={toggleCharacterPreset}
+                />
+              </>
+            ) : <p className="text-sm text-gray-600">当前房间不支持在提案中新增预设引用。</p>,
+          },
+          {
+            kind: 'characterDatabase',
+            description: `当前已选 ${snapshot.combatants.length}/${MAX_COMBATANTS}`,
+            defaultOpen: true,
+            content: (
+              <>
+                <DatabaseSelector
+                  className="!mb-0"
+                  title={null}
+                  onOpenCharacterModal={() => setModalKind('character')}
+                  onRandomMatchCharacter={() => { void randomMatchCharacter(); }}
+                  isAuthenticated
+                  isGenerating={disabled}
+                  isMatching={isMatching ? 'character' : null}
+                  combatantCount={snapshot.combatants.length}
+                  maxCombatants={MAX_COMBATANTS}
+                />
+                <p className="mt-1 text-xs text-gray-600 dark:text-gray-400">
+                  提案仅可引用公开且审核通过的数据卡；随机匹配同样只从公开角色库抽取。
+                </p>
+              </>
+            ),
+          },
+          {
+            kind: 'roster',
+            description: `已选 ${snapshot.combatants.length}/${MAX_COMBATANTS}`,
+            defaultOpen: true,
+            keepMounted: true,
+            content: (
+              <>
               <div className="mb-3 flex gap-2">
               <label htmlFor="arena-room-proposal-new-team" className="sr-only">新队伍名称</label>
               <input
@@ -546,19 +625,22 @@ const ProposalWorkspaceInner = ({
                 </select>
               </label>
             ))}
-          </CollapsibleSection>
-        </div>
-
-        <div className="min-w-0 space-y-4">
-          <CollapsibleSection title="🎮 模式选择" description="复用 Arena 模式控件" defaultOpen>
-            <BattleModeSwitcher />
-          </CollapsibleSection>
-          <CollapsibleSection
-            title="🎭 情景设置"
-            description={snapshot.scenario?.name ?? '未选择主情景'}
-            defaultOpen={snapshot.battleMode === 'scenario'}
-            autoOpen={snapshot.battleMode === 'scenario'}
-          >
+              </>
+            ),
+          },
+          {
+            kind: 'battleMode',
+            description: '不同模式会影响输出风格与计分规则',
+            defaultOpen: true,
+            content: <BattleModeSwitcher />,
+          },
+          ...(snapshot.battleMode === 'scenario' ? [{
+            kind: 'scenario' as const,
+            description: snapshot.scenario?.name ?? '未选择主情景',
+            defaultOpen: snapshot.battleMode === 'scenario',
+            autoOpen: snapshot.battleMode === 'scenario',
+            content: (
+              <>
             <div className="flex flex-wrap gap-2">
               <button type="button" className={secondaryButtonClass} onClick={() => setModalKind('scenario')}>浏览在线情景库</button>
               {snapshot.scenario ? <button type="button" className={dangerButtonClass} onClick={() => mutate((draft) => ({ ...draft, scenario: null }))}>清除主情景</button> : null}
@@ -589,8 +671,16 @@ const ProposalWorkspaceInner = ({
                 auxScenarios: draft.auxScenarios.filter((item) => item.key !== key),
               }))}
             />
-          </CollapsibleSection>
-          <CollapsibleSection title="📎 素材注入" description={`已选 ${snapshot.materials.length}`} defaultOpen={false} keepMounted>
+              </>
+            ),
+          }] : []),
+          {
+            kind: 'materials',
+            description: `已选 ${snapshot.materials.length}`,
+            defaultOpen: false,
+            keepMounted: true,
+            content: (
+              <>
             <button type="button" className={secondaryButtonClass} onClick={() => setModalKind('material')}>浏览在线数据卡</button>
             <p className="mt-2 text-xs text-gray-500">内置素材预设暂不可用：目前没有经过服务器确认的素材目录，避免未验证的正文进入提案。</p>
             <div className="mt-3">
@@ -613,15 +703,25 @@ const ProposalWorkspaceInner = ({
                 }))}
               />
             </div>
-          </CollapsibleSection>
-          <CollapsibleSection title="⚙️ 读写设置" description="复用 Arena 历史设置" defaultOpen={false} keepMounted>
-            <BattleSettings />
-          </CollapsibleSection>
-          <CollapsibleSection title="🧠 故事引导" description="模型服务与本地判定能力在提案模式中不可用" defaultOpen keepMounted>
-            <StoryOptions languages={languages} />
-          </CollapsibleSection>
-        </div>
-      </div>
+              </>
+            ),
+          },
+          {
+            kind: 'settings',
+            description: '建议保留默认；上下文过长或失败时可在这里精简',
+            defaultOpen: false,
+            keepMounted: true,
+            content: <BattleSettings />,
+          },
+          {
+            kind: 'story',
+            description: '提案共享故事选项；模型服务与本地判定仍由房主控制',
+            defaultOpen: true,
+            keepMounted: true,
+            content: <StoryOptions languages={languages} />,
+          },
+        ]}
+      />
 
       <BattleDataModal
         isOpen={modalKind !== null}

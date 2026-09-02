@@ -194,6 +194,7 @@ afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe('Arena room Proposal workspace', () => {
@@ -213,6 +214,12 @@ describe('Arena room Proposal workspace', () => {
     await act(async () => root.render(
       <ArenaRoomProposalWorkspaceView editor={editor} state={state} controller={controller} />,
     ));
+
+    expect(container.textContent).toContain('🎴 预设角色');
+    expect(container.textContent).toContain('选择预设魔法少女');
+    expect(container.textContent).toContain('选择预设残兽');
+    expect(container.textContent).toContain('🌐 在线角色库 / 随机匹配');
+    expect(container.textContent).not.toContain('选择内置预设角色');
 
     const curatedPresetToggle = container.querySelector<HTMLButtonElement>('button[aria-label="选择预设角色：翠雀"]');
     if (!curatedPresetToggle) throw new Error('curated preset picker item not found');
@@ -366,6 +373,53 @@ describe('Arena room Proposal workspace', () => {
         versionToken: expect.stringMatching(/^sha256:/),
       },
     });
+    editor.dispose();
+  });
+
+  it('随机匹配复用公开角色入口并只写入 exact ref', async () => {
+    const fetcher = vi.fn(async () => Response.json({
+      success: true,
+      card: {
+        id: 'character-random-1',
+        updated_at: 'version-character-random-1',
+        type: 'character',
+        content: { secret: '不得进入提案' },
+      },
+    }));
+    vi.stubGlobal('fetch', fetcher);
+    const editor = createRoomProposalArenaEditorSession({
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      revision: 7,
+      sharedConfig,
+    });
+    const controller = {
+      submitProposal: vi.fn(async () => undefined),
+      withdrawProposal: vi.fn(async () => undefined),
+      reconnect: vi.fn(),
+    } satisfies Pick<ArenaRoomController, 'reconnect' | 'submitProposal' | 'withdrawProposal'>;
+
+    await act(async () => root.render(
+      <ArenaRoomProposalWorkspaceView editor={editor} state={state} controller={controller} />,
+    ));
+    await act(async () => {
+      button('随机匹配角色').click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(fetcher).toHaveBeenCalledWith('/api/random-public-card?type=character');
+    const change = editor.preview().changes.find((item) => (
+      item.type === 'addCombatant' && item.ref.id === 'character-random-1'
+    ));
+    expect(change).toMatchObject({
+      ref: {
+        kind: 'character',
+        versionToken: 'version-character-random-1',
+      },
+    });
+    expect(change).not.toHaveProperty('key');
+    expect(JSON.stringify(change)).not.toContain('secret');
     editor.dispose();
   });
 
