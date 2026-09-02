@@ -198,6 +198,20 @@ const safeErrorMessage = (error: unknown): string => (
   error instanceof ArenaRoomClientError ? error.message : '房间运行时暂不可用'
 );
 
+/**
+ * 重放管理 mutation 时服务器给出的确定性拒绝（权限/输入等 4xx）：
+ * 这类响应证明 intent 未被执行且重试无意义，应解除 unknown 呈现真实错误，
+ * 而不是继续把结果标记为“未知”。ROOM_CONFLICT 意味着状态再次变化需重新对账，
+ * ROOM_RATE_LIMITED 属于可重试拒绝，二者都不算确定性拒绝。
+ */
+const isDeterministicMutationRejection = (error: ArenaRoomClientError): boolean => (
+  error.status !== null
+  && error.status >= 400
+  && error.status < 500
+  && error.code !== 'ROOM_CONFLICT'
+  && error.code !== 'ROOM_RATE_LIMITED'
+);
+
 const sameSharedConfig = (left: unknown, right: unknown): boolean => (
   JSON.stringify(left) === JSON.stringify(right)
 );
@@ -1560,6 +1574,34 @@ export const createArenaRoomController = (
     }
   };
 
+  /**
+   * 以 GET /session 取得的服务器权威 session 重建本地会话。
+   * Room recovery 会保留成员并轮换 roomEpoch，因此对账时 epoch 不一致
+   * 不能静默放弃：先安装新权威（必要时重置生成视图并触发权威基线恢复），
+   * 再基于新 epoch 重新评估管理 intent。epoch 未变化时只安装 session。
+   */
+  const installRebasedAuthoritativeSession = (
+    authoritative: ArenaRoomSessionResponse,
+    notice: string,
+  ): void => {
+    const epochChanged = authoritative.roomEpoch !== state.session?.roomEpoch;
+    controlCursor = {
+      roomEpoch: authoritative.roomEpoch,
+      controlSeq: authoritative.snapshot.controlSeq,
+    };
+    if (!epochChanged) {
+      publish({ session: authoritative, notice });
+      return;
+    }
+    generationFence += 1;
+    publish({
+      session: authoritative,
+      generation: generationViewForSnapshot(authoritative.snapshot.activeGeneration, true),
+      notice,
+    });
+    if (authoritative.snapshot.activeGeneration) void requestGenerationRecovery('baseline');
+  };
+
   const reconcileUnknownManagementMutation = async (): Promise<void> => {
     const current = state.session;
     const intent = unknownManagementMutation;
@@ -1574,7 +1616,7 @@ export const createArenaRoomController = (
           disposed
           || operation !== managementMutationGeneration
           || state.session?.roomId !== current.roomId
-          || authoritative.roomEpoch !== current.roomEpoch
+          || authoritative.roomId !== current.roomId
           || authoritative.self.userId !== current.self.userId
         ) return;
         const targetActive = authoritative.snapshot.members.some((member) => (
@@ -1582,28 +1624,34 @@ export const createArenaRoomController = (
         ));
         if (!targetActive) {
           unknownManagementMutation = null;
+          installRebasedAuthoritativeSession(authoritative, '已从房间权威状态确认成员移除');
           publish({
-            session: authoritative,
             managementOperation: null,
             managementResultUnknown: false,
-            notice: '已从房间权威状态确认成员移除',
             error: null,
           });
           return;
         }
         // 权威状态证明目标仍在房间、kick 尚未生效：安全重放同一幂等 intent
         // （服务端对已撤销目标幂等返回，且带 expectedRoomEpoch fence）。
+        // epoch 已因 Room recovery 轮换时先安装新权威 session，再以新 epoch 重放。
+        if (authoritative.roomEpoch !== current.roomEpoch) {
+          installRebasedAuthoritativeSession(
+            authoritative,
+            '房间已恢复为新实例，正在重新执行成员移除…',
+          );
+        }
         resubmitted = true;
         const replayed = await options.client.kick(
           current.roomId,
           intent.targetUserId,
-          current.roomEpoch,
+          authoritative.roomEpoch,
         );
         if (
           disposed
           || operation !== managementMutationGeneration
           || state.session?.roomId !== current.roomId
-          || state.session.roomEpoch !== current.roomEpoch
+          || state.session.roomEpoch !== authoritative.roomEpoch
           || state.session.self.userId !== current.self.userId
         ) return;
         unknownManagementMutation = null;
@@ -1630,22 +1678,29 @@ export const createArenaRoomController = (
           disposed
           || operation !== managementMutationGeneration
           || authoritative.roomId !== current.roomId
-          || authoritative.roomEpoch !== current.roomEpoch
           || authoritative.self.userId !== current.self.userId
         ) return;
         // 权威状态仍可读取证明 intent 尚未生效（成员仍 active / 房间仍开放）：
         // 安全重放同一幂等 intent，让未提交与已提交两种方向都收敛到终态。
+        // epoch 已因 Room recovery 轮换时先安装新权威 session，再以新 epoch 重放，
+        // 否则旧 epoch fence 会让重放永远无法收敛。
+        if (authoritative.roomEpoch !== current.roomEpoch) {
+          installRebasedAuthoritativeSession(
+            authoritative,
+            '房间已恢复为新实例，正在重新执行操作…',
+          );
+        }
         resubmitted = true;
         if (intent.operation === 'leave') {
-          await options.client.leave(current.roomId, current.roomEpoch);
+          await options.client.leave(current.roomId, authoritative.roomEpoch);
         } else {
-          await options.client.close(current.roomId, current.roomEpoch);
+          await options.client.close(current.roomId, authoritative.roomEpoch);
         }
         if (
           disposed
           || operation !== managementMutationGeneration
           || state.session?.roomId !== current.roomId
-          || state.session.roomEpoch !== current.roomEpoch
+          || state.session.roomEpoch !== authoritative.roomEpoch
           || state.session.self.userId !== current.self.userId
         ) return;
         unknownManagementMutation = null;
@@ -1665,6 +1720,31 @@ export const createArenaRoomController = (
         || state.session?.roomId !== current.roomId
         || state.session.roomEpoch !== current.roomEpoch
       ) return;
+      if (authoritative.roomEpoch !== current.roomEpoch) {
+        // Room 已轮换到新 epoch：安装服务器权威 session 并解除停止锁，
+        // 让房主基于新实例重新执行（或等待生成权威终态自然出现）。
+        const rebased = await options.client.getSession(current.roomId);
+        if (
+          disposed
+          || operation !== managementMutationGeneration
+          || rebased.roomId !== current.roomId
+          || rebased.self.userId !== current.self.userId
+        ) return;
+        const active = rebased.snapshot.activeGeneration;
+        const terminal = active !== null
+          && (active.state === 'completed' || active.state === 'failed' || active.state === 'cancelled');
+        unknownManagementMutation = null;
+        installRebasedAuthoritativeSession(
+          rebased,
+          terminal ? '生成已进入服务器权威终态' : '房间已恢复为新实例，请重新执行停止生成',
+        );
+        publish({
+          managementOperation: null,
+          managementResultUnknown: false,
+          error: null,
+        });
+        return;
+      }
       installAuthoritativeGenerationView(authoritative, {
         roomId: current.roomId,
         roomEpoch: current.roomEpoch,
@@ -1697,6 +1777,22 @@ export const createArenaRoomController = (
             : intent.operation === 'leave'
               ? '已确认当前房间会话已结束'
               : '房间会话已结束',
+        });
+        return;
+      }
+      if (
+        resubmitted
+        && error instanceof ArenaRoomClientError
+        && isDeterministicMutationRejection(error)
+      ) {
+        // 重放被服务器确定性拒绝：结果不再是“未知”，解除 unknown 并呈现真实错误。
+        unknownManagementMutation = null;
+        if (intent.operation !== 'kick') scheduleReconnect(false);
+        publish({
+          managementOperation: null,
+          managementResultUnknown: false,
+          notice: '管理动作未被执行，服务器已明确拒绝',
+          error: safeErrorMessage(error),
         });
         return;
       }

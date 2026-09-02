@@ -2130,6 +2130,224 @@ describe('Arena Room browser controller', () => {
     expect(client.getSession).toHaveBeenCalledOnce();
   });
 
+  it('leave 结果未知且 epoch 已轮换时按新权威重放离开意图并收敛终态', async () => {
+    const { client, controller } = createHarness();
+    const memberSession = {
+      ...session,
+      self: {
+        userId: 'member-1',
+        role: 'member' as const,
+        displayName: '成员',
+        membershipState: 'active' as const,
+      },
+    };
+    const recoveredSession = {
+      ...memberSession,
+      roomEpoch: 'epoch-2',
+      snapshot: { ...memberSession.snapshot, roomEpoch: 'epoch-2' },
+    };
+    vi.mocked(client.join).mockResolvedValueOnce(memberSession);
+    vi.mocked(client.leave)
+      .mockRejectedValueOnce(new ArenaRoomClientError(
+        'ROOM_RESULT_UNKNOWN',
+        null,
+        '请求结果未知',
+      ))
+      .mockResolvedValueOnce({ protocolVersion: 1, roomId: 'room-1', outcome: 'left' });
+    vi.mocked(client.getSession).mockResolvedValueOnce(recoveredSession);
+    await controller.join('room-1', '成员');
+
+    await controller.leave();
+    expect(controller.getSnapshot().managementResultUnknown).toBe(true);
+    controller.reconnect();
+
+    await vi.waitFor(() => expect(controller.getSnapshot()).toMatchObject({
+      phase: 'ready',
+      session: null,
+      managementOperation: null,
+      managementResultUnknown: false,
+      notice: '已离开房间',
+    }));
+    expect(client.leave).toHaveBeenCalledTimes(2);
+    expect(client.leave).toHaveBeenLastCalledWith('room-1', 'epoch-2');
+    expect(client.getSession).toHaveBeenCalledOnce();
+  });
+
+  it('close 结果未知且 epoch 已轮换时按新权威重放关闭意图并收敛终态', async () => {
+    const { client, controller } = createHarness();
+    const recoveredSession = {
+      ...session,
+      roomEpoch: 'epoch-2',
+      snapshot: { ...session.snapshot, roomEpoch: 'epoch-2' },
+    };
+    vi.mocked(client.close)
+      .mockRejectedValueOnce(new ArenaRoomClientError(
+        'ROOM_RESULT_UNKNOWN',
+        null,
+        '请求结果未知',
+      ))
+      .mockResolvedValueOnce({ protocolVersion: 1, roomId: 'room-1', outcome: 'closed' });
+    vi.mocked(client.getSession).mockResolvedValueOnce(recoveredSession);
+    await controller.create({
+      displayName: '房主',
+      directory: { title: '测试房', visibility: 'public' },
+      sharedConfig,
+    });
+
+    await controller.close();
+    expect(controller.getSnapshot().managementResultUnknown).toBe(true);
+    controller.reconnect();
+
+    await vi.waitFor(() => expect(controller.getSnapshot()).toMatchObject({
+      phase: 'ready',
+      session: null,
+      managementOperation: null,
+      managementResultUnknown: false,
+      notice: '房间已关闭',
+    }));
+    expect(client.close).toHaveBeenCalledTimes(2);
+    expect(client.close).toHaveBeenLastCalledWith('room-1', 'epoch-2');
+    expect(client.getSession).toHaveBeenCalledOnce();
+  });
+
+  it('kick 结果未知且 epoch 已轮换时安装新权威并按新 epoch 重放移除意图', async () => {
+    const { client, controller } = createHarness();
+    const member = {
+      userId: 'member-1',
+      role: 'member' as const,
+      displayName: '成员',
+      membershipState: 'active' as const,
+    };
+    const withMember = {
+      ...session,
+      snapshot: { ...snapshot, members: [snapshot.members[0]!, member] },
+    };
+    const recoveredWithMember = {
+      ...withMember,
+      roomEpoch: 'epoch-2',
+      snapshot: { ...withMember.snapshot, roomEpoch: 'epoch-2' },
+    };
+    const revokedSession = {
+      ...session,
+      roomEpoch: 'epoch-2',
+      snapshot: {
+        ...session.snapshot,
+        roomEpoch: 'epoch-2',
+        members: [snapshot.members[0]!, { ...member, membershipState: 'revoked' as const }],
+      },
+    };
+    vi.mocked(client.create).mockResolvedValueOnce(withMember);
+    vi.mocked(client.kick)
+      .mockRejectedValueOnce(new ArenaRoomClientError(
+        'ROOM_RESULT_UNKNOWN',
+        null,
+        '请求结果未知',
+      ))
+      .mockResolvedValueOnce(revokedSession);
+    vi.mocked(client.getSession).mockResolvedValueOnce(recoveredWithMember);
+    await controller.create({
+      displayName: '房主',
+      directory: { title: '测试房', visibility: 'public' },
+      sharedConfig,
+    });
+
+    await controller.kickMember('member-1');
+    expect(controller.getSnapshot().managementResultUnknown).toBe(true);
+    controller.reconnect();
+
+    await vi.waitFor(() => expect(controller.getSnapshot()).toMatchObject({
+      session: { roomEpoch: 'epoch-2' },
+      managementOperation: null,
+      managementResultUnknown: false,
+      notice: '已移除成员 成员',
+    }));
+    expect(controller.getSnapshot().session?.snapshot.members.find(
+      (candidate) => candidate.userId === 'member-1',
+    )?.membershipState).toBe('revoked');
+    expect(client.kick).toHaveBeenCalledTimes(2);
+    expect(client.kick).toHaveBeenLastCalledWith('room-1', 'member-1', 'epoch-2');
+    expect(client.getSession).toHaveBeenCalledOnce();
+  });
+
+  it('leave 重放被确定性拒绝时解除 unknown 并显示真实错误', async () => {
+    const { client, controller } = createHarness();
+    const memberSession = {
+      ...session,
+      self: {
+        userId: 'member-1',
+        role: 'member' as const,
+        displayName: '成员',
+        membershipState: 'active' as const,
+      },
+    };
+    vi.mocked(client.join).mockResolvedValueOnce(memberSession);
+    vi.mocked(client.leave)
+      .mockRejectedValueOnce(new ArenaRoomClientError(
+        'ROOM_RESULT_UNKNOWN',
+        null,
+        '请求结果未知',
+      ))
+      .mockRejectedValueOnce(new ArenaRoomClientError(
+        'ROOM_FORBIDDEN',
+        403,
+        '没有此房间操作权限',
+      ));
+    vi.mocked(client.getSession).mockResolvedValueOnce(memberSession);
+    await controller.join('room-1', '成员');
+
+    await controller.leave();
+    expect(controller.getSnapshot().managementResultUnknown).toBe(true);
+    controller.reconnect();
+
+    await vi.waitFor(() => expect(controller.getSnapshot()).toMatchObject({
+      session: memberSession,
+      managementOperation: null,
+      managementResultUnknown: false,
+      error: '没有此房间操作权限',
+    }));
+    expect(client.leave).toHaveBeenCalledTimes(2);
+  });
+
+  it('leave 重放遇到 ROOM_CONFLICT 时保持 unknown 并调度重新对账', async () => {
+    const { client, controller, runNextTimer } = createHarness();
+    const memberSession = {
+      ...session,
+      self: {
+        userId: 'member-1',
+        role: 'member' as const,
+        displayName: '成员',
+        membershipState: 'active' as const,
+      },
+    };
+    vi.mocked(client.join).mockResolvedValueOnce(memberSession);
+    vi.mocked(client.leave)
+      .mockRejectedValueOnce(new ArenaRoomClientError(
+        'ROOM_RESULT_UNKNOWN',
+        null,
+        '请求结果未知',
+      ))
+      .mockRejectedValueOnce(new ArenaRoomClientError(
+        'ROOM_CONFLICT',
+        409,
+        '房间实例已变化，请重新进入房间后重试。',
+      ));
+    vi.mocked(client.getSession).mockResolvedValueOnce(memberSession);
+    await controller.join('room-1', '成员');
+
+    await controller.leave();
+    expect(controller.getSnapshot().managementResultUnknown).toBe(true);
+    controller.reconnect();
+
+    await vi.waitFor(() => expect(controller.getSnapshot()).toMatchObject({
+      session: memberSession,
+      managementOperation: 'leave',
+      managementResultUnknown: true,
+    }));
+    expect(client.leave).toHaveBeenCalledTimes(2);
+    await runNextTimer();
+    expect(client.getSession).toHaveBeenCalledTimes(1);
+  });
+
   it('close 成功后立即结束本地房间会话', async () => {
     const { controller } = createHarness();
     await controller.create({
