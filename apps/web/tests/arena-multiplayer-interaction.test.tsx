@@ -517,6 +517,27 @@ describe('Arena multiplayer panel real React interactions', () => {
     expect(document.body.querySelector('#arena-room-generation-history-dialog-heading')).not.toBeNull();
     expect(mocks.listGenerationHistory).toHaveBeenCalledOnce();
     expect(document.body.textContent).toContain('已完成 · 配置版本 0');
+
+    const replacement = connectedHostState(sharedConfig);
+    mocks.listGenerationHistory.mockResolvedValueOnce({
+      protocolVersion: 1,
+      roomId: 'room-created',
+      roomEpoch: 'epoch-replacement',
+      items: [],
+    });
+    mocks.state = {
+      ...replacement,
+      session: replacement.session ? {
+        ...replacement.session,
+        roomEpoch: 'epoch-replacement',
+        snapshot: { ...replacement.session.snapshot, roomEpoch: 'epoch-replacement' },
+      } : null,
+    };
+    await act(async () => root.render(<ArenaMultiplayerContextPanel {...props} />));
+    await flush();
+    expect(mocks.listGenerationHistory).toHaveBeenCalledTimes(2);
+    expect(document.body.textContent).toContain('当前房间还没有战报记录');
+    expect(document.body.textContent).not.toContain('已完成 · 配置版本 0');
   });
 
   it('config publish unknown 在 connected 状态提供主动权威对账入口', async () => {

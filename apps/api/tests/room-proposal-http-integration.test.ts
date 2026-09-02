@@ -133,6 +133,7 @@ describe('Arena Proposal Hono authority composition', () => {
           list: vi.fn(async () => { throw new Error('not used'); }),
           start: vi.fn(async () => { throw new Error('not used'); }),
           read: vi.fn(async () => { throw new Error('not used'); }),
+          readHistory: vi.fn(async () => { throw new Error('not used'); }),
         },
         configs: {
           publish: vi.fn(async () => { throw new Error('not used'); }),

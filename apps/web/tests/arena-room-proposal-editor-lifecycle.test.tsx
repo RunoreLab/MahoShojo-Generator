@@ -37,7 +37,7 @@ const mocks = vi.hoisted(() => {
   };
   return {
     controller,
-    getGenerationView: vi.fn(),
+    getGenerationHistoryView: vi.fn(),
     hostWorkspace: { retainFor: vi.fn() },
     listGenerationHistory: vi.fn(),
     listeners,
@@ -47,7 +47,7 @@ const mocks = vi.hoisted(() => {
 
 vi.mock('@/lib/arena-room/client', () => ({
   createArenaRoomClient: vi.fn(() => ({
-    getGenerationView: mocks.getGenerationView,
+    getGenerationHistoryView: mocks.getGenerationHistoryView,
     listGenerationHistory: mocks.listGenerationHistory,
   })),
 }));
@@ -199,7 +199,7 @@ const installState = async (next: ArenaRoomControllerState): Promise<void> => {
 };
 
 beforeEach(() => {
-  mocks.getGenerationView.mockReset();
+  mocks.getGenerationHistoryView.mockReset();
   mocks.listGenerationHistory.mockReset();
   mocks.runtime.state = stateWith(null);
   mocks.listeners.clear();

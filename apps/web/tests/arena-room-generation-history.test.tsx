@@ -34,22 +34,16 @@ const view = {
   roomId: 'room-1',
   roomEpoch: 'epoch-1',
   generation: {
-    generationRequestId: 'request-12345678',
     generationId: 'generation-1',
-    attempt: 1,
     state: 'completed' as const,
     configRevision: 3,
-    snapshotDigest: 'sha256:snapshot',
     collaborativeInfluence: true,
-    participantUserIds: [1, 2],
     startedAt: '2026-09-02T00:00:00.000Z',
     finishedAt: '2026-09-02T00:03:00.000Z',
   },
   status: 'completed' as const,
+  contentStatus: 'available' as const,
   markdown: '# 先前的权威战报',
-  nextChunkSeq: 4,
-  finalAuthoritative: true,
-  generationRecordId: 'record-1',
   result: {
     version: 1 as const,
     format: 'stream-markdown' as const,
@@ -105,5 +99,49 @@ describe('Arena Room generation history', () => {
     await act(async () => { await Promise.resolve(); });
 
     expect(container.querySelector('[role="alert"]')?.textContent).toContain('房间会话已变化');
+  });
+
+  it('读取另一条失败时清除先前正文，正文过期按非重试终态提示', async () => {
+    const secondHistory = {
+      ...history,
+      items: [
+        ...history.items,
+        { ...history.items[0], generationId: 'generation-2', configRevision: 4 },
+      ],
+    };
+    const reader: ArenaRoomGenerationHistoryReader = {
+      list: vi.fn(async () => secondHistory),
+      read: vi.fn(async (generationId) => {
+        if (generationId === 'generation-2') throw new Error('正文读取失败');
+        return view;
+      }),
+    };
+    await act(async () => root.render(<ArenaRoomGenerationHistory reader={reader} />));
+    await act(async () => { await Promise.resolve(); });
+    const viewButtons = [...container.querySelectorAll('button')]
+      .filter((candidate) => candidate.textContent?.trim() === '查看战报');
+    await act(async () => {
+      viewButtons[0]?.click();
+      await Promise.resolve();
+    });
+    expect(container.querySelector('[data-testid="history-report"]')).not.toBeNull();
+    await act(async () => {
+      viewButtons[1]?.click();
+      await Promise.resolve();
+    });
+    expect(container.querySelector('[data-testid="history-report"]')).toBeNull();
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('正文读取失败');
+
+    vi.mocked(reader.read).mockResolvedValueOnce({
+      ...view,
+      contentStatus: 'expired',
+      markdown: '',
+      result: undefined,
+    });
+    await act(async () => {
+      viewButtons[1]?.click();
+      await Promise.resolve();
+    });
+    expect(container.textContent).toContain('战报正文已超过有限保留期');
   });
 });

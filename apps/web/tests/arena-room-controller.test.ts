@@ -192,6 +192,13 @@ const createHarness = () => {
     })),
     publishConfig: vi.fn(async () => session),
     startGeneration: vi.fn(async () => generationView),
+    listGenerationHistory: vi.fn(async () => ({
+      protocolVersion: 1,
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      items: [],
+    })),
+    getGenerationHistoryView: vi.fn(async () => { throw new Error('not used'); }),
     getGenerationView: vi.fn(async () => generationView),
     cancelGeneration: vi.fn(async () => generationView),
     buildWebSocketUrl: vi.fn((issued) => `wss://room.test/ws?ticket=${issued.ticket}`),

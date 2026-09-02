@@ -3863,6 +3863,7 @@ describe('Arena generation lifecycle service', () => {
         finalAuthoritative: true,
         resultAvailable: false,
         generationRecordId: null,
+        contentRetention: 'expired',
       }),
     });
     expect(resumed.status).toBe(410);

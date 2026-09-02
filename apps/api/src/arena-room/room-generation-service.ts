@@ -2,11 +2,13 @@ import type {
   ArenaMultiplayerGenerationSnapshot,
   ArenaRoomGenerationCancelRequest,
   ArenaRoomGenerationHistoryResponse,
+  ArenaRoomGenerationHistoryViewResponse,
   ArenaRoomGenerationStartRequest,
   ArenaRoomGenerationViewResponse,
 } from '@mahoshojo/contracts/arena-room';
 import {
   ArenaRoomGenerationHistoryResponseSchema,
+  ArenaRoomGenerationHistoryViewResponseSchema,
   ArenaRoomGenerationViewResponseSchema,
   MAX_ARENA_ROOM_GENERATION_HISTORY_ITEMS,
 } from '@mahoshojo/contracts/arena-room';
@@ -110,6 +112,11 @@ export type ArenaRoomGenerationService = {
     readonly generationId: string;
     readonly accountUserId: number;
   }): Promise<ArenaRoomGenerationViewResponse>;
+  readHistory(input: {
+    readonly roomId: string;
+    readonly generationId: string;
+    readonly accountUserId: number;
+  }): Promise<ArenaRoomGenerationHistoryViewResponse>;
 };
 
 export type ArenaRoomGenerationServiceOptions = {
@@ -350,6 +357,49 @@ const view = (input: {
   });
 };
 
+const historicalItem = (
+  mirror: ArenaRoomGenerationViewResponse['generation'],
+): ArenaRoomGenerationHistoryResponse['items'][number] => Object.freeze({
+  generationId: mirror.generationId,
+  state: mirror.state,
+  configRevision: mirror.configRevision,
+  collaborativeInfluence: mirror.collaborativeInfluence,
+  startedAt: mirror.startedAt,
+  ...(mirror.finishedAt === undefined ? {} : { finishedAt: mirror.finishedAt }),
+});
+
+const historicalView = (input: {
+  readonly state: ArenaRoomAuthorityState;
+  readonly mirror: ArenaRoomGenerationHistoryViewResponse['generation'];
+  readonly projection: OwnedProjection;
+}): ArenaRoomGenerationHistoryViewResponse => {
+  const { projection } = input;
+  if (projection.status !== 'completed' || !projection.finalAuthoritative) {
+    return fail('ROOM_GENERATION_UNAVAILABLE');
+  }
+  const contentAvailable = projection.resultAvailable
+    && projection.generationRecordId !== null
+    && projection.roomSafeResult !== undefined;
+  const contentStatus = contentAvailable
+    ? 'available' as const
+    : projection.contentRetention === 'expired'
+      ? 'expired' as const
+      : projection.persistenceWarning === 'OUTPUT_NOT_ARCHIVED'
+        && projection.replayUnavailable === true
+        ? 'not-archived' as const
+        : fail('ROOM_GENERATION_UNAVAILABLE');
+  return ArenaRoomGenerationHistoryViewResponseSchema.parse({
+    protocolVersion: 1,
+    roomId: input.state.snapshot.roomId,
+    roomEpoch: input.state.snapshot.roomEpoch,
+    generation: input.mirror,
+    status: projection.status,
+    contentStatus,
+    markdown: contentAvailable ? projection.markdown : '',
+    ...(contentAvailable ? { result: projection.roomSafeResult } : {}),
+  });
+};
+
 export const createArenaRoomGenerationService = (
   options: ArenaRoomGenerationServiceOptions,
 ): ArenaRoomGenerationService => {
@@ -576,7 +626,7 @@ export const createArenaRoomGenerationService = (
   const readHistoricalProjection = async (
     membership: ResolvedArenaRoomMembership,
     generationId: string,
-  ): Promise<ArenaRoomGenerationViewResponse> => {
+  ): Promise<ArenaRoomGenerationHistoryViewResponse> => {
     const initial = membership.actor.getSnapshot();
     if (
       !initial
@@ -586,7 +636,11 @@ export const createArenaRoomGenerationService = (
     const record = initial.generationLedger.find(({ mirror }) => (
       mirror.generationId === generationId
     ));
-    if (!record || initial.snapshot.activeGeneration?.generationId === generationId) {
+    if (
+      !record
+      || record.mirror.state !== 'completed'
+      || initial.snapshot.activeGeneration?.generationId === generationId
+    ) {
       return fail('ROOM_GENERATION_NOT_FOUND');
     }
 
@@ -626,13 +680,18 @@ export const createArenaRoomGenerationService = (
       mirror.generationId === generationId
       && mirror.generationRequestId === record.mirror.generationRequestId
     ));
-    if (!currentRecord || current.snapshot.activeGeneration?.generationId === generationId) {
+    if (
+      !currentRecord
+      || currentRecord.mirror.state !== 'completed'
+      || current.snapshot.activeGeneration?.generationId === generationId
+    ) {
       return fail('ROOM_GENERATION_NOT_FOUND');
     }
-    return view({
+    const mirror = historicalItem(currentRecord.mirror);
+    if (mirror.state !== 'completed') return fail('ROOM_GENERATION_NOT_FOUND');
+    return historicalView({
       state: current,
-      generationId,
-      mirror: currentRecord.mirror,
+      mirror: { ...mirror, state: 'completed' },
       projection: result.projection,
     });
   };
@@ -906,16 +965,13 @@ export const createArenaRoomGenerationService = (
         roomId: membership.roomId,
         roomEpoch: membership.roomEpoch,
         items: membership.state.generationLedger
+          .filter(({ mirror }) => (
+            mirror.state === 'completed'
+            && mirror.generationId !== membership.state.snapshot.activeGeneration?.generationId
+          ))
           .slice(-MAX_ARENA_ROOM_GENERATION_HISTORY_ITEMS)
           .reverse()
-          .map(({ mirror }) => ({
-            generationId: mirror.generationId,
-            state: mirror.state,
-            configRevision: mirror.configRevision,
-            collaborativeInfluence: mirror.collaborativeInfluence,
-            startedAt: mirror.startedAt,
-            ...(mirror.finishedAt === undefined ? {} : { finishedAt: mirror.finishedAt }),
-          })),
+          .map(({ mirror }) => historicalItem(mirror)),
       });
     },
 
@@ -933,9 +989,15 @@ export const createArenaRoomGenerationService = (
       if (!record) {
         return fail('ROOM_GENERATION_NOT_FOUND');
       }
-      return state.snapshot.activeGeneration?.generationId === input.generationId
-        ? readProjection(membership, input.generationId, true)
-        : readHistoricalProjection(membership, input.generationId);
+      if (state.snapshot.activeGeneration?.generationId !== input.generationId) {
+        return fail('ROOM_GENERATION_NOT_FOUND');
+      }
+      return readProjection(membership, input.generationId, true);
+    },
+
+    async readHistory(input) {
+      const membership = await resolveMembership(input.roomId, input.accountUserId);
+      return readHistoricalProjection(membership, input.generationId);
     },
   });
 };

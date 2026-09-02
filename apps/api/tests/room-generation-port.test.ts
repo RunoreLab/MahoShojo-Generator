@@ -449,4 +449,51 @@ describe('Arena Room generation internal port', () => {
       /extra_json|hidden-provider-key|reasoning|updatedCombatants|private/u,
     );
   });
+
+  it.each([
+    [
+      'expired',
+      { contentRetention: 'expired' as const },
+      { contentRetention: 'expired' },
+    ],
+    [
+      'not-archived',
+      { persistenceWarning: 'OUTPUT_NOT_ARCHIVED' as const, replayUnavailable: true as const },
+      { persistenceWarning: 'OUTPUT_NOT_ARCHIVED', replayUnavailable: true },
+    ],
+  ])('only projects the %s historical availability marker', async (_label, marker, expected) => {
+    const generationService = {
+      readOwnedProjection: vi.fn(async () => ({
+        kind: 'found' as const,
+        projection: {
+          generationId: 'arena_generation_1',
+          generationRequestId: 'request-room-completed-1',
+          status: 'completed' as const,
+          markdown: '',
+          resumeCursor: null,
+          updatedAt: '2026-08-28T11:00:00.000Z',
+          finalAuthoritative: true,
+          resultAvailable: false,
+          generationRecordId: null,
+          errorCode: null,
+          ...marker,
+          providerDiagnostic: 'must-not-pass',
+        },
+      })),
+    } as unknown as ArenaGenerationApplicationService;
+    const port = createArenaRoomGenerationPort({
+      generationService,
+      pvpAuthority: { sign: vi.fn() },
+      internalGuidanceAuthority: { sign: vi.fn() },
+      deriveGenerationId: vi.fn(async () => 'arena_generation_1'),
+      canonicalizeSemanticPayload,
+    });
+
+    const result = await port.readOwnedProjection({
+      roomId: 'room-1',
+      generationId: 'arena_generation_1',
+    });
+    expect(result).toMatchObject({ kind: 'found', projection: expected });
+    expect(JSON.stringify(result)).not.toContain('providerDiagnostic');
+  });
 });

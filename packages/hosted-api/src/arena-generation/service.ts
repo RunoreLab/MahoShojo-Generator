@@ -578,6 +578,7 @@ export type ArenaGenerationOwnedProjection = Readonly<{
   errorCode: string | null;
   persistenceWarning?: ArenaGenerationPersistenceWarning;
   replayUnavailable?: boolean;
+  contentRetention?: 'expired';
   roomSafeResult?: Readonly<Record<string, unknown>>;
 }>;
 
@@ -2833,6 +2834,7 @@ export const createArenaGenerationService = (
             persistenceWarning: ARENA_OUTPUT_NOT_ARCHIVED_WARNING,
             replayUnavailable: true,
           } : {}),
+          ...(terminalContentExpired ? { contentRetention: 'expired' as const } : {}),
           ...(owned.state.status === 'completed' && terminalFallback?.roomSafeResult
             ? { roomSafeResult: terminalFallback.roomSafeResult }
             : {}),

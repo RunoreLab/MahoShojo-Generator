@@ -6,6 +6,7 @@ import {
   ArenaRoomGenerationStartRequestSchema,
   ArenaRoomGenerationCancelRequestSchema,
   ArenaRoomGenerationHistoryResponseSchema,
+  ArenaRoomGenerationHistoryViewResponseSchema,
   ArenaRoomGenerationViewResponseSchema,
   ArenaRoomHttpErrorResponseSchema,
   ArenaRoomJoinRequestSchema,
@@ -25,6 +26,7 @@ import {
   type ArenaRoomGenerationStartRequest,
   type ArenaRoomGenerationCancelRequest,
   type ArenaRoomGenerationHistoryResponse,
+  type ArenaRoomGenerationHistoryViewResponse,
   type ArenaRoomGenerationViewResponse,
   type ArenaRoomJoinRequest,
   type ArenaRoomLeaveResponse,
@@ -97,6 +99,10 @@ export type ArenaRoomClient = {
     request: ArenaRoomGenerationStartRequest,
   ): Promise<ArenaRoomGenerationViewResponse>;
   listGenerationHistory(roomId: string): Promise<ArenaRoomGenerationHistoryResponse>;
+  getGenerationHistoryView(
+    roomId: string,
+    generationId: string,
+  ): Promise<ArenaRoomGenerationHistoryViewResponse>;
   getGenerationView(
     roomId: string,
     generationId: string,
@@ -445,6 +451,21 @@ export const createArenaRoomClient = (options: ClientOptions): ArenaRoomClient =
           'ROOM_RESPONSE_INVALID',
           null,
           '房间历史响应身份不一致',
+        );
+      }
+      return history;
+    },
+
+    async getGenerationHistoryView(roomId, generationId) {
+      const history = await request({
+        path: `${pathFor(roomId, `generations/${encodeURIComponent(generationId)}`)}?view=history`,
+        schema: ArenaRoomGenerationHistoryViewResponseSchema,
+      });
+      if (history.roomId !== roomId || history.generation.generationId !== generationId) {
+        throw new ArenaRoomClientError(
+          'ROOM_RESPONSE_INVALID',
+          null,
+          '房间历史详情响应身份不一致',
         );
       }
       return history;

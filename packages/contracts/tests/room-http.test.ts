@@ -8,6 +8,7 @@ import {
   ArenaRoomEpochMutationRequestSchema,
   ArenaRoomGenerationCancelRequestSchema,
   ArenaRoomGenerationHistoryResponseSchema,
+  ArenaRoomGenerationHistoryViewResponseSchema,
   ArenaRoomHttpErrorResponseSchema,
   ArenaRoomJoinRequestSchema,
   ArenaRoomLeaveResponseSchema,
@@ -302,6 +303,45 @@ describe('Arena Room HTTP product contract', () => {
         generationId: `generation-${index}`,
       })),
     }).success).toBe(false);
+  });
+
+  it('历史详情只暴露终态安全摘要，并显式表示正文过期', () => {
+    const completed = {
+      protocolVersion: 1 as const,
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      generation: {
+        generationId: 'generation-1',
+        state: 'completed' as const,
+        configRevision: 3,
+        collaborativeInfluence: true,
+        startedAt: '2026-08-28T00:00:00.000Z',
+        finishedAt: '2026-08-28T00:03:00.000Z',
+      },
+      status: 'completed' as const,
+      contentStatus: 'available' as const,
+      markdown: '# 安全战报',
+      result: { version: 1 as const, format: 'stream-markdown' as const, mode: 'classic' as const },
+    };
+    expect(ArenaRoomGenerationHistoryViewResponseSchema.parse(completed)).toEqual(completed);
+    expect(ArenaRoomGenerationHistoryViewResponseSchema.parse({
+      ...completed,
+      contentStatus: 'expired',
+      markdown: '',
+      result: undefined,
+    })).toMatchObject({ contentStatus: 'expired' });
+
+    for (const leakedGenerationField of [
+      { generationRequestId: 'request-1234' },
+      { snapshotDigest: `sha256:${'a'.repeat(64)}` },
+      { participantUserIds: [101, 202] },
+      { generationRecordId: 'record-1' },
+    ]) {
+      expect(ArenaRoomGenerationHistoryViewResponseSchema.safeParse({
+        ...completed,
+        generation: { ...completed.generation, ...leakedGenerationField },
+      }).success).toBe(false);
+    }
   });
 
   it('Proposal mutation DTO 只接受 client intent 与 typed changes，并保持 strict', () => {

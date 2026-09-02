@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 
 import type {
   ArenaRoomGenerationHistoryItem,
-  ArenaRoomGenerationViewResponse,
+  ArenaRoomGenerationHistoryViewResponse,
 } from '@mahoshojo/contracts/arena-room';
 
 import { BattleResultPresentation } from '../components/BattleResultPresentation';
@@ -42,7 +42,7 @@ export function ArenaRoomGenerationHistory({
   readonly onSaveImage?: (imageUrl: string) => void;
 }) {
   const [items, setItems] = useState<readonly ArenaRoomGenerationHistoryItem[]>([]);
-  const [selected, setSelected] = useState<ArenaRoomGenerationViewResponse | null>(null);
+  const [selected, setSelected] = useState<ArenaRoomGenerationHistoryViewResponse | null>(null);
   const [loadingList, setLoadingList] = useState(true);
   const [loadingGenerationId, setLoadingGenerationId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -79,6 +79,7 @@ export function ArenaRoomGenerationHistory({
   const read = async (generationId: string): Promise<void> => {
     if (loadingGenerationId) return;
     setLoadingGenerationId(generationId);
+    setSelected(null);
     setError(null);
     try {
       setSelected(await reader.read(generationId));
@@ -140,16 +141,16 @@ export function ArenaRoomGenerationHistory({
         <div className="mt-5 border-t border-gray-200 pt-4 dark:border-gray-700">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <p className="text-sm font-semibold text-gray-950 dark:text-gray-100">
-              {selected.status === 'completed' ? '权威历史战报' : stateLabel[selected.generation.state]}
+              {selected.contentStatus === 'available' ? '权威历史战报' : stateLabel[selected.generation.state]}
             </p>
             <button type="button" className={secondaryButtonClass} onClick={() => setSelected(null)}>收起战报</button>
           </div>
-          {selected.markdown ? (
+          {selected.contentStatus === 'available' ? (
             <BattleResultPresentation
               report={{
                 format: 'stream-markdown',
                 content: selected.markdown,
-                isStreaming: selected.status === 'running' || selected.status === 'finalizing',
+                isStreaming: false,
                 mode: selected.result?.mode,
                 scenarioName: selected.result?.scenarioDisplayName,
                 reporterInfo: selected.result?.reporterInfo ?? null,
@@ -166,9 +167,11 @@ export function ArenaRoomGenerationHistory({
               adjudicationResults={selected.result?.adjudicationResults ?? null}
               combatantUpdates={selected.result?.combatantUpdates ?? null}
             />
-          ) : (
-            <p className="text-sm text-gray-600 dark:text-gray-400">这条记录尚没有可显示的战报正文。</p>
-          )}
+          ) : selected.contentStatus === 'expired' ? (
+            <p className="text-sm text-amber-800 dark:text-amber-200">战报正文已超过有限保留期，当前无法恢复。</p>
+          ) : selected.contentStatus === 'not-archived' ? (
+            <p className="text-sm text-amber-800 dark:text-amber-200">这场战报当时未成功归档，当前没有可恢复的正文。</p>
+          ) : null}
         </div>
       ) : null}
     </section>

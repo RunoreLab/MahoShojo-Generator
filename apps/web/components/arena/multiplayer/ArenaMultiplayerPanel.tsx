@@ -761,6 +761,9 @@ function ArenaMultiplayerPanelRuntime({
   const [preparingCreate, setPreparingCreate] = useState(false);
   const createLock = useRef(false);
   const viewState = inputError ? { ...state, error: inputError } : state;
+  const generationHistoryScope = viewState.session
+    ? `${viewState.session.roomId}\n${viewState.session.roomEpoch}\n${viewState.session.self.userId}`
+    : 'no-room-session';
 
   const createRoom = async (): Promise<void> => {
     if (createLock.current) return;
@@ -815,7 +818,9 @@ function ArenaMultiplayerPanelRuntime({
           workspace={proposalWorkspace}
         />
       )}
-      generationHistoryContent={<ArenaRoomGenerationHistory reader={generationHistory} />}
+      generationHistoryContent={(
+        <ArenaRoomGenerationHistory key={generationHistoryScope} reader={generationHistory} />
+      )}
       hostConfigStatus={hostReconciliation.state.kind === 'conflicted'
         || hostReconciliation.state.kind === 'error'
         ? 'attention'

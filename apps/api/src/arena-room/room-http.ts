@@ -11,6 +11,7 @@ import {
   ArenaRoomEpochMutationRequestSchema,
   ArenaRoomGenerationCancelRequestSchema,
   ArenaRoomGenerationHistoryResponseSchema,
+  ArenaRoomGenerationHistoryViewResponseSchema,
   ArenaRoomGenerationStartRequestSchema,
   ArenaRoomGenerationViewResponseSchema,
   ArenaRoomJoinRequestSchema,
@@ -93,7 +94,10 @@ export type ArenaRoomHttpDependencies = {
   readonly directory: Pick<ArenaRoomDirectoryService, 'discoverPublic'>;
   readonly websocketAuthority: Pick<ArenaRoomWebSocketAuthority, 'issue'>;
   readonly proposals: Pick<ArenaRoomProposalService, 'resolve' | 'submit' | 'withdraw'>;
-  readonly generations: Pick<ArenaRoomGenerationService, 'cancel' | 'list' | 'read' | 'start'>;
+  readonly generations: Pick<
+    ArenaRoomGenerationService,
+    'cancel' | 'list' | 'read' | 'readHistory' | 'start'
+  >;
   readonly configs: Pick<ArenaRoomConfigService, 'publish'>;
   readonly rateLimit: (input: {
     readonly operation: ArenaRoomHttpOperation;
@@ -1163,11 +1167,16 @@ export const registerArenaRoomHttpRoutes = (
     );
     if (!authorization.accepted) return authorization.response;
     try {
-      const view = await dependencies.generations.read({
+      const input = {
         roomId,
         generationId,
         accountUserId: authorization.accountUserId,
-      });
+      };
+      if (context.req.query('view') === 'history') {
+        const history = await dependencies.generations.readHistory(input);
+        return context.json(ArenaRoomGenerationHistoryViewResponseSchema.parse(history), 200);
+      }
+      const view = await dependencies.generations.read(input);
       return context.json(ArenaRoomGenerationViewResponseSchema.parse(view), 200);
     } catch (error) {
       return mapServiceError(context, error);

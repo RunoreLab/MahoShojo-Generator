@@ -18,7 +18,7 @@ import {
 } from '@/components/arena/editor';
 import type {
   ArenaRoomGenerationHistoryResponse,
-  ArenaRoomGenerationViewResponse,
+  ArenaRoomGenerationHistoryViewResponse,
 } from '@mahoshojo/contracts/arena-room';
 
 import { createArenaRoomClient } from '@/lib/arena-room/client';
@@ -53,7 +53,7 @@ export type ArenaRoomProposalWorkspace = Readonly<{
 
 export type ArenaRoomGenerationHistoryReader = Readonly<{
   list(): Promise<ArenaRoomGenerationHistoryResponse>;
-  read(generationId: string): Promise<ArenaRoomGenerationViewResponse>;
+  read(generationId: string): Promise<ArenaRoomGenerationHistoryViewResponse>;
 }>;
 
 export const useArenaRoom = (options: UseArenaRoomOptions) => {
@@ -180,7 +180,7 @@ export const useArenaRoom = (options: UseArenaRoomOptions) => {
       },
       async read(generationId) {
         const captured = captureSession();
-        const result = await client.getGenerationView(captured.roomId, generationId);
+        const result = await client.getGenerationHistoryView(captured.roomId, generationId);
         assertSameSession(captured);
         if (result.roomEpoch !== captured.roomEpoch) {
           throw new Error('历史战报属于其他房间实例，已拒绝显示');

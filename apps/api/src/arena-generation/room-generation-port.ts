@@ -4,13 +4,14 @@ import {
   type ArenaMultiplayerGenerationSnapshot,
   type ArenaRoomGenerationResult,
 } from '@mahoshojo/contracts/arena-room';
-import type {
-  ArenaGenerationApplicationService,
-  ArenaGenerationOwnedCancelResult,
-  ArenaGenerationOwnedProjectionResult,
-  ArenaGenerationSubscription,
-  GenerationStatus,
-  GenerationStreamEvent,
+import {
+  ARENA_OUTPUT_NOT_ARCHIVED_WARNING,
+  type ArenaGenerationApplicationService,
+  type ArenaGenerationOwnedCancelResult,
+  type ArenaGenerationOwnedProjectionResult,
+  type ArenaGenerationSubscription,
+  type GenerationStatus,
+  type GenerationStreamEvent,
 } from '@mahoshojo/hosted-api/arena-generation/service';
 import {
   ARENA_INTERNAL_GUIDANCE_SIGNATURE_HEADER,
@@ -334,6 +335,13 @@ const projectOwnedProjectionResult = (
       resultAvailable: projection.resultAvailable,
       generationRecordId: projection.generationRecordId,
       errorCode,
+      ...(projection.persistenceWarning === ARENA_OUTPUT_NOT_ARCHIVED_WARNING
+        && projection.replayUnavailable === true
+        ? { persistenceWarning: ARENA_OUTPUT_NOT_ARCHIVED_WARNING, replayUnavailable: true }
+        : {}),
+      ...(projection.contentRetention === 'expired'
+        ? { contentRetention: 'expired' as const }
+        : {}),
       ...(roomSafeResult?.success ? { roomSafeResult: roomSafeResult.data } : {}),
     }),
   };

@@ -258,6 +258,39 @@ export const ArenaRoomGenerationResultSchema = z.object({
   }).strict()).max(MAX_COMBATANTS).optional(),
 }).strict();
 
+export const ArenaRoomGenerationHistoryViewResponseSchema = z.object({
+  protocolVersion: z.literal(PROTOCOL_VERSION),
+  roomId: OpaqueKeySchema,
+  roomEpoch: OpaqueKeySchema,
+  generation: ArenaRoomGenerationHistoryItemSchema.extend({ state: z.literal('completed') }),
+  status: z.literal('completed'),
+  contentStatus: z.enum(['available', 'expired', 'not-archived']),
+  markdown: z.string().max(MAX_ARENA_ROOM_GENERATION_MARKDOWN_LENGTH),
+  result: ArenaRoomGenerationResultSchema.optional(),
+}).strict().superRefine((response, context) => {
+  if (response.contentStatus === 'available' && response.result === undefined) {
+    context.addIssue({
+      code: 'custom',
+      path: ['result'],
+      message: 'available completed history must include a room-safe result',
+    });
+  }
+  if (response.contentStatus !== 'available' && response.result !== undefined) {
+    context.addIssue({
+      code: 'custom',
+      path: ['result'],
+      message: 'unavailable historical content cannot expose a result',
+    });
+  }
+  if (response.contentStatus !== 'available' && response.markdown !== '') {
+    context.addIssue({
+      code: 'custom',
+      path: ['markdown'],
+      message: 'unavailable historical content cannot expose markdown',
+    });
+  }
+});
+
 export const ArenaRoomGenerationViewResponseSchema = z.object({
   protocolVersion: z.literal(PROTOCOL_VERSION),
   roomId: OpaqueKeySchema,
@@ -430,6 +463,9 @@ export type ArenaRoomGenerationHistoryItem = z.infer<
 >;
 export type ArenaRoomGenerationHistoryResponse = z.infer<
   typeof ArenaRoomGenerationHistoryResponseSchema
+>;
+export type ArenaRoomGenerationHistoryViewResponse = z.infer<
+  typeof ArenaRoomGenerationHistoryViewResponseSchema
 >;
 export type ArenaRoomGenerationViewResponse = z.infer<
   typeof ArenaRoomGenerationViewResponseSchema

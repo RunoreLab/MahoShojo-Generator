@@ -101,6 +101,17 @@ const generationHistory = {
   }],
 };
 
+const generationHistoryView = {
+  protocolVersion: 1 as const,
+  roomId: authority.snapshot.roomId,
+  roomEpoch: authority.snapshot.roomEpoch,
+  generation: generationHistory.items[0],
+  status: 'completed' as const,
+  contentStatus: 'available' as const,
+  markdown: '# 历史正文',
+  result: { version: 1 as const, format: 'stream-markdown' as const, mode: 'classic' as const },
+};
+
 const createDependencies = (
   overrides: Partial<ArenaRoomHttpDependencies> = {},
 ): ArenaRoomHttpDependencies => ({
@@ -186,6 +197,7 @@ const createDependencies = (
     list: vi.fn(async () => generationHistory),
     start: vi.fn(async () => generationView),
     read: vi.fn(async () => generationView),
+    readHistory: vi.fn(async () => generationHistoryView),
   } satisfies ArenaRoomGenerationService,
   configs: {
     publish: vi.fn(async () => session),
@@ -956,6 +968,38 @@ describe('Arena Room HTTP product routes', () => {
     );
     expect(unavailable.status).toBe(503);
     expect(await unavailable.json()).toMatchObject({ code: 'ROOM_UNAVAILABLE' });
+  });
+
+  it('多人历史详情走严格安全视图，正文过期仍为非重试 200', async () => {
+    const dependencies = createDependencies();
+    vi.mocked(dependencies.generations.readHistory).mockResolvedValueOnce({
+      ...generationHistoryView,
+      contentStatus: 'expired',
+      markdown: '',
+      result: undefined,
+    });
+    const app = createHonoApp(config, createRedisStub(), undefined, {
+      arenaRoom: dependencies,
+    });
+
+    const response = await app.request(
+      `/api/arena/rooms/v1/${authority.snapshot.roomId}/generations/generation-1?view=history`,
+      { headers: { authorization: 'Bearer legacy-key' } },
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    expect(response.headers.get('retry-after')).toBeNull();
+    expect(dependencies.generations.readHistory).toHaveBeenCalledWith({
+      roomId: authority.snapshot.roomId,
+      generationId: 'generation-1',
+      accountUserId: 101,
+    });
+    expect(dependencies.generations.read).not.toHaveBeenCalled();
+    expect(await response.json()).toMatchObject({
+      contentStatus: 'expired',
+      markdown: '',
+    });
   });
 
   it('多人 generation history 只传认证 account/room，并返回 no-store 的严格列表', async () => {

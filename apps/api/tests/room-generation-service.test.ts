@@ -294,13 +294,6 @@ describe('Arena Room generation coordinator', () => {
       roomEpoch: 'epoch-1',
       items: [
         {
-          generationId: 'generation-2',
-          state: 'starting',
-          configRevision: 0,
-          collaborativeInfluence: false,
-          startedAt: '2026-08-28T00:03:00.000Z',
-        },
-        {
           generationId: 'generation-1',
           state: 'completed',
           configRevision: 0,
@@ -347,7 +340,7 @@ describe('Arena Room generation coordinator', () => {
     });
     vi.mocked(harness.generation.resumeOwnedSubscription).mockClear();
 
-    const detail = await harness.service.read({
+    const detail = await harness.service.readHistory({
       roomId: 'room-1',
       generationId: 'generation-1',
       accountUserId: 202,
@@ -357,13 +350,17 @@ describe('Arena Room generation coordinator', () => {
       roomId: 'room-1',
       roomEpoch: 'epoch-1',
       status: 'completed',
+      contentStatus: 'available',
       markdown: '# 历史权威战报',
-      generationRecordId: 'generation-1',
       generation: {
         generationId: 'generation-1',
         state: 'completed',
       },
     });
+    expect(JSON.stringify(detail)).not.toContain('generationRequestId');
+    expect(JSON.stringify(detail)).not.toContain('snapshotDigest');
+    expect(JSON.stringify(detail)).not.toContain('participantUserIds');
+    expect(JSON.stringify(detail)).not.toContain('generationRecordId');
     expect(harness.generation.readOwnedProjection).toHaveBeenCalledWith({
       roomId: 'room-1',
       generationId: 'generation-1',
@@ -375,12 +372,107 @@ describe('Arena Room generation coordinator', () => {
     });
   });
 
+  it.each([
+    ['正文已过期', { contentRetention: 'expired' as const }, 'expired'],
+    [
+      '正文未归档',
+      { persistenceWarning: 'OUTPUT_NOT_ARCHIVED' as const, replayUnavailable: true as const },
+      'not-archived',
+    ],
+  ])('%s 时返回非重试的安全历史终态', async (_label, marker, contentStatus) => {
+    const harness = await createHarness();
+    await prepareHistoricalGeneration(harness);
+    vi.mocked(harness.generation.readOwnedProjection).mockResolvedValueOnce({
+      kind: 'found',
+      projection: {
+        generationId: 'generation-1',
+        generationRequestId: 'request-1234',
+        status: 'completed',
+        markdown: '',
+        resumeCursor: null,
+        updatedAt: '2026-08-28T00:03:00.000Z',
+        finalAuthoritative: true,
+        resultAvailable: false,
+        generationRecordId: null,
+        errorCode: null,
+        ...marker,
+      },
+    });
+
+    await expect(harness.service.readHistory({
+      roomId: 'room-1',
+      generationId: 'generation-1',
+      accountUserId: 101,
+    })).resolves.toMatchObject({
+      status: 'completed',
+      contentStatus,
+      markdown: '',
+    });
+  });
+
+  it('无法分类的 completed 正文缺失仍 fail closed 为 unavailable', async () => {
+    const harness = await createHarness();
+    await prepareHistoricalGeneration(harness);
+    vi.mocked(harness.generation.readOwnedProjection).mockResolvedValueOnce({
+      kind: 'found',
+      projection: {
+        generationId: 'generation-1',
+        generationRequestId: 'request-1234',
+        status: 'completed',
+        markdown: '',
+        resumeCursor: null,
+        updatedAt: '2026-08-28T00:03:00.000Z',
+        finalAuthoritative: true,
+        resultAvailable: false,
+        generationRecordId: null,
+        errorCode: null,
+      },
+    });
+
+    await expect(harness.service.readHistory({
+      roomId: 'room-1',
+      generationId: 'generation-1',
+      accountUserId: 101,
+    })).rejects.toMatchObject({ code: 'ROOM_GENERATION_UNAVAILABLE' });
+  });
+
+  it('durable completed 尚未成为权威终态时拒绝作为历史战报读取', async () => {
+    const harness = await createHarness();
+    await prepareHistoricalGeneration(harness);
+    vi.mocked(harness.generation.readOwnedProjection).mockResolvedValueOnce({
+      kind: 'found',
+      projection: {
+        generationId: 'generation-1',
+        generationRequestId: 'request-1234',
+        status: 'completed',
+        markdown: '# 尚未权威确认',
+        resumeCursor: null,
+        updatedAt: '2026-08-28T00:03:00.000Z',
+        finalAuthoritative: false,
+        resultAvailable: true,
+        generationRecordId: 'generation-1',
+        errorCode: null,
+        roomSafeResult: {
+          version: 1,
+          format: 'stream-markdown',
+          mode: 'classic',
+        },
+      },
+    });
+
+    await expect(harness.service.readHistory({
+      roomId: 'room-1',
+      generationId: 'generation-1',
+      accountUserId: 101,
+    })).rejects.toMatchObject({ code: 'ROOM_GENERATION_UNAVAILABLE' });
+  });
+
   it('历史详情对 ledger 外 ID 与 durable identity mismatch fail closed', async () => {
     const harness = await createHarness();
     await prepareHistoricalGeneration(harness);
     vi.mocked(harness.generation.readOwnedProjection).mockClear();
 
-    await expect(harness.service.read({
+    await expect(harness.service.readHistory({
       roomId: 'room-1',
       generationId: 'generation-from-old-epoch',
       accountUserId: 101,
@@ -407,7 +499,7 @@ describe('Arena Room generation coordinator', () => {
         },
       },
     });
-    await expect(harness.service.read({
+    await expect(harness.service.readHistory({
       roomId: 'room-1',
       generationId: 'generation-1',
       accountUserId: 101,
