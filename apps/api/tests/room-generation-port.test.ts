@@ -311,6 +311,17 @@ describe('Arena Room generation internal port', () => {
           events: eventStream([
             { id: '5-0', type: 'telemetry', data: { providerRequestId: 'hidden' } },
             { id: '5-1', type: 'markdown', data: { chunk: 'resumed' } },
+            {
+              id: '5-2',
+              type: 'done',
+              data: {
+                status: 'completed',
+                ok: true,
+                persistenceWarning: 'OUTPUT_NOT_ARCHIVED',
+                replayUnavailable: true,
+                resultAvailable: false,
+              },
+            },
           ]),
         },
       })),
@@ -366,6 +377,15 @@ describe('Arena Room generation internal port', () => {
     if (resumed.kind !== 'subscribed') throw new Error('expected subscription');
     await expect(readAll(resumed.subscription.events)).resolves.toEqual([
       { id: '5-1', type: 'markdown', chunk: 'resumed' },
+      {
+        id: '5-2',
+        type: 'done',
+        status: 'completed',
+        generationRecordId: 'arena_generation_1',
+        resultAvailable: false,
+        persistenceWarning: 'OUTPUT_NOT_ARCHIVED',
+        replayUnavailable: true,
+      },
     ]);
   });
 

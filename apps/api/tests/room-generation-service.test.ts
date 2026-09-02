@@ -208,6 +208,7 @@ const startRequest = (config = sharedConfig()) => ({
 
 const prepareHistoricalGeneration = async (
   harness: Awaited<ReturnType<typeof createHarness>>,
+  reserveNextGeneration = true,
 ) => {
   await harness.service.start({
     roomId: 'room-1',
@@ -252,6 +253,7 @@ const prepareHistoricalGeneration = async (
     expect(result.ok).toBe(true);
   }
 
+  if (!reserveNextGeneration) return;
   vi.mocked(harness.generation.deriveGenerationId).mockResolvedValueOnce('generation-2');
   vi.mocked(harness.generation.startFromHostRequest).mockResolvedValueOnce({
     kind: 'subscribed',
@@ -408,6 +410,112 @@ describe('Arena Room generation coordinator', () => {
       contentStatus,
       markdown: '',
     });
+  });
+
+  it('最新 completed 指针也进入历史列表并返回非重试 retention 终态', async () => {
+    const harness = await createHarness();
+    await prepareHistoricalGeneration(harness, false);
+    vi.mocked(harness.generation.readOwnedProjection).mockResolvedValueOnce({
+      kind: 'found',
+      projection: {
+        generationId: 'generation-1',
+        generationRequestId: 'request-1234',
+        status: 'completed',
+        markdown: '',
+        resumeCursor: null,
+        updatedAt: '2026-08-28T00:03:00.000Z',
+        finalAuthoritative: true,
+        resultAvailable: false,
+        generationRecordId: null,
+        errorCode: null,
+        contentRetention: 'expired',
+      },
+    });
+
+    await expect(harness.service.list({
+      roomId: 'room-1',
+      accountUserId: 101,
+    })).resolves.toMatchObject({
+      items: [{ generationId: 'generation-1', state: 'completed' }],
+    });
+    await expect(harness.service.readHistory({
+      roomId: 'room-1',
+      generationId: 'generation-1',
+      accountUserId: 101,
+    })).resolves.toMatchObject({
+      contentStatus: 'expired',
+      status: 'completed',
+    });
+  });
+
+  it('durable 历史读取期间成员资格被撤销时在返回正文前 fail closed', async () => {
+    const harness = await createHarness();
+    await prepareHistoricalGeneration(harness);
+    const joined = await harness.memberships.join({
+      roomId: 'room-1',
+      accountUserId: 202,
+      displayName: 'Member',
+    });
+    let releaseProjection!: (value: Awaited<ReturnType<
+      ArenaRoomGenerationPort['readOwnedProjection']
+    >>) => void;
+    let projectionStarted!: () => void;
+    const started = new Promise<void>((resolve) => { projectionStarted = resolve; });
+    vi.mocked(harness.generation.readOwnedProjection).mockImplementationOnce(() => (
+      new Promise((resolve) => {
+        releaseProjection = resolve;
+        projectionStarted();
+      })
+    ));
+
+    const reading = harness.service.readHistory({
+      roomId: 'room-1',
+      generationId: 'generation-1',
+      accountUserId: 202,
+    });
+    await started;
+    const hostMembership = await harness.memberships.resolveActiveByAccount({
+      roomId: 'room-1',
+      accountUserId: 101,
+    });
+    const timestamp = '2026-08-28T00:05:00.000Z';
+    const kicked = await hostMembership.actor.execute({
+      authority: {
+        kind: 'authenticated-user',
+        actorUserId: hostMembership.member.userId,
+        accountUserId: 101,
+      },
+      command: {
+        type: 'kick-member',
+        expectedRoomEpoch: 'epoch-1',
+        targetUserId: joined.member.userId,
+        timestamp,
+      },
+      trustedTime: issueArenaRoomTrustedTime({ now: timestamp }),
+    });
+    expect(kicked.ok).toBe(true);
+    releaseProjection({
+      kind: 'found',
+      projection: {
+        generationId: 'generation-1',
+        generationRequestId: 'request-1234',
+        status: 'completed',
+        markdown: '# 不应返回给已撤销成员',
+        resumeCursor: null,
+        updatedAt: '2026-08-28T00:03:00.000Z',
+        finalAuthoritative: true,
+        resultAvailable: true,
+        generationRecordId: 'generation-1',
+        errorCode: null,
+        roomSafeResult: {
+          version: 1,
+          format: 'stream-markdown',
+          mode: 'classic',
+        },
+      },
+    });
+
+    await expect(reading).rejects.toMatchObject({ code: 'ROOM_MEMBERSHIP_REVOKED' });
   });
 
   it('无法分类的 completed 正文缺失仍 fail closed 为 unavailable', async () => {

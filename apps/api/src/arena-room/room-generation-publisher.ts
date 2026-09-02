@@ -197,9 +197,15 @@ export const createRoomGenerationPublisher = (
           if (event.type !== 'done') continue;
           if (
             event.status === 'completed'
-            && event.resultAvailable === true
             && typeof event.generationRecordId === 'string'
             && event.generationRecordId.length > 0
+            && (
+              event.resultAvailable === true
+              || (
+                event.persistenceWarning === 'OUTPUT_NOT_ARCHIVED'
+                && event.replayUnavailable === true
+              )
+            )
           ) {
             const terminalFailure = await mirror('completed', {
               generationRecordId: event.generationRecordId,

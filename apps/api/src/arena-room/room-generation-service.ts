@@ -639,7 +639,6 @@ export const createArenaRoomGenerationService = (
     if (
       !record
       || record.mirror.state !== 'completed'
-      || initial.snapshot.activeGeneration?.generationId === generationId
     ) {
       return fail('ROOM_GENERATION_NOT_FOUND');
     }
@@ -670,9 +669,13 @@ export const createArenaRoomGenerationService = (
       || result.projection.generationRequestId !== record.mirror.generationRequestId
     ) return fail('ROOM_GENERATION_NOT_FOUND');
 
-    const current = membership.actor.getSnapshot();
+    const refreshedMembership = await resolveMembership(
+      membership.roomId,
+      membership.accountUserId,
+    );
+    const current = refreshedMembership.state;
     if (
-      !current
+      refreshedMembership.roomEpoch !== membership.roomEpoch
       || current.snapshot.roomEpoch !== membership.roomEpoch
       || current.snapshot.roomId !== membership.roomId
     ) return fail('ROOM_GENERATION_NOT_FOUND');
@@ -683,7 +686,6 @@ export const createArenaRoomGenerationService = (
     if (
       !currentRecord
       || currentRecord.mirror.state !== 'completed'
-      || current.snapshot.activeGeneration?.generationId === generationId
     ) {
       return fail('ROOM_GENERATION_NOT_FOUND');
     }
@@ -965,10 +967,7 @@ export const createArenaRoomGenerationService = (
         roomId: membership.roomId,
         roomEpoch: membership.roomEpoch,
         items: membership.state.generationLedger
-          .filter(({ mirror }) => (
-            mirror.state === 'completed'
-            && mirror.generationId !== membership.state.snapshot.activeGeneration?.generationId
-          ))
+          .filter(({ mirror }) => mirror.state === 'completed')
           .slice(-MAX_ARENA_ROOM_GENERATION_HISTORY_ITEMS)
           .reverse()
           .map(({ mirror }) => historicalItem(mirror)),

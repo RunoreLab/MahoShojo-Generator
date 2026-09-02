@@ -40,6 +40,8 @@ export type ArenaRoomGenerationEvent =
     status: TerminalGenerationStatus;
     generationRecordId: string | null;
     resultAvailable: boolean;
+    persistenceWarning?: typeof ARENA_OUTPUT_NOT_ARCHIVED_WARNING;
+    replayUnavailable?: true;
   }>
   | Readonly<{
     id: string;
@@ -226,12 +228,21 @@ const projectEvent = (
       && status !== 'producer_lost'
     ) return null;
     const resultAvailable = typeof data?.resultRef === 'string' && data.resultRef.length > 0;
+    const outputNotArchived = status === 'completed'
+      && !resultAvailable
+      && data?.persistenceWarning === ARENA_OUTPUT_NOT_ARCHIVED_WARNING
+      && data.replayUnavailable === true
+      && data.resultAvailable === false;
     return Object.freeze({
       id: event.id,
       type: 'done',
       status,
-      generationRecordId: resultAvailable ? generationId : null,
+      generationRecordId: resultAvailable || outputNotArchived ? generationId : null,
       resultAvailable,
+      ...(outputNotArchived ? {
+        persistenceWarning: ARENA_OUTPUT_NOT_ARCHIVED_WARNING,
+        replayUnavailable: true as const,
+      } : {}),
     });
   }
   if (event.type === 'error') {
