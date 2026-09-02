@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   canAutoPublishArenaRoomHostDraft,
+  isArenaRoomGenerationFenceCurrent,
   pendingProposalFingerprint,
 } from '@/components/arena/multiplayer/generation-preflight';
 import type { ArenaProposal } from '@mahoshojo/contracts/arena-room';
@@ -58,5 +59,35 @@ describe('Arena Room generation preflight policy', () => {
       .not.toBe(pendingProposalFingerprint([
         proposal('proposal-1', '2026-09-02T00:01:00.000Z'),
       ]));
+  });
+
+  it('最终启动 fence 同时约束房间 authority 与待处理提案集合', () => {
+    const expectedAuthority = {
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      ownerUserId: 'host-1',
+      revision: 3,
+    };
+    const proposals = [proposal('proposal-1')];
+    const proposalFingerprint = pendingProposalFingerprint(proposals);
+
+    expect(isArenaRoomGenerationFenceCurrent({
+      expectedAuthority,
+      currentAuthority: expectedAuthority,
+      proposals,
+      proposalFingerprint,
+    })).toBe(true);
+    expect(isArenaRoomGenerationFenceCurrent({
+      expectedAuthority,
+      currentAuthority: { ...expectedAuthority, revision: 4 },
+      proposals,
+      proposalFingerprint,
+    })).toBe(false);
+    expect(isArenaRoomGenerationFenceCurrent({
+      expectedAuthority,
+      currentAuthority: expectedAuthority,
+      proposals: [...proposals, proposal('proposal-2')],
+      proposalFingerprint,
+    })).toBe(false);
   });
 });

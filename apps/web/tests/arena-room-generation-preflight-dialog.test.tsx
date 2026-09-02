@@ -109,4 +109,27 @@ describe('Arena Room generation preflight dialog', () => {
     expect(document.body.textContent).not.toContain('当前本地编辑草稿无法发布');
     expect(document.body.querySelector('[role="alert"]')).not.toBeNull();
   });
+
+  it('两条启动路径都不可用时只提示重新同步或修正，不给出矛盾建议', async () => {
+    await act(async () => root.render(
+      <ArenaRoomGenerationPreflightDialog
+        isOpen
+        reasons={['working-copy-invalid', 'baseline-missing']}
+        canUseRoom={false}
+        canPublish={false}
+        busy={false}
+        onChoice={vi.fn()}
+      />,
+    ));
+
+    expect(document.body.textContent).toContain('既无法安全发布本地草稿，也缺少可恢复的房间配置');
+    expect(document.body.textContent).toContain('请取消后重新同步或修正编辑内容');
+    expect(document.body.textContent).not.toContain('请显式更新房间或取消');
+    expect(document.body.textContent).not.toContain('可以沿用已发布的房间配置');
+    const actionButtons = [...document.body.querySelectorAll('button')].filter((button) => (
+      button.textContent?.includes('开始')
+    ));
+    expect(actionButtons).toHaveLength(2);
+    expect(actionButtons.every((button) => button.disabled)).toBe(true);
+  });
 });

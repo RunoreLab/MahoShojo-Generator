@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ArenaProposal } from '@mahoshojo/contracts/arena-room';
 
 import { ArenaProposalPanel } from '@/components/arena/multiplayer/ArenaProposalPanel';
+import { createRoomProposalArenaEditorSession } from '@/components/arena/editor';
 import type {
   ArenaRoomController,
   ArenaRoomControllerState,
@@ -123,7 +124,6 @@ const createController = () => ({
 const createWorkspace = (): ArenaRoomProposalWorkspace => ({
   editor: null,
   syncFromRoom: vi.fn(),
-  discard: vi.fn(),
 });
 
 let container: HTMLDivElement;
@@ -168,6 +168,34 @@ describe('Arena Proposal panel real React interactions', () => {
     expect(controller.submitProposal).not.toHaveBeenCalled();
     expect(container.querySelector('#arena-proposal-user-guidance')).toBeNull();
     fetchSpy.mockRestore();
+  });
+
+  it('member 重新同步 dirty 草稿前需二次确认，且不提供会被自动重建的退出入口', async () => {
+    const controller = createController();
+    const memberState = stateFor(member);
+    const editor = createRoomProposalArenaEditorSession(memberState.session!.snapshot);
+    editor.update((draft) => ({ ...draft, userGuidance: '未提交草稿' }));
+    const workspace: ArenaRoomProposalWorkspace = {
+      editor,
+      syncFromRoom: vi.fn(),
+    };
+    await act(async () => root.render(
+      <ArenaProposalPanel
+        state={memberState}
+        controller={controller}
+        workspace={workspace}
+      />,
+    ));
+
+    expect(container.textContent).not.toContain('退出提案模式');
+    await act(async () => button('丢弃草稿并重新同步').click());
+    expect(workspace.syncFromRoom).not.toHaveBeenCalled();
+    expect(container.querySelector('[role="alertdialog"]')).not.toBeNull();
+    expect(container.textContent).toContain('未提交修改将被丢弃');
+
+    await act(async () => button('确认丢弃并同步').click());
+    expect(workspace.syncFromRoom).toHaveBeenCalledOnce();
+    editor.dispose();
   });
 
   it('member 只能撤回 projected 自己的 pending Proposal', async () => {

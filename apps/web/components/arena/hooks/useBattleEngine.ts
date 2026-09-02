@@ -83,6 +83,7 @@ import {
 import { useArenaRoomContext } from '../multiplayer/useArenaRoom';
 import {
   canAutoPublishArenaRoomHostDraft,
+  isArenaRoomGenerationFenceCurrent,
   pendingProposalFingerprint,
 } from '../multiplayer/generation-preflight';
 
@@ -746,6 +747,7 @@ export const useBattleEngine = () => {
         const pendingProposalCount = preflightState.session?.snapshot.proposals.length ?? 0;
 
         let startInputs: ArenaRoomGenerationStartInputs | null = null;
+        let startAuthority = authority;
         if (!bundle) {
           const roomStart = arenaRoomRuntime.hostWorkspace.startFromRoom(authority);
           const choice = await requestArenaRoomGenerationPreflight({
@@ -838,6 +840,7 @@ export const useBattleEngine = () => {
               }
               arenaRoomRuntime.hostWorkspace.capturePublished(publishedAuthority, bundle);
               startInputs = comparison.current;
+              startAuthority = publishedAuthority;
             }
           }
         }
@@ -878,6 +881,15 @@ export const useBattleEngine = () => {
           questionnaires,
         });
         const dispatchState = arenaRoomRuntime.controller.getSnapshot();
+        const dispatchAuthority = arenaRoomHostWorkspaceAuthorityFromSession(dispatchState.session);
+        if (!isArenaRoomGenerationFenceCurrent({
+          expectedAuthority: startAuthority,
+          currentAuthority: dispatchAuthority,
+          proposals: dispatchState.session?.snapshot.proposals ?? [],
+          proposalFingerprint,
+        })) {
+          throw new Error('房间配置或待处理提案已变化，请重新确认后再开始生成。');
+        }
         const outcome = await dispatchArenaRoomGenerationStart({
           controller: arenaRoomRuntime.controller,
           state: dispatchState,

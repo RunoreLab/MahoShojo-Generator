@@ -33,6 +33,7 @@ export function ArenaRoomGenerationPreflightDialog({
   busy,
   onChoice,
 }: Props) {
+  const noSafeStartPath = !canUseRoom && !canPublish;
   return (
     <BaseModal
       isOpen={isOpen}
@@ -85,12 +86,17 @@ export function ArenaRoomGenerationPreflightDialog({
             </ul>
           </>
         ) : null}
-        {!canUseRoom ? (
+        {noSafeStartPath ? (
+          <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900" role="status">
+            当前既无法安全发布本地草稿，也缺少可恢复的房间配置；请取消后重新同步或修正编辑内容。
+          </p>
+        ) : null}
+        {!noSafeStartPath && !canUseRoom ? (
           <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900" role="status">
             缺少完整的本地内容发布基准，无法安全地“按当前房间配置”启动；请显式更新房间或取消。
           </p>
         ) : null}
-        {!canPublish && reasons.length > 0 ? (
+        {!noSafeStartPath && !canPublish && reasons.length > 0 ? (
           <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900" role="status">
             当前本地编辑草稿无法发布；可以沿用已发布的房间配置，或取消后修正本地编辑。
           </p>

@@ -48,7 +48,6 @@ type LifecycleToken = {
 export type ArenaRoomProposalWorkspace = Readonly<{
   editor: RoomProposalArenaEditorSession | null;
   syncFromRoom(): void;
-  discard(): void;
 }>;
 
 export type ArenaRoomGenerationHistoryReader = Readonly<{
@@ -144,11 +143,6 @@ export const useArenaRoom = (options: UseArenaRoomOptions) => {
       const next = createRoomProposalArenaEditorSession(session.snapshot);
       proposalEditorRef.current = next;
       setProposalEditor(next);
-    },
-    discard() {
-      proposalEditorRef.current?.dispose();
-      proposalEditorRef.current = null;
-      setProposalEditor(null);
     },
   }), [controller, proposalEditor]);
 

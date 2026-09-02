@@ -31,7 +31,6 @@ const mocks = vi.hoisted(() => ({
   reconnect: vi.fn(),
   reset: vi.fn(),
   syncProposalWorkspace: vi.fn(),
-  discardProposalWorkspace: vi.fn(),
   listGenerationHistory: vi.fn(),
   readGenerationHistory: vi.fn(),
   state: null as ArenaRoomControllerState | null,
@@ -75,7 +74,6 @@ vi.mock('@/components/arena/multiplayer/useArenaRoom', () => ({
     proposalWorkspace: {
       editor: null,
       syncFromRoom: mocks.syncProposalWorkspace,
-      discard: mocks.discardProposalWorkspace,
     },
     generationHistory: {
       list: mocks.listGenerationHistory,

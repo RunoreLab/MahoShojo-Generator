@@ -351,6 +351,7 @@ const MemberProposalEntry = ({
   readonly controller: ProposalController;
   readonly workspace: ArenaRoomProposalWorkspace;
 }) => {
+  const [confirmResync, setConfirmResync] = useState(false);
   const session = state.session;
   const editor = workspace.editor;
   const editorState = useSyncExternalStore(
@@ -374,16 +375,51 @@ const MemberProposalEntry = ({
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button type="button" className={secondaryButtonClass} onClick={workspace.syncFromRoom}>
-            {editorState ? '丢弃并重新同步' : '同步房间配置'}
+          <button
+            type="button"
+            className={secondaryButtonClass}
+            onClick={() => {
+              if (editorState?.dirty) {
+                setConfirmResync(true);
+                return;
+              }
+              workspace.syncFromRoom();
+            }}
+          >
+            {editorState?.dirty
+              ? '丢弃草稿并重新同步'
+              : editorState ? '重新同步房间配置' : '同步房间配置'}
           </button>
-          {editorState ? (
-            <button type="button" className={dangerButtonClass} onClick={workspace.discard}>
-              退出提案模式
-            </button>
-          ) : null}
         </div>
       </div>
+      {confirmResync ? (
+        <div
+          role="alertdialog"
+          aria-labelledby="arena-proposal-resync-confirm-heading"
+          aria-describedby="arena-proposal-resync-confirm-description"
+          className="mt-3 rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-900 dark:border-red-800 dark:bg-red-950/30 dark:text-red-100"
+        >
+          <p id="arena-proposal-resync-confirm-heading" className="font-semibold">确认重新同步？</p>
+          <p id="arena-proposal-resync-confirm-description" className="mt-1">
+            当前未提交修改将被丢弃，并以房间最新配置重新建立提案草稿。
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              className={dangerButtonClass}
+              onClick={() => {
+                setConfirmResync(false);
+                workspace.syncFromRoom();
+              }}
+            >
+              确认丢弃并同步
+            </button>
+            <button type="button" className={secondaryButtonClass} onClick={() => setConfirmResync(false)}>
+              保留草稿
+            </button>
+          </div>
+        </div>
+      ) : null}
       {editorState?.replacementRequired ? (
         <p role="alert" className="mt-3 rounded-lg border border-red-300 bg-red-50 p-2 text-sm text-red-800 dark:border-red-800 dark:bg-red-950/30 dark:text-red-200">
           房间实例已变化，旧草稿禁止提交；请重新同步。
