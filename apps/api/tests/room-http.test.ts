@@ -347,6 +347,7 @@ describe('Arena Room HTTP product routes', () => {
     const body = {
       expectedRoomEpoch: authority.snapshot.roomEpoch,
       expectedRevision: authority.snapshot.revision,
+      expectedControlSeq: authority.snapshot.controlSeq,
       generationRequestId: 'request-1234',
       sharedConfig: authority.snapshot.sharedConfig,
       hostLocalPayloads: [],
@@ -542,6 +543,7 @@ describe('Arena Room HTTP product routes', () => {
         ...createRequest({
         expectedRoomEpoch: authority.snapshot.roomEpoch,
         expectedRevision: authority.snapshot.revision,
+        expectedControlSeq: authority.snapshot.controlSeq,
         generationRequestId: 'request-1234',
         sharedConfig: authority.snapshot.sharedConfig,
         hostLocalPayloads: [],
@@ -578,6 +580,7 @@ describe('Arena Room HTTP product routes', () => {
     const body = {
       expectedRoomEpoch: authority.snapshot.roomEpoch,
       expectedRevision: authority.snapshot.revision,
+      expectedControlSeq: authority.snapshot.controlSeq,
       generationRequestId: 'request-1234',
       sharedConfig: authority.snapshot.sharedConfig,
       hostLocalPayloads: [],
@@ -652,6 +655,7 @@ describe('Arena Room HTTP product routes', () => {
     const request = createRequest({
       expectedRoomEpoch: authority.snapshot.roomEpoch,
       expectedRevision: authority.snapshot.revision,
+      expectedControlSeq: authority.snapshot.controlSeq,
       generationRequestId: 'request-legacy-host-local',
       sharedConfig: authority.snapshot.sharedConfig,
       hostLocalPayloads: [],
@@ -714,6 +718,7 @@ describe('Arena Room HTTP product routes', () => {
     const configRequest = createRequest({
       expectedRoomEpoch: session.roomEpoch,
       expectedRevision: session.snapshot.revision,
+      expectedControlSeq: session.snapshot.controlSeq,
       sharedConfig: session.snapshot.sharedConfig,
     });
     const configHeaders: Record<string, string> = { ...configRequest.headers };
@@ -738,6 +743,7 @@ describe('Arena Room HTTP product routes', () => {
     const generationRequest = {
       expectedRoomEpoch: authority.snapshot.roomEpoch,
       expectedRevision: authority.snapshot.revision,
+      expectedControlSeq: authority.snapshot.controlSeq,
       generationRequestId: 'request-1234',
       sharedConfig: { ...authority.snapshot.sharedConfig, combatants, teams: [] },
       hostLocalPayloads: [],
@@ -845,6 +851,7 @@ describe('Arena Room HTTP product routes', () => {
     const request = {
       expectedRoomEpoch: session.roomEpoch,
       expectedRevision: session.snapshot.revision,
+      expectedControlSeq: session.snapshot.controlSeq,
       sharedConfig: published.snapshot.sharedConfig,
     };
 
@@ -898,6 +905,7 @@ describe('Arena Room HTTP product routes', () => {
       createRequest({
         expectedRoomEpoch: session.roomEpoch,
         expectedRevision: session.snapshot.revision,
+        expectedControlSeq: session.snapshot.controlSeq,
         sharedConfig: session.snapshot.sharedConfig,
       }),
     );
@@ -928,6 +936,7 @@ describe('Arena Room HTTP product routes', () => {
       createRequest({
         expectedRoomEpoch: session.roomEpoch,
         expectedRevision: session.snapshot.revision,
+        expectedControlSeq: session.snapshot.controlSeq,
         sharedConfig: session.snapshot.sharedConfig,
       }),
     );

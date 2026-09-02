@@ -1377,9 +1377,15 @@ try {
         now: () => new Date(generationNow).toISOString(),
       });
       const generationConfig = sharedConfig();
+      const generationControlSeq = generationActors.get(generationRoomId)
+        ?.getSnapshot()?.snapshot.controlSeq;
+      if (generationControlSeq === undefined) {
+        throw new Error('ROOM_REDIS_GENERATION_ACTOR_MISSING');
+      }
       const generationRequest = {
         expectedRoomEpoch: generationHost.roomEpoch,
         expectedRevision: 0,
+        expectedControlSeq: generationControlSeq,
         generationRequestId,
         sharedConfig: generationConfig,
         hostLocalPayloads: [],

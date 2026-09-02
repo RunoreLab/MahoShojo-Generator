@@ -451,9 +451,14 @@ try {
     generation: port,
     now: () => new Date().toISOString(),
   });
+  const generationControlSeq = roomActors.get(roomId)?.getSnapshot()?.snapshot.controlSeq;
+  if (generationControlSeq === undefined) {
+    throw new Error('ROOM_GENERATION_DURABLE_VERIFIER_ACTOR_MISSING');
+  }
   const generationRequest = {
     expectedRoomEpoch: host.roomEpoch,
     expectedRevision: host.snapshot.revision,
+    expectedControlSeq: generationControlSeq,
     generationRequestId,
     sharedConfig: sharedConfig(),
     hostLocalPayloads: [],

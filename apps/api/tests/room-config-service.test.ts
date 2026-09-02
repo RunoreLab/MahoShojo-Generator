@@ -166,6 +166,7 @@ describe('Arena Room config application service', () => {
       request: {
         expectedRoomEpoch: 'epoch-1',
         expectedRevision: 0,
+        expectedControlSeq: harness.store.state!.snapshot.controlSeq,
         sharedConfig: draft,
       },
     })).resolves.toMatchObject({
@@ -191,6 +192,7 @@ describe('Arena Room config application service', () => {
       request: {
         expectedRoomEpoch: 'epoch-1',
         expectedRevision: 0,
+        expectedControlSeq: harness.store.state!.snapshot.controlSeq,
         sharedConfig: oversized,
       },
     })).rejects.toMatchObject({ code: 'ROOM_CONFIG_FRAME_TOO_LARGE' });
@@ -208,6 +210,7 @@ describe('Arena Room config application service', () => {
       request: {
         expectedRoomEpoch: 'epoch-1',
         expectedRevision: 0,
+        expectedControlSeq: harness.store.state!.snapshot.controlSeq,
         sharedConfig,
       },
     });
@@ -231,6 +234,7 @@ describe('Arena Room config application service', () => {
       request: {
         expectedRoomEpoch: 'epoch-1',
         expectedRevision: 0,
+        expectedControlSeq: harness.store.state!.snapshot.controlSeq,
         sharedConfig: config(),
       },
     });
@@ -244,6 +248,7 @@ describe('Arena Room config application service', () => {
     const base = {
       expectedRoomEpoch: 'epoch-1',
       expectedRevision: 0,
+      expectedControlSeq: harness.store.state!.snapshot.controlSeq,
       sharedConfig: { ...config(), userGuidance: '不能写入' },
     };
 
@@ -297,6 +302,7 @@ describe('Arena Room config application service', () => {
       request: {
         expectedRoomEpoch: 'epoch-1',
         expectedRevision: 0,
+        expectedControlSeq: harness.store.state!.snapshot.controlSeq,
         sharedConfig: { ...config(), userGuidance: '不得安装' },
       },
     })).rejects.toEqual(new ArenaRoomConfigError('ROOM_OPERATION_UNKNOWN'));
@@ -321,6 +327,7 @@ describe('Arena Room config application service', () => {
       request: {
         expectedRoomEpoch: 'epoch-1',
         expectedRevision: 0,
+        expectedControlSeq: harness.store.state!.snapshot.controlSeq,
         sharedConfig: config(),
       },
     })).rejects.toEqual(new ArenaRoomConfigError('ROOM_REFERENCE_STALE'));
@@ -359,6 +366,7 @@ describe('Arena Room config application service', () => {
       request: {
         expectedRoomEpoch: 'epoch-1',
         expectedRevision: 0,
+        expectedControlSeq: harness.store.state!.snapshot.controlSeq,
         sharedConfig,
       },
     });
@@ -385,6 +393,7 @@ describe('Arena Room config application service', () => {
       request: {
         expectedRoomEpoch: 'epoch-1',
         expectedRevision: 0,
+        expectedControlSeq: harness.store.state!.snapshot.controlSeq,
         sharedConfig: presetConfig(),
       },
     })).resolves.toMatchObject({ snapshot: { sharedConfig: presetConfig() } });
@@ -406,6 +415,7 @@ describe('Arena Room config application service', () => {
       request: {
         expectedRoomEpoch: 'epoch-1',
         expectedRevision: 0,
+        expectedControlSeq: harness.store.state!.snapshot.controlSeq,
         sharedConfig: presetConfig(),
       },
     })).rejects.toEqual(new ArenaRoomConfigError(expectedCode));
@@ -424,6 +434,7 @@ describe('Arena Room config application service', () => {
       request: {
         expectedRoomEpoch: 'epoch-1',
         expectedRevision: 0,
+        expectedControlSeq: harness.store.state!.snapshot.controlSeq,
         sharedConfig: presetConfig(),
       },
     })).rejects.toEqual(new ArenaRoomConfigError('ROOM_REFERENCE_UNAVAILABLE'));
@@ -441,6 +452,7 @@ describe('Arena Room config application service', () => {
       request: {
         expectedRoomEpoch: 'epoch-1',
         expectedRevision: 0,
+        expectedControlSeq: harness.store.state!.snapshot.controlSeq,
         sharedConfig: config(),
       },
     })).rejects.toEqual(new ArenaRoomConfigError('ROOM_REFERENCE_UNAVAILABLE'));

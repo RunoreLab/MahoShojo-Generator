@@ -84,6 +84,10 @@ describe('Arena Room HTTP product contract', () => {
       sharedConfig: canonicalRoomSnapshot.sharedConfig,
     };
     expect(ArenaRoomPublishConfigRequestSchema.parse(request)).toEqual(request);
+    expect(ArenaRoomPublishConfigRequestSchema.safeParse({
+      ...request,
+      expectedControlSeq: undefined,
+    }).success).toBe(false);
     for (const injected of [
       { roomId: canonicalRoomSnapshot.roomId },
       { accountUserId: 7 },
@@ -115,6 +119,10 @@ describe('Arena Room HTTP product contract', () => {
       },
     };
     expect(ArenaRoomGenerationStartRequestSchema.parse(request)).toEqual(request);
+    expect(ArenaRoomGenerationStartRequestSchema.safeParse({
+      ...request,
+      expectedControlSeq: undefined,
+    }).success).toBe(false);
     for (const injected of [
       { roomId: 'spoofed' },
       { generationId: 'spoofed' },

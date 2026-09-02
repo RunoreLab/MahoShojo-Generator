@@ -109,6 +109,7 @@ const generationResult = {
 const generationStartRequest = {
   expectedRoomEpoch: 'epoch-1',
   expectedRevision: 0,
+  expectedControlSeq: 0,
   generationRequestId: 'request-12345678',
   sharedConfig,
   generation: {
@@ -670,11 +671,13 @@ describe('Arena Room browser controller', () => {
     await controller.publishConfig({
       expectedRoomEpoch: 'epoch-stale',
       expectedRevision: 0,
+      expectedControlSeq: 0,
       sharedConfig: { ...sharedConfig, userGuidance: '不能发布' },
     });
     await controller.publishConfig({
       expectedRoomEpoch: 'epoch-1',
       expectedRevision: 7,
+      expectedControlSeq: 7,
       sharedConfig: { ...sharedConfig, userGuidance: '仍不能发布' },
     });
 
@@ -712,6 +715,7 @@ describe('Arena Room browser controller', () => {
     const request = {
       expectedRoomEpoch: 'epoch-1',
       expectedRevision: 0,
+      expectedControlSeq: 0,
       sharedConfig: desired,
     };
 
@@ -753,11 +757,13 @@ describe('Arena Room browser controller', () => {
     await controller.publishConfig({
       expectedRoomEpoch: 'epoch-1',
       expectedRevision: 0,
+      expectedControlSeq: 0,
       sharedConfig: desired,
     });
     await controller.publishConfig({
       expectedRoomEpoch: 'epoch-1',
       expectedRevision: 0,
+      expectedControlSeq: 0,
       sharedConfig: desired,
     });
 
@@ -802,6 +808,7 @@ describe('Arena Room browser controller', () => {
     await controller.publishConfig({
       expectedRoomEpoch: 'epoch-1',
       expectedRevision: 0,
+      expectedControlSeq: 0,
       sharedConfig,
     });
     expect(controller.getSnapshot().configPublishResultUnknown).toBe(true);
@@ -837,6 +844,7 @@ describe('Arena Room browser controller', () => {
       const publishing = controller.publishConfig({
         expectedRoomEpoch: 'epoch-1',
         expectedRevision: 0,
+        expectedControlSeq: 0,
         sharedConfig: desired,
       });
 

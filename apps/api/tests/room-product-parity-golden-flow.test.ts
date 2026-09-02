@@ -344,6 +344,7 @@ describe('GMR-10P-G product parity golden flow', () => {
     const request = {
       expectedRoomEpoch: host.roomEpoch,
       expectedRevision: 1,
+      expectedControlSeq: store.state!.snapshot.controlSeq,
       generationRequestId: 'request-golden',
       sharedConfig: acceptedConfig(),
       hostLocalPayloads: [],

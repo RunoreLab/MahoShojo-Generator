@@ -366,6 +366,7 @@ describe('Arena Room browser client', () => {
     const request = {
       expectedRoomEpoch: 'epoch-1',
       expectedRevision: 0,
+      expectedControlSeq: 0,
       sharedConfig: { ...snapshot.sharedConfig, userGuidance: '显式发布' },
     };
     const published = {
@@ -403,6 +404,7 @@ describe('Arena Room browser client', () => {
     const request = {
       expectedRoomEpoch: 'epoch-1',
       expectedRevision: 0,
+      expectedControlSeq: 0,
       sharedConfig: { ...snapshot.sharedConfig, userGuidance: '显式发布' },
     };
     const valid = {
@@ -466,6 +468,7 @@ describe('Arena Room browser client', () => {
     const request = {
       expectedRoomEpoch: 'epoch-1',
       expectedRevision: 0,
+      expectedControlSeq: 0,
       generationRequestId: 'request-12345678',
       sharedConfig: snapshot.sharedConfig,
       hostLocalPayloads: [],
@@ -488,6 +491,7 @@ describe('Arena Room browser client', () => {
     const request = {
       expectedRoomEpoch: 'epoch-1',
       expectedRevision: 0,
+      expectedControlSeq: 0,
       generationRequestId: 'request-12345678',
       sharedConfig: snapshot.sharedConfig,
       hostLocalPayloads: [],

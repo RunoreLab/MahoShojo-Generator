@@ -158,6 +158,7 @@ describe('GMR-10Q contract 门禁最小化', () => {
     const request = {
       expectedRoomEpoch: 'epoch-1',
       expectedRevision: 0,
+      expectedControlSeq: 0,
       generationRequestId: 'request-1234',
       sharedConfig: config(),
       hostLocalPayloads: Array.from({ length: MAX_ARENA_ROOM_HOST_LOCAL_PAYLOADS }, (_, index) => ({

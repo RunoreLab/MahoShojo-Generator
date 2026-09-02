@@ -196,6 +196,7 @@ const runProducerProcess = async (): Promise<never> => {
     request: {
       expectedRoomEpoch: host.roomEpoch,
       expectedRevision: host.snapshot.revision,
+      expectedControlSeq: host.snapshot.controlSeq,
       generationRequestId,
       sharedConfig: sharedConfig(),
       hostLocalPayloads: [],
@@ -408,6 +409,7 @@ const runParent = async (): Promise<void> => {
       request: {
         expectedRoomEpoch: checkpoint.snapshot.roomEpoch,
         expectedRevision: checkpoint.snapshot.revision,
+        expectedControlSeq: checkpoint.snapshot.controlSeq,
         generationRequestId,
         sharedConfig: sharedConfig(),
         hostLocalPayloads: [],

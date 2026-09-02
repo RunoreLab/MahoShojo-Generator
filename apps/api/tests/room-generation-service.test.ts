@@ -195,9 +195,10 @@ const createHarness = async (authorityConfig = sharedConfig()) => {
   };
 };
 
-const startRequest = (config = sharedConfig()) => ({
+const startRequest = (config = sharedConfig(), expectedControlSeq = 0) => ({
   expectedRoomEpoch: 'epoch-1',
   expectedRevision: 0,
+  expectedControlSeq,
   generationRequestId: 'request-1234',
   sharedConfig: config,
   hostLocalPayloads: [],
@@ -267,7 +268,7 @@ const prepareHistoricalGeneration = async (
     roomId: 'room-1',
     accountUserId: 101,
     request: {
-      ...startRequest(),
+      ...startRequest(sharedConfig(), harness.store.state!.snapshot.controlSeq),
       generationRequestId: 'request-5678',
     },
     sourceRequest: sourceRequest(),
@@ -1417,7 +1418,10 @@ describe('Arena Room generation coordinator', () => {
     await harness.service.start({
       roomId: 'room-1',
       accountUserId: 101,
-      request: startRequest(),
+      request: startRequest(
+        sharedConfig(),
+        harness.store.state!.snapshot.controlSeq,
+      ),
       sourceRequest: sourceRequest(),
     });
     vi.mocked(harness.generation.readOwnedProjection).mockResolvedValue({
