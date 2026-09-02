@@ -167,12 +167,14 @@ const runProducerProcess = async (): Promise<never> => {
     actors,
     createUserId: () => `process-user-${++nextUser}`,
   });
-  const host = await memberships.create({
+  await memberships.create({
     accountUserId: 101,
     displayName: 'Process Host',
     sharedConfig: sharedConfig(),
   });
   await memberships.join({ roomId, accountUserId: 202, displayName: 'Process Member' });
+  // join 会推进 controlSeq，生成 start 必须基于加入成员后的权威快照提交 fence。
+  const hostSession = await memberships.getSession({ roomId, accountUserId: 101 });
   let providerStarts = 0;
   let firstChunk!: () => void;
   const firstChunkWritten = new Promise<void>((resolve) => { firstChunk = resolve; });
@@ -194,9 +196,9 @@ const runProducerProcess = async (): Promise<never> => {
     roomId,
     accountUserId: 101,
     request: {
-      expectedRoomEpoch: host.roomEpoch,
-      expectedRevision: host.snapshot.revision,
-      expectedControlSeq: host.snapshot.controlSeq,
+      expectedRoomEpoch: hostSession.roomEpoch,
+      expectedRevision: hostSession.snapshot.revision,
+      expectedControlSeq: hostSession.snapshot.controlSeq,
       generationRequestId,
       sharedConfig: sharedConfig(),
       hostLocalPayloads: [],
