@@ -192,10 +192,9 @@ export const useArenaRoom = (options: UseArenaRoomOptions) => {
   });
 
   const activeGeneration = state.session?.snapshot.activeGeneration;
-  const latestHistoryRefreshKey = activeGeneration
-    && (activeGeneration.state === 'completed'
-      || activeGeneration.state === 'failed'
-      || activeGeneration.state === 'cancelled')
+  // 服务端历史列表只投影 completed ledger；failed/cancelled 不会改变计数，
+  // 因此只有 completed 终态才触发计数刷新。
+  const latestHistoryRefreshKey = activeGeneration?.state === 'completed'
     ? activeGeneration.generationId
     : '';
 

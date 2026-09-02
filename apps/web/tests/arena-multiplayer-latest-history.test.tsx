@@ -241,6 +241,78 @@ describe('useArenaRoomLatestCompletedHistory', () => {
     expect(harness.states.at(-1)).toEqual({ status: 'ready', completedCount: 2, hasLatest: true });
   });
 
+  it('终态计数刷新只 list 更新计数，不重新下载最近战报正文', async () => {
+    const reader: ArenaRoomGenerationHistoryReader = {
+      list: vi.fn()
+        .mockResolvedValueOnce(historyResponse)
+        .mockResolvedValueOnce({
+          ...historyResponse,
+          items: [{ ...completedItem, generationId: 'generation-10' }, completedItem],
+        }),
+      read: vi.fn(async () => availableView),
+    };
+    const harness = renderHook(reader, { sessionKey: 'room-1\nepoch-1\nuser-1', enabled: true });
+    await settle();
+    expect(reader.read).toHaveBeenCalledTimes(1);
+
+    harness.setRefreshKey('generation-10');
+    await settle();
+
+    expect(reader.list).toHaveBeenCalledTimes(2);
+    expect(reader.read).toHaveBeenCalledTimes(1);
+    expect(harness.states.at(-1)).toEqual({ status: 'ready', completedCount: 2, hasLatest: true });
+  });
+
+  it('refreshKey 回到空串（离开终态）不触发计数刷新', async () => {
+    const reader: ArenaRoomGenerationHistoryReader = {
+      list: vi.fn(async () => historyResponse),
+      read: vi.fn(async () => availableView),
+    };
+    const harness = renderHook(reader, { sessionKey: 'room-1\nepoch-1\nuser-1', enabled: true });
+    await settle();
+    expect(reader.list).toHaveBeenCalledOnce();
+
+    harness.setRefreshKey('generation-9');
+    await settle();
+    expect(reader.list).toHaveBeenCalledTimes(2);
+
+    harness.setRefreshKey('');
+    await settle();
+    expect(reader.list).toHaveBeenCalledTimes(2);
+  });
+
+  it('计数刷新失败时保留既有计数与最近战报', async () => {
+    const reader: ArenaRoomGenerationHistoryReader = {
+      list: vi.fn()
+        .mockResolvedValueOnce(historyResponse)
+        .mockRejectedValueOnce(new Error('房间运行时暂不可用')),
+      read: vi.fn(async () => availableView),
+    };
+    const harness = renderHook(reader, { sessionKey: 'room-1\nepoch-1\nuser-1', enabled: true });
+    await settle();
+    expect(harness.states.at(-1)).toEqual({ status: 'ready', completedCount: 1, hasLatest: true });
+
+    harness.setRefreshKey('generation-10');
+    await settle();
+
+    expect(harness.states.at(-1)).toEqual({ status: 'ready', completedCount: 1, hasLatest: true });
+  });
+
+  it('首次加载 list 成功而正文读取失败时保留正确计数', async () => {
+    const reader: ArenaRoomGenerationHistoryReader = {
+      list: vi.fn(async () => historyResponse),
+      read: vi.fn(async () => {
+        throw new Error('历史战报暂时无法读取');
+      }),
+    };
+    const harness = renderHook(reader, { sessionKey: 'room-1\nepoch-1\nuser-1', enabled: true });
+    await settle();
+
+    expect(reader.list).toHaveBeenCalledOnce();
+    expect(reader.read).toHaveBeenCalledWith('generation-9');
+    expect(harness.states.at(-1)).toEqual({ status: 'failed', completedCount: 1, hasLatest: false });
+  });
+
   it('refreshKey 未变化时 enabled 翻转不重复拉取 summary', async () => {
     const reader: ArenaRoomGenerationHistoryReader = {
       list: vi.fn(async () => historyResponse),
