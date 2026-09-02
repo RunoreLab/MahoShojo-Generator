@@ -997,13 +997,8 @@ export const createArenaRoomController = (
         if (socket !== current || disposed) return;
         socket = null;
         if (event.code === 1000) {
-          invalidateManagementMutation();
-          publish({
-            phase: 'closed',
-            managementOperation: null,
-            managementResultUnknown: false,
+          finishRoomSession({
             notice: '房间已关闭',
-            error: null,
           });
           return;
         }
@@ -1641,15 +1636,17 @@ export const createArenaRoomController = (
     } catch (error) {
       if (disposed || operation !== managementMutationGeneration) return;
       if (
-        (intent.operation === 'close' || intent.operation === 'leave')
+        intent.operation !== 'cancel-generation'
         && error instanceof ArenaRoomClientError
-        && error.code === 'ROOM_NOT_FOUND'
+        && (error.code === 'ROOM_NOT_FOUND' || error.code === 'ROOM_FORBIDDEN')
       ) {
         unknownManagementMutation = null;
         finishRoomSession({
-          notice: intent.operation === 'close'
+          notice: intent.operation === 'close' && error.code === 'ROOM_NOT_FOUND'
             ? '已从服务器确认房间关闭'
-            : '已从服务器确认离开房间',
+            : intent.operation === 'leave'
+              ? '已从服务器确认离开房间'
+              : '房间会话已结束',
         });
         return;
       }
@@ -2013,6 +2010,13 @@ export const createArenaRoomController = (
         });
       } catch (error) {
         if (!operationIsCurrent(generation)) return;
+        if (
+          error instanceof ArenaRoomClientError
+          && (error.code === 'ROOM_FORBIDDEN' || error.code === 'ROOM_NOT_FOUND')
+        ) {
+          finishRoomSession({ notice: '房间成员资格已结束' });
+          return;
+        }
         if (error instanceof ArenaRoomClientError && error.code === 'ROOM_RESULT_UNKNOWN') {
           unknownManagementMutation = { operation: 'leave' };
           publish({
@@ -2074,6 +2078,13 @@ export const createArenaRoomController = (
         });
       } catch (error) {
         if (!operationIsCurrent(generation)) return;
+        if (
+          error instanceof ArenaRoomClientError
+          && (error.code === 'ROOM_FORBIDDEN' || error.code === 'ROOM_NOT_FOUND')
+        ) {
+          finishRoomSession({ notice: '房间已结束' });
+          return;
+        }
         if (error instanceof ArenaRoomClientError && error.code === 'ROOM_RESULT_UNKNOWN') {
           unknownManagementMutation = { operation: 'close' };
           publish({

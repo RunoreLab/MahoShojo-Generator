@@ -178,7 +178,7 @@ let container: HTMLDivElement;
 let root: Root;
 
 const button = (label: string): HTMLButtonElement => {
-  const target = [...container.querySelectorAll('button')]
+  const target = [...document.body.querySelectorAll('button')]
     .find((candidate) => candidate.textContent?.trim() === label);
   if (!(target instanceof HTMLButtonElement)) throw new Error(`button not found: ${label}`);
   return target;
@@ -286,32 +286,32 @@ describe('Arena room Proposal workspace', () => {
     const previewTrigger = button('预览提案');
     previewTrigger.focus();
     await act(async () => previewTrigger.click());
-    expect(container.querySelectorAll('[role="dialog"][aria-modal="true"]')).toHaveLength(1);
+    expect(document.body.querySelectorAll('[role="dialog"][aria-modal="true"]')).toHaveLength(1);
     expect(document.activeElement?.textContent).toBe('关闭');
-    expect(container.textContent).toContain('基于房间配置版本 7');
-    expect(container.textContent).toContain('建议值：');
-    expect(container.textContent).toContain('将提交');
-    expect(container.textContent).toContain('新增角色');
-    expect(container.textContent).toContain('新增队伍');
-    expect(container.textContent).toContain('主情景改为 在线:scenario-public-main');
-    expect(container.textContent).toContain('新增辅助情景');
-    expect(container.textContent).toContain('新增素材');
-    expect(container.textContent).toContain('语言改为 en-US');
-    expect(container.textContent).toContain(
+    expect(document.body.textContent).toContain('基于房间配置版本 7');
+    expect(document.body.textContent).toContain('建议值：');
+    expect(document.body.textContent).toContain('将提交');
+    expect(document.body.textContent).toContain('新增角色');
+    expect(document.body.textContent).toContain('新增队伍');
+    expect(document.body.textContent).toContain('主情景改为 在线:scenario-public-main');
+    expect(document.body.textContent).toContain('新增辅助情景');
+    expect(document.body.textContent).toContain('新增素材');
+    expect(document.body.textContent).toContain('语言改为 en-US');
+    expect(document.body.textContent).toContain(
       '建议值：角色 data-card:character-public-1 引导改为“优先保护同伴”',
     );
-    expect(container.textContent).toContain(
+    expect(document.body.textContent).toContain(
       '建议值：角色 data-card:character-public-1 分配至队伍 team:',
     );
-    expect(container.textContent).toContain('叙事历史 读取=开(10)、写入=关');
+    expect(document.body.textContent).toContain('叙事历史 读取=开(10)、写入=关');
     for (const exposedTerm of ['Proposal', 'typed diff', 'BASE', 'PROPOSED', 'revision', 'server-known', 'payload']) {
-      expect(container.textContent).not.toContain(exposedTerm);
+      expect(document.body.textContent).not.toContain(exposedTerm);
     }
 
     await act(async () => {
       document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     });
-    expect(container.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
     expect(document.activeElement).toBe(previewTrigger);
     await act(async () => previewTrigger.click());
 
@@ -496,9 +496,9 @@ describe('Arena room Proposal workspace', () => {
       'reorderMaterials',
     ]);
     await act(async () => button('预览提案').click());
-    expect(container.textContent).toContain('调整角色顺序');
-    expect(container.textContent).toContain('调整队伍 team:a 内角色顺序');
-    expect(container.textContent).toContain('调整素材顺序');
+    expect(document.body.textContent).toContain('调整角色顺序');
+    expect(document.body.textContent).toContain('调整队伍 team:a 内角色顺序');
+    expect(document.body.textContent).toContain('调整素材顺序');
     editor.dispose();
   });
 });
