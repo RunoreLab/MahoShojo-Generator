@@ -85,11 +85,11 @@ export function PresetGridPicker({
                 download={preset.filename}
                 title="下载预设 JSON"
                 aria-label={`下载预设：${preset.name}`}
-                className="absolute right-1 top-1 z-20 inline-flex min-h-10 min-w-10 items-center justify-center rounded-full border border-gray-200 bg-white/80 text-gray-600 shadow-sm backdrop-blur transition-colors hover:bg-white hover:text-blue-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                className="absolute right-2 top-2 z-20 inline-flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white/80 text-gray-600 shadow-sm backdrop-blur transition-colors hover:bg-white hover:text-blue-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 after:absolute after:-inset-2 after:rounded-full after:content-['']"
               >
                 <Download className="h-4 w-4" />
               </a>
-              <div className="pointer-events-none relative z-10 pr-10">
+              <div className="pointer-events-none relative z-10 pr-8">
                 <p className={`font-semibold ${textColor}`}>{isLoading ? '加载中...' : preset.name}</p>
                 <p
                   className={`text-xs mt-1 ${

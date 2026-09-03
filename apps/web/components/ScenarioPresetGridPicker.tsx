@@ -67,12 +67,12 @@ export function ScenarioPresetGridPicker({
                 download={preset.filename}
                 title="下载预设 JSON"
                 aria-label={`下载预设情景：${preset.title}`}
-                className="absolute right-1 top-1 z-20 inline-flex min-h-10 min-w-10 items-center justify-center rounded-full border border-gray-200 bg-white/80 text-gray-600 shadow-sm backdrop-blur transition-colors hover:bg-white hover:text-blue-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                className="absolute right-2 top-2 z-20 inline-flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white/80 text-gray-600 shadow-sm backdrop-blur transition-colors hover:bg-white hover:text-blue-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 after:absolute after:-inset-2 after:rounded-full after:content-['']"
               >
                 <Download className="h-4 w-4" />
               </a>
 
-              <div className="pointer-events-none relative z-10 pr-10">
+              <div className="pointer-events-none relative z-10 pr-8">
                 <div className="flex items-center gap-2">
                   <p className={`font-semibold ${titleColor}`}>{isLoading ? '加载中...' : preset.title}</p>
                   <span className="inline-flex items-center rounded-full border border-gray-200 bg-white/70 px-2 py-0.5 text-[10px] font-medium text-gray-700">

@@ -25,7 +25,9 @@ describe('Arena shared preset picker accessibility', () => {
 
     expect(html).toContain('<button type="button" aria-label="取消选择预设角色：角色一" aria-pressed="true"');
     expect(html).toContain('<button type="button" aria-label="选择预设角色：角色二" aria-pressed="false"');
-    expect(html).toMatch(/aria-label="下载预设：角色一"[^>]*min-h-10[^>]*min-w-10/u);
+    expect(html).toMatch(/aria-label="下载预设：角色一"[^>]*h-6 w-6/u);
+    expect(html).toMatch(/aria-label="下载预设：角色一"[^>]*after:-inset-2/u);
+    expect(html).not.toMatch(/aria-label="下载预设：角色一"[^>]*min-(?:h-10|w-10)/u);
     expect(html).toMatch(/>下一页<\/button>/u);
     expect(html).toMatch(/<button[^>]*min-h-10[^>]*>下一页<\/button>/u);
   });
@@ -48,6 +50,8 @@ describe('Arena shared preset picker accessibility', () => {
     );
 
     expect(html).toContain('<button type="button" aria-label="选择预设情景：情景一" aria-pressed="false"');
-    expect(html).toMatch(/aria-label="下载预设情景：情景一"[^>]*min-h-10[^>]*min-w-10/u);
+    expect(html).toMatch(/aria-label="下载预设情景：情景一"[^>]*h-6 w-6/u);
+    expect(html).toMatch(/aria-label="下载预设情景：情景一"[^>]*after:-inset-2/u);
+    expect(html).not.toMatch(/aria-label="下载预设情景：情景一"[^>]*min-(?:h-10|w-10)/u);
   });
 });
