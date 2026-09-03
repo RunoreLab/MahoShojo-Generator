@@ -1,7 +1,7 @@
 import { ARENA_CANONICAL_CAPABILITIES } from './arena-capabilities';
 
 /** Shared wire-contract safety ceilings. Runtime TTLs and alarm values do not belong here. */
-export const MAX_ROOM_MEMBERS = 8;
+export const MAX_ROOM_MEMBERS = 16;
 export const MAX_COMBATANTS = ARENA_CANONICAL_CAPABILITIES.maxCombatants;
 export const MAX_ARENA_REFERENCE_ITEMS = ARENA_CANONICAL_CAPABILITIES.maxReferenceItemsSanity;
 export const MAX_PENDING_PROPOSALS_PER_MEMBER = 8;

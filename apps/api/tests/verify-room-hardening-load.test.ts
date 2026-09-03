@@ -77,15 +77,18 @@ const runAgainstTcpSentinel = async (input: Readonly<{
 };
 
 describe('Room hardening load verifier contract', () => {
-  test('固定 32 Room、每 Room 4 个真实 WSS client 与 20 次权威 workload transition', () => {
+  test('固定 32 Room、每 Room 4 个真实 WSS client、单房满员 fan-out 与 20 次权威 workload transition', () => {
     expect(HARDENING_LOAD_WORKLOAD).toEqual({
       rooms: 32,
       socketsPerRoom: 4,
+      fanoutRooms: 1,
+      fanoutSocketsPerRoom: 16,
       membershipTransitionsPerRoom: 4,
       configTransitionsPerRoom: 16,
       authorityTransitionsPerRoom: 20,
-      totalSockets: 128,
-      totalAuthorityTransitions: 640,
+      totalRooms: 33,
+      totalSockets: 144,
+      totalAuthorityTransitions: 672,
     });
     expect(Object.isFrozen(HARDENING_LOAD_WORKLOAD)).toBe(true);
   });

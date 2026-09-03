@@ -9,6 +9,7 @@ import {
   type ArenaRoomGenerationPresetResolver,
 } from '#/arena-room/room-generation-preset-registry';
 import type { ArenaRoomGenerationCanonicalContent } from '#/arena-room/room-generation-materializer';
+import { MAX_ROOM_MEMBERS } from '@mahoshojo/contracts/arena-room';
 import {
   checkpointPredecessorOf,
   consumeArenaRoomCheckpointCommit,
@@ -448,7 +449,7 @@ describe('Arena Room membership service', () => {
       displayName: 'Host',
       sharedConfig: createArenaRoomState().snapshot.sharedConfig,
     });
-    for (let index = 0; index < 7; index += 1) {
+    for (let index = 0; index < MAX_ROOM_MEMBERS - 1; index += 1) {
       await service.join({
         roomId: 'room-1',
         accountUserId: 200 + index,
@@ -461,7 +462,7 @@ describe('Arena Room membership service', () => {
       accountUserId: 999,
       displayName: 'Overflow',
     })).rejects.toMatchObject({ code: 'ROOM_MEMBER_LIMIT_REACHED' });
-    expect(store.state?.snapshot.members).toHaveLength(8);
+    expect(store.state?.snapshot.members).toHaveLength(MAX_ROOM_MEMBERS);
   });
 
   it('session snapshot 只向 host 暴露全部 Proposal，member 只能看到自己的 Proposal', async () => {

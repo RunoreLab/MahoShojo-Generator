@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { createAdaptorServer } from '@hono/node-server';
 import {
   ARENA_ROOM_WEBSOCKET_PROTOCOL,
+  MAX_ROOM_MEMBERS,
   type ArenaRoomSharedConfig,
   type RoomServerTransportMessage,
 } from '@mahoshojo/contracts/arena-room';
@@ -56,14 +57,33 @@ const ACTOR_QUEUE_MAX_COMMANDS = 64;
 const VERIFIER_TIMEOUT_MS = 30_000;
 const BROWSER_ORIGIN = 'https://hardening-load.loopback.invalid';
 
+const HARDENING_LOAD_ROOMS = 32;
+const HARDENING_LOAD_SOCKETS_PER_ROOM = 4;
+const HARDENING_LOAD_FANOUT_ROOMS = 1;
+const HARDENING_LOAD_CONFIG_TRANSITIONS_PER_ROOM = 16;
+const HARDENING_LOAD_MEMBERSHIP_TRANSITIONS_PER_ROOM = 4;
+
 export const HARDENING_LOAD_WORKLOAD = Object.freeze({
-  rooms: 32,
-  socketsPerRoom: 4,
-  membershipTransitionsPerRoom: 4,
-  configTransitionsPerRoom: 16,
-  authorityTransitionsPerRoom: 20,
-  totalSockets: 128,
-  totalAuthorityTransitions: 640,
+  rooms: HARDENING_LOAD_ROOMS,
+  socketsPerRoom: HARDENING_LOAD_SOCKETS_PER_ROOM,
+  fanoutRooms: HARDENING_LOAD_FANOUT_ROOMS,
+  fanoutSocketsPerRoom: MAX_ROOM_MEMBERS,
+  membershipTransitionsPerRoom: HARDENING_LOAD_MEMBERSHIP_TRANSITIONS_PER_ROOM,
+  configTransitionsPerRoom: HARDENING_LOAD_CONFIG_TRANSITIONS_PER_ROOM,
+  authorityTransitionsPerRoom: (
+    HARDENING_LOAD_MEMBERSHIP_TRANSITIONS_PER_ROOM + HARDENING_LOAD_CONFIG_TRANSITIONS_PER_ROOM
+  ),
+  totalRooms: HARDENING_LOAD_ROOMS + HARDENING_LOAD_FANOUT_ROOMS,
+  totalSockets: (
+    HARDENING_LOAD_ROOMS * HARDENING_LOAD_SOCKETS_PER_ROOM
+    + HARDENING_LOAD_FANOUT_ROOMS * MAX_ROOM_MEMBERS
+  ),
+  totalAuthorityTransitions: (
+    HARDENING_LOAD_ROOMS * (
+      HARDENING_LOAD_MEMBERSHIP_TRANSITIONS_PER_ROOM + HARDENING_LOAD_CONFIG_TRANSITIONS_PER_ROOM
+    )
+    + HARDENING_LOAD_FANOUT_ROOMS * (MAX_ROOM_MEMBERS + HARDENING_LOAD_CONFIG_TRANSITIONS_PER_ROOM)
+  ),
 });
 
 type HardeningLoadEnvironment = Readonly<{
@@ -557,7 +577,7 @@ const runRoomHardeningLoadVerifier = async (
     actors = createRoomActorRegistry({
       store: runtime.getRoomStore(),
       observer,
-      maxActors: HARDENING_LOAD_WORKLOAD.rooms,
+      maxActors: HARDENING_LOAD_WORKLOAD.totalRooms,
       maxQueuedCommands: ACTOR_QUEUE_MAX_COMMANDS,
       createRoomIdentity: () => {
         const index = roomIdentityIndex;
@@ -611,11 +631,23 @@ const runRoomHardeningLoadVerifier = async (
     const address = server.address() as AddressInfo;
     const webSocketOrigin = `ws://127.0.0.1:${address.port}`;
 
+    const roomSocketSpecs: readonly number[] = Object.freeze([
+      ...Array.from(
+        { length: HARDENING_LOAD_WORKLOAD.rooms },
+        () => HARDENING_LOAD_WORKLOAD.socketsPerRoom,
+      ),
+      ...Array.from(
+        { length: HARDENING_LOAD_WORKLOAD.fanoutRooms },
+        () => HARDENING_LOAD_WORKLOAD.fanoutSocketsPerRoom,
+      ),
+    ]);
+
     const rooms = await Promise.all(Array.from(
-      { length: HARDENING_LOAD_WORKLOAD.rooms },
+      { length: roomSocketSpecs.length },
       async (_unused, roomIndex) => {
+        const memberCount = roomSocketSpecs[roomIndex]!;
         const accounts = Array.from(
-          { length: HARDENING_LOAD_WORKLOAD.socketsPerRoom },
+          { length: memberCount },
           (_entry, memberIndex) => 10_000 + roomIndex * 100 + memberIndex,
         );
         const host = await memberships.create({
@@ -644,13 +676,14 @@ const runRoomHardeningLoadVerifier = async (
           accountUserId: accounts[0]!,
           hostUserId: host.member.userId,
           roomId: host.roomId,
+          memberCount,
         };
       },
     ));
 
     if (
-      observer.activeRoomsCurrent !== HARDENING_LOAD_WORKLOAD.rooms
-      || observer.residentActorsCurrent !== HARDENING_LOAD_WORKLOAD.rooms
+      observer.activeRoomsCurrent !== HARDENING_LOAD_WORKLOAD.totalRooms
+      || observer.residentActorsCurrent !== HARDENING_LOAD_WORKLOAD.totalRooms
       || observer.activeSocketsCurrent !== HARDENING_LOAD_WORKLOAD.totalSockets
       || sockets.size !== HARDENING_LOAD_WORKLOAD.totalSockets
       || [...sockets].some((socket) => socket.readyState !== WebSocket.OPEN)
@@ -695,15 +728,16 @@ const runRoomHardeningLoadVerifier = async (
         expectedGuidance: `hardening-load-${roomIndex}-${HARDENING_LOAD_WORKLOAD.configTransitionsPerRoom - 1}`,
         expectedRevision: initialRevision + HARDENING_LOAD_WORKLOAD.configTransitionsPerRoom,
         roomId: room.roomId,
+        memberCount: room.memberCount,
       };
     }));
 
-    const minimumMessages = HARDENING_LOAD_WORKLOAD.totalSockets
-      + HARDENING_LOAD_WORKLOAD.rooms
-        * HARDENING_LOAD_WORKLOAD.configTransitionsPerRoom
-        * HARDENING_LOAD_WORKLOAD.socketsPerRoom;
+    const expectedClientMessages = rooms.reduce(
+      (total, room) => total + room.memberCount * (HARDENING_LOAD_WORKLOAD.configTransitionsPerRoom + 1),
+      0,
+    );
     await waitFor(
-      () => clientCounters.messages >= minimumMessages
+      () => clientCounters.messages >= expectedClientMessages
         && observer.outboundQueuedFramesCurrent === 0
         && observer.outboundQueuedBytesCurrent === 0,
       'ROOM_HARDENING_LOAD_DELIVERY_TIMEOUT',
@@ -719,7 +753,7 @@ const runRoomHardeningLoadVerifier = async (
         !checkpoint
         || checkpoint.lifecycle.status !== 'open'
         || checkpoint.snapshot.members.filter((member) => member.membershipState === 'active').length
-          !== HARDENING_LOAD_WORKLOAD.socketsPerRoom
+          !== expected.memberCount
         || checkpoint.snapshot.revision !== expected.expectedRevision
         || checkpoint.snapshot.sharedConfig.userGuidance !== expected.expectedGuidance
         || raw === null
@@ -762,11 +796,7 @@ const runRoomHardeningLoadVerifier = async (
     const workloadCheckpointLatency = durationSummary(observer.checkpointDurationsMs);
     const workloadCheckpointBytesPeak = Math.max(0, ...observer.checkpointBytes);
     const expectedActorOperations = HARDENING_LOAD_WORKLOAD.totalAuthorityTransitions
-      + HARDENING_LOAD_WORKLOAD.rooms;
-    const expectedClientMessages = HARDENING_LOAD_WORKLOAD.totalSockets
-      + HARDENING_LOAD_WORKLOAD.rooms
-        * HARDENING_LOAD_WORKLOAD.configTransitionsPerRoom
-        * HARDENING_LOAD_WORKLOAD.socketsPerRoom;
+      + HARDENING_LOAD_WORKLOAD.totalRooms;
     if (
       appliedActorOperations !== expectedActorOperations
       || clientCounters.messages !== expectedClientMessages
@@ -778,14 +808,14 @@ const runRoomHardeningLoadVerifier = async (
       throw new Error('ROOM_HARDENING_LOAD_SLOW_CONSUMER_CLOSE_OBSERVED');
     }
     if (
-      observer.activeRoomsCurrent !== HARDENING_LOAD_WORKLOAD.rooms
-      || observer.residentActorsCurrent !== HARDENING_LOAD_WORKLOAD.rooms
+      observer.activeRoomsCurrent !== HARDENING_LOAD_WORKLOAD.totalRooms
+      || observer.residentActorsCurrent !== HARDENING_LOAD_WORKLOAD.totalRooms
       || observer.activeSocketsCurrent !== HARDENING_LOAD_WORKLOAD.totalSockets
     ) {
       throw new Error('ROOM_HARDENING_LOAD_ACTIVE_GAUGE_INVALID');
     }
     if (
-      observer.actorQueuedPeak > HARDENING_LOAD_WORKLOAD.rooms * ACTOR_QUEUE_MAX_COMMANDS
+      observer.actorQueuedPeak > HARDENING_LOAD_WORKLOAD.totalRooms * ACTOR_QUEUE_MAX_COMMANDS
       || observer.roomQueuedPeak > ACTOR_QUEUE_MAX_COMMANDS
     ) {
       throw new Error('ROOM_HARDENING_LOAD_ACTOR_QUEUE_UNBOUNDED');
