@@ -119,6 +119,29 @@ describe('shared Arena roster section via solo adapter', () => {
     expect(container.textContent).toContain('守护队');
   });
 
+  it('重命名输入在折叠按钮外，点击输入与回车提交不会触发分队折叠', () => {
+    useBattleStore.setState({
+      combatants: [dataCombatant('alpha.json', '阿尔法')],
+    });
+    renderList();
+
+    act(() => button('+ 新建分队').click());
+    const renameInput = container.querySelector<HTMLInputElement>('input[aria-label="分队名称"]');
+    if (!renameInput) throw new Error('team rename input not found');
+    expect(container.textContent).toContain('暂无成员');
+
+    // 点击输入框曾因嵌套在折叠 button 内冒泡触发折叠，导致队伍内容收起。
+    act(() => renameInput.click());
+    expect(container.textContent).toContain('暂无成员');
+
+    act(() => setValue(renameInput, '守护队'));
+    act(() => {
+      renameInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    });
+    expect(useBattleStore.getState().teams.map((team) => team.name)).toEqual(['守护队']);
+    expect(container.textContent).toContain('暂无成员');
+  });
+
   it('分队成员可移回未分队，删除分队需确认', () => {
     vi.spyOn(globalThis, 'confirm').mockReturnValue(true);
     useBattleStore.setState({

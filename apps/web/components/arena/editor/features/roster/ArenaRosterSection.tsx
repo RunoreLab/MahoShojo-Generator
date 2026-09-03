@@ -162,30 +162,34 @@ export function ArenaRosterSection({
               className={`h-4 w-4 text-gray-700 transition-transform ${team.collapsed ? '-rotate-90' : ''}`}
               aria-hidden
             />
-            {isEditing ? (
-              <input
-                className="text-sm font-semibold text-gray-700 border border-gray-300 rounded px-2 py-1 bg-white w-44"
-                value={editingTeamName}
-                disabled={model.disabled}
-                autoFocus
-                onChange={(event) => setEditingTeamName(event.target.value)}
-                onBlur={commitTeamRename}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') commitTeamRename();
-                  if (event.key === 'Escape') {
-                    setEditingTeamKey(null);
-                    setEditingTeamName('');
-                  }
-                }}
-                aria-label="分队名称"
-              />
-            ) : (
+            {!isEditing ? (
               <span className="font-semibold text-sm text-gray-700 truncate" title={team.name}>
                 {team.name}
               </span>
-            )}
+            ) : null}
             <span className="text-xs text-gray-500">({members.length})</span>
           </button>
+
+          {/* 重命名输入必须留在折叠 button 外：嵌套交互元素会让点击输入/回车提交
+              冒泡触发折叠（a11y interactive-in-interactive）。 */}
+          {isEditing ? (
+            <input
+              className="text-sm font-semibold text-gray-700 border border-gray-300 rounded px-2 py-1 bg-white w-44"
+              value={editingTeamName}
+              disabled={model.disabled}
+              autoFocus
+              onChange={(event) => setEditingTeamName(event.target.value)}
+              onBlur={commitTeamRename}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') commitTeamRename();
+                if (event.key === 'Escape') {
+                  setEditingTeamKey(null);
+                  setEditingTeamName('');
+                }
+              }}
+              aria-label="分队名称"
+            />
+          ) : null}
 
           <div className="flex w-full sm:w-auto flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:ml-auto min-w-0">
             {capabilities.reorderTeams ? (
@@ -271,21 +275,22 @@ export function ArenaRosterSection({
     if (unassignedRows.length === 0 && teams.length === 0) return null;
     return (
       <div className="rounded-lg border border-gray-300 bg-white/50">
-        <button
-          type="button"
-          className="w-full flex flex-wrap items-center gap-2 px-2 py-2"
-          onClick={() => setUnassignedCollapsed((value) => !value)}
-          aria-expanded={!unassignedCollapsed}
-          aria-controls="arena-team-unassigned-content"
-        >
-          <div className="flex items-center gap-2 min-w-0 flex-1">
+        <div className="w-full flex flex-wrap items-center gap-2 px-2 py-2">
+          <button
+            type="button"
+            className="flex items-center gap-2 min-w-0 flex-1"
+            onClick={() => setUnassignedCollapsed((value) => !value)}
+            aria-expanded={!unassignedCollapsed}
+            aria-controls="arena-team-unassigned-content"
+          >
             <ChevronDown
               className={`h-4 w-4 text-gray-700 transition-transform ${unassignedCollapsed ? '-rotate-90' : ''}`}
               aria-hidden
             />
             <span className="font-semibold text-sm text-gray-700">未分队</span>
             <span className="text-xs text-gray-500">({unassignedRows.length})</span>
-          </div>
+          </button>
+          {/* 移回下拉框留在折叠 button 外，避免点击/选择时冒泡触发折叠。 */}
           {capabilities.assignTeamMembers && teams.length > 0 ? (
             <select
               defaultValue=""
@@ -307,7 +312,7 @@ export function ArenaRosterSection({
               )))}
             </select>
           ) : null}
-        </button>
+        </div>
 
         {!unassignedCollapsed ? (
           <div id="arena-team-unassigned-content" className="p-2 pt-0 space-y-2">
