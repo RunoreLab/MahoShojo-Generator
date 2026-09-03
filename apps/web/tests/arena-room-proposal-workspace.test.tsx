@@ -235,34 +235,41 @@ describe('Arena room Proposal workspace', () => {
     await act(async () => button('模拟选择角色').click());
     await act(async () => button('关闭数据卡').click());
 
+    const guidanceRow = [...container.querySelectorAll('.group')]
+      .find((row) => row.textContent?.includes('character-public-1'));
+    if (!guidanceRow) throw new Error('character row not found');
+    const openGuidanceButton = [...(guidanceRow.querySelectorAll('button') ?? [])]
+      .find((candidate) => candidate.textContent?.trim() === '行动');
+    if (!(openGuidanceButton instanceof HTMLButtonElement)) throw new Error('guidance toggle button not found');
+    await act(async () => openGuidanceButton.click());
     const guidance = container.querySelector<HTMLTextAreaElement>('#arena-roster-guidance-data-card\\:character-public-1');
     if (!guidance) throw new Error('character guidance not found');
     await act(async () => setValue(guidance, '优先保护同伴'));
     expect(container.querySelector('label[for="arena-roster-guidance-data-card:character-public-1"]')?.textContent)
       .toContain('角色行动引导');
-    const guidanceRow = guidance.closest('.group');
-    const collapseGuidanceButton = [...(guidanceRow?.querySelectorAll('button') ?? [])]
+    const collapseGuidanceButton = [...(guidanceRow.querySelectorAll('button') ?? [])]
       .find((candidate) => candidate.textContent?.trim() === '收起');
     if (!(collapseGuidanceButton instanceof HTMLButtonElement)) throw new Error('guidance collapse button not found');
     await act(async () => collapseGuidanceButton.click());
     expect(container.querySelector('#arena-roster-guidance-data-card\\:character-public-1')).toBeNull();
-    const reopenGuidanceButton = [...(guidanceRow?.querySelectorAll('button') ?? [])]
+    const reopenGuidanceButton = [...(guidanceRow.querySelectorAll('button') ?? [])]
       .find((candidate) => candidate.textContent?.trim() === '行动');
     if (!(reopenGuidanceButton instanceof HTMLButtonElement)) throw new Error('guidance toggle button not found');
     await act(async () => reopenGuidanceButton.click());
     expect(container.querySelector('#arena-roster-guidance-data-card\\:character-public-1')).not.toBeNull();
 
-    const teamName = container.querySelector<HTMLInputElement>('input[placeholder="新队伍名称"]');
-    if (!teamName) throw new Error('team name input not found');
-    expect(teamName.id).toBe('arena-room-proposal-new-team');
-    expect(container.querySelector('label[for="arena-room-proposal-new-team"]')?.textContent)
-      .toContain('新队伍名称');
-    await act(async () => setValue(teamName, '守护队'));
-    await act(async () => button('新增队伍').click());
+    await act(async () => button('+ 新建分队').click());
+    const teamNameInput = container.querySelector<HTMLInputElement>('input[aria-label="分队名称"]');
+    if (!teamNameInput) throw new Error('team rename input not found');
+    await act(async () => setValue(teamNameInput, '守护队'));
+    await act(async () => {
+      teamNameInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    });
+    expect(container.textContent).toContain('守护队');
     const teamSelect = [...container.querySelectorAll<HTMLSelectElement>('select:not(#language-select)')].at(-1);
-    const teamKey = teamSelect?.options[1]?.value;
-    if (!teamSelect || !teamKey) throw new Error('team assignment select not found');
-    await act(async () => setValue(teamSelect, teamKey));
+    const memberOption = [...(teamSelect?.options ?? [])].find((option) => option.value === 'data-card:character-public-1');
+    if (!teamSelect || !memberOption) throw new Error('team assignment select not found');
+    await act(async () => setValue(teamSelect, memberOption.value));
 
     await act(async () => button('情景模式📜').click());
     await act(async () => button('浏览在线情景库').click());
@@ -492,6 +499,7 @@ describe('Arena room Proposal workspace', () => {
       battleMode: 'scenario',
       combatants: [
         { key: 'data-card:character-one', ref: { id: 'character-one', kind: 'character', versionToken: 'v1' } },
+        { key: 'data-card:character-four', ref: { id: 'character-four', kind: 'character', versionToken: 'v1' } },
         { key: 'data-card:character-two', ref: { id: 'character-two', kind: 'character', versionToken: 'v1' } },
         { key: 'data-card:character-three', ref: { id: 'character-three', kind: 'character', versionToken: 'v1' } },
       ],
@@ -536,7 +544,7 @@ describe('Arena room Proposal workspace', () => {
       await act(async () => target.click());
     };
 
-    await move('下移 character-one');
+    await move('下移 character-four');
     await move('下移队伍 A 队');
     await move('下移 A 队内 character-one');
     await move('下移 aux-one');

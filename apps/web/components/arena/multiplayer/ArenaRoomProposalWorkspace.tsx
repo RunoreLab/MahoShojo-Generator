@@ -18,8 +18,8 @@ import {
   useArenaEditorSelector,
   type RoomProposalArenaEditorSession,
 } from '../editor';
+import { ProposalArenaRosterSection } from '../editor/features/roster/ProposalArenaRosterSection';
 import { ArenaMaterialList } from '../editor/presentation/ArenaMaterialList';
-import { ArenaRosterList, ArenaRosterRow } from '../editor/presentation/ArenaRoster';
 import { ArenaAuxScenarioList } from '../editor/presentation/ArenaScenarioList';
 import { BattleModeSwitcher } from '../components/BattleModeSwitcher';
 import { BattleSettings } from '../components/BattleSettings';
@@ -182,8 +182,6 @@ const ProposalWorkspaceInner = ({
   const [canshouPresetPage, setCanshouPresetPage] = useState(1);
   const [scenarioPresetPage, setScenarioPresetPage] = useState(1);
   const [isMatching, setIsMatching] = useState(false);
-  const [newTeamName, setNewTeamName] = useState('');
-  const [collapsedGuidanceKeys, setCollapsedGuidanceKeys] = useState<ReadonlySet<string>>(new Set());
   const [preview, setPreview] = useState<readonly ArenaProposalChange[] | null>(null);
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [localError, setLocalError] = useState<string | null>(null);
@@ -222,17 +220,6 @@ const ProposalWorkspaceInner = ({
     } catch {
       setLocalError('该修改不满足房间安全配置约束');
     }
-  };
-
-  const addTeam = (): void => {
-    const displayName = newTeamName.trim();
-    if (!displayName) return;
-    const key = `team:${globalThis.crypto?.randomUUID?.() ?? Date.now().toString(36)}`;
-    mutate((draft) => ({
-      ...draft,
-      teams: [...draft.teams, { key, displayName, combatantKeys: [] }],
-    }));
-    setNewTeamName('');
   };
 
   const toggleCard = (card: unknown, nextSelected: boolean): void => {
@@ -460,172 +447,10 @@ const ProposalWorkspaceInner = ({
             defaultOpen: true,
             keepMounted: true,
             content: (
-              <>
-              <div className="mb-3 flex gap-2">
-              <label htmlFor="arena-room-proposal-new-team" className="sr-only">新队伍名称</label>
-              <input
-                id="arena-room-proposal-new-team"
-                value={newTeamName}
-                onChange={(event) => setNewTeamName(event.target.value)}
-                maxLength={80}
-                placeholder="新队伍名称"
-                className="min-w-0 flex-1 rounded-lg border px-3 py-2 text-sm"
+              <ProposalArenaRosterSection
+                disabled={disabled}
+                onActionError={setLocalError}
               />
-              <button type="button" className={secondaryButtonClass} disabled={!newTeamName.trim()} onClick={addTeam}>新增队伍</button>
-            </div>
-            {snapshot.teams.length > 0 ? (
-              <ul className="mb-3 space-y-2" aria-label="提案队伍">
-                {snapshot.teams.map((team, teamIndex) => (
-                  <li key={team.key} className="rounded-lg border bg-white/80 p-2">
-                    <div className="flex items-center gap-2">
-                      <div className="flex flex-col gap-1">
-                        <button
-                          type="button"
-                          className="min-h-10 min-w-10 rounded border text-xs disabled:cursor-not-allowed disabled:opacity-40"
-                          aria-label={`上移队伍 ${team.name}`}
-                          disabled={disabled || teamIndex === 0}
-                          onClick={() => mutate((draft) => ({
-                            ...draft,
-                            teams: moveItem(draft.teams, teamIndex, teamIndex - 1),
-                          }))}
-                        >↑</button>
-                        <button
-                          type="button"
-                          className="min-h-10 min-w-10 rounded border text-xs disabled:cursor-not-allowed disabled:opacity-40"
-                          aria-label={`下移队伍 ${team.name}`}
-                          disabled={disabled || teamIndex === snapshot.teams.length - 1}
-                          onClick={() => mutate((draft) => ({
-                            ...draft,
-                            teams: moveItem(draft.teams, teamIndex, teamIndex + 1),
-                          }))}
-                        >↓</button>
-                      </div>
-                      <input
-                        aria-label={`队伍 ${team.name} 名称`}
-                        className="min-w-0 flex-1 rounded border px-2 py-1 text-sm"
-                        value={team.name}
-                        onChange={(event) => mutate((draft) => ({
-                          ...draft,
-                          teams: draft.teams.map((item) => item.key === team.key
-                            ? { ...item, displayName: event.target.value }
-                            : item),
-                        }))}
-                      />
-                      <button type="button" className={dangerButtonClass} onClick={() => mutate((draft) => ({
-                        ...draft,
-                        teams: draft.teams.filter((item) => item.key !== team.key),
-                      }))}>移除</button>
-                    </div>
-                    {team.combatantKeys.length > 0 ? (
-                      <ul className="mt-2 space-y-1" aria-label={`${team.name} 队内角色顺序`}>
-                        {team.combatantKeys.map((combatantKey, combatantIndex) => {
-                          const combatantName = snapshot.combatants.find((item) => item.key === combatantKey)?.name
-                            ?? combatantKey;
-                          return (
-                            <li key={combatantKey} className="flex items-center justify-between gap-2 text-xs">
-                              <span className="min-w-0 truncate">{combatantName}</span>
-                              <span className="flex shrink-0 gap-1">
-                                <button
-                                  type="button"
-                                  className="min-h-10 min-w-10 rounded border disabled:cursor-not-allowed disabled:opacity-40"
-                                  aria-label={`上移 ${team.name}内 ${combatantName}`}
-                                  disabled={disabled || combatantIndex === 0}
-                                  onClick={() => mutate((draft) => ({
-                                    ...draft,
-                                    teams: draft.teams.map((entry) => entry.key === team.key
-                                      ? { ...entry, combatantKeys: moveItem(entry.combatantKeys, combatantIndex, combatantIndex - 1) }
-                                      : entry),
-                                  }))}
-                                >↑</button>
-                                <button
-                                  type="button"
-                                  className="min-h-10 min-w-10 rounded border disabled:cursor-not-allowed disabled:opacity-40"
-                                  aria-label={`下移 ${team.name}内 ${combatantName}`}
-                                  disabled={disabled || combatantIndex === team.combatantKeys.length - 1}
-                                  onClick={() => mutate((draft) => ({
-                                    ...draft,
-                                    teams: draft.teams.map((entry) => entry.key === team.key
-                                      ? { ...entry, combatantKeys: moveItem(entry.combatantKeys, combatantIndex, combatantIndex + 1) }
-                                      : entry),
-                                  }))}
-                                >↓</button>
-                              </span>
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    ) : null}
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-            <ArenaRosterList
-              items={snapshot.combatants.map((item) => ({
-                ...item,
-                displayName: item.name,
-                typeLabel: item.type ?? (
-                  item.source === 'preset' ? '内置预设' : item.access === 'stub' ? '房主本地角色' : '在线角色'
-                ),
-                guidance: item.characterGuidance,
-              }))}
-              emptyLabel="房间配置没有角色"
-              renderItem={(item, index) => (
-                <ArenaRosterRow
-                  key={item.key}
-                  item={item}
-                  index={index}
-                  total={snapshot.combatants.length}
-                  capabilities={{ guidance: true, remove: true, reorder: true }}
-                  guidanceExpanded={!collapsedGuidanceKeys.has(item.key)}
-                  onToggleGuidance={() => setCollapsedGuidanceKeys((current) => {
-                    const next = new Set(current);
-                    if (next.has(item.key)) next.delete(item.key);
-                    else next.add(item.key);
-                    return next;
-                  })}
-                  onGuidanceChange={(value) => mutate((draft) => ({
-                    ...draft,
-                    combatants: draft.combatants.map((entry) => entry.key === item.key
-                      ? { ...entry, ...(value.trim() ? { characterGuidance: value } : { characterGuidance: undefined }) }
-                      : entry),
-                  }))}
-                  onMove={(fromIndex, toIndex) => mutate((draft) => ({
-                    ...draft,
-                    combatants: moveItem(draft.combatants, fromIndex, toIndex),
-                  }))}
-                  onRemove={() => mutate((draft) => ({
-                    ...draft,
-                    combatants: draft.combatants.filter((entry) => entry.key !== item.key),
-                    teams: draft.teams.map((team) => ({
-                      ...team,
-                      combatantKeys: team.combatantKeys.filter((key) => key !== item.key),
-                    })),
-                  }))}
-                />
-              )}
-            />
-            {snapshot.combatants.map((combatant) => (
-              <label key={`team:${combatant.key}`} className="mt-2 flex items-center gap-2 text-xs">
-                <span className="min-w-24 truncate">{combatant.name}</span>
-                <select
-                  value={combatant.teamKey ?? ''}
-                  className="rounded border px-2 py-1"
-                  onChange={(event) => mutate((draft) => ({
-                    ...draft,
-                    teams: draft.teams.map((team) => ({
-                      ...team,
-                      combatantKeys: team.key === event.target.value
-                        ? [...team.combatantKeys.filter((key) => key !== combatant.key), combatant.key]
-                        : team.combatantKeys.filter((key) => key !== combatant.key),
-                    })),
-                  }))}
-                >
-                  <option value="">未分队</option>
-                  {snapshot.teams.map((team) => <option key={team.key} value={team.key}>{team.name}</option>)}
-                </select>
-              </label>
-            ))}
-              </>
             ),
           },
           {

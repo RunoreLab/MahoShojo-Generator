@@ -29,6 +29,8 @@ type ArenaRosterRowProps = {
   capabilities?: ArenaRosterCapabilities;
   guidanceExpanded?: boolean;
   copied?: boolean;
+  /** 队内重排等场景下的移动按钮语义宾语；缺省用角色名。 */
+  moveGroupLabel?: string;
   rankingBadge?: ReactNode;
   ranking?: ReactNode;
   onMove?: (fromIndex: number, toIndex: number) => void;
@@ -52,6 +54,7 @@ export function ArenaRosterRow({
   capabilities = {},
   guidanceExpanded = false,
   copied = false,
+  moveGroupLabel,
   rankingBadge,
   ranking,
   onMove,
@@ -63,6 +66,7 @@ export function ArenaRosterRow({
   onRemove,
 }: ArenaRosterRowProps) {
   const guidanceValue = item.guidance ?? '';
+  const moveLabel = moveGroupLabel ?? item.displayName;
   const canMove = capabilities.reorder ? onMove : undefined;
   const toggleGuidance = capabilities.guidance ? onToggleGuidance : undefined;
   const updateGuidance = capabilities.guidance ? onGuidanceChange : undefined;
@@ -77,7 +81,7 @@ export function ArenaRosterRow({
               onClick={() => canMove?.(index, index - 1)}
               disabled={disabled || !canMove || index === 0}
               className="min-h-10 min-w-10 text-xs rounded border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
-              aria-label={`上移 ${item.displayName}`}
+              aria-label={`上移 ${moveLabel}`}
               title="上移"
             >
               ↑
@@ -87,7 +91,7 @@ export function ArenaRosterRow({
               onClick={() => canMove?.(index, index + 1)}
               disabled={disabled || !canMove || index === total - 1}
               className="min-h-10 min-w-10 text-xs rounded border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
-              aria-label={`下移 ${item.displayName}`}
+              aria-label={`下移 ${moveLabel}`}
               title="下移"
             >
               ↓
