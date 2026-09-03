@@ -5,6 +5,7 @@ import {
   type GenerationStreamEvent,
 } from '@mahoshojo/hosted-api/arena-generation/service';
 import { parseArenaStructuredReportJson } from '../arena-generation/structured-report';
+import { normalizeUsage } from '../node-runtime/usage';
 
 export const ARENA_COMPANION_OPERATION_HEADER = 'x-mahoshojo-arena-companion-operation';
 export const ARENA_COMPANION_PLACEMENT_HEADER = 'x-mahoshojo-arena-execution-placement';
@@ -417,7 +418,7 @@ export const createArenaCompanionService = (
       || section(collected.markdown, '(?:最终结果|final result)');
     const impacts = normalizeImpacts(structuredReport?.impacts ?? collected.meta.impacts);
     const reporterInfo = recordOf(headerMeta.reporterInfo) ?? { name: '', publication: '' };
-    const usage = recordOf(collected.telemetry.usage);
+    const usage = normalizeUsage(collected.telemetry.usage);
     const telemetryReasoning = recordOf(collected.telemetry.reasoning);
     const model = textOf(collected.telemetry.model);
     const mode = textOf(payload.mode) || 'classic';

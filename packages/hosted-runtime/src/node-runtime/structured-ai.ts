@@ -12,6 +12,7 @@ import {
 } from '@mahoshojo/ai-core/structured-json';
 import { classifySuccess, classifyOutcome } from './outcome-classification';
 import { buildReasoningSummary } from './reasoning-normalizer';
+import { normalizeUsage } from './usage';
 import { createSafeAiRuntimeLogger, silentLogger } from './logger';
 import type {
   AIProvider,
@@ -510,7 +511,7 @@ async function generateWithAIUsing<T, I = string>(
             });
 
             if (options?.telemetry) {
-              options.telemetry.usage = textResult.usage;
+              options.telemetry.usage = normalizeUsage(textResult.usage) ?? undefined;
               options.telemetry.finishReason = textResult.finishReason;
               options.telemetry.reasoning = buildNonStreamReasoningEnvelope(textResult.reasoningText, textResult.usage);
             }
@@ -576,7 +577,7 @@ async function generateWithAIUsing<T, I = string>(
               });
 
               if (options?.telemetry) {
-                options.telemetry.usage = rawError.usage;
+                options.telemetry.usage = normalizeUsage(rawError.usage) ?? undefined;
                 options.telemetry.finishReason = rawError.finishReason;
                 options.telemetry.reasoning = buildNonStreamReasoningEnvelope(undefined, rawError.usage);
               }
@@ -666,7 +667,7 @@ async function generateWithAIUsing<T, I = string>(
           );
         }
         if (options?.telemetry) {
-          options.telemetry.usage = usage;
+          options.telemetry.usage = normalizeUsage(usage) ?? undefined;
           options.telemetry.finishReason = finishReason;
           options.telemetry.reasoning = reasoning;
         }

@@ -134,6 +134,37 @@ describe('hydrateBattleReportCardFromGenerationRecord', () => {
     expect(result.liveBody).not.toContain('MAHOSHOJO_TELEMETRY_META');
   });
 
+  it('normalizes legacy raw SDK usage fields inside telemetry meta comments', async () => {
+    const markdown = [
+      '正文第一段。',
+      '',
+      '<!-- MAHOSHOJO_TELEMETRY_META {"version":1,"usage":{"inputTokens":100,"outputTokens":20,"reasoningTokens":5,"totalTokens":120}} -->',
+    ].join('\n');
+
+    const result = await hydrateBattleReportCardFromGenerationRecord({
+      generationMode: 'stream',
+      endpoint: 'api/arena/generate-stream',
+      mode: 'classic',
+      scenarioTitle: null,
+      headline: null,
+      winner: null,
+      outputPreview: markdown,
+      aiModel: null,
+      promptTokens: null,
+      completionTokens: null,
+      totalTokens: null,
+      cachedTokens: null,
+      reasoningTokens: null,
+    });
+
+    expect(result.report.aiUsage).toMatchObject({
+      promptTokens: 100,
+      completionTokens: 20,
+      reasoningTokens: 5,
+      totalTokens: 120,
+    });
+  });
+
   it('prefers authoritative stream meta over poisoned record winner/headline', async () => {
     const markdown = `
 winner: 假赢家

@@ -47,6 +47,7 @@ import { createNodeRawStreamAiRuntime } from '../node-runtime/raw-stream-ai';
 import { createNodeStructuredAiRuntime } from '../node-runtime/structured-ai';
 import { quickCheckForServer } from '../node-runtime/sensitive-word-filter';
 import { isAiPreDispatchRetrySafe } from '../node-runtime/retry-safety';
+import { normalizeUsage } from '../node-runtime/usage';
 import type { SignatureService } from '../signature';
 import {
   LoadBalanceStrategy,
@@ -472,7 +473,8 @@ const wrapTelemetry = (
           usagePromise?.catch(() => null) ?? null,
           finishReasonPromise?.catch(() => null) ?? null,
         ]);
-        if (usage !== null) telemetry.usage = usage;
+        const normalizedUsage = normalizeUsage(usage);
+        if (normalizedUsage) telemetry.usage = normalizedUsage;
         if (typeof finishReason === 'string' && finishReason.trim()) {
           telemetry.finishReason = finishReason.trim();
         }

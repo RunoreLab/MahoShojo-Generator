@@ -1,5 +1,6 @@
 import type { NewsReport } from '@/components/BattleReportCard';
 import type { BattleReportRenderSnapshotV1 } from '@mahoshojo/contracts';
+import { normalizeUsage } from '@/lib/arena/battle-report-log-utils';
 import { summarizeStreamBattleReportPreview } from '@/lib/arena/stream-report-summary';
 import {
   extractStreamTelemetryMeta,
@@ -309,7 +310,7 @@ export async function hydrateBattleReportCardFromGenerationRecord(input: {
     ...(userGuidance ? { userGuidance } : {}),
   };
 
-  const usageFromTelemetry = telemetryExtracted?.meta?.usage as NewsReport['aiUsage'] | undefined;
+  const usageFromTelemetry = normalizeUsage(telemetryExtracted?.meta?.usage ?? null) ?? undefined;
   report.aiUsage = mergeUsage(usageFromTelemetry, usageFromRecord);
 
   const aiModelFromTelemetry = typeof telemetryExtracted?.meta?.aiModel === 'string' && telemetryExtracted.meta.aiModel.trim()

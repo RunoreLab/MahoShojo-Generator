@@ -57,6 +57,7 @@ import {
   type ArenaReconciliationRetryCombatant,
 } from '@/lib/arena/reconciliation-retry';
 import { readScenarioBattleStoryConfig } from '@/lib/scenario-battle-story';
+import { normalizeUsage } from '@/lib/arena/battle-report-log-utils';
 import { readTextAndReasoningStreamFromResponse } from '@/lib/stream/read-text-and-reasoning-stream';
 import { STREAM_ABORT_REASON_USER } from '@/lib/stream/abort';
 import { buildStreamSoftTimeoutMessage } from '@/lib/stream/timeout';
@@ -1013,10 +1014,7 @@ export function useBattleStorySession() {
           onTelemetry: (payload) => {
             patchStreamCardSnapshot({
               aiModel: typeof payload.aiModel === 'string' ? payload.aiModel.trim() : null,
-              aiUsage:
-                payload.usage && typeof payload.usage === 'object'
-                  ? (payload.usage as BattleStoryChapterCardSnapshot['aiUsage'])
-                  : null,
+              aiUsage: normalizeUsage(payload.usage),
               narrativeHistoryReadCount:
                 typeof payload.narrativeHistoryReadCount === 'number'
                   ? payload.narrativeHistoryReadCount

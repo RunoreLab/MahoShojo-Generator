@@ -1,6 +1,7 @@
 import { z } from 'zod/v3';
 
 import { repairNormalizeValidate } from '@/lib/repair-pipeline';
+import { normalizeUsage } from '@/lib/arena/battle-report-log-utils';
 
 export const STREAM_UPDATE_META_MARKERS = [
   'MAHOSHOJO_ARENA_META',
@@ -580,17 +581,9 @@ const sanitizeTelemetryMeta = (meta: StreamTelemetryMeta): NormalizedStreamTelem
   }
 
   if (out.usage && isRecord(out.usage)) {
-    const readNumber = (value: unknown) => (typeof value === 'number' && Number.isFinite(value) ? Math.floor(value) : null);
-    const usageRecord = out.usage as Record<string, unknown>;
-    const normalizedUsage = {
-      ...(readNumber(usageRecord.promptTokens) !== null ? { promptTokens: readNumber(usageRecord.promptTokens) } : {}),
-      ...(readNumber(usageRecord.reasoningTokens) !== null ? { reasoningTokens: readNumber(usageRecord.reasoningTokens) } : {}),
-      ...(readNumber(usageRecord.completionTokens) !== null ? { completionTokens: readNumber(usageRecord.completionTokens) } : {}),
-      ...(readNumber(usageRecord.totalTokens) !== null ? { totalTokens: readNumber(usageRecord.totalTokens) } : {}),
-      ...(readNumber(usageRecord.cachedTokens) !== null ? { cachedTokens: readNumber(usageRecord.cachedTokens) } : {}),
-    };
-    out.usage = normalizedUsage;
-    if (Object.keys(normalizedUsage).length === 0) delete out.usage;
+    const normalizedUsage = normalizeUsage(out.usage);
+    out.usage = normalizedUsage ?? undefined;
+    if (!normalizedUsage) delete out.usage;
   }
 
   if (typeof out.narrativeHistoryReadCount === 'number') {

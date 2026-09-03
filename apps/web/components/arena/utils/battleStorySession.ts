@@ -2,6 +2,7 @@
 
 import { randomUUID } from '@/lib/crypto';
 import { formatBattleStoryChapterProgress } from '@/lib/ai-session/battle-story/plan';
+import { normalizeUsage } from '@/lib/arena/battle-report-log-utils';
 import { normalizeCustomStoryLength } from '@/lib/story-length';
 import {
   buildAdjudicationRecordMarkdown,
@@ -89,24 +90,8 @@ const normalizeCharacterGuidances = (
   return normalized.length > 0 ? normalized : null;
 };
 
-const normalizeAiUsage = (value: unknown): BattleStoryChapterCardSnapshot['aiUsage'] | null => {
-  if (!isRecord(value)) return null;
-  const normalized: NonNullable<BattleStoryChapterCardSnapshot['aiUsage']> = {};
-  const fields: Array<keyof NonNullable<BattleStoryChapterCardSnapshot['aiUsage']>> = [
-    'promptTokens',
-    'reasoningTokens',
-    'completionTokens',
-    'totalTokens',
-    'cachedTokens',
-  ];
-  for (const field of fields) {
-    const tokenValue = value[field];
-    if (typeof tokenValue === 'number' && Number.isFinite(tokenValue)) {
-      normalized[field] = tokenValue;
-    }
-  }
-  return Object.keys(normalized).length > 0 ? normalized : null;
-};
+const normalizeAiUsage = (value: unknown): BattleStoryChapterCardSnapshot['aiUsage'] | null =>
+  normalizeUsage(value);
 
 const buildInlineMetaDebugFromReportJson = (
   reportJson: Record<string, unknown>

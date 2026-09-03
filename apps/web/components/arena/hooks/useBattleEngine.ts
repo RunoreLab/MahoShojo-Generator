@@ -25,6 +25,7 @@ import { useBattleActions } from './useBattleActions';
 import { useStreamCombatantUpdater } from './useStreamCombatantUpdater';
 import { toBattleReportMarkdown } from '../utils/battleReportMarkdown';
 import { extractStreamTelemetryMeta, extractStreamUpdateMeta, stripStreamUpdateMetaComment } from '@/lib/arena/stream-meta';
+import { normalizeUsage } from '@/lib/arena/battle-report-log-utils';
 import {
   buildStreamSoftTimeoutMessage,
   createStreamReadWithTimeout,
@@ -1434,9 +1435,9 @@ export const useBattleEngine = () => {
               }
 
               if (event === 'telemetry') {
-                const usage = payload?.usage ?? null;
-                setStreamAiUsage((usage ?? null) as NewsReport['aiUsage'] | null);
-                if (usage && typeof usage === 'object' && typeof usage.reasoningTokens === 'number') {
+                const usage = normalizeUsage(payload?.usage ?? null);
+                setStreamAiUsage(usage);
+                if (usage && typeof usage.reasoningTokens === 'number') {
                   const previous = useBattleStore.getState().streamReasoning;
                   if (previous) {
                     const next = {
@@ -1728,12 +1729,12 @@ export const useBattleEngine = () => {
               // 先移除并提取系统追加的 telemetry 注释（token/叙事历史读取条数），避免影响后续更新元数据解析。
               const telemetryExtracted = await extractStreamTelemetryMeta(accumulatedText);
               if (telemetryExtracted?.meta) {
-                const usage = telemetryExtracted.meta.usage ?? null;
+                const usage = normalizeUsage(telemetryExtracted.meta.usage ?? null);
                 const narrativeCount =
                   typeof telemetryExtracted.meta.narrativeHistoryReadCount === 'number'
                     ? telemetryExtracted.meta.narrativeHistoryReadCount
                     : null;
-                setStreamAiUsage((usage ?? null) as NewsReport['aiUsage'] | null);
+                setStreamAiUsage(usage);
                 setStreamNarrativeHistoryReadCount(narrativeCount);
                 const aiModel = typeof telemetryExtracted.meta.aiModel === 'string' ? telemetryExtracted.meta.aiModel.trim() : '';
                 if (aiModel) {

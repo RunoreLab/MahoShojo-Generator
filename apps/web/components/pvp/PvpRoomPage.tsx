@@ -28,6 +28,7 @@ import { ImagePreviewModal } from '@/components/shared/ImagePreviewModal';
 import { StreamStopButton } from '@/components/shared/StreamStopButton';
 import { PvpSettlementCardModal } from '@/components/pvp/PvpSettlementCardModal';
 import { authStorage } from '@/lib/auth';
+import { normalizeUsage } from '@/lib/arena/battle-report-log-utils';
 import { useClientRouteAdapter } from '@/lib/client-route-adapter';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useCooldown } from '@/lib/cooldown';
@@ -1273,10 +1274,10 @@ export function PvpRoomPage() {
             }
 
             if (event === 'telemetry') {
-              const usage = payload?.usage ?? null;
+              const usage = normalizeUsage(payload?.usage ?? null);
               const aiModel = typeof payload?.aiModel === 'string' ? payload.aiModel.trim() : '';
               const nextPatch: Record<string, unknown> = {};
-              if (usage && typeof usage === 'object') {
+              if (usage) {
                 nextPatch.aiUsage = usage;
                 if (typeof usage.reasoningTokens === 'number') {
                   patchReasoningMeta({ reasoningTokens: usage.reasoningTokens });

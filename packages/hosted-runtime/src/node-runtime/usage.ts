@@ -37,6 +37,7 @@ export const normalizeUsage = (usage: unknown): UsageLike | null => {
   const totalTokens = readFirst(root, ['totalTokens', 'total_tokens']);
   const cachedTokens = readFirst(root, [
     'cachedTokens', 'cached_tokens', 'cacheTokens', 'cache_tokens',
+    'cachedInputTokens', 'cached_input_tokens',
     'promptCacheTokens', 'prompt_cache_tokens',
     'promptTokensDetails.cachedTokens', 'prompt_tokens_details.cached_tokens',
     'promptTokensDetails.cached_tokens',

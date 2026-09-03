@@ -959,4 +959,70 @@ describe('Node Arena generation executor', () => {
       taskName: '生成classic模式故事',
     });
   });
+
+  it('streams provider usage through normalizeUsage so telemetry carries canonical token fields', async () => {
+    const generateWithStreamAI = vi.fn(async () => ({
+      response: new Response('正文'),
+      usagePromise: Promise.resolve({
+        inputTokens: 100,
+        outputTokens: 20,
+        reasoningTokens: 5,
+        cachedInputTokens: 8,
+        totalTokens: 120,
+      }),
+      finishReasonPromise: Promise.resolve('stop'),
+    }));
+    const executor = createNodeArenaGenerationExecutor({
+      env: {},
+      finalizer,
+      signatureService,
+      enforceSafety: vi.fn(async () => null),
+      generateWithStreamAI,
+    });
+    const prepared = await executor.prepare!({
+      request: new Request('https://example.test/api/arena/generate-stream'),
+      actorKey: 'anonymous:test',
+      generationRequestId: 'request-usage-normalize',
+      payload: {
+        ...validPayload,
+        readArenaHistory: false,
+        readCurrentState: false,
+        readNarrativeHistory: false,
+        writeArenaHistory: false,
+        writeCurrentState: false,
+        isDowngrade: true,
+      },
+    });
+    if (
+      prepared instanceof Response
+      || isArenaGenerationAuditableRejection(prepared)
+    ) throw new Error('unexpected response');
+    const emitted: Array<{ type: string; data?: unknown }> = [];
+    const terminal = await executor.execute({
+      generationId: 'generation-usage-normalize',
+      generationRequestId: 'request-usage-normalize',
+      actorKey: 'anonymous:test',
+      producerToken: 'producer-token-usage-normalize',
+      payloadHash: 'payload-hash-usage-normalize',
+      payload: prepared.executionPayload,
+      signal: new AbortController().signal,
+      emit: vi.fn(async (event: { type: string; data?: unknown }) => {
+        emitted.push(event);
+      }),
+      claimFinalization: vi.fn(async () => ({ kind: 'claimed' as const })),
+    });
+
+    expect(terminal.status).toBe('completed');
+    const telemetryEvent = emitted.find((event) => event.type === 'telemetry');
+    expect(telemetryEvent).toBeDefined();
+    expect(telemetryEvent?.data).toMatchObject({
+      usage: {
+        promptTokens: 100,
+        completionTokens: 20,
+        reasoningTokens: 5,
+        cachedTokens: 8,
+        totalTokens: 120,
+      },
+    });
+  });
 });

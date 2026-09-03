@@ -39,6 +39,23 @@ describe('normalizeUsage', () => {
     expect(usage!.reasoningTokens).toBe(7);
   });
 
+  test('maps AI SDK cachedInputTokens to cachedTokens', () => {
+    const usage = normalizeUsage({
+      inputTokens: 100,
+      outputTokens: 20,
+      reasoningTokens: 5,
+      cachedInputTokens: 8,
+      totalTokens: 120,
+    });
+    expect(usage).toEqual({
+      promptTokens: 100,
+      completionTokens: 20,
+      reasoningTokens: 5,
+      cachedTokens: 8,
+      totalTokens: 120,
+    });
+  });
+
   test('returns null when no usable token fields exist', () => {
     expect(normalizeUsage({})).toBeNull();
     expect(normalizeUsage({ usage: {} })).toBeNull();
