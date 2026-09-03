@@ -9,6 +9,7 @@ import type { ArenaRoomSharedConfig } from '@mahoshojo/contracts/arena-room';
 import { createRoomProposalArenaEditorSession } from '@/components/arena/editor';
 import { ArenaRoomProposalWorkspaceView } from '@/components/arena/multiplayer/ArenaRoomProposalWorkspace';
 import { arenaProposalExpectedBaseSummary } from '@/components/arena/multiplayer/ArenaProposalPanel';
+import { MAX_ARENA_REFERENCE_ITEMS } from '@/lib/arena/resource-budget';
 import type {
   ArenaRoomController,
   ArenaRoomControllerState,
@@ -577,6 +578,115 @@ describe('Arena room Proposal workspace', () => {
     expect(document.body.textContent).toContain('调整角色顺序');
     expect(document.body.textContent).toContain('调整队伍 team:a 内角色顺序');
     expect(document.body.textContent).toContain('调整素材顺序');
+    editor.dispose();
+  });
+
+  it('情景区块在无主情景时禁用辅助情景在线库入口并提示门槛，选择主情景后恢复', async () => {
+    const scenarioModeConfig: ArenaRoomSharedConfig = {
+      ...sharedConfig,
+      battleMode: 'scenario',
+    };
+    const editor = createRoomProposalArenaEditorSession({
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      revision: 7,
+      sharedConfig: scenarioModeConfig,
+    });
+    const scenarioModeState: ArenaRoomControllerState = {
+      ...state,
+      session: state.session ? {
+        ...state.session,
+        snapshot: { ...state.session.snapshot, sharedConfig: scenarioModeConfig },
+      } : null,
+    };
+    const controller = {
+      submitProposal: vi.fn(async () => undefined),
+      withdrawProposal: vi.fn(async () => undefined),
+      reconnect: vi.fn(),
+    } satisfies Pick<ArenaRoomController, 'reconnect' | 'submitProposal' | 'withdrawProposal'>;
+
+    await act(async () => root.render(
+      <ArenaRoomProposalWorkspaceView editor={editor} state={scenarioModeState} controller={controller} />,
+    ));
+
+    expect(container.textContent).toContain('参考项合计 0/256');
+    await act(async () => buttonContaining('辅助情景（可选）').click());
+    expect(container.textContent).toContain('（请先选择主情景）');
+    const auxBrowseButtons = buttonsWithText('浏览在线情景库');
+    expect(auxBrowseButtons.length).toBe(2);
+    expect(auxBrowseButtons[0]!.disabled).toBe(false);
+    expect(auxBrowseButtons[1]!.disabled).toBe(true);
+    const materialBrowse = button('浏览在线数据卡');
+    expect(materialBrowse.disabled).toBe(false);
+
+    await act(async () => buttonContaining('预设情景（内置）').click());
+    const curatedScenarioToggle = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="选择预设情景：谨遵女王之意（A.R.E.N.A.）"]',
+    );
+    if (!curatedScenarioToggle) throw new Error('curated scenario picker item not found');
+    await act(async () => curatedScenarioToggle.click());
+
+    expect(editor.exportSharedConfig().scenario).toMatchObject({
+      key: 'preset:S01_queen_will.json',
+    });
+    expect(container.textContent).not.toContain('（请先选择主情景）');
+    const auxBrowseAfter = buttonsWithText('浏览在线情景库');
+    expect(auxBrowseAfter.length).toBe(2);
+    expect(auxBrowseAfter[1]!.disabled).toBe(false);
+    editor.dispose();
+  });
+
+  it('素材与辅助情景入口投影参考项联合预算，预算用尽时禁用', async () => {
+    const auxScenarios = Array.from({ length: MAX_ARENA_REFERENCE_ITEMS }, (_, index) => ({
+      key: `data-card:scenario-aux-${index}`,
+      ref: {
+        id: `scenario-aux-${index}`,
+        kind: 'scenario' as const,
+        versionToken: `version-aux-${index}`,
+      },
+    }));
+    const exhaustedConfig: ArenaRoomSharedConfig = {
+      ...sharedConfig,
+      battleMode: 'scenario',
+      scenario: {
+        key: 'data-card:scenario-main',
+        ref: { id: 'scenario-main', kind: 'scenario', versionToken: 'version-main' },
+      },
+      auxScenarios,
+    };
+    const editor = createRoomProposalArenaEditorSession({
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      revision: 7,
+      sharedConfig: exhaustedConfig,
+    });
+    const exhaustedState: ArenaRoomControllerState = {
+      ...state,
+      session: state.session ? {
+        ...state.session,
+        snapshot: { ...state.session.snapshot, sharedConfig: exhaustedConfig },
+      } : null,
+    };
+    const controller = {
+      submitProposal: vi.fn(async () => undefined),
+      withdrawProposal: vi.fn(async () => undefined),
+      reconnect: vi.fn(),
+    } satisfies Pick<ArenaRoomController, 'reconnect' | 'submitProposal' | 'withdrawProposal'>;
+
+    await act(async () => root.render(
+      <ArenaRoomProposalWorkspaceView editor={editor} state={exhaustedState} controller={controller} />,
+    ));
+
+    expect(container.textContent).toContain('已选素材 0；参考项合计 256/256');
+    expect(button('浏览在线数据卡').disabled).toBe(true);
+
+    await act(async () => buttonContaining('辅助情景（可选）').click());
+    expect(container.textContent).not.toContain('（请先选择主情景）');
+    expect(container.textContent).toContain('（参考项总预算已用尽）');
+    expect(container.textContent).toContain('参考项合计 256/256');
+    const auxBrowseButtons = buttonsWithText('浏览在线情景库');
+    expect(auxBrowseButtons.length).toBe(2);
+    expect(auxBrowseButtons[1]!.disabled).toBe(true);
     editor.dispose();
   });
 });

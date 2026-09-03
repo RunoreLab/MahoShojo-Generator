@@ -71,11 +71,14 @@ export const useSoloMaterialSectionModel = (input: {
         clearMaterials();
         setError(null);
       },
-      upload: (files) => { void handleMaterialUpload(files); },
-      paste: (text) => {
-        void handleMaterialPaste(text).catch((error) => {
+      upload: (files) => handleMaterialUpload(files),
+      paste: async (text) => {
+        try {
+          await handleMaterialPaste(text);
+        } catch (error) {
           setError(`❌ ${error instanceof Error ? error.message : '素材解析失败'}`);
-        });
+          throw error;
+        }
       },
       move: moveMaterial,
       remove: removeMaterial,

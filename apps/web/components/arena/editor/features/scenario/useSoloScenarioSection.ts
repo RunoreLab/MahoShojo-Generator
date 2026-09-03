@@ -215,15 +215,32 @@ export const useSoloScenarioSectionModel = (input: {
         clearScenario();
         setError(null);
       },
-      uploadMain: (file) => { void handleScenarioUpload(file).catch(reportError); },
-      pasteMain: (text) => { void handleScenarioPaste(text).catch(reportError); },
+      uploadMain: async (file) => {
+        try {
+          await handleScenarioUpload(file);
+        } catch (error) {
+          reportError(error);
+          throw error;
+        }
+      },
+      pasteMain: async (text) => {
+        try {
+          await handleScenarioPaste(text);
+        } catch (error) {
+          reportError(error);
+          throw error;
+        }
+      },
       openAuxModal: onOpenAuxModal,
       randomMatchAux: () => { void handleRandomMatchAuxScenario(); },
-      uploadAux: (files) => { void uploadAux(files); },
-      pasteAux: (text) => {
-        void handleAuxScenarioPaste(text).catch((error) => {
+      uploadAux: (files) => uploadAux(files),
+      pasteAux: async (text) => {
+        try {
+          await handleAuxScenarioPaste(text);
+        } catch (error) {
           reportError(error);
-        });
+          throw error;
+        }
       },
       togglePreset: (filename) => { void togglePreset(filename); },
       moveAux: moveAuxScenario,

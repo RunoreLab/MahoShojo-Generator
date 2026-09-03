@@ -32,6 +32,8 @@ export function ArenaScenarioSection({ model }: Readonly<{ model: ArenaScenarioS
     if (!files || files.length === 0) return;
     try {
       await actions.uploadAux(files);
+    } catch {
+      // 失败原因由 adapter 呈现；文件输入无用户输入可保留，仅需复位。
     } finally {
       if (auxInputRef.current) {
         auxInputRef.current.value = '';
@@ -40,8 +42,12 @@ export function ArenaScenarioSection({ model }: Readonly<{ model: ArenaScenarioS
   };
 
   const onAuxPaste = async () => {
-    await actions.pasteAux(auxPastedJson);
-    setAuxPastedJson('');
+    try {
+      await actions.pasteAux(auxPastedJson);
+      setAuxPastedJson('');
+    } catch {
+      // 失败原因由 adapter 呈现；保留输入，避免用户重写整段 JSON。
+    }
   };
 
   return (

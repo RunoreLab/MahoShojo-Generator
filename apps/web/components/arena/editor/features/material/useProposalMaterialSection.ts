@@ -11,6 +11,7 @@ import {
 import type { RoomProposalArenaEditorSession } from '../../types';
 import { moveItemInList } from '../move-item';
 import type { ArenaMaterialSectionModel } from './material-contract';
+import { MAX_ARENA_REFERENCE_ITEMS } from '@/lib/arena/resource-budget';
 
 const PROPOSAL_MATERIAL_NOTICE = '内置素材预设暂不可用：目前没有经过服务器确认的素材目录，避免未验证的正文进入提案。';
 
@@ -36,8 +37,8 @@ const inertModel: ArenaMaterialSectionModel = {
   actions: {
     openModal: () => undefined,
     clearAll: () => undefined,
-    upload: () => undefined,
-    paste: () => undefined,
+    upload: async () => undefined,
+    paste: async () => undefined,
     move: () => undefined,
     remove: () => undefined,
   },
@@ -67,6 +68,9 @@ export const useProposalMaterialSectionModel = (input: {
       }
     };
 
+    // Shared Config contract 的联合预算：auxScenarios + materials 合计上限。
+    const referenceItemCount = state.auxScenarios.length + state.materials.length;
+
     return {
       disabled,
       items: state.materials.map((item) => ({
@@ -75,9 +79,9 @@ export const useProposalMaterialSectionModel = (input: {
         sourceLabel: proposalSourceLabel(item.source),
         fileName: null,
       })),
-      statsLine: null,
+      statsLine: `已选素材 ${state.materials.length}；参考项合计 ${referenceItemCount}/${MAX_ARENA_REFERENCE_ITEMS}`,
       notice: PROPOSAL_MATERIAL_NOTICE,
-      hasReferenceCapacity: true,
+      hasReferenceCapacity: referenceItemCount < MAX_ARENA_REFERENCE_ITEMS,
       capabilities: {
         browseOnline: true,
         clearAll: true,
@@ -88,8 +92,8 @@ export const useProposalMaterialSectionModel = (input: {
       actions: {
         openModal: onOpenModal,
         clearAll: () => update((draft) => ({ ...draft, materials: [] })),
-        upload: () => undefined,
-        paste: () => undefined,
+        upload: async () => undefined,
+        paste: async () => undefined,
         move: (fromIndex, toIndex) => update((draft) => ({
           ...draft,
           materials: moveItemInList(draft.materials, fromIndex, toIndex),

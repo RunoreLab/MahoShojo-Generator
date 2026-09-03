@@ -13,6 +13,7 @@ import { moveItemInList } from '../move-item';
 import type { ArenaScenarioSectionModel } from './scenario-contract';
 import { SCENARIO_PRESET_LIST, type ScenarioPreset } from '@/lib/scenario-presets';
 import { ARENA_ROOM_PRESET_CATALOG } from '@/lib/arena-room/generated/arena-room-preset-catalog';
+import { MAX_ARENA_REFERENCE_ITEMS } from '@/lib/arena/resource-budget';
 
 const PRESET_KEY_PREFIX = 'preset:';
 
@@ -57,12 +58,12 @@ const inertModel: ArenaScenarioSectionModel = {
     openMainModal: () => undefined,
     randomMatchMain: () => undefined,
     clearMain: () => undefined,
-    uploadMain: () => undefined,
-    pasteMain: () => undefined,
+    uploadMain: async () => undefined,
+    pasteMain: async () => undefined,
     openAuxModal: () => undefined,
     randomMatchAux: () => undefined,
-    uploadAux: () => undefined,
-    pasteAux: () => undefined,
+    uploadAux: async () => undefined,
+    pasteAux: async () => undefined,
     togglePreset: () => undefined,
     moveAux: () => undefined,
     removeAux: () => undefined,
@@ -102,6 +103,10 @@ export const useProposalScenarioSectionModel = (input: {
         .map((item) => item.key.slice(PRESET_KEY_PREFIX.length)),
     ];
 
+    // Shared Config contract 的联合预算：auxScenarios + materials 合计上限。
+    const referenceItemCount = state.auxScenarios.length + state.materials.length;
+    const hasReferenceCapacity = referenceItemCount < MAX_ARENA_REFERENCE_ITEMS;
+
     const togglePreset = (filename: string) => {
       const key = `${PRESET_KEY_PREFIX}${filename}`;
       const entry = ARENA_ROOM_PRESET_CATALOG.find((item) => item.kind === 'scenario' && item.id === filename);
@@ -123,7 +128,10 @@ export const useProposalScenarioSectionModel = (input: {
 
     return {
       disabled,
-      isAuthenticated: false,
+      // Proposal 编辑者必然已登录（进入房间需认证），且私有数据卡被提案安全边界
+      // 整体禁止、与登录态无关；isAuthenticated 仅用于 solo 的“登录后可访问私有
+      // 数据卡”提示，此处恒为 true 以避免误导用户重复登录。
+      isAuthenticated: true,
       isMatchingBlocked: false,
       isMatchingScenario: false,
       mainName: state.scenario?.name ?? null,
@@ -133,8 +141,8 @@ export const useProposalScenarioSectionModel = (input: {
         title: item.name,
         isNative: false,
       })),
-      auxBudgetLine: null,
-      auxBudgetExhausted: false,
+      auxBudgetLine: `参考项合计 ${referenceItemCount}/${MAX_ARENA_REFERENCE_ITEMS}`,
+      auxBudgetExhausted: !hasReferenceCapacity,
       presets: proposalScenarioPresets,
       presetsLoading: false,
       presetsError: null,
@@ -148,7 +156,9 @@ export const useProposalScenarioSectionModel = (input: {
         pasteMain: false,
         presetRefs: editor.capabilities.canAddPresetRefs,
         auxSection: true,
-        addAux: true,
+        // 与 solo 相同的用户级门槛：先有主情景，且参考项联合预算未用尽
+        // （Shared Config 对 auxScenarios + materials 有合计上限）。
+        addAux: state.scenario !== null && hasReferenceCapacity,
         browseAux: true,
         randomMatchAux: false,
         uploadAux: false,
@@ -161,12 +171,12 @@ export const useProposalScenarioSectionModel = (input: {
         openMainModal: onOpenMainModal,
         randomMatchMain: () => undefined,
         clearMain: () => update((draft) => ({ ...draft, scenario: null })),
-        uploadMain: () => undefined,
-        pasteMain: () => undefined,
+        uploadMain: async () => undefined,
+        pasteMain: async () => undefined,
         openAuxModal: onOpenAuxModal,
         randomMatchAux: () => undefined,
-        uploadAux: () => undefined,
-        pasteAux: () => undefined,
+        uploadAux: async () => undefined,
+        pasteAux: async () => undefined,
         togglePreset,
         moveAux: (fromIndex, toIndex) => update((draft) => ({
           ...draft,

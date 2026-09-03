@@ -35,6 +35,8 @@ export type ArenaScenarioSectionCapabilities = Readonly<{
 
 export type ArenaScenarioSectionModel = Readonly<{
   disabled: boolean;
+  /** 仅驱动共享主情景入口的“登录后可访问私有数据卡”提示（solo 语义）。
+   *  proposal 恒为 true：编辑者必已登录，私有卡被提案安全边界禁止、与登录态无关。 */
   isAuthenticated: boolean;
   isMatchingBlocked: boolean;
   isMatchingScenario: boolean;
@@ -56,12 +58,14 @@ export type ArenaScenarioSectionModel = Readonly<{
     openMainModal(): void;
     randomMatchMain(): void;
     clearMain(): void;
-    uploadMain(file: File): void;
-    pasteMain(text: string): void;
+    /** 上传/粘贴必须在 Promise 中反映真实成败：失败时 adapter 呈现错误并 reject，
+     *  共享视图据此保留用户输入，避免失败仍清空（ScenarioPickerPanel 既有语义）。 */
+    uploadMain(file: File): Promise<void>;
+    pasteMain(text: string): Promise<void>;
     openAuxModal(): void;
     randomMatchAux(): void;
-    uploadAux(files: FileList | null): void;
-    pasteAux(text: string): void;
+    uploadAux(files: FileList | null): Promise<void>;
+    pasteAux(text: string): Promise<void>;
     togglePreset(filename: string): void;
     moveAux(fromIndex: number, toIndex: number): void;
     removeAux(key: string): void;

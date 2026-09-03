@@ -127,4 +127,68 @@ describe('shared Arena scenario section via solo adapter', () => {
     act(() => button('清空').click());
     expect(useBattleStore.getState().auxScenarios).toEqual([]);
   });
+
+  it('主情景粘贴非法 JSON 失败时呈现错误并保留输入，不清空粘贴区域', async () => {
+    useBattleStore.setState({ battleMode: 'scenario' });
+    renderPanel();
+    act(() => button('展开情景粘贴区域（手机端推荐）').click());
+
+    const textarea = container.querySelector<HTMLTextAreaElement>('textarea');
+    if (!textarea) throw new Error('scenario paste textarea not found');
+    const invalidJson = '{ 不是合法 JSON ';
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(
+        HTMLTextAreaElement.prototype,
+        'value',
+      )?.set;
+      setter?.call(textarea, invalidJson);
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => button('从文本加载情景').click());
+
+    await vi.waitFor(() => {
+      expect(useBattleStore.getState().error).toContain('❌');
+      expect(useBattleStore.getState().scenario.content).toBeNull();
+    });
+    expect(textarea.value).toBe(invalidJson);
+  });
+
+  it('辅助情景粘贴非法 JSON 失败时呈现错误并保留输入，不清空粘贴区域', async () => {
+    useBattleStore.setState({
+      battleMode: 'scenario',
+      scenario: {
+        content: { title: '雨夜守城' },
+        fileName: '雨夜守城.json',
+        isNative: false,
+        isPreset: false,
+      },
+    });
+    renderPanel();
+
+    const auxHeader = [...container.querySelectorAll('button')]
+      .find((candidate) => candidate.textContent?.includes('辅助情景（可选）'));
+    if (!auxHeader) throw new Error('aux section header not found');
+    act(() => auxHeader.click());
+    act(() => button('展开辅助情景粘贴区域').click());
+
+    const textarea = [...container.querySelectorAll('textarea')]
+      .find((candidate) => candidate.placeholder.includes('辅助情景'));
+    if (!textarea) throw new Error('aux paste textarea not found');
+    const invalidJson = '{ 不是合法 JSON ';
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(
+        HTMLTextAreaElement.prototype,
+        'value',
+      )?.set;
+      setter?.call(textarea, invalidJson);
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => button('从文本添加辅助情景').click());
+
+    await vi.waitFor(() => {
+      expect(useBattleStore.getState().error).toContain('❌');
+      expect(useBattleStore.getState().auxScenarios).toEqual([]);
+    });
+    expect(textarea.value).toBe(invalidJson);
+  });
 });

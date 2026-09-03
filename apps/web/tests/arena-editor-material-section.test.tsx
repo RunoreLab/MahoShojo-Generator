@@ -77,4 +77,28 @@ describe('shared Arena material section via solo adapter', () => {
     act(() => button('清空').click());
     expect(useBattleStore.getState().materials).toEqual([]);
   });
+
+  it('粘贴非法 JSON 失败时呈现错误并保留输入，不清空粘贴区域', async () => {
+    renderPanel();
+    act(() => button('展开素材粘贴区域').click());
+
+    const textarea = container.querySelector<HTMLTextAreaElement>('textarea');
+    if (!textarea) throw new Error('material paste textarea not found');
+    const invalidJson = '{ 不是合法 JSON ';
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(
+        HTMLTextAreaElement.prototype,
+        'value',
+      )?.set;
+      setter?.call(textarea, invalidJson);
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => button('从文本添加素材').click());
+
+    await vi.waitFor(() => {
+      expect(useBattleStore.getState().error).toContain('❌');
+      expect(useBattleStore.getState().materials).toEqual([]);
+    });
+    expect(textarea.value).toBe(invalidJson);
+  });
 });

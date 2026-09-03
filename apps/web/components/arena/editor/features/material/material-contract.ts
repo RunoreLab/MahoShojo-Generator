@@ -26,14 +26,16 @@ export type ArenaMaterialSectionModel = Readonly<{
   statsLine?: string | null;
   /** 区块级说明（如 proposal 素材目录限制）。 */
   notice?: string | null;
-  /** 浏览/上传/粘贴入口的容量门槛（solo 参考项预算；proposal 恒为 true）。 */
+  /** 浏览/上传/粘贴入口的容量门槛（solo 与 proposal 均投影参考项联合预算）。 */
   hasReferenceCapacity: boolean;
   capabilities: ArenaMaterialSectionCapabilities;
   actions: Readonly<{
     openModal(): void;
     clearAll(): void;
-    upload(files: FileList | null): void;
-    paste(text: string): void;
+    /** 上传/粘贴必须在 Promise 中反映真实成败：失败时 adapter 呈现错误并 reject，
+     *  共享视图据此保留用户输入，避免失败仍清空（旧 MaterialPanel 语义）。 */
+    upload(files: FileList | null): Promise<void>;
+    paste(text: string): Promise<void>;
     move(fromIndex: number, toIndex: number): void;
     remove(key: string): void;
   }>;

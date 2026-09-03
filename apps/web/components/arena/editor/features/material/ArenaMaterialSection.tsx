@@ -20,14 +20,20 @@ export function ArenaMaterialSection({ model }: Readonly<{ model: ArenaMaterialS
   const onFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
     try {
       await actions.upload(event.target.files);
+    } catch {
+      // 失败原因由 adapter 呈现；文件输入无用户输入可保留，仅需复位。
     } finally {
       if (inputRef.current) inputRef.current.value = '';
     }
   };
 
   const onPaste = async () => {
-    await actions.paste(pastedJson);
-    setPastedJson('');
+    try {
+      await actions.paste(pastedJson);
+      setPastedJson('');
+    } catch {
+      // 失败原因由 adapter 呈现；保留输入，避免用户重写整段 JSON。
+    }
   };
 
   return (
