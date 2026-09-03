@@ -126,7 +126,7 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
             {
                 value: 'glm-5.3-flash',
                 label: 'GLM 5.3 Flash',
-                description: '牛来模型，智谱的最先进小模型。由 Kouri AI 热情赞助。'
+                description: '【推荐】牛来模型，智谱的最先进小模型。由 Kouri AI 热情赞助。'
             },
             {
                 value: 'deepseek-v4-flash-0731',
@@ -142,6 +142,11 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 value: 'glm-5.1',
                 label: 'GLM-5.1',
                 description: '智谱开源旗舰模型，适合复杂指令、多轮对话与高质量创作。由 Kouri AI 热情赞助。'
+            },
+            {
+                value: 'gemini-3.8-flash',
+                label: 'Gemini 3.8 Flash',
+                description: 'Google 的新模型，Benchmark 分数超级高，但代价是 Tokens 消耗也高。'
             },
             {
                 value: 'gemini-3.7-flash',
@@ -184,6 +189,11 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         type: 'openai',
         mode: 'json',
         models: [
+            {
+                value: 'gemini-3.8-flash',
+                label: 'Gemini 3.8 Flash',
+                description: 'Google 的新模型，Benchmark 分数超级高，但代价是 Tokens 消耗也高。'
+            },
             {
                 value: 'gemini-3.6-flash',
                 label: 'Gemini 3.6 Flash',
@@ -240,14 +250,9 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 description: 'Anthropic 旗下旗舰模型，非常适合复杂的专业任务和高级代理。'
             },
             {
-                value: 'glm-5.2',
-                label: 'GLM-5.2',
+                value: 'glm-5.3',
+                label: 'GLM-5.3',
                 description: '智谱开源旗舰模型，支持 1M 无损上下文，编程能力领先，适合复杂长程任务。'
-            },
-            {
-                value: 'glm-5.1',
-                label: 'GLM-5.1',
-                description: '智谱通用模型，综合能力均衡，适合复杂指令、多轮对话与高质量创作。'
             },
             {
                 value: 'glm-5',
@@ -397,14 +402,14 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 description: 'MiniMax 面向真实工作场景的模型，擅长办公文档生成与操作、智能体协同，适合多步骤创作任务。'
             },
             {
-                value: 'glm-5.2',
-                label: 'GLM-5.2',
-                description: '智谱开源旗舰模型，支持 1M 无损上下文，编程能力领先，适合复杂长程任务。'
+                value: 'glm-5.3-flash',
+                label: 'GLM-5.3 Flash',
+                description: '【推荐】智谱超强性价比模型，适用于高并发、低延迟的日常对话与文本生成。'
             },
             {
-                value: 'glm-5.1',
-                label: 'GLM-5.1',
-                description: '智谱长链路模型，代码与复杂任务执行能力强，适合高约束内容生成。'
+                value: 'glm-5.3',
+                label: 'GLM-5.3',
+                description: '智谱开源旗舰模型，支持 1M 无损上下文，编程能力领先，适合复杂长程任务。'
             },
             {
                 value: 'glm-5',
@@ -644,8 +649,13 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 description: 'Moonshot Kimi 系列模型，适合作为中文创作与长文本任务的备用选择。'
             },
             {
-                value: 'z-ai/glm-5.2',
-                label: 'GLM-5.2',
+                value: 'z-ai/glm-5.3-flash',
+                label: 'GLM-5.3 Flash',
+                description: '【推荐】智谱超强性价比模型，适用于高并发、低延迟的日常对话与文本生成。'
+            },
+            {
+                value: 'z-ai/glm-5.3',
+                label: 'GLM-5.3',
                 description: '智谱开源旗舰模型，支持 1M 无损上下文，编程能力领先，适合复杂长程任务。'
             },
             {
@@ -715,6 +725,11 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         mode: 'json',
         models: [
             {
+                value: 'gemini-3.8-flash',
+                label: 'Gemini 3.8 Flash',
+                description: 'Google 的新模型，Benchmark 分数超级高，但代价是 Tokens 消耗也高。'
+            },
+            {
                 value: 'gemini-3.6-flash',
                 label: 'Gemini 3.6 Flash',
                 description: 'Google 的新模型，据用户评测说很喜欢一惊一乍，还挺中二的。'
@@ -780,6 +795,11 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 description: 'xAI 通用模型，适合头脑风暴、创意发散与快速问答。'
             },
             {
+                value: 'glm-5.3-flash',
+                label: 'GLM-5.3 Flash',
+                description: '【推荐】智谱超强性价比模型，适用于高并发、低延迟的日常对话与文本生成。'
+            },
+            {
                 value: 'glm-5.2',
                 label: 'GLM-5.2',
                 description: '智谱开源旗舰模型，支持 1M 无损上下文，编程能力领先，适合复杂长程任务。'
@@ -825,6 +845,82 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 description: 'Moonshot 旗舰模型，1M token 上下文，综合智能领先，适合长程编程与端到端知识工作。'
             },
         ]
+    },
+    {
+        id: 'token-rhythm',
+        name: '基元律动',
+        description: '专注于 AI Agent Harness 与多模型协调优化的科技公司渠道，新人大概有几十块的优惠可以领。',
+        docsUrl: 'https://tokenrhythm.studio/i/rf_tr_OkBjQZyNHNrxObvmt3dK-dqx',
+        baseUrl: 'https://tokenrhythm.studio/v1',
+        type: 'openai',
+        mode: 'auto',
+        models: [
+            {
+                value: 'deepseek-v4-flash-0731',
+                label: 'DeepSeek V4 Flash 正式版',
+                description: '深度求索极速版大语言模型，具备极高的响应速度与性价比。'
+            },
+            {
+                value: 'deepseek-v4-pro-0813',
+                label: 'DeepSeek V4 Pro 正式版',
+                description: '深度求索专业版推理与通用模型，兼顾复杂逻辑推理与综合表达能力。'
+            },
+            {
+                value: 'glm-5.3',
+                label: 'GLM-5.3',
+                description: '智谱清言旗舰级大模型，擅长复杂指令遵循、长文本理解与综合认知。'
+            },
+            {
+                value: 'glm-5.3-flash',
+                label: 'GLM-5.3 Flash',
+                description: '【推荐】智谱超强性价比模型，适用于高并发、低延迟的日常对话与文本生成。'
+            },
+            {
+                value: 'kimi-k2.7-code',
+                label: 'Kimi K2.7 Code',
+                description: '月之暗面长文本与代码生成专项增强模型，适用于复杂编程与代码重构。'
+            },
+            {
+                value: 'kimi-k2.6',
+                label: 'Kimi K2.6',
+                description: '月之暗面长上下文通用大模型，擅长海量文档解析与超长对话逻辑。'
+            },
+            {
+                value: 'longcat-2.0',
+                label: '美团 LongCat 2.0',
+                description: '美团自研大语言模型，聚焦长文本处理与生活服务领域推理理解。'
+            },
+            {
+                value: 'seed-2.1-pro',
+                label: '豆包 Seed 2.1 Pro',
+                description: '字节跳动豆包旗舰大模型，综合推理、创作及多语言能力优秀。'
+            },
+            {
+                value: 'mimo-v2.5-pro',
+                label: 'MiMo V2.5 Pro',
+                description: '小米 MiMo 专业级大模型，强化设备联动、逻辑推理与对话理解。'
+            },
+            {
+                value: 'minimax-m2.7',
+                label: 'MiniMax M2.7',
+                description: '稀宇科技高效率多模态/大文本大模型，擅长角色扮演与拟人化交互。'
+            },
+            {
+                value: 'qwen3.8-max',
+                label: 'Qwen3.8-Max',
+                description: '通义千问超大规模旗舰模型，性能全面提升，适用于高难度复杂任务。'
+            },
+            {
+                value: 'qwen3.8-27b',
+                label: 'Qwen3.8-27b',
+                description: '通义千问 27B 参数高效开源模型，性能强劲且兼顾成本效率。'
+            },
+            {
+                value: 'qwen3.7-flash',
+                label: 'Qwen3.7 Flash',
+                description: '通义千问低延迟极速模型，极速响应，适合轻量级任务与高频调用。'
+            },
+        ],
     },
     {
         id: 'nova-cervus',
@@ -948,8 +1044,13 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 description: '通义千问 3 的思考版本，更擅长推理。'
             },
             {
-                value: 'ZhipuAI/GLM-5.2',
-                label: 'GLM-5.2',
+                value: 'ZhipuAI/glm-5.3-flash',
+                label: 'GLM-5.3 Flash',
+                description: '【推荐】智谱超强性价比模型，适用于高并发、低延迟的日常对话与文本生成。'
+            },
+            {
+                value: 'ZhipuAI/GLM-5.3',
+                label: 'GLM-5.3',
                 description: '智谱开源旗舰模型，支持 1M 无损上下文，编程能力领先，适合复杂长程任务。'
             },
             {
@@ -1032,6 +1133,11 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         baseUrl: 'https://gateway.ai.cloudflare.com/v1/5e2c3572782d87ae449e050ac15d6c5d/mhsj-custom/google-ai-studio/v1beta',
         type: 'google',
         models: [
+            {
+                value: 'gemini-3.8-flash',
+                label: 'Gemini 3.8 Flash',
+                description: 'Google 的新模型，Benchmark 分数超级高，但代价是 Tokens 消耗也高。'
+            },
             {
                 value: 'gemini-3.6-flash',
                 label: 'Gemini 3.6 Flash',
@@ -1181,6 +1287,11 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         mode: 'auto',
         models: [
             {
+                value: 'google/gemini-3.8-flash',
+                label: 'Gemini 3.8 Flash',
+                description: 'Google 的新模型，Benchmark 分数超级高，但代价是 Tokens 消耗也高。'
+            },
+            {
                 value: 'google/gemini-3.6-flash',
                 label: 'Gemini 3.6 Flash',
                 description: 'Google 的新模型，据用户评测说很喜欢一惊一乍，还挺中二的。'
@@ -1253,6 +1364,11 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 value: 'gemini-3.5-flash-lite',
                 label: 'Gemini 3.5 Flash Lite',
                 description: 'Google 高速轻量模型，适合预算敏感与高并发生成场景。'
+            },
+            {
+                value: 'gemini-3.8-flash',
+                label: 'Gemini 3.8 Flash',
+                description: 'Google 的新模型，Benchmark 分数超级高，但代价是 Tokens 消耗也高。'
             },
             {
                 value: 'gemini-3.6-flash',
@@ -1412,6 +1528,11 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 description: '偏推理与思考，适合复杂约束、分析和多步生成。'
             },
             {
+                value: 'z-ai/glm-5.3-flash',
+                label: 'GLM-5.3 Flash',
+                description: '【推荐】智谱超强性价比模型，适用于高并发、低延迟的日常对话与文本生成。'
+            },
+            {
                 value: 'z-ai/glm-5.2',
                 label: 'GLM 5.2',
                 description: '智谱开源旗舰模型，支持 1M 无损上下文，适合复杂长程任务与高质量创作。'
@@ -1471,6 +1592,11 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 value: 'deepseek-v4-pro',
                 label: 'DeepSeek V4 Pro',
                 description: 'DeepSeek V4 完全体，适合复杂分析、长文本写作与高质量生成。'
+            },
+            {
+                value: 'glm-5.3-flash',
+                label: 'GLM-5.3 Flash',
+                description: '【推荐】智谱超强性价比模型，适用于高并发、低延迟的日常对话与文本生成。'
             },
             {
                 value: 'glm-5.2',
@@ -1549,18 +1675,13 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 description: 'DeepSeek V4 完全体，适合复杂分析、长文本写作与高质量生成。'
             },
             {
+                value: 'glm-5.3-flash',
+                label: 'GLM-5.3 Flash',
+                description: '【推荐】智谱超强性价比模型，适用于高并发、低延迟的日常对话与文本生成。'
+            },
+            {
                 value: 'glm-5.3',
                 label: 'GLM-5.3',
-                description: '智谱通用模型，综合能力均衡，适合复杂指令、多轮对话与高质量创作。'
-            },
-            {
-                value: 'glm-5.2',
-                label: 'GLM-5.2',
-                description: '智谱开源旗舰模型，支持 1M 无损上下文，编程能力领先，适合复杂长程任务。'
-            },
-            {
-                value: 'glm-5.1',
-                label: 'GLM-5.1',
                 description: '智谱通用模型，综合能力均衡，适合复杂指令、多轮对话与高质量创作。'
             },
             {
