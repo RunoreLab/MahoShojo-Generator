@@ -44,6 +44,12 @@ export type ArenaRoomHostWorkspace = Readonly<{
     authority: ArenaRoomHostWorkspaceAuthority,
     bundle: ArenaRoomHostWorkspaceBundle,
   ): void;
+  /**
+   * 最近一次成功 capture 的 authority（发布或同步落定）。
+   * reconciliation 用它区分「本地相对落定基线有修改」与
+   * 「权威更新尚未安装到本地」，后者不应被判为房主冲突。
+   */
+  settledAuthority(): ArenaRoomHostWorkspaceAuthority | null;
   compare(
     authority: ArenaRoomHostWorkspaceAuthority,
     bundle: ArenaRoomHostWorkspaceBundle,
@@ -73,6 +79,7 @@ export const arenaRoomHostWorkspaceAuthorityFromSession = (
 };
 
 type Baseline = Readonly<{
+  authority: ArenaRoomHostWorkspaceAuthority;
   roomId: string;
   roomEpoch: string;
   ownerUserId: string;
@@ -216,6 +223,7 @@ export const createArenaRoomHostWorkspace = (): ArenaRoomHostWorkspace => {
         throw new Error('ARENA_ROOM_HOST_WORKSPACE_AUTHORITY_MISMATCH');
       }
       baseline = Object.freeze({
+        authority,
         roomId: authority.roomId,
         roomEpoch: authority.roomEpoch,
         ownerUserId: authority.ownerUserId,
@@ -223,6 +231,10 @@ export const createArenaRoomHostWorkspace = (): ArenaRoomHostWorkspace => {
         payloads: Object.freeze(normalized.payloads.map((entry) => structuredClone(entry))),
         digests: new Map(normalized.digests),
       });
+    },
+
+    settledAuthority() {
+      return baseline?.authority ?? null;
     },
 
     compare(authority, bundle) {

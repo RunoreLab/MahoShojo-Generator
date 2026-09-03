@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  ARENA_ROOM_GENERATION_SYNC_GATE_MESSAGE,
   canAutoPublishArenaRoomHostDraft,
   isArenaRoomGenerationFenceCurrent,
+  isArenaRoomGenerationSyncSettled,
   pendingProposalFingerprint,
 } from '@/components/arena/multiplayer/generation-preflight';
 import type { ArenaProposal } from '@mahoshojo/contracts/arena-room';
@@ -59,6 +61,15 @@ describe('Arena Room generation preflight policy', () => {
       .not.toBe(pendingProposalFingerprint([
         proposal('proposal-1', '2026-09-02T00:01:00.000Z'),
       ]));
+  });
+
+  it('reconciliation synchronizing 期间禁止任何生成发布方向（回归：空配置覆盖刚接受的提案）', () => {
+    for (const kind of ['idle', 'synced', 'conflicted', 'error'] as const) {
+      expect(isArenaRoomGenerationSyncSettled(kind)).toBe(true);
+    }
+    expect(isArenaRoomGenerationSyncSettled('synchronizing')).toBe(false);
+    // 手动 dirty preflight 的“更新房间配置并开始”也必须复用同一门禁文案。
+    expect(ARENA_ROOM_GENERATION_SYNC_GATE_MESSAGE).toContain('正在同步');
   });
 
   it('最终启动 fence 同时约束房间 authority 与待处理提案集合', () => {

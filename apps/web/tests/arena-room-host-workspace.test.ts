@@ -153,6 +153,25 @@ describe('Arena Room host workspace baseline', () => {
     expect(comparison).toMatchObject({ kind: 'clean', start: { hostLocalPayloads: [] } });
   });
 
+  it('settledAuthority 跟随最近一次 capture，并在 epoch 变化清空 baseline 时归零', () => {
+    const workspace = createArenaRoomHostWorkspace();
+    expect(workspace.settledAuthority()).toBeNull();
+
+    workspace.capturePublished(authority(), bundle());
+    expect(workspace.settledAuthority()).toMatchObject({
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      revision: 3,
+      ownerUserId: 'host-1',
+    });
+
+    workspace.capturePublished(authority('', { revision: 4 }), bundle());
+    expect(workspace.settledAuthority()).toMatchObject({ revision: 4 });
+
+    workspace.retainFor(authority('', { roomEpoch: 'epoch-2' }));
+    expect(workspace.settledAuthority()).toBeNull();
+  });
+
   it('working copy 无法投影时仍可从已发布 baseline 取得 Room 启动输入', () => {
     const workspace = createArenaRoomHostWorkspace();
     workspace.capturePublished(authority(), bundle());

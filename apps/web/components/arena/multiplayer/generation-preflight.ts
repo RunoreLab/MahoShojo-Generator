@@ -38,3 +38,14 @@ export const canAutoPublishArenaRoomHostDraft = (input: Readonly<{
   && (input.reconciliationKind === 'idle' || input.reconciliationKind === 'synced')
   && input.workspaceAllows
 );
+
+export const ARENA_ROOM_GENERATION_SYNC_GATE_MESSAGE = '房间配置正在同步，请等待同步完成后再开始生成。';
+
+/**
+ * reconciliation 尚未落定（synchronizing）时，本地 working copy 既不代表房间
+ * 权威、也可能即将被覆盖；此时禁止生成 preflight 的任何发布方向，避免用
+ * stale/空本地配置覆盖刚接受的提案。
+ */
+export const isArenaRoomGenerationSyncSettled = (
+  reconciliationKind: ArenaRoomHostReconciliationState['kind'],
+): boolean => reconciliationKind !== 'synchronizing';

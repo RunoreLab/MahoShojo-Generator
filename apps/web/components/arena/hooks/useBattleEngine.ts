@@ -83,8 +83,10 @@ import {
 } from '../multiplayer/generation-bridge';
 import { useArenaRoomContext } from '../multiplayer/useArenaRoom';
 import {
+  ARENA_ROOM_GENERATION_SYNC_GATE_MESSAGE,
   canAutoPublishArenaRoomHostDraft,
   isArenaRoomGenerationFenceCurrent,
+  isArenaRoomGenerationSyncSettled,
   pendingProposalFingerprint,
 } from '../multiplayer/generation-preflight';
 
@@ -718,6 +720,9 @@ export const useBattleEngine = () => {
       };
 
       if (roomAction.inRoom && arenaRoomRuntime) {
+        if (!isArenaRoomGenerationSyncSettled(arenaRoomRuntime.hostReconciliation.state.kind)) {
+          throw new Error(ARENA_ROOM_GENERATION_SYNC_GATE_MESSAGE);
+        }
         const capturedAuthority = arenaRoomHostWorkspaceAuthorityFromSession(
           arenaRoomRuntime.state.session,
         );
@@ -798,6 +803,11 @@ export const useBattleEngine = () => {
               }
               startInputs = comparison.room;
             } else {
+              if (!isArenaRoomGenerationSyncSettled(arenaRoomRuntime.hostReconciliation.state.kind)) {
+                // Preflight 打开期间同步可能已开始；此时发布本地草稿会覆盖
+                // 尚未安装到本地的房间权威，必须拒绝并让 reconciliation 先落定。
+                throw new Error(ARENA_ROOM_GENERATION_SYNC_GATE_MESSAGE);
+              }
               const beforePublishState = arenaRoomRuntime.controller.getSnapshot();
               const beforePublishAuthority = arenaRoomHostWorkspaceAuthorityFromSession(
                 beforePublishState.session,
