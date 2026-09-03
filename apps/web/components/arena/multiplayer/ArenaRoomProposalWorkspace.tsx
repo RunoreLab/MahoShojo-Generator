@@ -19,7 +19,7 @@ import {
 } from '../editor';
 import { ProposalArenaRosterSection } from '../editor/features/roster/ProposalArenaRosterSection';
 import { ProposalArenaScenarioSection } from '../editor/features/scenario/ProposalArenaScenarioSection';
-import { ArenaMaterialList } from '../editor/presentation/ArenaMaterialList';
+import { ProposalArenaMaterialSection } from '../editor/features/material/ProposalArenaMaterialSection';
 import { BattleModeSwitcher } from '../components/BattleModeSwitcher';
 import { BattleSettings } from '../components/BattleSettings';
 import { StoryOptions } from '../components/StoryOptions';
@@ -47,31 +47,12 @@ type ProposalController = Pick<
 
 const buttonClass = 'min-h-10 rounded-lg border px-3 py-2 text-sm font-medium transition-colors motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fuchsia-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50';
 const primaryButtonClass = `${buttonClass} border-fuchsia-600 bg-fuchsia-600 text-white hover:bg-fuchsia-700`;
-const secondaryButtonClass = `${buttonClass} border-gray-300 bg-white text-gray-800 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800`;
 
 const proposalCharacterPresets: Preset[] = PRESET_LIST.filter((preset) => (
   ARENA_ROOM_PRESET_CATALOG.some((entry) => entry.kind === 'character' && entry.id === preset.filename)
 ));
 
 const readText = (value: unknown): string => typeof value === 'string' ? value.trim() : '';
-
-const moveItem = <Item,>(
-  items: readonly Item[],
-  fromIndex: number,
-  toIndex: number,
-): Item[] => {
-  const next = [...items];
-  if (
-    fromIndex < 0
-    || fromIndex >= next.length
-    || toIndex < 0
-    || toIndex >= next.length
-    || fromIndex === toIndex
-  ) return next;
-  const [item] = next.splice(fromIndex, 1);
-  if (item !== undefined) next.splice(toIndex, 0, item);
-  return next;
-};
 
 const toExactRef = <Kind extends DataCardRef['kind']>(
   card: unknown,
@@ -449,30 +430,11 @@ const ProposalWorkspaceInner = ({
             defaultOpen: false,
             keepMounted: true,
             content: (
-              <>
-            <button type="button" className={secondaryButtonClass} onClick={() => setModalKind('material')}>浏览在线数据卡</button>
-            <p className="mt-2 text-xs text-gray-500">内置素材预设暂不可用：目前没有经过服务器确认的素材目录，避免未验证的正文进入提案。</p>
-            <div className="mt-3">
-              <ArenaMaterialList
-                items={snapshot.materials.map((item) => ({
-                  key: item.key,
-                  name: item.name,
-                  sourceLabel: item.source === 'preset'
-                    ? '内置预设'
-                    : item.source === 'host-local' ? '房主本地素材' : '公开在线数据卡',
-                }))}
+              <ProposalArenaMaterialSection
                 disabled={disabled}
-                onMove={(fromIndex, toIndex) => mutate((draft) => ({
-                  ...draft,
-                  materials: moveItem(draft.materials, fromIndex, toIndex),
-                }))}
-                onRemove={(key) => mutate((draft) => ({
-                  ...draft,
-                  materials: draft.materials.filter((item) => item.key !== key),
-                }))}
+                onActionError={setLocalError}
+                onOpenModal={() => setModalKind('material')}
               />
-            </div>
-              </>
             ),
           },
           {
