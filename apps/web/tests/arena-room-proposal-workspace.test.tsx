@@ -184,7 +184,18 @@ const button = (label: string): HTMLButtonElement => {
   return target;
 };
 
+const buttonsWithText = (label: string): HTMLButtonElement[] => [...document.body.querySelectorAll('button')]
+  .filter((candidate) => candidate.textContent?.trim() === label);
+
+const buttonContaining = (label: string): HTMLButtonElement => {
+  const target = [...document.body.querySelectorAll('button')]
+    .find((candidate) => candidate.textContent?.includes(label));
+  if (!(target instanceof HTMLButtonElement)) throw new Error(`button not found containing: ${label}`);
+  return target;
+};
+
 beforeEach(() => {
+  localStorage.clear();
   container = document.createElement('div');
   document.body.append(container);
   root = createRoot(container);
@@ -272,9 +283,13 @@ describe('Arena room Proposal workspace', () => {
     await act(async () => setValue(teamSelect, memberOption.value));
 
     await act(async () => button('情景模式📜').click());
+    await act(async () => buttonContaining('预设情景（内置）').click());
     await act(async () => button('浏览在线情景库').click());
     await act(async () => button('模拟选择主情景').click());
-    await act(async () => button('选择辅助情景').click());
+    await act(async () => buttonContaining('辅助情景（可选）').click());
+    const auxBrowseButtons = buttonsWithText('浏览在线情景库');
+    expect(auxBrowseButtons.length).toBe(2);
+    await act(async () => auxBrowseButtons.at(-1)!.click());
     await act(async () => button('模拟选择辅助情景').click());
     await act(async () => button('关闭数据卡').click());
     const curatedScenarioToggle = container.querySelector<HTMLButtonElement>('button[aria-label="选择预设情景：谨遵女王之意（A.R.E.N.A.）"]');
@@ -547,6 +562,7 @@ describe('Arena room Proposal workspace', () => {
     await move('下移 character-four');
     await move('下移队伍 A 队');
     await move('下移 A 队内 character-one');
+    await act(async () => buttonContaining('辅助情景（可选）').click());
     await move('下移 aux-one');
     await move('下移 material-one');
 
