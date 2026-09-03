@@ -276,20 +276,50 @@ describe('BattleDataModal accessibility and capabilities', () => {
     const detailButton = [...(dialog?.querySelectorAll('button') ?? [])]
       .find((button) => button.textContent?.trim() === '详情');
     expect(detailButton).toBeUndefined();
+    const floatingSelectButton = [...(dialog?.querySelectorAll('button') ?? [])]
+      .find((button) => button.textContent?.trim() === '选择');
+    expect(floatingSelectButton).toBeUndefined();
     expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(1);
 
-    const selectionButton = dialog?.querySelector<HTMLButtonElement>('button[aria-label="选择角色一"]');
-    expect(selectionButton).not.toBeNull();
-    expect(selectionButton?.className).toContain('min-h-10');
-    expect(selectionButton?.className).toContain('min-w-10');
-    selectionButton?.focus();
-    expect(document.activeElement).toBe(selectionButton);
-    act(() => selectionButton?.click());
+    const selectionTarget = dialog?.querySelector<HTMLDivElement>('div[role="button"][aria-label="选择角色一"]');
+    expect(selectionTarget).not.toBeNull();
+    expect(selectionTarget?.getAttribute('aria-disabled')).toBeNull();
+    expect(selectionTarget?.tabIndex).toBe(0);
+    selectionTarget?.focus();
+    expect(document.activeElement).toBe(selectionTarget);
+    act(() => {
+      selectionTarget?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    });
     expect(onSelectCard).toHaveBeenCalledOnce();
     expect(document.querySelector('[role="dialog"]')).toBeNull();
     expect(document.body.style.overflow).toBe('');
     expect(document.activeElement).toBe(trigger);
     trigger.remove();
+  });
+
+  it('keeps the multi-mode quick toggle compact with an enlarged touch hit area', async () => {
+    flushSync(() => root.render(
+      <BattleDataModal
+        isOpen
+        onClose={vi.fn()}
+        selectedType="character"
+        visibleTabs={['public']}
+        selectionMode="multi"
+        onToggleCard={vi.fn()}
+        allowDeckImport={false}
+        allowCardDetails={false}
+      />,
+    ));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const dialog = document.querySelector('[role="dialog"]');
+    const quickToggle = dialog?.querySelector<HTMLButtonElement>('button[aria-label="加入"]');
+    expect(quickToggle).not.toBeNull();
+    expect(quickToggle?.className).toContain('h-8');
+    expect(quickToggle?.className).toContain('w-8');
+    expect(quickToggle?.className).toContain('after:-inset-1');
+    expect(quickToggle?.className).not.toContain('min-h-10');
+    expect(quickToggle?.className).not.toContain('min-w-10');
   });
 
   it('keeps card details as the topmost keyboard modal and restores its trigger', async () => {

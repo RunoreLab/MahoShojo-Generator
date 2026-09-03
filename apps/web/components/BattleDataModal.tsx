@@ -1781,27 +1781,27 @@ export default function BattleDataModal({
 		                    <div
                         key={card.id}
                         className={`relative h-full ${itemDisabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                        {...(selectionMode === 'single' ? {
+                          role: 'button',
+                          tabIndex: itemDisabled ? -1 : 0,
+                          'aria-label': `选择${card.name || typeLabel}`,
+                          'aria-disabled': itemDisabled || undefined,
+                          onKeyDown: (event: React.KeyboardEvent<HTMLDivElement>) => {
+                            if (itemDisabled) return;
+                            if (event.key !== 'Enter' && event.key !== ' ') return;
+                            event.preventDefault();
+                            void handleSelectCard(card);
+                          },
+                        } : {})}
                         onClick={() => {
                           if (itemDisabled) return;
                           void handleSelectCard(card);
                         }}
                       >
-		                      {selectionMode === 'single' ? (
+                      {showQuickToggle && (
 		                        <button
 		                          type="button"
-		                          className="absolute right-2 top-2 z-20 inline-flex min-h-10 min-w-10 items-center justify-center rounded-full border border-transparent bg-emerald-500 px-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-emerald-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2"
-		                          onClick={(event) => {
-		                            event.stopPropagation();
-		                            void handleSelectCard(card);
-		                          }}
-		                          aria-label={`选择${card.name || typeLabel}`}
-		                        >
-		                          选择
-		                        </button>
-		                      ) : showQuickToggle && (
-		                        <button
-		                          type="button"
-		                          className={`absolute top-2 right-2 z-20 inline-flex min-h-10 min-w-10 items-center justify-center rounded-full border-2 text-lg font-bold leading-none shadow-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 ${
+		                          className={`absolute top-2 right-2 z-20 inline-flex h-8 w-8 items-center justify-center rounded-full border-2 text-lg font-bold leading-none shadow-sm transition-colors after:absolute after:rounded-full after:content-[''] focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 after:-inset-1 ${
 	                            quickToggleDisabled
 	                              ? 'cursor-not-allowed border-gray-200 bg-gray-100 text-gray-400'
 	                              : isSelected
