@@ -18,7 +18,10 @@ describe('production deployment pipeline', () => {
       /deploy:\s*[\s\S]*?needs: build[\s\S]*?if: github\.ref == 'refs\/heads\/feature\/v0\.2\.0_Battle_Growth_MahoShojo'/u,
     );
     expect(honoWorkflow).toContain(
-      "arena_multiplayer_enabled: ${{ github.event_name == 'workflow_dispatch' && inputs.arena_multiplayer == 'enabled' }}",
+      "arena_multiplayer_enabled: ${{ github.event_name == 'push' || inputs.arena_multiplayer == 'enabled' }}",
+    );
+    expect(honoWorkflow).toMatch(
+      /arena_multiplayer:\s*[\s\S]*?default: enabled\s*\n\s*type: choice\s*\n\s*options:\s*\n\s*- enabled\s*\n\s*- disabled/u,
     );
     expect(honoWorkflow).toMatch(
       /deploy-cloudflare:\s*[\s\S]*?needs: deploy[\s\S]*?uses: \.\/\.github\/workflows\/cloudflare-deploy\.yml/u,

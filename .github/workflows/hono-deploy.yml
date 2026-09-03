@@ -9,11 +9,11 @@ on:
       arena_multiplayer:
         description: 仅控制 Cloudflare Web exposure；Hono runtime 由服务器 ARENA_MULTIPLAYER_ENABLED 控制
         required: true
-        default: disabled
+        default: enabled
         type: choice
         options:
-          - disabled
           - enabled
+          - disabled
 
 concurrency:
   group: hono-production
@@ -214,5 +214,5 @@ jobs:
     if: github.ref == 'refs/heads/feature/v0.2.0_Battle_Growth_MahoShojo'
     uses: ./.github/workflows/cloudflare-deploy.yml
     with:
-      arena_multiplayer_enabled: ${{ github.event_name == 'workflow_dispatch' && inputs.arena_multiplayer == 'enabled' }}
+      arena_multiplayer_enabled: ${{ github.event_name == 'push' || inputs.arena_multiplayer == 'enabled' }}
     secrets: inherit
