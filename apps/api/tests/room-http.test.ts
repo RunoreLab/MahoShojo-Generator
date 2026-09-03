@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ARENA_ROOM_ERROR_TAXONOMY_ACCEPT } from '@mahoshojo/contracts/arena-room';
+import { ARENA_ROOM_ERROR_TAXONOMY_ACCEPT, MAX_ROOM_MEMBERS } from '@mahoshojo/contracts/arena-room';
 
 import type { HonoServerConfig } from '#/config';
 import { createHonoApp } from '#/app';
@@ -1576,8 +1576,8 @@ describe('Arena Room HTTP product routes', () => {
       const body = await response.json() as { code: string; error: string };
       expect(body).toMatchObject({ code });
       if (membershipCode === 'ROOM_MEMBER_LIMIT_REACHED') {
-        expect(body.error).toContain('最多容纳 8 人');
-        expect(body.error).toContain('当前已有 8 人');
+        expect(body.error).toContain(`最多容纳 ${MAX_ROOM_MEMBERS} 人`);
+        expect(body.error).toContain(`当前已有 ${MAX_ROOM_MEMBERS} 人`);
       }
     }
   });
