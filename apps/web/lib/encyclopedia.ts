@@ -282,6 +282,14 @@ export const encyclopediaEntries: EncyclopediaEntry[] = [
     keywords: ['战报', '模式', '计分'],
   },
   {
+    slug: 'arena-multiplayer',
+    title: '竞技场多人模式：一起围观、提案与生成',
+    summary: '多人房间玩法指南：快速开始、围观/多人跑团玩法、提案协作、断线恢复与常见问题。',
+    markdownPath: '/encyclopedia/arena-multiplayer.md',
+    categoryId: 'gameplay',
+    keywords: ['多人', '多人模式', '房间', '房主', '成员', '提案', '围观', '跑团', '房间码', '协作', 'multiplayer', 'room'],
+  },
+  {
     slug: 'continuous-battle-story',
     title: '连续战报会话（/arena）',
     summary: '竞技场里的长线章节模式：新建首章、续写、分支、重写最后一章与本地持久化。',
