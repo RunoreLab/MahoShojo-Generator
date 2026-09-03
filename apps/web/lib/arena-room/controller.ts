@@ -1605,6 +1605,94 @@ export const createArenaRoomController = (
     return true;
   };
 
+  /**
+   * leave 结果未知的对账：优先幂等重放同一 leave intent，而不是先 GET session。
+   * 服务端 leave 对同 epoch 的已撤销成员直接幂等返回成功，因此“已提交但成功响应
+   * 丢失（self 已 revoked）”与“未提交”两个方向都会在重放下收敛；若先 GET
+   * session，revoked 成员的读取只会得到 403 ROOM_FORBIDDEN，无法据此收敛。
+   * 重放遇到 ROOM_CONFLICT（epoch 因 Room recovery 轮换）时安装权威 session，
+   * self 仍 active 则以新 epoch 再重放一次；任何一步返回 ROOM_NOT_FOUND /
+   * ROOM_FORBIDDEN 都证明 self 已不在房间（或房间已结束），按 leave 已生效收敛。
+   */
+  const reconcileUnknownLeave = async (operation: number): Promise<void> => {
+    const current = state.session;
+    if (!current || disposed) return;
+    publish({ notice: '正在重放退出请求以确认结果…', error: null });
+    const exitNoticeFor = (error: ArenaRoomClientError): string => (
+      error.code === 'ROOM_NOT_FOUND'
+        ? '已确认当前房间会话已结束'
+        : '已离开房间'
+    );
+    const isExitConfirmed = (error: ArenaRoomClientError): boolean => (
+      error.code === 'ROOM_NOT_FOUND' || error.code === 'ROOM_FORBIDDEN'
+    );
+    let expectedEpoch = current.roomEpoch;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        await options.client.leave(current.roomId, expectedEpoch);
+      } catch (replayError) {
+        if (disposed || operation !== managementMutationGeneration) return;
+        if (
+          replayError instanceof ArenaRoomClientError
+          && isExitConfirmed(replayError)
+        ) {
+          finishRoomSession({ notice: exitNoticeFor(replayError) });
+          return;
+        }
+        if (
+          !(replayError instanceof ArenaRoomClientError)
+          || replayError.code !== 'ROOM_CONFLICT'
+          || attempt > 0
+        ) {
+          // 网络/5xx/限流/未知等非确定性失败：不猜测结果，保持 unknown 等待下次对账。
+          publish({
+            managementResultUnknown: true,
+            notice: '退出请求已再次提交，结果仍无法确认；请稍后重新确认',
+            error: safeErrorMessage(replayError),
+          });
+          scheduleReconnect(false);
+          return;
+        }
+        // ROOM_CONFLICT：epoch 已轮换，读取权威 session 后以新 epoch 重放。
+        let authoritative: ArenaRoomSessionResponse;
+        try {
+          authoritative = await options.client.getSession(current.roomId);
+        } catch (sessionError) {
+          if (disposed || operation !== managementMutationGeneration) return;
+          if (
+            sessionError instanceof ArenaRoomClientError
+            && isExitConfirmed(sessionError)
+          ) {
+            finishRoomSession({ notice: exitNoticeFor(sessionError) });
+            return;
+          }
+          publish({
+            managementResultUnknown: true,
+            notice: '退出结果仍无法确认；请稍后重新确认',
+            error: safeErrorMessage(sessionError),
+          });
+          scheduleReconnect(false);
+          return;
+        }
+        if (
+          disposed
+          || operation !== managementMutationGeneration
+          || authoritative.roomId !== current.roomId
+          || authoritative.self.userId !== current.self.userId
+        ) return;
+        installRebasedAuthoritativeSession(
+          authoritative,
+          '房间已恢复为新实例，正在重新执行退出…',
+        );
+        expectedEpoch = authoritative.roomEpoch;
+        continue;
+      }
+      if (disposed || operation !== managementMutationGeneration) return;
+      finishRoomSession({ notice: '已离开房间' });
+      return;
+    }
+  };
+
   const reconcileUnknownManagementMutation = async (): Promise<void> => {
     const current = state.session;
     const intent = unknownManagementMutation;
@@ -1682,7 +1770,12 @@ export const createArenaRoomController = (
         return;
       }
 
-      if (intent.operation === 'close' || intent.operation === 'leave') {
+      if (intent.operation === 'leave') {
+        await reconcileUnknownLeave(operation);
+        return;
+      }
+
+      if (intent.operation === 'close') {
         const authoritative = await options.client.getSession(current.roomId);
         if (
           disposed
@@ -1690,8 +1783,9 @@ export const createArenaRoomController = (
           || authoritative.roomId !== current.roomId
           || authoritative.self.userId !== current.self.userId
         ) return;
-        // 权威状态仍可读取证明 intent 尚未生效（成员仍 active / 房间仍开放）：
-        // 安全重放同一幂等 intent，让未提交与已提交两种方向都收敛到终态。
+        // 权威状态仍可读取证明 intent 尚未生效（房间仍开放、close 未提交）：
+        // 安全重放同一幂等 intent。若 close 已生效，房间关闭后 GET session 会
+        // 返回 ROOM_NOT_FOUND，由下方 catch 收敛为会话结束。
         // epoch 已因 Room recovery 轮换时先安装新权威 session，再以新 epoch 重放，
         // 否则旧 epoch fence 会让重放永远无法收敛。
         if (authoritative.roomEpoch !== current.roomEpoch) {
@@ -1701,11 +1795,7 @@ export const createArenaRoomController = (
           );
         }
         resubmitted = true;
-        if (intent.operation === 'leave') {
-          await options.client.leave(current.roomId, authoritative.roomEpoch);
-        } else {
-          await options.client.close(current.roomId, authoritative.roomEpoch);
-        }
+        await options.client.close(current.roomId, authoritative.roomEpoch);
         if (
           disposed
           || operation !== managementMutationGeneration
@@ -1714,9 +1804,7 @@ export const createArenaRoomController = (
           || state.session.self.userId !== current.self.userId
         ) return;
         unknownManagementMutation = null;
-        finishRoomSession({
-          notice: intent.operation === 'leave' ? '已离开房间' : '房间已关闭',
-        });
+        finishRoomSession({ notice: '房间已关闭' });
         return;
       }
 

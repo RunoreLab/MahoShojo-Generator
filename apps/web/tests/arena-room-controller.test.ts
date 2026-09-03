@@ -1880,7 +1880,7 @@ describe('Arena Room browser controller', () => {
     });
   });
 
-  it('leave 结果未知后用 session not found 对账为会话已结束', async () => {
+  it('leave 结果未知时优先幂等重放同一离开意图并收敛终态', async () => {
     const { client, controller } = createHarness();
     const memberSession = {
       ...session,
@@ -1892,16 +1892,57 @@ describe('Arena Room browser controller', () => {
       },
     };
     vi.mocked(client.join).mockResolvedValueOnce(memberSession);
-    vi.mocked(client.leave).mockRejectedValueOnce(new ArenaRoomClientError(
-      'ROOM_RESULT_UNKNOWN',
-      null,
-      '请求结果未知',
-    ));
-    vi.mocked(client.getSession).mockRejectedValueOnce(new ArenaRoomClientError(
-      'ROOM_NOT_FOUND',
-      404,
-      '房间会话不存在或已结束',
-    ));
+    // 第一次 leave 已在服务端生效但成功响应丢失（ROOM_RESULT_UNKNOWN）：
+    // 服务端对同 epoch 的已撤销成员幂等返回 left，重放直接收敛，
+    // 不依赖 GET session（revoked 后 session 读取只会 403）。
+    vi.mocked(client.leave)
+      .mockRejectedValueOnce(new ArenaRoomClientError(
+        'ROOM_RESULT_UNKNOWN',
+        null,
+        '请求结果未知',
+      ))
+      .mockResolvedValueOnce({ protocolVersion: 1, roomId: 'room-1', outcome: 'left' });
+    await controller.join('room-1', '成员');
+
+    await controller.leave();
+    expect(controller.getSnapshot().managementResultUnknown).toBe(true);
+    controller.reconnect();
+
+    await vi.waitFor(() => expect(controller.getSnapshot()).toMatchObject({
+      phase: 'ready',
+      session: null,
+      managementOperation: null,
+      managementResultUnknown: false,
+      notice: '已离开房间',
+    }));
+    expect(client.leave).toHaveBeenCalledTimes(2);
+    expect(client.leave).toHaveBeenNthCalledWith(2, 'room-1', 'epoch-1');
+    expect(client.getSession).not.toHaveBeenCalled();
+  });
+
+  it('leave 结果未知且重放返回 not found 时收敛为会话已结束', async () => {
+    const { client, controller } = createHarness();
+    const memberSession = {
+      ...session,
+      self: {
+        userId: 'member-1',
+        role: 'member' as const,
+        displayName: '成员',
+        membershipState: 'active' as const,
+      },
+    };
+    vi.mocked(client.join).mockResolvedValueOnce(memberSession);
+    vi.mocked(client.leave)
+      .mockRejectedValueOnce(new ArenaRoomClientError(
+        'ROOM_RESULT_UNKNOWN',
+        null,
+        '请求结果未知',
+      ))
+      .mockRejectedValueOnce(new ArenaRoomClientError(
+        'ROOM_NOT_FOUND',
+        404,
+        '房间会话不存在或已结束',
+      ));
     await controller.join('room-1', '成员');
 
     await controller.leave();
@@ -1915,8 +1956,8 @@ describe('Arena Room browser controller', () => {
       managementResultUnknown: false,
       notice: '已确认当前房间会话已结束',
     }));
-    expect(client.leave).toHaveBeenCalledOnce();
-    expect(client.getSession).toHaveBeenCalledOnce();
+    expect(client.leave).toHaveBeenCalledTimes(2);
+    expect(client.getSession).not.toHaveBeenCalled();
   });
 
   it('leave 直接返回通用 forbidden 时保留会话并显示失败原因', async () => {
@@ -1950,7 +1991,7 @@ describe('Arena Room browser controller', () => {
     });
   });
 
-  it('leave 结果未知且会话仍可读取时安全重放同一离开意图并收敛终态', async () => {
+  it('leave 结果未知且会话仍可读取时也直接重放收敛，无需读取会话', async () => {
     const { client, controller } = createHarness();
     const memberSession = {
       ...session,
@@ -1969,7 +2010,7 @@ describe('Arena Room browser controller', () => {
         '请求结果未知',
       ))
       .mockResolvedValueOnce({ protocolVersion: 1, roomId: 'room-1', outcome: 'left' });
-    vi.mocked(client.getSession).mockResolvedValueOnce(memberSession);
+    vi.mocked(client.getSession).mockResolvedValue(memberSession);
     await controller.join('room-1', '成员');
 
     await controller.leave();
@@ -1985,7 +2026,7 @@ describe('Arena Room browser controller', () => {
     }));
     expect(client.leave).toHaveBeenCalledTimes(2);
     expect(client.leave).toHaveBeenLastCalledWith('room-1', 'epoch-1');
-    expect(client.getSession).toHaveBeenCalledOnce();
+    expect(client.getSession).not.toHaveBeenCalled();
   });
 
   it('leave 结果未知且重放仍未知时保持 unknown 并按再次提交提示', async () => {
@@ -2005,7 +2046,6 @@ describe('Arena Room browser controller', () => {
       null,
       '请求结果未知',
     ));
-    vi.mocked(client.getSession).mockResolvedValue(memberSession);
     await controller.join('room-1', '成员');
 
     await controller.leave();
@@ -2018,9 +2058,10 @@ describe('Arena Room browser controller', () => {
       managementResultUnknown: true,
     }));
     expect(client.leave).toHaveBeenCalledTimes(2);
+    expect(client.getSession).not.toHaveBeenCalled();
   });
 
-  it('leave 对账遇到通用 forbidden 时保持 unknown，不误判为已离开', async () => {
+  it('leave 重放返回 forbidden（成员资格已不存在）时按已退出收敛', async () => {
     const { client, controller } = createHarness();
     const memberSession = {
       ...session,
@@ -2032,28 +2073,33 @@ describe('Arena Room browser controller', () => {
       },
     };
     vi.mocked(client.join).mockResolvedValueOnce(memberSession);
-    vi.mocked(client.leave).mockRejectedValueOnce(new ArenaRoomClientError(
-      'ROOM_RESULT_UNKNOWN',
-      null,
-      '请求结果未知',
-    ));
-    vi.mocked(client.getSession).mockRejectedValueOnce(new ArenaRoomClientError(
-      'ROOM_FORBIDDEN',
-      403,
-      '没有此房间操作权限',
-    ));
+    // 服务端 leave 在 epoch 匹配但该账号已无成员记录时返回 403：
+    // 对 leave intent 而言即“已不在房间”，按已退出收敛。
+    vi.mocked(client.leave)
+      .mockRejectedValueOnce(new ArenaRoomClientError(
+        'ROOM_RESULT_UNKNOWN',
+        null,
+        '请求结果未知',
+      ))
+      .mockRejectedValueOnce(new ArenaRoomClientError(
+        'ROOM_FORBIDDEN',
+        403,
+        '没有此房间操作权限',
+      ));
     await controller.join('room-1', '成员');
 
     await controller.leave();
     controller.reconnect();
 
     await vi.waitFor(() => expect(controller.getSnapshot()).toMatchObject({
-      session: memberSession,
-      managementOperation: 'leave',
-      managementResultUnknown: true,
-      notice: '管理动作结果仍无法确认；未重复提交请求',
+      phase: 'ready',
+      session: null,
+      managementOperation: null,
+      managementResultUnknown: false,
+      notice: '已离开房间',
     }));
-    expect(client.leave).toHaveBeenCalledOnce();
+    expect(client.leave).toHaveBeenCalledTimes(2);
+    expect(client.getSession).not.toHaveBeenCalled();
   });
 
   it('close 结果未知且房间仍开放时安全重放同一关闭意图并收敛终态', async () => {
@@ -2153,6 +2199,11 @@ describe('Arena Room browser controller', () => {
         null,
         '请求结果未知',
       ))
+      .mockRejectedValueOnce(new ArenaRoomClientError(
+        'ROOM_CONFLICT',
+        409,
+        '房间实例已变化，请重新进入房间后重试。',
+      ))
       .mockResolvedValueOnce({ protocolVersion: 1, roomId: 'room-1', outcome: 'left' });
     vi.mocked(client.getSession).mockResolvedValueOnce(recoveredSession);
     await controller.join('room-1', '成员');
@@ -2168,7 +2219,57 @@ describe('Arena Room browser controller', () => {
       managementResultUnknown: false,
       notice: '已离开房间',
     }));
-    expect(client.leave).toHaveBeenCalledTimes(2);
+    expect(client.leave).toHaveBeenCalledTimes(3);
+    expect(client.leave).toHaveBeenLastCalledWith('room-1', 'epoch-2');
+    expect(client.getSession).toHaveBeenCalledOnce();
+  });
+
+  it('leave 对账在 epoch 轮换后重放仍未知时保持 unknown 并重建连接', async () => {
+    const { client, controller } = createHarness();
+    const memberSession = {
+      ...session,
+      self: {
+        userId: 'member-1',
+        role: 'member' as const,
+        displayName: '成员',
+        membershipState: 'active' as const,
+      },
+    };
+    const recoveredSession = {
+      ...memberSession,
+      roomEpoch: 'epoch-2',
+      snapshot: { ...memberSession.snapshot, roomEpoch: 'epoch-2' },
+    };
+    vi.mocked(client.join).mockResolvedValueOnce(memberSession);
+    vi.mocked(client.leave)
+      .mockRejectedValueOnce(new ArenaRoomClientError(
+        'ROOM_RESULT_UNKNOWN',
+        null,
+        '请求结果未知',
+      ))
+      .mockRejectedValueOnce(new ArenaRoomClientError(
+        'ROOM_CONFLICT',
+        409,
+        '房间实例已变化，请重新进入房间后重试。',
+      ))
+      .mockRejectedValueOnce(new ArenaRoomClientError(
+        'ROOM_RESULT_UNKNOWN',
+        null,
+        '请求结果未知',
+      ));
+    vi.mocked(client.getSession).mockResolvedValueOnce(recoveredSession);
+    await controller.join('room-1', '成员');
+
+    await controller.leave();
+    controller.reconnect();
+
+    await vi.waitFor(() => expect(controller.getSnapshot()).toMatchObject({
+      phase: 'reconnecting',
+      session: { roomId: 'room-1', roomEpoch: 'epoch-2' },
+      managementOperation: 'leave',
+      managementResultUnknown: true,
+    }));
+    expect(client.leave).toHaveBeenCalledTimes(3);
     expect(client.leave).toHaveBeenLastCalledWith('room-1', 'epoch-2');
     expect(client.getSession).toHaveBeenCalledOnce();
   });
@@ -2401,85 +2502,6 @@ describe('Arena Room browser controller', () => {
     expect(sockets).toHaveLength(2);
     sockets[1]!.open();
     expect(controller.getSnapshot().phase).toBe('connected');
-  });
-
-  it('leave 重放被确定性拒绝时解除 unknown 并显示真实错误', async () => {
-    const { client, controller } = createHarness();
-    const memberSession = {
-      ...session,
-      self: {
-        userId: 'member-1',
-        role: 'member' as const,
-        displayName: '成员',
-        membershipState: 'active' as const,
-      },
-    };
-    vi.mocked(client.join).mockResolvedValueOnce(memberSession);
-    vi.mocked(client.leave)
-      .mockRejectedValueOnce(new ArenaRoomClientError(
-        'ROOM_RESULT_UNKNOWN',
-        null,
-        '请求结果未知',
-      ))
-      .mockRejectedValueOnce(new ArenaRoomClientError(
-        'ROOM_FORBIDDEN',
-        403,
-        '没有此房间操作权限',
-      ));
-    vi.mocked(client.getSession).mockResolvedValueOnce(memberSession);
-    await controller.join('room-1', '成员');
-
-    await controller.leave();
-    expect(controller.getSnapshot().managementResultUnknown).toBe(true);
-    controller.reconnect();
-
-    await vi.waitFor(() => expect(controller.getSnapshot()).toMatchObject({
-      session: memberSession,
-      managementOperation: null,
-      managementResultUnknown: false,
-      error: '没有此房间操作权限',
-    }));
-    expect(client.leave).toHaveBeenCalledTimes(2);
-  });
-
-  it('leave 重放遇到 ROOM_CONFLICT 时保持 unknown 并调度重新对账', async () => {
-    const { client, controller, runNextTimer } = createHarness();
-    const memberSession = {
-      ...session,
-      self: {
-        userId: 'member-1',
-        role: 'member' as const,
-        displayName: '成员',
-        membershipState: 'active' as const,
-      },
-    };
-    vi.mocked(client.join).mockResolvedValueOnce(memberSession);
-    vi.mocked(client.leave)
-      .mockRejectedValueOnce(new ArenaRoomClientError(
-        'ROOM_RESULT_UNKNOWN',
-        null,
-        '请求结果未知',
-      ))
-      .mockRejectedValueOnce(new ArenaRoomClientError(
-        'ROOM_CONFLICT',
-        409,
-        '房间实例已变化，请重新进入房间后重试。',
-      ));
-    vi.mocked(client.getSession).mockResolvedValueOnce(memberSession);
-    await controller.join('room-1', '成员');
-
-    await controller.leave();
-    expect(controller.getSnapshot().managementResultUnknown).toBe(true);
-    controller.reconnect();
-
-    await vi.waitFor(() => expect(controller.getSnapshot()).toMatchObject({
-      session: memberSession,
-      managementOperation: 'leave',
-      managementResultUnknown: true,
-    }));
-    expect(client.leave).toHaveBeenCalledTimes(2);
-    await runNextTimer();
-    expect(client.getSession).toHaveBeenCalledTimes(1);
   });
 
   it('close 成功后立即结束本地房间会话', async () => {
