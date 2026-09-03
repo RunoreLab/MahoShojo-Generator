@@ -321,7 +321,9 @@ const HostProposalInbox = ({
         服务器仍会校验当前房间配置版本、引用权限、提案基准、依赖与联动变更组。
       </p>
       {proposals.length === 0 ? (
-        <p className="mt-3 text-sm text-gray-600 dark:text-gray-400">暂无待处理提案</p>
+        <p className="mt-3 text-sm text-gray-600 dark:text-gray-400">
+          暂无待处理提案。成员在主编辑区编辑并提交提案后会出现在这里；接受后的内容才会进入本局配置。
+        </p>
       ) : (
         <ul className="mt-3 space-y-3" aria-label="待审阅提案">
           {proposals.map((proposal) => (
@@ -430,6 +432,9 @@ const MemberProposalEntry = ({
         </p>
       ) : null}
       <ArenaMemberProposalStatus state={state} controller={controller} />
+      <p className="mt-3 text-xs text-gray-600 dark:text-gray-400">
+        只想围观也完全可以：不提交提案，等房主开始生成即可。
+      </p>
     </section>
   );
 };

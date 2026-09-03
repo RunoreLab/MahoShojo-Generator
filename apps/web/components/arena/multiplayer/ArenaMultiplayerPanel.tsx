@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
 
 import type { RoomDirectoryVisibility } from '@mahoshojo/contracts/arena-room';
@@ -68,11 +69,26 @@ const primaryButtonClass = `${buttonClass} border-fuchsia-600 bg-fuchsia-600 tex
 const secondaryButtonClass = `${buttonClass} border-gray-300 bg-white text-gray-800 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800`;
 const inputClass = 'w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fuchsia-500 dark:border-gray-600 dark:bg-gray-950 dark:text-gray-100';
 
-const StatusNotice = ({ state }: { readonly state: ArenaRoomControllerState }) => (
-  <div role="status" aria-live="polite" aria-atomic="true" className="min-h-6 text-sm text-gray-700 dark:text-gray-200">
-    {state.notice ?? (state.phase === 'connected' ? '房间已连接' : '')}
-  </div>
-);
+const MULTIPLAYER_GUIDE_HREF = '/encyclopedia/arena-multiplayer';
+
+const StatusNotice = ({ state }: { readonly state: ArenaRoomControllerState }) => {
+  const session = state.phase === 'closed' || state.phase === 'replacement'
+    ? null
+    : state.session;
+  const activeMemberCount = session?.snapshot.members.filter((member) => (
+    member.membershipState === 'active'
+  )).length ?? 0;
+  const defaultNotice = state.phase === 'connected'
+    ? (session && activeMemberCount <= 1
+      ? '房间已连接；把房间码分享给朋友即可邀请加入'
+      : '房间已连接')
+    : '';
+  return (
+    <div role="status" aria-live="polite" aria-atomic="true" className="min-h-6 text-sm text-gray-700 dark:text-gray-200">
+      {state.notice ?? defaultNotice}
+    </div>
+  );
+};
 
 const ArenaRoomLobbyDialog = ({
   open,
@@ -113,7 +129,7 @@ const ArenaRoomLobbyDialog = ({
       onClose={onClose}
       titleId="arena-room-lobby-heading"
       title="多人房间"
-      description="创建房间，或从有界公开目录中选择并加入。"
+      description="创建房间并邀请朋友一起围观战报、协作生成；也可以从公开房间目录或凭房间码加入。"
       widthClassName="max-w-4xl"
     >
       <StatusNotice state={state} />
@@ -214,6 +230,18 @@ const ArenaRoomLobbyDialog = ({
               </div>
             ) : null}
           </section>
+
+          <div className="mt-4 rounded-xl border border-fuchsia-200 bg-fuchsia-50/70 p-3 text-sm text-gray-700 dark:border-fuchsia-900 dark:bg-fuchsia-950/20 dark:text-gray-200">
+            <p className="font-medium text-gray-950 dark:text-gray-100">两种最简单的玩法</p>
+            <p className="mt-1">👀 只想围观：加入房间后什么都不做，等房主开始生成，即可实时围观同一份战报。</p>
+            <p className="mt-1">🎲 多人跑团：每位成员提案自己的角色，并在角色「行动」里写下本轮行动引导，房主接受大家的提案后统一生成。</p>
+            <Link
+              href={`${MULTIPLAYER_GUIDE_HREF}#两种最简单的玩法`}
+              className="mt-2 inline-block font-medium text-fuchsia-700 hover:underline dark:text-fuchsia-300"
+            >
+              查看完整玩法说明
+            </Link>
+          </div>
     </ArenaRoomDialog>
   );
 };
@@ -393,16 +421,24 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
           ) : null}
         </div>
         {!session && !props.authLoading && (state.phase === 'ready' || state.phase === 'listing') ? (
-          <button
-            type="button"
-            className={primaryButtonClass}
-            onClick={() => {
-              setLobbyOpen(true);
-              props.onDiscover();
-            }}
-          >
-            打开多人房间
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              className={primaryButtonClass}
+              onClick={() => {
+                setLobbyOpen(true);
+                props.onDiscover();
+              }}
+            >
+              打开多人房间
+            </button>
+            <Link
+              href={`${MULTIPLAYER_GUIDE_HREF}#快速开始`}
+              className={secondaryButtonClass}
+            >
+              玩法说明
+            </Link>
+          </div>
         ) : null}
       </div>
 
@@ -503,6 +539,12 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
               <button type="button" className={secondaryButtonClass} onClick={() => setRoomOpen(true)}>
                 房间
               </button>
+              <Link
+                href={`${MULTIPLAYER_GUIDE_HREF}#房主与成员`}
+                className={secondaryButtonClass}
+              >
+                玩法说明
+              </Link>
             </div>
           </div>
 
@@ -641,6 +683,11 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
                   </li>
                 ))}
               </ul>
+              {activeMembers.length <= 1 ? (
+                <p className="mt-2 text-xs text-gray-600 dark:text-gray-400">
+                  房间里还没有其他成员；把房间面板中的房间码分享给朋友即可邀请加入。
+                </p>
+              ) : null}
             </section>
 
             <section aria-labelledby="arena-room-actions-heading" className="mt-5 border-t border-gray-200 pt-4 dark:border-gray-700">

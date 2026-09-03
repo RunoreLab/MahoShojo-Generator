@@ -221,6 +221,29 @@ describe('Arena multiplayer production client/hook wiring', () => {
     expect(WiringSocket.instances).toHaveLength(0);
   });
 
+  it('大厅对话框提供两种玩法提示与玩法说明百科直达链接', async () => {
+    const fetcher = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input);
+      if (url.endsWith('/languages.json')) return Response.json([]);
+      if (requestPath(url) === '/api/auth/verify') return Response.json({ success: false });
+      if (requestPath(url) === '/api/arena/rooms/v1') {
+        return Response.json({ protocolVersion: 1, items: [], nextCursor: null });
+      }
+      throw new Error(`unexpected Room request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetcher);
+    await act(async () => root.render(productionTree(props)));
+    await flush();
+    await act(async () => button('打开多人房间').click());
+    await flush();
+
+    expect(document.body.textContent).toContain('两种最简单的玩法');
+    expect(document.body.textContent).toContain('多人跑团');
+    const guideLink = [...document.body.querySelectorAll('a')]
+      .find((candidate) => candidate.getAttribute('href') === '/encyclopedia/arena-multiplayer#两种最简单的玩法');
+    expect(guideLink).not.toBeUndefined();
+  });
+
   it.each(['host', 'member'] as const)(
     '%s 通过真实 client/hook 完成 join -> ticket -> WSS -> exit epoch fence',
     async (role) => {

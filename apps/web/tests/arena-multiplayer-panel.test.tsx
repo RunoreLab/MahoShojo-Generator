@@ -131,6 +131,38 @@ describe('Arena multiplayer panel accessibility/permissions', () => {
     expect(html).toContain('aria-live="polite"');
   });
 
+  it('紧凑入口与房间壳都提供玩法说明百科直达链接', () => {
+    const compactHtml = render(readyState);
+    expect(compactHtml).toContain('玩法说明');
+    expect(compactHtml).toContain('href="/encyclopedia/arena-multiplayer#快速开始"');
+
+    const roomHtml = render({ ...readyState, phase: 'connected', session });
+    expect(roomHtml).toContain('href="/encyclopedia/arena-multiplayer#房主与成员"');
+  });
+
+  it('连接后的默认状态文案按成员数量引导邀请', () => {
+    const aloneHtml = render({ ...readyState, phase: 'connected', session });
+    expect(aloneHtml).toContain('房间已连接；把房间码分享给朋友即可邀请加入');
+
+    const withMemberSession = {
+      ...session,
+      snapshot: {
+        ...session.snapshot,
+        members: [
+          session.snapshot.members[0]!,
+          { userId: 'member-1', role: 'member' as const, displayName: '成员', membershipState: 'active' as const },
+        ],
+      },
+    };
+    const withMemberHtml = render({
+      ...readyState,
+      phase: 'connected',
+      session: withMemberSession,
+    });
+    expect(withMemberHtml).toContain('房间已连接');
+    expect(withMemberHtml).not.toContain('把房间码分享给朋友即可邀请加入');
+  });
+
   it('无 session 的大厅入口仍播报 controller notice pending 状态', () => {
     const html = render({
       ...readyState,

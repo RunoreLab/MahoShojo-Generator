@@ -33,6 +33,21 @@ export function ArenaRoomLatestHistoryResult({
         </section>
       );
     }
+    if (history.status === 'ready' && history.completedCount === 0) {
+      return (
+        <section
+          aria-labelledby="arena-room-latest-history-heading"
+          className="rounded-xl border border-fuchsia-200 bg-white/70 p-4 dark:border-fuchsia-900 dark:bg-gray-900/60"
+        >
+          <h3 id="arena-room-latest-history-heading" className="text-sm font-semibold text-gray-950 dark:text-gray-100">
+            房间战报
+          </h3>
+          <p role="status" className="mt-2 text-sm text-gray-600 dark:text-gray-400">
+            本房间还没有生成过战报。确认配置后，由房主开始生成，所有成员将实时看到同一份战报；只想围观的话，什么都不用做。
+          </p>
+        </section>
+      );
+    }
     return null;
   }
 

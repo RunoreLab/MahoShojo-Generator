@@ -377,7 +377,7 @@ describe('ArenaRoomLatestHistoryResult', () => {
     expect(notArchived).toContain('未成功归档');
   });
 
-  it('失败时显示降级提示，加载中与无历史不渲染', () => {
+  it('失败时显示降级提示，加载中不渲染，空房间给出下一步引导', () => {
     const failed = renderToStaticMarkup(
       <ArenaRoomLatestHistoryResult history={{ status: 'failed', completedCount: 0, latest: null }} />,
     );
@@ -386,8 +386,10 @@ describe('ArenaRoomLatestHistoryResult', () => {
     expect(renderToStaticMarkup(
       <ArenaRoomLatestHistoryResult history={{ status: 'loading', completedCount: 0, latest: null }} />,
     )).toBe('');
-    expect(renderToStaticMarkup(
+    const emptyRoom = renderToStaticMarkup(
       <ArenaRoomLatestHistoryResult history={{ status: 'ready', completedCount: 0, latest: null }} />,
-    )).toBe('');
+    );
+    expect(emptyRoom).toContain('本房间还没有生成过战报');
+    expect(emptyRoom).toContain('所有成员将实时看到同一份战报');
   });
 });
