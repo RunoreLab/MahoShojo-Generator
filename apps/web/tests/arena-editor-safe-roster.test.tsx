@@ -149,7 +149,7 @@ describe('Arena editor safe roster presentation', () => {
     expect(moveRoster).not.toHaveBeenCalled();
   });
 
-  it('共享列表的移动与移除按钮提供适合触屏的最小触控尺寸', async () => {
+  it('共享列表的移动与移除按钮保持紧凑视觉并提供 40px 不可见触控热区', async () => {
     await act(async () => root.render(
       <>
         <ArenaRosterRow
@@ -174,7 +174,9 @@ describe('Arena editor safe roster presentation', () => {
     ));
 
     for (const button of container.querySelectorAll('button[aria-label^="上移"], button[aria-label^="下移"], button[aria-label^="移除"]')) {
-      expect(button.className).toMatch(/(?:min-w-10|min-h-10|w-10|h-10)/);
+      expect(button.className).toMatch(/(?:w-6 h-6|w-5 h-5|px-2 py-1)/);
+      expect(button.className).toMatch(/after:-inset-(?:2|2\.5)/);
+      expect(button.className).not.toMatch(/min-w-10|min-h-10/);
     }
   });
 });

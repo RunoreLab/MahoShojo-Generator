@@ -48,7 +48,7 @@ export function ArenaMaterialList({
                 type="button"
                 onClick={() => onMove(index, index - 1)}
                 disabled={disabled || index === 0}
-                className="min-h-10 min-w-10 rounded border px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-40"
+                className="relative rounded border px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-40 after:absolute after:-inset-2 after:content-['']"
                 aria-label={`上移 ${material.name}`}
               >
                 ↑
@@ -57,7 +57,7 @@ export function ArenaMaterialList({
                 type="button"
                 onClick={() => onMove(index, index + 1)}
                 disabled={disabled || index === items.length - 1}
-                className="min-h-10 min-w-10 rounded border px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-40"
+                className="relative rounded border px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-40 after:absolute after:-inset-2 after:content-['']"
                 aria-label={`下移 ${material.name}`}
               >
                 ↓
@@ -66,7 +66,7 @@ export function ArenaMaterialList({
                 type="button"
                 onClick={() => onRemove(material.key)}
                 disabled={disabled}
-                className="min-h-10 min-w-10 rounded border border-red-200 px-2 py-1 text-xs text-red-600 disabled:cursor-not-allowed disabled:opacity-40"
+                className="relative rounded border border-red-200 px-2 py-1 text-xs text-red-600 disabled:cursor-not-allowed disabled:opacity-40 after:absolute after:-inset-2 after:content-['']"
                 aria-label={`移除 ${material.name}`}
               >
                 移除

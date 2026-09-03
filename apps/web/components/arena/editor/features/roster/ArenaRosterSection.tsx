@@ -196,14 +196,14 @@ export function ArenaRosterSection({
               <div className="flex flex-col gap-0.5">
                 <button
                   type="button"
-                  className="min-h-10 min-w-10 rounded border border-gray-300 bg-white text-xs hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+                  className="relative w-6 h-6 rounded border border-gray-300 bg-white text-xs hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40 after:absolute after:-inset-2 after:content-['']"
                   aria-label={`上移队伍 ${team.name}`}
                   disabled={model.disabled || teamIndex === 0}
                   onClick={() => actions.moveTeam(team.key, -1)}
                 >↑</button>
                 <button
                   type="button"
-                  className="min-h-10 min-w-10 rounded border border-gray-300 bg-white text-xs hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+                  className="relative w-6 h-6 rounded border border-gray-300 bg-white text-xs hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40 after:absolute after:-inset-2 after:content-['']"
                   aria-label={`下移队伍 ${team.name}`}
                   disabled={model.disabled || teamIndex === teams.length - 1}
                   onClick={() => actions.moveTeam(team.key, 1)}
