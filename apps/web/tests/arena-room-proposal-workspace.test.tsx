@@ -581,6 +581,61 @@ describe('Arena room Proposal workspace', () => {
     editor.dispose();
   });
 
+  it('成员工作区提供同步配置入口与底部生成区替代按钮', async () => {
+    const editor = createRoomProposalArenaEditorSession({
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      revision: 7,
+      sharedConfig,
+    });
+    const onSyncFromRoom = vi.fn();
+    const controller = {
+      submitProposal: vi.fn(async () => undefined),
+      withdrawProposal: vi.fn(async () => undefined),
+      reconnect: vi.fn(),
+    } satisfies Pick<ArenaRoomController, 'reconnect' | 'submitProposal' | 'withdrawProposal'>;
+
+    await act(async () => root.render(
+      <ArenaRoomProposalWorkspaceView
+        editor={editor}
+        state={state}
+        controller={controller}
+        onSyncFromRoom={onSyncFromRoom}
+      />,
+    ));
+
+    expect(container.textContent).toContain('提案完成后由房主开始生成');
+    expect(container.querySelectorAll('.arena-cta-button')).toHaveLength(2);
+    expect(container.querySelector('.arena-cta-button--preview')).toBeTruthy();
+    expect(container.querySelector('.arena-cta-button--sync')).toBeTruthy();
+    expect(buttonsWithText('同步配置')).toHaveLength(2);
+    expect(button('预览提案').disabled).toBe(true);
+
+    // 干净草稿：直接同步，不需要确认
+    await act(async () => button('同步配置').click());
+    expect(onSyncFromRoom).toHaveBeenCalledOnce();
+    expect(document.body.textContent).not.toContain('确认丢弃并同步');
+
+    // 脏草稿：先确认再丢弃同步
+    const storyGuidance = container.querySelector<HTMLInputElement>('#arena-story-guidance');
+    if (!storyGuidance) throw new Error('story guidance input not found');
+    await act(async () => setValue(storyGuidance, '同步前草稿'));
+    expect(button('预览提案').disabled).toBe(false);
+
+    await act(async () => button('同步配置').click());
+    expect(onSyncFromRoom).toHaveBeenCalledOnce();
+    expect(document.body.textContent).toContain('确认丢弃并同步');
+
+    await act(async () => button('保留草稿').click());
+    expect(document.body.textContent).not.toContain('确认丢弃并同步');
+    expect(onSyncFromRoom).toHaveBeenCalledOnce();
+
+    await act(async () => button('同步配置').click());
+    await act(async () => button('确认丢弃并同步').click());
+    expect(onSyncFromRoom).toHaveBeenCalledTimes(2);
+    editor.dispose();
+  });
+
   it('情景区块在无主情景时禁用辅助情景在线库入口并提示门槛，选择主情景后恢复', async () => {
     const scenarioModeConfig: ArenaRoomSharedConfig = {
       ...sharedConfig,

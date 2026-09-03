@@ -804,6 +804,56 @@ body.announcement-visible {
     transform: none;
   }
 
+  .arena-cta-button {
+    width: 100%;
+    padding: 15px;
+    color: white;
+    border: none;
+    border-radius: 12px;
+    font-size: 18px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    margin-bottom: 20px;
+  }
+
+  .arena-cta-button:hover:not(:disabled) {
+    transform: translateY(-2px);
+  }
+
+  .arena-cta-button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+  }
+
+  .arena-cta-button--preview {
+    background: linear-gradient(45deg, #d946ef, #c026d3);
+  }
+
+  .arena-cta-button--preview:hover:not(:disabled) {
+    box-shadow: 0 10px 20px rgba(217, 70, 239, 0.35);
+  }
+
+  .arena-cta-button--preview:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(217, 70, 239, 0.45);
+  }
+
+  .arena-cta-button--sync {
+    background: linear-gradient(45deg, #34d399, #059669);
+    margin-bottom: 0;
+  }
+
+  .arena-cta-button--sync:hover:not(:disabled) {
+    box-shadow: 0 10px 20px rgba(16, 185, 129, 0.35);
+  }
+
+  .arena-cta-button--sync:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.45);
+  }
+
   .result-card {
     background: var(--app-result-card-bg);
     color: white;

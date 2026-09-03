@@ -45,8 +45,36 @@ type ProposalController = Pick<
   'reconnect' | 'submitProposal' | 'withdrawProposal'
 >;
 
+const ResyncConfirmDialog = ({
+  onConfirm,
+  onCancel,
+}: {
+  readonly onConfirm: () => void;
+  readonly onCancel: () => void;
+}) => (
+  <ArenaRoomDialog
+    open
+    titleId="arena-proposal-resync-confirm-heading"
+    title="确认同步房间配置？"
+    description="当前未提交修改将被丢弃，并以房间最新配置重新建立提案草稿。"
+    onClose={onCancel}
+    widthClassName="max-w-md"
+  >
+    <div className="flex flex-wrap justify-end gap-2">
+      <button type="button" className={secondaryButtonClass} onClick={onCancel}>
+        保留草稿
+      </button>
+      <button type="button" className={dangerButtonClass} onClick={onConfirm}>
+        确认丢弃并同步
+      </button>
+    </div>
+  </ArenaRoomDialog>
+);
+
 const buttonClass = 'min-h-10 rounded-lg border px-3 py-2 text-sm font-medium transition-colors motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fuchsia-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50';
 const primaryButtonClass = `${buttonClass} border-fuchsia-600 bg-fuchsia-600 text-white hover:bg-fuchsia-700`;
+const secondaryButtonClass = `${buttonClass} border-gray-300 bg-white text-gray-800 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800`;
+const dangerButtonClass = `${buttonClass} border-red-300 bg-white text-red-700 hover:bg-red-50 dark:border-red-800 dark:bg-gray-900 dark:text-red-300`;
 
 const proposalCharacterPresets: Preset[] = PRESET_LIST.filter((preset) => (
   ARENA_ROOM_PRESET_CATALOG.some((entry) => entry.kind === 'character' && entry.id === preset.filename)
@@ -144,10 +172,12 @@ const ProposalWorkspaceInner = ({
   editor,
   state,
   controller,
+  onSyncFromRoom,
 }: {
   readonly editor: RoomProposalArenaEditorSession;
   readonly state: ArenaRoomControllerState;
   readonly controller: ProposalController;
+  readonly onSyncFromRoom?: () => void;
 }) => {
   const snapshot = useArenaEditorSelector((value) => value);
   const { data: languages } = useLanguagesQuery();
@@ -158,6 +188,7 @@ const ProposalWorkspaceInner = ({
   const [preview, setPreview] = useState<readonly ArenaProposalChange[] | null>(null);
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [localError, setLocalError] = useState<string | null>(null);
+  const [confirmSync, setConfirmSync] = useState(false);
   const submitLock = useRef(false);
 
   const selectedIds = useMemo(() => {
@@ -306,6 +337,23 @@ const ProposalWorkspaceInner = ({
     }
   };
 
+  const requestSync = (): void => {
+    if (!onSyncFromRoom) return;
+    if (snapshot.dirty) {
+      setConfirmSync(true);
+      return;
+    }
+    performSync();
+  };
+
+  const performSync = (): void => {
+    setPreview(null);
+    setSelected(new Set());
+    setLocalError(null);
+    setConfirmSync(false);
+    onSyncFromRoom?.();
+  };
+
   const submit = async (): Promise<void> => {
     if (!preview || submitLock.current || state.proposalOperation !== null || state.proposalResultUnknown) return;
     submitLock.current = true;
@@ -329,7 +377,12 @@ const ProposalWorkspaceInner = ({
           <h2 id="arena-room-proposal-workspace-heading" className="text-lg font-semibold text-gray-950 dark:text-gray-100">Arena 提案编辑模式</h2>
           <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">隔离草稿 · 基于房间配置版本 {snapshot.baselineRevision} · 本地编辑不联网</p>
         </div>
-        <button type="button" className={primaryButtonClass} disabled={!snapshot.dirty || disabled} onClick={buildPreview}>预览提案</button>
+        <div className="flex flex-wrap items-center gap-2">
+          {onSyncFromRoom ? (
+            <button type="button" className={secondaryButtonClass} onClick={requestSync}>同步配置</button>
+          ) : null}
+          <button type="button" className={primaryButtonClass} disabled={!snapshot.dirty || disabled} onClick={buildPreview}>预览提案</button>
+        </div>
       </div>
       {snapshot.stale ? <p role="status" className="mt-3 rounded-lg bg-amber-50 p-2 text-sm text-amber-900">房间配置已更新；当前草稿仍绑定旧基线，请重新同步后再提交。</p> : null}
       {localError ? <p role="alert" className="mt-3 text-sm text-red-700 dark:text-red-300">{localError}</p> : null}
@@ -454,6 +507,42 @@ const ProposalWorkspaceInner = ({
         ]}
       />
 
+      <section
+        aria-labelledby="arena-room-proposal-actions-heading"
+        className="mt-6 rounded-2xl border border-fuchsia-200 bg-white/70 p-4 dark:border-fuchsia-900 dark:bg-gray-900/60 sm:p-5"
+      >
+        <h3 id="arena-room-proposal-actions-heading" className="text-center text-base font-semibold text-gray-950 dark:text-gray-100">
+          提案完成后由房主开始生成
+        </h3>
+        <p className="mt-1 text-center text-sm text-gray-600 dark:text-gray-400">
+          多人生成只能由房主启动；把你的调整整理成提案，接受后会进入房间配置。
+        </p>
+        <div className="mt-4">
+          <button
+            type="button"
+            className="arena-cta-button arena-cta-button--preview"
+            disabled={!snapshot.dirty || disabled}
+            onClick={buildPreview}
+          >
+            🖆 预览提案
+          </button>
+          {onSyncFromRoom ? (
+            <button
+              type="button"
+              className="arena-cta-button arena-cta-button--sync"
+              onClick={requestSync}
+            >
+              ↻‌ 同步配置
+            </button>
+          ) : null}
+        </div>
+        {!snapshot.dirty ? (
+          <p className="mt-1 text-center text-xs text-gray-500 dark:text-gray-400">
+            当前草稿还没有可提交的修改；在上方调整配置后即可提交提案。
+          </p>
+        ) : null}
+      </section>
+
       <BattleDataModal
         isOpen={modalKind !== null}
         onClose={() => setModalKind(null)}
@@ -483,6 +572,13 @@ const ProposalWorkspaceInner = ({
           onSubmit={() => { void submit(); }}
         />
       ) : null}
+
+      {confirmSync ? (
+        <ResyncConfirmDialog
+          onConfirm={performSync}
+          onCancel={() => setConfirmSync(false)}
+        />
+      ) : null}
     </section>
   );
 };
@@ -496,6 +592,7 @@ export function ArenaRoomProposalWorkspace() {
       editor={editor}
       state={runtime.state}
       controller={runtime.controller}
+      onSyncFromRoom={runtime.proposalWorkspace.syncFromRoom}
     />
   );
 }
@@ -504,10 +601,12 @@ export function ArenaRoomProposalWorkspaceView({
   editor,
   state,
   controller,
+  onSyncFromRoom,
 }: {
   readonly editor: RoomProposalArenaEditorSession;
   readonly state: ArenaRoomControllerState;
   readonly controller: ProposalController;
+  readonly onSyncFromRoom?: () => void;
 }) {
   return (
     <ArenaEditorSessionProvider session={editor}>
@@ -515,6 +614,7 @@ export function ArenaRoomProposalWorkspaceView({
         editor={editor}
         state={state}
         controller={controller}
+        onSyncFromRoom={onSyncFromRoom}
       />
     </ArenaEditorSessionProvider>
   );
