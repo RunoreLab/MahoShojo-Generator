@@ -890,6 +890,72 @@ describe('proposal application', () => {
     expect(satisfied.revision).toBe(4);
   });
 
+  it('reports CURRENT == PROPOSED as satisfied for preset references too (regression)', () => {
+    // 回归：preset:<id> 引用的 satisfied 判定曾从 ref.id 重新推导 namespace，
+    // 得到 data-card:<id> 与当前 preset:<id> 不一致而误报冲突。
+    // satisfied 判定必须使用已规范化的 targetKey。
+    const presetRef = (id: string, kind: 'character' | 'scenario', versionToken: string) => ({
+      id,
+      kind,
+      versionToken,
+    });
+    const presetCurrent = {
+      ...baseConfig(),
+      combatants: [
+        { key: 'preset:M00.json', ref: presetRef('M00.json', 'character', 'sha256:m00') },
+        online('c2', 'character'),
+      ],
+      teams: [
+        { key: 'team:a', displayName: 'A', combatantKeys: [] },
+        { key: 'team:b', displayName: 'B', combatantKeys: ['preset:M00.json'] },
+      ],
+      scenario: { key: 'preset:S00.json', ref: presetRef('S00.json', 'scenario', 'sha256:s00') },
+      auxScenarios: [{ key: 'preset:A00.json', ref: presetRef('A00.json', 'scenario', 'sha256:a00') }],
+    };
+    const satisfied = applyArenaProposal(proposalState(presetCurrent, 4), makeProposal([
+      {
+        changeId: 'add-preset-dup',
+        type: 'addCombatant' as const,
+        key: 'preset:M00.json',
+        ref: presetRef('M00.json', 'character', 'sha256:m00'),
+        expectedBase: { kind: 'absent' as const },
+      },
+      {
+        changeId: 'scenario-preset-same',
+        type: 'setScenario' as const,
+        key: 'preset:S00.json',
+        ref: presetRef('S00.json', 'scenario', 'sha256:s00'),
+        expectedBase: { kind: 'ref' as const, ref: ref('s1', 'scenario') },
+      },
+      {
+        changeId: 'aux-preset-dup',
+        type: 'addAuxScenario' as const,
+        key: 'preset:A00.json',
+        ref: presetRef('A00.json', 'scenario', 'sha256:a00'),
+        expectedBase: { kind: 'absent' as const },
+      },
+    ], 'proposal-preset-dup'));
+
+    expect(satisfied.status).toBe('accepted');
+    expect(satisfied.satisfiedChangeIds).toEqual(['add-preset-dup', 'scenario-preset-same', 'aux-preset-dup']);
+    expect(satisfied.conflicts).toEqual([]);
+    expect(satisfied.config).toEqual(presetCurrent);
+    // 全 satisfied 是安全 no-op：终结提案但不产生新 config revision。
+    expect(satisfied.revision).toBe(4);
+
+    const preview = previewArenaProposalApplication(proposalState(presetCurrent, 4), makeProposal([
+      {
+        changeId: 'add-preset-dup',
+        type: 'addCombatant' as const,
+        key: 'preset:M00.json',
+        ref: presetRef('M00.json', 'character', 'sha256:m00'),
+        expectedBase: { kind: 'absent' as const },
+      },
+    ], 'proposal-preset-dup'));
+    const byId = new Map(preview.plan.map((item) => [item.changeId, item] as const));
+    expect(byId.get('add-preset-dup')?.outcome).toBe('satisfied');
+  });
+
   it('keeps genuine conflicts when CURRENT differs from both BASE and PROPOSED', () => {
     const driftedCurrent = { ...baseConfig(), battleMode: 'kizuna' as const };
     const result = applyArenaProposal(proposalState(driftedCurrent, 5), makeProposal([

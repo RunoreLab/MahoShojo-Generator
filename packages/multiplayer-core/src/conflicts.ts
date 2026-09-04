@@ -254,15 +254,21 @@ const refMatchesExpected = (
 ): SemanticMatchResult => {
   const expectedRef = expected.ref;
   if (current.kind !== 'ref') return { ok: false, reason: 'kind' };
+  // Prefer an already-canonicalized target key (typed expectedBase.key, or the
+  // proposed semantic value's targetKey produced by canonicalResourceKey) over
+  // re-deriving the namespace from ref.id, whose default assumes data-card and
+  // would misjudge preset references (preset:<id> vs data-card:<id>).
   const expectedKey = 'key' in expected && typeof expected.key === 'string'
     ? expected.key
-    : expectedRef && typeof expectedRef === 'object' && 'id' in expectedRef
-        ? canonicalResourceKey((expectedRef as { id: string }).id)
-        : expectedRef && typeof expectedRef === 'object' && 'source' in expectedRef
-          && (expectedRef as { source?: unknown }).source === 'host-local'
-          && 'key' in expectedRef
-          ? (expectedRef as { key: string }).key
-          : undefined;
+    : 'targetKey' in expected && typeof expected.targetKey === 'string'
+      ? expected.targetKey
+      : expectedRef && typeof expectedRef === 'object' && 'id' in expectedRef
+          ? canonicalResourceKey((expectedRef as { id: string }).id)
+          : expectedRef && typeof expectedRef === 'object' && 'source' in expectedRef
+            && (expectedRef as { source?: unknown }).source === 'host-local'
+            && 'key' in expectedRef
+            ? (expectedRef as { key: string }).key
+            : undefined;
   if (expectedKey !== undefined && current.targetKey !== expectedKey) {
     return { ok: false, reason: 'key' };
   }
