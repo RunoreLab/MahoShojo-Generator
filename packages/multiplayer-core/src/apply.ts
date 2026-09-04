@@ -16,7 +16,7 @@ import {
   type ArenaProposalConflict,
 } from './conflicts';
 import { validateProposalChanges, type ProposalSelectionIssue, type ProposalSelectionValidation } from './selection';
-import { canonicalResourceKey, deepClone } from './utils';
+import { canonicalResourceKey, deepClone, deepEqual } from './utils';
 
 export interface ArenaProposalState {
   readonly roomId: string;
@@ -443,7 +443,11 @@ export function applyArenaProposal(
     return {
       status: accepted.length === guarded.proposal.changes.length ? 'accepted' : 'partially_accepted',
       config: deepClone(finalConfig),
-      revision: state.revision + 1,
+      // Satisfied no-ops terminate the proposal without mutating the config, so
+      // they must not mint a new revision. This keeps the exported contract
+      // aligned with the authority state machine, which only increments the
+      // revision when the shared config actually changed.
+      revision: deepEqual(config, finalConfig) ? state.revision : state.revision + 1,
       acceptedChangeIds: accepted,
       satisfiedChangeIds: staged.satisfiedChangeIds,
       rejectedChangeIds: rejectedIds,

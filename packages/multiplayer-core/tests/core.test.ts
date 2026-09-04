@@ -826,6 +826,8 @@ describe('proposal application', () => {
     expect(absentTarget.acceptedChangeIds).toEqual(['remove-missing']);
     expect(absentTarget.conflicts).toEqual([]);
     expect(absentTarget.config).toEqual(current);
+    // satisfied no-op 不改变配置，也不允许虚增 config revision。
+    expect(absentTarget.revision).toBe(3);
     expect(current.materials).toHaveLength(2);
   });
 
@@ -885,6 +887,7 @@ describe('proposal application', () => {
     expect(satisfied.status).toBe('accepted');
     expect(satisfied.satisfiedChangeIds).toEqual(['mode']);
     expect(satisfied.config).toEqual(scenarioCurrent);
+    expect(satisfied.revision).toBe(4);
   });
 
   it('keeps genuine conflicts when CURRENT differs from both BASE and PROPOSED', () => {
