@@ -488,10 +488,19 @@ describe('Arena Room HTTP product contract', () => {
       result: 'applied' as const,
     };
     expect(ArenaRoomProposalMutationResponseSchema.parse(response)).toEqual(response);
-    // resolve 响应可以携带 mutation 后的权威 sharedConfig；不改变配置的 mutation 省略该字段。
+    // resolve 响应可以携带 mutation 后的权威 sharedConfig 与完整权威 snapshot；
+    // 不改变配置的 mutation 省略这两个字段。
+    const authoritativeSnapshot = {
+      ...canonicalRoomSnapshot,
+      roomId: response.roomId,
+      roomEpoch: response.roomEpoch,
+      controlSeq: response.controlSeq,
+      revision: response.revision,
+    };
     const withAuthority = {
       ...response,
       sharedConfig: canonicalRoomSnapshot.sharedConfig,
+      snapshot: authoritativeSnapshot,
     };
     expect(ArenaRoomProposalMutationResponseSchema.parse(withAuthority)).toEqual(withAuthority);
     for (const internal of [
@@ -500,10 +509,21 @@ describe('Arena Room HTTP product contract', () => {
       { terminalProposalIds: ['proposal-1'] },
       { receipt: 'checkpoint-receipt' },
       { authorityState: {} },
-      { snapshot: canonicalRoomSnapshot },
     ]) {
       expect(ArenaRoomProposalMutationResponseSchema.safeParse({ ...response, ...internal }).success)
         .toBe(false);
+    }
+    // snapshot 与响应公共身份/游标字段矛盾时必须拒绝。
+    for (const mismatch of [
+      { roomId: 'room-other' },
+      { roomEpoch: 'epoch-other' },
+      { controlSeq: response.controlSeq + 1 },
+      { revision: response.revision + 1 },
+    ]) {
+      expect(ArenaRoomProposalMutationResponseSchema.safeParse({
+        ...withAuthority,
+        snapshot: { ...authoritativeSnapshot, ...mismatch },
+      }).success).toBe(false);
     }
   });
 

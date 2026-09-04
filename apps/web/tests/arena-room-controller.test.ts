@@ -175,12 +175,22 @@ const createHarness = () => {
       protocolVersion: 1,
       roomId,
       roomEpoch: 'epoch-1',
-      controlSeq: 2,
+      // 真实状态机中 accept 在 submit 事件（seq 1）之后还会推进
+      // room.config.updated（seq 2）与 proposal.resolved（seq 3）两个控制事件，
+      // 响应携带最终 controlSeq 与完整权威 snapshot。
+      controlSeq: 3,
       revision: 1,
       proposalId,
       status: 'accepted' as const,
       result: 'applied' as const,
       sharedConfig: { ...sharedConfig, userGuidance: '成员建议' },
+      snapshot: {
+        ...snapshot,
+        controlSeq: 3,
+        revision: 1,
+        sharedConfig: { ...sharedConfig, userGuidance: '成员建议' },
+        proposals: [],
+      },
     })),
     withdrawProposal: vi.fn(async (roomId, proposalId) => ({
       protocolVersion: 1,
@@ -557,7 +567,7 @@ describe('Arena Room browser controller', () => {
     // 命令响应就是收敛主路径：无需等待 WSS 即可看见提案移除与房间配置更新。
     const installed = controller.getSnapshot().session;
     expect(installed?.snapshot.revision).toBe(1);
-    expect(installed?.snapshot.controlSeq).toBe(2);
+    expect(installed?.snapshot.controlSeq).toBe(3);
     expect(installed?.snapshot.sharedConfig).toEqual({ ...sharedConfig, userGuidance: '成员建议' });
     expect(installed?.snapshot.proposals).toEqual([]);
 
@@ -588,6 +598,122 @@ describe('Arena Room browser controller', () => {
     expect(afterReplication?.snapshot.controlSeq).toBe(3);
     expect(afterReplication?.snapshot.sharedConfig).toEqual({ ...sharedConfig, userGuidance: '成员建议' });
     expect(afterReplication?.snapshot.proposals).toEqual([]);
+  });
+
+  it('resolve 安装完整权威 snapshot：未送达的中间控制事件内容不丢失', async () => {
+    const { client, controller, queued, sockets } = createHarness();
+    await controller.create({
+      displayName: '房主',
+      directory: { title: '测试房', visibility: 'public' },
+      sharedConfig,
+    });
+    sockets[0]!.open();
+    const member = {
+      userId: 'user-member',
+      role: 'member' as const,
+      displayName: '成员',
+      membershipState: 'active' as const,
+    };
+    const proposal = (proposalId: string, changeId: string) => ({
+      proposalVersion: 1 as const,
+      proposalId,
+      roomId: 'room-1',
+      authorUserId: 'user-member',
+      baseRevision: 0,
+      status: 'submitted' as const,
+      changes: [{
+        changeId,
+        type: 'setUserGuidance' as const,
+        value: `${proposalId} 建议`,
+        expectedBase: { kind: 'value' as const, value: '' },
+      }],
+      createdAt: '2026-08-28T00:01:00.000Z',
+    });
+    const first = proposal('proposal-1', 'guidance-1');
+    const second = proposal('proposal-2', 'guidance-2');
+    // 房主只收到了 P1 的提交事件；P2 的提交事件（seq 2）仍在途。
+    sockets[0]!.message(JSON.stringify({
+      protocolVersion: 1,
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      controlSeq: 1,
+      timestamp: '2026-08-28T00:01:00.000Z',
+      type: 'proposal.submitted',
+      payload: { proposal: first },
+    }));
+    expect(controller.getSnapshot().session?.snapshot.proposals).toEqual([first]);
+
+    vi.mocked(client.resolveProposal).mockResolvedValueOnce({
+      protocolVersion: 1,
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      controlSeq: 4,
+      revision: 1,
+      proposalId: 'proposal-1',
+      status: 'accepted' as const,
+      result: 'applied' as const,
+      sharedConfig: { ...sharedConfig, userGuidance: 'proposal-1 建议' },
+      snapshot: {
+        ...snapshot,
+        controlSeq: 4,
+        revision: 1,
+        sharedConfig: { ...sharedConfig, userGuidance: 'proposal-1 建议' },
+        members: [...snapshot.members, member],
+        proposals: [second],
+        activeGeneration: null,
+      },
+    });
+    await controller.resolveProposal('proposal-1', {
+      expectedRoomEpoch: 'epoch-1',
+      expectedRevision: 0,
+      resolution: 'accept-selected',
+      selectedChangeIds: ['guidance-1'],
+    });
+
+    // 部分安装会只删除 P1 并把 controlSeq 宣布到 4，导致 P2 被去重规则丢弃；
+    // 完整权威 snapshot 安装必须保留服务器视角的全部 proposals。
+    const installed = controller.getSnapshot().session;
+    expect(installed?.snapshot.controlSeq).toBe(4);
+    expect(installed?.snapshot.proposals).toEqual([second]);
+    expect(installed?.snapshot.sharedConfig).toEqual({ ...sharedConfig, userGuidance: 'proposal-1 建议' });
+
+    // 在途事件随后到达：seq <= 4 全部被去重丢弃，且不得触发重连。
+    sockets[0]!.message(JSON.stringify({
+      protocolVersion: 1,
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      controlSeq: 2,
+      timestamp: '2026-08-28T00:02:00.000Z',
+      type: 'proposal.submitted',
+      payload: { proposal: second },
+    }));
+    sockets[0]!.message(JSON.stringify({
+      protocolVersion: 1,
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      controlSeq: 3,
+      timestamp: '2026-08-28T00:02:30.000Z',
+      type: 'room.config.updated',
+      payload: {
+        revision: 1,
+        sharedConfig: { ...sharedConfig, userGuidance: 'proposal-1 建议' },
+      },
+    }));
+    sockets[0]!.message(JSON.stringify({
+      protocolVersion: 1,
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      controlSeq: 4,
+      timestamp: '2026-08-28T00:03:00.000Z',
+      type: 'proposal.resolved',
+      payload: { proposalId: 'proposal-1', status: 'accepted' },
+    }));
+    const after = controller.getSnapshot();
+    expect(after.session?.snapshot.controlSeq).toBe(4);
+    expect(after.session?.snapshot.proposals).toEqual([second]);
+    expect(after.phase).toBe('connected');
+    expect(sockets[0]!.close).not.toHaveBeenCalled();
+    expect(queued).toHaveLength(0);
   });
 
   it('resolve 响应落后于本地权威时不回退，等待 WSS 完成 proposal 清理', async () => {

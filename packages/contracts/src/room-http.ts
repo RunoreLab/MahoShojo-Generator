@@ -432,7 +432,32 @@ export const ArenaRoomProposalMutationResponseSchema = z.object({
   // 「服务器提交」与「本地落地」合并为同一次命令收敛；不改变配置的
   // mutation（submit/withdraw）省略该字段。
   sharedConfig: ArenaRoomSharedConfigSchema.optional(),
-}).strict();
+  // resolve 响应携带 mutation 后的完整权威 snapshot（members/proposals/
+  // sharedConfig/activeGeneration）：房主端用它做原子安装并同步推进复制
+  // 游标，避免部分安装把尚未收到的控制事件「宣布已见」而被 WSS 去重
+  // 规则永久丢弃。不改变配置的 mutation 省略该字段。
+  snapshot: ArenaRoomSnapshotSchema.optional(),
+}).strict().superRefine((response, context) => {
+  if (response.snapshot === undefined) return;
+  const checks: ReadonlyArray<[
+    'roomId' | 'roomEpoch' | 'revision' | 'controlSeq',
+    string,
+  ]> = [
+    ['roomId', 'snapshot roomId must match response roomId'],
+    ['roomEpoch', 'snapshot roomEpoch must match response roomEpoch'],
+    ['revision', 'snapshot revision must match response revision'],
+    ['controlSeq', 'snapshot controlSeq must match response controlSeq'],
+  ];
+  for (const [key, message] of checks) {
+    if (response.snapshot[key] !== response[key]) {
+      context.addIssue({
+        code: 'custom',
+        path: ['snapshot', key],
+        message,
+      });
+    }
+  }
+});
 
 export const ArenaRoomHttpErrorCodeSchema = z.enum(ARENA_ROOM_HTTP_ERROR_CODES);
 

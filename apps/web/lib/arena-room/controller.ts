@@ -227,10 +227,13 @@ const proposalResolvedNotice = (status: ArenaRoomProposalMutationStatus): string
 );
 
 /**
- * resolve 的 HTTP 响应携带 mutation 后的权威 sharedConfig 时，把它立即安装进
+ * resolve 的 HTTP 响应携带 mutation 后的权威状态时，把它立即安装进
  * 本地 session 视图：命令响应是本次操作的主收敛路径，WSS 只是复制/恢复通道。
- * 这样房主接受提案后无需等待 WSS 事件即可看见「房间配置已更新」，reconciliation
- * 会随即把权威配置 materialize 到 Arena 编辑区，保证眼—手一致。
+ * 优先安装完整权威 snapshot（含 members/proposals/activeGeneration）：
+ * 部分安装只改 config/proposal 字段却把整个 snapshot 的 controlSeq 宣布到
+ * 响应值，尚未送达的中间控制事件（如另一个成员的 proposal.submitted）会被
+ * WSS 的 `controlSeq <= current` 去重规则永久丢弃。旧服务器只带 sharedConfig
+ * 时退回部分安装，仅收敛 revision/config/proposal。
  * 任一 fence 不满足（旧服务器响应、本地已看到更新状态、revision/config 矛盾）
  * 都返回 null，退回旧行为：等待 WSS 权威事件或快照对账。
  */
@@ -238,10 +241,24 @@ const resolveAuthoritySession = (
   latest: ArenaRoomSessionResponse,
   response: ArenaRoomProposalMutationResponse,
 ): ArenaRoomSessionResponse | null => {
-  if (response.sharedConfig === undefined) return null;
   if (latest.self.role !== 'host' || latest.self.membershipState !== 'active') return null;
   if (latest.snapshot.revision > response.revision) return null;
   if (latest.snapshot.controlSeq > response.controlSeq) return null;
+  if (response.roomId !== latest.roomId || response.roomEpoch !== latest.roomEpoch) return null;
+  const snapshot = response.snapshot;
+  if (snapshot) {
+    if (snapshot.revision !== response.revision || snapshot.controlSeq !== response.controlSeq) {
+      return null;
+    }
+    if (
+      latest.snapshot.revision === snapshot.revision
+      && !sameSharedConfig(latest.snapshot.sharedConfig, snapshot.sharedConfig)
+    ) return null;
+    const self = snapshot.members.find((member) => member.userId === latest.self.userId);
+    if (!self || self.membershipState !== 'active') return null;
+    return { ...latest, snapshot };
+  }
+  if (response.sharedConfig === undefined) return null;
   if (
     latest.snapshot.revision === response.revision
     && !sameSharedConfig(latest.snapshot.sharedConfig, response.sharedConfig)
@@ -1251,6 +1268,14 @@ export const createArenaRoomController = (
       const installed = operation === 'resolve' && latest
         ? resolveAuthoritySession(latest, response)
         : null;
+      if (installed && response.snapshot) {
+        // 完整权威 snapshot 安装：controlCursor 一并推进到快照确认已见的
+        // 位置，保证重连游标与已安装内容一致。
+        controlCursor = {
+          roomEpoch: installed.roomEpoch,
+          controlSeq: installed.snapshot.controlSeq,
+        };
+      }
       publish({
         ...(installed ? { session: installed } : {}),
         proposalOperation: null,
