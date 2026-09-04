@@ -1424,7 +1424,7 @@ describe('Arena Room browser controller', () => {
     });
   });
 
-  it('1008 room-authority-fenced 按终态处理，直接进入 replacement 而不消耗重连预算', async () => {
+  it('room-authority-fenced（1008/1013）按可重试处理，预算耗尽才进入 replacement', async () => {
     const harness = createHarness();
     await harness.controller.create({
       displayName: '房主',
@@ -1432,14 +1432,24 @@ describe('Arena Room browser controller', () => {
       sharedConfig,
     });
     harness.sockets[0]!.open();
+    // 回归：fenced 只表示当前进程 incarnation 失去 authority，房间可经服务端
+    // 重启后恢复，必须消耗重连预算而不是立即终态。
     harness.sockets[0]!.closed(1008, 'room-authority-fenced');
+    expect(harness.controller.getSnapshot()).toMatchObject({ phase: 'degraded', session: { roomId: 'room-1' } });
+    await harness.runNextTimer();
+    expect(harness.client.issueTicket).toHaveBeenCalledTimes(2);
 
+    harness.sockets[1]!.open();
+    harness.sockets[1]!.closed(1013, 'room-authority-fenced');
+    await harness.runNextTimer();
+    expect(harness.client.issueTicket).toHaveBeenCalledTimes(3);
+
+    harness.sockets[2]!.open();
+    harness.sockets[2]!.closed(1013, 'room-authority-fenced');
     expect(harness.controller.getSnapshot()).toMatchObject({
       phase: 'replacement',
-      session: null,
       notice: '原房间无法恢复，请房主创建新房间',
     });
-    expect(harness.client.issueTicket).toHaveBeenCalledTimes(1);
   });
 
   it('post-open 1013 不清零跨连接预算，重连最终有界熔断', async () => {

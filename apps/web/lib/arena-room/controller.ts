@@ -1088,12 +1088,9 @@ export const createArenaRoomController = (
           else enterReplacement();
           return;
         }
-        if (event.code === 1008 && event.reason === 'room-authority-fenced') {
-          // 服务器侧 authority 已 fence：房间实例对本进程不可恢复，重连也无法回到原房间。
-          if (state.session?.self.role === 'member') enterMembershipRevoked();
-          else enterReplacement();
-          return;
-        }
+        // room-authority-fenced（1008/1013）只表示当前进程 incarnation 失去
+        // authority，房间可经服务端重启后从 checkpoint 恢复，纳入重连预算而非
+        // 直接终态；确定性终局仅限 membership-revoked / room-closed。
         scheduleReconnect(event.code === 1008 && event.reason !== 'room-epoch-stale');
       };
     } catch {

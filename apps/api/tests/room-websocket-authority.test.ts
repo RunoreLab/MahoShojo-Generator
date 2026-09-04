@@ -953,14 +953,15 @@ describe('Arena Room ticket -> membership -> presence WSS authority', () => {
     );
     expect(recheckPeer.closes).toEqual([{ code: 1013, reason: 'room-authority-unavailable' }]);
 
-    // 3) 激活首查 fenced → 1008 room-authority-fenced（终态，但不再伪装 membership-revoked）
+    // 3) 激活首查 fenced → 1013 room-authority-fenced（可重试；与 fanout fenced
+    //    语义一致，房间可经服务端重启后恢复，不得按终态终结会话）
     script = [undefined, new RoomActorError('ROOM_ACTOR_FENCED')];
     const fencedPeer = createPeer();
     await activate(
       await authority.authorize(requestForTicket(await authority.issue({ roomId: 'room-1', accountUserId: 101 }))),
       fencedPeer.peer,
     );
-    expect(fencedPeer.closes).toEqual([{ code: 1008, reason: 'room-authority-fenced' }]);
+    expect(fencedPeer.closes).toEqual([{ code: 1013, reason: 'room-authority-fenced' }]);
 
     // 4) resync 请求时暂时故障 → 1013 room-authority-unavailable
     script = [undefined, undefined, undefined, new RoomActorError('ROOM_ACTOR_QUEUE_OVERLOADED')];
