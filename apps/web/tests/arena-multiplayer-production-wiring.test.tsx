@@ -356,6 +356,57 @@ describe('Arena multiplayer production client/hook wiring', () => {
     },
   );
 
+  it('复制邀请使用当前浏览站点 origin，不复用 Hono API origin', async () => {
+    const writeText = vi.fn(async () => undefined);
+    Object.defineProperty(globalThis.navigator, 'clipboard', {
+      value: { writeText },
+      configurable: true,
+    });
+    try {
+      const fetcher = vi.fn<typeof fetch>(async (input) => {
+        const url = String(input);
+        if (url.endsWith('/languages.json')) return Response.json([]);
+        if (requestPath(url) === '/api/auth/verify') return Response.json({ success: false });
+        if (requestPath(url) === '/api/arena/rooms/v1') {
+          return Response.json({ protocolVersion: 1, items: [], nextCursor: null });
+        }
+        if (url.endsWith('/join')) return Response.json(sessionFor('host'));
+        if (url.endsWith('/ticket')) return Response.json({
+          protocolVersion: 1,
+          ticket: 'ticket-invite',
+          expiresInSeconds: 45,
+          websocket: {
+            path: '/api/arena/rooms/v1/ws',
+            protocol: 'mahoshojo.arena-room.v1',
+          },
+        });
+        if (url.endsWith('/generations')) {
+          return Response.json({ protocolVersion: 1, roomId: 'room-1', roomEpoch: 'epoch-1', items: [] });
+        }
+        throw new Error(`unexpected Room request: ${url}`);
+      });
+      vi.stubGlobal('fetch', fetcher);
+      await act(async () => root.render(productionTree(props)));
+      await enterJoinCode();
+      await act(async () => button('加入房间').click());
+      await flush();
+      await act(async () => WiringSocket.instances[0]!.open());
+
+      await act(async () => button('复制邀请').click());
+      await flush();
+
+      expect(writeText).toHaveBeenCalledTimes(1);
+      const text = String(writeText.mock.calls[0]?.[0]);
+      // 回归：props.origin 是 Hono API origin（此处 127.0.0.1:8787，生产为
+      // homura.colanns.me），邀请链接必须指向用户正在浏览的 Web 站点。
+      expect(text).toContain(`${window.location.origin}/arena`);
+      expect(text).toContain('room-1');
+      expect(text).not.toContain('127.0.0.1:8787');
+    } finally {
+      delete (globalThis.navigator as { clipboard?: unknown }).clipboard;
+    }
+  });
+
   it('真实 hook 对 1013 取 fresh ticket，对 membership revoke 显示 replacement 并可 reset', async () => {
     vi.useFakeTimers();
     let ticketIndex = 0;

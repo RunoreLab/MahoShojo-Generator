@@ -460,8 +460,10 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
 
   const copyRoomInfo = async (kind: 'room-id' | 'invite'): Promise<void> => {
     if (!session) return;
-    const text = kind === 'invite' && props.origin
-      ? buildArenaRoomInviteText(props.origin, session.roomId)
+    // 邀请链接必须指向用户正在浏览的 Web 站点（production/preview/本地天然正确）；
+    // props.origin 是 Hono API origin，不能用于产品分享链接。
+    const text = kind === 'invite'
+      ? buildArenaRoomInviteText(window.location.origin, session.roomId)
       : session.roomId;
     const ok = await copyTextToClipboard(text);
     if (!ok) return;
