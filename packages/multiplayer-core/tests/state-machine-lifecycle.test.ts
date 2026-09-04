@@ -12,7 +12,9 @@ import {
   createRoomCommand,
   hostAuthority,
   joinMemberCommand,
+  leaveMemberCommand,
   memberAuthority,
+  rejoinMemberCommand,
 } from './state-machine-fixtures';
 
 const success = (result: ArenaRoomTransitionResult): Extract<ArenaRoomTransitionResult, { ok: true }> => {
@@ -139,6 +141,10 @@ describe('Arena Room runtime-neutral lifecycle transitions', () => {
       timestamp: NEXT_TIMESTAMP,
     }, hostAuthority()));
     expect(kicked.nextState.snapshot.members).toHaveLength(1);
+    expect(kicked.nextState.memberAuthority).toContainEqual(expect.objectContaining({
+      accountUserId: 202,
+      revocationReason: 'kicked',
+    }));
 
     const replayedKick = success(transitionArenaRoom(kicked.nextState, {
       type: 'kick-member',
@@ -168,6 +174,141 @@ describe('Arena Room runtime-neutral lifecycle transitions', () => {
     };
     expect(success(transitionArenaRoom(kicked.nextState, replacement, replacementContext)).nextState.snapshot.members)
       .toContainEqual(expect.objectContaining({ userId: 'member-2', membershipState: 'active' }));
+  });
+
+  it('reactivates voluntary leavers via rejoin-member with the same identity', () => {
+    const joined = success(transitionArenaRoom(createState(), joinMemberCommand(), memberAuthority())).nextState;
+    const left = success(transitionArenaRoom(joined, leaveMemberCommand(NEXT_TIMESTAMP), memberAuthority())).nextState;
+    expect(left.memberAuthority).toContainEqual(expect.objectContaining({
+      accountUserId: 202,
+      revocationReason: 'left',
+    }));
+
+    const rejoined = success(transitionArenaRoom(left, rejoinMemberCommand(), memberAuthority()));
+    expect(rejoined.kind).toBe('applied');
+    expect(rejoined.events).toEqual([
+      expect.objectContaining({ type: 'room.member.joined', controlSeq: left.snapshot.controlSeq + 1 }),
+    ]);
+    expect(rejoined.nextState.snapshot.members).toContainEqual({
+      userId: 'member-1',
+      role: 'member',
+      displayName: 'Member Rejoined',
+      membershipState: 'active',
+      joinedAt: '2026-08-27T16:02:00.000Z',
+    });
+    expect(rejoined.nextState.memberAuthority).toHaveLength(2);
+    expect(rejoined.nextState.memberAuthority).toContainEqual({
+      accountUserId: 202,
+      member: expect.objectContaining({ userId: 'member-1', membershipState: 'active' }),
+    });
+    expect(rejoined.nextState.memberAuthority.find((entry) => entry.accountUserId === 202))
+      .not.toHaveProperty('revocationReason');
+  });
+
+  it('keeps rejoin idempotent once membership is active again', () => {
+    const joined = success(transitionArenaRoom(createState(), joinMemberCommand(), memberAuthority())).nextState;
+    const left = success(transitionArenaRoom(joined, leaveMemberCommand(NEXT_TIMESTAMP), memberAuthority())).nextState;
+    const rejoined = success(transitionArenaRoom(left, rejoinMemberCommand(), memberAuthority())).nextState;
+    const replayed = success(transitionArenaRoom(rejoined, rejoinMemberCommand('Renamed', NEXT_TIMESTAMP), memberAuthority()));
+    expect(replayed.kind).toBe('idempotent');
+    expect(replayed.events).toEqual([]);
+    expect(replayed.nextState).toEqual(rejoined);
+  });
+
+  it('rejects rejoin for a foreign account bound to the same tombstone', () => {
+    const joined = success(transitionArenaRoom(createState(), joinMemberCommand(), memberAuthority())).nextState;
+    const left = success(transitionArenaRoom(joined, leaveMemberCommand(NEXT_TIMESTAMP), memberAuthority())).nextState;
+    expect(failure(transitionArenaRoom(left, rejoinMemberCommand(), {
+      kind: 'authenticated-user',
+      actorUserId: 'member-1',
+      accountUserId: 999,
+    }))).toMatchObject({ code: 'forbidden', reason: 'member-not-active' });
+  });
+
+  it('upgrades a later host kick over voluntary leave and fences rejoin monotonically', () => {
+    const joined = success(transitionArenaRoom(createState(), joinMemberCommand(), memberAuthority())).nextState;
+    const left = success(transitionArenaRoom(joined, leaveMemberCommand(NEXT_TIMESTAMP), memberAuthority())).nextState;
+    const upgradedKick = success(transitionArenaRoom(left, {
+      type: 'kick-member',
+      targetUserId: 'member-1',
+      expectedRoomEpoch: 'epoch-1',
+      timestamp: '2026-08-27T16:03:00.000Z',
+    }, hostAuthority()));
+    expect(upgradedKick.kind).toBe('applied');
+    expect(upgradedKick.events).toEqual([]);
+    expect(upgradedKick.nextState.memberAuthority).toContainEqual(expect.objectContaining({
+      accountUserId: 202,
+      revocationReason: 'kicked',
+    }));
+    expect(failure(transitionArenaRoom(upgradedKick.nextState, rejoinMemberCommand(), memberAuthority())))
+      .toMatchObject({ code: 'forbidden', reason: 'member-not-active' });
+
+    const kickedFirst = success(transitionArenaRoom(joined, {
+      type: 'kick-member',
+      targetUserId: 'member-1',
+      expectedRoomEpoch: 'epoch-1',
+      timestamp: '2026-08-27T16:03:00.000Z',
+    }, hostAuthority())).nextState;
+    const replayedLeave = success(transitionArenaRoom(kickedFirst, leaveMemberCommand('2026-08-27T16:04:00.000Z'), memberAuthority()));
+    expect(replayedLeave.kind).toBe('idempotent');
+    expect(replayedLeave.nextState.memberAuthority).toContainEqual(expect.objectContaining({
+      revocationReason: 'kicked',
+    }));
+    expect(failure(transitionArenaRoom(replayedLeave.nextState, rejoinMemberCommand(), memberAuthority())))
+      .toMatchObject({ code: 'forbidden', reason: 'member-not-active' });
+  });
+
+  it('keeps legacy reason-less revoked tombstones fail-closed against rejoin', () => {
+    const joined = success(transitionArenaRoom(createState(), joinMemberCommand(), memberAuthority())).nextState;
+    const left = success(transitionArenaRoom(joined, leaveMemberCommand(NEXT_TIMESTAMP), memberAuthority())).nextState;
+    const legacy = structuredClone(left);
+    const legacyRecord = legacy.memberAuthority.find((entry) => entry.accountUserId === 202);
+    if (!legacyRecord || !('revocationReason' in legacyRecord)) throw new Error('missing tombstone');
+    delete legacyRecord.revocationReason;
+    expect(failure(transitionArenaRoom(legacy, rejoinMemberCommand(), memberAuthority())))
+      .toMatchObject({ code: 'forbidden', reason: 'member-not-active' });
+    expect(failure(transitionArenaRoom(legacy, joinMemberCommand(), memberAuthority())))
+      .toMatchObject({ code: 'forbidden', reason: 'member-not-active' });
+  });
+
+  it('enforces the active member cap on rejoin without consuming authority history', () => {
+    let state = createState();
+    for (let index = 1; index < MAX_ROOM_MEMBERS; index += 1) {
+      state = success(transitionArenaRoom(state, {
+        ...joinMemberCommand(),
+        member: {
+          ...joinMemberCommand().member,
+          userId: `member-${index}`,
+          displayName: `Member ${index}`,
+        },
+      }, {
+        kind: 'authenticated-user',
+        actorUserId: `member-${index}`,
+        accountUserId: 200 + index,
+      })).nextState;
+    }
+    const leaverAuthority = { kind: 'authenticated-user' as const, actorUserId: 'member-1', accountUserId: 201 };
+    const left = success(transitionArenaRoom(state, leaveMemberCommand(NEXT_TIMESTAMP), leaverAuthority)).nextState;
+    const replacement = success(transitionArenaRoom(left, {
+      ...joinMemberCommand(),
+      member: { ...joinMemberCommand().member, userId: 'member-backfill' },
+    }, {
+      kind: 'authenticated-user',
+      actorUserId: 'member-backfill',
+      accountUserId: 999,
+    })).nextState;
+    const authoritySlots = replacement.memberAuthority.length;
+    expect(failure(transitionArenaRoom(replacement, rejoinMemberCommand(), leaverAuthority)))
+      .toMatchObject({ code: 'capability-denied', reason: 'member-limit-reached' });
+
+    const freed = success(transitionArenaRoom(replacement, leaveMemberCommand('2026-08-27T16:03:00.000Z'), {
+      kind: 'authenticated-user',
+      actorUserId: 'member-backfill',
+      accountUserId: 999,
+    })).nextState;
+    const rejoined = success(transitionArenaRoom(freed, rejoinMemberCommand(), leaverAuthority)).nextState;
+    expect(rejoined.snapshot.members).toContainEqual(expect.objectContaining({ userId: 'member-1', membershipState: 'active' }));
+    expect(rejoined.memberAuthority).toHaveLength(authoritySlots);
   });
 
   it('enforces the active member cap without counting revoked authority tombstones', () => {

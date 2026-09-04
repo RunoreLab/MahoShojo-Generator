@@ -148,6 +148,22 @@ export const joinMemberCommand = () => ({
   timestamp: NEXT_TIMESTAMP,
 });
 
+export const rejoinMemberCommand = (
+  displayName = 'Member Rejoined',
+  timestamp = '2026-08-27T16:02:00.000Z',
+) => ({
+  type: 'rejoin-member' as const,
+  expectedRoomEpoch: 'epoch-1',
+  displayName,
+  timestamp,
+});
+
+export const leaveMemberCommand = (timestamp = '2026-08-27T16:02:00.000Z') => ({
+  type: 'leave-member' as const,
+  expectedRoomEpoch: 'epoch-1',
+  timestamp,
+});
+
 export const proposal = (
   changes: readonly ArenaProposalChange[],
   proposalId = 'proposal-1',

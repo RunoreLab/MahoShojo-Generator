@@ -4,6 +4,7 @@ import {
   ArenaProposalSchema,
   ArenaRoomSharedConfigSchema,
   ArenaRoomSnapshotSchema,
+  DisplayNameSchema,
   GENERATION_BRIDGE_VERSION,
   GenerationBridgeScopeSchema,
   GenerationMirrorSchema,
@@ -55,10 +56,26 @@ export const MAX_ROOM_COLLABORATIVE_CHANGES = 256;
 export const CanonicalSnapshotDigestSchema = z.string()
   .regex(/^sha256:[0-9a-f]{64}$/u, 'must be a lowercase SHA-256 digest');
 
+/**
+ * Server-only membership tombstone. `revocationReason` distinguishes a
+ * voluntary leave (`left`, rejoinable) from a host kick (`kicked`, fenced for
+ * the room lifetime). Records revoked before this field existed carry no
+ * reason and stay fail-closed: they can never be reactivated. The public
+ * `RoomMember.membershipState` intentionally remains two-state.
+ */
 export const ArenaRoomMemberAuthorityRecordSchema = z.object({
   accountUserId: z.number().int().positive(),
   member: RoomMemberSchema,
-}).strict();
+  revocationReason: z.enum(['left', 'kicked']).optional(),
+}).strict().superRefine((record, context) => {
+  if (record.member.membershipState === 'active' && record.revocationReason !== undefined) {
+    context.addIssue({
+      code: 'custom',
+      path: ['revocationReason'],
+      message: 'active member authority must not carry a revocation reason',
+    });
+  }
+});
 export type ArenaRoomMemberAuthorityRecord = z.infer<typeof ArenaRoomMemberAuthorityRecordSchema>;
 
 export const ArenaRoomGenerationRecordSchema = z.object({
@@ -465,6 +482,17 @@ export const LeaveArenaRoomMemberCommandSchema = z.object({
   ...epochCommand,
 }).strict();
 
+/**
+ * Server-normalized reactivation of a voluntarily-left membership. Identity
+ * binding is derived from the existing authority record (same member userId),
+ * never from the command; the command only supplies the fresh displayName.
+ */
+export const RejoinArenaRoomMemberCommandSchema = z.object({
+  type: z.literal('rejoin-member'),
+  ...epochCommand,
+  displayName: DisplayNameSchema,
+}).strict();
+
 export const KickArenaRoomMemberCommandSchema = z.object({
   type: z.literal('kick-member'),
   ...epochCommand,
@@ -566,6 +594,7 @@ export const MirrorArenaRoomGenerationCommandSchema = z.object({
 export const ArenaRoomCommandSchema = z.union([
   CreateArenaRoomCommandSchema,
   JoinArenaRoomMemberCommandSchema,
+  RejoinArenaRoomMemberCommandSchema,
   LeaveArenaRoomMemberCommandSchema,
   KickArenaRoomMemberCommandSchema,
   CloseArenaRoomCommandSchema,

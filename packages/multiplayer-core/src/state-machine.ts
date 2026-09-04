@@ -399,12 +399,28 @@ const revokeMember = (
   state: ArenaRoomAuthorityState,
   targetUserId: string,
   timestamp: string,
+  reason: 'left' | 'kicked',
 ): ArenaRoomTransitionResult => {
   const authorityIndex = state.memberAuthority.findIndex((record) => record.member.userId === targetUserId);
   if (authorityIndex < 0) return transitionFailure('not-found', 'member-not-active');
   const authority = state.memberAuthority[authorityIndex];
   if (!authority) return transitionFailure('not-found', 'member-not-active');
-  if (authority.member.membershipState === 'revoked') return finishIdempotent(state);
+  if (authority.member.membershipState === 'revoked') {
+    // kicked is the monotonic terminal state: a host kick that lands after the
+    // target's voluntary leave must still fence the room, so it upgrades the
+    // tombstone reason instead of collapsing into plain idempotency.
+    if (reason === 'kicked' && authority.revocationReason === 'left') {
+      const upgraded = cloneState(state);
+      upgraded.memberAuthority[authorityIndex] = {
+        accountUserId: authority.accountUserId,
+        member: authority.member,
+        revocationReason: 'kicked',
+      };
+      upgraded.lifecycle = { ...upgraded.lifecycle, updatedAt: timestamp };
+      return finishApplied(state, upgraded, []);
+    }
+    return finishIdempotent(state);
+  }
   const member = activeMember(state, targetUserId);
   if (!member) return transitionFailure('validation-failed', 'invalid-state');
 
@@ -426,6 +442,7 @@ const revokeMember = (
   next.memberAuthority[authorityIndex] = {
     accountUserId: authority.accountUserId,
     member: revoked,
+    revocationReason: reason,
   };
   next.terminalProposalIds.push(...proposalIdsToTombstone);
   next.lifecycle = { ...next.lifecycle, updatedAt: timestamp };
@@ -439,6 +456,47 @@ const revokeMember = (
   if (!pushControlEvent(next, events, timestamp, {
     type: 'room.member.left',
     payload: { member: revoked },
+  })) return eventOverflow();
+  return finishApplied(state, next, events);
+};
+
+const rejoinMember = (
+  state: ArenaRoomAuthorityState,
+  command: Extract<ArenaRoomCommand, { type: 'rejoin-member' }>,
+  context: ArenaRoomAuthorityContext,
+): ArenaRoomTransitionResult => {
+  if (context.kind !== 'authenticated-user') {
+    return transitionFailure('forbidden', 'invalid-authority-context');
+  }
+  const record = memberAuthorityRecord(state, context.actorUserId);
+  if (!record || record.accountUserId !== context.accountUserId) {
+    return transitionFailure('forbidden', 'member-not-active');
+  }
+  if (record.member.membershipState === 'active') return finishIdempotent(state);
+  // Kicked and legacy (reason-less) tombstones stay fenced for the room lifetime.
+  if (record.revocationReason !== 'left') {
+    return transitionFailure('forbidden', 'member-not-active');
+  }
+  if (state.snapshot.members.filter((member) => member.membershipState === 'active').length >= MAX_ROOM_MEMBERS) {
+    return transitionFailure('capability-denied', 'member-limit-reached');
+  }
+  const reactivated: RoomMember = {
+    ...record.member,
+    displayName: command.displayName,
+    membershipState: 'active',
+    joinedAt: command.timestamp,
+  };
+  const next = cloneState(state);
+  next.snapshot.members.push(deepClone(reactivated));
+  next.memberAuthority[next.memberAuthority.findIndex((entry) => entry.member.userId === reactivated.userId)] = {
+    accountUserId: record.accountUserId,
+    member: reactivated,
+  };
+  next.lifecycle = { ...next.lifecycle, updatedAt: command.timestamp };
+  const events: ControlRoomEvent[] = [];
+  if (!pushControlEvent(next, events, command.timestamp, {
+    type: 'room.member.joined',
+    payload: { member: deepClone(reactivated) },
   })) return eventOverflow();
   return finishApplied(state, next, events);
 };
@@ -944,6 +1002,8 @@ export const transitionArenaRoom = (
   switch (command.type) {
     case 'join-member':
       return joinMember(state, command, context);
+    case 'rejoin-member':
+      return rejoinMember(state, command, context);
     case 'leave-member': {
       if (context.kind !== 'authenticated-user') {
         return transitionFailure('forbidden', 'invalid-authority-context');
@@ -957,14 +1017,14 @@ export const transitionArenaRoom = (
       if (!member) return transitionFailure('validation-failed', 'invalid-state');
       return member.role === 'host'
         ? closeRoom(state, command.timestamp)
-        : revokeMember(state, context.actorUserId, command.timestamp);
+        : revokeMember(state, context.actorUserId, command.timestamp, 'left');
     }
     case 'kick-member': {
       const authorization = requireRole(state, context, 'host');
       if (authorization) return authorization;
       const target = memberAuthorityRecord(state, command.targetUserId)?.member;
       if (target?.role === 'host') return transitionFailure('forbidden', 'host-required');
-      return revokeMember(state, command.targetUserId, command.timestamp);
+      return revokeMember(state, command.targetUserId, command.timestamp, 'kicked');
     }
     case 'sync-presence':
       return syncPresence(state, command, context);
