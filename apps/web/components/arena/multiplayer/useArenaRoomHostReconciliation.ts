@@ -194,7 +194,9 @@ export const useArenaRoomHostReconciliation = ({
       setState({ kind: 'idle' });
       return;
     }
-    if (authority.revision <= previous.revision) return;
+    // observed 只表示「看见过」；是否仍需同步以「已成功落定的基线」为准。
+    // 若以 observed 判定，自动同步失败的当前 revision 会被视为已处理，
+    // 瞬时错误后将永远无法对同一 revision 重试。
     observedAuthorityRef.current = authority;
     const settledAuthority = hostWorkspace.settledAuthority();
     if (

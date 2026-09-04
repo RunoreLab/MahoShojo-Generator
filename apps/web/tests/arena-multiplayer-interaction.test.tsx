@@ -774,4 +774,21 @@ describe('Arena multiplayer panel real React interactions', () => {
       expect(document.body.textContent).not.toContain(exposedTerm);
     }
   });
+
+  it('host reconciliation error 时提供重试同步入口，且不把发布本地作为默认恢复动作', async () => {
+    mocks.state = connectedHostState(sharedConfig);
+    mocks.reconciliationState = {
+      kind: 'error',
+      code: 'ROOM_GENERATION_RECONCILIATION_REQUIRED',
+      message: '自动同步房间配置失败',
+    };
+    await act(async () => root.render(<ArenaMultiplayerContextPanel {...props} />));
+    await act(async () => button('配置待处理').click());
+
+    expect(document.body.textContent).toContain('自动同步房间配置失败');
+    expect(document.body.textContent).toContain('重试同步房间配置');
+
+    await act(async () => button('重试同步房间配置').click());
+    expect(mocks.syncRoom).toHaveBeenCalledOnce();
+  });
 });

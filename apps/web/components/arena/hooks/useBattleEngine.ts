@@ -83,7 +83,7 @@ import {
 } from '../multiplayer/generation-bridge';
 import { useArenaRoomContext } from '../multiplayer/useArenaRoom';
 import {
-  ARENA_ROOM_GENERATION_SYNC_GATE_MESSAGE,
+  arenaRoomGenerationSyncGateMessage,
   canAutoPublishArenaRoomHostDraft,
   isArenaRoomGenerationFenceCurrent,
   isArenaRoomGenerationSyncSettled,
@@ -721,7 +721,7 @@ export const useBattleEngine = () => {
 
       if (roomAction.inRoom && arenaRoomRuntime) {
         if (!isArenaRoomGenerationSyncSettled(arenaRoomRuntime.hostReconciliation.state.kind)) {
-          throw new Error(ARENA_ROOM_GENERATION_SYNC_GATE_MESSAGE);
+          throw new Error(arenaRoomGenerationSyncGateMessage(arenaRoomRuntime.hostReconciliation.state.kind));
         }
         const capturedAuthority = arenaRoomHostWorkspaceAuthorityFromSession(
           arenaRoomRuntime.state.session,
@@ -793,7 +793,10 @@ export const useBattleEngine = () => {
               : await requestArenaRoomGenerationPreflight({
                   reasons: comparison.reasons,
                   canUseRoom: comparison.room !== null,
-                  canPublish: true,
+                  // reconciliation error 期间本地与房间权威的关系不可信：
+                  // 此时只允许明确选择「按当前房间配置开始」，禁止把本地
+                  // working copy 发布出去覆盖房间权威。
+                  canPublish: isArenaRoomGenerationSyncSettled(arenaRoomRuntime.hostReconciliation.state.kind),
                   pendingProposalCount,
                 });
             if (choice === 'cancel') return;
@@ -804,9 +807,10 @@ export const useBattleEngine = () => {
               startInputs = comparison.room;
             } else {
               if (!isArenaRoomGenerationSyncSettled(arenaRoomRuntime.hostReconciliation.state.kind)) {
-                // Preflight 打开期间同步可能已开始；此时发布本地草稿会覆盖
-                // 尚未安装到本地的房间权威，必须拒绝并让 reconciliation 先落定。
-                throw new Error(ARENA_ROOM_GENERATION_SYNC_GATE_MESSAGE);
+                // Preflight 打开期间同步可能已开始或已失败；此时发布本地草稿
+                // 会覆盖尚未安装/关系不明的房间权威，必须拒绝并让 reconciliation
+                // 先落定。
+                throw new Error(arenaRoomGenerationSyncGateMessage(arenaRoomRuntime.hostReconciliation.state.kind));
               }
               const beforePublishState = arenaRoomRuntime.controller.getSnapshot();
               const beforePublishAuthority = arenaRoomHostWorkspaceAuthorityFromSession(

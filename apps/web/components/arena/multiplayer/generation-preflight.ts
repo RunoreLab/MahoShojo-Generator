@@ -41,11 +41,27 @@ export const canAutoPublishArenaRoomHostDraft = (input: Readonly<{
 
 export const ARENA_ROOM_GENERATION_SYNC_GATE_MESSAGE = '房间配置正在同步，请等待同步完成后再开始生成。';
 
+export const ARENA_ROOM_GENERATION_SYNC_ERROR_GATE_MESSAGE = '房间配置同步失败，请先在房间配置中重试同步，再开始生成。';
+
 /**
- * reconciliation 尚未落定（synchronizing）时，本地 working copy 既不代表房间
- * 权威、也可能即将被覆盖；此时禁止生成 preflight 的任何发布方向，避免用
- * stale/空本地配置覆盖刚接受的提案。
+ * reconciliation 尚未落定时，本地 working copy 既不代表房间权威、也可能即将被
+ * 覆盖；此时禁止生成 preflight 的任何发布方向，避免用 stale/空本地配置覆盖刚
+ * 接受的提案。
+ *
+ * `error` 同样不算落定：自动同步或发布失败意味着本地与房间权威的关系不再可信
+ * （本地可能是被覆盖前的旧配置，房间也可能已被发布结果改变）。此时不允许发布
+ * 本地 working copy；恢复路径是先重试同步房间配置，而不是发布本地草稿。
  */
 export const isArenaRoomGenerationSyncSettled = (
   reconciliationKind: ArenaRoomHostReconciliationState['kind'],
-): boolean => reconciliationKind !== 'synchronizing';
+): boolean => (
+  reconciliationKind === 'idle'
+  || reconciliationKind === 'synced'
+  || reconciliationKind === 'conflicted'
+);
+
+export const arenaRoomGenerationSyncGateMessage = (
+  reconciliationKind: ArenaRoomHostReconciliationState['kind'],
+): string => reconciliationKind === 'error'
+  ? ARENA_ROOM_GENERATION_SYNC_ERROR_GATE_MESSAGE
+  : ARENA_ROOM_GENERATION_SYNC_GATE_MESSAGE;

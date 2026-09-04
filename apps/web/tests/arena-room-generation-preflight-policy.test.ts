@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   ARENA_ROOM_GENERATION_SYNC_GATE_MESSAGE,
+  arenaRoomGenerationSyncGateMessage,
   canAutoPublishArenaRoomHostDraft,
   isArenaRoomGenerationFenceCurrent,
   isArenaRoomGenerationSyncSettled,
@@ -48,6 +49,11 @@ describe('Arena Room generation preflight policy', () => {
       reconciliationKind: 'idle',
       workspaceAllows: false,
     })).toBe(false);
+    expect(canAutoPublishArenaRoomHostDraft({
+      pendingProposalCount: 0,
+      reconciliationKind: 'error',
+      workspaceAllows: true,
+    })).toBe(false);
   });
 
   it('提案 fingerprint 与顺序无关，但会感知新增和更新', () => {
@@ -63,13 +69,20 @@ describe('Arena Room generation preflight policy', () => {
       ]));
   });
 
-  it('reconciliation synchronizing 期间禁止任何生成发布方向（回归：空配置覆盖刚接受的提案）', () => {
-    for (const kind of ['idle', 'synced', 'conflicted', 'error'] as const) {
+  it('reconciliation synchronizing 与 error 期间禁止任何生成发布方向（回归：空配置覆盖刚接受的提案）', () => {
+    for (const kind of ['idle', 'synced', 'conflicted'] as const) {
       expect(isArenaRoomGenerationSyncSettled(kind)).toBe(true);
     }
+    // synchronizing：本地即将被房间权威覆盖；
+    // error：同步失败后本地与房间权威的关系不确定，发布本地可能覆盖刚接受的提案。
     expect(isArenaRoomGenerationSyncSettled('synchronizing')).toBe(false);
-    // 手动 dirty preflight 的“更新房间配置并开始”也必须复用同一门禁文案。
+    expect(isArenaRoomGenerationSyncSettled('error')).toBe(false);
+    // 手动 dirty preflight 的“更新房间配置并开始”复用同一门禁；
+    // error 时文案必须指向重试同步而不是“正在同步”。
     expect(ARENA_ROOM_GENERATION_SYNC_GATE_MESSAGE).toContain('正在同步');
+    expect(arenaRoomGenerationSyncGateMessage('synchronizing'))
+      .toBe(ARENA_ROOM_GENERATION_SYNC_GATE_MESSAGE);
+    expect(arenaRoomGenerationSyncGateMessage('error')).toContain('重试同步');
   });
 
   it('最终启动 fence 同时约束房间 authority 与待处理提案集合', () => {

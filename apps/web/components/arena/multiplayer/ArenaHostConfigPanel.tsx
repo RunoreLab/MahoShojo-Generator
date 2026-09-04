@@ -44,7 +44,7 @@ export function ArenaHostConfigPanel({
         </div>
         <button
           type="button"
-          className={primaryButtonClass}
+          className={status.kind === 'error' ? secondaryButtonClass : primaryButtonClass}
           disabled={busy}
           onClick={() => { void reconciliation.publishLocal(); }}
         >
@@ -59,13 +59,26 @@ export function ArenaHostConfigPanel({
           {status.message}（房间配置版本 {status.revision}）
         </p>
       ) : status.kind === 'error' ? (
-        <p
+        <div
           role="alert"
           data-error-code={status.code}
-          className="mt-3 text-sm text-red-700 dark:text-red-300"
+          className="mt-3 rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-950 dark:border-red-800 dark:bg-red-950/30 dark:text-red-100"
         >
-          {status.message}
-        </p>
+          <p className="font-medium">{status.message}</p>
+          <p className="mt-1 text-xs opacity-90">
+            本地与房间配置的同步结果不确定；请先重试同步房间配置，恢复后再继续生成或发布。
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              className={primaryButtonClass}
+              disabled={busy}
+              onClick={() => { void reconciliation.syncRoom(); }}
+            >
+              重试同步房间配置
+            </button>
+          </div>
+        </div>
       ) : status.kind === 'synchronizing' && status.action !== 'publish' ? (
         <p role="status" className="mt-3 text-sm text-gray-700 dark:text-gray-300">正在同步当前房间配置…</p>
       ) : null}

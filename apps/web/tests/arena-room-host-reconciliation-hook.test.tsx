@@ -447,4 +447,79 @@ describe('useArenaRoomHostReconciliation', () => {
       message: '本地草稿无法读取',
     });
   });
+
+  it('自动同步失败后同 revision 可重试：是否落定以 settled baseline 为准而非 observed（回归：瞬时错误永久卡死）', async () => {
+    const settledRev1 = authorityOf(stateAt(1, config('classic')));
+    let settled: ArenaRoomHostWorkspaceAuthority | null = settledRev1;
+    const capturePublished = vi.fn((authority: ArenaRoomHostWorkspaceAuthority) => {
+      settled = authority;
+    });
+    const workspace = {
+      settledAuthority: vi.fn(() => settled),
+      compare: vi.fn(() => ({ kind: 'clean', start: { sharedConfig: config('classic'), hostLocalPayloads: [] } })),
+      startFromRoom: vi.fn(() => ({ sharedConfig: config('daily'), hostLocalPayloads: [] })),
+      capturePublished,
+      retainFor: vi.fn(),
+      clear: vi.fn(),
+    } satisfies ArenaRoomHostWorkspace;
+    mocks.buildBundle.mockResolvedValue(bundle(config('daily')));
+    mocks.applyAuthority
+      .mockRejectedValueOnce(new Error('公开数据卡暂时无法读取'))
+      .mockResolvedValueOnce(undefined);
+    publishConfig.mockRejectedValueOnce(new Error('网络中断'));
+
+    await renderState(currentState, workspace);
+    await renderState(stateAt(2, config('daily')), workspace);
+    await flush();
+
+    expect(latest?.state).toMatchObject({ kind: 'error' });
+    expect(mocks.applyAuthority).toHaveBeenCalledTimes(1);
+    expect(capturePublished).not.toHaveBeenCalled();
+
+    // 手动发布失败后 finally 的 auto reconcile 会再次运行；此时 observed 已经是
+    // rev2，只有以 settled baseline（rev1）判定「尚未落定」才会重试同一 revision。
+    await act(async () => { await latest!.publishLocal(); });
+    await flush();
+
+    expect(workspace.compare).toHaveBeenCalledWith(settledRev1, expect.anything());
+    expect(mocks.applyAuthority).toHaveBeenCalledTimes(2);
+    expect(capturePublished).toHaveBeenCalledOnce();
+    expect(capturePublished).toHaveBeenCalledWith(
+      authorityOf(stateAt(2, config('daily'))),
+      expect.anything(),
+    );
+    expect(latest?.state).toMatchObject({ kind: 'synced', revision: 2 });
+  });
+
+  it('reconciliation error 后可通过 syncRoom 重试同一 revision（回归：error 恢复入口）', async () => {
+    const settledRev1 = authorityOf(stateAt(1, config('classic')));
+    let settled: ArenaRoomHostWorkspaceAuthority | null = settledRev1;
+    const capturePublished = vi.fn((authority: ArenaRoomHostWorkspaceAuthority) => {
+      settled = authority;
+    });
+    const workspace = {
+      settledAuthority: vi.fn(() => settled),
+      compare: vi.fn(() => ({ kind: 'clean', start: { sharedConfig: config('classic'), hostLocalPayloads: [] } })),
+      startFromRoom: vi.fn(() => ({ sharedConfig: config('daily'), hostLocalPayloads: [] })),
+      capturePublished,
+      retainFor: vi.fn(),
+      clear: vi.fn(),
+    } satisfies ArenaRoomHostWorkspace;
+    mocks.buildBundle.mockResolvedValue(bundle(config('daily')));
+    mocks.applyAuthority.mockRejectedValueOnce(new Error('公开数据卡暂时无法读取'));
+
+    await renderState(currentState, workspace);
+    await renderState(stateAt(2, config('daily')), workspace);
+    await flush();
+
+    expect(latest?.state).toMatchObject({ kind: 'error' });
+    expect(mocks.applyAuthority).toHaveBeenCalledTimes(1);
+
+    await act(async () => { await latest!.syncRoom(); });
+    await flush();
+
+    expect(mocks.applyAuthority).toHaveBeenCalledTimes(2);
+    expect(capturePublished).toHaveBeenCalledOnce();
+    expect(latest?.state).toMatchObject({ kind: 'synced', revision: 2 });
+  });
 });
