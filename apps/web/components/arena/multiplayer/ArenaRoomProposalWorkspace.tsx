@@ -379,7 +379,7 @@ const ProposalWorkspaceInner = ({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {onSyncFromRoom ? (
-            <button type="button" className={secondaryButtonClass} onClick={requestSync}>同步配置</button>
+            <button type="button" className={secondaryButtonClass} disabled={isMatching} onClick={requestSync}>同步配置</button>
           ) : null}
           <button type="button" className={primaryButtonClass} disabled={!snapshot.dirty || disabled} onClick={buildPreview}>预览提案</button>
         </div>
@@ -530,6 +530,7 @@ const ProposalWorkspaceInner = ({
             <button
               type="button"
               className="arena-cta-button arena-cta-button--sync"
+              disabled={isMatching}
               onClick={requestSync}
             >
               ↻‌ 同步配置

@@ -639,6 +639,60 @@ describe('Arena room Proposal workspace', () => {
     editor.dispose();
   });
 
+  it('成员随机匹配进行中禁用两处同步配置入口，避免中途销毁提案草稿', async () => {
+    const editor = createRoomProposalArenaEditorSession({
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      revision: 7,
+      sharedConfig,
+    });
+    const onSyncFromRoom = vi.fn();
+    const controller = {
+      submitProposal: vi.fn(async () => undefined),
+      withdrawProposal: vi.fn(async () => undefined),
+      reconnect: vi.fn(),
+    } satisfies Pick<ArenaRoomController, 'reconnect' | 'submitProposal' | 'withdrawProposal'>;
+    let releaseMatch!: (value: unknown) => void;
+    const pendingMatch = new Promise((resolve) => { releaseMatch = resolve; });
+    const fetchMock = vi.fn(() => pendingMatch);
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = fetchMock as typeof globalThis.fetch;
+
+    try {
+      await act(async () => root.render(
+        <ArenaRoomProposalWorkspaceView
+          editor={editor}
+          state={state}
+          controller={controller}
+          onSyncFromRoom={onSyncFromRoom}
+        />,
+      ));
+
+      await act(async () => button('随机匹配角色').click());
+      expect(fetchMock).toHaveBeenCalledOnce();
+      expect(button('同步配置').disabled).toBe(true);
+      expect(container.querySelector<HTMLButtonElement>('.arena-cta-button--sync')?.disabled).toBe(true);
+
+      await act(async () => {
+        releaseMatch({
+          ok: true,
+          json: async () => ({
+            success: true,
+            card: { _cardId: 'character-random-1', _updatedAt: 'version-random-1' },
+          }),
+        });
+        await pendingMatch;
+      });
+
+      expect(button('同步配置').disabled).toBe(false);
+      expect(container.querySelector<HTMLButtonElement>('.arena-cta-button--sync')?.disabled).toBe(false);
+      expect(onSyncFromRoom).not.toHaveBeenCalled();
+    } finally {
+      globalThis.fetch = originalFetch;
+      editor.dispose();
+    }
+  });
+
   it('情景区块在无主情景时禁用辅助情景在线库入口并提示门槛，选择主情景后恢复', async () => {
     const scenarioModeConfig: ArenaRoomSharedConfig = {
       ...sharedConfig,
