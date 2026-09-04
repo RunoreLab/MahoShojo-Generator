@@ -12,10 +12,16 @@ import {
   type ArenaRoomShareabilityIssue,
 } from '@/lib/arena-room/shared-config';
 import { arenaRoomHostWorkspaceAuthorityFromSession } from '@/lib/arena-room/host-workspace';
+import {
+  buildArenaRoomInviteText,
+  parseArenaRoomJoinCode,
+} from '@/lib/arena-room/join-code';
+import { copyTextToClipboard } from '@/lib/clipboard';
 import { useBattleStore } from '@/components/arena/stores/useBattleStore';
 import { ArenaProposalPanel } from './ArenaProposalPanel';
 import { ArenaHostConfigPanel } from './ArenaHostConfigPanel';
 import { useArenaRoomContext } from './useArenaRoom';
+import { useArenaRoomAutoTitle } from './useArenaRoomAutoTitle';
 import type { ArenaRoomLatestCompletedHistory } from './useArenaRoomLatestCompletedHistory';
 import { ArenaRoomLatestHistoryResult } from './ArenaRoomLatestHistoryResult';
 import { BattleResultPresentation } from '../components/BattleResultPresentation';
@@ -37,6 +43,7 @@ export type ArenaMultiplayerResultProps = {
 export type ArenaMultiplayerPanelViewProps = {
   readonly state: ArenaRoomControllerState;
   readonly authLoading: boolean;
+  readonly origin?: string;
   readonly actionPending?: boolean;
   readonly hostConfigContent?: ReactNode;
   readonly proposalContent?: ReactNode;
@@ -177,10 +184,13 @@ const ArenaRoomLobbyDialog = ({
                 <input
                   id="arena-room-join-code"
                   className={inputClass}
-                  maxLength={256}
+                  maxLength={1024}
                   value={joinCode}
                   onChange={(event: ChangeEvent<HTMLInputElement>) => onJoinCodeChange(event.target.value)}
                 />
+                <p className="mt-1 text-xs text-gray-600 dark:text-gray-400">
+                  支持直接粘贴完整邀请文案或分享文本，会自动识别其中的房间码。
+                </p>
               </div>
               <button type="button" className={primaryButtonClass} disabled={busy || !joinCode.trim()} onClick={() => onJoin(joinCode.trim())}>
                 加入房间
@@ -347,6 +357,7 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
   const [proposalsOpen, setProposalsOpen] = useState(false);
   const [generationHistoryOpen, setGenerationHistoryOpen] = useState(false);
   const [roomOpen, setRoomOpen] = useState(false);
+  const [copiedKind, setCopiedKind] = useState<'room-id' | 'invite' | null>(null);
   const [kickConfirmation, setKickConfirmation] = useState<{
     readonly targetUserId: string;
     readonly displayName: string;
@@ -361,10 +372,13 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
   const cancelGenerationTriggerRef = useRef<HTMLButtonElement>(null);
   const closeRoomTriggerRef = useRef<HTMLButtonElement>(null);
   const leaveRoomTriggerRef = useRef<HTMLButtonElement>(null);
+  const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const session = state.phase === 'closed' || state.phase === 'replacement'
     ? null
     : state.session;
   const hadSessionRef = useRef(Boolean(session));
+  const onDiscoverRef = useRef(props.onDiscover);
+  onDiscoverRef.current = props.onDiscover;
   useEffect(() => {
     if (props.proposalWorkspaceActive) setProposalsOpen(false);
   }, [props.proposalWorkspaceActive]);
@@ -373,7 +387,17 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
     hadSessionRef.current = Boolean(session);
     if (!hadSession || session) return;
     queueMicrotask(() => panelRef.current?.focus());
-  }, [session]);
+    if (state.phase === 'replacement' || state.phase === 'closed' || state.phase === 'unknown') {
+      return;
+    }
+    // 会话以 ready 结束（离开/关闭房间）：自动回到大厅并刷新公开房间列表，
+    // 避免「自动打开的多人房间」显示上一次会话遗留的过期空列表。
+    setLobbyOpen(true);
+    onDiscoverRef.current();
+  }, [session, state.phase]);
+  useEffect(() => () => {
+    if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+  }, []);
   useEffect(() => {
     if (kickConfirmation) kickConfirmationActionRef.current?.focus();
   }, [kickConfirmation]);
@@ -399,6 +423,18 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
     || props.hostConfigStatus === 'attention';
   const hostConfigSynchronizing = state.configPublishPending
     || props.hostConfigStatus === 'synchronizing';
+
+  const copyRoomInfo = async (kind: 'room-id' | 'invite'): Promise<void> => {
+    if (!session) return;
+    const text = kind === 'invite' && props.origin
+      ? buildArenaRoomInviteText(props.origin, session.roomId)
+      : session.roomId;
+    const ok = await copyTextToClipboard(text);
+    if (!ok) return;
+    setCopiedKind(kind);
+    if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+    copiedTimerRef.current = setTimeout(() => setCopiedKind(null), 2_000);
+  };
 
   return (
     <section
@@ -502,6 +538,22 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
                   : `配置版本 ${session.snapshot.revision}`}
             </p>
             <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                className={secondaryButtonClass}
+                aria-label={`复制房间码 ${session.roomId}`}
+                onClick={() => { void copyRoomInfo('room-id'); }}
+              >
+                {copiedKind === 'room-id' ? '已复制房间码' : '复制房间码'}
+              </button>
+              <button
+                type="button"
+                className={secondaryButtonClass}
+                aria-label="复制房间邀请文案"
+                onClick={() => { void copyRoomInfo('invite'); }}
+              >
+                {copiedKind === 'invite' ? '已复制邀请' : '复制邀请'}
+              </button>
               {session.self.role === 'host' ? (
                 <button
                   type="button"
@@ -846,7 +898,7 @@ function ArenaMultiplayerPanelRuntime({
   latestGenerationHistory,
   ...props
 }: ArenaMultiplayerPanelRuntimeProps) {
-  const [roomTitle, setRoomTitle] = useState(() => `${props.displayName || '玩家'} 的房间`);
+  const [roomTitle, setRoomTitle] = useArenaRoomAutoTitle(props.displayName);
   const [visibility, setVisibility] = useState<RoomDirectoryVisibility>('public');
   const [joinCode, setJoinCode] = useState('');
   const [inputError, setInputError] = useState<string | null>(null);
@@ -897,6 +949,7 @@ function ArenaMultiplayerPanelRuntime({
     <ArenaMultiplayerPanelView
       state={viewState}
       authLoading={props.authLoading}
+      origin={props.origin}
       actionPending={preparingCreate}
       hostConfigContent={(
         <ArenaHostConfigPanel
@@ -936,9 +989,15 @@ function ArenaMultiplayerPanelRuntime({
       onCreate={() => { void createRoom(); }}
       onDiscover={() => { void controller.discover(); }}
       onDiscoverMore={() => { void controller.discoverMore(); }}
-      onJoin={(roomId) => {
+      onJoin={(rawRoomId) => {
         setInputError(null);
-        void controller.join(roomId, props.displayName || '玩家');
+        // 粘贴的可能是整段邀请文案：先在本地提取房间码，绝不把原文当 roomId 提交。
+        const parsed = parseArenaRoomJoinCode(rawRoomId);
+        if (!parsed.ok) {
+          setInputError(parsed.error);
+          return;
+        }
+        void controller.join(parsed.roomId, props.displayName || '玩家');
       }}
       onLeave={() => { void controller.leave(); }}
       onClose={() => { void controller.close(); }}

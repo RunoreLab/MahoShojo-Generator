@@ -306,7 +306,10 @@ describe('Arena multiplayer production client/hook wiring', () => {
         '/api/arena/rooms/v1/room-1/ticket',
         '/api/arena/rooms/v1/room-1/generations',
         `/api/arena/rooms/v1/room-1/${role === 'host' ? 'close' : 'leave'}`,
+        // 会话以 ready 结束后自动回到大厅并刷新公开房间列表（回归：显示暂无公开房间）
+        '/api/arena/rooms/v1',
       ]);
+      expect(document.body.textContent).toContain('两种最简单的玩法');
       expect(JSON.parse(String(roomCalls[4]?.init?.body))).toEqual({
         expectedRoomEpoch: 'epoch-1',
       });
