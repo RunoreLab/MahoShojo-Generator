@@ -12,6 +12,11 @@ import type { RoomProposalArenaEditorSession } from '../../types';
 import { moveItemInList } from '../move-item';
 import type { ArenaMaterialSectionModel } from './material-contract';
 import { MAX_ARENA_REFERENCE_ITEMS } from '@/lib/arena/resource-budget';
+import {
+  formatArenaRoomReferenceName,
+  resolveArenaRoomReferenceName,
+  useArenaRoomReferenceNames,
+} from '@/lib/arena-room/reference-presentation';
 
 const PROPOSAL_MATERIAL_NOTICE = '内置素材预设暂不可用：目前没有经过服务器确认的素材目录，避免未验证的正文进入提案。';
 
@@ -57,6 +62,12 @@ export const useProposalMaterialSectionModel = (input: {
   const state = useArenaEditorSelector((value) => value);
   const { disabled, onActionError, onOpenModal } = input;
 
+  const referenceNames = useArenaRoomReferenceNames(state.materials.flatMap((item) => (
+    item.source === 'data-card' && item.reference
+      ? [{ source: 'data-card' as const, kind: 'material' as const, id: item.reference.id }]
+      : []
+  )));
+
   return useMemo(() => {
     if (session.mode !== 'room-proposal') return inertModel;
     const editor = session as RoomProposalArenaEditorSession;
@@ -75,7 +86,15 @@ export const useProposalMaterialSectionModel = (input: {
       disabled,
       items: state.materials.map((item) => ({
         key: item.key,
-        name: item.name,
+        name: item.source === 'data-card' && item.reference
+          ? `在线:${formatArenaRoomReferenceName(
+              { source: 'data-card', id: item.reference.id },
+              resolveArenaRoomReferenceName(
+                { source: 'data-card', kind: 'material', id: item.reference.id },
+                referenceNames,
+              ),
+            )}`
+          : item.name,
         sourceLabel: proposalSourceLabel(item.source),
         fileName: null,
       })),
@@ -104,5 +123,5 @@ export const useProposalMaterialSectionModel = (input: {
         })),
       },
     };
-  }, [session, state, disabled, onActionError, onOpenModal]);
+  }, [session, state, disabled, onActionError, onOpenModal, referenceNames]);
 };

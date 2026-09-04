@@ -12,8 +12,17 @@ import type {
   ArenaRosterRowView,
   ArenaRosterTeamView,
 } from './roster-contract';
+import {
+  arenaRoomReferenceSourcePrefix,
+  formatArenaRoomReferenceName,
+  resolveArenaRoomReferenceName,
+  useArenaRoomReferenceNames,
+  type ArenaRoomReferenceDetailsRequest,
+  type ArenaRoomReferenceRequest,
+} from '@/lib/arena-room/reference-presentation';
 
 const TEAM_KEY_PREFIX = 'team:';
+const PRESET_KEY_PREFIX = 'preset:';
 
 const proposalTypeLabel = (
   item: { type: string | null; source: string; access: string },
@@ -61,15 +70,26 @@ const inertModel: ArenaRosterSectionModel = {
 /**
  * Proposal roster/分队 adapter：从 RoomProposalArenaEditorSession 归一化视图
  * 构建共享 ArenaRosterSection 模型；所有写路径经由 editor.update 的 typed 校验。
+ * 详情能力按来源分层：预设/在线公开引用可查看，host-local stub 不提供入口。
  */
 export const useProposalRosterSectionModel = (input: {
   disabled: boolean;
   onActionError(message: string): void;
+  onRequestDetails?: (request: ArenaRoomReferenceDetailsRequest) => void;
 }): ArenaRosterSectionModel => {
   const session = useArenaEditorSession();
   const state = useArenaEditorSelector((value) => value);
   const [collapsedTeams, setCollapsedTeams] = useState<ReadonlySet<string>>(new Set());
-  const { disabled, onActionError } = input;
+  const { disabled, onActionError, onRequestDetails } = input;
+
+  // 预设/在线公开引用按来源解析可读名称；host-local stub 保持分享名。
+  const referenceNames = useArenaRoomReferenceNames(state.combatants.flatMap((item): ArenaRoomReferenceRequest[] => (
+    item.source === 'preset'
+      ? [{ source: 'preset', kind: 'character', id: item.key.slice(PRESET_KEY_PREFIX.length) }]
+      : item.source === 'data-card' && item.reference
+        ? [{ source: 'data-card', kind: 'character', id: item.reference.id }]
+        : []
+  )));
 
   return useMemo(() => {
     if (session.mode !== 'room-proposal') return inertModel;
@@ -82,9 +102,26 @@ export const useProposalRosterSectionModel = (input: {
       }
     };
 
+    const displayNameOf = (item: typeof state.combatants[number]): string => {
+      if (item.source === 'preset') {
+        const id = item.key.slice(PRESET_KEY_PREFIX.length);
+        const request = { source: 'preset' as const, kind: 'character' as const, id };
+        return `预设:${formatArenaRoomReferenceName(request, resolveArenaRoomReferenceName(request, referenceNames))}`;
+      }
+      if (item.source === 'data-card' && item.reference) {
+        const request = { source: 'data-card' as const, kind: 'character' as const, id: item.reference.id };
+        return `在线:${formatArenaRoomReferenceName(request, resolveArenaRoomReferenceName(request, referenceNames))}`;
+      }
+      return item.name;
+    };
+    const referenceTitleOf = (item: typeof state.combatants[number]): string | undefined => (
+      item.reference ? `${arenaRoomReferenceSourcePrefix(item.source === 'preset' ? 'preset' : 'data-card')}:${item.name}` : undefined
+    );
+
     const rows: readonly ArenaRosterRowView[] = state.combatants.map((item, index) => Object.freeze({
       key: item.key,
-      displayName: item.name,
+      displayName: displayNameOf(item),
+      referenceTitle: referenceTitleOf(item),
       typeLabel: proposalTypeLabel(item),
       guidance: item.characterGuidance,
       index,
@@ -97,6 +134,17 @@ export const useProposalRosterSectionModel = (input: {
       memberKeys: team.combatantKeys,
       collapsed: collapsedTeams.has(team.key),
     }));
+
+    const detailsRequestOf = (item: typeof state.combatants[number]): ArenaRoomReferenceDetailsRequest | null => {
+      if (item.source === 'preset') {
+        return { source: 'preset', kind: 'character', id: item.key.slice(PRESET_KEY_PREFIX.length) };
+      }
+      if (item.source === 'data-card' && item.reference) {
+        return { source: 'data-card', kind: 'character', id: item.reference.id };
+      }
+      // host-local stub 只暴露房主分享的 displayName/type，不提供正文详情。
+      return null;
+    };
 
     return {
       rows,
@@ -119,6 +167,13 @@ export const useProposalRosterSectionModel = (input: {
       disabled,
       combatantCountLabel: `${state.combatants.length}/${MAX_COMBATANTS}`,
       combatantCapReached: state.combatants.length >= MAX_COMBATANTS,
+      rowExtras: onRequestDetails
+        ? (row) => {
+            const item = state.combatants.find((entry) => entry.key === row.key);
+            const request = item ? detailsRequestOf(item) : null;
+            return request ? { onShowDetails: () => onRequestDetails(request) } : undefined;
+          }
+        : undefined,
       actions: {
         moveRow: (fromIndex, toIndex) => update((draft) => ({
           ...draft,
@@ -189,5 +244,5 @@ export const useProposalRosterSectionModel = (input: {
         }),
       },
     };
-  }, [session, state, collapsedTeams, disabled, onActionError]);
+  }, [session, state, collapsedTeams, disabled, onActionError, onRequestDetails, referenceNames]);
 };

@@ -5,6 +5,8 @@ import type { ReactNode } from 'react';
 export type ArenaRosterItemView = {
   key: string;
   displayName: string;
+  /** displayName 为解析后的可读名称时，hover 展示完整引用标识（原始 key/ID）。 */
+  referenceTitle?: string;
   typeLabel: string;
   guidance?: string;
   teamLabel?: string;
@@ -104,7 +106,7 @@ export function ArenaRosterRow({
             <div className="min-w-0 flex-1">
               <div
                 className="text-sm font-medium text-gray-800 leading-snug break-words line-clamp-3"
-                title={item.displayName}
+                title={item.referenceTitle ?? item.displayName}
               >
                 {item.displayName}
               </div>

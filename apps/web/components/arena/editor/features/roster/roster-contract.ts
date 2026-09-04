@@ -18,6 +18,8 @@ export type ArenaRosterTeamView = Readonly<{
 export type ArenaRosterRowView = Readonly<{
   key: string;
   displayName: string;
+  /** 展示名是解析结果（如 房间公开卡名称）时可附带的完整引用标识（hover title）。 */
+  referenceTitle?: string;
   typeLabel: string;
   guidance: string;
   /** 全局 roster 下标；全局重排语义使用。 */

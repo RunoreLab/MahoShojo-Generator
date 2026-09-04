@@ -328,10 +328,10 @@ describe('Arena room Proposal workspace', () => {
     expect(document.body.textContent).toContain('新增素材');
     expect(document.body.textContent).toContain('语言改为 en-US');
     expect(document.body.textContent).toContain(
-      '建议值：角色 data-card:character-public-1 引导改为“优先保护同伴”',
+      '建议值：角色 在线:character-public-1 引导改为“优先保护同伴”',
     );
     expect(document.body.textContent).toContain(
-      '建议值：角色 data-card:character-public-1 分配至队伍 team:',
+      '建议值：角色 在线:character-public-1 分配至队伍 守护队',
     );
     expect(document.body.textContent).toContain('叙事历史 读取=开(10)、写入=关');
     for (const exposedTerm of ['Proposal', 'typed diff', 'BASE', 'PROPOSED', 'revision', 'server-known', 'payload']) {
@@ -560,12 +560,13 @@ describe('Arena room Proposal workspace', () => {
       await act(async () => target.click());
     };
 
-    await move('下移 character-four');
+    // 参战角色行展示解析后的名称（在线引用显示 `在线:<名称>` 回退）。
+    await move('下移 在线:character-four');
     await move('下移队伍 A 队');
-    await move('下移 A 队内 character-one');
+    await move('下移 A 队内 在线:character-one');
     await act(async () => buttonContaining('辅助情景（可选）').click());
-    await move('下移 aux-one');
-    await move('下移 material-one');
+    await move('下移 在线:aux-one');
+    await move('下移 在线:material-one');
 
     expect(editor.preview().changes.map((change) => change.type)).toEqual([
       'reorderCombatants',
@@ -576,7 +577,8 @@ describe('Arena room Proposal workspace', () => {
     ]);
     await act(async () => button('预览提案').click());
     expect(document.body.textContent).toContain('调整角色顺序');
-    expect(document.body.textContent).toContain('调整队伍 team:a 内角色顺序');
+    // teamKey 摘要解析为分队 displayName。
+    expect(document.body.textContent).toContain('调整队伍 A 队 内角色顺序');
     expect(document.body.textContent).toContain('调整素材顺序');
     editor.dispose();
   });
@@ -654,7 +656,11 @@ describe('Arena room Proposal workspace', () => {
     } satisfies Pick<ArenaRoomController, 'reconnect' | 'submitProposal' | 'withdrawProposal'>;
     let releaseMatch!: (value: unknown) => void;
     const pendingMatch = new Promise((resolve) => { releaseMatch = resolve; });
-    const fetchMock = vi.fn(() => pendingMatch);
+    // 引用名称缓存等非匹配请求立即失败返回；只有随机匹配请求被挂起。
+    const fetchMock = vi.fn((input: RequestInfo | URL): Promise<Response> => {
+      if (String(input).includes('random-public-card')) return pendingMatch as Promise<Response>;
+      return Promise.resolve(new Response(JSON.stringify({ success: false }), { status: 404 }));
+    });
     const originalFetch = globalThis.fetch;
     globalThis.fetch = fetchMock as typeof globalThis.fetch;
 
@@ -669,7 +675,8 @@ describe('Arena room Proposal workspace', () => {
       ));
 
       await act(async () => button('随机匹配角色').click());
-      expect(fetchMock).toHaveBeenCalledOnce();
+      const matchCalls = fetchMock.mock.calls.filter(([input]) => String(input).includes('random-public-card'));
+      expect(matchCalls).toHaveLength(1);
       expect(button('同步配置').disabled).toBe(true);
       expect(container.querySelector<HTMLButtonElement>('.arena-cta-button--sync')?.disabled).toBe(true);
 

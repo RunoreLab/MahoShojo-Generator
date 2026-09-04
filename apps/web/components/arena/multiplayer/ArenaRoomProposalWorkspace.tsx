@@ -35,6 +35,9 @@ import {
   arenaProposalChangeSummary,
   arenaProposalChangeProposedSummary,
   arenaProposalSelectionError,
+  changeRefTitle,
+  useArenaProposalChangeLabels,
+  type ArenaProposalChangeLabels,
 } from './ArenaProposalPanel';
 import { ArenaRoomDialog } from './ArenaRoomDialog';
 import { useArenaRoomContext } from './useArenaRoom';
@@ -104,6 +107,7 @@ const proposalId = (): string => {
 const ProposalPreviewDialog = ({
   baselineRevision,
   changes,
+  labels,
   selected,
   disabled,
   onSelectedChange,
@@ -112,6 +116,7 @@ const ProposalPreviewDialog = ({
 }: {
   readonly baselineRevision: number;
   readonly changes: readonly ArenaProposalChange[];
+  readonly labels: ArenaProposalChangeLabels;
   readonly selected: ReadonlySet<string>;
   readonly disabled: boolean;
   readonly onSelectedChange: (value: ReadonlySet<string>) => void;
@@ -144,10 +149,15 @@ const ProposalPreviewDialog = ({
                 }}
               />
               <span>
-                <span className="font-medium text-gray-950 dark:text-gray-100">{arenaProposalChangeSummary(change)}</span>
+                <span
+                  className="font-medium text-gray-950 dark:text-gray-100"
+                  title={changeRefTitle(change)}
+                >
+                  {arenaProposalChangeSummary(change, labels)}
+                </span>
                 <ArenaProposalSelectionDetails change={change} />
                 <span className="mt-1 block text-xs text-gray-600 dark:text-gray-400">提案基准：{JSON.stringify(change.expectedBase)}</span>
-                <span className="block text-xs text-gray-600 dark:text-gray-400">建议值：{arenaProposalChangeProposedSummary(change)}</span>
+                <span className="block text-xs text-gray-600 dark:text-gray-400">建议值：{arenaProposalChangeProposedSummary(change, labels)}</span>
               </span>
             </label>
           ))}
@@ -190,6 +200,11 @@ const ProposalWorkspaceInner = ({
   const [localError, setLocalError] = useState<string | null>(null);
   const [confirmSync, setConfirmSync] = useState(false);
   const submitLock = useRef(false);
+  const previewLabels = useArenaProposalChangeLabels(null, preview ?? []);
+  const previewDialogLabels: ArenaProposalChangeLabels = useMemo(() => ({
+    ...previewLabels,
+    teamKey: (key) => snapshot.teams.find((team) => team.key === key)?.name ?? previewLabels.teamKey?.(key),
+  }), [previewLabels, snapshot.teams]);
 
   const selectedIds = useMemo(() => {
     const isOnlineReference = (item: { source: string; key: string; reference: { id: string } | null }) => (
@@ -566,6 +581,7 @@ const ProposalWorkspaceInner = ({
         <ProposalPreviewDialog
           baselineRevision={snapshot.baselineRevision ?? 0}
           changes={preview}
+          labels={previewDialogLabels}
           selected={selected}
           disabled={disabled}
           onSelectedChange={setSelected}

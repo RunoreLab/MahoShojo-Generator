@@ -14,6 +14,13 @@ import type { ArenaScenarioSectionModel } from './scenario-contract';
 import { SCENARIO_PRESET_LIST, type ScenarioPreset } from '@/lib/scenario-presets';
 import { ARENA_ROOM_PRESET_CATALOG } from '@/lib/arena-room/generated/arena-room-preset-catalog';
 import { MAX_ARENA_REFERENCE_ITEMS } from '@/lib/arena/resource-budget';
+import {
+  arenaRoomReferenceSourcePrefix,
+  formatArenaRoomReferenceName,
+  resolveArenaRoomReferenceName,
+  useArenaRoomReferenceNames,
+  type ArenaRoomReferenceRequest,
+} from '@/lib/arena-room/reference-presentation';
 
 const PRESET_KEY_PREFIX = 'preset:';
 
@@ -85,6 +92,26 @@ export const useProposalScenarioSectionModel = (input: {
   const state = useArenaEditorSelector((value) => value);
   const { disabled, onActionError, onOpenMainModal, onOpenAuxModal } = input;
 
+  const scenarioReferenceRequests: ArenaRoomReferenceRequest[] = [
+    ...(state.scenario && state.scenario.source !== 'host-local'
+      ? [{
+          source: state.scenario.source === 'preset' ? 'preset' as const : 'data-card' as const,
+          kind: 'scenario' as const,
+          id: state.scenario.source === 'preset'
+            ? state.scenario.key.slice(PRESET_KEY_PREFIX.length)
+            : state.scenario.reference?.id ?? '',
+        }]
+      : []),
+    ...state.auxScenarios.flatMap((item): ArenaRoomReferenceRequest[] => (
+      item.source === 'preset'
+        ? [{ source: 'preset', kind: 'scenario', id: item.key.slice(PRESET_KEY_PREFIX.length) }]
+        : item.source === 'data-card' && item.reference
+          ? [{ source: 'data-card', kind: 'scenario', id: item.reference.id }]
+          : []
+    )),
+  ];
+  const referenceNames = useArenaRoomReferenceNames(scenarioReferenceRequests);
+
   return useMemo(() => {
     if (session.mode !== 'room-proposal') return inertModel;
     const editor = session as RoomProposalArenaEditorSession;
@@ -94,6 +121,18 @@ export const useProposalScenarioSectionModel = (input: {
       } catch {
         onActionError('该修改不满足房间安全配置约束');
       }
+    };
+
+    const scenarioNameOf = (item: { source: string; key: string; reference: { id: string } | null; name: string }): string => {
+      if (item.source === 'preset') {
+        const request = { source: 'preset' as const, kind: 'scenario' as const, id: item.key.slice(PRESET_KEY_PREFIX.length) };
+        return formatArenaRoomReferenceName(request, resolveArenaRoomReferenceName(request, referenceNames));
+      }
+      if (item.source === 'data-card' && item.reference) {
+        const request = { source: 'data-card' as const, kind: 'scenario' as const, id: item.reference.id };
+        return formatArenaRoomReferenceName(request, resolveArenaRoomReferenceName(request, referenceNames));
+      }
+      return item.name;
     };
 
     const selectedPresetFilenames = [
@@ -134,11 +173,17 @@ export const useProposalScenarioSectionModel = (input: {
       isAuthenticated: true,
       isMatchingBlocked: false,
       isMatchingScenario: false,
-      mainName: state.scenario?.name ?? null,
+      mainName: state.scenario
+        ? `${state.scenario.source === 'preset' || state.scenario.source === 'data-card'
+          ? `${arenaRoomReferenceSourcePrefix(state.scenario.source === 'preset' ? 'preset' : 'data-card')}:`
+          : ''}${scenarioNameOf(state.scenario)}`
+        : null,
       mainIsNative: false,
       auxScenarios: state.auxScenarios.map((item) => ({
         key: item.key,
-        title: item.name,
+        title: `${item.source === 'preset' || item.source === 'data-card'
+          ? `${arenaRoomReferenceSourcePrefix(item.source === 'preset' ? 'preset' : 'data-card')}:`
+          : ''}${scenarioNameOf(item)}`,
         isNative: false,
       })),
       auxBudgetLine: `参考项合计 ${referenceItemCount}/${MAX_ARENA_REFERENCE_ITEMS}`,
@@ -189,5 +234,5 @@ export const useProposalScenarioSectionModel = (input: {
         clearAux: () => update((draft) => ({ ...draft, auxScenarios: [] })),
       },
     };
-  }, [session, state, disabled, onActionError, onOpenMainModal, onOpenAuxModal]);
+  }, [session, state, disabled, onActionError, onOpenMainModal, onOpenAuxModal, referenceNames]);
 };

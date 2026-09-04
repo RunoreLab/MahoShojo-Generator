@@ -1,12 +1,6 @@
 'use client';
 
-import {
-  useMemo,
-  useRef,
-  useState,
-  useSyncExternalStore,
-  type ChangeEvent,
-} from 'react';
+import { useMemo, useRef, useState, useSyncExternalStore, type ChangeEvent } from 'react';
 
 import type {
   ArenaProposal,
@@ -17,6 +11,15 @@ import {
   previewArenaProposalApplication,
   type ArenaProposalChangeAnalysis,
 } from '@mahoshojo/multiplayer-core';
+
+import {
+  arenaRoomReferenceSourcePrefix,
+  parseArenaRoomReferenceKey,
+  resolveArenaRoomReferenceName,
+  shortReferenceId,
+  useArenaRoomReferenceNames,
+  type ArenaRoomReferenceRequest,
+} from '@/lib/arena-room/reference-presentation';
 
 import type {
   ArenaRoomController,
@@ -59,6 +62,19 @@ const namespacedRefIdentity = (ref: { readonly id: string }, key?: string): stri
   `${key?.startsWith('preset:') ? '预设' : '在线'}:${safeText(ref.id)}`
 );
 
+/**
+ * 提案摘要的可读名称解析插槽：返回 undefined 时回退到原始 key/ID 展示。
+ * 名称来自统一引用 resolver（预设策展目录 + 公开卡名称缓存 + 房主本地分享名）。
+ */
+export type ArenaProposalChangeLabels = {
+  readonly combatantKey?: (key: string) => string | undefined;
+  readonly scenarioKey?: (key: string) => string | undefined;
+  readonly materialKey?: (key: string) => string | undefined;
+  readonly teamKey?: (key: string) => string | undefined;
+  readonly ref?: (ref: { readonly id: string; readonly kind: string }, key?: string) => string | undefined;
+  readonly orderKey?: (key: string) => string | undefined;
+};
+
 export const arenaProposalExpectedBaseSummary = (change: ArenaProposalChange): string => {
   const expected = change.expectedBase;
   if (expected.kind === 'absent') return '提案基准：目标不存在';
@@ -80,26 +96,173 @@ const safeJsonSummary = (value: unknown): string => {
   }
 };
 
-export const arenaProposalChangeSummary = (change: ArenaProposalChange): string => {
+const combatantLabelOf = (labels: ArenaProposalChangeLabels | undefined, key: string): string => (
+  labels?.combatantKey ? labels.combatantKey(key) ?? key : key
+);
+const teamKeyLabelOf = (labels: ArenaProposalChangeLabels | undefined, key: string): string => (
+  labels?.teamKey ? labels.teamKey(key) ?? key : key
+);
+const scenarioKeyLabelOf = (labels: ArenaProposalChangeLabels | undefined, key: string): string => (
+  labels?.scenarioKey ? labels.scenarioKey(key) ?? key : key
+);
+const materialKeyLabelOf = (labels: ArenaProposalChangeLabels | undefined, key: string): string => (
+  labels?.materialKey ? labels.materialKey(key) ?? key : key
+);
+
+/** 收集提案变更中所有可解析为预设/在线公开引用的名称请求。 */
+export const collectArenaProposalReferenceRequests = (
+  changes: readonly ArenaProposalChange[],
+): ArenaRoomReferenceRequest[] => {
+  const requests: ArenaRoomReferenceRequest[] = [];
+  const push = (request: ArenaRoomReferenceRequest | null): void => {
+    if (request) requests.push(request);
+  };
+  const sourceOfKey = (key: string | undefined): 'preset' | 'data-card' => (
+    key?.startsWith('preset:') ? 'preset' : 'data-card'
+  );
+  for (const change of changes) {
+    switch (change.type) {
+      case 'addCombatant':
+        push({ source: sourceOfKey(change.key), kind: 'character', id: change.ref.id });
+        break;
+      case 'removeCombatant':
+      case 'setCharacterGuidance':
+      case 'assignTeam':
+        push(parseArenaRoomReferenceKey(change.combatantKey, 'character'));
+        break;
+      case 'setScenario':
+        if (change.ref !== null) {
+          push({ source: sourceOfKey(change.key), kind: 'scenario', id: change.ref.id });
+        }
+        break;
+      case 'addAuxScenario':
+        push({ source: sourceOfKey(change.key), kind: 'scenario', id: change.ref.id });
+        break;
+      case 'removeAuxScenario':
+        push(parseArenaRoomReferenceKey(change.scenarioKey, 'scenario'));
+        break;
+      case 'addMaterial':
+        push({ source: sourceOfKey(change.key), kind: 'material', id: change.ref.id });
+        break;
+      case 'removeMaterial':
+        push(parseArenaRoomReferenceKey(change.materialKey, 'material'));
+        break;
+      case 'reorderCombatants':
+      case 'reorderTeamCombatants':
+        change.value.forEach((key) => push(parseArenaRoomReferenceKey(key, 'character')));
+        break;
+      case 'reorderAuxScenarios':
+        change.value.forEach((key) => push(parseArenaRoomReferenceKey(key, 'scenario')));
+        break;
+      case 'reorderMaterials':
+        change.value.forEach((key) => push(parseArenaRoomReferenceKey(key, 'material')));
+        break;
+      default:
+        break;
+    }
+  }
+  return requests;
+};
+
+/** 由共享配置 + 统一引用名称缓存构建提案摘要标签；找不到时回退原始 key。 */
+export const buildArenaProposalChangeLabels = (
+  changes: readonly ArenaProposalChange[],
+  config: ArenaRoomSharedConfig | null,
+  onlineNames: ReadonlyMap<string, string>,
+): ArenaProposalChangeLabels => {
+  const referenceName = (request: ArenaRoomReferenceRequest): string | null => (
+    resolveArenaRoomReferenceName(request, onlineNames)
+  );
+  const prefixedName = (
+    request: ArenaRoomReferenceRequest,
+    fallback: string | undefined,
+  ): string | undefined => {
+    const name = referenceName(request);
+    if (name) return `${arenaRoomReferenceSourcePrefix(request.source)}:${name}`;
+    return fallback;
+  };
+  const hostLocalNameOf = (key: string): string | undefined => {
+    const entry = config?.combatants.find((item) => item.key === key);
+    if (entry && !('ref' in entry)) return `房主本地:${entry.displayName}`;
+    const scenario = config?.auxScenarios.find((item) => item.key === key)
+      ?? (config?.scenario && config.scenario.key === key ? config.scenario : undefined);
+    if (scenario && !('ref' in scenario)) return `房主本地:${scenario.displayName}`;
+    const material = config?.materials.find((item) => item.key === key);
+    if (material && !('ref' in material)) return `房主本地:${material.displayName}`;
+    return undefined;
+  };
+  return {
+    combatantKey: (key) => {
+      const request = parseArenaRoomReferenceKey(key, 'character');
+      if (!request) return hostLocalNameOf(key);
+      return prefixedName(request, `在线:${shortReferenceId(request.id)}`);
+    },
+    scenarioKey: (key) => {
+      const request = parseArenaRoomReferenceKey(key, 'scenario');
+      if (!request) return hostLocalNameOf(key);
+      return prefixedName(request, `在线:${shortReferenceId(request.id)}`);
+    },
+    materialKey: (key) => {
+      const request = parseArenaRoomReferenceKey(key, 'material');
+      if (!request) return hostLocalNameOf(key);
+      return prefixedName(request, `在线:${shortReferenceId(request.id)}`);
+    },
+    teamKey: (key) => config?.teams.find((team) => team.key === key)?.displayName,
+    ref: (ref, key) => {
+      const request: ArenaRoomReferenceRequest = {
+        source: key?.startsWith('preset:') ? 'preset' : 'data-card',
+        kind: ref.kind === 'scenario' ? 'scenario' : ref.kind === 'material' ? 'material' : 'character',
+        id: ref.id,
+      };
+      return prefixedName(request, `${arenaRoomReferenceSourcePrefix(request.source)}:${shortReferenceId(ref.id)}`);
+    },
+    orderKey: (key) => {
+      const request = parseArenaRoomReferenceKey(key, 'character');
+      if (!request) return hostLocalNameOf(key);
+      return prefixedName(request, `在线:${shortReferenceId(request.id)}`);
+    },
+  };
+};
+
+/** 提案摘要标签 hook：预设走策展目录，在线公开卡走共享名称缓存。 */
+export const useArenaProposalChangeLabels = (
+  config: ArenaRoomSharedConfig | null,
+  changes: readonly ArenaProposalChange[],
+): ArenaProposalChangeLabels => {
+  const requests = useMemo(() => collectArenaProposalReferenceRequests(changes), [changes]);
+  const onlineNames = useArenaRoomReferenceNames(requests);
+  return useMemo(
+    () => buildArenaProposalChangeLabels(changes, config, onlineNames),
+    [changes, config, onlineNames],
+  );
+};
+
+export const arenaProposalChangeSummary = (
+  change: ArenaProposalChange,
+  labels?: ArenaProposalChangeLabels,
+): string => {
+  const refLabel = (ref: { readonly id: string; readonly kind: string }, key?: string): string => (
+    labels?.ref ? labels.ref(ref, key) ?? namespacedRefIdentity(ref, key) : namespacedRefIdentity(ref, key)
+  );
   switch (change.type) {
-    case 'addCombatant': return `新增角色 ${namespacedRefIdentity(change.ref, change.key)}`;
-    case 'removeCombatant': return `移除角色 ${change.combatantKey}`;
-    case 'setCharacterGuidance': return `修改角色引导 ${change.combatantKey}`;
-    case 'assignTeam': return `调整队伍 ${change.combatantKey}`;
+    case 'addCombatant': return `新增角色 ${refLabel(change.ref, change.key)}`;
+    case 'removeCombatant': return `移除角色 ${combatantLabelOf(labels, change.combatantKey)}`;
+    case 'setCharacterGuidance': return `修改角色引导 ${combatantLabelOf(labels, change.combatantKey)}`;
+    case 'assignTeam': return `调整队伍 ${combatantLabelOf(labels, change.combatantKey)}`;
     case 'addTeam': return `新增队伍 ${change.displayName}`;
-    case 'removeTeam': return `移除队伍 ${change.teamKey}`;
-    case 'renameTeam': return `队伍 ${change.teamKey} 改名为 ${safeText(change.value)}`;
+    case 'removeTeam': return `移除队伍 ${teamKeyLabelOf(labels, change.teamKey)}`;
+    case 'renameTeam': return `队伍 ${teamKeyLabelOf(labels, change.teamKey)} 改名为 ${safeText(change.value)}`;
     case 'reorderCombatants': return '调整角色顺序';
     case 'reorderTeams': return '调整队伍顺序';
-    case 'reorderTeamCombatants': return `调整队伍 ${change.teamKey} 内角色顺序`;
+    case 'reorderTeamCombatants': return `调整队伍 ${teamKeyLabelOf(labels, change.teamKey)} 内角色顺序`;
     case 'setBattleMode': return `战斗模式改为 ${change.value}`;
     case 'setSelectedLanguage': return `语言改为 ${change.value}`;
-    case 'setScenario': return change.ref === null ? '清除主情景' : `主情景改为 ${namespacedRefIdentity(change.ref, change.key)}`;
-    case 'addAuxScenario': return `新增辅助情景 ${namespacedRefIdentity(change.ref, change.key)}`;
-    case 'removeAuxScenario': return `移除辅助情景 ${change.scenarioKey}`;
+    case 'setScenario': return change.ref === null ? '清除主情景' : `主情景改为 ${refLabel(change.ref, change.key)}`;
+    case 'addAuxScenario': return `新增辅助情景 ${refLabel(change.ref, change.key)}`;
+    case 'removeAuxScenario': return `移除辅助情景 ${scenarioKeyLabelOf(labels, change.scenarioKey)}`;
     case 'reorderAuxScenarios': return '调整辅助情景顺序';
-    case 'addMaterial': return `新增素材 ${change.ref.id}`;
-    case 'removeMaterial': return `移除素材 ${change.materialKey}`;
+    case 'addMaterial': return `新增素材 ${refLabel(change.ref, change.key)}`;
+    case 'removeMaterial': return `移除素材 ${materialKeyLabelOf(labels, change.materialKey)}`;
     case 'reorderMaterials': return '调整素材顺序';
     case 'setUserGuidance': return `全局引导改为“${safeText(change.value || '空值')}”`;
     case 'setStoryLength': return `故事长度改为 ${change.value}`;
@@ -118,22 +281,28 @@ const historyReadSummary = (
   return unlimited ? '开(无限)' : `开(${limit})`;
 };
 
-export const arenaProposalChangeProposedSummary = (change: ArenaProposalChange): string => {
+export const arenaProposalChangeProposedSummary = (
+  change: ArenaProposalChange,
+  labels?: ArenaProposalChangeLabels,
+): string => {
+  const orderKeyLabel = (key: string): string => (
+    labels?.orderKey ? labels.orderKey(key) ?? safeText(key) : safeText(key)
+  );
   switch (change.type) {
     case 'reorderCombatants':
     case 'reorderTeams':
     case 'reorderTeamCombatants':
     case 'reorderAuxScenarios':
     case 'reorderMaterials':
-      return `${arenaProposalChangeSummary(change)}：${change.value.map((key) => safeText(key)).join(' → ')}`;
+      return `${arenaProposalChangeSummary(change, labels)}：${change.value.map(orderKeyLabel).join(' → ')}`;
     case 'setCharacterGuidance':
       return change.value === null
-        ? `清空角色 ${change.combatantKey} 引导`
-        : `角色 ${change.combatantKey} 引导改为“${safeText(change.value, 120)}”`;
+        ? `清空角色 ${combatantLabelOf(labels, change.combatantKey)} 引导`
+        : `角色 ${combatantLabelOf(labels, change.combatantKey)} 引导改为“${safeText(change.value, 120)}”`;
     case 'assignTeam':
       return change.teamKey === null
-        ? `角色 ${change.combatantKey} 取消队伍分配`
-        : `角色 ${change.combatantKey} 分配至队伍 ${change.teamKey}`;
+        ? `角色 ${combatantLabelOf(labels, change.combatantKey)} 取消队伍分配`
+        : `角色 ${combatantLabelOf(labels, change.combatantKey)} 分配至队伍 ${teamKeyLabelOf(labels, change.teamKey)}`;
     case 'setHistorySettings': {
       const value = change.value;
       return [
@@ -143,7 +312,7 @@ export const arenaProposalChangeProposedSummary = (change: ArenaProposalChange):
       ].join('；');
     }
     default:
-      return arenaProposalChangeSummary(change);
+      return arenaProposalChangeSummary(change, labels);
   }
 };
 
@@ -168,6 +337,14 @@ export const arenaProposalSelectionError = (
       ? '所选变更缺少依赖或拆分了联动变更组'
       : '所选变更无效';
   }
+};
+
+export const changeRefTitle = (change: ArenaProposalChange): string | undefined => {
+  if (change.type === 'addCombatant' || change.type === 'addAuxScenario' || change.type === 'addMaterial') {
+    return change.ref.id;
+  }
+  if (change.type === 'setScenario' && change.ref !== null) return change.ref.id;
+  return undefined;
 };
 
 export const arenaProposalConflictSummary = (analysis: ArenaProposalChangeAnalysis): string => {
@@ -210,6 +387,7 @@ const HostProposalCard = ({
   );
   const analysisByChangeId = new Map(preview.plan.map((item) => [item.changeId, item] as const));
   const selectedConflictCount = preview.conflicts.length;
+  const labels = useArenaProposalChangeLabels(currentConfig, proposal.changes);
 
   const resolve = async (resolution: 'accept-selected' | 'reject'): Promise<void> => {
     if (actionLock.current || disabled) return;
@@ -258,7 +436,12 @@ const HostProposalCard = ({
               }}
             />
             <span>
-              <span className="font-medium text-gray-950 dark:text-gray-100">{arenaProposalChangeSummary(change)}</span>
+              <span
+                className="font-medium text-gray-950 dark:text-gray-100"
+                title={changeRefTitle(change)}
+              >
+                {arenaProposalChangeSummary(change, labels)}
+              </span>
               <ArenaProposalSelectionDetails change={change} />
               <span className="mt-1 block text-xs text-gray-600 dark:text-gray-400">
                 提案基准：{safeJsonSummary(change.expectedBase)}
@@ -267,7 +450,7 @@ const HostProposalCard = ({
                 当前房间值：{conflict ? safeJsonSummary(conflict.current) : '与提案基准一致'}
               </span>
               <span className="block text-xs text-gray-600 dark:text-gray-400">
-                建议值：{arenaProposalChangeProposedSummary(change)}
+                建议值：{arenaProposalChangeProposedSummary(change, labels)}
               </span>
               {satisfied ? (
                 <span

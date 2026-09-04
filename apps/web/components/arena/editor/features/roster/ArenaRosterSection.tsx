@@ -78,6 +78,7 @@ export function ArenaRosterSection({
         item={{
           key: row.key,
           displayName: row.displayName,
+          referenceTitle: row.referenceTitle,
           typeLabel: row.typeLabel,
           guidance: row.guidance,
           tags: extras?.tags,

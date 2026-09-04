@@ -348,10 +348,10 @@ describe('Arena Proposal panel real React interactions', () => {
     expect(container.textContent).toContain('调整辅助情景顺序');
     expect(container.textContent).toContain('调整素材顺序');
     expect(container.textContent).toContain(
-      '建议值：角色 data-card:character-1 引导改为“保护后排并等待支援”',
+      '建议值：角色 在线:character-1 引导改为“保护后排并等待支援”',
     );
     expect(container.textContent).toContain(
-      '建议值：角色 data-card:character-1 分配至队伍 team:b',
+      '建议值：角色 在线:character-1 分配至队伍 team:b',
     );
     expect(container.textContent).toContain('叙事历史 读取=开(7)、写入=关');
     for (const exposedTerm of [
