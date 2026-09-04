@@ -10,7 +10,11 @@ import {
 } from '@mahoshojo/contracts/arena-room';
 
 import { ArenaMultiplayerCoreError } from './errors';
-import { detectProposalConflicts, type ArenaProposalConflict } from './conflicts';
+import {
+  analyzeProposalChanges,
+  type ArenaProposalChangeAnalysis,
+  type ArenaProposalConflict,
+} from './conflicts';
 import { validateProposalChanges, type ProposalSelectionIssue, type ProposalSelectionValidation } from './selection';
 import { canonicalResourceKey, deepClone } from './utils';
 
@@ -25,7 +29,17 @@ export interface ArenaProposalApplyResult {
   readonly config: ArenaRoomSharedConfig;
   readonly revision: number;
   readonly acceptedChangeIds: readonly string[];
+  readonly satisfiedChangeIds: readonly string[];
   readonly rejectedChangeIds: readonly string[];
+  readonly conflicts: readonly ArenaProposalConflict[];
+  readonly issues: readonly ProposalSelectionIssue[];
+}
+
+export interface ArenaProposalApplicationPreview {
+  readonly status: 'accepted' | 'partially_accepted' | 'rejected';
+  readonly plan: readonly ArenaProposalChangeAnalysis[];
+  readonly acceptedChangeIds: readonly string[];
+  readonly satisfiedChangeIds: readonly string[];
   readonly conflicts: readonly ArenaProposalConflict[];
   readonly issues: readonly ProposalSelectionIssue[];
 }
@@ -66,6 +80,7 @@ const rejected = (
   config: deepClone(config),
   revision,
   acceptedChangeIds: [],
+  satisfiedChangeIds: [],
   rejectedChangeIds: [...ids],
   conflicts: [...conflicts],
   issues: [...issues],
@@ -251,12 +266,19 @@ const collectIds = (input: unknown): string[] => (
 );
 
 /** Applies one complete Proposal as one immutable revision transition. */
-export function applyArenaProposal(
-  stateInput: ArenaProposalState,
+type StagedAnalysis = Readonly<{
+  working: ArenaRoomSharedConfig;
+  plan: readonly ArenaProposalChangeAnalysis[];
+  conflicts: readonly ArenaProposalConflict[];
+  applicableChangeIds: readonly string[];
+  satisfiedChangeIds: readonly string[];
+}>;
+
+const guardProposal = (
+  state: ArenaProposalState,
   proposalInput: unknown,
   selectedChangeIds?: readonly string[],
-): ArenaProposalApplyResult {
-  const state = parseState(stateInput);
+): { proposal: ArenaProposal; validation: ProposalSelectionValidation } | ArenaProposalApplyResult => {
   const config = parseArenaRoomSharedConfig(state.config);
   const proposal = parseProposal(proposalInput);
   const allIds = collectIds(proposalInput);
@@ -286,40 +308,144 @@ export function applyArenaProposal(
   if (validation.selectedChangeIds.length === 0) {
     return rejected(config, state.revision, proposal.changes.map((change) => change.changeId), validation.issues);
   }
+  return { proposal, validation };
+};
 
+/**
+ * Dependency-ordered staged analysis shared by the authoritative apply path and
+ * the host/member review preview. Every selected change is evaluated against the
+ * intermediate state produced by its dependencies, so "add combatant -> guidance
+ * on the added combatant" is never reported as a conflict, and changes whose
+ * target state already equals the proposal's postcondition are reported as
+ * satisfied no-ops instead of conflicts.
+ */
+const analyzeStagedApplication = (
+  config: ArenaRoomSharedConfig,
+  proposal: ArenaProposal,
+  validation: ProposalSelectionValidation,
+): StagedAnalysis => {
   const selectedSet = new Set(validation.selectedChangeIds);
   const working = deepClone(config);
   const orderedSelected = topologicalOrder(validation.changes, validation.selectedChangeIds);
+  const planById = new Map<string, ArenaProposalChangeAnalysis>();
   const conflicts: ArenaProposalConflict[] = [];
+  const applicableChangeIds: string[] = [];
+  const satisfiedChangeIds: string[] = [];
+  // Evaluate each target immediately before its dependency-ordered application.
+  // This lets a dependent change (e.g. add combatant -> guidance) compare its
+  // expected base against the staged semantic value without exposing a partial
+  // result if a later change conflicts.
+  for (const change of orderedSelected) {
+    const [analysis] = analyzeProposalChanges(working, [change]);
+    if (!analysis) continue;
+    planById.set(change.changeId, analysis);
+    if (analysis.outcome === 'conflict' && analysis.conflict) {
+      conflicts.push(analysis.conflict);
+      continue;
+    }
+    if (analysis.outcome === 'satisfied') {
+      satisfiedChangeIds.push(change.changeId);
+      continue;
+    }
+    if (analysis.outcome !== 'applicable') continue;
+    if (!changeTargetExists(working, change)) {
+      throw new ArenaMultiplayerCoreError('unsupported-change', `proposal target is absent for ${change.changeId}`);
+    }
+    applicableChangeIds.push(change.changeId);
+    applyChange(working, change);
+  }
+  // Unselected changes are reference-only for reviewers: analyze them against
+  // the pristine config like the old non-staged review did.
+  const plan = proposal.changes.flatMap((change) => {
+    const staged = planById.get(change.changeId);
+    if (staged) return [staged];
+    if (selectedSet.has(change.changeId)) return [];
+    const [reference] = analyzeProposalChanges(config, [change]);
+    return reference ? [{ ...reference, outcome: 'unselected' as const }] : [];
+  });
+  return {
+    working,
+    plan,
+    conflicts,
+    applicableChangeIds,
+    satisfiedChangeIds,
+  };
+};
+
+/** Dry-run of applyArenaProposal for host/member review UIs. Same staged semantics. */
+export function previewArenaProposalApplication(
+  stateInput: ArenaProposalState,
+  proposalInput: unknown,
+  selectedChangeIds?: readonly string[],
+): ArenaProposalApplicationPreview {
+  const state = parseState(stateInput);
+  const config = parseArenaRoomSharedConfig(state.config);
+  const guarded = guardProposal(state, proposalInput, selectedChangeIds);
+  if ('status' in guarded) {
+    return {
+      status: 'rejected',
+      plan: [],
+      acceptedChangeIds: [],
+      satisfiedChangeIds: [],
+      conflicts: guarded.conflicts,
+      issues: guarded.issues,
+    };
+  }
   try {
-    // Evaluate each target immediately before its dependency-ordered application.
-    // This lets a dependent change (e.g. add combatant -> guidance) compare its
-    // expected base against the staged semantic value without exposing a partial
-    // result if a later change conflicts.
-    for (const change of orderedSelected) {
-      const changeConflicts = detectProposalConflicts(working, [change]);
-      if (changeConflicts.length > 0) {
-        conflicts.push(...changeConflicts);
-        continue;
-      }
-      if (!changeTargetExists(working, change)) {
-        throw new ArenaMultiplayerCoreError('unsupported-change', `proposal target is absent for ${change.changeId}`);
-      }
-      applyChange(working, change);
+    const staged = analyzeStagedApplication(config, guarded.proposal, guarded.validation);
+    const accepted = [...guarded.validation.selectedChangeIds];
+    return {
+      status: staged.conflicts.length > 0 ? 'rejected' : (
+        accepted.length === guarded.proposal.changes.length ? 'accepted' : 'partially_accepted'
+      ),
+      plan: staged.plan,
+      acceptedChangeIds: accepted,
+      satisfiedChangeIds: staged.satisfiedChangeIds,
+      conflicts: staged.conflicts,
+      issues: [],
+    };
+  } catch (error) {
+    return {
+      status: 'rejected',
+      plan: [],
+      acceptedChangeIds: [],
+      satisfiedChangeIds: [],
+      conflicts: [],
+      issues: [{
+        code: 'invalid-changes',
+        message: error instanceof Error ? error.message : 'selected changes could not be applied',
+      }],
+    };
+  }
+}
+
+export function applyArenaProposal(
+  stateInput: ArenaProposalState,
+  proposalInput: unknown,
+  selectedChangeIds?: readonly string[],
+): ArenaProposalApplyResult {
+  const state = parseState(stateInput);
+  const config = parseArenaRoomSharedConfig(state.config);
+  const guarded = guardProposal(state, proposalInput, selectedChangeIds);
+  if ('status' in guarded) return guarded;
+
+  const selectedSet = new Set(guarded.validation.selectedChangeIds);
+  try {
+    const staged = analyzeStagedApplication(config, guarded.proposal, guarded.validation);
+    if (staged.conflicts.length > 0) {
+      return rejected(config, state.revision, guarded.proposal.changes.map((change) => change.changeId), guarded.validation.issues, staged.conflicts);
     }
-    if (conflicts.length > 0) {
-      return rejected(config, state.revision, proposal.changes.map((change) => change.changeId), validation.issues, conflicts);
-    }
-    const finalConfig = ArenaRoomSharedConfigSchema.parse(working);
-    const accepted = [...validation.selectedChangeIds];
-    const rejectedIds = proposal.changes
+    const finalConfig = ArenaRoomSharedConfigSchema.parse(staged.working);
+    const accepted = [...guarded.validation.selectedChangeIds];
+    const rejectedIds = guarded.proposal.changes
       .map((change) => change.changeId)
       .filter((changeId) => !selectedSet.has(changeId));
     return {
-      status: accepted.length === proposal.changes.length ? 'accepted' : 'partially_accepted',
+      status: accepted.length === guarded.proposal.changes.length ? 'accepted' : 'partially_accepted',
       config: deepClone(finalConfig),
       revision: state.revision + 1,
       acceptedChangeIds: accepted,
+      satisfiedChangeIds: staged.satisfiedChangeIds,
       rejectedChangeIds: rejectedIds,
       conflicts: [],
       issues: [],
@@ -329,6 +455,6 @@ export function applyArenaProposal(
       code: 'invalid-changes',
       message: error instanceof Error ? error.message : 'selected changes could not be applied',
     };
-    return rejected(config, state.revision, proposal.changes.map((change) => change.changeId), [issue]);
+    return rejected(config, state.revision, guarded.proposal.changes.map((change) => change.changeId), [issue]);
   }
 }

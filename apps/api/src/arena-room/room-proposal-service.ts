@@ -255,10 +255,6 @@ const requireEpoch = (state: ArenaRoomAuthorityState, expectedRoomEpoch: string)
   if (state.snapshot.roomEpoch !== expectedRoomEpoch) fail('ROOM_EPOCH_STALE');
 };
 
-const requireRevision = (state: ArenaRoomAuthorityState, expectedRevision: number): void => {
-  if (state.snapshot.revision !== expectedRevision) fail('ROOM_REVISION_STALE');
-};
-
 const executeOnce = async (
   membership: ResolvedArenaRoomMembership,
   command: unknown,
@@ -386,7 +382,10 @@ export const createArenaRoomProposalService = (
       if (!request.success) return fail('ROOM_PROPOSAL_INPUT_INVALID');
       const membership = await resolveMembership(input.roomId, input.accountUserId);
       requireEpoch(membership.state, request.data.expectedRoomEpoch);
-      requireRevision(membership.state, request.data.expectedRevision);
+      // No exact-revision veto: applyArenaProposal re-runs the dependency-ordered
+      // typed expectedBase merge against the latest authoritative config inside
+      // the atomic transition below, so unrelated concurrent revisions do not
+      // invalidate a still-mergeable proposal.
       if (membership.member.role !== 'host') return fail('ROOM_PERMISSION_DENIED');
       const proposal = membership.state.snapshot.proposals.find((item) => item.proposalId === proposalId);
       if (!proposal) {

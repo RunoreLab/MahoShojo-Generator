@@ -295,7 +295,7 @@ const mapServiceError = (context: ArenaRoomHttpContext, error: unknown): Respons
       case 'ROOM_INPUT_INVALID':
         return invalidRequest(context);
       case 'ROOM_MEMBERSHIP_TRANSITION_DENIED':
-        return context.json(errorBody('ROOM_CONFLICT', '房间状态已发生变化'), 409);
+        return context.json(errorBody('ROOM_CONFLICT', '房间状态已发生变化，请刷新后重试。'), 409);
       case 'ROOM_MEMBER_LIMIT_REACHED':
         return context.json(negotiatedErrorBody(context,
           'ROOM_MEMBER_LIMIT_REACHED',
@@ -342,11 +342,17 @@ const mapServiceError = (context: ArenaRoomHttpContext, error: unknown): Respons
           'ROOM_CONFIG_FRAME_TOO_LARGE',
           '房间快照超过 64 KiB，请减少配置内容或先处理现有提案后重试。',
         ), 413);
+      // 细分 code（ROOM_EPOCH_STALE 等）尚未进入协商 taxonomy（当前 v2 是
+      // exact-match，新增 code 会让已协商 v2 的旧 bundle 解析失败）；
+      // 先只细化 message，code 保持双方 schema 都兼容的 ROOM_CONFLICT。
       case 'ROOM_EPOCH_STALE':
-      case 'ROOM_PROPOSAL_CONFLICT':
+        return context.json(errorBody('ROOM_CONFLICT', '房间实例已更换，请重新进入房间后再试。'), 409);
       case 'ROOM_REVISION_STALE':
+        return context.json(errorBody('ROOM_CONFLICT', '房间配置刚发生更新，请等待房间状态同步后重试。'), 409);
+      case 'ROOM_PROPOSAL_CONFLICT':
+        return context.json(errorBody('ROOM_CONFLICT', '提案与当前房间配置存在冲突；请在审阅面板逐项确认或取消勾选冲突项后重试。'), 409);
       case 'ROOM_TRANSITION_DENIED':
-        return context.json(errorBody('ROOM_CONFLICT', '房间状态已发生变化'), 409);
+        return context.json(errorBody('ROOM_CONFLICT', '房间当前状态不允许该操作，请稍后重试。'), 409);
       case 'ROOM_REFERENCE_DENIED':
         return context.json(negotiatedErrorBody(context,
           'ROOM_REFERENCE_DENIED',

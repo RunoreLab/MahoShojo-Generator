@@ -50,20 +50,13 @@ const submit = (state: ArenaRoomAuthorityState, proposalValue = proposal([guidan
 );
 
 describe('Arena Room Proposal authority transitions', () => {
-  it('requires an exact room revision fence before resolving a Proposal', () => {
+  it('resolves a Proposal on the latest authoritative state without an exact-revision veto', () => {
+    // 语义修订：resolve 不再做全局 exact-revision 门禁。typed expectedBase 的
+    // staged 三方合并才是并发保护；无关 revision 前进不再让仍可合并的提案失败。
     const submitted = submit(createJoinedState()).nextState;
-    const stale = failure(transitionArenaRoomAt(submitted, {
-      type: 'resolve-proposal',
-      expectedRoomEpoch: 'epoch-1',
-      expectedRevision: 1,
-      proposalId: 'proposal-1',
-      resolution: 'reject',
-      timestamp: '2026-08-27T16:02:00.000Z',
-    }, hostAuthority()));
-    expect(stale).toMatchObject({ code: 'stale', reason: 'room-revision-mismatch' });
-    expect(submitted.snapshot.proposals).toHaveLength(1);
+    expect(submitted.snapshot.revision).toBe(0);
 
-    const resolved = success(transitionArenaRoomAt(submitted, {
+    const resolvedWithStaleDiagnostic = success(transitionArenaRoomAt(submitted, {
       type: 'resolve-proposal',
       expectedRoomEpoch: 'epoch-1',
       expectedRevision: 0,
@@ -71,7 +64,20 @@ describe('Arena Room Proposal authority transitions', () => {
       resolution: 'reject',
       timestamp: '2026-08-27T16:02:00.000Z',
     }, hostAuthority()));
-    expect(resolved.nextState.snapshot.proposals).toEqual([]);
+    expect(resolvedWithStaleDiagnostic.nextState.snapshot.proposals).toEqual([]);
+
+    // 房间 revision 已前进后提交的提案仍应在最新状态上原子 resolve。
+    const advanced = submit(createJoinedState()).nextState;
+    const bumped = success(transitionArenaRoomAt(advanced, {
+      type: 'resolve-proposal',
+      expectedRoomEpoch: 'epoch-1',
+      proposalId: 'proposal-1',
+      resolution: 'accept-selected',
+      selectedChangeIds: ['guidance-1'],
+      timestamp: NEXT_TIMESTAMP,
+    }, hostAuthority()));
+    expect(bumped.nextState.snapshot.revision).toBe(1);
+    expect(bumped.nextState.snapshot.proposals).toEqual([]);
   });
 
   it('submits once, rejects ID conflicts, and never accepts host-authored member proposals', () => {

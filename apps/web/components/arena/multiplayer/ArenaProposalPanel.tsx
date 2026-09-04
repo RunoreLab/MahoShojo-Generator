@@ -1,6 +1,7 @@
 'use client';
 
 import {
+  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
@@ -12,7 +13,10 @@ import type {
   ArenaProposalChange,
   ArenaRoomSharedConfig,
 } from '@mahoshojo/contracts/arena-room';
-import { detectProposalConflicts } from '@mahoshojo/multiplayer-core';
+import {
+  previewArenaProposalApplication,
+  type ArenaProposalChangeAnalysis,
+} from '@mahoshojo/multiplayer-core';
 
 import type {
   ArenaRoomController,
@@ -166,8 +170,16 @@ export const arenaProposalSelectionError = (
   }
 };
 
+export const arenaProposalConflictSummary = (analysis: ArenaProposalChangeAnalysis): string => {
+  if (analysis.outcome !== 'conflict' || !analysis.conflict) return '';
+  return analysis.conflict.code === 'reference-changed'
+    ? '引用的数据卡已更新版本，需要重新选择数据卡'
+    : '该目标的当前值已与提案基准不一致';
+};
+
 const HostProposalCard = ({
   proposal,
+  roomId,
   revision,
   roomEpoch,
   currentConfig,
@@ -176,6 +188,7 @@ const HostProposalCard = ({
   disabled,
 }: {
   readonly proposal: ArenaProposal;
+  readonly roomId: string;
   readonly revision: number;
   readonly roomEpoch: string;
   readonly currentConfig: ArenaRoomSharedConfig;
@@ -188,10 +201,15 @@ const HostProposalCard = ({
   );
   const actionLock = useRef(false);
   const validationError = arenaProposalSelectionError(proposal.changes, selected);
-  const conflictByChangeId = new Map(
-    detectProposalConflicts(currentConfig, proposal.changes)
-      .map((conflict) => [conflict.changeId, conflict] as const),
+  // 与服务器权威 apply 相同的依赖排序 + staged expectedBase 分析：
+  // “新增角色 -> 修改该角色引导”不再误报冲突；目标已由其他修改满足的变更
+  // 显示为安全跳过，而不是阻塞整份提案。
+  const preview = useMemo(
+    () => previewArenaProposalApplication({ roomId, config: currentConfig, revision }, proposal, [...selected]),
+    [roomId, currentConfig, revision, proposal, selected],
   );
+  const analysisByChangeId = new Map(preview.plan.map((item) => [item.changeId, item] as const));
+  const selectedConflictCount = preview.conflicts.length;
 
   const resolve = async (resolution: 'accept-selected' | 'reject'): Promise<void> => {
     if (actionLock.current || disabled) return;
@@ -223,7 +241,9 @@ const HostProposalCard = ({
       <fieldset className="mt-3 space-y-2">
         <legend className="text-sm font-semibold text-gray-950 dark:text-gray-100">逐项审阅</legend>
         {proposal.changes.map((change) => {
-          const conflict = conflictByChangeId.get(change.changeId);
+          const analysis = analysisByChangeId.get(change.changeId);
+          const conflict = analysis?.outcome === 'conflict' ? analysis.conflict : undefined;
+          const satisfied = analysis?.outcome === 'satisfied';
           return (
           <label key={change.changeId} className="flex items-start gap-2 rounded-lg border border-gray-200 p-2 text-sm dark:border-gray-700">
             <input
@@ -249,13 +269,21 @@ const HostProposalCard = ({
               <span className="block text-xs text-gray-600 dark:text-gray-400">
                 建议值：{arenaProposalChangeProposedSummary(change)}
               </span>
+              {satisfied ? (
+                <span
+                  className="mt-1 block font-medium text-emerald-700 dark:text-emerald-300"
+                  data-change-outcome="satisfied"
+                >
+                  该项目标已由其他修改满足；接受时将自动跳过，不会重复应用。
+                </span>
+              ) : null}
               {conflict ? (
                 <span
                   className="mt-1 block font-medium text-red-700 dark:text-red-300"
                   data-conflict-code={conflict.code}
                   data-conflict-target={conflict.target}
                 >
-                  与当前房间修改冲突，请确认后再接受。
+                  {arenaProposalConflictSummary(analysis!)}。可取消勾选该项，其余变更仍可接受。
                 </span>
               ) : null}
             </span>
@@ -266,6 +294,11 @@ const HostProposalCard = ({
       <div aria-live="polite" className="mt-2 min-h-5 text-xs text-red-700 dark:text-red-300">
         {validationError ?? ''}
       </div>
+      {selectedConflictCount > 0 ? (
+        <p role="status" className="mt-1 text-xs text-amber-700 dark:text-amber-300">
+          所选变更中有 {selectedConflictCount} 项与当前房间配置冲突，直接接受会被整体拒绝；请取消勾选冲突项后接受其余变更。
+        </p>
+      ) : null}
       <div className="mt-2 flex flex-wrap gap-2">
         <button
           type="button"
@@ -330,6 +363,7 @@ const HostProposalInbox = ({
             <HostProposalCard
               key={`${proposal.proposalId}:${proposal.updatedAt ?? proposal.createdAt}`}
               proposal={proposal}
+              roomId={session.snapshot.roomId}
               revision={session.snapshot.revision}
               roomEpoch={session.roomEpoch}
               currentConfig={session.snapshot.sharedConfig}

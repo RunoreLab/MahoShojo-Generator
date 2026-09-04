@@ -7,6 +7,7 @@ import {
   buildArenaRoomSharedConfig,
   detectProposalConflicts,
   diffArenaSharedConfig,
+  previewArenaProposalApplication,
   validateProposalChanges,
   type ArenaRoomNormalizedSource,
 } from '../src/index';
@@ -802,7 +803,7 @@ describe('proposal application', () => {
     expect(result.config.historySettings).toEqual(nextHistory);
   });
 
-  it('rejects malformed proposals and absent targets without changing config or revision', () => {
+  it('rejects malformed proposals without changing config or revision', () => {
     const current = baseConfig();
     const malformed = applyArenaProposal(proposalState(current, 3), {
       ...makeProposal([{ changeId: 'bad', type: 'setBattleMode', value: 'invalid' }], 'proposal-malformed'),
@@ -810,17 +811,135 @@ describe('proposal application', () => {
     expect(malformed.status).toBe('rejected');
     expect(malformed.revision).toBe(3);
     expect(malformed.config).toEqual(current);
+  });
 
+  it('treats removal of an already-absent target as a satisfied no-op, not a conflict', () => {
+    const current = baseConfig();
     const absentTarget = applyArenaProposal(proposalState(current, 3), makeProposal([{
       changeId: 'remove-missing',
       type: 'removeMaterial' as const,
       materialKey: 'data-card:missing',
       expectedBase: { kind: 'present' as const, ref: ref('missing', 'material') },
     }], 'proposal-absent'));
-    expect(absentTarget.status).toBe('rejected');
-    expect(absentTarget.revision).toBe(3);
+    expect(absentTarget.status).toBe('accepted');
+    expect(absentTarget.satisfiedChangeIds).toEqual(['remove-missing']);
+    expect(absentTarget.acceptedChangeIds).toEqual(['remove-missing']);
+    expect(absentTarget.conflicts).toEqual([]);
     expect(absentTarget.config).toEqual(current);
     expect(current.materials).toHaveLength(2);
+  });
+
+  it('accepts add + dependent guidance + removal of an already-deleted combatant (regression fixture)', () => {
+    // 试玩回归场景：提案基于含 c2 的 BASE 提交（移除 c2 + 新增 c3 + 设置 c3 引导），
+    // 但提交时 c2 已被其他修改删除。整份提案应安全合并：
+    // 新增/引导正常应用，移除项记为 satisfied no-op，而不是整份提案失败。
+    const base = baseConfig();
+    const withoutC2 = {
+      ...base,
+      combatants: base.combatants.filter((entry) => entry.key !== 'data-card:c2'),
+    };
+    const proposal = makeProposal([
+      {
+        changeId: 'add-c3',
+        type: 'addCombatant' as const,
+        ref: ref('c3', 'character'),
+        expectedBase: { kind: 'absent' as const },
+      },
+      {
+        changeId: 'guide-c3',
+        type: 'setCharacterGuidance' as const,
+        combatantKey: 'data-card:c3',
+        value: '这只是张公告',
+        expectedBase: { kind: 'value' as const, value: null },
+        dependsOn: ['add-c3'],
+      },
+      {
+        changeId: 'remove-c2',
+        type: 'removeCombatant' as const,
+        combatantKey: 'data-card:c2',
+        expectedBase: { kind: 'present' as const, ref: ref('c2', 'character') },
+      },
+    ], 'proposal-regression');
+
+    const result = applyArenaProposal(proposalState(withoutC2, 10), proposal);
+    expect(result.status).toBe('accepted');
+    expect(result.satisfiedChangeIds).toEqual(['remove-c2']);
+    expect(result.config.combatants).toContainEqual({
+      key: 'data-card:c3',
+      ref: ref('c3', 'character'),
+      characterGuidance: '这只是张公告',
+    });
+    expect(result.config.combatants.some((entry) => entry.key === 'data-card:c2')).toBe(false);
+  });
+
+  it('reports CURRENT == PROPOSED as satisfied for value changes too', () => {
+    const scenarioCurrent = { ...baseConfig(), battleMode: 'scenario' as const };
+    const satisfied = applyArenaProposal(proposalState(scenarioCurrent, 4), makeProposal([
+      {
+        changeId: 'mode',
+        type: 'setBattleMode' as const,
+        value: 'scenario' as const,
+        expectedBase: { kind: 'value' as const, value: 'classic' as const },
+      },
+    ], 'proposal-already-done'));
+    expect(satisfied.status).toBe('accepted');
+    expect(satisfied.satisfiedChangeIds).toEqual(['mode']);
+    expect(satisfied.config).toEqual(scenarioCurrent);
+  });
+
+  it('keeps genuine conflicts when CURRENT differs from both BASE and PROPOSED', () => {
+    const driftedCurrent = { ...baseConfig(), battleMode: 'kizuna' as const };
+    const result = applyArenaProposal(proposalState(driftedCurrent, 5), makeProposal([
+      {
+        changeId: 'mode',
+        type: 'setBattleMode' as const,
+        value: 'scenario' as const,
+        expectedBase: { kind: 'value' as const, value: 'classic' as const },
+      },
+    ], 'proposal-conflict'));
+    expect(result.status).toBe('rejected');
+    expect(result.conflicts).toEqual([
+      expect.objectContaining({ changeId: 'mode', code: 'precondition-failed' }),
+    ]);
+    expect(result.config).toEqual(driftedCurrent);
+  });
+
+  it('previews staged application with the same outcome per change as apply', () => {
+    const base = baseConfig();
+    const withoutC2 = {
+      ...base,
+      combatants: base.combatants.filter((entry) => entry.key !== 'data-card:c2'),
+    };
+    const proposal = makeProposal([
+      {
+        changeId: 'add-c3',
+        type: 'addCombatant' as const,
+        ref: ref('c3', 'character'),
+        expectedBase: { kind: 'absent' as const },
+      },
+      {
+        changeId: 'guide-c3',
+        type: 'setCharacterGuidance' as const,
+        combatantKey: 'data-card:c3',
+        value: 'g',
+        expectedBase: { kind: 'value' as const, value: null },
+        dependsOn: ['add-c3'],
+      },
+      {
+        changeId: 'remove-c2',
+        type: 'removeCombatant' as const,
+        combatantKey: 'data-card:c2',
+        expectedBase: { kind: 'present' as const, ref: ref('c2', 'character') },
+      },
+    ], 'proposal-preview');
+
+    const preview = previewArenaProposalApplication(proposalState(withoutC2, 10), proposal);
+    expect(preview.status).toBe('accepted');
+    expect(preview.conflicts).toEqual([]);
+    const byId = new Map(preview.plan.map((item) => [item.changeId, item] as const));
+    expect(byId.get('add-c3')?.outcome).toBe('applicable');
+    expect(byId.get('guide-c3')?.outcome).toBe('applicable');
+    expect(byId.get('remove-c2')?.outcome).toBe('satisfied');
   });
 
   it('returns the original config/revision when an earlier selected change stages before a later conflict', () => {

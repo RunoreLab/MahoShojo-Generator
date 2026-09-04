@@ -811,7 +811,7 @@ describe('Arena Room Proposal application service', () => {
     });
   });
 
-  it('stale revision and stale expectedBase preserve pending Proposal and avoid ref reads', async () => {
+  it('stale expectedBase fails closed with or without a stale diagnostic revision', async () => {
     const harness = await createHarness();
     await harness.service.submit({
       roomId: 'room-1',
@@ -828,6 +828,8 @@ describe('Arena Room Proposal application service', () => {
     });
     vi.mocked(harness.references.verify).mockClear();
 
+    // 语义修订：resolve 不再做全局 exact-revision veto；真正保护来自
+    // staged typed expectedBase 合并——基准过期的提案仍被拒绝且不消耗引用校验。
     await expect(harness.service.resolve({
       roomId: 'room-1',
       proposalId: 'proposal-stale',
@@ -838,7 +840,7 @@ describe('Arena Room Proposal application service', () => {
         resolution: 'accept-selected',
         selectedChangeIds: ['guidance-1'],
       },
-    })).rejects.toMatchObject({ code: 'ROOM_REVISION_STALE' });
+    })).rejects.toMatchObject({ code: 'ROOM_PROPOSAL_CONFLICT' });
     await expect(harness.service.resolve({
       roomId: 'room-1',
       proposalId: 'proposal-stale',
@@ -852,6 +854,67 @@ describe('Arena Room Proposal application service', () => {
     })).rejects.toMatchObject({ code: 'ROOM_PROPOSAL_CONFLICT' });
     expect(harness.references.verify).not.toHaveBeenCalled();
     expect(harness.store.state?.snapshot.proposals).toHaveLength(1);
+  });
+
+  it('resolves a still-mergeable proposal after unrelated revisions advanced the room', async () => {
+    const harness = await createHarness();
+    await harness.service.submit({
+      roomId: 'room-1',
+      accountUserId: 202,
+      request: {
+        proposalId: 'proposal-behind',
+        expectedRoomEpoch: 'epoch-1',
+        baseRevision: 0,
+        changes: [{
+          ...guidanceChange(),
+          expectedBase: { kind: 'value' as const, value: '' },
+        }],
+      },
+    });
+
+    // 通过另一个已接受提案把房间 revision 前进，但不触碰 guidance 目标。
+    await harness.service.submit({
+      roomId: 'room-1',
+      accountUserId: 202,
+      request: {
+        proposalId: 'proposal-unrelated',
+        expectedRoomEpoch: 'epoch-1',
+        baseRevision: 0,
+        changes: [{
+          changeId: 'story-1',
+          type: 'setStoryLength' as const,
+          value: 'long' as const,
+          expectedBase: { kind: 'value' as const, value: { storyLength: 'standard' as const, customStoryLength: null } },
+        }],
+      },
+    });
+    await harness.service.resolve({
+      roomId: 'room-1',
+      proposalId: 'proposal-unrelated',
+      accountUserId: 101,
+      request: {
+        expectedRoomEpoch: 'epoch-1',
+        resolution: 'accept-selected',
+        selectedChangeIds: ['story-1'],
+      },
+    });
+    const advanced = harness.store.state?.snapshot.revision ?? -1;
+    expect(advanced).toBeGreaterThan(0);
+
+    // 房主的 expectedRevision 诊断值已经落后，但 guidance 的 expectedBase
+    // 与当前值一致：提案应在最新状态上安全合并，而不是被 revision veto 拦截。
+    await expect(harness.service.resolve({
+      roomId: 'room-1',
+      proposalId: 'proposal-behind',
+      accountUserId: 101,
+      request: {
+        expectedRoomEpoch: 'epoch-1',
+        expectedRevision: 0,
+        resolution: 'accept-selected',
+        selectedChangeIds: ['guidance-1'],
+      },
+    })).resolves.toMatchObject({ status: 'accepted' });
+    expect(harness.store.state?.snapshot.proposals).toHaveLength(0);
   });
 
   it('old epoch, wrong roles and foreign withdraw all fail before mutation', async () => {

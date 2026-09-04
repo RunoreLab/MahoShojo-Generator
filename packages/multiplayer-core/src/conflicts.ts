@@ -51,6 +51,60 @@ const currentAssignment = (config: ArenaRoomSharedConfig, combatantKey: string):
   return null;
 };
 
+/**
+ * The semantic value a change intends to produce once applied. Compared with
+ * the current semantic value this detects "another mutation already achieved
+ * this change" (postcondition satisfied), which is a safe no-op rather than a
+ * conflict.
+ */
+const proposedSemanticValue = (change: ArenaProposalChange): SemanticValue => {
+  switch (change.type) {
+    case 'addCombatant':
+      return reference(change.ref, canonicalResourceKey(change.ref.id, change.key));
+    case 'removeCombatant':
+    case 'removeAuxScenario':
+    case 'removeMaterial':
+    case 'removeTeam':
+      return absent();
+    case 'setCharacterGuidance':
+      return value(change.value);
+    case 'assignTeam':
+      return value(change.teamKey);
+    case 'addTeam':
+      return reference({ key: change.teamKey, displayName: change.displayName, combatantKeys: [] });
+    case 'renameTeam':
+      return value(change.value);
+    case 'reorderCombatants':
+      return value(change.value);
+    case 'reorderTeams':
+      return value(change.value);
+    case 'reorderTeamCombatants':
+      return value(change.value);
+    case 'setBattleMode':
+      return value(change.value);
+    case 'setSelectedLanguage':
+      return value(change.value);
+    case 'setScenario':
+      return change.ref === null
+        ? reference(null)
+        : reference(change.ref, canonicalResourceKey(change.ref.id, change.key));
+    case 'addAuxScenario':
+      return reference(change.ref, canonicalResourceKey(change.ref.id, change.key));
+    case 'reorderAuxScenarios':
+      return value(change.value);
+    case 'addMaterial':
+      return reference(change.ref, canonicalResourceKey(change.ref.id, change.key));
+    case 'reorderMaterials':
+      return value(change.value);
+    case 'setUserGuidance':
+      return value(change.value);
+    case 'setStoryLength':
+      return value({ storyLength: change.value, customStoryLength: change.customStoryLength ?? null });
+    case 'setHistorySettings':
+      return value(change.value);
+  }
+};
+
 const currentSemanticValue = (config: ArenaRoomSharedConfig, change: ArenaProposalChange): SemanticValue => {
   switch (change.type) {
     case 'addCombatant': {
@@ -181,19 +235,26 @@ const conflictFor = (
     : 'current semantic value does not satisfy expectedBase',
 });
 
-const compare = (change: ArenaProposalChange, current: SemanticValue): ArenaProposalConflict | null => {
-  const expected = change.expectedBase;
-  if (expected.kind === 'absent') {
-    return current.kind === 'absent' ? null : conflictFor(change, 'precondition-failed', current);
-  }
-  if (expected.kind === 'value') {
-    return current.kind === 'value' && deepEqual(expected.value, current.value)
-      ? null
-      : conflictFor(change, 'precondition-failed', current);
-  }
-  const expectedRef = expected.kind === 'ref' ? expected.ref : expected.ref;
-  if (current.kind !== 'ref') return conflictFor(change, 'precondition-failed', current);
-  const expectedKey = 'key' in expected
+type SemanticMatchFailure = 'kind' | 'key' | 'drift' | 'value';
+
+type SemanticMatchResult =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly reason: SemanticMatchFailure };
+
+type ExpectedSemanticValue =
+  | { readonly kind: 'absent' }
+  | { readonly kind: 'value'; readonly value: unknown }
+  | { readonly kind: 'present' | 'ref'; readonly ref: unknown; readonly key?: string; readonly targetKey?: string };
+
+type ReferenceSemanticValue = Extract<ExpectedSemanticValue, { readonly ref: unknown }>;
+
+const refMatchesExpected = (
+  expected: ReferenceSemanticValue,
+  current: SemanticValue,
+): SemanticMatchResult => {
+  const expectedRef = expected.ref;
+  if (current.kind !== 'ref') return { ok: false, reason: 'kind' };
+  const expectedKey = 'key' in expected && typeof expected.key === 'string'
     ? expected.key
     : expectedRef && typeof expectedRef === 'object' && 'id' in expectedRef
         ? canonicalResourceKey((expectedRef as { id: string }).id)
@@ -203,44 +264,123 @@ const compare = (change: ArenaProposalChange, current: SemanticValue): ArenaProp
           ? (expectedRef as { key: string }).key
           : undefined;
   if (expectedKey !== undefined && current.targetKey !== expectedKey) {
-    return conflictFor(change, 'precondition-failed', current);
+    return { ok: false, reason: 'key' };
   }
-  if (hasVersionDrift(expectedRef, current.ref)) return conflictFor(change, 'reference-changed', current);
-  return deepEqual(expectedRef, current.ref) ? null : conflictFor(change, 'precondition-failed', current);
+  if (hasVersionDrift(expectedRef, current.ref)) return { ok: false, reason: 'drift' };
+  return deepEqual(expectedRef, current.ref) ? { ok: true } : { ok: false, reason: 'value' };
 };
 
-/** Compares each change's typed expectedBase to the current semantic target. */
-export const detectProposalConflicts = (
+const semanticMatches = (
+  expected: ExpectedSemanticValue,
+  current: SemanticValue,
+): SemanticMatchResult => {
+  if (expected.kind === 'absent') {
+    return current.kind === 'absent' ? { ok: true } : { ok: false, reason: 'kind' };
+  }
+  if (expected.kind === 'value') {
+    return current.kind === 'value' && deepEqual(expected.value, current.value)
+      ? { ok: true }
+      : { ok: false, reason: 'value' };
+  }
+  return refMatchesExpected(expected, current);
+};
+
+/**
+ * Three-way merge semantics for one change:
+ * - CURRENT == BASE -> applicable as proposed;
+ * - CURRENT == PROPOSED -> already satisfied by another mutation, a safe no-op;
+ * - otherwise -> a real conflict that the host must review.
+ */
+const compare = (
+  change: ArenaProposalChange,
+  current: SemanticValue,
+): ArenaProposalConflict | { readonly satisfied: true } | null => {
+  const baseResult = semanticMatches(change.expectedBase, current);
+  if (baseResult.ok) return null;
+  if (semanticMatches(proposedSemanticValue(change), current).ok) {
+    return { satisfied: true };
+  }
+  return conflictFor(
+    change,
+    baseResult.reason === 'drift' ? 'reference-changed' : 'precondition-failed',
+    current,
+  );
+};
+
+export type ArenaProposalChangeOutcome =
+  | 'applicable'
+  | 'satisfied'
+  | 'conflict'
+  | 'invalid-change'
+  | 'unselected';
+
+export interface ArenaProposalChangeAnalysis {
+  readonly changeId: string;
+  readonly target: string;
+  readonly outcome: ArenaProposalChangeOutcome;
+  readonly conflict?: ArenaProposalConflict;
+}
+
+/**
+ * Staged-independent per-change analysis. Callers that need dependency-aware
+ * results (add combatant -> guidance on the added combatant) must run this on
+ * each staged intermediate state, like applyArenaProposal does.
+ */
+export const analyzeProposalChanges = (
   currentInput: unknown,
   changesInput: unknown,
-): ArenaProposalConflict[] => {
+): ArenaProposalChangeAnalysis[] => {
   const current = parseArenaRoomSharedConfig(currentInput);
   if (!Array.isArray(changesInput)) {
     return [{
       changeId: 'unknown',
-      code: 'invalid-change',
       target: 'proposal',
-      message: 'changes must be an array',
+      outcome: 'invalid-change',
+      conflict: {
+        changeId: 'unknown',
+        code: 'invalid-change',
+        target: 'proposal',
+        message: 'changes must be an array',
+      },
     }];
   }
-  const conflicts: ArenaProposalConflict[] = [];
+  const analyses: ArenaProposalChangeAnalysis[] = [];
   for (const item of changesInput) {
     const parsed = ArenaProposalChangeSchema.safeParse(item);
     if (!parsed.success) {
       const changeId = item && typeof item === 'object' && !Array.isArray(item) && 'changeId' in item && typeof item.changeId === 'string'
         ? item.changeId
         : 'unknown';
-      conflicts.push({
+      analyses.push({
         changeId,
-        code: 'invalid-change',
         target: 'proposal',
-        message: 'change does not satisfy ArenaProposalChangeSchema',
+        outcome: 'invalid-change',
+        conflict: {
+          changeId,
+          code: 'invalid-change',
+          target: 'proposal',
+          message: 'change does not satisfy ArenaProposalChangeSchema',
+        },
       });
       continue;
     }
     const change = parsed.data;
-    const conflict = compare(change, currentSemanticValue(current, change));
-    if (conflict) conflicts.push(conflict);
+    const target = targetOf(change);
+    const result = compare(change, currentSemanticValue(current, change));
+    analyses.push(result === null
+      ? { changeId: change.changeId, target, outcome: 'applicable' }
+      : 'satisfied' in result
+        ? { changeId: change.changeId, target, outcome: 'satisfied' }
+        : { changeId: change.changeId, target, outcome: 'conflict', conflict: result });
   }
-  return conflicts;
+  return analyses;
 };
+
+/** Compares each change's typed expectedBase to the current semantic target. */
+export const detectProposalConflicts = (
+  currentInput: unknown,
+  changesInput: unknown,
+): ArenaProposalConflict[] => (
+  analyzeProposalChanges(currentInput, changesInput)
+    .flatMap((analysis) => (analysis.outcome === 'conflict' && analysis.conflict ? [analysis.conflict] : []))
+);

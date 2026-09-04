@@ -547,9 +547,11 @@ const resolveProposal = (
 ): ArenaRoomTransitionResult => {
   const authorization = requireRole(state, context, 'host');
   if (authorization) return authorization;
-  if (command.expectedRevision !== state.snapshot.revision) {
-    return transitionFailure('stale', 'room-revision-mismatch');
-  }
+  // No global exact-revision fence here on purpose: the authoritative apply
+  // below re-runs the dependency-ordered typed expectedBase merge against the
+  // latest state inside this single atomic transition. A proposal whose bases
+  // still match (or are already satisfied) merges safely even after unrelated
+  // revisions; only genuine per-target conflicts fail closed.
   const proposalIndex = state.snapshot.proposals.findIndex((item) => item.proposalId === command.proposalId);
   if (proposalIndex < 0) {
     return state.terminalProposalIds.includes(command.proposalId)

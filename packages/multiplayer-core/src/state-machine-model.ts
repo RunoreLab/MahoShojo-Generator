@@ -507,7 +507,11 @@ export const SubmitArenaRoomProposalCommandSchema = z.object({
 export const ResolveArenaRoomProposalCommandSchema = z.object({
   type: z.literal('resolve-proposal'),
   ...epochCommand,
-  expectedRevision: RoomRevisionSchema,
+  // Diagnostic only: the authoritative apply re-runs the staged typed
+  // expectedBase merge on the latest state inside one atomic transition, so a
+  //Proposal merged after unrelated revisions is still safe. Keeping the field
+  // optional preserves older request payloads for diagnostics.
+  expectedRevision: RoomRevisionSchema.optional(),
   proposalId: OpaqueKeySchema,
   resolution: z.enum(['accept-selected', 'reject']),
   selectedChangeIds: z.array(OpaqueKeySchema).max(MAX_PROPOSAL_CHANGES).optional(),

@@ -123,7 +123,11 @@ export const ArenaRoomProposalSubmitRequestSchema = z.object({
 
 export const ArenaRoomProposalResolveRequestSchema = z.object({
   expectedRoomEpoch: OpaqueKeySchema,
-  expectedRevision: RoomRevisionSchema,
+  // Diagnostic only. The authority re-runs the staged typed expectedBase merge
+  // on the latest shared config inside one atomic transition, so resolving a
+  // proposal after unrelated revisions is safe; only genuine per-target
+  // conflicts are rejected. Older clients still send this field.
+  expectedRevision: RoomRevisionSchema.optional(),
   resolution: z.enum(['accept-selected', 'reject']),
   selectedChangeIds: z.array(OpaqueKeySchema).max(MAX_PROPOSAL_CHANGES).optional(),
 }).strict().superRefine((request, context) => {

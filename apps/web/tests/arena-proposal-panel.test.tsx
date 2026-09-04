@@ -331,7 +331,13 @@ describe('Arena Proposal panel real React interactions', () => {
     expect(container.textContent).toContain('提案基准：');
     expect(container.textContent).toContain('当前房间值：');
     expect(container.textContent).toContain('建议值：');
-    expect(container.textContent).toContain('与当前房间修改冲突');
+    // 真冲突（当前值既不等于基准也不等于提案值）仍会红字提示并给出操作指引。
+    expect(container.textContent).toContain('该目标的当前值已与提案基准不一致');
+    expect(container.textContent).toContain('可取消勾选该项，其余变更仍可接受');
+    // 当前房间没有 team:a：移除目标已被满足，显示为安全跳过而非冲突。
+    expect(container.textContent).toContain('已由其他修改满足');
+    expect(container.querySelector('[data-change-outcome="satisfied"]')).not.toBeNull();
+    expect(container.querySelector('[data-conflict-code]')).not.toBeNull();
     expect(container.textContent).toContain('新增队伍 B 队');
     expect(container.textContent).toContain('移除队伍 team:a');
     expect(container.textContent).toContain('队伍 team:c 改名为 C 队新名');
