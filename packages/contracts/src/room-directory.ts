@@ -1,6 +1,7 @@
 import { z } from './zod';
 
 import { IsoTimestampSchema, OpaqueKeySchema } from './primitives';
+import { MAX_ROOM_MEMBERS } from './limits';
 
 export const MAX_ROOM_DIRECTORY_TITLE_LENGTH = 80;
 export const MAX_ROOM_DIRECTORY_CURSOR_LENGTH = 512;
@@ -23,6 +24,10 @@ export const RoomDirectoryEntrySchema = z.object({
   status: RoomDirectoryStatusSchema,
   createdAt: IsoTimestampSchema,
   lastActivityAt: IsoTimestampSchema,
+  // 以下为 projection 期可选增强字段（旧 API 不返回也合法，便于 Web/API 滚动部署）：
+  hostDisplayName: z.string().trim().min(1).max(200).optional(),
+  memberCount: z.number().int().min(1).max(MAX_ROOM_MEMBERS).optional(),
+  memberLimit: z.number().int().min(1).max(MAX_ROOM_MEMBERS).optional(),
 }).strict();
 
 export const RoomDirectoryPageQuerySchema = z.object({

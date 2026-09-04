@@ -82,6 +82,9 @@ describe('Arena Room Redis-only directory service', () => {
         status: 'open',
         createdAt: '2026-08-28T00:00:00.000Z',
         lastActivityAt: '2026-08-28T00:00:00.000Z',
+        hostDisplayName: 'Host',
+        memberCount: 1,
+        memberLimit: 16,
       }],
       nextCursor: null,
     });

@@ -239,13 +239,27 @@ describe('Arena multiplayer production client/hook wiring', () => {
     expect(WiringSocket.instances).toHaveLength(0);
   });
 
-  it('大厅对话框提供两种玩法提示与玩法说明百科直达链接', async () => {
+  it('大厅对话框提供两种玩法提示、玩法说明链接与房间元信息', async () => {
     const fetcher = vi.fn<typeof fetch>(async (input) => {
       const url = String(input);
       if (url.endsWith('/languages.json')) return Response.json([]);
       if (requestPath(url) === '/api/auth/verify') return Response.json({ success: false });
       if (requestPath(url) === '/api/arena/rooms/v1') {
-        return Response.json({ protocolVersion: 1, items: [], nextCursor: null });
+        // 注意：目录页面响应与 RoomDirectoryPageSchema（strict）完全一致，无 protocolVersion。
+        return Response.json({
+          items: [{
+            roomId: 'room-public-1',
+            title: '欢迎加入',
+            visibility: 'public',
+            status: 'open',
+            createdAt: '2026-09-04T00:00:00.000Z',
+            lastActivityAt: new Date().toISOString(),
+            hostDisplayName: 'Alice',
+            memberCount: 3,
+            memberLimit: 16,
+          }],
+          nextCursor: null,
+        });
       }
       throw new Error(`unexpected Room request: ${url}`);
     });
@@ -257,6 +271,11 @@ describe('Arena multiplayer production client/hook wiring', () => {
 
     expect(document.body.textContent).toContain('两种最简单的玩法');
     expect(document.body.textContent).toContain('多人跑团');
+    // 公开房间目录的丰富元信息（回归：只有标题和 UUID 的调试式列表）
+    expect(document.body.textContent).toContain('欢迎加入');
+    expect(document.body.textContent).toContain('房主：Alice');
+    expect(document.body.textContent).toContain('3/16 人');
+    expect(document.body.textContent).toMatch(/前活跃|刚刚活跃/);
     const guideLink = [...document.body.querySelectorAll('a')]
       .find((candidate) => candidate.getAttribute('href') === '/encyclopedia/arena-multiplayer#两种最简单的玩法');
     expect(guideLink).not.toBeUndefined();
@@ -327,6 +346,7 @@ describe('Arena multiplayer production client/hook wiring', () => {
         // 会话以 ready 结束后自动回到大厅并刷新公开房间列表（回归：显示暂无公开房间）
         '/api/arena/rooms/v1',
       ]);
+      expect(document.body.textContent).toContain('两种最简单的玩法');
       expect(document.body.textContent).toContain('两种最简单的玩法');
       expect(JSON.parse(String(roomCalls[4]?.init?.body))).toEqual({
         expectedRoomEpoch: 'epoch-1',

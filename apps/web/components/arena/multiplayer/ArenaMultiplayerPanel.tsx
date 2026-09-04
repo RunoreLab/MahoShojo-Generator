@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
 
-import type { RoomDirectoryVisibility } from '@mahoshojo/contracts/arena-room';
+import { MAX_ROOM_MEMBERS, type RoomDirectoryVisibility } from '@mahoshojo/contracts/arena-room';
 
 import type { ArenaRoomControllerState } from '@/lib/arena-room/controller';
 import type { ArenaRoomPanelUi } from './useArenaRoom';
@@ -80,6 +80,17 @@ const secondaryButtonClass = `${buttonClass} border-gray-300 bg-white text-gray-
 const inputClass = 'w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fuchsia-500 dark:border-gray-600 dark:bg-gray-950 dark:text-gray-100';
 
 const MULTIPLAYER_GUIDE_HREF = '/encyclopedia/arena-multiplayer';
+
+const formatRoomActivityTime = (iso: string): string => {
+  const timestamp = Date.parse(iso);
+  if (!Number.isFinite(timestamp)) return '';
+  const deltaMinutes = Math.max(0, Math.round((Date.now() - timestamp) / 60_000));
+  if (deltaMinutes < 1) return '刚刚活跃';
+  if (deltaMinutes < 60) return `${deltaMinutes} 分钟前活跃`;
+  const deltaHours = Math.floor(deltaMinutes / 60);
+  if (deltaHours < 24) return `${deltaHours} 小时前活跃`;
+  return `${Math.floor(deltaHours / 24)} 天前活跃`;
+};
 
 const StatusNotice = ({ state }: { readonly state: ArenaRoomControllerState }) => {
   const session = state.phase === 'closed' || state.phase === 'replacement'
@@ -217,17 +228,27 @@ const ArenaRoomLobbyDialog = ({
               <p className="mt-3 text-sm text-gray-600 dark:text-gray-400">暂无公开房间</p>
             ) : (
               <ul className="mt-3 grid max-h-64 gap-2 overflow-y-auto pr-1 sm:grid-cols-2" aria-label="公开房间列表">
-                {state.rooms.map((room) => (
-                  <li key={room.roomId} className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white/80 p-3 dark:border-gray-700 dark:bg-gray-900/70">
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-medium text-gray-950 dark:text-gray-100">{room.title}</p>
-                      <p className="truncate font-mono text-xs text-gray-600 dark:text-gray-400">{room.roomId}</p>
-                    </div>
-                    <button type="button" className={secondaryButtonClass} disabled={busy} onClick={() => onJoin(room.roomId)}>
-                      加入
-                    </button>
-                  </li>
-                ))}
+                {state.rooms.map((room) => {
+                  const metaParts = [
+                    room.hostDisplayName ? `房主：${room.hostDisplayName}` : null,
+                    room.memberCount ? `${room.memberCount}/${room.memberLimit ?? MAX_ROOM_MEMBERS} 人` : null,
+                    formatRoomActivityTime(room.lastActivityAt),
+                  ].filter((part): part is string => Boolean(part));
+                  return (
+                    <li key={room.roomId} className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white/80 p-3 dark:border-gray-700 dark:bg-gray-900/70">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium text-gray-950 dark:text-gray-100">{room.title}</p>
+                        <p className="truncate font-mono text-xs text-gray-600 dark:text-gray-400">{room.roomId}</p>
+                        {metaParts.length > 0 ? (
+                          <p className="truncate text-xs text-gray-600 dark:text-gray-400">{metaParts.join(' · ')}</p>
+                        ) : null}
+                      </div>
+                      <button type="button" className={secondaryButtonClass} disabled={busy} onClick={() => onJoin(room.roomId)}>
+                        加入
+                      </button>
+                    </li>
+                  );
+                })}
               </ul>
             )}
             {state.directoryNextCursor ? (
