@@ -277,8 +277,10 @@ const resolveAuthoritySession = (
   };
 };
 
+// 服务器给房主 45 分钟离线宽限；客户端的重连预算也应对齐「秒级服务抖动不毁房间」的
+// 产品语义：默认 8 次指数退避（约 40 秒恢复窗口），耗尽后才进入 replacement 熔断。
 const defaultReconnectDelay = (attempt: number): number => (
-  Math.min(4_000, 500 * (2 ** Math.max(0, attempt - 1)))
+  Math.min(8_000, 500 * (2 ** Math.max(0, attempt - 1)))
 );
 
 const replaceMember = (
@@ -399,7 +401,7 @@ const reduceGenerationControl = (
 export const createArenaRoomController = (
   options: ArenaRoomControllerOptions,
 ): ArenaRoomController => {
-  const maxReconnectAttempts = options.maxReconnectAttempts ?? 3;
+  const maxReconnectAttempts = options.maxReconnectAttempts ?? 8;
   if (!Number.isSafeInteger(maxReconnectAttempts) || maxReconnectAttempts < 1) {
     throw new Error('maxReconnectAttempts 必须是正安全整数');
   }
@@ -1082,6 +1084,12 @@ export const createArenaRoomController = (
           return;
         }
         if (event.code === 1008 && event.reason === 'membership-revoked') {
+          if (state.session?.self.role === 'member') enterMembershipRevoked();
+          else enterReplacement();
+          return;
+        }
+        if (event.code === 1008 && event.reason === 'room-authority-fenced') {
+          // 服务器侧 authority 已 fence：房间实例对本进程不可恢复，重连也无法回到原房间。
           if (state.session?.self.role === 'member') enterMembershipRevoked();
           else enterReplacement();
           return;

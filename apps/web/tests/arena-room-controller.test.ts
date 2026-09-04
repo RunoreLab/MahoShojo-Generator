@@ -1424,6 +1424,24 @@ describe('Arena Room browser controller', () => {
     });
   });
 
+  it('1008 room-authority-fenced 按终态处理，直接进入 replacement 而不消耗重连预算', async () => {
+    const harness = createHarness();
+    await harness.controller.create({
+      displayName: '房主',
+      directory: { title: '测试房', visibility: 'public' },
+      sharedConfig,
+    });
+    harness.sockets[0]!.open();
+    harness.sockets[0]!.closed(1008, 'room-authority-fenced');
+
+    expect(harness.controller.getSnapshot()).toMatchObject({
+      phase: 'replacement',
+      session: null,
+      notice: '原房间无法恢复，请房主创建新房间',
+    });
+    expect(harness.client.issueTicket).toHaveBeenCalledTimes(1);
+  });
+
   it('post-open 1013 不清零跨连接预算，重连最终有界熔断', async () => {
     const { client, controller, runNextTimer, sockets } = createHarness();
     await controller.create({
