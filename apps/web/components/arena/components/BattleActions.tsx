@@ -123,7 +123,7 @@ export function BattleActions({ showAdvancedUtilities = true }: { showAdvancedUt
     : { inRoom: false, canStart: true, canRetry: false, reason: null } as const;
   const roomPanel = arenaRoomRuntime?.panelUi ?? null;
   const roomSession = arenaRoomRuntime?.state.session ?? null;
-  const isRoomHost = roomSession?.self.role === 'host' ?? false;
+  const isRoomHost = roomSession?.self.role === 'host';
   const pendingProposalCount = isRoomHost && roomSession
     ? roomSession.snapshot.proposals.length
     : 0;
