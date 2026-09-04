@@ -10,7 +10,10 @@ import {
   type ArenaMultiplayerPanelProps,
 } from '@/components/arena/multiplayer/ArenaMultiplayerPanel';
 import { ArenaEditorWorkspaceBoundary } from '@/components/arena/multiplayer/ArenaRoomProposalWorkspace';
-import { ArenaRoomProvider } from '@/components/arena/multiplayer/useArenaRoom';
+import {
+  ArenaRoomProvider,
+  useArenaRoomContext,
+} from '@/components/arena/multiplayer/useArenaRoom';
 import { useBattleStore } from '@/components/arena/stores/useBattleStore';
 import { authStorage } from '@/lib/auth';
 
@@ -121,6 +124,21 @@ const props = {
 };
 
 const requestPath = (input: string): string => new URL(input, 'http://test.local').pathname;
+
+const PanelUiProbe = () => {
+  const runtime = useArenaRoomContext();
+  if (!runtime) return null;
+  return (
+    <>
+      <button type="button" onClick={() => runtime.panelUi.setProposalsOpen(true)}>
+        probe-open-proposals
+      </button>
+      <button type="button" onClick={() => runtime.panelUi.setConfigOpen(true)}>
+        probe-open-config
+      </button>
+    </>
+  );
+};
 
 const productionTree = (panelProps: ArenaMultiplayerPanelProps) => (
   <ArenaRoomProvider
@@ -366,6 +384,56 @@ describe('Arena multiplayer production client/hook wiring', () => {
     expect(container.textContent).toContain('原房间无法恢复');
     await act(async () => button('返回房间大厅').click());
     expect(container.textContent).toContain('打开多人房间');
+  });
+
+  it('panelUi 桥接：runtime 外部入口可打开房主配置/提案 Modal（回归：底部大按钮共享状态）', async () => {
+    const fetcher = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input);
+      if (requestPath(url) === '/api/arena/rooms/v1') {
+        return Response.json({ protocolVersion: 1, items: [], nextCursor: null });
+      }
+      if (url.endsWith('/join')) return Response.json(sessionFor('host'));
+      if (url.endsWith('/generations')) {
+        return Response.json({ protocolVersion: 1, roomId: 'room-1', roomEpoch: 'epoch-1', items: [] });
+      }
+      if (url.endsWith('/ticket')) {
+        return Response.json({
+          protocolVersion: 1,
+          ticket: 'ticket-1',
+          expiresInSeconds: 45,
+          websocket: {
+            path: '/api/arena/rooms/v1/ws',
+            protocol: 'mahoshojo.arena-room.v1',
+          },
+        });
+      }
+      throw new Error(`unexpected Room request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetcher);
+    await act(async () => root.render(
+      <ArenaRoomProvider
+        enabled={props.enabled}
+        authenticated={props.isAuthenticated && !props.authLoading}
+        origin={props.origin}
+      >
+        <QueryClientProvider client={queryClient}>
+          <PanelUiProbe />
+          <ArenaMultiplayerContextPanel {...props} />
+        </QueryClientProvider>
+      </ArenaRoomProvider>,
+    ));
+    await flush();
+    await enterJoinCode();
+    await act(async () => button('加入房间').click());
+    await flush();
+
+    expect(document.body.textContent).not.toContain('成员在主编辑区编辑，房主在此逐项审阅配置变更。');
+    await act(async () => button('probe-open-proposals').click());
+    await flush();
+    expect(document.body.textContent).toContain('成员在主编辑区编辑，房主在此逐项审阅配置变更。');
+    await act(async () => button('probe-open-config').click());
+    await flush();
+    expect(document.body.textContent).toContain('主编辑区继续作为 Arena 配置的唯一编辑入口。');
   });
 
   it('member 通过 production panel/client/WSS 提交并撤回，HTTP ack 不越权修改 snapshot', async () => {

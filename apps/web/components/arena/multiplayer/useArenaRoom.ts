@@ -56,6 +56,18 @@ export type ArenaRoomGenerationHistoryReader = Readonly<{
   read(generationId: string): Promise<ArenaRoomGenerationHistoryViewResponse>;
 }>;
 
+/**
+ * 房间面板 UI 桥：房间配置/提案 Modal 的开关状态放在页面级 runtime 上，
+ * 供顶部入口（ArenaMultiplayerPanelView）与底部大按钮（BattleActions）共享，
+ * 避免复制两套 modal state 和业务逻辑。
+ */
+export type ArenaRoomPanelUi = Readonly<{
+  configOpen: boolean;
+  proposalsOpen: boolean;
+  setConfigOpen(open: boolean): void;
+  setProposalsOpen(open: boolean): void;
+}>;
+
 export const useArenaRoom = (options: UseArenaRoomOptions) => {
   const { client, controller, hostWorkspace } = useMemo(() => {
     const client = createArenaRoomClient({ origin: options.origin });
@@ -74,6 +86,10 @@ export const useArenaRoom = (options: UseArenaRoomOptions) => {
   const lifecycle = useRef<LifecycleToken | null>(null);
   const proposalEditorRef = useRef<RoomProposalArenaEditorSession | null>(null);
   const [proposalEditor, setProposalEditor] = useState<RoomProposalArenaEditorSession | null>(null);
+  const [panelUiState, setPanelUiState] = useState<{ configOpen: boolean; proposalsOpen: boolean }>({
+    configOpen: false,
+    proposalsOpen: false,
+  });
 
   useEffect(() => {
     controller.setAccess({
@@ -207,6 +223,17 @@ export const useArenaRoom = (options: UseArenaRoomOptions) => {
     enabled: state.generation.phase === 'idle' && !state.generation.markdown,
   });
 
+  const panelUi = useMemo<ArenaRoomPanelUi>(() => Object.freeze({
+    configOpen: panelUiState.configOpen,
+    proposalsOpen: panelUiState.proposalsOpen,
+    setConfigOpen: (open: boolean) => {
+      setPanelUiState((current) => ({ ...current, configOpen: open }));
+    },
+    setProposalsOpen: (open: boolean) => {
+      setPanelUiState((current) => ({ ...current, proposalsOpen: open }));
+    },
+  }), [panelUiState]);
+
   return {
     controller,
     state,
@@ -215,6 +242,7 @@ export const useArenaRoom = (options: UseArenaRoomOptions) => {
     proposalWorkspace,
     generationHistory,
     latestGenerationHistory,
+    panelUi,
   };
 };
 

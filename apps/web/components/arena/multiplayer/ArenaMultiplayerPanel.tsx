@@ -1,11 +1,12 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
 
 import type { RoomDirectoryVisibility } from '@mahoshojo/contracts/arena-room';
 
 import type { ArenaRoomControllerState } from '@/lib/arena-room/controller';
+import type { ArenaRoomPanelUi } from './useArenaRoom';
 import {
   createArenaRoomCanonicalEmptyDraftBundle,
   tryBuildArenaRoomHostWorkspaceBundleFromBattleState,
@@ -52,6 +53,8 @@ export type ArenaMultiplayerPanelViewProps = {
   readonly proposalWorkspaceActive?: boolean;
   readonly localConfigSyncIssues?: readonly ArenaRoomShareabilityIssue[];
   readonly generationHistoryCount?: number;
+  /** 受控模式：底部大按钮等外部入口通过 runtime.panelUi 共享 Modal 开关。 */
+  readonly hostPanelUi?: ArenaRoomPanelUi;
   readonly roomTitle: string;
   readonly visibility: RoomDirectoryVisibility;
   readonly joinCode: string;
@@ -353,8 +356,18 @@ export const ArenaRoomGenerationResult = ({ state, onSaveImage }: {
 export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps) {
   const { state } = props;
   const [lobbyOpen, setLobbyOpen] = useState(false);
-  const [configOpen, setConfigOpen] = useState(false);
-  const [proposalsOpen, setProposalsOpen] = useState(false);
+  const [localConfigOpen, setLocalConfigOpen] = useState(false);
+  const [localProposalsOpen, setLocalProposalsOpen] = useState(false);
+  const configOpen = props.hostPanelUi ? props.hostPanelUi.configOpen : localConfigOpen;
+  const proposalsOpen = props.hostPanelUi ? props.hostPanelUi.proposalsOpen : localProposalsOpen;
+  const setConfigOpen = useCallback((open: boolean): void => {
+    if (props.hostPanelUi) props.hostPanelUi.setConfigOpen(open);
+    else setLocalConfigOpen(open);
+  }, [props.hostPanelUi]);
+  const setProposalsOpen = useCallback((open: boolean): void => {
+    if (props.hostPanelUi) props.hostPanelUi.setProposalsOpen(open);
+    else setLocalProposalsOpen(open);
+  }, [props.hostPanelUi]);
   const [generationHistoryOpen, setGenerationHistoryOpen] = useState(false);
   const [roomOpen, setRoomOpen] = useState(false);
   const [copiedKind, setCopiedKind] = useState<'room-id' | 'invite' | null>(null);
@@ -381,7 +394,7 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
   onDiscoverRef.current = props.onDiscover;
   useEffect(() => {
     if (props.proposalWorkspaceActive) setProposalsOpen(false);
-  }, [props.proposalWorkspaceActive]);
+  }, [props.proposalWorkspaceActive, setProposalsOpen]);
   useEffect(() => {
     const hadSession = hadSessionRef.current;
     hadSessionRef.current = Boolean(session);
@@ -905,6 +918,8 @@ function ArenaMultiplayerPanelRuntime({
   const [localConfigSyncIssues, setLocalConfigSyncIssues] = useState<readonly ArenaRoomShareabilityIssue[]>([]);
   const [preparingCreate, setPreparingCreate] = useState(false);
   const createLock = useRef(false);
+  const runtime = useArenaRoomContext();
+  const panelUi = runtime?.panelUi;
   const viewState = inputError ? { ...state, error: inputError } : state;
   const generationHistoryScope = viewState.session
     ? `${viewState.session.roomId}\n${viewState.session.roomEpoch}\n${viewState.session.self.userId}`
@@ -971,6 +986,7 @@ function ArenaMultiplayerPanelRuntime({
         || hostReconciliation.state.kind === 'error'
         ? 'attention'
         : hostReconciliation.state.kind}
+      hostPanelUi={panelUi}
       proposalWorkspaceActive={Boolean(proposalWorkspace.editor)}
       localConfigSyncIssues={localConfigSyncIssues}
       generationHistoryCount={latestGenerationHistory.completedCount}

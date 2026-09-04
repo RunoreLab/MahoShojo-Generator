@@ -200,11 +200,13 @@ const flush = async () => {
 
 /** 自动重试使用 setTimeout(0)（宏任务），flush 的微任务排空覆盖不到。 */
 const flushWithMacrotasks = async () => {
-  await act(async () => {
-    await new Promise<void>((resolve) => setTimeout(resolve, 5));
-    await Promise.resolve();
-    await Promise.resolve();
-  });
+  for (let round = 0; round < 5; round += 1) {
+    await act(async () => {
+      await new Promise<void>((resolve) => setTimeout(resolve, 5));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+  }
 };
 
 const renderState = async (state: ArenaRoomControllerState, workspace: ArenaRoomHostWorkspace) => {

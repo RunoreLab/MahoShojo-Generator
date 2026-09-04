@@ -222,8 +222,15 @@ describe('Arena multiplayer panel accessibility/permissions', () => {
     expect(memberHtml).not.toContain('关闭房间');
   });
 
-  it('仅向房主显示待处理提案数字 badge', () => {
-    const proposal = {
+  it('会话内提供复制房间码/复制邀请入口', () => {
+    const html = render({ ...readyState, phase: 'connected', session });
+    expect(html).toContain('复制房间码');
+    expect(html).toContain('复制邀请');
+    expect(html).toContain('aria-label="复制房间码 room-1"');
+    expect(html).toContain('aria-label="复制房间邀请文案"');
+  });
+
+  it('仅向房主显示待处理提案数字 badge', () => {    const proposal = {
       proposalVersion: 1 as const,
       proposalId: 'proposal-pending-1',
       roomId: 'room-1',

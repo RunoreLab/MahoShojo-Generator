@@ -121,6 +121,17 @@ export function BattleActions({ showAdvancedUtilities = true }: { showAdvancedUt
   const roomAction = arenaRoomRuntime
     ? resolveArenaRoomGenerationAction(arenaRoomRuntime.state)
     : { inRoom: false, canStart: true, canRetry: false, reason: null } as const;
+  const roomPanel = arenaRoomRuntime?.panelUi ?? null;
+  const roomSession = arenaRoomRuntime?.state.session ?? null;
+  const isRoomHost = roomSession?.self.role === 'host' ?? false;
+  const pendingProposalCount = isRoomHost && roomSession
+    ? roomSession.snapshot.proposals.length
+    : 0;
+  const hostConfigNeedsAttention = Boolean(arenaRoomRuntime && (
+    arenaRoomRuntime.state.configPublishResultUnknown
+    || arenaRoomRuntime.hostReconciliation?.state.kind === 'conflicted'
+    || arenaRoomRuntime.hostReconciliation?.state.kind === 'error'
+  ));
   const customProviderPayload = buildCustomProviderRequestPayload(userProviderConfig);
   const promptFundingMode = customProviderPayload?.providerId === 'system' || !customProviderPayload
     ? 'hosted-system'
@@ -290,6 +301,33 @@ export function BattleActions({ showAdvancedUtilities = true }: { showAdvancedUt
           />
         ) : null}
       </div>
+      {roomPanel && isRoomHost ? (
+        <div className="mt-2 flex items-center justify-center gap-2 flex-wrap">
+          <button
+            type="button"
+            className={`generate-button${hostConfigNeedsAttention ? ' border-amber-500' : ''}`}
+            onClick={() => roomPanel.setConfigOpen(true)}
+          >
+            {hostConfigNeedsAttention ? '房间配置（需处理）' : '房间配置'}
+          </button>
+          <button
+            type="button"
+            className="generate-button relative"
+            aria-label={pendingProposalCount > 0 ? `房间提案，${pendingProposalCount} 个待处理` : '房间提案'}
+            onClick={() => roomPanel.setProposalsOpen(true)}
+          >
+            房间提案
+            {pendingProposalCount > 0 ? (
+              <span
+                aria-hidden="true"
+                className="absolute -right-2 -top-2 inline-flex min-h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1 text-[11px] font-bold leading-none text-white ring-2 ring-white dark:ring-gray-900"
+              >
+                {pendingProposalCount > 99 ? '99+' : pendingProposalCount}
+              </span>
+            ) : null}
+          </button>
+        </div>
+      ) : null}
       {isGenerating && generationMode === 'stream' && streamSoftTimeoutWarning ? (
         <div
           className="mt-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-center text-xs text-amber-900"
