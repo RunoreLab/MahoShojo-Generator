@@ -359,6 +359,27 @@ describe('Arena Room HTTP product routes', () => {
     expect(body.error).toContain('无法重新加入');
   });
 
+  it('join 对被房主移出的成员返回可区分的 kicked 文案', async () => {
+    const dependencies = createDependencies();
+    vi.mocked(dependencies.memberships.join).mockRejectedValue(
+      new ArenaRoomMembershipError('ROOM_MEMBERSHIP_KICKED'),
+    );
+    const app = createHonoApp(config, createRedisStub(), undefined, {
+      arenaRoom: dependencies,
+    });
+
+    const response = await app.request(
+      `/api/arena/rooms/v1/${session.roomId}/join`,
+      createRequest({ displayName: '成员' }),
+    );
+
+    expect(response.status).toBe(403);
+    const body = await response.json() as { code: string; error: string };
+    expect(body.code).toBe('ROOM_FORBIDDEN');
+    expect(body.error).toContain('被房主移出');
+    expect(body.error).not.toContain('你已离开');
+  });
+
   it('多人 generation start 使用独立 12MiB 上限、strict intent 与 headers-only source context', async () => {
     const dependencies = createDependencies();
     const app = createHonoApp(config, createRedisStub(), undefined, {

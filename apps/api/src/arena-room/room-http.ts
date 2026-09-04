@@ -278,6 +278,7 @@ const mapServiceError = (context: ArenaRoomHttpContext, error: unknown): Respons
         return context.json(errorBody('ROOM_CONFLICT', '创建请求已绑定其他意图或结果已过期'), 409);
       case 'ROOM_MEMBERSHIP_NOT_ACTIVE':
       case 'ROOM_MEMBERSHIP_REVOKED':
+      case 'ROOM_MEMBERSHIP_KICKED':
       case 'ROOM_PERMISSION_DENIED':
         return context.json(errorBody('ROOM_FORBIDDEN', '没有此房间操作权限'), 403);
       case 'ROOM_REFERENCE_DENIED':
@@ -973,8 +974,16 @@ export const registerArenaRoomHttpRoutes = (
       noStore(context);
       return context.json(sessionResponse(session), 200);
     } catch (error) {
-      // leave-member 与 kick 都会 revoke 成员资格，之后 join 同一房间会得到
-      // ROOM_MEMBERSHIP_REVOKED；这里必须给出与「权限不足」可区分的明确文案。
+      // 自愿离开的成员已可通过 join 重进（rejoin），不会再到这里；REVOKED 仅剩
+      // legacy 无 reason 的 tombstone（无法区分离开/被踢，保持 fail-closed 通用
+      // 文案），KICKED 则给出可区分的精确文案。wire code 保持 ROOM_FORBIDDEN，
+      // 避免破坏 exact-match 的 v2 协商 taxonomy。
+      if (error instanceof ArenaRoomMembershipError && error.code === 'ROOM_MEMBERSHIP_KICKED') {
+        return context.json(errorBody(
+          'ROOM_FORBIDDEN',
+          '你已被房主移出此房间，无法重新加入；请联系房主或加入其他房间。',
+        ), 403);
+      }
       if (error instanceof ArenaRoomMembershipError && error.code === 'ROOM_MEMBERSHIP_REVOKED') {
         return context.json(errorBody(
           'ROOM_FORBIDDEN',

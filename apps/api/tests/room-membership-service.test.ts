@@ -543,11 +543,13 @@ describe('Arena Room membership service', () => {
       targetUserId: member.member.userId,
       expectedRoomEpoch: host.roomEpoch,
     });
+    expect(store.state?.memberAuthority.find((entry) => entry.accountUserId === 202))
+      .toMatchObject({ revocationReason: 'kicked' });
     await expect(service.join({
       roomId: 'room-1',
       accountUserId: 202,
       displayName: 'Member',
-    })).rejects.toMatchObject({ code: 'ROOM_MEMBERSHIP_REVOKED' });
+    })).rejects.toMatchObject({ code: 'ROOM_MEMBERSHIP_KICKED' });
 
     await service.leave({
       roomId: host.roomId,
@@ -555,6 +557,198 @@ describe('Arena Room membership service', () => {
       expectedRoomEpoch: host.roomEpoch,
     });
     expect(store.state?.lifecycle).toMatchObject({ status: 'closed' });
+  });
+
+  it('自愿离开后可重新加入同一房间，沿用原身份并刷新显示名与 joinedAt', async () => {
+    const { service, store } = createHarness();
+    await service.create({
+      accountUserId: 101,
+      displayName: 'Host',
+      sharedConfig: createArenaRoomState().snapshot.sharedConfig,
+    });
+    const first = await service.join({
+      roomId: 'room-1',
+      accountUserId: 202,
+      displayName: 'Member',
+    });
+    await service.leave({ roomId: 'room-1', accountUserId: 202, expectedRoomEpoch: 'epoch-1' });
+    expect(store.state?.memberAuthority.find((entry) => entry.accountUserId === 202))
+      .toMatchObject({ revocationReason: 'left' });
+
+    const rejoined = await service.join({
+      roomId: 'room-1',
+      accountUserId: 202,
+      displayName: 'Rejoined Member',
+    });
+
+    expect(rejoined.member).toMatchObject({
+      userId: first.member.userId,
+      role: 'member',
+      displayName: 'Rejoined Member',
+      membershipState: 'active',
+    });
+    expect(rejoined.member.joinedAt).not.toBe(first.member.joinedAt);
+    expect(store.state?.snapshot.members).toHaveLength(2);
+    expect(store.state?.memberAuthority).toHaveLength(2);
+    expect(store.state?.memberAuthority.find((entry) => entry.accountUserId === 202))
+      .toMatchObject({ member: { membershipState: 'active' } });
+    expect(store.state?.memberAuthority.find((entry) => entry.accountUserId === 202))
+      .not.toHaveProperty('revocationReason');
+  });
+
+  it('重进后离开前的 pending proposal 不会复活', async () => {
+    const { registry, service } = createHarness();
+    const host = await service.create({
+      accountUserId: 101,
+      displayName: 'Host',
+      sharedConfig: createArenaRoomState().snapshot.sharedConfig,
+    });
+    const author = await service.join({
+      roomId: 'room-1',
+      accountUserId: 202,
+      displayName: 'Author',
+    });
+    const actor = registry.get('room-1');
+    if (!actor) throw new Error('actor missing');
+    const submitted = await actor.execute({
+      authority: {
+        kind: 'authenticated-user',
+        actorUserId: author.member.userId,
+        accountUserId: 202,
+      },
+      command: {
+        type: 'submit-proposal',
+        expectedRoomEpoch: host.roomEpoch,
+        timestamp: '2026-08-28T00:04:00.000Z',
+        proposal: {
+          proposalVersion: 1,
+          proposalId: 'proposal-orphan',
+          roomId: 'room-1',
+          authorUserId: author.member.userId,
+          baseRevision: 0,
+          status: 'submitted',
+          changes: [{
+            changeId: 'guidance-1',
+            type: 'setUserGuidance',
+            value: '离开前提交',
+            expectedBase: { kind: 'value', value: '' },
+          }],
+          createdAt: '2026-08-28T00:04:00.000Z',
+        },
+      },
+    });
+    expect(submitted.ok).toBe(true);
+
+    await service.leave({ roomId: 'room-1', accountUserId: 202, expectedRoomEpoch: 'epoch-1' });
+    const rejoined = await service.join({
+      roomId: 'room-1',
+      accountUserId: 202,
+      displayName: 'Author',
+    });
+
+    expect(rejoined.snapshot.proposals).toEqual([]);
+    expect(registry.get('room-1')?.getSnapshot()?.terminalProposalIds).toContain('proposal-orphan');
+  });
+
+  it('leave 后被房主补踢则升级为 kicked，join 永久拒绝；kick 后重复 leave 也无法恢复', async () => {
+    const { service, store } = createHarness();
+    const host = await service.create({
+      accountUserId: 101,
+      displayName: 'Host',
+      sharedConfig: createArenaRoomState().snapshot.sharedConfig,
+    });
+    const member = await service.join({
+      roomId: 'room-1',
+      accountUserId: 202,
+      displayName: 'Member',
+    });
+
+    await service.leave({ roomId: 'room-1', accountUserId: 202, expectedRoomEpoch: 'epoch-1' });
+    await service.kick({
+      roomId: 'room-1',
+      accountUserId: 101,
+      targetUserId: member.member.userId,
+      expectedRoomEpoch: host.roomEpoch,
+    });
+    expect(store.state?.memberAuthority.find((entry) => entry.accountUserId === 202))
+      .toMatchObject({ revocationReason: 'kicked' });
+    await expect(service.join({
+      roomId: 'room-1',
+      accountUserId: 202,
+      displayName: 'Member',
+    })).rejects.toMatchObject({ code: 'ROOM_MEMBERSHIP_KICKED' });
+
+    await service.leave({ roomId: 'room-1', accountUserId: 202, expectedRoomEpoch: 'epoch-1' });
+    expect(store.state?.memberAuthority.find((entry) => entry.accountUserId === 202))
+      .toMatchObject({ revocationReason: 'kicked' });
+    await expect(service.join({
+      roomId: 'room-1',
+      accountUserId: 202,
+      displayName: 'Member',
+    })).rejects.toMatchObject({ code: 'ROOM_MEMBERSHIP_KICKED' });
+  });
+
+  it('重进重新占用成员容量额度，房间满员时拒绝重进', async () => {
+    const { service, store } = createHarness();
+    await service.create({
+      accountUserId: 101,
+      displayName: 'Host',
+      sharedConfig: createArenaRoomState().snapshot.sharedConfig,
+    });
+    const leaver = await service.join({
+      roomId: 'room-1',
+      accountUserId: 202,
+      displayName: 'Leaver',
+    });
+    for (let index = 0; index < MAX_ROOM_MEMBERS - 2; index += 1) {
+      await service.join({
+        roomId: 'room-1',
+        accountUserId: 300 + index,
+        displayName: `Filler ${index + 1}`,
+      });
+    }
+    await service.leave({ roomId: 'room-1', accountUserId: 202, expectedRoomEpoch: 'epoch-1' });
+    expect(store.state?.memberAuthority.find((entry) => entry.accountUserId === 202)?.member.userId)
+      .toBe(leaver.member.userId);
+    await service.join({
+      roomId: 'room-1',
+      accountUserId: 999,
+      displayName: 'Backfill',
+    });
+
+    await expect(service.join({
+      roomId: 'room-1',
+      accountUserId: 202,
+      displayName: 'Leaver',
+    })).rejects.toMatchObject({ code: 'ROOM_MEMBER_LIMIT_REACHED' });
+  });
+
+  it('legacy 无 reason 的 revoked tombstone 保持 fail-closed，不能重进', async () => {
+    const { service, store } = createHarness();
+    await service.create({
+      accountUserId: 101,
+      displayName: 'Host',
+      sharedConfig: createArenaRoomState().snapshot.sharedConfig,
+    });
+    await service.join({ roomId: 'room-1', accountUserId: 202, displayName: 'Member' });
+    await service.leave({ roomId: 'room-1', accountUserId: 202, expectedRoomEpoch: 'epoch-1' });
+    const record = store.state?.memberAuthority.find((entry) => entry.accountUserId === 202);
+    if (!record || !('revocationReason' in record)) throw new Error('missing tombstone');
+    delete record.revocationReason;
+
+    const recoveredRegistry = createRoomActorRegistry({
+      store,
+      now: () => Date.parse('2026-08-28T00:02:00.000Z'),
+    });
+    const recoveredService = createArenaRoomMembershipService({
+      actors: recoveredRegistry,
+      creationReceipts: store,
+    });
+    await expect(recoveredService.join({
+      roomId: 'room-1',
+      accountUserId: 202,
+      displayName: 'Member',
+    })).rejects.toMatchObject({ code: 'ROOM_MEMBERSHIP_REVOKED' });
   });
 
   it('kick 以 server host authority 与 epoch fence 决策，禁止 self/host 并对重复撤销幂等', async () => {

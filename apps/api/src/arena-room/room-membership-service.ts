@@ -15,6 +15,7 @@ import {
 import {
   projectArenaRoomSnapshotForViewer,
   type ArenaRoomAuthorityState,
+  type ArenaRoomMemberAuthorityRecord,
 } from '@mahoshojo/multiplayer-core';
 
 import {
@@ -44,6 +45,7 @@ export type ArenaRoomMembershipErrorCode =
   | 'ROOM_CREATION_REQUEST_CONFLICT'
   | 'ROOM_MEMBERSHIP_NOT_ACTIVE'
   | 'ROOM_MEMBERSHIP_REVOKED'
+  | 'ROOM_MEMBERSHIP_KICKED'
   | 'ROOM_MEMBERSHIP_TRANSITION_DENIED'
   | 'ROOM_MEMBER_LIMIT_REACHED'
   | 'ROOM_PERMISSION_DENIED'
@@ -293,6 +295,50 @@ export const createArenaRoomMembershipService = (
     };
   };
 
+  /**
+   * 自愿离开（revocationReason='left'）成员的重进：沿用原 authority record 的
+   * member userId，不消耗新的 authority history 槽位；被踢/legacy tombstone
+   * 不走此路径。并发重进已在状态机内幂等，这里仅在失败后对账一次。
+   */
+  const rejoinSession = async (
+    target: { readonly actor: RoomActor; readonly state: ArenaRoomAuthorityState },
+    record: ArenaRoomMemberAuthorityRecord,
+    accountUserId: number,
+    displayName: string,
+  ): Promise<ArenaRoomSessionView> => {
+    const result = await target.actor.execute({
+      authority: {
+        kind: 'authenticated-user',
+        actorUserId: record.member.userId,
+        accountUserId,
+      },
+      command: {
+        type: 'rejoin-member',
+        expectedRoomEpoch: target.state.snapshot.roomEpoch,
+        displayName,
+        timestamp: now(),
+      },
+    });
+    if (result.ok) {
+      const member = result.nextState.snapshot.members.find((entry) => entry.userId === record.member.userId);
+      if (!member) return fail('ROOM_MEMBERSHIP_TRANSITION_DENIED');
+      return sessionView(target.state.snapshot.roomId, result.nextState, member);
+    }
+    const current = target.actor.getSnapshot();
+    const concurrent = current && activeRecordByAccount(current, accountUserId);
+    if (current && concurrent?.member.membershipState === 'active') {
+      return sessionView(current.snapshot.roomId, current, concurrent.member);
+    }
+    if (result.reason === 'member-limit-reached') return fail('ROOM_MEMBER_LIMIT_REACHED');
+    return fail('ROOM_MEMBERSHIP_TRANSITION_DENIED');
+  };
+
+  const revokedJoinFailure = (record: ArenaRoomMemberAuthorityRecord): never => fail(
+    record.revocationReason === 'kicked'
+      ? 'ROOM_MEMBERSHIP_KICKED'
+      : 'ROOM_MEMBERSHIP_REVOKED',
+  );
+
   return Object.freeze({
     async hasCreationReceipt(input) {
       const creationRequestId = ArenaRoomCreationRequestIdSchema.safeParse(
@@ -426,8 +472,15 @@ export const createArenaRoomMembershipService = (
       }
       const initial = await recoverOpenActor(input.roomId);
       const existing = activeRecordByAccount(initial.state, input.accountUserId);
-      if (existing?.member.membershipState === 'revoked') return fail('ROOM_MEMBERSHIP_REVOKED');
-      if (existing) return sessionView(input.roomId, initial.state, existing.member);
+      if (existing?.member.membershipState === 'active') {
+        return sessionView(input.roomId, initial.state, existing.member);
+      }
+      if (existing?.member.membershipState === 'revoked') {
+        if (existing.revocationReason === 'left') {
+          return rejoinSession(initial, existing, input.accountUserId, displayName.data);
+        }
+        return revokedJoinFailure(existing);
+      }
 
       const userId = createUserId();
       const timestamp = now();
@@ -457,7 +510,17 @@ export const createArenaRoomMembershipService = (
         if (current && concurrent?.member.membershipState === 'active') {
           return sessionView(input.roomId, current, concurrent.member);
         }
-        if (concurrent?.member.membershipState === 'revoked') return fail('ROOM_MEMBERSHIP_REVOKED');
+        if (current && concurrent?.member.membershipState === 'revoked') {
+          if (concurrent.revocationReason === 'left') {
+            return rejoinSession(
+              { actor: initial.actor, state: current },
+              concurrent,
+              input.accountUserId,
+              displayName.data,
+            );
+          }
+          return revokedJoinFailure(concurrent);
+        }
         if (result.reason === 'member-limit-reached') return fail('ROOM_MEMBER_LIMIT_REACHED');
         return fail('ROOM_MEMBERSHIP_TRANSITION_DENIED');
       }
@@ -547,7 +610,9 @@ export const createArenaRoomMembershipService = (
       const target = activeRecordByUser(state, targetUserId.data);
       if (!target) return fail('ROOM_MEMBERSHIP_NOT_ACTIVE');
       if (target.member.role === 'host') return fail('ROOM_PERMISSION_DENIED');
-      if (target.member.membershipState === 'revoked') {
+      // 已被踢（或 legacy 无 reason）保持幂等成功；自愿离开（left）的目标必须
+      // 继续提交 kick，把 tombstone 单调升级为 kicked，压缩 leave/kick 竞态。
+      if (target.member.membershipState === 'revoked' && target.revocationReason !== 'left') {
         return sessionView(input.roomId, state, caller.member);
       }
       const result = await actor.execute({
