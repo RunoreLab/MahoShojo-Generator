@@ -3,6 +3,7 @@
 import {
   createContext,
   createElement,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
@@ -223,16 +224,27 @@ export const useArenaRoom = (options: UseArenaRoomOptions) => {
     enabled: state.generation.phase === 'idle' && !state.generation.markdown,
   });
 
+  // 两个 setter 独立稳定（deps []）：作为 ArenaRoomPanelUi 的公共 API，
+  // 引用永远不变，子组件不会因 panelUi 值对象换新而获得新 setter；
+  // 幂等 bail out 同时切断 View 侧 proposalWorkspaceActive 同步 effect
+  // 与 useCallback/memo 引用链可能形成的无限 Effect 循环。
+  const setPanelUiConfigOpen = useCallback((open: boolean) => {
+    setPanelUiState((current) => current.configOpen === open
+      ? current
+      : { ...current, configOpen: open });
+  }, []);
+  const setPanelUiProposalsOpen = useCallback((open: boolean) => {
+    setPanelUiState((current) => current.proposalsOpen === open
+      ? current
+      : { ...current, proposalsOpen: open });
+  }, []);
+
   const panelUi = useMemo<ArenaRoomPanelUi>(() => Object.freeze({
     configOpen: panelUiState.configOpen,
     proposalsOpen: panelUiState.proposalsOpen,
-    setConfigOpen: (open: boolean) => {
-      setPanelUiState((current) => ({ ...current, configOpen: open }));
-    },
-    setProposalsOpen: (open: boolean) => {
-      setPanelUiState((current) => ({ ...current, proposalsOpen: open }));
-    },
-  }), [panelUiState]);
+    setConfigOpen: setPanelUiConfigOpen,
+    setProposalsOpen: setPanelUiProposalsOpen,
+  }), [panelUiState, setPanelUiConfigOpen, setPanelUiProposalsOpen]);
 
   return {
     controller,
