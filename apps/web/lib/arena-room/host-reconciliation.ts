@@ -54,6 +54,22 @@ export type ArenaRoomAuthorityMaterializationOptions = Readonly<{
   commitIf?: () => boolean;
 }>;
 
+/** fence 中止：同步期间共享配置相关状态发生变化。可重试，重试会重新判定 dirty/clean。 */
+export class ArenaRoomReconciliationAbortError extends Error {
+  constructor(message = '房间配置同步期间状态已变化，未覆盖新的本地修改') {
+    super(message);
+    this.name = 'ArenaRoomReconciliationAbortError';
+  }
+}
+
+/** 暂时性失败：如在线数据卡读取暂时不可用。可重试；「已不存在」等终态失败不使用此类。 */
+export class ArenaRoomReconciliationTransientError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ArenaRoomReconciliationTransientError';
+  }
+}
+
 const cloneJson = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
@@ -467,7 +483,7 @@ export const applyArenaRoomAuthorityToBattleStore = async (
   }));
 
   if (options.commitIf && !options.commitIf()) {
-    throw new Error('房间配置同步期间状态已变化，未覆盖新的本地修改');
+    throw new ArenaRoomReconciliationAbortError('房间配置同步期间状态已变化，未覆盖新的本地修改');
   }
   useBattleStore.setState((state): Partial<BattleStoreState> => ({
     battleMode: config.battleMode,

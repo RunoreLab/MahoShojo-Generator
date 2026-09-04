@@ -10,6 +10,8 @@ import {
   useArenaRoomHostReconciliation,
   type ArenaRoomHostReconciliation,
 } from '@/components/arena/multiplayer/useArenaRoomHostReconciliation';
+import { ArenaRoomReconciliationAbortError, ArenaRoomReconciliationTransientError } from '@/lib/arena-room/host-reconciliation';
+import { useBattleStore } from '@/components/arena/stores/useBattleStore';
 import type {
   ArenaRoomController,
   ArenaRoomControllerState,
@@ -35,6 +37,8 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/lib/arena-room/host-reconciliation', () => ({
   applyArenaRoomAuthorityToBattleStore: mocks.applyAuthority,
+  ArenaRoomReconciliationAbortError: class ArenaRoomReconciliationAbortError extends Error {},
+  ArenaRoomReconciliationTransientError: class ArenaRoomReconciliationTransientError extends Error {},
 }));
 
 vi.mock('@/lib/arena-room/shared-config', () => ({
@@ -181,6 +185,7 @@ const Harness = ({
     controller,
     controllerState: state,
     hostWorkspace: workspace,
+    retryDelayMs: 0,
   });
   return <span>{latest.state.kind}</span>;
 };
@@ -188,6 +193,15 @@ const Harness = ({
 const flush = async () => {
   await act(async () => {
     await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+};
+
+/** 自动重试使用 setTimeout(0)（宏任务），flush 的微任务排空覆盖不到。 */
+const flushWithMacrotasks = async () => {
+  await act(async () => {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
     await Promise.resolve();
     await Promise.resolve();
   });
@@ -518,6 +532,182 @@ describe('useArenaRoomHostReconciliation', () => {
     await flush();
 
     expect(mocks.applyAuthority).toHaveBeenCalledTimes(2);
+    expect(capturePublished).toHaveBeenCalledOnce();
+    expect(latest?.state).toMatchObject({ kind: 'synced', revision: 2 });
+  });
+
+  it('物化期间无关 BattleStore 更新不中止 commit（回归：随机匹配公开角色后房主工作区卡在半同步）', async () => {
+    const settled = authorityOf(stateAt(1, config('classic')));
+    const capturePublished = vi.fn();
+    const workspace = {
+      settledAuthority: vi.fn(() => settled),
+      compare: vi.fn(() => ({ kind: 'clean', start: { sharedConfig: config('classic'), hostLocalPayloads: [] } })),
+      startFromRoom: vi.fn(() => ({ sharedConfig: config('daily'), hostLocalPayloads: [] })),
+      capturePublished,
+      retainFor: vi.fn(),
+      clear: vi.fn(),
+    } satisfies ArenaRoomHostWorkspace;
+    let releaseApply!: () => void;
+    const applyPending = new Promise<void>((resolve) => {
+      releaseApply = resolve;
+    });
+    let capturedCommitIf: (() => boolean) | undefined;
+    mocks.applyAuthority.mockImplementationOnce(async (_config, options) => {
+      capturedCommitIf = options.commitIf;
+      await applyPending;
+      if (options.commitIf && !options.commitIf()) {
+        throw new Error('房间配置同步期间状态已变化，未覆盖新的本地修改');
+      }
+    });
+    mocks.buildBundle.mockResolvedValue(bundle(config('daily')));
+
+    const previousError = useBattleStore.getState().error;
+    try {
+      await renderState(currentState, workspace);
+      await renderState(stateAt(2, config('daily')), workspace);
+      await flush();
+      expect(capturedCommitIf).toBeTypeOf('function');
+
+      // 在线数据卡异步加载期间（如随机匹配到的公开角色），无关 store 更新发生：
+      await act(async () => {
+        useBattleStore.setState({ error: 'unrelated-update-canary' });
+      });
+      expect(capturedCommitIf?.()).toBe(true);
+
+      releaseApply();
+      await flush();
+
+      expect(mocks.applyAuthority).toHaveBeenCalledOnce();
+      expect(capturePublished).toHaveBeenCalledOnce();
+      expect(latest?.state).toMatchObject({ kind: 'synced', revision: 2 });
+    } finally {
+      await act(async () => {
+        useBattleStore.setState({ error: previousError });
+      });
+    }
+  });
+
+  it('物化期间共享配置相关字段变化时 fence 中止，重试后自动收敛', async () => {
+    const settled = authorityOf(stateAt(1, config('classic')));
+    const capturePublished = vi.fn();
+    const workspace = {
+      settledAuthority: vi.fn(() => settled),
+      compare: vi.fn(() => ({ kind: 'clean', start: { sharedConfig: config('classic'), hostLocalPayloads: [] } })),
+      startFromRoom: vi.fn(() => ({ sharedConfig: config('daily'), hostLocalPayloads: [] })),
+      capturePublished,
+      retainFor: vi.fn(),
+      clear: vi.fn(),
+    } satisfies ArenaRoomHostWorkspace;
+    let releaseApply!: () => void;
+    const applyPending = new Promise<void>((resolve) => {
+      releaseApply = resolve;
+    });
+    let capturedCommitIf: (() => boolean) | undefined;
+    mocks.applyAuthority.mockImplementationOnce(async (_config, options) => {
+      capturedCommitIf = options.commitIf;
+      await applyPending;
+      if (options.commitIf && !options.commitIf()) {
+        throw new ArenaRoomReconciliationAbortError('房间配置同步期间状态已变化，未覆盖新的本地修改');
+      }
+    });
+    mocks.buildBundle.mockResolvedValue(bundle(config('daily')));
+
+    const previousLanguage = useBattleStore.getState().selectedLanguage;
+    try {
+      await renderState(currentState, workspace);
+      await renderState(stateAt(2, config('daily')), workspace);
+      await flush();
+      expect(capturedCommitIf).toBeTypeOf('function');
+
+      await act(async () => {
+        useBattleStore.setState({ selectedLanguage: 'en-US' });
+      });
+      expect(capturedCommitIf?.()).toBe(false);
+
+      releaseApply();
+      // attempt 1 因 fence 中止 → 自动重试同一 revision → 收敛
+      await flushWithMacrotasks();
+
+      expect(mocks.applyAuthority).toHaveBeenCalledTimes(2);
+      expect(capturePublished).toHaveBeenCalledOnce();
+      expect(capturePublished).toHaveBeenCalledWith(
+        authorityOf(stateAt(2, config('daily'))),
+        expect.anything(),
+      );
+      expect(latest?.state).toMatchObject({ kind: 'synced', revision: 2 });
+    } finally {
+      await act(async () => {
+        useBattleStore.setState({ selectedLanguage: previousLanguage });
+      });
+    }
+  });
+
+  it('在线数据卡暂时读取失败时自动重试同一 revision 并收敛（回归：服务器已接受、房主工作区仍旧）', async () => {
+    const settled = authorityOf(stateAt(1, config('classic')));
+    const capturePublished = vi.fn();
+    const workspace = {
+      settledAuthority: vi.fn(() => settled),
+      compare: vi.fn(() => ({ kind: 'clean', start: { sharedConfig: config('classic'), hostLocalPayloads: [] } })),
+      startFromRoom: vi.fn(() => ({ sharedConfig: config('daily'), hostLocalPayloads: [] })),
+      capturePublished,
+      retainFor: vi.fn(),
+      clear: vi.fn(),
+    } satisfies ArenaRoomHostWorkspace;
+    mocks.buildBundle.mockResolvedValue(bundle(config('daily')));
+    mocks.applyAuthority
+      .mockRejectedValueOnce(new ArenaRoomReconciliationTransientError('公开数据卡 card-1 暂时无法读取'))
+      .mockResolvedValueOnce(undefined);
+
+    await renderState(currentState, workspace);
+    await renderState(stateAt(2, config('daily')), workspace);
+    await flush();
+    await flushWithMacrotasks();
+
+    expect(mocks.applyAuthority).toHaveBeenCalledTimes(2);
+    expect(capturePublished).toHaveBeenCalledOnce();
+    expect(capturePublished).toHaveBeenCalledWith(
+      authorityOf(stateAt(2, config('daily'))),
+      expect.anything(),
+    );
+    expect(latest?.state).toMatchObject({ kind: 'synced', revision: 2 });
+  });
+
+  it('自动重试耗尽后保持 error，手动 syncRoom 仍可恢复同一 revision', async () => {
+    const settledRev1 = authorityOf(stateAt(1, config('classic')));
+    let settled: ArenaRoomHostWorkspaceAuthority | null = settledRev1;
+    const capturePublished = vi.fn((authority: ArenaRoomHostWorkspaceAuthority) => {
+      settled = authority;
+    });
+    const workspace = {
+      settledAuthority: vi.fn(() => settled),
+      compare: vi.fn(() => ({ kind: 'clean', start: { sharedConfig: config('classic'), hostLocalPayloads: [] } })),
+      startFromRoom: vi.fn(() => ({ sharedConfig: config('daily'), hostLocalPayloads: [] })),
+      capturePublished,
+      retainFor: vi.fn(),
+      clear: vi.fn(),
+    } satisfies ArenaRoomHostWorkspace;
+    mocks.buildBundle.mockResolvedValue(bundle(config('daily')));
+    mocks.applyAuthority
+      .mockRejectedValueOnce(new ArenaRoomReconciliationTransientError('公开数据卡 card-1 暂时无法读取'))
+      .mockRejectedValueOnce(new ArenaRoomReconciliationTransientError('公开数据卡 card-1 暂时无法读取'))
+      .mockRejectedValueOnce(new ArenaRoomReconciliationTransientError('公开数据卡 card-1 暂时无法读取'))
+      .mockResolvedValueOnce(undefined);
+
+    await renderState(currentState, workspace);
+    await renderState(stateAt(2, config('daily')), workspace);
+    await flush();
+    await flushWithMacrotasks();
+
+    expect(mocks.applyAuthority).toHaveBeenCalledTimes(3);
+    expect(latest?.state).toMatchObject({
+      kind: 'error',
+      message: '公开数据卡 card-1 暂时无法读取',
+    });
+
+    await act(async () => { await latest!.syncRoom(); });
+    await flush();
+
+    expect(mocks.applyAuthority).toHaveBeenCalledTimes(4);
     expect(capturePublished).toHaveBeenCalledOnce();
     expect(latest?.state).toMatchObject({ kind: 'synced', revision: 2 });
   });

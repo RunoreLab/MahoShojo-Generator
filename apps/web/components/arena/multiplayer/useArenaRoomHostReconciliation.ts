@@ -14,6 +14,8 @@ import type {
 } from '@/lib/arena-room/controller';
 import {
   applyArenaRoomAuthorityToBattleStore,
+  ArenaRoomReconciliationAbortError,
+  ArenaRoomReconciliationTransientError,
 } from '@/lib/arena-room/host-reconciliation';
 import { verifyArenaContentOrigin } from '@/lib/arena/verify-origin';
 import {
@@ -83,13 +85,50 @@ const authorityKeyOf = (authority: ArenaRoomHostWorkspaceAuthority): string => (
   `${authorityIdentity(authority)}\n${authority.revision}`
 );
 
+const DEFAULT_RECONCILE_RETRY_DELAY_MS = 400;
+
 const loadPublicCard = async (id: string): Promise<unknown> => {
   const result = await fetchPublicDataCardRowById(id);
   if (result.kind === 'success') return result.card;
-  throw new Error(result.kind === 'not-found'
-    ? `公开数据卡 ${id} 已不存在`
-    : `公开数据卡 ${id} 暂时无法读取`);
+  throw result.kind === 'not-found'
+    ? new Error(`公开数据卡 ${id} 已不存在`)
+    : new ArenaRoomReconciliationTransientError(`公开数据卡 ${id} 暂时无法读取`);
 };
+
+/**
+ * 语义 fence：host workspace bundle 只由这些 store 字段派生（见
+ * buildArenaRoomHostWorkspaceBundle 的数据来源）。这些字段的引用不变即派生结果不变；
+ * 不影响共享配置的 store 更新（流式文本、生成镜像、调试态等）不应中止正在进行的物化。
+ * 之前用整个 useBattleStore state 对象做引用比较，任何无关更新都会让「需要异步拉取
+ * 在线数据卡」的物化（例如成员随机匹配的公开角色）失败并停在半同步状态。
+ */
+const BUNDLE_SOURCE_FIELD_KEYS = [
+  'battleMode',
+  'combatants',
+  'teams',
+  'scenario',
+  'auxScenarios',
+  'materials',
+  'storyLength',
+  'customStoryLength',
+  'selectedLanguage',
+  'settings',
+] as const;
+
+const captureBundleSourceRefs = (
+  state: ReturnType<typeof useBattleStore.getState>,
+): readonly unknown[] => BUNDLE_SOURCE_FIELD_KEYS.map((key) => state[key]);
+
+const sameBundleSourceRefs = (
+  left: readonly unknown[],
+  right: readonly unknown[],
+): boolean => left.length === right.length
+  && left.every((value, index) => value === right[index]);
+
+const isRetryableReconciliationError = (error: unknown): boolean => (
+  error instanceof ArenaRoomReconciliationAbortError
+  || error instanceof ArenaRoomReconciliationTransientError
+);
 
 const currentAuthority = (
   controller: ArenaRoomController,
@@ -110,10 +149,13 @@ export const useArenaRoomHostReconciliation = ({
   controller,
   controllerState,
   hostWorkspace,
+  retryDelayMs,
 }: {
   readonly controller: ArenaRoomController;
   readonly controllerState: ArenaRoomControllerState;
   readonly hostWorkspace: ArenaRoomHostWorkspace;
+  /** 自动同步重试间隔；测试可传 0。 */
+  readonly retryDelayMs?: number;
 }): ArenaRoomHostReconciliation => {
   const [state, setState] = useState<ArenaRoomHostReconciliationState>({ kind: 'idle' });
   const observedAuthorityRef = useRef<ArenaRoomHostWorkspaceAuthority | null>(null);
@@ -128,6 +170,7 @@ export const useArenaRoomHostReconciliation = ({
   ): Promise<void> => {
     setState({ kind: 'synchronizing', action });
     const battleStateAtStart = useBattleStore.getState();
+    const sourceRefsAtStart = captureBundleSourceRefs(battleStateAtStart);
     const currentBundle = await buildArenaRoomHostWorkspaceBundleFromBattleState(
       battleStateAtStart,
     );
@@ -139,7 +182,7 @@ export const useArenaRoomHostReconciliation = ({
       verifyOrigin: verifyArenaContentOrigin,
       commitIf: () => (
         operationGenerationRef.current === operationGeneration
-        && useBattleStore.getState() === battleStateAtStart
+        && sameBundleSourceRefs(sourceRefsAtStart, captureBundleSourceRefs(useBattleStore.getState()))
         && isSameAuthorityRevision(currentAuthority(controller), authority)
       ),
     });
@@ -148,21 +191,24 @@ export const useArenaRoomHostReconciliation = ({
       || !isSameAuthorityRevision(currentAuthority(controller), authority)
     ) return;
     const synchronizedState = useBattleStore.getState();
+    const synchronizedRefs = captureBundleSourceRefs(synchronizedState);
     const synchronizedBundle = await buildArenaRoomHostWorkspaceBundleFromBattleState(
       synchronizedState,
     );
     if (
       operationGenerationRef.current !== operationGeneration
-      || useBattleStore.getState() !== synchronizedState
+      || !sameBundleSourceRefs(synchronizedRefs, captureBundleSourceRefs(useBattleStore.getState()))
       || !isSameAuthorityRevision(currentAuthority(controller), authority)
     ) {
-      throw new Error('房间配置同步期间状态已变化，未覆盖新的本地修改');
+      throw new ArenaRoomReconciliationAbortError('房间配置同步期间状态已变化，未覆盖新的本地修改');
     }
     if (!areArenaRoomSharedConfigsEqual(
       synchronizedBundle.sharedConfig,
       authority.sharedConfig,
     )) {
-      throw new Error('同步后的本地配置仍与当前房间配置不一致');
+      // 写入后本地仍与权威不一致：交给重试重新判定 dirty/clean，
+      // 真实本地修改会以 conflicted 呈现给房主，而不是永久卡在半同步。
+      throw new ArenaRoomReconciliationAbortError('同步后的本地配置仍与当前房间配置不一致');
     }
     hostWorkspace.capturePublished(authority, synchronizedBundle);
     setState({
@@ -211,40 +257,61 @@ export const useArenaRoomHostReconciliation = ({
     setState({ kind: 'synchronizing', action: 'auto' });
     void (async () => {
       try {
-        const bundle = await buildArenaRoomHostWorkspaceBundleFromBattleState(
-          useBattleStore.getState(),
-        );
-        if (operationGenerationRef.current !== operationGeneration) return;
-        const settled = hostWorkspace.settledAuthority();
-        // 脏判定只参照「已成功落定的基线」；从未安装过的中间 revision
-        // 不构成房主本地修改。没有落定基线时退回旧行为（与上一个观察对比）。
-        const reference = settled && authorityIdentity(settled) === authorityIdentity(authority)
-          ? settled
-          : previous;
-        const comparison = hostWorkspace.compare(reference, bundle);
-        if (operationGenerationRef.current !== operationGeneration) return;
-        if (comparison.kind === 'dirty') {
-          setState({
-            kind: 'conflicted',
-            revision: authority.revision,
-            reasons: comparison.reasons,
-            roomConfig: authority.sharedConfig,
-            localConfig: bundle.sharedConfig,
-          });
-          return;
+        // 同一 revision 的自动同步最多尝试 3 次：fence 中止或在线数据卡暂时读取失败时
+        // 自动重试，避免「服务器已接受、房主工作区仍旧」的半同步状态；重试会重新判定
+        // dirty/clean，真实本地修改会收敛为 conflicted，权威确实失效时保持 error。
+        const maxAttempts = 3;
+        for (let attempt = 1; ; attempt += 1) {
+          try {
+            const bundle = await buildArenaRoomHostWorkspaceBundleFromBattleState(
+              useBattleStore.getState(),
+            );
+            if (operationGenerationRef.current !== operationGeneration) return;
+            const settled = hostWorkspace.settledAuthority();
+            // 脏判定只参照「已成功落定的基线」；从未安装过的中间 revision
+            // 不构成房主本地修改。没有落定基线时退回旧行为（与上一个观察对比）。
+            const reference = settled && authorityIdentity(settled) === authorityIdentity(authority)
+              ? settled
+              : previous;
+            const comparison = hostWorkspace.compare(reference, bundle);
+            if (operationGenerationRef.current !== operationGeneration) return;
+            if (comparison.kind === 'dirty') {
+              setState({
+                kind: 'conflicted',
+                revision: authority.revision,
+                reasons: comparison.reasons,
+                roomConfig: authority.sharedConfig,
+                localConfig: bundle.sharedConfig,
+              });
+              return;
+            }
+            await installAuthority(authority, 'auto', operationGeneration);
+            return;
+          } catch (error) {
+            if (
+              operationGenerationRef.current !== operationGeneration
+              || !isSameAuthorityRevision(currentAuthority(controller), authority)
+            ) return;
+            if (attempt >= maxAttempts || !isRetryableReconciliationError(error)) {
+              setState(reconciliationErrorState(error, '自动同步房间配置失败'));
+              return;
+            }
+            await new Promise<void>((resolve) => {
+              setTimeout(resolve, retryDelayMs !== undefined
+                ? retryDelayMs
+                : DEFAULT_RECONCILE_RETRY_DELAY_MS * attempt);
+            });
+            if (
+              operationGenerationRef.current !== operationGeneration
+              || !isSameAuthorityRevision(currentAuthority(controller), authority)
+            ) return;
+          }
         }
-        await installAuthority(authority, 'auto', operationGeneration);
-      } catch (error) {
-        if (
-          operationGenerationRef.current !== operationGeneration
-          || !isSameAuthorityRevision(currentAuthority(controller), authority)
-        ) return;
-        setState(reconciliationErrorState(error, '自动同步房间配置失败'));
       } finally {
         if (inFlightKeyRef.current === key) inFlightKeyRef.current = null;
       }
     })();
-  }, [controller, hostWorkspace, installAuthority]);
+  }, [controller, hostWorkspace, installAuthority, retryDelayMs]);
 
   const publishLocal = useCallback(async (): Promise<void> => {
     if (actionLockRef.current) return;
