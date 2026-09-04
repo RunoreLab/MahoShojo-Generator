@@ -424,8 +424,9 @@ describe('Arena Room Proposal application service', () => {
       result: 'applied',
       revision: 0,
     });
-    // submit 不改变配置，响应不携带 sharedConfig。
+    // submit 不改变配置，响应不携带权威 sharedConfig/snapshot。
     expect(response).not.toHaveProperty('sharedConfig');
+    expect(response).not.toHaveProperty('snapshot');
     expect(harness.store.saveCount).toBe(before + 1);
     expect(harness.store.order.slice(-2)).toEqual(['checkpoint', 'fanout']);
     expect(harness.store.state?.snapshot.proposals[0]).toMatchObject({
@@ -493,10 +494,13 @@ describe('Arena Room Proposal application service', () => {
       refs: [{ id: 'character-1', kind: 'character', versionToken: 'v1' }],
     });
     expect(response).toMatchObject({ status: 'accepted', revision: 1, result: 'applied' });
-    // resolve 响应携带 mutation 后的权威 sharedConfig，供房主端命令收敛直接落地。
+    // resolve 响应携带 mutation 后的完整权威状态，供房主端命令收敛直接原子安装：
+    // 部分安装会把尚未收到的控制事件「宣布已见」而被 WSS 去重丢弃。
     expect(response.sharedConfig).toEqual(harness.store.state?.snapshot.sharedConfig);
     expect(harness.store.state?.snapshot.sharedConfig.userGuidance).toBe('成员建议');
-    expect(harness.store.state?.snapshot.proposals).toEqual([]);
+    expect(response.snapshot).toEqual(harness.store.state?.snapshot);
+    expect(response.snapshot?.controlSeq).toBe(harness.store.state?.snapshot.controlSeq);
+    expect(response.snapshot?.proposals).toEqual([]);
   });
 
   it('author withdraw and host reject checkpoint terminal lifecycle without changing revision', async () => {
@@ -520,6 +524,8 @@ describe('Arena Room Proposal application service', () => {
     });
     expect(withdrawn).toMatchObject({ status: 'withdrawn', revision: 0, result: 'applied' });
     expect(withdrawHarness.store.saveCount).toBe(beforeWithdraw + 1);
+    expect(withdrawn).not.toHaveProperty('sharedConfig');
+    expect(withdrawn).not.toHaveProperty('snapshot');
     expect(withdrawHarness.store.state?.snapshot.proposals).toEqual([]);
     expect(withdrawHarness.store.state?.terminalProposalIds).toContain('proposal-withdraw');
 
@@ -547,6 +553,7 @@ describe('Arena Room Proposal application service', () => {
       },
     });
     expect(rejected).toMatchObject({ status: 'rejected', revision: 0, result: 'applied' });
+    expect(rejected.snapshot).toEqual(rejectHarness.store.state?.snapshot);
     expect(rejectHarness.references.verify).not.toHaveBeenCalled();
     expect(rejectHarness.store.saveCount).toBe(beforeReject + 1);
     expect(rejectHarness.store.state?.snapshot.sharedConfig.userGuidance).toBe('');

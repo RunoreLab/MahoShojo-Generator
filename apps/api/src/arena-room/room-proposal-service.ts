@@ -9,6 +9,7 @@ import {
   type ArenaRoomProposalMutationResult,
   type ArenaRoomProposalMutationStatus,
   type ArenaRoomSharedConfig,
+  type ArenaRoomSnapshot,
   type DataCardRef,
 } from '@mahoshojo/contracts/arena-room';
 import {
@@ -66,6 +67,7 @@ export type ArenaRoomProposalMutationView = {
   readonly status: ArenaRoomProposalMutationStatus;
   readonly result: ArenaRoomProposalMutationResult;
   readonly sharedConfig?: ArenaRoomSharedConfig;
+  readonly snapshot?: ArenaRoomSnapshot;
 };
 
 export type ArenaRoomProposalService = {
@@ -144,7 +146,7 @@ const mutationView = (
   proposalId: string,
   status: ArenaRoomProposalMutationStatus,
   result: ArenaRoomProposalMutationResult,
-  includeSharedConfig = false,
+  includeAuthoritativeState = false,
 ): ArenaRoomProposalMutationView => ({
   roomId: state.snapshot.roomId,
   roomEpoch: state.snapshot.roomEpoch,
@@ -153,9 +155,12 @@ const mutationView = (
   proposalId,
   status,
   result,
-  // resolve 的响应直接携带 mutation 后权威 sharedConfig：state 已在内存中，
-  // 无需额外读取；房主端以此作为命令收敛的主路径。
-  ...(includeSharedConfig ? { sharedConfig: state.snapshot.sharedConfig } : {}),
+  // resolve 的响应直接携带 mutation 后的完整权威状态（含 snapshot）：
+  // state 已在内存中，无额外读取成本；房主端以完整 snapshot 做原子安装，
+  // 避免部分安装把尚未收到的控制事件「宣布已见」而被 WSS 去重丢弃。
+  ...(includeAuthoritativeState
+    ? { sharedConfig: state.snapshot.sharedConfig, snapshot: state.snapshot }
+    : {}),
 });
 
 const mapTransitionFailure = (failure: ArenaRoomTransitionFailure): never => {

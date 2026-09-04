@@ -184,10 +184,18 @@ describe('Arena Proposal Hono authority composition', () => {
     );
 
     expect(resolve.status).toBe(200);
-    expect(await resolve.json()).toMatchObject({
+    const resolveBody = await resolve.json();
+    expect(resolveBody).toMatchObject({
       proposalId,
       status: 'rejected',
       revision: 0,
+    });
+    // resolve 响应携带 mutation 后的完整权威 snapshot。
+    expect(resolveBody.snapshot).toMatchObject({
+      roomId: host.roomId,
+      roomEpoch: host.roomEpoch,
+      revision: 0,
+      proposals: [],
     });
     expect(store.state?.snapshot.proposals).toEqual([]);
     expect(store.state?.terminalProposalIds).toContain(proposalId);
