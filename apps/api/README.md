@@ -247,7 +247,9 @@ reaper 对账，不伪造可对外读取的 failed/completed 终态。
 `releases/<release-id>`、上传五个文件并执行目录内的 `deploy-bundle.sh`；不再使用独立 installer、随机 staging
 或历史 tuple 兼容层。
 
-默认分支 push 只由该 workflow 执行一次 `ci:verify`。Hono 发布与公网 smoke 成功后，它才调用
+整仓质量验证（`pnpm run ci:verify`）是合并前的本地验收与 PR 集成 CI（`.github/workflows/ci.yml`）的职责；
+生产发布 workflow 不再重复执行整仓 test/lint/build，只保留 install、容器构建、release bundle、runtime 集成
+验证与公网 smoke 等部署特有检查（与 preview workflow 同一口径）。Hono 发布与公网 smoke 成功后，它才调用
 `.github/workflows/cloudflare-deploy.yml` 发布 Web；Cloudflare workflow 不再独立监听 push 或重复 CI。runtime 是否接受
 Room request 由 `.env.hono` 的 `ARENA_MULTIPLAYER_ENABLED` 决定；workflow 手工入口只控制 Web exposure，
 不会覆盖服务器 flag。

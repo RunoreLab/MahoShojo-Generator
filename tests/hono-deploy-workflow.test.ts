@@ -6,10 +6,12 @@ const productionWorkflow = () => readFileSync(resolve('.github/workflows/hono-de
 const previewWorkflow = () => readFileSync(resolve('.github/workflows/preview-deploy.yml'), 'utf8');
 
 describe('Hono deployment workflows', () => {
-  test('production 只运行一次整仓 CI，再按 Hono → Cloudflare 顺序发布', () => {
+  test('production 不重复整仓 ci:verify，保留部署特有验证并按 Hono → Cloudflare 顺序发布', () => {
     const workflow = productionWorkflow();
 
-    expect(workflow.match(/pnpm run ci:verify/gu)).toHaveLength(1);
+    expect(workflow).not.toContain('pnpm run ci:verify');
+    expect(workflow).toContain('Verify Hono container build');
+    expect(workflow).toContain('Verify Hono built runtime integration');
     expect(workflow).toMatch(/deploy:\s*[\s\S]*?needs: build/u);
     expect(workflow).toMatch(/deploy-cloudflare:\s*[\s\S]*?needs: deploy/u);
     expect(workflow).toContain('environment: hono-production');

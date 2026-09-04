@@ -56,9 +56,6 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Verify workspace and repository
-        run: pnpm run ci:verify
-
       - name: Verify Hono container build
         env:
           HONO_RELEASE_DIR: /tmp/mahoshojo-hono-release
