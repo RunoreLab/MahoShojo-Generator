@@ -60,6 +60,32 @@ export const isArenaRoomGenerationSyncSettled = (
   || reconciliationKind === 'conflicted'
 );
 
+/**
+ * 生成 preflight 手动发布方向的落定判定。
+ *
+ * `reconciliationKind` 来自 React render 时序，异步闭包可能拿到旧值；而
+ * reconciliation 刚被触发但 effect 尚未运行的微窗口里，kind 仍是旧的
+ * `synced`/`idle`，权威却已经前进（例如 resolve 的 HTTP 权威安装）。此时
+ * 本地 working copy 是基于旧权威的草稿，发布它会静默覆盖房主尚未见过的
+ * 权威变更。因此除 kind 外，还必须同步核对 host workspace 已落定基线：
+ * 基线存在且身份一致时 MUST 与当前权威同 revision，否则只允许同步房间
+ * 配置或取消。没有落定基线（首发布、页面重载后）保持既有显式发布路径，
+ * 由 compare 的 dirty 原因如实呈现给房主决策。
+ */
+export const canPublishArenaRoomGenerationDraft = (input: Readonly<{
+  reconciliationKind: ArenaRoomHostReconciliationState['kind'];
+  authority: ArenaRoomGenerationFenceAuthority;
+  settledAuthority: ArenaRoomGenerationFenceAuthority | null;
+}>): boolean => {
+  if (!isArenaRoomGenerationSyncSettled(input.reconciliationKind)) return false;
+  const settled = input.settledAuthority;
+  if (!settled) return true;
+  return settled.roomId === input.authority.roomId
+    && settled.roomEpoch === input.authority.roomEpoch
+    && settled.ownerUserId === input.authority.ownerUserId
+    && settled.revision === input.authority.revision;
+};
+
 export const arenaRoomGenerationSyncGateMessage = (
   reconciliationKind: ArenaRoomHostReconciliationState['kind'],
 ): string => reconciliationKind === 'error'

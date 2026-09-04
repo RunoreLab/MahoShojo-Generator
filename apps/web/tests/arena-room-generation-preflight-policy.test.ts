@@ -4,6 +4,7 @@ import {
   ARENA_ROOM_GENERATION_SYNC_GATE_MESSAGE,
   arenaRoomGenerationSyncGateMessage,
   canAutoPublishArenaRoomHostDraft,
+  canPublishArenaRoomGenerationDraft,
   isArenaRoomGenerationFenceCurrent,
   isArenaRoomGenerationSyncSettled,
   pendingProposalFingerprint,
@@ -83,6 +84,62 @@ describe('Arena Room generation preflight policy', () => {
     expect(arenaRoomGenerationSyncGateMessage('synchronizing'))
       .toBe(ARENA_ROOM_GENERATION_SYNC_GATE_MESSAGE);
     expect(arenaRoomGenerationSyncGateMessage('error')).toContain('重试同步');
+  });
+
+  it('手动发布方向要求落定基线不落后于当前权威（回归：resolve 安装与 materialize 之间的微窗口）', () => {
+    const authority = {
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      ownerUserId: 'host-1',
+      revision: 11,
+    };
+    // 微窗口：reconciliation effect 尚未运行，kind 仍是 stale 'synced'，
+    // 但落定基线还停在旧 revision；发布本地草稿会覆盖房主尚未见过的权威变更。
+    expect(canPublishArenaRoomGenerationDraft({
+      reconciliationKind: 'synced',
+      authority,
+      settledAuthority: { ...authority, revision: 10 },
+    })).toBe(false);
+    expect(canPublishArenaRoomGenerationDraft({
+      reconciliationKind: 'idle',
+      authority,
+      settledAuthority: { ...authority, revision: 10 },
+    })).toBe(false);
+    // 落定基线追上当前权威后恢复可发布。
+    expect(canPublishArenaRoomGenerationDraft({
+      reconciliationKind: 'synced',
+      authority,
+      settledAuthority: authority,
+    })).toBe(true);
+    // 身份变化（房间/纪元/房主）说明基线不属于当前权威，不得发布。
+    expect(canPublishArenaRoomGenerationDraft({
+      reconciliationKind: 'synced',
+      authority,
+      settledAuthority: { ...authority, roomEpoch: 'epoch-2' },
+    })).toBe(false);
+    expect(canPublishArenaRoomGenerationDraft({
+      reconciliationKind: 'synced',
+      authority,
+      settledAuthority: { ...authority, ownerUserId: 'host-2' },
+    })).toBe(false);
+    // 无落定基线（首发布、页面重载后）保持既有显式发布路径，由 dirty
+    // 原因如实呈现给房主决策。
+    expect(canPublishArenaRoomGenerationDraft({
+      reconciliationKind: 'idle',
+      authority,
+      settledAuthority: null,
+    })).toBe(true);
+    // kind 未落定仍然一票否决。
+    expect(canPublishArenaRoomGenerationDraft({
+      reconciliationKind: 'synchronizing',
+      authority,
+      settledAuthority: authority,
+    })).toBe(false);
+    expect(canPublishArenaRoomGenerationDraft({
+      reconciliationKind: 'error',
+      authority,
+      settledAuthority: null,
+    })).toBe(false);
   });
 
   it('最终启动 fence 同时约束房间 authority 与待处理提案集合', () => {

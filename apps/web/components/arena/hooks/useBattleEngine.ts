@@ -85,6 +85,7 @@ import { useArenaRoomContext } from '../multiplayer/useArenaRoom';
 import {
   arenaRoomGenerationSyncGateMessage,
   canAutoPublishArenaRoomHostDraft,
+  canPublishArenaRoomGenerationDraft,
   isArenaRoomGenerationFenceCurrent,
   isArenaRoomGenerationSyncSettled,
   pendingProposalFingerprint,
@@ -789,6 +790,14 @@ export const useBattleEngine = () => {
               reconciliationKind: arenaRoomRuntime.hostReconciliation.state.kind,
               workspaceAllows: arenaRoomRuntime.hostWorkspace.canAutoPublish(authority, bundle),
             });
+            const generationPublishReady = () => canPublishArenaRoomGenerationDraft({
+              reconciliationKind: arenaRoomRuntime.hostReconciliation.state.kind,
+              authority,
+              // settledAuthority 读取 workspace 内部基线（非 React 状态）：
+              // 即使本闭包捕获的 reconciliation kind 已过期，也能同步判定
+              // 「落定基线是否已追上当前权威」，封死 render→effect 微窗口。
+              settledAuthority: arenaRoomRuntime.hostWorkspace.settledAuthority(),
+            });
             const choice = automaticallyPublish
               ? 'publish'
               : await requestArenaRoomGenerationPreflight({
@@ -796,7 +805,7 @@ export const useBattleEngine = () => {
                   // reconciliation error 期间本地与房间权威的关系不可信：
                   // 此时禁止把本地 working copy 发布出去覆盖房间权威，
                   // 只允许显式同步房间配置或取消。
-                  canPublish: isArenaRoomGenerationSyncSettled(arenaRoomRuntime.hostReconciliation.state.kind),
+                  canPublish: generationPublishReady(),
                   pendingProposalCount,
                 });
             if (choice === 'cancel') return;
@@ -807,10 +816,10 @@ export const useBattleEngine = () => {
               await arenaRoomRuntime.hostReconciliation.syncRoom();
               return;
             }
-            if (!isArenaRoomGenerationSyncSettled(arenaRoomRuntime.hostReconciliation.state.kind)) {
-              // Preflight 打开期间同步可能已开始或已失败；此时发布本地草稿
-              // 会覆盖尚未安装/关系不明的房间权威，必须拒绝并让 reconciliation
-              // 先落定。
+            if (!generationPublishReady()) {
+              // Preflight 打开期间同步可能已开始或已失败，或权威已前进到
+              // 落定基线之外；此时发布本地草稿会覆盖尚未安装/关系不明的
+              // 房间权威，必须拒绝并让 reconciliation 先落定。
               throw new Error(arenaRoomGenerationSyncGateMessage(arenaRoomRuntime.hostReconciliation.state.kind));
             }
             const beforePublishState = arenaRoomRuntime.controller.getSnapshot();
