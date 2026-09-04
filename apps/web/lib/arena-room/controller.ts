@@ -6,6 +6,8 @@ import {
   type ArenaRoomGenerationResult,
   type ArenaRoomGenerationStartRequest,
   type ArenaRoomGenerationViewResponse,
+  type ArenaRoomProposalMutationResponse,
+  type ArenaRoomProposalMutationStatus,
   type ArenaRoomProposalResolveRequest,
   type ArenaRoomProposalSubmitRequest,
   type ArenaRoomPublishConfigRequest,
@@ -215,6 +217,48 @@ const isDeterministicMutationRejection = (error: ArenaRoomClientError): boolean 
 const sameSharedConfig = (left: unknown, right: unknown): boolean => (
   JSON.stringify(left) === JSON.stringify(right)
 );
+
+const proposalResolvedNotice = (status: ArenaRoomProposalMutationStatus): string => (
+  status === 'withdrawn'
+    ? '提案已撤回'
+    : status === 'rejected'
+      ? '提案已拒绝'
+      : '提案已应用'
+);
+
+/**
+ * resolve 的 HTTP 响应携带 mutation 后的权威 sharedConfig 时，把它立即安装进
+ * 本地 session 视图：命令响应是本次操作的主收敛路径，WSS 只是复制/恢复通道。
+ * 这样房主接受提案后无需等待 WSS 事件即可看见「房间配置已更新」，reconciliation
+ * 会随即把权威配置 materialize 到 Arena 编辑区，保证眼—手一致。
+ * 任一 fence 不满足（旧服务器响应、本地已看到更新状态、revision/config 矛盾）
+ * 都返回 null，退回旧行为：等待 WSS 权威事件或快照对账。
+ */
+const resolveAuthoritySession = (
+  latest: ArenaRoomSessionResponse,
+  response: ArenaRoomProposalMutationResponse,
+): ArenaRoomSessionResponse | null => {
+  if (response.sharedConfig === undefined) return null;
+  if (latest.self.role !== 'host' || latest.self.membershipState !== 'active') return null;
+  if (latest.snapshot.revision > response.revision) return null;
+  if (latest.snapshot.controlSeq > response.controlSeq) return null;
+  if (
+    latest.snapshot.revision === response.revision
+    && !sameSharedConfig(latest.snapshot.sharedConfig, response.sharedConfig)
+  ) return null;
+  return {
+    ...latest,
+    snapshot: {
+      ...latest.snapshot,
+      controlSeq: response.controlSeq,
+      revision: response.revision,
+      sharedConfig: response.sharedConfig,
+      proposals: latest.snapshot.proposals.filter(
+        (proposal) => proposal.proposalId !== response.proposalId,
+      ),
+    },
+  };
+};
 
 const defaultReconnectDelay = (attempt: number): number => (
   Math.min(4_000, 500 * (2 ** Math.max(0, attempt - 1)))
@@ -906,11 +950,7 @@ export const createArenaRoomController = (
         ...(state.proposalResultUnknown && !reconciledUnknown ? {} : {
           proposalOperation: null,
           proposalResultUnknown: false,
-          notice: event.payload.status === 'withdrawn'
-            ? '提案已撤回'
-            : event.payload.status === 'rejected'
-              ? '提案已拒绝'
-              : '提案已应用',
+          notice: proposalResolvedNotice(event.payload.status),
           error: null,
         }),
       });
@@ -1174,7 +1214,7 @@ export const createArenaRoomController = (
     operation: ProposalMutationOperation,
     proposalId: string,
     requiredRole: 'host' | 'member',
-    execute: (session: ArenaRoomSessionResponse) => Promise<unknown>,
+    execute: (session: ArenaRoomSessionResponse) => Promise<ArenaRoomProposalMutationResponse>,
   ): Promise<void> => {
     const current = state.session;
     if (
@@ -1200,17 +1240,24 @@ export const createArenaRoomController = (
       error: null,
     });
     try {
-      await execute(current);
+      const response = await execute(current);
       if (
         disposed
         || generation !== proposalMutationGeneration
         || state.session?.roomId !== current.roomId
         || state.session.roomEpoch !== current.roomEpoch
       ) return;
+      const latest = state.session;
+      const installed = operation === 'resolve' && latest
+        ? resolveAuthoritySession(latest, response)
+        : null;
       publish({
+        ...(installed ? { session: installed } : {}),
         proposalOperation: null,
         proposalResultUnknown: false,
-        notice: '请求已确认，等待房间权威状态同步',
+        notice: installed
+          ? proposalResolvedNotice(response.status)
+          : '请求已确认，等待房间权威状态同步',
         error: null,
       });
       unknownProposalMutation = null;

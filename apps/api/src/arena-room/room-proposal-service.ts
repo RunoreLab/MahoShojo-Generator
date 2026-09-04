@@ -8,6 +8,7 @@ import {
   type ArenaProposalChange,
   type ArenaRoomProposalMutationResult,
   type ArenaRoomProposalMutationStatus,
+  type ArenaRoomSharedConfig,
   type DataCardRef,
 } from '@mahoshojo/contracts/arena-room';
 import {
@@ -64,6 +65,7 @@ export type ArenaRoomProposalMutationView = {
   readonly proposalId: string;
   readonly status: ArenaRoomProposalMutationStatus;
   readonly result: ArenaRoomProposalMutationResult;
+  readonly sharedConfig?: ArenaRoomSharedConfig;
 };
 
 export type ArenaRoomProposalService = {
@@ -142,6 +144,7 @@ const mutationView = (
   proposalId: string,
   status: ArenaRoomProposalMutationStatus,
   result: ArenaRoomProposalMutationResult,
+  includeSharedConfig = false,
 ): ArenaRoomProposalMutationView => ({
   roomId: state.snapshot.roomId,
   roomEpoch: state.snapshot.roomEpoch,
@@ -150,6 +153,9 @@ const mutationView = (
   proposalId,
   status,
   result,
+  // resolve 的响应直接携带 mutation 后权威 sharedConfig：state 已在内存中，
+  // 无需额外读取；房主端以此作为命令收敛的主路径。
+  ...(includeSharedConfig ? { sharedConfig: state.snapshot.sharedConfig } : {}),
 });
 
 const mapTransitionFailure = (failure: ArenaRoomTransitionFailure): never => {
@@ -421,7 +427,7 @@ export const createArenaRoomProposalService = (
         item.type === 'proposal.resolved' && item.payload.proposalId === proposalId
       ));
       if (!event || event.type !== 'proposal.resolved') return fail('ROOM_TRANSITION_DENIED');
-      return mutationView(transition.nextState, proposalId, event.payload.status, transition.kind);
+      return mutationView(transition.nextState, proposalId, event.payload.status, transition.kind, true);
     },
 
     async withdraw(input) {

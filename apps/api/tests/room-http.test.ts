@@ -175,6 +175,7 @@ const createDependencies = (
       proposalId: input.proposalId,
       status: 'accepted' as const,
       result: 'applied' as const,
+      sharedConfig: session.snapshot.sharedConfig,
     })),
     withdraw: vi.fn(async (input) => ({
       roomId: input.roomId,
@@ -1194,6 +1195,7 @@ describe('Arena Room HTTP product routes', () => {
       proposalId,
       status: 'accepted',
       revision: 1,
+      sharedConfig: session.snapshot.sharedConfig,
     });
 
     const withdrawRequest = { expectedRoomEpoch: session.roomEpoch };

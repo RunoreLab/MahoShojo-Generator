@@ -428,6 +428,10 @@ export const ArenaRoomProposalMutationResponseSchema = z.object({
   proposalId: ArenaProposalIdSchema,
   status: ArenaRoomProposalMutationStatusSchema,
   result: ArenaRoomProposalMutationResultSchema,
+  // resolve 响应携带 mutation 后的权威 sharedConfig，让房主端能把
+  // 「服务器提交」与「本地落地」合并为同一次命令收敛；不改变配置的
+  // mutation（submit/withdraw）省略该字段。
+  sharedConfig: ArenaRoomSharedConfigSchema.optional(),
 }).strict();
 
 export const ArenaRoomHttpErrorCodeSchema = z.enum(ARENA_ROOM_HTTP_ERROR_CODES);

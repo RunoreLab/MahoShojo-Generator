@@ -424,6 +424,8 @@ describe('Arena Room Proposal application service', () => {
       result: 'applied',
       revision: 0,
     });
+    // submit 不改变配置，响应不携带 sharedConfig。
+    expect(response).not.toHaveProperty('sharedConfig');
     expect(harness.store.saveCount).toBe(before + 1);
     expect(harness.store.order.slice(-2)).toEqual(['checkpoint', 'fanout']);
     expect(harness.store.state?.snapshot.proposals[0]).toMatchObject({
@@ -491,6 +493,8 @@ describe('Arena Room Proposal application service', () => {
       refs: [{ id: 'character-1', kind: 'character', versionToken: 'v1' }],
     });
     expect(response).toMatchObject({ status: 'accepted', revision: 1, result: 'applied' });
+    // resolve 响应携带 mutation 后的权威 sharedConfig，供房主端命令收敛直接落地。
+    expect(response.sharedConfig).toEqual(harness.store.state?.snapshot.sharedConfig);
     expect(harness.store.state?.snapshot.sharedConfig.userGuidance).toBe('成员建议');
     expect(harness.store.state?.snapshot.proposals).toEqual([]);
   });

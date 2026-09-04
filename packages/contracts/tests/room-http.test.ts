@@ -488,12 +488,19 @@ describe('Arena Room HTTP product contract', () => {
       result: 'applied' as const,
     };
     expect(ArenaRoomProposalMutationResponseSchema.parse(response)).toEqual(response);
+    // resolve 响应可以携带 mutation 后的权威 sharedConfig；不改变配置的 mutation 省略该字段。
+    const withAuthority = {
+      ...response,
+      sharedConfig: canonicalRoomSnapshot.sharedConfig,
+    };
+    expect(ArenaRoomProposalMutationResponseSchema.parse(withAuthority)).toEqual(withAuthority);
     for (const internal of [
       { accountUserId: 7 },
       { deadlines: { hostOfflineDeadline: null } },
       { terminalProposalIds: ['proposal-1'] },
       { receipt: 'checkpoint-receipt' },
       { authorityState: {} },
+      { snapshot: canonicalRoomSnapshot },
     ]) {
       expect(ArenaRoomProposalMutationResponseSchema.safeParse({ ...response, ...internal }).success)
         .toBe(false);
