@@ -339,6 +339,26 @@ describe('Arena Room HTTP product routes', () => {
     expect(dependencies.memberships.getSession).not.toHaveBeenCalled();
   });
 
+  it('join 对已离开/被移出的成员返回明确 403 文案，不伪装成泛化权限错误', async () => {
+    const dependencies = createDependencies();
+    vi.mocked(dependencies.memberships.join).mockRejectedValue(
+      new ArenaRoomMembershipError('ROOM_MEMBERSHIP_REVOKED'),
+    );
+    const app = createHonoApp(config, createRedisStub(), undefined, {
+      arenaRoom: dependencies,
+    });
+
+    const response = await app.request(
+      `/api/arena/rooms/v1/${session.roomId}/join`,
+      createRequest({ displayName: '成员' }),
+    );
+
+    expect(response.status).toBe(403);
+    const body = await response.json() as { code: string; error: string };
+    expect(body.code).toBe('ROOM_FORBIDDEN');
+    expect(body.error).toContain('无法重新加入');
+  });
+
   it('多人 generation start 使用独立 12MiB 上限、strict intent 与 headers-only source context', async () => {
     const dependencies = createDependencies();
     const app = createHonoApp(config, createRedisStub(), undefined, {

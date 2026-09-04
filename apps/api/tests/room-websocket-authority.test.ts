@@ -10,10 +10,11 @@ import {
 } from '@mahoshojo/multiplayer-core';
 import {
   createRoomActorRegistry,
+  RoomActorError,
   type RoomActorCheckpointStore,
 } from '#/arena-room/room-actor-registry';
 import { createArenaRoomMembershipService } from '#/arena-room/room-membership-service';
-import type { ArenaRoomMembershipService } from '#/arena-room/room-membership-service';
+import { ArenaRoomMembershipError, type ArenaRoomMembershipService } from '#/arena-room/room-membership-service';
 import {
   createArenaRoomTicketCodec,
   createArenaRoomTicketSignatureService,
@@ -904,5 +905,120 @@ describe('Arena Room ticket -> membership -> presence WSS authority', () => {
     await actor.refreshCheckpoint(Date.parse('2026-08-28T04:01:00.000Z'));
 
     expect(connected.closes.at(-1)).toEqual({ code: 1013, reason: 'room-authority-fenced' });
+  });
+
+  it('membership 解析暂时故障以 1013 可重试关闭，终态故障才用 1008（回归：临时错误被伪装成永久退房）', async () => {
+    const observations: ArenaRoomRuntimeObservation[] = [];
+    const harness = await createHarness();
+    // 每个 WS 连接消耗顺序：authorize 1 次 -> activate 首查 1 次 -> activate 复核 1 次。
+    // undefined 表示放行；Error 实例表示该次调用抛出。
+    let script: readonly (Error | undefined)[] = [];
+    const memberships: ArenaRoomMembershipService = {
+      ...harness.memberships,
+      async resolveActiveByUser(input) {
+        const failure = script[0];
+        script = script.slice(1);
+        if (failure !== undefined) throw failure;
+        return harness.memberships.resolveActiveByUser(input);
+      },
+    };
+    const authority = createArenaRoomWebSocketAuthority({
+      actors: harness.actors,
+      memberships,
+      replay: harness.replay,
+      tickets: harness.codec,
+      now: () => Date.parse('2026-08-28T00:00:00.000Z'),
+      observer: {
+        observeArenaRoomRuntime: (observation) => {
+          observations.push(observation);
+        },
+      },
+    });
+
+    // 1) 激活首查抛未知异常（如 Redis 故障）→ 1013 room-authority-unavailable
+    script = [undefined, new Error('redis-unavailable-canary')];
+    const transientPeer = createPeer();
+    await activate(
+      await authority.authorize(requestForTicket(await authority.issue({ roomId: 'room-1', accountUserId: 101 }))),
+      transientPeer.peer,
+    );
+    expect(transientPeer.closes).toEqual([{ code: 1013, reason: 'room-authority-unavailable' }]);
+
+    // 2) 激活复核抛 registry shutting down → 1013 room-authority-unavailable
+    script = [undefined, undefined, new RoomActorError('ROOM_ACTOR_REGISTRY_SHUTTING_DOWN')];
+    const recheckPeer = createPeer();
+    await activate(
+      await authority.authorize(requestForTicket(await authority.issue({ roomId: 'room-1', accountUserId: 101 }))),
+      recheckPeer.peer,
+    );
+    expect(recheckPeer.closes).toEqual([{ code: 1013, reason: 'room-authority-unavailable' }]);
+
+    // 3) 激活首查 fenced → 1008 room-authority-fenced（终态，但不再伪装 membership-revoked）
+    script = [undefined, new RoomActorError('ROOM_ACTOR_FENCED')];
+    const fencedPeer = createPeer();
+    await activate(
+      await authority.authorize(requestForTicket(await authority.issue({ roomId: 'room-1', accountUserId: 101 }))),
+      fencedPeer.peer,
+    );
+    expect(fencedPeer.closes).toEqual([{ code: 1008, reason: 'room-authority-fenced' }]);
+
+    // 4) resync 请求时暂时故障 → 1013 room-authority-unavailable
+    script = [undefined, undefined, undefined, new RoomActorError('ROOM_ACTOR_QUEUE_OVERLOADED')];
+    const resyncPeer = createPeer();
+    const resyncConnection = await activate(
+      await authority.authorize(requestForTicket(await authority.issue({ roomId: 'room-1', accountUserId: 101 }))),
+      resyncPeer.peer,
+    );
+    await resyncConnection.onMessage?.({
+      protocolVersion: 1,
+      type: 'room.resync.request',
+      cursor: { control: { roomEpoch: 'epoch-1', controlSeq: 0 } },
+    });
+    expect(resyncPeer.closes).toEqual([{ code: 1013, reason: 'room-authority-unavailable' }]);
+    await resyncConnection.dispose?.();
+
+    expect(observations).toEqual(expect.arrayContaining([
+      { event: 'sync', action: 'authority_unavailable' },
+      { event: 'sync', action: 'authority_fenced' },
+    ]));
+    expect(observations).not.toContainEqual({ event: 'sync', action: 'membership_rejected' });
+  });
+
+  it('membership 确定结束时仍以 1008 membership-revoked 终态关闭', async () => {
+    const observations: ArenaRoomRuntimeObservation[] = [];
+    const harness = await createHarness();
+    let script: readonly (Error | undefined)[] = [undefined, new ArenaRoomMembershipError('ROOM_MEMBERSHIP_REVOKED')];
+    const memberships: ArenaRoomMembershipService = {
+      ...harness.memberships,
+      async resolveActiveByUser(input) {
+        const failure = script[0];
+        script = script.slice(1);
+        if (failure !== undefined) throw failure;
+        return harness.memberships.resolveActiveByUser(input);
+      },
+    };
+    const authority = createArenaRoomWebSocketAuthority({
+      actors: harness.actors,
+      memberships,
+      replay: harness.replay,
+      tickets: harness.codec,
+      now: () => Date.parse('2026-08-28T00:00:00.000Z'),
+      observer: {
+        observeArenaRoomRuntime: (observation) => {
+          observations.push(observation);
+        },
+      },
+    });
+
+    const peer = createPeer();
+    await activate(
+      await authority.authorize(requestForTicket(await authority.issue({ roomId: 'room-1', accountUserId: 101 }))),
+      peer.peer,
+    );
+
+    expect(peer.closes).toEqual([{ code: 1008, reason: 'membership-revoked' }]);
+    expect(observations).toEqual(expect.arrayContaining([
+      { event: 'sync', action: 'membership_rejected' },
+    ]));
   });
 });

@@ -14,6 +14,7 @@ import {
   type ArenaRoomMembershipService,
   type ResolvedArenaRoomMembership,
 } from './room-membership-service';
+import { RoomActorError } from './room-actor-registry';
 import type { RoomActorRegistry } from './room-actor-registry';
 import type { RedisRoomTicketReplayStore } from './redis-room-ticket-replay-store';
 import type { ArenaRoomTicketCodec } from './room-ticket';
@@ -63,6 +64,33 @@ const rejected = (
   status: 401 | 403 | 503,
   code: string,
 ): RoomWebSocketAuthorization => ({ accepted: false, code, status });
+
+/**
+ * membership 解析失败的 close 语义必须区分「终态」与「暂时不可用」：
+ * - ArenaRoomMembershipError：房间不存在/已关闭/成员资格确定结束 → 1008 终态；
+ * - ROOM_ACTOR_FENCED：本进程 incarnation 的 authority 已失效 → 1008 终态
+ *   （客户端按原房间无法恢复处理；进程重启后房间可从 checkpoint 恢复）；
+ * - 其余（Redis 故障、registry 关闭、恢复冲突、未知异常）→ 1013 可重试，
+ *   客户端继续重连，不得结束房间生命周期。
+ */
+const closeForMembershipResolutionError = (
+  error: unknown,
+  peer: RoomWebSocketPeer,
+  observe: (observation: Parameters<ArenaRoomRuntimeObserver['observeArenaRoomRuntime']>[0]) => void,
+): void => {
+  if (error instanceof ArenaRoomMembershipError) {
+    observe({ event: 'sync', action: 'membership_rejected' });
+    peer.close(CLOSE_MEMBERSHIP_REVOKED, 'membership-revoked');
+    return;
+  }
+  if (error instanceof RoomActorError && error.code === 'ROOM_ACTOR_FENCED') {
+    observe({ event: 'sync', action: 'authority_fenced' });
+    peer.close(CLOSE_MEMBERSHIP_REVOKED, 'room-authority-fenced');
+    return;
+  }
+  observe({ event: 'sync', action: 'authority_unavailable' });
+  peer.close(CLOSE_ROOM_AUTHORITY_UNAVAILABLE, 'room-authority-unavailable');
+};
 
 const sameDeadlines = (
   left: { hostOfflineDeadline: string | null; roomIdleDeadline: string | null },
@@ -207,8 +235,8 @@ export const createArenaRoomWebSocketAuthority = (
           roomId: claims.roomId,
           userId: claims.userId,
         });
-      } catch {
-        peer.close(CLOSE_MEMBERSHIP_REVOKED, 'membership-revoked');
+      } catch (error) {
+        closeForMembershipResolutionError(error, peer, observe);
         return {};
       }
       if (membership.roomEpoch !== claims.roomEpoch) {
@@ -228,10 +256,10 @@ export const createArenaRoomWebSocketAuthority = (
           roomId: claims.roomId,
           userId: claims.userId,
         });
-      } catch {
+      } catch (error) {
         decrement(claims.roomId, claims.userId);
         await syncPresence(membership);
-        peer.close(CLOSE_MEMBERSHIP_REVOKED, 'membership-revoked');
+        closeForMembershipResolutionError(error, peer, observe);
         return {};
       }
       if (membership.roomEpoch !== claims.roomEpoch) {
@@ -295,8 +323,8 @@ export const createArenaRoomWebSocketAuthority = (
               roomId: claims.roomId,
               userId: claims.userId,
             });
-          } catch {
-            peer.close(CLOSE_MEMBERSHIP_REVOKED, 'membership-revoked');
+          } catch (error) {
+            closeForMembershipResolutionError(error, peer, observe);
             return;
           }
           if (current.roomEpoch !== claims.roomEpoch) {

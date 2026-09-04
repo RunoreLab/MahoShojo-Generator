@@ -973,6 +973,14 @@ export const registerArenaRoomHttpRoutes = (
       noStore(context);
       return context.json(sessionResponse(session), 200);
     } catch (error) {
+      // leave-member 与 kick 都会 revoke 成员资格，之后 join 同一房间会得到
+      // ROOM_MEMBERSHIP_REVOKED；这里必须给出与「权限不足」可区分的明确文案。
+      if (error instanceof ArenaRoomMembershipError && error.code === 'ROOM_MEMBERSHIP_REVOKED') {
+        return context.json(errorBody(
+          'ROOM_FORBIDDEN',
+          '你已离开该房间或被房主移出，无法重新加入；请联系房主或加入其他房间。',
+        ), 403);
+      }
       return mapServiceError(context, error);
     }
   });
