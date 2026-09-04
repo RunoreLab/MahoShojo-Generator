@@ -608,7 +608,10 @@ describe('Arena room Proposal workspace', () => {
     expect(container.querySelectorAll('.arena-cta-button')).toHaveLength(2);
     expect(container.querySelector('.arena-cta-button--preview')).toBeTruthy();
     expect(container.querySelector('.arena-cta-button--sync')).toBeTruthy();
-    expect(buttonsWithText('同步配置')).toHaveLength(2);
+    // 顶部入口是纯文本【同步配置】；底部 CTA 文本带装饰图标（↻‌），精确文本
+    // 匹配只命中顶部一处，底部由 arena-cta-button--sync class + 文本包含锁定。
+    expect(buttonsWithText('同步配置')).toHaveLength(1);
+    expect(container.querySelector('.arena-cta-button--sync')?.textContent).toContain('同步配置');
     expect(button('预览提案').disabled).toBe(true);
 
     // 干净草稿：直接同步，不需要确认
