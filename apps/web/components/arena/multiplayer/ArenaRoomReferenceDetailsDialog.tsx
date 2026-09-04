@@ -6,6 +6,10 @@ import DataCardDetailsModal from '@/components/DataCardDetailsModal';
 import { OnlineDataCardTypeSchema, type OnlineDataCardType } from '@mahoshojo/contracts/data-cards';
 
 import { ARENA_ROOM_PRESET_CATALOG } from '@/lib/arena-room/generated/arena-room-preset-catalog';
+import {
+  arenaRoomPresetReferenceVersionToken,
+  arenaRoomReferenceVersionDrifted,
+} from '@/lib/arena-room/reference-presentation';
 import { fetchPublicDataCardRowById } from '@/lib/public-card-cache/public-data-card-api';
 import type { ArenaRoomReferenceDetailsRequest } from '@/lib/arena-room/reference-presentation';
 
@@ -13,7 +17,17 @@ type DetailsCard = React.ComponentProps<typeof DataCardDetailsModal>['card'];
 
 const text = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
 
-const loadOnlineCard = async (id: string): Promise<DetailsCard> => {
+/**
+ * 加载详情正文并校验版本漂移。公开接口只能取到当前最新已公开版本；
+ * 当房间引用的 versionToken 与之不一致时，正文仍可预览，但通过 staleNotice
+ * 明确提示"看到的不是房间引用的那个版本"，避免把新正文误当成被引用身份。
+ */
+const VERSION_DRIFT_NOTICE = '注意：房间引用的是该内容的另一个版本，以下为当前已公开的最新版本；接受引用时若引用版本已过期，服务器会拒绝并要求重新选择。';
+
+const loadOnlineCard = async (
+  id: string,
+  versionToken: string | undefined,
+): Promise<{ card: DetailsCard; staleNotice: string | null }> => {
   const result = await fetchPublicDataCardRowById(id);
   if (result.kind !== 'success') {
     throw new Error(result.kind === 'not-found'
@@ -26,7 +40,7 @@ const loadOnlineCard = async (id: string): Promise<DetailsCard> => {
   const row = result.card as Record<string, unknown>;
   const parsedType = OnlineDataCardTypeSchema.safeParse(row.type);
   const type: OnlineDataCardType = parsedType.success ? parsedType.data : 'character';
-  return {
+  const card: DetailsCard = {
     id: text(row.id) || id,
     name: text(row.name) || id,
     description: text(row.description) || '房间引用的公开数据卡',
@@ -40,12 +54,15 @@ const loadOnlineCard = async (id: string): Promise<DetailsCard> => {
     createdAt: text(row.created_at) || undefined,
     updatedAt: text(row.updated_at) || text(row.updatedAt) || undefined,
   };
+  const drifted = arenaRoomReferenceVersionDrifted(versionToken, card.updatedAt);
+  return { card, staleNotice: drifted === true ? VERSION_DRIFT_NOTICE : null };
 };
 
 const loadPresetCard = async (
   kind: ArenaRoomReferenceDetailsRequest['kind'],
   id: string,
-): Promise<DetailsCard> => {
+  versionToken: string | undefined,
+): Promise<{ card: DetailsCard; staleNotice: string | null }> => {
   const entry = ARENA_ROOM_PRESET_CATALOG.find((item) => item.id === id && item.kind === kind);
   if (!entry) throw new Error('该预设不在房间策展目录内');
   const basePath = kind === 'character' ? '/presets/' : kind === 'scenario' ? '/scenario-presets/' : null;
@@ -53,14 +70,23 @@ const loadPresetCard = async (
   const response = await fetch(`${basePath}${encodeURIComponent(id)}`);
   if (!response.ok) throw new Error('该预设内容暂时无法读取');
   const payload: unknown = await response.json();
+  const drifted = arenaRoomReferenceVersionDrifted(
+    versionToken,
+    arenaRoomPresetReferenceVersionToken(kind, id),
+  );
   return {
-    id: entry.id,
-    name: entry.displayName,
-    description: '房间内置预设（由作者维护、随站点发布）',
-    type: entry.kind,
-    data: JSON.stringify(payload, null, 2),
-    isPublic: true,
-    author: '系统',
+    card: {
+      id: entry.id,
+      name: entry.displayName,
+      description: '房间内置预设（由作者维护、随站点发布）',
+      type: entry.kind,
+      data: JSON.stringify(payload, null, 2),
+      isPublic: true,
+      author: '系统',
+    },
+    staleNotice: drifted === true
+      ? '注意：房间引用的预设版本与当前站点部署版本不一致，以下为当前站点内容；接受引用时服务器会按最新目录校验。'
+      : null,
   };
 };
 
@@ -76,25 +102,31 @@ export function ArenaRoomReferenceDetailsDialog({
   readonly onClose: () => void;
 }) {
   const [card, setCard] = useState<DetailsCard | null>(null);
+  const [staleNotice, setStaleNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const loadGenerationRef = useRef(0);
 
   useEffect(() => {
     if (!request) {
       setCard(null);
+      setStaleNotice(null);
       setError(null);
       return;
     }
     const generation = loadGenerationRef.current + 1;
     loadGenerationRef.current = generation;
     setCard(null);
+    setStaleNotice(null);
     setError(null);
     let cancelled = false;
     void (request.source === 'data-card'
-      ? loadOnlineCard(request.id)
-      : loadPresetCard(request.kind, request.id)
+      ? loadOnlineCard(request.id, request.versionToken)
+      : loadPresetCard(request.kind, request.id, request.versionToken)
     ).then((loaded) => {
-      if (!cancelled && loadGenerationRef.current === generation) setCard(loaded);
+      if (!cancelled && loadGenerationRef.current === generation) {
+        setCard(loaded.card);
+        setStaleNotice(loaded.staleNotice);
+      }
     }).catch((loadError: unknown) => {
       if (!cancelled && loadGenerationRef.current === generation) {
         setError(loadError instanceof Error ? loadError.message : '详情暂时无法读取');
@@ -145,6 +177,7 @@ export function ArenaRoomReferenceDetailsDialog({
       isOpen
       onClose={onClose}
       card={card}
+      pendingNotice={staleNotice ?? undefined}
       metaCardId={request.source === 'data-card' ? card.id : null}
     />
   );

@@ -14,7 +14,9 @@ import type {
 } from './roster-contract';
 import {
   arenaRoomReferenceSourcePrefix,
+  dataCardReferenceRequest,
   formatArenaRoomReferenceName,
+  presetReferenceRequest,
   resolveArenaRoomReferenceName,
   useArenaRoomReferenceNames,
   type ArenaRoomReferenceDetailsRequest,
@@ -83,13 +85,21 @@ export const useProposalRosterSectionModel = (input: {
   const { disabled, onActionError, onRequestDetails } = input;
 
   // 预设/在线公开引用按来源解析可读名称；host-local stub 保持分享名。
-  const referenceNames = useArenaRoomReferenceNames(state.combatants.flatMap((item): ArenaRoomReferenceRequest[] => (
-    item.source === 'preset'
-      ? [{ source: 'preset', kind: 'character', id: item.key.slice(PRESET_KEY_PREFIX.length) }]
-      : item.source === 'data-card' && item.reference
-        ? [{ source: 'data-card', kind: 'character', id: item.reference.id }]
-        : []
-  )));
+  // 请求绑定房间引用的 versionToken：同 ID 不同版本不会命中彼此的名称缓存。
+  const referenceNames = useArenaRoomReferenceNames(state.combatants.flatMap((item): ArenaRoomReferenceRequest[] => {
+    if (item.source === 'preset') {
+      return [presetReferenceRequest(
+        'character',
+        item.key.slice(PRESET_KEY_PREFIX.length),
+        item.reference?.versionToken,
+      )];
+    }
+    if (item.source === 'data-card') {
+      const request = dataCardReferenceRequest('character', item.reference);
+      return request ? [request] : [];
+    }
+    return [];
+  }));
 
   return useMemo(() => {
     if (session.mode !== 'room-proposal') return inertModel;
@@ -104,13 +114,18 @@ export const useProposalRosterSectionModel = (input: {
 
     const displayNameOf = (item: typeof state.combatants[number]): string => {
       if (item.source === 'preset') {
-        const id = item.key.slice(PRESET_KEY_PREFIX.length);
-        const request = { source: 'preset' as const, kind: 'character' as const, id };
+        const request = presetReferenceRequest(
+          'character',
+          item.key.slice(PRESET_KEY_PREFIX.length),
+          item.reference?.versionToken,
+        );
         return `预设:${formatArenaRoomReferenceName(request, resolveArenaRoomReferenceName(request, referenceNames))}`;
       }
       if (item.source === 'data-card' && item.reference) {
-        const request = { source: 'data-card' as const, kind: 'character' as const, id: item.reference.id };
-        return `在线:${formatArenaRoomReferenceName(request, resolveArenaRoomReferenceName(request, referenceNames))}`;
+        const request = dataCardReferenceRequest('character', item.reference);
+        if (request) {
+          return `在线:${formatArenaRoomReferenceName(request, resolveArenaRoomReferenceName(request, referenceNames))}`;
+        }
       }
       return item.name;
     };
@@ -137,10 +152,14 @@ export const useProposalRosterSectionModel = (input: {
 
     const detailsRequestOf = (item: typeof state.combatants[number]): ArenaRoomReferenceDetailsRequest | null => {
       if (item.source === 'preset') {
-        return { source: 'preset', kind: 'character', id: item.key.slice(PRESET_KEY_PREFIX.length) };
+        return presetReferenceRequest(
+          'character',
+          item.key.slice(PRESET_KEY_PREFIX.length),
+          item.reference?.versionToken,
+        );
       }
-      if (item.source === 'data-card' && item.reference) {
-        return { source: 'data-card', kind: 'character', id: item.reference.id };
+      if (item.source === 'data-card') {
+        return dataCardReferenceRequest('character', item.reference);
       }
       // host-local stub 只暴露房主分享的 displayName/type，不提供正文详情。
       return null;

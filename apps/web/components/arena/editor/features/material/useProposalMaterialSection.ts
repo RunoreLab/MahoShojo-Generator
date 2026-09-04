@@ -13,6 +13,7 @@ import { moveItemInList } from '../move-item';
 import type { ArenaMaterialSectionModel } from './material-contract';
 import { MAX_ARENA_REFERENCE_ITEMS } from '@/lib/arena/resource-budget';
 import {
+  dataCardReferenceRequest,
   formatArenaRoomReferenceName,
   resolveArenaRoomReferenceName,
   useArenaRoomReferenceNames,
@@ -62,11 +63,12 @@ export const useProposalMaterialSectionModel = (input: {
   const state = useArenaEditorSelector((value) => value);
   const { disabled, onActionError, onOpenModal } = input;
 
-  const referenceNames = useArenaRoomReferenceNames(state.materials.flatMap((item) => (
-    item.source === 'data-card' && item.reference
-      ? [{ source: 'data-card' as const, kind: 'material' as const, id: item.reference.id }]
-      : []
-  )));
+  // 请求绑定引用 versionToken：同 ID 不同版本不会命中彼此的名称缓存。
+  const referenceNames = useArenaRoomReferenceNames(state.materials.flatMap((item) => {
+    if (item.source !== 'data-card') return [];
+    const request = dataCardReferenceRequest('material', item.reference);
+    return request ? [request] : [];
+  }));
 
   return useMemo(() => {
     if (session.mode !== 'room-proposal') return inertModel;
@@ -84,20 +86,22 @@ export const useProposalMaterialSectionModel = (input: {
 
     return {
       disabled,
-      items: state.materials.map((item) => ({
-        key: item.key,
-        name: item.source === 'data-card' && item.reference
-          ? `在线:${formatArenaRoomReferenceName(
-              { source: 'data-card', id: item.reference.id },
-              resolveArenaRoomReferenceName(
-                { source: 'data-card', kind: 'material', id: item.reference.id },
-                referenceNames,
-              ),
-            )}`
-          : item.name,
-        sourceLabel: proposalSourceLabel(item.source),
-        fileName: null,
-      })),
+      items: state.materials.map((item) => {
+        const request = item.source === 'data-card'
+          ? dataCardReferenceRequest('material', item.reference)
+          : null;
+        return {
+          key: item.key,
+          name: request
+            ? `在线:${formatArenaRoomReferenceName(
+                request,
+                resolveArenaRoomReferenceName(request, referenceNames),
+              )}`
+            : item.name,
+          sourceLabel: proposalSourceLabel(item.source),
+          fileName: null,
+        };
+      }),
       statsLine: `已选素材 ${state.materials.length}；参考项合计 ${referenceItemCount}/${MAX_ARENA_REFERENCE_ITEMS}`,
       notice: PROPOSAL_MATERIAL_NOTICE,
       hasReferenceCapacity: referenceItemCount < MAX_ARENA_REFERENCE_ITEMS,

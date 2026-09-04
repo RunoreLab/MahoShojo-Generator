@@ -16,7 +16,9 @@ import { ARENA_ROOM_PRESET_CATALOG } from '@/lib/arena-room/generated/arena-room
 import { MAX_ARENA_REFERENCE_ITEMS } from '@/lib/arena/resource-budget';
 import {
   arenaRoomReferenceSourcePrefix,
+  dataCardReferenceRequest,
   formatArenaRoomReferenceName,
+  presetReferenceRequest,
   resolveArenaRoomReferenceName,
   useArenaRoomReferenceNames,
   type ArenaRoomReferenceRequest,
@@ -92,23 +94,34 @@ export const useProposalScenarioSectionModel = (input: {
   const state = useArenaEditorSelector((value) => value);
   const { disabled, onActionError, onOpenMainModal, onOpenAuxModal } = input;
 
+  // 请求绑定房间引用的 versionToken：同 ID 不同版本不会命中彼此的名称缓存。
   const scenarioReferenceRequests: ArenaRoomReferenceRequest[] = [
     ...(state.scenario && state.scenario.source !== 'host-local'
-      ? [{
-          source: state.scenario.source === 'preset' ? 'preset' as const : 'data-card' as const,
-          kind: 'scenario' as const,
-          id: state.scenario.source === 'preset'
-            ? state.scenario.key.slice(PRESET_KEY_PREFIX.length)
-            : state.scenario.reference?.id ?? '',
-        }]
+      ? (state.scenario.source === 'preset'
+          ? [presetReferenceRequest(
+              'scenario',
+              state.scenario.key.slice(PRESET_KEY_PREFIX.length),
+              state.scenario.reference?.versionToken,
+            )]
+          : (() => {
+              const request = dataCardReferenceRequest('scenario', state.scenario.reference);
+              return request ? [request] : [];
+            })())
       : []),
-    ...state.auxScenarios.flatMap((item): ArenaRoomReferenceRequest[] => (
-      item.source === 'preset'
-        ? [{ source: 'preset', kind: 'scenario', id: item.key.slice(PRESET_KEY_PREFIX.length) }]
-        : item.source === 'data-card' && item.reference
-          ? [{ source: 'data-card', kind: 'scenario', id: item.reference.id }]
-          : []
-    )),
+    ...state.auxScenarios.flatMap((item): ArenaRoomReferenceRequest[] => {
+      if (item.source === 'preset') {
+        return [presetReferenceRequest(
+          'scenario',
+          item.key.slice(PRESET_KEY_PREFIX.length),
+          item.reference?.versionToken,
+        )];
+      }
+      if (item.source === 'data-card') {
+        const request = dataCardReferenceRequest('scenario', item.reference);
+        return request ? [request] : [];
+      }
+      return [];
+    }),
   ];
   const referenceNames = useArenaRoomReferenceNames(scenarioReferenceRequests);
 
@@ -123,14 +136,20 @@ export const useProposalScenarioSectionModel = (input: {
       }
     };
 
-    const scenarioNameOf = (item: { source: string; key: string; reference: { id: string } | null; name: string }): string => {
+    const scenarioNameOf = (item: { source: string; key: string; reference: { id: string; versionToken?: string } | null; name: string }): string => {
       if (item.source === 'preset') {
-        const request = { source: 'preset' as const, kind: 'scenario' as const, id: item.key.slice(PRESET_KEY_PREFIX.length) };
+        const request = presetReferenceRequest(
+          'scenario',
+          item.key.slice(PRESET_KEY_PREFIX.length),
+          item.reference?.versionToken,
+        );
         return formatArenaRoomReferenceName(request, resolveArenaRoomReferenceName(request, referenceNames));
       }
-      if (item.source === 'data-card' && item.reference) {
-        const request = { source: 'data-card' as const, kind: 'scenario' as const, id: item.reference.id };
-        return formatArenaRoomReferenceName(request, resolveArenaRoomReferenceName(request, referenceNames));
+      if (item.source === 'data-card') {
+        const request = dataCardReferenceRequest('scenario', item.reference);
+        if (request) {
+          return formatArenaRoomReferenceName(request, resolveArenaRoomReferenceName(request, referenceNames));
+        }
       }
       return item.name;
     };

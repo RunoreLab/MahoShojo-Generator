@@ -14,7 +14,9 @@ import {
 
 import {
   arenaRoomReferenceSourcePrefix,
+  dataCardReferenceRequest,
   parseArenaRoomReferenceKey,
+  presetReferenceRequest,
   resolveArenaRoomReferenceName,
   shortReferenceId,
   useArenaRoomReferenceNames,
@@ -71,8 +73,10 @@ export type ArenaProposalChangeLabels = {
   readonly scenarioKey?: (key: string) => string | undefined;
   readonly materialKey?: (key: string) => string | undefined;
   readonly teamKey?: (key: string) => string | undefined;
-  readonly ref?: (ref: { readonly id: string; readonly kind: string }, key?: string) => string | undefined;
-  readonly orderKey?: (key: string) => string | undefined;
+  readonly ref?: (
+    ref: { readonly id: string; readonly kind: string; readonly versionToken?: string },
+    key?: string,
+  ) => string | undefined;
 };
 
 export const arenaProposalExpectedBaseSummary = (change: ArenaProposalChange): string => {
@@ -109,53 +113,93 @@ const materialKeyLabelOf = (labels: ArenaProposalChangeLabels | undefined, key: 
   labels?.materialKey ? labels.materialKey(key) ?? key : key
 );
 
-/** 收集提案变更中所有可解析为预设/在线公开引用的名称请求。 */
+/** 从房间共享配置找回被 key 引用的在线卡版本；预设版本由策展目录提供。 */
+const onlineVersionTokenOf = (
+  config: ArenaRoomSharedConfig | null | undefined,
+  key: string,
+): string | undefined => {
+  if (!config) return undefined;
+  const entry = config.combatants.find((item) => item.key === key)
+    ?? config.auxScenarios.find((item) => item.key === key)
+    ?? config.materials.find((item) => item.key === key)
+    ?? (config.scenario?.key === key ? config.scenario : undefined);
+  return entry && 'ref' in entry ? entry.ref.versionToken : undefined;
+};
+
+/** key 解析为引用请求：绑定房间引用的版本；预设目录版本仅作回退。 */
+const referenceRequestOfKey = (
+  config: ArenaRoomSharedConfig | null | undefined,
+  key: string,
+  fallbackKind: ArenaRoomReferenceRequest['kind'],
+): ArenaRoomReferenceRequest | null => {
+  const parsed = parseArenaRoomReferenceKey(key, fallbackKind);
+  if (!parsed) return null;
+  if (parsed.source === 'preset') {
+    return presetReferenceRequest(parsed.kind, parsed.id, onlineVersionTokenOf(config, key));
+  }
+  return dataCardReferenceRequest(parsed.kind, {
+    id: parsed.id,
+    versionToken: onlineVersionTokenOf(config, key),
+  });
+};
+
+/** add/setScenario 的 ref + 可选 namespace key 解析为绑定版本的引用请求。 */
+const referenceRequestOfRef = (
+  kind: ArenaRoomReferenceRequest['kind'],
+  ref: { readonly id: string; readonly versionToken?: string },
+  key: string | undefined,
+): ArenaRoomReferenceRequest => ({
+  source: key !== undefined && key.startsWith('preset:') ? 'preset' : 'data-card',
+  kind,
+  id: ref.id,
+  ...(ref.versionToken === undefined ? {} : { versionToken: ref.versionToken }),
+});
+
+/** 收集提案变更中所有可解析为预设/在线公开引用的名称请求（绑定引用版本）。 */
 export const collectArenaProposalReferenceRequests = (
   changes: readonly ArenaProposalChange[],
+  config?: ArenaRoomSharedConfig | null,
 ): ArenaRoomReferenceRequest[] => {
   const requests: ArenaRoomReferenceRequest[] = [];
   const push = (request: ArenaRoomReferenceRequest | null): void => {
     if (request) requests.push(request);
   };
-  const sourceOfKey = (key: string | undefined): 'preset' | 'data-card' => (
-    key?.startsWith('preset:') ? 'preset' : 'data-card'
-  );
   for (const change of changes) {
     switch (change.type) {
       case 'addCombatant':
-        push({ source: sourceOfKey(change.key), kind: 'character', id: change.ref.id });
+        push(referenceRequestOfRef('character', change.ref, change.key));
         break;
       case 'removeCombatant':
       case 'setCharacterGuidance':
       case 'assignTeam':
-        push(parseArenaRoomReferenceKey(change.combatantKey, 'character'));
+        push(referenceRequestOfKey(config, change.combatantKey, 'character'));
         break;
       case 'setScenario':
         if (change.ref !== null) {
-          push({ source: sourceOfKey(change.key), kind: 'scenario', id: change.ref.id });
+          push(referenceRequestOfRef('scenario', change.ref, change.key));
         }
         break;
       case 'addAuxScenario':
-        push({ source: sourceOfKey(change.key), kind: 'scenario', id: change.ref.id });
+        push(referenceRequestOfRef('scenario', change.ref, change.key));
         break;
       case 'removeAuxScenario':
-        push(parseArenaRoomReferenceKey(change.scenarioKey, 'scenario'));
+        push(referenceRequestOfKey(config, change.scenarioKey, 'scenario'));
         break;
       case 'addMaterial':
-        push({ source: sourceOfKey(change.key), kind: 'material', id: change.ref.id });
+        push(referenceRequestOfRef('material', change.ref, change.key));
         break;
       case 'removeMaterial':
-        push(parseArenaRoomReferenceKey(change.materialKey, 'material'));
+        push(referenceRequestOfKey(config, change.materialKey, 'material'));
         break;
       case 'reorderCombatants':
       case 'reorderTeamCombatants':
-        change.value.forEach((key) => push(parseArenaRoomReferenceKey(key, 'character')));
+        change.value.forEach((key) => push(referenceRequestOfKey(config, key, 'character')));
         break;
       case 'reorderAuxScenarios':
-        change.value.forEach((key) => push(parseArenaRoomReferenceKey(key, 'scenario')));
+        change.value.forEach((key) => push(referenceRequestOfKey(config, key, 'scenario')));
         break;
       case 'reorderMaterials':
-        change.value.forEach((key) => push(parseArenaRoomReferenceKey(key, 'material')));
+        change.value.forEach((key) => push(referenceRequestOfKey(config, key, 'material')));
         break;
       default:
         break;
@@ -170,17 +214,17 @@ export const buildArenaProposalChangeLabels = (
   config: ArenaRoomSharedConfig | null,
   onlineNames: ReadonlyMap<string, string>,
 ): ArenaProposalChangeLabels => {
-  const referenceName = (request: ArenaRoomReferenceRequest): string | null => (
-    resolveArenaRoomReferenceName(request, onlineNames)
-  );
   const prefixedName = (
     request: ArenaRoomReferenceRequest,
     fallback: string | undefined,
   ): string | undefined => {
-    const name = referenceName(request);
+    const name = resolveArenaRoomReferenceName(request, onlineNames);
     if (name) return `${arenaRoomReferenceSourcePrefix(request.source)}:${name}`;
     return fallback;
   };
+  const fallbackOf = (request: ArenaRoomReferenceRequest): string => (
+    `${arenaRoomReferenceSourcePrefix(request.source)}:${shortReferenceId(request.id)}`
+  );
   const hostLocalNameOf = (key: string): string | undefined => {
     const entry = config?.combatants.find((item) => item.key === key);
     if (entry && !('ref' in entry)) return `房主本地:${entry.displayName}`;
@@ -191,45 +235,36 @@ export const buildArenaProposalChangeLabels = (
     if (material && !('ref' in material)) return `房主本地:${material.displayName}`;
     return undefined;
   };
+  const keyLabelOf = (fallbackKind: ArenaRoomReferenceRequest['kind']) => (key: string): string | undefined => {
+    const request = referenceRequestOfKey(config, key, fallbackKind);
+    if (!request) return hostLocalNameOf(key);
+    return prefixedName(request, fallbackOf(request));
+  };
   return {
-    combatantKey: (key) => {
-      const request = parseArenaRoomReferenceKey(key, 'character');
-      if (!request) return hostLocalNameOf(key);
-      return prefixedName(request, `在线:${shortReferenceId(request.id)}`);
-    },
-    scenarioKey: (key) => {
-      const request = parseArenaRoomReferenceKey(key, 'scenario');
-      if (!request) return hostLocalNameOf(key);
-      return prefixedName(request, `在线:${shortReferenceId(request.id)}`);
-    },
-    materialKey: (key) => {
-      const request = parseArenaRoomReferenceKey(key, 'material');
-      if (!request) return hostLocalNameOf(key);
-      return prefixedName(request, `在线:${shortReferenceId(request.id)}`);
-    },
+    combatantKey: keyLabelOf('character'),
+    scenarioKey: keyLabelOf('scenario'),
+    materialKey: keyLabelOf('material'),
     teamKey: (key) => config?.teams.find((team) => team.key === key)?.displayName,
     ref: (ref, key) => {
-      const request: ArenaRoomReferenceRequest = {
-        source: key?.startsWith('preset:') ? 'preset' : 'data-card',
-        kind: ref.kind === 'scenario' ? 'scenario' : ref.kind === 'material' ? 'material' : 'character',
-        id: ref.id,
-      };
-      return prefixedName(request, `${arenaRoomReferenceSourcePrefix(request.source)}:${shortReferenceId(ref.id)}`);
-    },
-    orderKey: (key) => {
-      const request = parseArenaRoomReferenceKey(key, 'character');
-      if (!request) return hostLocalNameOf(key);
-      return prefixedName(request, `在线:${shortReferenceId(request.id)}`);
+      const request = referenceRequestOfRef(
+        ref.kind === 'scenario' ? 'scenario' : ref.kind === 'material' ? 'material' : 'character',
+        ref,
+        key,
+      );
+      return prefixedName(request, fallbackOf(request));
     },
   };
 };
 
-/** 提案摘要标签 hook：预设走策展目录，在线公开卡走共享名称缓存。 */
+/** 提案摘要标签 hook：预设走策展目录，在线公开卡走共享名称缓存（按引用版本缓存）。 */
 export const useArenaProposalChangeLabels = (
   config: ArenaRoomSharedConfig | null,
   changes: readonly ArenaProposalChange[],
 ): ArenaProposalChangeLabels => {
-  const requests = useMemo(() => collectArenaProposalReferenceRequests(changes), [changes]);
+  const requests = useMemo(
+    () => collectArenaProposalReferenceRequests(changes, config),
+    [changes, config],
+  );
   const onlineNames = useArenaRoomReferenceNames(requests);
   return useMemo(
     () => buildArenaProposalChangeLabels(changes, config, onlineNames),
@@ -285,16 +320,16 @@ export const arenaProposalChangeProposedSummary = (
   change: ArenaProposalChange,
   labels?: ArenaProposalChangeLabels,
 ): string => {
-  const orderKeyLabel = (key: string): string => (
-    labels?.orderKey ? labels.orderKey(key) ?? safeText(key) : safeText(key)
-  );
   switch (change.type) {
     case 'reorderCombatants':
-    case 'reorderTeams':
     case 'reorderTeamCombatants':
+      return `${arenaProposalChangeSummary(change, labels)}：${change.value.map((key) => combatantLabelOf(labels, key)).join(' → ')}`;
+    case 'reorderTeams':
+      return `${arenaProposalChangeSummary(change, labels)}：${change.value.map((key) => teamKeyLabelOf(labels, key)).join(' → ')}`;
     case 'reorderAuxScenarios':
+      return `${arenaProposalChangeSummary(change, labels)}：${change.value.map((key) => scenarioKeyLabelOf(labels, key)).join(' → ')}`;
     case 'reorderMaterials':
-      return `${arenaProposalChangeSummary(change, labels)}：${change.value.map(orderKeyLabel).join(' → ')}`;
+      return `${arenaProposalChangeSummary(change, labels)}：${change.value.map((key) => materialKeyLabelOf(labels, key)).join(' → ')}`;
     case 'setCharacterGuidance':
       return change.value === null
         ? `清空角色 ${combatantLabelOf(labels, change.combatantKey)} 引导`
@@ -339,12 +374,35 @@ export const arenaProposalSelectionError = (
   }
 };
 
+/**
+ * 悬停提示：可读名称可能被名称缓存/策展目录遮蔽原始引用身份，
+ * 这里统一暴露完整原始 key（含 namespace 与完整 ID）。
+ */
 export const changeRefTitle = (change: ArenaProposalChange): string | undefined => {
-  if (change.type === 'addCombatant' || change.type === 'addAuxScenario' || change.type === 'addMaterial') {
-    return change.ref.id;
+  switch (change.type) {
+    case 'addCombatant':
+    case 'addAuxScenario':
+    case 'addMaterial':
+      return change.key ?? `data-card:${change.ref.id}`;
+    case 'setScenario':
+      return change.ref === null ? undefined : change.key ?? `data-card:${change.ref.id}`;
+    case 'removeCombatant':
+    case 'setCharacterGuidance':
+    case 'assignTeam':
+      return change.combatantKey;
+    case 'removeAuxScenario':
+      return change.scenarioKey;
+    case 'removeMaterial':
+      return change.materialKey;
+    case 'reorderCombatants':
+    case 'reorderTeams':
+    case 'reorderTeamCombatants':
+    case 'reorderAuxScenarios':
+    case 'reorderMaterials':
+      return change.value.join(' → ');
+    default:
+      return undefined;
   }
-  if (change.type === 'setScenario' && change.ref !== null) return change.ref.id;
-  return undefined;
 };
 
 export const arenaProposalConflictSummary = (analysis: ArenaProposalChangeAnalysis): string => {

@@ -12,6 +12,8 @@ export type ArenaRoomReferenceRequest = Readonly<{
   source: ArenaRoomReferenceSource;
   kind: 'character' | 'scenario' | 'material';
   id: string;
+  /** 房间引用身份的一部分：在线卡为服务器 updatedAt，预设为策展目录内容摘要。 */
+  versionToken?: string;
 }>;
 
 /** 详情弹窗的请求：仅预设策展目录与在线公开卡可发起。 */
@@ -19,6 +21,7 @@ export type ArenaRoomReferenceDetailsRequest = Readonly<{
   source: ArenaRoomReferenceSource;
   kind: 'character' | 'scenario' | 'material';
   id: string;
+  versionToken?: string;
 }>;
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
@@ -57,6 +60,10 @@ export const formatArenaRoomReferenceName = (
 
 type Listener = () => void;
 
+const onlineNameCacheKey = (id: string, versionToken: string | undefined): string => (
+  versionToken === undefined ? id : `${id}@${versionToken}`
+);
+
 const onlineNameCache = new Map<string, string>();
 const onlineNameInFlight = new Set<string>();
 /** 加载失败/未命中的负缓存：避免每次重渲染都重新发起请求形成渲染循环。 */
@@ -77,48 +84,59 @@ const subscribe = (listener: Listener): (() => void) => {
 
 const getSnapshot = (): ReadonlyMap<string, string> => snapshot;
 
-const loadOnlineName = async (id: string): Promise<void> => {
-  if (onlineNameCache.has(id) || onlineNameInFlight.has(id)) return;
-  const failedAt = onlineNameFailedAt.get(id);
+const loadOnlineName = async (id: string, versionToken: string | undefined): Promise<void> => {
+  const cacheKey = onlineNameCacheKey(id, versionToken);
+  if (onlineNameCache.has(cacheKey) || onlineNameInFlight.has(cacheKey)) return;
+  const failedAt = onlineNameFailedAt.get(cacheKey);
   if (failedAt !== undefined && Date.now() - failedAt < ONLINE_NAME_RETRY_MS) return;
-  onlineNameInFlight.add(id);
+  onlineNameInFlight.add(cacheKey);
   try {
     const result = await getPublicCardByIdWithSharedCache({
       id,
       fetcher: fetchPublicDataCardRowById,
     });
     const name = isRecord(result.card) ? text(result.card.name) : '';
-    if (name && !onlineNameCache.has(id)) onlineNameCache.set(id, name);
-    else if (!name) onlineNameFailedAt.set(id, Date.now());
+    if (name && !onlineNameCache.has(cacheKey)) onlineNameCache.set(cacheKey, name);
+    else if (!name) onlineNameFailedAt.set(cacheKey, Date.now());
     emit();
   } catch {
     // 名称是展示增强；加载失败记入负缓存并保持 ID 缩写回退即可。
-    onlineNameFailedAt.set(id, Date.now());
+    onlineNameFailedAt.set(cacheKey, Date.now());
   } finally {
-    onlineNameInFlight.delete(id);
+    onlineNameInFlight.delete(cacheKey);
   }
 };
 
-/** 订阅在线公开卡名称缓存；对未知 ID 触发一次后台加载。 */
+/** 订阅在线公开卡名称缓存；对未知 (id, versionToken) 触发一次后台加载。 */
 export const useArenaRoomReferenceNames = (
   requests: readonly ArenaRoomReferenceRequest[],
 ): ReadonlyMap<string, string> => {
-  const onlineIds = useMemo(
-    () => [...new Set(requests.filter((request) => request.source === 'data-card').map((request) => request.id))],
+  const onlineCacheKeys = useMemo(
+    () => [...new Set(requests
+      .filter((request) => request.source === 'data-card')
+      .map((request) => onlineNameCacheKey(request.id, request.versionToken)))],
     [requests],
   );
-  const requestKey = onlineIds.join('\n');
+  const requestKey = onlineCacheKeys.join('\n');
 
   useEffect(() => {
-    onlineIds.forEach((id) => { void loadOnlineName(id); });
-  }, [requestKey, onlineIds]);
+    const byKey = new Map(requests
+      .filter((request) => request.source === 'data-card')
+      .map((request) => [onlineNameCacheKey(request.id, request.versionToken), request] as const));
+    onlineCacheKeys.forEach((cacheKey) => {
+      const request = byKey.get(cacheKey);
+      if (request) void loadOnlineName(request.id, request.versionToken);
+    });
+  }, [requestKey, onlineCacheKeys, requests]);
 
   useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
   return snapshot;
 };
 
 export const arenaRoomReferenceRequestKey = (request: ArenaRoomReferenceRequest): string => (
-  `${request.source}:${request.kind}:${request.id}`
+  request.versionToken === undefined
+    ? `${request.source}:${request.kind}:${request.id}`
+    : `${request.source}:${request.kind}:${request.id}@${request.versionToken}`
 );
 
 /** 解析 `preset:<id>` / `data-card:<id>` 形式的房间共享 key。 */
@@ -135,15 +153,73 @@ export const parseArenaRoomReferenceKey = (
   return null;
 };
 
-/** 预设走策展目录同步解析，在线公开卡走名称缓存；都没有时返回 null。 */
+/** 预设走策展目录同步解析，在线公开卡按 (id, versionToken) 走名称缓存；都没有时返回 null。 */
 export const resolveArenaRoomReferenceName = (
   request: ArenaRoomReferenceRequest,
   onlineNames: ReadonlyMap<string, string>,
 ): string | null => (
   request.source === 'preset'
     ? arenaRoomPresetReferenceName(request.kind, request.id)
-    : onlineNames.get(request.id) ?? null
+    : onlineNames.get(onlineNameCacheKey(request.id, request.versionToken)) ?? null
 );
+
+/** 策展目录条目的版本摘要；目录外预设返回 null。 */
+export const arenaRoomPresetReferenceVersionToken = (
+  kind: ArenaRoomReferenceRequest['kind'],
+  id: string,
+): string | null => (
+  ARENA_ROOM_PRESET_CATALOG.find((entry) => entry.kind === kind && entry.id === id)?.versionToken ?? null
+);
+
+/**
+ * 预设引用请求：优先绑定房间引用的版本（引用身份），其次绑定策展目录当前版本
+ * （目录外预设不带版本）。详情弹窗据此比较"引用版本 vs 站点当前版本"。
+ */
+export const presetReferenceRequest = (
+  kind: ArenaRoomReferenceRequest['kind'],
+  id: string,
+  roomVersionToken?: string | null,
+): ArenaRoomReferenceRequest => {
+  const roomVersion = typeof roomVersionToken === 'string' ? roomVersionToken.trim() : '';
+  const versionToken = roomVersion !== ''
+    ? roomVersion
+    : arenaRoomPresetReferenceVersionToken(kind, id);
+  return versionToken === null
+    ? { source: 'preset', kind, id }
+    : { source: 'preset', kind, id, versionToken };
+};
+
+/** 在线公开卡引用请求：绑定引用身份中的 versionToken；ref 缺失时返回 null。 */
+export const dataCardReferenceRequest = (
+  kind: ArenaRoomReferenceRequest['kind'],
+  ref: { readonly id: string; readonly versionToken?: string } | null | undefined,
+): ArenaRoomReferenceRequest | null => (
+  ref
+    ? {
+        source: 'data-card',
+        kind,
+        id: ref.id,
+        ...(ref.versionToken === undefined ? {} : { versionToken: ref.versionToken }),
+      }
+    : null
+);
+
+/**
+ * 房间引用版本是否已相对当前公开内容漂移：
+ * 在线卡的 versionToken 即服务器元数据 updatedAt；预设为策展目录内容摘要。
+ * 返回 null 表示请求未绑定版本或无法取得当前版本，无法判定。
+ * 展示层只负责提示漂移；是否重新选择引用仍由用户通过正规编辑路径决定，
+ * 接受时的 stale 校验始终以服务器权威判定为准。
+ */
+export const arenaRoomReferenceVersionDrifted = (
+  expectedVersionToken: string | undefined,
+  currentVersionToken: string | null | undefined,
+): boolean | null => {
+  if (typeof expectedVersionToken !== 'string' || expectedVersionToken === '') return null;
+  const current = typeof currentVersionToken === 'string' ? currentVersionToken.trim() : '';
+  if (!current) return null;
+  return current !== expectedVersionToken;
+};
 
 /** 统一来源前缀：与提案摘要中的 在线:/预设: 命名空间一致。 */
 export const arenaRoomReferenceSourcePrefix = (source: ArenaRoomReferenceSource): string => (
