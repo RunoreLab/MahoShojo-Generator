@@ -271,7 +271,6 @@ describe('useArenaRoomHostReconciliation', () => {
         kind: 'dirty',
         reasons: ['shared-config'] as const,
         current: { sharedConfig: config('classic'), hostLocalPayloads: [] },
-        room: { sharedConfig: config('classic'), hostLocalPayloads: [] },
       })),
       startFromRoom: vi.fn(),
       capturePublished: vi.fn(),

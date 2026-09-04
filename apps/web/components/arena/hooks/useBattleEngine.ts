@@ -92,12 +92,12 @@ import {
 
 const sanitizeTextByShieldWords = (text: string): string => applyShieldWords(text).filteredText;
 
-export type ArenaRoomGenerationPreflightChoice = 'cancel' | 'publish' | 'use-room';
+export type ArenaRoomGenerationPreflightChoice = 'cancel' | 'publish' | 'sync-room' | 'confirm-start';
 
 export type ArenaRoomGenerationPreflightPrompt = Readonly<{
   reasons: readonly ArenaRoomHostWorkspaceDirtyReason[];
-  canUseRoom: boolean;
   canPublish: boolean;
+  canConfirmStart: boolean;
   pendingProposalCount: number;
   busy: boolean;
 }>;
@@ -418,8 +418,8 @@ export const useBattleEngine = () => {
   const requestArenaRoomGenerationPreflight = useCallback((
     input: Readonly<{
       reasons: readonly ArenaRoomHostWorkspaceDirtyReason[];
-      canUseRoom: boolean;
       canPublish: boolean;
+      canConfirmStart?: boolean;
       pendingProposalCount?: number;
     }>,
   ): Promise<ArenaRoomGenerationPreflightChoice> => {
@@ -428,8 +428,8 @@ export const useBattleEngine = () => {
       pendingArenaRoomGenerationPreflight.current = { resolve };
       setArenaRoomGenerationPreflight({
         reasons: input.reasons,
-        canUseRoom: input.canUseRoom,
         canPublish: input.canPublish,
+        canConfirmStart: input.canConfirmStart ?? false,
         pendingProposalCount: input.pendingProposalCount ?? 0,
         busy: false,
       });
@@ -755,31 +755,32 @@ export const useBattleEngine = () => {
         let startInputs: ArenaRoomGenerationStartInputs | null = null;
         let startAuthority = authority;
         if (!bundle) {
-          const roomStart = arenaRoomRuntime.hostWorkspace.startFromRoom(authority);
           const choice = await requestArenaRoomGenerationPreflight({
             reasons: ['working-copy-invalid'],
-            canUseRoom: roomStart !== null,
             canPublish: false,
             pendingProposalCount,
           });
           if (choice === 'cancel') return;
-          if (choice !== 'use-room' || !roomStart) {
-            throw new Error('本地编辑草稿无法发布，且缺少可用的房主本地内容发布基准。');
+          if (choice === 'sync-room') {
+            // 本地草稿无法安全投影：放弃本地草稿方向，把房间权威同步到
+            // Arena 编辑区；不自动开始生成，房主确认眼前配置后再次点击。
+            await arenaRoomRuntime.hostReconciliation.syncRoom();
+            return;
           }
-          startInputs = roomStart;
+          throw new Error('本地编辑草稿无法发布，已取消本次生成。');
         } else {
           const comparison = arenaRoomRuntime.hostWorkspace.compare(authority, bundle);
           startInputs = comparison.kind === 'clean' ? comparison.start : null;
           if (comparison.kind === 'clean' && pendingProposalCount > 0) {
             const choice = await requestArenaRoomGenerationPreflight({
               reasons: [],
-              canUseRoom: true,
               canPublish: false,
+              canConfirmStart: true,
               pendingProposalCount,
             });
             if (choice === 'cancel') return;
-            if (choice !== 'use-room') {
-              throw new Error('请先确认待处理提案，再选择是否按当前房间配置生成。');
+            if (choice !== 'confirm-start') {
+              throw new Error('请先确认待处理提案，再选择是否开始生成。');
             }
           }
           if (comparison.kind === 'dirty') {
@@ -792,74 +793,73 @@ export const useBattleEngine = () => {
               ? 'publish'
               : await requestArenaRoomGenerationPreflight({
                   reasons: comparison.reasons,
-                  canUseRoom: comparison.room !== null,
                   // reconciliation error 期间本地与房间权威的关系不可信：
-                  // 此时只允许明确选择「按当前房间配置开始」，禁止把本地
-                  // working copy 发布出去覆盖房间权威。
+                  // 此时禁止把本地 working copy 发布出去覆盖房间权威，
+                  // 只允许显式同步房间配置或取消。
                   canPublish: isArenaRoomGenerationSyncSettled(arenaRoomRuntime.hostReconciliation.state.kind),
                   pendingProposalCount,
                 });
             if (choice === 'cancel') return;
-            if (choice === 'use-room') {
-              if (!comparison.room) {
-                throw new Error('缺少完整的房主本地内容发布基准，无法按当前房间配置启动。');
-              }
-              startInputs = comparison.room;
-            } else {
-              if (!isArenaRoomGenerationSyncSettled(arenaRoomRuntime.hostReconciliation.state.kind)) {
-                // Preflight 打开期间同步可能已开始或已失败；此时发布本地草稿
-                // 会覆盖尚未安装/关系不明的房间权威，必须拒绝并让 reconciliation
-                // 先落定。
-                throw new Error(arenaRoomGenerationSyncGateMessage(arenaRoomRuntime.hostReconciliation.state.kind));
-              }
-              const beforePublishState = arenaRoomRuntime.controller.getSnapshot();
-              const beforePublishAuthority = arenaRoomHostWorkspaceAuthorityFromSession(
-                beforePublishState.session,
-              );
-              const beforePublishProposalFingerprint = pendingProposalFingerprint(
-                beforePublishState.session?.snapshot.proposals ?? [],
-              );
-              const beforePublishControlSeq = beforePublishState.session?.snapshot.controlSeq;
-              if (
-                beforePublishState.configPublishPending
-                || beforePublishState.configPublishResultUnknown
-                || beforePublishControlSeq === undefined
-                || !beforePublishAuthority
-                || beforePublishAuthority.roomId !== authority.roomId
-                || beforePublishAuthority.roomEpoch !== authority.roomEpoch
-                || beforePublishAuthority.ownerUserId !== authority.ownerUserId
-                || beforePublishAuthority.revision !== authority.revision
-                || beforePublishProposalFingerprint !== proposalFingerprint
-              ) {
-                throw new Error('房间配置或提案列表已变化，请确认最新状态后重试。');
-              }
-              await arenaRoomRuntime.controller.publishConfig({
-                expectedRoomEpoch: authority.roomEpoch,
-                expectedRevision: authority.revision,
-                expectedControlSeq: beforePublishControlSeq,
-                sharedConfig: comparison.current.sharedConfig,
-              });
-              const publishedState = arenaRoomRuntime.controller.getSnapshot();
-              const publishedAuthority = arenaRoomHostWorkspaceAuthorityFromSession(publishedState.session);
-              if (
-                publishedState.configPublishPending
-                || publishedState.configPublishResultUnknown
-                || !publishedAuthority
-                || publishedAuthority.roomId !== authority.roomId
-                || publishedAuthority.roomEpoch !== authority.roomEpoch
-                || publishedAuthority.ownerUserId !== authority.ownerUserId
-                || publishedAuthority.revision !== authority.revision + 1
-                || !areArenaRoomSharedConfigsEqual(
-                  publishedAuthority.sharedConfig,
-                  comparison.current.sharedConfig,
-                )
-              ) {
-                throw new Error('房间配置发布结果无法确认，请先同步房间权威状态。');
-              }
-              arenaRoomRuntime.hostWorkspace.capturePublished(publishedAuthority, bundle);
-              startInputs = comparison.current;
-              startAuthority = publishedAuthority;
+            if (choice === 'sync-room') {
+              // 眼—手一致硬不变量：本地与房间权威不一致时不得直接生成。
+              // 同步把房间权威物化到 Arena 编辑区（放弃未发布本地修改），
+              // 完成后由房主再次点击生成。
+              await arenaRoomRuntime.hostReconciliation.syncRoom();
+              return;
             }
+            if (!isArenaRoomGenerationSyncSettled(arenaRoomRuntime.hostReconciliation.state.kind)) {
+              // Preflight 打开期间同步可能已开始或已失败；此时发布本地草稿
+              // 会覆盖尚未安装/关系不明的房间权威，必须拒绝并让 reconciliation
+              // 先落定。
+              throw new Error(arenaRoomGenerationSyncGateMessage(arenaRoomRuntime.hostReconciliation.state.kind));
+            }
+            const beforePublishState = arenaRoomRuntime.controller.getSnapshot();
+            const beforePublishAuthority = arenaRoomHostWorkspaceAuthorityFromSession(
+              beforePublishState.session,
+            );
+            const beforePublishProposalFingerprint = pendingProposalFingerprint(
+              beforePublishState.session?.snapshot.proposals ?? [],
+            );
+            const beforePublishControlSeq = beforePublishState.session?.snapshot.controlSeq;
+            if (
+              beforePublishState.configPublishPending
+              || beforePublishState.configPublishResultUnknown
+              || beforePublishControlSeq === undefined
+              || !beforePublishAuthority
+              || beforePublishAuthority.roomId !== authority.roomId
+              || beforePublishAuthority.roomEpoch !== authority.roomEpoch
+              || beforePublishAuthority.ownerUserId !== authority.ownerUserId
+              || beforePublishAuthority.revision !== authority.revision
+              || beforePublishProposalFingerprint !== proposalFingerprint
+            ) {
+              throw new Error('房间配置或提案列表已变化，请确认最新状态后重试。');
+            }
+            await arenaRoomRuntime.controller.publishConfig({
+              expectedRoomEpoch: authority.roomEpoch,
+              expectedRevision: authority.revision,
+              expectedControlSeq: beforePublishControlSeq,
+              sharedConfig: comparison.current.sharedConfig,
+            });
+            const publishedState = arenaRoomRuntime.controller.getSnapshot();
+            const publishedAuthority = arenaRoomHostWorkspaceAuthorityFromSession(publishedState.session);
+            if (
+              publishedState.configPublishPending
+              || publishedState.configPublishResultUnknown
+              || !publishedAuthority
+              || publishedAuthority.roomId !== authority.roomId
+              || publishedAuthority.roomEpoch !== authority.roomEpoch
+              || publishedAuthority.ownerUserId !== authority.ownerUserId
+              || publishedAuthority.revision !== authority.revision + 1
+              || !areArenaRoomSharedConfigsEqual(
+                publishedAuthority.sharedConfig,
+                comparison.current.sharedConfig,
+              )
+            ) {
+              throw new Error('房间配置发布结果无法确认，请先同步房间权威状态。');
+            }
+            arenaRoomRuntime.hostWorkspace.capturePublished(publishedAuthority, bundle);
+            startInputs = comparison.current;
+            startAuthority = publishedAuthority;
           }
         }
         if (!startInputs) throw new Error('无法读取多人生成所需的当前房间配置。');

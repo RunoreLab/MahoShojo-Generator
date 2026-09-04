@@ -36,7 +36,6 @@ export type ArenaRoomHostWorkspaceComparison =
       kind: 'dirty';
       reasons: readonly ArenaRoomHostWorkspaceDirtyReason[];
       current: ArenaRoomGenerationStartInputs;
-      room: ArenaRoomGenerationStartInputs | null;
     }>;
 
 export type ArenaRoomHostWorkspace = Readonly<{
@@ -248,7 +247,6 @@ export const createArenaRoomHostWorkspace = (): ArenaRoomHostWorkspace => {
         authority.sharedConfig,
         normalized.payloads,
       );
-      const roomStart = startFromRoom(authority);
       const hasLocalAuthority = (expected?.size ?? 0) > 0;
       const contentMatches = !hasLocalAuthority || (
         relevantBaseline !== null
@@ -274,7 +272,6 @@ export const createArenaRoomHostWorkspace = (): ArenaRoomHostWorkspace => {
         kind: 'dirty' as const,
         reasons: Object.freeze(reasons),
         current: startInputs(normalized.sharedConfig, normalized.payloads),
-        room: roomStart,
       });
     },
 

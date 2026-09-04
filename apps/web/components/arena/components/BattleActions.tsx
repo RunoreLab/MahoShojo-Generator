@@ -261,8 +261,8 @@ export function BattleActions({ showAdvancedUtilities = true }: { showAdvancedUt
       <ArenaRoomGenerationPreflightDialog
         isOpen={arenaRoomGenerationPreflight !== null}
         reasons={arenaRoomGenerationPreflight?.reasons ?? []}
-        canUseRoom={arenaRoomGenerationPreflight?.canUseRoom ?? false}
         canPublish={arenaRoomGenerationPreflight?.canPublish ?? false}
+        canConfirmStart={arenaRoomGenerationPreflight?.canConfirmStart ?? false}
         pendingProposalCount={arenaRoomGenerationPreflight?.pendingProposalCount ?? 0}
         busy={arenaRoomGenerationPreflight?.busy ?? false}
         onChoice={resolveArenaRoomGenerationPreflight}

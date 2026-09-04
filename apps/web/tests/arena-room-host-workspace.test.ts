@@ -90,7 +90,6 @@ describe('Arena Room host workspace baseline', () => {
     });
     if (comparison.kind !== 'dirty') throw new Error('expected dirty');
     expect(comparison.current.hostLocalPayloads[0]!.payload).toMatchObject({ secret: 'changed-body' });
-    expect(comparison.room?.hostLocalPayloads[0]!.payload).toMatchObject({ secret: 'baseline-body' });
   });
 
   it('Room authority 被 Proposal 改变而 host working copy 未同步时不静默覆盖', () => {
@@ -101,7 +100,6 @@ describe('Arena Room host workspace baseline', () => {
     expect(comparison).toMatchObject({
       kind: 'dirty',
       reasons: ['shared-config'],
-      room: { sharedConfig: { userGuidance: '成员建议已接受' } },
       current: { sharedConfig: { userGuidance: '' } },
     });
   });
@@ -126,13 +124,12 @@ describe('Arena Room host workspace baseline', () => {
     expect(comparison).toMatchObject({
       kind: 'dirty',
       reasons: ['baseline-missing'],
-      room: null,
     });
 
     workspace.capturePublished(authority(), bundle());
     workspace.retainFor(authority('', { roomEpoch: 'epoch-2' }));
     expect(workspace.compare(authority('', { roomEpoch: 'epoch-2' }), bundle()))
-      .toMatchObject({ kind: 'dirty', reasons: ['baseline-missing'], room: null });
+      .toMatchObject({ kind: 'dirty', reasons: ['baseline-missing'] });
   });
 
   it('没有 host-local ref 时不需要内存 baseline 也可安全启动', () => {

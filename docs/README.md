@@ -25,6 +25,7 @@ Arena 多人 v1 production ingress 重整与后续激活使用以下专项入口
 Arena 多人 GMR-10P 产品一致性整改使用以下权威入口：
 
 - [Arena 多人产品一致性与既有 Arena 复用修订](./specs/2026-08-31_150000_Arena多人产品一致性与既有Arena复用修订.md)
+- [Arena 多人生成眼—手一致与 preflight 收敛修订](./specs/2026-09-04_091400_Arena多人生成眼手一致与preflight收敛修订.md)（覆盖上文的 7.3 preflight 选项，补充 7.2 命令响应收敛）
 - [Arena 多人 GMR-10P 产品一致性整改实施计划](./plans/2026-08-31_150000_Arena多人GMR-10P产品一致性整改实施计划.md)
 - [Arena 多人 GMR-10P 产品一致性实施与退出审计](./logs/2026-09-01_002500_Arena多人GMR-10P产品一致性实施与退出审计.md)
 

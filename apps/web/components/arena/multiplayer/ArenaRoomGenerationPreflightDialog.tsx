@@ -3,13 +3,13 @@
 import { BaseModal } from '@/components/shared/BaseModal';
 import type { ArenaRoomHostWorkspaceDirtyReason } from '@/lib/arena-room/host-workspace';
 
-export type ArenaRoomGenerationPreflightChoice = 'cancel' | 'publish' | 'use-room';
+export type ArenaRoomGenerationPreflightChoice = 'cancel' | 'publish' | 'sync-room' | 'confirm-start';
 
 type Props = Readonly<{
   isOpen: boolean;
   reasons: readonly ArenaRoomHostWorkspaceDirtyReason[];
-  canUseRoom: boolean;
   canPublish: boolean;
+  canConfirmStart: boolean;
   pendingProposalCount?: number;
   busy: boolean;
   onChoice: (choice: ArenaRoomGenerationPreflightChoice) => void;
@@ -27,13 +27,13 @@ const reasonText: Readonly<Record<ArenaRoomHostWorkspaceDirtyReason, string>> = 
 export function ArenaRoomGenerationPreflightDialog({
   isOpen,
   reasons,
-  canUseRoom,
   canPublish,
+  canConfirmStart,
   pendingProposalCount = 0,
   busy,
   onChoice,
 }: Props) {
-  const noSafeStartPath = !canUseRoom && !canPublish;
+  const dirty = reasons.length > 0;
   return (
     <BaseModal
       isOpen={isOpen}
@@ -53,22 +53,36 @@ export function ArenaRoomGenerationPreflightDialog({
           >
             取消
           </button>
-          <button
-            type="button"
-            className={`${buttonClass} border-gray-300 bg-white text-gray-800 hover:bg-gray-100`}
-            disabled={busy || !canUseRoom}
-            onClick={() => onChoice('use-room')}
-          >
-            按当前房间配置开始
-          </button>
-          <button
-            type="button"
-            className={`${buttonClass} border-fuchsia-600 bg-fuchsia-600 text-white hover:bg-fuchsia-700`}
-            disabled={busy || !canPublish}
-            onClick={() => onChoice('publish')}
-          >
-            更新房间配置并开始
-          </button>
+          {dirty ? (
+            <>
+              <button
+                type="button"
+                className={`${buttonClass} border-gray-300 bg-white text-gray-800 hover:bg-gray-100`}
+                disabled={busy}
+                onClick={() => onChoice('sync-room')}
+              >
+                放弃本地修改，同步房间配置
+              </button>
+              <button
+                type="button"
+                className={`${buttonClass} border-fuchsia-600 bg-fuchsia-600 text-white hover:bg-fuchsia-700`}
+                disabled={busy || !canPublish}
+                onClick={() => onChoice('publish')}
+              >
+                更新房间配置并开始
+              </button>
+            </>
+          ) : null}
+          {!dirty && canConfirmStart ? (
+            <button
+              type="button"
+              className={`${buttonClass} border-fuchsia-600 bg-fuchsia-600 text-white hover:bg-fuchsia-700`}
+              disabled={busy}
+              onClick={() => onChoice('confirm-start')}
+            >
+              确认按当前配置开始
+            </button>
+          ) : null}
         </div>
       )}
     >
@@ -78,28 +92,21 @@ export function ArenaRoomGenerationPreflightDialog({
             当前还有 {pendingProposalCount} 个待处理提案；继续生成不会应用这些提案。
           </p>
         ) : null}
-        {reasons.length > 0 ? (
+        {dirty ? (
           <>
-            <p>检测到未发布的本地修改，不会因为点击“开始生成”而静默覆盖房间。</p>
+            <p>检测到未发布的本地修改，不会因为点击“开始生成”而静默覆盖房间，也不能用看不见的房间配置开始生成。</p>
             <ul className="list-disc space-y-1 pl-5">
               {reasons.map((reason) => <li key={reason}>{reasonText[reason]}</li>)}
             </ul>
+            <p className="rounded-lg border border-sky-300 bg-sky-50 px-3 py-2 text-sky-900" role="status">
+              选择“同步房间配置”会把房间当前配置物化到编辑区（放弃上方列出的未发布本地修改）；完成后再点击一次开始生成。
+            </p>
+            {!canPublish ? (
+              <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900" role="status">
+                当前本地编辑草稿无法安全发布；请选择同步房间配置，或取消后修正编辑内容。
+              </p>
+            ) : null}
           </>
-        ) : null}
-        {noSafeStartPath ? (
-          <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900" role="status">
-            当前既无法安全发布本地草稿，也缺少可恢复的房间配置；请取消后重新同步或修正编辑内容。
-          </p>
-        ) : null}
-        {!noSafeStartPath && !canUseRoom ? (
-          <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900" role="status">
-            缺少完整的本地内容发布基准，无法安全地“按当前房间配置”启动；请显式更新房间或取消。
-          </p>
-        ) : null}
-        {!noSafeStartPath && !canPublish && reasons.length > 0 ? (
-          <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900" role="status">
-            当前本地编辑草稿无法发布；可以沿用已发布的房间配置，或取消后修正本地编辑。
-          </p>
         ) : null}
       </div>
     </BaseModal>
