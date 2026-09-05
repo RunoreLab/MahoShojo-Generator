@@ -2,6 +2,11 @@
 
 import { BattleResultPresentation } from '../components/BattleResultPresentation';
 import type { ArenaRoomLatestCompletedHistory } from './useArenaRoomLatestCompletedHistory';
+import {
+  arenaRoomCollaborativeTag,
+  arenaRoomHistoryExpiredNotice,
+  arenaRoomHistoryNotArchivedNotice,
+} from './presentation/room-copy';
 
 const displayTime = (value: string): string => {
   const timestamp = Date.parse(value);
@@ -52,7 +57,7 @@ export function ArenaRoomLatestHistoryResult({
   }
 
   const latest = history.latest;
-  const meta = `${displayTime(latest.generation.finishedAt ?? latest.generation.startedAt)} · 配置版本 ${latest.generation.configRevision}${latest.generation.collaborativeInfluence ? ' · 包含协作变更' : ''}`;
+  const meta = `${displayTime(latest.generation.finishedAt ?? latest.generation.startedAt)}${latest.generation.collaborativeInfluence ? ` · ${arenaRoomCollaborativeTag}` : ''}`;
 
   return (
     <section
@@ -98,11 +103,11 @@ export function ArenaRoomLatestHistoryResult({
         </>
       ) : latest.contentStatus === 'expired' ? (
         <p role="status" className="mt-2 text-sm text-amber-800 dark:text-amber-200">
-          战报正文已超过有限保留期，当前无法恢复。
+          {arenaRoomHistoryExpiredNotice}
         </p>
       ) : (
         <p role="status" className="mt-2 text-sm text-amber-800 dark:text-amber-200">
-          这场战报当时未成功归档，当前没有可恢复的正文。
+          {arenaRoomHistoryNotArchivedNotice}
         </p>
       )}
     </section>

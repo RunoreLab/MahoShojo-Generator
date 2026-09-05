@@ -318,7 +318,7 @@ describe('Arena room Proposal workspace', () => {
     await act(async () => previewTrigger.click());
     expect(document.body.querySelectorAll('[role="dialog"][aria-modal="true"]')).toHaveLength(1);
     expect(document.activeElement?.textContent).toBe('关闭');
-    expect(document.body.textContent).toContain('基于房间配置版本 7');
+    expect(document.body.textContent).toContain('逐项检查后将提交给房主审阅');
     expect(document.body.textContent).toContain('建议值：');
     expect(document.body.textContent).toContain('将提交');
     expect(document.body.textContent).toContain('新增角色');

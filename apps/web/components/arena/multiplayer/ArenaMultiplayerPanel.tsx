@@ -22,6 +22,14 @@ import { ActionBar } from '@/components/shared/ui/ActionBar';
 import { buttonClassName } from '@/components/shared/ui/Button';
 import { inputClassName } from '@/components/shared/ui/Input';
 import { StatusLine } from '@/components/shared/ui/StatusNotice';
+import { Badge } from '@/components/shared/ui/Badge';
+import {
+  arenaRoomGenerationErrorCopy,
+  arenaRoomGenerationGapNotice,
+  arenaRoomGenerationStatusLabel,
+  arenaRoomGenerationUnknownNotice,
+} from './presentation/generation-copy';
+import { arenaRoomConfigSyncLabel } from './presentation/room-copy';
 import { useBattleStore } from '@/components/arena/stores/useBattleStore';
 import { ArenaProposalPanel } from './ArenaProposalPanel';
 import { ArenaHostConfigPanel } from './ArenaHostConfigPanel';
@@ -286,21 +294,8 @@ export const ArenaRoomGenerationResult = ({ state, onSaveImage }: {
   const generation = state.generation;
   if (generation.phase === 'idle' && !generation.markdown) return null;
 
-  const statusLabel = generation.finalAuthoritative
-    ? '权威终态'
-    : generation.phase === 'completed'
-      ? '正在核对权威终态'
-      : generation.phase === 'unknown'
-        ? '启动结果尚未确认'
-        : generation.phase === 'resyncing'
-          ? '正在恢复缺口'
-          : generation.phase === 'running' || generation.phase === 'starting'
-            ? '服务器实时预览'
-            : generation.phase === 'failed'
-              ? '生成失败'
-              : generation.phase === 'cancelled'
-                ? '生成已取消'
-                : '暂不可用';
+  const statusLabel = arenaRoomGenerationStatusLabel(generation);
+  const errorCopy = generation.errorCode ? arenaRoomGenerationErrorCopy(generation.errorCode) : null;
 
   return (
     <section
@@ -312,24 +307,26 @@ export const ArenaRoomGenerationResult = ({ state, onSaveImage }: {
         <h3 id="arena-room-generation-heading" className="text-sm font-semibold text-gray-950 dark:text-gray-100">
           房间战报
         </h3>
-        <span className="rounded-full border border-fuchsia-300 px-2 py-0.5 text-xs font-medium text-fuchsia-900 dark:border-fuchsia-700 dark:text-fuchsia-100">
-          {statusLabel}
-        </span>
+        <Badge>{statusLabel}</Badge>
       </div>
       {generation.phase === 'unknown' ? (
         <p role="status" className="mt-3 text-sm text-amber-800 dark:text-amber-200">
-          启动结果尚未确认；客户端会读取服务器状态，不要重复提交生成请求。
+          {arenaRoomGenerationUnknownNotice}
         </p>
       ) : null}
       {generation.gap ? (
         <p role="status" className="mt-3 text-sm text-amber-800 dark:text-amber-200">
-          检测到战报分片缺口，正在从服务器恢复权威基线。
+          {arenaRoomGenerationGapNotice}
         </p>
       ) : null}
-      {generation.errorCode ? (
-        <p role="alert" className="mt-3 text-sm text-red-700 dark:text-red-300">
-          错误代码：{generation.errorCode}
-        </p>
+      {errorCopy ? (
+        <div role="alert" className="mt-3 text-sm text-red-700 dark:text-red-300" data-generation-error-code={generation.errorCode}>
+          <p>{errorCopy.message}</p>
+          <details className="mt-1 text-xs opacity-80">
+            <summary className="cursor-pointer select-none">技术详情</summary>
+            <p className="mt-1">错误代码：{generation.errorCode}</p>
+          </details>
+        </div>
       ) : null}
       {generation.phase !== 'unknown' && (
         generation.markdown
@@ -487,7 +484,7 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
         <div>
           {session ? (
             <h2 id="arena-multiplayer-heading" className="text-lg font-semibold text-gray-950 dark:text-gray-50">
-              Arena 多人房间
+              竞技场多人房间
             </h2>
           ) : null}
         </div>
@@ -566,11 +563,12 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
               <span aria-hidden="true"> · </span>
               {activeMembers.length} 人
               <span aria-hidden="true"> · </span>
-              {session.self.role === 'host' && hostConfigNeedsAttention
-                ? '配置需要处理'
-                : session.self.role === 'host' && hostConfigSynchronizing
-                  ? '正在同步配置'
-                  : `配置版本 ${session.snapshot.revision}`}
+              {session.self.role === 'host'
+                ? arenaRoomConfigSyncLabel({
+                  needsAttention: hostConfigNeedsAttention,
+                  synchronizing: hostConfigSynchronizing,
+                })
+                : '配置已同步'}
             </p>
             <ActionBar>
               <button
@@ -642,9 +640,9 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
             || state.managementResultUnknown ? (
               <button type="button" className={buttonClassName()} onClick={props.onReconnect}>
                 {state.managementResultUnknown
-                  ? '重新确认管理动作'
+                  ? '重新确认上次操作'
                   : state.configPublishResultUnknown
-                    ? '重新确认配置发布'
+                    ? '重新确认配置状态'
                     : '重新连接'}
               </button>
             ) : null}
@@ -660,7 +658,7 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
             onClose={() => setConfigOpen(false)}
             titleId="arena-room-config-dialog-heading"
             title="房间配置"
-            description="主编辑区继续作为 Arena 配置的唯一编辑入口。"
+            description="房间设置在主编辑区修改；此面板处理本地编辑与房间的同步。"
           >
             {props.hostConfigContent ?? (
               <p className="text-sm text-gray-700 dark:text-gray-300">
@@ -687,7 +685,7 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
             onClose={() => setGenerationHistoryOpen(false)}
             titleId="arena-room-generation-history-dialog-heading"
             title="历史战报"
-            description="当前房间成员可查看本房间实例内近期生成的权威战报。"
+            description="当前房间成员可以查看本房间近期生成的战报。"
             widthClassName="max-w-5xl"
           >
             {props.generationHistoryContent ?? (
@@ -704,7 +702,7 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
             }}
             titleId="arena-room-overview-dialog-heading"
             title="房间"
-            description={`当前 ${activeMembers.length} 人在线；管理动作会由服务器重新校验身份与房间实例。`}
+            description={`当前 ${activeMembers.length} 人在线。`}
           >
             {kickConfirmation ? (
               <div role="alertdialog" aria-label="确认移除成员" className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-950 dark:border-red-900 dark:bg-red-950/30 dark:text-red-100">
@@ -873,8 +871,8 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
         <div className="mt-4 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
           <p>
             {state.unknownOperation === 'join'
-              ? '服务器可能已经处理加入请求。可以读取当前成员状态确认结果，不会重复提交加入。'
-              : '服务器可能已经创建房间。可以使用同一创建请求 ID 安全确认结果，包括非公开房间。'}
+              ? '服务器可能已经处理加入请求。可以重新查询确认结果，不会重复加入。'
+              : '服务器可能已经创建房间。可以重新查询确认结果，不会重复创建。'}
           </p>
           <ActionBar className="mt-3">
             <button type="button" className={buttonClassName()} onClick={props.onRetryUnknown}>

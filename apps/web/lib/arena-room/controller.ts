@@ -658,7 +658,7 @@ export const createArenaRoomController = (
         managementResultUnknown: false,
         notice: view.status === 'cancelled'
           ? '生成已由服务器确认取消'
-          : '生成已进入服务器权威终态',
+          : '战报已完成',
       } : {}),
     });
     return true;
@@ -1142,7 +1142,7 @@ export const createArenaRoomController = (
     detachSocket(true);
     publish({
       phase: 'reconnecting',
-      notice: '正在获取房间权威快照并对账…',
+      notice: '正在与服务器核对房间状态…',
       error: null,
     });
     try {
@@ -1190,9 +1190,9 @@ export const createArenaRoomController = (
         configPublishResultUnknown: false,
         notice: hadConfigUnknown
           ? configConfirmed
-            ? '已从房间权威快照确认配置发布，正在重新连接…'
-            : '已取得房间权威快照；先前配置发布未成为当前权威，请重新确认'
-          : '已取得房间权威快照，正在重新连接…',
+            ? '已确认配置同步完成，正在重新连接…'
+            : '已核对房间状态；先前的配置同步未生效，请重新确认'
+          : '已核对房间状态，正在重新连接…',
         error: null,
       });
       if (authoritative.snapshot.activeGeneration) void requestGenerationRecovery('baseline');
@@ -1294,7 +1294,7 @@ export const createArenaRoomController = (
         proposalResultUnknown: false,
         notice: installed
           ? proposalResolvedNotice(response.status)
-          : '请求已确认，等待房间权威状态同步',
+          : '请求已确认，等待房间状态同步',
         error: null,
       });
       unknownProposalMutation = null;
@@ -1424,7 +1424,7 @@ export const createArenaRoomController = (
         publish({
           configPublishPending: false,
           configPublishResultUnknown: true,
-          notice: '配置发布结果无法确认，请先同步房间权威状态',
+          notice: '配置同步结果无法确认，请先重新连接核对房间状态',
           error: null,
         });
         return;
@@ -1553,7 +1553,7 @@ export const createArenaRoomController = (
         publish({
           managementOperation: 'kick',
           managementResultUnknown: true,
-          notice: '移除成员结果尚未确认；请先读取房间权威状态，不要重复提交',
+          notice: '移除成员结果尚未确认；请先核对房间状态，不要重复提交',
           error: null,
         });
       } else {
@@ -1623,7 +1623,7 @@ export const createArenaRoomController = (
         publish({
           managementOperation: 'cancel-generation',
           managementResultUnknown: false,
-          notice: '停止请求已提交，等待服务器权威终态',
+          notice: '已提交停止请求，正在等待服务器确认…',
           error: null,
         });
       }
@@ -1642,7 +1642,7 @@ export const createArenaRoomController = (
         publish({
           managementOperation: 'cancel-generation',
           managementResultUnknown: true,
-          notice: '停止生成结果尚未确认；请先读取服务器权威状态，不要重复提交',
+          notice: '停止生成结果尚未确认；请先核对服务器状态，不要重复提交',
           error: null,
         });
       } else {
@@ -1783,7 +1783,7 @@ export const createArenaRoomController = (
     if (!current || !intent || disposed) return;
     const operation = managementMutationGeneration;
     const reconnectGeneration = operationGeneration;
-    publish({ notice: '正在读取服务器权威状态并确认管理动作…', error: null });
+    publish({ notice: '正在核对服务器状态并确认上次操作…', error: null });
     let resubmitted = false;
     let epochRebased = false;
     try {
@@ -1803,7 +1803,7 @@ export const createArenaRoomController = (
           unknownManagementMutation = null;
           const rebased = installRebasedAuthoritativeSession(
             authoritative,
-            '已从房间权威状态确认成员移除',
+            '已确认成员移除',
           );
           publish({
             managementOperation: null,
@@ -1918,7 +1918,7 @@ export const createArenaRoomController = (
         unknownManagementMutation = null;
         const rebasedEpoch = installRebasedAuthoritativeSession(
           rebased,
-          terminal ? '生成已进入服务器权威终态' : '房间已恢复为新实例，请重新执行停止生成',
+          terminal ? '战报已完成' : '房间已恢复为新实例，请重新执行停止生成',
         );
         publish({
           managementOperation: null,
@@ -2056,7 +2056,7 @@ export const createArenaRoomController = (
         generationId: view.generation.generationId,
         attempt: view.generation.attempt,
       })) return;
-      publish({ notice: '多人生成已进入房间权威流程', error: null });
+      publish({ notice: '多人生成已开始', error: null });
     } catch (error) {
       if (
         disposed
@@ -2356,7 +2356,7 @@ export const createArenaRoomController = (
           publish({
             managementOperation: 'leave',
             managementResultUnknown: true,
-            notice: '离开房间结果尚未确认；请先读取服务器权威状态',
+            notice: '离开房间结果尚未确认；请先核对服务器状态',
             error: null,
           });
         } else {
@@ -2425,7 +2425,7 @@ export const createArenaRoomController = (
           publish({
             managementOperation: 'close',
             managementResultUnknown: true,
-            notice: '关闭房间结果尚未确认；请先读取服务器权威状态',
+            notice: '关闭房间结果尚未确认；请先核对服务器状态',
             error: null,
           });
         } else {

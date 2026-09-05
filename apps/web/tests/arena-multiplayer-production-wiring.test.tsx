@@ -506,7 +506,7 @@ describe('Arena multiplayer production client/hook wiring', () => {
     expect(document.body.textContent).toContain('成员在主编辑区编辑，房主在此逐项审阅配置变更。');
     await act(async () => button('probe-open-config').click());
     await flush();
-    expect(document.body.textContent).toContain('主编辑区继续作为 Arena 配置的唯一编辑入口。');
+    expect(document.body.textContent).toContain('房间设置在主编辑区修改；此面板处理本地编辑与房间的同步。');
   });
 
   it('member 通过 production panel/client/WSS 提交并撤回，HTTP ack 不越权修改 snapshot', async () => {
@@ -571,7 +571,7 @@ describe('Arena multiplayer production client/hook wiring', () => {
     await flush();
     await act(async () => WiringSocket.instances[0]!.open());
 
-    expect(container.textContent).toContain('Arena 提案编辑模式');
+    expect(container.textContent).toContain('竞技场提案编辑模式');
     expect(document.body.querySelector('#arena-room-proposals-dialog-heading')).toBeNull();
     await setTextField('arena-story-guidance', 'production 成员建议');
     await act(async () => button('预览提案').click());
@@ -783,7 +783,7 @@ describe('Arena multiplayer production client/hook wiring', () => {
     await act(async () => button('加入房间').click());
     await flush();
     await act(async () => WiringSocket.instances[0]!.open());
-    expect(container.textContent).toContain('Arena 提案编辑模式');
+    expect(container.textContent).toContain('竞技场提案编辑模式');
     await setTextField('arena-story-guidance', 'unknown 对账建议');
     await act(async () => button('预览提案').click());
     await act(async () => button('提交提案').click());

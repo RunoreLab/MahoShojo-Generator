@@ -519,7 +519,7 @@ describe('Arena multiplayer panel real React interactions', () => {
 
     expect(document.body.querySelector('#arena-room-generation-history-dialog-heading')).not.toBeNull();
     expect(mocks.listGenerationHistory).toHaveBeenCalledOnce();
-    expect(document.body.textContent).toContain('已完成 · 配置版本 0');
+    expect(document.body.textContent).toContain('已完成');
 
     const replacement = connectedHostState(sharedConfig);
     mocks.listGenerationHistory.mockResolvedValueOnce({
@@ -540,7 +540,7 @@ describe('Arena multiplayer panel real React interactions', () => {
     await flush();
     expect(mocks.listGenerationHistory).toHaveBeenCalledTimes(2);
     expect(document.body.textContent).toContain('当前房间还没有战报记录');
-    expect(document.body.textContent).not.toContain('已完成 · 配置版本 0');
+    expect(document.body.textContent).not.toContain('查看战报');
   });
 
   it('config publish unknown 在 connected 状态提供主动权威对账入口', async () => {
@@ -574,7 +574,7 @@ describe('Arena multiplayer panel real React interactions', () => {
       },
     };
     await act(async () => root.render(<ArenaMultiplayerContextPanel {...props} />));
-    await act(async () => button('重新确认配置发布').click());
+    await act(async () => button('重新确认配置状态').click());
     expect(mocks.reconnect).toHaveBeenCalledOnce();
   });
 
@@ -752,7 +752,7 @@ describe('Arena multiplayer panel real React interactions', () => {
     await act(async () => root.render(<ArenaMultiplayerContextPanel {...props} />));
     expect(button('配置待处理')).not.toBeNull();
     await act(async () => button('配置待处理').click());
-    expect(document.body.textContent).toContain('房间配置已更新，但本地 Arena 同时有未发布修改');
+    expect(document.body.textContent).toContain('房间设置已更新，而本地还有未发布的修改');
     await act(async () => button('查看差异').click());
     expect(document.body.querySelectorAll('[role="dialog"][aria-modal="true"]')).toHaveLength(1);
     const diffClose = document.body.querySelector<HTMLButtonElement>(

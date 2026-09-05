@@ -3,18 +3,11 @@
 import { useState } from 'react';
 
 import type { ArenaRoomControllerState } from '@/lib/arena-room/controller';
-import type { ArenaRoomHostWorkspaceDirtyReason } from '@/lib/arena-room/host-workspace';
 
 import { buttonClassName } from '@/components/shared/ui/Button';
 
 import type { ArenaRoomHostReconciliation } from './useArenaRoomHostReconciliation';
-
-const reasonLabel: Readonly<Record<ArenaRoomHostWorkspaceDirtyReason, string>> = {
-  'baseline-missing': '缺少房主本地内容的已发布基准',
-  'host-local-content': '房主本地正文已修改',
-  'shared-config': '共享配置有未发布修改',
-  'working-copy-invalid': '当前 Arena 配置无法安全发布',
-};
+import { arenaRoomDirtyReasonCopy } from './presentation/room-copy';
 
 export function ArenaHostConfigPanel({
   controllerState,
@@ -37,7 +30,7 @@ export function ArenaHostConfigPanel({
         <div>
           <h3 id="arena-host-config-heading" className="text-sm font-semibold text-gray-950 dark:text-gray-100">房间配置</h3>
           <p className="mt-1 text-xs text-gray-600 dark:text-gray-400">
-            本地编辑不会逐项联网；开始生成时仅在无提案、无冲突且发布基线一致时自动更新，其他情况会先请你确认。
+            本地编辑不会实时同步；开始生成时会检查本地与房间设置是否一致，有差异会先请你确认。
           </p>
         </div>
         <button
@@ -54,7 +47,7 @@ export function ArenaHostConfigPanel({
 
       {status.kind === 'synced' ? (
         <p role="status" className="mt-3 text-sm text-emerald-700 dark:text-emerald-300">
-          {status.message}（房间配置版本 {status.revision}）
+          {status.message}
         </p>
       ) : status.kind === 'error' ? (
         <div
@@ -83,9 +76,9 @@ export function ArenaHostConfigPanel({
 
       {status.kind === 'conflicted' ? (
         <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
-          <p className="font-medium">房间配置已更新，但本地 Arena 同时有未发布修改。</p>
+          <p className="font-medium">房间设置已更新，而本地还有未发布的修改。</p>
           <ul className="mt-2 list-disc pl-5 text-xs">
-            {status.reasons.map((reason) => <li key={reason}>{reasonLabel[reason]}</li>)}
+            {status.reasons.map((reason) => <li key={reason}>{arenaRoomDirtyReasonCopy[reason]}</li>)}
           </ul>
           <div className="mt-3 flex flex-wrap gap-2">
             <button type="button" className={buttonClassName()} disabled={busy} onClick={() => { void reconciliation.syncRoom(); }}>

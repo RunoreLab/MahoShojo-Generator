@@ -40,7 +40,7 @@ describe('Arena Room generation preflight dialog', () => {
       />,
     ));
 
-    expect(document.body.textContent).toContain('本地编辑与当前房间配置不同');
+    expect(document.body.textContent).toContain('本地编辑与当前房间设置不同');
     expect(document.body.textContent).toContain('更新房间配置并开始');
     expect(document.body.textContent).toContain('放弃本地修改，同步房间配置');
     expect(document.body.textContent).toContain('完成后再点击一次开始生成');
@@ -68,7 +68,7 @@ describe('Arena Room generation preflight dialog', () => {
     expect(findButton('更新房间配置并开始')).toHaveProperty('disabled', true);
     const syncRoom = findButton('放弃本地修改，同步房间配置');
     expect(syncRoom).toHaveProperty('disabled', false);
-    expect(document.body.textContent).toContain('当前本地编辑草稿无法安全发布');
+    expect(document.body.textContent).toContain('当前编辑内容无法安全发布');
     if (!(syncRoom instanceof HTMLButtonElement)) throw new Error('sync-room button missing');
     await act(async () => syncRoom.click());
     expect(onChoice).toHaveBeenCalledWith('sync-room');

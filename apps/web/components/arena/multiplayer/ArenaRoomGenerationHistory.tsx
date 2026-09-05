@@ -11,6 +11,11 @@ import { buttonClassName } from '@/components/shared/ui/Button';
 
 import { BattleResultPresentation } from '../components/BattleResultPresentation';
 import type { ArenaRoomGenerationHistoryReader } from './useArenaRoom';
+import {
+  arenaRoomCollaborativeTag,
+  arenaRoomHistoryExpiredNotice,
+  arenaRoomHistoryNotArchivedNotice,
+} from './presentation/room-copy';
 
 const stateLabel: Record<ArenaRoomGenerationHistoryItem['state'], string> = {
   starting: '启动中',
@@ -97,7 +102,7 @@ export function ArenaRoomGenerationHistory({
             本房间历史战报
           </h3>
           <p className="mt-1 text-xs text-gray-600 dark:text-gray-400">
-            仅保留当前房间实例的有界记录；房间结束或记录过期后不再提供长期归档。
+            历史战报仅保留一段时间；房间结束后或记录过期后无法再查看。
           </p>
         </div>
         <button type="button" className={buttonClassName()} disabled={loadingList} onClick={() => { void loadList(); }}>
@@ -116,8 +121,8 @@ export function ArenaRoomGenerationHistory({
             <li key={item.generationId} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white/70 p-3 dark:border-gray-700 dark:bg-gray-950/30">
               <div className="min-w-0">
                 <p className="text-sm font-medium text-gray-950 dark:text-gray-100">
-                  {stateLabel[item.state]} · 配置版本 {item.configRevision}
-                  {item.collaborativeInfluence ? ' · 包含协作变更' : ''}
+                  {stateLabel[item.state]}
+                  {item.collaborativeInfluence ? ` · ${arenaRoomCollaborativeTag}` : ''}
                 </p>
                 <p className="mt-1 text-xs text-gray-600 dark:text-gray-400">
                   {displayTime(item.finishedAt ?? item.startedAt)}
@@ -140,7 +145,7 @@ export function ArenaRoomGenerationHistory({
         <div className="mt-5 border-t border-gray-200 pt-4 dark:border-gray-700">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <p className="text-sm font-semibold text-gray-950 dark:text-gray-100">
-              {selected.contentStatus === 'available' ? '权威历史战报' : stateLabel[selected.generation.state]}
+              {selected.contentStatus === 'available' ? '历史战报' : stateLabel[selected.generation.state]}
             </p>
             <button type="button" className={buttonClassName()} onClick={() => setSelected(null)}>收起战报</button>
           </div>
@@ -167,9 +172,9 @@ export function ArenaRoomGenerationHistory({
               combatantUpdates={selected.result?.combatantUpdates ?? null}
             />
           ) : selected.contentStatus === 'expired' ? (
-            <p className="text-sm text-amber-800 dark:text-amber-200">战报正文已超过有限保留期，当前无法恢复。</p>
+            <p className="text-sm text-amber-800 dark:text-amber-200">{arenaRoomHistoryExpiredNotice}</p>
           ) : selected.contentStatus === 'not-archived' ? (
-            <p className="text-sm text-amber-800 dark:text-amber-200">这场战报当时未成功归档，当前没有可恢复的正文。</p>
+            <p className="text-sm text-amber-800 dark:text-amber-200">{arenaRoomHistoryNotArchivedNotice}</p>
           ) : null}
         </div>
       ) : null}

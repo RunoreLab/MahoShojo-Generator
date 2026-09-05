@@ -578,7 +578,7 @@ const HostProposalInbox = ({
           待处理提案 ({proposals.length})
         </h3>
         <p className="mt-1 text-xs text-gray-600 dark:text-gray-400">
-          在当前房间提案窗口逐项审阅配置变更，不占用 Arena 主编辑区。
+          在当前房间提案窗口逐项审阅配置变更，不占用主编辑区。
         </p>
       </div>
       {state.proposalResultUnknown ? (
@@ -590,7 +590,7 @@ const HostProposalInbox = ({
         </div>
       ) : null}
       <p className="mt-3 text-xs text-gray-600 dark:text-gray-400">
-        服务器仍会校验当前房间配置版本、引用权限、提案基准、依赖与联动变更组。
+        接受时服务器会再次校验这些修改是否仍然适用。
       </p>
       {proposals.length === 0 ? (
         <p className="mt-3 text-sm text-gray-600 dark:text-gray-400">
@@ -645,8 +645,8 @@ const MemberProposalEntry = ({
           </h3>
           <p className="mt-1 text-xs text-gray-600 dark:text-gray-400">
             {editorState
-              ? `Arena 主编辑区已进入提案模式 · 基于房间配置版本 ${editorState.baselineRevision}`
-              : '同步房间已发布配置后，Arena 主编辑区会切换到隔离的提案模式。'}
+              ? '主编辑区已进入提案模式'
+              : '同步房间当前设置后，主编辑区会切换到提案模式。'}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -701,7 +701,7 @@ const MemberProposalEntry = ({
         </p>
       ) : editorState?.stale ? (
         <p className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
-          房间配置版本已更新；当前草稿仍绑定版本 {editorState.baselineRevision}。
+          房间设置已更新；当前草稿基于旧版本，请重新同步后再提交。
         </p>
       ) : null}
       <ArenaMemberProposalStatus state={state} controller={controller} />

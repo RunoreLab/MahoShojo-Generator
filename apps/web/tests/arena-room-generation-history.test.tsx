@@ -75,7 +75,7 @@ describe('Arena Room generation history', () => {
     await act(async () => { await Promise.resolve(); });
 
     expect(reader.list).toHaveBeenCalledOnce();
-    expect(container.textContent).toContain('已完成 · 配置版本 3 · 包含协作变更');
+    expect(container.textContent).toContain('已完成 · 包含成员提案');
     const viewButton = [...container.querySelectorAll('button')]
       .find((button) => button.textContent?.trim() === '查看战报');
     if (!(viewButton instanceof HTMLButtonElement)) throw new Error('history view button missing');
@@ -87,7 +87,7 @@ describe('Arena Room generation history', () => {
     expect(reader.read).toHaveBeenCalledWith('generation-1');
     expect(container.querySelector('[data-testid="history-report"]')?.textContent)
       .toBe('# 先前的权威战报');
-    expect(container.textContent).toContain('权威历史战报');
+    expect(container.textContent).toContain('历史战报');
   });
 
   it('读取失败时显示明确错误而不伪造空历史', async () => {
@@ -142,6 +142,6 @@ describe('Arena Room generation history', () => {
       viewButtons[1]?.click();
       await Promise.resolve();
     });
-    expect(container.textContent).toContain('战报正文已超过有限保留期');
+    expect(container.textContent).toContain('已超过保留期');
   });
 });

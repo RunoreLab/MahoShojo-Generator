@@ -298,7 +298,7 @@ describe('Arena multiplayer panel accessibility/permissions', () => {
       <ArenaRoomGenerationResult state={completedState} />,
     );
     expect(completed).toContain('房间战报');
-    expect(completed).toContain('权威终态');
+    expect(completed).toContain('战报已完成');
     expect(completed).toContain('data-arena-battle-result-presentation="v1"');
     expect(completed).toContain('最终战报');
     expect(completed).toContain('房间记者');
@@ -322,8 +322,8 @@ describe('Arena multiplayer panel accessibility/permissions', () => {
     const unknown = renderToStaticMarkup(
       <ArenaRoomGenerationResult state={unknownState} />,
     );
-    expect(unknown).toContain('启动结果尚未确认');
-    expect(unknown).toContain('不要重复提交');
+    expect(unknown).toContain('正在确认生成状态');
+    expect(unknown).toContain('请暂时不要再次点击开始');
   });
 
   it('重连/降级/replacement 文案明确，不声称透明 failover', () => {
@@ -377,7 +377,7 @@ describe('Arena multiplayer panel accessibility/permissions', () => {
       unknownOperation: 'create',
     });
     expect(html).toContain('服务器可能已经创建房间');
-    expect(html).toContain('非公开房间');
+    expect(html).toContain('不会重复创建');
     expect(html).toContain('重新确认创建结果');
     expect(html).toContain('已确认状态，返回大厅');
     expect(html).not.toContain('创建多人房间');
@@ -388,7 +388,7 @@ describe('Arena multiplayer panel accessibility/permissions', () => {
       notice: '加入请求结果未知，请先确认房间状态',
       unknownOperation: 'join',
     });
-    expect(joinUnknown).toContain('不会重复提交加入');
+    expect(joinUnknown).toContain('不会重复加入');
     expect(joinUnknown).toContain('重新确认加入结果');
   });
 });

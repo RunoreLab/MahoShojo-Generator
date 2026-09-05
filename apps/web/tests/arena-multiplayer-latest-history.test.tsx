@@ -361,15 +361,14 @@ describe('ArenaRoomLatestHistoryResult', () => {
     );
     expect(html).toContain('最近一场房间战报');
     expect(html).toContain('历史战报');
-    expect(html).toContain('包含协作变更');
-    expect(html).toContain('配置版本 5');
+    expect(html).toContain('包含成员提案');
   });
 
   it('正文过期与未归档给出可理解终态而不伪装战报', () => {
     const expired = renderToStaticMarkup(
       <ArenaRoomLatestHistoryResult history={{ ...baseHistory, latest: { ...availableView, contentStatus: 'expired', markdown: '', result: undefined } }} />,
     );
-    expect(expired).toContain('战报正文已超过有限保留期');
+    expect(expired).toContain('已超过保留期');
 
     const notArchived = renderToStaticMarkup(
       <ArenaRoomLatestHistoryResult history={{ ...baseHistory, latest: { ...availableView, contentStatus: 'not-archived', markdown: '', result: undefined } }} />,

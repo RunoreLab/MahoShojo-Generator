@@ -102,7 +102,6 @@ const proposalId = (): string => {
 };
 
 const ProposalPreviewDialog = ({
-  baselineRevision,
   changes,
   labels,
   selected,
@@ -111,7 +110,6 @@ const ProposalPreviewDialog = ({
   onClose,
   onSubmit,
 }: {
-  readonly baselineRevision: number;
   readonly changes: readonly ArenaProposalChange[];
   readonly labels: ArenaProposalChangeLabels;
   readonly selected: ReadonlySet<string>;
@@ -126,7 +124,7 @@ const ProposalPreviewDialog = ({
       open
       titleId="arena-proposal-preview-heading"
       title="预览提案"
-      description={`基于房间配置版本 ${baselineRevision} · 逐项检查配置变更；依赖与联动变更组会再次校验。`}
+      description="逐项检查后将提交给房主审阅；相关联的修改会一起校验。"
       onClose={onClose}
       widthClassName="max-w-3xl"
     >
@@ -153,7 +151,6 @@ const ProposalPreviewDialog = ({
                   {arenaProposalChangeSummary(change, labels)}
                 </span>
                 <ArenaProposalSelectionDetails change={change} />
-                <span className="mt-1 block text-xs text-gray-600 dark:text-gray-400">提案基准：{JSON.stringify(change.expectedBase)}</span>
                 <span className="block text-xs text-gray-600 dark:text-gray-400">建议值：{arenaProposalChangeProposedSummary(change, labels)}</span>
               </span>
             </label>
@@ -386,8 +383,8 @@ const ProposalWorkspaceInner = ({
     <section aria-labelledby="arena-room-proposal-workspace-heading" className="mt-6 rounded-2xl border border-fuchsia-200 bg-fuchsia-50/40 p-4 dark:border-fuchsia-900 dark:bg-fuchsia-950/10 sm:p-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 id="arena-room-proposal-workspace-heading" className="text-lg font-semibold text-gray-950 dark:text-gray-100">Arena 提案编辑模式</h2>
-          <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">隔离草稿 · 基于房间配置版本 {snapshot.baselineRevision} · 本地编辑不联网</p>
+          <h2 id="arena-room-proposal-workspace-heading" className="text-lg font-semibold text-gray-950 dark:text-gray-100">竞技场提案编辑模式</h2>
+          <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">提案草稿与主编辑区隔离 · 本地编辑不联网</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {onSyncFromRoom ? (
@@ -396,7 +393,7 @@ const ProposalWorkspaceInner = ({
           <button type="button" className={buttonClassName({ variant: 'primary' })} disabled={!snapshot.dirty || disabled} onClick={buildPreview}>预览提案</button>
         </div>
       </div>
-      {snapshot.stale ? <p role="status" className="mt-3 rounded-lg bg-amber-50 p-2 text-sm text-amber-900">房间配置已更新；当前草稿仍绑定旧基线，请重新同步后再提交。</p> : null}
+      {snapshot.stale ? <p role="status" className="mt-3 rounded-lg bg-amber-50 p-2 text-sm text-amber-900">房间设置已更新；请重新同步后再提交提案。</p> : null}
       {localError ? <p role="alert" className="mt-3 text-sm text-red-700 dark:text-red-300">{localError}</p> : null}
       <ArenaMemberProposalStatus state={state} controller={controller} />
 
@@ -576,7 +573,6 @@ const ProposalWorkspaceInner = ({
 
       {preview ? (
         <ProposalPreviewDialog
-          baselineRevision={snapshot.baselineRevision ?? 0}
           changes={preview}
           labels={previewDialogLabels}
           selected={selected}

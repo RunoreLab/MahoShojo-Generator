@@ -908,7 +908,7 @@ describe('Arena Room browser controller', () => {
     expect(controller.getSnapshot()).toMatchObject({
       proposalOperation: null,
       proposalResultUnknown: false,
-      notice: '请求已确认，等待房间权威状态同步',
+      notice: '请求已确认，等待房间状态同步',
     });
     expect(controller.getSnapshot().session?.snapshot.proposals).toEqual([proposal]);
     expect(controller.getSnapshot().session?.snapshot.revision).toBe(0);
@@ -2128,7 +2128,7 @@ describe('Arena Room browser controller', () => {
     expect(client.cancelGeneration).toHaveBeenCalledOnce();
     expect(client.cancelGeneration).toHaveBeenCalledWith('room-1', 'generation-1', 'epoch-1');
     expect(controller.getSnapshot().managementOperation).toBe('cancel-generation');
-    expect(controller.getSnapshot().notice).toContain('等待服务器权威终态');
+    expect(controller.getSnapshot().notice).toContain('正在等待服务器确认');
     expect(controller.getSnapshot().notice).not.toContain('已取消');
 
     vi.mocked(client.getGenerationView).mockResolvedValueOnce({
