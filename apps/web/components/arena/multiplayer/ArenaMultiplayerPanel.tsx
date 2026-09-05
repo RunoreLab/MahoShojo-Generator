@@ -122,7 +122,11 @@ const StatusNotice = ({ state }: { readonly state: ArenaRoomControllerState }) =
 
 const roomMoreMenuItemClass = 'flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-gray-800 transition-colors hover:bg-gray-100 focus-visible:bg-gray-100 focus-visible:outline-none dark:text-gray-200 dark:hover:bg-gray-800 dark:focus-visible:bg-gray-800';
 
-/** 二级操作收纳菜单：历史战报、房间管理、玩法说明等低频入口。 */
+/**
+ * 二级操作收纳菜单（disclosure 模式）：历史战报、房间管理、玩法说明等低频入口。
+ * 不声明 ARIA menu 语义，也不实现 menu 键盘模型；弹层是普通操作列表，
+ * 键盘用户用自然 Tab 顺序导航，Escape/点击外部收起并把焦点还给触发按钮。
+ */
 const RoomMoreMenu = ({
   generationHistoryCount,
   onOpenGenerationHistory,
@@ -164,8 +168,8 @@ const RoomMoreMenu = ({
       <Button
         ref={triggerRef}
         variant="ghost"
-        aria-haspopup="menu"
         aria-expanded={open}
+        aria-controls="arena-room-more-actions"
         aria-label="更多房间操作"
         onClick={() => setOpen((value) => !value)}
       >
@@ -174,13 +178,12 @@ const RoomMoreMenu = ({
       </Button>
       {open ? (
         <div
-          role="menu"
+          id="arena-room-more-actions"
           aria-label="更多房间操作"
           className="absolute right-0 z-20 mt-1 w-44 overflow-hidden rounded-xl border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-900"
         >
           <button
             type="button"
-            role="menuitem"
             className={roomMoreMenuItemClass}
             onClick={() => closeWith(onOpenGenerationHistory)}
           >
@@ -190,7 +193,6 @@ const RoomMoreMenu = ({
           </button>
           <button
             type="button"
-            role="menuitem"
             className={roomMoreMenuItemClass}
             onClick={() => closeWith(onOpenRoom)}
           >
@@ -198,7 +200,6 @@ const RoomMoreMenu = ({
           </button>
           <Link
             href={`${guideHref}#房主与成员`}
-            role="menuitem"
             className={roomMoreMenuItemClass}
             onClick={() => setOpen(false)}
           >
@@ -650,9 +651,11 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
             data-arena-room-compact-shell="v1"
           >
             <div className="min-w-0">
-              <p className="truncate text-sm font-semibold text-gray-950 dark:text-gray-100">
-                {host?.displayName ?? '未知'}的房间
-                <span className="ml-2 font-normal text-gray-600 dark:text-gray-400">
+              <p className="flex min-w-0 items-baseline text-sm font-semibold text-gray-950 dark:text-gray-100">
+                <span className="truncate" title={host?.displayName ? `${host.displayName}的房间` : undefined}>
+                  {host?.displayName ?? '未知'}的房间
+                </span>
+                <span className="ml-2 shrink-0 font-normal text-gray-600 dark:text-gray-400">
                   {activeMembers.length} 人在线
                 </span>
               </p>
@@ -678,7 +681,8 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
                 </span>
               </p>
             </div>
-            <ActionBar className="shrink-0">
+            {/* 一级操作整组换行：窄屏时状态区占整行、操作组整体下一行，按钮自身不拆。 */}
+            <ActionBar className="shrink-0 flex-nowrap">
               <Button
                 aria-label="复制房间邀请文案"
                 onClick={() => { void copyRoomInfo(); }}
