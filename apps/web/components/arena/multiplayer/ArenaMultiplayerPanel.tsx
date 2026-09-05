@@ -18,6 +18,10 @@ import {
   parseArenaRoomJoinCode,
 } from '@/lib/arena-room/join-code';
 import { copyTextToClipboard } from '@/lib/clipboard';
+import { ActionBar } from '@/components/shared/ui/ActionBar';
+import { buttonClassName } from '@/components/shared/ui/Button';
+import { inputClassName } from '@/components/shared/ui/Input';
+import { StatusLine } from '@/components/shared/ui/StatusNotice';
 import { useBattleStore } from '@/components/arena/stores/useBattleStore';
 import { ArenaProposalPanel } from './ArenaProposalPanel';
 import { ArenaHostConfigPanel } from './ArenaHostConfigPanel';
@@ -74,11 +78,6 @@ export type ArenaMultiplayerPanelViewProps = {
   readonly onReset: () => void;
 };
 
-const buttonClass = 'rounded-xl border px-3 py-2 text-sm font-medium transition-colors motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fuchsia-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50';
-const primaryButtonClass = `${buttonClass} border-fuchsia-600 bg-fuchsia-600 text-white hover:bg-fuchsia-700`;
-const secondaryButtonClass = `${buttonClass} border-gray-300 bg-white text-gray-800 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800`;
-const inputClass = 'w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fuchsia-500 dark:border-gray-600 dark:bg-gray-950 dark:text-gray-100';
-
 const MULTIPLAYER_GUIDE_HREF = '/encyclopedia/arena-multiplayer';
 
 const formatRoomActivityTime = (iso: string): string => {
@@ -105,9 +104,9 @@ const StatusNotice = ({ state }: { readonly state: ArenaRoomControllerState }) =
       : '房间已连接')
     : '';
   return (
-    <div role="status" aria-live="polite" aria-atomic="true" className="min-h-6 text-sm text-gray-700 dark:text-gray-200">
+    <StatusLine>
       {state.notice ?? defaultNotice}
-    </div>
+    </StatusLine>
   );
 };
 
@@ -163,7 +162,7 @@ const ArenaRoomLobbyDialog = ({
                 </label>
                 <input
                   id="arena-room-title"
-                  className={inputClass}
+                  className={inputClassName()}
                   maxLength={80}
                   required
                   value={roomTitle}
@@ -176,7 +175,7 @@ const ArenaRoomLobbyDialog = ({
                 </label>
                 <select
                   id="arena-room-visibility"
-                  className={inputClass}
+                  className={inputClassName()}
                   value={visibility}
                   onChange={(event: ChangeEvent<HTMLSelectElement>) => onVisibilityChange(event.target.value as RoomDirectoryVisibility)}
                 >
@@ -184,7 +183,7 @@ const ArenaRoomLobbyDialog = ({
                   <option value="unlisted">仅凭房间码</option>
                 </select>
               </div>
-              <button type="button" className={primaryButtonClass} disabled={busy || !roomTitle.trim()} onClick={onCreate}>
+              <button type="button" className={buttonClassName({ variant: 'primary' })} disabled={busy || !roomTitle.trim()} onClick={onCreate}>
                 创建多人房间
               </button>
             </fieldset>
@@ -197,7 +196,7 @@ const ArenaRoomLobbyDialog = ({
                 </label>
                 <input
                   id="arena-room-join-code"
-                  className={inputClass}
+                  className={inputClassName()}
                   maxLength={1024}
                   value={joinCode}
                   onChange={(event: ChangeEvent<HTMLInputElement>) => onJoinCodeChange(event.target.value)}
@@ -206,7 +205,7 @@ const ArenaRoomLobbyDialog = ({
                   支持直接粘贴完整邀请文案或分享文本，会自动识别其中的房间码。
                 </p>
               </div>
-              <button type="button" className={primaryButtonClass} disabled={busy || !joinCode.trim()} onClick={() => onJoin(joinCode.trim())}>
+              <button type="button" className={buttonClassName({ variant: 'primary' })} disabled={busy || !joinCode.trim()} onClick={() => onJoin(joinCode.trim())}>
                 加入房间
               </button>
             </fieldset>
@@ -215,7 +214,7 @@ const ArenaRoomLobbyDialog = ({
           <section aria-labelledby="arena-public-room-heading" className="mt-4 rounded-xl border border-gray-200 p-4 dark:border-gray-700">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h4 id="arena-public-room-heading" className="text-sm font-semibold text-gray-950 dark:text-gray-100">公开房间</h4>
-              <button type="button" className={secondaryButtonClass} disabled={busy} onClick={onDiscover}>
+              <button type="button" className={buttonClassName()} disabled={busy} onClick={onDiscover}>
                 {state.phase === 'listing' ? '正在加载…' : state.error ? '重试' : '刷新'}
               </button>
             </div>
@@ -243,7 +242,7 @@ const ArenaRoomLobbyDialog = ({
                           <p className="truncate text-xs text-gray-600 dark:text-gray-400">{metaParts.join(' · ')}</p>
                         ) : null}
                       </div>
-                      <button type="button" className={secondaryButtonClass} disabled={busy} onClick={() => onJoin(room.roomId)}>
+                      <button type="button" className={buttonClassName()} disabled={busy} onClick={() => onJoin(room.roomId)}>
                         加入
                       </button>
                     </li>
@@ -255,7 +254,7 @@ const ArenaRoomLobbyDialog = ({
               <div className="mt-3 flex justify-center">
                 <button
                   type="button"
-                  className={secondaryButtonClass}
+                  className={buttonClassName()}
                   disabled={Boolean(state.directoryLoadingMore)}
                   onClick={onDiscoverMore}
                 >
@@ -493,10 +492,10 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
           ) : null}
         </div>
         {!session && !props.authLoading && (state.phase === 'ready' || state.phase === 'listing') ? (
-          <div className="flex flex-wrap items-center gap-2">
+          <ActionBar>
             <button
               type="button"
-              className={primaryButtonClass}
+              className={buttonClassName({ variant: 'primary' })}
               onClick={() => {
                 setLobbyOpen(true);
                 props.onDiscover();
@@ -506,11 +505,11 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
             </button>
             <Link
               href={`${MULTIPLAYER_GUIDE_HREF}#快速开始`}
-              className={secondaryButtonClass}
+              className={buttonClassName()}
             >
               玩法说明
             </Link>
-          </div>
+          </ActionBar>
         ) : null}
       </div>
 
@@ -573,10 +572,10 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
                   ? '正在同步配置'
                   : `配置版本 ${session.snapshot.revision}`}
             </p>
-            <div className="flex flex-wrap gap-2">
+            <ActionBar>
               <button
                 type="button"
-                className={secondaryButtonClass}
+                className={buttonClassName()}
                 aria-label={`复制房间码 ${session.roomId}`}
                 onClick={() => { void copyRoomInfo('room-id'); }}
               >
@@ -584,7 +583,7 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
               </button>
               <button
                 type="button"
-                className={secondaryButtonClass}
+                className={buttonClassName()}
                 aria-label="复制房间邀请文案"
                 onClick={() => { void copyRoomInfo('invite'); }}
               >
@@ -593,7 +592,7 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
               {session.self.role === 'host' ? (
                 <button
                   type="button"
-                  className={`${secondaryButtonClass}${hostConfigNeedsAttention ? ' border-amber-500 text-amber-800 dark:border-amber-600 dark:text-amber-200' : ''}`}
+                  className={buttonClassName(hostConfigNeedsAttention ? { className: 'border-amber-500 text-amber-800 dark:border-amber-600 dark:text-amber-200' } : {})}
                   onClick={() => setConfigOpen(true)}
                 >
                   {hostConfigNeedsAttention
@@ -605,7 +604,7 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
               ) : null}
               <button
                 type="button"
-                className={`${secondaryButtonClass} relative`}
+                className={buttonClassName({ className: 'relative' })}
                 aria-label={pendingProposalCount > 0 ? `提案，${pendingProposalCount} 个待处理` : '提案'}
                 onClick={() => setProposalsOpen(true)}
               >
@@ -619,29 +618,29 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
                   </span>
                 ) : null}
               </button>
-              <button type="button" className={secondaryButtonClass} onClick={() => setGenerationHistoryOpen(true)}>
+              <button type="button" className={buttonClassName()} onClick={() => setGenerationHistoryOpen(true)}>
                 {props.generationHistoryCount !== undefined && props.generationHistoryCount > 0
                   ? `历史战报（${props.generationHistoryCount}）`
                   : '历史战报'}
               </button>
-              <button type="button" className={secondaryButtonClass} onClick={() => setRoomOpen(true)}>
+              <button type="button" className={buttonClassName()} onClick={() => setRoomOpen(true)}>
                 房间
               </button>
               <Link
                 href={`${MULTIPLAYER_GUIDE_HREF}#房主与成员`}
-                className={secondaryButtonClass}
+                className={buttonClassName()}
               >
                 玩法说明
               </Link>
-            </div>
+            </ActionBar>
           </div>
 
-          <div className="mt-2 flex flex-wrap gap-2">
+          <ActionBar className="mt-2">
             {state.phase === 'degraded'
             || state.phase === 'reconnecting'
             || state.configPublishResultUnknown
             || state.managementResultUnknown ? (
-              <button type="button" className={secondaryButtonClass} onClick={props.onReconnect}>
+              <button type="button" className={buttonClassName()} onClick={props.onReconnect}>
                 {state.managementResultUnknown
                   ? '重新确认管理动作'
                   : state.configPublishResultUnknown
@@ -650,11 +649,11 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
               </button>
             ) : null}
             {state.phase === 'replacement' || state.phase === 'closed' ? (
-              <button type="button" className={secondaryButtonClass} onClick={props.onReset}>
+              <button type="button" className={buttonClassName()} onClick={props.onReset}>
                 返回房间大厅
               </button>
             ) : null}
-          </div>
+          </ActionBar>
 
           <ArenaRoomDialog
             open={configOpen}
@@ -710,11 +709,11 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
             {kickConfirmation ? (
               <div role="alertdialog" aria-label="确认移除成员" className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-950 dark:border-red-900 dark:bg-red-950/30 dark:text-red-100">
                 <p>确定将“{kickConfirmation.displayName}”移出当前房间吗？</p>
-                <div className="mt-3 flex flex-wrap gap-2">
+                <ActionBar className="mt-3">
                   <button
                     ref={kickConfirmationActionRef}
                     type="button"
-                    className={primaryButtonClass}
+                    className={buttonClassName({ variant: 'primary' })}
                     disabled={busy}
                     onClick={() => {
                       const targetUserId = kickConfirmation.targetUserId;
@@ -727,7 +726,7 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
                   </button>
                   <button
                     type="button"
-                    className={secondaryButtonClass}
+                    className={buttonClassName()}
                     onClick={() => {
                       setKickConfirmation(null);
                       queueMicrotask(() => kickTriggerRef.current?.focus());
@@ -735,7 +734,7 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
                   >
                     取消
                   </button>
-                </div>
+                </ActionBar>
               </div>
             ) : null}
             <section aria-labelledby="arena-room-members-heading">
@@ -754,7 +753,7 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
                     {session.self.role === 'host' && member.role !== 'host' && member.userId !== session.self.userId ? (
                       <button
                         type="button"
-                        className={secondaryButtonClass}
+                        className={buttonClassName()}
                         disabled={busy}
                         onClick={(event) => {
                           kickTriggerRef.current = event.currentTarget;
@@ -791,11 +790,11 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
                         ? '确定离开当前房间吗？'
                         : '确定停止当前战报生成吗？'}
                   </p>
-                  <div className="mt-3 flex flex-wrap gap-2">
+                  <ActionBar className="mt-3">
                     <button
                       ref={managementConfirmationActionRef}
                       type="button"
-                      className={primaryButtonClass}
+                      className={buttonClassName({ variant: 'primary' })}
                       disabled={busy}
                       onClick={() => {
                         const operation = managementConfirmation;
@@ -814,7 +813,7 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
                     </button>
                     <button
                       type="button"
-                      className={secondaryButtonClass}
+                      className={buttonClassName()}
                       onClick={() => {
                         const operation = managementConfirmation;
                         setManagementConfirmation(null);
@@ -827,14 +826,14 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
                     >
                       取消
                     </button>
-                  </div>
+                  </ActionBar>
                 </div>
               ) : session.self.role === 'host' ? (
-                <div className="mt-3 flex flex-wrap gap-2">
+                <ActionBar className="mt-3">
                   <button
                     ref={cancelGenerationTriggerRef}
                     type="button"
-                    className={secondaryButtonClass}
+                    className={buttonClassName()}
                     disabled={busy || !canCancelGeneration}
                     onClick={() => {
                       setKickConfirmation(null);
@@ -846,7 +845,7 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
                   <button
                     ref={closeRoomTriggerRef}
                     type="button"
-                    className={secondaryButtonClass}
+                    className={buttonClassName()}
                     disabled={busy}
                     onClick={() => {
                       setKickConfirmation(null);
@@ -855,12 +854,12 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
                   >
                     关闭房间
                   </button>
-                </div>
+                </ActionBar>
               ) : (
                 <button
                   ref={leaveRoomTriggerRef}
                   type="button"
-                  className={`${secondaryButtonClass} mt-3`}
+                  className={buttonClassName({ className: 'mt-3' })}
                   disabled={busy}
                   onClick={() => setManagementConfirmation('leave')}
                 >
@@ -877,17 +876,17 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
               ? '服务器可能已经处理加入请求。可以读取当前成员状态确认结果，不会重复提交加入。'
               : '服务器可能已经创建房间。可以使用同一创建请求 ID 安全确认结果，包括非公开房间。'}
           </p>
-          <div className="mt-3 flex flex-wrap gap-2">
-            <button type="button" className={secondaryButtonClass} onClick={props.onRetryUnknown}>
+          <ActionBar className="mt-3">
+            <button type="button" className={buttonClassName()} onClick={props.onRetryUnknown}>
               {state.unknownOperation === 'join' ? '重新确认加入结果' : '重新确认创建结果'}
             </button>
-            <button type="button" className={secondaryButtonClass} onClick={props.onReset}>
+            <button type="button" className={buttonClassName()} onClick={props.onReset}>
               已确认状态，返回大厅
             </button>
-          </div>
+          </ActionBar>
         </div>
       ) : state.phase === 'replacement' || state.phase === 'closed' ? (
-        <button type="button" className={`${secondaryButtonClass} mt-4`} onClick={props.onReset}>
+        <button type="button" className={buttonClassName({ className: 'mt-4' })} onClick={props.onReset}>
           返回房间大厅
         </button>
       ) : (

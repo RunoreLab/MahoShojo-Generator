@@ -31,6 +31,8 @@ import {
   ArenaProposalEditorError,
   assertArenaProposalSelection,
 } from '@/lib/arena-room/proposal-editor';
+import { buttonClassName } from '@/components/shared/ui/Button';
+
 import type { ArenaRoomProposalWorkspace } from './useArenaRoom';
 
 type ProposalController = Pick<
@@ -44,10 +46,6 @@ export type ArenaProposalPanelProps = {
   readonly workspace: ArenaRoomProposalWorkspace;
 };
 
-const buttonClass = 'rounded-lg border px-3 py-2 text-sm font-medium transition-colors motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fuchsia-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50';
-const primaryButtonClass = `${buttonClass} border-fuchsia-600 bg-fuchsia-600 text-white hover:bg-fuchsia-700`;
-const secondaryButtonClass = `${buttonClass} border-gray-300 bg-white text-gray-800 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800`;
-const dangerButtonClass = `${buttonClass} border-red-300 bg-white text-red-700 hover:bg-red-50 dark:border-red-800 dark:bg-gray-900 dark:text-red-300`;
 const safeText = (value: string, max = 80): string => (
   value.length <= max ? value : `${value.slice(0, max)}…`
 );
@@ -543,7 +541,7 @@ const HostProposalCard = ({
       <div className="mt-2 flex flex-wrap gap-2">
         <button
           type="button"
-          className={primaryButtonClass}
+          className={buttonClassName({ variant: 'primary' })}
           disabled={disabled || Boolean(validationError)}
           onClick={() => { void resolve('accept-selected'); }}
         >
@@ -551,7 +549,7 @@ const HostProposalCard = ({
         </button>
         <button
           type="button"
-          className={dangerButtonClass}
+          className={buttonClassName({ variant: 'danger' })}
           disabled={disabled}
           onClick={() => { void resolve('reject'); }}
         >
@@ -586,7 +584,7 @@ const HostProposalInbox = ({
       {state.proposalResultUnknown ? (
         <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
           <p>上次审阅结果未知，已冻结重复处理。</p>
-          <button type="button" className={`${secondaryButtonClass} mt-2`} onClick={controller.reconnect}>
+          <button type="button" className={buttonClassName({ className: 'mt-2' })} onClick={controller.reconnect}>
             重新连接并对账
           </button>
         </div>
@@ -654,7 +652,7 @@ const MemberProposalEntry = ({
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
-            className={secondaryButtonClass}
+            className={buttonClassName()}
             onClick={() => {
               if (editorState?.dirty) {
                 setConfirmResync(true);
@@ -683,7 +681,7 @@ const MemberProposalEntry = ({
           <div className="mt-3 flex flex-wrap gap-2">
             <button
               type="button"
-              className={dangerButtonClass}
+              className={buttonClassName({ variant: 'danger' })}
               onClick={() => {
                 setConfirmResync(false);
                 workspace.syncFromRoom();
@@ -691,7 +689,7 @@ const MemberProposalEntry = ({
             >
               确认丢弃并同步
             </button>
-            <button type="button" className={secondaryButtonClass} onClick={() => setConfirmResync(false)}>
+            <button type="button" className={buttonClassName()} onClick={() => setConfirmResync(false)}>
               保留草稿
             </button>
           </div>
@@ -732,7 +730,7 @@ export function ArenaMemberProposalStatus({
       {state.proposalResultUnknown ? (
         <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
           <p>上次提案请求结果未知，已冻结重复提交。</p>
-          <button type="button" className={`${secondaryButtonClass} mt-2`} onClick={controller.reconnect}>
+          <button type="button" className={buttonClassName({ className: 'mt-2' })} onClick={controller.reconnect}>
             重新连接并对账
           </button>
         </div>
@@ -747,7 +745,7 @@ export function ArenaMemberProposalStatus({
                 <span className="font-mono text-xs">{proposal.proposalId}</span>
                 <button
                   type="button"
-                  className={dangerButtonClass}
+                  className={buttonClassName({ variant: 'danger' })}
                   disabled={disabled}
                   onClick={() => { void controller.withdrawProposal(proposal.proposalId); }}
                 >

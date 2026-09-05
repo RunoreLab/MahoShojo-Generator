@@ -7,11 +7,10 @@ import type {
   ArenaRoomGenerationHistoryViewResponse,
 } from '@mahoshojo/contracts/arena-room';
 
+import { buttonClassName } from '@/components/shared/ui/Button';
+
 import { BattleResultPresentation } from '../components/BattleResultPresentation';
 import type { ArenaRoomGenerationHistoryReader } from './useArenaRoom';
-
-const buttonClass = 'min-h-10 rounded-lg border px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fuchsia-500 disabled:cursor-not-allowed disabled:opacity-50';
-const secondaryButtonClass = `${buttonClass} border-gray-300 bg-white text-gray-800 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100`;
 
 const stateLabel: Record<ArenaRoomGenerationHistoryItem['state'], string> = {
   starting: '启动中',
@@ -101,7 +100,7 @@ export function ArenaRoomGenerationHistory({
             仅保留当前房间实例的有界记录；房间结束或记录过期后不再提供长期归档。
           </p>
         </div>
-        <button type="button" className={secondaryButtonClass} disabled={loadingList} onClick={() => { void loadList(); }}>
+        <button type="button" className={buttonClassName()} disabled={loadingList} onClick={() => { void loadList(); }}>
           {loadingList ? '正在刷新…' : '刷新列表'}
         </button>
       </div>
@@ -126,7 +125,7 @@ export function ArenaRoomGenerationHistory({
               </div>
               <button
                 type="button"
-                className={secondaryButtonClass}
+                className={buttonClassName()}
                 disabled={loadingGenerationId !== null}
                 onClick={() => { void read(item.generationId); }}
               >
@@ -143,7 +142,7 @@ export function ArenaRoomGenerationHistory({
             <p className="text-sm font-semibold text-gray-950 dark:text-gray-100">
               {selected.contentStatus === 'available' ? '权威历史战报' : stateLabel[selected.generation.state]}
             </p>
-            <button type="button" className={secondaryButtonClass} onClick={() => setSelected(null)}>收起战报</button>
+            <button type="button" className={buttonClassName()} onClick={() => setSelected(null)}>收起战报</button>
           </div>
           {selected.contentStatus === 'available' ? (
             <BattleResultPresentation

@@ -39,6 +39,7 @@ import {
   useArenaProposalChangeLabels,
   type ArenaProposalChangeLabels,
 } from './ArenaProposalPanel';
+import { buttonClassName } from '@/components/shared/ui/Button';
 import { ArenaRoomDialog } from './ArenaRoomDialog';
 import { useArenaRoomContext } from './useArenaRoom';
 
@@ -64,20 +65,16 @@ const ResyncConfirmDialog = ({
     widthClassName="max-w-md"
   >
     <div className="flex flex-wrap justify-end gap-2">
-      <button type="button" className={secondaryButtonClass} onClick={onCancel}>
+      <button type="button" className={buttonClassName()} onClick={onCancel}>
         保留草稿
       </button>
-      <button type="button" className={dangerButtonClass} onClick={onConfirm}>
+      <button type="button" className={buttonClassName({ variant: 'danger' })} onClick={onConfirm}>
         确认丢弃并同步
       </button>
     </div>
   </ArenaRoomDialog>
 );
 
-const buttonClass = 'min-h-10 rounded-lg border px-3 py-2 text-sm font-medium transition-colors motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fuchsia-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50';
-const primaryButtonClass = `${buttonClass} border-fuchsia-600 bg-fuchsia-600 text-white hover:bg-fuchsia-700`;
-const secondaryButtonClass = `${buttonClass} border-gray-300 bg-white text-gray-800 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800`;
-const dangerButtonClass = `${buttonClass} border-red-300 bg-white text-red-700 hover:bg-red-50 dark:border-red-800 dark:bg-gray-900 dark:text-red-300`;
 
 const proposalCharacterPresets: Preset[] = PRESET_LIST.filter((preset) => (
   ARENA_ROOM_PRESET_CATALOG.some((entry) => entry.kind === 'character' && entry.id === preset.filename)
@@ -167,7 +164,7 @@ const ProposalPreviewDialog = ({
           <div aria-live="polite" className="mt-1 min-h-5 text-xs text-red-700 dark:text-red-300">{validationError ?? ''}</div>
           <button
             type="button"
-            className={`${primaryButtonClass} mt-2`}
+            className={buttonClassName({ variant: 'primary', className: 'mt-2' })}
             disabled={disabled || Boolean(validationError)}
             onClick={onSubmit}
           >
@@ -394,9 +391,9 @@ const ProposalWorkspaceInner = ({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {onSyncFromRoom ? (
-            <button type="button" className={secondaryButtonClass} disabled={isMatching} onClick={requestSync}>同步配置</button>
+            <button type="button" className={buttonClassName()} disabled={isMatching} onClick={requestSync}>同步配置</button>
           ) : null}
-          <button type="button" className={primaryButtonClass} disabled={!snapshot.dirty || disabled} onClick={buildPreview}>预览提案</button>
+          <button type="button" className={buttonClassName({ variant: 'primary' })} disabled={!snapshot.dirty || disabled} onClick={buildPreview}>预览提案</button>
         </div>
       </div>
       {snapshot.stale ? <p role="status" className="mt-3 rounded-lg bg-amber-50 p-2 text-sm text-amber-900">房间配置已更新；当前草稿仍绑定旧基线，请重新同步后再提交。</p> : null}

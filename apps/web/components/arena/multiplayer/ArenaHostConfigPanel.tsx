@@ -5,11 +5,9 @@ import { useState } from 'react';
 import type { ArenaRoomControllerState } from '@/lib/arena-room/controller';
 import type { ArenaRoomHostWorkspaceDirtyReason } from '@/lib/arena-room/host-workspace';
 
-import type { ArenaRoomHostReconciliation } from './useArenaRoomHostReconciliation';
+import { buttonClassName } from '@/components/shared/ui/Button';
 
-const buttonClass = 'rounded-lg border px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fuchsia-500 disabled:cursor-not-allowed disabled:opacity-50';
-const primaryButtonClass = `${buttonClass} border-fuchsia-600 bg-fuchsia-600 text-white hover:bg-fuchsia-700`;
-const secondaryButtonClass = `${buttonClass} border-gray-300 bg-white text-gray-800 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100`;
+import type { ArenaRoomHostReconciliation } from './useArenaRoomHostReconciliation';
 
 const reasonLabel: Readonly<Record<ArenaRoomHostWorkspaceDirtyReason, string>> = {
   'baseline-missing': '缺少房主本地内容的已发布基准',
@@ -44,7 +42,7 @@ export function ArenaHostConfigPanel({
         </div>
         <button
           type="button"
-          className={status.kind === 'error' ? secondaryButtonClass : primaryButtonClass}
+          className={buttonClassName({ variant: status.kind === 'error' ? 'secondary' : 'primary' })}
           disabled={busy}
           onClick={() => { void reconciliation.publishLocal(); }}
         >
@@ -71,7 +69,7 @@ export function ArenaHostConfigPanel({
           <div className="mt-3 flex flex-wrap gap-2">
             <button
               type="button"
-              className={primaryButtonClass}
+              className={buttonClassName({ variant: 'primary' })}
               disabled={busy}
               onClick={() => { void reconciliation.syncRoom(); }}
             >
@@ -90,13 +88,13 @@ export function ArenaHostConfigPanel({
             {status.reasons.map((reason) => <li key={reason}>{reasonLabel[reason]}</li>)}
           </ul>
           <div className="mt-3 flex flex-wrap gap-2">
-            <button type="button" className={secondaryButtonClass} disabled={busy} onClick={() => { void reconciliation.syncRoom(); }}>
+            <button type="button" className={buttonClassName()} disabled={busy} onClick={() => { void reconciliation.syncRoom(); }}>
               同步房间配置
             </button>
-            <button type="button" className={secondaryButtonClass} onClick={() => setDiffOpen(true)}>
+            <button type="button" className={buttonClassName()} onClick={() => setDiffOpen(true)}>
               查看差异
             </button>
-            <button type="button" className={primaryButtonClass} disabled={busy} onClick={() => { void reconciliation.publishLocal(); }}>
+            <button type="button" className={buttonClassName({ variant: 'primary' })} disabled={busy} onClick={() => { void reconciliation.publishLocal(); }}>
               保留本地修改并重新发布
             </button>
           </div>
@@ -110,7 +108,7 @@ export function ArenaHostConfigPanel({
                 <h3 id="arena-host-config-diff-heading" className="font-semibold text-gray-950 dark:text-gray-100">房间已发布配置 / 本地编辑草稿</h3>
                 <p className="mt-1 text-xs text-gray-600 dark:text-gray-400">仅展示可共享的配置字段，不包含房主本地正文。</p>
               </div>
-              <button type="button" className={secondaryButtonClass} onClick={() => setDiffOpen(false)}>关闭</button>
+              <button type="button" className={buttonClassName()} onClick={() => setDiffOpen(false)}>关闭</button>
             </div>
             <div className="grid gap-3 pt-3 lg:grid-cols-2">
               <div>

@@ -1,6 +1,7 @@
 'use client';
 
 import { BaseModal } from '@/components/shared/BaseModal';
+import { buttonClassName } from '@/components/shared/ui/Button';
 import type { ArenaRoomHostWorkspaceDirtyReason } from '@/lib/arena-room/host-workspace';
 
 export type ArenaRoomGenerationPreflightChoice = 'cancel' | 'publish' | 'sync-room' | 'confirm-start';
@@ -14,8 +15,6 @@ type Props = Readonly<{
   busy: boolean;
   onChoice: (choice: ArenaRoomGenerationPreflightChoice) => void;
 }>;
-
-const buttonClass = 'rounded-xl border px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fuchsia-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50';
 
 const reasonText: Readonly<Record<ArenaRoomHostWorkspaceDirtyReason, string>> = {
   'shared-config': '本地编辑与当前房间配置不同。',
@@ -47,7 +46,7 @@ export function ArenaRoomGenerationPreflightDialog({
         <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <button
             type="button"
-            className={`${buttonClass} border-gray-300 bg-white text-gray-800 hover:bg-gray-100`}
+            className={buttonClassName()}
             disabled={busy}
             onClick={() => onChoice('cancel')}
           >
@@ -57,7 +56,7 @@ export function ArenaRoomGenerationPreflightDialog({
             <>
               <button
                 type="button"
-                className={`${buttonClass} border-gray-300 bg-white text-gray-800 hover:bg-gray-100`}
+                className={buttonClassName()}
                 disabled={busy}
                 onClick={() => onChoice('sync-room')}
               >
@@ -65,7 +64,7 @@ export function ArenaRoomGenerationPreflightDialog({
               </button>
               <button
                 type="button"
-                className={`${buttonClass} border-fuchsia-600 bg-fuchsia-600 text-white hover:bg-fuchsia-700`}
+                className={buttonClassName({ variant: 'primary' })}
                 disabled={busy || !canPublish}
                 onClick={() => onChoice('publish')}
               >
@@ -76,7 +75,7 @@ export function ArenaRoomGenerationPreflightDialog({
           {!dirty && canConfirmStart ? (
             <button
               type="button"
-              className={`${buttonClass} border-fuchsia-600 bg-fuchsia-600 text-white hover:bg-fuchsia-700`}
+              className={buttonClassName({ variant: 'primary' })}
               disabled={busy}
               onClick={() => onChoice('confirm-start')}
             >
