@@ -1,6 +1,5 @@
 import type { ArenaRoomSharedConfig } from '@mahoshojo/contracts/arena-room';
 
-import { areArenaRoomSharedConfigsEqual } from '@/lib/arena-room/host-workspace';
 import {
   dataCardReferenceRequest,
   presetReferenceRequest,
@@ -85,6 +84,71 @@ const sameOrder = (a: readonly string[], b: readonly string[]): boolean => (
   a.length === b.length && a.every((key, index) => key === b[index])
 );
 
+/**
+ * 语义 diff 已逐字段覆盖的顶层 key。
+ * SharedConfig 新增字段时必须同步扩展结构化 diff 或本清单，否则编译失败，
+ * 防止 presentation 静默落后于 schema。
+ */
+const structuredConfigKeys = {
+  battleMode: true,
+  combatants: true,
+  teams: true,
+  scenario: true,
+  auxScenarios: true,
+  materials: true,
+  userGuidance: true,
+  storyLength: true,
+  customStoryLength: true,
+  selectedLanguage: true,
+  historySettings: true,
+} as const satisfies Record<keyof ArenaRoomSharedConfig, boolean>;
+
+/**
+ * 条目中被语义 diff 完整表达的字段：key（配对身份）、ref（版本条目）、
+ * displayName（重命名）、characterGuidance（行动引导）。
+ * 其余字段（如 host-local 的 type/contentVersion/guidance）一律按“未表达”处理，
+ * 包括未来新增的字段（fail-closed：宁可多报，不可漏报）。
+ */
+const representedEntryFields: ReadonlySet<string> = new Set([
+  'key',
+  'ref',
+  'displayName',
+  'characterGuidance',
+]);
+
+const fieldMismatch = (a: unknown, b: unknown): boolean => (
+  JSON.stringify(a ?? null) !== JSON.stringify(b ?? null)
+);
+
+/** 同 key 配对条目之间，是否存在语义 diff 未表达的字段差异。 */
+const hasUnrepresentedEntryFieldDifference = (roomEntry: object, localEntry: object): boolean => {
+  const roomRecord = roomEntry as Record<string, unknown>;
+  const localRecord = localEntry as Record<string, unknown>;
+  for (const key of new Set([...Object.keys(roomRecord), ...Object.keys(localRecord)])) {
+    if (representedEntryFields.has(key)) continue;
+    if (fieldMismatch(roomRecord[key], localRecord[key])) return true;
+  }
+  return false;
+};
+
+/**
+ * 顶层是否存在语义 diff 未覆盖的字段差异。
+ * 当前所有顶层 key 都已覆盖，本检查只对“schema 新增而 presentation 未跟上”的
+ * 未来字段兜底；清单由 structuredConfigKeys 的 satisfies 约束保证不落后于 schema。
+ */
+const hasUnhandledConfigKeyDifference = (
+  roomConfig: ArenaRoomSharedConfig,
+  localConfig: ArenaRoomSharedConfig,
+): boolean => {
+  const roomRecord = roomConfig as unknown as Record<string, unknown>;
+  const localRecord = localConfig as unknown as Record<string, unknown>;
+  for (const key of new Set([...Object.keys(roomRecord), ...Object.keys(localRecord)])) {
+    if (key in structuredConfigKeys) continue;
+    if (fieldMismatch(roomRecord[key], localRecord[key])) return true;
+  }
+  return false;
+};
+
 /** 主情景/辅助情景/素材条目的展示名：本地条目用 displayName，引用条目走名称解析。 */
 type ReferenceEntry = ArenaRoomSharedConfig['auxScenarios'][number] | ArenaRoomSharedConfig['materials'][number];
 
@@ -107,9 +171,11 @@ const scenarioIdentity = (
  * 输出“发生了什么变化”的产品级条目，而不是两侧原始 JSON。
  * 名称解析失败时回退缩写 ID（技术详情可看完整 key）。
  *
- * 不变量：只要 `areArenaRoomSharedConfigsEqual(roomConfig, localConfig)` 为 false，
- * 返回值至少包含一条；无法结构化描述时回退「其他房间设置发生了变化」，
- * 绝不出现“配置有差异但没有可展示差异”的自相矛盾状态。
+ * 不变量（双层）：
+ * 1. 两侧配置不等时，返回值至少包含一条，绝不出现“配置有差异但没有可展示差异”；
+ * 2. 只要存在任何未被结构化条目表达的字段差异（如同 key 条目的
+ *    guidance/contentVersion/type 变化），就显式追加「其他/另有其他房间设置发生了变化」，
+ *    即使已有其它结构化条目——不静默漏报。
  */
 export const buildArenaRoomConfigDiffEntries = (
   roomConfig: ArenaRoomSharedConfig,
@@ -118,6 +184,7 @@ export const buildArenaRoomConfigDiffEntries = (
 ): readonly ArenaConfigDiffEntry[] => {
   if (!localConfig) return [];
   const entries: ArenaConfigDiffEntry[] = [];
+  let hasUnrepresentedDifference = hasUnhandledConfigKeyDifference(roomConfig, localConfig);
 
   // 角色：新增 / 移除 / 行动引导 / 数据卡版本 / 名称 / 顺序
   const roomCombatantKeys = roomConfig.combatants.map((entry) => entry.key);
@@ -170,6 +237,9 @@ export const buildArenaRoomConfigDiffEntries = (
         tone: 'change',
         label: `重命名「${previous.displayName}」为「${entry.displayName}」`,
       });
+    }
+    if (hasUnrepresentedEntryFieldDifference(previous, entry)) {
+      hasUnrepresentedDifference = true;
     }
   }
   if (sameMembers(roomCombatantKeys, localCombatantKeys) && !sameOrder(roomCombatantKeys, localCombatantKeys)) {
@@ -235,6 +305,9 @@ export const buildArenaRoomConfigDiffEntries = (
         label: `重命名「${roomConfig.scenario.displayName}」为「${localConfig.scenario.displayName}」`,
       });
     }
+    if (hasUnrepresentedEntryFieldDifference(roomConfig.scenario, localConfig.scenario)) {
+      hasUnrepresentedDifference = true;
+    }
   }
 
   // 辅助情景 / 素材：新增 / 移除 / 数据卡版本 / 名称 / 顺序
@@ -275,6 +348,9 @@ export const buildArenaRoomConfigDiffEntries = (
           tone: 'change',
           label: `重命名「${previous.displayName}」为「${entry.displayName}」`,
         });
+      }
+      if (hasUnrepresentedEntryFieldDifference(previous, entry)) {
+        hasUnrepresentedDifference = true;
       }
     }
     if (sameMembers(roomKeys, localKeys) && !sameOrder(roomKeys, localKeys)) {
@@ -319,9 +395,17 @@ export const buildArenaRoomConfigDiffEntries = (
     entries.push({ id: 'history-settings', category: '共享历史设置', tone: 'change', label: '修改了共享历史读取/写入设置' });
   }
 
-  // 不变量兜底：存在未结构化的语义差异时，绝不返回空列表。
-  if (entries.length === 0 && !areArenaRoomSharedConfigsEqual(roomConfig, localConfig)) {
-    entries.push({ id: 'config:other', category: '其他', tone: 'change', label: '其他房间设置发生了变化' });
+  // 不变量兜底：存在语义 diff 未表达的字段差异时，显式追加兜底条目。
+  // 即使已有其它结构化条目也不省略，防止用户据不完整的差异清单做出覆盖决策。
+  if (hasUnrepresentedDifference) {
+    entries.push({
+      id: 'config:other',
+      category: '其他',
+      tone: 'change',
+      label: entries.length === 0
+        ? '其他房间设置发生了变化'
+        : '另有其他房间设置发生了变化',
+    });
   }
 
   return entries;

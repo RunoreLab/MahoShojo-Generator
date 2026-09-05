@@ -211,6 +211,54 @@ describe('arena room config diff presentation', () => {
     ]);
   });
 
+  it('结构化差异与未结构化差异并存时，两者都可见', () => {
+    const stub = (guidance: string) => ({
+      key: 'host-local:scenario:1',
+      displayName: '情景',
+      type: 'scenario' as const,
+      source: 'host-local' as const,
+      guidance,
+    });
+    const room = baseConfig({ battleMode: 'classic', auxScenarios: [stub('旧引导')] });
+    const local = baseConfig({ battleMode: 'daily', auxScenarios: [stub('新引导')] });
+    const entries = buildArenaRoomConfigDiffEntries(room, local, resolveNameOf([]));
+    expect(entries).toContainEqual(expect.objectContaining({
+      category: '模式与故事',
+      label: '战斗模式：经典模式 → 日常模式',
+    }));
+    expect(entries).toContainEqual(expect.objectContaining({
+      category: '其他',
+      label: '另有其他房间设置发生了变化',
+    }));
+  });
+
+  it('房主本地角色类型变化不会被结构化条目静默吞掉', () => {
+    const room = baseConfig({
+      combatants: [{ key: 'host-local:character:1', displayName: '焰', type: 'magical-girl', source: 'host-local' }],
+    });
+    const local = baseConfig({
+      combatants: [{ key: 'host-local:character:1', displayName: '焰', type: 'general-character', source: 'host-local' }],
+    });
+    expect(buildArenaRoomConfigDiffEntries(room, local, resolveNameOf([]))).toEqual([
+      expect.objectContaining({ category: '其他', label: '其他房间设置发生了变化' }),
+    ]);
+  });
+
+  it('房主本地内容 contentVersion 变化不会被结构化条目静默吞掉', () => {
+    const stub = (contentVersion: string) => ({
+      key: 'host-local:scenario:1',
+      displayName: '情景',
+      type: 'scenario' as const,
+      source: 'host-local' as const,
+      contentVersion,
+    });
+    const room = baseConfig({ scenario: stub(`sha256:${'a'.repeat(64)}`) });
+    const local = baseConfig({ scenario: stub(`sha256:${'b'.repeat(64)}`) });
+    expect(buildArenaRoomConfigDiffEntries(room, local, resolveNameOf([]))).toEqual([
+      expect.objectContaining({ category: '其他', label: '其他房间设置发生了变化' }),
+    ]);
+  });
+
   it('配置相等时不输出兜底条目', () => {
     const config = baseConfig();
     expect(buildArenaRoomConfigDiffEntries(config, structuredClone(config), resolveNameOf([]))).toEqual([]);
