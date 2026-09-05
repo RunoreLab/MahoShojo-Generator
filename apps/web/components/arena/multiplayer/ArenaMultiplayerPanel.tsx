@@ -132,11 +132,14 @@ const RoomMoreMenu = ({
   onOpenGenerationHistory,
   onOpenRoom,
   guideHref,
+  className,
 }: {
   readonly generationHistoryCount?: number;
   readonly onOpenGenerationHistory: () => void;
   readonly onOpenRoom: () => void;
   readonly guideHref: string;
+  /** 顶栏在窄屏为 2 列网格；成员只有 3 个一级操作时让本项跨满第二行。 */
+  readonly className?: string;
 }) => {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -164,10 +167,11 @@ const RoomMoreMenu = ({
     action();
   };
   return (
-    <div ref={rootRef} className="relative">
+    <div ref={rootRef} className={`relative ${className ?? ''}`}>
       <Button
         ref={triggerRef}
         variant="ghost"
+        className="w-full"
         aria-expanded={open}
         aria-controls="arena-room-more-actions"
         aria-label="更多房间操作"
@@ -681,8 +685,9 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
                 </span>
               </p>
             </div>
-            {/* 一级操作整组换行：窄屏时状态区占整行、操作组整体下一行，按钮自身不拆。 */}
-            <ActionBar className="shrink-0 flex-nowrap">
+            {/* 一级操作：窄屏是设计好的 2×2 网格（状态区占整行），≥sm 恢复单行不换行；
+                不依赖 flex-wrap 碰运气，也不在 320/375px 横向溢出。 */}
+            <ActionBar className="w-full shrink-0 grid grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-nowrap">
               <Button
                 aria-label="复制房间邀请文案"
                 onClick={() => { void copyRoomInfo(); }}
@@ -712,6 +717,7 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
                 <CountBadge count={pendingProposalCount} />
               </Button>
               <RoomMoreMenu
+                className={session.self.role === 'host' ? undefined : 'col-span-2'}
                 generationHistoryCount={props.generationHistoryCount}
                 onOpenGenerationHistory={() => setGenerationHistoryOpen(true)}
                 onOpenRoom={() => setRoomOpen(true)}
