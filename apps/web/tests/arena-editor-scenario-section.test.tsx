@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ScenarioPanel } from '@/components/arena/components/ScenarioPanel';
 import { useBattleStore } from '@/components/arena/stores/useBattleStore';
+import { SCENARIO_PRESET_LIST } from '@/lib/scenario-presets';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -151,6 +152,38 @@ describe('shared Arena scenario section via solo adapter', () => {
       expect(useBattleStore.getState().scenario.content).toBeNull();
     });
     expect(textarea.value).toBe(invalidJson);
+  });
+
+  it('预设情景分页可在全部页间翻页：15 个预设应有 4 页且最后一页可达', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = input instanceof URL ? input.toString() : input;
+      if (url.includes('/api/get-scenario-presets')) return Response.json(SCENARIO_PRESET_LIST);
+      return Response.json([]);
+    }));
+    useBattleStore.setState({ battleMode: 'scenario' });
+    renderPanel();
+
+    const presetHeader = [...container.querySelectorAll('button')]
+      .find((candidate) => candidate.textContent?.includes('预设情景（内置）'));
+    if (!presetHeader) throw new Error('preset section header not found');
+    act(() => presetHeader.click());
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('第 1 / 4 页');
+    });
+
+    act(() => button('下一页').click());
+    expect(container.textContent).toContain('第 2 / 4 页');
+    act(() => button('下一页').click());
+    expect(container.textContent).toContain('第 3 / 4 页');
+    act(() => button('下一页').click());
+    expect(container.textContent).toContain('第 4 / 4 页');
+    expect(container.textContent).toContain('废土行迹·战斗冲突：封路与突围');
+    expect(container.textContent).not.toContain('谨遵女王之意');
+    expect(button('下一页').disabled).toBe(true);
+
+    act(() => button('上一页').click());
+    expect(container.textContent).toContain('第 3 / 4 页');
   });
 
   it('辅助情景粘贴非法 JSON 失败时呈现错误并保留输入，不清空粘贴区域', async () => {

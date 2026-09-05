@@ -29,7 +29,12 @@ export function ScenarioPresetGridPicker({
   onToggle,
 }: ScenarioPresetGridPickerProps) {
   const totalPages = useMemo(() => Math.max(1, Math.ceil(presets.length / PRESETS_PER_PAGE)), [presets.length]);
-  const paged = useMemo(() => presets.slice((currentPage - 1) * PRESETS_PER_PAGE, currentPage * PRESETS_PER_PAGE), [presets, currentPage]);
+  // 分页规则唯一起来：父组件只保存页码，数据收缩或非法页码时由 picker 自行钳制。
+  const safePage = Math.min(Math.max(1, currentPage), totalPages);
+  const paged = useMemo(
+    () => presets.slice((safePage - 1) * PRESETS_PER_PAGE, safePage * PRESETS_PER_PAGE),
+    [presets, safePage],
+  );
 
   return (
     <div className="mb-4">
@@ -92,23 +97,23 @@ export function ScenarioPresetGridPicker({
         <div className="flex justify-center items-center mt-4 space-x-2">
           <button
             type="button"
-            onClick={() => onPageChange(Math.max(1, currentPage - 1))}
-            disabled={disabled || currentPage === 1}
+            onClick={() => onPageChange(Math.max(1, safePage - 1))}
+            disabled={disabled || safePage === 1}
             className={`min-h-10 px-3 py-1 rounded text-sm ${
-              currentPage === 1 || disabled ? 'bg-gray-200 text-gray-400' : 'bg-purple-100 text-purple-700 hover:bg-purple-200'
+              safePage === 1 || disabled ? 'bg-gray-200 text-gray-400' : 'bg-purple-100 text-purple-700 hover:bg-purple-200'
             }`}
           >
             上一页
           </button>
           <span className="text-sm text-gray-600">
-            第 {currentPage} / {totalPages} 页
+            第 {safePage} / {totalPages} 页
           </span>
           <button
             type="button"
-            onClick={() => onPageChange(Math.min(totalPages, currentPage + 1))}
-            disabled={disabled || currentPage === totalPages}
+            onClick={() => onPageChange(Math.min(totalPages, safePage + 1))}
+            disabled={disabled || safePage === totalPages}
             className={`min-h-10 px-3 py-1 rounded text-sm ${
-              currentPage === totalPages || disabled ? 'bg-gray-200 text-gray-400' : 'bg-purple-100 text-purple-700 hover:bg-purple-200'
+              safePage === totalPages || disabled ? 'bg-gray-200 text-gray-400' : 'bg-purple-100 text-purple-700 hover:bg-purple-200'
             }`}
           >
             下一页

@@ -10,8 +10,6 @@ import type { ScenarioPreset } from '@/lib/scenario-presets';
 
 import type { ArenaScenarioSectionModel } from './scenario-contract';
 
-const MAX_PRESET_PAGE_ITEMS = 12;
-
 /**
  * 单人与 Proposal 共用的“情景设置”区块组装：
  * ScenarioPickerPanel（主情景入口）+ 预设情景 + 辅助情景，
@@ -96,7 +94,7 @@ export function ArenaScenarioSection({ model }: Readonly<{ model: ArenaScenarioS
             <ScenarioPresetGridPicker
               title="选择预设情景"
               presets={model.presets as ScenarioPreset[]}
-              currentPage={Math.min(presetPage, Math.max(1, Math.ceil(model.presets.length / MAX_PRESET_PAGE_ITEMS)))}
+              currentPage={presetPage}
               onPageChange={setPresetPage}
               disabled={model.disabled}
               selectedFilenames={[...model.selectedPresetFilenames]}
