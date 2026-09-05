@@ -654,6 +654,9 @@ export const createArenaGenerationRuntime = (
     let markdown = '';
     let telemetry: Record<string, unknown> = {};
     let reasoningEnded = false;
+    let reasoningEventCount = 0;
+    let reasoningChars = 0;
+    let reasoningTextSeen = false;
     let reasoningOperation = Promise.resolve();
     let reasoningFailure: unknown = null;
     let finalizationStarted = false;
@@ -675,26 +678,40 @@ export const createArenaGenerationRuntime = (
     };
 
     const emit = async (event: GenerationEventInput): Promise<void> => input.emit(event);
+    const observeReasoningDiagnostics = (status: 'done' | 'unavailable'): void => {
+      observe({
+        event: 'reasoning',
+        generationId: input.generationId,
+        status,
+        eventCount: reasoningEventCount,
+        chars: reasoningChars,
+      });
+    };
     const queueReasoningEvent = (event: ArenaReasoningEvent): Promise<void> => {
       if (reasoningFailure) return Promise.reject(reasoningFailure);
       let projected: GenerationEventInput;
       try {
         if (event.type === 'reasoning-start') {
+          reasoningEventCount += 1;
           projected = {
             type: 'reasoning',
             data: { source: 'sdk', status: 'thinking', chunk: '' },
           };
         } else if (event.type === 'reasoning-delta') {
+          reasoningEventCount += 1;
           consumeOutputBudget(event.text);
+          if (event.text.trim()) reasoningTextSeen = true;
+          reasoningChars += event.text.length;
           projected = {
             type: 'reasoning',
             data: { source: 'sdk', status: 'thinking', chunk: event.text },
           };
         } else {
           reasoningEnded = true;
+          observeReasoningDiagnostics(reasoningTextSeen ? 'done' : 'unavailable');
           projected = {
             type: 'reasoning_done',
-            data: { source: 'sdk', status: 'done' },
+            data: { source: 'sdk', status: reasoningTextSeen ? 'done' : 'unavailable' },
           };
         }
       } catch (error) {
@@ -842,6 +859,7 @@ export const createArenaGenerationRuntime = (
         await emit(metaEvent);
       }
       if (!reasoningEnded) {
+        observeReasoningDiagnostics('unavailable');
         await emit({
           type: 'reasoning_done',
           data: { source: 'sdk', status: 'unavailable' },

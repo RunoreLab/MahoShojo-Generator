@@ -638,6 +638,96 @@ describe('Arena generation runtime', () => {
     ]);
   });
 
+  it('marks reasoning_done as done only when reasoning text was actually delivered', async () => {
+    const dependencies = createDependencies({
+      generate: vi.fn(async (input) => {
+        await input.onReasoning({ type: 'reasoning-start' });
+        await input.onReasoning({ type: 'reasoning-delta', text: '思考' });
+        await input.onReasoning({ type: 'reasoning-end' });
+        return { body: stream('正文'), telemetry: {} };
+      }),
+    });
+    const runtime = createArenaGenerationRuntime(dependencies);
+    const prepared = await runtime.prepare!({
+      request: new Request('https://example.test/api/arena/generate-stream'),
+      actorKey: 'user:42',
+      generationRequestId: 'request-direct-runtime',
+      payload,
+    });
+    if (
+      prepared instanceof Response
+      || isArenaGenerationAuditableRejection(prepared)
+    ) throw new Error('unexpected response');
+    const doneEvents: Array<Record<string, unknown>> = [];
+
+    await runtime.execute({
+      generationId: 'generation-1',
+      generationRequestId: 'request-1',
+      actorKey: 'user:42',
+      producerToken: 'producer-token-1',
+      payloadHash: 'payload-hash-1',
+      payload: prepared.executionPayload,
+      signal: new AbortController().signal,
+      emit: async (event) => {
+        if (event.type === 'reasoning_done') doneEvents.push(event.data as Record<string, unknown>);
+      },
+      claimFinalization: vi.fn(async () => ({ kind: 'claimed' as const })),
+    });
+
+    expect(doneEvents).toEqual([{ source: 'sdk', status: 'done' }]);
+  });
+
+  it('marks reasoning_done as unavailable when the provider ends reasoning without text', async () => {
+    const dependencies = createDependencies({
+      generate: vi.fn(async (input) => {
+        await input.onReasoning({ type: 'reasoning-start' });
+        await input.onReasoning({ type: 'reasoning-delta', text: '   ' });
+        await input.onReasoning({ type: 'reasoning-end' });
+        return { body: stream('正文'), telemetry: {} };
+      }),
+    });
+    const doneEvents: Array<Record<string, unknown>> = [];
+    const observations: Array<Record<string, unknown>> = [];
+    const runtime = createArenaGenerationRuntime({
+      ...dependencies,
+      observer: {
+        observeArenaGeneration: (observation) => { observations.push(observation as Record<string, unknown>); },
+      },
+    });
+    const prepared = await runtime.prepare!({
+      request: new Request('https://example.test/api/arena/generate-stream'),
+      actorKey: 'user:42',
+      generationRequestId: 'request-direct-runtime',
+      payload,
+    });
+    if (
+      prepared instanceof Response
+      || isArenaGenerationAuditableRejection(prepared)
+    ) throw new Error('unexpected response');
+
+    await runtime.execute({
+      generationId: 'generation-1',
+      generationRequestId: 'request-1',
+      actorKey: 'user:42',
+      producerToken: 'producer-token-1',
+      payloadHash: 'payload-hash-1',
+      payload: prepared.executionPayload,
+      signal: new AbortController().signal,
+      emit: async (event) => {
+        if (event.type === 'reasoning_done') doneEvents.push(event.data as Record<string, unknown>);
+      },
+      claimFinalization: vi.fn(async () => ({ kind: 'claimed' as const })),
+    });
+
+    expect(doneEvents).toEqual([{ source: 'sdk', status: 'unavailable' }]);
+    expect(observations).toContainEqual(expect.objectContaining({
+      event: 'reasoning',
+      status: 'unavailable',
+      eventCount: 2,
+      chars: 3,
+    }));
+  });
+
   it('does not manufacture a failed terminal when durable finalization remains incomplete', async () => {
     const dependencies = createDependencies({
       finalize: vi.fn(async () => { throw new Error('D1 and R2 unavailable'); }),

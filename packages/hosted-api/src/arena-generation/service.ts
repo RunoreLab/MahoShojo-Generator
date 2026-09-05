@@ -476,6 +476,13 @@ export type ArenaGenerationObservation =
     durationMs?: number;
   }
   | {
+    event: 'reasoning';
+    generationId: string;
+    status: 'done' | 'unavailable';
+    eventCount: number;
+    chars: number;
+  }
+  | {
     event: 'phase';
     generationId?: string;
     phase: 'safety' | 'prompt' | 'finalization';

@@ -189,6 +189,7 @@ export type HonoRuntimeTelemetrySnapshot = {
       latency: DurationSummary;
     };
     replay: { events: number; bytes: number; snapshotBootstraps: number };
+    reasoning: { done: number; unavailable: number; eventCount: number; chars: number };
     provider: {
       started: number;
       outcomes: { success: number; failure: number; cancelled: number };
@@ -614,6 +615,13 @@ export class HonoRuntimeTelemetry implements
 
   private readonly arenaReplay = { events: 0, bytes: 0, snapshotBootstraps: 0 };
 
+  private readonly arenaReasoning = {
+    done: 0,
+    unavailable: 0,
+    eventCount: 0,
+    chars: 0,
+  };
+
   private arenaProviderStarted = 0;
 
   private readonly arenaProviderOutcomes = { success: 0, failure: 0, cancelled: 0 };
@@ -976,6 +984,11 @@ export class HonoRuntimeTelemetry implements
           this.arenaProviderDuration.observe(observation.durationMs ?? 0);
         }
         break;
+      case 'reasoning':
+        this.arenaReasoning[observation.status] += 1;
+        this.arenaReasoning.eventCount += Math.max(0, Math.floor(observation.eventCount));
+        this.arenaReasoning.chars += Math.max(0, Math.floor(observation.chars));
+        break;
       case 'phase':
         this.arenaPhaseOutcomes[observation.phase][observation.outcome] += 1;
         this.arenaPhaseDurations[observation.phase].observe(observation.durationMs);
@@ -1336,6 +1349,7 @@ export class HonoRuntimeTelemetry implements
           outcomes: { ...this.arenaProviderOutcomes },
           duration: this.arenaProviderDuration.read(),
         },
+        reasoning: { ...this.arenaReasoning },
         phases: {
           safety: {
             outcomes: { ...this.arenaPhaseOutcomes.safety },
@@ -1571,6 +1585,7 @@ export class HonoRuntimeTelemetry implements
     });
     this.arenaResumeLatency.reset();
     Object.assign(this.arenaReplay, { events: 0, bytes: 0, snapshotBootstraps: 0 });
+    Object.assign(this.arenaReasoning, { done: 0, unavailable: 0, eventCount: 0, chars: 0 });
     this.arenaProviderStarted = 0;
     Object.assign(this.arenaProviderOutcomes, { success: 0, failure: 0, cancelled: 0 });
     this.arenaProviderDuration.reset();
