@@ -62,6 +62,38 @@ export const parseGenerationSseBlock = (
   return { id, event, data: dataLines.join('\n') };
 };
 
+/**
+ * Arena 内部 telemetry（由 Provider bridge 产生）使用内部字段名 `model`，
+ * 而 Web 客户端-facing telemetry 契约（StreamTelemetryMetaSchema）使用 `aiModel`。
+ * 本函数在 SSE 输出边界把内部形态投影为客户端形态，并剥离
+ * providerName/providerType/providerIndex/attempt/reasoning 等内部字段。
+ * 若数据不含模型字段则原样返回，避免重构错误诊断等非 telemetry 事件数据。
+ */
+export const projectArenaTelemetryForClient = (data: unknown): unknown => {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return data;
+  const record = data as Record<string, unknown>;
+  const internalModel = typeof record.model === 'string' ? record.model.trim() : '';
+  const explicitAiModel = typeof record.aiModel === 'string' ? record.aiModel.trim() : '';
+  const aiModel = explicitAiModel || internalModel;
+  if (!aiModel && !('model' in record) && !('aiModel' in record)) return record;
+  const projected: {
+    version: number;
+    aiModel?: string;
+    usage?: unknown;
+    narrativeHistoryReadCount?: number;
+  } = { version: 1 };
+  if (aiModel) projected.aiModel = aiModel;
+  if (record.usage !== undefined) projected.usage = record.usage;
+  if (
+    typeof record.narrativeHistoryReadCount === 'number'
+    && Number.isFinite(record.narrativeHistoryReadCount)
+    && record.narrativeHistoryReadCount >= 0
+  ) {
+    projected.narrativeHistoryReadCount = record.narrativeHistoryReadCount;
+  }
+  return projected;
+};
+
 export const resolveResumeCursor = (request: Request): string | null => {
   const headerCursor = request.headers.get('last-event-id')?.trim() || null;
   const queryCursor = new URL(request.url).searchParams.get('after')?.trim() || null;

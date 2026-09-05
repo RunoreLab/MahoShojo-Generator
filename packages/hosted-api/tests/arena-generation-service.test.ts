@@ -12,6 +12,10 @@ import {
   type GenerationReplayStoreState,
   type GenerationStreamEvent,
 } from '../src/arena-generation/service';
+import {
+  parseGenerationSseBlock,
+  projectArenaTelemetryForClient,
+} from '../src/arena-generation/sse';
 
 const readResponseText = async (response: Response): Promise<string> => response.text();
 
@@ -2551,6 +2555,70 @@ describe('Arena generation lifecycle service', () => {
       type: 'done',
       data: { status: 'completed', resultRef: 'r2://report/1' },
     });
+  });
+
+  test('projects internal telemetry into the client-facing aiModel contract on create and replay', async () => {
+    const store = new MemoryReplayStore();
+    const service = createService(store, {
+      execute: vi.fn(async ({ emit }) => {
+        await emit({ type: 'markdown', data: { chunk: 'A' } });
+        await emit({
+          type: 'telemetry',
+          data: {
+            model: 'gemini-x',
+            providerName: 'google',
+            providerType: 'google',
+            providerIndex: 0,
+            attempt: 1,
+            finishReason: 'stop',
+            reasoning: { status: 'complete' },
+            usage: { promptTokens: 10, completionTokens: 5 },
+          },
+        });
+        return { status: 'completed' as const, resultRef: 'r2://report/1' };
+      }),
+    });
+
+    const createResponse = await service.create(createRequest('request-1'));
+    const createBody = await readResponseText(createResponse);
+    const replayResponse = await service.resume(new Request(
+      'https://example.test/api/arena/generations/generation-1/stream',
+    ), { generationId: 'generation-1' });
+    const replayBody = await readResponseText(replayResponse);
+
+    for (const body of [createBody, replayBody]) {
+      const telemetryBlock = body
+        .split('\n\n')
+        .map((block) => parseGenerationSseBlock(block))
+        .find((block) => block?.event === 'telemetry');
+      expect(telemetryBlock).not.toBeNull();
+      expect(JSON.parse(telemetryBlock!.data)).toEqual({
+        version: 1,
+        aiModel: 'gemini-x',
+        usage: { promptTokens: 10, completionTokens: 5 },
+      });
+    }
+    expect(createBody).not.toContain('providerName');
+    expect(replayBody).not.toContain('providerName');
+  });
+
+  test('telemetry client projection is idempotent and preserves payloads without a model field', () => {
+    const clientFacing = {
+      version: 1,
+      aiModel: 'model-a',
+      usage: { totalTokens: 42 },
+      narrativeHistoryReadCount: 3,
+    };
+    expect(projectArenaTelemetryForClient(clientFacing)).toEqual(clientFacing);
+    expect(projectArenaTelemetryForClient({
+      model: 'model-a',
+      narrativeHistoryReadCount: 3,
+      usage: { totalTokens: 42 },
+    })).toEqual(clientFacing);
+    expect(projectArenaTelemetryForClient({ errorClass: 'Error' })).toEqual({ errorClass: 'Error' });
+    expect(projectArenaTelemetryForClient({})).toEqual({});
+    expect(projectArenaTelemetryForClient(null)).toBeNull();
+    expect(projectArenaTelemetryForClient({ model: '  ' })).toEqual({ version: 1 });
   });
 
   test('flushes a delta batch early when its byte budget is reached', async () => {

@@ -1,6 +1,7 @@
 import {
   compareGenerationSseIds,
   encodeGenerationSseEvent,
+  projectArenaTelemetryForClient,
   resolveResumeCursor,
 } from './sse';
 import type { SafePublicAiErrorProjection } from '../regular-generation';
@@ -756,7 +757,11 @@ const subscriptionToSseResponse = (
           controller.close();
           return;
         }
-        controller.enqueue(encodeGenerationSseEvent(next.value));
+        controller.enqueue(encodeGenerationSseEvent(
+          next.value.type === 'telemetry'
+            ? { ...next.value, data: projectArenaTelemetryForClient(next.value.data) }
+            : next.value,
+        ));
       } catch (error) {
         reader.releaseLock();
         controller.error(error);

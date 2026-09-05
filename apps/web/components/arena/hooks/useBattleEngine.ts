@@ -1473,7 +1473,13 @@ export const useBattleEngine = () => {
                 const narrativeCount =
                   typeof payload?.narrativeHistoryReadCount === 'number' ? payload.narrativeHistoryReadCount : null;
                 setStreamNarrativeHistoryReadCount(narrativeCount);
-                const aiModel = typeof payload?.aiModel === 'string' ? payload.aiModel.trim() : '';
+                // 兼容过渡期：新契约字段为 aiModel；旧 replay 存量/未升级 origin 仍可能发内部字段 model
+                const aiModelRaw = typeof payload?.aiModel === 'string' && payload.aiModel.trim()
+                  ? payload.aiModel
+                  : typeof payload?.model === 'string'
+                    ? payload.model
+                    : '';
+                const aiModel = aiModelRaw.trim();
                 if (aiModel) {
                   setStreamAiModel(sanitizeTextByShieldWords(aiModel));
                 }
