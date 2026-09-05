@@ -859,10 +859,13 @@ export const createArenaGenerationRuntime = (
         await emit(metaEvent);
       }
       if (!reasoningEnded) {
-        observeReasoningDiagnostics('unavailable');
+        // 与共享 reasoning bridge（node-runtime/reasoning-sse.ts）保持一致：
+        // Provider 省略 reasoning-end 时，按是否已交付实际文本判定终态。
+        const reasoningStatus = reasoningTextSeen ? 'done' : 'unavailable';
+        observeReasoningDiagnostics(reasoningStatus);
         await emit({
           type: 'reasoning_done',
-          data: { source: 'sdk', status: 'unavailable' },
+          data: { source: 'sdk', status: reasoningStatus },
         });
       }
       if (!markdown.trim()) {

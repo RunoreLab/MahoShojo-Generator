@@ -728,6 +728,56 @@ describe('Arena generation runtime', () => {
     }));
   });
 
+  it('marks reasoning_done as done when reasoning text was delivered without an explicit end event', async () => {
+    const dependencies = createDependencies({
+      generate: vi.fn(async (input) => {
+        await input.onReasoning({ type: 'reasoning-start' });
+        await input.onReasoning({ type: 'reasoning-delta', text: '思考' });
+        return { body: stream('正文'), telemetry: {} };
+      }),
+    });
+    const doneEvents: Array<Record<string, unknown>> = [];
+    const observations: Array<Record<string, unknown>> = [];
+    const runtime = createArenaGenerationRuntime({
+      ...dependencies,
+      observer: {
+        observeArenaGeneration: (observation) => { observations.push(observation as Record<string, unknown>); },
+      },
+    });
+    const prepared = await runtime.prepare!({
+      request: new Request('https://example.test/api/arena/generate-stream'),
+      actorKey: 'user:42',
+      generationRequestId: 'request-direct-runtime',
+      payload,
+    });
+    if (
+      prepared instanceof Response
+      || isArenaGenerationAuditableRejection(prepared)
+    ) throw new Error('unexpected response');
+
+    await runtime.execute({
+      generationId: 'generation-1',
+      generationRequestId: 'request-1',
+      actorKey: 'user:42',
+      producerToken: 'producer-token-1',
+      payloadHash: 'payload-hash-1',
+      payload: prepared.executionPayload,
+      signal: new AbortController().signal,
+      emit: async (event) => {
+        if (event.type === 'reasoning_done') doneEvents.push(event.data as Record<string, unknown>);
+      },
+      claimFinalization: vi.fn(async () => ({ kind: 'claimed' as const })),
+    });
+
+    expect(doneEvents).toEqual([{ source: 'sdk', status: 'done' }]);
+    expect(observations).toContainEqual(expect.objectContaining({
+      event: 'reasoning',
+      status: 'done',
+      eventCount: 2,
+      chars: 2,
+    }));
+  });
+
   it('does not manufacture a failed terminal when durable finalization remains incomplete', async () => {
     const dependencies = createDependencies({
       finalize: vi.fn(async () => { throw new Error('D1 and R2 unavailable'); }),
