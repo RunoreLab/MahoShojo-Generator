@@ -6,12 +6,8 @@ import type { ArenaRoomSharedConfig } from '@mahoshojo/contracts/arena-room';
 
 import type { ArenaRoomControllerState } from '@/lib/arena-room/controller';
 import {
-  dataCardReferenceRequest,
-  parseArenaRoomReferenceKey,
-  presetReferenceRequest,
   resolveArenaRoomReferenceName,
   useArenaRoomReferenceNames,
-  type ArenaRoomReferenceRequest,
 } from '@/lib/arena-room/reference-presentation';
 
 import { buttonClassName } from '@/components/shared/ui/Button';
@@ -19,6 +15,7 @@ import { buttonClassName } from '@/components/shared/ui/Button';
 import type { ArenaRoomHostReconciliation } from './useArenaRoomHostReconciliation';
 import {
   buildArenaRoomConfigDiffEntries,
+  collectArenaRoomConfigDiffReferenceRequests,
   type ArenaConfigDiffEntry,
 } from './presentation/config-diff';
 import { arenaRoomDirtyReasonCopy } from './presentation/room-copy';
@@ -44,43 +41,8 @@ const CATEGORY_ORDER: readonly ArenaConfigDiffEntry['category'][] = [
   '素材',
   '模式与故事',
   '共享历史设置',
+  '其他',
 ];
-
-/** 收集两侧配置中所有引用 key 的名称请求（绑定房间引用版本）。 */
-const collectDiffReferenceRequests = (
-  configs: readonly (ArenaRoomSharedConfig | null)[],
-): ArenaRoomReferenceRequest[] => {
-  const requests: ArenaRoomReferenceRequest[] = [];
-  const push = (request: ArenaRoomReferenceRequest | null): void => {
-    if (request) requests.push(request);
-  };
-  for (const config of configs) {
-    if (!config) continue;
-    const pushKey = (key: string, fallbackKind: ArenaRoomReferenceRequest['kind']): void => {
-      const parsed = parseArenaRoomReferenceKey(key, fallbackKind);
-      if (!parsed) return;
-      const entry = config.combatants.find((item) => item.key === key)
-        ?? config.auxScenarios.find((item) => item.key === key)
-        ?? config.materials.find((item) => item.key === key)
-        ?? (config.scenario?.key === key ? config.scenario : undefined);
-      const versionToken = entry && 'ref' in entry ? entry.ref.versionToken : undefined;
-      push(parsed.source === 'preset'
-        ? presetReferenceRequest(parsed.kind, parsed.id, versionToken)
-        : dataCardReferenceRequest(parsed.kind, { id: parsed.id, versionToken }));
-    };
-    for (const entry of config.combatants) {
-      if ('ref' in entry) pushKey(entry.key, 'character');
-    }
-    if (config.scenario && 'ref' in config.scenario) pushKey(config.scenario.key, 'scenario');
-    for (const entry of config.auxScenarios) {
-      if ('ref' in entry) pushKey(entry.key, 'scenario');
-    }
-    for (const entry of config.materials) {
-      if ('ref' in entry) pushKey(entry.key, 'material');
-    }
-  }
-  return requests;
-};
 
 const ConfigDiffSection = ({
   roomConfig,
@@ -92,22 +54,17 @@ const ConfigDiffSection = ({
   readonly revision: number;
 }) => {
   const requests = useMemo(
-    () => collectDiffReferenceRequests([roomConfig, localConfig]),
+    () => collectArenaRoomConfigDiffReferenceRequests([roomConfig, localConfig]),
     [roomConfig, localConfig],
   );
   const onlineNames = useArenaRoomReferenceNames(requests);
   const entries = useMemo(() => {
     if (!localConfig) return [];
-    return buildArenaRoomConfigDiffEntries(roomConfig, localConfig, (key) => {
-      const parsed = parseArenaRoomReferenceKey(key, 'character');
-      if (!parsed) return undefined;
-      const request = parsed.source === 'preset'
-        ? presetReferenceRequest(parsed.kind, parsed.id)
-        : dataCardReferenceRequest(parsed.kind, { id: parsed.id });
-      if (!request) return undefined;
-      const name = resolveArenaRoomReferenceName(request, onlineNames);
-      return name ?? undefined;
-    });
+    // 名称解析复用 collect 阶段的完整引用请求（kind + versionToken），
+    // 不在渲染时从 key 二次推导，避免丢失版本或错配 kind。
+    return buildArenaRoomConfigDiffEntries(roomConfig, localConfig, (request) => (
+      resolveArenaRoomReferenceName(request, onlineNames) ?? undefined
+    ));
   }, [roomConfig, localConfig, onlineNames]);
 
   const grouped = CATEGORY_ORDER
@@ -130,7 +87,9 @@ const ConfigDiffSection = ({
         </div>
       </div>
       {grouped.length === 0 ? (
-        <p className="pt-3 text-sm text-gray-600 dark:text-gray-400">没有可展示的差异。</p>
+        <p className="pt-3 text-sm text-gray-600 dark:text-gray-400">
+          房间设置本身没有差异；区别来自尚未发布的本地内容（角色、情景、素材）。
+        </p>
       ) : (
         <div className="space-y-3 pt-3">
           {grouped.map((group) => (
