@@ -32,6 +32,7 @@ import {
   assertArenaProposalSelection,
 } from '@/lib/arena-room/proposal-editor';
 import { buttonClassName } from '@/components/shared/ui/Button';
+import { ActionBar } from '@/components/shared/ui/ActionBar';
 
 import type { ArenaRoomProposalWorkspace } from './useArenaRoom';
 
@@ -465,12 +466,13 @@ const HostProposalCard = ({
     <li className="rounded-xl border border-gray-200 bg-white/80 p-3 dark:border-gray-700 dark:bg-gray-900/70">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
-          <p className="text-sm font-semibold text-gray-950 dark:text-gray-100">{authorDisplayName}</p>
-          <p className="mt-1 text-xs text-gray-600 dark:text-gray-400">
-            提交于 {proposal.createdAt} · 基于房间配置版本 {proposal.baseRevision}
+          <p className="text-sm font-semibold text-gray-950 dark:text-gray-100">
+            {authorDisplayName} 提出了 {proposal.changes.length} 项修改
+          </p>
+          <p className="mt-1 text-xs text-gray-600 dark:text-gray-400" title={proposal.proposalId}>
+            提交于 {proposal.createdAt}
           </p>
         </div>
-        <p className="font-mono text-xs text-gray-500 dark:text-gray-400">{proposal.proposalId}</p>
       </div>
       <fieldset className="mt-3 space-y-2">
         <legend className="text-sm font-semibold text-gray-950 dark:text-gray-100">逐项审阅</legend>
@@ -496,17 +498,7 @@ const HostProposalCard = ({
                 className="font-medium text-gray-950 dark:text-gray-100"
                 title={changeRefTitle(change)}
               >
-                {arenaProposalChangeSummary(change, labels)}
-              </span>
-              <ArenaProposalSelectionDetails change={change} />
-              <span className="mt-1 block text-xs text-gray-600 dark:text-gray-400">
-                提案基准：{safeJsonSummary(change.expectedBase)}
-              </span>
-              <span className="block text-xs text-gray-600 dark:text-gray-400">
-                当前房间值：{conflict ? safeJsonSummary(conflict.current) : '与提案基准一致'}
-              </span>
-              <span className="block text-xs text-gray-600 dark:text-gray-400">
-                建议值：{arenaProposalChangeProposedSummary(change, labels)}
+                {arenaProposalChangeProposedSummary(change, labels)}
               </span>
               {satisfied ? (
                 <span
@@ -538,7 +530,7 @@ const HostProposalCard = ({
           所选变更中有 {selectedConflictCount} 项与当前房间配置冲突，直接接受会被整体拒绝；请取消勾选冲突项后接受其余变更。
         </p>
       ) : null}
-      <div className="mt-2 flex flex-wrap gap-2">
+      <ActionBar className="mt-2">
         <button
           type="button"
           className={buttonClassName({ variant: 'primary' })}
@@ -555,7 +547,26 @@ const HostProposalCard = ({
         >
           拒绝全部
         </button>
-      </div>
+      </ActionBar>
+      <details className="mt-2 border-t pt-2 dark:border-gray-800">
+        <summary className="cursor-pointer select-none text-xs text-gray-600 dark:text-gray-400">技术详情</summary>
+        <div className="mt-2 space-y-1.5 text-xs text-gray-600 dark:text-gray-400">
+          <p>提案 ID：{proposal.proposalId} · 基于房间配置版本 {proposal.baseRevision}</p>
+          {proposal.changes.map((change) => {
+            const analysis = analysisByChangeId.get(change.changeId);
+            const conflict = analysis?.outcome === 'conflict' ? analysis.conflict : undefined;
+            return (
+              <p key={`detail-${change.changeId}`}>
+                <span className="font-mono">{change.changeId}</span>
+                {' · '}{arenaProposalExpectedBaseSummary(change)}
+                {change.dependsOn?.length ? ` · 依赖 ${change.dependsOn.join('、')}` : ''}
+                {change.atomicGroupId ? ` · 联动变更组 ${change.atomicGroupId}` : ''}
+                {conflict ? ` · 当前房间值：${safeJsonSummary(conflict.current)}` : ''}
+              </p>
+            );
+          })}
+        </div>
+      </details>
     </li>
   );
 };
@@ -742,7 +753,9 @@ export function ArenaMemberProposalStatus({
           <ul className="mt-2 space-y-2">
             {proposals.map((proposal) => (
               <li key={proposal.proposalId} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-gray-200 p-2 dark:border-gray-700">
-                <span className="font-mono text-xs">{proposal.proposalId}</span>
+                <span className="text-xs text-gray-600 dark:text-gray-400" title={proposal.proposalId}>
+                  提交于 {proposal.createdAt}
+                </span>
                 <button
                   type="button"
                   className={buttonClassName({ variant: 'danger' })}

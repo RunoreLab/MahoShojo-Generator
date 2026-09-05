@@ -319,7 +319,6 @@ describe('Arena room Proposal workspace', () => {
     expect(document.body.querySelectorAll('[role="dialog"][aria-modal="true"]')).toHaveLength(1);
     expect(document.activeElement?.textContent).toBe('关闭');
     expect(document.body.textContent).toContain('逐项检查后将提交给房主审阅');
-    expect(document.body.textContent).toContain('建议值：');
     expect(document.body.textContent).toContain('将提交');
     expect(document.body.textContent).toContain('新增角色');
     expect(document.body.textContent).toContain('新增队伍');
@@ -328,10 +327,10 @@ describe('Arena room Proposal workspace', () => {
     expect(document.body.textContent).toContain('新增素材');
     expect(document.body.textContent).toContain('语言改为 en-US');
     expect(document.body.textContent).toContain(
-      '建议值：角色 在线:character-public-1 引导改为“优先保护同伴”',
+      '角色 在线:character-public-1 引导改为“优先保护同伴”',
     );
     expect(document.body.textContent).toContain(
-      '建议值：角色 在线:character-public-1 分配至队伍 守护队',
+      '角色 在线:character-public-1 分配至队伍 守护队',
     );
     expect(document.body.textContent).toContain('叙事历史 读取=开(10)、写入=关');
     for (const exposedTerm of ['Proposal', 'typed diff', 'BASE', 'PROPOSED', 'revision', 'server-known', 'payload']) {

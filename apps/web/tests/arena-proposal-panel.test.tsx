@@ -328,9 +328,14 @@ describe('Arena Proposal panel real React interactions', () => {
     ));
     expect(container.textContent).toContain('待处理提案 (1)');
     expect(container.textContent).toContain('成员');
+    expect(container.textContent).toContain('提出了 12 项修改');
+    // 提案 ID 不进入一级文案：仅作为悬浮提示与技术详情中的辅助信息各出现一次。
+    expect(container.textContent.split('proposal-expanded').length - 1).toBe(1);
+    expect(container.querySelector('[title="proposal-expanded"]')).not.toBeNull();
+    // 判断依据（提案基准 / 当前房间值）保留在“技术详情”内供展开核对。
     expect(container.textContent).toContain('提案基准：');
     expect(container.textContent).toContain('当前房间值：');
-    expect(container.textContent).toContain('建议值：');
+    expect(container.textContent).toContain('技术详情');
     // 真冲突（当前值既不等于基准也不等于提案值）仍会红字提示并给出操作指引。
     expect(container.textContent).toContain('该目标的当前值已与提案基准不一致');
     expect(container.textContent).toContain('可取消勾选该项，其余变更仍可接受');
@@ -348,10 +353,10 @@ describe('Arena Proposal panel real React interactions', () => {
     expect(container.textContent).toContain('调整辅助情景顺序');
     expect(container.textContent).toContain('调整素材顺序');
     expect(container.textContent).toContain(
-      '建议值：角色 在线:character-1 引导改为“保护后排并等待支援”',
+      '角色 在线:character-1 引导改为“保护后排并等待支援”',
     );
     expect(container.textContent).toContain(
-      '建议值：角色 在线:character-1 分配至队伍 team:b',
+      '角色 在线:character-1 分配至队伍 team:b',
     );
     expect(container.textContent).toContain('叙事历史 读取=开(7)、写入=关');
     for (const exposedTerm of [

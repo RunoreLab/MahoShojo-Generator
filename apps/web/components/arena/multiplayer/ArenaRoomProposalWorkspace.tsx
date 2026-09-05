@@ -32,7 +32,6 @@ import { ARENA_ROOM_PRESET_CATALOG } from '@/lib/arena-room/generated/arena-room
 import {
   ArenaProposalSelectionDetails,
   ArenaMemberProposalStatus,
-  arenaProposalChangeSummary,
   arenaProposalChangeProposedSummary,
   arenaProposalSelectionError,
   changeRefTitle,
@@ -148,14 +147,24 @@ const ProposalPreviewDialog = ({
                   className="font-medium text-gray-950 dark:text-gray-100"
                   title={changeRefTitle(change)}
                 >
-                  {arenaProposalChangeSummary(change, labels)}
+                  {arenaProposalChangeProposedSummary(change, labels)}
                 </span>
-                <ArenaProposalSelectionDetails change={change} />
-                <span className="block text-xs text-gray-600 dark:text-gray-400">建议值：{arenaProposalChangeProposedSummary(change, labels)}</span>
               </span>
             </label>
           ))}
         </fieldset>
+        <details className="mt-3">
+          <summary className="cursor-pointer select-none text-xs text-gray-600 dark:text-gray-400">技术详情</summary>
+          <div className="mt-2 space-y-1.5 text-xs text-gray-600 dark:text-gray-400">
+            {changes.map((change) => (
+              <p key={`detail-${change.changeId}`}>
+                <span className="font-mono">{change.changeId}</span>
+                {' · '}
+                <ArenaProposalSelectionDetails change={change} />
+              </p>
+            ))}
+          </div>
+        </details>
         <div className="mt-4 border-t pt-4 dark:border-gray-800">
           <div className="text-xs text-gray-600 dark:text-gray-400">将提交 {selected.size} / {changes.length} 项变更</div>
           <div aria-live="polite" className="mt-1 min-h-5 text-xs text-red-700 dark:text-red-300">{validationError ?? ''}</div>
