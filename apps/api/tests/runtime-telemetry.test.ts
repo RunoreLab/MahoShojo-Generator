@@ -26,7 +26,7 @@ describe('Hono runtime telemetry', () => {
     const snapshot = telemetry.snapshot();
 
     expect(snapshot).toMatchObject({
-      schemaVersion: 5,
+      schemaVersion: 6,
       service: 'mahoshojo-hono',
       runtime: {
         origin: 'hono-node',
@@ -117,7 +117,7 @@ describe('Hono runtime telemetry', () => {
       });
 
       expect(telemetry.snapshot()).toMatchObject({
-        schemaVersion: 5,
+        schemaVersion: 6,
         aiUpstream: {
           attempts: {
             active: 1,
@@ -191,7 +191,7 @@ describe('Hono runtime telemetry', () => {
       });
 
       expect(telemetry.snapshot()).toMatchObject({
-        schemaVersion: 5,
+        schemaVersion: 6,
         hostedGeneration: {
           byOperation: {
             'generate-magical-girl-details': 1,
@@ -304,6 +304,14 @@ describe('Hono runtime telemetry', () => {
       event: 'provider', generationId: 'generation-1', outcome: 'failure', durationMs: 42,
     });
     telemetry.observeArenaGeneration({
+      event: 'reasoning', generationId: 'generation-1', status: 'done',
+      eventCount: 4, chars: 100,
+    });
+    telemetry.observeArenaGeneration({
+      event: 'reasoning', generationId: 'generation-2', status: 'unavailable',
+      eventCount: 1, chars: 0,
+    });
+    telemetry.observeArenaGeneration({
       event: 'phase', generationId: 'generation-1', phase: 'finalization',
       outcome: 'success', durationMs: 9,
     });
@@ -343,6 +351,7 @@ describe('Hono runtime telemetry', () => {
         latency: { samples: 1, totalMilliseconds: 12, maxMilliseconds: 12 },
       },
       replay: { events: 3, bytes: 512, snapshotBootstraps: 1 },
+      reasoning: { done: 1, unavailable: 1, eventCount: 5, chars: 100 },
       provider: {
         started: 1,
         outcomes: { success: 0, failure: 1, cancelled: 0 },
@@ -370,6 +379,7 @@ describe('Hono runtime telemetry', () => {
       snapshotBootstrap: true,
       secondProviderPrevention: true,
       terminal: { status: 'failed', code: 'GENERATION_FAILED' },
+      reasoning: { status: 'done', eventCount: 4, chars: 100 },
       finalization: 'success',
       r2: 'success',
     });
@@ -446,7 +456,7 @@ describe('Hono runtime telemetry', () => {
     telemetry.observeArenaRoomRuntime({ event: 'incident', outcome: 'replacement_required' });
 
     expect(telemetry.snapshot()).toMatchObject({
-      schemaVersion: 5,
+      schemaVersion: 6,
       arenaRoom: {
         registry: {
           activeRooms: 2,
@@ -568,6 +578,33 @@ describe('Hono runtime telemetry', () => {
         finished: 0,
         inFlight: { current: 3, peak: 3 },
       },
+    });
+  });
+
+  it('Arena reasoning 聚合在区间导出后重置为全零', () => {
+    const telemetry = new HonoRuntimeTelemetry({ logger: vi.fn() });
+    telemetry.observeArenaGeneration({
+      event: 'reasoning', generationId: 'generation-1', status: 'done',
+      eventCount: 4, chars: 100,
+    });
+    telemetry.observeArenaGeneration({
+      event: 'reasoning', generationId: 'generation-2', status: 'unavailable',
+      eventCount: 1, chars: 0,
+    });
+    expect(telemetry.snapshot().arenaGeneration.reasoning).toEqual({
+      done: 1,
+      unavailable: 1,
+      eventCount: 5,
+      chars: 100,
+    });
+
+    telemetry.emitSnapshot();
+
+    expect(telemetry.snapshot().arenaGeneration.reasoning).toEqual({
+      done: 0,
+      unavailable: 0,
+      eventCount: 0,
+      chars: 0,
     });
   });
 

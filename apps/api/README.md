@@ -62,7 +62,7 @@ Next handler 换一个入口继续加载。
 ## 容量遥测
 
 Hono 主进程启动 `HonoRuntimeTelemetry`，默认每 60 秒向 stdout 输出一行固定
-`schemaVersion=5`、`event=hono.runtime.telemetry` 的 JSON。当前快照包含：
+`schemaVersion=6`、`event=hono.runtime.telemetry` 的 JSON。当前快照包含：
 
 - process 累计 CPU 时间与采样间隔 utilization、RSS、heap used/total/limit；
 - event-loop utilization、active/idle 时间与 delay samples/mean/p99/max；
@@ -77,8 +77,9 @@ Hono 主进程启动 `HonoRuntimeTelemetry`，默认每 60 秒向 stdout 输出�
   reconnect/replay/snapshot/resync、publisher backlog/drop 与固定 incident outcome；observer 只接受低基数 union，
   不接受 room/user/ticket/generation ID、正文、错误原文或任意 metadata，异常时 fail-soft；
 - Arena request/resume/replay bytes/snapshot、provider attempt、generation duration、D1/R2 phase、cancel、
-  producer-lost、Redis 与 terminal outcome 的固定低基数计数，以及 generation duration p50/p95/p99；terminal audit
-  只记录 generation ID、固定 outcome/runtime 与聚合故障事实，不记录 actor、request body、prompt、正文或凭据；
+  producer-lost、Redis 与 terminal outcome 的固定低基数计数，以及 generation duration p50/p95/p99；Arena reasoning
+  仅聚合 done/unavailable 计数与事件数、字符数，不保存正文；terminal audit
+  只记录 generation ID、固定 outcome/runtime、reasoning 聚合事实与故障事实，不记录 actor、request body、prompt、正文或凭据；
 - Arena companion 的受信 operation、Hono primary / Next DR placement、固定 outcome 与 duration；Hono 聚合
   到 runtime snapshot，Cloudflare DR 使用同一 bounded observation vocabulary 输出结构化日志；
 - Details / Sublimation 四路的固定 operation、Hono primary / Next DR placement、固定 outcome 与 duration；

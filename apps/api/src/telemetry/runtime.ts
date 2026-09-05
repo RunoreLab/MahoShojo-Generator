@@ -52,7 +52,7 @@ export interface RuntimeTelemetryService {
 
 export type HonoRuntimeTelemetrySnapshot = {
   event: 'hono.runtime.telemetry';
-  schemaVersion: 5;
+  schemaVersion: 6;
   service: 'mahoshojo-hono';
   capturedAt: string;
   runtime: {
@@ -308,6 +308,11 @@ type ArenaGenerationAudit = {
   resumeAttempts: number;
   snapshotBootstrap: boolean;
   secondProviderPrevention: boolean;
+  reasoning: {
+    status: 'done' | 'unavailable' | 'not-observed';
+    eventCount: number;
+    chars: number;
+  };
   finalization: 'success' | 'failure' | 'not-observed';
   r2: 'success' | 'failure' | 'not-observed';
 };
@@ -318,6 +323,7 @@ const createArenaGenerationAudit = (): ArenaGenerationAudit => ({
   resumeAttempts: 0,
   snapshotBootstrap: false,
   secondProviderPrevention: false,
+  reasoning: { status: 'not-observed', eventCount: 0, chars: 0 },
   finalization: 'not-observed',
   r2: 'not-observed',
 });
@@ -984,11 +990,16 @@ export class HonoRuntimeTelemetry implements
           this.arenaProviderDuration.observe(observation.durationMs ?? 0);
         }
         break;
-      case 'reasoning':
+      case 'reasoning': {
         this.arenaReasoning[observation.status] += 1;
         this.arenaReasoning.eventCount += Math.max(0, Math.floor(observation.eventCount));
         this.arenaReasoning.chars += Math.max(0, Math.floor(observation.chars));
+        const reasoningAudit = this.getArenaAudit(observation.generationId).reasoning;
+        reasoningAudit.status = observation.status;
+        reasoningAudit.eventCount = Math.max(0, Math.floor(observation.eventCount));
+        reasoningAudit.chars = Math.max(0, Math.floor(observation.chars));
         break;
+      }
       case 'phase':
         this.arenaPhaseOutcomes[observation.phase][observation.outcome] += 1;
         this.arenaPhaseDurations[observation.phase].observe(observation.durationMs);
@@ -1029,6 +1040,7 @@ export class HonoRuntimeTelemetry implements
             snapshotBootstrap: audit.snapshotBootstrap,
             secondProviderPrevention: audit.secondProviderPrevention,
             terminal: { status: observation.status, code: observation.code },
+            reasoning: audit.reasoning,
             finalization: audit.finalization,
             r2: audit.r2,
           }));
@@ -1250,7 +1262,7 @@ export class HonoRuntimeTelemetry implements
 
     return {
       event: TELEMETRY_EVENT,
-      schemaVersion: 5,
+      schemaVersion: 6,
       service: 'mahoshojo-hono',
       capturedAt,
       runtime: {
