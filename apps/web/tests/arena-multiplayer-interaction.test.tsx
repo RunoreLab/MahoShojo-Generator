@@ -33,6 +33,7 @@ const mocks = vi.hoisted(() => ({
   syncProposalWorkspace: vi.fn(),
   listGenerationHistory: vi.fn(),
   readGenerationHistory: vi.fn(),
+  completedHistoryCount: 0,
   state: null as ArenaRoomControllerState | null,
   reconciliationState: { kind: 'idle' } as ArenaRoomHostReconciliationState,
 }));
@@ -82,7 +83,9 @@ vi.mock('@/components/arena/multiplayer/useArenaRoom', () => ({
     latestGenerationHistory: {
       status: 'idle',
       latest: null,
-      completedCount: 0,
+      get completedCount() {
+        return mocks.completedHistoryCount;
+      },
     },
   }),
 }));
@@ -207,6 +210,18 @@ const button = (label: string): HTMLButtonElement => {
     .find((candidate) => candidate.textContent?.trim() === label);
   if (!(match instanceof HTMLButtonElement)) throw new Error(`button not found: ${label}`);
   return match;
+};
+
+const buttonContaining = (label: string): HTMLButtonElement => {
+  const match = [...document.body.querySelectorAll('button')]
+    .find((candidate) => candidate.textContent?.includes(label));
+  if (!(match instanceof HTMLButtonElement)) throw new Error(`button not found: ${label}`);
+  return match;
+};
+
+/** 低频操作已收入“更多”菜单：先展开菜单，再按包含文本点选菜单项。 */
+const openMoreMenu = (): void => {
+  button('更多').click();
 };
 
 const flush = async (): Promise<void> => {
@@ -514,7 +529,8 @@ describe('Arena multiplayer panel real React interactions', () => {
     mocks.state = connectedHostState(sharedConfig);
     await act(async () => root.render(<ArenaMultiplayerContextPanel {...props} />));
 
-    await act(async () => button('历史战报').click());
+    await act(async () => openMoreMenu());
+    await act(async () => buttonContaining('历史战报').click());
     await flush();
 
     expect(document.body.querySelector('#arena-room-generation-history-dialog-heading')).not.toBeNull();
@@ -541,6 +557,20 @@ describe('Arena multiplayer panel real React interactions', () => {
     expect(mocks.listGenerationHistory).toHaveBeenCalledTimes(2);
     expect(document.body.textContent).toContain('当前房间还没有战报记录');
     expect(document.body.textContent).not.toContain('查看战报');
+  });
+
+  it('更多菜单中的历史战报入口在有已完成记录时显示有界数量', async () => {
+    mocks.state = connectedHostState(sharedConfig);
+    mocks.completedHistoryCount = 3;
+    await act(async () => root.render(<ArenaMultiplayerContextPanel {...props} />));
+
+    await act(async () => openMoreMenu());
+    expect(document.body.textContent).toContain('历史战报（3）');
+
+    mocks.completedHistoryCount = 0;
+    await act(async () => root.render(<ArenaMultiplayerContextPanel {...props} />));
+    await act(async () => openMoreMenu());
+    expect(document.body.textContent).not.toContain('历史战报（');
   });
 
   it('config publish unknown 在 connected 状态提供主动权威对账入口', async () => {
@@ -625,7 +655,8 @@ describe('Arena multiplayer panel real React interactions', () => {
     };
     await act(async () => root.render(<ArenaMultiplayerContextPanel {...props} />));
 
-    await act(async () => button('房间').click());
+    await act(async () => openMoreMenu());
+    await act(async () => button('房间成员与操作').click());
     const removeMember = button('移除');
     removeMember.focus();
     await act(async () => removeMember.click());
@@ -638,13 +669,15 @@ describe('Arena multiplayer panel real React interactions', () => {
     expect(mocks.kickMember).toHaveBeenCalledWith('member-1');
     expect(document.body.querySelector('#arena-room-overview-dialog-heading')).toBeNull();
 
-    await act(async () => button('房间').click());
+    await act(async () => openMoreMenu());
+    await act(async () => button('房间成员与操作').click());
     await act(async () => button('停止当前生成').click());
     expect(document.activeElement?.textContent).toBe('确认停止生成');
     await act(async () => button('确认停止生成').click());
     expect(mocks.cancelGeneration).toHaveBeenCalledOnce();
 
-    await act(async () => button('房间').click());
+    await act(async () => openMoreMenu());
+    await act(async () => button('房间成员与操作').click());
     await act(async () => button('关闭房间').click());
     await act(async () => button('确认关闭房间').click());
     expect(mocks.close).toHaveBeenCalledOnce();
@@ -687,7 +720,8 @@ describe('Arena multiplayer panel real React interactions', () => {
     };
     await act(async () => root.render(<ArenaMultiplayerContextPanel {...props} />));
 
-    await act(async () => button('房间').click());
+    await act(async () => openMoreMenu());
+    await act(async () => button('房间成员与操作').click());
     const leaveRoom = button('离开房间');
     leaveRoom.focus();
     await act(async () => leaveRoom.click());

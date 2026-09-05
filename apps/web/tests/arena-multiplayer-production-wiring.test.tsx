@@ -331,7 +331,8 @@ describe('Arena multiplayer production client/hook wiring', () => {
       });
       await act(async () => WiringSocket.instances[0]!.open());
       const exitLabel = role === 'host' ? '关闭房间' : '离开房间';
-      await act(async () => button('房间').click());
+      await act(async () => button('更多').click());
+      await act(async () => button('房间成员与操作').click());
       await act(async () => button(exitLabel).click());
       await act(async () => button(role === 'host' ? '确认关闭房间' : '确认离开房间').click());
       await flush();
@@ -392,7 +393,7 @@ describe('Arena multiplayer production client/hook wiring', () => {
       await flush();
       await act(async () => WiringSocket.instances[0]!.open());
 
-      await act(async () => button('复制邀请').click());
+      await act(async () => button('分享房间').click());
       await flush();
 
       expect(writeText).toHaveBeenCalledTimes(1);

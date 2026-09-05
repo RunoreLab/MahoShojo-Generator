@@ -3,6 +3,8 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
 
+import { ChevronDown } from 'lucide-react';
+
 import { MAX_ROOM_MEMBERS, type RoomDirectoryVisibility } from '@mahoshojo/contracts/arena-room';
 
 import type { ArenaRoomControllerState } from '@/lib/arena-room/controller';
@@ -19,10 +21,10 @@ import {
 } from '@/lib/arena-room/join-code';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { ActionBar } from '@/components/shared/ui/ActionBar';
-import { buttonClassName } from '@/components/shared/ui/Button';
+import { Badge, CountBadge } from '@/components/shared/ui/Badge';
+import { Button, buttonClassName } from '@/components/shared/ui/Button';
 import { inputClassName } from '@/components/shared/ui/Input';
 import { StatusLine } from '@/components/shared/ui/StatusNotice';
-import { Badge } from '@/components/shared/ui/Badge';
 import {
   arenaRoomGenerationErrorCopy,
   arenaRoomGenerationGapNotice,
@@ -115,6 +117,96 @@ const StatusNotice = ({ state }: { readonly state: ArenaRoomControllerState }) =
     <StatusLine>
       {state.notice ?? defaultNotice}
     </StatusLine>
+  );
+};
+
+const roomMoreMenuItemClass = 'flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-gray-800 transition-colors hover:bg-gray-100 focus-visible:bg-gray-100 focus-visible:outline-none dark:text-gray-200 dark:hover:bg-gray-800 dark:focus-visible:bg-gray-800';
+
+/** 二级操作收纳菜单：历史战报、房间管理、玩法说明等低频入口。 */
+const RoomMoreMenu = ({
+  generationHistoryCount,
+  onOpenGenerationHistory,
+  onOpenRoom,
+  guideHref,
+}: {
+  readonly generationHistoryCount?: number;
+  readonly onOpenGenerationHistory: () => void;
+  readonly onOpenRoom: () => void;
+  readonly guideHref: string;
+}) => {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const handlePointerDown = (event: PointerEvent): void => {
+      if (rootRef.current?.contains(event.target as Node)) return;
+      setOpen(false);
+    };
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape') return;
+      setOpen(false);
+      triggerRef.current?.focus();
+    };
+    document.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [open]);
+  const closeWith = (action: () => void): void => {
+    setOpen(false);
+    action();
+  };
+  return (
+    <div ref={rootRef} className="relative">
+      <Button
+        ref={triggerRef}
+        variant="ghost"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label="更多房间操作"
+        onClick={() => setOpen((value) => !value)}
+      >
+        更多
+        <ChevronDown aria-hidden="true" className={`h-4 w-4 transition-transform motion-reduce:transition-none ${open ? 'rotate-180' : ''}`} />
+      </Button>
+      {open ? (
+        <div
+          role="menu"
+          aria-label="更多房间操作"
+          className="absolute right-0 z-20 mt-1 w-44 overflow-hidden rounded-xl border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-900"
+        >
+          <button
+            type="button"
+            role="menuitem"
+            className={roomMoreMenuItemClass}
+            onClick={() => closeWith(onOpenGenerationHistory)}
+          >
+            {generationHistoryCount !== undefined && generationHistoryCount > 0
+              ? `历史战报（${generationHistoryCount}）`
+              : '历史战报'}
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className={roomMoreMenuItemClass}
+            onClick={() => closeWith(onOpenRoom)}
+          >
+            房间成员与操作
+          </button>
+          <Link
+            href={`${guideHref}#房主与成员`}
+            role="menuitem"
+            className={roomMoreMenuItemClass}
+            onClick={() => setOpen(false)}
+          >
+            玩法说明
+          </Link>
+        </div>
+      ) : null}
+    </div>
   );
 };
 
@@ -387,7 +479,7 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
   }, [props.hostPanelUi]);
   const [generationHistoryOpen, setGenerationHistoryOpen] = useState(false);
   const [roomOpen, setRoomOpen] = useState(false);
-  const [copiedKind, setCopiedKind] = useState<'room-id' | 'invite' | null>(null);
+  const [copiedInvite, setCopiedInvite] = useState(false);
   const [kickConfirmation, setKickConfirmation] = useState<{
     readonly targetUserId: string;
     readonly displayName: string;
@@ -454,18 +546,16 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
   const hostConfigSynchronizing = state.configPublishPending
     || props.hostConfigStatus === 'synchronizing';
 
-  const copyRoomInfo = async (kind: 'room-id' | 'invite'): Promise<void> => {
+  const copyRoomInfo = async (): Promise<void> => {
     if (!session) return;
     // 邀请链接必须指向用户正在浏览的 Web 站点（production/preview/本地天然正确）；
     // props.origin 是 Hono API origin，不能用于产品分享链接。
-    const text = kind === 'invite'
-      ? buildArenaRoomInviteText(window.location.origin, session.roomId)
-      : session.roomId;
+    const text = buildArenaRoomInviteText(window.location.origin, session.roomId);
     const ok = await copyTextToClipboard(text);
     if (!ok) return;
-    setCopiedKind(kind);
+    setCopiedInvite(true);
     if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
-    copiedTimerRef.current = setTimeout(() => setCopiedKind(null), 2_000);
+    copiedTimerRef.current = setTimeout(() => setCopiedInvite(false), 2_000);
   };
 
   return (
@@ -556,41 +646,47 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
             className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-fuchsia-200 bg-white/80 p-3 dark:border-fuchsia-900 dark:bg-gray-900/70"
             data-arena-room-compact-shell="v1"
           >
-            <p className="min-w-0 text-sm text-gray-800 dark:text-gray-200">
-              房间 <span className="font-mono font-semibold">{session.roomId}</span>
-              <span aria-hidden="true"> · </span>
-              房主 {host?.displayName ?? '未知'}
-              <span aria-hidden="true"> · </span>
-              {activeMembers.length} 人
-              <span aria-hidden="true"> · </span>
-              {session.self.role === 'host'
-                ? arenaRoomConfigSyncLabel({
-                  needsAttention: hostConfigNeedsAttention,
-                  synchronizing: hostConfigSynchronizing,
-                })
-                : '配置已同步'}
-            </p>
-            <ActionBar>
-              <button
-                type="button"
-                className={buttonClassName()}
-                aria-label={`复制房间码 ${session.roomId}`}
-                onClick={() => { void copyRoomInfo('room-id'); }}
-              >
-                {copiedKind === 'room-id' ? '已复制房间码' : '复制房间码'}
-              </button>
-              <button
-                type="button"
-                className={buttonClassName()}
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold text-gray-950 dark:text-gray-100">
+                {host?.displayName ?? '未知'}的房间
+                <span className="ml-2 font-normal text-gray-600 dark:text-gray-400">
+                  {activeMembers.length} 人在线
+                </span>
+              </p>
+              <p className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-gray-600 dark:text-gray-400">
+                <span className="font-mono" title={session.roomId}>{session.roomId}</span>
+                <span className="inline-flex items-center gap-1">
+                  <span
+                    aria-hidden="true"
+                    className={`inline-block h-1.5 w-1.5 rounded-full ${
+                      session.self.role === 'host' && hostConfigNeedsAttention
+                        ? 'bg-amber-500'
+                        : session.self.role === 'host' && hostConfigSynchronizing
+                          ? 'bg-sky-500'
+                          : 'bg-emerald-500'
+                    }`}
+                  />
+                  {session.self.role === 'host'
+                    ? arenaRoomConfigSyncLabel({
+                      needsAttention: hostConfigNeedsAttention,
+                      synchronizing: hostConfigSynchronizing,
+                    })
+                    : '配置已同步'}
+                </span>
+              </p>
+            </div>
+            <ActionBar className="shrink-0">
+              <Button
                 aria-label="复制房间邀请文案"
-                onClick={() => { void copyRoomInfo('invite'); }}
+                onClick={() => { void copyRoomInfo(); }}
               >
-                {copiedKind === 'invite' ? '已复制邀请' : '复制邀请'}
-              </button>
+                {copiedInvite ? '已复制邀请' : '分享房间'}
+              </Button>
               {session.self.role === 'host' ? (
-                <button
-                  type="button"
-                  className={buttonClassName(hostConfigNeedsAttention ? { className: 'border-amber-500 text-amber-800 dark:border-amber-600 dark:text-amber-200' } : {})}
+                <Button
+                  className={hostConfigNeedsAttention
+                    ? 'border-amber-500 text-amber-800 dark:border-amber-600 dark:text-amber-200'
+                    : undefined}
                   onClick={() => setConfigOpen(true)}
                 >
                   {hostConfigNeedsAttention
@@ -598,38 +694,22 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
                     : hostConfigSynchronizing
                       ? '同步配置中…'
                       : '配置'}
-                </button>
+                </Button>
               ) : null}
-              <button
-                type="button"
-                className={buttonClassName({ className: 'relative' })}
+              <Button
+                className="relative"
                 aria-label={pendingProposalCount > 0 ? `提案，${pendingProposalCount} 个待处理` : '提案'}
                 onClick={() => setProposalsOpen(true)}
               >
                 提案
-                {pendingProposalCount > 0 ? (
-                  <span
-                    aria-hidden="true"
-                    className="absolute -right-2 -top-2 inline-flex min-h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1 text-[11px] font-bold leading-none text-white ring-2 ring-white dark:ring-gray-900"
-                  >
-                    {pendingProposalCount > 99 ? '99+' : pendingProposalCount}
-                  </span>
-                ) : null}
-              </button>
-              <button type="button" className={buttonClassName()} onClick={() => setGenerationHistoryOpen(true)}>
-                {props.generationHistoryCount !== undefined && props.generationHistoryCount > 0
-                  ? `历史战报（${props.generationHistoryCount}）`
-                  : '历史战报'}
-              </button>
-              <button type="button" className={buttonClassName()} onClick={() => setRoomOpen(true)}>
-                房间
-              </button>
-              <Link
-                href={`${MULTIPLAYER_GUIDE_HREF}#房主与成员`}
-                className={buttonClassName()}
-              >
-                玩法说明
-              </Link>
+                <CountBadge count={pendingProposalCount} />
+              </Button>
+              <RoomMoreMenu
+                generationHistoryCount={props.generationHistoryCount}
+                onOpenGenerationHistory={() => setGenerationHistoryOpen(true)}
+                onOpenRoom={() => setRoomOpen(true)}
+                guideHref={MULTIPLAYER_GUIDE_HREF}
+              />
             </ActionBar>
           </div>
 

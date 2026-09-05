@@ -137,7 +137,9 @@ describe('Arena multiplayer panel accessibility/permissions', () => {
     expect(compactHtml).toContain('href="/encyclopedia/arena-multiplayer#快速开始"');
 
     const roomHtml = render({ ...readyState, phase: 'connected', session });
-    expect(roomHtml).toContain('href="/encyclopedia/arena-multiplayer#房主与成员"');
+    // 玩法说明已收入“更多”菜单；房间壳一级区不再展开百科链接。
+    expect(roomHtml).toContain('aria-label="更多房间操作"');
+    expect(roomHtml).not.toContain('href="/encyclopedia/arena-multiplayer#房主与成员"');
   });
 
   it('连接后的默认状态文案按成员数量引导邀请', () => {
@@ -172,28 +174,23 @@ describe('Arena multiplayer panel accessibility/permissions', () => {
     expect(html).toContain('role="status"');
   });
 
-  it('历史战报入口在有已完成记录时显示有界数量', () => {
+  it('历史战报入口收入更多菜单，不在一级操作区展开', () => {
     const base = render({ ...readyState, phase: 'connected', session });
-    expect(base).toContain('历史战报');
+    expect(base).toContain('aria-label="更多房间操作"');
+    expect(base).not.toContain('历史战报');
 
     const counted = render(
       { ...readyState, phase: 'connected', session },
       { generationHistoryCount: 3 },
     );
-    expect(counted).toContain('历史战报（3）');
-
-    const capped = render(
-      { ...readyState, phase: 'connected', session },
-      { generationHistoryCount: 0 },
-    );
-    expect(capped).not.toContain('历史战报（');
+    expect(counted).not.toContain('历史战报');
   });
 
   it('host/member 权限与 server contract 对齐', () => {
     const hostHtml = render({ ...readyState, phase: 'connected', session });
     expect(hostHtml).toContain('配置');
     expect(hostHtml).toContain('提案');
-    expect(hostHtml).toContain('>房间</button>');
+    expect(hostHtml).toContain('aria-label="更多房间操作"');
     expect(hostHtml).not.toContain('aria-label="房间成员列表"');
     expect(hostHtml).not.toContain('房间战报');
     expect(hostHtml).not.toContain('关闭房间');
@@ -216,18 +213,18 @@ describe('Arena multiplayer panel accessibility/permissions', () => {
     });
     expect(memberHtml).not.toContain('同步配置');
     expect(memberHtml).toContain('提案');
-    expect(memberHtml).toContain('>房间</button>');
+    expect(memberHtml).toContain('aria-label="更多房间操作"');
     expect(memberHtml).not.toContain('房间管理 / 退出');
     expect(memberHtml).not.toContain('离开房间');
     expect(memberHtml).not.toContain('关闭房间');
   });
 
-  it('会话内提供复制房间码/复制邀请入口', () => {
+  it('会话内提供分享房间入口，低频操作收入更多菜单', () => {
     const html = render({ ...readyState, phase: 'connected', session });
-    expect(html).toContain('复制房间码');
-    expect(html).toContain('复制邀请');
-    expect(html).toContain('aria-label="复制房间码 room-1"');
+    expect(html).toContain('分享房间');
+    expect(html).not.toContain('复制房间码');
     expect(html).toContain('aria-label="复制房间邀请文案"');
+    expect(html).toContain('aria-label="更多房间操作"');
   });
 
   it('仅向房主显示待处理提案数字 badge', () => {    const proposal = {
