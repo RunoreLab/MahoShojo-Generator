@@ -273,8 +273,7 @@ describe('Arena multiplayer production client/hook wiring', () => {
     expect(document.body.textContent).toContain('多人跑团');
     // 公开房间目录的丰富元信息（回归：只有标题和 UUID 的调试式列表）
     expect(document.body.textContent).toContain('欢迎加入');
-    expect(document.body.textContent).toContain('房主：Alice');
-    expect(document.body.textContent).toContain('3/16 人');
+    expect(document.body.textContent).toContain('Alice · 3/16 人');
     expect(document.body.textContent).toMatch(/前活跃|刚刚活跃/);
     const guideLink = [...document.body.querySelectorAll('a')]
       .find((candidate) => candidate.getAttribute('href') === '/encyclopedia/arena-multiplayer#两种最简单的玩法');

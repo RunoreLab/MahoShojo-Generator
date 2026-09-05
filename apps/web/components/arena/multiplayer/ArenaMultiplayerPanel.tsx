@@ -328,23 +328,26 @@ const ArenaRoomLobbyDialog = ({
             ) : (
               <ul className="mt-3 grid max-h-64 gap-2 overflow-y-auto pr-1 sm:grid-cols-2" aria-label="公开房间列表">
                 {state.rooms.map((room) => {
-                  const metaParts = [
-                    room.hostDisplayName ? `房主：${room.hostDisplayName}` : null,
+                  const memberLine = [
+                    room.hostDisplayName ?? null,
                     room.memberCount ? `${room.memberCount}/${room.memberLimit ?? MAX_ROOM_MEMBERS} 人` : null,
-                    formatRoomActivityTime(room.lastActivityAt),
-                  ].filter((part): part is string => Boolean(part));
+                  ].filter((part): part is string => Boolean(part)).join(' · ');
                   return (
-                    <li key={room.roomId} className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white/80 p-3 dark:border-gray-700 dark:bg-gray-900/70">
+                    <li
+                      key={room.roomId}
+                      className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white/80 p-3 dark:border-gray-700 dark:bg-gray-900/70"
+                      title={room.roomId}
+                    >
                       <div className="min-w-0">
-                        <p className="truncate text-sm font-medium text-gray-950 dark:text-gray-100">{room.title}</p>
-                        <p className="truncate font-mono text-xs text-gray-600 dark:text-gray-400">{room.roomId}</p>
-                        {metaParts.length > 0 ? (
-                          <p className="truncate text-xs text-gray-600 dark:text-gray-400">{metaParts.join(' · ')}</p>
+                        <p className="truncate text-sm font-medium text-gray-950 dark:text-gray-100" title={room.title}>{room.title}</p>
+                        {memberLine ? (
+                          <p className="mt-0.5 truncate text-xs text-gray-600 dark:text-gray-400">{memberLine}</p>
                         ) : null}
+                        <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-500">{formatRoomActivityTime(room.lastActivityAt)}</p>
                       </div>
-                      <button type="button" className={buttonClassName()} disabled={busy} onClick={() => onJoin(room.roomId)}>
+                      <Button className="shrink-0" disabled={busy} onClick={() => onJoin(room.roomId)}>
                         加入
-                      </button>
+                      </Button>
                     </li>
                   );
                 })}
