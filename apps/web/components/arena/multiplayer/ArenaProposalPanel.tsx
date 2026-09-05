@@ -35,6 +35,11 @@ import { buttonClassName } from '@/components/shared/ui/Button';
 import { ActionBar } from '@/components/shared/ui/ActionBar';
 
 import type { ArenaRoomProposalWorkspace } from './useArenaRoom';
+import {
+  arenaBattleModeCopy,
+  arenaLanguageCopy,
+  arenaStoryLengthValueCopy,
+} from './presentation/value-copy';
 
 type ProposalController = Pick<
   ArenaRoomController,
@@ -289,8 +294,8 @@ export const arenaProposalChangeSummary = (
     case 'reorderCombatants': return '调整角色顺序';
     case 'reorderTeams': return '调整队伍顺序';
     case 'reorderTeamCombatants': return `调整队伍 ${teamKeyLabelOf(labels, change.teamKey)} 内角色顺序`;
-    case 'setBattleMode': return `战斗模式改为 ${change.value}`;
-    case 'setSelectedLanguage': return `语言改为 ${change.value}`;
+    case 'setBattleMode': return `战斗模式改为 ${arenaBattleModeCopy[change.value]}`;
+    case 'setSelectedLanguage': return `语言改为 ${arenaLanguageCopy(change.value)}`;
     case 'setScenario': return change.ref === null ? '清除主情景' : `主情景改为 ${refLabel(change.ref, change.key)}`;
     case 'addAuxScenario': return `新增辅助情景 ${refLabel(change.ref, change.key)}`;
     case 'removeAuxScenario': return `移除辅助情景 ${scenarioKeyLabelOf(labels, change.scenarioKey)}`;
@@ -299,7 +304,7 @@ export const arenaProposalChangeSummary = (
     case 'removeMaterial': return `移除素材 ${materialKeyLabelOf(labels, change.materialKey)}`;
     case 'reorderMaterials': return '调整素材顺序';
     case 'setUserGuidance': return `全局引导改为“${safeText(change.value || '空值')}”`;
-    case 'setStoryLength': return `故事长度改为 ${change.value}`;
+    case 'setStoryLength': return `故事长度改为 ${arenaStoryLengthValueCopy(change.value, change.customStoryLength ?? null)}`;
     case 'setHistorySettings': return '修改共享历史读取/写入设置';
   }
 };

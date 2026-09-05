@@ -5,7 +5,10 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ArenaProposal } from '@mahoshojo/contracts/arena-room';
 
-import { ArenaProposalPanel } from '@/components/arena/multiplayer/ArenaProposalPanel';
+import {
+  ArenaProposalPanel,
+  arenaProposalChangeProposedSummary,
+} from '@/components/arena/multiplayer/ArenaProposalPanel';
 import { createRoomProposalArenaEditorSession } from '@/components/arena/editor';
 import type {
   ArenaRoomController,
@@ -272,8 +275,13 @@ describe('Arena Proposal panel real React interactions', () => {
       }, {
         changeId: 'language',
         type: 'setSelectedLanguage',
-        value: 'en-US',
-        expectedBase: { kind: 'value', value: 'ja-JP' },
+        value: 'ja',
+        expectedBase: { kind: 'value', value: 'en' },
+      }, {
+        changeId: 'story-length',
+        type: 'setStoryLength',
+        value: 'detailed',
+        expectedBase: { kind: 'value', value: { storyLength: 'default', customStoryLength: null } },
       }, {
         changeId: 'combatant-order',
         type: 'reorderCombatants',
@@ -328,7 +336,7 @@ describe('Arena Proposal panel real React interactions', () => {
     ));
     expect(container.textContent).toContain('待处理提案 (1)');
     expect(container.textContent).toContain('成员');
-    expect(container.textContent).toContain('提出了 12 项修改');
+    expect(container.textContent).toContain('提出了 13 项修改');
     // 提案 ID 不进入一级文案：仅作为悬浮提示与技术详情中的辅助信息各出现一次。
     expect(container.textContent.split('proposal-expanded').length - 1).toBe(1);
     expect(container.querySelector('[title="proposal-expanded"]')).not.toBeNull();
@@ -346,7 +354,8 @@ describe('Arena Proposal panel real React interactions', () => {
     expect(container.textContent).toContain('新增队伍 B 队');
     expect(container.textContent).toContain('移除队伍 team:a');
     expect(container.textContent).toContain('队伍 team:c 改名为 C 队新名');
-    expect(container.textContent).toContain('语言改为 en-US');
+    expect(container.textContent).toContain('语言改为 日本語');
+    expect(container.textContent).toContain('故事长度改为 详细');
     expect(container.textContent).toContain('调整角色顺序');
     expect(container.textContent).toContain('调整队伍顺序');
     expect(container.textContent).toContain('调整队伍 team:a 内角色顺序');
@@ -371,5 +380,29 @@ describe('Arena Proposal panel real React interactions', () => {
     ]) {
       expect(container.textContent).not.toContain(exposedTerm);
     }
+  });
+});
+
+describe('arena proposal change value presentation', () => {
+  it('内部枚举值必须经 registry 转译，不进入一级文案', () => {
+    expect(arenaProposalChangeProposedSummary({
+      changeId: 'mode',
+      type: 'setBattleMode',
+      value: 'scenario',
+      expectedBase: { kind: 'value', value: 'classic' },
+    })).toBe('战斗模式改为 情景模式');
+    expect(arenaProposalChangeProposedSummary({
+      changeId: 'length',
+      type: 'setStoryLength',
+      value: 'long',
+      customStoryLength: '2500',
+      expectedBase: { kind: 'value', value: { storyLength: 'default', customStoryLength: null } },
+    })).toBe('故事长度改为 自定义（2500 字）');
+    expect(arenaProposalChangeProposedSummary({
+      changeId: 'language',
+      type: 'setSelectedLanguage',
+      value: 'zh-TW',
+      expectedBase: { kind: 'value', value: 'zh-CN' },
+    })).toBe('语言改为 繁體中文');
   });
 });

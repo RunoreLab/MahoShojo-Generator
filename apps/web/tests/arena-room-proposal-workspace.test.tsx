@@ -25,7 +25,7 @@ vi.mock('@/components/arena/hooks/useArenaData', () => ({
   useLanguagesQuery: () => ({
     data: [
       { code: 'zh-CN', name: '简体中文' },
-      { code: 'en-US', name: 'English' },
+      { code: 'ja', name: '日本語' },
     ],
   }),
 }));
@@ -305,7 +305,7 @@ describe('Arena room Proposal workspace', () => {
     if (!storyGuidance || !language) throw new Error('shared story controls not found');
     await act(async () => setValue(storyGuidance, '雨夜守城'));
     await act(async () => button('标准(600+)').click());
-    await act(async () => setValue(language, 'en-US'));
+    await act(async () => setValue(language, 'ja'));
 
     const narrativeRead = [...container.querySelectorAll('label')]
       .find((label) => label.textContent?.includes('生成时读取（用于延续剧情）'))
@@ -325,7 +325,7 @@ describe('Arena room Proposal workspace', () => {
     expect(document.body.textContent).toContain('主情景改为 在线:scenario-public-main');
     expect(document.body.textContent).toContain('新增辅助情景');
     expect(document.body.textContent).toContain('新增素材');
-    expect(document.body.textContent).toContain('语言改为 en-US');
+    expect(document.body.textContent).toContain('语言改为 日本語');
     expect(document.body.textContent).toContain(
       '角色 在线:character-public-1 引导改为“优先保护同伴”',
     );

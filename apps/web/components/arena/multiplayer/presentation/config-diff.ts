@@ -1,8 +1,4 @@
-import type {
-  ArenaRoomSharedConfig,
-  BattleMode,
-  StoryLength,
-} from '@mahoshojo/contracts/arena-room';
+import type { ArenaRoomSharedConfig } from '@mahoshojo/contracts/arena-room';
 
 import { areArenaRoomSharedConfigsEqual } from '@/lib/arena-room/host-workspace';
 import {
@@ -11,7 +7,12 @@ import {
   shortReferenceId,
   type ArenaRoomReferenceRequest,
 } from '@/lib/arena-room/reference-presentation';
-import { hasCustomStoryLength } from '@/lib/story-length';
+
+import {
+  arenaBattleModeCopy,
+  arenaLanguageCopy,
+  arenaStoryLengthValueCopy,
+} from './value-copy';
 
 /** 房间配置语义 diff 的单条展示项。 */
 export type ArenaConfigDiffEntry = {
@@ -21,33 +22,6 @@ export type ArenaConfigDiffEntry = {
   readonly tone: 'add' | 'remove' | 'change';
   readonly label: string;
 };
-
-export const arenaBattleModeCopy: Readonly<Record<BattleMode, string>> = {
-  classic: '经典模式',
-  kizuna: '羁绊模式',
-  daily: '日常模式',
-  scenario: '情景模式',
-};
-
-export const arenaStoryLengthCopy: Readonly<Record<StoryLength, string>> = {
-  default: '默认',
-  short: '简短',
-  standard: '标准',
-  detailed: '详细',
-  long: '长篇',
-};
-
-export const arenaStoryLengthValueCopy = (
-  storyLength: StoryLength,
-  customStoryLength: string | null,
-): string => {
-  if (hasCustomStoryLength(customStoryLength)) return `自定义（${customStoryLength?.trim()} 字）`;
-  return arenaStoryLengthCopy[storyLength];
-};
-
-export const arenaLanguageCopy = (code: string): string => (
-  code === 'zh-CN' ? '简体中文' : code === 'en-US' ? 'English' : code
-);
 
 const fallbackKeyLabel = (key: string): string => {
   if (key.startsWith('preset:')) return `预设:${shortReferenceId(key.slice('preset:'.length))}`;

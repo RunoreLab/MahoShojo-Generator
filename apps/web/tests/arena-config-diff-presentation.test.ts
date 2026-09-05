@@ -5,11 +5,13 @@ import type { ArenaRoomSharedConfig } from '@mahoshojo/contracts/arena-room';
 import { arenaRoomReferenceRequestKey, type ArenaRoomReferenceRequest } from '@/lib/arena-room/reference-presentation';
 
 import {
-  arenaBattleModeCopy,
-  arenaStoryLengthValueCopy,
   buildArenaRoomConfigDiffEntries,
   collectArenaRoomConfigDiffReferenceRequests,
 } from '@/components/arena/multiplayer/presentation/config-diff';
+import {
+  arenaBattleModeCopy,
+  arenaStoryLengthValueCopy,
+} from '@/components/arena/multiplayer/presentation/value-copy';
 
 const historySettings = {
   readArenaHistory: true,
