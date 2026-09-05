@@ -38,7 +38,7 @@ export function ArenaRoomGenerationPreflightDialog({
         if (!busy) onChoice('cancel');
       }}
       footer={(
-        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
           <button
             type="button"
             className={buttonClassName()}
@@ -55,7 +55,7 @@ export function ArenaRoomGenerationPreflightDialog({
                 disabled={busy}
                 onClick={() => onChoice('sync-room')}
               >
-                放弃本地修改，同步房间配置
+                使用房间设置
               </button>
               <button
                 type="button"
@@ -63,7 +63,7 @@ export function ArenaRoomGenerationPreflightDialog({
                 disabled={busy || !canPublish}
                 onClick={() => onChoice('publish')}
               >
-                更新房间配置并开始
+                更新房间并开始
               </button>
             </>
           ) : null}
@@ -93,7 +93,7 @@ export function ArenaRoomGenerationPreflightDialog({
               {reasons.map((reason) => <li key={reason}>{arenaRoomDirtyReasonCopy[reason]}</li>)}
             </ul>
             <p className="rounded-lg border border-sky-300 bg-sky-50 px-3 py-2 text-sky-900" role="status">
-              选择“放弃本地修改，同步房间配置”会用房间当前设置替换编辑区内容（上方列出的本地修改将丢弃）；完成后再点击一次开始生成。
+              选择“使用房间设置”会用房间当前设置替换编辑区内容（上方列出的本地修改将丢弃）；完成后再点击一次开始生成。
             </p>
             {!canPublish ? (
               <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900" role="status">

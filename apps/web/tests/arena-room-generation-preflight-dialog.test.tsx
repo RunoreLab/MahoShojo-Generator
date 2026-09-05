@@ -41,13 +41,13 @@ describe('Arena Room generation preflight dialog', () => {
     ));
 
     expect(document.body.textContent).toContain('本地编辑与当前房间设置不同');
-    expect(document.body.textContent).toContain('更新房间配置并开始');
-    expect(document.body.textContent).toContain('放弃本地修改，同步房间配置');
+    expect(document.body.textContent).toContain('更新房间并开始');
+    expect(document.body.textContent).toContain('使用房间设置');
     expect(document.body.textContent).toContain('完成后再点击一次开始生成');
     for (const exposedTerm of ['host-local', 'working copy', 'Room baseline']) {
       expect(document.body.textContent).not.toContain(exposedTerm);
     }
-    const syncRoom = findButton('放弃本地修改，同步房间配置');
+    const syncRoom = findButton('使用房间设置');
     if (!(syncRoom instanceof HTMLButtonElement)) throw new Error('sync-room button missing');
     await act(async () => syncRoom.click());
     expect(onChoice).toHaveBeenCalledWith('sync-room');
@@ -65,8 +65,8 @@ describe('Arena Room generation preflight dialog', () => {
         onChoice={onChoice}
       />,
     ));
-    expect(findButton('更新房间配置并开始')).toHaveProperty('disabled', true);
-    const syncRoom = findButton('放弃本地修改，同步房间配置');
+    expect(findButton('更新房间并开始')).toHaveProperty('disabled', true);
+    const syncRoom = findButton('使用房间设置');
     expect(syncRoom).toHaveProperty('disabled', false);
     expect(document.body.textContent).toContain('当前编辑内容无法安全发布');
     if (!(syncRoom instanceof HTMLButtonElement)) throw new Error('sync-room button missing');
@@ -94,8 +94,8 @@ describe('Arena Room generation preflight dialog', () => {
     expect(document.body.querySelector('[role="alert"]')).not.toBeNull();
     const confirmStart = findButton('确认按当前配置开始');
     if (!(confirmStart instanceof HTMLButtonElement)) throw new Error('confirm-start button missing');
-    expect(findButton('放弃本地修改，同步房间配置')).toBeUndefined();
-    expect(findButton('更新房间配置并开始')).toBeUndefined();
+    expect(findButton('使用房间设置')).toBeUndefined();
+    expect(findButton('更新房间并开始')).toBeUndefined();
     await act(async () => confirmStart.click());
     expect(onChoice).toHaveBeenCalledWith('confirm-start');
   });
@@ -111,8 +111,8 @@ describe('Arena Room generation preflight dialog', () => {
         onChoice={vi.fn()}
       />,
     ));
-    expect(findButton('更新房间配置并开始')).toHaveProperty('disabled', true);
-    expect(findButton('放弃本地修改，同步房间配置')).toHaveProperty('disabled', true);
+    expect(findButton('更新房间并开始')).toHaveProperty('disabled', true);
+    expect(findButton('使用房间设置')).toHaveProperty('disabled', true);
     expect(findButton('取消')).toHaveProperty('disabled', true);
   });
 });

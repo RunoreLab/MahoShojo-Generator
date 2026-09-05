@@ -260,8 +260,8 @@ describe('Arena multiplayer BattleActions authority gate', () => {
     await render();
 
     const buttons = Array.from(document.body.querySelectorAll<HTMLButtonElement>('button'));
-    const publish = buttons.find((button) => button.textContent?.includes('更新房间配置并开始'));
-    const syncRoom = buttons.find((button) => button.textContent?.includes('放弃本地修改，同步房间配置'));
+    const publish = buttons.find((button) => button.textContent?.includes('更新房间并开始'));
+    const syncRoom = buttons.find((button) => button.textContent?.includes('使用房间设置'));
     const cancel = buttons.find((button) => button.textContent?.trim() === '取消');
     expect(publish).toBeTruthy();
     expect(syncRoom).toBeTruthy();
@@ -288,7 +288,7 @@ describe('Arena multiplayer BattleActions authority gate', () => {
     const cancel = buttons.find((button) => button.textContent?.trim() === '取消');
     expect(confirmStart).toBeTruthy();
     expect(cancel).toBeTruthy();
-    expect(buttons.find((button) => button.textContent?.includes('更新房间配置并开始'))).toBeUndefined();
+    expect(buttons.find((button) => button.textContent?.includes('更新房间并开始'))).toBeUndefined();
 
     await act(async () => confirmStart!.click());
     expect(mocks.resolvePreflight).toHaveBeenCalledWith('confirm-start');
