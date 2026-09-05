@@ -58,8 +58,10 @@ const sameOrder = (a: readonly string[], b: readonly string[]): boolean => (
 );
 
 /** 主情景/辅助情景/素材条目的展示名：本地条目用 displayName，引用条目走名称解析。 */
+type ReferenceEntry = ArenaRoomSharedConfig['auxScenarios'][number] | ArenaRoomSharedConfig['materials'][number];
+
 const entryName = (
-  entry: ArenaRoomSharedConfig['scenario'] | ArenaRoomSharedConfig['auxScenarios'][number] | ArenaRoomSharedConfig['materials'][number],
+  entry: ArenaRoomSharedConfig['scenario'] | ReferenceEntry,
   resolveReferenceName: (key: string) => string | undefined,
 ): string => {
   if (!entry) return '未设置';
@@ -156,8 +158,8 @@ export const buildArenaRoomConfigDiffEntries = (
   // 辅助情景 / 素材：新增 / 移除 / 顺序
   const referenceListDiff = (
     listName: ArenaConfigDiffEntry['category'],
-    roomEntries: readonly ArenaRoomSharedConfig['auxScenarios'][number][],
-    localEntries: readonly ArenaRoomSharedConfig['auxScenarios'][number][],
+    roomEntries: readonly ReferenceEntry[],
+    localEntries: readonly ReferenceEntry[],
     prefix: string,
     orderLabel: string,
   ): void => {
