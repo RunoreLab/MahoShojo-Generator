@@ -789,11 +789,10 @@ describe('Arena multiplayer panel real React interactions', () => {
     expect(document.body.textContent).toContain('房间设置已更新，而本地还有未发布的修改');
     await act(async () => button('查看差异').click());
     expect(document.body.querySelectorAll('[role="dialog"][aria-modal="true"]')).toHaveLength(1);
-    const diffClose = document.body.querySelector<HTMLButtonElement>(
-      '[aria-labelledby="arena-host-config-diff-heading"] button',
-    );
-    if (!diffClose) throw new Error('diff close button missing');
-    await act(async () => diffClose.click());
+    expect(document.body.textContent).toContain('与房间当前设置相比，本地修改了');
+    expect(document.body.querySelector('[aria-labelledby="arena-host-config-diff-heading"] details')).not.toBeNull();
+    await act(async () => button('收起差异').click());
+    expect(document.body.querySelector('[aria-labelledby="arena-host-config-diff-heading"]')).toBeNull();
     await act(async () => button('同步房间配置').click());
     await act(async () => button('保留本地修改并重新发布').click());
     expect(mocks.syncRoom).toHaveBeenCalledOnce();
