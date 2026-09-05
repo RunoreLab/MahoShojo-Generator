@@ -125,6 +125,7 @@ type ArenaRoomControllerOptions = {
   readonly initialAccess?: { readonly enabled: boolean; readonly authenticated: boolean };
   readonly maxReconnectAttempts?: number;
   readonly reconnectDelayMs?: (attempt: number) => number;
+  readonly reconnectRandom?: () => number;
   readonly setTimer?: (callback: () => void, delayMs: number) => unknown;
   readonly clearTimer?: (handle: unknown) => void;
   readonly createRequestId?: () => string;
@@ -279,9 +280,13 @@ const resolveAuthoritySession = (
 
 // 服务器给房主 45 分钟离线宽限；客户端的重连预算也应对齐「秒级服务抖动不毁房间」的
 // 产品语义：默认 8 次指数退避（约 40 秒恢复窗口），耗尽后才进入 replacement 熔断。
-const defaultReconnectDelay = (attempt: number): number => (
-  Math.min(8_000, 500 * (2 ** Math.max(0, attempt - 1)))
-);
+// 延迟再叠加 ±20% 乘性 jitter（0.8–1.2×）：Hono 整体重启时大量房间不会在相同时间点
+// 同步重连打回服务端。注入 reconnectDelayMs 时完全接管延迟（不叠加 jitter）；
+// 测试可通过 reconnectRandom 注入固定 RNG 求得确定性断言。
+const defaultReconnectDelay = (attempt: number, random: () => number): number => {
+  const exponential = Math.min(8_000, 500 * (2 ** Math.max(0, attempt - 1)));
+  return Math.round(exponential * (0.8 + random() * 0.4));
+};
 
 const replaceMember = (
   session: ArenaRoomSessionResponse,
@@ -405,7 +410,9 @@ export const createArenaRoomController = (
   if (!Number.isSafeInteger(maxReconnectAttempts) || maxReconnectAttempts < 1) {
     throw new Error('maxReconnectAttempts 必须是正安全整数');
   }
-  const reconnectDelayMs = options.reconnectDelayMs ?? defaultReconnectDelay;
+  const reconnectRandom = options.reconnectRandom ?? Math.random;
+  const reconnectDelayMs = options.reconnectDelayMs
+    ?? ((attempt: number) => defaultReconnectDelay(attempt, reconnectRandom));
   const setTimer = options.setTimer ?? ((callback, delayMs) => setTimeout(callback, delayMs));
   const clearTimer = options.clearTimer ?? ((handle) => clearTimeout(handle as ReturnType<typeof setTimeout>));
   const createRequestId = options.createRequestId ?? (() => globalThis.crypto.randomUUID());

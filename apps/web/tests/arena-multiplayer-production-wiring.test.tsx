@@ -443,7 +443,9 @@ describe('Arena multiplayer production client/hook wiring', () => {
     await act(async () => WiringSocket.instances[0]!.closed(1013, 'authority-unavailable'));
     expect(container.textContent).toContain('正在重新连接');
     await act(async () => {
-      vi.advanceTimersByTime(500);
+      // 默认重连延迟叠加 0.8–1.2× 乘性 jitter（基线 500ms），推进到上界 600ms
+      // 才能对任意 RNG 结果确定性命中重连。
+      vi.advanceTimersByTime(600);
       await Promise.resolve();
       await Promise.resolve();
     });

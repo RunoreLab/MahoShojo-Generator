@@ -149,7 +149,9 @@ const ticket = (value: string) => ({
   },
 });
 
-const createHarness = () => {
+type HarnessOverrides = Partial<Parameters<typeof createArenaRoomController>[0]>;
+
+const createHarness = (overrides: HarnessOverrides = {}) => {
   let ticketIndex = 0;
   let createRequestIndex = 0;
   const client: ArenaRoomClient = {
@@ -217,6 +219,8 @@ const createHarness = () => {
   };
   const sockets: FakeSocket[] = [];
   const queued: Array<() => void> = [];
+  // setTimer 仅用于重连调度，记录每次调度到的延迟即可精确断言退避序列。
+  const scheduledDelays: number[] = [];
   const controller = createArenaRoomController({
     client,
     createSocket: vi.fn((url, protocol) => {
@@ -229,7 +233,8 @@ const createHarness = () => {
     initialAccess: { enabled: true, authenticated: true },
     maxReconnectAttempts: 2,
     reconnectDelayMs: () => 0,
-    setTimer: (callback) => {
+    setTimer: (callback, delayMs) => {
+      scheduledDelays.push(delayMs);
       queued.push(callback);
       return callback;
     },
@@ -238,13 +243,14 @@ const createHarness = () => {
       if (index >= 0) queued.splice(index, 1);
     },
     createRequestId: () => `create-request-${String(++createRequestIndex).padStart(4, '0')}`,
+    ...overrides,
   });
   const runNextTimer = async () => {
     queued.shift()?.();
     await Promise.resolve();
     await Promise.resolve();
   };
-  return { client, controller, queued, runNextTimer, sockets };
+  return { client, controller, queued, scheduledDelays, runNextTimer, sockets };
 };
 
 describe('Arena Room browser controller', () => {
@@ -387,6 +393,56 @@ describe('Arena Room browser controller', () => {
     expect(client.join).not.toHaveBeenCalled();
     sockets[1]!.open();
     expect(controller.getSnapshot().phase).toBe('connected');
+  });
+
+  it('默认重连延迟叠加 0.8–1.2× 乘性 jitter（RNG 可注入），打散服务重启后的同步重连', async () => {
+    const rolls = [0, 0.5, 0.75];
+    const { controller, runNextTimer, scheduledDelays, sockets } = createHarness({
+      maxReconnectAttempts: 3,
+      reconnectDelayMs: undefined,
+      reconnectRandom: () => rolls.shift() ?? 0,
+    });
+    await controller.create({
+      displayName: '房主',
+      directory: { title: '测试房', visibility: 'public' },
+      sharedConfig,
+    });
+    sockets[0]!.open();
+
+    // attempt 1：基线 500ms，roll=0 → 0.8×500 = 400
+    sockets[0]!.closed(1013, 'try-again-later');
+    expect(scheduledDelays).toEqual([400]);
+    await runNextTimer();
+
+    // 跨连接未收到 validated control frame 不重置预算：attempt 2 基线 1000ms，
+    // roll=0.5 → 1.0×1000 = 1000
+    sockets[1]!.open();
+    sockets[1]!.closed(1013, 'try-again-later');
+    expect(scheduledDelays).toEqual([400, 1000]);
+    await runNextTimer();
+
+    // attempt 3：基线 2000ms，roll=0.75 → 1.1×2000 = 2200
+    sockets[2]!.open();
+    sockets[2]!.closed(1013, 'try-again-later');
+    expect(scheduledDelays).toEqual([400, 1000, 2200]);
+  });
+
+  it('注入 reconnectDelayMs 时完全接管延迟，不叠加 jitter', async () => {
+    const { controller, runNextTimer, scheduledDelays, sockets } = createHarness({
+      reconnectDelayMs: () => 1234,
+    });
+    await controller.create({
+      displayName: '房主',
+      directory: { title: '测试房', visibility: 'public' },
+      sharedConfig,
+    });
+    sockets[0]!.open();
+    sockets[0]!.closed(1013, 'try-again-later');
+    expect(scheduledDelays).toEqual([1234]);
+    await runNextTimer();
+    sockets[1]!.open();
+    sockets[1]!.closed(1013, 'try-again-later');
+    expect(scheduledDelays).toEqual([1234, 1234]);
   });
 
   it('服务器正常关闭 socket 时立即结束本地房间会话', async () => {
