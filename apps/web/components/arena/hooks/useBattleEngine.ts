@@ -1383,7 +1383,37 @@ export const useBattleEngine = () => {
               return true;
             };
 
-	            const handleSseEvent = async (event: string, data: string) => {
+	            const applyTelemetryPayload = (telemetryPayload: any) => {
+              const usage = normalizeUsage(telemetryPayload?.usage ?? null);
+              setStreamAiUsage(usage);
+              if (usage && typeof usage.reasoningTokens === 'number') {
+                const previous = useBattleStore.getState().streamReasoning;
+                if (previous) {
+                  const next = {
+                    ...previous,
+                    reasoningTokens: usage.reasoningTokens,
+                  };
+                  setStreamReasoning(next);
+                }
+              }
+              const narrativeCount =
+                typeof telemetryPayload?.narrativeHistoryReadCount === 'number'
+                  ? telemetryPayload.narrativeHistoryReadCount
+                  : null;
+              setStreamNarrativeHistoryReadCount(narrativeCount);
+              // 兼容过渡期：新契约字段为 aiModel；旧 replay 存量/未升级 origin 仍可能发内部字段 model
+              const aiModelRaw = typeof telemetryPayload?.aiModel === 'string' && telemetryPayload.aiModel.trim()
+                ? telemetryPayload.aiModel
+                : typeof telemetryPayload?.model === 'string'
+                  ? telemetryPayload.model
+                  : '';
+              const aiModel = aiModelRaw.trim();
+              if (aiModel) {
+                setStreamAiModel(sanitizeTextByShieldWords(aiModel));
+              }
+            };
+
+            const handleSseEvent = async (event: string, data: string) => {
               let payload: any = null;
               try {
                 payload = data ? JSON.parse(data) : null;
@@ -1454,35 +1484,15 @@ export const useBattleEngine = () => {
                     status: payload?.status === 'completed' ? 'done' : 'thinking',
                   })
                   : null);
+                // snapshot bootstrap 与 telemetry 事件共用同一份公开契约字段，恢复 model/usage/narrative 计数
+                if (payload?.telemetry && typeof payload.telemetry === 'object') {
+                  applyTelemetryPayload(payload.telemetry);
+                }
                 return;
               }
 
               if (event === 'telemetry') {
-                const usage = normalizeUsage(payload?.usage ?? null);
-                setStreamAiUsage(usage);
-                if (usage && typeof usage.reasoningTokens === 'number') {
-                  const previous = useBattleStore.getState().streamReasoning;
-                  if (previous) {
-                    const next = {
-                      ...previous,
-                      reasoningTokens: usage.reasoningTokens,
-                    };
-                    setStreamReasoning(next);
-                  }
-                }
-                const narrativeCount =
-                  typeof payload?.narrativeHistoryReadCount === 'number' ? payload.narrativeHistoryReadCount : null;
-                setStreamNarrativeHistoryReadCount(narrativeCount);
-                // 兼容过渡期：新契约字段为 aiModel；旧 replay 存量/未升级 origin 仍可能发内部字段 model
-                const aiModelRaw = typeof payload?.aiModel === 'string' && payload.aiModel.trim()
-                  ? payload.aiModel
-                  : typeof payload?.model === 'string'
-                    ? payload.model
-                    : '';
-                const aiModel = aiModelRaw.trim();
-                if (aiModel) {
-                  setStreamAiModel(sanitizeTextByShieldWords(aiModel));
-                }
+                applyTelemetryPayload(payload);
                 return;
               }
 

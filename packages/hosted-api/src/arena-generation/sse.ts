@@ -94,6 +94,40 @@ export const projectArenaTelemetryForClient = (data: unknown): unknown => {
   return projected;
 };
 
+/**
+ * Arena 客户端-facing SSE wire 边界的 event 级投影：
+ * `telemetry` 事件与 `snapshot` 事件内嵌的 telemetry 都必须经过
+ * `projectArenaTelemetryForClient`，使 create、retained replay、
+ * window-lost snapshot bootstrap 与 terminal snapshot fallback
+ * 共享同一个公开契约边界。
+ */
+export const projectArenaGenerationEventForClient = <
+  T extends { type: string; data: unknown },
+>(
+  event: T,
+): T => {
+  if (event.type === 'telemetry') {
+    return { ...event, data: projectArenaTelemetryForClient(event.data) } as T;
+  }
+  if (event.type === 'snapshot') {
+    const snapshot = event.data !== null
+      && typeof event.data === 'object'
+      && !Array.isArray(event.data)
+      ? event.data as Record<string, unknown>
+      : null;
+    if (snapshot && 'telemetry' in snapshot) {
+      return {
+        ...event,
+        data: {
+          ...snapshot,
+          telemetry: projectArenaTelemetryForClient(snapshot.telemetry),
+        },
+      } as T;
+    }
+  }
+  return event;
+};
+
 export const resolveResumeCursor = (request: Request): string | null => {
   const headerCursor = request.headers.get('last-event-id')?.trim() || null;
   const queryCursor = new URL(request.url).searchParams.get('after')?.trim() || null;

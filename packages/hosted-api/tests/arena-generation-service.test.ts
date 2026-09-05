@@ -2621,6 +2621,112 @@ describe('Arena generation lifecycle service', () => {
     expect(projectArenaTelemetryForClient({ model: '  ' })).toEqual({ version: 1 });
   });
 
+  test('projects snapshot bootstrap telemetry into the client contract on window-lost replay', async () => {
+    const store = new MemoryReplayStore();
+    const service = createService(store, {
+      execute: vi.fn(async ({ emit }) => {
+        await emit({ type: 'markdown', data: { chunk: 'A' } });
+        await emit({
+          type: 'telemetry',
+          data: {
+            model: 'gemini-x',
+            providerName: 'google',
+            providerType: 'google',
+            attempt: 2,
+            reasoning: { status: 'complete' },
+            usage: { promptTokens: 10, completionTokens: 5 },
+            narrativeHistoryReadCount: 2,
+          },
+        });
+        return { status: 'completed' as const, resultRef: 'r2://report/1' };
+      }),
+    });
+
+    const createResponse = await service.create(createRequest('request-1'));
+    await readResponseText(createResponse);
+    const replayResponse = await service.resume(new Request(
+      'https://example.test/api/arena/generations/generation-1/stream?after=999-0',
+    ), { generationId: 'generation-1' });
+    const replayBody = await readResponseText(replayResponse);
+
+    const snapshotBlock = replayBody
+      .split('\n\n')
+      .map((block) => parseGenerationSseBlock(block))
+      .find((block) => block?.event === 'snapshot');
+    expect(snapshotBlock).not.toBeNull();
+    expect(JSON.parse(snapshotBlock!.data)).toMatchObject({
+      status: 'completed',
+      telemetry: {
+        version: 1,
+        aiModel: 'gemini-x',
+        usage: { promptTokens: 10, completionTokens: 5 },
+        narrativeHistoryReadCount: 2,
+      },
+    });
+    expect(replayBody).not.toContain('providerName');
+    expect(replayBody).not.toContain('"model"');
+  });
+
+  test('projects telemetry on the running snapshot bootstrap path before a terminal exists', async () => {
+    const store = new MemoryReplayStore();
+    await store.reserve({
+      actorKey: 'user:42',
+      generationRequestId: 'request-running-bootstrap',
+      generationId: 'generation-1',
+      payloadHash: 'hash:{"value":"same"}',
+      producerToken: 'producer-1',
+      now: '2026-08-25T04:00:00.000Z',
+      leaseExpiresAt: '2026-08-25T04:02:00.000Z',
+    });
+    await store.markRunning({
+      generationId: 'generation-1',
+      producerToken: 'producer-1',
+      now: '2026-08-25T04:00:00.000Z',
+      leaseExpiresAt: '2026-08-25T04:02:00.000Z',
+    });
+    await store.writeSnapshot({
+      generationId: 'generation-1',
+      producerToken: 'producer-1',
+      now: '2026-08-25T04:00:01.000Z',
+      snapshot: {
+        status: 'running',
+        markdown: '部分正文',
+        reasoning: '部分思考',
+        telemetry: {
+          model: 'gemini-x',
+          providerName: 'google',
+          usage: { promptTokens: 7, completionTokens: 3 },
+        },
+        lastEventId: '7-0',
+        updatedAt: '2026-08-25T04:00:01.000Z',
+      },
+    });
+    const service = createService(store, {
+      execute: vi.fn(async () => ({ status: 'completed' as const })),
+    });
+
+    const replayResponse = await service.resume(new Request(
+      'https://example.test/api/arena/generations/generation-1/stream?after=999-0',
+    ), { generationId: 'generation-1' });
+    const replayBody = await readResponseText(replayResponse);
+
+    const snapshotBlock = replayBody
+      .split('\n\n')
+      .map((block) => parseGenerationSseBlock(block))
+      .find((block) => block?.event === 'snapshot');
+    expect(snapshotBlock).not.toBeNull();
+    expect(JSON.parse(snapshotBlock!.data)).toMatchObject({
+      status: 'running',
+      telemetry: {
+        version: 1,
+        aiModel: 'gemini-x',
+        usage: { promptTokens: 7, completionTokens: 3 },
+      },
+    });
+    expect(replayBody).not.toContain('providerName');
+    expect(replayBody).not.toContain('"model"');
+  });
+
   test('flushes a delta batch early when its byte budget is reached', async () => {
     const store = new MemoryReplayStore();
     let observedAppendCount = 0;
