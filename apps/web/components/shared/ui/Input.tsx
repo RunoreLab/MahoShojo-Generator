@@ -19,9 +19,10 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
 
 export type SelectProps = SelectHTMLAttributes<HTMLSelectElement>;
 
+/** Select 保留浏览器原生下拉箭头：不用 appearance-none 隐藏后再留空白。 */
 export const Select = forwardRef<HTMLSelectElement, SelectProps>(function Select(
   { className, ...props },
   ref,
 ) {
-  return <select ref={ref} className={inputClassName(clsx('appearance-none pr-8', className))} {...props} />;
+  return <select ref={ref} className={inputClassName(className)} {...props} />;
 });
