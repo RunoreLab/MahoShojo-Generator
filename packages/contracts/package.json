@@ -4,6 +4,11 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./admin": {
+      "types": "./src/admin.ts",
+      "import": "./src/admin.ts",
+      "default": "./src/admin.ts"
+    },
     ".": {
       "types": "./src/index.ts",
       "import": "./src/index.ts",
@@ -48,7 +53,8 @@
       "types": "./src/json-value.ts",
       "import": "./src/json-value.ts",
       "default": "./src/json-value.ts"
-    }
+    },
+    "./admin-arena-observation": "./src/admin-arena-observation.ts"
   },
   "scripts": {
     "test": "vitest run --config vitest.config.ts",

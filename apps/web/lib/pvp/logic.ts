@@ -1,7 +1,7 @@
 import { inferTemplate } from '@/lib/data-card-converter';
 
 import { shuffleInPlace } from './random';
-import type { PvpCardRef, PvpCombatantType, PvpHandState, PvpRoomRules, PvpSnapshotRef } from './types';
+import type { PvpCardRef, PvpCombatantType, PvpHandState, PvpSnapshotRef } from './types';
 
 export const inferPvpCombatantTypeFromJson = (data: unknown): PvpCombatantType => {
   const template = inferTemplate(data);
@@ -10,9 +10,7 @@ export const inferPvpCombatantTypeFromJson = (data: unknown): PvpCombatantType =
   return 'general-character';
 };
 
-export const requiresPvpSubmissionPhase = (rules: Pick<PvpRoomRules, 'submissionMode' | 'cardsPerPlayer'>): boolean => {
-  return rules.submissionMode === 'hostOnly' || Math.floor(rules.cardsPerPlayer) > 0;
-};
+export { requiresPvpSubmissionPhase } from '@mahoshojo/hosted-runtime/admin/arena-policy';
 
 export const buildCardRefKey = (ref: PvpCardRef): string => {
   if (ref.kind === 'data_card') return `data_card:${ref.id}`;

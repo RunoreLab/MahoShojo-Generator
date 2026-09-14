@@ -23,6 +23,8 @@ export type HonoServerConfig = {
   arenaRoomAllowedOrigins: string[];
   authMode: HonoAuthMode;
   arenaMultiplayerEnabled: boolean;
+  /** Dedicated Admin-to-Arena service key; never reuse public session or room-ticket signing keys. */
+  adminArenaObservationSecret?: string;
 };
 
 const hasText = (value: string | undefined): boolean => Boolean(value?.trim());
@@ -267,6 +269,13 @@ export const readHonoServerConfig = (): HonoServerConfig => {
   }
   const protectedHostedTarget = deploymentTarget === 'production' || deploymentTarget === 'preview';
   const redisUrl = readRedisUrl();
+  const adminArenaObservationSecret = process.env.ADMIN_ARENA_OBSERVATION_SECRET?.trim();
+  if (adminArenaObservationSecret && (adminArenaObservationSecret.length < 32
+    || adminArenaObservationSecret.length > 4096
+    || ['SIGNATURE_SECRET_KEY', 'BETTER_AUTH_SECRET', 'D1_GATEWAY_HMAC_SECRET', 'ARENA_FINALIZATION_HMAC_SECRET']
+      .some((name) => process.env[name]?.trim() === adminArenaObservationSecret))) {
+    throw new Error('ADMIN_ARENA_OBSERVATION_SECRET 必须是独立的至少 32 字符密钥');
+  }
   const config: HonoServerConfig = {
     host: process.env.HONO_HOST?.trim() || '0.0.0.0',
     port: readPort(),
@@ -279,6 +288,7 @@ export const readHonoServerConfig = (): HonoServerConfig => {
     arenaRoomAllowedOrigins: readArenaRoomAllowedOrigins(),
     authMode: readHonoAuthMode(),
     arenaMultiplayerEnabled: readBoolean('ARENA_MULTIPLAYER_ENABLED', false),
+    ...(adminArenaObservationSecret ? { adminArenaObservationSecret } : {}),
   };
   validateArenaRoomOrigins(config);
   validateProductionEnvironment(process.env, config);

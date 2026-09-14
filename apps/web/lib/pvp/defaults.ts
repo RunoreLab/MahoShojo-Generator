@@ -1,4 +1,5 @@
 import type { PvpRoomRules } from './types';
+import { DEFAULT_PVP_CARD_RANGE } from '@mahoshojo/hosted-runtime/admin/arena-card-range';
 
 export const DEFAULT_PVP_RULES: PvpRoomRules = {
   participants: 2,
@@ -11,15 +12,7 @@ export const DEFAULT_PVP_RULES: PvpRoomRules = {
   dedupe: true,
   showAllSubmissions: true,
   shuffleDecks: true,
-  cardRange: {
-    allowedCombatantTypes: ['magical-girl', 'canshou', 'general-character'],
-    minLikeCount: null,
-    maxLikeCount: null,
-    minUsageCount: null,
-    maxUsageCount: null,
-    minFavoriteCount: null,
-    maxFavoriteCount: null,
-  },
+  cardRange: DEFAULT_PVP_CARD_RANGE,
   mode: 'classic',
   bestOf: {
     enabled: true,

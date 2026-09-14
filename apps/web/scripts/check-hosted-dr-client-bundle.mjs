@@ -213,7 +213,7 @@ const scanBindings = (relativePath, source) => {
 
 for (const filePath of listJavaScript(staticRoot)) {
   const source = readFileSync(filePath, 'utf8');
-  const relativePath = path.relative(staticRoot, filePath);
+  const relativePath = path.relative(staticRoot, filePath).split(path.sep).join('/');
   for (const secretName of secretNames) {
     if (source.includes(secretName)) {
       failures.push(`${relativePath}: client bundle 包含 secret ${secretName}`);

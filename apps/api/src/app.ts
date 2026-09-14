@@ -13,6 +13,8 @@ import {
   type ArenaRoomHttpDependencies,
 } from '#/arena-room/room-http';
 import { registerHealthRoutes } from '#/health';
+import { registerAdminArenaObservationRoute } from '#/arena-room/admin-observation-http';
+import type { AdminArenaObservationService } from '#/arena-room/admin-observation';
 import { redisRateLimit } from '#/middleware/redis-rate-limit';
 import { requestMetadata, type HonoAppVariables } from '#/middleware/request-metadata';
 import type { RedisService } from '#/redis/runtime';
@@ -40,7 +42,7 @@ export const createHonoApp = (
   config: HonoServerConfig,
   redis: RedisService,
   telemetry: RuntimeTelemetryService = noopRuntimeTelemetry,
-  services: { readonly arenaRoom?: ArenaRoomHttpDependencies } = {},
+  services: { readonly arenaRoom?: ArenaRoomHttpDependencies; readonly adminArenaObservation?: AdminArenaObservationService } = {},
 ) => {
   if (config.arenaMultiplayerEnabled && !services.arenaRoom) {
     throw new Error('Arena Room HTTP dependencies are required when multiplayer is enabled');
@@ -49,6 +51,9 @@ export const createHonoApp = (
 
   app.use('*', requestMetadata(telemetry));
   app.use('*', secureHeaders());
+  if (config.adminArenaObservationSecret && services.adminArenaObservation) {
+    registerAdminArenaObservationRoute(app, { secret: config.adminArenaObservationSecret, service: services.adminArenaObservation });
+  }
   app.use('/api/*', cors({
     origin: (origin) => isAllowedOrigin(origin, config.corsOrigins),
     credentials: false,

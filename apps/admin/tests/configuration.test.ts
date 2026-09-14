@@ -3,12 +3,12 @@ import { describe, expect, test } from 'vitest';
 import worker, { createAdminWorker } from '../src/index';
 import { loadAdminConfiguration } from '../src/configuration';
 
-const denyAllBindings: CloudflareBindings = {
+const denyAllBindings = {
   ADMIN_ACCESS_ISSUER: 'https://unconfigured.cloudflareaccess.invalid',
   ADMIN_ACCESS_AUDIENCE: 'UNCONFIGURED_DENY_ALL',
   ADMIN_ACCESS_JWKS_URL: 'https://unconfigured.cloudflareaccess.invalid/cdn-cgi/access/certs',
   ADMIN_PRINCIPALS_JSON: '[]',
-};
+} as CloudflareBindings;
 
 describe('Admin runtime configuration', () => {
   test('仓库只提供无 principal 的 deny-all placeholder', () => {

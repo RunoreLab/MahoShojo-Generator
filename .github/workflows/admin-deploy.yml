@@ -1,0 +1,35 @@
+name: Admin manual deployment
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: admin-production
+  cancel-in-progress: false
+jobs:
+  deploy:
+    environment: admin-production
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.3.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run ci:verify
+      - name: Prepare reviewed deployment configuration
+        env:
+          ADMIN_CONFIG_JSON: ${{ secrets.ADMIN_CONFIG_JSON }}
+        run: |
+          test -n "$ADMIN_CONFIG_JSON"
+          printf '%s' "$ADMIN_CONFIG_JSON" > "$RUNNER_TEMP/admin-config.json"
+      - name: Deploy independent Admin Worker
+        env:
+          ADMIN_DEPLOY_CONFIG: ${{ runner.temp }}/admin-config.json
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: pnpm --filter @mahoshojo/admin run deploy

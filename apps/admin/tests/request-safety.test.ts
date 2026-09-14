@@ -157,6 +157,18 @@ describe('server-only audit envelope', () => {
     )).rejects.toMatchObject({ code: 'ADMIN_AUDIT_INVALID' });
   });
 
+  test.each(['Bearer opaque-fixture-token', 'Authorization: Basic fixture-token', 'secret=fixture-token',
+    'sk-fixture-provider-token', 'rediss://:fixture-credential@db.invalid'])('audit envelope 复用持久化入口的 credential 检查：%s', async (value) => {
+    const modules = await loadModules();
+    for (const field of ['reason', 'expectedVersion', 'idempotencyKey', 'targetIdOrSafeScope', 'resultSummary']) {
+      await expect(modules.audit.createAuditEnvelope(contextFor(modules), {
+        targetType: 'user', targetIdOrSafeScope: 'user-1', reason: '人工审核', expectedVersion: '7',
+        idempotencyKey: 'operation-1', result: 'denied', resultSummary: '拒绝', errorCodeSafe: 'ADMIN_DENIED',
+        [field]: value,
+      })).rejects.toMatchObject({ code: 'ADMIN_AUDIT_INVALID' });
+    }
+  });
+
   test('缺失 action-specific reason/version/idempotency 或夹带伪造字段时拒绝', async () => {
     const modules = await loadModules();
     const base = {

@@ -1,4 +1,7 @@
 import type { AppDrizzleDb } from '@/lib/db/drizzle';
+import { appealCaseDecision, reportResolutionLabel as buildResolutionLabel } from '@mahoshojo/hosted-runtime/admin/moderation/transitions';
+import { notifyResolvedReportCase } from '@mahoshojo/hosted-runtime/admin/moderation/notifications';
+import type { AdminDatabase } from '@mahoshojo/hosted-runtime/admin/database';
 import { isAdverseFinalReportResolutionCode } from '@/lib/data-card-reports/outcome-enforcement';
 import { getDataCardByIdWithAuthorAndTags } from '@/lib/db/repositories/data-cards-core';
 import * as repo from '@/lib/db/repositories/report-appeals';
@@ -165,27 +168,6 @@ const validateAppealReferences = (references: ReportAppealReferenceDraft[]): voi
     if (!isReportReferenceType(reference?.referenceType)) {
       throw new ReportAppealValidationError('引用类型无效');
     }
-  }
-};
-
-const buildResolutionLabel = (resolutionCode: ReportResolutionCode | ReportAppealResolutionCode | null): string => {
-  switch (resolutionCode) {
-    case 'confirmed_violation':
-      return '确认违规';
-    case 'content_removed':
-      return '内容已移除';
-    case 'self_remediated':
-      return '已自行整改';
-    case 'no_violation':
-      return '不违规';
-    case 'upheld':
-      return '维持原判';
-    case 'overturned_no_violation':
-      return '改判为不违规';
-    case 'reopened_under_review':
-      return '已转人工继续复核';
-    default:
-      return '处理中';
   }
 };
 
@@ -820,20 +802,11 @@ const createReportAppealsService = (deps: ReportAppealsServiceDeps) => ({
       throw new ReportAppealConflictError('申诉状态已变化，请刷新后重试');
     }
 
-    if (input.resolutionCode === 'overturned_no_violation') {
+    const caseDecision = appealCaseDecision(input.resolutionCode, now);
+    if (caseDecision) {
       await deps.repo.updateReportCaseAfterAppealReview(db, {
         reportCaseId: appeal.reportCaseId,
-        status: 'dismissed',
-        resolutionCode: 'no_violation',
-        closedAt: now,
-        now,
-      });
-    } else if (input.resolutionCode === 'reopened_under_review') {
-      await deps.repo.updateReportCaseAfterAppealReview(db, {
-        reportCaseId: appeal.reportCaseId,
-        status: 'under_review',
-        resolutionCode: null,
-        closedAt: null,
+        ...caseDecision,
         now,
       });
     }
@@ -1107,7 +1080,10 @@ export async function notifyReportCaseResolutionIfNeeded(input: {
   db: ReportAppealsServiceDb;
   reportCaseId: string;
 }): Promise<boolean> {
-  return defaultService.notifyReportCaseResolutionIfNeeded(input);
+  // Drizzle's public $client preserves the current request's native/HTTP D1 batch semantics.
+  const native = (requireDb(input.db) as AppDrizzleDb & { $client: AdminDatabase }).$client;
+  if (!native) throw new ReportAppealServiceUnavailableError('申诉服务当前不可用');
+  return notifyResolvedReportCase(native, input.reportCaseId);
 }
 
 export async function getOwnerModerationSummary(input: {

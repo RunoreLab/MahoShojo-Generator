@@ -167,7 +167,7 @@ describe('G25D Web workspace app ownership', () => {
       'tsc --noEmit --pretty false -p tsconfig.build.json',
     );
     expect(appManifest.scripts?.['typecheck:build']).toContain(
-      'NODE_OPTIONS=--max-old-space-size=3072',
+      'node --max-old-space-size=3072 node_modules/typescript/bin/tsc',
     );
     expect(appManifest.scripts?.['build:next']).toBe(
       'pnpm run clean:next && pnpm run typecheck:build && next build '

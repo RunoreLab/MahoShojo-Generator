@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { createClient, createClientPool } from 'redis';
 import type { GenerationReplayStore } from '@mahoshojo/hosted-api/arena-generation/service';
+import type { AdminArenaObservationRedis } from '../arena-room/admin-observation';
 import {
   createRedisGenerationReplayStore,
   type RedisGenerationClient,
@@ -400,6 +401,23 @@ export class RedisRuntime implements RedisService {
       } satisfies RedisRoomClient),
     });
     return this.roomStore;
+  }
+
+  getAdminArenaObservationRedis(): AdminArenaObservationRedis {
+    return {
+      get: (key) => this.executeRoomCommand(async () => {
+        if (!this.client?.isReady) throw new Error('ADMIN_ARENA_REDIS_UNAVAILABLE');
+        return this.client.get(key);
+      }),
+      pTTL: (key) => this.executeRoomCommand(async () => {
+        if (!this.client?.isReady) throw new Error('ADMIN_ARENA_REDIS_UNAVAILABLE');
+        return this.client.pTTL(key);
+      }),
+      scan: (cursor, options) => this.executeRoomCommand(async () => {
+        if (!this.client?.isReady) throw new Error('ADMIN_ARENA_REDIS_UNAVAILABLE');
+        return this.client.scan(cursor, options);
+      }),
+    };
   }
 
   getRoomDirectoryStore(): RedisRoomDirectoryStore {

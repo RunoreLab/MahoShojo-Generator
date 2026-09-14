@@ -117,26 +117,7 @@ export const clearBotsFromRulesJson = (rulesJson: string): string => {
  * 清理房间规则 JSON 中的“对局运行时字段”（重开房间时使用）。
  * 注意：不会清理房间配置（如 _scenario、规则字段等）。
  */
-export const clearPvpRoomRuntimeFromRulesJson = (rulesJson: string): string => {
-  try {
-    const raw = JSON.parse(rulesJson) as any;
-    if (!raw || typeof raw !== 'object') return rulesJson;
-
-    delete raw._bots;
-    delete raw._postRound;
-    delete raw._winnerVote;
-    delete raw._drawPile;
-    delete raw._usedPile;
-    delete raw._publicDrawnCardIds;
-    delete raw._submittedDataCardIds;
-    delete raw._presetDrawnFilenames;
-    delete raw._submittedPresetFilenames;
-
-    return JSON.stringify(raw);
-  } catch {
-    return rulesJson;
-  }
-};
+export { clearPvpRoomRuntimeFromRulesJson } from '@mahoshojo/hosted-runtime/admin/arena-policy';
 
 export const botUserIdForClient = (seat: number): number => {
   const s = Number.isFinite(seat) ? Math.floor(seat) : 0;

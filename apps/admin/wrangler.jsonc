@@ -1,12 +1,18 @@
 {
   "$schema": "../../node_modules/wrangler/config-schema.json",
-  "name": "mahoshojo-admin-prework",
+  "name": "mahoshojo-admin",
   "main": "src/index.ts",
-  "compatibility_date": "2026-08-29",
+  "compatibility_date": "2026-09-12",
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": false,
-  // G3-P0 ships deny-all placeholders only. Production hostname, Access policy,
-  // stable principal mappings and environment overrides are deferred to G3-6.
+  "preview_urls": false,
+  "assets": { "directory": "./dist/client", "binding": "ASSETS", "run_worker_first": true },
+  "d1_databases": [{ "binding": "DB", "database_name": "mahoshojo-admin-local", "database_id": "00000000-0000-0000-0000-000000000000", "migrations_dir": "../../drizzle" }],
+  "r2_buckets": [{"binding":"ADMIN_OBJECTS","bucket_name":"mahoshojo-admin-local"},{"binding":"LARGE_OBJECTS","bucket_name":"mahoshojo-large-objects-local"}],
+  "queues": {"producers":[{"binding":"ADMIN_QUEUE","queue":"mahoshojo-admin-local"}],"consumers":[{"queue":"mahoshojo-admin-local","max_batch_size":5,"max_retries":3}]},
+  "triggers": {"crons":["*/10 * * * *"]},
+  // Safe local defaults. Deployment uses the reviewed private configuration;
+  // production resource IDs and Access settings must be supplied explicitly.
   "vars": {
     "ADMIN_ACCESS_ISSUER": "https://unconfigured.cloudflareaccess.invalid",
     "ADMIN_ACCESS_AUDIENCE": "UNCONFIGURED_DENY_ALL",

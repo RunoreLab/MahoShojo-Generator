@@ -93,6 +93,7 @@ describe('report appeals repository', () => {
         case_resolution_code_snapshot TEXT,
         case_updated_at_snapshot TEXT NOT NULL,
         reviewed_by_user_id INTEGER,
+        reviewed_by_admin_principal_id TEXT,
         reviewed_at TEXT,
         withdrawn_at TEXT,
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,

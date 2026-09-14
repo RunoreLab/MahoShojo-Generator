@@ -1,3 +1,4 @@
+import { registerBundledVerifier } from './helpers/bundled-verifier';
 import { spawn } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { createServer, type Socket } from 'node:net';
@@ -13,6 +14,7 @@ const verifierPath = fileURLToPath(new URL(
   '../scripts/verify-room-hardening-load.ts',
   import.meta.url,
 ));
+const bundledVerifier = registerBundledVerifier(verifierPath);
 const CHILD_TIMEOUT_MS = 10_000;
 
 const runAgainstTcpSentinel = async (input: Readonly<{
@@ -41,7 +43,7 @@ const runAgainstTcpSentinel = async (input: Readonly<{
   const address = sentinel.address();
   if (!address || typeof address === 'string') throw new Error('TCP_SENTINEL_ADDRESS_INVALID');
 
-  const child = spawn(process.execPath, ['--import', 'tsx', verifierPath], {
+  const child = spawn(process.execPath, [bundledVerifier()], {
     env: {
       ...process.env,
       HOSTED_API_ENVIRONMENT: input.hostedApiEnvironment ?? 'local',

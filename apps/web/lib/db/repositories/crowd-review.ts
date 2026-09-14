@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 
 import type { AppDrizzleDb } from '@/lib/db/drizzle';
 import {
@@ -483,6 +483,12 @@ export async function finalizeAssignment(
         eq(crowdReviewAssignments.id, input.assignmentId),
         eq(crowdReviewAssignments.inspectorUserId, input.userId),
         eq(crowdReviewAssignments.status, 'assigned'),
+        ...((input.status === 'voted' || input.status === 'abstained') ? [sql`EXISTS (
+          SELECT 1 FROM crowd_review_rounds r WHERE r.id=${crowdReviewAssignments.crowdReviewRoundId}
+          AND r.status IN ('pending_dispatch','active','waiting_more_votes')
+          AND json_extract(r.result_summary_json,'$.adminAction') IS NULL
+          AND NOT EXISTS (SELECT 1 FROM crowd_review_inspectors i WHERE i.user_id=${input.userId} AND i.status IN ('suspended','revoked'))
+        )`] : []),
       ),
     )
     .returning({ id: crowdReviewAssignments.id });
@@ -525,6 +531,7 @@ export async function updateRound(
     extensionCount?: number;
     resultCode?: string | null;
     resultSummaryJson?: string;
+    expectedUpdatedAt?: string;
     now: string;
   },
 ): Promise<boolean> {
@@ -538,7 +545,10 @@ export async function updateRound(
       resultSummaryJson: input.resultSummaryJson,
       updatedAt: input.now,
     })
-    .where(eq(crowdReviewRounds.id, input.roundId))
+    .where(and(eq(crowdReviewRounds.id, input.roundId),
+      inArray(crowdReviewRounds.status, ['pending_dispatch', 'active', 'waiting_more_votes']),
+      sql`json_extract(${crowdReviewRounds.resultSummaryJson},'$.adminAction') IS NULL`,
+      input.expectedUpdatedAt === undefined ? undefined : eq(crowdReviewRounds.updatedAt, input.expectedUpdatedAt)))
     .returning({ id: crowdReviewRounds.id });
 
   return rows.length > 0;

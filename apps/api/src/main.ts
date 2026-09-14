@@ -14,6 +14,7 @@ import { createArenaRoomGenerationOnlineContentResolver } from '#/arena-room/roo
 import { createArenaRoomGenerationMaterializer } from '#/arena-room/room-generation-materializer';
 import { createArenaRoomGenerationPresetResolver } from '#/arena-room/room-generation-preset-registry';
 import { createArenaRoomDirectoryService } from '#/arena-room/room-directory-service';
+import { createAdminArenaObservationService } from '#/arena-room/admin-observation';
 import type { ArenaRoomHttpDependencies } from '#/arena-room/room-http';
 import { createRoomActorRegistry } from '#/arena-room/room-actor-registry';
 import { createArenaRoomMembershipService } from '#/arena-room/room-membership-service';
@@ -165,6 +166,9 @@ if (process.env.HONO_CONFIG_CHECK_ONLY === 'true') {
   telemetry.start();
   const app = createHonoApp(config, redis, telemetry, {
     ...(roomHttpDependencies ? { arenaRoom: roomHttpDependencies } : {}),
+    ...(config.adminArenaObservationSecret ? {
+      adminArenaObservation: createAdminArenaObservationService(redis.getAdminArenaObservationRedis(), config.redisKeyPrefix),
+    } : {}),
   });
   const roomWebSocketApp = createRoomWebSocketApp(roomWebSocketGateway);
   const server = serve({

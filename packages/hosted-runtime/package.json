@@ -4,6 +4,11 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./admin/audit-text": {
+      "types": "./src/admin/audit-text.ts",
+      "import": "./src/admin/audit-text.ts",
+      "default": "./src/admin/audit-text.ts"
+    },
     "./database-provider": {
       "types": "./src/database-provider.ts",
       "import": "./src/database-provider.ts",
@@ -303,14 +308,100 @@
       "types": "./src/generation-lifecycle.ts",
       "import": "./src/generation-lifecycle.ts",
       "default": "./src/generation-lifecycle.ts"
-    }
+    },
+    "./db/drizzle": {
+      "types": "./src/db/drizzle.ts",
+      "import": "./src/db/drizzle.ts",
+      "default": "./src/db/drizzle.ts"
+    },
+    "./db/schema": {
+      "types": "./src/db/schema/index.ts",
+      "import": "./src/db/schema/index.ts",
+      "default": "./src/db/schema/index.ts"
+    },
+    "./db/schema/business": {
+      "types": "./src/db/schema/business.ts",
+      "import": "./src/db/schema/business.ts",
+      "default": "./src/db/schema/business.ts"
+    },
+    "./db/schema/auth": {
+      "types": "./src/db/schema/auth.ts",
+      "import": "./src/db/schema/auth.ts",
+      "default": "./src/db/schema/auth.ts"
+    },
+    "./db/schema/ai-availability": {
+      "types": "./src/db/schema/ai-availability.ts",
+      "import": "./src/db/schema/ai-availability.ts",
+      "default": "./src/db/schema/ai-availability.ts"
+    },
+    "./admin/database": {
+      "types": "./src/admin/database.ts",
+      "import": "./src/admin/database.ts",
+      "default": "./src/admin/database.ts"
+    },
+    "./admin/principals": {
+      "types": "./src/admin/principals.ts",
+      "import": "./src/admin/principals.ts",
+      "default": "./src/admin/principals.ts"
+    },
+    "./admin/operations": {
+      "types": "./src/admin/operations.ts",
+      "import": "./src/admin/operations.ts",
+      "default": "./src/admin/operations.ts"
+    },
+    "./admin/read-models": {
+      "types": "./src/admin/read-models.ts",
+      "import": "./src/admin/read-models.ts",
+      "default": "./src/admin/read-models.ts"
+    },
+    "./admin/business-actions": {
+      "types": "./src/admin/business-actions.ts",
+      "import": "./src/admin/business-actions.ts",
+      "default": "./src/admin/business-actions.ts"
+    },
+    "./admin/actions/core": {
+      "types": "./src/admin/actions/core.ts",
+      "import": "./src/admin/actions/core.ts",
+      "default": "./src/admin/actions/core.ts"
+    },
+    "./admin/actions/messages": {
+      "types": "./src/admin/actions/messages.ts",
+      "import": "./src/admin/actions/messages.ts",
+      "default": "./src/admin/actions/messages.ts"
+    },
+    "./admin/analytics": {
+      "types": "./src/admin/analytics.ts",
+      "import": "./src/admin/analytics.ts",
+      "default": "./src/admin/analytics.ts"
+    },
+    "./admin/actions/analytics": {
+      "types": "./src/admin/actions/analytics.ts",
+      "import": "./src/admin/actions/analytics.ts",
+      "default": "./src/admin/actions/analytics.ts"
+    },
+    "./admin/moderation/transitions": "./src/admin/moderation/transitions.ts",
+    "./admin/arena-policy": "./src/admin/arena-policy.ts",
+    "./admin/arena-observation": "./src/admin/arena-observation.ts",
+    "./admin/moderation/notifications": "./src/admin/moderation/notifications.ts",
+    "./admin/jobs": "./src/admin/jobs.ts",
+    "./admin/arena-management": "./src/admin/arena-management.ts",
+    "./admin/actions/arena": "./src/admin/actions/arena.ts",
+    "./admin/actions/jobs": "./src/admin/actions/jobs.ts",
+    "./admin/arena-card-range": "./src/admin/arena-card-range.ts",
+    "./admin/arena-submission": "./src/admin/arena-submission.ts",
+    "./metrics/tech-index": "./src/metrics/tech-index.ts",
+    "./admin/ai-review-prompt": "./src/admin/ai-review-prompt.ts",
+    "./admin/ai-review": "./src/admin/ai-review.ts",
+    "./admin/actions/metrics": "./src/admin/actions/metrics.ts",
+    "./admin/actions/moderation": "./src/admin/actions/moderation.ts",
+    "./admin/pvp-presets": "./src/generated/pvp-presets.ts"
   },
   "scripts": {
     "assets:questionnaires": "node scripts/generate-questionnaire-assets.mjs",
     "assets:questionnaires:check": "node scripts/generate-questionnaire-assets.mjs --check",
     "test": "vitest run --config vitest.config.ts",
     "lint": "eslint src tests --config eslint.config.mjs",
-    "build": "node scripts/generate-questionnaire-assets.mjs --check && tsc --noEmit -p tsconfig.json"
+    "build": "node scripts/generate-questionnaire-assets.mjs --check && tsc --noEmit -p tsconfig.json && node scripts/generate-pvp-assets.mjs --check"
   },
   "dependencies": {
     "@ai-sdk/deepseek": "^2.0.35",
@@ -322,8 +413,10 @@
     "@mahoshojo/hosted-api": "workspace:*",
     "ai": "^6.0.184",
     "aws4fetch": "^1.0.20",
+    "drizzle-orm": "^0.45.2",
     "pinyin-pro": "^3.27.0",
-    "zod": "^4.1.13"
+    "zod": "^4.1.13",
+    "jose": "^6.2.10"
   },
   "devDependencies": {
     "@types/node": "^20",
@@ -331,6 +424,7 @@
     "esbuild": "^0.28.1",
     "eslint": "^9",
     "typescript": "^5",
-    "vitest": "^4.1.7"
+    "vitest": "^4.1.7",
+    "miniflare": "5.20260820.0-alpha"
   }
 }

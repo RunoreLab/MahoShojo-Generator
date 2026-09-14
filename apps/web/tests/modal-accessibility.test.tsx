@@ -334,8 +334,10 @@ describe('BattleDataModal accessibility and capabilities', () => {
         allowDeckImport={false}
       />,
     ));
-    await new Promise((resolve) => setTimeout(resolve, 10));
-
+    await vi.waitFor(() => {
+      expect([...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')]
+        .some((button) => button.textContent?.trim() === '详情')).toBe(true);
+    });
     const outerDialog = document.querySelector<HTMLElement>('[role="dialog"]');
     const detailButton = [...(outerDialog?.querySelectorAll<HTMLButtonElement>('button') ?? [])]
       .find((button) => button.textContent?.trim() === '详情');

@@ -50,13 +50,37 @@ importers:
 
   apps/admin:
     dependencies:
+      '@mahoshojo/ai-core':
+        specifier: workspace:*
+        version: link:../../packages/ai-core
+      '@mahoshojo/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
+      '@mahoshojo/hosted-runtime':
+        specifier: workspace:*
+        version: link:../../packages/hosted-runtime
       hono:
         specifier: ^4.13.3
         version: 4.13.3
       jose:
         specifier: ^6.2.10
         version: 6.2.10
+      react:
+        specifier: ^19.2.1
+        version: 19.2.3
+      react-dom:
+        specifier: ^19.2.1
+        version: 19.2.3(react@19.2.3)
     devDependencies:
+      '@types/node':
+        specifier: ^20
+        version: 20.19.27
+      '@types/react':
+        specifier: ^19
+        version: 19.2.15
+      '@types/react-dom':
+        specifier: ^19
+        version: 19.2.4(@types/react@19.2.15)
       '@typescript-eslint/parser':
         specifier: ^8.50.0
         version: 8.50.0(eslint@9.39.2(jiti@2.7.0))(typescript@5.9.3)
@@ -66,6 +90,9 @@ importers:
       eslint:
         specifier: ^9
         version: 9.39.2(jiti@2.7.0)
+      miniflare:
+        specifier: 5.20260820.0-alpha
+        version: 5.20260820.0-alpha
       typescript:
         specifier: ^5
         version: 5.9.3
@@ -562,6 +589,12 @@ importers:
       aws4fetch:
         specifier: ^1.0.20
         version: 1.0.20
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@opentelemetry/api@1.9.1)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.10.0)(kysely@0.29.5)
+      jose:
+        specifier: ^6.2.10
+        version: 6.2.10
       pinyin-pro:
         specifier: ^3.27.0
         version: 3.28.1
@@ -581,6 +614,9 @@ importers:
       eslint:
         specifier: ^9
         version: 9.39.2(jiti@2.7.0)
+      miniflare:
+        specifier: 5.20260820.0-alpha
+        version: 5.20260820.0-alpha
       typescript:
         specifier: ^5
         version: 5.9.3
@@ -1279,11 +1315,11 @@ packages:
 
   '@esbuild-kit/core-utils@3.3.2':
     resolution: {integrity: sha512-sPRAnw9CdSsRmEtnsl2WXWdyquogVpB3yZ3dgwJfe8zrOzTsV7cJvmwrKVa+0ma5BoiGJ+BoqkMvawbayKUsqQ==}
-    deprecated: 'Merged into tsx: https://tsx.is'
+    deprecated: 'Merged into tsx: https://tsx.hirok.io'
 
   '@esbuild-kit/esm-loader@2.6.5':
     resolution: {integrity: sha512-FxEMIkJKnodyA1OaCUoEvbYRkoZlLZ4d/eXFu9Fh8CbBBgP5EmZxrfTRyN0qpXZ4vOvqnE5YdRdcrmUUXuU+dA==}
-    deprecated: 'Merged into tsx: https://tsx.is'
+    deprecated: 'Merged into tsx: https://tsx.hirok.io'
 
   '@esbuild/aix-ppc64@0.25.4':
     resolution: {integrity: sha512-1VCICWypeQKhVbE9oW/sJaAmjLxhVqacdkvPLEjwlttjfwENRSClS8EjBz0KzRyFSCPDIkuXW34Je/vk7zdB7Q==}
@@ -3085,6 +3121,7 @@ packages:
 
   '@zumer/snapdom@1.9.14':
     resolution: {integrity: sha512-kQARFS/jf+fsIFv9qxfNp8YMeun5tTyhFDk3iv47Lywk5YRldhINWicEZI15fP3FDUCeo8ok+BP0CtnDRFMFRg==}
+    deprecated: Old versions have known fidelity bugs (text re-wrap, width freezing, KaTeX clipping). Upgrade to ^2.22 — drop-in for any 2.x. https://github.com/zumerlab/snapdom/releases
 
   abort-controller@3.0.0:
     resolution: {integrity: sha512-h8lQ8tacZYnR3vNQTgibj+tODHI5/+l06Au2Pcriv/Gmet0eaj4TwWH41sO9wnHDiQsEj19q0drzdWdeAHtweg==}

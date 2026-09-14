@@ -7,7 +7,7 @@
     "dev:pretty": "bash -lc 'if command -v pino-pretty >/dev/null 2>&1; then next dev --turbopack | pino-pretty; else echo \"[dev:pretty] pino-pretty 未安装，回退到原始日志输出\" >&2; next dev --turbopack; fi'",
     "clean:next": "node -e \"require('node:fs').rmSync('.next', { recursive: true, force: true })\"",
     "check:arena-room-origins": "pnpm --dir ../.. run check:arena-room-origins",
-    "typecheck:build": "NODE_OPTIONS=--max-old-space-size=3072 tsc --noEmit --pretty false -p tsconfig.build.json",
+    "typecheck:build": "node --max-old-space-size=3072 node_modules/typescript/bin/tsc --noEmit --pretty false -p tsconfig.build.json",
     "build:next": "pnpm run clean:next && pnpm run typecheck:build && next build && node scripts/check-hosted-dr-client-bundle.mjs --dir .next/static",
     "build": "pnpm run build:next",
     "check:wrangler:d1": "node scripts/check-wrangler-d1-config.mjs",

@@ -18,5 +18,11 @@ wireGracefulShutdownSignals({
   },
 });
 
+// Test transport only; production shutdown wiring remains unchanged.
+if (process.platform === 'win32') process.on('message', (message: unknown) => {
+  if (typeof message === 'object' && message !== null && 'type' in message && message.type === 'fixture-signal'
+    && 'signal' in message && message.signal === 'SIGTERM') process.emit('SIGTERM');
+});
+
 recordMarker('ready');
 setInterval(() => undefined, 1_000);

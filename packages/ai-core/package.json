@@ -28,6 +28,11 @@
       "types": "./src/arena-repair-meta.ts",
       "import": "./src/arena-repair-meta.ts",
       "default": "./src/arena-repair-meta.ts"
+    },
+    "./provider-catalog": {
+      "types": "./src/provider-catalog.ts",
+      "import": "./src/provider-catalog.ts",
+      "default": "./src/provider-catalog.ts"
     }
   },
   "scripts": {

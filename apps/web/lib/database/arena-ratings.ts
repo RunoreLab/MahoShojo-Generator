@@ -43,7 +43,8 @@ export interface ArenaEligibilitySnapshot {
   extraJson: string | null;
 }
 
-export const INITIAL_RATING = 1000;
+import { INITIAL_RATING } from '@mahoshojo/hosted-runtime/admin/arena-policy';
+export { INITIAL_RATING } from '@mahoshojo/hosted-runtime/admin/arena-policy';
 export const STRICT_DEDUP_WINDOW_MS = 360 * 60 * 1000;
 export const FREE_DEDUP_WINDOW_MS = 10 * 60 * 1000;
 export const STRICT_DAILY_LIMIT = 20;

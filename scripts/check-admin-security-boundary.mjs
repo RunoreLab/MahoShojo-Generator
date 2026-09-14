@@ -34,6 +34,12 @@ const ALLOWED_WRANGLER_KEYS = new Set([
   'workers_dev',
   'vars',
   'observability',
+  'preview_urls',
+  'assets',
+  'd1_databases',
+  'r2_buckets',
+  'queues',
+  'triggers',
 ]);
 
 const DENY_ALL_VARS = Object.freeze({
@@ -44,12 +50,12 @@ const DENY_ALL_VARS = Object.freeze({
 });
 
 const EXPECTED_ADMIN_SCRIPTS = Object.freeze({
-  dev: 'wrangler dev',
+  dev: 'node scripts/build-client.mjs && wrangler dev',
   types: 'wrangler types --include-runtime false --env-interface CloudflareBindings src/worker-configuration.d.ts',
   test: 'vitest run --config vitest.config.ts',
   lint: 'eslint src tests --config eslint.config.mjs',
-  build: 'wrangler types --check --include-runtime false --env-interface CloudflareBindings src/worker-configuration.d.ts && tsc --noEmit -p tsconfig.json && wrangler deploy --dry-run --outdir dist && node ../../scripts/check-admin-security-boundary.mjs',
-  deploy: 'wrangler deploy',
+  build: 'node scripts/build-client.mjs && wrangler types --check --include-runtime false --env-interface CloudflareBindings src/worker-configuration.d.ts && tsc --noEmit -p tsconfig.json && wrangler deploy --dry-run --outdir dist/worker && node ../../scripts/check-admin-security-boundary.mjs',
+  deploy: 'node scripts/deploy.mjs',
 });
 
 export const validateAdminWranglerConfig = (source) => {
@@ -67,12 +73,24 @@ export const validateAdminWranglerConfig = (source) => {
     failures.push(`Wrangler config 包含未允许的顶层键: ${unexpectedKeys.join(', ')}`);
   }
   if (config.workers_dev !== false) failures.push('apps/admin/wrangler.jsonc 必须保持 workers_dev=false');
+  if (config.preview_urls !== false) failures.push('Admin 必须禁用 preview_urls');
+  if (!isRecord(config.assets) || config.assets.run_worker_first !== true || config.assets.directory !== './dist/client' || config.assets.binding !== 'ASSETS') {
+    failures.push('Admin assets 必须使用独立 client 目录与 Worker-first 授权');
+  }
+  for (const key of ['d1_databases', 'r2_buckets']) {
+    if (config[key] !== undefined && !Array.isArray(config[key])) failures.push('本地 binding 必须是数组');
+    for (const binding of Array.isArray(config[key]) ? config[key] : []) {
+      if (!isRecord(binding) || binding.remote === true) failures.push('默认本地开发禁止 remote binding');
+      if (key === 'd1_databases' && binding?.database_id !== '00000000-0000-0000-0000-000000000000') failures.push('本地 D1 必须使用合成 placeholder ID');
+    }
+  }
+  if (config.queues !== undefined && (!isRecord(config.queues) || !Array.isArray(config.queues.producers) || !Array.isArray(config.queues.consumers))) failures.push('Queue 必须显式声明 producer/consumer');
   if (config.main !== 'src/index.ts') failures.push('Wrangler main 必须保持 server-only src/index.ts');
   if (!Array.isArray(config.compatibility_flags) || !config.compatibility_flags.includes('nodejs_compat')) {
     failures.push('Wrangler config 必须显式启用 nodejs_compat');
   }
   if (!isRecord(config.vars)) {
-    failures.push('G3-P0 Wrangler vars 必须是 deny-all object');
+    failures.push('本地 Wrangler vars 必须是 deny-all object');
   } else {
     const actualVarKeys = Object.keys(config.vars).sort();
     const expectedVarKeys = Object.keys(DENY_ALL_VARS).sort();
@@ -81,7 +99,7 @@ export const validateAdminWranglerConfig = (source) => {
       || actualVarKeys.some((key, index) => key !== expectedVarKeys[index])
       || expectedVarKeys.some((key) => config.vars[key] !== DENY_ALL_VARS[key])
     ) {
-      failures.push('G3-P0 Wrangler vars 必须精确保持 deny-all placeholder');
+      failures.push('本地 Wrangler vars 必须精确保持 deny-all placeholder');
     }
   }
   return failures;
@@ -116,6 +134,8 @@ const containsAdminWorkflowReference = (value) => {
   ));
 };
 
+export const isAdminBrowserSourcePath = (sourcePath) => /(?:^|\/)(?:public|client|browser)(?:\/|$)/.test(sourcePath.replaceAll('\\', '/'));
+
 export const isAdminBrowserArtifactPath = (artifactPath) => {
   const normalized = artifactPath.replaceAll('\\', '/').toLowerCase();
   return /\.(?:html?|css|svg|png|jpe?g|gif|webp|wasm)$/.test(normalized)
@@ -130,8 +150,15 @@ export const validateAdminWorkflow = (source, workflowPath) => {
     return [`${workflowPath} 不是有效 workflow YAML`];
   }
   if (!isRecord(workflow)) return [];
+  if (workflowPath.replaceAll('\\', '/').endsWith('/admin-deploy.yml')) {
+    const triggers = workflow.on;
+    const manualOnly = isRecord(triggers) && Object.keys(triggers).length === 1 && 'workflow_dispatch' in triggers;
+    const jobs = Object.values(workflow.jobs ?? {});
+    return manualOnly && jobs.length > 0 && jobs.every(job => job.environment === 'admin-production')
+      ? [] : ['Admin 发布必须只允许 workflow_dispatch 且使用 admin-production environment'];
+  }
   return containsAdminWorkflowReference(workflow)
-    ? [`${workflowPath} G3-P0 workflow 不得直接引用 Admin；请使用 root workspace orchestration`]
+    ? [`${workflowPath} 受保护管理端 workflow 不得直接引用 Admin；请使用 root workspace orchestration`]
     : [];
 };
 
@@ -143,10 +170,12 @@ const run = () => {
   const adminFiles = walkFiles(adminDirectory);
   const sourceFiles = adminFiles.filter((file) => /\.(?:ts|tsx|js|jsx|mjs|cjs)$/.test(file));
   const textFiles = adminFiles.filter((file) => /\.(?:ts|tsx|js|jsx|mjs|cjs|json|jsonc|md|ya?ml)$/.test(file));
-  const browserEntrypoints = adminFiles.filter((file) => /(?:^|\/)(?:public|client|browser)(?:\/|$)/.test(file));
+  const browserEntrypoints = adminFiles.filter(isAdminBrowserSourcePath);
 
-  if (browserEntrypoints.length > 0) {
-    fail(`G3-P0 不应产生浏览器 bundle/client entry: ${browserEntrypoints.map(relative).join(', ')}`);
+  for (const file of browserEntrypoints.filter(file => /\.(?:ts|tsx|js|jsx)$/.test(file))) {
+    if (/@mahoshojo\/hosted-runtime|(?:\.\.\/)+security\/|ADMIN_ACCESS_|ADMIN_PRINCIPALS_|CLOUDFLARE_API_TOKEN/.test(readFileSync(file, 'utf8'))) {
+      fail(`${relative(file)} 浏览器源码包含服务器依赖或配置`);
+    }
   }
 
   const forbiddenCredentialPatterns = [
@@ -175,8 +204,10 @@ const run = () => {
   if (existsSync(artifactDirectory)) {
     const artifactFiles = walkFiles(artifactDirectory);
     const browserArtifacts = artifactFiles.filter(isAdminBrowserArtifactPath);
-    if (browserArtifacts.length > 0) {
-      fail(`G3-P0 dist 不得包含 browser/static artifact: ${browserArtifacts.map(relative).join(', ')}`);
+    for (const file of browserArtifacts.filter(file => /\.(?:js|mjs|json|map|html)$/.test(file))) {
+      if (/ADMIN_ACCESS_ISSUER|ADMIN_PRINCIPALS_JSON|D1_GATEWAY_HMAC_SECRET|SIGNATURE_SECRET_KEY/.test(readFileSync(file, 'utf8'))) {
+        fail(`${relative(file)} 浏览器产物包含服务器配置`);
+      }
     }
     for (const file of artifactFiles.filter((candidate) => /\.(?:js|mjs|cjs|json|map|html?|css|svg|txt)$/i.test(candidate))) {
       const source = readFileSync(file, 'utf8');
@@ -198,7 +229,7 @@ const run = () => {
     for (const failure of failures) console.error(`- ${failure}`);
     process.exitCode = 1;
   } else {
-    console.log(`Admin security boundary check passed (${adminFiles.length} files, no browser bundle/production route/cross-app import/credential material)`);
+    console.log(`Admin security boundary check passed (${adminFiles.length} files, protected assets/no cross-app import/no credential material)`);
   }
 };
 

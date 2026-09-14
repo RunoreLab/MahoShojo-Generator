@@ -12,7 +12,7 @@ import {
 
 const rootDirectory = path.resolve(import.meta.dirname, '..');
 const directAdminWorkflowFailure = (workflowPath: string) => (
-  `${workflowPath} G3-P0 workflow 不得直接引用 Admin；请使用 root workspace orchestration`
+  `${workflowPath} 受保护管理端 workflow 不得直接引用 Admin；请使用 root workspace orchestration`
 );
 
 describe('Admin security boundary parser', () => {

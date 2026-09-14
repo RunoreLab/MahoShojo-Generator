@@ -125,3 +125,9 @@ describe('Cloudflare Access JWT verifier', () => {
     })).toThrow('issuer must be an HTTPS origin');
   });
 });
+
+ test.each([' human-subject-1', 'human-subject-1 ', 'human\u0000subject'])('稳定主体不允许空白规范化或控制字符: %j', async subject => {
+  const access = await loadModule();
+  await expect(access.createAccessJwtVerifier({issuer, audience, jwks}).verify(await signToken({subject})))
+    .rejects.toMatchObject({code: 'ACCESS_IDENTITY_INVALID'});
+ });

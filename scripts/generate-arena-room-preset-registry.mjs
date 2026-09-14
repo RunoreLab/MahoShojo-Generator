@@ -73,7 +73,7 @@ const loadEntries = async () => {
         displayName: displayName(payload, id),
         sourceType: sourceType(payload, source.kind),
         payload,
-        sourcePath: path.relative(root, sourcePath),
+    sourcePath: path.relative(root, sourcePath).split(path.sep).join('/'),
       });
     }
   }

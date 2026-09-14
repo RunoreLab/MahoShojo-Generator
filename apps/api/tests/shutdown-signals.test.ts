@@ -368,8 +368,14 @@ const abortStreamAfterFirstChunk = (port: number): Promise<void> =>
     });
   });
 
-describe('graceful shutdown real Node signals', () => {
-  it('第二个 SIGTERM 会中断已开始的 cleanup 并失败退出', async () => {
+// Windows kill(SIGTERM) terminates unconditionally; IPC delivers the same process event in the child fixture.
+// POSIX still exercises OS signal delivery. https://nodejs.org/api/process.html#signal-events
+const sendFixtureSigterm = (child: ChildProcess): boolean => process.platform === 'win32'
+  ? child.send({type: 'fixture-signal', signal: 'SIGTERM'})
+  : child.kill('SIGTERM');
+
+describe('graceful shutdown child process (POSIX signals / Windows process events)', () => {
+  it('第二个 SIGTERM 事件会中断已开始的 cleanup 并失败退出', async () => {
     const fixture = path.join(import.meta.dirname, 'fixtures/shutdown-signal-child.ts');
     const temporaryDirectory = await mkdtemp(path.join(tmpdir(), 'mahoshojo-shutdown-'));
     const bundledFixture = path.join(temporaryDirectory, 'shutdown-signal-child.mjs');
@@ -388,9 +394,10 @@ describe('graceful shutdown real Node signals', () => {
       const child = spawn(process.execPath, [bundledFixture], {
         cwd: path.resolve(import.meta.dirname, '..'),
         env: { ...process.env, SHUTDOWN_MARKER_PATH: markerPath },
-        stdio: ['ignore', 'ignore', 'pipe'],
+        stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
       });
       let stderr = '';
+      if (!child.stderr) throw new Error('Shutdown fixture stderr pipe is missing');
       child.stderr.setEncoding('utf8');
       child.stderr.on('data', (chunk: string) => {
         stderr += chunk;
@@ -398,9 +405,9 @@ describe('graceful shutdown real Node signals', () => {
 
       try {
         await waitForMarker(child, markerPath, 'ready\n');
-        expect(child.kill('SIGTERM')).toBe(true);
+        expect(sendFixtureSigterm(child)).toBe(true);
         await waitForMarker(child, markerPath, 'shutdown-started:SIGTERM\n');
-        expect(child.kill('SIGTERM')).toBe(true);
+        expect(sendFixtureSigterm(child)).toBe(true);
 
         const [code, signal] = await once(child, 'close') as [
           number | null,

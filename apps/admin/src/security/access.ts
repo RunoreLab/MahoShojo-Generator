@@ -40,12 +40,15 @@ const requireHttpsUrl = (value: string, field: string): URL => {
 };
 
 const classifyIdentity = (payload: Record<string, unknown>, issuer: string): AccessIdentity => {
-  if (payload.type !== 'app' || typeof payload.sub !== 'string') {
+  if (payload.type !== 'app' || typeof payload.sub !== 'string' || (payload.common_name !== undefined && typeof payload.common_name !== 'string')) {
     throw new AdminSecurityError('ACCESS_IDENTITY_INVALID');
   }
 
-  const subject = payload.sub.trim();
-  const serviceSubject = typeof payload.common_name === 'string' ? payload.common_name.trim() : '';
+  const subject = payload.sub;
+  const serviceSubject = typeof payload.common_name === 'string' ? payload.common_name : '';
+  if (subject !== subject.trim() || serviceSubject !== serviceSubject.trim() || /[\u0000-\u001f\u007f]/.test(subject + serviceSubject)) {
+    throw new AdminSecurityError('ACCESS_IDENTITY_INVALID');
+  }
   if (serviceSubject) {
     if (payload.sub !== '' || serviceSubject.length > 512) {
       throw new AdminSecurityError('ACCESS_IDENTITY_INVALID');

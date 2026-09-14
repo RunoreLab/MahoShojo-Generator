@@ -578,7 +578,7 @@ function isContractsSourceFile(unit, sourceFile) {
 function addViolation(violations, rule, filePath, moduleSpecifier, message, line) {
   violations.push({
     rule,
-    file: filePath,
+    file: filePath.split(path.sep).join('/'),
     ...(line ? { line } : {}),
     module: moduleSpecifier,
     message,
@@ -920,7 +920,7 @@ export function checkWorkspaceBoundaries(rootDirectory = process.cwd()) {
  */
 export function formatBoundaryViolations(violations, rootDirectory = process.cwd()) {
   return violations.map((violation) => {
-    const relativeFile = path.relative(path.resolve(rootDirectory), violation.file) || path.basename(violation.file);
+    const relativeFile = (path.relative(path.resolve(rootDirectory), violation.file) || path.basename(violation.file)).split(path.sep).join('/');
     const location = violation.line ? `:${violation.line}` : '';
     return `[${violation.rule}] ${relativeFile}${location} -> ${violation.module}: ${violation.message}`;
   }).join('\n');
