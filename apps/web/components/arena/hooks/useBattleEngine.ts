@@ -35,6 +35,8 @@ import {
 } from '@/lib/stream/timeout';
 import { authStorage } from '@/lib/auth';
 import { secureRandomUUID } from '@/lib/crypto';
+import { normalizeAdjudicationEvents } from '@/lib/adjudicator/normalize';
+import { buildArenaQuestionnaireRequest } from '../utils/questionnaireRequest';
 import {
   createPinnedGenerationApiSafeReadDispatcher,
   createGenerationApiIntent,
@@ -634,24 +636,7 @@ export const useBattleEngine = () => {
       const narrativeHistoryForRequest = localNarrativeHistory.entries;
 
       const generationRequestId = secureRandomUUID();
-      const questionnaireSelections = selectedQuestionnaires.length > 0
-        ? selectedQuestionnaires.map((selection) => ({
-          source: selection.source,
-          kind: selection.questionnaire.kind,
-          presetId: selection.source === 'preset' ? selection.questionnaire.id : undefined,
-          dataCardId: selection.source === 'database' ? selection.dataCardId : undefined,
-          useLore: selection.useLore === false ? false : undefined,
-        }))
-        : undefined;
-      const questionnaires = selectedQuestionnaires.length > 0
-        ? selectedQuestionnaires.map((selection) => ({
-          id: selection.questionnaire.id,
-          title: selection.questionnaire.title,
-          kind: selection.questionnaire.kind,
-          useLore: selection.useLore === false ? false : undefined,
-          loreMarkdown: selection.questionnaire.loreMarkdown ?? undefined,
-        }))
-        : undefined;
+      const { questionnaireSelections, questionnaires } = buildArenaQuestionnaireRequest(selectedQuestionnaires);
       const customProviderPayload = buildCustomProviderRequestPayload(userProviderConfig);
       const generationProviderSnapshot = customProviderPayload ? {
         ...customProviderPayload,
@@ -904,7 +889,7 @@ export const useBattleEngine = () => {
           customProvider: customProviderPayload,
           isDowngrade: false,
           narrativeHistory: roomNarrativeHistory.entries,
-          adjudicationEvents,
+          adjudicationEvents: normalizeAdjudicationEvents(adjudicationEvents),
           questionnaireSelections,
           questionnaires,
         });
