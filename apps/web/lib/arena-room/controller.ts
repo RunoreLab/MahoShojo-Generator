@@ -1,5 +1,7 @@
 import {
+  ARENA_ROOM_PRESENCE_WEBSOCKET_PROTOCOL,
   ArenaRoomPublishConfigRequestSchema,
+  type RoomPresenceSnapshot,
   parseRoomServerTransportFrame,
   type ArenaRoomCreateRequest,
   type ArenaRoomGenerationProjectionStatus,
@@ -46,6 +48,8 @@ export type ArenaRoomControllerState = {
   readonly directoryNextCursor?: string | null;
   readonly directoryLoadingMore?: boolean;
   readonly session: ArenaRoomSessionResponse | null;
+  /** Ephemeral and fresh only while the current socket is connected. */
+  readonly presence?: RoomPresenceSnapshot | null;
   readonly notice: string | null;
   readonly error: string | null;
   readonly unknownOperation: 'create' | 'join' | null;
@@ -114,6 +118,7 @@ type UnknownManagementMutation =
   | { readonly operation: 'leave' };
 
 export type ArenaRoomSocket = {
+  readonly protocol?: string;
   onopen: (() => void) | null;
   onmessage: ((event: { readonly data: unknown }) => void) | null;
   onclose: ((event: { readonly code: number; readonly reason: string }) => void) | null;
@@ -124,7 +129,7 @@ export type ArenaRoomSocket = {
 
 type ArenaRoomControllerOptions = {
   readonly client: ArenaRoomClient;
-  readonly createSocket: (url: string, protocol: string) => ArenaRoomSocket;
+  readonly createSocket: (url: string, protocol: string | string[]) => ArenaRoomSocket;
   readonly initialAccess?: { readonly enabled: boolean; readonly authenticated: boolean };
   readonly maxReconnectAttempts?: number;
   readonly reconnectDelayMs?: (attempt: number) => number;
@@ -185,6 +190,7 @@ const EMPTY_GENERATION_VIEW: ArenaRoomGenerationControllerView = Object.freeze({
 
 const READY_STATE: ArenaRoomControllerState = Object.freeze({
   phase: 'ready',
+  presence: null,
   rooms: [],
   directoryNextCursor: null,
   directoryLoadingMore: false,
@@ -376,7 +382,9 @@ const replaceMember = (
   const incoming = event.payload.member;
   const existing = session.snapshot.members.findIndex((member) => member.userId === incoming.userId);
   const members = [...session.snapshot.members];
-  if (existing >= 0) members[existing] = incoming;
+  if (incoming.membershipState === 'revoked') {
+    if (existing >= 0) members.splice(existing, 1);
+  } else if (existing >= 0) members[existing] = incoming;
   else members.push(incoming);
   const self = incoming.userId === session.self.userId ? incoming : session.self;
   return {
@@ -547,7 +555,14 @@ export const createArenaRoomController = (
 
   const publish = (patch: Partial<ArenaRoomControllerState>): void => {
     if (disposed) return;
-    state = { ...state, ...patch };
+    const next = { ...state, ...patch };
+    if (next.phase !== 'connected' || !next.session
+      || next.session.roomId !== state.session?.roomId
+      || next.session.roomEpoch !== state.session?.roomEpoch
+      || next.session.self.userId !== state.session?.self.userId) {
+      next.presence = null;
+    }
+    state = next;
     for (const listener of listeners) listener();
   };
 
@@ -1351,6 +1366,20 @@ export const createArenaRoomController = (
       scheduleReconnect(true);
       return;
     }
+    if (message.type === 'room.presence') {
+      const current = state.session;
+      if (state.phase !== 'connected' || !current
+        || socket?.protocol !== ARENA_ROOM_PRESENCE_WEBSOCKET_PROTOCOL
+        || message.roomId !== current.roomId || message.roomEpoch !== current.roomEpoch) return;
+      if (!message.onlineUserIds.every((userId) => current.snapshot.members.some((member) => (
+        member.userId === userId && member.membershipState === 'active'
+      )))) {
+        publish({ presence: null });
+        return;
+      }
+      publish({ presence: message });
+      return;
+    }
     if (message.type === 'room.resync.required') {
       void requestGenerationRecovery('resync');
       scheduleReconnect(false);
@@ -1391,7 +1420,7 @@ export const createArenaRoomController = (
       if (disposed || generation !== operationGeneration) return;
       const current = options.createSocket(
         options.client.buildWebSocketUrl(issued),
-        issued.websocket.protocol,
+        [ARENA_ROOM_PRESENCE_WEBSOCKET_PROTOCOL, issued.websocket.protocol],
       );
       detachSocket(true);
       socket = current;
@@ -1404,7 +1433,7 @@ export const createArenaRoomController = (
       };
       current.onerror = () => {
         if (socket === current && !disposed) {
-          publish({ notice: '房间运行时暂不可用，正在重试' });
+          publish({ presence: null, notice: '房间运行时暂不可用，正在重试' });
         }
       };
       current.onclose = (event) => {

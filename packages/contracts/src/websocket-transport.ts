@@ -1,7 +1,7 @@
 import { z } from './zod';
 
 import { ArenaContractError } from './errors';
-import { MAX_CONTROL_FRAME_BYTES } from './limits';
+import { MAX_CONTROL_FRAME_BYTES, MAX_ROOM_MEMBERS } from './limits';
 import {
   RoomControlCursorSchema,
   RoomEventSchema,
@@ -17,6 +17,15 @@ import {
 } from './wire-size';
 
 export const ARENA_ROOM_WEBSOCKET_PROTOCOL = 'mahoshojo.arena-room.v1';
+export const ARENA_ROOM_PRESENCE_WEBSOCKET_PROTOCOL = 'mahoshojo.arena-room.presence.v1';
+
+/** The upgrade gateway, Node transport and authority must select the same subprotocol. */
+export const selectArenaRoomWebSocketProtocol = (protocols: Iterable<string>): string | false => {
+  const offered = new Set(protocols);
+  if (offered.has(ARENA_ROOM_PRESENCE_WEBSOCKET_PROTOCOL)) return ARENA_ROOM_PRESENCE_WEBSOCKET_PROTOCOL;
+  return offered.has(ARENA_ROOM_WEBSOCKET_PROTOCOL) ? ARENA_ROOM_WEBSOCKET_PROTOCOL : false;
+};
+
 export const ARENA_ROOM_WEBSOCKET_PATH = '/api/arena/rooms/v1/ws';
 export const ARENA_ROOM_TICKET_VERSION = 1 as const;
 
@@ -59,7 +68,22 @@ const RoomServerResyncRequiredSchema = z.object({
   reason: z.enum(['state-not-attached', 'replay-unavailable', 'slow-consumer']),
 }).strict();
 
+/** Ephemeral full projection, never a durable/replayable control event. */
+export const RoomPresenceSnapshotSchema = z.object({
+  protocolVersion: z.literal(PROTOCOL_VERSION),
+  type: z.literal('room.presence'),
+  roomId: OpaqueKeySchema,
+  roomEpoch: OpaqueKeySchema,
+  onlineUserIds: z.array(OpaqueKeySchema).max(MAX_ROOM_MEMBERS),
+}).strict().superRefine((presence, context) => {
+  if (new Set(presence.onlineUserIds).size !== presence.onlineUserIds.length) {
+    context.addIssue({ code: 'custom', path: ['onlineUserIds'], message: 'online userId values must be unique' });
+  }
+});
+export type RoomPresenceSnapshot = z.infer<typeof RoomPresenceSnapshotSchema>;
+
 export const RoomServerTransportMessageSchema = z.union([
+  RoomPresenceSnapshotSchema,
   RoomEventSchema,
   RoomServerResyncRequiredSchema,
 ]);

@@ -4,7 +4,7 @@ import {
   type HttpBindings,
 } from '@hono/node-server';
 import {
-  ARENA_ROOM_WEBSOCKET_PROTOCOL,
+  selectArenaRoomWebSocketProtocol,
   MAX_CONTROL_FRAME_BYTES,
 } from '@mahoshojo/contracts/arena-room';
 import { Hono } from 'hono';
@@ -24,9 +24,7 @@ interface NodeFetchApp {
 export const createRoomWebSocketServer = (): WebSocketServer => {
   return new WebSocketServer({
     handleProtocols: (protocols) => {
-      return protocols.has(ARENA_ROOM_WEBSOCKET_PROTOCOL)
-        ? ARENA_ROOM_WEBSOCKET_PROTOCOL
-        : false;
+      return selectArenaRoomWebSocketProtocol(protocols);
     },
     maxPayload: MAX_CONTROL_FRAME_BYTES,
     noServer: true,

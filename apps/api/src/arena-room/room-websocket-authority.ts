@@ -1,3 +1,7 @@
+import {
+  ARENA_ROOM_PRESENCE_WEBSOCKET_PROTOCOL,
+  selectArenaRoomWebSocketProtocol,
+} from '@mahoshojo/contracts/arena-room';
 import type {
   RoomClientTransportMessage,
   RoomReconnectCursor,
@@ -54,6 +58,14 @@ export type ArenaRoomWebSocketAuthorityOptions = {
   readonly roomIdleTtlMs?: number;
   readonly observer?: ArenaRoomRuntimeObserver;
 };
+
+type MemberPresenceSubscriber = {
+  readonly userId: string;
+  readonly peer: RoomWebSocketPeer;
+  lastProjection: string | null;
+};
+
+const presenceKey = (roomId: string, roomEpoch: string): string => JSON.stringify([roomId, roomEpoch]);
 
 type PresenceCounts = {
   readonly users: Map<string, number>;
@@ -113,6 +125,7 @@ export const createArenaRoomWebSocketAuthority = (
     throw new Error('roomIdleTtlMs 必须是正安全整数');
   }
   const counts = new Map<string, PresenceCounts>();
+  const presenceSubscribers = new Map<string, Set<MemberPresenceSubscriber>>();
   const roomOperations = new Map<string, Promise<void>>();
   const observe = (
     observation: Parameters<ArenaRoomRuntimeObserver['observeArenaRoomRuntime']>[0],
@@ -154,10 +167,47 @@ export const createArenaRoomWebSocketAuthority = (
     if (current.total === 0) counts.delete(roomId);
   };
 
+  const removePresenceSubscriber = (key: string, subscriber: MemberPresenceSubscriber | null): void => {
+    if (!subscriber) return;
+    const current = presenceSubscribers.get(key);
+    current?.delete(subscriber);
+    if (current?.size === 0) presenceSubscribers.delete(key);
+  };
+
+  // Full ephemeral projections avoid replaying obsolete connection state after recovery.
+  const publishMemberPresence = (
+    membership: ResolvedArenaRoomMembership,
+    target?: MemberPresenceSubscriber | null,
+    force = false,
+  ): void => {
+    const state = membership.actor.getSnapshot();
+    if (!state || state.lifecycle.status === 'closed') return;
+    const key = presenceKey(membership.roomId, state.snapshot.roomEpoch);
+    const activeMembers = state.snapshot.members.filter((member) => member.membershipState === 'active');
+    const frame = {
+      protocolVersion: 1 as const,
+      type: 'room.presence' as const,
+      roomId: membership.roomId,
+      roomEpoch: state.snapshot.roomEpoch,
+      onlineUserIds: activeMembers
+        .filter((member) => (counts.get(key)?.users.get(member.userId) ?? 0) > 0)
+        .map((member) => member.userId),
+    };
+    const projection = JSON.stringify(frame);
+    const subscribers = presenceSubscribers.get(key);
+    for (const subscriber of target ? [target] : subscribers ?? []) {
+      if (!subscribers?.has(subscriber)) continue;
+      if (!activeMembers.some((member) => member.userId === subscriber.userId)) continue;
+      if (force || subscriber.lastProjection !== projection) {
+        if (subscriber.peer.send(frame)) subscriber.lastProjection = projection;
+      }
+    }
+  };
+
   const syncPresence = async (membership: ResolvedArenaRoomMembership): Promise<void> => {
     const state = membership.actor.getSnapshot();
     if (!state || state.lifecycle.status === 'closed') return;
-    const currentCounts = counts.get(membership.roomId);
+    const currentCounts = counts.get(presenceKey(membership.roomId, state.snapshot.roomEpoch));
     const host = state.snapshot.members.find((member) => (
       member.role === 'host' && member.membershipState === 'active'
     ));
@@ -226,6 +276,7 @@ export const createArenaRoomWebSocketAuthority = (
 
   const createConnectionAuthority = (
     claims: RoomTicketClaims,
+    supportsPresence: boolean,
   ): RoomWebSocketConnectionAuthority => ({
     activate: (peer) => enqueueRoomOperation(claims.roomId, async () => {
       if (claims.reconnect !== undefined) {
@@ -245,11 +296,13 @@ export const createArenaRoomWebSocketAuthority = (
         peer.close(CLOSE_MEMBERSHIP_REVOKED, 'room-epoch-stale');
         return {};
       }
-      increment(claims.roomId, claims.userId);
+      const connectionKey = presenceKey(claims.roomId, claims.roomEpoch);
+      increment(connectionKey, claims.userId);
       try {
         await syncPresence(membership);
       } catch (error) {
-        decrement(claims.roomId, claims.userId);
+        decrement(connectionKey, claims.userId);
+        publishMemberPresence(membership);
         throw error;
       }
 
@@ -259,20 +312,25 @@ export const createArenaRoomWebSocketAuthority = (
           userId: claims.userId,
         });
       } catch (error) {
-        decrement(claims.roomId, claims.userId);
-        await syncPresence(membership);
+        decrement(connectionKey, claims.userId);
+        try { await syncPresence(membership); }
+        finally { publishMemberPresence(membership); }
         closeForMembershipResolutionError(error, peer, observe);
         return {};
       }
       if (membership.roomEpoch !== claims.roomEpoch) {
-        decrement(claims.roomId, claims.userId);
-        await syncPresence(membership);
+        decrement(connectionKey, claims.userId);
+        try { await syncPresence(membership); }
+        finally { publishMemberPresence(membership); }
         peer.close(CLOSE_MEMBERSHIP_REVOKED, 'room-epoch-stale');
         return {};
       }
 
       let disposed = false;
       let unsubscribe: (() => void) | undefined;
+      const presenceSubscriber: MemberPresenceSubscriber | null = supportsPresence
+        ? { userId: claims.userId, peer, lastProjection: null }
+        : null;
       try {
         unsubscribe = membership.actor.subscribe((fanout) => {
           if (disposed) return;
@@ -306,12 +364,23 @@ export const createArenaRoomWebSocketAuthority = (
             }
           }
           if (closeCode !== undefined && closeReason) peer.close(closeCode, closeReason);
+          else if (presenceSubscriber && fanout.events.length > 0) {
+            publishMemberPresence(membership, presenceSubscriber);
+          }
         });
         sendControlSync(membership, peer, claims.reconnect);
+        if (presenceSubscriber) {
+          const subscribers = presenceSubscribers.get(connectionKey) ?? new Set<MemberPresenceSubscriber>();
+          subscribers.add(presenceSubscriber);
+          presenceSubscribers.set(connectionKey, subscribers);
+        }
+        publishMemberPresence(membership);
       } catch (error) {
         unsubscribe?.();
-        decrement(claims.roomId, claims.userId);
-        await syncPresence(membership);
+        removePresenceSubscriber(connectionKey, presenceSubscriber);
+        decrement(connectionKey, claims.userId);
+        try { await syncPresence(membership); }
+        finally { publishMemberPresence(membership); }
         throw error;
       }
 
@@ -334,13 +403,16 @@ export const createArenaRoomWebSocketAuthority = (
             return;
           }
           sendControlSync(current, peer, message.cursor);
+          if (presenceSubscriber) publishMemberPresence(current, presenceSubscriber, true);
         },
         dispose: () => enqueueRoomOperation(claims.roomId, async () => {
           if (disposed) return;
           disposed = true;
           unsubscribe?.();
-          decrement(claims.roomId, claims.userId);
-          await syncPresence(membership);
+          removePresenceSubscriber(connectionKey, presenceSubscriber);
+          decrement(connectionKey, claims.userId);
+          try { await syncPresence(membership); }
+          finally { publishMemberPresence(membership); }
         }),
       };
       return connection;
@@ -415,7 +487,12 @@ export const createArenaRoomWebSocketAuthority = (
         roomId: membership.roomId,
         userId: membership.member.userId,
         role: membership.member.role,
-        connectionAuthority: createConnectionAuthority(claims),
+        connectionAuthority: createConnectionAuthority(
+          claims,
+          selectArenaRoomWebSocketProtocol(
+            (request.headers.get('sec-websocket-protocol') ?? '').split(',').map((value) => value.trim()),
+          ) === ARENA_ROOM_PRESENCE_WEBSOCKET_PROTOCOL,
+        ),
       };
     },
   });

@@ -119,6 +119,7 @@ const generationStartRequest = {
 };
 
 class FakeSocket implements ArenaRoomSocket {
+  protocol = 'mahoshojo.arena-room.presence.v1';
   onopen: (() => void) | null = null;
   onmessage: ((event: { data: unknown }) => void) | null = null;
   onclose: ((event: { code: number; reason: string }) => void) | null = null;
@@ -252,7 +253,7 @@ const createHarness = (overrides: HarnessOverrides = {}) => {
     client,
     createSocket: vi.fn((url, protocol) => {
       expect(url).toMatch(/^wss:\/\/room\.test\/ws\?ticket=ticket-/u);
-      expect(protocol).toBe('mahoshojo.arena-room.v1');
+      expect(protocol).toEqual(['mahoshojo.arena-room.presence.v1', 'mahoshojo.arena-room.v1']);
       const socket = new FakeSocket();
       sockets.push(socket);
       return socket;
@@ -3764,5 +3765,63 @@ describe('Arena Room browser controller', () => {
       notice: '房间运行时暂不可用，正在重试',
     });
     expect(invalid.queued).toHaveLength(1);
+  });
+});
+
+
+describe('Room controller ephemeral presence', () => {
+  const presence = {
+    protocolVersion: 1, type: 'room.presence', roomId: 'room-1', roomEpoch: 'epoch-1',
+    onlineUserIds: ['user-host'],
+  };
+  it('接收完整在线投影，不推进controlSeq；拒绝旧epoch，断线清空并可重连恢复', async () => {
+    const { controller, sockets, runNextTimer } = createHarness();
+    await controller.join('room-1', '房主');
+    sockets[0]!.open();
+    sockets[0]!.message(JSON.stringify(presence));
+    expect(controller.getSnapshot().presence).toEqual(presence);
+    expect(controller.getSnapshot().session?.snapshot.controlSeq).toBe(0);
+    sockets[0]!.message(JSON.stringify({ ...presence, roomEpoch: 'old-epoch', onlineUserIds: [] }));
+    expect(controller.getSnapshot().presence).toEqual(presence);
+    const staleMessage = sockets[0]!.onmessage;
+    sockets[0]!.closed(1006);
+    expect(controller.getSnapshot().presence).toBeNull();
+    await runNextTimer();
+    expect(sockets).toHaveLength(2);
+    sockets[1]!.open();
+    expect(controller.getSnapshot().presence).toBeNull();
+    staleMessage?.({ data: JSON.stringify(presence) });
+    expect(controller.getSnapshot().presence).toBeNull();
+    sockets[1]!.message(JSON.stringify(presence));
+    expect(controller.getSnapshot().presence).toEqual(presence);
+    controller.reset();
+    expect(controller.getSnapshot().presence).toBeNull();
+    controller.dispose();
+  });
+  it('协商旧v1时保持可用，不从membership推断在线', async () => {
+    const { controller, sockets } = createHarness();
+    await controller.join('room-1', '房主');
+    sockets[0]!.protocol = 'mahoshojo.arena-room.v1';
+    sockets[0]!.open();
+    expect(controller.getSnapshot().phase).toBe('connected');
+    expect(controller.getSnapshot().presence).toBeNull();
+    sockets[0]!.message(JSON.stringify(presence));
+    expect(controller.getSnapshot().presence).toBeNull();
+    controller.dispose();
+  });
+  it('离开成员从snapshot移除，成员轮换不会积累revoked条目突破容量', async () => {
+    const { controller, sockets } = createHarness();
+    await controller.join('room-1', '房主');
+    sockets[0]!.open();
+    for (let index = 1; index <= 40; index += 1) {
+      const member = { userId: `member-${index}`, role: 'member', displayName: '成员', membershipState: 'active' };
+      const event = { protocolVersion: 1, roomId: 'room-1', roomEpoch: 'epoch-1', timestamp: '2026-09-16T10:00:00.000Z' };
+      sockets[0]!.message(JSON.stringify({ ...event, type: 'room.member.joined', controlSeq: index * 2 - 1, payload: { member } }));
+      sockets[0]!.message(JSON.stringify({ ...event, type: 'room.member.left', controlSeq: index * 2,
+        payload: { member: { ...member, membershipState: 'revoked' } } }));
+    }
+    expect(controller.getSnapshot().session?.snapshot.members).toEqual(snapshot.members);
+    expect(controller.getSnapshot().session?.snapshot.controlSeq).toBe(80);
+    controller.dispose();
   });
 });

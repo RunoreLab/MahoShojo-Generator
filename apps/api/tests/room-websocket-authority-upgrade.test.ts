@@ -611,3 +611,81 @@ describe('Room signed-ticket real Node upgrade', () => {
     }
   });
 });
+
+
+it('真实双协议 socket：关闭成员页、多tab、重连及房主离线正确投影', async () => {
+  const store = new MemoryRoomStore();
+  const now = Date.parse('2026-09-16T00:00:00.000Z');
+  let userIndex = 0;
+  let jti = 0;
+  const actors = createRoomActorRegistry({ store, now: () => now,
+    createRoomIdentity: () => ({ roomId: 'presence-room', roomEpoch: 'presence-epoch' }),
+    createTimestamp: () => new Date(now).toISOString(),
+  });
+  const memberships = createArenaRoomMembershipService({ actors,
+    references: createTestArenaDataCardRefVerifier(), createUserId: () => `presence-user-${++userIndex}`,
+    now: () => new Date(now).toISOString(),
+  });
+  const host = await memberships.create({ accountUserId: 101, displayName: 'Host',
+    sharedConfig: createArenaRoomState().snapshot.sharedConfig });
+  const member = await memberships.join({ roomId: host.roomId, accountUserId: 202, displayName: 'Member' });
+  const tickets = createArenaRoomTicketCodec({
+    signatures: createArenaRoomTicketSignatureService({
+      env: { SIGNATURE_SECRET_KEY: 'presence-test-only-at-least-32-characters' },
+      logger: { warn: () => undefined, error: () => undefined },
+    }), createJti: () => `presence-jti-${++jti}`, now: () => now,
+  });
+  const authority = createArenaRoomWebSocketAuthority({ actors, memberships, replay: new MemoryReplay(), tickets, now: () => now });
+  const gateway = new RoomWebSocketGateway({ allowedBrowserOrigins: ['https://app.example.com'],
+    authorize: authority.authorize, closeGraceMs: 50, shutdownGraceMs: 50 });
+  const wsServer = createRoomWebSocketServer();
+  const server = createAdaptorServer({
+    fetch: createRoomRequestDispatcher(new Hono(), createRoomWebSocketApp(gateway)),
+    websocket: { server: wsServer },
+  }) as Server;
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const origin = `ws://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const sockets: WebSocket[] = [];
+  const modern = 'mahoshojo.arena-room.presence.v1';
+  const open = async (accountUserId: number, legacy = false) => {
+    const ticket = await authority.issue({ roomId: host.roomId, accountUserId });
+    const socket = new WebSocket(`${origin}${ARENA_ROOM_WEBSOCKET_PATH}?ticket=${encodeURIComponent(ticket)}`,
+      legacy ? ARENA_ROOM_WEBSOCKET_PROTOCOL : [modern, ARENA_ROOM_WEBSOCKET_PROTOCOL],
+      { origin: 'https://app.example.com' });
+    sockets.push(socket);
+    const messages: RoomServerTransportMessage[] = [];
+    socket.on('message', (data) => messages.push(JSON.parse(data.toString()) as RoomServerTransportMessage));
+    const first = nextMatchingMessage(socket, (message) => message.type === 'room.snapshot');
+    await within(new Promise<void>((resolve, reject) => {
+      socket.once('open', resolve); socket.once('error', reject);
+    }), 'presence-open');
+    await within(first, 'presence-snapshot');
+    expect(socket.protocol).toBe(legacy ? ARENA_ROOM_WEBSOCKET_PROTOCOL : modern);
+    return { socket, messages };
+  };
+  const latest = (messages: RoomServerTransportMessage[]) => messages.filter((message) => message.type === 'room.presence').at(-1);
+  try {
+    const h = await open(101);
+    const a = await open(202, true);
+    const b = await open(202);
+    await expect.poll(() => latest(h.messages)?.onlineUserIds).toEqual([host.member.userId, member.member.userId]);
+    const before = structuredClone(store.state);
+    const closedA = nextClose(a.socket); a.socket.close(); await within(closedA, 'tab-a-close');
+    await expect.poll(() => wsServer.clients.size).toBe(2);
+    expect(latest(h.messages)?.onlineUserIds).toEqual([host.member.userId, member.member.userId]);
+    expect(latest(a.messages)).toBeUndefined();
+    const closedB = nextClose(b.socket); b.socket.close(); await within(closedB, 'tab-b-close');
+    await expect.poll(() => latest(h.messages)?.onlineUserIds).toEqual([host.member.userId]);
+    expect(store.state).toEqual(before);
+    const reconnected = await open(202);
+    await expect.poll(() => latest(reconnected.messages)?.onlineUserIds).toEqual([host.member.userId, member.member.userId]);
+    const hostClosed = nextClose(h.socket); h.socket.close(); await within(hostClosed, 'host-close');
+    await expect.poll(() => latest(reconnected.messages)?.onlineUserIds).toEqual([member.member.userId]);
+    expect(store.state?.snapshot.members).toHaveLength(2);
+  } finally {
+    for (const socket of sockets) socket.terminate();
+    await gateway.shutdown();
+    await actors.shutdown();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});

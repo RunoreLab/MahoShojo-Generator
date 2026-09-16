@@ -825,3 +825,27 @@ describe('Arena multiplayer panel real React interactions', () => {
     expect(mocks.syncRoom).toHaveBeenCalledOnce();
   });
 });
+
+
+it('成员名额与在线人数分开，断线和旧服务端不显示假在线', async () => {
+  const connected = connectedHostState(sharedConfig);
+  connected.session!.snapshot.members.push({ userId: 'member-2', role: 'member', displayName: '离线玩家', membershipState: 'active' });
+  mocks.state = { ...connected, presence: {
+    protocolVersion: 1, type: 'room.presence', roomId: 'room-created', roomEpoch: 'epoch-created', onlineUserIds: ['host-1'],
+  } };
+  await act(async () => root.render(<ArenaMultiplayerContextPanel {...props} />));
+  await act(async () => openMoreMenu());
+  await act(async () => button('房间成员与操作').click());
+  expect(document.body.textContent).toContain('当前 2 位成员，1 人在线，1 人离线。');
+  expect(document.body.querySelectorAll('[data-member-presence="online"]')).toHaveLength(1);
+  expect(document.body.querySelectorAll('[data-member-presence="offline"]')).toHaveLength(1);
+  expect(document.body.textContent).toContain('仍保留成员席位和提案');
+  mocks.state = { ...mocks.state!, phase: 'reconnecting' };
+  await act(async () => root.render(<ArenaMultiplayerContextPanel {...props} />));
+  expect(document.body.textContent).toContain('当前 2 位成员；在线状态暂不可用。');
+  expect(document.body.querySelectorAll('[data-member-presence="unknown"]')).toHaveLength(2);
+  mocks.state = { ...connected, presence: null };
+  await act(async () => root.render(<ArenaMultiplayerContextPanel {...props} />));
+  expect(document.body.textContent).toContain('在线状态暂不可用');
+  expect(document.body.textContent).not.toContain('2 人在线');
+});

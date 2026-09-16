@@ -94,7 +94,10 @@ class WiringSocket {
   readonly send = vi.fn();
   readonly close = vi.fn();
 
-  constructor(readonly url: string, readonly protocol: string) {
+  readonly protocol: string;
+
+  constructor(readonly url: string, readonly offeredProtocols: string | string[]) {
+    this.protocol = Array.isArray(offeredProtocols) ? offeredProtocols[0]! : offeredProtocols;
     WiringSocket.instances.push(this);
   }
 
@@ -326,7 +329,8 @@ describe('Arena multiplayer production client/hook wiring', () => {
       expect(WiringSocket.instances).toHaveLength(1);
       expect(WiringSocket.instances[0]).toMatchObject({
         url: 'ws://127.0.0.1:8787/api/arena/rooms/v1/ws?ticket=ticket-3',
-        protocol: 'mahoshojo.arena-room.v1',
+        protocol: 'mahoshojo.arena-room.presence.v1',
+        offeredProtocols: ['mahoshojo.arena-room.presence.v1', 'mahoshojo.arena-room.v1'],
       });
       await act(async () => WiringSocket.instances[0]!.open());
       const exitLabel = role === 'host' ? '关闭房间' : '离开房间';

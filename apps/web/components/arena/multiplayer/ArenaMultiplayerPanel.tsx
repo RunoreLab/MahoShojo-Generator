@@ -572,6 +572,14 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
   const activeMembers = session?.snapshot.members.filter((member) => (
     member.membershipState === 'active'
   )) ?? [];
+  const presence = state.phase === 'connected' && session
+    && state.presence?.roomId === session.roomId && state.presence.roomEpoch === session.roomEpoch
+    ? state.presence : null;
+  const onlineIds = presence ? new Set(presence.onlineUserIds) : null;
+  const onlineCount = onlineIds ? activeMembers.filter((member) => onlineIds.has(member.userId)).length : null;
+  const presenceSummary = onlineCount === null
+    ? `当前 ${activeMembers.length} 位成员；在线状态暂不可用。`
+    : `当前 ${activeMembers.length} 位成员，${onlineCount} 人在线，${activeMembers.length - onlineCount} 人离线。`;
   const host = activeMembers.find((member) => member.role === 'host');
   const directoryRoom = session
     ? state.rooms.find((room) => room.roomId === session.roomId)
@@ -699,7 +707,7 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
                   {host?.displayName ?? '未知'}的房间
                 </span>
                 <span className="ml-2 shrink-0 font-normal text-gray-600 dark:text-gray-400">
-                  {activeMembers.length} 人在线
+                  {activeMembers.length} 位成员{onlineCount === null ? ' · 在线未知' : ` · ${onlineCount} 人在线`}
                 </span>
               </p>
               <p className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-gray-600 dark:text-gray-400">
@@ -834,7 +842,7 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
             }}
             titleId="arena-room-overview-dialog-heading"
             title="房间"
-            description={`当前 ${activeMembers.length} 人在线。`}
+            description={presenceSummary}
           >
             {kickConfirmation ? (
               <div role="alertdialog" aria-label="确认移除成员" className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-950 dark:border-red-900 dark:bg-red-950/30 dark:text-red-100">
@@ -871,6 +879,9 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
               <h3 id="arena-room-members-heading" className="text-sm font-semibold text-gray-950 dark:text-gray-100">
                 房间成员
               </h3>
+              <p className="mt-2 text-xs text-gray-600 dark:text-gray-400">
+                关闭页面或断网只会离线，仍保留成员席位和提案；彻底退出请点“离开房间”，房主也可移除成员。
+              </p>
               <ul className="mt-3 grid gap-2 sm:grid-cols-2" aria-label="房间成员列表">
                 {activeMembers.map((member) => (
                   <li key={member.userId} className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white/80 px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900/70">
@@ -878,6 +889,11 @@ export function ArenaMultiplayerPanelView(props: ArenaMultiplayerPanelViewProps)
                       <span className="font-medium text-gray-950 dark:text-gray-100">{member.displayName}</span>
                       <span className="ml-2 text-gray-600 dark:text-gray-400">
                         {member.role === 'host' ? '房主' : '成员'}
+                      </span>
+                      <span className="ml-2 text-xs text-gray-600 dark:text-gray-400" data-member-presence={
+                        onlineIds === null ? 'unknown' : onlineIds.has(member.userId) ? 'online' : 'offline'
+                      }>
+                        {onlineIds === null ? '在线状态未知' : onlineIds.has(member.userId) ? '在线' : '离线（保留席位）'}
                       </span>
                     </span>
                     {session.self.role === 'host' && member.role !== 'host' && member.userId !== session.self.userId ? (

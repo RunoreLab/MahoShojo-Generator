@@ -1023,3 +1023,71 @@ describe('Arena Room ticket -> membership -> presence WSS authority', () => {
     ]));
   });
 });
+
+
+describe('成员 presence 回归：关闭页面不再假在线', () => {
+  const latest = (messages: readonly unknown[]) => messages.filter((message) => (
+    typeof message === 'object' && message !== null && 'type' in message
+    && message.type === 'room.presence'
+  )).at(-1) as { onlineUserIds: string[]; roomEpoch: string } | undefined;
+
+  it('普通成员最后一个连接断开广播离线，但保留 membership 和 checkpoint', async () => {
+    const h = await createHarness();
+    const connect = async (accountUserId: number, presence = true) => {
+      const ticket = await h.authority.issue({ roomId: 'room-1', accountUserId });
+      const request = requestForTicket(ticket);
+      request.headers.set('sec-websocket-protocol', presence
+        ? 'mahoshojo.arena-room.presence.v1, mahoshojo.arena-room.v1'
+        : 'mahoshojo.arena-room.v1');
+      const peer = createPeer();
+      return { ...peer, connection: await activate(await h.authority.authorize(request), peer.peer) };
+    };
+    const host = await connect(101);
+    const member = await connect(202);
+    const before = structuredClone(h.store.state);
+    try {
+      await member.connection.dispose?.();
+      expect(latest(host.messages)?.onlineUserIds).toEqual([h.host.member.userId]);
+      expect(h.store.state).toEqual(before);
+      expect(h.store.state?.snapshot.members).toContainEqual(h.member.member);
+      const reconnected = await connect(202);
+      try {
+        expect(latest(reconnected.messages)?.onlineUserIds).toEqual([
+          h.host.member.userId, h.member.member.userId,
+        ]);
+      } finally { await reconnected.connection.dispose?.(); }
+    } finally {
+      await member.connection.dispose?.();
+      await host.connection.dispose?.();
+      await h.actors.shutdown();
+    }
+  });
+
+  it('多标签页按用户去重，老 v1 peer 不收到陌生 presence 帧', async () => {
+    const h = await createHarness();
+    const connect = async (accountUserId: number, protocol: string) => {
+      const ticket = await h.authority.issue({ roomId: 'room-1', accountUserId });
+      const request = requestForTicket(ticket);
+      request.headers.set('sec-websocket-protocol', protocol);
+      const peer = createPeer();
+      return { ...peer, connection: await activate(await h.authority.authorize(request), peer.peer) };
+    };
+    const host = await connect(101, 'mahoshojo.arena-room.presence.v1');
+    const tabA = await connect(202, 'mahoshojo.arena-room.v1');
+    const tabB = await connect(202, 'mahoshojo.arena-room.presence.v1');
+    try {
+      const count = host.messages.length;
+      await tabA.connection.dispose?.();
+      expect(latest(host.messages)?.onlineUserIds).toEqual([h.host.member.userId, h.member.member.userId]);
+      expect(host.messages).toHaveLength(count);
+      expect(latest(tabA.messages)).toBeUndefined();
+      await tabB.connection.dispose?.();
+      expect(latest(host.messages)?.onlineUserIds).toEqual([h.host.member.userId]);
+    } finally {
+      await tabA.connection.dispose?.();
+      await tabB.connection.dispose?.();
+      await host.connection.dispose?.();
+      await h.actors.shutdown();
+    }
+  });
+});
