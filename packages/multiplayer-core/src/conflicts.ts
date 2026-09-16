@@ -316,6 +316,7 @@ const compare = (
 export type ArenaProposalChangeOutcome =
   | 'applicable'
   | 'satisfied'
+  | 'overridden'
   | 'conflict'
   | 'invalid-change'
   | 'unselected';
@@ -325,6 +326,9 @@ export interface ArenaProposalChangeAnalysis {
   readonly target: string;
   readonly outcome: ArenaProposalChangeOutcome;
   readonly conflict?: ArenaProposalConflict;
+  /** Local staged review metadata; never an authorization or persisted policy. */
+  readonly overrideAllowed?: boolean;
+  readonly overrideBlockedReason?: 'unsupported-change' | 'target-missing' | 'reference-changed';
 }
 
 /**

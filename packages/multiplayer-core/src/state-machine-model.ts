@@ -2,6 +2,7 @@ import {
   ArenaErrorCodeSchema,
   ArenaProposalChangeSchema,
   ArenaProposalSchema,
+  ArenaRoomProposalResolveRequestSchema,
   ArenaRoomSharedConfigSchema,
   ArenaRoomSnapshotSchema,
   DisplayNameSchema,
@@ -9,7 +10,6 @@ import {
   GenerationBridgeScopeSchema,
   GenerationMirrorSchema,
   IsoTimestampSchema,
-  MAX_PROPOSAL_CHANGES,
   OpaqueKeySchema,
   RoomMemberSchema,
   RoomEventSchema,
@@ -532,21 +532,11 @@ export const SubmitArenaRoomProposalCommandSchema = z.object({
   proposal: ArenaProposalSchema,
 }).strict();
 
-export const ResolveArenaRoomProposalCommandSchema = z.object({
+// Reuse canonical DTO refinements; direct actor callers cannot bypass override guards.
+export const ResolveArenaRoomProposalCommandSchema = ArenaRoomProposalResolveRequestSchema.safeExtend({
   type: z.literal('resolve-proposal'),
   ...epochCommand,
-  // Diagnostic only: the authoritative apply re-runs the staged typed
-  // expectedBase merge on the latest state inside one atomic transition, so a
-  //Proposal merged after unrelated revisions is still safe. Keeping the field
-  // optional preserves older request payloads for diagnostics.
-  expectedRevision: RoomRevisionSchema.optional(),
   proposalId: OpaqueKeySchema,
-  resolution: z.enum(['accept-selected', 'reject']),
-  selectedChangeIds: z.array(OpaqueKeySchema).max(MAX_PROPOSAL_CHANGES).optional(),
-}).strict().superRefine((command, context) => {
-  if (command.resolution === 'reject' && command.selectedChangeIds !== undefined) {
-    context.addIssue({ code: 'custom', path: ['selectedChangeIds'], message: 'reject cannot select changes' });
-  }
 });
 
 export const WithdrawArenaRoomProposalCommandSchema = z.object({

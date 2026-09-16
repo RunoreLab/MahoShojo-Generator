@@ -123,13 +123,12 @@ export const ArenaRoomProposalSubmitRequestSchema = z.object({
 
 export const ArenaRoomProposalResolveRequestSchema = z.object({
   expectedRoomEpoch: OpaqueKeySchema,
-  // Diagnostic only. The authority re-runs the staged typed expectedBase merge
-  // on the latest shared config inside one atomic transition, so resolving a
-  // proposal after unrelated revisions is safe; only genuine per-target
-  // conflicts are rejected. Older clients still send this field.
+  // Diagnostic for ordinary merges; required exact review revision for overrides.
+  // Unrelated revisions must not invalidate a still-mergeable ordinary proposal.
   expectedRevision: RoomRevisionSchema.optional(),
   resolution: z.enum(['accept-selected', 'reject']),
   selectedChangeIds: z.array(OpaqueKeySchema).max(MAX_PROPOSAL_CHANGES).optional(),
+  overrideChangeIds: z.array(OpaqueKeySchema).max(MAX_PROPOSAL_CHANGES).optional(),
 }).strict().superRefine((request, context) => {
   if (request.resolution === 'reject' && request.selectedChangeIds !== undefined) {
     context.addIssue({
@@ -137,6 +136,21 @@ export const ArenaRoomProposalResolveRequestSchema = z.object({
       path: ['selectedChangeIds'],
       message: 'reject cannot select changes',
     });
+  }
+  if (request.overrideChangeIds !== undefined) {
+    if (request.resolution === 'reject') {
+      context.addIssue({ code: 'custom', path: ['overrideChangeIds'], message: 'reject cannot override changes' });
+    }
+    const overrides = request.overrideChangeIds;
+    if (new Set(overrides).size !== overrides.length) {
+      context.addIssue({ code: 'custom', path: ['overrideChangeIds'], message: 'overrideChangeIds must be unique' });
+    }
+    if (overrides.length > 0 && request.expectedRevision === undefined) {
+      context.addIssue({ code: 'custom', path: ['expectedRevision'], message: 'overrides require the reviewed revision' });
+    }
+    if (overrides.some((id) => !request.selectedChangeIds?.includes(id))) {
+      context.addIssue({ code: 'custom', path: ['overrideChangeIds'], message: 'overrides must be explicitly selected' });
+    }
   }
 });
 

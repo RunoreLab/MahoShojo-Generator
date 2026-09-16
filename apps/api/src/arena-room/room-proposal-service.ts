@@ -382,11 +382,15 @@ export const createArenaRoomProposalService = (
       if (!request.success) return fail('ROOM_PROPOSAL_INPUT_INVALID');
       const membership = await resolveMembership(input.roomId, input.accountUserId);
       requireEpoch(membership.state, request.data.expectedRoomEpoch);
-      // No exact-revision veto: applyArenaProposal re-runs the dependency-ordered
+      // No ordinary exact-revision veto: applyArenaProposal re-runs the dependency-ordered
       // typed expectedBase merge against the latest authoritative config inside
       // the atomic transition below, so unrelated concurrent revisions do not
       // invalidate a still-mergeable proposal.
       if (membership.member.role !== 'host') return fail('ROOM_PERMISSION_DENIED');
+      if (request.data.overrideChangeIds?.length
+        && request.data.expectedRevision !== membership.state.snapshot.revision) {
+        return fail('ROOM_REVISION_STALE');
+      }
       const proposal = membership.state.snapshot.proposals.find((item) => item.proposalId === proposalId);
       if (!proposal) {
         return membership.state.terminalProposalIds.includes(proposalId)
@@ -399,7 +403,7 @@ export const createArenaRoomProposalService = (
           roomId: membership.state.snapshot.roomId,
           config: membership.state.snapshot.sharedConfig,
           revision: membership.state.snapshot.revision,
-        }, proposal, request.data.selectedChangeIds);
+        }, proposal, request.data.selectedChangeIds, { overrideChangeIds: request.data.overrideChangeIds });
         if (applied.status === 'rejected') return fail('ROOM_PROPOSAL_CONFLICT');
         await verifyRefs(options.references, {
           refs: canonicalArenaRoomSharedConfigRefs(applied.config),
@@ -425,6 +429,9 @@ export const createArenaRoomProposalService = (
         ...(request.data.selectedChangeIds === undefined
           ? {}
           : { selectedChangeIds: request.data.selectedChangeIds }),
+        ...(request.data.overrideChangeIds === undefined
+          ? {}
+          : { overrideChangeIds: request.data.overrideChangeIds }),
         timestamp,
       });
       const event = transition.events.find((item) => (

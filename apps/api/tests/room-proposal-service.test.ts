@@ -1110,3 +1110,80 @@ describe('Arena Room Proposal application service', () => {
     expect(harness.store.saveCount).toBe(before + 2);
   });
 });
+
+const createOverrideHarness = async () => {
+  const harness = await createHarness();
+  for (const [proposalId, value] of [['override-host-value', 'C'], ['override-member-value', 'B']]) {
+    await harness.service.submit({ roomId: 'room-1', accountUserId: 202, request: {
+      proposalId, expectedRoomEpoch: 'epoch-1', baseRevision: 0, changes: [guidanceChange(value)],
+    } });
+  }
+  await harness.service.resolve({ roomId: 'room-1', proposalId: 'override-host-value', accountUserId: 101,
+    request: { expectedRoomEpoch: 'epoch-1', resolution: 'accept-selected', selectedChangeIds: ['guidance-1'] } });
+  vi.mocked(harness.references.verify).mockClear();
+  return harness;
+};
+const overrideRequest = { expectedRoomEpoch: 'epoch-1', expectedRevision: 1, resolution: 'accept-selected',
+  selectedChangeIds: ['guidance-1'], overrideChangeIds: ['guidance-1'] };
+const resolveOverride = (harness: Awaited<ReturnType<typeof createHarness>>, patch = {}, accountUserId = 101) => (
+  harness.service.resolve({ roomId: 'room-1', proposalId: 'override-member-value', accountUserId,
+    request: { ...overrideRequest, ...patch } })
+);
+
+describe('房主 override Proposal 服务闭环', () => {
+  it('普通冲突保持 pending，明确覆盖后校验引用并 checkpoint 一次', async () => {
+    const h = await createOverrideHarness(); const before = h.store.saveCount;
+    await expect(resolveOverride(h, { overrideChangeIds: undefined })).rejects.toMatchObject({ code: 'ROOM_PROPOSAL_CONFLICT' });
+    expect(h.store.saveCount).toBe(before);
+    const response = await resolveOverride(h);
+    expect(response).toMatchObject({ status: 'accepted', revision: 2, sharedConfig: { userGuidance: 'B' } });
+    expect(h.store.saveCount).toBe(before + 1); expect(h.references.verify).toHaveBeenCalledTimes(1);
+    expect(response.snapshot).toEqual(h.store.state?.snapshot);
+    expect(h.store.state?.snapshot.proposals).toEqual([]);
+    await expect(resolveOverride(h, { expectedRevision: 2 })).rejects.toMatchObject({ code: 'ROOM_PROPOSAL_CONFLICT' });
+    expect(h.store.saveCount).toBe(before + 1);
+  });
+  it('API preflight 拒绝旧审阅版本和成员越权，不消耗引用校验', async () => {
+    const h = await createOverrideHarness(); const before = h.store.saveCount;
+    await expect(resolveOverride(h, { expectedRevision: 0 })).rejects.toMatchObject({ code: 'ROOM_REVISION_STALE' });
+    await expect(resolveOverride(h, {}, 202)).rejects.toMatchObject({ code: 'ROOM_PERMISSION_DENIED' });
+    expect(h.store.saveCount).toBe(before); expect(h.references.verify).not.toHaveBeenCalled();
+  });
+  it.each(['ARENA_DATA_CARD_REF_VERSION_MISMATCH', 'ARENA_DATA_CARD_REF_NOT_READABLE'] as const)(
+    'override 不能绕过引用验证 %s', async (code) => {
+      const h = await createOverrideHarness(); const before = h.store.saveCount;
+      vi.mocked(h.references.verify).mockRejectedValueOnce(new ArenaDataCardRefVerifierError(code));
+      await expect(resolveOverride(h)).rejects.toMatchObject({
+        code: code === 'ARENA_DATA_CARD_REF_VERSION_MISMATCH' ? 'ROOM_REFERENCE_STALE' : 'ROOM_REFERENCE_DENIED',
+      });
+      expect(h.store.saveCount).toBe(before);
+      expect(h.store.state?.snapshot.sharedConfig.userGuidance).toBe('C');
+      expect(h.store.state?.snapshot.proposals).toHaveLength(1);
+    });
+  it('引用 preflight 期间 C→D 后，actor exact fence 拒绝旧覆盖', async () => {
+    const h = await createOverrideHarness(); const before = h.store.saveCount;
+    vi.mocked(h.references.verify).mockImplementationOnce(async ({ refs }) => {
+      const actor = await h.actors.recover('room-1'); const state = actor?.getSnapshot();
+      if (!actor || !state) throw new Error('missing actor');
+      const published = await actor.execute({ authority: { kind: 'authenticated-user',
+        actorUserId: h.host.member.userId, accountUserId: 101 }, command: {
+        type: 'publish-config', expectedRoomEpoch: 'epoch-1', expectedRevision: state.snapshot.revision,
+        expectedControlSeq: state.snapshot.controlSeq, sharedConfig: { ...state.snapshot.sharedConfig, userGuidance: 'D' },
+        timestamp: '2026-08-28T00:04:00.000Z',
+      } });
+      expect(published.ok).toBe(true); return refs;
+    });
+    await expect(resolveOverride(h)).rejects.toMatchObject({ code: 'ROOM_REVISION_STALE' });
+    expect(h.store.saveCount).toBe(before + 1);
+    expect(h.store.state?.snapshot.sharedConfig.userGuidance).toBe('D');
+    expect(h.store.state?.snapshot.proposals).toHaveLength(1);
+  });
+  it('覆盖已提交但回执丢失时只进入 unknown，不重放写入', async () => {
+    const h = await createOverrideHarness(); const before = h.store.saveCount;
+    h.store.commitThenThrow = true;
+    await expect(resolveOverride(h)).rejects.toMatchObject({ code: 'ROOM_OPERATION_UNKNOWN' });
+    expect(h.store.saveCount).toBe(before + 1);
+    expect(h.store.state?.snapshot.sharedConfig.userGuidance).toBe('B');
+    expect(h.store.state?.snapshot.proposals).toEqual([]);
+  });
+});

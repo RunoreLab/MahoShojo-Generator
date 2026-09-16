@@ -24,6 +24,11 @@ export interface ArenaProposalState {
   readonly revision: number;
 }
 
+/** Pure application options. Host authorization and review revision fences live at the authority boundary. */
+export interface ArenaProposalApplyOptions {
+  readonly overrideChangeIds?: readonly string[];
+}
+
 export interface ArenaProposalApplyResult {
   readonly status: 'accepted' | 'partially_accepted' | 'rejected';
   readonly config: ArenaRoomSharedConfig;
@@ -103,6 +108,34 @@ const changeTargetExists = (config: ArenaRoomSharedConfig, change: ArenaProposal
       return config.teams.some((team) => team.key === change.teamKey);
     default:
       return true;
+  }
+};
+
+const overrideBlockedReason = (
+  config: ArenaRoomSharedConfig,
+  change: ArenaProposalChange,
+  analysis: ArenaProposalChangeAnalysis,
+): ArenaProposalChangeAnalysis['overrideBlockedReason'] => {
+  if (analysis.conflict?.code === 'reference-changed') return 'reference-changed';
+  if (!changeTargetExists(config, change)
+    || (change.type === 'assignTeam' && change.teamKey !== null
+      && !config.teams.some((team) => team.key === change.teamKey))) return 'target-missing';
+  // Explicit allowlist: never force an add-key collision or a full-list reorder.
+  switch (change.type) {
+    case 'setCharacterGuidance':
+    case 'setUserGuidance':
+    case 'setBattleMode':
+    case 'setSelectedLanguage':
+    case 'setStoryLength':
+    case 'setHistorySettings':
+    case 'setScenario':
+    case 'renameTeam':
+    case 'assignTeam':
+    case 'removeCombatant':
+    case 'removeAuxScenario':
+    case 'removeMaterial':
+    case 'removeTeam': return undefined;
+    default: return 'unsupported-change';
   }
 };
 
@@ -278,6 +311,7 @@ const guardProposal = (
   state: ArenaProposalState,
   proposalInput: unknown,
   selectedChangeIds?: readonly string[],
+  options: ArenaProposalApplyOptions = {},
 ): { proposal: ArenaProposal; validation: ProposalSelectionValidation } | ArenaProposalApplyResult => {
   const config = parseArenaRoomSharedConfig(state.config);
   const proposal = parseProposal(proposalInput);
@@ -308,6 +342,14 @@ const guardProposal = (
   if (validation.selectedChangeIds.length === 0) {
     return rejected(config, state.revision, proposal.changes.map((change) => change.changeId), validation.issues);
   }
+  const overrides = options.overrideChangeIds ?? [];
+  if (!Array.isArray(overrides) || new Set(overrides).size !== overrides.length
+    || overrides.some((id) => !validation.selectedChangeIds.includes(id))) {
+    return rejected(config, state.revision, allIds, [{
+      code: 'invalid-changes',
+      message: 'overrideChangeIds must be unique selected change IDs',
+    }]);
+  }
   return { proposal, validation };
 };
 
@@ -323,7 +365,9 @@ const analyzeStagedApplication = (
   config: ArenaRoomSharedConfig,
   proposal: ArenaProposal,
   validation: ProposalSelectionValidation,
+  options: ArenaProposalApplyOptions,
 ): StagedAnalysis => {
+  const overrides = new Set(options.overrideChangeIds ?? []);
   const selectedSet = new Set(validation.selectedChangeIds);
   const working = deepClone(config);
   const orderedSelected = topologicalOrder(validation.changes, validation.selectedChangeIds);
@@ -338,16 +382,26 @@ const analyzeStagedApplication = (
   for (const change of orderedSelected) {
     const [analysis] = analyzeProposalChanges(working, [change]);
     if (!analysis) continue;
-    planById.set(change.changeId, analysis);
+    let reviewed = analysis;
     if (analysis.outcome === 'conflict' && analysis.conflict) {
-      conflicts.push(analysis.conflict);
-      continue;
+      const blockedReason = overrideBlockedReason(working, change, analysis);
+      reviewed = { ...analysis, overrideAllowed: blockedReason === undefined,
+        ...(blockedReason ? { overrideBlockedReason: blockedReason } : {}),
+      };
+      if (overrides.has(change.changeId) && !blockedReason) {
+        reviewed = { ...reviewed, outcome: 'overridden' };
+      } else {
+        planById.set(change.changeId, reviewed);
+        conflicts.push(analysis.conflict);
+        continue;
+      }
     }
+    planById.set(change.changeId, reviewed);
     if (analysis.outcome === 'satisfied') {
       satisfiedChangeIds.push(change.changeId);
       continue;
     }
-    if (analysis.outcome !== 'applicable') continue;
+    if (reviewed.outcome !== 'applicable' && reviewed.outcome !== 'overridden') continue;
     if (!changeTargetExists(working, change)) {
       throw new ArenaMultiplayerCoreError('unsupported-change', `proposal target is absent for ${change.changeId}`);
     }
@@ -377,10 +431,11 @@ export function previewArenaProposalApplication(
   stateInput: ArenaProposalState,
   proposalInput: unknown,
   selectedChangeIds?: readonly string[],
+  options: ArenaProposalApplyOptions = {},
 ): ArenaProposalApplicationPreview {
   const state = parseState(stateInput);
   const config = parseArenaRoomSharedConfig(state.config);
-  const guarded = guardProposal(state, proposalInput, selectedChangeIds);
+  const guarded = guardProposal(state, proposalInput, selectedChangeIds, options);
   if ('status' in guarded) {
     return {
       status: 'rejected',
@@ -392,7 +447,8 @@ export function previewArenaProposalApplication(
     };
   }
   try {
-    const staged = analyzeStagedApplication(config, guarded.proposal, guarded.validation);
+    const staged = analyzeStagedApplication(config, guarded.proposal, guarded.validation, options);
+    if (staged.conflicts.length === 0) ArenaRoomSharedConfigSchema.parse(staged.working);
     const accepted = [...guarded.validation.selectedChangeIds];
     return {
       status: staged.conflicts.length > 0 ? 'rejected' : (
@@ -423,15 +479,16 @@ export function applyArenaProposal(
   stateInput: ArenaProposalState,
   proposalInput: unknown,
   selectedChangeIds?: readonly string[],
+  options: ArenaProposalApplyOptions = {},
 ): ArenaProposalApplyResult {
   const state = parseState(stateInput);
   const config = parseArenaRoomSharedConfig(state.config);
-  const guarded = guardProposal(state, proposalInput, selectedChangeIds);
+  const guarded = guardProposal(state, proposalInput, selectedChangeIds, options);
   if ('status' in guarded) return guarded;
 
   const selectedSet = new Set(guarded.validation.selectedChangeIds);
   try {
-    const staged = analyzeStagedApplication(config, guarded.proposal, guarded.validation);
+    const staged = analyzeStagedApplication(config, guarded.proposal, guarded.validation, options);
     if (staged.conflicts.length > 0) {
       return rejected(config, state.revision, guarded.proposal.changes.map((change) => change.changeId), guarded.validation.issues, staged.conflicts);
     }
