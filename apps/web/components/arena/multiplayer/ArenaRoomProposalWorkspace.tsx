@@ -402,7 +402,7 @@ const ProposalWorkspaceInner = ({
           <button type="button" className={buttonClassName({ variant: 'primary' })} disabled={!snapshot.dirty || disabled} onClick={buildPreview}>预览提案</button>
         </div>
       </div>
-      {snapshot.stale ? <p role="status" className="mt-3 rounded-lg bg-amber-50 p-2 text-sm text-amber-900">房间设置已更新；请重新同步后再提交提案。</p> : null}
+      {snapshot.stale ? <p role="status" className="mt-3 rounded-lg bg-amber-50 p-2 text-sm text-amber-900">{snapshot.replacementRequired ? '房间实例已变化，请重新同步后再创建提案。' : '房间设置已更新；草稿仍可提交，冲突项将由房主审阅决定。'}</p> : null}
       {localError ? <p role="alert" className="mt-3 text-sm text-red-700 dark:text-red-300">{localError}</p> : null}
       <ArenaMemberProposalStatus state={state} controller={controller} />
 

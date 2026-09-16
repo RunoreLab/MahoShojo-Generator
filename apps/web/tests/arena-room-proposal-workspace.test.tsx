@@ -808,3 +808,33 @@ describe('Arena room Proposal workspace', () => {
     editor.dispose();
   });
 });
+
+describe('旧基准草稿提交策略', () => {
+  it('同 epoch 的旧草稿保留并允许提交，真实冲突留给房主裁决', async () => {
+    const editor = createRoomProposalArenaEditorSession(state.session!.snapshot);
+    editor.update((draft) => ({ ...draft, userGuidance: '成员希望采用B' }));
+    const latest = { ...state, session: { ...state.session!, snapshot: { ...state.session!.snapshot,
+      revision: 8, sharedConfig: { ...sharedConfig, userGuidance: '房主已改C' },
+    } } };
+    editor.sync(latest.session.snapshot);
+    const controller = { submitProposal: vi.fn(async () => undefined), withdrawProposal: vi.fn(async () => undefined), reconnect: vi.fn() };
+    await act(async () => root.render(<ArenaRoomProposalWorkspaceView editor={editor} state={latest} controller={controller} />));
+    expect(container.textContent).toContain('草稿仍可提交，冲突项将由房主审阅决定');
+    expect(editor.store.getState()).toMatchObject({ baselineRevision: 7, stale: true, dirty: true });
+    await act(async () => button('预览提案').click());
+    await act(async () => button('提交提案').click());
+    expect(controller.submitProposal).toHaveBeenCalledWith(expect.objectContaining({ baseRevision: 7,
+      changes: [expect.objectContaining({ type: 'setUserGuidance', value: '成员希望采用B', expectedBase: { kind: 'value', value: '' } })],
+    }));
+  });
+  it('房间实例变更仍禁止旧草稿提交', async () => {
+    const editor = createRoomProposalArenaEditorSession(state.session!.snapshot);
+    editor.update((draft) => ({ ...draft, userGuidance: 'B' }));
+    editor.sync({ ...state.session!.snapshot, roomEpoch: 'epoch-2' });
+    const controller = { submitProposal: vi.fn(async () => undefined), withdrawProposal: vi.fn(async () => undefined), reconnect: vi.fn() };
+    await act(async () => root.render(<ArenaRoomProposalWorkspaceView editor={editor} state={state} controller={controller} />));
+    expect(container.textContent).toContain('房间实例已变化，请重新同步');
+    expect(button('预览提案').disabled).toBe(true);
+    expect(controller.submitProposal).not.toHaveBeenCalled();
+  });
+});

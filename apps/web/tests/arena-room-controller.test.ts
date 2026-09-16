@@ -645,7 +645,7 @@ describe('Arena Room browser controller', () => {
     expect(sockets[0]!.send).not.toHaveBeenCalled();
   });
 
-  it('Host resolve 用 HTTP 权威响应立即落地 session，WSS 事件退化为幂等复制', async () => {
+  it.each([false, true])('Host resolve 权威响应收敛及 WSS 幂等复制，override=%s', async (override) => {
     const { client, controller, sockets } = createHarness();
     await controller.create({
       displayName: '房主',
@@ -684,6 +684,11 @@ describe('Arena Room browser controller', () => {
       expectedRevision: 0,
       resolution: 'accept-selected',
       selectedChangeIds: ['guidance-1'],
+      ...(override ? { overrideChangeIds: ['guidance-1'] } : {}),
+    });
+    expect(client.resolveProposal).toHaveBeenCalledWith('room-1', 'proposal-1', {
+      expectedRoomEpoch: 'epoch-1', expectedRevision: 0, resolution: 'accept-selected',
+      selectedChangeIds: ['guidance-1'], ...(override ? { overrideChangeIds: ['guidance-1'] } : {}),
     });
     expect(client.resolveProposal).toHaveBeenCalledOnce();
     expect(controller.getSnapshot()).toMatchObject({

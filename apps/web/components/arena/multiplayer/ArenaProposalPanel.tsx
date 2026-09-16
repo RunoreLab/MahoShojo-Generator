@@ -33,6 +33,7 @@ import {
 } from '@/lib/arena-room/proposal-editor';
 import { buttonClassName } from '@/components/shared/ui/Button';
 import { ActionBar } from '@/components/shared/ui/ActionBar';
+import { ArenaProposalConflictReview } from './ArenaProposalConflictReview';
 
 import type { ArenaRoomProposalWorkspace } from './useArenaRoom';
 import {
@@ -438,30 +439,60 @@ const HostProposalCard = ({
   const [selected, setSelected] = useState<ReadonlySet<string>>(
     () => new Set(proposal.changes.map((change) => change.changeId)),
   );
+  // Consent belongs to this exact review, not to every future conflict on the ID.
+  const reviewKey = useMemo(() => JSON.stringify([roomId, roomEpoch, revision, proposal.changes]),
+    [roomId, roomEpoch, revision, proposal.changes]);
+  const [overrideReview, setOverrideReview] = useState<{ key: string; ids: readonly string[] } | null>(null);
+  const overrideChangeIds = useMemo(() => overrideReview?.key === reviewKey
+    ? overrideReview.ids.filter((id) => selected.has(id)) : [], [overrideReview, reviewKey, selected]);
+  const reviewExpired = Boolean(overrideReview?.ids.length && overrideReview.key !== reviewKey);
+  const [actionError, setActionError] = useState<string | null>(null);
   const actionLock = useRef(false);
   const validationError = arenaProposalSelectionError(proposal.changes, selected);
   // 与服务器权威 apply 相同的依赖排序 + staged expectedBase 分析：
   // “新增角色 -> 修改该角色引导”不再误报冲突；目标已由其他修改满足的变更
   // 显示为安全跳过，而不是阻塞整份提案。
   const preview = useMemo(
-    () => previewArenaProposalApplication({ roomId, config: currentConfig, revision }, proposal, [...selected]),
-    [roomId, currentConfig, revision, proposal, selected],
+    () => previewArenaProposalApplication({ roomId, config: currentConfig, revision }, proposal, [...selected], { overrideChangeIds }),
+    [roomId, currentConfig, revision, proposal, selected, overrideChangeIds],
   );
   const analysisByChangeId = new Map(preview.plan.map((item) => [item.changeId, item] as const));
   const selectedConflictCount = preview.conflicts.length;
+  const applicationError = validationError ?? (preview.issues.length > 0
+    ? '所选变更无法应用，请检查目标、依赖和配置约束。' : null);
+  const cannotAccept = Boolean(applicationError) || preview.status === 'rejected';
+  const selectChange = (changeId: string, accepted: boolean): void => {
+    const next = new Set(selected);
+    if (accepted) next.add(changeId);
+    else next.delete(changeId);
+    setSelected(next);
+    // A changed selection can alter staged dependency values: do not revive old consent.
+    setOverrideReview(null);
+    setActionError(null);
+  };
+  const adoptChange = (changeId: string): void => {
+    if (disabled || !selected.has(changeId)) return;
+    setOverrideReview({ key: reviewKey, ids: [...new Set([...overrideChangeIds, changeId])] });
+    setActionError(null);
+  };
   const labels = useArenaProposalChangeLabels(currentConfig, proposal.changes);
 
   const resolve = async (resolution: 'accept-selected' | 'reject'): Promise<void> => {
     if (actionLock.current || disabled) return;
-    if (resolution === 'accept-selected' && validationError) return;
+    if (resolution === 'accept-selected' && cannotAccept) return;
     actionLock.current = true;
+    setActionError(null);
     try {
       await controller.resolveProposal(proposal.proposalId, {
         expectedRoomEpoch: roomEpoch,
         expectedRevision: revision,
         resolution,
-        ...(resolution === 'accept-selected' ? { selectedChangeIds: [...selected] } : {}),
+        ...(resolution === 'accept-selected' ? { selectedChangeIds: [...selected],
+          ...(overrideChangeIds.length > 0 ? { overrideChangeIds } : {}),
+        } : {}),
       });
+    } catch {
+      setActionError('审阅未完成，请核对房间最新状态；结果未知时先重新连接并对账。');
     } finally {
       actionLock.current = false;
     }
@@ -483,22 +514,19 @@ const HostProposalCard = ({
         <legend className="text-sm font-semibold text-gray-950 dark:text-gray-100">逐项审阅</legend>
         {proposal.changes.map((change) => {
           const analysis = analysisByChangeId.get(change.changeId);
-          const conflict = analysis?.outcome === 'conflict' ? analysis.conflict : undefined;
+          const conflict = analysis?.outcome === 'conflict' || analysis?.outcome === 'overridden' ? analysis.conflict : undefined;
           const satisfied = analysis?.outcome === 'satisfied';
           return (
-          <label key={change.changeId} className="flex items-start gap-2 rounded-lg border border-gray-200 p-2 text-sm dark:border-gray-700">
+          <div key={change.changeId} className="flex items-start gap-2 rounded-lg border border-gray-200 p-2 text-sm dark:border-gray-700">
             <input
               type="checkbox"
               className="mt-1"
               checked={selected.has(change.changeId)}
-              onChange={(event: ChangeEvent<HTMLInputElement>) => {
-                const next = new Set(selected);
-                if (event.target.checked) next.add(change.changeId);
-                else next.delete(change.changeId);
-                setSelected(next);
-              }}
+              disabled={disabled}
+              aria-label={`接受变更：${arenaProposalChangeProposedSummary(change, labels)}`}
+              onChange={(event: ChangeEvent<HTMLInputElement>) => selectChange(change.changeId, event.target.checked)}
             />
-            <span>
+            <div className="min-w-0 flex-1">
               <span
                 className="font-medium text-gray-950 dark:text-gray-100"
                 title={changeRefTitle(change)}
@@ -513,33 +541,32 @@ const HostProposalCard = ({
                   该项目标已由其他修改满足；接受时将自动跳过，不会重复应用。
                 </span>
               ) : null}
-              {conflict ? (
-                <span
-                  className="mt-1 block font-medium text-red-700 dark:text-red-300"
-                  data-conflict-code={conflict.code}
-                  data-conflict-target={conflict.target}
-                >
-                  {arenaProposalConflictSummary(analysis!)}。可取消勾选该项，其余变更仍可接受。
-                </span>
+              {conflict && analysis ? (
+                <ArenaProposalConflictReview change={change} analysis={analysis} disabled={disabled}
+                  onAdopt={() => adoptChange(change.changeId)}
+                  onKeep={() => selectChange(change.changeId, false)} />
               ) : null}
-            </span>
-          </label>
+            </div>
+          </div>
           );
         })}
       </fieldset>
       <div aria-live="polite" className="mt-2 min-h-5 text-xs text-red-700 dark:text-red-300">
-        {validationError ?? ''}
+        {applicationError ?? actionError ?? ''}
       </div>
       {selectedConflictCount > 0 ? (
         <p role="status" className="mt-1 text-xs text-amber-700 dark:text-amber-300">
-          所选变更中有 {selectedConflictCount} 项与当前房间配置冲突，直接接受会被整体拒绝；请取消勾选冲突项后接受其余变更。
+          所选变更中有 {selectedConflictCount} 项尚未裁决或无法应用；请采用提案值，或取消相关项后接受其余变更。
         </p>
       ) : null}
+      {reviewExpired ? <p role="status" className="mt-2 text-sm text-amber-800 dark:text-amber-200">
+        房间或提案在审阅期间发生变化，请重新确认覆盖项。
+      </p> : null}
       <ActionBar className="mt-2">
         <button
           type="button"
           className={buttonClassName({ variant: 'primary' })}
-          disabled={disabled || Boolean(validationError)}
+          disabled={disabled || cannotAccept}
           onClick={() => { void resolve('accept-selected'); }}
         >
           接受所选
@@ -559,7 +586,7 @@ const HostProposalCard = ({
           <p>提案 ID：{proposal.proposalId} · 基于房间配置版本 {proposal.baseRevision}</p>
           {proposal.changes.map((change) => {
             const analysis = analysisByChangeId.get(change.changeId);
-            const conflict = analysis?.outcome === 'conflict' ? analysis.conflict : undefined;
+            const conflict = analysis?.outcome === 'conflict' || analysis?.outcome === 'overridden' ? analysis.conflict : undefined;
             return (
               <p key={`detail-${change.changeId}`}>
                 <span className="font-mono">{change.changeId}</span>
@@ -605,6 +632,13 @@ const HostProposalInbox = ({
           </button>
         </div>
       ) : null}
+      {state.error && !state.proposalResultUnknown ? (
+        <div role="alert" className="mt-3 rounded-lg border border-red-300 p-3 text-sm text-red-800 dark:text-red-200">
+          <p>{state.error}</p>
+          <button type="button" className={buttonClassName({ className: 'mt-2' })}
+            disabled={disabled} onClick={controller.reconnect}>重新连接并核对房间状态</button>
+        </div>
+      ) : null}
       <p className="mt-3 text-xs text-gray-600 dark:text-gray-400">
         接受时服务器会再次校验这些修改是否仍然适用。
       </p>
@@ -616,7 +650,7 @@ const HostProposalInbox = ({
         <ul className="mt-3 space-y-3" aria-label="待审阅提案">
           {proposals.map((proposal) => (
             <HostProposalCard
-              key={`${proposal.proposalId}:${proposal.updatedAt ?? proposal.createdAt}`}
+              key={`${session.roomId}:${session.roomEpoch}:${proposal.proposalId}:${proposal.updatedAt ?? proposal.createdAt}`}
               proposal={proposal}
               roomId={session.snapshot.roomId}
               revision={session.snapshot.revision}
@@ -717,7 +751,7 @@ const MemberProposalEntry = ({
         </p>
       ) : editorState?.stale ? (
         <p className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
-          房间设置已更新；当前草稿基于旧版本，请重新同步后再提交。
+          房间设置已更新；草稿仍可提交，冲突项将由房主审阅决定。
         </p>
       ) : null}
       <ArenaMemberProposalStatus state={state} controller={controller} />

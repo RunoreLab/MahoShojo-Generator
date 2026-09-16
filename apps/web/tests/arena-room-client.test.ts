@@ -270,7 +270,7 @@ describe('Arena Room browser client', () => {
     expect(websocketUrl.pathname).toBe('/api/arena/rooms/v1/ws');
   });
 
-  it('Proposal 三类 mutation 严格编码 intent，结果未知时每次只发送一次', async () => {
+  it.each([false, true])('Proposal mutation 编码及不重放，含逐项 override=%s', async (override) => {
     const response = {
       protocolVersion: 1,
       roomId: 'room-1',
@@ -310,12 +310,15 @@ describe('Arena Room browser client', () => {
       status: 'accepted',
       revision: 1,
     }));
-    await client.resolveProposal('room/1', 'proposal/1', {
+    const resolveIntent = {
       expectedRoomEpoch: 'epoch-1',
       expectedRevision: 0,
-      resolution: 'accept-selected',
+      resolution: 'accept-selected' as const,
       selectedChangeIds: ['guidance-1'],
-    });
+      ...(override ? { overrideChangeIds: ['guidance-1'] } : {}),
+    };
+    await client.resolveProposal('room/1', 'proposal/1', resolveIntent);
+    expect(JSON.parse(String(fetcher.mock.calls[1]?.[1]?.body))).toEqual(resolveIntent);
     expect(String(fetcher.mock.calls[1]?.[0])).toBe(
       'http://127.0.0.1:8787/api/arena/rooms/v1/room%2F1/proposals/proposal%2F1/resolve',
     );
@@ -651,5 +654,23 @@ describe('Arena Room browser client', () => {
         .rejects.toMatchObject({ code: 'ROOM_RESULT_UNKNOWN' });
       expect(fetcher).toHaveBeenCalledOnce();
     }
+  });
+});
+
+describe('override resolve transport failure', () => {
+  it.each(['network', 'server', 'malformed'] as const)('覆盖请求 %s 失败只发送一次，不自动重放', async (kind) => {
+    const fetcher = vi.fn<typeof fetch>(async () => {
+      if (kind === 'network') throw new TypeError('connection reset');
+      return kind === 'server'
+        ? Response.json({ code: 'ROOM_UNAVAILABLE', error: '暂不可用' }, { status: 503 })
+        : Response.json({ malformed: true });
+    });
+    const client = createArenaRoomClient({ origin: 'http://127.0.0.1:8787', fetch: fetcher,
+      getAuthHeader: async () => 'Bearer test-key' });
+    const request = { expectedRoomEpoch: 'epoch-1', expectedRevision: 1, resolution: 'accept-selected' as const,
+      selectedChangeIds: ['guidance-1'], overrideChangeIds: ['guidance-1'] };
+    await expect(client.resolveProposal('room-1', 'proposal-1', request)).rejects.toMatchObject({ code: 'ROOM_RESULT_UNKNOWN' });
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body))).toEqual(request);
   });
 });

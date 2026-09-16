@@ -198,7 +198,7 @@ describe('Arena Proposal panel real React interactions', () => {
 
     await act(async () => button('确认丢弃并同步').click());
     expect(workspace.syncFromRoom).toHaveBeenCalledOnce();
-    editor.dispose();
+    await act(async () => editor.dispose());
   });
 
   it('member 只能撤回 projected 自己的 pending Proposal', async () => {
@@ -340,13 +340,14 @@ describe('Arena Proposal panel real React interactions', () => {
     // 提案 ID 不进入一级文案：仅作为悬浮提示与技术详情中的辅助信息各出现一次。
     expect(container.textContent.split('proposal-expanded').length - 1).toBe(1);
     expect(container.querySelector('[title="proposal-expanded"]')).not.toBeNull();
-    // 判断依据（提案基准 / 当前房间值）保留在“技术详情”内供展开核对。
+    // 冲突的三方值直接展示，技术详情继续保留原始诊断。
     expect(container.textContent).toContain('提案基准：');
     expect(container.textContent).toContain('当前房间值：');
     expect(container.textContent).toContain('技术详情');
-    // 真冲突（当前值既不等于基准也不等于提案值）仍会红字提示并给出操作指引。
+    // 可覆盖冲突提供房主裁决，不再一律要求取消。
     expect(container.textContent).toContain('该目标的当前值已与提案基准不一致');
-    expect(container.textContent).toContain('可取消勾选该项，其余变更仍可接受');
+    expect(container.textContent).toContain('采用提案值');
+    expect(container.textContent).toContain('保留当前值');
     // 当前房间没有 team:a：移除目标已被满足，显示为安全跳过而非冲突。
     expect(container.textContent).toContain('已由其他修改满足');
     expect(container.querySelector('[data-change-outcome="satisfied"]')).not.toBeNull();
@@ -404,5 +405,108 @@ describe('arena proposal change value presentation', () => {
       value: 'zh-TW',
       expectedBase: { kind: 'value', value: 'zh-CN' },
     })).toBe('语言改为 繁體中文');
+  });
+});
+
+const overrideProposal = (value = 'B'): ArenaProposal => ({ ...proposal, proposalId: 'proposal-override', changes: [{
+  changeId: 'guidance', type: 'setCharacterGuidance', combatantKey: 'data-card:character-1',
+  value, expectedBase: { kind: 'value', value: 'A' },
+}] });
+const reviewState = (p = overrideProposal(), revision = 1, current = 'C') => {
+  const state = stateFor(host, [p]);
+  if (!state.session) throw new Error('missing session');
+  return { ...state, session: { ...state.session, snapshot: { ...state.session.snapshot,
+    revision, sharedConfig: { ...sharedConfig, combatants: [{ ...sharedConfig.combatants[0]!, characterGuidance: current }] },
+  } } };
+};
+const renderReview = async (state: ArenaRoomControllerState, controller: ReturnType<typeof createController>) => {
+  await act(async () => root.render(<ArenaProposalPanel state={state} controller={controller} workspace={createWorkspace()} />));
+};
+
+describe('房主人工覆盖真实交互', () => {
+  it('完整展示三方文本，只有明确采用后才发送逐项 override', async () => {
+    const text = `B${'长提案内容'.repeat(17)}末尾不可截断`;
+    const controller = createController(); await renderReview(reviewState(overrideProposal(text)), controller);
+    expect(container.querySelector('dl')?.textContent).toContain(text);
+    expect(container.querySelector('dl')?.textContent).toContain('当前房间值：C');
+    expect(button('接受所选').disabled).toBe(true);
+    await act(async () => button('采用提案值').click());
+    expect(button('采用提案值').getAttribute('aria-pressed')).toBe('true');
+    expect(button('接受所选').disabled).toBe(false);
+    await act(async () => button('接受所选').click());
+    expect(controller.resolveProposal).toHaveBeenCalledWith('proposal-override', {
+      expectedRoomEpoch: 'epoch-1', expectedRevision: 1, resolution: 'accept-selected',
+      selectedChangeIds: ['guidance'], overrideChangeIds: ['guidance'],
+    });
+  });
+  it('保留当前取消该项，其他普通修改仍可接受且不发送空 override', async () => {
+    const p = overrideProposal(); p.changes.push({ changeId: 'language', type: 'setSelectedLanguage',
+      value: 'en-US', expectedBase: { kind: 'value', value: 'zh-CN' } });
+    const controller = createController(); await renderReview(reviewState(p), controller);
+    await act(async () => button('保留当前值').click());
+    expect(button('接受所选').disabled).toBe(false);
+    await act(async () => button('接受所选').click());
+    expect(controller.resolveProposal).toHaveBeenCalledWith('proposal-override', {
+      expectedRoomEpoch: 'epoch-1', expectedRevision: 1, resolution: 'accept-selected', selectedChangeIds: ['language'],
+    });
+  });
+  it('取消再选择不会复活旧覆盖决定', async () => {
+    const controller = createController(); await renderReview(reviewState(), controller);
+    await act(async () => button('采用提案值').click());
+    const checkbox = container.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+    await act(async () => checkbox.click());
+    await act(async () => checkbox.click());
+    expect(button('采用提案值').getAttribute('aria-pressed')).toBe('false');
+    expect(button('接受所选').disabled).toBe(true);
+  });
+  it('revision 前进立即使覆盖失效；同 revision 的控制事件不打断审阅', async () => {
+    const controller = createController(); const state = reviewState(); await renderReview(state, controller);
+    await act(async () => button('采用提案值').click());
+    const controlOnly = structuredClone(state); controlOnly.session.snapshot.controlSeq += 1;
+    await renderReview(controlOnly, controller);
+    expect(button('接受所选').disabled).toBe(false);
+    await renderReview(reviewState(overrideProposal(), 2, 'D'), controller);
+    expect(container.textContent).toContain('请重新确认覆盖项');
+    expect(button('采用提案值').getAttribute('aria-pressed')).toBe('false');
+    expect(button('接受所选').disabled).toBe(true);
+    expect(controller.resolveProposal).not.toHaveBeenCalled();
+    await act(async () => button('采用提案值').click());
+    await act(async () => button('接受所选').click());
+    expect(controller.resolveProposal).toHaveBeenCalledWith('proposal-override', expect.objectContaining({
+      expectedRevision: 2, overrideChangeIds: ['guidance'],
+    }));
+  });
+  it('即使 timestamp 未变，提案内容更新也不能沿用旧同ID覆盖', async () => {
+    const controller = createController(); await renderReview(reviewState(), controller);
+    await act(async () => button('采用提案值').click());
+    await renderReview(reviewState(overrideProposal('另一份提案内容')), controller);
+    expect(button('接受所选').disabled).toBe(true);
+    expect(button('采用提案值').getAttribute('aria-pressed')).toBe('false');
+  });
+  it.each([true, false])('结果未知或请求处理中不允许重复裁决 %s', async (unknown) => {
+    const controller = createController(); const state = reviewState();
+    await renderReview({ ...state, proposalResultUnknown: unknown,
+      proposalOperation: unknown ? null : 'resolve',
+    }, controller);
+    expect(button('采用提案值').disabled).toBe(true);
+    expect(button('保留当前值').disabled).toBe(true);
+    expect(button('接受所选').disabled).toBe(true);
+    await act(async () => button('采用提案值').click());
+    expect(controller.resolveProposal).not.toHaveBeenCalled();
+  });
+  it('目标消失显示原因且不提供采用按钮', async () => {
+    const controller = createController(); const state = reviewState(); state.session.snapshot.sharedConfig.combatants = [];
+    await renderReview(state, controller);
+    expect(container.textContent).toContain('目标角色或队伍已不存在');
+    expect([...container.querySelectorAll('button')].some((b) => b.textContent === '采用提案值')).toBe(false);
+    expect(button('接受所选').disabled).toBe(true);
+  });
+  it('显式 reject 不携带先前选择的 override', async () => {
+    const controller = createController(); await renderReview(reviewState(), controller);
+    await act(async () => button('采用提案值').click());
+    await act(async () => button('拒绝全部').click());
+    expect(controller.resolveProposal).toHaveBeenCalledWith('proposal-override', {
+      expectedRoomEpoch: 'epoch-1', expectedRevision: 1, resolution: 'reject',
+    });
   });
 });
