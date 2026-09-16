@@ -4,6 +4,8 @@ import { readFile } from 'node:fs/promises';
 import { createServer, type Socket } from 'node:net';
 import { fileURLToPath } from 'node:url';
 
+import { MAX_ROOM_MEMBERS } from '@mahoshojo/contracts/arena-room';
+
 import {
   HARDENING_LOAD_WORKLOAD,
   isolatedRoomKeyPatterns,
@@ -80,17 +82,18 @@ const runAgainstTcpSentinel = async (input: Readonly<{
 
 describe('Room hardening load verifier contract', () => {
   test('固定 32 Room、每 Room 4 个真实 WSS client、单房满员 fan-out 与 20 次权威 workload transition', () => {
+    expect(MAX_ROOM_MEMBERS).toBe(32);
     expect(HARDENING_LOAD_WORKLOAD).toEqual({
       rooms: 32,
       socketsPerRoom: 4,
       fanoutRooms: 1,
-      fanoutSocketsPerRoom: 16,
+      fanoutSocketsPerRoom: MAX_ROOM_MEMBERS,
       membershipTransitionsPerRoom: 4,
       configTransitionsPerRoom: 16,
       authorityTransitionsPerRoom: 20,
       totalRooms: 33,
-      totalSockets: 144,
-      totalAuthorityTransitions: 672,
+      totalSockets: 32 * 4 + MAX_ROOM_MEMBERS,
+      totalAuthorityTransitions: 32 * 20 + MAX_ROOM_MEMBERS + 16,
     });
     expect(Object.isFrozen(HARDENING_LOAD_WORKLOAD)).toBe(true);
   });

@@ -311,7 +311,8 @@ describe('Arena Room runtime-neutral lifecycle transitions', () => {
     expect(rejoined.memberAuthority).toHaveLength(authoritySlots);
   });
 
-  it('enforces the active member cap without counting revoked authority tombstones', () => {
+  it('allows 32 active members including the host, then rejects the 33rd', () => {
+    expect(MAX_ROOM_MEMBERS).toBe(32);
     let state = createState();
     for (let index = 1; index < MAX_ROOM_MEMBERS; index += 1) {
       state = success(transitionArenaRoom(state, {

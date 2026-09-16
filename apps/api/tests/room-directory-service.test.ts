@@ -84,7 +84,7 @@ describe('Arena Room Redis-only directory service', () => {
         lastActivityAt: '2026-08-28T00:00:00.000Z',
         hostDisplayName: 'Host',
         memberCount: 1,
-        memberLimit: 16,
+        memberLimit: 32,
       }],
       nextCursor: null,
     });
