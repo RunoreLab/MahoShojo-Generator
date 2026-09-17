@@ -386,6 +386,14 @@ export const encyclopediaEntries: EncyclopediaEntry[] = [
     keywords: ['继承', '长线', '多回合', '历战记录', '状态栏'],
   },
   {
+    slug: 'web-data-card-authoring',
+    title: 'Web 战报数据卡创作进阶',
+    summary: '用体验设计、代码范例、Reference Runtime 和媒体资产，把数据卡扩展成互动 Web 玩法。',
+    markdownPath: '/encyclopedia/web-data-card-authoring.md',
+    categoryId: 'content',
+    keywords: ['Web战报', '数据卡', 'Runtime', 'Galgame', '视觉小说', '小游戏', '媒体资产', '互动'],
+  },
+  {
     slug: 'sublimation',
     title: '成长升华',
     summary: '让角色根据经历蜕变成新形态：模板、保留字段、读写历史/状态。',

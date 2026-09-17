@@ -118,4 +118,5 @@
 - 公开与审核机制：`/encyclopedia/review`
 - 箱庭物语（情景生成器）：`/encyclopedia/scenario-generator`
 - 情景卡进阶（继承与长线）：`/encyclopedia/scenario-advanced`
+- Web 战报数据卡创作进阶：`/encyclopedia/web-data-card-authoring`
 - 敏感词与逮捕：`/encyclopedia/sensitive-words`

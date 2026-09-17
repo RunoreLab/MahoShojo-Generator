@@ -100,6 +100,7 @@ v0.6.0 的排位对象以「实体」为单位：
 - 创作工房（/creator）：`/encyclopedia/creator`
 - 术语表：`/encyclopedia/glossary`
 - 情景卡进阶：`/encyclopedia/scenario-advanced`
+- Web 战报数据卡创作进阶：`/encyclopedia/web-data-card-authoring`
 - 引导与读写状态（strict/free 的差异点）：`/encyclopedia/guidance`
 - 连续战报会话：`/encyclopedia/continuous-battle-story`
 - 多人模式：`/encyclopedia/arena-multiplayer`
