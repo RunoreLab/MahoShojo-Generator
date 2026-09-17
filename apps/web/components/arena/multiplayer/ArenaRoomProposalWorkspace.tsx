@@ -22,6 +22,7 @@ import { ProposalArenaScenarioSection } from '../editor/features/scenario/Propos
 import { ProposalArenaMaterialSection } from '../editor/features/material/ProposalArenaMaterialSection';
 import { BattleModeSwitcher } from '../components/BattleModeSwitcher';
 import { BattleSettings } from '../components/BattleSettings';
+import { ReportFormatSwitcher } from '../components/ReportFormatSwitcher';
 import { StoryOptions } from '../components/StoryOptions';
 import { DatabaseSelector } from '../components/DatabaseSelector';
 import { ArenaEditorWorkspaceLayout } from '../editor/ArenaEditorWorkspaceLayout';
@@ -536,6 +537,7 @@ const ProposalWorkspaceInner = ({
           多人生成只能由房主启动；把你的调整整理成提案，接受后会进入房间配置。
         </p>
         <div className="mt-4">
+          <ReportFormatSwitcher />
           <button
             type="button"
             className="arena-cta-button arena-cta-button--preview"

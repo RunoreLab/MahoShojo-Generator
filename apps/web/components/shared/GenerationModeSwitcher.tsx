@@ -1,10 +1,13 @@
 'use client';
 
+import { FileCheck2, Waves } from 'lucide-react';
+import { SegmentedControl, type SegmentedOption } from './SegmentedControl';
+
 export type GenerationMode = 'non-stream' | 'stream';
 
-const MODE_OPTIONS: Array<{ key: GenerationMode; label: string }> = [
-  { key: 'non-stream', label: '非流式' },
-  { key: 'stream', label: '流式' },
+const MODE_OPTIONS: readonly SegmentedOption<GenerationMode>[] = [
+  { value: 'non-stream', label: '非流式', icon: <FileCheck2 />, description: '等待生成结束后一次性显示完整结果；等待期间不逐段显示正文。' },
+  { value: 'stream', label: '流式', icon: <Waves />, description: '生成过程中逐步接收内容，可边生成边阅读；Web 战报会在完整生成后展示互动页面。' },
 ];
 
 export function GenerationModeSwitcher(props: {
@@ -39,24 +42,8 @@ export function GenerationModeSwitcher(props: {
 
   return (
     <div className="input-group">
-      <label className="input-label">{props.label || '选择生成方式'}</label>
-      <div className="flex items-center space-x-1 bg-gray-200 p-1 rounded-full">
-        {MODE_OPTIONS.map((option) => (
-          <button
-            key={option.key}
-            type="button"
-            onClick={() => props.onChange(option.key)}
-            disabled={disabled}
-            className={`w-1/2 py-2 text-sm font-semibold rounded-full transition-colors duration-300 ${
-              value === option.key ? 'bg-white text-pink-600 shadow' : 'text-gray-600 hover:bg-gray-300'
-            } disabled:opacity-50 disabled:cursor-not-allowed`}
-          >
-            {option.label}
-          </button>
-        ))}
-      </div>
+      <SegmentedControl label={props.label || '选择生成方式'} value={value} options={MODE_OPTIONS} onChange={props.onChange} disabled={disabled} />
       {renderHelper()}
     </div>
   );
 }
-

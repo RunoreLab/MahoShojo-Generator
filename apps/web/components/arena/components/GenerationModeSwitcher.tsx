@@ -15,13 +15,13 @@ export function GenerationModeSwitcher({ showReportFormat = false }: { showRepor
 
   return (
     <>
-      {showReportFormat ? <ArenaReportFormatSelector value={reportFormat} onChange={setReportFormat} disabled={isGenerating} /> : null}
       <GenerationModeSwitcherUi
         label="选择生成方式"
         value={generationMode}
         disabled={isGenerating}
         onChange={(mode) => setGenerationMode(mode as GenerationMode)}
       />
+      {showReportFormat ? <ArenaReportFormatSelector value={reportFormat} onChange={setReportFormat} disabled={isGenerating} /> : null}
     </>
   );
 }

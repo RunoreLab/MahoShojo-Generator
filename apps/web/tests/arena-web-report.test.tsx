@@ -32,6 +32,16 @@ afterEach(async () => {
 });
 
 describe('Web 战报的本地执行许可', () => {
+  it('生成期间禁用格式切换，不打开确认也不更改格式', async () => {
+    const change = vi.fn();
+    await act(async () => root.render(<ArenaReportFormatSelector value="markdown" onChange={change} disabled roomId="disabled-selector" />));
+    await click('Web（实验性）');
+    await click('Markdown');
+    expect(change).not.toHaveBeenCalled();
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(container.querySelector('[aria-pressed="true"]')?.textContent).toBe('Markdown');
+  });
+
   it('选择 Web 可取消；确认与不再提示仅保存浏览器本地', async () => {
     const change = vi.fn();
     await act(async () => root.render(<ArenaReportFormatSelector value="markdown" onChange={change} roomId="selector" />));

@@ -26,6 +26,7 @@ import { BattleResult } from './components/BattleResult';
 import { BattleStorySessionPanel } from './components/BattleStorySessionPanel';
 import { BattleModeSwitcher } from './components/BattleModeSwitcher';
 import { GenerationModeSwitcher } from './components/GenerationModeSwitcher';
+import { ReportFormatSwitcher } from './components/ReportFormatSwitcher';
 import { RankingQuickActions } from './components/RankingQuickActions';
 import { useBattleStore } from './stores/useBattleStore';
 import {
@@ -330,8 +331,8 @@ export function ArenaPage({ multiplayer }: ArenaPageProps = {}) {
                   {
                     kind: 'generationMode',
                     description: '流式生成可边生成边阅读；非流式适合一次性结果',
-                    defaultOpen: false,
-                    content: <GenerationModeSwitcher />,
+                    defaultOpen: true,
+                    content: <><GenerationModeSwitcher /><ReportFormatSwitcher /></>,
                   },
                   {
                     kind: 'generationActions',

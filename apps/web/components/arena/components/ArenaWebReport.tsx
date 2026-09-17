@@ -1,10 +1,16 @@
 'use client';
 
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { FileText, PanelsTopLeft } from 'lucide-react';
+import { SegmentedControl, type SegmentedOption } from '@/components/shared/SegmentedControl';
 import { BaseModal } from '@/components/shared/BaseModal';
 import { stripAllStreamMetaComments } from '@/lib/arena/stream-meta';
 
 const CONSENT_KEY = 'arena.web-report-consent.v1';
+const FORMAT_OPTIONS: readonly SegmentedOption<'markdown' | 'web'>[] = [
+  { value: 'markdown', label: 'Markdown', icon: <FileText />, description: '以正文为主的战报，支持标题、表格与公式，适合阅读和保存图片。' },
+  { value: 'web', label: 'Web（实验性）', icon: <PanelsTopLeft />, description: '生成带自定义排版、动画或交互的网页；完成后经本地确认展示，可能加载第三方资源。' },
+];
 const sessionConsents = new Set<string>();
 const consentListeners = new Set<() => void>();
 const consentKey = (roomId?: string) => roomId ? `${CONSENT_KEY}.room.${roomId}` : CONSENT_KEY;
@@ -70,26 +76,17 @@ export function ArenaReportFormatSelector({ value, onChange, disabled = false, r
   const { accepted, accept } = useWebConsent(roomId);
   const [confirming, setConfirming] = useState(false);
   return (
-    <fieldset disabled={disabled} className="space-y-2">
-      <legend className="text-sm font-medium">战报格式</legend>
-      <div className="flex flex-wrap gap-2">
-        {(['markdown', 'web'] as const).map((format) => (
-          <button key={format} type="button" aria-pressed={value === format}
-            className={`rounded-lg border px-3 py-2 text-sm disabled:opacity-50 ${value === format ? 'border-purple-500 bg-purple-50 text-purple-800' : 'border-gray-300'}`}
-            onClick={() => {
-              if (format === 'web' && !accepted) setConfirming(true);
-              else onChange(format);
-            }}>
-            {format === 'web' ? 'Web（实验性）' : 'Markdown'}
-          </button>
-        ))}
-      </div>
+    <div className="input-group">
+      <SegmentedControl label="战报格式" value={value} options={FORMAT_OPTIONS} disabled={disabled} onChange={(format) => {
+        if (format === 'web' && !accepted) setConfirming(true);
+        else onChange(format);
+      }} />
       <WebReportConsentDialog open={confirming && !disabled} onCancel={() => setConfirming(false)} onAccept={(remember) => {
         accept(remember);
         setConfirming(false);
         onChange('web');
       }} />
-    </fieldset>
+    </div>
   );
 }
 

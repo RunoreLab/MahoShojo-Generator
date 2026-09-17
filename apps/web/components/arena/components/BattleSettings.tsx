@@ -1,6 +1,5 @@
 'use client';
 
-import { useArenaRoomContext } from '../multiplayer/useArenaRoom';
 import { useBattleStore } from '../stores/useBattleStore';
 import {
   useArenaEditorActions,
@@ -8,7 +7,6 @@ import {
   useArenaEditorSession,
 } from '../editor';
 import { SharedBattleSettingsControl } from '../editor/presentation/SharedBattleSettingsControl';
-import { ArenaReportFormatSelector } from './ArenaWebReport';
 import { BattleReportCardWidthSettings } from './BattleReportCardWidthSettings';
 
 function HostOnlyBattleReportCardWidthSettings({ disabled }: { readonly disabled: boolean }) {
@@ -25,19 +23,15 @@ function HostOnlyBattleReportCardWidthSettings({ disabled }: { readonly disabled
 
 export function BattleSettings() {
   const session = useArenaEditorSession();
-  const room = useArenaRoomContext();
   const settings = useArenaEditorSelector((state) => state.historySettings);
   const isGenerating = useArenaEditorSelector((state) => state.busy);
   const readableCombatantCount = useArenaEditorSelector((state) => (
     state.combatants.filter((item) => item.access === 'full').length
   ));
-  const reportFormat = useArenaEditorSelector((state) => state.reportFormat);
-  const roomId = useArenaEditorSelector((state) => state.roomId);
-  const { updateHistorySettings, setReportFormat } = useArenaEditorActions();
+  const { updateHistorySettings } = useArenaEditorActions();
 
   return (
     <>
-      <ArenaReportFormatSelector value={reportFormat} onChange={setReportFormat} disabled={isGenerating} roomId={roomId ?? room?.state.session?.roomId} />
       <SharedBattleSettingsControl
         value={settings}
         onChange={updateHistorySettings}

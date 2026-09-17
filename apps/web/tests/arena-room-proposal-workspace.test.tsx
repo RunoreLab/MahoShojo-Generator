@@ -283,7 +283,7 @@ describe('Arena room Proposal workspace', () => {
     if (!teamSelect || !memberOption) throw new Error('team assignment select not found');
     await act(async () => setValue(teamSelect, memberOption.value));
 
-    await act(async () => button('情景模式📜').click());
+    await act(async () => buttonContaining('情景模式').click());
     await act(async () => buttonContaining('预设情景（内置）').click());
     await act(async () => button('浏览在线情景库').click());
     await act(async () => button('模拟选择主情景').click());
