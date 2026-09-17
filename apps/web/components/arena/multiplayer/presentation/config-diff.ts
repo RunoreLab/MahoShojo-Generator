@@ -91,6 +91,7 @@ const sameOrder = (a: readonly string[], b: readonly string[]): boolean => (
  */
 const structuredConfigKeys = {
   battleMode: true,
+  reportFormat: true,
   combatants: true,
   teams: true,
   scenario: true,
@@ -361,6 +362,12 @@ export const buildArenaRoomConfigDiffEntries = (
   referenceListDiff('素材', roomConfig.materials, localConfig.materials, 'material', '调整了素材顺序');
 
   // 模式与故事
+  if (roomConfig.reportFormat !== localConfig.reportFormat) {
+    entries.push({
+      id: 'report-format', category: '模式与故事', tone: 'change',
+      label: `战报格式：${roomConfig.reportFormat === 'web' ? 'Web（实验性）' : 'Markdown'} → ${localConfig.reportFormat === 'web' ? 'Web（实验性）' : 'Markdown'}`,
+    });
+  }
   if (roomConfig.battleMode !== localConfig.battleMode) {
     entries.push({
       id: 'battle-mode',

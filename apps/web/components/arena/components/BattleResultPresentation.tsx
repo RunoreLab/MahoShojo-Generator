@@ -11,12 +11,15 @@ import StreamingBattleReportCard from '@/components/stream/StreamingBattleReport
 import { resolveAdjudicationOutcomeTone } from '@/lib/adjudicator/presentation';
 import type { AIReasoningEnvelope } from '@/types/ai-reasoning';
 import type { AdjudicationResult } from '@/types/arena';
+import { ArenaWebReport } from './ArenaWebReport';
 import { CombatantUpdatesPresentation } from './CombatantUpdatesPresentation';
 
 type ArenaBattleMode = 'classic' | 'kizuna' | 'daily' | 'scenario';
 
 export type BattleResultStreamingPresentation = {
-  readonly format: 'stream-markdown';
+  readonly format: 'stream-markdown' | 'stream-web' | 'web-document';
+  readonly webConsentScope?: string;
+  readonly webReady?: boolean;
   readonly content: string;
   readonly isStreaming?: boolean;
   readonly mode?: ArenaBattleMode;
@@ -126,27 +129,9 @@ export function BattleResultPresentation({
     <div className="contents" data-arena-battle-result-presentation="v1">
       {adjudicationResults?.length ? <AdjudicationResults results={adjudicationResults} /> : null}
 
-      {report?.format === 'stream-markdown' ? (
+      {report && report.format !== 'structured-report' ? (
         <div className="mt-6">
-          <StreamingBattleReportCard
-            content={report.content}
-            onSaveImage={onSaveImage}
-            mode={report.mode}
-            scenarioName={report.scenarioName}
-            reporterInfo={report.reporterInfo ? { ...report.reporterInfo } : null}
-            userGuidance={report.userGuidance}
-            characterGuidances={report.characterGuidances ? [...report.characterGuidances] : null}
-            adjudicationResults={adjudicationResults ? [...adjudicationResults] : null}
-            aiUsage={report.aiUsage}
-            aiModel={report.aiModel}
-            narrativeHistoryReadCount={report.narrativeHistoryReadCount}
-            aiReasoning={report.aiReasoning}
-            isStreaming={report.isStreaming}
-            softTimeoutWarning={report.softTimeoutWarning}
-            onStopGeneration={report.onStopGeneration}
-            illustrationAsset={report.illustrationAsset}
-            cardWidthPx={report.cardWidthPx}
-          />
+          <StreamingResult report={report} onSaveImage={onSaveImage} adjudicationResults={adjudicationResults} />
         </div>
       ) : report?.format === 'structured-report' ? (
         <BattleReportCard
@@ -177,5 +162,41 @@ export function BattleResultPresentation({
       ) : null}
       {afterReport}
     </div>
+  );
+}
+
+function StreamingResult({ report, onSaveImage, adjudicationResults }: {
+  report: BattleResultStreamingPresentation;
+  onSaveImage?: BattleResultPresentationProps['onSaveImage'];
+  adjudicationResults?: BattleResultPresentationProps['adjudicationResults'];
+}) {
+  const renderCard = (webContent?: ReactNode) => (
+    <StreamingBattleReportCard
+      content={report.content}
+      reportContent={webContent}
+      disableExport={webContent != null}
+      onSaveImage={onSaveImage}
+      mode={report.mode}
+      scenarioName={report.scenarioName}
+      reporterInfo={report.reporterInfo ? { ...report.reporterInfo } : null}
+      userGuidance={report.userGuidance}
+      characterGuidances={report.characterGuidances ? [...report.characterGuidances] : null}
+      adjudicationResults={adjudicationResults ? [...adjudicationResults] : null}
+      aiUsage={report.aiUsage}
+      aiModel={report.aiModel}
+      narrativeHistoryReadCount={report.narrativeHistoryReadCount}
+      aiReasoning={report.aiReasoning}
+      isStreaming={report.isStreaming}
+      softTimeoutWarning={report.softTimeoutWarning}
+      onStopGeneration={report.onStopGeneration}
+      illustrationAsset={report.illustrationAsset}
+      cardWidthPx={report.cardWidthPx}
+    />
+  );
+  return report.format === 'stream-markdown' ? renderCard() : (
+    <ArenaWebReport key={report.webConsentScope ?? 'single'} content={report.content}
+      ready={report.webReady === true && !report.isStreaming} roomId={report.webConsentScope}>
+      {renderCard}
+    </ArenaWebReport>
   );
 }

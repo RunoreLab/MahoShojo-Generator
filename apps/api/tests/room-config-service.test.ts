@@ -59,6 +59,7 @@ class MemoryRoomStore implements RoomActorCheckpointStore {
 
 const config = () => ({
   battleMode: 'classic' as const,
+  reportFormat: 'markdown' as const,
   combatants: [{
     key: 'data-card:character-1',
     ref: { id: 'character-1', kind: 'character' as const, versionToken: 'v1' },

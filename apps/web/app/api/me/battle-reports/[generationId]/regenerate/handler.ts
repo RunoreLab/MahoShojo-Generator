@@ -43,9 +43,12 @@ async function handler(req: Request): Promise<Response> {
   const canReadByPvp = record.pvp_match_id ? await isUserInPvpMatch(record.pvp_match_id, auth.user.id) : false;
   if (!isOwner && !canReadByPvp) return json({ error: '记录不存在' }, { status: 404 });
 
+  const renderSnapshot = extractBattleReportRenderSnapshotV1(record.extra_json);
+  const isWeb = renderSnapshot?.reportFormat === 'web';
   const output = await loadBattleReportGenerationOutputText({
     generationId: record.id,
-    outputPreview: record.output_preview,
+    // Web 必须读取完整存档，D1 preview 可能截断，不能作为可执行文档。
+    outputPreview: isWeb ? null : record.output_preview,
   });
   const outputPreview = output.outputText;
   if (!outputPreview.trim()) {
@@ -59,8 +62,6 @@ async function handler(req: Request): Promise<Response> {
     return json({ error: '该战报未保存可重生正文，可能已失败或已被清理。' }, { status: 409 });
   }
   const flaggedSensitive = record.output_has_sensitive_words;
-  const renderSnapshot = extractBattleReportRenderSnapshotV1(record.extra_json);
-
   const hasPreviewText = Boolean(outputPreview && outputPreview.trim());
   let contentBlocked = flaggedSensitive === 1;
   if (hasPreviewText) {
@@ -96,6 +97,7 @@ async function handler(req: Request): Promise<Response> {
     reasoningTokens: record.reasoning_tokens,
     userGuidance,
     renderSnapshot,
+    authoritativeWebContent: isWeb && record.status === 'completed' && output.source === 'r2' && !output.readError,
   });
 
   return json({

@@ -73,6 +73,7 @@ export const createRoomProposalArenaEditorSession = (
   }
   const actions: ArenaEditorActions = Object.freeze({
     setBattleMode: (value) => update((draft) => ({ ...draft, battleMode: value })),
+    setReportFormat: (value) => update((draft) => ({ ...draft, reportFormat: value })),
     setStoryLength: (value) => update((draft) => ({ ...draft, storyLength: value })),
     setCustomStoryLength: (value) => update((draft) => ({
       ...draft,

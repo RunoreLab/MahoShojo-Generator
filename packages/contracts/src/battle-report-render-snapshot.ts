@@ -1,4 +1,5 @@
 import { z } from './zod';
+import { ArenaReportFormatSchema } from './primitives';
 
 import { jsonUtf8ByteLength } from './wire-size';
 
@@ -18,6 +19,7 @@ export type BattleReportAdjudicationResult = z.infer<typeof BattleReportAdjudica
 
 export const BattleReportRenderSnapshotV1Schema = z.object({
   version: z.literal(1),
+  reportFormat: ArenaReportFormatSchema.optional(),
   reporterInfo: z.object({
     name: z.string().max(300),
     publication: z.string().max(300),

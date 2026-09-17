@@ -23,6 +23,7 @@ import { sha256Hex } from '@/lib/crypto';
 
 export type ArenaRoomBattleStateSource = {
   battleMode: BattleMode;
+  reportFormat?: 'markdown' | 'web';
   combatants: Combatant[];
   teams: BattleTeam[];
   scenario: ScenarioState;
@@ -432,6 +433,7 @@ const buildArenaRoomHostWorkspaceBundle = async (
   try {
     sharedConfig = buildArenaRoomSharedConfig({
       battleMode: source.battleMode,
+      reportFormat: source.reportFormat ?? 'markdown',
       combatants,
       teams: source.teams.map((team) => ({
         key: text(team.roomKey) || `team:${team.id}`,
@@ -521,6 +523,7 @@ export const tryBuildArenaRoomHostWorkspaceBundleFromBattleState = async (
 export const createArenaRoomCanonicalEmptyDraftBundle = (): ArenaRoomHostWorkspaceBundle => Object.freeze({
   sharedConfig: buildArenaRoomSharedConfig({
     battleMode: 'classic',
+    reportFormat: 'markdown',
     combatants: [],
     teams: [],
     scenario: null,

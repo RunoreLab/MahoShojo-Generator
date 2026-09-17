@@ -221,7 +221,19 @@ const redactSemanticValue = (value: unknown): unknown => {
 
 export const redactArenaGenerationSemanticPayload = (
   payload: Record<string, unknown>,
-): Record<string, unknown> => redactSemanticValue(payload) as Record<string, unknown>;
+): Record<string, unknown> => {
+  const semantic = redactSemanticValue(payload) as Record<string, unknown>;
+  if (semantic.reportFormat === 'markdown') delete semantic.reportFormat;
+  const snapshot = semantic.multiplayerGenerationSnapshot;
+  if (snapshot && typeof snapshot === 'object' && !Array.isArray(snapshot)) {
+    const config = (snapshot as Record<string, unknown>).sharedConfig;
+    if (config && typeof config === 'object' && !Array.isArray(config)) {
+      const sharedConfig = config as Record<string, unknown>;
+      if (sharedConfig.reportFormat === 'markdown') delete sharedConfig.reportFormat;
+    }
+  }
+  return semantic;
+};
 
 const readAuditablePvpContext = (
   payload: Record<string, unknown>,
@@ -570,6 +582,7 @@ export const createArenaGenerationRuntime = (
     };
     const reporterInfo = prepared.metadata.reporterInfo;
     const streamMeta = {
+      reportFormat: prepared.metadata.reportFormat === 'web' ? 'web' : 'markdown',
       ...(typeof executionPayload.mode === 'string' && executionPayload.mode.trim()
         ? { mode: executionPayload.mode.trim() }
         : {}),
@@ -589,6 +602,7 @@ export const createArenaGenerationRuntime = (
           : {}),
       ...(prepared.metadata.outputContract === 'structured-report'
         || prepared.metadata.outputContract === 'stream-markdown'
+        || prepared.metadata.outputContract === 'web-document'
         ? { outputContract: prepared.metadata.outputContract }
         : {}),
       ...(reporterInfo && typeof reporterInfo === 'object' && !Array.isArray(reporterInfo)

@@ -14,6 +14,9 @@ import {
 
 const nonEmptyTrimmedString = (max: number) => z.string().trim().min(1).max(max);
 
+export const ArenaReportFormatSchema = z.enum(['markdown', 'web']);
+export type ArenaReportFormat = z.infer<typeof ArenaReportFormatSchema>;
+
 export const OpaqueKeySchema = nonEmptyTrimmedString(MAX_OPAQUE_KEY_LENGTH);
 export const StableObjectKeySchema = z
   .string()

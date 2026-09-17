@@ -663,7 +663,7 @@ export const createStreamPromptBuilder = (
     loreText?: string | null,
     includeQuestionnaireAnswers: boolean = true,
     materials?: unknown[] | null,
-    outputContract: 'stream-markdown' | 'structured-report' = 'stream-markdown'
+    outputContract: 'stream-markdown' | 'structured-report' | 'web-document' = 'stream-markdown'
 ) => (input: { combatants: any[] }): string => {
     const { combatants } = input;
     const profiles = buildCombatantProfilesForPrompt({
@@ -778,7 +778,17 @@ export const createStreamPromptBuilder = (
     if (outputContract === 'structured-report') return finalPrompt;
 
     // 流式生成的关键：要求输出 Markdown 格式的战报
-    const shouldAllowStreamMeta = forceStreamMeta || writeArenaHistory || writeCurrentState;
+    const shouldAllowStreamMeta = outputContract === 'web-document' || forceStreamMeta || writeArenaHistory || writeCurrentState;
+    if (outputContract === 'web-document') {
+        finalPrompt += `\n\n【输出格式】\n直接输出一个完整 HTML5 document，从 <!doctype html> 开始，包含 html/head/body、UTF-8 charset 与 viewport，不要 Markdown 代码围栏或解释文本。\n` +
+            `这是独立 Web 战报，可自由使用 HTML、CSS、inline/external SVG、Canvas、JavaScript、browser-native ES Module、动画与外部 Web 资源。\n` +
+            `根据故事设计响应式排版，适合桌面和手机阅读，可加入时间线、状态面板、Tab、折叠、图表和互动按钮；完整展示故事、胜利者与最终结果。\n` +
+            `优先使用文档内 style/script、SVG 和 Canvas，自包含实现布局与交互；用 addEventListener 绑定事件，不使用 onclick 等内联事件属性。\n` +
+            `srcdoc 继承宿主 CSP，第三方 JavaScript/CSS/fonts 可能被浏览器限制，不保证可用，不得依赖外部库。外部图片、音视频与 fetch 可使用完整 HTTPS URL 尝试，仍受 CSP/CORS 等浏览器规则约束；加载失败时保持基本可读。iframe srcdoc 相对 URL 可能按宿主 URL 解析。\n` +
+            `页面运行在 sandbox=allow-scripts 的独立 iframe 中，不依赖宿主 React、变量、函数、cookie、localStorage 或 DOM；不提供 npm、Node.js、bundler 或 TypeScript 编译。\n` +
+            `互动仅用于展示，不得改变已裁定的故事事实或系统记录的胜者，不向宿主发送业务命令。\n` +
+            `完整 </html> 后必须追加下述 MAHOSHOJO_ARENA_META 注释；这是机器事实的唯一来源。\n`;
+    } else {
     finalPrompt += `\n\n【输出格式】\n请以 Markdown 格式输出战报，请严格按照格式输出，不要携带任何其他内容：\n` +
         `- 输出第 1 行必须从第 1 个字符开始就是 "# "（不要有任何前置空格、不要多输出额外的 # 号）。\n` +
         `- 正文部分不要输出 JSON/YAML/代码块，也不要输出任何字段名（例如 winner/impact/currentStateSummary）。\n` +
@@ -795,6 +805,7 @@ export const createStreamPromptBuilder = (
         `- 使用三级标题(###)标注内部小标题\n` +
         `- 使用引用块(>)来强调点评或特殊说明\n` +
         `- 使用列表来展示判定记录或关键信息`;
+    }
 
     // 如果用户开启了“写入历战记录/当前状态”，则要求模型在文末追加一段 HTML 注释元数据，
     // 供客户端在流式完成后提取 impacts/currentStateSummary，从而最大化“流式生成后自动更新角色”的成功率。

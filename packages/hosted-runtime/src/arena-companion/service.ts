@@ -389,15 +389,16 @@ export const createArenaCompanionService = (
     }
 
     const headerMeta = parseHeaderMeta(upstream.headers);
+    const isWeb = headerMeta.outputContract === 'web-document';
     const writeArenaHistory = booleanOf(payload.writeArenaHistory, true);
     const writeCurrentState = booleanOf(payload.writeCurrentState, true);
-    const structuredReport = parseArenaStructuredReportJson(collected.markdown, {
+    const structuredReport = isWeb ? null : parseArenaStructuredReportJson(collected.markdown, {
       enableImpacts: writeArenaHistory || writeCurrentState,
       enableImpactText: writeArenaHistory,
       enableCurrentState: writeCurrentState,
     });
     const expectsStructuredReport = headerMeta.outputContract === 'structured-report'
-      || collected.markdown.trimStart().startsWith('{');
+      || !isWeb && collected.markdown.trimStart().startsWith('{');
     if (expectsStructuredReport && !structuredReport) {
       return jsonResponse({
         code: 'ARENA_STRUCTURED_REPORT_INVALID',
@@ -410,12 +411,12 @@ export const createArenaCompanionService = (
     const structuredOfficialReport = recordOf(structuredReport?.officialReport);
     const headline = textOf(structuredReport?.headline)
       || textOf(metaReport.headline)
-      || headlineFromMarkdown(collected.markdown);
+      || (isWeb ? '' : headlineFromMarkdown(collected.markdown));
     const winner = textOf(structuredOfficialReport?.winner)
       || textOf(metaReport.winner)
-      || section(collected.markdown, '(?:胜利者|winner)');
+      || (isWeb ? '' : section(collected.markdown, '(?:胜利者|winner)'));
     const conclusion = textOf(structuredOfficialReport?.conclusion)
-      || section(collected.markdown, '(?:最终结果|final result)');
+      || (isWeb ? '' : section(collected.markdown, '(?:最终结果|final result)'));
     const impacts = normalizeImpacts(structuredReport?.impacts ?? collected.meta.impacts);
     const reporterInfo = recordOf(headerMeta.reporterInfo) ?? { name: '', publication: '' };
     const usage = normalizeUsage(collected.telemetry.usage);
@@ -424,11 +425,12 @@ export const createArenaCompanionService = (
     const mode = textOf(payload.mode) || 'classic';
     const report: Record<string, unknown> = {
       ...(structuredReport ?? {}),
+      ...(isWeb ? { reportFormat: 'web', webHtml: collected.markdown } : {}),
       headline,
       reporterInfo,
       article: {
-        body: textOf(structuredArticle?.body) || bodyFromMarkdown(collected.markdown),
-        analysis: textOf(structuredArticle?.analysis) || analysisFromMarkdown(collected.markdown),
+        body: isWeb ? collected.markdown : textOf(structuredArticle?.body) || bodyFromMarkdown(collected.markdown),
+        analysis: isWeb ? '' : textOf(structuredArticle?.analysis) || analysisFromMarkdown(collected.markdown),
       },
       officialReport: { winner, conclusion },
       mode,

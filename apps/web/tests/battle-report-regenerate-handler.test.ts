@@ -5,12 +5,17 @@ const mocks = vi.hoisted(() => ({
   updateBattleReportGenerationOutputHasSensitiveWords: vi.fn(),
   isUserInPvpMatch: vi.fn(),
   quickCheck: vi.fn(),
+  getLargeObjectByOwnerRef: vi.fn(),
+  getObjectText: vi.fn(),
 }));
 
 vi.mock('@/lib/database/battle-report-generations', () => ({
   getBattleReportGenerationByIdLite: mocks.getBattleReportGenerationByIdLite,
   updateBattleReportGenerationOutputHasSensitiveWords: mocks.updateBattleReportGenerationOutputHasSensitiveWords,
 }));
+
+vi.mock('@/lib/database/large-objects', () => ({ getLargeObjectByOwnerRef: mocks.getLargeObjectByOwnerRef }));
+vi.mock('@/lib/r2', () => ({ getObjectText: mocks.getObjectText }));
 
 vi.mock('@/lib/database/pvp', () => ({
   isUserInPvpMatch: mocks.isUserInPvpMatch,
@@ -40,6 +45,8 @@ describe('battle report regenerate handler', () => {
     mocks.updateBattleReportGenerationOutputHasSensitiveWords.mockReset();
     mocks.isUserInPvpMatch.mockReset();
     mocks.quickCheck.mockReset();
+    mocks.getLargeObjectByOwnerRef.mockReset();
+    mocks.getObjectText.mockReset();
     mocks.isUserInPvpMatch.mockResolvedValue(false);
     mocks.quickCheck.mockResolvedValue({ hasSensitiveWords: false });
     mocks.updateBattleReportGenerationOutputHasSensitiveWords.mockResolvedValue(undefined);
@@ -158,4 +165,38 @@ describe('battle report regenerate handler', () => {
       true,
     );
   });
+
+  it.each(['completed', 'failed', 'aborted'])('only executes completed Web records from full R2 storage (%s)', async (status) => {
+    const content = '<!doctype html><html><script>const original = "完整正文";</script></html>';
+    mocks.getBattleReportGenerationByIdLite.mockResolvedValue({
+      id: 'web-record', user_id: 7, pvp_match_id: null, status,
+      output_preview: '<!doctype html><html>截断……', generation_mode: 'stream',
+      extra_json: JSON.stringify({ battleReportRenderSnapshotV1: { version: 1, reportFormat: 'web' } }),
+    });
+    mocks.getLargeObjectByOwnerRef.mockResolvedValue({ r2_key: 'web-record.txt' });
+    mocks.getObjectText.mockResolvedValue({ success: true, data: { text: content } });
+    const response = await appRouteHandler(new Request('https://example.test/api/me/battle-reports/web-record/regenerate', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+    }));
+    const payload = await response.json();
+    expect(response.status).toBe(200);
+    expect(payload.report.webHtml).toBe(content);
+    expect(payload.report.webReady).toBe(status === 'completed');
+    expect(mocks.getObjectText).toHaveBeenCalledWith('web-record.txt');
+  });
+
+  it('does not substitute a Web preview when the complete archive has expired', async () => {
+    mocks.getBattleReportGenerationByIdLite.mockResolvedValue({
+      id: 'web-expired', user_id: 7, pvp_match_id: null, status: 'completed',
+      output_preview: '<html><script>unsafePreview()</script>……',
+      extra_json: JSON.stringify({ battleReportRenderSnapshotV1: { version: 1, reportFormat: 'web' } }),
+    });
+    mocks.getLargeObjectByOwnerRef.mockResolvedValue({ r2_key: 'expired.txt' });
+    mocks.getObjectText.mockResolvedValue({ success: false, status: 404 });
+    const response = await appRouteHandler(new Request('https://example.test/api/me/battle-reports/web-expired/regenerate', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+    }));
+    expect(response.status).toBe(409);
+  });
+
 });

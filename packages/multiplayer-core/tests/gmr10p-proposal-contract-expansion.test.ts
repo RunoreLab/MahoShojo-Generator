@@ -11,6 +11,7 @@ import { mergeCollaborativeChanges } from '../src/provenance';
 
 const config = () => ({
   battleMode: 'classic' as const,
+  reportFormat: 'markdown' as const,
   combatants: [
     { key: 'data-card:c1', ref: { id: 'c1', kind: 'character' as const, versionToken: 'v1' } },
     { key: 'data-card:c2', ref: { id: 'c2', kind: 'character' as const, versionToken: 'v1' } },

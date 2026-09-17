@@ -122,6 +122,7 @@ const createHarness = async (presets?: ArenaRoomGenerationPresetResolver) => {
   });
   const sharedConfig = {
     battleMode: 'classic' as const,
+    reportFormat: 'markdown' as const,
     combatants: [{
       key: 'data-card:character-1',
       ref: { id: 'character-1', kind: 'character' as const, versionToken: 'v1' },

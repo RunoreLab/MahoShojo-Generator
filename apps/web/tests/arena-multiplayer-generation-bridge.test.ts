@@ -17,6 +17,7 @@ import type {
 
 const sharedConfig: ArenaRoomSharedConfig = {
   battleMode: 'daily',
+  reportFormat: 'markdown',
   combatants: [{
     key: 'host-local:character:1',
     displayName: '角色',

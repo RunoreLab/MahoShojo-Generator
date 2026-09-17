@@ -66,6 +66,7 @@ const signatures = Object.freeze({
 
 const sharedConfig = () => ({
   battleMode: 'classic' as const,
+  reportFormat: 'markdown' as const,
   combatants: [{
     key: 'data-card:process-character',
     ref: { id: 'process-character', kind: 'character' as const, versionToken: 'v1' },

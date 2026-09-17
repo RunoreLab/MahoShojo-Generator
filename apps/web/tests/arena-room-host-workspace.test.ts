@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { ArenaRoomSharedConfigSchema } from '@mahoshojo/contracts/arena-room';
 
 import {
   createArenaRoomHostWorkspace,
@@ -8,6 +9,7 @@ import type { ArenaRoomHostWorkspaceBundle } from '@/lib/arena-room/shared-confi
 
 const sharedConfig = (guidance = '', contentVersion = `sha256:${'a'.repeat(64)}`) => ({
   battleMode: 'classic' as const,
+  reportFormat: 'markdown' as const,
   combatants: [{
     key: 'host-local:character:0:one',
     displayName: '本地角色',
@@ -64,6 +66,22 @@ const authority = (
 });
 
 describe('Arena Room host workspace baseline', () => {
+  it('旧房间配置经入口 schema 归一化后与显式 Markdown 工作副本一致', () => {
+    const legacyConfig = Object.fromEntries(Object.entries(sharedConfig())
+      .filter(([key]) => key !== 'reportFormat'));
+    const normalizedAuthority = authority('', {
+      sharedConfig: ArenaRoomSharedConfigSchema.parse(legacyConfig),
+    });
+    const workspace = createArenaRoomHostWorkspace();
+    workspace.capturePublished(normalizedAuthority, bundle());
+    expect(workspace.compare(normalizedAuthority, bundle())).toMatchObject({
+      kind: 'clean', start: { sharedConfig: { reportFormat: 'markdown' } },
+    });
+    expect(workspace.compare(normalizedAuthority, {
+      ...bundle(), sharedConfig: { ...sharedConfig(), reportFormat: 'web' },
+    })).toMatchObject({ kind: 'dirty', reasons: ['shared-config'] });
+  });
+
   it('已显式发布的安全配置与本地摘要一致时直接启动', () => {
     const workspace = createArenaRoomHostWorkspace();
     workspace.capturePublished(authority(), bundle());

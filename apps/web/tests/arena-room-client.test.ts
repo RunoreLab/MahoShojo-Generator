@@ -12,6 +12,7 @@ const snapshot = {
   controlSeq: 0,
   sharedConfig: {
     battleMode: 'classic',
+    reportFormat: 'markdown',
     combatants: [{
       key: 'host-local:character:1',
       displayName: '角色',

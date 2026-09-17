@@ -28,6 +28,8 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
   const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
   const adjudicationResults = useBattleSelector((state) => state.adjudicationResults);
   const newsReport = useBattleSelector((state) => state.newsReport);
+  const resultReportFormat = useBattleSelector((state) => state.resultReportFormat);
+  const resultWebReady = useBattleSelector((state) => state.resultWebReady);
   const generationMode = useBattleSelector((state) => state.generationMode);
   const streamingMarkdown = useBattleSelector((state) => state.streamingMarkdown);
   const streamReporterInfo = useBattleSelector((state) => state.streamReporterInfo);
@@ -153,7 +155,8 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
         report={generationMode === 'stream'
           ? isGenerating || streamingMarkdown !== null
             ? {
-                format: 'stream-markdown',
+                format: resultReportFormat === 'web' ? 'stream-web' : 'stream-markdown',
+                webReady: resultWebReady,
                 content: streamingMarkdown ?? '',
                 mode: battleMode,
                 scenarioName: scenarioDisplayName,
@@ -172,7 +175,24 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
               }
             : null
           : newsReport
-            ? {
+            ? newsReport.reportFormat === 'web'
+              ? {
+                  format: 'web-document',
+                  content: newsReport.webHtml ?? newsReport.article.body,
+                  webReady: resultWebReady,
+                  isStreaming: false,
+                  mode: battleMode,
+                  reporterInfo: newsReport.reporterInfo,
+                  userGuidance: newsReport.userGuidance,
+                  characterGuidances: newsReport.characterGuidances,
+                  aiUsage: newsReport.aiUsage,
+                  aiModel: newsReport.aiModel,
+                  aiReasoning: newsReport.aiReasoning,
+                  narrativeHistoryReadCount: newsReport.narrativeHistoryReadCount,
+                  illustrationAsset,
+                  cardWidthPx: battleReportCardWidthPx,
+                }
+              : {
                 format: 'structured-report',
                 report: newsReport as NewsReport,
                 mode: battleMode,

@@ -347,6 +347,14 @@ export const diffArenaSharedConfig = (
     }));
   }
 
+  if (base.reportFormat !== working.reportFormat) {
+    changes.push(makeChange({
+      changeId: nextId(),
+      type: 'setReportFormat',
+      value: working.reportFormat,
+      expectedBase: { kind: 'value', value: base.reportFormat },
+    }));
+  }
   if (base.battleMode !== working.battleMode) {
     changes.push(makeChange({
       changeId: nextId(),

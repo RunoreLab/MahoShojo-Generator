@@ -38,6 +38,7 @@ const online = (id: string, kind: 'character' | 'scenario' | 'material', version
 
 const baseConfig = () => ({
   battleMode: 'classic' as const,
+  reportFormat: 'markdown' as const,
   combatants: [
     { ...online('c1', 'character'), characterGuidance: '保护队友' },
     online('c2', 'character'),

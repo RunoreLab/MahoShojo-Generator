@@ -19,6 +19,7 @@ export type ArenaEditorViewProjection = Readonly<{
   auxScenarios: readonly ArenaEditorScenarioView[];
   materials: readonly ArenaEditorMaterialView[];
   battleMode: ArenaRoomSharedConfig['battleMode'];
+  reportFormat: ArenaRoomSharedConfig['reportFormat'];
   storyLength: ArenaRoomSharedConfig['storyLength'];
   customStoryLength: string;
   selectedLanguage: string;
@@ -110,6 +111,7 @@ export const mapSharedConfigToArenaEditorView = (
     auxScenarios: freezeArray(config.auxScenarios.map(sharedScenarioView)),
     materials: freezeArray(config.materials.map(sharedScenarioView)),
     battleMode: config.battleMode,
+    reportFormat: config.reportFormat,
     storyLength: config.storyLength,
     customStoryLength: config.customStoryLength ?? '',
     selectedLanguage: config.selectedLanguage,
@@ -252,6 +254,7 @@ export const mapBattleStoreToArenaEditorView = (
     })),
     materials: freezeArray(state.materials.map(localMaterialView)),
     battleMode: state.battleMode,
+    reportFormat: state.reportFormat ?? 'markdown',
     storyLength: state.storyLength,
     customStoryLength: state.customStoryLength,
     selectedLanguage: state.selectedLanguage,

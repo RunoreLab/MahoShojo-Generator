@@ -80,6 +80,7 @@ export type ArenaEditorWorkspaceStatus =
 
 export type ArenaEditorActions = Readonly<{
   setBattleMode(value: ArenaRoomSharedConfig['battleMode']): void;
+  setReportFormat(value: ArenaRoomSharedConfig['reportFormat']): void;
   setStoryLength(value: ArenaRoomSharedConfig['storyLength']): void;
   setCustomStoryLength(value: string): void;
   setSelectedLanguage(value: string): void;
@@ -95,6 +96,7 @@ export type ArenaEditorState = Readonly<{
   auxScenarios: readonly ArenaEditorScenarioView[];
   materials: readonly ArenaEditorMaterialView[];
   battleMode: ArenaRoomSharedConfig['battleMode'];
+  reportFormat: ArenaRoomSharedConfig['reportFormat'];
   storyLength: ArenaRoomSharedConfig['storyLength'];
   customStoryLength: string;
   selectedLanguage: string;

@@ -197,6 +197,9 @@ export interface BattleStoreState {
   selectedQuestionnaires: QuestionnaireSelection[];
   battleMode: BattleMode;
   generationMode: GenerationMode;
+  reportFormat: 'markdown' | 'web';
+  resultReportFormat: 'markdown' | 'web';
+  resultWebReady: boolean;
   /** 是否启用“自由排位”计分（默认关闭；仅影响 free 队列）。 */
   arenaFreeRankingEnabled: boolean;
   isStreaming: boolean;
@@ -240,6 +243,9 @@ export interface BattleStoreState {
 
   setBattleMode: (mode: BattleMode) => void;
   setGenerationMode: (mode: GenerationMode) => void;
+  setReportFormat: (format: 'markdown' | 'web') => void;
+  setResultReportFormat: (format: 'markdown' | 'web') => void;
+  setResultWebReady: (ready: boolean) => void;
   setArenaFreeRankingEnabled: (enabled: boolean) => void;
   setIsStreaming: (state: boolean) => void;
   setStreamingMarkdown: (markdown: string | null) => void;

@@ -41,8 +41,10 @@ const errorMessage = (error: unknown): string => (
 export function ArenaRoomGenerationHistory({
   reader,
   onSaveImage,
+  roomId,
 }: {
   readonly reader: ArenaRoomGenerationHistoryReader;
+  readonly roomId?: string;
   readonly onSaveImage?: (imageUrl: string) => void;
 }) {
   const [items, setItems] = useState<readonly ArenaRoomGenerationHistoryItem[]>([]);
@@ -152,7 +154,9 @@ export function ArenaRoomGenerationHistory({
           {selected.contentStatus === 'available' ? (
             <BattleResultPresentation
               report={{
-                format: 'stream-markdown',
+                format: selected.result?.format ?? 'stream-markdown',
+                webReady: selected.generation.state === 'completed',
+                webConsentScope: roomId,
                 content: selected.markdown,
                 isStreaming: false,
                 mode: selected.result?.mode,

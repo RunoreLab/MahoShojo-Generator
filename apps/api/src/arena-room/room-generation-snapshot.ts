@@ -22,7 +22,11 @@ const digestSnapshot = (snapshot: Omit<
   ArenaMultiplayerGenerationSnapshot,
   'snapshotDigest'
 >): string => {
-  const canonical = JSON.stringify(canonicalJsonValue(snapshot));
+  // Omitted legacy format means Markdown. Keep its digest stable when a
+  // normalized client retries an existing generation reservation.
+  const sharedConfig = { ...snapshot.sharedConfig } as Record<string, unknown>;
+  if (sharedConfig.reportFormat === 'markdown') delete sharedConfig.reportFormat;
+  const canonical = JSON.stringify(canonicalJsonValue({ ...snapshot, sharedConfig }));
   return `sha256:${createHash('sha256').update(canonical).digest('hex')}`;
 };
 

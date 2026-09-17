@@ -150,6 +150,9 @@ export const useBattleStore = create<BattleStoreState>()(
       selectedQuestionnaires: [],
       battleMode: 'classic',
       generationMode: 'stream',
+      reportFormat: 'markdown',
+      resultReportFormat: 'markdown',
+      resultWebReady: false,
       arenaFreeRankingEnabled: false,
       isStreaming: false,
       streamingMarkdown: null,
@@ -184,6 +187,9 @@ export const useBattleStore = create<BattleStoreState>()(
 
       setBattleMode: (mode) => set({ battleMode: mode }),
       setGenerationMode: (mode) => set({ generationMode: mode }),
+      setReportFormat: (reportFormat) => set({ reportFormat }),
+      setResultReportFormat: (resultReportFormat) => set({ resultReportFormat }),
+      setResultWebReady: (resultWebReady) => set({ resultWebReady }),
       setArenaFreeRankingEnabled: (enabled) => set({ arenaFreeRankingEnabled: enabled }),
       setIsStreaming: (stateValue) => set({ isStreaming: stateValue }),
       setStreamingMarkdown: (markdown) => set({ streamingMarkdown: markdown }),
@@ -583,6 +589,9 @@ export const useBattleStore = create<BattleStoreState>()(
           ...currentState,
           ...persistedWithoutDraft,
           adjudicationEvents: restoreArenaAdjudicationDraft(persisted),
+          reportFormat: persisted.reportFormat === 'web' ? 'web' : 'markdown',
+          resultReportFormat: 'markdown',
+          resultWebReady: false,
         } as BattleStoreState;
         if (persisted.settings && typeof persisted.settings === 'object') {
           merged.settings = { ...currentState.settings, ...(persisted.settings as Partial<BattleSettings>) };
@@ -592,6 +601,7 @@ export const useBattleStore = create<BattleStoreState>()(
       partialize: (state) => ({
         battleMode: state.battleMode,
         generationMode: state.generationMode,
+        reportFormat: state.reportFormat,
         arenaFreeRankingEnabled: state.arenaFreeRankingEnabled,
         storyLength: state.storyLength,
         customStoryLength: state.customStoryLength,

@@ -273,6 +273,7 @@ class HardeningLoadObserver implements ArenaRoomRuntimeObserver, RedisRuntimeObs
 
 const sharedConfig = (): ArenaRoomSharedConfig => ({
   battleMode: 'classic',
+  reportFormat: 'markdown' as const,
   combatants: [{
     key: 'data-card:hardening-load-character',
     ref: {

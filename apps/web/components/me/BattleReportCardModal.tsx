@@ -5,6 +5,7 @@ import { useMemo, useState } from 'react';
 import BattleReportCard, { type NewsReport } from '@/components/BattleReportCard';
 import { ImagePreviewModal } from '@/components/shared/ImagePreviewModal';
 import { BaseModal } from '@/components/shared/BaseModal';
+import { BattleResultPresentation } from '@/components/arena/components/BattleResultPresentation';
 import StreamingBattleReportCard from '@/components/stream/StreamingBattleReportCard';
 
 export const shouldUseStreamingBattleReportCard = (input: {
@@ -60,7 +61,30 @@ export function BattleReportCardModal({ isOpen, generationId, generationMode, re
         }
       >
         {report ? (
-          useStreamingCard && normalizedLiveBody ? (
+          report.reportFormat === 'web' ? (
+            <BattleResultPresentation
+              report={{
+                format: 'web-document',
+                content: report.webHtml ?? normalizedLiveBody ?? report.article.body,
+                webReady: report.webReady === true,
+                isStreaming: false,
+                mode,
+                scenarioName: typeof report.scenario === 'string' ? report.scenario : undefined,
+                userGuidance: report.userGuidance ?? null,
+                characterGuidances: report.characterGuidances ?? null,
+                narrativeHistoryReadCount: report.narrativeHistoryReadCount ?? null,
+                reporterInfo: report.reporterInfo,
+                aiUsage: report.aiUsage,
+                aiModel: report.aiModel,
+                aiReasoning: report.aiReasoning,
+              }}
+              onSaveImage={(url) => {
+                setImageUrl(url);
+                setShowImageModal(true);
+              }}
+              adjudicationResults={report.adjudicationResults}
+            />
+          ) : useStreamingCard && normalizedLiveBody ? (
             <StreamingBattleReportCard
               content={normalizedLiveBody}
               onSaveImage={(url) => {

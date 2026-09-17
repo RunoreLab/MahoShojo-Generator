@@ -487,6 +487,7 @@ export const applyArenaRoomAuthorityToBattleStore = async (
   }
   useBattleStore.setState((state): Partial<BattleStoreState> => ({
     battleMode: config.battleMode,
+    reportFormat: config.reportFormat,
     combatants,
     teams,
     scenario,

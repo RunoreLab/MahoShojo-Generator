@@ -400,3 +400,23 @@ winner: 假赢家
     expect(result.report.officialReport.winner).toBe('角色丙');
   });
 });
+
+
+describe('Web generation record hydration', () => {
+  it.each(['stream', 'non-stream'])('restores %s Web bytes and authoritative facts without reading HTML DOM', async (generationMode) => {
+    const content = '<!doctype html><html><body><h1>伪标题</h1><script>const x = "原文";</script></body></html>';
+    const result = await hydrateBattleReportCardFromGenerationRecord({
+      generationMode, endpoint: 'api/arena/generate', mode: 'classic',
+      scenarioTitle: null, headline: '权威标题', winner: '权威胜者',
+      outputPreview: `${content}<!-- MAHOSHOJO_ARENA_META {"version":1,"report":{"winner":"权威胜者"}} -->`,
+      promptTokens: null, completionTokens: null, totalTokens: null, cachedTokens: null, reasoningTokens: null,
+      renderSnapshot: { version: 1, reportFormat: 'web' },
+    });
+    expect(result.report.reportFormat).toBe('web');
+    expect(result.report.webReady).toBe(false);
+    expect(result.report.webHtml).toBe(content);
+    expect(result.liveBody).toBe(content);
+    expect(result.report.headline).toBe('权威标题');
+    expect(result.report.officialReport.winner).toBe('权威胜者');
+  });
+});

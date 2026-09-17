@@ -18,8 +18,10 @@ const displayTime = (value: string): string => {
 export function ArenaRoomLatestHistoryResult({
   history,
   onSaveImage,
+  roomId,
 }: {
   readonly history: ArenaRoomLatestCompletedHistory;
+  readonly roomId?: string;
   readonly onSaveImage?: (imageUrl: string) => void;
 }) {
   if (history.status !== 'ready' || !history.latest) {
@@ -78,7 +80,9 @@ export function ArenaRoomLatestHistoryResult({
         <>
           <BattleResultPresentation
             report={{
-              format: 'stream-markdown',
+              format: latest.result?.format ?? 'stream-markdown',
+                webReady: latest.generation.state === 'completed',
+                webConsentScope: roomId,
               content: latest.markdown,
               isStreaming: false,
               mode: latest.result?.mode,

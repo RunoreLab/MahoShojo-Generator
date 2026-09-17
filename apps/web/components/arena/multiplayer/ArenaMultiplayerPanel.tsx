@@ -467,7 +467,9 @@ export const ArenaRoomGenerationResult = ({ state, onSaveImage, onRetryRecovery 
       ) ? (
         <BattleResultPresentation
           report={{
-            format: 'stream-markdown',
+            format: generation.result?.format ?? 'stream-markdown',
+            webReady: generation.finalAuthoritative && generation.phase === 'completed',
+            webConsentScope: state.session?.roomId,
             content: generation.markdown,
             isStreaming: generation.phase === 'running'
               || generation.phase === 'starting'
@@ -1148,7 +1150,7 @@ function ArenaMultiplayerPanelRuntime({
         />
       )}
       generationHistoryContent={(
-        <ArenaRoomGenerationHistory key={generationHistoryScope} reader={generationHistory} />
+        <ArenaRoomGenerationHistory key={generationHistoryScope} reader={generationHistory} roomId={viewState.session?.roomId} />
       )}
       hostConfigStatus={hostReconciliation.state.kind === 'conflicted'
         || hostReconciliation.state.kind === 'error'
@@ -1230,5 +1232,5 @@ export function ArenaMultiplayerContextResult({ onSaveImage }: ArenaMultiplayerR
       />
     );
   }
-  return <ArenaRoomLatestHistoryResult history={runtime.latestGenerationHistory} onSaveImage={onSaveImage} />;
+  return <ArenaRoomLatestHistoryResult roomId={runtime.state.session.roomId} history={runtime.latestGenerationHistory} onSaveImage={onSaveImage} />;
 }

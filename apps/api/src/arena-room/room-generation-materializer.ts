@@ -319,6 +319,7 @@ export const createArenaRoomGenerationMaterializer = (
         ...runtimeResult.data,
         combatants,
         mode: config.battleMode,
+        reportFormat: config.reportFormat,
         userGuidance: config.userGuidance,
         ...(resolvedScenario && scenarioEntry ? {
           scenario: resolvedScenario.payload,

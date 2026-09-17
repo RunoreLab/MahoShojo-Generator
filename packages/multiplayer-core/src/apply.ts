@@ -124,6 +124,7 @@ const overrideBlockedReason = (
   switch (change.type) {
     case 'setCharacterGuidance':
     case 'setUserGuidance':
+    case 'setReportFormat':
     case 'setBattleMode':
     case 'setSelectedLanguage':
     case 'setStoryLength':
@@ -218,6 +219,9 @@ const applyChange = (config: ArenaRoomSharedConfig, change: ArenaProposalChange)
       config.teams = config.teams.map((team) => team.key === change.teamKey
         ? { ...team, combatantKeys: [...change.value] }
         : team);
+      return;
+    case 'setReportFormat':
+      config.reportFormat = change.value;
       return;
     case 'setBattleMode':
       config.battleMode = change.value;

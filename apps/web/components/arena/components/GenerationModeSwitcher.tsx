@@ -1,17 +1,21 @@
 'use client';
 
+import { ArenaReportFormatSelector } from './ArenaWebReport';
 import { useBattleStore } from '../stores/useBattleStore';
 import { BattleStoreState, GenerationMode } from '../types';
 import { GenerationModeSwitcher as GenerationModeSwitcherUi } from '@/components/shared/GenerationModeSwitcher';
 
-export function GenerationModeSwitcher() {
+export function GenerationModeSwitcher({ showReportFormat = false }: { showReportFormat?: boolean }) {
   const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
   const generationMode = useBattleSelector((state) => state.generationMode);
   const setGenerationMode = useBattleSelector((state) => state.setGenerationMode);
+  const reportFormat = useBattleSelector((state) => state.reportFormat);
+  const setReportFormat = useBattleSelector((state) => state.setReportFormat);
   const isGenerating = useBattleSelector((state) => state.isGenerating);
 
   return (
     <>
+      {showReportFormat ? <ArenaReportFormatSelector value={reportFormat} onChange={setReportFormat} disabled={isGenerating} /> : null}
       <GenerationModeSwitcherUi
         label="选择生成方式"
         value={generationMode}

@@ -62,6 +62,7 @@ class MemoryRoomStore implements RoomActorCheckpointStore {
 
 const sharedConfig = (): ArenaRoomSharedConfig => ({
   battleMode: 'classic' as const,
+  reportFormat: 'markdown' as const,
   combatants: [
     {
       key: 'data-card:character-1',

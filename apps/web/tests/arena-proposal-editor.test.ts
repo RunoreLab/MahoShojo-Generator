@@ -39,6 +39,7 @@ const combatant = (id: string, guidance?: string) => ({
 
 const config = (overrides: Partial<ArenaRoomSharedConfig> = {}): ArenaRoomSharedConfig => ({
   battleMode: 'classic',
+  reportFormat: 'markdown',
   combatants: [combatant('c1')],
   teams: [],
   scenario: null,

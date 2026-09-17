@@ -3,6 +3,57 @@ import { describe, expect, it } from 'vitest';
 import { buildArenaGenerationPrompt } from '../src/arena-generation/prompt';
 
 describe('Arena generation prompt', () => {
+  it.each([
+    ['api/arena/generate-stream', 'stream', 'stream-markdown'],
+    ['api/arena/generate', 'non-stream', 'structured-report'],
+  ])('旧 PVP %s 忽略 Web 格式请求', async (endpoint, deliveryMode, expected) => {
+    const result = await buildArenaGenerationPrompt({
+      actorKey: 'pvp-room:legacy',
+      payload: {
+        reportFormat: 'web', combatants: [],
+        __arenaServerContextV1: { endpoint, deliveryMode, trustedPvpContext: { roomId: 'legacy' } },
+      },
+    });
+    expect(result.metadata.outputContract).toBe(expected);
+    expect(result.metadata.reportFormat).toBe('markdown');
+  });
+
+  it('连续 Session 忽略 Web，而带冻结 snapshot 的 Room 仍可使用 Web', async () => {
+    const session = await buildArenaGenerationPrompt({ actorKey: 'user:1', payload: {
+      reportFormat: 'web', combatants: [],
+      __arenaServerContextV1: { endpoint: 'api/arena/session/generate-next', deliveryMode: 'stream' },
+    } });
+    const room = await buildArenaGenerationPrompt({ actorKey: 'pvp-room:new', payload: {
+      reportFormat: 'web', combatants: [], multiplayerGenerationSnapshot: { sharedConfig: { reportFormat: 'web' } },
+      __arenaServerContextV1: { endpoint: 'api/arena/generate-stream', deliveryMode: 'stream', trustedPvpContext: { roomId: 'new' } },
+    } });
+    expect(session.metadata.outputContract).toBe('stream-markdown');
+    expect(room.metadata.outputContract).toBe('web-document');
+  });
+
+  it.each(['classic', 'kizuna', 'daily', 'scenario'])('Web %s 的两种传输共用 HTML 契约且始终要求 meta', async (mode) => {
+    const prompts = await Promise.all(['stream', 'non-stream'].map((deliveryMode) => buildArenaGenerationPrompt({
+      actorKey: 'anonymous:test',
+      random: () => 0,
+      payload: {
+        mode, reportFormat: 'web', combatants: [{ data: { name: 'A' } }],
+        writeArenaHistory: false, writeCurrentState: false,
+        __arenaServerContextV1: { deliveryMode, endpoint: 'api/arena/generate' },
+      },
+    })));
+    expect(prompts[0].prompt).toBe(prompts[1].prompt);
+    for (const result of prompts) {
+      expect(result.metadata).toMatchObject({ outputContract: 'web-document', reportFormat: 'web', expectsMeta: true });
+      expect(result.prompt).toContain('完整 HTML5 document');
+      expect(result.prompt).toContain('MAHOSHOJO_ARENA_META');
+      expect(result.prompt).toContain('addEventListener');
+      expect(result.prompt).toContain('srcdoc 继承宿主 CSP');
+      expect(result.prompt).toContain('不得依赖外部库');
+      expect(result.prompt).not.toContain('请以 Markdown 格式输出战报');
+      expect(result.prompt).not.toContain('article.analysis');
+    }
+  });
+
   it('保留情景/素材/历史/长度语义且不把 secret/signature 写进 prompt', async () => {
     const result = await buildArenaGenerationPrompt({
       actorKey: 'user:42',

@@ -507,3 +507,11 @@ describe('Arena Room Battle store projection', () => {
     });
   });
 });
+
+
+it('publishes explicit report format while normalizing old local drafts to Markdown', async () => {
+  const legacy = await buildArenaRoomSharedConfigFromBattleState(source());
+  const web = await buildArenaRoomSharedConfigFromBattleState({ ...source(), reportFormat: 'web' });
+  expect(legacy.reportFormat).toBe('markdown');
+  expect(web.reportFormat).toBe('web');
+});

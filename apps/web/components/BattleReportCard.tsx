@@ -31,6 +31,9 @@ import type { AIReasoningEnvelope } from '@/types/ai-reasoning';
 type MarkdownCodeProps = React.ComponentPropsWithoutRef<'code'> & ExtraProps & { inline?: boolean };
 
 export interface NewsReport {
+  reportFormat?: 'markdown' | 'web';
+  webHtml?: string;
+  webReady?: boolean;
   headline: string;
   scenario?: string;
   reporterInfo: {

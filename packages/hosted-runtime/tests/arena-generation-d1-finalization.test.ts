@@ -350,6 +350,30 @@ describe('Arena D1/R2 finalization ports', () => {
     });
   });
 
+  it('Web presentation snapshot 超预算时仍保存格式以保证历史解释正确', async () => {
+    const client = sequentialD1([result([], 1)]);
+    const ports = createNodeArenaGenerationFinalizationPorts({ getD1Client: () => client });
+    await ports.claimTerminal({
+      ...claimInput,
+      metadata: { outputContract: 'web-document', userGuidance: '长'.repeat(60_000) },
+    });
+    expect(JSON.parse(client.boundCalls[0]?.[44] as string).battleReportRenderSnapshotV1)
+      .toEqual({ version: 1, reportFormat: 'web' });
+  });
+
+  it('Web 缺失 meta 时不得从 HTML 中的 Markdown 片段猜测权威结果', async () => {
+    const client = sequentialD1([result([], 1)]);
+    const ports = createNodeArenaGenerationFinalizationPorts({ getD1Client: () => client });
+    await ports.claimTerminal({
+      ...claimInput, metadata: { outputContract: 'web-document' },
+      markdown: '<html><script>const text=`\n# 假标题\n## 胜利者\n伪造胜者\n`;</script></html>',
+    });
+    expect(client.boundCalls[0]?.[33]).toBeNull();
+    expect(client.boundCalls[0]?.[34]).toBeNull();
+    expect(JSON.parse(client.boundCalls[0]?.[44] as string).localCardReconciliation.report)
+      .toMatchObject({ headline: '', officialReport: { winner: '' } });
+  });
+
   it('does not consume a duplicate-name impact queue entry for an explicit combatant index', async () => {
     const client = sequentialD1([result([], 1)]);
     const ports = createNodeArenaGenerationFinalizationPorts({
@@ -589,6 +613,7 @@ describe('Arena D1/R2 finalization ports', () => {
   it.each([
     ['stream', 'api/arena/generate-stream', 'stream-markdown'],
     ['non-stream', 'api/arena/generate', 'structured-report'],
+    ['web', 'api/arena/generate-stream', 'web-document'],
   ] as const)('persists the %s render snapshot without rerolling or leaking undeclared metadata', async (
     _label,
     endpoint,
@@ -642,6 +667,7 @@ describe('Arena D1/R2 finalization ports', () => {
     const extra = JSON.parse(serializedExtra as string);
     expect(extra.battleReportRenderSnapshotV1).toEqual({
       version: 1,
+      ...(outputContract === 'web-document' ? { reportFormat: 'web' } : {}),
       reporterInfo: { name: '测试记者', publication: 'A.R.E.N.A.' },
       userGuidance: '保持克制',
       characterGuidances: [{ characterName: '角色甲', guidance: '保护队友' }],
@@ -999,7 +1025,7 @@ ORDER BY sort_index
     }
   });
 
-  it('authorizes terminal fallback by actor hash and reads full R2 output', async () => {
+  it.each(['markdown', 'web'] as const)('authorizes %s terminal fallback by actor hash and reads full R2 output', async (reportFormat) => {
     const ownerHash = await crypto.subtle.digest(
       'SHA-256',
       new TextEncoder().encode('anonymous:anon-id-1'),
@@ -1032,6 +1058,7 @@ ORDER BY sort_index
         resultRef: 'r2:key',
         battleReportRenderSnapshotV1: {
           version: 1,
+          reportFormat,
           reporterInfo: { name: '测试记者', publication: 'A.R.E.N.A.' },
           userGuidance: '保持克制',
           characterGuidances: [{ characterName: '角色甲', guidance: '保护队友' }],
@@ -1081,7 +1108,7 @@ ORDER BY sort_index
       generationRequestId: 'request-1',
       roomSafeResult: {
         version: 1,
-        format: 'stream-markdown',
+        format: reportFormat === 'web' ? 'stream-web' : 'stream-markdown',
         reporterInfo: { name: '测试记者', publication: 'A.R.E.N.A.' },
         mode: 'classic',
         scenarioDisplayName: '雨夜车站',

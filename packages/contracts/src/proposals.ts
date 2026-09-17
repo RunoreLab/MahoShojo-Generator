@@ -8,6 +8,7 @@ import {
   MAX_PROPOSAL_CHANGES,
 } from './limits';
 import {
+  ArenaReportFormatSchema,
   BattleModeSchema,
   CharacterDataCardRefSchema,
   CustomStoryLengthSchema,
@@ -236,6 +237,12 @@ export const ReorderMaterialsChangeSchema = change({
   expectedBase: ValueExpectedBaseSchema(MaterialOrderSchema),
 }).superRefine(validateExactReorder);
 
+export const SetReportFormatChangeSchema = change({
+  type: z.literal('setReportFormat'),
+  value: ArenaReportFormatSchema,
+  expectedBase: ValueExpectedBaseSchema(ArenaReportFormatSchema),
+});
+
 export const SetBattleModeChangeSchema = change({
   type: z.literal('setBattleMode'),
   value: BattleModeSchema,
@@ -337,6 +344,7 @@ export const ArenaProposalChangeSchema = z.discriminatedUnion('type', [
   ReorderTeamCombatantsChangeSchema,
   ReorderAuxScenariosChangeSchema,
   ReorderMaterialsChangeSchema,
+  SetReportFormatChangeSchema,
   SetBattleModeChangeSchema,
   SetSelectedLanguageChangeSchema,
   SetScenarioChangeSchema,

@@ -125,6 +125,17 @@ describe('Arena generation finalization', () => {
     }));
   });
 
+  it('Web raw source 使用非主动执行 MIME 保存', async () => {
+    const ports = createPorts();
+    const content = '<!doctype html><script>const x = "a < b";</script>';
+    await createArenaGenerationFinalizer(ports)({
+      ...input, markdown: content, metadata: { ...input.metadata, outputContract: 'web-document' },
+    });
+    expect(ports.storeOutput).toHaveBeenCalledWith(expect.objectContaining({
+      markdown: content, contentType: 'text/plain; charset=utf-8',
+    }));
+  });
+
   it('重复 terminal claim 只读取已有结果，不重复业务副作用', async () => {
     const ports = createPorts({
       claimTerminal: vi.fn(async () => ({

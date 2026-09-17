@@ -6,7 +6,7 @@ import {
   getSystemPrompt,
 } from './compatibility-prompt';
 
-export type ArenaGenerationOutputContract = 'stream-markdown' | 'structured-report';
+export type ArenaGenerationOutputContract = 'stream-markdown' | 'structured-report' | 'web-document';
 
 const text = (value: unknown): string => typeof value === 'string' ? value.trim() : '';
 
@@ -33,6 +33,12 @@ export const resolveArenaGenerationOutputContract = (
 ): ArenaGenerationOutputContract => {
   const serverContext = asRecord(payload.__arenaServerContextV1);
   const endpoint = text(serverContext?.endpoint);
+  // Room producers have a signed frozen snapshot; legacy PVP producers do not.
+  const legacyPvp = Boolean(asRecord(serverContext?.trustedPvpContext) ?? asRecord(payload.pvpContext))
+    && !asRecord(payload.multiplayerGenerationSnapshot);
+  if (payload.reportFormat === 'web' && !legacyPvp && endpoint !== 'api/arena/session/generate-next') {
+    return 'web-document';
+  }
   return serverContext?.deliveryMode === 'non-stream'
     && (endpoint === 'api/arena/generate' || endpoint === 'api/generate-battle-story')
     ? 'structured-report'
@@ -106,7 +112,7 @@ export const buildArenaGenerationPrompt = async (input: {
   // response projection and history writes. Streaming intentionally remains
   // free-form and keeps the full guidance text.
   const userGuidance = (
-    outputContract === 'structured-report'
+    asRecord(payload.__arenaServerContextV1)?.deliveryMode === 'non-stream'
       ? rawUserGuidance.slice(0, 200)
       : rawUserGuidance
   ) || null;
@@ -118,7 +124,7 @@ export const buildArenaGenerationPrompt = async (input: {
   const writeArenaHistory = payload.writeArenaHistory !== false;
   const writeCurrentState = payload.writeCurrentState !== false;
   const forceStreamMeta = payload.forceStreamMeta === true;
-  const expectsMeta = outputContract === 'stream-markdown'
+  const expectsMeta = outputContract === 'web-document' || outputContract === 'stream-markdown'
     && (forceStreamMeta || writeArenaHistory || writeCurrentState);
   const promptBuilder = outputContract === 'structured-report'
     ? createPromptBuilder(
@@ -182,6 +188,7 @@ export const buildArenaGenerationPrompt = async (input: {
     lore || null,
     !strictRankedMatch,
     materials,
+    outputContract,
   );
   const taskPrompt = promptBuilder({ combatants });
   const characterGuidances = combatants.flatMap((value) => {
@@ -199,6 +206,7 @@ export const buildArenaGenerationPrompt = async (input: {
       mode,
       language,
       outputContract,
+      reportFormat: outputContract === 'web-document' ? 'web' : 'markdown',
       expectsMeta,
       combatantCount: combatants.length,
       pvpContext: asRecord(payload.pvpContext),

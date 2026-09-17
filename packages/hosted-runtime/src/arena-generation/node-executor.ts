@@ -178,6 +178,8 @@ const arenaRequestAuditContext = (request: Request): {
 };
 
 const normalizeLegacyPayloadDefaults = (payload: Record<string, unknown>): void => {
+  // Explicit default and legacy absence must retain the same idempotency hash.
+  if (payload.reportFormat === 'markdown') delete payload.reportFormat;
   payload.mode = readString(payload.mode) || 'classic';
   payload.language = readString(payload.language) || 'zh-CN';
   const useArenaHistory = typeof payload.useArenaHistory === 'boolean'
@@ -384,8 +386,7 @@ const buildSafetyText = async (
   policy: SafetyCheckPolicy,
   enableBundle: boolean,
 ): Promise<string> => {
-  const preserveLegacyNonStreamBounds = resolveArenaGenerationOutputContract(payload)
-    === 'structured-report';
+  const preserveLegacyNonStreamBounds = (payload.__arenaServerContextV1 as Record<string, unknown> | undefined)?.deliveryMode === 'non-stream';
   const inputs: Array<{
     type: keyof SafetyCheckPolicy;
     content: string;
@@ -560,6 +561,9 @@ export const createNodeArenaGenerationExecutor = (
           })
           : Promise.resolve(null))
       )({ request, generationRequestId, payload });
+      if (payload.reportFormat !== undefined && payload.reportFormat !== 'markdown' && payload.reportFormat !== 'web') {
+        return jsonResponse({ code: 'INVALID_REPORT_FORMAT', error: 'reportFormat 无效' }, 400);
+      }
       const normalized = clonePayload(payload);
       normalizeLegacyPayloadDefaults(normalized);
       const customProviderResolution = resolveArenaCustomProvider(normalized.customProvider);
@@ -621,7 +625,7 @@ export const createNodeArenaGenerationExecutor = (
           ? await signatures.verifySignature(normalized.scenario)
           : true,
       };
-      if (resolveArenaGenerationOutputContract(normalized) === 'structured-report') {
+      if (requestAuditContext.deliveryMode === 'non-stream') {
         normalized.userGuidance = readString(normalized.userGuidance).slice(0, 200) || null;
       }
       return normalized;

@@ -51,6 +51,8 @@ export const collaborativeChangeTarget = (change: ArenaProposalChange): string =
       return 'teams-order';
     case 'reorderTeamCombatants':
       return `team-combatants-order:${change.teamKey}`;
+    case 'setReportFormat':
+      return 'report-format';
     case 'setBattleMode':
       return 'battle-mode';
     case 'setSelectedLanguage':
@@ -111,6 +113,8 @@ export const hasCollaborativeChangeEffect = (
       const team = config.teams.find((entry) => entry.key === change.teamKey);
       return team !== undefined && retainsRelativeOrder(team.combatantKeys, change.value);
     }
+    case 'setReportFormat':
+      return config.reportFormat === change.value;
     case 'setBattleMode':
       return config.battleMode === change.value;
     case 'setSelectedLanguage':

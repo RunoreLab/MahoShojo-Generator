@@ -281,7 +281,7 @@ export function BattleLitePage() {
                 disabled={isGenerating}
                 storageKey="battle-lite.section.generationMode.open"
               >
-                <GenerationModeSwitcher />
+                <GenerationModeSwitcher showReportFormat />
               </CollapsibleSection>
 
               <CollapsibleSection

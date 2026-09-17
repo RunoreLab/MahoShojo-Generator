@@ -38,6 +38,7 @@ const defaultLocalScenario = { title: '本地辅助情景', content: '辅助正�
 
 const sharedConfig = () => ({
   battleMode: 'scenario' as const,
+  reportFormat: 'markdown' as const,
   combatants: [
     {
       key: 'data-card:online-character',
@@ -141,9 +142,9 @@ const createHarness = () => {
 };
 
 describe('Arena Room authoritative generation materializer', () => {
-  it('仅从 frozen Shared Config 重建角色/引导/队伍/情景/素材/历史语义', async () => {
+  it.each(['markdown', 'web'] as const)('仅从 frozen Shared Config 重建角色/引导/队伍/情景/素材/历史语义 (%s)', async (reportFormat) => {
     const harness = createHarness();
-    const config = sharedConfig();
+    const config = { ...sharedConfig(), reportFormat };
     const payload = await harness.materializer.materialize({
       sharedConfig: config,
       hostAccountUserId: 101,
@@ -169,6 +170,7 @@ describe('Arena Room authoritative generation materializer', () => {
 
     expect(payload).toMatchObject({
       mode: 'scenario',
+      reportFormat,
       userGuidance: '接受后的全局引导',
       language: 'ja-JP',
       storyLength: 'long',

@@ -44,6 +44,50 @@ const signatureService: SignatureService = {
 };
 
 describe('Node Arena generation executor', () => {
+  it('旧请求与显式 Markdown 保持语义 hash 等价，Web 独立', async () => {
+    const canonical = (reportFormat?: string) => canonicalizeNodeArenaGenerationSemanticPayload({
+      payload: {
+        ...validPayload, ...(reportFormat ? { reportFormat } : {}),
+        multiplayerGenerationSnapshot: { sharedConfig: { mode: 'classic', ...(reportFormat ? { reportFormat } : {}) } },
+      },
+      signatures: signatureService, trustedInternalGuidance: null, trustedPvpContext: null,
+    });
+    expect(await canonical('markdown')).toEqual(await canonical());
+    expect(await canonical('web')).not.toEqual(await canonical());
+  });
+
+  it.each(['generate-stream', 'generate'])('Web %s 只调用 raw provider 并剥离 meta', async (route) => {
+    const content = '<!doctype html><html><script>const x="原始字节";</script></html>';
+    const generateWithStructuredAI = vi.fn();
+    const generateWithStreamAI = vi.fn(async () => ({
+      response: new Response(content + '<!-- MAHOSHOJO_ARENA_META {"version":1,"report":{"winner":"A"}} -->'),
+      usagePromise: Promise.resolve({ totalTokens: 9 }), finishReasonPromise: Promise.resolve('stop'),
+    }));
+    const executor = createNodeArenaGenerationExecutor({
+      env: {}, finalizer, signatureService, generateWithStreamAI, generateWithStructuredAI,
+      enforceSafety: vi.fn(async () => null),
+    });
+    const prepared = await executor.prepare!({
+      request: new Request(`https://example.test/api/arena/${route}`),
+      actorKey: 'anonymous:test', generationRequestId: 'web-request',
+      payload: { ...validPayload, reportFormat: 'web', writeArenaHistory: false, writeCurrentState: false },
+    });
+    if (prepared instanceof Response || isArenaGenerationAuditableRejection(prepared)) throw new Error('unexpected rejection');
+    const emit = vi.fn(async () => undefined);
+    const terminal = await executor.execute({
+      generationId: 'web-generation', generationRequestId: 'web-request', actorKey: 'anonymous:test',
+      producerToken: 'producer', payloadHash: 'hash', payload: prepared.executionPayload,
+      signal: new AbortController().signal, emit,
+      claimFinalization: vi.fn(async () => ({ kind: 'claimed' as const })),
+    });
+    expect(terminal.status).toBe('completed');
+    expect(generateWithStreamAI).toHaveBeenCalledOnce();
+    expect(generateWithStructuredAI).not.toHaveBeenCalled();
+    expect(JSON.parse(decodeURIComponent(prepared.responseHeaders?.['X-Mahoshojo-Stream-Meta'] ?? '{}')).outputContract).toBe('web-document');
+    const events = emit.mock.calls as unknown as Array<[{ type: string; data: { chunk?: string } }]>;
+    expect(events.filter(([event]) => event.type === 'markdown').map(([event]) => event.data.chunk).join('')).toBe(content);
+  });
+
   it('keeps canonical preset identity while deriving native authority on the server', async () => {
     const data = JSON.parse(await readFile(
       new URL('../../../apps/web/public/presets/C01_egg.json', import.meta.url),

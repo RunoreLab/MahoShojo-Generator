@@ -21,10 +21,13 @@ import {
   ArenaRoomProposalWithdrawRequestSchema,
   ArenaRoomPublishConfigRequestSchema,
   ArenaRoomSessionResponseSchema,
+  ArenaRoomSnapshotSchema,
   ArenaRoomTicketRequestSchema,
   ArenaRoomTicketResponseSchema,
 } from '../src/arena-room';
-import canonicalRoomSnapshot from './fixtures/arena-room-v1.json';
+import legacyRoomSnapshot from './fixtures/arena-room-v1.json';
+
+const canonicalRoomSnapshot = ArenaRoomSnapshotSchema.parse(legacyRoomSnapshot);
 
 const session = {
   protocolVersion: 1,

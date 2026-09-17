@@ -72,6 +72,7 @@ const secretCanary = 'hardening-local-signature-secret-at-least-32-characters';
 
 const sharedConfig = () => ({
   battleMode: 'classic' as const,
+  reportFormat: 'markdown' as const,
   combatants: [{
     key: 'data-card:hardening-character',
     ref: { id: 'hardening-character', kind: 'character' as const, versionToken: 'v1' },

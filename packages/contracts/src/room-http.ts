@@ -245,7 +245,7 @@ const ArenaRoomGenerationUsageSchema = z.object({
 
 export const ArenaRoomGenerationResultSchema = z.object({
   version: z.literal(1),
-  format: z.literal('stream-markdown'),
+  format: z.enum(['stream-markdown', 'stream-web']),
   reporterInfo: z.object({
     name: z.string().max(300),
     publication: z.string().max(300),

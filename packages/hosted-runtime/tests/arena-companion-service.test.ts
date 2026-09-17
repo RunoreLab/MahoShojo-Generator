@@ -319,6 +319,30 @@ describe('Arena companion service', () => {
     });
   });
 
+  it('Web non-stream 原样返回 HTML，权威结果仅来自 meta', async () => {
+    const source = '<!doctype html><html><h1>错误的 DOM 标题</h1><script>const a="x";</script></html>';
+    const service = createArenaCompanionService({
+      generationService: generationService(async () => ({
+        ...subscription([]),
+        headers: { 'X-Mahoshojo-Stream-Meta': encodeURIComponent(JSON.stringify({ outputContract: 'web-document' })) },
+        events: streamOf(
+          { id: '1-0', type: 'snapshot', data: { markdown: source } },
+          { id: '2-0', type: 'meta', data: { meta: { version: 1, report: { headline: '可信标题', winner: 'A' } } } },
+          { id: '3-0', type: 'done', data: { status: 'completed' } },
+        ),
+      })),
+      projectUpdatedCombatants: vi.fn(async () => []),
+    });
+    const result = await service.generate(new Request('https://example.test/api/arena/generate', {
+      method: 'POST', body: JSON.stringify({ reportFormat: 'web' }),
+    }));
+    expect(result.status).toBe(200);
+    expect((await result.json() as Record<string, unknown>).report).toMatchObject({
+      reportFormat: 'web', webHtml: source, headline: '可信标题',
+      article: { body: source, analysis: '' }, officialReport: { winner: 'A', conclusion: '' },
+    });
+  });
+
   it('从 structured JSON snapshot 原样投影 non-stream 战报与 impacts', async () => {
     const structured = {
       headline: '结构化重放战报',

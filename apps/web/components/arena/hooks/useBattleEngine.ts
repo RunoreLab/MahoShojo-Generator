@@ -375,6 +375,9 @@ export const useBattleEngine = () => {
   const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
   const combatants = useBattleSelector((state) => state.combatants);
   const battleMode = useBattleSelector((state) => state.battleMode);
+  const reportFormat = useBattleSelector((state) => state.reportFormat);
+  const setResultReportFormat = useBattleSelector((state) => state.setResultReportFormat);
+  const setResultWebReady = useBattleSelector((state) => state.setResultWebReady);
   const generationMode = useBattleSelector((state) => state.generationMode);
   const arenaFreeRankingEnabled = useBattleSelector((state) => state.arenaFreeRankingEnabled);
   const scenario = useBattleSelector((state) => state.scenario);
@@ -562,6 +565,8 @@ export const useBattleEngine = () => {
 
     setIsGenerating(true);
     setIsStreaming(false);
+    setResultReportFormat(reportFormat);
+    setResultWebReady(false);
     setStreamingMarkdown(null);
     setError(null);
     setNewsReport(null);
@@ -664,6 +669,7 @@ export const useBattleEngine = () => {
       };
       const requestBody = roomAction.inRoom ? null : {
         generationRequestId,
+        reportFormat,
         combatants: freshCombatants.map((combatant) => ({
           type: combatant.type,
           data: combatant.data,
@@ -968,7 +974,7 @@ export const useBattleEngine = () => {
         const safeScenarioDisplayName = scenarioDisplayName ? sanitizeTextByShieldWords(scenarioDisplayName) : null;
 
         const reportWithScenario: NewsReport = {
-          ...sanitizeReportByShieldWords(result.report),
+          ...(result.report.reportFormat === 'web' ? result.report : sanitizeReportByShieldWords(result.report)),
           adjudicationResults: result.adjudicationResults,
         };
 
@@ -980,6 +986,8 @@ export const useBattleEngine = () => {
           delete (reportWithScenario as any).scenario;
         }
 
+        setResultReportFormat(result.report.reportFormat === 'web' ? 'web' : 'markdown');
+        setResultWebReady(result.report.reportFormat === 'web' && typeof result.report.webHtml === 'string');
         setNewsReport(reportWithScenario);
         const normalizedImpacts = normalizeBattleAiImpacts(result.impacts);
         setLatestAiImpacts(normalizedImpacts.length > 0 ? normalizedImpacts : null);
@@ -1136,10 +1144,13 @@ export const useBattleEngine = () => {
 	            });
 	          }
 
+          let authoritativeWebContract = false;
 	          const metaHeader = response.headers.get('x-mahoshojo-stream-meta');
           if (metaHeader) {
             try {
               const parsed = JSON.parse(decodeURIComponent(metaHeader));
+              authoritativeWebContract = parsed?.outputContract === 'web-document' && parsed?.reportFormat === 'web';
+              setResultReportFormat(authoritativeWebContract ? 'web' : 'markdown');
               const generationId = typeof parsed?.generationId === 'string' ? parsed.generationId.trim() : '';
               if (generationId) {
                 captureGenerationRepairContext(generationId);
@@ -1211,6 +1222,10 @@ export const useBattleEngine = () => {
 	          let isInterruptedAbort = false;
 	          let interruptedMessage: string | null = null;
 	          let sseEndedWithoutDone = false;
+          let authoritativeStreamDone = false;
+          const presentGeneratedContent = (content: string) => authoritativeWebContract || reportFormat === 'web'
+            ? content
+            : sanitizeTextByShieldWords(content);
 	          let metaOverrideFromSse:
 	            | {
 	              report?: { headline?: string; winner?: string };
@@ -1362,7 +1377,7 @@ export const useBattleEngine = () => {
               accumulatedText = accumulatedText.slice(0, cutIndex);
               accumulatedText += buildStreamSensitiveArrestWarrantMarkdown('使用危险符文');
 
-              setStreamingMarkdown(sanitizeTextByShieldWords(accumulatedText));
+              setStreamingMarkdown(presentGeneratedContent(accumulatedText));
 
               shouldAbort = true;
               abortController.abort(STREAM_ABORT_REASON_CONTENT_POLICY);
@@ -1447,7 +1462,7 @@ export const useBattleEngine = () => {
                 if (chunk) {
                   accumulatedText += chunk;
                   if (await handleSensitiveIfNeeded()) return;
-                  setStreamingMarkdown(sanitizeTextByShieldWords(accumulatedText));
+                  setStreamingMarkdown(presentGeneratedContent(accumulatedText));
                 }
                 return;
               }
@@ -1462,7 +1477,8 @@ export const useBattleEngine = () => {
                 if (mergedMarkdown !== accumulatedText || !accumulatedText) {
                   accumulatedText = mergedMarkdown;
                   lastCheckedLength = 0;
-                  setStreamingMarkdown(sanitizeTextByShieldWords(mergedMarkdown));
+                  if (await handleSensitiveIfNeeded()) return;
+                  setStreamingMarkdown(presentGeneratedContent(mergedMarkdown));
                 }
                 setStreamReasoning(reasoning
                   ? appendReasoningDelta(null, sanitizeTextByShieldWords(reasoning), {
@@ -1565,6 +1581,13 @@ export const useBattleEngine = () => {
               }
 
               if (event === 'done') {
+                authoritativeStreamDone = payload?.status === 'completed' && payload?.ok !== false;
+                if (authoritativeWebContract && !authoritativeStreamDone) {
+                  shouldAbort = true;
+                  setError(payload?.status === 'cancelled'
+                    ? '生成已取消，当前内容仅供普通显示。'
+                    : '生成未成功完成，当前内容仅供普通显示。');
+                }
                 if (typeof payload?.persistenceWarning === 'string') {
                   setError('⚠️ 战报已生成并保留当前正文，但保存或断线恢复能力暂时不可用。');
                 }
@@ -1695,14 +1718,14 @@ export const useBattleEngine = () => {
                 accumulatedText = accumulatedText.slice(0, cutIndex);
                 accumulatedText += buildStreamSensitiveArrestWarrantMarkdown('使用危险符文');
 
-                setStreamingMarkdown(sanitizeTextByShieldWords(accumulatedText));
+                setStreamingMarkdown(presentGeneratedContent(accumulatedText));
 
                 shouldAbort = true;
                 abortController.abort(STREAM_ABORT_REASON_CONTENT_POLICY);
                 break;
               }
 
-              setStreamingMarkdown(sanitizeTextByShieldWords(accumulatedText));
+              setStreamingMarkdown(presentGeneratedContent(accumulatedText));
 
                 if (shouldTerminateByTelemetry(accumulatedText)) {
                   try {
@@ -1744,7 +1767,7 @@ export const useBattleEngine = () => {
           if (!isSseResponse) {
             // flush TextDecoder：避免最后一个 chunk 以多字节字符结尾时丢字
             accumulatedText += decoder.decode();
-            setStreamingMarkdown(sanitizeTextByShieldWords(accumulatedText));
+            setStreamingMarkdown(presentGeneratedContent(accumulatedText));
 
             // 流式正文末尾可能包含 HTML 注释 JSON 元数据（用于角色更新的 impacts/currentStateSummary）。
             // 此处尽量提取并修复解析；失败时回退到仅基于 Markdown 的更新逻辑。
@@ -1834,12 +1857,14 @@ export const useBattleEngine = () => {
             }
           }
 
-          setStreamingMarkdown(sanitizeTextByShieldWords(markdownForUi));
+          setStreamingMarkdown(presentGeneratedContent(markdownForUi));
 
           const trimmedForValidation = markdownForUi.trim();
           const allowStreamMeta = settings.writeArenaHistory || settings.writeCurrentState;
           const hasMetaImpacts = allowStreamMeta && Boolean(metaOverride?.impacts?.length);
-          const looksLikeCompleteReport = hasMetaImpacts
+          const looksLikeCompleteReport = reportFormat === 'web' || authoritativeWebContract
+            ? authoritativeWebContract && authoritativeStreamDone && Boolean(trimmedForValidation)
+            : hasMetaImpacts
             ? true
             : trimmedForValidation.length >= 120 && /^#{2,6}\s*/m.test(trimmedForValidation);
 
@@ -1863,13 +1888,17 @@ export const useBattleEngine = () => {
             return;
           }
 
+          setResultWebReady(authoritativeWebContract && authoritativeStreamDone);
+
           if (hasMetaImpacts && !trimmedForValidation) {
             setError('⚠️ 战报正文为空，但检测到角色更新元数据，已尝试继续更新角色数据。');
           }
 
           if (settings.writeNarrativeHistory) {
             await appendArenaNarrativeHistoryResult({
-              title: extractTitleFromBattleMarkdown(markdownForUi),
+              title: authoritativeWebContract
+                ? metaOverride?.report?.headline?.trim() || 'Web 战报'
+                : extractTitleFromBattleMarkdown(markdownForUi),
               contentMarkdown: markdownForUi,
               generationId: resumableGenerationId ?? null,
             });
@@ -1977,6 +2006,9 @@ export const useBattleEngine = () => {
     remainingTime,
     battleMode,
     generationMode,
+    reportFormat,
+    setResultReportFormat,
+    setResultWebReady,
     arenaFreeRankingEnabled,
     combatants,
     scenario,

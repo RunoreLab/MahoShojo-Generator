@@ -11,6 +11,7 @@ import {
 
 const sharedConfig = {
   battleMode: 'classic' as const,
+  reportFormat: 'markdown' as const,
   combatants: [{
     key: 'host-local:character:1',
     displayName: '角色',

@@ -31,6 +31,10 @@ import type { AIReasoningEnvelope } from '@/types/ai-reasoning';
 import type { BattleReportIllustrationAsset } from '@/components/BattleReportCard';
 
 interface StreamingBattleReportCardProps {
+    /** 共享卡片外壳内的已隔离 Web 内容。 */
+    reportContent?: React.ReactNode;
+    /** Web 显示不支持卡片截图或 Markdown 导出。 */
+    disableExport?: boolean;
     /** 流式输入的 Markdown 文本内容 */
     content: string;
     onSaveImage?: (imageUrl: string) => void;
@@ -74,6 +78,8 @@ interface StreamingBattleReportCardProps {
 
 const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
     content,
+    reportContent,
+    disableExport = false,
     onSaveImage,
     mode,
     scenarioName,
@@ -646,13 +652,13 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
 
                 {/* Markdown 内容渲染区域 */}
                 <div className="min-h-[200px]">
-                    <ReactMarkdown
+                    {reportContent ?? <ReactMarkdown
                         remarkPlugins={[remarkGfm, remarkBattleTable, [remarkMath, { singleDollarTextMath: true }]]}
                         rehypePlugins={[[rehypeKatex, { throwOnError: false, strict: 'ignore' }]]}
                         components={markdownComponents}
                     >
                         {markdownBody}
-                    </ReactMarkdown>
+                    </ReactMarkdown>}
                     {/* 闪烁光标，模拟打字效果 */}
                     {isStreaming && (
                         <span className="inline-block w-2 h-4 bg-pink-500 animate-pulse align-middle ml-1"></span>
@@ -722,7 +728,7 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
                 )}
 
                 {/* 底部按钮 */}
-                <div className="buttons-container flex gap-2 justify-center mt-6 pt-4 border-t border-gray-700" style={{ alignItems: 'stretch' }}>
+                {!disableExport && <div className="buttons-container flex gap-2 justify-center mt-6 pt-4 border-t border-gray-700" style={{ alignItems: 'stretch' }}>
                     {onSaveImage && (
                         <button
                             onClick={isStreaming && onStopGeneration ? onStopGeneration : handleSaveImage}
@@ -738,7 +744,7 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
                     >
                         📄 下载记录
                     </button>
-                </div>
+                </div>}
 
                 {/* Logo占位符，用于截图 */}
                 <div

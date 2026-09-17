@@ -8,6 +8,7 @@ import {
   MAX_OPAQUE_KEY_LENGTH,
 } from './limits';
 import {
+  ArenaReportFormatSchema,
   BattleModeSchema,
   CharacterDataCardRefSchema,
   DisplayNameSchema,
@@ -120,6 +121,7 @@ export type MaterialEntry = z.infer<typeof MaterialEntrySchema>;
 export const ArenaRoomSharedConfigSchema = z
   .object({
     battleMode: BattleModeSchema,
+    reportFormat: ArenaReportFormatSchema.default('markdown'),
     combatants: z.array(CombatantEntrySchema).max(MAX_COMBATANTS),
     teams: z.array(TeamAssignmentSchema).max(MAX_COMBATANTS),
     scenario: ScenarioEntrySchema,
