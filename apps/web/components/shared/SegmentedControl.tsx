@@ -31,14 +31,14 @@ export function SegmentedControl<T extends string>({ label, value, options, onCh
             title={option.description}
             disabled={disabled}
             onClick={() => onChange(option.value)}
-            className={`flex min-h-11 min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-full px-2 py-2 text-xs font-semibold transition-colors duration-200 sm:flex-row sm:gap-2 sm:text-sm motion-reduce:transition-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink-500 disabled:cursor-not-allowed disabled:opacity-50 ${
+            className={`flex min-h-11 min-w-0 flex-auto flex-col items-center justify-center gap-1 rounded-full px-2 py-2 text-xs font-semibold transition-colors duration-200 sm:flex-row sm:gap-2 sm:text-sm motion-reduce:transition-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink-500 disabled:cursor-not-allowed disabled:opacity-50 ${
               value === option.value
                 ? 'bg-white text-pink-600 shadow-sm dark:bg-gray-700 dark:text-pink-300'
                 : 'text-gray-600 enabled:hover:bg-white/60 enabled:hover:text-gray-900 dark:text-gray-300 dark:enabled:hover:bg-gray-700 dark:enabled:hover:text-white'
             }`}
           >
-            <span aria-hidden="true" className="flex h-4 items-center justify-center text-base [&>svg]:size-4">{option.icon}</span>
-            <span>{option.label}</span>
+            <span aria-hidden="true" className="flex h-4 shrink-0 items-center justify-center text-base [&>svg]:size-4">{option.icon}</span>
+            <span className="whitespace-nowrap">{option.label}</span>
           </button>
         ))}
       </div>

@@ -35,6 +35,8 @@ interface StreamingBattleReportCardProps {
     reportContent?: React.ReactNode;
     /** Web 显示不支持卡片截图或 Markdown 导出。 */
     disableExport?: boolean;
+    /** 与默认导出操作共用卡片底部操作栏。 */
+    additionalActions?: React.ReactNode;
     /** 流式输入的 Markdown 文本内容 */
     content: string;
     onSaveImage?: (imageUrl: string) => void;
@@ -80,6 +82,7 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
     content,
     reportContent,
     disableExport = false,
+    additionalActions,
     onSaveImage,
     mode,
     scenarioName,
@@ -728,8 +731,8 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
                 )}
 
                 {/* 底部按钮 */}
-                {!disableExport && <div className="buttons-container flex gap-2 justify-center mt-6 pt-4 border-t border-gray-700" style={{ alignItems: 'stretch' }}>
-                    {onSaveImage && (
+                {(!disableExport || additionalActions != null) && <div className="buttons-container flex flex-wrap gap-2 justify-center mt-6 pt-4 border-t border-gray-700" style={{ alignItems: 'stretch' }}>
+                    {!disableExport && onSaveImage && (
                         <button
                             onClick={isStreaming && onStopGeneration ? onStopGeneration : handleSaveImage}
                             disabled={isSavingImage}
@@ -738,12 +741,13 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
                             {isStreaming && onStopGeneration ? '⏹ 停止生成' : isSavingImage ? '生成中...' : '📱 保存为图片'}
                         </button>
                     )}
-                    <button
+                    {!disableExport && <button
                         onClick={handleSaveMarkdown}
                         className="save-button flex-1 bg-white/10 hover:bg-white/20 text-white py-2 px-4 rounded transition-all"
                     >
                         📄 下载记录
-                    </button>
+                    </button>}
+                    {additionalActions}
                 </div>}
 
                 {/* Logo占位符，用于截图 */}

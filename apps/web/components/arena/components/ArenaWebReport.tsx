@@ -101,7 +101,7 @@ export function ArenaWebReport({ content, ready, roomId, children }: {
   content: string;
   ready: boolean;
   roomId?: string;
-  children: (webContent: ReactNode | undefined) => ReactNode;
+  children: (webContent: ReactNode | undefined, actions: ReactNode) => ReactNode;
 }) {
   const { accepted, accept } = useWebConsent(roomId);
   const [displayMode, setDisplayMode] = useState<ArenaWebDisplayMode>('web');
@@ -152,8 +152,7 @@ export function ArenaWebReport({ content, ready, roomId, children }: {
       {children(showingWeb ? (
         <iframe key={reload} title="AI Web 战报" sandbox="allow-scripts" referrerPolicy="no-referrer"
           srcDoc={stripAllStreamMetaComments(content)} className="h-[75vh] min-h-[360px] w-full rounded-lg border-0 bg-white" />
-      ) : undefined)}
-      <div className="buttons-container flex gap-2 justify-center mt-6 pt-4 border-t border-gray-700" style={{ alignItems: 'stretch' }}>
+      ) : undefined, <>
         {showingWeb ? <button
           type="button"
           onClick={() => setReload((value) => value + 1)}
@@ -171,7 +170,7 @@ export function ArenaWebReport({ content, ready, roomId, children }: {
         >
           🌐 下载 HTML
         </button>
-      </div>
+      </>)}
       <WebReportConsentDialog open={ready && confirming && !accepted} onCancel={() => { setConfirming(false); setDisplayMode('ordinary'); }} onAccept={(remember) => {
         accept(remember);
         setConfirming(false);

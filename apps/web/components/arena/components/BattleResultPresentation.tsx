@@ -170,10 +170,11 @@ function StreamingResult({ report, onSaveImage, adjudicationResults }: {
   onSaveImage?: BattleResultPresentationProps['onSaveImage'];
   adjudicationResults?: BattleResultPresentationProps['adjudicationResults'];
 }) {
-  const renderCard = (webContent?: ReactNode) => (
+  const renderCard = (webContent?: ReactNode, actions?: ReactNode) => (
     <StreamingBattleReportCard
       content={report.content}
       reportContent={webContent}
+      additionalActions={actions}
       disableExport={webContent != null}
       onSaveImage={onSaveImage}
       mode={report.mode}

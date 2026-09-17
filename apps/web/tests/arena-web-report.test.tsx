@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ArenaReportFormatSelector, ArenaWebReport } from '@/components/arena/components/ArenaWebReport';
 import { downloadBlob } from '@/lib/client/blobUrl';
+import { BattleResultPresentation } from '@/components/arena/components/BattleResultPresentation';
 
 vi.mock('@/lib/client/blobUrl', () => ({ downloadBlob: vi.fn() }));
 
@@ -17,7 +18,10 @@ const click = async (text: string) => {
 };
 const viewer = (roomId: string, ready = true, content = source) => (
   <ArenaWebReport key={roomId} roomId={roomId} ready={ready} content={content}>
-    {(web) => web ?? <div data-testid="ordinary">{content}</div>}
+    {(web, actions) => <section>
+      {web ?? <div data-testid="ordinary">{content}</div>}
+      <div className="buttons-container">{actions}</div>
+    </section>}
   </ArenaWebReport>
 );
 
@@ -35,6 +39,28 @@ afterEach(async () => {
 });
 
 describe('Web 战报的本地执行许可', () => {
+  it('Web 与普通显示的操作均位于真实战报卡片的同一个底部操作栏', async () => {
+    window.localStorage.setItem('arena.web-report-consent.v1.room.card-actions', 'accepted');
+    await act(async () => root.render(<BattleResultPresentation
+      report={{ format: 'stream-web', content: source, webReady: true, webConsentScope: 'card-actions' }}
+      onSaveImage={vi.fn()}
+    />));
+    const frame = container.querySelector('iframe')!;
+    const toolbar = container.querySelector('.buttons-container')!;
+    expect(toolbar.parentElement?.contains(frame)).toBe(true);
+    expect(toolbar.textContent).toContain('重新加载');
+    expect(toolbar.textContent).toContain('下载 HTML');
+    expect(toolbar.textContent).not.toContain('保存为图片');
+    expect(toolbar.textContent).not.toContain('下载记录');
+    await click('普通显示');
+    expect(container.querySelectorAll('.buttons-container')).toHaveLength(1);
+    expect(toolbar.isConnected).toBe(true);
+    expect(toolbar.textContent).toContain('保存为图片');
+    expect(toolbar.textContent).toContain('下载记录');
+    expect(toolbar.textContent).toContain('下载 HTML');
+    expect(toolbar.textContent).not.toContain('重新加载');
+  });
+
   it('仅完整战报可下载 HTML；取消执行后仍可下载，保留脚本并移除机器 meta', async () => {
     const content = `${source}\n<!-- MAHOSHOJO_ARENA_META {"version":1,"report":{"winner":"甲"}} -->`;
     await act(async () => root.render(viewer('download', false, content)));
