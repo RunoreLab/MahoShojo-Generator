@@ -603,6 +603,11 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         mode: 'auto',
         models: [
             {
+                value: 'agnes-3.0-flash',
+                label: 'Agnes 3.0 Flash',
+                description: 'Agnes 新一代文本模型，面向 Agent 工具与高质量通用生成场景。'
+            },
+            {
                 value: 'agnes-2.5-flash',
                 label: 'Agnes 2.5 Flash',
                 description: '由 Sapiens AI 开发的快速高效的语言模型，在代码理解、工程修复、多步骤任务执行，以及复杂推理能力上均有显著提升。'
@@ -1274,7 +1279,8 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         type: 'deepseek',
         mode: 'auto',
         models: [
-            { value: 'deepseek-v4-flash-0731', label: 'DeepSeek V4 Flash', description: 'DeepSeek V4 Flash 正式版，Agent 能力大幅增强，百万级上下文，兼顾质量与成本。' },
+            { value: 'deepseek-flash', label: 'DeepSeek V4.1 Flash', description: 'DeepSeek V4.1 Flash 官方 API 模型，原生支持多模态，适合高吞吐 Agent、推理与通用生成。' },
+            { value: 'deepseek-v4-flash-0731', label: 'DeepSeek V4 Flash（兼容 ID）', description: '保留旧 V4 Flash catalog ID 以兼容既有配置；请求仍按现有兼容解析逻辑发送。' },
             { value: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro', description: 'DeepSeek V4 的完全体，适合复杂分析、长文本写作与更高要求的生成任务。' },
             { value: 'deepseek-chat', label: 'DeepSeek-V3.2', description: '通用对话与分析模型，适合日常问答、写作与总结。' },
             { value: 'deepseek-reasoner', label: 'DeepSeek-V3.2 思考模式', description: '思考模式会拉长推理链路，适合复杂问题与多步分析。' },

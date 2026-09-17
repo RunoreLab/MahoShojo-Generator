@@ -186,7 +186,12 @@ const CAPABILITIES = new Map<string, ModelGenerationCapabilities>([
     maxOutputTokens: buildMaxOutputTokens(384_000),
   })],
 
-  // DeepSeek 官方 API canonical modelId；同时保留旧 catalog ID 的能力别名以兼容 UI/localStorage。
+  // DeepSeek 官方 API 当前 canonical modelId 为 deepseek-flash；同时保留 V4 Flash 旧 ID 的能力别名以兼容 UI/localStorage。
+  [buildKey('deepseek', 'deepseek-flash'), buildCapabilities({
+    temperature: SUPPORTED_TEMPERATURE,
+    maxOutputTokens: buildMaxOutputTokens(384_000),
+    thinking: buildThinking('deepseek-thinking-toggle'),
+  })],
   [buildKey('deepseek', 'deepseek-v4-flash'), buildCapabilities({
     temperature: SUPPORTED_TEMPERATURE,
     maxOutputTokens: buildMaxOutputTokens(384_000),
