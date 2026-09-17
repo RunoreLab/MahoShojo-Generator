@@ -1,5 +1,7 @@
 # 文档导航
 
+Arena Web 战报当前规格：[Arena Web 战报生成与沙箱渲染规格](./specs/2026-09-17_080700_Arena%20Web战报生成与沙箱渲染规格.md)。单人（含 `/battle`）支持流式/非流式 HTML，多人沿用服务器权威流式生成；浏览器本地确认后才执行完成的沙箱文档，默认格式仍为 Markdown。
+
 Arena 提案人工裁决最新入口：[Arena 提案房主逐项覆盖修订](./specs/2026-09-16_164703_Arena提案房主逐项覆盖修订.md)。允许房主逐项采用旧提案值，保留引用/权限/结构校验及覆盖审阅版本保护；不强制成员 rebase。
 
 Admin 业务迁移当前执行入口：[独立线上管理端迁移实施计划](./plans/2026-09-12_130000_独立线上管理端迁移实施计划.md)。新域名为 `admin.mahoshojo.colanns.me`；历史材料中的 `homura-admin.colanns.me` 实为 Arcane Docker 管理入口。
