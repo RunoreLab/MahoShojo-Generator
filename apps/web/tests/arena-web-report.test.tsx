@@ -3,6 +3,9 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ArenaReportFormatSelector, ArenaWebReport } from '@/components/arena/components/ArenaWebReport';
+import { downloadBlob } from '@/lib/client/blobUrl';
+
+vi.mock('@/lib/client/blobUrl', () => ({ downloadBlob: vi.fn() }));
 
 const source = '<!doctype html><html><body><button onclick="this.textContent=123">互动</button></body></html>';
 let container: HTMLDivElement;
@@ -32,6 +35,37 @@ afterEach(async () => {
 });
 
 describe('Web 战报的本地执行许可', () => {
+  it('仅完整战报可下载 HTML；取消执行后仍可下载，保留脚本并移除机器 meta', async () => {
+    const content = `${source}\n<!-- MAHOSHOJO_ARENA_META {"version":1,"report":{"winner":"甲"}} -->`;
+    await act(async () => root.render(viewer('download', false, content)));
+    await click('🌐 下载 HTML');
+    expect(downloadBlob).not.toHaveBeenCalled();
+    await act(async () => root.render(viewer('download', true, content)));
+    await click('取消');
+    expect(container.textContent).toContain('不再受本站沙箱保护');
+    await click('🌐 下载 HTML');
+    expect(document.querySelector('iframe')).toBeNull();
+    expect(downloadBlob).toHaveBeenCalledOnce();
+    const [blob, filename] = vi.mocked(downloadBlob).mock.calls[0];
+    expect(blob.type).toBe('text/html;charset=utf-8');
+    expect(filename).toMatch(/^魔法少女速报_[\dT-]+Z\.html$/);
+    const downloaded = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(blob);
+    });
+    expect(downloaded).toBe(source);
+    await click('Web 显示');
+    await click('继续使用 Web');
+    await click('🌐 下载 HTML');
+    expect(downloadBlob).toHaveBeenCalledTimes(2);
+    expect(document.querySelector('iframe')?.getAttribute('sandbox')).toBe('allow-scripts');
+    await act(async () => root.render(viewer('download', false, content)));
+    await click('🌐 下载 HTML');
+    expect(downloadBlob).toHaveBeenCalledTimes(2);
+  });
+
   it('生成期间禁用格式切换，不打开确认也不更改格式', async () => {
     const change = vi.fn();
     await act(async () => root.render(<ArenaReportFormatSelector value="markdown" onChange={change} disabled roomId="disabled-selector" />));

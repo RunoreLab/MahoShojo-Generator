@@ -5,6 +5,7 @@ import { FileText, PanelsTopLeft } from 'lucide-react';
 import { SegmentedControl, type SegmentedOption } from '@/components/shared/SegmentedControl';
 import { BaseModal } from '@/components/shared/BaseModal';
 import { stripAllStreamMetaComments } from '@/lib/arena/stream-meta';
+import { downloadBlob } from '@/lib/client/blobUrl';
 
 const CONSENT_KEY = 'arena.web-report-consent.v1';
 const FORMAT_OPTIONS: readonly SegmentedOption<'markdown' | 'web'>[] = [
@@ -109,6 +110,12 @@ export function ArenaWebReport({ content, ready, roomId, children }: {
     }
   }, [ready, accepted, asked]);
   const showingWeb = ready && accepted && !ordinary;
+  const downloadHtml = () => {
+    if (!ready) return;
+    // BOM 确保缺少 charset 声明的生成文档在本地打开时仍按 UTF-8 解码。
+    const blob = new Blob(['\uFEFF', stripAllStreamMetaComments(content)], { type: 'text/html;charset=utf-8' });
+    downloadBlob(blob, `魔法少女速报_${new Date().toISOString().replace(/[:.]/g, '-')}.html`);
+  };
   return (
     <>
       <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
@@ -118,8 +125,13 @@ export function ArenaWebReport({ content, ready, roomId, children }: {
           else setConfirming(true);
         }} className="rounded-lg border px-3 py-2 disabled:opacity-50">Web 显示</button>
         {showingWeb ? <button type="button" onClick={() => setReload((value) => value + 1)} className="rounded-lg border px-3 py-2">重新加载 Web</button> : null}
+        <button type="button" disabled={!ready} onClick={downloadHtml} className="rounded-lg border px-3 py-2 disabled:opacity-50">🌐 下载 HTML</button>
         {!ready ? <span className="text-gray-500">生成完整战报后可使用 Web 显示。</span> : null}
       </div>
+      {ready ? <p className="mb-3 text-xs text-gray-500">
+        下载的 HTML 在浏览器直接打开时不再受本站沙箱保护；外部资源仍可能需要联网，页面内的交互进度不会保存。
+        {showingWeb ? '如需保存图片，可使用浏览器截图，或切换普通显示保存普通战报图片。' : null}
+      </p> : null}
       {children(showingWeb ? (
         <iframe key={reload} title="AI Web 战报" sandbox="allow-scripts" referrerPolicy="no-referrer"
           srcDoc={stripAllStreamMetaComments(content)} className="h-[75vh] min-h-[360px] w-full rounded-lg border-0 bg-white" />
