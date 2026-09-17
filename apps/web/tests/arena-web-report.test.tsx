@@ -42,6 +42,8 @@ describe('Web 战报的本地执行许可', () => {
     expect(downloadBlob).not.toHaveBeenCalled();
     await act(async () => root.render(viewer('download', true, content)));
     await click('取消');
+    expect(container.querySelector('legend')?.textContent).toBe('显示方式');
+    expect(container.querySelector('[data-testid="ordinary"]')?.nextElementSibling?.classList.contains('buttons-container')).toBe(true);
     expect(container.textContent).toContain('不再受本站沙箱保护');
     await click('🌐 下载 HTML');
     expect(document.querySelector('iframe')).toBeNull();
@@ -112,7 +114,8 @@ describe('Web 战报的本地执行许可', () => {
     await click('Web 显示');
     expect(document.querySelector('iframe')).toBeTruthy();
     const oldFrame = document.querySelector('iframe');
-    await click('重新加载 Web');
+    expect(oldFrame?.nextElementSibling?.classList.contains('buttons-container')).toBe(true);
+    await click('↻ 重新加载');
     expect(document.querySelector('iframe')).not.toBe(oldFrame);
     await act(async () => root.render(viewer('final-only', false, content)));
     expect(document.querySelector('iframe')).toBeNull();

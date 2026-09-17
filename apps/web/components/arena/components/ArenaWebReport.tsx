@@ -12,6 +12,11 @@ const FORMAT_OPTIONS: readonly SegmentedOption<'markdown' | 'web'>[] = [
   { value: 'markdown', label: 'Markdown', icon: <FileText />, description: '以正文为主的战报，支持标题、表格与公式，适合阅读和保存图片。' },
   { value: 'web', label: 'Web（实验性）', icon: <PanelsTopLeft />, description: '生成带自定义排版、动画或交互的网页；完成后经本地确认展示，可能加载第三方资源。' },
 ];
+type ArenaWebDisplayMode = 'ordinary' | 'web';
+const DISPLAY_OPTIONS: readonly SegmentedOption<ArenaWebDisplayMode>[] = [
+  { value: 'ordinary', label: '普通显示', icon: <FileText />, description: '使用普通战报卡片展示正文，适合阅读、保存图片和下载战斗记录。' },
+  { value: 'web', label: 'Web 显示', icon: <PanelsTopLeft />, description: '在浏览器隔离框架中展示生成的网页战报，保留自定义排版和交互。' },
+];
 const sessionConsents = new Set<string>();
 const consentListeners = new Set<() => void>();
 const consentKey = (roomId?: string) => roomId ? `${CONSENT_KEY}.room.${roomId}` : CONSENT_KEY;
@@ -99,7 +104,7 @@ export function ArenaWebReport({ content, ready, roomId, children }: {
   children: (webContent: ReactNode | undefined) => ReactNode;
 }) {
   const { accepted, accept } = useWebConsent(roomId);
-  const [ordinary, setOrdinary] = useState(false);
+  const [displayMode, setDisplayMode] = useState<ArenaWebDisplayMode>('web');
   const [confirming, setConfirming] = useState(false);
   const [asked, setAsked] = useState(false);
   const [reload, setReload] = useState(0);
@@ -109,7 +114,19 @@ export function ArenaWebReport({ content, ready, roomId, children }: {
       setConfirming(true);
     }
   }, [ready, accepted, asked]);
-  const showingWeb = ready && accepted && !ordinary;
+  const showingWeb = ready && accepted && displayMode === 'web';
+  const handleDisplayModeChange = (nextMode: ArenaWebDisplayMode) => {
+    if (nextMode === 'ordinary') {
+      setDisplayMode('ordinary');
+      setConfirming(false);
+      return;
+    }
+    if (accepted) {
+      setDisplayMode('web');
+      return;
+    }
+    setConfirming(true);
+  };
   const downloadHtml = () => {
     if (!ready) return;
     // BOM 确保缺少 charset 声明的生成文档在本地打开时仍按 UTF-8 解码。
@@ -118,15 +135,15 @@ export function ArenaWebReport({ content, ready, roomId, children }: {
   };
   return (
     <>
-      <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
-        <button type="button" aria-pressed={!showingWeb} onClick={() => { setOrdinary(true); setConfirming(false); }} className="rounded-lg border px-3 py-2">普通显示</button>
-        <button type="button" aria-pressed={showingWeb} disabled={!ready} onClick={() => {
-          if (accepted) setOrdinary(false);
-          else setConfirming(true);
-        }} className="rounded-lg border px-3 py-2 disabled:opacity-50">Web 显示</button>
-        {showingWeb ? <button type="button" onClick={() => setReload((value) => value + 1)} className="rounded-lg border px-3 py-2">重新加载 Web</button> : null}
-        <button type="button" disabled={!ready} onClick={downloadHtml} className="rounded-lg border px-3 py-2 disabled:opacity-50">🌐 下载 HTML</button>
-        {!ready ? <span className="text-gray-500">生成完整战报后可使用 Web 显示。</span> : null}
+      <div className="mb-4 flex flex-wrap items-end gap-3 text-sm">
+        <SegmentedControl
+          label="显示方式"
+          value={showingWeb ? 'web' : 'ordinary'}
+          options={DISPLAY_OPTIONS}
+          disabled={!ready}
+          onChange={handleDisplayModeChange}
+        />
+        {!ready ? <span className="pb-1 text-gray-500">生成完整战报后可使用 Web 显示。</span> : null}
       </div>
       {ready ? <p className="mb-3 text-xs text-gray-500">
         下载的 HTML 在浏览器直接打开时不再受本站沙箱保护；外部资源仍可能需要联网，页面内的交互进度不会保存。
@@ -136,10 +153,29 @@ export function ArenaWebReport({ content, ready, roomId, children }: {
         <iframe key={reload} title="AI Web 战报" sandbox="allow-scripts" referrerPolicy="no-referrer"
           srcDoc={stripAllStreamMetaComments(content)} className="h-[75vh] min-h-[360px] w-full rounded-lg border-0 bg-white" />
       ) : undefined)}
-      <WebReportConsentDialog open={ready && confirming && !accepted} onCancel={() => { setConfirming(false); setOrdinary(true); }} onAccept={(remember) => {
+      <div className="buttons-container flex gap-2 justify-center mt-6 pt-4 border-t border-gray-700" style={{ alignItems: 'stretch' }}>
+        {showingWeb ? <button
+          type="button"
+          onClick={() => setReload((value) => value + 1)}
+          className="save-button flex-1 bg-white/10 hover:bg-white/20 text-white py-2 px-4 rounded transition-all"
+          aria-label="重新加载 Web 战报"
+          title="重新加载 Web 战报"
+        >
+          ↻ 重新加载
+        </button> : null}
+        <button
+          type="button"
+          disabled={!ready}
+          onClick={downloadHtml}
+          className="save-button flex-1 bg-white/10 hover:bg-white/20 text-white py-2 px-4 rounded transition-all disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          🌐 下载 HTML
+        </button>
+      </div>
+      <WebReportConsentDialog open={ready && confirming && !accepted} onCancel={() => { setConfirming(false); setDisplayMode('ordinary'); }} onAccept={(remember) => {
         accept(remember);
         setConfirming(false);
-        setOrdinary(false);
+        setDisplayMode('web');
       }} />
     </>
   );
