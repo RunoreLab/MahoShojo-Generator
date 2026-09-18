@@ -1,5 +1,3 @@
-@import "tailwindcss";
-
 /* 使用CSS层来控制优先级，确保Tailwind类优先 */
 @layer base {
   * {

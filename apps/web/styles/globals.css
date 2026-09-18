@@ -1,5 +1,7 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where([data-color-mode='dark'], [data-color-mode='dark'] *));
+
 /* 使用CSS层来控制优先级，确保Tailwind类优先 */
 @layer base {
   * {
