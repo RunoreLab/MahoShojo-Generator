@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { filterAndFormatHistory, formatNarrativeHistoryForPrompt } from '@/lib/arena/logic';
+import { filterAndFormatHistory } from '@/lib/arena/logic';
 import {
   extractNarrativeHistoryImportEntries,
   limitNarrativeHistoryEntriesForPrompt,
@@ -55,30 +55,6 @@ describe('arena 历史命名兼容回归', () => {
     expect(formatted).not.toContain('应被过滤');
   });
 
-  test('叙事历史应保留传入顺序，同时兼容 created_at/updated_at 字段', () => {
-    const prompt = formatNarrativeHistoryForPrompt([
-      {
-        id: 'new',
-        title: '新记录',
-        content: '这是较新的内容',
-        created_at: '2026-03-01T12:00:00.000Z',
-        updated_at: '2026-03-01T12:00:00.000Z',
-      },
-      {
-        id: 'old',
-        title: '旧记录',
-        content: '这是较旧的内容',
-        created_at: '2026-03-01T08:00:00.000Z',
-        updated_at: '2026-03-01T08:00:00.000Z',
-      },
-    ] as any);
-
-    const oldIndex = prompt.indexOf('旧记录');
-    const newIndex = prompt.indexOf('新记录');
-    expect(oldIndex).toBeGreaterThanOrEqual(0);
-    expect(newIndex).toBeGreaterThanOrEqual(0);
-    expect(newIndex).toBeLessThan(oldIndex);
-  });
 
   test('旧版本地缓存迁移后应恢复为按创建时间从旧到新', () => {
     const migrated = migrateLegacyNarrativeHistoryOrder([

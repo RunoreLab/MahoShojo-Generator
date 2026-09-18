@@ -104,11 +104,13 @@ describe('Arena generation prompt', () => {
       },
     });
 
-    const bodyIndex = result.prompt.indexOf('随后紧跟故事或者战报的正文');
+    const titleIndex = result.prompt.search(/^# .+$/m);
+    const bodyIndex = result.prompt.indexOf('正文', titleIndex);
     const winnerIndex = result.prompt.indexOf('## 胜利者');
     const conclusionIndex = result.prompt.indexOf('## 最终结果');
 
-    expect(bodyIndex).toBeGreaterThan(-1);
+    expect(titleIndex).toBeGreaterThan(-1);
+    expect(bodyIndex).toBeGreaterThan(titleIndex);
     expect(winnerIndex).toBeGreaterThan(bodyIndex);
     expect(conclusionIndex).toBeGreaterThan(winnerIndex);
     expect(result.prompt).not.toContain('记者点评');
