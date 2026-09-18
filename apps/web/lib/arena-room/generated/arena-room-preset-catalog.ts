@@ -84,7 +84,7 @@ export const ARENA_ROOM_PRESET_CATALOG = [
   {
     "id": "M01_centaurea.json",
     "kind": "character",
-    "versionToken": "sha256:12416c3a9974c77297a5e8613f0baddd72ec1246a49317b98c986e2b9d432fc4",
+    "versionToken": "sha256:223615f4b5f35daa3acbd22f611442d5d560d7e0518785466f7363ce3a91effc",
     "displayName": "翠雀",
     "sourceType": "魔法少女/心之花/魔法少女（问卷生成）"
   },
@@ -98,7 +98,7 @@ export const ARENA_ROOM_PRESET_CATALOG = [
   {
     "id": "M02_white_rose.json",
     "kind": "character",
-    "versionToken": "sha256:339a900772ef4c7ed549d12790fc3a8e72b224fa392ce30be553b72f939c922f",
+    "versionToken": "sha256:90bb8c0dcf4f7821a2d8ab01b607a436a0ca9553db7d7174dbefd3676334290c",
     "displayName": "白玫",
     "sourceType": "魔法少女/心之花/魔法少女（问卷生成）"
   },
@@ -203,14 +203,14 @@ export const ARENA_ROOM_PRESET_CATALOG = [
   {
     "id": "M12_greatness_in_simplicity.json",
     "kind": "character",
-    "versionToken": "sha256:c97d965ecbdc4915620f01dcc083265b0f5320d36aa2cee3bbb3e7a8965f0d20",
+    "versionToken": "sha256:8bf44858b77e86b23c5434939f0fd778d6e19c26088ddf70a729c82f116bd5c6",
     "displayName": "雪绒",
     "sourceType": "character"
   },
   {
     "id": "M13_greatness_in_complexity.json",
     "kind": "character",
-    "versionToken": "sha256:db55d4a903e212f5b86c6bf057280532c4da3341b2126342a45e06f1c01a58bb",
+    "versionToken": "sha256:59d35ce04d3d430675a2bfbd8da0c3e7a774f049caad0323687bb1574614606b",
     "displayName": "千日红",
     "sourceType": "character"
   },
@@ -231,14 +231,14 @@ export const ARENA_ROOM_PRESET_CATALOG = [
   {
     "id": "M16_xuemo.json",
     "kind": "character",
-    "versionToken": "sha256:b206acc20224ae2b8e8a03b9e811f80b348959568f32eaf551341fe51402993e",
+    "versionToken": "sha256:8d5961082799080fd7fbb93089e09e0031451c0222ba631443579bb806b73f38",
     "displayName": "雪沫",
     "sourceType": "character"
   },
   {
     "id": "M90_goose.json",
     "kind": "character",
-    "versionToken": "sha256:67d18a37f3331df695ed5efae6ce5c571d15ec8bc816c2564757c93696b999f3",
+    "versionToken": "sha256:42f07fd02da3ba5f43e2ae6b9b87677414311cd1df6d8e38feace2a0d2ef1618",
     "displayName": "鹅",
     "sourceType": "character"
   },
