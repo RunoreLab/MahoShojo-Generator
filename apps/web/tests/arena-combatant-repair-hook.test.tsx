@@ -295,7 +295,7 @@ describe('useCombatantRepair', () => {
         impact: '不得应用的修复',
       }],
     })));
-    expect(useBattleStore.getState().tryBeginCombatantMutation()).toBe(true);
+    act(() => expect(useBattleStore.getState().tryBeginCombatantMutation()).toBe(true));
 
     await act(async () => currentHook!.applyArenaRepairDraft());
 
@@ -303,7 +303,7 @@ describe('useCombatantRepair', () => {
     expect(useBattleStore.getState().combatants).toEqual([originalCombatant]);
     expect(useBattleStore.getState().repairAppliedGenerationId).toBeNull();
 
-    useBattleStore.getState().endCombatantMutation();
+    act(() => useBattleStore.getState().endCombatantMutation());
     await act(async () => root.unmount());
     container.remove();
   });

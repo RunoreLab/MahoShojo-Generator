@@ -63,6 +63,7 @@ afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
   queryClient.clear();
+  vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   localStorage.clear();
@@ -155,6 +156,7 @@ describe('shared Arena scenario section via solo adapter', () => {
   });
 
   it('预设情景分页可在全部页间翻页：15 个预设应有 4 页且最后一页可达', async () => {
+    vi.useFakeTimers();
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const url = input instanceof URL ? input.toString() : input;
       if (url.includes('/api/get-scenario-presets')) return Response.json(SCENARIO_PRESET_LIST);
@@ -166,11 +168,13 @@ describe('shared Arena scenario section via solo adapter', () => {
     const presetHeader = [...container.querySelectorAll('button')]
       .find((candidate) => candidate.textContent?.includes('预设情景（内置）'));
     if (!presetHeader) throw new Error('preset section header not found');
-    act(() => presetHeader.click());
-
-    await vi.waitFor(() => {
-      expect(container.textContent).toContain('第 1 / 4 页');
+    await act(async () => {
+      presetHeader.click();
+      // React Query 的 observer 通知通过定时器发布。
+      await vi.runAllTimersAsync();
     });
+
+    expect(container.textContent).toContain('第 1 / 4 页');
 
     act(() => button('下一页').click());
     expect(container.textContent).toContain('第 2 / 4 页');

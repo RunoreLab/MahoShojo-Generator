@@ -113,6 +113,7 @@ describe('Arena editor safe roster presentation', () => {
           items={[safeStub]}
           renderItem={(item, index) => (
             <ArenaRosterRow
+              key={item.key}
               item={item}
               index={index}
               total={1}

@@ -395,7 +395,7 @@ describe('Arena room Proposal workspace', () => {
         versionToken: expect.stringMatching(/^sha256:/),
       },
     });
-    editor.dispose();
+    await act(async () => editor.dispose());
   });
 
   it('随机匹配复用公开角色入口并只写入 exact ref', async () => {
@@ -442,7 +442,7 @@ describe('Arena room Proposal workspace', () => {
     });
     expect(change).not.toHaveProperty('key');
     expect(JSON.stringify(change)).not.toContain('secret');
-    editor.dispose();
+    await act(async () => editor.dispose());
   });
 
   it('expectedBase 摘要保留 preset namespace', () => {
@@ -505,7 +505,7 @@ describe('Arena room Proposal workspace', () => {
     await act(async () => button('浏览在线角色库').click());
     const modal = container.querySelector('[data-testid="battle-data-modal"]');
     expect(modal?.getAttribute('data-selected-card-ids')).toBe('');
-    editor.dispose();
+    await act(async () => editor.dispose());
   });
 
   it('暴露共享列表移动控件并产生五类全序 typed change', async () => {
@@ -579,7 +579,7 @@ describe('Arena room Proposal workspace', () => {
     // teamKey 摘要解析为分队 displayName。
     expect(document.body.textContent).toContain('调整队伍 A 队 内角色顺序');
     expect(document.body.textContent).toContain('调整素材顺序');
-    editor.dispose();
+    await act(async () => editor.dispose());
   });
 
   it('成员工作区提供同步配置入口与底部生成区替代按钮', async () => {
@@ -637,7 +637,7 @@ describe('Arena room Proposal workspace', () => {
     await act(async () => button('同步配置').click());
     await act(async () => button('确认丢弃并同步').click());
     expect(onSyncFromRoom).toHaveBeenCalledTimes(2);
-    editor.dispose();
+    await act(async () => editor.dispose());
   });
 
   it('成员随机匹配进行中禁用两处同步配置入口，避免中途销毁提案草稿', async () => {
@@ -695,7 +695,7 @@ describe('Arena room Proposal workspace', () => {
       expect(onSyncFromRoom).not.toHaveBeenCalled();
     } finally {
       globalThis.fetch = originalFetch;
-      editor.dispose();
+      await act(async () => editor.dispose());
     }
   });
 
@@ -751,7 +751,7 @@ describe('Arena room Proposal workspace', () => {
     const auxBrowseAfter = buttonsWithText('浏览在线情景库');
     expect(auxBrowseAfter.length).toBe(2);
     expect(auxBrowseAfter[1]!.disabled).toBe(false);
-    editor.dispose();
+    await act(async () => editor.dispose());
   });
 
   it('素材与辅助情景入口投影参考项联合预算，预算用尽时禁用', async () => {
@@ -805,7 +805,7 @@ describe('Arena room Proposal workspace', () => {
     const auxBrowseButtons = buttonsWithText('浏览在线情景库');
     expect(auxBrowseButtons.length).toBe(2);
     expect(auxBrowseButtons[1]!.disabled).toBe(true);
-    editor.dispose();
+    await act(async () => editor.dispose());
   });
 });
 

@@ -3,7 +3,6 @@
 import React, { useState } from 'react';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { flushSync } from 'react-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { BaseModal } from '@/components/shared/BaseModal';
@@ -80,7 +79,7 @@ beforeEach(() => {
       return jsonResponse({ success: true, cards: [card] });
     }
     if (url.includes('/api/data-card-meta-batch')) {
-      return jsonResponse({ success: true, items: {} });
+      return jsonResponse({ success: true, items: { [card.id]: { metrics: null, strict: null } } });
     }
     if (url.includes('/api/data-card-meta?')) {
       return jsonResponse({
@@ -92,7 +91,7 @@ beforeEach(() => {
       });
     }
     if (url.includes('/api/badges/batch')) {
-      return jsonResponse({ success: true, items: {} });
+      return jsonResponse({ success: true, items: { [card.user_id]: [] } });
     }
     if (url.includes('/api/tags')) {
       return jsonResponse({
@@ -193,7 +192,7 @@ describe('DataCardReportModal accessibility contract', () => {
       );
     };
 
-    flushSync(() => root.render(<Harness />));
+    await act(async () => root.render(<Harness />));
     const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
     expect(dialog).not.toBeNull();
     expect(dialog?.getAttribute('aria-modal')).toBe('true');
@@ -216,8 +215,8 @@ describe('DataCardReportModal accessibility contract', () => {
     trigger.remove();
   });
 
-  it('focuses the dialog itself while all report actions are disabled', () => {
-    flushSync(() => root.render(
+  it('focuses the dialog itself while all report actions are disabled', async () => {
+    await act(async () => root.render(
       <DataCardReportModal
         isOpen
         cardName="角色一"
@@ -261,8 +260,7 @@ describe('BattleDataModal accessibility and capabilities', () => {
       );
     };
 
-    flushSync(() => root.render(<Harness />));
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await act(async () => root.render(<Harness />));
 
     const dialog = document.querySelector('[role="dialog"]');
     expect(dialog).not.toBeNull();
@@ -298,7 +296,7 @@ describe('BattleDataModal accessibility and capabilities', () => {
   });
 
   it('keeps the multi-mode quick toggle compact with an enlarged touch hit area', async () => {
-    flushSync(() => root.render(
+    await act(async () => root.render(
       <BattleDataModal
         isOpen
         onClose={vi.fn()}
@@ -310,7 +308,6 @@ describe('BattleDataModal accessibility and capabilities', () => {
         allowCardDetails={false}
       />,
     ));
-    await new Promise((resolve) => setTimeout(resolve, 10));
 
     const dialog = document.querySelector('[role="dialog"]');
     const quickToggle = dialog?.querySelector<HTMLButtonElement>('button[aria-label="加入"]');
@@ -323,7 +320,7 @@ describe('BattleDataModal accessibility and capabilities', () => {
   });
 
   it('keeps card details as the topmost keyboard modal and restores its trigger', async () => {
-    flushSync(() => root.render(
+    await act(async () => root.render(
       <BattleDataModal
         isOpen
         onClose={vi.fn()}
@@ -343,7 +340,7 @@ describe('BattleDataModal accessibility and capabilities', () => {
       .find((button) => button.textContent?.trim() === '详情');
     expect(detailButton).toBeDefined();
     detailButton?.focus();
-    act(() => detailButton?.click());
+    await act(async () => detailButton?.click());
 
     const dialogs = [...document.querySelectorAll<HTMLElement>('[role="dialog"]')];
     expect(dialogs).toHaveLength(2);

@@ -100,16 +100,18 @@ describe('useStreamCombatantUpdater', () => {
     await act(async () => root.render(<Harness />));
     if (!currentHook) throw new Error('updater hook 未挂载');
 
-    await expect(currentHook.updateCombatants({
-      combatants: [{
-        type: originalCombatant.type,
-        data: originalCombatant.data,
-        isNative: false,
-        isPreset: false,
-      }],
-    }, {
-      canCommit: () => false,
-    })).rejects.toThrow('角色更新上下文已变化');
+    await act(async () => {
+      await expect(currentHook!.updateCombatants({
+        combatants: [{
+          type: originalCombatant.type,
+          data: originalCombatant.data,
+          isNative: false,
+          isPreset: false,
+        }],
+      }, {
+        canCommit: () => false,
+      })).rejects.toThrow('角色更新上下文已变化');
+    });
 
     expect(useBattleStore.getState().combatants).toEqual([originalCombatant]);
     expect(useBattleStore.getState().updatedCombatants).toEqual([]);
@@ -257,27 +259,29 @@ describe('useStreamCombatantUpdater', () => {
     await act(async () => root.render(<Harness />));
     if (!currentHook) throw new Error('updater hook 未挂载');
 
-    const pending = currentHook.updateCombatants({
-      generationId: 'generation-race-001',
-      combatants: [{
-        type: originalCombatant.type,
-        data: originalCombatant.data,
-        isPreset: false,
-        filename: originalCombatant.filename,
-      }],
-    });
-    useBattleStore.setState({ combatants: [replacement] });
-    resolveResponse(new Response(JSON.stringify({
-      success: true,
-      updatedCombatants: [{
-        combatantIndex: 0,
-        data: { name: '角色 A', marker: 'stale-result' },
-        isNative: false,
-      }],
-      warnings: [],
-    }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    await act(async () => {
+      const pending = currentHook!.updateCombatants({
+        generationId: 'generation-race-001',
+        combatants: [{
+          type: originalCombatant.type,
+          data: originalCombatant.data,
+          isPreset: false,
+          filename: originalCombatant.filename,
+        }],
+      });
+      useBattleStore.setState({ combatants: [replacement] });
+      resolveResponse(new Response(JSON.stringify({
+        success: true,
+        updatedCombatants: [{
+          combatantIndex: 0,
+          data: { name: '角色 A', marker: 'stale-result' },
+          isNative: false,
+        }],
+        warnings: [],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
 
-    await expect(pending).rejects.toThrow('角色更新上下文已变化');
+      await expect(pending).rejects.toThrow('角色更新上下文已变化');
+    });
     expect(useBattleStore.getState().combatants).toEqual([replacement]);
 
     await act(async () => root.unmount());
