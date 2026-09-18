@@ -138,19 +138,3 @@ export const SYSTEM_PROMPTS = {
 现在，请你开始创作。
 `,
 };
-
-export const getSystemPrompt = (mode: string, combatants: any[]): string => {
-  if (mode === 'daily') return SYSTEM_PROMPTS.daily;
-  if (mode === 'kizuna') return SYSTEM_PROMPTS.kizuna;
-  if (mode === 'scenario') return SYSTEM_PROMPTS.scenario;
-
-  const participantTypes = new Set(combatants.map((c: any) => c.type));
-  const hasOnlyMagicalGirls = participantTypes.size === 1 && participantTypes.has('magical-girl');
-  const hasOnlyCanshou = participantTypes.size === 1 && participantTypes.has('canshou');
-  const hasMagicalAndCanshouOnly = participantTypes.has('magical-girl') && participantTypes.has('canshou') && participantTypes.size === 2;
-
-  if (hasOnlyMagicalGirls) return SYSTEM_PROMPTS.classic;
-  if (hasOnlyCanshou) return SYSTEM_PROMPTS.canshouVsCanshou;
-  if (hasMagicalAndCanshouOnly) return SYSTEM_PROMPTS.magicalGirlVsCanshou;
-  return SYSTEM_PROMPTS.fallback;
-};
