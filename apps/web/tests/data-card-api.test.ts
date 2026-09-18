@@ -66,4 +66,26 @@ describe('dataCardApi.getCardsDetailed', () => {
       (authStorage as typeof authStorage & { fetch: typeof authStorage.fetch }).fetch = originalFetch;
     }
   });
+
+  test('repairQuestionnaireType 使用受控恢复接口并透传结果', async () => {
+    const originalFetch = authStorage.fetch;
+
+    try {
+      (authStorage as typeof authStorage & { fetch: typeof authStorage.fetch }).fetch = vi.fn(async (input, init) => {
+        expect(input).toBe('/api/data-cards/repair-questionnaire-type');
+        expect(init?.method).toBe('POST');
+        expect(JSON.parse(String(init?.body))).toEqual({ id: 'legacy-card' });
+        return new Response(JSON.stringify({ success: true, repaired: true }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      });
+
+      const result = await dataCardApi.repairQuestionnaireType('legacy-card');
+
+      expect(result).toEqual({ success: true, repaired: true });
+    } finally {
+      (authStorage as typeof authStorage & { fetch: typeof authStorage.fetch }).fetch = originalFetch;
+    }
+  });
 });

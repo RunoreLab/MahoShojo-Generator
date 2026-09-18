@@ -31,6 +31,7 @@ import { useAuth } from '@/lib/useAuth';
 import { dataCardApi, authStorage } from '@/lib/auth';
 import { loadAuthMigrationStatus, type AuthMigrationStatus } from '@/components/me/authMigrationStatus';
 import { getDataCardVisibilityValue } from '@/lib/data-card-status';
+import { isQuestionnaireDataCard } from '@/lib/questionnaire-data-card';
 
 // 引入 AdjudicatorEditor 和新类型
 import AdjudicatorEditor from '@/components/AdjudicatorEditor';
@@ -697,7 +698,7 @@ export const CharacterManagerPage: React.FC = () => {
                 setShowDataCardsModal(false);
                 return;
             }
-            if (card?.type === 'questionnaire') {
+            if (isQuestionnaireDataCard(card)) {
                 const raw = typeof card.data === 'string' ? card.data : JSON.stringify(card.data ?? {}, null, 2);
                 openQuestionnaireCompat(raw, {
                     id: card.id,
@@ -792,7 +793,7 @@ export const CharacterManagerPage: React.FC = () => {
             await handleLoadDataCard(card);
             return;
         }
-        if (card?.type === 'questionnaire') {
+        if (isQuestionnaireDataCard(card)) {
             const raw = typeof card.data === 'string' ? card.data : JSON.stringify(card.data ?? {}, null, 2);
             openQuestionnaireCompat(raw, {
                 id: card.id,

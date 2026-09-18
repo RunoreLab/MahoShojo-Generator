@@ -423,6 +423,31 @@ export const updateDataCardByIdAndUser = async (
   return updated.length;
 };
 
+export const repairQuestionnaireDataCardType = async (
+  db: AppDrizzleDb,
+  input: { id: string; userId: number },
+): Promise<number> => {
+  const updated = await db
+    .update(dataCards)
+    .set({
+      type: 'questionnaire',
+      data: sql`json_set(${dataCards.data}, '$.nativeAllowed', json('false'))`,
+      updatedAt: sql`CURRENT_TIMESTAMP`,
+    })
+    .where(
+      and(
+        eq(dataCards.id, input.id),
+        eq(dataCards.userId, input.userId),
+        eq(dataCards.type, 'character'),
+        sql`json_valid(${dataCards.data}) = 1`,
+        isNull(dataCards.deletedAt),
+      ),
+    )
+    .returning({ id: dataCards.id });
+
+  return updated.length;
+};
+
 export const updateDataCardContentByIdAndUserWithChanges = async (
   db: AppDrizzleDb,
   dataCardId: string,

@@ -582,6 +582,30 @@ export const dataCardApi = {
     }
   },
 
+  // 恢复历史上被误标为角色的问卷数据卡类型
+  async repairQuestionnaireType(id: string): Promise<{
+    success: boolean;
+    repaired?: boolean;
+    error?: string;
+  }> {
+    try {
+      const response = await authStorage.fetch('/api/data-cards/repair-questionnaire-type', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ id }),
+      });
+
+      const result = await response.json().catch(() => ({}));
+      if (response.ok) return result;
+      return { success: false, error: result?.error || '恢复问卷数据卡类型失败' };
+    } catch (error) {
+      console.error('Repair questionnaire data-card type error:', error);
+      return { success: false, error: '恢复问卷数据卡类型失败' };
+    }
+  },
+
   // 删除数据卡
   async deleteCard(id: string): Promise<{
     success: boolean;

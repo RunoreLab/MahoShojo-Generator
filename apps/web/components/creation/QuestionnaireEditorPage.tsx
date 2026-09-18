@@ -28,6 +28,7 @@ import { useAuth } from '@/lib/useAuth';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 import { config } from '@/lib/config';
 import { getDataCardStatus, getDataCardVisibilityValue } from '@/lib/data-card-status';
+import { normalizeQuestionnaireDataCard } from '@/lib/questionnaire-data-card';
 
 type EditableSuggestionItem = {
   uid: string;
@@ -293,11 +294,15 @@ export const QuestionnaireEditorPage: React.FC = () => {
   const trimmedLogoUrl = logoUrl.trim();
 
   const questionnaireCards = useMemo(
-    () => userDataCards.filter((card) => card?.type === 'questionnaire'),
+    () => userDataCards
+      .map((card) => normalizeQuestionnaireDataCard(card))
+      .filter((card): card is NonNullable<typeof card> => card !== null),
     [userDataCards]
   );
   const questionnaireRecycleCards = useMemo(
-    () => recycleBinCards.filter((card) => card?.type === 'questionnaire'),
+    () => recycleBinCards
+      .map((card) => normalizeQuestionnaireDataCard(card))
+      .filter((card): card is NonNullable<typeof card> => card !== null),
     [recycleBinCards]
   );
   const privateQuestionnaireCount = useMemo(
@@ -813,6 +818,12 @@ export const QuestionnaireEditorPage: React.FC = () => {
 
   const handleLoadQuestionnaireCard = async (card: any) => {
     try {
+      if (card?.isLegacyQuestionnaire) {
+        const repairResult = await dataCardApi.repairQuestionnaireType(card.id);
+        if (!repairResult.success) {
+          throw new Error(repairResult.error || '恢复问卷数据卡类型失败');
+        }
+      }
       const raw = typeof card?.data === 'string' ? card.data : JSON.stringify(card?.data ?? {}, null, 2);
       handleImport(raw);
       setShowDataCardsModal(false);
@@ -862,6 +873,14 @@ export const QuestionnaireEditorPage: React.FC = () => {
       return;
     }
 
+    if (questionnaireCards.some((card) => card?.id === id && card?.isLegacyQuestionnaire)) {
+      const repairResult = await dataCardApi.repairQuestionnaireType(id);
+      if (!repairResult.success) {
+        setEditorError(repairResult.error || '恢复问卷数据卡类型失败');
+        return;
+      }
+    }
+
     const result = await dataCardApi.updateCard(id, name, description, isPublic);
     if (result.success) {
       setEditingCard(null);
@@ -883,6 +902,13 @@ export const QuestionnaireEditorPage: React.FC = () => {
     if (sensitiveWordResult.hasSensitiveWords) {
       router.push('/arrested');
       return;
+    }
+    if (card?.isLegacyQuestionnaire) {
+      const repairResult = await dataCardApi.repairQuestionnaireType(card.id);
+      if (!repairResult.success) {
+        setEditorError(repairResult.error || '恢复问卷数据卡类型失败');
+        return;
+      }
     }
     const result = await dataCardApi.replaceCard(card.id, {
       name: card.name,

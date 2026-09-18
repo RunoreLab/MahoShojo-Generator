@@ -142,6 +142,11 @@ export default function QuestionnaireCompatModal({
         return;
       }
 
+      const repairResult = await dataCardApi.repairQuestionnaireType(targetCard.id);
+      if (!repairResult.success) {
+        throw new Error(repairResult.error || '恢复问卷数据卡类型失败');
+      }
+
       const result = await dataCardApi.replaceCard(targetCard.id, {
         name: targetCard.name,
         description: targetCard.description,

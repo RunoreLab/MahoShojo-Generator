@@ -10,6 +10,11 @@ export const ONLINE_DATA_CARD_TYPES = [
 export const OnlineDataCardTypeSchema = z.enum(ONLINE_DATA_CARD_TYPES);
 export type OnlineDataCardType = z.infer<typeof OnlineDataCardTypeSchema>;
 
+export const RepairQuestionnaireDataCardTypeRequestSchema = z.object({
+  id: z.string().trim().min(1).max(200),
+}).strict();
+export type RepairQuestionnaireDataCardTypeRequest = z.infer<typeof RepairQuestionnaireDataCardTypeRequestSchema>;
+
 export const DATA_CARD_REVIEW_STATUSES = ['pending', 'approved', 'rejected'] as const;
 
 export const DataCardReviewStatusSchema = z.enum(DATA_CARD_REVIEW_STATUSES);

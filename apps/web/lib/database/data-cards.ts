@@ -41,6 +41,10 @@ type DataCardsRepoBundle = {
       reviewStatus?: DataCardReviewStatus;
     },
   ) => Promise<number>;
+  repairQuestionnaireDataCardType: (
+    db: unknown,
+    input: { id: string; userId: number },
+  ) => Promise<number>;
   updateDataCardContentByIdAndUserWithChanges: (
     db: unknown,
     dataCardId: string,
@@ -134,6 +138,7 @@ const readDataCardsRepoBundle = async (): Promise<DataCardsRepoBundle | null> =>
       insertDataCard: repo.insertDataCard as DataCardsRepoBundle['insertDataCard'],
       listUserDataCards: repo.listUserDataCards as DataCardsRepoBundle['listUserDataCards'],
       updateDataCardByIdAndUser: repo.updateDataCardByIdAndUser as DataCardsRepoBundle['updateDataCardByIdAndUser'],
+      repairQuestionnaireDataCardType: repo.repairQuestionnaireDataCardType as DataCardsRepoBundle['repairQuestionnaireDataCardType'],
       updateDataCardContentByIdAndUserWithChanges: repo.updateDataCardContentByIdAndUserWithChanges as DataCardsRepoBundle['updateDataCardContentByIdAndUserWithChanges'],
       upsertDataCardUpdateByDataCardId: repo.upsertDataCardUpdateByDataCardId as DataCardsRepoBundle['upsertDataCardUpdateByDataCardId'],
       countUserUsedDataCardSlots: repo.countUserUsedDataCardSlots as DataCardsRepoBundle['countUserUsedDataCardSlots'],
@@ -318,6 +323,23 @@ export async function updateDataCard(
     return changes > 0;
   } catch (error) {
     console.error('更新数据卡失败:', error);
+    return false;
+  }
+}
+
+// 仅恢复历史上被误标为角色的问卷数据卡类型
+export async function repairQuestionnaireDataCardType(
+  id: string,
+  userId: number,
+): Promise<boolean> {
+  try {
+    const bundle = await readDataCardsRepoBundle();
+    if (!bundle) return false;
+
+    const changes = await bundle.repairQuestionnaireDataCardType(bundle.db, { id, userId });
+    return changes > 0;
+  } catch (error) {
+    console.error('恢复问卷数据卡类型失败:', error);
     return false;
   }
 }
