@@ -6,6 +6,7 @@ on:
     branches:
       - refactor/platform-rearchitecture
   workflow_dispatch:
+  workflow_call:
 
 concurrency:
   group: repository-ci-${{ github.workflow }}-${{ github.ref }}

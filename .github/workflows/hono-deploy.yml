@@ -28,7 +28,11 @@ env:
   VPS_USER: ${{ vars.VPS_USER }}
 
 jobs:
+  verify:
+    uses: ./.github/workflows/ci.yml
+
   build:
+    needs: verify
     runs-on: ubuntu-latest
     services:
       redis:

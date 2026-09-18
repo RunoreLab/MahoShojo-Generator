@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { parse } from 'yaml';
 
 const honoWorkflowPath = resolve(process.cwd(), '.github/workflows/hono-deploy.yml');
 const cloudflareWorkflowPath = resolve(
@@ -9,6 +10,18 @@ const cloudflareWorkflowPath = resolve(
 );
 
 describe('production deployment pipeline', () => {
+  it('requires the reusable repository verification before building the production release', () => {
+    const workflow = parse(readFileSync(honoWorkflowPath, 'utf8'));
+    const ci = parse(readFileSync(resolve('.github/workflows/ci.yml'), 'utf8'));
+
+    expect(ci.on).toHaveProperty('workflow_call');
+    expect(workflow.jobs.verify.uses).toBe('./.github/workflows/ci.yml');
+    expect(workflow.jobs.build.needs).toBe('verify');
+    expect(workflow.jobs.verify.if).toBeUndefined();
+    expect(workflow.jobs.build.if).toBeUndefined();
+    expect(ci.on.push.branches).not.toContain(workflow.on.push.branches[0]);
+  });
+
   it('uses one default-branch push pipeline ordered Hono then Cloudflare', () => {
     const honoWorkflow = readFileSync(honoWorkflowPath, 'utf8');
     const cloudflareWorkflow = readFileSync(cloudflareWorkflowPath, 'utf8');
