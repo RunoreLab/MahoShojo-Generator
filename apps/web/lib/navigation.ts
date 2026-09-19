@@ -43,7 +43,6 @@ export const TOPBAR_COVERED_ROUTES = [
   '/messages',
   '/report-appeals',
   '/investigation',
-  '/challenge',
   '/beta-access',
   '/encyclopedia',
   '/encyclopedia/[slug]',

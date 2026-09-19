@@ -1,9 +1,8 @@
 import { OnlineDataCardTypeSchema } from '@mahoshojo/contracts/data-cards';
-import type { ChallengeResolvedSourceCardLite } from '@/lib/challenge/types';
 import {
-  inferChallengeRenderableTemplate,
-  isChallengeRenderableSourceCard,
-} from '@/lib/challenge/source-card-renderability';
+  inferPublicCardRenderableTemplate,
+  isPublicCardRenderable,
+} from '@/lib/public-card-cache/renderability';
 import {
   cleanupExpiredPublicCardCache,
   deletePublicCardCacheRecord,
@@ -104,8 +103,8 @@ const toRenderableMetadata = (data: string): {
   }
 
   return {
-    renderableTemplate: inferChallengeRenderableTemplate(parsed),
-    isRenderable: isChallengeRenderableSourceCard(parsed),
+    renderableTemplate: inferPublicCardRenderableTemplate(parsed),
+    isRenderable: isPublicCardRenderable(parsed),
   };
 };
 
@@ -235,25 +234,6 @@ const buildPositiveRecord = (input: {
   };
 };
 
-const buildRecordFromSidecar = (
-  sidecar: ChallengeResolvedSourceCardLite,
-  nowMs: number,
-): PublicCardCacheRecord | null => {
-  const id = sidecar.id.trim();
-  const name = sidecar.name.trim();
-  const data = normalizeDataString(sidecar.data);
-  if (!id || !name || !data) return null;
-
-  return buildPositiveRecord({
-    id,
-    name,
-    data,
-    updatedAt: sidecar.updatedAt,
-    nowMs,
-    source: 'challenge-sidecar',
-  });
-};
-
 const buildRecordFromPublicRow = (row: unknown, nowMs: number): PublicCardCacheRecord | null => {
   if (!isRecord(row)) return null;
 
@@ -328,16 +308,6 @@ const revalidateInBackground = (
 
 export const clearPublicCardMemoryCacheForTest = (): void => {
   publicCardMemoryCache.clear();
-};
-
-export const writePublicCardCacheFromSidecar = async (
-  sidecar: ChallengeResolvedSourceCardLite,
-  options?: { nowMs?: number },
-): Promise<void> => {
-  const nowMs = options?.nowMs ?? Date.now();
-  const entry = buildRecordFromSidecar(sidecar, nowMs);
-  if (!entry) return;
-  await writePositiveEntry(entry, nowMs);
 };
 
 export const primePublicCardCacheFromPublicRow = async (

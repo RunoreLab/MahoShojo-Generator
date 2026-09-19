@@ -22,6 +22,7 @@ export type PublicCardCacheRecord = {
   expiresAtMs: number;
   renderableTemplate: PublicCardRenderableTemplate;
   isRenderable: boolean;
+  // 兼容挑战功能退休前的本地缓存；当前 writer 只产生 public-data-card-api。
   source: 'challenge-sidecar' | 'public-data-card-api';
 };
 

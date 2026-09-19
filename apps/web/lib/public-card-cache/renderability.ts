@@ -1,6 +1,6 @@
 import { inferTemplate } from '@/lib/data-card-converter';
 
-export type ChallengeRenderableTemplate = 'magical-girl' | 'canshou' | 'general';
+export type PublicCardCharacterTemplate = 'magical-girl' | 'canshou' | 'general';
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -15,9 +15,9 @@ const isRenderableMagicalGirlCardPayload = (cardPayload: Record<string, unknown>
   && isRecord(cardPayload.blooming)
   && isRecord(cardPayload.analysis);
 
-export function inferChallengeRenderableTemplate(
+export function inferPublicCardRenderableTemplate(
   cardPayload: Record<string, unknown>
-): ChallengeRenderableTemplate | null {
+): PublicCardCharacterTemplate | null {
   const template = inferTemplate(cardPayload);
   if (template === 'magical-girl' || template === 'canshou' || template === 'general') {
     return template;
@@ -25,8 +25,8 @@ export function inferChallengeRenderableTemplate(
   return null;
 }
 
-export function isChallengeRenderableSourceCard(cardPayload: Record<string, unknown>): boolean {
-  const template = inferChallengeRenderableTemplate(cardPayload);
+export function isPublicCardRenderable(cardPayload: Record<string, unknown>): boolean {
+  const template = inferPublicCardRenderableTemplate(cardPayload);
   if (!template) return false;
   if (template === 'magical-girl') {
     return isRenderableMagicalGirlCardPayload(cardPayload);

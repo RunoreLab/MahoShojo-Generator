@@ -6,8 +6,9 @@ import { __resetAiSessionDbForTest } from '@/lib/ai-session/storage';
 import { AI_SESSION_DB_NAME } from '@/lib/ai-session/types';
 import {
   clearPublicCardMemoryCacheForTest,
-  writePublicCardCacheFromSidecar,
 } from '@/lib/public-card-cache/shared-loader';
+import { putPublicCardCacheRecord } from '@/lib/public-card-cache/storage';
+import { PUBLIC_CARD_CACHE_HARD_TTL_MS } from '@/lib/public-card-cache/types';
 
 describe('LeaderboardEntityDetailsModal', () => {
   beforeEach(async () => {
@@ -84,10 +85,18 @@ describe('LeaderboardEntityDetailsModal', () => {
     expect(second.pendingNotice).toBe(entity.pendingNotice);
   });
 
-  test('data_card 详情不会把 challenge sidecar 当作完整 public-data-card 详情', async () => {
+  test('data_card 详情不会把历史 challenge sidecar 当作完整 public-data-card 详情', async () => {
     const { loadLeaderboardEntityDetails } = await import('@/components/ranking/LeaderboardEntityDetailsModal');
 
-    await writePublicCardCacheFromSidecar({
+    const nowMs = Date.now();
+    await putPublicCardCacheRecord({
+      cacheKind: 'card',
+      fetchedAtMs: nowMs,
+      lastAccessedAtMs: nowMs,
+      expiresAtMs: nowMs + PUBLIC_CARD_CACHE_HARD_TTL_MS,
+      renderableTemplate: 'general',
+      isRenderable: true,
+      source: 'challenge-sidecar',
       id: 'card-details-sidecar',
       name: '冻结挑战侧载',
       data: JSON.stringify({

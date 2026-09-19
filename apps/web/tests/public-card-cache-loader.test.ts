@@ -11,7 +11,7 @@ import {
 import {
   clearPublicCardMemoryCacheForTest,
   getPublicCardByIdWithSharedCache,
-  writePublicCardCacheFromSidecar,
+  primePublicCardCacheFromPublicRow,
 } from '@/lib/public-card-cache/shared-loader';
 import {
   PUBLIC_CARD_CACHE_FRESH_TTL_MS,
@@ -31,13 +31,13 @@ const waitForAsync = async (predicate: () => Promise<boolean>, maxAttempts = 40)
   throw new Error('condition not met');
 };
 
-const baseSidecar = {
-  id: 'card-sidecar-1',
-  name: '侧载敌人',
+const basePublicCard = {
+  id: 'card-public-1',
+  name: '公开角色',
   data: JSON.stringify({
     templateId: '通用角色',
-    name: '侧载敌人',
-    content: '# 侧载敌人',
+    name: '公开角色',
+    content: '# 公开角色',
   }),
   updatedAt: '2026-04-05T12:00:00.000Z',
 } as const;
@@ -55,11 +55,11 @@ describe('public card cache loader', () => {
   });
 
   test('memory 命中时不会访问 IndexedDB 或网络', async () => {
-    await writePublicCardCacheFromSidecar(baseSidecar, { nowMs: NOW_MS });
+    await primePublicCardCacheFromPublicRow(basePublicCard, { nowMs: NOW_MS });
     let fetchCount = 0;
 
     const result = await getPublicCardByIdWithSharedCache({
-      id: baseSidecar.id,
+      id: basePublicCard.id,
       nowMs: NOW_MS,
       fetcher: async () => {
         fetchCount += 1;
@@ -68,17 +68,17 @@ describe('public card cache loader', () => {
     });
 
     expect(result.source).toBe('memory');
-    expect((result.card as { name?: string } | null)?.name).toBe('侧载敌人');
+    expect((result.card as { name?: string } | null)?.name).toBe('公开角色');
     expect(fetchCount).toBe(0);
   });
 
   test('IDB fresh 命中时直接返回缓存值', async () => {
-    await writePublicCardCacheFromSidecar(baseSidecar, { nowMs: NOW_MS });
+    await primePublicCardCacheFromPublicRow(basePublicCard, { nowMs: NOW_MS });
     clearPublicCardMemoryCacheForTest();
     let fetchCount = 0;
 
     const result = await getPublicCardByIdWithSharedCache({
-      id: baseSidecar.id,
+      id: basePublicCard.id,
       nowMs: NOW_MS,
       fetcher: async () => {
         fetchCount += 1;
@@ -87,15 +87,15 @@ describe('public card cache loader', () => {
     });
 
     expect(result.source).toBe('indexeddb');
-    expect((result.card as { name?: string } | null)?.name).toBe('侧载敌人');
+    expect((result.card as { name?: string } | null)?.name).toBe('公开角色');
     expect(fetchCount).toBe(0);
   });
 
   test('memory 命中会刷新 L2 lastAccessedAtMs，避免 trim 误删热卡', async () => {
-    await writePublicCardCacheFromSidecar(baseSidecar, { nowMs: NOW_MS });
+    await primePublicCardCacheFromPublicRow(basePublicCard, { nowMs: NOW_MS });
 
     await getPublicCardByIdWithSharedCache({
-      id: baseSidecar.id,
+      id: basePublicCard.id,
       nowMs: NOW_MS + 500,
       fetcher: async () => {
         throw new Error('should not fetch');
@@ -121,7 +121,7 @@ describe('public card cache loader', () => {
     await trimPublicCardCacheToLimit();
     clearPublicCardMemoryCacheForTest();
 
-    expect(await getPublicCardCacheRecord(baseSidecar.id)).not.toBeNull();
+    expect(await getPublicCardCacheRecord(basePublicCard.id)).not.toBeNull();
     expect(await getPublicCardCacheRecord('card-extra-0')).toBeNull();
   });
 
@@ -448,9 +448,9 @@ describe('public card cache loader', () => {
     // @ts-expect-error test override
     delete window.indexedDB;
     try {
-      await writePublicCardCacheFromSidecar(baseSidecar, { nowMs: NOW_MS });
+      await primePublicCardCacheFromPublicRow(basePublicCard, { nowMs: NOW_MS });
       const result = await getPublicCardByIdWithSharedCache({
-        id: baseSidecar.id,
+        id: basePublicCard.id,
         nowMs: NOW_MS,
         fetcher: async () => {
           throw new Error('should not fetch');
@@ -458,18 +458,18 @@ describe('public card cache loader', () => {
       });
 
       expect(result.source).toBe('memory');
-      expect((result.card as { name?: string } | null)?.name).toBe('侧载敌人');
+      expect((result.card as { name?: string } | null)?.name).toBe('公开角色');
     } finally {
       window.indexedDB = originalIndexedDB;
     }
   });
 
-  test('sidecar write-through 后可被共享 loader 直接读出', async () => {
-    await writePublicCardCacheFromSidecar(baseSidecar, { nowMs: NOW_MS });
+  test('公开卡 write-through 后可被共享 loader 直接读出', async () => {
+    await primePublicCardCacheFromPublicRow(basePublicCard, { nowMs: NOW_MS });
     clearPublicCardMemoryCacheForTest();
 
     const result = await getPublicCardByIdWithSharedCache({
-      id: baseSidecar.id,
+      id: basePublicCard.id,
       nowMs: NOW_MS,
       fetcher: async () => {
         throw new Error('should not fetch');
@@ -477,6 +477,6 @@ describe('public card cache loader', () => {
     });
 
     expect(result.source).toBe('indexeddb');
-    expect((result.card as { name?: string } | null)?.name).toBe('侧载敌人');
+    expect((result.card as { name?: string } | null)?.name).toBe('公开角色');
   });
 });

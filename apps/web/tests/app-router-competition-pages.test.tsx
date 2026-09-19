@@ -73,12 +73,6 @@ vi.mock('@/components/ranking/RankingPage', () => ({
   },
 }));
 
-vi.mock('@/components/challenge/ChallengePage', () => ({
-  ChallengePage: function ChallengePageMock() {
-    return <main data-page="challenge">本轮挑战</main>;
-  },
-}));
-
 vi.mock('@/components/investigation/InvestigationPage', () => ({
   InvestigationPage: function InvestigationPageMock() {
     return <main data-page="investigation">公开数据卡众查</main>;
@@ -109,12 +103,6 @@ vi.mock('@/components/competition/ArrestedPage', () => ({
   },
 }));
 
-vi.mock('@/components/competition/ChallengeRouteGate', () => ({
-  ChallengeRouteGate: function ChallengeRouteGateMock() {
-    return <main data-page="challenge">本轮挑战</main>;
-  },
-}));
-
 const readProjectFile = (path: string) => readFileSync(join(process.cwd(), path), 'utf8');
 
 describe('competition domain App Router pages', () => {
@@ -137,22 +125,19 @@ describe('competition domain App Router pages', () => {
     });
   });
 
-  test('ranking, sublimation, challenge and investigation routes render migrated pages', async () => {
+  test('ranking, sublimation and investigation routes render migrated pages', async () => {
     const { default: RankingRoute, metadata: rankingMetadata } = await import('@/app/ranking/page');
     const { default: SublimationRoute, metadata: sublimationMetadata } = await import('@/app/sublimation/page');
-    const { default: ChallengeRoute, metadata: challengeMetadata } = await import('@/app/challenge/page');
     const { default: InvestigationRoute, metadata: investigationMetadata } = await import('@/app/investigation/page');
 
     expect(renderToStaticMarkup(<RankingRoute />)).toContain('data-page="ranking"');
     expect(renderToStaticMarkup(<SublimationRoute />)).toContain('data-page="sublimation"');
-    expect(renderToStaticMarkup(<ChallengeRoute />)).toContain('data-page="challenge"');
     expect(renderToStaticMarkup(<InvestigationRoute />)).toContain('data-page="investigation"');
     expect(rankingMetadata).toMatchObject({ title: '排位排行榜 - MahoShojo Generator' });
     expect(sublimationMetadata).toMatchObject({
       title: '成长升华 - MahoShojo Generator',
       description: '根据角色的历战记录，生成一个全新的成长后形态！',
     });
-    expect(challengeMetadata).toMatchObject({ title: '魔女挑战 - MahoShojo Generator' });
     expect(investigationMetadata).toMatchObject({ title: '调查院 - MahoShojo Generator' });
   });
 
@@ -186,7 +171,6 @@ describe('competition domain App Router pages', () => {
       'app/arena-stream/page.tsx',
       'app/ranking/page.tsx',
       'app/sublimation/page.tsx',
-      'app/challenge/page.tsx',
       'app/investigation/page.tsx',
       'app/pvp/page.tsx',
       'app/pvp/[roomId]/page.tsx',
@@ -197,7 +181,6 @@ describe('competition domain App Router pages', () => {
       'components/competition/PvpRouteProviders.tsx',
       'components/competition/PvpRoomRouteProviders.tsx',
       'components/competition/QueryRouteProviders.tsx',
-      'components/competition/ChallengeRouteGate.tsx',
       'components/arena/ArenaPage.tsx',
       'components/arena-lite/BattleLitePage.tsx',
       'components/ranking/RankingPage.tsx',

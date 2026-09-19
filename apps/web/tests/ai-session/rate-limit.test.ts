@@ -74,14 +74,14 @@ describe('ai session soft rate limit', () => {
     expect(second.allowed).toBe(true);
   });
 
-  test('challenge_node_adjudicate 对 system provider 保持战报级冷却策略', () => {
+  test('battle_story_session_continue 对 system provider 保持战报级冷却策略', () => {
     __resetAiSessionSoftRateLimitForTest();
     const req = buildRequest('3.3.3.3');
 
     const first = acquireAiSessionSoftRateLimit({
       req,
-      actionType: 'challenge_node_adjudicate',
-      sessionId: 'challenge-run-a',
+      actionType: 'battle_story_session_continue',
+      sessionId: 'battle-session-a',
       providerMode: 'system',
       nowMs: 1_000,
     });
@@ -90,8 +90,8 @@ describe('ai session soft rate limit', () => {
 
     const second = acquireAiSessionSoftRateLimit({
       req,
-      actionType: 'challenge_node_adjudicate',
-      sessionId: 'challenge-run-a',
+      actionType: 'battle_story_session_continue',
+      sessionId: 'battle-session-a',
       providerMode: 'system',
       nowMs: 61_000,
     });
@@ -102,14 +102,14 @@ describe('ai session soft rate limit', () => {
     }
   });
 
-  test('challenge_node_adjudicate 对 custom provider 保持短冷却策略', () => {
+  test('battle_story_session_continue 对 custom provider 保持短冷却策略', () => {
     __resetAiSessionSoftRateLimitForTest();
     const req = buildRequest('4.4.4.4');
 
     const first = acquireAiSessionSoftRateLimit({
       req,
-      actionType: 'challenge_node_adjudicate',
-      sessionId: 'challenge-run-b',
+      actionType: 'battle_story_session_continue',
+      sessionId: 'battle-session-b',
       providerMode: 'custom',
       nowMs: 1_000,
     });
@@ -118,8 +118,8 @@ describe('ai session soft rate limit', () => {
 
     const second = acquireAiSessionSoftRateLimit({
       req,
-      actionType: 'challenge_node_adjudicate',
-      sessionId: 'challenge-run-b',
+      actionType: 'battle_story_session_continue',
+      sessionId: 'battle-session-b',
       providerMode: 'custom',
       nowMs: 4_500,
     });

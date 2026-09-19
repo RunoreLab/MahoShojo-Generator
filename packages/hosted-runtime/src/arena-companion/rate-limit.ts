@@ -4,8 +4,7 @@ export const OFFICIAL_KEY_ARENA_BATTLE_REPORT_COOLDOWN_MS = 120_000;
 export type ArenaSessionRateLimitAction =
   | 'battle_story_session_continue'
   | 'battle_story_session_regenerate_chapter'
-  | 'battle_story_session_refresh_summary'
-  | 'challenge_node_adjudicate';
+  | 'battle_story_session_refresh_summary';
 
 type TokenBucketState = { tokens: number; updatedAt: number };
 type SessionLeaseState = { lastAcceptedAt: number; inFlight: number };

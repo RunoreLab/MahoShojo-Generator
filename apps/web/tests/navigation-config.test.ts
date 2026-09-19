@@ -40,7 +40,6 @@ describe('navigation config', () => {
       '/messages',
       '/report-appeals',
       '/investigation',
-      '/challenge',
       '/beta-access',
       '/encyclopedia',
       '/encyclopedia/[slug]',
