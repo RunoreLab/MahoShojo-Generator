@@ -19,15 +19,6 @@ CREATE TABLE IF NOT EXISTS battles (
   created_at TEXT NOT NULL                -- 战斗发生时间
 );
 
--- 新增的测试数据表，使用 32 位随机字符串 ID
--- 用于测试自定义 ID 插入功能
-CREATE TABLE IF NOT EXISTS player_data (
-  id TEXT PRIMARY KEY NOT NULL,           -- 32位随机字符串ID
-  data TEXT NOT NULL,                     -- JSON格式的数据
-  created_at TEXT NOT NULL,               -- 创建时间
-  updated_at TEXT NOT NULL                -- 更新时间
-);
-
 -- 用户表
 CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -3,13 +3,8 @@
 
 // 重新导出核心功能
 export {
-  generateRandomId,
   generateUUID,
   queryFromD1,
-  createWithCustomId,
-  updateById,
-  getRecordById,
-  saveToD1
 } from './database/core';
 
 // 重新导出用户相关功能

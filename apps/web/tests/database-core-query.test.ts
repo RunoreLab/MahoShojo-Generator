@@ -1,12 +1,9 @@
 import { describe, expect, test, vi } from 'vitest';
 import {
-  createWithCustomId,
   queryD1BatchPayload,
   queryD1Payload,
   queryD1RawPayload,
   queryFromD1,
-  saveToD1,
-  updateById,
 } from '@/lib/database/core';
 
 type EnvSnapshot = {
@@ -272,7 +269,7 @@ describe('database/core queryD1Payload', () => {
       }) as typeof globalThis.fetch;
 
       await withSilencedConsoleError(async () => {
-        await expect(queryD1Payload('UPDATE shojo SET data = ? WHERE id = ?', ['{}', '1']))
+        await expect(queryD1Payload('UPDATE test_records SET data = ? WHERE id = ?', ['{}', '1']))
           .rejects.toMatchObject({
             name: 'D1IndeterminateOutcomeError',
             code: 'D1_INDETERMINATE_OUTCOME',
@@ -300,7 +297,7 @@ describe('database/core queryD1Payload', () => {
       }) as typeof globalThis.fetch;
 
       await withSilencedConsoleError(async () => {
-        const pendingError = queryD1Payload('DELETE FROM shojo WHERE id = ?', ['1'])
+        const pendingError = queryD1Payload('DELETE FROM test_records WHERE id = ?', ['1'])
           .catch((error: unknown) => error);
         await vi.runAllTimersAsync();
         await expect(pendingError).resolves.toMatchObject({
@@ -334,7 +331,7 @@ describe('database/core queryD1Payload', () => {
       await withSilencedConsoleError(async () => {
         await expect(queryD1BatchPayload([
           { sql: 'SELECT 1 AS ok' },
-          { sql: 'INSERT INTO shojo (data) VALUES (?)', params: ['{}'] },
+          { sql: 'INSERT INTO test_records (data) VALUES (?)', params: ['{}'] },
         ])).rejects.toMatchObject({
           name: 'D1IndeterminateOutcomeError',
           code: 'D1_INDETERMINATE_OUTCOME',
@@ -378,39 +375,6 @@ describe('database/core queryD1Payload', () => {
         result: [{ success: true, results: [{ ok: 1 }], meta: {} }],
       });
       expect(fetchCalls).toBe(2);
-    } finally {
-      globalThis.fetch = originalFetch;
-      restoreEnvSnapshot(envSnapshot);
-    }
-  });
-
-  test.each([
-    ['createWithCustomId', () => createWithCustomId('{}', 'shojo')],
-    ['updateById', () => updateById('record-1', '{}', 'shojo')],
-    ['saveToD1', () => saveToD1({ id: 'record-1' })],
-  ])('%s 不吞掉未知提交结果', async (_name, invoke) => {
-    const envSnapshot = readEnvSnapshot();
-    const originalFetch = globalThis.fetch;
-
-    try {
-      setMinimalEnv();
-      let fetchCalls = 0;
-      globalThis.fetch = (async () => {
-        fetchCalls += 1;
-        return new Response('temporarily unavailable', {
-          status: 503,
-          headers: { 'Retry-After': '0' },
-        });
-      }) as typeof globalThis.fetch;
-
-      await withSilencedConsoleError(async () => {
-        await expect(invoke()).rejects.toMatchObject({
-          name: 'D1IndeterminateOutcomeError',
-          code: 'D1_INDETERMINATE_OUTCOME',
-          status: 503,
-        });
-      });
-      expect(fetchCalls).toBe(1);
     } finally {
       globalThis.fetch = originalFetch;
       restoreEnvSnapshot(envSnapshot);
