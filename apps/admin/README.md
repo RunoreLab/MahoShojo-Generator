@@ -58,11 +58,13 @@ node apps/admin/scripts/principals.mjs revoke --local
 node apps/admin/scripts/principals.mjs restore --local
 ```
 
-共用环境变量为 `ADMIN_PRINCIPAL_ID`、`ADMIN_CONTROL_REASON`、`ADMIN_CONTROL_OPERATOR_REF`。bootstrap 还需要 `ADMIN_ACCESS_ISSUER`、`ADMIN_ACCESS_AUDIENCE`、`ADMIN_ACCESS_JWKS_URL`、`ADMIN_ACCESS_JWT_FILE`、`ADMIN_BOOTSTRAP_CAPABILITIES`（JSON capability 数组）。token 文件只在控制工具中读取，首个管理员必须是验签成功的真实 human identity；没有公网 bootstrap 接口。所有成功操作持久审计。
+排查 Access 登录后的拒绝可运行 `node apps/admin/scripts/principals.mjs status --local` 或 `status --remote`。`status` 需要 `ADMIN_ACCESS_ISSUER`、`ADMIN_ACCESS_AUDIENCE`、`ADMIN_ACCESS_JWKS_URL` 和 `ADMIN_ACCESS_JWT_FILE`；remote 还需要下文的 gateway 配置。它先验签，再复用 Worker 的 D1 principal 解析和 `admin.shell.read` 授权判断，仅输出 `access`、`identityKind`、`principal`、`shellAllowed` 与 `denialCode`。不输出 token、邮箱、issuer/subject 或其他管理员，不写入主体或审计；不需要 principal ID、理由、权限数组或 `--confirm-remote`。退出码 0 表示允许进入 shell，2 表示验签成功但授权拒绝，1 表示配置、验签或数据库检查失败。结果仅适用于提供的 token 和目标库，不能替代真实浏览器入口验收。
+
+变更命令共用环境变量为 `ADMIN_PRINCIPAL_ID`、`ADMIN_CONTROL_REASON`、`ADMIN_CONTROL_OPERATOR_REF`。bootstrap 还需要 `ADMIN_ACCESS_ISSUER`、`ADMIN_ACCESS_AUDIENCE`、`ADMIN_ACCESS_JWKS_URL`、`ADMIN_ACCESS_JWT_FILE`、`ADMIN_BOOTSTRAP_CAPABILITIES`（JSON capability 数组）。token 文件只在控制工具中读取，首个管理员必须是验签成功的真实 human identity；没有公网 bootstrap 接口。所有成功操作持久审计。
 
 `restore` 使用同一套真实 Access 验签配置，另由 `ADMIN_RESTORE_CAPABILITIES` 显式给出恢复后的权限。它只将同一 `issuer + subject + human kind`、同一 ID 的 disabled 主体原子恢复为 active；审计失败回滚，不新增主体、不覆盖 active 主体或其他身份。原唯一管理员可通过 Cloudflare 账户恢复精确入口策略后使用该工具，不能删除旧主体或审计再 bootstrap。
 
-remote 模式必须显式 `--remote --confirm-remote`，并提供受保护 gateway 的 `ADMIN_CONTROL_GATEWAY_URL`、`ADMIN_CONTROL_GATEWAY_HMAC_SECRET`，需要时提供 Access service credentials。该模式属于仓库高风险边界，需在具体目标和操作可审阅后单独授权。本地 Miniflare 存储工具使用其 workerd 已支持的兼容日期；产品 Worker 的兼容日期独立维护。
+remote 模式提供受保护 gateway 的 `ADMIN_CONTROL_GATEWAY_URL`、`ADMIN_CONTROL_GATEWAY_HMAC_SECRET`，需要时提供 Access service credentials。除只读 `status` 外，变更必须显式 `--remote --confirm-remote`，属于仓库高风险边界，需在具体目标和操作可审阅后单独授权。本地 Miniflare 存储工具使用其 workerd 已支持的兼容日期；产品 Worker 的兼容日期独立维护。
 
 ## 独立部署与验证
 
