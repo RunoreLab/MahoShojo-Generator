@@ -283,6 +283,18 @@ export function ArenaWebReport({ content, ready, roomId, children }: {
     }
   }, []);
   useEffect(() => {
+    if (!immersive) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      // 原生 fullscreen 由浏览器处理 Escape，避免阻止其退出默认行为。
+      if (nativeFullscreenRequestedRef.current && document.fullscreenElement) return;
+      event.preventDefault();
+      exitImmersive();
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [exitImmersive, immersive]);
+  useEffect(() => {
     if (immersive && !showingWeb) exitImmersive();
   }, [exitImmersive, immersive, showingWeb]);
   const handleDisplayModeChange = (nextMode: ArenaWebDisplayMode) => {

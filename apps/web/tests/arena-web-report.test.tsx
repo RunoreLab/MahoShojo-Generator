@@ -149,6 +149,20 @@ describe('Web 战报的本地执行许可', () => {
     expect(container.querySelector('.buttons-container')?.textContent).toContain('⛶ 沉浸显示');
   });
 
+  it('CSS 沉浸 fallback 可通过 Escape 退出', async () => {
+    window.localStorage.setItem('arena.web-report-consent.v1.room.immersive-escape', 'accepted');
+    await act(async () => root.render(viewer('immersive-escape', true, source)));
+    await click('⛶ 沉浸显示');
+    expect(document.querySelector('[data-testid="arena-web-immersive"]')).toBeTruthy();
+
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    });
+
+    expect(document.querySelector('[data-testid="arena-web-immersive"]')).toBeNull();
+    expect(document.body.style.overflow).toBe('');
+  });
+
   it('战报离开可执行状态时会自动退出沉浸并恢复页面滚动', async () => {
     window.localStorage.setItem('arena.web-report-consent.v1.room.lifecycle', 'accepted');
     await act(async () => root.render(viewer('lifecycle', true, source)));

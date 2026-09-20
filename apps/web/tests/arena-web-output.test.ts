@@ -36,12 +36,12 @@ describe('normalizeArenaWebOutput', () => {
   it('uses the first real html closing tag and keeps later mentions in the epilogue', () => {
     const result = normalizeArenaWebOutput([
       '<!doctype html>',
-      '<html><body><script>const example = "</html>";</script></body></html>',
+      '<html><head><title>示例 </html> 标记</title></head><body><script>const example = "</html>";</script><textarea>输入 </html> 标记</textarea></body></html>',
       '',
       '页面已在 </html> 标签结束。',
     ].join('\n'));
 
-    expect(result.document).toBe('<!doctype html>\n<html><body><script>const example = "</html>";</script></body></html>');
+    expect(result.document).toBe('<!doctype html>\n<html><head><title>示例 </html> 标记</title></head><body><script>const example = "</html>";</script><textarea>输入 </html> 标记</textarea></body></html>');
     expect(result.epilogue).toBe('页面已在 </html> 标签结束。');
   });
 
