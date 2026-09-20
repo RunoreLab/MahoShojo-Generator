@@ -782,7 +782,7 @@ export const createStreamPromptBuilder = (
     if (outputContract === 'web-document') {
         finalPrompt += `\n\n【输出格式】\n直接输出一个完整 HTML5 document，从 <!doctype html> 开始，包含 html/head/body、UTF-8 charset 与 viewport，不要 Markdown 代码围栏或解释文本。\n` +
             `这是独立 Web 内容，可自由使用 HTML、CSS、inline/external SVG、Canvas、JavaScript、browser-native ES Module、动画与外部 Web 资源。\n` +
-            `根据故事设计响应式排版，适合桌面和手机阅读，建议遵循最新 Web Content Accessibility Guidelines (WCAG)。可按需加入时间线、状态面板、Tab、折叠、图表、互动按钮等元素。\n` +
+            `根据故事设计响应式排版，适合桌面和手机阅读，建议遵循最新 Web Content Accessibility Guidelines (WCAG)。页面将在大小可变化的 iframe 中运行。在约 360px 的窄屏下，核心信息与主要操作仍必须可访问，重要操作不得仅依赖 hover 或屏幕底部固定坐标。可按需加入时间线、状态面板、Tab、折叠、图表、互动按钮等元素。\n` +
             `优先使用文档内 style/script、SVG 和 Canvas，自包含实现布局与交互；用 addEventListener 绑定事件，不使用 onclick 等内联事件属性。\n` +
             `srcdoc 继承宿主 CSP，第三方 JavaScript/CSS/fonts 可能被浏览器限制，不保证可用，不得依赖外部库。外部图片、音视频与 fetch 可尝试完整 HTTPS URL，仍受 CSP/CORS 等浏览器规则约束；加载失败时保持基本可读。iframe srcdoc 相对 URL 可能按宿主 URL 解析。\n` +
             `页面运行在 sandbox=allow-scripts 的独立 iframe 中，不依赖宿主 React、变量、函数、cookie、localStorage 或 DOM；不提供编译。\n` +
