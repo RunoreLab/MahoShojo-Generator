@@ -49,6 +49,9 @@ describe('Arena generation prompt', () => {
       expect(result.prompt).toContain('addEventListener');
       expect(result.prompt).toContain('srcdoc 继承宿主 CSP');
       expect(result.prompt).toContain('不得依赖外部库');
+      expect(result.prompt).toContain('大小可变化的 iframe');
+      expect(result.prompt).toContain('约 360px');
+      expect(result.prompt).toContain('不得仅依赖 hover');
       expect(result.prompt).not.toContain('请以 Markdown 格式输出战报');
       expect(result.prompt).not.toContain('article.analysis');
     }

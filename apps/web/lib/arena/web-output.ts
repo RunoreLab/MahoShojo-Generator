@@ -8,23 +8,42 @@ export type ArenaWebOutputNormalization = {
 
 const HTML_DOCTYPE_PATTERN = /<!doctype\s+html\b/i;
 const HTML_OPEN_TAG_PATTERN = /<html(?:\s|>)/i;
-const HTML_CLOSE_TAG_PATTERN = /<\/html\s*>/gi;
-const FENCE_BEFORE_DOCUMENT_PATTERN = /(?:^|\n)[ \t]*```(?:html)?[ \t]*(?:\r?\n|$)/i;
+const HTML_CLOSE_TAG_PATTERN = /^<\/html\s*>/i;
+const RAW_TEXT_OPEN_TAG_PATTERN = /^<(script|style)\b[^>]*>/i;
+const FENCE_BEFORE_DOCUMENT_PATTERN = /(?:^|\n)[ \t]*```(?:html)?[ \t]*\n[ \t]*$/i;
 const FENCE_AFTER_DOCUMENT_PATTERN = /^\s*```[ \t]*(?:\r?\n|$)/;
 
 const trimDocumentBoundaryFence = (text: string, pattern: RegExp): string => text.replace(pattern, '').trim();
 
 const findDocumentEnd = (text: string, start: number): number => {
-  HTML_CLOSE_TAG_PATTERN.lastIndex = start;
-  let match: RegExpExecArray | null = null;
-  let end = -1;
+  let cursor = start;
+  while (cursor < text.length) {
+    const nextTag = text.indexOf('<', cursor);
+    if (nextTag < 0) break;
 
-  while ((match = HTML_CLOSE_TAG_PATTERN.exec(text)) !== null) {
-    end = match.index + match[0].length;
+    if (text.startsWith('<!--', nextTag)) {
+      const commentEnd = text.indexOf('-->', nextTag + 4);
+      if (commentEnd < 0) return -1;
+      cursor = commentEnd + 3;
+      continue;
+    }
+
+    const closeMatch = HTML_CLOSE_TAG_PATTERN.exec(text.slice(nextTag));
+    if (closeMatch) return nextTag + closeMatch[0].length;
+
+    const rawTextOpenMatch = RAW_TEXT_OPEN_TAG_PATTERN.exec(text.slice(nextTag));
+    if (rawTextOpenMatch) {
+      const rawTextEndPattern = new RegExp(`</${rawTextOpenMatch[1]}\\s*>`, 'i');
+      const rawTextEndMatch = rawTextEndPattern.exec(text.slice(nextTag + rawTextOpenMatch[0].length));
+      if (!rawTextEndMatch) return -1;
+      cursor = nextTag + rawTextOpenMatch[0].length + rawTextEndMatch.index + rawTextEndMatch[0].length;
+      continue;
+    }
+
+    cursor = nextTag + 1;
   }
 
-  HTML_CLOSE_TAG_PATTERN.lastIndex = 0;
-  return end;
+  return -1;
 };
 
 /**

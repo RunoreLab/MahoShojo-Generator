@@ -1,7 +1,6 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
-import { createPortal } from 'react-dom';
 import { FileText, PanelsTopLeft } from 'lucide-react';
 import { SegmentedControl, type SegmentedOption } from '@/components/shared/SegmentedControl';
 import { BaseModal } from '@/components/shared/BaseModal';
@@ -120,12 +119,7 @@ function ArenaWebDocument({ htmlDocument, prelude, epilogue, reload, immersive, 
   onDownload: () => void;
   onExitImmersive: () => void;
 }) {
-  const [mounted, setMounted] = useState(false);
   const exitButtonRef = useRef<HTMLButtonElement>(null);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
 
   useEffect(() => {
     if (immersive) exitButtonRef.current?.focus();
@@ -145,24 +139,20 @@ function ArenaWebDocument({ htmlDocument, prelude, epilogue, reload, immersive, 
     />
   );
 
-  if (!immersive) {
-    return <>
-      <ArenaWebNotes prelude={prelude} epilogue={epilogue} />
-      {frame}
-    </>;
-  }
-
-  if (!mounted) return null;
-
-  return createPortal(
+  // 两种模式保持同一组 DOM 层级，只切换布局 class，避免 iframe browsing context 被重建。
+  return (
     <div
-      role="dialog"
-      aria-modal="true"
-      aria-label="沉浸式 Web 战报"
-      data-testid="arena-web-immersive"
-      className="fixed inset-0 z-[60] flex min-h-[100dvh] flex-col bg-slate-950 text-white"
+      role={immersive ? 'dialog' : undefined}
+      aria-modal={immersive ? true : undefined}
+      aria-label={immersive ? '沉浸式 Web 战报' : undefined}
+      data-testid={immersive ? 'arena-web-immersive' : undefined}
+      className={immersive
+        ? 'fixed inset-0 z-[60] flex min-h-[100dvh] flex-col bg-slate-950 text-white'
+        : 'contents'}
     >
-      <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-white/10 bg-slate-950/95 px-3 py-3 backdrop-blur sm:px-5">
+      <header className={immersive
+        ? 'flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-white/10 bg-slate-950/95 px-3 py-3 backdrop-blur sm:px-5'
+        : 'hidden'}>
         <div className="min-w-0">
           <div className="truncate text-sm font-semibold sm:text-base">AI Web 战报</div>
           <div className="text-xs text-white/55">沉浸显示 · iframe 仍保持隔离运行</div>
@@ -192,12 +182,13 @@ function ArenaWebDocument({ htmlDocument, prelude, epilogue, reload, immersive, 
           </button>
         </div>
       </header>
-      <main className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto p-3 sm:p-4">
+      <div className={immersive
+        ? 'flex min-h-0 flex-1 flex-col gap-3 overflow-auto p-3 sm:p-4'
+        : 'contents'}>
         <ArenaWebNotes prelude={prelude} epilogue={epilogue} />
         {frame}
-      </main>
-    </div>,
-    document.body,
+      </div>
+    </div>
   );
 }
 
@@ -241,11 +232,11 @@ export function ArenaWebReport({ content, ready, roomId, children }: {
   const normalizedOutput = useMemo(() => normalizeArenaWebOutput(content), [content]);
   const webDocument = normalizedOutput.document;
   useEffect(() => {
-    if (ready && !accepted && !asked) {
+    if (ready && webDocument && !accepted && !asked) {
       setAsked(true);
       setConfirming(true);
     }
-  }, [ready, accepted, asked]);
+  }, [ready, webDocument, accepted, asked]);
   useEffect(() => {
     const handleFullscreenChange = () => {
       if (!document.fullscreenElement && nativeFullscreenRequestedRef.current) {
@@ -305,6 +296,7 @@ export function ArenaWebReport({ content, ready, roomId, children }: {
       setDisplayMode('web');
       return;
     }
+    if (!webDocument) return;
     setConfirming(true);
   };
   const downloadHtml = () => {

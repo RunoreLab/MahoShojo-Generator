@@ -33,6 +33,34 @@ describe('normalizeArenaWebOutput', () => {
     expect(result.epilogue).toBe('');
   });
 
+  it('uses the first real html closing tag and keeps later mentions in the epilogue', () => {
+    const result = normalizeArenaWebOutput([
+      '<!doctype html>',
+      '<html><body><script>const example = "</html>";</script></body></html>',
+      '',
+      '页面已在 </html> 标签结束。',
+    ].join('\n'));
+
+    expect(result.document).toBe('<!doctype html>\n<html><body><script>const example = "</html>";</script></body></html>');
+    expect(result.epilogue).toBe('页面已在 </html> 标签结束。');
+  });
+
+  it('only removes an opening fence immediately before the html document', () => {
+    const result = normalizeArenaWebOutput([
+      '先展示一个代码示例：',
+      '',
+      '```',
+      'foo',
+      '```',
+      '',
+      '<!doctype html>',
+      '<html><body>内容</body></html>',
+    ].join('\n'));
+
+    expect(result.prelude).toBe('先展示一个代码示例：\n\n```\nfoo\n```');
+    expect(result.document).toBe('<!doctype html>\n<html><body>内容</body></html>');
+  });
+
   it('does not expose incomplete output to an executable iframe', () => {
     const result = normalizeArenaWebOutput('先说两句。\n<!doctype html><html><body>还没结束');
 

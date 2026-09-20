@@ -129,19 +129,22 @@ describe('Web 战报的本地执行许可', () => {
     expect(downloaded).toBe(source);
   });
 
-  it('沉浸显示通过 Portal 脱离卡片，并在原生全屏不可用时保留 CSS fallback', async () => {
+  it('沉浸显示保持同一个 iframe，并在原生全屏不可用时保留 CSS fallback', async () => {
     window.localStorage.setItem('arena.web-report-consent.v1.room.immersive', 'accepted');
     await act(async () => root.render(viewer('immersive', true, source)));
 
+    const originalFrame = document.querySelector('iframe');
+    expect(originalFrame).toBeTruthy();
     await click('⛶ 沉浸显示');
     expect(document.querySelector('[data-testid="arena-web-immersive"]')).toBeTruthy();
-    expect(document.querySelector('[data-testid="arena-web-immersive"]')?.parentElement).toBe(document.body);
+    expect(document.querySelector('iframe')).toBe(originalFrame);
     expect(document.querySelector('iframe')?.getAttribute('allow')).toBeNull();
     expect(document.body.style.overflow).toBe('hidden');
     expect(container.querySelector('.buttons-container')?.textContent).toBe('');
 
     await click('× 退出沉浸');
     expect(document.querySelector('[data-testid="arena-web-immersive"]')).toBeNull();
+    expect(document.querySelector('iframe')).toBe(originalFrame);
     expect(document.body.style.overflow).toBe('');
     expect(container.querySelector('.buttons-container')?.textContent).toContain('⛶ 沉浸显示');
   });
@@ -203,7 +206,7 @@ describe('Web 战报的本地执行许可', () => {
     await click('Web 显示');
     expect(document.querySelector('iframe')).toBeTruthy();
     const oldFrame = document.querySelector('iframe');
-    expect(oldFrame?.nextElementSibling?.classList.contains('buttons-container')).toBe(true);
+    expect(container.querySelector('.buttons-container')?.textContent).toContain('↻ 重新加载');
     await click('↻ 重新加载');
     expect(document.querySelector('iframe')).not.toBe(oldFrame);
     await act(async () => root.render(viewer('final-only', false, content)));
@@ -230,6 +233,18 @@ describe('Web 战报的本地执行许可', () => {
     expect(document.querySelector('iframe')).toBeNull();
     await act(async () => root.render(viewer('remembered')));
     expect(document.querySelector('iframe')?.srcdoc).toBe(source);
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it('完整但不含 HTML 的输出不会请求 Web 执行许可', async () => {
+    await act(async () => root.render(viewer('malformed-ready', true, '这是一段普通说明。')));
+
+    expect(document.querySelector('iframe')).toBeNull();
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(container.querySelector('[data-testid="ordinary"]')).toBeTruthy();
+    expect(container.textContent).toContain('没有包含完整的 HTML 文档');
+
+    await click('Web 显示');
     expect(document.querySelector('[role="dialog"]')).toBeNull();
   });
 
