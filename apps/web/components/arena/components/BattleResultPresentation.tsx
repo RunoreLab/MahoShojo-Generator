@@ -200,7 +200,8 @@ function StreamingResult({ report, onSaveImage, adjudicationResults }: {
   );
   return report.format === 'stream-markdown' ? renderCard() : (
     <ArenaWebReport key={report.webConsentScope ?? 'single'} content={report.content}
-      ready={report.webReady === true && !report.isStreaming} roomId={report.webConsentScope}>
+      ready={report.webReady === true && !report.isStreaming} roomId={report.webConsentScope}
+      aiModel={report.aiModel} aiUsage={report.aiUsage}>
       {renderCard}
     </ArenaWebReport>
   );

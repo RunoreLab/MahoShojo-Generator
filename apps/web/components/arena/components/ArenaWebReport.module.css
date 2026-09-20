@@ -1,0 +1,166 @@
+.viewer {
+  position: relative;
+}
+
+.immersive {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  height: 100dvh;
+  overflow: hidden;
+  overscroll-behavior: none;
+  background: #000;
+}
+
+.frame {
+  display: block;
+  width: 100%;
+  height: 75dvh;
+  min-height: 360px;
+  border: 0;
+  background: #fff;
+}
+
+.immersive .frame {
+  height: 100%;
+  min-height: 0;
+}
+
+.header {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 1;
+  padding: 8px 8px 40px;
+  color: #fff;
+  background: linear-gradient(to bottom, rgb(24 24 27 / 85%), rgb(24 24 27 / 76%) calc(100% - 32px), transparent);
+  pointer-events: none;
+  transition: opacity 160ms ease-out, transform 160ms ease-out;
+}
+
+.header[aria-hidden='true'] {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+
+.controls {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  pointer-events: auto;
+}
+
+.header[aria-hidden='true'] .controls {
+  pointer-events: none;
+}
+
+.identity {
+  min-width: 0;
+}
+
+.logo {
+  display: block;
+  width: 128px;
+  max-width: 100%;
+  height: auto;
+}
+
+.metadata {
+  display: flex;
+  flex-wrap: wrap;
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+}
+
+.model {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  margin-right: 4px;
+}
+
+.token {
+  white-space: nowrap;
+}
+
+.immersiveButton,
+.expandButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  min-width: 44px;
+  min-height: 44px;
+  border: 1px solid rgb(255 255 255 / 40%);
+  border-radius: 8px;
+  color: #fff;
+  cursor: pointer;
+  transition: background-color 160ms ease-out, border-color 160ms ease-out;
+}
+
+.immersiveButton {
+  gap: 6px;
+  padding: 0 10px;
+  font-size: 12px;
+  white-space: nowrap;
+  background: rgb(255 255 255 / 10%);
+}
+
+.expandButton {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 1;
+  background: rgb(0 0 0 / 65%);
+}
+
+.expandButton[hidden] {
+  display: none;
+}
+
+@media (hover: hover) {
+  .immersiveButton:hover,
+  .expandButton:hover { border-color: rgb(255 255 255 / 65%); }
+  .immersiveButton:hover { background: rgb(255 255 255 / 20%); }
+  .expandButton:hover { background: rgb(0 0 0 / 80%); }
+}
+
+.immersiveButton:focus-visible,
+.expandButton:focus-visible {
+  outline: 2px solid white;
+  outline-offset: 2px;
+}
+
+.immersive .header {
+  padding-top: max(8px, env(safe-area-inset-top));
+  padding-left: max(8px, env(safe-area-inset-left));
+  padding-right: max(8px, env(safe-area-inset-right));
+}
+
+.immersive .expandButton {
+  top: max(8px, env(safe-area-inset-top));
+  right: max(8px, env(safe-area-inset-right));
+}
+
+@media (min-width: 640px) {
+  .header { padding: 12px 12px 44px; }
+  .logo { width: 160px; }
+  .expandButton { top: 12px; right: 12px; }
+  .immersive .header {
+    padding-top: max(12px, env(safe-area-inset-top));
+    padding-left: max(12px, env(safe-area-inset-left));
+    padding-right: max(12px, env(safe-area-inset-right));
+  }
+  .immersive .expandButton {
+    top: max(12px, env(safe-area-inset-top));
+    right: max(12px, env(safe-area-inset-right));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .header,
+  .immersiveButton,
+  .expandButton { transition: none; }
+  .header[aria-hidden='true'] { transform: none; }
+}
