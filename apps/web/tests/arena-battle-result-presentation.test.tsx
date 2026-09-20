@@ -12,7 +12,10 @@ vi.mock('@/components/stream/StreamingBattleReportCard', () => ({
     scenarioName?: string;
     userGuidance?: string | null;
     aiModel?: string | null;
+    stopGenerationLabel?: string;
+    stopGenerationDisabled?: boolean;
     onSaveImage?: (imageUrl: string) => void;
+    onStopGeneration?: () => void;
   }) => (
     <div>
       <div
@@ -21,9 +24,20 @@ vi.mock('@/components/stream/StreamingBattleReportCard', () => ({
         data-scenario={props.scenarioName}
         data-guidance={props.userGuidance ?? undefined}
         data-model={props.aiModel ?? undefined}
+        data-stop-label={props.stopGenerationLabel ?? undefined}
+        data-stop-disabled={String(Boolean(props.stopGenerationDisabled))}
       >
         {props.content}
       </div>
+      {props.onStopGeneration ? (
+        <button
+          type="button"
+          disabled={props.stopGenerationDisabled}
+          onClick={props.onStopGeneration}
+        >
+          {props.stopGenerationLabel ?? '停止生成'}
+        </button>
+      ) : null}
       <button type="button" onClick={() => props.onSaveImage?.('blob:room-report')}>
         保存战报图片
       </button>
@@ -59,6 +73,23 @@ const render = (props: BattleResultPresentationProps) => renderToStaticMarkup(
 );
 
 describe('BattleResultPresentation', () => {
+  it('把取消中的战报停止状态传递给主战报卡', () => {
+    const html = render({
+      report: {
+        format: 'stream-markdown',
+        content: '# 正在停止',
+        isStreaming: true,
+        onStopGeneration: vi.fn(),
+        stopGenerationLabel: '正在停止…',
+        stopGenerationDisabled: true,
+      },
+    });
+
+    expect(html).toContain('data-stop-label="正在停止…"');
+    expect(html).toContain('data-stop-disabled="true"');
+    expect(html).toContain('<button type="button" disabled="">正在停止…</button>');
+  });
+
   it('用主战报卡呈现流式战报与严格安全摘要', () => {
     const html = render({
       report: {

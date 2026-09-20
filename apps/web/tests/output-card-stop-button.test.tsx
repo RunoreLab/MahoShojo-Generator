@@ -85,6 +85,21 @@ describe('输出卡片停止生成按钮', () => {
     expect(html).toContain('停止生成');
   });
 
+  test('停止请求处理中显示正在停止并禁用重复点击', () => {
+    const html = renderToStaticMarkup(
+      <StreamingBattleReportCard
+        content="# 破晓战报\n正文"
+        isStreaming
+        onStopGeneration={noop}
+        onSaveImage={noop}
+        stopGenerationDisabled
+      />
+    );
+
+    expect(html).toContain('正在停止…');
+    expect(html).toContain('disabled=""');
+  });
+
   test('非流式战报卡片在空闲时不显示停止生成，在流式生成中显示', () => {
     const idleHtml = renderToStaticMarkup(<BattleReportCard report={report} />);
     const streamingHtml = renderToStaticMarkup(<BattleReportCard report={report} isStreaming onStopGeneration={noop} onSaveImage={noop} />);

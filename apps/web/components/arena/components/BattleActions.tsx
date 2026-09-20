@@ -255,7 +255,7 @@ export function BattleActions({ showAdvancedUtilities = true }: { showAdvancedUt
     if (isCooldown) return `记者赶稿中...请等待 ${remainingTime} 秒`;
     if (isGenerating) {
       if (isRecoveringArenaGeneration) return '正在恢复上一场战报…';
-      if (arenaGenerationConnectionState === 'cancelling') return '正在停止上一场生成…';
+      if (arenaGenerationConnectionState === 'cancelling') return '正在停止生成…';
       switch (battleMode) {
         case 'daily':
           return '撰写日常逸闻中... (｡･ω･｡)ﾉ';

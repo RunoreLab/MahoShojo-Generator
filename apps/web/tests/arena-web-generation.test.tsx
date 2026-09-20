@@ -149,6 +149,7 @@ describe('single-player Web generation integration', () => {
 
     await act(async () => {
       onStateChange('generating');
+      expect(useBattleStore.getState().error).toBeNull();
       producer.enqueue(new TextEncoder().encode(sse('markdown', { chunk: '# 恢复后的战报' })));
       producer.enqueue(new TextEncoder().encode(sse('done', { status: 'completed', ok: true })));
       producer.close();

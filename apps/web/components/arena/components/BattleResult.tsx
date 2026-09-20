@@ -29,6 +29,7 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
     stopGeneration,
     isRedoingUpdates,
     isRecoveringArenaGeneration,
+    arenaGenerationConnectionState,
   } = useBattleEngine();
   const combatantRepair = useCombatantRepair();
   const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
@@ -55,6 +56,7 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
   const settings = useBattleSelector((state) => state.settings);
   const battleMode = useBattleSelector((state) => state.battleMode);
   const scenario = useBattleSelector((state) => state.scenario);
+  const isCancellingArenaGeneration = arenaGenerationConnectionState === 'cancelling';
   const [illustrationAsset, setIllustrationAsset] = useState<BattleReportIllustrationAsset | null>(null);
   const battleReportCardWidthPx = resolveBattleReportCardManualWidthPx(settings);
 
@@ -169,7 +171,12 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
                 isStreaming: isGenerating,
                 softTimeoutWarning: streamSoftTimeoutWarning,
                 onStopGeneration: stopGeneration,
-                stopGenerationLabel: isRecoveringArenaGeneration ? '放弃恢复' : '停止生成',
+                stopGenerationLabel: isCancellingArenaGeneration
+                  ? '正在停止…'
+                  : isRecoveringArenaGeneration
+                    ? '放弃恢复'
+                    : '停止生成',
+                stopGenerationDisabled: isCancellingArenaGeneration,
                 illustrationAsset,
                 cardWidthPx: battleReportCardWidthPx,
               }

@@ -43,6 +43,7 @@ export type BattleResultStreamingPresentation = {
   readonly softTimeoutWarning?: string | null;
   readonly onStopGeneration?: () => void;
   readonly stopGenerationLabel?: string;
+  readonly stopGenerationDisabled?: boolean;
   readonly illustrationAsset?: BattleReportIllustrationAsset | null;
   readonly cardWidthPx?: number | null;
 };
@@ -192,6 +193,7 @@ function StreamingResult({ report, onSaveImage, adjudicationResults }: {
       softTimeoutWarning={report.softTimeoutWarning}
       onStopGeneration={report.onStopGeneration}
       stopGenerationLabel={report.stopGenerationLabel}
+      stopGenerationDisabled={report.stopGenerationDisabled}
       illustrationAsset={report.illustrationAsset}
       cardWidthPx={report.cardWidthPx}
     />

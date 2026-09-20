@@ -499,7 +499,6 @@ export const useBattleEngine = () => {
 
   const handleGenerate = useCallback(async () => {
     let lastArenaConnectionState: ArenaGenerationConnectionState | null = null;
-    let recoveryNoticeActive = false;
     const roomAction = arenaRoomRuntime
       ? resolveArenaRoomGenerationAction(arenaRoomRuntime.state)
       : { inRoom: false, canStart: true, canRetry: false, reason: null } as const;
@@ -1085,24 +1084,9 @@ export const useBattleEngine = () => {
                   ),
                   getInitialRoutePin: () => generationIntent?.getRoutePin() ?? null,
                   onStateChange: (state) => {
-                    const previousState = lastArenaConnectionState;
                     lastArenaConnectionState = state;
                     setArenaGenerationConnectionState(state);
                     if (isArenaGenerationRecoveryState(state) || state === 'cancelling') {
-                      setError(null);
-                      return;
-                    }
-                    if (
-                      state === 'generating'
-                      && previousState
-                      && ['recovering_initial', 'reconnecting', 'resuming'].includes(previousState)
-                    ) {
-                      recoveryNoticeActive = true;
-                      setError('连接已恢复，继续接收同一场战报。');
-                      return;
-                    }
-                    if (state === 'completed' && recoveryNoticeActive) {
-                      recoveryNoticeActive = false;
                       setError(null);
                       return;
                     }

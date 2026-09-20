@@ -248,6 +248,20 @@ describe('Arena multiplayer BattleActions authority gate', () => {
     expect(mocks.stopGeneration).toHaveBeenCalledOnce();
   });
 
+  it('停止生成请求处理中统一展示文案并禁用重复操作', async () => {
+    mocks.isGenerating = true;
+    mocks.arenaGenerationConnectionState = 'cancelling';
+    mocks.arenaGenerationStatusNotice = '正在请求服务器停止生成，请稍候。';
+
+    const button = await render();
+    expect(button.textContent).toContain('正在停止生成');
+
+    const stopButton = document.body.querySelector<HTMLButtonElement>('[aria-label="正在停止…"]');
+    expect(stopButton).not.toBeNull();
+    expect(stopButton?.disabled).toBe(true);
+    expect(stopButton?.textContent).toContain('正在停止…');
+  });
+
   it('成员只显示等待房主且按钮不可提交', async () => {
     mocks.roomState = stateFor('member');
     const button = await render();
