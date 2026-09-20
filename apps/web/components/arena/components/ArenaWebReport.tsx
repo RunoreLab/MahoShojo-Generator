@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { FileText, PanelsTopLeft } from 'lucide-react';
 import { SegmentedControl, type SegmentedOption } from '@/components/shared/SegmentedControl';
 import { BaseModal } from '@/components/shared/BaseModal';
@@ -109,25 +110,94 @@ function ArenaWebNotes({ prelude, epilogue }: {
   );
 }
 
-function ArenaWebDocument({ document, prelude, epilogue, reload }: {
-  document: string;
+function ArenaWebDocument({ htmlDocument, prelude, epilogue, reload, immersive, onReload, onDownload, onExitImmersive }: {
+  htmlDocument: string;
   prelude: string;
   epilogue: string;
   reload: number;
+  immersive: boolean;
+  onReload: () => void;
+  onDownload: () => void;
+  onExitImmersive: () => void;
 }) {
-  return (
-    <>
+  const [mounted, setMounted] = useState(false);
+  const exitButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (immersive) exitButtonRef.current?.focus();
+  }, [immersive]);
+
+  const frame = (
+    <iframe
+      key={reload}
+      title="AI Web 战报"
+      sandbox="allow-scripts"
+      referrerPolicy="no-referrer"
+      srcDoc={htmlDocument}
+      data-testid="arena-web-document"
+      className={immersive
+        ? 'min-h-[360px] min-w-0 flex-1 rounded-lg border-0 bg-white'
+        : 'mt-3 h-[75dvh] min-h-[360px] w-full rounded-lg border-0 bg-white'}
+    />
+  );
+
+  if (!immersive) {
+    return <>
       <ArenaWebNotes prelude={prelude} epilogue={epilogue} />
-      <iframe
-        key={reload}
-        title="AI Web 战报"
-        sandbox="allow-scripts"
-        referrerPolicy="no-referrer"
-        srcDoc={document}
-        data-testid="arena-web-document"
-        className="mt-3 h-[75dvh] min-h-[360px] w-full rounded-lg border-0 bg-white"
-      />
-    </>
+      {frame}
+    </>;
+  }
+
+  if (!mounted) return null;
+
+  return createPortal(
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="沉浸式 Web 战报"
+      data-testid="arena-web-immersive"
+      className="fixed inset-0 z-[60] flex min-h-[100dvh] flex-col bg-slate-950 text-white"
+    >
+      <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-white/10 bg-slate-950/95 px-3 py-3 backdrop-blur sm:px-5">
+        <div className="min-w-0">
+          <div className="truncate text-sm font-semibold sm:text-base">AI Web 战报</div>
+          <div className="text-xs text-white/55">沉浸显示 · iframe 仍保持隔离运行</div>
+        </div>
+        <div className="flex flex-wrap justify-end gap-2 text-sm">
+          <button
+            type="button"
+            onClick={onReload}
+            className="min-h-10 rounded-lg bg-white/10 px-3 py-2 transition-colors hover:bg-white/20 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink-300"
+          >
+            ↻ 重新加载
+          </button>
+          <button
+            type="button"
+            onClick={onDownload}
+            className="min-h-10 rounded-lg bg-white/10 px-3 py-2 transition-colors hover:bg-white/20 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink-300"
+          >
+            🌐 下载 HTML
+          </button>
+          <button
+            ref={exitButtonRef}
+            type="button"
+            onClick={onExitImmersive}
+            className="min-h-10 rounded-lg bg-pink-500/80 px-3 py-2 font-semibold transition-colors hover:bg-pink-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink-300"
+          >
+            × 退出沉浸
+          </button>
+        </div>
+      </header>
+      <main className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto p-3 sm:p-4">
+        <ArenaWebNotes prelude={prelude} epilogue={epilogue} />
+        {frame}
+      </main>
+    </div>,
+    document.body,
   );
 }
 
@@ -166,6 +236,8 @@ export function ArenaWebReport({ content, ready, roomId, children }: {
   const [confirming, setConfirming] = useState(false);
   const [asked, setAsked] = useState(false);
   const [reload, setReload] = useState(0);
+  const [immersive, setImmersive] = useState(false);
+  const nativeFullscreenRequestedRef = useRef(false);
   const normalizedOutput = useMemo(() => normalizeArenaWebOutput(content), [content]);
   const webDocument = normalizedOutput.document;
   useEffect(() => {
@@ -174,9 +246,54 @@ export function ArenaWebReport({ content, ready, roomId, children }: {
       setConfirming(true);
     }
   }, [ready, accepted, asked]);
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      if (!document.fullscreenElement && nativeFullscreenRequestedRef.current) {
+        nativeFullscreenRequestedRef.current = false;
+        setImmersive(false);
+      }
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, []);
+  useEffect(() => {
+    if (!immersive) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [immersive]);
+  useEffect(() => () => {
+    if (nativeFullscreenRequestedRef.current && document.fullscreenElement && document.exitFullscreen) {
+      nativeFullscreenRequestedRef.current = false;
+      void document.exitFullscreen().catch(() => undefined);
+    }
+  }, []);
   const showingWeb = ready && accepted && displayMode === 'web' && webDocument !== null;
+  const enterImmersive = () => {
+    setImmersive(true);
+    const requestFullscreen = document.documentElement.requestFullscreen;
+    if (typeof requestFullscreen !== 'function') return;
+
+    nativeFullscreenRequestedRef.current = true;
+    void requestFullscreen.call(document.documentElement).catch(() => {
+      nativeFullscreenRequestedRef.current = false;
+    });
+  };
+  const exitImmersive = () => {
+    setImmersive(false);
+    if (!nativeFullscreenRequestedRef.current) return;
+
+    nativeFullscreenRequestedRef.current = false;
+    if (document.fullscreenElement && document.exitFullscreen) {
+      void document.exitFullscreen().catch(() => undefined);
+    }
+  };
   const handleDisplayModeChange = (nextMode: ArenaWebDisplayMode) => {
     if (nextMode === 'ordinary') {
+      if (immersive) exitImmersive();
       setDisplayMode('ordinary');
       setConfirming(false);
       return;
@@ -214,13 +331,17 @@ export function ArenaWebReport({ content, ready, roomId, children }: {
       </p> : null}
       {children(showingWeb ? (
         <ArenaWebDocument
-          document={webDocument}
+          htmlDocument={webDocument}
           prelude={normalizedOutput.prelude}
           epilogue={normalizedOutput.epilogue}
           reload={reload}
+          immersive={immersive}
+          onReload={() => setReload((value) => value + 1)}
+          onDownload={downloadHtml}
+          onExitImmersive={exitImmersive}
         />
       ) : undefined, <>
-        {showingWeb ? <button
+        {showingWeb && !immersive ? <button
           type="button"
           onClick={() => setReload((value) => value + 1)}
           className="save-button flex-1 bg-white/10 hover:bg-white/20 text-white py-2 px-4 rounded transition-all"
@@ -229,14 +350,23 @@ export function ArenaWebReport({ content, ready, roomId, children }: {
         >
           ↻ 重新加载
         </button> : null}
-        <button
+        {showingWeb && !immersive ? <button
+          type="button"
+          onClick={enterImmersive}
+          className="save-button flex-1 bg-white/10 hover:bg-white/20 text-white py-2 px-4 rounded transition-all"
+          aria-label="沉浸显示 Web 战报"
+          title="沉浸显示 Web 战报"
+        >
+          ⛶ 沉浸显示
+        </button> : null}
+        {!immersive ? <button
           type="button"
           disabled={!ready || !webDocument}
           onClick={downloadHtml}
           className="save-button flex-1 bg-white/10 hover:bg-white/20 text-white py-2 px-4 rounded transition-all disabled:cursor-not-allowed disabled:opacity-60"
         >
           🌐 下载 HTML
-        </button>
+        </button> : null}
       </>)}
       <WebReportConsentDialog open={ready && confirming && !accepted} onCancel={() => { setConfirming(false); setDisplayMode('ordinary'); }} onAccept={(remember) => {
         accept(remember);

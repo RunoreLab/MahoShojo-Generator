@@ -129,6 +129,23 @@ describe('Web 战报的本地执行许可', () => {
     expect(downloaded).toBe(source);
   });
 
+  it('沉浸显示通过 Portal 脱离卡片，并在原生全屏不可用时保留 CSS fallback', async () => {
+    window.localStorage.setItem('arena.web-report-consent.v1.room.immersive', 'accepted');
+    await act(async () => root.render(viewer('immersive', true, source)));
+
+    await click('⛶ 沉浸显示');
+    expect(document.querySelector('[data-testid="arena-web-immersive"]')).toBeTruthy();
+    expect(document.querySelector('[data-testid="arena-web-immersive"]')?.parentElement).toBe(document.body);
+    expect(document.querySelector('iframe')?.getAttribute('allow')).toBeNull();
+    expect(document.body.style.overflow).toBe('hidden');
+    expect(container.querySelector('.buttons-container')?.textContent).toBe('');
+
+    await click('× 退出沉浸');
+    expect(document.querySelector('[data-testid="arena-web-immersive"]')).toBeNull();
+    expect(document.body.style.overflow).toBe('');
+    expect(container.querySelector('.buttons-container')?.textContent).toContain('⛶ 沉浸显示');
+  });
+
   it('生成期间禁用格式切换，不打开确认也不更改格式', async () => {
     const change = vi.fn();
     await act(async () => root.render(<ArenaReportFormatSelector value="markdown" onChange={change} disabled roomId="disabled-selector" />));
