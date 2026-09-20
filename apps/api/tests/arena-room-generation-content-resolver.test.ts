@@ -79,7 +79,6 @@ describe('Arena Room generation online canonical content resolver', () => {
   });
 
   it.each([
-    ['stale version', { updated_at: '2026-08-31T08:00:01.000Z' }, 'ARENA_ROOM_REFERENCE_VERSION_MISMATCH'],
     ['deleted', { deleted_at: '2026-08-31T08:01:00.000Z' }, 'ARENA_ROOM_REFERENCE_NOT_READABLE'],
     ['pending', { review_status: 'pending' }, 'ARENA_ROOM_REFERENCE_NOT_READABLE'],
     ['banned', { is_public: -1 }, 'ARENA_ROOM_REFERENCE_NOT_READABLE'],
@@ -92,6 +91,16 @@ describe('Arena Room generation online canonical content resolver', () => {
     const { client } = createClient(() => [row(overrides)]);
     const resolver = createArenaRoomGenerationOnlineContentResolver({ getClient: () => client });
     await expect(resolver.resolve({ ref: ref(), hostAccountUserId: 7 })).rejects.toMatchObject({ code });
+  });
+
+  it('版本漂移时读取并返回当前 latest ref 与正文', async () => {
+    const { client } = createClient(() => [row({ updated_at: '2026-08-31T08:00:01.000Z' })]);
+    const resolver = createArenaRoomGenerationOnlineContentResolver({ getClient: () => client });
+
+    await expect(resolver.resolve({ ref: ref(), hostAccountUserId: 7 })).resolves.toMatchObject({
+      ref: { id: 'card-1', kind: 'character', versionToken: '2026-08-31T08:00:01.000Z' },
+      payload: { name: '线上角色' },
+    });
   });
 
   it('host 可读自有 approved private exact card，material 可引用支持的任意卡类型', async () => {

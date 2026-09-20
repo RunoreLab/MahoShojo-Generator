@@ -285,7 +285,7 @@ describe('Arena Room Proposal authority transitions', () => {
       },
     }], 'proposal-version-drift');
     const driftSubmitted = submit(createJoinedState(), versionDrift).nextState;
-    expect(failure(transitionArenaRoomAt(driftSubmitted, {
+    expect(success(transitionArenaRoomAt(driftSubmitted, {
       type: 'resolve-proposal',
       expectedRoomEpoch: 'epoch-1',
       expectedRevision: 0,
@@ -293,7 +293,7 @@ describe('Arena Room Proposal authority transitions', () => {
       resolution: 'accept-selected',
       selectedChangeIds: ['remove-character-1'],
       timestamp: '2026-08-27T16:02:00.000Z',
-    }, hostAuthority()))).toMatchObject({ code: 'conflict', reason: 'proposal-conflict' });
+    }, hostAuthority()))).toMatchObject({ ok: true });
   });
 
   it('enforces the pending Proposal cap with a stable failure', () => {

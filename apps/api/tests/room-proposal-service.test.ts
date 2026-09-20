@@ -721,7 +721,6 @@ describe('Arena Room Proposal application service', () => {
   });
 
   it.each([
-    ['version changed', { updated_at: 'v2' }, 'ROOM_REFERENCE_STALE'],
     ['deleted', { deleted_at: '2026-08-28T00:03:00.000Z' }, 'ROOM_REFERENCE_DENIED'],
     ['permission changed', { is_public: 0, user_id: 202 }, 'ROOM_REFERENCE_DENIED'],
     ['review changed', { review_status: 'pending' }, 'ROOM_REFERENCE_DENIED'],
@@ -810,6 +809,79 @@ describe('Arena Room Proposal application service', () => {
       proposals: [{ status: 'submitted' }],
       sharedConfig: { scenario: null },
     });
+  });
+
+  it('online DataCard updated_at 漂移不阻止 Proposal resolve，generation 再解析 latest', async () => {
+    const harness = await createHarness();
+    const rows = new Map<string, Record<string, unknown>>([
+      ['character-1', {
+        id: 'character-1',
+        user_id: 101,
+        type: 'character',
+        is_public: 1,
+        review_status: 'approved',
+        updated_at: 'v1',
+        deleted_at: null,
+      }],
+      ['scenario-1', {
+        id: 'scenario-1',
+        user_id: 101,
+        type: 'scenario',
+        is_public: 1,
+        review_status: 'approved',
+        updated_at: 'v1',
+        deleted_at: null,
+      }],
+    ]);
+    const client: ArenaDataCardRefVerifierD1Client = {
+      prepare() {
+        let id = '';
+        const statement: ArenaDataCardRefVerifierD1Statement = {
+          bind(value) {
+            id = String(value);
+            return statement;
+          },
+          async all() {
+            const row = rows.get(id);
+            return { success: true, results: row ? [structuredClone(row)] : [] };
+          },
+        };
+        return statement;
+      },
+    };
+    const service = createArenaRoomProposalService({
+      memberships: harness.memberships,
+      references: createArenaDataCardRefVerifier({ getClient: () => client }),
+      now: () => '2026-08-28T00:03:00.000Z',
+    });
+    await service.submit({
+      roomId: 'room-1',
+      accountUserId: 202,
+      request: {
+        proposalId: 'proposal-d1-version-changed',
+        expectedRoomEpoch: 'epoch-1',
+        baseRevision: 0,
+        changes: [{
+          changeId: 'scenario-1',
+          type: 'setScenario',
+          ref: { id: 'scenario-1', kind: 'scenario', versionToken: 'v1' },
+          expectedBase: { kind: 'ref', ref: null },
+        }],
+      },
+    });
+    rows.set('scenario-1', { ...rows.get('scenario-1')!, updated_at: 'v2' });
+
+    await expect(service.resolve({
+      roomId: 'room-1',
+      proposalId: 'proposal-d1-version-changed',
+      accountUserId: 101,
+      request: {
+        expectedRoomEpoch: 'epoch-1',
+        expectedRevision: 0,
+        resolution: 'accept-selected',
+        selectedChangeIds: ['scenario-1'],
+      },
+    })).resolves.toMatchObject({ result: 'applied', revision: 1 });
   });
 
   it('stale expectedBase fails closed with or without a stale diagnostic revision', async () => {

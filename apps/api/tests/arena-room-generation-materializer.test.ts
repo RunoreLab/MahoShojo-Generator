@@ -3,7 +3,6 @@ import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
-  ArenaRoomGenerationMaterializationError,
   createArenaRoomGenerationMaterializer,
   type ArenaRoomGenerationCanonicalContent,
 } from '#/arena-room/room-generation-materializer';
@@ -347,12 +346,12 @@ describe('Arena Room authoritative generation materializer', () => {
     });
   });
 
-  it('canonical resolver 的 exact ref 不一致时 fail closed', async () => {
+  it('online canonical resolver 返回 latest ref 时继续 materialize', async () => {
     const harness = createHarness();
     harness.content.resolveOnline.mockResolvedValueOnce(canonical(
-      'online-character', 'character', 'stale-version', { name: '旧角色' }, '旧角色',
+      'online-character', 'character', 'latest-version', { name: '新角色' }, '新角色',
     ));
-    await expect(harness.materializer.materialize({
+    const payload = await harness.materializer.materialize({
       sharedConfig: sharedConfig(),
       hostAccountUserId: 101,
       hostLocalPayloads: [
@@ -360,6 +359,11 @@ describe('Arena Room authoritative generation materializer', () => {
         { key: 'host-local:scenario:0:aux', kind: 'scenario', payload: defaultLocalScenario },
       ],
       hostRuntime: {},
-    })).rejects.toBeInstanceOf(ArenaRoomGenerationMaterializationError);
+    });
+    expect((payload.combatants as readonly unknown[])[0]).toMatchObject({
+      roomCombatantKey: 'data-card:online-character',
+      data: { name: '新角色' },
+      sourceDataCardUpdatedAt: 'latest-version',
+    });
   });
 });

@@ -79,10 +79,14 @@ const isPlainRecord = (value: unknown): value is Record<string, unknown> => (
   && (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null)
 );
 
-const canonicalRefMatches = (left: DataCardRef, right: DataCardRef): boolean => (
+const canonicalRefMatches = (
+  left: DataCardRef,
+  right: DataCardRef,
+  source: 'online' | 'preset',
+): boolean => (
   left.id === right.id
   && left.kind === right.kind
-  && left.versionToken === right.versionToken
+  && (source === 'online' || left.versionToken === right.versionToken)
 );
 
 const canonicalJsonValue = (value: unknown): unknown => {
@@ -156,7 +160,7 @@ export const createArenaRoomGenerationMaterializer = (
     const resolved = source === 'online'
       ? await options.content.resolveOnline({ ref: entry.ref, hostAccountUserId })
       : await options.content.resolvePreset({ ref: entry.ref });
-    if (!canonicalRefMatches(resolved.ref, entry.ref)) {
+    if (!canonicalRefMatches(resolved.ref, entry.ref, source)) {
       return fail('ARENA_ROOM_REFERENCE_STALE');
     }
     if (!isPlainRecord(resolved.payload)) {

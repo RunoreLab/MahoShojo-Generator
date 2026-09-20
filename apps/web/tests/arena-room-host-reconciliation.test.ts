@@ -167,7 +167,7 @@ describe('Arena room host reconciliation', () => {
     expect(rebuilt.sharedConfig).toEqual(target);
   });
 
-  it('线上 ref 版本漂移时 fail closed，且不写入 BattleStore', async () => {
+  it('线上 ref 版本漂移时采用最新正文并写入最新版本元数据', async () => {
     const before = useBattleStore.getState();
     const baselineBundle = await buildArenaRoomHostWorkspaceBundleFromBattleState(before);
     const target: ArenaRoomSharedConfig = {
@@ -182,14 +182,18 @@ describe('Arena room host reconciliation', () => {
       }],
     };
 
-    await expect(applyArenaRoomAuthorityToBattleStore(target, {
+    await applyArenaRoomAuthorityToBattleStore(target, {
       currentBundle: baselineBundle,
       loadPublicCard: async () => ({
         ...publicRow('character-stale', 'character'),
         updated_at: 'different-version',
       }),
-    })).rejects.toThrow(/版本/u);
-    expect(useBattleStore.getState().combatants).toBe(before.combatants);
+    });
+    expect(useBattleStore.getState().combatants).not.toBe(before.combatants);
+    expect(useBattleStore.getState().combatants.at(-1)).toMatchObject({
+      sourceDataCardId: 'character-stale',
+      sourceDataCardUpdatedAt: 'different-version',
+    });
   });
 
   it('materialize 完成前工作区已变化时不覆盖新的本地修改', async () => {

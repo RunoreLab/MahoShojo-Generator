@@ -110,7 +110,10 @@ const sameReference = (
   return left.key === right.key
     && left.ref.id === right.ref.id
     && left.ref.kind === right.ref.kind
-    && left.ref.versionToken === right.ref.versionToken;
+    && (
+      left.key.startsWith('data-card:')
+      || left.ref.versionToken === right.ref.versionToken
+    );
 };
 
 const sameHostLocal = (
@@ -128,7 +131,7 @@ const sameSource = (
   right: SharedEntry | SharedScenarioEntry | SharedMaterialEntry,
 ): boolean => sameReference(left, right) || sameHostLocal(left, right);
 
-const loadExactPublicPayload = async (
+const loadLatestPublicPayload = async (
   ref: { readonly id: string; readonly kind: string; readonly versionToken: string },
   loadPublicCard: ArenaRoomPublicCardLoader,
 ): Promise<Record<string, unknown>> => {
@@ -138,8 +141,8 @@ const loadExactPublicPayload = async (
   const payloadType = isRecord(payload) && typeof payload._cardType === 'string'
     ? payload._cardType
     : '';
-  if (source.sourceDataCardId !== ref.id || source.sourceDataCardUpdatedAt !== ref.versionToken) {
-    throw new Error(`在线数据卡 ${ref.id} 的版本与当前房间配置不一致`);
+  if (source.sourceDataCardId !== ref.id) {
+    throw new Error(`在线数据卡 ${ref.id} 的身份与当前房间配置不一致`);
   }
   const kindMatches = ref.kind === 'material' || payloadType === ref.kind;
   if (!kindMatches || !isPublicVisibility(payload._isPublic)) {
@@ -178,7 +181,7 @@ const publicCombatant = async (
   loadPublicCard: ArenaRoomPublicCardLoader,
   verifyOrigin: ArenaRoomOriginVerifier,
 ): Promise<CombatantData> => {
-  const payload = await loadExactPublicPayload(entry.ref, loadPublicCard);
+  const payload = await loadLatestPublicPayload(entry.ref, loadPublicCard);
   const cleaned = stripBattleSelectionTransportMeta(payload);
   const source = mapDataCardRuntimeSourceInfo(payload);
   const displayName = getCombatantDisplayName(cleaned);
@@ -190,7 +193,7 @@ const publicCombatant = async (
     isPreset: false,
     isNonStandard: false,
     sourceDataCardId: entry.ref.id,
-    sourceDataCardUpdatedAt: entry.ref.versionToken,
+    sourceDataCardUpdatedAt: source.sourceDataCardUpdatedAt ?? entry.ref.versionToken,
     sourceDataCardName: source.sourceDataCardName,
     sourceDataCardDescription: source.sourceDataCardDescription,
     sourceDataCardCreatedAt: source.sourceDataCardCreatedAt,
@@ -225,7 +228,7 @@ const publicScenario = async (
   loadPublicCard: ArenaRoomPublicCardLoader,
   verifyOrigin: ArenaRoomOriginVerifier,
 ): Promise<ScenarioState> => {
-  const payload = await loadExactPublicPayload(entry.ref, loadPublicCard);
+  const payload = await loadLatestPublicPayload(entry.ref, loadPublicCard);
   const cleaned = stripBattleSelectionTransportMeta(payload);
   const source = mapDataCardRuntimeSourceInfo(payload);
   return {
@@ -234,7 +237,7 @@ const publicScenario = async (
     isNative: await verifyOrigin(cleaned),
     isPreset: false,
     sourceDataCardId: entry.ref.id,
-    sourceDataCardUpdatedAt: entry.ref.versionToken,
+    sourceDataCardUpdatedAt: source.sourceDataCardUpdatedAt ?? entry.ref.versionToken,
     sourceDataCardName: source.sourceDataCardName,
     sourceDataCardDescription: source.sourceDataCardDescription,
     sourceDataCardCreatedAt: source.sourceDataCardCreatedAt,
@@ -264,14 +267,14 @@ const publicMaterial = async (
   loadPublicCard: ArenaRoomPublicCardLoader,
   verifyOrigin: ArenaRoomOriginVerifier,
 ): Promise<ArenaMaterialState> => {
-  const payload = await loadExactPublicPayload(entry.ref, loadPublicCard);
+  const payload = await loadLatestPublicPayload(entry.ref, loadPublicCard);
   const cleaned = stripBattleSelectionTransportMeta(payload);
   const source = mapDataCardRuntimeSourceInfo(payload);
   return buildArenaMaterialState({
     payload,
     id: `material-card-${entry.ref.id}`,
     sourceDataCardId: entry.ref.id,
-    sourceDataCardUpdatedAt: entry.ref.versionToken,
+    sourceDataCardUpdatedAt: source.sourceDataCardUpdatedAt ?? entry.ref.versionToken,
     sourceDataCardName: source.sourceDataCardName,
     isNative: await verifyOrigin(cleaned),
     isPreset: false,

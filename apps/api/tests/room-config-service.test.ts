@@ -4,6 +4,7 @@ import {
   ArenaDataCardRefVerifierError,
   type ArenaDataCardRefVerifier,
 } from '#/arena-room/arena-data-card-ref-verifier';
+import type { DataCardRef } from '@mahoshojo/contracts/arena-room';
 import {
   ArenaRoomGenerationPresetResolverError,
   type ArenaRoomGenerationPresetResolver,
@@ -172,6 +173,30 @@ describe('Arena Room config application service', () => {
       },
     })).resolves.toMatchObject({
       snapshot: { revision: 1, sharedConfig: { combatants: [] } },
+    });
+  });
+
+  it('publish 将在线 DataCard ref 规范化为 verifier 返回的 latest token', async () => {
+    const references: ArenaDataCardRefVerifier = {
+      verify: vi.fn(async ({ refs }) => refs.map((ref: DataCardRef) => ({ ...ref, versionToken: 'latest-v2' }))),
+    };
+    const harness = await createHarness(references);
+
+    await expect(harness.service.publish({
+      roomId: 'room-1',
+      accountUserId: 101,
+      request: {
+        expectedRoomEpoch: 'epoch-1',
+        expectedRevision: 0,
+        expectedControlSeq: harness.store.state!.snapshot.controlSeq,
+        sharedConfig: config(),
+      },
+    })).resolves.toMatchObject({
+      snapshot: {
+        sharedConfig: {
+          combatants: [{ ref: { versionToken: 'latest-v2' } }],
+        },
+      },
     });
   });
 

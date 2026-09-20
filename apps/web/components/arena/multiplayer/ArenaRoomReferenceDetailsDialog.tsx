@@ -18,15 +18,10 @@ type DetailsCard = React.ComponentProps<typeof DataCardDetailsModal>['card'];
 const text = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
 
 /**
- * 加载详情正文并校验版本漂移。公开接口只能取到当前最新已公开版本；
- * 当房间引用的 versionToken 与之不一致时，正文仍可预览，但通过 staleNotice
- * 明确提示"看到的不是房间引用的那个版本"，避免把新正文误当成被引用身份。
+ * 在线数据卡采用 latest 语义：详情始终展示当前可读的公开版本，版本变化不阻塞房间操作。
  */
-const VERSION_DRIFT_NOTICE = '注意：房间引用的是该内容的另一个版本，以下为当前已公开的最新版本；接受引用时若引用版本已过期，服务器会拒绝并要求重新选择。';
-
 const loadOnlineCard = async (
   id: string,
-  versionToken: string | undefined,
 ): Promise<{ card: DetailsCard; staleNotice: string | null }> => {
   const result = await fetchPublicDataCardRowById(id);
   if (result.kind !== 'success') {
@@ -54,8 +49,7 @@ const loadOnlineCard = async (
     createdAt: text(row.created_at) || undefined,
     updatedAt: text(row.updated_at) || text(row.updatedAt) || undefined,
   };
-  const drifted = arenaRoomReferenceVersionDrifted(versionToken, card.updatedAt);
-  return { card, staleNotice: drifted === true ? VERSION_DRIFT_NOTICE : null };
+  return { card, staleNotice: null };
 };
 
 const loadPresetCard = async (
@@ -120,7 +114,7 @@ export function ArenaRoomReferenceDetailsDialog({
     setError(null);
     let cancelled = false;
     void (request.source === 'data-card'
-      ? loadOnlineCard(request.id, request.versionToken)
+      ? loadOnlineCard(request.id)
       : loadPresetCard(request.kind, request.id, request.versionToken)
     ).then((loaded) => {
       if (!cancelled && loadGenerationRef.current === generation) {

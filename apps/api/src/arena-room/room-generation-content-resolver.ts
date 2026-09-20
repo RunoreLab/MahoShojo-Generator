@@ -34,6 +34,7 @@ export type ArenaRoomGenerationContentResolverErrorCode =
   | 'ARENA_ROOM_REFERENCE_INPUT_INVALID'
   | 'ARENA_ROOM_REFERENCE_METADATA_INVALID'
   | 'ARENA_ROOM_REFERENCE_NOT_READABLE'
+  /** @deprecated Built-in resolution now returns the latest readable row. */
   | 'ARENA_ROOM_REFERENCE_VERSION_MISMATCH';
 
 export class ArenaRoomGenerationContentResolverError extends Error {
@@ -170,11 +171,8 @@ export const createArenaRoomGenerationOnlineContentResolver = (
       || visibility === -1
       || (visibility === 0 && row.user_id !== input.hostAccountUserId)
     ) return fail('ARENA_ROOM_REFERENCE_NOT_READABLE');
-    if (row.updated_at !== parsedRef.data.versionToken) {
-      return fail('ARENA_ROOM_REFERENCE_VERSION_MISMATCH');
-    }
     return Object.freeze({
-      ref: Object.freeze({ ...parsedRef.data }),
+      ref: Object.freeze({ ...parsedRef.data, versionToken: row.updated_at }),
       displayName: name.data,
       sourceType: type.data,
       payload: parsePayload(row.data),

@@ -147,8 +147,9 @@ export const createArenaRoomConfigService = (
       if (membership.member.role !== 'host' || membership.member.membershipState !== 'active') {
         return fail('ROOM_PERMISSION_DENIED');
       }
+      let resolvedSharedConfig = request.data.sharedConfig;
       try {
-        await verifyArenaRoomSharedConfigRefs({
+        resolvedSharedConfig = await verifyArenaRoomSharedConfigRefs({
           references: options.references,
           sharedConfig: request.data.sharedConfig,
           hostAccountUserId: membership.accountUserId,
@@ -159,7 +160,7 @@ export const createArenaRoomConfigService = (
       try {
         await verifyArenaRoomSharedConfigPresetRefs({
           presets: options.presets,
-          sharedConfig: request.data.sharedConfig,
+          sharedConfig: resolvedSharedConfig,
         });
       } catch (error) {
         mapPresetReferenceError(error);
@@ -177,7 +178,7 @@ export const createArenaRoomConfigService = (
             expectedRoomEpoch: request.data.expectedRoomEpoch,
             expectedRevision: request.data.expectedRevision,
             expectedControlSeq: request.data.expectedControlSeq,
-            sharedConfig: request.data.sharedConfig,
+            sharedConfig: resolvedSharedConfig,
             timestamp: monotonicTimestamp(now, current),
           },
         });

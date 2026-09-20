@@ -575,7 +575,7 @@ describe('proposal selection and conflicts', () => {
     ]));
   });
 
-  it('distinguishes stale value preconditions from online reference version drift', () => {
+  it('ignores online reference version drift while preserving stale value preconditions', () => {
     const base = baseConfig();
     const changes = diffArenaSharedConfig(base, {
       ...base,
@@ -594,7 +594,7 @@ describe('proposal selection and conflicts', () => {
     };
     const conflicts = detectProposalConflicts(current, changes);
 
-    expect(conflicts.find((conflict) => conflict.target === 'combatant:data-card:c1')).toMatchObject({ code: 'reference-changed' });
+    expect(conflicts.find((conflict) => conflict.target === 'combatant:data-card:c1')).toBeUndefined();
     expect(conflicts.find((conflict) => conflict.target === 'userGuidance')).toMatchObject({ code: 'precondition-failed' });
   });
 });

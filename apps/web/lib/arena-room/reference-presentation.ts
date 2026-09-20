@@ -189,7 +189,7 @@ export const presetReferenceRequest = (
     : { source: 'preset', kind, id, versionToken };
 };
 
-/** 在线公开卡引用请求：绑定引用身份中的 versionToken；ref 缺失时返回 null。 */
+/** 在线公开卡引用请求：携带当前观测到的 versionToken；ref 缺失时返回 null。 */
 export const dataCardReferenceRequest = (
   kind: ArenaRoomReferenceRequest['kind'],
   ref: { readonly id: string; readonly versionToken?: string } | null | undefined,

@@ -60,13 +60,13 @@ describe('房主逐项覆盖 staged apply', () => {
     expect(run(baseConfig(), [change], ['assign']).preview.plan[0])
       .toMatchObject({ outcome: 'conflict', overrideBlockedReason: 'target-missing' });
   });
-  it('引用漂移和新增 key 碰撞不可覆盖', () => {
+  it('在线卡版本漂移不构成冲突，但新增 key 碰撞不可覆盖', () => {
     const ref = baseConfig().combatants[0]!.ref;
     const current = { ...baseConfig(), combatants: [{ key: 'data-card:character-1', ref: { ...ref, versionToken: 'v2' } }] };
     const remove: ArenaProposalChange = { changeId: 'remove', type: 'removeCombatant',
       combatantKey: 'data-card:character-1', expectedBase: { kind: 'present', ref } };
     expect(run(current, [remove], ['remove']).preview.plan[0])
-      .toMatchObject({ outcome: 'conflict', overrideAllowed: false, overrideBlockedReason: 'reference-changed' });
+      .toMatchObject({ outcome: 'applicable' });
     const add: ArenaProposalChange = { changeId: 'add', type: 'addTeam', teamKey: 'team:one', displayName: 'B', expectedBase: { kind: 'absent' } };
     expect(run({ ...baseConfig(), teams: [{ key: 'team:one', displayName: 'C', combatantKeys: [] }] }, [add], ['add']).result.status).toBe('rejected');
   });

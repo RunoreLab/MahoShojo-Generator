@@ -4,6 +4,7 @@ import {
   ArenaDataCardRefVerifierError,
   type ArenaDataCardRefVerifier,
 } from '#/arena-room/arena-data-card-ref-verifier';
+import type { DataCardRef } from '@mahoshojo/contracts/arena-room';
 import {
   ArenaRoomGenerationPresetResolverError,
   type ArenaRoomGenerationPresetResolver,
@@ -169,6 +170,25 @@ describe('Arena Room membership service', () => {
       sharedConfig: localConfig,
     })).resolves.toMatchObject({
       snapshot: { sharedConfig: { combatants: localConfig.combatants } },
+    });
+  });
+
+  it('create 将在线 DataCard ref 规范化为 verifier 返回的 latest token', async () => {
+    const references: ArenaDataCardRefVerifier = {
+      verify: vi.fn(async ({ refs }) => refs.map((ref: DataCardRef) => ({ ...ref, versionToken: 'latest-v2' }))),
+    };
+    const { service } = createHarness(references);
+
+    await expect(service.create({
+      accountUserId: 101,
+      displayName: 'Host',
+      sharedConfig: createArenaRoomState().snapshot.sharedConfig,
+    })).resolves.toMatchObject({
+      snapshot: {
+        sharedConfig: {
+          combatants: [{ ref: { versionToken: 'latest-v2' } }],
+        },
+      },
     });
   });
 

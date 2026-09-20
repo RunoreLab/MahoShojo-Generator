@@ -125,7 +125,7 @@ describe('arena room config diff presentation', () => {
     }));
   });
 
-  it('在线卡仅版本变化时，名称请求携带 versionToken 且输出版本条目', () => {
+  it('在线卡仅版本变化时不制造配置差异，但名称请求仍携带 versionToken', () => {
     const room = baseConfig({
       combatants: [{ key: 'data-card:alice', ref: { id: 'alice', kind: 'character', versionToken: 'v1' } }],
     });
@@ -133,11 +133,7 @@ describe('arena room config diff presentation', () => {
       combatants: [{ key: 'data-card:alice', ref: { id: 'alice', kind: 'character', versionToken: 'v2' } }],
     });
     const entries = buildArenaRoomConfigDiffEntries(room, local, resolveNameOf([named(alice('v2'), '爱丽丝')]));
-    expect(entries).toContainEqual(expect.objectContaining({
-      category: '角色',
-      tone: 'change',
-      label: '更新了「爱丽丝」的数据卡版本',
-    }));
+    expect(entries).toEqual([]);
     expect(entries).not.toContainEqual(expect.objectContaining({ category: '角色', tone: 'add' }));
     expect(entries).not.toContainEqual(expect.objectContaining({ category: '角色', tone: 'remove' }));
   });
@@ -154,7 +150,7 @@ describe('arena room config diff presentation', () => {
     }));
   });
 
-  it('仅版本差异且名称无法解析时，仍输出可读条目（不出现空差异）', () => {
+  it('仅在线卡版本差异且名称无法解析时不输出伪差异', () => {
     const room = baseConfig({
       combatants: [{ key: 'data-card:alice', ref: { id: 'alice', kind: 'character', versionToken: 'v1' } }],
     });
@@ -162,13 +158,7 @@ describe('arena room config diff presentation', () => {
       combatants: [{ key: 'data-card:alice', ref: { id: 'alice', kind: 'character', versionToken: 'v2' } }],
     });
     const entries = buildArenaRoomConfigDiffEntries(room, local, resolveNameOf([]));
-    expect(entries).toEqual([
-      expect.objectContaining({
-        category: '角色',
-        tone: 'change',
-        label: '更新了「在线:alice」的数据卡版本',
-      }),
-    ]);
+    expect(entries).toEqual([]);
   });
 
   it('仅队伍顺序变化时输出可读条目', () => {

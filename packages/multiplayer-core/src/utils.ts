@@ -58,6 +58,14 @@ export const hasVersionDrift = (expected: unknown, current: unknown): boolean =>
   && expected.versionToken !== current.versionToken
 );
 
+/** Online DataCard refs float to the latest version; id + kind remain stable. */
+export const sameOnlineDataCardIdentity = (left: unknown, right: unknown): boolean => (
+  isOnlineRef(left)
+  && isOnlineRef(right)
+  && left.id === right.id
+  && left.kind === right.kind
+);
+
 export const arrayEqual = (left: readonly string[], right: readonly string[]): boolean => (
   left.length === right.length && left.every((value, index) => value === right[index])
 );

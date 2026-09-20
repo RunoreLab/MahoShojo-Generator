@@ -22,6 +22,8 @@ import {
   deepEqual,
   isCanonicalResourceKey,
   isOnlineRef,
+  isRecord,
+  sameOnlineDataCardIdentity,
 } from './utils';
 
 const entryKey = (entry: { key: string }): string => entry.key;
@@ -39,6 +41,23 @@ const hostEntry = (entry: unknown): boolean => (
   && 'source' in entry
   && entry.source === 'host-local'
 );
+
+const semanticallyEqualEntry = (left: unknown, right: unknown): boolean => {
+  if (!isRecord(left) || !isRecord(right)) return deepEqual(left, right);
+  const leftKey = left.key;
+  const rightKey = right.key;
+  if (
+    leftKey === rightKey
+    && typeof leftKey === 'string'
+    && leftKey.startsWith('data-card:')
+    && sameOnlineDataCardIdentity(left.ref, right.ref)
+  ) {
+    const normalizedLeft = { ...left, ref: { ...(left.ref as Record<string, unknown>), versionToken: '__latest__' } };
+    const normalizedRight = { ...right, ref: { ...(right.ref as Record<string, unknown>), versionToken: '__latest__' } };
+    return deepEqual(normalizedLeft, normalizedRight);
+  }
+  return deepEqual(left, right);
+};
 
 /**
  * Collection additions are applied by appending and removals by filtering the
@@ -139,7 +158,7 @@ const compareStableEntry = (
     delete baseWithoutGuidance.characterGuidance;
     delete workingWithoutGuidance.characterGuidance;
   }
-  if (!deepEqual(baseWithoutGuidance, workingWithoutGuidance)) {
+  if (!semanticallyEqualEntry(baseWithoutGuidance, workingWithoutGuidance)) {
     unsupportedChange(`${target} has an unrepresentable identity or host-local field change`);
   }
 };
@@ -395,7 +414,7 @@ export const diffArenaSharedConfig = (
       if (!deepEqual(baseScenario, workingScenario)) {
         unsupportedChange('scenario host-local field changes are not representable by Arena Proposal v1');
       }
-    } else if (!deepEqual(baseScenario, workingScenario)) {
+    } else if (!semanticallyEqualEntry(baseScenario, workingScenario)) {
       const workingScenarioRef = ('ref' in workingScenario ? workingScenario.ref : undefined);
       if (!workingScenarioRef || !isCanonicalResourceKey(workingScenario.key, workingScenarioRef.id)) {
         unsupportedChange('scenario reference changes must use canonical data-card or preset key');

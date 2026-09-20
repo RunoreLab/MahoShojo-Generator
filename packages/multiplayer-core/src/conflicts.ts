@@ -5,7 +5,13 @@ import {
   type ArenaRoomSharedConfig,
 } from '@mahoshojo/contracts/arena-room';
 
-import { canonicalResourceKey, deepClone, deepEqual, hasVersionDrift } from './utils';
+import {
+  canonicalResourceKey,
+  deepClone,
+  deepEqual,
+  hasVersionDrift,
+  sameOnlineDataCardIdentity,
+} from './utils';
 
 export type ProposalConflictCode = 'precondition-failed' | 'reference-changed' | 'invalid-change';
 
@@ -235,7 +241,7 @@ const conflictFor = (
   expectedBase: expectedForReport(change),
   current: currentForReport(current, change.expectedBase),
   message: code === 'reference-changed'
-    ? 'online reference versionToken changed'
+    ? 'canonical reference identity or version changed'
     : 'current semantic value does not satisfy expectedBase',
 });
 
@@ -275,6 +281,9 @@ const refMatchesExpected = (
             : undefined;
   if (expectedKey !== undefined && current.targetKey !== expectedKey) {
     return { ok: false, reason: 'key' };
+  }
+  if (expectedKey?.startsWith('data-card:') && sameOnlineDataCardIdentity(expectedRef, current.ref)) {
+    return { ok: true };
   }
   if (hasVersionDrift(expectedRef, current.ref)) return { ok: false, reason: 'drift' };
   return deepEqual(expectedRef, current.ref) ? { ok: true } : { ok: false, reason: 'value' };

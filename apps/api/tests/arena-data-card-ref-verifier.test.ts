@@ -69,7 +69,7 @@ const createVerifier = (
 ) => createArenaDataCardRefVerifier({ getClient: () => client });
 
 describe('Arena DataCardRef verifier', () => {
-  it('只查询 metadata，public approved exact token 返回原始 canonical refs', async () => {
+  it('只查询 metadata，public approved ref 返回当前 latest canonical refs', async () => {
     const { client, calls } = createClient();
     const verifier = createVerifier(client);
 
@@ -135,13 +135,13 @@ describe('Arena DataCardRef verifier', () => {
     },
   );
 
-  it('versionToken 必须精确匹配 updated_at，不得 fallback 到 latest', async () => {
+  it('versionToken 漂移时解析为 metadata 中的 latest updated_at', async () => {
     const { client } = createClient(() => success([card({ updated_at: '2026-08-28T08:00:01.000Z' })]));
     const verifier = createVerifier(client);
 
-    await expect(verifier.verify({ refs: [ref()], hostAccountUserId: 7 })).rejects.toMatchObject({
-      code: 'ARENA_DATA_CARD_REF_VERSION_MISMATCH',
-    });
+    await expect(verifier.verify({ refs: [ref()], hostAccountUserId: 7 })).resolves.toEqual([
+      ref({ versionToken: '2026-08-28T08:00:01.000Z' }),
+    ]);
   });
 
   it('missing, invalid input and malformed metadata all fail closed before returning a ref', async () => {

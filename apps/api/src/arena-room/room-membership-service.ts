@@ -405,8 +405,9 @@ export const createArenaRoomMembershipService = (
       } else if (input.requireExistingCreationReceipt === true) {
         return fail('ROOM_INPUT_INVALID');
       }
+      let resolvedSharedConfig = sharedConfig.data;
       try {
-        await verifyArenaRoomSharedConfigRefs({
+        resolvedSharedConfig = await verifyArenaRoomSharedConfigRefs({
           references: options.references,
           sharedConfig: sharedConfig.data,
           hostAccountUserId: input.accountUserId,
@@ -417,7 +418,7 @@ export const createArenaRoomMembershipService = (
       try {
         await verifyArenaRoomSharedConfigPresetRefs({
           presets: options.presets,
-          sharedConfig: sharedConfig.data,
+          sharedConfig: resolvedSharedConfig,
         });
       } catch (error) {
         mapPresetReferenceError(error);
@@ -432,7 +433,7 @@ export const createArenaRoomMembershipService = (
             accountUserId: input.accountUserId,
           },
           host: { userId, displayName: displayName.data },
-          sharedConfig: sharedConfig.data,
+          sharedConfig: resolvedSharedConfig,
           ...(receiptIdentity === null ? {} : { creationReceipt: receiptIdentity }),
           ...(directoryTitle?.success && directoryVisibility?.success
             ? {

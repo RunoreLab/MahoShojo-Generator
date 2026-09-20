@@ -121,6 +121,21 @@ const fieldMismatch = (a: unknown, b: unknown): boolean => (
   JSON.stringify(a ?? null) !== JSON.stringify(b ?? null)
 );
 
+const meaningfulReferenceVersionChange = (
+  leftKey: string,
+  left: SharedRefEntry['ref'],
+  rightKey: string,
+  right: SharedRefEntry['ref'],
+): boolean => (
+  left.versionToken !== right.versionToken
+  && !(
+    leftKey.startsWith('data-card:')
+    && rightKey.startsWith('data-card:')
+    && left.id === right.id
+    && left.kind === right.kind
+  )
+);
+
 /** 同 key 配对条目之间，是否存在语义 diff 未表达的字段差异。 */
 const hasUnrepresentedEntryFieldDifference = (roomEntry: object, localEntry: object): boolean => {
   const roomRecord = roomEntry as Record<string, unknown>;
@@ -187,7 +202,7 @@ export const buildArenaRoomConfigDiffEntries = (
   const entries: ArenaConfigDiffEntry[] = [];
   let hasUnrepresentedDifference = hasUnhandledConfigKeyDifference(roomConfig, localConfig);
 
-  // 角色：新增 / 移除 / 行动引导 / 数据卡版本 / 名称 / 顺序
+  // 角色：新增 / 移除 / 行动引导 / 名称 / 顺序
   const roomCombatantKeys = roomConfig.combatants.map((entry) => entry.key);
   const localCombatantKeys = localConfig.combatants.map((entry) => entry.key);
   const combatantName = (
@@ -223,7 +238,11 @@ export const buildArenaRoomConfigDiffEntries = (
         label: `修改「${combatantName(entry)}」的行动引导`,
       });
     }
-    if ('ref' in entry && 'ref' in previous && entry.ref.versionToken !== previous.ref.versionToken) {
+    if (
+      'ref' in entry
+      && 'ref' in previous
+      && meaningfulReferenceVersionChange(previous.key, previous.ref, entry.key, entry.ref)
+    ) {
       entries.push({
         id: `combatant:version:${entry.key}`,
         category: '角色',
@@ -272,7 +291,7 @@ export const buildArenaRoomConfigDiffEntries = (
     entries.push({ id: 'teams:order', category: '队伍', tone: 'change', label: '调整了队伍顺序' });
   }
 
-  // 主情景：切换 / 数据卡版本 / 名称
+  // 主情景：切换 / 名称
   if (scenarioIdentity(roomConfig.scenario) !== scenarioIdentity(localConfig.scenario)) {
     entries.push({
       id: 'scenario',
@@ -286,7 +305,12 @@ export const buildArenaRoomConfigDiffEntries = (
     if (
       'ref' in roomConfig.scenario
       && 'ref' in localConfig.scenario
-      && roomConfig.scenario.ref.versionToken !== localConfig.scenario.ref.versionToken
+      && meaningfulReferenceVersionChange(
+        roomConfig.scenario.key,
+        roomConfig.scenario.ref,
+        localConfig.scenario.key,
+        localConfig.scenario.ref,
+      )
     ) {
       entries.push({
         id: 'scenario:version',
@@ -311,7 +335,7 @@ export const buildArenaRoomConfigDiffEntries = (
     }
   }
 
-  // 辅助情景 / 素材：新增 / 移除 / 数据卡版本 / 名称 / 顺序
+  // 辅助情景 / 素材：新增 / 移除 / 名称 / 顺序
   const referenceListDiff = (
     listName: ArenaConfigDiffEntry['category'],
     roomEntries: readonly ReferenceEntry[],
@@ -334,7 +358,11 @@ export const buildArenaRoomConfigDiffEntries = (
     for (const entry of localEntries) {
       const previous = roomEntries.find((item) => item.key === entry.key);
       if (!previous) continue;
-      if ('ref' in entry && 'ref' in previous && entry.ref.versionToken !== previous.ref.versionToken) {
+      if (
+        'ref' in entry
+        && 'ref' in previous
+        && meaningfulReferenceVersionChange(previous.key, previous.ref, entry.key, entry.ref)
+      ) {
         entries.push({
           id: `${prefix}:version:${entry.key}`,
           category: listName,
