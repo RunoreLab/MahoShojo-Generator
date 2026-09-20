@@ -95,6 +95,9 @@ export function BattleActions({ showAdvancedUtilities = true }: { showAdvancedUt
     handleGenerate,
     stopGeneration,
     isGenerating,
+    isRecoveringArenaGeneration,
+    arenaGenerationConnectionState,
+    arenaGenerationStatusNotice,
     isCooldown,
     remainingTime,
     providerCooldownMode,
@@ -251,6 +254,8 @@ export function BattleActions({ showAdvancedUtilities = true }: { showAdvancedUt
     if (roomAction.inRoom && roomAction.reason === 'active') return '房间战报生成中…';
     if (isCooldown) return `记者赶稿中...请等待 ${remainingTime} 秒`;
     if (isGenerating) {
+      if (isRecoveringArenaGeneration) return '正在恢复上一场战报…';
+      if (arenaGenerationConnectionState === 'cancelling') return '正在停止上一场生成…';
       switch (battleMode) {
         case 'daily':
           return '撰写日常逸闻中... (｡･ω･｡)ﾉ';
@@ -297,10 +302,37 @@ export function BattleActions({ showAdvancedUtilities = true }: { showAdvancedUt
           <StreamStopButton
             onClick={stopGeneration}
             compact
-            label="停止生成"
+            disabled={arenaGenerationConnectionState === 'cancelling'}
+            label={
+              arenaGenerationConnectionState === 'cancelling'
+                ? '正在停止…'
+                : isRecoveringArenaGeneration
+                  ? '放弃恢复'
+                  : '停止生成'
+            }
           />
         ) : null}
       </div>
+      {isGenerating && arenaGenerationStatusNotice ? (
+        <div
+          className={`mt-2 rounded-lg border px-3 py-2 text-center text-xs ${
+            isRecoveringArenaGeneration
+              ? 'border-sky-300 bg-sky-50 text-sky-900'
+              : 'border-amber-300 bg-amber-50 text-amber-900'
+          }`}
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+          data-arena-generation-status="true"
+        >
+          <div className="font-medium">{arenaGenerationStatusNotice}</div>
+          {isRecoveringArenaGeneration ? (
+            <div className="mt-1">
+              上一场战报可能仍在服务器生成。点击“放弃恢复”会请求停止这场生成；如果服务器暂时无法确认，生成可能仍在后台继续。
+            </div>
+          ) : null}
+        </div>
+      ) : null}
       {roomPanel && isRoomHost ? (
         <div className="mt-2 flex items-center justify-center gap-2 flex-wrap">
           <button

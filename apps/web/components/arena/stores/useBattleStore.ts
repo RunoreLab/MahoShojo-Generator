@@ -179,6 +179,7 @@ export const useBattleStore = create<BattleStoreState>()(
       updatedCombatants: [],
       error: null,
       isGenerating: false,
+      arenaGenerationConnectionState: null,
       isRedoingUpdates: false,
       isCombatantMutationPending: false,
       isMatching: null,
@@ -491,6 +492,7 @@ export const useBattleStore = create<BattleStoreState>()(
 
       setError: (message) => set({ error: message }),
       setIsGenerating: (stateValue) => set({ isGenerating: stateValue }),
+      setArenaGenerationConnectionState: (state) => set({ arenaGenerationConnectionState: state }),
       setIsRedoingUpdates: (stateValue) => set({ isRedoingUpdates: stateValue }),
       tryBeginCombatantMutation: () => {
         let acquired = false;

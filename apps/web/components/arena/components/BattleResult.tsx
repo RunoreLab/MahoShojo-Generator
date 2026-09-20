@@ -24,7 +24,12 @@ interface BattleResultProps {
 }
 
 export function BattleResult({ onSaveImage }: BattleResultProps) {
-  const { handleRetryUpdates, stopGeneration, isRedoingUpdates } = useBattleEngine();
+  const {
+    handleRetryUpdates,
+    stopGeneration,
+    isRedoingUpdates,
+    isRecoveringArenaGeneration,
+  } = useBattleEngine();
   const combatantRepair = useCombatantRepair();
   const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
   const adjudicationResults = useBattleSelector((state) => state.adjudicationResults);
@@ -164,6 +169,7 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
                 isStreaming: isGenerating,
                 softTimeoutWarning: streamSoftTimeoutWarning,
                 onStopGeneration: stopGeneration,
+                stopGenerationLabel: isRecoveringArenaGeneration ? '放弃恢复' : '停止生成',
                 illustrationAsset,
                 cardWidthPx: battleReportCardWidthPx,
               }

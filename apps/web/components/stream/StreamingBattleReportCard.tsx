@@ -72,6 +72,8 @@ interface StreamingBattleReportCardProps {
     softTimeoutWarning?: string | null;
     /** 流式生成中的手动中止回调。 */
     onStopGeneration?: () => void;
+    /** 流式生成中止按钮的上下文文案。 */
+    stopGenerationLabel?: string;
     /** 战报插图（可选，支持生成图或用户上传图） */
     illustrationAsset?: BattleReportIllustrationAsset | null;
     /** 手动指定卡片宽度（px）；为空时自动铺满容器。 */
@@ -97,6 +99,7 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
     isStreaming = false,
     softTimeoutWarning = null,
     onStopGeneration,
+    stopGenerationLabel = '停止生成',
     illustrationAsset = null,
     cardWidthPx = null
 }) => {
@@ -731,7 +734,7 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
                             disabled={isSavingImage}
                             className="save-button flex-1 bg-white/10 hover:bg-white/20 text-white py-2 px-4 rounded transition-all disabled:opacity-60 disabled:cursor-not-allowed"
                         >
-                            {isStreaming && onStopGeneration ? '⏹ 停止生成' : isSavingImage ? '生成中...' : '📱 保存为图片'}
+                            {isStreaming && onStopGeneration ? `⏹ ${stopGenerationLabel}` : isSavingImage ? '生成中...' : '📱 保存为图片'}
                         </button>
                     )}
                     {!disableExport && <button

@@ -40,6 +40,16 @@ export type ArenaGenerationConnectionState =
   | 'interrupted'
   | 'unknown';
 
+const ARENA_GENERATION_RECOVERY_STATES: readonly ArenaGenerationConnectionState[] = [
+  'recovering_initial',
+  'reconnecting',
+  'resuming',
+];
+
+export const isArenaGenerationRecoveryState = (
+  state: ArenaGenerationConnectionState | null | undefined,
+): boolean => Boolean(state && ARENA_GENERATION_RECOVERY_STATES.includes(state));
+
 export const arenaGenerationConnectionNotice = (
   state: ArenaGenerationConnectionState,
 ): string | null => {
@@ -47,7 +57,7 @@ export const arenaGenerationConnectionNotice = (
     return '网络连接暂时中断，战报仍在服务器生成，正在恢复连接。';
   }
   if (state === 'resuming' || state === 'recovering_initial') {
-    return '正在恢复同一场战报生成。';
+    return '正在恢复上一场战报生成。';
   }
   if (state === 'producer_lost') return '生成进程已丢失，无法安全自动重试。';
   if (state === 'cancelling') return '正在请求服务器停止生成，请稍候。';

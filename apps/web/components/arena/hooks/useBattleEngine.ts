@@ -66,6 +66,7 @@ import {
 import {
   arenaGenerationConnectionNotice,
   captureArenaGenerationActorToken,
+  isArenaGenerationRecoveryState,
   mergeArenaGenerationSnapshotMarkdown,
   openArenaGenerationStream,
   type ArenaGenerationConnectionState,
@@ -395,6 +396,8 @@ export const useBattleEngine = () => {
   const setUpdatedCombatants = useBattleSelector((state) => state.setUpdatedCombatants);
   const setAdjudicationResults = useBattleSelector((state) => state.setAdjudicationResults);
   const setIsGenerating = useBattleSelector((state) => state.setIsGenerating);
+  const arenaGenerationConnectionState = useBattleSelector((state) => state.arenaGenerationConnectionState);
+  const setArenaGenerationConnectionState = useBattleSelector((state) => state.setArenaGenerationConnectionState);
   const setIsRedoingUpdates = useBattleSelector((state) => state.setIsRedoingUpdates);
   const setIsStreaming = useBattleSelector((state) => state.setIsStreaming);
   const setStreamingMarkdown = useBattleSelector((state) => state.setStreamingMarkdown);
@@ -564,6 +567,7 @@ export const useBattleEngine = () => {
     }
 
     setIsGenerating(true);
+    setArenaGenerationConnectionState(null);
     setIsStreaming(false);
     setResultReportFormat(reportFormat);
     setResultWebReady(false);
@@ -1083,6 +1087,11 @@ export const useBattleEngine = () => {
                   onStateChange: (state) => {
                     const previousState = lastArenaConnectionState;
                     lastArenaConnectionState = state;
+                    setArenaGenerationConnectionState(state);
+                    if (isArenaGenerationRecoveryState(state) || state === 'cancelling') {
+                      setError(null);
+                      return;
+                    }
                     if (
                       state === 'generating'
                       && previousState
@@ -1993,7 +2002,8 @@ export const useBattleEngine = () => {
 	        setNewsReport(null);
 	      }
 	    } finally {
-        sharedGenerationAbortController = null;
+          sharedGenerationAbortController = null;
+          setArenaGenerationConnectionState(null);
 	      setArenaRoomGenerationPreflight(null);
 	      setIsGenerating(false);
 	      setIsStreaming(false);
@@ -2027,6 +2037,7 @@ export const useBattleEngine = () => {
     setUpdatedCombatants,
     setAdjudicationResults,
     setIsGenerating,
+    setArenaGenerationConnectionState,
     setIsStreaming,
     setStreamingMarkdown,
     setStreamReporterInfo,
@@ -2050,8 +2061,11 @@ export const useBattleEngine = () => {
   ]);
 
   const stopGeneration = useCallback(() => {
+    if (sharedGenerationAbortController) {
+      setArenaGenerationConnectionState('cancelling');
+    }
     sharedGenerationAbortController?.abort(STREAM_ABORT_REASON_USER);
-  }, []);
+  }, [setArenaGenerationConnectionState]);
 
   const handleRetryUpdates = useCallback(async () => {
     const state = useBattleStore.getState();
@@ -2112,6 +2126,11 @@ export const useBattleEngine = () => {
     stopGeneration,
     handleRetryUpdates,
     isGenerating,
+    arenaGenerationConnectionState,
+    isRecoveringArenaGeneration: isArenaGenerationRecoveryState(arenaGenerationConnectionState),
+    arenaGenerationStatusNotice: arenaGenerationConnectionState
+      ? arenaGenerationConnectionNotice(arenaGenerationConnectionState)
+      : null,
     isRedoingUpdates,
     isCooldown,
     remainingTime,

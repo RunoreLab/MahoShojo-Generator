@@ -4,6 +4,8 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { ArenaGenerationConnectionState } from '@/lib/arena/resumable-generation-client';
+
 const mocks = vi.hoisted(() => ({
   openStream: vi.fn(), dispatch: vi.fn(), quickCheck: vi.fn(), shield: vi.fn(),
   updateFromMarkdown: vi.fn(), resolveRandom: vi.fn(), cooldown: vi.fn(),
@@ -117,6 +119,43 @@ describe('single-player Web generation integration', () => {
     });
     expect(useBattleStore.getState().resultWebReady).toBe(false);
     expect(mocks.updateFromMarkdown).not.toHaveBeenCalled();
+  });
+
+  it('publishes recovery status separately from the error message', async () => {
+    let producer!: ReadableStreamDefaultController<Uint8Array>;
+    let onStateChange!: (state: ArenaGenerationConnectionState) => void;
+    mocks.openStream.mockImplementation(async (options: {
+      onStateChange: (state: ArenaGenerationConnectionState) => void;
+    }) => {
+      onStateChange = options.onStateChange;
+      return new Response(new ReadableStream<Uint8Array>({
+        start(controller) {
+          producer = controller;
+        },
+      }), { headers: streamHeaders });
+    });
+
+    let generation!: Promise<void>;
+    await act(async () => {
+      generation = current.handleGenerate();
+      await vi.waitFor(() => expect(mocks.openStream).toHaveBeenCalled());
+    });
+
+    await act(async () => onStateChange('resuming'));
+    expect(useBattleStore.getState()).toMatchObject({
+      arenaGenerationConnectionState: 'resuming',
+      error: null,
+    });
+
+    await act(async () => {
+      onStateChange('generating');
+      producer.enqueue(new TextEncoder().encode(sse('markdown', { chunk: '# 恢复后的战报' })));
+      producer.enqueue(new TextEncoder().encode(sse('done', { status: 'completed', ok: true })));
+      producer.close();
+      await generation;
+    });
+
+    expect(useBattleStore.getState().arenaGenerationConnectionState).toBeNull();
   });
 
   it('checks replay snapshots before allowing completed HTML to execute', async () => {

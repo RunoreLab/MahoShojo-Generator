@@ -6,12 +6,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ArenaRoomControllerState } from '@/lib/arena-room/controller';
 import type { UserAIProviderConfig } from '@/lib/ai/custom-provider';
+import type { ArenaGenerationConnectionState } from '@/lib/arena/resumable-generation-client';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 const mocks = vi.hoisted(() => ({
   handleGenerate: vi.fn(async () => {}),
   stopGeneration: vi.fn(),
+  isGenerating: false,
+  arenaGenerationConnectionState: null as ArenaGenerationConnectionState | null,
+  isRecoveringArenaGeneration: false,
+  arenaGenerationStatusNotice: null as string | null,
   resolvePreflight: vi.fn(),
   preflight: null as null | {
     reasons: readonly ('baseline-missing' | 'host-local-content' | 'shared-config' | 'working-copy-invalid')[];
@@ -28,7 +33,10 @@ vi.mock('@/components/arena/hooks/useBattleEngine', () => ({
   useBattleEngine: () => ({
     handleGenerate: mocks.handleGenerate,
     stopGeneration: mocks.stopGeneration,
-    isGenerating: false,
+    isGenerating: mocks.isGenerating,
+    arenaGenerationConnectionState: mocks.arenaGenerationConnectionState,
+    isRecoveringArenaGeneration: mocks.isRecoveringArenaGeneration,
+    arenaGenerationStatusNotice: mocks.arenaGenerationStatusNotice,
     isCooldown: false,
     remainingTime: 0,
     providerCooldownMode: 'system',
@@ -90,7 +98,11 @@ vi.mock('@/components/shared/CollapsibleSection', () => ({
   CollapsibleSection: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
 }));
 vi.mock('@/components/shared/StreamStopButton', () => ({
-  StreamStopButton: () => <button type="button">停止生成</button>,
+  StreamStopButton: (props: { onClick: () => void; label?: string; disabled?: boolean }) => (
+    <button type="button" onClick={props.onClick} aria-label={props.label} disabled={props.disabled}>
+      {props.label ?? '停止生成'}
+    </button>
+  ),
 }));
 vi.mock('@/components/arena/components/NarrativeHistoryModal', () => ({
   NarrativeHistoryModal: () => null,
@@ -154,6 +166,11 @@ let container: HTMLDivElement;
 beforeEach(() => {
   battleState.combatants.splice(0, battleState.combatants.length, { data: { name: '甲' } }, { data: { name: '乙' } });
   mocks.handleGenerate.mockClear();
+  mocks.stopGeneration.mockClear();
+  mocks.isGenerating = false;
+  mocks.arenaGenerationConnectionState = null;
+  mocks.isRecoveringArenaGeneration = false;
+  mocks.arenaGenerationStatusNotice = null;
   mocks.resolvePreflight.mockClear();
   mocks.preflight = null;
   mocks.roomState = null;
@@ -210,6 +227,25 @@ describe('Arena multiplayer BattleActions authority gate', () => {
     expect(button.textContent).toContain('生成独家新闻');
     await act(async () => button.click());
     expect(mocks.handleGenerate).toHaveBeenCalledTimes(1);
+  });
+
+  it('恢复上一场战报时明确展示恢复状态与放弃恢复动作', async () => {
+    mocks.isGenerating = true;
+    mocks.arenaGenerationConnectionState = 'resuming';
+    mocks.isRecoveringArenaGeneration = true;
+    mocks.arenaGenerationStatusNotice = '正在恢复上一场战报生成。';
+
+    const button = await render();
+    expect(button.disabled).toBe(true);
+    expect(button.textContent).toContain('正在恢复上一场战报');
+
+    const stopButton = document.body.querySelector<HTMLButtonElement>('[aria-label="放弃恢复"]');
+    expect(stopButton).not.toBeNull();
+    expect(document.body.querySelector('[data-arena-generation-status="true"]')?.textContent)
+      .toContain('上一场战报可能仍在服务器生成');
+
+    await act(async () => stopButton?.click());
+    expect(mocks.stopGeneration).toHaveBeenCalledOnce();
   });
 
   it('成员只显示等待房主且按钮不可提交', async () => {

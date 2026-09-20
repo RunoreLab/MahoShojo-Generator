@@ -7,6 +7,7 @@ import type { NormalizedStreamUpdateMeta } from '@/lib/arena/stream-meta';
 import type { QuestionnaireDefinition } from '@/lib/questionnaires';
 import type { AIReasoningEnvelope } from '@/types/ai-reasoning';
 import type { ArenaMaterialState } from '@/lib/arena/materials';
+import type { ArenaGenerationConnectionState } from '@/lib/arena/resumable-generation-client';
 import { MAX_ARENA_MATERIALS } from '@/lib/arena/materials';
 import { MAX_ARENA_REFERENCE_ITEMS } from '@/lib/arena/resource-budget';
 
@@ -234,6 +235,8 @@ export interface BattleStoreState {
   updatedCombatants: UpdatedCombatantData[];
   error: string | null;
   isGenerating: boolean;
+  /** 当前可恢复生成的连接生命周期状态；仅保留在内存，不持久化。 */
+  arenaGenerationConnectionState: ArenaGenerationConnectionState | null;
   isRedoingUpdates: boolean;
   /** 权威角色更新与本地 repair 共用的进程内写入锁。 */
   isCombatantMutationPending: boolean;
@@ -308,6 +311,7 @@ export interface BattleStoreState {
 
   setError: (message: string | null) => void;
   setIsGenerating: (state: boolean) => void;
+  setArenaGenerationConnectionState: (state: ArenaGenerationConnectionState | null) => void;
   setIsRedoingUpdates: (state: boolean) => void;
   tryBeginCombatantMutation: () => boolean;
   endCombatantMutation: () => void;

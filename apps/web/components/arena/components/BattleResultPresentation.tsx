@@ -42,6 +42,7 @@ export type BattleResultStreamingPresentation = {
   readonly aiReasoning?: AIReasoningEnvelope | null;
   readonly softTimeoutWarning?: string | null;
   readonly onStopGeneration?: () => void;
+  readonly stopGenerationLabel?: string;
   readonly illustrationAsset?: BattleReportIllustrationAsset | null;
   readonly cardWidthPx?: number | null;
 };
@@ -190,6 +191,7 @@ function StreamingResult({ report, onSaveImage, adjudicationResults }: {
       isStreaming={report.isStreaming}
       softTimeoutWarning={report.softTimeoutWarning}
       onStopGeneration={report.onStopGeneration}
+      stopGenerationLabel={report.stopGenerationLabel}
       illustrationAsset={report.illustrationAsset}
       cardWidthPx={report.cardWidthPx}
     />
