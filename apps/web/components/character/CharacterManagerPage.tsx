@@ -1870,14 +1870,7 @@ export const CharacterManagerPage: React.FC = () => {
 
             if (type === 'download') {
                 const blob = new Blob([jsonData], { type: 'application/json' });
-                const url = URL.createObjectURL(blob);
-                const link = document.createElement('a');
-                link.href = url;
-                link.download = `${filenamePrefix}_${resolvedName}_已编辑.json`;
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
-                URL.revokeObjectURL(url);
+                downloadBlob(blob, `${filenamePrefix}_${resolvedName}_已编辑.json`);
                 // 延迟更新消息，确保用户能看到签名成功的提示
                 setTimeout(() => setMessage({ type: 'success', text: '文件已下载！' }), 1000);
             } else {

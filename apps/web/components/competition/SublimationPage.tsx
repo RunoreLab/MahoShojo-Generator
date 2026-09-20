@@ -7,6 +7,7 @@ import CanshouCard from '@/components/CanshouCard';
 import GeneralCharacterCard from '@/components/GeneralCharacterCard';
 import { getSensitiveWordRedirectTarget } from '@/lib/content-safety/client';
 import { useClientRouteAdapter } from '@/lib/client-route-adapter';
+import { downloadBlob } from '@/lib/client/blobUrl';
 import { useProviderModeCooldown } from '@/lib/cooldown';
 import { config as appConfig } from '@/lib/config';
 import SaveToCloudButton from '@/components/SaveToCloudButton';
@@ -1182,14 +1183,7 @@ export const SublimationPage: React.FC = () => {
         const name = data.codename || data.name;
         const jsonData = JSON.stringify(data, null, 2);
         const blob = new Blob([jsonData], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `角色档案_${name}_升华.json`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
+        downloadBlob(blob, `角色档案_${name}_升华.json`);
     };
 
     const handleOptionalFieldChange = (fieldId: string) => {

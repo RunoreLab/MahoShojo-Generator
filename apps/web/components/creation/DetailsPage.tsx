@@ -53,6 +53,7 @@ import { readSafeTextAndReasoningStreamFromResponse } from '@/lib/stream/read-sa
 import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
 import { AI_META_REQUEST_HEADER, AI_META_REQUEST_VALUE, readJsonWithAiMeta } from '@/lib/client/read-json-with-ai-meta';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
+import { downloadBlob } from '@/lib/client/blobUrl';
 import { getAnswerLimitInfo, isAnswerOverLimit, QUESTIONNAIRE_NATIVE_MAX_ANSWER_CHARS } from '@/lib/questionnaire-limits';
 import { authStorage } from '@/lib/auth';
 import { useGenerationApiIntentLatch } from '@/lib/use-generation-api-intent-latch';
@@ -151,15 +152,8 @@ const SaveJsonButton: React.FC<SaveJsonButtonProps> = ({ data, mode, recommended
 
   const downloadJson = () => {
     const blob = new Blob([jsonPayload], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
     const sanitizedCodename = data.codename?.replace(/[^a-z0-9\u4e00-\u9fa5]/gi, '_') || 'data';
-    link.download = `魔法少女_${sanitizedCodename}.json`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    downloadBlob(blob, `魔法少女_${sanitizedCodename}.json`);
     setCopyStatus('idle');
   };
 
@@ -1710,16 +1704,9 @@ export const DetailsPage: React.FC = () => {
     if (!data) return;
     const jsonPayload = JSON.stringify(data, null, 2);
     const blob = new Blob([jsonPayload], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
     const rawName = (data?.codename || data?.name || '未命名角色').toString();
     const sanitizedName = rawName.replace(/[^a-z0-9\u4e00-\u9fa5]/gi, '_').slice(0, 80) || 'data';
-    link.href = url;
-    link.download = `通用魔法少女角色_${sanitizedName}.json`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    downloadBlob(blob, `通用魔法少女角色_${sanitizedName}.json`);
   };
 
   const copyStreamedGeneralCard = async (data: any) => {

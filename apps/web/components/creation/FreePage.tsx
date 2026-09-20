@@ -31,6 +31,7 @@ import { GENERAL_SCENARIO_TEMPLATE_ID } from '@/lib/schemas/general-scenario';
 import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
 import { AI_META_REQUEST_HEADER, AI_META_REQUEST_VALUE, readJsonWithAiMeta } from '@/lib/client/read-json-with-ai-meta';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
+import { downloadBlob } from '@/lib/client/blobUrl';
 import { authStorage } from '@/lib/auth';
 import { useGenerationApiIntentLatch } from '@/lib/use-generation-api-intent-latch';
 import { STREAM_ABORT_REASON_USER } from '@/lib/stream/abort';
@@ -455,14 +456,7 @@ export function FreePage() {
   const downloadJson = (data: any, suggestedName: string) => {
     const jsonData = JSON.stringify(data, null, 2);
     const blob = new Blob([jsonData], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = suggestedName;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    downloadBlob(blob, suggestedName);
   };
 
   const copyToClipboard = async (data: any, label: string) => {

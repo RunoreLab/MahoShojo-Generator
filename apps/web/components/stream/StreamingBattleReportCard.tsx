@@ -270,21 +270,14 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
 
     // --- 下载 Markdown 逻辑 ---
     const handleSaveMarkdown = () => {
-        const exportMarkdown = buildExportMarkdown();
-        const blob = new Blob([exportMarkdown], { type: 'text/markdown;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
+    const exportMarkdown = buildExportMarkdown();
+    const blob = new Blob([exportMarkdown], { type: 'text/markdown;charset=utf-8;' });
 
         const titleMatch = exportMarkdown.match(/^#{1,3}\s*(.+)$/m);
         const title = titleMatch ? titleMatch[1] : '战斗战报';
         const sanitizedTitle = title.replace(/[^a-z0-9\u4e00-\u9fa5]/gi, '_');
 
-        link.download = `魔法少女速报_${sanitizedTitle}.md`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
+        downloadBlob(blob, `魔法少女速报_${sanitizedTitle}.md`);
     };
 
     // --- 自定义 Markdown 渲染组件 ---

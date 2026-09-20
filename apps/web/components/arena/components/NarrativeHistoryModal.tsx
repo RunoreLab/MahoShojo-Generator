@@ -7,6 +7,7 @@ import BattleDataModal from '@/components/BattleDataModal';
 import SaveToCloudButton from '@/components/SaveToCloudButton';
 import { JsonSizeIndicator } from '@/components/shared/JsonSizeIndicator';
 import { formatDateTime } from '@/lib/constants';
+import { downloadBlob } from '@/lib/client/blobUrl';
 import { randomUUID } from '@/lib/crypto';
 import {
   extractNarrativeHistoryImportEntries,
@@ -347,14 +348,7 @@ export function NarrativeHistoryModal({ isOpen, onClose }: Props) {
     }
     const json = JSON.stringify(historyCardData, null, 2);
     const blob = new Blob([json], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `叙事历史_${formatDateTime(new Date()).replace(/[:\\s]/g, '-')}.json`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    downloadBlob(blob, `叙事历史_${formatDateTime(new Date()).replace(/[:\\s]/g, '-')}.json`);
   };
 
   const handlePickFile = () => {

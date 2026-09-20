@@ -18,6 +18,7 @@ import { EncyclopediaLinks } from '@/components/encyclopedia/EncyclopediaLinks';
 import { CreatorEntryLink } from '@/components/shared/CreatorEntryLink';
 import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
+import { downloadBlob } from '@/lib/client/blobUrl';
 import { ThemeImage } from '@/components/shared/ThemeImage';
 import { authStorage } from '@/lib/auth';
 import type { GenerationApiIntent } from '@/lib/hono-api-client';
@@ -319,14 +320,7 @@ export function NamePage() {
     // 签名已包含在 magicalGirl 对象中
     const jsonData = JSON.stringify(magicalGirl, null, 2);
     const blob = new Blob([jsonData], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `魔法少女_${magicalGirl.name}.json`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    downloadBlob(blob, `魔法少女_${magicalGirl.name}.json`);
   };
 
   return (

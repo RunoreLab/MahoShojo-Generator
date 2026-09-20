@@ -17,6 +17,7 @@ import { BattleIllustrationPanel } from './BattleIllustrationPanel';
 import { BattleResultPresentation } from './BattleResultPresentation';
 import { CombatantUpdatesPresentation } from './CombatantUpdatesPresentation';
 import { resolveBattleReportCardManualWidthPx } from '../utils/battleReportCardWidth';
+import { downloadBlob } from '@/lib/client/blobUrl';
 
 interface BattleResultProps {
   onSaveImage: (imageUrl: string) => void;
@@ -129,14 +130,7 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
     const name = characterData.codename || characterData.name;
     const jsonData = JSON.stringify(characterData, null, 2);
     const blob = new Blob([jsonData], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `角色设定_${name}_更新.json`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    downloadBlob(blob, `角色设定_${name}_更新.json`);
   };
 
   useEffect(() => {

@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { randomUUID } from '@/lib/crypto';
 import { formatDateTime } from '@/lib/constants';
+import { downloadBlob } from '@/lib/client/blobUrl';
 import type { NarrativeHistoryDataCardV1, NarrativeHistoryEntry } from '@/types/arena';
 
 interface TargetCardMeta {
@@ -125,12 +126,7 @@ export default function NarrativeHistoryCardEditorModal({
               onClick={() => {
                 const payload = buildPayload();
                 const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `${payload.title || '叙事历史'}.json`;
-                a.click();
-                URL.revokeObjectURL(url);
+                downloadBlob(blob, `${payload.title || '叙事历史'}.json`);
               }}
               disabled={!initialData || saving}
             >

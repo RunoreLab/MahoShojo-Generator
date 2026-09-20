@@ -4,6 +4,7 @@ import { MarkdownBlock } from '@/components/MarkdownBlock';
 import { DataCardReportModal } from '@/components/data-card-reports/DataCardReportModal';
 import { getFieldDisplayName } from '@/lib/fieldTranslations';
 import { formatDateTime } from '@/lib/constants';
+import { downloadBlob } from '@/lib/client/blobUrl';
 import { authStorage } from '@/lib/auth';
 import { upsertArenaRankCacheFromMeta } from '@/lib/arena/rank-cache';
 import { EntityRatingHistoryButton } from '@/components/ranking/EntityRatingHistoryButton';
@@ -608,17 +609,7 @@ export default function DataCardDetailsModal({
       const payload = JSON.parse(card.data);
       const jsonString = JSON.stringify(payload, null, 2);
       const blob = new Blob([jsonString], { type: 'application/json;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `${sanitizeDownloadFilename(card.name || '数据卡')}.json`;
-
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-
-      URL.revokeObjectURL(url);
+      downloadBlob(blob, `${sanitizeDownloadFilename(card.name || '数据卡')}.json`);
     } catch (error) {
       console.error('下载数据卡失败:', error);
       setDownloadError('下载失败：数据卡内容不是有效的 JSON');

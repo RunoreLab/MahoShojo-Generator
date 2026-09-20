@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { downloadBlob } from '@/lib/client/blobUrl';
 import Link from 'next/link';
 import { useAppRouterAdapter } from '@/lib/app-router-adapter';
 import SaveToCloudButton from '@/components/SaveToCloudButton';
@@ -795,15 +796,8 @@ export const QuestionnaireEditorPage: React.FC = () => {
       return;
     }
     const blob = new Blob([jsonPreview], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
     const safeName = (title || 'questionnaire').replace(/[^a-z0-9\u4e00-\u9fa5]/gi, '_');
-    link.href = url;
-    link.download = `${safeName}.json`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    downloadBlob(blob, `${safeName}.json`);
     flashMessage('✅ 已生成下载文件');
   };
 

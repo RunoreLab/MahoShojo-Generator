@@ -48,6 +48,7 @@ import { secureRandomUUID } from '@/lib/crypto';
 import { useGenerationApiIntentLatch } from '@/lib/use-generation-api-intent-latch';
 import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
+import { downloadBlob } from '@/lib/client/blobUrl';
 import { useProviderModeCooldown } from '@/lib/cooldown';
 import {
   captureArenaGenerationActorToken,
@@ -1884,14 +1885,7 @@ export function useBattleStorySession() {
 
     const content = buildBattleStoryExportMarkdown(sessionRecord, chapterRecords);
     const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `${sessionRecord.title || 'battle-story-session'}.md`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    downloadBlob(blob, `${sessionRecord.title || 'battle-story-session'}.md`);
   }, []);
 
   const stopGeneration = useCallback(() => {

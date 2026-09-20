@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 import { dataCardApi } from '@/lib/auth';
+import { downloadBlob } from '@/lib/client/blobUrl';
 import { normalizeQuestionnaireDefinition } from '@/lib/questionnaires';
 
 export type QuestionnaireCompatTargetCard = {
@@ -82,15 +83,8 @@ export default function QuestionnaireCompatModal({
 
   const handleDownload = () => {
     const blob = new Blob([draftJson], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
     const safeName = (targetCard?.name || 'questionnaire').replace(/[^a-z0-9\u4e00-\u9fa5]/gi, '_');
-    link.href = url;
-    link.download = `${safeName}.json`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    downloadBlob(blob, `${safeName}.json`);
     flashToast('✅ 已生成下载文件');
   };
 

@@ -29,4 +29,31 @@ describe('blob download helper', () => {
     vi.advanceTimersByTime(10_000);
     expect(revokeObjectURL).toHaveBeenCalledWith(objectUrl);
   });
+
+  test('keeps consecutive downloads independent until each URL is released', () => {
+    vi.useFakeTimers();
+    const blobA = new Blob(['a'], { type: 'text/plain' });
+    const blobB = new Blob(['b'], { type: 'text/plain' });
+    const objectUrlA = 'blob:https://example.com/download-a';
+    const objectUrlB = 'blob:https://example.com/download-b';
+    const createObjectURL = vi.fn((blob: Blob) => (blob === blobA ? objectUrlA : objectUrlB));
+    const revokeObjectURL = vi.fn();
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    vi.stubGlobal('URL', { createObjectURL, revokeObjectURL });
+
+    downloadBlob(blobA, 'a.txt');
+    downloadBlob(blobB, 'b.txt');
+
+    expect(createObjectURL).toHaveBeenNthCalledWith(1, blobA);
+    expect(createObjectURL).toHaveBeenNthCalledWith(2, blobB);
+    expect(click).toHaveBeenCalledTimes(2);
+    expect(revokeObjectURL).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(9_999);
+    expect(revokeObjectURL).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(1);
+    expect(revokeObjectURL).toHaveBeenNthCalledWith(1, objectUrlA);
+    expect(revokeObjectURL).toHaveBeenNthCalledWith(2, objectUrlB);
+  });
 });

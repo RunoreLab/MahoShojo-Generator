@@ -4,6 +4,7 @@ import DataCard from '../DataCard';
 import EditCardForm from './EditCardForm';
 import DataCardDetailsModal from '../DataCardDetailsModal';
 import { config } from '@/lib/config';
+import { downloadBlob } from '@/lib/client/blobUrl';
 import { inferTemplate } from '@/lib/data-card-converter';
 import { isHotCard } from '@/lib/constants';
 import { authStorage } from '@/lib/auth';
@@ -709,12 +710,7 @@ export default function DataCardsModal({
                             const blob = new Blob([JSON.stringify(dataToDownload, null, 2)], {
                               type: 'application/json'
                             });
-                            const url = URL.createObjectURL(blob);
-                            const a = document.createElement('a');
-                            a.href = url;
-                            a.download = `${card.name}.json`;
-                            a.click();
-                            URL.revokeObjectURL(url);
+                            downloadBlob(blob, `${card.name}.json`);
                           }}
                           onEditInfo={() => onEditCard(card)}
                           onEditData={hideEditData ? undefined : () => onLoadCard(card)}

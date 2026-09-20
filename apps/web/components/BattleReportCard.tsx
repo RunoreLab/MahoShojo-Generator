@@ -274,15 +274,8 @@ ${adjudicationMarkdown}
 
     // 创建Blob对象并触发下载
     const blob = new Blob([markdownContent], { type: 'text/markdown;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
     const sanitizedTitle = headline.replace(/[^a-z0-9\u4e00-\u9fa5]/gi, '_') || 'battle_report';
-    link.download = `魔法少女速报_${sanitizedTitle}.md`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    downloadBlob(blob, `魔法少女速报_${sanitizedTitle}.md`);
   };
 
   const markdownComponents: Components = {
