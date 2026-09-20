@@ -110,10 +110,8 @@ const sameReference = (
   return left.key === right.key
     && left.ref.id === right.ref.id
     && left.ref.kind === right.ref.kind
-    && (
-      left.key.startsWith('data-card:')
-      || left.ref.versionToken === right.ref.versionToken
-    );
+    // 意图等价可以忽略在线版本；正文复用必须匹配实际已物化版本。
+    && left.ref.versionToken === right.ref.versionToken;
 };
 
 const sameHostLocal = (

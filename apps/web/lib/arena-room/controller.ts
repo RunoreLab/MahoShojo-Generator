@@ -28,6 +28,10 @@ import {
   type ArenaRoomClient,
 } from './client';
 import { secureRandomUUID } from '@/lib/crypto';
+import {
+  areArenaRoomSharedConfigsExactlyEqual,
+  areArenaRoomSharedConfigsSemanticallyEqual,
+} from './shared-config-equality';
 
 export type ArenaRoomControllerPhase =
   | 'closed'
@@ -300,9 +304,6 @@ const isDeterministicMutationRejection = (error: ArenaRoomClientError): boolean 
   && error.code !== 'ROOM_RATE_LIMITED'
 );
 
-const sameSharedConfig = (left: unknown, right: unknown): boolean => (
-  JSON.stringify(left) === JSON.stringify(right)
-);
 
 const proposalResolvedNotice = (status: ArenaRoomProposalMutationStatus): string => (
   status === 'withdrawn'
@@ -338,7 +339,7 @@ const resolveAuthoritySession = (
     }
     if (
       latest.snapshot.revision === snapshot.revision
-      && !sameSharedConfig(latest.snapshot.sharedConfig, snapshot.sharedConfig)
+      && !areArenaRoomSharedConfigsExactlyEqual(latest.snapshot.sharedConfig, snapshot.sharedConfig)
     ) return null;
     const self = snapshot.members.find((member) => member.userId === latest.self.userId);
     if (!self || self.membershipState !== 'active') return null;
@@ -347,7 +348,7 @@ const resolveAuthoritySession = (
   if (response.sharedConfig === undefined) return null;
   if (
     latest.snapshot.revision === response.revision
-    && !sameSharedConfig(latest.snapshot.sharedConfig, response.sharedConfig)
+    && !areArenaRoomSharedConfigsExactlyEqual(latest.snapshot.sharedConfig, response.sharedConfig)
   ) return null;
   return {
     ...latest,
@@ -1177,7 +1178,7 @@ export const createArenaRoomController = (
           event.payload.revision === configPublishIntent.request.expectedRevision
           || event.payload.revision === configPublishIntent.request.expectedRevision + 1
         )
-        && sameSharedConfig(
+        && areArenaRoomSharedConfigsSemanticallyEqual(
           event.payload.sharedConfig,
           configPublishIntent.request.sharedConfig,
         );
@@ -1248,7 +1249,7 @@ export const createArenaRoomController = (
         && configPublishIntent?.roomId === event.roomId
         && configPublishIntent.request.expectedRoomEpoch === event.roomEpoch
         && event.payload.revision === configPublishIntent.request.expectedRevision + 1
-        && sameSharedConfig(
+        && areArenaRoomSharedConfigsSemanticallyEqual(
           event.payload.sharedConfig,
           configPublishIntent.request.sharedConfig,
         );
@@ -1520,7 +1521,7 @@ export const createArenaRoomController = (
           authoritative.snapshot.revision === pendingConfigIntent.request.expectedRevision
           || authoritative.snapshot.revision === pendingConfigIntent.request.expectedRevision + 1
         )
-        && sameSharedConfig(
+        && areArenaRoomSharedConfigsSemanticallyEqual(
           authoritative.snapshot.sharedConfig,
           pendingConfigIntent.request.sharedConfig,
         );
@@ -1774,7 +1775,7 @@ export const createArenaRoomController = (
           authoritative.snapshot.revision === captured.revision
           || authoritative.snapshot.revision === captured.revision + 1
         )
-        && sameSharedConfig(authoritative.snapshot.sharedConfig, request.sharedConfig);
+        && areArenaRoomSharedConfigsSemanticallyEqual(authoritative.snapshot.sharedConfig, request.sharedConfig);
       if (!responseMatchesIntent) {
         publish({
           configPublishPending: false,
@@ -1788,7 +1789,7 @@ export const createArenaRoomController = (
         && latest.snapshot.controlSeq === captured.controlSeq;
       const alreadyInstalled = latest.snapshot.revision === authoritative.snapshot.revision
         && latest.snapshot.controlSeq >= authoritative.snapshot.controlSeq
-        && sameSharedConfig(latest.snapshot.sharedConfig, request.sharedConfig);
+        && areArenaRoomSharedConfigsExactlyEqual(latest.snapshot.sharedConfig, authoritative.snapshot.sharedConfig);
       if (!canInstall && !alreadyInstalled) {
         configPublishIntent = null;
         publish({

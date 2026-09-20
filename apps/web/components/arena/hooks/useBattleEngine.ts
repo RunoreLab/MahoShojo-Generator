@@ -862,6 +862,7 @@ export const useBattleEngine = () => {
               throw new Error('房间配置发布结果无法确认，请先同步房间权威状态。');
             }
             arenaRoomRuntime.hostWorkspace.capturePublished(publishedAuthority, bundle);
+            arenaRoomRuntime.hostReconciliation.reconcilePublished();
             startInputs = comparison.current;
             startAuthority = publishedAuthority;
           }

@@ -7,6 +7,7 @@ import {
 } from '@mahoshojo/contracts/arena-room';
 
 import type { ArenaRoomHostWorkspaceBundle } from './shared-config';
+import { areArenaRoomSharedConfigsSemanticallyEqual as sameConfig, areArenaRoomSharedConfigsExactlyEqual } from './shared-config-equality';
 
 export type ArenaRoomHostWorkspaceAuthority = Readonly<{
   roomId: string;
@@ -48,6 +49,7 @@ export type ArenaRoomHostWorkspace = Readonly<{
    * reconciliation 用它区分「本地相对落定基线有修改」与
    * 「权威更新尚未安装到本地」，后者不应被判为房主冲突。
    */
+  needsOnlineRefresh?(authority: ArenaRoomHostWorkspaceAuthority): boolean;
   settledAuthority(): ArenaRoomHostWorkspaceAuthority | null;
   compare(
     authority: ArenaRoomHostWorkspaceAuthority,
@@ -83,25 +85,14 @@ type Baseline = Readonly<{
   roomEpoch: string;
   ownerUserId: string;
   revision: number;
+  needsOnlineRefresh: boolean;
   payloads: readonly ArenaRoomHostLocalPayload[];
   digests: ReadonlyMap<string, string>;
 }>;
 
 type DataCardKind = ArenaRoomHostLocalPayload['kind'];
 
-const canonicalize = (value: unknown): unknown => {
-  if (Array.isArray(value)) return value.map(canonicalize);
-  if (typeof value !== 'object' || value === null) return value;
-  return Object.fromEntries(Object.entries(value as Record<string, unknown>)
-    .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
-    .map(([key, entry]) => [key, canonicalize(entry)]));
-};
-
-const sameConfig = (left: ArenaRoomSharedConfig, right: ArenaRoomSharedConfig): boolean => (
-  JSON.stringify(canonicalize(left)) === JSON.stringify(canonicalize(right))
-);
-
-export const areArenaRoomSharedConfigsEqual = sameConfig;
+export { areArenaRoomSharedConfigsSemanticallyEqual as areArenaRoomSharedConfigsEqual } from './shared-config-equality';
 
 const sameAuthorityOwner = (
   baseline: Baseline,
@@ -223,6 +214,7 @@ export const createArenaRoomHostWorkspace = (): ArenaRoomHostWorkspace => {
       }
       baseline = Object.freeze({
         authority,
+        needsOnlineRefresh: !areArenaRoomSharedConfigsExactlyEqual(authority.sharedConfig, normalized.sharedConfig),
         roomId: authority.roomId,
         roomEpoch: authority.roomEpoch,
         ownerUserId: authority.ownerUserId,
@@ -230,6 +222,11 @@ export const createArenaRoomHostWorkspace = (): ArenaRoomHostWorkspace => {
         payloads: Object.freeze(normalized.payloads.map((entry) => structuredClone(entry))),
         digests: new Map(normalized.digests),
       });
+    },
+
+    needsOnlineRefresh(authority) {
+      return Boolean(baseline && sameAuthorityOwner(baseline, authority)
+        && baseline.revision === authority.revision && baseline.needsOnlineRefresh);
     },
 
     settledAuthority() {

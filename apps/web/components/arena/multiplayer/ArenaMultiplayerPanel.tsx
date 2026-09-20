@@ -1118,6 +1118,7 @@ function ArenaMultiplayerPanelRuntime({
       );
       if (authority) {
         hostWorkspace.capturePublished(authority, bundle);
+        hostReconciliation.reconcilePublished();
         if (!buildResult.ok) setLocalConfigSyncIssues(buildResult.issues);
       }
     } catch (error) {

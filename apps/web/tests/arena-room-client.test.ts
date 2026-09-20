@@ -2,6 +2,11 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { createArenaRoomClient } from '@/lib/arena-room/client';
 import { hostedDrClientRouting } from '@/config/hosted-routing';
+import { ArenaRoomSharedConfigSchema } from '@mahoshojo/contracts/arena-room';
+import {
+  areArenaRoomSharedConfigsExactlyEqual,
+  areArenaRoomSharedConfigsSemanticallyEqual,
+} from '@/lib/arena-room/shared-config-equality';
 
 const snapshot = {
   protocolVersion: 1,
@@ -57,6 +62,44 @@ const session = {
   self: snapshot.members[0],
   snapshot,
 };
+
+describe('shared config comparison', () => {
+  it('所有在线卡位置均忽略 observed version，保留其他字段和数组顺序', () => {
+    const entry = (id: string, kind: string) => ({ key: `data-card:${id}`, ref: { id, kind, versionToken: 'v1' } });
+    const original = ArenaRoomSharedConfigSchema.parse({
+      ...snapshot.sharedConfig,
+      combatants: [entry('character-1', 'character'), entry('character-2', 'character')],
+      scenario: entry('scenario-1', 'scenario'),
+      auxScenarios: [entry('scenario-2', 'scenario')],
+      materials: [entry('material-1', 'material')],
+    });
+    const updated = ArenaRoomSharedConfigSchema.parse(JSON.parse(JSON.stringify(original).replaceAll('v1', 'v2')));
+    expect(areArenaRoomSharedConfigsSemanticallyEqual(original, updated)).toBe(true);
+    expect(areArenaRoomSharedConfigsExactlyEqual(original, updated)).toBe(false);
+    expect(areArenaRoomSharedConfigsSemanticallyEqual(original, { ...updated, userGuidance: 'changed' })).toBe(false);
+    expect(areArenaRoomSharedConfigsSemanticallyEqual(original, { ...updated, combatants: [...updated.combatants].reverse() })).toBe(false);
+    expect(areArenaRoomSharedConfigsSemanticallyEqual(original, { ...updated, scenario: null })).toBe(false);
+    expect(areArenaRoomSharedConfigsSemanticallyEqual(original, null)).toBe(false);
+    expect(original.scenario).toMatchObject({ ref: { versionToken: 'v1' } });
+  });
+
+  it('host-local contentVersion 以及 preset versionToken 仍严格比较', () => {
+    const local = ArenaRoomSharedConfigSchema.parse({
+      ...snapshot.sharedConfig,
+      combatants: [{ ...snapshot.sharedConfig.combatants[0], contentVersion: 'sha256:' + '1'.repeat(64) }],
+    });
+    const changedLocal = ArenaRoomSharedConfigSchema.parse({
+      ...local, combatants: [{ ...local.combatants[0], contentVersion: 'sha256:' + '2'.repeat(64) }],
+    });
+    expect(areArenaRoomSharedConfigsSemanticallyEqual(local, changedLocal)).toBe(false);
+    const preset = ArenaRoomSharedConfigSchema.parse({
+      ...local, scenario: { key: 'preset:scenario-1', ref: { id: 'scenario-1', kind: 'scenario', versionToken: 'v1' } },
+    });
+    expect(areArenaRoomSharedConfigsSemanticallyEqual(preset, {
+      ...preset, scenario: { key: 'preset:scenario-1', ref: { id: 'scenario-1', kind: 'scenario', versionToken: 'v2' } },
+    })).toBe(false);
+  });
+});
 
 const generationMirror = {
   generationRequestId: 'request-12345678',
@@ -402,6 +445,25 @@ describe('Arena Room browser client', () => {
       payload: { providerApiKey: 'secret-canary' },
     } as never)).rejects.toThrow();
     expect(fetcher).toHaveBeenCalledOnce();
+  });
+
+  it.each(['data-card', 'preset'] as const)('config publish %s 仅在线版本变化可接受', async (source) => {
+    const config = (versionToken: string) => ({
+      ...snapshot.sharedConfig,
+      combatants: [{ key: `${source}:card-1`, ref: { id: 'card-1', kind: 'character', versionToken } }],
+    });
+    const published = { ...session, snapshot: { ...snapshot, revision: 1, sharedConfig: config('v2') } };
+    const client = createArenaRoomClient({
+      origin: 'https://api.example.test',
+      fetch: vi.fn<typeof fetch>(async () => Response.json(published)),
+      getAuthHeader: async () => 'Bearer verified-key',
+    });
+    const result = client.publishConfig('room-1', {
+      expectedRoomEpoch: 'epoch-1', expectedRevision: 0, expectedControlSeq: 0,
+      sharedConfig: config('v1') as never,
+    });
+    if (source === 'data-card') await expect(result).resolves.toEqual(published);
+    else await expect(result).rejects.toMatchObject({ code: 'ROOM_RESULT_UNKNOWN' });
   });
 
   it('config publish 对 network/5xx/malformed/identity mismatch 均单发并标记 unknown', async () => {

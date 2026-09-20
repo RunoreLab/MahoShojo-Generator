@@ -28,6 +28,7 @@ const mocks = vi.hoisted(() => ({
   publishConfig: vi.fn(async () => undefined),
   publishLocal: vi.fn(async () => undefined),
   syncRoom: vi.fn(async () => undefined),
+  reconcilePublished: vi.fn(),
   reconnect: vi.fn(),
   reset: vi.fn(),
   syncProposalWorkspace: vi.fn(),
@@ -70,6 +71,7 @@ vi.mock('@/components/arena/multiplayer/useArenaRoom', () => ({
       state: mocks.reconciliationState,
       publishLocal: mocks.publishLocal,
       syncRoom: mocks.syncRoom,
+      reconcilePublished: mocks.reconcilePublished,
       dismiss: vi.fn(),
     },
     proposalWorkspace: {
@@ -806,6 +808,23 @@ describe('Arena multiplayer panel real React interactions', () => {
     ]) {
       expect(document.body.textContent).not.toContain(exposedTerm);
     }
+  });
+
+  it('数据卡刷新失败时保留已发布状态并提供保护本地修改的刷新重试', async () => {
+    mocks.state = connectedHostState(sharedConfig);
+    mocks.reconciliationState = {
+      kind: 'synced',
+      revision: 1,
+      refreshFailed: true,
+      message: '房间配置已保存；Arena 编辑区暂未刷新',
+    };
+    await act(async () => root.render(<ArenaMultiplayerContextPanel {...props} />));
+    await act(async () => button('配置').click());
+    expect(document.body.textContent).toContain('房间配置已保存');
+    await act(async () => button('重试刷新数据卡').click());
+    expect(mocks.reconcilePublished).toHaveBeenCalledOnce();
+    expect(mocks.syncRoom).not.toHaveBeenCalled();
+    expect(mocks.publishLocal).not.toHaveBeenCalled();
   });
 
   it('host reconciliation error 时提供重试同步入口，且不把发布本地作为默认恢复动作', async () => {

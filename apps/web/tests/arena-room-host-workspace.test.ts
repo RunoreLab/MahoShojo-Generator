@@ -197,3 +197,29 @@ describe('Arena Room host workspace baseline', () => {
     expect(workspace.startFromRoom(authority('', { roomEpoch: 'epoch-other' }))).toBeNull();
   });
 });
+
+
+describe('在线数据卡 latest 发布基线', () => {
+  it('接受仅 token 变化的权威，同时拒绝其他配置差异', () => {
+    const workspace = createArenaRoomHostWorkspace();
+    const local = {
+      ...bundle(),
+      sharedConfig: {
+        ...sharedConfig(),
+        combatants: [{ key: 'data-card:online-1', ref: { id: 'online-1', kind: 'character' as const, versionToken: 'v1' } }],
+      },
+      hostLocalPayloads: [],
+      hostLocalContentDigests: [],
+    };
+    const published = authority('', { sharedConfig: {
+      ...local.sharedConfig,
+      combatants: [{ key: 'data-card:online-1', ref: { id: 'online-1', kind: 'character', versionToken: 'v2' } }],
+    } });
+    expect(() => workspace.capturePublished(published, local)).not.toThrow();
+    expect(workspace.compare(published, local).kind).toBe('clean');
+    expect(workspace.startFromRoom(published)?.sharedConfig).toEqual(published.sharedConfig);
+    expect(() => workspace.capturePublished(published, {
+      ...local, sharedConfig: { ...local.sharedConfig, userGuidance: 'changed' },
+    })).toThrow('ARENA_ROOM_HOST_WORKSPACE_AUTHORITY_MISMATCH');
+  });
+});

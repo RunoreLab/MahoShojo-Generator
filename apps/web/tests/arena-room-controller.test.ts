@@ -1194,6 +1194,37 @@ describe('Arena Room browser controller', () => {
     });
   });
 
+  it.each(['http', 'event', 'snapshot', 'reconnect'] as const)('latest publish 通过 %s 确认正常升级后的意图', async (transport) => {
+    const { client, controller, sockets } = createHarness();
+    const config = (versionToken: string) => ({
+      ...sharedConfig,
+      combatants: [{ key: 'data-card:card-1', ref: { id: 'card-1', kind: 'character' as const, versionToken } }],
+    });
+    const published = { ...session, snapshot: { ...snapshot, revision: 1, controlSeq: 1, sharedConfig: config('v2') } };
+    if (transport === 'http') vi.mocked(client.publishConfig).mockResolvedValueOnce(published);
+    else vi.mocked(client.publishConfig).mockRejectedValueOnce(new ArenaRoomClientError('ROOM_RESULT_UNKNOWN', 503, '结果未知'));
+    await controller.create({ displayName: '房主', directory: { title: '测试房', visibility: 'public' }, sharedConfig });
+    await controller.publishConfig({
+      expectedRoomEpoch: 'epoch-1', expectedRevision: 0, expectedControlSeq: 0, sharedConfig: config('v1'),
+    });
+    if (transport === 'event' || transport === 'snapshot') {
+      sockets[0]!.message(JSON.stringify({
+        protocolVersion: 1, roomId: 'room-1', roomEpoch: 'epoch-1', controlSeq: 1,
+        timestamp: '2026-08-31T00:02:00.000Z',
+        type: transport === 'event' ? 'room.config.updated' : 'room.snapshot',
+        payload: transport === 'event' ? { revision: 1, sharedConfig: config('v2') } : published.snapshot,
+      }));
+    } else if (transport === 'reconnect') {
+      vi.mocked(client.getSession).mockResolvedValueOnce(published);
+      controller.reconnect();
+      await vi.waitFor(() => expect(controller.getSnapshot().configPublishResultUnknown).toBe(false));
+    }
+    expect(controller.getSnapshot()).toMatchObject({
+      configPublishPending: false, configPublishResultUnknown: false, error: null,
+      session: { snapshot: { revision: 1, sharedConfig: config('v2') } },
+    });
+  });
+
   it('config publish unknown 不伪造 revision，并由匹配的权威事件对账', async () => {
     const { client, controller, sockets } = createHarness();
     const desired = { ...sharedConfig, userGuidance: '结果未知' };

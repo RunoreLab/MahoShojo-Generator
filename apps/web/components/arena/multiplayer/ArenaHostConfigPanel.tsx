@@ -161,9 +161,21 @@ export function ArenaHostConfigPanel({
       </div>
 
       {status.kind === 'synced' ? (
-        <p role="status" className="mt-3 text-sm text-emerald-700 dark:text-emerald-300">
-          {status.message}
-        </p>
+        <div className="mt-3">
+          <p role="status" className="text-sm text-emerald-700 dark:text-emerald-300">
+            {status.message}
+          </p>
+          {status.refreshFailed ? (
+            <button
+              type="button"
+              className={`${buttonClassName()} mt-2`}
+              disabled={busy}
+              onClick={() => { reconciliation.reconcilePublished(); }}
+            >
+              重试刷新数据卡
+            </button>
+          ) : null}
+        </div>
       ) : status.kind === 'error' ? (
         <div
           role="alert"

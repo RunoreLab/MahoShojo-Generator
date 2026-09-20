@@ -196,6 +196,52 @@ describe('Arena room host reconciliation', () => {
     });
   });
 
+  it('已有在线卡版本更新时重新读取角色、主辅情景和素材的完整正文', async () => {
+    const baseline = await buildArenaRoomHostWorkspaceBundleFromBattleState(useBattleStore.getState());
+    const ref = (id: string, kind: 'character' | 'scenario' | 'material') => ({
+      key: `data-card:${id}`,
+      ref: { id, kind, versionToken: `version-${id}` },
+    });
+    const target: ArenaRoomSharedConfig = {
+      ...baseline.sharedConfig,
+      combatants: [ref('character', 'character')],
+      scenario: ref('main', 'scenario'),
+      auxScenarios: [ref('aux', 'scenario')],
+      materials: [ref('material', 'material')],
+    };
+    const typeOf = (id: string) => id === 'character' ? 'character' as const
+      : id === 'material' ? 'material' as const : 'scenario' as const;
+    await applyArenaRoomAuthorityToBattleStore(target, {
+      currentBundle: baseline,
+      loadPublicCard: async (id) => publicRow(id, typeOf(id)),
+      verifyOrigin: async () => false,
+    });
+    const before = useBattleStore.getState();
+    const currentBundle = await buildArenaRoomHostWorkspaceBundleFromBattleState(before);
+    const updated = JSON.parse(JSON.stringify(target).replaceAll('version-', 'latest-')) as ArenaRoomSharedConfig;
+    const loadPublicCard = vi.fn(async (id: string) => ({
+      ...publicRow(id, typeOf(id)),
+      data: JSON.stringify({ name: `更新 ${id}`, title: `更新 ${id}`, description: '新版正文' }),
+      updated_at: `latest-${id}`,
+    }));
+    // 后一个来源失败时，前面已完成的读取不能部分写入 store。
+    await expect(applyArenaRoomAuthorityToBattleStore(updated, {
+      currentBundle,
+      loadPublicCard: async (id) => id === 'material' ? { ...publicRow(id, 'material'), data: 'invalid' } : loadPublicCard(id),
+      verifyOrigin: async () => false,
+    })).rejects.toThrow();
+    expect(useBattleStore.getState()).toBe(before);
+    loadPublicCard.mockClear();
+    await applyArenaRoomAuthorityToBattleStore(updated, { currentBundle, loadPublicCard, verifyOrigin: async () => false });
+    const after = useBattleStore.getState();
+    expect(loadPublicCard).toHaveBeenCalledTimes(4);
+    expect(after.combatants[0]).toMatchObject({ data: { name: '更新 character' }, sourceDataCardUpdatedAt: 'latest-character' });
+    expect(after.scenario).toMatchObject({ content: { title: '更新 main' }, sourceDataCardUpdatedAt: 'latest-main' });
+    expect(after.auxScenarios[0]).toMatchObject({ content: { title: '更新 aux' }, sourceDataCardUpdatedAt: 'latest-aux' });
+    expect(after.materials[0]).toMatchObject({ sourceDataCardUpdatedAt: 'latest-material' });
+    expect(JSON.stringify(after.materials[0])).toContain('新版正文');
+  });
+
   it('materialize 完成前工作区已变化时不覆盖新的本地修改', async () => {
     const before = useBattleStore.getState();
     const baselineBundle = await buildArenaRoomHostWorkspaceBundleFromBattleState(before);

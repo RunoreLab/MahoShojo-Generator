@@ -4,6 +4,7 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { ArenaRoomSharedConfigSchema } from '@mahoshojo/contracts/arena-room';
 import type { ArenaRoomSharedConfig } from '@mahoshojo/contracts/arena-room';
 
 import {
@@ -16,6 +17,7 @@ import type {
   ArenaRoomController,
   ArenaRoomControllerState,
 } from '@/lib/arena-room/controller';
+import { createArenaRoomHostWorkspace } from '@/lib/arena-room/host-workspace';
 import type {
   ArenaRoomHostWorkspace,
   ArenaRoomHostWorkspaceAuthority,
@@ -712,5 +714,80 @@ describe('useArenaRoomHostReconciliation', () => {
     expect(mocks.applyAuthority).toHaveBeenCalledTimes(4);
     expect(capturePublished).toHaveBeenCalledOnce();
     expect(latest?.state).toMatchObject({ kind: 'synced', revision: 2 });
+  });
+});
+
+
+describe('发布成功后的 latest 正文刷新', () => {
+  const oldConfig = () => ArenaRoomSharedConfigSchema.parse(config('classic'));
+  const latestConfig = (): ArenaRoomSharedConfig => ({
+    ...oldConfig(),
+    combatants: [{ key: 'data-card:character-1', ref: { id: 'character-1', kind: 'character', versionToken: 'v2' } }],
+  });
+
+  it('首次观察已发布的 token drift 自动刷新，加载后不会循环同步', async () => {
+    const published = stateAt(1, latestConfig());
+    const workspace = createArenaRoomHostWorkspace();
+    workspace.capturePublished(authorityOf(published), bundle(oldConfig()));
+    mocks.buildBundle.mockResolvedValueOnce(bundle(oldConfig()))
+      .mockResolvedValueOnce(bundle(oldConfig()))
+      .mockResolvedValue(bundle(latestConfig()));
+    await renderState(published, workspace);
+    await flush();
+    expect(mocks.applyAuthority).toHaveBeenCalledOnce();
+    expect(latest?.state).toMatchObject({ kind: 'synced', revision: 1 });
+    await renderState(withControlEventAtSameRevision(published, 2), workspace);
+    await flush();
+    expect(mocks.applyAuthority).toHaveBeenCalledOnce();
+  });
+
+  it('创建 session 先于发布基线出现时，可在 capture 后补一次自动刷新', async () => {
+    const published = stateAt(1, latestConfig());
+    const workspace = createArenaRoomHostWorkspace();
+    mocks.buildBundle.mockResolvedValueOnce(bundle(oldConfig()))
+      .mockResolvedValueOnce(bundle(oldConfig()))
+      .mockResolvedValue(bundle(latestConfig()));
+    await renderState(published, workspace);
+    await flush();
+    expect(mocks.applyAuthority).not.toHaveBeenCalled();
+    workspace.capturePublished(authorityOf(published), bundle(oldConfig()));
+    await act(async () => latest?.reconcilePublished());
+    await flush();
+    expect(mocks.applyAuthority).toHaveBeenCalledOnce();
+    expect(latest?.state).toMatchObject({ kind: 'synced' });
+  });
+
+  it('异步对账构建期间用户编辑时重新判断冲突，不覆盖新编辑', async () => {
+    const published = stateAt(1, latestConfig());
+    const workspace = createArenaRoomHostWorkspace();
+    workspace.capturePublished(authorityOf(published), bundle(oldConfig()));
+    let resolveBundle!: (value: ReturnType<typeof bundle>) => void;
+    mocks.buildBundle.mockImplementationOnce(() => new Promise((resolve) => { resolveBundle = resolve; }))
+      .mockResolvedValue(bundle({ ...oldConfig(), battleMode: 'daily' }));
+    const originalMode = useBattleStore.getState().battleMode;
+    try {
+      await renderState(published, workspace);
+      await act(async () => {
+        useBattleStore.setState({ battleMode: originalMode === 'daily' ? 'classic' : 'daily' });
+        resolveBundle(bundle(oldConfig()));
+      });
+      await flushWithMacrotasks();
+      expect(mocks.applyAuthority).not.toHaveBeenCalled();
+      expect(latest?.state).toMatchObject({ kind: 'conflicted' });
+    } finally {
+      useBattleStore.setState({ battleMode: originalMode });
+    }
+  });
+
+  it('正文刷新失败保留发布成功状态，不阻塞后续操作', async () => {
+    const published = stateAt(1, latestConfig());
+    const workspace = createArenaRoomHostWorkspace();
+    workspace.capturePublished(authorityOf(published), bundle(oldConfig()));
+    mocks.buildBundle.mockResolvedValue(bundle(oldConfig()));
+    mocks.applyAuthority.mockRejectedValueOnce(new Error('读取失败'));
+    await renderState(published, workspace);
+    await flush();
+    expect(latest?.state).toMatchObject({ kind: 'synced', message: expect.stringContaining('房间配置已保存') });
+    expect(workspace.compare(authorityOf(published), bundle(oldConfig())).kind).toBe('clean');
   });
 });

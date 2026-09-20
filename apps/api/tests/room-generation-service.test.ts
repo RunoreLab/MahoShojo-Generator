@@ -915,6 +915,47 @@ describe('Arena Room generation coordinator', () => {
     expect(notFoundPort.startFromHostRequest).toHaveBeenCalledTimes(1);
   });
 
+  it('reservation 恢复时 latest 正文已变化则拒绝补启动，不替换本次冻结输入', async () => {
+    const harness = await createHarness();
+    const request = startRequest();
+    const start = {
+      roomId: 'room-1',
+      accountUserId: 101,
+      request,
+      sourceRequest: sourceRequest(),
+    };
+    let version = 'v1';
+    harness.materializer.materialize.mockImplementation(async () => ({
+      mode: 'classic',
+      combatants: [{ data: { name: version }, sourceDataCardUpdatedAt: version }],
+    }));
+    harness.generation.hashSemanticPayload.mockImplementation(async ({ payload }) => (
+      `sha256:${JSON.stringify(payload).includes('v2') ? 'b'.repeat(64) : 'a'.repeat(64)}`
+    ));
+    await harness.service.start(start);
+    harness.finishPublisher();
+    await Promise.resolve();
+
+    version = 'v2';
+    const historicalPort = {
+      ...harness.generation,
+      readOwnedProjection: vi.fn(async () => ({ kind: 'not-found' as const })),
+      startFromHostRequest: vi.fn(async () => ({
+        kind: 'subscribed' as const,
+        subscription: subscription(),
+      })),
+    };
+    const restarted = createArenaRoomGenerationService({
+      memberships: harness.memberships,
+      materializer: harness.materializer,
+      generation: historicalPort,
+      createPublisher: harness.createPublisher,
+      now: () => '2026-08-28T00:02:00.000Z',
+    });
+    await expect(restarted.start(start)).rejects.toMatchObject({ code: 'ROOM_GENERATION_CONFLICT' });
+    expect(historicalPort.startFromHostRequest).not.toHaveBeenCalled();
+  });
+
   it('历史 durable terminal 先返回权威结果，不被后续 ref stale 遮蔽', async () => {
     const harness = await createHarness();
     const request = startRequest();

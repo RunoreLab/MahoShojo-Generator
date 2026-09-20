@@ -43,6 +43,7 @@ import {
 } from '@mahoshojo/contracts/arena-room';
 
 import { authStorage } from '@/lib/auth';
+import { areArenaRoomSharedConfigsSemanticallyEqual } from './shared-config-equality';
 
 export type ArenaRoomClientErrorCode =
   | 'ROOM_AUTHENTICATION_REQUIRED'
@@ -422,7 +423,7 @@ export const createArenaRoomClient = (options: ClientOptions): ArenaRoomClient =
           session.snapshot.revision !== parsed.expectedRevision
           && session.snapshot.revision !== parsed.expectedRevision + 1
         )
-        || JSON.stringify(session.snapshot.sharedConfig) !== JSON.stringify(parsed.sharedConfig)
+        || !areArenaRoomSharedConfigsSemanticallyEqual(session.snapshot.sharedConfig, parsed.sharedConfig)
       ) {
         throw new ArenaRoomClientError(
           'ROOM_RESULT_UNKNOWN',
