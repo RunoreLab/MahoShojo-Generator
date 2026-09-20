@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { FileText, PanelsTopLeft } from 'lucide-react';
 import { SegmentedControl, type SegmentedOption } from '@/components/shared/SegmentedControl';
@@ -272,7 +272,7 @@ export function ArenaWebReport({ content, ready, roomId, children }: {
     }
   }, []);
   const showingWeb = ready && accepted && displayMode === 'web' && webDocument !== null;
-  const enterImmersive = () => {
+  const enterImmersive = useCallback(() => {
     setImmersive(true);
     const requestFullscreen = document.documentElement.requestFullscreen;
     if (typeof requestFullscreen !== 'function') return;
@@ -281,8 +281,8 @@ export function ArenaWebReport({ content, ready, roomId, children }: {
     void requestFullscreen.call(document.documentElement).catch(() => {
       nativeFullscreenRequestedRef.current = false;
     });
-  };
-  const exitImmersive = () => {
+  }, []);
+  const exitImmersive = useCallback(() => {
     setImmersive(false);
     if (!nativeFullscreenRequestedRef.current) return;
 
@@ -290,7 +290,10 @@ export function ArenaWebReport({ content, ready, roomId, children }: {
     if (document.fullscreenElement && document.exitFullscreen) {
       void document.exitFullscreen().catch(() => undefined);
     }
-  };
+  }, []);
+  useEffect(() => {
+    if (immersive && !showingWeb) exitImmersive();
+  }, [exitImmersive, immersive, showingWeb]);
   const handleDisplayModeChange = (nextMode: ArenaWebDisplayMode) => {
     if (nextMode === 'ordinary') {
       if (immersive) exitImmersive();
