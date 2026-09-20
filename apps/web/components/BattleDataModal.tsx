@@ -14,6 +14,7 @@ import {
 } from '@/lib/data-card-read-mappers';
 import { addUsedCard, isCardUsed } from '@/lib/localStorage';
 import { inferTemplate } from '@/lib/data-card-converter';
+import { downloadBlob } from '@/lib/client/blobUrl';
 import { buildTitleDisplay } from '@/lib/text';
 import { ChevronDown, Filter } from 'lucide-react';
 import DecksModal from './DecksModal';
@@ -909,14 +910,7 @@ export default function BattleDataModal({
       }
       const blob = new Blob([JSON.stringify(cardPayload, null, 2)], { type: 'application/json' });
       const sanitizedName = (card.name || '数据卡').replace(/[\\/:*?"<>|]/g, '_');
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `${sanitizedName}.json`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
+      downloadBlob(blob, `${sanitizedName}.json`);
     } catch (error) {
       console.error('保存数据卡失败:', error);
     }

@@ -7,6 +7,7 @@ import { TierBadge } from '@/components/ranking/TierBadge';
 import { TechBadge } from '@/components/ranking/TechBadge';
 import { computeEloExpectedScore } from '@/lib/arena/elo';
 import { authStorage } from '@/lib/auth';
+import { downloadBlob } from '@/lib/client/blobUrl';
 import { computeTechIndex } from '@/lib/metrics/techIndex';
 import {
   parseGenerationRankingResponse,
@@ -227,15 +228,8 @@ export const useSoloRosterSectionModel = (input: {
   const downloadJson = (combatant: CombatantData) => {
     const jsonData = JSON.stringify(combatant.data, null, 2);
     const blob = new Blob([jsonData], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
     const baseName = getCombatantDisplayName(combatant.data);
-    link.download = `${baseName}_修正版.json`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    downloadBlob(blob, `${baseName}_修正版.json`);
   };
 
   const copyJson = async (combatant: CombatantData) => {
