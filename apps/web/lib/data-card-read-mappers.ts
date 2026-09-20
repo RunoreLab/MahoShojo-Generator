@@ -25,6 +25,7 @@ export type BattleSelectionPayload = Record<string, unknown> & {
   _cardId: string;
   _cardName: string;
   _cardDescription: string;
+  _cardType: OnlineDataCardType;
   _isPublic: boolean | number;
   _updatedAt?: string;
   _createdAt?: string;

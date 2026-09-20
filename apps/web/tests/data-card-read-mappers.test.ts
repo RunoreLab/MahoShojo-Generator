@@ -94,6 +94,7 @@ describe('data-card read mappers', () => {
       id: 'snake-id',
       name: 'snake-name',
       description: 'desc',
+      type: 'scenario',
       data: '{"codename":"A"}',
       is_public: 1,
       updated_at: '2026-01-02T00:00:00.000Z',
@@ -104,6 +105,7 @@ describe('data-card read mappers', () => {
       usage_count: 30,
     });
     expect(snakePayload._cardId).toBe('snake-id');
+    expect(snakePayload._cardType).toBe('scenario');
     expect(snakePayload._isPublic).toBe(1);
     expect(snakePayload._author).toBe('alice');
     expect(snakePayload._likeCount).toBe(10);

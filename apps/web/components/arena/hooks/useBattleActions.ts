@@ -2,7 +2,6 @@
 
 import { useCallback } from 'react';
 
-import { inferTemplate } from '@/lib/data-card-converter';
 import { buildAdjudicationSourceKey, markAdjudicationEventsWithSource } from '@/lib/arena/adjudication-events';
 import { buildArenaMaterialState } from '@/lib/arena/materials';
 import {
@@ -32,6 +31,7 @@ import {
   isLegacyAdjudicatorFormat,
 } from '../utils/characterValidator';
 import { parseCombatantsFromText } from '../utils/fileParser';
+import { resolveArenaDataCardTemplate } from '../utils/data-card-template';
 import { ScenarioSchema } from '../utils/schemas';
 
 // 追踪正在处理中的卡片，防止重复点击
@@ -236,9 +236,12 @@ export const useBattleActions = () => {
         sourceDataCardUsageCount,
       } = mapDataCardRuntimeSourceInfo(cardData);
 
+      // _cardType 是在线选卡的传输元数据，最终仍需从正文中移除；但在清理前
+      // 读取它，让正文无法识别的 scenario 不会掉入参战角色分支。
+      const declaredCardType = cardData?._cardType;
       const cleanedCardData = stripBattleSelectionTransportMeta(cardData);
       const resolvedName = getCombatantDisplayName(cleanedCardData);
-      const inferredTemplate = inferTemplate(cleanedCardData);
+      const inferredTemplate = resolveArenaDataCardTemplate(cleanedCardData, declaredCardType);
       const targetFilename = `${sourceDataCardName || resolvedName}.json`;
       const adjudicationSourceKey = buildAdjudicationSourceKey({
         sourceDataCardId,
@@ -369,8 +372,9 @@ export const useBattleActions = () => {
         sourceAuthor,
       } = mapDataCardRuntimeSourceInfo(cardData);
 
+      const declaredCardType = cardData?._cardType;
       const cleanedCardData = stripBattleSelectionTransportMeta(cardData);
-      const inferredTemplate = inferTemplate(cleanedCardData);
+      const inferredTemplate = resolveArenaDataCardTemplate(cleanedCardData, declaredCardType);
       if (inferredTemplate !== 'scenario' && inferredTemplate !== 'general-scenario') {
         setError('❌ 请选择“情景”类型的数据卡。');
         return;
