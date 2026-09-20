@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { FileText, PanelsTopLeft } from 'lucide-react';
 import { SegmentedControl, type SegmentedOption } from '@/components/shared/SegmentedControl';
 import { BaseModal } from '@/components/shared/BaseModal';
-import { stripAllStreamMetaComments } from '@/lib/arena/stream-meta';
+import { MarkdownBlock } from '@/components/MarkdownBlock';
+import { normalizeArenaWebOutput } from '@/lib/arena/web-output';
 import { downloadBlob } from '@/lib/client/blobUrl';
 
 const CONSENT_KEY = 'arena.web-report-consent.v1';
@@ -73,6 +74,63 @@ function WebReportConsentDialog({ open, onCancel, onAccept }: {
   );
 }
 
+function ArenaWebNotes({ prelude, epilogue }: {
+  prelude: string;
+  epilogue: string;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const notes = [
+    prelude ? { label: '前言', content: prelude } : null,
+    epilogue ? { label: '后记', content: epilogue } : null,
+  ].filter((note): note is { label: string; content: string } => note !== null);
+
+  if (notes.length === 0) return null;
+
+  return (
+    <section className="rounded-lg border border-white/10 bg-black/20 text-white/90" data-testid="arena-web-notes">
+      <button
+        type="button"
+        className="flex min-h-11 w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm font-semibold transition-colors hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink-300"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((value) => !value)}
+      >
+        <span>💬 AI 附言（{notes.length} 段）</span>
+        <span aria-hidden="true" className="text-white/60">{expanded ? '⌃' : '⌄'}</span>
+      </button>
+      {expanded ? <div className="space-y-3 border-t border-white/10 px-3 py-3">
+        {notes.map((note) => (
+          <div key={note.label}>
+            <div className="mb-1 text-xs font-semibold tracking-wide text-white/60">AI {note.label}</div>
+            <MarkdownBlock content={note.content} variant="dark" mode="article" />
+          </div>
+        ))}
+      </div> : null}
+    </section>
+  );
+}
+
+function ArenaWebDocument({ document, prelude, epilogue, reload }: {
+  document: string;
+  prelude: string;
+  epilogue: string;
+  reload: number;
+}) {
+  return (
+    <>
+      <ArenaWebNotes prelude={prelude} epilogue={epilogue} />
+      <iframe
+        key={reload}
+        title="AI Web 战报"
+        sandbox="allow-scripts"
+        referrerPolicy="no-referrer"
+        srcDoc={document}
+        data-testid="arena-web-document"
+        className="mt-3 h-[75dvh] min-h-[360px] w-full rounded-lg border-0 bg-white"
+      />
+    </>
+  );
+}
+
 export function ArenaReportFormatSelector({ value, onChange, disabled = false, roomId }: {
   value: 'markdown' | 'web';
   onChange: (format: 'markdown' | 'web') => void;
@@ -108,13 +166,15 @@ export function ArenaWebReport({ content, ready, roomId, children }: {
   const [confirming, setConfirming] = useState(false);
   const [asked, setAsked] = useState(false);
   const [reload, setReload] = useState(0);
+  const normalizedOutput = useMemo(() => normalizeArenaWebOutput(content), [content]);
+  const webDocument = normalizedOutput.document;
   useEffect(() => {
     if (ready && !accepted && !asked) {
       setAsked(true);
       setConfirming(true);
     }
   }, [ready, accepted, asked]);
-  const showingWeb = ready && accepted && displayMode === 'web';
+  const showingWeb = ready && accepted && displayMode === 'web' && webDocument !== null;
   const handleDisplayModeChange = (nextMode: ArenaWebDisplayMode) => {
     if (nextMode === 'ordinary') {
       setDisplayMode('ordinary');
@@ -128,9 +188,9 @@ export function ArenaWebReport({ content, ready, roomId, children }: {
     setConfirming(true);
   };
   const downloadHtml = () => {
-    if (!ready) return;
+    if (!ready || !webDocument) return;
     // BOM 确保缺少 charset 声明的生成文档在本地打开时仍按 UTF-8 解码。
-    const blob = new Blob(['\uFEFF', stripAllStreamMetaComments(content)], { type: 'text/html;charset=utf-8' });
+    const blob = new Blob(['\uFEFF', webDocument], { type: 'text/html;charset=utf-8' });
     downloadBlob(blob, `魔法少女速报_${new Date().toISOString().replace(/[:.]/g, '-')}.html`);
   };
   return (
@@ -149,9 +209,16 @@ export function ArenaWebReport({ content, ready, roomId, children }: {
         下载的 HTML 在浏览器直接打开时不再受本站沙箱保护；外部资源仍可能需要联网，页面内的交互进度不会保存。
         {showingWeb ? '如需保存图片，可使用浏览器截图，或切换普通显示保存普通战报图片。' : null}
       </p> : null}
+      {ready && !webDocument ? <p className="mb-3 rounded-lg border border-amber-300/50 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900 dark:border-amber-300/30 dark:bg-amber-950/30 dark:text-amber-100" role="status">
+        这份输出没有包含完整的 HTML 文档，已切换为普通显示；其中的脚本不会被执行。
+      </p> : null}
       {children(showingWeb ? (
-        <iframe key={reload} title="AI Web 战报" sandbox="allow-scripts" referrerPolicy="no-referrer"
-          srcDoc={stripAllStreamMetaComments(content)} className="h-[75vh] min-h-[360px] w-full rounded-lg border-0 bg-white" />
+        <ArenaWebDocument
+          document={webDocument}
+          prelude={normalizedOutput.prelude}
+          epilogue={normalizedOutput.epilogue}
+          reload={reload}
+        />
       ) : undefined, <>
         {showingWeb ? <button
           type="button"
@@ -164,7 +231,7 @@ export function ArenaWebReport({ content, ready, roomId, children }: {
         </button> : null}
         <button
           type="button"
-          disabled={!ready}
+          disabled={!ready || !webDocument}
           onClick={downloadHtml}
           className="save-button flex-1 bg-white/10 hover:bg-white/20 text-white py-2 px-4 rounded transition-all disabled:cursor-not-allowed disabled:opacity-60"
         >

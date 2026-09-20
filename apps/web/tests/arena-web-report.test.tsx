@@ -9,6 +9,14 @@ import { BattleResultPresentation } from '@/components/arena/components/BattleRe
 vi.mock('@/lib/client/blobUrl', () => ({ downloadBlob: vi.fn() }));
 
 const source = '<!doctype html><html><body><button onclick="this.textContent=123">互动</button></body></html>';
+const sourceWithNotes = [
+  '下面是本场特别战报。',
+  '',
+  source,
+  '',
+  '希望你喜欢这场战斗。',
+  '<!-- MAHOSHOJO_ARENA_META {"version":1} -->',
+].join('\n');
 let container: HTMLDivElement;
 let root: Root;
 const click = async (text: string) => {
@@ -92,6 +100,33 @@ describe('Web 战报的本地执行许可', () => {
     await act(async () => root.render(viewer('download', false, content)));
     await click('🌐 下载 HTML');
     expect(downloadBlob).toHaveBeenCalledTimes(2);
+  });
+
+  it('只把 canonical HTML 放入 iframe 和下载文件，前后附言默认折叠但可展开', async () => {
+    window.localStorage.setItem('arena.web-report-consent.v1.room.notes', 'accepted');
+    await act(async () => root.render(viewer('notes', true, sourceWithNotes)));
+
+    const frame = document.querySelector('iframe')!;
+    expect(frame.srcdoc).toBe(source);
+    expect(frame.srcdoc).not.toContain('下面是本场特别战报');
+    expect(frame.srcdoc).not.toContain('MAHOSHOJO_ARENA_META');
+
+    const notes = container.querySelector('[data-testid="arena-web-notes"]')!;
+    expect(notes.textContent).toContain('AI 附言（2 段）');
+    expect(notes.textContent).not.toContain('下面是本场特别战报');
+    await act(async () => (notes.querySelector('button') as HTMLButtonElement).click());
+    expect(notes.textContent).toContain('下面是本场特别战报');
+    expect(notes.textContent).toContain('希望你喜欢这场战斗');
+
+    await click('🌐 下载 HTML');
+    const [blob] = vi.mocked(downloadBlob).mock.calls[0];
+    const downloaded = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(blob);
+    });
+    expect(downloaded).toBe(source);
   });
 
   it('生成期间禁用格式切换，不打开确认也不更改格式', async () => {
