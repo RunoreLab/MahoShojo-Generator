@@ -7,10 +7,11 @@ on:
       - refactor/platform-rearchitecture
   workflow_dispatch:
   workflow_call:
-
-concurrency:
-  group: repository-ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+    inputs:
+      skip_build:
+        description: 发布流水线由并行的应用构建 job 提供构建与类型检查
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -19,6 +20,9 @@ jobs:
   verify:
     name: Verify repository
     runs-on: ubuntu-latest
+    concurrency:
+      group: repository-ci-${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -38,4 +42,9 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Verify repository
+        if: ${{ !inputs.skip_build }}
         run: pnpm run ci:verify
+
+      - name: Verify repository without duplicate builds
+        if: ${{ inputs.skip_build }}
+        run: pnpm run ci:verify:checks

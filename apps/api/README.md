@@ -247,14 +247,26 @@ reaper 对账，不伪造可对外读取的 failed/completed 终态。
 `.github/workflows/hono-deploy.yml` 继续保留受保护生产分支、Environment、SSH host key 和
 `cancel-in-progress: false`，build/container/artifact 路径只引用 `apps/api` owner。发布物由
 `index.mjs`、release-local `compose.yml` 与 `deploy-bundle.sh` 组成；`release.manifest` 覆盖这三个运行资产，
-其 SHA-256 是 release id，连同 manifest 本身构成五文件 release。workflow 校验 release id 后直接创建
-`releases/<release-id>`、上传五个文件并执行目录内的 `deploy-bundle.sh`；不再使用独立 installer、随机 staging
-或历史 tuple 兼容层。
+其 SHA-256 是 release id，连同 manifest 本身构成五文件 release。生产 workflow 将本次构建的 artifact id、
+ZIP 摘要和 release id 传给部署 job，由 runner 使用仅含 `actions: read` 的 Actions 访问权限获取临时下载链接，
+再通过 SSH stdin 交给 VPS。GitHub token 不离开 runner，临时链接不写日志或配置文件。
+VPS 使用 HTTPS 下载压缩包，核对 ZIP 摘要和五文件 manifest，在临时目录内校验通过后才放入
+`releases/<release-id>`；同名 release 仅核对、不覆盖。下载失败最多刷新链接重试三次，校验失败直接停止。
+产物准备与执行目录内的 `deploy-bundle.sh` 分为两个步骤，重试下载不会重复部署；现有健康检查和回滚不变。
+生产拉取使用服务器已有的 Python 3 标准库，不需要 unzip、常驻 agent 或长期 GitHub token。
+preview workflow 仍使用原来的 SCP 五文件上传流程。本次不改变五文件 release 格式或引入历史 tuple 兼容层。
 
-整仓质量验证（`pnpm run ci:verify`）是合并前的本地验收与 PR 集成 CI（`.github/workflows/ci.yml`）的职责；
-生产发布 workflow 不再重复执行整仓 test/lint/build，只保留 install、容器构建、release bundle、runtime 集成
-验证与公网 smoke 等部署特有检查（与 preview workflow 同一口径）。Hono 发布与公网 smoke 成功后，它才调用
-`.github/workflows/cloudflare-deploy.yml` 发布 Web；Cloudflare workflow 不再独立监听 push 或重复 CI。runtime 是否接受
+PR、手动 Repository CI 与本地完整验收仍执行 `pnpm run ci:verify`。生产流水线并行运行
+`ci:verify:checks`（原有测试、lint 和边界检查，不重复 workspace build）、Hono 构建与类型检查、
+以及使用 production 环境变量的 Cloudflare 构建。三者全部成功后才进入发布。
+Web 的完整 OpenNext 产物只构建一次，压缩打包保留隐藏文件及符号链接；发布 job 按本次运行的
+artifact id 下载、复验打包摘要，使用同一 commit 的 Wrangler 配置部署，不重新构建。
+
+生产互斥锁只覆盖 `.github/workflows/production-release.yml` 的完整 Hono → Web 发布过程，不阻塞准备阶段。
+仅尚未完成的验证/构建可被更新任务取消，已经开始的发布不会被新 push 中断。取得发布锁后，
+尚未开始发布的过时 commit 会被跳过；Hono 健康检查和公网 smoke 成功后才发布 Web。
+`.github/workflows/cloudflare-deploy.yml` 保留手动关闭多人入口的 Web-only 紧急发布，并使用同一把发布锁；
+它不自动监听 push。preview 流水线不受本次调整影响。runtime 是否接受
 Room request 由 `.env.hono` 的 `ARENA_MULTIPLAYER_ENABLED` 决定；workflow 手工入口只控制 Web exposure，
 不会覆盖服务器 flag。
 

@@ -45,7 +45,9 @@
     "workspace:test": "pnpm --workspace-concurrency=1 --filter \"./packages/*\" --filter \"./apps/*\" --if-present run test",
     "workspace:lint": "pnpm --filter \"./packages/*\" --filter \"./apps/*\" --if-present run lint",
     "workspace:build": "pnpm --workspace-concurrency=1 --filter \"./packages/*\" --filter \"./apps/*\" --if-present run build",
-    "workspace:verify": "pnpm run check:workspace:boundaries && pnpm run check:admin-boundary && pnpm run check:arena-room-origins && pnpm run check:arena-room-presets && pnpm run workspace:test && pnpm run workspace:lint && pnpm run workspace:build",
+    "workspace:checks": "pnpm run check:workspace:boundaries && pnpm run check:admin-boundary && pnpm run check:arena-room-origins && pnpm run check:arena-room-presets && pnpm run workspace:test && pnpm run workspace:lint",
+    "workspace:verify": "pnpm run workspace:checks && pnpm run workspace:build",
+    "ci:verify:checks": "pnpm run workspace:checks && pnpm run test:repo && pnpm run lint:repo",
     "ci:verify": "pnpm run workspace:verify && pnpm run test:repo && pnpm run lint:repo"
   },
   "devDependencies": {

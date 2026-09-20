@@ -1,0 +1,74 @@
+name: Build Cloudflare production artifact
+
+on:
+  workflow_call:
+    inputs:
+      arena_multiplayer_enabled:
+        required: true
+        type: boolean
+    outputs:
+      artifact_id:
+        value: ${{ jobs.build.outputs.artifact_id }}
+      bundle_sha256:
+        value: ${{ jobs.build.outputs.bundle_sha256 }}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    environment: production
+    concurrency:
+      group: cloudflare-build-${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
+    outputs:
+      artifact_id: ${{ steps.artifact.outputs.artifact-id }}
+      bundle_sha256: ${{ steps.bundle.outputs.sha256 }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 11.3.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Cloudflare bundle
+        env:
+          # Keep the original production build-time values; do not reuse a PR build.
+          NEXT_PUBLIC_TURNSTILE_SITE_KEY: ${{ secrets.NEXT_PUBLIC_TURNSTILE_SITE_KEY }}
+          NEXT_PUBLIC_AI_SAFETY_PROMPT_LEVEL: ${{ vars.NEXT_PUBLIC_AI_SAFETY_PROMPT_LEVEL }}
+          NEXT_PUBLIC_ENABLE_BUNDLE_SAFETY_CHECK: ${{ vars.NEXT_PUBLIC_ENABLE_BUNDLE_SAFETY_CHECK }}
+          NEXT_PUBLIC_GA_ID: ${{ vars.NEXT_PUBLIC_GA_ID }}
+          NEXT_PUBLIC_SAFETY_CHECK_POLICY: ${{ vars.NEXT_PUBLIC_SAFETY_CHECK_POLICY }}
+          NEXT_PUBLIC_HOSTED_API_ENVIRONMENT: production
+          NEXT_PUBLIC_ARENA_MULTIPLAYER_ENABLED: ${{ inputs.arena_multiplayer_enabled && 'true' || 'false' }}
+        run: pnpm --filter @mahoshojo/web run build:cf
+
+      - name: Package Cloudflare bundle
+        id: bundle
+        run: |
+          set -euo pipefail
+          # tar preserves hidden files, executable bits and relative symlinks.
+          tar -czf web-bundle.tar.gz -C apps/web .open-next
+          echo "sha256=$(sha256sum web-bundle.tar.gz | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+
+      - name: Upload Cloudflare bundle
+        id: artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloudflare-production-${{ github.sha }}-${{ github.run_attempt }}
+          path: web-bundle.tar.gz
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 7

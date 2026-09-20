@@ -15,24 +15,31 @@ on:
           - enabled
           - disabled
 
-concurrency:
-  group: hono-production
-  cancel-in-progress: false
-
 permissions:
   contents: read
+  actions: read
   deployments: write
-
-env:
-  VPS_HOST: ${{ vars.VPS_HOST }}
-  VPS_USER: ${{ vars.VPS_USER }}
 
 jobs:
   verify:
     uses: ./.github/workflows/ci.yml
+    with:
+      skip_build: true
+
+  build-web:
+    uses: ./.github/workflows/cloudflare-build.yml
+    with:
+      arena_multiplayer_enabled: ${{ github.event_name == 'push' || inputs.arena_multiplayer == 'enabled' }}
+    secrets: inherit
 
   build:
-    needs: verify
+    concurrency:
+      group: hono-build-${{ github.ref }}
+      cancel-in-progress: true
+    outputs:
+      artifact_id: ${{ steps.bundle.outputs.artifact-id }}
+      artifact_digest: ${{ steps.bundle.outputs.artifact-digest }}
+      release_id: ${{ steps.release.outputs.release_id }}
     runs-on: ubuntu-latest
     services:
       redis:
@@ -60,6 +67,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Typecheck Hono
+        run: pnpm --filter @mahoshojo/api run build
+
       - name: Verify Hono container build
         env:
           HONO_RELEASE_DIR: /tmp/mahoshojo-hono-release
@@ -82,6 +92,7 @@ jobs:
           sudo --preserve-env=HONO_RELEASE_DIR,HONO_HOSTED_API_ENVIRONMENT,HONO_DEPLOY_CORS_ORIGINS docker compose -f apps/api/deploy/compose.yml config --no-env-resolution
 
       - name: Build single-file server
+        id: release
         run: |
           pnpm --filter @mahoshojo/api run deploy:prepare
           cp apps/api/deploy/compose.yml apps/api/dist/compose.yml
@@ -89,6 +100,7 @@ jobs:
           cd apps/api/dist
           sha256sum index.mjs compose.yml deploy-bundle.sh > release.manifest
           sha256sum release.manifest > release.sha256
+          echo "release_id=$(cut -d ' ' -f 1 release.sha256)" >> "$GITHUB_OUTPUT"
 
       - name: Verify Hono built runtime integration
         env:
@@ -153,9 +165,10 @@ jobs:
           pnpm run verify:server:runtime
 
       - name: Upload bundle
+        id: bundle
         uses: actions/upload-artifact@v4
         with:
-          name: hono-server-${{ github.sha }}
+          name: hono-server-${{ github.sha }}-${{ github.run_attempt }}
           path: |
             apps/api/dist/index.mjs
             apps/api/dist/compose.yml
@@ -165,55 +178,18 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  deploy:
-    needs: build
+  release:
+    needs: [verify, build, build-web]
     if: github.ref == 'refs/heads/feature/v0.2.0_Battle_Growth_MahoShojo'
-    runs-on: ubuntu-latest
-    environment: hono-production
-    steps:
-      - name: Checkout deployment files
-        uses: actions/checkout@v6
-
-      - name: Download bundle
-        uses: actions/download-artifact@v5
-        with:
-          name: hono-server-${{ github.sha }}
-          path: artifact
-
-      - name: Configure SSH
-        env:
-          VPS_SSH_PRIVATE_KEY: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
-        run: |
-          install -m 700 -d ~/.ssh
-          printf '%s\n' "$VPS_SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          printf '%s %s\n' "$VPS_HOST" 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIARFAFVUCsUdVM8PtbbiOhkUD9zn5Q6MeK47hxEr/XuC' > ~/.ssh/known_hosts
-
-      - name: Upload release
-        run: |
-          set -euo pipefail
-          release_id="$(awk '{print $1}' artifact/release.sha256)"
-          case "$release_id" in
-            ''|*[!0-9a-f]*) echo "artifact release id 非法" >&2; exit 1 ;;
-          esac
-          test "${#release_id}" -eq 64
-          release_dir="/opt/mahoshojo-hono/releases/$release_id"
-          ssh -i ~/.ssh/deploy_key "$VPS_USER@$VPS_HOST" \
-            "test -d /opt/mahoshojo-hono/releases && test ! -L /opt/mahoshojo-hono/releases && if test -e '$release_dir' || test -L '$release_dir'; then test -d '$release_dir' && test ! -L '$release_dir'; else mkdir -- '$release_dir'; fi"
-          scp -i ~/.ssh/deploy_key \
-            artifact/index.mjs \
-            artifact/compose.yml \
-            artifact/deploy-bundle.sh \
-            artifact/release.manifest \
-            artifact/release.sha256 \
-            "$VPS_USER@$VPS_HOST:$release_dir/"
-          ssh -i ~/.ssh/deploy_key "$VPS_USER@$VPS_HOST" \
-            "chmod 755 '$release_dir/deploy-bundle.sh' && HONO_HOSTED_API_ENVIRONMENT=production '$release_dir/deploy-bundle.sh' publish '$release_id' https://homura.colanns.me"
-
-  deploy-cloudflare:
-    needs: deploy
-    if: github.ref == 'refs/heads/feature/v0.2.0_Battle_Growth_MahoShojo'
-    uses: ./.github/workflows/cloudflare-deploy.yml
+    # The lock covers every job in the called workflow, including Web deployment.
+    concurrency:
+      group: hono-production
+      cancel-in-progress: false
+    uses: ./.github/workflows/production-release.yml
     with:
-      arena_multiplayer_enabled: ${{ github.event_name == 'push' || inputs.arena_multiplayer == 'enabled' }}
+      hono_artifact_id: ${{ needs.build.outputs.artifact_id }}
+      hono_artifact_digest: ${{ needs.build.outputs.artifact_digest }}
+      hono_release_id: ${{ needs.build.outputs.release_id }}
+      web_artifact_id: ${{ needs.build-web.outputs.artifact_id }}
+      web_bundle_sha256: ${{ needs.build-web.outputs.bundle_sha256 }}
     secrets: inherit

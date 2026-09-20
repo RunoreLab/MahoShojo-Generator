@@ -1,12 +1,6 @@
 name: Deploy Cloudflare production
 
 on:
-  workflow_call:
-    inputs:
-      arena_multiplayer_enabled:
-        description: Expose Arena multiplayer after the Hono release probe succeeds
-        required: true
-        type: boolean
   workflow_dispatch:
     inputs:
       confirm_disable_multiplayer:
@@ -16,77 +10,27 @@ on:
         options:
           - disable
 
-concurrency:
-  group: cloudflare-production
-  cancel-in-progress: false
+permissions:
+  contents: read
+  actions: read
+  deployments: write
 
 jobs:
-  deploy:
-    name: Build and deploy Cloudflare production
-    runs-on: ubuntu-latest
-    environment:
-      name: production
-    permissions:
-      contents: read
-      deployments: write
+  build:
+    if: github.ref == 'refs/heads/feature/v0.2.0_Battle_Growth_MahoShojo' && inputs.confirm_disable_multiplayer == 'disable'
+    uses: ./.github/workflows/cloudflare-build.yml
+    with:
+      arena_multiplayer_enabled: false
+    secrets: inherit
 
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v6
-        with:
-          version: 11.3.0
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: 24
-
-      - name: Get pnpm store path
-        id: pnpm-store
-        shell: bash
-        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
-
-      - name: Restore pnpm cache
-        uses: actions/cache@v5
-        with:
-          path: ${{ steps.pnpm-store.outputs.path }}
-          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build Cloudflare bundle
-        env:
-          # NEXT_PUBLIC_* 变量在构建时被内联进客户端产物，必须在此步骤显式注入。
-          # site key 为敏感凭据走 secrets；其余为公开配置走 environment variables。
-          NEXT_PUBLIC_TURNSTILE_SITE_KEY: ${{ secrets.NEXT_PUBLIC_TURNSTILE_SITE_KEY }}
-          NEXT_PUBLIC_AI_SAFETY_PROMPT_LEVEL: ${{ vars.NEXT_PUBLIC_AI_SAFETY_PROMPT_LEVEL }}
-          NEXT_PUBLIC_ENABLE_BUNDLE_SAFETY_CHECK: ${{ vars.NEXT_PUBLIC_ENABLE_BUNDLE_SAFETY_CHECK }}
-          NEXT_PUBLIC_GA_ID: ${{ vars.NEXT_PUBLIC_GA_ID }}
-          NEXT_PUBLIC_SAFETY_CHECK_POLICY: ${{ vars.NEXT_PUBLIC_SAFETY_CHECK_POLICY }}
-          NEXT_PUBLIC_HOSTED_API_ENVIRONMENT: production
-          NEXT_PUBLIC_ARENA_MULTIPLAYER_ENABLED: ${{ inputs.arena_multiplayer_enabled && 'true' || 'false' }}
-        run: pnpm --filter @mahoshojo/web run build:cf
-
-      - name: Deploy production
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: pnpm --filter @mahoshojo/web exec wrangler deploy --env production --keep-vars
-
-      - name: Verify production reachability
-        run: |
-          set -euo pipefail
-          curl --fail --silent --show-error \
-            --retry 5 --retry-delay 3 --retry-connrefused \
-            --connect-timeout 5 --max-time 15 \
-            https://mahoshojo.colanns.me/arena >/dev/null
-          curl --fail --silent --show-error \
-            --retry 5 --retry-delay 3 --retry-connrefused \
-            --connect-timeout 5 --max-time 15 \
-            https://homura.colanns.me/api/health/ready >/dev/null
+  release:
+    needs: build
+    concurrency:
+      group: hono-production
+      cancel-in-progress: false
+    uses: ./.github/workflows/production-release.yml
+    with:
+      web_only: true
+      web_artifact_id: ${{ needs.build.outputs.artifact_id }}
+      web_bundle_sha256: ${{ needs.build.outputs.bundle_sha256 }}
+    secrets: inherit

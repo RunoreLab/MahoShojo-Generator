@@ -1,0 +1,164 @@
+name: Publish production artifacts
+
+on:
+  workflow_call:
+    inputs:
+      web_only:
+        description: 仅供关闭多人入口的紧急 Web-only 发布
+        type: boolean
+        default: false
+      hono_artifact_id:
+        type: string
+        default: ''
+      hono_artifact_digest:
+        type: string
+        default: ''
+      hono_release_id:
+        type: string
+        default: ''
+      web_artifact_id:
+        type: string
+        required: true
+      web_bundle_sha256:
+        type: string
+        required: true
+
+# Callers hold the same hono-production lock for this entire workflow.
+permissions:
+  contents: read
+  actions: read
+  deployments: write
+
+jobs:
+  candidate:
+    if: github.ref == 'refs/heads/feature/v0.2.0_Battle_Growth_MahoShojo'
+    runs-on: ubuntu-latest
+    outputs:
+      current: ${{ steps.head.outputs.current }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Skip superseded candidate before deployment
+        id: head
+        env:
+          WEB_ONLY: ${{ inputs.web_only }}
+          EVENT_NAME: ${{ github.event_name }}
+          CONFIRM_DISABLE: ${{ github.event.inputs.confirm_disable_multiplayer }}
+        run: |
+          set -euo pipefail
+          if [ "$WEB_ONLY" = true ]; then
+            test "$EVENT_NAME" = workflow_dispatch
+            test "$CONFIRM_DISABLE" = disable
+          else
+            tip="$(git ls-remote --exit-code origin "$GITHUB_REF" | cut -f 1)"
+            if [ "$tip" != "$GITHUB_SHA" ]; then
+              echo 'current=false' >> "$GITHUB_OUTPUT"
+              echo '已有更新提交；跳过尚未开始的旧版本发布。'
+              exit 0
+            fi
+          fi
+          echo 'current=true' >> "$GITHUB_OUTPUT"
+
+  deploy-hono:
+    needs: candidate
+    if: needs.candidate.outputs.current == 'true' && !inputs.web_only
+    runs-on: ubuntu-latest
+    environment: hono-production
+    env:
+      VPS_HOST: ${{ vars.VPS_HOST }}
+      VPS_USER: ${{ vars.VPS_USER }}
+    steps:
+      - name: Checkout deployment files
+        uses: actions/checkout@v6
+
+      - name: Configure SSH
+        env:
+          VPS_SSH_PRIVATE_KEY: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$VPS_SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s %s\n' "$VPS_HOST" 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIARFAFVUCsUdVM8PtbbiOhkUD9zn5Q6MeK47hxEr/XuC' > ~/.ssh/known_hosts
+
+      - name: Pull release on VPS
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ARTIFACT_ID: ${{ inputs.hono_artifact_id }}
+          ARTIFACT_DIGEST: ${{ inputs.hono_artifact_digest }}
+          RELEASE_ID: ${{ inputs.hono_release_id }}
+        run: node scripts/pull-hono-artifact.mjs
+
+      - name: Activate release
+        env:
+          RELEASE_ID: ${{ inputs.hono_release_id }}
+        run: |
+          set -euo pipefail
+          release_id="$RELEASE_ID"
+          case "$release_id" in
+            ''|*[!0-9a-f]*) echo "artifact release id 非法" >&2; exit 1 ;;
+          esac
+          test "${#release_id}" -eq 64
+          release_dir="/opt/mahoshojo-hono/releases/$release_id"
+          ssh -i ~/.ssh/deploy_key -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            -o ConnectTimeout=10 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 "$VPS_USER@$VPS_HOST" \
+            "chmod 755 '$release_dir/deploy-bundle.sh' && HONO_HOSTED_API_ENVIRONMENT=production '$release_dir/deploy-bundle.sh' publish '$release_id' https://homura.colanns.me"
+
+
+  deploy-web:
+    needs: [candidate, deploy-hono]
+    if: >-
+      always() && !cancelled() && needs.candidate.outputs.current == 'true' &&
+      (needs.deploy-hono.result == 'success' || (inputs.web_only && needs.deploy-hono.result == 'skipped'))
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 11.3.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install deployment dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Download verified Web build
+        uses: actions/download-artifact@v5
+        with:
+          artifact-ids: ${{ inputs.web_artifact_id }}
+          merge-multiple: true
+          path: artifact
+
+      - name: Verify and unpack Web build
+        env:
+          WEB_BUNDLE_SHA256: ${{ inputs.web_bundle_sha256 }}
+        run: |
+          set -euo pipefail
+          [[ "$WEB_BUNDLE_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          printf '%s  artifact/web-bundle.tar.gz\n' "$WEB_BUNDLE_SHA256" | sha256sum -c -
+          tar -xzf artifact/web-bundle.tar.gz -C apps/web
+          test -f apps/web/.open-next/worker.js
+
+      - name: Deploy production without rebuilding
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: pnpm --filter @mahoshojo/web exec wrangler deploy --config wrangler.jsonc --env production --keep-vars
+
+      - name: Verify production reachability
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            --retry 5 --retry-delay 3 --retry-connrefused \
+            --connect-timeout 5 --max-time 15 \
+            https://mahoshojo.colanns.me/arena >/dev/null
+          curl --fail --silent --show-error \
+            --retry 5 --retry-delay 3 --retry-connrefused \
+            --connect-timeout 5 --max-time 15 \
+            https://homura.colanns.me/api/health/ready >/dev/null
