@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
+  getUserDataCards: vi.fn(async () => [] as Array<{ id: string }>),
   createDataCardWithAuthor: vi.fn(async () => ({ success: true, id: 'card-created' })),
   getDataCardById: vi.fn(async () => ({
     id: 'card-existing',
@@ -33,7 +34,7 @@ vi.mock('@/lib/db/drizzle', () => ({
 
 vi.mock('@/lib/database/data-cards', () => ({
   createDataCardWithAuthor: mocks.createDataCardWithAuthor,
-  getUserDataCards: vi.fn(async () => []),
+  getUserDataCards: mocks.getUserDataCards,
   updateDataCard: mocks.updateDataCard,
   deleteDataCard: vi.fn(async () => true),
   pruneUserRecycleBin: vi.fn(async () => undefined),
@@ -56,6 +57,22 @@ import handler from '@/app/api/data-cards/handler';
 describe('api/data-cards metadata contract', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  test('GET 限制单页正文数量并返回下一页，不公开缓存私有卡片', async () => {
+    mocks.getUserDataCards.mockResolvedValueOnce(Array.from({ length: 9 }, (_, i) => ({ id: String(i) })));
+    const response = await handler(new Request('https://example.test/api/data-cards?limit=999&offset=8'));
+    expect(mocks.getUserDataCards).toHaveBeenCalledWith(7, undefined, undefined, { limit: 9, offset: 8 });
+    expect(response.headers.get('cache-control')).toBe('private, no-store');
+    const payload = await response.json();
+    expect(payload.cards).toHaveLength(8);
+    expect(payload.nextOffset).toBe(16);
+  });
+
+  test.each(['limit=0', 'offset=-1', 'limit=no', 'offset=1.5'])('GET 拒绝非法分页 %s', async (query) => {
+    const response = await handler(new Request(`https://example.test/api/data-cards?${query}`));
+    expect(response.status).toBe(400);
+    expect(mocks.getUserDataCards).not.toHaveBeenCalled();
   });
 
   test.each([2, -2, 0.5, 1.5, '1'])('POST 拒绝契约外可见性值 %j', async (isPublic) => {

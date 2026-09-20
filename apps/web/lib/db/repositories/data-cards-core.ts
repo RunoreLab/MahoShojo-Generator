@@ -343,7 +343,7 @@ export const insertDataCard = async (
 
 export const listUserDataCards = async (
   db: AppDrizzleDb,
-  input: { userId: number; search?: string; sortBy?: DataCardSortBy },
+  input: { userId: number; search?: string; sortBy?: DataCardSortBy; limit: number; offset: number },
 ): Promise<UserDataCardDbRow[]> => {
   const conditions: SQL[] = [eq(dataCards.userId, input.userId), isNull(dataCards.deletedAt)];
   if (input.search) {
@@ -378,7 +378,9 @@ export const listUserDataCards = async (
     .from(dataCards)
     .leftJoin(dataCardUpdates, eq(dataCardUpdates.dataCardId, dataCards.id))
     .where(and(...conditions))
-    .orderBy(...orderBy);
+    .orderBy(...orderBy)
+    .limit(input.limit)
+    .offset(input.offset);
 
   return rows.map((row) => ({
     ...mapDataCardDbRow(row),

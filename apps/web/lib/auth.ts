@@ -2,6 +2,7 @@ import type { OnlineDataCardType } from '@mahoshojo/contracts/data-cards';
 import type { UserBadge } from '@/types/badge';
 import { signOutBetterAuthSession } from '@/lib/auth/logout';
 import { mapDeckDetailPayload, mapDeckListPayload } from '@/lib/deck-client-mappers';
+import { DATA_CARD_LIST_PAGE_SIZE } from '@/lib/data-card-list-page';
 
 const STORAGE_KEY = 'mahoshojo_auth';
 const ENCRYPTION_KEY = 'mahoshojo_2024_secret_encryption_key';
@@ -305,6 +306,36 @@ const resolveApiErrorMessage = async (response: Response, fallback: string): Pro
   return fallback;
 };
 
+const fetchCardListPages = async (
+  path: string,
+  params: URLSearchParams,
+  key: 'cards' | 'favorites',
+): Promise<DataCardsListResult> => {
+  const cards: any[] = [];
+  let offset = 0;
+  while (true) {
+    params.set('limit', String(DATA_CARD_LIST_PAGE_SIZE));
+    params.set('offset', String(offset));
+    const response = await authStorage.fetch(`${path}?${params}`);
+    if (!response.ok) {
+      return {
+        success: false, cards: [], status: response.status,
+        error: await resolveApiErrorMessage(response, `获取列表失败（HTTP ${response.status}）`),
+      };
+    }
+    const data = await response.json();
+    if (data?.success === false || !Array.isArray(data?.[key])) {
+      throw new Error(typeof data?.error === 'string' ? data.error : '列表响应无效');
+    }
+    cards.push(...data[key]);
+    // 兼容尚未升级分页的服务端；不把分页中途失败伪装成完整列表。
+    if (data.nextOffset == null) return { success: true, cards };
+    if (!Number.isSafeInteger(data.nextOffset) || data.nextOffset <= offset
+      || data.nextOffset !== offset + data[key].length) throw new Error('列表分页响应无效');
+    offset = data.nextOffset;
+  }
+};
+
 const fetchDataCardsDetailed = async (
   search?: string,
   sortBy?: 'likes' | 'usage' | 'favorites' | 'created_at',
@@ -318,25 +349,7 @@ const fetchDataCardsDetailed = async (
       searchParams.append('sortBy', sortBy);
     }
 
-    const queryString = searchParams.toString();
-    const url = `/api/data-cards${queryString ? `?${queryString}` : ''}`;
-    const response = await authStorage.fetch(url);
-
-    if (response.ok) {
-      const data = await response.json().catch(() => null);
-      return {
-        success: true,
-        cards: Array.isArray(data?.cards) ? data.cards : [],
-      };
-    }
-
-    const fallback = `获取数据卡失败（HTTP ${response.status}）`;
-    return {
-      success: false,
-      cards: [],
-      status: response.status,
-      error: await resolveApiErrorMessage(response, fallback),
-    };
+    return await fetchCardListPages('/api/data-cards', searchParams, 'cards');
   } catch (error) {
     return {
       success: false,
@@ -689,6 +702,13 @@ export const favoritesApi = {
     }
     if (options?.idsOnly) {
       params.append('idsOnly', '1');
+    } else {
+      try {
+        const result = await fetchCardListPages('/api/favorites', params, 'favorites');
+        return { success: result.success, favorites: result.cards, error: result.error };
+      } catch (error) {
+        return { success: false, favorites: [], error: error instanceof Error ? error.message : '获取收藏失败' };
+      }
     }
 
     const response = await authStorage.fetch(`/api/favorites${params.size ? `?${params.toString()}` : ''}`);

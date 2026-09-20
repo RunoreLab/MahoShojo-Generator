@@ -1,5 +1,6 @@
 import type { OnlineDataCardType } from '@mahoshojo/contracts/data-cards';
 import { getRequestUrl } from '@/lib/request-url';
+import { readDataCardListPage } from '@/lib/data-card-list-page';
 import {
   addFavorite,
   removeFavorite,
@@ -35,10 +36,14 @@ async function handler(req: Request): Promise<Response> {
         });
       }
 
-      const favorites = await getUserFavorites(auth.user.id, type ?? undefined);
-      return new Response(JSON.stringify({ success: true, favorites }), {
+      const page = readDataCardListPage(url.searchParams);
+      if (!page) return Response.json({ success: false, error: '无效的分页参数' }, { status: 400 });
+      const rows = await getUserFavorites(auth.user.id, type ?? undefined, { ...page, limit: page.limit + 1 });
+      const favorites = rows.slice(0, page.limit);
+      const nextOffset = rows.length > page.limit ? page.offset + page.limit : null;
+      return new Response(JSON.stringify({ success: true, favorites, nextOffset }), {
         status: 200,
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 'Content-Type': 'application/json', 'Cache-Control': 'private, no-store' }
       });
     }
 

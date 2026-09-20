@@ -1,4 +1,5 @@
 import { generateUUID } from './core';
+import type { DataCardListPage } from '@/lib/data-card-list-page';
 import type {
   DataCardReviewStatus,
   OnlineDataCardType,
@@ -28,7 +29,7 @@ type DataCardsRepoBundle = {
   ) => Promise<boolean>;
   listUserDataCards: (
     db: unknown,
-    input: { userId: number; search?: string; sortBy?: DataCardSortBy },
+    input: { userId: number; search?: string; sortBy?: DataCardSortBy } & DataCardListPage,
   ) => Promise<any[]>;
   updateDataCardByIdAndUser: (
     db: unknown,
@@ -275,26 +276,28 @@ export async function createDataCard(
   }
 }
 
-// 获取用户的所有数据卡
+// 获取用户的一页数据卡，保留正文供现有编辑/导出消费者使用。
 export async function getUserDataCards(
   userId: number,
-  search?: string,
-  sortBy?: DataCardSortBy,
+  search: string | undefined,
+  sortBy: DataCardSortBy | undefined,
+  page: DataCardListPage,
 ): Promise<any[]> {
   try {
     const bundle = await readDataCardsRepoBundle();
-    if (!bundle) return [];
+    if (!bundle) throw new Error('数据卡存储不可用');
 
     const rows = await bundle.listUserDataCards(bundle.db, {
       userId,
       search,
       sortBy,
+      ...page,
     });
 
     return withTagIds(rows);
   } catch (error) {
     console.error('获取数据卡失败:', error);
-    return [];
+    throw error;
   }
 }
 

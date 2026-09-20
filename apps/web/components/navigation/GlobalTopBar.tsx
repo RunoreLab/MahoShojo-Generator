@@ -68,6 +68,7 @@ export function GlobalTopBar({ pathname, defaultMobileOpen = false }: GlobalTopB
       >
         <div className="global-topbar-panel pointer-events-auto mx-auto flex min-h-[var(--global-topbar-height)] w-full max-w-screen-2xl items-center gap-3 px-3 backdrop-blur-2xl backdrop-saturate-150 sm:px-4 lg:px-6">
           <Link
+            prefetch={false}
             href="/"
             aria-label="返回首页"
             className="global-topbar-logo-link inline-flex min-w-0 items-center gap-2 rounded-full px-2 py-1.5 transition"
@@ -138,6 +139,7 @@ export function GlobalTopBar({ pathname, defaultMobileOpen = false }: GlobalTopB
                     <div className="global-topbar-dropdown rounded-2xl p-2 shadow-xl backdrop-blur">
                       {group.items.map((item) => (
                         <Link
+                          prefetch={false}
                           key={item.href}
                           href={item.href}
                           target={item.isExternal ? '_blank' : undefined}

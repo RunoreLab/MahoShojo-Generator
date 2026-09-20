@@ -594,6 +594,37 @@ export async function listCrowdReviewHistoryByInspector(
     .limit(safeLimit);
 }
 
+// 消息角标只读取是否有待办，不加载案件正文，也不触发过期结算。
+export async function getCrowdReviewPendingFlags(db: AppDrizzleDb, userId: number, now: string) {
+  const row = await db.get<{ current: number; assignable: number }>(sql`
+    SELECT EXISTS (
+      SELECT 1 FROM crowd_review_assignments a
+      JOIN crowd_review_rounds r ON r.id = a.crowd_review_round_id
+      WHERE a.inspector_user_id = ${userId} AND a.status = 'assigned' AND a.expires_at > ${now}
+        AND r.status IN ('pending_dispatch', 'active', 'waiting_more_votes') AND r.deadline_at > ${now}
+    ) AS current, EXISTS (
+      SELECT 1 FROM report_cases c
+      JOIN data_cards d ON d.id = c.target_entity_id AND c.target_entity_type = 'data_card'
+      LEFT JOIN crowd_review_rounds r ON r.report_case_id = c.id
+        AND r.status IN ('pending_dispatch', 'active', 'waiting_more_votes')
+      WHERE c.status IN ('open', 'under_review') AND c.target_user_id <> ${userId}
+        AND d.is_public = 1 AND d.review_status = 'approved' AND d.deleted_at IS NULL
+        AND (r.id IS NULL OR r.deadline_at > ${now})
+        AND EXISTS (SELECT 1 FROM reports p WHERE p.case_id = c.id AND p.status = 'active')
+        AND NOT EXISTS (
+          SELECT 1 FROM reports p WHERE p.case_id = c.id AND p.status = 'active' AND p.reporter_user_id = ${userId}
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM crowd_review_assignments a WHERE a.crowd_review_round_id = r.id AND a.inspector_user_id = ${userId}
+        )
+    ) AS assignable
+  `);
+  return {
+    hasCurrentAssignment: Boolean(row?.current),
+    hasCrowdReviewPending: Boolean(row?.current || row?.assignable),
+  };
+}
+
 export async function listAssignableCases(
   db: AppDrizzleDb,
   userId: number,

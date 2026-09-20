@@ -90,6 +90,7 @@ export function TopBarMobileDrawer({
               <div className="mt-2 grid gap-1">
                 {group.items.map((item) => (
                   <Link
+                    prefetch={false}
                     key={item.href}
                     href={item.href}
                     target={item.isExternal ? '_blank' : undefined}

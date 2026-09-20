@@ -166,7 +166,7 @@ const getSessionAuthUserFromLegacyRead = async (session: BetterAuthSession): Pro
   return null;
 };
 
-const getSessionAuthUser = async (req: Request): Promise<AuthenticatedUser | null> => {
+export const getSessionAuthUserForApp = async (req: Request): Promise<AuthenticatedUser | null> => {
   const auth = getBetterAuthInstance();
   if (!auth) return null;
 
@@ -208,7 +208,7 @@ export const getAuthUserForApp = async (req: Request): Promise<AuthUserContext |
     return bearerUser ? { user: bearerUser, source: 'legacy-bearer' } : null;
   }
 
-  const sessionUser = await getSessionAuthUser(req);
+  const sessionUser = await getSessionAuthUserForApp(req);
   if (sessionUser) {
     return { user: sessionUser, source: 'better-auth-session' };
   }

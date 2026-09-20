@@ -18,7 +18,7 @@ export default function Footer({ className = "footer", textWhite = false }: Foot
       </p>
       <p>欢迎在爱发电上赞助我们！</p>
       <p style={{ textAlign: 'center', display: 'flex', justifyContent: 'center' }}>
-        <Link href="https://afdian.com/a/colanns" target="_blank" rel="noopener noreferrer">
+        <Link prefetch={false} href="https://afdian.com/a/colanns" target="_blank" rel="noopener noreferrer">
           {textWhite ? <Image src="/afdian-white.svg" alt="afdian" width={120} height={20} /> : <Image src="/afdian.svg" alt="afdian" width={120} height={20} />}
         </Link>
       </p>
@@ -58,7 +58,7 @@ export default function Footer({ className = "footer", textWhite = false }: Foot
         <a href="https://docs.qq.com/form/page/DYmdrdWFQdmZCSGdZ" target="_blank" rel="noopener noreferrer" className="footer-link">反馈问题</a>
       </p>
       <p>
-        <Link href="/encyclopedia" className="footer-link">百科</Link>
+        <Link prefetch={false} href="/encyclopedia" className="footer-link">百科</Link>
       </p>
       <p>
         <a href="https://github.com/colasama/MahoShojo-Generator" target="_blank" rel="noopener noreferrer" className="footer-link">colasama/MahoShojo-Generator</a>

@@ -8,7 +8,9 @@ const json = (payload: unknown, status = 200): Response =>
 
 export async function GET(): Promise<Response> {
   try {
-    return json(PRESET_LIST);
+    const response = json(PRESET_LIST);
+    response.headers.set('Cache-Control', 'public, max-age=300, s-maxage=3600');
+    return response;
   } catch (error) {
     console.error('获取预设角色失败:', error);
     return json({ error: '无法加载预设列表' }, 500);

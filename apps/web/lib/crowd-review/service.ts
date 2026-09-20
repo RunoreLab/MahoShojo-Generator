@@ -8,6 +8,7 @@ import {
   createCrowdReviewRound as createCrowdReviewRoundRow,
   finalizeAssignment as finalizeAssignmentRow,
   getActiveAssignmentByInspector as getActiveAssignmentByInspectorRow,
+  getCrowdReviewPendingFlags,
   getAssignmentByIdForInspector as getAssignmentByIdForInspectorRow,
   getInspectorState as getInspectorStateRow,
   getLatestCompletedAssignmentByInspector as getLatestCompletedAssignmentByInspectorRow,
@@ -86,6 +87,7 @@ type ServiceAssignmentRow = CrowdReviewAssignmentRow & {
 };
 
 type CrowdReviewServiceRepo = {
+  getPendingFlags: typeof getCrowdReviewPendingFlags;
   getInspectorState: (db: AppDrizzleDb, userId: number) => Promise<CrowdReviewInspectorRow | null>;
   getActiveAssignmentByInspector: (db: AppDrizzleDb, userId: number) => Promise<ServiceAssignmentRow | null>;
   getLatestCompletedAssignmentByInspector: (
@@ -652,6 +654,7 @@ const hydrateAssignmentForRuntime = async (
 };
 
 const createRuntimeRepo = (): CrowdReviewServiceRepo => ({
+  getPendingFlags: getCrowdReviewPendingFlags,
   getInspectorState: (db, userId) => getInspectorStateRow(db, userId),
   getActiveAssignmentByInspector: async (db, userId) =>
     hydrateAssignmentForRuntime(db, await getActiveAssignmentByInspectorRow(db, userId)),
@@ -978,8 +981,9 @@ const createCrowdReviewService = (deps: CrowdReviewServiceDeps) => {
     async getCrowdReviewSummary(input: {
       db: AppDrizzleDb | null;
       userId: number | null;
+      readOnly?: boolean;
     }): Promise<CrowdReviewSummaryDto> {
-      await advanceExpiredState(input.db);
+      if (!input.readOnly) await advanceExpiredState(input.db);
 
       const eligibility = await ensureEligibility(input.db, input.userId);
       if (!eligibility.eligible || input.userId == null) {
@@ -987,6 +991,15 @@ const createCrowdReviewService = (deps: CrowdReviewServiceDeps) => {
       }
 
       const db = requireDb(input.db);
+      if (input.readOnly) {
+        return {
+          eligible: true,
+          inspectorStatus: 'active',
+          statusReason: null,
+          ...await deps.repo.getPendingFlags(db, input.userId, deps.now()),
+          entryUrl: CROWD_REVIEW_ENTRY_URL,
+        };
+      }
       const activeAssignment = await deps.repo.getActiveAssignmentByInspector(db, input.userId);
       const assignableCase =
         activeAssignment == null
@@ -1315,6 +1328,7 @@ export function createCrowdReviewServiceForTests(
       }),
     hasInspectorBadge: deps.hasInspectorBadge ?? (async () => missing('hasInspectorBadge')),
     repo: {
+      getPendingFlags: deps.repo?.getPendingFlags ?? (async () => missing('getPendingFlags')),
       getInspectorState: deps.repo?.getInspectorState ?? (async () => missing('getInspectorState')),
       getActiveAssignmentByInspector:
         deps.repo?.getActiveAssignmentByInspector ?? (async () => missing('getActiveAssignmentByInspector')),
@@ -1362,6 +1376,7 @@ const defaultService = createCrowdReviewService({
 export async function getCrowdReviewSummary(input: {
   db: AppDrizzleDb | null;
   userId: number | null;
+  readOnly?: boolean;
 }): Promise<CrowdReviewSummaryDto> {
   return defaultService.getCrowdReviewSummary(input);
 }

@@ -1,4 +1,5 @@
 import type { OnlineDataCardType } from '@mahoshojo/contracts/data-cards';
+import type { DataCardListPage } from '@/lib/data-card-list-page';
 
 interface FavoriteOperationResult {
   success: boolean;
@@ -17,7 +18,7 @@ type FavoritesRepoBundle = {
   incrementDataCardFavoriteCount: (db: unknown, cardId: string) => Promise<void>;
   deleteFavoriteRecord: (db: unknown, userId: number, cardId: string) => Promise<number>;
   decrementDataCardFavoriteCount: (db: unknown, cardId: string) => Promise<void>;
-  listUserFavoritesWithCards: (db: unknown, userId: number, type?: FavoriteCardType) => Promise<any[]>;
+  listUserFavoritesWithCards: (db: unknown, userId: number, type: FavoriteCardType | undefined, page: DataCardListPage) => Promise<any[]>;
   listUserFavoriteCardIds: (db: unknown, userId: number, type?: FavoriteCardType) => Promise<string[]>;
 };
 
@@ -99,16 +100,17 @@ export async function removeFavorite(userId: number, cardId: string): Promise<Fa
 }
 
 /**
- * 获取用户收藏的卡片完整详情列表。
+ * 分页获取用户收藏的卡片详情。
  */
 export async function getUserFavorites(
   userId: number,
-  type?: FavoriteCardType
+  type: FavoriteCardType | undefined,
+  page: DataCardListPage,
 ): Promise<any[]> {
   try {
     const bundle = await readFavoritesRepoBundle();
-    if (!bundle) return [];
-    const rows = await bundle.listUserFavoritesWithCards(bundle.db, userId, type);
+    if (!bundle) throw new Error('收藏存储不可用');
+    const rows = await bundle.listUserFavoritesWithCards(bundle.db, userId, type, page);
     return rows.map((row) => {
       const raw = typeof row?.tag_ids === 'string' ? row.tag_ids : '';
       const tagIds = raw
@@ -119,7 +121,7 @@ export async function getUserFavorites(
     });
   } catch (error) {
     console.error('获取收藏列表失败:', error);
-    return [];
+    throw error;
   }
 }
 

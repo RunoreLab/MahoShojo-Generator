@@ -67,12 +67,9 @@ export default function SaveToCloudButton({
     router.push('/arrested');
   };
 
-  // 加载用户数据卡信息
+  // 按钮可在同页出现多次；只在打开替换列表时读取卡片正文。
   useEffect(() => {
-    if (isAuthenticated) {
-      void loadUserDataCards();
-      return;
-    }
+    if (isAuthenticated) return;
     setUserDataCards([]);
     setCardsLoadState({ status: 'idle', error: null });
   }, [isAuthenticated]);
@@ -169,6 +166,11 @@ export default function SaveToCloudButton({
     setCardDescription((defaultDescription && defaultDescription.trim()) ? defaultDescription : inferredDescription);
     setIsPublic(defaultIsPublic);
     setSaveError(null);
+    const capacityInfo = await dataCardApi.getUserCapacity();
+    if (capacityInfo !== null) {
+      setUserCapacity(capacityInfo.capacity);
+      setUserUsedSlots(capacityInfo.usedSlots);
+    }
     setShowSaveModal(true);
   };
 

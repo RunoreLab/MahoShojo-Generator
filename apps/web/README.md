@@ -57,6 +57,15 @@ endpoint 必须 absent；只对 framework URL parser 的精确 synthetic fixture
 
 ## Deploy 与 rollback
 
+### Worker CPU 与列表读取
+
+- OpenNext 使用 Workers Static Assets 的只读增量缓存，复用构建时生成的页面/RSC 和公开预设列表；不新增 R2/KV/DO。`build:cf` 在本地将缓存复制到静态产物，兼容 CI 直接执行 `wrangler deploy`。当前不使用 ISR/按需 revalidation，若引入这类能力需更换可写缓存。动态鉴权和私有 API 不设公共缓存。
+- 首页、全站导航和页脚关闭自动 Link 预取；点击导航仍使用 Next 客户端路由。
+- “保存到云端”按钮挂载不查询卡片；点击保存只查询容量，点击替换才读取卡片列表。
+- Web 会话鉴权直接复用 Better Auth 服务端校验，不再 HTTP 自调用 `/api/auth/verify`；保留 session 优先、legacy bearer、封禁校验。
+- `GET /api/data-cards` 与非 `idsOnly` 的 `GET /api/favorites` 使用 `limit`/`offset`，默认及最大 `limit=8`，响应新增 `nextOffset: number | null`。列表仍包含正文与既有字段，前端统一工具顺序拉取至 `nextOffset=null`，中途错误不作为完整列表返回。直接调用 API 的消费者也需跟进分页，部署后旧页面需刷新。此改动限制单请求内存，不减少完整导出所需总数据量。
+- 消息角标只做众查资格和待办存在性读取；众查自己的 summary/current/assign/submit 仍按协议执行惰性过期结算。
+
 `pnpm --filter @mahoshojo/web deploy` 使用本目录 `wrangler.jsonc`。CI 分别以 `production` 或 `preview` environment 部署；G25D 本身不执行 deploy/cutover。
 
 历史 production control-plane bootstrap seam 仍保留在独立 `dr-candidate` Wrangler environment，但状态是

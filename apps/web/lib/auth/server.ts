@@ -1,9 +1,6 @@
 import { getUserByAuthKey } from '@/lib/database/users';
-import { ACTIVITY_TOKEN_HEADER, ACTIVITY_USER_ID_HEADER } from '@/lib/auth/activity-token';
 import { hasBetterAuthSessionCookie } from '@/lib/auth/better-auth';
-import { buildSubrequestAuthHeaders } from '@/lib/subrequest-auth';
 import { isBearerOnlyHonoAuthMode } from '@/lib/auth/hono-auth-mode';
-import { resolveTrustedBetterAuthSubrequestUrl } from '@/lib/auth/trusted-better-auth-url';
 
 export interface AuthenticatedUser {
   id: number;
@@ -22,10 +19,9 @@ export type AuthUserContext = {
 };
 
 type AuthServerDeps = {
-  fetchImpl: typeof fetch;
+  getSessionAuthUserImpl: (req: Request) => Promise<unknown>;
   getUserByAuthKeyImpl: typeof getUserByAuthKey;
   hasBetterAuthSessionCookieImpl: typeof hasBetterAuthSessionCookie;
-  buildSubrequestAuthHeadersImpl: typeof buildSubrequestAuthHeaders;
 };
 
 export type RequireAuthUserResult = { user: AuthenticatedUser; source: AuthUserSource } | { response: Response };
@@ -37,10 +33,12 @@ export type AuthServerApi = {
 };
 
 const defaultAuthServerDeps: AuthServerDeps = {
-  fetchImpl: fetch,
+  getSessionAuthUserImpl: async (req) => {
+    const { getSessionAuthUserForApp } = await import('@/lib/auth/server-app');
+    return getSessionAuthUserForApp(req);
+  },
   getUserByAuthKeyImpl: getUserByAuthKey,
   hasBetterAuthSessionCookieImpl: hasBetterAuthSessionCookie,
-  buildSubrequestAuthHeadersImpl: buildSubrequestAuthHeaders,
 };
 
 const json = (payload: unknown, status = 200): Response =>
@@ -127,52 +125,11 @@ const toAuthenticatedUser = (raw: unknown): AuthenticatedUser | null => {
   return user;
 };
 
-const parseVerifiedUser = (payload: unknown): AuthenticatedUser | null => {
-  if (!payload || typeof payload !== 'object') return null;
-  const userRecord = (payload as { user?: unknown }).user;
-  return toAuthenticatedUser(userRecord);
-};
-
-const copyHeader = (source: Headers, target: Headers, key: string): void => {
-  const value = source.get(key);
-  if (value && value.trim().length > 0) {
-    target.set(key, value);
-  }
-};
-
 const getSessionAuthUser = async (req: Request, deps: AuthServerDeps): Promise<AuthenticatedUser | null> => {
   if (!deps.hasBetterAuthSessionCookieImpl(req)) return null;
 
   try {
-    const verifyUrl = resolveTrustedBetterAuthSubrequestUrl('/api/auth/verify');
-    const headers = new Headers({
-      'Content-Type': 'application/json',
-    });
-
-    const subrequestAuthHeaders = deps.buildSubrequestAuthHeadersImpl(req);
-    for (const [key, value] of Object.entries(subrequestAuthHeaders)) {
-      headers.set(key, value);
-    }
-
-    copyHeader(req.headers, headers, 'cookie');
-    copyHeader(req.headers, headers, 'origin');
-    copyHeader(req.headers, headers, 'referer');
-    copyHeader(req.headers, headers, 'user-agent');
-    copyHeader(req.headers, headers, 'x-forwarded-for');
-    copyHeader(req.headers, headers, 'x-real-ip');
-    copyHeader(req.headers, headers, 'cf-connecting-ip');
-    copyHeader(req.headers, headers, ACTIVITY_TOKEN_HEADER);
-    copyHeader(req.headers, headers, ACTIVITY_USER_ID_HEADER);
-
-    const response = await deps.fetchImpl(verifyUrl.toString(), {
-      method: 'POST',
-      headers,
-    });
-
-    if (!response.ok) return null;
-
-    const payload = await response.json().catch(() => null);
-    return parseVerifiedUser(payload);
+    return toAuthenticatedUser(await deps.getSessionAuthUserImpl(req));
   } catch (error) {
     console.error('[auth][server] 会话探测失败:', error);
     return null;

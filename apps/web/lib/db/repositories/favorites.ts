@@ -137,7 +137,8 @@ export const decrementDataCardFavoriteCount = async (
 export const listUserFavoritesWithCards = async (
   db: AppDrizzleDb,
   userId: number,
-  type?: FavoriteCardType,
+  type: FavoriteCardType | undefined,
+  page: { limit: number; offset: number },
 ): Promise<UserFavoriteRow[]> => {
   const rows = await db
     .select({
@@ -176,7 +177,9 @@ export const listUserFavoritesWithCards = async (
         type ? eq(dataCards.type, type) : undefined,
       ),
     )
-    .orderBy(desc(favorites.createdAt));
+    .orderBy(desc(favorites.createdAt), desc(dataCards.id))
+    .limit(page.limit)
+    .offset(page.offset);
 
   return rows.map((row) => ({
     id: row.id,

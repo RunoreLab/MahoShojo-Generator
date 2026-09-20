@@ -142,6 +142,25 @@ const buildService = (
   });
 
 describe('crowd review service', () => {
+  test('消息角标只读取待办，不推进全局过期状态或加载案件正文', async () => {
+    const unexpected = async () => { throw new Error('角标不得执行维护或加载正文'); };
+    const service = buildService({ repo: {
+      advanceExpiredState: unexpected,
+      listExpiredRounds: unexpected,
+      getActiveAssignmentByInspector: unexpected,
+      listAssignableCases: unexpected,
+      getPendingFlags: async () => ({ hasCurrentAssignment: false, hasCrowdReviewPending: true }),
+    } });
+    expect(await service.getCrowdReviewSummary({ db: {} as never, userId: 7, readOnly: true }))
+      .toMatchObject({ eligible: true, hasCurrentAssignment: false, hasCrowdReviewPending: true });
+    const ineligible = buildService({
+      hasInspectorBadge: async () => false,
+      repo: { advanceExpiredState: unexpected, getPendingFlags: unexpected },
+    });
+    expect(await ineligible.getCrowdReviewSummary({ db: {} as never, userId: 7, readOnly: true }))
+      .toMatchObject({ eligible: false, hasCrowdReviewPending: false });
+  });
+
   test('exported summary rejects authenticated requests when db runtime is unavailable', async () => {
     await expect(getCrowdReviewSummary({ db: null, userId: 7 })).rejects.toBeInstanceOf(
       CrowdReviewServiceUnavailableError,

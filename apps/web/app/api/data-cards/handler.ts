@@ -1,6 +1,7 @@
 import { OnlineDataCardTypeSchema } from '@mahoshojo/contracts/data-cards';
 import { normalizeOnlineDataCardVisibilityCompat } from '@/lib/data-card-visibility';
 import { getRequestUrl } from '@/lib/request-url';
+import { readDataCardListPage } from '@/lib/data-card-list-page';
 import { 
   createDataCardWithAuthor, 
   getUserDataCards, 
@@ -96,16 +97,20 @@ async function handler(req: Request): Promise<Response> {
 
   switch (req.method) {
     case 'GET':
-      // 获取用户的所有数据卡
+      // 有界分页，避免一次读取所有正文耗尽 Worker 内存。
       try {
         const url = getRequestUrl(req);
+        const page = readDataCardListPage(url.searchParams);
+        if (!page) return Response.json({ error: '无效的分页参数' }, { status: 400 });
         const search = url.searchParams.get('search'); // 搜索关键词
         const sortBy = url.searchParams.get('sortBy') as 'likes' | 'usage' | 'favorites' | 'created_at' | null; // 排序方式
         
-        const cards = await getUserDataCards(userId, search || undefined, sortBy || undefined);
-        return new Response(JSON.stringify({ success: true, cards }), {
+        const rows = await getUserDataCards(userId, search || undefined, sortBy || undefined, { ...page, limit: page.limit + 1 });
+        const cards = rows.slice(0, page.limit);
+        const nextOffset = rows.length > page.limit ? page.offset + page.limit : null;
+        return new Response(JSON.stringify({ success: true, cards, nextOffset }), {
           status: 200,
-          headers: { 'Content-Type': 'application/json' }
+          headers: { 'Content-Type': 'application/json', 'Cache-Control': 'private, no-store' }
         });
       } catch (error) {
         console.error('Get cards error:', error);

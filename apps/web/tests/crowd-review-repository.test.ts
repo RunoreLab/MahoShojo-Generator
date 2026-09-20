@@ -8,6 +8,7 @@ import {
   createCrowdReviewAssignment,
   createCrowdReviewRound,
   getActiveAssignmentByInspector,
+  getCrowdReviewPendingFlags,
   getLatestCompletedAssignmentByInspector,
   getInspectorState,
   listAssignableCases,
@@ -138,6 +139,44 @@ describe('crowd review repository', () => {
 
   afterEach(() => {
     sqlite.close();
+  });
+
+  test('待办摘要遵守公开性、举报人和作者回避规则，且只读', async () => {
+    exec(`
+      INSERT INTO data_cards (id, user_id, type, name, data, is_public, review_status)
+      VALUES ('card-1', 2, 'character', '测试卡', '{}', 1, 'approved');
+      INSERT INTO reports (id, case_id, reporter_user_id, status, created_at)
+      VALUES ('report-1', 'case-1', 8, 'active', '2026-04-08T10:00:00.000Z');
+    `);
+    const changes = sqlite.prepare('SELECT total_changes() AS count').get();
+    const now = '2026-04-08T10:30:00.000Z';
+    expect(await getCrowdReviewPendingFlags(db, 7, now)).toEqual({ hasCurrentAssignment: false, hasCrowdReviewPending: true });
+    for (const userId of [2, 8]) {
+      expect((await getCrowdReviewPendingFlags(db, userId, now)).hasCrowdReviewPending).toBe(false);
+    }
+    expect(sqlite.prepare('SELECT total_changes() AS count').get()).toEqual(changes);
+    exec(`UPDATE data_cards SET is_public = 0`);
+    expect((await getCrowdReviewPendingFlags(db, 7, now)).hasCrowdReviewPending).toBe(false);
+  });
+
+  test('待办摘要排除过期派单和轮次，不修改它们的状态', async () => {
+    const now = '2026-04-08T10:30:00.000Z';
+    await createCrowdReviewRound(db, {
+      id: 'round-summary', reportCaseId: 'case-1', status: 'active', openedAt: now,
+      deadlineAt: '2026-04-08T12:30:00.000Z', extensionCount: 0, minValidVotes: 3,
+      resultCode: null, resultSummaryJson: '{}', now,
+    });
+    await createCrowdReviewAssignment(db, {
+      id: 'assignment-summary', crowdReviewRoundId: 'round-summary', inspectorUserId: 7,
+      status: 'assigned', assignedAt: now, expiresAt: '2026-04-08T11:30:00.000Z',
+      completedAt: null, decision: null, decisionNote: null, postVoteSummaryJson: '{}',
+      postVoteSummarySeenAt: null, now,
+    });
+    expect((await getCrowdReviewPendingFlags(db, 7, now)).hasCurrentAssignment).toBe(true);
+    expect((await getCrowdReviewPendingFlags(db, 7, '2026-04-08T11:30:00.000Z')).hasCurrentAssignment).toBe(false);
+    exec(`UPDATE crowd_review_rounds SET deadline_at = '${now}'`);
+    expect((await getCrowdReviewPendingFlags(db, 7, now)).hasCurrentAssignment).toBe(false);
+    expect(sqlite.prepare('SELECT status FROM crowd_review_assignments').get()).toEqual({ status: 'assigned' });
   });
 
   test('stores inspector state rows and returns active eligibility', async () => {

@@ -88,6 +88,7 @@ export function TopBarUserMenu({ variant = 'desktop', onNavigate, onRequestAuth 
         </div>
         <div className="grid gap-1">
           <Link
+            prefetch={false}
             href="/me"
             onClick={onNavigate}
             className="flex items-center gap-2 rounded-xl px-3 py-2 text-sm text-gray-700 hover:bg-pink-50 dark:text-slate-100 dark:hover:bg-slate-800"
@@ -96,6 +97,7 @@ export function TopBarUserMenu({ variant = 'desktop', onNavigate, onRequestAuth 
             个人页
           </Link>
           <Link
+            prefetch={false}
             href="/character-manager"
             onClick={onNavigate}
             className="flex items-center gap-2 rounded-xl px-3 py-2 text-sm text-gray-700 hover:bg-pink-50 dark:text-slate-100 dark:hover:bg-slate-800"
@@ -139,6 +141,7 @@ export function TopBarUserMenu({ variant = 'desktop', onNavigate, onRequestAuth 
       >
         <div className="rounded-2xl border border-white/60 bg-white/95 p-2 shadow-xl backdrop-blur dark:border-slate-600/60 dark:bg-slate-950/95">
           <Link
+            prefetch={false}
             href="/me"
             className="flex items-center gap-2 rounded-xl px-3 py-2 text-sm text-gray-700 hover:bg-pink-50 dark:text-slate-100 dark:hover:bg-slate-800"
           >
@@ -146,6 +149,7 @@ export function TopBarUserMenu({ variant = 'desktop', onNavigate, onRequestAuth 
             个人页
           </Link>
           <Link
+            prefetch={false}
             href="/character-manager"
             className="flex items-center gap-2 rounded-xl px-3 py-2 text-sm text-gray-700 hover:bg-pink-50 dark:text-slate-100 dark:hover:bg-slate-800"
           >

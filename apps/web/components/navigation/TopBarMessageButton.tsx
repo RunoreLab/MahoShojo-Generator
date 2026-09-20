@@ -9,6 +9,7 @@ export function TopBarMessageButton({ isAuthenticated, userId }: { isAuthenticat
 
   return (
     <Link
+      prefetch={false}
       href="/messages"
       aria-label="消息中心"
       title="消息中心"
