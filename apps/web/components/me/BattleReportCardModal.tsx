@@ -66,6 +66,7 @@ export function BattleReportCardModal({ isOpen, generationId, generationMode, re
               report={{
                 format: 'web-document',
                 content: report.webHtml ?? normalizedLiveBody ?? report.article.body,
+                headline: report.headline ?? null,
                 webReady: report.webReady === true,
                 isStreaming: false,
                 mode,

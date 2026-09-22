@@ -6,8 +6,10 @@ import type { NewsReport } from '@/components/BattleReportCard';
 import { SegmentedControl, type SegmentedOption } from '@/components/shared/SegmentedControl';
 import { BaseModal } from '@/components/shared/BaseModal';
 import { MarkdownBlock } from '@/components/MarkdownBlock';
+import { resolveWebDisplayTitle } from '@/lib/arena/battle-report-display-title';
 import { normalizeArenaWebOutput } from '@/lib/arena/web-output';
 import { downloadBlob } from '@/lib/client/blobUrl';
+import { buildSafeFileName } from '@/lib/client/fileName';
 import styles from './ArenaWebReport.module.css';
 
 const CONSENT_KEY = 'arena.web-report-consent.v1';
@@ -293,10 +295,12 @@ export function ArenaReportFormatSelector({ value, onChange, disabled = false, r
 }
 
 /** 仅 authoritative final 可以执行；暂停、失败或断开连接都不意味着完成。 */
-export function ArenaWebReport({ content, ready, roomId, aiModel, aiUsage, children }: WebReportMetadata & {
+export function ArenaWebReport({ content, ready, roomId, aiModel, aiUsage, displayTitle, children }: WebReportMetadata & {
   content: string;
   ready: boolean;
   roomId?: string;
+  /** 上游解析好的显示标题；缺省时按同一 resolver 从内容尽力解析。 */
+  displayTitle?: string | null;
   children: (webContent: ReactNode | undefined, actions: ReactNode) => ReactNode;
 }) {
   const { accepted, accept } = useWebConsent(roomId);
@@ -308,6 +312,10 @@ export function ArenaWebReport({ content, ready, roomId, aiModel, aiUsage, child
   const nativeFullscreenRequestedRef = useRef(false);
   const normalizedOutput = useMemo(() => normalizeArenaWebOutput(content), [content]);
   const webDocument = normalizedOutput.document;
+  const resolvedDisplayTitle = useMemo(
+    () => displayTitle?.trim() || resolveWebDisplayTitle({ html: content }),
+    [displayTitle, content],
+  );
   useEffect(() => {
     if (ready && webDocument && !accepted && !asked) {
       setAsked(true);
@@ -397,7 +405,7 @@ export function ArenaWebReport({ content, ready, roomId, aiModel, aiUsage, child
     if (!ready || !webDocument) return;
     // BOM 确保缺少 charset 声明的生成文档在本地打开时仍按 UTF-8 解码。
     const blob = new Blob(['\uFEFF', webDocument], { type: 'text/html;charset=utf-8' });
-    downloadBlob(blob, `魔法少女速报_${new Date().toISOString().replace(/[:.]/g, '-')}.html`);
+    downloadBlob(blob, buildSafeFileName(`魔法少女速报_${resolvedDisplayTitle}`, 'html', '魔法少女速报'));
   };
   return (
     <>

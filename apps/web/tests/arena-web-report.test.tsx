@@ -200,7 +200,7 @@ describe('Web 战报的本地执行许可', () => {
     expect(downloadBlob).toHaveBeenCalledOnce();
     const [blob, filename] = vi.mocked(downloadBlob).mock.calls[0];
     expect(blob.type).toBe('text/html;charset=utf-8');
-    expect(filename).toMatch(/^魔法少女速报_[\dT-]+Z\.html$/);
+    expect(filename).toMatch(/^魔法少女速报_Web战报_\d{4}-\d{2}-\d{2}_\d{4}\.html$/);
     const downloaded = await new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(reader.result as string);
@@ -216,6 +216,44 @@ describe('Web 战报的本地执行许可', () => {
     await act(async () => root.render(viewer('download', false, content)));
     await click('🌐 下载 HTML');
     expect(downloadBlob).toHaveBeenCalledTimes(2);
+  });
+
+  it('下载 HTML 使用上游 displayTitle，并保留 Unicode 标题', async () => {
+    window.localStorage.setItem('arena.web-report-consent.v1.room.download-title', 'accepted');
+    await act(async () => root.render(
+      <ArenaWebReport key="download-title" roomId="download-title" ready content={source} displayTitle="月下决战：白百合与黑曜">
+        {(web, actions) => <section>
+          {web ?? <div data-testid="ordinary">{source}</div>}
+          <div className="buttons-container">{actions}</div>
+        </section>}
+      </ArenaWebReport>
+    ));
+    await click('🌐 下载 HTML');
+    expect(vi.mocked(downloadBlob).mock.calls[0]?.[1]).toBe('魔法少女速报_月下决战：白百合与黑曜.html');
+  });
+
+  it('缺省 displayTitle 时按静态 <title> 命名下载文件', async () => {
+    window.localStorage.setItem('arena.web-report-consent.v1.room.title-fallback', 'accepted');
+    const titled = '<!doctype html><html><head><title>月下决战：白百合与黑曜</title></head><body>x</body></html>';
+    await act(async () => root.render(viewer('title-fallback', true, titled)));
+    await click('🌐 下载 HTML');
+    expect(vi.mocked(downloadBlob).mock.calls[0]?.[1]).toBe('魔法少女速报_月下决战：白百合与黑曜.html');
+  });
+
+  it('BattleResultPresentation 用 headline 解析出的显示标题命名下载文件', async () => {
+    window.localStorage.setItem('arena.web-report-consent.v1.room.presentation-title', 'accepted');
+    await act(async () => root.render(
+      <BattleResultPresentation report={{
+        format: 'stream-web',
+        content: source,
+        webReady: true,
+        webConsentScope: 'presentation-title',
+        headline: '月下决战',
+        scenarioName: '雨夜车站',
+      }} />
+    ));
+    await click('🌐 下载 HTML');
+    expect(vi.mocked(downloadBlob).mock.calls[0]?.[1]).toBe('魔法少女速报_月下决战.html');
   });
 
   it('预览附加滚动条样式而下载保留 canonical HTML，前后附言默认折叠但可展开', async () => {

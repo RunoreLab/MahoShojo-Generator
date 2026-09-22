@@ -1,6 +1,6 @@
 'use client';
 
-import type { ReactNode } from 'react';
+import { useMemo, type ReactNode } from 'react';
 
 import BattleReportCard, {
   type BattleReportIllustrationAsset,
@@ -9,6 +9,7 @@ import BattleReportCard, {
 import { CollapsibleSection } from '@/components/shared/CollapsibleSection';
 import StreamingBattleReportCard from '@/components/stream/StreamingBattleReportCard';
 import { resolveAdjudicationOutcomeTone } from '@/lib/adjudicator/presentation';
+import { resolveBattleReportDisplayTitle } from '@/lib/arena/battle-report-display-title';
 import type { AIReasoningEnvelope } from '@/types/ai-reasoning';
 import type { AdjudicationResult } from '@/types/arena';
 import { ArenaWebReport } from './ArenaWebReport';
@@ -21,6 +22,8 @@ export type BattleResultStreamingPresentation = {
   readonly webConsentScope?: string;
   readonly webReady?: boolean;
   readonly content: string;
+  /** 机器元数据中的权威标题；缺失时显示标题走内容/上下文 fallback。 */
+  readonly headline?: string | null;
   readonly isStreaming?: boolean;
   readonly mode?: ArenaBattleMode;
   readonly scenarioName?: string;
@@ -172,6 +175,17 @@ function StreamingResult({ report, onSaveImage, adjudicationResults }: {
   onSaveImage?: BattleResultPresentationProps['onSaveImage'];
   adjudicationResults?: BattleResultPresentationProps['adjudicationResults'];
 }) {
+  const isWebFormat = report.format !== 'stream-markdown';
+  const displayTitle = useMemo(() => (
+    isWebFormat
+      ? resolveBattleReportDisplayTitle({
+          headline: report.headline,
+          content: report.content,
+          contextLabel: report.scenarioName,
+          mode: report.mode,
+        })
+      : null
+  ), [isWebFormat, report.headline, report.content, report.scenarioName, report.mode]);
   const renderCard = (webContent?: ReactNode, actions?: ReactNode) => (
     <StreamingBattleReportCard
       content={report.content}
@@ -201,7 +215,7 @@ function StreamingResult({ report, onSaveImage, adjudicationResults }: {
   return report.format === 'stream-markdown' ? renderCard() : (
     <ArenaWebReport key={report.webConsentScope ?? 'single'} content={report.content}
       ready={report.webReady === true && !report.isStreaming} roomId={report.webConsentScope}
-      aiModel={report.aiModel} aiUsage={report.aiUsage}>
+      aiModel={report.aiModel} aiUsage={report.aiUsage} displayTitle={displayTitle}>
       {renderCard}
     </ArenaWebReport>
   );

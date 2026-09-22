@@ -32,6 +32,7 @@ type DetailResponse = {
     language: string | null;
     storyLength: string | null;
     headline: string | null;
+    displayTitle: string;
     winner: string | null;
     outputPreview: string | null;
     hasPreview: boolean;
@@ -92,7 +93,7 @@ export function BattleReportDetailsModal({ isOpen, generationId, onClose, onRege
     <BaseModal
       isOpen={isOpen}
       onClose={onClose}
-      title={record?.headline || '战报详情'}
+      title={record?.displayTitle || record?.headline || '战报详情'}
       description={record ? `generationId：${record.id}` : undefined}
       maxWidthClassName="max-w-5xl"
       footer={

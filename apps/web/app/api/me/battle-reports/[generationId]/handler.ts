@@ -2,6 +2,7 @@ import {
   getBattleReportGenerationByIdLite,
   updateBattleReportGenerationOutputHasSensitiveWords,
 } from '@/lib/database/battle-report-generations';
+import { resolveBattleReportDisplayTitle } from '@/lib/arena/battle-report-display-title';
 import {
   extractBattleReportGenerationErrorMessage,
   loadBattleReportGenerationOutputText,
@@ -75,6 +76,12 @@ async function handler(req: Request): Promise<Response> {
       language: record.language,
       storyLength: record.story_length,
       headline: record.headline,
+      displayTitle: resolveBattleReportDisplayTitle({
+        headline: record.headline,
+        content: contentBlocked ? null : outputPreview,
+        contextLabel: record.scenario_title,
+        mode: record.mode,
+      }),
       winner: record.winner,
       outputPreview: contentBlocked ? null : outputPreview,
       hasPreview: Boolean(outputPreview && outputPreview.trim()) && !contentBlocked,

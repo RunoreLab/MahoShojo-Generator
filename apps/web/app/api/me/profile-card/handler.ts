@@ -21,6 +21,7 @@ import {
   type UserTopDataCardRow,
 } from '@/lib/database/data-cards';
 import { applyQueenTier, computeArenaBaseTier } from '@/lib/arena/tier';
+import { resolveBattleReportDisplayTitle } from '@/lib/arena/battle-report-display-title';
 import { getDrizzleDbFromRuntime } from '@/lib/db/drizzle';
 import {
   getDataCardMetricsByDataCardIds,
@@ -121,6 +122,7 @@ type BattleReportLite = {
   status: string;
   mode: string;
   headline: string | null;
+  displayTitle: string;
   winner: string | null;
   promptTokens: number | null;
   reasoningTokens: number | null;
@@ -439,6 +441,12 @@ const handler = withPvpErrorBoundary(async function handler(req: Request): Promi
     status: r.status,
     mode: r.mode,
     headline: r.headline,
+    displayTitle: resolveBattleReportDisplayTitle({
+      headline: r.headline,
+      content: r.output_has_sensitive_words ? null : r.output_preview,
+      contextLabel: r.scenario_title,
+      mode: r.mode,
+    }),
     winner: r.winner,
     promptTokens: r.prompt_tokens ?? null,
     reasoningTokens: r.reasoning_tokens ?? null,

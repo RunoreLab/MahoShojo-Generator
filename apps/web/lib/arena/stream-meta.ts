@@ -120,8 +120,9 @@ export interface StreamUpdateImpact {
   currentStateSummary?: string;
 }
 
-export type NormalizedStreamUpdateMeta = Omit<StreamUpdateMeta, 'impacts'> & {
+export type NormalizedStreamUpdateMeta = Omit<StreamUpdateMeta, 'impacts' | 'report'> & {
   impacts?: StreamUpdateImpact[];
+  report?: { headline?: string; winner?: string };
 };
 
 export interface ExtractedStreamMeta {

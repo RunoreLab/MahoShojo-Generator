@@ -4,6 +4,7 @@ import {
   getBattleReportGenerationsByUserIdLite,
   type BattleReportGenerationsListFilter,
 } from '@/lib/database/battle-report-generations';
+import { resolveBattleReportDisplayTitle } from '@/lib/arena/battle-report-display-title';
 import { extractBattleReportGenerationErrorMessage } from '@/lib/arena/battle-report-record-utils';
 import { json, requireAuthUser } from '@/lib/pvp/server';
 
@@ -73,6 +74,12 @@ async function handler(req: Request): Promise<Response> {
       generationMode: r.generation_mode,
       mode: r.mode,
       headline: r.headline,
+      displayTitle: resolveBattleReportDisplayTitle({
+        headline: r.headline,
+        content: contentBlocked ? null : outputPreview,
+        contextLabel: r.scenario_title,
+        mode: r.mode,
+      }),
       winner: r.winner,
       hasPreview: Boolean(outputPreview && outputPreview.trim()) && !contentBlocked,
       canRegenerate: !contentBlocked && (r.status === 'completed' || Boolean(outputPreview && outputPreview.trim())),

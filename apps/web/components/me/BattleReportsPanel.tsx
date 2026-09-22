@@ -15,6 +15,7 @@ type BattleReportRecordSummary = {
   generationMode: string;
   mode: string;
   headline: string | null;
+  displayTitle: string | null;
   winner: string | null;
   hasPreview: boolean;
   canRegenerate: boolean;
@@ -427,7 +428,7 @@ export function BattleReportsPanel({ isAuthenticated, onOpenDetails, onRegenerat
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
                           <div className="truncate font-semibold text-gray-900">
-                            {r.headline || '（无标题）'}
+                            {r.displayTitle || r.headline || '（无标题）'}
                           </div>
                           {r.contentBlocked ? (
                             <span className="rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-[11px] text-red-800">

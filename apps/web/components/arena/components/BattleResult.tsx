@@ -159,6 +159,7 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
                 format: resultReportFormat === 'web' ? 'stream-web' : 'stream-markdown',
                 webReady: resultWebReady,
                 content: streamingMarkdown ?? '',
+                headline: streamUpdateMetaDebug?.meta?.report?.headline ?? null,
                 mode: battleMode,
                 scenarioName: scenarioDisplayName,
                 reporterInfo: streamReporterInfo,
@@ -186,6 +187,7 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
               ? {
                   format: 'web-document',
                   content: newsReport.webHtml ?? newsReport.article.body,
+                  headline: newsReport.headline ?? null,
                   webReady: resultWebReady,
                   isStreaming: false,
                   mode: battleMode,

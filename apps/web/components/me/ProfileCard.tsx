@@ -85,6 +85,7 @@ type BattleReportLite = {
   status: string;
   mode: string;
   headline: string | null;
+  displayTitle: string;
   winner: string | null;
   promptTokens: number | null;
   reasoningTokens: number | null;
@@ -671,7 +672,7 @@ export function ProfileCard({
                       <div className="text-[11px] text-white/80">{formatDateTime(r.startedAt)}</div>
                     </div>
                     <div className="mt-1 text-xs text-white/90 break-words">
-                      {r.contentBlocked ? '（内容已屏蔽）' : r.headline || '（无标题）'}
+                      {r.contentBlocked ? '（内容已屏蔽）' : r.displayTitle || r.headline || '（无标题）'}
                     </div>
                     <div className="mt-1 text-[11px] text-white/85">
                       胜利者：{r.winner || '—'}
