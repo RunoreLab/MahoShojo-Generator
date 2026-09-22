@@ -65,6 +65,7 @@ const generationRequestId = `request-generation-durable-${token}`;
 const actorKey = `pvp-room:${roomId}`;
 const objects = new Map<string, string>();
 const generationRows = new Map<string, Record<string, unknown>>();
+const participantRows = new Map<string, Map<number, string | null>>();
 const objectRows = new Map<string, Record<string, unknown>>();
 const cleanupClient = createClient({ url: redisUrl });
 cleanupClient.on('error', () => undefined);
@@ -88,6 +89,18 @@ const createVerifierD1Adapter = (): NodeDataD1Client => ({
         return d1Statement;
       },
       async all() {
+        if (sql.includes('FROM battle_report_generation_participants')) {
+          const participantGenerationId = String(parameters[0] ?? '');
+          const limit = Number(parameters[1] ?? 0);
+          const boundedLimit = Number.isFinite(limit) && limit > 0
+            ? limit
+            : Number.POSITIVE_INFINITY;
+          const rows = [...(participantRows.get(participantGenerationId)
+            ?? new Map<number, string | null>())]
+            .slice(0, boundedLimit)
+            .map(([userId, role]) => ({ user_id: userId, role }));
+          return { success: true, results: rows, meta: {} };
+        }
         const generationId = String(parameters[0] ?? '');
         const generation = generationRows.get(generationId);
         if (sql.includes('FROM battle_report_generations\nWHERE id = ?')) {
@@ -173,6 +186,26 @@ const createVerifierD1Adapter = (): NodeDataD1Client => ({
         }
         if (sql.includes('INSERT INTO battle_report_generation_combatants')) {
           return { success: true, results: [], meta: { changes: 1 } };
+        }
+        if (sql.includes('INSERT INTO battle_report_generation_participants')) {
+          let changes = 0;
+          for (let index = 0; index + 2 < parameters.length; index += 3) {
+            const participantGenerationId = String(parameters[index] ?? '');
+            const userId = Number(parameters[index + 1]);
+            const role = typeof parameters[index + 2] === 'string'
+              ? parameters[index + 2] as string
+              : null;
+            let rows = participantRows.get(participantGenerationId);
+            if (!rows) {
+              rows = new Map<number, string | null>();
+              participantRows.set(participantGenerationId, rows);
+            }
+            if (!rows.has(userId)) {
+              rows.set(userId, role);
+              changes += 1;
+            }
+          }
+          return { success: true, results: [], meta: { changes } };
         }
         throw new Error('ROOM_GENERATION_DURABLE_D1_WRITE_UNEXPECTED');
       },
@@ -648,6 +681,16 @@ try {
     || await terminalStore.readOwnedTerminal({ generationId, actorKey: `${actorKey}:other` }) !== null
   ) throw new Error('ROOM_GENERATION_DURABLE_D1_R2_AUTHORITY_INVALID');
 
+  const persistedParticipants = participantRows.get(generationId);
+  const persistedParticipantRoles = persistedParticipants
+    ? Object.fromEntries([...persistedParticipants])
+    : {};
+  if (
+    persistedParticipants?.size !== 2
+    || persistedParticipants.get(101) !== 'host'
+    || persistedParticipants.get(202) !== 'member'
+  ) throw new Error('ROOM_GENERATION_DURABLE_PARTICIPANTS_INVALID');
+
   activeRecoveredActors.forceClose();
   activeRecoveredActors = null;
   await runtime.close();
@@ -730,6 +773,7 @@ try {
     roomTerminal: roomTerminal?.snapshot.activeGeneration?.state,
     d1R2TerminalFallback: true,
     ownerMismatchHidden: true,
+    persistedParticipants: persistedParticipantRoles,
     terminalRecoveryEpoch: recoveredView.roomEpoch,
     realFinalizerRuns: finalizerRuns,
     duplicateFinalizationIdempotent: finalizerRuns === 2,
