@@ -1260,7 +1260,11 @@ export const createNodeArenaGenerationTerminalStore = (
       const status = logicalTerminalStatus(existing, extra);
       if (!status) throw new Error('ARENA_TERMINAL_STATUS_INVALID');
       if (extra.finalizationCompleted !== true) {
-        await persistArenaGenerationParticipants(client, input.generationId, extra.arenaMultiplayer);
+        await persistArenaGenerationParticipants(
+          client,
+          input.generationId,
+          extra.arenaMultiplayer ?? input.multiplayerParticipation,
+        );
         await persistFallbackCombatants({
           client,
           generationId: input.generationId,

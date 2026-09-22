@@ -1493,6 +1493,7 @@ ORDER BY user_id
       result([], 1),
       result([], 1),
       result([], 1),
+      result([], 1),
       result([{
         id: 'generation-1',
         status: 'completed',
@@ -1516,6 +1517,12 @@ ORDER BY user_id
       mode: 'classic',
       updatedAt: '2026-08-25T04:01:00.000Z',
       code: 'PRODUCER_LEASE_EXPIRED',
+      multiplayerParticipation: {
+        roomId: 'room-1',
+        participantUserIds: [42, 99],
+        hostAccountUserId: 42,
+        collaborativeInfluence: true,
+      },
     })).resolves.toMatchObject({
       status: 'completed',
       resultRef: 'r2:key',
