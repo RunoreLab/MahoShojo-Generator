@@ -409,7 +409,13 @@ describe('Arena Room generation internal port', () => {
     })).resolves.toEqual({ kind: 'unavailable', code: 'GENERATION_STATE_UNAVAILABLE' });
   });
 
-  it('strictly projects only the completed durable Room-safe result allowlist', async () => {
+  it.each(['markdown', 'package'])('strictly projects only the completed durable Room-safe result allowlist (%s)', async (format) => {
+    const packageFields = format === 'package' ? {
+      webPackage: {
+        packageRef: { id: 'mahoshojo.visual-novel-lite', version: '1.0.0', digest: `sha256:${'a'.repeat(64)}` },
+        targetPath: 'data/report.json', targetMediaType: 'application/json' as const, generatedDigest: `sha256:${'b'.repeat(64)}`,
+      },
+    } : {};
     const generationService = {
       readOwnedProjection: vi.fn(async () => ({
         kind: 'found' as const,
@@ -426,7 +432,8 @@ describe('Arena Room generation internal port', () => {
           errorCode: null,
           roomSafeResult: {
             version: 1,
-            format: 'stream-markdown',
+            format: format === 'package' ? 'stream-web' : 'stream-markdown',
+            ...packageFields,
             mode: 'classic',
             reporterInfo: { name: '测试记者', publication: 'A.R.E.N.A.' },
             report: { headline: '安全标题' },
@@ -457,7 +464,8 @@ describe('Arena Room generation internal port', () => {
         status: 'completed',
         roomSafeResult: {
           version: 1,
-          format: 'stream-markdown',
+          format: format === 'package' ? 'stream-web' : 'stream-markdown',
+          ...packageFields,
           mode: 'classic',
           reporterInfo: { name: '测试记者', publication: 'A.R.E.N.A.' },
           report: { headline: '安全标题' },

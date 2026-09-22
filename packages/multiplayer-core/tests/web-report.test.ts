@@ -5,6 +5,40 @@ import { collaborativeChangeTarget, hasCollaborativeChangeEffect } from '../src/
 import { baseConfig, proposal } from './state-machine-fixtures';
 
 describe('Web report room semantics', () => {
+  const ref = { id: 'runorelab.visual-novel-lite', version: '1.0.0', digest: `sha256:${'a'.repeat(64)}` };
+
+  it('projects only Package identity and groups format changes with Package selection', () => {
+    const base = baseConfig();
+    const working = { ...base, reportFormat: 'web' as const, webPackageRef: ref };
+    const projected = buildArenaRoomSharedConfig({ ...working, webPackageRef: { ...ref, secret: 'omit' } } as typeof working);
+    expect(projected.webPackageRef).toEqual(ref);
+    const changes = diffArenaSharedConfig(base, working);
+    expect(changes.map((change) => change.type)).toEqual(['setReportFormat', 'setWebPackageRef']);
+    expect(changes.map((change) => change.atomicGroupId)).toEqual(['web-package-format', 'web-package-format']);
+    const applied = applyArenaProposal({ roomId: 'room-1', config: base, revision: 1 }, proposal(changes));
+    expect(applied).toMatchObject({ status: 'accepted', revision: 2, config: working });
+    expect(base).not.toHaveProperty('webPackageRef');
+    expect(collaborativeChangeTarget(changes[1]!)).toBe('web-package');
+    expect(hasCollaborativeChangeEffect(working, changes[1]!)).toBe(true);
+    expect(hasCollaborativeChangeEffect(base, changes[1]!)).toBe(false);
+    const restored = applyArenaProposal({ roomId: 'room-1', config: working, revision: 2 }, proposal(diffArenaSharedConfig(working, base)));
+    expect(restored).toMatchObject({ status: 'accepted', revision: 3, config: base });
+    expect(restored.config).not.toHaveProperty('webPackageRef');
+  });
+
+  it('treats digest changes as conflicts and retains immutable proposal values', () => {
+    const base = { ...baseConfig(), reportFormat: 'web' as const, webPackageRef: ref };
+    const next = { ...base, webPackageRef: { ...ref, digest: `sha256:${'b'.repeat(64)}` } };
+    const changes = diffArenaSharedConfig(base, next);
+    expect(changes).toMatchObject([{ type: 'setWebPackageRef', expectedBase: { value: ref } }]);
+    const current = { ...base, webPackageRef: { ...ref, digest: `sha256:${'c'.repeat(64)}` } };
+    const applied = applyArenaProposal({ roomId: 'room-1', config: current, revision: 3 }, proposal(changes));
+    expect(applied.config).toEqual(current);
+    expect(applied.conflicts).toHaveLength(1);
+    next.webPackageRef.digest = `sha256:${'d'.repeat(64)}`;
+    expect(changes[0]).toMatchObject({ value: { digest: `sha256:${'b'.repeat(64)}` } });
+  });
+
   it('projects legacy configs as Markdown and publishes Web explicitly', () => {
     const legacy = { ...baseConfig(), reportFormat: undefined };
     expect(buildArenaRoomSharedConfig(legacy).reportFormat).toBe('markdown');

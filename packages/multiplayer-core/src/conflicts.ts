@@ -87,6 +87,7 @@ const proposedSemanticValue = (change: ArenaProposalChange): SemanticValue => {
     case 'reorderTeamCombatants':
       return value(change.value);
     case 'setReportFormat':
+    case 'setWebPackageRef':
     case 'setBattleMode':
       return value(change.value);
     case 'setSelectedLanguage':
@@ -152,6 +153,8 @@ const currentSemanticValue = (config: ArenaRoomSharedConfig, change: ArenaPropos
     }
     case 'setReportFormat':
       return value(config.reportFormat);
+    case 'setWebPackageRef':
+      return value(config.webPackageRef ?? null);
     case 'setBattleMode':
       return value(config.battleMode);
     case 'setSelectedLanguage':
@@ -200,6 +203,7 @@ const targetOf = (change: ArenaProposalChange): string => {
     case 'reorderTeams': return 'teams:order';
     case 'reorderTeamCombatants': return `team:${change.teamKey}:combatants:order`;
     case 'setReportFormat': return 'reportFormat';
+    case 'setWebPackageRef': return 'webPackageRef';
     case 'setBattleMode': return 'battleMode';
     case 'setSelectedLanguage': return 'selectedLanguage';
     case 'setScenario': return 'scenario';

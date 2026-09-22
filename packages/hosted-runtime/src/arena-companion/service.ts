@@ -6,6 +6,7 @@ import {
 } from '@mahoshojo/hosted-api/arena-generation/service';
 import { parseArenaStructuredReportJson } from '../arena-generation/structured-report';
 import { normalizeUsage } from '../node-runtime/usage';
+import { WebPackageArtifactSchema, type WebPackageArtifact } from '@mahoshojo/contracts/web-package';
 
 export const ARENA_COMPANION_OPERATION_HEADER = 'x-mahoshojo-arena-companion-operation';
 export const ARENA_COMPANION_PLACEMENT_HEADER = 'x-mahoshojo-arena-execution-placement';
@@ -238,6 +239,7 @@ type CollectedGeneration = {
   terminalErrorMessage: string | null;
   completed: boolean;
   occurredAt: string | null;
+  webPackage?: WebPackageArtifact;
 };
 
 const occurredAtFromEventId = (id: string): string | null => {
@@ -263,6 +265,7 @@ const collectSubscription = async (
   let terminalErrorMessage: string | null = null;
   let completed = false;
   let occurredAt: string | null = null;
+  let webPackage: WebPackageArtifact | undefined;
   const reader = subscription.events.getReader();
   try {
     while (true) {
@@ -270,6 +273,10 @@ const collectSubscription = async (
       if (next.done) break;
       const event = next.value;
       const data = eventData(event);
+      if (event.type === 'meta' || event.type === 'done') {
+        const artifact = WebPackageArtifactSchema.safeParse(data.webPackage);
+        if (artifact.success) webPackage = artifact.data;
+      }
       occurredAt ??= occurredAtFromEventId(event.id);
       if (event.type === 'markdown') markdown += rawTextOf(data.chunk);
       if (event.type === 'reasoning') reasoning += rawTextOf(data.chunk);
@@ -305,6 +312,7 @@ const collectSubscription = async (
     terminalErrorMessage,
     completed,
     occurredAt,
+    ...(webPackage ? { webPackage } : {}),
   };
 };
 
@@ -389,7 +397,7 @@ export const createArenaCompanionService = (
     }
 
     const headerMeta = parseHeaderMeta(upstream.headers);
-    const isWeb = headerMeta.outputContract === 'web-document';
+    const isWeb = headerMeta.outputContract === 'web-document' || Boolean(collected.webPackage);
     const writeArenaHistory = booleanOf(payload.writeArenaHistory, true);
     const writeCurrentState = booleanOf(payload.writeCurrentState, true);
     const structuredReport = isWeb ? null : parseArenaStructuredReportJson(collected.markdown, {
@@ -425,7 +433,8 @@ export const createArenaCompanionService = (
     const mode = textOf(payload.mode) || 'classic';
     const report: Record<string, unknown> = {
       ...(structuredReport ?? {}),
-      ...(isWeb ? { reportFormat: 'web', webHtml: collected.markdown } : {}),
+      ...(isWeb ? { reportFormat: 'web', ...(collected.webPackage
+        ? { webPackage: collected.webPackage } : { webHtml: collected.markdown }) } : {}),
       headline,
       reporterInfo,
       article: {

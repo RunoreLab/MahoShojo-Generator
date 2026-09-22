@@ -29,6 +29,7 @@ import { ArenaContractError } from './errors';
 import { SharedHistorySettingsSchema, TeamAssignmentSchema } from './shared-config';
 import { PROPOSAL_VERSION } from './versions';
 import { jsonUtf8ByteLength } from './wire-size';
+import { WebPackageRefSchema } from './web-package';
 
 const ChangeIdSchema = z.string().trim().min(1).max(MAX_OPAQUE_KEY_LENGTH);
 const AtomicGroupIdSchema = z.string().trim().min(1).max(MAX_OPAQUE_KEY_LENGTH);
@@ -243,6 +244,12 @@ export const SetReportFormatChangeSchema = change({
   expectedBase: ValueExpectedBaseSchema(ArenaReportFormatSchema),
 });
 
+export const SetWebPackageRefChangeSchema = change({
+  type: z.literal('setWebPackageRef'),
+  value: WebPackageRefSchema.nullable(),
+  expectedBase: ValueExpectedBaseSchema(WebPackageRefSchema.nullable()),
+});
+
 export const SetBattleModeChangeSchema = change({
   type: z.literal('setBattleMode'),
   value: BattleModeSchema,
@@ -345,6 +352,7 @@ export const ArenaProposalChangeSchema = z.discriminatedUnion('type', [
   ReorderAuxScenariosChangeSchema,
   ReorderMaterialsChangeSchema,
   SetReportFormatChangeSchema,
+  SetWebPackageRefChangeSchema,
   SetBattleModeChangeSchema,
   SetSelectedLanguageChangeSchema,
   SetScenarioChangeSchema,

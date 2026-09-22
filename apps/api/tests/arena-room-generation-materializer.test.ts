@@ -143,7 +143,8 @@ const createHarness = () => {
 describe('Arena Room authoritative generation materializer', () => {
   it.each(['markdown', 'web'] as const)('仅从 frozen Shared Config 重建角色/引导/队伍/情景/素材/历史语义 (%s)', async (reportFormat) => {
     const harness = createHarness();
-    const config = { ...sharedConfig(), reportFormat };
+    const webPackageRef = { id: 'mahoshojo.visual-novel-lite', version: '1.0.0', digest: `sha256:${'a'.repeat(64)}` };
+    const config = { ...sharedConfig(), reportFormat, ...(reportFormat === 'web' ? { webPackageRef } : {}) };
     const payload = await harness.materializer.materialize({
       sharedConfig: config,
       hostAccountUserId: 101,
@@ -170,6 +171,7 @@ describe('Arena Room authoritative generation materializer', () => {
     expect(payload).toMatchObject({
       mode: 'scenario',
       reportFormat,
+      ...(reportFormat === 'web' ? { webPackageRef } : {}),
       userGuidance: '接受后的全局引导',
       language: 'ja-JP',
       storyLength: 'long',

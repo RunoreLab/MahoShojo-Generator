@@ -8,7 +8,9 @@ Arena 多人个人历史补全：[参与战报个人历史设计](./specs/2026-0
 
 Arena Web 战报当前规格：[Arena Web 战报生成与沙箱渲染规格](./specs/2026-09-17_080700_Arena%20Web战报生成与沙箱渲染规格.md)。单人（含 `/battle`）支持流式/非流式 HTML，多人沿用服务器权威流式生成；浏览器本地确认后才执行完成的沙箱文档，默认格式仍为 Markdown。
 
-未来若社区形成稳定、重复使用的 Web 玩法，可参考候选调研：[Web 数据卡 Runtime 与媒体资产原生支持设计建议](./reports/2026-09-17_121500_Web数据卡Runtime与媒体资产原生支持设计建议.md)。该文档当前仅记录后续方向，不改变现行 Web V1 规格。
+Web 体验复用采用“不可变 Base Package + AI 单文件 Overlay”，见 [Web Experience Package 决策](./decisions/2026-09-22_142300_WebExperiencePackage上位抽象与单文件Overlay决策.md)与 [V1 架构规格](./specs/2026-09-22_142300_WebExperiencePackageV1架构规格.md)。Phase 1 接入内置 Visual Novel Lite，模型仅接收 Prompt Projection，Package-backed report 仍属于 `reportFormat='web'`；无 Package 的 HTML 生成继续兼容。用户导入、公开分享和 Host Bridge 未实现。
+
+架构演进背景保留在 [Web 数据卡 Runtime 与媒体资产原生支持设计建议](./reports/2026-09-17_121500_Web数据卡Runtime与媒体资产原生支持设计建议.md)。
 
 Arena 提案人工裁决最新入口：[Arena 提案房主逐项覆盖修订](./specs/2026-09-16_164703_Arena提案房主逐项覆盖修订.md)。允许房主逐项采用旧提案值，保留引用/权限/结构校验及覆盖审阅版本保护；不强制成员 rebase。
 

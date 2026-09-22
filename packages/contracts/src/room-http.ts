@@ -35,6 +35,7 @@ import {
 } from './limits';
 import { SafeJsonValueSchema } from './json-value';
 import { BattleReportAdjudicationResultSchema } from './battle-report-render-snapshot';
+import { WebPackageArtifactSchema } from './web-package';
 import {
   RoomDirectoryTitleSchema,
   RoomDirectoryVisibilitySchema,
@@ -246,6 +247,7 @@ const ArenaRoomGenerationUsageSchema = z.object({
 export const ArenaRoomGenerationResultSchema = z.object({
   version: z.literal(1),
   format: z.enum(['stream-markdown', 'stream-web']),
+  webPackage: WebPackageArtifactSchema.optional(),
   reporterInfo: z.object({
     name: z.string().max(300),
     publication: z.string().max(300),
@@ -276,7 +278,9 @@ export const ArenaRoomGenerationResultSchema = z.object({
     impact: z.string().max(2_000).optional(),
     currentStateSummary: z.string().max(2_000).optional(),
   }).strict()).max(MAX_COMBATANTS).optional(),
-}).strict();
+}).strict().refine((result) => !result.webPackage || result.format === 'stream-web', {
+  path: ['webPackage'], message: 'Web Package requires stream-web result format',
+});
 
 export const ArenaRoomGenerationHistoryViewResponseSchema = z.object({
   protocolVersion: z.literal(PROTOCOL_VERSION),

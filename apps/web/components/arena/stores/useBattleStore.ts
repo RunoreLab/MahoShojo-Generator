@@ -2,6 +2,7 @@
 
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { WebPackageRefSchema } from '@mahoshojo/contracts/web-package';
 
 import {
   BattleStoreState,
@@ -151,7 +152,9 @@ export const useBattleStore = create<BattleStoreState>()(
       battleMode: 'classic',
       generationMode: 'stream',
       reportFormat: 'markdown',
+      webPackageRef: null,
       resultReportFormat: 'markdown',
+      resultWebPackage: null,
       resultWebReady: false,
       arenaFreeRankingEnabled: false,
       isStreaming: false,
@@ -188,7 +191,9 @@ export const useBattleStore = create<BattleStoreState>()(
 
       setBattleMode: (mode) => set({ battleMode: mode }),
       setGenerationMode: (mode) => set({ generationMode: mode }),
-      setReportFormat: (reportFormat) => set({ reportFormat }),
+      setReportFormat: (reportFormat) => set((state) => ({ reportFormat, webPackageRef: reportFormat === 'web' ? state.webPackageRef : null })),
+      setWebPackageRef: (webPackageRef) => set({ webPackageRef }),
+      setResultWebPackage: (resultWebPackage) => set({ resultWebPackage }),
       setResultReportFormat: (resultReportFormat) => set({ resultReportFormat }),
       setResultWebReady: (resultWebReady) => set({ resultWebReady }),
       setArenaFreeRankingEnabled: (enabled) => set({ arenaFreeRankingEnabled: enabled }),
@@ -592,6 +597,8 @@ export const useBattleStore = create<BattleStoreState>()(
           ...persistedWithoutDraft,
           adjudicationEvents: restoreArenaAdjudicationDraft(persisted),
           reportFormat: persisted.reportFormat === 'web' ? 'web' : 'markdown',
+          webPackageRef: persisted.reportFormat === 'web' ? WebPackageRefSchema.safeParse(persisted.webPackageRef).data ?? null : null,
+          resultWebPackage: null,
           resultReportFormat: 'markdown',
           resultWebReady: false,
         } as BattleStoreState;
@@ -604,6 +611,7 @@ export const useBattleStore = create<BattleStoreState>()(
         battleMode: state.battleMode,
         generationMode: state.generationMode,
         reportFormat: state.reportFormat,
+        webPackageRef: state.webPackageRef,
         arenaFreeRankingEnabled: state.arenaFreeRankingEnabled,
         storyLength: state.storyLength,
         customStoryLength: state.customStoryLength,

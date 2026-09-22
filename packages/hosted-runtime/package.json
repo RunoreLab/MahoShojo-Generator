@@ -411,6 +411,7 @@
     "@mahoshojo/contracts": "workspace:*",
     "@mahoshojo/domain": "workspace:*",
     "@mahoshojo/hosted-api": "workspace:*",
+    "@mahoshojo/web-package": "workspace:*",
     "ai": "^6.0.184",
     "aws4fetch": "^1.0.20",
     "drizzle-orm": "^0.45.2",

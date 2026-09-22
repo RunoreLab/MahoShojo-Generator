@@ -24,6 +24,7 @@ import { sha256Hex } from '@/lib/crypto';
 export type ArenaRoomBattleStateSource = {
   battleMode: BattleMode;
   reportFormat?: 'markdown' | 'web';
+  webPackageRef?: import('@mahoshojo/contracts/web-package').WebPackageRef | null;
   combatants: Combatant[];
   teams: BattleTeam[];
   scenario: ScenarioState;
@@ -434,6 +435,7 @@ const buildArenaRoomHostWorkspaceBundle = async (
     sharedConfig = buildArenaRoomSharedConfig({
       battleMode: source.battleMode,
       reportFormat: source.reportFormat ?? 'markdown',
+      ...(source.reportFormat === 'web' && source.webPackageRef ? { webPackageRef: source.webPackageRef } : {}),
       combatants,
       teams: source.teams.map((team) => ({
         key: text(team.roomKey) || `team:${team.id}`,

@@ -33,6 +33,7 @@ type MarkdownCodeProps = React.ComponentPropsWithoutRef<'code'> & ExtraProps & {
 export interface NewsReport {
   reportFormat?: 'markdown' | 'web';
   webHtml?: string;
+  webPackage?: import('@mahoshojo/contracts/web-package').WebPackageArtifact;
   webReady?: boolean;
   headline: string;
   scenario?: string;

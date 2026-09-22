@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { BUILTIN_VISUAL_NOVEL_PACKAGE_REF } from '@mahoshojo/web-package';
 
 import {
   ArenaRoomShareabilityError,
@@ -89,6 +90,12 @@ const source = (): ArenaRoomBattleStateSource => ({
 });
 
 describe('Arena Room Battle store projection', () => {
+  it('includes a Web package revision in the shared generation config only in Web mode', async () => {
+    const state = { ...source(), reportFormat: 'web' as const, webPackageRef: BUILTIN_VISUAL_NOVEL_PACKAGE_REF };
+    expect((await buildArenaRoomSharedConfigFromBattleState(state)).webPackageRef).toEqual(BUILTIN_VISUAL_NOVEL_PACKAGE_REF);
+    expect((await buildArenaRoomSharedConfigFromBattleState({ ...state, reportFormat: 'markdown' })).webPackageRef).toBeUndefined();
+  });
+
   it('在 SubtleCrypto 缺失时仍生成兼容的内容摘要', async () => {
     vi.stubGlobal('crypto', {
       getRandomValues: (array: Uint8Array) => array,

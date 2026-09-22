@@ -469,6 +469,7 @@ export const ArenaRoomGenerationResult = ({ state, onSaveImage, onRetryRecovery 
           report={{
             format: generation.result?.format ?? 'stream-markdown',
             webReady: generation.finalAuthoritative && generation.phase === 'completed',
+            webPackage: generation.result?.webPackage,
             webConsentScope: state.session?.roomId,
             content: generation.markdown,
             isStreaming: generation.phase === 'running'

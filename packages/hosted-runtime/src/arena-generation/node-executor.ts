@@ -1,4 +1,6 @@
 import { STRICT_RANKED_MODEL_FALLBACKS } from '@mahoshojo/domain/arena-ranked-model-policy';
+import { WebPackageRefSchema } from '@mahoshojo/contracts/web-package';
+import { resolveWebPackage } from '@mahoshojo/web-package';
 
 import type {
   ArenaGenerationAuditableRejection,
@@ -563,6 +565,19 @@ export const createNodeArenaGenerationExecutor = (
       )({ request, generationRequestId, payload });
       if (payload.reportFormat !== undefined && payload.reportFormat !== 'markdown' && payload.reportFormat !== 'web') {
         return jsonResponse({ code: 'INVALID_REPORT_FORMAT', error: 'reportFormat 无效' }, 400);
+      }
+      if (payload.webPackageRef !== undefined) {
+        if (payload.reportFormat !== 'web' || requestAuditContext.endpoint === 'api/arena/session/generate-next'
+          || trustedPvpContext && !payload.multiplayerGenerationSnapshot) {
+          return jsonResponse({ code: 'ARENA_WEB_PACKAGE_REQUIRES_WEB', error: 'Web Package 仅用于 Arena Web 战报' }, 400);
+        }
+        const ref = WebPackageRefSchema.safeParse(payload.webPackageRef);
+        if (!ref.success) return jsonResponse({ code: 'ARENA_WEB_PACKAGE_INVALID', error: 'Web Package 引用无效' }, 400);
+        try {
+          await resolveWebPackage(ref.data);
+        } catch {
+          return jsonResponse({ code: 'ARENA_WEB_PACKAGE_UNAVAILABLE', error: 'Web Package revision 不可用' }, 400);
+        }
       }
       const normalized = clonePayload(payload);
       normalizeLegacyPayloadDefaults(normalized);

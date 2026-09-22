@@ -37,6 +37,7 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
   const newsReport = useBattleSelector((state) => state.newsReport);
   const resultReportFormat = useBattleSelector((state) => state.resultReportFormat);
   const resultWebReady = useBattleSelector((state) => state.resultWebReady);
+  const resultWebPackage = useBattleSelector((state) => state.resultWebPackage);
   const generationMode = useBattleSelector((state) => state.generationMode);
   const streamingMarkdown = useBattleSelector((state) => state.streamingMarkdown);
   const streamReporterInfo = useBattleSelector((state) => state.streamReporterInfo);
@@ -158,6 +159,7 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
             ? {
                 format: resultReportFormat === 'web' ? 'stream-web' : 'stream-markdown',
                 webReady: resultWebReady,
+                webPackage: resultWebPackage,
                 content: streamingMarkdown ?? '',
                 headline: streamUpdateMetaDebug?.meta?.report?.headline ?? null,
                 mode: battleMode,
@@ -187,6 +189,7 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
               ? {
                   format: 'web-document',
                   content: newsReport.webHtml ?? newsReport.article.body,
+                  webPackage: newsReport.webPackage,
                   headline: newsReport.headline ?? null,
                   webReady: resultWebReady,
                   isStreaming: false,

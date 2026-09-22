@@ -403,6 +403,23 @@ describe('Arena D1/R2 finalization ports', () => {
       .toEqual({ version: 1, reportFormat: 'web' });
   });
 
+  it('preserves package identity and overlay digest through compact snapshot and room replay', async () => {
+    const webPackage = {
+      packageRef: { id: 'mahoshojo.visual-novel-lite', version: '1.0.0', digest: `sha256:${'a'.repeat(64)}` },
+      targetPath: 'data/report.json', targetMediaType: 'application/json', generatedDigest: `sha256:${'b'.repeat(64)}`,
+    };
+    const client = sequentialD1([result([], 1)]);
+    const ports = createNodeArenaGenerationFinalizationPorts({ getD1Client: () => client });
+    await ports.claimTerminal({
+      ...claimInput,
+      metadata: { outputContract: 'web-document', webPackage, userGuidance: '长'.repeat(60_000) },
+    });
+    const snapshot = JSON.parse(client.boundCalls[0]?.[44] as string).battleReportRenderSnapshotV1;
+    expect(snapshot).toEqual({ version: 1, reportFormat: 'web', webPackage });
+    expect(await readRoomSafeResult({ battleReportRenderSnapshotV1: snapshot }))
+      .toMatchObject({ format: 'stream-web', webPackage });
+  });
+
   it('Web 缺失 meta 时不得从 HTML 中的 Markdown 片段猜测权威结果', async () => {
     const client = sequentialD1([result([], 1)]);
     const ports = createNodeArenaGenerationFinalizationPorts({ getD1Client: () => client });

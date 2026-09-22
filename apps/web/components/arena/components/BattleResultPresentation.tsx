@@ -21,6 +21,7 @@ export type BattleResultStreamingPresentation = {
   readonly format: 'stream-markdown' | 'stream-web' | 'web-document';
   readonly webConsentScope?: string;
   readonly webReady?: boolean;
+  readonly webPackage?: import('@mahoshojo/contracts/web-package').WebPackageArtifact | null;
   readonly content: string;
   /** 机器元数据中的权威标题；缺失时显示标题走内容/上下文 fallback。 */
   readonly headline?: string | null;
@@ -214,6 +215,7 @@ function StreamingResult({ report, onSaveImage, adjudicationResults }: {
   );
   return report.format === 'stream-markdown' ? renderCard() : (
     <ArenaWebReport key={report.webConsentScope ?? 'single'} content={report.content}
+      webPackage={report.webPackage}
       ready={report.webReady === true && !report.isStreaming} roomId={report.webConsentScope}
       aiModel={report.aiModel} aiUsage={report.aiUsage} displayTitle={displayTitle}>
       {renderCard}

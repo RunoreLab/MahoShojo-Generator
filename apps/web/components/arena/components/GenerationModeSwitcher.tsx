@@ -11,6 +11,8 @@ export function GenerationModeSwitcher({ showReportFormat = false }: { showRepor
   const setGenerationMode = useBattleSelector((state) => state.setGenerationMode);
   const reportFormat = useBattleSelector((state) => state.reportFormat);
   const setReportFormat = useBattleSelector((state) => state.setReportFormat);
+  const webPackageRef = useBattleSelector((state) => state.webPackageRef);
+  const setWebPackageRef = useBattleSelector((state) => state.setWebPackageRef);
   const isGenerating = useBattleSelector((state) => state.isGenerating);
 
   return (
@@ -21,7 +23,7 @@ export function GenerationModeSwitcher({ showReportFormat = false }: { showRepor
         disabled={isGenerating}
         onChange={(mode) => setGenerationMode(mode as GenerationMode)}
       />
-      {showReportFormat ? <ArenaReportFormatSelector value={reportFormat} onChange={setReportFormat} disabled={isGenerating} /> : null}
+      {showReportFormat ? <ArenaReportFormatSelector value={reportFormat} onChange={setReportFormat} webPackageRef={webPackageRef} onWebPackageChange={setWebPackageRef} disabled={isGenerating} /> : null}
     </>
   );
 }

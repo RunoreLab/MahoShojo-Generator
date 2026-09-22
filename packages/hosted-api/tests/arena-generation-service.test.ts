@@ -349,6 +349,42 @@ const createService = (
 });
 
 describe('Arena generation lifecycle service', () => {
+  test('preserves package artifact for live, retained and durable snapshot replay without redispatch', async () => {
+    const webPackage = {
+      packageRef: { id: 'mahoshojo.visual-novel-lite', version: '1.0.0', digest: `sha256:${'a'.repeat(64)}` },
+      targetPath: 'data/report.json', targetMediaType: 'application/json' as const, generatedDigest: `sha256:${'b'.repeat(64)}`,
+    };
+    const content = ' {"title":"测试","scenes":[{"text":"故事"}]}\n';
+    const execute = vi.fn(async ({ emit }) => {
+      await emit({ type: 'markdown', data: { chunk: content } });
+      return { status: 'completed' as const, resultRef: 'r2:package', webPackage };
+    });
+    const service = createService(new MemoryReplayStore(), { execute });
+    const live = await service.create(createRequest('request-package'));
+    const liveText = await live.text();
+    const retained = await service.create(createRequest('request-package'));
+    for (const body of [liveText, await retained.text()]) {
+      expect(body).toContain(JSON.stringify(webPackage));
+      expect(body).toContain('event: done');
+    }
+    expect(execute).toHaveBeenCalledOnce();
+
+    const unavailable = new MemoryReplayStore();
+    unavailable.reserveUnavailable = true;
+    const readOwnedTerminal = vi.fn(async () => ({
+      generationId: 'generation-1', generationRequestId: 'request-package', status: 'completed' as const,
+      updatedAt: '2026-08-25T04:00:00.000Z', resultRef: 'r2:package', markdown: content, reasoning: '',
+      payloadHash: 'hash:{"value":"same"}', contentAvailable: true, webPackage,
+    }));
+    const fallbackService = createService(unavailable, { execute }, { terminalStore: { readOwnedTerminal } });
+    const fallback = await fallbackService.create(createRequest('request-package'));
+    expect(fallback.status).toBe(200);
+    const fallbackText = await fallback.text();
+    expect(fallbackText).toContain(JSON.stringify(webPackage));
+    expect(fallbackText).toContain('event: snapshot');
+    expect(execute).toHaveBeenCalledOnce();
+  });
+
   test('dispatch readiness requires D1/signing but does not require an archive object store', () => {
     expect(isArenaGenerationDispatchReady({
       d1Available: true,

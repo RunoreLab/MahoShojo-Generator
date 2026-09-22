@@ -6,6 +6,7 @@ import { ArenaReportFormatSelector, ArenaWebReport } from '@/components/arena/co
 import { downloadBlob } from '@/lib/client/blobUrl';
 import { BattleResultPresentation } from '@/components/arena/components/BattleResultPresentation';
 import { BaseModal } from '@/components/shared/BaseModal';
+import { BUILTIN_VISUAL_NOVEL_PACKAGE_REF, createWebPackageOverlay } from '@mahoshojo/web-package';
 
 vi.mock('@/lib/client/blobUrl', () => ({ downloadBlob: vi.fn() }));
 vi.mock('@/components/shared/GeneratedByUserBadge', () => ({ GeneratedByUserBadge: () => null }));
@@ -50,6 +51,53 @@ afterEach(async () => {
 });
 
 describe('Web 战报的本地执行许可', () => {
+  it('offers the first-party experience in a labelled native selector and disables it while generating', async () => {
+    const onWebPackageChange = vi.fn();
+    await act(async () => root.render(<ArenaReportFormatSelector value="web" onChange={() => {}} onWebPackageChange={onWebPackageChange} />));
+    const select = container.querySelector('select')!;
+    expect(select.parentElement?.textContent).toContain('Web 体验');
+    await act(async () => {
+      select.value = BUILTIN_VISUAL_NOVEL_PACKAGE_REF.digest;
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    expect(onWebPackageChange).toHaveBeenCalledWith(BUILTIN_VISUAL_NOVEL_PACKAGE_REF);
+    await act(async () => root.render(<ArenaReportFormatSelector value="web" onChange={() => {}} onWebPackageChange={onWebPackageChange} disabled />));
+    expect(select.disabled).toBe(true);
+  });
+
+  it('validates a package before consent, keeps JSON fallback inert, and exports a self-contained experience', async () => {
+    const content = JSON.stringify({ title: '包故事', scenes: [{ text: '<script>unsafe()</script>' }] });
+    const { generatedContent: _content, ...artifact } = await createWebPackageOverlay(BUILTIN_VISUAL_NOVEL_PACKAGE_REF, content);
+    expect(_content).toBe(content);
+    const render = (ready: boolean, override = artifact) => <ArenaWebReport key="package-consent" roomId="package-consent" ready={ready} content={content} webPackage={override}>
+      {(web, actions) => <section>{web}<div>{actions}</div></section>}
+    </ArenaWebReport>;
+    await act(async () => root.render(render(false)));
+    expect(container.querySelector('iframe')).toBeNull();
+    expect(container.querySelector('pre')?.textContent).toContain('<script>unsafe()</script>');
+    expect(container.querySelector('script')).toBeNull();
+    await act(async () => root.render(render(true)));
+    await vi.waitFor(async () => {
+      await act(async () => {});
+      expect(document.body.textContent).toContain('启用 Web 战报');
+    });
+    expect(container.querySelector('iframe')).toBeNull();
+    await click('继续使用 Web');
+    const frame = container.querySelector('iframe')!;
+    expect(frame.getAttribute('sandbox')).toBe('allow-scripts');
+    expect(frame.srcdoc).toContain('包故事');
+    expect(frame.srcdoc).not.toContain('<script>unsafe()</script>');
+    await click('🌐 下载 HTML');
+    expect(downloadBlob).toHaveBeenCalledWith(expect.any(Blob), expect.stringMatching(/\.html$/));
+    await act(async () => root.render(render(true, { ...artifact, generatedDigest: `sha256:${'0'.repeat(64)}` })));
+    await vi.waitFor(async () => {
+      await act(async () => {});
+      expect(container.textContent).toContain('故事数据校验失败');
+    });
+    expect(container.querySelector('iframe')).toBeNull();
+    expect(container.querySelector('pre')?.textContent).toContain('unsafe()');
+  });
+
   it.each([
     { aiModel: 'deepseek-v4-flash-0731', aiUsage: { promptTokens: 12833, reasoningTokens: 7981, completionTokens: 14315 }, expected: '模型：deepseek-v4-flash-0731 · tokens：输入 12,833｜推理 7,981｜输出 14,315' },
     { aiModel: null, aiUsage: { promptTokens: 0, completionTokens: 1234567890 }, expected: 'tokens：输入 0｜推理 -｜输出 1,234,567,890' },

@@ -347,6 +347,7 @@ const buildExtraJson = async (
   const battleReportRenderSnapshotV1 = parseBattleReportRenderSnapshotV1({
     version: 1,
     ...(input.metadata.outputContract === 'web-document' ? { reportFormat: 'web' } : {}),
+    ...(input.metadata.webPackage ? { webPackage: input.metadata.webPackage } : {}),
     ...(snapshotReporterInfo ? {
       reporterInfo: {
         name: snapshotReporterInfo.name,
@@ -366,7 +367,8 @@ const buildExtraJson = async (
       ? { narrativeHistoryReadCount: input.metadata.narrativeHistoryReadCount }
       : {}),
   }) ?? (input.metadata.outputContract === 'web-document'
-    ? parseBattleReportRenderSnapshotV1({ version: 1, reportFormat: 'web' })
+    ? parseBattleReportRenderSnapshotV1({ version: 1, reportFormat: 'web',
+      ...(input.metadata.webPackage ? { webPackage: input.metadata.webPackage } : {}) })
     : null);
   const impactRosterQueues = new Map<string, number[]>();
   for (const combatant of combatantsFallback) {
@@ -732,6 +734,7 @@ const buildRoomSafeResult = (
   const candidate = {
     version: 1,
     format: render?.reportFormat === 'web' ? 'stream-web' : 'stream-markdown',
+    ...(render?.webPackage ? { webPackage: render.webPackage } : {}),
     ...(render?.reporterInfo ? { reporterInfo: render.reporterInfo } : {}),
     mode: row.mode,
     ...(boundedString(row.scenario_title, 300)
@@ -815,6 +818,8 @@ const materializeStoredTerminal = async (input: {
     contentAvailable,
     contentUnavailableReason,
     roomSafeResult: status === 'completed' ? buildRoomSafeResult(input.row, extra) : null,
+    ...(status === 'completed' && parseBattleReportRenderSnapshotV1(extra.battleReportRenderSnapshotV1)?.webPackage
+      ? { webPackage: parseBattleReportRenderSnapshotV1(extra.battleReportRenderSnapshotV1)!.webPackage } : {}),
   };
 };
 

@@ -73,7 +73,8 @@ export const createRoomProposalArenaEditorSession = (
   }
   const actions: ArenaEditorActions = Object.freeze({
     setBattleMode: (value) => update((draft) => ({ ...draft, battleMode: value })),
-    setReportFormat: (value) => update((draft) => ({ ...draft, reportFormat: value })),
+    setReportFormat: (value) => update((draft) => ({ ...draft, reportFormat: value, webPackageRef: value === 'web' ? draft.webPackageRef : undefined })),
+    setWebPackageRef: (value) => update((draft) => ({ ...draft, webPackageRef: value ?? undefined })),
     setStoryLength: (value) => update((draft) => ({ ...draft, storyLength: value })),
     setCustomStoryLength: (value) => update((draft) => ({
       ...draft,

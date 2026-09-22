@@ -68,6 +68,7 @@ export function BattleReportCardModal({ isOpen, generationId, generationMode, re
                 content: report.webHtml ?? normalizedLiveBody ?? report.article.body,
                 headline: report.headline ?? null,
                 webReady: report.webReady === true,
+                webPackage: report.webPackage,
                 isStreaming: false,
                 mode,
                 scenarioName: typeof report.scenario === 'string' ? report.scenario : undefined,

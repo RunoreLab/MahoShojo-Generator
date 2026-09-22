@@ -343,6 +343,28 @@ describe('Arena companion service', () => {
     });
   });
 
+  it('package snapshot replay preserves exact JSON and its artifact without interpreting it as a structured report', async () => {
+    const source = ' {"title":"测试","scenes":[{"text":"故事"}]}\n';
+    const webPackage = {
+      packageRef: { id: 'mahoshojo.visual-novel-lite', version: '1.0.0', digest: `sha256:${'a'.repeat(64)}` },
+      targetPath: 'data/report.json', targetMediaType: 'application/json', generatedDigest: `sha256:${'b'.repeat(64)}`,
+    };
+    const service = createArenaCompanionService({
+      generationService: generationService(async () => subscription([
+        { id: '1-0', type: 'snapshot', data: { markdown: source } },
+        { id: '2-0', type: 'done', data: { status: 'completed', webPackage } },
+      ])),
+      projectUpdatedCombatants: vi.fn(async () => []),
+    });
+    const response = await service.generate(new Request('https://example.test/api/arena/generate', {
+      method: 'POST', body: JSON.stringify({ reportFormat: 'web' }),
+    }));
+    expect(response.status).toBe(200);
+    const result = await response.json() as { report: Record<string, unknown> };
+    expect(result.report).toMatchObject({ reportFormat: 'web', webPackage, article: { body: source, analysis: '' } });
+    expect(result.report).not.toHaveProperty('webHtml');
+  });
+
   it('从 structured JSON snapshot 原样投影 non-stream 战报与 impacts', async () => {
     const structured = {
       headline: '结构化重放战报',

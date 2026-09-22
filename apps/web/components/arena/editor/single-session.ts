@@ -30,6 +30,7 @@ export const SINGLE_ARENA_EDITOR_CAPABILITIES: ArenaEditorCapabilities = Object.
 const createSingleActions = (): ArenaEditorActions => Object.freeze({
   setBattleMode: (value) => useBattleStore.getState().setBattleMode(value),
   setReportFormat: (value) => useBattleStore.getState().setReportFormat(value),
+  setWebPackageRef: (value) => useBattleStore.getState().setWebPackageRef(value),
   setStoryLength: (value) => useBattleStore.getState().setStoryLength(value),
   setCustomStoryLength: (value) => useBattleStore.getState().setCustomStoryLength(value),
   setSelectedLanguage: (value) => useBattleStore.getState().setSelectedLanguage(value),

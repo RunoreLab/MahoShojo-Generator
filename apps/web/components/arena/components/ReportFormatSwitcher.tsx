@@ -8,8 +8,9 @@ import { ArenaReportFormatSelector } from './ArenaWebReport';
 export function ReportFormatSwitcher() {
   const room = useArenaRoomContext();
   const value = useArenaEditorSelector((state) => state.reportFormat);
+  const webPackageRef = useArenaEditorSelector((state) => state.webPackageRef);
   const disabled = useArenaEditorSelector((state) => state.busy);
   const roomId = useArenaEditorSelector((state) => state.roomId);
-  const { setReportFormat } = useArenaEditorActions();
-  return <ArenaReportFormatSelector value={value} onChange={setReportFormat} disabled={disabled} roomId={roomId ?? room?.state.session?.roomId} />;
+  const { setReportFormat, setWebPackageRef } = useArenaEditorActions();
+  return <ArenaReportFormatSelector value={value} onChange={setReportFormat} webPackageRef={webPackageRef} onWebPackageChange={setWebPackageRef} disabled={disabled} roomId={roomId ?? room?.state.session?.roomId} />;
 }

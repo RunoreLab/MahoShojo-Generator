@@ -1,4 +1,6 @@
 import type { ArenaGenerationPrompt } from './runtime';
+import { WebPackageRefSchema } from '@mahoshojo/contracts/web-package';
+import { buildWebPackagePrompt } from '@mahoshojo/web-package';
 import {
   createPromptBuilder,
   createStreamPromptBuilder,
@@ -107,6 +109,13 @@ export const buildArenaGenerationPrompt = async (input: {
   const combatants = Array.isArray(payload.combatants) ? payload.combatants : [];
   const lore = questionnaireLore(payload.questionnaires);
   const outputContract = resolveArenaGenerationOutputContract(payload);
+  const webPackageRef = payload.webPackageRef === undefined
+    ? undefined
+    : WebPackageRefSchema.parse(payload.webPackageRef);
+  if (webPackageRef && outputContract !== 'web-document') {
+    throw new Error('ARENA_WEB_PACKAGE_REQUIRES_WEB');
+  }
+  const packagePrompt = webPackageRef ? await buildWebPackagePrompt(webPackageRef) : undefined;
   const rawUserGuidance = text(payload.userGuidance);
   // Legacy non-stream handlers bounded this field before safety, prompting,
   // response projection and history writes. Streaming intentionally remains
@@ -189,6 +198,7 @@ export const buildArenaGenerationPrompt = async (input: {
     !strictRankedMatch,
     materials,
     outputContract,
+    packagePrompt,
   );
   const taskPrompt = promptBuilder({ combatants });
   const characterGuidances = combatants.flatMap((value) => {
@@ -207,6 +217,7 @@ export const buildArenaGenerationPrompt = async (input: {
       language,
       outputContract,
       reportFormat: outputContract === 'web-document' ? 'web' : 'markdown',
+      ...(webPackageRef ? { webPackageRef } : {}),
       expectsMeta,
       combatantCount: combatants.length,
       pvpContext: asRecord(payload.pvpContext),

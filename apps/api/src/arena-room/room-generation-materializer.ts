@@ -324,6 +324,7 @@ export const createArenaRoomGenerationMaterializer = (
         combatants,
         mode: config.battleMode,
         reportFormat: config.reportFormat,
+        ...(config.webPackageRef ? { webPackageRef: config.webPackageRef } : {}),
         userGuidance: config.userGuidance,
         ...(resolvedScenario && scenarioEntry ? {
           scenario: resolvedScenario.payload,

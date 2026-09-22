@@ -125,6 +125,7 @@ const overrideBlockedReason = (
     case 'setCharacterGuidance':
     case 'setUserGuidance':
     case 'setReportFormat':
+    case 'setWebPackageRef':
     case 'setBattleMode':
     case 'setSelectedLanguage':
     case 'setStoryLength':
@@ -222,6 +223,10 @@ const applyChange = (config: ArenaRoomSharedConfig, change: ArenaProposalChange)
       return;
     case 'setReportFormat':
       config.reportFormat = change.value;
+      return;
+    case 'setWebPackageRef':
+      if (change.value === null) delete config.webPackageRef;
+      else config.webPackageRef = deepClone(change.value);
       return;
     case 'setBattleMode':
       config.battleMode = change.value;
