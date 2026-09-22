@@ -189,7 +189,7 @@ export function BattleReportDetailsModal({ isOpen, generationId, onClose, onRege
             <div className="text-sm">
               <div className="text-xs text-gray-500">PVP 关联</div>
               <div className="font-medium text-gray-900 break-all">
-                {record.pvpMatchId ? `match=${record.pvpMatchId}` : '无'}
+                {record.sourceKind === 'pvp' && record.pvpMatchId ? `match=${record.pvpMatchId}` : '无'}
               </div>
             </div>
             <div className="text-sm">

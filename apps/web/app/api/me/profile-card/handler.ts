@@ -457,11 +457,7 @@ const handler = withPvpErrorBoundary(async function handler(req: Request): Promi
     cachedTokens: r.cached_tokens ?? null,
     pvpMatchId: r.pvp_match_id,
     contentBlocked: Boolean(r.output_has_sensitive_words),
-    sourceKind: r.pvp_match_id
-      ? 'pvp'
-      : r.arena_participant_generation_id
-        ? 'arena-multiplayer'
-        : 'solo',
+    sourceKind: r.source_kind,
     arenaParticipantRole: r.arena_participant_generation_id ? (r.arena_participant_role ?? null) : null,
   }));
 

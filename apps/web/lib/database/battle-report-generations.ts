@@ -119,6 +119,7 @@ export interface BattleReportGenerationRowLite {
   pvp_round_id: string | null;
   created_at: string;
   updated_at: string;
+  source_kind: 'solo' | 'arena-multiplayer' | 'pvp';
   arena_participant_generation_id?: string | null;
   arena_participant_role?: BattleReportGenerationParticipantRole;
 }
@@ -321,7 +322,7 @@ export function buildBattleReportGenerationsWhereClause(
   userId: number,
   filter?: BattleReportGenerationsListFilter,
 ): { whereSql: string; params: unknown[]; orderBySql: string } {
-  const where: string[] = ['(user_id = ? OR EXISTS (SELECT 1 FROM battle_report_generation_participants participant WHERE participant.generation_id = battle_report_generations.id AND participant.user_id = ?))'];
+  const where: string[] = ['id IN (SELECT id FROM battle_report_generations WHERE user_id = ? UNION SELECT generation_id FROM battle_report_generation_participants WHERE user_id = ?)'];
   const params: unknown[] = [userId, userId];
 
   const status = filter?.status;
@@ -344,6 +345,7 @@ export function buildBattleReportGenerationsWhereClause(
 
   if (filter?.pvpOnly) {
     where.push('pvp_match_id IS NOT NULL');
+    where.push('NOT EXISTS (SELECT 1 FROM battle_report_generation_participants participant WHERE participant.generation_id = battle_report_generations.id)');
   }
 
   const titleQuery = typeof filter?.titleQuery === 'string' ? filter.titleQuery.trim() : '';

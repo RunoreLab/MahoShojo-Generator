@@ -52,9 +52,10 @@ const record = {
   story_length: 'standard',
   headline: '共享战报',
   winner: '角色甲',
-  pvp_match_id: null,
-  pvp_room_id: null,
-  pvp_round_id: null,
+  pvp_match_id: 'generation-1',
+  pvp_room_id: 'room-1',
+  pvp_round_id: 'attempt-1',
+  source_kind: 'arena-multiplayer',
   status: 'completed',
   started_at: '2026-09-22T10:00:00.000Z',
   ended_at: '2026-09-22T10:00:01.000Z',
@@ -136,6 +137,7 @@ describe('battle report detail handler access projection', () => {
     ));
     const ownerPayload = await ownerResponse.json() as any;
     expect(ownerResponse.status).toBe(200);
+    expect(ownerPayload.record.sourceKind).toBe('arena-multiplayer');
     expect(ownerPayload.combatants[0]).toMatchObject({
       templateId: 'host-local-template',
       dataCardId: 'private-card-id',

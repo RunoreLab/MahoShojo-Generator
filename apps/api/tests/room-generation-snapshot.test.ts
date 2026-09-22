@@ -11,9 +11,11 @@ import { createArenaRoomState } from './arena-room-fixtures';
 describe('Arena Room frozen generation snapshot', () => {
   it('旧 checkpoint 不猜测 host，新快照拒绝不属于参与者的 host', () => {
     const snapshot = createArenaRoomGenerationSnapshot(createArenaRoomState(), 'legacy-host');
-    const { snapshotDigest: _digest, hostAccountUserId: _host, ...legacy } = snapshot;
+    const { snapshotDigest, hostAccountUserId, ...legacy } = snapshot;
+    expect(hostAccountUserId).toBe(101);
     const restored = createArenaRoomGenerationSnapshotFromFrozen(legacy);
     expect(restored.hostAccountUserId).toBeUndefined();
+    expect(restored.snapshotDigest).not.toBe(snapshotDigest);
     expect(createArenaRoomGenerationSnapshotFromFrozen(legacy)).toEqual(restored);
     expect(() => createArenaRoomGenerationSnapshotFromFrozen({ ...legacy, hostAccountUserId: 999 }))
       .toThrow();
