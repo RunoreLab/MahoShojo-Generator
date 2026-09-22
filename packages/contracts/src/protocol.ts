@@ -94,6 +94,7 @@ export const GenerationMirrorSchema = z
     snapshotDigest: OpaqueKeySchema,
     collaborativeInfluence: z.boolean(),
     participantUserIds: ParticipantUserIdsSchema,
+    hostAccountUserId: z.number().int().positive().optional(),
     startedAt: IsoTimestampSchema,
     finishedAt: IsoTimestampSchema.optional(),
   })
@@ -170,6 +171,7 @@ const GenerationEventPayloadSchema = z
     snapshotDigest: OpaqueKeySchema,
     collaborativeInfluence: z.boolean(),
     participantUserIds: ParticipantUserIdsSchema,
+    hostAccountUserId: z.number().int().positive().optional(),
   })
   .strict();
 

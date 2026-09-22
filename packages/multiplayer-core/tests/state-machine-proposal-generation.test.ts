@@ -388,6 +388,7 @@ describe('Arena Room authoritative generation transitions', () => {
       snapshotDigest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
       collaborativeInfluence: false,
       participantUserIds: [101, 202],
+      hostAccountUserId: 101,
       startedAt: '2026-08-27T16:04:00.000Z',
     });
     expect(reserved.nextState.generationLedger[0]?.generationPayloadDigest)

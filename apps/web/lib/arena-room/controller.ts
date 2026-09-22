@@ -449,6 +449,9 @@ const mirrorFromGenerationControl = (
     snapshotDigest: event.payload.snapshotDigest,
     collaborativeInfluence: event.payload.collaborativeInfluence,
     participantUserIds: event.payload.participantUserIds,
+    ...(event.payload.hostAccountUserId === undefined ? {} : {
+      hostAccountUserId: event.payload.hostAccountUserId,
+    }),
     startedAt: sameAttempt ? current.startedAt : event.timestamp,
     ...(event.type === 'generation.started' ? {} : { finishedAt: event.timestamp }),
   };

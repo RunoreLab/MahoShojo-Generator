@@ -820,6 +820,9 @@ export const createArenaRoomGenerationService = (
           configRevision: historical.mirror.configRevision,
           collaborativeInfluence: historical.mirror.collaborativeInfluence,
           participantUserIds: historical.mirror.participantUserIds,
+          ...(historical.mirror.hostAccountUserId === undefined ? {} : {
+            hostAccountUserId: historical.mirror.hostAccountUserId,
+          }),
           sharedConfig: input.request.sharedConfig,
         });
         if (snapshot.snapshotDigest !== historical.mirror.snapshotDigest) {

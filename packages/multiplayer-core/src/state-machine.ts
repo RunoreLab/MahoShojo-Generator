@@ -790,6 +790,12 @@ const reserveGeneration = (
     .map((record) => record.accountUserId)
     .sort((left, right) => left - right);
   const collaborativeInfluence = state.collaborativeChanges.length > 0;
+  const hosts = state.memberAuthority.filter((record) => (
+    record.member.membershipState === 'active' && record.member.role === 'host'
+  ));
+  if (hosts.length !== 1 || !participantUserIds.includes(hosts[0]!.accountUserId)) {
+    return transitionFailure('forbidden', 'invalid-state');
+  }
   const mirror: GenerationMirror = {
     generationRequestId: command.generationRequestId,
     generationId: command.generationId,
@@ -799,6 +805,7 @@ const reserveGeneration = (
     snapshotDigest: scope.snapshotDigest,
     collaborativeInfluence,
     participantUserIds,
+    hostAccountUserId: hosts[0]!.accountUserId,
     startedAt: command.timestamp,
   };
   const next = cloneState(state);
@@ -821,6 +828,7 @@ const generationEventPayload = (mirror: GenerationMirror) => ({
   snapshotDigest: mirror.snapshotDigest,
   collaborativeInfluence: mirror.collaborativeInfluence,
   participantUserIds: [...mirror.participantUserIds],
+  ...(mirror.hostAccountUserId === undefined ? {} : { hostAccountUserId: mirror.hostAccountUserId }),
 });
 
 const terminalMetadataMatches = (

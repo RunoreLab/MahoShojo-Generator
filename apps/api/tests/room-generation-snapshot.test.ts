@@ -9,6 +9,19 @@ import {
 import { createArenaRoomState } from './arena-room-fixtures';
 
 describe('Arena Room frozen generation snapshot', () => {
+  it('旧 checkpoint 不猜测 host，新快照拒绝不属于参与者的 host', () => {
+    const snapshot = createArenaRoomGenerationSnapshot(createArenaRoomState(), 'legacy-host');
+    const { snapshotDigest: _digest, hostAccountUserId: _host, ...legacy } = snapshot;
+    const restored = createArenaRoomGenerationSnapshotFromFrozen(legacy);
+    expect(restored.hostAccountUserId).toBeUndefined();
+    expect(createArenaRoomGenerationSnapshotFromFrozen(legacy)).toEqual(restored);
+    expect(() => createArenaRoomGenerationSnapshotFromFrozen({ ...legacy, hostAccountUserId: 999 }))
+      .toThrow();
+    const state = createArenaRoomState();
+    state.memberAuthority[0]!.member.membershipState = 'revoked';
+    expect(() => createArenaRoomGenerationSnapshot(state, 'invalid-host')).toThrow();
+  });
+
   it('normalized Markdown retains the digest of old snapshots without reportFormat', () => {
     const snapshot = createArenaRoomGenerationSnapshot(createArenaRoomState(), 'legacy-request');
     const { snapshotDigest, ...frozen } = snapshot;
@@ -69,6 +82,7 @@ describe('Arena Room frozen generation snapshot', () => {
       configRevision: state.snapshot.revision,
       collaborativeInfluence: true,
       participantUserIds: [9, 101],
+      hostAccountUserId: 101,
       sharedConfig: state.snapshot.sharedConfig,
     });
     expect(snapshot.snapshotDigest).toMatch(/^sha256:[0-9a-f]{64}$/u);
@@ -78,6 +92,7 @@ describe('Arena Room frozen generation snapshot', () => {
       configRevision: snapshot.configRevision,
       collaborativeInfluence: snapshot.collaborativeInfluence,
       participantUserIds: snapshot.participantUserIds,
+      hostAccountUserId: snapshot.hostAccountUserId,
       sharedConfig: snapshot.sharedConfig,
     })).toEqual(snapshot);
 

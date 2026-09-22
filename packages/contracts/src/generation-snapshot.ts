@@ -13,10 +13,15 @@ export const ArenaMultiplayerGenerationSnapshotSchema = z
     snapshotDigest: z.string().trim().min(1).max(MAX_SNAPSHOT_DIGEST_LENGTH),
     collaborativeInfluence: z.boolean(),
     participantUserIds: ParticipantUserIdsSchema,
+    // Optional only for checkpoints created before participant roles were frozen.
+    hostAccountUserId: z.number().int().positive().optional(),
     sharedConfig: ArenaRoomSharedConfigSchema,
   })
   .strict()
-  ;
+  .refine((snapshot) => snapshot.hostAccountUserId === undefined
+    || snapshot.participantUserIds.includes(snapshot.hostAccountUserId), {
+    path: ['hostAccountUserId'], message: 'host must be a frozen participant',
+  });
 export type ArenaMultiplayerGenerationSnapshot = z.infer<typeof ArenaMultiplayerGenerationSnapshotSchema>;
 
 export const parseArenaMultiplayerGenerationSnapshot = (input: unknown): ArenaMultiplayerGenerationSnapshot => {

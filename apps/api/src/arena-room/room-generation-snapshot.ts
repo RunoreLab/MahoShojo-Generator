@@ -65,11 +65,16 @@ export const createArenaRoomGenerationSnapshot = (
   state: ArenaRoomAuthorityState,
   generationRequestId: string,
 ): ArenaMultiplayerGenerationSnapshot => {
+  const hosts = state.memberAuthority.filter((record) => (
+    record.member.membershipState === 'active' && record.member.role === 'host'
+  ));
+  if (hosts.length !== 1) throw new Error('ROOM_GENERATION_HOST_INVALID');
   const frozen = {
     roomId: state.snapshot.roomId,
     generationRequestId,
     configRevision: state.snapshot.revision,
     collaborativeInfluence: state.collaborativeChanges.length > 0,
+    hostAccountUserId: hosts[0]!.accountUserId,
     participantUserIds: state.memberAuthority
       .filter((record) => record.member.membershipState === 'active')
       .map((record) => record.accountUserId)

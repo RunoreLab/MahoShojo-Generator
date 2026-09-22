@@ -523,6 +523,9 @@ try {
     configRevision: historical.mirror.configRevision,
     collaborativeInfluence: historical.mirror.collaborativeInfluence,
     participantUserIds: historical.mirror.participantUserIds,
+    ...(historical.mirror.hostAccountUserId === undefined ? {} : {
+      hostAccountUserId: historical.mirror.hostAccountUserId,
+    }),
     sharedConfig: generationRequest.sharedConfig,
   });
   const retryPayload = await generationMaterializer.materialize({
