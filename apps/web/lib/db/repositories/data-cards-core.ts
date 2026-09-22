@@ -343,9 +343,10 @@ export const insertDataCard = async (
 
 export const listUserDataCards = async (
   db: AppDrizzleDb,
-  input: { userId: number; search?: string; sortBy?: DataCardSortBy; limit: number; offset: number },
+  input: { userId: number; id?: string; search?: string; sortBy?: DataCardSortBy; limit: number; offset: number },
 ): Promise<UserDataCardDbRow[]> => {
   const conditions: SQL[] = [eq(dataCards.userId, input.userId), isNull(dataCards.deletedAt)];
+  if (input.id) conditions.push(eq(dataCards.id, input.id));
   if (input.search) {
     const keyword = `%${input.search}%`;
     conditions.push(or(like(dataCards.name, keyword), like(dataCards.description, keyword))!);

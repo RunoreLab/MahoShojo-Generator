@@ -2,6 +2,9 @@ import { OnlineDataCardTypeSchema } from '@mahoshojo/contracts/data-cards';
 import { normalizeOnlineDataCardVisibilityCompat } from '@/lib/data-card-visibility';
 import { getRequestUrl } from '@/lib/request-url';
 import { readDataCardListPage } from '@/lib/data-card-list-page';
+import { readDataCardSummaryQuery } from '@/lib/data-card-summary-query';
+import { listDataCardSummaries } from '@/lib/db/repositories/data-card-summaries';
+import { listUserDataCards } from '@/lib/db/repositories/data-cards-core';
 import { 
   createDataCardWithAuthor, 
   getUserDataCards, 
@@ -100,6 +103,24 @@ async function handler(req: Request): Promise<Response> {
       // 有界分页，避免一次读取所有正文耗尽 Worker 内存。
       try {
         const url = getRequestUrl(req);
+        if (url.searchParams.has('id')) {
+          const id = url.searchParams.get('id')?.trim();
+          if (!id || id.length > 200) return Response.json({ error: '无效的数据卡 ID' }, { status: 400 });
+          if (!db) throw new Error('数据卡存储不可用');
+          const [card] = await listUserDataCards(db, { userId, id, limit: 1, offset: 0 });
+          return Response.json(card ? { success: true, card } : { error: '数据卡不存在或无权访问' }, {
+            status: card ? 200 : 404, headers: { 'Cache-Control': 'private, no-store' },
+          });
+        }
+        if (url.searchParams.get('view') === 'summary') {
+          const query = readDataCardSummaryQuery(url.searchParams);
+          if (!query) return Response.json({ error: '无效的列表查询参数' }, { status: 400 });
+          if (!db) throw new Error('数据卡存储不可用');
+          const started = Date.now();
+          const result = await listDataCardSummaries(db, userId, 'my', query);
+          console.info('data-card-list', { source: 'my', summary: true, limit: query.limit, offset: query.offset, count: result.cards.length, durationMs: Date.now() - started, status: 200 });
+          return Response.json(result, { headers: { 'Cache-Control': 'private, no-store' } });
+        }
         const page = readDataCardListPage(url.searchParams);
         if (!page) return Response.json({ error: '无效的分页参数' }, { status: 400 });
         const search = url.searchParams.get('search'); // 搜索关键词
@@ -113,7 +134,7 @@ async function handler(req: Request): Promise<Response> {
           headers: { 'Content-Type': 'application/json', 'Cache-Control': 'private, no-store' }
         });
       } catch (error) {
-        console.error('Get cards error:', error);
+        console.error('data-card-list-failed', { source: 'my', status: 500, category: error instanceof Error ? error.name : 'unknown' });
         return new Response(JSON.stringify({ error: '获取数据卡失败' }), {
           status: 500,
           headers: { 'Content-Type': 'application/json' }

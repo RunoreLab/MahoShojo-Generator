@@ -306,24 +306,45 @@ const resolveApiErrorMessage = async (response: Response, fallback: string): Pro
   return fallback;
 };
 
+// 只用于幂等卡片 GET：每页至多两次尝试，调用方取消后不得继续翻页或重试。
+export async function fetchDataCardJson(url: string, signal?: AbortSignal): Promise<any> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    signal?.throwIfAborted();
+    try {
+      const response = await authStorage.fetch(url, {
+        signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(30_000)]) : AbortSignal.timeout(30_000),
+      });
+      if (response.ok) return await response.json();
+      const error = Object.assign(new Error(await resolveApiErrorMessage(response, `获取数据卡失败（HTTP ${response.status}）`)), { status: response.status });
+      throw error;
+    } catch (cause) {
+      signal?.throwIfAborted();
+      const status = (cause as { status?: number })?.status;
+      const retryable = status === 408 || status === 429 || (status !== undefined && status >= 500)
+        || cause instanceof TypeError || (cause instanceof Error && ['TimeoutError', 'AbortError'].includes(cause.name));
+      if (!retryable || attempt === 1) throw cause;
+      await new Promise<void>((resolve, reject) => {
+        const onAbort = () => { clearTimeout(timer); reject(signal?.reason); };
+        const timer = setTimeout(() => { signal?.removeEventListener('abort', onAbort); resolve(); }, 500);
+        signal?.addEventListener('abort', onAbort, { once: true });
+      });
+    }
+  }
+}
+
 const fetchCardListPages = async (
   path: string,
   params: URLSearchParams,
   key: 'cards' | 'favorites',
+  signal?: AbortSignal,
 ): Promise<DataCardsListResult> => {
   const cards: any[] = [];
   let offset = 0;
   while (true) {
     params.set('limit', String(DATA_CARD_LIST_PAGE_SIZE));
     params.set('offset', String(offset));
-    const response = await authStorage.fetch(`${path}?${params}`);
-    if (!response.ok) {
-      return {
-        success: false, cards: [], status: response.status,
-        error: await resolveApiErrorMessage(response, `获取列表失败（HTTP ${response.status}）`),
-      };
-    }
-    const data = await response.json();
+    const data = await fetchDataCardJson(`${path}?${params}`, signal);
+    signal?.throwIfAborted();
     if (data?.success === false || !Array.isArray(data?.[key])) {
       throw new Error(typeof data?.error === 'string' ? data.error : '列表响应无效');
     }
@@ -339,6 +360,7 @@ const fetchCardListPages = async (
 const fetchDataCardsDetailed = async (
   search?: string,
   sortBy?: 'likes' | 'usage' | 'favorites' | 'created_at',
+  signal?: AbortSignal,
 ): Promise<DataCardsListResult> => {
   try {
     const searchParams = new URLSearchParams();
@@ -349,12 +371,15 @@ const fetchDataCardsDetailed = async (
       searchParams.append('sortBy', sortBy);
     }
 
-    return await fetchCardListPages('/api/data-cards', searchParams, 'cards');
+    return await fetchCardListPages('/api/data-cards', searchParams, 'cards', signal);
   } catch (error) {
     return {
       success: false,
       cards: [],
-      error: error instanceof Error ? error.message : '获取数据卡失败',
+      status: (error as { status?: number })?.status,
+      error: error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')
+        ? '加载数据卡超时，请重试'
+        : error instanceof Error ? error.message : '获取数据卡失败',
     };
   }
 };
@@ -495,8 +520,9 @@ export const dataCardApi = {
   async getCardsDetailed(
     search?: string,
     sortBy?: 'likes' | 'usage' | 'favorites' | 'created_at',
+    signal?: AbortSignal,
   ): Promise<DataCardsListResult> {
-    return fetchDataCardsDetailed(search, sortBy);
+    return fetchDataCardsDetailed(search, sortBy, signal);
   },
 
   // 获取所有数据卡

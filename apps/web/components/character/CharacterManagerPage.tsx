@@ -310,7 +310,7 @@ export const CharacterManagerPage: React.FC = () => {
     const [legacyMigrationDeferCount, setLegacyMigrationDeferCount] = useState(0);
 
     // 数据卡管理相关状态
-    const [userDataCards, setUserDataCards] = useState<any[]>([]);
+    const [cardsRefresh, setCardsRefresh] = useState(0);
     const [userCapacity, setUserCapacity] = useState(config.DEFAULT_DATA_CARD_CAPACITY);
     const [userUsedSlots, setUserUsedSlots] = useState(0);
   const [showDataCardsModal, setShowDataCardsModal] = useState(false);
@@ -378,24 +378,22 @@ export const CharacterManagerPage: React.FC = () => {
     // 加载用户数据卡和容量
     const loadUserDataCards = useCallback(async () => {
         if (!isAuthenticated) return;
-        const [cards, capacityInfo, recycleCards] = await Promise.all([
-            dataCardApi.getCards(),
-            dataCardApi.getUserCapacity(),
-            dataCardApi.getRecycleBin()
+        setCardsRefresh((value) => value + 1);
+        await Promise.all([
+            dataCardApi.getUserCapacity().then((capacityInfo) => {
+                if (capacityInfo !== null) {
+                    setUserCapacity(capacityInfo.capacity);
+                    setUserUsedSlots(capacityInfo.usedSlots);
+                }
+            }),
+            dataCardApi.getRecycleBin().then(setRecycleBinCards),
         ]);
-        setUserDataCards(cards);
-        setRecycleBinCards(recycleCards);
-        if (capacityInfo !== null) {
-            setUserCapacity(capacityInfo.capacity);
-            setUserUsedSlots(capacityInfo.usedSlots);
-        }
     }, [isAuthenticated]);
 
     useEffect(() => {
         if (isAuthenticated) {
             loadUserDataCards();
         } else {
-            setUserDataCards([]);
             setRecycleBinCards([]);
             setShowDataCardsModal(false);
             setShowRecycleBinModal(false);
@@ -2707,7 +2705,9 @@ export const CharacterManagerPage: React.FC = () => {
                     setShowDataCardsModal(false);
                     setCurrentPage(1);
                 }}
-                dataCards={userDataCards}
+                dataCards={[]}
+                summaryOwnerId={user?.id}
+                refreshKey={cardsRefresh}
                 editingCard={editingCard}
                 currentPage={currentPage}
                 cardsPerPage={cardsPerPage}
