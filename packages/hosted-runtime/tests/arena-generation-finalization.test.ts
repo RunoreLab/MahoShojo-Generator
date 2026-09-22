@@ -36,6 +36,7 @@ const createPorts = (
   completeTerminal: vi.fn(async () => undefined),
   failTerminal: vi.fn(async () => undefined),
   persistCombatants: vi.fn(async () => undefined),
+  persistParticipants: vi.fn(async () => undefined),
   applyStoryImpacts: vi.fn(async () => undefined),
   settleRatings: vi.fn(async () => undefined),
   readRanking: vi.fn(async () => ({ success: true })),
@@ -59,6 +60,7 @@ describe('Arena generation finalization', () => {
         };
       }),
       persistCombatants: vi.fn(async () => { order.push('combatants'); }),
+      persistParticipants: vi.fn(async () => { order.push('participants'); }),
       applyStoryImpacts: vi.fn(async () => { order.push('impacts'); }),
       settleRatings: vi.fn(async () => { order.push('ratings'); }),
       completeTerminal: vi.fn(async () => { order.push('complete'); }),
@@ -75,7 +77,7 @@ describe('Arena generation finalization', () => {
     });
 
     expect(order).toEqual([
-      'r2', 'claim', 'combatants', 'impacts', 'ratings', 'complete', 'ranking',
+      'r2', 'claim', 'combatants', 'participants', 'impacts', 'ratings', 'complete', 'ranking',
     ]);
     expect(ports.claimTerminal).toHaveBeenCalledWith(expect.objectContaining({
       generationId: 'generation-1',

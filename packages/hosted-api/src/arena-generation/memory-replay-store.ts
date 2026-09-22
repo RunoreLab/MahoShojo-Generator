@@ -134,6 +134,7 @@ export const createMemoryGenerationReplayStore = (
         generationRequestId: input.generationRequestId,
         payloadHash: input.payloadHash,
         mode: input.mode ?? null,
+        ...(input.multiplayerParticipation ? { multiplayerParticipation: structuredClone(input.multiplayerParticipation) } : {}),
         producerToken: input.producerToken,
         status: 'reserved',
         lastEventId: null,

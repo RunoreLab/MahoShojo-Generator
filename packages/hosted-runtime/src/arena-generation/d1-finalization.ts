@@ -5,6 +5,8 @@ import type {
   ArenaGenerationTerminalStore,
 } from '@mahoshojo/hosted-api/arena-generation/service';
 import { ARENA_OUTPUT_NOT_ARCHIVED_WARNING } from '@mahoshojo/hosted-api/arena-generation/service';
+import { extractArenaMultiplayerParticipation, type ArenaMultiplayerParticipation } from '@mahoshojo/contracts/arena-room';
+import { persistArenaGenerationParticipants } from './participants';
 import type {
   ArenaTerminalEffectInput,
   ArenaGenerationFinalizationPorts,
@@ -427,6 +429,7 @@ const buildExtraJson = async (
       reason: 'manifest_budget_exceeded',
     };
   const authority = {
+    arenaMultiplayer: extractArenaMultiplayerParticipation(input.payload.multiplayerGenerationSnapshot, input.actorKey),
     generationRequestId: boundedString(input.generationRequestId, 128),
     generationOwnerHash: await sha256(input.actorKey),
     generationPayloadHash: boundedString(input.payloadHash, 128),
@@ -1102,6 +1105,17 @@ WHERE id = ?
       }
     },
 
+    async persistParticipants(input: ArenaTerminalEffectInput) {
+      if (input.idempotencyKey !== buildArenaTerminalEffectIdempotencyKey(input.generationId, 'participants')) {
+        throw new Error('ARENA_PARTICIPANTS_IDEMPOTENCY_KEY_INVALID');
+      }
+      const evidence = extractArenaMultiplayerParticipation(input.payload.multiplayerGenerationSnapshot, input.actorKey);
+      if (!evidence) return;
+      const client = options.getD1Client();
+      if (!client) throw new Error('ARENA_D1_UNAVAILABLE');
+      await persistArenaGenerationParticipants(client, input.generationId, evidence);
+    },
+
     async persistCombatants(input: ArenaTerminalEffectInput) {
       if (
         input.idempotencyKey
@@ -1231,6 +1245,7 @@ export const createNodeArenaGenerationTerminalStore = (
     mode: string | null;
     updatedAt: string;
     code: string;
+    multiplayerParticipation?: ArenaMultiplayerParticipation;
   }): Promise<ArenaGenerationTerminalRecord> {
     const client = options.getD1Client();
     if (!client) throw new Error('ARENA_D1_UNAVAILABLE');
@@ -1245,6 +1260,7 @@ export const createNodeArenaGenerationTerminalStore = (
       const status = logicalTerminalStatus(existing, extra);
       if (!status) throw new Error('ARENA_TERMINAL_STATUS_INVALID');
       if (extra.finalizationCompleted !== true) {
+        await persistArenaGenerationParticipants(client, input.generationId, extra.arenaMultiplayer);
         await persistFallbackCombatants({
           client,
           generationId: input.generationId,
@@ -1294,11 +1310,12 @@ WHERE id = ?
       return terminal;
     }
     const extra = {
+      arenaMultiplayer: input.multiplayerParticipation,
       generationRequestId: input.generationRequestId,
       generationOwnerHash: await sha256(input.actorKey),
       generationPayloadHash: input.payloadHash,
       generationTerminalStatus: 'producer_lost',
-      finalizationCompleted: true,
+      finalizationCompleted: false,
       errorCode: input.code,
       resultRef: null,
     };
@@ -1328,6 +1345,10 @@ VALUES (?, ?, ?, 0, 'failed', 'stream', 'api/arena/generate-stream',
       || storedExtra?.generationPayloadHash !== input.payloadHash
       || storedExtra?.generationTerminalStatus !== 'producer_lost'
     ) throw new Error('ARENA_PRODUCER_LOST_TERMINAL_CONFLICT');
+    await persistArenaGenerationParticipants(client, input.generationId, storedExtra.arenaMultiplayer);
+    await client.prepare(`UPDATE battle_report_generations
+SET extra_json = json_set(extra_json, '$.finalizationCompleted', json('true')) WHERE id = ?`)
+      .bind(input.generationId).run({ retry: 'none' });
     return {
       generationId: input.generationId,
       generationRequestId: input.generationRequestId,

@@ -6,6 +6,7 @@ import {
 } from './sse';
 import type { SafePublicAiErrorProjection } from '../regular-generation';
 import { ARENA_RESOURCE_BUDGET } from './resource-budget';
+import { extractArenaMultiplayerParticipation, type ArenaMultiplayerParticipation } from '@mahoshojo/contracts/arena-room';
 
 export const MAX_ARENA_CREATE_BODY_BYTES = ARENA_RESOURCE_BUDGET.hardBodyBytes;
 export const MAX_ARENA_CANCEL_BODY_BYTES = ARENA_RESOURCE_BUDGET.cancelBodyBytes;
@@ -115,6 +116,7 @@ export const isArenaGenerationDispatchReady = (input: Readonly<{
 );
 
 export type GenerationReplayStoreState = {
+  multiplayerParticipation?: ArenaMultiplayerParticipation;
   actorKey: string;
   generationId: string;
   generationRequestId: string;
@@ -137,6 +139,7 @@ export type GenerationReplayStoreState = {
 
 export interface GenerationReplayStore {
   reserve(_input: {
+    multiplayerParticipation?: ArenaMultiplayerParticipation;
     actorKey: string;
     generationRequestId: string;
     generationId: string;
@@ -406,6 +409,7 @@ export interface ArenaGenerationTerminalStore {
     | { kind: 'terminal'; terminal: ArenaGenerationTerminalRecord }
   >;
   reconcileExpiredLease?(_input: {
+    multiplayerParticipation?: ArenaMultiplayerParticipation;
     generationId: string;
     generationRequestId: string;
     actorKey: string;
@@ -1598,6 +1602,7 @@ export const createArenaGenerationService = (
         }, 503);
       }
       terminalFallback = await dependencies.terminalStore.reconcileExpiredLease({
+        multiplayerParticipation: state.multiplayerParticipation,
         generationId,
         generationRequestId: claimed.generationRequestId,
         actorKey: actor.actorKey,
@@ -3017,6 +3022,7 @@ export const createArenaGenerationService = (
       let reservation: Awaited<ReturnType<GenerationReplayStore['reserve']>>;
       try {
         reservation = await dependencies.store.reserve({
+          multiplayerParticipation: extractArenaMultiplayerParticipation(semanticPayload.multiplayerGenerationSnapshot, actor.actorKey),
           actorKey: actor.actorKey,
           generationRequestId: parsed.generationRequestId,
           generationId,

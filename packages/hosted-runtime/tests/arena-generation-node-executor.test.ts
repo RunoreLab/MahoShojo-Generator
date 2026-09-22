@@ -29,6 +29,7 @@ const finalizer = createArenaGenerationFinalizer({
   completeTerminal: vi.fn(async () => undefined),
   failTerminal: vi.fn(async () => undefined),
   persistCombatants: vi.fn(async () => undefined),
+  persistParticipants: vi.fn(async () => undefined),
   applyStoryImpacts: vi.fn(async () => undefined),
   settleRatings: vi.fn(async () => undefined),
   readRanking: vi.fn(async () => null),

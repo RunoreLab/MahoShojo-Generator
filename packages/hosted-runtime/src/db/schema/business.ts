@@ -1085,6 +1085,15 @@ export const battleReportGenerations = sqliteTable('battle_report_generations', 
   updatedAt: text('updated_at').notNull(),
 });
 
+export const battleReportGenerationParticipants = sqliteTable('battle_report_generation_participants', {
+  generationId: text('generation_id').notNull().references(() => battleReportGenerations.id, { onDelete: 'cascade' }),
+  userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  role: text('role', { enum: ['host', 'member'] }),
+}, (table) => [
+  primaryKey({ columns: [table.generationId, table.userId] }),
+  index('idx_battle_report_generation_participants_user_generation').on(table.userId, table.generationId),
+]);
+
 export const battleReportGenerationCombatants = sqliteTable('battle_report_generation_combatants', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   generationId: text('generation_id').notNull(),

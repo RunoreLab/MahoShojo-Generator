@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { ArenaMultiplayerParticipationSchema } from '@mahoshojo/contracts/arena-room';
 
 import {
   generationCancelCode,
@@ -558,6 +559,9 @@ const parseStoredState = (raw: string): StoredGenerationState => {
     generationRequestId: parsed.generationRequestId,
     payloadHash: parsed.payloadHash,
     mode: typeof parsed.mode === 'string' ? parsed.mode : null,
+    ...(parsed.multiplayerParticipation === undefined ? {} : {
+      multiplayerParticipation: ArenaMultiplayerParticipationSchema.parse(parsed.multiplayerParticipation),
+    }),
     producerToken: parsed.producerToken,
     status: parsed.status,
     lastEventId: typeof parsed.lastEventId === 'string' ? parsed.lastEventId : null,
@@ -705,6 +709,9 @@ export const createRedisGenerationReplayStore = (
         generationRequestId: input.generationRequestId,
         payloadHash: input.payloadHash,
         mode: input.mode ?? null,
+        ...(input.multiplayerParticipation ? {
+          multiplayerParticipation: ArenaMultiplayerParticipationSchema.parse(input.multiplayerParticipation),
+        } : {}),
         producerToken: input.producerToken,
         status: 'reserved',
         lastEventId: null,

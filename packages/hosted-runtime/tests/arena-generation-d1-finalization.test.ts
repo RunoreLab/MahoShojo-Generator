@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createRequire } from 'node:module';
+import { ArenaRoomSharedConfigSchema } from '@mahoshojo/contracts/arena-room';
+import { persistArenaGenerationParticipants } from '../src/arena-generation/participants';
 
 import {
   createNodeArenaGenerationFinalizationPorts,
@@ -105,6 +107,46 @@ const claimInput = {
   status: 'completed' as const,
   errorCode: null,
   resultRef: 'r2:v1/battle-report-generations/generation-1/output.md',
+};
+
+const multiplayerSharedConfig = ArenaRoomSharedConfigSchema.parse({
+  battleMode: 'classic',
+  reportFormat: 'markdown',
+  combatants: [{
+    key: 'data-card:character-1',
+    ref: { id: 'character-1', kind: 'character', versionToken: 'v1' },
+  }],
+  teams: [],
+  scenario: null,
+  auxScenarios: [],
+  materials: [],
+  userGuidance: '',
+  storyLength: 'standard',
+  customStoryLength: null,
+  selectedLanguage: 'zh-CN',
+  historySettings: {
+    readArenaHistory: true,
+    readArenaHistoryLimit: 3,
+    isArenaHistoryUnlimited: false,
+    writeArenaHistory: true,
+    readCurrentState: true,
+    writeCurrentState: true,
+    readNarrativeHistory: false,
+    readNarrativeHistoryLimit: 10,
+    isNarrativeHistoryUnlimited: false,
+    writeNarrativeHistory: false,
+  },
+});
+
+const multiplayerSnapshot = {
+  roomId: 'room-1',
+  generationRequestId: 'request-1',
+  configRevision: 0,
+  snapshotDigest: 'sha256:test',
+  collaborativeInfluence: true,
+  participantUserIds: [42, 99],
+  hostAccountUserId: 42,
+  sharedConfig: multiplayerSharedConfig,
 };
 
 const rejectedInput: ArenaGenerationRejectedTerminalRecordInput = {
@@ -1023,6 +1065,71 @@ ORDER BY sort_index
     } finally {
       database.close();
     }
+  });
+
+  it('persists frozen multiplayer participants with host/member roles idempotently', async () => {
+    const database = new DatabaseSync(':memory:');
+    try {
+      database.exec(`
+CREATE TABLE battle_report_generation_participants (
+  generation_id TEXT NOT NULL,
+  user_id INTEGER NOT NULL,
+  role TEXT,
+  PRIMARY KEY (generation_id, user_id)
+)
+      `.trim());
+      const ports = createNodeArenaGenerationFinalizationPorts({
+        getD1Client: () => sqliteD1(database),
+      });
+      const input = {
+        ...claimInput,
+        actorKey: 'pvp-room:room-1',
+        payload: {
+          ...claimInput.payload,
+          multiplayerGenerationSnapshot: multiplayerSnapshot,
+        },
+        idempotencyKey: 'arena-terminal:generation-1:participants',
+      };
+
+      await ports.persistParticipants(input);
+      await ports.persistParticipants(input);
+
+      expect(database.prepare(`
+SELECT generation_id AS generationId, user_id AS userId, role
+FROM battle_report_generation_participants
+ORDER BY user_id
+      `.trim()).all()).toEqual([
+        { generationId: 'generation-1', userId: 42, role: 'host' },
+        { generationId: 'generation-1', userId: 99, role: 'member' },
+      ]);
+    } finally {
+      database.close();
+    }
+  });
+
+  it('preserves null role for legacy multiplayer snapshots and batches at most sixteen users', async () => {
+    const client = sequentialD1([result(), result()]);
+    await persistArenaGenerationParticipants(client, 'generation-legacy', {
+      roomId: 'room-legacy',
+      participantUserIds: Array.from({ length: 32 }, (_, index) => index + 1),
+      collaborativeInfluence: false,
+    });
+
+    expect(client.boundCalls).toHaveLength(2);
+    expect(client.boundCalls[0]).toHaveLength(16 * 3);
+    expect(client.boundCalls[1]).toHaveLength(16 * 3);
+    expect(client.boundCalls.flat()).toContain(null);
+  });
+
+  it('rejects participant persistence when the effect idempotency identity is wrong', async () => {
+    const client = sequentialD1([]);
+    const ports = createNodeArenaGenerationFinalizationPorts({ getD1Client: () => client });
+
+    await expect(ports.persistParticipants({
+      ...claimInput,
+      idempotencyKey: 'arena-terminal:another-generation:participants',
+    })).rejects.toThrow('ARENA_PARTICIPANTS_IDEMPOTENCY_KEY_INVALID');
+    expect(client.prepare).not.toHaveBeenCalled();
   });
 
   it.each(['markdown', 'web'] as const)('authorizes %s terminal fallback by actor hash and reads full R2 output', async (reportFormat) => {

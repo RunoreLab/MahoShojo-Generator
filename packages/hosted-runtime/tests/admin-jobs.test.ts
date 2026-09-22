@@ -13,6 +13,17 @@ describe('持久化管理作业',()=>{
   await expect(previewAdminCleanup(f.db,{target:'pvp_rounds',ids:[]})).rejects.toThrow();
   expect(f.sqlite.prepare('SELECT count(*) AS n FROM admin_jobs').get()).toEqual({n:0});f.sqlite.close();
  });
+ it('清理生成记录时通过 FK cascade 删除多人参与关系',async()=>{
+  const f=await adminManagementFixture(['data.maintenance']);
+  f.sqlite.exec('PRAGMA foreign_keys=ON');
+  f.sqlite.exec("INSERT INTO users (id,username,email,auth_key) VALUES (42,'member','member@example.test','member-key'); INSERT INTO battle_report_generations(id,started_at,ended_at,duration_ms,status,generation_mode,endpoint,mode,created_at,updated_at) VALUES('participant-gen','2020-01-01','2020-01-01',1,'completed','stream','fixture','classic','2020-01-01','2020-01-01'); INSERT INTO battle_report_generation_participants(generation_id,user_id,role) VALUES('participant-gen',42,'member')");
+  const preview=await previewAdminCleanup(f.db,{target:'battle_report_generations',ids:['participant-gen']});
+  const job=await createAdminJob(f.db,{kind:'cleanup',target:'battle_report_generations',ids:['participant-gen'],previewVersion:preview.previewVersion,reason:'级联清理演练',idempotencyKey:'cleanup-participant-generation'},f.context);
+  await runAdminJobStep(f.db,bucket().storage,job.result!.jobId);
+  expect(f.sqlite.prepare('SELECT count(*) AS n FROM battle_report_generations WHERE id=?').get('participant-gen')?.n).toBe(0);
+  expect(f.sqlite.prepare('SELECT count(*) AS n FROM battle_report_generation_participants WHERE generation_id=?').get('participant-gen')?.n).toBe(0);
+  f.sqlite.close();
+ });
  it('导出进度持久化、重复投递不重复执行、撤权后拒绝新步骤',async()=>{
   const f=await adminManagementFixture(['exports.read']);const b=bucket();
   f.sqlite.exec("INSERT INTO users (id,username,email,auth_key) VALUES (1,'fixture','fixture@example.test','never-export'); INSERT INTO data_cards (id,user_id,type,name,data) VALUES ('card',1,'character','合成卡片','{}')");

@@ -23,7 +23,7 @@ export type ArenaTerminalClaimResult = {
   finalized: boolean;
 };
 
-export type ArenaTerminalEffect = 'combatants' | 'story-impacts' | 'ratings';
+export type ArenaTerminalEffect = 'combatants' | 'participants' | 'story-impacts' | 'ratings';
 
 export type ArenaTerminalEffectInput = ArenaTerminalClaimInput & {
   /**
@@ -51,6 +51,7 @@ export interface ArenaGenerationFinalizationPorts {
   completeTerminal(_input: ArenaTerminalClaimInput): Promise<void>;
   failTerminal(_input: ArenaTerminalClaimInput & { failureCode: string }): Promise<void>;
   persistCombatants(_input: ArenaTerminalEffectInput): Promise<void>;
+  persistParticipants(_input: ArenaTerminalEffectInput): Promise<void>;
   applyStoryImpacts(_input: ArenaTerminalEffectInput): Promise<void>;
   settleRatings(_input: ArenaTerminalEffectInput): Promise<void>;
   readRanking(_input: {
@@ -157,6 +158,7 @@ export const createArenaGenerationFinalizer = (
       if (!claim.finalized) {
         const effectClaim = { ...claimInput, resultRef };
         await ports.persistCombatants(effectInput(effectClaim, 'combatants'));
+        await ports.persistParticipants(effectInput(effectClaim, 'participants'));
         if (input.status === 'completed') {
           await ports.applyStoryImpacts(effectInput(effectClaim, 'story-impacts'));
           await ports.settleRatings(effectInput(effectClaim, 'ratings'));
