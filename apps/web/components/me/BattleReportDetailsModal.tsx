@@ -9,12 +9,13 @@ type CombatantItem = {
   sortIndex: number;
   name: string;
   type: string | null;
-  templateId: string | null;
-  isNative: boolean;
-  isPreset: boolean;
+  templateId?: string | null;
+  isNative?: boolean;
+  isPreset?: boolean;
   teamId: number | null;
-  dataCardId: string | null;
-  dataCardUpdatedAt: string | null;
+  characterGuidance?: string | null;
+  dataCardId?: string | null;
+  dataCardUpdatedAt?: string | null;
 };
 
 type DetailResponse = {
@@ -45,6 +46,9 @@ type DetailResponse = {
     pvpRoomId: string | null;
     pvpMatchId: string | null;
     pvpRoundId: string | null;
+    accessScope: 'owner' | 'arena-participant' | 'pvp-participant';
+    arenaParticipantRole: 'host' | 'member' | null;
+    sourceKind: 'solo' | 'arena-multiplayer' | 'pvp';
   };
   combatants: CombatantItem[];
 };
@@ -72,6 +76,16 @@ const formatDuration = (ms: number): string => {
   const min = Math.floor(sec / 60);
   const rest = sec % 60;
   return `${min}m ${rest}s`;
+};
+
+const sourceLabel = (record: DetailResponse['record']): string => {
+  if (record.sourceKind === 'pvp') return 'PVP';
+  if (record.sourceKind === 'arena-multiplayer') {
+    if (record.arenaParticipantRole === 'host') return '多人 · 房主';
+    if (record.arenaParticipantRole === 'member') return '多人 · 成员';
+    return '多人参与';
+  }
+  return '单人';
 };
 
 export function BattleReportDetailsModal({ isOpen, generationId, onClose, onRegenerate, isRegenerating, regenerateError }: Props) {
@@ -167,7 +181,7 @@ export function BattleReportDetailsModal({ isOpen, generationId, onClose, onRege
             </div>
             <div className="text-sm">
               <div className="text-xs text-gray-500">来源</div>
-              <div className="font-medium text-gray-900 break-all">{record.endpoint}</div>
+              <div className="font-medium text-gray-900 break-all">{sourceLabel(record)} · {record.endpoint}</div>
             </div>
             <div className="text-sm">
               <div className="text-xs text-gray-500">PVP 关联</div>
@@ -203,7 +217,9 @@ export function BattleReportDetailsModal({ isOpen, generationId, onClose, onRege
                       <div className="col-span-5 truncate font-medium text-gray-900">{c.name}</div>
                       <div className="col-span-3 truncate text-gray-700">{c.type || '未知'}</div>
                       <div className="col-span-4 truncate text-gray-600">
-                        {c.dataCardId ? `数据卡 ${c.dataCardId}` : c.isPreset ? '预设角色' : c.isNative ? '本地原生' : '未知'}
+                        {record.accessScope === 'arena-participant'
+                          ? '多人共享投影'
+                          : c.dataCardId ? `数据卡 ${c.dataCardId}` : c.isPreset ? '预设角色' : c.isNative ? '本地原生' : '未知'}
                       </div>
                     </div>
                   ))}

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   getBattleReportGenerationByIdLite: vi.fn(),
+  getBattleReportGenerationAccessByUserId: vi.fn(),
   updateBattleReportGenerationOutputHasSensitiveWords: vi.fn(),
   isUserInPvpMatch: vi.fn(),
   quickCheck: vi.fn(),
@@ -11,6 +12,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/lib/database/battle-report-generations', () => ({
   getBattleReportGenerationByIdLite: mocks.getBattleReportGenerationByIdLite,
+  getBattleReportGenerationAccessByUserId: mocks.getBattleReportGenerationAccessByUserId,
   updateBattleReportGenerationOutputHasSensitiveWords: mocks.updateBattleReportGenerationOutputHasSensitiveWords,
 }));
 
@@ -42,12 +44,20 @@ import { appRouteHandler } from '@/app/api/me/battle-reports/[generationId]/rege
 describe('battle report regenerate handler', () => {
   beforeEach(() => {
     mocks.getBattleReportGenerationByIdLite.mockReset();
+    mocks.getBattleReportGenerationAccessByUserId.mockReset();
     mocks.updateBattleReportGenerationOutputHasSensitiveWords.mockReset();
     mocks.isUserInPvpMatch.mockReset();
     mocks.quickCheck.mockReset();
     mocks.getLargeObjectByOwnerRef.mockReset();
     mocks.getObjectText.mockReset();
     mocks.isUserInPvpMatch.mockResolvedValue(false);
+    mocks.getBattleReportGenerationAccessByUserId.mockResolvedValue({
+      generationId: 'mock-generation',
+      ownerUserId: 7,
+      pvpMatchId: null,
+      arenaParticipantGenerationId: null,
+      arenaParticipantRole: null,
+    });
     mocks.quickCheck.mockResolvedValue({ hasSensitiveWords: false });
     mocks.updateBattleReportGenerationOutputHasSensitiveWords.mockResolvedValue(undefined);
   });
@@ -197,6 +207,40 @@ describe('battle report regenerate handler', () => {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
     }));
     expect(response.status).toBe(409);
+  });
+
+  it('projects host-local render guidance away for an Arena participant', async () => {
+    mocks.getBattleReportGenerationAccessByUserId.mockResolvedValue({
+      generationId: 'arena-member',
+      ownerUserId: 99,
+      pvpMatchId: null,
+      arenaParticipantGenerationId: 'arena-member',
+      arenaParticipantRole: 'member',
+    });
+    mocks.getBattleReportGenerationByIdLite.mockResolvedValue({
+      id: 'arena-member', user_id: 7, pvp_match_id: null,
+      output_preview: '# 战报\n\n正文', output_has_sensitive_words: 0,
+      generation_mode: 'stream', endpoint: 'api/arena/generate-stream', mode: 'classic',
+      scenario_title: null, headline: '多人战报', winner: '角色甲', ai_model: null,
+      prompt_tokens: null, completion_tokens: null, total_tokens: null,
+      cached_tokens: null, reasoning_tokens: null,
+      extra_json: JSON.stringify({ battleReportRenderSnapshotV1: {
+        version: 1,
+        userGuidance: '共享引导',
+        characterGuidances: [{ characterName: '角色甲', guidance: '房主本地指导' }],
+      } }),
+    });
+
+    const response = await appRouteHandler(new Request(
+      'https://example.test/api/me/battle-reports/arena-member/regenerate',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' },
+    ));
+    const payload = await response.json() as any;
+
+    expect(response.status).toBe(200);
+    expect(payload.accessScope).toBe('arena-participant');
+    expect(payload.report.userGuidance).toBe('共享引导');
+    expect(payload.report).not.toHaveProperty('characterGuidances');
   });
 
 });

@@ -94,6 +94,8 @@ type BattleReportLite = {
   cachedTokens: number | null;
   pvpMatchId: string | null;
   contentBlocked: boolean;
+  sourceKind: 'solo' | 'arena-multiplayer' | 'pvp';
+  arenaParticipantRole: 'host' | 'member' | null;
 };
 
 export type MeProfileCardPayload = {
@@ -200,6 +202,16 @@ const statusLabel = (status: string): string => {
     default:
       return status;
   }
+};
+
+const sourceLabel = (report: BattleReportLite): string => {
+  if (report.sourceKind === 'pvp') return 'PVP';
+  if (report.sourceKind === 'arena-multiplayer') {
+    if (report.arenaParticipantRole === 'host') return '多人 · 房主';
+    if (report.arenaParticipantRole === 'member') return '多人 · 成员';
+    return '多人参与';
+  }
+  return '单人';
 };
 
 function getInitials(name: string) {
@@ -671,6 +683,7 @@ export function ProfileCard({
                       </div>
                       <div className="text-[11px] text-white/80">{formatDateTime(r.startedAt)}</div>
                     </div>
+                    <div className="mt-1 text-[11px] text-white/75">来源：{sourceLabel(r)}</div>
                     <div className="mt-1 text-xs text-white/90 break-words">
                       {r.contentBlocked ? '（内容已屏蔽）' : r.displayTitle || r.headline || '（无标题）'}
                     </div>

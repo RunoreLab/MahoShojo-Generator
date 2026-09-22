@@ -131,6 +131,8 @@ type BattleReportLite = {
   cachedTokens: number | null;
   pvpMatchId: string | null;
   contentBlocked: boolean;
+  sourceKind: 'solo' | 'arena-multiplayer' | 'pvp';
+  arenaParticipantRole: 'host' | 'member' | null;
 };
 
 const ARENA_TIER_WHITELIST = new Set(['无牌', '白牌', '字牌', '花牌', '权杖', '女王']);
@@ -455,6 +457,12 @@ const handler = withPvpErrorBoundary(async function handler(req: Request): Promi
     cachedTokens: r.cached_tokens ?? null,
     pvpMatchId: r.pvp_match_id,
     contentBlocked: Boolean(r.output_has_sensitive_words),
+    sourceKind: r.pvp_match_id
+      ? 'pvp'
+      : r.arena_participant_generation_id
+        ? 'arena-multiplayer'
+        : 'solo',
+    arenaParticipantRole: r.arena_participant_generation_id ? (r.arena_participant_role ?? null) : null,
   }));
 
   const matchIds = pvp.matches.map((m) => m.id);

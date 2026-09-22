@@ -364,6 +364,7 @@ const successfulPorts = (counts: SideEffectCounts): ArenaGenerationFinalizationP
     return { kind: 'created', resultRef: input.resultRef, finalized: false };
   },
   async persistCombatants() { counts.combatants += 1; },
+  async persistParticipants() {},
   async applyStoryImpacts() { counts.impacts += 1; },
   async settleRatings() { counts.ratings += 1; },
   async completeTerminal() { counts.complete += 1; },
@@ -877,6 +878,7 @@ describe.sequential('Arena resumable generation fault-injection matrix', () => {
       async claimTerminal() { throw new Error('injected D1 outage'); },
       async failTerminal() { throw new Error('injected D1 outage'); },
       async persistCombatants() { throw new Error('unexpected side effect'); },
+      async persistParticipants() { throw new Error('unexpected side effect'); },
       async applyStoryImpacts() { throw new Error('unexpected side effect'); },
       async settleRatings() { throw new Error('unexpected side effect'); },
       async completeTerminal() { throw new Error('unexpected side effect'); },
@@ -1191,6 +1193,7 @@ describe.sequential('Arena resumable generation fault-injection matrix', () => {
       async claimTerminal() { throw new Error('fault-injected process died before durable terminal'); },
       async failTerminal() { throw new Error('fault-injected process died before durable terminal'); },
       async persistCombatants() { throw new Error('unexpected combatant write'); },
+      async persistParticipants() { throw new Error('unexpected participant write'); },
       async applyStoryImpacts() { throw new Error('unexpected impact write'); },
       async settleRatings() { throw new Error('unexpected rating write'); },
       async completeTerminal() { throw new Error('unexpected terminal completion'); },

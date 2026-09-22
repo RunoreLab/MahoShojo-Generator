@@ -25,6 +25,8 @@ type BattleReportRecordSummary = {
   pvpRoomId: string | null;
   pvpMatchId: string | null;
   pvpRoundId: string | null;
+  sourceKind: 'solo' | 'arena-multiplayer' | 'pvp';
+  arenaParticipantRole: 'host' | 'member' | null;
 };
 
 type ListResponse = {
@@ -63,6 +65,16 @@ const clampInt = (value: unknown, fallback: number, min: number, max: number): n
 const getSingleQueryValue = (value: string | string[] | undefined): string | null => {
   if (Array.isArray(value)) return typeof value[0] === 'string' ? value[0] : null;
   return typeof value === 'string' ? value : null;
+};
+
+const sourceLabel = (record: BattleReportRecordSummary): string => {
+  if (record.sourceKind === 'pvp') return 'PVP';
+  if (record.sourceKind === 'arena-multiplayer') {
+    if (record.arenaParticipantRole === 'host') return '多人 · 房主';
+    if (record.arenaParticipantRole === 'member') return '多人 · 成员';
+    return '多人参与';
+  }
+  return '单人';
 };
 
 const areQueryRecordsEqual = (a: Record<string, string>, b: Record<string, string>): boolean => {
@@ -440,6 +452,9 @@ export function BattleReportsPanel({ isAuthenticated, onOpenDetails, onRegenerat
                               含屏蔽词
                             </span>
                           ) : null}
+                          <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[11px] text-indigo-800">
+                            {sourceLabel(r)}
+                          </span>
                         </div>
                         <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-600">
                           <span className="rounded-full border bg-gray-50 px-2 py-0.5">

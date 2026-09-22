@@ -8,12 +8,22 @@ import {
   extractBattleReportGenerationErrorMessage,
   loadBattleReportGenerationOutputText,
 } from '@/lib/arena/battle-report-record-utils';
-import { isUserInPvpMatch } from '@/lib/database/pvp';
+import { resolveBattleReportAccess } from '@/lib/arena/battle-report-access';
 import { hydrateBattleReportCardFromGenerationRecord } from '@/lib/arena/battle-report-card-fallback';
 import { json, readJson, requireAuthUser } from '@/lib/pvp/server';
 import { quickCheck } from '@/lib/sensitive-word-filter';
+import type { BattleReportRenderSnapshotV1 } from '@mahoshojo/contracts';
 
 type RegenerateBody = { userGuidance?: unknown };
+
+const projectArenaParticipantRenderSnapshot = (
+  snapshot: BattleReportRenderSnapshotV1 | null,
+): BattleReportRenderSnapshotV1 | null => {
+  if (!snapshot) return null;
+  const sharedSnapshot = { ...snapshot };
+  delete sharedSnapshot.characterGuidances;
+  return sharedSnapshot;
+};
 
 const getGenerationIdFromUrl = (url: string): string | null => {
   try {
@@ -39,12 +49,14 @@ async function handler(req: Request): Promise<Response> {
   const record = await getBattleReportGenerationByIdLite(generationId);
   if (!record) return json({ error: '记录不存在' }, { status: 404 });
 
-  const isOwner = record.user_id === auth.user.id;
-  const canReadByPvp = record.pvp_match_id ? await isUserInPvpMatch(record.pvp_match_id, auth.user.id) : false;
-  if (!isOwner && !canReadByPvp) return json({ error: '记录不存在' }, { status: 404 });
+  const access = await resolveBattleReportAccess(generationId, auth.user.id);
+  if (!access) return json({ error: '记录不存在' }, { status: 404 });
 
   const renderSnapshot = extractBattleReportRenderSnapshotV1(record.extra_json);
-  const isWeb = renderSnapshot?.reportFormat === 'web';
+  const projectedRenderSnapshot = access.scope === 'arena-participant'
+    ? projectArenaParticipantRenderSnapshot(renderSnapshot)
+    : renderSnapshot;
+  const isWeb = projectedRenderSnapshot?.reportFormat === 'web';
   const output = await loadBattleReportGenerationOutputText({
     generationId: record.id,
     // Web 必须读取完整存档，D1 preview 可能截断，不能作为可执行文档。
@@ -96,7 +108,7 @@ async function handler(req: Request): Promise<Response> {
     cachedTokens: record.cached_tokens,
     reasoningTokens: record.reasoning_tokens,
     userGuidance,
-    renderSnapshot,
+    renderSnapshot: projectedRenderSnapshot,
     authoritativeWebContent: isWeb && record.status === 'completed' && output.source === 'r2' && !output.readError,
   });
 
@@ -106,6 +118,8 @@ async function handler(req: Request): Promise<Response> {
     liveBody: hydrated.liveBody,
     generationId,
     generationMode: record.generation_mode,
+    accessScope: access.scope,
+    arenaParticipantRole: access.arenaParticipantRole,
   });
 }
 

@@ -4,6 +4,15 @@ import { touchUserLastActivity } from './user-activity';
 export type BattleReportGenerationStatus = 'completed' | 'aborted' | 'failed';
 export type BattleReportGenerationMode = 'stream' | 'non-stream';
 export type BattleReportGenerationListSort = 'started_at_desc' | 'started_at_asc';
+export type BattleReportGenerationParticipantRole = 'host' | 'member' | null;
+
+export type BattleReportGenerationAccessRow = {
+  generationId: string;
+  ownerUserId: number | null;
+  pvpMatchId: string | null;
+  arenaParticipantGenerationId: string | null;
+  arenaParticipantRole: BattleReportGenerationParticipantRole;
+};
 
 export type BattleReportGenerationsListFilter = {
   status?: BattleReportGenerationStatus;
@@ -110,6 +119,8 @@ export interface BattleReportGenerationRowLite {
   pvp_round_id: string | null;
   created_at: string;
   updated_at: string;
+  arena_participant_generation_id?: string | null;
+  arena_participant_role?: BattleReportGenerationParticipantRole;
 }
 
 export type BattleReportCountsByStatus = {
@@ -137,6 +148,11 @@ type BattleReportGenerationsRepoBundle = {
     db: unknown,
     generationId: string,
   ) => Promise<BattleReportGenerationRowLite | null>;
+  getBattleReportGenerationAccessByUserId: (
+    db: unknown,
+    generationId: string,
+    userId: number,
+  ) => Promise<BattleReportGenerationAccessRow | null>;
   listBattleReportGenerationsByUserIdLite: (
     db: unknown,
     userId: number,
@@ -188,6 +204,7 @@ const readBattleReportGenerationsRepoBundle = async (): Promise<BattleReportGene
       insertBattleReportGenerationRecord: repo.insertBattleReportGenerationRecord as BattleReportGenerationsRepoBundle['insertBattleReportGenerationRecord'],
       updateBattleReportGenerationOutputPreview: repo.updateBattleReportGenerationOutputPreview as BattleReportGenerationsRepoBundle['updateBattleReportGenerationOutputPreview'],
       getBattleReportGenerationByIdLite: repo.getBattleReportGenerationByIdLite as BattleReportGenerationsRepoBundle['getBattleReportGenerationByIdLite'],
+      getBattleReportGenerationAccessByUserId: repo.getBattleReportGenerationAccessByUserId as BattleReportGenerationsRepoBundle['getBattleReportGenerationAccessByUserId'],
       listBattleReportGenerationsByUserIdLite: repo.listBattleReportGenerationsByUserIdLite as BattleReportGenerationsRepoBundle['listBattleReportGenerationsByUserIdLite'],
       countBattleReportGenerationsByUserId: repo.countBattleReportGenerationsByUserId as BattleReportGenerationsRepoBundle['countBattleReportGenerationsByUserId'],
       updateBattleReportGenerationCombatantsWriteResult: repo.updateBattleReportGenerationCombatantsWriteResult as BattleReportGenerationsRepoBundle['updateBattleReportGenerationCombatantsWriteResult'],
@@ -256,6 +273,20 @@ export async function getBattleReportGenerationByIdLite(
   }
 }
 
+export async function getBattleReportGenerationAccessByUserId(
+  generationId: string,
+  userId: number,
+): Promise<BattleReportGenerationAccessRow | null> {
+  try {
+    const bundle = await readBattleReportGenerationsRepoBundle();
+    if (!bundle) return null;
+    return await bundle.getBattleReportGenerationAccessByUserId(bundle.db, generationId, userId);
+  } catch (error) {
+    console.error('读取 battle_report_generations access 失败:', error);
+    return null;
+  }
+}
+
 export async function getBattleReportGenerationsByUserIdLite(
   userId: number,
   limit: number,
@@ -290,8 +321,8 @@ export function buildBattleReportGenerationsWhereClause(
   userId: number,
   filter?: BattleReportGenerationsListFilter,
 ): { whereSql: string; params: unknown[]; orderBySql: string } {
-  const where: string[] = ['user_id = ?'];
-  const params: unknown[] = [userId];
+  const where: string[] = ['(user_id = ? OR EXISTS (SELECT 1 FROM battle_report_generation_participants participant WHERE participant.generation_id = battle_report_generations.id AND participant.user_id = ?))'];
+  const params: unknown[] = [userId, userId];
 
   const status = filter?.status;
   if (status === 'completed' || status === 'aborted' || status === 'failed') {

@@ -9,7 +9,7 @@ import {
 } from '@/lib/arena/battle-report-record-utils';
 import { getBattleReportGenerationCombatantsByGenerationId } from '@/lib/database/battle-report-generation-combatants';
 import { parseGenerationCombatantsFallback } from '@/lib/database/arena-ratings';
-import { isUserInPvpMatch } from '@/lib/database/pvp';
+import { resolveBattleReportAccess } from '@/lib/arena/battle-report-access';
 import { json, requireAuthUser } from '@/lib/pvp/server';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 
@@ -37,9 +37,9 @@ async function handler(req: Request): Promise<Response> {
   const record = await getBattleReportGenerationByIdLite(generationId);
   if (!record) return json({ error: '记录不存在' }, { status: 404 });
 
-  const isOwner = record.user_id === auth.user.id;
-  const canReadByPvp = record.pvp_match_id ? await isUserInPvpMatch(record.pvp_match_id, auth.user.id) : false;
-  if (!isOwner && !canReadByPvp) return json({ error: '无权限' }, { status: 403 });
+  const access = await resolveBattleReportAccess(generationId, auth.user.id);
+  if (!access) return json({ error: '无权限' }, { status: 403 });
+  const isArenaParticipant = access.scope === 'arena-participant';
 
   const tableCombatants = await getBattleReportGenerationCombatantsByGenerationId(generationId);
   const combatants = tableCombatants.length > 0 ? tableCombatants : parseGenerationCombatantsFallback(generationId, record.extra_json);
@@ -94,18 +94,23 @@ async function handler(req: Request): Promise<Response> {
       pvpRoomId: record.pvp_room_id,
       pvpMatchId: record.pvp_match_id,
       pvpRoundId: record.pvp_round_id,
+      accessScope: access.scope,
+      arenaParticipantRole: access.arenaParticipantRole,
+      sourceKind: record.pvp_match_id ? 'pvp' : access.isArenaParticipant ? 'arena-multiplayer' : 'solo',
     },
     combatants: combatants.map((c) => ({
       sortIndex: c.sort_index,
       name: c.name,
       type: c.type,
-      templateId: c.template_id,
-      isNative: Boolean(c.is_native),
-      isPreset: Boolean(c.is_preset),
+      ...(isArenaParticipant ? {} : {
+        templateId: c.template_id,
+        isNative: Boolean(c.is_native),
+        isPreset: Boolean(c.is_preset),
+        characterGuidance: typeof c.character_guidance === 'string' && c.character_guidance.trim() ? c.character_guidance : null,
+        dataCardId: c.data_card_id,
+        dataCardUpdatedAt: c.data_card_updated_at,
+      }),
       teamId: c.team_id,
-      characterGuidance: typeof c.character_guidance === 'string' && c.character_guidance.trim() ? c.character_guidance : null,
-      dataCardId: c.data_card_id,
-      dataCardUpdatedAt: c.data_card_updated_at,
     })),
   });
 }
