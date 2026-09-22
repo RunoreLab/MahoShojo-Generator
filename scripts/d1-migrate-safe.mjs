@@ -1,9 +1,23 @@
-import { mkdirSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 const SPECIAL_MIGRATION_NAME = '0001_users_admin_flags.sql';
 const WRANGLER_WORKSPACE = '@mahoshojo/web';
+const WRANGLER_APP_DIR = 'apps/web';
+
+const resolvePnpmInvocation = () => {
+  const execPath = process.env.npm_execpath;
+  if (typeof execPath === 'string' && execPath.length > 0 && /\.[cm]?js$/i.test(execPath)) {
+    return { command: process.execPath, prefixArgs: [execPath] };
+  }
+  return { command: 'pnpm', prefixArgs: [] };
+};
+
+const spawnPnpm = (pnpmArgs, options) => {
+  const { command, prefixArgs } = resolvePnpmInvocation();
+  return spawnSync(command, [...prefixArgs, ...pnpmArgs], options);
+};
 
 const parseArgs = (argv) => {
   const args = {
@@ -104,7 +118,7 @@ const normalizeWranglerResponse = (payload) => {
 };
 
 const buildWranglerCommandArgs = (options, sql) => {
-  const args = ['--filter', WRANGLER_WORKSPACE, 'exec', 'wrangler', 'd1', 'execute', options.database];
+  const args = ['d1', 'execute', options.database];
 
   if (options.local) args.push('--local');
   if (options.remote) args.push('--remote');
@@ -125,14 +139,24 @@ const executeSql = (options, sql) => {
   mkdirSync(xdgConfigHome, { recursive: true });
 
   const commandArgs = buildWranglerCommandArgs(options, sql);
-  const result = spawnSync('pnpm', commandArgs, {
+  const spawnOptions = {
     encoding: 'utf8',
     env: {
       ...process.env,
       XDG_CONFIG_HOME: xdgConfigHome,
     },
     maxBuffer: 10 * 1024 * 1024,
-  });
+  };
+  const wranglerBin = resolve(process.cwd(), WRANGLER_APP_DIR, 'node_modules/wrangler/bin/wrangler.js');
+  const result = existsSync(wranglerBin)
+    ? spawnSync(process.execPath, [wranglerBin, ...commandArgs], spawnOptions)
+    : spawnPnpm(['--filter', WRANGLER_WORKSPACE, 'exec', 'wrangler', ...commandArgs], spawnOptions);
+
+  if (result.error) {
+    throw new Error(
+      `启动 wrangler 执行进程失败: ${result.error.message}。若回退到 pnpm 路径，请通过 pnpm run 执行本脚本，或在 PATH 中提供 pnpm.exe。`,
+    );
+  }
 
   if (result.status !== 0) {
     const errorOutput = `${result.stdout ?? ''}\n${result.stderr ?? ''}`.trim();
