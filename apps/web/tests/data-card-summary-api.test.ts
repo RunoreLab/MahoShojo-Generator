@@ -72,6 +72,15 @@ test('收藏只返回自己的可见且通过审核的收藏，失效卡不会�
   expect((await listDataCardSummaries(db, 1, 'favorites', DataCardSummaryQuerySchema.parse({}))).total).toBe(0);
 });
 
+test('历史空互动计数按零筛选，与摘要展示一致', async () => {
+  sqlite.exec(`UPDATE data_cards SET like_count=NULL, usage_count=NULL, favorite_count=NULL WHERE id='card-199'`);
+  const result = await listDataCardSummaries(db, 1, 'my', DataCardSummaryQuerySchema.parse({
+    search: 'card-199', minLikes: 0, maxLikes: 0, minUsage: 0, maxFavorites: 0,
+  }));
+  expect(result.cards).toHaveLength(1);
+  expect(result.cards[0]).toMatchObject({ like_count: 0, usage_count: 0, favorite_count: 0 });
+});
+
 test('摘要接口兼容旧接口，单卡正文由所有权隔离，私有响应不缓存', async () => {
   const summary = await cardsHandler(new Request('https://test/api/data-cards?view=summary&limit=12'));
   expect(summary.status).toBe(200); expect(summary.headers.get('cache-control')).toBe('private, no-store');

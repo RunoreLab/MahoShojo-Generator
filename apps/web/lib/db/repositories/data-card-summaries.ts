@@ -41,8 +41,9 @@ export async function listDataCardSummaries(db: AppDrizzleDb, userId: number, so
     [dataCards.usageCount, query.minUsage, query.maxUsage],
     [dataCards.favoriteCount, query.minFavorites, query.maxFavorites],
   ] as const) {
-    if (min !== undefined) conditions.push(gte(column, min));
-    if (max !== undefined) conditions.push(lte(column, max));
+    const value = sql<number>`COALESCE(${column}, 0)`;
+    if (min !== undefined) conditions.push(gte(value, min));
+    if (max !== undefined) conditions.push(lte(value, max));
   }
   if (query.nativeOnly) conditions.push(eq(dataCardMetrics.isNative, true));
   if (query.nativeAllowedOnly) conditions.push(sql`${nativeAllowed}`);
@@ -55,7 +56,7 @@ export async function listDataCardSummaries(db: AppDrizzleDb, userId: number, so
   const updated = sql`COALESCE(${dataCards.updatedAt}, ${dataCards.createdAt})`;
   const sortColumn = {
     updated_at: updated, created_at: sql`COALESCE(${dataCards.createdAt}, ${dataCards.updatedAt})`,
-    likes: dataCards.likeCount, usage: dataCards.usageCount, favorites: dataCards.favoriteCount,
+    likes: sql`COALESCE(${dataCards.likeCount}, 0)`, usage: sql`COALESCE(${dataCards.usageCount}, 0)`, favorites: sql`COALESCE(${dataCards.favoriteCount}, 0)`,
     favorited_at: favorites.createdAt,
   }[query.sortBy];
   const from = <T extends ReturnType<AppDrizzleDb['select']>>(select: T) => select.from(dataCards)

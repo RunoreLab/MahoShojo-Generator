@@ -137,6 +137,7 @@ const inferRoleType = (card: any): CardRoleType | undefined => {
 
 const extractCardAuthor = (card: any): string | undefined => {
   if (!card) return undefined;
+  if (card.data === undefined && typeof card.username === 'string') return card.username || undefined;
   try {
     const data = typeof card.data === 'string' ? JSON.parse(card.data) : card.data;
     if (data && typeof data === 'object' && typeof (data as any)._author === 'string') {

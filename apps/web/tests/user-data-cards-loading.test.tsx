@@ -9,7 +9,7 @@ import type { DataCardSummary, DataCardSummaryPage } from '@mahoshojo/contracts/
 import DataCardsModal from '@/components/CharManager/DataCardsModal';
 import BattleDataModal from '@/components/BattleDataModal';
 vi.mock('@/lib/useAuth', () => ({ useAuth: () => ({ isAuthenticated: true, user: { id: 1, username: 'test' }, userBadges: [] }) }));
-vi.mock('@/components/DataCard', () => ({ default: (props: any) => <button onClick={props.onEditData || props.onViewDetails}>{props.name}</button> }));
+vi.mock('@/components/DataCard', () => ({ default: (props: any) => <button data-author={props.author} onClick={props.onEditData || props.onViewDetails}>{props.name}</button> }));
 vi.mock('@/components/DataCardDetailsModal', () => ({ default: () => null }));
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 let root: Root;
@@ -72,6 +72,7 @@ it('200 张卡管理首屏只读一页摘要，翻页才发新查询，载入才
   function Modal() { const [currentPage, setPage] = useState(1); return <DataCardsModal {...modalProps} currentPage={currentPage} onPageChange={setPage} onLoadCard={onLoad} />; }
   await act(async () => root.render(<Modal />));
   expect(get).toHaveBeenCalledOnce(); expect(get.mock.calls[0][1]).toMatchObject({ limit: 12, offset: 0 }); expect(full).not.toHaveBeenCalled();
+  expect(document.querySelector('[data-author="test"]')).not.toBeNull();
   await act(async () => [...document.querySelectorAll('button')].find((b) => b.textContent === '下一页')!.click());
   expect(get).toHaveBeenCalledTimes(2); expect(get.mock.calls[1][1]).toMatchObject({ offset: 12 });
   await act(async () => [...document.querySelectorAll('button')].find((b) => b.textContent === '我的角色')!.click());
