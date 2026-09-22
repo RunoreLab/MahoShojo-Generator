@@ -98,7 +98,11 @@ export const GenerationMirrorSchema = z
     startedAt: IsoTimestampSchema,
     finishedAt: IsoTimestampSchema.optional(),
   })
-  .strict();
+  .strict()
+  .refine((value) => value.hostAccountUserId === undefined
+    || value.participantUserIds.includes(value.hostAccountUserId), {
+    path: ['hostAccountUserId'], message: 'host must be a frozen participant',
+  });
 export type GenerationMirror = z.infer<typeof GenerationMirrorSchema>;
 
 export const ArenaRoomSnapshotSchema = z
@@ -173,13 +177,17 @@ const GenerationEventPayloadSchema = z
     participantUserIds: ParticipantUserIdsSchema,
     hostAccountUserId: z.number().int().positive().optional(),
   })
-  .strict();
+  .strict()
+  .refine((value) => value.hostAccountUserId === undefined
+    || value.participantUserIds.includes(value.hostAccountUserId), {
+    path: ['hostAccountUserId'], message: 'host must be a frozen participant',
+  });
 
-const GenerationCompletedPayloadSchema = GenerationEventPayloadSchema.extend({
+const GenerationCompletedPayloadSchema = GenerationEventPayloadSchema.safeExtend({
   generationRecordId: OpaqueKeySchema,
 }).strict();
 
-const GenerationFailedPayloadSchema = GenerationEventPayloadSchema.extend({
+const GenerationFailedPayloadSchema = GenerationEventPayloadSchema.safeExtend({
   errorCode: ArenaErrorCodeSchema,
 }).strict();
 

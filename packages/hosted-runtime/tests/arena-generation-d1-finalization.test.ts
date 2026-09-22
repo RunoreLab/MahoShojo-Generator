@@ -1093,6 +1093,11 @@ CREATE TABLE battle_report_generation_participants (
 
       await ports.persistParticipants(input);
       await ports.persistParticipants(input);
+      database.exec('DELETE FROM battle_report_generation_participants WHERE user_id = 99');
+      await ports.persistParticipants(input);
+      await persistArenaGenerationParticipants(sqliteD1(database), 'generation-1', {
+        roomId: 'room-1', participantUserIds: [42, 99], collaborativeInfluence: true,
+      });
 
       expect(database.prepare(`
 SELECT generation_id AS generationId, user_id AS userId, role
@@ -1102,23 +1107,47 @@ ORDER BY user_id
         { generationId: 'generation-1', userId: 42, role: 'host' },
         { generationId: 'generation-1', userId: 99, role: 'member' },
       ]);
+
+      database.exec("UPDATE battle_report_generation_participants SET role = NULL WHERE user_id = 42");
+      await ports.persistParticipants(input);
+      expect(database.prepare('SELECT role FROM battle_report_generation_participants WHERE user_id = 42').all())
+        .toEqual([{ role: null }]);
     } finally {
       database.close();
     }
   });
 
   it('preserves null role for legacy multiplayer snapshots and batches at most sixteen users', async () => {
-    const client = sequentialD1([result(), result()]);
+    const client = sequentialD1([result(), result(), result()]);
     await persistArenaGenerationParticipants(client, 'generation-legacy', {
       roomId: 'room-legacy',
       participantUserIds: Array.from({ length: 32 }, (_, index) => index + 1),
       collaborativeInfluence: false,
     });
 
-    expect(client.boundCalls).toHaveLength(2);
-    expect(client.boundCalls[0]).toHaveLength(16 * 3);
+    expect(client.boundCalls).toHaveLength(3);
+    expect(client.boundCalls[0]).toEqual(['generation-legacy', 33]);
     expect(client.boundCalls[1]).toHaveLength(16 * 3);
+    expect(client.boundCalls[2]).toHaveLength(16 * 3);
     expect(client.boundCalls.flat()).toContain(null);
+  });
+
+  it.each(['role', 'membership'])('rejects conflicting participant %s before writing more access rows', async (conflict) => {
+    const database = new DatabaseSync(':memory:');
+    try {
+      database.exec(`CREATE TABLE battle_report_generation_participants (
+        generation_id TEXT, user_id INTEGER, role TEXT, PRIMARY KEY (generation_id, user_id)
+      )`);
+      database.prepare('INSERT INTO battle_report_generation_participants VALUES (?, ?, ?)')
+        .run('generation-1', conflict === 'role' ? 42 : 77, 'member');
+      await expect(persistArenaGenerationParticipants(sqliteD1(database), 'generation-1', {
+        roomId: 'room-1', participantUserIds: [42, 99], hostAccountUserId: 42, collaborativeInfluence: true,
+      })).rejects.toThrow('ARENA_PARTICIPANTS_EVIDENCE_CONFLICT');
+      expect(database.prepare('SELECT user_id FROM battle_report_generation_participants WHERE user_id = 99').all())
+        .toEqual([]);
+    } finally {
+      database.close();
+    }
   });
 
   it('rejects participant persistence when the effect idempotency identity is wrong', async () => {
@@ -1490,6 +1519,7 @@ ORDER BY user_id
         extra_json: JSON.stringify(pendingExtra),
         r2_key: null,
       }]),
+      result([], 1),
       result([], 1),
       result([], 1),
       result([], 1),
