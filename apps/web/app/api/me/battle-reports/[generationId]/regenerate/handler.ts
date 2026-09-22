@@ -68,6 +68,9 @@ async function handler(req: Request): Promise<Response> {
     if (output.readError) {
       return json({ error: `战报正文读取失败：${output.readError}` }, { status: 502 });
     }
+    if (output.source === 'r2' && !output.hasStoredOutput) {
+      return json({ error: '战报正文已超过保留期，无法还原。' }, { status: 409 });
+    }
     if (errorMessage) {
       return json({ error: `该战报未生成可重生正文：${errorMessage}` }, { status: 409 });
     }

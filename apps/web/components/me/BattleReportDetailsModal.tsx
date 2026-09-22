@@ -41,6 +41,7 @@ type DetailResponse = {
     canRegenerate: boolean;
     outputSource: 'd1' | 'r2' | 'none';
     outputReadError: string | null;
+    contentExpired: boolean;
     errorMessage: string | null;
     outputHasShieldWords: boolean;
     pvpRoomId: string | null;
@@ -115,6 +116,8 @@ export function BattleReportDetailsModal({ isOpen, generationId, onClose, onRege
           <div className="text-xs text-gray-500">
             {record?.contentBlocked
               ? '该记录包含敏感词，已禁止展示正文预览。'
+              : record?.contentExpired
+                ? '战报正文已超过保留期，但历史元数据仍可查看。'
               : record && !record.canRegenerate
                 ? '该记录当前没有可重生正文；可先查看失败原因或稍后重试。'
                 : '提示：详情仅用于回溯；建议及时下载战报卡片/Markdown。'}
@@ -192,7 +195,7 @@ export function BattleReportDetailsModal({ isOpen, generationId, onClose, onRege
             <div className="text-sm">
               <div className="text-xs text-gray-500">正文存储</div>
               <div className="font-medium text-gray-900">
-                {record.outputSource === 'r2' ? 'R2 外部存储' : record.outputSource === 'd1' ? 'D1 预览' : '无正文'}
+                {record.contentExpired ? 'R2 正文已超过保留期' : record.outputSource === 'r2' ? 'R2 外部存储' : record.outputSource === 'd1' ? 'D1 预览' : '无正文'}
               </div>
             </div>
           </div>
@@ -249,6 +252,10 @@ export function BattleReportDetailsModal({ isOpen, generationId, onClose, onRege
             ) : record.outputReadError ? (
               <div className="mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
                 正文读取失败：{record.outputReadError}
+              </div>
+            ) : record.contentExpired ? (
+              <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                战报正文已超过保留期，当前仅保留标题、时间、状态和参与身份等历史元数据。
               </div>
             ) : record.outputPreview ? (
               <pre className="mt-2 whitespace-pre-wrap rounded-lg border bg-gray-50 p-3 text-xs leading-relaxed text-gray-800">

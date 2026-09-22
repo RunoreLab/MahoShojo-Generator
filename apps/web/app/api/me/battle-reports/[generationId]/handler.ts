@@ -50,6 +50,7 @@ async function handler(req: Request): Promise<Response> {
   });
   const outputPreview = output.outputText || null;
   const hasPreviewText = Boolean(outputPreview && outputPreview.trim());
+  const contentExpired = output.source === 'r2' && !output.hasStoredOutput && !output.readError;
 
   let contentBlocked = record.output_has_sensitive_words === 1;
   if (hasPreviewText) {
@@ -89,6 +90,7 @@ async function handler(req: Request): Promise<Response> {
       canRegenerate,
       outputSource: output.source,
       outputReadError: output.readError,
+      contentExpired,
       errorMessage,
       outputHasShieldWords: Boolean(record.output_has_shield_words),
       pvpRoomId: record.pvp_room_id,
