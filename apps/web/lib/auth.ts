@@ -1,7 +1,7 @@
 import type { OnlineDataCardType } from '@mahoshojo/contracts/data-cards';
 import type { UserBadge } from '@/types/badge';
 import { signOutBetterAuthSession } from '@/lib/auth/logout';
-import { fetchJsonWithBoundedRetry, type BoundedJsonFailure } from '@/lib/bounded-fetch';
+import { fetchJsonWithBoundedRetry, throwIfAborted, type BoundedJsonFailure } from '@/lib/bounded-fetch';
 import { resolveApiErrorMessage } from '@/lib/client/apiError';
 import { mapDeckDetailPayload, mapDeckListPayload } from '@/lib/deck-client-mappers';
 import { DATA_CARD_LIST_PAGE_SIZE } from '@/lib/data-card-list-page';
@@ -319,7 +319,7 @@ const fetchCardListPages = async (
     params.set('limit', String(DATA_CARD_LIST_PAGE_SIZE));
     params.set('offset', String(offset));
     const data = await fetchDataCardJson(`${path}?${params}`, signal);
-    signal?.throwIfAborted();
+    throwIfAborted(signal);
     if (data?.success === false || !Array.isArray(data?.[key])) {
       throw new Error(typeof data?.error === 'string' ? data.error : '列表响应无效');
     }
