@@ -55,7 +55,7 @@ describe('Web 战报的本地执行许可', () => {
     const onWebPackageChange = vi.fn();
     await act(async () => root.render(<ArenaReportFormatSelector value="web" onChange={() => {}} onWebPackageChange={onWebPackageChange} />));
     const select = container.querySelector('select')!;
-    expect(select.parentElement?.textContent).toContain('Web 体验');
+    expect(select.parentElement?.textContent).toContain('Web 包');
     await act(async () => {
       select.value = BUILTIN_VISUAL_NOVEL_PACKAGE_REF.digest;
       select.dispatchEvent(new Event('change', { bubbles: true }));

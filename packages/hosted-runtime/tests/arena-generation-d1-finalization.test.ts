@@ -412,7 +412,7 @@ describe('Arena D1/R2 finalization ports', () => {
     const ports = createNodeArenaGenerationFinalizationPorts({ getD1Client: () => client });
     await ports.claimTerminal({
       ...claimInput,
-      metadata: { outputContract: 'web-document', webPackage, userGuidance: '长'.repeat(60_000) },
+      metadata: { outputContract: 'web-package-target', webPackage, userGuidance: '长'.repeat(60_000) },
     });
     const snapshot = JSON.parse(client.boundCalls[0]?.[44] as string).battleReportRenderSnapshotV1;
     expect(snapshot).toEqual({ version: 1, reportFormat: 'web', webPackage });

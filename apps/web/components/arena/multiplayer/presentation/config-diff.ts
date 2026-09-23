@@ -394,7 +394,7 @@ export const buildArenaRoomConfigDiffEntries = (
   if (JSON.stringify(roomConfig.webPackageRef ?? null) !== JSON.stringify(localConfig.webPackageRef ?? null)) {
     entries.push({
       id: 'web-package', category: '模式与故事', tone: 'change',
-      label: `Web 体验包：${roomConfig.webPackageRef ? `${roomConfig.webPackageRef.id}@${roomConfig.webPackageRef.version}` : '自由生成'} → ${localConfig.webPackageRef ? `${localConfig.webPackageRef.id}@${localConfig.webPackageRef.version}` : '自由生成'}`,
+      label: `Web 包：${roomConfig.webPackageRef ? `${roomConfig.webPackageRef.id}@${roomConfig.webPackageRef.version}` : '自由生成'} → ${localConfig.webPackageRef ? `${localConfig.webPackageRef.id}@${localConfig.webPackageRef.version}` : '自由生成'}`,
     });
   }
   if (roomConfig.reportFormat !== localConfig.reportFormat) {

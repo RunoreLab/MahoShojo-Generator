@@ -5,6 +5,7 @@ import {
   type GenerationStreamEvent,
 } from '@mahoshojo/hosted-api/arena-generation/service';
 import { parseArenaStructuredReportJson } from '../arena-generation/structured-report';
+import { isWebArenaOutputContract } from '../arena-generation/output-contract';
 import { normalizeUsage } from '../node-runtime/usage';
 import { WebPackageArtifactSchema, type WebPackageArtifact } from '@mahoshojo/contracts/web-package';
 
@@ -397,7 +398,7 @@ export const createArenaCompanionService = (
     }
 
     const headerMeta = parseHeaderMeta(upstream.headers);
-    const isWeb = headerMeta.outputContract === 'web-document' || Boolean(collected.webPackage);
+    const isWeb = isWebArenaOutputContract(headerMeta.outputContract) || Boolean(collected.webPackage);
     const writeArenaHistory = booleanOf(payload.writeArenaHistory, true);
     const writeCurrentState = booleanOf(payload.writeCurrentState, true);
     const structuredReport = isWeb ? null : parseArenaStructuredReportJson(collected.markdown, {

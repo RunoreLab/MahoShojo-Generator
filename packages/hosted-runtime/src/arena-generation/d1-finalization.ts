@@ -18,6 +18,7 @@ import {
 } from '@mahoshojo/contracts';
 import { parseArenaStructuredReportJson } from './structured-report';
 import { buildArenaTerminalEffectIdempotencyKey } from './finalization';
+import { isWebArenaOutputContract } from './output-contract';
 import type { NodeDataD1Client } from '../node-runtime/data-ports';
 
 const OUTPUT_KIND = 'battle_report_generation_output';
@@ -240,14 +241,14 @@ const structuredReport = (
 const terminalReport = (
   input: Pick<ArenaTerminalClaimInput, 'metadata' | 'markdown' | 'payload'>,
 ): Record<string, unknown> | null => streamReport(input.metadata)
-  ?? (input.metadata.outputContract === 'web-document' ? null : structuredReport(input));
+  ?? (isWebArenaOutputContract(input.metadata.outputContract) ? null : structuredReport(input));
 
 const terminalImpacts = (
   input: Pick<ArenaTerminalClaimInput, 'metadata' | 'markdown' | 'payload'>,
 ): Array<Record<string, unknown>> => {
   const streamed = streamImpacts(input.metadata);
   if (streamed.length > 0) return streamed;
-  const report = input.metadata.outputContract === 'web-document' ? null : structuredReport(input);
+  const report = isWebArenaOutputContract(input.metadata.outputContract) ? null : structuredReport(input);
   return Array.isArray(report?.impacts)
     ? report.impacts.flatMap((value) => recordOf(value) ? [recordOf(value)!] : [])
     : [];
@@ -346,7 +347,7 @@ const buildExtraJson = async (
   const snapshotReporterInfo = recordOf(input.metadata.reporterInfo);
   const battleReportRenderSnapshotV1 = parseBattleReportRenderSnapshotV1({
     version: 1,
-    ...(input.metadata.outputContract === 'web-document' ? { reportFormat: 'web' } : {}),
+    ...(isWebArenaOutputContract(input.metadata.outputContract) ? { reportFormat: 'web' } : {}),
     ...(input.metadata.webPackage ? { webPackage: input.metadata.webPackage } : {}),
     ...(snapshotReporterInfo ? {
       reporterInfo: {
@@ -366,7 +367,7 @@ const buildExtraJson = async (
     ...(typeof input.metadata.narrativeHistoryReadCount === 'number'
       ? { narrativeHistoryReadCount: input.metadata.narrativeHistoryReadCount }
       : {}),
-  }) ?? (input.metadata.outputContract === 'web-document'
+  }) ?? (isWebArenaOutputContract(input.metadata.outputContract)
     ? parseBattleReportRenderSnapshotV1({ version: 1, reportFormat: 'web',
       ...(input.metadata.webPackage ? { webPackage: input.metadata.webPackage } : {}) })
     : null);
@@ -379,12 +380,12 @@ const buildExtraJson = async (
   }
   const reconciliationCandidate = {
     report: {
-      headline: boundedString(report?.headline, 300) ?? (input.metadata.outputContract === 'web-document' ? null : headlineFromMarkdown(input.markdown)) ?? '',
+      headline: boundedString(report?.headline, 300) ?? (isWebArenaOutputContract(input.metadata.outputContract) ? null : headlineFromMarkdown(input.markdown)) ?? '',
       mode: boundedString(input.payload.mode, 64) ?? 'classic',
       officialReport: {
         winner: boundedString(report?.winner, 300)
           ?? boundedString(officialReport?.winner, 300)
-          ?? (input.metadata.outputContract === 'web-document' ? null : winnerFromMarkdown(input.markdown))
+          ?? (isWebArenaOutputContract(input.metadata.outputContract) ? null : winnerFromMarkdown(input.markdown))
           ?? '',
       },
     },
@@ -991,10 +992,10 @@ VALUES (
         boundedString(input.telemetry.providerName, 128),
         boundedString(input.telemetry.providerType, 64),
         boundedString(input.telemetry.model, 256),
-        boundedString(report?.headline, 300) ?? (input.metadata.outputContract === 'web-document' ? null : headlineFromMarkdown(terminalMarkdown)),
+        boundedString(report?.headline, 300) ?? (isWebArenaOutputContract(input.metadata.outputContract) ? null : headlineFromMarkdown(terminalMarkdown)),
         boundedString(report?.winner, 300)
           ?? boundedString(officialReport?.winner, 300)
-          ?? (input.metadata.outputContract === 'web-document' ? null : winnerFromMarkdown(terminalMarkdown)),
+          ?? (isWebArenaOutputContract(input.metadata.outputContract) ? null : winnerFromMarkdown(terminalMarkdown)),
         terminalMarkdown.length,
         markdownBytes,
         numberOf(usage?.promptTokens),

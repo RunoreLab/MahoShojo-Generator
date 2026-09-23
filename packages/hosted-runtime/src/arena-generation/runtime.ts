@@ -28,6 +28,7 @@ import type {
 import { createArenaStreamProjector } from './stream-projector';
 import { WebPackageRefSchema, type WebPackageArtifact } from '@mahoshojo/contracts/web-package';
 import { createWebPackageOverlay } from '@mahoshojo/web-package';
+import { isWebArenaOutputContract } from './output-contract';
 
 export const MAX_ARENA_COMBATANTS = ARENA_RESOURCE_BUDGET.maxCombatants;
 const PREPARED_PAYLOAD_KEY = '__arenaGenerationRuntimeV1';
@@ -611,9 +612,9 @@ export const createArenaGenerationRuntime = (
           && executionPayload.storyLength.trim()
           ? { storyLength: executionPayload.storyLength.trim() }
           : {}),
-      ...(prepared.metadata.outputContract === 'structured-report'
+      ...(isWebArenaOutputContract(prepared.metadata.outputContract)
+        || prepared.metadata.outputContract === 'structured-report'
         || prepared.metadata.outputContract === 'stream-markdown'
-        || prepared.metadata.outputContract === 'web-document'
         ? { outputContract: prepared.metadata.outputContract }
         : {}),
       ...(reporterInfo && typeof reporterInfo === 'object' && !Array.isArray(reporterInfo)

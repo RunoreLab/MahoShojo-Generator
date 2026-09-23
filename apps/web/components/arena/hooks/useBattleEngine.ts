@@ -1149,7 +1149,8 @@ export const useBattleEngine = () => {
           if (metaHeader) {
             try {
               const parsed = JSON.parse(decodeURIComponent(metaHeader));
-              authoritativeWebContract = parsed?.outputContract === 'web-document' && parsed?.reportFormat === 'web';
+              const contract = parsed?.outputContract;
+              authoritativeWebContract = (contract === 'web-document' || contract === 'web-package-target') && parsed?.reportFormat === 'web';
               authoritativePackage = authoritativeWebContract && Boolean(parsed?.webPackageRef);
               setResultReportFormat(authoritativeWebContract ? 'web' : 'markdown');
               const generationId = typeof parsed?.generationId === 'string' ? parsed.generationId.trim() : '';

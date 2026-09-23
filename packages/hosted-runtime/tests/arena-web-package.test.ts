@@ -26,7 +26,7 @@ describe('Web Package hosted generation', () => {
     expect(results[0].prompt).not.toContain('完整 HTML5 document');
     expect(results[0].prompt).not.toContain('<script>');
     expect(results[0].metadata).toMatchObject({
-      outputContract: 'web-document', reportFormat: 'web', expectsMeta: true,
+      outputContract: 'web-package-target', reportFormat: 'web', expectsMeta: true,
       webPackageRef: BUILTIN_VISUAL_NOVEL_PACKAGE_REF,
     });
   });

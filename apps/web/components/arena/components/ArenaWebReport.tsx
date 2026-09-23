@@ -92,7 +92,7 @@ function WebReportConsentDialog({ open, onCancel, onAccept }: {
   return (
     <BaseModal isOpen={open} title="启用 Web 战报" onClose={onCancel} maxWidthClassName="max-w-lg">
       <p className="text-sm leading-6">
-        Web 战报会运行生成的网页或体验包中的 HTML、CSS 和 JavaScript，并可能加载第三方脚本、样式、图片或其他网络资源。
+        Web 战报会运行生成的网页或 Web 包中的 HTML、CSS 和 JavaScript，并可能加载第三方脚本、样式、图片或其他网络资源。
         生成页面可能出现显示异常、页面卡顿或外部资源失效，第三方资源也可能接收到相关网络请求或页面发送的信息。
         请仅在了解这些风险后启用。
       </p>
@@ -290,7 +290,7 @@ export function ArenaReportFormatSelector({ value, onChange, disabled = false, r
         else onChange(format);
       }} />
       {value === 'web' && onWebPackageChange ? <label className="mt-3 block text-sm">
-        <span className="mb-1 block font-medium">Web 体验</span>
+        <span className="mb-1 block font-medium">Web 包</span>
         <select
           value={webPackageRef ? webPackageRef.digest : ''}
           disabled={disabled}
@@ -299,7 +299,7 @@ export function ArenaReportFormatSelector({ value, onChange, disabled = false, r
         >
           <option value="">自由生成网页</option>
           <option value={BUILTIN_VISUAL_NOVEL_PACKAGE_REF.digest}>Visual Novel Lite · 视觉小说</option>
-          {webPackageRef && webPackageRef.digest !== BUILTIN_VISUAL_NOVEL_PACKAGE_REF.digest ? <option value={webPackageRef.digest}>不可用的体验包（请重新选择）</option> : null}
+          {webPackageRef && webPackageRef.digest !== BUILTIN_VISUAL_NOVEL_PACKAGE_REF.digest ? <option value={webPackageRef.digest}>不可用的 Web 包（请重新选择）</option> : null}
         </select>
         <span className="mt-1 block text-xs text-gray-500">视觉小说使用内置阅读器，AI 只生成本场故事；完成后可切换安全文本显示。</span>
       </label> : null}
@@ -337,7 +337,7 @@ export function ArenaWebReport({ content, ready, roomId, aiModel, aiUsage, displ
     void renderWebPackage({ ...webPackage, generatedContent: content }).then((location) => {
       if (active) setPackageResolution({ artifact: webPackage, content, html: location.html });
     }).catch(() => {
-      if (active) setPackageResolution({ artifact: webPackage, content, error: '体验包不可用或故事数据校验失败，已保留安全文本。' });
+      if (active) setPackageResolution({ artifact: webPackage, content, error: 'Web 包不可用或故事数据校验失败，已保留安全文本。' });
     });
     return () => { active = false; };
   }, [content, ready, webPackage]);
@@ -458,7 +458,7 @@ export function ArenaWebReport({ content, ready, roomId, aiModel, aiUsage, displ
         {showingWeb ? '如需保存图片，可使用浏览器截图，或切换普通显示保存普通战报图片。' : null}
       </p> : null}
       {ready && !webDocument ? <p className="mb-3 rounded-lg border border-amber-300/50 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900 dark:border-amber-300/30 dark:bg-amber-950/30 dark:text-amber-100" role="status">
-        {webPackage ? (matchingResolution?.error ?? '正在校验体验包与故事数据…') : '这份输出没有包含完整的 HTML 文档，已切换为普通显示；其中的脚本不会被执行。'}
+        {webPackage ? (matchingResolution?.error ?? '正在校验 Web 包与故事数据…') : '这份输出没有包含完整的 HTML 文档，已切换为普通显示；其中的脚本不会被执行。'}
       </p> : null}
       {children(showingWeb ? (
         <ArenaWebDocument
@@ -471,7 +471,7 @@ export function ArenaWebReport({ content, ready, roomId, aiModel, aiUsage, displ
           aiUsage={aiUsage}
           onToggleImmersive={immersive ? exitImmersive : enterImmersive}
         />
-      ) : webPackage ? <pre className="max-h-[70vh] overflow-auto whitespace-pre-wrap break-words p-4 text-sm" aria-label="体验包故事数据（安全文本）">{packageFallback}</pre> : undefined, <>
+      ) : webPackage ? <pre className="max-h-[70vh] overflow-auto whitespace-pre-wrap break-words p-4 text-sm" aria-label="Web 包故事数据（安全文本）">{packageFallback}</pre> : undefined, <>
         {showingWeb && !immersive ? <button
           type="button"
           onClick={() => setReload((value) => value + 1)}

@@ -273,7 +273,7 @@ const projectSubscription = (
       const reporter = recordOf(decoded?.reporterInfo);
       const candidate = {
         version: 1,
-        format: decoded?.outputContract === 'web-document' ? 'stream-web' : 'stream-markdown',
+        format: decoded?.outputContract === 'web-document' || decoded?.outputContract === 'web-package-target' ? 'stream-web' : 'stream-markdown',
         ...(reporter ? {
           reporterInfo: { name: reporter.name, publication: reporter.publication },
         } : {}),

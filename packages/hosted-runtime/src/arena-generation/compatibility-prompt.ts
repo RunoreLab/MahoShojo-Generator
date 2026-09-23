@@ -663,7 +663,7 @@ export const createStreamPromptBuilder = (
     loreText?: string | null,
     includeQuestionnaireAnswers: boolean = true,
     materials?: unknown[] | null,
-    outputContract: 'stream-markdown' | 'structured-report' | 'web-document' = 'stream-markdown',
+    outputContract: 'stream-markdown' | 'structured-report' | 'web-document' | 'web-package-target' = 'stream-markdown',
     packagePrompt?: string,
 ) => (input: { combatants: any[] }): string => {
     const { combatants } = input;
@@ -778,10 +778,11 @@ export const createStreamPromptBuilder = (
 
     if (outputContract === 'structured-report') return finalPrompt;
 
-    // 支持输出 Markdown 和 Web/HTML 格式
-    const shouldAllowStreamMeta = outputContract === 'web-document' || forceStreamMeta || writeArenaHistory || writeCurrentState;
-    if (outputContract === 'web-document' && packagePrompt) {
-        finalPrompt += `\n\n${packagePrompt}`;
+    // 支持输出 Markdown 和 Web/HTML 或 Package target 格式
+    const isWebContract = outputContract === 'web-document' || outputContract === 'web-package-target';
+    const shouldAllowStreamMeta = isWebContract || forceStreamMeta || writeArenaHistory || writeCurrentState;
+    if (outputContract === 'web-package-target') {
+        finalPrompt += `\n\n${packagePrompt ?? ''}`;
     } else if (outputContract === 'web-document') {
         finalPrompt += `\n\n【输出格式】\n直接输出一个完整 HTML5 document，从 <!doctype html> 开始，包含 html/head/body、UTF-8 charset 与 viewport，不要 Markdown 代码围栏或解释文本。\n` +
             `这是独立 Web 内容，可自由使用 HTML、CSS、inline/external SVG、Canvas、JavaScript、browser-native ES Module、动画与外部 Web 资源。\n` +

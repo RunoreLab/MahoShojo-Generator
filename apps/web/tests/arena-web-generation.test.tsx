@@ -71,7 +71,7 @@ describe('single-player Web generation integration', () => {
     await act(async () => useBattleStore.getState().setWebPackageRef(BUILTIN_VISUAL_NOVEL_PACKAGE_REF));
     mocks.openStream.mockResolvedValue(new Response(
       sse('markdown', { chunk: content }) + sse('done', { status: 'completed', ok: true, webPackage: artifact }),
-      { headers: { ...streamHeaders, 'x-mahoshojo-stream-meta': encodeURIComponent(JSON.stringify({ outputContract: 'web-document', reportFormat: 'web', webPackageRef: BUILTIN_VISUAL_NOVEL_PACKAGE_REF })) } },
+      { headers: { ...streamHeaders, 'x-mahoshojo-stream-meta': encodeURIComponent(JSON.stringify({ outputContract: 'web-package-target', reportFormat: 'web', webPackageRef: BUILTIN_VISUAL_NOVEL_PACKAGE_REF })) } },
     ));
     await act(async () => current.handleGenerate());
     expect(mocks.openStream.mock.calls[0][0].body.webPackageRef).toEqual(BUILTIN_VISUAL_NOVEL_PACKAGE_REF);
@@ -81,7 +81,7 @@ describe('single-player Web generation integration', () => {
   it('keeps package content inert when a completed stream omits its artifact', async () => {
     await act(async () => useBattleStore.getState().setWebPackageRef(BUILTIN_VISUAL_NOVEL_PACKAGE_REF));
     mocks.openStream.mockResolvedValue(new Response(sse('markdown', { chunk: source }) + sse('done', { status: 'completed', ok: true }), {
-      headers: { ...streamHeaders, 'x-mahoshojo-stream-meta': encodeURIComponent(JSON.stringify({ outputContract: 'web-document', reportFormat: 'web', webPackageRef: BUILTIN_VISUAL_NOVEL_PACKAGE_REF })) },
+      headers: { ...streamHeaders, 'x-mahoshojo-stream-meta': encodeURIComponent(JSON.stringify({ outputContract: 'web-package-target', reportFormat: 'web', webPackageRef: BUILTIN_VISUAL_NOVEL_PACKAGE_REF })) },
     }));
     await act(async () => current.handleGenerate());
     expect(useBattleStore.getState().resultWebReady).toBe(false);

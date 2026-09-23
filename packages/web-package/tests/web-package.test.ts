@@ -40,6 +40,10 @@ describe('immutable first-party Web Package contract', () => {
     expect(WebPackagePathSchema.safeParse(path).success).toBe(false);
   });
 
+  it.each(['报告/故事.html', 'my file.js', 'styles/app.theme.css', 'assets/背景.svg'])('accepts normal web path %j', (path) => {
+    expect(WebPackagePathSchema.safeParse(path).success).toBe(true);
+  });
+
   it('strictly validates manifest shape, paths, entry, target and mode', async () => {
     const { manifest } = await resolveWebPackage(ref);
     const invalid = [
@@ -47,7 +51,7 @@ describe('immutable first-party Web Package contract', () => {
       { ...manifest, entry: 'missing.html' }, { ...manifest, entry: 'runtime/app.js' },
       { ...manifest, files: [...manifest.files, manifest.files[0]] },
       { ...manifest, files: [...manifest.files, { ...manifest.files[0], path: 'INDEX.html' }] },
-      { ...manifest, generation: { ...manifest.generation, target: 'MANIFEST.json' } },
+      { ...manifest, generation: { ...manifest.generation, target: 'WEB-PACKAGE.json' } },
       { ...manifest, generation: { ...manifest.generation, target: 'DATA/story.json' } },
       { ...manifest, generation: { ...manifest.generation, mode: 'patch' } },
       { ...manifest, generation: { ...manifest.generation, mediaType: 'image/png' } },
@@ -57,6 +61,10 @@ describe('immutable first-party Web Package contract', () => {
     invalid.forEach((value) => expect(WebPackageManifestSchema.safeParse(value).success).toBe(false));
     expect(WebPackageManifestSchema.safeParse({ ...manifest, generation: { ...manifest.generation, target: 'new/story.json' } }).success).toBe(true);
     expect(WebPackageManifestSchema.safeParse({ ...manifest, generation: { ...manifest.generation, target: 'index.html', mediaType: 'text/html' } }).success).toBe(true);
+    const withoutOptional: Record<string, unknown> = { ...manifest, capabilities: undefined };
+    withoutOptional.generation = { ...manifest.generation, instructions: undefined };
+    expect(WebPackageManifestSchema.safeParse(withoutOptional).success).toBe(true);
+    expect(WebPackageManifestSchema.safeParse({ ...manifest, capabilities: undefined }).success).toBe(true);
   });
 
   it('verifies exact file bytes, sizes and sets; canonical identity ignores descriptor order', async () => {
@@ -129,7 +137,7 @@ describe('single authoritative overlay and replay', () => {
     await expect(verifyWebPackageOverlay({ ...overlay, generatedContent: story + ' ' })).rejects.toThrow('digest');
     await expect(verifyWebPackageOverlay({ ...overlay, targetPath: 'runtime/app.js' })).rejects.toThrow('契约');
     await expect(verifyWebPackageOverlay({ ...overlay, targetMediaType: 'text/html' })).rejects.toThrow('契约');
-    await expect(verifyWebPackageOverlay({ ...overlay, targetPath: 'manifest.json' })).rejects.toThrow();
+    await expect(verifyWebPackageOverlay({ ...overlay, targetPath: 'web-package.json' })).rejects.toThrow();
     await expect(verifyWebPackageOverlay({ ...overlay, packageRef: { ...ref, version: 'latest' } })).rejects.toThrow();
   });
 

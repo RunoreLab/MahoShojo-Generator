@@ -2,7 +2,7 @@ import { z } from './zod';
 
 export const WEB_PACKAGE_FORMAT = 'mahoshojo-web-package' as const;
 export const WEB_PACKAGE_FORMAT_VERSION = 1 as const;
-export const WEB_PACKAGE_MANIFEST_PATH = 'manifest.json' as const;
+export const WEB_PACKAGE_MANIFEST_PATH = 'web-package.json' as const;
 export const WEB_PACKAGE_TEXT_MEDIA_TYPES = [
   'text/html', 'text/plain', 'text/markdown', 'text/css', 'text/javascript',
   'application/javascript', 'application/json', 'image/svg+xml',
@@ -13,13 +13,18 @@ const IdentitySchema = z.string().min(1).max(128).regex(/^[a-zA-Z0-9][a-zA-Z0-9.
 const MediaTypeSchema = z.string().max(128).regex(/^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/u);
 const ByteLengthSchema = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const ReservedFileStem = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/iu;
+// Controls, Windows-invalid filename characters, path separators and '%'
+// (percent would make logical paths ambiguous under URL decoding).
+const ForbiddenPathChar = /[\u0000-\u001f\u007f<>:"|?*%\\]/u;
 
 /** Portable relative paths; case folding is also checked when comparing file identities. */
 export const WebPackagePathSchema = z.string().min(1).max(512).superRefine((path, context) => {
-  if (path.split('/').some((part) => (
-    !/^[a-zA-Z0-9._-]+$/u.test(part) || part === '.' || part === '..'
-    || part.endsWith('.') || ReservedFileStem.test(part)
-  ))) {
+  if (path.startsWith('/') || ForbiddenPathChar.test(path)
+    || path.split('/').some((part) => (
+      !part || part === '.' || part === '..'
+      || part.endsWith('.') || part.endsWith(' ') || ReservedFileStem.test(part)
+    ))
+  ) {
     context.addIssue({ code: 'custom', message: 'must be a portable relative package path' });
   }
 });
@@ -55,12 +60,12 @@ export const WebPackageManifestSchema = z.object({
     target: TargetPathSchema,
     mode: z.literal('replace'),
     mediaType: z.enum(WEB_PACKAGE_TEXT_MEDIA_TYPES),
-    instructions: WebPackagePathSchema,
+    instructions: WebPackagePathSchema.optional(),
     schema: WebPackagePathSchema.optional(),
     assetCatalog: WebPackagePathSchema.optional(),
   }).strict(),
-  capabilities: z.array(z.enum(['scripts', 'audio', 'video', 'network'])).max(4),
-  files: z.array(WebPackageFileDescriptorSchema).min(1).max(1024),
+  capabilities: z.array(z.enum(['scripts', 'audio', 'video', 'network'])).max(4).default([]),
+  files: z.array(WebPackageFileDescriptorSchema).min(1),
 }).strict().superRefine((manifest, context) => {
   const paths = new Set<string>();
   for (const [index, file] of manifest.files.entries()) {
@@ -103,3 +108,6 @@ export type WebPackageOverlay = z.infer<typeof WebPackageOverlaySchema>;
 
 /** Renderer transport is deliberately separate from package identity and logical paths. */
 export type WebPackageRenderLocation = { kind: 'srcdoc'; html: string } | { kind: 'url'; url: string };
+
+/** Source adapters may grow (online) without changing package identity or overlay semantics. */
+export type WebPackageSourceKind = 'builtin' | 'local' | 'online';

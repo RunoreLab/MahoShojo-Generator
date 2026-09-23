@@ -7,8 +7,14 @@ import {
   DEFAULT_ARENA_PROMPT_QUESTIONS,
   getSystemPrompt,
 } from './compatibility-prompt';
+import {
+  isPackageBackedOutputContract,
+  isWebArenaOutputContract,
+  type ArenaGenerationOutputContract,
+} from './output-contract';
 
-export type ArenaGenerationOutputContract = 'stream-markdown' | 'structured-report' | 'web-document';
+export type { ArenaGenerationOutputContract } from './output-contract';
+export { isPackageBackedOutputContract, isWebArenaOutputContract } from './output-contract';
 
 const text = (value: unknown): string => typeof value === 'string' ? value.trim() : '';
 
@@ -39,7 +45,7 @@ export const resolveArenaGenerationOutputContract = (
   const legacyPvp = Boolean(asRecord(serverContext?.trustedPvpContext) ?? asRecord(payload.pvpContext))
     && !asRecord(payload.multiplayerGenerationSnapshot);
   if (payload.reportFormat === 'web' && !legacyPvp && endpoint !== 'api/arena/session/generate-next') {
-    return 'web-document';
+    return payload.webPackageRef != null ? 'web-package-target' : 'web-document';
   }
   return serverContext?.deliveryMode === 'non-stream'
     && (endpoint === 'api/arena/generate' || endpoint === 'api/generate-battle-story')
@@ -112,7 +118,7 @@ export const buildArenaGenerationPrompt = async (input: {
   const webPackageRef = payload.webPackageRef === undefined
     ? undefined
     : WebPackageRefSchema.parse(payload.webPackageRef);
-  if (webPackageRef && outputContract !== 'web-document') {
+  if (webPackageRef && !isPackageBackedOutputContract(outputContract)) {
     throw new Error('ARENA_WEB_PACKAGE_REQUIRES_WEB');
   }
   const packagePrompt = webPackageRef ? await buildWebPackagePrompt(webPackageRef) : undefined;
@@ -133,7 +139,7 @@ export const buildArenaGenerationPrompt = async (input: {
   const writeArenaHistory = payload.writeArenaHistory !== false;
   const writeCurrentState = payload.writeCurrentState !== false;
   const forceStreamMeta = payload.forceStreamMeta === true;
-  const expectsMeta = outputContract === 'web-document' || outputContract === 'stream-markdown'
+  const expectsMeta = isWebArenaOutputContract(outputContract) || outputContract === 'stream-markdown'
     && (forceStreamMeta || writeArenaHistory || writeCurrentState);
   const promptBuilder = outputContract === 'structured-report'
     ? createPromptBuilder(
@@ -216,7 +222,7 @@ export const buildArenaGenerationPrompt = async (input: {
       mode,
       language,
       outputContract,
-      reportFormat: outputContract === 'web-document' ? 'web' : 'markdown',
+      reportFormat: isWebArenaOutputContract(outputContract) ? 'web' : 'markdown',
       ...(webPackageRef ? { webPackageRef } : {}),
       expectsMeta,
       combatantCount: combatants.length,
