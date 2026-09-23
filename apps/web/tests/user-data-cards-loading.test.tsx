@@ -9,8 +9,10 @@ import type { DataCardSummary, DataCardSummaryPage } from '@mahoshojo/contracts/
 import DataCardsModal from '@/components/CharManager/DataCardsModal';
 import BattleDataModal from '@/components/BattleDataModal';
 vi.mock('@/lib/useAuth', () => ({ useAuth: () => ({ isAuthenticated: true, user: { id: 1, username: 'test' }, userBadges: [] }) }));
-vi.mock('@/components/DataCard', () => ({ default: (props: any) => <button data-author={props.author} onClick={props.onEditData || props.onViewDetails}>{props.name}</button> }));
-vi.mock('@/components/DataCardDetailsModal', () => ({ default: () => null }));
+vi.mock('@/components/DataCard', () => ({ default: (props: any) => (
+  <button data-author={props.author} onClick={(event) => { event.stopPropagation(); (props.onEditData || props.onViewDetails)?.(); }}>{props.name}</button>
+) }));
+vi.mock('@/components/DataCardDetailsModal', () => ({ default: (props: any) => (props.isOpen ? <div data-testid="card-details">{props.card?.name}</div> : null) }));
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 let root: Root;
 let container: HTMLDivElement;
@@ -20,12 +22,12 @@ const card: DataCardSummary = { id: 'mine', user_id: 1, type: 'character', name:
   like_count: 0, favorite_count: 0, is_recommended: 0, username: 'test', roleType: 'general',
   nativeAllowed: false, has_pending_update: false, tag_ids: [], favorited_at: null };
 const page = (cards: DataCardSummary[] = [card], total = cards.length): DataCardSummaryPage => ({ success: true, cards, total, nextOffset: total > 12 ? 12 : null });
-function Harness({ userId = 1, enabled = true, search = '' }: { userId?: number | null; enabled?: boolean; search?: string }) {
-  state = useDataCardSummaryPage('my', userId, enabled, { search }); return null;
+function Harness({ userId = 1, enabled = true, search = '', offset = 0 }: { userId?: number | null; enabled?: boolean; search?: string; offset?: number }) {
+  state = useDataCardSummaryPage('my', userId, enabled, { search, offset }); return null;
 }
-function deferred() {
-  let resolve!: (result: DataCardSummaryPage) => void; let reject!: (reason: Error) => void;
-  const promise = new Promise<DataCardSummaryPage>((yes, no) => { resolve = yes; reject = no; });
+function deferred<T = DataCardSummaryPage>() {
+  let resolve!: (result: T) => void; let reject!: (reason: Error) => void;
+  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
   return { promise, resolve, reject };
 }
 beforeEach(() => {
@@ -100,4 +102,88 @@ it('Arena 私有库加载独立于公开库，刷新失败仍展示旧卡，收�
   await act(async () => [...document.querySelectorAll('button')].find((b) => b.textContent?.startsWith('我的收藏'))!.click());
   expect(get.mock.calls.at(-1)?.[0]).toBe('favorites'); expect(get.mock.calls[0][2]?.aborted).toBe(true);
   expect(document.body.textContent).toContain('暂无数据卡');
+});
+
+it('公开库高级筛选不随 Tab 泄漏进我的卡/收藏摘要查询', async () => {
+  const fetchMock = vi.fn(async () => Response.json({ success: true, cards: [], items: {}, tags: [{ id: 'tag', name: '标签', scope: 'system', isActive: true }] }));
+  vi.stubGlobal('fetch', fetchMock);
+  const get = vi.spyOn(client, 'getDataCardSummaryPage').mockResolvedValue(page([]));
+  await act(async () => root.render(<BattleDataModal isOpen onClose={vi.fn()} onSelectCard={vi.fn()} selectedType="character" />));
+  const clickButton = async (predicate: (text: string) => boolean) => {
+    const button = [...document.querySelectorAll('button')].find((b) => typeof b.textContent === 'string' && predicate(b.textContent));
+    expect(button).toBeDefined();
+    await act(async () => button!.click());
+  };
+  await clickButton((text) => text === '公开角色');
+  await clickButton((text) => text.includes('高级筛选'));
+  const authorInput = document.querySelector<HTMLInputElement>('input[name="author"]');
+  expect(authorInput).not.toBeNull();
+  const setValue = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+  await act(async () => {
+    setValue?.call(authorInput, 'Bob');
+    authorInput!.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await clickButton((text) => text === '应用筛选');
+  expect(fetchMock.mock.calls.some((call) => String(call[0]).includes('author=Bob'))).toBe(true);
+  await clickButton((text) => text.startsWith('我的角色 ('));
+  const myQueries = get.mock.calls.filter((call) => call[0] === 'my').map((call) => call[1] as Record<string, unknown>);
+  expect(myQueries.length).toBeGreaterThanOrEqual(2);
+  for (const query of myQueries) {
+    for (const hidden of ['author', 'minLikes', 'maxLikes', 'minUsage', 'maxUsage', 'minFavorites', 'maxFavorites',
+      'roleType', 'nativeOnly', 'nativeAllowedOnly', 'recommendedOnly']) {
+      expect(query).not.toHaveProperty(hidden);
+    }
+  }
+  expect(myQueries.at(-1)).toMatchObject({ sortBy: 'created_at', tagMatch: 'any' });
+});
+
+it('同一查询刷新失败保留旧数据；翻页请求失败不得展示上一页结果', async () => {
+  const get = vi.spyOn(client, 'getDataCardSummaryPage')
+    .mockResolvedValueOnce(page())
+    .mockRejectedValueOnce(new Error('第二页失败'))
+    .mockRejectedValueOnce(new Error('第二页仍失败'));
+  await act(async () => root.render(<Harness />));
+  expect(state.cards).toEqual([card]); expect(state.status).toBe('success');
+  await act(async () => root.render(<Harness offset={12} />));
+  expect(get.mock.calls[1][1]).toMatchObject({ offset: 12 });
+  expect(state.cards).toEqual([]); expect(state.status).toBe('error'); expect(state.error).toBe('第二页失败');
+  await act(async () => state.reload());
+  expect(state.cards).toEqual([]); expect(state.error).toBe('第二页仍失败');
+});
+
+it('搜索 A 成功后搜索 B 失败，不把 A 的结果留在 B 的结果区', async () => {
+  vi.spyOn(client, 'getDataCardSummaryPage')
+    .mockResolvedValueOnce(page())
+    .mockRejectedValueOnce(new Error('搜索失败'));
+  await act(async () => root.render(<Harness search="A" />));
+  expect(state.cards).toEqual([card]); expect(state.status).toBe('success');
+  await act(async () => root.render(<Harness search="B" />));
+  expect(state.cards).toEqual([]); expect(state.status).toBe('error'); expect(state.error).toBe('搜索失败');
+});
+
+it('Arena 详情连续点击 last-click-wins：新请求中止旧请求，后点击的卡片胜出', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => Response.json({
+    success: true, cards: [],
+    items: { 'card-a': { metrics: null, strict: null }, 'card-b': { metrics: null, strict: null } },
+    tags: [{ id: 'tag', name: '标签', scope: 'system', isActive: true }],
+  })));
+  const cardA = { ...card, id: 'card-a', name: '甲卡' };
+  const cardB = { ...card, id: 'card-b', name: '乙卡' };
+  const first = deferred<any>(); const second = deferred<any>();
+  vi.spyOn(client, 'getDataCardSummaryPage').mockResolvedValue(page([cardA, cardB]));
+  const full = vi.spyOn(client, 'loadFullDataCard').mockImplementation((target: any) => (target.id === 'card-a' ? first.promise : second.promise));
+  await act(async () => root.render(<BattleDataModal isOpen onClose={vi.fn()} onSelectCard={vi.fn()} selectedType="character" />));
+  const clickCard = async (name: string) => {
+    const button = [...document.querySelectorAll('button')].find((b) => b.textContent === name);
+    expect(button).toBeDefined();
+    await act(async () => button!.click());
+  };
+  await clickCard('甲卡');
+  await clickCard('乙卡');
+  expect(full).toHaveBeenCalledTimes(2);
+  expect(full.mock.calls[0][2]?.aborted).toBe(true);
+  await act(async () => { second.resolve({ ...cardB, data: '{"name":"乙"}' }); });
+  expect(document.querySelector('[data-testid="card-details"]')?.textContent).toBe('乙卡');
+  await act(async () => { first.resolve({ ...cardA, data: '{"name":"甲"}' }); });
+  expect(document.querySelector('[data-testid="card-details"]')?.textContent).toBe('乙卡');
 });

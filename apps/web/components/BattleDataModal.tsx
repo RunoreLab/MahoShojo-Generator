@@ -208,6 +208,8 @@ export default function BattleDataModal({
   const badgeFetchAbortControllerRef = useRef<AbortController | null>(null);
   const selectingCardIdsRef = useRef<Set<string>>(new Set());
   const cardReadController = useRef<AbortController>(new AbortController());
+  // 详情按“每次动作”创建：新的详情点击会中止上一次未完成的详情读取（last-click-wins）。
+  const cardDetailControllerRef = useRef<AbortController | null>(null);
   const isSingleSelectingRef = useRef(false);
   const [publicDataCards, setPublicDataCards] = useState<any[]>([]);
   const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
@@ -374,14 +376,13 @@ export default function BattleDataModal({
 
   const isPvpHandTab = activeTab === 'pvpHand';
   const isPublicTab = activeTab === 'public' || activeTab === 'recommended';
+  // 私有/收藏摘要只继承这些 Tab 上实际可见且有语义的条件。
+  // 公开库高级筛选（author/数值/roleType/native*/recommendedOnly）只随公开列表请求发送，
+  // 避免切换 Tab 后界面已隐藏的筛选继续污染 my/favorites 查询（例如 owner=Alice 且 author=Bob 恒为空）。
   const summaryQuery = {
     limit: cardsPerPage, offset: (currentPage - 1) * cardsPerPage,
     search: debouncedSearchQuery.trim() || undefined, sortBy, types: effectiveAllowedTypes,
-    author: activeFilters.author || undefined, roleType: activeFilters.roleType || undefined,
-    nativeOnly: activeFilters.nativeOnly, nativeAllowedOnly: activeFilters.nativeAllowedOnly,
     tagIds: selectedTagIds, tagMatch: tagMatchMode,
-    ...Object.fromEntries(['minLikes', 'maxLikes', 'minUsage', 'maxUsage', 'minFavorites', 'maxFavorites']
-      .map((key) => [key, activeFilters[key as keyof Filters] === '' ? undefined : Number(activeFilters[key as keyof Filters])])),
   };
   const myPage = useDataCardSummaryPage('my', isAuthenticated ? user?.id ?? null : null, isOpen && activeTab === 'my', summaryQuery);
   const favoritesPage = useDataCardSummaryPage('favorites', isAuthenticated ? user?.id ?? null : null, isOpen && activeTab === 'favorites', summaryQuery);
@@ -394,7 +395,11 @@ export default function BattleDataModal({
   const { reload: reloadFavorites } = favoritesPage;
   useEffect(() => {
     cardReadController.current = new AbortController();
-    return () => { cardReadController.current.abort(); };
+    return () => {
+      cardReadController.current.abort();
+      cardDetailControllerRef.current?.abort();
+      cardDetailControllerRef.current = null;
+    };
   }, [isOpen, activeTab, user?.id]);
   useEffect(() => {
     if (!isOpen || isPublicTab) return;
@@ -889,6 +894,26 @@ export default function BattleDataModal({
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') return;
       setSelectError(error instanceof Error ? error.message : '保存数据卡失败');
+    }
+  }, [activeTab]);
+
+  // 查看详情：与 DataCardsModal.withFullCard 一致，新动作 abort 旧动作，
+  // 避免连续点击 A、B 时先返回的 A 覆盖最后点击的 B。
+  const openCardDetails = useCallback(async (card: any) => {
+    cardDetailControllerRef.current?.abort();
+    const controller = new AbortController();
+    cardDetailControllerRef.current = controller;
+    const { signal } = controller;
+    try {
+      const full = await loadFullDataCard(card, activeTab === 'my' ? 'my' : 'public', signal);
+      if (signal.aborted) return;
+      setSelectedCard(full);
+      setShowDetailsModal(true);
+    } catch (error) {
+      if (signal.aborted) return;
+      setSelectError(error instanceof Error ? error.message : '读取数据卡失败');
+    } finally {
+      if (cardDetailControllerRef.current === controller) cardDetailControllerRef.current = null;
     }
   }, [activeTab]);
 
@@ -1797,10 +1822,7 @@ export default function BattleDataModal({
 	                        isRecommended={card.is_recommended === 1}
 	                        author={activeTab === 'my' ? '我' : (card.username || '未知')}
 	                        authorBadges={activeTab === 'my' ? currentUserEquippedBadges : (authorBadgesById[card.user_id] ?? [])}
-		                        onViewDetails={allowCardDetails ? () => {
-                              const signal = cardReadController.current.signal;
-                              void loadFullDataCard(card, activeTab === 'my' ? 'my' : 'public', signal).then((full) => { if (!signal.aborted) { setSelectedCard(full); setShowDetailsModal(true); } }).catch((error) => { if (!signal.aborted) setSelectError(error.message); });
-                            } : undefined}
+		                        onViewDetails={allowCardDetails ? () => { void openCardDetails(card); } : undefined}
 	                        onAuthorClick={handleAuthorClick}
 	                        onToggleFavorite={enableFavorite ? (next) => handleFavoriteToggleForCard(card, next) : undefined}
 	                        onDownload={() => handleDownloadCard(card)}
