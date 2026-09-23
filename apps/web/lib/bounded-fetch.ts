@@ -2,6 +2,10 @@
 // 可重试：408 / 429 / 5xx / network error / timeout；外部 Abort 立即停止重试与退避。
 // 权限错误与非法契约不在此层自动重试，由调用方按业务语义处理。
 // fetchJsonWithBoundedRetry 额外把 JSON body 消费纳入同一 attempt，避免 headers 成功后正文断流只试一次。
+//
+// 兼容性：不依赖 AbortSignal.any / AbortSignal.timeout / AbortSignal#throwIfAborted 等较新
+// convenience API（Baseline 2024 附近，旧浏览器/WebView 可能缺失），改用经典
+// AbortController + abort 事件 + setTimeout 实现取消与超时。
 
 export type BoundedFetchFetcher = (input: string, init?: RequestInit) => Promise<Response>;
 
@@ -22,22 +26,79 @@ export const BOUNDED_FETCH_BACKOFF_MS = 500;
 // 导出供调用方区分“可重试传输错误”与不可重试的 4xx 业务终态（400/401/403/404 等）。
 export const isRetryableStatus = (status: number): boolean => status === 408 || status === 429 || status >= 500;
 
+const createAbortDomException = (message: string, name: 'AbortError' | 'TimeoutError'): DOMException =>
+  new DOMException(message, name);
+
+const getAbortReason = (signal?: AbortSignal): unknown =>
+  signal?.reason ?? createAbortDomException('The operation was aborted.', 'AbortError');
+
+/** 兼容旧环境：不调用可能缺失的 AbortSignal#throwIfAborted，按 aborted/reason 语义抛出。 */
+export const throwIfAborted = (signal?: AbortSignal): void => {
+  if (signal?.aborted) {
+    throw getAbortReason(signal);
+  }
+};
+
+type AttemptSignalHandle = {
+  signal: AbortSignal;
+  cleanup: () => void;
+};
+
+// 每次 attempt 自建 AbortController：外部取消经传统 abort 事件转发，超时用 setTimeout 实现。
+// cleanup 必须覆盖整个 attempt（含 JSON body 消费），避免正文阶段重新失去超时保护。
+const createAttemptSignal = (
+  externalSignal: AbortSignal | undefined,
+  timeoutMs: number,
+): AttemptSignalHandle => {
+  const controller = new AbortController();
+
+  const abortFromExternal = (): void => {
+    controller.abort(getAbortReason(externalSignal));
+  };
+
+  if (externalSignal?.aborted) {
+    abortFromExternal();
+  } else {
+    externalSignal?.addEventListener('abort', abortFromExternal, { once: true });
+  }
+
+  const timer = setTimeout(() => {
+    controller.abort(createAbortDomException('The operation timed out.', 'TimeoutError'));
+  }, timeoutMs);
+
+  return {
+    signal: controller.signal,
+    cleanup() {
+      clearTimeout(timer);
+      externalSignal?.removeEventListener('abort', abortFromExternal);
+    },
+  };
+};
+
 // jsdom 的 DOMException 不是 Error 子类，不能只靠 instanceof；TimeoutError/AbortError 按 name 判定。
 const hasRetryableErrorName = (cause: unknown): boolean => typeof cause === 'object'
   && cause !== null
   && 'name' in cause
   && ((cause as { name: unknown }).name === 'TimeoutError' || (cause as { name: unknown }).name === 'AbortError');
 
-const isRetryableError = (cause: unknown): boolean => cause instanceof TypeError || hasRetryableErrorName(cause);
+// fetch 网络失败通常抛 TypeError；但 "xxx is not a function" 等是确定性编程/兼容性错误，重试无意义。
+const isDeterministicProgrammingTypeError = (cause: TypeError): boolean =>
+  /\bis not a (?:function|constructor|method)\b/.test(cause.message);
+
+const isRetryableError = (cause: unknown): boolean => {
+  if (hasRetryableErrorName(cause)) return true;
+  if (cause instanceof TypeError) return !isDeterministicProgrammingTypeError(cause);
+  return false;
+};
 
 const delayWithAbort = (ms: number, signal?: AbortSignal): Promise<void> => new Promise<void>((resolve, reject) => {
   if (signal?.aborted) {
-    reject(signal.reason);
+    reject(getAbortReason(signal));
     return;
   }
   const onAbort = () => {
     clearTimeout(timer);
-    reject(signal?.reason);
+    reject(getAbortReason(signal));
   };
   const timer = setTimeout(() => {
     signal?.removeEventListener('abort', onAbort);
@@ -57,19 +118,20 @@ export async function fetchWithBoundedRetry(url: string, options: BoundedFetchOp
   const doFetch: BoundedFetchFetcher = fetcher ?? ((input, init) => fetch(input, init));
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    signal?.throwIfAborted();
+    throwIfAborted(signal);
     const isLastAttempt = attempt === maxAttempts - 1;
+    const attemptSignal = createAttemptSignal(signal, timeoutMs);
     try {
-      const timeoutSignal = AbortSignal.timeout(timeoutMs);
-      const attemptSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
-      const response = await doFetch(url, { signal: attemptSignal });
+      const response = await doFetch(url, { signal: attemptSignal.signal });
       if (response.ok || isLastAttempt || !isRetryableStatus(response.status)) return response;
       // 丢弃将被替换的 5xx 响应体，避免连接挂起。
       void response.body?.cancel().catch(() => undefined);
     } catch (cause) {
       // 外部 Abort 优先于可重试判定：调用方取消后不得继续退避或重试。
-      signal?.throwIfAborted();
+      throwIfAborted(signal);
       if (isLastAttempt || !isRetryableError(cause)) throw cause;
+    } finally {
+      attemptSignal.cleanup();
     }
     await delayWithAbort(backoffMs, signal);
   }
@@ -131,12 +193,11 @@ export async function fetchJsonWithBoundedRetry<T = unknown>(
   const doFetch: BoundedFetchFetcher = fetcher ?? ((input, init) => fetch(input, init));
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    signal?.throwIfAborted();
+    throwIfAborted(signal);
     const isLastAttempt = attempt === maxAttempts - 1;
+    const attemptSignal = createAttemptSignal(signal, timeoutMs);
     try {
-      const timeoutSignal = AbortSignal.timeout(timeoutMs);
-      const attemptSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
-      const response = await doFetch(url, { signal: attemptSignal });
+      const response = await doFetch(url, { signal: attemptSignal.signal });
 
       if (!response.ok) {
         if (!isLastAttempt && isRetryableStatus(response.status)) {
@@ -150,13 +211,15 @@ export async function fetchJsonWithBoundedRetry<T = unknown>(
           return { ok: true, status: response.status, data };
         } catch (bodyCause) {
           void response.body?.cancel().catch(() => undefined);
-          signal?.throwIfAborted();
+          throwIfAborted(signal);
           if (isLastAttempt || !isRetryableError(bodyCause)) throw bodyCause;
         }
       }
     } catch (cause) {
-      signal?.throwIfAborted();
+      throwIfAborted(signal);
       if (isLastAttempt || !isRetryableError(cause)) throw cause;
+    } finally {
+      attemptSignal.cleanup();
     }
     await delayWithAbort(backoffMs, signal);
   }
