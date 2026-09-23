@@ -89,11 +89,7 @@ async function handler(req: Request): Promise<Response> {
       pvpRoomId: r.pvp_room_id,
       pvpMatchId: r.pvp_match_id,
       pvpRoundId: r.pvp_round_id,
-      sourceKind: r.pvp_match_id
-        ? 'pvp'
-        : r.arena_participant_generation_id
-          ? 'arena-multiplayer'
-          : 'solo',
+      sourceKind: r.source_kind,
       arenaParticipantRole: r.arena_participant_generation_id ? (r.arena_participant_role ?? null) : null,
     };
   });

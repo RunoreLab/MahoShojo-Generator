@@ -165,22 +165,44 @@ const readDataCardsRepoBundle = async (): Promise<DataCardsRepoBundle | null> =>
   }
 };
 
+/** 公开库 strict 读取专用：存储不可用时不得伪装成空列表/404。 */
+export class DatabaseUnavailableError extends Error {
+  override readonly name = 'DatabaseUnavailableError';
+
+  constructor(message = '数据卡存储不可用') {
+    super(message);
+  }
+}
+
+export const isDatabaseUnavailableError = (error: unknown): boolean => (
+  error instanceof DatabaseUnavailableError
+  || (typeof error === 'object'
+    && error !== null
+    && (error as { name?: unknown }).name === 'DatabaseUnavailableError')
+);
+
+const readDataCardsRepoBundleStrict = async (): Promise<DataCardsRepoBundle> => {
+  const bundle = await readDataCardsRepoBundle();
+  if (!bundle) throw new DatabaseUnavailableError();
+  return bundle;
+};
+
+const mapDataCardRowWithTags = (row: any): any => {
+  const raw = typeof row?.tag_ids === 'string' ? row.tag_ids : '';
+  const tagIds = raw
+    .split(',')
+    .map((id: string) => id.trim())
+    .filter(Boolean);
+  return { ...row, tagIds };
+};
+
 const normalizeIsPublicValue = (isPublic: boolean | number): OnlineDataCardVisibility => {
   const normalized = normalizeOnlineDataCardVisibilityCompat(isPublic);
   if (normalized === null) throw new Error('无效的数据卡可见性');
   return normalized;
 };
 
-const withTagIds = (rows: any[]): any[] => {
-  return rows.map((row) => {
-    const raw = typeof row?.tag_ids === 'string' ? row.tag_ids : '';
-    const tagIds = raw
-      .split(',')
-      .map((id: string) => id.trim())
-      .filter(Boolean);
-    return { ...row, tagIds };
-  });
-};
+const withTagIds = (rows: any[]): any[] => rows.map(mapDataCardRowWithTags);
 
 // 检查公开数据卡是否存在同名
 export async function checkPublicCardNameExists(
@@ -529,17 +551,27 @@ export async function getDataCardById(cardId: string, isPublic: boolean = false)
     });
     if (!row) return null;
 
-    const raw = typeof row?.tag_ids === 'string' ? row.tag_ids : '';
-    const tagIds = raw
-      .split(',')
-      .map((id: string) => id.trim())
-      .filter(Boolean);
-
-    return { ...row, tagIds };
+    return mapDataCardRowWithTags(row);
   } catch (error) {
     console.error('通过ID获取数据卡失败:', error);
     return null;
   }
+}
+
+/**
+ * 公开库单卡 strict 读取：
+ * - 存储不可用 → 抛 DatabaseUnavailableError（映射 503）
+ * - 查询异常 → 继续抛出（映射 500）
+ * - 仅当查询成功且无行 → 返回 null（映射 404）
+ */
+export async function getPublicDataCardByIdStrict(cardId: string): Promise<any | null> {
+  const bundle = await readDataCardsRepoBundleStrict();
+  const row = await bundle.getDataCardByIdWithAuthorAndTags(bundle.db, {
+    cardId,
+    publicOnly: true,
+  });
+  if (!row) return null;
+  return mapDataCardRowWithTags(row);
 }
 
 // 增加数据卡的点赞数
@@ -591,10 +623,7 @@ export async function getPublicDataCards(
   nativeAllowedOnly?: boolean,
 ): Promise<any[]> {
   try {
-    const bundle = await readDataCardsRepoBundle();
-    if (!bundle) return [];
-
-    const rows = await bundle.listPublicDataCardsWithFilters(bundle.db, {
+    return await getPublicDataCardsStrict(
       limit,
       offset,
       type,
@@ -612,13 +641,61 @@ export async function getPublicDataCards(
       recommendedOnly,
       nativeOnly,
       nativeAllowedOnly,
-    });
-
-    return withTagIds(rows);
+    );
   } catch (error) {
     console.error('获取公开数据卡失败:', error);
     return [];
   }
+}
+
+/**
+ * 公开库列表 strict 读取：
+ * - 存储不可用 → 抛 DatabaseUnavailableError（映射 503）
+ * - 查询异常 → 继续抛出（映射 500）
+ * - 仅当查询成功且无结果 → 返回 []（映射 200 空列表）
+ */
+export async function getPublicDataCardsStrict(
+  limit: number = 20,
+  offset: number = 0,
+  type?: DataCardType,
+  search?: string,
+  sortBy?: DataCardSortBy,
+  tagIds?: string[],
+  tagMatch?: 'any' | 'all',
+  author?: string,
+  minLikes?: number,
+  maxLikes?: number,
+  minUsage?: number,
+  maxUsage?: number,
+  minFavorites?: number,
+  maxFavorites?: number,
+  recommendedOnly?: boolean,
+  nativeOnly?: boolean,
+  nativeAllowedOnly?: boolean,
+): Promise<any[]> {
+  const bundle = await readDataCardsRepoBundleStrict();
+
+  const rows = await bundle.listPublicDataCardsWithFilters(bundle.db, {
+    limit,
+    offset,
+    type,
+    search,
+    sortBy,
+    tagIds,
+    tagMatch,
+    author,
+    minLikes,
+    maxLikes,
+    minUsage,
+    maxUsage,
+    minFavorites,
+    maxFavorites,
+    recommendedOnly,
+    nativeOnly,
+    nativeAllowedOnly,
+  });
+
+  return withTagIds(rows);
 }
 
 /**

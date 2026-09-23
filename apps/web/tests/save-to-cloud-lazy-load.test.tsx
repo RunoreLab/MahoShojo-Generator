@@ -15,7 +15,7 @@ vi.mock('@/lib/auth', () => ({ dataCardApi: {
 vi.mock('@/components/CharManager/SaveCardModal', () => ({ default: () => null }));
 vi.mock('@/components/CharManager/DataCardsModal', () => ({ default: () => null }));
 
-test('挂载不读卡片，保存只读容量，打开替换列表才读正文', async () => {
+test('挂载不读卡片，保存只读容量，打开替换列表由摘要分页组件读取', async () => {
   const container = document.createElement('div');
   const root = createRoot(container);
   try {
@@ -26,7 +26,7 @@ test('挂载不读卡片，保存只读容量，打开替换列表才读正文',
     expect(dataCardApi.getUserCapacity).toHaveBeenCalledTimes(1);
     expect(dataCardApi.getCardsDetailed).not.toHaveBeenCalled();
     await act(async () => { container.querySelectorAll('button')[1].click(); });
-    expect(dataCardApi.getCardsDetailed).toHaveBeenCalledTimes(1);
+    expect(dataCardApi.getCardsDetailed).not.toHaveBeenCalled();
   } finally {
     await act(async () => root.unmount());
   }

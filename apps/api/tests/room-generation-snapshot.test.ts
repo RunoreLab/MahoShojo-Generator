@@ -16,6 +16,7 @@ describe('Arena Room frozen generation snapshot', () => {
     expect(hostAccountUserId).toBe(101);
     const restored = createArenaRoomGenerationSnapshotFromFrozen(legacy);
     expect(restored.hostAccountUserId).toBeUndefined();
+    expect(restored.snapshotDigest).not.toBe(snapshotDigest);
     expect(createArenaRoomGenerationSnapshotFromFrozen(legacy)).toEqual(restored);
     expect(() => createArenaRoomGenerationSnapshotFromFrozen({ ...legacy, hostAccountUserId: 999 }))
       .toThrow();

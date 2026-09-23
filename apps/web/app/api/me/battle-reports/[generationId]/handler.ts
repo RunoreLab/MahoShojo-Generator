@@ -98,7 +98,7 @@ async function handler(req: Request): Promise<Response> {
       pvpRoundId: record.pvp_round_id,
       accessScope: access.scope,
       arenaParticipantRole: access.arenaParticipantRole,
-      sourceKind: record.pvp_match_id ? 'pvp' : access.isArenaParticipant ? 'arena-multiplayer' : 'solo',
+      sourceKind: record.source_kind,
     },
     combatants: combatants.map((c) => ({
       sortIndex: c.sort_index,

@@ -468,7 +468,7 @@ export function BattleReportsPanel({ isAuthenticated, onOpenDetails, onRegenerat
                           <span>{formatTime(r.startedAt)}</span>
                           <span className="text-gray-400">·</span>
                           <span>胜者：{r.winner || '（未知）'}</span>
-                          {r.pvpMatchId ? (
+                          {r.sourceKind === 'pvp' && r.pvpMatchId ? (
                             <>
                               <span className="text-gray-400">·</span>
                               <span className="truncate">PVP：{r.pvpMatchId}</span>
