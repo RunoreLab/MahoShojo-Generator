@@ -1,5 +1,8 @@
 import { STRICT_RANKED_MODEL_FALLBACKS } from '@mahoshojo/domain/arena-ranked-model-policy';
-import { WebPackageRefSchema } from '@mahoshojo/contracts/web-package';
+import {
+  WebPackagePromptProjectionSchema,
+  WebPackageRefSchema,
+} from '@mahoshojo/contracts/web-package';
 import { resolveWebPackage } from '@mahoshojo/web-package';
 
 import type {
@@ -573,10 +576,20 @@ export const createNodeArenaGenerationExecutor = (
         }
         const ref = WebPackageRefSchema.safeParse(payload.webPackageRef);
         if (!ref.success) return jsonResponse({ code: 'ARENA_WEB_PACKAGE_INVALID', error: 'Web Package 引用无效' }, 400);
-        try {
-          await resolveWebPackage(ref.data);
-        } catch {
-          return jsonResponse({ code: 'ARENA_WEB_PACKAGE_UNAVAILABLE', error: 'Web Package revision 不可用' }, 400);
+        if (payload.webPackagePromptProjection !== undefined) {
+          const projection = WebPackagePromptProjectionSchema.safeParse(payload.webPackagePromptProjection);
+          if (!projection.success
+            || projection.data.package.id !== ref.data.id
+            || projection.data.package.version !== ref.data.version
+            || projection.data.package.digest !== ref.data.digest) {
+            return jsonResponse({ code: 'ARENA_WEB_PACKAGE_INVALID', error: 'Web Package Prompt Projection 无效' }, 400);
+          }
+        } else {
+          try {
+            await resolveWebPackage(ref.data);
+          } catch {
+            return jsonResponse({ code: 'ARENA_WEB_PACKAGE_UNAVAILABLE', error: 'Web Package revision 不可用' }, 400);
+          }
         }
       }
       const normalized = clonePayload(payload);

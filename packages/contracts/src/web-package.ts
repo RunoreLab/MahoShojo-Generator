@@ -111,3 +111,34 @@ export type WebPackageRenderLocation = { kind: 'srcdoc'; html: string } | { kind
 
 /** Source adapters may grow (online) without changing package identity or overlay semantics. */
 export type WebPackageSourceKind = 'builtin' | 'local' | 'online';
+
+/**
+ * Client-authored Prompt Projection for local packages the server cannot resolve.
+ * Structural trust only: host authority, target contract and safety stay server-owned.
+ */
+export const WebPackagePromptProjectionSchema = z.object({
+  package: z.object({
+    id: IdentitySchema,
+    name: z.string().min(1).max(256),
+    version: IdentitySchema,
+    digest: DigestSchema,
+  }),
+  entry: WebPackagePathSchema,
+  target: z.object({
+    path: TargetPathSchema,
+    mediaType: z.enum(WEB_PACKAGE_TEXT_MEDIA_TYPES),
+    mode: z.literal('replace'),
+  }),
+  instructions: z.string().max(131_072).optional(),
+  schema: z.unknown().optional(),
+  assetCatalog: z.unknown().optional(),
+}).superRefine((projection, context) => {
+  const budget = (value: unknown): number => JSON.stringify(value ?? '').length;
+  if (projection.schema !== undefined && budget(projection.schema) > 262_144) {
+    context.addIssue({ code: 'custom', path: ['schema'], message: 'schema exceeds projection byte budget' });
+  }
+  if (projection.assetCatalog !== undefined && budget(projection.assetCatalog) > 131_072) {
+    context.addIssue({ code: 'custom', path: ['assetCatalog'], message: 'assetCatalog exceeds projection byte budget' });
+  }
+});
+export type WebPackagePromptProjection = z.infer<typeof WebPackagePromptProjectionSchema>;

@@ -13,16 +13,25 @@ import {
   BUILTIN_WEB_PACKAGE_PRESETS,
   assertJsonSchema202012,
   buildWebPackagePrompt,
+  buildWebPackagePromptFromProjection,
+  buildWebPackagePromptProjection,
   canonicalizeWebPackageManifest,
+  clearLocalWebPackageSessionStaging,
   createWebPackageInstance,
   createWebPackageOverlay,
+  createWebPackageOverlayFromProjection,
   digestWebPackageBytes,
   findBuiltinWebPackagePreset,
   formatWebPackageFallback,
+  getStagedLocalWebPackage,
+  isBuiltinWebPackageRef,
+  listStagedLocalWebPackages,
   packWebPackageZip,
   renderWebPackage,
   resolveWebPackage,
+  stageLocalWebPackage,
   unpackWebPackageZip,
+  unstageLocalWebPackage,
   verifyWebPackage,
   verifyWebPackageOverlay,
 } from '../src';
@@ -256,5 +265,73 @@ describe('canonical ZIP artifact and generic JSON Schema validation', () => {
       $ref: '#/$defs/scene',
       $defs: { scene: { type: 'object', required: ['text'], properties: { text: { type: 'string' } }, additionalProperties: false } },
     }, { text: 'ok' });
+  });
+});
+
+describe('local session staging and Prompt Projection', () => {
+  const localManifest = async () => {
+    const builtin = await resolveWebPackage(ref);
+    const manifest = { ...builtin.manifest, id: 'local.demo-package', name: '本地演示包' };
+    return verifyWebPackage(manifest, manifest.files.map((file) => ({
+      path: file.path, bytes: builtin.readFile(file.path)!,
+    })));
+  };
+
+  it('resolves only staged local refs and rejects unstaged ones', async () => {
+    clearLocalWebPackageSessionStaging();
+    const local = await localManifest();
+    expect(isBuiltinWebPackageRef(local.ref)).toBe(false);
+    expect(isBuiltinWebPackageRef(ref)).toBe(true);
+    await expect(resolveWebPackage(local.ref)).rejects.toThrow('不支持');
+    stageLocalWebPackage(local);
+    expect(getStagedLocalWebPackage(local.ref)?.manifest.name).toBe('本地演示包');
+    expect(listStagedLocalWebPackages()).toHaveLength(1);
+    expect((await resolveWebPackage(local.ref)).ref).toEqual(local.ref);
+    await expect(resolveWebPackage({ ...local.ref, digest: `sha256:${'c'.repeat(64)}` })).rejects.toThrow();
+    unstageLocalWebPackage(local.ref);
+    await expect(resolveWebPackage(local.ref)).rejects.toThrow();
+    clearLocalWebPackageSessionStaging();
+    expect(listStagedLocalWebPackages()).toHaveLength(0);
+  });
+
+  it('builds a structural projection and reconstructs the host contract prompt', async () => {
+    const base = await resolveWebPackage(ref);
+    const projection = buildWebPackagePromptProjection(base);
+    expect(projection.package).toMatchObject({ id: ref.id, version: ref.version, digest: ref.digest });
+    expect(projection.target).toEqual({ path: 'data/story.json', mediaType: 'application/json', mode: 'replace' });
+    expect(projection.schema).toMatchObject({ type: 'object' });
+    const prompt = buildWebPackagePromptFromProjection(projection);
+    const direct = await buildWebPackagePrompt(ref);
+    expect(prompt).toContain('[HOST WEB PACKAGE OUTPUT CONTRACT]');
+    expect(prompt).toContain('data/story.json');
+    expect(prompt).toContain('UNTRUSTED PACKAGE CREATOR INSTRUCTIONS');
+    const instructions = decoder.decode(base.readFile('ai/instructions.md'));
+    expect(prompt).toContain(instructions);
+    expect(direct).toContain(instructions);
+    // Projection re-serializes structured creator files; only semantic presence is guaranteed.
+    expect(direct).toContain(decoder.decode(base.readFile('schemas/story.schema.json')));
+    expect(direct).toContain(decoder.decode(base.readFile('ai/assets.json')));
+    expect(prompt).toContain('"$schema"');
+    expect(prompt).toContain('"scenes"');
+    expect(prompt).toContain('Semantic asset catalog:');
+    expect(prompt).toContain('twilight-stage');
+    expect(prompt).not.toContain('<script>');
+    expect(prompt).not.toContain(decoder.decode(base.readFile('runtime/app.js')));
+  });
+
+  it('creates overlay from projection with schema and trailer checks', async () => {
+    const base = await resolveWebPackage(ref);
+    const projection = buildWebPackagePromptProjection(base);
+    const content = story;
+    const overlay = await createWebPackageOverlayFromProjection(projection, content);
+    expect(overlay.packageRef).toEqual({ id: ref.id, version: ref.version, digest: ref.digest });
+    expect(overlay.targetPath).toBe('data/story.json');
+    expect(overlay.generatedDigest).toBe(await digestWebPackageBytes(encoder.encode(content)));
+    await expect(createWebPackageOverlayFromProjection(projection, `${content}${'x'.repeat(5 * 1024 * 1024)}`)).rejects.toThrow('字节预算');
+    await expect(createWebPackageOverlayFromProjection(projection, `${content}<!-- MAHOSHOJO_ARENA_META -->`)).rejects.toThrow('trailer');
+    await expect(createWebPackageOverlayFromProjection(projection, '{"title":1}')).rejects.toThrow('JSON Schema');
+    await expect(createWebPackageOverlayFromProjection({ ...projection, package: { ...projection.package, digest: `sha256:${'d'.repeat(64)}` } }, content)).resolves.toMatchObject({
+      packageRef: { digest: `sha256:${'d'.repeat(64)}` },
+    });
   });
 });

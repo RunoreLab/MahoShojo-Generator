@@ -27,7 +27,7 @@ import type {
 } from '@mahoshojo/hosted-api/arena-generation/service';
 import { createArenaStreamProjector } from './stream-projector';
 import { WebPackageRefSchema, type WebPackageArtifact } from '@mahoshojo/contracts/web-package';
-import { createWebPackageOverlay } from '@mahoshojo/web-package';
+import { createWebPackageOverlay, createWebPackageOverlayFromProjection } from '@mahoshojo/web-package';
 import { isWebArenaOutputContract } from './output-contract';
 
 export const MAX_ARENA_COMBATANTS = ARENA_RESOURCE_BUDGET.maxCombatants;
@@ -885,11 +885,24 @@ export const createArenaGenerationRuntime = (
           throw new ArenaWebPackageOutputError();
         }
         try {
-          const overlay = await createWebPackageOverlay(
-            WebPackageRefSchema.parse(prepared.metadata.webPackageRef),
-            markdown,
-            { maxBytes: ARENA_RESOURCE_BUDGET.maxOutputBytes },
-          );
+          const projection = prepared.metadata.webPackagePromptProjection;
+          const overlay = projection !== undefined
+            ? await createWebPackageOverlayFromProjection(
+              projection as Parameters<typeof createWebPackageOverlayFromProjection>[0],
+              markdown,
+              { maxBytes: ARENA_RESOURCE_BUDGET.maxOutputBytes },
+            )
+            : await createWebPackageOverlay(
+              WebPackageRefSchema.parse(prepared.metadata.webPackageRef),
+              markdown,
+              { maxBytes: ARENA_RESOURCE_BUDGET.maxOutputBytes },
+            );
+          const expectedRef = WebPackageRefSchema.parse(prepared.metadata.webPackageRef);
+          if (overlay.packageRef.id !== expectedRef.id
+            || overlay.packageRef.version !== expectedRef.version
+            || overlay.packageRef.digest !== expectedRef.digest) {
+            throw new Error('Web Package overlay 与请求 ref 不匹配');
+          }
           webPackage = {
             packageRef: overlay.packageRef,
             targetPath: overlay.targetPath,

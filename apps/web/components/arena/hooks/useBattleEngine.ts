@@ -38,6 +38,12 @@ import { secureRandomUUID } from '@/lib/crypto';
 import { normalizeAdjudicationEvents } from '@/lib/adjudicator/normalize';
 import { buildArenaQuestionnaireRequest } from '../utils/questionnaireRequest';
 import {
+  buildWebPackagePromptProjection,
+  isBuiltinWebPackageRef,
+  resolveWebPackage,
+} from '@mahoshojo/web-package';
+import type { WebPackagePromptProjection } from '@mahoshojo/contracts/web-package';
+import {
   createPinnedGenerationApiSafeReadDispatcher,
   createGenerationApiIntent,
   isGenerationApiClientErrorCode,
@@ -673,10 +679,21 @@ export const useBattleEngine = () => {
           customProvider: generationProviderSnapshot,
         });
       };
+      let webPackagePromptProjection: WebPackagePromptProjection | undefined;
+      if (reportFormat === 'web' && webPackageRef && !isBuiltinWebPackageRef(webPackageRef)) {
+        try {
+          const base = await resolveWebPackage(webPackageRef);
+          webPackagePromptProjection = buildWebPackagePromptProjection(base);
+        } catch {
+          setError('本地 Web 包未加载或已损坏，请重新导入后再生成。');
+          return;
+        }
+      }
       const requestBody = roomAction.inRoom ? null : {
         generationRequestId,
         reportFormat,
         ...(reportFormat === 'web' && webPackageRef ? { webPackageRef } : {}),
+        ...(webPackagePromptProjection ? { webPackagePromptProjection } : {}),
         combatants: freshCombatants.map((combatant) => ({
           type: combatant.type,
           data: combatant.data,

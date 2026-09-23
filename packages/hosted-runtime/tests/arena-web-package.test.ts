@@ -1,6 +1,16 @@
 import { describe, expect, it, vi } from 'vitest';
-import { BUILTIN_VISUAL_NOVEL_PACKAGE_REF, createWebPackageOverlay } from '@mahoshojo/web-package';
+import {
+  BUILTIN_VISUAL_NOVEL_PACKAGE_REF,
+  buildWebPackagePromptProjection,
+  clearLocalWebPackageSessionStaging,
+  createWebPackageOverlay,
+  createWebPackageOverlayFromProjection,
+  resolveWebPackage,
+  unpackWebPackageZip,
+  packWebPackageZip,
+} from '@mahoshojo/web-package';
 import { isArenaGenerationAuditableRejection } from '@mahoshojo/hosted-api/arena-generation/service';
+import { WebPackagePromptProjectionSchema } from '@mahoshojo/contracts/web-package';
 import { buildArenaGenerationPrompt } from '../src/arena-generation/prompt';
 import { createArenaGenerationRuntime } from '../src/arena-generation/runtime';
 import { createNodeArenaGenerationExecutor } from '../src/arena-generation/node-executor';
@@ -11,6 +21,17 @@ const payload = {
   reportFormat: 'web', webPackageRef: BUILTIN_VISUAL_NOVEL_PACKAGE_REF,
   combatants: [{ data: { name: 'A' } }, { data: { name: 'B' } }],
   writeArenaHistory: false, writeCurrentState: false,
+};
+
+const createLocalProjectionPackage = async () => {
+  const archive = await packWebPackageZip(await resolveWebPackage(BUILTIN_VISUAL_NOVEL_PACKAGE_REF));
+  const unpacked = await unpackWebPackageZip(archive);
+  const manifest = { ...unpacked.manifest, id: 'local.hosted-projection', name: '本地投影包' };
+  const { verifyWebPackage } = await import('@mahoshojo/web-package');
+  // Intentionally not staged: the server cannot resolve this local package without a projection.
+  return verifyWebPackage(manifest, manifest.files.map((file) => ({
+    path: file.path, bytes: unpacked.readFile(file.path)!,
+  })));
 };
 
 describe('Web Package hosted generation', () => {
@@ -98,5 +119,80 @@ describe('Web Package hosted generation', () => {
     expect((result as Response).status).toBe(400);
     expect(await (result as Response).json()).toMatchObject({ code });
     expect(generateWithStreamAI).not.toHaveBeenCalled();
+  });
+
+  it('accepts a local package only through a matching structural Prompt Projection', async () => {
+    clearLocalWebPackageSessionStaging();
+    const local = await createLocalProjectionPackage();
+    const projection = buildWebPackagePromptProjection(local);
+    const localPayload = { ...payload, webPackageRef: local.ref };
+
+    const unavailable = createNodeArenaGenerationExecutor({
+      env: {}, generateWithStreamAI: vi.fn(),
+      signatureService: { generateSignature: async () => '', verifySignature: async () => false },
+      finalizer: async () => ({ resultRef: null, ranking: null }),
+      enforceSafety: async () => null,
+    });
+    const withoutProjection = await unavailable.prepare!({
+      request: new Request('https://example.test/api/arena/generate-stream'), actorKey: 'user:42',
+      generationRequestId: 'package-request', payload: localPayload,
+    });
+    expect(withoutProjection).toBeInstanceOf(Response);
+    expect(await (withoutProjection as Response).json()).toMatchObject({ code: 'ARENA_WEB_PACKAGE_UNAVAILABLE' });
+
+    const generateWithStreamAI = vi.fn();
+    const withProjection = createNodeArenaGenerationExecutor({
+      env: {}, generateWithStreamAI,
+      signatureService: { generateSignature: async () => '', verifySignature: async () => false },
+      finalizer: async () => ({ resultRef: null, ranking: null }),
+      enforceSafety: async () => null,
+    });
+    const prepared = await withProjection.prepare!({
+      request: new Request('https://example.test/api/arena/generate-stream'), actorKey: 'user:42',
+      generationRequestId: 'package-request',
+      payload: { ...localPayload, webPackagePromptProjection: projection },
+    });
+    expect(prepared).not.toBeInstanceOf(Response);
+    expect(generateWithStreamAI).not.toHaveBeenCalled();
+
+    const mismatched = await withProjection.prepare!({
+      request: new Request('https://example.test/api/arena/generate-stream'), actorKey: 'user:42',
+      generationRequestId: 'package-request',
+      payload: {
+        ...localPayload,
+        webPackagePromptProjection: WebPackagePromptProjectionSchema.parse({
+          ...projection,
+          package: { ...projection.package, digest: `sha256:${'e'.repeat(64)}` },
+        }),
+      },
+    });
+    expect(mismatched).toBeInstanceOf(Response);
+    expect(await (mismatched as Response).json()).toMatchObject({ code: 'ARENA_WEB_PACKAGE_INVALID' });
+
+    const built = await buildArenaGenerationPrompt({
+      actorKey: 'user:42', random: () => 0,
+      payload: {
+        ...localPayload, webPackagePromptProjection: projection,
+        __arenaServerContextV1: { endpoint: 'api/arena/generate', deliveryMode: 'stream' },
+      },
+    });
+    expect(built.prompt).toContain('[HOST WEB PACKAGE OUTPUT CONTRACT]');
+    expect(built.prompt).toContain(local.ref.digest);
+    expect(built.metadata).toMatchObject({
+      outputContract: 'web-package-target',
+      webPackageRef: local.ref,
+      webPackagePromptProjection: projection,
+    });
+
+    const overlay = await createWebPackageOverlayFromProjection(projection, content);
+    expect(overlay.packageRef).toEqual(local.ref);
+    await expect(buildArenaGenerationPrompt({
+      actorKey: 'user:42', random: () => 0,
+      payload: {
+        ...localPayload,
+        webPackagePromptProjection: { ...projection, package: { ...projection.package, id: 'other' } },
+      },
+    })).rejects.toThrow('ARENA_WEB_PACKAGE_PROJECTION_MISMATCH');
+    clearLocalWebPackageSessionStaging();
   });
 });

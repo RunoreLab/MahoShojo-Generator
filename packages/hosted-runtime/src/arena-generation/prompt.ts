@@ -1,6 +1,9 @@
 import type { ArenaGenerationPrompt } from './runtime';
-import { WebPackageRefSchema } from '@mahoshojo/contracts/web-package';
-import { buildWebPackagePrompt } from '@mahoshojo/web-package';
+import {
+  WebPackagePromptProjectionSchema,
+  WebPackageRefSchema,
+} from '@mahoshojo/contracts/web-package';
+import { buildWebPackagePrompt, buildWebPackagePromptFromProjection } from '@mahoshojo/web-package';
 import {
   createPromptBuilder,
   createStreamPromptBuilder,
@@ -121,7 +124,22 @@ export const buildArenaGenerationPrompt = async (input: {
   if (webPackageRef && !isPackageBackedOutputContract(outputContract)) {
     throw new Error('ARENA_WEB_PACKAGE_REQUIRES_WEB');
   }
-  const packagePrompt = webPackageRef ? await buildWebPackagePrompt(webPackageRef) : undefined;
+  const webPackagePromptProjection = payload.webPackagePromptProjection === undefined
+    ? undefined
+    : WebPackagePromptProjectionSchema.parse(payload.webPackagePromptProjection);
+  if (webPackagePromptProjection) {
+    if (!webPackageRef
+      || webPackagePromptProjection.package.id !== webPackageRef.id
+      || webPackagePromptProjection.package.version !== webPackageRef.version
+      || webPackagePromptProjection.package.digest !== webPackageRef.digest) {
+      throw new Error('ARENA_WEB_PACKAGE_PROJECTION_MISMATCH');
+    }
+  }
+  const packagePrompt = webPackagePromptProjection
+    ? buildWebPackagePromptFromProjection(webPackagePromptProjection)
+    : webPackageRef
+      ? await buildWebPackagePrompt(webPackageRef)
+      : undefined;
   const rawUserGuidance = text(payload.userGuidance);
   // Legacy non-stream handlers bounded this field before safety, prompting,
   // response projection and history writes. Streaming intentionally remains
@@ -224,6 +242,7 @@ export const buildArenaGenerationPrompt = async (input: {
       outputContract,
       reportFormat: isWebArenaOutputContract(outputContract) ? 'web' : 'markdown',
       ...(webPackageRef ? { webPackageRef } : {}),
+      ...(webPackagePromptProjection ? { webPackagePromptProjection } : {}),
       expectsMeta,
       combatantCount: combatants.length,
       pvpContext: asRecord(payload.pvpContext),

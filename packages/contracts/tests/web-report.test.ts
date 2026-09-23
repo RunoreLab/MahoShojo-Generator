@@ -7,6 +7,7 @@ import {
   ArenaRoomSnapshotSchema,
 } from '../src/arena-room';
 import { BattleReportRenderSnapshotV1Schema } from '../src/battle-report-render-snapshot';
+import { WebPackagePromptProjectionSchema } from '../src/web-package';
 import legacySnapshot from './fixtures/arena-room-v1.json';
 
 describe('Arena Web report compatibility', () => {
@@ -14,6 +15,13 @@ describe('Arena Web report compatibility', () => {
   const webPackage = {
     packageRef, targetPath: 'data/report.json', targetMediaType: 'application/json',
     generatedDigest: `sha256:${'b'.repeat(64)}`,
+  };
+  const projection = {
+    package: { ...packageRef, name: '本地包' },
+    entry: 'index.html',
+    target: { path: 'data/story.json', mediaType: 'application/json', mode: 'replace' as const },
+    instructions: '创作素材',
+    schema: { type: 'object' },
   };
 
   it('keeps Package identity in Web config and persisted artifacts, never Markdown', () => {
@@ -60,5 +68,30 @@ describe('Arena Web report compatibility', () => {
     expect(BattleReportRenderSnapshotV1Schema.parse({ version: 1 })).toEqual({ version: 1 });
     expect(BattleReportRenderSnapshotV1Schema.parse({ version: 1, reportFormat: 'web' }))
       .toEqual({ version: 1, reportFormat: 'web' });
+  });
+
+  it('bounds local Prompt Projection structure and creator byte budgets', () => {
+    expect(WebPackagePromptProjectionSchema.parse(projection)).toMatchObject({
+      package: { digest: packageRef.digest },
+      target: { mode: 'replace' },
+    });
+    expect(WebPackagePromptProjectionSchema.safeParse({
+      ...projection,
+      target: { ...projection.target, mode: 'patch' },
+    }).success).toBe(false);
+    expect(WebPackagePromptProjectionSchema.safeParse({
+      ...projection,
+      instructions: 'x'.repeat(131_073),
+    }).success).toBe(false);
+    expect(WebPackagePromptProjectionSchema.safeParse({
+      ...projection,
+      schema: { type: 'object', properties: Object.fromEntries(
+        Array.from({ length: 20_000 }, (_, index) => [`p${index}`, { type: 'string' }]),
+      ) },
+    }).success).toBe(false);
+    expect(WebPackagePromptProjectionSchema.safeParse({
+      ...projection,
+      assetCatalog: 'x'.repeat(131_073),
+    }).success).toBe(false);
   });
 });
