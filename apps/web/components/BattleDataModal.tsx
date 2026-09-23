@@ -8,7 +8,7 @@ import DataCardDetailsModal from './DataCardDetailsModal';
 import { useAuth } from '@/lib/useAuth';
 import { useDataCardSummaryPage } from '@/lib/use-data-card-summary-page';
 import { loadFullDataCard } from '@/lib/data-card-list-client';
-import { fetchWithBoundedRetry } from '@/lib/bounded-fetch';
+import { fetchWithBoundedRetry, isRetryableStatus } from '@/lib/bounded-fetch';
 import { authStorage, favoritesApi, deckApi } from '@/lib/auth';
 import {
   isPublicVisibility,
@@ -31,6 +31,10 @@ import {
 
 type DataCardType = OnlineDataCardType;
 type BattleDataSelectedType = DataCardType | 'all';
+
+// 4xx 业务终态（400/401/403/404 等，不含 408/429）：与 bounded-retry 的不可重试语义对齐。
+const isDefinitiveClientTerminalStatus = (status: number): boolean =>
+  status >= 400 && status < 500 && !isRetryableStatus(status);
 
 interface BattleDataModalProps {
   isOpen: boolean;
@@ -526,6 +530,7 @@ export default function BattleDataModal({
       publicLoadedRequestKeyRef.current = null;
       setPublicDataCards([]);
     }
+    let failedStatus: number | null = null;
     try {
       setIsLoading(true);
       setPublicError(null);
@@ -537,13 +542,17 @@ export default function BattleDataModal({
         publicLoadedRequestKeyRef.current = requestKey;
         setPublicDataCards(card ? mapWithRoleType([card]) : []);
       } else {
+        failedStatus = response.status;
         throw new Error(`获取数据卡失败（HTTP ${response.status}）`);
       }
     } catch (error) {
       if (abortController.signal.aborted || (error instanceof Error && error.name === 'AbortError')) {
         return;
       }
-      if (publicLoadedRequestKeyRef.current !== requestKey) {
+      // 同 requestKey 的 5xx/timeout 保留 stale 单卡；4xx 业务终态（卡被转私有/删除）必须清掉。
+      const keepStale = publicLoadedRequestKeyRef.current === requestKey
+        && !(failedStatus !== null && isDefinitiveClientTerminalStatus(failedStatus));
+      if (!keepStale) {
         publicLoadedRequestKeyRef.current = null;
         setPublicDataCards([]);
       }
@@ -644,9 +653,10 @@ export default function BattleDataModal({
     }
   }, [buildPublicRequestKey, selectedType, effectiveAllowedTypes, cardsPerPage, mapWithRoleType]);
 
-  // 公开查询的统一重放入口：始终使用当前 debouncedSearchQuery + publicFilters，
-  // 供 effect、重试按钮与“再次点击当前 Tab”复用，避免 closure 里的过期查询语义。
-  const reloadPublicCurrentQuery = useCallback((page: number = currentPage) => {
+  // 公开查询的显式重放入口：始终使用当前 debouncedSearchQuery + publicFilters，
+  // 页码由调用方显式传入（不读取 currentPage，避免翻页 → callback identity → effect 的间接依赖），
+  // 供 effect、重试按钮、翻页与“再次点击当前 Tab”复用，避免 closure 里的过期查询语义。
+  const reloadPublicCurrentQuery = useCallback((page: number) => {
     if (!isPublicTab) return;
     const trimmed = debouncedSearchQuery.trim();
     const uuidMatch = trimmed.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
@@ -655,7 +665,7 @@ export default function BattleDataModal({
       return;
     }
     loadPublicDataCards(page, sortBy, trimmed || undefined, publicFilters, selectedTagIds, tagMatchMode);
-  }, [isPublicTab, currentPage, debouncedSearchQuery, sortBy, publicFilters, selectedTagIds, tagMatchMode, loadCardByIdForDisplay, loadPublicDataCards]);
+  }, [isPublicTab, debouncedSearchQuery, sortBy, publicFilters, selectedTagIds, tagMatchMode, loadCardByIdForDisplay, loadPublicDataCards]);
 
   const sortFavorites = useCallback((items: any[], criteria: 'likes' | 'usage' | 'favorites' | 'created_at') => {
     const sorted = [...items];
@@ -719,7 +729,8 @@ export default function BattleDataModal({
   }, [isOpen, isPublicTab]);
 
   // 公开查询的唯一请求 owner：防抖搜索、Tab、排序、筛选、标签变化都从这里发起。
-  // 翻页不在其中（currentPage 不是本 effect 的依赖），由 handlePageChange 显式请求。
+  // 翻页不在其中：reloadPublicCurrentQuery 不读取 currentPage（页码显式传参），
+  // 本 effect 依赖链也不含 currentPage，翻页由 handlePageChange 独占发起。
   useEffect(() => {
     if (!isOpen) return;
 
@@ -1057,11 +1068,11 @@ export default function BattleDataModal({
     return true;
   }, [isAuthenticated, adjustFavoriteCount, sortFavorites, sortBy, setUserDataCards, setFavoriteCards, reloadFavorites]);
 
-  // 处理页码变化
+  // 处理页码变化：翻页请求的显式 owner；roleType 高级筛选走本地 500 条分页，只切页不请求。
   const handlePageChange = (newPage: number) => {
     setCurrentPage(newPage);
     if (isPublicTab && !(publicFilters.roleType && selectedType === 'character')) {
-      loadPublicDataCards(newPage, sortBy, debouncedSearchQuery.trim() || undefined, publicFilters, selectedTagIds, tagMatchMode);
+      reloadPublicCurrentQuery(newPage);
     }
   };
 
@@ -1628,7 +1639,7 @@ export default function BattleDataModal({
           {listError && <div role="alert" className="mb-3 rounded-lg bg-red-50 p-3 text-sm text-red-700">
             {displayCards.length ? `刷新失败，当前显示上次成功结果：${listError}` : `数据卡加载失败：${listError}`}
             <button type="button" disabled={listLoading} className="ml-3 px-3 py-2 rounded bg-white disabled:opacity-50"
-              onClick={() => activeTab === 'my' ? myPage.reload() : activeTab === 'favorites' ? favoritesPage.reload() : reloadPublicCurrentQuery()}>重试</button>
+              onClick={() => activeTab === 'my' ? myPage.reload() : activeTab === 'favorites' ? favoritesPage.reload() : reloadPublicCurrentQuery(currentPage)}>重试</button>
           </div>}
           {/* 标签页切换 */}
           <div className="flex items-center justify-between gap-2 mb-4 flex-wrap">

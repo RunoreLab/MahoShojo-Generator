@@ -18,7 +18,8 @@ export const BOUNDED_FETCH_TIMEOUT_MS = 30_000;
 export const BOUNDED_FETCH_MAX_ATTEMPTS = 2;
 export const BOUNDED_FETCH_BACKOFF_MS = 500;
 
-const isRetryableStatus = (status: number): boolean => status === 408 || status === 429 || status >= 500;
+// 导出供调用方区分“可重试传输错误”与不可重试的 4xx 业务终态（400/401/403/404 等）。
+export const isRetryableStatus = (status: number): boolean => status === 408 || status === 429 || status >= 500;
 
 // jsdom 的 DOMException 不是 Error 子类，不能只靠 instanceof；TimeoutError/AbortError 按 name 判定。
 const hasRetryableErrorName = (cause: unknown): boolean => typeof cause === 'object'

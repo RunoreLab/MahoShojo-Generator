@@ -366,3 +366,121 @@ it('重复点击当前公开 Tab 仍保留搜索词，不发无搜索条件请�
   await flushAsync();
   expect(listUrls.at(-1)).toContain('search=A');
 });
+
+const findButton = (predicate: (text: string) => boolean): HTMLButtonElement | undefined =>
+  [...document.querySelectorAll('button')].find((b) => typeof b.textContent === 'string' && predicate(b.textContent));
+
+it('公开库下一页发 offset=12 并停留在第 2 页，不被公开查询 effect 弹回第 1 页', async () => {
+  const pageCards = Array.from({ length: 12 }, (_, index) => ({
+    ...card,
+    id: `public-${index + 1}`,
+    name: `公开卡${index + 1}`,
+    is_public: 1,
+  }));
+  const listUrls: string[] = [];
+  vi.stubGlobal('fetch', makePublicBatchFetch((url) => {
+    listUrls.push(url);
+    return Response.json({ success: true, cards: pageCards });
+  }));
+  await act(async () => root.render(
+    <BattleDataModal isOpen onClose={vi.fn()} onSelectCard={vi.fn()} selectedType="character" initialTab="public" />,
+  ));
+  await flushAsync();
+  await flushAsync();
+  expect(document.body.textContent).toContain('第 1 页');
+  const nextButton = findButton((text) => text === '下一页');
+  expect(nextButton).toBeDefined();
+  expect(nextButton!.disabled).toBe(false);
+
+  const requestsBeforePageChange = listUrls.length;
+  await act(async () => nextButton!.click());
+  await flushAsync();
+  await flushAsync();
+
+  const pageChangeRequests = listUrls.slice(requestsBeforePageChange);
+  expect(pageChangeRequests.some((url) => url.includes('offset=12'))).toBe(true);
+  expect(pageChangeRequests.some((url) => url.includes('offset=0'))).toBe(false);
+  expect(document.body.textContent).toContain('第 2 页');
+  expect(document.body.textContent).not.toContain('第 1 页');
+});
+
+it('roleType 高级筛选后本地分页第 2 页不被公开查询 effect 重置', async () => {
+  const roleCards = Array.from({ length: 13 }, (_, index) => ({
+    ...card,
+    id: `role-${index + 1}`,
+    name: `魔法少女${index + 1}`,
+    is_public: 1,
+    roleType: 'magical-girl',
+  }));
+  const listUrls: string[] = [];
+  vi.stubGlobal('fetch', makePublicBatchFetch((url) => {
+    listUrls.push(url);
+    return Response.json({ success: true, cards: roleCards });
+  }));
+  await act(async () => root.render(
+    <BattleDataModal isOpen onClose={vi.fn()} onSelectCard={vi.fn()} selectedType="character" initialTab="public" />,
+  ));
+  await flushAsync();
+  await flushAsync();
+
+  const filterToggle = findButton((text) => text.includes('高级筛选'));
+  expect(filterToggle).toBeDefined();
+  await act(async () => filterToggle!.click());
+  const roleSelect = document.querySelector<HTMLSelectElement>('select[name="roleType"]');
+  expect(roleSelect).not.toBeNull();
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')?.set?.call(roleSelect, 'magical-girl');
+    roleSelect!.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  const applyButton = findButton((text) => text === '应用筛选');
+  expect(applyButton).toBeDefined();
+  await act(async () => applyButton!.click());
+  await flushAsync();
+  await flushAsync();
+  expect(document.body.textContent).toContain('第 1 页 / 2');
+
+  const nextButton = findButton((text) => text === '下一页');
+  expect(nextButton).toBeDefined();
+  expect(nextButton!.disabled).toBe(false);
+  const requestsBeforePageChange = listUrls.length;
+  await act(async () => nextButton!.click());
+  await flushAsync();
+  await flushAsync();
+
+  expect(listUrls.length).toBe(requestsBeforePageChange);
+  expect(document.body.textContent).toContain('第 2 页 / 2');
+  expect(document.body.textContent).not.toContain('第 1 页 / 2');
+});
+
+it('公开单卡刷新遇 404 清除 stale 卡片，不显示“上次成功结果”', async () => {
+  const uuid = '12345678-1234-1234-1234-123456789abc';
+  const singleCard = { ...card, id: 'public-single', name: '公开单卡', is_public: 1 };
+  let idRequests = 0;
+  vi.stubGlobal('fetch', makePublicBatchFetch((url) => {
+    if (url.includes(`id=${uuid}`)) {
+      idRequests += 1;
+      if (idRequests === 1) return Response.json({ success: true, card: singleCard });
+      return new Response(null, { status: 404 });
+    }
+    return Response.json({ success: true, cards: [] });
+  }));
+  await act(async () => root.render(
+    <BattleDataModal isOpen onClose={vi.fn()} onSelectCard={vi.fn()} selectedType="character" initialTab="public" />,
+  ));
+  await flushAsync();
+  await flushAsync();
+  await typeSearch(uuid);
+  expect(idRequests).toBe(1);
+  expect(document.body.textContent).toContain('公开单卡');
+
+  const publicTab = findButton((text) => text === '公开角色');
+  expect(publicTab).toBeDefined();
+  await act(async () => publicTab!.click());
+  await flushAsync();
+  await flushAsync();
+
+  expect(idRequests).toBe(2);
+  expect(document.body.textContent).not.toContain('公开单卡');
+  expect(document.body.textContent).toContain('数据卡加载失败');
+  expect(document.body.textContent).not.toContain('当前显示上次成功结果');
+});
