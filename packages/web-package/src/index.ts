@@ -1,20 +1,32 @@
 import {
-  WebPackageManifestSchema,
+  WEB_PACKAGE_MANIFEST_PATH,
   WebPackageOverlaySchema,
   WebPackageRefSchema,
-  type WebPackageManifest,
   type WebPackageOverlay,
   type WebPackageRef,
   type WebPackageSourceKind,
 } from '@mahoshojo/contracts/web-package';
+import { assertJsonSchema202012 } from './json-schema';
 import {
   BUILTIN_VISUAL_NOVEL_PACKAGE_REF,
-  STORY_LOADER,
-  VISUAL_NOVEL_FILES,
-  VisualNovelStorySchema,
+  materializeVisualNovelHtml,
 } from './visual-novel-v1';
+import {
+  digestWebPackageBytes,
+  freezeDeep,
+  verifyWebPackage,
+  type VerifiedWebPackage,
+} from './verify';
 
 export { BUILTIN_VISUAL_NOVEL_PACKAGE_REF } from './visual-novel-v1';
+export {
+  BUILTIN_WEB_PACKAGE_PRESETS,
+  findBuiltinWebPackagePreset,
+  type BuiltinWebPackagePreset,
+} from './registry';
+export { packWebPackageZip, unpackWebPackageZip } from './zip';
+export { assertJsonSchema202012 } from './json-schema';
+export { canonicalizeWebPackageManifest, digestWebPackageBytes, verifyWebPackage } from './verify';
 export type {
   WebPackageRef,
   WebPackageArtifact,
@@ -27,70 +39,16 @@ const encoder = new TextEncoder();
 const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 const DEFAULT_MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
 
-export type ResolvedWebPackage = Readonly<{
-  ref: Readonly<WebPackageRef>;
-  manifest: WebPackageManifest;
-  /** Returns a copy, so callers cannot mutate the canonical bytes. */
-  readFile: (_path: string) => Uint8Array | undefined;
-}>;
+export type ResolvedWebPackage = VerifiedWebPackage;
 export type WebPackageInstance = Readonly<{
   base: ResolvedWebPackage;
   overlay: Readonly<WebPackageOverlay>;
   readFile: (_path: string) => Uint8Array | undefined;
 }>;
 
-export const digestWebPackageBytes = async (bytes: Uint8Array): Promise<string> => {
-  const digest = await crypto.subtle.digest('SHA-256', new Uint8Array(bytes));
-  return `sha256:${Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
-};
-
-const stableJson = (value: unknown): string => {
-  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
-  if (value !== null && typeof value === 'object') {
-    return `{${Object.entries(value).filter(([, item]) => item !== undefined).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)
-      .map(([key, item]) => `${JSON.stringify(key)}:${stableJson(item)}`).join(',')}}`;
-  }
-  return JSON.stringify(value);
-};
-
-/** UTF-8 canonical JSON: recursively sorted keys, sorted file paths and capabilities, no whitespace. */
-export const canonicalizeWebPackageManifest = (input: unknown): string => {
-  const manifest = WebPackageManifestSchema.parse(input);
-  return stableJson({ ...manifest, capabilities: [...manifest.capabilities].sort(), files: [...manifest.files].sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0) });
-};
-
-const freeze = <T>(value: T): T => {
-  if (value && typeof value === 'object') {
-    Object.values(value).forEach(freeze);
-    Object.freeze(value);
-  }
-  return value;
-};
-
-/** Verification only; Phase 1 does not expose an arbitrary package import or registry API. */
-export const verifyWebPackage = async (
-  input: unknown,
-  files: ReadonlyArray<Readonly<{ path: string; bytes: Uint8Array }>>,
-): Promise<ResolvedWebPackage> => {
-  const manifest = WebPackageManifestSchema.parse(input);
-  if (files.length !== manifest.files.length) throw new Error('Web Package 文件集合不匹配');
-  const payloads = new Map<string, Uint8Array>();
-  for (const file of files) {
-    if (payloads.has(file.path)) throw new Error('Web Package 文件路径重复');
-    payloads.set(file.path, new Uint8Array(file.bytes));
-  }
-  for (const file of manifest.files) {
-    const bytes = payloads.get(file.path);
-    if (!bytes || bytes.byteLength !== file.size || await digestWebPackageBytes(bytes) !== file.digest) {
-      throw new Error(`Web Package 文件完整性校验失败：${file.path}`);
-    }
-  }
-  const ref = freeze({ id: manifest.id, version: manifest.version, digest: await digestWebPackageBytes(encoder.encode(canonicalizeWebPackageManifest(manifest))) });
-  return Object.freeze({ ref, manifest: freeze(manifest), readFile: (path: string) => payloads.get(path)?.slice() });
-};
-
 let builtin: Promise<ResolvedWebPackage> | undefined;
 const loadBuiltin = async (): Promise<ResolvedWebPackage> => {
+  const { VISUAL_NOVEL_FILES } = await import('./visual-novel-v1');
   const files = VISUAL_NOVEL_FILES.map((file) => ({ ...file, bytes: encoder.encode(file.content) }));
   const descriptors = await Promise.all(files.map(async (file) => ({ path: file.path, mediaType: file.mediaType, digest: await digestWebPackageBytes(file.bytes), size: file.bytes.byteLength })));
   return verifyWebPackage({
@@ -165,8 +123,7 @@ const validateContent = (base: ResolvedWebPackage, content: string, maxBytes: nu
   if (base.manifest.generation.mediaType === 'application/json') {
     const parsed: unknown = JSON.parse(content);
     if (base.manifest.generation.schema) {
-      if (!sameRef(base.ref, BUILTIN_VISUAL_NOVEL_PACKAGE_REF)) throw new Error('不支持此 Web Package JSON schema revision');
-      VisualNovelStorySchema.parse(parsed);
+      assertJsonSchema202012(JSON.parse(readText(base, base.manifest.generation.schema)), parsed);
     }
   }
   return bytes;
@@ -179,7 +136,7 @@ export const createWebPackageOverlay = async (
 ): Promise<WebPackageOverlay> => {
   const base = await resolveWebPackage(ref);
   const bytes = validateContent(base, generatedContent, maxBytes);
-  return freeze({ packageRef: { ...base.ref }, targetPath: base.manifest.generation.target, targetMediaType: base.manifest.generation.mediaType, generatedDigest: await digestWebPackageBytes(bytes), generatedContent });
+  return freezeDeep({ packageRef: { ...base.ref }, targetPath: base.manifest.generation.target, targetMediaType: base.manifest.generation.mediaType, generatedDigest: await digestWebPackageBytes(bytes), generatedContent });
 };
 
 export const createWebPackageInstance = async (
@@ -191,7 +148,7 @@ export const createWebPackageInstance = async (
   if (!sameRef(base.ref, overlay.packageRef) || overlay.targetPath !== base.manifest.generation.target || overlay.targetMediaType !== base.manifest.generation.mediaType) throw new Error('Web Package overlay 与冻结契约不匹配');
   const bytes = validateContent(base, overlay.generatedContent, maxBytes);
   if (await digestWebPackageBytes(bytes) !== overlay.generatedDigest) throw new Error('Web Package overlay digest 校验失败');
-  return Object.freeze({ base, overlay: freeze(overlay), readFile: (path: string) => path === overlay.targetPath ? bytes.slice() : base.readFile(path) });
+  return Object.freeze({ base, overlay: freezeDeep(overlay), readFile: (path: string) => path === overlay.targetPath ? bytes.slice() : base.readFile(path) });
 };
 
 export const verifyWebPackageOverlay = async (
@@ -203,25 +160,16 @@ export const verifyWebPackageOverlay = async (
   return instance.overlay;
 };
 
-const toDataUrl = (mediaType: string, bytes: Uint8Array): string => {
-  let binary = '';
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return `data:${mediaType};base64,${btoa(binary)}`;
-};
-
-/** First-party materializer only. Arbitrary packages need a real isolated URL namespace. */
+/** First-party materializer only. Arbitrary packages need a real isolated URL namespace (Slice D). */
 export const renderWebPackage = async (input: WebPackageOverlay): Promise<{ kind: 'srcdoc'; html: string }> => {
   const overlay = WebPackageOverlaySchema.parse(input);
   const base = await resolveWebPackage(overlay.packageRef);
   const instance = await createWebPackageInstance(base, overlay);
+  if (!sameRef(base.ref, BUILTIN_VISUAL_NOVEL_PACKAGE_REF)) {
+    throw new Error('此 Web Package revision 尚无 first-party 渲染器');
+  }
   const story = decoder.decode(instance.readFile(overlay.targetPath)!);
-  const runtime = readText(base, 'runtime/app.js').replace(STORY_LOADER, "Promise.resolve(JSON.parse(document.getElementById('web-package-story').textContent))");
-  const backdrop = toDataUrl('image/svg+xml', base.readFile('assets/backdrop.svg')!);
-  const html = readText(base, base.manifest.entry)
-    .replace('<link rel="stylesheet" href="styles/app.css">', `<style>${readText(base, 'styles/app.css')}</style>`)
-    .replace('src="assets/backdrop.svg"', `src="${backdrop}"`)
-    .replace('<script src="runtime/app.js"></script>', () => `<script type="application/json" id="web-package-story">${story.replace(/</gu, '\\u003c')}</script><script>${runtime}</script>`);
-  return { kind: 'srcdoc', html };
+  return { kind: 'srcdoc', html: materializeVisualNovelHtml((path) => instance.readFile(path), story) };
 };
 
 /** Presentation text only: callers must render as text, never as HTML or Markdown. */
@@ -231,3 +179,5 @@ export const formatWebPackageFallback = (overlay: WebPackageOverlay): string => 
   }
   return overlay.generatedContent;
 };
+
+export const WEB_PACKAGE_MANIFEST_FILE = WEB_PACKAGE_MANIFEST_PATH;

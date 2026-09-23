@@ -12,7 +12,7 @@ import { downloadBlob } from '@/lib/client/blobUrl';
 import { buildSafeFileName } from '@/lib/client/fileName';
 import styles from './ArenaWebReport.module.css';
 import type { WebPackageArtifact, WebPackageRef } from '@mahoshojo/contracts/web-package';
-import { BUILTIN_VISUAL_NOVEL_PACKAGE_REF, formatWebPackageFallback, renderWebPackage } from '@mahoshojo/web-package';
+import { BUILTIN_WEB_PACKAGE_PRESETS, findBuiltinWebPackagePreset, formatWebPackageFallback, packWebPackageZip, renderWebPackage, resolveWebPackage } from '@mahoshojo/web-package';
 
 const CONSENT_KEY = 'arena.web-report-consent.v1';
 // 仅附加到预览；低优先级 layer 允许作品自身的滚动条设计覆盖默认样式。
@@ -283,26 +283,59 @@ export function ArenaReportFormatSelector({ value, onChange, disabled = false, r
 }) {
   const { accepted, accept } = useWebConsent(roomId);
   const [confirming, setConfirming] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+  const selectedPreset = findBuiltinWebPackagePreset(webPackageRef);
+  const downloadPresetZip = async (refToDownload: WebPackageRef) => {
+    if (downloading) return;
+    setDownloading(true);
+    setDownloadError(null);
+    try {
+      const base = await resolveWebPackage(refToDownload);
+      const archive = await packWebPackageZip(base);
+      downloadBlob(new Blob([archive], { type: 'application/zip' }), buildSafeFileName(`${base.manifest.id}@${base.manifest.version}`, 'zip', 'mahoshojo-web-package'));
+    } catch {
+      setDownloadError('Web 包下载失败，请稍后重试。');
+    } finally {
+      setDownloading(false);
+    }
+  };
   return (
     <div className="input-group">
       <SegmentedControl label="战报格式" value={value} options={FORMAT_OPTIONS} disabled={disabled} onChange={(format) => {
         if (format === 'web' && !accepted) setConfirming(true);
         else onChange(format);
       }} />
-      {value === 'web' && onWebPackageChange ? <label className="mt-3 block text-sm">
-        <span className="mb-1 block font-medium">Web 包</span>
-        <select
-          value={webPackageRef ? webPackageRef.digest : ''}
-          disabled={disabled}
-          onChange={(event) => onWebPackageChange(event.target.value ? BUILTIN_VISUAL_NOVEL_PACKAGE_REF : null)}
-          className="min-h-11 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-purple-500 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
+      {value === 'web' && onWebPackageChange ? <div className="mt-3 text-sm">
+        <label className="block">
+          <span className="mb-1 block font-medium">Web 包</span>
+          <select
+            value={webPackageRef ? webPackageRef.digest : ''}
+            disabled={disabled}
+            onChange={(event) => {
+              const preset = BUILTIN_WEB_PACKAGE_PRESETS.find((item) => item.packageRef.digest === event.target.value);
+              onWebPackageChange(event.target.value ? preset?.packageRef ?? null : null);
+            }}
+            className="min-h-11 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-purple-500 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
+          >
+            <option value="">自由生成网页</option>
+            {BUILTIN_WEB_PACKAGE_PRESETS.map((preset) => (
+              <option key={preset.packageRef.digest} value={preset.packageRef.digest}>{preset.title}</option>
+            ))}
+            {webPackageRef && !selectedPreset ? <option value={webPackageRef.digest}>不可用的 Web 包（请重新选择）</option> : null}
+          </select>
+        </label>
+        <span className="mt-1 block text-xs text-gray-500">{selectedPreset?.description ?? '视觉小说使用内置阅读器，AI 只生成本场故事；完成后可切换安全文本显示。'}</span>
+        {selectedPreset ? <button
+          type="button"
+          disabled={disabled || downloading}
+          onClick={() => void downloadPresetZip(selectedPreset.packageRef)}
+          className="mt-2 min-h-11 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 hover:bg-gray-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-purple-500 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800"
         >
-          <option value="">自由生成网页</option>
-          <option value={BUILTIN_VISUAL_NOVEL_PACKAGE_REF.digest}>Visual Novel Lite · 视觉小说</option>
-          {webPackageRef && webPackageRef.digest !== BUILTIN_VISUAL_NOVEL_PACKAGE_REF.digest ? <option value={webPackageRef.digest}>不可用的 Web 包（请重新选择）</option> : null}
-        </select>
-        <span className="mt-1 block text-xs text-gray-500">视觉小说使用内置阅读器，AI 只生成本场故事；完成后可切换安全文本显示。</span>
-      </label> : null}
+          {downloading ? '正在准备 ZIP…' : '下载 Web 包 ZIP'}
+        </button> : null}
+        {downloadError ? <span className="mt-1 block text-xs text-red-600 dark:text-red-400" role="status">{downloadError}</span> : null}
+      </div> : null}
       <WebReportConsentDialog open={confirming && !disabled} onCancel={() => setConfirming(false)} onAccept={(remember) => {
         accept(remember);
         setConfirming(false);

@@ -10,14 +10,19 @@ import {
 } from '@mahoshojo/contracts/web-package';
 import {
   BUILTIN_VISUAL_NOVEL_PACKAGE_REF as ref,
+  BUILTIN_WEB_PACKAGE_PRESETS,
+  assertJsonSchema202012,
   buildWebPackagePrompt,
   canonicalizeWebPackageManifest,
   createWebPackageInstance,
   createWebPackageOverlay,
   digestWebPackageBytes,
+  findBuiltinWebPackagePreset,
   formatWebPackageFallback,
+  packWebPackageZip,
   renderWebPackage,
   resolveWebPackage,
+  unpackWebPackageZip,
   verifyWebPackage,
   verifyWebPackageOverlay,
 } from '../src';
@@ -189,5 +194,67 @@ describe('single authoritative overlay and replay', () => {
     const { html } = await renderWebPackage(await createWebPackageOverlay(ref, JSON.stringify(source)));
     const materialized = html.match(/<script type="application\/json" id="web-package-story">([\s\S]*?)<\/script>/u)![1];
     expect(JSON.parse(materialized)).toEqual(source);
+  });
+});
+
+describe('canonical ZIP artifact and generic JSON Schema validation', () => {
+  it('packs and re-imports the builtin package with identical identity, prompt and render', async () => {
+    const base = await resolveWebPackage(ref);
+    const archive = await packWebPackageZip(base);
+    const reimported = await unpackWebPackageZip(archive);
+    expect(reimported.ref).toEqual(base.ref);
+    expect(reimported.manifest).toEqual(base.manifest);
+    expect(canonicalizeWebPackageManifest(reimported.manifest)).toBe(canonicalizeWebPackageManifest(base.manifest));
+    expect(await buildWebPackagePrompt(reimported.ref)).toBe(await buildWebPackagePrompt(base.ref));
+    const content = JSON.stringify({ title: '导入后', scenes: [{ text: '同一份 canonical identity。' }] });
+    const original = await renderWebPackage(await createWebPackageOverlay(base.ref, content));
+    const replay = await renderWebPackage(await createWebPackageOverlay(reimported.ref, content));
+    expect(replay).toEqual(original);
+  });
+
+  it.each([new Uint8Array(), new TextEncoder().encode('not-zip'), new TextEncoder().encode('{}')])('rejects invalid ZIP payloads', async (archive) => {
+    await expect(unpackWebPackageZip(archive)).rejects.toThrow();
+  });
+
+  it('rejects ZIP archives missing payload files or a valid manifest', async () => {
+    const { unzipSync, zipSync } = await import('fflate');
+    const base = await resolveWebPackage(ref);
+    const mtime = new Date('1980-01-01T00:00:00.000Z');
+    const entries = unzipSync(await packWebPackageZip(base));
+    const missingPath = base.manifest.files[0]!.path;
+    const missingBytes = base.readFile(missingPath)!;
+    delete entries[missingPath];
+    await expect(unpackWebPackageZip(zipSync(entries, { level: 6, mtime }))).rejects.toThrow('缺少文件');
+    entries[missingPath] = new Uint8Array(missingBytes);
+    delete entries['web-package.json'];
+    await expect(unpackWebPackageZip(zipSync(entries, { level: 6, mtime }))).rejects.toThrow('web-package.json');
+    entries['web-package.json'] = new TextEncoder().encode('{');
+    await expect(unpackWebPackageZip(zipSync(entries, { level: 6, mtime }))).rejects.toThrow('合法 JSON');
+  });
+
+  it('exposes discoverable builtin presets only for pinned refs', () => {
+    expect(BUILTIN_WEB_PACKAGE_PRESETS).toHaveLength(1);
+    expect(findBuiltinWebPackagePreset(ref)?.packageRef).toEqual(ref);
+    expect(findBuiltinWebPackagePreset({ ...ref, digest: `sha256:${'0'.repeat(64)}` })).toBeUndefined();
+    expect(findBuiltinWebPackagePreset(null)).toBeUndefined();
+    expect(BUILTIN_WEB_PACKAGE_PRESETS[0]!.title).toContain('视觉小说');
+    expect(BUILTIN_WEB_PACKAGE_PRESETS[0]!.downloadUrl).toContain(ref.id);
+  });
+
+  it('validates the frozen story schema via the generic Draft 2020-12 interpreter', async () => {
+    const base = await resolveWebPackage(ref);
+    const schema = JSON.parse(decoder.decode(base.readFile('schemas/story.schema.json')));
+    assertJsonSchema202012(schema, JSON.parse(story));
+    expect(() => assertJsonSchema202012(schema, {})).toThrow('JSON Schema 校验失败');
+    expect(() => assertJsonSchema202012(schema, { title: 'x', scenes: [] })).toThrow('JSON Schema 校验失败');
+    expect(() => assertJsonSchema202012(schema, { title: 'x', scenes: [{ text: 'x', code: 1 }] })).toThrow('JSON Schema 校验失败');
+    expect(() => assertJsonSchema202012({ $schema: 'http://json-schema.org/draft-07/schema#' }, JSON.parse(story))).toThrow('Draft 2020-12');
+    assertJsonSchema202012(true, { any: 'value' });
+    expect(() => assertJsonSchema202012(false, 'value')).toThrow('不允许出现');
+    assertJsonSchema202012({
+      $schema: 'https://json-schema.org/draft/2020-12/schema',
+      $ref: '#/$defs/scene',
+      $defs: { scene: { type: 'object', required: ['text'], properties: { text: { type: 'string' } }, additionalProperties: false } },
+    }, { text: 'ok' });
   });
 });

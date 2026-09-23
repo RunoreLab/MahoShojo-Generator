@@ -61,7 +61,13 @@ describe('Web 战报的本地执行许可', () => {
       select.dispatchEvent(new Event('change', { bubbles: true }));
     });
     expect(onWebPackageChange).toHaveBeenCalledWith(BUILTIN_VISUAL_NOVEL_PACKAGE_REF);
-    await act(async () => root.render(<ArenaReportFormatSelector value="web" onChange={() => {}} onWebPackageChange={onWebPackageChange} disabled />));
+    await act(async () => root.render(<ArenaReportFormatSelector value="web" onChange={() => {}} onWebPackageChange={onWebPackageChange} webPackageRef={BUILTIN_VISUAL_NOVEL_PACKAGE_REF} />));
+    await click('下载 Web 包 ZIP');
+    await vi.waitFor(() => {
+      expect(downloadBlob).toHaveBeenCalledWith(expect.any(Blob), 'mahoshojo.visual-novel-lite@1.0.0.zip');
+    });
+    await act(async () => { /* settle post-download state updates */ });
+    await act(async () => root.render(<ArenaReportFormatSelector value="web" onChange={() => {}} onWebPackageChange={onWebPackageChange} webPackageRef={BUILTIN_VISUAL_NOVEL_PACKAGE_REF} disabled />));
     expect(select.disabled).toBe(true);
   });
 
