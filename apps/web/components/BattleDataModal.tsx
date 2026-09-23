@@ -8,7 +8,7 @@ import DataCardDetailsModal from './DataCardDetailsModal';
 import { useAuth } from '@/lib/useAuth';
 import { useDataCardSummaryPage } from '@/lib/use-data-card-summary-page';
 import { loadFullDataCard } from '@/lib/data-card-list-client';
-import { fetchWithBoundedRetry, isRetryableStatus } from '@/lib/bounded-fetch';
+import { fetchJsonWithBoundedRetry, isRetryableStatus } from '@/lib/bounded-fetch';
 import { authStorage, favoritesApi, deckApi } from '@/lib/auth';
 import {
   isPublicVisibility,
@@ -534,16 +534,15 @@ export default function BattleDataModal({
     try {
       setIsLoading(true);
       setPublicError(null);
-      const response = await fetchWithBoundedRetry(`/api/public-data-cards?id=${cardId}`, { signal: abortController.signal });
-      if (response.ok) {
-        const result = await response.json();
+      const result = await fetchJsonWithBoundedRetry<any>(`/api/public-data-cards?id=${cardId}`, { signal: abortController.signal });
+      if (result.ok) {
         if (abortController.signal.aborted) return;
-        const card = result.success && result.card && effectiveAllowedTypeSet.has(result.card.type) ? result.card : null;
+        const card = result.data.success && result.data.card && effectiveAllowedTypeSet.has(result.data.card.type) ? result.data.card : null;
         publicLoadedRequestKeyRef.current = requestKey;
         setPublicDataCards(card ? mapWithRoleType([card]) : []);
       } else {
-        failedStatus = response.status;
-        throw new Error(`获取数据卡失败（HTTP ${response.status}）`);
+        failedStatus = result.status;
+        throw new Error(`获取数据卡失败（HTTP ${result.status}）`);
       }
     } catch (error) {
       if (abortController.signal.aborted || (error instanceof Error && error.name === 'AbortError')) {
@@ -621,11 +620,12 @@ export default function BattleDataModal({
           if (currentFilters.nativeAllowedOnly) params.append('nativeAllowedOnly', '1');
         }
 
-        const response = await fetchWithBoundedRetry(`/api/public-data-cards?${params}`, { signal: abortController.signal });
-        if (!response.ok) throw new Error(`获取公开数据卡失败（HTTP ${response.status}）`);
-        const result = await response.json();
-        if (!result.success || !Array.isArray(result.cards)) throw new Error(result.error || '列表响应无效');
-        return result.cards;
+        const result = await fetchJsonWithBoundedRetry<any>(`/api/public-data-cards?${params}`, { signal: abortController.signal });
+        if (!result.ok) throw new Error(`获取公开数据卡失败（HTTP ${result.status}）`);
+        if (!result.data.success || !Array.isArray(result.data.cards)) {
+          throw new Error(result.data.error || '列表响应无效');
+        }
+        return result.data.cards;
       };
 
       const batches = await Promise.all(effectiveAllowedTypes.map((type) => fetchType(type)));

@@ -1,7 +1,8 @@
 import type { OnlineDataCardType } from '@mahoshojo/contracts/data-cards';
 import type { UserBadge } from '@/types/badge';
 import { signOutBetterAuthSession } from '@/lib/auth/logout';
-import { fetchWithBoundedRetry } from '@/lib/bounded-fetch';
+import { fetchJsonWithBoundedRetry, type BoundedJsonFailure } from '@/lib/bounded-fetch';
+import { resolveApiErrorMessage } from '@/lib/client/apiError';
 import { mapDeckDetailPayload, mapDeckListPayload } from '@/lib/deck-client-mappers';
 import { DATA_CARD_LIST_PAGE_SIZE } from '@/lib/data-card-list-page';
 
@@ -286,40 +287,24 @@ export type DataCardsListResult = {
   status?: number;
 };
 
-const resolveApiErrorMessage = async (response: Response, fallback: string): Promise<string> => {
-  const contentType = (response.headers.get('content-type') || '').toLowerCase();
-
-  if (contentType.includes('application/json')) {
-    const payload = await response.json().catch(() => null);
-    if (payload && typeof payload === 'object') {
-      const record = payload as Record<string, unknown>;
-      const message = typeof record.message === 'string' ? record.message.trim() : '';
-      const error = typeof record.error === 'string' ? record.error.trim() : '';
-      if (message) return message;
-      if (error) return error;
-    }
-  }
-
-  const text = await response.text().catch(() => '');
-  const trimmed = typeof text === 'string' ? text.trim() : '';
-  if (trimmed) return trimmed.slice(0, 200);
-
-  return fallback;
+const resolveBoundedFailureMessage = (failure: BoundedJsonFailure, fallback: string): string => {
+  const payload = failure.data ?? failure.bodyText ?? null;
+  return resolveApiErrorMessage({ payload, fallback });
 };
 
-// 只用于幂等卡片 GET：有界重试与超时由 fetchWithBoundedRetry 统一执行。
+// 只用于幂等卡片 GET：有界重试与超时由 fetchJsonWithBoundedRetry 统一执行（含 JSON body 消费）。
 export async function fetchDataCardJson(url: string, signal?: AbortSignal): Promise<any> {
-  const response = await fetchWithBoundedRetry(url, {
+  const result = await fetchJsonWithBoundedRetry<any>(url, {
     fetcher: (input, init) => authStorage.fetch(input, init),
     signal,
   });
-  if (!response.ok) {
+  if (!result.ok) {
     throw Object.assign(
-      new Error(await resolveApiErrorMessage(response, `获取数据卡失败（HTTP ${response.status}）`)),
-      { status: response.status },
+      new Error(resolveBoundedFailureMessage(result, `获取数据卡失败（HTTP ${result.status}）`)),
+      { status: result.status },
     );
   }
-  return await response.json();
+  return result.data;
 }
 
 const fetchCardListPages = async (
