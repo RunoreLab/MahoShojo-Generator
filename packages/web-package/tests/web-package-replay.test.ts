@@ -4,10 +4,12 @@ import {
   clearLocalWebPackageSessionStaging,
   createWebPackageOverlay,
   findWebPackageCandidateById,
+  findWebPackageCandidatesById,
   listStagedLocalWebPackages,
   prepareWebPackageReplay,
   resolveWebPackage,
   stageLocalWebPackage,
+  unstageLocalWebPackage,
   verifyWebPackage,
 } from '../src';
 
@@ -77,8 +79,17 @@ describe('historical Web package replay', () => {
 
     expect((await findWebPackageCandidateById(artifact.packageRef.id))?.ref).toEqual(v2.ref);
 
+    // Higher version wins deterministically when multiple same-id candidates are staged.
+    const v0 = await buildLocalPackage('0.9.0');
+    stageLocalWebPackage(v0);
+    expect((await findWebPackageCandidateById(artifact.packageRef.id))?.ref).toEqual(v2.ref);
+    expect((await findWebPackageCandidatesById(artifact.packageRef.id)).map((pkg) => pkg.ref.version))
+      .toEqual(['1.1.0', '0.9.0']);
+    unstageLocalWebPackage(v0.ref);
+
     const deferred = await prepareWebPackageReplay({ artifact, generatedContent });
     expect(deferred.status).toBe('mismatch-available');
+    expect(deferred.message).toContain('1.1.0');
     expect(deferred.candidateAvailable).toBe(true);
     expect(deferred.instance).toBeUndefined();
     expect(artifact.packageRef).toEqual(v1.ref);

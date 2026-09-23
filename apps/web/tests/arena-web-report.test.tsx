@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import '@/tests/helpers/fake-indexeddb';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -9,6 +10,7 @@ import { BattleResultPresentation } from '@/components/arena/components/BattleRe
 import { BaseModal } from '@/components/shared/BaseModal';
 import {
   BUILTIN_VISUAL_NOVEL_PACKAGE_REF,
+  WEB_PACKAGE_INSTANCE_PREFIX,
   clearLocalWebPackageSessionStaging,
   createWebPackageOverlay,
   resolveWebPackage,
@@ -16,9 +18,25 @@ import {
   verifyWebPackage,
 } from '@mahoshojo/web-package';
 import { useBattleStore } from '@/components/arena/stores/useBattleStore';
+import { clearWebPackageInstances } from '@/lib/web-package/instance-store';
 
 vi.mock('@/lib/client/blobUrl', () => ({ downloadBlob: vi.fn() }));
 vi.mock('@/components/shared/GeneratedByUserBadge', () => ({ GeneratedByUserBadge: () => null }));
+
+const installServiceWorkerStub = () => {
+  const container = {
+    controller: {} as object,
+    register: vi.fn(async () => undefined),
+    ready: Promise.resolve({} as object),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  };
+  Object.defineProperty(navigator, 'serviceWorker', {
+    configurable: true,
+    get: () => container,
+  });
+  return container;
+};
 
 const source = '<!doctype html><html><body><button onclick="this.textContent=123">互动</button></body></html>';
 const sourceWithNotes = [
@@ -48,16 +66,19 @@ const viewer = (roomId: string, ready = true, content = source) => (
 beforeEach(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   window.localStorage.clear();
+  installServiceWorkerStub();
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
 });
 afterEach(async () => {
+  vi.useRealTimers();
   clearLocalWebPackageSessionStaging();
+  await clearWebPackageInstances();
   await act(async () => root.unmount());
   container.remove();
   vi.restoreAllMocks();
-  vi.useRealTimers();
+  vi.clearAllMocks();
   useBattleStore.setState({ webPackageRef: null, isGenerating: false }, true);
 });
 
@@ -102,7 +123,7 @@ describe('Web 战报的本地执行许可', () => {
     expect(container.querySelector('[data-testid="arena-web-package-select"]')!.disabled).toBe(true);
   });
 
-  it('validates a package before consent, keeps JSON fallback inert, and exports a self-contained experience', async () => {
+  it('validates a package before consent, keeps JSON fallback inert, and exports the generated target', async () => {
     const content = JSON.stringify({ title: '包故事', scenes: [{ text: '<script>unsafe()</script>' }] });
     const { generatedContent: _content, ...artifact } = await createWebPackageOverlay(BUILTIN_VISUAL_NOVEL_PACKAGE_REF, content);
     expect(_content).toBe(content);
@@ -122,10 +143,15 @@ describe('Web 战报的本地执行许可', () => {
     await click('继续使用 Web');
     const frame = container.querySelector('iframe')!;
     expect(frame.getAttribute('sandbox')).toBe('allow-scripts');
-    expect(frame.srcdoc).toContain('包故事');
-    expect(frame.srcdoc).not.toContain('<script>unsafe()</script>');
-    await click('🌐 下载 HTML');
-    expect(downloadBlob).toHaveBeenCalledWith(expect.any(Blob), expect.stringMatching(/\.html$/));
+    expect(frame.getAttribute('src')).toContain(WEB_PACKAGE_INSTANCE_PREFIX);
+    expect(frame.getAttribute('srcdoc') ?? '').toBe('');
+    await click('⬇ 下载生成目标');
+    expect(downloadBlob).toHaveBeenCalledWith(expect.any(Blob), expect.stringMatching(/\.json$/));
+    const [targetBlob, targetName] = vi.mocked(downloadBlob).mock.calls[0]!;
+    expect(targetName).toBe('story.json');
+    expect(await targetBlob.text()).toBe(content);
+    const htmlButton = [...document.querySelectorAll('button')].find((item) => item.textContent === '🌐 下载 HTML')!;
+    expect(htmlButton.disabled).toBe(true);
     await act(async () => root.render(render(true, { ...artifact, generatedDigest: `sha256:${'0'.repeat(64)}` })));
     await vi.waitFor(async () => {
       await act(async () => {});
@@ -135,6 +161,7 @@ describe('Web 战报的本地执行许可', () => {
     expect(container.querySelector('pre')?.textContent).toContain('unsafe()');
     expect(container.textContent).toContain('重新导入本地 Web 包');
     expect(container.textContent).not.toContain('仍尝试使用此 Web 包');
+    expect(container.textContent).toContain('下载生成目标');
   });
 
   it('缺失历史 Web 包时展示安全回退与重导入入口，不提供兼容重放', async () => {
@@ -193,7 +220,8 @@ describe('Web 战报的本地执行许可', () => {
       expect(container.textContent).toContain('当前使用的是不同版本的 Web 包，效果可能与生成时不一致。');
     });
     expect(container.querySelector('iframe')).toBeTruthy();
-    expect(container.querySelector('iframe')!.srcdoc).toContain('兼容重放故事');
+    expect(container.querySelector('iframe')!.getAttribute('src')).toContain(WEB_PACKAGE_INSTANCE_PREFIX);
+    expect(container.textContent).toContain('下载生成目标');
     expect(container.textContent).not.toContain('仍尝试使用此 Web 包');
     expect(artifact.packageRef).toEqual(historical.ref);
   });

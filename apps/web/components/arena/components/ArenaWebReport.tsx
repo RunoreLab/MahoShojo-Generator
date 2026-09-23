@@ -517,6 +517,23 @@ export function ArenaWebReport({ content, ready, roomId, aiModel, aiUsage, displ
     const blob = new Blob(['﻿', source], { type: 'text/html;charset=utf-8' });
     downloadBlob(blob, buildSafeFileName(`魔法少女速报_${resolvedDisplayTitle}`, 'html', '魔法少女速报'));
   };
+  const downloadTarget = () => {
+    if (!ready || !webPackage) return;
+    const extension = ({
+      'application/json': 'json',
+      'text/html': 'html',
+      'text/plain': 'txt',
+      'text/markdown': 'md',
+      'text/css': 'css',
+      'text/javascript': 'js',
+      'application/javascript': 'js',
+      'image/svg+xml': 'svg',
+    } as Record<string, string>)[webPackage.targetMediaType] ?? 'txt';
+    const leaf = webPackage.targetPath.split('/').pop() || `魔法少女速报_${resolvedDisplayTitle}`;
+    const stem = leaf.replace(/\.[^.]+$/u, '') || leaf;
+    const blob = new Blob([content], { type: `${webPackage.targetMediaType};charset=utf-8` });
+    downloadBlob(blob, buildSafeFileName(stem, extension, '魔法少女速报'));
+  };
   return (
     <>
       <div className="mb-4 flex flex-wrap items-end gap-3 text-sm">
@@ -565,8 +582,9 @@ export function ArenaWebReport({ content, ready, roomId, aiModel, aiUsage, displ
         />
         {importError ? <span className="text-red-300" role="alert">{importError}</span> : null}
       </div> : null}
-      {ready && webPackage && packageLocation && packageLocation.kind === 'url' ? <p className="mb-3 text-xs text-gray-500">
-        此 Web 包通过隔离 URL 空间加载；单文件 HTML 下载仅适用于内置视觉小说适配器。
+      {ready && webPackage ? <p className="mb-3 text-xs text-gray-500">
+        Web 包战报可下载 AI 生成的目标文件；预设或本地包的完整资源请使用「下载 Web 包 ZIP」或重新导入。
+        {packageLocation?.kind === 'url' ? '当前通过隔离 URL 空间加载，不提供单文件 HTML 导出。' : null}
       </p> : null}
       {children(showingWeb ? (
         <ArenaWebDocument
@@ -588,6 +606,14 @@ export function ArenaWebReport({ content, ready, roomId, aiModel, aiUsage, displ
           title="重新加载 Web 战报"
         >
           ↻ 重新加载
+        </button> : null}
+        {!immersive && webPackage ? <button
+          type="button"
+          disabled={!ready}
+          onClick={downloadTarget}
+          className="save-button flex-1 bg-white/10 hover:bg-white/20 text-white py-2 px-4 rounded transition-all disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          ⬇ 下载生成目标
         </button> : null}
         {!immersive ? <button
           type="button"

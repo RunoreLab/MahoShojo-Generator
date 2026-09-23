@@ -96,7 +96,10 @@ export const useSoloWebPackageSectionModel = (input: {
     void localTick;
     void hydrated;
     const builtins = builtinOptions();
-    return allowLocalImport ? [...builtins, ...localOptions()] : builtins;
+    const locals = allowLocalImport ? localOptions() : [];
+    // Same canonical identity may appear as both a preset and a re-imported local ZIP.
+    const seen = new Set(builtins.map((option) => option.digest));
+    return [...builtins, ...locals.filter((option) => !seen.has(option.digest))];
   }, [allowLocalImport, hydrated, localTick]);
 
   const selected = allowLocalImport

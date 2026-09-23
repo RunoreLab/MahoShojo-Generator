@@ -39,7 +39,9 @@ export const buildWebPackageInstanceUrl = (instanceId: string, path: string): st
   if (!INSTANCE_ID_PATTERN.test(instanceId)) throw new Error('非法 Web Package instance id');
   const parsed = WebPackagePathSchema.safeParse(path);
   if (!parsed.success) throw new Error('非法 Web Package 资源路径');
-  return `${WEB_PACKAGE_INSTANCE_PREFIX}${instanceId}/${path}`;
+  // Segment-encode so reserved URL characters (notably '#') stay logical path bytes.
+  const encodedPath = path.split('/').map((segment) => encodeURIComponent(segment)).join('/');
+  return `${WEB_PACKAGE_INSTANCE_PREFIX}${instanceId}/${encodedPath}`;
 };
 
 export const parseWebPackageInstancePath = (
@@ -85,6 +87,12 @@ export const createWebPackageResourceSnapshot = (
     if (!bytes) throw new Error(`Web Package 文件不存在：${file.path}`);
     const mediaType = file.path === overlay.targetPath ? overlay.targetMediaType : file.mediaType;
     files.set(file.path, Object.freeze({ mediaType, bytes: bytes.slice() }));
+  }
+  // Legal overlays may create a target that never existed in the immutable base tree.
+  if (!files.has(overlay.targetPath)) {
+    const bytes = source.readFile(overlay.targetPath);
+    if (!bytes) throw new Error(`Web Package overlay target 不存在：${overlay.targetPath}`);
+    files.set(overlay.targetPath, Object.freeze({ mediaType: overlay.targetMediaType, bytes: bytes.slice() }));
   }
   return Object.freeze({
     instanceId,

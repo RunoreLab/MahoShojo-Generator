@@ -254,8 +254,37 @@ const collectErrors = (
 };
 
 /**
+ * Draft 2020-12 assertion keywords the host intentionally does not implement.
+ * Ignoring them would silently weaken author-declared constraints, so fail closed.
+ * Unknown *extension* keywords remain ignored per JSON Schema.
+ */
+const UNSUPPORTED_STANDARD_KEYWORDS = new Set([
+  'unevaluatedProperties',
+  'unevaluatedItems',
+  'dependentSchemas',
+  'propertyNames',
+  '$dynamicRef',
+  '$dynamicAnchor',
+]);
+
+const assertSupportedKeywords = (node: unknown): void => {
+  if (Array.isArray(node)) {
+    for (const item of node) assertSupportedKeywords(item);
+    return;
+  }
+  if (!isRecord(node)) return;
+  for (const key of Object.keys(node)) {
+    if (UNSUPPORTED_STANDARD_KEYWORDS.has(key)) {
+      throw new Error(`JSON Schema 使用了宿主未实现的标准关键字：${key}`);
+    }
+  }
+  for (const value of Object.values(node)) assertSupportedKeywords(value);
+};
+
+/**
  * CSP-safe Draft 2020-12 subset validator for Web Package generation targets.
- * Unsupported dialects fail closed; unknown keywords are ignored per JSON Schema.
+ * Unsupported dialects and known-but-unimplemented standard assertions fail closed;
+ * unknown keywords are ignored per JSON Schema.
  */
 export const assertJsonSchema202012 = (schema: unknown, value: unknown): void => {
   if (!isRecord(schema) && typeof schema !== 'boolean') throw new Error('JSON Schema 必须是 object 或 boolean');
@@ -264,6 +293,7 @@ export const assertJsonSchema202012 = (schema: unknown, value: unknown): void =>
     if (typeof dialect === 'string' && dialect !== DRAFT_2020_12) {
       throw new Error(`仅支持 JSON Schema Draft 2020-12，收到：${dialect.slice(0, 120)}`);
     }
+    assertSupportedKeywords(schema);
   }
   const errors: string[] = [];
   collectErrors(schema, schema as Schema, value, '', errors);

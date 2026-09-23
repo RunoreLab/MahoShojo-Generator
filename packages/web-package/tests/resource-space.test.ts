@@ -14,11 +14,14 @@ import {
   BUILTIN_VISUAL_NOVEL_PACKAGE_REF,
   createWebPackageInstance,
   createWebPackageOverlay,
+  digestWebPackageBytes,
   resolveWebPackage,
+  verifyWebPackage,
 } from '../src';
 
 const INSTANCE_ID = 'inst_0123456789abcdef';
 const encoder = new TextEncoder();
+const storyJson = JSON.stringify({ title: '新建目标', scenes: [{ text: '第一幕' }] });
 
 const buildSnapshot = async (content: string) => {
   const base = await resolveWebPackage(BUILTIN_VISUAL_NOVEL_PACKAGE_REF);
@@ -137,6 +140,51 @@ describe('generic Web package resource space', () => {
     expect(() => buildWebPackageInstanceUrl('bad id', 'index.html')).toThrow();
     expect(() => buildWebPackageInstanceUrl(INSTANCE_ID, '../index.html')).toThrow();
     expect(() => buildWebPackageInstanceUrl(INSTANCE_ID, '/index.html')).toThrow();
+  });
+
+  it('segment-encodes logical paths so #, spaces and Unicode stay requestable', () => {
+    const withHash = buildWebPackageInstanceUrl(INSTANCE_ID, 'notes/report#1.html');
+    expect(withHash).toBe(`${WEB_PACKAGE_INSTANCE_PREFIX}${INSTANCE_ID}/notes/report%231.html`);
+    expect(withHash.split('#')).toHaveLength(1);
+    expect(parseWebPackageInstancePath(new URL(withHash, 'https://example.test').pathname)).toEqual({
+      instanceId: INSTANCE_ID,
+      path: 'notes/report#1.html',
+    });
+
+    const withSpace = buildWebPackageInstanceUrl(INSTANCE_ID, 'my file.js');
+    expect(withSpace).toContain('my%20file.js');
+    expect(parseWebPackageInstancePath(new URL(withSpace, 'https://example.test').pathname)?.path).toBe('my file.js');
+
+    const unicode = buildWebPackageInstanceUrl(INSTANCE_ID, 'assets/背景.svg');
+    expect(parseWebPackageInstancePath(new URL(unicode, 'https://example.test').pathname)?.path).toBe('assets/背景.svg');
+  });
+
+  it('materializes an overlay-only target that is absent from the base manifest', async () => {
+    const base = await resolveWebPackage(BUILTIN_VISUAL_NOVEL_PACKAGE_REF);
+    const manifest = {
+      ...base.manifest,
+      generation: { ...base.manifest.generation, schema: undefined, target: 'new/story.json' },
+    };
+    const withNewTarget = await verifyWebPackage(manifest, manifest.files.map((file) => ({
+      path: file.path,
+      bytes: base.readFile(file.path)!,
+    })));
+    expect(withNewTarget.readFile('new/story.json')).toBeUndefined();
+    const overlay = {
+      packageRef: withNewTarget.ref,
+      targetPath: withNewTarget.manifest.generation.target,
+      targetMediaType: withNewTarget.manifest.generation.mediaType,
+      generatedContent: storyJson,
+      generatedDigest: await digestWebPackageBytes(encoder.encode(storyJson)),
+    };
+    const instance = await createWebPackageInstance(withNewTarget, overlay);
+    const snapshot = createWebPackageResourceSnapshot(INSTANCE_ID, instance);
+    const pathname = `${WEB_PACKAGE_INSTANCE_PREFIX}${INSTANCE_ID}/new/story.json`;
+    expect(resolveWebPackageInstancePath(snapshot, pathname)).not.toBeNull();
+    const response = createWebPackageResourceResponse(snapshot, pathname);
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toContain('application/json');
+    expect(await response.text()).toBe(storyJson);
   });
 
   it('rejects snapshots when overlay identity drifts from the frozen base ref', async () => {

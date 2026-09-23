@@ -217,8 +217,13 @@ describe('canonical ZIP artifact and generic JSON Schema validation', () => {
     expect(await buildWebPackagePrompt(reimported.ref)).toBe(await buildWebPackagePrompt(base.ref));
     const content = JSON.stringify({ title: '导入后', scenes: [{ text: '同一份 canonical identity。' }] });
     const original = await renderWebPackage(await createWebPackageOverlay(base.ref, content));
+    stageLocalWebPackage(reimported);
+    // Staged local wins over the equal-identity builtin so re-import exercises the local path.
+    expect((await resolveWebPackage(reimported.ref)).manifest.name).toBe(reimported.manifest.name);
     const replay = await renderWebPackage(await createWebPackageOverlay(reimported.ref, content));
     expect(replay).toEqual(original);
+    unstageLocalWebPackage(reimported.ref);
+    expect((await resolveWebPackage(reimported.ref)).ref).toEqual(base.ref);
   });
 
   it.each([new Uint8Array(), new TextEncoder().encode('not-zip'), new TextEncoder().encode('{}')])('rejects invalid ZIP payloads', async (archive) => {
@@ -265,6 +270,18 @@ describe('canonical ZIP artifact and generic JSON Schema validation', () => {
       $ref: '#/$defs/scene',
       $defs: { scene: { type: 'object', required: ['text'], properties: { text: { type: 'string' } }, additionalProperties: false } },
     }, { text: 'ok' });
+    for (const keyword of ['unevaluatedProperties', 'dependentSchemas', 'propertyNames', '$dynamicRef'] as const) {
+      expect(() => assertJsonSchema202012({
+        $schema: 'https://json-schema.org/draft/2020-12/schema',
+        type: 'object',
+        [keyword]: keyword === 'propertyNames' ? { type: 'string' } : false,
+      }, {}), keyword).toThrow('未实现的标准关键字');
+    }
+    assertJsonSchema202012({
+      $schema: 'https://json-schema.org/draft/2020-12/schema',
+      type: 'object',
+      'x-host-extension': true,
+    }, { any: 'value' });
   });
 });
 

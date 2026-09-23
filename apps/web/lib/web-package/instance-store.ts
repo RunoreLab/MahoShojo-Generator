@@ -106,6 +106,24 @@ export const deleteWebPackageInstance = async (instanceId: string): Promise<void
   }
 };
 
+/** Drop every stored instance that is not currently mounted, so reloads cannot accumulate full package copies. */
+export const gcWebPackageInstances = async (keepInstanceIds: readonly string[]): Promise<void> => {
+  try {
+    const keep = new Set(keepInstanceIds);
+    const db = await openDb();
+    const transaction = db.transaction([STORE], 'readwrite');
+    const store = transaction.objectStore(STORE);
+    const all = await requestToPromise(store.getAllKeys() as IDBRequest<IDBValidKey[]>);
+    for (const key of all) {
+      if (typeof key === 'string' && !keep.has(key)) store.delete(key);
+    }
+    await transactionToPromise(transaction);
+    db.close();
+  } catch {
+    // GC is best-effort; storage failures never block rendering.
+  }
+};
+
 export const clearWebPackageInstances = async (): Promise<void> => {
   try {
     const db = await openDb();

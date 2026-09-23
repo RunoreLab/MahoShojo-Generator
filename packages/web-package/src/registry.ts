@@ -18,10 +18,15 @@ export const BUILTIN_WEB_PACKAGE_PRESETS: readonly BuiltinWebPackagePreset[] = O
   }),
 ]);
 
+const sameRef = (left: WebPackageRef, right: WebPackageRef): boolean => (
+  left.id === right.id && left.version === right.version && left.digest === right.digest
+);
+
 export const findBuiltinWebPackagePreset = (ref: WebPackageRef | null | undefined): BuiltinWebPackagePreset | undefined => (
-  ref ? BUILTIN_WEB_PACKAGE_PRESETS.find((preset) => (
-    preset.packageRef.id === ref.id
-    && preset.packageRef.version === ref.version
-    && preset.packageRef.digest === ref.digest
-  )) : undefined
+  ref ? BUILTIN_WEB_PACKAGE_PRESETS.find((preset) => sameRef(preset.packageRef, ref)) : undefined
+);
+
+/** Builtin membership is registry-driven so a second preset is first-class without core edits. */
+export const isBuiltinWebPackageRegistryRef = (ref: WebPackageRef): boolean => (
+  BUILTIN_WEB_PACKAGE_PRESETS.some((preset) => sameRef(preset.packageRef, ref))
 );

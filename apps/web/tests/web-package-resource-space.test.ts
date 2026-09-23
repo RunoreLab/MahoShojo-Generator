@@ -6,11 +6,15 @@ import {
   createWebPackageInstance,
   createWebPackageOverlay,
   createWebPackageResourceSnapshot,
+  digestWebPackageBytes,
   resolveWebPackage,
+  verifyWebPackage,
 } from '@mahoshojo/web-package';
 import {
   clearWebPackageInstances,
+  deleteWebPackageInstance,
   deserializeWebPackageInstanceRecord,
+  gcWebPackageInstances,
   putWebPackageInstance,
   readWebPackageInstance,
   serializeWebPackageResourceSnapshot,
@@ -80,5 +84,40 @@ describe('Web package instance store and resource handler', () => {
     const afterClear = await handleWebPackageResourceRequest(`${WEB_PACKAGE_INSTANCE_PREFIX}inst_handler/index.html`);
     expect(afterClear.status).toBe(404);
     expect(await readWebPackageInstance('missing-instance')).toBeNull();
+  });
+
+  it('serves overlay-only targets and garbage-collects stale instances', async () => {
+    const base = await resolveWebPackage(BUILTIN_VISUAL_NOVEL_PACKAGE_REF);
+    const manifest = {
+      ...base.manifest,
+      generation: { ...base.manifest.generation, schema: undefined, target: 'new/story.json' },
+    };
+    const withNewTarget = await verifyWebPackage(manifest, manifest.files.map((file) => ({
+      path: file.path,
+      bytes: base.readFile(file.path)!,
+    })));
+    const overlay = {
+      packageRef: withNewTarget.ref,
+      targetPath: withNewTarget.manifest.generation.target,
+      targetMediaType: withNewTarget.manifest.generation.mediaType,
+      generatedContent: story,
+      generatedDigest: await digestWebPackageBytes(new TextEncoder().encode(story)),
+    };
+    const instance = await createWebPackageInstance(withNewTarget, overlay);
+    const snapshot = createWebPackageResourceSnapshot('inst_new_target', instance);
+    await putWebPackageInstance(snapshot);
+    const created = await handleWebPackageResourceRequest(`${WEB_PACKAGE_INSTANCE_PREFIX}inst_new_target/new/story.json`);
+    expect(created.status).toBe(200);
+    expect(await created.text()).toBe(story);
+
+    await putWebPackageInstance(await buildSnapshot('inst_stale'));
+    expect(await readWebPackageInstance('inst_stale')).not.toBeNull();
+    await gcWebPackageInstances(['inst_new_target']);
+    expect(await readWebPackageInstance('inst_stale')).toBeNull();
+    expect(await readWebPackageInstance('inst_new_target')).not.toBeNull();
+
+    await deleteWebPackageInstance('inst_new_target');
+    expect(await readWebPackageInstance('inst_new_target')).toBeNull();
+    await clearWebPackageInstances();
   });
 });

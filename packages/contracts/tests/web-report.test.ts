@@ -93,5 +93,17 @@ describe('Arena Web report compatibility', () => {
       ...projection,
       assetCatalog: 'x'.repeat(131_073),
     }).success).toBe(false);
+    // Byte budget is UTF-8, not JS string length: full-width chars exceed the nominal limit earlier.
+    const wideInstructions = '魔'.repeat(70_000);
+    expect(wideInstructions.length).toBeLessThan(131_072);
+    expect(WebPackagePromptProjectionSchema.safeParse({
+      ...projection,
+      instructions: wideInstructions,
+    }).success).toBe(false);
+    const wideCatalog = '语'.repeat(70_000);
+    expect(WebPackagePromptProjectionSchema.safeParse({
+      ...projection,
+      assetCatalog: wideCatalog,
+    }).success).toBe(false);
   });
 });

@@ -12,9 +12,10 @@ import {
 } from '@mahoshojo/contracts/web-package';
 import { assertJsonSchema202012 } from './json-schema';
 import {
-  BUILTIN_VISUAL_NOVEL_PACKAGE_REF,
-  materializeVisualNovelHtml,
-} from './visual-novel-v1';
+  BUILTIN_WEB_PACKAGE_PRESETS,
+  findBuiltinWebPackagePreset,
+  isBuiltinWebPackageRegistryRef,
+} from './registry';
 import {
   digestWebPackageBytes,
   freezeDeep,
@@ -27,11 +28,13 @@ export { BUILTIN_VISUAL_NOVEL_PACKAGE_REF } from './visual-novel-v1';
 export {
   BUILTIN_WEB_PACKAGE_PRESETS,
   findBuiltinWebPackagePreset,
+  isBuiltinWebPackageRegistryRef,
   type BuiltinWebPackagePreset,
 } from './registry';
 export { packWebPackageZip, unpackWebPackageZip } from './zip';
 export { assertJsonSchema202012 } from './json-schema';
 export { canonicalizeWebPackageManifest, digestWebPackageBytes, verifyWebPackage } from './verify';
+export { renderWebPackage } from './visual-novel-adapter';
 export {
   WEB_PACKAGE_INSTANCE_PREFIX,
   WEB_PACKAGE_SERVICE_WORKER_PATH,
@@ -77,7 +80,7 @@ export type WebPackageInstance = Readonly<{
 
 let builtin: Promise<ResolvedWebPackage> | undefined;
 const loadBuiltin = async (): Promise<ResolvedWebPackage> => {
-  const { VISUAL_NOVEL_FILES } = await import('./visual-novel-v1');
+  const { BUILTIN_VISUAL_NOVEL_PACKAGE_REF, VISUAL_NOVEL_FILES } = await import('./visual-novel-v1');
   const files = VISUAL_NOVEL_FILES.map((file) => ({ ...file, bytes: encoder.encode(file.content) }));
   const descriptors = await Promise.all(files.map(async (file) => ({ path: file.path, mediaType: file.mediaType, digest: await digestWebPackageBytes(file.bytes), size: file.bytes.byteLength })));
   return verifyWebPackage({
@@ -93,20 +96,23 @@ const sameRef = (left: WebPackageRef, right: WebPackageRef): boolean => (
   left.id === right.id && left.version === right.version && left.digest === right.digest
 );
 
-/** Resolve the exact retained revision; never select a latest version by id. */
+/**
+ * Resolve the exact retained revision; never select a latest version by id.
+ * Staged locals win over an equal-identity builtin so re-import exercises the local path.
+ */
 export const resolveWebPackage = async (input: WebPackageRef): Promise<ResolvedWebPackage> => {
   const ref = WebPackageRefSchema.parse(input);
-  if (sameRef(ref, BUILTIN_VISUAL_NOVEL_PACKAGE_REF)) {
+  const local = getStagedLocalWebPackage(ref);
+  if (local) return local;
+  if (findBuiltinWebPackagePreset(ref)) {
     const base = await (builtin ??= loadBuiltin());
     if (!sameRef(base.ref, ref)) throw new Error(`内置 Web Package revision 完整性校验失败：${base.ref.digest}`);
     return base;
   }
-  const local = getStagedLocalWebPackage(ref);
-  if (local) return local;
   throw new Error('不支持或无法解析此 Web Package revision');
 };
 
-export const isBuiltinWebPackageRef = (ref: WebPackageRef): boolean => sameRef(ref, BUILTIN_VISUAL_NOVEL_PACKAGE_REF);
+export const isBuiltinWebPackageRef = (ref: WebPackageRef): boolean => isBuiltinWebPackageRegistryRef(ref);
 
 /**
  * Source seam: builtin/local/online adapters resolve refs into the same
@@ -269,18 +275,6 @@ export const createWebPackageOverlayFromProjection = async (
   });
 };
 
-/** First-party Visual Novel Lite adapter only; arbitrary packages use the generic resource-space URL (Slice D). */
-export const renderWebPackage = async (input: WebPackageOverlay): Promise<{ kind: 'srcdoc'; html: string }> => {
-  const overlay = WebPackageOverlaySchema.parse(input);
-  const base = await resolveWebPackage(overlay.packageRef);
-  const instance = await createWebPackageInstance(base, overlay);
-  if (!sameRef(base.ref, BUILTIN_VISUAL_NOVEL_PACKAGE_REF)) {
-    throw new Error('此 Web Package revision 尚无 first-party 渲染器');
-  }
-  const story = decoder.decode(instance.readFile(overlay.targetPath)!);
-  return { kind: 'srcdoc', html: materializeVisualNovelHtml((path) => instance.readFile(path), story) };
-};
-
 /** Presentation text only: callers must render as text, never as HTML or Markdown. */
 export const formatWebPackageFallback = (overlay: WebPackageOverlay): string => {
   if (overlay.targetMediaType === 'application/json') {
@@ -306,18 +300,44 @@ export type WebPackageReplayOutcome = Readonly<{
   candidateAvailable?: boolean;
 }>;
 
-/** Same-id candidates after exact resolve miss: staged locals first, then builtin. */
+/**
+ * Same-id candidates after exact resolve miss, ordered deterministically
+ * (higher version first, then digest) so multi-candidate choice is stable.
+ */
+export const findWebPackageCandidatesById = async (
+  packageId: string,
+): Promise<readonly ResolvedWebPackage[]> => {
+  const staged = listStagedLocalWebPackages()
+    .filter((pkg) => pkg.ref.id === packageId)
+    .sort((left, right) => (
+      right.ref.version.localeCompare(left.ref.version)
+      || left.ref.digest.localeCompare(right.ref.digest)
+    ));
+  const builtins: ResolvedWebPackage[] = [];
+  for (const preset of BUILTIN_WEB_PACKAGE_PRESETS) {
+    if (preset.packageRef.id !== packageId) continue;
+    try {
+      const pkg = await resolveWebPackage(preset.packageRef);
+      if (pkg.ref.digest !== preset.packageRef.digest) continue;
+      if (staged.some((item) => item.ref.digest === pkg.ref.digest)) continue;
+      builtins.push(pkg);
+    } catch {
+      // Unloadable builtin revisions are skipped; locals remain usable.
+    }
+  }
+  return [...staged, ...builtins]
+    .sort((left, right) => (
+      right.ref.version.localeCompare(left.ref.version)
+      || left.ref.digest.localeCompare(right.ref.digest)
+    ));
+};
+
+/** Deterministic single candidate: highest version, then lowest digest. */
 export const findWebPackageCandidateById = async (
   packageId: string,
 ): Promise<ResolvedWebPackage | null> => {
-  const staged = listStagedLocalWebPackages().filter((pkg) => pkg.ref.id === packageId);
-  if (staged.length > 0) return staged[0]!;
-  if (BUILTIN_VISUAL_NOVEL_PACKAGE_REF.id !== packageId) return null;
-  try {
-    return await resolveWebPackage(BUILTIN_VISUAL_NOVEL_PACKAGE_REF);
-  } catch {
-    return null;
-  }
+  const candidates = await findWebPackageCandidatesById(packageId);
+  return candidates[0] ?? null;
 };
 
 /**
@@ -394,7 +414,7 @@ export const prepareWebPackageReplay = async (input: {
   if (!input.allowCompatibility) {
     return {
       status: 'mismatch-available',
-      message: '当前缺少该 Web 包的历史 revision，但存在同 ID 的其他版本。',
+      message: `当前缺少该 Web 包的历史 revision，但存在同 ID 的其他版本（可用候选 ${candidate.ref.version}）。`,
       fallbackText,
       candidateAvailable: true,
     };

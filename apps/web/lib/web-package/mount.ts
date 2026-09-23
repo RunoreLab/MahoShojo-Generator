@@ -3,13 +3,12 @@ import {
   WEB_PACKAGE_SERVICE_WORKER_SCOPE,
   buildWebPackageInstanceUrl,
   createWebPackageResourceSnapshot,
-  isBuiltinWebPackageRef,
-  renderWebPackage,
+  digestWebPackageBytes,
   resolveWebPackage,
   createWebPackageInstance,
 } from '@mahoshojo/web-package';
 import type { WebPackageOverlay, WebPackageRenderLocation } from '@mahoshojo/contracts/web-package';
-import { putWebPackageInstance } from './instance-store';
+import { gcWebPackageInstances, putWebPackageInstance } from './instance-store';
 
 type ServiceWorkerContainerLike = Pick<ServiceWorkerContainer, 'register' | 'ready' | 'controller' | 'addEventListener' | 'removeEventListener'>;
 
@@ -42,25 +41,36 @@ export const ensureWebPackageServiceWorker = async (): Promise<void> => {
   await waitForController(container);
 };
 
+/** Deterministic id so remounting the same overlay reuses one IndexedDB row. */
+const stableInstanceId = async (overlay: WebPackageOverlay): Promise<string> => {
+  const material = [
+    overlay.packageRef.digest,
+    overlay.targetPath,
+    overlay.targetMediaType,
+    overlay.generatedDigest,
+  ].join('\n');
+  const digest = await digestWebPackageBytes(new TextEncoder().encode(material));
+  return `inst_${digest.slice('sha256:'.length, 'sha256:'.length + 40)}`;
+};
+
 /** Current-session instance materialization into the narrow URL namespace. */
 export const mountWebPackageInstance = async (overlay: WebPackageOverlay): Promise<string> => {
   const base = await resolveWebPackage(overlay.packageRef);
   const instance = await createWebPackageInstance(base, overlay);
-  const instanceId = crypto.randomUUID().replace(/[^A-Za-z0-9_-]/gu, '');
+  const instanceId = await stableInstanceId(overlay);
   const snapshot = createWebPackageResourceSnapshot(instanceId, instance);
   await putWebPackageInstance(snapshot);
   await ensureWebPackageServiceWorker();
+  // Stale instances from prior reloads/history views are dropped so quota cannot grow unbounded.
+  await gcWebPackageInstances([instanceId]);
   return buildWebPackageInstanceUrl(instanceId, snapshot.entry);
 };
 
 /**
- * Builtin Visual Novel Lite keeps the first-party srcdoc materializer as an adapter.
- * Arbitrary packages mount into the generic resource-space URL namespace.
+ * All packages — builtin included — mount through the generic resource-space URL.
+ * The Visual Novel srcdoc materializer remains a first-party fixture adapter only.
  */
 export const renderWebPackageLocation = async (overlay: WebPackageOverlay): Promise<WebPackageRenderLocation> => {
-  if (isBuiltinWebPackageRef(overlay.packageRef)) {
-    return renderWebPackage(overlay);
-  }
   const url = await mountWebPackageInstance(overlay);
   return { kind: 'url', url };
 };

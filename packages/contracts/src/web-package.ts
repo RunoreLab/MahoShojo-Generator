@@ -129,15 +129,19 @@ export const WebPackagePromptProjectionSchema = z.object({
     mediaType: z.enum(WEB_PACKAGE_TEXT_MEDIA_TYPES),
     mode: z.literal('replace'),
   }),
-  instructions: z.string().max(131_072).optional(),
+  instructions: z.string().optional(),
   schema: z.unknown().optional(),
   assetCatalog: z.unknown().optional(),
 }).superRefine((projection, context) => {
-  const budget = (value: unknown): number => JSON.stringify(value ?? '').length;
-  if (projection.schema !== undefined && budget(projection.schema) > 262_144) {
+  const encoder = new TextEncoder();
+  const utf8Bytes = (value: unknown): number => encoder.encode(JSON.stringify(value ?? '')).byteLength;
+  if (projection.instructions !== undefined && utf8Bytes(projection.instructions) > 131_072) {
+    context.addIssue({ code: 'custom', path: ['instructions'], message: 'instructions exceeds projection byte budget' });
+  }
+  if (projection.schema !== undefined && utf8Bytes(projection.schema) > 262_144) {
     context.addIssue({ code: 'custom', path: ['schema'], message: 'schema exceeds projection byte budget' });
   }
-  if (projection.assetCatalog !== undefined && budget(projection.assetCatalog) > 131_072) {
+  if (projection.assetCatalog !== undefined && utf8Bytes(projection.assetCatalog) > 131_072) {
     context.addIssue({ code: 'custom', path: ['assetCatalog'], message: 'assetCatalog exceeds projection byte budget' });
   }
 });
