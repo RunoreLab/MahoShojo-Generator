@@ -9,6 +9,8 @@ import type { WebPackageManifest } from '@mahoshojo/contracts/web-package';
 export const WEB_PACKAGE_INSTANCE_PREFIX = '/__web-package__/instance/';
 export const WEB_PACKAGE_SERVICE_WORKER_PATH = '/__web-package__/sw.js';
 export const WEB_PACKAGE_SERVICE_WORKER_SCOPE = '/__web-package__/';
+/** Opaque sandbox origins need explicit CORS; credentials are never used here. */
+export const WEB_PACKAGE_RESOURCE_CORS_ORIGIN = '*';
 
 const INSTANCE_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/u;
 
@@ -125,11 +127,16 @@ const withCharset = (mediaType: string): string => {
   return mediaType;
 };
 
+const securityBaseHeaders = (): Record<string, string> => ({
+  'Access-Control-Allow-Origin': WEB_PACKAGE_RESOURCE_CORS_ORIGIN,
+  'Referrer-Policy': 'no-referrer',
+  'X-Content-Type-Options': 'nosniff',
+});
+
 export const createWebPackageResourceHeaders = (mediaType: string): Headers => {
   const headers = new Headers({
+    ...securityBaseHeaders(),
     'Content-Type': withCharset(mediaType),
-    'Referrer-Policy': 'no-referrer',
-    'X-Content-Type-Options': 'nosniff',
   });
   if (mediaType === 'text/html') {
     headers.set('Content-Security-Policy', 'sandbox allow-scripts');
@@ -140,9 +147,8 @@ export const createWebPackageResourceHeaders = (mediaType: string): Headers => {
 const notFound = (): Response => new Response('Not Found', {
   status: 404,
   headers: {
+    ...securityBaseHeaders(),
     'Content-Type': 'text/plain; charset=utf-8',
-    'Referrer-Policy': 'no-referrer',
-    'X-Content-Type-Options': 'nosniff',
   },
 });
 

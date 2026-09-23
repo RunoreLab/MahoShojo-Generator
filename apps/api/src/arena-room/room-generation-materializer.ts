@@ -10,6 +10,7 @@ import {
   type DataCardRef,
 } from '@mahoshojo/contracts/arena-room';
 import { inferCharacterKind } from '@mahoshojo/domain/data-cards';
+import { isBuiltinWebPackageRef } from '@mahoshojo/web-package';
 
 export type ArenaRoomGenerationMaterializationErrorCode =
   | 'ARENA_ROOM_GENERATION_CONFIG_INVALID'
@@ -22,7 +23,8 @@ export type ArenaRoomGenerationMaterializationErrorCode =
   | 'ARENA_ROOM_HOST_LOCAL_PAYLOAD_TYPE_MISMATCH'
   | 'ARENA_ROOM_HOST_RUNTIME_INVALID'
   | 'ARENA_ROOM_REFERENCE_CONTENT_INVALID'
-  | 'ARENA_ROOM_REFERENCE_STALE';
+  | 'ARENA_ROOM_REFERENCE_STALE'
+  | 'ARENA_WEB_PACKAGE_REF_NOT_SERVER_SHAREABLE';
 
 export type ArenaRoomGenerationMaterializationTarget = Readonly<{
   kind: 'room' | 'combatant' | 'scenario' | 'material';
@@ -202,6 +204,9 @@ export const createArenaRoomGenerationMaterializer = (
       }
 
       const config = configResult.data;
+      if (config.webPackageRef !== undefined && !isBuiltinWebPackageRef(config.webPackageRef)) {
+        return fail('ARENA_WEB_PACKAGE_REF_NOT_SERVER_SHAREABLE');
+      }
       const expectedLocalKinds = new Map<string, Readonly<{
         kind: DataCardRef['kind'];
         target: ArenaRoomGenerationMaterializationTarget;

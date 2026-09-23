@@ -3,7 +3,7 @@ import {
   WebPackagePromptProjectionSchema,
   WebPackageRefSchema,
 } from '@mahoshojo/contracts/web-package';
-import { resolveWebPackage } from '@mahoshojo/web-package';
+import { resolveWebPackage, buildWebPackagePromptProjection } from '@mahoshojo/web-package';
 
 import type {
   ArenaGenerationAuditableRejection,
@@ -584,10 +584,19 @@ export const createNodeArenaGenerationExecutor = (
             || projection.data.package.digest !== ref.data.digest) {
             return jsonResponse({ code: 'ARENA_WEB_PACKAGE_INVALID', error: 'Web Package Prompt Projection 无效' }, 400);
           }
-        } else {
-          try {
-            await resolveWebPackage(ref.data);
-          } catch {
+        }
+        // Server-resolvable packages must match a server-rebuilt canonical Projection;
+        // unresolvable local packages are only valid through a client Projection.
+        try {
+          const base = await resolveWebPackage(ref.data);
+          if (payload.webPackagePromptProjection !== undefined) {
+            const canonical = buildWebPackagePromptProjection(base);
+            if (JSON.stringify(payload.webPackagePromptProjection) !== JSON.stringify(canonical)) {
+              return jsonResponse({ code: 'ARENA_WEB_PACKAGE_INVALID', error: 'Web Package Prompt Projection 与可解析 revision 不一致' }, 400);
+            }
+          }
+        } catch {
+          if (payload.webPackagePromptProjection === undefined) {
             return jsonResponse({ code: 'ARENA_WEB_PACKAGE_UNAVAILABLE', error: 'Web Package revision 不可用' }, 400);
           }
         }

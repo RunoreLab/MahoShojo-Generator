@@ -674,6 +674,46 @@ describe('Arena Room Proposal application service', () => {
     ]);
   });
 
+  it('accept-selected 拒绝非 builtin 的 setWebPackageRef，不写 checkpoint', async () => {
+    const harness = await createHarness();
+    const localOnly = { id: 'local.not-builtin', version: '1.0.0', digest: `sha256:${'b'.repeat(64)}` };
+    await harness.service.submit({
+      roomId: 'room-1',
+      accountUserId: 202,
+      request: {
+        proposalId: 'proposal-local-package',
+        expectedRoomEpoch: 'epoch-1',
+        baseRevision: 0,
+        changes: [{
+          changeId: 'web-package-1',
+          type: 'setReportFormat',
+          value: 'web' as const,
+          expectedBase: { kind: 'value' as const, value: 'markdown' as const },
+        }, {
+          changeId: 'web-package-2',
+          type: 'setWebPackageRef',
+          value: localOnly,
+          expectedBase: { kind: 'value' as const, value: null },
+        }],
+      },
+    });
+    const before = harness.store.saveCount;
+    await expect(harness.service.resolve({
+      roomId: 'room-1',
+      proposalId: 'proposal-local-package',
+      accountUserId: 101,
+      request: {
+        expectedRoomEpoch: 'epoch-1',
+        expectedRevision: 0,
+        resolution: 'accept-selected',
+        selectedChangeIds: ['web-package-1', 'web-package-2'],
+      },
+    })).rejects.toMatchObject({ code: 'ROOM_REFERENCE_DENIED' });
+    expect(harness.store.saveCount).toBe(before);
+    expect(harness.store.state?.snapshot.sharedConfig).not.toHaveProperty('webPackageRef');
+    expect(harness.store.state?.snapshot.sharedConfig.reportFormat).toBe('markdown');
+  });
+
   it.each([
     ['ARENA_DATA_CARD_REF_VERSION_MISMATCH', 'ROOM_REFERENCE_STALE'],
     ['ARENA_DATA_CARD_REF_NOT_READABLE', 'ROOM_REFERENCE_DENIED'],

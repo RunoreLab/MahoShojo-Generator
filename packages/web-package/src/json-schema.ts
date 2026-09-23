@@ -71,18 +71,59 @@ const collectErrors = (
 
   const ref = schema.$ref;
   if (typeof ref === 'string') {
+    // Draft 2020-12 allows $ref siblings; both the target and local keywords apply.
     collectErrors(root, resolveRef(root, ref), value, path, errors);
-    return;
+  } else if ('$ref' in schema) {
+    errors.push(`${path || '$'} 的 $ref 必须是 string`);
+  }
+
+  // Known assertion keywords with wrong types would otherwise be silently ignored.
+  const numericKeywords = [
+    'minLength', 'maxLength', 'minItems', 'maxItems',
+    'minProperties', 'maxProperties',
+    'minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum',
+    'multipleOf', 'minContains', 'maxContains',
+  ] as const;
+  for (const keyword of numericKeywords) {
+    if (keyword in schema && typeof schema[keyword] !== 'number') {
+      errors.push(`${path || '$'} 的 ${keyword} 必须是 number`);
+    }
+  }
+  if ('uniqueItems' in schema && typeof schema.uniqueItems !== 'boolean') {
+    errors.push(`${path || '$'} 的 uniqueItems 必须是 boolean`);
+  }
+  if ('pattern' in schema && typeof schema.pattern !== 'string') {
+    errors.push(`${path || '$'} 的 pattern 必须是 string`);
+  }
+  if ('required' in schema && !Array.isArray(schema.required)) {
+    errors.push(`${path || '$'} 的 required 必须是 array`);
+  }
+  if ('enum' in schema && !Array.isArray(schema.enum)) {
+    errors.push(`${path || '$'} 的 enum 必须是 array`);
+  }
+  if ('allOf' in schema && !Array.isArray(schema.allOf)) {
+    errors.push(`${path || '$'} 的 allOf 必须是 array`);
+  }
+  if ('anyOf' in schema && !Array.isArray(schema.anyOf)) {
+    errors.push(`${path || '$'} 的 anyOf 必须是 array`);
+  }
+  if ('oneOf' in schema && !Array.isArray(schema.oneOf)) {
+    errors.push(`${path || '$'} 的 oneOf 必须是 array`);
+  }
+  if ('prefixItems' in schema && !Array.isArray(schema.prefixItems)) {
+    errors.push(`${path || '$'} 的 prefixItems 必须是 array`);
   }
 
   const type = schema.type;
-  if (typeof type === 'string') {
-    if (!matchesType(type, value)) {
-      errors.push(`${path || '$'} 类型应为 ${type}`);
-      return;
-    }
-  } else if (Array.isArray(type)) {
-    if (!type.some((entry) => typeof entry === 'string' && matchesType(entry, value))) {
+  if (type !== undefined) {
+    if (typeof type !== 'string' && !Array.isArray(type)) {
+      errors.push(`${path || '$'} 的 type 必须是 string 或 string[]`);
+    } else if (typeof type === 'string') {
+      if (!matchesType(type, value)) {
+        errors.push(`${path || '$'} 类型应为 ${type}`);
+        return;
+      }
+    } else if (!type.some((entry) => typeof entry === 'string' && matchesType(entry, value))) {
       errors.push(`${path || '$'} 类型不在允许集合`);
       return;
     }
@@ -120,7 +161,7 @@ const collectErrors = (
     collectErrors(root, schema.not as Schema, value, path, bucket);
     if (bucket.length === 0) errors.push(`${path || '$'} 不得匹配 not`);
   }
-  if (isRecord(schema.if)) {
+  if (schema.if !== undefined) {
     const branch: string[] = [];
     collectErrors(root, schema.if as Schema, value, path, branch);
     if (branch.length === 0) {
@@ -131,11 +172,13 @@ const collectErrors = (
   }
 
   if (typeof value === 'string') {
-    if (typeof schema.minLength === 'number' && value.length < schema.minLength) {
-      errors.push(`${path || '$'} 字符串长度不足`);
+    // JSON Schema string lengths count Unicode code points, not UTF-16 units.
+    const codePoints = [...value];
+    if (typeof schema.minLength === 'number' && codePoints.length < schema.minLength) {
+      errors.push(`${path || '$'} 字符串长度不足（minLength）`);
     }
-    if (typeof schema.maxLength === 'number' && value.length > schema.maxLength) {
-      errors.push(`${path || '$'} 字符串长度超限`);
+    if (typeof schema.maxLength === 'number' && codePoints.length > schema.maxLength) {
+      errors.push(`${path || '$'} 字符串长度超限（maxLength）`);
     }
     if (typeof schema.pattern === 'string' && !new RegExp(schema.pattern, 'u').test(value)) {
       errors.push(`${path || '$'} 不匹配 pattern`);
@@ -267,7 +310,28 @@ const UNSUPPORTED_STANDARD_KEYWORDS = new Set([
   '$dynamicAnchor',
 ]);
 
+/** Structural schema positions to walk; instance-data keywords (const/enum/default) are skipped. */
+const SCHEMA_CONTAINER_KEYWORDS = new Set([
+  '$defs',
+  'definitions',
+  'allOf',
+  'anyOf',
+  'oneOf',
+  'not',
+  'if',
+  'then',
+  'else',
+  'items',
+  'prefixItems',
+  'contains',
+  'additionalProperties',
+  'patternProperties',
+  'properties',
+  'dependentSchemas',
+]);
+
 const assertSupportedKeywords = (node: unknown): void => {
+  if (typeof node === 'boolean') return;
   if (Array.isArray(node)) {
     for (const item of node) assertSupportedKeywords(item);
     return;
@@ -278,7 +342,10 @@ const assertSupportedKeywords = (node: unknown): void => {
       throw new Error(`JSON Schema 使用了宿主未实现的标准关键字：${key}`);
     }
   }
-  for (const value of Object.values(node)) assertSupportedKeywords(value);
+  for (const [key, value] of Object.entries(node)) {
+    if (!SCHEMA_CONTAINER_KEYWORDS.has(key)) continue;
+    assertSupportedKeywords(value);
+  }
 };
 
 /**

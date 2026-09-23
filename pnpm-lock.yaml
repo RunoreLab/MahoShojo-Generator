@@ -123,6 +123,9 @@ importers:
       '@mahoshojo/multiplayer-core':
         specifier: workspace:*
         version: link:../../packages/multiplayer-core
+      '@mahoshojo/web-package':
+        specifier: workspace:*
+        version: link:../../packages/web-package
       dotenv:
         specifier: ^17.4.2
         version: 17.4.2

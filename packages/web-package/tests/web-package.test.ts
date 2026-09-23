@@ -282,6 +282,48 @@ describe('canonical ZIP artifact and generic JSON Schema validation', () => {
       type: 'object',
       'x-host-extension': true,
     }, { any: 'value' });
+    // Draft 2020-12: $ref siblings apply alongside the target.
+    assertJsonSchema202012({
+      $schema: 'https://json-schema.org/draft/2020-12/schema',
+      $ref: '#/$defs/name',
+      minLength: 3,
+      $defs: { name: { type: 'string', maxLength: 5 } },
+    }, 'abcd');
+    expect(() => assertJsonSchema202012({
+      $schema: 'https://json-schema.org/draft/2020-12/schema',
+      $ref: '#/$defs/name',
+      minLength: 3,
+      $defs: { name: { type: 'string', maxLength: 5 } },
+    }, 'ab')).toThrow('minLength');
+    // Boolean if/then is valid 2020-12 and must not be treated as a schema container keyword.
+    assertJsonSchema202012({
+      $schema: 'https://json-schema.org/draft/2020-12/schema',
+      type: 'object',
+      if: true,
+      properties: { a: { type: 'string' } },
+    }, { a: 'x' });
+    // String length keywords count Unicode code points, not UTF-16 units.
+    expect(() => assertJsonSchema202012({
+      $schema: 'https://json-schema.org/draft/2020-12/schema',
+      type: 'string',
+      maxLength: 2,
+    }, '🙂🙂')).not.toThrow();
+    expect(() => assertJsonSchema202012({
+      $schema: 'https://json-schema.org/draft/2020-12/schema',
+      type: 'string',
+      maxLength: 1,
+    }, '🙂🙂')).toThrow('maxLength');
+    // Known assertion keywords with wrong types fail closed instead of being ignored.
+    expect(() => assertJsonSchema202012({
+      $schema: 'https://json-schema.org/draft/2020-12/schema',
+      type: 'string',
+      minLength: 'nope',
+    }, 'value')).toThrow('minLength 必须是 number');
+    expect(() => assertJsonSchema202012({
+      $schema: 'https://json-schema.org/draft/2020-12/schema',
+      type: 'object',
+      required: 'nope',
+    }, {})).toThrow('required 必须是 array');
   });
 });
 

@@ -3,7 +3,11 @@ import {
   WebPackagePromptProjectionSchema,
   WebPackageRefSchema,
 } from '@mahoshojo/contracts/web-package';
-import { buildWebPackagePrompt, buildWebPackagePromptFromProjection } from '@mahoshojo/web-package';
+import {
+  buildWebPackagePromptFromProjection,
+  buildWebPackagePromptProjection,
+  resolveWebPackage,
+} from '@mahoshojo/web-package';
 import {
   createPromptBuilder,
   createStreamPromptBuilder,
@@ -135,11 +139,30 @@ export const buildArenaGenerationPrompt = async (input: {
       throw new Error('ARENA_WEB_PACKAGE_PROJECTION_MISMATCH');
     }
   }
-  const packagePrompt = webPackagePromptProjection
-    ? buildWebPackagePromptFromProjection(webPackagePromptProjection)
-    : webPackageRef
-      ? await buildWebPackagePrompt(webPackageRef)
-      : undefined;
+  // Server-resolvable packages always rebuild a canonical Projection; a client
+  // Projection is only authoritative when the server cannot resolve the ref.
+  let trustedProjection = webPackagePromptProjection;
+  let packagePrompt: string | undefined;
+  if (webPackageRef) {
+    try {
+      const base = await resolveWebPackage(webPackageRef);
+      const canonical = buildWebPackagePromptProjection(base);
+      if (
+        webPackagePromptProjection
+        && JSON.stringify(webPackagePromptProjection) !== JSON.stringify(canonical)
+      ) {
+        throw new Error('ARENA_WEB_PACKAGE_PROJECTION_MISMATCH');
+      }
+      trustedProjection = canonical;
+      packagePrompt = buildWebPackagePromptFromProjection(canonical);
+    } catch (error) {
+      if (error instanceof Error && error.message === 'ARENA_WEB_PACKAGE_PROJECTION_MISMATCH') {
+        throw error;
+      }
+      if (!webPackagePromptProjection) throw error;
+      packagePrompt = buildWebPackagePromptFromProjection(webPackagePromptProjection);
+    }
+  }
   const rawUserGuidance = text(payload.userGuidance);
   // Legacy non-stream handlers bounded this field before safety, prompting,
   // response projection and history writes. Streaming intentionally remains
@@ -242,7 +265,7 @@ export const buildArenaGenerationPrompt = async (input: {
       outputContract,
       reportFormat: isWebArenaOutputContract(outputContract) ? 'web' : 'markdown',
       ...(webPackageRef ? { webPackageRef } : {}),
-      ...(webPackagePromptProjection ? { webPackagePromptProjection } : {}),
+      ...(trustedProjection ? { webPackagePromptProjection: trustedProjection } : {}),
       expectsMeta,
       combatantCount: combatants.length,
       pvpContext: asRecord(payload.pvpContext),

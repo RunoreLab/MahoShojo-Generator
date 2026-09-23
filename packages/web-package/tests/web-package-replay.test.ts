@@ -134,6 +134,39 @@ describe('historical Web package replay', () => {
     expect(artifact.packageRef).toEqual(v1.ref);
   });
 
+  it('a higher incompatible candidate never shadows a lower compatible one', async () => {
+    const v1 = await buildLocalPackage('1.0.0');
+    stageLocalWebPackage(v1);
+    const { generatedContent, ...artifact } = await createWebPackageOverlay(v1.ref, story);
+    clearLocalWebPackageSessionStaging();
+
+    const v2 = await buildLocalPackage('1.1.0');
+    const incompatible = await verifyWebPackage(
+      { ...v2.manifest, generation: { ...v2.manifest.generation, target: 'other/out.html' } },
+      v2.manifest.files.map((file) => ({ path: file.path, bytes: v2.readFile(file.path)! })),
+    );
+    stageLocalWebPackage(incompatible);
+
+    expect((await findWebPackageCandidatesById(artifact.packageRef.id)).map((pkg) => pkg.ref.version))
+      .toEqual(['1.1.0']);
+    const outcome = await prepareWebPackageReplay({
+      artifact,
+      generatedContent,
+      allowCompatibility: true,
+    });
+    expect(outcome.status).toBe('rejected');
+    expect(outcome.message).toContain('契约不兼容');
+    expect(outcome.candidateAvailable).toBe(true);
+    expect(outcome.instance).toBeUndefined();
+    expect(artifact.packageRef).toEqual(v1.ref);
+
+    unstageLocalWebPackage(incompatible.ref);
+    stageLocalWebPackage(v1);
+    const fallbackExact = await prepareWebPackageReplay({ artifact, generatedContent });
+    expect(fallbackExact.status).toBe('exact');
+    expect(fallbackExact.instance?.base.ref).toEqual(v1.ref);
+  });
+
   it('keeps historical provenance while rendering with a compatibility candidate', async () => {
     const v1 = await buildLocalPackage('1.0.0');
     stageLocalWebPackage(v1);

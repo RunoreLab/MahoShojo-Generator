@@ -24,12 +24,14 @@ vi.mock('@/lib/client/blobUrl', () => ({ downloadBlob: vi.fn() }));
 vi.mock('@/components/shared/GeneratedByUserBadge', () => ({ GeneratedByUserBadge: () => null }));
 
 const installServiceWorkerStub = () => {
+  const activeWorker = { state: 'activated', addEventListener: vi.fn(), removeEventListener: vi.fn() };
+  const registration = {
+    active: activeWorker,
+    installing: null,
+    waiting: null,
+  } as unknown as ServiceWorkerRegistration;
   const container = {
-    controller: {} as object,
-    register: vi.fn(async () => undefined),
-    ready: Promise.resolve({} as object),
-    addEventListener: vi.fn(),
-    removeEventListener: vi.fn(),
+    register: vi.fn(async () => registration),
   };
   Object.defineProperty(navigator, 'serviceWorker', {
     configurable: true,

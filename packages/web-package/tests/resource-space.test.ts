@@ -85,10 +85,11 @@ describe('generic Web package resource space', () => {
       expect(resolved!.bytes.byteLength).toBeGreaterThan(0);
 
       const response = createWebPackageResourceResponse(snapshot, pathname);
-      expect(response.status, path).toBe(200);
+      expect(response.status, pathname).toBe(200);
       expect(response.headers.get('content-type'), path).toContain(mediaType);
       expect(response.headers.get('x-content-type-options')).toBe('nosniff');
       expect(response.headers.get('referrer-policy')).toBe('no-referrer');
+      expect(response.headers.get('access-control-allow-origin'), path).toBe('*');
     }
 
     const html = createWebPackageResourceResponse(snapshot, `${WEB_PACKAGE_INSTANCE_PREFIX}${INSTANCE_ID}/index.html`);
@@ -202,14 +203,26 @@ describe('generic Web package resource space', () => {
     const html = createWebPackageResourceHeaders('text/html');
     expect(html.get('content-security-policy')).toBe('sandbox allow-scripts');
     expect(html.get('content-type')).toBe('text/html; charset=utf-8');
+    expect(html.get('access-control-allow-origin')).toBe('*');
 
     const png = createWebPackageResourceHeaders('image/png');
     expect(png.get('content-security-policy')).toBeNull();
     expect(png.get('content-type')).toBe('image/png');
+    expect(png.get('access-control-allow-origin')).toBe('*');
 
     const mjs = createWebPackageResourceHeaders('text/javascript');
     expect(mjs.get('content-type')).toBe('text/javascript; charset=utf-8');
     expect(mjs.get('x-content-type-options')).toBe('nosniff');
+    expect(mjs.get('access-control-allow-origin')).toBe('*');
+  });
+
+  it('emits CORS headers on success and 404 so opaque sandbox fetches can read JSON/JS', async () => {
+    const snapshot = await buildSnapshot(JSON.stringify({ title: 'CORS', scenes: [{ text: 'x' }] }));
+    const ok = createWebPackageResourceResponse(snapshot, `${WEB_PACKAGE_INSTANCE_PREFIX}${INSTANCE_ID}/data/story.json`);
+    expect(ok.headers.get('access-control-allow-origin')).toBe('*');
+    const missing = createWebPackageResourceResponse(snapshot, `${WEB_PACKAGE_INSTANCE_PREFIX}${INSTANCE_ID}/missing.json`);
+    expect(missing.status).toBe(404);
+    expect(missing.headers.get('access-control-allow-origin')).toBe('*');
   });
 
   it('keeps foreign instance bytes out of this snapshot even when paths match', async () => {

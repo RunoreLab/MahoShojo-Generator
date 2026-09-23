@@ -27,6 +27,12 @@ export interface ArenaProposalState {
 /** Pure application options. Host authorization and review revision fences live at the authority boundary. */
 export interface ArenaProposalApplyOptions {
   readonly overrideChangeIds?: readonly string[];
+  /**
+   * Server-side source-capability check for `setWebPackageRef`.
+   * Pure multiplayer logic cannot import the package registry; hosts inject
+   * the exact-builtin predicate when applying proposals on the authority path.
+   */
+  readonly isServerShareableWebPackageRef?: (_ref: NonNullable<ArenaRoomSharedConfig['webPackageRef']>) => boolean;
 }
 
 export interface ArenaProposalApplyResult {
@@ -153,7 +159,11 @@ const reorderByKeys = <Entry extends { readonly key: string }>(
   });
 };
 
-const applyChange = (config: ArenaRoomSharedConfig, change: ArenaProposalChange): void => {
+const applyChange = (
+  config: ArenaRoomSharedConfig,
+  change: ArenaProposalChange,
+  options: ArenaProposalApplyOptions,
+): void => {
   switch (change.type) {
     case 'addCombatant': {
       config.combatants.push({ key: canonicalResourceKey(change.ref.id, change.key), ref: deepClone(change.ref) });
@@ -226,7 +236,18 @@ const applyChange = (config: ArenaRoomSharedConfig, change: ArenaProposalChange)
       return;
     case 'setWebPackageRef':
       if (change.value === null) delete config.webPackageRef;
-      else config.webPackageRef = deepClone(change.value);
+      else {
+        if (
+          options.isServerShareableWebPackageRef
+          && !options.isServerShareableWebPackageRef(change.value)
+        ) {
+          throw new ArenaMultiplayerCoreError(
+            'unsupported-change',
+            'web package ref is not server-shareable',
+          );
+        }
+        config.webPackageRef = deepClone(change.value);
+      }
       return;
     case 'setBattleMode':
       config.battleMode = change.value;
@@ -415,7 +436,7 @@ const analyzeStagedApplication = (
       throw new ArenaMultiplayerCoreError('unsupported-change', `proposal target is absent for ${change.changeId}`);
     }
     applicableChangeIds.push(change.changeId);
-    applyChange(working, change);
+    applyChange(working, change, options);
   }
   // Unselected changes are reference-only for reviewers: analyze them against
   // the pristine config like the old non-staged review did.

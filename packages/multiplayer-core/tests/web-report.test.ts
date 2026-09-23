@@ -46,6 +46,23 @@ describe('Web report room semantics', () => {
     expect(buildArenaRoomSharedConfig({ ...legacy, reportFormat: 'web' }).reportFormat).toBe('web');
   });
 
+  it('rejects non-server-shareable web package refs when the host injects the predicate', () => {
+    const base = baseConfig();
+    const localOnly = { id: 'local.demo', version: '1.0.0', digest: `sha256:${'b'.repeat(64)}` };
+    const changes = diffArenaSharedConfig(base, {
+      ...base, reportFormat: 'web' as const, webPackageRef: localOnly,
+    });
+    const applied = applyArenaProposal({ roomId: 'room-1', config: base, revision: 1 },
+      proposal(changes), undefined, { isServerShareableWebPackageRef: () => false });
+    expect(applied.status).toBe('rejected');
+    expect(applied.issues.some((issue) => issue.message.includes('not server-shareable'))).toBe(true);
+    expect(base).not.toHaveProperty('webPackageRef');
+    const allowed = applyArenaProposal({ roomId: 'room-1', config: base, revision: 1 },
+      proposal(changes), undefined, { isServerShareableWebPackageRef: () => true });
+    expect(allowed.status).toBe('accepted');
+    expect(allowed.config.webPackageRef).toEqual(localOnly);
+  });
+
   it('applies format proposals with revision, no-op and provenance semantics', () => {
     const base = baseConfig();
     const web = { ...base, reportFormat: 'web' as const };

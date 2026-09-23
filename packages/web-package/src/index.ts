@@ -37,6 +37,7 @@ export { canonicalizeWebPackageManifest, digestWebPackageBytes, verifyWebPackage
 export { renderWebPackage } from './visual-novel-adapter';
 export {
   WEB_PACKAGE_INSTANCE_PREFIX,
+  WEB_PACKAGE_RESOURCE_CORS_ORIGIN,
   WEB_PACKAGE_SERVICE_WORKER_PATH,
   WEB_PACKAGE_SERVICE_WORKER_SCOPE,
   buildWebPackageInstanceUrl,
@@ -124,9 +125,23 @@ export type WebPackageSource = Readonly<{
   resolve: (_ref: WebPackageRef) => Promise<ResolvedWebPackage>;
 }>;
 
+/**
+ * Builtin-only resolve: never consults staged locals, so a local re-import with
+ * the same identity cannot shadow the registry revision for this source.
+ */
+const resolveBuiltinOnly = async (input: WebPackageRef): Promise<ResolvedWebPackage> => {
+  const ref = WebPackageRefSchema.parse(input);
+  if (!findBuiltinWebPackagePreset(ref)) {
+    throw new Error('不支持或无法解析此 Web Package revision');
+  }
+  const base = await (builtin ??= loadBuiltin());
+  if (!sameRef(base.ref, ref)) throw new Error(`内置 Web Package revision 完整性校验失败：${base.ref.digest}`);
+  return base;
+};
+
 export const builtinWebPackageSource: WebPackageSource = Object.freeze({
   kind: 'builtin',
-  resolve: resolveWebPackage,
+  resolve: resolveBuiltinOnly,
 });
 
 const readText = (base: ResolvedWebPackage, path: string): string => {
@@ -300,9 +315,34 @@ export type WebPackageReplayOutcome = Readonly<{
   candidateAvailable?: boolean;
 }>;
 
+/** Version compare: SemVer-aware when both parse, otherwise numeric-aware fallback. */
+const comparePackageVersions = (left: string, right: string): number => {
+  const parse = (value: string) => {
+    const [core = '0', pre = ''] = value.split('-', 2);
+    const parts = core.split('.').map((part) => Number.parseInt(part, 10));
+    return {
+      nums: [parts[0] || 0, parts[1] || 0, parts[2] || 0] as const,
+      pre,
+      numeric: parts.every((part) => Number.isFinite(part)),
+    };
+  };
+  const a = parse(left);
+  const b = parse(right);
+  for (let index = 0; index < 3; index += 1) {
+    if (a.nums[index] !== b.nums[index]) return a.nums[index] - b.nums[index];
+  }
+  // A pre-release sorts before the corresponding release.
+  if (a.pre === b.pre) return 0;
+  if (a.pre === '') return 1;
+  if (b.pre === '') return -1;
+  return a.pre.localeCompare(b.pre);
+};
+
 /**
  * Same-id candidates after exact resolve miss, ordered deterministically
  * (higher version first, then digest) so multi-candidate choice is stable.
+ * Callers that only accept one generation contract should filter by
+ * target path/mediaType before taking the head of this list.
  */
 export const findWebPackageCandidatesById = async (
   packageId: string,
@@ -310,7 +350,7 @@ export const findWebPackageCandidatesById = async (
   const staged = listStagedLocalWebPackages()
     .filter((pkg) => pkg.ref.id === packageId)
     .sort((left, right) => (
-      right.ref.version.localeCompare(left.ref.version)
+      comparePackageVersions(right.ref.version, left.ref.version)
       || left.ref.digest.localeCompare(right.ref.digest)
     ));
   const builtins: ResolvedWebPackage[] = [];
@@ -327,7 +367,7 @@ export const findWebPackageCandidatesById = async (
   }
   return [...staged, ...builtins]
     .sort((left, right) => (
-      right.ref.version.localeCompare(left.ref.version)
+      comparePackageVersions(right.ref.version, left.ref.version)
       || left.ref.digest.localeCompare(right.ref.digest)
     ));
 };
@@ -379,25 +419,24 @@ export const prepareWebPackageReplay = async (input: {
     }
   }
 
-  const candidate = await findWebPackageCandidateById(artifact.packageRef.id);
-  if (!candidate) {
-    return {
-      status: 'missing-package',
-      message: '此 Web 包 revision 不可用；可重新导入本地 Web 包，或先阅读下方安全文本。',
-      fallbackText,
-      candidateAvailable: false,
-    };
-  }
-
-  const contractCompatible =
+  // Filter same-id candidates to those whose generation contract can accept this
+  // historical target before ranking, so a higher but incompatible version never
+  // shadows a lower compatible one.
+  const allCandidates = await findWebPackageCandidatesById(artifact.packageRef.id);
+  const compatibleCandidates = allCandidates.filter((candidate) => (
     candidate.manifest.generation.target === artifact.targetPath
-    && candidate.manifest.generation.mediaType === artifact.targetMediaType;
-  if (!contractCompatible) {
+    && candidate.manifest.generation.mediaType === artifact.targetMediaType
+  ));
+  const candidate = compatibleCandidates[0] ?? null;
+  if (!candidate) {
+    const anyCandidateAvailable = allCandidates.length > 0;
     return {
-      status: 'rejected',
-      message: '可用 Web 包与历史战报的目标契约不兼容，无法兼容重放。',
+      status: anyCandidateAvailable ? 'rejected' : 'missing-package',
+      message: anyCandidateAvailable
+        ? '可用 Web 包与历史战报的目标契约不兼容，无法兼容重放。'
+        : '此 Web 包 revision 不可用；可重新导入本地 Web 包，或先阅读下方安全文本。',
       fallbackText,
-      candidateAvailable: false,
+      candidateAvailable: anyCandidateAvailable,
     };
   }
 

@@ -62,11 +62,13 @@ describe('Web package instance store and resource handler', () => {
     expect(css.status).toBe(200);
     expect(css.headers.get('content-type')).toContain('text/css');
     expect(css.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(css.headers.get('access-control-allow-origin')).toBe('*');
 
     const html = await handleWebPackageResourceRequest(`${WEB_PACKAGE_INSTANCE_PREFIX}inst_handler/index.html`);
     expect(html.status).toBe(200);
     expect(html.headers.get('content-security-policy')).toBe('sandbox allow-scripts');
     expect(html.headers.get('referrer-policy')).toBe('no-referrer');
+    expect(html.headers.get('access-control-allow-origin')).toBe('*');
 
     for (const pathname of [
       `${WEB_PACKAGE_INSTANCE_PREFIX}inst_handler/missing.js`,
@@ -78,6 +80,7 @@ describe('Web package instance store and resource handler', () => {
     ]) {
       const response = await handleWebPackageResourceRequest(pathname);
       expect(response.status, pathname).toBe(404);
+      expect(response.headers.get('access-control-allow-origin'), pathname).toBe('*');
     }
 
     await clearWebPackageInstances();
@@ -118,6 +121,26 @@ describe('Web package instance store and resource handler', () => {
 
     await deleteWebPackageInstance('inst_new_target');
     expect(await readWebPackageInstance('inst_new_target')).toBeNull();
+    await clearWebPackageInstances();
+  });
+
+  it('keeps both session-mounted instances when a second mount GCs', async () => {
+    const first = await buildSnapshot('inst_session_a');
+    const second = await buildSnapshot('inst_session_b');
+    await putWebPackageInstance(first);
+    await putWebPackageInstance(second);
+    await putWebPackageInstance(await buildSnapshot('inst_session_stale'));
+
+    // Simulate mountWebPackageInstance lease semantics: keep both active ids.
+    await gcWebPackageInstances(['inst_session_a', 'inst_session_b']);
+    expect(await readWebPackageInstance('inst_session_a')).not.toBeNull();
+    expect(await readWebPackageInstance('inst_session_b')).not.toBeNull();
+    expect(await readWebPackageInstance('inst_session_stale')).toBeNull();
+
+    const a = await handleWebPackageResourceRequest(`${WEB_PACKAGE_INSTANCE_PREFIX}inst_session_a/index.html`);
+    const b = await handleWebPackageResourceRequest(`${WEB_PACKAGE_INSTANCE_PREFIX}inst_session_b/index.html`);
+    expect(a.status).toBe(200);
+    expect(b.status).toBe(200);
     await clearWebPackageInstances();
   });
 });

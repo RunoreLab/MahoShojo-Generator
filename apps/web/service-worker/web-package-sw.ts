@@ -59,6 +59,7 @@ const readInstance = async (instanceId: string): Promise<WebPackageResourceSnaps
 const notFound = (): Response => new Response('Not Found', {
   status: 404,
   headers: {
+    'Access-Control-Allow-Origin': '*',
     'Content-Type': 'text/plain; charset=utf-8',
     'Referrer-Policy': 'no-referrer',
     'X-Content-Type-Options': 'nosniff',
@@ -98,10 +99,24 @@ workerScope.addEventListener('fetch', (event) => {
     request: Request;
     respondWith: (_response: Response | Promise<Response>) => void;
   };
-  if (fetchEvent.request.method !== 'GET') return;
   const url = new URL(fetchEvent.request.url);
   if (url.origin !== workerScope.location.origin) return;
   if (!url.pathname.startsWith(WEB_PACKAGE_INSTANCE_PREFIX)) return;
+  if (fetchEvent.request.method === 'OPTIONS') {
+    fetchEvent.respondWith(new Response(null, {
+      status: 204,
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+        'Access-Control-Allow-Headers': '*',
+        'Access-Control-Max-Age': '86400',
+        'Referrer-Policy': 'no-referrer',
+        'X-Content-Type-Options': 'nosniff',
+      },
+    }));
+    return;
+  }
+  if (fetchEvent.request.method !== 'GET' && fetchEvent.request.method !== 'HEAD') return;
   fetchEvent.respondWith(handleRequest(fetchEvent.request));
 });
 

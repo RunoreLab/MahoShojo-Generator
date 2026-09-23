@@ -8,6 +8,7 @@ import { readWebPackageInstance } from './instance-store';
 const notFound = (): Response => new Response('Not Found', {
   status: 404,
   headers: {
+    'Access-Control-Allow-Origin': '*',
     'Content-Type': 'text/plain; charset=utf-8',
     'Referrer-Policy': 'no-referrer',
     'X-Content-Type-Options': 'nosniff',

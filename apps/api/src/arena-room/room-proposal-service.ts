@@ -29,6 +29,10 @@ import {
   verifyArenaRoomPresetRefs,
   verifyArenaRoomSharedConfigPresetRefs,
 } from './arena-room-shared-config-refs';
+import {
+  assertSharedConfigServerShareableWebPackage,
+  isServerShareableWebPackageRef,
+} from './web-package-shareability';
 import type { ArenaRoomGenerationPresetResolver } from './room-generation-preset-registry';
 import type {
   ArenaRoomMembershipService,
@@ -403,8 +407,21 @@ export const createArenaRoomProposalService = (
           roomId: membership.state.snapshot.roomId,
           config: membership.state.snapshot.sharedConfig,
           revision: membership.state.snapshot.revision,
-        }, proposal, request.data.selectedChangeIds, { overrideChangeIds: request.data.overrideChangeIds });
-        if (applied.status === 'rejected') return fail('ROOM_PROPOSAL_CONFLICT');
+        }, proposal, request.data.selectedChangeIds, {
+          overrideChangeIds: request.data.overrideChangeIds,
+          isServerShareableWebPackageRef,
+        });
+        if (applied.status === 'rejected') {
+          if (applied.issues.some((issue) => issue.message.includes('not server-shareable'))) {
+            return fail('ROOM_REFERENCE_DENIED');
+          }
+          return fail('ROOM_PROPOSAL_CONFLICT');
+        }
+        try {
+          assertSharedConfigServerShareableWebPackage(applied.config);
+        } catch {
+          return fail('ROOM_REFERENCE_DENIED');
+        }
         await verifyRefs(options.references, {
           refs: canonicalArenaRoomSharedConfigRefs(applied.config),
           hostAccountUserId: membership.accountUserId,
