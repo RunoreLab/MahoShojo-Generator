@@ -7,7 +7,14 @@ import { SoloArenaWebPackageSection } from '@/components/arena/editor/features/w
 import { downloadBlob } from '@/lib/client/blobUrl';
 import { BattleResultPresentation } from '@/components/arena/components/BattleResultPresentation';
 import { BaseModal } from '@/components/shared/BaseModal';
-import { BUILTIN_VISUAL_NOVEL_PACKAGE_REF, createWebPackageOverlay } from '@mahoshojo/web-package';
+import {
+  BUILTIN_VISUAL_NOVEL_PACKAGE_REF,
+  clearLocalWebPackageSessionStaging,
+  createWebPackageOverlay,
+  resolveWebPackage,
+  stageLocalWebPackage,
+  verifyWebPackage,
+} from '@mahoshojo/web-package';
 import { useBattleStore } from '@/components/arena/stores/useBattleStore';
 
 vi.mock('@/lib/client/blobUrl', () => ({ downloadBlob: vi.fn() }));
@@ -46,12 +53,27 @@ beforeEach(() => {
   root = createRoot(container);
 });
 afterEach(async () => {
+  clearLocalWebPackageSessionStaging();
   await act(async () => root.unmount());
   container.remove();
   vi.restoreAllMocks();
   vi.useRealTimers();
   useBattleStore.setState({ webPackageRef: null, isGenerating: false }, true);
 });
+
+const buildLocalPackage = async (version: string, id = 'local.ui-replay-package') => {
+  const builtin = await resolveWebPackage(BUILTIN_VISUAL_NOVEL_PACKAGE_REF);
+  const manifest = {
+    ...builtin.manifest,
+    id,
+    version,
+    name: `UI 重放包 ${version}`,
+  };
+  return verifyWebPackage(manifest, manifest.files.map((file) => ({
+    path: file.path,
+    bytes: builtin.readFile(file.path)!,
+  })));
+};
 
 describe('Web 战报的本地执行许可', () => {
   it('offers the first-party experience in a labelled native selector and disables it while generating', async () => {
@@ -107,10 +129,73 @@ describe('Web 战报的本地执行许可', () => {
     await act(async () => root.render(render(true, { ...artifact, generatedDigest: `sha256:${'0'.repeat(64)}` })));
     await vi.waitFor(async () => {
       await act(async () => {});
-      expect(container.textContent).toContain('故事数据校验失败');
+      expect(container.textContent).toContain('digest 校验失败');
     });
     expect(container.querySelector('iframe')).toBeNull();
     expect(container.querySelector('pre')?.textContent).toContain('unsafe()');
+    expect(container.textContent).toContain('重新导入本地 Web 包');
+    expect(container.textContent).not.toContain('仍尝试使用此 Web 包');
+  });
+
+  it('缺失历史 Web 包时展示安全回退与重导入入口，不提供兼容重放', async () => {
+    const content = JSON.stringify({ title: '缺失包故事', scenes: [{ text: '第一幕' }] });
+    clearLocalWebPackageSessionStaging();
+    const local = await buildLocalPackage('1.0.0');
+    stageLocalWebPackage(local);
+    const { generatedContent: _generated, ...artifact } = await createWebPackageOverlay(local.ref, content);
+    expect(_generated).toBe(content);
+    clearLocalWebPackageSessionStaging();
+    window.localStorage.setItem('arena.web-report-consent.v1.room.missing-package', 'accepted');
+
+    await act(async () => root.render(
+      <ArenaWebReport key="missing-package" roomId="missing-package" ready content={content} webPackage={artifact}>
+        {(web, actions) => <section>{web}<div>{actions}</div></section>}
+      </ArenaWebReport>,
+    ));
+    await vi.waitFor(async () => {
+      await act(async () => {});
+      expect(container.textContent).toContain('重新导入本地 Web 包');
+    });
+    expect(container.textContent).not.toContain('仍尝试使用此 Web 包');
+    expect(container.textContent).not.toContain('不同版本的 Web 包');
+    expect(container.querySelector('iframe')).toBeNull();
+    expect(container.querySelector('pre')?.textContent).toContain('缺失包故事');
+  });
+
+  it('同 id 不同版本需显式选择兼容重放并展示不一致警告', async () => {
+    const content = JSON.stringify({ title: '兼容重放故事', scenes: [{ text: '第一幕' }] });
+    clearLocalWebPackageSessionStaging();
+    // 历史 revision 是内置 id 的本地版本；清空 staging 后候选回落到 builtin，可走 srcdoc 而无需 Service Worker。
+    const historical = await buildLocalPackage('0.9.0', BUILTIN_VISUAL_NOVEL_PACKAGE_REF.id);
+    stageLocalWebPackage(historical);
+    const { generatedContent: _generated, ...artifact } = await createWebPackageOverlay(historical.ref, content);
+    expect(_generated).toBe(content);
+    clearLocalWebPackageSessionStaging();
+    window.localStorage.setItem('arena.web-report-consent.v1.room.mismatch-choice', 'accepted');
+
+    await act(async () => root.render(
+      <ArenaWebReport key="mismatch-choice" roomId="mismatch-choice" ready content={content} webPackage={artifact}>
+        {(web, actions) => <section>{web}<div>{actions}</div></section>}
+      </ArenaWebReport>,
+    ));
+    await vi.waitFor(async () => {
+      await act(async () => {});
+      expect(container.textContent).toContain('仍尝试使用此 Web 包');
+    });
+    expect(container.textContent).toContain('重新导入本地 Web 包');
+    expect(container.querySelector('iframe')).toBeNull();
+    expect(container.textContent).not.toContain('不同版本的 Web 包');
+    expect(artifact.packageRef).toEqual(historical.ref);
+
+    await click('仍尝试使用此 Web 包');
+    await vi.waitFor(async () => {
+      await act(async () => {});
+      expect(container.textContent).toContain('当前使用的是不同版本的 Web 包，效果可能与生成时不一致。');
+    });
+    expect(container.querySelector('iframe')).toBeTruthy();
+    expect(container.querySelector('iframe')!.srcdoc).toContain('兼容重放故事');
+    expect(container.textContent).not.toContain('仍尝试使用此 Web 包');
+    expect(artifact.packageRef).toEqual(historical.ref);
   });
 
   it.each([

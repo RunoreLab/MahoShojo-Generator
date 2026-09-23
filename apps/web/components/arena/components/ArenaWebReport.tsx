@@ -11,9 +11,14 @@ import { normalizeArenaWebOutput } from '@/lib/arena/web-output';
 import { downloadBlob } from '@/lib/client/blobUrl';
 import { buildSafeFileName } from '@/lib/client/fileName';
 import { renderWebPackageLocation } from '@/lib/web-package/mount';
+import { importLocalWebPackageArchive } from '@/lib/web-package/cache';
 import styles from './ArenaWebReport.module.css';
 import type { WebPackageArtifact } from '@mahoshojo/contracts/web-package';
-import { formatWebPackageFallback } from '@mahoshojo/web-package';
+import {
+  formatWebPackageFallback,
+  prepareWebPackageReplay,
+  type WebPackageReplayStatus,
+} from '@mahoshojo/web-package';
 
 const CONSENT_KEY = 'arena.web-report-consent.v1';
 // 仅附加到预览；低优先级 layer 允许作品自身的滚动条设计覆盖默认样式。
@@ -321,24 +326,84 @@ export function ArenaWebReport({ content, ready, roomId, aiModel, aiUsage, displ
   const [immersive, setImmersive] = useState(false);
   const nativeFullscreenRequestedRef = useRef(false);
   const normalizedOutput = useMemo(() => normalizeArenaWebOutput(content), [content]);
+  const [compatChoiceKey, setCompatChoiceKey] = useState<string | null>(null);
+  const [replayEpoch, setReplayEpoch] = useState(0);
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+  const importInputRef = useRef<HTMLInputElement>(null);
+  const replayKey = `${webPackage?.packageRef.digest ?? ''}::${content}`;
+  const allowCompatibility = compatChoiceKey === replayKey;
   const [packageResolution, setPackageResolution] = useState<{
     artifact: WebPackageArtifact;
     content: string;
+    status: WebPackageReplayStatus;
+    message?: string;
     location?: { kind: 'srcdoc'; html: string } | { kind: 'url'; url: string };
-    error?: string;
+    compatibility?: boolean;
+    candidateAvailable?: boolean;
   } | null>(null);
   useEffect(() => {
     if (!webPackage || !ready) return;
     let active = true;
-    void renderWebPackageLocation({ ...webPackage, generatedContent: content }).then((location) => {
-      if (active) setPackageResolution({ artifact: webPackage, content, location });
+    void prepareWebPackageReplay({
+      artifact: webPackage,
+      generatedContent: content,
+      allowCompatibility,
+    }).then(async (outcome) => {
+      if (!active) return;
+      if ((outcome.status === 'exact' || outcome.status === 'compatibility') && outcome.overlay) {
+        const location = await renderWebPackageLocation(outcome.overlay);
+        if (!active) return;
+        setPackageResolution({
+          artifact: webPackage,
+          content,
+          status: outcome.status,
+          message: outcome.message,
+          location,
+          compatibility: outcome.status === 'compatibility',
+          candidateAvailable: outcome.candidateAvailable,
+        });
+        return;
+      }
+      setPackageResolution({
+        artifact: webPackage,
+        content,
+        status: outcome.status,
+        message: outcome.message ?? 'Web 包不可用或故事数据校验失败，已保留安全文本。',
+        candidateAvailable: outcome.candidateAvailable,
+      });
     }).catch(() => {
-      if (active) setPackageResolution({ artifact: webPackage, content, error: 'Web 包不可用或故事数据校验失败，已保留安全文本。' });
+      if (active) setPackageResolution({
+        artifact: webPackage,
+        content,
+        status: 'rejected',
+        message: 'Web 包不可用或故事数据校验失败，已保留安全文本。',
+      });
     });
     return () => { active = false; };
-  }, [content, ready, webPackage]);
+  }, [allowCompatibility, content, ready, replayEpoch, webPackage]);
   const matchingResolution = packageResolution?.artifact === webPackage && packageResolution?.content === content ? packageResolution : null;
   const packageLocation = matchingResolution?.location ?? null;
+  const resolutionStatus = matchingResolution?.status ?? null;
+  const showReplayActions = ready
+    && Boolean(webPackage)
+    && (resolutionStatus === 'missing-package'
+      || resolutionStatus === 'mismatch-available'
+      || resolutionStatus === 'rejected');
+  const handleImportArchive = useCallback(async (file: File | null | undefined) => {
+    if (!file || importing) return;
+    setImporting(true);
+    setImportError(null);
+    try {
+      await importLocalWebPackageArchive(new Uint8Array(await file.arrayBuffer()));
+      setReplayEpoch((value) => value + 1);
+    } catch (error) {
+      setImportError(error instanceof Error ? error.message : 'Web 包导入失败');
+    } finally {
+      setImporting(false);
+      if (importInputRef.current) importInputRef.current.value = '';
+    }
+  }, [importing]);
   // Package documents are structured locations (srcdoc adapter or mounted URL); ordinary web stays a raw HTML string.
   const documentSource: { kind: 'srcdoc'; html: string } | { kind: 'url'; url: string } | string | null = webPackage
     ? packageLocation
@@ -469,8 +534,37 @@ export function ArenaWebReport({ content, ready, roomId, aiModel, aiUsage, displ
         {showingWeb ? '如需保存图片，可使用浏览器截图，或切换普通显示保存普通战报图片。' : null}
       </p> : null}
       {ready && !webDocument ? <p className="mb-3 rounded-lg border border-amber-300/50 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900 dark:border-amber-300/30 dark:bg-amber-950/30 dark:text-amber-100" role="status">
-        {webPackage ? (matchingResolution?.error ?? '正在校验 Web 包与故事数据…') : '这份输出没有包含完整的 HTML 文档，已切换为普通显示；其中的脚本不会被执行。'}
+        {webPackage ? (matchingResolution?.message ?? '正在校验 Web 包与故事数据…') : '这份输出没有包含完整的 HTML 文档，已切换为普通显示；其中的脚本不会被执行。'}
       </p> : null}
+      {ready && matchingResolution?.compatibility && packageLocation ? <p className="mb-3 rounded-lg border border-amber-300/50 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900 dark:border-amber-300/30 dark:bg-amber-950/30 dark:text-amber-100" role="status">
+        当前使用的是不同版本的 Web 包，效果可能与生成时不一致。
+      </p> : null}
+      {ready && webPackage && showReplayActions ? <div className="mb-3 flex flex-wrap items-center gap-2 text-xs">
+        {resolutionStatus === 'mismatch-available' ? <button
+          type="button"
+          onClick={() => setCompatChoiceKey(replayKey)}
+          className="rounded-lg border border-amber-400/60 bg-amber-50 px-3 py-1.5 font-medium text-amber-900 hover:bg-amber-100 dark:border-amber-300/40 dark:bg-amber-950/40 dark:text-amber-100 dark:hover:bg-amber-950/70"
+        >
+          仍尝试使用此 Web 包
+        </button> : null}
+        <button
+          type="button"
+          disabled={importing}
+          onClick={() => importInputRef.current?.click()}
+          className="rounded-lg border border-white/20 bg-white/10 px-3 py-1.5 font-medium text-white hover:bg-white/20 disabled:opacity-60"
+        >
+          {importing ? '正在导入…' : '重新导入本地 Web 包'}
+        </button>
+        <input
+          ref={importInputRef}
+          type="file"
+          accept=".zip,application/zip"
+          className="hidden"
+          aria-label="重新导入本地 Web 包"
+          onChange={(event) => void handleImportArchive(event.target.files?.[0])}
+        />
+        {importError ? <span className="text-red-300" role="alert">{importError}</span> : null}
+      </div> : null}
       {ready && webPackage && packageLocation && packageLocation.kind === 'url' ? <p className="mb-3 text-xs text-gray-500">
         此 Web 包通过隔离 URL 空间加载；单文件 HTML 下载仅适用于内置视觉小说适配器。
       </p> : null}

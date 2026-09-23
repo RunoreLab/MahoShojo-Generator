@@ -1,8 +1,10 @@
 import {
   WEB_PACKAGE_MANIFEST_PATH,
+  WebPackageArtifactSchema,
   WebPackageOverlaySchema,
   WebPackagePromptProjectionSchema,
   WebPackageRefSchema,
+  type WebPackageArtifact,
   type WebPackageOverlay,
   type WebPackagePromptProjection,
   type WebPackageRef,
@@ -19,7 +21,7 @@ import {
   verifyWebPackage,
   type VerifiedWebPackage,
 } from './verify';
-import { getStagedLocalWebPackage } from './session-staging';
+import { getStagedLocalWebPackage, listStagedLocalWebPackages } from './session-staging';
 
 export { BUILTIN_VISUAL_NOVEL_PACKAGE_REF } from './visual-novel-v1';
 export {
@@ -285,6 +287,144 @@ export const formatWebPackageFallback = (overlay: WebPackageOverlay): string => 
     try { return JSON.stringify(JSON.parse(overlay.generatedContent), null, 2); } catch { /* Show the original evidence on invalid output. */ }
   }
   return overlay.generatedContent;
+};
+
+export type WebPackageReplayStatus =
+  | 'exact'
+  | 'compatibility'
+  | 'missing-package'
+  | 'mismatch-available'
+  | 'rejected';
+
+export type WebPackageReplayOutcome = Readonly<{
+  status: WebPackageReplayStatus;
+  message?: string;
+  instance?: WebPackageInstance;
+  overlay?: WebPackageOverlay;
+  base?: ResolvedWebPackage;
+  fallbackText?: string;
+  candidateAvailable?: boolean;
+}>;
+
+/** Same-id candidates after exact resolve miss: staged locals first, then builtin. */
+export const findWebPackageCandidateById = async (
+  packageId: string,
+): Promise<ResolvedWebPackage | null> => {
+  const staged = listStagedLocalWebPackages().filter((pkg) => pkg.ref.id === packageId);
+  if (staged.length > 0) return staged[0]!;
+  if (BUILTIN_VISUAL_NOVEL_PACKAGE_REF.id !== packageId) return null;
+  try {
+    return await resolveWebPackage(BUILTIN_VISUAL_NOVEL_PACKAGE_REF);
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Exact restore by default; compatibility only after explicit user choice.
+ * Historical provenance stays on the caller's artifact — only the working
+ * overlay may point at a compatibility candidate.
+ */
+export const prepareWebPackageReplay = async (input: {
+  artifact: WebPackageArtifact;
+  generatedContent: string;
+  allowCompatibility?: boolean;
+  maxBytes?: number;
+}): Promise<WebPackageReplayOutcome> => {
+  const artifact = WebPackageArtifactSchema.parse(input.artifact);
+  const historicalOverlay = WebPackageOverlaySchema.parse({
+    ...artifact,
+    generatedContent: input.generatedContent,
+  });
+  const fallbackText = formatWebPackageFallback(historicalOverlay);
+  const maxBytes = input.maxBytes;
+
+  let exactBase: ResolvedWebPackage | null = null;
+  try {
+    exactBase = await resolveWebPackage(artifact.packageRef);
+  } catch {
+    exactBase = null;
+  }
+
+  if (exactBase) {
+    try {
+      const instance = await createWebPackageInstance(exactBase, historicalOverlay, { maxBytes });
+      return { status: 'exact', instance, overlay: instance.overlay, base: exactBase, fallbackText };
+    } catch (error) {
+      return {
+        status: 'rejected',
+        message: error instanceof Error ? error.message : 'Web 包故事数据校验失败',
+        fallbackText,
+      };
+    }
+  }
+
+  const candidate = await findWebPackageCandidateById(artifact.packageRef.id);
+  if (!candidate) {
+    return {
+      status: 'missing-package',
+      message: '此 Web 包 revision 不可用；可重新导入本地 Web 包，或先阅读下方安全文本。',
+      fallbackText,
+      candidateAvailable: false,
+    };
+  }
+
+  const contractCompatible =
+    candidate.manifest.generation.target === artifact.targetPath
+    && candidate.manifest.generation.mediaType === artifact.targetMediaType;
+  if (!contractCompatible) {
+    return {
+      status: 'rejected',
+      message: '可用 Web 包与历史战报的目标契约不兼容，无法兼容重放。',
+      fallbackText,
+      candidateAvailable: false,
+    };
+  }
+
+  const contentDigest = await digestWebPackageBytes(encoder.encode(input.generatedContent));
+  if (contentDigest !== artifact.generatedDigest) {
+    return {
+      status: 'rejected',
+      message: '历史生成内容 digest 校验失败，无法兼容重放。',
+      fallbackText,
+      candidateAvailable: true,
+    };
+  }
+
+  if (!input.allowCompatibility) {
+    return {
+      status: 'mismatch-available',
+      message: '当前缺少该 Web 包的历史 revision，但存在同 ID 的其他版本。',
+      fallbackText,
+      candidateAvailable: true,
+    };
+  }
+
+  try {
+    const workingOverlay = WebPackageOverlaySchema.parse({
+      ...historicalOverlay,
+      packageRef: { ...candidate.ref },
+    });
+    const instance = await createWebPackageInstance(candidate, workingOverlay, { maxBytes });
+    return {
+      status: 'compatibility',
+      message: '当前使用的是不同版本的 Web 包，效果可能与生成时不一致。',
+      instance,
+      overlay: instance.overlay,
+      base: candidate,
+      fallbackText,
+      candidateAvailable: true,
+    };
+  } catch (error) {
+    return {
+      status: 'rejected',
+      message: error instanceof Error
+        ? error.message
+        : '候选 Web 包拒绝了历史 Overlay，无法兼容重放。',
+      fallbackText,
+      candidateAvailable: true,
+    };
+  }
 };
 
 export const WEB_PACKAGE_MANIFEST_FILE = WEB_PACKAGE_MANIFEST_PATH;
