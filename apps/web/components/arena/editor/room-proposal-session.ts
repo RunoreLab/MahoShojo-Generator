@@ -16,6 +16,7 @@ import {
   cloneArenaEditorSharedConfig,
   mapSharedConfigToArenaEditorView,
 } from './shared-config-mapper';
+import { isBuiltinWebPackageRef } from '@mahoshojo/web-package';
 import type {
   ArenaEditorActions,
   ArenaEditorCapabilities,
@@ -74,7 +75,10 @@ export const createRoomProposalArenaEditorSession = (
   const actions: ArenaEditorActions = Object.freeze({
     setBattleMode: (value) => update((draft) => ({ ...draft, battleMode: value })),
     setReportFormat: (value) => update((draft) => ({ ...draft, reportFormat: value, webPackageRef: value === 'web' ? draft.webPackageRef : undefined })),
-    setWebPackageRef: (value) => update((draft) => ({ ...draft, webPackageRef: value ?? undefined })),
+    setWebPackageRef: (value) => update((draft) => ({
+      ...draft,
+      webPackageRef: value && isBuiltinWebPackageRef(value) ? value : undefined,
+    })),
     setStoryLength: (value) => update((draft) => ({ ...draft, storyLength: value })),
     setCustomStoryLength: (value) => update((draft) => ({
       ...draft,

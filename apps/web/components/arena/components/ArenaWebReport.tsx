@@ -10,24 +10,10 @@ import { resolveWebDisplayTitle } from '@/lib/arena/battle-report-display-title'
 import { normalizeArenaWebOutput } from '@/lib/arena/web-output';
 import { downloadBlob } from '@/lib/client/blobUrl';
 import { buildSafeFileName } from '@/lib/client/fileName';
-import {
-  deleteWebPackageArchiveCache,
-  hydrateWebPackageSessionFromCache,
-  importLocalWebPackageArchive,
-} from '@/lib/web-package/cache';
 import { renderWebPackageLocation } from '@/lib/web-package/mount';
 import styles from './ArenaWebReport.module.css';
-import type { WebPackageArtifact, WebPackageRef } from '@mahoshojo/contracts/web-package';
-import {
-  BUILTIN_WEB_PACKAGE_PRESETS,
-  findBuiltinWebPackagePreset,
-  formatWebPackageFallback,
-  isBuiltinWebPackageRef,
-  listStagedLocalWebPackages,
-  packWebPackageZip,
-  resolveWebPackage,
-  unstageLocalWebPackage,
-} from '@mahoshojo/web-package';
+import type { WebPackageArtifact } from '@mahoshojo/contracts/web-package';
+import { formatWebPackageFallback } from '@mahoshojo/web-package';
 
 const CONSENT_KEY = 'arena.web-report-consent.v1';
 // 仅附加到预览；低优先级 layer 允许作品自身的滚动条设计覆盖默认样式。
@@ -291,154 +277,23 @@ function ArenaWebDocument({ location, prelude, epilogue, reload, immersive, aiMo
   );
 }
 
-export function ArenaReportFormatSelector({ value, onChange, disabled = false, roomId, webPackageRef, onWebPackageChange }: {
+export function ArenaReportFormatSelector({ value, onChange, disabled = false, roomId, children }: {
   value: 'markdown' | 'web';
   onChange: (format: 'markdown' | 'web') => void;
   disabled?: boolean;
   roomId?: string;
-  webPackageRef?: WebPackageRef | null;
-  onWebPackageChange?: (ref: WebPackageRef | null) => void;
+  /** Web 格式下由调用方注入统一 Web 包区块（单人 / Proposal 各自 adapter）。 */
+  children?: ReactNode;
 }) {
   const { accepted, accept } = useWebConsent(roomId);
   const [confirming, setConfirming] = useState(false);
-  const [downloading, setDownloading] = useState(false);
-  const [downloadError, setDownloadError] = useState<string | null>(null);
-  const [importing, setImporting] = useState(false);
-  const [importError, setImportError] = useState<string | null>(null);
-  const [localPackages, setLocalPackages] = useState<readonly { ref: WebPackageRef; name: string }[]>([]);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const selectedPreset = findBuiltinWebPackagePreset(webPackageRef);
-  const selectedLocal = webPackageRef && !selectedPreset
-    ? localPackages.find((item) => item.ref.digest === webPackageRef.digest)
-    : undefined;
-  useEffect(() => {
-    let active = true;
-    void hydrateWebPackageSessionFromCache().then(() => {
-      if (!active) return;
-      setLocalPackages(listStagedLocalWebPackages().map((pkg) => ({ ref: pkg.ref, name: pkg.manifest.name })));
-    });
-    return () => { active = false; };
-  }, []);
-  const refreshLocalPackages = () => {
-    setLocalPackages(listStagedLocalWebPackages().map((pkg) => ({ ref: pkg.ref, name: pkg.manifest.name })));
-  };
-  const downloadPresetZip = async (refToDownload: WebPackageRef) => {
-    if (downloading) return;
-    setDownloading(true);
-    setDownloadError(null);
-    try {
-      const base = await resolveWebPackage(refToDownload);
-      const archive = await packWebPackageZip(base);
-      downloadBlob(new Blob([archive.buffer.slice(archive.byteOffset, archive.byteOffset + archive.byteLength) as ArrayBuffer], { type: 'application/zip' }), buildSafeFileName(`${base.manifest.id}@${base.manifest.version}`, 'zip', 'mahoshojo-web-package'));
-    } catch {
-      setDownloadError('Web 包下载失败，请稍后重试。');
-    } finally {
-      setDownloading(false);
-    }
-  };
-  const handleImportFile = async (file: File | null | undefined) => {
-    if (!file || importing || !onWebPackageChange) return;
-    setImporting(true);
-    setImportError(null);
-    try {
-      const archive = new Uint8Array(await file.arrayBuffer());
-      const pkg = await importLocalWebPackageArchive(archive);
-      refreshLocalPackages();
-      onWebPackageChange(pkg.ref);
-    } catch (error) {
-      setImportError(error instanceof Error ? error.message : 'Web 包导入失败');
-    } finally {
-      setImporting(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
-    }
-  };
-  const handleRemoveLocal = async () => {
-    if (!webPackageRef || isBuiltinWebPackageRef(webPackageRef) || !onWebPackageChange) return;
-    unstageLocalWebPackage(webPackageRef);
-    void deleteWebPackageArchiveCache(webPackageRef.digest);
-    refreshLocalPackages();
-    onWebPackageChange(null);
-  };
   return (
     <div className="input-group">
       <SegmentedControl label="战报格式" value={value} options={FORMAT_OPTIONS} disabled={disabled} onChange={(format) => {
         if (format === 'web' && !accepted) setConfirming(true);
         else onChange(format);
       }} />
-      {value === 'web' && onWebPackageChange ? <div className="mt-3 text-sm">
-        <label className="block">
-          <span className="mb-1 block font-medium">Web 包</span>
-          <select
-            value={webPackageRef ? webPackageRef.digest : ''}
-            disabled={disabled}
-            onChange={(event) => {
-              const digest = event.target.value;
-              if (!digest) {
-                onWebPackageChange(null);
-                return;
-              }
-              const preset = BUILTIN_WEB_PACKAGE_PRESETS.find((item) => item.packageRef.digest === digest);
-              if (preset) {
-                onWebPackageChange(preset.packageRef);
-                return;
-              }
-              const local = localPackages.find((item) => item.ref.digest === digest);
-              if (local) onWebPackageChange(local.ref);
-            }}
-            className="min-h-11 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-purple-500 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
-          >
-            <option value="">自由生成网页</option>
-            {BUILTIN_WEB_PACKAGE_PRESETS.map((preset) => (
-              <option key={preset.packageRef.digest} value={preset.packageRef.digest}>{preset.title}</option>
-            ))}
-            {localPackages.map((item) => (
-              <option key={item.ref.digest} value={item.ref.digest}>本地：{item.name}</option>
-            ))}
-            {webPackageRef && !selectedPreset && !selectedLocal ? <option value={webPackageRef.digest}>不可用的 Web 包（请重新选择）</option> : null}
-          </select>
-        </label>
-        <span className="mt-1 block text-xs text-gray-500">
-          {selectedPreset?.description
-            ?? (selectedLocal ? `已加载本地 Web 包（${selectedLocal.name} · ${selectedLocal.ref.id}@${selectedLocal.ref.version}）。缓存可能因清理站点数据或存储配额而消失，可重新导入。` : '视觉小说使用内置阅读器，AI 只生成本场故事；完成后可切换安全文本显示。')}
-        </span>
-        {selectedPreset ? <button
-          type="button"
-          disabled={disabled || downloading}
-          onClick={() => void downloadPresetZip(selectedPreset.packageRef)}
-          className="mt-2 min-h-11 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 hover:bg-gray-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-purple-500 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800"
-        >
-          {downloading ? '正在准备 ZIP…' : '下载 Web 包 ZIP'}
-        </button> : null}
-        <div className="mt-2 flex flex-wrap gap-2">
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".zip,application/zip"
-            className="sr-only"
-            disabled={disabled || importing}
-            onChange={(event) => void handleImportFile(event.target.files?.[0])}
-            aria-label="导入本地 Web 包 ZIP"
-          />
-          <button
-            type="button"
-            disabled={disabled || importing}
-            onClick={() => fileInputRef.current?.click()}
-            className="min-h-11 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 hover:bg-gray-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-purple-500 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800"
-          >
-            {importing ? '正在导入…' : '导入本地 ZIP'}
-          </button>
-          {selectedLocal ? <button
-            type="button"
-            disabled={disabled}
-            onClick={() => void handleRemoveLocal()}
-            className="min-h-11 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 hover:bg-gray-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-purple-500 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800"
-          >
-            移除本地包
-          </button> : null}
-        </div>
-        {importError ? <span className="mt-1 block text-xs text-red-600 dark:text-red-400" role="status">{importError}</span> : null}
-        {downloadError ? <span className="mt-1 block text-xs text-red-600 dark:text-red-400" role="status">{downloadError}</span> : null}
-      </div> : null}
+      {value === 'web' && children ? <div className="mt-3 text-sm">{children}</div> : null}
       <WebReportConsentDialog open={confirming && !disabled} onCancel={() => setConfirming(false)} onAccept={(remember) => {
         accept(remember);
         setConfirming(false);

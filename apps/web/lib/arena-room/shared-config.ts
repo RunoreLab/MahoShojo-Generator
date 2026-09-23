@@ -20,6 +20,7 @@ import type {
 } from '@/components/arena/types';
 import type { ArenaMaterialState } from '@/lib/arena/materials';
 import { sha256Hex } from '@/lib/crypto';
+import { isBuiltinWebPackageRef } from '@mahoshojo/web-package';
 
 export type ArenaRoomBattleStateSource = {
   battleMode: BattleMode;
@@ -435,7 +436,9 @@ const buildArenaRoomHostWorkspaceBundle = async (
     sharedConfig = buildArenaRoomSharedConfig({
       battleMode: source.battleMode,
       reportFormat: source.reportFormat ?? 'markdown',
-      ...(source.reportFormat === 'web' && source.webPackageRef ? { webPackageRef: source.webPackageRef } : {}),
+      ...(source.reportFormat === 'web' && source.webPackageRef && isBuiltinWebPackageRef(source.webPackageRef)
+        ? { webPackageRef: source.webPackageRef }
+        : {}),
       combatants,
       teams: source.teams.map((team) => ({
         key: text(team.roomKey) || `team:${team.id}`,

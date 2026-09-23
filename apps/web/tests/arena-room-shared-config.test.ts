@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { BUILTIN_VISUAL_NOVEL_PACKAGE_REF } from '@mahoshojo/web-package';
+import type { WebPackageRef } from '@mahoshojo/contracts/web-package';
+import { BUILTIN_VISUAL_NOVEL_PACKAGE_REF, isBuiltinWebPackageRef } from '@mahoshojo/web-package';
 
 import {
   ArenaRoomShareabilityError,
@@ -9,6 +10,7 @@ import {
   tryBuildArenaRoomHostWorkspaceBundleFromBattleState,
   type ArenaRoomBattleStateSource,
 } from '@/lib/arena-room/shared-config';
+import { mapSharedConfigToArenaEditorView } from '@/components/arena/editor/shared-config-mapper';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -94,6 +96,26 @@ describe('Arena Room Battle store projection', () => {
     const state = { ...source(), reportFormat: 'web' as const, webPackageRef: BUILTIN_VISUAL_NOVEL_PACKAGE_REF };
     expect((await buildArenaRoomSharedConfigFromBattleState(state)).webPackageRef).toEqual(BUILTIN_VISUAL_NOVEL_PACKAGE_REF);
     expect((await buildArenaRoomSharedConfigFromBattleState({ ...state, reportFormat: 'markdown' })).webPackageRef).toBeUndefined();
+  });
+
+  it('非 builtin 的本地 Web 包引用不得进入多人共享配置或提案投影', async () => {
+    const localRef: WebPackageRef = {
+      id: 'local.side-package',
+      version: '1.0.0',
+      digest: `sha256:${'a'.repeat(64)}`,
+    };
+    expect(isBuiltinWebPackageRef(localRef)).toBe(false);
+    const config = await buildArenaRoomSharedConfigFromBattleState({
+      ...source(),
+      reportFormat: 'web',
+      webPackageRef: localRef,
+    });
+    expect(config.webPackageRef).toBeUndefined();
+    const projected = mapSharedConfigToArenaEditorView({
+      ...config,
+      webPackageRef: localRef,
+    });
+    expect(projected.webPackageRef).toBeUndefined();
   });
 
   it('在 SubtleCrypto 缺失时仍生成兼容的内容摘要', async () => {

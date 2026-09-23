@@ -3,10 +3,12 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ArenaReportFormatSelector, ArenaWebReport } from '@/components/arena/components/ArenaWebReport';
+import { SoloArenaWebPackageSection } from '@/components/arena/editor/features/web-package/SoloArenaWebPackageSection';
 import { downloadBlob } from '@/lib/client/blobUrl';
 import { BattleResultPresentation } from '@/components/arena/components/BattleResultPresentation';
 import { BaseModal } from '@/components/shared/BaseModal';
 import { BUILTIN_VISUAL_NOVEL_PACKAGE_REF, createWebPackageOverlay } from '@mahoshojo/web-package';
+import { useBattleStore } from '@/components/arena/stores/useBattleStore';
 
 vi.mock('@/lib/client/blobUrl', () => ({ downloadBlob: vi.fn() }));
 vi.mock('@/components/shared/GeneratedByUserBadge', () => ({ GeneratedByUserBadge: () => null }));
@@ -48,27 +50,34 @@ afterEach(async () => {
   container.remove();
   vi.restoreAllMocks();
   vi.useRealTimers();
+  useBattleStore.setState({ webPackageRef: null, isGenerating: false }, true);
 });
 
 describe('Web 战报的本地执行许可', () => {
   it('offers the first-party experience in a labelled native selector and disables it while generating', async () => {
-    const onWebPackageChange = vi.fn();
-    await act(async () => root.render(<ArenaReportFormatSelector value="web" onChange={() => {}} onWebPackageChange={onWebPackageChange} />));
-    const select = container.querySelector('select')!;
-    expect(select.parentElement?.textContent).toContain('Web 包');
+    await act(async () => root.render(
+      <ArenaReportFormatSelector value="web" onChange={() => {}}>
+        <SoloArenaWebPackageSection reportFormat="web" />
+      </ArenaReportFormatSelector>,
+    ));
+    const select = container.querySelector('[data-testid="arena-web-package-select"]')!;
+    expect(select.getAttribute('aria-label')).toBe('选择 Web 包');
+    expect(container.querySelector('[data-testid="arena-web-package-section"]')?.textContent).toContain('Web 包');
     await act(async () => {
       select.value = BUILTIN_VISUAL_NOVEL_PACKAGE_REF.digest;
       select.dispatchEvent(new Event('change', { bubbles: true }));
     });
-    expect(onWebPackageChange).toHaveBeenCalledWith(BUILTIN_VISUAL_NOVEL_PACKAGE_REF);
-    await act(async () => root.render(<ArenaReportFormatSelector value="web" onChange={() => {}} onWebPackageChange={onWebPackageChange} webPackageRef={BUILTIN_VISUAL_NOVEL_PACKAGE_REF} />));
+    expect(useBattleStore.getState().webPackageRef).toEqual(BUILTIN_VISUAL_NOVEL_PACKAGE_REF);
     await click('下载 Web 包 ZIP');
     await vi.waitFor(() => {
       expect(downloadBlob).toHaveBeenCalledWith(expect.any(Blob), 'mahoshojo.visual-novel-lite@1.0.0.zip');
     });
-    await act(async () => { /* settle post-download state updates */ });
-    await act(async () => root.render(<ArenaReportFormatSelector value="web" onChange={() => {}} onWebPackageChange={onWebPackageChange} webPackageRef={BUILTIN_VISUAL_NOVEL_PACKAGE_REF} disabled />));
-    expect(select.disabled).toBe(true);
+    await act(async () => root.render(
+      <ArenaReportFormatSelector value="web" onChange={() => {}} disabled>
+        <SoloArenaWebPackageSection reportFormat="web" disabled />
+      </ArenaReportFormatSelector>,
+    ));
+    expect(container.querySelector('[data-testid="arena-web-package-select"]')!.disabled).toBe(true);
   });
 
   it('validates a package before consent, keeps JSON fallback inert, and exports a self-contained experience', async () => {
