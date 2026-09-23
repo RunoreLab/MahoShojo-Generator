@@ -190,11 +190,13 @@ it('Arena 详情连续点击 last-click-wins：新请求中止旧请求，后点
 });
 
 const flushAsync = async () => { await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); }); };
-const waitSearchDebounce = async () => {
+const waitDebounceOrBackoff = async () => {
+  // 覆盖 500ms 搜索防抖或 500ms 有界重试退避，再冲刷挂起的 React 更新。
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 550)); });
   await flushAsync();
   await flushAsync();
 };
+const waitSearchDebounce = waitDebounceOrBackoff;
 const makePublicBatchFetch = (listResponse: (url: string) => Response | Promise<Response>) => vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = String(input);
   if (url.includes('/api/public-data-cards')) return listResponse(url);
@@ -240,6 +242,8 @@ it('公开库搜索 A 成功后搜索 B 失败，不把 A 的结果留在 B 的�
   expect(document.body.textContent).toContain('公开甲卡');
   expect(document.body.textContent).not.toContain('数据卡加载失败');
   await typeSearch('B');
+  // 5xx 还需等一次 500ms 有界重试退避才进入最终错误态。
+  await waitDebounceOrBackoff();
   expect(document.body.textContent).not.toContain('公开甲卡');
   expect(document.body.textContent).toContain('数据卡加载失败');
   expect(document.body.textContent).not.toContain('当前显示上次成功结果');
@@ -260,9 +264,105 @@ it('公开库切换到管理员推荐失败，不把公开库结果留在推荐�
   const recommendedTab = [...document.querySelectorAll('button')].find((b) => b.textContent === '管理员推荐');
   expect(recommendedTab).toBeDefined();
   await act(async () => recommendedTab!.click());
-  await flushAsync();
-  await flushAsync();
+  // 5xx 还需等一次 500ms 有界重试退避才进入最终错误态。
+  await waitDebounceOrBackoff();
   expect(document.body.textContent).not.toContain('公开甲卡');
   expect(document.body.textContent).toContain('数据卡加载失败');
   expect(document.body.textContent).not.toContain('当前显示上次成功结果');
+});
+
+it('公开列表首次 503 自动重试一次后成功，不把瞬时故障展示为失败', async () => {
+  const publicCardA = { ...card, id: 'public-a', name: '公开甲卡', is_public: 1 };
+  let armed = false;
+  let listCalls = 0;
+  vi.stubGlobal('fetch', makePublicBatchFetch(() => {
+    if (!armed) return Response.json({ success: true, cards: [] });
+    listCalls += 1;
+    if (listCalls === 1) return new Response(null, { status: 503 });
+    return Response.json({ success: true, cards: [publicCardA] });
+  }));
+  await act(async () => root.render(
+    <BattleDataModal isOpen onClose={vi.fn()} onSelectCard={vi.fn()} selectedType="character" initialTab="public" />,
+  ));
+  await flushAsync();
+  await flushAsync();
+  armed = true;
+  const publicTab = [...document.querySelectorAll('button')].find((b) => b.textContent === '公开角色');
+  expect(publicTab).toBeDefined();
+  await act(async () => publicTab!.click());
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 550)); });
+  await flushAsync();
+  await flushAsync();
+  expect(listCalls).toBe(2);
+  expect(document.body.textContent).toContain('公开甲卡');
+  expect(document.body.textContent).not.toContain('数据卡加载失败');
+  expect(document.body.textContent).not.toContain('加载中...');
+});
+
+it('公开列表持续超时有界结束后进入错误态，不永久停留在加载中', async () => {
+  let armed = false;
+  let listCalls = 0;
+  vi.stubGlobal('fetch', makePublicBatchFetch(() => {
+    if (!armed) return Response.json({ success: true, cards: [] });
+    listCalls += 1;
+    throw new DOMException('The operation timed out.', 'TimeoutError');
+  }));
+  await act(async () => root.render(
+    <BattleDataModal isOpen onClose={vi.fn()} onSelectCard={vi.fn()} selectedType="character" initialTab="public" />,
+  ));
+  await flushAsync();
+  await flushAsync();
+  armed = true;
+  const publicTab = [...document.querySelectorAll('button')].find((b) => b.textContent === '公开角色');
+  expect(publicTab).toBeDefined();
+  await act(async () => publicTab!.click());
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 550)); });
+  await flushAsync();
+  await flushAsync();
+  expect(listCalls).toBe(2);
+  expect(document.body.textContent).toContain('数据卡加载失败');
+  expect(document.body.textContent).not.toContain('加载中...');
+  expect(document.body.textContent).not.toContain('暂无数据卡');
+});
+
+it('公开切推荐 Tab 只发一次列表请求，不产生被立即 abort 的多余请求', async () => {
+  const listUrls: string[] = [];
+  vi.stubGlobal('fetch', makePublicBatchFetch((url) => {
+    listUrls.push(url);
+    return Response.json({ success: true, cards: [] });
+  }));
+  await act(async () => root.render(
+    <BattleDataModal isOpen onClose={vi.fn()} onSelectCard={vi.fn()} selectedType="character" initialTab="public" />,
+  ));
+  await flushAsync();
+  await flushAsync();
+  const before = listUrls.length;
+  const recommendedTab = [...document.querySelectorAll('button')].find((b) => b.textContent === '管理员推荐');
+  expect(recommendedTab).toBeDefined();
+  await act(async () => recommendedTab!.click());
+  await flushAsync();
+  await flushAsync();
+  expect(listUrls.length).toBe(before + 1);
+  expect(listUrls.at(-1)).toContain('recommendedOnly=1');
+});
+
+it('重复点击当前公开 Tab 仍保留搜索词，不发无搜索条件请求', async () => {
+  const listUrls: string[] = [];
+  vi.stubGlobal('fetch', makePublicBatchFetch((url) => {
+    listUrls.push(url);
+    return Response.json({ success: true, cards: [] });
+  }));
+  await act(async () => root.render(
+    <BattleDataModal isOpen onClose={vi.fn()} onSelectCard={vi.fn()} selectedType="character" initialTab="public" />,
+  ));
+  await flushAsync();
+  await flushAsync();
+  await typeSearch('A');
+  expect(listUrls.at(-1)).toContain('search=A');
+  const publicTab = [...document.querySelectorAll('button')].find((b) => b.textContent === '公开角色');
+  expect(publicTab).toBeDefined();
+  await act(async () => publicTab!.click());
+  await flushAsync();
+  await flushAsync();
+  expect(listUrls.at(-1)).toContain('search=A');
 });

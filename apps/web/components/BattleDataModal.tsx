@@ -8,6 +8,7 @@ import DataCardDetailsModal from './DataCardDetailsModal';
 import { useAuth } from '@/lib/useAuth';
 import { useDataCardSummaryPage } from '@/lib/use-data-card-summary-page';
 import { loadFullDataCard } from '@/lib/data-card-list-client';
+import { fetchWithBoundedRetry } from '@/lib/bounded-fetch';
 import { authStorage, favoritesApi, deckApi } from '@/lib/auth';
 import {
   isPublicVisibility,
@@ -528,7 +529,7 @@ export default function BattleDataModal({
     try {
       setIsLoading(true);
       setPublicError(null);
-      const response = await fetch(`/api/public-data-cards?id=${cardId}`, { signal: abortController.signal });
+      const response = await fetchWithBoundedRetry(`/api/public-data-cards?id=${cardId}`, { signal: abortController.signal });
       if (response.ok) {
         const result = await response.json();
         if (abortController.signal.aborted) return;
@@ -611,7 +612,7 @@ export default function BattleDataModal({
           if (currentFilters.nativeAllowedOnly) params.append('nativeAllowedOnly', '1');
         }
 
-        const response = await fetch(`/api/public-data-cards?${params}`, { signal: abortController.signal });
+        const response = await fetchWithBoundedRetry(`/api/public-data-cards?${params}`, { signal: abortController.signal });
         if (!response.ok) throw new Error(`获取公开数据卡失败（HTTP ${response.status}）`);
         const result = await response.json();
         if (!result.success || !Array.isArray(result.cards)) throw new Error(result.error || '列表响应无效');
@@ -642,6 +643,19 @@ export default function BattleDataModal({
       }
     }
   }, [buildPublicRequestKey, selectedType, effectiveAllowedTypes, cardsPerPage, mapWithRoleType]);
+
+  // 公开查询的统一重放入口：始终使用当前 debouncedSearchQuery + publicFilters，
+  // 供 effect、重试按钮与“再次点击当前 Tab”复用，避免 closure 里的过期查询语义。
+  const reloadPublicCurrentQuery = useCallback((page: number = currentPage) => {
+    if (!isPublicTab) return;
+    const trimmed = debouncedSearchQuery.trim();
+    const uuidMatch = trimmed.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+    if (uuidMatch) {
+      loadCardByIdForDisplay(uuidMatch[0]);
+      return;
+    }
+    loadPublicDataCards(page, sortBy, trimmed || undefined, publicFilters, selectedTagIds, tagMatchMode);
+  }, [isPublicTab, currentPage, debouncedSearchQuery, sortBy, publicFilters, selectedTagIds, tagMatchMode, loadCardByIdForDisplay, loadPublicDataCards]);
 
   const sortFavorites = useCallback((items: any[], criteria: 'likes' | 'usage' | 'favorites' | 'created_at') => {
     const sorted = [...items];
@@ -704,37 +718,16 @@ export default function BattleDataModal({
     }
   }, [isOpen, isPublicTab]);
 
-  // 当防抖搜索词变化时执行搜索
+  // 公开查询的唯一请求 owner：防抖搜索、Tab、排序、筛选、标签变化都从这里发起。
+  // 翻页不在其中（currentPage 不是本 effect 的依赖），由 handlePageChange 显式请求。
   useEffect(() => {
     if (!isOpen) return;
 
-    const trimmed = debouncedSearchQuery.trim();
     setCurrentPage(1);
+    if (!isPublicTab) return;
 
-    // 私有库搜索：直接从用户数据卡接口查询
-    if (activeTab === 'my') {
-      return;
-    }
-
-    // 收藏库本地过滤，避免重复请求
-    if (activeTab === 'favorites') {
-      return;
-    }
-
-    if (activeTab === 'pvpHand') {
-      return;
-    }
-
-    // 检查是否包含 UUID 格式的 ID
-    const uuidRegex = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
-    const match = trimmed.match(uuidRegex);
-
-    if (match) {
-      loadCardByIdForDisplay(match[0]);
-    } else {
-      loadPublicDataCards(1, sortBy, trimmed || undefined, publicFilters, selectedTagIds, tagMatchMode);
-    }
-  }, [debouncedSearchQuery, isOpen, activeTab, loadUserDataCards, loadCardByIdForDisplay, loadPublicDataCards, sortBy, publicFilters, selectedTagIds, tagMatchMode]);
+    reloadPublicCurrentQuery(1);
+  }, [debouncedSearchQuery, isOpen, activeTab, isPublicTab, sortBy, publicFilters, selectedTagIds, tagMatchMode, reloadPublicCurrentQuery]);
 
   useEffect(() => {
     return () => {
@@ -1072,13 +1065,10 @@ export default function BattleDataModal({
     }
   };
 
-  // 处理排序变化
+  // 处理排序变化：只更新 state，由公开查询 effect 统一发起请求
   const handleSortChange = (newSortBy: 'likes' | 'usage' | 'favorites' | 'created_at') => {
     setSortBy(newSortBy);
     setCurrentPage(1);
-    if (isPublicTab) {
-      loadPublicDataCards(1, newSortBy, debouncedSearchQuery.trim() || undefined, publicFilters, selectedTagIds, tagMatchMode);
-    }
   };
 
   const tagById = useMemo(() => {
@@ -1638,7 +1628,7 @@ export default function BattleDataModal({
           {listError && <div role="alert" className="mb-3 rounded-lg bg-red-50 p-3 text-sm text-red-700">
             {displayCards.length ? `刷新失败，当前显示上次成功结果：${listError}` : `数据卡加载失败：${listError}`}
             <button type="button" disabled={listLoading} className="ml-3 px-3 py-2 rounded bg-white disabled:opacity-50"
-              onClick={() => activeTab === 'my' ? myPage.reload() : activeTab === 'favorites' ? favoritesPage.reload() : void loadPublicDataCards(currentPage, sortBy, debouncedSearchQuery.trim() || undefined, publicFilters, selectedTagIds, tagMatchMode)}>重试</button>
+              onClick={() => activeTab === 'my' ? myPage.reload() : activeTab === 'favorites' ? favoritesPage.reload() : reloadPublicCurrentQuery()}>重试</button>
           </div>}
           {/* 标签页切换 */}
           <div className="flex items-center justify-between gap-2 mb-4 flex-wrap">
@@ -1674,9 +1664,14 @@ export default function BattleDataModal({
               <button
                 onClick={() => {
                   hasUserSelectedTabRef.current = true;
+                  // 再次点击当前 Tab：用当前查询刷新；切换 Tab 只改 state，由 effect 发起请求
+                  if (activeTab === 'public') {
+                    setCurrentPage(1);
+                    reloadPublicCurrentQuery(1);
+                    return;
+                  }
                   setActiveTab('public');
                   setCurrentPage(1);
-                  loadPublicDataCards(1, sortBy, '', buildPublicFilters(filters, 'public'), selectedTagIds, tagMatchMode);
                 }}
                 className={`px-4 py-2 rounded text-sm font-medium ${activeTab === 'public' ? 'bg-pink-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
               >
@@ -1687,9 +1682,13 @@ export default function BattleDataModal({
               <button
                 onClick={() => {
                   hasUserSelectedTabRef.current = true;
+                  if (activeTab === 'recommended') {
+                    setCurrentPage(1);
+                    reloadPublicCurrentQuery(1);
+                    return;
+                  }
                   setActiveTab('recommended');
                   setCurrentPage(1);
-                  loadPublicDataCards(1, sortBy, '', buildPublicFilters(filters, 'recommended'), selectedTagIds, tagMatchMode);
                 }}
                 className={`px-4 py-2 rounded text-sm font-medium ${activeTab === 'recommended' ? 'bg-pink-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
               >

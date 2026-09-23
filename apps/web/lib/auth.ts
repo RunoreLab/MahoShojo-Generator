@@ -1,6 +1,7 @@
 import type { OnlineDataCardType } from '@mahoshojo/contracts/data-cards';
 import type { UserBadge } from '@/types/badge';
 import { signOutBetterAuthSession } from '@/lib/auth/logout';
+import { fetchWithBoundedRetry } from '@/lib/bounded-fetch';
 import { mapDeckDetailPayload, mapDeckListPayload } from '@/lib/deck-client-mappers';
 import { DATA_CARD_LIST_PAGE_SIZE } from '@/lib/data-card-list-page';
 
@@ -306,30 +307,19 @@ const resolveApiErrorMessage = async (response: Response, fallback: string): Pro
   return fallback;
 };
 
-// 只用于幂等卡片 GET：每页至多两次尝试，调用方取消后不得继续翻页或重试。
+// 只用于幂等卡片 GET：有界重试与超时由 fetchWithBoundedRetry 统一执行。
 export async function fetchDataCardJson(url: string, signal?: AbortSignal): Promise<any> {
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    signal?.throwIfAborted();
-    try {
-      const response = await authStorage.fetch(url, {
-        signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(30_000)]) : AbortSignal.timeout(30_000),
-      });
-      if (response.ok) return await response.json();
-      const error = Object.assign(new Error(await resolveApiErrorMessage(response, `获取数据卡失败（HTTP ${response.status}）`)), { status: response.status });
-      throw error;
-    } catch (cause) {
-      signal?.throwIfAborted();
-      const status = (cause as { status?: number })?.status;
-      const retryable = status === 408 || status === 429 || (status !== undefined && status >= 500)
-        || cause instanceof TypeError || (cause instanceof Error && ['TimeoutError', 'AbortError'].includes(cause.name));
-      if (!retryable || attempt === 1) throw cause;
-      await new Promise<void>((resolve, reject) => {
-        const onAbort = () => { clearTimeout(timer); reject(signal?.reason); };
-        const timer = setTimeout(() => { signal?.removeEventListener('abort', onAbort); resolve(); }, 500);
-        signal?.addEventListener('abort', onAbort, { once: true });
-      });
-    }
+  const response = await fetchWithBoundedRetry(url, {
+    fetcher: (input, init) => authStorage.fetch(input, init),
+    signal,
+  });
+  if (!response.ok) {
+    throw Object.assign(
+      new Error(await resolveApiErrorMessage(response, `获取数据卡失败（HTTP ${response.status}）`)),
+      { status: response.status },
+    );
   }
+  return await response.json();
 }
 
 const fetchCardListPages = async (
