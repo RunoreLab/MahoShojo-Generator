@@ -1,5 +1,7 @@
+import { useDataCardSummaryPage } from '@/lib/use-data-card-summary-page';
+import { useAuth } from '@/lib/useAuth';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { deckApi, deckFavoritesApi, deckStatsApi, dataCardApi } from '@/lib/auth';
+import { deckApi, deckFavoritesApi, deckStatsApi } from '@/lib/auth';
 import { addLikedDeck, getLikedDecks } from '@/lib/localStorage';
 import { buildTitleDisplay } from '@/lib/text';
 import { getDeckStatus, getDeckVisibilityValue } from '@/lib/deck-status';
@@ -79,6 +81,14 @@ export default function DecksModal({ isOpen, onClose, onImportDeck }: DecksModal
   const [addSearch, setAddSearch] = useState('');
   const [addCandidates, setAddCandidates] = useState<any[]>([]);
   const [addLoading, setAddLoading] = useState(false);
+  const { user } = useAuth();
+  const [addOffset, setAddOffset] = useState(0);
+  const addPage = useDataCardSummaryPage('my', user?.id ?? null, isOpen && detailMode === 'edit' && addSource === 'my', {
+    search: addSearch.trim() || undefined, types: ['character'], limit: 12, offset: addOffset,
+  });
+  const candidates = addSource === 'my' ? addPage.cards : addCandidates;
+  const candidatesLoading = addSource === 'my' ? addPage.loading : addLoading;
+  useEffect(() => { setAddOffset(0); }, [addSearch, addSource, detailDeck?.id]);
 
   const canCreate = useMemo(() => {
     if (capacity === null || deckCount === null) return true;
@@ -269,22 +279,18 @@ export default function DecksModal({ isOpen, onClose, onImportDeck }: DecksModal
   }, [detailDeck, showToast]);
 
   const fetchAddCandidates = useCallback(async () => {
-    if (!detailDeck || detailMode !== 'edit') return;
+    if (!detailDeck || detailMode !== 'edit' || addSource === 'my') return;
     const query = addSearch.trim();
     setAddLoading(true);
     try {
-      if (addSource === 'my') {
-        const cards = await dataCardApi.getCards(query || undefined);
-        const filtered = (cards || []).filter((c: any) => c?.type === 'character' && !c?.deleted_at);
-        setAddCandidates(filtered.slice(0, 30));
-      } else {
-        const cards = await deckApi.getPublicCharacterCards(query || undefined);
-        setAddCandidates(cards.slice(0, 30));
-      }
+      const cards = await deckApi.getPublicCharacterCards(query || undefined);
+      setAddCandidates(cards.slice(0, 30));
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : '数据卡加载失败，请重试');
     } finally {
       setAddLoading(false);
     }
-  }, [addSearch, addSource, detailDeck, detailMode]);
+  }, [addSearch, addSource, detailDeck, detailMode, showToast]);
 
   const handleAddCards = useCallback(
     async (cardIds: string[]) => {
@@ -595,12 +601,22 @@ export default function DecksModal({ isOpen, onClose, onImportDeck }: DecksModal
                     </div>
 
                     <div className="p-4 space-y-2">
-                      {addLoading ? (
+                      {addSource === 'my' && addPage.error && <div role="alert" className="text-sm text-red-600">
+                        {candidates.length ? '刷新失败，当前显示上次成功结果：' : ''}{addPage.error}
+                        <button onClick={addPage.reload} disabled={addPage.loading} className="ml-2 px-3 py-2">重试</button>
+                      </div>}
+                      {addSource === 'my' && addPage.total > 12 && <div className="flex gap-3 items-center text-sm">
+                        <button disabled={addOffset === 0 || addPage.loading} onClick={() => setAddOffset((value) => Math.max(0, value - 12))}>上一页</button>
+                        <span>第 {Math.floor(addOffset / 12) + 1} / {Math.ceil(addPage.total / 12)} 页</span>
+                        <button disabled={addOffset + 12 >= addPage.total || addPage.loading} onClick={() => setAddOffset((value) => value + 12)}>下一页</button>
+                      </div>}
+
+                      {candidatesLoading && candidates.length === 0 ? (
                         <div className="text-sm text-gray-500">加载中...</div>
-                      ) : addCandidates.length === 0 ? (
-                        <div className="text-sm text-gray-500">暂无结果</div>
+                      ) : candidates.length === 0 ? (
+                        <div className="text-sm text-gray-500">{addSource === 'my' && (addPage.error || addPage.status === 'idle') ? '尚未加载数据卡' : '暂无结果'}</div>
                       ) : (
-                        addCandidates.map((card: any) => {
+                        candidates.map((card: any) => {
                           const { display, full } = buildTitleDisplay(card.name || '未命名');
                           return (
                             <div key={card.id} className="flex items-center justify-between gap-3 rounded-md border p-3">

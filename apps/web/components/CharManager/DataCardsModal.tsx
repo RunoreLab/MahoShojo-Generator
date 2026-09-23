@@ -8,6 +8,8 @@ import { downloadBlob } from '@/lib/client/blobUrl';
 import { inferTemplate } from '@/lib/data-card-converter';
 import { isHotCard } from '@/lib/constants';
 import { authStorage } from '@/lib/auth';
+import { useDataCardSummaryPage } from '@/lib/use-data-card-summary-page';
+import { loadFullDataCard } from '@/lib/data-card-list-client';
 import { normalizePublicVisibilityValue } from '@/lib/data-card-read-mappers';
 import { getDataCardStatus } from '@/lib/data-card-status';
 import { ChevronDown, Filter } from 'lucide-react';
@@ -17,6 +19,11 @@ interface DataCardsModalProps {
   isOpen: boolean;
   onClose: () => void;
   dataCards: any[];
+  summaryOwnerId?: number;
+  refreshKey?: number;
+  loading?: boolean;
+  error?: string | null;
+  onReload?: () => void;
   editingCard: any | null;
   currentPage: number;
   cardsPerPage: number;
@@ -98,6 +105,7 @@ const isFilterActive = (filters: Filters) => {
 
 const inferRoleType = (card: any): CardRoleType | undefined => {
   if (!card || card.type !== 'character') return undefined;
+  if (card.roleType) return card.roleType;
   let payload = card.data;
   if (typeof payload === 'string') {
     try {
@@ -129,6 +137,7 @@ const inferRoleType = (card: any): CardRoleType | undefined => {
 
 const extractCardAuthor = (card: any): string | undefined => {
   if (!card) return undefined;
+  if (card.data === undefined && typeof card.username === 'string') return card.username || undefined;
   try {
     const data = typeof card.data === 'string' ? JSON.parse(card.data) : card.data;
     if (data && typeof data === 'object' && typeof (data as any)._author === 'string') {
@@ -190,7 +199,12 @@ const resolveQuestionnaireNativeAllowed = (card: any): boolean => {
 export default function DataCardsModal({
   isOpen,
   onClose,
-  dataCards,
+  dataCards: suppliedCards,
+  summaryOwnerId,
+  refreshKey = 0,
+  loading: suppliedLoading = false,
+  error: suppliedError = null,
+  onReload: suppliedReload,
   editingCard,
   currentPage,
   cardsPerPage,
@@ -241,6 +255,39 @@ export default function DataCardsModal({
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(() => isFilterActive(sanitizedDefaultFilters));
   const [filters, setFilters] = useState<Filters>(sanitizedDefaultFilters);
   const [activeFilters, setActiveFilters] = useState<Filters>(sanitizedDefaultFilters);
+  const serverPaged = summaryOwnerId !== undefined;
+  const summaryQuery = {
+    limit: cardsPerPage, offset: (currentPage - 1) * cardsPerPage,
+    search: debouncedSearchQuery.trim() || undefined, sortBy,
+    types: activeFilters.type ? [activeFilters.type] : resolvedAllowedTypes,
+    includeLegacyQuestionnaires: resolvedAllowedTypes.length === 1 && resolvedAllowedTypes[0] === 'questionnaire',
+    visibility: activeFilters.visibility || undefined, roleType: activeFilters.roleType || undefined,
+    ...Object.fromEntries(['minLikes', 'maxLikes', 'minUsage', 'maxUsage', 'minFavorites', 'maxFavorites']
+      .map((key) => [key, toOptionalNumber(activeFilters[key as keyof Filters]) ?? undefined])),
+  };
+  const page = useDataCardSummaryPage('my', summaryOwnerId ?? null, isOpen && serverPaged, summaryQuery);
+  const dataCards = serverPaged ? page.cards : suppliedCards;
+  const loading = serverPaged ? page.loading : suppliedLoading;
+  const error = serverPaged ? page.error : suppliedError;
+  const onReload = serverPaged ? page.reload : suppliedReload;
+  const [actionError, setActionError] = useState<string | null>(null);
+  const actionController = useRef<AbortController | null>(null);
+  const { reload: reloadSummary } = page;
+  useEffect(() => { if (refreshKey) reloadSummary(); }, [refreshKey, reloadSummary]);
+  useEffect(() => () => { actionController.current?.abort(); }, [isOpen]);
+  const withFullCard = async (card: any, action: (full: any) => void | Promise<void>) => {
+    actionController.current?.abort();
+    const controller = new AbortController();
+    actionController.current = controller;
+    setActionError(null);
+    try {
+      const full = await loadFullDataCard(card, 'my', controller.signal);
+      if (!controller.signal.aborted) await action(full);
+    } catch (cause) {
+      if (!controller.signal.aborted) setActionError(cause instanceof Error ? cause.message : '读取数据卡失败');
+    }
+  };
+
 
   useEffect(() => {
     if (isComposingSearchRef.current) return;
@@ -302,6 +349,7 @@ export default function DataCardsModal({
   }, [dataCards]);
 
   const filteredAndSortedCards = useMemo(() => {
+    if (serverPaged) return processedCards;
     const queryRaw = debouncedSearchQuery.trim();
     const query = queryRaw.toLowerCase();
 
@@ -390,7 +438,7 @@ export default function DataCardsModal({
     });
 
     return sorted;
-  }, [processedCards, debouncedSearchQuery, activeFilters, sortBy]);
+  }, [processedCards, debouncedSearchQuery, activeFilters, sortBy, serverPaged]);
 
   // 处理查看详情
   const handleViewDetails = (card: any) => {
@@ -398,9 +446,10 @@ export default function DataCardsModal({
     setShowDetailsModal(true);
   };
 
-  const totalPages = Math.max(1, Math.ceil(filteredAndSortedCards.length / cardsPerPage));
+  const total = serverPaged ? page.total : filteredAndSortedCards.length;
+  const totalPages = Math.max(1, Math.ceil(total / cardsPerPage));
   const safeCurrentPage = Math.min(Math.max(1, currentPage), totalPages);
-  const paginatedCards = filteredAndSortedCards.slice(
+  const paginatedCards = serverPaged ? filteredAndSortedCards : filteredAndSortedCards.slice(
     (safeCurrentPage - 1) * cardsPerPage,
     safeCurrentPage * cardsPerPage
   );
@@ -419,10 +468,11 @@ export default function DataCardsModal({
 
   useEffect(() => {
     if (!isOpen) return;
+    if (serverPaged && page.status !== 'success') return;
     if (currentPage > totalPages) {
       onPageChange(totalPages);
     }
-  }, [isOpen, currentPage, totalPages, onPageChange]);
+  }, [isOpen, currentPage, totalPages, onPageChange, serverPaged, page.status]);
 
   const paginatedCardIds = useMemo(() => {
     const out: string[] = [];
@@ -514,8 +564,8 @@ export default function DataCardsModal({
           <div className="flex items-center gap-3">
             <h2 className="text-xl font-bold">{title}</h2>
             <div className="text-sm text-gray-600">
-              {userUsedSlots}/{userCapacity} 槽（{dataCards.length} 张）
-              {filteredAndSortedCards.length !== dataCards.length && (
+              {userUsedSlots}/{userCapacity} 槽（{serverPaged ? page.hasLoaded ? page.total : '—' : dataCards.length} 张）
+              {!serverPaged && filteredAndSortedCards.length !== dataCards.length && (
                 <span className="ml-2 text-gray-500">筛选后 {filteredAndSortedCards.length}</span>
               )}
             </div>
@@ -525,6 +575,12 @@ export default function DataCardsModal({
               </div>
             )}
           </div>
+          {onReload && (
+            <button type="button" onClick={onReload} disabled={loading}
+              className="px-3 py-2 text-sm rounded-lg bg-gray-100 hover:bg-gray-200 disabled:opacity-50">
+              {loading ? '加载中…' : error ? '重试' : '刷新'}
+            </button>
+          )}
           {onOpenRecycleBin && (
             <button
               onClick={onOpenRecycleBin}
@@ -536,10 +592,8 @@ export default function DataCardsModal({
         </div>
 
         <div className="flex-1 min-h-0 overflow-y-auto">
-          {dataCards.length === 0 ? (
-            <p className="text-gray-500 text-center py-8">{emptyText}</p>
-          ) : (
-            <>
+          {(error || actionError) && <p role="alert" className="text-red-600 text-center py-3">{error && dataCards.length > 0 ? `刷新失败，当前显示上次成功结果：${error}` : error || actionError}</p>}
+          <>
               {/* 搜索 / 排序 / 筛选 */}
               <div className="mb-3">
                 <div className="flex flex-wrap gap-2 items-center">
@@ -659,7 +713,7 @@ export default function DataCardsModal({
 
               {/* 数据卡网格 */}
               {filteredAndSortedCards.length === 0 ? (
-                <p className="text-gray-500 text-center py-8">暂无匹配的数据卡</p>
+                <p role="status" className="text-gray-500 text-center py-8">{loading || (serverPaged && page.status === 'idle') ? '正在加载数据卡…' : error ? '数据卡未能加载，请重试。' : total === 0 ? emptyText : '暂无匹配的数据卡'}</p>
               ) : (
                 <div className="mb-4">
                   <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
@@ -668,7 +722,7 @@ export default function DataCardsModal({
                       const author = (card as any).uiAuthor as string | undefined;
 
                       const hot = isHotCard({ favorite_count: card.favorite_count, usage_count: card.usage_count });
-                      const hasPendingUpdate = Boolean(card.pending_data);
+                      const hasPendingUpdate = Boolean(card.has_pending_update || card.pending_data);
                       const questionnaireNativeAllowed = resolveQuestionnaireNativeAllowed(card);
 
                       return editingCard?.id === card.id ? (
@@ -703,22 +757,22 @@ export default function DataCardsModal({
                           pending={hasPendingUpdate}
                           author={author}
                           isOwner={true}
-                          onViewDetails={() => handleViewDetails(card)}
-                          onDownload={() => {
+                          onViewDetails={() => void withFullCard(card, handleViewDetails)}
+                          onDownload={() => void withFullCard(card, (card) => {
                             // 下载功能
                             const dataToDownload = JSON.parse(card.data);
                             const blob = new Blob([JSON.stringify(dataToDownload, null, 2)], {
                               type: 'application/json'
                             });
                             downloadBlob(blob, `${card.name}.json`);
-                          }}
-                          onEditInfo={() => onEditCard(card)}
-                          onEditData={hideEditData ? undefined : () => onLoadCard(card)}
+                          })}
+                          onEditInfo={() => void withFullCard(card, onEditCard)}
+                          onEditData={hideEditData ? undefined : () => void withFullCard(card, onLoadCard)}
                           onDelete={() => onDeleteCard(card.id)}
-                          onShare={() => onShareCard?.(card)}
+                          onShare={() => void withFullCard(card, (full) => onShareCard?.(full))}
                           onReplace={
                             onReplaceCard && (card.type !== 'history' || allowHistoryReplace)
-                              ? () => onReplaceCard(card)
+                              ? () => void withFullCard(card, onReplaceCard)
                               : undefined
                           }
                         />
@@ -729,7 +783,7 @@ export default function DataCardsModal({
               )}
 
               {/* 分页控件 */}
-              {filteredAndSortedCards.length > cardsPerPage && (
+              {totalPages > 1 && (
                 <div className="flex justify-center items-center gap-2 pt-4 border-t">
                   <button
                     onClick={() => onPageChange(Math.max(1, safeCurrentPage - 1))}
@@ -750,8 +804,7 @@ export default function DataCardsModal({
                   </button>
                 </div>
               )}
-            </>
-          )}
+          </>
         </div>
       </div>
 

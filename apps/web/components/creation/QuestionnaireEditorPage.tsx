@@ -28,7 +28,8 @@ import { dataCardApi } from '@/lib/auth';
 import { useAuth } from '@/lib/useAuth';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 import { config } from '@/lib/config';
-import { getDataCardStatus, getDataCardVisibilityValue } from '@/lib/data-card-status';
+import { getDataCardVisibilityValue } from '@/lib/data-card-status';
+import { useDataCardSummaryPage } from '@/lib/use-data-card-summary-page';
 import { normalizeQuestionnaireDataCard } from '@/lib/questionnaire-data-card';
 
 type EditableSuggestionItem = {
@@ -245,7 +246,7 @@ const getQuestionLabel = (question: EditableQuestion, index: number) => {
 
 export const QuestionnaireEditorPage: React.FC = () => {
   const router = useAppRouterAdapter();
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
   const [kind, setKind] = useState<'magical-girl' | 'canshou'>('magical-girl');
   const [questionnaireId, setQuestionnaireId] = useState('magical-girl-custom');
   const [title, setTitle] = useState('未命名问卷');
@@ -263,7 +264,7 @@ export const QuestionnaireEditorPage: React.FC = () => {
   const [collapsedMap, setCollapsedMap] = useState<Record<string, boolean>>({});
   const [showDataCardsModal, setShowDataCardsModal] = useState(false);
   const [showRecycleBinModal, setShowRecycleBinModal] = useState(false);
-  const [userDataCards, setUserDataCards] = useState<any[]>([]);
+  const [cardsRefresh, setCardsRefresh] = useState(0);
   const [recycleBinCards, setRecycleBinCards] = useState<any[]>([]);
   const [userCapacity, setUserCapacity] = useState<number | null>(null);
   const [userUsedSlots, setUserUsedSlots] = useState(0);
@@ -294,30 +295,19 @@ export const QuestionnaireEditorPage: React.FC = () => {
   }, [logoUrl, normalizedLogoUrl]);
   const trimmedLogoUrl = logoUrl.trim();
 
-  const questionnaireCards = useMemo(
-    () => userDataCards
-      .map((card) => normalizeQuestionnaireDataCard(card))
-      .filter((card): card is NonNullable<typeof card> => card !== null),
-    [userDataCards]
-  );
   const questionnaireRecycleCards = useMemo(
     () => recycleBinCards
       .map((card) => normalizeQuestionnaireDataCard(card))
       .filter((card): card is NonNullable<typeof card> => card !== null),
     [recycleBinCards]
   );
-  const privateQuestionnaireCount = useMemo(
-    () => questionnaireCards.filter((card) => getDataCardStatus(card).status === 'private').length,
-    [questionnaireCards]
-  );
-  const publicQuestionnaireCount = useMemo(
-    () => questionnaireCards.filter((card) => getDataCardStatus(card).status === 'public').length,
-    [questionnaireCards]
-  );
-  const pendingQuestionnaireCount = useMemo(
-    () => questionnaireCards.filter((card) => card.review_status === 'pending').length,
-    [questionnaireCards]
-  );
+  const questionnaireSummary = useDataCardSummaryPage('my', user?.id ?? null, isAuthenticated, {
+    limit: 1, types: ['questionnaire'], includeLegacyQuestionnaires: true,
+  });
+  const { reload: refreshQuestionnaireSummary } = questionnaireSummary;
+  const privateQuestionnaireCount = questionnaireSummary.stats?.private ?? '—';
+  const publicQuestionnaireCount = questionnaireSummary.stats?.public ?? '—';
+  const pendingQuestionnaireCount = questionnaireSummary.stats?.pending ?? '—';
   const defaultModalFilters = useMemo(
     () => ({ type: 'questionnaire' as const, visibility: 'private' as const }),
     []
@@ -326,12 +316,12 @@ export const QuestionnaireEditorPage: React.FC = () => {
   const loadUserQuestionnaireCards = useCallback(async () => {
     if (!isAuthenticated) return;
     try {
-      const [cards, capacityInfo, recycleCards] = await Promise.all([
-        dataCardApi.getCards(),
+      setCardsRefresh((value) => value + 1);
+      refreshQuestionnaireSummary();
+      const [capacityInfo, recycleCards] = await Promise.all([
         dataCardApi.getUserCapacity(),
         dataCardApi.getRecycleBin(),
       ]);
-      setUserDataCards(cards);
       setRecycleBinCards(recycleCards);
       if (capacityInfo !== null) {
         setUserCapacity(capacityInfo.capacity);
@@ -340,13 +330,12 @@ export const QuestionnaireEditorPage: React.FC = () => {
     } catch (error) {
       console.error('加载问卷数据卡失败:', error);
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, refreshQuestionnaireSummary]);
 
   useEffect(() => {
     if (isAuthenticated) {
       loadUserQuestionnaireCards();
     } else {
-      setUserDataCards([]);
       setRecycleBinCards([]);
       setUserCapacity(null);
       setUserUsedSlots(0);
@@ -867,7 +856,7 @@ export const QuestionnaireEditorPage: React.FC = () => {
       return;
     }
 
-    if (questionnaireCards.some((card) => card?.id === id && card?.isLegacyQuestionnaire)) {
+    if (editingCard?.id === id && editingCard?.isLegacyQuestionnaire) {
       const repairResult = await dataCardApi.repairQuestionnaireType(id);
       if (!repairResult.success) {
         setEditorError(repairResult.error || '恢复问卷数据卡类型失败');
@@ -1075,7 +1064,7 @@ export const QuestionnaireEditorPage: React.FC = () => {
               <div className="mt-3 grid grid-cols-1 gap-3 text-xs text-slate-600 md:grid-cols-3">
                 <div className="rounded-lg border border-white/70 bg-white p-3">
                   <div className="text-slate-400">已保存问卷</div>
-                  <div className="mt-1 text-base font-semibold text-slate-700">{questionnaireCards.length}</div>
+                  <div className="mt-1 text-base font-semibold text-slate-700">{questionnaireSummary.status === 'success' ? questionnaireSummary.total : '—'}</div>
                 </div>
                 <div className="rounded-lg border border-white/70 bg-white p-3">
                   <div className="text-slate-400">私有 / 公开</div>
@@ -1759,7 +1748,9 @@ export const QuestionnaireEditorPage: React.FC = () => {
           setShowDataCardsModal(false);
           setEditingCard(null);
         }}
-        dataCards={questionnaireCards}
+        dataCards={[]}
+        summaryOwnerId={user?.id}
+        refreshKey={cardsRefresh}
         editingCard={editingCard}
         currentPage={currentPage}
         cardsPerPage={cardsPerPage}
