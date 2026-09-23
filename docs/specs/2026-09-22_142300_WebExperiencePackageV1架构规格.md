@@ -1,6 +1,6 @@
 # Web Experience Package V1 架构规格
 
-状态：**accepted / Phase 1 内置 Package 实施；不授权生产激活**
+状态：superseded / historical，后续以 `2026-09-22_165900_WebPackage统一架构与后续开发规格.md` 为准
 日期：2026-09-22
 规格标识：`SPEC-web-experience-package-v1`
 依据决策：`ADR-web-experience-package-single-overlay-v1`
