@@ -2,7 +2,11 @@ import { OnlineDataCardTypeSchema } from '@mahoshojo/contracts/data-cards';
 import { getRequestUrl } from '@/lib/request-url';
 // app/api/public-data-cards/handler.ts
 
-import { getDataCardById, getPublicDataCards } from '@/lib/database/data-cards';
+import {
+  getPublicDataCardByIdStrict,
+  getPublicDataCardsStrict,
+  isDatabaseUnavailableError,
+} from '@/lib/database/data-cards';
 import { withEdgeCache } from '@/lib/edge-cache';
 
 const MAX_LIMIT = 100;
@@ -103,7 +107,7 @@ async function handler(req: Request): Promise<Response> {
 
       // 如果提供了ID，则获取单个数据卡
       if (id) {
-        const card = await getDataCardById(id, true);
+        const card = await getPublicDataCardByIdStrict(id);
         if (!card) {
           return new Response(
             JSON.stringify({
@@ -131,7 +135,7 @@ async function handler(req: Request): Promise<Response> {
 
       // 获取公开数据卡列表，支持搜索和类型过滤
       // 【修改】将新增的筛选参数传递给数据库函数
-      const cards = await getPublicDataCards(
+      const cards = await getPublicDataCardsStrict(
         limit,
         offset,
         type,
@@ -162,6 +166,20 @@ async function handler(req: Request): Promise<Response> {
         },
       );
     } catch (error) {
+      // 存储不可用是可重试的瞬时故障：503 而非 200 空列表/404，避免 withEdgeCache 把故障缓存成“空库”。
+      if (isDatabaseUnavailableError(error)) {
+        console.error('Public data cards storage unavailable:', error);
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: '数据卡存储暂不可用',
+          }),
+          {
+            status: 503,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        );
+      }
       console.error('Get public data cards error:', error);
       return new Response(
         JSON.stringify({
