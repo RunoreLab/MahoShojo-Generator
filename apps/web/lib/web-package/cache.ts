@@ -45,7 +45,7 @@ const transactionToPromise = (transaction: IDBTransaction): Promise<void> =>
 export const putWebPackageArchiveCache = async (pkg: ResolvedWebPackage): Promise<boolean> => {
   try {
     const archive = await packWebPackageZip(pkg);
-    const buffer = archive.buffer.slice(archive.byteOffset, archive.byteOffset + archive.byteLength);
+    const buffer = archive.buffer.slice(archive.byteOffset, archive.byteOffset + archive.byteLength) as ArrayBuffer;
     const db = await openDb();
     const transaction = db.transaction([STORE], 'readwrite');
     transaction.objectStore(STORE).put({

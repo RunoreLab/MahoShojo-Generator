@@ -15,6 +15,7 @@ import {
   hydrateWebPackageSessionFromCache,
   importLocalWebPackageArchive,
 } from '@/lib/web-package/cache';
+import { renderWebPackageLocation } from '@/lib/web-package/mount';
 import styles from './ArenaWebReport.module.css';
 import type { WebPackageArtifact, WebPackageRef } from '@mahoshojo/contracts/web-package';
 import {
@@ -24,7 +25,6 @@ import {
   isBuiltinWebPackageRef,
   listStagedLocalWebPackages,
   packWebPackageZip,
-  renderWebPackage,
   resolveWebPackage,
   unstageLocalWebPackage,
 } from '@mahoshojo/web-package';
@@ -163,8 +163,8 @@ type WebReportMetadata = {
   aiUsage?: NewsReport['aiUsage'] | null;
 };
 
-function ArenaWebDocument({ htmlDocument, prelude, epilogue, reload, immersive, aiModel, aiUsage, onToggleImmersive }: WebReportMetadata & {
-  htmlDocument: string;
+function ArenaWebDocument({ location, prelude, epilogue, reload, immersive, aiModel, aiUsage, onToggleImmersive }: WebReportMetadata & {
+  location: { kind: 'srcdoc'; html: string } | { kind: 'url'; url: string };
   prelude: string;
   epilogue: string;
   reload: number;
@@ -174,7 +174,10 @@ function ArenaWebDocument({ htmlDocument, prelude, epilogue, reload, immersive, 
   const [expanded, setExpanded] = useState(true);
   const [hovered, setHovered] = useState(false);
   const [keyboardFocus, setKeyboardFocus] = useState(false);
-  const previewDocument = useMemo(() => htmlDocument + PREVIEW_SCROLLBAR_STYLE, [htmlDocument]);
+  const previewDocument = useMemo(
+    () => (location.kind === 'srcdoc' ? location.html + PREVIEW_SCROLLBAR_STYLE : ''),
+    [location],
+  );
   const viewerRef = useRef<HTMLDivElement>(null);
   const immersiveButtonRef = useRef<HTMLButtonElement>(null);
   const focusOnExpandRef = useRef(false);
@@ -186,7 +189,7 @@ function ArenaWebDocument({ htmlDocument, prelude, epilogue, reload, immersive, 
 
   useEffect(() => {
     setExpanded(true);
-  }, [htmlDocument, reload, immersive]);
+  }, [location, reload, immersive]);
 
   useEffect(() => {
     if (!expanded || hovered || keyboardFocus) return;
@@ -195,7 +198,7 @@ function ArenaWebDocument({ htmlDocument, prelude, epilogue, reload, immersive, 
       setExpanded(false);
     }, 3000);
     return () => window.clearTimeout(timer);
-  }, [expanded, hovered, keyboardFocus, htmlDocument, reload, immersive]);
+  }, [expanded, hovered, keyboardFocus, location, reload, immersive]);
 
   useEffect(() => {
     if (expanded && focusOnExpandRef.current) {
@@ -276,7 +279,7 @@ function ArenaWebDocument({ htmlDocument, prelude, epilogue, reload, immersive, 
           title="AI Web 战报"
           sandbox="allow-scripts"
           referrerPolicy="no-referrer"
-          srcDoc={previewDocument}
+          {...(location.kind === 'url' ? { src: location.url } : { srcDoc: previewDocument })}
           data-testid="arena-web-document"
           className={styles.frame}
         />
@@ -326,7 +329,7 @@ export function ArenaReportFormatSelector({ value, onChange, disabled = false, r
     try {
       const base = await resolveWebPackage(refToDownload);
       const archive = await packWebPackageZip(base);
-      downloadBlob(new Blob([archive], { type: 'application/zip' }), buildSafeFileName(`${base.manifest.id}@${base.manifest.version}`, 'zip', 'mahoshojo-web-package'));
+      downloadBlob(new Blob([archive.buffer.slice(archive.byteOffset, archive.byteOffset + archive.byteLength) as ArrayBuffer], { type: 'application/zip' }), buildSafeFileName(`${base.manifest.id}@${base.manifest.version}`, 'zip', 'mahoshojo-web-package'));
     } catch {
       setDownloadError('Web 包下载失败，请稍后重试。');
     } finally {
@@ -463,19 +466,29 @@ export function ArenaWebReport({ content, ready, roomId, aiModel, aiUsage, displ
   const [immersive, setImmersive] = useState(false);
   const nativeFullscreenRequestedRef = useRef(false);
   const normalizedOutput = useMemo(() => normalizeArenaWebOutput(content), [content]);
-  const [packageResolution, setPackageResolution] = useState<{ artifact: WebPackageArtifact; content: string; html?: string; error?: string } | null>(null);
+  const [packageResolution, setPackageResolution] = useState<{
+    artifact: WebPackageArtifact;
+    content: string;
+    location?: { kind: 'srcdoc'; html: string } | { kind: 'url'; url: string };
+    error?: string;
+  } | null>(null);
   useEffect(() => {
     if (!webPackage || !ready) return;
     let active = true;
-    void renderWebPackage({ ...webPackage, generatedContent: content }).then((location) => {
-      if (active) setPackageResolution({ artifact: webPackage, content, html: location.html });
+    void renderWebPackageLocation({ ...webPackage, generatedContent: content }).then((location) => {
+      if (active) setPackageResolution({ artifact: webPackage, content, location });
     }).catch(() => {
       if (active) setPackageResolution({ artifact: webPackage, content, error: 'Web 包不可用或故事数据校验失败，已保留安全文本。' });
     });
     return () => { active = false; };
   }, [content, ready, webPackage]);
   const matchingResolution = packageResolution?.artifact === webPackage && packageResolution?.content === content ? packageResolution : null;
-  const webDocument = webPackage ? (matchingResolution?.html ?? null) : normalizedOutput.document;
+  const packageLocation = matchingResolution?.location ?? null;
+  // Package documents are structured locations (srcdoc adapter or mounted URL); ordinary web stays a raw HTML string.
+  const documentSource: { kind: 'srcdoc'; html: string } | { kind: 'url'; url: string } | string | null = webPackage
+    ? packageLocation
+    : normalizedOutput.document;
+  const webDocument = documentSource;
   const packageFallback = useMemo(() => webPackage
     ? formatWebPackageFallback({ ...webPackage, generatedContent: content })
     : '', [content, webPackage]);
@@ -518,6 +531,12 @@ export function ArenaWebReport({ content, ready, roomId, aiModel, aiUsage, displ
     }
   }, []);
   const showingWeb = ready && accepted && displayMode === 'web' && webDocument !== null;
+  // Memoized so ordinary srcdoc transport does not recreate the location identity every render.
+  const documentLocation = useMemo<{ kind: 'srcdoc'; html: string } | { kind: 'url'; url: string }>(() => {
+    if (packageLocation) return packageLocation;
+    if (!webPackage && typeof documentSource === 'string') return { kind: 'srcdoc', html: documentSource };
+    return { kind: 'srcdoc', html: '' };
+  }, [packageLocation, documentSource, webPackage]);
   const enterImmersive = useCallback((viewer: HTMLDivElement | null) => {
     setImmersive(true);
     if (!viewer || typeof viewer.requestFullscreen !== 'function') return;
@@ -570,8 +589,12 @@ export function ArenaWebReport({ content, ready, roomId, aiModel, aiUsage, displ
   };
   const downloadHtml = () => {
     if (!ready || !webDocument) return;
+    const source = packageLocation?.kind === 'srcdoc'
+      ? packageLocation.html
+      : (!webPackage && typeof webDocument === 'string' ? webDocument : '');
+    if (!source) return;
     // BOM 确保缺少 charset 声明的生成文档在本地打开时仍按 UTF-8 解码。
-    const blob = new Blob(['\uFEFF', webDocument], { type: 'text/html;charset=utf-8' });
+    const blob = new Blob(['﻿', source], { type: 'text/html;charset=utf-8' });
     downloadBlob(blob, buildSafeFileName(`魔法少女速报_${resolvedDisplayTitle}`, 'html', '魔法少女速报'));
   };
   return (
@@ -593,9 +616,12 @@ export function ArenaWebReport({ content, ready, roomId, aiModel, aiUsage, displ
       {ready && !webDocument ? <p className="mb-3 rounded-lg border border-amber-300/50 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900 dark:border-amber-300/30 dark:bg-amber-950/30 dark:text-amber-100" role="status">
         {webPackage ? (matchingResolution?.error ?? '正在校验 Web 包与故事数据…') : '这份输出没有包含完整的 HTML 文档，已切换为普通显示；其中的脚本不会被执行。'}
       </p> : null}
+      {ready && webPackage && packageLocation && packageLocation.kind === 'url' ? <p className="mb-3 text-xs text-gray-500">
+        此 Web 包通过隔离 URL 空间加载；单文件 HTML 下载仅适用于内置视觉小说适配器。
+      </p> : null}
       {children(showingWeb ? (
         <ArenaWebDocument
-          htmlDocument={webDocument}
+          location={documentLocation}
           prelude={webPackage ? '' : normalizedOutput.prelude}
           epilogue={webPackage ? '' : normalizedOutput.epilogue}
           reload={reload}
@@ -616,7 +642,7 @@ export function ArenaWebReport({ content, ready, roomId, aiModel, aiUsage, displ
         </button> : null}
         {!immersive ? <button
           type="button"
-          disabled={!ready || !webDocument}
+          disabled={!ready || !webDocument || Boolean(webPackage) && packageLocation?.kind !== 'srcdoc'}
           onClick={downloadHtml}
           className="save-button flex-1 bg-white/10 hover:bg-white/20 text-white py-2 px-4 rounded transition-all disabled:cursor-not-allowed disabled:opacity-60"
         >

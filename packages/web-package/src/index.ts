@@ -31,6 +31,22 @@ export { packWebPackageZip, unpackWebPackageZip } from './zip';
 export { assertJsonSchema202012 } from './json-schema';
 export { canonicalizeWebPackageManifest, digestWebPackageBytes, verifyWebPackage } from './verify';
 export {
+  WEB_PACKAGE_INSTANCE_PREFIX,
+  WEB_PACKAGE_SERVICE_WORKER_PATH,
+  WEB_PACKAGE_SERVICE_WORKER_SCOPE,
+  buildWebPackageInstanceUrl,
+  createWebPackageResourceHeaders,
+  createWebPackageResourceResponse,
+  createWebPackageResourceSnapshot,
+  parseWebPackageInstancePath,
+  resolveWebPackageInstancePath,
+} from './resource-space';
+export type {
+  WebPackageResourceFile,
+  WebPackageResourceSnapshot,
+  WebPackageResourceSource,
+} from './resource-space';
+export {
   clearLocalWebPackageSessionStaging,
   getStagedLocalWebPackage,
   listStagedLocalWebPackages,
@@ -251,7 +267,7 @@ export const createWebPackageOverlayFromProjection = async (
   });
 };
 
-/** First-party materializer only. Arbitrary packages need a real isolated URL namespace (Slice D). */
+/** First-party Visual Novel Lite adapter only; arbitrary packages use the generic resource-space URL (Slice D). */
 export const renderWebPackage = async (input: WebPackageOverlay): Promise<{ kind: 'srcdoc'; html: string }> => {
   const overlay = WebPackageOverlaySchema.parse(input);
   const base = await resolveWebPackage(overlay.packageRef);
