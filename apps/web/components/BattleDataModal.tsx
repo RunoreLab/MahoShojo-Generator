@@ -212,6 +212,8 @@ export default function BattleDataModal({
   const cardDetailControllerRef = useRef<AbortController | null>(null);
   const isSingleSelectingRef = useRef(false);
   const [publicDataCards, setPublicDataCards] = useState<any[]>([]);
+  // 记录当前 publicDataCards 展示结果所属的查询；只有相同查询的刷新失败才允许保留 stale 数据。
+  const publicLoadedRequestKeyRef = useRef<string | null>(null);
   const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
   const [isLoading, setIsLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<BattleDataTab>('public');
@@ -335,6 +337,23 @@ export default function BattleDataModal({
   }, []);
 
   const publicFilters = useMemo(() => buildPublicFilters(activeFilters, activeTab), [activeFilters, activeTab, buildPublicFilters]);
+  // 公开库请求键覆盖 page/search/filter/tab/UUID 语义；任一变化都让旧结果先失效。
+  const buildPublicRequestKey = useCallback((
+    kind: 'list' | 'id',
+    args: { page?: number; sort?: string; search?: string; filters?: Filters | null; tagIds?: string[]; tagMatch?: string; cardId?: string } = {},
+  ) => JSON.stringify({
+    kind,
+    tab: activeTab,
+    page: args.page ?? null,
+    sort: args.sort ?? null,
+    search: args.search ?? '',
+    filters: args.filters ?? null,
+    tagIds: args.tagIds ?? [],
+    tagMatch: args.tagMatch ?? 'any',
+    cardId: args.cardId ?? null,
+    selectedType,
+    types: effectiveAllowedTypes,
+  }), [activeTab, effectiveAllowedTypes, selectedType]);
   const normalizeFiltersBySelectedType = useCallback((source: Filters): Filters => {
     let next = source;
 
@@ -497,16 +516,24 @@ export default function BattleDataModal({
 
   // 通过 ID 获取数据卡并显示在列表中
   const loadCardByIdForDisplay = useCallback(async (cardId: string) => {
+    const requestKey = buildPublicRequestKey('id', { cardId });
     publicFetchAbortControllerRef.current?.abort();
     const abortController = new AbortController();
     publicFetchAbortControllerRef.current = abortController;
+    if (publicLoadedRequestKeyRef.current !== requestKey) {
+      // 查询语义变化（含 UUID 切换）：旧结果不得冒充新查询结果。
+      publicLoadedRequestKeyRef.current = null;
+      setPublicDataCards([]);
+    }
     try {
       setIsLoading(true);
       setPublicError(null);
       const response = await fetch(`/api/public-data-cards?id=${cardId}`, { signal: abortController.signal });
       if (response.ok) {
         const result = await response.json();
+        if (abortController.signal.aborted) return;
         const card = result.success && result.card && effectiveAllowedTypeSet.has(result.card.type) ? result.card : null;
+        publicLoadedRequestKeyRef.current = requestKey;
         setPublicDataCards(card ? mapWithRoleType([card]) : []);
       } else {
         throw new Error(`获取数据卡失败（HTTP ${response.status}）`);
@@ -515,6 +542,10 @@ export default function BattleDataModal({
       if (abortController.signal.aborted || (error instanceof Error && error.name === 'AbortError')) {
         return;
       }
+      if (publicLoadedRequestKeyRef.current !== requestKey) {
+        publicLoadedRequestKeyRef.current = null;
+        setPublicDataCards([]);
+      }
       setPublicError(error instanceof Error ? error.message : '获取数据卡失败');
     } finally {
       if (publicFetchAbortControllerRef.current === abortController) {
@@ -522,7 +553,7 @@ export default function BattleDataModal({
         setIsLoading(false);
       }
     }
-  }, [effectiveAllowedTypeSet, mapWithRoleType]);
+  }, [buildPublicRequestKey, effectiveAllowedTypeSet, mapWithRoleType]);
 
   // 【修改】获取公开数据卡，现在会接收所有筛选条件
   const loadPublicDataCards = useCallback(async (
@@ -533,9 +564,18 @@ export default function BattleDataModal({
     currentTagIds?: string[],
     currentTagMatch?: 'any' | 'all'
   ) => {
+    const requestKey = buildPublicRequestKey('list', {
+      page, sort: currentSortBy, search: currentSearchTerm, filters: currentFilters ?? null,
+      tagIds: currentTagIds ?? [], tagMatch: currentTagMatch,
+    });
     publicFetchAbortControllerRef.current?.abort();
     const abortController = new AbortController();
     publicFetchAbortControllerRef.current = abortController;
+    if (publicLoadedRequestKeyRef.current !== requestKey) {
+      // 翻页/搜索/筛选/Tab 变化：旧查询结果不得冒充新查询结果。
+      publicLoadedRequestKeyRef.current = null;
+      setPublicDataCards([]);
+    }
     try {
       setIsLoading(true);
       setPublicError(null);
@@ -579,14 +619,20 @@ export default function BattleDataModal({
       };
 
       const batches = await Promise.all(effectiveAllowedTypes.map((type) => fetchType(type)));
+      if (abortController.signal.aborted) return;
       let cards = mapWithRoleType(batches.flat());
       if (currentFilters?.roleType && selectedType === 'character') {
         cards = cards.filter((card: any) => card.roleType === currentFilters.roleType);
       }
+      publicLoadedRequestKeyRef.current = requestKey;
       setPublicDataCards(cards);
     } catch (error) {
       if (abortController.signal.aborted || (error instanceof Error && error.name === 'AbortError')) {
         return;
+      }
+      if (publicLoadedRequestKeyRef.current !== requestKey) {
+        publicLoadedRequestKeyRef.current = null;
+        setPublicDataCards([]);
       }
       setPublicError(error instanceof Error ? error.message : '获取公开数据卡失败');
     } finally {
@@ -595,7 +641,7 @@ export default function BattleDataModal({
         setIsLoading(false);
       }
     }
-  }, [selectedType, effectiveAllowedTypes, cardsPerPage, mapWithRoleType]);
+  }, [buildPublicRequestKey, selectedType, effectiveAllowedTypes, cardsPerPage, mapWithRoleType]);
 
   const sortFavorites = useCallback((items: any[], criteria: 'likes' | 'usage' | 'favorites' | 'created_at') => {
     const sorted = [...items];
@@ -1388,7 +1434,7 @@ export default function BattleDataModal({
 	                {searchQuery && searchQuery !== debouncedSearchQuery && <div className="absolute right-3 top-1/2 -translate-y-1/2"><div className="w-4 h-4 border-2 border-pink-500 border-t-transparent rounded-full animate-spin"></div></div>}
 	              </div>
 	              {!isPvpHandTab && <SortSelector value={sortBy} onChange={handleSortChange} />}
-              {!isPvpHandTab && (
+              {isPublicTab && (
                 <button
                   onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
                   className={`flex items-center gap-1 px-3 py-2 text-sm rounded-lg transition-colors ${isFilterActive ? 'bg-purple-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
