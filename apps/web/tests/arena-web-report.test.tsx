@@ -166,6 +166,32 @@ describe('Web 战报的本地执行许可', () => {
     expect(container.textContent).toContain('下载生成目标');
   });
 
+  it('合法本地 Web 包精确重放时安全回退，不误报损坏或要求重导入', async () => {
+    const content = JSON.stringify({ title: '本地包故事', scenes: [{ text: '第一幕' }] });
+    clearLocalWebPackageSessionStaging();
+    const local = await buildLocalPackage('1.0.0');
+    stageLocalWebPackage(local);
+    const { generatedContent: _generated, ...artifact } = await createWebPackageOverlay(local.ref, content);
+    expect(_generated).toBe(content);
+    window.localStorage.setItem('arena.web-report-consent.v1.room.local-render-unsupported', 'accepted');
+
+    await act(async () => root.render(
+      <ArenaWebReport key="local-render-unsupported" roomId="local-render-unsupported" ready content={content} webPackage={artifact}>
+        {(web, actions) => <section>{web}<div>{actions}</div></section>}
+      </ArenaWebReport>,
+    ));
+    await vi.waitFor(async () => {
+      await act(async () => {});
+      expect(container.textContent).toContain('当前版本暂不执行此 Web 包');
+    });
+    expect(container.textContent).toContain('Web 包已通过校验');
+    expect(container.textContent).not.toContain('Web 包不可用或故事数据校验失败');
+    expect(container.textContent).not.toContain('重新导入本地 Web 包');
+    expect(container.querySelector('iframe')).toBeNull();
+    expect(container.querySelector('pre')?.textContent).toContain('本地包故事');
+    expect(container.textContent).toContain('下载生成目标');
+  });
+
   it('缺失历史 Web 包时展示安全回退与重导入入口，不提供兼容重放', async () => {
     const content = JSON.stringify({ title: '缺失包故事', scenes: [{ text: '第一幕' }] });
     clearLocalWebPackageSessionStaging();

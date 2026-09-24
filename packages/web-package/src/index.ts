@@ -34,7 +34,7 @@ export {
 export { packWebPackageZip, unpackWebPackageZip } from './zip';
 export { assertJsonSchema202012 } from './json-schema';
 export { canonicalizeWebPackageManifest, digestWebPackageBytes, verifyWebPackage } from './verify';
-export { renderWebPackage } from './visual-novel-adapter';
+export { canRenderBuiltinVisualNovelSrcdoc, renderBuiltinVisualNovelSrcdoc } from './visual-novel-adapter';
 export {
   WEB_PACKAGE_INSTANCE_PREFIX,
   WEB_PACKAGE_RESOURCE_CORS_ORIGIN,

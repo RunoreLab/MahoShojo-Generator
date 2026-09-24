@@ -27,7 +27,7 @@ import {
   isBuiltinWebPackageRef,
   listStagedLocalWebPackages,
   packWebPackageZip,
-  renderWebPackage,
+  renderBuiltinVisualNovelSrcdoc,
   resolveWebPackage,
   stageLocalWebPackage,
   unpackWebPackageZip,
@@ -158,8 +158,8 @@ describe('single authoritative overlay and replay', () => {
   it('materializes the same self-contained entry from the original revision and exact overlay', async () => {
     const content = JSON.stringify({ title: '恶意 </script><script>alert(1)</script>', scenes: [{ text: '<img onerror=alert(1)>' }] });
     const overlay = await createWebPackageOverlay(ref, content);
-    const rendered = await renderWebPackage(overlay);
-    expect(await renderWebPackage(structuredClone(overlay))).toEqual(rendered);
+    const rendered = await renderBuiltinVisualNovelSrcdoc(overlay);
+    expect(await renderBuiltinVisualNovelSrcdoc(structuredClone(overlay))).toEqual(rendered);
     expect(rendered.kind).toBe('srcdoc');
     expect(rendered.html).toContain('data:image/svg+xml;base64,');
     expect(rendered.html).toContain('<style>');
@@ -172,12 +172,12 @@ describe('single authoritative overlay and replay', () => {
     expect(rendered.html).not.toContain('fetch(');
     expect(rendered.html).not.toContain('allow-same-origin');
     expect(formatWebPackageFallback(overlay)).toBe(JSON.stringify(JSON.parse(content), null, 2));
-    await expect(renderWebPackage({ ...overlay, generatedContent: story })).rejects.toThrow('digest');
+    await expect(renderBuiltinVisualNovelSrcdoc({ ...overlay, generatedContent: story })).rejects.toThrow('digest');
   });
 
   it('runs the materialized runtime offline and navigates scenes using literal text', async () => {
     const content = JSON.stringify({ title: '<script>literal</script>', scenes: [{ text: '第一幕' }, { speaker: '角色', text: '第二幕' }] });
-    const { html } = await renderWebPackage(await createWebPackageOverlay(ref, content));
+    const { html } = await renderBuiltinVisualNovelSrcdoc(await createWebPackageOverlay(ref, content));
     const storyText = html.match(/<script type="application\/json" id="web-package-story">([\s\S]*?)<\/script>/u)![1];
     const runtime = html.match(/<script>([\s\S]*?)<\/script>/u)![1];
     const elements = new Map<string, { textContent: string; disabled: boolean; addEventListener: (_event: string, _handler: () => void) => void; click: () => void }>();
@@ -200,7 +200,7 @@ describe('single authoritative overlay and replay', () => {
 
   it.each(['$&', '$`', "$'", '$$'])('keeps replacement metacharacters literal in generated story %j', async (text) => {
     const source = { title: '原样展示', scenes: [{ text }] };
-    const { html } = await renderWebPackage(await createWebPackageOverlay(ref, JSON.stringify(source)));
+    const { html } = await renderBuiltinVisualNovelSrcdoc(await createWebPackageOverlay(ref, JSON.stringify(source)));
     const materialized = html.match(/<script type="application\/json" id="web-package-story">([\s\S]*?)<\/script>/u)![1];
     expect(JSON.parse(materialized)).toEqual(source);
   });
@@ -216,11 +216,11 @@ describe('canonical ZIP artifact and generic JSON Schema validation', () => {
     expect(canonicalizeWebPackageManifest(reimported.manifest)).toBe(canonicalizeWebPackageManifest(base.manifest));
     expect(await buildWebPackagePrompt(reimported.ref)).toBe(await buildWebPackagePrompt(base.ref));
     const content = JSON.stringify({ title: '导入后', scenes: [{ text: '同一份 canonical identity。' }] });
-    const original = await renderWebPackage(await createWebPackageOverlay(base.ref, content));
+    const original = await renderBuiltinVisualNovelSrcdoc(await createWebPackageOverlay(base.ref, content));
     stageLocalWebPackage(reimported);
     // Staged local wins over the equal-identity builtin so re-import exercises the local path.
     expect((await resolveWebPackage(reimported.ref)).manifest.name).toBe(reimported.manifest.name);
-    const replay = await renderWebPackage(await createWebPackageOverlay(reimported.ref, content));
+    const replay = await renderBuiltinVisualNovelSrcdoc(await createWebPackageOverlay(reimported.ref, content));
     expect(replay).toEqual(original);
     unstageLocalWebPackage(reimported.ref);
     expect((await resolveWebPackage(reimported.ref)).ref).toEqual(base.ref);

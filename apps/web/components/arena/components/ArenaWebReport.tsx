@@ -14,9 +14,10 @@ import { importLocalWebPackageArchive } from '@/lib/web-package/cache';
 import styles from './ArenaWebReport.module.css';
 import type { WebPackageArtifact } from '@mahoshojo/contracts/web-package';
 import {
+  canRenderBuiltinVisualNovelSrcdoc,
   formatWebPackageFallback,
   prepareWebPackageReplay,
-  renderWebPackage,
+  renderBuiltinVisualNovelSrcdoc,
   type WebPackageReplayStatus,
 } from '@mahoshojo/web-package';
 
@@ -352,21 +353,45 @@ export function ArenaWebReport({ content, ready, roomId, aiModel, aiUsage, displ
     }).then(async (outcome) => {
       if (!active) return;
       if ((outcome.status === 'exact' || outcome.status === 'compatibility') && outcome.overlay) {
-        // Transitional: SW URL mount is fail-closed pending a separate sandbox-origin
-        // or materialization architecture PR (opaque iframes bypass Service Workers).
-        // Builtin VN Lite uses the first-party srcdoc adapter; other revisions throw
-        // into the safe-text fallback below.
-        const location = await renderWebPackage(outcome.overlay);
-        if (!active) return;
-        setPackageResolution({
-          artifact: webPackage,
-          content,
-          status: outcome.status,
-          message: outcome.message,
-          location,
-          compatibility: outcome.status === 'compatibility',
-          candidateAvailable: outcome.candidateAvailable,
-        });
+        const compatibility = outcome.status === 'compatibility';
+        if (!canRenderBuiltinVisualNovelSrcdoc(outcome.overlay.packageRef)) {
+          setPackageResolution({
+            artifact: webPackage,
+            content,
+            status: outcome.status,
+            message: compatibility
+              ? 'Web 包已通过兼容重放校验；当前版本暂不执行此 Web 包，已保留安全文本，生成目标仍可查看和下载。'
+              : 'Web 包已通过校验；当前版本暂不执行此 Web 包，已保留安全文本，生成目标仍可查看和下载。',
+            compatibility,
+            candidateAvailable: outcome.candidateAvailable,
+          });
+          return;
+        }
+        try {
+          // Transitional: only the pinned first-party Visual Novel Lite revision
+          // has a srcdoc materializer while the generic renderer remains disabled.
+          const location = await renderBuiltinVisualNovelSrcdoc(outcome.overlay);
+          if (!active) return;
+          setPackageResolution({
+            artifact: webPackage,
+            content,
+            status: outcome.status,
+            message: outcome.message,
+            location,
+            compatibility,
+            candidateAvailable: outcome.candidateAvailable,
+          });
+        } catch {
+          if (!active) return;
+          setPackageResolution({
+            artifact: webPackage,
+            content,
+            status: outcome.status,
+            message: 'Web 包已通过校验，但当前过渡渲染器无法展示；已保留安全文本，生成目标仍可查看和下载。',
+            compatibility,
+            candidateAvailable: outcome.candidateAvailable,
+          });
+        }
         return;
       }
       setPackageResolution({
