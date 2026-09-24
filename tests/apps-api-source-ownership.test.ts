@@ -57,6 +57,7 @@ describe('apps/api source ownership', () => {
       '@mahoshojo/hosted-api',
       '@mahoshojo/hosted-runtime',
       '@mahoshojo/multiplayer-core',
+      '@mahoshojo/web-package',
       'dotenv',
       'hono',
       'redis',

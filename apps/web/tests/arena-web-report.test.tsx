@@ -1,14 +1,43 @@
 // @vitest-environment jsdom
+import '@/tests/helpers/fake-indexeddb';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ArenaReportFormatSelector, ArenaWebReport } from '@/components/arena/components/ArenaWebReport';
+import { SoloArenaWebPackageSection } from '@/components/arena/editor/features/web-package/SoloArenaWebPackageSection';
 import { downloadBlob } from '@/lib/client/blobUrl';
 import { BattleResultPresentation } from '@/components/arena/components/BattleResultPresentation';
 import { BaseModal } from '@/components/shared/BaseModal';
+import {
+  BUILTIN_VISUAL_NOVEL_PACKAGE_REF,
+  clearLocalWebPackageSessionStaging,
+  createWebPackageOverlay,
+  resolveWebPackage,
+  stageLocalWebPackage,
+  verifyWebPackage,
+} from '@mahoshojo/web-package';
+import { useBattleStore } from '@/components/arena/stores/useBattleStore';
+import { clearWebPackageInstances } from '@/lib/web-package/instance-store';
 
 vi.mock('@/lib/client/blobUrl', () => ({ downloadBlob: vi.fn() }));
 vi.mock('@/components/shared/GeneratedByUserBadge', () => ({ GeneratedByUserBadge: () => null }));
+
+const installServiceWorkerStub = () => {
+  const activeWorker = { state: 'activated', addEventListener: vi.fn(), removeEventListener: vi.fn() };
+  const registration = {
+    active: activeWorker,
+    installing: null,
+    waiting: null,
+  } as unknown as ServiceWorkerRegistration;
+  const container = {
+    register: vi.fn(async () => registration),
+  };
+  Object.defineProperty(navigator, 'serviceWorker', {
+    configurable: true,
+    get: () => container,
+  });
+  return container;
+};
 
 const source = '<!doctype html><html><body><button onclick="this.textContent=123">互动</button></body></html>';
 const sourceWithNotes = [
@@ -38,18 +67,195 @@ const viewer = (roomId: string, ready = true, content = source) => (
 beforeEach(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   window.localStorage.clear();
+  installServiceWorkerStub();
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
 });
 afterEach(async () => {
+  vi.useRealTimers();
+  clearLocalWebPackageSessionStaging();
+  await clearWebPackageInstances();
   await act(async () => root.unmount());
   container.remove();
   vi.restoreAllMocks();
-  vi.useRealTimers();
+  vi.clearAllMocks();
+  useBattleStore.setState({ webPackageRef: null, isGenerating: false }, true);
 });
 
+const buildLocalPackage = async (version: string, id = 'local.ui-replay-package') => {
+  const builtin = await resolveWebPackage(BUILTIN_VISUAL_NOVEL_PACKAGE_REF);
+  const manifest = {
+    ...builtin.manifest,
+    id,
+    version,
+    name: `UI 重放包 ${version}`,
+  };
+  return verifyWebPackage(manifest, manifest.files.map((file) => ({
+    path: file.path,
+    bytes: builtin.readFile(file.path)!,
+  })));
+};
+
 describe('Web 战报的本地执行许可', () => {
+  it('offers the first-party experience in a labelled native selector and disables it while generating', async () => {
+    await act(async () => root.render(
+      <ArenaReportFormatSelector value="web" onChange={() => {}}>
+        <SoloArenaWebPackageSection reportFormat="web" />
+      </ArenaReportFormatSelector>,
+    ));
+    const select = container.querySelector('[data-testid="arena-web-package-select"]')!;
+    expect(select.getAttribute('aria-label')).toBe('选择 Web 包');
+    expect(container.querySelector('[data-testid="arena-web-package-section"]')?.textContent).toContain('Web 包');
+    await act(async () => {
+      select.value = BUILTIN_VISUAL_NOVEL_PACKAGE_REF.digest;
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    expect(useBattleStore.getState().webPackageRef).toEqual(BUILTIN_VISUAL_NOVEL_PACKAGE_REF);
+    await click('下载 Web 包 ZIP');
+    await vi.waitFor(() => {
+      expect(downloadBlob).toHaveBeenCalledWith(expect.any(Blob), 'mahoshojo.visual-novel-lite@1.0.0.zip');
+    });
+    await act(async () => root.render(
+      <ArenaReportFormatSelector value="web" onChange={() => {}} disabled>
+        <SoloArenaWebPackageSection reportFormat="web" disabled />
+      </ArenaReportFormatSelector>,
+    ));
+    expect(container.querySelector('[data-testid="arena-web-package-select"]')!.disabled).toBe(true);
+  });
+
+  it('validates a package before consent, keeps JSON fallback inert, and exports the generated target', async () => {
+    const content = JSON.stringify({ title: '包故事', scenes: [{ text: '<script>unsafe()</script>' }] });
+    const { generatedContent: _content, ...artifact } = await createWebPackageOverlay(BUILTIN_VISUAL_NOVEL_PACKAGE_REF, content);
+    expect(_content).toBe(content);
+    const render = (ready: boolean, override = artifact) => <ArenaWebReport key="package-consent" roomId="package-consent" ready={ready} content={content} webPackage={override}>
+      {(web, actions) => <section>{web}<div>{actions}</div></section>}
+    </ArenaWebReport>;
+    await act(async () => root.render(render(false)));
+    expect(container.querySelector('iframe')).toBeNull();
+    expect(container.querySelector('pre')?.textContent).toContain('<script>unsafe()</script>');
+    expect(container.querySelector('script')).toBeNull();
+    await act(async () => root.render(render(true)));
+    await vi.waitFor(async () => {
+      await act(async () => {});
+      expect(document.body.textContent).toContain('启用 Web 战报');
+    });
+    expect(container.querySelector('iframe')).toBeNull();
+    await click('继续使用 Web');
+    const frame = container.querySelector('iframe')!;
+    expect(frame.getAttribute('sandbox')).toBe('allow-scripts');
+    // Transitional interim: builtin VN Lite renders via the first-party srcdoc adapter.
+    expect(frame.getAttribute('src') ?? '').toBe('');
+    expect(frame.getAttribute('srcdoc') ?? '').toContain('<');
+    await click('⬇ 下载生成目标');
+    expect(downloadBlob).toHaveBeenCalledWith(expect.any(Blob), expect.stringMatching(/\.json$/));
+    const [targetBlob, targetName] = vi.mocked(downloadBlob).mock.calls[0]!;
+    expect(targetName).toBe('story.json');
+    expect(await targetBlob.text()).toBe(content);
+    const htmlButton = [...document.querySelectorAll('button')].find((item) => item.textContent === '🌐 下载 HTML')!;
+    expect(htmlButton.disabled).toBe(false);
+    await act(async () => root.render(render(true, { ...artifact, generatedDigest: `sha256:${'0'.repeat(64)}` })));
+    await vi.waitFor(async () => {
+      await act(async () => {});
+      expect(container.textContent).toContain('digest 校验失败');
+    });
+    expect(container.querySelector('iframe')).toBeNull();
+    expect(container.querySelector('pre')?.textContent).toContain('unsafe()');
+    expect(container.textContent).toContain('重新导入本地 Web 包');
+    expect(container.textContent).not.toContain('仍尝试使用此 Web 包');
+    expect(container.textContent).toContain('下载生成目标');
+  });
+
+  it('合法本地 Web 包精确重放时安全回退，不误报损坏或要求重导入', async () => {
+    const content = JSON.stringify({ title: '本地包故事', scenes: [{ text: '第一幕' }] });
+    clearLocalWebPackageSessionStaging();
+    const local = await buildLocalPackage('1.0.0');
+    stageLocalWebPackage(local);
+    const { generatedContent: _generated, ...artifact } = await createWebPackageOverlay(local.ref, content);
+    expect(_generated).toBe(content);
+    window.localStorage.setItem('arena.web-report-consent.v1.room.local-render-unsupported', 'accepted');
+
+    await act(async () => root.render(
+      <ArenaWebReport key="local-render-unsupported" roomId="local-render-unsupported" ready content={content} webPackage={artifact}>
+        {(web, actions) => <section>{web}<div>{actions}</div></section>}
+      </ArenaWebReport>,
+    ));
+    await vi.waitFor(async () => {
+      await act(async () => {});
+      expect(container.textContent).toContain('当前版本暂不执行此 Web 包');
+    });
+    expect(container.textContent).toContain('Web 包已通过校验');
+    expect(container.textContent).not.toContain('Web 包不可用或故事数据校验失败');
+    expect(container.textContent).not.toContain('重新导入本地 Web 包');
+    expect(container.querySelector('iframe')).toBeNull();
+    expect(container.querySelector('pre')?.textContent).toContain('本地包故事');
+    expect(container.textContent).toContain('下载生成目标');
+  });
+
+  it('缺失历史 Web 包时展示安全回退与重导入入口，不提供兼容重放', async () => {
+    const content = JSON.stringify({ title: '缺失包故事', scenes: [{ text: '第一幕' }] });
+    clearLocalWebPackageSessionStaging();
+    const local = await buildLocalPackage('1.0.0');
+    stageLocalWebPackage(local);
+    const { generatedContent: _generated, ...artifact } = await createWebPackageOverlay(local.ref, content);
+    expect(_generated).toBe(content);
+    clearLocalWebPackageSessionStaging();
+    window.localStorage.setItem('arena.web-report-consent.v1.room.missing-package', 'accepted');
+
+    await act(async () => root.render(
+      <ArenaWebReport key="missing-package" roomId="missing-package" ready content={content} webPackage={artifact}>
+        {(web, actions) => <section>{web}<div>{actions}</div></section>}
+      </ArenaWebReport>,
+    ));
+    await vi.waitFor(async () => {
+      await act(async () => {});
+      expect(container.textContent).toContain('重新导入本地 Web 包');
+    });
+    expect(container.textContent).not.toContain('仍尝试使用此 Web 包');
+    expect(container.textContent).not.toContain('不同版本的 Web 包');
+    expect(container.querySelector('iframe')).toBeNull();
+    expect(container.querySelector('pre')?.textContent).toContain('缺失包故事');
+  });
+
+  it('同 id 不同版本需显式选择兼容重放并展示不一致警告', async () => {
+    const content = JSON.stringify({ title: '兼容重放故事', scenes: [{ text: '第一幕' }] });
+    clearLocalWebPackageSessionStaging();
+    // 历史 revision 是内置 id 的本地版本；清空 staging 后候选回落到 builtin，可走 srcdoc 而无需 Service Worker。
+    const historical = await buildLocalPackage('0.9.0', BUILTIN_VISUAL_NOVEL_PACKAGE_REF.id);
+    stageLocalWebPackage(historical);
+    const { generatedContent: _generated, ...artifact } = await createWebPackageOverlay(historical.ref, content);
+    expect(_generated).toBe(content);
+    clearLocalWebPackageSessionStaging();
+    window.localStorage.setItem('arena.web-report-consent.v1.room.mismatch-choice', 'accepted');
+
+    await act(async () => root.render(
+      <ArenaWebReport key="mismatch-choice" roomId="mismatch-choice" ready content={content} webPackage={artifact}>
+        {(web, actions) => <section>{web}<div>{actions}</div></section>}
+      </ArenaWebReport>,
+    ));
+    await vi.waitFor(async () => {
+      await act(async () => {});
+      expect(container.textContent).toContain('仍尝试使用此 Web 包');
+    });
+    expect(container.textContent).toContain('重新导入本地 Web 包');
+    expect(container.querySelector('iframe')).toBeNull();
+    expect(container.textContent).not.toContain('不同版本的 Web 包');
+    expect(artifact.packageRef).toEqual(historical.ref);
+
+    await click('仍尝试使用此 Web 包');
+    await vi.waitFor(async () => {
+      await act(async () => {});
+      expect(container.textContent).toContain('当前使用的是不同版本的 Web 包，效果可能与生成时不一致。');
+    });
+    expect(container.querySelector('iframe')).toBeTruthy();
+    // 历史 revision 候选回落到 builtin 后经 srcdoc 过渡适配器渲染，无需 SW URL mount。
+    expect(container.querySelector('iframe')!.getAttribute('src') ?? '').toBe('');
+    expect(container.querySelector('iframe')!.getAttribute('srcdoc') ?? '').toContain('<');
+    expect(container.textContent).toContain('下载生成目标');
+    expect(container.textContent).not.toContain('仍尝试使用此 Web 包');
+    expect(artifact.packageRef).toEqual(historical.ref);
+  });
+
   it.each([
     { aiModel: 'deepseek-v4-flash-0731', aiUsage: { promptTokens: 12833, reasoningTokens: 7981, completionTokens: 14315 }, expected: '模型：deepseek-v4-flash-0731 · tokens：输入 12,833｜推理 7,981｜输出 14,315' },
     { aiModel: null, aiUsage: { promptTokens: 0, completionTokens: 1234567890 }, expected: 'tokens：输入 0｜推理 -｜输出 1,234,567,890' },

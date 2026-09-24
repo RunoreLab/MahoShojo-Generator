@@ -26,6 +26,9 @@ import type {
   ArenaTrustedPvpContext,
 } from '@mahoshojo/hosted-api/arena-generation/service';
 import { createArenaStreamProjector } from './stream-projector';
+import { WebPackageRefSchema, type WebPackageArtifact } from '@mahoshojo/contracts/web-package';
+import { createWebPackageOverlay, createWebPackageOverlayFromProjection } from '@mahoshojo/web-package';
+import { isWebArenaOutputContract } from './output-contract';
 
 export const MAX_ARENA_COMBATANTS = ARENA_RESOURCE_BUDGET.maxCombatants;
 const PREPARED_PAYLOAD_KEY = '__arenaGenerationRuntimeV1';
@@ -122,6 +125,13 @@ class ArenaOutputBudgetExceededError extends Error {
   constructor() {
     super('ARENA_OUTPUT_BUDGET_EXCEEDED');
     this.name = 'ArenaOutputBudgetExceededError';
+  }
+}
+
+class ArenaWebPackageOutputError extends Error {
+  constructor() {
+    super('ARENA_WEB_PACKAGE_OUTPUT_INVALID');
+    this.name = 'ArenaWebPackageOutputError';
   }
 }
 
@@ -433,6 +443,7 @@ const errorCodeOf = (error: unknown, signal: AbortSignal): string => {
   }
   if (error instanceof Error && error.name === 'AbortError') return 'GENERATION_ABORTED';
   if (error instanceof ArenaOutputBudgetExceededError) return 'ARENA_OUTPUT_BUDGET_EXCEEDED';
+  if (error instanceof ArenaWebPackageOutputError) return 'ARENA_WEB_PACKAGE_OUTPUT_INVALID';
   return 'GENERATION_FAILED';
 };
 
@@ -583,6 +594,7 @@ export const createArenaGenerationRuntime = (
     const reporterInfo = prepared.metadata.reporterInfo;
     const streamMeta = {
       reportFormat: prepared.metadata.reportFormat === 'web' ? 'web' : 'markdown',
+      ...(prepared.metadata.webPackageRef ? { webPackageRef: prepared.metadata.webPackageRef } : {}),
       ...(typeof executionPayload.mode === 'string' && executionPayload.mode.trim()
         ? { mode: executionPayload.mode.trim() }
         : {}),
@@ -600,9 +612,9 @@ export const createArenaGenerationRuntime = (
           && executionPayload.storyLength.trim()
           ? { storyLength: executionPayload.storyLength.trim() }
           : {}),
-      ...(prepared.metadata.outputContract === 'structured-report'
+      ...(isWebArenaOutputContract(prepared.metadata.outputContract)
+        || prepared.metadata.outputContract === 'structured-report'
         || prepared.metadata.outputContract === 'stream-markdown'
-        || prepared.metadata.outputContract === 'web-document'
         ? { outputContract: prepared.metadata.outputContract }
         : {}),
       ...(reporterInfo && typeof reporterInfo === 'object' && !Array.isArray(reporterInfo)
@@ -666,6 +678,7 @@ export const createArenaGenerationRuntime = (
     const outputEncoder = new TextEncoder();
     let outputBytes = 0;
     let markdown = '';
+    let webPackage: WebPackageArtifact | undefined;
     let telemetry: Record<string, unknown> = {};
     let reasoningEnded = false;
     let reasoningEventCount = 0;
@@ -682,6 +695,7 @@ export const createArenaGenerationRuntime = (
     let providerSettled = false;
     const projector = createArenaStreamProjector({
       expectsMeta: prepared.metadata.expectsMeta === true,
+      strictTrailer: Boolean(prepared.metadata.webPackageRef),
     });
 
     const consumeOutputBudget = (text: string): void => {
@@ -755,6 +769,7 @@ export const createArenaGenerationRuntime = (
         const terminal: GenerationTerminal = {
           status,
           ...(errorCode ? { code: errorCode } : {}),
+          ...(status === 'completed' && webPackage ? { webPackage } : {}),
         };
         finalizationClaimIndeterminate = true;
         const claim = await input.claimFinalization(terminal);
@@ -861,6 +876,45 @@ export const createArenaGenerationRuntime = (
       }
       await flushReasoningEvents();
       const { metaEvent } = projector.result();
+      if (prepared.metadata.webPackageRef) {
+        const eventData = metaEvent?.type === 'meta' ? metaEvent.data as Record<string, unknown> : null;
+        const meta = eventData?.meta as Record<string, unknown> | undefined;
+        const report = meta?.report as Record<string, unknown> | undefined;
+        if (meta?.version !== 1 || !report || typeof report.headline !== 'string' || !report.headline.trim()
+          || typeof report.winner !== 'string' || !report.winner.trim()) {
+          throw new ArenaWebPackageOutputError();
+        }
+        try {
+          const projection = prepared.metadata.webPackagePromptProjection;
+          const overlay = projection !== undefined
+            ? await createWebPackageOverlayFromProjection(
+              projection as Parameters<typeof createWebPackageOverlayFromProjection>[0],
+              markdown,
+              { maxBytes: ARENA_RESOURCE_BUDGET.maxOutputBytes },
+            )
+            : await createWebPackageOverlay(
+              WebPackageRefSchema.parse(prepared.metadata.webPackageRef),
+              markdown,
+              { maxBytes: ARENA_RESOURCE_BUDGET.maxOutputBytes },
+            );
+          const expectedRef = WebPackageRefSchema.parse(prepared.metadata.webPackageRef);
+          if (overlay.packageRef.id !== expectedRef.id
+            || overlay.packageRef.version !== expectedRef.version
+            || overlay.packageRef.digest !== expectedRef.digest) {
+            throw new Error('Web Package overlay 与请求 ref 不匹配');
+          }
+          webPackage = {
+            packageRef: overlay.packageRef,
+            targetPath: overlay.targetPath,
+            targetMediaType: overlay.targetMediaType,
+            generatedDigest: overlay.generatedDigest,
+          };
+          executionMetadata.webPackage = webPackage;
+          if (eventData) eventData.webPackage = webPackage;
+        } catch {
+          throw new ArenaWebPackageOutputError();
+        }
+      }
       if (metaEvent) {
         if (
           metaEvent.type === 'meta'
@@ -912,6 +966,7 @@ export const createArenaGenerationRuntime = (
       return {
         status: 'completed',
         resultRef: finalization.resultRef,
+        ...(webPackage ? { webPackage } : {}),
         ...(finalization.persistenceWarning
           ? { persistenceWarning: finalization.persistenceWarning }
           : {}),

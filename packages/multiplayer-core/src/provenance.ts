@@ -53,6 +53,8 @@ export const collaborativeChangeTarget = (change: ArenaProposalChange): string =
       return `team-combatants-order:${change.teamKey}`;
     case 'setReportFormat':
       return 'report-format';
+    case 'setWebPackageRef':
+      return 'web-package';
     case 'setBattleMode':
       return 'battle-mode';
     case 'setSelectedLanguage':
@@ -115,6 +117,8 @@ export const hasCollaborativeChangeEffect = (
     }
     case 'setReportFormat':
       return config.reportFormat === change.value;
+    case 'setWebPackageRef':
+      return deepEqual(config.webPackageRef ?? null, change.value);
     case 'setBattleMode':
       return config.battleMode === change.value;
     case 'setSelectedLanguage':

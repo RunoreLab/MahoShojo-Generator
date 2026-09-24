@@ -199,7 +199,9 @@ export interface BattleStoreState {
   battleMode: BattleMode;
   generationMode: GenerationMode;
   reportFormat: 'markdown' | 'web';
+  webPackageRef: import('@mahoshojo/contracts/web-package').WebPackageRef | null;
   resultReportFormat: 'markdown' | 'web';
+  resultWebPackage: import('@mahoshojo/contracts/web-package').WebPackageArtifact | null;
   resultWebReady: boolean;
   /** 是否启用“自由排位”计分（默认关闭；仅影响 free 队列）。 */
   arenaFreeRankingEnabled: boolean;
@@ -247,6 +249,8 @@ export interface BattleStoreState {
   setBattleMode: (mode: BattleMode) => void;
   setGenerationMode: (mode: GenerationMode) => void;
   setReportFormat: (format: 'markdown' | 'web') => void;
+  setWebPackageRef: (ref: import('@mahoshojo/contracts/web-package').WebPackageRef | null) => void;
+  setResultWebPackage: (artifact: import('@mahoshojo/contracts/web-package').WebPackageArtifact | null) => void;
   setResultReportFormat: (format: 'markdown' | 'web') => void;
   setResultWebReady: (ready: boolean) => void;
   setArenaFreeRankingEnabled: (enabled: boolean) => void;

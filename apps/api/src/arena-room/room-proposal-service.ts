@@ -29,6 +29,10 @@ import {
   verifyArenaRoomPresetRefs,
   verifyArenaRoomSharedConfigPresetRefs,
 } from './arena-room-shared-config-refs';
+import {
+  assertSharedConfigServerShareableWebPackage,
+  isServerShareableWebPackageRef,
+} from './web-package-shareability';
 import type { ArenaRoomGenerationPresetResolver } from './room-generation-preset-registry';
 import type {
   ArenaRoomMembershipService,
@@ -233,6 +237,14 @@ const introducedPresetRefs = (changes: readonly ArenaProposalChange[]): readonly
   }))
 );
 
+/** Proposals carrying a non-shareable Web Package ref must not even be stored. */
+const assertSubmittedWebPackageRefsShareable = (changes: readonly ArenaProposalChange[]): void => {
+  for (const change of changes) {
+    if (change.type !== 'setWebPackageRef' || change.value === null) continue;
+    if (!isServerShareableWebPackageRef(change.value)) fail('ROOM_REFERENCE_DENIED');
+  }
+};
+
 const mapPresetReferenceError = (error: unknown): never => {
   if (!(error instanceof ArenaRoomPresetRefVerifierError)) throw error;
   switch (error.code) {
@@ -322,6 +334,7 @@ export const createArenaRoomProposalService = (
       if (membership.state.terminalProposalIds.includes(request.data.proposalId)) {
         return fail('ROOM_PROPOSAL_CONFLICT');
       }
+      assertSubmittedWebPackageRefsShareable(request.data.changes);
 
       await verifyRefs(options.references, {
         refs: introducedRefs(request.data.changes),
@@ -403,8 +416,21 @@ export const createArenaRoomProposalService = (
           roomId: membership.state.snapshot.roomId,
           config: membership.state.snapshot.sharedConfig,
           revision: membership.state.snapshot.revision,
-        }, proposal, request.data.selectedChangeIds, { overrideChangeIds: request.data.overrideChangeIds });
-        if (applied.status === 'rejected') return fail('ROOM_PROPOSAL_CONFLICT');
+        }, proposal, request.data.selectedChangeIds, {
+          overrideChangeIds: request.data.overrideChangeIds,
+          isServerShareableWebPackageRef,
+        });
+        if (applied.status === 'rejected') {
+          if (applied.issues.some((issue) => issue.message.includes('not server-shareable'))) {
+            return fail('ROOM_REFERENCE_DENIED');
+          }
+          return fail('ROOM_PROPOSAL_CONFLICT');
+        }
+        try {
+          assertSharedConfigServerShareableWebPackage(applied.config);
+        } catch {
+          return fail('ROOM_REFERENCE_DENIED');
+        }
         await verifyRefs(options.references, {
           refs: canonicalArenaRoomSharedConfigRefs(applied.config),
           hostAccountUserId: membership.accountUserId,

@@ -1,4 +1,9 @@
 import { STRICT_RANKED_MODEL_FALLBACKS } from '@mahoshojo/domain/arena-ranked-model-policy';
+import {
+  WebPackagePromptProjectionSchema,
+  WebPackageRefSchema,
+} from '@mahoshojo/contracts/web-package';
+import { resolveWebPackage, buildWebPackagePromptProjection } from '@mahoshojo/web-package';
 
 import type {
   ArenaGenerationAuditableRejection,
@@ -563,6 +568,38 @@ export const createNodeArenaGenerationExecutor = (
       )({ request, generationRequestId, payload });
       if (payload.reportFormat !== undefined && payload.reportFormat !== 'markdown' && payload.reportFormat !== 'web') {
         return jsonResponse({ code: 'INVALID_REPORT_FORMAT', error: 'reportFormat 无效' }, 400);
+      }
+      if (payload.webPackageRef !== undefined) {
+        if (payload.reportFormat !== 'web' || requestAuditContext.endpoint === 'api/arena/session/generate-next'
+          || trustedPvpContext && !payload.multiplayerGenerationSnapshot) {
+          return jsonResponse({ code: 'ARENA_WEB_PACKAGE_REQUIRES_WEB', error: 'Web Package 仅用于 Arena Web 战报' }, 400);
+        }
+        const ref = WebPackageRefSchema.safeParse(payload.webPackageRef);
+        if (!ref.success) return jsonResponse({ code: 'ARENA_WEB_PACKAGE_INVALID', error: 'Web Package 引用无效' }, 400);
+        if (payload.webPackagePromptProjection !== undefined) {
+          const projection = WebPackagePromptProjectionSchema.safeParse(payload.webPackagePromptProjection);
+          if (!projection.success
+            || projection.data.package.id !== ref.data.id
+            || projection.data.package.version !== ref.data.version
+            || projection.data.package.digest !== ref.data.digest) {
+            return jsonResponse({ code: 'ARENA_WEB_PACKAGE_INVALID', error: 'Web Package Prompt Projection 无效' }, 400);
+          }
+        }
+        // Server-resolvable packages must match a server-rebuilt canonical Projection;
+        // unresolvable local packages are only valid through a client Projection.
+        try {
+          const base = await resolveWebPackage(ref.data);
+          if (payload.webPackagePromptProjection !== undefined) {
+            const canonical = buildWebPackagePromptProjection(base);
+            if (JSON.stringify(payload.webPackagePromptProjection) !== JSON.stringify(canonical)) {
+              return jsonResponse({ code: 'ARENA_WEB_PACKAGE_INVALID', error: 'Web Package Prompt Projection 与可解析 revision 不一致' }, 400);
+            }
+          }
+        } catch {
+          if (payload.webPackagePromptProjection === undefined) {
+            return jsonResponse({ code: 'ARENA_WEB_PACKAGE_UNAVAILABLE', error: 'Web Package revision 不可用' }, 400);
+          }
+        }
       }
       const normalized = clonePayload(payload);
       normalizeLegacyPayloadDefaults(normalized);

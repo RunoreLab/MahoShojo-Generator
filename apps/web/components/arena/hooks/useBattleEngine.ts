@@ -38,6 +38,12 @@ import { secureRandomUUID } from '@/lib/crypto';
 import { normalizeAdjudicationEvents } from '@/lib/adjudicator/normalize';
 import { buildArenaQuestionnaireRequest } from '../utils/questionnaireRequest';
 import {
+  buildWebPackagePromptProjection,
+  isBuiltinWebPackageRef,
+  resolveWebPackage,
+} from '@mahoshojo/web-package';
+import type { WebPackagePromptProjection } from '@mahoshojo/contracts/web-package';
+import {
   createPinnedGenerationApiSafeReadDispatcher,
   createGenerationApiIntent,
   isGenerationApiClientErrorCode,
@@ -377,6 +383,8 @@ export const useBattleEngine = () => {
   const combatants = useBattleSelector((state) => state.combatants);
   const battleMode = useBattleSelector((state) => state.battleMode);
   const reportFormat = useBattleSelector((state) => state.reportFormat);
+  const webPackageRef = useBattleSelector((state) => state.webPackageRef);
+  const setResultWebPackage = useBattleSelector((state) => state.setResultWebPackage);
   const setResultReportFormat = useBattleSelector((state) => state.setResultReportFormat);
   const setResultWebReady = useBattleSelector((state) => state.setResultWebReady);
   const generationMode = useBattleSelector((state) => state.generationMode);
@@ -569,6 +577,7 @@ export const useBattleEngine = () => {
     setArenaGenerationConnectionState(null);
     setIsStreaming(false);
     setResultReportFormat(reportFormat);
+    setResultWebPackage(null);
     setResultWebReady(false);
     setStreamingMarkdown(null);
     setError(null);
@@ -670,9 +679,21 @@ export const useBattleEngine = () => {
           customProvider: generationProviderSnapshot,
         });
       };
+      let webPackagePromptProjection: WebPackagePromptProjection | undefined;
+      if (reportFormat === 'web' && webPackageRef && !isBuiltinWebPackageRef(webPackageRef)) {
+        try {
+          const base = await resolveWebPackage(webPackageRef);
+          webPackagePromptProjection = buildWebPackagePromptProjection(base);
+        } catch {
+          setError('本地 Web 包未加载或已损坏，请重新导入后再生成。');
+          return;
+        }
+      }
       const requestBody = roomAction.inRoom ? null : {
         generationRequestId,
         reportFormat,
+        ...(reportFormat === 'web' && webPackageRef ? { webPackageRef } : {}),
+        ...(webPackagePromptProjection ? { webPackagePromptProjection } : {}),
         combatants: freshCombatants.map((combatant) => ({
           type: combatant.type,
           data: combatant.data,
@@ -991,7 +1012,8 @@ export const useBattleEngine = () => {
         }
 
         setResultReportFormat(result.report.reportFormat === 'web' ? 'web' : 'markdown');
-        setResultWebReady(result.report.reportFormat === 'web' && typeof result.report.webHtml === 'string');
+        setResultWebPackage(result.report.webPackage ?? null);
+        setResultWebReady(result.report.reportFormat === 'web' && (Boolean(result.report.webPackage) || typeof result.report.webHtml === 'string'));
         setNewsReport(reportWithScenario);
         const normalizedImpacts = normalizeBattleAiImpacts(result.impacts);
         setLatestAiImpacts(normalizedImpacts.length > 0 ? normalizedImpacts : null);
@@ -1139,11 +1161,14 @@ export const useBattleEngine = () => {
 	          }
 
           let authoritativeWebContract = false;
+          let authoritativePackage = false;
 	          const metaHeader = response.headers.get('x-mahoshojo-stream-meta');
           if (metaHeader) {
             try {
               const parsed = JSON.parse(decodeURIComponent(metaHeader));
-              authoritativeWebContract = parsed?.outputContract === 'web-document' && parsed?.reportFormat === 'web';
+              const contract = parsed?.outputContract;
+              authoritativeWebContract = (contract === 'web-document' || contract === 'web-package-target') && parsed?.reportFormat === 'web';
+              authoritativePackage = authoritativeWebContract && Boolean(parsed?.webPackageRef);
               setResultReportFormat(authoritativeWebContract ? 'web' : 'markdown');
               const generationId = typeof parsed?.generationId === 'string' ? parsed.generationId.trim() : '';
               if (generationId) {
@@ -1493,6 +1518,12 @@ export const useBattleEngine = () => {
               }
 
               if (event === 'meta') {
+                if (payload?.webPackage) {
+                  authoritativeWebContract = true;
+                  authoritativePackage = true;
+                  setResultReportFormat('web');
+                  setResultWebPackage(payload.webPackage);
+                }
                 if (payload?.parseOk && payload?.meta && typeof payload.meta === 'object') {
                   const meta = payload.meta as any;
                   const impacts = normalizeBattleAiImpacts(meta.impacts);
@@ -1575,6 +1606,12 @@ export const useBattleEngine = () => {
               }
 
               if (event === 'done') {
+                if (payload?.webPackage) {
+                  authoritativeWebContract = true;
+                  authoritativePackage = true;
+                  setResultReportFormat('web');
+                  setResultWebPackage(payload.webPackage);
+                }
                 authoritativeStreamDone = payload?.status === 'completed' && payload?.ok !== false;
                 if (authoritativeWebContract && !authoritativeStreamDone) {
                   shouldAbort = true;
@@ -1843,7 +1880,7 @@ export const useBattleEngine = () => {
                 });
               }
             }
-          } else {
+          } else if (!authoritativePackage) {
             // SSE 模式下：正文与 meta/telemetry 已分通道，但仍做一次兜底剥离（防止异常情况下 meta 泄漏进正文）
             const stripped = stripStreamUpdateMetaComment(markdownForUi);
             if (stripped && typeof stripped.strippedMarkdown === 'string') {
@@ -1857,7 +1894,7 @@ export const useBattleEngine = () => {
           const allowStreamMeta = settings.writeArenaHistory || settings.writeCurrentState;
           const hasMetaImpacts = allowStreamMeta && Boolean(metaOverride?.impacts?.length);
           const looksLikeCompleteReport = reportFormat === 'web' || authoritativeWebContract
-            ? authoritativeWebContract && authoritativeStreamDone && Boolean(trimmedForValidation)
+            ? authoritativeWebContract && authoritativeStreamDone && Boolean(trimmedForValidation) && (!authoritativePackage || Boolean(useBattleStore.getState().resultWebPackage))
             : hasMetaImpacts
             ? true
             : trimmedForValidation.length >= 120 && /^#{2,6}\s*/m.test(trimmedForValidation);
@@ -2002,6 +2039,8 @@ export const useBattleEngine = () => {
     battleMode,
     generationMode,
     reportFormat,
+    webPackageRef,
+    setResultWebPackage,
     setResultReportFormat,
     setResultWebReady,
     arenaFreeRankingEnabled,

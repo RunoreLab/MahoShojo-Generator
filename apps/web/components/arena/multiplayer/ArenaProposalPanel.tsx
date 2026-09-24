@@ -296,6 +296,7 @@ export const arenaProposalChangeSummary = (
     case 'reorderTeams': return '调整队伍顺序';
     case 'reorderTeamCombatants': return `调整队伍 ${teamKeyLabelOf(labels, change.teamKey)} 内角色顺序`;
     case 'setReportFormat': return `战报格式改为 ${change.value === 'web' ? 'Web（实验性）' : 'Markdown'}`;
+    case 'setWebPackageRef': return change.value ? `Web 包改为 ${change.value.id}@${change.value.version}` : '使用自由生成的 Web 战报';
     case 'setBattleMode': return `战斗模式改为 ${arenaBattleModeCopy[change.value]}`;
     case 'setSelectedLanguage': return `语言改为 ${arenaLanguageCopy(change.value)}`;
     case 'setScenario': return change.ref === null ? '清除主情景' : `主情景改为 ${refLabel(change.ref, change.key)}`;

@@ -123,6 +123,9 @@ importers:
       '@mahoshojo/multiplayer-core':
         specifier: workspace:*
         version: link:../../packages/multiplayer-core
+      '@mahoshojo/web-package':
+        specifier: workspace:*
+        version: link:../../packages/web-package
       dotenv:
         specifier: ^17.4.2
         version: 17.4.2
@@ -217,6 +220,9 @@ importers:
       '@mahoshojo/multiplayer-core':
         specifier: workspace:*
         version: link:../../packages/multiplayer-core
+      '@mahoshojo/web-package':
+        specifier: workspace:*
+        version: link:../../packages/web-package
       '@next/third-parties':
         specifier: 15.5.24
         version: 15.5.24(next@15.5.24(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@20.19.27)(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react@19.2.3)
@@ -382,7 +388,7 @@ importers:
         version: 30.0.1(@noble/hashes@2.3.0)
       shadcn:
         specifier: ^3.5.2
-        version: 3.6.2(@types/node@20.19.27)(hono@4.13.3)(typescript@5.9.3)
+        version: 3.6.2(@cfworker/json-schema@4.1.1)(@types/node@20.19.27)(hono@4.13.3)(typescript@5.9.3)
       tailwindcss:
         specifier: ^4
         version: 4.1.18
@@ -583,6 +589,9 @@ importers:
       '@mahoshojo/hosted-api':
         specifier: workspace:*
         version: link:../hosted-api
+      '@mahoshojo/web-package':
+        specifier: workspace:*
+        version: link:../web-package
       ai:
         specifier: ^6.0.184
         version: 6.0.184(zod@4.3.6)
@@ -657,6 +666,40 @@ importers:
       '@mahoshojo/contracts':
         specifier: workspace:*
         version: link:../contracts
+      zod:
+        specifier: ^4.1.13
+        version: 4.3.6
+    devDependencies:
+      '@types/node':
+        specifier: ^20
+        version: 20.19.27
+      '@typescript-eslint/parser':
+        specifier: ^8.50.0
+        version: 8.50.0(eslint@9.39.2(jiti@2.7.0))(typescript@5.9.3)
+      esbuild:
+        specifier: ^0.28.1
+        version: 0.28.1
+      eslint:
+        specifier: ^9
+        version: 9.39.2(jiti@2.7.0)
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.7
+        version: 4.1.7(@opentelemetry/api@1.9.1)(@types/node@20.19.27)(jsdom@30.0.1(@noble/hashes@2.3.0))(msw@2.15.0(@types/node@20.19.27)(typescript@5.9.3))(vite@8.0.16(@types/node@20.19.27)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.16.9)(tsx@4.22.4)(yaml@2.9.0))
+
+  packages/web-package:
+    dependencies:
+      '@cfworker/json-schema':
+        specifier: ^4.1.1
+        version: 4.1.1
+      '@mahoshojo/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      fflate:
+        specifier: ^0.8.3
+        version: 0.8.3
       zod:
         specifier: ^4.1.13
         version: 4.3.6
@@ -1200,6 +1243,9 @@ packages:
   '@bramus/specificity@2.4.2':
     resolution: {integrity: sha512-ctxtJ/eA+t+6q2++vj5j7FYX3nRu311q1wfYH3xjlLOsczhlhxAg2FWNUXhpGvAw3BWo1xBcvOV6/YLc2r5FJw==}
     hasBin: true
+
+  '@cfworker/json-schema@4.1.1':
+    resolution: {integrity: sha512-gAmrUZSGtKc3AiBL71iNWxDsyUC5uMaKKGdvzYsBoTW/xi42JQHl7eKV2OYzCUqvc+D2RCcf7EXY2iCyFIk6og==}
 
   '@cloudflare/kv-asset-handler@0.5.0':
     resolution: {integrity: sha512-jxQYkj8dSIzc0cD6cMMNdOc1UVjqSqu8BZdor5s8cGjW2I8BjODt/kWPVdY+u9zj3ms75Q5qaZgnxUad83+eAg==}
@@ -7476,6 +7522,8 @@ snapshots:
     dependencies:
       css-tree: 3.2.1
 
+  '@cfworker/json-schema@4.1.1': {}
+
   '@cloudflare/kv-asset-handler@0.5.0': {}
 
   '@cloudflare/unenv-preset@2.16.1(unenv@2.0.0-rc.24)(workerd@1.20260820.1)':
@@ -8154,7 +8202,7 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
 
-  '@modelcontextprotocol/sdk@1.25.1(hono@4.13.3)(zod@3.25.76)':
+  '@modelcontextprotocol/sdk@1.25.1(@cfworker/json-schema@4.1.1)(hono@4.13.3)(zod@3.25.76)':
     dependencies:
       '@hono/node-server': 1.19.17(hono@4.13.3)
       ajv: 8.17.1
@@ -8172,6 +8220,8 @@ snapshots:
       raw-body: 3.0.2
       zod: 3.25.76
       zod-to-json-schema: 3.25.2(zod@3.25.76)
+    optionalDependencies:
+      '@cfworker/json-schema': 4.1.1
     transitivePeerDependencies:
       - hono
       - supports-color
@@ -12092,7 +12142,7 @@ snapshots:
 
   setprototypeof@1.2.0: {}
 
-  shadcn@3.6.2(@types/node@20.19.27)(hono@4.13.3)(typescript@5.9.3):
+  shadcn@3.6.2(@cfworker/json-schema@4.1.1)(@types/node@20.19.27)(hono@4.13.3)(typescript@5.9.3):
     dependencies:
       '@antfu/ni': 25.0.0
       '@babel/core': 7.29.7
@@ -12100,7 +12150,7 @@ snapshots:
       '@babel/plugin-transform-typescript': 7.29.7(@babel/core@7.29.7)
       '@babel/preset-typescript': 7.29.7(@babel/core@7.29.7)
       '@dotenvx/dotenvx': 1.51.2
-      '@modelcontextprotocol/sdk': 1.25.1(hono@4.13.3)(zod@3.25.76)
+      '@modelcontextprotocol/sdk': 1.25.1(@cfworker/json-schema@4.1.1)(hono@4.13.3)(zod@3.25.76)
       browserslist: 4.28.8
       commander: 14.0.3
       cosmiconfig: 9.0.2(typescript@5.9.3)

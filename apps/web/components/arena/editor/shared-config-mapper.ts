@@ -11,6 +11,7 @@ import type {
 } from './types';
 import type { BattleStoreState, Combatant, ScenarioState } from '../types';
 import type { ArenaMaterialState } from '@/lib/arena/materials';
+import { isBuiltinWebPackageRef } from '@mahoshojo/web-package';
 
 export type ArenaEditorViewProjection = Readonly<{
   combatants: readonly ArenaEditorCombatantView[];
@@ -20,6 +21,7 @@ export type ArenaEditorViewProjection = Readonly<{
   materials: readonly ArenaEditorMaterialView[];
   battleMode: ArenaRoomSharedConfig['battleMode'];
   reportFormat: ArenaRoomSharedConfig['reportFormat'];
+  webPackageRef?: ArenaRoomSharedConfig['webPackageRef'];
   storyLength: ArenaRoomSharedConfig['storyLength'];
   customStoryLength: string;
   selectedLanguage: string;
@@ -112,6 +114,9 @@ export const mapSharedConfigToArenaEditorView = (
     materials: freezeArray(config.materials.map(sharedScenarioView)),
     battleMode: config.battleMode,
     reportFormat: config.reportFormat,
+    webPackageRef: config.webPackageRef && isBuiltinWebPackageRef(config.webPackageRef)
+      ? config.webPackageRef
+      : undefined,
     storyLength: config.storyLength,
     customStoryLength: config.customStoryLength ?? '',
     selectedLanguage: config.selectedLanguage,
@@ -255,6 +260,9 @@ export const mapBattleStoreToArenaEditorView = (
     materials: freezeArray(state.materials.map(localMaterialView)),
     battleMode: state.battleMode,
     reportFormat: state.reportFormat ?? 'markdown',
+    webPackageRef: state.reportFormat === 'web' && state.webPackageRef && isBuiltinWebPackageRef(state.webPackageRef)
+      ? state.webPackageRef
+      : undefined,
     storyLength: state.storyLength,
     customStoryLength: state.customStoryLength,
     selectedLanguage: state.selectedLanguage,

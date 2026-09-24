@@ -1,6 +1,7 @@
 import { z } from './zod';
 
 import { ArenaContractError } from './errors';
+import { WebPackageRefSchema } from './web-package';
 import {
   MAX_ARENA_REFERENCE_ITEMS,
   MAX_COMBATANTS,
@@ -122,6 +123,7 @@ export const ArenaRoomSharedConfigSchema = z
   .object({
     battleMode: BattleModeSchema,
     reportFormat: ArenaReportFormatSchema.default('markdown'),
+    webPackageRef: WebPackageRefSchema.optional(),
     combatants: z.array(CombatantEntrySchema).max(MAX_COMBATANTS),
     teams: z.array(TeamAssignmentSchema).max(MAX_COMBATANTS),
     scenario: ScenarioEntrySchema,
@@ -135,6 +137,9 @@ export const ArenaRoomSharedConfigSchema = z
   })
   .strict()
   .superRefine((config, context) => {
+    if (config.webPackageRef && config.reportFormat !== 'web') {
+      context.addIssue({ code: 'custom', path: ['webPackageRef'], message: 'Web Package requires reportFormat=web' });
+    }
     const validateUniqueKeys = (keys: readonly string[], path: string): void => {
       if (new Set(keys).size !== keys.length) {
         context.addIssue({ code: 'custom', path: [path], message: `${path} keys must be unique` });

@@ -8,6 +8,7 @@ import {
   ARENA_PERSISTENCE_UNAVAILABLE_WARNING,
   type ArenaGenerationPersistenceWarning,
 } from '@mahoshojo/hosted-api/arena-generation/service';
+import { isWebArenaOutputContract } from './output-contract';
 
 export type ArenaTerminalClaimInput = Omit<
   ArenaGenerationFinalizationInput,
@@ -102,7 +103,7 @@ export const createArenaGenerationFinalizer = (
           markdown: input.markdown,
           contentType: input.metadata.outputContract === 'structured-report'
             ? 'application/json; charset=utf-8'
-            : input.metadata.outputContract === 'web-document'
+            : isWebArenaOutputContract(input.metadata.outputContract)
               ? 'text/plain; charset=utf-8'
               : 'text/markdown; charset=utf-8',
           signal: input.signal,

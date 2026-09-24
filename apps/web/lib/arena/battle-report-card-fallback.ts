@@ -213,11 +213,12 @@ export async function hydrateBattleReportCardFromGenerationRecord(input: {
 
   // Web 的格式来自持久化的权威快照；不检查 DOM 或从 HTML 猜测胜者。
   if (input.renderSnapshot?.reportFormat === 'web') {
-    const content = stripAllStreamMetaComments(typeof input.outputPreview === 'string' ? input.outputPreview : '');
+    const sourceContent = typeof input.outputPreview === 'string' ? input.outputPreview : '';
+    const content = input.renderSnapshot.webPackage ? sourceContent : stripAllStreamMetaComments(sourceContent);
     const report: NewsReport = {
       reportFormat: 'web',
       webReady: input.authoritativeWebContent === true,
-      webHtml: content,
+      ...(input.renderSnapshot.webPackage ? { webPackage: input.renderSnapshot.webPackage } : { webHtml: content }),
       headline: typeof input.headline === 'string' && input.headline.trim() ? input.headline : '战报',
       ...(scenario ? { scenario } : {}),
       reporterInfo: { name: '系统', publication: endpoint || 'A.R.E.N.A.' },

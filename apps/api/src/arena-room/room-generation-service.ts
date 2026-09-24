@@ -224,6 +224,7 @@ const mapMaterializationError = (error: unknown): never => {
   if (error instanceof ArenaRoomGenerationMaterializationError) {
     switch (error.code) {
       case 'ARENA_ROOM_REFERENCE_STALE': return fail('ROOM_REFERENCE_STALE');
+      case 'ARENA_WEB_PACKAGE_REF_NOT_SERVER_SHAREABLE': return fail('ROOM_REFERENCE_DENIED');
       case 'ARENA_ROOM_HOST_LOCAL_PAYLOAD_MISSING':
         return fail('ROOM_HOST_LOCAL_PAYLOAD_MISSING', undefined, error.target);
       case 'ARENA_ROOM_HOST_LOCAL_PAYLOAD_INVALID':

@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 
 import { describe, expect, it, vi } from 'vitest';
 
+import { BUILTIN_VISUAL_NOVEL_PACKAGE_REF } from '@mahoshojo/web-package';
 import {
   createArenaRoomGenerationMaterializer,
   type ArenaRoomGenerationCanonicalContent,
@@ -143,7 +144,8 @@ const createHarness = () => {
 describe('Arena Room authoritative generation materializer', () => {
   it.each(['markdown', 'web'] as const)('仅从 frozen Shared Config 重建角色/引导/队伍/情景/素材/历史语义 (%s)', async (reportFormat) => {
     const harness = createHarness();
-    const config = { ...sharedConfig(), reportFormat };
+    const webPackageRef = BUILTIN_VISUAL_NOVEL_PACKAGE_REF;
+    const config = { ...sharedConfig(), reportFormat, ...(reportFormat === 'web' ? { webPackageRef } : {}) };
     const payload = await harness.materializer.materialize({
       sharedConfig: config,
       hostAccountUserId: 101,
@@ -170,6 +172,7 @@ describe('Arena Room authoritative generation materializer', () => {
     expect(payload).toMatchObject({
       mode: 'scenario',
       reportFormat,
+      ...(reportFormat === 'web' ? { webPackageRef } : {}),
       userGuidance: '接受后的全局引导',
       language: 'ja-JP',
       storyLength: 'long',
@@ -365,5 +368,21 @@ describe('Arena Room authoritative generation materializer', () => {
       data: { name: '新角色' },
       sourceDataCardUpdatedAt: 'latest-version',
     });
+  });
+
+  it('拒绝非 builtin 的 server-shareable Web Package ref', async () => {
+    const harness = createHarness();
+    const config = {
+      ...sharedConfig(),
+      reportFormat: 'web' as const,
+      webPackageRef: { id: 'local.not-builtin', version: '1.0.0', digest: `sha256:${'a'.repeat(64)}` },
+    };
+    await expect(harness.materializer.materialize({
+      sharedConfig: config,
+      hostAccountUserId: 101,
+      hostLocalPayloads: [],
+      hostRuntime: {},
+    })).rejects.toMatchObject({ code: 'ARENA_WEB_PACKAGE_REF_NOT_SERVER_SHAREABLE' });
+    expect(harness.content.resolveOnline).not.toHaveBeenCalled();
   });
 });

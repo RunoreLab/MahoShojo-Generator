@@ -36,6 +36,9 @@ packages/*/build/
 packages/*/out/
 packages/*/.open-next/
 
+# generated service worker bundle
+apps/web/public/__web-package__/
+
 # misc
 .DS_Store
 *.pem

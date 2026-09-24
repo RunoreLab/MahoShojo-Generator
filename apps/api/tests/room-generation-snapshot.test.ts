@@ -12,6 +12,7 @@ describe('Arena Room frozen generation snapshot', () => {
   it('旧 checkpoint 不猜测 host，新快照拒绝不属于参与者的 host', () => {
     const snapshot = createArenaRoomGenerationSnapshot(createArenaRoomState(), 'legacy-host');
     const { snapshotDigest, hostAccountUserId, ...legacy } = snapshot;
+    expect(snapshotDigest).toMatch(/^sha256:/u);
     expect(hostAccountUserId).toBe(101);
     const restored = createArenaRoomGenerationSnapshotFromFrozen(legacy);
     expect(restored.hostAccountUserId).toBeUndefined();
@@ -54,6 +55,22 @@ describe('Arena Room frozen generation snapshot', () => {
     const { snapshotDigest, ...frozen } = web;
     expect(snapshotDigest).toMatch(/^sha256:/u);
     expect(createArenaRoomGenerationSnapshotFromFrozen(frozen)).toEqual(web);
+  });
+
+  it('Package revision participates in snapshot identity and remains pinned after room edits', () => {
+    const state = createArenaRoomState();
+    state.snapshot.sharedConfig.reportFormat = 'web';
+    const generatedWeb = createArenaRoomGenerationSnapshot(state, 'package-request');
+    const ref = { id: 'mahoshojo.visual-novel-lite', version: '1.0.0', digest: `sha256:${'a'.repeat(64)}` };
+    state.snapshot.sharedConfig.webPackageRef = ref;
+    const packageWeb = createArenaRoomGenerationSnapshot(state, 'package-request');
+    expect(packageWeb.snapshotDigest).not.toBe(generatedWeb.snapshotDigest);
+    expect(packageWeb.sharedConfig.webPackageRef).toEqual(ref);
+    state.snapshot.sharedConfig.webPackageRef = { ...ref, digest: `sha256:${'b'.repeat(64)}` };
+    expect(createArenaRoomGenerationSnapshot(state, 'package-request').snapshotDigest).not.toBe(packageWeb.snapshotDigest);
+    expect(packageWeb.sharedConfig.webPackageRef).toEqual(ref);
+    const { snapshotDigest, ...frozen } = packageWeb;
+    expect(createArenaRoomGenerationSnapshotFromFrozen(frozen).snapshotDigest).toBe(snapshotDigest);
   });
 
   it('冻结当前 revision/config/active account participants 与 collaborative provenance', () => {

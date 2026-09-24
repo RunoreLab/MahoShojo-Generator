@@ -31,6 +31,7 @@
     "@mahoshojo/hosted-api": "workspace:*",
     "@mahoshojo/hosted-runtime": "workspace:*",
     "@mahoshojo/multiplayer-core": "workspace:*",
+    "@mahoshojo/web-package": "workspace:*",
     "dotenv": "^17.4.2",
     "hono": "^4.13.3",
     "redis": "^6.2.1",

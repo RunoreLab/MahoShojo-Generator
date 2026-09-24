@@ -674,6 +674,34 @@ describe('Arena Room Proposal application service', () => {
     ]);
   });
 
+  it('submit 拒绝非 builtin 的 setWebPackageRef，不落库', async () => {
+    const harness = await createHarness();
+    const localOnly = { id: 'local.not-builtin', version: '1.0.0', digest: `sha256:${'b'.repeat(64)}` };
+    const before = harness.store.saveCount;
+    await expect(harness.service.submit({
+      roomId: 'room-1',
+      accountUserId: 202,
+      request: {
+        proposalId: 'proposal-local-package',
+        expectedRoomEpoch: 'epoch-1',
+        baseRevision: 0,
+        changes: [{
+          changeId: 'web-package-1',
+          type: 'setReportFormat',
+          value: 'web' as const,
+          expectedBase: { kind: 'value' as const, value: 'markdown' as const },
+        }, {
+          changeId: 'web-package-2',
+          type: 'setWebPackageRef',
+          value: localOnly,
+          expectedBase: { kind: 'value' as const, value: null },
+        }],
+      },
+    })).rejects.toMatchObject({ code: 'ROOM_REFERENCE_DENIED' });
+    expect(harness.store.saveCount).toBe(before);
+    expect(harness.store.state?.snapshot.proposals).toEqual([]);
+  });
+
   it.each([
     ['ARENA_DATA_CARD_REF_VERSION_MISMATCH', 'ROOM_REFERENCE_STALE'],
     ['ARENA_DATA_CARD_REF_NOT_READABLE', 'ROOM_REFERENCE_DENIED'],

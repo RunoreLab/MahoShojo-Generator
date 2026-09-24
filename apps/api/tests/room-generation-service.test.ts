@@ -313,15 +313,19 @@ describe('Arena Room generation coordinator', () => {
     expect(JSON.stringify(history)).not.toContain('provider-secret-canary');
   });
 
-  it('active member 可读取当前 epoch ledger 中的历史终态，不 resume 或改写 current generation', async () => {
+  it.each(['markdown', 'package'])('active member 可读取当前 epoch ledger 中的历史终态，不 resume 或改写 current generation (%s)', async (format) => {
     const harness = await createHarness();
+    const webPackage = {
+      packageRef: { id: 'mahoshojo.visual-novel-lite', version: '1.0.0', digest: `sha256:${'a'.repeat(64)}` },
+      targetPath: 'data/report.json', targetMediaType: 'application/json' as const, generatedDigest: `sha256:${'b'.repeat(64)}`,
+    };
     await prepareHistoricalGeneration(harness);
     await harness.memberships.join({
       roomId: 'room-1',
       accountUserId: 202,
       displayName: 'Member',
     });
-    vi.mocked(harness.generation.readOwnedProjection).mockResolvedValueOnce({
+    vi.mocked(harness.generation.readOwnedProjection).mockResolvedValue({
       kind: 'found',
       projection: {
         generationId: 'generation-1',
@@ -336,7 +340,8 @@ describe('Arena Room generation coordinator', () => {
         errorCode: null,
         roomSafeResult: {
           version: 1,
-          format: 'stream-markdown',
+          format: format === 'package' ? 'stream-web' : 'stream-markdown',
+          ...(format === 'package' ? { webPackage } : {}),
           mode: 'classic',
           report: { headline: '历史标题' },
         },
@@ -370,6 +375,13 @@ describe('Arena Room generation coordinator', () => {
       generationId: 'generation-1',
     });
     expect(harness.generation.resumeOwnedSubscription).not.toHaveBeenCalled();
+    if (format === 'package') {
+      expect(detail.result?.webPackage).toEqual(webPackage);
+      const hostDetail = await harness.service.readHistory({
+        roomId: 'room-1', generationId: 'generation-1', accountUserId: 101,
+      });
+      expect(hostDetail.result?.webPackage).toEqual(detail.result?.webPackage);
+    }
     expect(harness.store.state?.snapshot.activeGeneration).toMatchObject({
       generationId: 'generation-2',
       state: 'starting',
