@@ -237,6 +237,14 @@ const introducedPresetRefs = (changes: readonly ArenaProposalChange[]): readonly
   }))
 );
 
+/** Proposals carrying a non-shareable Web Package ref must not even be stored. */
+const assertSubmittedWebPackageRefsShareable = (changes: readonly ArenaProposalChange[]): void => {
+  for (const change of changes) {
+    if (change.type !== 'setWebPackageRef' || change.value === null) continue;
+    if (!isServerShareableWebPackageRef(change.value)) fail('ROOM_REFERENCE_DENIED');
+  }
+};
+
 const mapPresetReferenceError = (error: unknown): never => {
   if (!(error instanceof ArenaRoomPresetRefVerifierError)) throw error;
   switch (error.code) {
@@ -326,6 +334,7 @@ export const createArenaRoomProposalService = (
       if (membership.state.terminalProposalIds.includes(request.data.proposalId)) {
         return fail('ROOM_PROPOSAL_CONFLICT');
       }
+      assertSubmittedWebPackageRefsShareable(request.data.changes);
 
       await verifyRefs(options.references, {
         refs: introducedRefs(request.data.changes),

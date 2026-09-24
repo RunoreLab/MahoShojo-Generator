@@ -59,7 +59,7 @@ describe('Web package service worker registration lifecycle', () => {
     expect(installing.removeEventListener).toHaveBeenCalledWith('statechange', listener);
   });
 
-  it('treats a redundant installing worker as a finished wait', async () => {
+  it('treats a redundant installing worker as finished when an active worker is already activated', async () => {
     const installing = createWorker('installing');
     const active = createWorker('activated');
     installRegistration({ active, installing: installing as unknown as ServiceWorker, waiting: null });
@@ -70,6 +70,26 @@ describe('Web package service worker registration lifecycle', () => {
     listener!();
     await expect(wait).resolves.toBeUndefined();
     expect(installing.removeEventListener).toHaveBeenCalledWith('statechange', listener);
+  });
+
+  it('fails closed when the installing worker goes redundant without an activated worker', async () => {
+    const installing = createWorker('installing');
+    installRegistration({
+      active: null,
+      installing: installing as unknown as ServiceWorker,
+      waiting: null,
+    });
+    const wait = ensureWebPackageServiceWorker();
+    await vi.waitFor(() => expect(installing.addEventListener).toHaveBeenCalledWith('statechange', expect.any(Function)));
+    const listener = findStateListener(installing);
+    installing.state = 'redundant';
+    listener!();
+    await expect(wait).rejects.toThrow('未能进入 activated');
+  });
+
+  it('fails closed when no worker is ever present on the registration', async () => {
+    installRegistration({ active: null, installing: null, waiting: null });
+    await expect(ensureWebPackageServiceWorker()).rejects.toThrow('未能进入 activated');
   });
 
   it('resolves immediately when registration already has an activated worker', async () => {

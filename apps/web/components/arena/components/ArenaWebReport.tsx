@@ -10,13 +10,13 @@ import { resolveWebDisplayTitle } from '@/lib/arena/battle-report-display-title'
 import { normalizeArenaWebOutput } from '@/lib/arena/web-output';
 import { downloadBlob } from '@/lib/client/blobUrl';
 import { buildSafeFileName } from '@/lib/client/fileName';
-import { renderWebPackageLocation } from '@/lib/web-package/mount';
 import { importLocalWebPackageArchive } from '@/lib/web-package/cache';
 import styles from './ArenaWebReport.module.css';
 import type { WebPackageArtifact } from '@mahoshojo/contracts/web-package';
 import {
   formatWebPackageFallback,
   prepareWebPackageReplay,
+  renderWebPackage,
   type WebPackageReplayStatus,
 } from '@mahoshojo/web-package';
 
@@ -352,7 +352,11 @@ export function ArenaWebReport({ content, ready, roomId, aiModel, aiUsage, displ
     }).then(async (outcome) => {
       if (!active) return;
       if ((outcome.status === 'exact' || outcome.status === 'compatibility') && outcome.overlay) {
-        const location = await renderWebPackageLocation(outcome.overlay);
+        // Transitional: SW URL mount is fail-closed pending a separate sandbox-origin
+        // or materialization architecture PR (opaque iframes bypass Service Workers).
+        // Builtin VN Lite uses the first-party srcdoc adapter; other revisions throw
+        // into the safe-text fallback below.
+        const location = await renderWebPackage(outcome.overlay);
         if (!active) return;
         setPackageResolution({
           artifact: webPackage,

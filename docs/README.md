@@ -10,7 +10,7 @@ Arena 多人个人历史补全：[参与战报个人历史设计](./specs/2026-0
 
 Arena Web 战报当前规格：[Arena Web 战报生成与沙箱渲染规格](./specs/2026-09-17_080700_Arena%20Web战报生成与沙箱渲染规格.md)。单人（含 `/battle`）支持流式/非流式 HTML，多人沿用服务器权威流式生成；浏览器本地确认后才执行完成的沙箱文档，默认格式仍为 Markdown。
 
-Web 包统一架构与后续开发当前权威入口：[Web Package 统一架构与后续开发规格](./specs/2026-09-22_165900_WebPackage统一架构与后续开发规格.md)（`SPEC-web-package-unified-v1`）。当前实现覆盖 builtin 预设 + 本地 ZIP 导入、Prompt Projection、通用 resource-space / Service Worker、exact 与显式兼容重放、单人本地包与多人 builtin 边界；`reportFormat='web'` 下未选包仍是自由 Web。线上库仅冻结演进边界，Host Bridge 未实现。与下列材料冲突时以统一规格为准： [Web Experience Package 决策](./decisions/2026-09-22_142300_WebExperiencePackage上位抽象与单文件Overlay决策.md)、[V1 架构规格](./specs/2026-09-22_142300_WebExperiencePackageV1架构规格.md)（二者已标注 superseded / historical）。
+Web 包统一架构与后续开发当前权威入口：[Web Package 统一架构与后续开发规格](./specs/2026-09-22_165900_WebPackage统一架构与后续开发规格.md)（`SPEC-web-package-unified-v1`）。当前实现覆盖 builtin 预设 + 本地 ZIP 导入、Prompt Projection、exact 与显式兼容重放、单人本地包与多人 builtin 边界；`reportFormat='web'` 下未选包仍是自由 Web。过渡期 builtin 走 `srcdoc` 过渡适配器，非 builtin revision fail-closed 到安全文本；Service Worker URL mount 已停用（opaque sandboxed iframe 实证绕过 SW），独立 sandbox origin / materialization 另见规格 §11/§12 迁移差距。线上库仅冻结演进边界，Host Bridge 未实现。与下列材料冲突时以统一规格为准： [Web Experience Package 决策](./decisions/2026-09-22_142300_WebExperiencePackage上位抽象与单文件Overlay决策.md)、[V1 架构规格](./specs/2026-09-22_142300_WebExperiencePackageV1架构规格.md)（二者已标注 superseded / historical）。
 
 架构演进背景保留在 [Web 数据卡 Runtime 与媒体资产原生支持设计建议](./reports/2026-09-17_121500_Web数据卡Runtime与媒体资产原生支持设计建议.md)。
 

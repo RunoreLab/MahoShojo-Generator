@@ -1,0 +1,245 @@
+{
+  "description": "Curated JSON Schema Draft 2020-12 official-suite subset as host contract (assertJsonSchema202012). Structure mirrors json-schema-org/JSON-Schema-Test-Suite case files.",
+  "suite": "https://github.com/json-schema-org/JSON-Schema-Test-Suite",
+  "dialect": "https://json-schema.org/draft/2020-12/schema",
+  "groups": [
+    {
+      "description": "type",
+      "schema": { "type": "string" },
+      "tests": [
+        { "description": "string", "data": "foo", "valid": true },
+        { "description": "integer", "data": 1, "valid": false },
+        { "description": "null", "data": null, "valid": false }
+      ]
+    },
+    {
+      "description": "integer type accepts floats with zero fractional part",
+      "schema": { "type": "integer" },
+      "tests": [
+        { "description": "1.0 is integer", "data": 1.0, "valid": true },
+        { "description": "1.1 is not integer", "data": 1.1, "valid": false }
+      ]
+    },
+    {
+      "description": "enum",
+      "schema": { "enum": ["foo", "bar", 42] },
+      "tests": [
+        { "description": "one of enum", "data": "bar", "valid": true },
+        { "description": "not in enum", "data": "baz", "valid": false }
+      ]
+    },
+    {
+      "description": "const",
+      "schema": { "const": 42 },
+      "tests": [
+        { "description": "equal", "data": 42, "valid": true },
+        { "description": "not equal", "data": 43, "valid": false }
+      ]
+    },
+    {
+      "description": "required",
+      "schema": { "required": ["foo", "bar"] },
+      "tests": [
+        { "description": "present", "data": { "foo": 1, "bar": 2 }, "valid": true },
+        { "description": "missing", "data": { "foo": 1 }, "valid": false }
+      ]
+    },
+    {
+      "description": "additionalProperties false",
+      "schema": {
+        "properties": { "foo": { "type": "integer" } },
+        "additionalProperties": false
+      },
+      "tests": [
+        { "description": "allowed", "data": { "foo": 1 }, "valid": true },
+        { "description": "not allowed", "data": { "bar": 1 }, "valid": false }
+      ]
+    },
+    {
+      "description": "patternProperties",
+      "schema": { "patternProperties": { "^f": { "type": "string" } } },
+      "tests": [
+        { "description": "matching key", "data": { "foo": "bar" }, "valid": true },
+        { "description": "matching key wrong type", "data": { "foo": 1 }, "valid": false }
+      ]
+    },
+    {
+      "description": "array items",
+      "schema": { "items": { "type": "integer" } },
+      "tests": [
+        { "description": "homogeneous", "data": [1, 2, 3], "valid": true },
+        { "description": "heterogeneous", "data": [1, "x"], "valid": false }
+      ]
+    },
+    {
+      "description": "prefixItems",
+      "schema": {
+        "prefixItems": [{ "type": "string" }, { "type": "number" }],
+        "items": { "type": "boolean" }
+      },
+      "tests": [
+        { "description": "valid tuple with tail", "data": ["a", 1, true], "valid": true },
+        { "description": "wrong tail", "data": ["a", 1, "no"], "valid": false },
+        { "description": "wrong prefix", "data": [1, 1], "valid": false }
+      ]
+    },
+    {
+      "description": "contains",
+      "schema": { "contains": { "type": "integer", "minimum": 5 } },
+      "tests": [
+        { "description": "has match", "data": [1, 5, 9], "valid": true },
+        { "description": "no match", "data": [1, 2, 3], "valid": false }
+      ]
+    },
+    {
+      "description": "minContains / maxContains",
+      "schema": {
+        "contains": { "type": "integer" },
+        "minContains": 2,
+        "maxContains": 3
+      },
+      "tests": [
+        { "description": "two matches", "data": [1, 2], "valid": true },
+        { "description": "one match", "data": [1], "valid": false },
+        { "description": "four matches", "data": [1, 2, 3, 4], "valid": false }
+      ]
+    },
+    {
+      "description": "uniqueItems",
+      "schema": { "uniqueItems": true },
+      "tests": [
+        { "description": "unique", "data": [1, 2, 3], "valid": true },
+        { "description": "duplicate", "data": [1, 1], "valid": false }
+      ]
+    },
+    {
+      "description": "allOf",
+      "schema": { "allOf": [{ "type": "string" }, { "minLength": 3 }] },
+      "tests": [
+        { "description": "both hold", "data": "foo", "valid": true },
+        { "description": "second fails", "data": "ab", "valid": false }
+      ]
+    },
+    {
+      "description": "anyOf",
+      "schema": { "anyOf": [{ "type": "string" }, { "type": "number" }] },
+      "tests": [
+        { "description": "first", "data": "x", "valid": true },
+        { "description": "second", "data": 1, "valid": true },
+        { "description": "neither", "data": true, "valid": false }
+      ]
+    },
+    {
+      "description": "oneOf",
+      "schema": { "oneOf": [{ "type": "number", "multipleOf": 5 }, { "type": "number", "multipleOf": 3 }] },
+      "tests": [
+        { "description": "only first", "data": 10, "valid": true },
+        { "description": "only second", "data": 9, "valid": true },
+        { "description": "both", "data": 15, "valid": false },
+        { "description": "neither", "data": 7, "valid": false }
+      ]
+    },
+    {
+      "description": "not",
+      "schema": { "not": { "type": "string" } },
+      "tests": [
+        { "description": "number", "data": 1, "valid": true },
+        { "description": "string", "data": "x", "valid": false }
+      ]
+    },
+    {
+      "description": "if/then/else",
+      "schema": {
+        "if": { "const": 0 },
+        "then": { "minimum": 1 },
+        "else": { "maximum": 10 }
+      },
+      "tests": [
+        { "description": "then branch", "data": 0, "valid": false },
+        { "description": "else branch ok", "data": 5, "valid": true },
+        { "description": "else branch fail", "data": 11, "valid": false }
+      ]
+    },
+    {
+      "description": "boolean if is a schema instance",
+      "schema": { "type": "object", "if": true, "properties": { "a": { "type": "string" } } },
+      "tests": [
+        { "description": "valid object", "data": { "a": "x" }, "valid": true },
+        { "description": "invalid property", "data": { "a": 1 }, "valid": false }
+      ]
+    },
+    {
+      "description": "dependentRequired",
+      "schema": { "dependentRequired": { "bar": ["foo"] } },
+      "tests": [
+        { "description": "dependency met", "data": { "foo": 1, "bar": 2 }, "valid": true },
+        { "description": "dependency missing", "data": { "bar": 2 }, "valid": false },
+        { "description": "trigger absent", "data": { "foo": 1 }, "valid": true }
+      ]
+    },
+    {
+      "description": "dependentSchemas",
+      "schema": {
+        "dependentSchemas": { "bar": { "required": ["foo"] } }
+      },
+      "tests": [
+        { "description": "dependency met", "data": { "foo": 1, "bar": 2 }, "valid": true },
+        { "description": "dependency missing", "data": { "bar": 2 }, "valid": false }
+      ]
+    },
+    {
+      "description": "propertyNames",
+      "schema": { "propertyNames": { "pattern": "^a" } },
+      "tests": [
+        { "description": "all match", "data": { "abc": 1 }, "valid": true },
+        { "description": "one mismatch", "data": { "abc": 1, "b": 2 }, "valid": false }
+      ]
+    },
+    {
+      "description": "unevaluatedProperties false after properties",
+      "schema": {
+        "properties": { "foo": { "type": "string" } },
+        "allOf": [{ "patternProperties": { "^g": { "type": "number" } } }],
+        "unevaluatedProperties": false
+      },
+      "tests": [
+        { "description": "covered by properties", "data": { "foo": "x" }, "valid": true },
+        { "description": "covered by patternProperties", "data": { "gar": 1 }, "valid": true },
+        { "description": "uncovered", "data": { "bar": 1 }, "valid": false }
+      ]
+    },
+    {
+      "description": "unevaluatedItems after items",
+      "schema": {
+        "prefixItems": [{ "type": "string" }],
+        "unevaluatedItems": false
+      },
+      "tests": [
+        { "description": "prefix only", "data": ["a"], "valid": true },
+        { "description": "extra item", "data": ["a", 1], "valid": false }
+      ]
+    },
+    {
+      "description": "$ref with siblings (2020-12)",
+      "schema": {
+        "$ref": "#/$defs/positive",
+        "maximum": 10,
+        "$defs": { "positive": { "type": "number", "minimum": 1 } }
+      },
+      "tests": [
+        { "description": "in range", "data": 5, "valid": true },
+        { "description": "below ref minimum", "data": 0, "valid": false },
+        { "description": "above local maximum", "data": 11, "valid": false }
+      ]
+    },
+    {
+      "description": "local $ref only host contract rejects external refs",
+      "schema": {
+        "$ref": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "tests": [
+        { "description": "external ref must fail closed before interpretation", "data": {}, "valid": null }
+      ]
+    }
+  ]
+}

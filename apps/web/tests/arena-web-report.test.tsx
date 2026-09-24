@@ -10,7 +10,6 @@ import { BattleResultPresentation } from '@/components/arena/components/BattleRe
 import { BaseModal } from '@/components/shared/BaseModal';
 import {
   BUILTIN_VISUAL_NOVEL_PACKAGE_REF,
-  WEB_PACKAGE_INSTANCE_PREFIX,
   clearLocalWebPackageSessionStaging,
   createWebPackageOverlay,
   resolveWebPackage,
@@ -145,15 +144,16 @@ describe('Web 战报的本地执行许可', () => {
     await click('继续使用 Web');
     const frame = container.querySelector('iframe')!;
     expect(frame.getAttribute('sandbox')).toBe('allow-scripts');
-    expect(frame.getAttribute('src')).toContain(WEB_PACKAGE_INSTANCE_PREFIX);
-    expect(frame.getAttribute('srcdoc') ?? '').toBe('');
+    // Transitional interim: builtin VN Lite renders via the first-party srcdoc adapter.
+    expect(frame.getAttribute('src') ?? '').toBe('');
+    expect(frame.getAttribute('srcdoc') ?? '').toContain('<');
     await click('⬇ 下载生成目标');
     expect(downloadBlob).toHaveBeenCalledWith(expect.any(Blob), expect.stringMatching(/\.json$/));
     const [targetBlob, targetName] = vi.mocked(downloadBlob).mock.calls[0]!;
     expect(targetName).toBe('story.json');
     expect(await targetBlob.text()).toBe(content);
     const htmlButton = [...document.querySelectorAll('button')].find((item) => item.textContent === '🌐 下载 HTML')!;
-    expect(htmlButton.disabled).toBe(true);
+    expect(htmlButton.disabled).toBe(false);
     await act(async () => root.render(render(true, { ...artifact, generatedDigest: `sha256:${'0'.repeat(64)}` })));
     await vi.waitFor(async () => {
       await act(async () => {});
@@ -222,7 +222,9 @@ describe('Web 战报的本地执行许可', () => {
       expect(container.textContent).toContain('当前使用的是不同版本的 Web 包，效果可能与生成时不一致。');
     });
     expect(container.querySelector('iframe')).toBeTruthy();
-    expect(container.querySelector('iframe')!.getAttribute('src')).toContain(WEB_PACKAGE_INSTANCE_PREFIX);
+    // 历史 revision 候选回落到 builtin 后经 srcdoc 过渡适配器渲染，无需 SW URL mount。
+    expect(container.querySelector('iframe')!.getAttribute('src') ?? '').toBe('');
+    expect(container.querySelector('iframe')!.getAttribute('srcdoc') ?? '').toContain('<');
     expect(container.textContent).toContain('下载生成目标');
     expect(container.textContent).not.toContain('仍尝试使用此 Web 包');
     expect(artifact.packageRef).toEqual(historical.ref);

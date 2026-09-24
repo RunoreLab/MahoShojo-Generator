@@ -270,13 +270,48 @@ describe('canonical ZIP artifact and generic JSON Schema validation', () => {
       $ref: '#/$defs/scene',
       $defs: { scene: { type: 'object', required: ['text'], properties: { text: { type: 'string' } }, additionalProperties: false } },
     }, { text: 'ok' });
-    for (const keyword of ['unevaluatedProperties', 'dependentSchemas', 'propertyNames', '$dynamicRef'] as const) {
+    // Upstream implements unevaluated*/propertyNames/dependentSchemas; only dynamic scope keywords stay fail-closed.
+    for (const keyword of ['$dynamicRef', '$dynamicAnchor'] as const) {
       expect(() => assertJsonSchema202012({
         $schema: 'https://json-schema.org/draft/2020-12/schema',
         type: 'object',
-        [keyword]: keyword === 'propertyNames' ? { type: 'string' } : false,
+        [keyword]: '#/x',
       }, {}), keyword).toThrow('未实现的标准关键字');
     }
+    // Implemented 2020-12 applicators must validate, not throw as unsupported.
+    expect(() => assertJsonSchema202012({
+      $schema: 'https://json-schema.org/draft/2020-12/schema',
+      type: 'object',
+      properties: { a: { type: 'string' } },
+      unevaluatedProperties: false,
+    }, { a: 'x' })).not.toThrow();
+    expect(() => assertJsonSchema202012({
+      $schema: 'https://json-schema.org/draft/2020-12/schema',
+      type: 'object',
+      properties: { a: { type: 'string' } },
+      unevaluatedProperties: false,
+    }, { b: 1 })).toThrow('JSON Schema 校验失败');
+    expect(() => assertJsonSchema202012({
+      $schema: 'https://json-schema.org/draft/2020-12/schema',
+      type: 'object',
+      propertyNames: { pattern: '^a' },
+    }, { b: 1 })).toThrow('JSON Schema 校验失败');
+    // External $ref would escape the fail-closed host and must be rejected before interpretation.
+    expect(() => assertJsonSchema202012({
+      $schema: 'https://json-schema.org/draft/2020-12/schema',
+      $ref: 'https://evil.example/schema.json',
+    }, {})).toThrow('不支持的 JSON Schema $ref');
+    // Wrong-typed / out-of-range assertion arguments fail closed instead of being ignored.
+    expect(() => assertJsonSchema202012({
+      $schema: 'https://json-schema.org/draft/2020-12/schema',
+      type: 'number',
+      multipleOf: 0,
+    }, 1)).toThrow('multipleOf 必须是大于 0');
+    expect(() => assertJsonSchema202012({
+      $schema: 'https://json-schema.org/draft/2020-12/schema',
+      type: 'string',
+      minLength: -1,
+    }, 'x')).toThrow('minLength 必须是非负整数');
     assertJsonSchema202012({
       $schema: 'https://json-schema.org/draft/2020-12/schema',
       type: 'object',
@@ -318,12 +353,12 @@ describe('canonical ZIP artifact and generic JSON Schema validation', () => {
       $schema: 'https://json-schema.org/draft/2020-12/schema',
       type: 'string',
       minLength: 'nope',
-    }, 'value')).toThrow('minLength 必须是 number');
+    }, 'value')).toThrow('minLength 必须是非负整数');
     expect(() => assertJsonSchema202012({
       $schema: 'https://json-schema.org/draft/2020-12/schema',
       type: 'object',
       required: 'nope',
-    }, {})).toThrow('required 必须是 array');
+    }, {})).toThrow('required 必须是 string[]');
   });
 });
 

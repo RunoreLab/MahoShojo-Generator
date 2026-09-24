@@ -24,6 +24,9 @@ const WORKER_ACTIVATION_TIMEOUT_MS = 15_000;
  * Arena pages live outside `/__web-package__/`, so `ready` (scope-matched to the
  * current URL) never settles there; the iframe URL alone is enough for the SW
  * to control subsequent instance fetches once activation completes.
+ *
+ * Fail-closed: resolving without an activated worker would hand out instance
+ * URLs that silently bypass the worker (opaque sandboxed iframes already do).
  */
 const waitForWorkerActive = async (registration: ServiceWorkerRegistration): Promise<void> => {
   const waitWorker = (worker: ServiceWorker | null | undefined): Promise<void> => {
@@ -50,6 +53,9 @@ const waitForWorkerActive = async (registration: ServiceWorkerRegistration): Pro
   const pending = registration.installing ?? registration.waiting;
   if (pending) await waitWorker(pending);
   if (registration.active) await waitWorker(registration.active);
+  if (registration.active?.state !== 'activated') {
+    throw new Error('Web Package Service Worker 未能进入 activated 状态');
+  }
 };
 
 export const ensureWebPackageServiceWorker = async (): Promise<void> => {
@@ -100,8 +106,11 @@ export const releaseWebPackageInstanceLease = (instanceId: string): void => {
 };
 
 /**
- * All packages — builtin included — mount through the generic resource-space URL.
- * The Visual Novel srcdoc materializer remains a first-party fixture adapter only.
+ * Production Arena rendering no longer mounts through this URL space: opaque
+ * `sandbox="allow-scripts"` iframes bypass Service Workers entirely (verified in
+ * Chromium), so `renderWebPackageLocation` / `mountWebPackageInstance` are kept
+ * only as the forward path for a future sandbox-origin or materialization PR.
+ * Callers must treat activation failures as fail-closed, never as a usable URL.
  */
 export const renderWebPackageLocation = async (overlay: WebPackageOverlay): Promise<WebPackageRenderLocation> => {
   const url = await mountWebPackageInstance(overlay);
