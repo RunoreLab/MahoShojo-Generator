@@ -11,6 +11,14 @@ type SuiteCase = {
 
 type SuiteFile = {
   suite: string;
+  provenance: {
+    mode: 'manual-curation';
+    upstreamCommit: string;
+    upstreamCommitDate: string;
+    upstreamRoot: string;
+    sourceFiles: string[];
+    note: string;
+  };
   dialect: string;
   groups: SuiteCase[];
 };
@@ -24,6 +32,11 @@ describe('JSON Schema Draft 2020-12 official-suite subset contract', () => {
     expect(suite.dialect).toBe('https://json-schema.org/draft/2020-12/schema');
     expect(suite.groups.length).toBeGreaterThanOrEqual(20);
     expect(suite.suite).toContain('json-schema-org/JSON-Schema-Test-Suite');
+    expect(suite.provenance.mode).toBe('manual-curation');
+    expect(suite.provenance.upstreamCommit).toMatch(/^[0-9a-f]{40}$/u);
+    expect(suite.provenance.upstreamRoot).toBe('tests/draft2020-12');
+    expect(suite.provenance.sourceFiles).toContain('ref.json');
+    expect(suite.provenance.sourceFiles).toContain('unevaluatedProperties.json');
   });
 
   for (const group of suite.groups) {
