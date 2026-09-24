@@ -23,50 +23,69 @@ const UNSUPPORTED_STANDARD_KEYWORDS = new Set([
 ]);
 
 /** Structural schema positions to walk; instance-data keywords (const/enum/default) are skipped. */
-const SCHEMA_CONTAINER_KEYWORDS = new Set([
-  '$defs',
-  'definitions',
-  'allOf',
-  'anyOf',
-  'oneOf',
+const SINGLE_SCHEMA_KEYWORDS = new Set([
   'not',
   'if',
   'then',
   'else',
   'items',
-  'prefixItems',
   'contains',
   'additionalProperties',
+  'propertyNames',
+  'unevaluatedProperties',
+  'unevaluatedItems',
+]);
+
+const SCHEMA_ARRAY_KEYWORDS = new Set([
+  'allOf',
+  'anyOf',
+  'oneOf',
+  'prefixItems',
+]);
+
+const SCHEMA_MAP_KEYWORDS = new Set([
+  '$defs',
+  'definitions',
   'patternProperties',
   'properties',
   'dependentSchemas',
 ]);
 
+const visitChildSchemas = (
+  node: Record<string, unknown>,
+  visit: (_child: unknown, _path: string) => void,
+): void => {
+  for (const keyword of SINGLE_SCHEMA_KEYWORDS) {
+    if (keyword in node) visit(node[keyword], keyword);
+  }
+  for (const keyword of SCHEMA_ARRAY_KEYWORDS) {
+    const value = node[keyword];
+    if (!Array.isArray(value)) continue;
+    value.forEach((child, index) => visit(child, `${keyword}[${index}]`));
+  }
+  for (const keyword of SCHEMA_MAP_KEYWORDS) {
+    const value = node[keyword];
+    if (!isRecord(value)) continue;
+    for (const [name, child] of Object.entries(value)) {
+      visit(child, `${keyword}.${name}`);
+    }
+  }
+};
+
 const assertSupportedKeywords = (node: unknown): void => {
   if (typeof node === 'boolean') return;
-  if (Array.isArray(node)) {
-    for (const item of node) assertSupportedKeywords(item);
-    return;
-  }
   if (!isRecord(node)) return;
   for (const key of Object.keys(node)) {
     if (UNSUPPORTED_STANDARD_KEYWORDS.has(key)) {
       throw new Error(`JSON Schema 使用了宿主未实现的标准关键字：${key}`);
     }
   }
-  for (const [key, value] of Object.entries(node)) {
-    if (!SCHEMA_CONTAINER_KEYWORDS.has(key)) continue;
-    assertSupportedKeywords(value);
-  }
+  visitChildSchemas(node, (child) => assertSupportedKeywords(child));
 };
 
 /** Only same-document JSON pointers are allowed; external $ref would escape the fail-closed host. */
 const assertLocalRefsOnly = (node: unknown): void => {
   if (typeof node === 'boolean') return;
-  if (Array.isArray(node)) {
-    for (const item of node) assertLocalRefsOnly(item);
-    return;
-  }
   if (!isRecord(node)) return;
   const ref = node.$ref;
   if (ref !== undefined) {
@@ -75,10 +94,7 @@ const assertLocalRefsOnly = (node: unknown): void => {
       throw new Error(`不支持的 JSON Schema $ref：${ref}`);
     }
   }
-  for (const [key, value] of Object.entries(node)) {
-    if (!SCHEMA_CONTAINER_KEYWORDS.has(key)) continue;
-    assertLocalRefsOnly(value);
-  }
+  visitChildSchemas(node, (child) => assertLocalRefsOnly(child));
 };
 
 /**
@@ -88,16 +104,12 @@ const assertLocalRefsOnly = (node: unknown): void => {
  */
 const assertKeywordArgumentShapes = (node: unknown, path = ''): void => {
   if (typeof node === 'boolean') return;
-  if (Array.isArray(node)) {
-    for (const item of node) assertKeywordArgumentShapes(item, path);
-    return;
-  }
   if (!isRecord(node)) return;
 
   const where = path || '$';
   const nonNegativeIntKeywords = [
     'minLength', 'maxLength', 'minItems', 'maxItems',
-    'minProperties', 'maxProperties',
+    'minProperties', 'maxProperties', 'minContains', 'maxContains',
   ] as const;
   for (const keyword of nonNegativeIntKeywords) {
     if (!(keyword in node)) continue;
@@ -108,7 +120,6 @@ const assertKeywordArgumentShapes = (node: unknown, path = ''): void => {
   }
   const finiteNumberKeywords = [
     'minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum',
-    'minContains', 'maxContains',
   ] as const;
   for (const keyword of finiteNumberKeywords) {
     if (keyword in node && (typeof node[keyword] !== 'number' || !Number.isFinite(node[keyword] as number))) {
@@ -139,9 +150,25 @@ const assertKeywordArgumentShapes = (node: unknown, path = ''): void => {
   if ('enum' in node && !Array.isArray(node.enum)) {
     throw new Error(`${where} 的 enum 必须是 array`);
   }
-  for (const keyword of ['allOf', 'anyOf', 'oneOf', 'prefixItems'] as const) {
-    if (keyword in node && !Array.isArray(node[keyword])) {
-      throw new Error(`${where} 的 ${keyword} 必须是 array`);
+  for (const keyword of SCHEMA_ARRAY_KEYWORDS) {
+    if (!(keyword in node)) continue;
+    const value = node[keyword];
+    if (!Array.isArray(value) || value.some((child) => typeof child !== 'boolean' && !isRecord(child))) {
+      throw new Error(`${where} 的 ${keyword} 必须是 JSON Schema[]`);
+    }
+  }
+  for (const keyword of SINGLE_SCHEMA_KEYWORDS) {
+    if (!(keyword in node)) continue;
+    const value = node[keyword];
+    if (typeof value !== 'boolean' && !isRecord(value)) {
+      throw new Error(`${where} 的 ${keyword} 必须是 JSON Schema`);
+    }
+  }
+  for (const keyword of SCHEMA_MAP_KEYWORDS) {
+    if (!(keyword in node)) continue;
+    const value = node[keyword];
+    if (!isRecord(value) || Object.values(value).some((child) => typeof child !== 'boolean' && !isRecord(child))) {
+      throw new Error(`${where} 的 ${keyword} 必须是 JSON Schema map`);
     }
   }
   if ('type' in node) {
@@ -151,10 +178,9 @@ const assertKeywordArgumentShapes = (node: unknown, path = ''): void => {
     if (!valid) throw new Error(`${where} 的 type 必须是 string 或 string[]`);
   }
 
-  for (const [key, value] of Object.entries(node)) {
-    if (!SCHEMA_CONTAINER_KEYWORDS.has(key)) continue;
-    assertKeywordArgumentShapes(value, path ? `${path}.${key}` : key);
-  }
+  visitChildSchemas(node, (child, childPath) => {
+    assertKeywordArgumentShapes(child, path ? `${path}.${childPath}` : childPath);
+  });
 };
 
 const formatCfworkerErrors = (errors: readonly { instanceLocation?: string; keyword?: string; error?: string }[]): string => (

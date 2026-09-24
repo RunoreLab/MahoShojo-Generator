@@ -278,6 +278,33 @@ describe('canonical ZIP artifact and generic JSON Schema validation', () => {
         [keyword]: '#/x',
       }, {}), keyword).toThrow('未实现的标准关键字');
     }
+    expect(() => assertJsonSchema202012({
+      type: 'object',
+      properties: { x: { $dynamicRef: '#something' } },
+    }, { x: 1 })).toThrow('未实现的标准关键字');
+    expect(() => assertJsonSchema202012({
+      type: 'object',
+      properties: { x: { $ref: 'https://evil.example/schema.json' } },
+    }, { x: 1 })).toThrow('不支持的 JSON Schema $ref');
+    expect(() => assertJsonSchema202012({
+      $defs: { amount: { type: 'number', multipleOf: 0 } },
+    }, 1)).toThrow('multipleOf 必须是大于 0');
+    expect(() => assertJsonSchema202012({
+      type: 'object',
+      properties: { x: { type: 'string', minLength: -1 } },
+    }, { x: 'value' })).toThrow('minLength 必须是非负整数');
+    expect(() => assertJsonSchema202012({
+      type: 'object',
+      propertyNames: { $dynamicAnchor: 'name' },
+    }, {})).toThrow('未实现的标准关键字');
+    expect(() => assertJsonSchema202012({
+      type: 'object',
+      unevaluatedProperties: { minLength: -1 },
+    }, {})).toThrow('minLength 必须是非负整数');
+    expect(() => assertJsonSchema202012({
+      type: 'array',
+      unevaluatedItems: { $ref: 'https://evil.example/schema.json' },
+    }, [])).toThrow('不支持的 JSON Schema $ref');
     // Implemented 2020-12 applicators must validate, not throw as unsupported.
     expect(() => assertJsonSchema202012({
       $schema: 'https://json-schema.org/draft/2020-12/schema',
@@ -312,6 +339,11 @@ describe('canonical ZIP artifact and generic JSON Schema validation', () => {
       type: 'string',
       minLength: -1,
     }, 'x')).toThrow('minLength 必须是非负整数');
+    expect(() => assertJsonSchema202012({
+      $schema: 'https://json-schema.org/draft/2020-12/schema',
+      contains: { type: 'integer' },
+      minContains: 1.5,
+    }, [1, 2])).toThrow('minContains 必须是非负整数');
     assertJsonSchema202012({
       $schema: 'https://json-schema.org/draft/2020-12/schema',
       type: 'object',
