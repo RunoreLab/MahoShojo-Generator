@@ -1,12 +1,3 @@
-/**
- * Browser-only presentation adapters.
- *
- * Keep DOM-dependent materialization off the package root so Node/Worker consumers
- * can depend on @mahoshojo/web-package without loading browser ambient types.
- */
-export {
-  canRenderBuiltinWebPackageSrcdoc,
-  renderBuiltinWebPackageSrcdoc,
-} from './builtin-adapter';
-
-export { renderWebPackageInstance, WebPackageRenderError, type WebPackagePresentation } from './render';
+/** 通用浏览器展示入口；来源发现、内容身份与原始文件契约留在 package core。 */
+export { renderWebPackageInstance, WebPackageRenderError } from './render';
+export type { WebPackagePresentation } from './render';

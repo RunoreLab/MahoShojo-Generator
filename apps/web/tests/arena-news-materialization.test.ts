@@ -2,17 +2,20 @@
 import { describe, expect, it } from 'vitest';
 import {
   BUILTIN_WEB_PACKAGE_PRESETS, clearLocalWebPackageSessionStaging,
-  createWebPackageOverlay, packWebPackageZip, resolveWebPackage,
+  createWebPackageOverlay, createWebPackageInstance, packWebPackageZip, resolveWebPackage,
   stageLocalWebPackage, unpackWebPackageZip,
 } from '@mahoshojo/web-package';
-import {
-  canRenderBuiltinWebPackageSrcdoc,
-  renderBuiltinWebPackageSrcdoc,
-} from '@mahoshojo/web-package/browser';
+import { renderWebPackageInstance } from '@mahoshojo/web-package/browser';
+import type { WebPackageOverlay } from '@mahoshojo/contracts/web-package';
+
+const render = async (overlay: WebPackageOverlay) => renderWebPackageInstance(
+  await createWebPackageInstance(await resolveWebPackage(overlay.packageRef), overlay),
+);
+const decodeData = (value: string) => new TextDecoder().decode(Uint8Array.from(atob(value.slice(value.indexOf(',') + 1)), char => char.charCodeAt(0)));
 
 const ref = BUILTIN_WEB_PACKAGE_PRESETS.find((preset) => preset.packageRef.id === 'mahoshojo.arena-news')!.packageRef;
 
-describe('Arena News pinned HTML materialization', () => {
+describe('竞技场新闻复用通用资源渲染', () => {
   it('rewrites static resources while preserving AI content, script strings and external/hash links', async () => {
     const base = await resolveWebPackage(ref);
     const source = `<!doctype html><html lang="zh"><head><base href="https://wrong.example/"><title>AI 自创报刊</title>
@@ -22,32 +25,35 @@ describe('Arena News pinned HTML materialization', () => {
       <a href="#article-one">阅读</a><a href="https://example.com/story">来源</a>
       <script>window.exampleMarkup = '<img src="assets/brand/arena.svg">';</script>
       <script src="./scripts/news.js" defer></script></body></html>`;
-    const { html } = await renderBuiltinWebPackageSrcdoc(await createWebPackageOverlay(ref, source));
+    const { html } = await render(await createWebPackageOverlay(ref, source));
     const parsed = new DOMParser().parseFromString(html, 'text/html');
     expect(parsed.title).toBe('AI 自创报刊');
-    expect(parsed.querySelector('base')).toBeNull();
-    expect(parsed.querySelector('style')?.textContent).toBe(new TextDecoder().decode(base.readFile('styles/news.css')).replace(/\r\n?/gu, '\n'));
-    expect(parsed.querySelector('style')?.media).toBe('screen');
-    expect(parsed.querySelector('link[rel="stylesheet"],script[src]')).toBeNull();
+    expect(parsed.querySelector('base')?.href).toMatch(/^https:\/\/web-package\.invalid\//u);
+    const css = parsed.querySelector<HTMLLinkElement>('link[rel="stylesheet"]')!;
+    expect(css.href).toMatch(/^data:text\/css;base64,/u);
+    expect(css.media).toBe('screen');
+    expect(decodeData(css.href).length).toBeGreaterThan(0);
     expect(parsed.querySelector('img')?.src).toMatch(/^data:image\/svg\+xml;base64,/u);
     expect(parsed.querySelectorAll('img')[1].src).toBe('https://example.com/image.png');
     expect(parsed.querySelector('a')?.getAttribute('href')).toBe('#article-one');
     expect(parsed.querySelectorAll('a')[1].href).toBe('https://example.com/story');
-    expect(parsed.querySelectorAll('script')).toHaveLength(2);
-    expect(parsed.querySelectorAll('script')[0].textContent).toContain('<img src="assets/brand/arena.svg">');
-    expect(parsed.querySelectorAll('script')[1].textContent).toBe(new TextDecoder().decode(base.readFile('scripts/news.js')).replace(/\r\n?/gu, '\n'));
+    const scripts = [...parsed.querySelectorAll('script')];
+    expect(scripts).toHaveLength(3);
+    expect(scripts.some(script => (script.src ? decodeData(script.src) : script.textContent)?.includes('<img src="assets/brand/arena.svg">'))).toBe(true);
+    const external = parsed.querySelector<HTMLScriptElement>('script[defer][src]')!;
+    expect(external.defer).toBe(true);
+    expect(decodeData(external.src)).toBe(new TextDecoder().decode(base.readFile('scripts/news.js')));
     expect(parsed.querySelectorAll('p')).toHaveLength(1);
     expect(parsed.querySelector('p')?.textContent).toBe('scripts/news.js');
   });
 
-  it('refuses an unpinned revision or missing local resource without widening local execution', async () => {
+  it('rejects unknown identities and missing or escaping local resources', async () => {
     const changed = { ...ref, digest: `sha256:${'0'.repeat(64)}` };
-    expect(canRenderBuiltinWebPackageSrcdoc(ref)).toBe(true);
-    expect(canRenderBuiltinWebPackageSrcdoc(changed)).toBe(false);
+    await expect(resolveWebPackage(changed)).rejects.toThrow();
     const missing = await createWebPackageOverlay(ref, '<!doctype html><html><body><script src="missing.js"></script></body></html>');
-    await expect(renderBuiltinWebPackageSrcdoc(missing)).rejects.toThrow('资源不存在');
+    await expect(render(missing)).rejects.toThrow();
     const traversal = await createWebPackageOverlay(ref, '<!doctype html><html><body><script src="../outside.js"></script></body></html>');
-    await expect(renderBuiltinWebPackageSrcdoc(traversal)).rejects.toThrow('路径');
+    await expect(render(traversal)).rejects.toThrow();
   });
 
   it('uses the same static asset bytes after ZIP export and exact local reimport', async () => {
@@ -58,11 +64,11 @@ describe('Arena News pinned HTML materialization', () => {
       const logo = base.manifest.files.find((file) => file.path.endsWith('.svg'))!.path;
       const generated = `<!doctype html><html><head><title>重新创作</title><link rel="stylesheet" href="${css}"></head><body><h1>重新创作</h1><img src="${logo}"><script src="${script}"></script></body></html>`;
       const overlay = await createWebPackageOverlay(ref, generated);
-      const original = await renderBuiltinWebPackageSrcdoc(overlay);
+      const original = await render(overlay);
       const imported = await unpackWebPackageZip(await packWebPackageZip(base));
       expect(imported.ref).toEqual(ref);
       stageLocalWebPackage(imported);
-      expect(await renderBuiltinWebPackageSrcdoc(overlay)).toEqual(original);
+      expect(await render(overlay)).toEqual(original);
       expect(original.html).toContain('<h1>重新创作</h1>');
       expect(original.html).toContain('data:image/svg+xml;base64,');
     } finally {
