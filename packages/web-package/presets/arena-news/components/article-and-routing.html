@@ -1,0 +1,17 @@
+<!-- Reference fragment, not an entry page. Replace every placeholder with generated content. -->
+<section data-news-view="home" aria-label="首页">
+  <label>搜索新闻 <input type="search" data-news-query placeholder="标题、角色或事件"></label>
+  <label>分类 <select data-news-filter><option value="all">全部</option><option value="report">战况</option><option value="interview">专访</option></select></label>
+  <p>共 <span data-news-result-count>0</span> 条</p>
+  <div class="news-grid">
+    <article class="news-card" data-news-item data-news-category="report" data-news-search="AI 填写可搜索的标题摘要角色">
+      <p class="news-kicker">现场报道</p><h2><a data-news-link href="#article-one">AI 生成的新闻标题</a></h2>
+      <p>AI 生成的摘要。</p><p class="news-meta">虚构记者 · 赛后</p>
+    </article>
+  </div>
+  <p data-news-empty hidden>没有符合条件的新闻，请尝试其他关键词。</p>
+</section>
+<section data-news-view="article-one" hidden>
+  <a data-news-link href="#home">返回首页</a>
+  <article class="news-article"><p class="news-kicker">现场报道</p><h1>AI 生成的新闻标题</h1><p>AI 在此写入完整报道正文。</p></article>
+</section>

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   BUILTIN_VISUAL_NOVEL_PACKAGE_REF,
+  BUILTIN_WEB_PACKAGE_PRESETS,
   buildWebPackagePromptProjection,
   clearLocalWebPackageSessionStaging,
   createWebPackageOverlay,
@@ -35,6 +36,23 @@ const createLocalProjectionPackage = async () => {
 };
 
 describe('Web Package hosted generation', () => {
+  it('projects the news HTML target consistently for stream and non-stream generation', async () => {
+    const ref = BUILTIN_WEB_PACKAGE_PRESETS.find((preset) => preset.packageRef.id === 'mahoshojo.arena-news')!.packageRef;
+    const results = await Promise.all(['stream', 'non-stream'].map((deliveryMode) => buildArenaGenerationPrompt({
+      actorKey: 'user:42', random: () => 0,
+      payload: { ...payload, webPackageRef: ref, __arenaServerContextV1: { endpoint: 'api/arena/generate', deliveryMode } },
+    })));
+    expect(results[0].prompt).toBe(results[1].prompt);
+    expect(results[0].prompt).toContain('index.html');
+    expect(results[0].prompt).toContain('text/html');
+    expect(results[0].prompt).toContain('data-news-view');
+    expect(results[0].prompt).not.toContain('data/story.json');
+    expect(results[0].metadata).toMatchObject({ outputContract: 'web-package-target', webPackageRef: ref });
+    const overlay = await createWebPackageOverlay(ref, '<!doctype html><title>新闻</title><article>完整正文</article>');
+    expect(overlay.targetPath).toBe('index.html');
+    expect(overlay.targetMediaType).toBe('text/html');
+  });
+
   it('both delivery modes project one JSON target without copying runtime', async () => {
     const results = await Promise.all(['stream', 'non-stream'].map((deliveryMode) => buildArenaGenerationPrompt({
       actorKey: 'user:42', random: () => 0,

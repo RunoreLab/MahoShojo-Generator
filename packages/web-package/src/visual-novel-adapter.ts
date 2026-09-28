@@ -10,6 +10,7 @@ import {
 } from './visual-novel-v1';
 
 import { FORUM_PACKAGE_REF, CHOICE_PACKAGE_REF, materializeCreativePreset } from './creative-presets-v1';
+import { canRenderArenaNewsSrcdoc, materializeArenaNewsHtml } from './arena-news-adapter';
 
 const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 const sameRef = (left: WebPackageRef, right: WebPackageRef): boolean => (
@@ -40,13 +41,16 @@ export const renderBuiltinWebPackageSrcdoc = async (
     throw new Error('此 Web Package revision 不受内置包过渡适配器支持');
   }
   const story = decoder.decode(instance.readFile(overlay.targetPath)!);
+  if (canRenderArenaNewsSrcdoc(base.ref)) {
+    return { kind: 'srcdoc', html: materializeArenaNewsHtml(base.ref, (path) => instance.readFile(path), story) };
+  }
   const materialize = canRenderBuiltinVisualNovelSrcdoc(base.ref) ? materializeVisualNovelHtml : materializeCreativePreset;
   return { kind: 'srcdoc', html: materialize((path) => instance.readFile(path), story) };
 };
 
 /** Presentation capability is an exact first-party allowlist, never arbitrary local HTML. */
 export const canRenderBuiltinWebPackageSrcdoc = (ref: WebPackageRef): boolean => (
-  [BUILTIN_VISUAL_NOVEL_PACKAGE_REF, FORUM_PACKAGE_REF, CHOICE_PACKAGE_REF].some((known) => sameRef(ref, known))
+  canRenderArenaNewsSrcdoc(ref) || [BUILTIN_VISUAL_NOVEL_PACKAGE_REF, FORUM_PACKAGE_REF, CHOICE_PACKAGE_REF].some((known) => sameRef(ref, known))
 );
 
 /** Retained compatibility entry point for Visual Novel Lite consumers. */

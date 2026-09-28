@@ -1,0 +1,19 @@
+<!-- Each article needs its own key; button type is always explicit. -->
+<div class="news-toolbar">
+  <button type="button" data-news-toggle="save:article-one" data-news-on="已收藏" data-news-off="收藏" aria-pressed="false"><span data-news-toggle-label>收藏</span></button>
+  <button type="button" data-news-toggle="like:article-one" data-news-base="12" aria-pressed="false">赞 <span data-news-toggle-count>12</span></button>
+</div>
+<section aria-label="评论"><h2>读者来信</h2><p class="news-meta">模拟评论，仅本次浏览有效。请勿填写个人信息。</p>
+  <div data-news-comment-list="article-one" aria-label="评论列表"></div>
+  <form class="news-form" data-news-comments="article-one">
+    <label>笔名（可选）<input name="author" maxlength="40" autocomplete="off"></label>
+    <label>评论<textarea name="comment" maxlength="1000" required></textarea></label>
+    <button type="submit">发表模拟评论</button>
+  </form>
+</section>
+<fieldset><legend>你认为哪一方会赢得下一场？（模拟投票）</legend>
+  <button type="button" data-news-poll="winner" data-news-choice="星之队">星之队</button>
+  <button type="button" data-news-poll="winner" data-news-choice="月之队">月之队</button>
+  <p data-news-poll-result="winner" role="status">每次浏览可投一次。</p>
+</fieldset>
+<p class="news-status" data-news-status role="status" aria-live="polite"></p>

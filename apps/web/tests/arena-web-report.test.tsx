@@ -126,11 +126,11 @@ describe('Web 战报的本地执行许可', () => {
     await act(async () => {
       select.click();
     });
-    expect(useBattleStore.getState().webPackageRef).toEqual(BUILTIN_VISUAL_NOVEL_PACKAGE_REF);
+    expect(useBattleStore.getState().webPackageRef).toEqual(BUILTIN_WEB_PACKAGE_PRESETS[0].packageRef);
     await act(async () => container.querySelector<HTMLButtonElement>('[title="下载 Web 包 ZIP"]')!.click());
     await act(async () => {
       await vi.waitFor(() => {
-        expect(downloadBlob).toHaveBeenCalledWith(expect.any(Blob), 'mahoshojo.visual-novel-lite@1.0.0.zip');
+        expect(downloadBlob).toHaveBeenCalledWith(expect.any(Blob), 'mahoshojo.arena-news@1.0.0.zip');
       });
     });
     await act(async () => root.render(
@@ -145,7 +145,7 @@ describe('Web 战报的本地执行许可', () => {
   it.each(BUILTIN_WEB_PACKAGE_PRESETS.filter((preset) => preset.packageRef.id !== BUILTIN_VISUAL_NOVEL_PACKAGE_REF.id))(
     'executes the $title preset through the real Arena report consumer', async ({ packageRef }) => {
       const base = await resolveWebPackage(packageRef);
-      const content = new TextDecoder().decode(base.readFile(base.manifest.generation.target));
+      const content = '<!doctype html><html><head><title>独立创作的竞技场新闻</title><link rel="stylesheet" href="styles/tokens.css"></head><body><h1>独立创作的竞技场新闻</h1></body></html>';
       const { generatedContent: _generated, ...artifact } = await createWebPackageOverlay(packageRef, content);
       expect(_generated).toBe(content);
       window.localStorage.setItem('arena.web-report-consent.v1.room.creative', 'accepted');
@@ -156,7 +156,9 @@ describe('Web 战报的本地执行许可', () => {
       ));
       await waitForReact(() => expect(container.querySelector('iframe')).toBeTruthy());
       expect(container.querySelector('iframe')!.getAttribute('sandbox')).toBe('allow-scripts');
-      expect(container.querySelector('iframe')!.getAttribute('srcdoc')).toContain(JSON.parse(content).title);
+      expect(base.manifest.generation.mediaType).toBe('text/html');
+      expect(container.querySelector('iframe')!.getAttribute('srcdoc')).toContain('独立创作的竞技场新闻');
+      expect(container.querySelector('iframe')!.getAttribute('srcdoc')).not.toContain('href="styles/tokens.css"');
       expect(container.textContent).not.toContain('暂不执行此 Web 包');
     },
   );
