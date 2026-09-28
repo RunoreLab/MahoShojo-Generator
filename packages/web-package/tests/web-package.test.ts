@@ -248,7 +248,7 @@ describe('canonical ZIP artifact and generic JSON Schema validation', () => {
   });
 
   it('exposes discoverable builtin presets only for pinned refs', () => {
-    expect(BUILTIN_WEB_PACKAGE_PRESETS).toHaveLength(1);
+    expect(BUILTIN_WEB_PACKAGE_PRESETS).toHaveLength(3);
     expect(findBuiltinWebPackagePreset(ref)?.packageRef).toEqual(ref);
     expect(findBuiltinWebPackagePreset({ ...ref, digest: `sha256:${'0'.repeat(64)}` })).toBeUndefined();
     expect(findBuiltinWebPackagePreset(null)).toBeUndefined();

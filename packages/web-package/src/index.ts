@@ -1,3 +1,4 @@
+import { loadBuiltinWebPackage } from './builtin-loader';
 import {
   WEB_PACKAGE_MANIFEST_PATH,
   WebPackageArtifactSchema,
@@ -19,7 +20,6 @@ import {
 import {
   digestWebPackageBytes,
   freezeDeep,
-  verifyWebPackage,
   type VerifiedWebPackage,
 } from './verify';
 import { getStagedLocalWebPackage, listStagedLocalWebPackages } from './session-staging';
@@ -34,7 +34,7 @@ export {
 export { packWebPackageZip, unpackWebPackageZip } from './zip';
 export { assertJsonSchema202012 } from './json-schema';
 export { canonicalizeWebPackageManifest, digestWebPackageBytes, verifyWebPackage } from './verify';
-export { canRenderBuiltinVisualNovelSrcdoc, renderBuiltinVisualNovelSrcdoc } from './visual-novel-adapter';
+export { canRenderBuiltinVisualNovelSrcdoc, renderBuiltinVisualNovelSrcdoc, canRenderBuiltinWebPackageSrcdoc, renderBuiltinWebPackageSrcdoc } from './visual-novel-adapter';
 export {
   WEB_PACKAGE_INSTANCE_PREFIX,
   WEB_PACKAGE_RESOURCE_CORS_ORIGIN,
@@ -79,20 +79,6 @@ export type WebPackageInstance = Readonly<{
   readFile: (_path: string) => Uint8Array | undefined;
 }>;
 
-let builtin: Promise<ResolvedWebPackage> | undefined;
-const loadBuiltin = async (): Promise<ResolvedWebPackage> => {
-  const { BUILTIN_VISUAL_NOVEL_PACKAGE_REF, VISUAL_NOVEL_FILES } = await import('./visual-novel-v1');
-  const files = VISUAL_NOVEL_FILES.map((file) => ({ ...file, bytes: encoder.encode(file.content) }));
-  const descriptors = await Promise.all(files.map(async (file) => ({ path: file.path, mediaType: file.mediaType, digest: await digestWebPackageBytes(file.bytes), size: file.bytes.byteLength })));
-  return verifyWebPackage({
-    format: 'mahoshojo-web-package', formatVersion: 1,
-    id: BUILTIN_VISUAL_NOVEL_PACKAGE_REF.id, version: BUILTIN_VISUAL_NOVEL_PACKAGE_REF.version,
-    name: 'Visual Novel Lite', entry: 'index.html', capabilities: ['scripts'],
-    generation: { target: 'data/story.json', mode: 'replace', mediaType: 'application/json', instructions: 'ai/instructions.md', schema: 'schemas/story.schema.json', assetCatalog: 'ai/assets.json' },
-    files: descriptors,
-  }, files);
-};
-
 const sameRef = (left: WebPackageRef, right: WebPackageRef): boolean => (
   left.id === right.id && left.version === right.version && left.digest === right.digest
 );
@@ -106,7 +92,7 @@ export const resolveWebPackage = async (input: WebPackageRef): Promise<ResolvedW
   const local = getStagedLocalWebPackage(ref);
   if (local) return local;
   if (findBuiltinWebPackagePreset(ref)) {
-    const base = await (builtin ??= loadBuiltin());
+    const base = await loadBuiltinWebPackage(ref);
     if (!sameRef(base.ref, ref)) throw new Error(`内置 Web Package revision 完整性校验失败：${base.ref.digest}`);
     return base;
   }
@@ -134,7 +120,7 @@ const resolveBuiltinOnly = async (input: WebPackageRef): Promise<ResolvedWebPack
   if (!findBuiltinWebPackagePreset(ref)) {
     throw new Error('不支持或无法解析此 Web Package revision');
   }
-  const base = await (builtin ??= loadBuiltin());
+  const base = await loadBuiltinWebPackage(ref);
   if (!sameRef(base.ref, ref)) throw new Error(`内置 Web Package revision 完整性校验失败：${base.ref.digest}`);
   return base;
 };
