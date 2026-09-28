@@ -28,6 +28,19 @@ describe('Web Package creator trust boundary', () => {
     expect(prompt.split('\n').at(-1)).toContain('宿主最终要求');
   });
 
+  it('retains recursive data schemas and treats annotation values as inert data', async () => {
+    const base = await resolveWebPackage(BUILTIN_VISUAL_NOVEL_PACKAGE_REF);
+    const projection = {
+      ...buildWebPackagePromptProjection(base),
+      schema: {
+        type: 'object',
+        properties: { child: { $ref: '#' } },
+        default: { pattern: '(a+)+$', $ref: '#' },
+      },
+    };
+    expect(() => buildWebPackagePromptFromProjection(projection)).not.toThrow();
+  });
+
   it.each([
     { $ref: '#' },
     { allOf: [{ $ref: '#' }] },
