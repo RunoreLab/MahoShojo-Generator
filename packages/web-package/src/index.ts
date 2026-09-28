@@ -304,36 +304,15 @@ export type WebPackageReplayOutcome = Readonly<{
   base?: ResolvedWebPackage;
   fallbackText?: string;
   candidateAvailable?: boolean;
+  candidates?: readonly WebPackageRef[];
 }>;
 
-/** Version compare: SemVer-aware when both parse, otherwise numeric-aware fallback. */
-const comparePackageVersions = (left: string, right: string): number => {
-  const parse = (value: string) => {
-    const [core = '0', pre = ''] = value.split('-', 2);
-    const parts = core.split('.').map((part) => Number.parseInt(part, 10));
-    return {
-      nums: [parts[0] || 0, parts[1] || 0, parts[2] || 0] as const,
-      pre,
-      numeric: parts.every((part) => Number.isFinite(part)),
-    };
-  };
-  const a = parse(left);
-  const b = parse(right);
-  for (let index = 0; index < 3; index += 1) {
-    if (a.nums[index] !== b.nums[index]) return a.nums[index] - b.nums[index];
-  }
-  // A pre-release sorts before the corresponding release.
-  if (a.pre === b.pre) return 0;
-  if (a.pre === '') return 1;
-  if (b.pre === '') return -1;
-  return a.pre.localeCompare(b.pre);
-};
+// Version labels are opaque. Ordering is only for stable display, not preference.
+const compareLabels = (left: string, right: string): number => left < right ? -1 : left > right ? 1 : 0;
 
 /**
  * Same-id candidates after exact resolve miss, ordered deterministically
- * (higher version first, then digest) so multi-candidate choice is stable.
- * Callers that only accept one generation contract should filter by
- * target path/mediaType before taking the head of this list.
+ * by version label and digest. Multiple candidates require explicit selection.
  */
 export const findWebPackageCandidatesById = async (
   packageId: string,
@@ -341,8 +320,8 @@ export const findWebPackageCandidatesById = async (
   const staged = listStagedLocalWebPackages()
     .filter((pkg) => pkg.ref.id === packageId)
     .sort((left, right) => (
-      comparePackageVersions(right.ref.version, left.ref.version)
-      || left.ref.digest.localeCompare(right.ref.digest)
+      compareLabels(left.ref.version, right.ref.version)
+      || compareLabels(left.ref.digest, right.ref.digest)
     ));
   const builtins: ResolvedWebPackage[] = [];
   for (const preset of BUILTIN_WEB_PACKAGE_PRESETS) {
@@ -358,17 +337,17 @@ export const findWebPackageCandidatesById = async (
   }
   return [...staged, ...builtins]
     .sort((left, right) => (
-      comparePackageVersions(right.ref.version, left.ref.version)
-      || left.ref.digest.localeCompare(right.ref.digest)
+      compareLabels(left.ref.version, right.ref.version)
+      || compareLabels(left.ref.digest, right.ref.digest)
     ));
 };
 
-/** Deterministic single candidate: highest version, then lowest digest. */
+/** Only unambiguous candidate discovery; never select among revisions for the user. */
 export const findWebPackageCandidateById = async (
   packageId: string,
 ): Promise<ResolvedWebPackage | null> => {
   const candidates = await findWebPackageCandidatesById(packageId);
-  return candidates[0] ?? null;
+  return candidates.length === 1 ? candidates[0] : null;
 };
 
 /**
@@ -380,6 +359,7 @@ export const prepareWebPackageReplay = async (input: {
   artifact: WebPackageArtifact;
   generatedContent: string;
   allowCompatibility?: boolean;
+  compatibilityRef?: WebPackageRef;
   maxBytes?: number;
 }): Promise<WebPackageReplayOutcome> => {
   const artifact = WebPackageArtifactSchema.parse(input.artifact);
@@ -410,16 +390,14 @@ export const prepareWebPackageReplay = async (input: {
     }
   }
 
-  // Filter same-id candidates to those whose generation contract can accept this
-  // historical target before ranking, so a higher but incompatible version never
-  // shadows a lower compatible one.
+  // Offer only candidates whose target contract matches the historical target.
   const allCandidates = await findWebPackageCandidatesById(artifact.packageRef.id);
   const compatibleCandidates = allCandidates.filter((candidate) => (
     candidate.manifest.generation.target === artifact.targetPath
     && candidate.manifest.generation.mediaType === artifact.targetMediaType
   ));
-  const candidate = compatibleCandidates[0] ?? null;
-  if (!candidate) {
+  const candidates = compatibleCandidates.map((candidate) => ({ ...candidate.ref }));
+  if (compatibleCandidates.length === 0) {
     const anyCandidateAvailable = allCandidates.length > 0;
     return {
       status: anyCandidateAvailable ? 'rejected' : 'missing-package',
@@ -441,12 +419,18 @@ export const prepareWebPackageReplay = async (input: {
     };
   }
 
-  if (!input.allowCompatibility) {
+  const candidate = input.compatibilityRef
+    ? compatibleCandidates.find((item) => sameRef(item.ref, input.compatibilityRef!))
+    : compatibleCandidates.length === 1 ? compatibleCandidates[0] : undefined;
+  if (!input.allowCompatibility || !candidate) {
     return {
       status: 'mismatch-available',
-      message: `当前缺少该 Web 包的历史 revision，但存在同 ID 的其他版本（可用候选 ${candidate.ref.version}）。`,
+      message: candidates.length === 1
+        ? `当前缺少该 Web 包的历史 revision，但存在同 ID 的其他版本（可用候选 ${candidates[0].version}）。`
+        : '当前缺少该 Web 包的历史 revision；请选择具体版本与 digest，再确认兼容重放。',
       fallbackText,
       candidateAvailable: true,
+      candidates,
     };
   }
 

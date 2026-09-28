@@ -14,7 +14,7 @@ import { downloadBlob } from '@/lib/client/blobUrl';
 import { buildSafeFileName } from '@/lib/client/fileName';
 import { importLocalWebPackageArchive } from '@/lib/web-package/cache';
 import styles from './ArenaWebReport.module.css';
-import type { WebPackageArtifact } from '@mahoshojo/contracts/web-package';
+import type { WebPackageArtifact, WebPackageRef } from '@mahoshojo/contracts/web-package';
 import {
   canRenderBuiltinVisualNovelSrcdoc,
   formatWebPackageFallback,
@@ -329,13 +329,14 @@ export function ArenaWebReport({ content, ready, roomId, aiModel, aiUsage, displ
   const [immersive, setImmersive] = useState(false);
   const nativeFullscreenRequestedRef = useRef(false);
   const normalizedOutput = useMemo(() => normalizeArenaWebOutput(content), [content]);
-  const [compatChoiceKey, setCompatChoiceKey] = useState<string | null>(null);
+  const [compatChoice, setCompatChoice] = useState<{ key: string; ref: WebPackageRef } | null>(null);
+  const [candidateChoice, setCandidateChoice] = useState<{ key: string; digest: string } | null>(null);
   const [replayEpoch, setReplayEpoch] = useState(0);
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
   const replayKey = `${webPackage?.packageRef.digest ?? ''}::${content}`;
-  const allowCompatibility = compatChoiceKey === replayKey;
+  const compatibilityRef = compatChoice?.key === replayKey ? compatChoice.ref : undefined;
   const [packageResolution, setPackageResolution] = useState<{
     artifact: WebPackageArtifact;
     content: string;
@@ -344,6 +345,7 @@ export function ArenaWebReport({ content, ready, roomId, aiModel, aiUsage, displ
     location?: { kind: 'srcdoc'; html: string } | { kind: 'url'; url: string };
     compatibility?: boolean;
     candidateAvailable?: boolean;
+    candidates?: readonly WebPackageRef[];
   } | null>(null);
   useEffect(() => {
     if (!webPackage || !ready) return;
@@ -351,7 +353,8 @@ export function ArenaWebReport({ content, ready, roomId, aiModel, aiUsage, displ
     void prepareWebPackageReplay({
       artifact: webPackage,
       generatedContent: content,
-      allowCompatibility,
+      allowCompatibility: Boolean(compatibilityRef),
+      compatibilityRef,
     }).then(async (outcome) => {
       if (!active) return;
       if ((outcome.status === 'exact' || outcome.status === 'compatibility') && outcome.overlay) {
@@ -402,6 +405,7 @@ export function ArenaWebReport({ content, ready, roomId, aiModel, aiUsage, displ
         status: outcome.status,
         message: outcome.message ?? 'Web 包不可用或故事数据校验失败，已保留安全文本。',
         candidateAvailable: outcome.candidateAvailable,
+        candidates: outcome.candidates,
       });
     }).catch(() => {
       if (active) setPackageResolution({
@@ -412,10 +416,14 @@ export function ArenaWebReport({ content, ready, roomId, aiModel, aiUsage, displ
       });
     });
     return () => { active = false; };
-  }, [allowCompatibility, content, ready, replayEpoch, webPackage]);
+  }, [compatibilityRef, content, ready, replayEpoch, webPackage]);
   const matchingResolution = packageResolution?.artifact === webPackage && packageResolution?.content === content ? packageResolution : null;
   const packageLocation = matchingResolution?.location ?? null;
   const resolutionStatus = matchingResolution?.status ?? null;
+  const candidates = matchingResolution?.candidates ?? [];
+  const selectedCandidate = candidates.length === 1 ? candidates[0] : candidates.find((candidate) => (
+    candidateChoice?.key === replayKey && candidate.digest === candidateChoice.digest
+  ));
   const showReplayActions = ready
     && Boolean(webPackage)
     && (resolutionStatus === 'missing-package'
@@ -588,10 +596,24 @@ export function ArenaWebReport({ content, ready, roomId, aiModel, aiUsage, displ
         当前使用的是不同版本的 Web 包，效果可能与生成时不一致。
       </p> : null}
       {ready && webPackage && showReplayActions ? <div className="mb-3 flex flex-wrap items-center gap-2 text-xs">
+        {resolutionStatus === 'mismatch-available' && candidates.length > 1 ? <label className="flex min-w-0 flex-col gap-1">
+          选择兼容重放版本
+          <select
+            value={selectedCandidate?.digest ?? ''}
+            onChange={(event) => setCandidateChoice({ key: replayKey, digest: event.target.value })}
+            className="max-w-full rounded-lg border border-amber-400/60 bg-amber-50 px-3 py-2 text-amber-900"
+          >
+            <option value="" disabled>请选择版本与 digest</option>
+            {candidates.map((candidate) => <option key={candidate.digest} value={candidate.digest}>
+              {candidate.version} · {candidate.digest}
+            </option>)}
+          </select>
+        </label> : null}
         {resolutionStatus === 'mismatch-available' ? <button
           type="button"
-          onClick={() => setCompatChoiceKey(replayKey)}
-          className="rounded-lg border border-amber-400/60 bg-amber-50 px-3 py-1.5 font-medium text-amber-900 hover:bg-amber-100 dark:border-amber-300/40 dark:bg-amber-950/40 dark:text-amber-100 dark:hover:bg-amber-950/70"
+          disabled={!selectedCandidate}
+          onClick={() => { if (selectedCandidate) setCompatChoice({ key: replayKey, ref: selectedCandidate }); }}
+          className="rounded-lg border border-amber-400/60 bg-amber-50 px-3 py-1.5 font-medium text-amber-900 hover:bg-amber-100 disabled:opacity-50 dark:border-amber-300/40 dark:bg-amber-950/40 dark:text-amber-100 dark:hover:bg-amber-950/70"
         >
           仍尝试使用此 Web 包
         </button> : null}

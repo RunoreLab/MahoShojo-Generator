@@ -79,12 +79,12 @@ describe('historical Web package replay', () => {
 
     expect((await findWebPackageCandidateById(artifact.packageRef.id))?.ref).toEqual(v2.ref);
 
-    // Higher version wins deterministically when multiple same-id candidates are staged.
+    // Version labels are opaque; multiple candidates require an explicit identity.
     const v0 = await buildLocalPackage('0.9.0');
     stageLocalWebPackage(v0);
-    expect((await findWebPackageCandidateById(artifact.packageRef.id))?.ref).toEqual(v2.ref);
+    expect(await findWebPackageCandidateById(artifact.packageRef.id)).toBeNull();
     expect((await findWebPackageCandidatesById(artifact.packageRef.id)).map((pkg) => pkg.ref.version))
-      .toEqual(['1.1.0', '0.9.0']);
+      .toEqual(['0.9.0', '1.1.0']);
     unstageLocalWebPackage(v0.ref);
 
     const deferred = await prepareWebPackageReplay({ artifact, generatedContent });
@@ -106,6 +106,39 @@ describe('historical Web package replay', () => {
     expect(allowed.overlay?.generatedDigest).toBe(artifact.generatedDigest);
     expect(listStagedLocalWebPackages().map((pkg) => pkg.ref.digest)).toEqual([v2.ref.digest]);
     expect(artifact.packageRef).toEqual(v1.ref);
+  });
+
+  it('requires an exact candidate choice among opaque or identical version labels', async () => {
+    const { overlay } = await stageAndOverlay('original');
+    const { generatedContent, ...artifact } = overlay;
+    clearLocalWebPackageSessionStaging();
+    const first = await buildLocalPackage('community-edition');
+    const second = await verifyWebPackage({ ...first.manifest, name: '另一个同版本 revision' },
+      first.manifest.files.map((file) => ({ path: file.path, bytes: first.readFile(file.path)! })));
+    stageLocalWebPackage(first);
+    stageLocalWebPackage(second);
+
+    const deferred = await prepareWebPackageReplay({ artifact, generatedContent, allowCompatibility: true });
+    expect(deferred.status).toBe('mismatch-available');
+    expect(deferred.instance).toBeUndefined();
+    expect(deferred.candidates).toHaveLength(2);
+    expect(deferred.candidates?.map((candidate) => candidate.digest)).toEqual(
+      [first.ref.digest, second.ref.digest].sort(),
+    );
+
+    const chosen = await prepareWebPackageReplay({
+      artifact, generatedContent, allowCompatibility: true, compatibilityRef: second.ref,
+    });
+    expect(chosen.status).toBe('compatibility');
+    expect(chosen.instance?.base.ref).toEqual(second.ref);
+    expect(artifact.packageRef.version).toBe('original');
+
+    unstageLocalWebPackage(second.ref);
+    const stale = await prepareWebPackageReplay({
+      artifact, generatedContent, allowCompatibility: true, compatibilityRef: second.ref,
+    });
+    expect(stale.status).toBe('mismatch-available');
+    expect(stale.instance).toBeUndefined();
   });
 
   it('rejects compatibility when target contract or content digest breaks', async () => {

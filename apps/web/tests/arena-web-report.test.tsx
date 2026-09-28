@@ -55,6 +55,22 @@ const click = async (text: string) => {
   expect(button, text).toBeTruthy();
   await act(async () => button!.click());
 };
+// Keep async crypto/cache completion inside act, then flush before inspecting the DOM.
+// Wrapping a DOM waitFor in one outer act instead would defer the render until it exits.
+const waitForReact = async (assertion: () => void) => {
+  const deadline = Date.now() + 1_000;
+  for (;;) {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+    try {
+      assertion();
+      return;
+    } catch (error) {
+      if (Date.now() >= deadline) throw error;
+    }
+  }
+};
 const viewer = (roomId: string, ready = true, content = source) => (
   <ArenaWebReport key={roomId} roomId={roomId} ready={ready} content={content}>
     {(web, actions) => <section>
@@ -98,30 +114,31 @@ const buildLocalPackage = async (version: string, id = 'local.ui-replay-package'
 };
 
 describe('Web 战报的本地执行许可', () => {
-  it('offers the first-party experience in a labelled native selector and disables it while generating', async () => {
+  it('offers first-party presets in the shared grid and disables selection while generating', async () => {
     await act(async () => root.render(
       <ArenaReportFormatSelector value="web" onChange={() => {}}>
         <SoloArenaWebPackageSection reportFormat="web" />
       </ArenaReportFormatSelector>,
     ));
-    const select = container.querySelector('[data-testid="arena-web-package-select"]')!;
-    expect(select.getAttribute('aria-label')).toBe('选择 Web 包');
+    const select = container.querySelector<HTMLButtonElement>('[aria-label^="选择Web 包："]')!;
     expect(container.querySelector('[data-testid="arena-web-package-section"]')?.textContent).toContain('Web 包');
     await act(async () => {
-      select.value = BUILTIN_VISUAL_NOVEL_PACKAGE_REF.digest;
-      select.dispatchEvent(new Event('change', { bubbles: true }));
+      select.click();
     });
     expect(useBattleStore.getState().webPackageRef).toEqual(BUILTIN_VISUAL_NOVEL_PACKAGE_REF);
-    await click('下载 Web 包 ZIP');
-    await vi.waitFor(() => {
-      expect(downloadBlob).toHaveBeenCalledWith(expect.any(Blob), 'mahoshojo.visual-novel-lite@1.0.0.zip');
+    await act(async () => container.querySelector<HTMLButtonElement>('[title="下载 Web 包 ZIP"]')!.click());
+    await act(async () => {
+      await vi.waitFor(() => {
+        expect(downloadBlob).toHaveBeenCalledWith(expect.any(Blob), 'mahoshojo.visual-novel-lite@1.0.0.zip');
+      });
     });
     await act(async () => root.render(
       <ArenaReportFormatSelector value="web" onChange={() => {}} disabled>
         <SoloArenaWebPackageSection reportFormat="web" disabled />
       </ArenaReportFormatSelector>,
     ));
-    expect(container.querySelector('[data-testid="arena-web-package-select"]')!.disabled).toBe(true);
+    expect(container.querySelector<HTMLButtonElement>('[aria-label^="取消选择Web 包："]')!.disabled).toBe(true);
+    expect(container.querySelector<HTMLButtonElement>('[title="下载 Web 包 ZIP"]')!.disabled).toBe(false);
   });
 
   it('validates a package before consent, keeps JSON fallback inert, and exports the generated target', async () => {
@@ -136,8 +153,7 @@ describe('Web 战报的本地执行许可', () => {
     expect(container.querySelector('pre')?.textContent).toContain('<script>unsafe()</script>');
     expect(container.querySelector('script')).toBeNull();
     await act(async () => root.render(render(true)));
-    await vi.waitFor(async () => {
-      await act(async () => {});
+    await waitForReact(() => {
       expect(document.body.textContent).toContain('启用 Web 战报');
     });
     expect(container.querySelector('iframe')).toBeNull();
@@ -155,8 +171,7 @@ describe('Web 战报的本地执行许可', () => {
     const htmlButton = [...document.querySelectorAll('button')].find((item) => item.textContent === '🌐 下载 HTML')!;
     expect(htmlButton.disabled).toBe(false);
     await act(async () => root.render(render(true, { ...artifact, generatedDigest: `sha256:${'0'.repeat(64)}` })));
-    await vi.waitFor(async () => {
-      await act(async () => {});
+    await waitForReact(() => {
       expect(container.textContent).toContain('digest 校验失败');
     });
     expect(container.querySelector('iframe')).toBeNull();
@@ -180,8 +195,7 @@ describe('Web 战报的本地执行许可', () => {
         {(web, actions) => <section>{web}<div>{actions}</div></section>}
       </ArenaWebReport>,
     ));
-    await vi.waitFor(async () => {
-      await act(async () => {});
+    await waitForReact(() => {
       expect(container.textContent).toContain('当前版本暂不执行此 Web 包');
     });
     expect(container.textContent).toContain('Web 包已通过校验');
@@ -207,8 +221,7 @@ describe('Web 战报的本地执行许可', () => {
         {(web, actions) => <section>{web}<div>{actions}</div></section>}
       </ArenaWebReport>,
     ));
-    await vi.waitFor(async () => {
-      await act(async () => {});
+    await waitForReact(() => {
       expect(container.textContent).toContain('重新导入本地 Web 包');
     });
     expect(container.textContent).not.toContain('仍尝试使用此 Web 包');
@@ -233,8 +246,7 @@ describe('Web 战报的本地执行许可', () => {
         {(web, actions) => <section>{web}<div>{actions}</div></section>}
       </ArenaWebReport>,
     ));
-    await vi.waitFor(async () => {
-      await act(async () => {});
+    await waitForReact(() => {
       expect(container.textContent).toContain('仍尝试使用此 Web 包');
     });
     expect(container.textContent).toContain('重新导入本地 Web 包');
@@ -243,8 +255,7 @@ describe('Web 战报的本地执行许可', () => {
     expect(artifact.packageRef).toEqual(historical.ref);
 
     await click('仍尝试使用此 Web 包');
-    await vi.waitFor(async () => {
-      await act(async () => {});
+    await waitForReact(() => {
       expect(container.textContent).toContain('当前使用的是不同版本的 Web 包，效果可能与生成时不一致。');
     });
     expect(container.querySelector('iframe')).toBeTruthy();
@@ -253,6 +264,42 @@ describe('Web 战报的本地执行许可', () => {
     expect(container.querySelector('iframe')!.getAttribute('srcdoc') ?? '').toContain('<');
     expect(container.textContent).toContain('下载生成目标');
     expect(container.textContent).not.toContain('仍尝试使用此 Web 包');
+    expect(artifact.packageRef).toEqual(historical.ref);
+  });
+
+  it('多个兼容版本先选择具体 digest，再确认重放', async () => {
+    const content = JSON.stringify({ title: '选择版本', scenes: [{ text: '第一幕' }] });
+    clearLocalWebPackageSessionStaging();
+    const historical = await buildLocalPackage('old', BUILTIN_VISUAL_NOVEL_PACKAGE_REF.id);
+    stageLocalWebPackage(historical);
+    const { generatedContent: _generated, ...artifact } = await createWebPackageOverlay(historical.ref, content);
+    expect(_generated).toBe(content);
+    clearLocalWebPackageSessionStaging();
+    stageLocalWebPackage(await buildLocalPackage('community', BUILTIN_VISUAL_NOVEL_PACKAGE_REF.id));
+    window.localStorage.setItem('arena.web-report-consent.v1.room.multi-choice', 'accepted');
+    await act(async () => root.render(
+      <ArenaWebReport key="multi-choice" roomId="multi-choice" ready content={content} webPackage={artifact}>
+        {(web, actions) => <section>{web}<div>{actions}</div></section>}
+      </ArenaWebReport>,
+    ));
+    await waitForReact(() => {
+      expect(container.querySelector('select')).toBeTruthy();
+    });
+    const confirm = [...container.querySelectorAll('button')].find((button) => button.textContent === '仍尝试使用此 Web 包')!;
+    expect(confirm.disabled).toBe(true);
+    expect(container.querySelector('iframe')).toBeNull();
+    const select = container.querySelector('select')!;
+    expect(select.textContent).toContain(BUILTIN_VISUAL_NOVEL_PACKAGE_REF.digest);
+    await act(async () => {
+      select.value = BUILTIN_VISUAL_NOVEL_PACKAGE_REF.digest;
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    expect(confirm.disabled).toBe(false);
+    expect(container.querySelector('iframe')).toBeNull();
+    await act(async () => confirm.click());
+    await waitForReact(() => {
+      expect(container.querySelector('iframe')).toBeTruthy();
+    });
     expect(artifact.packageRef).toEqual(historical.ref);
   });
 
