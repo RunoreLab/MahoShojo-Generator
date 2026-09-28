@@ -183,6 +183,22 @@ describe('canonical ZIP artifact and generic JSON Schema validation', () => {
     await expect(unpackWebPackageZip(archive)).rejects.toThrow();
   });
 
+  it('rejects undeclared ZIP files while tolerating required directory placeholders', async () => {
+    const { unzipSync, zipSync } = await import('fflate');
+    const base = await resolveWebPackage(ref);
+    const mtime = new Date('1980-01-01T00:00:00.000Z');
+    const entries = unzipSync(await packWebPackageZip(base));
+
+    entries['extra.txt'] = new TextEncoder().encode('not declared');
+    await expect(unpackWebPackageZip(zipSync(entries, { level: 6, mtime })))
+      .rejects.toThrow('未声明文件：extra.txt');
+
+    delete entries['extra.txt'];
+    entries['styles/'] = new Uint8Array();
+    await expect(unpackWebPackageZip(zipSync(entries, { level: 6, mtime })))
+      .resolves.toMatchObject({ ref: base.ref });
+  });
+
   it('rejects ZIP archives missing payload files or a valid manifest', async () => {
     const { unzipSync, zipSync } = await import('fflate');
     const base = await resolveWebPackage(ref);

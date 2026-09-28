@@ -38,11 +38,27 @@ export const unpackWebPackageZip = async (archive: Uint8Array): Promise<Verified
   }
   const rawFiles = (manifest as { files?: Array<{ path?: unknown }> }).files;
   if (!Array.isArray(rawFiles)) throw new Error(`Web Package ${WEB_PACKAGE_MANIFEST_PATH} 缺少 files`);
-  const files = rawFiles.map((file) => {
+  const filePaths = rawFiles.map((file) => {
     if (typeof file?.path !== 'string') throw new Error(`Web Package ${WEB_PACKAGE_MANIFEST_PATH} 文件条目非法`);
-    const bytes = entries[file.path];
-    if (!bytes) throw new Error(`Web Package ZIP 缺少文件：${file.path}`);
-    return { path: file.path, bytes };
+    return file.path;
+  });
+  const declaredPaths = new Set([WEB_PACKAGE_MANIFEST_PATH, ...filePaths]);
+  for (const [path, bytes] of Object.entries(entries)) {
+    if (declaredPaths.has(path)) continue;
+    // ZIP tools may emit empty parent-directory placeholders. They are archive
+    // metadata rather than package files, so allow only directories actually
+    // required by a declared file path.
+    if (
+      path.endsWith('/')
+      && bytes.byteLength === 0
+      && filePaths.some((filePath) => filePath.startsWith(path))
+    ) continue;
+    throw new Error(`Web Package ZIP 包含未声明文件：${path}`);
+  }
+  const files = filePaths.map((path) => {
+    const bytes = entries[path];
+    if (!bytes) throw new Error(`Web Package ZIP 缺少文件：${path}`);
+    return { path, bytes };
   });
   return verifyWebPackage(manifest, files);
 };
