@@ -346,7 +346,7 @@ describe('Arena companion service', () => {
   it('package snapshot replay preserves exact JSON and its artifact without interpreting it as a structured report', async () => {
     const source = ' {"title":"测试","scenes":[{"text":"故事"}]}\n';
     const webPackage = {
-      packageRef: { id: 'mahoshojo.visual-novel-lite', version: '1.0.0', digest: `sha256:${'a'.repeat(64)}` },
+      packageRef: { id: 'test.fixture', version: '1.0.0', digest: `sha256:${'a'.repeat(64)}` },
       targetPath: 'data/report.json', targetMediaType: 'application/json', generatedDigest: `sha256:${'b'.repeat(64)}`,
     };
     const service = createArenaCompanionService({

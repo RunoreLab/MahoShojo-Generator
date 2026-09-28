@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { WebPackageRef } from '@mahoshojo/contracts/web-package';
-import { BUILTIN_VISUAL_NOVEL_PACKAGE_REF, isBuiltinWebPackageRef } from '@mahoshojo/web-package';
+import { BUILTIN_ARENA_NEWS_PACKAGE_REF, isBuiltinWebPackageRef } from '@mahoshojo/web-package';
 
 import {
   ArenaRoomShareabilityError,
@@ -93,8 +93,8 @@ const source = (): ArenaRoomBattleStateSource => ({
 
 describe('Arena Room Battle store projection', () => {
   it('includes a Web package revision in the shared generation config only in Web mode', async () => {
-    const state = { ...source(), reportFormat: 'web' as const, webPackageRef: BUILTIN_VISUAL_NOVEL_PACKAGE_REF };
-    expect((await buildArenaRoomSharedConfigFromBattleState(state)).webPackageRef).toEqual(BUILTIN_VISUAL_NOVEL_PACKAGE_REF);
+    const state = { ...source(), reportFormat: 'web' as const, webPackageRef: BUILTIN_ARENA_NEWS_PACKAGE_REF };
+    expect((await buildArenaRoomSharedConfigFromBattleState(state)).webPackageRef).toEqual(BUILTIN_ARENA_NEWS_PACKAGE_REF);
     expect((await buildArenaRoomSharedConfigFromBattleState({ ...state, reportFormat: 'markdown' })).webPackageRef).toBeUndefined();
   });
 

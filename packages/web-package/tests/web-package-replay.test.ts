@@ -1,38 +1,26 @@
+import { createJsonPackage } from './helpers/json-package';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
-  BUILTIN_VISUAL_NOVEL_PACKAGE_REF as ref,
+  BUILTIN_ARENA_NEWS_PACKAGE_REF as ref,
   clearLocalWebPackageSessionStaging,
   createWebPackageOverlay,
   findWebPackageCandidateById,
   findWebPackageCandidatesById,
   listStagedLocalWebPackages,
   prepareWebPackageReplay,
-  resolveWebPackage,
   stageLocalWebPackage,
   unstageLocalWebPackage,
   verifyWebPackage,
 } from '../src';
 
-const story = JSON.stringify({ title: '重放故事', scenes: [{ text: '第一幕' }] });
+const record = JSON.stringify({ title: '重放记录', records: [{ value: '第一幕' }] });
 
-const buildLocalPackage = async (version: string) => {
-  const builtin = await resolveWebPackage(ref);
-  const manifest = {
-    ...builtin.manifest,
-    id: 'local.replay-package',
-    version,
-    name: `本地重放包 ${version}`,
-  };
-  return verifyWebPackage(manifest, manifest.files.map((file) => ({
-    path: file.path,
-    bytes: builtin.readFile(file.path)!,
-  })));
-};
+const buildLocalPackage = (version: string) => createJsonPackage(version, 'local.replay-package');
 
 const stageAndOverlay = async (version: string) => {
   const pkg = await buildLocalPackage(version);
   stageLocalWebPackage(pkg);
-  const overlay = await createWebPackageOverlay(pkg.ref, story);
+  const overlay = await createWebPackageOverlay(pkg.ref, record);
   return { pkg, overlay };
 };
 
@@ -44,10 +32,11 @@ describe('historical Web package replay', () => {
     clearLocalWebPackageSessionStaging();
   });
 
-  it('exact-restores a retained revision without compatibility warnings', async () => {
-    const { generatedContent, ...artifact } = await createWebPackageOverlay(ref, story);
+  it('exact-restores the current builtin revision without compatibility warnings', async () => {
+    const content = '<!doctype html><title>Exact replay</title>';
+    const { generatedContent, ...artifact } = await createWebPackageOverlay(ref, content);
     void generatedContent;
-    const outcome = await prepareWebPackageReplay({ artifact, generatedContent: story });
+    const outcome = await prepareWebPackageReplay({ artifact, generatedContent: content });
     expect(outcome.status).toBe('exact');
     expect(outcome.message).toBeUndefined();
     expect(outcome.instance?.base.ref).toEqual(ref);
@@ -62,14 +51,14 @@ describe('historical Web package replay', () => {
     const outcome = await prepareWebPackageReplay({ artifact, generatedContent });
     expect(outcome.status).toBe('missing-package');
     expect(outcome.candidateAvailable).toBe(false);
-    expect(outcome.fallbackText).toContain('重放故事');
+    expect(outcome.fallbackText).toContain('重放记录');
     expect(outcome.instance).toBeUndefined();
   });
 
   it('awaits explicit compatibility choice when only a same-id candidate is staged', async () => {
     const v1 = await buildLocalPackage('1.0.0');
     stageLocalWebPackage(v1);
-    const { generatedContent, ...artifact } = await createWebPackageOverlay(v1.ref, story);
+    const { generatedContent, ...artifact } = await createWebPackageOverlay(v1.ref, record);
     clearLocalWebPackageSessionStaging();
 
     const v2 = await buildLocalPackage('1.1.0');
@@ -144,7 +133,7 @@ describe('historical Web package replay', () => {
   it('rejects compatibility when target contract or content digest breaks', async () => {
     const v1 = await buildLocalPackage('1.0.0');
     stageLocalWebPackage(v1);
-    const { generatedContent, ...artifact } = await createWebPackageOverlay(v1.ref, story);
+    const { generatedContent, ...artifact } = await createWebPackageOverlay(v1.ref, record);
     clearLocalWebPackageSessionStaging();
     const v2 = await buildLocalPackage('1.1.0');
     stageLocalWebPackage(v2);
@@ -158,7 +147,7 @@ describe('historical Web package replay', () => {
     expect(brokenDigest.message).toContain('digest');
 
     const brokenPath = await prepareWebPackageReplay({
-      artifact: { ...artifact, targetPath: 'runtime/app.js' },
+      artifact: { ...artifact, targetPath: 'runtime/helper.js' },
       generatedContent,
       allowCompatibility: true,
     });
@@ -170,7 +159,7 @@ describe('historical Web package replay', () => {
   it('a higher incompatible candidate never shadows a lower compatible one', async () => {
     const v1 = await buildLocalPackage('1.0.0');
     stageLocalWebPackage(v1);
-    const { generatedContent, ...artifact } = await createWebPackageOverlay(v1.ref, story);
+    const { generatedContent, ...artifact } = await createWebPackageOverlay(v1.ref, record);
     clearLocalWebPackageSessionStaging();
 
     const v2 = await buildLocalPackage('1.1.0');
@@ -203,7 +192,7 @@ describe('historical Web package replay', () => {
   it('keeps historical provenance while rendering with a compatibility candidate', async () => {
     const v1 = await buildLocalPackage('1.0.0');
     stageLocalWebPackage(v1);
-    const overlay = await createWebPackageOverlay(v1.ref, story);
+    const overlay = await createWebPackageOverlay(v1.ref, record);
     const { generatedContent, ...artifact } = overlay;
     clearLocalWebPackageSessionStaging();
     const historical = structuredClone(artifact);

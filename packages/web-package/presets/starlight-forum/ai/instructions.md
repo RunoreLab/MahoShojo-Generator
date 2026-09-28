@@ -1,1 +1,0 @@
-将本场角色与情景创作为虚构社区。仅生成满足schema的JSON。title/subtitle为社区名称和简介；生成6至12条不同主题帖子，每条有角色化author、category、body和2至6条有来有回的replies。通过目击、讨论、日常和不同角色口吻展现完整故事，保留正式事实与winner，不伪造现实平台或真实用户。不要输出HTML或脚本。搜索、分类、收藏和详情由固定runtime实现，无需编写UI。

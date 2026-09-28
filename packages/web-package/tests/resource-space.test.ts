@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { stageJsonPackage } from './helpers/json-package';
+import { afterEach, describe, expect, it } from 'vitest';
 import {
   WEB_PACKAGE_INSTANCE_PREFIX,
   WEB_PACKAGE_SERVICE_WORKER_PATH,
@@ -11,21 +12,22 @@ import {
   resolveWebPackageInstancePath,
 } from '../src/resource-space';
 import {
-  BUILTIN_VISUAL_NOVEL_PACKAGE_REF,
+  clearLocalWebPackageSessionStaging,
   createWebPackageInstance,
   createWebPackageOverlay,
   digestWebPackageBytes,
-  resolveWebPackage,
   verifyWebPackage,
 } from '../src';
 
+afterEach(clearLocalWebPackageSessionStaging);
+
 const INSTANCE_ID = 'inst_0123456789abcdef';
 const encoder = new TextEncoder();
-const storyJson = JSON.stringify({ title: '新建目标', scenes: [{ text: '第一幕' }] });
+const recordJson = JSON.stringify({ title: '新建目标', records: [{ value: '第一幕' }] });
 
 const buildSnapshot = async (content: string) => {
-  const base = await resolveWebPackage(BUILTIN_VISUAL_NOVEL_PACKAGE_REF);
-  const overlay = await createWebPackageOverlay(BUILTIN_VISUAL_NOVEL_PACKAGE_REF, content);
+  const base = await stageJsonPackage();
+  const overlay = await createWebPackageOverlay(base.ref, content);
   const instance = await createWebPackageInstance(base, overlay);
   return createWebPackageResourceSnapshot(INSTANCE_ID, instance);
 };
@@ -36,9 +38,9 @@ describe('generic Web package resource space', () => {
       instanceId: INSTANCE_ID,
       path: 'index.html',
     });
-    expect(parseWebPackageInstancePath(`${WEB_PACKAGE_INSTANCE_PREFIX}${INSTANCE_ID}/runtime/app.js`)).toEqual({
+    expect(parseWebPackageInstancePath(`${WEB_PACKAGE_INSTANCE_PREFIX}${INSTANCE_ID}/runtime/helper.js`)).toEqual({
       instanceId: INSTANCE_ID,
-      path: 'runtime/app.js',
+      path: 'runtime/helper.js',
     });
     expect(parseWebPackageInstancePath(`${WEB_PACKAGE_INSTANCE_PREFIX}${INSTANCE_ID}/%E6%8A%A5%E5%91%8A.html`)).toEqual({
       instanceId: INSTANCE_ID,
@@ -66,17 +68,17 @@ describe('generic Web package resource space', () => {
   });
 
   it('serves relative JS, nested paths and the entry document from one instance URL space', async () => {
-    const snapshot = await buildSnapshot(JSON.stringify({ title: '资源空间', scenes: [{ text: '第一幕' }] }));
+    const snapshot = await buildSnapshot(JSON.stringify({ title: '资源空间', records: [{ value: '第一幕' }] }));
     const entryUrl = buildWebPackageInstanceUrl(INSTANCE_ID, snapshot.entry);
     expect(entryUrl).toBe(`${WEB_PACKAGE_INSTANCE_PREFIX}${INSTANCE_ID}/index.html`);
 
     for (const [path, mediaType] of [
       ['index.html', 'text/html'],
-      ['runtime/app.js', 'text/javascript'],
-      ['styles/app.css', 'text/css'],
-      ['assets/backdrop.svg', 'image/svg+xml'],
-      ['data/story.json', 'application/json'],
-      ['schemas/story.schema.json', 'application/json'],
+      ['runtime/helper.js', 'text/javascript'],
+      ['styles/base.css', 'text/css'],
+      ['assets/marker.svg', 'image/svg+xml'],
+      ['data/record.json', 'application/json'],
+      ['schemas/record.schema.json', 'application/json'],
     ] as const) {
       const pathname = `${WEB_PACKAGE_INSTANCE_PREFIX}${INSTANCE_ID}/${path}`;
       const resolved = resolveWebPackageInstancePath(snapshot, pathname);
@@ -95,33 +97,33 @@ describe('generic Web package resource space', () => {
     const html = createWebPackageResourceResponse(snapshot, `${WEB_PACKAGE_INSTANCE_PREFIX}${INSTANCE_ID}/index.html`);
     expect(html.headers.get('content-security-policy')).toBe('sandbox allow-scripts');
 
-    const js = createWebPackageResourceResponse(snapshot, `${WEB_PACKAGE_INSTANCE_PREFIX}${INSTANCE_ID}/runtime/app.js`);
+    const js = createWebPackageResourceResponse(snapshot, `${WEB_PACKAGE_INSTANCE_PREFIX}${INSTANCE_ID}/runtime/helper.js`);
     expect(js.headers.get('content-security-policy')).toBeNull();
     const jsText = await js.text();
-    expect(jsText).toContain('Visual Novel Lite');
+    expect(jsText).toContain('fixtureReady');
   });
 
   it('prefers the overlay target over the immutable base file without mutating base bytes', async () => {
-    const base = await resolveWebPackage(BUILTIN_VISUAL_NOVEL_PACKAGE_REF);
-    const baseStory = base.readFile('data/story.json')!;
-    const content = JSON.stringify({ title: 'overlay wins', scenes: [{ text: '新故事' }] });
-    const overlay = await createWebPackageOverlay(BUILTIN_VISUAL_NOVEL_PACKAGE_REF, content);
+    const base = await stageJsonPackage();
+    const baseRecord = base.readFile('data/record.json')!;
+    const content = JSON.stringify({ title: 'overlay wins', records: [{ value: '新故事' }] });
+    const overlay = await createWebPackageOverlay(base.ref, content);
     const instance = await createWebPackageInstance(base, overlay);
     const snapshot = createWebPackageResourceSnapshot(INSTANCE_ID, instance);
 
-    const targetPath = `${WEB_PACKAGE_INSTANCE_PREFIX}${INSTANCE_ID}/data/story.json`;
+    const targetPath = `${WEB_PACKAGE_INSTANCE_PREFIX}${INSTANCE_ID}/data/record.json`;
     const resolved = resolveWebPackageInstancePath(snapshot, targetPath)!;
     expect(new TextDecoder().decode(resolved.bytes)).toBe(content);
     expect(resolved.mediaType).toBe('application/json');
-    expect(base.readFile('data/story.json')).toEqual(baseStory);
-    expect(new TextDecoder().decode(base.readFile('data/story.json')!)).not.toContain('overlay wins');
+    expect(base.readFile('data/record.json')).toEqual(baseRecord);
+    expect(new TextDecoder().decode(base.readFile('data/record.json')!)).not.toContain('overlay wins');
 
-    const untouched = resolveWebPackageInstancePath(snapshot, `${WEB_PACKAGE_INSTANCE_PREFIX}${INSTANCE_ID}/runtime/app.js`)!;
-    expect(untouched.bytes).toEqual(base.readFile('runtime/app.js'));
+    const untouched = resolveWebPackageInstancePath(snapshot, `${WEB_PACKAGE_INSTANCE_PREFIX}${INSTANCE_ID}/runtime/helper.js`)!;
+    expect(untouched.bytes).toEqual(base.readFile('runtime/helper.js'));
   });
 
   it('returns 404 for unknown paths, foreign instance ids and non-instance URLs', async () => {
-    const snapshot = await buildSnapshot(JSON.stringify({ title: '仅本实例', scenes: [{ text: 'x' }] }));
+    const snapshot = await buildSnapshot(JSON.stringify({ title: '仅本实例', records: [{ value: 'x' }] }));
     for (const pathname of [
       `${WEB_PACKAGE_INSTANCE_PREFIX}${INSTANCE_ID}/missing/file.js`,
       `${WEB_PACKAGE_INSTANCE_PREFIX}${INSTANCE_ID}/`,
@@ -161,36 +163,36 @@ describe('generic Web package resource space', () => {
   });
 
   it('materializes an overlay-only target that is absent from the base manifest', async () => {
-    const base = await resolveWebPackage(BUILTIN_VISUAL_NOVEL_PACKAGE_REF);
+    const base = await stageJsonPackage();
     const manifest = {
       ...base.manifest,
-      generation: { ...base.manifest.generation, schema: undefined, target: 'new/story.json' },
+      generation: { ...base.manifest.generation, schema: undefined, target: 'new/record.json' },
     };
     const withNewTarget = await verifyWebPackage(manifest, manifest.files.map((file) => ({
       path: file.path,
       bytes: base.readFile(file.path)!,
     })));
-    expect(withNewTarget.readFile('new/story.json')).toBeUndefined();
+    expect(withNewTarget.readFile('new/record.json')).toBeUndefined();
     const overlay = {
       packageRef: withNewTarget.ref,
       targetPath: withNewTarget.manifest.generation.target,
       targetMediaType: withNewTarget.manifest.generation.mediaType,
-      generatedContent: storyJson,
-      generatedDigest: await digestWebPackageBytes(encoder.encode(storyJson)),
+      generatedContent: recordJson,
+      generatedDigest: await digestWebPackageBytes(encoder.encode(recordJson)),
     };
     const instance = await createWebPackageInstance(withNewTarget, overlay);
     const snapshot = createWebPackageResourceSnapshot(INSTANCE_ID, instance);
-    const pathname = `${WEB_PACKAGE_INSTANCE_PREFIX}${INSTANCE_ID}/new/story.json`;
+    const pathname = `${WEB_PACKAGE_INSTANCE_PREFIX}${INSTANCE_ID}/new/record.json`;
     expect(resolveWebPackageInstancePath(snapshot, pathname)).not.toBeNull();
     const response = createWebPackageResourceResponse(snapshot, pathname);
     expect(response.status).toBe(200);
     expect(response.headers.get('content-type')).toContain('application/json');
-    expect(await response.text()).toBe(storyJson);
+    expect(await response.text()).toBe(recordJson);
   });
 
   it('rejects snapshots when overlay identity drifts from the frozen base ref', async () => {
-    const base = await resolveWebPackage(BUILTIN_VISUAL_NOVEL_PACKAGE_REF);
-    const overlay = await createWebPackageOverlay(BUILTIN_VISUAL_NOVEL_PACKAGE_REF, JSON.stringify({ title: 't', scenes: [{ text: 's' }] }));
+    const base = await stageJsonPackage();
+    const overlay = await createWebPackageOverlay(base.ref, JSON.stringify({ title: 't', records: [{ value: 's' }] }));
     const instance = await createWebPackageInstance(base, overlay);
     expect(() => createWebPackageResourceSnapshot(INSTANCE_ID, {
       ...instance,
@@ -217,8 +219,8 @@ describe('generic Web package resource space', () => {
   });
 
   it('emits CORS headers on success and 404 so opaque sandbox fetches can read JSON/JS', async () => {
-    const snapshot = await buildSnapshot(JSON.stringify({ title: 'CORS', scenes: [{ text: 'x' }] }));
-    const ok = createWebPackageResourceResponse(snapshot, `${WEB_PACKAGE_INSTANCE_PREFIX}${INSTANCE_ID}/data/story.json`);
+    const snapshot = await buildSnapshot(JSON.stringify({ title: 'CORS', records: [{ value: 'x' }] }));
+    const ok = createWebPackageResourceResponse(snapshot, `${WEB_PACKAGE_INSTANCE_PREFIX}${INSTANCE_ID}/data/record.json`);
     expect(ok.headers.get('access-control-allow-origin')).toBe('*');
     const missing = createWebPackageResourceResponse(snapshot, `${WEB_PACKAGE_INSTANCE_PREFIX}${INSTANCE_ID}/missing.json`);
     expect(missing.status).toBe(404);
@@ -226,7 +228,7 @@ describe('generic Web package resource space', () => {
   });
 
   it('keeps foreign instance bytes out of this snapshot even when paths match', async () => {
-    const snapshot = await buildSnapshot(JSON.stringify({ title: '隔离', scenes: [{ text: '仅 A' }] }));
+    const snapshot = await buildSnapshot(JSON.stringify({ title: '隔离', records: [{ value: '仅 A' }] }));
     const otherPath = `${WEB_PACKAGE_INSTANCE_PREFIX}ffff/index.html`;
     expect(resolveWebPackageInstancePath(snapshot, otherPath)).toBeNull();
     expect(createWebPackageResourceResponse(snapshot, otherPath).status).toBe(404);

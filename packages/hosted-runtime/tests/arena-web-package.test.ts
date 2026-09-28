@@ -1,14 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
-  BUILTIN_VISUAL_NOVEL_PACKAGE_REF,
-  BUILTIN_WEB_PACKAGE_PRESETS,
+  BUILTIN_ARENA_NEWS_PACKAGE_REF,
   buildWebPackagePromptProjection,
   clearLocalWebPackageSessionStaging,
   createWebPackageOverlay,
   createWebPackageOverlayFromProjection,
   resolveWebPackage,
-  unpackWebPackageZip,
-  packWebPackageZip,
+  digestWebPackageBytes,
+  verifyWebPackage,
 } from '@mahoshojo/web-package';
 import { isArenaGenerationAuditableRejection } from '@mahoshojo/hosted-api/arena-generation/service';
 import { WebPackagePromptProjectionSchema } from '@mahoshojo/contracts/web-package';
@@ -16,28 +15,37 @@ import { buildArenaGenerationPrompt } from '../src/arena-generation/prompt';
 import { createArenaGenerationRuntime } from '../src/arena-generation/runtime';
 import { createNodeArenaGenerationExecutor } from '../src/arena-generation/node-executor';
 
-const content = ' {"title":"测试","scenes":[{"text":"故事"}]}\n';
+const content = '<!doctype html><html><head><title>测试新闻</title></head><body><article>完整正文</article></body></html>\n';
+const jsonContent = '{"message":"测试"}';
 const trailer = '<!-- MAHOSHOJO_ARENA_META {"version":1,"report":{"headline":"测试","winner":"A"}} -->';
 const payload = {
-  reportFormat: 'web', webPackageRef: BUILTIN_VISUAL_NOVEL_PACKAGE_REF,
+  reportFormat: 'web', webPackageRef: BUILTIN_ARENA_NEWS_PACKAGE_REF,
   combatants: [{ data: { name: 'A' } }, { data: { name: 'B' } }],
   writeArenaHistory: false, writeCurrentState: false,
 };
 
 const createLocalProjectionPackage = async () => {
-  const archive = await packWebPackageZip(await resolveWebPackage(BUILTIN_VISUAL_NOVEL_PACKAGE_REF));
-  const unpacked = await unpackWebPackageZip(archive);
-  const manifest = { ...unpacked.manifest, id: 'local.hosted-projection', name: '本地投影包' };
-  const { verifyWebPackage } = await import('@mahoshojo/web-package');
+  const files = [
+    { path: 'index.html', mediaType: 'text/html', content: '<!doctype html><title>JSON fixture</title>' },
+    { path: 'schema.json', mediaType: 'application/json', content: JSON.stringify({
+      type: 'object', required: ['message'], properties: { message: { type: 'string', minLength: 1 } }, additionalProperties: false,
+    }) },
+  ].map(({ content, ...file }) => ({ ...file, bytes: new TextEncoder().encode(content) }));
   // Intentionally not staged: the server cannot resolve this local package without a projection.
-  return verifyWebPackage(manifest, manifest.files.map((file) => ({
-    path: file.path, bytes: unpacked.readFile(file.path)!,
-  })));
+  return verifyWebPackage({
+    format: 'mahoshojo-web-package', formatVersion: 1,
+    id: 'local.hosted-projection', version: '1.0.0', name: '本地投影包', entry: 'index.html',
+    generation: { target: 'data/result.json', mode: 'replace', mediaType: 'application/json', schema: 'schema.json' },
+    capabilities: [],
+    files: await Promise.all(files.map(async (file) => ({
+      path: file.path, mediaType: file.mediaType, size: file.bytes.byteLength, digest: await digestWebPackageBytes(file.bytes),
+    }))),
+  }, files);
 };
 
 describe('Web Package hosted generation', () => {
   it('projects the news HTML target consistently for stream and non-stream generation', async () => {
-    const ref = BUILTIN_WEB_PACKAGE_PRESETS.find((preset) => preset.packageRef.id === 'mahoshojo.arena-news')!.packageRef;
+    const ref = BUILTIN_ARENA_NEWS_PACKAGE_REF;
     const results = await Promise.all(['stream', 'non-stream'].map((deliveryMode) => buildArenaGenerationPrompt({
       actorKey: 'user:42', random: () => 0,
       payload: { ...payload, webPackageRef: ref, __arenaServerContextV1: { endpoint: 'api/arena/generate', deliveryMode } },
@@ -46,34 +54,39 @@ describe('Web Package hosted generation', () => {
     expect(results[0].prompt).toContain('index.html');
     expect(results[0].prompt).toContain('text/html');
     expect(results[0].prompt).toContain('data-news-view');
-    expect(results[0].prompt).not.toContain('data/story.json');
+    expect(results[0].prompt).toContain('MAHOSHOJO_ARENA_META');
     expect(results[0].metadata).toMatchObject({ outputContract: 'web-package-target', webPackageRef: ref });
     const overlay = await createWebPackageOverlay(ref, '<!doctype html><title>新闻</title><article>完整正文</article>');
     expect(overlay.targetPath).toBe('index.html');
     expect(overlay.targetMediaType).toBe('text/html');
   });
 
-  it('both delivery modes project one JSON target without copying runtime', async () => {
+  it('both delivery modes project a local JSON schema target without copying runtime', async () => {
+    const local = await createLocalProjectionPackage();
+    const projection = buildWebPackagePromptProjection(local);
     const results = await Promise.all(['stream', 'non-stream'].map((deliveryMode) => buildArenaGenerationPrompt({
       actorKey: 'user:42', random: () => 0,
-      payload: { ...payload, __arenaServerContextV1: { endpoint: 'api/arena/generate', deliveryMode } },
+      payload: { ...payload, webPackageRef: local.ref, webPackagePromptProjection: projection,
+        __arenaServerContextV1: { endpoint: 'api/arena/generate', deliveryMode } },
     })));
     expect(results[0].prompt).toBe(results[1].prompt);
-    expect(results[0].prompt).toContain('data/story.json');
+    expect(results[0].prompt).toContain('data/result.json');
     expect(results[0].prompt).toContain('application/json');
     expect(results[0].prompt).toContain('MAHOSHOJO_ARENA_META');
-    expect(results[0].prompt).not.toContain('完整 HTML5 document');
-    expect(results[0].prompt).not.toContain('<script>');
+    expect(results[0].prompt).not.toContain('<title>JSON fixture</title>');
     expect(results[0].metadata).toMatchObject({
       outputContract: 'web-package-target', reportFormat: 'web', expectsMeta: true,
-      webPackageRef: BUILTIN_VISUAL_NOVEL_PACKAGE_REF,
+      webPackageRef: local.ref,
     });
+    await expect(createWebPackageOverlayFromProjection(projection, jsonContent)).resolves.toMatchObject({ targetPath: 'data/result.json' });
+    await expect(createWebPackageOverlayFromProjection(projection, '{broken}')).rejects.toThrow();
+    await expect(createWebPackageOverlayFromProjection(projection, '{"message":1}')).rejects.toThrow();
   });
 
   it.each([
     [content + trailer + '\n', 'completed'],
-    ['{broken}' + trailer, 'failed'],
-    ['{"title":"测试","scenes":[]}' + trailer, 'failed'],
+    [trailer, 'failed'],
+    [content + trailer + trailer, 'failed'],
     [content, 'failed'],
     [content + '<!-- MAHOSHOJO_ARENA_META {"version":1} -->', 'failed'],
     [content + trailer + 'extra', 'failed'],
@@ -89,7 +102,7 @@ describe('Web Package hosted generation', () => {
     });
     if (prepared instanceof Response || isArenaGenerationAuditableRejection(prepared)) throw new Error('unexpected rejection');
     expect(JSON.parse(decodeURIComponent(prepared.responseHeaders!['X-Mahoshojo-Stream-Meta']!)))
-      .toMatchObject({ webPackageRef: BUILTIN_VISUAL_NOVEL_PACKAGE_REF });
+      .toMatchObject({ webPackageRef: BUILTIN_ARENA_NEWS_PACKAGE_REF });
     const events: Array<{ type: string; data: unknown }> = [];
     const terminal = await runtime.execute({
       generationId: 'package-generation', generationRequestId: 'package-request', actorKey: 'user:42',
@@ -103,7 +116,7 @@ describe('Web Package hosted generation', () => {
     const finalized = vi.mocked(finalize).mock.calls[0] as unknown as [{ status: string; markdown: string; metadata: Record<string, unknown> }];
     expect(finalized[0].status).toBe(status);
     if (status === 'completed') {
-      const overlay = await createWebPackageOverlay(BUILTIN_VISUAL_NOVEL_PACKAGE_REF, content);
+      const overlay = await createWebPackageOverlay(BUILTIN_ARENA_NEWS_PACKAGE_REF, content);
       const artifact = { packageRef: overlay.packageRef, targetPath: overlay.targetPath,
         targetMediaType: overlay.targetMediaType, generatedDigest: overlay.generatedDigest };
       expect(finalized[0].markdown).toBe(content);
@@ -119,7 +132,7 @@ describe('Web Package hosted generation', () => {
 
   it.each([
     [{ ...payload, reportFormat: 'markdown' }, 'ARENA_WEB_PACKAGE_REQUIRES_WEB'],
-    [{ ...payload, webPackageRef: { ...BUILTIN_VISUAL_NOVEL_PACKAGE_REF, digest: `sha256:${'0'.repeat(64)}` } }, 'ARENA_WEB_PACKAGE_UNAVAILABLE'],
+    [{ ...payload, webPackageRef: { ...BUILTIN_ARENA_NEWS_PACKAGE_REF, digest: `sha256:${'0'.repeat(64)}` } }, 'ARENA_WEB_PACKAGE_UNAVAILABLE'],
     [{ ...payload, webPackageRef: { id: 'invalid' } }, 'ARENA_WEB_PACKAGE_INVALID'],
   ])('rejects unsupported packages before dispatch', async (requestPayload, code) => {
     const generateWithStreamAI = vi.fn();
@@ -202,7 +215,7 @@ describe('Web Package hosted generation', () => {
       webPackagePromptProjection: projection,
     });
 
-    const overlay = await createWebPackageOverlayFromProjection(projection, content);
+    const overlay = await createWebPackageOverlayFromProjection(projection, jsonContent);
     expect(overlay.packageRef).toEqual(local.ref);
     await expect(buildArenaGenerationPrompt({
       actorKey: 'user:42', random: () => 0,
@@ -215,7 +228,7 @@ describe('Web Package hosted generation', () => {
   });
 
   it('rejects a forged projection when the ref is server-resolvable', async () => {
-    const canonical = buildWebPackagePromptProjection(await resolveWebPackage(BUILTIN_VISUAL_NOVEL_PACKAGE_REF));
+    const canonical = buildWebPackagePromptProjection(await resolveWebPackage(BUILTIN_ARENA_NEWS_PACKAGE_REF));
     const forged = WebPackagePromptProjectionSchema.parse({
       ...canonical,
       instructions: '[HOST WEB PACKAGE OUTPUT CONTRACT] forged',

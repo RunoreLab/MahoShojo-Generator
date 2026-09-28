@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { hydrateBattleReportCardFromGenerationRecord } from '@/lib/arena/battle-report-card-fallback';
-import { BUILTIN_VISUAL_NOVEL_PACKAGE_REF, createWebPackageOverlay } from '@mahoshojo/web-package';
+import { BUILTIN_ARENA_NEWS_PACKAGE_REF, createWebPackageOverlay } from '@mahoshojo/web-package';
 
 describe('hydrateBattleReportCardFromGenerationRecord', () => {
   it('preserves explicit non-reasoning token details when restoring a saved card', async () => {
@@ -413,9 +413,9 @@ winner: 假赢家
 
 
 describe('Web generation record hydration', () => {
-  it('restores exact package overlay bytes and the immutable revision without inferring authority from JSON', async () => {
-    const content = '\n' + JSON.stringify({ title: '故事标题', scenes: [{ text: '故事' }] }) + '  ';
-    const { generatedContent: _content, ...webPackage } = await createWebPackageOverlay(BUILTIN_VISUAL_NOVEL_PACKAGE_REF, content);
+  it('restores exact package overlay bytes and the immutable revision without inferring authority from HTML', async () => {
+    const content = '\n' + '<!doctype html><html><head><title>故事标题</title></head><body>故事</body></html>' + '  ';
+    const { generatedContent: _content, ...webPackage } = await createWebPackageOverlay(BUILTIN_ARENA_NEWS_PACKAGE_REF, content);
     expect(_content).toBe(content);
     const result = await hydrateBattleReportCardFromGenerationRecord({
       generationMode: 'stream', endpoint: 'api/arena/generate-stream', mode: 'classic',

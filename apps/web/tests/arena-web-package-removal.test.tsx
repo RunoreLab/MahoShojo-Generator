@@ -4,7 +4,7 @@ import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { expect, it } from 'vitest';
 import {
-  BUILTIN_VISUAL_NOVEL_PACKAGE_REF, clearLocalWebPackageSessionStaging,
+  BUILTIN_ARENA_NEWS_PACKAGE_REF, clearLocalWebPackageSessionStaging,
   listStagedLocalWebPackages, resolveWebPackage, stageLocalWebPackage, verifyWebPackage,
 } from '@mahoshojo/web-package';
 import { putWebPackageArchiveCache, readWebPackageArchiveCache, deleteWebPackageArchiveCache } from '@/lib/web-package/cache';
@@ -13,7 +13,7 @@ import { SoloArenaWebPackageSection } from '@/components/arena/editor/features/w
 
 it('移除本地包只取消选择，保留 session staging 与持久缓存供历史重放', async () => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-  const builtin = await resolveWebPackage(BUILTIN_VISUAL_NOVEL_PACKAGE_REF);
+  const builtin = await resolveWebPackage(BUILTIN_ARENA_NEWS_PACKAGE_REF);
   const manifest = { ...builtin.manifest, id: 'local.removal-test', name: '可保留本地包' };
   const local = await verifyWebPackage(manifest, manifest.files.map((file) => ({
     path: file.path, bytes: builtin.readFile(file.path)!,

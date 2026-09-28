@@ -316,7 +316,7 @@ describe('Arena Room generation coordinator', () => {
   it.each(['markdown', 'package'])('active member 可读取当前 epoch ledger 中的历史终态，不 resume 或改写 current generation (%s)', async (format) => {
     const harness = await createHarness();
     const webPackage = {
-      packageRef: { id: 'mahoshojo.visual-novel-lite', version: '1.0.0', digest: `sha256:${'a'.repeat(64)}` },
+      packageRef: { id: 'test.fixture', version: '1.0.0', digest: `sha256:${'a'.repeat(64)}` },
       targetPath: 'data/report.json', targetMediaType: 'application/json' as const, generatedDigest: `sha256:${'b'.repeat(64)}`,
     };
     await prepareHistoricalGeneration(harness);

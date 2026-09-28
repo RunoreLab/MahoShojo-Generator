@@ -438,7 +438,7 @@ describe('Arena D1/R2 finalization ports', () => {
 
   it('preserves package identity and overlay digest through compact snapshot and room replay', async () => {
     const webPackage = {
-      packageRef: { id: 'mahoshojo.visual-novel-lite', version: '1.0.0', digest: `sha256:${'a'.repeat(64)}` },
+      packageRef: { id: 'test.fixture', version: '1.0.0', digest: `sha256:${'a'.repeat(64)}` },
       targetPath: 'data/report.json', targetMediaType: 'application/json', generatedDigest: `sha256:${'b'.repeat(64)}`,
     };
     const client = sequentialD1([result([], 1)]);

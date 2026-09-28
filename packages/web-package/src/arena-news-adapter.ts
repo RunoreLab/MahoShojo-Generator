@@ -1,14 +1,10 @@
 import type { WebPackageRef } from '@mahoshojo/contracts/web-package';
-import { PRESET_METADATA } from './generated/preset-metadata';
+import { BUILTIN_ARENA_NEWS_PACKAGE_REF as newsRef } from './registry';
 
 const decoder = new TextDecoder('utf-8', { fatal: true });
-const news = PRESET_METADATA.find((preset) => preset.packageRef.id === 'mahoshojo.arena-news');
 
 /** A presentation capability for one verified first-party revision, not a local-package resolver. */
-export const canRenderArenaNewsSrcdoc = (ref: WebPackageRef): boolean => Boolean(news
-  && ref.id === news.packageRef.id
-  && ref.version === news.packageRef.version
-  && ref.digest === news.packageRef.digest);
+export const canRenderArenaNewsSrcdoc = (ref: WebPackageRef): boolean => (ref.id === newsRef.id && ref.version === newsRef.version && ref.digest === newsRef.digest);
 
 const packagePath = (reference: string): { path: string; fragment: string } | null => {
   const value = reference.trim();

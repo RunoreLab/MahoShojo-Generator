@@ -412,7 +412,7 @@ describe('Arena Room generation internal port', () => {
   it.each(['markdown', 'package'])('strictly projects only the completed durable Room-safe result allowlist (%s)', async (format) => {
     const packageFields = format === 'package' ? {
       webPackage: {
-        packageRef: { id: 'mahoshojo.visual-novel-lite', version: '1.0.0', digest: `sha256:${'a'.repeat(64)}` },
+        packageRef: { id: 'test.fixture', version: '1.0.0', digest: `sha256:${'a'.repeat(64)}` },
         targetPath: 'data/report.json', targetMediaType: 'application/json' as const, generatedDigest: `sha256:${'b'.repeat(64)}`,
       },
     } : {};

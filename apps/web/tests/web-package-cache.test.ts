@@ -1,7 +1,7 @@
 import '@/tests/helpers/fake-indexeddb';
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
-  BUILTIN_VISUAL_NOVEL_PACKAGE_REF,
+  BUILTIN_ARENA_NEWS_PACKAGE_REF,
   clearLocalWebPackageSessionStaging,
   listStagedLocalWebPackages,
   packWebPackageZip,
@@ -18,7 +18,7 @@ import {
 } from '@/lib/web-package/cache';
 
 const createLocalPackage = async () => {
-  const archive = await packWebPackageZip(await resolveWebPackage(BUILTIN_VISUAL_NOVEL_PACKAGE_REF));
+  const archive = await packWebPackageZip(await resolveWebPackage(BUILTIN_ARENA_NEWS_PACKAGE_REF));
   const unpacked = await unpackWebPackageZip(archive);
   const manifest = { ...unpacked.manifest, id: 'local.cache-test', name: '缓存测试包' };
   const { verifyWebPackage } = await import('@mahoshojo/web-package');

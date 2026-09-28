@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ArenaWebPackageSection } from '@/components/arena/editor/features/web-package/ArenaWebPackageSection';
 import type { ArenaWebPackageSectionModel } from '@/components/arena/editor/features/web-package/web-package-contract';
-import { BUILTIN_VISUAL_NOVEL_PACKAGE_REF } from '@mahoshojo/web-package';
+import { BUILTIN_ARENA_NEWS_PACKAGE_REF } from '@mahoshojo/web-package';
 
 let container: HTMLDivElement;
 let root: Root;
@@ -15,11 +15,11 @@ const model = (overrides: Partial<ArenaWebPackageSectionModel> = {}): ArenaWebPa
   active: true,
   selected: null,
   options: [{
-    digest: BUILTIN_VISUAL_NOVEL_PACKAGE_REF.digest,
-    title: 'Visual Novel Lite',
+    digest: BUILTIN_ARENA_NEWS_PACKAGE_REF.digest,
+    title: '竞技场新闻',
     kind: 'builtin',
-    ref: BUILTIN_VISUAL_NOVEL_PACKAGE_REF,
-    summary: '内置视觉小说阅读器',
+    ref: BUILTIN_ARENA_NEWS_PACKAGE_REF,
+    summary: '新闻网站创作资源',
   }],
   localSummary: null,
   importError: null,
@@ -67,9 +67,9 @@ describe('ArenaWebPackageSection', () => {
     const download = container.querySelector<HTMLButtonElement>('[title="下载 Web 包 ZIP"]')!;
     expect(download.disabled).toBe(false);
     await act(async () => download.click());
-    expect(input.actions.downloadPreset).toHaveBeenCalledWith(BUILTIN_VISUAL_NOVEL_PACKAGE_REF.digest);
+    expect(input.actions.downloadPreset).toHaveBeenCalledWith(BUILTIN_ARENA_NEWS_PACKAGE_REF.digest);
     expect(input.actions.select).not.toHaveBeenCalled();
-    expect(container.querySelector<HTMLButtonElement>('[aria-label="选择Web 包：Visual Novel Lite"]')!.disabled).toBe(true);
+    expect(container.querySelector<HTMLButtonElement>('[aria-label="选择Web 包：竞技场新闻"]')!.disabled).toBe(true);
   });
 
   it('点击当前选中的卡片回到自由 Web', async () => {
@@ -90,17 +90,17 @@ describe('ArenaWebPackageSection', () => {
     await render(model());
     expect(container.querySelector('[data-testid="arena-web-package-selected"]')?.textContent)
       .toBe('自由生成网页（未选择 Web 包）');
-    expect(container.querySelector('[aria-label="选择Web 包：Visual Novel Lite"]')).toBeTruthy();
+    expect(container.querySelector('[aria-label="选择Web 包：竞技场新闻"]')).toBeTruthy();
     expect(container.textContent).not.toContain('禁用包');
   });
 
   it('多人能力关闭时不展示本地导入入口与预设下载按钮', async () => {
     await render(model({
       selected: {
-        digest: BUILTIN_VISUAL_NOVEL_PACKAGE_REF.digest,
-        title: 'Visual Novel Lite',
+        digest: BUILTIN_ARENA_NEWS_PACKAGE_REF.digest,
+        title: '竞技场新闻',
         kind: 'builtin',
-        ref: BUILTIN_VISUAL_NOVEL_PACKAGE_REF,
+        ref: BUILTIN_ARENA_NEWS_PACKAGE_REF,
       },
       capabilities: {
         importLocal: false,
@@ -118,10 +118,10 @@ describe('ArenaWebPackageSection', () => {
   it('单人能力开启时展示导入与独立下载按钮，并暴露失败原因', async () => {
     await render(model({
       selected: {
-        digest: BUILTIN_VISUAL_NOVEL_PACKAGE_REF.digest,
-        title: 'Visual Novel Lite',
+        digest: BUILTIN_ARENA_NEWS_PACKAGE_REF.digest,
+        title: '竞技场新闻',
         kind: 'builtin',
-        ref: BUILTIN_VISUAL_NOVEL_PACKAGE_REF,
+        ref: BUILTIN_ARENA_NEWS_PACKAGE_REF,
       },
       importError: 'ZIP 结构不合法',
       capabilities: {

@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { BUILTIN_VISUAL_NOVEL_PACKAGE_REF } from '@mahoshojo/web-package';
+import { BUILTIN_ARENA_NEWS_PACKAGE_REF } from '@mahoshojo/web-package';
 import {
   createArenaRoomGenerationMaterializer,
   type ArenaRoomGenerationCanonicalContent,
@@ -144,7 +144,7 @@ const createHarness = () => {
 describe('Arena Room authoritative generation materializer', () => {
   it.each(['markdown', 'web'] as const)('仅从 frozen Shared Config 重建角色/引导/队伍/情景/素材/历史语义 (%s)', async (reportFormat) => {
     const harness = createHarness();
-    const webPackageRef = BUILTIN_VISUAL_NOVEL_PACKAGE_REF;
+    const webPackageRef = BUILTIN_ARENA_NEWS_PACKAGE_REF;
     const config = { ...sharedConfig(), reportFormat, ...(reportFormat === 'web' ? { webPackageRef } : {}) };
     const payload = await harness.materializer.materialize({
       sharedConfig: config,

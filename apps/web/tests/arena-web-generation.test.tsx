@@ -27,7 +27,7 @@ vi.mock('@/lib/arena/resumable-generation-client', async (importOriginal) => ({
 
 import { useBattleEngine } from '@/components/arena/hooks/useBattleEngine';
 import { useBattleStore } from '@/components/arena/stores/useBattleStore';
-import { BUILTIN_VISUAL_NOVEL_PACKAGE_REF, createWebPackageOverlay } from '@mahoshojo/web-package';
+import { BUILTIN_ARENA_NEWS_PACKAGE_REF, createWebPackageOverlay } from '@mahoshojo/web-package';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 let current: ReturnType<typeof useBattleEngine>;
@@ -98,30 +98,30 @@ describe('Markdown completion follows the authoritative terminal', () => {
 
 describe('single-player Web generation integration', () => {
   it('freezes a package ref and preserves exact overlay bytes across stream completion', async () => {
-    const content = ' \n' + JSON.stringify({ title: '故事', scenes: [{ text: 'SHIELD 原始故事' }] }) + '\n ';
-    const { generatedContent: _content, ...artifact } = await createWebPackageOverlay(BUILTIN_VISUAL_NOVEL_PACKAGE_REF, content);
+    const content = ' \n' + '<!doctype html><html><head><title>故事</title></head><body>SHIELD 原始故事</body></html>' + '\n ';
+    const { generatedContent: _content, ...artifact } = await createWebPackageOverlay(BUILTIN_ARENA_NEWS_PACKAGE_REF, content);
     expect(_content).toBe(content);
-    await act(async () => useBattleStore.getState().setWebPackageRef(BUILTIN_VISUAL_NOVEL_PACKAGE_REF));
+    await act(async () => useBattleStore.getState().setWebPackageRef(BUILTIN_ARENA_NEWS_PACKAGE_REF));
     mocks.openStream.mockResolvedValue(new Response(
       sse('markdown', { chunk: content }) + sse('done', { status: 'completed', ok: true, webPackage: artifact }),
-      { headers: { ...streamHeaders, 'x-mahoshojo-stream-meta': encodeURIComponent(JSON.stringify({ outputContract: 'web-package-target', reportFormat: 'web', webPackageRef: BUILTIN_VISUAL_NOVEL_PACKAGE_REF })) } },
+      { headers: { ...streamHeaders, 'x-mahoshojo-stream-meta': encodeURIComponent(JSON.stringify({ outputContract: 'web-package-target', reportFormat: 'web', webPackageRef: BUILTIN_ARENA_NEWS_PACKAGE_REF })) } },
     ));
     await act(async () => current.handleGenerate());
-    expect(mocks.openStream.mock.calls[0][0].body.webPackageRef).toEqual(BUILTIN_VISUAL_NOVEL_PACKAGE_REF);
+    expect(mocks.openStream.mock.calls[0][0].body.webPackageRef).toEqual(BUILTIN_ARENA_NEWS_PACKAGE_REF);
     expect(useBattleStore.getState()).toMatchObject({ streamingMarkdown: content, resultWebPackage: artifact, resultWebReady: true });
   });
 
   it('keeps package content inert when a completed stream omits its artifact', async () => {
-    await act(async () => useBattleStore.getState().setWebPackageRef(BUILTIN_VISUAL_NOVEL_PACKAGE_REF));
+    await act(async () => useBattleStore.getState().setWebPackageRef(BUILTIN_ARENA_NEWS_PACKAGE_REF));
     mocks.openStream.mockResolvedValue(new Response(sse('markdown', { chunk: source }) + sse('done', { status: 'completed', ok: true }), {
-      headers: { ...streamHeaders, 'x-mahoshojo-stream-meta': encodeURIComponent(JSON.stringify({ outputContract: 'web-package-target', reportFormat: 'web', webPackageRef: BUILTIN_VISUAL_NOVEL_PACKAGE_REF })) },
+      headers: { ...streamHeaders, 'x-mahoshojo-stream-meta': encodeURIComponent(JSON.stringify({ outputContract: 'web-package-target', reportFormat: 'web', webPackageRef: BUILTIN_ARENA_NEWS_PACKAGE_REF })) },
     }));
     await act(async () => current.handleGenerate());
     expect(useBattleStore.getState().resultWebReady).toBe(false);
   });
 
   it('uses a recovered generation contract instead of the current package selection', async () => {
-    await act(async () => useBattleStore.getState().setWebPackageRef(BUILTIN_VISUAL_NOVEL_PACKAGE_REF));
+    await act(async () => useBattleStore.getState().setWebPackageRef(BUILTIN_ARENA_NEWS_PACKAGE_REF));
     mocks.openStream.mockResolvedValue(new Response(
       sse('snapshot', { markdown: source, status: 'completed' }) + sse('done', { status: 'completed', ok: true }),
       { headers: streamHeaders },
@@ -131,7 +131,7 @@ describe('single-player Web generation integration', () => {
   });
 
   it('restores a persisted package snapshot without stream metadata headers and preserves original bytes', async () => {
-    const { generatedContent: content, ...artifact } = await createWebPackageOverlay(BUILTIN_VISUAL_NOVEL_PACKAGE_REF, ' \n' + JSON.stringify({ title: '历史故事', scenes: [{ text: 'SHIELD 原始数据' }] }) + '\n ');
+    const { generatedContent: content, ...artifact } = await createWebPackageOverlay(BUILTIN_ARENA_NEWS_PACKAGE_REF, ' \n' + '<!doctype html><html><head><title>历史故事</title></head><body>SHIELD 原始数据</body></html>' + '\n ');
     await act(async () => useBattleStore.getState().setReportFormat('markdown'));
     mocks.openStream.mockResolvedValue(new Response(
       sse('snapshot', { markdown: content, status: 'completed' }) + sse('done', { status: 'completed', ok: true, webPackage: artifact }),
@@ -142,17 +142,17 @@ describe('single-player Web generation integration', () => {
   });
 
   it('preserves a non-stream package descriptor and clears selection when returning to Markdown', async () => {
-    const content = JSON.stringify({ title: '故事', scenes: [{ text: 'SHIELD 原始故事' }] });
-    const { generatedContent: _content, ...webPackage } = await createWebPackageOverlay(BUILTIN_VISUAL_NOVEL_PACKAGE_REF, content);
+    const content = '<!doctype html><html><head><title>故事</title></head><body>SHIELD 原始故事</body></html>';
+    const { generatedContent: _content, ...webPackage } = await createWebPackageOverlay(BUILTIN_ARENA_NEWS_PACKAGE_REF, content);
     expect(_content).toBe(content);
     await act(async () => {
       useBattleStore.getState().setGenerationMode('non-stream');
-      useBattleStore.getState().setWebPackageRef(BUILTIN_VISUAL_NOVEL_PACKAGE_REF);
+      useBattleStore.getState().setWebPackageRef(BUILTIN_ARENA_NEWS_PACKAGE_REF);
     });
     const report = { reportFormat: 'web', webPackage, headline: '故事', article: { body: content, analysis: '' }, officialReport: { winner: '角色甲', conclusion: '' }, reporterInfo: { name: '记者', publication: 'Arena' } };
     mocks.dispatch.mockResolvedValue(Response.json({ report, updatedCombatants: [], generationId: 'generation-package' }));
     await act(async () => current.handleGenerate());
-    expect(JSON.parse(mocks.dispatch.mock.calls[0][1].body).webPackageRef).toEqual(BUILTIN_VISUAL_NOVEL_PACKAGE_REF);
+    expect(JSON.parse(mocks.dispatch.mock.calls[0][1].body).webPackageRef).toEqual(BUILTIN_ARENA_NEWS_PACKAGE_REF);
     expect(useBattleStore.getState()).toMatchObject({ newsReport: report, resultWebPackage: webPackage, resultWebReady: true });
     await act(async () => useBattleStore.getState().setReportFormat('markdown'));
     expect(useBattleStore.getState().webPackageRef).toBeNull();

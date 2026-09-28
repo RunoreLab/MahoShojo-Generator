@@ -1,7 +1,7 @@
 import '@/tests/helpers/fake-indexeddb';
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
-  BUILTIN_VISUAL_NOVEL_PACKAGE_REF,
+  BUILTIN_ARENA_NEWS_PACKAGE_REF,
   WEB_PACKAGE_INSTANCE_PREFIX,
   createWebPackageInstance,
   createWebPackageOverlay,
@@ -21,11 +21,11 @@ import {
 } from '@/lib/web-package/instance-store';
 import { handleWebPackageResourceRequest } from '@/lib/web-package/resource-handler';
 
-const story = JSON.stringify({ title: '实例存储', scenes: [{ text: '第一幕' }] });
+const htmlContent = '<!doctype html><html><head><title>实例存储</title></head><body>第一幕</body></html>';
 
 const buildSnapshot = async (instanceId: string) => {
-  const base = await resolveWebPackage(BUILTIN_VISUAL_NOVEL_PACKAGE_REF);
-  const overlay = await createWebPackageOverlay(BUILTIN_VISUAL_NOVEL_PACKAGE_REF, story);
+  const base = await resolveWebPackage(BUILTIN_ARENA_NEWS_PACKAGE_REF);
+  const overlay = await createWebPackageOverlay(BUILTIN_ARENA_NEWS_PACKAGE_REF, htmlContent);
   const instance = await createWebPackageInstance(base, overlay);
   return createWebPackageResourceSnapshot(instanceId, instance);
 };
@@ -44,20 +44,20 @@ describe('Web package instance store and resource handler', () => {
     expect(loaded!.packageRef).toEqual(snapshot.packageRef);
     expect([...loaded!.files.keys()].sort()).toEqual([...snapshot.files.keys()].sort());
 
-    const storyFile = loaded!.files.get('data/story.json')!;
-    expect(new TextDecoder().decode(storyFile.bytes)).toBe(story);
-    expect(storyFile.mediaType).toBe('application/json');
+    const targetFile = loaded!.files.get('index.html')!;
+    expect(new TextDecoder().decode(targetFile.bytes)).toBe(htmlContent);
+    expect(targetFile.mediaType).toBe('text/html');
 
     const record = serializeWebPackageResourceSnapshot(snapshot);
     const restored = deserializeWebPackageInstanceRecord(record);
-    expect(restored.files.get('runtime/app.js')!.bytes).toEqual(snapshot.files.get('runtime/app.js')!.bytes);
+    expect(restored.files.get('scripts/news.js')!.bytes).toEqual(snapshot.files.get('scripts/news.js')!.bytes);
   });
 
   it('serves nested relative paths and rejects unknown or foreign instance paths', async () => {
     const snapshot = await buildSnapshot('inst_handler');
     await putWebPackageInstance(snapshot);
 
-    const nested = `${WEB_PACKAGE_INSTANCE_PREFIX}inst_handler/styles/app.css`;
+    const nested = `${WEB_PACKAGE_INSTANCE_PREFIX}inst_handler/styles/news.css`;
     const css = await handleWebPackageResourceRequest(nested);
     expect(css.status).toBe(200);
     expect(css.headers.get('content-type')).toContain('text/css');
@@ -90,10 +90,10 @@ describe('Web package instance store and resource handler', () => {
   });
 
   it('serves overlay-only targets and garbage-collects stale instances', async () => {
-    const base = await resolveWebPackage(BUILTIN_VISUAL_NOVEL_PACKAGE_REF);
+    const base = await resolveWebPackage(BUILTIN_ARENA_NEWS_PACKAGE_REF);
     const manifest = {
       ...base.manifest,
-      generation: { ...base.manifest.generation, schema: undefined, target: 'new/story.json' },
+      generation: { ...base.manifest.generation, schema: undefined, target: 'new/article.html' },
     };
     const withNewTarget = await verifyWebPackage(manifest, manifest.files.map((file) => ({
       path: file.path,
@@ -103,15 +103,15 @@ describe('Web package instance store and resource handler', () => {
       packageRef: withNewTarget.ref,
       targetPath: withNewTarget.manifest.generation.target,
       targetMediaType: withNewTarget.manifest.generation.mediaType,
-      generatedContent: story,
-      generatedDigest: await digestWebPackageBytes(new TextEncoder().encode(story)),
+      generatedContent: htmlContent,
+      generatedDigest: await digestWebPackageBytes(new TextEncoder().encode(htmlContent)),
     };
     const instance = await createWebPackageInstance(withNewTarget, overlay);
     const snapshot = createWebPackageResourceSnapshot('inst_new_target', instance);
     await putWebPackageInstance(snapshot);
-    const created = await handleWebPackageResourceRequest(`${WEB_PACKAGE_INSTANCE_PREFIX}inst_new_target/new/story.json`);
+    const created = await handleWebPackageResourceRequest(`${WEB_PACKAGE_INSTANCE_PREFIX}inst_new_target/new/article.html`);
     expect(created.status).toBe(200);
-    expect(await created.text()).toBe(story);
+    expect(await created.text()).toBe(htmlContent);
 
     await putWebPackageInstance(await buildSnapshot('inst_stale'));
     expect(await readWebPackageInstance('inst_stale')).not.toBeNull();

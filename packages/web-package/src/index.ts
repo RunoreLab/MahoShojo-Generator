@@ -13,7 +13,7 @@ import {
 } from '@mahoshojo/contracts/web-package';
 import { assertJsonSchema202012, preflightWebPackageJsonSchema } from './json-schema';
 import {
-  BUILTIN_WEB_PACKAGE_REVISIONS,
+  BUILTIN_WEB_PACKAGE_PRESETS,
   findBuiltinWebPackagePreset,
   isBuiltinWebPackageRegistryRef,
 } from './registry';
@@ -24,7 +24,7 @@ import {
 } from './verify';
 import { getStagedLocalWebPackage, listStagedLocalWebPackages } from './session-staging';
 
-export { BUILTIN_VISUAL_NOVEL_PACKAGE_REF } from './visual-novel-v1';
+export { BUILTIN_ARENA_NEWS_PACKAGE_REF } from './registry';
 export {
   BUILTIN_WEB_PACKAGE_PRESETS,
   findBuiltinWebPackagePreset,
@@ -34,7 +34,7 @@ export {
 export { packWebPackageZip, unpackWebPackageZip } from './zip';
 export { assertJsonSchema202012 } from './json-schema';
 export { canonicalizeWebPackageManifest, digestWebPackageBytes, verifyWebPackage } from './verify';
-export { canRenderBuiltinVisualNovelSrcdoc, renderBuiltinVisualNovelSrcdoc, canRenderBuiltinWebPackageSrcdoc, renderBuiltinWebPackageSrcdoc } from './visual-novel-adapter';
+export { canRenderBuiltinWebPackageSrcdoc, renderBuiltinWebPackageSrcdoc } from './builtin-adapter';
 export {
   WEB_PACKAGE_INSTANCE_PREFIX,
   WEB_PACKAGE_RESOURCE_CORS_ORIGIN,
@@ -84,7 +84,7 @@ const sameRef = (left: WebPackageRef, right: WebPackageRef): boolean => (
 );
 
 /**
- * Resolve the exact retained revision; never select a latest version by id.
+ * Resolve the exact registered revision; never select a latest version by id.
  * Staged locals win over an equal-identity builtin so re-import exercises the local path.
  */
 export const resolveWebPackage = async (input: WebPackageRef): Promise<ResolvedWebPackage> => {
@@ -310,7 +310,7 @@ export const findWebPackageCandidatesById = async (
       || compareLabels(left.ref.digest, right.ref.digest)
     ));
   const builtins: ResolvedWebPackage[] = [];
-  for (const preset of BUILTIN_WEB_PACKAGE_REVISIONS) {
+  for (const preset of BUILTIN_WEB_PACKAGE_PRESETS) {
     if (preset.packageRef.id !== packageId) continue;
     try {
       const pkg = await resolveWebPackage(preset.packageRef);

@@ -351,7 +351,7 @@ const createService = (
 describe('Arena generation lifecycle service', () => {
   test('preserves package artifact for live, retained and durable snapshot replay without redispatch', async () => {
     const webPackage = {
-      packageRef: { id: 'mahoshojo.visual-novel-lite', version: '1.0.0', digest: `sha256:${'a'.repeat(64)}` },
+      packageRef: { id: 'test.fixture', version: '1.0.0', digest: `sha256:${'a'.repeat(64)}` },
       targetPath: 'data/report.json', targetMediaType: 'application/json' as const, generatedDigest: `sha256:${'b'.repeat(64)}`,
     };
     const content = ' {"title":"测试","scenes":[{"text":"故事"}]}\n';

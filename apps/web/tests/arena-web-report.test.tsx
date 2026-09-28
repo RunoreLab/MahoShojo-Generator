@@ -9,7 +9,7 @@ import { downloadBlob } from '@/lib/client/blobUrl';
 import { BattleResultPresentation } from '@/components/arena/components/BattleResultPresentation';
 import { BaseModal } from '@/components/shared/BaseModal';
 import {
-  BUILTIN_VISUAL_NOVEL_PACKAGE_REF,
+  BUILTIN_ARENA_NEWS_PACKAGE_REF,
   BUILTIN_WEB_PACKAGE_PRESETS,
   clearLocalWebPackageSessionStaging,
   createWebPackageOverlay,
@@ -101,7 +101,7 @@ afterEach(async () => {
 });
 
 const buildLocalPackage = async (version: string, id = 'local.ui-replay-package') => {
-  const builtin = await resolveWebPackage(BUILTIN_VISUAL_NOVEL_PACKAGE_REF);
+  const builtin = await resolveWebPackage(BUILTIN_ARENA_NEWS_PACKAGE_REF);
   const manifest = {
     ...builtin.manifest,
     id,
@@ -142,7 +142,7 @@ describe('Web 战报的本地执行许可', () => {
     expect(container.querySelector<HTMLButtonElement>('[title="下载 Web 包 ZIP"]')!.disabled).toBe(false);
   });
 
-  it.each(BUILTIN_WEB_PACKAGE_PRESETS.filter((preset) => preset.packageRef.id !== BUILTIN_VISUAL_NOVEL_PACKAGE_REF.id))(
+  it.each(BUILTIN_WEB_PACKAGE_PRESETS)(
     'executes the $title preset through the real Arena report consumer', async ({ packageRef }) => {
       const base = await resolveWebPackage(packageRef);
       const content = '<!doctype html><html><head><title>独立创作的竞技场新闻</title><link rel="stylesheet" href="styles/tokens.css"></head><body><h1>独立创作的竞技场新闻</h1></body></html>';
@@ -163,9 +163,9 @@ describe('Web 战报的本地执行许可', () => {
     },
   );
 
-  it('validates a package before consent, keeps JSON fallback inert, and exports the generated target', async () => {
-    const content = JSON.stringify({ title: '包故事', scenes: [{ text: '<script>unsafe()</script>' }] });
-    const { generatedContent: _content, ...artifact } = await createWebPackageOverlay(BUILTIN_VISUAL_NOVEL_PACKAGE_REF, content);
+  it('validates a package before consent, keeps HTML fallback inert, and exports the generated target', async () => {
+    const content = '<!doctype html><html><head><title>包故事</title></head><body><script>unsafe()</script></body></html>';
+    const { generatedContent: _content, ...artifact } = await createWebPackageOverlay(BUILTIN_ARENA_NEWS_PACKAGE_REF, content);
     expect(_content).toBe(content);
     const render = (ready: boolean, override = artifact) => <ArenaWebReport key="package-consent" roomId="package-consent" ready={ready} content={content} webPackage={override}>
       {(web, actions) => <section>{web}<div>{actions}</div></section>}
@@ -182,13 +182,13 @@ describe('Web 战报的本地执行许可', () => {
     await click('继续使用 Web');
     const frame = container.querySelector('iframe')!;
     expect(frame.getAttribute('sandbox')).toBe('allow-scripts');
-    // Transitional interim: builtin VN Lite renders via the first-party srcdoc adapter.
+    // The builtin news package renders through its static-asset srcdoc adapter.
     expect(frame.getAttribute('src') ?? '').toBe('');
     expect(frame.getAttribute('srcdoc') ?? '').toContain('<');
     await click('⬇ 下载生成目标');
-    expect(downloadBlob).toHaveBeenCalledWith(expect.any(Blob), expect.stringMatching(/\.json$/));
+    expect(downloadBlob).toHaveBeenCalledWith(expect.any(Blob), expect.stringMatching(/\.html$/));
     const [targetBlob, targetName] = vi.mocked(downloadBlob).mock.calls[0]!;
-    expect(targetName).toBe('story.json');
+    expect(targetName).toBe('index.html');
     expect(await targetBlob.text()).toBe(content);
     const htmlButton = [...document.querySelectorAll('button')].find((item) => item.textContent === '🌐 下载 HTML')!;
     expect(htmlButton.disabled).toBe(false);
@@ -204,7 +204,7 @@ describe('Web 战报的本地执行许可', () => {
   });
 
   it('合法本地 Web 包精确重放时安全回退，不误报损坏或要求重导入', async () => {
-    const content = JSON.stringify({ title: '本地包故事', scenes: [{ text: '第一幕' }] });
+    const content = '<!doctype html><html><head><title>本地包故事</title></head><body>第一幕</body></html>';
     clearLocalWebPackageSessionStaging();
     const local = await buildLocalPackage('1.0.0');
     stageLocalWebPackage(local);
@@ -229,7 +229,7 @@ describe('Web 战报的本地执行许可', () => {
   });
 
   it('缺失历史 Web 包时展示安全回退与重导入入口，不提供兼容重放', async () => {
-    const content = JSON.stringify({ title: '缺失包故事', scenes: [{ text: '第一幕' }] });
+    const content = '<!doctype html><html><head><title>缺失包故事</title></head><body>第一幕</body></html>';
     clearLocalWebPackageSessionStaging();
     const local = await buildLocalPackage('1.0.0');
     stageLocalWebPackage(local);
@@ -253,10 +253,10 @@ describe('Web 战报的本地执行许可', () => {
   });
 
   it('同 id 不同版本需显式选择兼容重放并展示不一致警告', async () => {
-    const content = JSON.stringify({ title: '兼容重放故事', scenes: [{ text: '第一幕' }] });
+    const content = '<!doctype html><html><head><title>兼容重放故事</title></head><body>第一幕</body></html>';
     clearLocalWebPackageSessionStaging();
     // 历史 revision 是内置 id 的本地版本；清空 staging 后候选回落到 builtin，可走 srcdoc 而无需 Service Worker。
-    const historical = await buildLocalPackage('0.9.0', BUILTIN_VISUAL_NOVEL_PACKAGE_REF.id);
+    const historical = await buildLocalPackage('0.9.0', BUILTIN_ARENA_NEWS_PACKAGE_REF.id);
     stageLocalWebPackage(historical);
     const { generatedContent: _generated, ...artifact } = await createWebPackageOverlay(historical.ref, content);
     expect(_generated).toBe(content);
@@ -290,14 +290,14 @@ describe('Web 战报的本地执行许可', () => {
   });
 
   it('多个兼容版本先选择具体 digest，再确认重放', async () => {
-    const content = JSON.stringify({ title: '选择版本', scenes: [{ text: '第一幕' }] });
+    const content = '<!doctype html><html><head><title>选择版本</title></head><body>第一幕</body></html>';
     clearLocalWebPackageSessionStaging();
-    const historical = await buildLocalPackage('old', BUILTIN_VISUAL_NOVEL_PACKAGE_REF.id);
+    const historical = await buildLocalPackage('old', BUILTIN_ARENA_NEWS_PACKAGE_REF.id);
     stageLocalWebPackage(historical);
     const { generatedContent: _generated, ...artifact } = await createWebPackageOverlay(historical.ref, content);
     expect(_generated).toBe(content);
     clearLocalWebPackageSessionStaging();
-    stageLocalWebPackage(await buildLocalPackage('community', BUILTIN_VISUAL_NOVEL_PACKAGE_REF.id));
+    stageLocalWebPackage(await buildLocalPackage('community', BUILTIN_ARENA_NEWS_PACKAGE_REF.id));
     window.localStorage.setItem('arena.web-report-consent.v1.room.multi-choice', 'accepted');
     await act(async () => root.render(
       <ArenaWebReport key="multi-choice" roomId="multi-choice" ready content={content} webPackage={artifact}>
@@ -311,9 +311,9 @@ describe('Web 战报的本地执行许可', () => {
     expect(confirm.disabled).toBe(true);
     expect(container.querySelector('iframe')).toBeNull();
     const select = container.querySelector('select')!;
-    expect(select.textContent).toContain(BUILTIN_VISUAL_NOVEL_PACKAGE_REF.digest);
+    expect(select.textContent).toContain(BUILTIN_ARENA_NEWS_PACKAGE_REF.digest);
     await act(async () => {
-      select.value = BUILTIN_VISUAL_NOVEL_PACKAGE_REF.digest;
+      select.value = BUILTIN_ARENA_NEWS_PACKAGE_REF.digest;
       select.dispatchEvent(new Event('change', { bubbles: true }));
     });
     expect(confirm.disabled).toBe(false);

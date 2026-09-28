@@ -1,1 +1,0 @@
-将本次 Arena 故事写为 Visual Novel Lite 的连续场景。仅输出 JSON：title 与 scenes 数组；每幕包含 text，可选 speaker。保留角色身份、事实与正式裁定；场景按发生顺序推进，台词和旁白均可独立成幕。舞台、翻页和排版由固定 Runtime 完成，无需生成 HTML、CSS、JavaScript 或资源。

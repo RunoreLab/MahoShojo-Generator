@@ -8,43 +8,6 @@
     },
     "title": "竞技场新闻",
     "description": "提供新闻样式、素材和互动组件，由 AI 自由创作完整新闻站；可阅读报道、发表评论和体验模拟广告。",
-    "downloadUrl": "web-package:builtin/mahoshojo.arena-news@1.0.0",
-    "status": "active"
-  },
-  {
-    "directory": "visual-novel-lite",
-    "packageRef": {
-      "id": "mahoshojo.visual-novel-lite",
-      "version": "1.0.0",
-      "digest": "sha256:c04d82583f2530d56068b20de2ead8dcafffeecba9bb2f90d9c5f5ab07092257"
-    },
-    "title": "Visual Novel Lite · 视觉小说",
-    "description": "视觉小说使用内置阅读器，AI 只生成本场故事；完成后可切换安全文本显示。",
-    "downloadUrl": "web-package:builtin/mahoshojo.visual-novel-lite@1.0.0",
-    "status": "retained"
-  },
-  {
-    "directory": "starlight-forum",
-    "packageRef": {
-      "id": "mahoshojo.starlight-forum",
-      "version": "1.0.0",
-      "digest": "sha256:db0b1bfdba6520dabbd4b00c342c3e916311f3f2898ed210a11d84b127d7fd15"
-    },
-    "title": "星屑社区 · 角色论坛",
-    "description": "在虚构社区里搜索话题、浏览角色的讨论，收藏值得回味的故事线索。",
-    "downloadUrl": "web-package:builtin/mahoshojo.starlight-forum@1.0.0",
-    "status": "retained"
-  },
-  {
-    "directory": "crossroads",
-    "packageRef": {
-      "id": "mahoshojo.crossroads",
-      "version": "1.0.0",
-      "digest": "sha256:db441d96537815eb37375bd3537df765552034893829475d6bc60cbe52c77f4f"
-    },
-    "title": "命运岔路 · 情境抉择",
-    "description": "走进角色的情境，选择行动、获得不同反馈与旅程回顾，还可以重玩探索。",
-    "downloadUrl": "web-package:builtin/mahoshojo.crossroads@1.0.0",
-    "status": "retained"
+    "downloadUrl": "web-package:builtin/mahoshojo.arena-news@1.0.0"
   }
 ]

@@ -8,18 +8,17 @@ export type BuiltinWebPackagePreset = Readonly<{
   description: string;
   downloadUrl: string;
 }>;
-export const BUILTIN_WEB_PACKAGE_REVISIONS = Object.freeze(PRESET_METADATA.map((preset) => Object.freeze({ ...preset, packageRef: Object.freeze({ ...preset.packageRef }) })));
-
-/** Only active showcases appear in selection/download grids. Retained revisions still replay. */
-export const BUILTIN_WEB_PACKAGE_PRESETS: readonly BuiltinWebPackagePreset[] = Object.freeze(BUILTIN_WEB_PACKAGE_REVISIONS.filter((preset) => preset.status === 'active'));
+/** All registered builtins are discoverable; there are no unpublished legacy revisions. */
+export const BUILTIN_WEB_PACKAGE_PRESETS: readonly BuiltinWebPackagePreset[] = Object.freeze(PRESET_METADATA.map((preset) => Object.freeze({ ...preset, packageRef: Object.freeze({ ...preset.packageRef }) })));
+export const BUILTIN_ARENA_NEWS_PACKAGE_REF: Readonly<WebPackageRef> = BUILTIN_WEB_PACKAGE_PRESETS.find((preset) => preset.packageRef.id === 'mahoshojo.arena-news')!.packageRef;
 
 const sameRef = (left: WebPackageRef, right: WebPackageRef): boolean => (
   left.id === right.id && left.version === right.version && left.digest === right.digest
 );
 
-/** Exact lookup includes retired packages for existing selections and historical replay. */
+/** Resolve only registered exact identities; never substitute a newer revision. */
 export const findBuiltinWebPackagePreset = (ref: WebPackageRef | null | undefined): BuiltinWebPackagePreset | undefined => (
-  ref ? BUILTIN_WEB_PACKAGE_REVISIONS.find((preset) => sameRef(preset.packageRef, ref)) : undefined
+  ref ? BUILTIN_WEB_PACKAGE_PRESETS.find((preset) => sameRef(preset.packageRef, ref)) : undefined
 );
 
 export const isBuiltinWebPackageRegistryRef = (ref: WebPackageRef): boolean => Boolean(findBuiltinWebPackagePreset(ref));

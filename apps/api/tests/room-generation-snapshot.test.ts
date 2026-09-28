@@ -61,7 +61,7 @@ describe('Arena Room frozen generation snapshot', () => {
     const state = createArenaRoomState();
     state.snapshot.sharedConfig.reportFormat = 'web';
     const generatedWeb = createArenaRoomGenerationSnapshot(state, 'package-request');
-    const ref = { id: 'mahoshojo.visual-novel-lite', version: '1.0.0', digest: `sha256:${'a'.repeat(64)}` };
+    const ref = { id: 'test.fixture', version: '1.0.0', digest: `sha256:${'a'.repeat(64)}` };
     state.snapshot.sharedConfig.webPackageRef = ref;
     const packageWeb = createArenaRoomGenerationSnapshot(state, 'package-request');
     expect(packageWeb.snapshotDigest).not.toBe(generatedWeb.snapshotDigest);
