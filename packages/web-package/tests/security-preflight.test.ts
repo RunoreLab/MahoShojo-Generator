@@ -46,7 +46,7 @@ describe('Web 包本地风险预检与独立同源授权', () => {
   });
   it('fails closed for malformed, changed identity and obsolete policy grants', async () => {
     const {profile}=await fixture('<h1>结果</h1>'); const grant=createWebPackageTrustGrant(profile,'revision');
-    for (const value of [null,{},'accepted',{...grant,policyVersion:0},{...grant,categories:[{}]},{...grant,packageDigest:`sha256:${'0'.repeat(64)}`}]) {
+    for (const value of [null,{},'accepted',{...grant,policyVersion:0},{...grant,scope:['revision']},{...grant,profileStatus:['complete']},{...grant,categories:[{}]},{...grant,packageDigest:`sha256:${'0'.repeat(64)}`}]) {
       expect(canReuseWebPackageTrust(value,profile)).toBe(false);
     }
   });

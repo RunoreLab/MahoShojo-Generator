@@ -137,8 +137,9 @@ describe('Web 战报的本地执行许可', () => {
       await waitForReact(() => expect(container.querySelector('iframe')).toBeTruthy());
       expect(container.querySelector('iframe')!.getAttribute('sandbox')).toBe('allow-scripts');
       expect(base.manifest.generation.mediaType).toBe('text/html');
-      expect(container.querySelector('iframe')!.getAttribute('srcdoc')).toContain('独立创作的竞技场新闻');
-      expect(container.querySelector('iframe')!.getAttribute('srcdoc')).not.toContain('href="styles/tokens.css"');
+      expect(container.querySelector('iframe')!.getAttribute('src')).toContain('/__web-package__/runner?instance=');
+      expect(container.querySelector('iframe')!.getAttribute('srcdoc')).toBeNull();
+      expect(container.querySelector('iframe')!.dataset.webPackageMode).toBe('restricted');
       expect(container.textContent).not.toContain('暂不执行此 Web 包');
     },
   );
@@ -162,9 +163,9 @@ describe('Web 战报的本地执行许可', () => {
     await click('继续使用 Web');
     const frame = container.querySelector('iframe')!;
     expect(frame.getAttribute('sandbox')).toBe('allow-scripts');
-    // The builtin news package renders through its static-asset srcdoc adapter.
-    expect(frame.getAttribute('src') ?? '').toBe('');
-    expect(frame.getAttribute('srcdoc') ?? '').toContain('<');
+    // Builtin 与本地包都通过同一个静态运行页，不在主站 srcdoc 继承 CSP。
+    expect(frame.getAttribute('src')).toContain('/__web-package__/runner?instance=');
+    expect(frame.getAttribute('srcdoc')).toBeNull();
     await click('⬇ 下载生成目标');
     expect(downloadBlob).toHaveBeenCalledWith(expect.any(Blob), expect.stringMatching(/\.html$/));
     const [targetBlob, targetName] = vi.mocked(downloadBlob).mock.calls[0]!;
@@ -183,7 +184,7 @@ describe('Web 战报的本地执行许可', () => {
     expect(container.textContent).toContain('下载生成目标');
   });
 
-  it('合法本地 Web 包精确重放时安全回退，不误报损坏或要求重导入', async () => {
+  it('合法本地 Web 包精确重放时默认受限执行，不误报损坏或要求重导入', async () => {
     const content = '<!doctype html><html><head><title>本地包故事</title></head><body>第一幕</body></html>';
     clearLocalWebPackageSessionStaging();
     const local = await buildLocalPackage('1.0.0');
@@ -198,13 +199,14 @@ describe('Web 战报的本地执行许可', () => {
       </ArenaWebReport>,
     ));
     await waitForReact(() => {
-      expect(container.textContent).toContain('当前版本暂不执行此 Web 包');
+      expect(container.querySelector('iframe')).toBeTruthy();
     });
-    expect(container.textContent).toContain('Web 包已通过校验');
+    expect(container.textContent).toContain('受限模式（未授予本站同源权限）');
     expect(container.textContent).not.toContain('Web 包不可用或故事数据校验失败');
     expect(container.textContent).not.toContain('重新导入本地 Web 包');
-    expect(container.querySelector('iframe')).toBeNull();
-    expect(container.querySelector('pre')?.textContent).toContain('本地包故事');
+    expect(container.querySelector('iframe')!.getAttribute('sandbox')).toBe('allow-scripts');
+    expect(container.querySelector('iframe')!.getAttribute('src')).toContain('/__web-package__/runner');
+    expect(container.querySelector('pre')).toBeNull();
     expect(container.textContent).toContain('下载生成目标');
   });
 
@@ -261,9 +263,9 @@ describe('Web 战报的本地执行许可', () => {
       expect(container.textContent).toContain('当前使用的是不同版本的 Web 包，效果可能与生成时不一致。');
     });
     expect(container.querySelector('iframe')).toBeTruthy();
-    // 历史 revision 候选回落到 builtin 后经 srcdoc 过渡适配器渲染，无需 SW URL mount。
-    expect(container.querySelector('iframe')!.getAttribute('src') ?? '').toBe('');
-    expect(container.querySelector('iframe')!.getAttribute('srcdoc') ?? '').toContain('<');
+    // 显式兼容重放也使用通用运行页，不自动继承高权限。
+    expect(container.querySelector('iframe')!.getAttribute('src')).toContain('/__web-package__/runner');
+    expect(container.querySelector('iframe')!.getAttribute('sandbox')).toBe('allow-scripts');
     expect(container.textContent).toContain('下载生成目标');
     expect(container.textContent).not.toContain('仍尝试使用此 Web 包');
     expect(artifact.packageRef).toEqual(historical.ref);

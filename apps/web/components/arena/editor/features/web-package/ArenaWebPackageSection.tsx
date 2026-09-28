@@ -3,6 +3,7 @@
 import { useRef, useState } from 'react';
 
 import { PresetGridPicker } from '@/components/PresetGridPicker';
+import { WebPackageBaseRisk } from '../../../components/WebPackageSafety';
 
 import type { ArenaWebPackageSectionModel } from './web-package-contract';
 
@@ -69,6 +70,7 @@ export function ArenaWebPackageSection({ model }: Readonly<{ model: ArenaWebPack
         ) : null}
       </div>
 
+      {model.selected?.ref ? <WebPackageBaseRisk packageRef={model.selected.ref} /> : null}
       <div className="space-y-2">
         <PresetGridPicker
           title="选择 Web 包"
@@ -121,7 +123,7 @@ export function ArenaWebPackageSection({ model }: Readonly<{ model: ArenaWebPack
 
         {capabilities.importLocal ? (
           <p className="text-xs text-gray-500">
-            本地 ZIP 可用于生成和保存目标文件；当前版本暂不执行自定义包的网页体验，生成后将显示安全文本。移除选择不会删除本地缓存。
+            本地 ZIP 在本浏览器解析并受限运行；不向服务器上传完整包。生成后可另行授权本站同源权限。移除选择不会删除本地缓存。
           </p>
         ) : null}
         {model.importError ? (

@@ -12,18 +12,21 @@ import { resolveWebDisplayTitle } from '@/lib/arena/battle-report-display-title'
 import { normalizeArenaWebOutput } from '@/lib/arena/web-output';
 import { downloadBlob } from '@/lib/client/blobUrl';
 import { buildSafeFileName } from '@/lib/client/fileName';
-import { importLocalWebPackageArchive } from '@/lib/web-package/cache';
+import { hydrateExactWebPackageFromCache, importLocalWebPackageArchive } from '@/lib/web-package/cache';
+import { useWebPackageTrust } from '@/lib/web-package/trust';
+import { WebPackageFrame } from './WebPackageFrame';
+import { WebPackageRiskSummary, WebPackageTrustDialog } from './WebPackageSafety';
+import { scanWebPackageInstance, type WebPackageRiskProfile } from '@mahoshojo/web-package/security';
 import styles from './ArenaWebReport.module.css';
 import type { WebPackageArtifact, WebPackageRef } from '@mahoshojo/contracts/web-package';
 import {
   formatWebPackageFallback,
   prepareWebPackageReplay,
+  packWebPackageZip,
+  type ResolvedWebPackage,
   type WebPackageReplayStatus,
 } from '@mahoshojo/web-package';
-import {
-  canRenderBuiltinWebPackageSrcdoc,
-  renderBuiltinWebPackageSrcdoc,
-} from '@mahoshojo/web-package/browser';
+import { renderWebPackageInstance } from '@mahoshojo/web-package/browser';
 
 const CONSENT_KEY = 'arena.web-report-consent.v1';
 // 仅附加到预览；低优先级 layer 允许作品自身的滚动条设计覆盖默认样式。
@@ -159,12 +162,14 @@ type WebReportMetadata = {
   aiUsage?: NewsReport['aiUsage'] | null;
 };
 
-function ArenaWebDocument({ location, prelude, epilogue, reload, immersive, aiModel, aiUsage, onToggleImmersive }: WebReportMetadata & {
+function ArenaWebDocument({ location, prelude, epilogue, reload, immersive, aiModel, aiUsage, onToggleImmersive, packageMode, packageIdentity }: WebReportMetadata & {
   location: { kind: 'srcdoc'; html: string } | { kind: 'url'; url: string };
   prelude: string;
   epilogue: string;
   reload: number;
   immersive: boolean;
+  packageMode?: 'restricted' | 'trusted';
+  packageIdentity?: string;
   onToggleImmersive: (viewer: HTMLDivElement | null) => void;
 }) {
   const [expanded, setExpanded] = useState(true);
@@ -270,7 +275,12 @@ function ArenaWebDocument({ location, prelude, epilogue, reload, immersive, aiMo
         >
           <ChevronDown size={20} aria-hidden="true" />
         </button>
-        <iframe
+        {packageMode && location.kind === 'srcdoc' ? <WebPackageFrame
+          key={`${reload}:${packageMode}:${packageIdentity}`}
+          html={previewDocument}
+          trusted={packageMode === 'trusted'}
+          className={styles.frame}
+        /> : <iframe
           key={reload}
           title="AI Web 战报"
           sandbox="allow-scripts"
@@ -278,7 +288,7 @@ function ArenaWebDocument({ location, prelude, epilogue, reload, immersive, aiMo
           {...(location.kind === 'url' ? { src: location.url } : { srcDoc: previewDocument })}
           data-testid="arena-web-document"
           className={styles.frame}
-        />
+        />}
       </div>
       {prelude || epilogue ? <div className="px-4 pt-4" hidden={immersive}>
         <ArenaWebNotes prelude={prelude} epilogue={epilogue} />
@@ -337,6 +347,8 @@ export function ArenaWebReport({ content, ready, roomId, aiModel, aiUsage, displ
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
+  const [trustDialogKey, setTrustDialogKey] = useState<string | null>(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
   const replayKey = `${webPackage?.packageRef.digest ?? ''}::${content}`;
   const compatibilityRef = compatChoice?.key === replayKey ? compatChoice.ref : undefined;
   const [packageResolution, setPackageResolution] = useState<{
@@ -348,54 +360,39 @@ export function ArenaWebReport({ content, ready, roomId, aiModel, aiUsage, displ
     compatibility?: boolean;
     candidateAvailable?: boolean;
     candidates?: readonly WebPackageRef[];
+    profile?: WebPackageRiskProfile;
+    base?: ResolvedWebPackage;
+    diagnostics?: readonly string[];
   } | null>(null);
   useEffect(() => {
     if (!webPackage || !ready) return;
     let active = true;
-    void prepareWebPackageReplay({
+    void hydrateExactWebPackageFromCache(webPackage.packageRef).then(() => prepareWebPackageReplay({
       artifact: webPackage,
       generatedContent: content,
       allowCompatibility: Boolean(compatibilityRef),
       compatibilityRef,
-    }).then(async (outcome) => {
+    })).then(async (outcome) => {
       if (!active) return;
-      if ((outcome.status === 'exact' || outcome.status === 'compatibility') && outcome.overlay) {
+      if ((outcome.status === 'exact' || outcome.status === 'compatibility') && outcome.instance) {
         const compatibility = outcome.status === 'compatibility';
-        if (!canRenderBuiltinWebPackageSrcdoc(outcome.overlay.packageRef)) {
-          setPackageResolution({
-            artifact: webPackage,
-            content,
-            status: outcome.status,
-            message: compatibility
-              ? 'Web 包已通过兼容重放校验；当前版本暂不执行此 Web 包，已保留安全文本，生成目标仍可查看和下载。'
-              : 'Web 包已通过校验；当前版本暂不执行此 Web 包，已保留安全文本，生成目标仍可查看和下载。',
-            compatibility,
-            candidateAvailable: outcome.candidateAvailable,
-          });
-          return;
-        }
+        let profile: WebPackageRiskProfile | undefined;
+        try { profile = scanWebPackageInstance(outcome.instance); } catch { /* 预检失败不阻断受限模式。 */ }
         try {
-          // Only pinned first-party revisions have a srcdoc materializer;
-          // the generic resource renderer remains a separate migration.
-          const location = await renderBuiltinWebPackageSrcdoc(outcome.overlay);
+          const location = await renderWebPackageInstance(outcome.instance);
           if (!active) return;
           setPackageResolution({
-            artifact: webPackage,
-            content,
-            status: outcome.status,
-            message: outcome.message,
-            location,
-            compatibility,
+            artifact: webPackage, content, status: outcome.status, message: outcome.message,
+            location, compatibility, profile, base: outcome.instance.base,
+            diagnostics: [...location.diagnostics, ...(profile ? [] : ['能力预检暂不可用，未开放同源授权；受限模式仍可使用。'])],
             candidateAvailable: outcome.candidateAvailable,
           });
-        } catch {
+        } catch (error) {
           if (!active) return;
           setPackageResolution({
-            artifact: webPackage,
-            content,
-            status: outcome.status,
-            message: 'Web 包已通过校验，但当前过渡渲染器无法展示；已保留安全文本，生成目标仍可查看和下载。',
-            compatibility,
+            artifact: webPackage, content, status: outcome.status, compatibility, profile,
+            base: outcome.instance.base,
+            message: `Web 包已通过内容校验，但当前渲染失败：${error instanceof Error ? error.message : '未知错误'}。目标文件和原包仍可下载。`,
             candidateAvailable: outcome.candidateAvailable,
           });
         }
@@ -421,6 +418,8 @@ export function ArenaWebReport({ content, ready, roomId, aiModel, aiUsage, displ
   }, [compatibilityRef, content, ready, replayEpoch, webPackage]);
   const matchingResolution = packageResolution?.artifact === webPackage && packageResolution?.content === content ? packageResolution : null;
   const packageLocation = matchingResolution?.location ?? null;
+  const riskProfile = matchingResolution?.profile ?? null;
+  const trust = useWebPackageTrust(riskProfile);
   const resolutionStatus = matchingResolution?.status ?? null;
   const candidates = matchingResolution?.candidates ?? [];
   const selectedCandidate = candidates.length === 1 ? candidates[0] : candidates.find((candidate) => (
@@ -558,6 +557,15 @@ export function ArenaWebReport({ content, ready, roomId, aiModel, aiUsage, displ
     const blob = new Blob(['﻿', source], { type: 'text/html;charset=utf-8' });
     downloadBlob(blob, buildSafeFileName(`魔法少女速报_${resolvedDisplayTitle}`, 'html', '魔法少女速报'));
   };
+  const downloadPackage = async () => {
+    const base = matchingResolution?.base;
+    if (!base) return;
+    setDownloadError(null);
+    try {
+      const archive = await packWebPackageZip(base);
+      downloadBlob(new Blob([new Uint8Array(archive).buffer], { type: 'application/zip' }), buildSafeFileName(`${base.ref.id}@${base.ref.version}`, 'zip', 'web-package'));
+    } catch { setDownloadError('Web 包 ZIP 导出失败；原目标文件仍可下载。'); }
+  };
   const downloadTarget = () => {
     if (!ready || !webPackage) return;
     const extension = ({
@@ -594,6 +602,18 @@ export function ArenaWebReport({ content, ready, roomId, aiModel, aiUsage, displ
       {ready && !webDocument ? <p className="mb-3 rounded-lg border border-amber-300/50 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900 dark:border-amber-300/30 dark:bg-amber-950/30 dark:text-amber-100" role="status">
         {webPackage ? (matchingResolution?.message ?? '正在校验 Web 包与故事数据…') : '这份输出没有包含完整的 HTML 文档，已切换为普通显示；其中的脚本不会被执行。'}
       </p> : null}
+      {ready && webPackage && riskProfile ? <div className="mb-3 space-y-2">
+        <WebPackageRiskSummary profile={riskProfile} />
+        <div className="flex flex-wrap items-center gap-3 text-sm">
+          <span data-testid="web-package-permission-status">{trust.trusted ? '已授权可信同源模式' : '受限模式（未授予本站同源权限）'}</span>
+          {trust.trusted ? <button type="button" onClick={trust.revoke} className="min-h-11 rounded-lg border px-3 py-2">撤销信任并回到受限模式</button>
+            : <button type="button" disabled={!accepted || !packageLocation} onClick={() => setTrustDialogKey(riskProfile.fingerprint)} className="min-h-11 rounded-lg border px-3 py-2 disabled:opacity-50">授权本站同源权限…</button>}
+        </div>
+        <p className="text-xs text-gray-500">同源权限是可选的额外权限；拒绝不影响能在受限模式工作的功能。切换权限会重新加载作品，交互进度可能重置；撤销不能恢复已经泄漏的数据或撤回已经完成的账号操作。</p>
+        {trust.notice ? <p role="status" className="text-xs text-amber-700">{trust.notice}</p> : null}
+      </div> : null}
+      {ready && matchingResolution?.diagnostics?.map(message => <p key={message} role="status" className="mb-2 text-xs text-amber-700">{message}</p>)}
+      {downloadError ? <p role="status" className="text-sm text-red-600">{downloadError}</p> : null}
       {ready && matchingResolution?.compatibility && packageLocation ? <p className="mb-3 rounded-lg border border-amber-300/50 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900 dark:border-amber-300/30 dark:bg-amber-950/30 dark:text-amber-100" role="status">
         当前使用的是不同版本的 Web 包，效果可能与生成时不一致。
       </p> : null}
@@ -651,6 +671,8 @@ export function ArenaWebReport({ content, ready, roomId, aiModel, aiUsage, displ
           aiModel={aiModel}
           aiUsage={aiUsage}
           onToggleImmersive={immersive ? exitImmersive : enterImmersive}
+          packageMode={webPackage ? (trust.trusted ? 'trusted' : 'restricted') : undefined}
+          packageIdentity={`${matchingResolution?.base?.ref.digest ?? webPackage?.packageRef.digest}:${webPackage?.generatedDigest}`}
         />
       ) : webPackage ? <pre className="max-h-[70vh] overflow-auto whitespace-pre-wrap break-words p-4 text-sm" aria-label="Web 包故事数据（安全文本）">{packageFallback}</pre> : undefined, <>
         {showingWeb && !immersive ? <button
@@ -662,6 +684,7 @@ export function ArenaWebReport({ content, ready, roomId, aiModel, aiUsage, displ
         >
           ↻ 重新加载
         </button> : null}
+        {!immersive && matchingResolution?.base ? <button type="button" disabled={!ready} onClick={() => void downloadPackage()} className="save-button flex-1 bg-white/10 hover:bg-white/20 text-white py-2 px-4 rounded transition-all">⬇ 下载 Web 包 ZIP</button> : null}
         {!immersive && webPackage ? <button
           type="button"
           disabled={!ready}
@@ -679,6 +702,12 @@ export function ArenaWebReport({ content, ready, roomId, aiModel, aiUsage, displ
           🌐 下载 HTML
         </button> : null}
       </>)}
+      {ready && accepted && riskProfile && trustDialogKey === riskProfile.fingerprint ? <WebPackageTrustDialog
+        key={riskProfile.fingerprint}
+        profile={riskProfile}
+        onCancel={() => setTrustDialogKey(null)}
+        onAllow={(remember) => { trust.allow(remember); setTrustDialogKey(null); }}
+      /> : null}
       <WebReportConsentDialog open={ready && confirming && !accepted} onCancel={() => { setConfirming(false); setDisplayMode('ordinary'); }} onAccept={(remember) => {
         accept(remember);
         setConfirming(false);

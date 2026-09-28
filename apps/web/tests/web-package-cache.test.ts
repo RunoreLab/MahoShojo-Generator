@@ -12,6 +12,7 @@ import {
 import {
   deleteWebPackageArchiveCache,
   hydrateWebPackageSessionFromCache,
+  hydrateExactWebPackageFromCache,
   importLocalWebPackageArchive,
   putWebPackageArchiveCache,
   readWebPackageArchiveCache,
@@ -57,6 +58,20 @@ describe('optional local Web package archive cache', () => {
     await deleteWebPackageArchiveCache(pkg.ref.digest);
     expect(await readWebPackageArchiveCache(pkg.ref.digest)).toBeNull();
     clearLocalWebPackageSessionStaging();
+  });
+
+  it('restores one exact local dependency without first mounting the package picker', async () => {
+    const { pkg } = await createLocalPackage();
+    expect(await putWebPackageArchiveCache(pkg)).toBe(true);
+    clearLocalWebPackageSessionStaging();
+    await hydrateExactWebPackageFromCache(pkg.ref);
+    expect((await resolveWebPackage(pkg.ref)).ref).toEqual(pkg.ref);
+    clearLocalWebPackageSessionStaging();
+    await hydrateExactWebPackageFromCache({ ...pkg.ref, id: 'local.wrong-identity' });
+    expect(listStagedLocalWebPackages()).toHaveLength(0);
+    await deleteWebPackageArchiveCache(pkg.ref.digest);
+    await hydrateExactWebPackageFromCache(pkg.ref);
+    expect(listStagedLocalWebPackages()).toHaveLength(0);
   });
 
   it('keeps cache failures non-blocking for staging', async () => {

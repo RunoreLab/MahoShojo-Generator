@@ -137,11 +137,11 @@ export function parseWebPackageTrustGrant(input: unknown): WebPackageTrustGrant 
   if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
   const value = input as Record<string, unknown>;
   if (!digest(value.packageDigest) || !digest(value.generatedDigest)
-    || !['instance', 'revision'].includes(String(value.scope))
+    || (value.scope !== 'instance' && value.scope !== 'revision')
     || value.scannerVersion !== WEB_PACKAGE_SCAN_VERSION || value.policyVersion !== WEB_PACKAGE_TRUST_POLICY_VERSION
-    || !strings(value.categories) || !value.categories.every((c) => Object.hasOwn(WEB_PACKAGE_RISK_LABELS, c))
+    || !strings(value.categories) || !value.categories.every((c) => Object.prototype.hasOwnProperty.call(WEB_PACKAGE_RISK_LABELS, c))
     || !strings(value.externalOrigins) || !strings(value.uncertainty)
-    || !['complete', 'partial'].includes(String(value.profileStatus))) return null;
+    || (value.profileStatus !== 'complete' && value.profileStatus !== 'partial')) return null;
   return value as unknown as WebPackageTrustGrant;
 }
 

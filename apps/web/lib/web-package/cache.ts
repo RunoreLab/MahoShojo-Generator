@@ -122,3 +122,14 @@ export const resolveSelectedWebPackage = (ref: WebPackageRef | null | undefined)
   if (!ref) return Promise.reject(new Error('未选择 Web 包'));
   return resolveWebPackage(ref);
 };
+
+/** 历史详情可独立恢复 exact 本地包，不要求先进入选择器水合全部缓存。 */
+export const hydrateExactWebPackageFromCache = async (ref: WebPackageRef): Promise<void> => {
+  try { await resolveWebPackage(ref); return; } catch { /* 尚未在当前会话中。 */ }
+  const entry = await readWebPackageArchiveCache(ref.digest);
+  if (!entry) return;
+  try {
+    const pkg = await unpackWebPackageZip(new Uint8Array(entry.archive));
+    if (pkg.ref.id === ref.id && pkg.ref.version === ref.version && pkg.ref.digest === ref.digest) stageLocalWebPackage(pkg);
+  } catch { /* 损坏缓存不冒充可用；既有重新导入流程继续可用。 */ }
+};
