@@ -13,7 +13,7 @@ import {
 } from '@mahoshojo/contracts/web-package';
 import { assertJsonSchema202012, preflightWebPackageJsonSchema } from './json-schema';
 import {
-  BUILTIN_WEB_PACKAGE_PRESETS,
+  BUILTIN_WEB_PACKAGE_REVISIONS,
   findBuiltinWebPackagePreset,
   isBuiltinWebPackageRegistryRef,
 } from './registry';
@@ -310,7 +310,7 @@ export const findWebPackageCandidatesById = async (
       || compareLabels(left.ref.digest, right.ref.digest)
     ));
   const builtins: ResolvedWebPackage[] = [];
-  for (const preset of BUILTIN_WEB_PACKAGE_PRESETS) {
+  for (const preset of BUILTIN_WEB_PACKAGE_REVISIONS) {
     if (preset.packageRef.id !== packageId) continue;
     try {
       const pkg = await resolveWebPackage(preset.packageRef);

@@ -1,0 +1,19 @@
+{
+  "format": "mahoshojo-web-package",
+  "formatVersion": 1,
+  "id": "mahoshojo.visual-novel-lite",
+  "version": "1.0.0",
+  "name": "Visual Novel Lite",
+  "entry": "index.html",
+  "generation": {
+    "target": "data/story.json",
+    "mode": "replace",
+    "mediaType": "application/json",
+    "instructions": "ai/instructions.md",
+    "schema": "schemas/story.schema.json",
+    "assetCatalog": "ai/assets.json"
+  },
+  "capabilities": [
+    "scripts"
+  ]
+}

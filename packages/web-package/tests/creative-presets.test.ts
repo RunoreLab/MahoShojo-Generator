@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { runInNewContext } from 'node:vm';
-import { FORUM_PACKAGE_REF, CHOICE_PACKAGE_REF, FORUM_SAMPLE, CHOICE_SAMPLE } from '../src/creative-presets-v1';
+import { readFileSync } from 'node:fs';
+const FORUM_SAMPLE = JSON.parse(readFileSync(new URL('../presets/starlight-forum/data/story.json', import.meta.url), 'utf8'));
+const CHOICE_SAMPLE = JSON.parse(readFileSync(new URL('../presets/crossroads/data/story.json', import.meta.url), 'utf8'));
+import { FORUM_PACKAGE_REF, CHOICE_PACKAGE_REF } from '../src/creative-presets-v1';
 import { createWebPackageOverlay, resolveWebPackage, packWebPackageZip, unpackWebPackageZip, stageLocalWebPackage, unstageLocalWebPackage } from '../src';
 import { canRenderBuiltinWebPackageSrcdoc, renderBuiltinWebPackageSrcdoc } from '../src/visual-novel-adapter';
 

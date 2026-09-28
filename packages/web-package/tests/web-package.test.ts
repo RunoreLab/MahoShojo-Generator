@@ -248,12 +248,11 @@ describe('canonical ZIP artifact and generic JSON Schema validation', () => {
   });
 
   it('exposes discoverable builtin presets only for pinned refs', () => {
-    expect(BUILTIN_WEB_PACKAGE_PRESETS).toHaveLength(3);
+    expect(BUILTIN_WEB_PACKAGE_PRESETS).toHaveLength(0);
     expect(findBuiltinWebPackagePreset(ref)?.packageRef).toEqual(ref);
     expect(findBuiltinWebPackagePreset({ ...ref, digest: `sha256:${'0'.repeat(64)}` })).toBeUndefined();
     expect(findBuiltinWebPackagePreset(null)).toBeUndefined();
-    expect(BUILTIN_WEB_PACKAGE_PRESETS[0]!.title).toContain('视觉小说');
-    expect(BUILTIN_WEB_PACKAGE_PRESETS[0]!.downloadUrl).toContain(ref.id);
+    expect(BUILTIN_WEB_PACKAGE_PRESETS.some((preset) => preset.packageRef.id === ref.id)).toBe(false);
   });
 
   it('validates the frozen story schema via the generic Draft 2020-12 interpreter', async () => {

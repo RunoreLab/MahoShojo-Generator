@@ -1,0 +1,1 @@
+将本场角色与情景创作为可重玩的情境抉择小游戏。仅生成满足schema的JSON。生成4至8个连续挑战，每个challenge有title、scene以及2至4个choices。每个choice有label、具体且不同的feedback和0/1/2洞察点points；每题至少有两种不同分数。得分衡量体察情境，不代表道德优劣。endings提供thoughtful（得分比例>=70%）、bold（>=35%）、exploratory三种具体不同的旅程回顾。挑战顺序固定，各选项在下一题前汇合，避免需要前一选择才能成立的剧情；这是既定故事内的互动番外，不改写正式winner或权威事实。不得输出HTML或脚本。
