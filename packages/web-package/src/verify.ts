@@ -1,3 +1,4 @@
+import { preflightWebPackageJsonSchema } from './json-schema';
 import {
   WebPackageManifestSchema,
   type WebPackageManifest,
@@ -57,6 +58,16 @@ export const verifyWebPackage = async (
     if (!bytes || bytes.byteLength !== file.size || await digestWebPackageBytes(bytes) !== file.digest) {
       throw new Error(`Web Package 文件完整性校验失败：${file.path}`);
     }
+  }
+  if (manifest.generation.schema) {
+    const bytes = payloads.get(manifest.generation.schema)!;
+    let schema: unknown;
+    try {
+      schema = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+    } catch {
+      throw new Error('Web Package JSON Schema 不是合法 UTF-8 JSON');
+    }
+    preflightWebPackageJsonSchema(schema);
   }
   const ref = freezeDeep({ id: manifest.id, version: manifest.version, digest: await digestWebPackageBytes(encoder.encode(canonicalizeWebPackageManifest(manifest))) });
   return Object.freeze({ ref, manifest: freezeDeep(manifest), readFile: (path: string) => payloads.get(path)?.slice() });

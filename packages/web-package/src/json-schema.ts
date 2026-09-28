@@ -183,6 +183,91 @@ const assertKeywordArgumentShapes = (node: unknown, path = ''): void => {
   });
 };
 
+/**
+ * Preflight creator schemas before import/provider dispatch. Native JS regex is
+ * deliberately unavailable for packages until a bounded implementation is needed.
+ * Only schema positions are visited; annotation/default/const data is inert.
+ */
+export const preflightWebPackageJsonSchema = (schema: unknown): void => {
+  if (!isRecord(schema) && typeof schema !== 'boolean') throw new Error('JSON Schema 必须是 object 或 boolean');
+  const nodes = new Set<unknown>();
+  const refs = new Map<Record<string, unknown>, string>();
+  const visit = (node: unknown, depth = 0): void => {
+    if (depth > 64 || nodes.size > 4096) throw new Error('JSON Schema 超出结构复杂度预算');
+    nodes.add(node);
+    if (!isRecord(node)) return;
+    if (Object.keys(node).some((key) => key.startsWith('__absolute_')) || '$recursiveRef' in node || '$recursiveAnchor' in node) {
+      throw new Error('JSON Schema 不支持内部或旧版递归关键字');
+    }
+    if ('pattern' in node || 'patternProperties' in node) {
+      throw new Error('Web Package JSON Schema 暂不支持 pattern / patternProperties 正则约束');
+    }
+    if ('$schema' in node && node.$schema !== DRAFT_2020_12) {
+      throw new Error('JSON Schema 仅支持 Draft 2020-12');
+    }
+    if ('type' in node) {
+      const types = Array.isArray(node.type) ? node.type : [node.type];
+      const allowed = ['null', 'boolean', 'object', 'array', 'number', 'integer', 'string'];
+      if (!types.length || types.some((type) => !allowed.includes(type as string)) || new Set(types).size !== types.length) {
+        throw new Error('JSON Schema type 必须是合法且不重复的类型');
+      }
+    }
+    if ('dependentRequired' in node && (!isRecord(node.dependentRequired) || Object.values(node.dependentRequired).some(
+      (value) => !Array.isArray(value) || value.some((key) => typeof key !== 'string') || new Set(value).size !== value.length,
+    ))) {
+      throw new Error('JSON Schema dependentRequired 必须是 string[] map');
+    }
+    if ('enum' in node && (!Array.isArray(node.enum) || !node.enum.length)) {
+      throw new Error('JSON Schema enum 必须是非空 array');
+    }
+    if (typeof node.$ref === 'string') refs.set(node, node.$ref);
+    visitChildSchemas(node, (child) => visit(child, depth + 1));
+  };
+  visit(schema);
+  assertSupportedKeywords(schema);
+  assertLocalRefsOnly(schema);
+  try {
+    assertKeywordArgumentShapes(schema);
+  } catch (error) {
+    throw new Error('JSON Schema 无效：' + (error instanceof Error ? error.message : String(error)));
+  }
+  const targets = new Map<unknown, unknown>();
+  for (const [source, ref] of refs) {
+    let target: unknown = schema;
+    try {
+      for (const segment of ref === '#' ? [] : decodeURIComponent(ref.slice(2)).split('/')) {
+        const key = segment.replace(/~1/gu, '/').replace(/~0/gu, '~');
+        if ((!isRecord(target) && !Array.isArray(target)) || !Object.prototype.hasOwnProperty.call(target, key)) throw new Error();
+        target = (target as Record<string, unknown>)[key];
+      }
+    } catch {
+      throw new Error('JSON Schema $ref 无法解析');
+    }
+    if (!nodes.has(target)) throw new Error('JSON Schema $ref 必须指向当前文档中的 schema');
+    targets.set(source, target);
+  }
+  // Reject recursion that revalidates the same instance forever. Descending
+  // properties/items is deliberately excluded so ordinary recursive data works.
+  const checked = new Set<unknown>();
+  const active = new Set<unknown>();
+  const checkProgress = (node: unknown): void => {
+    if (!isRecord(node) || checked.has(node)) return;
+    if (active.has(node)) throw new Error('JSON Schema $ref 存在不推进数据层级的循环');
+    active.add(node);
+    if (targets.has(node)) checkProgress(targets.get(node));
+    for (const key of ['not', 'if', 'then', 'else']) checkProgress(node[key]);
+    for (const key of ['allOf', 'anyOf', 'oneOf']) {
+      if (Array.isArray(node[key])) (node[key] as unknown[]).forEach(checkProgress);
+    }
+    if (isRecord(node.dependentSchemas)) Object.values(node.dependentSchemas).forEach(checkProgress);
+    active.delete(node);
+    checked.add(node);
+  };
+  nodes.forEach(checkProgress);
+  // Construction checks resource identifiers without evaluating generated data.
+  new Validator(schema as Schema, '2020-12', false);
+};
+
 const formatCfworkerErrors = (errors: readonly { instanceLocation?: string; keyword?: string; error?: string }[]): string => (
   errors.slice(0, 5).map((issue) => {
     const location = issue.instanceLocation && issue.instanceLocation !== '#' ? `${issue.instanceLocation} ` : '';
