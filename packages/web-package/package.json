@@ -18,7 +18,8 @@
       "types": "./src/security.ts",
       "import": "./src/security.ts",
       "default": "./src/security.ts"
-    }
+    },
+    "./testing/fixtures": "./tests/helpers/generic-package.ts"
   },
   "scripts": {
     "test": "vitest run --config vitest.config.ts",

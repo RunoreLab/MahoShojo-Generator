@@ -2,11 +2,11 @@ import { createWebPackageInstance, digestWebPackageBytes, verifyWebPackage } fro
 
 export async function createGenericTestPackage(options: {
   html?: string; generated?: string; target?: string;
-  extra?: Record<string, { type: string; text: string }>;
+  extra?: Record<string, { type: string; text: string; bytes?: Uint8Array }>;
 } = {}) {
   const encoder = new TextEncoder();
   const target = options.target ?? 'data/report.json';
-  const source = {
+  const source: Record<string, { type: string; text: string; bytes?: Uint8Array }> = {
     'index.html': { type: 'text/html', text: options.html ?? '<!doctype html><html><head><title>本地包</title><link rel="stylesheet" href="styles/main.css"></head><body><h1 id="result">等待</h1><img id="image" src="assets/点.svg"><script src="runtime/classic.js" defer></script><script type="module" src="runtime/main.js"></script></body></html>' },
     'styles/main.css': { type: 'text/css', text: '@import "./nested/base.css"; #result{background-image:url("../assets/点.svg");}' },
     'styles/nested/base.css': { type: 'text/css', text: '#result { color: rgb(12,34,56); }' },
@@ -26,7 +26,7 @@ export async function createGenericTestPackage(options: {
     'data/report.json': { type: 'application/json', text: '{"title":"基础内容"}' },
     ...options.extra,
   };
-  const files = Object.entries(source).map(([path, file]) => ({ path, bytes: encoder.encode(file.text), type: file.type }));
+  const files = Object.entries(source).map(([path, file]) => ({ path, bytes: file.bytes ?? encoder.encode(file.text), type: file.type }));
   const manifest = { format:'mahoshojo-web-package',formatVersion:1,id:'local.generic-test',version:'1.0.0',name:'本地通用包',entry:'index.html',
     generation:{target,mediaType:target.endsWith('.json')?'application/json':'text/html',mode:'replace'},
     files: await Promise.all(files.map(async f=>({path:f.path,mediaType:f.type,size:f.bytes.length,digest:await digestWebPackageBytes(f.bytes)}))) };

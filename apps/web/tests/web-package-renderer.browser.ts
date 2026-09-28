@@ -2,7 +2,7 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { chromium, firefox, webkit, type Browser, type BrowserContext, type Page } from 'playwright';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { createGenericTestPackage } from '../../../packages/web-package/tests/helpers/generic-package';
+import { createGenericTestPackage } from '@mahoshojo/web-package/testing/fixtures';
 import { renderWebPackageInstance } from '@mahoshojo/web-package/browser';
 import { createWebPackageInstance, packWebPackageZip, unpackWebPackageZip, BUILTIN_ARENA_NEWS_PACKAGE_REF, createWebPackageOverlay, resolveWebPackage } from '@mahoshojo/web-package';
 import { WEB_PACKAGE_RUNNER_HEADERS, WEB_PACKAGE_RUNNER_HTML, WEB_PACKAGE_RUNNER_PATH } from '@/lib/web-package/runner';
@@ -168,16 +168,22 @@ describe('本地 Web 包真实浏览器资源空间',()=>{
   });
 
   it('serves local media, preserves srcset data commas and applies rewritten CSS despite original SRI', async () => {
-    const { instance } = await createGenericTestPackage({ html: `<link rel="stylesheet" href="styles/main.css" integrity="sha256-invalid"><h1 id="result">媒体</h1><audio id="audio" src="tone.wav" preload="none"></audio><img id="set" srcset="data:image/svg+xml;base64,PHN2Zy8+ 1x, assets/点.svg 2x">`, extra: {
-      'tone.wav': { type: 'audio/wav', text: 'RIFF' },
+    // 合法 PCM WAV：8000 Hz、16 bit、单声道、0.1 秒静音，不依赖外部素材或声音设备。
+    const wav = new Uint8Array(1644); const view = new DataView(wav.buffer);
+    for (const [offset, value] of [[0, 'RIFF'], [8, 'WAVE'], [12, 'fmt '], [36, 'data']] as const) wav.set(new TextEncoder().encode(value), offset);
+    for (const [offset, value] of [[4, 1636], [16, 16], [24, 8000], [28, 16000], [40, 1600]]) view.setUint32(offset, value, true);
+    for (const [offset, value] of [[20, 1], [22, 1], [32, 2], [34, 16]]) view.setUint16(offset, value, true);
+    const { instance } = await createGenericTestPackage({ html: `<link rel="stylesheet" href="styles/main.css" integrity="sha256-invalid"><h1 id="result">媒体</h1><audio id="audio" src="tone.wav" preload="metadata"></audio><img id="set" srcset="data:image/svg+xml;base64,PHN2Zy8+ 1x, assets/点.svg 2x">`, extra: {
+      'tone.wav': { type: 'audio/wav', text: '', bytes: wav },
     } });
     const frame = await mount((await renderWebPackageInstance(instance)).html);
     await frame.waitForSelector('#audio', { state: 'attached' });
     expect(await frame.locator('#audio').getAttribute('src')).toMatch(/^data:audio\/wav;base64,/u);
     expect(await frame.locator('#set').getAttribute('srcset')).toContain('data:image/svg+xml;base64,PHN2Zy8+ 1x, data:image/svg+xml;base64,');
     await frame.waitForFunction(() => getComputedStyle(document.querySelector('#result')!).color === 'rgb(12, 34, 56)');
-    // 字节及 MIME 保真测试；无效音频不代表可播放，解码由浏览器负责。
-    expect(await frame.evaluate(async () => { const r = await fetch('tone.wav'); return [r.headers.get('content-type'), await r.text()]; })).toEqual(['audio/wav', 'RIFF']);
+    await frame.waitForFunction(() => (document.querySelector('#audio') as HTMLAudioElement).readyState >= 1);
+    expect(await frame.locator('#audio').evaluate(element => (element as HTMLAudioElement).duration)).toBeCloseTo(0.1);
+    expect(await frame.evaluate(async () => { const r = await fetch('tone.wav'); return [r.headers.get('content-type'), (await r.arrayBuffer()).byteLength]; })).toEqual(['audio/wav', 1644]);
   });
 
   it('does not execute a wrong nonce or a message from a sibling frame',async()=>{
