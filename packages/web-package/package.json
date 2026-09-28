@@ -13,6 +13,11 @@
       "types": "./src/browser.ts",
       "import": "./src/browser.ts",
       "default": "./src/browser.ts"
+    },
+    "./security": {
+      "types": "./src/security.ts",
+      "import": "./src/security.ts",
+      "default": "./src/security.ts"
     }
   },
   "scripts": {
