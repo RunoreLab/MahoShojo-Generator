@@ -16,12 +16,14 @@ import { importLocalWebPackageArchive } from '@/lib/web-package/cache';
 import styles from './ArenaWebReport.module.css';
 import type { WebPackageArtifact, WebPackageRef } from '@mahoshojo/contracts/web-package';
 import {
-  canRenderBuiltinWebPackageSrcdoc,
   formatWebPackageFallback,
   prepareWebPackageReplay,
-  renderBuiltinWebPackageSrcdoc,
   type WebPackageReplayStatus,
 } from '@mahoshojo/web-package';
+import {
+  canRenderBuiltinWebPackageSrcdoc,
+  renderBuiltinWebPackageSrcdoc,
+} from '@mahoshojo/web-package/browser';
 
 const CONSENT_KEY = 'arena.web-report-consent.v1';
 // 仅附加到预览；低优先级 layer 允许作品自身的滚动条设计覆盖默认样式。

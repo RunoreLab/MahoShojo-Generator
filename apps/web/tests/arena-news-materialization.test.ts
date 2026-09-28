@@ -1,10 +1,14 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
 import {
-  BUILTIN_WEB_PACKAGE_PRESETS, canRenderBuiltinWebPackageSrcdoc, clearLocalWebPackageSessionStaging,
-  createWebPackageOverlay, packWebPackageZip, renderBuiltinWebPackageSrcdoc, resolveWebPackage,
+  BUILTIN_WEB_PACKAGE_PRESETS, clearLocalWebPackageSessionStaging,
+  createWebPackageOverlay, packWebPackageZip, resolveWebPackage,
   stageLocalWebPackage, unpackWebPackageZip,
 } from '@mahoshojo/web-package';
+import {
+  canRenderBuiltinWebPackageSrcdoc,
+  renderBuiltinWebPackageSrcdoc,
+} from '@mahoshojo/web-package/browser';
 
 const ref = BUILTIN_WEB_PACKAGE_PRESETS.find((preset) => preset.packageRef.id === 'mahoshojo.arena-news')!.packageRef;
 
