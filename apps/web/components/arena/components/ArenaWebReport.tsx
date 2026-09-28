@@ -349,7 +349,10 @@ export function ArenaWebReport({ content, ready, roomId, aiModel, aiUsage, displ
   const importInputRef = useRef<HTMLInputElement>(null);
   const [trustDialogKey, setTrustDialogKey] = useState<string | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
-  const replayKey = `${webPackage?.packageRef.digest ?? ''}::${content}`;
+  // Use immutable content identity instead of embedding the whole generated target.
+  // The target can be multi-megabyte HTML/JSON; replay state only needs the same
+  // identity used by Web Package artifact verification.
+  const replayKey = `${webPackage?.packageRef.digest ?? ''}::${webPackage?.generatedDigest ?? ''}`;
   const compatibilityRef = compatChoice?.key === replayKey ? compatChoice.ref : undefined;
   const [packageResolution, setPackageResolution] = useState<{
     artifact: WebPackageArtifact;
