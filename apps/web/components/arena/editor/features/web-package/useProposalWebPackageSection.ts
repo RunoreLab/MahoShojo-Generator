@@ -8,6 +8,8 @@ import {
   isBuiltinWebPackageRef,
 } from '@mahoshojo/web-package';
 
+import { useWebPackagePresetDownload } from './useWebPackagePresetDownload';
+
 import {
   useArenaEditorActions,
   useArenaEditorSelector,
@@ -32,6 +34,7 @@ export const useProposalWebPackageSectionModel = (input: {
   disabled: boolean;
   onActionError(message: string): void;
 }): ArenaWebPackageSectionModel => {
+  const { downloading, downloadError, downloadPreset } = useWebPackagePresetDownload();
   const session = useArenaEditorSession();
   const reportFormat = useArenaEditorSelector((state) => state.reportFormat);
   const webPackageRef = useArenaEditorSelector((state) => state.webPackageRef);
@@ -82,10 +85,6 @@ export const useProposalWebPackageSectionModel = (input: {
     actions.setWebPackageRef(null);
   }, [actions]);
 
-  const downloadPreset = useCallback(async () => {
-    // Proposal 不承担预设下载；下载入口保留在单人 editor。
-  }, []);
-
   const importFile = useCallback(async () => {
     onActionError('多人模式不支持导入本地 Web 包');
   }, [onActionError]);
@@ -97,12 +96,12 @@ export const useProposalWebPackageSectionModel = (input: {
     options,
     localSummary: null,
     importError: null,
-    downloadError: null,
+    downloadError,
     importing: false,
-    downloading: false,
+    downloading,
     capabilities: {
       importLocal: false,
-      downloadPreset: false,
+      downloadPreset: true,
       remove: true,
       replace: true,
     },

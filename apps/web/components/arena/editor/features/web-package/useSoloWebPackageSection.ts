@@ -7,20 +7,15 @@ import {
   BUILTIN_WEB_PACKAGE_PRESETS,
   isBuiltinWebPackageRef,
   listStagedLocalWebPackages,
-  packWebPackageZip,
-  resolveWebPackage,
-  unstageLocalWebPackage,
 } from '@mahoshojo/web-package';
 
 import { useBattleStore } from '../../../stores/useBattleStore';
 import type { BattleStoreState } from '../../../types';
 import {
-  deleteWebPackageArchiveCache,
   hydrateWebPackageSessionFromCache,
   importLocalWebPackageArchive,
 } from '@/lib/web-package/cache';
-import { downloadBlob } from '@/lib/client/blobUrl';
-import { buildSafeFileName } from '@/lib/client/fileName';
+import { useWebPackagePresetDownload } from './useWebPackagePresetDownload';
 
 import type {
   ArenaWebPackageOptionView,
@@ -79,8 +74,7 @@ export const useSoloWebPackageSectionModel = (input: {
   const [localTick, setLocalTick] = useState(0);
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
-  const [downloading, setDownloading] = useState(false);
-  const [downloadError, setDownloadError] = useState<string | null>(null);
+  const { downloading, downloadError, downloadPreset } = useWebPackagePresetDownload();
 
   useEffect(() => {
     let active = true;
@@ -115,7 +109,6 @@ export const useSoloWebPackageSectionModel = (input: {
 
   const select = useCallback((digest: string | null) => {
     setImportError(null);
-    setDownloadError(null);
     if (!digest) {
       setWebPackageRef(null);
       return;
@@ -134,34 +127,8 @@ export const useSoloWebPackageSectionModel = (input: {
   }, [allowLocalImport, setWebPackageRef]);
 
   const remove = useCallback(() => {
-    const ref = useBattleStore.getState().webPackageRef;
-    if (ref && !isBuiltinWebPackageRef(ref)) {
-      unstageLocalWebPackage(ref);
-      void deleteWebPackageArchiveCache(ref.digest);
-      refreshLocal();
-    }
     setWebPackageRef(null);
   }, [setWebPackageRef]);
-
-  const downloadPreset = useCallback(async (digest: string) => {
-    if (downloading) return;
-    setDownloading(true);
-    setDownloadError(null);
-    try {
-      const preset = BUILTIN_WEB_PACKAGE_PRESETS.find((item) => item.packageRef.digest === digest);
-      if (!preset) throw new Error('未找到预设');
-      const base = await resolveWebPackage(preset.packageRef);
-      const archive = await packWebPackageZip(base);
-      downloadBlob(
-        new Blob([archive.buffer.slice(archive.byteOffset, archive.byteOffset + archive.byteLength) as ArrayBuffer], { type: 'application/zip' }),
-        buildSafeFileName(`${base.manifest.id}@${base.manifest.version}`, 'zip', 'mahoshojo-web-package'),
-      );
-    } catch {
-      setDownloadError('Web 包下载失败，请稍后重试。');
-    } finally {
-      setDownloading(false);
-    }
-  }, [downloading]);
 
   const importFile = useCallback(async (file: File | null | undefined) => {
     if (!file || importing) return;

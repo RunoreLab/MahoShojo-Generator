@@ -1,6 +1,8 @@
 'use client';
 
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
+
+import { PresetGridPicker } from '@/components/PresetGridPicker';
 
 import type { ArenaWebPackageSectionModel } from './web-package-contract';
 
@@ -17,6 +19,7 @@ import type { ArenaWebPackageSectionModel } from './web-package-contract';
  */
 export function ArenaWebPackageSection({ model }: Readonly<{ model: ArenaWebPackageSectionModel }>) {
   const { capabilities, actions } = model;
+  const [currentPage, setCurrentPage] = useState(1);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   if (!model.active) {
@@ -67,40 +70,27 @@ export function ArenaWebPackageSection({ model }: Readonly<{ model: ArenaWebPack
       </div>
 
       <div className="space-y-2">
-        <label className="block">
-          <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
-            更换 / 选择
-          </span>
-          <select
-            value={model.selected?.digest ?? ''}
-            disabled={model.disabled || !capabilities.replace}
-            onChange={(event) => actions.select(event.target.value || null)}
-            className="min-h-11 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-purple-500 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
-            aria-label="选择 Web 包"
-            data-testid="arena-web-package-select"
-          >
-            <option value="">自由生成网页</option>
-            {model.options.map((option) => (
-              <option key={option.digest} value={option.digest}>
-                {option.kind === 'local' ? `本地：${option.title}` : option.title}
-              </option>
-            ))}
-          </select>
-        </label>
+        <PresetGridPicker
+          title="选择 Web 包"
+          presets={model.options.map((option) => ({
+            ...option,
+            filename: option.digest,
+            name: option.kind === 'local' ? `本地：${option.title}` : option.title,
+            description: option.summary ?? '',
+          }))}
+          currentPage={currentPage}
+          onPageChange={setCurrentPage}
+          disabled={model.disabled || !capabilities.replace}
+          selectedFilenames={model.selected ? [model.selected.digest] : []}
+          onToggle={(preset) => actions.select(preset.digest === model.selected?.digest ? null : preset.digest)}
+          selectionLabel="Web 包"
+          canDownload={(preset) => capabilities.downloadPreset && preset.kind === 'builtin'}
+          onDownload={(preset) => { void actions.downloadPreset(preset.digest); }}
+          downloadDisabled={model.downloading}
+          downloadTitle={model.downloading ? '正在准备 ZIP…' : '下载 Web 包 ZIP'}
+        />
 
         <div className="flex flex-wrap gap-2">
-          {capabilities.downloadPreset && model.selected?.kind === 'builtin' ? (
-            <button
-              type="button"
-              disabled={model.disabled || model.downloading}
-              onClick={() => { void actions.downloadPreset(model.selected!.digest); }}
-              className="min-h-11 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 hover:bg-gray-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-purple-500 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800"
-              data-testid="arena-web-package-download"
-            >
-              {model.downloading ? '正在准备 ZIP…' : '下载 Web 包 ZIP'}
-            </button>
-          ) : null}
-
           {capabilities.importLocal ? (
             <>
               <input
@@ -109,7 +99,10 @@ export function ArenaWebPackageSection({ model }: Readonly<{ model: ArenaWebPack
                 accept=".zip,application/zip"
                 className="sr-only"
                 disabled={model.disabled || model.importing}
-                onChange={(event) => { void actions.importFile(event.target.files?.[0]); }}
+                onChange={(event) => {
+                  void actions.importFile(event.target.files?.[0]);
+                  event.target.value = '';
+                }}
                 aria-label="导入本地 Web 包 ZIP"
                 data-testid="arena-web-package-import-input"
               />
@@ -126,6 +119,11 @@ export function ArenaWebPackageSection({ model }: Readonly<{ model: ArenaWebPack
           ) : null}
         </div>
 
+        {capabilities.importLocal ? (
+          <p className="text-xs text-gray-500">
+            本地 ZIP 可用于生成和保存目标文件；当前版本暂不执行自定义包的网页体验，生成后将显示安全文本。移除选择不会删除本地缓存。
+          </p>
+        ) : null}
         {model.importError ? (
           <span className="block text-xs text-red-600 dark:text-red-400" role="status" data-testid="arena-web-package-import-error">
             {model.importError}

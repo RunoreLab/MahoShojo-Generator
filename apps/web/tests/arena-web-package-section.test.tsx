@@ -59,6 +59,26 @@ afterEach(async () => {
 });
 
 describe('ArenaWebPackageSection', () => {
+  it('未选择和只读时仍可下载指定预设，且不修改当前选择', async () => {
+    const input = model({ disabled: true, capabilities: {
+      importLocal: false, downloadPreset: true, remove: true, replace: true,
+    } });
+    await render(input);
+    const download = container.querySelector<HTMLButtonElement>('[title="下载 Web 包 ZIP"]')!;
+    expect(download.disabled).toBe(false);
+    await act(async () => download.click());
+    expect(input.actions.downloadPreset).toHaveBeenCalledWith(BUILTIN_VISUAL_NOVEL_PACKAGE_REF.digest);
+    expect(input.actions.select).not.toHaveBeenCalled();
+    expect(container.querySelector<HTMLButtonElement>('[aria-label="选择Web 包：Visual Novel Lite"]')!.disabled).toBe(true);
+  });
+
+  it('点击当前选中的卡片回到自由 Web', async () => {
+    const input = model();
+    await render({ ...input, selected: input.options[0] });
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-pressed="true"]')!.click());
+    expect(input.actions.select).toHaveBeenCalledWith(null);
+  });
+
   it('默认简洁：Markdown 时只提示切换，不展示选择器细节', async () => {
     await render(model({ active: false }));
     expect(container.querySelector('[data-testid="arena-web-package-section"]')).toBeNull();
@@ -70,9 +90,8 @@ describe('ArenaWebPackageSection', () => {
     await render(model());
     expect(container.querySelector('[data-testid="arena-web-package-selected"]')?.textContent)
       .toBe('自由生成网页（未选择 Web 包）');
-    const options = [...container.querySelectorAll('option')].map((item) => item.textContent);
-    expect(options[0]).toBe('自由生成网页');
-    expect(options).not.toContain('禁用包');
+    expect(container.querySelector('[aria-label="选择Web 包：Visual Novel Lite"]')).toBeTruthy();
+    expect(container.textContent).not.toContain('禁用包');
   });
 
   it('多人能力关闭时不展示本地导入入口与预设下载按钮', async () => {
@@ -92,7 +111,7 @@ describe('ArenaWebPackageSection', () => {
     }));
     expect(container.querySelector('[data-testid="arena-web-package-import"]')).toBeNull();
     expect(container.querySelector('[data-testid="arena-web-package-import-input"]')).toBeNull();
-    expect(container.querySelector('[data-testid="arena-web-package-download"]')).toBeNull();
+    expect(container.querySelector('[title="下载 Web 包 ZIP"]')).toBeNull();
     expect(container.textContent).toContain('多人模式仅支持可共享的内置预设');
   });
 
@@ -113,7 +132,7 @@ describe('ArenaWebPackageSection', () => {
       },
     }));
     expect(container.querySelector('[data-testid="arena-web-package-import"]')).toBeTruthy();
-    expect(container.querySelector('[data-testid="arena-web-package-download"]')).toBeTruthy();
+    expect(container.querySelector('[title="下载 Web 包 ZIP"]')).toBeTruthy();
     expect(container.querySelector('[data-testid="arena-web-package-import-error"]')?.textContent)
       .toBe('ZIP 结构不合法');
   });
