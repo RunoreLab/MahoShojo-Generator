@@ -37,8 +37,6 @@ export { canonicalizeWebPackageManifest, digestWebPackageBytes, verifyWebPackage
 export {
   WEB_PACKAGE_INSTANCE_PREFIX,
   WEB_PACKAGE_RESOURCE_CORS_ORIGIN,
-  WEB_PACKAGE_SERVICE_WORKER_PATH,
-  WEB_PACKAGE_SERVICE_WORKER_SCOPE,
   buildWebPackageInstanceUrl,
   createWebPackageResourceHeaders,
   createWebPackageResourceResponse,

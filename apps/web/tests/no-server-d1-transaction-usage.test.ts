@@ -19,7 +19,6 @@ const allowedTransactionFiles = new Set([
   'lib/ai-session/battle-story/storage.ts',
   'lib/public-card-cache/storage.ts',
   'lib/web-package/cache.ts',
-  'lib/web-package/instance-store.ts',
 ]);
 
 const isObjectRecord = (value: unknown): value is Record<string, unknown> =>

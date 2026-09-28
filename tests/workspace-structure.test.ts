@@ -171,9 +171,10 @@ describe('G25D Web workspace app ownership', () => {
       'node --max-old-space-size=3072 node_modules/typescript/bin/tsc',
     );
     expect(appManifest.scripts?.['build:next']).toBe(
-      'pnpm run clean:next && pnpm run typecheck:build && pnpm run build:sw && next build '
+      'pnpm run clean:next && pnpm run typecheck:build && next build '
       + '&& node scripts/check-hosted-dr-client-bundle.mjs --dir .next/static',
     );
+    expect(appManifest.scripts?.['build:sw']).toBeUndefined();
     expect(appManifest.scripts?.build).toContain('pnpm run build:next');
     expect(appManifest.scripts?.['build:cf']).toContain('opennextjs-cloudflare build');
     expect(appManifest.scripts?.['build:cf']).not.toContain('--skipNextBuild');

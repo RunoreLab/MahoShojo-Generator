@@ -2,8 +2,6 @@ import { stageJsonPackage } from './helpers/json-package';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   WEB_PACKAGE_INSTANCE_PREFIX,
-  WEB_PACKAGE_SERVICE_WORKER_PATH,
-  WEB_PACKAGE_SERVICE_WORKER_SCOPE,
   buildWebPackageInstanceUrl,
   createWebPackageResourceHeaders,
   createWebPackageResourceResponse,
@@ -49,7 +47,7 @@ describe('generic Web package resource space', () => {
     for (const pathname of [
       '/',
       '/index.html',
-      WEB_PACKAGE_SERVICE_WORKER_PATH,
+      '/__web-package__/sw.js',
       `${WEB_PACKAGE_INSTANCE_PREFIX}`,
       `${WEB_PACKAGE_INSTANCE_PREFIX}${INSTANCE_ID}`,
       `${WEB_PACKAGE_INSTANCE_PREFIX}${INSTANCE_ID}/`,
@@ -63,8 +61,6 @@ describe('generic Web package resource space', () => {
     ]) {
       expect(parseWebPackageInstancePath(pathname), pathname).toBeNull();
     }
-    expect(WEB_PACKAGE_SERVICE_WORKER_SCOPE).toBe('/__web-package__/');
-    expect(WEB_PACKAGE_SERVICE_WORKER_PATH.startsWith(WEB_PACKAGE_SERVICE_WORKER_SCOPE)).toBe(true);
   });
 
   it('serves relative JS, nested paths and the entry document from one instance URL space', async () => {
@@ -130,7 +126,7 @@ describe('generic Web package resource space', () => {
       `${WEB_PACKAGE_INSTANCE_PREFIX}other-instance/index.html`,
       `${WEB_PACKAGE_INSTANCE_PREFIX}${INSTANCE_ID}/../index.html`,
       '/arena',
-      WEB_PACKAGE_SERVICE_WORKER_PATH,
+      '/__web-package__/sw.js',
     ]) {
       const response = createWebPackageResourceResponse(snapshot, pathname);
       expect(response.status, pathname).toBe(404);

@@ -5,10 +5,8 @@ import {
 } from '@mahoshojo/contracts/web-package';
 import type { WebPackageManifest } from '@mahoshojo/contracts/web-package';
 
-/** Narrow instance namespace; Service Worker (or an equivalent host) may only serve here. */
+/** Transport-neutral instance namespace for a future isolated resource host. */
 export const WEB_PACKAGE_INSTANCE_PREFIX = '/__web-package__/instance/';
-export const WEB_PACKAGE_SERVICE_WORKER_PATH = '/__web-package__/sw.js';
-export const WEB_PACKAGE_SERVICE_WORKER_SCOPE = '/__web-package__/';
 /** Opaque sandbox origins need explicit CORS; credentials are never used here. */
 export const WEB_PACKAGE_RESOURCE_CORS_ORIGIN = '*';
 

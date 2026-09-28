@@ -18,27 +18,9 @@ import {
   verifyWebPackage,
 } from '@mahoshojo/web-package';
 import { useBattleStore } from '@/components/arena/stores/useBattleStore';
-import { clearWebPackageInstances } from '@/lib/web-package/instance-store';
 
 vi.mock('@/lib/client/blobUrl', () => ({ downloadBlob: vi.fn() }));
 vi.mock('@/components/shared/GeneratedByUserBadge', () => ({ GeneratedByUserBadge: () => null }));
-
-const installServiceWorkerStub = () => {
-  const activeWorker = { state: 'activated', addEventListener: vi.fn(), removeEventListener: vi.fn() };
-  const registration = {
-    active: activeWorker,
-    installing: null,
-    waiting: null,
-  } as unknown as ServiceWorkerRegistration;
-  const container = {
-    register: vi.fn(async () => registration),
-  };
-  Object.defineProperty(navigator, 'serviceWorker', {
-    configurable: true,
-    get: () => container,
-  });
-  return container;
-};
 
 const source = '<!doctype html><html><body><button onclick="this.textContent=123">互动</button></body></html>';
 const sourceWithNotes = [
@@ -84,7 +66,6 @@ const viewer = (roomId: string, ready = true, content = source) => (
 beforeEach(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   window.localStorage.clear();
-  installServiceWorkerStub();
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -92,7 +73,6 @@ beforeEach(() => {
 afterEach(async () => {
   vi.useRealTimers();
   clearLocalWebPackageSessionStaging();
-  await clearWebPackageInstances();
   await act(async () => root.unmount());
   container.remove();
   vi.restoreAllMocks();

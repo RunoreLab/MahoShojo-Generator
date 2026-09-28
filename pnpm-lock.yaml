@@ -259,9 +259,6 @@ importers:
       drizzle-orm:
         specifier: ^0.45.2
         version: 0.45.2(@opentelemetry/api@1.9.1)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.10.0)(kysely@0.29.5)
-      esbuild:
-        specifier: ^0.28.1
-        version: 0.28.1
       fflate:
         specifier: ^0.8.2
         version: 0.8.3
