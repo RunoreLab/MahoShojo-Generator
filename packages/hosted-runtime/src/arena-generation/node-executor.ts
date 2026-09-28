@@ -53,6 +53,7 @@ import { createNodeStructuredAiRuntime } from '../node-runtime/structured-ai';
 import { quickCheckForServer } from '../node-runtime/sensitive-word-filter';
 import { isAiPreDispatchRetrySafe } from '../node-runtime/retry-safety';
 import { normalizeUsage } from '../node-runtime/usage';
+import { normalizeFinishReason } from './completion';
 import type { SignatureService } from '../signature';
 import {
   LoadBalanceStrategy,
@@ -481,11 +482,19 @@ const wrapTelemetry = (
         ]);
         const normalizedUsage = normalizeUsage(usage);
         if (normalizedUsage) telemetry.usage = normalizedUsage;
-        if (typeof finishReason === 'string' && finishReason.trim()) {
-          telemetry.finishReason = finishReason.trim();
-        }
+        if (finishReasonPromise) telemetry.finishReason = normalizeFinishReason(finishReason);
         controller.close();
       } catch (error) {
+        telemetry.finishReason = 'error';
+        // Error paths must not wait indefinitely for SDK usage promises.
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const usage = await Promise.race([
+          usagePromise?.catch(() => null) ?? Promise.resolve(null),
+          new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), 250); }),
+        ]);
+        if (timer) clearTimeout(timer);
+        const normalized = normalizeUsage(usage);
+        if (normalized) telemetry.usage = normalized;
         controller.error(error);
       }
     },

@@ -38,6 +38,7 @@ export type BattleResultStreamingPresentation = {
     readonly promptTokens?: number | null;
     readonly reasoningTokens?: number | null;
     readonly completionTokens?: number | null;
+    readonly textTokens?: number | null;
     readonly totalTokens?: number | null;
     readonly cachedTokens?: number | null;
   } | null;

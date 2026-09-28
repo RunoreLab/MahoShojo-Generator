@@ -1,5 +1,7 @@
 'use client';
 
+import { getVisibleOutputTokens } from '@mahoshojo/ai-core/token-usage';
+
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { ChevronDown, FileText, Maximize, Minimize, PanelsTopLeft } from 'lucide-react';
 import type { NewsReport } from '@/components/BattleReportCard';
@@ -174,7 +176,7 @@ function ArenaWebDocument({ location, prelude, epilogue, reload, immersive, aiMo
   const immersiveButtonRef = useRef<HTMLButtonElement>(null);
   const focusOnExpandRef = useRef(false);
   const model = aiModel?.trim();
-  const hasTokens = [aiUsage?.promptTokens, aiUsage?.reasoningTokens, aiUsage?.completionTokens]
+  const hasTokens = [aiUsage?.promptTokens, aiUsage?.reasoningTokens, aiUsage?.completionTokens, aiUsage?.textTokens]
     .some((value) => typeof value === 'number' && Number.isFinite(value));
   const formatToken = (value: number | null | undefined) =>
     typeof value === 'number' && Number.isFinite(value) ? value.toLocaleString() : '-';
@@ -237,7 +239,7 @@ function ArenaWebDocument({ location, prelude, epilogue, reload, immersive, aiMo
                 {hasTokens ? <>
                   <span className={styles.token}>tokens：输入 {formatToken(aiUsage?.promptTokens)}</span>
                   <span className={styles.token}>｜推理 {formatToken(aiUsage?.reasoningTokens)}</span>
-                  <span className={styles.token}>｜输出 {formatToken(aiUsage?.completionTokens)}</span>
+                  <span className={styles.token}>｜输出 {formatToken(getVisibleOutputTokens(aiUsage))}</span>
                 </> : null}
               </div> : null}
             </div>

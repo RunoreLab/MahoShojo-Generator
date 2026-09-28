@@ -5,6 +5,7 @@ import {
   resolveResumeCursor,
 } from './sse';
 import type { SafePublicAiErrorProjection } from '../regular-generation';
+import { getStreamCompletionErrorMessage } from '../regular-generation';
 import { ARENA_RESOURCE_BUDGET } from './resource-budget';
 import { extractArenaMultiplayerParticipation, type ArenaMultiplayerParticipation } from '@mahoshojo/contracts/arena-room';
 import { WebPackageArtifactSchema, type WebPackageArtifact } from '@mahoshojo/contracts/web-package';
@@ -381,6 +382,8 @@ export interface ArenaGenerationExecutor {
 }
 
 export type ArenaGenerationTerminalRecord = {
+  /** Only canonical usage and display model; never provider diagnostics or reasoning text. */
+  telemetry?: Record<string, unknown>;
   generationId: string;
   generationRequestId: string;
   status: GenerationTerminal['status'];
@@ -1964,7 +1967,9 @@ export const createArenaGenerationService = (
     })();
     const snapshot: GenerationSnapshot = {
       status: terminal.status,
-      markdown: terminal.status === 'completed' ? terminal.markdown : '',
+      ...(terminal.telemetry ? { telemetry: terminal.telemetry } : {}),
+      markdown: terminal.status === 'completed' || (terminal.status === 'failed' && terminal.resultRef)
+        ? terminal.markdown : '',
       reasoning: terminal.status === 'completed' ? terminal.reasoning : '',
       lastEventId: null,
       updatedAt: terminal.updatedAt,
@@ -1986,6 +1991,8 @@ export const createArenaGenerationService = (
       data: {
         ok: terminal.status === 'completed',
         status: terminal.status,
+        ...(getStreamCompletionErrorMessage(terminal.errorCode)
+          ? { message: getStreamCompletionErrorMessage(terminal.errorCode) } : {}),
         ...(
           terminal.status === 'failed' || terminal.status === 'producer_lost'
             ? {

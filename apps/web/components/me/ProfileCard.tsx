@@ -2,6 +2,7 @@
 
 import { useMemo, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { getVisibleOutputTokens } from '@mahoshojo/ai-core/token-usage';
 
 import Badge from '@/components/badge/Badge';
 import BadgeIcon from '@/components/badge/BadgeIcon';
@@ -268,14 +269,14 @@ const buildTokenBreakdownLabel = (report: BattleReportLite): string => {
       ? report.completionTokens
       : null;
 
-  const fallbackTotal = [prompt, reasoning, completion].reduce<number>((sum, n) => sum + (typeof n === 'number' ? n : 0), 0);
-  const resolvedTotal = total ?? (fallbackTotal > 0 ? fallbackTotal : null);
+  const resolvedTotal = total ?? (prompt != null && completion != null ? prompt + completion : null);
+  const output = getVisibleOutputTokens(report);
 
   const pieces: string[] = [];
   pieces.push(`总 ${resolvedTotal == null ? '-' : formatCount(resolvedTotal)}`);
   if (prompt != null) pieces.push(`输入 ${formatCount(prompt)}`);
   if (reasoning != null) pieces.push(`推理 ${formatCount(reasoning)}`);
-  if (completion != null) pieces.push(`输出 ${formatCount(completion)}`);
+  if (completion != null || output != null) pieces.push(`输出 ${output == null ? '-' : formatCount(output)}`);
   return pieces.join(' / ');
 };
 

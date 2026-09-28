@@ -4,6 +4,15 @@ import { hydrateBattleReportCardFromGenerationRecord } from '@/lib/arena/battle-
 import { BUILTIN_VISUAL_NOVEL_PACKAGE_REF, createWebPackageOverlay } from '@mahoshojo/web-package';
 
 describe('hydrateBattleReportCardFromGenerationRecord', () => {
+  it('preserves explicit non-reasoning token details when restoring a saved card', async () => {
+    const result = await hydrateBattleReportCardFromGenerationRecord({
+      generationMode: 'stream', endpoint: 'api/arena/generate-stream', mode: 'daily',
+      scenarioTitle: null, headline: null, winner: null, outputPreview: '# 正文',
+      promptTokens: 13967, completionTokens: 11568, reasoningTokens: 8273,
+      totalTokens: null, cachedTokens: null, usageDetails: { textTokens: 3295 },
+    });
+    expect(result.report.aiUsage).toMatchObject({ textTokens: 3295, completionTokens: 11568, reasoningTokens: 8273 });
+  });
   it.each([
     ['stream', '# 快照战报\n\n正文。\n\n## 胜利者\n角色甲'],
     ['non-stream', JSON.stringify({

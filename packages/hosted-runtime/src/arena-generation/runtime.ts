@@ -26,6 +26,7 @@ import type {
   ArenaTrustedPvpContext,
 } from '@mahoshojo/hosted-api/arena-generation/service';
 import { createArenaStreamProjector } from './stream-projector';
+import { assertStreamCompletion } from './completion';
 import { WebPackageRefSchema, type WebPackageArtifact } from '@mahoshojo/contracts/web-package';
 import { createWebPackageOverlay, createWebPackageOverlayFromProjection } from '@mahoshojo/web-package';
 import { isWebArenaOutputContract } from './output-contract';
@@ -876,6 +877,7 @@ export const createArenaGenerationRuntime = (
       }
       await flushReasoningEvents();
       const { metaEvent } = projector.result();
+      assertStreamCompletion(telemetry);
       if (prepared.metadata.webPackageRef) {
         const eventData = metaEvent?.type === 'meta' ? metaEvent.data as Record<string, unknown> : null;
         const meta = eventData?.meta as Record<string, unknown> | undefined;
@@ -980,6 +982,15 @@ export const createArenaGenerationRuntime = (
           outcome: input.signal.aborted ? 'cancelled' : 'failure',
           durationMs: performance.now() - providerStartedAt,
         });
+      }
+      if (!finalizationStarted && !input.signal.aborted) {
+        // Flush the projector's guarded tail on upstream failure as well as normal EOF.
+        for (const chunk of projector.finish().markdown) {
+          markdown += chunk;
+          await emit({ type: 'markdown', data: { chunk } }).catch(() => undefined);
+        }
+        // A replay transport failure must not prevent durable failed finalization.
+        await emit({ type: 'telemetry', data: telemetry }).catch(() => undefined);
       }
       if (
         (durableFinalizationAttempted || finalizationClaimIndeterminate)

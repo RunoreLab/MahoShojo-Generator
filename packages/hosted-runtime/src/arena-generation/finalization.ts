@@ -9,6 +9,7 @@ import {
   type ArenaGenerationPersistenceWarning,
 } from '@mahoshojo/hosted-api/arena-generation/service';
 import { isWebArenaOutputContract } from './output-contract';
+import { canArchivePartialOutput } from './completion';
 
 export type ArenaTerminalClaimInput = Omit<
   ArenaGenerationFinalizationInput,
@@ -92,7 +93,7 @@ export const createArenaGenerationFinalizer = (
   });
   let resultRef: string | null = null;
   let persistenceWarning: ArenaGenerationPersistenceWarning | undefined;
-  if (input.status === 'completed') {
+  if (input.status === 'completed' || (canArchivePartialOutput(input) && input.markdown.trim())) {
     const startedAt = performance.now();
     const bytes = new TextEncoder().encode(input.markdown).byteLength;
     for (let attempt = 0; attempt < 3 && !resultRef; attempt += 1) {

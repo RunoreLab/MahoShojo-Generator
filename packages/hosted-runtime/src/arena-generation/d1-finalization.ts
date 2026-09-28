@@ -19,6 +19,8 @@ import {
 import { parseArenaStructuredReportJson } from './structured-report';
 import { buildArenaTerminalEffectIdempotencyKey } from './finalization';
 import { isWebArenaOutputContract } from './output-contract';
+import { canArchivePartialOutput, completionDiagnostics } from './completion';
+import { normalizeUsage } from '../node-runtime/usage';
 import type { NodeDataD1Client } from '../node-runtime/data-ports';
 
 const OUTPUT_KIND = 'battle_report_generation_output';
@@ -438,6 +440,9 @@ const buildExtraJson = async (
     generationPayloadHash: boundedString(input.payloadHash, 128),
     generationTerminalStatus: input.status,
     finalizationCompleted: false,
+    completion: completionDiagnostics(input.telemetry),
+    usageDetails: normalizeUsage(input.telemetry.usage),
+    partialOutput: canArchivePartialOutput(input) && Boolean(input.markdown.trim()),
     resultRef: boundedString(input.resultRef, 512),
     persistenceWarning: input.persistenceWarning ?? null,
     errorCode: boundedString(input.errorCode, 80),
@@ -714,6 +719,8 @@ const buildRoomSafeResult = (
     }] : [];
   });
   const usage = {
+    ...(numberOf(recordOf(extra.usageDetails)?.textTokens) === null ? {}
+      : { textTokens: numberOf(recordOf(extra.usageDetails)?.textTokens)! }),
     ...(numberOf(row.prompt_tokens) === null ? {} : { promptTokens: numberOf(row.prompt_tokens)! }),
     ...(numberOf(row.completion_tokens) === null
       ? {} : { completionTokens: numberOf(row.completion_tokens)! }),
@@ -773,15 +780,17 @@ const materializeStoredTerminal = async (input: {
   const status = logicalTerminalStatus(input.row, extra);
   const requestId = stringOf(extra.generationRequestId);
   if (!status || !requestId) return null;
-  const resultRef = status === 'completed' ? stringOf(extra.resultRef) : null;
+  const partialOutput = status === 'failed' && extra.partialOutput === true
+    && canArchivePartialOutput({ status, errorCode: stringOf(extra.errorCode) });
+  const resultRef = status === 'completed' || partialOutput ? stringOf(extra.resultRef) : null;
   const r2Key = stringOf(input.row['r2_key']);
   let markdown = '';
-  let contentAvailable = status !== 'completed';
+  let contentAvailable = status !== 'completed' && !partialOutput;
   let contentUnavailableReason: 'not-archived' | 'not-found' | 'temporary' | undefined;
   let persistenceWarning = extra.persistenceWarning === ARENA_OUTPUT_NOT_ARCHIVED_WARNING
     ? ARENA_OUTPUT_NOT_ARCHIVED_WARNING
     : undefined;
-  if (status === 'completed') {
+  if (status === 'completed' || partialOutput) {
     if (!resultRef) {
       contentUnavailableReason = 'not-archived';
       persistenceWarning = ARENA_OUTPUT_NOT_ARCHIVED_WARNING;
@@ -811,6 +820,14 @@ const materializeStoredTerminal = async (input: {
     resultRef,
     markdown,
     reasoning: '',
+    telemetry: {
+      ...(boundedString(input.row['ai_model'], 256) ? { aiModel: boundedString(input.row['ai_model'], 256) } : {}),
+      usage: normalizeUsage(extra.usageDetails) ?? normalizeUsage({
+        promptTokens: input.row.prompt_tokens, completionTokens: input.row.completion_tokens,
+        reasoningTokens: input.row.reasoning_tokens, totalTokens: input.row.total_tokens,
+        cachedTokens: input.row.cached_tokens,
+      }),
+    },
     errorCode: stableErrorCodeOf(extra.finalizationFailureCode)
       ?? stableErrorCodeOf(extra.errorCode)
       ?? stableErrorCodeOf(extra.rejectionCode),
@@ -932,7 +949,7 @@ ON CONFLICT(kind, owner_ref_id) DO UPDATE SET
       const pvp = recordOf(serverContext?.trustedPvpContext);
       const usage = recordOf(input.telemetry.usage);
       const extraJson = await buildExtraJson(input);
-      const terminalMarkdown = input.status === 'completed' ? input.markdown : '';
+      const terminalMarkdown = input.status === 'completed' || canArchivePartialOutput(input) ? input.markdown : '';
       const markdownBytes = new TextEncoder().encode(terminalMarkdown).byteLength;
       let inserted: Awaited<ReturnType<ReturnType<NodeDataD1Client['prepare']>['run']>>;
       try {

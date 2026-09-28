@@ -3759,6 +3759,29 @@ describe('Arena generation lifecycle service', () => {
     expect(replay).not.toMatch(/message|余额不足|provider/u);
   });
 
+  test('durable truncated terminal replays partial text, usage and a fixed explanation without redispatch', async () => {
+    const execute = vi.fn(async () => ({ status: 'completed' as const }));
+    const terminalStore: ArenaGenerationTerminalStore = {
+      readOwnedTerminal: vi.fn(async () => ({
+        generationId: 'generation-1', generationRequestId: 'request-1',
+        status: 'failed' as const, updatedAt: '2026-09-28T00:00:00Z',
+        resultRef: 'r2:partial', markdown: 'partial body', reasoning: '',
+        errorCode: 'AI_OUTPUT_TRUNCATED', payloadHash: 'hash', contentAvailable: true,
+        telemetry: { usage: { completionTokens: 20, reasoningTokens: 15, textTokens: 5 } },
+      })),
+    };
+    const service = createService(new MemoryReplayStore(), { execute }, { terminalStore });
+    const response = await service.resume(new Request('https://example.test/api/arena/generations/generation-1/stream'),
+      { generationId: 'generation-1' });
+    const replay = await response.text();
+    expect(replay).toContain('partial body');
+    expect(replay).toContain('"textTokens":5');
+    expect(replay).toContain('生成达到输出上限');
+    expect(replay).toContain('event: error');
+    expect(replay).not.toContain('event: done');
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   test('validates the resume cursor before generation lookup and advances terminal fallback ids', async () => {
     const store = new MemoryReplayStore();
     const terminalStore: ArenaGenerationTerminalStore = {

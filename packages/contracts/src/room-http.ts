@@ -237,6 +237,7 @@ export const ArenaRoomGenerationHistoryResponseSchema = z.object({
 }).strict();
 
 const ArenaRoomGenerationUsageSchema = z.object({
+  textTokens: z.number().int().nonnegative().optional(),
   promptTokens: z.number().int().nonnegative().optional(),
   completionTokens: z.number().int().nonnegative().optional(),
   totalTokens: z.number().int().nonnegative().optional(),

@@ -203,6 +203,39 @@ const readRoomSafeResult = async (extra: Record<string, unknown>) => {
 };
 
 describe('Arena D1/R2 finalization ports', () => {
+  it('persists bounded completion diagnostics and restores a failed partial output by owner', async () => {
+    const writer = sequentialD1([result([], 1)]);
+    const ports = createNodeArenaGenerationFinalizationPorts({ getD1Client: () => writer });
+    await ports.claimTerminal({
+      ...claimInput, status: 'failed', errorCode: 'AI_OUTPUT_TRUNCATED',
+      markdown: 'partial body',
+      telemetry: { finishReason: 'length', usage: { completionTokens: 20, reasoningTokens: 15, textTokens: 5 },
+        streamCompletion: { sdkFinishEvent: true, maxOutputTokens: 20, textChars: 12,
+          lastTextMs: 100, apiKey: 'must-not-persist' }, providerBaseUrl: 'must-not-persist' },
+    });
+    const extra = writer.boundCalls[0]?.map((value) => {
+      try { return typeof value === 'string' ? JSON.parse(value) : null; } catch { return null; }
+    }).find((value) => value?.partialOutput === true);
+    expect(extra).toMatchObject({
+      completion: { finishReason: 'length', sdkFinishEvent: true, maxOutputTokens: 20 },
+      usageDetails: { completionTokens: 20, reasoningTokens: 15, textTokens: 5 },
+      partialOutput: true,
+    });
+    expect(JSON.stringify(extra)).not.toContain('must-not-persist');
+    const reader = sequentialD1([result([{
+      id: claimInput.generationId, status: 'failed',
+      updated_at: '2026-09-28T00:00:00Z', r2_key: 'key',
+      extra_json: JSON.stringify({ ...extra, finalizationCompleted: true }),
+    }])]);
+    const terminal = await createNodeArenaGenerationTerminalStore({
+      getD1Client: () => reader,
+      objectStore: { put: vi.fn(), getText: vi.fn(async () => ({ kind: 'found' as const, text: 'partial body' })) },
+    }).readOwnedTerminal({ generationId: claimInput.generationId, actorKey: claimInput.actorKey });
+    expect(terminal).toMatchObject({
+      status: 'failed', markdown: 'partial body', errorCode: 'AI_OUTPUT_TRUNCATED',
+      roomSafeResult: null, telemetry: { usage: { textTokens: 5 } },
+    });
+  });
   it('records a bounded failed PVP rejection without success-side-effect data', async () => {
     const client = sequentialD1([result([], 1)]);
     const recorder = createNodeArenaRejectedTerminalRecorder({

@@ -63,6 +63,39 @@ afterEach(async () => {
   useBattleStore.setState(useBattleStore.getInitialState());
 });
 
+describe('Markdown completion follows the authoritative terminal', () => {
+  it('accepts completed text without inventing a Markdown heading requirement', async () => {
+    const initial = useBattleStore.getState();
+    await act(async () => useBattleStore.setState({ reportFormat: 'markdown',
+      settings: { ...initial.settings, writeArenaHistory: false, writeCurrentState: false } }));
+    const body = '完整的普通叙事正文，没有二级标题。'.repeat(15);
+    mocks.openStream.mockResolvedValue(new Response(
+      sse('markdown', { chunk: body }) + sse('done', { status: 'completed', ok: true }),
+      { headers: { 'Content-Type': 'text/event-stream' } },
+    ));
+    await act(async () => current.handleGenerate());
+    expect(useBattleStore.getState().streamingMarkdown).toBe(body);
+    expect(useBattleStore.getState().error).toBeFalsy();
+  });
+
+  it.each(['failed', 'missing'])('does not update cards or repeat generation with a %s done event', async (terminal) => {
+    await act(async () => useBattleStore.setState({ reportFormat: 'markdown' }));
+    const body = '# 开场\n\n## 已有小标题\n' + '未完成正文'.repeat(40);
+    mocks.openStream.mockResolvedValue(new Response(
+      sse('markdown', { chunk: body }) + (terminal === 'failed' ? sse('done', { status: 'failed', ok: false }) : ''),
+      { headers: { 'Content-Type': 'text/event-stream' } },
+    ));
+    await act(async () => current.handleGenerate());
+    expect(useBattleStore.getState().streamingMarkdown).toBe(body);
+    expect(useBattleStore.getState().error).toContain(terminal === 'failed' ? '未成功完成' : '未收到 done');
+    expect(mocks.updateFromMarkdown).not.toHaveBeenCalled();
+    if (terminal === 'failed') expect(mocks.cooldown).not.toHaveBeenCalled();
+    // Unknown connection state may still have a live producer; preserve the existing throttle.
+    else expect(mocks.cooldown).toHaveBeenCalledTimes(1);
+    expect(mocks.openStream).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('single-player Web generation integration', () => {
   it('freezes a package ref and preserves exact overlay bytes across stream completion', async () => {
     const content = ' \n' + JSON.stringify({ title: '故事', scenes: [{ text: 'SHIELD 原始故事' }] }) + '\n ';

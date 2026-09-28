@@ -68,6 +68,7 @@ export type AiTelemetry = {
   attempt?: number;
   usage?: unknown;
   finishReason?: unknown;
+  streamCompletion?: Record<string, unknown>;
   reasoning?: AIReasoningEnvelope | null;
 };
 

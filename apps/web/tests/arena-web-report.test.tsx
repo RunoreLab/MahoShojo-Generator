@@ -257,8 +257,9 @@ describe('Web 战报的本地执行许可', () => {
   });
 
   it.each([
-    { aiModel: 'deepseek-v4-flash-0731', aiUsage: { promptTokens: 12833, reasoningTokens: 7981, completionTokens: 14315 }, expected: '模型：deepseek-v4-flash-0731 · tokens：输入 12,833｜推理 7,981｜输出 14,315' },
-    { aiModel: null, aiUsage: { promptTokens: 0, completionTokens: 1234567890 }, expected: 'tokens：输入 0｜推理 -｜输出 1,234,567,890' },
+    { aiModel: 'deepseek-v4-flash-0731', aiUsage: { promptTokens: 12833, reasoningTokens: 7981, completionTokens: 14315 }, expected: '模型：deepseek-v4-flash-0731 · tokens：输入 12,833｜推理 7,981｜输出 6,334' },
+    { aiModel: null, aiUsage: { promptTokens: 0, completionTokens: 1234567890 }, expected: 'tokens：输入 0｜推理 -｜输出 -' },
+    { aiModel: null, aiUsage: { promptTokens: 13967, completionTokens: 11568, reasoningTokens: 8273, textTokens: 3295 }, expected: 'tokens：输入 13,967｜推理 8,273｜输出 3,295' },
     { aiModel: '  very-long-model-name-'.repeat(8).trim(), aiUsage: null, expected: `模型：${'  very-long-model-name-'.repeat(8).trim()}` },
     { aiModel: '  ', aiUsage: { promptTokens: null, reasoningTokens: NaN, completionTokens: Infinity }, expected: '' },
     { aiModel: undefined, aiUsage: undefined, expected: '' },

@@ -44,6 +44,28 @@ const createPorts = (
 });
 
 describe('Arena generation finalization', () => {
+  it.each([
+    { status: 'cancelled' as const, errorCode: 'CONTENT_POLICY_CANCELLED', metadata: {} },
+    { status: 'failed' as const, errorCode: 'AI_OUTPUT_FILTERED', metadata: {} },
+    { status: 'failed' as const, errorCode: 'AI_OUTPUT_TRUNCATED', metadata: { outputContract: 'web-document' } },
+    { status: 'failed' as const, errorCode: 'AI_OUTPUT_TRUNCATED', metadata: { outputContract: 'web-package-target' } },
+  ])('does not archive policy or executable partial output: $errorCode $metadata', async (failure) => {
+    const ports = createPorts();
+    await createArenaGenerationFinalizer(ports)({ ...input, ...failure, markdown: 'partial' });
+    expect(ports.storeOutput).not.toHaveBeenCalled();
+    expect(ports.applyStoryImpacts).not.toHaveBeenCalled();
+    expect(ports.settleRatings).not.toHaveBeenCalled();
+  });
+  it('archives truncated markdown without applying ratings or story updates', async () => {
+    const ports = createPorts();
+    const result = await createArenaGenerationFinalizer(ports)({
+      ...input, status: 'failed', errorCode: 'AI_OUTPUT_TRUNCATED', markdown: 'partial body',
+    });
+    expect(ports.storeOutput).toHaveBeenCalledWith(expect.objectContaining({ markdown: 'partial body' }));
+    expect(result.resultRef).toBe('r2://battle/generation-1');
+    expect(ports.applyStoryImpacts).not.toHaveBeenCalled();
+    expect(ports.settleRatings).not.toHaveBeenCalled();
+  });
   it('D1 terminal claim 是 rating/history 等权威副作用的唯一门禁', async () => {
     const order: string[] = [];
     const ports = createPorts({

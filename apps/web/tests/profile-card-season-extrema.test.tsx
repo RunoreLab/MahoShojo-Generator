@@ -129,6 +129,21 @@ function buildPayload(): MeProfileCardPayload {
 }
 
 describe('ProfileCard season extrema', () => {
+  it('splits reasoning from output and does not count it twice in a fallback total', () => {
+    const data = buildPayload();
+    data.recentBattleReports = [{
+      id: 'report-usage', startedAt: '2026-09-28T00:00:00.000Z', status: 'completed',
+      mode: 'daily', headline: '用量测试', displayTitle: '用量测试', winner: null,
+      promptTokens: 13967, completionTokens: 11568, reasoningTokens: 8273,
+      totalTokens: null, cachedTokens: null, pvpMatchId: null, contentBlocked: false,
+      sourceKind: 'solo', arenaParticipantRole: null,
+    }];
+    const queryClient = new QueryClient({ defaultOptions: { queries: { enabled: false } } });
+    const html = renderToStaticMarkup(
+      <QueryClientProvider client={queryClient}><ProfileCard data={data} /></QueryClientProvider>,
+    );
+    expect(html).toContain('总 25,535 / 输入 13,967 / 推理 8,273 / 输出 3,295');
+  });
   it('仅在排位最高角色卡区域渲染 strict 赛季极值与最高段位', () => {
     const queryClient = new QueryClient({
       defaultOptions: {

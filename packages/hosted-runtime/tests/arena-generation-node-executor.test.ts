@@ -1005,7 +1005,7 @@ describe('Node Arena generation executor', () => {
     });
   });
 
-  it('streams provider usage through normalizeUsage so telemetry carries canonical token fields', async () => {
+  it.each(['stop', 'length', 'unknown'])('preserves usage and handles provider finish reason %s', async (finishReason) => {
     const generateWithStreamAI = vi.fn(async () => ({
       response: new Response('正文'),
       usagePromise: Promise.resolve({
@@ -1015,7 +1015,7 @@ describe('Node Arena generation executor', () => {
         cachedInputTokens: 8,
         totalTokens: 120,
       }),
-      finishReasonPromise: Promise.resolve('stop'),
+      finishReasonPromise: Promise.resolve(finishReason),
     }));
     const executor = createNodeArenaGenerationExecutor({
       env: {},
@@ -1057,7 +1057,7 @@ describe('Node Arena generation executor', () => {
       claimFinalization: vi.fn(async () => ({ kind: 'claimed' as const })),
     });
 
-    expect(terminal.status).toBe('completed');
+    expect(terminal.status).toBe(finishReason === 'stop' ? 'completed' : 'failed');
     const telemetryEvent = emitted.find((event) => event.type === 'telemetry');
     expect(telemetryEvent).toBeDefined();
     expect(telemetryEvent?.data).toMatchObject({
