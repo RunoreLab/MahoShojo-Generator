@@ -8,3 +8,5 @@ export {
   canRenderBuiltinWebPackageSrcdoc,
   renderBuiltinWebPackageSrcdoc,
 } from './builtin-adapter';
+
+export { renderWebPackageInstance, WebPackageRenderError, type WebPackagePresentation } from './render';

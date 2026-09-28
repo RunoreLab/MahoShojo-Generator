@@ -28,10 +28,14 @@
   "dependencies": {
     "@cfworker/json-schema": "^4.1.1",
     "@mahoshojo/contracts": "workspace:*",
+    "acorn": "8.18.0",
+    "css-tree": "3.2.1",
     "fflate": "^0.8.3",
+    "parse5": "8.0.1",
     "zod": "^4.1.13"
   },
   "devDependencies": {
+    "@types/css-tree": "2.3.11",
     "@types/node": "^20",
     "@typescript-eslint/parser": "^8.50.0",
     "esbuild": "^0.28.1",

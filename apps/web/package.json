@@ -20,7 +20,8 @@
     "test:watch": "vitest --config vitest.config.ts",
     "verify:hosted-dr:client-preflight": "node --import tsx scripts/verify-hosted-dr-client-preflight.ts",
     "backfill:user-auth-links:dry": "pnpm exec tsx scripts/backfill-user-auth-links.ts --dry-run true --batch 200",
-    "backfill:user-auth-links:write": "pnpm exec tsx scripts/backfill-user-auth-links.ts --write --batch 200"
+    "backfill:user-auth-links:write": "pnpm exec tsx scripts/backfill-user-auth-links.ts --write --batch 200",
+    "test:browser:web-package": "vitest run --config vitest.web-package-browser.config.ts"
   },
   "dependencies": {
     "@ai-sdk/deepseek": "^2.0.35",
@@ -90,6 +91,7 @@
     "eslint-config-next": "15.5.24",
     "fake-indexeddb": "^6.2.5",
     "jsdom": "^30.0.1",
+    "playwright": "1.62.1",
     "shadcn": "^3.5.2",
     "tailwindcss": "^4",
     "tw-animate-css": "^1.3.0",
