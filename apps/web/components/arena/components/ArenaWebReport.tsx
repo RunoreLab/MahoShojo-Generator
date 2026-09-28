@@ -16,10 +16,10 @@ import { importLocalWebPackageArchive } from '@/lib/web-package/cache';
 import styles from './ArenaWebReport.module.css';
 import type { WebPackageArtifact, WebPackageRef } from '@mahoshojo/contracts/web-package';
 import {
-  canRenderBuiltinVisualNovelSrcdoc,
+  canRenderBuiltinWebPackageSrcdoc,
   formatWebPackageFallback,
   prepareWebPackageReplay,
-  renderBuiltinVisualNovelSrcdoc,
+  renderBuiltinWebPackageSrcdoc,
   type WebPackageReplayStatus,
 } from '@mahoshojo/web-package';
 
@@ -359,7 +359,7 @@ export function ArenaWebReport({ content, ready, roomId, aiModel, aiUsage, displ
       if (!active) return;
       if ((outcome.status === 'exact' || outcome.status === 'compatibility') && outcome.overlay) {
         const compatibility = outcome.status === 'compatibility';
-        if (!canRenderBuiltinVisualNovelSrcdoc(outcome.overlay.packageRef)) {
+        if (!canRenderBuiltinWebPackageSrcdoc(outcome.overlay.packageRef)) {
           setPackageResolution({
             artifact: webPackage,
             content,
@@ -373,9 +373,9 @@ export function ArenaWebReport({ content, ready, roomId, aiModel, aiUsage, displ
           return;
         }
         try {
-          // Transitional: only the pinned first-party Visual Novel Lite revision
-          // has a srcdoc materializer while the generic renderer remains disabled.
-          const location = await renderBuiltinVisualNovelSrcdoc(outcome.overlay);
+          // Only pinned first-party revisions have a srcdoc materializer;
+          // the generic resource renderer remains a separate migration.
+          const location = await renderBuiltinWebPackageSrcdoc(outcome.overlay);
           if (!active) return;
           setPackageResolution({
             artifact: webPackage,

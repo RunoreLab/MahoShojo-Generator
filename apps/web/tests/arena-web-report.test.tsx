@@ -10,6 +10,7 @@ import { BattleResultPresentation } from '@/components/arena/components/BattleRe
 import { BaseModal } from '@/components/shared/BaseModal';
 import {
   BUILTIN_VISUAL_NOVEL_PACKAGE_REF,
+  BUILTIN_WEB_PACKAGE_PRESETS,
   clearLocalWebPackageSessionStaging,
   createWebPackageOverlay,
   resolveWebPackage,
@@ -140,6 +141,25 @@ describe('Web 战报的本地执行许可', () => {
     expect(container.querySelector<HTMLButtonElement>('[aria-label^="取消选择Web 包："]')!.disabled).toBe(true);
     expect(container.querySelector<HTMLButtonElement>('[title="下载 Web 包 ZIP"]')!.disabled).toBe(false);
   });
+
+  it.each(BUILTIN_WEB_PACKAGE_PRESETS.filter((preset) => preset.packageRef.id !== BUILTIN_VISUAL_NOVEL_PACKAGE_REF.id))(
+    'executes the $title preset through the real Arena report consumer', async ({ packageRef }) => {
+      const base = await resolveWebPackage(packageRef);
+      const content = new TextDecoder().decode(base.readFile(base.manifest.generation.target));
+      const { generatedContent: _generated, ...artifact } = await createWebPackageOverlay(packageRef, content);
+      expect(_generated).toBe(content);
+      window.localStorage.setItem('arena.web-report-consent.v1.room.creative', 'accepted');
+      await act(async () => root.render(
+        <ArenaWebReport key={packageRef.digest} roomId="creative" ready content={content} webPackage={artifact}>
+          {(web, actions) => <section>{web}<div>{actions}</div></section>}
+        </ArenaWebReport>,
+      ));
+      await waitForReact(() => expect(container.querySelector('iframe')).toBeTruthy());
+      expect(container.querySelector('iframe')!.getAttribute('sandbox')).toBe('allow-scripts');
+      expect(container.querySelector('iframe')!.getAttribute('srcdoc')).toContain(JSON.parse(content).title);
+      expect(container.textContent).not.toContain('暂不执行此 Web 包');
+    },
+  );
 
   it('validates a package before consent, keeps JSON fallback inert, and exports the generated target', async () => {
     const content = JSON.stringify({ title: '包故事', scenes: [{ text: '<script>unsafe()</script>' }] });
