@@ -84,12 +84,16 @@ export function WebPackageCardGrid({
   );
 
   if (items.length === 0) {
-    return <p className="rounded-lg border border-dashed border-gray-300 px-4 py-8 text-center text-sm text-gray-500">{emptyHint}</p>;
+    return (
+      <p className="rounded-lg border border-dashed border-gray-300 px-4 py-8 text-center text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
+        {emptyHint}
+      </p>
+    );
   }
 
   return (
     <div className="space-y-3">
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {paged.map((item) => {
           const selected = item.digest === selectedDigest;
           const busy = busyDigest === item.digest;
@@ -98,10 +102,10 @@ export function WebPackageCardGrid({
               key={item.digest}
               className={`relative rounded-xl border p-3 transition-colors ${
                 selected
-                  ? 'border-pink-400 bg-pink-50'
+                  ? 'border-pink-400 bg-pink-50 dark:border-pink-600 dark:bg-pink-950/40'
                   : item.broken
-                    ? 'border-red-200 bg-red-50/40'
-                    : 'border-gray-200 bg-white hover:border-pink-300'
+                    ? 'border-red-200 bg-red-50/40 dark:border-red-900/60 dark:bg-red-950/30'
+                    : 'border-gray-200 bg-white hover:border-pink-300 dark:border-gray-700 dark:bg-gray-900 dark:hover:border-pink-600'
               }`}
             >
               <button
@@ -114,8 +118,8 @@ export function WebPackageCardGrid({
               />
 
               <div className="pointer-events-none relative z-10 flex flex-col gap-1 pr-[7.5rem]">
-                <p className="truncate text-sm font-semibold text-gray-900" title={item.title}>{item.title}</p>
-                <p className="truncate text-xs text-gray-500" title={item.summary}>{item.summary}</p>
+                <p className="truncate text-sm font-semibold text-gray-900 dark:text-gray-100" title={item.title}>{item.title}</p>
+                <p className="truncate text-xs text-gray-500 dark:text-gray-400" title={item.summary}>{item.summary}</p>
                 <div className="mt-1 flex flex-wrap items-center gap-1">
                   <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] ${
                     item.source === 'builtin' ? 'bg-violet-100 text-violet-700' : 'bg-slate-100 text-slate-700'

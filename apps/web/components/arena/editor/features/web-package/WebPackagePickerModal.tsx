@@ -5,7 +5,8 @@ import { HardDrive, Package } from 'lucide-react';
 import { BaseModal } from '@/components/shared/BaseModal';
 import { WebPackageBaseRisk } from '@/components/arena/components/WebPackageSafety';
 import { WebPackageCardGrid, type WebPackageCardItem } from './WebPackageCardGrid';
-import { LocalLibrarySavePreference } from '@/components/arena/components/RosterUploader';
+import { LocalLibrarySavePreference } from '@/components/shared/LocalLibrarySavePreference';
+import { LocalLibraryStatusNote } from '@/components/shared/LocalLibraryStatusNote';
 import type { ArenaWebPackageOptionView, ArenaWebPackageSectionModel } from './web-package-contract';
 
 const toCardItem = (option: ArenaWebPackageOptionView): WebPackageCardItem => ({
@@ -107,6 +108,7 @@ export function WebPackagePickerModal({
             onViewDetails={(item) => onViewDetails(item.digest)}
           />
         ) : (
+          <>
           <WebPackageCardGrid
             items={search(library)}
             selectedDigest={model.selected?.digest ?? null}
@@ -118,6 +120,8 @@ export function WebPackagePickerModal({
             onDelete={model.capabilities.manageLibrary ? (item) => onRemoveFromLibrary(item.digest) : undefined}
             onViewDetails={(item) => onViewDetails(item.digest)}
           />
+          <LocalLibraryStatusNote />
+          </>
         )}
 
         {model.importFeedback ? (

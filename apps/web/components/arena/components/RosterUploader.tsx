@@ -4,48 +4,13 @@ import { ChangeEvent, useEffect, useRef, useState } from 'react';
 
 import { DisclosureButton } from '@/components/shared/CollapsibleSection';
 import { useLocalLibraryAutoSave } from '@/lib/local-library/use-local-library-auto-save';
+import { LocalLibrarySavePreference } from '@/components/shared/LocalLibrarySavePreference';
 import { useLocalLibraryPreferences } from '@/lib/local-library/preferences';
 import type { CombatantData } from '../types';
 
 import { useBattleStore } from '../stores/useBattleStore';
 import { BattleStoreState, isCombatantLimitReached, MAX_COMBATANTS } from '../types';
 import { useBattleActions } from '../hooks/useBattleActions';
-
-/** 本地导入区域共用的「保存到本地库」偏好行。数据卡与 Web 包两处保持同一措辞与风险提示。 */
-export function LocalLibrarySavePreference({
-  checked,
-  onChange,
-  disabled,
-  label = '同时保存到本地库',
-}: {
-  checked: boolean;
-  onChange: (next: boolean) => void;
-  disabled?: boolean;
-  label?: string;
-}) {
-  return (
-    <div className="mt-2">
-      <label className="flex min-h-11 cursor-pointer items-start gap-2 text-sm text-gray-700 dark:text-gray-200">
-        <input
-          type="checkbox"
-          checked={checked}
-          disabled={disabled}
-          onChange={(event) => onChange(event.target.checked)}
-          className="mt-1 h-4 w-4 shrink-0"
-        />
-        <span>
-          {label}
-          <span className="block text-xs text-gray-500">
-            打开后，之后导入的内容会自动存入本机本地库；内容相同会自动更新原卡而不是新增一张。
-          </span>
-        </span>
-      </label>
-      <p className="mt-1 text-xs text-gray-500">
-        本地库保存在此浏览器中，不会跨设备同步；清除站点数据会一并删除。
-      </p>
-    </div>
-  );
-}
 
 export function RosterUploader() {
   const [isPasteVisible, setIsPasteVisible] = useState(false);

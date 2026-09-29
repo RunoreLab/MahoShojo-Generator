@@ -26,6 +26,7 @@ import { buildTitleDisplay } from '@/lib/text';
 import { ChevronDown, Filter } from 'lucide-react';
 import DecksModal from './DecksModal';
 import { BaseModal } from './shared/BaseModal';
+import { LocalLibraryStatusNote } from './shared/LocalLibraryStatusNote';
 import { getDataCardStatus } from '@/lib/data-card-status';
 import type { BadgeDefinition } from '@/types/badge';
 import {
@@ -1860,6 +1861,7 @@ export default function BattleDataModal({
 
 	          {/* 内容区域 */}
 	          <div>
+	            {isLocalTab ? <LocalLibraryStatusNote className="mb-3" /> : null}
 	            {isPvpHandTab ? (
 	              filteredPvpHandCards.length === 0 ? (
 	                <div className="text-center text-gray-500 py-8">暂无手牌</div>

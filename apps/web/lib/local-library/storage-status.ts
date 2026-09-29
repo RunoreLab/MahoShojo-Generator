@@ -80,8 +80,15 @@ export const useLocalLibraryStorageStatus = (): LocalLibraryStorageStatus => {
   return { persisted, requestedPersist, usage, quota, supported, busy, requestPersist, refresh };
 };
 
+const formatBytes = (bytes: number): string => {
+  if (bytes < 1024) return `${Math.round(bytes)} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+};
+
 export const formatLocalLibraryQuota = (usage: number | null, quota: number | null): string => {
   if (usage === null || quota === null) return '空间占用未知';
-  const toMb = (bytes: number): string => `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${toMb(usage)} / ${toMb(quota)}`;
+  // 各自选单位：把 1 KB 的占用显示成「0.0 MB」会让人以为读数坏了。
+  return `${formatBytes(usage)} / ${formatBytes(quota)}`;
 };
