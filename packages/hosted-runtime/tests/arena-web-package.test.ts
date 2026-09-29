@@ -212,9 +212,9 @@ describe('Web Package hosted generation', () => {
     const local = await createLocalProjectionPackage();
     const projection = buildWebPackagePromptProjection(local);
     const generate = vi.fn(async () => ({ body: new Response(output + trailer).body!, telemetry: {} }));
+    const finalize = vi.fn(async () => ({ resultRef: 'r2:layered', ranking: null }));
     const runtime = createArenaGenerationRuntime({
-      checkSafety: async () => null, buildPrompt: buildArenaGenerationPrompt, generate,
-      finalize: vi.fn(async () => ({ resultRef: 'r2:layered', ranking: null })),
+      checkSafety: async () => null, buildPrompt: buildArenaGenerationPrompt, generate, finalize,
     });
     const prepared = await runtime.prepare!({
       request: new Request('https://example.test/api/arena/generate-stream'), actorKey: 'user:42',
@@ -232,6 +232,9 @@ describe('Web Package hosted generation', () => {
     expect(terminal.code).toBe(code);
     expect(terminal.publicError).toMatchObject({ code, message: expect.stringContaining('Web 包') });
     expect(generate).toHaveBeenCalledOnce();
+    // 失败分类留在 execution metadata 里供排障，不走错误文案通道。
+    const finalized = vi.mocked(finalize).mock.calls[0] as unknown as [{ metadata: Record<string, unknown> }];
+    expect(finalized[0].metadata.webPackageTargetFailure).toBe(failure);
   });
 
   it('never routes model output through the error channel', async () => {

@@ -14,6 +14,9 @@ Visual Novel Lite、星屑社区、命运岔路从未部署，已删除其资产
 
 - 根导出：验证、ZIP、不可变实例、Prompt Projection、重放、归档导入与错误码。
 - Prompt Projection 只投影 `instructions` / `schema` / `assetCatalog` 与作者显式声明的 `generation.example`；base target 不会被自动当作示例（内置竞技场新闻的 base `index.html` 是占位页）。
+- HOST block 按 `target.mediaType` 正面声明目标形态，顶层是数组还是对象跟随已校验的 `generation.schema`。这不是替包作者描述内容，而是声明宿主如何读取与校验这个文件；形态来源是宿主侧已冻结的契约字段，因此不破坏 §13 的信任边界。
+- `src/target-normalize.ts`：JSON 目标在校验前的确定性归一化，剥离 Markdown 围栏、被回显的目标路径行，必要时按字符串感知的括号平衡提取首个完整 JSON 值。它**只去包装**：不改写值、不补字段、不猜结构（对象永远不会被提升成数组），对已经是合法 JSON 的输入字节恒等，因此 `generatedDigest` 与历史 replay 都不受影响。
+- `src/generation-readiness.ts`：导入期对 JSON 数据类目标做生成可行性体检（instructions 缺失/过薄、schema 缺失、无 `required`、无 `properties`、`required` 覆盖不足、未提供 `example`），只产出提示不阻断导入。宿主保证形态可解析，不发明包想要的内容结构——后者由这一层与 `apps/web/public/encyclopedia/web-package-authoring.md` 承接。
 - `src/archive.ts` / `src/import.ts` / `src/media-types.ts`：信封归一化、缺省导入与共享媒体类型映射；预设生成器复用同一份媒体类型映射。
 - `/browser`：`renderWebPackageInstance(instance)`，无预设 ID 分支；返回展示 HTML 与诊断，不修改 Base/Overlay 原始字节。
 - `/security`：Base/有效实例能力预检和摘要绑定授权判定；不执行作者代码，不访问网络。启发式规则只在标记无法被标记语言模仿时才报告——`host-page-access` 要求 window/self/globalThis/frames 限定或未被 `.`/`-`/`#` 前置的裸全局，以免把 CSS `top`、`.top` 类名与选择器判成宿主访问；`scripts` 的内联事件属性要求完整属性名就是 `on…` 且位于标签内，`data-one=`、`oneTime = true` 不算；`dynamic-execution` 只匹配可执行的 `data:`/`blob:` 媒体类型，内嵌 base64 图片不算；`site-storage` 要求真实访问点（`document.cookie`、`caches.open` 等），说明文字不算。
