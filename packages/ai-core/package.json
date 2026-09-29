@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./token-usage": "./src/token-usage.ts",
     ".": {
       "types": "./src/index.ts",
       "import": "./src/index.ts",

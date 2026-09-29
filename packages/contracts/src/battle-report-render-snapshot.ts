@@ -1,5 +1,6 @@
 import { z } from './zod';
 import { ArenaReportFormatSchema } from './primitives';
+import { WebPackageArtifactSchema } from './web-package';
 
 import { jsonUtf8ByteLength } from './wire-size';
 
@@ -20,6 +21,7 @@ export type BattleReportAdjudicationResult = z.infer<typeof BattleReportAdjudica
 export const BattleReportRenderSnapshotV1Schema = z.object({
   version: z.literal(1),
   reportFormat: ArenaReportFormatSchema.optional(),
+  webPackage: WebPackageArtifactSchema.optional(),
   reporterInfo: z.object({
     name: z.string().max(300),
     publication: z.string().max(300),
@@ -34,6 +36,9 @@ export const BattleReportRenderSnapshotV1Schema = z.object({
     .optional(),
   narrativeHistoryReadCount: z.number().int().nonnegative().max(1_000_000).optional(),
 }).strict().superRefine((snapshot, context) => {
+  if (snapshot.webPackage && snapshot.reportFormat !== 'web') {
+    context.addIssue({ code: 'custom', path: ['webPackage'], message: 'Web Package requires reportFormat=web' });
+  }
   if (jsonUtf8ByteLength(snapshot) <= MAX_BATTLE_REPORT_RENDER_SNAPSHOT_BYTES) return;
   context.addIssue({
     code: 'too_big',

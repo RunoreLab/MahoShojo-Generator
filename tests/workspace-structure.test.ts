@@ -174,6 +174,7 @@ describe('G25D Web workspace app ownership', () => {
       'pnpm run clean:next && pnpm run typecheck:build && next build '
       + '&& node scripts/check-hosted-dr-client-bundle.mjs --dir .next/static',
     );
+    expect(appManifest.scripts?.['build:sw']).toBeUndefined();
     expect(appManifest.scripts?.build).toContain('pnpm run build:next');
     expect(appManifest.scripts?.['build:cf']).toContain('opennextjs-cloudflare build');
     expect(appManifest.scripts?.['build:cf']).not.toContain('--skipNextBuild');

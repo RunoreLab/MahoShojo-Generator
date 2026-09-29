@@ -5,8 +5,10 @@ import {
   resolveResumeCursor,
 } from './sse';
 import type { SafePublicAiErrorProjection } from '../regular-generation';
+import { getStreamCompletionErrorMessage } from '../regular-generation';
 import { ARENA_RESOURCE_BUDGET } from './resource-budget';
 import { extractArenaMultiplayerParticipation, type ArenaMultiplayerParticipation } from '@mahoshojo/contracts/arena-room';
+import { WebPackageArtifactSchema, type WebPackageArtifact } from '@mahoshojo/contracts/web-package';
 
 export const MAX_ARENA_CREATE_BODY_BYTES = ARENA_RESOURCE_BUDGET.hardBodyBytes;
 export const MAX_ARENA_CANCEL_BODY_BYTES = ARENA_RESOURCE_BUDGET.cancelBodyBytes;
@@ -95,6 +97,7 @@ export type GenerationTerminal = {
   resultRef?: string | null;
   persistenceWarning?: ArenaGenerationPersistenceWarning;
   publicError?: SafePublicAiErrorProjection;
+  webPackage?: WebPackageArtifact;
 };
 
 export type GenerationCancelReason = 'user' | 'content_policy';
@@ -379,6 +382,8 @@ export interface ArenaGenerationExecutor {
 }
 
 export type ArenaGenerationTerminalRecord = {
+  /** Only canonical usage and display model; never provider diagnostics or reasoning text. */
+  telemetry?: Record<string, unknown>;
   generationId: string;
   generationRequestId: string;
   status: GenerationTerminal['status'];
@@ -393,6 +398,7 @@ export type ArenaGenerationTerminalRecord = {
   contentUnavailableReason?: 'not-archived' | 'not-found' | 'temporary' | null;
   /** Strictly sanitized by the durable terminal adapter; callers must parse again at wire boundary. */
   roomSafeResult?: Readonly<Record<string, unknown>> | null;
+  webPackage?: WebPackageArtifact;
 };
 
 export interface ArenaGenerationTerminalStore {
@@ -1193,6 +1199,7 @@ export const createArenaGenerationService = (
               status: terminal.status,
               ...(terminal.code ? { code: terminal.code } : {}),
               ...(terminal.resultRef ? { resultRef: terminal.resultRef } : {}),
+              ...(terminal.status === 'completed' && terminal.webPackage ? { webPackage: terminal.webPackage } : {}),
               ...(terminal.persistenceWarning ? {
                 persistenceWarning: terminal.persistenceWarning,
                 replayUnavailable: true,
@@ -1272,6 +1279,8 @@ export const createArenaGenerationService = (
   } => {
     const terminal: GenerationTerminal = {
       status: record.status,
+      ...(record.status === 'completed' && WebPackageArtifactSchema.safeParse(record.webPackage).success
+        ? { webPackage: WebPackageArtifactSchema.parse(record.webPackage) } : {}),
       ...(record.errorCode ? { code: record.errorCode } : {}),
       ...(record.resultRef ? { resultRef: record.resultRef } : {}),
       ...(record.persistenceWarning ? {
@@ -1294,6 +1303,7 @@ export const createArenaGenerationService = (
           status: terminal.status,
           ...(terminalCode ? { code: terminalCode } : {}),
           ...(terminal.resultRef ? { resultRef: terminal.resultRef } : {}),
+          ...(terminal.webPackage ? { webPackage: terminal.webPackage } : {}),
           ...(terminal.persistenceWarning ? {
             persistenceWarning: terminal.persistenceWarning,
             replayUnavailable: true,
@@ -1957,7 +1967,9 @@ export const createArenaGenerationService = (
     })();
     const snapshot: GenerationSnapshot = {
       status: terminal.status,
-      markdown: terminal.status === 'completed' ? terminal.markdown : '',
+      ...(terminal.telemetry ? { telemetry: terminal.telemetry } : {}),
+      markdown: terminal.status === 'completed' || (terminal.status === 'failed' && terminal.resultRef)
+        ? terminal.markdown : '',
       reasoning: terminal.status === 'completed' ? terminal.reasoning : '',
       lastEventId: null,
       updatedAt: terminal.updatedAt,
@@ -1979,6 +1991,8 @@ export const createArenaGenerationService = (
       data: {
         ok: terminal.status === 'completed',
         status: terminal.status,
+        ...(getStreamCompletionErrorMessage(terminal.errorCode)
+          ? { message: getStreamCompletionErrorMessage(terminal.errorCode) } : {}),
         ...(
           terminal.status === 'failed' || terminal.status === 'producer_lost'
             ? {
@@ -1992,6 +2006,8 @@ export const createArenaGenerationService = (
         ...(terminal.status === 'completed' && terminal.resultRef
           ? { resultRef: terminal.resultRef }
           : {}),
+        ...(terminal.status === 'completed' && WebPackageArtifactSchema.safeParse(terminal.webPackage).success
+          ? { webPackage: WebPackageArtifactSchema.parse(terminal.webPackage) } : {}),
         ...(isTerminalContentNotArchived(terminal) ? {
           persistenceWarning: ARENA_OUTPUT_NOT_ARCHIVED_WARNING,
           replayUnavailable: true,
@@ -2158,6 +2174,7 @@ export const createArenaGenerationService = (
                 ...(terminal.status === 'completed' && terminal.resultRef
                   ? { resultRef: terminal.resultRef }
                   : {}),
+                ...(terminal.status === 'completed' && terminal.webPackage ? { webPackage: terminal.webPackage } : {}),
                 ...(terminal.persistenceWarning ? {
                   persistenceWarning: terminal.persistenceWarning,
                   replayUnavailable: true,

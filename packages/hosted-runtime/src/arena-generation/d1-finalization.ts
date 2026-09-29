@@ -18,6 +18,9 @@ import {
 } from '@mahoshojo/contracts';
 import { parseArenaStructuredReportJson } from './structured-report';
 import { buildArenaTerminalEffectIdempotencyKey } from './finalization';
+import { isWebArenaOutputContract } from './output-contract';
+import { canArchivePartialOutput, completionDiagnostics } from './completion';
+import { normalizeUsage } from '../node-runtime/usage';
 import type { NodeDataD1Client } from '../node-runtime/data-ports';
 
 const OUTPUT_KIND = 'battle_report_generation_output';
@@ -240,14 +243,14 @@ const structuredReport = (
 const terminalReport = (
   input: Pick<ArenaTerminalClaimInput, 'metadata' | 'markdown' | 'payload'>,
 ): Record<string, unknown> | null => streamReport(input.metadata)
-  ?? (input.metadata.outputContract === 'web-document' ? null : structuredReport(input));
+  ?? (isWebArenaOutputContract(input.metadata.outputContract) ? null : structuredReport(input));
 
 const terminalImpacts = (
   input: Pick<ArenaTerminalClaimInput, 'metadata' | 'markdown' | 'payload'>,
 ): Array<Record<string, unknown>> => {
   const streamed = streamImpacts(input.metadata);
   if (streamed.length > 0) return streamed;
-  const report = input.metadata.outputContract === 'web-document' ? null : structuredReport(input);
+  const report = isWebArenaOutputContract(input.metadata.outputContract) ? null : structuredReport(input);
   return Array.isArray(report?.impacts)
     ? report.impacts.flatMap((value) => recordOf(value) ? [recordOf(value)!] : [])
     : [];
@@ -346,7 +349,8 @@ const buildExtraJson = async (
   const snapshotReporterInfo = recordOf(input.metadata.reporterInfo);
   const battleReportRenderSnapshotV1 = parseBattleReportRenderSnapshotV1({
     version: 1,
-    ...(input.metadata.outputContract === 'web-document' ? { reportFormat: 'web' } : {}),
+    ...(isWebArenaOutputContract(input.metadata.outputContract) ? { reportFormat: 'web' } : {}),
+    ...(input.metadata.webPackage ? { webPackage: input.metadata.webPackage } : {}),
     ...(snapshotReporterInfo ? {
       reporterInfo: {
         name: snapshotReporterInfo.name,
@@ -365,8 +369,9 @@ const buildExtraJson = async (
     ...(typeof input.metadata.narrativeHistoryReadCount === 'number'
       ? { narrativeHistoryReadCount: input.metadata.narrativeHistoryReadCount }
       : {}),
-  }) ?? (input.metadata.outputContract === 'web-document'
-    ? parseBattleReportRenderSnapshotV1({ version: 1, reportFormat: 'web' })
+  }) ?? (isWebArenaOutputContract(input.metadata.outputContract)
+    ? parseBattleReportRenderSnapshotV1({ version: 1, reportFormat: 'web',
+      ...(input.metadata.webPackage ? { webPackage: input.metadata.webPackage } : {}) })
     : null);
   const impactRosterQueues = new Map<string, number[]>();
   for (const combatant of combatantsFallback) {
@@ -377,12 +382,12 @@ const buildExtraJson = async (
   }
   const reconciliationCandidate = {
     report: {
-      headline: boundedString(report?.headline, 300) ?? (input.metadata.outputContract === 'web-document' ? null : headlineFromMarkdown(input.markdown)) ?? '',
+      headline: boundedString(report?.headline, 300) ?? (isWebArenaOutputContract(input.metadata.outputContract) ? null : headlineFromMarkdown(input.markdown)) ?? '',
       mode: boundedString(input.payload.mode, 64) ?? 'classic',
       officialReport: {
         winner: boundedString(report?.winner, 300)
           ?? boundedString(officialReport?.winner, 300)
-          ?? (input.metadata.outputContract === 'web-document' ? null : winnerFromMarkdown(input.markdown))
+          ?? (isWebArenaOutputContract(input.metadata.outputContract) ? null : winnerFromMarkdown(input.markdown))
           ?? '',
       },
     },
@@ -435,6 +440,9 @@ const buildExtraJson = async (
     generationPayloadHash: boundedString(input.payloadHash, 128),
     generationTerminalStatus: input.status,
     finalizationCompleted: false,
+    completion: completionDiagnostics(input.telemetry),
+    usageDetails: normalizeUsage(input.telemetry.usage),
+    partialOutput: canArchivePartialOutput(input) && Boolean(input.markdown.trim()),
     resultRef: boundedString(input.resultRef, 512),
     persistenceWarning: input.persistenceWarning ?? null,
     errorCode: boundedString(input.errorCode, 80),
@@ -711,6 +719,8 @@ const buildRoomSafeResult = (
     }] : [];
   });
   const usage = {
+    ...(numberOf(recordOf(extra.usageDetails)?.textTokens) === null ? {}
+      : { textTokens: numberOf(recordOf(extra.usageDetails)?.textTokens)! }),
     ...(numberOf(row.prompt_tokens) === null ? {} : { promptTokens: numberOf(row.prompt_tokens)! }),
     ...(numberOf(row.completion_tokens) === null
       ? {} : { completionTokens: numberOf(row.completion_tokens)! }),
@@ -732,6 +742,7 @@ const buildRoomSafeResult = (
   const candidate = {
     version: 1,
     format: render?.reportFormat === 'web' ? 'stream-web' : 'stream-markdown',
+    ...(render?.webPackage ? { webPackage: render.webPackage } : {}),
     ...(render?.reporterInfo ? { reporterInfo: render.reporterInfo } : {}),
     mode: row.mode,
     ...(boundedString(row.scenario_title, 300)
@@ -769,15 +780,17 @@ const materializeStoredTerminal = async (input: {
   const status = logicalTerminalStatus(input.row, extra);
   const requestId = stringOf(extra.generationRequestId);
   if (!status || !requestId) return null;
-  const resultRef = status === 'completed' ? stringOf(extra.resultRef) : null;
+  const partialOutput = status === 'failed' && extra.partialOutput === true
+    && canArchivePartialOutput({ status, errorCode: stringOf(extra.errorCode) });
+  const resultRef = status === 'completed' || partialOutput ? stringOf(extra.resultRef) : null;
   const r2Key = stringOf(input.row['r2_key']);
   let markdown = '';
-  let contentAvailable = status !== 'completed';
+  let contentAvailable = status !== 'completed' && !partialOutput;
   let contentUnavailableReason: 'not-archived' | 'not-found' | 'temporary' | undefined;
   let persistenceWarning = extra.persistenceWarning === ARENA_OUTPUT_NOT_ARCHIVED_WARNING
     ? ARENA_OUTPUT_NOT_ARCHIVED_WARNING
     : undefined;
-  if (status === 'completed') {
+  if (status === 'completed' || partialOutput) {
     if (!resultRef) {
       contentUnavailableReason = 'not-archived';
       persistenceWarning = ARENA_OUTPUT_NOT_ARCHIVED_WARNING;
@@ -807,6 +820,14 @@ const materializeStoredTerminal = async (input: {
     resultRef,
     markdown,
     reasoning: '',
+    telemetry: {
+      ...(boundedString(input.row['ai_model'], 256) ? { aiModel: boundedString(input.row['ai_model'], 256) } : {}),
+      usage: normalizeUsage(extra.usageDetails) ?? normalizeUsage({
+        promptTokens: input.row.prompt_tokens, completionTokens: input.row.completion_tokens,
+        reasoningTokens: input.row.reasoning_tokens, totalTokens: input.row.total_tokens,
+        cachedTokens: input.row.cached_tokens,
+      }),
+    },
     errorCode: stableErrorCodeOf(extra.finalizationFailureCode)
       ?? stableErrorCodeOf(extra.errorCode)
       ?? stableErrorCodeOf(extra.rejectionCode),
@@ -815,6 +836,8 @@ const materializeStoredTerminal = async (input: {
     contentAvailable,
     contentUnavailableReason,
     roomSafeResult: status === 'completed' ? buildRoomSafeResult(input.row, extra) : null,
+    ...(status === 'completed' && parseBattleReportRenderSnapshotV1(extra.battleReportRenderSnapshotV1)?.webPackage
+      ? { webPackage: parseBattleReportRenderSnapshotV1(extra.battleReportRenderSnapshotV1)!.webPackage } : {}),
   };
 };
 
@@ -926,7 +949,7 @@ ON CONFLICT(kind, owner_ref_id) DO UPDATE SET
       const pvp = recordOf(serverContext?.trustedPvpContext);
       const usage = recordOf(input.telemetry.usage);
       const extraJson = await buildExtraJson(input);
-      const terminalMarkdown = input.status === 'completed' ? input.markdown : '';
+      const terminalMarkdown = input.status === 'completed' || canArchivePartialOutput(input) ? input.markdown : '';
       const markdownBytes = new TextEncoder().encode(terminalMarkdown).byteLength;
       let inserted: Awaited<ReturnType<ReturnType<NodeDataD1Client['prepare']>['run']>>;
       try {
@@ -986,10 +1009,10 @@ VALUES (
         boundedString(input.telemetry.providerName, 128),
         boundedString(input.telemetry.providerType, 64),
         boundedString(input.telemetry.model, 256),
-        boundedString(report?.headline, 300) ?? (input.metadata.outputContract === 'web-document' ? null : headlineFromMarkdown(terminalMarkdown)),
+        boundedString(report?.headline, 300) ?? (isWebArenaOutputContract(input.metadata.outputContract) ? null : headlineFromMarkdown(terminalMarkdown)),
         boundedString(report?.winner, 300)
           ?? boundedString(officialReport?.winner, 300)
-          ?? (input.metadata.outputContract === 'web-document' ? null : winnerFromMarkdown(terminalMarkdown)),
+          ?? (isWebArenaOutputContract(input.metadata.outputContract) ? null : winnerFromMarkdown(terminalMarkdown)),
         terminalMarkdown.length,
         markdownBytes,
         numberOf(usage?.promptTokens),

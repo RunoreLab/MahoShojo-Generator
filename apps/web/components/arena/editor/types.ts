@@ -81,6 +81,7 @@ export type ArenaEditorWorkspaceStatus =
 export type ArenaEditorActions = Readonly<{
   setBattleMode(value: ArenaRoomSharedConfig['battleMode']): void;
   setReportFormat(value: ArenaRoomSharedConfig['reportFormat']): void;
+  setWebPackageRef(value: import('@mahoshojo/contracts/web-package').WebPackageRef | null): void;
   setStoryLength(value: ArenaRoomSharedConfig['storyLength']): void;
   setCustomStoryLength(value: string): void;
   setSelectedLanguage(value: string): void;
@@ -97,6 +98,7 @@ export type ArenaEditorState = Readonly<{
   materials: readonly ArenaEditorMaterialView[];
   battleMode: ArenaRoomSharedConfig['battleMode'];
   reportFormat: ArenaRoomSharedConfig['reportFormat'];
+  webPackageRef?: ArenaRoomSharedConfig['webPackageRef'];
   storyLength: ArenaRoomSharedConfig['storyLength'];
   customStoryLength: string;
   selectedLanguage: string;

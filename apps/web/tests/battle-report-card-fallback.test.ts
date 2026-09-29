@@ -1,8 +1,18 @@
 import { describe, expect, it } from 'vitest';
 
 import { hydrateBattleReportCardFromGenerationRecord } from '@/lib/arena/battle-report-card-fallback';
+import { BUILTIN_ARENA_NEWS_PACKAGE_REF, createWebPackageOverlay } from '@mahoshojo/web-package';
 
 describe('hydrateBattleReportCardFromGenerationRecord', () => {
+  it('preserves explicit non-reasoning token details when restoring a saved card', async () => {
+    const result = await hydrateBattleReportCardFromGenerationRecord({
+      generationMode: 'stream', endpoint: 'api/arena/generate-stream', mode: 'daily',
+      scenarioTitle: null, headline: null, winner: null, outputPreview: '# 正文',
+      promptTokens: 13967, completionTokens: 11568, reasoningTokens: 8273,
+      totalTokens: null, cachedTokens: null, usageDetails: { textTokens: 3295 },
+    });
+    expect(result.report.aiUsage).toMatchObject({ textTokens: 3295, completionTokens: 11568, reasoningTokens: 8273 });
+  });
   it.each([
     ['stream', '# 快照战报\n\n正文。\n\n## 胜利者\n角色甲'],
     ['non-stream', JSON.stringify({
@@ -403,6 +413,22 @@ winner: 假赢家
 
 
 describe('Web generation record hydration', () => {
+  it('restores exact package overlay bytes and the immutable revision without inferring authority from HTML', async () => {
+    const content = '\n' + '<!doctype html><html><head><title>故事标题</title></head><body>故事</body></html>' + '  ';
+    const { generatedContent: _content, ...webPackage } = await createWebPackageOverlay(BUILTIN_ARENA_NEWS_PACKAGE_REF, content);
+    expect(_content).toBe(content);
+    const result = await hydrateBattleReportCardFromGenerationRecord({
+      generationMode: 'stream', endpoint: 'api/arena/generate-stream', mode: 'classic',
+      scenarioTitle: null, headline: '权威标题', winner: '权威胜者', outputPreview: content,
+      promptTokens: null, completionTokens: null, totalTokens: null, cachedTokens: null, reasoningTokens: null,
+      authoritativeWebContent: true,
+      renderSnapshot: { version: 1, reportFormat: 'web', webPackage },
+    });
+    expect(result.report).toMatchObject({ webReady: true, webPackage, headline: '权威标题', officialReport: { winner: '权威胜者' } });
+    expect(result.liveBody).toBe(content);
+    expect(result.report.article.body).toBe(content);
+  });
+
   it.each(['stream', 'non-stream'])('restores %s Web bytes and authoritative facts without reading HTML DOM', async (generationMode) => {
     const content = '<!doctype html><html><body><h1>伪标题</h1><script>const x = "原文";</script></body></html>';
     const result = await hydrateBattleReportCardFromGenerationRecord({

@@ -203,6 +203,39 @@ const readRoomSafeResult = async (extra: Record<string, unknown>) => {
 };
 
 describe('Arena D1/R2 finalization ports', () => {
+  it('persists bounded completion diagnostics and restores a failed partial output by owner', async () => {
+    const writer = sequentialD1([result([], 1)]);
+    const ports = createNodeArenaGenerationFinalizationPorts({ getD1Client: () => writer });
+    await ports.claimTerminal({
+      ...claimInput, status: 'failed', errorCode: 'AI_OUTPUT_TRUNCATED',
+      markdown: 'partial body',
+      telemetry: { finishReason: 'length', usage: { completionTokens: 20, reasoningTokens: 15, textTokens: 5 },
+        streamCompletion: { sdkFinishEvent: true, maxOutputTokens: 20, textChars: 12,
+          lastTextMs: 100, apiKey: 'must-not-persist' }, providerBaseUrl: 'must-not-persist' },
+    });
+    const extra = writer.boundCalls[0]?.map((value) => {
+      try { return typeof value === 'string' ? JSON.parse(value) : null; } catch { return null; }
+    }).find((value) => value?.partialOutput === true);
+    expect(extra).toMatchObject({
+      completion: { finishReason: 'length', sdkFinishEvent: true, maxOutputTokens: 20 },
+      usageDetails: { completionTokens: 20, reasoningTokens: 15, textTokens: 5 },
+      partialOutput: true,
+    });
+    expect(JSON.stringify(extra)).not.toContain('must-not-persist');
+    const reader = sequentialD1([result([{
+      id: claimInput.generationId, status: 'failed',
+      updated_at: '2026-09-28T00:00:00Z', r2_key: 'key',
+      extra_json: JSON.stringify({ ...extra, finalizationCompleted: true }),
+    }])]);
+    const terminal = await createNodeArenaGenerationTerminalStore({
+      getD1Client: () => reader,
+      objectStore: { put: vi.fn(), getText: vi.fn(async () => ({ kind: 'found' as const, text: 'partial body' })) },
+    }).readOwnedTerminal({ generationId: claimInput.generationId, actorKey: claimInput.actorKey });
+    expect(terminal).toMatchObject({
+      status: 'failed', markdown: 'partial body', errorCode: 'AI_OUTPUT_TRUNCATED',
+      roomSafeResult: null, telemetry: { usage: { textTokens: 5 } },
+    });
+  });
   it('records a bounded failed PVP rejection without success-side-effect data', async () => {
     const client = sequentialD1([result([], 1)]);
     const recorder = createNodeArenaRejectedTerminalRecorder({
@@ -401,6 +434,23 @@ describe('Arena D1/R2 finalization ports', () => {
     });
     expect(JSON.parse(client.boundCalls[0]?.[44] as string).battleReportRenderSnapshotV1)
       .toEqual({ version: 1, reportFormat: 'web' });
+  });
+
+  it('preserves package identity and overlay digest through compact snapshot and room replay', async () => {
+    const webPackage = {
+      packageRef: { id: 'test.fixture', version: '1.0.0', digest: `sha256:${'a'.repeat(64)}` },
+      targetPath: 'data/report.json', targetMediaType: 'application/json', generatedDigest: `sha256:${'b'.repeat(64)}`,
+    };
+    const client = sequentialD1([result([], 1)]);
+    const ports = createNodeArenaGenerationFinalizationPorts({ getD1Client: () => client });
+    await ports.claimTerminal({
+      ...claimInput,
+      metadata: { outputContract: 'web-package-target', webPackage, userGuidance: '长'.repeat(60_000) },
+    });
+    const snapshot = JSON.parse(client.boundCalls[0]?.[44] as string).battleReportRenderSnapshotV1;
+    expect(snapshot).toEqual({ version: 1, reportFormat: 'web', webPackage });
+    expect(await readRoomSafeResult({ battleReportRenderSnapshotV1: snapshot }))
+      .toMatchObject({ format: 'stream-web', webPackage });
   });
 
   it('Web 缺失 meta 时不得从 HTML 中的 Markdown 片段猜测权威结果', async () => {

@@ -156,6 +156,7 @@ export function ArenaRoomGenerationHistory({
               report={{
                 format: selected.result?.format ?? 'stream-markdown',
                 webReady: selected.generation.state === 'completed',
+                webPackage: selected.result?.webPackage,
                 webConsentScope: roomId,
                 content: selected.markdown,
                 isStreaming: false,

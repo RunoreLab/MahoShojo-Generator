@@ -213,6 +213,22 @@ describe('Arena Room membership service', () => {
     expect(store.state).toBeNull();
   });
 
+  it('create 拒绝非 builtin 的 server-shareable Web Package ref，不创建房间', async () => {
+    const { service, store } = createHarness();
+    const sharedConfig = {
+      ...createArenaRoomState().snapshot.sharedConfig,
+      reportFormat: 'web' as const,
+      webPackageRef: { id: 'local.not-builtin', version: '1.0.0', digest: `sha256:${'a'.repeat(64)}` },
+    };
+
+    await expect(service.create({
+      accountUserId: 101,
+      displayName: 'Host',
+      sharedConfig,
+    })).rejects.toEqual(new ArenaRoomMembershipError('ROOM_REFERENCE_DENIED'));
+    expect(store.state).toBeNull();
+  });
+
   it('Shared Config 含 online ref 但未注入 verifier 时 fail closed', async () => {
     const { service, store } = createHarness(null);
 

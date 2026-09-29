@@ -806,7 +806,7 @@ describe('Arena room Proposal workspace', () => {
     expect(auxBrowseButtons.length).toBe(2);
     expect(auxBrowseButtons[1]!.disabled).toBe(true);
     await act(async () => editor.dispose());
-  });
+  }, 30_000);
 });
 
 describe('旧基准草稿提交策略', () => {

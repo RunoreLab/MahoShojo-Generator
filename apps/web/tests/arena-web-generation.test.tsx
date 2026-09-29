@@ -27,6 +27,7 @@ vi.mock('@/lib/arena/resumable-generation-client', async (importOriginal) => ({
 
 import { useBattleEngine } from '@/components/arena/hooks/useBattleEngine';
 import { useBattleStore } from '@/components/arena/stores/useBattleStore';
+import { BUILTIN_ARENA_NEWS_PACKAGE_REF, createWebPackageOverlay } from '@mahoshojo/web-package';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 let current: ReturnType<typeof useBattleEngine>;
@@ -62,7 +63,102 @@ afterEach(async () => {
   useBattleStore.setState(useBattleStore.getInitialState());
 });
 
+describe('Markdown completion follows the authoritative terminal', () => {
+  it('accepts completed text without inventing a Markdown heading requirement', async () => {
+    const initial = useBattleStore.getState();
+    await act(async () => useBattleStore.setState({ reportFormat: 'markdown',
+      settings: { ...initial.settings, writeArenaHistory: false, writeCurrentState: false } }));
+    const body = '完整的普通叙事正文，没有二级标题。'.repeat(15);
+    mocks.openStream.mockResolvedValue(new Response(
+      sse('markdown', { chunk: body }) + sse('done', { status: 'completed', ok: true }),
+      { headers: { 'Content-Type': 'text/event-stream' } },
+    ));
+    await act(async () => current.handleGenerate());
+    expect(useBattleStore.getState().streamingMarkdown).toBe(body);
+    expect(useBattleStore.getState().error).toBeFalsy();
+  });
+
+  it.each(['failed', 'missing'])('does not update cards or repeat generation with a %s done event', async (terminal) => {
+    await act(async () => useBattleStore.setState({ reportFormat: 'markdown' }));
+    const body = '# 开场\n\n## 已有小标题\n' + '未完成正文'.repeat(40);
+    mocks.openStream.mockResolvedValue(new Response(
+      sse('markdown', { chunk: body }) + (terminal === 'failed' ? sse('done', { status: 'failed', ok: false }) : ''),
+      { headers: { 'Content-Type': 'text/event-stream' } },
+    ));
+    await act(async () => current.handleGenerate());
+    expect(useBattleStore.getState().streamingMarkdown).toBe(body);
+    expect(useBattleStore.getState().error).toContain(terminal === 'failed' ? '未成功完成' : '未收到 done');
+    expect(mocks.updateFromMarkdown).not.toHaveBeenCalled();
+    if (terminal === 'failed') expect(mocks.cooldown).not.toHaveBeenCalled();
+    // Unknown connection state may still have a live producer; preserve the existing throttle.
+    else expect(mocks.cooldown).toHaveBeenCalledTimes(1);
+    expect(mocks.openStream).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('single-player Web generation integration', () => {
+  it('freezes a package ref and preserves exact overlay bytes across stream completion', async () => {
+    const content = ' \n' + '<!doctype html><html><head><title>故事</title></head><body>SHIELD 原始故事</body></html>' + '\n ';
+    const { generatedContent: _content, ...artifact } = await createWebPackageOverlay(BUILTIN_ARENA_NEWS_PACKAGE_REF, content);
+    expect(_content).toBe(content);
+    await act(async () => useBattleStore.getState().setWebPackageRef(BUILTIN_ARENA_NEWS_PACKAGE_REF));
+    mocks.openStream.mockResolvedValue(new Response(
+      sse('markdown', { chunk: content }) + sse('done', { status: 'completed', ok: true, webPackage: artifact }),
+      { headers: { ...streamHeaders, 'x-mahoshojo-stream-meta': encodeURIComponent(JSON.stringify({ outputContract: 'web-package-target', reportFormat: 'web', webPackageRef: BUILTIN_ARENA_NEWS_PACKAGE_REF })) } },
+    ));
+    await act(async () => current.handleGenerate());
+    expect(mocks.openStream.mock.calls[0][0].body.webPackageRef).toEqual(BUILTIN_ARENA_NEWS_PACKAGE_REF);
+    expect(useBattleStore.getState()).toMatchObject({ streamingMarkdown: content, resultWebPackage: artifact, resultWebReady: true });
+  });
+
+  it('keeps package content inert when a completed stream omits its artifact', async () => {
+    await act(async () => useBattleStore.getState().setWebPackageRef(BUILTIN_ARENA_NEWS_PACKAGE_REF));
+    mocks.openStream.mockResolvedValue(new Response(sse('markdown', { chunk: source }) + sse('done', { status: 'completed', ok: true }), {
+      headers: { ...streamHeaders, 'x-mahoshojo-stream-meta': encodeURIComponent(JSON.stringify({ outputContract: 'web-package-target', reportFormat: 'web', webPackageRef: BUILTIN_ARENA_NEWS_PACKAGE_REF })) },
+    }));
+    await act(async () => current.handleGenerate());
+    expect(useBattleStore.getState().resultWebReady).toBe(false);
+  });
+
+  it('uses a recovered generation contract instead of the current package selection', async () => {
+    await act(async () => useBattleStore.getState().setWebPackageRef(BUILTIN_ARENA_NEWS_PACKAGE_REF));
+    mocks.openStream.mockResolvedValue(new Response(
+      sse('snapshot', { markdown: source, status: 'completed' }) + sse('done', { status: 'completed', ok: true }),
+      { headers: streamHeaders },
+    ));
+    await act(async () => current.handleGenerate());
+    expect(useBattleStore.getState()).toMatchObject({ streamingMarkdown: source, resultWebReady: true, resultWebPackage: null });
+  });
+
+  it('restores a persisted package snapshot without stream metadata headers and preserves original bytes', async () => {
+    const { generatedContent: content, ...artifact } = await createWebPackageOverlay(BUILTIN_ARENA_NEWS_PACKAGE_REF, ' \n' + '<!doctype html><html><head><title>历史故事</title></head><body>SHIELD 原始数据</body></html>' + '\n ');
+    await act(async () => useBattleStore.getState().setReportFormat('markdown'));
+    mocks.openStream.mockResolvedValue(new Response(
+      sse('snapshot', { markdown: content, status: 'completed' }) + sse('done', { status: 'completed', ok: true, webPackage: artifact }),
+      { headers: { 'Content-Type': 'text/event-stream' } },
+    ));
+    await act(async () => current.handleGenerate());
+    expect(useBattleStore.getState()).toMatchObject({ streamingMarkdown: content, resultReportFormat: 'web', resultWebReady: true, resultWebPackage: artifact });
+  });
+
+  it('preserves a non-stream package descriptor and clears selection when returning to Markdown', async () => {
+    const content = '<!doctype html><html><head><title>故事</title></head><body>SHIELD 原始故事</body></html>';
+    const { generatedContent: _content, ...webPackage } = await createWebPackageOverlay(BUILTIN_ARENA_NEWS_PACKAGE_REF, content);
+    expect(_content).toBe(content);
+    await act(async () => {
+      useBattleStore.getState().setGenerationMode('non-stream');
+      useBattleStore.getState().setWebPackageRef(BUILTIN_ARENA_NEWS_PACKAGE_REF);
+    });
+    const report = { reportFormat: 'web', webPackage, headline: '故事', article: { body: content, analysis: '' }, officialReport: { winner: '角色甲', conclusion: '' }, reporterInfo: { name: '记者', publication: 'Arena' } };
+    mocks.dispatch.mockResolvedValue(Response.json({ report, updatedCombatants: [], generationId: 'generation-package' }));
+    await act(async () => current.handleGenerate());
+    expect(JSON.parse(mocks.dispatch.mock.calls[0][1].body).webPackageRef).toEqual(BUILTIN_ARENA_NEWS_PACKAGE_REF);
+    expect(useBattleStore.getState()).toMatchObject({ newsReport: report, resultWebPackage: webPackage, resultWebReady: true });
+    await act(async () => useBattleStore.getState().setReportFormat('markdown'));
+    expect(useBattleStore.getState().webPackageRef).toBeNull();
+    expect(useBattleStore.getState().resultWebPackage).toEqual(webPackage);
+  });
+
   it('keeps raw HTML inert until a successful completed done, without shield mutations', async () => {
     let producer!: ReadableStreamDefaultController<Uint8Array>;
     mocks.openStream.mockResolvedValue(new Response(new ReadableStream<Uint8Array>({ start(controller) { producer = controller; } }), { headers: streamHeaders }));

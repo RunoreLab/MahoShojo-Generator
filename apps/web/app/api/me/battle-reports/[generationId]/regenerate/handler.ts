@@ -105,6 +105,10 @@ async function handler(req: Request): Promise<Response> {
     winner: record.winner,
     outputPreview: outputPreview,
     aiModel: record.ai_model,
+    usageDetails: (() => {
+      try { return JSON.parse(record.extra_json ?? '{}')?.usageDetails; }
+      catch { return undefined; }
+    })(),
     promptTokens: record.prompt_tokens,
     completionTokens: record.completion_tokens,
     totalTokens: record.total_tokens,

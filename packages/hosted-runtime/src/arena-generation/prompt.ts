@@ -1,12 +1,27 @@
 import type { ArenaGenerationPrompt } from './runtime';
 import {
+  WebPackagePromptProjectionSchema,
+  WebPackageRefSchema,
+} from '@mahoshojo/contracts/web-package';
+import {
+  buildWebPackagePromptFromProjection,
+  buildWebPackagePromptProjection,
+  resolveWebPackage,
+} from '@mahoshojo/web-package';
+import {
   createPromptBuilder,
   createStreamPromptBuilder,
   DEFAULT_ARENA_PROMPT_QUESTIONS,
   getSystemPrompt,
 } from './compatibility-prompt';
+import {
+  isPackageBackedOutputContract,
+  isWebArenaOutputContract,
+  type ArenaGenerationOutputContract,
+} from './output-contract';
 
-export type ArenaGenerationOutputContract = 'stream-markdown' | 'structured-report' | 'web-document';
+export type { ArenaGenerationOutputContract } from './output-contract';
+export { isPackageBackedOutputContract, isWebArenaOutputContract } from './output-contract';
 
 const text = (value: unknown): string => typeof value === 'string' ? value.trim() : '';
 
@@ -37,7 +52,7 @@ export const resolveArenaGenerationOutputContract = (
   const legacyPvp = Boolean(asRecord(serverContext?.trustedPvpContext) ?? asRecord(payload.pvpContext))
     && !asRecord(payload.multiplayerGenerationSnapshot);
   if (payload.reportFormat === 'web' && !legacyPvp && endpoint !== 'api/arena/session/generate-next') {
-    return 'web-document';
+    return payload.webPackageRef != null ? 'web-package-target' : 'web-document';
   }
   return serverContext?.deliveryMode === 'non-stream'
     && (endpoint === 'api/arena/generate' || endpoint === 'api/generate-battle-story')
@@ -107,6 +122,47 @@ export const buildArenaGenerationPrompt = async (input: {
   const combatants = Array.isArray(payload.combatants) ? payload.combatants : [];
   const lore = questionnaireLore(payload.questionnaires);
   const outputContract = resolveArenaGenerationOutputContract(payload);
+  const webPackageRef = payload.webPackageRef === undefined
+    ? undefined
+    : WebPackageRefSchema.parse(payload.webPackageRef);
+  if (webPackageRef && !isPackageBackedOutputContract(outputContract)) {
+    throw new Error('ARENA_WEB_PACKAGE_REQUIRES_WEB');
+  }
+  const webPackagePromptProjection = payload.webPackagePromptProjection === undefined
+    ? undefined
+    : WebPackagePromptProjectionSchema.parse(payload.webPackagePromptProjection);
+  if (webPackagePromptProjection) {
+    if (!webPackageRef
+      || webPackagePromptProjection.package.id !== webPackageRef.id
+      || webPackagePromptProjection.package.version !== webPackageRef.version
+      || webPackagePromptProjection.package.digest !== webPackageRef.digest) {
+      throw new Error('ARENA_WEB_PACKAGE_PROJECTION_MISMATCH');
+    }
+  }
+  // Server-resolvable packages always rebuild a canonical Projection; a client
+  // Projection is only authoritative when the server cannot resolve the ref.
+  let trustedProjection = webPackagePromptProjection;
+  let packagePrompt: string | undefined;
+  if (webPackageRef) {
+    try {
+      const base = await resolveWebPackage(webPackageRef);
+      const canonical = buildWebPackagePromptProjection(base);
+      if (
+        webPackagePromptProjection
+        && JSON.stringify(webPackagePromptProjection) !== JSON.stringify(canonical)
+      ) {
+        throw new Error('ARENA_WEB_PACKAGE_PROJECTION_MISMATCH');
+      }
+      trustedProjection = canonical;
+      packagePrompt = buildWebPackagePromptFromProjection(canonical);
+    } catch (error) {
+      if (error instanceof Error && error.message === 'ARENA_WEB_PACKAGE_PROJECTION_MISMATCH') {
+        throw error;
+      }
+      if (!webPackagePromptProjection) throw error;
+      packagePrompt = buildWebPackagePromptFromProjection(webPackagePromptProjection);
+    }
+  }
   const rawUserGuidance = text(payload.userGuidance);
   // Legacy non-stream handlers bounded this field before safety, prompting,
   // response projection and history writes. Streaming intentionally remains
@@ -124,7 +180,7 @@ export const buildArenaGenerationPrompt = async (input: {
   const writeArenaHistory = payload.writeArenaHistory !== false;
   const writeCurrentState = payload.writeCurrentState !== false;
   const forceStreamMeta = payload.forceStreamMeta === true;
-  const expectsMeta = outputContract === 'web-document' || outputContract === 'stream-markdown'
+  const expectsMeta = isWebArenaOutputContract(outputContract) || outputContract === 'stream-markdown'
     && (forceStreamMeta || writeArenaHistory || writeCurrentState);
   const promptBuilder = outputContract === 'structured-report'
     ? createPromptBuilder(
@@ -189,6 +245,7 @@ export const buildArenaGenerationPrompt = async (input: {
     !strictRankedMatch,
     materials,
     outputContract,
+    packagePrompt,
   );
   const taskPrompt = promptBuilder({ combatants });
   const characterGuidances = combatants.flatMap((value) => {
@@ -206,7 +263,9 @@ export const buildArenaGenerationPrompt = async (input: {
       mode,
       language,
       outputContract,
-      reportFormat: outputContract === 'web-document' ? 'web' : 'markdown',
+      reportFormat: isWebArenaOutputContract(outputContract) ? 'web' : 'markdown',
+      ...(webPackageRef ? { webPackageRef } : {}),
+      ...(trustedProjection ? { webPackagePromptProjection: trustedProjection } : {}),
       expectsMeta,
       combatantCount: combatants.length,
       pvpContext: asRecord(payload.pvpContext),

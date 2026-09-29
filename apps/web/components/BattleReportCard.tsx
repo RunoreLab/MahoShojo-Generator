@@ -1,6 +1,7 @@
 // components/BattleReportCard.tsx
 
 import React, { useRef, useState } from 'react';
+import { getVisibleOutputTokens } from '@mahoshojo/ai-core/token-usage';
 import ReactMarkdown, { type Components, type ExtraProps } from 'react-markdown';
 import rehypeKatex from 'rehype-katex';
 import remarkGfm from 'remark-gfm';
@@ -33,6 +34,7 @@ type MarkdownCodeProps = React.ComponentPropsWithoutRef<'code'> & ExtraProps & {
 export interface NewsReport {
   reportFormat?: 'markdown' | 'web';
   webHtml?: string;
+  webPackage?: import('@mahoshojo/contracts/web-package').WebPackageArtifact;
   webReady?: boolean;
   headline: string;
   scenario?: string;
@@ -54,6 +56,7 @@ export interface NewsReport {
   aiUsage?: {
     promptTokens?: number | null;
     reasoningTokens?: number | null;
+    textTokens?: number | null;
     completionTokens?: number | null;
     totalTokens?: number | null;
     cachedTokens?: number | null;
@@ -130,7 +133,7 @@ const BattleReportCard: React.FC<BattleReportCardProps> = ({
   const aiUsage = report.aiUsage;
   const hasAnyTokenNumber =
     aiUsage != null &&
-    [aiUsage.promptTokens, aiUsage.reasoningTokens, aiUsage.completionTokens].some(
+    [aiUsage.promptTokens, aiUsage.reasoningTokens, aiUsage.completionTokens, aiUsage.textTokens].some(
       (value) => typeof value === 'number' && Number.isFinite(value)
     );
   const shouldShowNarrativeReadCount = typeof report.narrativeHistoryReadCount === 'number';
@@ -530,7 +533,7 @@ ${adjudicationMarkdown}
                 {hasAnyTokenNumber && (
                   <>
                     tokens：输入 {formatToken(aiUsage?.promptTokens)}｜推理 {formatToken(aiUsage?.reasoningTokens)}｜输出{' '}
-                    {formatToken(aiUsage?.completionTokens)}
+                    {formatToken(getVisibleOutputTokens(aiUsage))}
                   </>
                 )}
                 {hasAnyTokenNumber && shouldShowNarrativeReadCount ? ' · ' : ''}

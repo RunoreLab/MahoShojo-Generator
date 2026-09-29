@@ -1,6 +1,7 @@
 'use client';
 
 import { ArenaReportFormatSelector } from './ArenaWebReport';
+import { SoloArenaWebPackageSection } from '../editor/features/web-package/SoloArenaWebPackageSection';
 import { useBattleStore } from '../stores/useBattleStore';
 import { BattleStoreState, GenerationMode } from '../types';
 import { GenerationModeSwitcher as GenerationModeSwitcherUi } from '@/components/shared/GenerationModeSwitcher';
@@ -21,7 +22,11 @@ export function GenerationModeSwitcher({ showReportFormat = false }: { showRepor
         disabled={isGenerating}
         onChange={(mode) => setGenerationMode(mode as GenerationMode)}
       />
-      {showReportFormat ? <ArenaReportFormatSelector value={reportFormat} onChange={setReportFormat} disabled={isGenerating} /> : null}
+      {showReportFormat ? (
+        <ArenaReportFormatSelector value={reportFormat} onChange={setReportFormat} disabled={isGenerating}>
+          <SoloArenaWebPackageSection reportFormat={reportFormat} disabled={isGenerating} />
+        </ArenaReportFormatSelector>
+      ) : null}
     </>
   );
 }

@@ -54,7 +54,12 @@
       "import": "./src/json-value.ts",
       "default": "./src/json-value.ts"
     },
-    "./admin-arena-observation": "./src/admin-arena-observation.ts"
+    "./admin-arena-observation": "./src/admin-arena-observation.ts",
+    "./web-package": {
+      "types": "./src/web-package.ts",
+      "import": "./src/web-package.ts",
+      "default": "./src/web-package.ts"
+    }
   },
   "scripts": {
     "test": "vitest run --config vitest.config.ts",

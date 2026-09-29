@@ -200,6 +200,29 @@ describe('Arena Room config application service', () => {
     });
   });
 
+  it('publish 拒绝非 builtin 的 server-shareable Web Package ref，不写 checkpoint', async () => {
+    const harness = await createHarness();
+    const before = harness.store.saveCount;
+    const sharedConfig = {
+      ...config(),
+      reportFormat: 'web' as const,
+      webPackageRef: { id: 'local.not-builtin', version: '1.0.0', digest: `sha256:${'a'.repeat(64)}` },
+    };
+
+    await expect(harness.service.publish({
+      roomId: 'room-1',
+      accountUserId: 101,
+      request: {
+        expectedRoomEpoch: 'epoch-1',
+        expectedRevision: 0,
+        expectedControlSeq: harness.store.state!.snapshot.controlSeq,
+        sharedConfig,
+      },
+    })).rejects.toMatchObject({ code: 'ROOM_REFERENCE_DENIED' });
+    expect(harness.store.saveCount).toBe(before);
+    expect(harness.store.state?.snapshot.sharedConfig).not.toHaveProperty('webPackageRef');
+  });
+
   it('配置快照超过 64 KiB 时返回独立帧容量错误', async () => {
     const harness = await createHarness();
     const oversized = {

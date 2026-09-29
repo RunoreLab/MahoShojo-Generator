@@ -60,6 +60,75 @@ const createDependencies = (
 });
 
 describe('Arena generation runtime', () => {
+  it.each([false, true])('retains the guarded tail on upstream failure with replay unavailable=%s', async (replayUnavailable) => {
+    let pulls = 0;
+    const dependencies = createDependencies({
+      buildPrompt: vi.fn(async () => ({ prompt: 'test', metadata: { expectsMeta: true } })),
+      generate: vi.fn(async () => ({
+        body: new ReadableStream<Uint8Array>({
+          pull(controller) {
+            if (pulls++ === 0) controller.enqueue(new TextEncoder().encode('short buffered partial'));
+            else controller.error(createSafePublicAiError({ code: 'AI_UPSTREAM_REQUEST_FAILED', message: '连接中断' }));
+          },
+        }),
+        telemetry: { usage: { completionTokens: 20 } },
+      })),
+    });
+    const runtime = createArenaGenerationRuntime(dependencies);
+    const prepared = await runtime.prepare!({
+      request: new Request('https://example.test/api/arena/generate-stream'),
+      actorKey: 'user:42', generationRequestId: 'request-tail', payload,
+    });
+    if (prepared instanceof Response || isArenaGenerationAuditableRejection(prepared)) throw new Error('prepare failed');
+    const events: unknown[] = [];
+    const terminal = await runtime.execute({
+      generationId: 'generation-tail', generationRequestId: 'request-tail', actorKey: 'user:42',
+      producerToken: 'producer', payloadHash: 'hash', payload: prepared.executionPayload,
+      signal: new AbortController().signal, emit: async (event) => {
+        events.push(event);
+        if (replayUnavailable && ['markdown', 'telemetry'].includes(event.type)) throw new Error('replay unavailable');
+      },
+      claimFinalization: async () => ({ kind: 'claimed' as const }),
+    });
+    expect(terminal.status).toBe('failed');
+    expect(dependencies.finalize).toHaveBeenCalledWith(expect.objectContaining({
+      markdown: 'short buffered partial', status: 'failed', errorCode: 'AI_UPSTREAM_REQUEST_FAILED',
+    }));
+    expect(events).toContainEqual({ type: 'markdown', data: { chunk: 'short buffered partial' } });
+  });
+  it.each([
+    ['length', 'AI_OUTPUT_TRUNCATED'],
+    ['content-filter', 'AI_OUTPUT_FILTERED'],
+    ['unknown', 'AI_STREAM_INCOMPLETE'],
+    ['error', 'AI_STREAM_INCOMPLETE'],
+  ])('does not mark nonempty %s output as completed', async (finishReason, code) => {
+    const dependencies = createDependencies({
+      generate: vi.fn(async () => ({
+        body: stream('# partial body'),
+        telemetry: { finishReason, usage: { completionTokens: 20, reasoningTokens: 15 } },
+      })),
+    });
+    const runtime = createArenaGenerationRuntime(dependencies);
+    const prepared = await runtime.prepare!({
+      request: new Request('https://example.test/api/arena/generate-stream'),
+      actorKey: 'user:42', generationRequestId: 'request-finish', payload,
+    });
+    if (prepared instanceof Response || isArenaGenerationAuditableRejection(prepared)) throw new Error('prepare failed');
+    const emitted: unknown[] = [];
+    const terminal = await runtime.execute({
+      generationId: 'generation-finish', generationRequestId: 'request-finish',
+      actorKey: 'user:42', producerToken: 'producer', payloadHash: 'hash',
+      payload: prepared.executionPayload, signal: new AbortController().signal,
+      emit: async (event) => { emitted.push(event); },
+      claimFinalization: async () => ({ kind: 'claimed' as const }),
+    });
+    expect(terminal).toMatchObject({ status: 'failed', code });
+    expect(dependencies.finalize).toHaveBeenCalledWith(expect.objectContaining({
+      status: 'failed', errorCode: code, markdown: '# partial body',
+    }));
+    expect(emitted).toContainEqual(expect.objectContaining({ type: 'telemetry' }));
+    expect(dependencies.generate).toHaveBeenCalledTimes(1);
+  });
   it('materializes adjudication and prompt deterministically from the reserved seed', async () => {
     const buildPrompt = vi.fn(async ({ payload: input, random }) => ({
       prompt: `prompt:${JSON.stringify(input.adjudicationResults)}:${random()}`,

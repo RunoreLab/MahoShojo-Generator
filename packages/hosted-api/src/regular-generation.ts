@@ -10,9 +10,25 @@ export const PUBLIC_AI_ERROR_CODES = Object.freeze([
   'AI_REQUEST_ABORTED',
   'AI_PROVIDER_REDIRECT_BLOCKED',
   'THINKING_DISABLED_REASONING_ONLY',
+  'AI_OUTPUT_TRUNCATED',
+  'AI_OUTPUT_FILTERED',
+  'AI_STREAM_INCOMPLETE',
 ] as const);
 
 export type PublicAiErrorCode = typeof PUBLIC_AI_ERROR_CODES[number];
+
+export const getStreamCompletionErrorMessage = (code: unknown): string | null => {
+  switch (code) {
+    case 'AI_OUTPUT_TRUNCATED':
+      return '生成达到输出上限，正文未完整完成。已保留收到的内容，请调整生成设置后手动重试。';
+    case 'AI_OUTPUT_FILTERED':
+      return '上游内容过滤终止了生成，当前内容不构成完整战报。';
+    case 'AI_STREAM_INCOMPLETE':
+      return '未收到可靠的正常结束信号，无法确认战报完整性。已保留收到的内容，不会自动重新生成。';
+    default:
+      return null;
+  }
+};
 
 export type SafePublicAiErrorProjection = Readonly<{
   code: PublicAiErrorCode;

@@ -24,6 +24,7 @@ import { deepClone, isRecord } from './utils';
 export interface ArenaRoomNormalizedSource {
   readonly battleMode: ArenaRoomSharedConfig['battleMode'];
   readonly reportFormat?: ArenaRoomSharedConfig['reportFormat'];
+  readonly webPackageRef?: ArenaRoomSharedConfig['webPackageRef'];
   readonly combatants: readonly ({
     readonly key: string;
     readonly ref: DataCardRef;
@@ -126,6 +127,13 @@ const projectConfig = (input: unknown): unknown => {
   return {
     battleMode: input.battleMode,
     reportFormat: input.reportFormat,
+    ...(input.webPackageRef === undefined ? {} : {
+      webPackageRef: isRecord(input.webPackageRef) ? {
+        id: input.webPackageRef.id,
+        version: input.webPackageRef.version,
+        digest: input.webPackageRef.digest,
+      } : input.webPackageRef,
+    }),
     combatants: Array.isArray(input.combatants) ? input.combatants.map(projectCombatant) : input.combatants,
     teams: Array.isArray(input.teams) ? input.teams.map(projectTeam) : input.teams,
     scenario: projectScenarioOrMaterial(input.scenario),

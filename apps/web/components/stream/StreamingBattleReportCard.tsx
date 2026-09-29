@@ -1,6 +1,7 @@
 // components/StreamingBattleReportCard.tsx
 
 import React, { useRef, useState } from 'react';
+import { getVisibleOutputTokens } from '@mahoshojo/ai-core/token-usage';
 import ReactMarkdown from 'react-markdown';
 import { Components } from 'react-markdown';
 import rehypeKatex from 'rehype-katex';
@@ -55,6 +56,7 @@ interface StreamingBattleReportCardProps {
     aiUsage?: {
         promptTokens?: number | null;
         reasoningTokens?: number | null;
+        textTokens?: number | null;
         completionTokens?: number | null;
         totalTokens?: number | null;
         cachedTokens?: number | null;
@@ -143,7 +145,7 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
     const hasAnyTokenNumber =
         !showingWeb &&
         aiUsage != null &&
-        [aiUsage.promptTokens, aiUsage.reasoningTokens, aiUsage.completionTokens].some(
+        [aiUsage.promptTokens, aiUsage.reasoningTokens, aiUsage.completionTokens, aiUsage.textTokens].some(
             (value) => typeof value === 'number' && Number.isFinite(value)
         );
     const shouldShowNarrativeReadCount = typeof narrativeHistoryReadCount === 'number';
@@ -621,7 +623,7 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
                                     {hasAnyTokenNumber && (
                                         <>
                                             tokens：输入 {formatToken(aiUsage?.promptTokens)}｜推理 {formatToken(aiUsage?.reasoningTokens)}｜输出{' '}
-                                            {formatToken(aiUsage?.completionTokens)}
+                                            {formatToken(getVisibleOutputTokens(aiUsage))}
                                         </>
                                     )}
                                     {hasAnyTokenNumber && shouldShowNarrativeReadCount ? ' · ' : ''}

@@ -18,6 +18,9 @@ import {
   verifyArenaRoomSharedConfigPresetRefs,
   verifyArenaRoomSharedConfigRefs,
 } from './arena-room-shared-config-refs';
+import {
+  assertSharedConfigServerShareableWebPackage,
+} from './web-package-shareability';
 import type { ArenaRoomGenerationPresetResolver } from './room-generation-preset-registry';
 import type {
   ArenaRoomMembershipService,
@@ -164,6 +167,11 @@ export const createArenaRoomConfigService = (
         });
       } catch (error) {
         mapPresetReferenceError(error);
+      }
+      try {
+        assertSharedConfigServerShareableWebPackage(resolvedSharedConfig);
+      } catch {
+        return fail('ROOM_REFERENCE_DENIED');
       }
       let result;
       try {

@@ -351,15 +351,37 @@ async function generateWithStreamAIUsing(
                     },
 	                });
 
+                    const streamStartedAt = performance.now();
+                    const streamCompletion: Record<string, unknown> = {
+                        sdkFinishEvent: false,
+                        streamError: false,
+                        textChars: 0,
+                        maxOutputTokens: resolvedSettings.standardOptions.maxOutputTokens,
+                        thinkingMode: resolvedSettings.thinkingResolution.requestedMode,
+                        thinkingDisposition: resolvedSettings.thinkingResolution.disposition,
+                    };
+                    if (options?.telemetry) options.telemetry.streamCompletion = streamCompletion;
 	                const mapToUnifiedChunk = (part: unknown): RawUnifiedStreamChunk | null => {
 	                    if (!part || typeof part !== 'object') return null;
 	                    const type = (part as any).type;
+                        if (type === 'error') {
+                            streamCompletion.streamError = true;
+                            capturedError = (part as { error?: unknown }).error ?? new Error('AI_STREAM_ERROR');
+                            throw capturedError;
+                        }
+                        if (type === 'finish') streamCompletion.sdkFinishEvent = true;
 
 	                    if (type === 'text-delta') {
 	                        const text =
 	                            typeof (part as any).text === 'string'
 	                                ? (part as any).text
 	                                : (typeof (part as any).delta === 'string' ? (part as any).delta : '');
+                            if (text) {
+                                const elapsed = Math.floor(performance.now() - streamStartedAt);
+                                streamCompletion.firstTextMs ??= elapsed;
+                                streamCompletion.lastTextMs = elapsed;
+                                streamCompletion.textChars = Number(streamCompletion.textChars) + text.length;
+                            }
 	                        return { type: 'text-delta', id: typeof (part as any).id === 'string' ? (part as any).id : undefined, text };
 	                    }
 	                    if (type === 'reasoning-start') {
@@ -524,6 +546,10 @@ async function generateWithStreamAIUsing(
                             while (true) {
                                 const { done, value } = await readWithTimeout(reader);
                                 if (done) {
+                                    if (capturedError) {
+                                        streamCompletion.streamError = true;
+                                        throw capturedError;
+                                    }
                                     if (isTrivialAtTerminal()) {
                                         const isThinkingDisabledReasoningOnly =
                                             thinkingDisabledApplied && textChars === 0 && reasoningChars > 0;
@@ -587,6 +613,7 @@ async function generateWithStreamAIUsing(
                                 return;
                             }
                         } catch (streamError) {
+                            streamCompletion.streamError = true;
                             await cancelUpstream(streamError);
                             const interrupted = finishAttemptFromError(streamError);
                             const projectedStreamError = enhanceErrorWithUpstreamMessage(

@@ -108,6 +108,7 @@ const loadPublicCard = async (id: string): Promise<unknown> => {
 const BUNDLE_SOURCE_FIELD_KEYS = [
   'battleMode',
   'reportFormat',
+  'webPackageRef',
   'combatants',
   'teams',
   'scenario',

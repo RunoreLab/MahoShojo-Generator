@@ -92,6 +92,7 @@ const sameOrder = (a: readonly string[], b: readonly string[]): boolean => (
 const structuredConfigKeys = {
   battleMode: true,
   reportFormat: true,
+  webPackageRef: true,
   combatants: true,
   teams: true,
   scenario: true,
@@ -390,6 +391,12 @@ export const buildArenaRoomConfigDiffEntries = (
   referenceListDiff('素材', roomConfig.materials, localConfig.materials, 'material', '调整了素材顺序');
 
   // 模式与故事
+  if (JSON.stringify(roomConfig.webPackageRef ?? null) !== JSON.stringify(localConfig.webPackageRef ?? null)) {
+    entries.push({
+      id: 'web-package', category: '模式与故事', tone: 'change',
+      label: `Web 包：${roomConfig.webPackageRef ? `${roomConfig.webPackageRef.id}@${roomConfig.webPackageRef.version}` : '自由生成'} → ${localConfig.webPackageRef ? `${localConfig.webPackageRef.id}@${localConfig.webPackageRef.version}` : '自由生成'}`,
+    });
+  }
   if (roomConfig.reportFormat !== localConfig.reportFormat) {
     entries.push({
       id: 'report-format', category: '模式与故事', tone: 'change',

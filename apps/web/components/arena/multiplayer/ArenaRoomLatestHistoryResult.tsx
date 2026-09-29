@@ -82,6 +82,7 @@ export function ArenaRoomLatestHistoryResult({
             report={{
               format: latest.result?.format ?? 'stream-markdown',
                 webReady: latest.generation.state === 'completed',
+                webPackage: latest.result?.webPackage,
                 webConsentScope: roomId,
               content: latest.markdown,
               isStreaming: false,

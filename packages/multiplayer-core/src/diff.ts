@@ -366,14 +366,32 @@ export const diffArenaSharedConfig = (
     }));
   }
 
+  const packageChanged = !deepEqual(base.webPackageRef ?? null, working.webPackageRef ?? null);
+  const webAtomicGroup = packageChanged && base.reportFormat !== working.reportFormat
+    ? { atomicGroupId: 'web-package-format' } : {};
+  const addPackageChange = () => {
+    if (!packageChanged) return;
+    changes.push(makeChange({
+      changeId: nextId(),
+      type: 'setWebPackageRef',
+      value: deepClone(working.webPackageRef ?? null),
+      expectedBase: { kind: 'value', value: deepClone(base.webPackageRef ?? null) },
+      ...webAtomicGroup,
+    }));
+  };
+  // Staged proposal analysis validates every intermediate config.
+  // Remove the Package before leaving Web; enter Web before adding one.
+  if (working.reportFormat !== 'web') addPackageChange();
   if (base.reportFormat !== working.reportFormat) {
     changes.push(makeChange({
       changeId: nextId(),
       type: 'setReportFormat',
       value: working.reportFormat,
       expectedBase: { kind: 'value', value: base.reportFormat },
+      ...webAtomicGroup,
     }));
   }
+  if (working.reportFormat === 'web') addPackageChange();
   if (base.battleMode !== working.battleMode) {
     changes.push(makeChange({
       changeId: nextId(),

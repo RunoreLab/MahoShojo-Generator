@@ -41,6 +41,21 @@ const fullStreamFrom = (parts: unknown[]): ReadableStream<unknown> => new Readab
 });
 
 describe('raw stream empty-output terminal', () => {
+  it('propagates an SDK error event after text and never retries a paid attempt', async () => {
+    mocks.streamText.mockReturnValueOnce({
+      fullStream: fullStreamFrom([
+        { type: 'text-delta', text: 'already delivered partial body' },
+        { type: 'error', error: new Error('upstream connection ended') },
+      ]),
+      usage: Promise.resolve({ outputTokens: 7 }),
+      finishReason: Promise.resolve('error'),
+    });
+    const { createNodeRawStreamAiRuntime } = await import('../src/node-runtime');
+    const runtime = createNodeRawStreamAiRuntime({ providers: [provider] });
+    const result = await runtime.generateWithStreamAI({ prompt: 'test' });
+    await expect(result.response.text()).rejects.toThrow();
+    expect(mocks.streamText).toHaveBeenCalledTimes(1);
+  });
   beforeEach(() => {
     mocks.streamText.mockReset();
   });

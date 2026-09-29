@@ -187,6 +187,7 @@ export async function hydrateBattleReportCardFromGenerationRecord(input: {
   winner: unknown;
   outputPreview: unknown;
   aiModel?: unknown;
+  usageDetails?: unknown;
   promptTokens: number | null;
   completionTokens: number | null;
   totalTokens: number | null;
@@ -203,21 +204,22 @@ export async function hydrateBattleReportCardFromGenerationRecord(input: {
   const userGuidance = typeof input.userGuidance === 'string' && input.userGuidance.trim() ? input.userGuidance.trim() : undefined;
   const aiModelFromRecord = typeof input.aiModel === 'string' && input.aiModel.trim() ? input.aiModel.trim() : undefined;
 
-  const usageFromRecord = buildUsageFromRecord({
+  const usageFromRecord = mergeUsage(normalizeUsage(input.usageDetails) ?? undefined, buildUsageFromRecord({
     prompt_tokens: input.promptTokens,
     completion_tokens: input.completionTokens,
     total_tokens: input.totalTokens,
     cached_tokens: input.cachedTokens,
     reasoning_tokens: input.reasoningTokens,
-  });
+  }));
 
   // Web 的格式来自持久化的权威快照；不检查 DOM 或从 HTML 猜测胜者。
   if (input.renderSnapshot?.reportFormat === 'web') {
-    const content = stripAllStreamMetaComments(typeof input.outputPreview === 'string' ? input.outputPreview : '');
+    const sourceContent = typeof input.outputPreview === 'string' ? input.outputPreview : '';
+    const content = input.renderSnapshot.webPackage ? sourceContent : stripAllStreamMetaComments(sourceContent);
     const report: NewsReport = {
       reportFormat: 'web',
       webReady: input.authoritativeWebContent === true,
-      webHtml: content,
+      ...(input.renderSnapshot.webPackage ? { webPackage: input.renderSnapshot.webPackage } : { webHtml: content }),
       headline: typeof input.headline === 'string' && input.headline.trim() ? input.headline : '战报',
       ...(scenario ? { scenario } : {}),
       reporterInfo: { name: '系统', publication: endpoint || 'A.R.E.N.A.' },

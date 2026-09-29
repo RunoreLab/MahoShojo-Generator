@@ -8,6 +8,8 @@ import {
   ARENA_PERSISTENCE_UNAVAILABLE_WARNING,
   type ArenaGenerationPersistenceWarning,
 } from '@mahoshojo/hosted-api/arena-generation/service';
+import { isWebArenaOutputContract } from './output-contract';
+import { canArchivePartialOutput } from './completion';
 
 export type ArenaTerminalClaimInput = Omit<
   ArenaGenerationFinalizationInput,
@@ -91,7 +93,7 @@ export const createArenaGenerationFinalizer = (
   });
   let resultRef: string | null = null;
   let persistenceWarning: ArenaGenerationPersistenceWarning | undefined;
-  if (input.status === 'completed') {
+  if (input.status === 'completed' || (canArchivePartialOutput(input) && input.markdown.trim())) {
     const startedAt = performance.now();
     const bytes = new TextEncoder().encode(input.markdown).byteLength;
     for (let attempt = 0; attempt < 3 && !resultRef; attempt += 1) {
@@ -102,7 +104,7 @@ export const createArenaGenerationFinalizer = (
           markdown: input.markdown,
           contentType: input.metadata.outputContract === 'structured-report'
             ? 'application/json; charset=utf-8'
-            : input.metadata.outputContract === 'web-document'
+            : isWebArenaOutputContract(input.metadata.outputContract)
               ? 'text/plain; charset=utf-8'
               : 'text/markdown; charset=utf-8',
           signal: input.signal,
