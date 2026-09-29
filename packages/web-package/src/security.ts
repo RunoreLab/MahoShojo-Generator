@@ -49,6 +49,12 @@ export type WebPackageTrustGrant = Readonly<{
 const MAX_SCAN_FILE_BYTES = 512 * 1024;
 const MAX_SCAN_TOTAL_BYTES = 4 * 1024 * 1024;
 const MAX_FINDINGS = 512;
+/** 授权对话框要指名道姓，否则"未分析"对用户不可行动；条目过多只列前若干个。 */
+const MAX_LISTED_UNSCANNED = 8;
+const encoder = new TextEncoder();
+const listPaths = (paths: readonly string[]): string => (paths.length <= MAX_LISTED_UNSCANNED
+  ? paths.join('、')
+  : `${paths.slice(0, MAX_LISTED_UNSCANNED).join('、')} 等 ${paths.length} 个文件`);
 const sorted = <T extends string>(items: Iterable<T>): T[] => [...new Set(items)].sort();
 /**
  * Host-page access is matched only where markup cannot imitate it. `top` is a
@@ -139,22 +145,31 @@ function scan(base: ResolvedWebPackage, instance?: WebPackageInstance): WebPacka
   const uncertainty = new Set<string>(['启发式扫描无法证明安全；未检测到不代表没有此能力。']);
   let status: 'complete' | 'partial' = 'complete';
   let remaining = MAX_SCAN_TOTAL_BYTES;
-  const files = [...base.manifest.files];
-  if (instance && !files.some((file) => file.path === instance.overlay.targetPath)) {
-    files.push({ path: instance.overlay.targetPath, mediaType: instance.overlay.targetMediaType,
-      size: new TextEncoder().encode(instance.overlay.generatedContent).length, digest: instance.overlay.generatedDigest });
-  }
+  const overlayPath = instance?.overlay.targetPath;
+  const overlayBytes = instance ? encoder.encode(instance.overlay.generatedContent) : null;
+  const byPath = (left: { path: string }, right: { path: string }): number => (left.path < right.path ? -1 : left.path > right.path ? 1 : 0);
+  /**
+   * 生成目标先扫，基础包用剩余预算。授权判断依赖生成目标的扫描结论，让基础包按
+   * 路径序抢走预算会把最该被扫描的文件挤掉——这个方向性错误即使 fail-closed 也
+   * 救不回来。同路径的基础包描述符由 overlay 取代，与既有行为一致。
+   */
+  const files = [
+    ...(instance ? [{ path: instance.overlay.targetPath, mediaType: instance.overlay.targetMediaType, size: overlayBytes!.length, digest: instance.overlay.generatedDigest }] : []),
+    ...base.manifest.files.filter((file) => file.path !== overlayPath).sort(byPath),
+  ];
   const add = (category: WebPackageRiskCategory, path: string, source: 'base' | 'overlay', evidence: string) => {
     categories.add(category);
     if (findings.length < MAX_FINDINGS) findings.push({ category, path, source, evidence: evidence.slice(0, 160) });
     else { status = 'partial'; uncertainty.add('部分风险证据未展开。'); }
   };
   let skippedPromptFiles = 0;
-  for (const file of [...files].sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0)) {
-    const isOverlay = Boolean(instance && file.path === instance.overlay.targetPath);
+  const overBudget: string[] = [];
+  const undecodable: string[] = [];
+  for (const file of files) {
+    const isOverlay = file.path === overlayPath;
     const source = isOverlay ? 'overlay' : 'base';
     const type = isOverlay ? instance!.overlay.targetMediaType : file.mediaType;
-    const size = isOverlay ? new TextEncoder().encode(instance!.overlay.generatedContent).length : file.size;
+    const size = isOverlay ? overlayBytes!.length : file.size;
     if (type.startsWith('audio/')) add('audio', file.path, source, '包内音频资源');
     if (type.startsWith('video/')) add('video', file.path, source, '包内视频资源');
     if (type.includes('javascript')) add('scripts', file.path, source, 'JavaScript 文件');
@@ -169,21 +184,21 @@ function scan(base: ResolvedWebPackage, instance?: WebPackageInstance): WebPacka
       // 已知二进制本来就扫不出东西，不该因此把档案标成"未完成"。
       if (!isWebPackageBinaryMediaType(type)) {
         status = 'partial';
-        uncertainty.add('部分文本超过扫描预算，未分析；此限制不影响包导入。');
+        overBudget.push(file.path);
       }
       continue;
     }
     remaining -= size;
     let text: string;
     try {
-      const bytes = isOverlay ? new TextEncoder().encode(instance!.overlay.generatedContent) : base.readFile(file.path);
+      const bytes = isOverlay ? overlayBytes : base.readFile(file.path);
       if (!bytes) throw new Error('missing');
       text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
     } catch {
       // 真实二进制在严格 UTF-8 下解码失败，跳过不构成扫描缺口。
       if (!isWebPackageBinaryMediaType(type)) {
         status = 'partial';
-        uncertainty.add('存在无法读取或解码的文本文件。');
+        undecodable.push(file.path);
       }
       continue;
     }
@@ -201,6 +216,12 @@ function scan(base: ResolvedWebPackage, instance?: WebPackageInstance): WebPacka
   }
   if (skippedPromptFiles > 0) {
     uncertainty.add(`包内 ${skippedPromptFiles} 个提示词/说明文件未按运行时能力扫描；其中的代码片段与地址只是创作参考文本。`);
+  }
+  if (overBudget.length > 0) {
+    uncertainty.add(`以下文本超过预检体量或预算上限，未分析：${listPaths(overBudget)}。此限制不影响包导入，也不表示其中没有能力。`);
+  }
+  if (undecodable.length > 0) {
+    uncertainty.add(`以下文本无法按 UTF-8 读取或解码，未分析：${listPaths(undecodable)}。此限制不影响包导入，也不表示其中没有能力。`);
   }
   if (categories.has('network')) uncertainty.add('网络目的地可能动态构造；远程内容未下载、未分析，可能随时变化。');
   if (categories.has('dynamic-execution')) uncertainty.add('动态代码或模块加载使实际行为无法仅由文本确定。');
