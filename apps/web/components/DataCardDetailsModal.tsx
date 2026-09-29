@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { X, Info, Star, Heart, Download, ChevronDown, ChevronUp, Flag, MoreHorizontal, Layers } from 'lucide-react';
+import { X, Info, Star, Heart, Download, ChevronDown, ChevronUp, Flag, MoreHorizontal, Layers, HardDrive } from 'lucide-react';
 import { MarkdownBlock } from '@/components/MarkdownBlock';
 import { DataCardReportModal } from '@/components/data-card-reports/DataCardReportModal';
 import { getFieldDisplayName } from '@/lib/fieldTranslations';
@@ -169,6 +169,12 @@ interface DataCardDetailsModalProps {
   };
   pendingNotice?: string;
   fallbackFocusRef?: React.RefObject<HTMLElement | null>;
+  /**
+   * LIB-007「下载本地副本」：把线上数据卡的正文复制一份存入本机本地库。
+   * 只对线上数据卡开放；本地库卡片已经在此，没有再复制一次的道理。
+   */
+  onSaveCopyToLocalLibrary?: () => Promise<void> | void;
+  localLibrarySaveState?: { busy: boolean; message: string | null };
 }
 
 export default function DataCardDetailsModal({
@@ -182,6 +188,8 @@ export default function DataCardDetailsModal({
   adminTagEditor = false,
   initialReportCapability = null,
   fallbackFocusRef,
+  onSaveCopyToLocalLibrary,
+  localLibrarySaveState,
 }: DataCardDetailsModalProps) {
   const titleId = React.useId();
   const dialogRef = useRef<HTMLDivElement | null>(null);
@@ -1181,6 +1189,9 @@ export default function DataCardDetailsModal({
             {downloadError && (
               <div className="text-xs text-red-600">{downloadError}</div>
             )}
+            {localLibrarySaveState?.message && (
+              <div className="text-xs text-gray-600" role="status">{localLibrarySaveState.message}</div>
+            )}
           </div>
 
           <div className="flex items-center gap-2">
@@ -1229,6 +1240,17 @@ export default function DataCardDetailsModal({
                     : '不可下载'}
               </span>
             </button>
+            {onSaveCopyToLocalLibrary && isCloudDataCard ? (
+              <button
+                onClick={() => { void onSaveCopyToLocalLibrary(); }}
+                disabled={localLibrarySaveState?.busy === true}
+                className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors inline-flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                title="把这张数据卡的正文复制一份存入本机本地库，不会影响线上记录"
+              >
+                <HardDrive className="w-4 h-4" />
+                <span>{localLibrarySaveState?.busy === true ? '保存中...' : '存到本地库'}</span>
+              </button>
+            ) : null}
             <button
               onClick={onClose}
               className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"

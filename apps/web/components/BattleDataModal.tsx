@@ -16,11 +16,16 @@ import {
   normalizePublicVisibilityValue,
 } from '@/lib/data-card-read-mappers';
 import { addUsedCard, isCardUsed } from '@/lib/localStorage';
+import { getLocalCardRepository } from '@/lib/local-library/card-repository';
+import { isLocalDataCardRow, mapLocalCardRecordToDetailsCard, type LocalDataCardRow } from '@/lib/local-library/data-card-rows';
+import { useLocalDataCards } from '@/lib/local-library/use-local-data-cards';
+import { useLocalLibraryAutoSave } from '@/lib/local-library/use-local-library-auto-save';
 import { inferTemplate } from '@/lib/data-card-converter';
 import { downloadBlob } from '@/lib/client/blobUrl';
 import { buildTitleDisplay } from '@/lib/text';
 import { ChevronDown, Filter } from 'lucide-react';
 import DecksModal from './DecksModal';
+import { BaseModal } from './shared/BaseModal';
 import { getDataCardStatus } from '@/lib/data-card-status';
 import type { BadgeDefinition } from '@/types/badge';
 import {
@@ -58,7 +63,12 @@ interface BattleDataModalProps {
   allowCardDetails?: boolean;
 }
 
-type BattleDataTab = 'my' | 'public' | 'recommended' | 'favorites' | 'pvpHand';
+type BattleDataTab = 'my' | 'public' | 'recommended' | 'favorites' | 'pvpHand' | 'local';
+
+const normalizeCardTypeForLibrary = (card: unknown): DataCardType => {
+  const parsed = OnlineDataCardTypeSchema.safeParse((card as { type?: unknown })?.type);
+  return parsed.success ? parsed.data : 'character';
+};
 
 const normalizeTagIds = (value: unknown): string[] => {
   const rawList: string[] = [];
@@ -274,6 +284,13 @@ export default function BattleDataModal({
   const [tagOptions, setTagOptions] = useState<ApiTag[]>([]);
   const [tagOptionsLoading, setTagOptionsLoading] = useState(false);
   const [tagOptionsError, setTagOptionsError] = useState<string | null>(null);
+  /**
+   * 「已经取过标签库」必须显式记一份，不能用 `tagOptions.length > 0` 代替：
+   * 标签库为空时长度恒为 0，旧实现会把它当成「还没取过」，于是每次渲染都重新请求，
+   * loading true/false 交替触发无限重渲染。用 ref 承载以保持 callback 身份稳定。
+   */
+  const tagOptionsSettledRef = useRef(false);
+  const tagOptionsInFlightRef = useRef(false);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -381,6 +398,7 @@ export default function BattleDataModal({
       : ([
         ...(pvpHandTab ? (['pvpHand'] as const) : []),
         ...(isAuthenticated ? (['my'] as const) : []),
+        'local' as const,
         'public' as const,
         'recommended' as const,
         ...(isAuthenticated ? (['favorites'] as const) : []),
@@ -413,8 +431,20 @@ export default function BattleDataModal({
   const { cards: rawUserDataCards, setCards: setUserDataCards, reload: loadUserDataCards } = myPage;
   const { setCards: setFavoriteCards } = favoritesPage;
   const [publicError, setPublicError] = useState<string | null>(null);
-  const listLoading = activeTab === 'my' ? myPage.loading : activeTab === 'favorites' ? favoritesPage.loading : isLoading;
-  const listError = activeTab === 'my' ? myPage.error : activeTab === 'favorites' ? favoritesPage.error : publicError;
+  const isLocalTab = activeTab === 'local';
+  const localCards = useLocalDataCards(isOpen && isLocalTab, effectiveAllowedTypes, debouncedSearchQuery);
+  const localRecordById = useMemo(
+    () => new Map(localCards.records.map((record) => [record.id, record])),
+    [localCards.records],
+  );
+  const [localActionError, setLocalActionError] = useState<string | null>(null);
+  const [removingLocalId, setRemovingLocalId] = useState<string | null>(null);
+  const [pendingLocalRemoval, setPendingLocalRemoval] = useState<LocalDataCardRow | null>(null);
+  const libraryAutoSave = useLocalLibraryAutoSave();
+  const [libraryCopyMessage, setLibraryCopyMessage] = useState<string | null>(null);
+
+  const listLoading = activeTab === 'my' ? myPage.loading : activeTab === 'favorites' ? favoritesPage.loading : isLocalTab ? localCards.loading : isLoading;
+  const listError = activeTab === 'my' ? myPage.error : activeTab === 'favorites' ? favoritesPage.error : isLocalTab ? localCards.error : publicError;
   const listIdle = activeTab === 'my' ? myPage.status === 'idle' : activeTab === 'favorites' ? favoritesPage.status === 'idle' : false;
   const { reload: reloadFavorites } = favoritesPage;
   useEffect(() => {
@@ -485,8 +515,10 @@ export default function BattleDataModal({
     }));
   }, [inferRoleType]);
 
-  const loadTagOptions = useCallback(async () => {
-    if (tagOptionsLoading || tagOptions.length > 0) return;
+  const loadTagOptions = useCallback(async (options: { force?: boolean } = {}) => {
+    if (tagOptionsInFlightRef.current) return;
+    if (!options.force && tagOptionsSettledRef.current) return;
+    tagOptionsInFlightRef.current = true;
     setTagOptionsLoading(true);
     setTagOptionsError(null);
     try {
@@ -501,17 +533,19 @@ export default function BattleDataModal({
         return;
       }
       setTagOptions(Array.isArray(json.tags) ? json.tags : []);
+      // 空标签库同样是成功结果：记为已取过，避免"永远在加载"。
+      tagOptionsSettledRef.current = true;
     } catch (error) {
       setTagOptionsError(String(error));
     } finally {
+      tagOptionsInFlightRef.current = false;
       setTagOptionsLoading(false);
     }
-  }, [tagOptions.length, tagOptionsLoading]);
+  }, []);
 
   const ensureTagOptions = useCallback(() => {
-    if (tagOptions.length > 0 || tagOptionsLoading) return;
     void loadTagOptions();
-  }, [loadTagOptions, tagOptions.length, tagOptionsLoading]);
+  }, [loadTagOptions]);
 
 
   const userDataCards = useMemo(() => mapWithRoleType(
@@ -760,6 +794,8 @@ export default function BattleDataModal({
     setSelectedTagIds([]);
     setTagMatchMode('any');
     setTagOptionsError(null);
+    tagOptionsSettledRef.current = false;
+    tagOptionsInFlightRef.current = false;
 
     const fallbackTab: BattleDataTab = effectiveTabs[0] ?? 'public';
     const canUseInitialTab = Boolean(initialTab && effectiveTabs.includes(initialTab));
@@ -817,7 +853,10 @@ export default function BattleDataModal({
       }
 
       const signal = cardReadController.current.signal;
-      const full = typeof card.data === 'string' ? card : await loadFullDataCard(card, activeTab === 'my' ? 'my' : 'public', signal);
+      // 本地库记录本来就带着完整正文；走 loadFullDataCard 只会得到一次注定 404 的请求。
+      const full = isLocalDataCardRow(card)
+        ? card
+        : typeof card.data === 'string' ? card : await loadFullDataCard(card, activeTab === 'my' ? 'my' : 'public', signal);
       if (signal.aborted) return;
       const payload = mapPublicDataCardRowToBattleSelectionPayload(full);
 
@@ -932,7 +971,9 @@ export default function BattleDataModal({
   const handleDownloadCard = useCallback(async (card: any) => {
     try {
       const signal = cardReadController.current.signal;
-      const full = typeof card.data === 'string' ? card : await loadFullDataCard(card, activeTab === 'my' ? 'my' : 'public', signal);
+      const full = isLocalDataCardRow(card)
+        ? card
+        : typeof card.data === 'string' ? card : await loadFullDataCard(card, activeTab === 'my' ? 'my' : 'public', signal);
       if (signal.aborted) return;
       let cardPayload = full.data;
       if (typeof cardPayload === 'string') {
@@ -947,6 +988,53 @@ export default function BattleDataModal({
     }
   }, [activeTab]);
 
+  /**
+   * 从本机本地库删除一张数据卡。
+   *
+   * 与"取消选择"是两件事：删除后本地库不再保留这条记录，而取消选择只影响本次会话。
+   * 这里刻意不做静默删除——tombstone 由仓储负责，UI 只负责把后果说清楚。
+   */
+  const handleRemoveLocalCard = useCallback(async (card: LocalDataCardRow) => {
+    setLocalActionError(null);
+    setRemovingLocalId(card.id);
+    try {
+      await getLocalCardRepository().delete(card.id);
+      localCards.reload();
+    } catch (error) {
+      setLocalActionError(error instanceof Error ? error.message : '本地库删除失败，请重试。');
+    } finally {
+      setRemovingLocalId((current) => (current === card.id ? null : current));
+    }
+  }, [localCards]);
+
+  /**
+   * LIB-007「下载本地副本」：把线上数据卡复制一份进本机本地库。
+   *
+   * 复制而非移动：线上记录不受影响，本地副本通过 `cloudRef` 与它保持可辨认的对应关系。
+   * 内容相同则整卡更新，用户不会因为多点一次就多出一张几乎一样的卡。
+   */
+  const handleSaveCardToLibrary = useCallback(async (card: any) => {
+    setLocalActionError(null);
+    const summary = await libraryAutoSave.save([{
+      cardType: normalizeCardTypeForLibrary(card),
+      title: typeof card?.name === 'string' && card.name.trim() ? card.name : '未命名数据卡',
+      payload: typeof card?.data === 'string' ? JSON.parse(card.data) : card?.data,
+    }]);
+    setLibraryCopyMessage(summary.saved > 0
+      ? `已保存到本地库：${summary.saved} 张。`
+      : summary.updated > 0
+        ? '本地库中已有内容相同的数据卡，已更新原卡。'
+        : summary.failed > 0
+          ? '保存到本地库失败。'
+          : null);
+  }, [libraryAutoSave]);
+
+  const handleSaveSelectedCardToLibrary = useCallback(async () => {
+    if (!selectedCard) return;
+    await handleSaveCardToLibrary(selectedCard);
+    if (isLocalTab) localCards.reload();
+  }, [selectedCard, handleSaveCardToLibrary, isLocalTab, localCards]);
+
   // 查看详情：与 DataCardsModal.withFullCard 一致，新动作 abort 旧动作，
   // 避免连续点击 A、B 时先返回的 A 覆盖最后点击的 B。
   const openCardDetails = useCallback(async (card: any) => {
@@ -955,6 +1043,14 @@ export default function BattleDataModal({
     cardDetailControllerRef.current = controller;
     const { signal } = controller;
     try {
+      if (isLocalDataCardRow(card)) {
+        const record = localRecordById.get(card.id);
+        if (!record) throw new Error('本地库中的这张数据卡已不可用。');
+        if (signal.aborted) return;
+        setSelectedCard(mapLocalCardRecordToDetailsCard(record));
+        setShowDetailsModal(true);
+        return;
+      }
       const full = await loadFullDataCard(card, activeTab === 'my' ? 'my' : 'public', signal);
       if (signal.aborted) return;
       setSelectedCard(full);
@@ -965,7 +1061,7 @@ export default function BattleDataModal({
     } finally {
       if (cardDetailControllerRef.current === controller) cardDetailControllerRef.current = null;
     }
-  }, [activeTab]);
+  }, [activeTab, localRecordById]);
 
   // 【新增】处理高级筛选输入变化
   const handleFilterChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
@@ -1176,17 +1272,26 @@ export default function BattleDataModal({
     return filteredPublicCards;
   }, [filteredPublicCards, publicFilters.roleType, selectedType, currentPage, cardsPerPage]);
 
+  const localPaginatedCards = useMemo(
+    () => localCards.rows.slice((currentPage - 1) * cardsPerPage, currentPage * cardsPerPage),
+    [localCards.rows, currentPage, cardsPerPage],
+  );
+  const localTotalPages = Math.max(1, Math.ceil(localCards.total / cardsPerPage));
+
   const displayCards = useMemo(() => {
     if (activeTab === 'my') return paginatedUserCards;
     if (activeTab === 'favorites') return paginatedFavoriteCards;
+    if (isLocalTab) return localPaginatedCards;
     if (isPublicTab) return publicPaginatedCards;
     return [];
-  }, [activeTab, isPublicTab, paginatedUserCards, paginatedFavoriteCards, publicPaginatedCards]);
+  }, [activeTab, isLocalTab, isPublicTab, paginatedUserCards, paginatedFavoriteCards, localPaginatedCards, publicPaginatedCards]);
 
   const displayCardIds = useMemo(() => {
     const out: string[] = [];
     const seen = new Set<string>();
     for (const card of displayCards as any[]) {
+      // 本地库记录不参与服务器侧的批量元数据请求：它们没有技术值、段位或审核状态。
+      if (isLocalDataCardRow(card)) continue;
       const id = typeof card?.id === 'string' ? card.id.trim() : '';
       if (!id) continue;
       if (seen.has(id)) continue;
@@ -1201,6 +1306,7 @@ export default function BattleDataModal({
     if (isPvpHandTab) return;
     if (displayCardIds.length === 0) return;
 
+    // 本地库记录没有服务器侧技术值/段位；为它们发批量请求只会得到空响应。
     const pendingIds = displayCardIds.filter((id) => !Object.prototype.hasOwnProperty.call(cardMetaById, id));
     if (pendingIds.length === 0) return;
 
@@ -1342,6 +1448,8 @@ export default function BattleDataModal({
     ? userTotalPages
     : activeTab === 'favorites'
       ? favoritesTotalPages
+    : isLocalTab
+      ? localTotalPages
     : isPublicTab
         ? publicTotalPages
         : null;
@@ -1397,6 +1505,11 @@ export default function BattleDataModal({
           {selectError && (
             <div className="mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
               {selectError}
+            </div>
+          )}
+          {localActionError && (
+            <div className="mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
+              {localActionError}
             </div>
           )}
           {externalError && (
@@ -1639,7 +1752,7 @@ export default function BattleDataModal({
           {listError && <div role="alert" className="mb-3 rounded-lg bg-red-50 p-3 text-sm text-red-700">
             {displayCards.length ? `刷新失败，当前显示上次成功结果：${listError}` : `数据卡加载失败：${listError}`}
             <button type="button" disabled={listLoading} className="ml-3 px-3 py-2 rounded bg-white disabled:opacity-50"
-              onClick={() => activeTab === 'my' ? myPage.reload() : activeTab === 'favorites' ? favoritesPage.reload() : reloadPublicCurrentQuery(currentPage)}>重试</button>
+              onClick={() => activeTab === 'my' ? myPage.reload() : activeTab === 'favorites' ? favoritesPage.reload() : isLocalTab ? localCards.reload() : reloadPublicCurrentQuery(currentPage)}>重试</button>
           </div>}
           {/* 标签页切换 */}
           <div className="flex items-center justify-between gap-2 mb-4 flex-wrap">
@@ -1669,6 +1782,20 @@ export default function BattleDataModal({
                 className={`px-4 py-2 rounded text-sm font-medium ${activeTab === 'my' ? 'bg-pink-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
               >
                 我的{typeLabel} ({myPage.hasLoaded ? myPage.total : '—'})
+              </button>
+            )}
+            {effectiveTabs.includes('local') && (
+              <button
+                onClick={() => {
+                  hasUserSelectedTabRef.current = true;
+                  setActiveTab('local');
+                  setCurrentPage(1);
+                  if (activeTab === 'local') localCards.reload();
+                }}
+                className={`px-4 py-2 rounded text-sm font-medium ${activeTab === 'local' ? 'bg-pink-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
+                title="本机本地库，无需登录；清除站点数据会一并删除"
+              >
+                本地库 ({localCards.status === 'success' ? localCards.total : '—'})
               </button>
             )}
             {effectiveTabs.includes('public') && (
@@ -1857,6 +1984,10 @@ export default function BattleDataModal({
 	                        </button>
 	                      )}
 	                      <DataCard
+	                        storageLocation={isLocalDataCardRow(card) ? 'local' : 'cloud'}
+	                        onRemoveFromLibrary={isLocalDataCardRow(card) ? () => setPendingLocalRemoval(card) : undefined}
+	                        removePending={removingLocalId === card.id}
+	                        localLibraryOriginHint={isLocalDataCardRow(card) ? '仅保存在本机，不会上传' : null}
 	                        id={card.id}
 	                        name={card.name}
 	                        description={card.description}
@@ -1921,9 +2052,11 @@ export default function BattleDataModal({
                     ? currentPage >= userTotalPages
                     : activeTab === 'favorites'
                       ? currentPage >= favoritesTotalPages
-                      : publicTotalPages
-                        ? currentPage >= publicTotalPages
-                        : displayCards.length < cardsPerPage
+                      : isLocalTab
+                        ? currentPage >= localTotalPages
+                        : publicTotalPages
+                          ? currentPage >= publicTotalPages
+                          : displayCards.length < cardsPerPage
                 }
                 className="page-button"
               >
@@ -1934,9 +2067,47 @@ export default function BattleDataModal({
 	    </div>
 	  </div>
 
+	  {/* 本地库删除二次确认：删除只影响本机，但不可从选择弹窗里撤销，措辞必须说清楚 */}
+      <BaseModal
+        isOpen={pendingLocalRemoval !== null}
+        title="从本地库删除这张数据卡？"
+        maxWidthClassName="max-w-md"
+        closeOnBackdrop={!removingLocalId}
+        onClose={() => { if (!removingLocalId) setPendingLocalRemoval(null); }}
+        footer={(
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              className="px-4 py-2 rounded text-sm border border-gray-300 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:hover:bg-gray-800"
+              disabled={removingLocalId !== null}
+              onClick={() => setPendingLocalRemoval(null)}
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              className="px-4 py-2 rounded text-sm bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+              disabled={removingLocalId !== null}
+              onClick={() => {
+                if (pendingLocalRemoval) void handleRemoveLocalCard(pendingLocalRemoval).then(() => setPendingLocalRemoval(null));
+              }}
+            >
+              {removingLocalId !== null ? '正在删除…' : '删除'}
+            </button>
+          </div>
+        )}
+      >
+        <p className="text-sm text-gray-700 dark:text-gray-200">
+          「{pendingLocalRemoval?.name}」只会从这台设备的本地库中移除，不影响任何线上数据卡，
+          也不会同步到其他设备。删除后如需再次使用，需要重新导入该文件。
+        </p>
+      </BaseModal>
+
 	  {/* 详情模态框 */}
       {allowCardDetails && selectedCard && (
         <DataCardDetailsModal
+          onSaveCopyToLocalLibrary={isLocalDataCardRow(selectedCard) ? undefined : handleSaveSelectedCardToLibrary}
+          localLibrarySaveState={{ busy: libraryAutoSave.busy, message: libraryCopyMessage }}
           isOpen={showDetailsModal}
           fallbackFocusRef={closeButtonRef}
           onClose={() => {

@@ -182,15 +182,17 @@ export const useBattleActions = () => {
       } else {
         setError(null);
       }
+
+      return uniqueResults;
     },
     [addCombatant, appendAdjudicationEvents, combatants, setError]
   );
 
   const handleFileUpload = useCallback(
     async (files: FileList | null) => {
-      if (!files || isGenerating) return;
+      if (!files || isGenerating) return [];
       const texts = await Promise.all(Array.from(files).map((file) => file.text()));
-      await importFromText(texts.join('\n'));
+      return importFromText(texts.join('\n'));
     },
     [importFromText, isGenerating]
   );
@@ -198,8 +200,8 @@ export const useBattleActions = () => {
   const handlePaste = useCallback(
     async (text: string) => {
       const trimmed = text.trim();
-      if (!trimmed) return;
-      await importFromText(trimmed);
+      if (!trimmed) return [];
+      return importFromText(trimmed);
     },
     [importFromText]
   );

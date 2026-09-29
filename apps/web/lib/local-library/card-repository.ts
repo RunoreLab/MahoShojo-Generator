@@ -95,8 +95,9 @@ export class IndexedDbCardRepository implements CardRepository {
       const store = transaction.objectStore(LOCAL_LIBRARY_STORE_NAMES.dataCards);
       const existing = await getLocalLibraryRecord<LocalCardRecordV1>(store, id);
       if (existing === undefined || existing.deletedAt === undefined) return;
-      const { deletedAt: _deletedAt, ...restored } = existing;
-      await putLocalLibraryRecord(store, { ...restored, updatedAt: monotonicNowIso(existing.updatedAt) });
+      const restored = { ...existing, updatedAt: monotonicNowIso(existing.updatedAt) };
+      delete restored.deletedAt;
+      await putLocalLibraryRecord(store, restored);
     });
   }
 

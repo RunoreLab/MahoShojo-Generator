@@ -19,6 +19,8 @@ const allowedTransactionFiles = new Set([
   'lib/ai-session/battle-story/storage.ts',
   'lib/public-card-cache/storage.ts',
   'lib/web-package/cache.ts',
+  // 浏览器端 IndexedDB 本地库存储（ADR-local-library-data-ownership §4 / LIB-002）。
+  'lib/local-library/db.ts',
 ]);
 
 const isObjectRecord = (value: unknown): value is Record<string, unknown> =>
