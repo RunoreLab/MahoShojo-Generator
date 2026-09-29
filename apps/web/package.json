@@ -34,6 +34,7 @@
     "@mahoshojo/domain": "workspace:*",
     "@mahoshojo/hosted-api": "workspace:*",
     "@mahoshojo/hosted-runtime": "workspace:*",
+    "@mahoshojo/local-library": "workspace:*",
     "@mahoshojo/multiplayer-core": "workspace:*",
     "@mahoshojo/web-package": "workspace:*",
     "@next/third-parties": "15.5.24",

@@ -217,6 +217,9 @@ importers:
       '@mahoshojo/hosted-runtime':
         specifier: workspace:*
         version: link:../../packages/hosted-runtime
+      '@mahoshojo/local-library':
+        specifier: workspace:*
+        version: link:../../packages/local-library
       '@mahoshojo/multiplayer-core':
         specifier: workspace:*
         version: link:../../packages/multiplayer-core

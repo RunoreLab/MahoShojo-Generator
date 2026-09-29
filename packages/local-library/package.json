@@ -28,6 +28,11 @@
       "types": "./src/repository.ts",
       "import": "./src/repository.ts",
       "default": "./src/repository.ts"
+    },
+    "./web-package-record": {
+      "types": "./src/web-package-record.ts",
+      "import": "./src/web-package-record.ts",
+      "default": "./src/web-package-record.ts"
     }
   },
   "scripts": {
