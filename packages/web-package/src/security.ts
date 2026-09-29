@@ -47,12 +47,21 @@ const MAX_SCAN_FILE_BYTES = 512 * 1024;
 const MAX_SCAN_TOTAL_BYTES = 4 * 1024 * 1024;
 const MAX_FINDINGS = 512;
 const sorted = <T extends string>(items: Iterable<T>): T[] => [...new Set(items)].sort();
+/**
+ * Host-page access is matched only where markup cannot imitate it. `top` is a
+ * ubiquitous CSS property and class name, and `.parent`/`#parent`/`--parent`
+ * are selectors or custom properties, so an unqualified `top` is not reported
+ * and bare globals must not sit behind a selector or property sigil. The scan
+ * is a heuristic prompt rather than an enforcement boundary: a miss costs one
+ * warning, a false positive costs trust in every other warning.
+ */
+const HOST_PAGE_ACCESS = /(?:window|self|globalThis|frames)\s*\.\s*(?:parent|top|opener|frameElement)\b|(?:^|[^\w.$\-#])(?:parent|opener|frameElement)\b/u;
 const rules: readonly [WebPackageRiskCategory, RegExp][] = [
   ['scripts', /<script\b|\bon\w+\s*=|javascript\s*:/iu],
   ['audio', /<audio\b|\bAudio(?:Context)?\s*\(/u],
   ['video', /<video\b/iu],
   ['network', /\b(?:fetch|XMLHttpRequest|WebSocket|EventSource|sendBeacon)\b|https?:\/\/|wss?:\/\//u],
-  ['host-page-access', /\b(?:parent|top|opener|frameElement)\b/u],
+  ['host-page-access', HOST_PAGE_ACCESS],
   ['site-storage', /\b(?:localStorage|sessionStorage|indexedDB|BroadcastChannel|cookie|caches)\b/u],
   ['dynamic-execution', /\b(?:eval|Function|WebAssembly)\s*[.(]|\bimport\s*\(|(?:blob|data):(?:text\/javascript|application\/javascript)?/u],
   ['workers', /\b(?:Worker|SharedWorker)\s*\(/u],

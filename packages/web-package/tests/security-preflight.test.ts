@@ -13,6 +13,13 @@ async function fixture(generated: string, baseCode = 'parent.document;') {
   return {base,instance,profile:scanWebPackageInstance(instance)};
 }
 
+async function baseFixture(baseCode: string) {
+  const files = [{path:'index.html',mediaType:'text/html',text:baseCode}];
+  const descriptors = await Promise.all(files.map(async f => ({path:f.path,mediaType:f.mediaType,size:encoder.encode(f.text).length,digest:await digestWebPackageBytes(encoder.encode(f.text))})));
+  return verifyWebPackage({ format:'mahoshojo-web-package',formatVersion:1,id:'local.markup',version:'1.0',name:'标记噪声',entry:'index.html',
+    generation:{target:'index.html',mode:'replace',mediaType:'text/html'},files:descriptors },files.map(f=>({path:f.path,bytes:encoder.encode(f.text)})));
+}
+
 describe('Web 包本地风险预检与独立同源授权', () => {
   it('scans base and effective overlay separately without retaining overwritten behavior', async () => {
     const {base,profile}=await fixture('<h1>纯展示</h1>');
@@ -57,5 +64,27 @@ describe('Web 包本地风险预检与独立同源授权', () => {
     expect(scanWebPackageInstance(instance).fingerprint).toBe(profile.fingerprint);
     expect(instance.overlay.generatedContent).toBe(text);
     expect(profile.findings.some(f=>f.source==='overlay'&&f.path==='index.html')).toBe(true);
+  });
+  // `top` is a CSS property, a class name and an id in ordinary markup, and
+  // `.parent`/`#parent`/`--parent` are selectors. Reporting those as host-page
+  // access trains users to dismiss every real warning.
+  it.each([
+    '.bar i{position:absolute;left:0;top:0;height:8px}',
+    '<div class="top"><span class="nm">标题</span></div>',
+    '#toast{position:absolute;top:12%;color:red}',
+    ':root{--top-gap:1rem} .x{margin-top:var(--top-gap)}',
+    'el.scrollTop = 0; node.parentNode.remove(); box.offsetTop;',
+    '<style>.wrap{background:url(logo.png)}</style><p>顶部 top bottom</p>',
+  ])('does not report host-page access for ordinary markup: %s', async (code) => {
+    expect(scanWebPackageBase(await baseFixture(code)).categories).not.toContain('host-page-access');
+  });
+  it.each([
+    'parent.document.body.innerHTML = "x";',
+    'window.top.location = "https://evil.example";',
+    'window.parent.postMessage({}, "*");',
+    'self.opener.location.reload();',
+    'globalThis.frameElement.remove();',
+  ])('still reports deliberate frame access: %s', async (code) => {
+    expect(scanWebPackageBase(await baseFixture(code)).categories).toContain('host-page-access');
   });
 });
