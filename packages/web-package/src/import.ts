@@ -129,7 +129,7 @@ const DECLARABLE_CAPABILITIES_TEXT = WEB_PACKAGE_DECLARABLE_CAPABILITIES.join('�
  * 已知的高频 authoring 错误翻译成「字段是什么 + 该怎么改」，未覆盖的仍保留
  * 原文并给出通用指引。
  */
-const manifestIssueGuidance = (issue: ManifestIssue): { message: string; hint: string } | null => {
+const manifestIssueGuidance = (issue: ManifestIssue, entryPath: string): { message: string; hint: string } | null => {
   const field = issue.path.map(String).join('.');
   const leaf = String(issue.path[issue.path.length - 1] ?? '');
   if (issue.code === 'unrecognized_keys') {
@@ -177,6 +177,13 @@ const manifestIssueGuidance = (issue: ManifestIssue): { message: string; hint: s
       };
     }
     if (leaf === 'instructions' || leaf === 'schema' || leaf === 'assetCatalog' || leaf === 'example') {
+      if (/must not be the entry/u.test(issue.message)) {
+        return {
+          message: `generation.${leaf} 不能指向入口文件 ${entryPath}。`,
+          hint: '入口是一定会被执行的页面，不能同时当作提示材料交给 AI——那样它的代码就不会进入风险分析。'
+            + '请另存一份提示文件（例如 ai/instructions.md）后指向它；范例可以直接指向 generation.target。',
+        };
+      }
       return {
         message: `generation.${leaf} 指向的文件不在包内。`,
         hint: `请把该文件一起打包，或删除 generation.${leaf} 字段。`,
@@ -192,17 +199,17 @@ const manifestIssueGuidance = (issue: ManifestIssue): { message: string; hint: s
   return null;
 };
 
-const describeManifestFailure = (error: unknown): { message: string; hint: string } | null => {
+const describeManifestFailure = (error: unknown, entryPath: string): { message: string; hint: string } | null => {
   const issues = (error as { issues?: ManifestIssue[] }).issues;
   if (!Array.isArray(issues) || issues.length === 0) return null;
   const described = issues.map((issue) => {
-    const guidance = manifestIssueGuidance(issue);
+    const guidance = manifestIssueGuidance(issue, entryPath);
     const field = issue.path.join('.') || '(root)';
     return guidance
       ? `${field}: ${guidance.message}`
       : `${field}: ${issue.message}`;
   });
-  const known = issues.map((issue) => manifestIssueGuidance(issue)?.hint).filter((hint): hint is string => Boolean(hint));
+  const known = issues.map((issue) => manifestIssueGuidance(issue, entryPath)?.hint).filter((hint): hint is string => Boolean(hint));
   return {
     message: `Web 包清单未通过校验：${described.join('；')}`,
     hint: known.length > 0
@@ -445,7 +452,9 @@ export const importWebPackageArchive = async (archive: Uint8Array): Promise<WebP
     }));
     return { pkg, diagnostics };
   } catch (error) {
-    const manifestFailure = describeManifestFailure(error);
+    // `manifest` is the pre-validation draft here, so the entry is untyped until
+    // the schema below accepts or rejects it; the guidance only echoes it back.
+    const manifestFailure = describeManifestFailure(error, String(manifest.entry ?? ''));
     if (manifestFailure !== null) {
       fail('invalid-manifest-field', manifestFailure.message, manifestFailure.hint);
     }

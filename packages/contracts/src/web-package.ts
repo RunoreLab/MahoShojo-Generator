@@ -75,10 +75,17 @@ export const WebPackageManifestSchema = z.object({
     schema: WebPackagePathSchema.optional(),
     assetCatalog: WebPackagePathSchema.optional(),
     /**
-     * Opt-in shape sample for the target file, projected to the model the same
+     * Opt-in reference for the target file, projected to the model the same
      * bounded way as `instructions`. Never filled in automatically: a target
      * that is a placeholder (the shipped preset's is) would teach the model to
      * emit the placeholder.
+     *
+     * Two uses, deliberately sharing one field: a small shape sample (a few
+     * records) or a complete working reference implementation (for example a
+     * playable game whose mechanics the model adapts to the cast). Only the
+     * second is large, so the byte budget is sized for it — roughly a 33k-token
+     * reference against a 128k system prompt budget. A truncated reference is
+     * worse than none, so the budget rejects rather than clips.
      */
     example: WebPackagePathSchema.optional(),
   }).strict(),
@@ -104,6 +111,14 @@ export const WebPackageManifestSchema = z.object({
     const path = manifest.generation[key];
     if (path && !manifest.files.some((file) => file.path === path)) {
       context.addIssue({ code: 'custom', path: ['generation', key], message: 'prompt file must exist' });
+    }
+    // A prompt projection input is read as model context and never loaded, so it
+    // is exempt from runtime scanning. That exemption must not reach the entry:
+    // the entry always executes, and an author pointing `instructions` (or
+    // `example`) at it would otherwise hide that code from the risk profile
+    // that the trust grant is decided on.
+    if (path && path === manifest.entry) {
+      context.addIssue({ code: 'custom', path: ['generation', key], message: 'prompt file must not be the entry' });
     }
   }
   const target = manifest.files.find((file) => file.path.toLowerCase() === manifest.generation.target.toLowerCase());
@@ -166,8 +181,12 @@ export const WebPackagePromptProjectionSchema = z.object({
   if (projection.assetCatalog !== undefined && utf8Bytes(projection.assetCatalog) > 131_072) {
     context.addIssue({ code: 'custom', path: ['assetCatalog'], message: 'assetCatalog exceeds projection byte budget' });
   }
-  // A shape sample is meant to be a few records long, not the whole dataset.
-  if (projection.example !== undefined && utf8Bytes(projection.example) > 32_768) {
+  // Sized for the larger of the two uses: a complete working reference
+  // implementation is tens of KiB of code, a shape sample is a few records.
+  // A truncated reference teaches the model to emit a broken artefact, so this
+  // rejects rather than clips; the real ceiling is the Arena prompt budget,
+  // which rejects the whole request with 413.
+  if (projection.example !== undefined && utf8Bytes(projection.example) > 131_072) {
     context.addIssue({ code: 'custom', path: ['example'], message: 'example exceeds projection byte budget' });
   }
 });

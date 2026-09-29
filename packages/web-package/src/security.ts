@@ -147,13 +147,19 @@ const rules: readonly RiskRule[] = [
  */
 const activeType = (type: string): boolean => /(?:html|javascript|css|svg\+xml)$/u.test(type);
 /**
- * 提示投影输入（instructions / schema / assetCatalog）不是运行时资源：其中的
- * 代码片段、URL 与 "不要使用 cookie" 之类的说明都只是创作参考文本。把它们当作
- * 运行时代码扫描，会让一个完全本地的包长期挂着"网络访问""站点存储"警告。
+ * 提示投影输入（instructions / schema / assetCatalog / example）不是运行时资源：
+ * 其中的代码片段、URL 与 "不要使用 cookie" 之类的说明都只是创作参考文本。把它们
+ * 当作运行时代码扫描，会让一个完全本地的包长期挂着"网络访问""站点存储"警告。
+ *
+ * 例外是硬性的：entry 一定会执行，生成目标在 overlay 里也一定会执行。把同一个
+ * 路径同时当成提示文本，就等于让一个会执行的文件不进授权判断——所以这里排除
+ * entry 与 target。manifest 侧同样禁止提示字段指向 entry，两层都不依赖对方。
  */
 const isPromptProjectionFile = (base: ResolvedWebPackage, path: string): boolean => {
-  const { instructions, schema, assetCatalog } = base.manifest.generation;
-  return path === instructions || path === schema || path === assetCatalog;
+  const { instructions, schema, assetCatalog, example } = base.manifest.generation;
+  const projected = path === instructions || path === schema || path === assetCatalog || path === example;
+  if (!projected) return false;
+  return path !== base.manifest.entry && path !== base.manifest.generation.target;
 };
 /** Markdown 在浏览器里没有执行语义；其内容只可能被读取它的脚本解释。 */
 const isDocumentationFile = (type: string): boolean => type === 'text/markdown';

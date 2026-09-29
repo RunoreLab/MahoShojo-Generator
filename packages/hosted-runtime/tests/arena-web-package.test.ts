@@ -98,6 +98,45 @@ describe('Web Package hosted generation', () => {
     expect(prompt).toContain('不要照抄');
   });
 
+  // example 有两种用法：小结构样本，以及一份完整可运行的参考实现。后者才是
+  // 几十 KiB 的量级，措辞含糊会让模型主动忽略一份可运行的引擎。
+  it('describes both uses of generation.example instead of only "shape"', async () => {
+    const local = await createLocalProjectionPackage({ example: 'data/example.json' });
+    const prompt = (await buildArenaGenerationPrompt({
+      actorKey: 'user:42', random: () => 0,
+      payload: { ...payload, webPackageRef: local.ref, webPackagePromptProjection: buildWebPackagePromptProjection(local) },
+    })).prompt;
+    const hostBlock = prompt.slice(prompt.indexOf('[HOST WEB PACKAGE OUTPUT CONTRACT]'));
+    expect(hostBlock).toContain('一小段结构样本');
+    expect(hostBlock).toContain('一份完整可运行的参考实现');
+    expect(hostBlock).toContain('机制、架构、接口与代码组织方式可以尽量贴近它');
+    // 旧措辞会把模型推向忽略范例，必须消失。
+    expect(hostBlock).not.toContain('只说明大致形态');
+  });
+
+  it('accepts a reference implementation far past the old 32 KiB shape-sample cap', async () => {
+    const local = await createLocalProjectionPackage({ example: 'data/example.json' });
+    const projection = buildWebPackagePromptProjection(local);
+    const bigReference = `<!doctype html><html><body><script>${'const bullet = () => 42;'.repeat(4_000)}</script></body></html>`;
+    // 约 100 KiB 的可运行参考实现：旧上限装不下，新的上限要装得下。
+    expect(Buffer.byteLength(bigReference)).toBeGreaterThan(32_768);
+    expect(Buffer.byteLength(bigReference)).toBeLessThan(131_072);
+    await expect(buildArenaGenerationPrompt({
+      actorKey: 'user:42', random: () => 0,
+      payload: { ...payload, webPackageRef: local.ref, webPackagePromptProjection: { ...projection, example: bigReference } },
+    })).resolves.toMatchObject({ metadata: { outputContract: 'web-package-target' } });
+  });
+
+  it('still rejects a reference implementation past 128 KiB rather than clipping it', async () => {
+    const local = await createLocalProjectionPackage({ example: 'data/example.json' });
+    const projection = buildWebPackagePromptProjection(local);
+    const tooBig = 'x'.repeat(131_073);
+    await expect(buildArenaGenerationPrompt({
+      actorKey: 'user:42', random: () => 0,
+      payload: { ...payload, webPackageRef: local.ref, webPackagePromptProjection: { ...projection, example: tooBig } },
+    })).rejects.toThrow();
+  });
+
   it('never projects the base target file as an implicit sample', async () => {
     // 自动注入会教模型复现占位页：竞技场新闻的 base index.html 只有一句
     // "这里等待 AI 生成完整新闻网站"。

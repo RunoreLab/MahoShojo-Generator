@@ -275,6 +275,29 @@ describe('manifest defaulting', () => {
     }), 'invalid-manifest-field');
   });
 
+  it('rejects a prompt field that points at the entry, with guidance', async () => {
+    // 入口一定会执行。把提示字段指向它，等于让一段会执行的代码以"提示文本"的名义
+    // 逃过风险扫描，而授权判定正是基于那份风险档案。
+    for (const key of ['instructions', 'example'] as const) {
+      let failure: WebPackageImportError | null = null;
+      try {
+        await importWebPackageArchive(pack({
+          'index.html': HTML,
+          'web-package.json': encoder.encode(JSON.stringify(manifestOf({
+            generation: { target: 'index.html', mode: 'replace', mediaType: 'text/html', [key]: 'index.html' },
+          }))),
+        }));
+      } catch (caught) {
+        failure = caught as WebPackageImportError;
+      }
+      expect(failure).toBeInstanceOf(WebPackageImportError);
+      const error = failure as WebPackageImportError;
+      expect(error.code).toBe('invalid-manifest-field');
+      expect(error.message).toContain('不能指向入口文件');
+      expect(error.hint).toContain('风险分析');
+    }
+  });
+
   it('rejects an entry that is not present in the archive', async () => {
     await expectCode(pack({
       'index.html': HTML,
