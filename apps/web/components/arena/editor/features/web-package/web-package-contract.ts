@@ -26,6 +26,15 @@ export type ArenaWebPackageSectionCapabilities = Readonly<{
   replace: boolean;
 }>;
 
+export type ArenaWebPackageImportFeedback = Readonly<{
+  /** What went wrong, in the user's terms. */
+  message: string;
+  /** What to change; empty when the failure has no actionable remedy. */
+  hint: string;
+  /** Normalization and defaults applied during a successful import. */
+  diagnostics: readonly string[];
+}>;
+
 export type ArenaWebPackageSectionModel = Readonly<{
   disabled: boolean;
   /** reportFormat === 'web' 时才展示选择器细节；markdown 时保持简洁。 */
@@ -34,7 +43,7 @@ export type ArenaWebPackageSectionModel = Readonly<{
   options: readonly ArenaWebPackageOptionView[];
   /** 已加载本地包摘要（含 staging 水合结果）。 */
   localSummary: string | null;
-  importError: string | null;
+  importFeedback: ArenaWebPackageImportFeedback | null;
   downloadError: string | null;
   importing: boolean;
   downloading: boolean;

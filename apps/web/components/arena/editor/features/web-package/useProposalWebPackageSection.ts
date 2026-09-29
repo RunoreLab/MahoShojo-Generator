@@ -95,7 +95,7 @@ export const useProposalWebPackageSectionModel = (input: {
     selected,
     options,
     localSummary: null,
-    importError: null,
+    importFeedback: null,
     downloadError,
     importing: false,
     downloading,

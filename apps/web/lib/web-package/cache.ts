@@ -1,5 +1,12 @@
 import type { WebPackageRef } from '@mahoshojo/contracts/web-package';
-import { packWebPackageZip, resolveWebPackage, stageLocalWebPackage, unpackWebPackageZip, type ResolvedWebPackage } from '@mahoshojo/web-package';
+import {
+  importWebPackageArchive,
+  packWebPackageZip,
+  resolveWebPackage,
+  stageLocalWebPackage,
+  unpackWebPackageZip,
+  type ResolvedWebPackage,
+} from '@mahoshojo/web-package';
 
 const DB_NAME = 'mahoshojo-web-package-cache:v1';
 const DB_VERSION = 1;
@@ -111,11 +118,18 @@ export const hydrateWebPackageSessionFromCache = async (): Promise<number> => {
   }
 };
 
-export const importLocalWebPackageArchive = async (archive: Uint8Array): Promise<ResolvedWebPackage> => {
-  const pkg = await unpackWebPackageZip(archive);
+export type LocalWebPackageImport = Readonly<{
+  pkg: ResolvedWebPackage;
+  /** Normalization and applied defaults worth telling the user about. */
+  diagnostics: readonly string[];
+}>;
+
+/** Import a user-supplied ZIP; diagnostics are surfaced instead of silently swallowed. */
+export const importLocalWebPackageArchive = async (archive: Uint8Array): Promise<LocalWebPackageImport> => {
+  const { pkg, diagnostics } = await importWebPackageArchive(archive);
   stageLocalWebPackage(pkg);
   void putWebPackageArchiveCache(pkg);
-  return pkg;
+  return { pkg, diagnostics };
 };
 
 export const resolveSelectedWebPackage = (ref: WebPackageRef | null | undefined): Promise<ResolvedWebPackage> => {

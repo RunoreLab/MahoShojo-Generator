@@ -23,6 +23,7 @@ import {
   formatWebPackageFallback,
   prepareWebPackageReplay,
   packWebPackageZip,
+  WebPackageImportError,
   type ResolvedWebPackage,
   type WebPackageReplayStatus,
 } from '@mahoshojo/web-package';
@@ -345,7 +346,7 @@ export function ArenaWebReport({ content, ready, roomId, aiModel, aiUsage, displ
   const [candidateChoice, setCandidateChoice] = useState<{ key: string; digest: string } | null>(null);
   const [replayEpoch, setReplayEpoch] = useState(0);
   const [importing, setImporting] = useState(false);
-  const [importError, setImportError] = useState<string | null>(null);
+  const [importFeedback, setImportFeedback] = useState<{ message: string; hint: string; diagnostics: readonly string[] } | null>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
   const [trustDialogKey, setTrustDialogKey] = useState<string | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
@@ -436,12 +437,17 @@ export function ArenaWebReport({ content, ready, roomId, aiModel, aiUsage, displ
   const handleImportArchive = useCallback(async (file: File | null | undefined) => {
     if (!file || importing) return;
     setImporting(true);
-    setImportError(null);
+    setImportFeedback(null);
     try {
-      await importLocalWebPackageArchive(new Uint8Array(await file.arrayBuffer()));
+      const { diagnostics } = await importLocalWebPackageArchive(new Uint8Array(await file.arrayBuffer()));
+      setImportFeedback({ message: '', hint: '', diagnostics });
       setReplayEpoch((value) => value + 1);
     } catch (error) {
-      setImportError(error instanceof Error ? error.message : 'Web 包导入失败');
+      setImportFeedback({
+        message: error instanceof Error ? error.message : 'Web 包导入失败',
+        hint: error instanceof WebPackageImportError ? error.hint : '请确认选择的是有效的 Web 包 ZIP 后重试。',
+        diagnostics: [],
+      });
     } finally {
       setImporting(false);
       if (importInputRef.current) importInputRef.current.value = '';
@@ -658,7 +664,17 @@ export function ArenaWebReport({ content, ready, roomId, aiModel, aiUsage, displ
           aria-label="重新导入本地 Web 包"
           onChange={(event) => void handleImportArchive(event.target.files?.[0])}
         />
-        {importError ? <span className="text-red-300" role="alert">{importError}</span> : null}
+        {importFeedback?.message ? (
+          <span className="text-red-300" role="alert">
+            {importFeedback.message}
+            {importFeedback.hint ? <span className="block text-xs text-gray-400">{importFeedback.hint}</span> : null}
+          </span>
+        ) : null}
+        {importFeedback && importFeedback.diagnostics.length > 0 ? (
+          <ul className="text-xs text-gray-400">
+            {importFeedback.diagnostics.map((note) => <li key={note}>· {note}</li>)}
+          </ul>
+        ) : null}
       </div> : null}
       {ready && webPackage ? <p className="mb-3 text-xs text-gray-500">
         Web 包战报可下载 AI 生成的目标文件；预设或本地包的完整资源请使用「下载 Web 包 ZIP」或重新导入。

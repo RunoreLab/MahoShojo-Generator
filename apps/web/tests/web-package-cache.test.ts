@@ -40,7 +40,8 @@ describe('optional local Web package archive cache', () => {
     clearLocalWebPackageSessionStaging();
     const { archive, pkg } = await createLocalPackage();
     const imported = await importLocalWebPackageArchive(archive);
-    expect(imported.ref).toEqual(pkg.ref);
+    expect(imported.pkg.ref).toEqual(pkg.ref);
+    expect(imported.diagnostics).toEqual([]);
     expect(listStagedLocalWebPackages().map((item) => item.ref.digest)).toContain(pkg.ref.digest);
 
     // import already kicked off a best-effort put; wait for it by re-putting.

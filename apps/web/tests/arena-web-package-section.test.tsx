@@ -22,7 +22,7 @@ const model = (overrides: Partial<ArenaWebPackageSectionModel> = {}): ArenaWebPa
     summary: '新闻网站创作资源',
   }],
   localSummary: null,
-  importError: null,
+  importFeedback: null,
   downloadError: null,
   importing: false,
   downloading: false,
@@ -123,7 +123,7 @@ describe('ArenaWebPackageSection', () => {
         kind: 'builtin',
         ref: BUILTIN_ARENA_NEWS_PACKAGE_REF,
       },
-      importError: 'ZIP 结构不合法',
+      importFeedback: { message: 'ZIP 结构不合法', hint: '请确认选择的是 Web 包 ZIP。', diagnostics: [] },
       capabilities: {
         importLocal: true,
         downloadPreset: true,
@@ -134,7 +134,17 @@ describe('ArenaWebPackageSection', () => {
     expect(container.querySelector('[data-testid="arena-web-package-import"]')).toBeTruthy();
     expect(container.querySelector('[title="下载 Web 包 ZIP"]')).toBeTruthy();
     expect(container.querySelector('[data-testid="arena-web-package-import-error"]')?.textContent)
-      .toBe('ZIP 结构不合法');
+      .toBe('ZIP 结构不合法请确认选择的是 Web 包 ZIP。');
+  });
+
+  it('导入成功时展示归一化与缺省填充说明', async () => {
+    await render(model({
+      importFeedback: { message: '', hint: '', diagnostics: ['已识别包根目录 site/，导入后路径以此为基准。'] },
+      capabilities: { importLocal: true, downloadPreset: true, remove: true, replace: true },
+    }));
+    const notes = container.querySelector('[data-testid="arena-web-package-import-diagnostics"]');
+    expect(notes?.textContent).toContain('已识别包根目录 site/');
+    expect(container.querySelector('[data-testid="arena-web-package-import-error"]')).toBeNull();
   });
 
   it('本地包展示本地前缀、摘要与移除入口', async () => {

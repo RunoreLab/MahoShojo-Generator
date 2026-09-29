@@ -15,7 +15,8 @@ import type { ArenaWebPackageSectionModel } from './web-package-contract';
  * - 默认简洁：非 Web 格式只显示格式切换；Web 格式才展开包选择。
  * - 当前选择清楚可见；未选择 = 自由 Web，无「禁用包」选项。
  * - 预设下载按钮独立于选择，避免误触。
- * - 本地导入失败原因与已加载摘要可见。
+ * - 本地导入失败原因与已加载摘要可见；失败时给出可操作的补救提示，
+ *   成功时说明做了哪些归一化与缺省填充。
  * - 多人（capabilities.importLocal=false）不暴露本地包入口。
  */
 export function ArenaWebPackageSection({ model }: Readonly<{ model: ArenaWebPackageSectionModel }>) {
@@ -126,10 +127,27 @@ export function ArenaWebPackageSection({ model }: Readonly<{ model: ArenaWebPack
             本地 ZIP 在本浏览器解析并受限运行；不向服务器上传完整包。生成后可另行授权本站同源权限。移除选择不会删除本地缓存。
           </p>
         ) : null}
-        {model.importError ? (
-          <span className="block text-xs text-red-600 dark:text-red-400" role="status" data-testid="arena-web-package-import-error">
-            {model.importError}
+        {model.importFeedback?.message ? (
+          <span
+            className="block text-xs text-red-600 dark:text-red-400"
+            role="status"
+            data-testid="arena-web-package-import-error"
+          >
+            {model.importFeedback.message}
+            {model.importFeedback.hint ? (
+              <span className="mt-0.5 block text-gray-600 dark:text-gray-400">{model.importFeedback.hint}</span>
+            ) : null}
           </span>
+        ) : null}
+        {model.importFeedback && model.importFeedback.diagnostics.length > 0 ? (
+          <ul
+            className="space-y-0.5 text-xs text-gray-500"
+            data-testid="arena-web-package-import-diagnostics"
+          >
+            {model.importFeedback.diagnostics.map((note) => (
+              <li key={note}>· {note}</li>
+            ))}
+          </ul>
         ) : null}
         {model.downloadError ? (
           <span className="block text-xs text-red-600 dark:text-red-400" role="status" data-testid="arena-web-package-download-error">

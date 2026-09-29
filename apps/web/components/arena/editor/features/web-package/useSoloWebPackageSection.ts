@@ -7,6 +7,7 @@ import {
   BUILTIN_WEB_PACKAGE_PRESETS,
   isBuiltinWebPackageRef,
   listStagedLocalWebPackages,
+  WebPackageImportError,
 } from '@mahoshojo/web-package';
 
 import { useBattleStore } from '../../../stores/useBattleStore';
@@ -18,6 +19,7 @@ import {
 import { useWebPackagePresetDownload } from './useWebPackagePresetDownload';
 
 import type {
+  ArenaWebPackageImportFeedback,
   ArenaWebPackageOptionView,
   ArenaWebPackageSectionModel,
 } from './web-package-contract';
@@ -73,7 +75,7 @@ export const useSoloWebPackageSectionModel = (input: {
   const [hydrated, setHydrated] = useState(false);
   const [localTick, setLocalTick] = useState(0);
   const [importing, setImporting] = useState(false);
-  const [importError, setImportError] = useState<string | null>(null);
+  const [importFeedback, setImportFeedback] = useState<ArenaWebPackageImportFeedback | null>(null);
   const { downloading, downloadError, downloadPreset } = useWebPackagePresetDownload();
 
   useEffect(() => {
@@ -108,7 +110,7 @@ export const useSoloWebPackageSectionModel = (input: {
   const refreshLocal = () => setLocalTick((tick) => tick + 1);
 
   const select = useCallback((digest: string | null) => {
-    setImportError(null);
+    setImportFeedback(null);
     if (!digest) {
       setWebPackageRef(null);
       return;
@@ -119,7 +121,7 @@ export const useSoloWebPackageSectionModel = (input: {
       return;
     }
     if (!allowLocalImport) {
-      setImportError('多人模式仅支持内置 Web 包预设');
+      setImportFeedback({ message: '多人模式仅支持内置 Web 包预设', hint: '', diagnostics: [] });
       return;
     }
     const local = listStagedLocalWebPackages().find((item) => item.ref.digest === digest);
@@ -133,14 +135,18 @@ export const useSoloWebPackageSectionModel = (input: {
   const importFile = useCallback(async (file: File | null | undefined) => {
     if (!file || importing) return;
     setImporting(true);
-    setImportError(null);
+    setImportFeedback(null);
     try {
-      const archive = new Uint8Array(await file.arrayBuffer());
-      const pkg = await importLocalWebPackageArchive(archive);
+      const { pkg, diagnostics } = await importLocalWebPackageArchive(new Uint8Array(await file.arrayBuffer()));
       refreshLocal();
       setWebPackageRef(pkg.ref);
+      setImportFeedback({ message: '', hint: '', diagnostics });
     } catch (error) {
-      setImportError(error instanceof Error ? error.message : 'Web 包导入失败');
+      setImportFeedback({
+        message: error instanceof Error ? error.message : 'Web 包导入失败',
+        hint: error instanceof WebPackageImportError ? error.hint : '请确认选择的是有效的 Web 包 ZIP 后重试。',
+        diagnostics: [],
+      });
     } finally {
       setImporting(false);
     }
@@ -152,7 +158,7 @@ export const useSoloWebPackageSectionModel = (input: {
     selected,
     options,
     localSummary,
-    importError,
+    importFeedback,
     downloadError,
     importing,
     downloading,
