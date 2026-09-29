@@ -91,7 +91,9 @@ test('显式review fixture提供合成系统和BYOK建议、人工裁决与私�
       const operation = await response.json() as {result: {jobId: string}};
       await reviewer.drainJobs();
       const result = await fetch('/api/admin/v1/ai-review-result?id=' + operation.result.jobId);
-      expect(result.status).toBe(200);
+      // 无消息断言只会给出裸 403：ADMIN_FORBIDDEN（授权层）与 ADMIN_AI_RESULT_UNAVAILABLE
+      // （作业未达成 succeeded）指向完全不同的根因，必须把响应体带进失败信息。
+      expect(result.status, await result.clone().text()).toBe(200);
       expect(await result.json()).toMatchObject({reviews: [{id: 'card:fixture-card-1', suggestion: 'approved'}, {id: 'card:fixture-card-reject', suggestion: 'rejected'}]});
       expect(await (await fetch('/api/admin/v1/actions/ai.review', body)).json()).toMatchObject({replayed: true, result: {jobId: operation.result.jobId}});
       return operation.result.jobId;
