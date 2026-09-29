@@ -90,7 +90,10 @@ export const useProposalWebPackageSectionModel = (input: {
   }, [onActionError]);
 
   // 多人提案里不存在本地库：不暴露删除/导出，也不提供「保存到本地库」偏好。
-  const rejectLibraryAction = useCallback(async (): Promise<void> => {
+  const rejectLibraryManagement = useCallback(async (): Promise<void> => {
+    onActionError('多人模式不支持本地 Web 包管理');
+  }, [onActionError]);
+  const rejectSavePreference = useCallback((): void => {
     onActionError('多人模式不支持本地 Web 包管理');
   }, [onActionError]);
 
@@ -117,10 +120,10 @@ export const useProposalWebPackageSectionModel = (input: {
       select,
       remove,
       downloadPreset,
-      downloadFromLibrary: rejectLibraryAction,
+      downloadFromLibrary: rejectLibraryManagement,
       importFile,
-      removeFromLibrary: rejectLibraryAction,
-      setSaveImportedToLibrary: rejectLibraryAction,
+      removeFromLibrary: rejectLibraryManagement,
+      setSaveImportedToLibrary: rejectSavePreference,
     },
   };
 };

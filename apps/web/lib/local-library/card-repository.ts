@@ -44,7 +44,8 @@ export class IndexedDbCardRepository implements CardRepository {
     return parsed.data;
   }
 
-  async list(query: LocalCardQuery): Promise<LocalCardPage> {
+  /** `unreadable` 列出被跳过的损坏行 ID；为空表示全部可读。 */
+  async list(query: LocalCardQuery): Promise<LocalCardPage & { unreadable: string[] }> {
     const parsedQuery = LocalCardQuerySchema.parse(query);
     const offset = parseCursor(parsedQuery.cursor);
     const rows = await runLocalLibraryTransaction(LOCAL_LIBRARY_STORE_NAMES.dataCards, 'readonly', (transaction) =>
@@ -53,7 +54,17 @@ export class IndexedDbCardRepository implements CardRepository {
       ),
     );
 
-    const matching = rows
+    // 逐行解析而不是一次性 parse 整个列表：一条 schema 漂移的旧行不该让用户
+    // 看到"本地库读取失败"的空列表。坏行被跳过，但数量会报出来。
+    const unreadable: string[] = [];
+    const parsed = rows.flatMap((row) => {
+      const result = LocalCardRecordV1Schema.safeParse(row);
+      if (result.success) return [result.data];
+      unreadable.push(typeof row?.id === 'string' ? row.id : '(未知)');
+      return [];
+    });
+
+    const matching = parsed
       .filter((row) => parsedQuery.includeDeleted === true || row.deletedAt === undefined)
       .filter((row) => parsedQuery.cardTypes === undefined || parsedQuery.cardTypes.includes(row.cardType))
       .sort((left, right) => {
@@ -63,10 +74,13 @@ export class IndexedDbCardRepository implements CardRepository {
 
     const page = matching.slice(offset, offset + parsedQuery.limit);
     const nextOffset = offset + page.length;
-    return LocalCardPageSchema.parse({
-      items: page.map((row) => LocalCardRecordV1Schema.parse(row)),
-      ...(nextOffset < matching.length ? { nextCursor: String(nextOffset) } : {}),
-    });
+    return {
+      ...LocalCardPageSchema.parse({
+        items: page,
+        ...(nextOffset < matching.length ? { nextCursor: String(nextOffset) } : {}),
+      }),
+      unreadable,
+    };
   }
 
   async put(record: LocalCardRecordV1): Promise<void> {

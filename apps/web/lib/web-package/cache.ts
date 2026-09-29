@@ -70,15 +70,18 @@ export const readAllWebPackageArchiveCache = async (): Promise<WebPackageArchive
 
 /** 迁移成功后清空旧表；读不到时返回 false，调用方据此保留旧数据。 */
 export const drainWebPackageArchiveCache = async (): Promise<boolean> => {
+  let db: IDBDatabase | null = null;
   try {
-    const db = await openDb();
+    db = await openDb();
     const transaction = db.transaction([STORE], 'readwrite');
     transaction.objectStore(STORE).clear();
     await transactionToPromise(transaction);
-    db.close();
     return true;
   } catch {
     return false;
+  } finally {
+    // 这条路径失败后会被下次挂载重试；漏掉 close 会让连接一直挂着。
+    db?.close();
   }
 };
 

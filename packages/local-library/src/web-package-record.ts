@@ -93,16 +93,23 @@ export const LocalWebPackagePageSchema = z
   .strict();
 export type LocalWebPackagePage = z.infer<typeof LocalWebPackagePageSchema>;
 
+/**
+ * 二进制载荷判定。
+ *
+ * 不能只写 `instanceof ArrayBuffer`：结构化克隆可能来自另一个 realm（worker、
+ * 测试用的 fake-indexeddb），那里的 ArrayBuffer 内部槽相同但原型链不同，
+ * `instanceof` 会返回 false。按内部槽判定才能同时覆盖同 realm 与跨 realm。
+ */
+export const isBinaryPayload = (value: unknown): value is ArrayBufferLike =>
+  (typeof value === 'object'
+    && value !== null
+    && (Object.prototype.toString.call(value) === '[object ArrayBuffer]' || ArrayBuffer.isView(value)));
+
 /** ZIP 字节与记录分开存储，列表查询因此不必反序列化包内容。 */
 export const LocalWebPackageArchiveSchema = z
   .object({
     digest: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
-    // 结构化克隆可能来自另一个 realm（worker / 测试用的 fake-indexeddb），
-    // 因此这里接受 ArrayBuffer 与任意 TypedArray 视图，而不是只认 `instanceof ArrayBuffer`。
-    bytes: z.custom<ArrayBufferLike>(
-      (value) => value instanceof ArrayBuffer || ArrayBuffer.isView(value),
-      'must be binary data',
-    ),
+    bytes: z.custom<ArrayBufferLike>(isBinaryPayload, 'must be binary data'),
     cachedAt: z.string().datetime({ offset: true }),
   })
   .strict();

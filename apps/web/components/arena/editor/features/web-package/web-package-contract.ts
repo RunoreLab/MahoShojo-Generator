@@ -21,6 +21,11 @@ export type ArenaWebPackageOptionView = Readonly<{
   byteLength?: number | null;
   /** 本地库条目：记录与字节不一致、已无法恢复。 */
   broken?: boolean;
+  /**
+   * 只存在于本次会话 staging、尚未写入本地库。
+   * 导入默认不落盘，若这类包不可选，用户刚导入完就会看到"不可用的 Web 包"。
+   */
+  sessionOnly?: boolean;
 }>;
 
 export type ArenaWebPackageSectionCapabilities = Readonly<{
@@ -70,6 +75,10 @@ export type ArenaWebPackageSectionModel = Readonly<{
     downloadPreset(digest: string): Promise<void>;
     downloadFromLibrary(digest: string): Promise<void>;
     importFile(file: File | null | undefined): Promise<void>;
+    /**
+     * Promise 在失败时也必须 resolve：失败原因写入 `importFeedback`，由对话框保持打开。
+     * 用 reject 表达失败会让 `void ...then(...)` 变成未处理的 rejection，用户什么都看不到。
+     */
     removeFromLibrary(digest: string): Promise<void>;
     setSaveImportedToLibrary(next: boolean): void;
   }>;

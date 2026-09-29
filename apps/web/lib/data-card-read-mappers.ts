@@ -27,6 +27,8 @@ export type BattleSelectionPayload = Record<string, unknown> & {
   _cardDescription: string;
   _cardType: OnlineDataCardType;
   _isPublic: boolean | number;
+  /** `local` 表示这条内容属于用户本机本地库，没有服务器侧身份。 */
+  _storageLocation: 'cloud' | 'local';
   _updatedAt?: string;
   _createdAt?: string;
   _author: string;
@@ -42,7 +44,14 @@ export type DataCardSourceMeta = {
 };
 
 export type DataCardRuntimeSourceInfo = {
+  /**
+   * 仅线上数据卡有服务器身份。本地库记录 MUST NOT 产出该字段：
+   * 一旦产出，它会被当作 online content reference 发布进 Arena 房间共享配置或
+   * PVP 提交（`arena-room/shared-config.ts` / `pvp`），把 device-owned 数据
+   * 冒充成 server-authoritative 实体。参见 ADR-local-library-data-ownership §2。
+   */
   sourceDataCardId?: string;
+  sourceIsLocalLibrary?: boolean;
   sourceDataCardName?: string;
   sourceDataCardDescription?: string;
   sourceDataCardCreatedAt?: string;
@@ -56,6 +65,7 @@ export type DataCardRuntimeSourceInfo = {
 
 const BATTLE_SELECTION_TRANSPORT_META_KEYS = new Set([
   '_cardId',
+  '_storageLocation',
   '_cardName',
   '_cardDescription',
   '_cardType',
@@ -136,6 +146,16 @@ export const mapDataCardSourceMeta = (rowInput: unknown): DataCardSourceMeta => 
 
 export const mapDataCardRuntimeSourceInfo = (rowInput: unknown): DataCardRuntimeSourceInfo => {
   const row = toRecord(rowInput) ?? {};
+  const isLocalLibrary = readString(row, ['_storageLocation']) === 'local';
+  if (isLocalLibrary) {
+    // 本地库内容没有线上记录可指；不产出 sourceDataCardId / sourceIsPublic，
+    // 下游因此走 host-local 分支，与 ADR §8 / LIB-012 一致。
+    return {
+      sourceDataCardName: normalizeOptionalText(readString(row, ['_cardName', 'name'])),
+      sourceDataCardDescription: normalizeOptionalText(readString(row, ['_cardDescription', 'description'])),
+      sourceIsLocalLibrary: true,
+    };
+  }
   const sourceMeta = mapDataCardSourceMeta(row);
 
   const numericVisibility = readNumber(row, ['_isPublic', 'is_public', 'isPublic']);
@@ -236,13 +256,17 @@ export const mapPublicDataCardRowToBattleSelectionPayload = (rowInput: unknown):
   const visibility = normalizePublicVisibilityValue(row);
   const author = sourceMeta.dataCardAuthor ?? '未知';
 
+  const isLocalLibrary = readString(row, ['storageLocation', '_storageLocation']) === 'local';
+
   return {
     ...dataObject,
-    _cardId: cardId,
+    // 本地库记录没有服务器 ID。给一个本地 id 会让它在下游被当成线上引用发布出去。
+    _cardId: isLocalLibrary ? '' : cardId,
     _cardName: cardName,
     _cardDescription: description,
     _cardType: normalizeCardType(readString(row, ['type'])),
     _isPublic: visibility,
+    _storageLocation: isLocalLibrary ? 'local' : 'cloud',
     _updatedAt: readString(row, ['updated_at', 'updatedAt']) ?? undefined,
     _createdAt: readString(row, ['created_at', 'createdAt']) ?? undefined,
     _author: author,

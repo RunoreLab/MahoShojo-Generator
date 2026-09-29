@@ -58,6 +58,8 @@ archive manifest，但**没有任何 runtime 消费它**：无 IndexedDB adapter
 - Web 包：内容身份就是 `ref.digest`（canonical manifest 的 SHA-256），天然满足该要求。
 - 摘要命中时 MUST **整卡替换**。字段级合并会造出用户从未写过的第三态；本地库一旦开始堆积
   似曾相识的条目，用户就再也分不清哪条是真的。
+- 仓储禁止普通 `put` 清除 tombstone。导入路径 MUST 在写入前显式 `restore`：用户删掉之后再导入
+  同一份文件是明确的"我要它回来"，不是隐式复活。
 
 ### 2.4 选择体验
 
@@ -66,8 +68,18 @@ archive manifest，但**没有任何 runtime 消费它**：无 IndexedDB adapter
 - 本地库卡片复用 `DataCard` 的渲染路径，但以 `storageLocation: 'local'` 切换动作集：
   点赞/收藏/分享/审核徽章 MUST NOT 出现，改为删除/导出/详情，并显式标注「本地库」。
 - 本地库记录 MUST NOT 参与服务器侧批量元数据与技术值请求，也 MUST NOT 走单卡读取接口。
+- **本地库记录 MUST NOT 携带服务器身份**：选择本地卡产出的 payload MUST NOT 含 `sourceDataCardId`。
+  一旦带上，`arena-room/shared-config` 会把它归类为 online content reference 发布进房间共享配置，
+  PVP 提交同样会带上它——那是把 device-owned 数据冒充成 server-authoritative 实体，
+  直接违反 `ADR-local-library-data-ownership` §2。同时它也就无法参与 Strict 排位，
+  这与[平台重整目标架构 §7.3](../architecture/2026-08-22_022500_平台重整目标架构.md)
+  「本地库记录必须先显式进入线上库并获得服务器实体 ID 才能参与 Strict」一致。
 - Web 包的选择、搜索、导入、删除与详情 MUST 位于独立模态框，复用 `BattleDataModal` 的产品模式
   但不复用它的组件：Web 包不是数据卡，塞进去会让 `onSelectCard(payload)` 契约分裂。
+- **未落本地库、只存在于会话 staging 的包 MUST 仍然可见可选**，并标注为「仅本次会话」。
+  导入默认不落盘（见 §2.6），若这类包不可选，用户刚导入完就会看到「不可用的 Web 包」，
+  而重新勾选偏好再导入一次并不是用户预期中的补救。
+- sessionOnly 的条目 MUST NOT 提供删除入口：本地库没有对应行可删，给一个按钮只是假动作。
 - 内置预设与本地库 MUST 分属两个 tab。
 
 ### 2.5 复制与删除（`LIB-007` 的本轮范围）
@@ -121,6 +133,9 @@ archive manifest，但**没有任何 runtime 消费它**：无 IndexedDB adapter
 - `apps/web/tests/local-library-status.test.tsx`：持久化状态、申请入口、不支持时的保守措辞。
 - `apps/web/tests/web-package-cache.test.ts`：导入不再写旧缓存、重新导入整卡替换、会话与历史
   水合、一次性迁移的幂等与失败保留。
+- `apps/web/tests/data-card-local-library.test.tsx`：真实 `DataCard` 的本地分支（不是只断言 prop 回显）。
+- `apps/web/tests/web-package-import-library.test.tsx`：走真实 adapter 的导入路径——默认不落盘时
+  仍可选可见、重导入不新增行、保存偏好生效。
 - `apps/web/tests/arena-web-package-section.test.tsx` / `arena-web-package-removal.test.tsx`：
   两个来源分 tab、下载在生成期间可用、删除闭环四处状态同时清理。
 
@@ -128,4 +143,5 @@ archive manifest，但**没有任何 runtime 消费它**：无 IndexedDB adapter
 
 - `LIB-007` 导出/备份/恢复的完整实现。
 - `LIB-004` Installed APP（SQLite + 文件内容寻址区 + Secure Vault）。
-- 本地库回收站 UI：仓储已支持 `restore` 与 `purge`，当前只有软删，没有面向用户的恢复入口。
+- 本地库回收站 UI：仓储已支持 `restore`，当前只有软删，没有面向用户的恢复入口。
+  `purge` 只在数据卡仓储上实现且无调用方，Web 包仓储尚无对应能力。

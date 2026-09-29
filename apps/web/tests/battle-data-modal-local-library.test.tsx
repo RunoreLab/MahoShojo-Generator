@@ -8,10 +8,15 @@ import BattleDataModal from '@/components/BattleDataModal';
 import { IndexedDbCardRepository, resetLocalCardRepository } from '@/lib/local-library/card-repository';
 import { LOCAL_LIBRARY_DB_NAME, resetLocalLibraryDbConnection } from '@/lib/local-library/db';
 import { saveLocalDataCard } from '@/lib/local-library/data-card-digest';
+import { mapDataCardRuntimeSourceInfo } from '@/lib/data-card-read-mappers';
 
 vi.mock('@/lib/useAuth', () => ({ useAuth: () => ({ isAuthenticated: false, user: null, userBadges: [] }) }));
 vi.mock('@/components/DataCard', () => ({ default: (props: any) => (
-  <div data-testid={`card-${props.id}`} data-storage={props.storageLocation}>
+  <div
+    data-testid={`card-${props.id}`}
+    data-storage={props.storageLocation}
+    data-remove={String(typeof props.onRemoveFromLibrary === 'function')}
+  >
     <span>{props.name}</span>
     <button type="button" data-testid={`remove-${props.id}`} disabled={props.removePending} onClick={(event) => { event.stopPropagation(); props.onRemoveFromLibrary?.(); }}>移除卡片</button>
     <button type="button" data-testid={`details-${props.id}`} onClick={(event) => { event.stopPropagation(); props.onViewDetails?.(); }}>详情</button>
@@ -68,7 +73,6 @@ const render = async (props: Record<string, unknown> = {}): Promise<void> => {
 };
 
 it('未登录也能打开本地库并看到本机数据卡', async () => {
-  expect('PRECONDITION_OK').toBe('PRECONDITION_OK');
   await saveLocalDataCard(repository, { cardType: 'character', title: '本机焰', payload: character('焰') }, () => '2026-09-29T12:00:00.000Z');
   await render();
 
@@ -81,7 +85,7 @@ it('未登录也能打开本地库并看到本机数据卡', async () => {
   expect(metaCalls).toHaveLength(0);
 });
 
-it('本地库卡片按本地动作集渲染，不出现点赞/收藏/分享', async () => {
+it('本地库卡片带上本地标记，从而让 DataCard 走本地动作集', async () => {
   const { record } = await saveLocalDataCard(
     repository,
     { cardType: 'character', title: '本机焰', payload: character('焰') },
@@ -90,6 +94,7 @@ it('本地库卡片按本地动作集渲染，不出现点赞/收藏/分享', as
   await render();
   const card = document.body.querySelector(`[data-testid="card-${record.id}"]`);
   expect(card?.getAttribute('data-storage')).toBe('local');
+  expect(card?.getAttribute('data-remove')).toBe('true');
 });
 
 it('删除本地库卡片需要二次确认，确认后记录才消失', async () => {
@@ -148,5 +153,11 @@ it('选择本地库卡片直接产出 payload，不经过线上单卡接口', as
   await act(async () => (document.body.querySelector(`[data-testid="card-${record.id}"]`) as HTMLElement).click());
 
   expect(onSelectCard).toHaveBeenCalledTimes(1);
-  expect(onSelectCard.mock.calls[0][0]).toMatchObject({ _cardId: record.id, _cardName: '本机焰', name: '焰' });
+  const payload = onSelectCard.mock.calls[0][0];
+  expect(payload).toMatchObject({ _cardName: '本机焰', name: '焰', _storageLocation: 'local' });
+  // 本地库记录没有服务器身份：给出本地 id 会让它在下游被当成 online content reference
+  // 发布进 Arena 房间共享配置与 PVP 提交（ADR-local-library-data-ownership §2）。
+  expect(payload._cardId).toBe('');
+  expect(mapDataCardRuntimeSourceInfo(payload).sourceDataCardId).toBeUndefined();
+  expect(mapDataCardRuntimeSourceInfo(payload).sourceIsLocalLibrary).toBe(true);
 });

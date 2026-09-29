@@ -1,3 +1,5 @@
+import { isBinaryPayload } from '@mahoshojo/local-library/web-package-record';
+
 /**
  * Web 本地库存储（ADR-local-library-data-ownership §4 / LIB-002）。
  *
@@ -7,7 +9,7 @@
  */
 
 export const LOCAL_LIBRARY_DB_NAME = 'mahoshojo-local-library' as const;
-export const LOCAL_LIBRARY_DB_VERSION = 1 as const;
+export const LOCAL_LIBRARY_DB_VERSION = 1;
 
 export const LOCAL_LIBRARY_STORE_NAMES = {
   dataCards: 'data-cards',
@@ -24,6 +26,9 @@ export const LOCAL_LIBRARY_INDEX_NAMES = {
   byCardType: 'by_cardType',
   byDigest: 'by_digest',
 } as const;
+
+/** IndexedDB 版本号即本地库 schema 版本；升级时由它触发 `onupgradeneeded`。 */
+export const LOCAL_LIBRARY_SCHEMA_VERSION: number = LOCAL_LIBRARY_DB_VERSION;
 
 export const LOCAL_LIBRARY_META_KEYS = {
   schemaVersion: 'schemaVersion',
@@ -192,27 +197,19 @@ export const monotonicNowIso = (previousUpdatedAt: string | undefined): string =
 };
 
 /**
- * 结构化克隆可能跨 realm（worker、fake-indexeddb），`instanceof ArrayBuffer` 在那里为 false
- * 但内部槽仍然是 ArrayBuffer。这里用内部槽判定而不是原型链，返回 null 表示这不是可读字节。
+ * 契约的 `isBinaryPayload` 与这里的读取必须用同一条判定。
+ * 分成两份的话，收紧契约不会传导到实现，或者反过来出现"schema 通过但读不出来"。
  */
 export const toStoredBytes = (value: unknown): Uint8Array | null => {
-  if (value instanceof ArrayBuffer) return new Uint8Array(value);
+  if (!isBinaryPayload(value)) return null;
   if (ArrayBuffer.isView(value)) {
     return new Uint8Array(value.buffer as ArrayBuffer, value.byteOffset, value.byteLength);
   }
-  if (
-    typeof value === 'object'
-    && value !== null
-    && Object.prototype.toString.call(value) === '[object ArrayBuffer]'
-    && typeof (value as ArrayBuffer).byteLength === 'number'
-  ) {
-    try {
-      return new Uint8Array(value as ArrayBuffer);
-    } catch {
-      return null;
-    }
+  try {
+    return new Uint8Array(value);
+  } catch {
+    return null;
   }
-  return null;
 };
 
 /** 精确切片：传入的视图可能来自更大的底层缓冲，直接持久化会把整块内存一起写进去。 */

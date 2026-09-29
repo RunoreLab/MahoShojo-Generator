@@ -5,6 +5,7 @@ import { HardDrive, Package, Settings2 } from 'lucide-react';
 import { BaseModal } from '@/components/shared/BaseModal';
 import { WebPackageBaseRisk } from '@/components/arena/components/WebPackageSafety';
 import { WebPackagePickerModal } from './WebPackagePickerModal';
+import { describeWebPackageRemovalConsequences } from '@/lib/local-library/remove-local-web-package';
 import type { ArenaWebPackageOptionView, ArenaWebPackageSectionModel } from './web-package-contract';
 
 /**
@@ -139,7 +140,10 @@ export function ArenaWebPackageSection({ model }: Readonly<{ model: ArenaWebPack
               disabled={model.busyDigest !== null}
               onClick={() => {
                 if (!pendingRemoval) return;
-                void model.actions.removeFromLibrary(pendingRemoval).then(() => setPendingRemoval(null));
+                // adapter 失败时也会 resolve，失败原因已写入 importFeedback；
+                // 这里通过 busyDigest 是否回落来判断该关还是该留。
+                void model.actions.removeFromLibrary(pendingRemoval)
+                  .then(() => { if (removalTarget) setPendingRemoval(null); });
               }}
             >
               {model.busyDigest !== null ? '正在删除…' : '删除'}
@@ -147,12 +151,10 @@ export function ArenaWebPackageSection({ model }: Readonly<{ model: ArenaWebPack
           </div>
         )}
       >
-        <div className="space-y-2 text-sm text-gray-700 dark:text-gray-200">
-          <p>「{removalTarget?.title}」的 ZIP 将从这台设备的本地库中移除。</p>
-          <p className="text-xs text-gray-500">
-            历史上引用了这份 Web 包的战报将无法再原样重放，会退化为纯文本结果；
-            该包的同源授权也会一并撤销，重新导入同样字节时需要重新确认。
-          </p>
+        <div className="space-y-1.5 text-sm text-gray-700 dark:text-gray-200">
+          {(removalTarget ? describeWebPackageRemovalConsequences(removalTarget) : []).map((line) => (
+            <p key={line}>{line}</p>
+          ))}
         </div>
       </BaseModal>
 

@@ -15,6 +15,7 @@ const toCardItem = (option: ArenaWebPackageOptionView): WebPackageCardItem => ({
   summary: option.summary ?? '',
   source: option.kind === 'builtin' ? 'builtin' : 'local',
   broken: option.broken === true,
+  sessionOnly: option.sessionOnly === true,
 });
 
 type PickerTab = 'preset' | 'local';
@@ -52,7 +53,9 @@ export function WebPackagePickerModal({
       setTab('preset');
       setKeyword('');
     }
-  }, [isOpen]);
+    // 多人模式没有本地库：tab 被隐藏后必须把当前页签退回预设，否则内容区空着。
+    if (!model.capabilities.importLocal && tab === 'local') setTab('preset');
+  }, [isOpen, model.capabilities.importLocal, tab]);
 
   const disabled = model.disabled || !model.capabilities.replace;
   const presets = model.presets.map(toCardItem);
@@ -78,9 +81,11 @@ export function WebPackagePickerModal({
             <button type="button" role="tab" aria-selected={tab === 'preset'} className={`px-4 py-2 rounded text-sm font-medium ${TAB_STYLE(tab === 'preset')}`} onClick={() => setTab('preset')}>
               <span className="inline-flex items-center gap-1.5"><Package className="h-4 w-4" />内置预设 ({presets.length})</span>
             </button>
+            {model.capabilities.importLocal ? (
             <button type="button" role="tab" aria-selected={tab === 'local'} className={`px-4 py-2 rounded text-sm font-medium ${TAB_STYLE(tab === 'local')}`} onClick={() => setTab('local')}>
               <span className="inline-flex items-center gap-1.5"><HardDrive className="h-4 w-4" />本地库 ({library.length})</span>
             </button>
+          ) : null}
           </div>
           <input
             type="search"
@@ -94,7 +99,7 @@ export function WebPackagePickerModal({
 
         {model.selected?.ref ? <WebPackageBaseRisk packageRef={model.selected.ref} /> : null}
 
-        {tab === 'preset' ? (
+        {tab === 'preset' || !model.capabilities.importLocal ? (
           <WebPackageCardGrid
             items={search(presets)}
             selectedDigest={model.selected?.digest ?? null}
@@ -114,10 +119,14 @@ export function WebPackagePickerModal({
             selectedDigest={model.selected?.digest ?? null}
             disabled={disabled}
             busyDigest={model.busyDigest}
-            emptyHint="本地库中还没有 Web 包。导入本地 ZIP，或打开下方的「同时保存到本地库」。"
+            emptyHint="还没有本地 Web 包。导入本地 ZIP 即可使用；勾选「导入时保存到本地库」可让它在刷新后依然存在。"
             onSelect={(digest) => { model.actions.select(digest); onClose(); }}
             onDownload={(item) => { void model.actions.downloadFromLibrary(item.digest); }}
-            onDelete={model.capabilities.manageLibrary ? (item) => onRemoveFromLibrary(item.digest) : undefined}
+            // sessionOnly 的包没有本地库行可删；给它一个删除按钮只会是假动作。
+            onDelete={model.capabilities.manageLibrary
+              ? (item) => { if (!item.sessionOnly) onRemoveFromLibrary(item.digest); }
+              : undefined}
+            deletable={(item) => !item.sessionOnly}
             onViewDetails={(item) => onViewDetails(item.digest)}
           />
           <LocalLibraryStatusNote />

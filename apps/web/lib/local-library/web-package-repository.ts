@@ -1,4 +1,5 @@
 import {
+  LocalWebPackageArchiveSchema,
   LocalWebPackagePageSchema,
   LocalWebPackageQuerySchema,
   LocalWebPackageRecordV1Schema,
@@ -31,6 +32,12 @@ const parseCursor = (cursor: string | undefined): number => {
  * 本地库记录的 Web 包 ID 由 canonical digest 派生：同一次导入永远落在同一行，
  * 修改过任何一个字节的包则是另一行。这正是「重新导入＝更新而不是新增」的身份基础。
  */
+const promisifyKeys = (request: IDBRequest<IDBValidKey[]>): Promise<IDBValidKey[]> =>
+  new Promise((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error ?? new Error('IndexedDB 请求失败。'));
+  });
+
 export const deriveLocalWebPackageId = (digest: string): string => `wp_${digest.replace(/^sha256:/u, '').slice(0, 32)}`;
 
 export class IndexedDbWebPackageRepository implements WebPackageRepository {
@@ -58,7 +65,8 @@ export class IndexedDbWebPackageRepository implements WebPackageRepository {
     return parsed.success ? parsed.data : null;
   }
 
-  async list(query: LocalWebPackageQuery): Promise<LocalWebPackagePage> {
+  /** `unreadable` 列出被跳过的损坏行 ID；为空表示全部可读。 */
+  async list(query: LocalWebPackageQuery): Promise<LocalWebPackagePage & { unreadable: string[] }> {
     const parsedQuery = LocalWebPackageQuerySchema.parse(query);
     const offset = parseCursor(parsedQuery.cursor);
     const rows = await runLocalLibraryTransaction(LOCAL_LIBRARY_STORE_NAMES.webPackages, 'readonly', (transaction) =>
@@ -67,7 +75,16 @@ export class IndexedDbWebPackageRepository implements WebPackageRepository {
       ),
     );
 
-    const matching = rows
+    // 逐行解析：一条坏行不该让整个本地库显示为"读取失败"的空列表。
+    const unreadable: string[] = [];
+    const parsed = rows.flatMap((row) => {
+      const result = LocalWebPackageRecordV1Schema.safeParse(row);
+      if (result.success) return [result.data];
+      unreadable.push(typeof row?.id === 'string' ? row.id : '(未知)');
+      return [];
+    });
+
+    const matching = parsed
       .filter((row) => parsedQuery.includeDeleted === true || row.deletedAt === undefined)
       .sort((left, right) => {
         if (left.updatedAt !== right.updatedAt) return right.updatedAt.localeCompare(left.updatedAt);
@@ -76,10 +93,13 @@ export class IndexedDbWebPackageRepository implements WebPackageRepository {
 
     const page = matching.slice(offset, offset + parsedQuery.limit);
     const nextOffset = offset + page.length;
-    return LocalWebPackagePageSchema.parse({
-      items: page.map((row) => LocalWebPackageRecordV1Schema.parse(row)),
-      ...(nextOffset < matching.length ? { nextCursor: String(nextOffset) } : {}),
-    });
+    return {
+      ...LocalWebPackagePageSchema.parse({
+        items: page,
+        ...(nextOffset < matching.length ? { nextCursor: String(nextOffset) } : {}),
+      }),
+      unreadable,
+    };
   }
 
   async put(record: LocalWebPackageRecordV1, archive: Uint8Array): Promise<void> {
@@ -98,13 +118,15 @@ export class IndexedDbWebPackageRepository implements WebPackageRepository {
           throw new Error('本地库中的 Web 包已被删除；请先恢复再保存。');
         }
         await putLocalLibraryRecord(recordStore, parsed);
+        // 走契约 schema：收紧 LocalWebPackageArchiveSchema 时才真的能传导到实现，
+        // 而不是各自维护一份"看起来一样"的读取判断。
         await putLocalLibraryRecord(
           transaction.objectStore(LOCAL_LIBRARY_STORE_NAMES.webPackageArchives),
-          {
+          LocalWebPackageArchiveSchema.parse({
             digest: parsed.ref.digest,
             bytes,
             cachedAt: monotonicNowIso(parsed.updatedAt),
-          },
+          }),
         );
       },
     );
@@ -140,6 +162,12 @@ export class IndexedDbWebPackageRepository implements WebPackageRepository {
   }
 
   async readArchive(digest: string): Promise<Uint8Array | null> {
+    const row = await this.readArchiveRow(digest);
+    return row === null ? null : toStoredBytes(row.bytes);
+  }
+
+  /** 归档行读取；解析失败视为损坏行（返回 null），不冒充空包。 */
+  private async readArchiveRow(digest: string): Promise<{ digest: string; bytes: ArrayBufferLike } | null> {
     const stored = await runLocalLibraryTransaction(
       LOCAL_LIBRARY_STORE_NAMES.webPackageArchives,
       'readonly',
@@ -150,24 +178,24 @@ export class IndexedDbWebPackageRepository implements WebPackageRepository {
         ),
     );
     if (stored === undefined) return null;
-    return toStoredBytes(stored.bytes);
+    const parsed = LocalWebPackageArchiveSchema.safeParse(stored);
+    return parsed.success ? (parsed.data as { digest: string; bytes: ArrayBufferLike }) : null;
   }
 
   /**
-   * 只判断字节是否还在，不解包。列表渲染要判断"记录是否可用"，
-   * 每张卡都解一次 ZIP 会让本地库在打开时卡住。
+   * 一次读出所有已存 archive 的 digest。
+   *
+   * 列表渲染要判断每条记录"字节是否还在"，逐条查询等于 N 次事务；ZIP 库常有几十条，
+   * 在移动端会明显卡顿。keyPath 就是 digest，所以 `getAllKeys` 一次就够。
    */
-  async hasArchive(digest: string): Promise<boolean> {
-    const stored = await runLocalLibraryTransaction(
+  async listArchiveDigests(): Promise<Set<string>> {
+    const keys = await runLocalLibraryTransaction(
       LOCAL_LIBRARY_STORE_NAMES.webPackageArchives,
       'readonly',
       (transaction) =>
-        getLocalLibraryRecord<{ digest: string; bytes: unknown }>(
-          transaction.objectStore(LOCAL_LIBRARY_STORE_NAMES.webPackageArchives),
-          digest,
-        ),
+        promisifyKeys(transaction.objectStore(LOCAL_LIBRARY_STORE_NAMES.webPackageArchives).getAllKeys()),
     );
-    return stored !== undefined;
+    return new Set(keys.filter((key): key is string => typeof key === 'string'));
   }
 }
 

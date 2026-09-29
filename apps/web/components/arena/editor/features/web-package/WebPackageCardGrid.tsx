@@ -19,16 +19,11 @@ export type WebPackageCardItem = Readonly<{
   source: 'builtin' | 'local';
   /** 记录与 archive 字节不一致、已无法恢复时为 true。 */
   broken?: boolean;
+  /** 只在本次会话可用：刷新后需要重新导入。 */
+  sessionOnly?: boolean;
 }>;
 
 const CARDS_PER_PAGE = 6;
-
-const formatBytes = (bytes: number | null | undefined): string | null => {
-  if (typeof bytes !== 'number' || !Number.isFinite(bytes) || bytes < 0) return null;
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-};
 
 interface CardActionProps {
   label: string;
@@ -64,16 +59,20 @@ export function WebPackageCardGrid({
   onDelete,
   onViewDetails,
   busyDigest,
+  deletable,
 }: {
   items: readonly WebPackageCardItem[];
   selectedDigest: string | null;
   disabled?: boolean;
   emptyHint: string;
-  onSelect: (digest: string) => void;
+  /** 已选中的卡片再次点击时传 `null`，表示取消选择回到自由 Web。 */
+  onSelect: (digest: string | null) => void;
   onDownload?: (item: WebPackageCardItem) => void;
   onDelete?: (item: WebPackageCardItem) => void;
   onViewDetails?: (item: WebPackageCardItem) => void;
   busyDigest?: string | null;
+  /** 逐项决定是否给出删除入口；未提供时对所有条目开放。 */
+  deletable?: (item: WebPackageCardItem) => boolean;
 }) {
   const [page, setPage] = useState(1);
   const totalPages = useMemo(() => Math.max(1, Math.ceil(items.length / CARDS_PER_PAGE)), [items.length]);
@@ -113,7 +112,7 @@ export function WebPackageCardGrid({
                 disabled={disabled || item.broken === true}
                 aria-pressed={selected}
                 aria-label={`${selected ? '取消选择' : '选择'} Web 包：${item.title}`}
-                onClick={() => onSelect(item.digest)}
+                onClick={() => onSelect(selected ? null : item.digest)}
                 className="absolute inset-0 z-0 rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed"
               />
 
@@ -127,6 +126,9 @@ export function WebPackageCardGrid({
                     {item.source === 'builtin' ? <Package className="h-3 w-3" /> : <HardDrive className="h-3 w-3" />}
                     {item.source === 'builtin' ? '内置预设' : '本地库'}
                   </span>
+                  {item.sessionOnly ? (
+                    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] text-amber-800">仅本次会话</span>
+                  ) : null}
                   {item.broken ? (
                     <span className="rounded-full bg-red-100 px-2 py-0.5 text-[11px] text-red-700">文件已缺失</span>
                   ) : null}
@@ -151,7 +153,7 @@ export function WebPackageCardGrid({
                     <Download className="h-4 w-4" />
                   </CardAction>
                 ) : null}
-                {onDelete ? (
+                {onDelete && (deletable?.(item) ?? true) ? (
                   <CardAction
                     label="删除"
                     title={`从本地库删除：${item.title}`}
@@ -177,5 +179,3 @@ export function WebPackageCardGrid({
     </div>
   );
 }
-
-export const describeWebPackageSize = formatBytes;

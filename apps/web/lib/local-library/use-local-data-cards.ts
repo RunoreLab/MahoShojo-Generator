@@ -10,6 +10,9 @@ import { mapLocalCardRecordToRow, type LocalDataCardRow } from './data-card-rows
 export interface LocalDataCardPageState {
   rows: LocalDataCardRow[];
   records: LocalCardRecordV1[];
+  /** 库内总条目数（不受搜索影响），用于 tab 徽标。 */
+  libraryTotal: number;
+  /** 当前搜索命中的条目数。 */
   total: number;
   status: 'idle' | 'loading' | 'success' | 'error';
   loading: boolean;
@@ -79,6 +82,7 @@ export const useLocalDataCards = (
   return {
     rows,
     records,
+    libraryTotal: records.length,
     total: rows.length,
     status,
     loading: status === 'loading',

@@ -6,6 +6,7 @@ import type { WebPackageRef } from '@mahoshojo/contracts/web-package';
 import {
   BUILTIN_WEB_PACKAGE_PRESETS,
   isBuiltinWebPackageRef,
+  listStagedLocalWebPackages,
   packWebPackageZip,
   WebPackageImportError,
 } from '@mahoshojo/web-package';
@@ -80,8 +81,9 @@ export const useSoloWebPackageSectionModel = (input: {
   const setWebPackageRef = useBattleStore((state: BattleStoreState) => state.setWebPackageRef);
   const isGenerating = useBattleStore((state: BattleStoreState) => state.isGenerating);
 
-  const [hydrated, setHydrated] = useState(false);
   const [importing, setImporting] = useState(false);
+  /** staging 是进程内状态，只能靠显式 bump 让 UI 重新读取。 */
+  const [stagedTick, setStagedTick] = useState(0);
   const [importFeedback, setImportFeedback] = useState<ArenaWebPackageImportFeedback | null>(null);
   const [busyDigest, setBusyDigest] = useState<string | null>(null);
   const [missingArchives, setMissingArchives] = useState<ReadonlySet<string>>(new Set());
@@ -102,11 +104,13 @@ export const useSoloWebPackageSectionModel = (input: {
         if (outcome.drained) await markLegacyWebPackageMigrationCompleted();
       }
       await hydrateWebPackageSessionFromLibrary();
-    })().then(() => {
       if (!active) return;
-      setHydrated(true);
-    });
+      setStagedTick((tick) => tick + 1);
+      localLibrary.reload();
+    })();
     return () => { active = false; };
+    // 迁移与水合各只应发生一次；localLibrary 引用会每次渲染变化，不能进依赖。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const presets = useMemo(() => builtinOptions(), []);
@@ -117,19 +121,18 @@ export const useSoloWebPackageSectionModel = (input: {
     let active = true;
     void (async () => {
       const repository = getLocalWebPackageRepository();
-      const missing: string[] = [];
-      for (const record of localLibrary.records) {
-        if (!(await repository.hasArchive(record.ref.digest))) missing.push(record.ref.digest);
-      }
+      const stored = await repository.listArchiveDigests();
       if (!active) return;
-      setMissingArchives(new Set(missing));
+      setMissingArchives(new Set(localLibrary.records
+        .filter((record) => !stored.has(record.ref.digest))
+        .map((record) => record.ref.digest)));
     })();
     return () => { active = false; };
   }, [allowLocalImport, localLibrary.records]);
 
   const library = useMemo<ArenaWebPackageOptionView[]>(() => {
-    void hydrated;
-    return localLibrary.records.map((record) => ({
+    void stagedTick;
+    const options: ArenaWebPackageOptionView[] = localLibrary.records.map((record) => ({
       digest: record.ref.digest,
       title: record.title,
       kind: 'local' as const,
@@ -138,7 +141,23 @@ export const useSoloWebPackageSectionModel = (input: {
       byteLength: record.archiveByteLength,
       broken: missingArchives.has(record.ref.digest),
     }));
-  }, [localLibrary.records, hydrated, missingArchives]);
+    const known = new Set(options.map((option) => option.digest));
+    // 导入默认不落盘。还没写进本地库的 staged 包同样要能选中，否则用户刚导入完
+    // 就会看到「不可用的 Web 包（请重新选择）」。
+    for (const staged of listStagedLocalWebPackages()) {
+      if (known.has(staged.ref.digest)) continue;
+      known.add(staged.ref.digest);
+      options.push({
+        digest: staged.ref.digest,
+        title: staged.manifest.name,
+        kind: 'local',
+        ref: staged.ref,
+        summary: `${staged.ref.id}@${staged.ref.version}`,
+        sessionOnly: true,
+      });
+    }
+    return options;
+  }, [localLibrary.records, missingArchives, stagedTick]);
 
   const allOptions = useMemo(() => [...presets, ...library], [presets, library]);
 
@@ -191,6 +210,7 @@ export const useSoloWebPackageSectionModel = (input: {
         localLibrary.reload();
       }
       setWebPackageRef(pkg.ref);
+      setStagedTick((tick) => tick + 1);
       setImportFeedback({ message: '', hint: '', diagnostics: notes });
     } catch (error) {
       setImportFeedback({
@@ -227,16 +247,34 @@ export const useSoloWebPackageSectionModel = (input: {
     }
   }, [localLibrary.records]);
 
-  const removeFromLibrary = useCallback(async (digest: string) => {
+  const removeFromLibrary = useCallback(async (digest: string): Promise<void> => {
     const record = localLibrary.records.find((item) => item.ref.digest === digest);
     if (!record) return;
     setBusyDigest(digest);
+    setImportFeedback(null);
     try {
-      await removeLocalWebPackage(record, {
+      const outcome = await removeLocalWebPackage(record, {
         activeRefDigest: webPackageRef?.digest ?? null,
         clearSelection: () => setWebPackageRef(null),
       });
+      if (!outcome.clearedTrustGrant) {
+        // 库记录已删，但浏览器拒绝了 localStorage 删除：同源授权可能仍在。
+        // 不说清楚的话，用户重新导入同一份字节会莫名跳过风险确认。
+        setImportFeedback({
+          message: '已从本地库删除，但浏览器未能清除该包的同源授权记录。',
+          hint: '请在本站的站点数据中手动清除后重新导入。',
+          diagnostics: [],
+        });
+      }
       localLibrary.reload();
+    } catch (error) {
+      // 对话框靠"promise 是否 resolve"判断是否关闭；这里必须吞掉异常并把原因
+      // 写进 importFeedback，否则调用点会变成未处理 rejection，用户看不到任何反馈。
+      setImportFeedback({
+        message: error instanceof Error ? error.message : '删除失败，请重试。',
+        hint: '本地库可能不可写（例如浏览器拒绝了存储访问）。',
+        diagnostics: [],
+      });
     } finally {
       setBusyDigest(null);
     }

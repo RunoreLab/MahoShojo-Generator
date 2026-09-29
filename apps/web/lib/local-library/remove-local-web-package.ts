@@ -27,13 +27,19 @@ export interface RemoveLocalWebPackageResult {
   clearedStaging: boolean;
 }
 
+/**
+ * @returns true 表示确实移除了一条持久授权；false 表示本来就没有或浏览器拒绝删除。
+ * 两者对用户不是同一件事：前者无感，后者 MUST 提示手动清除站点权限。
+ */
 export const revokePersistedWebPackageTrust = (digest: string): boolean => {
   if (typeof window === 'undefined') return false;
+  const key = WEB_PACKAGE_TRUST_KEY_PREFIX + digest;
   try {
-    window.localStorage.removeItem(WEB_PACKAGE_TRUST_KEY_PREFIX + digest);
-    return true;
+    const existed = window.localStorage.getItem(key) !== null;
+    window.localStorage.removeItem(key);
+    return existed && window.localStorage.getItem(key) === null;
   } catch {
-    // 隐私模式下删除可能失败；调用方据此提示用户手动清除站点权限。
+    // 隐私模式下读取/删除可能失败；调用方据此提示用户手动清除站点权限。
     return false;
   }
 };
@@ -59,14 +65,28 @@ export const removeLocalWebPackage = async (
   return { clearedSelection, clearedTrustGrant, clearedStaging };
 };
 
-/** 删除时会被一并清掉的本地状态描述，用于确认对话框把后果讲清楚。 */
-export const describeWebPackageRemovalConsequences = (record: LocalWebPackageRecordV1): string[] => {
+/**
+ * 删除时会被一并清掉的本地状态。确认对话框用它把后果讲清楚——
+ * 措辞与实际删除行为同源，避免两处各写一份而悄悄漂移。
+ */
+export const describeWebPackageRemovalConsequences = (target: {
+  title: string;
+  digest: string;
+  sessionOnly?: boolean;
+}): string[] => {
+  if (target.sessionOnly) {
+    return [
+      `「${target.title}」只存在于本次会话，移除后需要重新导入 ZIP。`,
+      '它没有写入本地库，因此不影响任何历史战报。',
+    ];
+  }
   const lines = [
-    `「${record.title}」的 ZIP 将从这台设备的本地库中移除。`,
+    `「${target.title}」的 ZIP 将从这台设备的本地库中移除。`,
     '历史上引用了这份 Web 包的战报将无法再原样重放，会退化为纯文本结果。',
+    '该包的同源授权也会一并撤销；重新导入同样字节时需要重新确认。',
   ];
-  if (listStagedLocalWebPackages().some((staged) => staged.ref.digest === record.ref.digest)) {
-    lines.push('本次会话中对该包的同源授权也会一并撤销。');
+  if (typeof window !== 'undefined' && window.localStorage.getItem(WEB_PACKAGE_TRUST_KEY_PREFIX + target.digest) !== null) {
+    lines.push('当前浏览器确实保存着它的同源授权，删除后会一并失效。');
   }
   return lines;
 };

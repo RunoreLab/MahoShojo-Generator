@@ -1016,11 +1016,25 @@ export default function BattleDataModal({
    */
   const handleSaveCardToLibrary = useCallback(async (card: any) => {
     setLocalActionError(null);
+    // 详情弹窗用 `void onSaveCopyToLocalLibrary()` 调用：这里抛出去就是未处理
+    // rejection，用户既看不到提示，弹窗也不会关。
+    let payload: unknown;
+    try {
+      payload = typeof card?.data === 'string' ? JSON.parse(card.data) : card?.data;
+    } catch {
+      setLocalActionError('这张数据卡的正文不是合法 JSON，无法保存到本地库。');
+      return;
+    }
+    if (payload === undefined || payload === null) {
+      setLocalActionError('这张数据卡没有可保存的正文。');
+      return;
+    }
     const summary = await libraryAutoSave.save([{
       cardType: normalizeCardTypeForLibrary(card),
       title: typeof card?.name === 'string' && card.name.trim() ? card.name : '未命名数据卡',
-      payload: typeof card?.data === 'string' ? JSON.parse(card.data) : card?.data,
+      payload,
     }]);
+    if (libraryAutoSave.error) setLocalActionError(libraryAutoSave.error);
     setLibraryCopyMessage(summary.saved > 0
       ? `已保存到本地库：${summary.saved} 张。`
       : summary.updated > 0
@@ -1796,7 +1810,7 @@ export default function BattleDataModal({
                 className={`px-4 py-2 rounded text-sm font-medium ${activeTab === 'local' ? 'bg-pink-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
                 title="本机本地库，无需登录；清除站点数据会一并删除"
               >
-                本地库 ({localCards.status === 'success' ? localCards.total : '—'})
+                本地库 ({localCards.status === 'success' ? localCards.libraryTotal : '—'})
               </button>
             )}
             {effectiveTabs.includes('public') && (
