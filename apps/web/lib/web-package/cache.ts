@@ -1,14 +1,21 @@
-import type { WebPackageRef } from '@mahoshojo/contracts/web-package';
 import {
   importWebPackageArchive,
-  packWebPackageZip,
-  resolveWebPackage,
   stageLocalWebPackage,
   unpackWebPackageZip,
   type ResolvedWebPackage,
 } from '@mahoshojo/web-package';
+import type { WebPackageRef } from '@mahoshojo/contracts/web-package';
 
-const DB_NAME = 'mahoshojo-web-package-cache:v1';
+/**
+ * 旧 Web 包缓存（`mahoshojo-web-package-cache:v1`）的读取桥。
+ *
+ * 这个库**不是**本地库。ADR-local-library-data-ownership §4 要求本地库使用独立
+ * IndexedDB，旧缓存无上限、无 eviction、也没有任何用户可见的删除入口，把它原地
+ * 升格等于把这些缺陷一并继承下来。因此这里只保留读取与清空，供一次性迁移使用；
+ * 新的读写一律走 `@/lib/local-library/web-package-library`。
+ */
+
+export const LEGACY_WEB_PACKAGE_CACHE_DB_NAME = 'mahoshojo-web-package-cache:v1' as const;
 const DB_VERSION = 1;
 const STORE = 'archives';
 
@@ -24,7 +31,7 @@ const openDb = (): Promise<IDBDatabase> =>
       reject(new Error('当前环境不支持 IndexedDB'));
       return;
     }
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    const request = indexedDB.open(LEGACY_WEB_PACKAGE_CACHE_DB_NAME, DB_VERSION);
     request.onupgradeneeded = () => {
       const db = request.result;
       if (!db.objectStoreNames.contains(STORE)) {
@@ -48,18 +55,25 @@ const transactionToPromise = (transaction: IDBTransaction): Promise<void> =>
     transaction.onerror = () => reject(transaction.error ?? new Error('IndexedDB 事务失败'));
   });
 
-/** Best-effort optional cache: failures never block session staging or selection. */
-export const putWebPackageArchiveCache = async (pkg: ResolvedWebPackage): Promise<boolean> => {
+/** 读取旧缓存的全部条目。失败时抛错，调用方据此保留旧数据而不是当作空库。 */
+export const readAllWebPackageArchiveCache = async (): Promise<WebPackageArchiveCacheEntry[]> => {
+  const db = await openDb();
   try {
-    const archive = await packWebPackageZip(pkg);
-    const buffer = archive.buffer.slice(archive.byteOffset, archive.byteOffset + archive.byteLength) as ArrayBuffer;
+    const transaction = db.transaction([STORE], 'readonly');
+    const entries = await requestToPromise(transaction.objectStore(STORE).getAll() as IDBRequest<WebPackageArchiveCacheEntry[]>);
+    await transactionToPromise(transaction);
+    return entries ?? [];
+  } finally {
+    db.close();
+  }
+};
+
+/** 迁移成功后清空旧表；读不到时返回 false，调用方据此保留旧数据。 */
+export const drainWebPackageArchiveCache = async (): Promise<boolean> => {
+  try {
     const db = await openDb();
     const transaction = db.transaction([STORE], 'readwrite');
-    transaction.objectStore(STORE).put({
-      ref: { ...pkg.ref },
-      archive: buffer,
-      cachedAt: Date.now(),
-    } satisfies WebPackageArchiveCacheEntry);
+    transaction.objectStore(STORE).clear();
     await transactionToPromise(transaction);
     db.close();
     return true;
@@ -68,82 +82,32 @@ export const putWebPackageArchiveCache = async (pkg: ResolvedWebPackage): Promis
   }
 };
 
-export const readWebPackageArchiveCache = async (digest: string): Promise<WebPackageArchiveCacheEntry | null> => {
-  try {
-    const db = await openDb();
-    const transaction = db.transaction([STORE], 'readonly');
-    const result = await requestToPromise(transaction.objectStore(STORE).get(digest) as IDBRequest<WebPackageArchiveCacheEntry | undefined>);
-    await transactionToPromise(transaction);
-    db.close();
-    return result ?? null;
-  } catch {
-    return null;
-  }
-};
-
-export const deleteWebPackageArchiveCache = async (digest: string): Promise<void> => {
-  try {
-    const db = await openDb();
-    const transaction = db.transaction([STORE], 'readwrite');
-    transaction.objectStore(STORE).delete(digest);
-    await transactionToPromise(transaction);
-    db.close();
-  } catch {
-    // Cache removal is best-effort.
-  }
-};
-
-/** Current-session staging from optional cache; integrity always re-runs unpack/verify. */
-export const hydrateWebPackageSessionFromCache = async (): Promise<number> => {
-  try {
-    const db = await openDb();
-    const transaction = db.transaction([STORE], 'readonly');
-    const entries = await requestToPromise(transaction.objectStore(STORE).getAll() as IDBRequest<WebPackageArchiveCacheEntry[]>);
-    await transactionToPromise(transaction);
-    db.close();
-    let staged = 0;
-    for (const entry of entries ?? []) {
-      try {
-        const pkg = await unpackWebPackageZip(new Uint8Array(entry.archive));
-        if (pkg.ref.digest !== entry.ref.digest) continue;
-        stageLocalWebPackage(pkg);
-        staged += 1;
-      } catch {
-        // Drop corrupted cache rows silently; user can re-import.
-      }
-    }
-    return staged;
-  } catch {
-    return 0;
-  }
-};
-
 export type LocalWebPackageImport = Readonly<{
   pkg: ResolvedWebPackage;
-  /** Normalization and applied defaults worth telling the user about. */
+  /** 值得让用户看到的归一化与缺省填充。 */
   diagnostics: readonly string[];
 }>;
 
-/** Import a user-supplied ZIP; diagnostics are surfaced instead of silently swallowed. */
+/**
+ * 导入用户提供的 ZIP；diagnostics 交给 UI 呈现，而不是静默吞掉。
+ *
+ * 只写 session staging。是否落本地库由调用方按用户偏好决定；这里不再无条件写旧缓存。
+ */
 export const importLocalWebPackageArchive = async (archive: Uint8Array): Promise<LocalWebPackageImport> => {
   const { pkg, diagnostics } = await importWebPackageArchive(archive);
   stageLocalWebPackage(pkg);
-  void putWebPackageArchiveCache(pkg);
   return { pkg, diagnostics };
 };
 
-export const resolveSelectedWebPackage = (ref: WebPackageRef | null | undefined): Promise<ResolvedWebPackage> => {
-  if (!ref) return Promise.reject(new Error('未选择 Web 包'));
-  return resolveWebPackage(ref);
-};
-
-/** 历史详情可独立恢复 exact 本地包，不要求先进入选择器水合全部缓存。 */
-export const hydrateExactWebPackageFromCache = async (ref: WebPackageRef): Promise<void> => {
-  try { await resolveWebPackage(ref); return; } catch { /* 尚未在当前会话中。 */ }
-  const entry = await readWebPackageArchiveCache(ref.digest);
-  if (!entry) return;
+/** 校验一段 ZIP 字节是否确实是它自称的那个包；迁移时用来拒绝身份不符的行。 */
+export const verifyCachedWebPackageArchive = async (
+  entry: WebPackageArchiveCacheEntry,
+): Promise<ResolvedWebPackage | null> => {
   try {
     const pkg = await unpackWebPackageZip(new Uint8Array(entry.archive));
-    if (pkg.ref.id === ref.id && pkg.ref.version === ref.version && pkg.ref.digest === ref.digest) stageLocalWebPackage(pkg);
-  } catch { /* 损坏缓存不冒充可用；既有重新导入流程继续可用。 */ }
+    if (pkg.ref.digest !== entry.ref.digest) return null;
+    return pkg;
+  } catch {
+    return null;
+  }
 };

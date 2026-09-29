@@ -6,16 +6,31 @@ import type { WebPackageRef } from '@mahoshojo/contracts/web-package';
 import {
   BUILTIN_WEB_PACKAGE_PRESETS,
   isBuiltinWebPackageRef,
-  listStagedLocalWebPackages,
+  packWebPackageZip,
   WebPackageImportError,
 } from '@mahoshojo/web-package';
 
 import { useBattleStore } from '../../../stores/useBattleStore';
 import type { BattleStoreState } from '../../../types';
 import {
-  hydrateWebPackageSessionFromCache,
+  drainWebPackageArchiveCache,
   importLocalWebPackageArchive,
+  readAllWebPackageArchiveCache,
 } from '@/lib/web-package/cache';
+import { downloadBlob } from '@/lib/client/blobUrl';
+import { buildSafeFileName } from '@/lib/client/fileName';
+import { useLocalLibraryPreferences } from '@/lib/local-library/preferences';
+import { getLocalWebPackageRepository } from '@/lib/local-library/web-package-repository';
+import {
+  hasCompletedLegacyWebPackageMigration,
+  hydrateWebPackageSessionFromLibrary,
+  markLegacyWebPackageMigrationCompleted,
+  migrateLegacyWebPackageCache,
+  readWebPackageFromLibrary,
+  saveWebPackageToLibrary,
+} from '@/lib/local-library/web-package-library';
+import { removeLocalWebPackage } from '@/lib/local-library/remove-local-web-package';
+import { useLocalWebPackages } from '@/lib/local-library/use-local-web-packages';
 import { useWebPackagePresetDownload } from './useWebPackagePresetDownload';
 
 import type {
@@ -23,15 +38,6 @@ import type {
   ArenaWebPackageOptionView,
   ArenaWebPackageSectionModel,
 } from './web-package-contract';
-
-const localOptions = (): readonly ArenaWebPackageOptionView[] =>
-  listStagedLocalWebPackages().map((pkg) => ({
-    digest: pkg.ref.digest,
-    title: pkg.manifest.name,
-    kind: 'local' as const,
-    ref: pkg.ref,
-    summary: `${pkg.ref.id}@${pkg.ref.version}`,
-  }));
 
 const builtinOptions = (): readonly ArenaWebPackageOptionView[] =>
   BUILTIN_WEB_PACKAGE_PRESETS.map((preset) => ({
@@ -59,8 +65,10 @@ const resolveSelected = (
 };
 
 /**
- * 单人 Web 包区块 adapter：battle store + 本地 staging/cache。
- * 非 builtin 不进入多人 shared config；此处仍允许单人选择与导入。
+ * 单人 Web 包区块 adapter：battle store + 本地库。
+ *
+ * 本地 ZIP 的持久化从"旧缓存"迁到本地库（ADR-local-library-data-ownership §4）：
+ * 用户勾选「导入时保存到本地库」才落盘，不再无条件 best-effort 写一份用户删不掉的缓存。
  */
 export const useSoloWebPackageSectionModel = (input: {
   reportFormat: 'markdown' | 'web';
@@ -73,41 +81,77 @@ export const useSoloWebPackageSectionModel = (input: {
   const isGenerating = useBattleStore((state: BattleStoreState) => state.isGenerating);
 
   const [hydrated, setHydrated] = useState(false);
-  const [localTick, setLocalTick] = useState(0);
   const [importing, setImporting] = useState(false);
   const [importFeedback, setImportFeedback] = useState<ArenaWebPackageImportFeedback | null>(null);
+  const [busyDigest, setBusyDigest] = useState<string | null>(null);
+  const [missingArchives, setMissingArchives] = useState<ReadonlySet<string>>(new Set());
+  const { preferences, setPreference } = useLocalLibraryPreferences();
+  const localLibrary = useLocalWebPackages(allowLocalImport);
   const { downloading, downloadError, downloadPreset } = useWebPackagePresetDownload();
 
   useEffect(() => {
     let active = true;
-    void hydrateWebPackageSessionFromCache().then(() => {
+    void (async () => {
+      // 一次性把旧缓存搬进本地库。读不到旧库时迁移返回 drained=false，
+      // 此时不得标记完成——下次挂载还要再试，否则用户会同时失去旧数据和迁移机会。
+      if (!(await hasCompletedLegacyWebPackageMigration())) {
+        const outcome = await migrateLegacyWebPackageCache(
+          readAllWebPackageArchiveCache,
+          drainWebPackageArchiveCache,
+        );
+        if (outcome.drained) await markLegacyWebPackageMigrationCompleted();
+      }
+      await hydrateWebPackageSessionFromLibrary();
+    })().then(() => {
       if (!active) return;
       setHydrated(true);
-      setLocalTick((tick) => tick + 1);
     });
     return () => { active = false; };
   }, []);
 
-  const options = useMemo(() => {
-    void localTick;
+  const presets = useMemo(() => builtinOptions(), []);
+
+  // 记录在但 ZIP 字节不在时必须点名：否则用户点下去才发现这个包用不了。
+  useEffect(() => {
+    if (!allowLocalImport) return;
+    let active = true;
+    void (async () => {
+      const repository = getLocalWebPackageRepository();
+      const missing: string[] = [];
+      for (const record of localLibrary.records) {
+        if (!(await repository.hasArchive(record.ref.digest))) missing.push(record.ref.digest);
+      }
+      if (!active) return;
+      setMissingArchives(new Set(missing));
+    })();
+    return () => { active = false; };
+  }, [allowLocalImport, localLibrary.records]);
+
+  const library = useMemo<ArenaWebPackageOptionView[]>(() => {
     void hydrated;
-    const builtins = builtinOptions();
-    const locals = allowLocalImport ? localOptions() : [];
-    // Same canonical identity may appear as both a preset and a re-imported local ZIP.
-    const seen = new Set(builtins.map((option) => option.digest));
-    return [...builtins, ...locals.filter((option) => !seen.has(option.digest))];
-  }, [allowLocalImport, hydrated, localTick]);
+    return localLibrary.records.map((record) => ({
+      digest: record.ref.digest,
+      title: record.title,
+      kind: 'local' as const,
+      ref: record.ref,
+      summary: record.summary,
+      byteLength: record.archiveByteLength,
+      broken: missingArchives.has(record.ref.digest),
+    }));
+  }, [localLibrary.records, hydrated, missingArchives]);
+
+  const allOptions = useMemo(() => [...presets, ...library], [presets, library]);
 
   const selected = allowLocalImport
-    ? resolveSelected(webPackageRef, options)
+    ? resolveSelected(webPackageRef, allOptions)
     : webPackageRef && isBuiltinWebPackageRef(webPackageRef)
-      ? resolveSelected(webPackageRef, options)
+      ? resolveSelected(webPackageRef, allOptions)
       : null;
-  const localSummary = selected?.kind === 'local'
-    ? `已加载本地 Web 包（${selected.title} · ${selected.summary ?? ''}）。缓存可能因清理站点数据或存储配额而消失，可重新导入。`
-    : null;
 
-  const refreshLocal = () => setLocalTick((tick) => tick + 1);
+  const refByDigest = useCallback(
+    (digest: string): WebPackageRef | null => allOptions.find((option) => option.digest === digest)?.ref ?? null,
+    [allOptions],
+  );
 
   const select = useCallback((digest: string | null) => {
     setImportFeedback(null);
@@ -124,9 +168,10 @@ export const useSoloWebPackageSectionModel = (input: {
       setImportFeedback({ message: '多人模式仅支持内置 Web 包预设', hint: '', diagnostics: [] });
       return;
     }
-    const local = listStagedLocalWebPackages().find((item) => item.ref.digest === digest);
-    if (local) setWebPackageRef(local.ref);
-  }, [allowLocalImport, setWebPackageRef]);
+    // 只用 digest 拼出来的 ref 无法被任何解析路径接受；必须回填库记录里的真实身份。
+    const ref = refByDigest(digest);
+    if (ref) setWebPackageRef(ref);
+  }, [allowLocalImport, setWebPackageRef, refByDigest]);
 
   const remove = useCallback(() => {
     setWebPackageRef(null);
@@ -137,10 +182,16 @@ export const useSoloWebPackageSectionModel = (input: {
     setImporting(true);
     setImportFeedback(null);
     try {
-      const { pkg, diagnostics } = await importLocalWebPackageArchive(new Uint8Array(await file.arrayBuffer()));
-      refreshLocal();
+      const archive = new Uint8Array(await file.arrayBuffer());
+      const { pkg, diagnostics } = await importLocalWebPackageArchive(archive);
+      const notes = [...diagnostics];
+      if (preferences.saveImportedWebPackages) {
+        const { updated } = await saveWebPackageToLibrary({ pkg, archive });
+        notes.push(updated ? '本地库中已有同一份 Web 包，已更新原记录。' : '已保存到本地库。');
+        localLibrary.reload();
+      }
       setWebPackageRef(pkg.ref);
-      setImportFeedback({ message: '', hint: '', diagnostics });
+      setImportFeedback({ message: '', hint: '', diagnostics: notes });
     } catch (error) {
       setImportFeedback({
         message: error instanceof Error ? error.message : 'Web 包导入失败',
@@ -150,29 +201,74 @@ export const useSoloWebPackageSectionModel = (input: {
     } finally {
       setImporting(false);
     }
-  }, [importing, setWebPackageRef]);
+  }, [importing, preferences.saveImportedWebPackages, setWebPackageRef, localLibrary]);
+
+  const downloadFromLibrary = useCallback(async (digest: string) => {
+    const record = localLibrary.records.find((item) => item.ref.digest === digest);
+    if (!record) return;
+    setBusyDigest(digest);
+    try {
+      const pkg = await readWebPackageFromLibrary(record);
+      if (!pkg) {
+        setImportFeedback({
+          message: '本地库中的这个 Web 包已找不到 ZIP 字节。',
+          hint: '请删除后重新导入。',
+          diagnostics: [],
+        });
+        return;
+      }
+      const archive = await packWebPackageZip(pkg);
+      downloadBlob(
+        new Blob([archive.slice().buffer as ArrayBuffer], { type: 'application/zip' }),
+        buildSafeFileName(`${record.ref.id}@${record.ref.version}`, 'zip', 'mahoshojo-web-package'),
+      );
+    } finally {
+      setBusyDigest(null);
+    }
+  }, [localLibrary.records]);
+
+  const removeFromLibrary = useCallback(async (digest: string) => {
+    const record = localLibrary.records.find((item) => item.ref.digest === digest);
+    if (!record) return;
+    setBusyDigest(digest);
+    try {
+      await removeLocalWebPackage(record, {
+        activeRefDigest: webPackageRef?.digest ?? null,
+        clearSelection: () => setWebPackageRef(null),
+      });
+      localLibrary.reload();
+    } finally {
+      setBusyDigest(null);
+    }
+  }, [localLibrary, webPackageRef, setWebPackageRef]);
 
   return {
     disabled: disabled || isGenerating,
     active: reportFormat === 'web',
     selected,
-    options,
-    localSummary,
+    presets,
+    library,
     importFeedback,
     downloadError,
     importing,
     downloading,
+    busyDigest,
+    saveImportedToLibrary: preferences.saveImportedWebPackages,
     capabilities: {
       importLocal: allowLocalImport,
       downloadPreset: true,
       remove: true,
       replace: true,
+      manageLibrary: allowLocalImport,
     },
     actions: {
       select,
       remove,
       downloadPreset,
+      downloadFromLibrary,
       importFile,
+      removeFromLibrary,
+      setSaveImportedToLibrary: (next: boolean) => setPreference('saveImportedWebPackages', next),
     },
   };
 };

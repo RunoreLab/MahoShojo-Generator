@@ -152,6 +152,23 @@ export class IndexedDbWebPackageRepository implements WebPackageRepository {
     if (stored === undefined) return null;
     return toStoredBytes(stored.bytes);
   }
+
+  /**
+   * 只判断字节是否还在，不解包。列表渲染要判断"记录是否可用"，
+   * 每张卡都解一次 ZIP 会让本地库在打开时卡住。
+   */
+  async hasArchive(digest: string): Promise<boolean> {
+    const stored = await runLocalLibraryTransaction(
+      LOCAL_LIBRARY_STORE_NAMES.webPackageArchives,
+      'readonly',
+      (transaction) =>
+        getLocalLibraryRecord<{ digest: string; bytes: unknown }>(
+          transaction.objectStore(LOCAL_LIBRARY_STORE_NAMES.webPackageArchives),
+          digest,
+        ),
+    );
+    return stored !== undefined;
+  }
 }
 
 let sharedRepository: IndexedDbWebPackageRepository | null = null;

@@ -12,7 +12,8 @@ import { resolveWebDisplayTitle } from '@/lib/arena/battle-report-display-title'
 import { normalizeArenaWebOutput } from '@/lib/arena/web-output';
 import { downloadBlob } from '@/lib/client/blobUrl';
 import { buildSafeFileName } from '@/lib/client/fileName';
-import { hydrateExactWebPackageFromCache, importLocalWebPackageArchive } from '@/lib/web-package/cache';
+import { importLocalWebPackageArchive } from '@/lib/web-package/cache';
+import { hydrateExactWebPackageFromLibrary } from '@/lib/local-library/web-package-library';
 import { useWebPackageTrust } from '@/lib/web-package/trust';
 import { WebPackageFrame } from './WebPackageFrame';
 import { WebPackageRiskSummary, WebPackageTrustDialog } from './WebPackageSafety';
@@ -371,7 +372,9 @@ export function ArenaWebReport({ content, ready, roomId, aiModel, aiUsage, displ
   useEffect(() => {
     if (!webPackage || !ready) return;
     let active = true;
-    void hydrateExactWebPackageFromCache(webPackage.packageRef).then(() => prepareWebPackageReplay({
+    // 历史回放只恢复这一个 exact revision；它已从本机本地库删除时返回 false，
+    // 由此走既有的「缺失包 / 重新导入」分支，而不是静默当成可用。
+    void hydrateExactWebPackageFromLibrary(webPackage.packageRef).then(() => prepareWebPackageReplay({
       artifact: webPackage,
       generatedContent: content,
       allowCompatibility: Boolean(compatibilityRef),

@@ -89,27 +89,38 @@ export const useProposalWebPackageSectionModel = (input: {
     onActionError('多人模式不支持导入本地 Web 包');
   }, [onActionError]);
 
+  // 多人提案里不存在本地库：不暴露删除/导出，也不提供「保存到本地库」偏好。
+  const rejectLibraryAction = useCallback(async (): Promise<void> => {
+    onActionError('多人模式不支持本地 Web 包管理');
+  }, [onActionError]);
+
   return {
     disabled,
     active: reportFormat === 'web',
     selected,
-    options,
-    localSummary: null,
+    presets: options,
+    library: [],
     importFeedback: null,
     downloadError,
     importing: false,
     downloading,
+    busyDigest: null,
+    saveImportedToLibrary: false,
     capabilities: {
       importLocal: false,
       downloadPreset: true,
       remove: true,
       replace: true,
+      manageLibrary: false,
     },
     actions: {
       select,
       remove,
       downloadPreset,
+      downloadFromLibrary: rejectLibraryAction,
       importFile,
+      removeFromLibrary: rejectLibraryAction,
+      setSaveImportedToLibrary: rejectLibraryAction,
     },
   };
 };

@@ -95,19 +95,30 @@ const buildLocalPackage = async (version: string, id = 'local.ui-replay-package'
 };
 
 describe('Web 战报的本地执行许可', () => {
-  it('offers first-party presets in the shared grid and disables selection while generating', async () => {
+  it('offers first-party presets in the picker modal and disables selection while generating', async () => {
+    // 网格已经移进模态框：生成方式区块只保留当前选择与入口。
+    const openPicker = async (): Promise<void> => {
+      await act(async () => {
+        document.querySelector<HTMLButtonElement>('[data-testid="arena-web-package-open-picker"]')!.click();
+      });
+    };
     await act(async () => root.render(
       <ArenaReportFormatSelector value="web" onChange={() => {}}>
         <SoloArenaWebPackageSection reportFormat="web" />
       </ArenaReportFormatSelector>,
     ));
-    const select = container.querySelector<HTMLButtonElement>('[aria-label^="选择Web 包："]')!;
     expect(container.querySelector('[data-testid="arena-web-package-section"]')?.textContent).toContain('Web 包');
+    expect(container.querySelector('[aria-label^="选择 Web 包："]')).toBeNull();
+    await openPicker();
+    const select = document.querySelector<HTMLButtonElement>('[aria-label^="选择 Web 包："]')!;
     await act(async () => {
       select.click();
     });
     expect(useBattleStore.getState().webPackageRef).toEqual(BUILTIN_WEB_PACKAGE_PRESETS[0].packageRef);
-    await act(async () => container.querySelector<HTMLButtonElement>('[title="下载 Web 包 ZIP"]')!.click());
+    // 选中后模态框关闭；下载是独立入口，需要重新打开才可见。
+    expect(document.querySelector('[title^="下载 Web 包 ZIP："]')).toBeNull();
+    await openPicker();
+    await act(async () => document.querySelector<HTMLButtonElement>('[title^="下载 Web 包 ZIP："]')!.click());
     await act(async () => {
       await vi.waitFor(() => {
         expect(downloadBlob).toHaveBeenCalledWith(expect.any(Blob), 'mahoshojo.arena-news@1.0.0.zip');
@@ -118,8 +129,9 @@ describe('Web 战报的本地执行许可', () => {
         <SoloArenaWebPackageSection reportFormat="web" disabled />
       </ArenaReportFormatSelector>,
     ));
-    expect(container.querySelector<HTMLButtonElement>('[aria-label^="取消选择Web 包："]')!.disabled).toBe(true);
-    expect(container.querySelector<HTMLButtonElement>('[title="下载 Web 包 ZIP"]')!.disabled).toBe(false);
+    await openPicker();
+    expect(document.querySelector<HTMLButtonElement>('[aria-label^="取消选择 Web 包："]')!.disabled).toBe(true);
+    expect(document.querySelector<HTMLButtonElement>('[title^="下载 Web 包 ZIP："]')!.disabled).toBe(false);
   });
 
   it.each(BUILTIN_WEB_PACKAGE_PRESETS)(

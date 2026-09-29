@@ -1,88 +1,154 @@
+// @vitest-environment jsdom
 import '@/tests/helpers/fake-indexeddb';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, expect, it } from 'vitest';
+import { packWebPackageZip, resolveWebPackage, BUILTIN_ARENA_NEWS_PACKAGE_REF, verifyWebPackage, type ResolvedWebPackage } from '@mahoshojo/web-package';
 import {
-  BUILTIN_ARENA_NEWS_PACKAGE_REF,
-  clearLocalWebPackageSessionStaging,
-  listStagedLocalWebPackages,
-  packWebPackageZip,
-  resolveWebPackage,
-  stageLocalWebPackage,
-  unpackWebPackageZip,
-} from '@mahoshojo/web-package';
-import {
-  deleteWebPackageArchiveCache,
-  hydrateWebPackageSessionFromCache,
-  hydrateExactWebPackageFromCache,
+  drainWebPackageArchiveCache,
   importLocalWebPackageArchive,
-  putWebPackageArchiveCache,
-  readWebPackageArchiveCache,
+  LEGACY_WEB_PACKAGE_CACHE_DB_NAME,
+  readAllWebPackageArchiveCache,
+  verifyCachedWebPackageArchive,
 } from '@/lib/web-package/cache';
+import { getLocalWebPackageRepository, resetLocalWebPackageRepository } from '@/lib/local-library/web-package-repository';
+import { LOCAL_LIBRARY_DB_NAME, resetLocalLibraryDbConnection } from '@/lib/local-library/db';
+import {
+  hydrateExactWebPackageFromLibrary,
+  hydrateWebPackageSessionFromLibrary,
+  migrateLegacyWebPackageCache,
+  readWebPackageFromLibrary,
+  saveWebPackageToLibrary,
+} from '@/lib/local-library/web-package-library';
+import { clearLocalWebPackageSessionStaging, listStagedLocalWebPackages } from '@mahoshojo/web-package';
 
-const createLocalPackage = async () => {
-  const archive = await packWebPackageZip(await resolveWebPackage(BUILTIN_ARENA_NEWS_PACKAGE_REF));
-  const unpacked = await unpackWebPackageZip(archive);
-  const manifest = { ...unpacked.manifest, id: 'local.cache-test', name: '缓存测试包' };
-  const { verifyWebPackage } = await import('@mahoshojo/web-package');
-  const pkg = await verifyWebPackage(manifest, manifest.files.map((file) => ({
-    path: file.path, bytes: unpacked.readFile(file.path)!,
-  })));
-  const localArchive = await packWebPackageZip(pkg);
-  return { archive: localArchive, pkg };
+const makePackage = async (id: string): Promise<ResolvedWebPackage> => {
+  const builtin = await resolveWebPackage(BUILTIN_ARENA_NEWS_PACKAGE_REF);
+  const manifest = { ...builtin.manifest, id, name: `本地包 ${id}` };
+  return verifyWebPackage(manifest, manifest.files.map((file) => ({ path: file.path, bytes: builtin.readFile(file.path)! })));
 };
 
-describe('optional local Web package archive cache', () => {
-  beforeEach(() => {
-    clearLocalWebPackageSessionStaging();
-    return deleteWebPackageArchiveCache(`sha256:${'0'.repeat(64)}`).catch(() => undefined);
+const deleteDatabase = (name: string): Promise<void> =>
+  new Promise((resolve) => {
+    const request = indexedDB.deleteDatabase(name);
+    request.onsuccess = () => resolve();
+    request.onerror = () => resolve();
+    request.onblocked = () => resolve();
   });
 
-  it('imports, stages, best-effort caches, and rehydrates with integrity', async () => {
-    clearLocalWebPackageSessionStaging();
-    const { archive, pkg } = await createLocalPackage();
-    const imported = await importLocalWebPackageArchive(archive);
-    expect(imported.pkg.ref).toEqual(pkg.ref);
-    expect(imported.diagnostics).toEqual([]);
-    expect(listStagedLocalWebPackages().map((item) => item.ref.digest)).toContain(pkg.ref.digest);
+const resetAll = async (): Promise<void> => {
+  clearLocalWebPackageSessionStaging();
+  resetLocalLibraryDbConnection();
+  resetLocalWebPackageRepository();
+  await deleteDatabase(LOCAL_LIBRARY_DB_NAME);
+  await deleteDatabase(LEGACY_WEB_PACKAGE_CACHE_DB_NAME);
+};
 
-    // import already kicked off a best-effort put; wait for it by re-putting.
-    expect(await putWebPackageArchiveCache(pkg)).toBe(true);
-    const cached = await readWebPackageArchiveCache(pkg.ref.digest);
-    expect(cached?.ref).toEqual(pkg.ref);
-    expect(cached!.archive.byteLength).toBeGreaterThan(0);
+beforeEach(resetAll);
+afterEach(resetAll);
 
-    clearLocalWebPackageSessionStaging();
-    expect(listStagedLocalWebPackages()).toHaveLength(0);
-    const stagedCount = await hydrateWebPackageSessionFromCache();
-    expect(stagedCount).toBeGreaterThanOrEqual(1);
-    expect(listStagedLocalWebPackages().map((item) => item.ref.digest)).toContain(pkg.ref.digest);
+it('导入只写会话 staging，不再无条件写旧缓存', async () => {
+  const pkg = await makePackage('local.import-only');
+  const archive = await packWebPackageZip(pkg);
+  const { pkg: imported } = await importLocalWebPackageArchive(archive);
 
-    await deleteWebPackageArchiveCache(pkg.ref.digest);
-    expect(await readWebPackageArchiveCache(pkg.ref.digest)).toBeNull();
-    clearLocalWebPackageSessionStaging();
-  });
+  expect(imported.ref.digest).toBe(pkg.ref.digest);
+  expect(listStagedLocalWebPackages().some((item) => item.ref.digest === imported.ref.digest)).toBe(true);
+  // 旧缓存曾无上限、无删除入口且被用户无法清理；它不再是默认落点。
+  expect(await readAllWebPackageArchiveCache()).toEqual([]);
+  expect((await getLocalWebPackageRepository().list({ limit: 10 })).items).toEqual([]);
+});
 
-  it('restores one exact local dependency without first mounting the package picker', async () => {
-    const { pkg } = await createLocalPackage();
-    expect(await putWebPackageArchiveCache(pkg)).toBe(true);
-    clearLocalWebPackageSessionStaging();
-    await hydrateExactWebPackageFromCache(pkg.ref);
-    expect((await resolveWebPackage(pkg.ref)).ref).toEqual(pkg.ref);
-    clearLocalWebPackageSessionStaging();
-    await hydrateExactWebPackageFromCache({ ...pkg.ref, id: 'local.wrong-identity' });
-    expect(listStagedLocalWebPackages()).toHaveLength(0);
-    await deleteWebPackageArchiveCache(pkg.ref.digest);
-    await hydrateExactWebPackageFromCache(pkg.ref);
-    expect(listStagedLocalWebPackages()).toHaveLength(0);
-  });
+it('重新导入同一份 ZIP 视为同一行并整卡替换', async () => {
+  const pkg = await makePackage('local.same-bytes');
+  const archive = await packWebPackageZip(pkg);
+  const first = await saveWebPackageToLibrary({ pkg, archive });
+  const second = await saveWebPackageToLibrary({ pkg, archive }, () => '2026-09-30T00:00:00.000Z');
 
-  it('keeps cache failures non-blocking for staging', async () => {
-    const { archive, pkg } = await createLocalPackage();
-    stageLocalWebPackage(pkg);
-    // Missing IDB environment is simulated by deleting after stage; put returns false only on failure.
-    const ok = await putWebPackageArchiveCache(pkg);
-    expect(typeof ok).toBe('boolean');
-    expect(listStagedLocalWebPackages().map((item) => item.ref.digest)).toContain(pkg.ref.digest);
-    await deleteWebPackageArchiveCache(pkg.ref.digest);
-    clearLocalWebPackageSessionStaging();
-  });
+  expect(first.updated).toBe(false);
+  expect(second.updated).toBe(true);
+  expect(second.record.id).toBe(first.record.id);
+  expect((await getLocalWebPackageRepository().list({ limit: 10 })).items).toHaveLength(1);
+});
+
+it('记录仍在但字节缺失时读回为 null，而不是给出半个包', async () => {
+  const pkg = await makePackage('local.missing-bytes');
+  const { record } = await saveWebPackageToLibrary({ pkg, archive: await packWebPackageZip(pkg) });
+  expect(await readWebPackageFromLibrary(record)).not.toBeNull();
+
+  await getLocalWebPackageRepository().delete(record.id);
+  expect(await readWebPackageFromLibrary(record)).toBeNull();
+});
+
+it('会话水合从本地库恢复，并且复核 digest', async () => {
+  const pkg = await makePackage('local.hydrate');
+  await saveWebPackageToLibrary({ pkg, archive: await packWebPackageZip(pkg) });
+  clearLocalWebPackageSessionStaging();
+  expect(listStagedLocalWebPackages()).toHaveLength(0);
+
+  expect(await hydrateWebPackageSessionFromLibrary()).toBe(1);
+  expect(listStagedLocalWebPackages().some((item) => item.ref.digest === pkg.ref.digest)).toBe(true);
+});
+
+it('历史回放只恢复 exact revision，删除后不再可用', async () => {
+  const pkg = await makePackage('local.replay');
+  const { record } = await saveWebPackageToLibrary({ pkg, archive: await packWebPackageZip(pkg) });
+  clearLocalWebPackageSessionStaging();
+
+  expect(await hydrateExactWebPackageFromLibrary(pkg.ref)).toBe(true);
+  expect(listStagedLocalWebPackages().some((item) => item.ref.digest === pkg.ref.digest)).toBe(true);
+
+  // 同 digest 但 id/version 不同：不得被当成同一个包。
+  expect(await hydrateExactWebPackageFromLibrary({ ...pkg.ref, id: 'local.impersonated' })).toBe(false);
+
+  await getLocalWebPackageRepository().delete(record.id);
+  expect(await hydrateExactWebPackageFromLibrary(pkg.ref)).toBe(false);
+});
+
+it('旧缓存一次性迁入本地库并清空；重复执行是幂等的', async () => {
+  const first = await makePackage('local.legacy-a');
+  const second = await makePackage('local.legacy-b');
+  const legacy = [
+    { ref: { ...first.ref }, archive: (await packWebPackageZip(first)).slice().buffer as ArrayBuffer, cachedAt: 1 },
+    { ref: { ...second.ref }, archive: (await packWebPackageZip(second)).slice().buffer as ArrayBuffer, cachedAt: 2 },
+  ];
+  let remaining = legacy;
+  const readLegacy = async () => remaining;
+  const drainLegacy = async () => { remaining = []; return true; };
+
+  const outcome = await migrateLegacyWebPackageCache(readLegacy, drainLegacy, () => '2026-09-29T12:00:00.000Z');
+  expect(outcome).toMatchObject({ migrated: 2, skipped: 0, failed: 0, drained: true });
+  expect((await getLocalWebPackageRepository().list({ limit: 10 })).items).toHaveLength(2);
+
+  const again = await migrateLegacyWebPackageCache(readLegacy, drainLegacy);
+  expect(again).toMatchObject({ migrated: 0, drained: true });
+  expect((await getLocalWebPackageRepository().list({ limit: 10 })).items).toHaveLength(2);
+});
+
+it('旧库读不到时保留旧数据并报告未清空', async () => {
+  const readLegacy = async () => { throw new Error('IndexedDB 不可用'); };
+  let drained = false;
+  const drainLegacy = async () => { drained = true; return true; };
+
+  const outcome = await migrateLegacyWebPackageCache(readLegacy, drainLegacy);
+  expect(outcome.drained).toBe(false);
+  // 迁移机会必须留到下次：读不到旧库时绝不能清空它。
+  expect(drained).toBe(false);
+});
+
+it('旧库中 digest 与字节不符的行被跳过，而不是冒充成那个包', async () => {
+  const pkg = await makePackage('local.mismatch');
+  const forged = await makePackage('local.forged');
+  const readLegacy = async () => [{
+    ref: { ...pkg.ref },
+    archive: (await packWebPackageZip(forged)).slice().buffer as ArrayBuffer,
+    cachedAt: 1,
+  }];
+
+  const outcome = await migrateLegacyWebPackageCache(readLegacy, async () => true);
+  expect(outcome).toMatchObject({ migrated: 0, skipped: 1, failed: 0 });
+  expect(await verifyCachedWebPackageArchive({ ref: { ...pkg.ref }, archive: (await packWebPackageZip(forged)).slice().buffer as ArrayBuffer, cachedAt: 1 })).toBeNull();
+});
+
+it('旧缓存桥在库不存在时读取为空、可安全清空', async () => {
+  expect(await readAllWebPackageArchiveCache()).toEqual([]);
+  expect(await drainWebPackageArchiveCache()).toBe(true);
 });

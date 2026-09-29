@@ -1,7 +1,11 @@
 /**
  * 共享 Web 包选择区块的 UI contract。
+ *
  * 状态容器（单人 battle store / proposal editor session）由各自 adapter 持有；
  * 共享视图只消费归一化 model，不 import store、Room controller 或网络 client。
+ *
+ * 「本地库」与「内置预设」是两个并列来源，不再像旧实现那样压进同一个网格：
+ * 前者可删可导出，后者随应用分发、不可删。
  */
 
 import type { WebPackageRef } from '@mahoshojo/contracts/web-package';
@@ -11,8 +15,12 @@ export type ArenaWebPackageOptionView = Readonly<{
   title: string;
   kind: 'builtin' | 'local' | 'unknown';
   ref: WebPackageRef | null;
-  /** 本地包摘要行用；builtin 可为空。 */
+  /** 来源身份行，通常是 `id@version`。 */
   summary?: string | null;
+  /** 本地库条目：ZIP 字节数。 */
+  byteLength?: number | null;
+  /** 本地库条目：记录与字节不一致、已无法恢复。 */
+  broken?: boolean;
 }>;
 
 export type ArenaWebPackageSectionCapabilities = Readonly<{
@@ -24,6 +32,8 @@ export type ArenaWebPackageSectionCapabilities = Readonly<{
   remove: boolean;
   /** 更换当前包（打开选择列表）。 */
   replace: boolean;
+  /** 本地库管理（删除/导出）。多人模式下不存在，因此为 false。 */
+  manageLibrary: boolean;
 }>;
 
 export type ArenaWebPackageImportFeedback = Readonly<{
@@ -40,18 +50,27 @@ export type ArenaWebPackageSectionModel = Readonly<{
   /** reportFormat === 'web' 时才展示选择器细节；markdown 时保持简洁。 */
   active: boolean;
   selected: ArenaWebPackageOptionView | null;
-  options: readonly ArenaWebPackageOptionView[];
-  /** 已加载本地包摘要（含 staging 水合结果）。 */
-  localSummary: string | null;
+  /** 内置预设；始终可下载，不可删除。 */
+  presets: readonly ArenaWebPackageOptionView[];
+  /** 本地库条目；可删除、可导出。 */
+  library: readonly ArenaWebPackageOptionView[];
   importFeedback: ArenaWebPackageImportFeedback | null;
   downloadError: string | null;
   importing: boolean;
   downloading: boolean;
+  /** 正在执行删除/导出的条目 digest。 */
+  busyDigest: string | null;
+  /** 「导入时保存到本地库」偏好。 */
+  saveImportedToLibrary: boolean;
   capabilities: ArenaWebPackageSectionCapabilities;
   actions: Readonly<{
     select(digest: string | null): void;
+    /** 只取消当前选择，不动本地库。 */
     remove(): void;
     downloadPreset(digest: string): Promise<void>;
+    downloadFromLibrary(digest: string): Promise<void>;
     importFile(file: File | null | undefined): Promise<void>;
+    removeFromLibrary(digest: string): Promise<void>;
+    setSaveImportedToLibrary(next: boolean): void;
   }>;
 }>;
