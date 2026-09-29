@@ -164,7 +164,7 @@ const manifestIssueGuidance = (issue: ManifestIssue): { message: string; hint: s
         hint: '两者都不声明时导入会默认用入口文件与 text/html；如果目标是 JSON 等数据文件，请同时声明 mediaType。',
       };
     }
-    if (leaf === 'instructions' || leaf === 'schema' || leaf === 'assetCatalog') {
+    if (leaf === 'instructions' || leaf === 'schema' || leaf === 'assetCatalog' || leaf === 'example') {
       return {
         message: `generation.${leaf} 指向的文件不在包内。`,
         hint: `请把该文件一起打包，或删除 generation.${leaf} 字段。`,
@@ -245,11 +245,11 @@ const resolveFileDescriptors = async (
 };
 
 const optionalPromptFiles = (source: Record<string, unknown>): Record<string, string> => {
-  const optional = (field: 'instructions' | 'schema' | 'assetCatalog'): Record<string, string> => {
+  const optional = (field: 'instructions' | 'schema' | 'assetCatalog' | 'example'): Record<string, string> => {
     const value = readOptionalString(source, field, 'generation');
     return value === undefined ? {} : { [field]: value };
   };
-  return { ...optional('instructions'), ...optional('schema'), ...optional('assetCatalog') };
+  return { ...optional('instructions'), ...optional('schema'), ...optional('assetCatalog'), ...optional('example') };
 };
 
 const buildGeneration = (

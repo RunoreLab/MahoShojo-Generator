@@ -246,6 +246,7 @@ export const buildArenaGenerationPrompt = async (input: {
     materials,
     outputContract,
     packagePrompt,
+    trustedProjection?.target.mediaType ?? null,
   );
   const taskPrompt = promptBuilder({ combatants });
   const characterGuidances = combatants.flatMap((value) => {

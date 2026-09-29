@@ -63,6 +63,13 @@ export const WebPackageManifestSchema = z.object({
     instructions: WebPackagePathSchema.optional(),
     schema: WebPackagePathSchema.optional(),
     assetCatalog: WebPackagePathSchema.optional(),
+    /**
+     * Opt-in shape sample for the target file, projected to the model the same
+     * bounded way as `instructions`. Never filled in automatically: a target
+     * that is a placeholder (the shipped preset's is) would teach the model to
+     * emit the placeholder.
+     */
+    example: WebPackagePathSchema.optional(),
   }).strict(),
   capabilities: z.array(z.enum(['scripts', 'audio', 'video', 'network'])).max(4).default([]),
   files: z.array(WebPackageFileDescriptorSchema).min(1),
@@ -79,7 +86,7 @@ export const WebPackageManifestSchema = z.object({
   if (entry?.mediaType !== 'text/html') {
     context.addIssue({ code: 'custom', path: ['entry'], message: 'entry must exist and be text/html' });
   }
-  for (const key of ['instructions', 'schema', 'assetCatalog'] as const) {
+  for (const key of ['instructions', 'schema', 'assetCatalog', 'example'] as const) {
     const path = manifest.generation[key];
     if (path && !manifest.files.some((file) => file.path === path)) {
       context.addIssue({ code: 'custom', path: ['generation', key], message: 'prompt file must exist' });
@@ -132,6 +139,7 @@ export const WebPackagePromptProjectionSchema = z.object({
   instructions: z.string().optional(),
   schema: z.unknown().optional(),
   assetCatalog: z.unknown().optional(),
+  example: z.string().optional(),
 }).superRefine((projection, context) => {
   const encoder = new TextEncoder();
   const utf8Bytes = (value: unknown): number => encoder.encode(JSON.stringify(value ?? '')).byteLength;
@@ -143,6 +151,10 @@ export const WebPackagePromptProjectionSchema = z.object({
   }
   if (projection.assetCatalog !== undefined && utf8Bytes(projection.assetCatalog) > 131_072) {
     context.addIssue({ code: 'custom', path: ['assetCatalog'], message: 'assetCatalog exceeds projection byte budget' });
+  }
+  // A shape sample is meant to be a few records long, not the whole dataset.
+  if (projection.example !== undefined && utf8Bytes(projection.example) > 32_768) {
+    context.addIssue({ code: 'custom', path: ['example'], message: 'example exceeds projection byte budget' });
   }
 });
 export type WebPackagePromptProjection = z.infer<typeof WebPackagePromptProjectionSchema>;

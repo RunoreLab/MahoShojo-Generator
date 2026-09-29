@@ -13,6 +13,7 @@ Visual Novel Lite、星屑社区、命运岔路从未部署，已删除其资产
 ## 入口与客户端传输
 
 - 根导出：验证、ZIP、不可变实例、Prompt Projection、重放、归档导入与错误码。
+- Prompt Projection 只投影 `instructions` / `schema` / `assetCatalog` 与作者显式声明的 `generation.example`；base target 不会被自动当作示例（内置竞技场新闻的 base `index.html` 是占位页）。
 - `src/archive.ts` / `src/import.ts` / `src/media-types.ts`：信封归一化、缺省导入与共享媒体类型映射；预设生成器复用同一份媒体类型映射。
 - `/browser`：`renderWebPackageInstance(instance)`，无预设 ID 分支；返回展示 HTML 与诊断，不修改 Base/Overlay 原始字节。
 - `/security`：Base/有效实例能力预检和摘要绑定授权判定；不执行作者代码，不访问网络。启发式规则只在标记无法被标记语言模仿时才报告——`host-page-access` 要求 window/self/globalThis/frames 限定或未被 `.`/`-`/`#` 前置的裸全局，以免把 CSS `top`、`.top` 类名与选择器判成宿主访问；`scripts` 的内联事件属性要求完整属性名就是 `on…` 且位于标签内，`data-one=`、`oneTime = true` 不算；`dynamic-execution` 只匹配可执行的 `data:`/`blob:` 媒体类型，内嵌 base64 图片不算；`site-storage` 要求真实访问点（`document.cookie`、`caches.open` 等），说明文字不算。

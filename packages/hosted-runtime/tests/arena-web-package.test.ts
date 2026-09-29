@@ -24,18 +24,19 @@ const payload = {
   writeArenaHistory: false, writeCurrentState: false,
 };
 
-const createLocalProjectionPackage = async () => {
+const createLocalProjectionPackage = async (overrides: Record<string, unknown> = {}) => {
   const files = [
     { path: 'index.html', mediaType: 'text/html', content: '<!doctype html><title>JSON fixture</title>' },
     { path: 'schema.json', mediaType: 'application/json', content: JSON.stringify({
       type: 'object', required: ['message'], properties: { message: { type: 'string', minLength: 1 } }, additionalProperties: false,
     }) },
+    { path: 'data/example.json', mediaType: 'application/json', content: '{"message":"示例条目"}' },
   ].map(({ content, ...file }) => ({ ...file, bytes: new TextEncoder().encode(content) }));
   // Intentionally not staged: the server cannot resolve this local package without a projection.
   return verifyWebPackage({
     format: 'mahoshojo-web-package', formatVersion: 1,
     id: 'local.hosted-projection', version: '1.0.0', name: '本地投影包', entry: 'index.html',
-    generation: { target: 'data/result.json', mode: 'replace', mediaType: 'application/json', schema: 'schema.json' },
+    generation: { target: 'data/result.json', mode: 'replace', mediaType: 'application/json', schema: 'schema.json', ...overrides },
     capabilities: [],
     files: await Promise.all(files.map(async (file) => ({
       path: file.path, mediaType: file.mediaType, size: file.bytes.byteLength, digest: await digestWebPackageBytes(file.bytes),
@@ -61,8 +62,7 @@ describe('Web Package hosted generation', () => {
     expect(overlay.targetMediaType).toBe('text/html');
   });
 
-  it('both delivery modes project a local JSON schema target without copying runtime', async () => {
-    const local = await createLocalProjectionPackage();
+  it('both delivery modes project a local JSON schema target without copying runtime', async () => {    const local = await createLocalProjectionPackage();
     const projection = buildWebPackagePromptProjection(local);
     const results = await Promise.all(['stream', 'non-stream'].map((deliveryMode) => buildArenaGenerationPrompt({
       actorKey: 'user:42', random: () => 0,
@@ -78,9 +78,39 @@ describe('Web Package hosted generation', () => {
       outputContract: 'web-package-target', reportFormat: 'web', expectsMeta: true,
       webPackageRef: local.ref,
     });
+    // 唯一输出是一份 JSON 数据文件时，"约 600 字"的要求会和包自己的
+    // instructions 正面冲突，把模型推向输出战报纯文本。
+    expect(results[0].prompt).not.toContain('【字数要求】');
     await expect(createWebPackageOverlayFromProjection(projection, jsonContent)).resolves.toMatchObject({ targetPath: 'data/result.json' });
     await expect(createWebPackageOverlayFromProjection(projection, '{broken}')).rejects.toThrow();
     await expect(createWebPackageOverlayFromProjection(projection, '{"message":1}')).rejects.toThrow();
+  });
+
+  it('projects an opt-in shape sample as untrusted creator data', async () => {
+    const local = await createLocalProjectionPackage({ example: 'data/example.json' });
+    const projection = buildWebPackagePromptProjection(local);
+    expect(projection.example).toBe('{"message":"示例条目"}');
+    const prompt = (await buildArenaGenerationPrompt({
+      actorKey: 'user:42', random: () => 0,
+      payload: { ...payload, webPackageRef: local.ref, webPackagePromptProjection: projection },
+    })).prompt;
+    expect(prompt).toContain('示例条目');
+    expect(prompt).toContain('不要照抄');
+  });
+
+  it('never projects the base target file as an implicit sample', async () => {
+    // 自动注入会教模型复现占位页：竞技场新闻的 base index.html 只有一句
+    // "这里等待 AI 生成完整新闻网站"。
+    const local = await createLocalProjectionPackage();
+    expect(buildWebPackagePromptProjection(local).example).toBeUndefined();
+  });
+
+  it('keeps the story length requirement for a prose target', async () => {
+    const prompt = (await buildArenaGenerationPrompt({
+      actorKey: 'user:42', random: () => 0,
+      payload: { ...payload, storyLength: 'standard' },
+    })).prompt;
+    expect(prompt).toContain('【字数要求】');
   });
 
   it.each([

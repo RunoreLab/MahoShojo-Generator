@@ -665,6 +665,8 @@ export const createStreamPromptBuilder = (
     materials?: unknown[] | null,
     outputContract: 'stream-markdown' | 'structured-report' | 'web-document' | 'web-package-target' = 'stream-markdown',
     packagePrompt?: string,
+    /** Web 包生成目标的媒体类型；数据类目标没有"正文长度"可言。 */
+    packageTargetMediaType: string | null = null,
 ) => (input: { combatants: any[] }): string => {
     const { combatants } = input;
     const profiles = buildCombatantProfilesForPrompt({
@@ -759,7 +761,11 @@ export const createStreamPromptBuilder = (
         finalPrompt += `\n\n【重要提醒】\n故事引导可能不完全符合世界观，请你在创作时，务必确保最终生成的故事符合魔法少女的世界观，修正或忽略不恰当的元素。`;
     }
 
-    const storyLengthRequirement = buildStoryLengthRequirementText({
+    // 「约 600 字」描述的是散文正文。当唯一输出是一份 JSON/Markdown 数据文件时，
+    // 这条要求会和包自己的 instructions 正面冲突，把模型推向输出战报纯文本。
+    const targetIsDataFile = outputContract === 'web-package-target'
+        && packageTargetMediaType === 'application/json';
+    const storyLengthRequirement = targetIsDataFile ? null : buildStoryLengthRequirementText({
         storyLength,
         customStoryLength,
         targetLabel: outputContract === 'structured-report'
