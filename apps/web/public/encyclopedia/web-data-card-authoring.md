@@ -636,6 +636,7 @@ Web 战报真正扩大的不是“排版能力”，而是数据卡创作者可�
 站内条目：
 
 - 情景卡进阶（继承与长线）：`/encyclopedia/scenario-advanced`
+- Web 包创作指南（自己打包 JSON 数据目标时看这篇）：`/encyclopedia/web-package-authoring`
 - 通用数据卡（Markdown）：`/encyclopedia/general-cards`
 - 竞技场：`/encyclopedia/arena`
 - 引导 / 判定事件 / 读写状态：`/encyclopedia/guidance`

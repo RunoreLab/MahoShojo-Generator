@@ -47,5 +47,39 @@ describe('encyclopedia', () => {
     expect(matchEncyclopediaEntry(entry!, '限流')).toBe(true);
     expect(matchEncyclopediaEntry(entry!, '冷却')).toBe(true);
   });
+
+  // 注册了但没有对应 markdown 的条目会在运行时变成 404，而且很难被察觉。
+  test('every registered entry has its markdown file', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const { join } = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+    const publicDir = fileURLToPath(new URL('../public/', import.meta.url));
+    const missing: string[] = [];
+    for (const entry of encyclopediaEntries) {
+      try {
+        await readFile(join(publicDir, entry.markdownPath), 'utf8');
+      } catch {
+        missing.push(`${entry.slug} -> ${entry.markdownPath}`);
+      }
+    }
+    expect(missing).toEqual([]);
+  });
+
+  // 站内条目之间靠 /encyclopedia/<slug> 互链，拼错只会得到一个死链。
+  test('cross-links between encyclopedia pages all resolve', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const { join } = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+    const publicDir = fileURLToPath(new URL('../public/', import.meta.url));
+    const known = new Set(encyclopediaEntries.map((entry) => `/encyclopedia/${entry.slug}`));
+    const broken: string[] = [];
+    for (const entry of encyclopediaEntries) {
+      const body = await readFile(join(publicDir, entry.markdownPath), 'utf8');
+      for (const match of body.matchAll(/\/encyclopedia\/[a-z0-9-]+/g)) {
+        if (!known.has(match[0])) broken.push(`${entry.slug} -> ${match[0]}`);
+      }
+    }
+    expect(broken).toEqual([]);
+  });
 });
 

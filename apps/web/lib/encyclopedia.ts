@@ -419,6 +419,14 @@ export const encyclopediaEntries: EncyclopediaEntry[] = [
     keywords: ['Web战报', '数据卡', 'Runtime', 'Galgame', '视觉小说', '小游戏', '媒体资产', '互动'],
   },
   {
+    slug: 'web-package-authoring',
+    title: 'Web 包创作指南',
+    summary: '从 web-package.json 到 schema 与示例：让 AI 一次就生成对自定义 Web 包需要的数据文件。',
+    markdownPath: '/encyclopedia/web-package-authoring.md',
+    categoryId: 'content',
+    keywords: ['Web包', 'web-package.json', 'schema', 'JSON', 'instructions', 'example', '数据文件'],
+  },
+  {
     slug: 'sublimation',
     title: '成长升华',
     summary: '让角色根据经历蜕变成新形态：模板、保留字段、读写历史/状态。',
