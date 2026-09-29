@@ -12,6 +12,7 @@ import {
   type ArchiveEntry,
 } from './archive';
 import { resolveWebPackageMediaType, WEB_PACKAGE_OPAQUE_MEDIA_TYPE } from './media-types';
+import { buildGenerationReadinessHints } from './generation-readiness';
 import { digestWebPackageBytes, verifyWebPackage, type VerifiedWebPackage } from './verify';
 
 export type WebPackageImportErrorCode =
@@ -422,6 +423,26 @@ export const importWebPackageArchive = async (archive: Uint8Array): Promise<WebP
   const manifest = await buildManifest(raw, descriptors, files, normalized.root, diagnostics);
   try {
     const pkg = await verifyWebPackage(manifest, files);
+    diagnostics.push(...buildGenerationReadinessHints(pkg.manifest, {
+      text: (path) => {
+        const bytes = files.find((file) => file.path === path)?.bytes;
+        if (!bytes) return null;
+        try {
+          return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+        } catch {
+          return null;
+        }
+      },
+      json: (path) => {
+        const bytes = files.find((file) => file.path === path)?.bytes;
+        if (!bytes) return undefined;
+        try {
+          return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)) as unknown;
+        } catch {
+          return undefined;
+        }
+      },
+    }));
     return { pkg, diagnostics };
   } catch (error) {
     const manifestFailure = describeManifestFailure(error);
