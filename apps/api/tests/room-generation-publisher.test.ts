@@ -683,7 +683,12 @@ describe('RoomGenerationPublisher typed generation consumer', () => {
   });
 
   it('Web 包输出契约失败不塌缩成可重试的 generation-failed', async () => {
-    for (const code of ['ARENA_WEB_PACKAGE_OUTPUT_INVALID', 'ARENA_WEB_PACKAGE_TARGET_INVALID']) {
+    for (const code of [
+      'ARENA_WEB_PACKAGE_OUTPUT_INVALID',
+      'ARENA_WEB_PACKAGE_TARGET_INVALID',
+      'ARENA_WEB_PACKAGE_TARGET_MALFORMED',
+      'ARENA_WEB_PACKAGE_TARGET_SCHEMA',
+    ]) {
       const harness = await createRunningActor({ running: false });
       harness.setNow('2026-08-28T00:03:00.000Z');
       const publisher = createRoomGenerationPublisher({

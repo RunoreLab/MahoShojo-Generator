@@ -69,6 +69,8 @@ describe('resolveApiErrorMessage', () => {
   test.each([
     'ARENA_WEB_PACKAGE_OUTPUT_INVALID',
     'ARENA_WEB_PACKAGE_TARGET_INVALID',
+    'ARENA_WEB_PACKAGE_TARGET_MALFORMED',
+    'ARENA_WEB_PACKAGE_TARGET_SCHEMA',
   ])('surfaces the host-authored Web 包 failure copy for %s', (code) => {
     const message = getPublicAiErrorMessage(code);
     expect(message).toBeTruthy();

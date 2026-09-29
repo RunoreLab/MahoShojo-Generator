@@ -33,6 +33,8 @@ export type RoomGenerationFailureCode = 'generation-failed' | 'web-package-outpu
 const WEB_PACKAGE_OUTPUT_ERROR_CODES: ReadonlySet<string> = new Set([
   'ARENA_WEB_PACKAGE_OUTPUT_INVALID',
   'ARENA_WEB_PACKAGE_TARGET_INVALID',
+  'ARENA_WEB_PACKAGE_TARGET_MALFORMED',
+  'ARENA_WEB_PACKAGE_TARGET_SCHEMA',
 ]);
 
 /** 未知或非 Web 包的上游失败码一律保持 generation-failed，不新增 wire 面。 */

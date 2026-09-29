@@ -15,6 +15,8 @@ export const PUBLIC_AI_ERROR_CODES = Object.freeze([
   'AI_STREAM_INCOMPLETE',
   'ARENA_WEB_PACKAGE_OUTPUT_INVALID',
   'ARENA_WEB_PACKAGE_TARGET_INVALID',
+  'ARENA_WEB_PACKAGE_TARGET_MALFORMED',
+  'ARENA_WEB_PACKAGE_TARGET_SCHEMA',
 ] as const);
 
 export type PublicAiErrorCode = typeof PUBLIC_AI_ERROR_CODES[number];
@@ -32,6 +34,12 @@ const PUBLIC_AI_ERROR_MESSAGES: Readonly<Partial<Record<PublicAiErrorCode, strin
     'Web 包输出缺少可解析的 Arena 战报元数据结尾，无法确认本次结果完整。收到的内容已按纯文本保留，可在下方查看后重试。',
   ARENA_WEB_PACKAGE_TARGET_INVALID:
     'AI 生成的 Web 包目标文件未通过格式或 schema 校验，本次结果不会应用到 Web 包。收到的内容已按纯文本保留，可在下方查看后重试。',
+  ARENA_WEB_PACKAGE_TARGET_MALFORMED:
+    'AI 没有按 Web 包要求的形态输出目标文件（宿主已尝试剥离 Markdown 代码围栏与前导路径行，仍不是可直接解析的 JSON）。'
+    + '收到的内容已按纯文本保留，可在下方查看：若模型输出的是一段散文，说明该包的创作指引不足。',
+  ARENA_WEB_PACKAGE_TARGET_SCHEMA:
+    'AI 输出的目标是合法 JSON，但不符合这个 Web 包声明的数据结构，本次结果不会应用到 Web 包。'
+    + '收到的内容已按纯文本保留，可在下方对照查看：若结构明显跑偏，通常说明该包的 generation.schema 约束不够，需要补全嵌套结构。',
 });
 
 export const getPublicAiErrorMessage = (code: unknown): string | null => (

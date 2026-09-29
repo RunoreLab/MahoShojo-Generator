@@ -28,7 +28,7 @@ import type {
 import { createArenaStreamProjector } from './stream-projector';
 import { assertStreamCompletion } from './completion';
 import { WebPackageRefSchema, type WebPackageArtifact } from '@mahoshojo/contracts/web-package';
-import { createWebPackageOverlay, createWebPackageOverlayFromProjection } from '@mahoshojo/web-package';
+import { createWebPackageOverlay, createWebPackageOverlayFromProjection, isWebPackageTargetError } from '@mahoshojo/web-package';
 import { isWebArenaOutputContract } from './output-contract';
 
 export const MAX_ARENA_COMBATANTS = ARENA_RESOURCE_BUDGET.maxCombatants;
@@ -145,8 +145,19 @@ class ArenaOutputBudgetExceededError extends Error {
  * 校验细节或 provider 数据。
  */
 const webPackageOutputError = (
-  code: 'ARENA_WEB_PACKAGE_OUTPUT_INVALID' | 'ARENA_WEB_PACKAGE_TARGET_INVALID',
+  code: 'ARENA_WEB_PACKAGE_OUTPUT_INVALID' | 'ARENA_WEB_PACKAGE_TARGET_INVALID'
+    | 'ARENA_WEB_PACKAGE_TARGET_MALFORMED' | 'ARENA_WEB_PACKAGE_TARGET_SCHEMA',
 ): Error => createSafePublicAiError({ code, message: getPublicAiErrorMessage(code)! });
+
+/** Shape and schema failures need different copy: the first is a format problem, the second a contract problem. */
+const webPackageTargetFailureCode = (error: unknown): 'ARENA_WEB_PACKAGE_TARGET_INVALID'
+  | 'ARENA_WEB_PACKAGE_TARGET_MALFORMED' | 'ARENA_WEB_PACKAGE_TARGET_SCHEMA' => {
+  if (isWebPackageTargetError(error)) {
+    if (error.failure === 'json-shape') return 'ARENA_WEB_PACKAGE_TARGET_MALFORMED';
+    if (error.failure === 'json-schema') return 'ARENA_WEB_PACKAGE_TARGET_SCHEMA';
+  }
+  return 'ARENA_WEB_PACKAGE_TARGET_INVALID';
+};
 
 const validationFailure = (
   code: string,
@@ -932,8 +943,12 @@ export const createArenaGenerationRuntime = (
           };
           executionMetadata.webPackage = webPackage;
           if (eventData) eventData.webPackage = webPackage;
-        } catch {
-          throw webPackageOutputError('ARENA_WEB_PACKAGE_TARGET_INVALID');
+        } catch (error) {
+          // The failure kind travels in the code, not in the message: the model
+          // output is already retained as plain text, so routing it through the
+          // error channel would only widen that surface for no new information.
+          executionMetadata.webPackageTargetFailure = isWebPackageTargetError(error) ? error.failure : 'unknown';
+          throw webPackageOutputError(webPackageTargetFailureCode(error));
         }
       }
       if (metaEvent) {

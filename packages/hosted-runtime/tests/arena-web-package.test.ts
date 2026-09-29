@@ -202,6 +202,63 @@ describe('Web Package hosted generation', () => {
     expect(overlay.generatedDigest).toBe(await digestWebPackageBytes(new TextEncoder().encode(body)));
   });
 
+  // "格式不对"和"结构不对"要能被用户区分：前者是形态问题，后者是包的 schema
+  // 约束不足——两者的下一步动作完全不同。
+  it.each([
+    ['故事标题：《雨天的薄荷与焦糖》\n\n雨落在橱窗上。', 'ARENA_WEB_PACKAGE_TARGET_MALFORMED', 'json-shape'],
+    ['```json\n[1,2,3]\n```', 'ARENA_WEB_PACKAGE_TARGET_SCHEMA', 'json-schema'],
+    ['', 'ARENA_WEB_PACKAGE_TARGET_INVALID', 'empty-or-oversized'],
+  ])('separates shape failures from schema failures (%s)', async (output, code, failure) => {
+    const local = await createLocalProjectionPackage();
+    const projection = buildWebPackagePromptProjection(local);
+    const generate = vi.fn(async () => ({ body: new Response(output + trailer).body!, telemetry: {} }));
+    const runtime = createArenaGenerationRuntime({
+      checkSafety: async () => null, buildPrompt: buildArenaGenerationPrompt, generate,
+      finalize: vi.fn(async () => ({ resultRef: 'r2:layered', ranking: null })),
+    });
+    const prepared = await runtime.prepare!({
+      request: new Request('https://example.test/api/arena/generate-stream'), actorKey: 'user:42',
+      generationRequestId: 'layered-request',
+      payload: { ...payload, webPackageRef: local.ref, webPackagePromptProjection: projection },
+    });
+    if (prepared instanceof Response || isArenaGenerationAuditableRejection(prepared)) throw new Error('unexpected rejection');
+    const terminal = await runtime.execute({
+      generationId: 'layered-generation', generationRequestId: 'layered-request', actorKey: 'user:42',
+      producerToken: 'producer', payloadHash: 'hash', payload: prepared.executionPayload,
+      signal: new AbortController().signal, emit: async () => {},
+      claimFinalization: async () => ({ kind: 'claimed' }),
+    });
+    expect(terminal.status).toBe('failed');
+    expect(terminal.code).toBe(code);
+    expect(terminal.publicError).toMatchObject({ code, message: expect.stringContaining('Web 包') });
+    expect(generate).toHaveBeenCalledOnce();
+  });
+
+  it('never routes model output through the error channel', async () => {
+    const local = await createLocalProjectionPackage();
+    const projection = buildWebPackagePromptProjection(local);
+    const secret = 'UNIQUE_MODEL_OUTPUT_SENTINEL';
+    const generate = vi.fn(async () => ({ body: new Response(`${secret} 的散文\n\n${trailer}`).body!, telemetry: {} }));
+    const runtime = createArenaGenerationRuntime({
+      checkSafety: async () => null, buildPrompt: buildArenaGenerationPrompt, generate,
+      finalize: vi.fn(async () => ({ resultRef: 'r2:leak', ranking: null })),
+    });
+    const prepared = await runtime.prepare!({
+      request: new Request('https://example.test/api/arena/generate-stream'), actorKey: 'user:42',
+      generationRequestId: 'leak-request',
+      payload: { ...payload, webPackageRef: local.ref, webPackagePromptProjection: projection },
+    });
+    if (prepared instanceof Response || isArenaGenerationAuditableRejection(prepared)) throw new Error('unexpected rejection');
+    const terminal = await runtime.execute({
+      generationId: 'leak-generation', generationRequestId: 'leak-request', actorKey: 'user:42',
+      producerToken: 'producer', payloadHash: 'hash', payload: prepared.executionPayload,
+      signal: new AbortController().signal, emit: async () => {},
+      claimFinalization: async () => ({ kind: 'claimed' }),
+    });
+    expect(terminal.code).toBe('ARENA_WEB_PACKAGE_TARGET_MALFORMED');
+    expect(JSON.stringify(terminal.publicError)).not.toContain(secret);
+  });
+
   // 创作人格（"你是一位才华横溢的作家"）与数据文件生成互斥。宿主需要一条真正的
   // system role 来承载输出纪律，否则它会和创作原则在同一轮 user 消息里互相稀释。
   it('gives package targets a real system role and leaves other contracts flat', async () => {
