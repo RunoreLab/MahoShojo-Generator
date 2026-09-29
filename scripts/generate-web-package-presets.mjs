@@ -5,22 +5,30 @@ import { build } from 'esbuild';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const packageRoot = path.join(root, 'packages/web-package');
-const mediaTypes = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.json': 'application/json', '.md': 'text/markdown', '.txt': 'text/plain', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif', '.woff2': 'font/woff2', '.mp3': 'audio/mpeg', '.mp4': 'video/mp4' };
 let verifier;
+let sharedMediaTypes;
 async function getVerifier() {
   if (!verifier) {
     const result = await build({
-      stdin: { contents: "export { verifyWebPackage, digestWebPackageBytes } from './packages/web-package/src/verify.ts'; export { WebPackagePathSchema } from './packages/contracts/src/web-package.ts';", resolveDir: root },
+      stdin: {
+        contents: [
+          "export { verifyWebPackage, digestWebPackageBytes } from './packages/web-package/src/verify.ts';",
+          "export { WebPackagePathSchema } from './packages/contracts/src/web-package.ts';",
+          "export { resolveWebPackageMediaType } from './packages/web-package/src/media-types.ts';",
+        ].join('\n'),
+        resolveDir: root,
+      },
       bundle: true, platform: 'node', format: 'esm', write: false,
     });
     verifier = await import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`);
+    sharedMediaTypes = verifier;
   }
   return verifier;
 }
 
 /** Filesystem is authoring authority; the wire manifest still contains verified descriptors. */
 export async function compilePreset(directory) {
-  const { verifyWebPackage, digestWebPackageBytes, WebPackagePathSchema } = await getVerifier();
+  const { verifyWebPackage, digestWebPackageBytes, WebPackagePathSchema, resolveWebPackageMediaType } = await getVerifier();
   const files = [];
   async function walk(relative = '') {
     const current = path.join(directory, relative);
@@ -34,7 +42,7 @@ export async function compilePreset(directory) {
       if (stat.isDirectory()) { await walk(logical); continue; }
       if (!stat.isFile()) throw new Error(`Unsupported asset: ${logical}`);
       if (logical === 'web-package.json') continue;
-      const mediaType = mediaTypes[path.extname(logical).toLowerCase()];
+      const mediaType = resolveWebPackageMediaType(logical);
       if (!mediaType) throw new Error(`Unknown asset media type: ${logical}`);
       const bytes = await readFile(absolute);
       files.push({ path: logical, mediaType, bytes });

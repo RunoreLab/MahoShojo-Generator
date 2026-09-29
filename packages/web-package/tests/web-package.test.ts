@@ -207,10 +207,14 @@ describe('canonical ZIP artifact and generic JSON Schema validation', () => {
     const missingPath = base.manifest.files[0]!.path;
     const missingBytes = base.readFile(missingPath)!;
     delete entries[missingPath];
-    await expect(unpackWebPackageZip(zipSync(entries, { level: 6, mtime }))).rejects.toThrow('缺少文件');
+    await expect(unpackWebPackageZip(zipSync(entries, { level: 6, mtime })))
+      .rejects.toMatchObject({ code: 'missing-file' });
     entries[missingPath] = new Uint8Array(missingBytes);
+    // A root-layout archive without a manifest is discovered from its contents
+    // rather than rejected; only a malformed manifest is a hard failure.
     delete entries['web-package.json'];
-    await expect(unpackWebPackageZip(zipSync(entries, { level: 6, mtime }))).rejects.toThrow('web-package.json');
+    await expect(unpackWebPackageZip(zipSync(entries, { level: 6, mtime })))
+      .resolves.toMatchObject({ manifest: { entry: 'index.html' } });
     entries['web-package.json'] = new TextEncoder().encode('{');
     await expect(unpackWebPackageZip(zipSync(entries, { level: 6, mtime }))).rejects.toThrow('合法 JSON');
   });
