@@ -17,6 +17,8 @@ export const ArenaErrorCode = z.enum([
   'not-found',
   'room-closed',
   'generation-failed',
+  // 宿主 Web 包输出契约失败；与可重试的 generation-failed 区分，重试不会改变结果。
+  'web-package-output-invalid',
   'invalid-message',
   'validation-failed',
   'conflict',

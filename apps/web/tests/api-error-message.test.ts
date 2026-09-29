@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'vitest';
 
+import { getPublicAiErrorMessage } from '@mahoshojo/hosted-api/regular-generation';
+
 import { INFRASTRUCTURE_ERROR_MESSAGES, resolveApiErrorMessage } from '@/lib/client/apiError';
 
 describe('resolveApiErrorMessage', () => {
@@ -61,5 +63,18 @@ describe('resolveApiErrorMessage', () => {
         fallback: '请求失败',
       }),
     ).toBe('余额不足，请充值后重试');
+  });
+
+  // Web 包目标校验失败曾经只剩一个 code，用户看到的是"服务器流式响应异常"。
+  test.each([
+    'ARENA_WEB_PACKAGE_OUTPUT_INVALID',
+    'ARENA_WEB_PACKAGE_TARGET_INVALID',
+  ])('surfaces the host-authored Web 包 failure copy for %s', (code) => {
+    const message = getPublicAiErrorMessage(code);
+    expect(message).toBeTruthy();
+    expect(resolveApiErrorMessage({
+      payload: { ok: false, status: 'failed', code, message },
+      fallback: '服务器流式响应异常',
+    })).toBe(message);
   });
 });

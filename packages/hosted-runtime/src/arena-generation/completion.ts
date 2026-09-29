@@ -1,4 +1,4 @@
-import { createSafePublicAiError, getStreamCompletionErrorMessage } from '@mahoshojo/hosted-api/regular-generation';
+import { createSafePublicAiError, getPublicAiErrorMessage } from '@mahoshojo/hosted-api/regular-generation';
 
 const finishReasons = new Set(['stop', 'length', 'content-filter', 'tool-calls', 'error', 'other', 'unknown']);
 export const normalizeFinishReason = (value: unknown): string =>
@@ -11,7 +11,7 @@ export const assertStreamCompletion = (telemetry: Record<string, unknown>): void
   if (reason === 'stop') return;
   const code = reason === 'length' ? 'AI_OUTPUT_TRUNCATED'
     : reason === 'content-filter' ? 'AI_OUTPUT_FILTERED' : 'AI_STREAM_INCOMPLETE';
-  throw createSafePublicAiError({ code, message: getStreamCompletionErrorMessage(code)! });
+  throw createSafePublicAiError({ code, message: getPublicAiErrorMessage(code)! });
 };
 
 /** Do not archive cancellation, policy rejection, malformed executable Web output or arbitrary failures. */

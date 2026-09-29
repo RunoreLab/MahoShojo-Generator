@@ -5,7 +5,7 @@ import {
   resolveResumeCursor,
 } from './sse';
 import type { SafePublicAiErrorProjection } from '../regular-generation';
-import { getStreamCompletionErrorMessage } from '../regular-generation';
+import { getPublicAiErrorMessage } from '../regular-generation';
 import { ARENA_RESOURCE_BUDGET } from './resource-budget';
 import { extractArenaMultiplayerParticipation, type ArenaMultiplayerParticipation } from '@mahoshojo/contracts/arena-room';
 import { WebPackageArtifactSchema, type WebPackageArtifact } from '@mahoshojo/contracts/web-package';
@@ -1991,8 +1991,8 @@ export const createArenaGenerationService = (
       data: {
         ok: terminal.status === 'completed',
         status: terminal.status,
-        ...(getStreamCompletionErrorMessage(terminal.errorCode)
-          ? { message: getStreamCompletionErrorMessage(terminal.errorCode) } : {}),
+        ...(getPublicAiErrorMessage(terminal.errorCode)
+          ? { message: getPublicAiErrorMessage(terminal.errorCode) } : {}),
         ...(
           terminal.status === 'failed' || terminal.status === 'producer_lost'
             ? {

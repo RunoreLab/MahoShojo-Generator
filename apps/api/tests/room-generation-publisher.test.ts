@@ -682,6 +682,33 @@ describe('RoomGenerationPublisher typed generation consumer', () => {
     });
   });
 
+  it('Web 包输出契约失败不塌缩成可重试的 generation-failed', async () => {
+    for (const code of ['ARENA_WEB_PACKAGE_OUTPUT_INVALID', 'ARENA_WEB_PACKAGE_TARGET_INVALID']) {
+      const harness = await createRunningActor({ running: false });
+      harness.setNow('2026-08-28T00:03:00.000Z');
+      const publisher = createRoomGenerationPublisher({
+        actor: harness.actor,
+        authority: issueArenaRoomGenerationPublisherAuthority({
+          roomId: ROOM_ID,
+          roomEpoch: ROOM_EPOCH,
+          generationRequestId: GENERATION_REQUEST_ID,
+          generationId: GENERATION_ID,
+          attempt: 1,
+          expiresAt: EXPIRES_AT,
+        }),
+        now: () => Date.parse('2026-08-28T00:03:00.000Z'),
+      });
+
+      await expect(publisher.attach(subscriptionOf([
+        { id: '1', type: 'error', status: 'failed', code },
+      ]))).resolves.toEqual({ kind: 'failed', errorCode: 'web-package-output-invalid' });
+      const state = harness.actor.getSnapshot();
+      expect(state?.snapshot.activeGeneration?.state).toBe('failed');
+      expect(state?.generationLedger.find((entry) => entry.mirror.generationId === GENERATION_ID)?.errorCode)
+        .toBe('web-package-output-invalid');
+    }
+  });
+
   it('把 typed error/无 result identity 的 completed 映射为稳定 generation-failed', async () => {
     for (const terminal of [
       { id: '1', type: 'error', status: 'producer_lost', code: 'PRODUCER_OWNERSHIP_LOST' },

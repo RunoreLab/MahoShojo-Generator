@@ -85,12 +85,12 @@ describe('Web Package hosted generation', () => {
 
   it.each([
     [content + trailer + '\n', 'completed'],
-    [trailer, 'failed'],
-    [content + trailer + trailer, 'failed'],
-    [content, 'failed'],
-    [content + '<!-- MAHOSHOJO_ARENA_META {"version":1} -->', 'failed'],
-    [content + trailer + 'extra', 'failed'],
-  ])('validates before authority and never repairs with another provider call (%s)', async (output, status) => {
+    [trailer, 'ARENA_WEB_PACKAGE_TARGET_INVALID'],
+    [content + trailer + trailer, 'ARENA_WEB_PACKAGE_OUTPUT_INVALID'],
+    [content, 'ARENA_WEB_PACKAGE_OUTPUT_INVALID'],
+    [content + '<!-- MAHOSHOJO_ARENA_META {"version":1} -->', 'ARENA_WEB_PACKAGE_OUTPUT_INVALID'],
+    [content + trailer + 'extra', 'ARENA_WEB_PACKAGE_OUTPUT_INVALID'],
+  ])('validates before authority and never repairs with another provider call (%s)', async (output, code) => {
     const generate = vi.fn(async () => ({ body: new Response(output).body!, telemetry: {} }));
     const finalize = vi.fn(async () => ({ resultRef: 'r2:package-test', ranking: null }));
     const runtime = createArenaGenerationRuntime({
@@ -110,12 +110,12 @@ describe('Web Package hosted generation', () => {
       signal: new AbortController().signal, emit: async (event) => { events.push(event); },
       claimFinalization: async () => ({ kind: 'claimed' }),
     });
-    expect(terminal.status).toBe(status);
+    expect(terminal.status).toBe(code === 'completed' ? 'completed' : 'failed');
     expect(generate).toHaveBeenCalledOnce();
     expect(finalize).toHaveBeenCalledOnce();
     const finalized = vi.mocked(finalize).mock.calls[0] as unknown as [{ status: string; markdown: string; metadata: Record<string, unknown> }];
-    expect(finalized[0].status).toBe(status);
-    if (status === 'completed') {
+    expect(finalized[0].status).toBe(code === 'completed' ? 'completed' : 'failed');
+    if (code === 'completed') {
       const overlay = await createWebPackageOverlay(BUILTIN_ARENA_NEWS_PACKAGE_REF, content);
       const artifact = { packageRef: overlay.packageRef, targetPath: overlay.targetPath,
         targetMediaType: overlay.targetMediaType, generatedDigest: overlay.generatedDigest };
@@ -124,7 +124,9 @@ describe('Web Package hosted generation', () => {
       expect(terminal.webPackage).toEqual(artifact);
       expect(events.find((event) => event.type === 'meta')?.data).toMatchObject({ webPackage: artifact });
     } else {
-      expect(terminal.code).toBe('ARENA_WEB_PACKAGE_OUTPUT_INVALID');
+      // 失败必须自带用户可执行的中文说明：code 会一路透传到 SSE error 帧。
+      expect(terminal.code).toBe(code);
+      expect(terminal.publicError).toMatchObject({ code, message: expect.stringContaining('Web 包') });
       expect(terminal.webPackage).toBeUndefined();
       expect(finalized[0].metadata.webPackage).toBeUndefined();
     }

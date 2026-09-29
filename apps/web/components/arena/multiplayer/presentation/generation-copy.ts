@@ -91,6 +91,7 @@ const generationErrorCodeCopy: Readonly<Record<string, string>> = {
   ARENA_MODEL_UNKNOWN: '模型服务配置无效，请联系房主检查模型设置。',
   ARENA_PROVIDER_KEY_EMPTY: '模型服务未配置，请联系房主检查模型设置。',
   GENERATION_REQUEST_CONFLICT: '生成请求发生冲突，请稍后重试。',
+  'web-package-output-invalid': 'AI 生成的内容没有通过所选 Web 包的格式校验，重试不会改变结果；请改用普通战报格式或换一个 Web 包。',
   ARENA_MATERIALIZATION_VERSION_UNSUPPORTED: '当前房间数据版本过旧，无法继续生成；请联系房主重新开始。',
 };
 

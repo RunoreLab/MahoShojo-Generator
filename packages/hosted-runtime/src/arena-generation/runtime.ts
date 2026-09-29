@@ -6,7 +6,7 @@ import {
   isArenaPreparationSeed,
   isGenerationCancelReason,
 } from '@mahoshojo/hosted-api/arena-generation/service';
-import { readSafePublicAiError } from '@mahoshojo/hosted-api/regular-generation';
+import { readSafePublicAiError, createSafePublicAiError, getPublicAiErrorMessage } from '@mahoshojo/hosted-api/regular-generation';
 import {
   ARENA_RESOURCE_BUDGET,
   countArenaReferenceItems,
@@ -129,12 +129,15 @@ class ArenaOutputBudgetExceededError extends Error {
   }
 }
 
-class ArenaWebPackageOutputError extends Error {
-  constructor() {
-    super('ARENA_WEB_PACKAGE_OUTPUT_INVALID');
-    this.name = 'ArenaWebPackageOutputError';
-  }
-}
+/**
+ * Web 包输出契约失败。两个原因对用户是完全不同的下一步，因此分成两个公开
+ * 错误码：缺少 Arena control trailer（协议没遵守，重试可能仍失败）与目标
+ * 文件未通过格式/schema 校验（包期望的产物没拿到）。两者都不携带模型输出、
+ * 校验细节或 provider 数据。
+ */
+const webPackageOutputError = (
+  code: 'ARENA_WEB_PACKAGE_OUTPUT_INVALID' | 'ARENA_WEB_PACKAGE_TARGET_INVALID',
+): Error => createSafePublicAiError({ code, message: getPublicAiErrorMessage(code)! });
 
 const validationFailure = (
   code: string,
@@ -444,7 +447,6 @@ const errorCodeOf = (error: unknown, signal: AbortSignal): string => {
   }
   if (error instanceof Error && error.name === 'AbortError') return 'GENERATION_ABORTED';
   if (error instanceof ArenaOutputBudgetExceededError) return 'ARENA_OUTPUT_BUDGET_EXCEEDED';
-  if (error instanceof ArenaWebPackageOutputError) return 'ARENA_WEB_PACKAGE_OUTPUT_INVALID';
   return 'GENERATION_FAILED';
 };
 
@@ -884,7 +886,7 @@ export const createArenaGenerationRuntime = (
         const report = meta?.report as Record<string, unknown> | undefined;
         if (meta?.version !== 1 || !report || typeof report.headline !== 'string' || !report.headline.trim()
           || typeof report.winner !== 'string' || !report.winner.trim()) {
-          throw new ArenaWebPackageOutputError();
+          throw webPackageOutputError('ARENA_WEB_PACKAGE_OUTPUT_INVALID');
         }
         try {
           const projection = prepared.metadata.webPackagePromptProjection;
@@ -914,7 +916,7 @@ export const createArenaGenerationRuntime = (
           executionMetadata.webPackage = webPackage;
           if (eventData) eventData.webPackage = webPackage;
         } catch {
-          throw new ArenaWebPackageOutputError();
+          throw webPackageOutputError('ARENA_WEB_PACKAGE_TARGET_INVALID');
         }
       }
       if (metaEvent) {

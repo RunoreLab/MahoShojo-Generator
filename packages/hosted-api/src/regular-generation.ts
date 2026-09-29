@@ -13,22 +13,32 @@ export const PUBLIC_AI_ERROR_CODES = Object.freeze([
   'AI_OUTPUT_TRUNCATED',
   'AI_OUTPUT_FILTERED',
   'AI_STREAM_INCOMPLETE',
+  'ARENA_WEB_PACKAGE_OUTPUT_INVALID',
+  'ARENA_WEB_PACKAGE_TARGET_INVALID',
 ] as const);
 
 export type PublicAiErrorCode = typeof PUBLIC_AI_ERROR_CODES[number];
 
-export const getStreamCompletionErrorMessage = (code: unknown): string | null => {
-  switch (code) {
-    case 'AI_OUTPUT_TRUNCATED':
-      return '生成达到输出上限，正文未完整完成。已保留收到的内容，请调整生成设置后手动重试。';
-    case 'AI_OUTPUT_FILTERED':
-      return '上游内容过滤终止了生成，当前内容不构成完整战报。';
-    case 'AI_STREAM_INCOMPLETE':
-      return '未收到可靠的正常结束信号，无法确认战报完整性。已保留收到的内容，不会自动重新生成。';
-    default:
-      return null;
-  }
-};
+/**
+ * Output-contract failures the user can act on. They carry no model output, no
+ * validation detail and no provider data: only what happened and what to do, so
+ * a code that reaches the client always explains itself.
+ */
+const PUBLIC_AI_ERROR_MESSAGES: Readonly<Partial<Record<PublicAiErrorCode, string>>> = Object.freeze({
+  AI_OUTPUT_TRUNCATED: '生成达到输出上限，正文未完整完成。已保留收到的内容，请调整生成设置后手动重试。',
+  AI_OUTPUT_FILTERED: '上游内容过滤终止了生成，当前内容不构成完整战报。',
+  AI_STREAM_INCOMPLETE: '未收到可靠的正常结束信号，无法确认战报完整性。已保留收到的内容，不会自动重新生成。',
+  ARENA_WEB_PACKAGE_OUTPUT_INVALID:
+    'Web 包输出缺少可解析的 Arena 战报元数据结尾，无法确认本次结果完整。收到的内容已按纯文本保留，可在下方查看后重试。',
+  ARENA_WEB_PACKAGE_TARGET_INVALID:
+    'AI 生成的 Web 包目标文件未通过格式或 schema 校验，本次结果不会应用到 Web 包。收到的内容已按纯文本保留，可在下方查看后重试。',
+});
+
+export const getPublicAiErrorMessage = (code: unknown): string | null => (
+  typeof code === 'string' && Object.prototype.hasOwnProperty.call(PUBLIC_AI_ERROR_MESSAGES, code)
+    ? PUBLIC_AI_ERROR_MESSAGES[code as PublicAiErrorCode] ?? null
+    : null
+);
 
 export type SafePublicAiErrorProjection = Readonly<{
   code: PublicAiErrorCode;
@@ -108,7 +118,11 @@ export const createSafePublicAiError = (
       ? 'StreamReadTimeoutError'
       : projection.code === 'AI_PROVIDER_REDIRECT_BLOCKED'
         ? 'AIProviderRedirectError'
-        : 'AI_APICallError';
+        : projection.code === 'ARENA_WEB_PACKAGE_OUTPUT_INVALID'
+          ? 'ArenaWebPackageOutputError'
+          : projection.code === 'ARENA_WEB_PACKAGE_TARGET_INVALID'
+            ? 'ArenaWebPackageTargetError'
+            : 'AI_APICallError';
   if (projection.upstreamStatus !== undefined) {
     Object.assign(error, {
       status: projection.upstreamStatus,
