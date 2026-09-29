@@ -15,7 +15,8 @@ Visual Novel Lite、星屑社区、命运岔路从未部署，已删除其资产
 - 根导出：验证、ZIP、不可变实例、Prompt Projection、重放、归档导入与错误码。
 - `src/archive.ts` / `src/import.ts` / `src/media-types.ts`：信封归一化、缺省导入与共享媒体类型映射；预设生成器复用同一份媒体类型映射。
 - `/browser`：`renderWebPackageInstance(instance)`，无预设 ID 分支；返回展示 HTML 与诊断，不修改 Base/Overlay 原始字节。
-- `/security`：Base/有效实例能力预检和摘要绑定授权判定；不执行作者代码，不访问网络。启发式规则只在标记无法被标记语言模仿时才报告——`host-page-access` 要求 window/self/globalThis/frames 限定或未被 `.`/`-`/`#` 前置的裸全局，以免把 CSS `top`、`.top` 类名与选择器判成宿主访问。
+- `/security`：Base/有效实例能力预检和摘要绑定授权判定；不执行作者代码，不访问网络。启发式规则只在标记无法被标记语言模仿时才报告——`host-page-access` 要求 window/self/globalThis/frames 限定或未被 `.`/`-`/`#` 前置的裸全局，以免把 CSS `top`、`.top` 类名与选择器判成宿主访问；`scripts` 的内联事件属性要求完整属性名就是 `on…` 且位于标签内，`data-one=`、`oneTime = true` 不算；`dynamic-execution` 只匹配可执行的 `data:`/`blob:` 媒体类型，内嵌 base64 图片不算；`site-storage` 要求真实访问点（`document.cookie`、`caches.open` 等），说明文字不算。
+- 预检不把提示投影输入（`generation.instructions` / `schema` / `assetCatalog`）与 Markdown 当作运行时资源扫描：其中的代码片段、地址与"不要使用 cookie"之类的说明只是创作参考文本。被跳过的文件数量会在 `uncertainty` 中显式说明，不会静默漏扫。XML 命名空间与 DOCTYPE 标识符不计入网络目的地。规则变更会提升 `WEB_PACKAGE_SCAN_VERSION`，使旧版本签发的长期信任重新确认。
 - `/testing/fixtures`：仅测试使用的显式跨 workspace 夹具入口，不进入产品根导出。
 
 HTML/CSS/JavaScript 分别使用 parse5、css-tree、Acorn 解析，三者为 MIT 依赖。相对资源解析以引用文件为基准；CSS 和媒体转为 data URL，模块 Blob URL 在子窗口创建，并由 import map 处理循环及动态导入。局部 fetch 提供 GET/HEAD、正确 MIME、404/405；异步 XHR 支持包内 GET。文件 query 不改变底层 bytes，fragment 保留。`entry` 不必等于生成目标。

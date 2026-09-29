@@ -1,7 +1,9 @@
 import type { WebPackageRef } from '@mahoshojo/contracts/web-package';
 import type { ResolvedWebPackage, WebPackageInstance } from './index';
 
-export const WEB_PACKAGE_SCAN_VERSION = 1;
+// 2: 收紧 inline handler / data: / site-storage 规则，跳过提示词与 Markdown 文件，
+// 并把 XML 命名空间标识符排除在网络目的地之外。旧版本签发的长期信任必须重新确认。
+export const WEB_PACKAGE_SCAN_VERSION = 2;
 export const WEB_PACKAGE_TRUST_POLICY_VERSION = 1;
 export const WEB_PACKAGE_RISK_LABELS = {
   scripts: '脚本执行', audio: '音频', video: '视频', network: '网络访问',
@@ -56,14 +58,43 @@ const sorted = <T extends string>(items: Iterable<T>): T[] => [...new Set(items)
  * warning, a false positive costs trust in every other warning.
  */
 const HOST_PAGE_ACCESS = /(?:window|self|globalThis|frames)\s*\.\s*(?:parent|top|opener|frameElement)\b|(?:^|[^\w.$\-#])(?:parent|opener|frameElement)\b/u;
-const rules: readonly [WebPackageRiskCategory, RegExp][] = [
-  ['scripts', /<script\b|\bon\w+\s*=|javascript\s*:/iu],
+/**
+ * Inline event-handler attribute: only real when the whole attribute name is
+ * `on…` inside a tag. `oneTime = true` is an ordinary identifier, and
+ * `data-one=` / `aria-on*` are prefixed attribute names, not handlers.
+ */
+const INLINE_HANDLER_ATTRIBUTE = /\bon[a-z]+\s*=/giu;
+const isInlineHandlerAttribute = (text: string, index: number): boolean => {
+  if (index > 0 && !/\s/u.test(text[index - 1] ?? '')) return false;
+  const open = text.lastIndexOf('<', index);
+  if (open < 0) return false;
+  const close = text.indexOf('>', open);
+  if (close >= 0 && close < index) return false;
+  return /^<\/?[A-Za-z][^<>]*$/u.test(text.slice(open, index));
+};
+/** `data:image/png;base64,…` is an inline asset, not executable script content. */
+const EXECUTABLE_DATA_URL = /\bblob:|(?:data|blob):(?:text|application)\/(?:x-)?(?:java|ecma)script\b/iu;
+/** `cookie`/`caches` appear in ordinary prose; require the actual access site. */
+const SITE_STORAGE = /\b(?:localStorage|sessionStorage|indexedDB|BroadcastChannel)\b|\bdocument\s*\.\s*cookie\b|\bcaches\s*\.\s*(?:open|match|has|delete|keys)\b/u;
+/** XML namespaces and DOCTYPE identifiers are identifiers, never fetched. */
+const XML_IDENTIFIERS = /\bxmlns(?::[A-Za-z_][\w.-]*)?\s*=\s*(?:"[^"]*"|'[^']*')|\bxsi:schemaLocation\s*=\s*(?:"[^"]*"|'[^']*')|<!DOCTYPE[^>]*>/giu;
+
+type RiskRule = readonly [
+  WebPackageRiskCategory,
+  RegExp,
+  ((_text: string, _match: RegExpExecArray) => boolean)?,
+];
+
+const rules: readonly RiskRule[] = [
+  ['scripts', /<script\b|javascript\s*:/iu],
+  ['scripts', INLINE_HANDLER_ATTRIBUTE, (_text, match) => isInlineHandlerAttribute(_text, match.index)],
   ['audio', /<audio\b|\bAudio(?:Context)?\s*\(/u],
   ['video', /<video\b/iu],
   ['network', /\b(?:fetch|XMLHttpRequest|WebSocket|EventSource|sendBeacon)\b|https?:\/\/|wss?:\/\//u],
   ['host-page-access', HOST_PAGE_ACCESS],
-  ['site-storage', /\b(?:localStorage|sessionStorage|indexedDB|BroadcastChannel|cookie|caches)\b/u],
-  ['dynamic-execution', /\b(?:eval|Function|WebAssembly)\s*[.(]|\bimport\s*\(|(?:blob|data):(?:text\/javascript|application\/javascript)?/u],
+  ['site-storage', SITE_STORAGE],
+  ['dynamic-execution', /\b(?:eval|Function|WebAssembly)\s*[.(]|\bimport\s*\(/iu],
+  ['dynamic-execution', EXECUTABLE_DATA_URL],
   ['workers', /\b(?:Worker|SharedWorker)\s*\(/u],
   ['service-worker', /\bserviceWorker\b|ServiceWorkerContainer/u],
   ['navigation', /\b(?:window\s*\.\s*open|location\s*[.=]|download\s*=)|target\s*=\s*["']?_blank/u],
@@ -71,6 +102,29 @@ const rules: readonly [WebPackageRiskCategory, RegExp][] = [
 ];
 const textType = (type: string): boolean => type.startsWith('text/') || /(?:json|javascript|svg\+xml|xml)$/u.test(type);
 const activeType = (type: string): boolean => /(?:html|javascript|css|svg\+xml)$/u.test(type);
+/**
+ * 提示投影输入（instructions / schema / assetCatalog）不是运行时资源：其中的
+ * 代码片段、URL 与 "不要使用 cookie" 之类的说明都只是创作参考文本。把它们当作
+ * 运行时代码扫描，会让一个完全本地的包长期挂着"网络访问""站点存储"警告。
+ */
+const isPromptProjectionFile = (base: ResolvedWebPackage, path: string): boolean => {
+  const { instructions, schema, assetCatalog } = base.manifest.generation;
+  return path === instructions || path === schema || path === assetCatalog;
+};
+/** Markdown 在浏览器里没有执行语义；其内容只可能被读取它的脚本解释。 */
+const isDocumentationFile = (type: string): boolean => type === 'text/markdown';
+
+const firstConfirmedMatch = (
+  pattern: RegExp,
+  text: string,
+  confirm?: (_text: string, _match: RegExpExecArray) => boolean,
+): RegExpExecArray | null => {
+  const scanner = new RegExp(pattern.source, pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`);
+  for (const match of text.matchAll(scanner)) {
+    if (!confirm || confirm(text, match)) return match;
+  }
+  return null;
+};
 
 function scan(base: ResolvedWebPackage, instance?: WebPackageInstance): WebPackageRiskProfile {
   const findings: WebPackageRiskFinding[] = [];
@@ -89,6 +143,7 @@ function scan(base: ResolvedWebPackage, instance?: WebPackageInstance): WebPacka
     if (findings.length < MAX_FINDINGS) findings.push({ category, path, source, evidence: evidence.slice(0, 160) });
     else { status = 'partial'; uncertainty.add('部分风险证据未展开。'); }
   };
+  let skippedPromptFiles = 0;
   for (const file of [...files].sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0)) {
     const isOverlay = Boolean(instance && file.path === instance.overlay.targetPath);
     const source = isOverlay ? 'overlay' : 'base';
@@ -101,7 +156,9 @@ function scan(base: ResolvedWebPackage, instance?: WebPackageInstance): WebPacka
       add('dynamic-execution', file.path, source, 'WebAssembly 二进制，未分析其行为');
       uncertainty.add('包内包含无法静态分析的二进制执行内容。');
     }
-    if (!textType(type)) continue;
+    const scanned = isOverlay || !(isPromptProjectionFile(base, file.path) || isDocumentationFile(type));
+    if (!scanned) skippedPromptFiles += 1;
+    if (!textType(type) || !scanned) continue;
     if (size > MAX_SCAN_FILE_BYTES || size > remaining) {
       status = 'partial'; uncertainty.add('部分文本超过扫描预算，未分析；此限制不影响包导入。'); continue;
     }
@@ -112,13 +169,20 @@ function scan(base: ResolvedWebPackage, instance?: WebPackageInstance): WebPacka
       if (!bytes) throw new Error('missing');
       text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
     } catch { status = 'partial'; uncertainty.add('存在无法读取或解码的文本文件。'); continue; }
-    for (const [category, pattern] of rules) {
-      const match = pattern.exec(text);
-      if (match) add(category, file.path, source, text.slice(Math.max(0, match.index - 24), match.index + 100));
+    // 命名空间与 DOCTYPE 里的 URL 是标识符，不是会被取回的网络目的地。
+    const scannable = type === 'image/svg+xml' || type.endsWith('+xml') || type === 'text/xml' || type === 'application/xml'
+      ? text.replace(XML_IDENTIFIERS, ' ')
+      : text;
+    for (const [category, pattern, confirm] of rules) {
+      const match = firstConfirmedMatch(pattern, scannable, confirm);
+      if (match) add(category, file.path, source, scannable.slice(Math.max(0, match.index - 24), match.index + 100));
     }
-    for (const match of text.matchAll(/(?:https?|wss?):\/\/[^\s"'<>`\\)\]}]+/gu)) {
+    for (const match of scannable.matchAll(/(?:https?|wss?):\/\/[^\s"'<>`\\)\]}]+/gu)) {
       try { origins.add(new URL(match[0]).origin); } catch { uncertainty.add('存在无法解析的网络地址。'); }
     }
+  }
+  if (skippedPromptFiles > 0) {
+    uncertainty.add(`包内 ${skippedPromptFiles} 个提示词/说明文件未按运行时能力扫描；其中的代码片段与地址只是创作参考文本。`);
   }
   if (categories.has('network')) uncertainty.add('网络目的地可能动态构造；远程内容未下载、未分析，可能随时变化。');
   if (categories.has('dynamic-execution')) uncertainty.add('动态代码或模块加载使实际行为无法仅由文本确定。');

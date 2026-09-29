@@ -4,6 +4,7 @@ import {
   BUILTIN_WEB_PACKAGE_PRESETS, buildWebPackagePromptProjection, createWebPackageInstance,
   createWebPackageOverlay, packWebPackageZip, resolveWebPackage, unpackWebPackageZip,
 } from '../src';
+import { scanWebPackageBase } from '../src/security';
 
 const ref = BUILTIN_WEB_PACKAGE_PRESETS.find((preset) => preset.packageRef.id === 'mahoshojo.arena-news')!.packageRef;
 
@@ -20,8 +21,7 @@ describe('Arena News resource package', () => {
     }
   });
 
-  it('asks for complete HTML and leaves assets immutable when replacing the entry', async () => {
-    const base = await resolveWebPackage(ref);
+  it('asks for complete HTML and leaves assets immutable when replacing the entry', async () => {    const base = await resolveWebPackage(ref);
     const projection = buildWebPackagePromptProjection(base);
     expect(projection.target).toEqual({ path: 'index.html', mode: 'replace', mediaType: 'text/html' });
     expect(projection.schema).toBeUndefined();
@@ -35,5 +35,19 @@ describe('Arena News resource package', () => {
     for (const file of base.manifest.files.filter((file) => file.path !== 'index.html')) {
       expect(instance.readFile(file.path)).toEqual(base.readFile(file.path));
     }
+  });
+
+  // 这个包完全离线：没有网络代码、没有存储、没有动态执行。SVG 命名空间、
+  // 内嵌 data: 图片和提示词文件曾经让它长期挂着三条不成立的警告，
+  // 其中两个假 origin 还会写进同源授权凭据。
+  it('does not claim network, storage or dynamic execution it does not have', async () => {
+    const profile = scanWebPackageBase(await resolveWebPackage(ref));
+    expect(profile.status).toBe('complete');
+    expect(profile.externalOrigins).toEqual([]);
+    for (const category of ['network', 'site-storage', 'dynamic-execution', 'host-page-access'] as const) {
+      expect(profile.categories, category).not.toContain(category);
+    }
+    expect(profile.findings.map((finding) => `${finding.path}:${finding.category}`).sort())
+      .toEqual(['scripts/news.js:navigation', 'scripts/news.js:scripts']);
   });
 });
