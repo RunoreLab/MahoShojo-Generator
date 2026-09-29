@@ -779,7 +779,7 @@ export const createStreamPromptBuilder = (
     finalPrompt += `\n\n【重要指令】请你必须使用【${language}】进行内容创作。`;
 
     if (writeCurrentState) {
-        finalPrompt += `\n\n【当前状态同步】请在输出的 impacts 数组中为每位角色填写 currentStateSummary 字段，精确描述事件结束后的即时状态（如身体状况、关系、心情或想法）。如果当前状态已有既定格式，请遵循该格式。如果当前状态中存在物品列表，请确保物品名称和数量准确反映事后情况。`;
+        finalPrompt += `\n\n【当前状态同步】请在文末 Arena control trailer 的 impacts 数组中为每位角色填写 currentStateSummary 字段，精确描述事件结束后的即时状态（如身体状况、关系、心情或想法）。如果当前状态已有既定格式，请遵循该格式。如果当前状态中存在物品列表，请确保物品名称和数量准确反映事后情况。`;
     }
 
     if (outputContract === 'structured-report') return finalPrompt;
@@ -821,6 +821,11 @@ export const createStreamPromptBuilder = (
     if (shouldAllowStreamMeta) {
         const requiresImpact = writeArenaHistory;
         const requiresCurrentState = writeCurrentState;
+        // 数据类目标没有"正文标题/胜利者"。沿用散文的措辞会反向暗示模型
+        // "你要写一篇有标题和胜者的正文"，这正是纯文本战报的一个诱因。
+        const headlineWinnerRule = targetIsDataFile
+            ? 'report.headline 与 report.winner 请根据目标文件里的实际内容概括（目标文件是数据文件，没有正文标题与胜利者）'
+            : 'report.headline 与 report.winner 需与正文标题/胜利者保持一致';
 
         if (requiresImpact || requiresCurrentState) {
             const requiredFields = [
@@ -834,24 +839,60 @@ export const createStreamPromptBuilder = (
                 `要求：\n` +
                 `- 注释必须以 "<!-- MAHOSHOJO_ARENA_META " 开头，以 " -->" 结尾。\n` +
                 `- JSON 必须是一个对象，包含 version=1 以及 impacts 数组。\n` +
-                `- JSON 中请额外包含 report 对象：report.headline 与 report.winner（与正文标题/胜利者保持一致），用于兜底解析。\n` +
+                `- JSON 中请额外包含 report 对象用于兜底解析：${headlineWinnerRule}。\n` +
                 `- impacts 必须覆盖每一位参战角色；每个元素字段要求：${requiredFields}。\n` +
                 `- 除注释外不要输出任何额外文本。\n\n` +
                 `示例（仅示例，不要照抄名字）：\n` +
-                `<!-- MAHOSHOJO_ARENA_META {\"version\":1,\"report\":{\"headline\":\"……\",\"winner\":\"……\"},\"impacts\":[{\"characterName\":\"角色A\",\"impact\":\"……\",\"currentStateSummary\":\"……\"}]} -->`;
+                `<!-- MAHOSHOJO_ARENA_META {"version":1,"report":{"headline":"……","winner":"……"},"impacts":[{"characterName":"角色A","impact":"……","currentStateSummary":"……"}]} -->`;
         } else {
             finalPrompt += `\n\n【元数据（务必输出）】\n` +
                 `在全文最后一行，追加一段 HTML 注释（不会显示给用户），内容必须包含一段 JSON，用于系统兜底解析。\n` +
                 `要求：\n` +
                 `- 注释必须以 "<!-- MAHOSHOJO_ARENA_META " 开头，以 " -->" 结尾。\n` +
-                `- JSON 必须是一个对象，至少包含 version=1 与 report 对象（report.headline 与 report.winner 与正文标题/胜利者保持一致）。\n` +
+                `- JSON 必须是一个对象，至少包含 version=1 与 report 对象（${headlineWinnerRule}）。\n` +
                 `- 除注释外不要输出任何额外文本。\n\n` +
                 `示例（仅示例，不要照抄名字）：\n` +
-                `<!-- MAHOSHOJO_ARENA_META {\"version\":1,\"report\":{\"headline\":\"……\",\"winner\":\"……\"}} -->`;
+                `<!-- MAHOSHOJO_ARENA_META {"version":1,"report":{"headline":"……","winner":"……"}} -->`;
         }
     }
 
     return finalPrompt;
+};
+
+/**
+ * System-role instruction for package-backed generation.
+ *
+ * The task prompt is deliberately self-contained (it still carries the mode
+ * system prompt and the whole host contract), but a single user turn makes the
+ * output discipline compete with the creative persona for attention — and the
+ * creative personas are all "write a story". Observed failure: the model
+ * produces the target file and drops the Arena control trailer, or returns
+ * prose. A real system role is the one place a provider will treat output
+ * discipline as an instruction rather than as part of the material.
+ *
+ * For data targets the creative persona is explicitly subordinated: the model
+ * is told to apply it to the *content* of the target file, never to override
+ * the target's shape.
+ */
+export const buildPackageTargetSystemPrompt = (modeSystemPrompt: string, targetMediaType: string | null): string => {
+    const dataTarget = targetMediaType === 'application/json';
+    return [
+        '[HOST OUTPUT DISCIPLINE]',
+        '本场你不是在写一篇可以独立阅读的文章。你在按宿主输出契约生成一个目标文件。',
+        '你的回复必须恰好由两部分组成，顺序固定：',
+        '1) 目标文件内容——' + (dataTarget
+            ? '一段可被 JSON.parse 直接解析的 JSON 文档，顶层类型必须严格符合任务提示中的目标文件形态要求（不要额外包一层容器对象）。'
+            : `一份完整的 ${targetMediaType ?? '文本'} 文档正文。`)
+            + '除此之外不要写任何前导或结尾文字，不要用 Markdown 代码围栏。',
+        '2) 一行 Arena control trailer：<!-- MAHOSHOJO_ARENA_META {"version":1,"report":{"headline":"…","winner":"…"},"impacts":[…]} -->',
+        'trailer 必须出现在回复的最末尾，且必须是能被 JSON.parse 解析的合法 JSON。省略 trailer 会让本次生成整体作废。',
+        dataTarget
+            ? '下方的创作原则只用于决定目标文件"写什么内容"，不得用来改变目标文件的形态；目标文件里不要出现标题、导语、结语或解说。'
+            : '下方的创作原则用于决定目标文件"写什么内容"。',
+        '[/HOST OUTPUT DISCIPLINE]',
+        '',
+        modeSystemPrompt,
+    ].join('\n');
 };
 
 // Non-stream Arena generation intentionally keeps a separate structured-output

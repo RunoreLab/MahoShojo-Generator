@@ -9,6 +9,7 @@ import {
   resolveWebPackage,
 } from '@mahoshojo/web-package';
 import {
+  buildPackageTargetSystemPrompt,
   createPromptBuilder,
   createStreamPromptBuilder,
   DEFAULT_ARENA_PROMPT_QUESTIONS,
@@ -249,6 +250,7 @@ export const buildArenaGenerationPrompt = async (input: {
     trustedProjection?.target.mediaType ?? null,
   );
   const taskPrompt = promptBuilder({ combatants });
+  const systemPrompt = getSystemPrompt(mode, combatants);
   const characterGuidances = combatants.flatMap((value) => {
     const combatant = asRecord(value);
     const data = asRecord(combatant?.data);
@@ -259,7 +261,13 @@ export const buildArenaGenerationPrompt = async (input: {
   const reporterInfo = randomReporter(random);
 
   return {
-    prompt: `${getSystemPrompt(mode, combatants)}\n\n${taskPrompt}`,
+    // Package targets carry the mode persona in the system role, so repeating it
+    // here would re-introduce the "prose author" framing the system role exists
+    // to subordinate. The host output contract stays in the task prompt, so a
+    // provider that ignores the system role still sees the shape requirements.
+    ...(outputContract === 'web-package-target'
+      ? { prompt: taskPrompt, systemPrompt: buildPackageTargetSystemPrompt(systemPrompt, trustedProjection?.target.mediaType ?? null) }
+      : { prompt: `${systemPrompt}\n\n${taskPrompt}` }),
     metadata: {
       mode,
       language,

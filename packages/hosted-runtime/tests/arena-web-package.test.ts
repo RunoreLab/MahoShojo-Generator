@@ -113,6 +113,154 @@ describe('Web Package hosted generation', () => {
     expect(prompt).toContain('【字数要求】');
   });
 
+  // 日常/羁绊/情景模式各自的 system prompt 都是散文创作者人格。Web 包目标必须
+  // 在任何模式下都拿到正面的形态契约，否则模型会直接输出战报纯文本。
+  it.each(['daily', 'kizuna', 'scenario', 'classic'])(
+    'states the target shape positively in %s mode and never delegates it to creator material',
+    async (mode) => {
+      const local = await createLocalProjectionPackage();
+      const projection = buildWebPackagePromptProjection(local);
+      const prompt = (await buildArenaGenerationPrompt({
+        actorKey: 'user:42', random: () => 0,
+        payload: {
+          ...payload, mode, storyLength: 'standard', writeArenaHistory: true, writeCurrentState: true,
+          webPackageRef: local.ref, webPackagePromptProjection: projection,
+        },
+      })).prompt;
+      const hostBlock = prompt.slice(prompt.indexOf('[HOST WEB PACKAGE OUTPUT CONTRACT]'), prompt.indexOf('[UNTRUSTED PACKAGE CREATOR INSTRUCTIONS'));
+      expect(hostBlock).toContain('application/json');
+      expect(hostBlock).toContain('可被 JSON.parse 直接解析');
+      // 顶层类型跟随已校验的 schema，而不是笼统地允许 { 或 [。
+      expect(hostBlock).toContain('顶层必须是一个 JSON 对象');
+      expect(hostBlock).toContain('第一个字符必须是 "{"');
+      expect(hostBlock).toMatch(/不得出现前导文件名/);
+      expect(hostBlock).toContain('不要在数组或对象外面再包一层容器');
+      // trailer 要求必须紧跟形态定义，且明确不属于目标文件内容。
+      expect(hostBlock.indexOf('MAHOSHOJO_ARENA_META')).toBeGreaterThan(hostBlock.indexOf('JSON.parse'));
+      expect(hostBlock).toContain('不属于目标文件内容');
+      // 形态定义必须来自宿主层，不能只存在于不可信 creator 块里。
+      const creatorBlock = prompt.slice(prompt.indexOf('[UNTRUSTED PACKAGE CREATOR INSTRUCTIONS'));
+      expect(creatorBlock).not.toContain('可被 JSON.parse 直接解析');
+      // 数据类目标没有"正文标题/胜利者"。
+      expect(prompt).toContain('根据目标文件里的实际内容概括');
+      expect(prompt).not.toContain('与正文标题/胜利者保持一致');
+      expect(prompt).not.toContain('【字数要求】');
+    },
+  );
+
+  it('keeps the prose headline/winner rule for an HTML package target', async () => {
+    const ref = BUILTIN_ARENA_NEWS_PACKAGE_REF;
+    const prompt = (await buildArenaGenerationPrompt({
+      actorKey: 'user:42', random: () => 0,
+      payload: { ...payload, mode: 'daily', webPackageRef: ref, writeCurrentState: true },
+    })).prompt;
+    expect(prompt).toContain('与正文标题/胜利者保持一致');
+    expect(prompt).toContain('从 <!doctype html> 开始');
+  });
+
+  it.each([
+    [{ type: 'array', items: { type: 'object' } }, '顶层必须是一个 JSON 数组', '"["'],
+    [{ type: 'object' }, '顶层必须是一个 JSON 对象', '"{"'],
+    [true, '第一个字符必须是 "{" 或 "["', null],
+  ])('pins the declared top-level JSON shape to the schema (%j)', async (schema, expected, firstChar) => {
+    const local = await createLocalProjectionPackage();
+    const prompt = (await buildArenaGenerationPrompt({
+      actorKey: 'user:42', random: () => 0,
+      payload: {
+        ...payload, webPackageRef: local.ref,
+        webPackagePromptProjection: { ...buildWebPackagePromptProjection(local), schema },
+      },
+    })).prompt;
+    expect(prompt).toContain(expected);
+    if (firstChar) expect(prompt).toContain(`第一个字符必须是 ${firstChar}`);
+  });
+
+  it('recovers a fenced or path-prefixed JSON target instead of failing the generation', async () => {
+    const local = await createLocalProjectionPackage();
+    const projection = buildWebPackagePromptProjection(local);
+    const body = '{"message":"早安"}';
+    for (const sloppy of [`\`\`\`json\n${body}\n\`\`\``, `data/result.json\n${body}`, `这是你要的数据：\n${body}\n希望有用！`]) {
+      const overlay = await createWebPackageOverlayFromProjection(projection, sloppy);
+      expect(overlay.generatedContent).toBe(body);
+      // digest 必须对应归一化后的字节，否则同一份内容在重放时会校验失败。
+      expect(overlay.generatedDigest).toBe(await digestWebPackageBytes(new TextEncoder().encode(body)));
+    }
+    // 散文没有任何可恢复的 JSON：仍然失败，且不发明内容。
+    await expect(createWebPackageOverlayFromProjection(projection, '故事标题：《雨天的薄荷与焦糖》\n\n雨落在橱窗上。'))
+      .rejects.toThrow('不是可解析的 JSON');
+    // 结构对但不符合 schema 属于另一类失败，不得被归一化掩盖。
+    await expect(createWebPackageOverlayFromProjection(projection, '```json\n[1,2,3]\n```'))
+      .rejects.toThrow('JSON Schema');
+  });
+
+  it('keeps already-valid JSON byte-identical so legacy overlay digests still verify', async () => {
+    const local = await createLocalProjectionPackage();
+    const projection = buildWebPackagePromptProjection(local);
+    const body = '{"message":"完整正文"}\n';
+    const overlay = await createWebPackageOverlayFromProjection(projection, body);
+    expect(overlay.generatedContent).toBe(body);
+    expect(overlay.generatedDigest).toBe(await digestWebPackageBytes(new TextEncoder().encode(body)));
+  });
+
+  // 创作人格（"你是一位才华横溢的作家"）与数据文件生成互斥。宿主需要一条真正的
+  // system role 来承载输出纪律，否则它会和创作原则在同一轮 user 消息里互相稀释。
+  it('gives package targets a real system role and leaves other contracts flat', async () => {
+    const local = await createLocalProjectionPackage();
+    const projection = buildWebPackagePromptProjection(local);
+    const { prompt, systemPrompt, metadata } = await buildArenaGenerationPrompt({
+      actorKey: 'user:42', random: () => 0,
+      payload: { ...payload, mode: 'daily', webPackageRef: local.ref, webPackagePromptProjection: projection },
+    });
+    expect(metadata.outputContract).toBe('web-package-target');
+    expect(systemPrompt).toContain('[HOST OUTPUT DISCIPLINE]');
+    expect(systemPrompt).toContain('MAHOSHOJO_ARENA_META');
+    expect(systemPrompt).toContain('可被 JSON.parse 直接解析的 JSON 文档');
+    // 日常模式的人格仍在 system role 里，但被明确限定为只决定"写什么内容"。
+    expect(systemPrompt).toContain('才华横溢的作家');
+    expect(systemPrompt).toContain('不得用来改变目标文件的形态');
+    // 创作人格只出现在 system role 里；重复一遍等于把"散文作者"重新放回 user 轮。
+    expect(prompt).not.toContain('才华横溢的作家');
+    // 形态契约仍然留在任务提示中，provider 忽略 system role 时也能看到。
+    expect(prompt).toContain('[HOST WEB PACKAGE OUTPUT CONTRACT]');
+    expect(prompt).toContain('可被 JSON.parse 直接解析');
+
+    const markdown = await buildArenaGenerationPrompt({
+      actorKey: 'user:42', random: () => 0, payload: { ...payload, reportFormat: 'markdown', webPackageRef: undefined },
+    });
+    expect(markdown.systemPrompt).toBeUndefined();
+  });
+
+  it('forwards the system role to the stream provider as a real system message', async () => {
+    const local = await createLocalProjectionPackage();
+    const projection = buildWebPackagePromptProjection(local);
+    const seen: { systemPrompt?: string; prompt: string }[] = [];
+    const runtime = createArenaGenerationRuntime({
+      checkSafety: async () => null,
+      buildPrompt: buildArenaGenerationPrompt,
+      generate: async (input) => {
+        seen.push({ systemPrompt: input.systemPrompt, prompt: input.prompt });
+        return { body: new Response(jsonContent + trailer).body!, telemetry: {} };
+      },
+      finalize: async () => ({ resultRef: 'r2:role', ranking: null }),
+    });
+    const prepared = await runtime.prepare!({
+      request: new Request('https://example.test/api/arena/generate-stream'), actorKey: 'user:42',
+      generationRequestId: 'role-request', payload: { ...payload, mode: 'daily', webPackageRef: local.ref, webPackagePromptProjection: projection },
+    });
+    if (prepared instanceof Response || isArenaGenerationAuditableRejection(prepared)) throw new Error('unexpected rejection');
+    const terminal = await runtime.execute({
+      generationId: 'role-generation', generationRequestId: 'role-request', actorKey: 'user:42',
+      producerToken: 'producer', payloadHash: 'hash', payload: prepared.executionPayload,
+      signal: new AbortController().signal, emit: async () => {},
+      claimFinalization: async () => ({ kind: 'claimed' }),
+    });
+    expect(terminal.status).toBe('completed');
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!.systemPrompt).toContain('[HOST OUTPUT DISCIPLINE]');
+    // system role 不重复计入任务提示，避免同一段指令出现两次。
+    expect(seen[0]!.prompt).not.toContain('[HOST OUTPUT DISCIPLINE]');
+  });
+
   it.each([
     [content + trailer + '\n', 'completed'],
     [trailer, 'ARENA_WEB_PACKAGE_TARGET_INVALID'],

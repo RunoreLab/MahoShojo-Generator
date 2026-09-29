@@ -43,6 +43,13 @@ export type ArenaReasoningEvent =
 
 export type ArenaGenerationPrompt = {
   prompt: string;
+  /**
+   * Optional system-role instruction. The task prompt stays self-contained when
+   * this is absent; when present the provider receives it as a real system
+   * message so output discipline is not competing with creative guidance for
+   * attention inside one user turn.
+   */
+  systemPrompt?: string;
   metadata: Record<string, unknown>;
 };
 
@@ -92,6 +99,7 @@ export interface ArenaGenerationRuntimeDependencies {
     generationId: string;
     payload: Record<string, unknown>;
     prompt: string;
+    systemPrompt?: string;
     signal: AbortSignal;
     onReasoning(_event: ArenaReasoningEvent): Promise<void>;
   }): Promise<ArenaGenerationUpstream>;
@@ -103,6 +111,7 @@ export interface ArenaGenerationRuntimeDependencies {
 
 type PreparedRuntimePayload = {
   prompt: string;
+  systemPrompt?: string;
   metadata: Record<string, unknown>;
 };
 
@@ -413,6 +422,11 @@ const readPrepared = (payload: Record<string, unknown>): PreparedRuntimePayload 
   }
   return {
     prompt: record.prompt,
+    // Absent for every contract that never had a system role, so this stays
+    // backwards compatible with payloads prepared by older builds.
+    ...(typeof record.systemPrompt === 'string' && record.systemPrompt
+      ? { systemPrompt: record.systemPrompt }
+      : {}),
     metadata: record.metadata as Record<string, unknown>,
   };
 };
@@ -577,7 +591,9 @@ export const createArenaGenerationRuntime = (
     }
     const promptBudget = evaluateArenaPromptBudget({
       fundingMode: resolveFundingMode(executionPayload),
-      prompt: prepared.prompt,
+      // Count the system role too, otherwise package targets would be budgeted
+      // on strictly less text than actually reaches the provider.
+      prompt: prepared.systemPrompt ? `${prepared.systemPrompt}\n\n${prepared.prompt}` : prepared.prompt,
     });
     if (!promptBudget.allowed) {
       return jsonResponse({
@@ -840,6 +856,7 @@ export const createArenaGenerationRuntime = (
         generationId: input.generationId,
         payload: input.payload,
         prompt: prepared.prompt,
+        ...(prepared.systemPrompt ? { systemPrompt: prepared.systemPrompt } : {}),
         signal: input.signal,
         onReasoning: queueReasoningEvent,
       });

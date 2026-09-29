@@ -330,6 +330,9 @@ async function generateWithStreamAIUsing(
 	                const result = streamText({
 	                    model: provider.type === 'openai' ? llm.chat(selectedModel) : llm(selectedModel),
                     prompt: [
+                        ...(generationConfig.systemPrompt
+                            ? [{ role: 'system' as const, content: generationConfig.systemPrompt }]
+                            : []),
                         {
                             role: 'user',
                             content: generationConfig.prompt,

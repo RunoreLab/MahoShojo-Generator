@@ -702,7 +702,7 @@ export const createNodeArenaGenerationExecutor = (
       });
     },
     buildPrompt: buildArenaGenerationPrompt,
-    generate: async ({ payload, prompt, signal, onReasoning }) => {
+    generate: async ({ payload, prompt, systemPrompt, signal, onReasoning }) => {
       const customProvider = parseCustomProvider(payload.customProvider);
       if (customProvider instanceof Response) throw new Error('ARENA_CUSTOM_PROVIDER_INVALID');
       const telemetry: AiTelemetry = {};
@@ -737,6 +737,11 @@ export const createNodeArenaGenerationExecutor = (
       const config: RawGenerationConfig = {
         prompt,
         temperature: 0.9,
+        // structured-report splits the prompt itself below; every other path
+        // forwards the system role the prompt builder already produced.
+        ...(systemPrompt && resolveArenaGenerationOutputContract(payload) !== 'structured-report'
+          ? { systemPrompt }
+          : {}),
         ...(customProvider ? {
           generationSettingsContext: {
             providerId: customProvider.providerId,

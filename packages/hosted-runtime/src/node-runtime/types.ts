@@ -86,6 +86,8 @@ export interface GenerationConfig<T, I = string> {
 
 export interface RawGenerationConfig {
   prompt: string;
+  /** Sent as a real system message when present, ahead of the single user turn. */
+  systemPrompt?: string;
   temperature?: number;
   maxOutputTokens?: number;
   modelOverride?: string;
