@@ -12,7 +12,7 @@ Arena 多人个人历史补全：[参与战报个人历史设计](./specs/2026-0
 
 Arena Web 战报当前规格：[Arena Web 战报生成与沙箱渲染规格](./specs/2026-09-17_080700_Arena%20Web战报生成与沙箱渲染规格.md)。单人（含 `/battle`）支持流式/非流式 HTML，多人沿用服务器权威流式生成；浏览器本地确认后才执行完成的沙箱文档，默认格式仍为 Markdown。
 
-Web 包当前入口：[统一架构与后续开发规格](./specs/2026-09-22_165900_WebPackage统一架构与后续开发规格.md)与[受限模式和可信同源授权决策](./decisions/2026-09-28_205100_WebPackage受限模式与可信同源授权决策.md)。本地 ZIP、预设及预设重导入现在统一经过 browser-local materialization，已接通相对 JS/CSS/ESM、媒体、包内 fetch、历史恢复与下载；不使用 SW、不新增域名、不上传包资源。默认 Restricted Mode；独立的三秒风险确认可授予本次/当前浏览器版本的 Trusted Same-Origin，风险扩大需重新确认，撤销后重建受限页面。旧 first-party-only 渲染适配器已删除。当前是单文档物化而非完整 HTTP 文件服务器，多文档/Worker/任意动态 CSSOM 等兼容边界见规格 §11.2。线上库和本地包多人分发仍延后；本轮不部署或推送。
+Web 包当前入口：[统一架构与后续开发规格](./specs/2026-09-22_165900_WebPackage统一架构与后续开发规格.md)、[受限模式和可信同源授权决策](./decisions/2026-09-28_205100_WebPackage受限模式与可信同源授权决策.md)与[ZIP 信封归一化与缺省导入决策](./decisions/2026-09-29_114500_WebPackageZIP信封归一化与缺省导入决策.md)。本地 ZIP、预设及预设重导入现在统一经过 browser-local materialization，已接通相对 JS/CSS/ESM、媒体、包内 fetch、历史恢复与下载；不使用 SW、不新增域名、不上传包资源。默认 Restricted Mode；独立的三秒风险确认可授予本次/当前浏览器版本的 Trusted Same-Origin，风险扩大需重新确认，撤销后重建受限页面。旧 first-party-only 渲染适配器已删除。当前是单文档物化而非完整 HTTP 文件服务器，多文档/Worker/任意动态 CSSOM 等兼容边界见规格 §11.2；该边界只约束渲染能力，不限制导入层对打包方式的宽容度。线上库和本地包多人分发仍延后；本轮不部署或推送。
 
 架构演进背景保留在 [Web 数据卡 Runtime 与媒体资产原生支持设计建议](./reports/2026-09-17_121500_Web数据卡Runtime与媒体资产原生支持设计建议.md)。
 

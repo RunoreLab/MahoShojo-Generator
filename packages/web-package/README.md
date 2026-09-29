@@ -12,9 +12,10 @@ Visual Novel Lite、星屑社区、命运岔路从未部署，已删除其资产
 
 ## 入口与客户端传输
 
-- 根导出：验证、ZIP、不可变实例、Prompt Projection、重放。
+- 根导出：验证、ZIP、不可变实例、Prompt Projection、重放、归档导入与错误码。
+- `src/archive.ts` / `src/import.ts` / `src/media-types.ts`：信封归一化、缺省导入与共享媒体类型映射；预设生成器复用同一份媒体类型映射。
 - `/browser`：`renderWebPackageInstance(instance)`，无预设 ID 分支；返回展示 HTML 与诊断，不修改 Base/Overlay 原始字节。
-- `/security`：Base/有效实例能力预检和摘要绑定授权判定；不执行作者代码，不访问网络。
+- `/security`：Base/有效实例能力预检和摘要绑定授权判定；不执行作者代码，不访问网络。启发式规则只在标记无法被标记语言模仿时才报告——`host-page-access` 要求 window/self/globalThis/frames 限定或未被 `.`/`-`/`#` 前置的裸全局，以免把 CSS `top`、`.top` 类名与选择器判成宿主访问。
 - `/testing/fixtures`：仅测试使用的显式跨 workspace 夹具入口，不进入产品根导出。
 
 HTML/CSS/JavaScript 分别使用 parse5、css-tree、Acorn 解析，三者为 MIT 依赖。相对资源解析以引用文件为基准；CSS 和媒体转为 data URL，模块 Blob URL 在子窗口创建，并由 import map 处理循环及动态导入。局部 fetch 提供 GET/HEAD、正确 MIME、404/405；异步 XHR 支持包内 GET。文件 query 不改变底层 bytes，fragment 保留。`entry` 不必等于生成目标。
@@ -29,7 +30,21 @@ Arena 的 `/__web-package__/runner` 只返回固定启动页。随机实例 nonc
 
 这不是完整 HTTP 文件服务器或浏览器虚拟机。当前不支持多 HTML 文档跳转、import map scopes/null 映射、Worker/Service Worker、嵌套 iframe/object、`eval/new Function` 或任意动态 CSSOM/innerHTML 内的相对资源重写。多文档入口链接等可检测情况给出诊断；无法可靠解析的入口依赖显示明确错误并保留目标/原包下载。复杂运行时请先 bundle、改用单文档路由，或使用已支持的 DOM 资源属性和模块 URL。外部库与资源不会被自动下载以绕过 CSP/CORS；扫描无法证明它们安全。
 
-包大小仍不增加产品级硬限制；大包物化会有 base64/AST/内存副本开销。预检自身有工作预算，超预算显示“不完整”且不允许持久信任，但不把它当作包导入上限。
+包大小仍不增加产品级硬限制；大包物化会有 base64/AST/内存副本开销。预检自身有工作预算，超预算显示“不完整”且不允许持久信任，但不把它当作包导入上限。导入另有一层解压保护上限（`MAX_ARCHIVE_EXPANDED_BYTES`）：fflate 在解压前按 central directory 的 `originalSize` 预分配缓冲，伪造的尺寸字段是直接的内存耗尽向量。它约束的是展开工作量，不是 Web 包的产品大小限制；错误提示中也如此区分。
+
+## 本地 ZIP 导入
+
+导入分两层：信封层（`src/archive.ts`）定位包根目录、剔除归档元数据、约束解压规模；语义层（`src/import.ts`）决定文件表来源、填充 manifest 缺省并执行标准 `verifyWebPackage`。信封对打包方式宽容，对内容严格。
+
+- 根目录已有 `web-package.json` → 整体作为包；否则唯一一层子目录含该文件时剥离该目录（仅接受单个 portable 路径段）。多个候选明确报歧义，嵌套一层以上明确报打包错误，均不猜测。
+- 完全没有 `web-package.json` 时整个归档即包，作者路径原样保留，由最浅的 `index.html` 识别入口。
+- 包根目录之外的任何文件一律拒绝；`__MACOSX/`、`.DS_Store`、`Thumbs.db`、`desktop.ini` 按固定名单丢弃并在诊断中说明。
+- `files` 声明存在时保持权威（未声明/缺少/大小写冲突一律拒绝）；缺失时按归档内容派生，媒体类型取自 `src/media-types.ts` 的共享映射，未知扩展名 fail closed。
+- 只对**缺失**的 manifest 字段做缺省填充（`id` 由内容派生、`version` 为 `1.0.0`、`entry` 自动识别、`generation.target` 默认替换识别出的入口）。存在但非法的字段显式失败，默认值不覆盖作者已表达的意图。
+- `importWebPackageArchive` 返回 `diagnostics`，逐条说明识别到的包根目录、被丢弃的元数据与每一项缺省填充；UI 必须展示，用户在授权前有权知道包的实际身份来源。
+- 失败统一为 `WebPackageImportError`，带稳定 `code` 与面向用户的 `hint`，UI 展示「发生了什么 + 该改什么」而非裸校验器消息。
+
+`unpackWebPackageZip` 保留为不带诊断的兼容入口。与内置预设的 ZIP 往返行为不变：诊断为空、`ref` 相同。决策依据见 `docs/decisions/2026-09-29_114500_WebPackageZIP信封归一化与缺省导入决策.md`。
 
 ## 验证命令
 
