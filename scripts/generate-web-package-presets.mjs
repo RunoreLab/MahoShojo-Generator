@@ -43,6 +43,8 @@ export async function compilePreset(directory) {
       if (!stat.isFile()) throw new Error(`Unsupported asset: ${logical}`);
       if (logical === 'web-package.json') continue;
       const mediaType = resolveWebPackageMediaType(logical);
+      // 预设是仓库内受审的创作目录，未知扩展名是 authoring 错误，必须在构建期
+      // 暴露；用户 ZIP 导入走的是同一张映射表，但允许回落为不透明二进制。
       if (!mediaType) throw new Error(`Unknown asset media type: ${logical}`);
       const bytes = await readFile(absolute);
       files.push({ path: logical, mediaType, bytes });

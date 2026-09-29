@@ -10,7 +10,7 @@ import {
   normalizeWebPackageArchive,
   type ArchiveEntry,
 } from './archive';
-import { resolveWebPackageMediaType, WEB_PACKAGE_MEDIA_TYPE_EXTENSIONS } from './media-types';
+import { resolveWebPackageMediaType, WEB_PACKAGE_OPAQUE_MEDIA_TYPE } from './media-types';
 import { digestWebPackageBytes, verifyWebPackage, type VerifiedWebPackage } from './verify';
 
 export type WebPackageImportErrorCode =
@@ -27,7 +27,6 @@ export type WebPackageImportErrorCode =
   | 'undeclared-file'
   | 'missing-file'
   | 'duplicate-path'
-  | 'unknown-media-type'
   | 'entry-not-found'
   | 'integrity';
 
@@ -36,7 +35,6 @@ const IMPORT_HINTS = {
   removeOrRename: '请移除或重命名该文件后重新打包。',
   deriveFiles: '也可以删除 web-package.json 中的 files 字段，改由归档自动派生。',
   entry: '请在包内放置 index.html，或在 web-package.json 中显式声明 entry。',
-  supportedTypes: `当前支持的扩展名：${WEB_PACKAGE_MEDIA_TYPE_EXTENSIONS.join('、')}。`,
 } as const;
 
 /**
@@ -105,19 +103,100 @@ const detectEntry = (paths: readonly string[]): string | undefined => {
   ))[0];
 };
 
-const requireMediaType = (path: string): string => {
+/**
+ * 描述不了的文件按不透明二进制处理，而不是拒绝整个包。真正决定「这段字节
+ * 会不会被执行」的是渲染器：`<script src>` 指向非 JavaScript 媒体类型会直接
+ * 抛「脚本 MIME 不匹配」，非 CSS 资源也不会被当样式表解析。未知扩展名在导入
+ * 层阻断使用，换来的是零安全收益。
+ */
+const describeMediaType = (path: string, diagnostics: string[]): string => {
   const mediaType = resolveWebPackageMediaType(path);
-  if (!mediaType) {
-    fail('unknown-media-type', `无法从文件名推断媒体类型：${path}`,
-      `${IMPORT_HINTS.supportedTypes}也可在 web-package.json 的 files 中显式声明 mediaType。`);
-  }
-  return mediaType;
+  if (mediaType) return mediaType;
+  diagnostics.push(`${path} 的扩展名不在已知媒体类型表中，已按不透明二进制（${WEB_PACKAGE_OPAQUE_MEDIA_TYPE}）导入；`
+    + `若该资源需要被页面按特定类型加载，请在 web-package.json 的 files 中显式声明 mediaType。`);
+  return WEB_PACKAGE_OPAQUE_MEDIA_TYPE;
 };
 
-const describeZodFailure = (error: unknown): string | null => {
-  const issues = (error as { issues?: ReadonlyArray<{ path: readonly unknown[]; message: string }> }).issues;
+type ManifestIssue = Readonly<{ path: readonly unknown[]; code?: string; message: string }>;
+
+/**
+ * zod 的诊断文本是英文的校验器语言，直接透给包作者等于让他去读实现。这里把
+ * 已知的高频 authoring 错误翻译成「字段是什么 + 该怎么改」，未覆盖的仍保留
+ * 原文并给出通用指引。
+ */
+const manifestIssueGuidance = (issue: ManifestIssue): { message: string; hint: string } | null => {
+  const field = issue.path.map(String).join('.');
+  const leaf = String(issue.path[issue.path.length - 1] ?? '');
+  if (issue.code === 'unrecognized_keys') {
+    return {
+      message: `web-package.json 含有当前版本不认识的字段：${field}`,
+      hint: `清单只接受 format、formatVersion、id、version、name、entry、generation、capabilities、files；其余字段请删除。`,
+    };
+  }
+  if (issue.path[0] === 'capabilities' && issue.code === 'invalid_value') {
+    return {
+      message: `${field} 不在 capabilities 允许值内。`,
+      hint: '作者声明只用于展示，当前只接受 scripts、audio、video、network；站点存储、后台 Worker、宿主页面访问等能力由宿主预检自动检测并在授权对话框中列出，没有对应的声明词。',
+    };
+  }
+  if ((issue.path[0] === 'id' || issue.path[0] === 'version') && issue.code === 'invalid_format') {
+    return {
+      message: `${field} 只能使用英文字母、数字、点、下划线与短横线，且必须以字母或数字开头。`,
+      hint: `${field} 只用于包身份与版本比较；中文名称请写进 name 字段。`,
+    };
+  }
+  if (leaf === 'mediaType' && issue.path[0] === 'files' && issue.code === 'invalid_format') {
+    return {
+      message: `${field} 必须是「类型/子类型」形式，不能带参数。`,
+      hint: '例如 text/html、application/json、image/png；不要写成 "text/html; charset=utf-8"。',
+    };
+  }
+  if (issue.code === 'custom') {
+    if (issue.path[0] === 'entry') {
+      return {
+        message: 'entry 必须在包内存在，且媒体类型是 text/html。',
+        hint: '请确认该文件确实在 ZIP 内；或删除 entry 字段，由导入自动识别最浅的 index.html。',
+      };
+    }
+    if (leaf === 'target') {
+      return {
+        message: 'generation.target 必须指向包内已存在的文件，且其媒体类型与 generation.mediaType 一致。',
+        hint: '两者都不声明时导入会默认用入口文件与 text/html；如果目标是 JSON 等数据文件，请同时声明 mediaType。',
+      };
+    }
+    if (leaf === 'instructions' || leaf === 'schema' || leaf === 'assetCatalog') {
+      return {
+        message: `generation.${leaf} 指向的文件不在包内。`,
+        hint: `请把该文件一起打包，或删除 generation.${leaf} 字段。`,
+      };
+    }
+    if (issue.path[0] === 'files') {
+      return {
+        message: 'files 中存在重复或保留的路径。',
+        hint: '路径不能重复（不区分大小写），也不能是 web-package.json；或删除 files 字段改由归档自动派生。',
+      };
+    }
+  }
+  return null;
+};
+
+const describeManifestFailure = (error: unknown): { message: string; hint: string } | null => {
+  const issues = (error as { issues?: ManifestIssue[] }).issues;
   if (!Array.isArray(issues) || issues.length === 0) return null;
-  return issues.map((issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`).join('；');
+  const described = issues.map((issue) => {
+    const guidance = manifestIssueGuidance(issue);
+    const field = issue.path.join('.') || '(root)';
+    return guidance
+      ? `${field}: ${guidance.message}`
+      : `${field}: ${issue.message}`;
+  });
+  const known = issues.map((issue) => manifestIssueGuidance(issue)?.hint).filter((hint): hint is string => Boolean(hint));
+  return {
+    message: `Web 包清单未通过校验：${described.join('；')}`,
+    hint: known.length > 0
+      ? [...new Set(known)].join(' ')
+      : '请按提示修正 web-package.json，或删除该文件改由归档结构自动识别。',
+  };
 };
 
 /** Declared `files` stay authoritative; only an absent table is derived. */
@@ -131,7 +210,7 @@ const resolveFileDescriptors = async (
     diagnostics.push(`files 未声明，已按归档内 ${files.length} 个文件自动派生文件表、媒体类型与摘要。`);
     return Promise.all(files.map(async (file) => ({
       path: file.path,
-      mediaType: requireMediaType(file.path),
+      mediaType: describeMediaType(file.path, diagnostics),
       digest: await digestWebPackageBytes(file.bytes),
       size: file.bytes.byteLength,
     })));
@@ -165,9 +244,18 @@ const resolveFileDescriptors = async (
   return declared as readonly Descriptor[];
 };
 
+const optionalPromptFiles = (source: Record<string, unknown>): Record<string, string> => {
+  const optional = (field: 'instructions' | 'schema' | 'assetCatalog'): Record<string, string> => {
+    const value = readOptionalString(source, field, 'generation');
+    return value === undefined ? {} : { [field]: value };
+  };
+  return { ...optional('instructions'), ...optional('schema'), ...optional('assetCatalog') };
+};
+
 const buildGeneration = (
   raw: Record<string, unknown>,
   entry: string,
+  descriptors: readonly Descriptor[],
   diagnostics: string[],
 ): Record<string, unknown> => {
   const generation = raw.generation === undefined ? {} : raw.generation;
@@ -186,21 +274,36 @@ const buildGeneration = (
       `V1 生成目标仅支持 ${WEB_PACKAGE_TEXT_MEDIA_TYPES.join('、')}。`);
   }
   const declaredTarget = readOptionalString(source, 'target', 'generation');
+  const target = declaredTarget ?? entry;
   if (declaredTarget === undefined) diagnostics.push('generation.target 未声明，已默认替换自动识别的入口文件。');
-  if (mediaType === undefined) diagnostics.push('generation.mediaType 未声明，已默认使用 text/html。');
-  const optional = (field: 'instructions' | 'schema' | 'assetCatalog'): Record<string, string> => {
-    const value = readOptionalString(source, field, 'generation');
-    return value === undefined ? {} : { [field]: value };
-  };
+  // 目标已经在包内时，媒体类型由该文件自己的描述符决定。作者写了
+  // `target: "static/events.json"` 却漏写 mediaType 时，默认 text/html 会
+  // 撞上"target 必须与既有路径和媒体类型一致"，而那条消息完全不提 mediaType。
+  const targetDescriptor = descriptors.find((file) => file.path.toLowerCase() === target.toLowerCase());
+  const derivedMediaType = targetDescriptor?.mediaType;
+  if (mediaType === undefined) {
+    const resolved = derivedMediaType !== undefined && (WEB_PACKAGE_TEXT_MEDIA_TYPES as readonly string[]).includes(derivedMediaType)
+      ? derivedMediaType
+      : 'text/html';
+    diagnostics.push(`generation.mediaType 未声明，已按目标文件 ${target} 推导为 ${resolved}。`);
+    return {
+      target,
+      mode: 'replace',
+      mediaType: resolved,
+      ...optionalPromptFiles(source),
+    };
+  }
   return {
-    target: declaredTarget ?? entry,
+    target,
     mode: 'replace',
-    mediaType: mediaType ?? 'text/html',
-    ...optional('instructions'),
-    ...optional('schema'),
-    ...optional('assetCatalog'),
+    mediaType,
+    ...optionalPromptFiles(source),
   };
 };
+
+const MANIFEST_FIELDS: ReadonlySet<string> = new Set([
+  'format', 'formatVersion', 'id', 'version', 'name', 'entry', 'generation', 'capabilities', 'files',
+]);
 
 const buildManifest = async (
   raw: Record<string, unknown>,
@@ -231,6 +334,13 @@ const buildManifest = async (
   const name = readOptionalString(raw, 'name', WEB_PACKAGE_MANIFEST_PATH) ?? (root || id);
   if (raw.name === undefined) diagnostics.push('name 未声明，已按包根目录或 ID 显示。');
   if (raw.capabilities === undefined) diagnostics.push('capabilities 未声明，已按空数组处理（不影响实际能力扫描）。');
+  // canonical manifest 是 strict 的，未知顶层字段会被丢弃。与其静默吞掉作者
+  // 的拼写错误（generationn、entrys），不如在导入诊断里点名。
+  const ignored = Object.keys(raw).filter((key) => !MANIFEST_FIELDS.has(key)).sort();
+  if (ignored.length > 0) {
+    diagnostics.push(`web-package.json 中的 ${ignored.join('、')} 不属于当前清单字段，已忽略；`
+      + '清单只接受 format、formatVersion、id、version、name、entry、generation、capabilities、files。');
+  }
   return {
     format: WEB_PACKAGE_FORMAT,
     formatVersion: WEB_PACKAGE_FORMAT_VERSION,
@@ -238,7 +348,7 @@ const buildManifest = async (
     version,
     name,
     entry,
-    generation: buildGeneration(raw, entry, diagnostics),
+    generation: buildGeneration(raw, entry, descriptors, diagnostics),
     ...(raw.capabilities === undefined ? {} : { capabilities: raw.capabilities }),
     files: descriptors,
   };
@@ -299,17 +409,13 @@ export const importWebPackageArchive = async (archive: Uint8Array): Promise<WebP
     .sort((left, right) => (left.path < right.path ? -1 : 1));
   const descriptors = await resolveFileDescriptors(raw, files, diagnostics);
   const manifest = await buildManifest(raw, descriptors, files, normalized.root, diagnostics);
-  if (descriptors.length !== files.length) {
-    fail('undeclared-file', 'Web 包声明的文件数量与归档内容不一致。', IMPORT_HINTS.deriveFiles);
-  }
   try {
     const pkg = await verifyWebPackage(manifest, files);
     return { pkg, diagnostics };
   } catch (error) {
-    const zodFailure = describeZodFailure(error);
-    if (zodFailure !== null) {
-      fail('invalid-manifest-field', `Web 包清单未通过校验：${zodFailure}`,
-        `请按提示修正 web-package.json，或删除该文件改由归档自动识别。`);
+    const manifestFailure = describeManifestFailure(error);
+    if (manifestFailure !== null) {
+      fail('invalid-manifest-field', manifestFailure.message, manifestFailure.hint);
     }
     fail('integrity', `Web 包未通过完整性校验：${error instanceof Error ? error.message : String(error)}`,
       '请确认包内文件与声明一致；若是自制包，可删除 web-package.json 中的 files 字段改由归档自动派生。');

@@ -40,8 +40,10 @@ Arena 的 `/__web-package__/runner` 只返回固定启动页。随机实例 nonc
 - 根目录已有 `web-package.json` → 整体作为包；否则唯一一层子目录含该文件时剥离该目录（仅接受单个 portable 路径段）。多个候选明确报歧义，嵌套一层以上明确报打包错误，均不猜测。
 - 完全没有 `web-package.json` 时整个归档即包，作者路径原样保留，由最浅的 `index.html` 识别入口。
 - 包根目录之外的任何文件一律拒绝；`__MACOSX/`、`.DS_Store`、`Thumbs.db`、`desktop.ini` 按固定名单丢弃并在诊断中说明。
-- `files` 声明存在时保持权威（未声明/缺少/大小写冲突一律拒绝）；缺失时按归档内容派生，媒体类型取自 `src/media-types.ts` 的共享映射，未知扩展名 fail closed。
-- 只对**缺失**的 manifest 字段做缺省填充（`id` 由内容派生、`version` 为 `1.0.0`、`entry` 自动识别、`generation.target` 默认替换识别出的入口）。存在但非法的字段显式失败，默认值不覆盖作者已表达的意图。
+- `files` 声明存在时保持权威（未声明/缺少/大小写冲突一律拒绝）；缺失时按归档内容派生，媒体类型取自 `src/media-types.ts` 的共享映射。映射表覆盖常见 Web 资源；仍无法推断的扩展名按 `application/octet-stream` 导入并在诊断中点名，不阻断整个包——真正决定「这段字节会不会被执行」的是渲染器，它对非 JavaScript 媒体类型的 `<script src>` 已经 fail closed。仓库内受审的预设生成器保持严格，未知扩展名在构建期报错。
+- 预检是否按文本扫描由内容决定，不由作者声明的 `mediaType` 决定：先在既有体量预算内读取，再尝试严格 UTF-8 解码，解码成功即扫描。把脚本声明成 `image/png` 不再能逃过扫描。
+- 只对**缺失**的 manifest 字段做缺省填充（`id` 由内容派生、`version` 为 `1.0.0`、`entry` 自动识别、`generation.target` 默认替换识别出的入口、`generation.mediaType` 默认取目标文件自身的媒体类型）。存在但非法的字段显式失败，默认值不覆盖作者已表达的意图。清单里的未知顶层字段不阻断导入，但会在诊断中点名，避免 `entrys` 这类拼写错误被静默吞掉。
+- 面向包作者的失败一律给出中文字段说明与可执行指引，而不是 zod 的英文校验器原文。
 - `importWebPackageArchive` 返回 `diagnostics`，逐条说明识别到的包根目录、被丢弃的元数据与每一项缺省填充；UI 必须展示，用户在授权前有权知道包的实际身份来源。
 - 失败统一为 `WebPackageImportError`，带稳定 `code` 与面向用户的 `hint`，UI 展示「发生了什么 + 该改什么」而非裸校验器消息。
 

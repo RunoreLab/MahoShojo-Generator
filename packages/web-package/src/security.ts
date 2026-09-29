@@ -1,4 +1,5 @@
 import type { WebPackageRef } from '@mahoshojo/contracts/web-package';
+import { isWebPackageBinaryMediaType } from './media-types';
 import type { ResolvedWebPackage, WebPackageInstance } from './index';
 
 // 2: 收紧 inline handler / data: / site-storage 规则，跳过提示词与 Markdown 文件，
@@ -100,7 +101,12 @@ const rules: readonly RiskRule[] = [
   ['navigation', /\b(?:window\s*\.\s*open|location\s*[.=]|download\s*=)|target\s*=\s*["']?_blank/u],
   ['sensitive-api', /\b(?:clipboard|getUserMedia|geolocation|Notification|PaymentRequest|requestDevice|showOpenFilePicker|showSaveFilePicker)\b/u],
 ];
-const textType = (type: string): boolean => type.startsWith('text/') || /(?:json|javascript|svg\+xml|xml)$/u.test(type);
+/**
+ * 是否按内容决定文本扫描：声明的媒体类型由包作者给出，可以与真实内容不符
+ * （把脚本声明成 `image/png` 就能让整段文本扫描被跳过），所以扫描与否最终由
+ * 「严格 UTF-8 解码是否成功」决定。媒体类型名单只用于一件事——体量超过预算的
+ * 已知二进制不值得尝试解码，也不构成"未扫描"缺口。
+ */
 const activeType = (type: string): boolean => /(?:html|javascript|css|svg\+xml)$/u.test(type);
 /**
  * 提示投影输入（instructions / schema / assetCatalog）不是运行时资源：其中的
@@ -158,9 +164,14 @@ function scan(base: ResolvedWebPackage, instance?: WebPackageInstance): WebPacka
     }
     const scanned = isOverlay || !(isPromptProjectionFile(base, file.path) || isDocumentationFile(type));
     if (!scanned) skippedPromptFiles += 1;
-    if (!textType(type) || !scanned) continue;
+    if (!scanned) continue;
     if (size > MAX_SCAN_FILE_BYTES || size > remaining) {
-      status = 'partial'; uncertainty.add('部分文本超过扫描预算，未分析；此限制不影响包导入。'); continue;
+      // 已知二进制本来就扫不出东西，不该因此把档案标成"未完成"。
+      if (!isWebPackageBinaryMediaType(type)) {
+        status = 'partial';
+        uncertainty.add('部分文本超过扫描预算，未分析；此限制不影响包导入。');
+      }
+      continue;
     }
     remaining -= size;
     let text: string;
@@ -168,7 +179,14 @@ function scan(base: ResolvedWebPackage, instance?: WebPackageInstance): WebPacka
       const bytes = isOverlay ? new TextEncoder().encode(instance!.overlay.generatedContent) : base.readFile(file.path);
       if (!bytes) throw new Error('missing');
       text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
-    } catch { status = 'partial'; uncertainty.add('存在无法读取或解码的文本文件。'); continue; }
+    } catch {
+      // 真实二进制在严格 UTF-8 下解码失败，跳过不构成扫描缺口。
+      if (!isWebPackageBinaryMediaType(type)) {
+        status = 'partial';
+        uncertainty.add('存在无法读取或解码的文本文件。');
+      }
+      continue;
+    }
     // 命名空间与 DOCTYPE 里的 URL 是标识符，不是会被取回的网络目的地。
     const scannable = type === 'image/svg+xml' || type.endsWith('+xml') || type === 'text/xml' || type === 'application/xml'
       ? text.replace(XML_IDENTIFIERS, ' ')

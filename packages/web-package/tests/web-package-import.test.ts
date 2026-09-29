@@ -121,13 +121,37 @@ describe('file table derivation', () => {
     expect(diagnostics.join('\n')).toContain('自动派生文件表');
   });
 
-  it('fails closed on media types that cannot be derived', async () => {
-    const error = await expectCode(pack({
+  it('describes undescribable assets as opaque binaries instead of refusing the package', async () => {
+    const { pkg, diagnostics } = await importWebPackageArchive(pack({
       'index.html': HTML,
       'assets/theme.wasm': encoder.encode('binary'),
+      'assets/blob.unknown': encoder.encode('opaque'),
       'web-package.json': encoder.encode(JSON.stringify(manifestOf({ files: undefined }))),
-    }), 'unknown-media-type');
-    expect(error.hint).toContain('.html');
+    }));
+    expect(pkg.manifest.files).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: 'assets/theme.wasm', mediaType: 'application/wasm' }),
+      expect.objectContaining({ path: 'assets/blob.unknown', mediaType: 'application/octet-stream' }),
+    ]));
+    expect(diagnostics.join('\n')).toContain('assets/blob.unknown');
+    expect(diagnostics.join('\n')).toContain('不透明二进制');
+  });
+
+  it('imports the common formats the shared media type table used to reject', async () => {
+    const { pkg, diagnostics } = await importWebPackageArchive(pack({
+      'index.html': HTML,
+      'static/favicon.ico': encoder.encode('icon'),
+      'static/manifest.webmanifest': encoder.encode('{}'),
+      'assets/app.mjs': encoder.encode('export default 1;'),
+      'assets/font.woff': encoder.encode('woff'),
+      'web-package.json': encoder.encode(JSON.stringify(manifestOf({ files: undefined }))),
+    }));
+    expect(diagnostics.join('\n')).not.toContain('不透明二进制');
+    expect(pkg.manifest.files.map((file) => [file.path, file.mediaType])).toEqual(expect.arrayContaining([
+      ['static/favicon.ico', 'image/vnd.microsoft.icon'],
+      ['static/manifest.webmanifest', 'application/manifest+json'],
+      ['assets/app.mjs', 'text/javascript'],
+      ['assets/font.woff', 'font/woff'],
+    ]));
   });
 
   it('keeps a declared file table authoritative', async () => {
@@ -150,6 +174,31 @@ describe('file table derivation', () => {
 });
 
 describe('manifest defaulting', () => {
+  it('derives a missing generation.mediaType from the target file instead of assuming HTML', async () => {
+    // 作者写了 target 却漏写 mediaType 时，默认 text/html 会撞上"target 必须与
+    // 既有路径和媒体类型一致"，而那条消息完全不提 mediaType。
+    const { pkg, diagnostics } = await importWebPackageArchive(pack({
+      'index.html': HTML,
+      'static/events.json': encoder.encode('[]'),
+      'web-package.json': encoder.encode(JSON.stringify(manifestOf({
+        generation: { target: 'static/events.json', mode: 'replace' },
+      }))),
+    }));
+    expect(pkg.manifest.generation.mediaType).toBe('application/json');
+    expect(diagnostics.join('\n')).toContain('已按目标文件 static/events.json 推导为 application/json');
+  });
+
+  it('still assumes text/html when the target is not an existing package file', async () => {
+    const { pkg, diagnostics } = await importWebPackageArchive(pack({
+      'index.html': HTML,
+      'web-package.json': encoder.encode(JSON.stringify(manifestOf({
+        generation: { target: 'data/result.json', mode: 'replace' },
+      }))),
+    }));
+    expect(pkg.manifest.generation.mediaType).toBe('text/html');
+    expect(diagnostics.join('\n')).toContain('已按目标文件 data/result.json 推导为 text/html');
+  });
+
   it('discovers a package with no manifest at all', async () => {
     // Without a manifest there is no authority for where the package starts, so
     // the whole archive is imported and author paths are left untouched.
@@ -235,6 +284,39 @@ describe('manifest defaulting', () => {
 
   it('reports invalid JSON as a distinct, actionable failure', async () => {
     await expectCode(pack({ 'index.html': HTML, 'web-package.json': encoder.encode('{') }), 'manifest-invalid-json');
+  });
+
+  // 这些是最容易在中文包生态里写错的字段；zod 原文是校验器语言，作者读不懂。
+  it.each([
+    [{ capabilities: ['storage'] }, 'capabilities', '宿主预检自动检测'],
+    [{ id: '雀权引擎' }, 'id', '中文名称请写进 name'],
+    [{ version: '1.0 版' }, 'version', '中文名称请写进 name'],
+  ])('explains the authoring mistake in %o', async (overrides, field, hintFragment) => {
+    const error = await expectCode(pack({
+      'index.html': HTML,
+      'web-package.json': encoder.encode(JSON.stringify(manifestOf(overrides))),
+    }), 'invalid-manifest-field');
+    expect(error.message).toContain(field);
+    expect(error.message).not.toMatch(/Invalid (string|option)|Unrecognized key/u);
+    expect(error.hint).toContain(hintFragment);
+  });
+
+  it('names unknown manifest fields instead of silently dropping them', async () => {
+    const { diagnostics } = await importWebPackageArchive(pack({
+      'index.html': HTML,
+      'web-package.json': encoder.encode(JSON.stringify(manifestOf({ entrys: 'index.html' }))),
+    }));
+    expect(diagnostics.join('\n')).toContain('entrys 不属于当前清单字段');
+  });
+
+  it('explains a mediaType written with parameters', async () => {
+    const error = await expectCode(pack({
+      'index.html': HTML,
+      'web-package.json': encoder.encode(JSON.stringify(manifestOf({
+        files: [{ path: 'index.html', mediaType: 'text/html; charset=utf-8', digest: `sha256:${'a'.repeat(64)}`, size: HTML.byteLength }],
+      }))),
+    }), 'invalid-manifest-field');
+    expect(error.hint).toContain('不要写成 "text/html; charset=utf-8"');
   });
 });
 
