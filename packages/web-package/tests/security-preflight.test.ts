@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { createWebPackageInstance, digestWebPackageBytes, verifyWebPackage } from '../src';
-import { canReuseWebPackageTrust, createWebPackageTrustGrant, scanWebPackageBase, scanWebPackageInstance } from '../src/security';
+import {
+  canReuseWebPackageTrust, createWebPackageTrustGrant, diffWebPackageDeclaration,
+  scanWebPackageBase, scanWebPackageInstance, webPackageRiskLabel,
+} from '../src/security';
 
 const encoder = new TextEncoder();
 async function fixture(generated: string, baseCode = 'parent.document;') {
@@ -226,5 +229,43 @@ describe('Web 包本地风险预检与独立同源授权', () => {
     ]);
     expect(undecodable.status).toBe('partial');
     expect(undecodable.uncertainty.join(' ')).toContain('broken.json');
+  });
+});
+
+// 完整的两份能力清单并排陈列会互相削弱：读者会把作者自述当成授权范围，预检警告
+// 退化成附注。差异是「作者声明」唯一值得展示的内容。
+describe('作者声明与预检结论的差异', () => {
+  const declared = async (capabilities: string[], detected: string) => {
+    const text = detected;
+    const base = await verifyWebPackage({ format: 'mahoshojo-web-package', formatVersion: 1, id: 'local.decl',
+      version: '1.0', name: '声明对照', entry: 'index.html', capabilities,
+      generation: { target: 'index.html', mode: 'replace', mediaType: 'text/html' },
+      files: [{ path: 'index.html', mediaType: 'text/html', size: encoder.encode(text).length, digest: await digestWebPackageBytes(encoder.encode(text)) }] },
+    [{ path: 'index.html', bytes: encoder.encode(text) }]);
+    return scanWebPackageBase(base);
+  };
+
+  it('reports capabilities detected without a declaration', async () => {
+    const profile = await declared([], 'localStorage.getItem("k");');
+    expect(profile.categories).toContain('site-storage');
+    expect(diffWebPackageDeclaration(profile).undeclaredDetected).toContain('site-storage');
+  });
+
+  it('produces no diff when the declaration matches the scan', async () => {
+    const profile = await declared(['scripts'], '<script>x()</script>');
+    expect(profile.declared).toEqual(['scripts']);
+    expect(diffWebPackageDeclaration(profile)).toEqual({ undeclaredDetected: [], declaredNotDetected: [] });
+  });
+
+  it('keeps a declared-but-undetected capability out of the detected list', async () => {
+    const profile = await declared(['audio'], '<p>纯展示</p>');
+    expect(profile.categories).toEqual([]);
+    expect(diffWebPackageDeclaration(profile)).toEqual({ undeclaredDetected: [], declaredNotDetected: ['audio'] });
+  });
+
+  it('labels categories and passes unregistered declaration values through', () => {
+    expect(webPackageRiskLabel('site-storage')).toBe('站点存储');
+    expect(webPackageRiskLabel('__proto__')).toBe('__proto__');
+    expect(webPackageRiskLabel('toString')).toBe('toString');
   });
 });

@@ -14,6 +14,16 @@ export const WEB_PACKAGE_RISK_LABELS = {
   'sensitive-api': '敏感浏览器能力',
 } as const;
 export type WebPackageRiskCategory = keyof typeof WEB_PACKAGE_RISK_LABELS;
+
+/**
+ * 标签查表收敛在这里，调用方不必知道映射表的形状。作者声明来自包作者的输入，
+ * 未登记的取值按原样呈现而不是渲染成 `undefined`。
+ */
+export const webPackageRiskLabel = (value: string): string => (
+  Object.prototype.hasOwnProperty.call(WEB_PACKAGE_RISK_LABELS, value)
+    ? WEB_PACKAGE_RISK_LABELS[value as WebPackageRiskCategory]
+    : value
+);
 export type WebPackageRiskFinding = Readonly<{
   category: WebPackageRiskCategory;
   source: 'base' | 'overlay';
@@ -44,6 +54,28 @@ export type WebPackageTrustGrant = Readonly<{
   uncertainty: readonly string[];
   profileStatus: 'complete' | 'partial';
 }>;
+
+export type WebPackageDeclarationDiff = Readonly<{
+  /** 检测到但作者未声明：作者的自述已经与实际行为不符。 */
+  undeclaredDetected: readonly WebPackageRiskCategory[];
+  /** 作者声明了但预检未检测到：可能是无害误报，也可能是声明与实现已经漂移。 */
+  declaredNotDetected: readonly string[];
+}>;
+
+/**
+ * 声明与预检的差异，是「作者声明」这一栏唯一值得展示的内容。
+ *
+ * 完整的两份清单并排陈列会互相削弱：读者容易把作者的自述当成授权范围，而预检
+ * 警告退化成"作者已经说过了"的附注。差异方向相反——它只陈述两者不一致的事实，
+ * 且预检结论始终独立完整呈现。声明为空或与预检一致时不产生任何输出。
+ */
+export const diffWebPackageDeclaration = (profile: WebPackageRiskProfile): WebPackageDeclarationDiff => {
+  const declared = new Set(profile.declared);
+  return Object.freeze({
+    undeclaredDetected: profile.categories.filter((category) => !declared.has(category)),
+    declaredNotDetected: profile.declared.filter((entry) => !profile.categories.includes(entry as WebPackageRiskCategory)),
+  });
+};
 
 // 只限制启发式扫描成本，不限制包的导入或运行大小。未扫描部分显式标为未知。
 const MAX_SCAN_FILE_BYTES = 512 * 1024;

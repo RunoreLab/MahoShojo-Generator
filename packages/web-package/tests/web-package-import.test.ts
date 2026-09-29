@@ -301,6 +301,20 @@ describe('manifest defaulting', () => {
     expect(error.hint).toContain(hintFragment);
   });
 
+  // 重复声明曾经同时得到 "Too big: expected array to have <=4 items" 与英文的
+  // "capabilities must be unique"：4 正是允许的取值数，作者无从判断该删哪一项。
+  it('explains duplicated capability declarations without the validator text', async () => {
+    const error = await expectCode(pack({
+      'index.html': HTML,
+      'web-package.json': encoder.encode(JSON.stringify(manifestOf({
+        capabilities: ['scripts', 'scripts', 'audio', 'video', 'network'],
+      }))),
+    }), 'invalid-manifest-field');
+    expect(error.message).toContain('capabilities');
+    expect(error.message).not.toMatch(/Too big|must be unique/u);
+    expect(error.hint).toContain('重复');
+  });
+
   it('names unknown manifest fields instead of silently dropping them', async () => {
     const { diagnostics } = await importWebPackageArchive(pack({
       'index.html': HTML,

@@ -49,6 +49,17 @@ const TargetPathSchema = WebPackagePathSchema.refine(
   'generation cannot replace the package manifest',
 );
 
+/**
+ * 作者可声明的能力，取值刻意少于预检的风险类别。
+ *
+ * 声明是作者对宿主预检结论的补充说明，不是权限授予，也不构成安全结论。它不与
+ * 预检类别同步扩展：两份同源词表一旦对齐，作者声明就会变成预检结果的影子副本，
+ * 既可能因漂移而说谎，也会让读者把一份"看起来完整"的清单当成授权。真正的安全
+ * 事实始终来自预检；声明的价值只在于让作者写错的地方可见。
+ */
+export const WEB_PACKAGE_DECLARABLE_CAPABILITIES = ['scripts', 'audio', 'video', 'network'] as const;
+export type WebPackageDeclarableCapability = (typeof WEB_PACKAGE_DECLARABLE_CAPABILITIES)[number];
+
 export const WebPackageManifestSchema = z.object({
   format: z.literal(WEB_PACKAGE_FORMAT),
   formatVersion: z.literal(WEB_PACKAGE_FORMAT_VERSION),
@@ -71,7 +82,10 @@ export const WebPackageManifestSchema = z.object({
      */
     example: WebPackagePathSchema.optional(),
   }).strict(),
-  capabilities: z.array(z.enum(['scripts', 'audio', 'video', 'network'])).max(4).default([]),
+  // 唯一性检查已经把长度限制在枚举大小以内：多出一项必然重复。不再叠加 `.max()`，
+  // 否则重复声明会同时得到 `too_big`（"最多 4 项"，而 4 正是允许的取值数）与
+  // "必须唯一"两条互相干扰的英文原文。
+  capabilities: z.array(z.enum(WEB_PACKAGE_DECLARABLE_CAPABILITIES)).default([]),
   files: z.array(WebPackageFileDescriptorSchema).min(1),
 }).strict().superRefine((manifest, context) => {
   const paths = new Set<string>();

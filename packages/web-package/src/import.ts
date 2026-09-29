@@ -1,4 +1,5 @@
 import {
+  WEB_PACKAGE_DECLARABLE_CAPABILITIES,
   WEB_PACKAGE_FORMAT,
   WEB_PACKAGE_FORMAT_VERSION,
   WEB_PACKAGE_MANIFEST_PATH,
@@ -119,6 +120,9 @@ const describeMediaType = (path: string, diagnostics: string[]): string => {
 
 type ManifestIssue = Readonly<{ path: readonly unknown[]; code?: string; message: string }>;
 
+/** 取值清单由 schema 派生，作者向文案不会在枚举变化后静默过期。 */
+const DECLARABLE_CAPABILITIES_TEXT = WEB_PACKAGE_DECLARABLE_CAPABILITIES.join('、');
+
 /**
  * zod 的诊断文本是英文的校验器语言，直接透给包作者等于让他去读实现。这里把
  * 已知的高频 authoring 错误翻译成「字段是什么 + 该怎么改」，未覆盖的仍保留
@@ -136,7 +140,14 @@ const manifestIssueGuidance = (issue: ManifestIssue): { message: string; hint: s
   if (issue.path[0] === 'capabilities' && issue.code === 'invalid_value') {
     return {
       message: `${field} 不在 capabilities 允许值内。`,
-      hint: '作者声明只用于展示，当前只接受 scripts、audio、video、network；站点存储、后台 Worker、宿主页面访问等能力由宿主预检自动检测并在授权对话框中列出，没有对应的声明词。',
+      hint: `作者声明只用于对照预检结论，不是权限声明，当前只接受 ${DECLARABLE_CAPABILITIES_TEXT}；`
+        + '站点存储、后台 Worker、宿主页面访问等能力由宿主预检自动检测并在授权对话框中列出，没有对应的声明词。',
+    };
+  }
+  if (issue.path[0] === 'capabilities' && issue.code === 'custom') {
+    return {
+      message: 'capabilities 中有重复的能力声明。',
+      hint: `同一项能力只需声明一次，请删除重复项；允许的取值为 ${DECLARABLE_CAPABILITIES_TEXT}。`,
     };
   }
   if ((issue.path[0] === 'id' || issue.path[0] === 'version') && issue.code === 'invalid_format') {

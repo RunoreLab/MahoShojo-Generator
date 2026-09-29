@@ -26,9 +26,9 @@ async function waitReady() {
   }
   throw new Error('Web 包 iframe 未出现：'+container.textContent);
 }
-async function fixture(content='<!doctype html><h1>本次结果</h1>') {
+async function fixture(content='<!doctype html><h1>本次结果</h1>',capabilities?:string[]) {
   const bytes=new TextEncoder().encode('<!doctype html><html><body>基础包</body></html>');
-  const base=await verifyWebPackage({format:'mahoshojo-web-package',formatVersion:1,id:'local.trust-test',version:'1.0',name:'授权测试',entry:'index.html',generation:{target:'index.html',mode:'replace',mediaType:'text/html'},files:[{path:'index.html',mediaType:'text/html',size:bytes.length,digest:await digestWebPackageBytes(bytes)}]},[{path:'index.html',bytes}]);
+  const base=await verifyWebPackage({format:'mahoshojo-web-package',formatVersion:1,id:'local.trust-test',version:'1.0',name:'授权测试',entry:'index.html',...(capabilities?{capabilities}:{}),generation:{target:'index.html',mode:'replace',mediaType:'text/html'},files:[{path:'index.html',mediaType:'text/html',size:bytes.length,digest:await digestWebPackageBytes(bytes)}]},[{path:'index.html',bytes}]);
   stageLocalWebPackage(base);const {generatedContent,...artifact}=await createWebPackageOverlay(base.ref,content);
   return {base,artifact,content:generatedContent};
 }
@@ -124,6 +124,21 @@ describe('Web 包可信同源授权 UI',()=>{
   it('does not silently grant same-origin from malformed saved data',async()=>{
     const input=await fixture();localStorage.setItem(WEB_PACKAGE_TRUST_KEY_PREFIX+input.base.ref.digest,'accepted');
     await show(input);expect(container.querySelector('iframe')!.getAttribute('sandbox')).toBe('allow-scripts');
+  });
+
+  // 两份完整清单并排会互相削弱：作者自述会被读成授权范围，预检警告退化成附注。
+  // 风险声明只陈述两者不一致的事实，扫描结论始终独立完整呈现。
+  it('shows only the disagreement between the author declaration and the scan',async()=>{
+    const undeclared=await fixture('<!doctype html><script>localStorage.getItem("k")</script>',['scripts']);
+    await show(undeclared);
+    const text=container.querySelector('[data-testid="web-package-risk-summary"]')!.textContent!;
+    expect(text).toContain('预检检测到：脚本执行、站点存储');
+    expect(text).toContain('作者未声明，但预检检测到：站点存储');
+    expect(text).not.toContain('作者声明：');
+    const overdeclared=await fixture('<!doctype html><h1>无音频</h1>',['audio']);
+    await act(async()=>root.render(viewer(overdeclared)));await waitReady();
+    expect(container.querySelector('[data-testid="web-package-risk-summary"]')!.textContent!)
+      .toContain('作者声明了，预检未检测到：音频');
   });
 });
 

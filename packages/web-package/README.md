@@ -17,7 +17,9 @@ Visual Novel Lite、星屑社区、命运岔路从未部署，已删除其资产
 - `src/archive.ts` / `src/import.ts` / `src/media-types.ts`：信封归一化、缺省导入与共享媒体类型映射；预设生成器复用同一份媒体类型映射。
 - `/browser`：`renderWebPackageInstance(instance)`，无预设 ID 分支；返回展示 HTML 与诊断，不修改 Base/Overlay 原始字节。
 - `/security`：Base/有效实例能力预检和摘要绑定授权判定；不执行作者代码，不访问网络。启发式规则只在标记无法被标记语言模仿时才报告——`host-page-access` 要求 window/self/globalThis/frames 限定或未被 `.`/`-`/`#` 前置的裸全局，以免把 CSS `top`、`.top` 类名与选择器判成宿主访问；`scripts` 的内联事件属性要求完整属性名就是 `on…` 且位于标签内，`data-one=`、`oneTime = true` 不算；`dynamic-execution` 只匹配可执行的 `data:`/`blob:` 媒体类型，内嵌 base64 图片不算；`site-storage` 要求真实访问点（`document.cookie`、`caches.open` 等），说明文字不算。
-- 预检不把提示投影输入（`generation.instructions` / `schema` / `assetCatalog`）与 Markdown 当作运行时资源扫描：其中的代码片段、地址与"不要使用 cookie"之类的说明只是创作参考文本。被跳过的文件数量会在 `uncertainty` 中显式说明，不会静默漏扫。XML 命名空间与 DOCTYPE 标识符不计入网络目的地。规则变更会提升 `WEB_PACKAGE_SCAN_VERSION`，使旧版本签发的长期信任重新确认。
+- 预检预算优先给生成目标：授权判断依赖 generated target 的扫描结论，基础包按路径序抢走预算会把最该被扫描的文件挤掉。超预算或无法解码时 `uncertainty` 列出**具体文件路径**，因为授权对话框需要用户能据此判断，而不是只给一句「部分内容未分析」。规则变更会提升 `WEB_PACKAGE_SCAN_VERSION`；仅调整扫描顺序或不确定性文案不会提升，因为 `canReuseWebPackageTrust` 已按 `categories` / `externalOrigins` / `uncertainty` 逐项比对，新文案本身就会让旧授权失效并重新确认，而未超预算的包结论完全不变。
+- manifest `capabilities` 是**非权威对照**，不是能力清单，也不是权限授予。`diffWebPackageDeclaration()` 只给出两个方向：检测到但作者未声明（自述与实际行为不符）、声明了但预检未检测到。取值清单来自 `WEB_PACKAGE_DECLARABLE_CAPABILITIES`，刻意少于预检的 11 个风险类别且不对齐——对齐会让声明变成预检的影子副本，并制造「看起来完整」的授权错觉。`capabilities` 不设 `.max()`：唯一性已把长度限制在枚举大小内，保留它会让重复声明同时得到「最多 4 项」与「必须唯一」两条互相干扰的提示。
+- 预检不把提示投影输入（`generation.instructions` / `schema` / `assetCatalog`）与 Markdown 当作运行时资源扫描：其中的代码片段、地址与"不要使用 cookie"之类的说明只是创作参考文本。被跳过的文件数量会在 `uncertainty` 中显式说明，不会静默漏扫。XML 命名空间与 DOCTYPE 标识符不计入网络目的地。
 - `/testing/fixtures`：仅测试使用的显式跨 workspace 夹具入口，不进入产品根导出。
 
 HTML/CSS/JavaScript 分别使用 parse5、css-tree、Acorn 解析，三者为 MIT 依赖。相对资源解析以引用文件为基准；CSS 和媒体转为 data URL，模块 Blob URL 在子窗口创建，并由 import map 处理循环及动态导入。局部 fetch 提供 GET/HEAD、正确 MIME、404/405；异步 XHR 支持包内 GET。文件 query 不改变底层 bytes，fragment 保留。`entry` 不必等于生成目标。
