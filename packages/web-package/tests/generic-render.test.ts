@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { parse, type DefaultTreeAdapterMap } from 'parse5';
 import { renderWebPackageInstance } from '../src/render';
-import { createWebPackageInstance, packWebPackageZip, unpackWebPackageZip } from '../src';
+import { buildWebPackagePromptProjection, createWebPackageInstance, createWebPackageOverlayFromProjection, packWebPackageZip, unpackWebPackageZip } from '../src';
+import { importWebPackageArchive } from '../src/import';
 import { createGenericTestPackage } from './helpers/generic-package';
 
 type Plan = { entry:string;root:string;files:Record<string,{mediaType:string;base64:string}>;modules:Record<string,{code:string}> };
@@ -49,5 +50,32 @@ describe('通用 Web 包物化',()=>{
   it('reports unsupported document navigation without granting permissions',async()=>{
     const {instance}=await createGenericTestPackage({html:'<a href="page.html">跳转</a>',extra:{'page.html':{type:'text/html',text:'<p>第二页</p>'}}});
     expect((await renderWebPackageInstance(instance)).diagnostics.join(' ')).toContain('多文档');
+  });
+  // 真实第三方包（quequan-game）就是这个形态：files 未声明、带 favicon.ico、
+  // 生成目标是页面 fetch 的一份 JSON。以前一个 .ico 就让整个包无法导入。
+  it('imports a derived file table with a favicon and an AI-generated JSON target',async()=>{
+    const encoder=new TextEncoder();
+    const {zipSync}=await import('fflate');
+    const archive=zipSync({
+      'index.html':encoder.encode('<!doctype html><html lang="zh"><head><meta charset="utf-8"><link rel="icon" href="static/favicon.ico"><title>事件引擎</title></head><body><script>fetch("static/events.json").then(r=>r.json()).then(e=>globalThis.events=e);</script></body></html>'),
+      'static/favicon.ico':encoder.encode('icon-bytes'),
+      'static/events.json':encoder.encode('[{"id":"e001","text":"示例事件"}]'),
+      'web-package.json':encoder.encode(JSON.stringify({
+        format:'mahoshojo-web-package',formatVersion:1,id:'local.derived',version:'1.0.0',name:'派生包',
+        entry:'index.html',generation:{target:'static/events.json',mode:'replace',mediaType:'application/json'},
+      })),
+    });
+    const {pkg,diagnostics}=await importWebPackageArchive(archive);
+    expect(diagnostics.join('\n')).not.toContain('不透明二进制');
+    expect(pkg.manifest.files.find(f=>f.path==='static/favicon.ico')?.mediaType).toBe('image/vnd.microsoft.icon');
+    const projection=buildWebPackagePromptProjection(pkg);
+    const generated='[{"id":"e001","text":"AI 重写的事件"}]';
+    const instance=await createWebPackageInstance(pkg,await createWebPackageOverlayFromProjection(projection,generated));
+    const html=(await renderWebPackageInstance(instance)).html;
+    expect(html).toContain('data:image/vnd.microsoft.icon;base64,');
+    const plan=readPlan(html);
+    expect(new TextDecoder().decode(Uint8Array.from(atob(plan.files['static/events.json'].base64),(c)=>c.charCodeAt(0))))
+      .toBe(generated);
+    expect(new TextDecoder().decode(pkg.readFile('static/events.json')!)).not.toContain('AI 重写');
   });
 });
