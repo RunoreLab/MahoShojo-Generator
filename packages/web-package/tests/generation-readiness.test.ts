@@ -165,8 +165,38 @@ describe('import-time generation readiness hints', () => {
     expect(hints[0]).toContain('只把 2 个列入 required');
   });
 
-  it('stays silent for a well-authored data package', async () => {
+  it('warns when the reference implementation is large enough to inflate the output', async () => {
+    // 实测 79 KiB 参考实现 -> 65 KiB 产出、2.8 万 token、5 分钟。范例长度直接
+    // 决定目标文件长度，所以偏大的范例既慢又有截断风险。
     const archive = await packFixture(
+      manifestFor({ target: 'static/events.json', mode: 'replace', mediaType: 'application/json', instructions: 'ai/instructions.md', schema: 'ai/schema.json', example: 'ai/example.json' }),
+      [...baseSpecs,
+        { path: 'ai/instructions.md', mediaType: 'text/markdown', content: 'x'.repeat(400) },
+        { path: 'ai/schema.json', mediaType: 'application/json', content: JSON.stringify({ type: 'array', items: { type: 'object', properties: { id: {}, text: {} }, required: ['id', 'text'] } }) },
+        { path: 'ai/example.json', mediaType: 'application/json', content: `<!doctype html><script>${'const bullet=1;'.repeat(6_000)}</script>` },
+      ],
+    );
+    const { diagnostics } = await importWebPackageArchive(archive);
+    const hints = diagnostics.filter((line) => line.startsWith('生成可行性：'));
+    expect(hints).toHaveLength(1);
+    expect(hints[0]).toContain('偏大');
+    expect(hints[0]).toContain('5 分钟');
+  });
+
+  it('says nothing about a reference that fits comfortably', async () => {
+    const archive = await packFixture(
+      manifestFor({ target: 'static/events.json', mode: 'replace', mediaType: 'application/json', instructions: 'ai/instructions.md', schema: 'ai/schema.json', example: 'ai/example.json' }),
+      [...baseSpecs,
+        { path: 'ai/instructions.md', mediaType: 'text/markdown', content: 'x'.repeat(400) },
+        { path: 'ai/schema.json', mediaType: 'application/json', content: JSON.stringify({ type: 'array', items: { type: 'object', properties: { id: {}, text: {} }, required: ['id', 'text'] } }) },
+        { path: 'ai/example.json', mediaType: 'application/json', content: '<!doctype html><script>const a=1;</script>' },
+      ],
+    );
+    const { diagnostics } = await importWebPackageArchive(archive);
+    expect(diagnostics.filter((line) => line.startsWith('生成可行性：'))).toEqual([]);
+  });
+
+  it('stays silent for a well-authored data package', async () => {    const archive = await packFixture(
       manifestFor({ target: 'static/events.json', mode: 'replace', mediaType: 'application/json', instructions: 'ai/instructions.md', schema: 'ai/schema.json', example: 'ai/example.json' }),
       [...baseSpecs,
         { path: 'ai/instructions.md', mediaType: 'text/markdown', content: '请生成事件数组。每个事件包含 id、text、weight 与 accept/reject 的四维增减表。'.repeat(12) },

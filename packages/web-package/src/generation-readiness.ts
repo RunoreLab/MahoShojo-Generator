@@ -23,6 +23,13 @@ import type { WebPackageManifest } from '@mahoshojo/contracts/web-package';
  */
 const THIN_INSTRUCTIONS_CHARS = 300;
 
+/**
+ * Measured: a 79 KiB working reference produced a 65 KiB / ~28k-token target that
+ * took 5 minutes to stream. The reference size sets the output size, so an
+ * oversized one buys nothing and costs generation time plus a truncation risk.
+ */
+const LARGE_REFERENCE_BYTES = 48 * 1024;
+
 const isRecord = (value: unknown): value is Record<string, unknown> => (
   Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 );
@@ -103,11 +110,23 @@ export const buildGenerationReadinessHints = (
     }
   }
 
-  if (!manifest.generation.example) {
+  const examplePath = manifest.generation.example;
+  if (!examplePath) {
     hints.push(
       '生成可行性：没有 generation.example。宿主不会自动拿包自带的默认目标文件当示例，'
-      + '补一份 3–5 条的小样本是提升一次生成成功率最直接的办法。',
+      + '补一份 3–5 条的小样本（或一份可运行的参考实现）是提升一次生成成功率最直接的办法。',
     );
+  } else {
+    const example = read.text(examplePath) ?? '';
+    const bytes = new TextEncoder().encode(example).byteLength;
+    if (bytes > LARGE_REFERENCE_BYTES) {
+      hints.push(
+        `生成可行性：generation.example 有 ${Math.round(bytes / 1024)} KiB，偏大。`
+        + '范例有多长，目标文件通常就要产出多长——实测 79 KiB 的参考实现产出了 65 KiB、约 2.8 万 token，'
+        + '单次生成跑了 5 分钟。请把范例精简到"仍可运行、但不含可删的样式与内容"的最小形态，'
+        + '否则容易撞上输出上限或等待超时。',
+      );
+    }
   }
 
   return hints;

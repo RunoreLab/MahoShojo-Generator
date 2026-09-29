@@ -14,6 +14,9 @@ Visual Novel Lite、星屑社区、命运岔路从未部署，已删除其资产
 
 - 根导出：验证、ZIP、不可变实例、Prompt Projection、重放、归档导入与错误码。
 - Prompt Projection 只投影 `instructions` / `schema` / `assetCatalog` 与作者显式声明的 `generation.example`；base target 不会被自动当作示例（内置竞技场新闻的 base `index.html` 是占位页）。
+- `generation.example` 承担两种用途：小结构样本，或一份完整可运行的参考实现（引擎代码）。预算 128 KiB，按较大的那一种定；超限拒绝而非裁剪（截断的范例会教出坏产物）。它**不得指向 `entry`**。
+- 范例长度直接决定产出长度：实测 79 KiB 范例 → 65 KiB / 约 2.8 万 token 产出、299 秒。因此导入期对 > 48 KiB 的 `example` 提示精简到「仍可运行但可删内容已删」的最小形态。
+- `example` 与 `instructions` / `schema` / `assetCatalog` 同为提示投影输入，**不按运行时资源扫描**——参考实现里的 `fetch` / `localStorage` 是创作参考文本，不会加载。`entry` 与 `generation.target` 不享受该豁免，扫描器也不依赖 manifest 校验来保证这一点。
 - HOST block 按 `target.mediaType` 正面声明目标形态，顶层是数组还是对象跟随已校验的 `generation.schema`。这不是替包作者描述内容，而是声明宿主如何读取与校验这个文件；形态来源是宿主侧已冻结的契约字段，因此不破坏 §13 的信任边界。
 - `src/target-normalize.ts`：JSON 目标在校验前的确定性归一化，剥离 Markdown 围栏、被回显的目标路径行，必要时按字符串感知的括号平衡提取首个完整 JSON 值。它**只去包装**：不改写值、不补字段、不猜结构（对象永远不会被提升成数组），对已经是合法 JSON 的输入字节恒等，因此 `generatedDigest` 与历史 replay 都不受影响。
 - `src/generation-readiness.ts`：导入期对 JSON 数据类目标做生成可行性体检（instructions 缺失/过薄、schema 缺失、无 `required`、无 `properties`、`required` 覆盖不足、未提供 `example`），只产出提示不阻断导入。宿主保证形态可解析，不发明包想要的内容结构——后者由这一层与 `apps/web/public/encyclopedia/web-package-authoring.md` 承接。
