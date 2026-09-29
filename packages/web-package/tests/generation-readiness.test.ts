@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
 import { importWebPackageArchive } from '../src';
 import { WebPackageImportError } from '../src/import';
 
@@ -82,10 +81,32 @@ const crc32 = (data: Uint8Array): number => {
   return (c ^ 0xffffffff) >>> 0;
 };
 
-const quequanInstructions = readFileSync(
-  new URL('../../../.tmp/quequan-inspect/generation/instructions.md', import.meta.url),
-  'utf8',
-);
+/**
+ * 真实第三方包 `quequan-game` 的 instructions 原文（183 字符）——只有字段名清单。
+ */
+const quequanInstructions = [
+  '# 雀权事件生成说明',
+  '',
+  'AI 输出目标：static/events.json',
+  '',
+  '请生成事件数组。',
+  '',
+  '每个事件必须包含：',
+  '- id',
+  '- initial',
+  '- text',
+  '- weight',
+  '- chain',
+  '- oneTime',
+  '- ending',
+  '- accept',
+  '- reject',
+  '- acceptUnlock',
+  '- rejectUnlock',
+  '',
+  '保持事件数据为合法 JSON。',
+  '',
+].join('\n');
 
 const baseSpecs: FileSpec[] = [
   { path: 'index.html', mediaType: 'text/html', content: '<!doctype html><title>引擎</title>' },
