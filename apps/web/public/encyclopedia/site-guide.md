@@ -1,7 +1,7 @@
 # 站内功能速览（从生成到对战）
 
 > 作者：[末伏之夜](https://github.com/notuhao)  
-> 更新时间：2026-09-03
+> 更新时间：2026-09-30
 
 如果你是第一次来，可以把本站理解成三件事：
 
@@ -35,8 +35,24 @@
 
 ### 对战竞技
 
-- `/arena`（或旧入口 `/battle`）：魔法少女竞技场（生成战报；可选日常/羁绊/经典/情景模式；v0.8.1 起支持连续战报会话与章节规划；v0.8.2 起支持素材注入；v0.9.0 起支持多人房间）
+- `/arena`（或旧入口 `/battle`）：魔法少女竞技场（生成战报；可选日常/羁绊/经典/情景模式；v0.8.1 起支持连续战报会话与章节规划；v0.8.2 起支持素材注入；v0.9.0 起支持多人房间；v0.10.0 起支持 Web 战报与 Web 包）
 - `/pvp`：PVP 卡牌对决（房间对局、回合推进、投票与结算）
+
+### Web 战报与 Web 包（v0.10.0+）
+
+- **Web 战报**：在竞技场把战报格式从 `Markdown` 切到 `Web（实验性）`，AI 直接生成一份可以点的 HTML 战报；结果区可切「普通显示 / Web 显示」并进入沉浸显示
+- **Web 包**：包是「引擎 + 素材」，AI 只生成包指定的**一个数据文件**；内置预设「竞技场新闻」可直接选用，也可在「Web 包」区块导入自己的本地 ZIP
+- 权限模型：包默认在**受限模式**下运行；同源授权是可选的额外权限，随时可撤销
+
+上手说明见：`/encyclopedia/web-report`
+
+### 本地库（v0.10.0+）
+
+- 所有数据卡选择弹窗都有「本地库」页签：数据卡与 Web 包的本机存储，无需登录、不上传、不跨设备同步
+- 三个填充入口：数据卡详情弹窗「存到本地库」、导入时的「同时保存到本地库」偏好、竞技场分队上传处的同一偏好
+- ⚠️ 清除本站数据会一并删除；目前**没有**整库导出/备份与回收站
+
+详见：`/encyclopedia/local-library`
 
 ### 最快体验多人（v0.9.0+）
 
@@ -106,11 +122,13 @@
 - 自由生成：`/encyclopedia/free-generator`
 - 魔法茶会（功能与快速开始）：`/encyclopedia/magic-tea-party`
 - 角色组队：`/encyclopedia/character-party`
+- 本地库：`/encyclopedia/local-library`
 - 酒馆生态联动（SillyTavern）：`/encyclopedia/tavern-ecosystem`
 - 万途生态互通：`/encyclopedia/wantu-ecosystem`
 - 档案馆（角色管理）：`/encyclopedia/archive`
 - 账号迁移指南：`/encyclopedia/auth-migration`
 - 竞技场：`/encyclopedia/arena`
+- Web 战报使用说明：`/encyclopedia/web-report`
 - 竞技场多人模式：`/encyclopedia/arena-multiplayer`
 - 连续战报会话：`/encyclopedia/continuous-battle-story`
 - 排位与排行榜：`/encyclopedia/ranking`

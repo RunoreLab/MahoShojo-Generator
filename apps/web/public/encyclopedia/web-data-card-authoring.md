@@ -2,7 +2,7 @@
 
 > 适用范围：竞技场 Web 战报（实验性）  
 > 面向对象：角色卡 / 情景卡创作者  
-> 更新日期：2026-09-22
+> 更新日期：2026-09-30
 
 Web 战报让数据卡创作多了一层新的可能性。
 
@@ -641,6 +641,9 @@ Web 战报真正扩大的不是“排版能力”，而是数据卡创作者可�
 - 竞技场：`/encyclopedia/arena`
 - 引导 / 判定事件 / 读写状态：`/encyclopedia/guidance`
 - 连续战报会话：`/encyclopedia/continuous-battle-story`
+- Web 战报使用说明（面向使用者）：`/encyclopedia/web-report`
+- Web 包创作指南：`/encyclopedia/web-package-authoring`
+- 本地库：`/encyclopedia/local-library`
 - AI 输出格式异常：`/encyclopedia/ai-output-format`
 
 外部创作思路：

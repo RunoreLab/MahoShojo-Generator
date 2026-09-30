@@ -1,7 +1,7 @@
 # 竞技场
 
 > 作者：[末伏之夜](https://github.com/notuhao)  
-> 更新时间：2026-09-03
+> 更新时间：2026-09-30
 
 竞技场是「生成战报」的主要入口：你选择参战者（数据卡或预设角色），系统生成战报并给出胜负结果。
 
@@ -51,6 +51,19 @@
 - 连续战报内部固定走 **流式生成**
 
 更详细的使用说明见：`/encyclopedia/continuous-battle-story`
+
+## Web 战报与 Web 包（v0.10.0）
+
+`/arena` 现在可以把战报格式从 `Markdown` 切成 `Web（实验性）`。
+
+- **Web 战报**：AI 直接生成一份可交互的 HTML 战报；结果区提供「普通显示 / Web 显示」，并支持沉浸显示与单独下载 HTML
+- **Web 包**：包是「引擎 + 素材」，AI 只生成包指定的**一个数据文件**；可选内置预设，或在「Web 包」区块导入自己的本地 ZIP
+- 权限模型：包默认在**受限模式**下运行，能做包内脚本、样式、模块与素材工作，但拿不到主站 DOM 与浏览器存储的同源权限。同源授权是可选的额外权限，风险扩大需重新确认，可随时撤销
+- 多人房间只支持内置预设，本地 ZIP 不会进入房间配置
+
+当前边界：单文档本地物化；多 HTML 页面跳转、Worker / Service Worker、嵌套 iframe、`eval` 与任意动态 `innerHTML` / CSSOM 里的相对资源不保证工作。
+
+完整说明见：`/encyclopedia/web-report`
 
 ## 素材注入（v0.8.2）
 
@@ -102,6 +115,8 @@ v0.6.0 的排位对象以「实体」为单位：
 - 情景卡进阶：`/encyclopedia/scenario-advanced`
 - Web 战报数据卡创作进阶：`/encyclopedia/web-data-card-authoring`
 - Web 包创作指南：`/encyclopedia/web-package-authoring`
+- Web 战报使用说明：`/encyclopedia/web-report`
+- 本地库：`/encyclopedia/local-library`
 - 引导与读写状态（strict/free 的差异点）：`/encyclopedia/guidance`
 - 连续战报会话：`/encyclopedia/continuous-battle-story`
 - 多人模式：`/encyclopedia/arena-multiplayer`

@@ -2,7 +2,7 @@
 
 > 适用范围：竞技场 Web 战报的自定义 Web 包（本地 ZIP 导入）  
 > 面向对象：自己打包 Web 包的创作者  
-> 更新日期：2026-09-29
+> 更新日期：2026-09-30
 
 本页讲的是**怎么打包，让 AI 稳定地生成出你引擎要的数据**。
 
@@ -334,6 +334,8 @@ pnpm --filter @mahoshojo/hosted-runtime test
 
 ## 九、相关页面
 
+- Web 战报使用说明（面向使用者）：`/encyclopedia/web-report`
 - Web 战报数据卡创作进阶：`/encyclopedia/web-data-card-authoring`
+- 本地库：`/encyclopedia/local-library`
 - AI 输出格式异常：`/encyclopedia/ai-output-format`
 - 竞技场总览：`/encyclopedia/arena`

@@ -77,8 +77,37 @@
 
 房间历史战报里的标注，表示这一局的配置里含有被接受的成员提案带来的影响，方便区分“房主自己的普通局”和“多人协作局”。
 
+## 本地库与 Web 战报术语（v0.10.0+）
+
+### 本地库
+
+保存在**用户自己浏览器**里的数据集合（数据卡 + Web 包），需要独立 IndexedDB `mahoshojo-local-library`。不需要登录、不上传、不随账号跨设备同步；清除本站数据会一并删除。相关取舍见 `/encyclopedia/local-library`。
+
+### 仅本次会话
+
+Web 包导入后**默认不落盘**时的状态：这次页面还可选，刷新页面就需要重新导入。勾选「导入时保存到本地库」才会长期保留。
+
+### Web 战报
+
+竞技场的一种战报格式（`Web（实验性）`）：AI 直接生成一份完整 HTML 页面而非 Markdown 文章，在浏览器隔离框架中展示，可切换普通显示 / Web 显示与沉浸显示。见 `/encyclopedia/web-report`。
+
+### Web 包 / 生成目标
+
+Web 包是「引擎 + 素材」的 ZIP（根目录 `web-package.json`），**AI 只生成包声明的那一个目标文件**，引擎留在包里不被替换。内置预设目前是「竞技场新闻」。
+
+### 受限模式 / 可信同源模式
+
+Web 包的两种运行权限。受限模式（默认）允许包内脚本、样式、模块与素材工作，但不给主站 DOM 与浏览器存储的同源权限；可信同源模式需要用户显式授权，接近本站自身脚本权限，风险扩大需重新确认，可随时撤销。
+
+### 能力预检
+
+对 Web 包做的静态扫描，报告它**真实具备**的能力、外部目的地与不确定性。「未检测到已知能力」不等于安全。
+
 ## 相关条目
 
 - 竞技场多人模式：`/encyclopedia/arena-multiplayer`
+- Web 战报使用说明：`/encyclopedia/web-report`
+- Web 包创作指南：`/encyclopedia/web-package-authoring`
+- 本地库：`/encyclopedia/local-library`
 - 情景卡进阶：`/encyclopedia/scenario-advanced`
 - 代码杀（概念与礼仪）：`/encyclopedia/code-kill`
