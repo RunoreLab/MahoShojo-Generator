@@ -19,8 +19,15 @@ export type WebPackageCardItem = Readonly<{
   /** 稳定键：包的 canonical digest。 */
   digest: string;
   title: string;
-  /** 来源身份行，通常是 `id@version`。 */
+  /** 描述行：内置预设是 catalog 里的 description，本地库是 `id@version`。 */
   summary: string;
+  /**
+   * 规范身份 `id@version`。
+   *
+   * 与 `summary` 分开是因为内置预设的 summary 是描述而不是身份；搜索框承诺能按
+   * id@version 找包，就必须单独拿这一份来匹配，否则预设永远搜不到自己的身份。
+   */
+  identity: string;
   source: 'builtin' | 'local';
   /** 记录与 archive 字节不一致、已无法恢复时为 true。 */
   broken?: boolean;

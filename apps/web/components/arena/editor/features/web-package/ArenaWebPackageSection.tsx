@@ -60,6 +60,19 @@ export function ArenaWebPackageSection({ model }: Readonly<{ model: ArenaWebPack
   const detailOption = detailDigest
     ? [...model.presets, ...model.library].find((option: ArenaWebPackageOptionView) => option.digest === detailDigest) ?? null
     : null;
+  // summary 对内置预设是描述、对本地库才是身份；混在一行里会出现"身份"标签下
+  // 放着一段描述、而真正的 id@version 从头到尾没被展示过的情况。
+  const detailIdentity = detailOption?.ref ? `${detailOption.ref.id}@${detailOption.ref.version}` : null;
+  const detailDescription = detailOption?.summary && detailOption.summary !== detailIdentity
+    ? detailOption.summary
+    : null;
+  const detailOrigin = !detailOption
+    ? ''
+    : detailOption.kind === 'builtin'
+      ? '内置预设（随应用分发，不可删除）'
+      : detailOption.sessionOnly
+        ? '仅本次会话暂存（未写入本地库，刷新后需重新导入）'
+        : '本机本地库（可删除、可导出）';
 
   return (
     <div className="space-y-3" data-testid="arena-web-package-section">
@@ -76,12 +89,14 @@ export function ArenaWebPackageSection({ model }: Readonly<{ model: ArenaWebPack
             {selectedLabel}
           </p>
           {model.selected?.summary ? (
-            <p className="mt-0.5 text-xs text-gray-500">{model.selected.summary}</p>
+            <p className="mt-0.5 text-xs break-words text-gray-500">{model.selected.summary}</p>
           ) : null}
           {model.selected?.kind === 'local' ? (
             <p className="mt-0.5 flex items-center gap-1 text-xs text-gray-500">
               <HardDrive className="h-3 w-3" />
-              来自本机本地库；清除站点数据会一并删除，可随时在此重新导入。
+              {model.selected.sessionOnly
+                ? '仅本次会话暂存；刷新后需要重新导入。'
+                : '来自本机本地库；清除站点数据会一并删除，可随时在此重新导入。'}
             </p>
           ) : null}
         </div>
@@ -183,12 +198,20 @@ export function ArenaWebPackageSection({ model }: Readonly<{ model: ArenaWebPack
         <dl className="space-y-2 text-sm">
           <div className="flex gap-2">
             <dt className="w-20 shrink-0 text-gray-500">来源</dt>
-            <dd>{detailOption?.kind === 'builtin' ? '内置预设（随应用分发，不可删除）' : '本机本地库（可删除、可导出）'}</dd>
+            <dd>{detailOrigin}</dd>
           </div>
-          <div className="flex gap-2">
-            <dt className="w-20 shrink-0 text-gray-500">身份</dt>
-            <dd className="break-all font-mono text-xs">{detailOption?.summary}</dd>
-          </div>
+          {detailIdentity ? (
+            <div className="flex gap-2">
+              <dt className="w-20 shrink-0 text-gray-500">身份</dt>
+              <dd className="break-all font-mono text-xs">{detailIdentity}</dd>
+            </div>
+          ) : null}
+          {detailDescription ? (
+            <div className="flex gap-2">
+              <dt className="w-20 shrink-0 text-gray-500">描述</dt>
+              <dd className="break-words">{detailDescription}</dd>
+            </div>
+          ) : null}
           <div className="flex gap-2">
             <dt className="w-20 shrink-0 text-gray-500">内容摘要</dt>
             <dd className="break-all font-mono text-xs">{detailOption?.digest}</dd>

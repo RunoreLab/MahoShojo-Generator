@@ -13,6 +13,7 @@ const toCardItem = (option: ArenaWebPackageOptionView): WebPackageCardItem => ({
   digest: option.digest,
   title: option.title,
   summary: option.summary ?? '',
+  identity: option.ref ? `${option.ref.id}@${option.ref.version}` : '',
   source: option.kind === 'builtin' ? 'builtin' : 'local',
   broken: option.broken === true,
   sessionOnly: option.sessionOnly === true,
@@ -63,7 +64,9 @@ export function WebPackagePickerModal({
   const search = (items: WebPackageCardItem[]): WebPackageCardItem[] => {
     const needle = keyword.trim().toLowerCase();
     if (!needle) return items;
-    return items.filter((item) => `${item.title} ${item.summary}`.toLowerCase().includes(needle));
+    // 身份单列匹配：内置预设的 summary 是描述，光搜 title+summary 会让搜索框
+    // 承诺的「id@version」对预设完全失效。
+    return items.filter((item) => `${item.title} ${item.summary} ${item.identity}`.toLowerCase().includes(needle));
   };
 
   return (

@@ -252,4 +252,126 @@ describe('ArenaWebPackageSection', () => {
     const selectButton = document.querySelector<HTMLButtonElement>('[aria-label="选择 Web 包：我的阅读器"]')!;
     expect(selectButton.disabled).toBe(true);
   });
+
+  it('详情把 id@version 归到「身份」、描述归到「描述」，不再把描述当身份展示', async () => {
+    await render(model({
+      capabilities: soloCapabilities,
+      presets: [{
+        ...preset,
+        summary: '提供新闻样式、素材和互动组件，由 AI 自由创作完整新闻站。',
+      }],
+    }));
+    await openPicker();
+    await act(async () => {
+      document.querySelector<HTMLButtonElement>('[title="查看 Web 包详情：竞技场新闻"]')!.click();
+    });
+
+    const detail = document.querySelector<HTMLElement>('[aria-labelledby="web-package-detail-title"]')!;
+    const rows = new Map([...detail.querySelectorAll('dt')]
+      .map((dt) => [dt.textContent, dt.nextElementSibling?.textContent ?? '']));
+    expect(rows.get('身份')).toBe(`${BUILTIN_ARENA_NEWS_PACKAGE_REF.id}@${BUILTIN_ARENA_NEWS_PACKAGE_REF.version}`);
+    expect(rows.get('描述')).toContain('提供新闻样式');
+    expect(rows.get('身份')).not.toContain('提供新闻样式');
+  });
+
+  it('本地库条目的身份与描述不重复；仅本次会话的暂存包不说自己可删除', async () => {
+    const sessionItem: ArenaWebPackageOptionView = {
+      ...libraryItem,
+      summary: 'local.side@1.0.0',
+      sessionOnly: true,
+    };
+    await render(model({ capabilities: soloCapabilities, library: [sessionItem], selected: sessionItem }));
+    await openPicker();
+    await act(async () => {
+      [...document.querySelectorAll('button')].find((button) => button.textContent?.includes('本地库 ('))!.click();
+    });
+    await act(async () => {
+      document.querySelector<HTMLButtonElement>('[title="查看 Web 包详情：我的阅读器"]')!.click();
+    });
+
+    const detail = document.querySelector<HTMLElement>('[aria-labelledby="web-package-detail-title"]')!;
+    const labels = [...detail.querySelectorAll('dt')].map((dt) => dt.textContent);
+    expect(labels).toContain('身份');
+    // summary 就是身份时不重复展示成「描述」。
+    expect(labels).not.toContain('描述');
+    expect(detail.textContent).toContain('仅本次会话暂存');
+    expect(detail.textContent).not.toContain('可删除、可导出');
+    // 折叠区块里也不能把暂存包说成来自本地库。
+    expect(container.textContent).toContain('仅本次会话暂存；刷新后需要重新导入。');
+  });
+
+  it('搜索能按 id@version 命中内置预设（其卡片摘要不是身份）', async () => {
+    await render(model({ capabilities: soloCapabilities }));
+    await openPicker();
+
+    const search = document.querySelector<HTMLInputElement>('input[type="search"]')!;
+    const typeKeyword = async (value: string) => {
+      await act(async () => {
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+        setter.call(search, value);
+        search.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+    };
+
+    await typeKeyword('竞技场');
+    expect(document.querySelector('[aria-label$="Web 包：竞技场新闻"]')).toBeTruthy();
+
+    await typeKeyword(`${BUILTIN_ARENA_NEWS_PACKAGE_REF.id}@${BUILTIN_ARENA_NEWS_PACKAGE_REF.version}`);
+    expect(document.querySelector('[aria-label$="Web 包：竞技场新闻"]')).toBeTruthy();
+  });
+
+  it('在详情里按 Escape 只关详情，选择器与已输入的搜索词都留着', async () => {
+    await render(model({ capabilities: soloCapabilities }));
+    await openPicker();
+    const search = document.querySelector<HTMLInputElement>('input[type="search"]')!;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+      setter.call(search, '竞技场');
+      search.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => {
+      document.querySelector<HTMLButtonElement>('[title="查看 Web 包详情：竞技场新闻"]')!.click();
+    });
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+
+    expect(document.querySelector('[aria-labelledby="web-package-detail-title"]')).toBeNull();
+    expect(document.querySelector('[data-testid="web-package-import-input"]')).toBeTruthy();
+    expect(document.querySelector<HTMLInputElement>('input[type="search"]')?.value).toBe('竞技场');
+  });
+
+  it('详情与删除确认互斥，不会同时挂在选择器之上', async () => {
+    await render(model({ capabilities: soloCapabilities }));
+    await openPicker();
+    await act(async () => {
+      [...document.querySelectorAll('button')].find((button) => button.textContent?.includes('本地库 ('))!.click();
+    });
+    await act(async () => {
+      document.querySelector<HTMLButtonElement>('[title="查看 Web 包详情：我的阅读器"]')!.click();
+    });
+    await act(async () => {
+      document.querySelector<HTMLButtonElement>('[title="从本地库删除：我的阅读器"]')!.click();
+    });
+
+    expect(document.querySelector('[aria-labelledby="web-package-detail-title"]')).toBeNull();
+    expect(document.querySelector('[aria-labelledby="web-package-remove-title"]')).toBeTruthy();
+  });
+
+  it('待确认的条目从列表消失后不再留着确认框', async () => {
+    const input = model({ capabilities: soloCapabilities });
+    await render(input);
+    await openPicker();
+    await act(async () => {
+      [...document.querySelectorAll('button')].find((button) => button.textContent?.includes('本地库 ('))!.click();
+    });
+    await act(async () => {
+      document.querySelector<HTMLButtonElement>('[title="从本地库删除：我的阅读器"]')!.click();
+    });
+    expect(document.querySelector('[aria-labelledby="web-package-remove-title"]')).toBeTruthy();
+
+    // 库记录被别处清掉：确认框必须跟着消失，而不是等这条记录再次出现时无声弹回。
+    await render(model({ capabilities: soloCapabilities, library: [] }));
+    expect(document.querySelector('[aria-labelledby="web-package-remove-title"]')).toBeNull();
+  });
 });
