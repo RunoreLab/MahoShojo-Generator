@@ -197,6 +197,11 @@ const renderAssistantFooter = (message: MagicTeaPartyMessage) => {
   return null;
 };
 
+const isMessageOverCharLimit = (message: MagicTeaPartyMessage, messageCharLimit?: number): boolean =>
+  typeof messageCharLimit === 'number'
+  && messageCharLimit > 0
+  && (typeof message.content === 'string' ? message.content.length : 0) > messageCharLimit;
+
 const CompactMessageButton = (props: {
   message: MagicTeaPartyMessage;
   isGenerating: boolean;
@@ -205,9 +210,8 @@ const CompactMessageButton = (props: {
 }) => {
   const { message, isGenerating, messageCharLimit, onCompactMessage } = props;
   if (!onCompactMessage) return null;
-  if (typeof messageCharLimit !== 'number' || messageCharLimit <= 0) return null;
+  if (!isMessageOverCharLimit(message, messageCharLimit)) return null;
   const length = typeof message.content === 'string' ? message.content.length : 0;
-  if (length <= messageCharLimit) return null;
 
   return (
     <button
@@ -240,15 +244,7 @@ const renderAssistantActions = (props: {
   const canUseReference = plain && typeof onUseAsReference === 'function';
   const canRegenerate = showRegenerate && typeof onRegenerate === 'function';
   const canDelete = message.role !== 'system' && typeof onDeleteMessage === 'function';
-  const compactButton = (
-    <CompactMessageButton
-      message={message}
-      isGenerating={isGenerating}
-      messageCharLimit={props.messageCharLimit}
-      onCompactMessage={props.onCompactMessage}
-    />
-  );
-  const canCompact = compactButton !== null;
+  const canCompact = Boolean(props.onCompactMessage) && isMessageOverCharLimit(message, props.messageCharLimit);
 
   if (!canUseReference && !canRegenerate && !canDelete && !canCompact) return null;
 
@@ -275,7 +271,14 @@ const renderAssistantActions = (props: {
           重新生成
         </button>
       ) : null}
-      {compactButton}
+      {canCompact ? (
+        <CompactMessageButton
+          message={message}
+          isGenerating={isGenerating}
+          messageCharLimit={props.messageCharLimit}
+          onCompactMessage={props.onCompactMessage}
+        />
+      ) : null}
       {canDelete ? (
         <button
           type="button"
@@ -303,15 +306,8 @@ const renderUserActions = (props: {
   if (message.role !== 'user') return null;
   const canEdit = typeof onStartEdit === 'function' && !isGenerating;
   const canDelete = typeof onDeleteMessage === 'function' && !isGenerating;
-  const compactButton = (
-    <CompactMessageButton
-      message={message}
-      isGenerating={isGenerating}
-      messageCharLimit={props.messageCharLimit}
-      onCompactMessage={props.onCompactMessage}
-    />
-  );
-  if (!canEdit && !canDelete && compactButton === null) return null;
+  const canCompact = Boolean(props.onCompactMessage) && isMessageOverCharLimit(message, props.messageCharLimit);
+  if (!canEdit && !canDelete && !canCompact) return null;
 
   return (
     <div className="mt-2 flex items-center justify-end gap-2 text-xs text-gray-500">
@@ -325,7 +321,14 @@ const renderUserActions = (props: {
           编辑并分支
         </button>
       ) : null}
-      {compactButton}
+      {canCompact ? (
+        <CompactMessageButton
+          message={message}
+          isGenerating={isGenerating}
+          messageCharLimit={props.messageCharLimit}
+          onCompactMessage={props.onCompactMessage}
+        />
+      ) : null}
       {canDelete ? (
         <button
           type="button"
@@ -536,6 +539,8 @@ export function MagicTeaPartyChatMessage(props: MagicTeaPartyChatMessageProps) {
             onUseAsReference: props.onUseAsReference,
             onRegenerate: props.onRegenerate,
             showRegenerate: props.showRegenerate,
+            onCompactMessage: props.onCompactMessage,
+            messageCharLimit: props.messageCharLimit,
           })
         : renderUserActions({
             message,
