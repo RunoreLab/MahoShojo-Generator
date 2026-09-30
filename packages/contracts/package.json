@@ -29,6 +29,11 @@
       "import": "./src/data-cards.ts",
       "default": "./src/data-cards.ts"
     },
+    "./desktop-ipc": {
+      "types": "./src/desktop-ipc.ts",
+      "import": "./src/desktop-ipc.ts",
+      "default": "./src/desktop-ipc.ts"
+    },
     "./game-card": {
       "types": "./src/game-card.ts",
       "import": "./src/game-card.ts",

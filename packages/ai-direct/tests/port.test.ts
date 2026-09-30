@@ -10,8 +10,8 @@ class InMemorySecureVault implements SecureVault {
     this.#secrets.set(ref, value);
   }
 
-  async getSecret(ref: string): Promise<string | null> {
-    return this.#secrets.get(ref) ?? null;
+  async hasSecret(ref: string): Promise<boolean> {
+    return this.#secrets.has(ref);
   }
 
   async deleteSecret(ref: string): Promise<void> {
@@ -89,13 +89,24 @@ describe('AiExecutionPort', () => {
 });
 
 describe('SecureVault', () => {
-  it('is a runtime-neutral secret reference port', async () => {
+  it('is a write-only secret reference port', async () => {
     const vault: SecureVault = new InMemorySecureVault();
 
     await vault.setSecret('vault:profile-1:api-key', 'secret-value');
-    await expect(vault.getSecret('vault:profile-1:api-key')).resolves.toBe('secret-value');
+    await expect(vault.hasSecret('vault:profile-1:api-key')).resolves.toBe(true);
 
+    // 删除是幂等的：缺失引用同样成功。
     await vault.deleteSecret('vault:profile-1:api-key');
-    await expect(vault.getSecret('vault:profile-1:api-key')).resolves.toBeNull();
+    await expect(vault.hasSecret('vault:profile-1:api-key')).resolves.toBe(false);
+    await expect(vault.deleteSecret('vault:profile-1:api-key')).resolves.toBeUndefined();
+  });
+
+  it('does not expose any plaintext read surface', () => {
+    // 已持久化的 secret 不得由 renderer 可达的接口读回；这条断言防止接口在后续
+    // 重构中悄悄长出一个 getSecret。
+    const surface = new InMemorySecureVault() as unknown as Record<string, unknown>;
+    for (const forbidden of ['getSecret', 'readSecret', 'revealSecret', 'exportSecrets']) {
+      expect(Object.keys(surface), `${forbidden} must not be reachable`).not.toContain(forbidden);
+    }
   });
 });
