@@ -26,6 +26,7 @@ import { buildTitleDisplay } from '@/lib/text';
 import { ChevronDown, Filter } from 'lucide-react';
 import DecksModal from './DecksModal';
 import { BaseModal } from './shared/BaseModal';
+import { DataCardEmptyState, type DataCardEmptyStateTab } from './shared/DataCardEmptyState';
 import { LocalLibraryStatusNote } from './shared/LocalLibraryStatusNote';
 import { getDataCardStatus } from '@/lib/data-card-status';
 import type { BadgeDefinition } from '@/types/badge';
@@ -1301,6 +1302,19 @@ export default function BattleDataModal({
     return [];
   }, [activeTab, isLocalTab, isPublicTab, paginatedUserCards, paginatedFavoriteCards, localPaginatedCards, publicPaginatedCards]);
 
+  // 「搜索/筛选无命中」和「这个库里本来就没有」对用户是两件事，空状态必须分开说。
+  const hasActiveQuery = useMemo(() => (
+    debouncedSearchQuery.trim().length > 0
+    || JSON.stringify(activeFilters) !== JSON.stringify(initialFilters)
+  ), [debouncedSearchQuery, activeFilters, initialFilters]);
+
+  const reloadActiveList = useCallback(() => {
+    if (activeTab === 'my') { loadUserDataCards(); return; }
+    if (activeTab === 'favorites') { favoritesPage.reload(); return; }
+    if (isLocalTab) { localCards.reload(); return; }
+    reloadPublicCurrentQuery(currentPage);
+  }, [activeTab, isLocalTab, localCards, favoritesPage, reloadPublicCurrentQuery, currentPage, loadUserDataCards]);
+
   const displayCardIds = useMemo(() => {
     const out: string[] = [];
     const seen = new Set<string>();
@@ -1767,7 +1781,7 @@ export default function BattleDataModal({
           {listError && <div role="alert" className="mb-3 rounded-lg bg-red-50 p-3 text-sm text-red-700">
             {displayCards.length ? `刷新失败，当前显示上次成功结果：${listError}` : `数据卡加载失败：${listError}`}
             <button type="button" disabled={listLoading} className="ml-3 px-3 py-2 rounded bg-white disabled:opacity-50"
-              onClick={() => activeTab === 'my' ? myPage.reload() : activeTab === 'favorites' ? favoritesPage.reload() : isLocalTab ? localCards.reload() : reloadPublicCurrentQuery(currentPage)}>重试</button>
+              onClick={reloadActiveList}>重试</button>
           </div>}
           {/* 标签页切换 */}
           <div className="flex items-center justify-between gap-2 mb-4 flex-wrap">
@@ -1941,7 +1955,13 @@ export default function BattleDataModal({
 	            ) : (listLoading || listIdle) && displayCards.length === 0 ? (
 	              <div className="flex justify-center items-center min-h-[40vh]"><div className="text-gray-500">加载中...</div></div>
 	            ) : displayCards.length === 0 ? (
-	              <div className="text-center text-gray-500 py-8">{listError ? '请重试加载数据卡' : '暂无数据卡'}</div>
+	              <DataCardEmptyState
+	                tab={activeTab as DataCardEmptyStateTab}
+	                typeLabel={typeLabel}
+	                error={Boolean(listError)}
+	                hasActiveSearch={hasActiveQuery}
+	                onRetry={listError ? reloadActiveList : undefined}
+	              />
 	            ) : (
 		              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
 		                {displayCards.map((card: any) => {

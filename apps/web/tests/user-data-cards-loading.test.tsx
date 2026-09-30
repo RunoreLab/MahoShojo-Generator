@@ -101,7 +101,8 @@ it('Arena 私有库加载独立于公开库，刷新失败仍展示旧卡，收�
   expect(document.body.textContent).toContain('当前显示上次成功结果'); expect(document.body.textContent).toContain('我的角色');
   await act(async () => [...document.querySelectorAll('button')].find((b) => b.textContent?.startsWith('我的收藏'))!.click());
   expect(get.mock.calls.at(-1)?.[0]).toBe('favorites'); expect(get.mock.calls[0][2]?.aborted).toBe(true);
-  expect(document.body.textContent).toContain('暂无数据卡');
+  // 空状态按页签区分：收藏为空要说清「去哪儿收藏」，而不是一句「暂无数据卡」。
+  expect(document.body.textContent).toContain('还没有收藏');
 });
 
 it('公开库高级筛选不随 Tab 泄漏进我的卡/收藏摘要查询', async () => {

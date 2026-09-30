@@ -131,6 +131,21 @@ it('详情按钮直接读本地正文，不发单卡网络请求', async () => {
   expect(singleCardCalls).toHaveLength(0);
 });
 
+it('空本地库给出填充入口与边界说明，而不是一句共用的「暂无数据卡」', async () => {
+  await render();
+  // 首次进入本地库页签会先读一次 IndexedDB，空态要等这次读取落定。
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+
+  expect(document.body.textContent).toContain('本地库还是空的');
+  // 填充入口全在用户当前视野之外，空状态必须自己把它们列出来。
+  expect(document.body.textContent).toContain('存到本地库');
+  expect(document.body.textContent).toContain('同时保存到本地库');
+  expect(document.body.textContent).toContain('清除本站数据会一并删除');
+  // 没有整库备份这件事必须在这里说，否则用户会以为清站点数据是安全的。
+  expect(document.body.textContent).toContain('还没有整库导出/备份');
+  expect(document.body.querySelector('a[href="/encyclopedia/local-library"]')).not.toBeNull();
+});
+
 it('标签库为空时不会反复重取（否则每次渲染都触发一次请求）', async () => {
   const fetchMock = vi.fn(async () => Response.json({ success: true, cards: [], items: {}, tags: [] }));
   vi.stubGlobal('fetch', fetchMock);
