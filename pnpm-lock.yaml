@@ -402,6 +402,9 @@ importers:
       '@next/env':
         specifier: 15.5.24
         version: 15.5.24
+      '@next/eslint-plugin-next':
+        specifier: 15.5.24
+        version: 15.5.24
       '@tailwindcss/postcss':
         specifier: ^4
         version: 4.1.18
@@ -417,6 +420,9 @@ importers:
       '@types/react-dom':
         specifier: ^19
         version: 19.2.4(@types/react@19.2.15)
+      '@typescript-eslint/eslint-plugin':
+        specifier: ^8.50.0
+        version: 8.50.0(@typescript-eslint/parser@8.50.0(eslint@9.39.2(jiti@2.7.0))(typescript@5.9.3))(eslint@9.39.2(jiti@2.7.0))(typescript@5.9.3)
       '@typescript-eslint/parser':
         specifier: ^8.50.0
         version: 8.50.0(eslint@9.39.2(jiti@2.7.0))(typescript@5.9.3)
@@ -435,6 +441,18 @@ importers:
       eslint-config-next:
         specifier: 15.5.24
         version: 15.5.24(eslint@9.39.2(jiti@2.7.0))(typescript@5.9.3)
+      eslint-plugin-import:
+        specifier: ^2.31.0
+        version: 2.32.0(@typescript-eslint/parser@8.50.0(eslint@9.39.2(jiti@2.7.0))(typescript@5.9.3))(eslint-import-resolver-typescript@3.10.1)(eslint@9.39.2(jiti@2.7.0))
+      eslint-plugin-jsx-a11y:
+        specifier: ^6.10.0
+        version: 6.10.2(eslint@9.39.2(jiti@2.7.0))
+      eslint-plugin-react:
+        specifier: ^7.37.0
+        version: 7.37.5(eslint@9.39.2(jiti@2.7.0))
+      eslint-plugin-react-hooks:
+        specifier: ^5.0.0
+        version: 5.2.0(eslint@9.39.2(jiti@2.7.0))
       fake-indexeddb:
         specifier: ^6.2.5
         version: 6.2.5
