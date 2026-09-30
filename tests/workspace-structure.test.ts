@@ -412,6 +412,64 @@ describe('desktop workspace app ownership', () => {
     }
   });
 
+  it('exposes no plaintext secret read surface on the Rust command set', () => {
+    const libSource = readFileSync(path.join(tauriDirectory, 'src', 'lib.rs'), 'utf8');
+    const handler = libSource.match(/generate_handler!\[([\s\S]*?)\]/);
+    expect(handler, 'apps/desktop must register an explicit command handler').not.toBeNull();
+
+    const commands = (handler?.[1] ?? '')
+      .split(',')
+      .map((command) => command.trim())
+      .filter((command) => command.length > 0);
+
+    expect(commands).toEqual([
+      'desktop_runtime_info',
+      'set_provider_secret',
+      'has_provider_secret',
+      'delete_provider_secret',
+    ]);
+
+    // renderer 可用的 secret 能力只有写入与存在性；任何读取形态都会让
+    // ACCEPT-002 的「已持久化 secret 不可读回」失效。
+    for (const command of commands) {
+      expect(command, `${command} must not read a secret back`).not.toMatch(
+        /(?:get|read|reveal|export|dump)_?(?:provider_)?secret$/u,
+      );
+    }
+    expect(commands).not.toContain('get_provider_secret');
+    expect(commands).not.toContain('read_provider_secret');
+  });
+
+  it('keeps the secret reference rules single-sourced and cross-runtime checked', () => {
+    const secretSource = readFileSync(path.join(tauriDirectory, 'src', 'secret.rs'), 'utf8');
+
+    // Rust 侧必须在编译期读入 TypeScript 持有的 fixture，否则两侧规则会静默漂移。
+    expect(secretSource).toContain('packages/contracts/fixtures/desktop-secret-refs.json');
+    expect(
+      existsSync(
+        path.join(rootDirectory, 'packages/contracts/fixtures/desktop-secret-refs.json'),
+      ),
+    ).toBe(true);
+    expect(
+      existsSync(path.join(rootDirectory, 'packages/contracts/src/desktop-ipc.ts')),
+    ).toBe(true);
+
+    const contractsManifest = JSON.parse(
+      readFileSync(path.join(rootDirectory, 'packages/contracts/package.json'), 'utf8'),
+    ) as { exports?: Record<string, unknown> };
+    expect(Object.keys(contractsManifest.exports ?? {})).toContain('./desktop-ipc');
+  });
+
+  it('keeps a write-only SecureVault port free of any plaintext read', () => {
+    const vaultSource = readFileSync(
+      path.join(rootDirectory, 'packages/ai-direct/src/vault.ts'),
+      'utf8',
+    );
+
+    expect(vaultSource).toContain('hasSecret');
+    expect(vaultSource).not.toContain('getSecret');
+  });
+
   it('以结构化方式关闭远程内容、全局 Tauri 对象与 iframe', () => {
     const tauriConfig = JSON.parse(
       readFileSync(path.join(tauriDirectory, 'tauri.conf.json'), 'utf8'),

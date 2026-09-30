@@ -16,6 +16,7 @@
     "check:rust": "cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check && cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings && cargo test --manifest-path src-tauri/Cargo.toml"
   },
   "dependencies": {
+    "@mahoshojo/contracts": "workspace:*",
     "@tauri-apps/api": "^2.12.0",
     "react": "^19.2.1",
     "react-dom": "^19.2.1"

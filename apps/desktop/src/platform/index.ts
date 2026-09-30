@@ -1,9 +1,14 @@
-import { invoke } from '@tauri-apps/api/core';
-
-import { readDesktopRuntimeInfo, type DesktopRuntimeInfo } from './desktop-bridge';
-
 export type { DesktopRuntimeInfo } from './desktop-bridge';
-export { DesktopBridgeError } from './desktop-bridge';
+export { DesktopBridgeError, readDesktopRuntimeInfo } from './desktop-bridge';
 
-export const loadDesktopRuntimeInfo = (): Promise<DesktopRuntimeInfo> =>
-  readDesktopRuntimeInfo((command, args) => invoke(command, args));
+export { loadDesktopRuntimeInfo } from './runtime-info';
+
+export {
+  DELETE_PROVIDER_SECRET_COMMAND,
+  HAS_PROVIDER_SECRET_COMMAND,
+  SET_PROVIDER_SECRET_COMMAND,
+  DesktopSecretBridgeError,
+  deleteProviderSecret,
+  hasProviderSecret,
+  setProviderSecret,
+} from './secret-bridge';

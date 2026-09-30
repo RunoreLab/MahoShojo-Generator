@@ -76,9 +76,41 @@ Rust 门禁同时由 `.github/workflows/desktop-ci.yml` 执行。`build` 脚本�
 - capability 只有 `main-ui` 一个，使用 `webviews` 粒度而非 `windows`。
 - **未引入任何 Tauri 插件**，因此 renderer 不存在 shell、文件系统、SQL 或 HTTP 通用能力。
 - Vite `envPrefix` 只保留 `TAURI_ENV_*`，不暴露 `VITE_`。
-- Rust 侧当前没有出站 HTTP、数据库、文件写入或秘密存取能力。
+- Rust 侧当前没有出站 HTTP、数据库、文件写入能力；持久 secret 已接入操作系统凭据存储。
+
+## 持久 secret
+
+V1 使用操作系统凭据存储（`keyring`），**不**使用 Stronghold JavaScript API —— 后者要求把
+vault master password 交给 renderer，与「已持久化 secret 不可读回」直接冲突。
+
+renderer 可用的能力只有三个：
+
+```text
+set_provider_secret(secretRef, value)
+has_provider_secret(secretRef)
+delete_provider_secret(secretRef)
+```
+
+没有明文读取入口，且这条约束同时由三处强制：`SecretStore` trait 上不存在读取方法、
+`apps/desktop` 的导出面不含任何读取函数、以及 `@mahoshojo/ai-direct` 的 `SecureVault`
+只暴露 `set` / `has` / `delete`。
+
+secret 引用的字符集与长度上限由 `@mahoshojo/contracts/desktop-ipc` 单点定义，
+Rust 侧在编译期 `include_str!` 同一份 fixture，两侧测试同时消费，任一侧单方面放宽都会让
+另一侧失败。
 
 已知边界：
+
+- Windows Credential Manager 后端已在开发机实测（写入 / 读取 / 删除 / 幂等删除，均无需
+  交互式解锁）。
+- macOS Keychain 与 Linux Secret Service 后端尚未在真实目标平台验证，属于 D5 发行门禁。
+- 触碰真实系统凭据的往返测试默认 `#[ignore]`，本地验证：
+
+  ```bash
+  pnpm --filter @mahoshojo/desktop run check:rust -- --ignored
+  ```
+
+## 已知边界
 
 - GUI 交互行为无法在无头 CI 中验证，涉及"实际运行结果"的检查在文档中记为未验证并附复现步骤。
 - Windows 上同源 iframe 会继承宿主 IPC（GHSA-57fm-592m-34r7），因此 Web Package 在任何阶段
