@@ -26,3 +26,12 @@ export {
   parseProviderProfileDocument,
   saveProviderProfile,
 } from './provider-profile-bridge';
+
+export {
+  CANCEL_DIRECT_AI_COMMAND,
+  STREAM_DIRECT_AI_COMMAND,
+  DesktopAiError,
+  cancelDirectAi,
+  openDirectAiStream,
+} from './direct-ai-bridge';
+export type { DesktopAiExecutionOptions } from './direct-ai-bridge';

@@ -111,6 +111,17 @@ pub trait SecretStore: Send + Sync {
     fn exists(&self, secret_ref: &str) -> Result<bool, SecretStoreError>;
     /// 幂等：引用不存在同样视为成功。
     fn delete(&self, secret_ref: &str) -> Result<(), SecretStoreError>;
+
+    /// 取出明文。
+    ///
+    /// **只允许 native 侧出站 executor 调用。** 它不通过任何 `#[tauri::command]` 暴露，
+    /// 因此 renderer 无法触达；边界由"命令面"保证，而不是由"trait 上没有这个方法"保证。
+    ///
+    /// 早先这里刻意不提供读取方法，理由是"trait 上不存在即安全"。实际不成立：Rust executor
+    /// 必须能取明文才能发起带凭据的请求，缺失它只会让凭据以更糟的方式流转（例如把明文塞进
+    /// 命令参数）。正确的不变量是 IPC 面不可读，已由仓库结构门禁断言命令集合不含任何读取
+    /// 形态。
+    fn resolve(&self, secret_ref: &str) -> Result<Option<String>, SecretStoreError>;
 }
 
 fn classify(error: &keyring::Error) -> SecretStoreError {
@@ -171,6 +182,15 @@ impl SecretStore for CredentialStore {
         match entry.delete_credential() {
             Ok(()) => Ok(()),
             Err(keyring::Error::NoEntry) => Ok(()),
+            Err(error) => Err(classify(&error)),
+        }
+    }
+
+    fn resolve(&self, secret_ref: &str) -> Result<Option<String>, SecretStoreError> {
+        let entry = self.entry(secret_ref)?;
+        match entry.get_password() {
+            Ok(value) => Ok(Some(value)),
+            Err(keyring::Error::NoEntry) => Ok(None),
             Err(error) => Err(classify(&error)),
         }
     }
@@ -252,6 +272,16 @@ mod tests {
                 .expect("in-memory store lock")
                 .remove(secret_ref);
             Ok(())
+        }
+
+        fn resolve(&self, secret_ref: &str) -> Result<Option<String>, SecretStoreError> {
+            validate_secret_ref(secret_ref)?;
+            Ok(self
+                .entries
+                .lock()
+                .expect("in-memory store lock")
+                .get(secret_ref)
+                .cloned())
         }
     }
 
@@ -343,11 +373,26 @@ mod tests {
     }
 
     #[test]
-    fn credential_store_never_reads_plaintext_back_through_the_trait() {
-        // trait 上不存在读取方法本身就是门禁：把它写成编译期断言而不是文档承诺。
-        fn assert_write_only<S: SecretStore>() {}
-        assert_write_only::<CredentialStore>();
-        assert_write_only::<InMemorySecretStore>();
+    fn resolve_returns_plaintext_only_inside_the_native_process() {
+        // resolve 存在的理由是 native executor 必须取明文才能发起带凭据的请求。
+        // 它不被任何 #[tauri::command] 使用，因此 renderer 触不到；这条不变量由仓库结构
+        // 门禁断言命令集合不含读取形态，而不是由 trait 形状保证。
+        let store = InMemorySecretStore::new();
+        store
+            .set("provider:p_01:api-key", "sk-value")
+            .expect("set must succeed");
+        assert_eq!(
+            store
+                .resolve("provider:p_01:api-key")
+                .expect("resolve must succeed"),
+            Some("sk-value".to_string())
+        );
+        assert_eq!(
+            store
+                .resolve("provider:p_01:absent")
+                .expect("resolve must succeed"),
+            None
+        );
     }
 
     /// 跨运行时一致性门禁的最小实例。

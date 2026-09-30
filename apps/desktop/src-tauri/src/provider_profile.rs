@@ -295,16 +295,69 @@ impl DirectProviderExecutionProfile {
 
         Ok(())
     }
+
+    /// 该 Profile 允许的最大重定向次数。缺省为 0，即默认完全不跟随。
+    pub fn max_redirects(&self) -> u8 {
+        self.transport
+            .as_ref()
+            .and_then(|transport| transport.max_redirects)
+            .unwrap_or(0)
+            .min(MAX_REDIRECTS)
+    }
 }
 
-/// 从**完整** Profile 文档里"peek"出 Rust 唯一需要的几个字段。
+/// 磁盘上保存的**完整** Profile 文档。
 ///
-/// 与 [`DirectProviderExecutionProfile`] 的区别是这里**允许**未知字段：完整文档合法地带有
-/// `version` / `createdAt` / `updatedAt` / `generationDefaults`，而 Rust 不解释它们。
-/// Rust 只在删除 Profile 时需要知道它引用了哪些 secret。
+/// 与 [`DirectProviderExecutionProfile`] 的区别只有一处：这里**允许**未知字段。完整文档合法
+/// 地带有 `version` / `createdAt` / `updatedAt` / `generationDefaults`，而 Rust 不解释它们。
+/// 校验完全复用窄投影的规则，因此"存进库里的东西一定可执行"这条性质没有被放宽。
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StoredProviderProfile {
+    id: String,
+    adapter: ProviderAdapter,
+    base_url: String,
+    model_id: String,
+    #[serde(default)]
+    api_key_ref: Option<String>,
+    #[serde(default)]
+    secret_header_refs: Option<BTreeMap<String, String>>,
+    #[serde(default)]
+    public_headers: Option<BTreeMap<String, String>>,
+    #[serde(default)]
+    transport: Option<ProfileTransport>,
+}
+
+/// 从已保存的完整 Profile 文档解析出可执行的窄投影。
+///
+/// 与 [`DirectProviderExecutionProfile::parse`]（用于校验即将跨运行时传递的投影）不同，
+/// 这里容忍完整文档的额外字段，但安全校验完全一致。
+pub fn parse_stored_profile(
+    document: &str,
+) -> Result<DirectProviderExecutionProfile, ProviderProfileError> {
+    let stored: StoredProviderProfile =
+        serde_json::from_str(document).map_err(|_| ProviderProfileError::MalformedDocument)?;
+    let profile = DirectProviderExecutionProfile {
+        id: stored.id,
+        // name 是纯展示字段，执行路径不使用；窄投影要求它存在，这里给占位值。
+        name: String::new(),
+        adapter: stored.adapter,
+        base_url: stored.base_url,
+        model_id: stored.model_id,
+        api_key_ref: stored.api_key_ref,
+        secret_header_refs: stored.secret_header_refs,
+        public_headers: stored.public_headers,
+        transport: stored.transport,
+    };
+    profile.validate()?;
+    Ok(profile)
+}
+
+/// 从已保存的完整 Profile 文档里"peek"出删除时需要的字段。
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StoredProviderProfileIdentity {
+    #[serde(default)]
     pub id: String,
     #[serde(default)]
     pub api_key_ref: Option<String>,
@@ -337,13 +390,63 @@ impl StoredProviderProfileIdentity {
 
 #[cfg(test)]
 mod tests {
-    use super::{DirectProviderExecutionProfile, ProviderAdapter, ProviderProfileError};
+    use super::{
+        parse_stored_profile, DirectProviderExecutionProfile, ProviderAdapter, ProviderProfileError,
+    };
 
     const FIXTURE: &str =
         include_str!("../../../../packages/contracts/fixtures/provider-execution-profiles.json");
 
     fn document(value: serde_json::Value) -> String {
         value.to_string()
+    }
+
+    #[test]
+    fn parses_a_stored_full_profile_into_an_executable_projection() {
+        // 落盘的是完整 Profile；执行时必须能从它解析出窄投影，且校验规则完全一致。
+        let stored = serde_json::json!({
+            "version": 1,
+            "id": "profile-stored",
+            "name": "Ollama",
+            "adapter": "openai-compatible",
+            "baseUrl": "http://127.0.0.1:11434/v1",
+            "modelId": "qwen3:8b",
+            "apiKeyRef": "provider:profile-stored:api-key",
+            "generationDefaults": { "temperature": 0.4 },
+            "createdAt": "2026-09-30T00:00:00.000Z",
+            "updatedAt": "2026-09-30T00:00:00.000Z"
+        });
+
+        let profile =
+            parse_stored_profile(&document(stored.clone())).expect("stored profile must parse");
+        assert_eq!(profile.id, "profile-stored");
+        assert_eq!(profile.base_url, "http://127.0.0.1:11434/v1");
+        assert_eq!(
+            profile.api_key_ref.as_deref(),
+            Some("provider:profile-stored:api-key")
+        );
+
+        // 同一份文档去掉 generationDefaults 之类的展示字段后，仍必须被窄投影的严格解析拒绝。
+        assert!(DirectProviderExecutionProfile::parse(&document(stored)).is_err());
+    }
+
+    #[test]
+    fn refuses_a_stored_profile_whose_execution_subset_is_unsafe() {
+        // 完整文档能过"宽松解析"不代表能过安全校验：这里必须是同一套规则。
+        let stored = serde_json::json!({
+            "version": 1,
+            "id": "profile-insecure",
+            "name": "Insecure",
+            "adapter": "openai-compatible",
+            "baseUrl": "http://api.example.com/v1",
+            "modelId": "m",
+            "createdAt": "2026-09-30T00:00:00.000Z",
+            "updatedAt": "2026-09-30T00:00:00.000Z"
+        });
+        assert_eq!(
+            parse_stored_profile(&document(stored)).expect_err("must be refused"),
+            ProviderProfileError::InsecureBaseUrl
+        );
     }
 
     #[test]

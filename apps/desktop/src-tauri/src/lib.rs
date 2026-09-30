@@ -9,8 +9,10 @@
 //! Direct AI transport、SQLite 本地库分别在 D1 与 D2 引入，并且都必须先经过对应门禁
 //! （见 `PLAN-desktop-client-v1`）。
 
+mod ai;
 mod provider_profile;
 mod secret;
+mod sse;
 mod store;
 
 use provider_profile::DirectProviderExecutionProfile;
@@ -140,10 +142,46 @@ fn validate_provider_execution_profile(
     DirectProviderExecutionProfile::parse(&document)
 }
 
+/// 对已保存的 Profile 发起一次 Direct 流式生成。
+///
+/// 请求 DTO 只带 `profileId` 与 `AiExecutionRequest`：endpoint、header 与 secret 全部由
+/// native 侧从本地库与凭据存储解析，renderer 无法指定。
+#[tauri::command]
+async fn stream_direct_ai(
+    store: State<'_, LocalStore>,
+    secrets: State<'_, SharedSecretStore>,
+    registry: State<'_, ai::RequestRegistry>,
+    profile_id: String,
+    request: ai::AiExecutionRequest,
+    on_event: tauri::ipc::Channel<ai::AiStreamEvent>,
+) -> Result<(), ai::DirectAiError> {
+    ai::stream_direct_ai(
+        &profile_id,
+        request,
+        &store,
+        secrets.inner().as_ref(),
+        &registry,
+        on_event,
+    )
+    .await
+}
+
+/// 取消一次在途的 Direct 生成。
+///
+/// 取消会真正中止上游 HTTP body，而不只是让 renderer 停止消费事件。
+#[tauri::command]
+fn cancel_direct_ai(
+    registry: State<'_, ai::RequestRegistry>,
+    request_id: String,
+) -> Result<bool, ai::DirectAiError> {
+    Ok(registry.cancel(&request_id))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .manage(default_secret_store())
+        .manage(ai::RequestRegistry::default())
         .setup(|app| {
             // 应用数据目录只能在 Builder 内部解析，因此本地库在 setup 阶段打开。
             // 路径完全由 native 侧产生：renderer 既不能指定目录，也不能指定文件名或 SQL。
@@ -164,7 +202,9 @@ pub fn run() {
             list_provider_profile_ids,
             get_provider_profile,
             delete_provider_profile,
-            validate_provider_execution_profile
+            validate_provider_execution_profile,
+            stream_direct_ai,
+            cancel_direct_ai
         ])
         .run(tauri::generate_context!())
         .expect("error while running MahoShojo Generator desktop app");

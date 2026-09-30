@@ -432,6 +432,8 @@ describe('desktop workspace app ownership', () => {
       'get_provider_profile',
       'delete_provider_profile',
       'validate_provider_execution_profile',
+      'stream_direct_ai',
+      'cancel_direct_ai',
     ]);
 
     // renderer 可用的 secret 能力只有写入与存在性；任何读取形态都会让
@@ -443,6 +445,15 @@ describe('desktop workspace app ownership', () => {
     }
     expect(commands).not.toContain('get_provider_secret');
     expect(commands).not.toContain('read_provider_secret');
+
+    // Direct 通路的选择器只能是 profileId 与 requestId：请求 DTO 不得携带 endpoint 或 secret。
+    const streamCommand = commands.filter((command) => /direct_ai/u.test(command));
+    expect(streamCommand).toEqual(['stream_direct_ai', 'cancel_direct_ai']);
+    for (const parameter of ['base_url', 'baseUrl', 'endpoint', 'url', 'api_key', 'apiKey', 'headers']) {
+      expect(libSource, `Direct command surface must not accept ${parameter}`).not.toMatch(
+        new RegExp(`\\b${parameter}\\s*:\\s*(?:String|&str)`, 'u'),
+      );
+    }
   });
 
   it('keeps the secret reference rules single-sourced and cross-runtime checked', () => {
