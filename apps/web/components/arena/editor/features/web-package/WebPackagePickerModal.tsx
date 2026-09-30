@@ -53,16 +53,15 @@ export function WebPackagePickerModal({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (!isOpen) {
-      setTab('preset');
-      setKeyword('');
-    }
-    // 多人模式没有本地库：tab 被隐藏后必须把当前页签退回预设，否则内容区空着。
-    if (!model.capabilities.importLocal && tab === 'local') setTab('preset');
-  }, [isOpen, model.capabilities.importLocal, tab]);
+    if (isOpen) return;
+    setTab('preset');
+    setKeyword('');
+  }, [isOpen]);
 
   const disabled = model.disabled || !model.capabilities.replace;
   const TABS = model.capabilities.importLocal ? TAB_ORDER : TAB_ORDER.slice(0, 1);
+  // 多人模式没有本地库，页签被隐藏后必须把当前页签退回预设。只在这里兜一道：
+  // 再往 effect 里加一条 setTab 就等于让 activeTab 和 tab 各自决定一次渲染内容。
   const activeTab: PickerTab = TABS.includes(tab) ? tab : 'preset';
   const presets = model.presets.map(toCardItem);
   const library = model.library.map(toCardItem);

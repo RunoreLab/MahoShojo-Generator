@@ -124,6 +124,8 @@ export const useSoloWebPackageSectionModel = (input: {
 
   // 列表读取失败时 useLocalWebPackages 已经有 status/error，但区块此前从不读它：
   // 读不出来和"本来就没有"在界面上都是同一句"还没有本地 Web 包"，用户会以为包没了。
+  // 挂载期与探测期的失败都是一次性的，恢复途径是刷新，因此不做自动清除：
+  // 存储真的不可用时，那条提示本来就该一直挂着。
   const libraryError = localLibrary.status === 'error'
     ? localLibrary.error ?? '本地库读取失败，请重试。'
     : localLibraryError;
