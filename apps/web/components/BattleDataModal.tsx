@@ -26,6 +26,7 @@ import { buildTitleDisplay } from '@/lib/text';
 import { ChevronDown, Filter } from 'lucide-react';
 import DecksModal from './DecksModal';
 import { BaseModal } from './shared/BaseModal';
+import { ModalTabs, modalTabIds, type ModalTabItem } from './shared/ModalTabs';
 import { DataCardEmptyState } from './shared/DataCardEmptyState';
 import { LocalLibraryStatusNote } from './shared/LocalLibraryStatusNote';
 import { getDataCardStatus } from '@/lib/data-card-status';
@@ -38,6 +39,10 @@ import {
 
 type DataCardType = OnlineDataCardType;
 type BattleDataSelectedType = DataCardType | 'all';
+
+/** 同时喂给 ModalTabs 的 idPrefix 和下方 tabpanel 的 id，两边必须同源。 */
+const TAB_ID_PREFIX = 'battle-data-source';
+const TAB_ARIA_LABEL = '数据卡来源';
 
 // 4xx 业务终态（400/401/403/404 等，不含 408/429）：与 bounded-retry 的不可重试语义对齐。
 const isDefinitiveClientTerminalStatus = (status: number): boolean =>
@@ -1510,6 +1515,59 @@ export default function BattleDataModal({
     );
   }, [publicFilters]);
 
+  const { tabId: activeTabTabId, panelId: activeTabPanelId } = modalTabIds(TAB_ID_PREFIX, activeTab);
+
+  /**
+   * 页签定义。顺序即 effectiveTabs 的声明顺序，直接决定 rail 上的左右次序。
+   *
+   * 数量交给 ModalTabs 的 `count` 渲染成 `tabular-nums` 片段，而不是拼进 label：
+   * 切换页签时数字变化不该把整条 rail 的宽度顶得跳动。
+   */
+  const tabItems: ModalTabItem<BattleDataTab>[] = [];
+  if (effectiveTabs.includes('pvpHand')) {
+    tabItems.push({ value: 'pvpHand', label: '手牌', count: pvpHandTab?.cards?.length ?? 0 });
+  }
+  if (effectiveTabs.includes('my')) {
+    tabItems.push({ value: 'my', label: `我的${typeLabel}`, count: myPage.hasLoaded ? myPage.total : '—' });
+  }
+  if (effectiveTabs.includes('local')) {
+    tabItems.push({
+      value: 'local',
+      label: '本地库',
+      count: localCards.status === 'success' ? localCards.libraryTotal : '—',
+      title: '本机本地库，无需登录；清除站点数据会一并删除',
+    });
+  }
+  if (effectiveTabs.includes('public')) {
+    tabItems.push({ value: 'public', label: `公开${typeLabel}` });
+  }
+  if (effectiveTabs.includes('recommended')) {
+    tabItems.push({ value: 'recommended', label: '管理员推荐' });
+  }
+  if (effectiveTabs.includes('favorites')) {
+    tabItems.push({ value: 'favorites', label: '我的收藏', count: favoritesPage.hasLoaded ? favoritesPage.total : '—' });
+  }
+
+  /**
+   * 页签切换统一入口：原先每个按钮各自内联一套 onClick，现在按「是否当前页签」分派。
+   *
+   * 再次点击当前页签 = 用当前查询刷新，这是既有交互，不因为收敛到 ModalTabs 而丢掉；
+   * 各页签的刷新入口本来就不同，切换页签只改 state、请求仍由 effect 发起。
+   */
+  const handleTabChange = (next: BattleDataTab) => {
+    hasUserSelectedTabRef.current = true;
+    if (next === activeTab) {
+      setCurrentPage(1);
+      if (next === 'my') loadUserDataCards();
+      else if (next === 'local') localCards.reload();
+      else if (next === 'favorites') favoritesPage.reload();
+      else if (next === 'public' || next === 'recommended') reloadPublicCurrentQuery(1);
+      return;
+    }
+    setActiveTab(next);
+    setCurrentPage(1);
+  };
+
   if (!isOpen) {
     return null;
   }
@@ -1786,100 +1844,18 @@ export default function BattleDataModal({
             <button type="button" disabled={listLoading} className="ml-3 px-3 py-2 rounded bg-white disabled:opacity-50"
               onClick={reloadActiveList}>重试</button>
           </div>}
-          {/* 标签页切换 */}
+          {/* 标签页切换。窄屏由 ModalTabs 内部横向滚动承载，不再让 flex 收缩把中文标签压成竖排。 */}
           <div className="flex items-center justify-between gap-2 mb-4 flex-wrap">
-            <div className="flex gap-2">
-            {effectiveTabs.includes('pvpHand') && (
-              <button
-                onClick={() => {
-                  hasUserSelectedTabRef.current = true;
-                  setActiveTab('pvpHand');
-                  setCurrentPage(1);
-                }}
-                className={`px-4 py-2 rounded text-sm font-medium ${activeTab === 'pvpHand' ? 'bg-pink-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
-              >
-                手牌 ({pvpHandTab?.cards?.length ?? 0})
-              </button>
-            )}
-            {effectiveTabs.includes('my') && (
-              <button
-                onClick={() => {
-                  hasUserSelectedTabRef.current = true;
-                  setActiveTab('my');
-                  setCurrentPage(1);
-                  if (activeTab === 'my') {
-                    loadUserDataCards();
-                  }
-                }}
-                className={`px-4 py-2 rounded text-sm font-medium ${activeTab === 'my' ? 'bg-pink-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
-              >
-                我的{typeLabel} ({myPage.hasLoaded ? myPage.total : '—'})
-              </button>
-            )}
-            {effectiveTabs.includes('local') && (
-              <button
-                onClick={() => {
-                  hasUserSelectedTabRef.current = true;
-                  setActiveTab('local');
-                  setCurrentPage(1);
-                  if (activeTab === 'local') localCards.reload();
-                }}
-                className={`px-4 py-2 rounded text-sm font-medium ${activeTab === 'local' ? 'bg-pink-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
-                title="本机本地库，无需登录；清除站点数据会一并删除"
-              >
-                本地库 ({localCards.status === 'success' ? localCards.libraryTotal : '—'})
-              </button>
-            )}
-            {effectiveTabs.includes('public') && (
-              <button
-                onClick={() => {
-                  hasUserSelectedTabRef.current = true;
-                  // 再次点击当前 Tab：用当前查询刷新；切换 Tab 只改 state，由 effect 发起请求
-                  if (activeTab === 'public') {
-                    setCurrentPage(1);
-                    reloadPublicCurrentQuery(1);
-                    return;
-                  }
-                  setActiveTab('public');
-                  setCurrentPage(1);
-                }}
-                className={`px-4 py-2 rounded text-sm font-medium ${activeTab === 'public' ? 'bg-pink-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
-              >
-                公开{typeLabel}
-              </button>
-            )}
-            {effectiveTabs.includes('recommended') && (
-              <button
-                onClick={() => {
-                  hasUserSelectedTabRef.current = true;
-                  if (activeTab === 'recommended') {
-                    setCurrentPage(1);
-                    reloadPublicCurrentQuery(1);
-                    return;
-                  }
-                  setActiveTab('recommended');
-                  setCurrentPage(1);
-                }}
-                className={`px-4 py-2 rounded text-sm font-medium ${activeTab === 'recommended' ? 'bg-pink-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
-              >
-                管理员推荐
-              </button>
-            )}
-            {effectiveTabs.includes('favorites') && (
-              <button
-                onClick={() => {
-                  hasUserSelectedTabRef.current = true;
-                  setActiveTab('favorites');
-                  setCurrentPage(1);
-                  if (activeTab === 'favorites') favoritesPage.reload();
-                }}
-                className={`px-4 py-2 rounded text-sm font-medium ${activeTab === 'favorites' ? 'bg-pink-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
-              >
-                我的收藏 ({favoritesPage.hasLoaded ? favoritesPage.total : '—'})
-              </button>
-            )}
-            </div>
+            <ModalTabs
+              idPrefix={TAB_ID_PREFIX}
+              ariaLabel={TAB_ARIA_LABEL}
+              items={tabItems}
+              value={activeTab}
+              onValueChange={handleTabChange}
+              className="max-w-full"
+            />
 
+            {/* 卡组导入不是页签，必须留在滚动 rail 之外，否则它会被一起卷走。 */}
             {canImportDeck && (
               <button
                 onClick={() => setShowDecksModal(true)}
@@ -1891,7 +1867,11 @@ export default function BattleDataModal({
           </div>
 
 	          {/* 内容区域 */}
-	          <div>
+          <div
+            role="tabpanel"
+            id={activeTabPanelId}
+            aria-labelledby={activeTabTabId}
+          >
 	            {isLocalTab ? <LocalLibraryStatusNote className="mb-3" /> : null}
 	            {isPvpHandTab ? (
 	              filteredPvpHandCards.length === 0 ? (
@@ -2070,7 +2050,6 @@ export default function BattleDataModal({
 	          onImportDeck={(deckId) => void handleImportDeck(deckId)}
 	        />
 	      ) : null}
-	          </div>
 
           {/* 分页与底部 */}
           {(
@@ -2107,6 +2086,7 @@ export default function BattleDataModal({
               </button>
             </div>
           }
+            </div>
 	    </div>
 	  </div>
 

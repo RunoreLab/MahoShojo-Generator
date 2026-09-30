@@ -488,16 +488,50 @@ describe('Web 包来源页签的 ARIA 与键盘契约', () => {
     expect(tab('local').tabIndex).toBe(0);
     expect(tab('preset').tabIndex).toBe(-1);
 
-    // 末端再向右必须回到起点，而不是停在原地。
+    // 末端再向右必须硬停。Material 明确不建议让可横向滚动的 tab 集无限循环：
+    // 线性浏览页签的读屏用户会被困在环里，出不去。
     await press('ArrowRight');
-    expect(tab('preset').getAttribute('aria-selected')).toBe('true');
-    await press('ArrowLeft');
     expect(tab('local').getAttribute('aria-selected')).toBe('true');
-
-    await press('Home');
+    expect(document.activeElement).toBe(tab('local'));
+    await press('ArrowLeft');
     expect(tab('preset').getAttribute('aria-selected')).toBe('true');
+    // 起点再向左同样硬停。
+    await press('ArrowLeft');
+    expect(tab('preset').getAttribute('aria-selected')).toBe('true');
+    expect(document.activeElement).toBe(tab('preset'));
+
     await press('End');
     expect(tab('local').getAttribute('aria-selected')).toBe('true');
+    await press('Home');
+    expect(tab('preset').getAttribute('aria-selected')).toBe('true');
+  });
+
+  it('横向 tablist 不吞上下方向键', async () => {
+    await render(model({ capabilities: soloCapabilities }));
+    await openPicker();
+
+    // APG：horizontal tablist 不得监听上下键，把滚动页面的能力留给用户。
+    await press('ArrowDown');
+    expect(tab('preset').getAttribute('aria-selected')).toBe('true');
+    await press('ArrowUp');
+    expect(tab('preset').getAttribute('aria-selected')).toBe('true');
+  });
+
+  it('窄屏靠横向滚动承载页签，而不是让 flex 把中文标签压成竖排', async () => {
+    await render(model({ capabilities: soloCapabilities }));
+    await openPicker();
+
+    const rail = document.querySelector<HTMLElement>('[role="tablist"]')!;
+    // 三个类缺一不可：滚动容器、不可收缩的页签、不可断行的页签。
+    // 少了 shrink-0 + whitespace-nowrap，中文会在窄屏被逐字拆开。
+    expect(rail.className).toContain('overflow-x-auto');
+    for (const value of ['preset', 'local'] as const) {
+      const className = tab(value).className;
+      expect(className).toContain('shrink-0');
+      expect(className).toContain('whitespace-nowrap');
+    }
+    // 触控目标不得为了紧凑降到 44px 以下（Apple HIG / WCAG 2.5.5）。
+    expect(tab('preset').className).toContain('min-h-11');
   });
 
   it('多人模式没有本地库页签，panel 也不会指向不存在的页签', async () => {

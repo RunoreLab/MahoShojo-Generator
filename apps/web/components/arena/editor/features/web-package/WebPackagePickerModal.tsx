@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { HardDrive, Package } from 'lucide-react';
 import { BaseModal } from '@/components/shared/BaseModal';
+import { ModalTabs, modalTabIds } from '@/components/shared/ModalTabs';
 import { WebPackageBaseRisk } from '@/components/arena/components/WebPackageSafety';
 import { WebPackageCardGrid, type WebPackageCardItem } from './WebPackageCardGrid';
 import { LocalLibrarySavePreference } from '@/components/shared/LocalLibrarySavePreference';
@@ -28,8 +29,8 @@ const WEB_REPORT_HREF = '/encyclopedia/web-report';
 /** 多人模式没有本地库，页签只剩预设一个。 */
 const TAB_ORDER: readonly PickerTab[] = ['preset', 'local'];
 
-const TAB_STYLE = (active: boolean): string =>
-  active ? 'bg-pink-500 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200';
+/** 同时喂给 ModalTabs 的 idPrefix 和下面 tabpanel 的 id，两边必须同源。 */
+const TAB_ID_PREFIX = 'web-package-source';
 
 /**
  * Web 包选择模态框。
@@ -67,6 +68,7 @@ export function WebPackagePickerModal({
   // 多人模式没有本地库，页签被隐藏后必须把当前页签退回预设。只在这里兜一道：
   // 再往 effect 里加一条 setTab 就等于让 activeTab 和 tab 各自决定一次渲染内容。
   const activeTab: PickerTab = TABS.includes(tab) ? tab : 'preset';
+  const { tabId: activeTabId, panelId: activePanelId } = modalTabIds(TAB_ID_PREFIX, activeTab);
   const presets = model.presets.map(toCardItem);
   const library = model.library.map(toCardItem);
   const search = (items: WebPackageCardItem[]): WebPackageCardItem[] => {
@@ -75,22 +77,6 @@ export function WebPackagePickerModal({
     // 身份单列匹配：内置预设的 summary 是描述，光搜 title+summary 会让搜索框
     // 承诺的「id@version」对预设完全失效。
     return items.filter((item) => `${item.title} ${item.summary} ${item.identity}`.toLowerCase().includes(needle));
-  };
-  /** WAI-ARIA tabs 模式：方向键在页签间移动并即时选中，Home/End 跳到首尾。 */
-  const onTabListKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    const step = event.key === 'ArrowRight' || event.key === 'ArrowDown'
-      ? 1
-      : event.key === 'ArrowLeft' || event.key === 'ArrowUp'
-        ? -1
-        : 0;
-    let next: PickerTab | null = null;
-    if (step !== 0) next = TABS[(TABS.indexOf(activeTab) + step + TABS.length) % TABS.length] ?? null;
-    else if (event.key === 'Home') next = TABS[0] ?? null;
-    else if (event.key === 'End') next = TABS.at(-1) ?? null;
-    if (!next || next === activeTab) return;
-    event.preventDefault();
-    setTab(next);
-    document.getElementById(`web-package-source-tab-${next}`)?.focus();
   };
 
   return (
@@ -104,27 +90,22 @@ export function WebPackagePickerModal({
     >
       <div className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex gap-2" role="tablist" aria-label="Web 包来源" onKeyDown={onTabListKeyDown}>
-            {TABS.map((option) => (
-              <button
-                key={option}
-                type="button"
-                role="tab"
-                id={`web-package-source-tab-${option}`}
-                aria-selected={tab === option}
-                aria-controls={`web-package-source-panel-${option}`}
-                // roving tabindex：tablist 整体只占一个 Tab 停靠点。
-                tabIndex={tab === option ? 0 : -1}
-                className={`rounded px-4 py-2 text-sm font-medium ${TAB_STYLE(tab === option)}`}
-                onClick={() => setTab(option)}
-              >
+          <ModalTabs
+            idPrefix={TAB_ID_PREFIX}
+            ariaLabel="Web 包来源"
+            items={TABS.map((option) => ({
+              value: option,
+              label: (
                 <span className="inline-flex items-center gap-1.5">
                   {option === 'preset' ? <Package className="h-4 w-4" /> : <HardDrive className="h-4 w-4" />}
-                  {option === 'preset' ? `内置预设 (${presets.length})` : `本地库 (${library.length})`}
+                  {option === 'preset' ? '内置预设' : '本地库'}
                 </span>
-              </button>
-            ))}
-          </div>
+              ),
+              count: option === 'preset' ? presets.length : library.length,
+            }))}
+            value={activeTab}
+            onValueChange={setTab}
+          />
           <input
             type="search"
             value={keyword}
@@ -140,8 +121,8 @@ export function WebPackagePickerModal({
         {/* tabpanel 与 tab 一一对应；预设页签在多人模式下没有本地库，panel 仍指向它。 */}
         <div
           role="tabpanel"
-          id={`web-package-source-panel-${activeTab}`}
-          aria-labelledby={`web-package-source-tab-${activeTab}`}
+          id={activePanelId}
+          aria-labelledby={activeTabId}
         >
         {activeTab === 'preset' ? (
           <WebPackageCardGrid

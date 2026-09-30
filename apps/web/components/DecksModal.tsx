@@ -5,8 +5,18 @@ import { deckApi, deckFavoritesApi, deckStatsApi } from '@/lib/auth';
 import { addLikedDeck, getLikedDecks } from '@/lib/localStorage';
 import { buildTitleDisplay } from '@/lib/text';
 import { getDeckStatus, getDeckVisibilityValue } from '@/lib/deck-status';
+import { ModalTabs, modalTabIds } from '@/components/shared/ModalTabs';
 
 type DeckTab = 'my' | 'public' | 'favorites';
+
+/** 同时喂给 ModalTabs 的 idPrefix 和 tabpanel 的 id，两边必须同源。 */
+const TAB_ID_PREFIX = 'decks-source';
+
+const DECK_TAB_ITEMS: readonly { value: DeckTab; label: string }[] = [
+  { value: 'my', label: '我的卡组' },
+  { value: 'public', label: '公开卡组' },
+  { value: 'favorites', label: '我的收藏' },
+];
 
 type DeckRow = {
   id: string;
@@ -419,6 +429,8 @@ export default function DecksModal({ isOpen, onClose, onImportDeck }: DecksModal
 
   if (!isOpen) return null;
 
+  const { tabId: activeTabTabId, panelId: activeTabPanelId } = modalTabIds(TAB_ID_PREFIX, activeTab);
+
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
       <div className="bg-white rounded-lg max-w-5xl w-full max-h-[90vh] overflow-hidden flex flex-col relative">
@@ -443,26 +455,14 @@ export default function DecksModal({ isOpen, onClose, onImportDeck }: DecksModal
                 </span>
               )}
             </div>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setActiveTab('my')}
-                className={`px-3 py-1.5 rounded text-sm font-medium ${activeTab === 'my' ? 'bg-pink-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
-              >
-                我的卡组
-              </button>
-              <button
-                onClick={() => setActiveTab('public')}
-                className={`px-3 py-1.5 rounded text-sm font-medium ${activeTab === 'public' ? 'bg-pink-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
-              >
-                公开卡组
-              </button>
-              <button
-                onClick={() => setActiveTab('favorites')}
-                className={`px-3 py-1.5 rounded text-sm font-medium ${activeTab === 'favorites' ? 'bg-pink-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
-              >
-                我的收藏
-              </button>
-            </div>
+            <ModalTabs
+              idPrefix={TAB_ID_PREFIX}
+              ariaLabel="卡组来源"
+              items={DECK_TAB_ITEMS}
+              value={activeTab}
+              onValueChange={setActiveTab}
+              className="max-w-full"
+            />
           </div>
         </div>
 
@@ -640,7 +640,11 @@ export default function DecksModal({ isOpen, onClose, onImportDeck }: DecksModal
               </div>
             </div>
           ) : (
-            <>
+            <div
+              role="tabpanel"
+              id={activeTabPanelId}
+              aria-labelledby={activeTabTabId}
+            >
               {activeTab === 'my' && (
                 <div className="space-y-4">
                   <div className="rounded-lg border bg-white p-4">
@@ -872,7 +876,7 @@ export default function DecksModal({ isOpen, onClose, onImportDeck }: DecksModal
                   </div>
                 </div>
               )}
-            </>
+            </div>
           )}
         </div>
 
