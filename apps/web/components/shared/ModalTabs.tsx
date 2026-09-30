@@ -38,7 +38,6 @@ export type ModalTabsProps<TValue extends string> = {
   readonly value: TValue;
   readonly onValueChange: (value: TValue) => void;
   readonly className?: string;
-  readonly itemClassName?: string;
 };
 
 /** 消费方用它把 tab 与自己的 tabpanel 绑到同一组 id 上。 */
@@ -102,7 +101,6 @@ export function ModalTabs<TValue extends string>({
   value,
   onValueChange,
   className,
-  itemClassName,
 }: ModalTabsProps<TValue>) {
   const railRef = useRef<HTMLDivElement>(null);
 
@@ -172,11 +170,7 @@ export function ModalTabs<TValue extends string>({
             tabIndex={selected ? 0 : -1}
             title={item.title}
             onClick={() => onValueChange(item.value)}
-            className={twMerge(clsx(
-              MODAL_TAB_CLASS_NAME,
-              MODAL_TAB_STATE_CLASS_NAME(selected),
-              itemClassName,
-            ))}
+            className={twMerge(clsx(MODAL_TAB_CLASS_NAME, MODAL_TAB_STATE_CLASS_NAME(selected)))}
           >
             {item.label}
             {item.count === undefined || item.count === null ? null : (
