@@ -1,6 +1,6 @@
 # 文档导航
 
-Desktop 客户端落地采用[Desktop Tauri V1 运行时与本地安全边界决策](./decisions/2026-09-30_160000_DesktopTauriV1运行时与本地安全边界决策.md)（当前 `proposed`）、[Desktop 客户端实施规格](./specs/2026-09-30_160000_Desktop客户端实施规格.md)与[Desktop 客户端阶段实施计划](./plans/2026-09-30_160100_Desktop客户端阶段实施计划.md)：Desktop 是独立本地 client runtime，不加载远端页面、不内嵌服务器运行时；capability 只用 `webviews` 粒度且不引入插件；Web Package 必须走独立零 capability webview（Windows 上同源 iframe 会继承宿主 IPC，已由 GHSA-57fm-592m-34r7 核验）；Tauri 版本下限 `>=2.11.1`（CVE-2026-42184 修复版本）；secret 走操作系统凭据存储且 renderer 不可读回；本地库业务语义留在 TypeScript、存储机制在 Rust；内容摘要算法冻结既有语义并版本化演进。ADR 待 D0.5 两个 spike 完成后转 `accepted`。
+Desktop 客户端落地采用[Desktop Tauri V1 运行时与本地安全边界决策](./decisions/2026-09-30_160000_DesktopTauriV1运行时与本地安全边界决策.md)、[Desktop 客户端实施规格](./specs/2026-09-30_160000_Desktop客户端实施规格.md)与[Desktop 客户端阶段实施计划](./plans/2026-09-30_160100_Desktop客户端阶段实施计划.md)：Desktop 是独立本地 client runtime，不加载远端页面、不内嵌服务器运行时；capability 只用 `webviews` 粒度且不引入插件；Web Package 必须走独立零 capability webview（Windows 上同源 iframe 会继承宿主 IPC，已由 GHSA-57fm-592m-34r7 核验），主 UI 的 CSP 另以 `frame-src 'none'` 结构禁止 iframe；Tauri 版本下限 `>=2.11.1`（CVE-2026-42184 修复版本）；secret 走操作系统凭据存储且 renderer 不可读回（Windows Credential Manager 路径已实测通过，Stronghold 不进入 V1）；本地库业务语义留在 TypeScript、存储机制在 Rust；内容摘要算法冻结既有语义并版本化演进。
 
 模态框页签的窄屏承载采用[模态框页签窄屏承载规格](./specs/2026-09-30_113200_模态框页签窄屏承载规格.md)：页签栏统一走 `shared/ModalTabs` 的 WAI-ARIA + 横向滚动 rail，选型依据是 W3C ARIA APG 议题 #2438 与 Material Design 3（两者都把横向滚动列为首选/标准做法，换行堆叠与「更多」菜单被明确否决）；同时修正四处弹窗外壳的 `w-[96vw]` 横向溢出与 `vh` 视口失真。
 
