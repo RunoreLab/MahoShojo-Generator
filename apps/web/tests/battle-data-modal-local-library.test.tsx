@@ -146,6 +146,28 @@ it('空本地库给出填充入口与边界说明，而不是一句共用的「�
   expect(document.body.querySelector('a[href="/encyclopedia/local-library"]')).not.toBeNull();
 });
 
+it('库里有卡但搜索没命中时，空态不能说「本地库还是空的」', async () => {
+  await saveLocalDataCard(repository, { cardType: 'character', title: '本机焰', payload: character('焰') }, () => '2026-09-29T12:00:00.000Z');
+  await render();
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+  expect(document.body.textContent).toContain('本机焰');
+
+  const search = document.body.querySelector('input[type="search"], input[placeholder^="搜索"]') as HTMLInputElement;
+  expect(search).not.toBeNull();
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    setter.call(search, '不存在的关键词');
+    search.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 700)); });
+
+  // 页签徽标是未过滤总数，所以此时界面同时出现「本地库 (1)」和空列表。
+  // 说「本地库还是空的」并列出三个填充入口，会把用户推去重复导入已有的卡。
+  expect(document.body.textContent).toContain('本地库 (1)');
+  expect(document.body.textContent).toContain('没有匹配的本地数据卡');
+  expect(document.body.textContent).not.toContain('本地库还是空的');
+});
+
 it('标签库为空时不会反复重取（否则每次渲染都触发一次请求）', async () => {
   const fetchMock = vi.fn(async () => Response.json({ success: true, cards: [], items: {}, tags: [] }));
   vi.stubGlobal('fetch', fetchMock);

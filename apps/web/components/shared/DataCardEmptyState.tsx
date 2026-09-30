@@ -14,6 +14,20 @@ export type DataCardEmptyStateTab = 'my' | 'public' | 'recommended' | 'favorites
 
 const LOCAL_LIBRARY_HREF = '/encyclopedia/local-library';
 
+/**
+ * 「这一页签本来就没有」和「搜索/筛选没命中」必须分开说。
+ *
+ * 页签徽标显示的是**未过滤**的总数，所以在本地库里搜不到东西时，界面会同时出现
+ * `本地库 (5)` 和空列表——这时说「本地库还是空的」不只是含糊，还会把用户推去
+ * 重新导入他们已经有的卡，正好抵消掉去重设计要防的事。
+ */
+const NoQueryMatch = ({ title, hint }: { title: string; hint: string }) => (
+  <div className="py-8 text-center">
+    <p className="text-sm text-gray-500">{title}</p>
+    <p className="mx-auto mt-2 max-w-xl text-xs leading-6 text-gray-500">{hint}</p>
+  </div>
+);
+
 export function DataCardEmptyState({
   tab,
   typeLabel,
@@ -26,7 +40,7 @@ export function DataCardEmptyState({
   typeLabel: string;
   /** 列表加载失败。为真时只提示重试，不假装这是「本来就没有」。 */
   error?: boolean;
-  /** 是否处于搜索/筛选状态。搜索无结果和「库里真的没有」要说不同的话。 */
+  /** 是否处于搜索/标签/高级筛选状态。 */
   hasActiveSearch?: boolean;
   onRetry?: () => void;
 }) {
@@ -48,6 +62,14 @@ export function DataCardEmptyState({
   }
 
   if (tab === 'local') {
+    if (hasActiveSearch) {
+      return (
+        <NoQueryMatch
+          title="没有匹配的本地数据卡"
+          hint="本地库里是有卡的，只是当前的搜索 / 标签 / 筛选条件没有命中。页签上的数字显示的是未过滤的总数。清空搜索框，或用标签区的「清空」与高级筛选的「重置」再试。"
+        />
+      );
+    }
     return (
       <div className="rounded-xl border border-dashed border-gray-300 p-6 text-center dark:border-gray-700">
         <p className="text-sm font-medium text-gray-900 dark:text-gray-100">本地库还是空的</p>
@@ -56,7 +78,7 @@ export function DataCardEmptyState({
         </p>
         <ul className="mx-auto mt-3 max-w-xl space-y-1.5 text-left text-xs leading-6 text-gray-600 dark:text-gray-300">
           <li>· 在任意{typeLabel}详情弹窗里点「存到本地库」，把线上那张卡复制一份到本机</li>
-          <li>· 勾选导入区的「同时保存到本地库」，之后导入的内容会自动存进来</li>
+          <li>· 在竞技场上传参战者时勾选「同时保存到本地库」，之后上传的内容会自动存进来</li>
           <li>· 内容相同的卡会自动更新原卡，不会堆出一堆近似重复项</li>
         </ul>
         <p className="mx-auto mt-3 max-w-xl text-xs leading-6 text-amber-700 dark:text-amber-300">
@@ -97,12 +119,19 @@ export function DataCardEmptyState({
       return { title: '暂时没有推荐内容', hint: '可以先按名称或标签搜索，或到公开库看看。' };
     }
     return {
-      title: hasActiveSearch ? '没有匹配的数据卡' : `公开库里还没有公开的${typeLabel}数据卡`,
-      hint: hasActiveSearch
-        ? '换个关键词，或点「重置」清掉筛选条件再试。'
-        : '可以先搜索、粘贴分享链接，或自己生成一张并设为公开。',
+      title: `公开库里还没有公开的${typeLabel}数据卡`,
+      hint: '可以先搜索、粘贴分享链接，或自己生成一张并设为公开。',
     };
   })();
+
+  if (hasActiveSearch) {
+    return (
+      <NoQueryMatch
+        title="没有匹配的数据卡"
+        hint="换个关键词，或清空搜索框、用标签区的「清空」与高级筛选的「重置」再试。"
+      />
+    );
+  }
 
   return (
     <div className="py-8 text-center">

@@ -26,7 +26,7 @@ import { buildTitleDisplay } from '@/lib/text';
 import { ChevronDown, Filter } from 'lucide-react';
 import DecksModal from './DecksModal';
 import { BaseModal } from './shared/BaseModal';
-import { DataCardEmptyState, type DataCardEmptyStateTab } from './shared/DataCardEmptyState';
+import { DataCardEmptyState } from './shared/DataCardEmptyState';
 import { LocalLibraryStatusNote } from './shared/LocalLibraryStatusNote';
 import { getDataCardStatus } from '@/lib/data-card-status';
 import type { BadgeDefinition } from '@/types/badge';
@@ -1303,10 +1303,13 @@ export default function BattleDataModal({
   }, [activeTab, isLocalTab, isPublicTab, paginatedUserCards, paginatedFavoriteCards, localPaginatedCards, publicPaginatedCards]);
 
   // 「搜索/筛选无命中」和「这个库里本来就没有」对用户是两件事，空状态必须分开说。
+  // 标签是与关键词、高级筛选各自独立的状态，且在每一个非 pvpHand 页签上都渲染，
+  // 只看关键词和 Filters 会把「只按标签筛出了 0 条」误判成「库里本来就没有」。
   const hasActiveQuery = useMemo(() => (
     debouncedSearchQuery.trim().length > 0
+    || selectedTagIds.length > 0
     || JSON.stringify(activeFilters) !== JSON.stringify(initialFilters)
-  ), [debouncedSearchQuery, activeFilters, initialFilters]);
+  ), [debouncedSearchQuery, selectedTagIds, activeFilters, initialFilters]);
 
   const reloadActiveList = useCallback(() => {
     if (activeTab === 'my') { loadUserDataCards(); return; }
@@ -1954,9 +1957,13 @@ export default function BattleDataModal({
 	              )
 	            ) : (listLoading || listIdle) && displayCards.length === 0 ? (
 	              <div className="flex justify-center items-center min-h-[40vh]"><div className="text-gray-500">加载中...</div></div>
-	            ) : displayCards.length === 0 ? (
+	            ) : isPvpHandTab ? (
+              // 手牌页签有自己的空态；走到这里说明分支被重排了，宁可显示通用文案，
+              // 也不要让 pvpHand 掉进 public 的分支里去骗用户。
+              <DataCardEmptyState tab="public" typeLabel={typeLabel} />
+            ) : displayCards.length === 0 ? (
 	              <DataCardEmptyState
-	                tab={activeTab as DataCardEmptyStateTab}
+	                tab={activeTab}
 	                typeLabel={typeLabel}
 	                error={Boolean(listError)}
 	                hasActiveSearch={hasActiveQuery}
