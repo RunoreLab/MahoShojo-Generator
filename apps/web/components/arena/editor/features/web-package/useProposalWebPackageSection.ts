@@ -17,6 +17,8 @@ import {
 } from '../../context';
 import type { ArenaWebPackageOptionView, ArenaWebPackageSectionModel } from './web-package-contract';
 
+const noopReloadLibrary = (): void => {};
+
 const builtinOptions = (): readonly ArenaWebPackageOptionView[] =>
   BUILTIN_WEB_PACKAGE_PRESETS.map((preset) => ({
     digest: preset.packageRef.digest,
@@ -96,7 +98,6 @@ export const useProposalWebPackageSectionModel = (input: {
   const rejectSavePreference = useCallback((): void => {
     onActionError('多人模式不支持本地 Web 包管理');
   }, [onActionError]);
-
   return {
     disabled,
     active: reportFormat === 'web',
@@ -126,8 +127,9 @@ export const useProposalWebPackageSectionModel = (input: {
       importFile,
       removeFromLibrary: rejectLibraryManagement,
       setSaveImportedToLibrary: rejectSavePreference,
-      // 多人提案没有本地库，也就没有可重试的读取失败。
-      reloadLibrary: () => {},
+      // 多人提案没有本地库，也就没有可重试的读取失败；仍然给一个稳定引用，
+      // 免得共享视图为了判空而依赖一个每次渲染都新建的函数。
+      reloadLibrary: noopReloadLibrary,
     },
   };
 };

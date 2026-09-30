@@ -91,21 +91,33 @@ export const useSoloWebPackageSectionModel = (input: {
   const { preferences, setPreference } = useLocalLibraryPreferences();
   const localLibrary = useLocalWebPackages(allowLocalImport);
   const { downloadingDigest, downloadError, downloadPreset } = useWebPackagePresetDownload();
+  const { reload: reloadLocalLibraryList } = localLibrary;
+
+  /**
+   * 挂载期恢复：一次性把旧缓存搬进本地库，再从本地库水合会话暂存。
+   *
+   * 抽成 callback 而不是只写在挂载 effect 里，是因为失败后的恢复入口必须重跑
+   * **同一段逻辑**：只重读列表的话，一次迁移失败就被当成"已经好了"抹掉，而那次
+   * 迁移要等到下次整页加载才重试——用户看到的是"读出来了"，实际数据还缺着。
+   */
+  const runMountRecovery = useCallback(async (): Promise<void> => {
+    // 读不到旧库时迁移返回 drained=false，此时不得标记完成——
+    // 否则用户会同时失去旧数据和迁移机会。
+    if (!(await hasCompletedLegacyWebPackageMigration())) {
+      const outcome = await migrateLegacyWebPackageCache(
+        readAllWebPackageArchiveCache,
+        drainWebPackageArchiveCache,
+      );
+      if (outcome.drained) await markLegacyWebPackageMigrationCompleted();
+    }
+    await hydrateWebPackageSessionFromLibrary();
+  }, []);
 
   useEffect(() => {
     let active = true;
     void (async () => {
       try {
-        // 一次性把旧缓存搬进本地库。读不到旧库时迁移返回 drained=false，
-        // 此时不得标记完成——下次挂载还要再试，否则用户会同时失去旧数据和迁移机会。
-        if (!(await hasCompletedLegacyWebPackageMigration())) {
-          const outcome = await migrateLegacyWebPackageCache(
-            readAllWebPackageArchiveCache,
-            drainWebPackageArchiveCache,
-          );
-          if (outcome.drained) await markLegacyWebPackageMigrationCompleted();
-        }
-        await hydrateWebPackageSessionFromLibrary();
+        await runMountRecovery();
       } catch (error) {
         // 迁移与水合都在 IndexedDB 上跑：隐私模式或存储被拒时会 reject。不接住就是
         // unhandled rejection，用户看不到任何提示，只会觉得"本地库自己空了"。
@@ -115,12 +127,11 @@ export const useSoloWebPackageSectionModel = (input: {
       }
       if (!active) return;
       setStagedTick((tick) => tick + 1);
-      localLibrary.reload();
+      reloadLocalLibraryList();
     })();
     return () => { active = false; };
-    // 迁移与水合各只应发生一次；localLibrary 引用会每次渲染变化，不能进依赖。
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    // 恢复逻辑只应发生一次；reloadLocalLibraryList 是稳定的 useCallback，不进依赖。
+  }, [runMountRecovery, reloadLocalLibraryList]);
 
   // 列表读取失败时 useLocalWebPackages 已经有 status/error，但区块此前从不读它：
   // 读不出来和"本来就没有"在界面上都是同一句"还没有本地 Web 包"，用户会以为包没了。
@@ -314,12 +325,22 @@ export const useSoloWebPackageSectionModel = (input: {
   }, [localLibrary, webPackageRef, setWebPackageRef]);
 
   // 挂载期的迁移/水合失败此前没有任何原地恢复入口，只能让用户刷新页面。
-  // 这里同时清掉挂载期错误并重读列表：只重读列表的话，挂载期那条错误会一直挂着。
+  // 必须重跑同一段恢复逻辑，而不是清掉错误就宣称读出来了：一次迁移失败被抹掉后，
+  // 那次迁移要等到下次整页加载才重试，期间用户看到的是"库里是空的"。
   const reloadLibrary = useCallback(() => {
-    setLocalLibraryError(null);
-    setMissingArchives(new Set());
-    localLibrary.reload();
-  }, [localLibrary]);
+    void (async () => {
+      try {
+        await runMountRecovery();
+      } catch (error) {
+        setLocalLibraryError(error instanceof Error ? error.message : '本地库读取失败');
+        return;
+      }
+      setLocalLibraryError(null);
+      setMissingArchives(new Set());
+      setStagedTick((tick) => tick + 1);
+      reloadLocalLibraryList();
+    })();
+  }, [runMountRecovery, reloadLocalLibraryList]);
 
   return {
     disabled: disabled || isGenerating,

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import Link from 'next/link';
 import { HardDrive, Package } from 'lucide-react';
 import { BaseModal } from '@/components/shared/BaseModal';
 import { WebPackageBaseRisk } from '@/components/arena/components/WebPackageSafety';
@@ -162,7 +163,7 @@ export function WebPackagePickerModal({
                     : '可以切到「本地库」页签导入自己的 ZIP：包是「引擎 + 素材」，AI 只生成包指定的那一个数据文件。'}
                 </p>
                 <p className="text-xs">
-                  <a className="underline hover:text-gray-700" href={WEB_REPORT_HREF}>这是什么？</a>
+                  <Link className="underline hover:text-gray-700" href={WEB_REPORT_HREF}>这是什么？</Link>
                 </p>
               </div>
             )}
@@ -211,7 +212,7 @@ export function WebPackagePickerModal({
                   </button>
                 ) : null}
                 <p className="text-xs">
-                  <a className="underline hover:text-gray-700" href={WEB_REPORT_HREF}>Web 战报与 Web 包说明</a>
+                  <Link className="underline hover:text-gray-700" href={WEB_REPORT_HREF}>Web 战报与 Web 包说明</Link>
                 </p>
               </div>
             )}

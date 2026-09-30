@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { HardDrive, Package, Settings2 } from 'lucide-react';
 import { BaseModal } from '@/components/shared/BaseModal';
 import { WebPackageBaseRisk } from '@/components/arena/components/WebPackageSafety';
@@ -144,7 +145,7 @@ export function ArenaWebPackageSection({ model }: Readonly<{ model: ArenaWebPack
           「自由生成网页（未选择 Web 包）」和「Web 包」的关系无处可查。 */}
       <p className="text-xs text-gray-500">
         不选包就是让 AI 自由生成一个网页；选包则由包提供引擎与素材、AI 只生成那一个数据文件。
-        <a className="ml-1 underline hover:text-gray-700" href={WEB_REPORT_HREF}>Web 战报说明</a>
+        <Link className="ml-1 underline hover:text-gray-700" href={WEB_REPORT_HREF}>Web 战报说明</Link>
       </p>
 
       <WebPackagePickerModal
