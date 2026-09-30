@@ -18,6 +18,13 @@ import {
   trimMagicTeaPartyHistory,
 } from '@/lib/magic-tea-party/history';
 import { buildMagicTeaPartyJsonlPreview, extractMagicTeaPartySideChannelsFromJsonl, parseMagicTeaPartyJsonl } from '@/lib/magic-tea-party/jsonl';
+import {
+  applyMagicTeaPartyMessageLimits,
+  clipMagicTeaPartyMessageContent,
+  formatMagicTeaPartyTotalOverflowMessage,
+  isMagicTeaPartyTotalOverflow,
+  resolveMagicTeaPartyMessageCharLimit,
+} from '@/lib/magic-tea-party/message-limits';
 import { extractMagicTeaPartyNoticesFromMarkdown } from '@/lib/magic-tea-party/notice';
 import { buildMagicTeaPartyMainPrompt, buildWorldbookText } from '@/lib/magic-tea-party/prompts';
 import { getMagicTeaPartyPreset } from '@/lib/magic-tea-party/presets';
@@ -132,6 +139,8 @@ export type UseMagicTeaPartyChatResult = {
   generateChoices: () => Promise<void>;
   regenerateMessage: (target: MagicTeaPartyMessage) => Promise<void>;
   deleteMessage: (target: MagicTeaPartyMessage) => Promise<void>;
+  compactMessageContent: (target: MagicTeaPartyMessage) => Promise<void>;
+  getMessageCharLimit: () => number;
   generateSummary: () => Promise<void>;
   clearSummary: () => Promise<void>;
 };
@@ -253,6 +262,18 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
     [buildRequestSettings, preferences.outputPlan]
   );
 
+  const emitNotices = useCallback(
+    (notices: MagicTeaPartyNotice[]) => {
+      if (!onNotices || notices.length === 0) return;
+      const sanitized = notices.map((notice) => ({
+        ...notice,
+        message: applyShieldWords(notice.message).filteredText,
+      }));
+      onNotices(sanitized);
+    },
+    [onNotices]
+  );
+
   const buildHistoryForRequest = useCallback(
     (params: { session: MagicTeaPartySession; messages: MagicTeaPartyMessage[]; outputFormat?: MagicTeaPartyOutputFormat }) => {
       const outputFormat =
@@ -264,11 +285,13 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
         return {
           history: [],
           trimStats: { rawCount: 0, trimmedCount: 0, droppedCount: 0, droppedRatio: 0 },
+          clipStats: { limit: 0, clippedCount: 0, omittedChars: 0, totalChars: 0 },
         };
       }
 
       const providerId = userProviderConfig?.providerId ?? params.session.settings.providerId;
       const tokenBudget = resolveMagicTeaPartyTokenBudget(params.session.settings, providerId);
+      const messageCharLimit = resolveMagicTeaPartyMessageCharLimit(tokenBudget.contextWindowTokens);
       const preset = getMagicTeaPartyPreset(params.session.settings.presetId ?? null);
       const worldbookText = preset ? buildWorldbookText(preset.worldbook) : '';
       const stylePrompt = preset ? preset.systemPrompt : '';
@@ -299,17 +322,35 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
         userDisplayName: promptSettings.userDisplayName,
         minKeep: 2,
       });
+      const limited = applyMagicTeaPartyMessageLimits(trimmed, messageCharLimit);
       const rawCount = rawHistory.length;
       const trimmedCount = trimmed.length;
       const droppedCount = Math.max(0, rawCount - trimmedCount);
       const droppedRatio = rawCount > 0 ? droppedCount / rawCount : 0;
 
+      if (limited.clippedMessages.length > 0) {
+        emitNotices([
+          {
+            type: 'notice',
+            level: 'warning',
+            code: 'message_content_clipped',
+            message: `有 ${limited.clippedMessages.length} 条消息超过单条 ${messageCharLimit} 字预算，已自动省略中段（共 ${limited.totalOmittedChars} 字）。如需保留完整内容，请编辑或精简对应消息。`,
+          },
+        ]);
+      }
+
       return {
-        history: trimmed,
+        history: limited.messages,
         trimStats: { rawCount, trimmedCount, droppedCount, droppedRatio },
+        clipStats: {
+          limit: messageCharLimit,
+          clippedCount: limited.clippedMessages.length,
+          omittedChars: limited.totalOmittedChars,
+          totalChars: limited.totalChars,
+        },
       };
     },
-    [preferences.outputFormat, resolvePromptSettings, userProviderConfig?.providerId]
+    [emitNotices, preferences.outputFormat, resolvePromptSettings, userProviderConfig?.providerId]
   );
 
   const recordDropStats = useCallback((sessionId: string, droppedRatio: number) => {
@@ -353,27 +394,19 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
     []
   );
 
-  const emitNotices = useCallback(
-    (notices: MagicTeaPartyNotice[]) => {
-      if (!onNotices || notices.length === 0) return;
-      const sanitized = notices.map((notice) => ({
-        ...notice,
-        message: applyShieldWords(notice.message).filteredText,
+  const normalizeFallbackHistory = useCallback(
+    (history: MagicTeaPartyHistoryMessage[], contextWindowTokens?: number | null) => {
+      const MAX_MESSAGES = 200;
+      const limit = resolveMagicTeaPartyMessageCharLimit(contextWindowTokens);
+      const clipped = applyMagicTeaPartyMessageLimits(history.slice(-MAX_MESSAGES), limit);
+      return clipped.messages.map((message) => ({
+        id: message.id,
+        role: message.role,
+        content: message.content,
       }));
-      onNotices(sanitized);
     },
-    [onNotices]
+    []
   );
-
-  const normalizeFallbackHistory = useCallback((history: MagicTeaPartyHistoryMessage[]) => {
-    const MAX_MESSAGES = 200;
-    const MAX_MESSAGE_CHARS = 8_000;
-    return history.slice(-MAX_MESSAGES).map((message) => ({
-      id: message.id,
-      role: message.role,
-      content: typeof message.content === 'string' ? message.content.slice(0, MAX_MESSAGE_CHARS) : '',
-    }));
-  }, []);
 
   const requestChoicesFallback = useCallback(
     async (params: { session: MagicTeaPartySession; normalizedHistory: MagicTeaPartyHistoryMessage[] }) => {
@@ -647,12 +680,17 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
       const baseHistory: MagicTeaPartyHistoryMessage[] = assistantHistory
         ? [...params.historyForRequest, assistantHistory]
         : params.historyForRequest;
-      const normalizedHistory = normalizeFallbackHistory(baseHistory);
+      const fallbackTokenBudget = resolveMagicTeaPartyTokenBudget(
+        params.session.settings,
+        userProviderConfig.providerId
+      );
+      const normalizedHistory = normalizeFallbackHistory(baseHistory, fallbackTokenBudget.contextWindowTokens);
       if (normalizedHistory.length === 0) return;
 
       const mergedSettings = buildRequestSettings(params.session);
       const language = params.session.settings.language ?? preferences.language;
       const userDisplayName = params.session.settings.userDisplayName || preferences.userDisplayName || '旅人';
+      const contextWindowTokens = fallbackTokenBudget.contextWindowTokens;
 
       if (needsSummary && !isSummarizing) {
         try {
@@ -664,6 +702,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
               mode: 'summary',
               language,
               userDisplayName,
+              contextWindowTokens,
               messages: normalizedHistory,
               customProvider: buildMagicTeaPartyCustomProviderPayload(userProviderConfig),
             }),
@@ -752,6 +791,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
                 writeCurrentState: mergedSettings.writeCurrentState,
                 language,
                 userDisplayName,
+                contextWindowTokens,
               },
               customProvider: buildMagicTeaPartyCustomProviderPayload(userProviderConfig),
             }),
@@ -840,6 +880,22 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
       assistantMessage: MagicTeaPartyMessage;
       arrestedBackupInput?: string;
     }): Promise<MagicTeaPartySession | null> => {
+      const totalChars = params.historyForRequest.reduce(
+        (sum, message) => sum + (typeof message.content === 'string' ? message.content.length : 0),
+        0
+      );
+      if (isMagicTeaPartyTotalOverflow(totalChars)) {
+        emitNotices([
+          {
+            type: 'notice',
+            level: 'error',
+            code: 'history_total_overflow',
+            message: formatMagicTeaPartyTotalOverflowMessage(totalChars),
+          },
+        ]);
+        return null;
+      }
+
       let finalSession: MagicTeaPartySession | null = null;
       const controller = new AbortController();
       abortControllerRef.current = controller;
@@ -1228,14 +1284,16 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
       setSummaryError(null);
 
       const MAX_SUMMARY_MESSAGES = 200;
-      const MAX_MESSAGE_CHARS = 8_000;
       const summarySeed = session.summary?.trim() || '';
 
-      const normalizedHistory = summarizedHistory.map((message) => ({
-        id: message.id,
-        role: message.role,
-        content: message.content.slice(0, MAX_MESSAGE_CHARS),
-      }));
+      const summaryCharLimit = resolveMagicTeaPartyMessageCharLimit(tokenBudget.contextWindowTokens);
+      const normalizedHistory = applyMagicTeaPartyMessageLimits(summarizedHistory, summaryCharLimit).messages.map(
+        (message) => ({
+          id: message.id,
+          role: message.role,
+          content: message.content,
+        })
+      );
 
       const withSeed = summarySeed
         ? [
@@ -1268,6 +1326,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
             mode: 'summary',
             language: session.settings.language ?? preferences.language,
             userDisplayName,
+            contextWindowTokens: tokenBudget.contextWindowTokens,
             messages: summaryMessages,
             customProvider: buildMagicTeaPartyCustomProviderPayload(userProviderConfig!),
           }),
@@ -1804,7 +1863,29 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
     onGlobalError?.(null);
     setSummaryError(null);
 
-    const historyForRequest = buildMagicTeaPartyHistory(messages, { includeEmptyContent: false });
+    const rawHistoryForSummary = buildMagicTeaPartyHistory(messages, { includeEmptyContent: false });
+
+    if (rawHistoryForSummary.length === 0) {
+      setSummaryError('还没有可用于摘要的对话。');
+      return;
+    }
+
+    const summaryTokenBudget = resolveMagicTeaPartyTokenBudget(
+      activeSession.settings,
+      userProviderConfig.providerId
+    );
+    const trimmedForSummary = trimMagicTeaPartyHistory(rawHistoryForSummary, {
+      maxMessages: summaryTokenBudget.maxContextMessages,
+      tokenBudget: summaryTokenBudget.historyBudgetTokens,
+      providerId: userProviderConfig.providerId,
+      userDisplayName:
+        activeSession.settings.userDisplayName || preferences.userDisplayName || '旅人',
+      minKeep: 2,
+    });
+    const historyForRequest = applyMagicTeaPartyMessageLimits(
+      trimmedForSummary,
+      resolveMagicTeaPartyMessageCharLimit(summaryTokenBudget.contextWindowTokens)
+    ).messages;
 
     if (historyForRequest.length === 0) {
       setSummaryError('还没有可用于摘要的对话。');
@@ -1825,6 +1906,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
           mode: 'summary',
           language: activeSession.settings.language ?? preferences.language,
           userDisplayName: activeSession.settings.userDisplayName || preferences.userDisplayName || '旅人',
+          contextWindowTokens: summaryTokenBudget.contextWindowTokens,
           messages: historyForRequest,
           customProvider: buildMagicTeaPartyCustomProviderPayload(userProviderConfig),
         }),
@@ -1851,8 +1933,8 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
       const safeText = applyShieldWords(summaryRaw).filteredText;
       const summaryMeta: MagicTeaPartySession['summaryMeta'] = {
         updatedAt: now,
-        fromMessageId: historyForRequest[0]?.id,
-        toMessageId: historyForRequest[historyForRequest.length - 1]?.id,
+        fromMessageId: rawHistoryForSummary[0]?.id,
+        toMessageId: rawHistoryForSummary[rawHistoryForSummary.length - 1]?.id,
       };
 
       const nextSession: MagicTeaPartySession = {
@@ -2009,6 +2091,40 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
     [activeSession, persistSession, setMessages]
   );
 
+  /**
+   * 就地把一条超长消息压缩到当前单条预算内（保留头尾、显式标记省略中段）。
+   * 这是超长消息的非破坏性逃生口：不必删除，也不必创建会话分支。
+   */
+  const compactMessageContent = useCallback(
+    async (targetMessage: MagicTeaPartyMessage) => {
+      if (!activeSession) return;
+      if (targetMessage.status === 'streaming') return;
+      const tokenBudget = resolveMagicTeaPartyTokenBudget(
+        activeSession.settings,
+        userProviderConfig?.providerId ?? activeSession.settings.providerId
+      );
+      const limit = resolveMagicTeaPartyMessageCharLimit(tokenBudget.contextWindowTokens);
+      const clipped = clipMagicTeaPartyMessageContent(targetMessage.content ?? '', limit);
+      if (!clipped.clipped) return;
+
+      const nextMessage: MagicTeaPartyMessage = { ...targetMessage, content: clipped.text };
+      setMessages((prev) => prev.map((message) => (message.id === targetMessage.id ? nextMessage : message)));
+      await putMagicTeaPartyMessage(nextMessage);
+      const now = Date.now();
+      await persistSession({ ...activeSession, updatedAt: now });
+    },
+    [activeSession, persistSession, setMessages, userProviderConfig?.providerId]
+  );
+
+  /** 单条消息是否超出当前预算——供 UI 决定是否显示「精简」入口。 */
+  const getMessageCharLimit = useCallback((): number => {
+    const tokenBudget = resolveMagicTeaPartyTokenBudget(
+      activeSession?.settings ?? null,
+      userProviderConfig?.providerId
+    );
+    return resolveMagicTeaPartyMessageCharLimit(tokenBudget.contextWindowTokens);
+  }, [activeSession?.settings, userProviderConfig?.providerId]);
+
   return {
     isGenerating,
     isSummarizing,
@@ -2019,6 +2135,8 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
     generateChoices,
     regenerateMessage,
     deleteMessage,
+    compactMessageContent,
+    getMessageCharLimit,
     generateSummary,
     clearSummary,
   };

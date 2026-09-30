@@ -12,6 +12,7 @@ type MagicTeaPartyChatComposerProps = {
   onGenerateChoices: () => void;
   isGenerating: boolean;
   hasMessages: boolean;
+  messageCharLimit?: number;
 };
 
 export function MagicTeaPartyChatComposer(props: MagicTeaPartyChatComposerProps) {
@@ -25,12 +26,24 @@ export function MagicTeaPartyChatComposer(props: MagicTeaPartyChatComposerProps)
     onGenerateChoices,
     isGenerating,
     hasMessages,
+    messageCharLimit,
   } = props;
 
   const outputFormat = activeSession?.settings.outputFormat ?? preferences.outputFormat;
   const canSend = Boolean(activeSession && !isGenerating && draft.trim());
   const canAction = Boolean(activeSession && !isGenerating);
   const hasSession = Boolean(activeSession);
+
+  const draftLength = draft.length;
+  const limit = typeof messageCharLimit === 'number' && messageCharLimit > 0 ? messageCharLimit : 0;
+  const draftRatio = limit > 0 ? draftLength / limit : 0;
+  const draftOverLimit = limit > 0 && draftLength > limit;
+  const draftNearLimit = limit > 0 && !draftOverLimit && draftRatio >= 0.9;
+  const counterClass = draftOverLimit
+    ? 'font-semibold text-red-600'
+    : draftNearLimit
+      ? 'font-semibold text-amber-600'
+      : 'text-gray-400';
 
   return (
     <div className="mt-4 grid gap-2">
@@ -43,11 +56,30 @@ export function MagicTeaPartyChatComposer(props: MagicTeaPartyChatComposerProps)
       />
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0 text-xs text-gray-500">
-          {!hasSession
-            ? '提示：请先新建或选择会话，再开始对话。'
-            : outputFormat === 'markdown'
-              ? '提示：Markdown 模式正文更自由；合并输出计划设为“强制”时会额外调用生成选项/摘要/更新。'
-              : '提示：JSONL 模式可解析旁白/对白/选项。'}
+          {!hasSession ? (
+            '提示：请先新建或选择会话，再开始对话。'
+          ) : (
+            <>
+              <span>
+                {outputFormat === 'markdown'
+                  ? '提示：Markdown 模式正文更自由；合并输出计划设为“强制”时会额外调用生成选项/摘要/更新。'
+                  : '提示：JSONL 模式可解析旁白/对白/选项。'}
+              </span>
+              {limit > 0 ? (
+                <span className="ml-2">
+                  本条 {draftLength}
+                  <span className={counterClass}>
+                    {' '}/ {limit} 字
+                  </span>
+                </span>
+              ) : null}
+              {draftOverLimit ? (
+                <div className="mt-1 text-red-600">
+                  已超出单条预算，发送时会自动保留首尾并省略中段；建议先精简。
+                </div>
+              ) : null}
+            </>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <button

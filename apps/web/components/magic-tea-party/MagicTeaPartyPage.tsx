@@ -142,6 +142,8 @@ export function MagicTeaPartyPage() {
     generateChoices,
     regenerateMessage,
     deleteMessage,
+    compactMessageContent,
+    getMessageCharLimit,
     generateSummary,
     clearSummary,
   } = useMagicTeaPartyChat({
@@ -933,6 +935,8 @@ export function MagicTeaPartyPage() {
                     onCancelEdit={handleCancelEditMessage}
                     onConfirmEdit={handleConfirmEditMessage}
                     onDeleteMessage={(message) => void deleteMessage(message)}
+                    onCompactMessage={(message) => void compactMessageContent(message)}
+                    messageCharLimit={getMessageCharLimit()}
                   />
 
                   <MagicTeaPartyChatComposer
@@ -950,6 +954,7 @@ export function MagicTeaPartyPage() {
                     onGenerateChoices={() => void handleGenerateChoices()}
                     isGenerating={isGenerating}
                     hasMessages={messages.length > 0}
+                    messageCharLimit={getMessageCharLimit()}
                   />
 
                   <MagicTeaPartyHistoryImageExportPanel

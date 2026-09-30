@@ -6,6 +6,12 @@ import { AI_PROVIDER_CATALOG, resolveAIProviderModel } from '@/lib/ai/constants'
 import type { AIProvider } from '@/lib/config';
 import { enforceTextSafety } from '@/lib/content-safety/server';
 import { getLogger } from '@/lib/logger';
+import {
+  applyMagicTeaPartyMessageLimits,
+  formatMagicTeaPartyTotalOverflowMessage,
+  MAGIC_TEA_PARTY_MAX_TOTAL_CHARS,
+  resolveMagicTeaPartyMessageCharLimit,
+} from '@/lib/magic-tea-party/message-limits';
 import { buildMagicTeaPartyUpdatePrompt } from '@/lib/magic-tea-party/prompts';
 import type { MagicTeaPartyMessage, MagicTeaPartyRole, MagicTeaPartyScenario, MagicTeaPartyUpdateDraft } from '@/lib/magic-tea-party/types';
 import { generateWithAI, LoadBalanceStrategy } from '@/lib/ai';
@@ -16,7 +22,6 @@ import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
 const log = getLogger('api-magic-tea-party-generate-updates');
 
 const MAX_SAFETY_TEXT_CHARS = 50_000;
-const MAX_MESSAGE_CHARS = 8_000;
 
 const CustomProviderSchema = z.object({
   providerId: z.string().min(1),
@@ -67,6 +72,8 @@ const SettingsSchema = z.object({
   writeCurrentState: z.boolean().optional(),
   language: z.enum(['zh-CN', 'ja-JP', 'en-US']).optional(),
   userDisplayName: z.string().optional(),
+  contextWindowTokens: z.number().int().min(1).optional(),
+  responseReserveTokens: z.number().int().min(0).optional(),
 });
 
 const RequestBodySchema = z.object({
@@ -174,9 +181,24 @@ async function handler(req: NextRequest): Promise<Response> {
       return json({ error: '未开启写入开关' }, { status: 400 });
     }
 
-    const overMessage = messages.find((message) => typeof message.content === 'string' && message.content.length > MAX_MESSAGE_CHARS);
-    if (overMessage) {
-      return json({ error: `单条消息内容超过 ${MAX_MESSAGE_CHARS} 字，请先精简。` }, { status: 400 });
+    const messageCharLimit = resolveMagicTeaPartyMessageCharLimit(settings.contextWindowTokens);
+    const limitedMessages = applyMagicTeaPartyMessageLimits(messages, messageCharLimit);
+    if (limitedMessages.totalChars > MAGIC_TEA_PARTY_MAX_TOTAL_CHARS) {
+      return json(
+        {
+          error: formatMagicTeaPartyTotalOverflowMessage(limitedMessages.totalChars),
+          meta: { totalChars: limitedMessages.totalChars, limit: MAGIC_TEA_PARTY_MAX_TOTAL_CHARS },
+        },
+        { status: 413 }
+      );
+    }
+    if (limitedMessages.clippedMessages.length > 0) {
+      log.info('魔法茶会单条消息超长，已按预算截断', {
+        sessionId,
+        limit: messageCharLimit,
+        clippedCount: limitedMessages.clippedMessages.length,
+        omittedChars: limitedMessages.totalOmittedChars,
+      });
     }
 
     const providerOverrideResult = buildProviderOverride(customProvider);
@@ -221,7 +243,7 @@ async function handler(req: NextRequest): Promise<Response> {
       scenario: normalizedScenario,
       auxScenarios: normalizedAuxScenarios,
       lastChoices: normalizedLastChoices,
-      messages: messages as MagicTeaPartyMessage[],
+      messages: limitedMessages.messages as MagicTeaPartyMessage[],
       summary: summary ?? undefined,
       language: settings.language ?? 'zh-CN',
       userDisplayName: settings.userDisplayName,

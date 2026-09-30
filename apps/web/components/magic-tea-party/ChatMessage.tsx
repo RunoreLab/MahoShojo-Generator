@@ -31,6 +31,8 @@ type MagicTeaPartyChatMessageProps = {
   onCancelEdit?: () => void;
   onConfirmEdit?: (message: MagicTeaPartyMessage) => void;
   onDeleteMessage?: (message: MagicTeaPartyMessage) => void;
+  onCompactMessage?: (message: MagicTeaPartyMessage) => void;
+  messageCharLimit?: number;
 };
 
 const isMessageSuperseded = (message: MagicTeaPartyMessage): boolean => {
@@ -195,6 +197,31 @@ const renderAssistantFooter = (message: MagicTeaPartyMessage) => {
   return null;
 };
 
+const CompactMessageButton = (props: {
+  message: MagicTeaPartyMessage;
+  isGenerating: boolean;
+  messageCharLimit?: number;
+  onCompactMessage?: (message: MagicTeaPartyMessage) => void;
+}) => {
+  const { message, isGenerating, messageCharLimit, onCompactMessage } = props;
+  if (!onCompactMessage) return null;
+  if (typeof messageCharLimit !== 'number' || messageCharLimit <= 0) return null;
+  const length = typeof message.content === 'string' ? message.content.length : 0;
+  if (length <= messageCharLimit) return null;
+
+  return (
+    <button
+      type="button"
+      className="underline underline-offset-2 hover:text-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
+      onClick={() => onCompactMessage(message)}
+      disabled={isGenerating}
+      title={`本条 ${length} 字，超过单条预算 ${messageCharLimit} 字；点击保留首尾并省略中段`}
+    >
+      精简长消息
+    </button>
+  );
+};
+
 const renderAssistantActions = (props: {
   message: MagicTeaPartyMessage;
   session: MagicTeaPartySession | null;
@@ -203,6 +230,8 @@ const renderAssistantActions = (props: {
   onRegenerate?: (message: MagicTeaPartyMessage) => void;
   showRegenerate?: boolean;
   onDeleteMessage?: (message: MagicTeaPartyMessage) => void;
+  onCompactMessage?: (message: MagicTeaPartyMessage) => void;
+  messageCharLimit?: number;
 }) => {
   const { message, session, isGenerating, onUseAsReference, onRegenerate, showRegenerate, onDeleteMessage } = props;
   if (message.status === 'streaming') return null;
@@ -211,8 +240,17 @@ const renderAssistantActions = (props: {
   const canUseReference = plain && typeof onUseAsReference === 'function';
   const canRegenerate = showRegenerate && typeof onRegenerate === 'function';
   const canDelete = message.role !== 'system' && typeof onDeleteMessage === 'function';
+  const compactButton = (
+    <CompactMessageButton
+      message={message}
+      isGenerating={isGenerating}
+      messageCharLimit={props.messageCharLimit}
+      onCompactMessage={props.onCompactMessage}
+    />
+  );
+  const canCompact = compactButton !== null;
 
-  if (!canUseReference && !canRegenerate && !canDelete) return null;
+  if (!canUseReference && !canRegenerate && !canDelete && !canCompact) return null;
 
   return (
     <div className="mt-2 flex items-center justify-end gap-2 text-xs text-gray-500">
@@ -237,6 +275,7 @@ const renderAssistantActions = (props: {
           重新生成
         </button>
       ) : null}
+      {compactButton}
       {canDelete ? (
         <button
           type="button"
@@ -257,12 +296,22 @@ const renderUserActions = (props: {
   isGenerating: boolean;
   onStartEdit?: (message: MagicTeaPartyMessage) => void;
   onDeleteMessage?: (message: MagicTeaPartyMessage) => void;
+  onCompactMessage?: (message: MagicTeaPartyMessage) => void;
+  messageCharLimit?: number;
 }) => {
   const { message, isGenerating, onStartEdit, onDeleteMessage } = props;
   if (message.role !== 'user') return null;
   const canEdit = typeof onStartEdit === 'function' && !isGenerating;
   const canDelete = typeof onDeleteMessage === 'function' && !isGenerating;
-  if (!canEdit && !canDelete) return null;
+  const compactButton = (
+    <CompactMessageButton
+      message={message}
+      isGenerating={isGenerating}
+      messageCharLimit={props.messageCharLimit}
+      onCompactMessage={props.onCompactMessage}
+    />
+  );
+  if (!canEdit && !canDelete && compactButton === null) return null;
 
   return (
     <div className="mt-2 flex items-center justify-end gap-2 text-xs text-gray-500">
@@ -276,6 +325,7 @@ const renderUserActions = (props: {
           编辑并分支
         </button>
       ) : null}
+      {compactButton}
       {canDelete ? (
         <button
           type="button"
@@ -338,6 +388,8 @@ export function MagicTeaPartyChatMessage(props: MagicTeaPartyChatMessageProps) {
           onRegenerate: props.onRegenerate,
           showRegenerate: props.showRegenerate,
           onDeleteMessage: props.onDeleteMessage,
+          onCompactMessage: props.onCompactMessage,
+          messageCharLimit: props.messageCharLimit,
         })}
       </div>
     );
@@ -398,6 +450,8 @@ export function MagicTeaPartyChatMessage(props: MagicTeaPartyChatMessageProps) {
           onRegenerate: props.onRegenerate,
           showRegenerate: props.showRegenerate,
           onDeleteMessage: props.onDeleteMessage,
+          onCompactMessage: props.onCompactMessage,
+          messageCharLimit: props.messageCharLimit,
         })}
       </div>
     );
@@ -455,6 +509,8 @@ export function MagicTeaPartyChatMessage(props: MagicTeaPartyChatMessageProps) {
           onRegenerate: props.onRegenerate,
           showRegenerate: props.showRegenerate,
           onDeleteMessage: props.onDeleteMessage,
+          onCompactMessage: props.onCompactMessage,
+          messageCharLimit: props.messageCharLimit,
         })}
       </div>
     );
@@ -486,6 +542,8 @@ export function MagicTeaPartyChatMessage(props: MagicTeaPartyChatMessageProps) {
             isGenerating,
             onStartEdit: props.onStartEdit,
             onDeleteMessage: props.onDeleteMessage,
+            onCompactMessage: props.onCompactMessage,
+            messageCharLimit: props.messageCharLimit,
           })}
     </div>
   );
