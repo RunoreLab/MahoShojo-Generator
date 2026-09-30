@@ -9,11 +9,15 @@
 //! Direct AI transport、SQLite 本地库分别在 D1 与 D2 引入，并且都必须先经过对应门禁
 //! （见 `PLAN-desktop-client-v1`）。
 
+mod provider_profile;
 mod secret;
+mod store;
 
+use provider_profile::DirectProviderExecutionProfile;
 use secret::{default_secret_store, SharedSecretStore};
 use serde::Serialize;
-use tauri::State;
+use store::LocalStore;
+use tauri::{Manager, State};
 
 /// 供渲染层展示的本地运行时信息。
 ///
@@ -73,17 +77,94 @@ fn delete_provider_secret(
     store.delete(&secret_ref)
 }
 
+/// 写入或覆盖一个 Provider Profile。
+///
+/// `document` 必须是 TypeScript 侧已通过 `DirectProviderProfileV1Schema` 校验的完整
+/// Profile JSON。Rust 把它当作 opaque 文档存储，**不解释**业务字段；同时它只按 id 存取，
+/// 不接受 renderer 提供的路径或 SQL。
+#[tauri::command]
+fn save_provider_profile(
+    store: State<'_, LocalStore>,
+    document: String,
+    updated_at: String,
+) -> Result<(), store::StoreError> {
+    let identity = provider_profile::StoredProviderProfileIdentity::parse(&document)
+        .map_err(|_| store::StoreError::InvalidDocument)?;
+    store.put(&identity.id, &document, &updated_at)
+}
+
+/// 列出已保存的 Profile id。
+#[tauri::command]
+fn list_provider_profile_ids(
+    store: State<'_, LocalStore>,
+) -> Result<Vec<String>, store::StoreError> {
+    store.list_ids()
+}
+
+/// 读取一个 Profile 的完整文档。缺失时返回 `None`，不视为错误。
+#[tauri::command]
+fn get_provider_profile(
+    store: State<'_, LocalStore>,
+    profile_id: String,
+) -> Result<Option<String>, store::StoreError> {
+    store.get(&profile_id)
+}
+
+/// 删除一个 Profile 及其引用的 secret。幂等。
+#[tauri::command]
+fn delete_provider_profile(
+    store: State<'_, LocalStore>,
+    secrets: State<'_, SharedSecretStore>,
+    profile_id: String,
+) -> Result<(), store::StoreError> {
+    if let Some(document) = store.get(&profile_id)? {
+        if let Ok(identity) = provider_profile::StoredProviderProfileIdentity::parse(&document) {
+            for secret_ref in identity.secret_refs() {
+                // 删除 Profile 不因凭据后端故障而失败：凭据残留由后续清理处理，
+                // 但必须让调用方知道这不是一次完整清理。
+                let _ = secrets.delete(&secret_ref);
+            }
+        }
+    }
+    store.delete(&profile_id)
+}
+
+/// 校验一份执行投影，并返回 Rust 侧独立解析后的结果。
+///
+/// 存在的意义是让"TypeScript 认为合法"与"native 侧也认为合法"在 UI 层就能对齐，而不是等到
+/// 真正发起请求时才失败。
+#[tauri::command]
+fn validate_provider_execution_profile(
+    document: String,
+) -> Result<DirectProviderExecutionProfile, provider_profile::ProviderProfileError> {
+    DirectProviderExecutionProfile::parse(&document)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let store: SharedSecretStore = default_secret_store();
-
     tauri::Builder::default()
-        .manage(store)
+        .manage(default_secret_store())
+        .setup(|app| {
+            // 应用数据目录只能在 Builder 内部解析，因此本地库在 setup 阶段打开。
+            // 路径完全由 native 侧产生：renderer 既不能指定目录，也不能指定文件名或 SQL。
+            let data_root = app.path().app_data_dir().map_err(|error| {
+                format!("cannot resolve the application data directory: {error}")
+            })?;
+            let store = LocalStore::open(&store::LocalStorePaths::under(&data_root))
+                .map_err(|error| format!("cannot open the local store: {}", error.message()))?;
+            app.manage(store);
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             desktop_runtime_info,
             set_provider_secret,
             has_provider_secret,
-            delete_provider_secret
+            delete_provider_secret,
+            save_provider_profile,
+            list_provider_profile_ids,
+            get_provider_profile,
+            delete_provider_profile,
+            validate_provider_execution_profile
         ])
         .run(tauri::generate_context!())
         .expect("error while running MahoShojo Generator desktop app");

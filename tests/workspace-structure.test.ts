@@ -427,6 +427,11 @@ describe('desktop workspace app ownership', () => {
       'set_provider_secret',
       'has_provider_secret',
       'delete_provider_secret',
+      'save_provider_profile',
+      'list_provider_profile_ids',
+      'get_provider_profile',
+      'delete_provider_profile',
+      'validate_provider_execution_profile',
     ]);
 
     // renderer 可用的 secret 能力只有写入与存在性；任何读取形态都会让
@@ -468,6 +473,42 @@ describe('desktop workspace app ownership', () => {
 
     expect(vaultSource).toContain('hasSecret');
     expect(vaultSource).not.toContain('getSecret');
+  });
+
+  it('keeps the local store opaque and free of renderer-supplied paths or SQL', () => {
+    const storeSource = readFileSync(path.join(tauriDirectory, 'src', 'store.rs'), 'utf8');
+    const libSource = readFileSync(path.join(tauriDirectory, 'src', 'lib.rs'), 'utf8');
+
+    // Rust 是"已校验文档的 dumb store"：SQL 全部是内部常量，不接受 renderer 传入的选择器。
+    const interpolatedStatements = storeSource.match(/"[^"]*\{[^"]*\}\s*"/gu) ?? [];
+    expect(
+      interpolatedStatements.filter((statement) => /SELECT|INSERT|UPDATE|DELETE/iu.test(statement)),
+      'SQL must never be assembled from interpolated input',
+    ).toEqual([]);
+
+    // 命令签名里不得出现路径或 SQL 形态的**参数**（只匹配 `name: Type` 形式，
+    // 避免误伤散文里的 "directory:" 之类字样）。
+    for (const forbidden of [
+      /\bpath\s*:\s*(?:String|&str|PathBuf)/u,
+      /\bsql\s*:\s*(?:String|&str)/u,
+      /\bfilename\s*:\s*(?:String|&str|PathBuf)/u,
+      /\bdirectory\s*:\s*(?:String|&str|PathBuf)/u,
+    ]) {
+      expect(libSource, `command surface must not accept ${forbidden}`).not.toMatch(forbidden);
+    }
+
+    // 落盘的必须是完整 Profile 文档，而不是 native 的窄投影。
+    expect(libSource).toContain('StoredProviderProfileIdentity');
+  });
+
+  it('refuses project-owned endpoints on the native side as well', () => {
+    const profileSource = readFileSync(path.join(tauriDirectory, 'src', 'provider_profile.rs'), 'utf8');
+
+    expect(profileSource).toContain('PROJECT_DOMAIN_SUFFIXES');
+    expect(profileSource).toContain('mahoshojo.colanns.me');
+    expect(profileSource).toContain('deny_unknown_fields');
+    // 跨运行时一致性：native 侧在编译期读入 TypeScript 持有的 fixture。
+    expect(profileSource).toContain('packages/contracts/fixtures/provider-execution-profiles.json');
   });
 
   it('以结构化方式关闭远程内容、全局 Tauri 对象与 iframe', () => {

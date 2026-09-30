@@ -56,6 +56,14 @@ pnpm --filter @mahoshojo/desktop run dev:tauri
 pnpm --filter @mahoshojo/desktop run dev
 ```
 
+## 类型检查口径
+
+Desktop 通过 workspace 的 source export 直接编译 `@mahoshojo/*` 的源码，因此
+`tsconfig.json` 刻意与其它 workspace 保持同一组 `strict` 选项。这里**不**额外启用
+`noUncheckedIndexedAccess`：那会让本 app 的类型检查替 `packages/contracts` 等包报错
+（例如 `json-value.ts` 的深度守卫），属于跨包的独立决策，不该由一个新 app 单方面引入。
+真要收紧应当全仓一起决定。
+
 ## 门禁
 
 | 命令 | 覆盖 |
