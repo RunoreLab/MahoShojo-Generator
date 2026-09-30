@@ -12,9 +12,8 @@ use serde::Deserialize;
 use crate::local_card::{MAX_LOCAL_CARD_DOCUMENT_BYTES, MAX_LOCAL_CARD_PAGE_SIZE};
 use crate::store::StoreError;
 
-const FIXTURE: &str = include_str!(
-    "../../../../packages/contracts/fixtures/desktop-local-cards.json"
-);
+const FIXTURE: &str =
+    include_str!("../../../../packages/contracts/fixtures/desktop-local-cards.json");
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -86,7 +85,10 @@ fn parse() -> Fixture {
 #[test]
 fn limits_match_the_typescript_authority() {
     let fixture = parse();
-    assert_eq!(MAX_LOCAL_CARD_DOCUMENT_BYTES, fixture.limits.max_document_bytes);
+    assert_eq!(
+        MAX_LOCAL_CARD_DOCUMENT_BYTES,
+        fixture.limits.max_document_bytes
+    );
     assert_eq!(MAX_LOCAL_CARD_PAGE_SIZE, fixture.limits.max_page_size);
 }
 
@@ -109,7 +111,11 @@ fn error_codes_match_the_typescript_authority_in_a_stable_order() {
 
     assert_eq!(
         ours,
-        fixture.error_codes.iter().map(String::as_str).collect::<Vec<_>>(),
+        fixture
+            .error_codes
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
         "错误码集合或顺序与契约不一致"
     );
 }
@@ -140,17 +146,18 @@ fn a_fixtures_index_survives_the_round_trip_through_our_own_type() {
     assert_eq!(parsed, index, "LocalCardIndex 的 camelCase 形状必须稳定");
 
     // 契约声明 deletedAt 可选，Rust 侧必须能接受"带 tombstone"与"不带"两种形态。
-    let tombstoned: crate::local_card::LocalCardIndex = serde_json::from_value(
-        serde_json::json!({
-            "id": fixture.tombstoned_index.id,
-            "cardType": "character",
-            "updatedAt": "2026-09-30T12:00:00.000Z",
-            "deletedAt": fixture.tombstoned_index.deleted_at,
-            "contentDigest": fixture.valid_index.content_digest,
-        }),
-    )
+    let tombstoned: crate::local_card::LocalCardIndex = serde_json::from_value(serde_json::json!({
+        "id": fixture.tombstoned_index.id,
+        "cardType": "character",
+        "updatedAt": "2026-09-30T12:00:00.000Z",
+        "deletedAt": fixture.tombstoned_index.deleted_at,
+        "contentDigest": fixture.valid_index.content_digest,
+    }))
     .expect("tombstoned index must deserialize");
-    assert_eq!(tombstoned.deleted_at.as_deref(), Some("2026-09-30T13:00:00.000Z"));
+    assert_eq!(
+        tombstoned.deleted_at.as_deref(),
+        Some("2026-09-30T13:00:00.000Z")
+    );
 }
 
 #[test]
