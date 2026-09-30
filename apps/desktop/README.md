@@ -2,8 +2,17 @@
 
 MahoShojo Generator 的本地桌面客户端 runtime。它是独立 app，不是 `apps/web` 的桌面壳。
 
-当前处于 **D0 骨架阶段**：只验证本地打包 UI、最小 capability 与窄 IPC 是否成立，不提供任何
-业务能力。Direct AI、本地库与发行分别属于 D1/D1.5/D2 及之后的阶段。
+当前阶段：**D1 执行核 + D1.5 摘要冻结 + D2.0 本地卡存储已落地**。
+
+- **D0** skeleton、安全边界与 CI 接线；
+- **D0.5** 持久 secret 接入操作系统凭据存储；
+- **D1** Direct AI 最薄纵切：Rust 持有出站 HTTP，`Channel<AiStreamEvent>` 流式，`requestId` +
+  取消注册表 + exactly-once 终态。**退出门禁尚未闭合**，唯一缺口是真实 Provider 端点实测
+  （见下方「已知边界」）；
+- **D1.5** 内容摘要语义下沉：`canonicalization` / 摘要 / ID 派生的唯一权威实现在
+  `@mahoshojo/local-library/digest`，V1 逐字节输出由 golden fixture 冻结；
+- **D2.0** 本地库本地卡存储：SQLite `local_card`、keyset 分页、业务级 IPC 与
+  `CardRepository` adapter。blob、导入导出、备份与 GC 属 D2.1 之后的阶段。
 
 ## 权威边界
 
@@ -84,7 +93,10 @@ Rust 门禁同时由 `.github/workflows/desktop-ci.yml` 执行。`build` 脚本�
 - capability 只有 `main-ui` 一个，使用 `webviews` 粒度而非 `windows`。
 - **未引入任何 Tauri 插件**，因此 renderer 不存在 shell、文件系统、SQL 或 HTTP 通用能力。
 - Vite `envPrefix` 只保留 `TAURI_ENV_*`，不暴露 `VITE_`。
-- Rust 侧当前没有出站 HTTP、数据库、文件写入能力；持久 secret 已接入操作系统凭据存储。
+- Rust 侧的出站 HTTP 只服务于 Direct AI：endpoint 与 header 只能来自已保存 Profile 的窄投影，
+  项目自有域名被拒绝，重定向缺省关闭，`no_proxy`。
+- SQLite 只有业务级读写：没有 `query` / `readFile` / `writeFile` 形态的通用 command，
+  所有落盘路径、文件名与 SQL 选择器都由 Rust 产生。
 
 ## Provider Profile 与 Direct AI
 
@@ -110,7 +122,41 @@ Profile 草稿
 - `thinking` 字段当前被 native 的 `deny_unknown_fields` 拒绝，尚未映射到 Provider 参数；
 - `anthropic` / `google` adapter 显式拒绝，不会按 OpenAI 语义静默发起请求；
 - 真实 Ollama / LM Studio / 公网端点尚未实测，端到端证据来自进程内自建的
-  OpenAI-compatible SSE 服务（含"取消真正中止上游 body"的断连观测）。
+  OpenAI-compatible SSE 服务（含"取消真正中止上游 body"的断连观测）。这是 D1 退出门禁
+  唯一未闭合的一条，且只能由人在真实 Provider 上确认。
+
+## 本地库（D2.0）
+
+`library.sqlite` 里目前有两张表，共享同一份 PRAGMA 与 migration journal：
+
+- `provider_profile`（D1）：opaque JSON 文档；
+- `local_card`（D2.0）：opaque `document` + `card_type` / `updated_at` / `deleted_at` /
+  `content_digest` 四个索引列。
+
+业务语义全部留在 TypeScript。索引列由渲染层从**已通过 `LocalCardRecordV1Schema` 校验的
+记录**投影而来，native 侧再从 document 里重新提取一遍并逐项比对，不一致即拒绝落盘：
+
+```text
+已校验的 LocalCardRecordV1
+  -> 投影索引列（只取 native 做选择器必需的 5 个字段）
+  -> 序列化完整 document
+  -> native 提取索引列并与声明值比对
+  -> 一致才落盘
+```
+
+两层校验都必要：只有第一层的话，一次 `{...record, updatedAt: 伪造值}` 就能让排序与分页
+永久错乱。
+
+分页是 `(updated_at, id)` 的 keyset 游标而非 offset。游标在 IPC 上保持不透明，使 Web 的
+IndexedDB adapter 未来可独立改进。软删只写 tombstone、**保留** document，使 `restore` 能
+真正恢复可用状态；`purge` 才彻底删除。
+
+**不使用 `serde_json::Value` 作为落盘门禁**：实测它会拒绝 `"\ud800"` 这类孤立代理项转义，
+而 JavaScript 的 `JSON.stringify` 会产出它、Web 的 IndexedDB 也照常保存它。因此 document 的
+自由载荷走 `Box<RawValue>`，保留原始文本而不实例化 `String`，载荷里的孤立代理项被逐字节
+保留（见 `local_card.rs` 的兼容性测试与 `fixtures/desktop-local-cards.json`）。
+
+blob、内容寻址区、导入导出与 GC 属 D2.1 之后的阶段，当前**不存在**。
 
 ## 持久 secret
 

@@ -434,6 +434,12 @@ describe('desktop workspace app ownership', () => {
       'validate_provider_execution_profile',
       'stream_direct_ai',
       'cancel_direct_ai',
+      'save_local_card',
+      'get_local_card',
+      'list_local_cards',
+      'delete_local_card',
+      'restore_local_card',
+      'purge_local_card',
     ]);
 
     // renderer 可用的 secret 能力只有写入与存在性；任何读取形态都会让
@@ -454,6 +460,66 @@ describe('desktop workspace app ownership', () => {
         new RegExp(`\\b${parameter}\\s*:\\s*(?:String|&str)`, 'u'),
       );
     }
+  });
+
+  it('exposes only business-level local library commands with no renderer-supplied paths', () => {
+    const libSource = readFileSync(path.join(tauriDirectory, 'src', 'lib.rs'), 'utf8');
+    const handler = libSource.match(/generate_handler!\[([\s\S]*?)\]/);
+    const commands = (handler?.[1] ?? '')
+      .split(',')
+      .map((command) => command.trim())
+      .filter((command) => command.length > 0);
+
+    // ADR 第 7 条：IPC 必须是业务级的。通用读写形态一旦出现，renderer 就能指定路径或 SQL，
+    // "Rust 自己产生所有落盘路径、文件名与 SQL 选择器"这条边界随之失效。
+    for (const command of commands) {
+      expect(
+        command,
+        `${command} looks like a generic capability rather than a business operation`,
+      ).not.toMatch(/^(?:read|write|delete|open|save|list|query|exec|run)_?(?:any_)?file$/u);
+      expect(command, `${command} must not be a generic SQL surface`).not.toMatch(
+        /^(?:query|exec|sql|query_?sql)$/u,
+      );
+      expect(command, `${command} must not be a generic fetch surface`).not.toMatch(
+        /^(?:fetch|http_?request|request)$/u,
+      );
+    }
+
+    // 本地卡命令只接受 id、时间戳与已校验记录，不接受路径。
+    const cardCommands = commands.filter((command) => /_local_card/iu.test(command));
+    expect(cardCommands.length).toBeGreaterThan(0);
+    expect(cardCommands).toEqual(
+      expect.arrayContaining([
+        'save_local_card',
+        'get_local_card',
+        'list_local_cards',
+        'delete_local_card',
+        'restore_local_card',
+        'purge_local_card',
+      ]),
+    );
+    for (const parameter of ['path', 'file_path', 'filePath', 'directory', 'dir', 'sql', 'query']) {
+      expect(
+        libSource,
+        `local library command surface must not accept ${parameter}`,
+      ).not.toMatch(new RegExp(`\\b${parameter}\\s*:\\s*(?:String|&str)`, 'u'));
+    }
+  });
+
+  it('keeps the local library document free of a serde_json::Value write gate', () => {
+    // DESK-062：serde_json::Value 会拒绝 \ud800，而 JSON.stringify 会产出它、Web 的
+    // IndexedDB 也照常保存它。把 Value 解析当落盘前提会静默拒收 Web 已有的合法数据。
+    const localCardSource = readFileSync(path.join(tauriDirectory, 'src', 'local_card.rs'), 'utf8');
+    expect(localCardSource).toContain('RawValue');
+
+    // 只扫描生产代码：测试里用 Value 提取断言字段是合理的，真正要禁的是落盘路径上的解析。
+    const productionSource = localCardSource.split('#[cfg(test)]')[0] ?? '';
+    expect(productionSource, 'local card storage must not gate writes on serde_json::Value').not.toMatch(
+      /from_str::<\s*serde_json::Value\s*>/u,
+    );
+    expect(productionSource, 'local card storage must not build a serde_json::Value from the document').not.toMatch(
+      /to_value\s*\(/u,
+    );
   });
 
   it('keeps the secret reference rules single-sourced and cross-runtime checked', () => {
