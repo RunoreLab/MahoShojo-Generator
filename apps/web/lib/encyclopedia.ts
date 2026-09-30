@@ -130,6 +130,14 @@ export const encyclopediaEntries: EncyclopediaEntry[] = [
     keywords: ['登录', '未登录', 'API Key', '403', 'notice', '解析失败', '敏感词', 'blocked'],
   },
   {
+    slug: 'magic-tea-party-context-limits',
+    title: '魔法茶会：上下文与超长消息',
+    summary: '单条消息超长会被自动省略中段、历史总量上限、Token 预算与摘要的正确处理方式。',
+    markdownPath: '/encyclopedia/magic-tea-party-context-limits.md',
+    categoryId: 'magic-tea-party',
+    keywords: ['超长', '单条消息', '省略中段', '精简长消息', 'Token 预算', '上下文', '413', '摘要'],
+  },
+  {
     slug: 'troubleshooting-faq',
     title: '综合故障排查与 FAQ',
     summary: '下载没反应、复制失败、本地记录消失、战报一直恢复、Web 战报异常、房间卡住等跨功能问题的一页自救入口。',

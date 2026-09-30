@@ -160,10 +160,13 @@
 
 这些字段主要用于“Token 预算提示”与自动摘要阈值。一般建议**保持默认**，只有在你明确知道模型上下文窗口、且希望更激进/更保守地摘要时再调整。
 
+其中 `contextWindowTokens` 还会决定**单条消息的字数预算**（≤8K→8,000 字 / ≤32K→16,000 / ≤64K→24,000 / ≤128K→32,000 / >128K→48,000）。设置偏小会让长消息更早被省略中段，详见 `/encyclopedia/magic-tea-party-context-limits`。
+
 ## 相关条目
 
 - 魔法茶会（功能与快速开始）：`/encyclopedia/magic-tea-party`
 - 魔法茶会：会话管理（分支/合并/备份与导出）：`/encyclopedia/magic-tea-party-session-management`
 - 魔法茶会：角色卡/情景卡进阶（协议与 mtp_notice）：`/encyclopedia/magic-tea-party-card-authoring`
 - 魔法茶会：错误排查与 FAQ：`/encyclopedia/magic-tea-party-troubleshooting`
+- 魔法茶会：上下文与超长消息：`/encyclopedia/magic-tea-party-context-limits`
 - 引导 / 裁判事件 / 读写状态：`/encyclopedia/guidance`

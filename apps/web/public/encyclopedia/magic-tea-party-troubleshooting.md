@@ -86,6 +86,26 @@
 2) 减少角色数量 / 减少情景与世界书内容  
 3) 降低“读取历战记录”的条数（不要开不限条数）
 
+## 6.5) 提示“对话历史共 N 字，超过单次请求上限”
+
+这是**历史总量**超限（HTTP 413），和单条消息超长不是一回事。
+
+- 单条消息超长不会让请求失败——系统会自动保留首尾、只省略中段，并给出黄色提示。
+- 历史总量超限才会被拒绝，因为它直接决定请求体大小。
+
+处理顺序：先生成摘要 → 对超长消息点「精简长消息」→ 删除无关长消息 → 按章节分会话。
+
+详见 `/encyclopedia/magic-tea-party-context-limits`。
+
+## 6.6) 提示“有 N 条消息超过单条预算，已自动省略中段”
+
+不是错误，生成照常进行。若你在意被省略的中段内容：
+
+- 对该条消息点「精简长消息」，会显式保留首尾并标记省略位置；
+- 或把关键设定写进角色卡 / 情景卡 / 世界书，它们不依赖单条消息长度。
+
+详见 `/encyclopedia/magic-tea-party-context-limits`。
+
 ## 7) “角色更新”相关问题（草案为空 / 写入失败 / 写入后变非原生）
 
 ### 写入后为什么会变成“非原生”？
@@ -147,3 +167,4 @@
 - 魔法茶会：设置与参数说明：`/encyclopedia/magic-tea-party-settings`
 - 魔法茶会：角色卡/情景卡进阶（协议与 mtp_notice）：`/encyclopedia/magic-tea-party-card-authoring`
 - 魔法茶会：会话管理（分支/合并/备份与导出）：`/encyclopedia/magic-tea-party-session-management`
+- 魔法茶会：上下文与超长消息：`/encyclopedia/magic-tea-party-context-limits`
