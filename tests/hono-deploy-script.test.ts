@@ -13,6 +13,7 @@ import {
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, test } from 'vitest';
+import { hasSh, hasSymlink } from './support/posix';
 
 const deployScriptPath = path.resolve('apps/api/deploy/deploy-bundle.sh');
 const temporaryDirectories: string[] = [];
@@ -208,7 +209,7 @@ afterEach(() => {
   }
 });
 
-describe('Hono release deployment', () => {
+describe.skipIf(!hasSh || !hasSymlink)('Hono release deployment', () => {
   test('checksum 不匹配时在启动容器前拒绝 candidate', () => {
     const fixture = createFixture();
     writeFileSync(

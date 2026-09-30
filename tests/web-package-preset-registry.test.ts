@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { compilePreset, generate } from '../scripts/generate-web-package-presets.mjs';
+import { hasCaseSensitiveFs, hasSymlink } from './support/posix';
 
 const directories: string[] = [];
 afterEach(async () => { await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true }))); });
@@ -28,16 +29,18 @@ describe('directory authored Web Package presets', () => {
     await writeFile(join(directory, 'index.html'), '<!doctype html><title>Changed</title>');
     expect((await compilePreset(directory)).ref.digest).not.toBe(first.ref.digest);
   });
-  it('rejects symlinks, including links escaping the package', async () => {
+  it.skipIf(!hasSymlink)('rejects symlinks, including links escaping the package', async () => {
     const directory = await fixture();
     await symlink(join(directory, 'index.html'), join(directory, 'alias.html'));
     await expect(compilePreset(directory)).rejects.toThrow('Symlinks');
   });
-  it('rejects case collisions and unknown media rather than silently losing assets', async () => {
+  it.skipIf(!hasCaseSensitiveFs)('rejects case collisions rather than silently losing assets', async () => {
     const directory = await fixture();
     await writeFile(join(directory, 'INDEX.html'), 'collision');
     await expect(compilePreset(directory)).rejects.toThrow('duplicate');
-    await rm(join(directory, 'INDEX.html'));
+  });
+  it('rejects unknown media rather than silently losing assets', async () => {
+    const directory = await fixture();
     await writeFile(join(directory, 'unknown.bin'), 'unknown');
     await expect(compilePreset(directory)).rejects.toThrow('Unknown asset media type');
   });

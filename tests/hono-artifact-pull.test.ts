@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { pullHonoArtifact } from '../scripts/pull-hono-artifact.mjs';
+import { hasBash, posixPython } from './support/posix';
 
 vi.mock('node:child_process', async (original) => ({
   ...await original<typeof import('node:child_process')>(),
@@ -66,7 +67,7 @@ describe('Hono artifact pull', () => {
     expect(spawnSync).not.toHaveBeenCalled();
   });
 
-  test('SSH 使用的实际 shell 引号可执行，错误不泄露 stdin', async () => {
+  test.skipIf(!hasBash)('SSH 使用的实际 shell 引号可执行，错误不泄露 stdin', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(redirect()));
     vi.mocked(spawnSync).mockReturnValue(sshResult(0));
     await pullHonoArtifact(env);
@@ -80,9 +81,9 @@ describe('Hono artifact pull', () => {
     expect(result.stderr).not.toContain('SyntaxError');
   });
 
-  test('远端 receiver 本地回归测试（不连接生产）', async () => {
+  test.skipIf(!posixPython)('远端 receiver 本地回归测试（不连接生产）', async () => {
     const { spawnSync: actualSpawn } = await vi.importActual<typeof import('node:child_process')>('node:child_process');
-    const result = actualSpawn('python3', ['-B', resolve('tests/hono-artifact-receive.test.py')], { encoding: 'utf8' });
+    const result = actualSpawn(posixPython!, ['-B', resolve('tests/hono-artifact-receive.test.py')], { encoding: 'utf8' });
     expect(result.status, result.stdout + result.stderr).toBe(0);
   });
 });

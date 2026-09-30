@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
+import { hasBash, hasSymlink } from './support/posix';
 
 const workflow = (name: string) => parse(readFileSync(resolve('.github/workflows', name), 'utf8'));
 const hono = workflow('hono-deploy.yml');
@@ -90,7 +91,7 @@ describe('production deployment pipeline', () => {
     expect(emergency.jobs.release.uses).toBe(hono.jobs.release.uses);
   });
 
-  it.each([
+  it.skipIf(!hasBash).each([
     ['current head', false, 'push', '', 'a', 0, 'a', 0, 'true'],
     ['superseded head', false, 'push', '', 'b', 0, 'a', 0, 'false'],
     ['head lookup failed', false, 'push', '', '', 1, 'a', 1, ''],
@@ -113,7 +114,7 @@ describe('production deployment pipeline', () => {
     expect(existsSync(output) ? readFileSync(output, 'utf8').trim() : '').toBe(current ? 'current=' + current : '');
   });
 
-  it('restores hidden files and symlinks; digest mismatch stops extraction', () => {
+  it.skipIf(!hasBash || !hasSymlink)('restores hidden files and symlinks; digest mismatch stops extraction', () => {
     const source = fixture();
     const target = fixture();
     const openNext = join(source, 'apps/web/.open-next');
