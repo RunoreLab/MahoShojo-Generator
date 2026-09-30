@@ -1,5 +1,5 @@
 export * from './card-repository';
-export * from './data-card-digest';
+export * from './save-local-data-card';
 export * from './data-card-rows';
 export * from './db';
 export * from './preferences';

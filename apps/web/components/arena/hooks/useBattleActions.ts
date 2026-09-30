@@ -8,10 +8,10 @@ import {
   canAddArenaReferenceItems,
   MAX_ARENA_REFERENCE_ITEMS,
 } from '@/lib/arena/resource-budget';
+import { stripLocalCardTransportMeta } from '@mahoshojo/local-library/digest';
 import {
   mapDataCardRuntimeSourceInfo,
   mapPublicDataCardRowToBattleSelectionPayload,
-  stripBattleSelectionTransportMeta,
 } from '@/lib/data-card-read-mappers';
 import { generateRandomCanshou, generateRandomMagicalGirl } from '@/lib/random-character-generator';
 import { verifyArenaContentOrigin as verifyOrigin } from '@/lib/arena/verify-origin';
@@ -241,7 +241,7 @@ export const useBattleActions = () => {
       // _cardType 是在线选卡的传输元数据，最终仍需从正文中移除；但在清理前
       // 读取它，让正文无法识别的 scenario 不会掉入参战角色分支。
       const declaredCardType = cardData?._cardType;
-      const cleanedCardData = stripBattleSelectionTransportMeta(cardData);
+      const cleanedCardData = stripLocalCardTransportMeta(cardData);
       const resolvedName = getCombatantDisplayName(cleanedCardData);
       const inferredTemplate = resolveArenaDataCardTemplate(cleanedCardData, declaredCardType);
       const targetFilename = `${sourceDataCardName || resolvedName}.json`;
@@ -375,7 +375,7 @@ export const useBattleActions = () => {
       } = mapDataCardRuntimeSourceInfo(cardData);
 
       const declaredCardType = cardData?._cardType;
-      const cleanedCardData = stripBattleSelectionTransportMeta(cardData);
+      const cleanedCardData = stripLocalCardTransportMeta(cardData);
       const inferredTemplate = resolveArenaDataCardTemplate(cleanedCardData, declaredCardType);
       if (inferredTemplate !== 'scenario' && inferredTemplate !== 'general-scenario') {
         setError('❌ 请选择“情景”类型的数据卡。');
@@ -660,7 +660,7 @@ export const useBattleActions = () => {
       loadingCards.add(materialId);
 
       try {
-        const cleanedCardData = stripBattleSelectionTransportMeta(cardData);
+        const cleanedCardData = stripLocalCardTransportMeta(cardData);
         const isNative = await verifyOrigin(cleanedCardData).catch(() => false);
         const material = buildArenaMaterialState({
           payload: cardData,

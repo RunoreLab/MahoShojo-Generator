@@ -9,11 +9,11 @@ import {
   IndexedDbCardRepository,
   resetLocalCardRepository,
 } from '@/lib/local-library/card-repository';
+import { saveLocalDataCard } from '@/lib/local-library/save-local-data-card';
 import {
-  deriveLocalDataCardId,
-  digestLocalCardPayload,
-  saveLocalDataCard,
-} from '@/lib/local-library/data-card-digest';
+  deriveLocalDataCardIdV1,
+  digestLocalCardPayloadV1,
+} from '@mahoshojo/local-library/digest';
 import {
   isLocalDataCardRow,
   mapLocalCardRecordToDetailsCard,
@@ -44,24 +44,24 @@ beforeEach(async () => {
   });
 });
 
-describe('digestLocalCardPayload', () => {
+describe('本地库消费共享摘要实现', () => {
   it('is stable across key order so an unchanged card never looks new', async () => {
-    const a = await digestLocalCardPayload({ name: '焰', age: 15, nested: { x: 1, y: 2 } });
-    const b = await digestLocalCardPayload({ nested: { y: 2, x: 1 }, age: 15, name: '焰' });
+    const a = await digestLocalCardPayloadV1({ name: '焰', age: 15, nested: { x: 1, y: 2 } });
+    const b = await digestLocalCardPayloadV1({ nested: { y: 2, x: 1 }, age: 15, name: '焰' });
     expect(a).toBe(b);
   });
 
   it('ignores transport metadata and signatures that change on every save', async () => {
     const base = character('焰');
-    const withMeta = await digestLocalCardPayload({ ...base, _cardId: 'uuid-1', _usageCount: 7 });
-    const withSignature = await digestLocalCardPayload({ ...base, signature: 'sig-a' });
-    const otherSignature = await digestLocalCardPayload({ ...base, signature: 'sig-b' });
-    expect(withMeta).toBe(await digestLocalCardPayload(base));
+    const withMeta = await digestLocalCardPayloadV1({ ...base, _cardId: 'uuid-1', _usageCount: 7 });
+    const withSignature = await digestLocalCardPayloadV1({ ...base, signature: 'sig-a' });
+    const otherSignature = await digestLocalCardPayloadV1({ ...base, signature: 'sig-b' });
+    expect(withMeta).toBe(await digestLocalCardPayloadV1(base));
     expect(withSignature).toBe(otherSignature);
   });
 
   it('changes when real content changes', async () => {
-    expect(await digestLocalCardPayload(character('焰'))).not.toBe(await digestLocalCardPayload(character('雪')));
+    expect(await digestLocalCardPayloadV1(character('焰'))).not.toBe(await digestLocalCardPayloadV1(character('雪')));
   });
 });
 
@@ -117,11 +117,11 @@ describe('saveLocalDataCard', () => {
   });
 
   it('derives a stable id from the content digest', async () => {
-    const digest = await digestLocalCardPayload(character('焰'));
-    const other = await digestLocalCardPayload(character('雪'));
-    expect(deriveLocalDataCardId(digest)).toMatch(/^lc_[0-9a-f]{32}$/u);
-    expect(deriveLocalDataCardId(digest)).toBe(deriveLocalDataCardId(digest));
-    expect(deriveLocalDataCardId(digest)).not.toBe(deriveLocalDataCardId(other));
+    const digest = await digestLocalCardPayloadV1(character('焰'));
+    const other = await digestLocalCardPayloadV1(character('雪'));
+    expect(deriveLocalDataCardIdV1(digest)).toMatch(/^lc_[0-9a-f]{32}$/u);
+    expect(deriveLocalDataCardIdV1(digest)).toBe(deriveLocalDataCardIdV1(digest));
+    expect(deriveLocalDataCardIdV1(digest)).not.toBe(deriveLocalDataCardIdV1(other));
   });
 });
 

@@ -4,7 +4,7 @@ import { useCallback, useState } from 'react';
 import type { OnlineDataCardType } from '@mahoshojo/contracts/data-cards';
 
 import { getLocalCardRepository } from './card-repository';
-import { saveLocalDataCard } from './data-card-digest';
+import { saveLocalDataCard } from './save-local-data-card';
 
 export interface LocalLibraryAutoSaveInput {
   cardType: OnlineDataCardType;

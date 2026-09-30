@@ -17,11 +17,11 @@ import {
   getCombatantDisplayName,
   inferCombatantType,
 } from '@/components/arena/utils/characterValidator';
+import { stripLocalCardTransportMeta } from '@mahoshojo/local-library/digest';
 import {
   isPublicVisibility,
   mapDataCardRuntimeSourceInfo,
   mapPublicDataCardRowToBattleSelectionPayload,
-  stripBattleSelectionTransportMeta,
 } from '@/lib/data-card-read-mappers';
 import {
   buildArenaMaterialState,
@@ -146,7 +146,7 @@ const loadLatestPublicPayload = async (
   if (!kindMatches || !isPublicVisibility(payload._isPublic)) {
     throw new Error(`在线数据卡 ${ref.id} 的类型或公开状态不满足当前房间配置`);
   }
-  const cleaned = stripBattleSelectionTransportMeta(payload);
+  const cleaned = stripLocalCardTransportMeta(payload);
   if (!isRecord(cleaned)) throw new Error(`在线数据卡 ${ref.id} 正文无效`);
   return payload;
 };
@@ -180,7 +180,7 @@ const publicCombatant = async (
   verifyOrigin: ArenaRoomOriginVerifier,
 ): Promise<CombatantData> => {
   const payload = await loadLatestPublicPayload(entry.ref, loadPublicCard);
-  const cleaned = stripBattleSelectionTransportMeta(payload);
+  const cleaned = stripLocalCardTransportMeta(payload);
   const source = mapDataCardRuntimeSourceInfo(payload);
   const displayName = getCombatantDisplayName(cleaned);
   return {
@@ -227,7 +227,7 @@ const publicScenario = async (
   verifyOrigin: ArenaRoomOriginVerifier,
 ): Promise<ScenarioState> => {
   const payload = await loadLatestPublicPayload(entry.ref, loadPublicCard);
-  const cleaned = stripBattleSelectionTransportMeta(payload);
+  const cleaned = stripLocalCardTransportMeta(payload);
   const source = mapDataCardRuntimeSourceInfo(payload);
   return {
     content: cloneJson(cleaned),
@@ -266,7 +266,7 @@ const publicMaterial = async (
   verifyOrigin: ArenaRoomOriginVerifier,
 ): Promise<ArenaMaterialState> => {
   const payload = await loadLatestPublicPayload(entry.ref, loadPublicCard);
-  const cleaned = stripBattleSelectionTransportMeta(payload);
+  const cleaned = stripLocalCardTransportMeta(payload);
   const source = mapDataCardRuntimeSourceInfo(payload);
   return buildArenaMaterialState({
     payload,

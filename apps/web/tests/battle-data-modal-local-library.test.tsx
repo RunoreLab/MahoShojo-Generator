@@ -7,7 +7,7 @@ import { favoritesApi, authStorage } from '@/lib/auth';
 import BattleDataModal from '@/components/BattleDataModal';
 import { IndexedDbCardRepository, resetLocalCardRepository } from '@/lib/local-library/card-repository';
 import { LOCAL_LIBRARY_DB_NAME, resetLocalLibraryDbConnection } from '@/lib/local-library/db';
-import { saveLocalDataCard } from '@/lib/local-library/data-card-digest';
+import { saveLocalDataCard } from '@/lib/local-library/save-local-data-card';
 import { mapDataCardRuntimeSourceInfo } from '@/lib/data-card-read-mappers';
 
 vi.mock('@/lib/useAuth', () => ({ useAuth: () => ({ isAuthenticated: false, user: null, userBadges: [] }) }));

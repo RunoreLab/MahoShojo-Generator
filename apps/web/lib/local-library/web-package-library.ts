@@ -231,6 +231,9 @@ export const hydrateExactWebPackageFromLibrary = async (ref: {
   try {
     const record = await getLocalWebPackageRepository().findByDigest(ref.digest);
     if (!record) return false;
+    // 显式拒绝 tombstone。软删保留 ZIP 字节，因此"字节还在"不再等价于"包可用"；
+    // 可见性必须由记录的删除状态决定，否则用户删掉的包会被历史战报静默重新 staging。
+    if (record.deletedAt !== undefined) return false;
     if (record.ref.id !== ref.id || record.ref.version !== ref.version) return false;
     const pkg = await readWebPackageFromLibrary(record);
     if (!pkg) return false;

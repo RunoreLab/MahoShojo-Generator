@@ -13,6 +13,8 @@ import { getLocalWebPackageRepository, resetLocalWebPackageRepository } from '@/
 import {
   LOCAL_LIBRARY_DB_NAME,
   LOCAL_LIBRARY_SCHEMA_VERSION,
+  LOCAL_LIBRARY_STORE_NAMES,
+  deleteLocalLibraryRecord,
   getLocalLibraryRecord,
   resetLocalLibraryDbConnection,
   runLocalLibraryTransaction,
@@ -77,12 +79,38 @@ it('重新导入同一份 ZIP 视为同一行并整卡替换', async () => {
   expect((await getLocalWebPackageRepository().list({ limit: 10 })).items).toHaveLength(1);
 });
 
-it('记录仍在但字节缺失时读回为 null，而不是给出半个包', async () => {
+it('软删保留字节，purge 才让记录与字节一起消失', async () => {
   const pkg = await makePackage('local.missing-bytes');
   const { record } = await saveWebPackageToLibrary({ pkg, archive: await packWebPackageZip(pkg) });
   expect(await readWebPackageFromLibrary(record)).not.toBeNull();
 
   await getLocalWebPackageRepository().delete(record.id);
+  // 软删是回收站语义：字节必须留着，否则 restore 之后只剩一条读不出包的损坏行。
+  expect(await readWebPackageFromLibrary(record)).not.toBeNull();
+
+  await getLocalWebPackageRepository().purge(record.id);
+  expect(await getLocalWebPackageRepository().get(record.id)).toBeNull();
+  expect(await readWebPackageFromLibrary(record)).toBeNull();
+});
+
+it('记录仍在但字节被外部破坏时读回为 null，而不是给出半个包', async () => {
+  const pkg = await makePackage('local.corrupt-archive');
+  const { record } = await saveWebPackageToLibrary({ pkg, archive: await packWebPackageZip(pkg) });
+  expect(await readWebPackageFromLibrary(record)).not.toBeNull();
+
+  // 正常操作已不会造出"记录在、字节缺"：软删保留字节，purge 两者一起删。因此这里直接
+  // 删归档行来模拟 IndexedDB 被外部破坏，保留读回路径的韧性覆盖。
+  await runLocalLibraryTransaction(
+    LOCAL_LIBRARY_STORE_NAMES.webPackageArchives,
+    'readwrite',
+    (transaction) =>
+      deleteLocalLibraryRecord(
+        transaction.objectStore(LOCAL_LIBRARY_STORE_NAMES.webPackageArchives),
+        record.ref.digest,
+      ),
+  );
+
+  expect(await getLocalWebPackageRepository().get(record.id)).not.toBeNull();
   expect(await readWebPackageFromLibrary(record)).toBeNull();
 });
 
@@ -108,6 +136,9 @@ it('历史回放只恢复 exact revision，删除后不再可用', async () => {
   expect(await hydrateExactWebPackageFromLibrary({ ...pkg.ref, id: 'local.impersonated' })).toBe(false);
 
   await getLocalWebPackageRepository().delete(record.id);
+  // 显式断言字节仍在：删除后不可用的原因**只是** tombstone，而不是字节碰巧没了。
+  // 少了这条断言，后来者删掉 hydrate 里的 tombstone 判断也未必会红。
+  expect(await getLocalWebPackageRepository().readArchive(pkg.ref.digest)).not.toBeNull();
   expect(await hydrateExactWebPackageFromLibrary(pkg.ref)).toBe(false);
 });
 
