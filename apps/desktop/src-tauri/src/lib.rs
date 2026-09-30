@@ -218,6 +218,9 @@ struct ListLocalCardsRequest {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct LocalCardCursorDto {
+    /// keyset 排序键（UTC epoch 毫秒），由 native 从 document 的 `updatedAt` 自行解析。
+    #[serde(default)]
+    updated_at_sort: i64,
     updated_at: String,
     id: String,
 }
@@ -262,6 +265,7 @@ fn list_local_cards(
         card_types: request.card_types,
         limit: request.limit,
         cursor: request.cursor.map(|cursor| local_card::LocalCardCursor {
+            updated_at_sort: cursor.updated_at_sort,
             updated_at: cursor.updated_at,
             id: cursor.id,
         }),
@@ -270,28 +274,33 @@ fn list_local_cards(
     Ok(ListLocalCardsResponse {
         documents: page.documents,
         next_cursor: page.next_cursor.map(|cursor| LocalCardCursorDto {
+            updated_at_sort: cursor.updated_at_sort,
             updated_at: cursor.updated_at,
             id: cursor.id,
         }),
     })
 }
 
-/// 软删一条本地卡：只写 tombstone，保留文档，使 `restore_local_card` 能真正恢复。
+/// 软删一条本地卡。
+///
+/// 与保存同形：调用方交出**组装完成的完整记录**（含 `deletedAt`），native 只校验这次状态
+/// 转移并原子写入整行。刻意不接受 `(id, deletedAt)` 只改索引列——那样 document 里的
+/// `deletedAt` 仍是旧值，而 `get()` 返回的正是 document，调用方会拿到一条"看起来没被
+/// 删除"的记录。
 #[tauri::command]
 fn delete_local_card(
     cards: State<'_, local_card::LocalCardStore>,
-    id: String,
-    deleted_at: String,
+    request: SaveLocalCardRequest,
 ) -> Result<(), store::StoreError> {
-    cards.soft_delete(&id, &deleted_at)
+    cards.delete(&request.document, &request.index)
 }
 
 #[tauri::command]
 fn restore_local_card(
     cards: State<'_, local_card::LocalCardStore>,
-    id: String,
+    request: SaveLocalCardRequest,
 ) -> Result<(), store::StoreError> {
-    cards.restore(&id)
+    cards.restore(&request.document, &request.index)
 }
 
 /// 彻底删除一条本地卡。幂等。

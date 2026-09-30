@@ -105,12 +105,26 @@ export type DesktopLocalCardIndex = z.infer<typeof DesktopLocalCardIndexSchema>;
  */
 export const DesktopLocalCardCursorSchema = z
   .object({
+    /**
+     * keyset 排序键（UTC epoch 毫秒），由 native 从 document 的 `updatedAt` 自行解析。
+     *
+     * 带上它是因为契约允许任意 UTC offset：两个 offset 不同的时间戳文本可能表示同一时刻，
+     * 只有规范化后的排序键能与存储层的比较口径完全一致。缺省为 0 以兼容首屏游标。
+     */
+    updatedAtSort: z.number().int().default(0),
     updatedAt: DesktopLocalCardTimestampSchema,
     id: DesktopLocalCardIdSchema,
   })
   .strict();
 export type DesktopLocalCardCursor = z.infer<typeof DesktopLocalCardCursorSchema>;
 
+/**
+ * 保存、软删与恢复共用同一种请求形状。
+ *
+ * 三者交出的都是**组装完成的完整记录**。刻意不提供 `(id, deletedAt)` 形态：只改索引列而
+ * 不动 document，会让 `get()` 交回一条与索引列不一致的记录——`get()` 返回的正是 document，
+ * 调用方因此会以为记录仍活动，而 `list` 却已把它隐藏。
+ */
 export const DesktopSaveLocalCardRequestSchema = z
   .object({
     /** 已通过 `LocalCardRecordV1Schema` 校验的完整记录，序列化为 JSON 文本。 */
@@ -119,6 +133,9 @@ export const DesktopSaveLocalCardRequestSchema = z
   })
   .strict();
 export type DesktopSaveLocalCardRequest = z.infer<typeof DesktopSaveLocalCardRequestSchema>;
+
+export const DesktopLocalCardWriteIntentSchema = z.enum(['save', 'delete', 'restore']);
+export type DesktopLocalCardWriteIntent = z.infer<typeof DesktopLocalCardWriteIntentSchema>;
 
 export const DesktopListLocalCardsRequestSchema = z
   .object({
@@ -150,6 +167,8 @@ export const DesktopStoreErrorCodeSchema = z.enum([
   'document-too-large',
   'index-mismatch',
   'record-tombstoned',
+  'transition-mismatch',
+  'record-missing',
   'non-monotonic-timestamp',
   'invalid-query',
   'store-failure',

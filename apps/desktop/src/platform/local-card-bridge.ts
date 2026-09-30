@@ -1,6 +1,7 @@
 import {
   DesktopListLocalCardsRequestSchema,
   DesktopListLocalCardsResponseSchema,
+  DesktopLocalCardCursorSchema,
   DesktopSaveLocalCardRequestSchema,
   type DesktopListLocalCardsRequest,
   type DesktopLocalCardCursor,
@@ -14,7 +15,11 @@ import {
   type LocalCardQuery,
   type CardRepository,
 } from '@mahoshojo/local-library/repository';
-import { LocalCardRecordV1Schema, type LocalCardRecordV1 } from '@mahoshojo/local-library/record';
+import {
+  LocalCardRecordV1Schema,
+  nextLocalTimestamp,
+  type LocalCardRecordV1,
+} from '@mahoshojo/local-library/record';
 
 /**
  * 本地数据卡的渲染层桥接，以及基于 IPC 的 `CardRepository` 实现。
@@ -41,15 +46,43 @@ export const PURGE_LOCAL_CARD_COMMAND = 'purge_local_card' as const;
 
 export class DesktopLocalCardError extends Error {
   readonly command: string;
-  readonly code: DesktopStoreErrorCode | 'invalid-card' | 'bridge-failure';
+  readonly code: DesktopLocalCardErrorCode;
 
-  constructor(command: string, code: DesktopLocalCardError['code'], message: string) {
+  constructor(command: string, code: DesktopLocalCardErrorCode, message: string) {
     super(message);
     this.name = 'DesktopLocalCardError';
     this.command = command;
     this.code = code;
   }
 }
+
+/**
+ * 渲染层可能观察到的全部失败类别。
+ *
+ * `invalid-card` 与 `bridge-failure` 是渲染层自己的分类（native 不会返回它们）；
+ * 其余与 native 的错误码一一对应。native 的 `message` 是固定文案，可直接透传；
+ * 本地库相关的 `message` **MUST NOT** 回显用户数据或 SQLite / 文件系统的原始错误串。
+ */
+export type DesktopLocalCardErrorCode =
+  | DesktopStoreErrorCode
+  | 'invalid-card'
+  | 'bridge-failure';
+
+const NATIVE_ERROR_CODES: readonly DesktopStoreErrorCode[] = [
+  'store-unavailable',
+  'invalid-document',
+  'document-too-large',
+  'index-mismatch',
+  'record-tombstoned',
+  'transition-mismatch',
+  'record-missing',
+  'non-monotonic-timestamp',
+  'invalid-query',
+  'store-failure',
+];
+
+const isStoreErrorCode = (value: string): value is DesktopStoreErrorCode =>
+  (NATIVE_ERROR_CODES as readonly string[]).includes(value);
 
 export interface InvokeFn {
   (command: string, args?: Record<string, unknown>): Promise<unknown>;
@@ -64,33 +97,35 @@ const toBridgeError = (command: string, cause: unknown): DesktopLocalCardError =
     && typeof (cause as { message?: unknown }).message === 'string'
   ) {
     const { code, message } = cause as { code: string; message: string };
-    return newDesktopLocalCardError(command, code, message);
+    if (isStoreErrorCode(code)) {
+      return new DesktopLocalCardError(command, code, message);
+    }
   }
+  // 未知形状不采信：既不透传可能含 SQL 片段的 message，也不新增一个错误类别，
+  // 否则上层会拿一个它没准备处理的 code 做重试决策。
   return new DesktopLocalCardError(command, 'bridge-failure', '本地库调用失败');
 };
 
-const newDesktopLocalCardError = (
+/**
+ * 解析 native 交回的一条 document。
+ *
+ * `get` 与 `list` **MUST** 共用这一个入口：分开写就会出现"list 已经把坏行进 unreadable、
+ * get 却抛原始 SyntaxError"的不一致——那正是本函数被提取出来要消除的缺陷。
+ */
+const parseStoredDocument = (
   command: string,
-  code: string,
-  message: string,
-): DesktopLocalCardError => {
-  const known: readonly string[] = [
-    'store-unavailable',
-    'invalid-document',
-    'document-too-large',
-    'index-mismatch',
-    'record-tombstoned',
-    'non-monotonic-timestamp',
-    'invalid-query',
-    'store-failure',
-  ];
-  // native 的 message 是固定文案，可以透传；code 不在契约枚举内则不采信，避免把
-  // 未知形状当作已知失败类别交给上层做重试决策。
-  return new DesktopLocalCardError(
-    command,
-    (known.includes(code) ? code : 'bridge-failure') as DesktopLocalCardError['code'],
-    known.includes(code) ? message : '本地库调用失败',
-  );
+  document: string,
+): { record: LocalCardRecordV1 } | { unreadable: boolean; id: string } => {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(document);
+  } catch {
+    return { unreadable: true, id: '(未知)' };
+  }
+  const parsed = LocalCardRecordV1Schema.safeParse(raw);
+  if (parsed.success) return { record: parsed.data };
+  const id = (raw as { id?: unknown } | null)?.id;
+  return { unreadable: true, id: typeof id === 'string' ? id : '(未知)' };
 };
 
 /**
@@ -117,19 +152,33 @@ const toDocumentText = (record: LocalCardRecordV1): string => JSON.stringify(rec
  * keyset 游标在渲染层保持不透明。
  *
  * 契约层不透明是有意的：Web 的 IndexedDB adapter 可以用 offset 游标，Desktop 用 keyset，
- * 两者都不必迁就对方。这里因此**原样透传** native 返回的游标，不解析它的内部结构。
+ * 两者都不必迁就对方。这里因此**原样透传** native 返回的游标，不解释它的内部结构。
+ *
+ * 但"不透明"不等于"不校验"：无法识别的游标必须以稳定错误失败，而不是静默回落成第一页
+ * ——后者会让同一批数据被反复读取，比报错难查得多。
  */
-const toRequestCursor = (cursor: string | undefined): DesktopLocalCardCursor | undefined => {
+const toRequestCursor = (
+  command: string,
+  cursor: string | undefined,
+): DesktopLocalCardCursor | undefined => {
   if (cursor === undefined) return undefined;
-  const parsed = DesktopListLocalCardsRequestSchema.shape.cursor.safeParse(JSON.parse(cursor));
+  const parsed = DesktopLocalCardCursorSchema.safeParse(parseJsonOrThrow(command, cursor));
   if (!parsed.success) {
     throw new DesktopLocalCardError(
-      LIST_LOCAL_CARDS_COMMAND,
+      command,
       'invalid-card',
       '本地库返回了无法识别的分页游标',
     );
   }
   return parsed.data;
+};
+
+const parseJsonOrThrow = (command: string, text: string): unknown => {
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new DesktopLocalCardError(command, 'invalid-card', '本地库返回了无法解析的数据');
+  }
 };
 
 const toCursorText = (cursor: DesktopLocalCardCursor): string => JSON.stringify(cursor);
@@ -144,7 +193,7 @@ export const buildLocalCardListRequest = (
     limit: parsedQuery.limit,
     ...(parsedQuery.cursor === undefined
       ? {}
-      : { cursor: toRequestCursor(parsedQuery.cursor) }),
+      : { cursor: toRequestCursor(LIST_LOCAL_CARDS_COMMAND, parsedQuery.cursor) }),
   });
 };
 
@@ -166,15 +215,16 @@ export class IpcLocalCardRepository implements CardRepository {
     }
     if (raw === null || raw === undefined) return null;
 
-    const parsed = LocalCardRecordV1Schema.safeParse(JSON.parse(raw as string));
-    if (!parsed.success) {
+    const parsed = parseStoredDocument(GET_LOCAL_CARD_COMMAND, raw as string);
+    if ('unreadable' in parsed) {
+      // 单行损坏必须报错而不是当作"不存在"：后者会让一次软删看起来成功，却什么也没删掉。
       throw new DesktopLocalCardError(
         GET_LOCAL_CARD_COMMAND,
         'invalid-card',
-        '本地库中存在无法解析的数据卡记录。',
+        `本地库中存在无法解析的数据卡记录（${parsed.id}）。`,
       );
     }
-    return parsed.data;
+    return parsed.record;
   }
 
   async list(query: LocalCardQuery): Promise<LocalCardPage & { unreadable: string[] }> {
@@ -187,26 +237,22 @@ export class IpcLocalCardRepository implements CardRepository {
 
     const response = DesktopListLocalCardsResponseSchema.safeParse(raw);
     if (!response.success) {
-      throw new DesktopLocalCardError(LIST_LOCAL_CARDS_COMMAND, 'bridge-failure', '本地库返回了无法识别的分页结果');
+      throw new DesktopLocalCardError(
+        LIST_LOCAL_CARDS_COMMAND,
+        'bridge-failure',
+        '本地库返回了无法识别的分页结果',
+      );
     }
 
-    // 逐行解析：一条 schema 漂移的旧行不该让用户看到"本地库读取失败"的空列表。
-    // 解析失败分两种，都必须归入 unreadable 而不是抛出：document 不是合法 JSON，
-    // 以及 JSON 合法但不满足 LocalCardRecordV1Schema。把 JSON.parse 放在 try 之外会让
-    // 前者直接掀翻整页——那正是这条用例要防的情况。
+    // 与 get 共用同一个解析入口：一条坏行不该让整页变空，但也不该让 get 抛原始 SyntaxError。
     const unreadable: string[] = [];
     const items = response.data.documents.flatMap((document) => {
-      let raw: unknown;
-      try {
-        raw = JSON.parse(document);
-      } catch {
-        unreadable.push('(未知)');
+      const parsed = parseStoredDocument(LIST_LOCAL_CARDS_COMMAND, document);
+      if ('unreadable' in parsed) {
+        unreadable.push(parsed.id);
         return [];
       }
-      const parsed = LocalCardRecordV1Schema.safeParse(raw);
-      if (parsed.success) return [parsed.data];
-      unreadable.push(typeof (raw as { id?: unknown })?.id === 'string' ? String((raw as { id: string }).id) : '(未知)');
-      return [];
+      return [parsed.record];
     });
 
     return {
@@ -221,6 +267,53 @@ export class IpcLocalCardRepository implements CardRepository {
   }
 
   async put(record: LocalCardRecordV1): Promise<void> {
+    await this.write(SAVE_LOCAL_CARD_COMMAND, record);
+  }
+
+  /**
+   * 幂等软删。
+   *
+   * 交出的是**组装完成的整条记录**（含 `deletedAt`），而不是 `(id, deletedAt)`：只让 native
+   * 改索引列会让 document 与索引列分叉，而 `get()` 返回的正是 document。
+   */
+  async delete(id: string): Promise<void> {
+    const existing = await this.get(id);
+    // 契约：缺失 id 与已删除记录都是 no-op。
+    if (existing === null || existing.deletedAt !== undefined) return;
+
+    const deletedAt = nextLocalTimestamp(existing.updatedAt);
+    await this.write(DELETE_LOCAL_CARD_COMMAND, {
+      ...existing,
+      updatedAt: deletedAt,
+      deletedAt,
+    });
+  }
+
+  /** 幂等恢复。交出的是移除 `deletedAt` 后的完整记录。 */
+  async restore(id: string): Promise<void> {
+    const existing = await this.get(id);
+    // 契约：缺失 id 与活动记录都是 no-op。
+    if (existing === null || existing.deletedAt === undefined) return;
+
+    const restored = {
+      ...existing,
+      updatedAt: nextLocalTimestamp(existing.updatedAt),
+    };
+    delete restored.deletedAt;
+    await this.write(RESTORE_LOCAL_CARD_COMMAND, restored);
+  }
+
+  /** 彻底删除。native 侧幂等，因此这里不需要先读。 */
+  async purge(id: string): Promise<void> {
+    try {
+      await this.invoke(PURGE_LOCAL_CARD_COMMAND, { id });
+    } catch (cause) {
+      throw toBridgeError(PURGE_LOCAL_CARD_COMMAND, cause);
+    }
+  }
+
+  /** 校验 → 投影索引列 → 序列化 document → 交给 native 原子写入整行。 */
+  private async write(command: string, record: LocalCardRecordV1): Promise<void> {
     // 先校验再投影：投影必须来自已通过契约的记录，否则调用方传入的多余字段能影响选择器。
     const validated = LocalCardRecordV1Schema.parse(record);
     const request = DesktopSaveLocalCardRequestSchema.parse({
@@ -228,27 +321,9 @@ export class IpcLocalCardRepository implements CardRepository {
       index: toLocalCardIndex(validated),
     });
     try {
-      await this.invoke(SAVE_LOCAL_CARD_COMMAND, { request });
+      await this.invoke(command, { request });
     } catch (cause) {
-      throw toBridgeError(SAVE_LOCAL_CARD_COMMAND, cause);
-    }
-  }
-
-  async delete(id: string): Promise<void> {
-    // 时间戳由渲染层生成：native 不引入时间库，也就不会出现两端对"现在"的定义不一致。
-    // 软删**只**写 tombstone、保留 document，使 `restore` 能真正恢复可用状态。
-    try {
-      await this.invoke(DELETE_LOCAL_CARD_COMMAND, { id, deletedAt: new Date().toISOString() });
-    } catch (cause) {
-      throw toBridgeError(DELETE_LOCAL_CARD_COMMAND, cause);
-    }
-  }
-
-  async restore(id: string): Promise<void> {
-    try {
-      await this.invoke(RESTORE_LOCAL_CARD_COMMAND, { id });
-    } catch (cause) {
-      throw toBridgeError(RESTORE_LOCAL_CARD_COMMAND, cause);
+      throw toBridgeError(command, cause);
     }
   }
 }

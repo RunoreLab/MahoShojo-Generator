@@ -12,7 +12,6 @@ import {
   GET_LOCAL_CARD_COMMAND,
   LIST_LOCAL_CARDS_COMMAND,
   PURGE_LOCAL_CARD_COMMAND,
-  RESTORE_LOCAL_CARD_COMMAND,
   SAVE_LOCAL_CARD_COMMAND,
 } from '../src/platform/local-card-bridge';
 
@@ -34,6 +33,13 @@ const record = (overrides: Partial<LocalCardRecordV1> = {}): LocalCardRecordV1 =
   });
 
 const documentText = (value: LocalCardRecordV1): string => JSON.stringify(value);
+
+/** 读取 document 文本里的顶层字符串字段，用于断言交出的 document 真的带该字段。 */
+const documentField = (document: string, field: string): string | undefined => {
+  const raw = JSON.parse(document) as Record<string, unknown>;
+  const value = raw[field];
+  return typeof value === 'string' ? value : undefined;
+};
 
 describe('toLocalCardIndex', () => {
   it('只投影 native 做选择器必需的字段，不泄漏业务语义', () => {
@@ -142,7 +148,7 @@ describe('IpcLocalCardRepository', () => {
 
   it('list 原样透传 native 的不透明游标，可用于继续翻页', async () => {
     const good = record();
-    const cursor = { updatedAt: '2026-09-30T12:00:00.000Z', id: good.id };
+    const cursor = { updatedAtSort: 1788072000000, updatedAt: '2026-09-30T12:00:00.000Z', id: good.id };
     const seen: unknown[] = [];
     const repository = new IpcLocalCardRepository(async (_command, args) => {
       seen.push((args as { request: { cursor?: unknown } }).request.cursor);
@@ -158,20 +164,134 @@ describe('IpcLocalCardRepository', () => {
     expect(seen[1]).toEqual(cursor);
   });
 
-  it('delete 发送渲染层时间戳；restore 与 purge 是独立命令', async () => {
+  it('delete 交出带 deletedAt 的完整记录，而不是 (id, deletedAt)', async () => {
     const calls: { command: string; args?: Record<string, unknown> }[] = [];
+    let stored: string | null = null;
     const repository = new IpcLocalCardRepository(async (command, args) => {
       calls.push({ command, args });
+      if (command === GET_LOCAL_CARD_COMMAND) return stored;
+      const request = (args as { request: { document: string } }).request;
+      stored = request.document;
+      return { id: 'lc_0123456789abcdef0123456789abcdef' };
+    });
+
+    stored = documentText(record());
+    await repository.delete('lc_0123456789abcdef0123456789abcdef');
+
+    expect(calls.map((call) => call.command)).toEqual([GET_LOCAL_CARD_COMMAND, DELETE_LOCAL_CARD_COMMAND]);
+    const request = calls[1]?.args?.request as { document: string; index: { deletedAt?: string } };
+    // document 本身必须带 tombstone：get 返回的正是 document，只改索引列会让调用方
+    // 拿到一条"看起来仍未删除"的记录。
+    expect(documentField(request.document, 'deletedAt')).toEqual(expect.any(String));
+    expect(request.index.deletedAt).toEqual(expect.any(String));
+    // createdAt 不得被软删改写。
+    expect(documentField(request.document, 'createdAt')).toBe('2026-09-30T12:00:00.000Z');
+  });
+
+  it('delete 对缺失或已删除的记录是 no-op，不发出写调用', async () => {
+    const commands: string[] = [];
+    const build = (getResult: string | null) => {
+      commands.length = 0;
+      return new IpcLocalCardRepository(async (command) => {
+        commands.push(command);
+        return command === GET_LOCAL_CARD_COMMAND ? getResult : null;
+      });
+    };
+
+    await build(null).delete('lc_missing');
+    expect(commands).toEqual([GET_LOCAL_CARD_COMMAND]);
+
+    await build(documentText(record({ deletedAt: '2026-09-30T13:00:00.000Z' }))).delete('lc_deleted');
+    expect(commands).toEqual([GET_LOCAL_CARD_COMMAND]);
+  });
+
+  it('restore 交出移除 deletedAt 且推进 updatedAt 的完整记录', async () => {
+    const calls: { command: string; args?: Record<string, unknown> }[] = [];
+    let stored: string | null = documentText(
+      record({ updatedAt: '2026-09-30T12:00:00.000Z', deletedAt: '2026-09-30T13:00:00.000Z' }),
+    );
+    const repository = new IpcLocalCardRepository(async (command, args) => {
+      calls.push({ command, args });
+      if (command === GET_LOCAL_CARD_COMMAND) return stored;
+      stored = (args as { request: { document: string } }).request.document;
       return null;
     });
 
-    await repository.delete('lc_1');
-    await repository.restore('lc_1');
+    await repository.restore('lc_0123456789abcdef0123456789abcdef');
 
-    expect(calls[0]?.command).toBe(DELETE_LOCAL_CARD_COMMAND);
-    expect(calls[0]?.args?.deletedAt).toEqual(expect.any(String));
-    expect(calls[1]?.command).toBe(RESTORE_LOCAL_CARD_COMMAND);
-    expect(PURGE_LOCAL_CARD_COMMAND).toBe('purge_local_card');
+    const request = calls[1]?.args?.request as { document: string; index: { deletedAt?: string } };
+    expect(documentField(request.document, 'deletedAt')).toBeUndefined();
+    expect('deletedAt' in request.index).toBe(false);
+    expect(documentField(request.document, 'updatedAt')).toEqual(expect.any(String));
+  });
+
+  it('restore 对缺失或活动记录是 no-op', async () => {
+    const commands: string[] = [];
+    const build = (getResult: string | null) => {
+      commands.length = 0;
+      return new IpcLocalCardRepository(async (command) => {
+        commands.push(command);
+        return command === GET_LOCAL_CARD_COMMAND ? getResult : null;
+      });
+    };
+
+    await build(null).restore('lc_missing');
+    expect(commands).toEqual([GET_LOCAL_CARD_COMMAND]);
+
+    await build(documentText(record())).restore('lc_active');
+    expect(commands).toEqual([GET_LOCAL_CARD_COMMAND]);
+  });
+
+  it('purge 直接交出 id：native 侧幂等，无需先读', async () => {
+    const commands: string[] = [];
+    const repository = new IpcLocalCardRepository(async (command) => {
+      commands.push(command);
+      return null;
+    });
+
+    await repository.purge('lc_1');
+    expect(commands).toEqual([PURGE_LOCAL_CARD_COMMAND]);
+  });
+
+  it('get 与 list 共用同一个解析入口：document 不是 JSON 时都归一为 invalid-card', async () => {
+    const broken = new IpcLocalCardRepository(async (command) =>
+      command === GET_LOCAL_CARD_COMMAND ? 'not json at all' : { documents: ['not json at all'] },
+    );
+
+    // get：抛既定错误类别，而不是原始 SyntaxError
+    await expect(broken.get('lc_x')).rejects.toThrow(DesktopLocalCardError);
+    await expect(broken.get('lc_x')).rejects.toMatchObject({ code: 'invalid-card' });
+
+    // list：同一条坏行进 unreadable，而不是掀翻整页
+    const page = await broken.list({ limit: 10 });
+    expect(page.items).toEqual([]);
+    expect(page.unreadable).toEqual(['(未知)']);
+  });
+
+  it('无法识别的游标以 invalid-card 失败，而不是原始 SyntaxError 或静默回落第一页', () => {
+    expect(() => buildLocalCardListRequest({ limit: 10, cursor: 'not-json' })).toThrow(
+      DesktopLocalCardError,
+    );
+    expect(() => buildLocalCardListRequest({ limit: 10, cursor: 'not-json' })).toThrow(
+      /本地库返回了无法解析的数据/,
+    );
+    expect(() => buildLocalCardListRequest({ limit: 10, cursor: '{"nope":1}' })).toThrow(
+      DesktopLocalCardError,
+    );
+  });
+
+  it('cursor 的排序键被透传，不被渲染层重算', async () => {
+    const good = record();
+    const cursor = { updatedAtSort: 1788072000000, updatedAt: '2026-09-30T12:00:00.000Z', id: good.id };
+    const seen: unknown[] = [];
+    const repository = new IpcLocalCardRepository(async (_command, args) => {
+      seen.push((args as { request: { cursor?: unknown } }).request.cursor);
+      return { documents: [documentText(good)], nextCursor: cursor };
+    });
+
+    const first = await repository.list({ limit: 10 });
+    await repository.list({ limit: 10, cursor: first.nextCursor });
+    expect(seen[1]).toEqual(cursor);
   });
 
   it('native 报出的已知 code 被保留，未知 code 归一为 bridge-failure', async () => {

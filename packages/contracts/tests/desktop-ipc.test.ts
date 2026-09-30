@@ -98,6 +98,7 @@ describe('DesktopSecretStoreError', () => {
 });
 
 interface LocalCardFixture {
+  timestampCases: { name: string; why: string; id: string; updatedAt: string }[];
   limits: { maxDocumentBytes: number; maxPageSize: number };
   errorCodes: string[];
   cardTypes: string[];
@@ -167,5 +168,31 @@ describe('Desktop 本地卡 IPC 契约', () => {
     });
     expect(request.document).toBe(surrogate?.document);
     expect(request.document).toContain('\\ud800');
+  });
+
+  it('带 UTC offset 的时间戳是契约允许的输入，而不是被拒或被改写', () => {
+    // 契约允许任意 offset，native 必须按"时刻"而不是"文本"排序。把这里改成拒绝等于收窄
+    // 可表示域——那需要走显式新版本。
+    const fixtureWithOffsets = readLocalCardFixture();
+    expect(fixtureWithOffsets.timestampCases.length).toBeGreaterThanOrEqual(3);
+
+    for (const testCase of fixtureWithOffsets.timestampCases) {
+      const parsed = DesktopLocalCardIndexSchema.parse({
+        id: testCase.id,
+        cardType: 'character',
+        updatedAt: testCase.updatedAt,
+        contentDigest: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      });
+      // 逐字节保留：native 侧自行解析出排序键，本包不改写表示形式。
+      expect(parsed.updatedAt).toBe(testCase.updatedAt);
+    }
+  });
+
+  it('游标携带排序键，使它与存储层的比较口径一致', () => {
+    expect(DesktopLocalCardCursorSchema.parse(fixture.cursor)).toEqual(fixture.cursor);
+    // 缺省排序键必须被接受：首屏游标不带它。
+    expect(
+      DesktopLocalCardCursorSchema.parse({ updatedAt: fixture.cursor.updatedAt, id: fixture.cursor.id }),
+    ).toMatchObject({ updatedAtSort: 0 });
   });
 });

@@ -1,3 +1,4 @@
+import { nextLocalTimestamp } from '@mahoshojo/local-library/record';
 import { isBinaryPayload } from '@mahoshojo/local-library/web-package-record';
 
 /**
@@ -188,13 +189,13 @@ export const deleteLocalLibraryRecord = (store: IDBObjectStore, key: IDBValidKey
 /**
  * 记录契约要求 `createdAt <= updatedAt <= deletedAt`。系统时钟回拨（用户改时间、
  * NTP 校正）会让 `new Date()` 落在 createdAt 之前，于是软删会写出一条自身非法的行。
- * 这里把写入时间抬到既有 updatedAt 之上：tombstone 仍然是单调的，也不会撒谎。
+ *
+ * 实现委托给 `@mahoshojo/local-library` 的 `nextLocalTimestamp`：这条规则同时约束
+ * IndexedDB adapter 与 SQLite adapter，两份实现必然漂移，而漂移的后果是"同一张卡在
+ * Web 与 Desktop 上顺序不同"。
  */
-export const monotonicNowIso = (previousUpdatedAt: string | undefined): string => {
-  const now = new Date().toISOString();
-  if (previousUpdatedAt === undefined) return now;
-  return Date.parse(now) < Date.parse(previousUpdatedAt) ? previousUpdatedAt : now;
-};
+export const monotonicNowIso = (previousUpdatedAt: string | undefined): string =>
+  nextLocalTimestamp(previousUpdatedAt);
 
 /**
  * 契约的 `isBinaryPayload` 与这里的读取必须用同一条判定。

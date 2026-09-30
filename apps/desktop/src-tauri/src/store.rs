@@ -11,8 +11,6 @@ use std::sync::Mutex;
 
 use rusqlite::{Connection, OpenFlags};
 
-use crate::local_card::MIGRATION_2;
-
 /// 当前 schema 版本。SQLite 的 `user_version` 与 migration journal 必须与它一致。
 ///
 /// D1 引入 `provider_profile`（版本 1）；D2.0 在**同一个库**上增加本地卡
@@ -35,6 +33,10 @@ pub enum StoreError {
     IndexMismatch,
     /// 该记录已带 tombstone；必须先 `restore` 才能覆盖写入。
     Tombstoned,
+    /// 请求的状态转移与既有状态不符（例如要求"删除"一条带 tombstone 的记录）。
+    TransitionMismatch,
+    /// 转移目标不存在。删除/恢复缺失 id 视为幂等 no-op，因此这是调用方逻辑错误。
+    RecordMissing,
     /// `updated_at` 会回退，会破坏 keyset 分页的稳定顺序。
     NonMonotonicTimestamp,
     /// 查询参数越界（页大小不在 `1..=MAX_LOCAL_CARD_PAGE_SIZE`）。
@@ -50,6 +52,8 @@ impl StoreError {
             StoreError::DocumentTooLarge => "document-too-large",
             StoreError::IndexMismatch => "index-mismatch",
             StoreError::Tombstoned => "record-tombstoned",
+            StoreError::TransitionMismatch => "transition-mismatch",
+            StoreError::RecordMissing => "record-missing",
             StoreError::NonMonotonicTimestamp => "non-monotonic-timestamp",
             StoreError::InvalidQuery => "invalid-query",
             StoreError::Failure => "store-failure",
@@ -63,6 +67,10 @@ impl StoreError {
             StoreError::DocumentTooLarge => "local store document exceeds its byte ceiling",
             StoreError::IndexMismatch => "local store index columns disagree with the document",
             StoreError::Tombstoned => "local store record is deleted; restore it before saving",
+            StoreError::TransitionMismatch => "local store refused the requested state transition",
+            StoreError::RecordMissing => {
+                "local store cannot transition a record that does not exist"
+            }
             StoreError::NonMonotonicTimestamp => "local store refuses a backwards timestamp",
             StoreError::InvalidQuery => "local store rejected the query",
             StoreError::Failure => "local store operation failed",
@@ -121,39 +129,97 @@ pub fn migrate(connection: &Connection) -> Result<(), StoreError> {
         return Err(StoreError::Unavailable);
     }
 
-    if current < 1 {
-        connection
-            .execute_batch(MIGRATION_1)
-            .map_err(|_| StoreError::Failure)?;
-        record_migration(connection, 1)?;
-        connection
-            .execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION}"))
-            .map_err(|_| StoreError::Failure)?;
-    }
+    let steps: &[MigrationStep] = &[
+        MigrationStep {
+            version: 1,
+            sql: MIGRATION_1,
+        },
+        MigrationStep {
+            version: 2,
+            sql: crate::local_card::MIGRATION_2,
+        },
+    ];
 
-    if current < 2 {
-        // 从版本 0 直开时上面已把 user_version 推到最新；这里只需补齐 D2.0 的表。
-        // 逐步记录 journal，使"哪些版本已应用"在 journal 与 user_version 上一致。
-        connection
-            .execute_batch(MIGRATION_2)
-            .map_err(|_| StoreError::Failure)?;
-        record_migration(connection, 2)?;
-        connection
-            .execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION}"))
-            .map_err(|_| StoreError::Failure)?;
-    }
+    apply_steps(connection, steps)
+}
 
+/// 顺序应用所有 `version > current` 的步骤，每步一个事务。
+///
+/// 拆出来是为了让测试能传入**故意失败**的步骤；生产路径只有 `migrate` 一个调用方。
+fn apply_steps(connection: &Connection, steps: &[MigrationStep]) -> Result<(), StoreError> {
+    let current = user_version(connection)?;
+    if current > SCHEMA_VERSION {
+        return Err(StoreError::Unavailable);
+    }
+    for step in steps.iter().filter(|step| step.version > current) {
+        apply_step(connection, step)?;
+    }
     Ok(())
 }
 
-fn record_migration(connection: &Connection, version: i64) -> Result<(), StoreError> {
+fn user_version(connection: &Connection) -> Result<i64, StoreError> {
     connection
-        .execute(
-            "INSERT OR IGNORE INTO schema_migration (version, applied_at) VALUES (?1, ?2)",
-            rusqlite::params![version, now_iso8601()],
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .map_err(|_| StoreError::Unavailable)
+}
+
+/// 表是否存在。仅测试使用：断言失败事务确实回滚了 DDL。
+#[cfg(test)]
+fn table_exists(connection: &Connection, name: &str) -> bool {
+    connection
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+            rusqlite::params![name],
+            |row| row.get::<_, i64>(0),
         )
+        .map(|count| count > 0)
+        .unwrap_or(false)
+}
+
+/// 一次迁移 = 一个显式事务。
+///
+/// 三件事**必须**在同一事务里：建表、写 journal、推进 `user_version`。分三次 autocommit
+/// 语句会在中间留下崩溃窗口——`user_version` 先到最新而后续 DDL 未落盘时，下次启动会认为
+/// 该版本已完成，从而永远跳过它，最终得到一个"版本号是 2 但 `local_card` 表不存在"的库。
+///
+/// `user_version` 写在事务内部因此会随回滚一起撤销：失败的迁移在磁盘上不留痕迹，下次
+/// 启动仍是"未应用"状态。
+fn apply_step(connection: &Connection, step: &MigrationStep) -> Result<(), StoreError> {
+    connection
+        .execute_batch("BEGIN IMMEDIATE")
         .map_err(|_| StoreError::Failure)?;
-    Ok(())
+
+    let outcome = (|| {
+        connection
+            .execute_batch(step.sql)
+            .map_err(|_| StoreError::Failure)?;
+        connection
+            .execute(
+                "INSERT OR IGNORE INTO schema_migration (version, applied_at) VALUES (?1, ?2)",
+                rusqlite::params![step.version, now_iso8601()],
+            )
+            .map_err(|_| StoreError::Failure)?;
+        connection
+            .execute_batch(&format!("PRAGMA user_version = {}", step.version))
+            .map_err(|_| StoreError::Failure)?;
+        Ok(())
+    })();
+
+    if let Err(error) = outcome {
+        let _ = connection.execute_batch("ROLLBACK");
+        return Err(error);
+    }
+    connection
+        .execute_batch("COMMIT")
+        .map_err(|_| StoreError::Failure)
+}
+
+/// 迁移步骤。抽出结构是为了让测试能注入一个**故意失败**的步骤，
+/// 否则"迁移是原子的"这条属性无法被验证。
+#[derive(Debug, Clone, Copy)]
+struct MigrationStep {
+    version: i64,
+    sql: &'static str,
 }
 
 fn now_iso8601() -> String {
@@ -337,7 +403,8 @@ impl LocalStore {
 #[cfg(test)]
 mod tests {
     use super::{
-        applied_migrations, migrate, LocalStore, LocalStorePaths, StoreError, MAX_DOCUMENT_BYTES,
+        applied_migrations, apply_steps, configure, migrate, table_exists, user_version,
+        LocalStore, LocalStorePaths, MigrationStep, StoreError, MAX_DOCUMENT_BYTES, MIGRATION_1,
         SCHEMA_VERSION,
     };
     use rusqlite::Connection;
@@ -414,6 +481,101 @@ mod tests {
             .execute_batch(&format!("PRAGMA user_version = {}", SCHEMA_VERSION + 1))
             .expect("set future version");
         assert_eq!(migrate(&connection), Err(StoreError::Unavailable));
+    }
+
+    /// R2：验证"迁移是原子的"，而不是只在顺利路径上验证。
+    ///
+    /// 注入一个必然失败的 v2，检查三件事同时成立：
+    ///
+    /// 1. `user_version` 停在 1（没有被提前推到最新）；
+    /// 2. journal 里没有 2；
+    /// 3. 失败的 DDL 没有留下痕迹（`local_card` 不存在）。
+    ///
+    /// 这正是旧实现会失败的场景：它把 `user_version = SCHEMA_VERSION` 写在 MIGRATION_1
+    /// 之后、MIGRATION_2 之前，于是"版本号是 2 但表不存在"的库会被永久跳过。
+    #[test]
+    fn a_failed_migration_step_leaves_no_partial_state_behind() {
+        let connection = Connection::open_in_memory().expect("open");
+        configure(&connection).expect("configure");
+
+        let failing = [
+            MigrationStep {
+                version: 1,
+                sql: MIGRATION_1,
+            },
+            MigrationStep {
+                version: 2,
+                sql: "CREATE TABLE local_card (id TEXT PRIMARY KEY NOT NULL); \
+                      INSERT INTO no_such_table (x) VALUES (1);",
+            },
+        ];
+
+        assert_eq!(apply_steps(&connection, &failing), Err(StoreError::Failure));
+
+        assert_eq!(
+            user_version(&connection).expect("read version"),
+            1,
+            "user_version 必须停在最后一个成功的版本，不能提前推到最新"
+        );
+        assert_eq!(
+            applied_migrations(&connection).expect("read journal"),
+            vec![1],
+            "失败的版本不得写进 journal"
+        );
+        assert!(
+            !table_exists(&connection, "local_card"),
+            "失败事务内的建表必须一并回滚，否则留下半套 schema"
+        );
+    }
+
+    #[test]
+    fn a_partially_migrated_database_completes_on_the_next_open() {
+        let root = std::env::temp_dir().join(format!(
+            "mahoshojo-desktop-partial-migration-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("create test root");
+        let database = root.join("library.sqlite");
+
+        // 第一次打开：v2 失败，磁盘上留下的是"只完成 v1"的状态。
+        {
+            let connection = Connection::open(&database).expect("open");
+            configure(&connection).expect("configure");
+            let failing = [
+                MigrationStep {
+                    version: 1,
+                    sql: MIGRATION_1,
+                },
+                MigrationStep {
+                    version: 2,
+                    sql: "CREATE TABLE local_card (id TEXT PRIMARY KEY NOT NULL); \
+                          INSERT INTO no_such_table (x) VALUES (1);",
+                },
+            ];
+            assert_eq!(apply_steps(&connection, &failing), Err(StoreError::Failure));
+        }
+
+        // 第二次打开：条件已修好，真实的 v2 必须被补上。
+        {
+            let store = LocalStore::open(&LocalStorePaths::under(&root))
+                .expect("second open must complete the migration");
+            assert_eq!(store.schema_version().expect("version"), SCHEMA_VERSION);
+            let versions = applied_migrations(&store.connection.lock().expect("lock"))
+                .expect("journal must be readable");
+            assert_eq!(versions, vec![1, 2]);
+        }
+
+        // 第三次打开：全部已完成，不重复执行。
+        {
+            let store = LocalStore::open(&LocalStorePaths::under(&root)).expect("third open");
+            assert_eq!(
+                applied_migrations(&store.connection.lock().expect("lock")).expect("journal"),
+                vec![1, 2]
+            );
+        }
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

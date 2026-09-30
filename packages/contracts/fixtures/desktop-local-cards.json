@@ -10,6 +10,8 @@
     "document-too-large",
     "index-mismatch",
     "record-tombstoned",
+    "transition-mismatch",
+    "record-missing",
     "non-monotonic-timestamp",
     "invalid-query",
     "store-failure"
@@ -29,10 +31,30 @@
     "contentDigest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
   },
   "cursor": {
+    "updatedAtSort": 1788072000000,
     "updatedAt": "2026-09-30T12:00:00.000Z",
     "id": "lc_0123456789abcdef0123456789abcdef"
   },
-  "cases": [
+  "timestampCases": [
+    {
+      "name": "文本更大但实际更早",
+      "why": "12:00+14:00 等于前一天 22:00Z。字符串比较会把它排到后面，keyset 因此漏读。",
+      "id": "lc_ts_text_later",
+      "updatedAt": "2026-09-30T12:00:00+14:00"
+    },
+    {
+      "name": "文本更小但实际更晚",
+      "why": "01:00Z 晚于前一天 22:00Z。字符串比较会把它排到后面，因此顺序被反转。",
+      "id": "lc_ts_text_smaller",
+      "updatedAt": "2026-09-30T01:00:00Z"
+    },
+    {
+      "name": "同一时刻、不同 offset",
+      "why": "排序键必须相等并退回按 id 升序；同时不得被判为时间回退。",
+      "id": "lc_ts_same_instant",
+      "updatedAt": "2026-09-30T15:00:00+14:00"
+    }
+  ],  "cases": [
     {
       "name": "孤立代理项载荷必须被接受且逐字节保留",
       "why": "JSON.stringify 会产出 \\ud800，Web 的 IndexedDB 照常保存它。若 native 用 serde_json::Value 解析 document 就会静默拒收 Web 已有的合法数据，因此 document 的自由载荷走 RawValue。",

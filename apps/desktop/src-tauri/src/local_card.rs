@@ -54,22 +54,25 @@ pub const MAX_LOCAL_CARD_PAGE_SIZE: i64 = 100;
 
 pub const MIGRATION_2: &str = r#"
 CREATE TABLE IF NOT EXISTS local_card (
-    id             TEXT PRIMARY KEY NOT NULL,
-    document       TEXT NOT NULL,
-    card_type      TEXT NOT NULL,
-    updated_at     TEXT NOT NULL,
-    deleted_at     TEXT,
-    content_digest TEXT NOT NULL
+    id              TEXT PRIMARY KEY NOT NULL,
+    document        TEXT NOT NULL,
+    card_type       TEXT NOT NULL,
+    updated_at      TEXT NOT NULL,
+    updated_at_sort INTEGER NOT NULL,
+    deleted_at      TEXT,
+    content_digest  TEXT NOT NULL
 ) STRICT;
 
 -- keyset 分页与"排除 tombstone"的主力索引。
 -- 顺序与 list 的 ORDER BY 完全一致，否则分页会退化成对全表排序。
+-- 排序列是 updated_at_sort 而非 updated_at 文本：契约允许任意 UTC offset，
+-- 字符串比较不是时间比较（见 sort_key 的说明）。
 CREATE INDEX IF NOT EXISTS local_card_by_updated
-    ON local_card (updated_at DESC, id ASC);
+    ON local_card (updated_at_sort DESC, id ASC);
 
 -- 类型过滤。Web 端的等价能力是按 cardType 过滤，这里由 SQLite 承担。
 CREATE INDEX IF NOT EXISTS local_card_by_type
-    ON local_card (card_type, updated_at DESC, id ASC);
+    ON local_card (card_type, updated_at_sort DESC, id ASC);
 "#;
 
 /// 从 document 中提取的索引列。
@@ -110,16 +113,31 @@ pub struct LocalCardIndex {
     pub content_digest: String,
 }
 
-/// keyset 游标：`(updated_at, id)`。
+/// keyset 游标：`(updated_at_sort, id)`。
 ///
 /// 用 keyset 而非 offset 是因为 offset 游标在两次翻页之间的写入或删除下会重复或漏掉行。
 /// 游标本身对调用方保持 opaque（`repository.ts` 只要求它是不超过 512 字符的字符串），
 /// 使 Web 的 IndexedDB adapter 未来可以独立改进而不必跟随本实现。
+///
+/// 携带**排序键**而非原始时间戳文本：offset 不同的两个时间戳可能表示同一时刻，只有排序键
+/// 能与存储层的比较口径完全一致。`updated_at` 文本保留在返回值里，便于断言与排障。
 #[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalCardCursor {
+    #[serde(default)]
+    pub updated_at_sort: i64,
     pub updated_at: String,
     pub id: String,
+}
+
+impl LocalCardCursor {
+    fn new(updated_at_sort: i64, updated_at: String, id: String) -> Self {
+        Self {
+            updated_at_sort,
+            updated_at,
+            id,
+        }
+    }
 }
 
 /// 本地卡分页查询。
@@ -221,95 +239,96 @@ impl LocalCardStore {
         if declared.id.trim().is_empty() {
             return Err(StoreError::InvalidDocument);
         }
-        if document.len() > MAX_LOCAL_CARD_DOCUMENT_BYTES {
-            return Err(StoreError::DocumentTooLarge);
-        }
+
+        let updated_at_sort = sort_key(&declared.updated_at)?;
 
         self.with_connection(|connection| {
-            let existing: Option<(String, Option<String>)> = connection
+            let existing: Option<(Option<String>, i64)> = connection
                 .query_row(
-                    "SELECT updated_at, deleted_at FROM local_card WHERE id = ?1",
+                    "SELECT deleted_at, updated_at_sort FROM local_card WHERE id = ?1",
                     rusqlite::params![declared.id],
-                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+                    |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, i64>(1)?)),
                 )
                 .ok();
 
-            if let Some((existing_updated_at, tombstone)) = existing {
+            if let Some((tombstone, existing_sort)) = existing {
                 if tombstone.is_some() && index.deleted_at.is_none() {
                     return Err(StoreError::Tombstoned);
                 }
-                // 覆盖写入不得让 updated_at 回退。keyset 分页按 updated_at DESC 排序，
-                // 一次回退会让已翻过的页再次出现新行，或让正在读的那一页漏掉行。
-                // 时钟回拨（NTP 校正、用户改时间）会造出这种输入，因此在存储层挡住。
-                if declared.updated_at.as_str() < existing_updated_at.as_str() {
+                // 覆盖写入不得让 updatedAt 回退。keyset 分页按排序键降序遍历，一次回退会让
+                // 已翻过的页再次出现新行，或让正在读的那一页漏掉行。时钟回拨（NTP 校正、
+                // 用户改时间）会造出这种输入，因此在存储层挡住。
+                if updated_at_sort < existing_sort {
                     return Err(StoreError::NonMonotonicTimestamp);
                 }
             }
 
-            connection
-                .execute(
-                    "INSERT INTO local_card
-                        (id, document, card_type, updated_at, deleted_at, content_digest)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-                     ON CONFLICT(id) DO UPDATE SET
-                        document = excluded.document,
-                        card_type = excluded.card_type,
-                        updated_at = excluded.updated_at,
-                        deleted_at = excluded.deleted_at,
-                        content_digest = excluded.content_digest",
-                    rusqlite::params![
-                        declared.id,
-                        document,
-                        declared.card_type,
-                        declared.updated_at,
-                        index.deleted_at,
-                        declared.content_digest,
-                    ],
-                )
-                .map_err(|_| StoreError::Failure)?;
-            Ok(())
+            upsert_row(connection, document, &declared, updated_at_sort)
         })
     }
 
-    /// 幂等软删：只写 `deleted_at`，保留 document。缺失或已删除同样成功。
-    pub fn soft_delete(&self, id: &str, deleted_at: &str) -> Result<(), StoreError> {
+    /// 幂等软删：**整行**写入调用方组装好的 tombstone 记录。
+    ///
+    /// 刻意不接受 `(id, deletedAt)` 只改索引列：那样 document 里的 `deletedAt` 仍然是旧值，
+    /// 而 `get()` 返回的正是 document——调用方会拿到一条"看起来没被删除"的记录，直接违反
+    /// `CardRepository` 的 "returns the record, including a tombstone"。同理 document 里的
+    /// `updatedAt` 会与索引列分叉。
+    ///
+    /// 记录组装留在 TypeScript（ADR 第 7 条）；Rust 只校验这次状态转移合法并原子写入整行。
+    pub fn delete(&self, document: &str, index: &LocalCardIndex) -> Result<(), StoreError> {
+        let declared = validate_and_extract(document, index)?;
+
+        if index.deleted_at.is_none() {
+            // 目标状态没有 tombstone，那就不是"删除"而是复活；必须走 restore。
+            return Err(StoreError::TransitionMismatch);
+        }
+
+        self.write_transition(document, &declared, Transition::Delete)
+    }
+
+    /// 幂等恢复：**整行**写入调用方组装好的、已移除 tombstone 的记录。理由同 [`Self::delete`]。
+    pub fn restore(&self, document: &str, index: &LocalCardIndex) -> Result<(), StoreError> {
+        let declared = validate_and_extract(document, index)?;
+
+        if index.deleted_at.is_some() {
+            return Err(StoreError::TransitionMismatch);
+        }
+
+        self.write_transition(document, &declared, Transition::Restore)
+    }
+
+    /// 校验一次状态转移并原子写入整行（document 与全部索引列在同一条语句里更新）。
+    fn write_transition(
+        &self,
+        document: &str,
+        declared: &LocalCardIndex,
+        transition: Transition,
+    ) -> Result<(), StoreError> {
         self.with_connection(|connection| {
-            let existing: Option<(String, Option<String>)> = connection
+            let existing: Option<(Option<String>, i64)> = connection
                 .query_row(
-                    "SELECT updated_at, deleted_at FROM local_card WHERE id = ?1",
-                    rusqlite::params![id],
-                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+                    "SELECT deleted_at, updated_at_sort FROM local_card WHERE id = ?1",
+                    rusqlite::params![declared.id],
+                    |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, i64>(1)?)),
                 )
                 .ok();
-            let Some((updated_at, tombstone)) = existing else {
-                return Ok(());
-            };
-            if tombstone.is_some() {
-                return Ok(());
-            }
-            if deleted_at < updated_at.as_str() {
-                return Err(StoreError::InvalidDocument);
-            }
-            connection
-                .execute(
-                    "UPDATE local_card SET deleted_at = ?2, updated_at = ?2 WHERE id = ?1",
-                    rusqlite::params![id, deleted_at],
-                )
-                .map_err(|_| StoreError::Failure)?;
-            Ok(())
-        })
-    }
 
-    /// 显式移除 tombstone，使记录重新可见。幂等。
-    pub fn restore(&self, id: &str) -> Result<(), StoreError> {
-        self.with_connection(|connection| {
-            connection
-                .execute(
-                    "UPDATE local_card SET deleted_at = NULL WHERE id = ?1",
-                    rusqlite::params![id],
-                )
-                .map_err(|_| StoreError::Failure)?;
-            Ok(())
+            // 幂等：缺失 id 与"已经处于目标状态"都是 no-op。
+            let Some((tombstone, existing_sort)) = existing else {
+                return Err(StoreError::RecordMissing);
+            };
+            match transition {
+                Transition::Delete if tombstone.is_some() => return Ok(()),
+                Transition::Restore if tombstone.is_none() => return Ok(()),
+                _ => {}
+            }
+
+            let next_sort = sort_key(&declared.updated_at)?;
+            if next_sort < existing_sort {
+                return Err(StoreError::NonMonotonicTimestamp);
+            }
+
+            upsert_row(connection, document, declared, next_sort)
         })
     }
 
@@ -345,7 +364,7 @@ impl LocalCardStore {
 
             let mut statement = connection
                 .prepare_cached(
-                    "SELECT id, document, updated_at FROM local_card
+                    "SELECT id, document, updated_at, updated_at_sort FROM local_card
                      WHERE (:include_deleted = 1 OR deleted_at IS NULL)
                        AND (
                             :has_type_filter = 0
@@ -353,10 +372,10 @@ impl LocalCardStore {
                        )
                        AND (
                             :has_cursor = 0
-                            OR (updated_at < :cursor_updated_at)
-                            OR (updated_at = :cursor_updated_at AND id > :cursor_id)
+                            OR (updated_at_sort < :cursor_sort)
+                            OR (updated_at_sort = :cursor_sort AND id > :cursor_id)
                        )
-                     ORDER BY updated_at DESC, id ASC
+                     ORDER BY updated_at_sort DESC, id ASC
                      LIMIT :fetch",
                 )
                 .map_err(|_| StoreError::Failure)?;
@@ -367,16 +386,20 @@ impl LocalCardStore {
             //
             // 类型筛选走 `json_each` 而不是拼接 `IN (?, ?, ?)`：绑定一个 JSON 数组避免了
             // 动态构造 SQL，而 SQL 选择器仍完全由本模块决定（ADR 第 7 条）。
-            let type_filter = serde_json::to_string(&query.card_types)
-                .map_err(|_| StoreError::InvalidQuery)?;
+            let type_filter =
+                serde_json::to_string(&query.card_types).map_err(|_| StoreError::InvalidQuery)?;
 
             let cursor = query.cursor.as_ref();
+            // 游标带排序键；缺省游标（首屏）用 i64::MAX 的语义由 :has_cursor 关闭，无需特殊值。
+            let cursor_sort = cursor
+                .map(|value| value.updated_at_sort)
+                .unwrap_or(i64::MAX);
 
             let rows = statement
                 .query_map(
                     rusqlite::named_params! {
                         ":type_filter": type_filter,
-                        ":cursor_updated_at": cursor.map(|value| value.updated_at.as_str()).unwrap_or(""),
+                        ":cursor_sort": cursor_sort,
                         ":cursor_id": cursor.map(|value| value.id.as_str()).unwrap_or(""),
                         ":fetch": fetch,
                         ":include_deleted": i64::from(include_deleted),
@@ -388,6 +411,7 @@ impl LocalCardStore {
                             row.get::<_, String>(0)?,
                             row.get::<_, String>(1)?,
                             row.get::<_, String>(2)?,
+                            row.get::<_, i64>(3)?,
                         ))
                     },
                 )
@@ -401,19 +425,91 @@ impl LocalCardStore {
             let mut has_more = false;
 
             for row in rows {
-                let (id, document, updated_at) = row.map_err(|_| StoreError::Failure)?;
+                let (id, document, updated_at, updated_at_sort) =
+                    row.map_err(|_| StoreError::Failure)?;
                 if documents.len() == query.limit as usize {
                     has_more = true;
                     break;
                 }
-                last_returned = Some(LocalCardCursor { updated_at, id });
+                last_returned = Some(LocalCardCursor::new(updated_at_sort, updated_at, id));
                 documents.push(document);
             }
 
             let next_cursor = if has_more { last_returned } else { None };
-            Ok(LocalCardPage { documents, next_cursor })
+            Ok(LocalCardPage {
+                documents,
+                next_cursor,
+            })
         })
     }
+}
+
+/// 一次需要"既有状态 → 目标状态"配对校验的变更方向。
+///
+/// 保存（`put`）不在此列：它允许新建、允许覆盖活动记录、只禁止清除既有 tombstone，
+/// 规则与"删除/恢复"不同，混进同一张表会让每条分支都要额外判别。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Transition {
+    Delete,
+    Restore,
+}
+
+/// 写入整行：document 与全部索引列在**同一条语句**里更新。
+///
+/// 分成"先改索引列、再改 document"就是本模块早期版本的 bug 来源——任何中途失败或崩溃都会
+/// 留下两套状态。单语句让两者同生共死。
+fn upsert_row(
+    connection: &Connection,
+    document: &str,
+    declared: &LocalCardIndex,
+    updated_at_sort: i64,
+) -> Result<(), StoreError> {
+    connection
+        .execute(
+            "INSERT INTO local_card
+                (id, document, card_type, updated_at, updated_at_sort, deleted_at, content_digest)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+             ON CONFLICT(id) DO UPDATE SET
+                document = excluded.document,
+                card_type = excluded.card_type,
+                updated_at = excluded.updated_at,
+                updated_at_sort = excluded.updated_at_sort,
+                deleted_at = excluded.deleted_at,
+                content_digest = excluded.content_digest",
+            rusqlite::params![
+                declared.id,
+                document,
+                declared.card_type,
+                declared.updated_at,
+                updated_at_sort,
+                declared.deleted_at,
+                declared.content_digest,
+            ],
+        )
+        .map_err(|_| StoreError::Failure)?;
+    Ok(())
+}
+
+/// 把 RFC3339 时间戳解析成 UTC epoch 毫秒，作为 keyset 的**排序键**。
+///
+/// 为什么不直接按 `updated_at` 文本排序：契约允许任意 UTC offset（`datetime({ offset: true })`），
+/// 而字符串比较不是时间比较。`2026-09-30T12:00:00+14:00` 的文本大于
+/// `2026-09-30T01:00:00Z`，实际却是**更早**的时刻。照文本排会让 keyset 漏读、让
+/// "时间戳不得回退"的判定误判，并让未来带 offset 的 archive 导入顺序错乱。
+///
+/// 排序键由 native 自己从 document 的 `updatedAt` 解析，**不采信**调用方提供的值——
+/// 因此它不可能被伪造或与 document 分叉。
+fn sort_key(updated_at: &str) -> Result<i64, StoreError> {
+    time::OffsetDateTime::parse(updated_at, &time::format_description::well_known::Rfc3339)
+        // 秒与毫秒分开取，避免 unix_timestamp_nanos 的 i128 中间值。
+        .map(|value| value.unix_timestamp() * 1_000 + i64::from(value.nanosecond() / 1_000_000))
+        .map_err(|_| StoreError::InvalidDocument)
+}
+
+/// 仅测试可见的 `sort_key` 出口，让契约测试能直接断言"这个时间戳解析成哪个时刻"。
+#[cfg(test)]
+pub fn sort_key_for_test(updated_at: &str) -> Option<i64> {
+    sort_key(updated_at).ok()
 }
 
 /// 复核 document 中的索引字段并返回它们。
@@ -458,8 +554,20 @@ mod tests {
     /// 用 `format!` 而不是 `serde_json::json!`：后者会重新序列化，从而丢掉
     /// "document 文本必须原样落盘"这一前提——本模块承诺的是字节级往返。
     fn card(id: &str, card_type: &str, updated_at: &str, data: &str) -> (String, LocalCardIndex) {
+        card_with_deleted(id, card_type, updated_at, updated_at, data)
+    }
+
+    /// 同 [`card`]，但允许 `created_at` 与 `updated_at` 分别给出——恢复时二者会分叉
+    /// （`updatedAt` 推进，`deletedAt` 移除）。tombstone 用 [`with_deleted_at`]。
+    fn card_with_deleted(
+        id: &str,
+        card_type: &str,
+        created_at: &str,
+        updated_at: &str,
+        data: &str,
+    ) -> (String, LocalCardIndex) {
         let document = format!(
-            r#"{{"id":"{id}","schemaVersion":1,"storageLocation":"local","cardType":"{card_type}","title":"t","data":{data},"contentDigest":"sha256:{}","provenance":{{"kind":"unsigned","execution":"imported"}},"createdAt":"{updated_at}","updatedAt":"{updated_at}"}}"#,
+            r#"{{"id":"{id}","schemaVersion":1,"storageLocation":"local","cardType":"{card_type}","title":"t","data":{data},"contentDigest":"sha256:{}","provenance":{{"kind":"unsigned","execution":"imported"}},"createdAt":"{created_at}","updatedAt":"{updated_at}"}}"#,
             "a".repeat(64)
         );
         let index = LocalCardIndex {
@@ -472,7 +580,35 @@ mod tests {
         (document, index)
     }
 
-    fn store() -> LocalCardStore {
+    fn with_deleted_at(
+        id: &str,
+        card_type: &str,
+        created_at: &str,
+        updated_at: &str,
+        deleted_at: &str,
+        data: &str,
+    ) -> (String, LocalCardIndex) {
+        let document = format!(
+            r#"{{"id":"{id}","schemaVersion":1,"storageLocation":"local","cardType":"{card_type}","title":"t","data":{data},"contentDigest":"sha256:{}","provenance":{{"kind":"unsigned","execution":"imported"}},"createdAt":"{created_at}","updatedAt":"{updated_at}","deletedAt":"{deleted_at}"}}"#,
+            "a".repeat(64)
+        );
+        let index = LocalCardIndex {
+            id: id.to_string(),
+            card_type: card_type.to_string(),
+            updated_at: updated_at.to_string(),
+            deleted_at: Some(deleted_at.to_string()),
+            content_digest: format!("sha256:{}", "a".repeat(64)),
+        };
+        (document, index)
+    }
+
+    /// 从 document 文本里读一个顶层字符串字段，用于断言 `get()` 返回的内容。
+    fn document_field(document: &str, field: &str) -> Option<String> {
+        let value: serde_json::Value = serde_json::from_str(document).expect("row is json");
+        value.get(field)?.as_str().map(str::to_string)
+    }
+
+    fn new_store() -> LocalCardStore {
         LocalCardStore::open_in_memory().expect("in-memory card store must open")
     }
 
@@ -491,7 +627,7 @@ mod tests {
 
     #[test]
     fn round_trips_a_card_and_reports_absence_without_error() {
-        let store = store();
+        let store = new_store();
         let (document, index) = card("lc_a", "character", "2026-09-30T00:00:00Z", r#"{"n":1}"#);
 
         store.put(&document, &index).expect("put must succeed");
@@ -501,7 +637,7 @@ mod tests {
 
     #[test]
     fn preserves_a_document_byte_for_byte_including_key_order_and_escapes() {
-        let store = store();
+        let store = new_store();
         // 故意不按字母序写键，并混入转义：opaque 文档的字节序必须原样落盘。
         let (document, index) = card(
             "lc_order",
@@ -522,7 +658,7 @@ mod tests {
     /// `Value` 会直接拒绝。若桌面端沿用那条校验，用户在 Web 侧存下的卡到桌面端会静默写不进去。
     #[test]
     fn accepts_a_document_whose_payload_contains_a_lone_surrogate_escape() {
-        let store = store();
+        let store = new_store();
         let (document, index) = card(
             "lc_surrogate",
             "character",
@@ -544,7 +680,7 @@ mod tests {
 
     #[test]
     fn rejects_an_index_that_disagrees_with_the_document() {
-        let store = store();
+        let store = new_store();
         let (document, mut index) = card("lc_mismatch", "character", "2026-09-30T00:00:00Z", "{}");
 
         index.card_type = "scenario".to_string();
@@ -572,7 +708,7 @@ mod tests {
 
     #[test]
     fn rejects_documents_that_are_not_json_or_exceed_the_ceiling() {
-        let store = store();
+        let store = new_store();
         let (_, index) = card("lc_x", "character", "2026-09-30T00:00:00Z", "{}");
 
         assert_eq!(
@@ -596,32 +732,140 @@ mod tests {
         );
     }
 
+    /// `CardRepository` 的完整生命周期，逐条对齐 `repository.ts` 的端口注释。
+    ///
+    /// 这条用例针对的是一个真实缺陷：早期实现的 `delete` / `restore` 只改 SQLite 索引列而
+    /// 不动 document，而 `get()` 返回的正是 document——于是软删后 `get()` 交回一条
+    /// "看起来仍未删除"的记录，违反 "returns the record, including a tombstone"。
     #[test]
-    fn refuses_to_resurrect_a_tombstone_through_a_normal_put() {
-        let store = store();
-        let (document, index) = card("lc_tomb", "character", "2026-09-30T00:00:00Z", "{}");
-        store.put(&document, &index).expect("put");
-        store
-            .soft_delete("lc_tomb", "2026-09-30T01:00:00Z")
-            .expect("soft delete");
+    fn card_lifecycle_keeps_the_document_and_the_tombstone_in_step() {
+        let store = new_store();
+        let created = "2026-09-30T00:00:00Z";
 
-        // 文档与索引必须成对更新：只改索引会被 IndexMismatch 先拒掉，测不到 tombstone 规则。
-        let (newer_document, newer_index) =
-            card("lc_tomb", "character", "2026-09-30T02:00:00Z", "{}");
+        // 1) 保存活动记录
+        let (document, index) = card("lc_life", "character", created, r#"{"n":1}"#);
+        store.put(&document, &index).expect("put");
+        assert!(page_of(&store, &default_query(10)).contains(&document));
+
+        // 2) delete 之后：get 必须交回**带 tombstone** 的记录
+        let deleted_at = "2026-09-30T01:00:00Z";
+        let (tombstone_document, tombstone_index) = with_deleted_at(
+            "lc_life",
+            "character",
+            created,
+            deleted_at,
+            deleted_at,
+            r#"{"n":1}"#,
+        );
+        store
+            .delete(&tombstone_document, &tombstone_index)
+            .expect("delete");
+
+        let read_back = store
+            .get("lc_life")
+            .expect("get must succeed")
+            .expect("row must exist");
         assert_eq!(
-            store.put(&newer_document, &newer_index),
+            document_field(&read_back, "deletedAt").as_deref(),
+            Some(deleted_at),
+            "get 返回的 document 必须带 deletedAt，否则调用方会以为记录仍活动"
+        );
+        assert_eq!(
+            document_field(&read_back, "updatedAt").as_deref(),
+            Some(deleted_at),
+            "document 的 updatedAt 必须与索引列同步推进"
+        );
+
+        // 3) 默认 list 隐藏它，includeDeleted 看得见 tombstone
+        assert!(
+            page_of(&store, &default_query(10)).is_empty(),
+            "tombstone 默认不可见"
+        );
+        let including = LocalCardQuery {
+            include_deleted: true,
+            ..default_query(10)
+        };
+        let listed = page_of(&store, &including);
+        assert_eq!(listed.len(), 1);
+        assert_eq!(
+            document_field(&listed[0], "deletedAt").as_deref(),
+            Some(deleted_at),
+            "list 交回的 document 同样必须带 tombstone"
+        );
+
+        // 4) 普通 put 不得复活 tombstone
+        let (resurrect_document, resurrect_index) =
+            card("lc_life", "character", "2026-09-30T02:00:00Z", r#"{"n":1}"#);
+        assert_eq!(
+            store.put(&resurrect_document, &resurrect_index),
             Err(StoreError::Tombstoned),
         );
 
-        store.restore("lc_tomb").expect("restore");
+        // 5) delete 幂等；缺失 id 是可诊断错误而非静默成功
         store
-            .put(&newer_document, &newer_index)
-            .expect("restore 后才能覆盖写入");
+            .delete(&tombstone_document, &tombstone_index)
+            .expect("repeat delete must be idempotent");
+        let (ghost_document, ghost_index) = with_deleted_at(
+            "lc_ghost",
+            "character",
+            created,
+            deleted_at,
+            deleted_at,
+            "{}",
+        );
+        assert_eq!(
+            store.delete(&ghost_document, &ghost_index),
+            Err(StoreError::RecordMissing),
+            "删除不存在的记录是调用方逻辑错误，必须暴露而不是伪装成功",
+        );
+
+        // 6) restore 之后 get 不再带 deletedAt，且重新出现在默认 list
+        let restored_at = "2026-09-30T03:00:00Z";
+        let (restored_document, restored_index) =
+            card_with_deleted("lc_life", "character", created, restored_at, r#"{"n":1}"#);
+        store
+            .restore(&restored_document, &restored_index)
+            .expect("restore");
+
+        let read_back = store
+            .get("lc_life")
+            .expect("get must succeed")
+            .expect("row must exist");
+        assert_eq!(
+            document_field(&read_back, "deletedAt"),
+            None,
+            "恢复后 document 不得再带 deletedAt"
+        );
+        assert_eq!(
+            document_field(&read_back, "updatedAt").as_deref(),
+            Some(restored_at),
+        );
+        assert_eq!(
+            page_of(&store, &default_query(10)),
+            vec![restored_document.clone()]
+        );
+
+        // 7) restore 幂等；对活动记录 restore 是 no-op
+        store
+            .restore(&restored_document, &restored_index)
+            .expect("repeat restore must be idempotent");
+
+        // 8) 转移方向反了就是调用方错误
+        assert_eq!(
+            store.delete(&restored_document, &restored_index),
+            Err(StoreError::TransitionMismatch),
+            "对不带 deletedAt 的记录执行 delete 必须被拒绝",
+        );
+        assert_eq!(
+            store.restore(&tombstone_document, &tombstone_index),
+            Err(StoreError::TransitionMismatch),
+            "对带 deletedAt 的记录执行 restore 必须被拒绝",
+        );
     }
 
     #[test]
     fn refuses_a_backwards_timestamp_so_keyset_order_stays_stable() {
-        let store = store();
+        let store = new_store();
         let (document, index) = card("lc_time", "character", "2026-09-30T05:00:00Z", "{}");
         store.put(&document, &index).expect("put");
 
@@ -639,49 +883,71 @@ mod tests {
         );
     }
 
+    /// 不同 UTC offset 下的时间比较。
+    ///
+    /// 契约允许任意 offset（`datetime({ offset: true })`），而字符串比较不是时间比较：
+    /// `2026-09-30T12:00:00+14:00` 的**文本**大于 `2026-09-30T01:00:00Z`，实际却是更早的
+    /// 时刻。照文本排会让 keyset 漏读、让"不得回退"的判定误判，并让未来带 offset 的
+    /// archive 导入顺序错乱。
     #[test]
-    fn soft_delete_is_idempotent_and_restore_brings_the_document_back() {
-        let store = store();
-        let (document, index) = card("lc_soft", "character", "2026-09-30T00:00:00Z", "{}");
-        let expected = document.clone();
-        store.put(&document, &index).expect("put");
+    fn keyset_ordering_follows_the_instant_not_the_timestamp_text() {
+        let store = new_store();
 
-        store
-            .soft_delete("lc_soft", "2026-09-30T01:00:00Z")
-            .expect("soft delete");
-        store
-            .soft_delete("lc_soft", "2026-09-30T02:00:00Z")
-            .expect("repeat must be idempotent");
-        store
-            .soft_delete("missing", "2026-09-30T02:00:00Z")
-            .expect("missing must be idempotent");
-
-        assert!(
-            page_of(&store, &default_query(10)).is_empty(),
-            "tombstone 默认不可见"
+        // 文本更大、实际更早：12:00+14:00 等于前一天 22:00Z。
+        let (text_later, text_later_index) = card(
+            "lc_offset_a",
+            "character",
+            "2026-09-30T12:00:00+14:00",
+            "{}",
         );
-        // soft delete 不删文档：restore 因此能真正恢复，而不是留下"记录在、字节缺"的行。
+        // 文本更小、实际更晚：01:00Z 晚于前一天 22:00Z。
+        let (text_smaller, text_smaller_index) =
+            card("lc_offset_b", "character", "2026-09-30T01:00:00Z", "{}");
+
+        store.put(&text_later, &text_later_index).expect("put a");
+        store
+            .put(&text_smaller, &text_smaller_index)
+            .expect("put b");
+
+        // 按文本排会得到 [a, b]；按时刻排必须是 [b, a]。
         assert_eq!(
-            store.get("lc_soft").expect("get must succeed"),
-            Some(expected)
+            page_of(&store, &default_query(10)),
+            vec![text_smaller, text_later],
+            "更晚的时刻必须排在前面，即使它的文本看起来更小"
         );
 
-        let including = LocalCardQuery {
-            include_deleted: true,
-            ..default_query(10)
-        };
-        assert_eq!(page_of(&store, &including).len(), 1);
+        // 同一时刻、不同 offset：排序键相同，必须退回按 id 升序，且不违反单调性。
+        let same_instant = new_store();
+        let (utc_text, utc_index) = card("lc_same_b", "character", "2026-09-30T01:00:00Z", "{}");
+        let (offset_text, offset_index) =
+            card("lc_same_a", "character", "2026-09-30T15:00:00+14:00", "{}");
+        same_instant.put(&utc_text, &utc_index).expect("put z");
+        same_instant
+            .put(&offset_text, &offset_index)
+            .expect("put a");
+        assert_eq!(
+            page_of(&same_instant, &default_query(10)),
+            vec![offset_text, utc_text.clone()],
+            "同一时刻的两条记录必须按 id 升序稳定排列"
+        );
+        // 排序键相等不算回退，因此不会误报。
+        assert!(same_instant.put(&utc_text, &utc_index).is_ok());
+    }
 
-        store.restore("lc_soft").expect("restore");
-        store
-            .restore("lc_soft")
-            .expect("repeat restore must be idempotent");
-        assert_eq!(page_of(&store, &default_query(10)).len(), 1);
+    #[test]
+    fn rejects_a_timestamp_it_cannot_parse() {
+        let store = new_store();
+        let (document, index) = card("lc_bad_time", "character", "not-a-timestamp", "{}");
+        // 不解析成功就意味着排序键算不出来；此时必须拒绝而不是写一个排不动的行。
+        assert_eq!(
+            store.put(&document, &index),
+            Err(StoreError::InvalidDocument)
+        );
     }
 
     #[test]
     fn purge_removes_the_row_and_stays_idempotent() {
-        let store = store();
+        let store = new_store();
         let (document, index) = card("lc_purge", "character", "2026-09-30T00:00:00Z", "{}");
         store.put(&document, &index).expect("put");
 
@@ -694,7 +960,7 @@ mod tests {
 
     #[test]
     fn lists_newest_first_with_a_deterministic_tie_break() {
-        let store = store();
+        let store = new_store();
         for (id, updated_at) in [
             ("lc_b", "2026-09-01T00:00:00Z"),
             ("lc_a", "2026-09-02T00:00:00Z"),
@@ -720,7 +986,7 @@ mod tests {
 
     #[test]
     fn keyset_pagination_covers_every_row_exactly_once_across_page_sizes() {
-        let store = store();
+        let store = new_store();
         // 1000 行正对应 ACCEPT-004 的规模。用分钟粒度造出唯一的 updated_at，
         // 于是分页正确性只取决于 keyset 逻辑，不依赖时间戳碰撞。
         let total = 1000i64;
@@ -773,7 +1039,7 @@ mod tests {
 
     #[test]
     fn pagination_is_unaffected_by_writes_that_land_between_pages() {
-        let store = store();
+        let store = new_store();
         for n in 0..6i64 {
             let updated_at = format!("2026-01-01T00:0{n}:00Z");
             let (document, index) = card(&format!("lc_{n}"), "character", &updated_at, "{}");
@@ -822,7 +1088,7 @@ mod tests {
 
     #[test]
     fn filters_by_card_type_without_exposing_the_sql_shape_to_callers() {
-        let store = store();
+        let store = new_store();
         for (id, card_type) in [
             ("lc_c1", "character"),
             ("lc_s1", "scenario"),
@@ -852,7 +1118,7 @@ mod tests {
 
     #[test]
     fn rejects_a_page_size_outside_the_contract_range() {
-        let store = store();
+        let store = new_store();
         for limit in [0_i64, -1, MAX_LOCAL_CARD_PAGE_SIZE + 1] {
             assert_eq!(
                 store.list(&default_query(limit)),
