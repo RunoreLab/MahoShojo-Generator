@@ -31,6 +31,10 @@ serde = { version = "1", features = ["derive"] }
 # 从而在桌面端静默拒收 Web 已有的合法数据。依据 SPEC-desktop-client-v1 DESK-062。
 serde_json = { version = "1", features = ["raw_value"] }
 tauri = { version = "2", features = [] }
+# RFC3339 解析，用于把本地卡 updatedAt 规范化成 UTC epoch 毫秒的 keyset 排序键。
+# 不自己写日期解析：闰年、世纪闰年、offset 边界这类错误极难靠肉眼保证，而排序键算错会
+# 直接表现为 keyset 漏读。MIT / Apache-2.0，纯 Rust。
+time = { version = "0.3", features = ["parsing", "formatting"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "io-util"] }
 tokio-util = { version = "0.7", features = ["rt"] }
 url = "2"

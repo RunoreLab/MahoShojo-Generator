@@ -24,7 +24,21 @@ struct Fixture {
     valid_index: ValidIndex,
     tombstoned_index: TombstonedIndex,
     cursor: Cursor,
+    timestamp_cases: Vec<TimestampCase>,
     cases: Vec<FixtureCase>,
+}
+
+/// 带 UTC offset 的时间戳用例。
+///
+/// 契约允许任意 offset，因此 native **MUST** 按时刻而非文本排序。这三条把三个最容易
+/// 互相搞混的方向各自钉住：文本更大但更早、文本更小但更晚、同一时刻不同 offset。
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TimestampCase {
+    #[allow(dead_code)]
+    name: String,
+    id: String,
+    updated_at: String,
 }
 
 #[derive(Deserialize)]
@@ -101,6 +115,8 @@ fn error_codes_match_the_typescript_authority_in_a_stable_order() {
         StoreError::DocumentTooLarge,
         StoreError::IndexMismatch,
         StoreError::Tombstoned,
+        StoreError::TransitionMismatch,
+        StoreError::RecordMissing,
         StoreError::NonMonotonicTimestamp,
         StoreError::InvalidQuery,
         StoreError::Failure,
@@ -118,6 +134,71 @@ fn error_codes_match_the_typescript_authority_in_a_stable_order() {
             .collect::<Vec<_>>(),
         "错误码集合或顺序与契约不一致"
     );
+}
+
+/// fixture 里的 offset 时间戳必须被 native 解析成**正确时刻**，而不是按文本比较。
+///
+/// 三条用例一起钉住三个方向：文本更大但更早、文本更小但更晚、同一时刻不同 offset。
+/// 只测其中一条会漏掉"把排序键当成字符串"或"把相等当成回退"这两类错误。
+#[test]
+fn every_fixture_timestamp_resolves_to_the_instant_it_denotes() {
+    let fixture = parse();
+    assert!(
+        fixture.timestamp_cases.len() >= 3,
+        "fixture 必须覆盖三类 offset 时间戳用例"
+    );
+
+    let store = crate::local_card::LocalCardStore::open_in_memory()
+        .expect("in-memory card store must open");
+
+    let mut observed: Vec<(String, i64)> = Vec::new();
+    for case in &fixture.timestamp_cases {
+        let (document, index) = build_card(&case.id, &case.updated_at);
+        store
+            .put(&document, &index)
+            .unwrap_or_else(|error| panic!("用例「{}」必须被接受，实际 {error:?}", case.name));
+        let sort = crate::local_card::sort_key_for_test(&case.updated_at)
+            .unwrap_or_else(|| panic!("用例「{}」的时间戳必须可解析", case.name));
+        observed.push((case.id.clone(), sort));
+    }
+
+    // 12:00+14:00 == 前一天 22:00Z，早于 01:00Z；15:00+14:00 == 01:00Z，与之同一时刻。
+    let by_id: std::collections::HashMap<&str, i64> = observed
+        .iter()
+        .map(|(id, sort)| (id.as_str(), *sort))
+        .collect();
+    let text_later = by_id["lc_ts_text_later"];
+    let text_smaller = by_id["lc_ts_text_smaller"];
+    let same_instant = by_id["lc_ts_same_instant"];
+
+    assert!(
+        text_later < text_smaller,
+        "文本更大的那个必须解析为更早的时刻"
+    );
+    assert_eq!(
+        same_instant, text_smaller,
+        "同一时刻的不同 offset 必须解析为相同的排序键"
+    );
+
+    // 排序键相等不得被判为时间回退。
+    let (document, index) = build_card("lc_ts_text_smaller", "2026-09-30T01:00:00Z");
+    assert_eq!(store.put(&document, &index), Ok(()), "排序键相等不算回退");
+}
+
+/// 造一条最小可用的 document 与配套索引列，供 fixture 用例复用。
+fn build_card(id: &str, updated_at: &str) -> (String, crate::local_card::LocalCardIndex) {
+    let document = format!(
+        r#"{{"id":"{id}","schemaVersion":1,"storageLocation":"local","cardType":"character","title":"t","data":{{}},"contentDigest":"sha256:{}","provenance":{{"kind":"unsigned","execution":"imported"}},"createdAt":"{updated_at}","updatedAt":"{updated_at}"}}"#,
+        "a".repeat(64)
+    );
+    let index = crate::local_card::LocalCardIndex {
+        id: id.to_string(),
+        card_type: "character".to_string(),
+        updated_at: updated_at.to_string(),
+        deleted_at: None,
+        content_digest: format!("sha256:{}", "a".repeat(64)),
+    };
+    (document, index)
 }
 
 #[test]
@@ -164,6 +245,7 @@ fn a_fixtures_index_survives_the_round_trip_through_our_own_type() {
 fn a_cursor_round_trips_through_our_own_type() {
     let fixture = parse();
     let cursor = crate::local_card::LocalCardCursor {
+        updated_at_sort: 0,
         updated_at: fixture.cursor.updated_at.clone(),
         id: fixture.cursor.id.clone(),
     };
