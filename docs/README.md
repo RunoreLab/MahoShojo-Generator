@@ -1,5 +1,7 @@
 # 文档导航
 
+模态框页签的窄屏承载采用[模态框页签窄屏承载规格](./specs/2026-09-30_113200_模态框页签窄屏承载规格.md)：页签栏统一走 `shared/ModalTabs` 的 WAI-ARIA + 横向滚动 rail，选型依据是 W3C ARIA APG 议题 #2438 与 Material Design 3（两者都把横向滚动列为首选/标准做法，换行堆叠与「更多」菜单被明确否决）；同时修正四处弹窗外壳的 `w-[96vw]` 横向溢出与 `vh` 视口失真。
+
 本地库在 Web 端落地采用[本地库 Web 落地与 BattleDataModal 一等数据源规格](./specs/2026-09-29_200500_本地库Web落地与BattleDataModal一等数据源规格.md)，受[本地库与数据所有权决策](./decisions/2026-08-22_022300_本地库与数据所有权决策.md)约束：数据卡与 Web 包共用独立 IndexedDB `mahoshojo-local-library`，`BattleDataModal` 新增无需登录的「本地库」tab，Web 包的选择与删除移入独立模态框，旧 Web 包缓存一次性迁入后清空。内容摘要去重、整卡替换；「导入时保存到本地库」是持久化的设备偏好。导出/备份/恢复（`LIB-007`）与 Installed APP（`LIB-004`）本轮未实现，文档中已显式标注为未完成。
 
 Arena 结束状态与 Tokens 展示采用[结束状态与 Tokens 展示修订](./specs/2026-09-28_160000_Arena结束状态与Tokens展示修订.md)：区分推理与非推理输出，识别截断与流错误，按失败终态恢复可保留的 Markdown 部分正文。
