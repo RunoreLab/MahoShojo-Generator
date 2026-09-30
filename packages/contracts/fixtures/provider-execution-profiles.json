@@ -1,0 +1,139 @@
+{
+  "$comment": "DirectProviderExecutionProfile 的跨运行时 fixture。TypeScript 侧由 packages/contracts/tests/provider-profile.test.ts 校验，Rust 侧由 apps/desktop/src-tauri/src/provider_profile.rs 通过 include_str! 在编译期读取。Rust 不得假设 TypeScript 已替它做完安全校验，因此本 fixture 同时覆盖可接受与必须拒绝的输入。",
+  "valid": [
+    {
+      "id": "profile-openai",
+      "name": "OpenAI Compatible (Ollama)",
+      "adapter": "openai-compatible",
+      "baseUrl": "http://127.0.0.1:11434/v1",
+      "modelId": "qwen3:8b",
+      "apiKeyRef": "provider:profile-openai:api-key",
+      "transport": {
+        "allowPublicHttp": false,
+        "maxRedirects": 0
+      }
+    },
+    {
+      "id": "profile-remote",
+      "name": "Remote BYOK",
+      "adapter": "openai-compatible",
+      "baseUrl": "https://api.example.com/v1",
+      "modelId": "gpt-4o-mini",
+      "apiKeyRef": "provider:profile-remote:api-key",
+      "secretHeaderRefs": {
+        "x-tenant-token": "provider:profile-remote:x-tenant-token"
+      },
+      "publicHeaders": {
+        "x-client": "mahoshojo-desktop"
+      },
+      "transport": {
+        "maxRedirects": 2
+      }
+    },
+    {
+      "id": "profile-no-secret",
+      "name": "Local no auth",
+      "adapter": "openai-compatible",
+      "baseUrl": "http://localhost:1234/v1",
+      "modelId": "local-model"
+    }
+  ],
+  "invalid": [
+    {
+      "$case": "http 明文公网地址且未显式确认",
+      "profile": {
+        "id": "profile-insecure",
+        "name": "Insecure",
+        "adapter": "openai-compatible",
+        "baseUrl": "http://api.example.com/v1",
+        "modelId": "m"
+      }
+    },
+    {
+      "$case": "URL 内嵌凭据",
+      "profile": {
+        "id": "profile-embedded",
+        "name": "Embedded",
+        "adapter": "openai-compatible",
+        "baseUrl": "https://user:pass@api.example.com/v1",
+        "modelId": "m"
+      }
+    },
+    {
+      "$case": "非 HTTP(S) 协议",
+      "profile": {
+        "id": "profile-ftp",
+        "name": "FTP",
+        "adapter": "openai-compatible",
+        "baseUrl": "ftp://api.example.com/v1",
+        "modelId": "m"
+      }
+    },
+    {
+      "$case": "secret header 与 public header 重名",
+      "profile": {
+        "id": "profile-overlap",
+        "name": "Overlap",
+        "adapter": "openai-compatible",
+        "baseUrl": "https://api.example.com/v1",
+        "modelId": "m",
+        "secretHeaderRefs": {
+          "X-Client": "provider:profile-overlap:x-client"
+        },
+        "publicHeaders": {
+          "x-client": "value"
+        }
+      }
+    },
+    {
+      "$case": "明文写进 publicHeaders 的已知 secret header",
+      "profile": {
+        "id": "profile-leak",
+        "name": "Leak",
+        "adapter": "openai-compatible",
+        "baseUrl": "https://api.example.com/v1",
+        "modelId": "m",
+        "publicHeaders": {
+          "authorization": "Bearer sk-leaked"
+        }
+      }
+    },
+    {
+      "$case": "传输层受控 header",
+      "profile": {
+        "id": "profile-host",
+        "name": "Host",
+        "adapter": "openai-compatible",
+        "baseUrl": "https://api.example.com/v1",
+        "modelId": "m",
+        "publicHeaders": {
+          "host": "evil.example.com"
+        }
+      }
+    },
+    {
+      "$case": "redirect 上限越界",
+      "profile": {
+        "id": "profile-redirects",
+        "name": "Redirects",
+        "adapter": "openai-compatible",
+        "baseUrl": "https://api.example.com/v1",
+        "modelId": "m",
+        "transport": {
+          "maxRedirects": 9
+        }
+      }
+    },
+    {
+      "$case": "secret 引用不符合凭据目标名字符集",
+      "profile": {
+        "id": "profile-badref",
+        "name": "Bad ref",
+        "adapter": "openai-compatible",
+        "baseUrl": "https://api.example.com/v1",
+        "modelId": "m",
+        "apiKeyRef": "provider:profile bad:api key"
+      }
+    }
+  ]
+}

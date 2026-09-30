@@ -1,5 +1,6 @@
 import { z } from './zod';
 
+import { MAX_SECRET_REF_LENGTH, SECRET_REF_PATTERN, SecretRefSchema, isSecretRef } from './secret-ref';
 import { utf8ByteLimitedStringSchema } from './wire-size';
 
 /**
@@ -10,31 +11,21 @@ import { utf8ByteLimitedStringSchema } from './wire-size';
  * DOM、环境变量或服务器依赖。
  */
 
-export const MAX_DESKTOP_SECRET_REF_LENGTH = 256;
+export const MAX_DESKTOP_SECRET_REF_LENGTH = MAX_SECRET_REF_LENGTH;
 export const MAX_DESKTOP_SECRET_VALUE_BYTES = 8 * 1024;
 
 /**
  * Secret 引用的合法字符集。
  *
- * 该引用会直接成为操作系统凭据存储的目标名，因此只允许 ASCII 字母、数字、点、下划线、
- * 冒号与连字符。这条规则同时阻止把凭据存储当成任意键值仓库使用，也保证
- * Provider Profile 的 id 必须先满足本规则才允许派生 secret 引用。
+ * 单点定义在 `./secret-ref`，此处按原名再导出，避免 Desktop 侧出现第二份判据。
  */
-export const DESKTOP_SECRET_REF_PATTERN = /^[A-Za-z0-9._:-]+$/u;
+export const DESKTOP_SECRET_REF_PATTERN = SECRET_REF_PATTERN;
 
-export const DesktopSecretRefSchema = z
-  .string()
-  .min(1)
-  .max(MAX_DESKTOP_SECRET_REF_LENGTH)
-  .regex(
-    DESKTOP_SECRET_REF_PATTERN,
-    'must only contain ASCII letters, digits, dot, underscore, colon or hyphen',
-  );
+export const DesktopSecretRefSchema = SecretRefSchema;
 
 export const DesktopSecretValueSchema = utf8ByteLimitedStringSchema(MAX_DESKTOP_SECRET_VALUE_BYTES);
 
 export type DesktopSecretRef = z.infer<typeof DesktopSecretRefSchema>;
-
 export const DesktopSecretStoreErrorCodeSchema = z.enum([
   'invalid-secret-ref',
   'secret-value-too-large',
@@ -57,7 +48,4 @@ export const DesktopSecretStoreErrorSchema = z
   .strict();
 export type DesktopSecretStoreError = z.infer<typeof DesktopSecretStoreErrorSchema>;
 
-export const isDesktopSecretRef = (value: string): boolean =>
-  value.length > 0
-  && value.length <= MAX_DESKTOP_SECRET_REF_LENGTH
-  && DESKTOP_SECRET_REF_PATTERN.test(value);
+export const isDesktopSecretRef = isSecretRef;
