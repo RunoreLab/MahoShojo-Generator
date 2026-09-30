@@ -86,6 +86,32 @@ Rust 门禁同时由 `.github/workflows/desktop-ci.yml` 执行。`build` 脚本�
 - Vite `envPrefix` 只保留 `TAURI_ENV_*`，不暴露 `VITE_`。
 - Rust 侧当前没有出站 HTTP、数据库、文件写入能力；持久 secret 已接入操作系统凭据存储。
 
+## Provider Profile 与 Direct AI
+
+当前阶段（D1）可用的最小面板支持：保存 Profile、查看已保存列表与凭据是否存在、跑一次生成测试。
+
+```text
+Profile 草稿
+  -> 客户端用 DirectProviderProfileV1Schema 校验
+  -> 派生 secret 引用 provider:<id>:api-key
+  -> 先写凭据（操作系统凭据存储）
+  -> 让 native 独立解析窄投影并回显
+  -> 两侧一致才落盘完整 Profile（SQLite）
+```
+
+顺序不可反：先凭据后 Profile，反过来的话崩溃会留下"引用存在但取不到值"的 Profile。
+删除时反过来——先 Profile 再凭据，因为保留孤儿凭据不会让任何执行路径误用已删除的配置。
+
+明文 API Key 只在录入那一刻存在于输入框与保存调用中，保存后立即从组件状态清除，且本页
+**没有任何读回凭据的入口**（`hasProviderSecret` 只返回布尔值）。
+
+已知边界：
+
+- `thinking` 字段当前被 native 的 `deny_unknown_fields` 拒绝，尚未映射到 Provider 参数；
+- `anthropic` / `google` adapter 显式拒绝，不会按 OpenAI 语义静默发起请求；
+- 真实 Ollama / LM Studio / 公网端点尚未实测，端到端证据来自进程内自建的
+  OpenAI-compatible SSE 服务（含"取消真正中止上游 body"的断连观测）。
+
 ## 持久 secret
 
 V1 使用操作系统凭据存储（`keyring`），**不**使用 Stronghold JavaScript API —— 后者要求把

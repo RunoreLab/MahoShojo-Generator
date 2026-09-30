@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 
 import { loadDesktopRuntimeInfo, type DesktopRuntimeInfo } from '../platform';
+import { ProviderProfilesPanel } from '../features/providers/ProviderProfilesPanel';
 
 interface RuntimeState {
   status: 'loading' | 'ready' | 'failed';
@@ -67,6 +68,8 @@ export const App = () => {
           </dl>
         )}
       </section>
+
+      <ProviderProfilesPanel />
     </main>
   );
 };
