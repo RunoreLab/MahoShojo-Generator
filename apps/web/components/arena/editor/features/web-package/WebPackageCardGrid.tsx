@@ -1,7 +1,7 @@
 'use client';
 
 import { Download, HardDrive, Info, Loader2, Package, Trash2 } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 
 /**
  * Web 包卡片网格。
@@ -77,7 +77,11 @@ export function WebPackageCardGrid({
   items: readonly WebPackageCardItem[];
   selectedDigest: string | null;
   disabled?: boolean;
-  emptyHint: string;
+  /**
+   * 空列表时展示的内容。刻意允许任意节点：空态是唯一能让用户离开"什么都没有"
+   * 这个死路的地方，调用方需要在这里放导入入口、重试按钮和说明链接。
+   */
+  emptyHint: ReactNode;
   /** 已选中的卡片再次点击时传 `null`，表示取消选择回到自由 Web。 */
   onSelect: (digest: string | null) => void;
   onDownload?: (item: WebPackageCardItem) => void;
@@ -99,9 +103,9 @@ export function WebPackageCardGrid({
 
   if (items.length === 0) {
     return (
-      <p className="rounded-lg border border-dashed border-gray-300 px-4 py-8 text-center text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
+      <div className="rounded-lg border border-dashed border-gray-300 px-4 py-8 text-center text-sm text-gray-600 dark:border-gray-700 dark:text-gray-300">
         {emptyHint}
-      </p>
+      </div>
     );
   }
 

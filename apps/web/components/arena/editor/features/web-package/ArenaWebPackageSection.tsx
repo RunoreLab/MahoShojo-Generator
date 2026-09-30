@@ -8,6 +8,9 @@ import { WebPackagePickerModal } from './WebPackagePickerModal';
 import { describeWebPackageRemovalConsequences } from '@/lib/local-library/remove-local-web-package';
 import type { ArenaWebPackageOptionView, ArenaWebPackageSectionModel } from './web-package-contract';
 
+/** 用户第一次接触 Web 包的入口；与选择器共用同一个说明页。 */
+const WEB_REPORT_HREF = '/encyclopedia/web-report';
+
 /**
  * 单人与 Proposal 共用的「Web 包」区块。
  *
@@ -136,6 +139,13 @@ export function ArenaWebPackageSection({ model }: Readonly<{ model: ArenaWebPack
       {!capabilities.importLocal ? (
         <p className="text-xs text-gray-500">多人模式仅支持可共享的内置预设；本地 ZIP 包不可进入房间配置。</p>
       ) : null}
+
+      {/* 这个区块是用户第一次接触 Web 包的地方，此前没有任何百科入口，
+          「自由生成网页（未选择 Web 包）」和「Web 包」的关系无处可查。 */}
+      <p className="text-xs text-gray-500">
+        不选包就是让 AI 自由生成一个网页；选包则由包提供引擎与素材、AI 只生成那一个数据文件。
+        <a className="ml-1 underline hover:text-gray-700" href={WEB_REPORT_HREF}>Web 战报说明</a>
+      </p>
 
       <WebPackagePickerModal
         isOpen={pickerOpen}

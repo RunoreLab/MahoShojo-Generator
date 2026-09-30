@@ -57,6 +57,7 @@ const model = (overrides: Partial<ArenaWebPackageSectionModel> = {}): ArenaWebPa
     importFile: vi.fn(async () => {}),
     removeFromLibrary: vi.fn(async () => {}),
     setSaveImportedToLibrary: vi.fn(),
+    reloadLibrary: vi.fn(),
   },
   ...overrides,
 });
@@ -128,6 +129,56 @@ describe('ArenaWebPackageSection', () => {
     });
     expect(document.querySelector('[aria-label="选择 Web 包：我的阅读器"]')).toBeTruthy();
     expect(document.querySelector('[aria-label="选择 Web 包：竞技场新闻"]')).toBeNull();
+  });
+
+  it('区块给出 Web 战报百科入口，并说清自由 Web 与 Web 包的区别', async () => {
+    await render(model({ capabilities: soloCapabilities }));
+    // 「自由生成网页（未选择 Web 包）」此前无处可查：用户不知道它和 Web 包是什么关系。
+    expect(container.textContent).toContain('不选包就是让 AI 自由生成一个网页');
+    expect(container.querySelector('a[href="/encyclopedia/web-report"]')).toBeTruthy();
+  });
+
+  it('本地库为空时，空态里就有可点的导入入口与说明链接', async () => {
+    await render(model({ capabilities: soloCapabilities, library: [] }));
+    await openPicker();
+    await act(async () => {
+      [...document.querySelectorAll('button')].find((button) => button.textContent?.includes('本地库 ('))!.click();
+    });
+
+    // 导入按钮此前只在网格下方的另一个卡片里，空态只给一行指向它的文字。
+    const emptyImport = [...document.querySelectorAll('button')].find((button) => button.textContent === '导入本地 ZIP');
+    expect(emptyImport).toBeTruthy();
+    expect(document.body.textContent).toContain('勾选「导入时保存到本地库」');
+    expect(document.querySelector('a[href="/encyclopedia/web-report"]')).toBeTruthy();
+  });
+
+  it('本地库读取失败时给出可点的重试，而不是只让用户刷新页面', async () => {
+    const input = model({
+      capabilities: soloCapabilities,
+      library: [],
+      libraryError: 'IndexedDB 不可用',
+    });
+    await render(input);
+    await openPicker();
+    await act(async () => {
+      [...document.querySelectorAll('button')].find((button) => button.textContent?.includes('本地库 ('))!.click();
+    });
+
+    expect(document.body.textContent).toContain('这不代表已保存的 Web 包被删除');
+    const retry = [...document.querySelectorAll('button')].find((button) => button.textContent === '重新读取本地库');
+    expect(retry).toBeTruthy();
+    await act(async () => { retry!.click(); });
+    expect(input.actions.reloadLibrary).toHaveBeenCalled();
+  });
+
+  it('多人模式下说明本地包要去单人模式用，而不是给一句无出口的禁令', async () => {
+    await render(model({
+      selected: preset,
+      capabilities: { importLocal: false, downloadPreset: false, remove: true, replace: true, manageLibrary: false },
+    }));
+    await openPicker();
+    expect(document.body.textContent).toContain('多人模式仅支持可共享的内置预设');
+    expect(document.body.textContent).toContain('请在单人模式下打开选择器');
   });
 
   it('本地库卡片提供删除与导出，内置预设不提供删除', async () => {

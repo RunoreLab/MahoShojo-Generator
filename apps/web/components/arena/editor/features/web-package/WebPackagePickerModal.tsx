@@ -21,6 +21,9 @@ const toCardItem = (option: ArenaWebPackageOptionView): WebPackageCardItem => ({
 
 type PickerTab = 'preset' | 'local';
 
+/** 这个弹窗此前没有任何百科入口，用户无法自查「Web 包是什么」「授权意味着什么」。 */
+const WEB_REPORT_HREF = '/encyclopedia/web-report';
+
 /** 多人模式没有本地库，页签只剩预设一个。 */
 const TAB_ORDER: readonly PickerTab[] = ['preset', 'local'];
 
@@ -146,7 +149,23 @@ export function WebPackagePickerModal({
             disabled={disabled}
             busyDigest={model.busyDigest}
             downloadingDigest={model.downloadingDigest}
-            emptyHint="没有匹配的内置 Web 包预设。"
+            emptyHint={(
+              <div className="space-y-3">
+                <p>
+                  {keyword.trim()
+                    ? '没有匹配的内置 Web 包预设。'
+                    : '当前没有内置 Web 包预设。'}
+                </p>
+                <p className="text-xs leading-5 text-gray-500">
+                  {keyword.trim()
+                    ? '换个关键词或清空搜索框再试。也可以切到「本地库」导入自己的 ZIP。'
+                    : '可以切到「本地库」页签导入自己的 ZIP：包是「引擎 + 素材」，AI 只生成包指定的那一个数据文件。'}
+                </p>
+                <p className="text-xs">
+                  <a className="underline hover:text-gray-700" href={WEB_REPORT_HREF}>这是什么？</a>
+                </p>
+              </div>
+            )}
             onSelect={(digest) => { model.actions.select(digest); onClose(); }}
             onDownload={model.capabilities.downloadPreset
               ? (item) => { void model.actions.downloadPreset(item.digest); }
@@ -161,9 +180,41 @@ export function WebPackagePickerModal({
             disabled={disabled}
             busyDigest={model.busyDigest}
             downloadingDigest={model.downloadingDigest}
-            emptyHint={model.libraryError
-              ? '本地库暂时读不出来，这里显示不出已保存的 Web 包。'
-              : '还没有本地 Web 包。导入本地 ZIP 即可使用；勾选「导入时保存到本地库」可让它在刷新后依然存在。'}
+            emptyHint={model.libraryError ? (
+              <div className="space-y-3">
+                <p>本地库暂时读不出来，这里显示不出已保存的 Web 包。</p>
+                <p className="text-xs leading-5 text-gray-500">
+                  这不代表已保存的 Web 包被删除。先重试；仍失败请检查浏览器是否允许本站使用本地存储。
+                </p>
+                <button
+                  type="button"
+                  onClick={model.actions.reloadLibrary}
+                  className="inline-flex min-h-11 items-center rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm text-gray-900 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
+                >
+                  重新读取本地库
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <p>{keyword.trim() ? '没有匹配的本地 Web 包。' : '还没有本地 Web 包。'}</p>
+                <p className="text-xs leading-5 text-gray-500">
+                  导入本地 ZIP 即可使用。导入默认只对本次会话有效，勾选「导入时保存到本地库」可以让它在刷新后依然存在。
+                </p>
+                {model.capabilities.importLocal ? (
+                  <button
+                    type="button"
+                    disabled={model.disabled || model.importing}
+                    onClick={() => fileInputRef.current?.click()}
+                    className="inline-flex min-h-11 items-center rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm text-gray-900 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
+                  >
+                    {model.importing ? '正在导入…' : '导入本地 ZIP'}
+                  </button>
+                ) : null}
+                <p className="text-xs">
+                  <a className="underline hover:text-gray-700" href={WEB_REPORT_HREF}>Web 战报与 Web 包说明</a>
+                </p>
+              </div>
+            )}
             onSelect={(digest) => { model.actions.select(digest); onClose(); }}
             onDownload={(item) => { void model.actions.downloadFromLibrary(item.digest); }}
             // sessionOnly 的包没有本地库行可删；给它一个删除按钮只会是假动作。
@@ -196,6 +247,15 @@ export function WebPackagePickerModal({
             <span className="mt-0.5 block text-xs text-red-500">
               这不代表已保存的 Web 包被删除；请检查浏览器是否允许本站使用本地存储后重试。
             </span>
+            {model.capabilities.manageLibrary ? (
+              <button
+                type="button"
+                onClick={model.actions.reloadLibrary}
+                className="mt-2 inline-flex min-h-11 items-center rounded-lg border border-red-200 bg-white px-3 py-1.5 text-sm text-red-700 hover:bg-red-50"
+              >
+                重新读取本地库
+              </button>
+            ) : null}
           </p>
         ) : null}
 
@@ -234,7 +294,10 @@ export function WebPackagePickerModal({
             />
           </div>
         ) : (
-          <p className="text-xs text-gray-500">多人模式仅支持可共享的内置预设；本地 ZIP 包不可进入房间配置。</p>
+          <div className="rounded-lg border border-gray-200 bg-gray-50/60 p-3 text-xs leading-5 text-gray-600">
+            <p>多人模式仅支持可共享的内置预设；本地 ZIP 包不可进入房间配置。</p>
+            <p className="mt-1 text-gray-500">需要导入自己的 Web 包时，请在单人模式下打开选择器。</p>
+          </div>
         )}
       </div>
     </BaseModal>

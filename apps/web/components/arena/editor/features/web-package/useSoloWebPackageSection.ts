@@ -313,6 +313,14 @@ export const useSoloWebPackageSectionModel = (input: {
     }
   }, [localLibrary, webPackageRef, setWebPackageRef]);
 
+  // 挂载期的迁移/水合失败此前没有任何原地恢复入口，只能让用户刷新页面。
+  // 这里同时清掉挂载期错误并重读列表：只重读列表的话，挂载期那条错误会一直挂着。
+  const reloadLibrary = useCallback(() => {
+    setLocalLibraryError(null);
+    setMissingArchives(new Set());
+    localLibrary.reload();
+  }, [localLibrary]);
+
   return {
     disabled: disabled || isGenerating,
     active: reportFormat === 'web',
@@ -343,6 +351,7 @@ export const useSoloWebPackageSectionModel = (input: {
       importFile,
       removeFromLibrary,
       setSaveImportedToLibrary: (next: boolean) => setPreference('saveImportedWebPackages', next),
+      reloadLibrary,
     },
   };
 };

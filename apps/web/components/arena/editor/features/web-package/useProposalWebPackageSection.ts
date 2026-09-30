@@ -126,6 +126,8 @@ export const useProposalWebPackageSectionModel = (input: {
       importFile,
       removeFromLibrary: rejectLibraryManagement,
       setSaveImportedToLibrary: rejectSavePreference,
+      // 多人提案没有本地库，也就没有可重试的读取失败。
+      reloadLibrary: () => {},
     },
   };
 };

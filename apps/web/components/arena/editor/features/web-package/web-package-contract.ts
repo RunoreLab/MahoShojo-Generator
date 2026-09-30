@@ -90,5 +90,12 @@ export type ArenaWebPackageSectionModel = Readonly<{
      */
     removeFromLibrary(digest: string): Promise<void>;
     setSaveImportedToLibrary(next: boolean): void;
+    /**
+     * 重新读取本地库列表与挂载期水合。
+     *
+     * `libraryError` 目前只有"刷新页面"这一条恢复途径，用户拿不到任何可点的重试；
+     * 多人模式没有本地库，实现为 no-op。
+     */
+    reloadLibrary(): void;
   }>;
 }>;
