@@ -166,4 +166,25 @@ describe('数据卡页签的 ARIA 与窄屏承载', () => {
     expect(tab('recommended').getAttribute('aria-selected')).toBe('true');
     expect(panel().id).toBe('battle-data-source-panel-recommended');
   });
+
+  it('页签行 sticky 留在滚动容器内，往下翻列表时仍能切页签', async () => {
+    await render();
+
+    const row = rail().closest<HTMLElement>('[class*="sticky"]')!;
+    expect(row).toBeTruthy();
+    expect(row.className).toContain('sticky');
+    expect(row.className).toContain('bg-white');
+    // 不透明底色是必须的，否则卡片会从页签行底下透出来。
+  });
+
+  it('弹窗外壳不再用 vw 定量宽，移动端不会被遮罩 padding 顶出横向滚动', async () => {
+    await render();
+
+    const shell = document.body.querySelector<HTMLElement>('[role="dialog"]')!;
+    // 遮罩自带 p-4，再叠 w-[96vw] 必然超出视口；高度也要用 dvh 才不会被地址栏吃掉。
+    expect(shell.className).not.toContain('vw]');
+    expect(shell.className).not.toMatch(/(^|[^d])vh\]/);
+    expect(shell.className).toContain('w-full');
+    expect(shell.className).toContain('dvh]');
+  });
 });

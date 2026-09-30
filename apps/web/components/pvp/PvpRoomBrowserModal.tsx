@@ -289,7 +289,7 @@ export function PvpRoomBrowserModal({ isOpen, onClose }: Props) {
 
   const modal = (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg p-6 w-[96vw] max-w-[90rem] h-[85vh] max-h-[90vh] overflow-hidden flex flex-col relative">
+      <div className="bg-white rounded-xl p-4 shadow-2xl sm:p-6 w-full max-w-[90rem] h-[85dvh] max-h-[90dvh] overflow-hidden flex flex-col relative">
         <button onClick={onClose} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 z-10">
           <X className="w-6 h-6" />
         </button>

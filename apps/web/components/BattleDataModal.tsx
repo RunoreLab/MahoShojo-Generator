@@ -1583,7 +1583,7 @@ export default function BattleDataModal({
         aria-labelledby={modalTitleId}
         aria-label={modalTitle}
         tabIndex={-1}
-        className="bg-white rounded-lg p-6 w-[96vw] max-w-[90rem] h-[85vh] max-h-[90vh] overflow-hidden flex flex-col relative"
+        className="bg-white rounded-xl p-4 shadow-2xl sm:p-6 w-full max-w-[90rem] h-[85dvh] max-h-[90dvh] overflow-hidden flex flex-col relative"
       >
         <button
           type="button"
@@ -1845,8 +1845,10 @@ export default function BattleDataModal({
             <button type="button" disabled={listLoading} className="ml-3 px-3 py-2 rounded bg-white disabled:opacity-50"
               onClick={reloadActiveList}>重试</button>
           </div>}
-          {/* 标签页切换。窄屏由 ModalTabs 内部横向滚动承载，不再让 flex 收缩把中文标签压成竖排。 */}
-          <div className="flex items-center justify-between gap-2 mb-4 flex-wrap">
+          {/* 标签页切换。窄屏由 ModalTabs 内部横向滚动承载，不再让 flex 收缩把中文标签压成竖排。
+              整行 sticky：卡片网格在滚动容器里，往下翻页时页签必须留在视野内，
+              否则手机上滚到列表底部就再也切不了页签，只能一路滚回顶部。 */}
+          <div className="sticky top-0 z-10 mb-4 flex flex-wrap items-center justify-between gap-2 bg-white py-1">
             <ModalTabs
               idPrefix={TAB_ID_PREFIX}
               ariaLabel={TAB_ARIA_LABEL}

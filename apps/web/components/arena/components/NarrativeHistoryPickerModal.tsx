@@ -118,7 +118,7 @@ export function NarrativeHistoryPickerModal({ isOpen, onClose, initialSelectedId
   const modal = (
     <div className="fixed inset-0 z-40 bg-black/50 flex items-center justify-center p-4" onClick={closeAndReset}>
       <div
-        className="bg-white rounded-lg shadow-xl p-0 w-[96vw] max-w-[72rem] h-[80vh] max-h-[90vh] overflow-hidden flex flex-col"
+        className="bg-white rounded-lg shadow-xl p-0 w-full max-w-[72rem] h-[80dvh] max-h-[90dvh] overflow-hidden flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between p-4 border-b gap-3">
