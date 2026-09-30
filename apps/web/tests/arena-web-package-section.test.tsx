@@ -402,3 +402,64 @@ describe('WebPackageCardGrid 导出忙态', () => {
     expect(buttons[0]!.querySelector('.animate-spin')).toBeNull();
   });
 });
+
+describe('Web 包来源页签的 ARIA 与键盘契约', () => {
+  const tab = (name: 'preset' | 'local') =>
+    document.querySelector<HTMLButtonElement>(`#web-package-source-tab-${name}`)!;
+  const panel = () => document.querySelector<HTMLElement>('[role="tabpanel"]')!;
+  const press = async (key: string) => {
+    await act(async () => {
+      document.querySelector<HTMLElement>('[role="tablist"]')!
+        .dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+    });
+  };
+
+  it('tab 与 tabpanel 一一对应，tablist 只占一个 Tab 停靠点', async () => {
+    await render(model({ capabilities: soloCapabilities }));
+    await openPicker();
+
+    expect(tab('preset').getAttribute('aria-selected')).toBe('true');
+    expect(tab('preset').getAttribute('aria-controls')).toBe('web-package-source-panel-preset');
+    expect(tab('local').getAttribute('aria-controls')).toBe('web-package-source-panel-local');
+    expect(panel().id).toBe('web-package-source-panel-preset');
+    expect(panel().getAttribute('aria-labelledby')).toBe('web-package-source-tab-preset');
+    expect([tab('preset').tabIndex, tab('local').tabIndex]).toEqual([0, -1]);
+  });
+
+  it('方向键在页签间移动并即时选中，Home/End 跳到首尾', async () => {
+    await render(model({ capabilities: soloCapabilities }));
+    await openPicker();
+
+    await press('ArrowRight');
+    expect(tab('local').getAttribute('aria-selected')).toBe('true');
+    expect(panel().id).toBe('web-package-source-panel-local');
+    expect(document.activeElement).toBe(tab('local'));
+    expect(tab('local').tabIndex).toBe(0);
+    expect(tab('preset').tabIndex).toBe(-1);
+
+    // 末端再向右必须回到起点，而不是停在原地。
+    await press('ArrowRight');
+    expect(tab('preset').getAttribute('aria-selected')).toBe('true');
+    await press('ArrowLeft');
+    expect(tab('local').getAttribute('aria-selected')).toBe('true');
+
+    await press('Home');
+    expect(tab('preset').getAttribute('aria-selected')).toBe('true');
+    await press('End');
+    expect(tab('local').getAttribute('aria-selected')).toBe('true');
+  });
+
+  it('多人模式没有本地库页签，panel 也不会指向不存在的页签', async () => {
+    await render(model({
+      capabilities: { importLocal: false, downloadPreset: true, remove: true, replace: true, manageLibrary: false },
+    }));
+    await openPicker();
+
+    expect(document.querySelectorAll('[role="tab"]')).toHaveLength(1);
+    expect(tab('preset').getAttribute('aria-selected')).toBe('true');
+    expect(panel().id).toBe('web-package-source-panel-preset');
+    // 单页签时按方向键不得把选中态弄丢。
+    await press('ArrowRight');
+    expect(tab('preset').getAttribute('aria-selected')).toBe('true');
+  });
+});
