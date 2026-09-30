@@ -1847,7 +1847,9 @@ export default function BattleDataModal({
           </div>}
           {/* 标签页切换。窄屏由 ModalTabs 内部横向滚动承载，不再让 flex 收缩把中文标签压成竖排。
               整行 sticky：卡片网格在滚动容器里，往下翻页时页签必须留在视野内，
-              否则手机上滚到列表底部就再也切不了页签，只能一路滚回顶部。 */}
+              否则手机上滚到列表底部就再也切不了页签，只能一路滚回顶部。
+              z-10 只在「下方内容区已自成一个层叠上下文」时成立——卡片网格的 `isolate` 是
+              这个前提，两处必须一起改，否则卡内浮层会穿透上来。 */}
           <div className="sticky top-0 z-10 mb-4 flex flex-wrap items-center justify-between gap-2 bg-white py-1">
             <ModalTabs
               idPrefix={TAB_ID_PREFIX}
@@ -1953,7 +1955,14 @@ export default function BattleDataModal({
 	                onRetry={listError ? reloadActiveList : undefined}
 	              />
 	            ) : (
-		              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+		              <div
+                        // `isolate` 让网格自成一个层叠上下文。卡片右上角的 +/- 浮层是
+                        // `absolute z-20`，而卡片容器只是 `relative`（z-index 为 auto，不构成
+                        // 层叠上下文），于是这个 z-20 直接和弹窗的 chrome 参与比较，压过上方
+                        // `z-10` 的 sticky 页签行——卡片被遮住了，浮层按钮却还浮在页签行上。
+                        // 隔离后 z-20 只在网格内部生效，sticky 行仍然盖住整片列表。
+                        className="isolate grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4"
+                      >
 		                {displayCards.map((card: any) => {
 		                  const isFavorited = favoriteIds.has(card.id);
 		                  const enableFavorite = isAuthenticated && activeTab !== 'my';

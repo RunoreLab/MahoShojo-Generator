@@ -5,8 +5,9 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { favoritesApi, authStorage } from '@/lib/auth';
 import BattleDataModal from '@/components/BattleDataModal';
-import { resetLocalCardRepository } from '@/lib/local-library/card-repository';
-import { resetLocalLibraryDbConnection } from '@/lib/local-library/db';
+import { IndexedDbCardRepository, resetLocalCardRepository } from '@/lib/local-library/card-repository';
+import { LOCAL_LIBRARY_DB_NAME, resetLocalLibraryDbConnection } from '@/lib/local-library/db';
+import { saveLocalDataCard } from '@/lib/local-library/data-card-digest';
 
 const authState = vi.hoisted(() => ({ isAuthenticated: false }));
 vi.mock('@/lib/useAuth', () => ({ useAuth: () => ({
@@ -26,11 +27,19 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 let root: Root;
 let container: HTMLDivElement;
+let repository: IndexedDbCardRepository;
 
-beforeEach(() => {
+beforeEach(async () => {
   authState.isAuthenticated = false;
   resetLocalLibraryDbConnection();
   resetLocalCardRepository();
+  await new Promise<void>((resolve, reject) => {
+    const request = indexedDB.deleteDatabase(LOCAL_LIBRARY_DB_NAME);
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+    request.onblocked = () => resolve();
+  });
+  repository = new IndexedDbCardRepository();
   vi.spyOn(authStorage, 'getAuthHeader').mockResolvedValue(null);
   vi.spyOn(favoritesApi, 'getFavorites').mockResolvedValue({ success: true, favorites: [] });
   vi.stubGlobal('fetch', vi.fn(async () => Response.json({ success: true, cards: [], items: {}, tags: [] })));
@@ -186,5 +195,27 @@ describe('数据卡页签的 ARIA 与窄屏承载', () => {
     expect(shell.className).not.toMatch(/(^|[^d])vh\]/);
     expect(shell.className).toContain('w-full');
     expect(shell.className).toContain('dvh]');
+  });
+
+  it('卡片网格自成一个层叠上下文，卡内浮层不会穿透到 sticky 页签行之上', async () => {
+    await saveLocalDataCard(
+      repository,
+      { cardType: 'character', title: '本机焰', payload: { name: '本机焰', codename: '本机焰', age: 15 } },
+      () => '2026-09-30T00:00:00.000Z',
+    );
+    await render({ initialTab: 'local', selectionMode: 'multi' });
+
+    const toggle = [...document.body.querySelectorAll('button')]
+      .find((button) => button.textContent === '+' || button.textContent === '-');
+    expect(toggle).toBeDefined();
+    // 浮层自身是 absolute z-20：它必须只和卡片内容比层级，不能和弹窗 chrome 比。
+    expect(toggle!.className).toContain('absolute');
+    expect(toggle!.className).toContain('z-20');
+
+    // jsdom 不做层叠计算，这里锁的是「网格必须是独立层叠上下文」这个类名契约：
+    // 少了 isolate，卡片容器（relative、z-index auto）不构成层叠上下文，
+    // z-20 会直接压过 sticky 页签行的 z-10。
+    const grid = toggle!.closest<HTMLElement>('.grid');
+    expect(grid?.className).toContain('isolate');
   });
 });
