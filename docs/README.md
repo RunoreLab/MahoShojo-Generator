@@ -1,5 +1,7 @@
 # 文档导航
 
+Desktop 客户端落地采用[Desktop Tauri V1 运行时与本地安全边界决策](./decisions/2026-09-30_160000_DesktopTauriV1运行时与本地安全边界决策.md)（当前 `proposed`）、[Desktop 客户端实施规格](./specs/2026-09-30_160000_Desktop客户端实施规格.md)与[Desktop 客户端阶段实施计划](./plans/2026-09-30_160100_Desktop客户端阶段实施计划.md)：Desktop 是独立本地 client runtime，不加载远端页面、不内嵌服务器运行时；capability 只用 `webviews` 粒度且不引入插件；Web Package 必须走独立零 capability webview（Windows 上同源 iframe 会继承宿主 IPC，已由 GHSA-57fm-592m-34r7 核验）；Tauri 版本下限 `>=2.11.1`（CVE-2026-42184 修复版本）；secret 走操作系统凭据存储且 renderer 不可读回；本地库业务语义留在 TypeScript、存储机制在 Rust；内容摘要算法冻结既有语义并版本化演进。ADR 待 D0.5 两个 spike 完成后转 `accepted`。
+
 模态框页签的窄屏承载采用[模态框页签窄屏承载规格](./specs/2026-09-30_113200_模态框页签窄屏承载规格.md)：页签栏统一走 `shared/ModalTabs` 的 WAI-ARIA + 横向滚动 rail，选型依据是 W3C ARIA APG 议题 #2438 与 Material Design 3（两者都把横向滚动列为首选/标准做法，换行堆叠与「更多」菜单被明确否决）；同时修正四处弹窗外壳的 `w-[96vw]` 横向溢出与 `vh` 视口失真。
 
 本地库在 Web 端落地采用[本地库 Web 落地与 BattleDataModal 一等数据源规格](./specs/2026-09-29_200500_本地库Web落地与BattleDataModal一等数据源规格.md)，受[本地库与数据所有权决策](./decisions/2026-08-22_022300_本地库与数据所有权决策.md)约束：数据卡与 Web 包共用独立 IndexedDB `mahoshojo-local-library`，`BattleDataModal` 新增无需登录的「本地库」tab，Web 包的选择与删除移入独立模态框，旧 Web 包缓存一次性迁入后清空。内容摘要去重、整卡替换；「导入时保存到本地库」是持久化的设备偏好。导出/备份/恢复（`LIB-007`）与 Installed APP（`LIB-004`）本轮未实现，文档中已显式标注为未完成。

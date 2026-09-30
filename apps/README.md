@@ -15,5 +15,9 @@ Phase 2.5C 已激活 Hono API 的 source、manifest、测试和构建边界；Ad
 - `desktop`、`mobile`：桌面端与移动端应用边界。
 
 除 `apps/web`、`apps/api`、`apps/d1-gateway` 与 `apps/admin` 边界外，README 或空目录仍只表示
-路线图占位。Desktop、Mobile 尚未激活。应用之间不得直接导入彼此内部源码，共享能力应经
+路线图占位。Mobile 尚未激活。Desktop 已进入骨架激活过程：它按
+[Desktop Tauri V1 运行时与本地安全边界决策](../docs/decisions/2026-09-30_160000_DesktopTauriV1运行时与本地安全边界决策.md)
+成为独立本地 client runtime，不加载远端页面、不内嵌服务器运行时，详见
+[`desktop/README.md`](./desktop/README.md)；只读骨架通过门禁不等于 Direct AI、本地库或发行已交付。
+应用之间不得直接导入彼此内部源码，共享能力应经
 `packages/*` 或版本化协议边界提供。仓库根只保留 workspace 编排、统一门禁与跨 runtime route/migration tooling。
