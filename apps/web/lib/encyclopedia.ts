@@ -299,12 +299,28 @@ export const encyclopediaEntries: EncyclopediaEntry[] = [
     keywords: ['组队', '队伍卡', '/character-party', '合并', '通用角色'],
   },
   {
+    slug: 'local-library',
+    title: '本地库：属于你自己这台设备的数据',
+    summary: '数据卡与 Web 包的本机存储：三个填充入口、去重规则、存储状态、删除导出，以及尚未实现的整库备份。',
+    markdownPath: '/encyclopedia/local-library.md',
+    categoryId: 'guide',
+    keywords: ['本地库', '本地存储', 'IndexedDB', '离线', '设备数据', '不跨设备', '持久化存储', '配额', '存到本地库'],
+  },
+  {
     slug: 'arena',
     title: '竞技场',
     summary: '竞技场与战报生成的基本概念、模式差异与计分触发点。',
     markdownPath: '/encyclopedia/arena.md',
     categoryId: 'gameplay',
     keywords: ['战报', '模式', '计分'],
+  },
+  {
+    slug: 'web-report',
+    title: 'Web 战报：让 AI 直接交一份可以点的战报',
+    summary: '竞技场 Web 战报的使用方式：与 Web 包的区别、两种权限模式、三种下载物的区别、兼容边界与失败自查。',
+    markdownPath: '/encyclopedia/web-report.md',
+    categoryId: 'gameplay',
+    keywords: ['Web战报', 'Web显示', '沙箱', '同源授权', '受限模式', '沉浸显示', 'HTML', '下载', '实验性'],
   },
   {
     slug: 'arena-multiplayer',
