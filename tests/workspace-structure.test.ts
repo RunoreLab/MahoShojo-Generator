@@ -48,6 +48,8 @@ describe('phase 1 workspace structure', () => {
       'apps/*/out/',
       'apps/*/.next/',
       'apps/*/.open-next/',
+      'apps/*/src-tauri/target/',
+      'apps/*/src-tauri/gen/schemas/',
       'packages/*/coverage/',
       'packages/*/build/',
       'packages/*/out/',
@@ -313,6 +315,137 @@ describe('phase 2.5A D1 Gateway workspace app', () => {
         },
       ],
     });
+  });
+});
+
+describe('desktop workspace app ownership', () => {
+  const appDirectory = path.join(rootDirectory, 'apps/desktop');
+  const tauriDirectory = path.join(appDirectory, 'src-tauri');
+
+  it('由 apps/desktop 独占本地 client runtime 的 manifest、构建与运行时源码', () => {
+    for (const relativePath of [
+      'package.json',
+      'README.md',
+      'index.html',
+      'vite.config.ts',
+      'vitest.config.ts',
+      'eslint.config.mjs',
+      'tsconfig.json',
+      'tsconfig.build.json',
+      'src/main.tsx',
+      'src/app/App.tsx',
+      'src/platform/desktop-bridge.ts',
+      'src-tauri/Cargo.toml',
+      'src-tauri/Cargo.lock',
+      'src-tauri/build.rs',
+      'src-tauri/tauri.conf.json',
+      'src-tauri/capabilities/main-ui.json',
+      'src-tauri/src/lib.rs',
+      'src-tauri/src/main.rs',
+    ]) {
+      expect(
+        existsSync(path.join(appDirectory, relativePath)),
+        `apps/desktop/${relativePath} must exist`,
+      ).toBe(true);
+    }
+  });
+
+  it('声明独立 app 生命周期，并把 Rust 编译移出 workspace build', () => {
+    const appManifest = JSON.parse(
+      readFileSync(path.join(appDirectory, 'package.json'), 'utf8'),
+    ) as {
+      name?: string;
+      private?: boolean;
+      type?: string;
+      scripts?: Record<string, string>;
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+    };
+
+    expect(appManifest).toMatchObject({
+      name: '@mahoshojo/desktop',
+      private: true,
+      type: 'module',
+    });
+    for (const scriptName of ['dev', 'test', 'lint', 'build']) {
+      expect(appManifest.scripts?.[scriptName], `missing scripts.${scriptName}`).toEqual(
+        expect.any(String),
+      );
+    }
+
+    // workspace:build 会遍历所有 app，因此 build 只能是前端产物。
+    expect(appManifest.scripts?.build).not.toContain('tauri build');
+    expect(appManifest.scripts?.build).toContain('vite build');
+    expect(appManifest.scripts?.['build:tauri']).toContain('tauri build');
+    expect(appManifest.scripts?.['check:rust']).toContain('cargo test');
+
+    // renderer 侧不引入任何通用原生能力插件。
+    for (const dependencyName of Object.keys(appManifest.dependencies ?? {})) {
+      expect(dependencyName, `renderer dependency ${dependencyName} must not be a native plugin`).not.toMatch(
+        /^@tauri-apps\/plugin-/u,
+      );
+    }
+  });
+
+  it('把 capability 授权面收窄到单个 webview 且不含通配 label', () => {
+    const capability = JSON.parse(
+      readFileSync(path.join(tauriDirectory, 'capabilities', 'main-ui.json'), 'utf8'),
+    ) as {
+      identifier?: string;
+      webviews?: string[];
+      windows?: string[];
+      permissions?: string[];
+    };
+
+    expect(capability.identifier).toBe('main-ui');
+    // windows 命中会启用到该 window 下的所有 webview，因此必须只写 webviews。
+    expect(capability.windows).toBeUndefined();
+    expect(capability.webviews).toEqual(['main-ui']);
+    for (const label of capability.webviews ?? []) {
+      expect(label).not.toContain('*');
+    }
+    for (const permission of capability.permissions ?? []) {
+      expect(permission, `permission ${permission} must not be a plugin or wildcard grant`).not.toMatch(
+        /^(?:[a-z0-9-]+:)?\*$/u,
+      );
+      expect(permission.startsWith('core:')).toBe(true);
+    }
+  });
+
+  it('以结构化方式关闭远程内容、全局 Tauri 对象与 iframe', () => {
+    const tauriConfig = JSON.parse(
+      readFileSync(path.join(tauriDirectory, 'tauri.conf.json'), 'utf8'),
+    ) as {
+      identifier?: string;
+      build?: { devUrl?: string; frontendDist?: string };
+      app?: {
+        withGlobalTauri?: boolean;
+        windows?: { label?: string }[];
+        security?: { capabilities?: string[]; csp?: string | null };
+      };
+      bundle?: { active?: boolean; createUpdaterArtifacts?: boolean };
+      plugins?: Record<string, unknown>;
+    };
+
+    expect(tauriConfig.identifier).not.toBe('com.tauri.dev');
+    expect(tauriConfig.build?.frontendDist).toBe('../dist');
+    expect(tauriConfig.build?.devUrl).toMatch(/^http:\/\/localhost:\d+$/u);
+    expect(tauriConfig.app?.withGlobalTauri).toBe(false);
+    expect(tauriConfig.app?.windows?.map((window) => window.label)).toEqual(['main-ui']);
+    expect(tauriConfig.app?.security?.capabilities).toEqual(['main-ui']);
+
+    const csp = tauriConfig.app?.security?.csp;
+    expect(csp, 'desktop must declare an explicit CSP').toEqual(expect.any(String));
+    expect(csp).toContain("default-src 'self'");
+    expect(csp).toContain("script-src 'self'");
+    expect(csp).not.toContain('unsafe-eval');
+    expect(csp).not.toContain("script-src *");
+    // 不可信内容只能走独立 webview，因此主文档内不允许任何 frame。
+    expect(csp).toContain("frame-src 'none'");
+
+    // 发行与 updater 属于 D5，D0 不预先打开。
+    expect(tauriConfig.bundle?.createUpdaterArtifacts).toBe(false);
+    expect(Object.keys(tauriConfig.plugins ?? {})).toEqual([]);
   });
 });
 

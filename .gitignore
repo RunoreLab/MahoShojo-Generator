@@ -31,6 +31,8 @@ apps/*/out/
 apps/*/.next/
 apps/*/.open-next/
 apps/*/.wrangler/
+apps/*/src-tauri/target/
+apps/*/src-tauri/gen/schemas/
 packages/*/coverage/
 packages/*/build/
 packages/*/out/

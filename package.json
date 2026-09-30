@@ -50,7 +50,12 @@
     "ci:verify:checks": "pnpm run workspace:checks && pnpm run test:repo && pnpm run lint:repo",
     "ci:verify": "pnpm run workspace:verify && pnpm run test:repo && pnpm run lint:repo",
     "generate:web-package-presets": "node scripts/generate-web-package-presets.mjs",
-    "check:web-package-presets": "node scripts/generate-web-package-presets.mjs --check"
+    "check:web-package-presets": "node scripts/generate-web-package-presets.mjs --check",
+    "dev:desktop": "pnpm --filter @mahoshojo/desktop run dev:tauri",
+    "build:desktop": "pnpm --filter @mahoshojo/desktop run build:tauri",
+    "test:desktop": "pnpm --filter @mahoshojo/desktop run test",
+    "lint:desktop": "pnpm --filter @mahoshojo/desktop run lint",
+    "check:desktop:rust": "pnpm --filter @mahoshojo/desktop run check:rust"
   },
   "devDependencies": {
     "@types/node": "^20",

@@ -4,7 +4,19 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import parser from '@typescript-eslint/parser';
 
 const SOURCE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.mts', '.cts']);
-const IGNORED_DIRECTORIES = new Set(['.git', '.next', '.open-next', 'build', 'coverage', 'dist', 'node_modules', 'out']);
+const IGNORED_DIRECTORIES = new Set([
+  '.git',
+  '.next',
+  '.open-next',
+  'build',
+  'coverage',
+  'dist',
+  'node_modules',
+  'out',
+  // Rust 构建树。apps/desktop/src-tauri/target 体积巨大且不含需要参与边界检查的源码，
+  // 不忽略会让每次门禁都遍历整个 target 目录。
+  'target',
+]);
 const ROOT_TOOLING_DIRECTORIES = ['scripts', 'tests'];
 const CLIENT_PACKAGE_NAMES = new Set(['ai-direct', 'local-library', 'cloud-client', 'ui-web']);
 const REQUIRED_WORKSPACE_SCRIPTS = ['test', 'lint', 'build'];
