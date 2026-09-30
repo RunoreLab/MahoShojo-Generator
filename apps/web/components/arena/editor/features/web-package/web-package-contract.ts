@@ -70,7 +70,8 @@ export type ArenaWebPackageSectionModel = Readonly<{
    */
   libraryError: string | null;
   importing: boolean;
-  downloading: boolean;
+  /** 正在导出 ZIP 的条目 digest；null 表示空闲。 */
+  downloadingDigest: string | null;
   /** 正在执行删除/导出的条目 digest。 */
   busyDigest: string | null;
   /** 「导入时保存到本地库」偏好。 */

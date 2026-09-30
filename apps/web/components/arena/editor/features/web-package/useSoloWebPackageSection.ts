@@ -90,7 +90,7 @@ export const useSoloWebPackageSectionModel = (input: {
   const [missingArchives, setMissingArchives] = useState<ReadonlySet<string>>(new Set());
   const { preferences, setPreference } = useLocalLibraryPreferences();
   const localLibrary = useLocalWebPackages(allowLocalImport);
-  const { downloading, downloadError, downloadPreset } = useWebPackagePresetDownload();
+  const { downloadingDigest, downloadError, downloadPreset } = useWebPackagePresetDownload();
 
   useEffect(() => {
     let active = true;
@@ -323,7 +323,7 @@ export const useSoloWebPackageSectionModel = (input: {
     // 后者不能——库里确实有包，只是这一次没导出来。
     libraryError,
     importing,
-    downloading,
+    downloadingDigest,
     busyDigest,
     saveImportedToLibrary: preferences.saveImportedWebPackages,
     capabilities: {

@@ -34,7 +34,7 @@ export const useProposalWebPackageSectionModel = (input: {
   disabled: boolean;
   onActionError(message: string): void;
 }): ArenaWebPackageSectionModel => {
-  const { downloading, downloadError, downloadPreset } = useWebPackagePresetDownload();
+  const { downloadingDigest, downloadError, downloadPreset } = useWebPackagePresetDownload();
   const session = useArenaEditorSession();
   const reportFormat = useArenaEditorSelector((state) => state.reportFormat);
   const webPackageRef = useArenaEditorSelector((state) => state.webPackageRef);
@@ -108,7 +108,7 @@ export const useProposalWebPackageSectionModel = (input: {
     // 多人提案没有本地库，不存在列表读取失败。
     libraryError: null,
     importing: false,
-    downloading,
+    downloadingDigest,
     busyDigest: null,
     saveImportedToLibrary: false,
     capabilities: {

@@ -1,6 +1,6 @@
 'use client';
 
-import { Download, HardDrive, Info, Package, Trash2 } from 'lucide-react';
+import { Download, HardDrive, Info, Loader2, Package, Trash2 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
 /**
@@ -71,6 +71,7 @@ export function WebPackageCardGrid({
   onDelete,
   onViewDetails,
   busyDigest,
+  downloadingDigest,
   deletable,
 }: {
   items: readonly WebPackageCardItem[];
@@ -83,6 +84,8 @@ export function WebPackageCardGrid({
   onDelete?: (item: WebPackageCardItem) => void;
   onViewDetails?: (item: WebPackageCardItem) => void;
   busyDigest?: string | null;
+  /** 正在导出 ZIP 的条目；只让这张卡转圈，其余卡片的导出入口保持可用。 */
+  downloadingDigest?: string | null;
   /** 逐项决定是否给出删除入口；未提供时对所有条目开放。 */
   deletable?: (item: WebPackageCardItem) => boolean;
 }) {
@@ -108,6 +111,7 @@ export function WebPackageCardGrid({
         {paged.map((item) => {
           const selected = item.digest === selectedDigest;
           const busy = busyDigest === item.digest;
+          const downloading = downloadingDigest === item.digest;
           return (
             <div
               key={item.digest}
@@ -159,11 +163,14 @@ export function WebPackageCardGrid({
                     label="下载"
                     title={`下载 Web 包 ZIP：${item.title}`}
                     // 下载是只读的本地动作，与"正在生成"无关：生成期间也必须可用，
-                    // 否则用户无法在等待时取得预设 ZIP。
-                    disabled={busy || item.broken === true}
+                    // 否则用户无法在等待时取得预设 ZIP。只有同一张卡正在导出才禁用，
+                    // 否则会把整页卡片的导出入口一起锁掉。
+                    disabled={busy || downloading || item.broken === true}
                     onClick={() => onDownload(item)}
                   >
-                    <Download className="h-4 w-4" />
+                    {downloading
+                      ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                      : <Download className="h-4 w-4" />}
                   </CardAction>
                 ) : null}
                 {onDelete && (deletable?.(item) ?? true) ? (

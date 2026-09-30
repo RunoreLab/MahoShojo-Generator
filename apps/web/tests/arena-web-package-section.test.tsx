@@ -37,8 +37,9 @@ const model = (overrides: Partial<ArenaWebPackageSectionModel> = {}): ArenaWebPa
   library: [libraryItem],
   importFeedback: null,
   downloadError: null,
+  libraryError: null,
   importing: false,
-  downloading: false,
+  downloadingDigest: null,
   busyDigest: null,
   saveImportedToLibrary: false,
   capabilities: {
@@ -373,5 +374,31 @@ describe('ArenaWebPackageSection', () => {
     // 库记录被别处清掉：确认框必须跟着消失，而不是等这条记录再次出现时无声弹回。
     await render(model({ capabilities: soloCapabilities, library: [] }));
     expect(document.querySelector('[aria-labelledby="web-package-remove-title"]')).toBeNull();
+  });
+});
+
+describe('WebPackageCardGrid 导出忙态', () => {
+  it('只锁住正在导出的那张卡，其余卡片的下载入口保持可用', async () => {
+    const many = Array.from({ length: 3 }, (_, index) => ({
+      digest: `sha256:${String(index).padStart(2, '0')}${'e'.repeat(62)}`,
+      title: `预设 ${index}`,
+      kind: 'builtin' as const,
+      ref: { id: `preset.${index}`, version: '1.0.0', digest: `sha256:${String(index).padStart(2, '0')}${'e'.repeat(62)}` },
+      summary: `描述 ${index}`,
+    }));
+    await render(model({
+      capabilities: soloCapabilities,
+      presets: many,
+      library: [],
+      downloadingDigest: many[1]!.digest,
+    }));
+    await openPicker();
+
+    const buttons = many.map((option) =>
+      document.querySelector<HTMLButtonElement>(`[title="下载 Web 包 ZIP：${option.title}"]`)!);
+    expect(buttons.map((button) => button.disabled)).toEqual([false, true, false]);
+    // 正在导出的那张卡片显示转圈，其余仍是下载图标。
+    expect(buttons[1]!.querySelector('.animate-spin')).toBeTruthy();
+    expect(buttons[0]!.querySelector('.animate-spin')).toBeNull();
   });
 });

@@ -108,6 +108,7 @@ export function WebPackagePickerModal({
             selectedDigest={model.selected?.digest ?? null}
             disabled={disabled}
             busyDigest={model.busyDigest}
+            downloadingDigest={model.downloadingDigest}
             emptyHint="没有匹配的内置 Web 包预设。"
             onSelect={(digest) => { model.actions.select(digest); onClose(); }}
             onDownload={model.capabilities.downloadPreset
@@ -122,6 +123,7 @@ export function WebPackagePickerModal({
             selectedDigest={model.selected?.digest ?? null}
             disabled={disabled}
             busyDigest={model.busyDigest}
+            downloadingDigest={model.downloadingDigest}
             emptyHint={model.libraryError
               ? '本地库暂时读不出来，这里显示不出已保存的 Web 包。'
               : '还没有本地 Web 包。导入本地 ZIP 即可使用；勾选「导入时保存到本地库」可让它在刷新后依然存在。'}
