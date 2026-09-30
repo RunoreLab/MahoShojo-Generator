@@ -43,7 +43,8 @@
   "scripts": {
     "test": "vitest run --config vitest.config.ts",
     "lint": "eslint src tests --config eslint.config.mjs",
-    "build": "tsc --noEmit -p tsconfig.json"
+    "build": "tsc --noEmit -p tsconfig.json",
+    "fixture:regenerate": "node --experimental-strip-types tests/regenerate-digest-fixture.ts"
   },
   "dependencies": {
     "@mahoshojo/contracts": "workspace:*",
