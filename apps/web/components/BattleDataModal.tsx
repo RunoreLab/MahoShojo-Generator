@@ -27,6 +27,7 @@ import { ChevronDown, Filter } from 'lucide-react';
 import DecksModal from './DecksModal';
 import { BaseModal } from './shared/BaseModal';
 import { ModalTabs, modalTabIds, type ModalTabItem } from './shared/ModalTabs';
+import { buttonClassName } from './shared/ui';
 import { DataCardEmptyState } from './shared/DataCardEmptyState';
 import { LocalLibraryStatusNote } from './shared/LocalLibraryStatusNote';
 import { getDataCardStatus } from '@/lib/data-card-status';
@@ -2062,7 +2063,13 @@ export default function BattleDataModal({
             ))
           ) &&
             <div className="flex justify-center items-center gap-2 pt-4 border-t mt-4">
-              <button onClick={() => handlePageChange(currentPage - 1)} disabled={currentPage === 1} className="page-button">上一页</button>
+              <button
+                onClick={() => handlePageChange(currentPage - 1)}
+                disabled={currentPage === 1}
+                className={buttonClassName({ variant: 'secondary', size: 'md' })}
+              >
+                上一页
+              </button>
               <span className="text-sm text-gray-600">
                 第 {currentPage} 页
                 {currentTabTotalPages ? ` / ${currentTabTotalPages}` : ''}
@@ -2080,7 +2087,7 @@ export default function BattleDataModal({
                           ? currentPage >= publicTotalPages
                           : displayCards.length < cardsPerPage
                 }
-                className="page-button"
+                className={buttonClassName({ variant: 'secondary', size: 'md' })}
               >
                 下一页
               </button>

@@ -3,6 +3,8 @@
 import { Download, HardDrive, Info, Loader2, Package, Trash2 } from 'lucide-react';
 import { useMemo, useState, type ReactNode } from 'react';
 
+import { buttonClassName } from '@/components/shared/ui';
+
 /**
  * Web 包卡片网格。
  *
@@ -195,9 +197,23 @@ export function WebPackageCardGrid({
 
       {totalPages > 1 ? (
         <div className="flex items-center justify-center gap-2 text-sm">
-          <button type="button" className="page-button" disabled={safePage <= 1} onClick={() => setPage(safePage - 1)}>上一页</button>
+          <button
+            type="button"
+            className={buttonClassName({ variant: 'secondary', size: 'md' })}
+            disabled={safePage <= 1}
+            onClick={() => setPage(safePage - 1)}
+          >
+            上一页
+          </button>
           <span className="text-gray-600">第 {safePage} / {totalPages} 页</span>
-          <button type="button" className="page-button" disabled={safePage >= totalPages} onClick={() => setPage(safePage + 1)}>下一页</button>
+          <button
+            type="button"
+            className={buttonClassName({ variant: 'secondary', size: 'md' })}
+            disabled={safePage >= totalPages}
+            onClick={() => setPage(safePage + 1)}
+          >
+            下一页
+          </button>
         </div>
       ) : null}
     </div>

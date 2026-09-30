@@ -45,6 +45,16 @@
     @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-200;
     @apply disabled:cursor-not-allowed disabled:opacity-50;
   }
+
+  .animate-fade-in-down {
+    animation: fadeInDown 0.18s ease-out;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .animate-fade-in-down {
+      animation: none;
+    }
+  }
 }
 
 :root {
@@ -502,6 +512,20 @@ body.announcement-visible {
 
   to {
     opacity: 1;
+  }
+}
+
+/* 披露式面板自上而下展开。BattleDataModal 的高级筛选面板一直在引用
+   `animate-fade-in-down`，但这条 keyframes 从未定义，展开实际是瞬间弹出。 */
+@keyframes fadeInDown {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 
