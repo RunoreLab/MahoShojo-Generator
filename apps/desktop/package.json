@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@mahoshojo/ai-core": "workspace:*",
+    "@mahoshojo/ai-direct": "workspace:*",
     "@mahoshojo/contracts": "workspace:*",
     "@tauri-apps/api": "^2.12.0",
     "react": "^19.2.1",

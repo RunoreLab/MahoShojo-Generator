@@ -35,7 +35,7 @@ const DELTA_FLUSH_INTERVAL: Duration = Duration::from_millis(40);
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(180);
 
 #[cfg(test)]
-const STREAM_FIXTURE: &str =
+pub(crate) const STREAM_FIXTURE: &str =
     include_str!("../../../../packages/contracts/fixtures/ai-stream-events.json");
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
@@ -93,7 +93,7 @@ pub enum AiStreamEvent {
 
 impl AiStreamEvent {
     #[cfg(test)]
-    fn identity(&self) -> (&str, u32, AiExecutionMode) {
+    pub(crate) fn identity(&self) -> (&str, u32, AiExecutionMode) {
         match self {
             AiStreamEvent::Started {
                 request_id,
@@ -343,12 +343,52 @@ impl RequestRegistry {
 // 上游事件映射
 // ---------------------------------------------------------------------------
 
+/// 上游 usage 的原始形状。
+///
+/// **不能**直接用 `AiExecutionUsage` 反序列化：OpenAI-compatible 家族实际发送的是
+/// `prompt_tokens` / `completion_tokens` 这类 snake_case 字段，而我们的契约形状是
+/// camelCode 的 `inputTokens` / `outputTokens`。直接反序列化会因为 `#[serde(default)]`
+/// 而静默变成全 None——一个不会报错、只会让 token 统计消失的缺陷。
+#[derive(Debug, Clone, Default, Deserialize)]
+struct UpstreamUsage {
+    #[serde(default)]
+    prompt_tokens: Option<u64>,
+    #[serde(default)]
+    completion_tokens: Option<u64>,
+    #[serde(default)]
+    reasoning_tokens: Option<u64>,
+    #[serde(default)]
+    total_tokens: Option<u64>,
+    #[serde(default)]
+    prompt_tokens_details: Option<UpstreamPromptTokensDetails>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct UpstreamPromptTokensDetails {
+    #[serde(default)]
+    cached_tokens: Option<u64>,
+}
+
+impl UpstreamUsage {
+    fn into_contract(self) -> AiExecutionUsage {
+        AiExecutionUsage {
+            input_tokens: self.prompt_tokens,
+            output_tokens: self.completion_tokens,
+            reasoning_tokens: self.reasoning_tokens,
+            cached_input_tokens: self
+                .prompt_tokens_details
+                .and_then(|details| details.cached_tokens),
+            total_tokens: self.total_tokens,
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct UpstreamChunk {
     #[serde(default)]
     choices: Vec<UpstreamChoice>,
     #[serde(default)]
-    usage: Option<AiExecutionUsage>,
+    usage: Option<UpstreamUsage>,
     #[serde(default)]
     error: Option<UpstreamError>,
 }
@@ -438,20 +478,18 @@ fn build_request_body(
 }
 
 fn build_endpoint(profile: &DirectProviderExecutionProfile) -> Result<url::Url, DirectAiError> {
-    let base = url::Url::parse(&profile.base_url).map_err(|_| {
+    let mut endpoint = url::Url::parse(&profile.base_url).map_err(|_| {
         DirectAiError::new(
             DirectAiErrorCode::ProfileRejected,
             "profile base URL is invalid",
         )
     })?;
-    let mut endpoint = base.join("chat/completions").map_err(|_| {
-        DirectAiError::new(
-            DirectAiErrorCode::ProfileRejected,
-            "cannot build the chat completions endpoint",
-        )
-    })?;
-    // Profile 的 baseUrl 是 OpenAI-compatible 根（含 /v1）。显式清空 query 与 fragment，
-    // 避免用户误配的查询参数把凭据带到意料之外的位置。
+    // 必须按路径**追加**而不是用 Url::join：base 形如 `.../v1` 时，join 会把 `v1`
+    // 当成文件名替换掉，得到 `/chat/completions`，从而丢掉 OpenAI-compatible 根路径。
+    let base_path = endpoint.path().trim_end_matches('/');
+    endpoint.set_path(&format!("{base_path}/chat/completions"));
+    // Profile 的 baseUrl 是 API 根。显式清空 query 与 fragment，避免用户误配的查询参数
+    // 把凭据带到意料之外的位置。
     endpoint.set_query(None);
     endpoint.set_fragment(None);
     Ok(endpoint)
@@ -578,10 +616,23 @@ fn map_http_status(status: reqwest::StatusCode) -> DirectAiErrorCode {
     }
 }
 
-fn emit_event(
-    on_event: &Channel<AiStreamEvent>,
-    event: AiStreamEvent,
-) -> Result<(), DirectAiError> {
+/// 流事件的汇。
+///
+/// 抽象成 trait 而不是直接用 `Channel`：流折叠逻辑（delta 聚合、单一终态、取消）必须能在
+/// 没有 Tauri 运行时的测试里被完整驱动。把 IPC 留在实现层，才能对"取消真的中止了上游"
+/// 写端到端断言，而不是只能靠 code review。
+pub trait EventSink: Sync {
+    // 需要 Sync：\&dyn EventSink\ 会跨 await 点被持有，因此必须随 future 一起是 Send。
+    fn send(&self, event: AiStreamEvent) -> Result<(), ()>;
+}
+
+impl EventSink for Channel<AiStreamEvent> {
+    fn send(&self, event: AiStreamEvent) -> Result<(), ()> {
+        Channel::send(self, event).map_err(|_| ())
+    }
+}
+
+fn emit_event(on_event: &dyn EventSink, event: AiStreamEvent) -> Result<(), DirectAiError> {
     on_event.send(event).map_err(|_| {
         DirectAiError::new(DirectAiErrorCode::Cancelled, "the event channel was closed")
     })
@@ -589,7 +640,7 @@ fn emit_event(
 
 #[allow(clippy::too_many_arguments)]
 fn emit_terminal(
-    on_event: &Channel<AiStreamEvent>,
+    on_event: &dyn EventSink,
     request_id: &str,
     contract_version: u32,
     mode: AiExecutionMode,
@@ -619,7 +670,7 @@ pub async fn run_stream(
     upstream: reqwest::Response,
     request: &AiExecutionRequest,
     token: CancellationToken,
-    on_event: Channel<AiStreamEvent>,
+    on_event: &dyn EventSink,
 ) -> Result<(), DirectAiError> {
     let request_id = request.request_id.clone();
     let contract_version = request.contract_version;
@@ -627,7 +678,7 @@ pub async fn run_stream(
 
     let mut sequence: u32 = 0;
     emit_event(
-        &on_event,
+        on_event,
         AiStreamEvent::Started {
             request_id: request_id.clone(),
             contract_version,
@@ -644,8 +695,11 @@ pub async fn run_stream(
     let mut finish_reason = AiExecutionFinishReason::Other;
     let mut pending_text = String::new();
     let mut pending_reasoning = String::new();
-    let mut last_flush = tokio::time::Instant::now();
     let mut saw_done = false;
+    // 定时器必须独立于 chunk 到达：否则上游一旦停顿（例如本地模型首 token 很慢），
+    // 已经缓冲的正文会一直留在缓冲区里，用户看不到任何输出。
+    let mut flush_tick = tokio::time::interval(DELTA_FLUSH_INTERVAL);
+    flush_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
     let flush = |pending_text: &mut String,
                  pending_reasoning: &mut String,
@@ -693,6 +747,13 @@ pub async fn run_stream(
             _ = token.cancelled() => {
                 failure = Some(DirectAiError::new(DirectAiErrorCode::Cancelled, "cancelled by the client"));
                 break;
+            }
+            _ = flush_tick.tick() => {
+                if let Err(error) = flush(&mut pending_text, &mut pending_reasoning, &mut sequence) {
+                    failure = Some(error);
+                    break;
+                }
+                continue;
             }
             chunk = stream.next() => chunk,
         };
@@ -753,18 +814,19 @@ pub async fn run_stream(
                     }
 
                     if let Some(reported_usage) = chunk.usage {
+                        let contract_usage = reported_usage.into_contract();
                         emit_event(
-                            &on_event,
+                            on_event,
                             AiStreamEvent::Usage {
                                 request_id: request_id.clone(),
                                 contract_version,
                                 mode,
                                 sequence,
-                                usage: reported_usage.clone(),
+                                usage: contract_usage.clone(),
                             },
                         )?;
                         sequence += 1;
-                        usage = Some(reported_usage);
+                        usage = Some(contract_usage);
                     }
 
                     for choice in chunk.choices {
@@ -792,15 +854,14 @@ pub async fn run_stream(
             break;
         }
 
+        // 达到阈值就立即冲刷，不等下一个 tick：长正文下阈值触发比定时更关键。
         let due = pending_text.chars().count() >= DELTA_FLUSH_CHARS
-            || pending_reasoning.chars().count() >= DELTA_FLUSH_CHARS
-            || last_flush.elapsed() >= DELTA_FLUSH_INTERVAL;
+            || pending_reasoning.chars().count() >= DELTA_FLUSH_CHARS;
         if due {
             if let Err(error) = flush(&mut pending_text, &mut pending_reasoning, &mut sequence) {
                 failure = Some(error);
                 break;
             }
-            last_flush = tokio::time::Instant::now();
         }
     }
 
@@ -847,7 +908,7 @@ pub async fn run_stream(
             }),
         };
         return emit_terminal(
-            &on_event,
+            on_event,
             &request_id,
             contract_version,
             mode,
@@ -871,7 +932,7 @@ pub async fn run_stream(
             },
         });
         return emit_terminal(
-            &on_event,
+            on_event,
             &request_id,
             contract_version,
             mode,
@@ -893,7 +954,7 @@ pub async fn run_stream(
         usage: usage.clone(),
     });
     emit_terminal(
-        &on_event,
+        on_event,
         &request_id,
         contract_version,
         mode,
@@ -923,7 +984,7 @@ pub async fn stream_direct_ai(
     store: &LocalStore,
     secrets: &dyn SecretStore,
     registry: &RequestRegistry,
-    on_event: Channel<AiStreamEvent>,
+    on_event: &dyn EventSink,
 ) -> Result<(), DirectAiError> {
     if request.mode != AiExecutionMode::DirectLocal && request.mode != AiExecutionMode::DirectRemote
     {
@@ -967,7 +1028,7 @@ async fn stream_direct_ai_inner(
     request: &AiExecutionRequest,
     secrets: &dyn SecretStore,
     token: CancellationToken,
-    on_event: Channel<AiStreamEvent>,
+    on_event: &dyn EventSink,
 ) -> Result<(), DirectAiError> {
     let client = build_http_client(profile.max_redirects())?;
     let endpoint = build_endpoint(profile)?;
@@ -1006,164 +1067,4 @@ async fn stream_direct_ai_inner(
     run_stream(upstream, request, token, on_event)
         .await
         .map(|_| ())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{
-        AiExecutionMode, AiExecutionResult, AiStreamEvent, RequestRegistry, STREAM_FIXTURE,
-    };
-
-    #[test]
-    fn deserializes_every_event_shape_from_the_shared_typescript_fixture() {
-        let fixture: serde_json::Value =
-            serde_json::from_str(STREAM_FIXTURE).expect("shared fixture must be valid JSON");
-        let raw_events = fixture["events"]
-            .as_array()
-            .expect("fixture must contain an events array");
-        assert!(
-            raw_events.len() >= 5,
-            "fixture must cover every event variant"
-        );
-
-        let mut parsed: Vec<AiStreamEvent> = Vec::new();
-        for raw in raw_events {
-            parsed.push(
-                serde_json::from_value(raw.clone())
-                    .unwrap_or_else(|error| panic!("failed to parse {raw}: {error}")),
-            );
-        }
-
-        // 事件种类覆盖度：started / text-delta / reasoning-delta / usage / result 三种终态。
-        assert!(parsed
-            .iter()
-            .any(|event| matches!(event, AiStreamEvent::Started { .. })));
-        assert!(parsed
-            .iter()
-            .any(|event| matches!(event, AiStreamEvent::TextDelta { .. })));
-        assert!(parsed
-            .iter()
-            .any(|event| matches!(event, AiStreamEvent::ReasoningDelta { .. })));
-        assert!(parsed
-            .iter()
-            .any(|event| matches!(event, AiStreamEvent::Usage { .. })));
-
-        let terminals: Vec<&AiExecutionResult> = parsed
-            .iter()
-            .filter_map(|event| match event {
-                AiStreamEvent::Result { result, .. } => Some(result),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(
-            terminals.len(),
-            3,
-            "fixture must cover all terminal statuses"
-        );
-        assert!(terminals
-            .iter()
-            .any(|result| matches!(result, AiExecutionResult::Completed(_))));
-        assert!(terminals
-            .iter()
-            .any(|result| matches!(result, AiExecutionResult::Failed(_))));
-        assert!(terminals
-            .iter()
-            .any(|result| matches!(result, AiExecutionResult::Cancelled(_))));
-    }
-
-    #[test]
-    fn round_trips_events_without_dropping_fields() {
-        let fixture: serde_json::Value =
-            serde_json::from_str(STREAM_FIXTURE).expect("shared fixture must be valid JSON");
-
-        for raw in fixture["events"].as_array().expect("events array") {
-            let parsed: AiStreamEvent =
-                serde_json::from_value(raw.clone()).expect("event must parse");
-            let echoed = serde_json::to_value(&parsed).expect("event must serialize");
-            assert_eq!(
-                echoed, *raw,
-                "re-serializing {raw} must reproduce the original document"
-            );
-        }
-    }
-
-    #[test]
-    fn identity_is_extractable_from_every_variant() {
-        let fixture: serde_json::Value =
-            serde_json::from_str(STREAM_FIXTURE).expect("shared fixture must be valid JSON");
-        for raw in fixture["events"].as_array().expect("events array") {
-            let parsed: AiStreamEvent =
-                serde_json::from_value(raw.clone()).expect("event must parse");
-            let (request_id, contract_version, mode) = parsed.identity();
-            assert_eq!(request_id, raw["requestId"].as_str().expect("requestId"));
-            assert_eq!(
-                contract_version,
-                raw["contractVersion"].as_u64().expect("version") as u32
-            );
-            assert_eq!(
-                mode,
-                match raw["mode"].as_str().expect("mode") {
-                    "direct-local" => AiExecutionMode::DirectLocal,
-                    "direct-remote" => AiExecutionMode::DirectRemote,
-                    other => panic!("fixture uses an unhandled mode: {other}"),
-                }
-            );
-        }
-    }
-
-    #[test]
-    fn documents_that_unknown_event_fields_are_ignored_rather_than_rejected() {
-        // serde 不支持在 internally tagged enum 上使用 deny_unknown_fields，未知字段会被
-        // 静默忽略。这不是我们想要的性质，但当前无法在类型层面强制。
-        //
-        // 实际风险由另外两道门禁兜住：事件字段集合由 TypeScript 侧的 zod schema 单点定义，
-        // 且任何字段改名都会让跨运行时 fixture 的双向断言失败。
-        let event = serde_json::json!({
-            "type": "started",
-            "requestId": "req-1",
-            "contractVersion": 1,
-            "mode": "direct-local",
-            "sequence": 0,
-            "unexpected": true
-        });
-        let parsed: AiStreamEvent =
-            serde_json::from_value(event).expect("internally tagged enums ignore unknown fields");
-        assert_eq!(parsed.identity().0, "req-1");
-    }
-
-    #[test]
-    fn registry_rejects_duplicate_in_flight_request_ids() {
-        let registry = RequestRegistry::default();
-        let _token = registry
-            .register("req-1")
-            .expect("first register must succeed");
-        assert!(registry.register("req-1").is_err());
-        assert_eq!(registry.len(), 1);
-    }
-
-    #[test]
-    fn registry_cancel_reports_whether_it_hit_an_in_flight_request() {
-        let registry = RequestRegistry::default();
-        assert!(!registry.cancel("never-registered"));
-
-        let token = registry.register("req-1").expect("register");
-        assert!(!token.is_cancelled());
-        assert!(registry.cancel("req-1"));
-        assert!(
-            token.is_cancelled(),
-            "cancel must reach the upstream handle"
-        );
-    }
-
-    #[test]
-    fn registry_finish_releases_the_entry_so_the_id_can_be_reused() {
-        let registry = RequestRegistry::default();
-        registry.register("req-1").expect("register");
-        registry.finish("req-1");
-        assert_eq!(registry.len(), 0);
-        assert!(!registry.cancel("req-1"));
-        registry
-            .register("req-1")
-            .expect("id must be reusable after finish");
-    }
 }

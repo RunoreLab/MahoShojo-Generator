@@ -10,6 +10,10 @@
 //! （见 `PLAN-desktop-client-v1`）。
 
 mod ai;
+#[cfg(test)]
+mod ai_contract_tests;
+#[cfg(test)]
+mod ai_e2e_tests;
 mod provider_profile;
 mod secret;
 mod sse;
@@ -161,7 +165,7 @@ async fn stream_direct_ai(
         &store,
         secrets.inner().as_ref(),
         &registry,
-        on_event,
+        &on_event,
     )
     .await
 }

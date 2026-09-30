@@ -31,9 +31,22 @@ interface InvokeFn {
   (command: string, args?: Record<string, unknown>): Promise<unknown>;
 }
 
+/** Channel 的最小结构。Tauri 的 `Channel` 满足它。 */
+export interface DirectAiChannel {
+  onmessage?: (event: AiStreamEvent) => void;
+}
+
 export interface DesktopAiExecutionOptions {
   invoke: InvokeFn;
   profileId: string;
+  /**
+   * Channel 工厂，默认使用 Tauri 的 `Channel`。
+   *
+   * 之所以留成可替换：真实 `Channel` 依赖 WebView 的 `window` 与 IPC internals，在 node
+   * 测试环境下不存在。为了测流式交付顺序而引入整套 DOM 测试环境不划算，因此在 IPC
+   * 边界注入替身，而不是伪造全局。
+   */
+  createChannel?: () => DirectAiChannel;
 }
 
 const toAiError = (command: string, cause: unknown): DesktopAiError => {
@@ -60,7 +73,7 @@ export const openDirectAiStream = (
   request: { requestId: string; contractVersion: number },
   onEvent: (event: AiStreamEvent) => void,
 ): Promise<void> => {
-  const channel = new Channel<AiStreamEvent>();
+  const channel = (options.createChannel ?? (() => new Channel<AiStreamEvent>()))();
   channel.onmessage = onEvent;
 
   return options

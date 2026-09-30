@@ -35,3 +35,6 @@ export {
   openDirectAiStream,
 } from './direct-ai-bridge';
 export type { DesktopAiExecutionOptions } from './direct-ai-bridge';
+
+export { createDesktopAiExecutionPort } from './desktop-ai-execution';
+export type { DirectAiChannel } from './direct-ai-bridge';

@@ -54,6 +54,11 @@ pub struct SecretStoreError {
 }
 
 impl SecretStoreError {
+    #[cfg(test)]
+    pub(crate) fn failure_for_test() -> Self {
+        Self::failure()
+    }
+
     fn invalid_ref() -> Self {
         Self {
             code: SecretStoreErrorCode::InvalidSecretRef,
