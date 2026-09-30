@@ -1,0 +1,22 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-surface: oklch(0.18 0.012 300);
+  --color-surface-raised: oklch(0.23 0.014 300);
+  --color-ink: oklch(0.94 0.006 300);
+  --color-ink-muted: oklch(0.72 0.01 300);
+  --color-accent: oklch(0.78 0.16 350);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-surface);
+  color: var(--color-ink);
+  font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+}
