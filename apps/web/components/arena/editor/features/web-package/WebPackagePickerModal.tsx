@@ -122,7 +122,9 @@ export function WebPackagePickerModal({
             selectedDigest={model.selected?.digest ?? null}
             disabled={disabled}
             busyDigest={model.busyDigest}
-            emptyHint="还没有本地 Web 包。导入本地 ZIP 即可使用；勾选「导入时保存到本地库」可让它在刷新后依然存在。"
+            emptyHint={model.libraryError
+              ? '本地库暂时读不出来，这里显示不出已保存的 Web 包。'
+              : '还没有本地 Web 包。导入本地 ZIP 即可使用；勾选「导入时保存到本地库」可让它在刷新后依然存在。'}
             onSelect={(digest) => { model.actions.select(digest); onClose(); }}
             onDownload={(item) => { void model.actions.downloadFromLibrary(item.digest); }}
             // sessionOnly 的包没有本地库行可删；给它一个删除按钮只会是假动作。
@@ -148,6 +150,14 @@ export function WebPackagePickerModal({
           </div>
         ) : null}
         {model.downloadError ? <p className="text-sm text-red-600" role="status">{model.downloadError}</p> : null}
+        {model.libraryError ? (
+          <p className="text-sm text-red-600" role="status" data-testid="web-package-library-error">
+            本地库读取失败：{model.libraryError}
+            <span className="mt-0.5 block text-xs text-red-500">
+              这不代表已保存的 Web 包被删除；请检查浏览器是否允许本站使用本地存储后重试。
+            </span>
+          </p>
+        ) : null}
 
         {model.capabilities.importLocal ? (
           <div className="rounded-lg border border-gray-200 bg-gray-50/60 p-3">

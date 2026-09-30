@@ -60,7 +60,15 @@ export type ArenaWebPackageSectionModel = Readonly<{
   /** 本地库条目；可删除、可导出。 */
   library: readonly ArenaWebPackageOptionView[];
   importFeedback: ArenaWebPackageImportFeedback | null;
+  /** 导出 ZIP 失败。与 `libraryError` 分开：一个是动作失败，一个是根本读不到列表。 */
   downloadError: string | null;
+  /**
+   * 本地库列表或完整性探测读取失败。
+   *
+   * 必须与"本地库是空的"区分开：读失败时若仍提示"还没有本地 Web 包"，用户会以为
+   * 自己存的包被删了，从而重复导入或清站点数据。
+   */
+  libraryError: string | null;
   importing: boolean;
   downloading: boolean;
   /** 正在执行删除/导出的条目 digest。 */

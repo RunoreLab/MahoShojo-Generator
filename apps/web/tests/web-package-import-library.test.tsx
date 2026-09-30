@@ -21,6 +21,42 @@ import { LOCAL_LIBRARY_PREFERENCE_STORAGE_KEY } from '@/lib/local-library/prefer
 import { useBattleStore } from '@/components/arena/stores/useBattleStore';
 import { SoloArenaWebPackageSection } from '@/components/arena/editor/features/web-package/SoloArenaWebPackageSection';
 
+/**
+ * 故障注入：这两个开关让用例能精准触发"读列表失败"和"读 ZIP 字节失败"。
+ * 未开启时 mock 完整透传，因此不影响同文件其它用例。
+ */
+const injected = { readArchive: null as Error | null, listLibrary: null as Error | null };
+
+vi.mock('@/lib/local-library/web-package-library', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/local-library/web-package-library')>();
+  return {
+    ...actual,
+    readWebPackageFromLibrary: (record: Parameters<typeof actual.readWebPackageFromLibrary>[0]) =>
+      injected.readArchive
+        ? Promise.reject(injected.readArchive)
+        : actual.readWebPackageFromLibrary(record),
+  };
+});
+
+vi.mock('@/lib/local-library/web-package-repository', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/local-library/web-package-repository')>();
+  return {
+    ...actual,
+    getLocalWebPackageRepository: () => {
+      const real = actual.getLocalWebPackageRepository();
+      if (!injected.listLibrary) return real;
+      const fail = () => Promise.reject(injected.listLibrary);
+      return new Proxy(real, {
+        get(target, property, receiver) {
+          if (property === 'list' || property === 'listArchiveDigests') return fail;
+          const value = Reflect.get(target, property, receiver);
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      });
+    },
+  };
+});
+
 let container: HTMLDivElement;
 let root: Root;
 
@@ -86,6 +122,8 @@ beforeEach(async () => {
   resetLocalLibraryDbConnection();
   resetLocalCardRepository();
   resetLocalWebPackageRepository();
+  injected.readArchive = null;
+  injected.listLibrary = null;
   await deleteDatabase(LOCAL_LIBRARY_DB_NAME);
   window.localStorage.clear();
   container = document.createElement('div');
@@ -195,4 +233,67 @@ it('未勾选偏好时本地库为空，但数据卡本地库路径不受影响'
   await act(async () => root.render(<SoloArenaWebPackageSection reportFormat="web" />));
   expect((await getLocalWebPackageRepository().list({ limit: 10 })).items).toHaveLength(0);
   expect((await getLocalCardRepository().list({ limit: 10 })).items).toHaveLength(1);
+});
+
+it('本地库导出失败时给出可读原因，并在失败后解锁重试', async () => {
+  window.localStorage.setItem(
+    LOCAL_LIBRARY_PREFERENCE_STORAGE_KEY,
+    JSON.stringify({ saveImportedWebPackages: true }),
+  );
+  const pkg = await makePackage('local.download-fails');
+  await act(async () => root.render(<SoloArenaWebPackageSection reportFormat="web" />));
+  await openPicker();
+  await importZip(await zipFile(await packWebPackageZip(pkg)));
+  await showLibraryTab();
+
+  const downloadOf = () => document.querySelector<HTMLButtonElement>(
+    `[title="下载 Web 包 ZIP：${pkg.manifest.name}"]`,
+  );
+  expect(downloadOf()).toBeTruthy();
+
+  // 让"读 ZIP 字节"直接抛错。修复前这段没有 catch，界面什么都不发生，
+  // 用户只会以为按钮坏了。
+  injected.readArchive = new Error('本地库字节读取被拒绝');
+  await act(async () => { downloadOf()!.click(); });
+  await flushAsyncWork();
+
+  expect(document.querySelector('[data-testid="web-package-import-feedback"]')?.textContent)
+    .toContain('本地库字节读取被拒绝');
+  expect(document.body.textContent).toContain('本地库可能不可读');
+  // 失败后必须解锁，否则用户再也无法重试。
+  expect(downloadOf()?.disabled).toBe(false);
+});
+
+it('本地库列表读取失败时不谎称"还没有本地 Web 包"', async () => {
+  injected.listLibrary = new Error('IndexedDB 不可用');
+
+  await act(async () => root.render(<SoloArenaWebPackageSection reportFormat="web" />));
+  await showLibraryTab();
+  await flushAsyncWork();
+
+  expect(document.querySelector('[data-testid="web-package-library-error"]')?.textContent)
+    .toContain('IndexedDB 不可用');
+  // 关键回归点：读失败不等于没有包，空态与错误提示必须各说各的。
+  expect(document.body.textContent).toContain('本地库暂时读不出来');
+  expect(document.body.textContent).not.toContain('还没有本地 Web 包');
+  expect(document.body.textContent).toContain('这不代表已保存的 Web 包被删除');
+});
+
+it('迁移与水合阶段失败时不产生未处理 rejection，并如实上报', async () => {
+  injected.listLibrary = new Error('存储访问被拒绝');
+
+  const unhandled: unknown[] = [];
+  const onUnhandled = (reason: unknown) => { unhandled.push(reason); };
+  process.on('unhandledRejection', onUnhandled);
+  try {
+    await act(async () => root.render(<SoloArenaWebPackageSection reportFormat="web" />));
+    await openPicker();
+    await flushAsyncWork();
+  } finally {
+    process.off('unhandledRejection', onUnhandled);
+  }
+
+  expect(unhandled).toEqual([]);
+  expect(document.querySelector('[data-testid="web-package-library-error"]')?.textContent)
+    .toContain('存储访问被拒绝');
 });

@@ -86,6 +86,7 @@ export const useSoloWebPackageSectionModel = (input: {
   const [stagedTick, setStagedTick] = useState(0);
   const [importFeedback, setImportFeedback] = useState<ArenaWebPackageImportFeedback | null>(null);
   const [busyDigest, setBusyDigest] = useState<string | null>(null);
+  const [localLibraryError, setLocalLibraryError] = useState<string | null>(null);
   const [missingArchives, setMissingArchives] = useState<ReadonlySet<string>>(new Set());
   const { preferences, setPreference } = useLocalLibraryPreferences();
   const localLibrary = useLocalWebPackages(allowLocalImport);
@@ -94,16 +95,24 @@ export const useSoloWebPackageSectionModel = (input: {
   useEffect(() => {
     let active = true;
     void (async () => {
-      // 一次性把旧缓存搬进本地库。读不到旧库时迁移返回 drained=false，
-      // 此时不得标记完成——下次挂载还要再试，否则用户会同时失去旧数据和迁移机会。
-      if (!(await hasCompletedLegacyWebPackageMigration())) {
-        const outcome = await migrateLegacyWebPackageCache(
-          readAllWebPackageArchiveCache,
-          drainWebPackageArchiveCache,
-        );
-        if (outcome.drained) await markLegacyWebPackageMigrationCompleted();
+      try {
+        // 一次性把旧缓存搬进本地库。读不到旧库时迁移返回 drained=false，
+        // 此时不得标记完成——下次挂载还要再试，否则用户会同时失去旧数据和迁移机会。
+        if (!(await hasCompletedLegacyWebPackageMigration())) {
+          const outcome = await migrateLegacyWebPackageCache(
+            readAllWebPackageArchiveCache,
+            drainWebPackageArchiveCache,
+          );
+          if (outcome.drained) await markLegacyWebPackageMigrationCompleted();
+        }
+        await hydrateWebPackageSessionFromLibrary();
+      } catch (error) {
+        // 迁移与水合都在 IndexedDB 上跑：隐私模式或存储被拒时会 reject。不接住就是
+        // unhandled rejection，用户看不到任何提示，只会觉得"本地库自己空了"。
+        if (!active) return;
+        setLocalLibraryError(error instanceof Error ? error.message : '本地库读取失败');
+        return;
       }
-      await hydrateWebPackageSessionFromLibrary();
       if (!active) return;
       setStagedTick((tick) => tick + 1);
       localLibrary.reload();
@@ -113,6 +122,12 @@ export const useSoloWebPackageSectionModel = (input: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // 列表读取失败时 useLocalWebPackages 已经有 status/error，但区块此前从不读它：
+  // 读不出来和"本来就没有"在界面上都是同一句"还没有本地 Web 包"，用户会以为包没了。
+  const libraryError = localLibrary.status === 'error'
+    ? localLibrary.error ?? '本地库读取失败，请重试。'
+    : localLibraryError;
+
   const presets = useMemo(() => builtinOptions(), []);
 
   // 记录在但 ZIP 字节不在时必须点名：否则用户点下去才发现这个包用不了。
@@ -120,8 +135,15 @@ export const useSoloWebPackageSectionModel = (input: {
     if (!allowLocalImport) return;
     let active = true;
     void (async () => {
-      const repository = getLocalWebPackageRepository();
-      const stored = await repository.listArchiveDigests();
+      let stored: Set<string>;
+      try {
+        stored = await getLocalWebPackageRepository().listArchiveDigests();
+      } catch (error) {
+        // 探测失败时不能把全部记录标成"文件已缺失"——那是误导；如实说探测没做成。
+        if (!active) return;
+        setLocalLibraryError(error instanceof Error ? error.message : '本地库完整性探测失败');
+        return;
+      }
       if (!active) return;
       setMissingArchives(new Set(localLibrary.records
         .filter((record) => !stored.has(record.ref.digest))
@@ -227,6 +249,7 @@ export const useSoloWebPackageSectionModel = (input: {
     const record = localLibrary.records.find((item) => item.ref.digest === digest);
     if (!record) return;
     setBusyDigest(digest);
+    setImportFeedback(null);
     try {
       const pkg = await readWebPackageFromLibrary(record);
       if (!pkg) {
@@ -242,6 +265,14 @@ export const useSoloWebPackageSectionModel = (input: {
         new Blob([archive.slice().buffer as ArrayBuffer], { type: 'application/zip' }),
         buildSafeFileName(`${record.ref.id}@${record.ref.version}`, 'zip', 'mahoshojo-web-package'),
       );
+    } catch (error) {
+      // 预设下载走 useWebPackagePresetDownload 的兜底；本地库下载原来没有任何
+      // catch，字节缺失之外的打包/存储失败会变成未处理 rejection，界面上毫无反应。
+      setImportFeedback({
+        message: error instanceof Error ? error.message : 'Web 包下载失败，请稍后重试。',
+        hint: '本地库可能不可读（例如浏览器拒绝了存储访问）。',
+        diagnostics: [],
+      });
     } finally {
       setBusyDigest(null);
     }
@@ -288,6 +319,9 @@ export const useSoloWebPackageSectionModel = (input: {
     library,
     importFeedback,
     downloadError,
+    // 列表读失败与导出失败走不同通道：前者必须能改写"还没有本地 Web 包"这句提示，
+    // 后者不能——库里确实有包，只是这一次没导出来。
+    libraryError,
     importing,
     downloading,
     busyDigest,

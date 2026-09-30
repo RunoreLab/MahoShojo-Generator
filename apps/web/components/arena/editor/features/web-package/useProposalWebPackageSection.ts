@@ -105,6 +105,8 @@ export const useProposalWebPackageSectionModel = (input: {
     library: [],
     importFeedback: null,
     downloadError,
+    // 多人提案没有本地库，不存在列表读取失败。
+    libraryError: null,
     importing: false,
     downloading,
     busyDigest: null,
