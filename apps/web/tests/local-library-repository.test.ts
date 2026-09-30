@@ -182,7 +182,7 @@ describe('IndexedDbWebPackageRepository', () => {
     ).rejects.toThrow('内容摘要不一致');
   });
 
-  it('drops the archive bytes on soft delete and keeps the tombstone addressable', async () => {
+  it('keeps the archive bytes on soft delete so restore yields a usable package', async () => {
     const repository = new IndexedDbWebPackageRepository();
     const record = createWebPackageRecord();
     await repository.put(record, new Uint8Array([1, 2, 3]));
@@ -190,8 +190,26 @@ describe('IndexedDbWebPackageRepository', () => {
 
     expect((await repository.list({ limit: 10 })).items).toEqual([]);
     expect((await repository.get(record.id))?.deletedAt).toEqual(expect.any(String));
-    expect(await repository.readArchive(DIGEST)).toBeNull();
+    // 软删不改变字节可达性：否则 restore 之后只剩一条读不出字节的损坏行。
+    expect([...(await repository.readArchive(DIGEST))!]).toEqual([1, 2, 3]);
     await expect(repository.put(record, new Uint8Array([1, 2, 3]))).rejects.toThrow('已被删除');
+
+    await repository.restore(record.id);
+    const restored = await repository.get(record.id);
+    expect(restored?.deletedAt).toBeUndefined();
+    expect([...(await repository.readArchive(DIGEST))!]).toEqual([1, 2, 3]);
+  });
+
+  it('drops the record and its bytes together on purge, and stays idempotent', async () => {
+    const repository = new IndexedDbWebPackageRepository();
+    const record = createWebPackageRecord();
+    await repository.put(record, new Uint8Array([1, 2, 3]));
+    await repository.delete(record.id);
+
+    await repository.purge(record.id);
+    expect(await repository.get(record.id)).toBeNull();
+    expect(await repository.readArchive(DIGEST)).toBeNull();
+    await expect(repository.purge(record.id)).resolves.toBeUndefined();
   });
 
   it('reports a missing archive instead of returning truncated bytes', async () => {

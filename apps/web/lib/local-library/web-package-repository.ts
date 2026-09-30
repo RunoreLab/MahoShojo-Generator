@@ -132,22 +132,20 @@ export class IndexedDbWebPackageRepository implements WebPackageRepository {
     );
   }
 
+  /**
+   * 幂等软删：只写 tombstone，**保留** archive 字节。
+   *
+   * 丢弃字节的时机是 `purge` 而不是这里。提前丢弃会让 `restore` 产出一条"记录在、字节缺"
+   * 的行，而 `readArchive` 对它返回 `null`——与真正的存储损坏无法区分，用户恢复后只会看到
+   * 一个打不开的包。
+   */
   async delete(id: string): Promise<void> {
-    await runLocalLibraryTransaction(
-      [LOCAL_LIBRARY_STORE_NAMES.webPackages, LOCAL_LIBRARY_STORE_NAMES.webPackageArchives],
-      'readwrite',
-      async (transaction) => {
-        const recordStore = transaction.objectStore(LOCAL_LIBRARY_STORE_NAMES.webPackages);
-        const existing = await getLocalLibraryRecord<LocalWebPackageRecordV1>(recordStore, id);
-        if (existing === undefined || existing.deletedAt !== undefined) return;
-        await putLocalLibraryRecord(recordStore, { ...existing, deletedAt: monotonicNowIso(existing.updatedAt) });
-        // 软删只回收不再可达的字节；被 tombstone 独占的 archive 没有任何读取路径。
-        await deleteLocalLibraryRecord(
-          transaction.objectStore(LOCAL_LIBRARY_STORE_NAMES.webPackageArchives),
-          existing.ref.digest,
-        );
-      },
-    );
+    await runLocalLibraryTransaction(LOCAL_LIBRARY_STORE_NAMES.webPackages, 'readwrite', async (transaction) => {
+      const recordStore = transaction.objectStore(LOCAL_LIBRARY_STORE_NAMES.webPackages);
+      const existing = await getLocalLibraryRecord<LocalWebPackageRecordV1>(recordStore, id);
+      if (existing === undefined || existing.deletedAt !== undefined) return;
+      await putLocalLibraryRecord(recordStore, { ...existing, deletedAt: monotonicNowIso(existing.updatedAt) });
+    });
   }
 
   async restore(id: string): Promise<void> {
@@ -159,6 +157,27 @@ export class IndexedDbWebPackageRepository implements WebPackageRepository {
       delete restored.deletedAt;
       await putLocalLibraryRecord(store, restored);
     });
+  }
+
+  /**
+   * 彻底删除记录与它独占的 archive 字节。记录与字节在同一个事务里消失，
+   * 因此不会出现"记录没了但字节还在"的中间态。
+   */
+  async purge(id: string): Promise<void> {
+    await runLocalLibraryTransaction(
+      [LOCAL_LIBRARY_STORE_NAMES.webPackages, LOCAL_LIBRARY_STORE_NAMES.webPackageArchives],
+      'readwrite',
+      async (transaction) => {
+        const recordStore = transaction.objectStore(LOCAL_LIBRARY_STORE_NAMES.webPackages);
+        const existing = await getLocalLibraryRecord<LocalWebPackageRecordV1>(recordStore, id);
+        if (existing === undefined) return;
+        await deleteLocalLibraryRecord(recordStore, id);
+        await deleteLocalLibraryRecord(
+          transaction.objectStore(LOCAL_LIBRARY_STORE_NAMES.webPackageArchives),
+          existing.ref.digest,
+        );
+      },
+    );
   }
 
   async readArchive(digest: string): Promise<Uint8Array | null> {

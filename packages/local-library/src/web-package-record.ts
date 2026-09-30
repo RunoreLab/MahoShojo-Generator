@@ -118,6 +118,10 @@ export type LocalWebPackageArchive = z.infer<typeof LocalWebPackageArchiveSchema
 /**
  * 本地 Web 包仓储端口。delete/restore 与 `CardRepository` 同为幂等软删语义，
  * 且永不触网——本地包不上传服务器。
+ *
+ * 软删**不改变归档字节的可达性**：`delete` 只写 tombstone 并保留字节，`restore` 因此能让包
+ * 重新可用。只有 `purge` 才移除记录与它独占的字节。把丢弃字节的时机提前到 `delete` 会让
+ * `restore` 产出一条"记录在、字节缺"的损坏行——这类行读出来是 `null`，与损坏无法区分。
  */
 export interface WebPackageRepository {
   get(_id: string): Promise<LocalWebPackageRecordV1 | null>;
@@ -125,9 +129,11 @@ export interface WebPackageRepository {
   list(_query: LocalWebPackageQuery): Promise<LocalWebPackagePage>;
   /** 按 canonical identity 覆盖写入；同一 digest 视为同一包的重新导入。 */
   put(_record: LocalWebPackageRecordV1, _archive: Uint8Array): Promise<void>;
-  /** 幂等软删，同时丢弃本地 archive 字节。 */
+  /** 幂等软删：只写 tombstone，保留 archive 字节，使 `restore` 能真正恢复可用状态。 */
   delete(_id: string): Promise<void>;
   restore(_id: string): Promise<void>;
+  /** 彻底删除记录与它独占的 archive 字节。幂等：缺失 id 同样成功。 */
+  purge(_id: string): Promise<void>;
   /** 读取 ZIP 字节；记录存在但字节缺失时返回 null（属于可恢复的损坏行）。 */
   readArchive(_digest: string): Promise<Uint8Array | null>;
 }

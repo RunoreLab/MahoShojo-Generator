@@ -144,4 +144,6 @@ archive manifest，但**没有任何 runtime 消费它**：无 IndexedDB adapter
 - `LIB-007` 导出/备份/恢复的完整实现。
 - `LIB-004` Installed APP（SQLite + 文件内容寻址区 + Secure Vault）。
 - 本地库回收站 UI：仓储已支持 `restore`，当前只有软删，没有面向用户的恢复入口。
-  `purge` 只在数据卡仓储上实现且无调用方，Web 包仓储尚无对应能力。
+  `purge` 已在两类仓储上具备能力，但只有「从本机删除 Web 包」这一入口有调用方
+  （`removeLocalWebPackage`，因为它对用户的承诺是彻底移除而非移入回收站）。
+  回收站 UI 属 `LIB-007` 的承载页面范围。

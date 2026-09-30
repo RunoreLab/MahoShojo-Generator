@@ -85,7 +85,9 @@ it('从本机删除会同时清掉本地库记录、staging、同源授权与陈
   expect(outcome.clearedSelection).toBe(true);
   expect(outcome.clearedStaging).toBe(true);
   expect(outcome.clearedTrustGrant).toBe(true);
-  expect((await getLocalWebPackageRepository().get(record.id))?.deletedAt).toEqual(expect.any(String));
+  // 「从本机删除」承诺的是彻底移除，因此记录本身必须消失，而不只是留下 tombstone。
+  // 断言 get 返回 null 而不是 deletedAt 有值，正是为了挡住回退到仓储软删语义。
+  expect(await getLocalWebPackageRepository().get(record.id)).toBeNull();
   expect((await getLocalWebPackageRepository().list({ limit: 10 })).items).toHaveLength(0);
   expect(listStagedLocalWebPackages().some((pkg) => pkg.ref.digest === local.ref.digest)).toBe(false);
   expect(window.localStorage.getItem(WEB_PACKAGE_TRUST_KEY_PREFIX + local.ref.digest)).toBeNull();

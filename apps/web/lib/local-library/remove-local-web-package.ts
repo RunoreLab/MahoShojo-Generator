@@ -13,10 +13,15 @@ import { WEB_PACKAGE_TRUST_KEY_PREFIX } from '@/lib/web-package/trust';
  * 彻底不再可选。旧实现只有前者，用户一旦认定某个 ZIP 不可信就再也删不掉它。
  *
  * 一次性清掉四处会各自独立地让包"还活着"的状态：
- * 1. 本地库记录（软删，同时丢弃不再可达的 archive 字节）；
+ * 1. 本地库记录（**purge**：记录与 archive 字节一起消失，而不是软删留字节）；
  * 2. 会话 staging（否则本次会话仍能选中它）；
  * 3. 同源信任授权的 localStorage 键（否则重新导入同样字节会静默恢复信任、跳过三秒确认）；
  * 4. 指向它的 `webPackageRef`（否则下次会话恢复出一个指向已删除包的陈旧选择）。
+ *
+ * 这里用 `purge` 而不是 `delete`，因为本流程对用户的承诺是"从这台设备移除"，而仓储的
+ * `delete` 是回收站语义：它保留 ZIP 字节，使 `restore` 能真正恢复可用状态。把承诺
+ * "彻底移除"的入口接到软删上，会让用户以为字节已经消失、实际却仍留在磁盘上。
+ * 回收站本身暂无 UI 入口，`restore` 的用户路径留待本地数据管理页面。
  *
  * 历史战报里引用的同一 digest 会退化为 `missing-package` 回退；这是无法两全的取舍，
  * UI 必须在确认前说清楚。
@@ -48,7 +53,7 @@ export const removeLocalWebPackage = async (
   record: LocalWebPackageRecordV1,
   options: { activeRefDigest: string | null; clearSelection: () => void },
 ): Promise<RemoveLocalWebPackageResult> => {
-  await getLocalWebPackageRepository().delete(record.id);
+  await getLocalWebPackageRepository().purge(record.id);
 
   let clearedStaging = false;
   for (const staged of listStagedLocalWebPackages()) {
