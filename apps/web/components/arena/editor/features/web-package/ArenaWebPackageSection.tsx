@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { HardDrive, Package, Settings2 } from 'lucide-react';
 import { BaseModal } from '@/components/shared/BaseModal';
 import { WebPackageBaseRisk } from '@/components/arena/components/WebPackageSafety';
@@ -28,6 +28,19 @@ export function ArenaWebPackageSection({ model }: Readonly<{ model: ArenaWebPack
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pendingRemoval, setPendingRemoval] = useState<string | null>(null);
   const [detailDigest, setDetailDigest] = useState<string | null>(null);
+  // 待确认的 digest 必须随列表失效一起清掉：否则记录从库里消失后 pendingRemoval 仍留着，
+  // 等同一条记录再次出现时确认框会毫无征兆地重新弹出来。
+  useEffect(() => {
+    if (pendingRemoval && !model.library.some((option) => option.digest === pendingRemoval)) {
+      setPendingRemoval(null);
+    }
+  }, [model.library, pendingRemoval]);
+  useEffect(() => {
+    if (!detailDigest) return;
+    const stillListed = [...model.presets, ...model.library]
+      .some((option) => option.digest === detailDigest);
+    if (!stillListed) setDetailDigest(null);
+  }, [model.presets, model.library, detailDigest]);
   if (!model.active) {
     return (
       <p className="text-xs text-gray-500">
@@ -113,8 +126,10 @@ export function ArenaWebPackageSection({ model }: Readonly<{ model: ArenaWebPack
         isOpen={pickerOpen}
         onClose={() => setPickerOpen(false)}
         model={model}
-        onRemoveFromLibrary={setPendingRemoval}
-        onViewDetails={setDetailDigest}
+        // 删除确认与详情互斥：两者都挂在选择器之上，同时打开就会出现两个同层 z-50
+        // 对话框争抢绘制顺序与键盘焦点。
+        onRemoveFromLibrary={(digest) => { setDetailDigest(null); setPendingRemoval(digest); }}
+        onViewDetails={(digest) => { setPendingRemoval(null); setDetailDigest(digest); }}
       />
 
       <BaseModal

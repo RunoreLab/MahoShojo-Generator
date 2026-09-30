@@ -39,6 +39,27 @@ const FOCUSABLE_SELECTOR = [
   '[tabindex]:not([tabindex="-1"])',
 ].join(',');
 
+/**
+ * 打开中的对话框栈。
+ *
+ * Escape 与 Tab 都在 `document` 上监听，每个打开的实例都会收到同一次按键。嵌套对话框
+ * （Web 包选择器 → 删除确认/详情、战报卡 → 详情 → 举报）如果不区分层级，后果是：
+ * 一次 Escape 把所有层一起关掉；两个 focus trap 互相把焦点拽回自己，Tab 永远停在
+ * 首个可聚焦元素上，键盘根本够不到确认按钮。规格 §16.1 不变量 11 要求键盘与焦点可用。
+ *
+ * 只有栈顶对话框响应键盘。栈是模块级的：同一时刻只有一个"栈顶"，不需要组件间通信。
+ */
+const openModalStack: symbol[] = [];
+
+const pushOpenModal = (id: symbol): void => { openModalStack.push(id); };
+
+const popOpenModal = (id: symbol): void => {
+  const index = openModalStack.lastIndexOf(id);
+  if (index >= 0) openModalStack.splice(index, 1);
+};
+
+const isTopmostOpenModal = (id: symbol): boolean => openModalStack[openModalStack.length - 1] === id;
+
 export const useBaseModalAccessibility = ({
   isOpen,
   onClose,
@@ -53,9 +74,11 @@ export const useBaseModalAccessibility = ({
   const initialFocusRef = useRef<HTMLButtonElement>(null);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
+  const stackId = useMemo(() => Symbol('base-modal'), []);
 
   useEffect(() => {
     if (!isOpen) return;
+    pushOpenModal(stackId);
     const previouslyFocused = document.activeElement instanceof HTMLElement
       ? document.activeElement
       : null;
@@ -70,6 +93,7 @@ export const useBaseModalAccessibility = ({
     }
 
     const onKeyDown = (event: KeyboardEvent) => {
+      if (!isTopmostOpenModal(stackId)) return;
       if (event.key === 'Escape') {
         event.preventDefault();
         onCloseRef.current();
@@ -99,6 +123,7 @@ export const useBaseModalAccessibility = ({
 
     document.addEventListener('keydown', onKeyDown);
     return () => {
+      popOpenModal(stackId);
       document.body.style.overflow = prevOverflow;
       document.removeEventListener('keydown', onKeyDown);
       if (previouslyFocused && document.contains(previouslyFocused)) {
@@ -107,7 +132,7 @@ export const useBaseModalAccessibility = ({
         fallbackFocus?.focus();
       }
     };
-  }, [fallbackFocusRef, isOpen]);
+  }, [fallbackFocusRef, isOpen, stackId]);
 
   return { dialogRef, initialFocusRef, titleId };
 };

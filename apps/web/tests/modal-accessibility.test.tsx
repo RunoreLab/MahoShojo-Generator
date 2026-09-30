@@ -166,6 +166,63 @@ describe('BaseModal accessibility contract', () => {
     expect(document.activeElement).toBe(trigger);
     trigger.remove();
   });
+
+  it('keeps keyboard ownership with the topmost dialog when two BaseModals are open', async () => {
+    const outerClose = vi.fn();
+    const innerClose = vi.fn();
+
+    const draw = async (innerOpen: boolean) => {
+      await act(async () => root.render(
+        <>
+          <BaseModal isOpen title="外层" onClose={outerClose}>
+            <button type="button">外层操作</button>
+          </BaseModal>
+          <BaseModal isOpen={innerOpen} title="内层" onClose={innerClose}>
+            <button type="button">取消</button>
+            <button type="button">删除</button>
+          </BaseModal>
+        </>,
+      ));
+    };
+
+    const innerDialog = () => [...document.querySelectorAll<HTMLElement>('[role="dialog"]')]
+      .find((dialog) => dialog.querySelector('div[id]')?.textContent === '内层')!;
+    const pressTab = async (shiftKey = false) => {
+      await act(async () => {
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey, bubbles: true }));
+      });
+    };
+
+    await draw(true);
+    const inner = innerDialog();
+    const closeButton = inner.querySelector<HTMLButtonElement>('button[aria-label^="关闭"]')!;
+    const cancelButton = [...inner.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === '取消')!;
+    const deleteButton = [...inner.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === '删除')!;
+    expect(document.activeElement).toBe(closeButton);
+
+    // 焦点停在内层中间的元素上时，背景对话框的 focus trap 不得把它拽回自己。
+    // 修复前这里会跳到内层的关闭按钮，Tab 因此永远走不到「删除」。
+    cancelButton.focus();
+    await pressTab();
+    expect(document.activeElement).toBe(cancelButton);
+
+    // 边界仍然由内层自己闭环。
+    deleteButton.focus();
+    await pressTab();
+    expect(document.activeElement).toBe(closeButton);
+    await pressTab(true);
+    expect(document.activeElement).toBe(deleteButton);
+
+    // Escape 只关最上层，背景对话框必须留着（用户填好的搜索与页签不能被一起丢掉）。
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    expect(innerClose).toHaveBeenCalledOnce();
+    expect(outerClose).not.toHaveBeenCalled();
+
+    await draw(false);
+    expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(1);
+  });
 });
 
 describe('DataCardReportModal accessibility contract', () => {
