@@ -38,3 +38,17 @@ export type { DesktopAiExecutionOptions } from './direct-ai-bridge';
 
 export { createDesktopAiExecutionPort } from './desktop-ai-execution';
 export type { DirectAiChannel } from './direct-ai-bridge';
+
+export {
+  DELETE_LOCAL_CARD_COMMAND,
+  GET_LOCAL_CARD_COMMAND,
+  LIST_LOCAL_CARDS_COMMAND,
+  PURGE_LOCAL_CARD_COMMAND,
+  RESTORE_LOCAL_CARD_COMMAND,
+  SAVE_LOCAL_CARD_COMMAND,
+  DesktopLocalCardError,
+  IpcLocalCardRepository,
+  buildLocalCardListRequest,
+  toLocalCardIndex,
+} from './local-card-bridge';
+export type { InvokeFn as LocalCardInvokeFn } from './local-card-bridge';

@@ -15,6 +15,8 @@ mod ai_contract_tests;
 #[cfg(test)]
 mod ai_e2e_tests;
 mod local_card;
+#[cfg(test)]
+mod local_card_contract_tests;
 mod provider_profile;
 mod secret;
 mod sse;

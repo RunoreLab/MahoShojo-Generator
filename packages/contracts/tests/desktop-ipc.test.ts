@@ -10,6 +10,14 @@ import {
   MAX_DESKTOP_SECRET_REF_LENGTH,
   MAX_DESKTOP_SECRET_VALUE_BYTES,
   isDesktopSecretRef,
+  MAX_DESKTOP_LOCAL_CARD_DOCUMENT_BYTES,
+  MAX_DESKTOP_LOCAL_CARD_PAGE_SIZE,
+  DesktopLocalCardIndexSchema,
+  DesktopLocalCardCursorSchema,
+  DesktopLocalCardTypeSchema,
+  DesktopListLocalCardsRequestSchema,
+  DesktopSaveLocalCardRequestSchema,
+  DesktopStoreErrorCodeSchema,
 } from '../src/desktop-ipc';
 
 interface SecretRefFixture {
@@ -86,5 +94,78 @@ describe('DesktopSecretStoreError', () => {
       DesktopSecretStoreErrorSchema.safeParse({ code: 'secret-store-failure', message: 'x', extra: 1 })
         .success,
     ).toBe(false);
+  });
+});
+
+interface LocalCardFixture {
+  limits: { maxDocumentBytes: number; maxPageSize: number };
+  errorCodes: string[];
+  cardTypes: string[];
+  validIndex: unknown;
+  tombstonedIndex: unknown;
+  cursor: unknown;
+  cases: { name: string; index: unknown; document: string; expectReject?: boolean }[];
+}
+
+/**
+ * 本地卡 fixture 同样由 Rust 在编译期 `include_str!` 读取（见
+ * `apps/desktop/src-tauri/src/local_card_contract_tests.rs`）。两侧断言的是各自的常量与
+ * fixture 的具体取值相等，而不是各自内联一份期望值——否则"同步改了"会静默通过。
+ */
+const readLocalCardFixture = (): LocalCardFixture =>
+  JSON.parse(
+    readFileSync(path.resolve(process.cwd(), 'fixtures', 'desktop-local-cards.json'), 'utf8'),
+  ) as LocalCardFixture;
+
+describe('Desktop 本地卡 IPC 契约', () => {
+  const fixture = readLocalCardFixture();
+
+  it('上限与 native 侧常量一致', () => {
+    expect(MAX_DESKTOP_LOCAL_CARD_DOCUMENT_BYTES).toBe(fixture.limits.maxDocumentBytes);
+    expect(MAX_DESKTOP_LOCAL_CARD_PAGE_SIZE).toBe(fixture.limits.maxPageSize);
+  });
+
+  it('错误码集合与 native 侧一致且顺序稳定', () => {
+    expect(DesktopStoreErrorCodeSchema.options).toEqual(fixture.errorCodes);
+  });
+
+  it('卡类型与线上数据卡类型一致', () => {
+    expect(DesktopLocalCardTypeSchema.options).toEqual(fixture.cardTypes);
+  });
+
+  it('接受 fixture 中的有效索引与 tombstone 索引', () => {
+    expect(DesktopLocalCardIndexSchema.parse(fixture.validIndex)).toEqual(fixture.validIndex);
+    expect(DesktopLocalCardIndexSchema.parse(fixture.tombstonedIndex)).toEqual(
+      fixture.tombstonedIndex,
+    );
+    expect(DesktopLocalCardCursorSchema.parse(fixture.cursor)).toEqual(fixture.cursor);
+  });
+
+  it('不接受未知字段、非法卡类型与越界页大小', () => {
+    expect(() => DesktopLocalCardIndexSchema.parse({ ...(fixture.validIndex as object), extra: 1 })).toThrow();
+    expect(() =>
+      DesktopListLocalCardsRequestSchema.parse({ limit: MAX_DESKTOP_LOCAL_CARD_PAGE_SIZE + 1 }),
+    ).toThrow();
+    expect(() => DesktopListLocalCardsRequestSchema.parse({ limit: 0 })).toThrow();
+  });
+
+  it('分页请求的缺省值是"排除 tombstone 且不筛选类型"', () => {
+    const parsed = DesktopListLocalCardsRequestSchema.parse({ limit: 10 });
+    expect(parsed.includeDeleted).toBe(false);
+    expect(parsed.cardTypes).toEqual([]);
+    expect(parsed.cursor).toBeUndefined();
+  });
+
+  it('fixture 里的 document 至少有一条含孤立代理项，且本包不做 JSON 解析', () => {
+    // 契约只搬运文本。孤立代理项能否被 native 接受由 native 侧的 RawValue 决定，
+    // 这里断言的只是"文本原样通过契约、不被 zod 改写"。
+    const surrogate = fixture.cases.find((item) => item.document.includes('\\ud800'));
+    expect(surrogate, 'fixture 必须覆盖孤立代理项载荷').toBeDefined();
+    const request = DesktopSaveLocalCardRequestSchema.parse({
+      document: surrogate?.document,
+      index: surrogate?.index,
+    });
+    expect(request.document).toBe(surrogate?.document);
+    expect(request.document).toContain('\\ud800');
   });
 });

@@ -19,6 +19,7 @@
     "@mahoshojo/ai-core": "workspace:*",
     "@mahoshojo/ai-direct": "workspace:*",
     "@mahoshojo/contracts": "workspace:*",
+    "@mahoshojo/local-library": "workspace:*",
     "@tauri-apps/api": "^2.12.0",
     "react": "^19.2.1",
     "react-dom": "^19.2.1"

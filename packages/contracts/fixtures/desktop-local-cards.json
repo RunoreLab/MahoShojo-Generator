@@ -1,0 +1,60 @@
+{
+  "$comment": "Desktop IPC 本地卡契约的跨运行时 fixture。TypeScript 侧用 zod 校验它，Rust 侧 include_str! 后反序列化并断言自身常量与之逐项一致。任一侧改了形状而未更新本文件，两侧都必须失败。依据 SPEC-desktop-client-v1 DESK-033 / DESK-062。",
+  "limits": {
+    "maxDocumentBytes": 4194304,
+    "maxPageSize": 100
+  },
+  "errorCodes": [
+    "store-unavailable",
+    "invalid-document",
+    "document-too-large",
+    "index-mismatch",
+    "record-tombstoned",
+    "non-monotonic-timestamp",
+    "invalid-query",
+    "store-failure"
+  ],
+  "cardTypes": ["character", "scenario", "history", "questionnaire"],
+  "validIndex": {
+    "id": "lc_0123456789abcdef0123456789abcdef",
+    "cardType": "character",
+    "updatedAt": "2026-09-30T12:00:00.000Z",
+    "contentDigest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+  },
+  "tombstonedIndex": {
+    "id": "lc_0123456789abcdef0123456789abcdef",
+    "cardType": "character",
+    "updatedAt": "2026-09-30T12:00:00.000Z",
+    "deletedAt": "2026-09-30T13:00:00.000Z",
+    "contentDigest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+  },
+  "cursor": {
+    "updatedAt": "2026-09-30T12:00:00.000Z",
+    "id": "lc_0123456789abcdef0123456789abcdef"
+  },
+  "cases": [
+    {
+      "name": "孤立代理项载荷必须被接受且逐字节保留",
+      "why": "JSON.stringify 会产出 \\ud800，Web 的 IndexedDB 照常保存它。若 native 用 serde_json::Value 解析 document 就会静默拒收 Web 已有的合法数据，因此 document 的自由载荷走 RawValue。",
+      "index": {
+        "id": "lc_00000000000000000000000000000001",
+        "cardType": "scenario",
+        "updatedAt": "2026-09-30T12:00:00.000Z",
+        "contentDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "document": "{\"id\":\"lc_00000000000000000000000000000001\",\"schemaVersion\":1,\"storageLocation\":\"local\",\"cardType\":\"scenario\",\"title\":\"孤立代理项\",\"data\":{\"note\":\"\\ud800\"},\"contentDigest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"provenance\":{\"kind\":\"unsigned\",\"execution\":\"imported\"},\"createdAt\":\"2026-09-30T12:00:00.000Z\",\"updatedAt\":\"2026-09-30T12:00:00.000Z\"}"
+    },
+    {
+      "name": "索引列与 document 不一致时必须拒绝",
+      "why": "两侧对同一条记录的理解不一致时不得落盘，否则会写入一行 updated_at 与 document 矛盾的数据，让 keyset 分页永久漏读该行。",
+      "index": {
+        "id": "lc_00000000000000000000000000000002",
+        "cardType": "history",
+        "updatedAt": "2026-09-30T12:00:00.000Z",
+        "contentDigest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "document": "{\"id\":\"lc_00000000000000000000000000000002\",\"schemaVersion\":1,\"storageLocation\":\"local\",\"cardType\":\"questionnaire\",\"title\":\"类型被改过\",\"data\":{},\"contentDigest\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"provenance\":{\"kind\":\"unsigned\",\"execution\":\"imported\"},\"createdAt\":\"2026-09-30T12:00:00.000Z\",\"updatedAt\":\"2026-09-30T12:00:00.000Z\"}",
+      "expectReject": true
+    }
+  ]
+}

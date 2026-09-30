@@ -100,7 +100,7 @@ struct LocalCardIndexProjection {
 ///
 /// `camelCase` 与 `LocalCardRecordV1` 的字段名一致，因此 IPC 侧不需要额外映射层；
 /// `deny_unknown_fields` 刻意不加：多带一个无害字段不应让整次保存失败。
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalCardIndex {
     pub id: String,
@@ -115,7 +115,8 @@ pub struct LocalCardIndex {
 /// 用 keyset 而非 offset 是因为 offset 游标在两次翻页之间的写入或删除下会重复或漏掉行。
 /// 游标本身对调用方保持 opaque（`repository.ts` 只要求它是不超过 512 字符的字符串），
 /// 使 Web 的 IndexedDB adapter 未来可以独立改进而不必跟随本实现。
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct LocalCardCursor {
     pub updated_at: String,
     pub id: String,

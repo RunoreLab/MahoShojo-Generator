@@ -196,6 +196,9 @@ importers:
       '@mahoshojo/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@mahoshojo/local-library':
+        specifier: workspace:*
+        version: link:../../packages/local-library
       '@tauri-apps/api':
         specifier: ^2.12.0
         version: 2.12.0
