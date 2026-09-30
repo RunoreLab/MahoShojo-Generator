@@ -11,13 +11,19 @@ use std::sync::Mutex;
 
 use rusqlite::{Connection, OpenFlags};
 
+use crate::local_card::MIGRATION_2;
+
 /// 当前 schema 版本。SQLite 的 `user_version` 与 migration journal 必须与它一致。
-pub const SCHEMA_VERSION: i64 = 1;
+///
+/// D1 引入 `provider_profile`（版本 1）；D2.0 在**同一个库**上增加本地卡
+/// （`local_card` 与其索引，版本 2）。刻意不新开数据库文件：Profile 与本地库同属一台
+/// 设备上的用户资产，分库会让备份、迁移与"重开应用"各自多一套路径。
+pub const SCHEMA_VERSION: i64 = 2;
 
 /// 单条文档的 UTF-8 字节上限。
 ///
 /// Provider Profile 契约本身有 64 KiB 上限；这里留出余量，使"契约合法但文档过大"这种
-/// 情况以可诊断错误失败，而不是静默截断。
+/// 情况以可诊断错误失败，而不是静默截断。本地卡文档另有限额，见 `local_card`。
 pub const MAX_DOCUMENT_BYTES: usize = 256 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -25,6 +31,14 @@ pub enum StoreError {
     Unavailable,
     InvalidDocument,
     DocumentTooLarge,
+    /// 调用方声明的索引列与 document 中的实际值不一致。以此拒绝而不是写入自相矛盾的行。
+    IndexMismatch,
+    /// 该记录已带 tombstone；必须先 `restore` 才能覆盖写入。
+    Tombstoned,
+    /// `updated_at` 会回退，会破坏 keyset 分页的稳定顺序。
+    NonMonotonicTimestamp,
+    /// 查询参数越界（页大小不在 `1..=MAX_LOCAL_CARD_PAGE_SIZE`）。
+    InvalidQuery,
     Failure,
 }
 
@@ -34,6 +48,10 @@ impl StoreError {
             StoreError::Unavailable => "store-unavailable",
             StoreError::InvalidDocument => "invalid-document",
             StoreError::DocumentTooLarge => "document-too-large",
+            StoreError::IndexMismatch => "index-mismatch",
+            StoreError::Tombstoned => "record-tombstoned",
+            StoreError::NonMonotonicTimestamp => "non-monotonic-timestamp",
+            StoreError::InvalidQuery => "invalid-query",
             StoreError::Failure => "store-failure",
         }
     }
@@ -43,6 +61,10 @@ impl StoreError {
             StoreError::Unavailable => "local store is unavailable",
             StoreError::InvalidDocument => "local store rejected the document",
             StoreError::DocumentTooLarge => "local store document exceeds its byte ceiling",
+            StoreError::IndexMismatch => "local store index columns disagree with the document",
+            StoreError::Tombstoned => "local store record is deleted; restore it before saving",
+            StoreError::NonMonotonicTimestamp => "local store refuses a backwards timestamp",
+            StoreError::InvalidQuery => "local store rejected the query",
             StoreError::Failure => "local store operation failed",
         }
     }
@@ -103,17 +125,34 @@ pub fn migrate(connection: &Connection) -> Result<(), StoreError> {
         connection
             .execute_batch(MIGRATION_1)
             .map_err(|_| StoreError::Failure)?;
-        connection
-            .execute(
-                "INSERT OR IGNORE INTO schema_migration (version, applied_at) VALUES (?1, ?2)",
-                rusqlite::params![1_i64, now_iso8601()],
-            )
-            .map_err(|_| StoreError::Failure)?;
+        record_migration(connection, 1)?;
         connection
             .execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION}"))
             .map_err(|_| StoreError::Failure)?;
     }
 
+    if current < 2 {
+        // 从版本 0 直开时上面已把 user_version 推到最新；这里只需补齐 D2.0 的表。
+        // 逐步记录 journal，使"哪些版本已应用"在 journal 与 user_version 上一致。
+        connection
+            .execute_batch(MIGRATION_2)
+            .map_err(|_| StoreError::Failure)?;
+        record_migration(connection, 2)?;
+        connection
+            .execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION}"))
+            .map_err(|_| StoreError::Failure)?;
+    }
+
+    Ok(())
+}
+
+fn record_migration(connection: &Connection, version: i64) -> Result<(), StoreError> {
+    connection
+        .execute(
+            "INSERT OR IGNORE INTO schema_migration (version, applied_at) VALUES (?1, ?2)",
+            rusqlite::params![version, now_iso8601()],
+        )
+        .map_err(|_| StoreError::Failure)?;
     Ok(())
 }
 
@@ -135,6 +174,16 @@ fn configure(connection: &Connection) -> Result<(), StoreError> {
              PRAGMA foreign_keys = ON;",
         )
         .map_err(|_| StoreError::Unavailable)
+}
+
+/// 配置 PRAGMA 并应用迁移。
+///
+/// 抽成自由函数是因为 D2.0 引入了第二个访问同一个库的类型（`LocalCardStore`）。两条路径
+/// **MUST** 用同一份 PRAGMA 与迁移，否则会出现"Profile 库开了 WAL、卡片库没开"这类
+/// 按类型分叉的隐性差异。
+pub fn configure_and_migrate(connection: &Connection) -> Result<(), StoreError> {
+    configure(connection)?;
+    migrate(connection)
 }
 
 /// 应用数据目录布局。路径全部由 Rust 产生。
@@ -177,8 +226,7 @@ impl LocalStore {
         )
         .map_err(|_| StoreError::Unavailable)?;
 
-        configure(&connection)?;
-        migrate(&connection)?;
+        configure_and_migrate(&connection)?;
 
         Ok(Self {
             connection: Mutex::new(connection),
@@ -189,13 +237,11 @@ impl LocalStore {
     #[cfg(test)]
     pub fn open_in_memory() -> Result<Self, StoreError> {
         let connection = Connection::open_in_memory().map_err(|_| StoreError::Unavailable)?;
-        configure(&connection)?;
-        migrate(&connection)?;
+        configure_and_migrate(&connection)?;
         Ok(Self {
             connection: Mutex::new(connection),
         })
     }
-
     fn with_connection<T>(
         &self,
         operation: impl FnOnce(&Connection) -> Result<T, StoreError>,
@@ -290,7 +336,11 @@ impl LocalStore {
 
 #[cfg(test)]
 mod tests {
-    use super::{applied_migrations, LocalStore, StoreError, MAX_DOCUMENT_BYTES, SCHEMA_VERSION};
+    use super::{
+        applied_migrations, migrate, LocalStore, LocalStorePaths, StoreError, MAX_DOCUMENT_BYTES,
+        SCHEMA_VERSION,
+    };
+    use rusqlite::Connection;
 
     fn store() -> LocalStore {
         LocalStore::open_in_memory().expect("in-memory store must open")
@@ -303,11 +353,67 @@ mod tests {
 
         let versions = applied_migrations(&store.connection.lock().expect("lock"))
             .expect("migration journal must be readable");
-        assert_eq!(versions, vec![1]);
+        assert_eq!(versions, vec![1, 2]);
 
         // 重复打开同一个库不会重复执行迁移。
         let reopened = LocalStore::open_in_memory().expect("reopen");
         assert_eq!(reopened.schema_version().expect("version"), SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn migration_from_a_version_1_database_adds_local_card_without_touching_profiles() {
+        // 模拟 D1 留下的库：只有 provider_profile，user_version = 1。
+        let root = std::env::temp_dir().join(format!(
+            "mahoshojo-desktop-upgrade-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("create test root");
+        let database = root.join("library.sqlite");
+
+        {
+            let connection = Connection::open(&database).expect("open");
+            connection
+                .execute_batch(
+                    "PRAGMA journal_mode = WAL;
+                     CREATE TABLE provider_profile (
+                        id TEXT PRIMARY KEY NOT NULL,
+                        document TEXT NOT NULL,
+                        updated_at TEXT NOT NULL
+                     ) STRICT;
+                     CREATE TABLE schema_migration (
+                        version INTEGER PRIMARY KEY NOT NULL,
+                        applied_at TEXT NOT NULL
+                     ) STRICT;
+                     INSERT INTO provider_profile (id, document, updated_at)
+                        VALUES ('profile-1', '{\"v\":1}', '2026-09-30T00:00:00Z');
+                     INSERT INTO schema_migration (version, applied_at) VALUES (1, 'seed');
+                     PRAGMA user_version = 1;",
+                )
+                .expect("seed v1 database");
+        }
+
+        let store = LocalStore::open(&LocalStorePaths::under(&root)).expect("upgrade must succeed");
+        assert_eq!(store.schema_version().expect("version"), SCHEMA_VERSION);
+        // 既有 Profile 必须原样保留：升级不能要求用户重新保存任何东西。
+        assert_eq!(
+            store.get("profile-1").expect("get must succeed"),
+            Some("{\"v\":1}".to_string())
+        );
+        let versions = applied_migrations(&store.connection.lock().expect("lock"))
+            .expect("migration journal must be readable");
+        assert_eq!(versions, vec![1, 2]);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn refuses_to_open_a_database_from_a_newer_schema() {
+        let connection = Connection::open_in_memory().expect("open");
+        connection
+            .execute_batch(&format!("PRAGMA user_version = {}", SCHEMA_VERSION + 1))
+            .expect("set future version");
+        assert_eq!(migrate(&connection), Err(StoreError::Unavailable));
     }
 
     #[test]

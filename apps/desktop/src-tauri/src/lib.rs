@@ -14,6 +14,7 @@ mod ai;
 mod ai_contract_tests;
 #[cfg(test)]
 mod ai_e2e_tests;
+mod local_card;
 mod provider_profile;
 mod secret;
 mod sse;
@@ -181,6 +182,125 @@ fn cancel_direct_ai(
     Ok(registry.cancel(&request_id))
 }
 
+/// 本地卡 IPC 用的 DTO。
+///
+/// 与 Rust 存储层解耦：command 层只搬运已校验的 JSON 记录与索引列，**不解释**卡的内容
+/// 语义。索引列由 TypeScript 提供，native 侧独立复核（见 `local_card::LocalCardStore::put`）。
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SaveLocalCardRequest {
+    /// 已通过 `LocalCardRecordV1Schema` 校验的完整记录，序列化为 JSON 文本。
+    document: String,
+    index: local_card::LocalCardIndex,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SaveLocalCardResponse {
+    id: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ListLocalCardsRequest {
+    #[serde(default)]
+    include_deleted: bool,
+    #[serde(default)]
+    card_types: Vec<String>,
+    limit: i64,
+    /// 上一页返回的 `nextCursor`，原样回传。
+    #[serde(default)]
+    cursor: Option<LocalCardCursorDto>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LocalCardCursorDto {
+    updated_at: String,
+    id: String,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ListLocalCardsResponse {
+    documents: Vec<String>,
+    next_cursor: Option<LocalCardCursorDto>,
+}
+
+/// 保存一条本地数据卡。
+///
+/// 业务级 IPC：renderer 交出"一条已校验的记录"，native 负责落盘。这里**没有** `readFile` /
+/// `writeFile` / `query` 形态的通用能力（ADR 第 7 条）。
+#[tauri::command]
+fn save_local_card(
+    cards: State<'_, local_card::LocalCardStore>,
+    request: SaveLocalCardRequest,
+) -> Result<SaveLocalCardResponse, store::StoreError> {
+    cards.put(&request.document, &request.index)?;
+    Ok(SaveLocalCardResponse {
+        id: request.index.id,
+    })
+}
+
+#[tauri::command]
+fn get_local_card(
+    cards: State<'_, local_card::LocalCardStore>,
+    id: String,
+) -> Result<Option<String>, store::StoreError> {
+    cards.get(&id)
+}
+
+#[tauri::command]
+fn list_local_cards(
+    cards: State<'_, local_card::LocalCardStore>,
+    request: ListLocalCardsRequest,
+) -> Result<ListLocalCardsResponse, store::StoreError> {
+    let page = cards.list(&local_card::LocalCardQuery {
+        include_deleted: request.include_deleted,
+        card_types: request.card_types,
+        limit: request.limit,
+        cursor: request.cursor.map(|cursor| local_card::LocalCardCursor {
+            updated_at: cursor.updated_at,
+            id: cursor.id,
+        }),
+    })?;
+
+    Ok(ListLocalCardsResponse {
+        documents: page.documents,
+        next_cursor: page.next_cursor.map(|cursor| LocalCardCursorDto {
+            updated_at: cursor.updated_at,
+            id: cursor.id,
+        }),
+    })
+}
+
+/// 软删一条本地卡：只写 tombstone，保留文档，使 `restore_local_card` 能真正恢复。
+#[tauri::command]
+fn delete_local_card(
+    cards: State<'_, local_card::LocalCardStore>,
+    id: String,
+    deleted_at: String,
+) -> Result<(), store::StoreError> {
+    cards.soft_delete(&id, &deleted_at)
+}
+
+#[tauri::command]
+fn restore_local_card(
+    cards: State<'_, local_card::LocalCardStore>,
+    id: String,
+) -> Result<(), store::StoreError> {
+    cards.restore(&id)
+}
+
+/// 彻底删除一条本地卡。幂等。
+#[tauri::command]
+fn purge_local_card(
+    cards: State<'_, local_card::LocalCardStore>,
+    id: String,
+) -> Result<(), store::StoreError> {
+    cards.purge(&id)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -192,9 +312,16 @@ pub fn run() {
             let data_root = app.path().app_data_dir().map_err(|error| {
                 format!("cannot resolve the application data directory: {error}")
             })?;
-            let store = LocalStore::open(&store::LocalStorePaths::under(&data_root))
+            let paths = store::LocalStorePaths::under(&data_root);
+            // 两个存储访问**同一个** SQLite 文件：D1 的 Profile 与 D2.0 的本地卡同属一台
+            // 设备上的用户资产。分开存放会让备份、迁移与"重开应用"各多一套路径。
+            let store = LocalStore::open(&paths)
                 .map_err(|error| format!("cannot open the local store: {}", error.message()))?;
+            let cards = local_card::LocalCardStore::open(&paths).map_err(|error| {
+                format!("cannot open the local card store: {}", error.message())
+            })?;
             app.manage(store);
+            app.manage(cards);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -208,7 +335,13 @@ pub fn run() {
             delete_provider_profile,
             validate_provider_execution_profile,
             stream_direct_ai,
-            cancel_direct_ai
+            cancel_direct_ai,
+            save_local_card,
+            get_local_card,
+            list_local_cards,
+            delete_local_card,
+            restore_local_card,
+            purge_local_card
         ])
         .run(tauri::generate_context!())
         .expect("error while running MahoShojo Generator desktop app");
