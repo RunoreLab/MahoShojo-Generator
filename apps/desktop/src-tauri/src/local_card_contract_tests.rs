@@ -1,4 +1,4 @@
-//! `packages/contracts` 的 Desktop IPC fixture 断言（D2.0）。
+//! `packages/contracts` 的 Desktop IPC fixture 断言（D2.0 + D2.2）。
 //!
 //! 契约的 TypeScript 权威实现在 `packages/contracts/src/desktop-ipc.ts`；Rust 侧镜像其中的
 //! 常量与枚举。两边**MUST** 读同一份 fixture，任一侧改了形状而未更新 fixture 都必须失败

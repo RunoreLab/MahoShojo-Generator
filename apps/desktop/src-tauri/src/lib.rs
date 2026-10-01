@@ -14,16 +14,21 @@ mod ai;
 mod ai_contract_tests;
 #[cfg(test)]
 mod ai_e2e_tests;
+mod audit;
 mod blob;
 mod library;
 mod local_card;
 #[cfg(test)]
 mod local_card_contract_tests;
 mod maintenance;
+#[cfg(test)]
+mod maintenance_contract_tests;
 mod provider_profile;
 mod secret;
 mod sse;
 mod store;
+#[cfg(test)]
+mod test_fixture;
 mod web_package;
 
 use library::LocalLibrary;
@@ -537,6 +542,42 @@ fn purge_web_package(
     library.packages().purge(&id)
 }
 
+/// 跑一次本地库完整性审计。**只报告，不修复。**
+///
+/// 返回形状与 `DesktopLocalLibraryAuditReportSchema` 一一对应。审计 MUST 在维护窗口内执行
+/// （`DESK-067`）：单次 SQL 查询是原子的，但"读 metadata → 读文件 → 读 metadata"不是——
+/// save 落在中间会报出一个假的损坏桶，而用户据此去恢复数据只会发现什么都没有。
+///
+/// `async fn` + `spawn_blocking`：审计要为每个被引用 blob 重算 SHA-256，是 O(字节) 的工作。
+/// 同步 command 会在调用线程上跑完它，期间整个 WebView 无法重绘。
+#[tauri::command]
+async fn audit_local_library(
+    app: tauri::AppHandle,
+) -> Result<audit::AuditReport, audit::AuditError> {
+    // 这里刻意用 `AppHandle` + `state()` 而不是 `State<'_, LocalLibrary>`：`State` 借用
+    // 函数体的生命周期，无法 move 进 `spawn_blocking`。`AppHandle` 是 cloneable + Send，
+    // 且 `state()` 在阻塞任务里取到的仍是同一份 managed state。
+    let window = app
+        .state::<LocalLibrary>()
+        .enter_maintenance("audit")
+        .map_err(|_| audit::AuditError::Unavailable)?;
+
+    let handle = app.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let library = handle.state::<LocalLibrary>();
+        audit::audit(
+            library.blobs(),
+            &blob::BlobPaths::under(library.data_root()),
+            library.connection(),
+        )
+    })
+    .await
+    .map_err(|_| audit::AuditError::Failure)?;
+
+    drop(window);
+    result
+}
+
 /// 读取一个本地 Web 包的原始 ZIP 字节。
 ///
 /// **按 `contentDigest` 查，不是按包 id。** 共享端口 `WebPackageRepository.readArchive(digest)`
@@ -624,7 +665,8 @@ pub fn run() {
             delete_web_package,
             restore_web_package,
             purge_web_package,
-            read_web_package_archive
+            read_web_package_archive,
+            audit_local_library
         ])
         .run(tauri::generate_context!())
         .expect("error while running MahoShojo Generator desktop app");

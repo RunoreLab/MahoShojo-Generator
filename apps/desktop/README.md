@@ -15,8 +15,10 @@ MahoShojo Generator 的本地桌面客户端 runtime。它是独立 app，不是
   `CardRepository` adapter；
 - **D2.1** Web Package ZIP blob 持久化：内容寻址 `blob` 表、`local_web_package` 与真实外键
   引用表、原子写入与去重自愈、业务级 IPC 与 `WebPackageRepository` adapter；
-- **D2.2a** 并发地基：`LocalLibrary` 单一 managed state、维护窗口、数据目录单实例锁。
-  审计、GC、备份与导入导出属 D2.2b 之后的阶段。
+- **D2.2a** 并发地基：`LocalLibrary` 单一 managed state、维护窗口、数据目录单实例锁；
+- **D2.2b** 完整性审计：六个分桶的只读报告（缺失、摘要/长度不符、无引用 metadata、孤儿文件、
+  记录缺引用、外键违规），`audit_local_library` command 与渲染层分组。
+  GC、备份与导入导出属 D2.2c 之后的阶段。
 
 ## 权威边界
 
@@ -229,8 +231,38 @@ IndexedDB adapter 未来可独立改进。软删只写 tombstone、**保留** do
 自由载荷走 `Box<RawValue>`，保留原始文本而不实例化 `String`，载荷里的孤立代理项被逐字节
 保留（见 `local_card.rs` 的兼容性测试与 `fixtures/desktop-local-cards.json`）。
 
-完整性审计、孤儿 GC、导入导出与备份属 D2.2b 之后的阶段，当前**不存在**。D2.2a 只落地了它们
-依赖的并发地基——维护窗口与单实例此刻没有任何生产调用方，这是刻意留到下一段接上的。
+### 完整性审计（D2.2b）
+
+`audit_local_library` 跑一次只读审计，**只报告不修复**——修复只发生在下一次写入的自愈路径上。
+一份说"有问题"的报告比一份说"我替你修了"的报告有用得多：后者让用户失去对库状态的判断依据。
+
+六个桶与它们各自的用户可见性：
+
+| 桶 | 含义 | 用户可见损坏 |
+| --- | --- | --- |
+| `reference-file-missing` | 引用存在，文件不在 | 是 |
+| `reference-bytes-mismatch` | 文件在，摘要或长度不符 | 是 |
+| `record-without-reference` | 包记录存在但没有引用行 | 是 |
+| `unreferenced-metadata` | 有 metadata 无引用（purge 后的回收候选） | 否 |
+| `orphan-file` | 有文件无 metadata（崩溃窗口产物） | 否 |
+| `foreign-key-violation` | `PRAGMA foreign_key_check` 报出的违规 | 否 |
+
+第五桶单列的原因：外键方向是"引用行 → 包记录"，数据库**不**约束"每个包记录都必须有引用行"，
+而缺引用行的包对用户表现为"打不开"（`readArchive` 返回 `null`），与字节损坏无法区分。
+
+后三桶不算损坏：孤儿文件与无引用 metadata 用户都看不见（前者是崩溃窗口产物，后者是 purge
+之后的回收候选），把它们算作损坏会让真正要处理的问题被稀释。外键违规同理——它的症状必然
+落到前三个桶之一，单独报警等于同一件事报两次。
+
+报告**必须**携带规模分母（被引用 blob 数、metadata 数、包数）：来自空库的「0 个问题」与
+来自 500 个包的「0 个问题」含义完全不同。报告**不得**携带文件路径（`DESK-057`）。
+
+审计在 native 侧持有维护窗口并跑在 `spawn_blocking` 上：单次 SQL 查询是原子的，但
+"读 metadata → 读文件 → 读 metadata"不是，save 落在中间会报出假的损坏桶；重算每个 blob 的
+SHA-256 是 O(字节) 的工作，同步 command 会冻结 WebView。渲染层因此对 `maintenance-busy`
+做有界重试。
+
+孤儿 GC、导入导出与备份属 D2.2c 之后的阶段，当前**不存在**。
 
 ## 持久 secret
 

@@ -27,6 +27,11 @@ import {
   DesktopReadWebPackageArchiveResponseSchema,
   DesktopWebPackageIndexSchema,
   DesktopWebPackageTransitionRequestSchema,
+  DESKTOP_LOCAL_LIBRARY_AUDIT_DAMAGE_KINDS,
+  DESKTOP_LOCAL_LIBRARY_AUDIT_KINDS,
+  DesktopLocalLibraryAuditErrorSchema,
+  DesktopLocalLibraryAuditFindingSchema,
+  DesktopLocalLibraryAuditReportSchema,
 } from '../src/desktop-ipc';
 
 interface SecretRefFixture {
@@ -122,10 +127,12 @@ interface LocalCardFixture {
  * `apps/desktop/src-tauri/src/local_card_contract_tests.rs`）。两侧断言的是各自的常量与
  * fixture 的具体取值相等，而不是各自内联一份期望值——否则"同步改了"会静默通过。
  */
-const readLocalCardFixture = (): LocalCardFixture =>
+const readFixture = <T>(): T =>
   JSON.parse(
     readFileSync(path.resolve(process.cwd(), 'fixtures', 'desktop-local-cards.json'), 'utf8'),
-  ) as LocalCardFixture;
+  ) as T;
+
+const readLocalCardFixture = (): LocalCardFixture => readFixture<LocalCardFixture>();
 
 describe('Desktop 本地卡 IPC 契约', () => {
   const fixture = readLocalCardFixture();
@@ -224,10 +231,7 @@ interface BlobFixture {
  * 曾经出现过声明 4 字节却实际解出 5 字节的 fixture——两侧如果只比较字符串就会一起通过，
  * 直到用户导入时才炸。因此这里断言解码后的魔数与长度。
  */
-const readBlobFixture = (): BlobFixture =>
-  JSON.parse(
-    readFileSync(path.resolve(process.cwd(), 'fixtures', 'desktop-local-cards.json'), 'utf8'),
-  ) as BlobFixture;
+const readBlobFixture = (): BlobFixture => readFixture<BlobFixture>();
 
 describe('Desktop blob 与 Web 包 IPC 契约', () => {
   const fixture = readBlobFixture();
@@ -344,5 +348,144 @@ describe('Desktop blob 与 Web 包 IPC 契约', () => {
       index: fixture.webPackageIndex,
     });
     expect(Object.keys(request).sort()).toEqual(['document', 'index']);
+  });
+});
+
+/** fixture 的 `maintenance` 段。D2.2 的审计与 GC 契约都在这里。 */
+interface MaintenanceSection {
+  $comment?: string;
+  auditKinds: string[];
+  auditDamageKinds: string[];
+  auditErrorCodes: string[];
+  auditReport: Record<string, unknown> & { $case?: string };
+  auditFindingReferenceFileMissing: Record<string, unknown> & { $case?: string };
+  auditFindingBytesMismatchEqualLength: Record<string, unknown> & { $case?: string };
+  auditFindingBytesMismatchTruncated: Record<string, unknown> & { $case?: string };
+  auditFindingUnreferencedMetadata: Record<string, unknown> & { $case?: string };
+  auditFindingOrphanFile: Record<string, unknown> & { $case?: string };
+  auditFindingRecordWithoutReference: Record<string, unknown> & { $case?: string };
+  auditFindingForeignKeyViolation: Record<string, unknown> & { $case?: string };
+}
+
+interface MaintenanceFixture {
+  maintenance: MaintenanceSection;
+}
+
+const readMaintenanceFixture = (): MaintenanceFixture => readFixture<MaintenanceFixture>();
+
+/** 剔除 fixture 的人读注释：契约是 strict 的，注释字段不是契约的一部分。 */
+const withoutCase = <T extends Record<string, unknown>>(value: T): Omit<T, '$case'> => {
+  const { $case: _case, ...rest } = value;
+  expect(_case).toEqual(expect.any(String));
+  return rest;
+};
+
+describe('Desktop 本地库维护 IPC 契约（D2.2）', () => {
+  const fixture = readMaintenanceFixture().maintenance;
+  expect(fixture.$comment).toEqual(expect.any(String));
+
+  it('桶集合与 native 侧一致且顺序稳定', () => {
+    expect([...DESKTOP_LOCAL_LIBRARY_AUDIT_KINDS]).toEqual(fixture.auditKinds);
+  });
+
+  it('「用户可见损坏」是桶的真子集', () => {
+    expect([...DESKTOP_LOCAL_LIBRARY_AUDIT_DAMAGE_KINDS]).toEqual(fixture.auditDamageKinds);
+    for (const kind of DESKTOP_LOCAL_LIBRARY_AUDIT_DAMAGE_KINDS) {
+      expect(DESKTOP_LOCAL_LIBRARY_AUDIT_KINDS).toContain(kind);
+    }
+    // 孤儿文件与无引用 metadata 是崩溃窗口产物或 purge 后的回收候选：用户不会因此
+    // 少看到任何包。把它们标成损坏会让真正要处理的问题被稀释。
+    expect(DESKTOP_LOCAL_LIBRARY_AUDIT_DAMAGE_KINDS).not.toContain('orphan-file');
+    expect(DESKTOP_LOCAL_LIBRARY_AUDIT_DAMAGE_KINDS).not.toContain('unreferenced-metadata');
+  });
+
+  it('审计错误码与 native 侧一致', () => {
+    expect(DesktopLocalLibraryAuditErrorSchema.shape.code.options).toEqual(
+      fixture.auditErrorCodes,
+    );
+  });
+
+  it('接受 fixture 中的每一个桶，并保留 lengthMatches 这一区分', () => {
+    const cases = [
+      fixture.auditFindingReferenceFileMissing,
+      fixture.auditFindingBytesMismatchEqualLength,
+      fixture.auditFindingBytesMismatchTruncated,
+      fixture.auditFindingUnreferencedMetadata,
+      fixture.auditFindingOrphanFile,
+      fixture.auditFindingRecordWithoutReference,
+      fixture.auditFindingForeignKeyViolation,
+    ];
+    for (const value of cases) {
+      const parsed = DesktopLocalLibraryAuditFindingSchema.parse(withoutCase(value));
+      expect(parsed.kind).toBe(value['kind']);
+    }
+
+    // 等长但内容不同 vs 被截断：两者用户症状相同、成因不同，必须能被 UI 区分。
+    // 判别联合的收窄靠 `kind`，因此先按 kind 过滤再读字段——直接读 `lengthMatches`
+    // 只能在类型层面就报错，那正是这个 schema 用 `discriminatedUnion` 的原因。
+    const mismatch = DesktopLocalLibraryAuditFindingSchema.parse(
+      withoutCase(fixture.auditFindingBytesMismatchEqualLength),
+    );
+    const truncated = DesktopLocalLibraryAuditFindingSchema.parse(
+      withoutCase(fixture.auditFindingBytesMismatchTruncated),
+    );
+    expect(mismatch.kind).toBe('reference-bytes-mismatch');
+    expect(truncated.kind).toBe('reference-bytes-mismatch');
+    if (mismatch.kind !== 'reference-bytes-mismatch' || truncated.kind !== 'reference-bytes-mismatch') {
+      throw new Error('两个 fixture 都必须声明 reference-bytes-mismatch');
+    }
+    expect(mismatch.lengthMatches).toBe(true);
+    expect(truncated.lengthMatches).toBe(false);
+    expect(mismatch.expectedByteLength).toBe(truncated.expectedByteLength);
+    expect(mismatch.actualByteLength).not.toBe(truncated.actualByteLength);
+  });
+
+  it('桶由 kind 判别：把一个桶的字段用在另一个桶上必须失败', () => {
+    // 只检查 kind 而不检查字段的 schema 会让 `{kind: 'orphan-file', byteLength}` 被当作
+    // `reference-file-missing` 接受，于是报告在 UI 上显示成"文件缺失"而实际是孤儿文件。
+    expect(() =>
+      DesktopLocalLibraryAuditFindingSchema.parse({
+        kind: 'orphan-file',
+        byteLength: 10,
+        packageId: 'wp_0123456789abcdef0123456789abcdef',
+      }),
+    ).toThrow();
+    expect(() =>
+      DesktopLocalLibraryAuditFindingSchema.parse({
+        ...withoutCase(fixture.auditFindingOrphanFile),
+        digest: 'not-a-digest',
+      }),
+    ).toThrow();
+  });
+
+  it('干净报告 MUST 携带规模分母', () => {
+    const parsed = DesktopLocalLibraryAuditReportSchema.parse(
+      withoutCase(fixture.auditReport),
+    );
+    expect(parsed.findings).toEqual([]);
+    // 分母不是可选的礼貌：来自空库的「0 个问题」与来自 500 个包的「0 个问题」含义完全不同。
+    expect(Object.keys(parsed).sort()).toEqual([
+      'blobMetadataCount',
+      'findings',
+      'referencedBlobCount',
+      'schemaVersion',
+      'webPackageCount',
+    ]);
+  });
+
+  it('报告不接受文件路径——物理布局不进对外契约', () => {
+    // 带路径会让「同一份库在两台设备上的审计结果」不同，而那对用户判断毫无价值。
+    expect(() =>
+      DesktopLocalLibraryAuditReportSchema.parse({
+        ...withoutCase(fixture.auditReport),
+        dataRoot: 'C:\\Users\\someone\\AppData\\Local\\mahoshojo',
+      }),
+    ).toThrow();
+    expect(() =>
+      DesktopLocalLibraryAuditFindingSchema.parse({
+        ...withoutCase(fixture.auditFindingOrphanFile),
+        path: 'blobs/abc',
+      }),
+    ).toThrow();
   });
 });

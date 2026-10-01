@@ -51,6 +51,79 @@
     "$case": "读取归档的**请求**形状：参数是 manifest 摘要（record.ref.digest），不是包 id。两者混用会让真实读取路径必然落空。",
     "contentDigest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
   },
+  "maintenance": {
+    "$comment": "D2.2 完整性审计与 GC 的跨运行时契约。TypeScript 侧用 zod 校验，Rust 侧 include_str! 后断言自身枚举与之逐项一致。",
+    "auditKinds": [
+      "reference-file-missing",
+      "reference-bytes-mismatch",
+      "unreferenced-metadata",
+      "orphan-file",
+      "record-without-reference",
+      "foreign-key-violation"
+    ],
+    "auditDamageKinds": [
+      "reference-file-missing",
+      "reference-bytes-mismatch",
+      "record-without-reference"
+    ],
+    "auditErrorCodes": ["audit-unavailable", "audit-failure"],
+    "auditReport": {
+      "$case": "一次干净审计的报告：findings 为空但**必须**给出规模分母——来自空库与来自满库的『0 个问题』含义完全不同。",
+      "findings": [],
+      "schemaVersion": 4,
+      "referencedBlobCount": 0,
+      "blobMetadataCount": 0,
+      "webPackageCount": 0
+    },
+    "auditFindingReferenceFileMissing": {
+      "$case": "桶一：引用存在但文件缺失。用户看得见这个包、点开打不开。",
+      "kind": "reference-file-missing",
+      "packageId": "wp_0123456789abcdef0123456789abcdef",
+      "digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    },
+    "auditFindingBytesMismatchEqualLength": {
+      "$case": "桶二最难的一种：长度相同但内容被改写。lengthMatches 让 UI 能把它与截断区分开。",
+      "kind": "reference-bytes-mismatch",
+      "packageId": "wp_0123456789abcdef0123456789abcdef",
+      "digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "expectedByteLength": 1024,
+      "actualByteLength": 1024,
+      "lengthMatches": true
+    },
+    "auditFindingBytesMismatchTruncated": {
+      "$case": "同一桶的另一种形态：被截断。lengthMatches=false。",
+      "kind": "reference-bytes-mismatch",
+      "packageId": "wp_0123456789abcdef0123456789abcdef",
+      "digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "expectedByteLength": 1024,
+      "actualByteLength": 512,
+      "lengthMatches": false
+    },
+    "auditFindingUnreferencedMetadata": {
+      "$case": "桶三：purge 之后的可回收候选。不是损坏——用户没有少看到任何东西。",
+      "kind": "unreferenced-metadata",
+      "digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    },
+    "auditFindingOrphanFile": {
+      "$case": "桶四：崩溃窗口产物，允许存在，因此不算用户可见损坏。",
+      "kind": "orphan-file",
+      "digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "byteLength": 2048
+    },
+    "auditFindingRecordWithoutReference": {
+      "$case": "桶五：外键方向是 引用行→包记录，因此数据库不约束这个方向。它对用户表现为『打不开』，与字节损坏无法区分。",
+      "kind": "record-without-reference",
+      "packageId": "wp_0123456789abcdef0123456789abcdef"
+    },
+    "auditFindingForeignKeyViolation": {
+      "$case": "桶六：PRAGMA foreign_key_check 的输出。rowId 是 SQLite 的 rowid，不是业务 id。",
+      "kind": "foreign-key-violation",
+      "table": "web_package_archive_ref",
+      "rowId": 2,
+      "parent": "blob",
+      "foreignKeyId": 0
+    }
+  },
   "validIndex": {
     "id": "lc_0123456789abcdef0123456789abcdef",
     "cardType": "character",

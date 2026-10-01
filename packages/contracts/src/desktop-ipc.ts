@@ -350,3 +350,147 @@ export const DesktopListWebPackagesResponseSchema = z
   })
   .strict();
 export type DesktopListWebPackagesResponse = z.infer<typeof DesktopListWebPackagesResponseSchema>;
+
+/**
+ * 本地库维护 IPC（D2.2）。
+ *
+ * ## 报告形状与实现无关
+ *
+ * 桶的语义（"什么叫孤儿"、"什么叫可达"）是**领域知识**而不是 Desktop 细节，因此投影
+ * 放在契约包、由 Rust 与未来的 Web 实现共同对齐。但 V1 只有 native 侧实现审计——
+ * Web 的 IndexedDB 把记录与字节写在同一个事务里，天然不产生孤儿（见 `DESK-055`），
+ * 因此那里没有可审计的中间态。这不是"Web 不需要审计"，而是"Web 当前没有审计的对象"。
+ *
+ * ## 六个桶
+ *
+ * `record-without-reference` 单列：外键方向是"引用行 → 包记录"，因此数据库**不**约束
+ * "每个包记录都必须有引用行"。缺引用行的包对用户表现为"打不开"（`readArchive` 返回
+ * `null`），与真正的字节损坏无法区分。
+ *
+ * ## 报告 MUST NOT 携带文件路径
+ *
+ * blob 的物理布局是 adapter 内部实现（`DESK-057`）。带路径的报告会让"同一份库在两台设备上
+ * 的审计结果不同"，而那对用户判断毫无价值。因此定位信息只有摘要与包 id。
+ */
+
+/** 审计的一个发现。`kind` 是桶，`digest` / `packageId` 是定位信息。 */
+export const DesktopLocalLibraryAuditFindingSchema = z.discriminatedUnion('kind', [
+  z
+    .object({
+      kind: z.literal('reference-file-missing'),
+      /** 打不开这个包的记录 id。 */
+      packageId: DesktopLocalCardIdSchema,
+      /** 引用行指向的 blob 摘要。 */
+      digest: DesktopLocalCardDigestSchema,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('reference-bytes-mismatch'),
+      packageId: DesktopLocalCardIdSchema,
+      digest: DesktopLocalCardDigestSchema,
+      /** metadata 声称的字节数。 */
+      expectedByteLength: z.number().int().nonnegative(),
+      /** 磁盘上的实际字节数。 */
+      actualByteLength: z.number().int().nonnegative(),
+      /**
+       * 长度是否一致。与 `actualByteLength` 分开报告，让 UI 能区分"被截断"与
+       * "内容不同但等长"——后者是最难被长度检查发现的一种损坏。
+       */
+      lengthMatches: z.boolean(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('unreferenced-metadata'),
+      digest: DesktopLocalCardDigestSchema,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('orphan-file'),
+      digest: DesktopLocalCardDigestSchema,
+      byteLength: z.number().int().nonnegative(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('record-without-reference'),
+      packageId: DesktopLocalCardIdSchema,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('foreign-key-violation'),
+      table: z.string().min(1).max(128),
+      rowId: z.number().int(),
+      parent: z.string().min(1).max(128),
+      foreignKeyId: z.number().int().nonnegative(),
+    })
+    .strict(),
+]);
+export type DesktopLocalLibraryAuditFinding = z.infer<
+  typeof DesktopLocalLibraryAuditFindingSchema
+>;
+
+/** 审计的桶标识。UI 按它分组统计。 */
+export const DESKTOP_LOCAL_LIBRARY_AUDIT_KINDS = [
+  'reference-file-missing',
+  'reference-bytes-mismatch',
+  'unreferenced-metadata',
+  'orphan-file',
+  'record-without-reference',
+  'foreign-key-violation',
+] as const;
+export type DesktopLocalLibraryAuditKind = (typeof DESKTOP_LOCAL_LIBRARY_AUDIT_KINDS)[number];
+
+/**
+ * 该桶是否代表**用户可见的损坏**。
+ *
+ * 孤儿文件与无引用 metadata 都不算：它们是崩溃窗口产物或 purge 之后的回收候选，用户不会
+ * 因此少看到任何一个包。把它们标成损坏会让真正需要处理的问题被稀释。
+ *
+ * 外键违规**不算**：它是数据库层的不变量被破坏，症状必然落到上面三个桶之一（用户看到的是
+ * "包打不开"）。单独把它算作损坏会让同一件事被报告两次。
+ */
+export const DESKTOP_LOCAL_LIBRARY_AUDIT_DAMAGE_KINDS = [
+  'reference-file-missing',
+  'reference-bytes-mismatch',
+  'record-without-reference',
+] as const satisfies readonly DesktopLocalLibraryAuditKind[];
+
+export const DesktopLocalLibraryAuditReportSchema = z
+  .object({
+    findings: z.array(DesktopLocalLibraryAuditFindingSchema).max(100_000),
+    schemaVersion: z.number().int().nonnegative(),
+    /**
+     * 参与审计的规模。给出分母是必要的：一份"0 个问题"来自空库与来自 500 个包的库，
+     * 含义完全不同。UI 不应把前者显示成"本地库健康"。
+     */
+    referencedBlobCount: z.number().int().nonnegative(),
+    blobMetadataCount: z.number().int().nonnegative(),
+    webPackageCount: z.number().int().nonnegative(),
+  })
+  .strict();
+export type DesktopLocalLibraryAuditReport = z.infer<
+  typeof DesktopLocalLibraryAuditReportSchema
+>;
+
+/** 审计失败。刻意与本地库存储错误分开：审计失败是"不知道库怎么样"，不是"库坏了"。 */
+export const DesktopLocalLibraryAuditErrorCodeSchema = z.enum([
+  'audit-unavailable',
+  'audit-failure',
+]);
+export type DesktopLocalLibraryAuditErrorCode = z.infer<
+  typeof DesktopLocalLibraryAuditErrorCodeSchema
+>;
+
+export const DesktopLocalLibraryAuditErrorSchema = z
+  .object({
+    code: DesktopLocalLibraryAuditErrorCodeSchema,
+    message: z.string().min(1).max(512),
+  })
+  .strict();
+export type DesktopLocalLibraryAuditError = z.infer<
+  typeof DesktopLocalLibraryAuditErrorSchema
+>;

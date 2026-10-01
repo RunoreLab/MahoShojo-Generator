@@ -1,0 +1,149 @@
+import {
+  DESKTOP_LOCAL_LIBRARY_AUDIT_DAMAGE_KINDS,
+  DESKTOP_LOCAL_LIBRARY_AUDIT_KINDS,
+  DesktopLocalLibraryAuditErrorSchema,
+  DesktopLocalLibraryAuditReportSchema,
+  type DesktopLocalLibraryAuditFinding,
+  type DesktopLocalLibraryAuditKind,
+  type DesktopLocalLibraryAuditReport,
+} from '@mahoshojo/contracts/desktop-ipc';
+
+/**
+ * 审计报告的渲染层桥接（D2.2b）。
+ *
+ * 这一层只有一件事：把 native 返回的线形 `findings` 变成 UI 可以直接渲染的**按桶分组 + 计数**
+ * 结构，并区分"用户可见的损坏"与"可以稍后回收的候选"。
+ *
+ * 为什么值得单独一层：报告的原始形状是 `findings: Finding[]`，而 UI 要回答三个不同的问题——
+ * 需不需要弹警告（损坏）、需不需要提示可以清理（可回收）、每类各有几条。把这三件事散进各个
+ * 组件就会各写一遍分组逻辑，而"什么算损坏"这条判断一旦有两份实现就会漂移。
+ */
+
+/** 一个桶在 UI 上的呈现形态。 */
+export interface LocalLibraryAuditBucket {
+  kind: DesktopLocalLibraryAuditKind;
+  count: number;
+  findings: readonly DesktopLocalLibraryAuditFinding[];
+}
+
+export interface LocalLibraryAuditSummary {
+  /** 按 `DESKTOP_LOCAL_LIBRARY_AUDIT_KINDS` 的固定顺序排列，缺失的桶不出现。 */
+  readonly buckets: readonly LocalLibraryAuditBucket[];
+  /** 是否需要向用户报警。false 时 UI 只在"本地库"页展示一个静态的状态说明。 */
+  readonly hasDamage: boolean;
+  /** 是否存在可以回收的空间（孤儿文件 + purge 后的无引用 metadata）。 */
+  readonly hasReclaimableSpace: boolean;
+  readonly referencedBlobCount: number;
+  readonly blobMetadataCount: number;
+  readonly webPackageCount: number;
+}
+
+export const AUDIT_LOCAL_LIBRARY_COMMAND = 'audit_local_library' as const;
+
+export interface InvokeFn {
+  (command: string, args?: Record<string, unknown>): Promise<unknown>;
+}
+
+export class DesktopLocalLibraryAuditError extends Error {
+  readonly code: string;
+
+  constructor(code: string, message: string) {
+    super(message);
+    this.name = 'DesktopLocalLibraryAuditError';
+    this.code = code;
+  }
+}
+
+/**
+ * 把报告分组。
+ *
+ * 顺序取自契约常量而不是"发现出现的顺序"：后者依赖目录遍历顺序，同一份库在两台设备上会
+ * 分出不同排列的桶，而用户会以为顺序本身携带了优先级信息。
+ *
+ * 空报告仍然返回空 `buckets` 而非"每桶一条 count: 0"——UI 需要区分"没有该类问题"与
+ * "这一类不存在"，后者靠分母判断。
+ */
+export const summarizeLocalLibraryAudit = (
+  report: DesktopLocalLibraryAuditReport,
+): LocalLibraryAuditSummary => {
+  const parsed = DesktopLocalLibraryAuditReportSchema.parse(report);
+  const byKind = new Map<string, DesktopLocalLibraryAuditFinding[]>();
+  for (const finding of parsed.findings) {
+    const bucket = byKind.get(finding.kind) ?? [];
+    bucket.push(finding);
+    byKind.set(finding.kind, bucket);
+  }
+
+  const buckets: LocalLibraryAuditBucket[] = [];
+  for (const kind of DESKTOP_LOCAL_LIBRARY_AUDIT_KINDS) {
+    const findings = byKind.get(kind);
+    if (findings === undefined || findings.length === 0) continue;
+    buckets.push({ kind, count: findings.length, findings });
+  }
+
+  return {
+    buckets,
+    hasDamage: parsed.findings.some((finding) =>
+      (DESKTOP_LOCAL_LIBRARY_AUDIT_DAMAGE_KINDS as readonly string[]).includes(finding.kind),
+    ),
+    hasReclaimableSpace: buckets.some(
+      (bucket) => bucket.kind === 'orphan-file' || bucket.kind === 'unreferenced-metadata',
+    ),
+    referencedBlobCount: parsed.referencedBlobCount,
+    blobMetadataCount: parsed.blobMetadataCount,
+    webPackageCount: parsed.webPackageCount,
+  };
+};
+
+/**
+ * 跑一次审计。
+ *
+ * 审计在 native 侧持有维护窗口，因此它运行期间**并发写入会被拒**（`maintenance-busy`）。
+ * 这里的重试因此不是可有可无的礼貌：用户点一下"检查本地库"时若恰好在保存一张卡，
+ * 直接把错误弹给用户会让他以为检查失败与那张卡有关。
+ */
+export const runLocalLibraryAudit = async (
+  invoke: InvokeFn,
+  options: { readonly retryOnMaintenance?: number } = {},
+): Promise<LocalLibraryAuditSummary> => {
+  const attempts = options.retryOnMaintenance ?? 3;
+  let lastError: unknown = null;
+
+  for (let attempt = 0; attempt < Math.max(1, attempts); attempt += 1) {
+    try {
+      const raw = await invoke(AUDIT_LOCAL_LIBRARY_COMMAND);
+      return summarizeLocalLibraryAudit(
+        DesktopLocalLibraryAuditReportSchema.parse(raw) as DesktopLocalLibraryAuditReport,
+      );
+    } catch (cause) {
+      lastError = cause;
+      if (!isMaintenanceBusy(cause) || attempt === attempts - 1) break;
+      // 退避固定而非指数：维护窗口通常在几百毫秒内结束，而 UI 正在等这个结果。
+      await new Promise((resolve) => setTimeout(resolve, 200 * (attempt + 1)));
+    }
+  }
+
+  throw toAuditError(lastError);
+};
+
+const isMaintenanceBusy = (cause: unknown): boolean =>
+  cause !== null &&
+  typeof cause === 'object' &&
+  typeof (cause as { code?: unknown }).code === 'string' &&
+  (cause as { code: string }).code === 'maintenance-busy';
+
+const toAuditError = (cause: unknown): DesktopLocalLibraryAuditError => {
+  if (
+    cause !== null &&
+    typeof cause === 'object' &&
+    typeof (cause as { code?: unknown }).code === 'string' &&
+    typeof (cause as { message?: unknown }).message === 'string'
+  ) {
+    const parsed = DesktopLocalLibraryAuditErrorSchema.safeParse(cause);
+    if (parsed.success) {
+      return new DesktopLocalLibraryAuditError(parsed.data.code, parsed.data.message);
+    }
+    return new DesktopLocalLibraryAuditError('audit-failure', '本地库完整性检查未能完成。');
+  }
+  return new DesktopLocalLibraryAuditError('audit-failure', '本地库完整性检查未能完成。');
+};

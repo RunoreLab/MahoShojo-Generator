@@ -447,6 +447,7 @@ describe('desktop workspace app ownership', () => {
       'restore_web_package',
       'purge_web_package',
       'read_web_package_archive',
+      'audit_local_library',
     ]);
 
     // renderer 可用的 secret 能力只有写入与存在性；任何读取形态都会让
@@ -510,6 +511,31 @@ describe('desktop workspace app ownership', () => {
         libSource,
         `local library command surface must not accept ${parameter}`,
       ).not.toMatch(new RegExp(`\\b${parameter}\\s*:\\s*(?:String|&str)`, 'u'));
+    }
+  });
+
+  it('runs maintenance commands off the IPC thread and inside a maintenance window', () => {
+    // DESK-067：Tauri 的同步 command 在调用线程执行。审计要为每个被引用 blob 重算 SHA-256，
+    // 是 O(字节) 的工作——同步执行会冻结整个 WebView。
+    //
+    // 这条无法由 Rust 单测覆盖：command 是否 `async` 是源码形状，不是运行期行为。
+    const libSource = readFileSync(path.join(tauriDirectory, 'src', 'lib.rs'), 'utf8');
+
+    for (const command of ['audit_local_library']) {
+      const declaration = new RegExp(`async fn ${command}\\(([\\s\\S]*?)\\n\\}`, 'u').exec(libSource);
+      expect(declaration, `${command} must be declared to inspect`).not.toBeNull();
+      const body = declaration?.[0] ?? '';
+      expect(
+        body,
+        `${command} must be async — a sync command would block the WebView`,
+      ).toMatch(/\basync fn\b/u);
+      expect(
+        body,
+        `${command} must move blocking work into spawn_blocking`,
+      ).toContain('spawn_blocking');
+      // 许可必须在进入窗口后才 spawn，且要 move 进阻塞任务——否则它会在 spawn 之前
+      // drop，窗口等于没开。
+      expect(body, `${command} must take the maintenance permit`).toContain('enter_maintenance');
     }
   });
 

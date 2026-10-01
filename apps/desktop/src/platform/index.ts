@@ -40,6 +40,17 @@ export { createDesktopAiExecutionPort } from './desktop-ai-execution';
 export type { DirectAiChannel } from './direct-ai-bridge';
 
 export {
+  AUDIT_LOCAL_LIBRARY_COMMAND,
+  DesktopLocalLibraryAuditError,
+  runLocalLibraryAudit,
+  summarizeLocalLibraryAudit,
+} from './local-library-audit';
+export type {
+  LocalLibraryAuditBucket,
+  LocalLibraryAuditSummary,
+} from './local-library-audit';
+
+export {
   DELETE_LOCAL_CARD_COMMAND,
   GET_LOCAL_CARD_COMMAND,
   LIST_LOCAL_CARDS_COMMAND,
