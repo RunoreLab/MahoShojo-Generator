@@ -2381,6 +2381,7 @@ checksum = "4050469837a6ff301cd14c1f8f24f88549e6d548f24f64e2148eb0f72cebc51f"
 name = "mahoshojo-desktop"
 version = "0.0.0"
 dependencies = [
+ "base64 0.22.1",
  "futures-util",
  "keyring",
  "reqwest",

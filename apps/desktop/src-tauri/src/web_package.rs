@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS local_web_package (
     id                  TEXT PRIMARY KEY NOT NULL,
     document            TEXT NOT NULL,
     ref_digest          TEXT NOT NULL,
+
     updated_at          TEXT NOT NULL,
     updated_at_sort     INTEGER NOT NULL,
     deleted_at          TEXT,
@@ -356,6 +357,11 @@ impl WebPackageStore {
     }
 
     /// 该包当前引用的 blob 摘要。
+    /// 按**包 id** 取它的归档 blob 地址。
+    ///
+    /// 仅供测试断言存储布局；`DESK-063` 意义上的外部读取入口是
+    /// [`Self::archive_digest_for_content_digest`]——共享端口以 manifest 摘要为键。
+    #[cfg(test)]
     pub fn archive_digest(&self, id: &str) -> Result<Option<String>, StoreError> {
         self.with_connection(|connection| {
             let mut statement = connection
@@ -363,6 +369,38 @@ impl WebPackageStore {
                 .map_err(|_| StoreError::Failure)?;
             let mut rows = statement
                 .query(rusqlite::params![id])
+                .map_err(|_| StoreError::Failure)?;
+            match rows.next().map_err(|_| StoreError::Failure)? {
+                Some(row) => Ok(Some(
+                    row.get::<_, String>(0).map_err(|_| StoreError::Failure)?,
+                )),
+                None => Ok(None),
+            }
+        })
+    }
+
+    /// 按 **manifest 摘要**（= `ref.digest` = 记录里的 `contentDigest`）取归档 blob 地址。
+    ///
+    /// 共享端口 `WebPackageRepository.readArchive(digest)` 与 Web 的 IndexedDB adapter 都以
+    /// manifest 摘要为键：业务侧传的是 `record.ref.digest`，而它不是 `wp_…` 形式的包 id。
+    /// 桌面侧要落到同一个键上，就必须经 `local_web_package` → `web_package_archive_ref` 两跳。
+    ///
+    /// `None` 表示"没有这条摘要的记录，或记录已被 purge"——调用方据此返回 `null`，与 Web 一致。
+    pub fn archive_digest_for_content_digest(
+        &self,
+        content_digest: &str,
+    ) -> Result<Option<String>, StoreError> {
+        self.with_connection(|connection| {
+            // 引用表是权威：它只对真实存在的包行有行（真实外键），因此不必再联表查包记录。
+            let mut statement = connection
+                .prepare(
+                    "SELECT ref.digest FROM web_package_archive_ref ref
+                     JOIN local_web_package pkg ON pkg.id = ref.package_id
+                     WHERE pkg.ref_digest = ?1",
+                )
+                .map_err(|_| StoreError::Failure)?;
+            let mut rows = statement
+                .query(rusqlite::params![content_digest])
                 .map_err(|_| StoreError::Failure)?;
             match rows.next().map_err(|_| StoreError::Failure)? {
                 Some(row) => Ok(Some(
@@ -617,9 +655,19 @@ mod tests {
     }
 
     /// 造一条 document。`archive_len` 是它**自称**的归档长度，用来测试它与实际字节数的复核。
-    fn package_document(id: &str, updated_at: &str, tombstone: &str, archive_len: i64) -> String {
+    ///
+    /// `digest` 是这条记录的 canonical identity。真实记录里每个包的 manifest 摘要各不相同，
+    /// 而 `ref_digest` 上有 UNIQUE 约束——因此需要多行时必须给出不同摘要，否则测的是
+    /// "两个包抢同一个身份"这条拒绝路径。
+    fn package_document(
+        id: &str,
+        digest: &str,
+        updated_at: &str,
+        tombstone: &str,
+        archive_len: i64,
+    ) -> String {
         format!(
-            r#"{{"id":"{id}","schemaVersion":1,"storageLocation":"local","entityKind":"web-package","title":"包","summary":"s","ref":{{"digest":"{DIGEST}","id":"local.x","version":"1.0.0"}},"manifest":{{"format":"mahoshojo-web-package","formatVersion":1,"id":"local.x","version":"1.0.0","name":"包","entry":"index.html","capabilities":[],"files":[{{"path":"index.html","mediaType":"text/html","digest":"{DIGEST}","size":2}}]}},"contentDigest":"{DIGEST}","archiveByteLength":{archive_len},"provenance":{{"kind":"unsigned","execution":"imported"}},"createdAt":"{updated_at}","updatedAt":"{updated_at}"{tombstone}}}"#
+            r#"{{"id":"{id}","schemaVersion":1,"storageLocation":"local","entityKind":"web-package","title":"包","summary":"s","ref":{{"digest":"{digest}","id":"local.x","version":"1.0.0"}},"manifest":{{"format":"mahoshojo-web-package","formatVersion":1,"id":"local.x","version":"1.0.0","name":"包","entry":"index.html","capabilities":[],"files":[{{"path":"index.html","mediaType":"text/html","digest":"{digest}","size":2}}]}},"contentDigest":"{digest}","archiveByteLength":{archive_len},"provenance":{{"kind":"unsigned","execution":"imported"}},"createdAt":"{updated_at}","updatedAt":"{updated_at}"{tombstone}}}"#
         )
     }
 
@@ -633,16 +681,27 @@ mod tests {
         deleted_at: Option<&str>,
         archive: &[u8],
     ) -> (String, WebPackageIndex) {
+        package_for_digest(id, DIGEST, updated_at, deleted_at, archive)
+    }
+
+    /// 指定 canonical identity 的版本。多行场景用它给每行不同摘要。
+    fn package_for_digest(
+        id: &str,
+        digest: &str,
+        updated_at: &str,
+        deleted_at: Option<&str>,
+        archive: &[u8],
+    ) -> (String, WebPackageIndex) {
         let tombstone = match deleted_at {
             Some(value) => format!(r#","deletedAt":"{value}""#),
             None => String::new(),
         };
-        let document = package_document(id, updated_at, &tombstone, archive.len() as i64);
+        let document = package_document(id, digest, updated_at, &tombstone, archive.len() as i64);
         let index = WebPackageIndex {
             id: id.to_string(),
             updated_at: updated_at.to_string(),
             deleted_at: deleted_at.map(str::to_string),
-            content_digest: DIGEST.to_string(),
+            content_digest: digest.to_string(),
         };
         (document, index)
     }
@@ -992,14 +1051,92 @@ mod tests {
         );
     }
 
+    /// 共享端口的读取入口 MUST 以 **manifest 摘要**为键。
+    ///
+    /// 业务侧传的是 `record.ref.digest`，而它不是 `wp_…` 形式的包 id。这里曾把参数当包 id
+    /// 用，于是真实读取路径必然落空：manifest 摘要永远不是包 id，查不到记录就返回 `null`，
+    /// 用户表现为"包打不开"。测试用摘要查、并断言包 id 查不到，把端口语义钉在这里。
+    #[test]
+    fn an_archive_is_found_by_its_manifest_digest_not_by_the_package_id() {
+        let (packages, blobs, _root) = fixture();
+        let archive = b"PK\x03\x04by-digest".to_vec();
+        let (document, index) = package_for("wp_lookup", NOW, None, &archive);
+        packages
+            .save(&blobs, &document, &index, &archive, NOW)
+            .expect("save");
+
+        assert_eq!(
+            packages
+                .archive_digest_for_content_digest(DIGEST)
+                .expect("lookup")
+                .expect("manifest 摘要必须能查到归档"),
+            crate::blob::digest_of(&archive)
+        );
+        // 包 id 不是摘要，拿它查必须落空——否则就是把两种键混为一谈。
+        assert_eq!(
+            packages
+                .archive_digest_for_content_digest("wp_lookup")
+                .expect("lookup"),
+            None
+        );
+        assert_eq!(
+            packages
+                .archive_digest_for_content_digest(&format!("sha256:{}", "d".repeat(64)))
+                .expect("lookup"),
+            None,
+            "不存在的摘要 MUST 返回 None 而不是报错"
+        );
+    }
+
+    /// soft delete 之后归档仍 MUST 可按摘要读到（`DESK-055`：软删不改变可达性），
+    /// purge 之后 MUST 读不到。
+    #[test]
+    fn reachability_by_manifest_digest_follows_the_soft_delete_lifecycle() {
+        let (packages, blobs, _root) = fixture();
+        let archive = b"PK\x03\x04lifecycle".to_vec();
+        let (document, index) = package_for("wp_life", NOW, None, &archive);
+        packages
+            .save(&blobs, &document, &index, &archive, NOW)
+            .expect("save");
+
+        let (tombstone, tombstone_index) = package_of_len(
+            "wp_life",
+            "2026-09-30T13:00:00Z",
+            Some("2026-09-30T13:00:00Z"),
+        );
+        packages
+            .delete(&tombstone, &tombstone_index)
+            .expect("soft delete");
+        assert!(
+            packages
+                .archive_digest_for_content_digest(DIGEST)
+                .expect("lookup")
+                .is_some(),
+            "软删 MUST NOT 切断归档可达性，否则恢复后仍是一个打不开的包"
+        );
+
+        packages.purge("wp_life").expect("purge");
+        assert_eq!(
+            packages
+                .archive_digest_for_content_digest(DIGEST)
+                .expect("lookup"),
+            None,
+            "purge 之后 MUST 读不到归档"
+        );
+    }
+
     #[test]
     fn keyset_pagination_covers_every_row_once_across_page_sizes() {
         let (packages, blobs, _root) = fixture();
         for n in 0..25i64 {
             let updated_at = format!("2026-09-30T{:02}:{:02}:00Z", n / 60, n % 60);
-            // 每行一份不同字节，因此地址也不同——顺带覆盖"多条记录指向不同 blob"。
+            // 每行一份不同字节（因此 blob 地址不同）与不同 manifest 摘要（因此 canonical
+            // identity 不同）——`ref_digest` 上有 UNIQUE 约束，用同一个摘要建 25 行测的
+            // 是拒绝路径，不是分页。
             let archive = format!("PK{n}").into_bytes();
-            let (document, index) = package_for(&format!("wp_{n:03}"), &updated_at, None, &archive);
+            let digest = format!("sha256:{:064x}", n);
+            let (document, index) =
+                package_for_digest(&format!("wp_{n:03}"), &digest, &updated_at, None, &archive);
             packages
                 .save(&blobs, &document, &index, &archive, &updated_at)
                 .expect("save");

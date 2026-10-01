@@ -2,6 +2,8 @@ import {
   DesktopBase64BytesSchema,
   DesktopListWebPackagesRequestSchema,
   DesktopListWebPackagesResponseSchema,
+  DesktopReadWebPackageArchiveRequestSchema,
+  DesktopReadWebPackageArchiveResponseSchema,
   DesktopSaveWebPackageRequestSchema,
   DesktopSaveWebPackageResponseSchema,
   DesktopWebPackageTransitionRequestSchema,
@@ -265,18 +267,30 @@ export class IpcWebPackageRepository implements WebPackageRepository {
     });
   }
 
-  /** 读取原始 ZIP 字节；记录存在但字节缺失时返回 null。 */
+  /**
+   * 读取原始 ZIP 字节；记录存在但字节缺失时返回 null。
+   *
+   * 参数是 **manifest 摘要**（`record.ref.digest`），不是包 id——共享端口
+   * `WebPackageRepository.readArchive(digest)` 与 Web 的 IndexedDB adapter 都以摘要为键。
+   * 曾把它当包 id 传，native 按 id 查不到任何记录，于是每次读取都返回 null，表现为
+   * "包打不开"；而两侧单测都绿，因为它们用的是包 id 当参数。
+   */
   async readArchive(digest: string): Promise<Uint8Array | null> {
     let raw: unknown;
     try {
-      raw = await this.invoke(READ_WEB_PACKAGE_ARCHIVE_COMMAND, { id: digest });
+      raw = await this.invoke(
+        READ_WEB_PACKAGE_ARCHIVE_COMMAND,
+        DesktopReadWebPackageArchiveRequestSchema.parse({ contentDigest: digest }),
+      );
     } catch (cause) {
       const error = toWebPackageError(READ_WEB_PACKAGE_ARCHIVE_COMMAND, cause);
       // 字节缺失是一个可判定状态，不该以抛错呈现：调用方要的是"读不到"这个事实。
       if (error.code === 'blob-not-found') return null;
       throw error;
     }
-    return fromBase64Bytes(raw);
+    // native 返回 `{archive: {b64, len}}`，不是裸字符串；解包路径只有一条。
+    const envelope = DesktopReadWebPackageArchiveResponseSchema.parse(raw);
+    return fromBase64Bytes(envelope.archive);
   }
 
   async delete(id: string): Promise<void> {

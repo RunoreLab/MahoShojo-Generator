@@ -323,7 +323,7 @@ struct SaveWebPackageRequest {
     index: web_package::WebPackageIndex,
     /// 原始 ZIP 字节的 base64。与文档分开传：文档是 JSON 文本，载荷是二进制，混在一个
     /// 字段里会让两侧都要为对方的数据形状做让步。
-    #[serde(with = "base64_bytes")]
+    #[serde(with = "base64_bytes::field")]
     archive: Vec<u8>,
     /// 渲染层时钟。软删/恢复必须单调推进，native 不引入时间库。
     now: String,
@@ -351,75 +351,72 @@ struct SaveWebPackageResponse {
 
 /// base64 传输二进制。
 ///
-/// `DESK-053` 要求 IPC 接受字节流或受控句柄、**MUST NOT** 接受 renderer 提供的任意目标路径。
-/// 这里用 base64 而不是自定义协议：Tauri 2 有原生 raw IPC（`InvokeBody::Raw` /
-/// `tauri::ipc::Response`），但它要求请求体整体是 raw 形式，无法与结构化参数并存；而本阶段
-/// 的载荷是单个 Web 包 ZIP，base64 的开销可以接受。等 D2.3 要搬整个 archive 时再切 raw IPC。
+/// `DESK-064` 要求二进制信封同时携带载荷与其字节长度，两端都在解码后核对长度。
+/// **请求与响应共用同一个类型**——让读写各自定义形状是"读出来是一根字符串"这类 bug 的温床：
+/// 两侧各自的单测都会绿，因为它们各自 mock 了对方的形状。
+///
+/// 用标准 crate 而不是手写：宽松的 padding 处理会静默接受截断载荷（失败点被推到解包器里，
+/// 离真正原因很远），而逐字符线性查表在 64 MiB 归档上是 10^9 量级的字符比较。
 mod base64_bytes {
-    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    use base64::engine::general_purpose::STANDARD;
+    use base64::Engine as _;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-    pub fn deserialize<'de, D: serde::Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<Vec<u8>, D::Error> {
-        #[derive(serde::Deserialize)]
-        #[serde(rename_all = "camelCase")]
-        struct Raw {
-            b64: String,
-            len: usize,
+    /// IPC 上的 base64 信封：编码后的载荷 + 解码后的字节长度。
+    ///
+    /// 请求与响应**共用这一个类型**：让读写各自定义形状，正是"读出来是一根裸字符串"这类
+    /// bug 的温床——两侧各自的单测都会绿，因为它们各自 mock 了对方的形状。
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct Base64Bytes {
+        pub b64: String,
+        pub len: usize,
+    }
+
+    impl Base64Bytes {
+        pub fn from_bytes(bytes: &[u8]) -> Self {
+            Self {
+                b64: STANDARD.encode(bytes),
+                len: bytes.len(),
+            }
         }
+
+        /// 解码并核对长度。
+        ///
+        /// 长度核对不可省：静默接受截断载荷会产出"看起来完整"的短归档，把失败点推到解包器里。
+        pub fn decode(&self) -> Result<Vec<u8>, String> {
+            let bytes = STANDARD
+                .decode(&self.b64)
+                .map_err(|_| "载荷不是合法的标准 base64".to_string())?;
+            if bytes.len() != self.len {
+                return Err(format!(
+                    "base64 载荷长度不符：声明 {}，实际 {}",
+                    self.len,
+                    bytes.len()
+                ));
+            }
+            Ok(bytes)
+        }
+    }
+
+    /// serde 的 `(serialize, deserialize)` 适配器。请求与响应两个方向的实现相同——
+    /// 它们共享 `Base64Bytes`，因此不可能漂移。
+    pub mod field {
+        use super::{Base64Bytes, Deserializer, Serialize, Serializer};
+        use serde::de::Error as _;
         use serde::Deserialize as _;
-        let raw = Raw::deserialize(deserializer)?;
-        let bytes = decode(&raw.b64)
-            .ok_or_else(|| serde::de::Error::custom("archive payload is not valid base64"))?;
-        if bytes.len() != raw.len {
-            return Err(serde::de::Error::custom("base64 payload length mismatch"));
-        }
-        Ok(bytes)
-    }
 
-    /// 对外暴露编码器：读路径必须复用它，否则两份实现会漂移。
-    pub fn encode(bytes: &[u8]) -> String {
-        let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
-        for chunk in bytes.chunks(3) {
-            let b = [
-                chunk[0],
-                *chunk.get(1).unwrap_or(&0),
-                *chunk.get(2).unwrap_or(&0),
-            ];
-            let packed = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
-            out.push(ALPHABET[(packed >> 18) as usize & 63] as char);
-            out.push(ALPHABET[(packed >> 12) as usize & 63] as char);
-            out.push(if chunk.len() > 1 {
-                ALPHABET[(packed >> 6) as usize & 63] as char
-            } else {
-                '='
-            });
-            out.push(if chunk.len() > 2 {
-                ALPHABET[packed as usize & 63] as char
-            } else {
-                '='
-            });
+        pub fn serialize<S: Serializer>(bytes: &[u8], serializer: S) -> Result<S::Ok, S::Error> {
+            Base64Bytes::from_bytes(bytes).serialize(serializer)
         }
-        out
-    }
 
-    pub fn decode(text: &str) -> Option<Vec<u8>> {
-        let mut out = Vec::with_capacity(text.len() / 4 * 3);
-        let mut accumulator: u32 = 0;
-        let mut bits = 0_u32;
-        for byte in text.bytes() {
-            if byte == b'=' {
-                break;
-            }
-            let value = ALPHABET.iter().position(|candidate| *candidate == byte)? as u32;
-            accumulator = (accumulator << 6) | value;
-            bits += 6;
-            if bits >= 8 {
-                bits -= 8;
-                out.push((accumulator >> bits) as u8);
-            }
+        pub fn deserialize<'de, D: Deserializer<'de>>(
+            deserializer: D,
+        ) -> Result<Vec<u8>, D::Error> {
+            Base64Bytes::deserialize(deserializer)?
+                .decode()
+                .map_err(D::Error::custom)
         }
-        Some(out)
     }
 }
 
@@ -527,23 +524,33 @@ fn purge_web_package(
 
 /// 读取一个本地 Web 包的原始 ZIP 字节。
 ///
-/// 返回值是 base64 文本而非原始字节：与 `save_web_package` 的入参保持对称，且让渲染层只需
-/// 一个解码路径。字节本身来自内容寻址存储并已校验摘要。
+/// **按 `contentDigest` 查，不是按包 id。** 共享端口 `WebPackageRepository.readArchive(digest)`
+/// 与 Web 的 IndexedDB adapter 都以 manifest 摘要为键，业务侧传的也正是 `record.ref.digest`。
+/// 把它当成包 id 会让真实读取路径必然落空（manifest 摘要永远不是 `wp_…` 形式）。
+///
+/// 返回 `{b64, len}` 信封而非裸 base64 字符串：`DESK-064` 要求二进制载荷自带长度，
+/// 而裸字符串会让渲染层无法核对——它只能选择"要么不核对，要么解析失败"。
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ReadWebPackageArchiveResponse {
+    #[serde(with = "base64_bytes::field")]
+    archive: Vec<u8>,
+}
+
 #[tauri::command]
 fn read_web_package_archive(
     packages: State<'_, web_package::WebPackageStore>,
     blobs: State<'_, blob::BlobStore>,
-    id: String,
-) -> Result<String, web_package::SaveWebPackageError> {
+    content_digest: String,
+) -> Result<ReadWebPackageArchiveResponse, web_package::SaveWebPackageError> {
     let digest = packages
-        .archive_digest(&id)
+        .archive_digest_for_content_digest(&content_digest)
         .map_err(web_package::SaveWebPackageError::Store)?;
     let digest = digest.ok_or(web_package::SaveWebPackageError::Blob(
         blob::BlobError::NotFound,
     ))?;
     let bytes = blobs.read(&digest)?;
-    // 复用与入参同一个编码器：两份 base64 实现必然漂移，而漂移表现为"存进去读不出来"。
-    Ok(base64_bytes::encode(&bytes))
+    Ok(ReadWebPackageArchiveResponse { archive: bytes })
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -619,11 +626,11 @@ pub fn run() {
 mod tests {
     use super::{base64_bytes, DesktopRuntimeInfo};
 
-    /// 手写 base64 MUST 与标准实现逐字节一致。
+    /// base64 MUST 与标准实现逐字节一致。
     ///
-    /// 这是自实现编码器最危险的地方：它与渲染层的解码器只有一次调用相隔，漂移的表现是
-    /// "存进去读不出来"，而且要到用户导入 Web 包时才暴露。逐长度覆盖 0/1/2/3 字节的尾部
-    /// 情形，期望值取自 Node 的 `Buffer.toString('base64')`。
+    /// 这个信封与渲染层的解码器只有一次 IPC 调用相隔，漂移的表现是"存进去读不出来"，而且要
+    /// 到用户导入 Web 包时才暴露。逐长度覆盖 0/1/2/3 字节的尾部情形，期望值取自 Node 的
+    /// `Buffer.toString('base64')`。
     #[test]
     fn base64_matches_the_standard_encoding() {
         for (bytes, expected) in [
@@ -635,30 +642,76 @@ mod tests {
             (&b"PK\x03\x04z"[..], "UEsDBHo="),
             (&b"PK\x03\x04zh"[..], "UEsDBHpo"),
         ] {
-            assert_eq!(base64_bytes::encode(bytes), expected, "len={}", bytes.len());
-            assert_eq!(
-                base64_bytes::decode(expected).as_deref(),
-                Some(bytes),
-                "{expected}"
-            );
+            let envelope = base64_bytes::Base64Bytes::from_bytes(bytes);
+            assert_eq!(envelope.b64, expected, "len={}", bytes.len());
+            assert_eq!(envelope.len, bytes.len());
+            assert_eq!(envelope.decode().as_deref(), Ok(bytes), "{expected}");
         }
     }
 
     #[test]
     fn base64_round_trips_every_byte_value() {
         let all: Vec<u8> = (0..=255_u8).collect();
-        let encoded = base64_bytes::encode(&all);
-        assert_eq!(
-            base64_bytes::decode(&encoded).as_deref(),
-            Some(all.as_slice())
-        );
+        let envelope = base64_bytes::Base64Bytes::from_bytes(&all);
+        assert_eq!(envelope.decode().as_deref(), Ok(all.as_slice()));
     }
 
+    /// 非法输入 MUST 被拒，而不是产出一段"看起来能用"的错误字节。
+    ///
+    /// 这几条正是自写解码器的典型漏洞面：遇到 `=` 就 `break` 而不校验 padding，于是尾随垃圾
+    /// 会被静默丢弃——`UEsDBQ==garbage` 和 `UEsDBQ==` 会被当成同一份载荷。
     #[test]
-    fn base64_decode_rejects_characters_outside_the_alphabet() {
-        // 静默接受非法字符会产出"看起来能用"的错误字节。
-        assert_eq!(base64_bytes::decode("UEsD*Q=="), None);
-        assert_eq!(base64_bytes::decode("UEsD Q=="), None);
+    fn base64_rejects_malformed_payloads() {
+        for bad in [
+            "UEsD*Q==",        // 字母表外字符
+            "UEsD Q==",        // 空白
+            "UEsDBQ=",         // padding 长度错误
+            "UEsDBQ",          // 长度不是 4 的倍数
+            "UEsDBQ==garbage", // padding 之后的尾随内容
+            "UEs=DBA=",        // '=' 出现在中间
+        ] {
+            assert!(
+                base64_bytes::Base64Bytes {
+                    b64: bad.to_string(),
+                    len: 3
+                }
+                .decode()
+                .is_err(),
+                "{bad} MUST be rejected"
+            );
+        }
+    }
+
+    /// 长度核对 MUST 生效：截断载荷会变成"看起来完整"的短归档。
+    #[test]
+    fn base64_rejects_a_length_that_does_not_match_the_payload() {
+        assert!(base64_bytes::Base64Bytes {
+            b64: "UEsDBA==".to_string(),
+            len: 99
+        }
+        .decode()
+        .is_err());
+    }
+
+    /// 请求与响应两个方向 MUST 产出同一形状的线上字段。
+    ///
+    /// 它们曾各写各的：native 返回裸字符串，渲染层按对象解析——两侧单测都绿（各自 mock 了
+    /// 对方），真实 IPC 才炸。因此这里断言序列化结果的字段名集合。
+    #[test]
+    fn the_base64_envelope_has_one_wire_shape_in_both_directions() {
+        #[derive(serde::Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Response {
+            #[serde(with = "base64_bytes::field")]
+            archive: Vec<u8>,
+        }
+        let archive = b"PK\x03\x04".to_vec();
+        let value = serde_json::to_value(Response { archive }).expect("must serialize");
+        assert_eq!(
+            value,
+            serde_json::json!({ "archive": { "b64": "UEsDBA==", "len": 4 } }),
+            "响应方向必须也是 {{b64, len}}，不能是裸字符串"
+        );
     }
 
     #[test]

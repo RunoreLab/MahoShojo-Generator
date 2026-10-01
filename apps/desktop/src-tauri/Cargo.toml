@@ -16,6 +16,10 @@ crate-type = ["rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+# 标准 base64 编解码。MIT / Apache-2.0，纯 Rust，无额外传递依赖。
+# 自己手写解码器的问题不是"风格"：宽松的 padding 处理会静默接受截断载荷，
+# 而逐字符线性查表在 64 MiB 归档上是 10^9 量级的比较。依据 DESK-064。
+base64 = "0.22"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 keyring = { version = "4", features = [
   "windows-native-keyring-store",

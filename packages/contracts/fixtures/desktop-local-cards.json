@@ -32,10 +32,23 @@
     "updatedAt": "2026-09-30T12:00:00.000Z",
     "contentDigest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
   },
+  "webPackageIdentity": {
+    "$case": "canonical identity：包 id MUST 由 contentDigest 派生。Web 与 Desktop 共用同一份派生规则，native 只做存储约束而不重算。",
+    "id": "wp_0123456789abcdef0123456789abcdef",
+    "contentDigest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+  },
   "blobArchive": {
     "$case": "一份最小 ZIP 的 base64 载荷；len 记录解码后长度，两侧都必须核对",
     "b64": "UEsDBA==",
     "len": 4
+  },
+  "readArchiveResponse": {
+    "$case": "读取归档的**响应**形状：载荷包在 archive 字段里。曾经 native 返回裸 base64 字符串而渲染层按对象解析——两侧单测都绿（各自 mock 对方形状），真实 IPC 才炸。",
+    "archive": { "b64": "UEsDBA==", "len": 4 }
+  },
+  "readArchiveRequest": {
+    "$case": "读取归档的**请求**形状：参数是 manifest 摘要（record.ref.digest），不是包 id。两者混用会让真实读取路径必然落空。",
+    "contentDigest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
   },
   "validIndex": {
     "id": "lc_0123456789abcdef0123456789abcdef",

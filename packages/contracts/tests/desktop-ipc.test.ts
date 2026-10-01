@@ -23,6 +23,8 @@ import {
   DesktopBlobErrorCodeSchema,
   DesktopBlobWriteOutcomeSchema,
   DesktopSaveWebPackageRequestSchema,
+  DesktopReadWebPackageArchiveRequestSchema,
+  DesktopReadWebPackageArchiveResponseSchema,
   DesktopWebPackageIndexSchema,
   DesktopWebPackageTransitionRequestSchema,
 } from '../src/desktop-ipc';
@@ -209,7 +211,10 @@ interface BlobFixture {
   blobWriteOutcomes: string[];
   maxPackageArchiveBytes: number;
   webPackageIndex: unknown;
+  webPackageIdentity: { $case: string; id: string; contentDigest: string };
   blobArchive: { $case: string; b64: string; len: number };
+  readArchiveRequest: { $case: string; contentDigest: string };
+  readArchiveResponse: { $case: string; archive: { b64: string; len: number } };
 }
 
 /**
@@ -271,6 +276,48 @@ describe('Desktop blob 与 Web 包 IPC 契约', () => {
       deletedAt: '2026-09-30T13:00:00.000Z',
     };
     expect(DesktopWebPackageIndexSchema.parse(tombstoned)).toEqual(tombstoned);
+  });
+
+  it('读取归档的请求以 manifest 摘要为键，不接受包 id 形状', () => {
+    // manifest 摘要是 `sha256:…`，包 id 是 `wp_…`。把两者混用会让真实读取路径必然落空。
+    const { $case: _requestCase, ...request } = fixture.readArchiveRequest;
+    expect(_requestCase).toEqual(expect.any(String));
+    expect(DesktopReadWebPackageArchiveRequestSchema.parse(request)).toEqual(request);
+    expect(() =>
+      DesktopReadWebPackageArchiveRequestSchema.parse({
+        ...request,
+        id: fixture.webPackageIdentity.id,
+      }),
+    ).toThrow();
+  });
+
+  it('读取归档的响应是 {archive:{b64,len}}，不接受裸字符串载荷', () => {
+    // native 曾返回裸 base64 字符串。只比较字符串的两侧会一起通过，直到真实 IPC 才炸。
+    const { $case: _responseCase, ...response } = fixture.readArchiveResponse;
+    expect(_responseCase).toEqual(expect.any(String));
+    expect(DesktopReadWebPackageArchiveResponseSchema.parse(response)).toEqual(response);
+    expect(() =>
+      DesktopReadWebPackageArchiveResponseSchema.parse(fixture.blobArchive.b64),
+    ).toThrow();
+  });
+
+  it('canonical identity：包 id 与内容摘要在 fixture 中成对出现', () => {
+    // 派生规则由 TS 单点实现（@mahoshojo/local-library 的 deriveLocalWebPackageId），
+    // Web 与 Desktop 共用；native 只做 UNIQUE 存储约束而不重算。因此这条断言的是
+    // "契约包里的 id 与摘要是同一个身份"，而不是在这里复算派生。
+    const { $case: _case, ...identity } = fixture.webPackageIdentity;
+    expect(_case).toEqual(expect.any(String));
+    expect(DesktopWebPackageIndexSchema.parse(fixture.webPackageIndex).id).toBe(identity.id);
+    expect(
+      DesktopWebPackageIndexSchema.parse({
+        ...(fixture.webPackageIndex as object),
+        id: identity.id,
+        contentDigest: identity.contentDigest,
+      }),
+    ).toMatchObject({ id: identity.id, contentDigest: identity.contentDigest });
+    // id 必须是 wp_ 形式，摘要必须是 sha256: 形式——两者不可互换。
+    expect(identity.id).toMatch(/^wp_[0-9a-f]{32}$/u);
+    expect(identity.contentDigest).toMatch(/^sha256:[0-9a-f]{64}$/u);
   });
 
   it('保存 Web 包必须带上 archive，缺字节的请求在契约层就被拒', () => {

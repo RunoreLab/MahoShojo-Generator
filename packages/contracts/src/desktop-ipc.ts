@@ -284,6 +284,34 @@ export const DesktopSaveWebPackageResponseSchema = z
 export type DesktopSaveWebPackageResponse = z.infer<typeof DesktopSaveWebPackageResponseSchema>;
 
 /**
+ * 读取一个本地 Web 包的原始归档字节。
+ *
+ * 参数是 **manifest 摘要**（`record.ref.digest` = 记录的 `contentDigest`），**不是**包 id。
+ * 共享端口 `WebPackageRepository.readArchive(digest)` 与 Web 的 IndexedDB adapter 都以摘要为
+ * 键：manifest 摘要不是 `wp_…` 形式，拿它当 id 查会让真实读取路径必然落空。
+ */
+export const DesktopReadWebPackageArchiveRequestSchema = z
+  .object({ contentDigest: DesktopLocalCardDigestSchema })
+  .strict();
+export type DesktopReadWebPackageArchiveRequest = z.infer<
+  typeof DesktopReadWebPackageArchiveRequestSchema
+>;
+
+/**
+ * 读取一个本地 Web 包的原始归档字节的**响应**。
+ *
+ * 载荷包在 `archive` 字段里，而不是把 invoke 的返回值直接当载荷：native 曾返回一根裸
+ * base64 字符串，而渲染层按 `{b64, len}` 解析——两侧各自的单测都绿（各自 mock 了对方的
+ * 形状），真实 IPC 才炸。信封形状由 `DesktopBase64BytesSchema` 单点定义。
+ */
+export const DesktopReadWebPackageArchiveResponseSchema = z
+  .object({ archive: DesktopBase64BytesSchema })
+  .strict();
+export type DesktopReadWebPackageArchiveResponse = z.infer<
+  typeof DesktopReadWebPackageArchiveResponseSchema
+>;
+
+/**
  * 删除/恢复一个本地 Web 包。
  *
  * 与保存请求分开，是因为**状态转移不产生新字节**。若复用保存请求，"恢复一个包"也得先把整个

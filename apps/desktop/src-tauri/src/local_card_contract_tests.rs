@@ -25,6 +25,7 @@ struct Fixture {
     blob_write_outcomes: Vec<String>,
     max_package_archive_bytes: usize,
     web_package_index: WebPackageIndexFixture,
+    web_package_identity: WebPackageIdentityFixture,
     blob_archive: BlobArchiveFixture,
     valid_index: ValidIndex,
     tombstoned_index: TombstonedIndex,
@@ -42,6 +43,18 @@ struct WebPackageIndexFixture {
     #[allow(dead_code)]
     #[serde(default)]
     deleted_at: Option<String>,
+}
+
+/// canonical identity 的成对取值。
+///
+/// native **不**重算 id 派生规则（它的权威在 `@mahoshojo/local-library`）。这里断言的是
+/// "契约包里的 id 与摘要是同一个身份"：id 必须是 `wp_` 形式、摘要必须是 `sha256:` 形式，
+/// 且 fixture 的索引列与本结构一致。
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WebPackageIdentityFixture {
+    id: String,
+    content_digest: String,
 }
 
 /// base64 传输信封。
@@ -379,14 +392,46 @@ fn blob_error_codes_and_outcomes_match_the_typescript_authority_in_a_stable_orde
 #[test]
 fn the_shared_base64_payload_decodes_through_our_own_decoder() {
     let fixture = parse();
-    let decoded = crate::base64_bytes::decode(&fixture.blob_archive.b64)
-        .expect("fixture 的 base64 载荷必须能被 native 解码");
+    let decoded = crate::base64_bytes::Base64Bytes {
+        b64: fixture.blob_archive.b64.clone(),
+        len: fixture.blob_archive.len,
+    }
+    .decode()
+    .expect("fixture 的 base64 载荷必须能被 native 解码");
     assert_eq!(
         decoded.len(),
         fixture.blob_archive.len,
         "解码长度必须与声明一致，否则失败点会被推到解包器里"
     );
     assert_eq!(&decoded[..4], b"PK\x03\x04", "载荷的语义是一个 ZIP");
+}
+
+/// canonical identity 在两侧是同一对取值，且形状是 `wp_…` 对 `sha256:…`。
+#[test]
+fn the_shared_canonical_identity_is_one_pair_in_two_halves() {
+    let fixture = parse();
+    let identity = &fixture.web_package_identity;
+    assert_eq!(identity.id, fixture.web_package_index.id);
+    assert_eq!(
+        identity.content_digest,
+        fixture.web_package_index.content_digest
+    );
+    // 两个键不可互换：读档入口以摘要为键，把 `wp_…` 当摘要查必然落空。
+    assert!(
+        identity.id.starts_with("wp_"),
+        "包 id 必须是 wp_ 形式，实际 {:?}",
+        identity.id
+    );
+    assert!(
+        identity.content_digest.starts_with("sha256:"),
+        "内容摘要必须是 sha256: 形式，实际 {:?}",
+        identity.content_digest
+    );
+    assert_ne!(identity.id, identity.content_digest);
+    // 派生规则本身由 TS 权威实现（deriveLocalWebPackageId），native 只做 UNIQUE 存储约束，
+    // 因此这里断言形状而不复算派生。
+    assert_eq!(identity.id.len(), "wp_".len() + 32);
+    assert_eq!(identity.content_digest.len(), "sha256:".len() + 64);
 }
 
 /// fixture 里的 Web 包索引能通过我们自己的类型，且**线上字段名**与契约一致。

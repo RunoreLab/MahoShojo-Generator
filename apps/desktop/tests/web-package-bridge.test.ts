@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { LocalWebPackageRecordV1Schema, type LocalWebPackageRecordV1 } from '@mahoshojo/local-library/web-package-record';
+import {
+  LocalWebPackageRecordV1Schema,
+  deriveLocalWebPackageId,
+  type LocalWebPackageRecordV1,
+} from '@mahoshojo/local-library/web-package-record';
 import { DesktopSaveWebPackageResponseSchema } from '@mahoshojo/contracts/desktop-ipc';
 
 import { DesktopLocalCardError } from '../src/platform/local-card-bridge';
@@ -19,7 +23,8 @@ import {
 } from '../src/platform/web-package-bridge';
 
 const DIGEST = `sha256:${'a'.repeat(64)}`;
-const PKG_ID = 'wp_0123456789abcdef0123456789abcdef';
+// id 由摘要派生：这是记录契约里的 canonical identity，测试夹具不能用随手写的 id。
+const PKG_ID = deriveLocalWebPackageId(DIGEST);
 const ARCHIVE = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x7a]);
 
 const record = (overrides: Partial<LocalWebPackageRecordV1> = {}): LocalWebPackageRecordV1 =>
@@ -176,14 +181,34 @@ describe('IpcWebPackageRepository', () => {
     expect(seen[1]).toEqual(cursor);
   });
 
-  it('readArchive 交出字节；字节缺失是一个状态而不是抛错', async () => {
-    const present = new IpcWebPackageRepository(async () => toBase64Bytes(ARCHIVE));
-    expect([...(await present.readArchive(PKG_ID))!]).toEqual([...ARCHIVE]);
+  it('readArchive 按 manifest 摘要查询，不是按包 id', async () => {
+    // 共享端口与 Web adapter 都以 ref.digest 为键，业务侧传的也是它。把它当包 id 传，
+    // native 按 id 查不到记录，每次读取都返回 null——表现为"包打不开"，而单测照样绿。
+    const seen: { digest: unknown; id: unknown }[] = [];
+    const present = new IpcWebPackageRepository(async (_command, args) => {
+      const payload = args as { contentDigest?: unknown; id?: unknown };
+      seen.push({ digest: payload.contentDigest, id: payload.id });
+      return { archive: toBase64Bytes(ARCHIVE) };
+    });
 
+    expect([...(await present.readArchive(DIGEST))!]).toEqual([...ARCHIVE]);
+    expect(seen[0]).toEqual({ digest: DIGEST, id: undefined });  });
+
+  it('readArchive 解析 native 的 {archive:{b64,len}} 信封，而不是裸字符串', async () => {
+    // native 曾返回裸 base64 字符串。这里 mock 真实形状：裸字符串必须被拒，
+    // 否则"读出来是一根字符串"这个 bug 会被 mock 再次掩盖。
+    const good = new IpcWebPackageRepository(async () => ({ archive: toBase64Bytes(ARCHIVE) }));
+    expect([...(await good.readArchive(DIGEST))!]).toEqual([...ARCHIVE]);
+
+    const bare = new IpcWebPackageRepository(async () => toBase64Bytes(ARCHIVE).b64);
+    await expect(bare.readArchive(DIGEST)).rejects.toBeInstanceOf(Error);
+  });
+
+  it('readArchive：字节缺失是一个状态而不是抛错', async () => {
     const missing = new IpcWebPackageRepository(async () => {
       throw { code: 'blob-not-found', message: 'blob does not exist' };
     });
-    expect(await missing.readArchive(PKG_ID)).toBeNull();
+    expect(await missing.readArchive(DIGEST)).toBeNull();
   });
 
   it('blob 损坏以 blob-corrupt 透出，而不是压成 bridge-failure', async () => {
@@ -191,7 +216,7 @@ describe('IpcWebPackageRepository', () => {
     const corrupt = new IpcWebPackageRepository(async () => {
       throw { code: 'blob-corrupt', message: 'stored blob does not match its digest' };
     });
-    await expect(corrupt.readArchive(PKG_ID)).rejects.toMatchObject({ code: 'blob-corrupt' });
+    await expect(corrupt.readArchive(DIGEST)).rejects.toMatchObject({ code: 'blob-corrupt' });
   });
 
   it('delete 交出带 deletedAt 的完整记录，而不是 (id, deletedAt)', async () => {
@@ -250,7 +275,9 @@ describe('IpcWebPackageRepository', () => {
       commands.push(command);
       if (command === GET_WEB_PACKAGE_COMMAND) return null;
       if (command === LIST_WEB_PACKAGES_COMMAND) return { documents: [] };
-      if (command === READ_WEB_PACKAGE_ARCHIVE_COMMAND) return toBase64Bytes(ARCHIVE);
+      if (command === READ_WEB_PACKAGE_ARCHIVE_COMMAND) {
+        return { archive: toBase64Bytes(ARCHIVE) };
+      }
       if (command === SAVE_WEB_PACKAGE_COMMAND) {
         return DesktopSaveWebPackageResponseSchema.parse({ id: PKG_ID, blobOutcome: 'stored' });
       }
@@ -259,7 +286,7 @@ describe('IpcWebPackageRepository', () => {
 
     await repository.get(PKG_ID);
     await repository.list({ limit: 10 });
-    await repository.readArchive(PKG_ID);
+    await repository.readArchive(DIGEST);
     await repository.put(record(), ARCHIVE);
     await repository.purge(PKG_ID);
     expect(commands).toEqual([
