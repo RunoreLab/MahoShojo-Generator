@@ -149,7 +149,11 @@ pub fn collect(
         let rows = statement
             .query_map([], |row| row.get::<_, String>(0))
             .map_err(|_| GarbageCollectionError::Failure)?;
-        rows.flatten().collect()
+        // 逐行传播错误而不是 `.flatten()`（见 `store::collect_rows`）。
+        //
+        // 这里的错误方向恰好是**保守**的：少拿候选 = 少回收，不会误删。但它仍会让 `scanned`
+        // 与 `reclaimed` 报出不是真相的数字，而 GC 报告的用途正是让用户判断"回收了多少"。
+        crate::store::collect_rows(rows).map_err(|_| GarbageCollectionError::Failure)?
     };
 
     let mut report = GarbageCollectionReport {

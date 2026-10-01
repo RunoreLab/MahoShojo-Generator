@@ -59,6 +59,37 @@ pub fn lock_connection(
     connection.lock().map_err(|_| StoreError::Failure)
 }
 
+/// 把 `query_map` 的结果**完整**收集成 `Vec`，任一行出错即整体失败。
+///
+/// ## 为什么需要这个函数
+///
+/// `rusqlite::MappedRows` 的 `Item` 是 `Result<T>`（`rusqlite-0.37/src/row.rs:155`）。而
+/// `Result<T, E>` 实现了 `IntoIterator<Item = T>`，因此 `rows.flatten()` **能编译**——它把
+/// 解码失败的行静默变成"零个元素"而不是传播错误。
+///
+/// 对普通列表这也许可以接受；对**完整性审计**不行：一次 SQLite 解码错误会让报告少报问题、
+/// 分母变小，而 UI 于是显示得比真实状态更健康。那正是本仓库一贯反对的 fail-open。
+///
+/// 这个函数让 fallible 路径成为唯一路径：`collect()` 需要 `FromIterator<Result<T>>`，而
+/// `Result<T, E>` 不实现它——因此类型会**拒绝** `.flatten()` 那种写法，而不是靠 review 拦。
+pub fn collect_rows<T>(
+    rows: impl Iterator<Item = rusqlite::Result<T>>,
+) -> Result<Vec<T>, StoreError> {
+    rows.collect::<rusqlite::Result<Vec<T>>>()
+        .map_err(|_| StoreError::Failure)
+}
+
+/// 读单个 `i64` 标量（如 `COUNT(*)`）。
+///
+/// **MUST NOT** 在这里折叠成 `0`。审计报告用这些数字当分母——它要回答"这份'0 个问题'的报告
+/// 来自多大的库"。折叠成 0 会让"查询失败"与"库里真有 0 条"不可区分，而前者发生时报告看起来
+/// 恰恰是最健康的那个。
+pub fn scalar_i64(connection: &Connection, sql: &str) -> Result<i64, StoreError> {
+    connection
+        .query_row(sql, [], |row| row.get::<_, i64>(0))
+        .map_err(|_| StoreError::Failure)
+}
+
 /// 当前 schema 版本。SQLite 的 `user_version` 与 migration journal 必须与它一致。
 ///
 /// D1 引入 `provider_profile`（版本 1）；D2.0 在**同一个库**上增加本地卡（版本 2）；
@@ -481,11 +512,97 @@ impl LocalStore {
 #[cfg(test)]
 mod tests {
     use super::{
-        applied_migrations, apply_steps, configure, migrate, table_exists, user_version,
-        LocalStore, LocalStorePaths, MigrationStep, StoreError, MAX_DOCUMENT_BYTES, MIGRATION_1,
-        SCHEMA_VERSION,
+        applied_migrations, apply_steps, collect_rows, configure, migrate, scalar_i64,
+        table_exists, user_version, LocalStore, LocalStorePaths, MigrationStep, StoreError,
+        MAX_DOCUMENT_BYTES, MIGRATION_1, SCHEMA_VERSION,
     };
     use rusqlite::Connection;
+
+    /// 把源码里的注释行去掉，只留下会被编译的代码。
+    ///
+    /// 结构门禁必须扫代码而不是扫文本：这两个模块的注释里**要**写出 `.flatten()` 这个词来讲清
+    /// 为什么不能那么写，扫原文会把自己的说明当成违规。
+    fn code_lines(source: &str) -> impl Iterator<Item = &str> {
+        source
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.starts_with("//"))
+    }
+
+    /// 审计与 GC **MUST NOT** 对查询结果用 `.flatten()`。
+    ///
+    /// 这条门禁存在的唯一理由是：`rusqlite::MappedRows` 的 `Item` 是 `Result<T>`，而
+    /// `Result<T, E>` 实现了 `IntoIterator<Item = T>`，因此 `rows.flatten()` **能编译**——
+    /// 编译器不会拦它，只有语义测试能，而"SQLite 在这一步恰好解码失败"无法在无头环境里构造。
+    ///
+    /// 曾真实发生过的两个后果方向相反：审计里少报问题（fail-open），审计的 `known` 集合变短
+    /// 导致每个 blob 都被误报成孤儿（fail-noisy）。两者都是错的报告。
+    ///
+    /// `collect_rows` 用 `collect::<rusqlite::Result<Vec<T>>>()`，而 `Result<T, E>` 不实现
+    /// `FromIterator`——因此正确写法在类型上无法被误写成 `.flatten()`，这条门禁守的是
+    /// "有人绕过 `collect_rows` 直接手写 `.flatten()`"。
+    #[test]
+    fn audit_and_gc_never_flatten_a_query_result() {
+        let offenders: Vec<(&str, &str)> = [
+            ("audit.rs", include_str!("./audit.rs")),
+            ("gc.rs", include_str!("./gc.rs")),
+        ]
+        .into_iter()
+        .flat_map(|(module, source)| {
+            code_lines(source)
+                .filter(|line| line.contains(".flatten()"))
+                .map(move |line| (module, line))
+                .collect::<Vec<_>>()
+        })
+        .collect();
+        assert!(
+            offenders.is_empty(),
+            "MUST NOT 用 .flatten() 遍历查询结果（它会静默跳过出错行）：{offenders:?}"
+        );
+    }
+
+    #[test]
+    fn collect_rows_propagates_a_row_error_instead_of_dropping_the_row() {
+        // 直接的行为门禁：前两行成功、第三行类型不匹配时，整体必须失败且**不含**那三行中的任何一行。
+        let connection = Connection::open_in_memory().expect("in-memory connection");
+        connection
+            .execute_batch(
+                "CREATE TABLE mixed (value TEXT); INSERT INTO mixed VALUES ('1'), ('2'), (3);",
+            )
+            .expect("fixture table");
+
+        let mut statement = connection
+            .prepare("SELECT value FROM mixed")
+            .expect("prepare");
+        let rows = statement
+            .query_map([], |row| row.get::<_, i64>(0))
+            .expect("query");
+
+        // SQLite 是动态类型：TEXT 列里的 INTEGER 值取成 i64 会得到类型不匹配。
+        let error = collect_rows(rows).expect_err("第三行的类型错误必须整体失败");
+        assert_eq!(error, StoreError::Failure);
+    }
+
+    #[test]
+    fn scalar_i64_never_reports_a_failed_query_as_zero() {
+        // 分母必须是真的。"查询失败"折叠成 0 会让它与"库里真有 0 条"不可区分，而审计报告
+        // 恰恰靠这个数字回答"这份'0 个问题'来自多大的库"。
+        let connection = Connection::open_in_memory().expect("in-memory connection");
+        connection
+            .execute_batch("CREATE TABLE counted (id INTEGER);")
+            .expect("fixture table");
+
+        assert_eq!(
+            scalar_i64(&connection, "SELECT COUNT(*) FROM counted"),
+            Ok(0),
+            "空表的真值就是 0"
+        );
+        assert_eq!(
+            scalar_i64(&connection, "SELECT COUNT(*) FROM no_such_table"),
+            Err(StoreError::Failure),
+            "查询失败必须是错误，而不是 0"
+        );
+    }
 
     fn store() -> LocalStore {
         LocalStore::open_in_memory().expect("in-memory store must open")

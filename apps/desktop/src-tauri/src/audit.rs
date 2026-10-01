@@ -222,11 +222,11 @@ pub fn audit(
     // 第一遍：只读 SQLite，不碰文件系统。分成两遍是因为文件校验要重算摘要（O(字节)），
     // 而纯 SQL 那一半是廉价且原子的；混在一起会让"审计很慢"变成无差别的事实。
     let mut findings = Vec::new();
-    let web_package_count = scalar(&guard, "SELECT COUNT(*) FROM local_web_package");
-    let blob_metadata_count = scalar(&guard, "SELECT COUNT(*) FROM blob");
+    let web_package_count = scalar(&guard, "SELECT COUNT(*) FROM local_web_package")?;
+    let blob_metadata_count = scalar(&guard, "SELECT COUNT(*) FROM blob")?;
 
     // 桶一、二：每条引用行都指向一个必须存在、且内容与 metadata 一致的 blob。
-    let referenced_blob_count = audit_referenced_blobs(&guard, paths, &mut findings);
+    let referenced_blob_count = audit_referenced_blobs(&guard, paths, &mut findings)?;
 
     // 桶三：有 metadata、无引用。
     findings.extend(audit_unreferenced(&guard)?);
@@ -252,10 +252,8 @@ pub fn audit(
     })
 }
 
-fn scalar(connection: &rusqlite::Connection, sql: &str) -> i64 {
-    connection
-        .query_row(sql, [], |row| row.get::<_, i64>(0))
-        .unwrap_or(0)
+fn scalar(connection: &rusqlite::Connection, sql: &str) -> Result<i64, AuditError> {
+    crate::store::scalar_i64(connection, sql).map_err(|_| AuditError::Failure)
 }
 
 /// 桶一、二：引用行的目标必须存在，且摘要与长度都对得上。
@@ -265,30 +263,30 @@ fn audit_referenced_blobs(
     connection: &rusqlite::Connection,
     paths: &BlobPaths,
     findings: &mut Vec<AuditFinding>,
-) -> i64 {
-    let mut statement = match connection.prepare(
-        "SELECT ref.package_id, ref.digest, blob.byte_length
-         FROM web_package_archive_ref AS ref
-         LEFT JOIN blob ON blob.digest = ref.digest",
-    ) {
-        Ok(statement) => statement,
-        Err(_) => return 0,
-    };
+) -> Result<i64, AuditError> {
+    let mut statement = connection
+        .prepare(
+            "SELECT ref.package_id, ref.digest, blob.byte_length
+             FROM web_package_archive_ref AS ref
+             LEFT JOIN blob ON blob.digest = ref.digest",
+        )
+        .map_err(|_| AuditError::Failure)?;
 
-    let rows = match statement.query_map([], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, Option<String>>(1)?,
-            row.get::<_, Option<i64>>(2)?,
-        ))
-    }) {
-        Ok(rows) => rows,
-        Err(_) => return 0,
-    };
+    // 逐行传播错误而不是 `.flatten()`：审计的职责是如实报告库的状态，解码失败的行不能
+    // 变成"这一行不存在"。见 `store::collect_rows` 的文档。
+    let rows = statement
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, Option<i64>>(2)?,
+            ))
+        })
+        .map_err(|_| AuditError::Failure)?;
 
     let mut count = 0_i64;
-    for row in rows.flatten() {
-        let (package_id, digest, declared_length) = row;
+    for row in rows {
+        let (package_id, digest, declared_length) = row.map_err(|_| AuditError::Failure)?;
         count += 1;
 
         // LEFT JOIN 给出 None 说明引用行指向了一个 blob 表里不存在的 digest。
@@ -342,7 +340,7 @@ fn audit_referenced_blobs(
             Err(_) => findings.push(AuditFinding::ReferenceFileMissing { package_id, digest }),
         }
     }
-    count
+    Ok(count)
 }
 
 /// 桶三：有 metadata、无任何引用。
@@ -361,7 +359,8 @@ fn audit_unreferenced(connection: &rusqlite::Connection) -> Result<Vec<AuditFind
         .map_err(|_| AuditError::Failure)?;
 
     let mut findings = Vec::new();
-    for digest in rows.flatten() {
+    for digest in rows {
+        let digest = digest.map_err(|_| AuditError::Failure)?;
         findings.push(AuditFinding::UnreferencedMetadata { digest });
     }
     Ok(findings)
@@ -378,15 +377,20 @@ fn audit_orphan_files(
 ) -> Result<Vec<AuditFinding>, AuditError> {
     // metadata 里的 digest 集合。规模等于 blob 数，而孤儿文件数不会超过目录条目数；
     // 一次性取回比对，比对每个目录条目发一次 SQL 便宜。
-    let known = {
+    //
+    // 这里曾用 `.flatten()`，它把解码失败的行静默跳过 → `known` 变短 → **每一个** blob 文件
+    // 都被误报成孤儿。这类错误方向与"少报问题"相反，但同样是错的报告。
+    let known: std::collections::HashSet<String> = {
         let mut statement = connection
             .prepare("SELECT digest FROM blob")
             .map_err(|_| AuditError::Failure)?;
         let rows = statement
             .query_map([], |row| row.get::<_, String>(0))
             .map_err(|_| AuditError::Failure)?;
-        rows.flatten()
-            .collect::<std::collections::HashSet<String>>()
+        crate::store::collect_rows(rows)
+            .map_err(|_| AuditError::Failure)?
+            .into_iter()
+            .collect()
     };
     let _ = blob_metadata_count;
 
@@ -398,7 +402,11 @@ fn audit_orphan_files(
     };
 
     let mut findings = Vec::new();
-    for entry in entries.flatten() {
+    // 目录条目同样逐个传播错误：跳过一个读不出来的条目，等于把"有一个 blob 文件我看不见"这件事
+    // 从报告里抹掉。而紧接着的 `metadata()` 失败更不能折叠成 `unwrap_or_default()`——那会给一个
+    // 真实存在的文件报出 `byteLength: 0`，报告里的数字因此变成假的。
+    for entry in entries {
+        let entry = entry.map_err(|_| AuditError::Unavailable)?;
         let name = entry.file_name().to_string_lossy().into_owned();
         // 只看摘要形状的普通文件。临时文件（`NamedTempFile`）在写入窗口内存在，
         // 它不是孤儿——把它报出来会让审计在正常写入期间产生噪声。
@@ -408,10 +416,7 @@ fn audit_orphan_files(
         if known.contains(&format!("sha256:{name}")) {
             continue;
         }
-        let byte_length = entry
-            .metadata()
-            .map(|meta| meta.len() as i64)
-            .unwrap_or_default();
+        let byte_length = entry.metadata().map_err(|_| AuditError::Unavailable)?.len() as i64;
         findings.push(AuditFinding::OrphanFile {
             digest: format!("sha256:{name}"),
             byte_length,
@@ -450,7 +455,8 @@ fn audit_records_without_references(
         .map_err(|_| AuditError::Failure)?;
 
     let mut findings = Vec::new();
-    for package_id in rows.flatten() {
+    for package_id in rows {
+        let package_id = package_id.map_err(|_| AuditError::Failure)?;
         findings.push(AuditFinding::RecordWithoutReference { package_id });
     }
     Ok(findings)
@@ -476,8 +482,8 @@ fn audit_foreign_keys(connection: &rusqlite::Connection) -> Result<Vec<AuditFind
         .map_err(|_| AuditError::Failure)?;
 
     let mut findings = Vec::new();
-    for finding in rows.flatten() {
-        findings.push(finding);
+    for finding in rows {
+        findings.push(finding.map_err(|_| AuditError::Failure)?);
     }
     Ok(findings)
 }
