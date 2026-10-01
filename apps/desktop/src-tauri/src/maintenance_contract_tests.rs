@@ -10,6 +10,7 @@
 use serde::Deserialize;
 
 use crate::audit::{AuditError, AuditFinding, AuditReport};
+use crate::gc::{GarbageCollectionError, GarbageCollectionReport};
 
 const FIXTURE: &str =
     include_str!("../../../../packages/contracts/fixtures/desktop-local-cards.json");
@@ -29,6 +30,8 @@ struct MaintenanceSection {
     audit_kinds: Vec<String>,
     audit_damage_kinds: Vec<String>,
     audit_error_codes: Vec<String>,
+    gc_error_codes: Vec<String>,
+    gc_report: GarbageCollectionReport,
     audit_report: AuditReportFixture,
     audit_finding_reference_file_missing: AuditFindingFixture,
     audit_finding_bytes_mismatch_equal_length: AuditFindingFixture,
@@ -271,6 +274,82 @@ fn every_fixture_finding_carries_its_locator() {
         assert!(case.package_id.is_some(), "{} 必须带 packageId", case.kind);
         assert!(case.digest.is_some(), "{} 必须带 digest", case.kind);
     }
+}
+
+/// GC 的错误码 MUST 与契约一致，且**不与审计错误码混用**。
+///
+/// 审计失败说"不知道库怎么样"，GC 失败说"不知道能回收什么"。混用会让用户在库其实健康时
+/// 收到一条"本地库已损坏"的告警——而用户据此去"恢复"一份完好的数据，比什么都不显示更糟。
+#[test]
+fn gc_error_codes_match_the_typescript_authority_and_stay_distinct_from_audit() {
+    let section = parse().maintenance;
+
+    let ours: Vec<&str> = [
+        GarbageCollectionError::Unavailable,
+        GarbageCollectionError::Failure,
+    ]
+    .iter()
+    .map(GarbageCollectionError::code)
+    .collect();
+    assert_eq!(ours, section.gc_error_codes, "GC 错误码与契约不一致");
+
+    assert_ne!(
+        section.gc_error_codes, section.audit_error_codes,
+        "GC 与审计的错误码 MUST NOT 是同一组"
+    );
+    for code in &section.audit_error_codes {
+        assert!(
+            !section.gc_error_codes.contains(code),
+            "审计错误码 {code} MUST NOT 出现在 GC 错误码里"
+        );
+    }
+}
+
+/// GC 的结果形状 MUST 与契约一致。
+///
+/// `Deserialize` 是这里的关键：Rust 侧的 [`GarbageCollectionReport`] 因此能消费同一份
+/// fixture（`DESK-033`）。改错字段名会在测试期失败，而不是产出一份 UI 读不到 `filesRemoved`
+/// 的结果——那个计数是 UI 判断"是否有文件没删掉"的唯一依据。
+#[test]
+fn the_gc_report_shape_matches_the_typescript_authority() {
+    let section = parse().maintenance;
+    let fixture_value = serde_json::to_value(&section.gc_report).expect("re-encode");
+
+    let parsed: GarbageCollectionReport =
+        serde_json::from_value(fixture_value).expect("GC 报告 MUST 能反序列化为 Rust 结构体");
+
+    // 逐字段相等：`#[serde(default)]` 若被误加到计数字段上，这里会看到 0 与 fixture 不符。
+    assert_eq!(parsed.scanned, section.gc_report.scanned);
+    assert_eq!(parsed.reclaimed, section.gc_report.reclaimed);
+    assert_eq!(parsed.files_removed, section.gc_report.files_removed);
+    assert_eq!(parsed.bytes_reclaimed, section.gc_report.bytes_reclaimed);
+    assert_eq!(parsed.files_failed, section.gc_report.files_failed);
+
+    // 字段名集合必须恰好是这五个。少一个会让 UI 无法区分"没跑"与"跑了但没回收"；
+    // 多一个（例如路径）会让物理布局泄漏进契约。
+    let rendered = serde_json::to_value(&parsed).expect("serialize");
+    let mut keys: Vec<&str> = rendered
+        .as_object()
+        .expect("GC report must serialize as an object")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    keys.sort_unstable();
+    assert_eq!(
+        keys,
+        vec![
+            "bytesReclaimed",
+            "filesFailed",
+            "filesRemoved",
+            "reclaimed",
+            "scanned",
+        ]
+    );
+
+    assert!(
+        parsed.files_removed <= parsed.reclaimed,
+        "filesRemoved MUST NOT 超过 reclaimed——删的文件比删的行多说明删除顺序反了"
+    );
 }
 
 /// fixture 的干净报告 MUST 能反序列化，且**携带规模分母**。

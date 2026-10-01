@@ -6,15 +6,19 @@ import { describe, expect, it } from 'vitest';
 import type {
   DesktopLocalLibraryAuditFinding,
   DesktopLocalLibraryAuditReport,
+  DesktopLocalLibraryGcReport as GcReport,
 } from '@mahoshojo/contracts/desktop-ipc';
 
 import {
+  collectLocalLibraryGarbage,
+  gcReclaimedSomething,
   runLocalLibraryAudit,
   summarizeLocalLibraryAudit,
   type LocalLibraryAuditSummary,
 } from '../src/platform/local-library-audit';
 
 interface AuditFixtureSection {
+  gcReport: Record<string, unknown> & { $case?: string };
   auditReport: Record<string, unknown> & { $case?: string };
   auditFindingReferenceFileMissing: Record<string, unknown> & { $case?: string };
   auditFindingBytesMismatchEqualLength: Record<string, unknown> & { $case?: string };
@@ -184,6 +188,44 @@ describe('桌面本地库审计', () => {
 
     await expect(runLocalLibraryAudit(invoke)).rejects.toMatchObject({
       code: 'audit-unavailable',
+    });
+  });
+
+  it('GC 走同一套维护重试——它同样持有窗口', async () => {
+    const report = stripCase(fixture.gcReport);
+    let calls = 0;
+    const invoke = async () => {
+      calls += 1;
+      if (calls === 1) {
+        throw Object.assign(new Error('busy'), { code: 'maintenance-busy' });
+      }
+      return report;
+    };
+
+    const summary = await collectLocalLibraryGarbage(invoke, { retryOnMaintenance: 3 });
+    expect(calls).toBe(2);
+    expect(summary.reclaimed).toBe(2);
+  });
+
+  it('区分"候选集是空的"与"回收到了东西"', () => {
+    const gcReport = stripCase(fixture.gcReport) as unknown as GcReport;
+    // fixture 本身代表一次成功的回收。
+    expect(gcReclaimedSomething(gcReport)).toBe(true);
+
+    // scanned === 0：库干净，或用户还没 purge 任何东西。
+    expect(gcReclaimedSomething({ ...gcReport, scanned: 0, reclaimed: 0 })).toBe(false);
+    // scanned > 0 但 reclaimed === 0：候选集里有东西却被条件 DELETE 挡住了。这值得让用户
+    // 知道，而不是显示成"没有可回收的空间"。
+    expect(gcReclaimedSomething({ ...gcReport, scanned: 3, reclaimed: 0 })).toBe(false);
+  });
+
+  it('GC 的错误码不被压成审计错误码', async () => {
+    // 混用会让用户在库其实健康时收到"本地库已损坏"。两类错误是不同的事。
+    const invoke = async () => {
+      throw { code: 'gc-unavailable', message: 'the local library is unavailable for collection' };
+    };
+    await expect(collectLocalLibraryGarbage(invoke)).rejects.toMatchObject({
+      code: 'gc-unavailable',
     });
   });
 });

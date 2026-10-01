@@ -448,6 +448,7 @@ describe('desktop workspace app ownership', () => {
       'purge_web_package',
       'read_web_package_archive',
       'audit_local_library',
+      'collect_local_garbage',
     ]);
 
     // renderer 可用的 secret 能力只有写入与存在性；任何读取形态都会让
@@ -514,14 +515,39 @@ describe('desktop workspace app ownership', () => {
     }
   });
 
-  it('runs maintenance commands off the IPC thread and inside a maintenance window', () => {
+  it('pins the blob GC delete order so it can never be reversed', () => {
+    // DESK-072：先删 metadata 行、后删文件。反过来崩溃后会留下"metadata 在、文件不在"——
+    // DESK-051 明令禁止的悬空记录，而且没有任何自愈路径能修它（写入时找不到对应引用行）。
+    //
+    // 这条无法由运行期测试覆盖：要在单进程里造出"文件已删、行还在"的崩溃中间态，需要真的
+    // 在两步之间断电。因此门禁落在源码顺序上——它是文本事实，比一个依赖时序的测试可靠。
+    const gcSource = readFileSync(path.join(tauriDirectory, 'src', 'gc.rs'), 'utf8');
+    const deleteIndex = gcSource.indexOf('"DELETE FROM blob');
+    const removeIndex = gcSource.indexOf('remove_blob_file(&target)');
+
+    expect(deleteIndex, 'GC must delete a metadata row').toBeGreaterThan(-1);
+    expect(removeIndex, 'GC must remove a blob file').toBeGreaterThan(-1);
+    expect(
+      deleteIndex,
+      'the metadata DELETE MUST come before the file removal (DESK-072)',
+    ).toBeLessThan(removeIndex);
+
+    // 再确认必须与删除同在一条语句里。写成"先 SELECT 再 DELETE"会留下一个间隙。
+    const deleteStatement = gcSource.slice(deleteIndex, deleteIndex + 400);
+    expect(
+      deleteStatement,
+      'the DELETE must carry its own NOT EXISTS guard (mark-then-reconfirm)',
+    ).toContain('NOT EXISTS');
+  });
+
+it('runs maintenance commands off the IPC thread and inside a maintenance window', () => {
     // DESK-067：Tauri 的同步 command 在调用线程执行。审计要为每个被引用 blob 重算 SHA-256，
     // 是 O(字节) 的工作——同步执行会冻结整个 WebView。
     //
     // 这条无法由 Rust 单测覆盖：command 是否 `async` 是源码形状，不是运行期行为。
     const libSource = readFileSync(path.join(tauriDirectory, 'src', 'lib.rs'), 'utf8');
 
-    for (const command of ['audit_local_library']) {
+    for (const command of ['audit_local_library', 'collect_local_garbage']) {
       const declaration = new RegExp(`async fn ${command}\\(([\\s\\S]*?)\\n\\}`, 'u').exec(libSource);
       expect(declaration, `${command} must be declared to inspect`).not.toBeNull();
       const body = declaration?.[0] ?? '';

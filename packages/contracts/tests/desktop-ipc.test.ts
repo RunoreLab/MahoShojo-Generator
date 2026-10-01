@@ -32,6 +32,8 @@ import {
   DesktopLocalLibraryAuditErrorSchema,
   DesktopLocalLibraryAuditFindingSchema,
   DesktopLocalLibraryAuditReportSchema,
+  DesktopLocalLibraryGcErrorSchema,
+  DesktopLocalLibraryGcReportSchema,
 } from '../src/desktop-ipc';
 
 interface SecretRefFixture {
@@ -357,6 +359,8 @@ interface MaintenanceSection {
   auditKinds: string[];
   auditDamageKinds: string[];
   auditErrorCodes: string[];
+  gcErrorCodes: string[];
+  gcReport: Record<string, unknown> & { $case?: string };
   auditReport: Record<string, unknown> & { $case?: string };
   auditFindingReferenceFileMissing: Record<string, unknown> & { $case?: string };
   auditFindingBytesMismatchEqualLength: Record<string, unknown> & { $case?: string };
@@ -471,6 +475,35 @@ describe('Desktop 本地库维护 IPC 契约（D2.2）', () => {
       'schemaVersion',
       'webPackageCount',
     ]);
+  });
+
+  it('GC 结果的五个计数都在，且不接受未知字段', () => {
+    const gc = fixture.gcReport;
+
+    const parsed = DesktopLocalLibraryGcReportSchema.parse(withoutCase(gc));
+    expect(Object.keys(parsed).sort()).toEqual([
+      'bytesReclaimed',
+      'filesFailed',
+      'filesRemoved',
+      'reclaimed',
+      'scanned',
+    ]);
+    expect(() =>
+      DesktopLocalLibraryGcReportSchema.parse({ ...parsed, reclaimedTwice: 1 }),
+    ).toThrow();
+    expect(() =>
+      DesktopLocalLibraryGcReportSchema.parse({ ...parsed, bytesReclaimed: -1 }),
+    ).toThrow();
+  });
+
+  it('GC 错误码与 native 侧一致，且不与审计错误码混用', () => {
+    expect(DesktopLocalLibraryGcErrorSchema.shape.code.options).toEqual(fixture.gcErrorCodes);
+    // 审计失败说"不知道库怎么样"，GC 失败说"不知道能回收什么"。混用会让用户在库其实
+    // 健康时收到一条"本地库已损坏"的告警。
+    expect(fixture.gcErrorCodes).not.toEqual(fixture.auditErrorCodes);
+    expect(
+      DesktopLocalLibraryGcErrorSchema.safeParse({ code: 'audit-failure', message: 'x' }).success,
+    ).toBe(false);
   });
 
   it('报告不接受文件路径——物理布局不进对外契约', () => {

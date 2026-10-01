@@ -16,6 +16,7 @@ mod ai_contract_tests;
 mod ai_e2e_tests;
 mod audit;
 mod blob;
+mod gc;
 mod library;
 mod local_card;
 #[cfg(test)]
@@ -542,6 +543,37 @@ fn purge_web_package(
     library.packages().purge(&id)
 }
 
+/// 回收无引用的 blob 字节。
+///
+/// 判定只依据引用表；`last_referenced_at` **不参与**（`DESK-065`）。删除顺序由 `DESK-072`
+/// 固定为"先 metadata 后文件"。
+///
+/// `async fn` + `spawn_blocking`：删除文件是同步 I/O，且一次 GC 可能涉及成百上千个 blob。
+/// 维护窗口内所有写入被拒，因此这段时间 UI 只能等——让它至少还能重绘。
+#[tauri::command]
+async fn collect_local_garbage(
+    app: tauri::AppHandle,
+) -> Result<gc::GarbageCollectionReport, gc::GarbageCollectionError> {
+    let window = app
+        .state::<LocalLibrary>()
+        .enter_maintenance("gc")
+        .map_err(|_| gc::GarbageCollectionError::Unavailable)?;
+
+    let handle = app.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let library = handle.state::<LocalLibrary>();
+        gc::collect(
+            &blob::BlobPaths::under(library.data_root()),
+            library.connection(),
+        )
+    })
+    .await
+    .map_err(|_| gc::GarbageCollectionError::Failure)?;
+
+    drop(window);
+    result
+}
+
 /// 跑一次本地库完整性审计。**只报告，不修复。**
 ///
 /// 返回形状与 `DesktopLocalLibraryAuditReportSchema` 一一对应。审计 MUST 在维护窗口内执行
@@ -666,7 +698,8 @@ pub fn run() {
             restore_web_package,
             purge_web_package,
             read_web_package_archive,
-            audit_local_library
+            audit_local_library,
+            collect_local_garbage
         ])
         .run(tauri::generate_context!())
         .expect("error while running MahoShojo Generator desktop app");

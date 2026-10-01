@@ -2,7 +2,7 @@
 
 MahoShojo Generator 的本地桌面客户端 runtime。它是独立 app，不是 `apps/web` 的桌面壳。
 
-当前阶段：**D1 执行核 + D1.5 摘要冻结 + D2.0 本地卡存储 + D2.1 blob 持久化 + D2.2a 并发地基已落地**。
+当前阶段：**D1 执行核 + D1.5 摘要冻结 + D2.0 本地卡存储 + D2.1 blob 持久化 + D2.2a/b/c 已落地**。
 
 - **D0** skeleton、安全边界与 CI 接线；
 - **D0.5** 持久 secret 接入操作系统凭据存储；
@@ -17,8 +17,9 @@ MahoShojo Generator 的本地桌面客户端 runtime。它是独立 app，不是
   引用表、原子写入与去重自愈、业务级 IPC 与 `WebPackageRepository` adapter；
 - **D2.2a** 并发地基：`LocalLibrary` 单一 managed state、维护窗口、数据目录单实例锁；
 - **D2.2b** 完整性审计：六个分桶的只读报告（缺失、摘要/长度不符、无引用 metadata、孤儿文件、
-  记录缺引用、外键违规），`audit_local_library` command 与渲染层分组。
-  GC、备份与导入导出属 D2.2c 之后的阶段。
+  记录缺引用、外键违规），`audit_local_library` command 与渲染层分组；
+- **D2.2c** 孤儿 GC：`collect_local_garbage`，只回收无引用 blob，先删 metadata 后删文件。
+  导入导出与备份属后续阶段。
 
 ## 权威边界
 
@@ -262,7 +263,28 @@ IndexedDB adapter 未来可独立改进。软删只写 tombstone、**保留** do
 SHA-256 是 O(字节) 的工作，同步 command 会冻结 WebView。渲染层因此对 `maintenance-busy`
 做有界重试。
 
-孤儿 GC、导入导出与备份属 D2.2c 之后的阶段，当前**不存在**。
+### 孤儿 GC（D2.2c）
+
+`collect_local_garbage` 只回收**不在任何引用表**中的 blob。判定**不**看
+`last_referenced_at`（`DESK-065`）：一个刚被引用、尚未落该时间戳的 blob 在 GC 眼里就是孤儿。
+
+删除顺序固定为"先 metadata 行、后文件"（`DESK-072`）。反过来崩溃后会留下"metadata 在、
+文件不在"——正是 `DESK-051` 禁止的悬空记录，且没有任何自愈路径能修它（写入时找不到对应
+引用行）。先删行后删文件，崩溃最多留下孤儿文件，而孤儿文件是**允许存在**的。
+
+软删**不**改变可达性（`DESK-055`）：软删只写 tombstone，引用行不动，因此它的字节仍可达、
+GC 不会碰它。只有 purge 让它成为回收候选。这条是"恢复一个删掉的包能真正恢复可用状态"的
+前提。
+
+**桶五的包，其字节会被 GC 回收**——这是 `DESK-065` 的直接后果，不是 bug。该 digest 确实不
+在引用表里；关键在于**这类包在 GC 跑之前就已经打不开**，所以回收不额外造成损失。真正的
+损失发生在引用行丢失的那一刻，由审计的桶五暴露给用户。
+
+结果有五个计数：UI 必须区分"候选集是空的"（库干净或用户还没 purge）与"回收到了东西"——
+`gcReclaimedSomething` 单列这个判断。`filesRemoved < reclaimed` 表示有些行的文件本来就不在
+（桶一的损坏形态），`filesFailed` 表示权限或 I/O 错误导致文件留下成为孤儿。
+
+导入导出与备份属后续阶段，当前**不存在**。
 
 ## 持久 secret
 

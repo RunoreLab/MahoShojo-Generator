@@ -494,3 +494,50 @@ export const DesktopLocalLibraryAuditErrorSchema = z
 export type DesktopLocalLibraryAuditError = z.infer<
   typeof DesktopLocalLibraryAuditErrorSchema
 >;
+
+/**
+ * 孤儿 GC 的结果（D2.2c）。
+ *
+ * 五个计数让"跑了但什么都没回收"与"根本没跑"可区分——前者正常（库干净，或用户还没 purge），
+ * 后者说明候选集计算坏了。
+ */
+export const DesktopLocalLibraryGcReportSchema = z
+  .object({
+    /** 进入候选集的 digest 数。 */
+    scanned: z.number().int().nonnegative(),
+    /** 实际删除的 metadata 行数。 */
+    reclaimed: z.number().int().nonnegative(),
+    /**
+     * 实际删除的文件数。它与 `reclaimed` 的差值有意义：差值大于零说明有些行的文件本来
+     * 就不在（损坏形态）——GC 删了行（正确）但没有文件可删。
+     */
+    filesRemoved: z.number().int().nonnegative(),
+    /** 回收的字节数。 */
+    bytesReclaimed: z.number().int().nonnegative(),
+    /**
+     * 删除文件失败的条数（权限、I/O）。metadata 行已删（正确），剩下的是孤儿文件，
+     * 下一次审计会报成桶四。UI 应把它显示为"部分文件未能删除"。
+     */
+    filesFailed: z.number().int().nonnegative(),
+  })
+  .strict();
+export type DesktopLocalLibraryGcReport = z.infer<
+  typeof DesktopLocalLibraryGcReportSchema
+>;
+
+/** GC 失败。与审计错误同样分开：GC 失败是"不知道能回收什么"，不是"库坏了"。 */
+export const DesktopLocalLibraryGcErrorCodeSchema = z.enum([
+  'gc-unavailable',
+  'gc-failure',
+]);
+export type DesktopLocalLibraryGcErrorCode = z.infer<
+  typeof DesktopLocalLibraryGcErrorCodeSchema
+>;
+
+export const DesktopLocalLibraryGcErrorSchema = z
+  .object({
+    code: DesktopLocalLibraryGcErrorCodeSchema,
+    message: z.string().min(1).max(512),
+  })
+  .strict();
+export type DesktopLocalLibraryGcError = z.infer<typeof DesktopLocalLibraryGcErrorSchema>;

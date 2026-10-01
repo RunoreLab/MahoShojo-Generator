@@ -67,6 +67,15 @@
       "record-without-reference"
     ],
     "auditErrorCodes": ["audit-unavailable", "audit-failure"],
+    "gcErrorCodes": ["gc-unavailable", "gc-failure"],
+    "gcReport": {
+      "$case": "一次回收了两个孤儿：filesRemoved MUST 与 reclaimed 相等——它们不等意味着有些行的文件本来就不在。",
+      "scanned": 2,
+      "reclaimed": 2,
+      "filesRemoved": 2,
+      "bytesReclaimed": 4096,
+      "filesFailed": 0
+    },
     "auditReport": {
       "$case": "一次干净审计的报告：findings 为空但**必须**给出规模分母——来自空库与来自满库的『0 个问题』含义完全不同。",
       "findings": [],

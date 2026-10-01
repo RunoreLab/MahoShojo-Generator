@@ -85,6 +85,73 @@ impl Fixture {
         blob_path(&BlobPaths::under(&self.root), digest).expect("digest must be well-formed")
     }
 
+    /// 某个 blob 的文件是否还在磁盘上。
+    pub fn blob_file_exists(&self, digest: &str) -> bool {
+        self.blob_file(digest).exists()
+    }
+
+    /// 某个包记录是否仍能解析出它的归档 digest。
+    ///
+    /// 走的是生产的解析路径（`contentDigest → 包记录 → 引用行`），而不是直接查表——这样
+    /// "可读"与"用户看得见"是同一件事。
+    pub fn package_has_archive(&self, id: &str) -> bool {
+        self.packages
+            .archive_digest(id)
+            .expect("query must run")
+            .is_some()
+    }
+
+    /// 某个包是否仍能读出它的 ZIP 字节。
+    pub fn package_readable(&self, id: &str) -> bool {
+        let Some(digest) = self.packages.archive_digest(id).expect("query must run") else {
+            return false;
+        };
+        self.blobs.read(&digest).is_ok()
+    }
+
+    /// 某个包当前有几条引用行。
+    pub fn reference_count(&self, package_id: &str) -> i64 {
+        self.with_connection(|connection| {
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM web_package_archive_ref WHERE package_id = ?1",
+                    rusqlite::params![package_id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .expect("count references")
+        })
+    }
+
+    /// 某个 digest 在 `blob` 表里还有几行。
+    pub fn blob_metadata_count(&self, digest: &str) -> i64 {
+        self.with_connection(|connection| {
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM blob WHERE digest = ?1",
+                    rusqlite::params![digest],
+                    |row| row.get::<_, i64>(0),
+                )
+                .expect("count blob metadata")
+        })
+    }
+
+    /// 直接插回一条 blob metadata 行，绕过写入路径。
+    ///
+    /// 用途是构造"metadata 在、文件不在"这个 GC 正常情况下不会产生的状态（桶一的损坏形态）。
+    /// 走 `BlobStore::write` 不可能造出它——那正是写入路径的自愈逻辑在工作。
+    pub fn reinsert_blob_metadata(&self, digest: &str, byte_length: i64) -> std::io::Result<()> {
+        self.with_connection(|connection| {
+            connection
+                .execute(
+                    "INSERT OR REPLACE INTO blob (digest, byte_length, created_at, last_referenced_at)
+                     VALUES (?1, ?2, '2026-10-01T00:00:00.000Z', '2026-10-01T00:00:00.000Z')",
+                    rusqlite::params![digest, byte_length],
+                )
+                .expect("insert blob metadata");
+        });
+        Ok(())
+    }
+
     /// 造一条自洽的包记录并保存。
     ///
     /// 返回 `SavedPackage`：document 与 index（后续转移需要），以及**归档字节的摘要**。
@@ -153,6 +220,16 @@ impl Fixture {
         std::fs::write(self.blob_file(digest), bytes)
     }
 
+    /// 在连接上跑一段只读 SQL，返回结果。
+    ///
+    /// 供需要直接观察存储布局的测试使用。刻意只开放查询而不开放任意写入：注入损坏的写入口
+    /// 应该是具名的（[`Self::delete_reference_row`]、`[`Self::reinsert_blob_metadata`]），
+    /// 让"这个测试造了什么状态"在代码里一眼可见。
+    pub fn with_connection<T>(&self, operation: impl FnOnce(&Connection) -> T) -> T {
+        let guard = crate::store::lock_connection(&self.connection).expect("lock connection");
+        operation(&guard)
+    }
+
     /// 直接删掉一条引用行，制造"包记录存在但没有引用"。
     ///
     /// 绕过 `purge` 是必须的：`purge` 会把包记录也删掉，那样就变成了另一桶。
@@ -186,11 +263,6 @@ impl Fixture {
             let _ = connection.execute_batch("PRAGMA foreign_keys = ON");
             inserted
         })
-    }
-
-    fn with_connection<T>(&self, operation: impl FnOnce(&Connection) -> T) -> T {
-        let guard = crate::store::lock_connection(&self.connection).expect("lock connection");
-        operation(&guard)
     }
 }
 

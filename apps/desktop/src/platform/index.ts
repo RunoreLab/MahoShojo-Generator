@@ -41,7 +41,11 @@ export type { DirectAiChannel } from './direct-ai-bridge';
 
 export {
   AUDIT_LOCAL_LIBRARY_COMMAND,
+  COLLECT_LOCAL_GARBAGE_COMMAND,
   DesktopLocalLibraryAuditError,
+  DesktopLocalLibraryGcError,
+  collectLocalLibraryGarbage,
+  gcReclaimedSomething,
   runLocalLibraryAudit,
   summarizeLocalLibraryAudit,
 } from './local-library-audit';

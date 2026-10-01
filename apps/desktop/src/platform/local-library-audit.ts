@@ -3,9 +3,12 @@ import {
   DESKTOP_LOCAL_LIBRARY_AUDIT_KINDS,
   DesktopLocalLibraryAuditErrorSchema,
   DesktopLocalLibraryAuditReportSchema,
+  DesktopLocalLibraryGcErrorSchema,
+  DesktopLocalLibraryGcReportSchema,
   type DesktopLocalLibraryAuditFinding,
   type DesktopLocalLibraryAuditKind,
   type DesktopLocalLibraryAuditReport,
+  type DesktopLocalLibraryGcReport,
 } from '@mahoshojo/contracts/desktop-ipc';
 
 /**
@@ -39,6 +42,7 @@ export interface LocalLibraryAuditSummary {
 }
 
 export const AUDIT_LOCAL_LIBRARY_COMMAND = 'audit_local_library' as const;
+export const COLLECT_LOCAL_GARBAGE_COMMAND = 'collect_local_garbage' as const;
 
 export interface InvokeFn {
   (command: string, args?: Record<string, unknown>): Promise<unknown>;
@@ -50,6 +54,16 @@ export class DesktopLocalLibraryAuditError extends Error {
   constructor(code: string, message: string) {
     super(message);
     this.name = 'DesktopLocalLibraryAuditError';
+    this.code = code;
+  }
+}
+
+export class DesktopLocalLibraryGcError extends Error {
+  readonly code: string;
+
+  constructor(code: string, message: string) {
+    super(message);
+    this.name = 'DesktopLocalLibraryGcError';
     this.code = code;
   }
 }
@@ -96,35 +110,79 @@ export const summarizeLocalLibraryAudit = (
 };
 
 /**
- * 跑一次审计。
+ * 维护冲突重试。
  *
- * 审计在 native 侧持有维护窗口，因此它运行期间**并发写入会被拒**（`maintenance-busy`）。
- * 这里的重试因此不是可有可无的礼貌：用户点一下"检查本地库"时若恰好在保存一张卡，
- * 直接把错误弹给用户会让他以为检查失败与那张卡有关。
+ * 审计与 GC 都在 native 侧持有维护窗口，因此它们运行期间**并发写入会被拒**
+ * （`maintenance-busy`）。重试不是可有可无的礼貌：用户点一下"检查本地库"或"清理空间"时
+ * 若恰好在保存一张卡，直接把错误弹出来会让他以为操作失败与那张卡有关。
+ *
+ * 退避固定而非指数：维护窗口通常在几百毫秒内结束，而 UI 正在等这个结果——指数退避会把
+ * 一个 300ms 的窗口拖成好几秒。
  */
-export const runLocalLibraryAudit = async (
-  invoke: InvokeFn,
-  options: { readonly retryOnMaintenance?: number } = {},
-): Promise<LocalLibraryAuditSummary> => {
-  const attempts = options.retryOnMaintenance ?? 3;
+const withMaintenanceRetry = async <T>(
+  operation: () => Promise<T>,
+  toError: (cause: unknown) => Error,
+  attempts: number,
+): Promise<T> => {
+  const limit = Math.max(1, attempts);
   let lastError: unknown = null;
 
-  for (let attempt = 0; attempt < Math.max(1, attempts); attempt += 1) {
+  for (let attempt = 0; attempt < limit; attempt += 1) {
     try {
-      const raw = await invoke(AUDIT_LOCAL_LIBRARY_COMMAND);
-      return summarizeLocalLibraryAudit(
-        DesktopLocalLibraryAuditReportSchema.parse(raw) as DesktopLocalLibraryAuditReport,
-      );
+      return await operation();
     } catch (cause) {
       lastError = cause;
-      if (!isMaintenanceBusy(cause) || attempt === attempts - 1) break;
-      // 退避固定而非指数：维护窗口通常在几百毫秒内结束，而 UI 正在等这个结果。
+      if (!isMaintenanceBusy(cause) || attempt === limit - 1) break;
       await new Promise((resolve) => setTimeout(resolve, 200 * (attempt + 1)));
     }
   }
 
-  throw toAuditError(lastError);
+  throw toError(lastError);
 };
+
+/** 跑一次审计。 */
+export const runLocalLibraryAudit = async (
+  invoke: InvokeFn,
+  options: { readonly retryOnMaintenance?: number } = {},
+): Promise<LocalLibraryAuditSummary> =>
+  withMaintenanceRetry(
+    async () =>
+      summarizeLocalLibraryAudit(
+        DesktopLocalLibraryAuditReportSchema.parse(
+          (await invoke(AUDIT_LOCAL_LIBRARY_COMMAND)) as DesktopLocalLibraryAuditReport,
+        ),
+      ),
+    toAuditError,
+    options.retryOnMaintenance ?? 3,
+  );
+
+/**
+ * 回收无引用的 blob。
+ *
+ * 与审计共用维护重试：GC 同样持有窗口，同样会对并发写入说 `maintenance-busy`。
+ */
+export const collectLocalLibraryGarbage = async (
+  invoke: InvokeFn,
+  options: { readonly retryOnMaintenance?: number } = {},
+): Promise<DesktopLocalLibraryGcReport> =>
+  withMaintenanceRetry(
+    async () =>
+      DesktopLocalLibraryGcReportSchema.parse(
+        (await invoke(COLLECT_LOCAL_GARBAGE_COMMAND)) as DesktopLocalLibraryGcReport,
+      ),
+    toGcError,
+    options.retryOnMaintenance ?? 3,
+  );
+
+/**
+ * GC 是否真的回收到了东西。
+ *
+ * 单列这个判断是因为 UI 必须区分两种"零"：`scanned === 0` 说明候选集是空的（库干净，或
+ * 用户还没 purge 任何东西）；`scanned > 0 && reclaimed === 0` 说明候选集里有东西却被条件
+ * DELETE 挡住了——那值得让用户知道，而不是显示成"没有可回收的空间"。
+ */
+export const gcReclaimedSomething = (report: DesktopLocalLibraryGcReport): boolean =>
+  report.reclaimed > 0;
 
 const isMaintenanceBusy = (cause: unknown): boolean =>
   cause !== null &&
@@ -143,7 +201,21 @@ const toAuditError = (cause: unknown): DesktopLocalLibraryAuditError => {
     if (parsed.success) {
       return new DesktopLocalLibraryAuditError(parsed.data.code, parsed.data.message);
     }
-    return new DesktopLocalLibraryAuditError('audit-failure', '本地库完整性检查未能完成。');
   }
   return new DesktopLocalLibraryAuditError('audit-failure', '本地库完整性检查未能完成。');
+};
+
+const toGcError = (cause: unknown): DesktopLocalLibraryGcError => {
+  if (
+    cause !== null &&
+    typeof cause === 'object' &&
+    typeof (cause as { code?: unknown }).code === 'string' &&
+    typeof (cause as { message?: unknown }).message === 'string'
+  ) {
+    const parsed = DesktopLocalLibraryGcErrorSchema.safeParse(cause);
+    if (parsed.success) {
+      return new DesktopLocalLibraryGcError(parsed.data.code, parsed.data.message);
+    }
+  }
+  return new DesktopLocalLibraryGcError('gc-failure', '本地库空间清理未能完成。');
 };
