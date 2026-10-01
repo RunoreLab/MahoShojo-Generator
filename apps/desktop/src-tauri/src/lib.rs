@@ -15,19 +15,21 @@ mod ai_contract_tests;
 #[cfg(test)]
 mod ai_e2e_tests;
 mod blob;
+mod library;
 mod local_card;
 #[cfg(test)]
 mod local_card_contract_tests;
+mod maintenance;
 mod provider_profile;
 mod secret;
 mod sse;
 mod store;
 mod web_package;
 
+use library::LocalLibrary;
 use provider_profile::DirectProviderExecutionProfile;
 use secret::{default_secret_store, SharedSecretStore};
 use serde::Serialize;
-use store::LocalStore;
 use tauri::{Manager, State};
 
 /// 供渲染层展示的本地运行时信息。
@@ -95,40 +97,42 @@ fn delete_provider_secret(
 /// 不接受 renderer 提供的路径或 SQL。
 #[tauri::command]
 fn save_provider_profile(
-    store: State<'_, LocalStore>,
+    library: State<'_, LocalLibrary>,
     document: String,
     updated_at: String,
 ) -> Result<(), store::StoreError> {
     let identity = provider_profile::StoredProviderProfileIdentity::parse(&document)
         .map_err(|_| store::StoreError::InvalidDocument)?;
-    store.put(&identity.id, &document, &updated_at)
+    let _permit = library.enter_write().map_err(store::StoreError::from)?;
+    library.profiles().put(&identity.id, &document, &updated_at)
 }
 
 /// 列出已保存的 Profile id。
 #[tauri::command]
 fn list_provider_profile_ids(
-    store: State<'_, LocalStore>,
+    library: State<'_, LocalLibrary>,
 ) -> Result<Vec<String>, store::StoreError> {
-    store.list_ids()
+    library.profiles().list_ids()
 }
 
 /// 读取一个 Profile 的完整文档。缺失时返回 `None`，不视为错误。
 #[tauri::command]
 fn get_provider_profile(
-    store: State<'_, LocalStore>,
+    library: State<'_, LocalLibrary>,
     profile_id: String,
 ) -> Result<Option<String>, store::StoreError> {
-    store.get(&profile_id)
+    library.profiles().get(&profile_id)
 }
 
 /// 删除一个 Profile 及其引用的 secret。幂等。
 #[tauri::command]
 fn delete_provider_profile(
-    store: State<'_, LocalStore>,
+    library: State<'_, LocalLibrary>,
     secrets: State<'_, SharedSecretStore>,
     profile_id: String,
 ) -> Result<(), store::StoreError> {
-    if let Some(document) = store.get(&profile_id)? {
+    let _permit = library.enter_write().map_err(store::StoreError::from)?;
+    if let Some(document) = library.profiles().get(&profile_id)? {
         if let Ok(identity) = provider_profile::StoredProviderProfileIdentity::parse(&document) {
             for secret_ref in identity.secret_refs() {
                 // 删除 Profile 不因凭据后端故障而失败：凭据残留由后续清理处理，
@@ -137,7 +141,7 @@ fn delete_provider_profile(
             }
         }
     }
-    store.delete(&profile_id)
+    library.profiles().delete(&profile_id)
 }
 
 /// 校验一份执行投影，并返回 Rust 侧独立解析后的结果。
@@ -157,7 +161,7 @@ fn validate_provider_execution_profile(
 /// native 侧从本地库与凭据存储解析，renderer 无法指定。
 #[tauri::command]
 async fn stream_direct_ai(
-    store: State<'_, LocalStore>,
+    library: State<'_, LocalLibrary>,
     secrets: State<'_, SharedSecretStore>,
     registry: State<'_, ai::RequestRegistry>,
     profile_id: String,
@@ -167,7 +171,7 @@ async fn stream_direct_ai(
     ai::stream_direct_ai(
         &profile_id,
         request,
-        &store,
+        library.profiles(),
         secrets.inner().as_ref(),
         &registry,
         &on_event,
@@ -240,10 +244,11 @@ struct ListLocalCardsResponse {
 /// `writeFile` / `query` 形态的通用能力（ADR 第 7 条）。
 #[tauri::command]
 fn save_local_card(
-    cards: State<'_, local_card::LocalCardStore>,
+    library: State<'_, LocalLibrary>,
     request: SaveLocalCardRequest,
 ) -> Result<SaveLocalCardResponse, store::StoreError> {
-    cards.put(&request.document, &request.index)?;
+    let _permit = library.enter_write().map_err(store::StoreError::from)?;
+    library.cards().put(&request.document, &request.index)?;
     Ok(SaveLocalCardResponse {
         id: request.index.id,
     })
@@ -251,18 +256,18 @@ fn save_local_card(
 
 #[tauri::command]
 fn get_local_card(
-    cards: State<'_, local_card::LocalCardStore>,
+    library: State<'_, LocalLibrary>,
     id: String,
 ) -> Result<Option<String>, store::StoreError> {
-    cards.get(&id)
+    library.cards().get(&id)
 }
 
 #[tauri::command]
 fn list_local_cards(
-    cards: State<'_, local_card::LocalCardStore>,
+    library: State<'_, LocalLibrary>,
     request: ListLocalCardsRequest,
 ) -> Result<ListLocalCardsResponse, store::StoreError> {
-    let page = cards.list(&local_card::LocalCardQuery {
+    let page = library.cards().list(&local_card::LocalCardQuery {
         include_deleted: request.include_deleted,
         card_types: request.card_types,
         limit: request.limit,
@@ -291,27 +296,27 @@ fn list_local_cards(
 /// 删除"的记录。
 #[tauri::command]
 fn delete_local_card(
-    cards: State<'_, local_card::LocalCardStore>,
+    library: State<'_, LocalLibrary>,
     request: SaveLocalCardRequest,
 ) -> Result<(), store::StoreError> {
-    cards.delete(&request.document, &request.index)
+    let _permit = library.enter_write().map_err(store::StoreError::from)?;
+    library.cards().delete(&request.document, &request.index)
 }
 
 #[tauri::command]
 fn restore_local_card(
-    cards: State<'_, local_card::LocalCardStore>,
+    library: State<'_, LocalLibrary>,
     request: SaveLocalCardRequest,
 ) -> Result<(), store::StoreError> {
-    cards.restore(&request.document, &request.index)
+    let _permit = library.enter_write().map_err(store::StoreError::from)?;
+    library.cards().restore(&request.document, &request.index)
 }
 
 /// 彻底删除一条本地卡。幂等。
 #[tauri::command]
-fn purge_local_card(
-    cards: State<'_, local_card::LocalCardStore>,
-    id: String,
-) -> Result<(), store::StoreError> {
-    cards.purge(&id)
+fn purge_local_card(library: State<'_, LocalLibrary>, id: String) -> Result<(), store::StoreError> {
+    let _permit = library.enter_write().map_err(store::StoreError::from)?;
+    library.cards().purge(&id)
 }
 
 /// Web 包 IPC 用的 DTO。
@@ -426,12 +431,13 @@ mod base64_bytes {
 /// 孤儿 blob，而不会出现"引用行存在但包记录不存在"的中间态。
 #[tauri::command]
 fn save_web_package(
-    packages: State<'_, web_package::WebPackageStore>,
-    blobs: State<'_, blob::BlobStore>,
+    library: State<'_, LocalLibrary>,
     request: SaveWebPackageRequest,
 ) -> Result<SaveWebPackageResponse, web_package::SaveWebPackageError> {
-    let outcome = packages.save(
-        blobs.inner(),
+    // 许可覆盖"写 blob + 写包事务"整段，而不是各自一半。
+    let _permit = library.enter_write().map_err(store::StoreError::from)?;
+    let outcome = library.packages().save(
+        library.blobs(),
         &request.document,
         &request.index,
         &request.archive,
@@ -445,10 +451,10 @@ fn save_web_package(
 
 #[tauri::command]
 fn get_web_package(
-    packages: State<'_, web_package::WebPackageStore>,
+    library: State<'_, LocalLibrary>,
     id: String,
 ) -> Result<Option<String>, store::StoreError> {
-    packages.get(&id)
+    library.packages().get(&id)
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -470,10 +476,10 @@ struct ListWebPackagesRequest {
 
 #[tauri::command]
 fn list_web_packages(
-    packages: State<'_, web_package::WebPackageStore>,
+    library: State<'_, LocalLibrary>,
     request: ListWebPackagesRequest,
 ) -> Result<ListWebPackagesResponse, store::StoreError> {
-    let page = packages.list(&web_package::WebPackageQuery {
+    let page = library.packages().list(&web_package::WebPackageQuery {
         include_deleted: request.include_deleted,
         limit: request.limit,
         cursor: request.cursor.map(|cursor| web_package::WebPackageCursor {
@@ -498,28 +504,37 @@ fn list_web_packages(
 /// `archive` 也不带 `now`——时间戳已由渲染层写进 document，native 从 document 复核单调性。
 #[tauri::command]
 fn delete_web_package(
-    packages: State<'_, web_package::WebPackageStore>,
+    library: State<'_, LocalLibrary>,
     request: WebPackageTransitionRequest,
 ) -> Result<(), store::StoreError> {
-    packages.delete(&request.document, &request.index)
+    let _permit = library.enter_write().map_err(store::StoreError::from)?;
+    library.packages().delete(&request.document, &request.index)
 }
 
 /// 恢复一条已软删的本地 Web 包。
 #[tauri::command]
 fn restore_web_package(
-    packages: State<'_, web_package::WebPackageStore>,
+    library: State<'_, LocalLibrary>,
     request: WebPackageTransitionRequest,
 ) -> Result<(), store::StoreError> {
-    packages.restore(&request.document, &request.index)
+    let _permit = library.enter_write().map_err(store::StoreError::from)?;
+    library
+        .packages()
+        .restore(&request.document, &request.index)
 }
 
 /// 彻底删除一条本地 Web 包与其 blob 引用。幂等。
+///
+/// 只删引用行，**不**删 blob 字节：字节的回收是 GC 的职责，且必须在维护窗口内进行
+/// （`DESK-055` / `DESK-072`）。因此这条命令之后，该 blob 会成为一个"有 metadata、无引用"
+/// 的回收候选——这是被允许的中间态，不是损坏。
 #[tauri::command]
 fn purge_web_package(
-    packages: State<'_, web_package::WebPackageStore>,
+    library: State<'_, LocalLibrary>,
     id: String,
 ) -> Result<(), store::StoreError> {
-    packages.purge(&id)
+    let _permit = library.enter_write().map_err(store::StoreError::from)?;
+    library.packages().purge(&id)
 }
 
 /// 读取一个本地 Web 包的原始 ZIP 字节。
@@ -539,17 +554,17 @@ struct ReadWebPackageArchiveResponse {
 
 #[tauri::command]
 fn read_web_package_archive(
-    packages: State<'_, web_package::WebPackageStore>,
-    blobs: State<'_, blob::BlobStore>,
+    library: State<'_, LocalLibrary>,
     content_digest: String,
 ) -> Result<ReadWebPackageArchiveResponse, web_package::SaveWebPackageError> {
-    let digest = packages
+    let digest = library
+        .packages()
         .archive_digest_for_content_digest(&content_digest)
         .map_err(web_package::SaveWebPackageError::Store)?;
     let digest = digest.ok_or(web_package::SaveWebPackageError::Blob(
         blob::BlobError::NotFound,
     ))?;
-    let bytes = blobs.read(&digest)?;
+    let bytes = library.blobs().read(&digest)?;
     Ok(ReadWebPackageArchiveResponse { archive: bytes })
 }
 
@@ -564,32 +579,25 @@ pub fn run() {
             let data_root = app.path().app_data_dir().map_err(|error| {
                 format!("cannot resolve the application data directory: {error}")
             })?;
-            let paths = store::LocalStorePaths::under(&data_root);
-            // 三个访问者共享**同一个** SQLite 文件与同一份迁移阶梯：Profile、本地卡、Web 包
-            // 与 blob 同属一台设备上的用户资产。分开存放会让备份、迁移与"重开应用"各多一套
-            // 路径，也更容易出现"某个库忘了迁移"这类按类型分叉的隐性差异。
-            let store = LocalStore::open(&paths)
+
+            // 单实例先于一切本地库访问（`DESK-065` / `DESK-068`）。顺序不可颠倒：
+            // 先开库再抢锁的话，两个进程都可能已经建立了连接，然后第二个才失败——
+            // 那时它已经跑完了迁移阶梯，可能留下一个"迁移了一半"的库。
+            //
+            // 锁由 `_instance` 持到进程结束：它是 `setup` 的局部变量，因此**必须** manage
+            // 出去，否则会在 setup 返回时立刻 drop，锁随之释放，单实例约束形同虚设。
+            let instance = maintenance::InstanceGuard::acquire(&data_root).map_err(|rejection| {
+                format!(
+                    "cannot open the local library: {}。请先关闭已运行的 MahoShojo Generator 桌面客户端。",
+                    rejection.message()
+                )
+            })?;
+
+            let library = LocalLibrary::open(&data_root)
                 .map_err(|error| format!("cannot open the local store: {}", error.message()))?;
-            let cards = local_card::LocalCardStore::open(&paths).map_err(|error| {
-                format!("cannot open the local card store: {}", error.message())
-            })?;
-            let packages = web_package::WebPackageStore::open(&paths).map_err(|error| {
-                format!("cannot open the web package store: {}", error.message())
-            })?;
 
-            // blob 的 metadata 与上面三者同库，但它的**文件**区是独立的目录，因此需要自己的
-            // 连接句柄（同一文件、同一个 Mutex 家族，各自串行化自己的访问）。
-            let blob_connection = rusqlite::Connection::open(paths.database())
-                .map_err(|error| format!("cannot open the blob store connection: {error}"))?;
-            store::configure_and_migrate(&blob_connection)
-                .map_err(|error| format!("cannot migrate the blob store: {}", error.message()))?;
-            let blobs = blob::open(blob::BlobPaths::under(&data_root), blob_connection)
-                .map_err(|error| format!("cannot open the blob store: {}", error.message()))?;
-
-            app.manage(store);
-            app.manage(cards);
-            app.manage(packages);
-            app.manage(blobs);
+            app.manage(instance);
+            app.manage(library);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

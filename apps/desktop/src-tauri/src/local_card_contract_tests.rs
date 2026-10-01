@@ -158,6 +158,7 @@ fn error_codes_match_the_typescript_authority_in_a_stable_order() {
         StoreError::RecordMissing,
         StoreError::NonMonotonicTimestamp,
         StoreError::InvalidQuery,
+        StoreError::MaintenanceBusy,
         StoreError::Failure,
     ]
     .iter()

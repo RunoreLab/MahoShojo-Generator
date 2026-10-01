@@ -171,6 +171,10 @@ export const DesktopStoreErrorCodeSchema = z.enum([
   'record-missing',
   'non-monotonic-timestamp',
   'invalid-query',
+  // 维护窗口（GC / 审计 / 备份）期间的写入被拒（D2.2a / DESK-065）。
+  // 刻意**不**并入 store-failure：它不是数据出错，而是一次可重试的时机问题。UI 把它
+  // 显示成"本地库正忙，请稍后重试"；并入失败会让用户以为自己的数据坏了。
+  'maintenance-busy',
   'store-failure',
 ]);
 export type DesktopStoreErrorCode = z.infer<typeof DesktopStoreErrorCodeSchema>;

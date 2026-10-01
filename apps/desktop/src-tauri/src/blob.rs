@@ -36,11 +36,12 @@
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 
 use rusqlite::Connection;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
+
+use crate::store::{lock_connection, SharedConnection};
 
 /// 单个 blob 的字节上限。
 ///
@@ -200,19 +201,17 @@ pub fn digest_of(bytes: &[u8]) -> String {
 
 pub struct BlobStore {
     paths: BlobPaths,
-    connection: Mutex<Connection>,
+    connection: SharedConnection,
 }
 
-/// 打开 blob 存储。`connection` **MUST** 已经过 [`crate::store::configure_and_migrate`]。
+/// 打开 blob 存储。`connection` **MUST** 已经过 [`crate::store::configure_and_migrate`]，
+/// 且**MUST** 与其它 store 共用同一条（`DESK-065`）。
 ///
 /// 刻意不在这里自己跑迁移：blob 表与本地卡表在同一个库里，迁移阶梯只应由
 /// `store.rs` 的那一份驱动。两处各自建表会产出"版本号说到了、表却缺一半"的库。
-pub fn open(paths: BlobPaths, connection: Connection) -> Result<BlobStore, BlobError> {
+pub fn open(paths: BlobPaths, connection: SharedConnection) -> Result<BlobStore, BlobError> {
     std::fs::create_dir_all(paths.root()).map_err(|_| BlobError::Unavailable)?;
-    Ok(BlobStore {
-        paths,
-        connection: Mutex::new(connection),
-    })
+    Ok(BlobStore { paths, connection })
 }
 
 /// 内存库 + 真实临时目录。
@@ -233,9 +232,8 @@ pub fn open_in_memory() -> Result<BlobStore, BlobError> {
     let _ = std::fs::remove_dir_all(&root);
     let paths = BlobPaths::under(&root);
 
-    let connection = Connection::open_in_memory().map_err(|_| BlobError::Unavailable)?;
     // 走与生产同一份迁移阶梯，而不是就地建表。
-    crate::store::configure_and_migrate(&connection).map_err(|_| BlobError::Failure)?;
+    let connection = crate::store::open_in_memory_connection().map_err(|_| BlobError::Failure)?;
     open(paths, connection)
 }
 
@@ -244,7 +242,7 @@ impl BlobStore {
         &self,
         operation: impl FnOnce(&Connection) -> Result<T, BlobError>,
     ) -> Result<T, BlobError> {
-        let guard = self.connection.lock().map_err(|_| BlobError::Failure)?;
+        let guard = lock_connection(&self.connection).map_err(|_| BlobError::Failure)?;
         operation(&guard)
     }
 
@@ -778,12 +776,12 @@ mod tests {
         let (digest, bytes) = bytes_of("zip-orphan-only");
         store.write(&digest, &bytes, NOW).expect("write");
 
-        // 一个"只看到文件、看不到 metadata"的视角：换一个内存库指向同一目录。
-        let connection = Connection::open_in_memory().expect("open");
-        crate::store::configure_and_migrate(&connection).expect("migrate");
+        // 一个"只看到文件、看不到 metadata"的视角：换一个**独立**内存库指向同一目录。
+        // 必须用新连接而不是 clone：D2.2a 起生产路径只有一条连接，而这条用例要的恰恰是
+        // "另一条连接看不见这些 metadata"，共享连接会把它变成同义反复。
         let other = open(
             BlobPaths::under(store.paths.root().parent().expect("data root")),
-            connection,
+            crate::store::open_in_memory_connection().expect("open"),
         )
         .expect("open");
         assert!(!other.exists_in_metadata(&digest).expect("metadata"));

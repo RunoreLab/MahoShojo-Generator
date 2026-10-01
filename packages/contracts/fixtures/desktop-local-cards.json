@@ -14,6 +14,7 @@
     "record-missing",
     "non-monotonic-timestamp",
     "invalid-query",
+    "maintenance-busy",
     "store-failure"
   ],
   "cardTypes": ["character", "scenario", "history", "questionnaire"],

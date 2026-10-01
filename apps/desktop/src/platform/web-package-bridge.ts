@@ -62,6 +62,7 @@ const WEB_PACKAGE_ERROR_CODES: readonly DesktopLocalLibraryErrorCode[] = [
   'record-missing',
   'non-monotonic-timestamp',
   'invalid-query',
+  'maintenance-busy',
   'store-failure',
   // blob 存储
   'blob-unavailable',

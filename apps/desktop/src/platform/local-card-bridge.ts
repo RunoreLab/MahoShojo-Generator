@@ -87,8 +87,21 @@ const NATIVE_ERROR_CODES: readonly DesktopStoreErrorCode[] = [
   'record-missing',
   'non-monotonic-timestamp',
   'invalid-query',
+  // 维护窗口内的写入被拒（D2.2a / DESK-065）：可重试的时机问题，不是数据损坏。
+  'maintenance-busy',
   'store-failure',
 ];
+
+/**
+ * 判定一个错误是否值得让用户重试。
+ *
+ * `maintenance-busy` 是**唯一**一个"原样重试就会成功"的类别：维护窗口结束后写入路径
+ * 完全正常。UI 应当据此提示"本地库正在维护，请稍后重试"，而不是显示成一次失败——
+ * 后者会让用户以为数据出了问题，进而重复导入或清库。
+ */
+export const isRetryableLocalLibraryError = (
+  code: DesktopLocalLibraryErrorCode,
+): boolean => code === 'maintenance-busy';
 
 const isStoreErrorCode = (value: string): value is DesktopStoreErrorCode =>
   (NATIVE_ERROR_CODES as readonly string[]).includes(value);

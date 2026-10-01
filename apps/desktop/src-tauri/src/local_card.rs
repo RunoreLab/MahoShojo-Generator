@@ -34,13 +34,11 @@
 //! 本模块只处理结构化记录。blob 引用与孤儿 GC 属 D2.1 / D2.2：`DESK-055` 规定 soft delete
 //! 不改变 blob 可达性，因此那两张表与本表是独立演进的。
 
-use std::sync::Mutex;
-
-use rusqlite::{Connection, OpenFlags};
+use rusqlite::Connection;
 use serde::Deserialize;
 use serde_json::value::RawValue;
 
-use crate::store::{LocalStorePaths, StoreError};
+use crate::store::{lock_connection, SharedConnection, StoreError};
 
 /// 单条本地卡文档的 UTF-8 字节上限。
 ///
@@ -162,46 +160,29 @@ pub struct LocalCardPage {
 }
 
 /// 本地库中本地卡的存储。
+///
+/// 共享连接由 [`crate::library::LocalLibrary`] 持有并传入（`DESK-065`）：所有 store 共用
+/// 一条连接，因此"卡写入"与"Web 包写入"不会各自看到对方的中间态。
 pub struct LocalCardStore {
-    connection: Mutex<Connection>,
+    connection: SharedConnection,
 }
 
 impl LocalCardStore {
-    /// 在给定的应用数据目录布局上打开本地库。
-    pub fn open(paths: &LocalStorePaths) -> Result<Self, StoreError> {
-        if let Some(parent) = paths.database().parent() {
-            std::fs::create_dir_all(parent).map_err(|_| StoreError::Unavailable)?;
-        }
-
-        let connection = Connection::open_with_flags(
-            paths.database(),
-            OpenFlags::SQLITE_OPEN_READ_WRITE
-                | OpenFlags::SQLITE_OPEN_CREATE
-                | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-        )
-        .map_err(|_| StoreError::Unavailable)?;
-
-        Self::from_connection(connection)
+    pub fn new(connection: SharedConnection) -> Self {
+        Self { connection }
     }
 
     /// 打开内存库。供测试使用，不触碰用户数据目录。
     #[cfg(test)]
     pub fn open_in_memory() -> Result<Self, StoreError> {
-        Self::from_connection(Connection::open_in_memory().map_err(|_| StoreError::Unavailable)?)
-    }
-
-    fn from_connection(connection: Connection) -> Result<Self, StoreError> {
-        crate::store::configure_and_migrate(&connection)?;
-        Ok(Self {
-            connection: Mutex::new(connection),
-        })
+        Ok(Self::new(crate::store::open_in_memory_connection()?))
     }
 
     fn with_connection<T>(
         &self,
         operation: impl FnOnce(&Connection) -> Result<T, StoreError>,
     ) -> Result<T, StoreError> {
-        let guard = self.connection.lock().map_err(|_| StoreError::Failure)?;
+        let guard = lock_connection(&self.connection)?;
         operation(&guard)
     }
 
@@ -1133,11 +1114,13 @@ mod tests {
             r#"{"n":1}"#,
         );
         {
-            let store = LocalCardStore::open(&paths).expect("open");
+            let store =
+                LocalCardStore::new(crate::store::open_shared_connection(&paths).expect("open"));
             store.put(&document, &index).expect("put");
         }
 
-        let reopened = LocalCardStore::open(&paths).expect("reopen");
+        let reopened =
+            LocalCardStore::new(crate::store::open_shared_connection(&paths).expect("reopen"));
         assert_eq!(
             reopened.get("lc_persist").expect("get must succeed"),
             Some(document)

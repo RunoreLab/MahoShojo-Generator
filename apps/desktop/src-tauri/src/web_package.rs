@@ -28,13 +28,11 @@
 //! - purge 删除包记录，`ON DELETE CASCADE` 顺带移除引用；
 //! - blob 的实际回收由 GC（D2.2）依据引用表统一判断。
 
-use std::sync::Mutex;
-
 use rusqlite::Connection;
 use serde::Deserialize;
 
 use crate::blob::BlobStore;
-use crate::store::{timestamp_sort_key, LocalStorePaths, StoreError};
+use crate::store::{lock_connection, timestamp_sort_key, SharedConnection, StoreError};
 
 /// 本地库当前 schema 版本。版本 4 增加 Web 包记录与它到 blob 的真实外键引用。
 pub const MIGRATION_4: &str = r#"
@@ -190,38 +188,23 @@ impl serde::Serialize for SaveWebPackageError {
 
 /// 本地 Web 包存储。与 [`LocalCardStore`](crate::local_card::LocalCardStore) 同构，但多一条
 /// 到 blob 的真实外键引用。
+///
+/// 与其它 store 共用一条连接（`DESK-065`）。这一点对本类型尤其关键：[`Self::save`] 的
+/// "写 blob"与"写包事务"是两步，共享连接让两步之间的中间态对任何其它路径不可见。
 pub struct WebPackageStore {
-    connection: Mutex<Connection>,
+    connection: SharedConnection,
 }
 
 impl WebPackageStore {
-    /// 在给定的应用数据目录布局上打开本地库。
-    pub fn open(paths: &LocalStorePaths) -> Result<Self, StoreError> {
-        if let Some(parent) = paths.database().parent() {
-            std::fs::create_dir_all(parent).map_err(|_| StoreError::Unavailable)?;
-        }
-        let connection = Connection::open_with_flags(
-            paths.database(),
-            rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE
-                | rusqlite::OpenFlags::SQLITE_OPEN_CREATE
-                | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
-        )
-        .map_err(|_| StoreError::Unavailable)?;
-        Self::from_connection(connection)
-    }
-
-    fn from_connection(connection: Connection) -> Result<Self, StoreError> {
-        crate::store::configure_and_migrate(&connection)?;
-        Ok(Self {
-            connection: Mutex::new(connection),
-        })
+    pub fn new(connection: SharedConnection) -> Self {
+        Self { connection }
     }
 
     fn with_connection<T>(
         &self,
         operation: impl FnOnce(&Connection) -> Result<T, StoreError>,
     ) -> Result<T, StoreError> {
-        let guard = self.connection.lock().map_err(|_| StoreError::Failure)?;
+        let guard = lock_connection(&self.connection)?;
         operation(&guard)
     }
 
@@ -649,12 +632,12 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
         let paths = crate::store::LocalStorePaths::under(&root);
 
-        let packages = WebPackageStore::open(&paths).expect("packages");
-
-        let blob_connection =
-            rusqlite::Connection::open(paths.database()).expect("blob connection");
-        crate::store::configure_and_migrate(&blob_connection).expect("migrate");
-        let blobs = crate::blob::open(BlobPaths::under(&root), blob_connection).expect("blobs");
+        // 与生产路径同构：**一条**连接同时供包记录与 blob metadata 使用（D2.2a）。
+        // 这条 fixture 此前开第二条连接，仅仅是因为生产路径当时也是两条；把它改成共享
+        // 是为了让测试不再依赖一个已经不存在的拓扑。
+        let connection = crate::store::open_shared_connection(&paths).expect("connection");
+        let packages = WebPackageStore::new(std::sync::Arc::clone(&connection));
+        let blobs = crate::blob::open(BlobPaths::under(&root), connection).expect("blobs");
 
         (packages, blobs, root)
     }

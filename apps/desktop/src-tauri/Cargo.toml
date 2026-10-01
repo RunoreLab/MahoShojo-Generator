@@ -36,6 +36,11 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
 # 内容寻址 blob 的摘要计算。MIT / Apache-2.0，纯 Rust。
 sha2 = "0.10"
+# 跨进程 advisory 文件锁。MIT / Apache-2.0，纯 Rust（以 rustix 取代 libc）。
+# V1 单实例的机制选择：按**数据目录**加锁，而不是 tauri-plugin-single-instance
+# 按 app id 加锁——dev 构建与另一个构建可以有不同 app id 却共享同一个数据目录，
+# 而那正是 DESK-065 要防的情况（依据 SPEC-desktop-client-v1 DESK-065 / DESK-068）。
+fs4 = "1.1.0"
 # 同目录唯一命名的临时文件，用于"临时文件 -> sync -> 原子 rename"的写入顺序。
 # 放在 blob 目录内是硬性要求：rename 只在同一文件系统内原子。
 tempfile = "3"

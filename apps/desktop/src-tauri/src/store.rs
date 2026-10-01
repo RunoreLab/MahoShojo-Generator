@@ -7,9 +7,57 @@
 //! Rust 仍然自己产生所有落盘路径与 SQL 选择器：不存在"由 renderer 指定文件名或 SQL"的入口。
 
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use rusqlite::{Connection, OpenFlags};
+
+/// 全进程共享的 SQLite 连接句柄。
+///
+/// D2.2a 之前，四个 store 各自 `Mutex<Connection>`、指向同一个数据库文件——四把互不相干的
+/// 锁。那不只是"不够强"，它是一个**现存缺陷**：`WebPackageStore::save` 先写 blob（释放 blob
+/// 锁）再进包事务，两步之间若有另一条路径观察 blob metadata，就会看到一个"有 metadata、无引用"
+/// 的中间态。共用一把锁之后，任何跨资源的观察都落在同一临界区内。
+///
+/// 仍然用 `Mutex<Connection>` 而非连接池：本地库写入低频，复杂度预算要求不为它引入
+/// 连接池与异步写入路径（见 [`LocalStore`] 的说明）。
+pub type SharedConnection = Arc<Mutex<Connection>>;
+
+/// 打开（或创建）共享连接，并跑完 PRAGMA 配置与迁移阶梯。
+///
+/// 迁移只在**这一处**执行。四条连接各自跑一遍阶梯曾经是可行的，但那是"四条连接"的
+/// 副产品，不是设计：一旦合并成一条连接，跑四次就成了四次无谓的 DDL 与 journal 写入。
+pub fn open_shared_connection(paths: &LocalStorePaths) -> Result<SharedConnection, StoreError> {
+    if let Some(parent) = paths.database().parent() {
+        std::fs::create_dir_all(parent).map_err(|_| StoreError::Unavailable)?;
+    }
+
+    let connection = Connection::open_with_flags(
+        paths.database(),
+        OpenFlags::SQLITE_OPEN_READ_WRITE
+            | OpenFlags::SQLITE_OPEN_CREATE
+            | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .map_err(|_| StoreError::Unavailable)?;
+
+    configure_and_migrate(&connection)?;
+
+    Ok(Arc::new(Mutex::new(connection)))
+}
+
+/// 内存库。供测试使用，不触碰用户数据目录。
+#[cfg(test)]
+pub fn open_in_memory_connection() -> Result<SharedConnection, StoreError> {
+    let connection = Connection::open_in_memory().map_err(|_| StoreError::Unavailable)?;
+    configure_and_migrate(&connection)?;
+    Ok(Arc::new(Mutex::new(connection)))
+}
+
+/// 取得连接锁。中毒时折叠成 `Failure`：一个 panic 过的写入路径意味着状态不可信。
+pub fn lock_connection(
+    connection: &SharedConnection,
+) -> Result<MutexGuard<'_, Connection>, StoreError> {
+    connection.lock().map_err(|_| StoreError::Failure)
+}
 
 /// 当前 schema 版本。SQLite 的 `user_version` 与 migration journal 必须与它一致。
 ///
@@ -41,7 +89,24 @@ pub enum StoreError {
     NonMonotonicTimestamp,
     /// 查询参数越界（页大小不在 `1..=MAX_LOCAL_CARD_PAGE_SIZE`）。
     InvalidQuery,
+    /// 本地库正处于维护窗口，写入被拒（`DESK-065`）。**不是**数据损坏：调用方应当重试。
+    MaintenanceBusy,
     Failure,
+}
+
+impl From<crate::maintenance::MaintenanceRejection> for StoreError {
+    /// 只映射 `MaintenanceBusy`。
+    ///
+    /// `InstanceLocked` 不在此出现：它属于应用启动阶段（第二个进程根本不会走到 command），
+    /// 把它塞进运行期错误里会让 UI 提示"本地库正忙"，而真实原因是另一个进程占着这份库。
+    fn from(rejection: crate::maintenance::MaintenanceRejection) -> Self {
+        match rejection {
+            crate::maintenance::MaintenanceRejection::MaintenanceBusy => {
+                StoreError::MaintenanceBusy
+            }
+            crate::maintenance::MaintenanceRejection::InstanceLocked => StoreError::Unavailable,
+        }
+    }
 }
 
 impl StoreError {
@@ -56,6 +121,7 @@ impl StoreError {
             StoreError::RecordMissing => "record-missing",
             StoreError::NonMonotonicTimestamp => "non-monotonic-timestamp",
             StoreError::InvalidQuery => "invalid-query",
+            StoreError::MaintenanceBusy => "maintenance-busy",
             StoreError::Failure => "store-failure",
         }
     }
@@ -73,6 +139,7 @@ impl StoreError {
             }
             StoreError::NonMonotonicTimestamp => "local store refuses a backwards timestamp",
             StoreError::InvalidQuery => "local store rejected the query",
+            StoreError::MaintenanceBusy => "the local library is being maintained; retry shortly",
             StoreError::Failure => "local store operation failed",
         }
     }
@@ -292,47 +359,38 @@ impl LocalStorePaths {
 
 /// 进程内单连接存储。
 ///
+/// 共享连接是 D2.2a 引入的：四个 store 此前各开一条连接、各持一把锁，于是
+/// `save_web_package` 的"写 blob"与"写包事务"两步之间存在一个无人持有的观察窗口。
+/// 现在所有 store 共用 [`SharedConnection`]，跨资源的操作落在同一临界区内。
+///
 /// 单连接 + `Mutex` 是刻意的：本地库的写入是低频的（用户保存卡片、修改 Profile），
 /// 而复杂度预算要求避免为它引入连接池与异步写入路径。
 pub struct LocalStore {
-    connection: Mutex<Connection>,
+    connection: SharedConnection,
 }
 
 impl LocalStore {
+    pub fn new(connection: SharedConnection) -> Self {
+        Self { connection }
+    }
+
+    /// 单独打开一条连接。**仅测试与迁移工具使用**：生产路径经由
+    /// [`crate::library::LocalLibrary`] 共享同一条连接（`DESK-065`）。
+    #[cfg(test)]
     pub fn open(paths: &LocalStorePaths) -> Result<Self, StoreError> {
-        if let Some(parent) = paths.database().parent() {
-            std::fs::create_dir_all(parent).map_err(|_| StoreError::Unavailable)?;
-        }
-
-        let connection = Connection::open_with_flags(
-            paths.database(),
-            OpenFlags::SQLITE_OPEN_READ_WRITE
-                | OpenFlags::SQLITE_OPEN_CREATE
-                | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-        )
-        .map_err(|_| StoreError::Unavailable)?;
-
-        configure_and_migrate(&connection)?;
-
-        Ok(Self {
-            connection: Mutex::new(connection),
-        })
+        Ok(Self::new(open_shared_connection(paths)?))
     }
 
     /// 打开内存库。供测试使用，不触碰用户数据目录。
     #[cfg(test)]
     pub fn open_in_memory() -> Result<Self, StoreError> {
-        let connection = Connection::open_in_memory().map_err(|_| StoreError::Unavailable)?;
-        configure_and_migrate(&connection)?;
-        Ok(Self {
-            connection: Mutex::new(connection),
-        })
+        Ok(Self::new(open_in_memory_connection()?))
     }
     fn with_connection<T>(
         &self,
         operation: impl FnOnce(&Connection) -> Result<T, StoreError>,
     ) -> Result<T, StoreError> {
-        let guard = self.connection.lock().map_err(|_| StoreError::Failure)?;
+        let guard = lock_connection(&self.connection)?;
         operation(&guard)
     }
 

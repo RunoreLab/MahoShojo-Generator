@@ -513,6 +513,91 @@ describe('desktop workspace app ownership', () => {
     }
   });
 
+  it('routes every local library store through one managed state and one connection', () => {
+    // DESK-065：一次保存跨 blob 文件、blob metadata 与包事务三个资源。四个 store 此前各开
+    // 一条连接、各持一把 Mutex，于是 "写 blob" 与 "写包事务" 之间存在一个无人持有的观察
+    // 窗口——GC 落在那里就会删掉 in-flight 的字节。这条断言把该形状钉死，避免它被改回去。
+    const libSource = readFileSync(path.join(tauriDirectory, 'src', 'lib.rs'), 'utf8');
+
+    for (const store of ['LocalCardStore', 'WebPackageStore', 'BlobStore', 'LocalStore']) {
+      expect(
+        libSource,
+        `${store} must be reached through LocalLibrary, not registered as its own Tauri state`,
+      ).not.toMatch(new RegExp(`app\\.manage\\([^)]*${store}`, 'u'));
+      expect(
+        libSource,
+        `${store} must not appear as a State parameter type`,
+      ).not.toMatch(new RegExp(`State<'_,\\s*${store}>`, 'u'));
+    }
+
+    // 生产路径只有一个本地库 State（连同单实例守卫与凭据/注册表，setup 一共 manage 三个）。
+    const managedStates = libSource.match(/app\.manage\([^)]*\)/gu) ?? [];
+    expect(
+      managedStates.filter((call) => /library/iu.test(call)),
+      'apps/desktop must manage exactly one local library state',
+    ).toEqual(['app.manage(library)']);
+
+    // 单实例必须在打开库**之前**获取：反过来两个进程可能都已建连接，第二个才失败，
+    // 而它已经跑完迁移阶梯，可能留下一个迁移了一半的库。
+    const acquireAt = libSource.indexOf('InstanceGuard::acquire');
+    const openAt = libSource.indexOf('LocalLibrary::open');
+    expect(acquireAt).toBeGreaterThan(-1);
+    expect(openAt).toBeGreaterThan(-1);
+    expect(
+      acquireAt,
+      'InstanceGuard::acquire must precede LocalLibrary::open in setup',
+    ).toBeLessThan(openAt);
+
+    // 锁必须 manage 出去。它是 setup 的局部变量，不 manage 就会在 setup 返回时 drop，
+    // 锁随之释放，单实例约束形同虚设。
+    expect(
+      libSource,
+      'the instance guard must be managed so its lock outlives setup',
+    ).toContain('app.manage(instance)');
+  });
+
+  it('takes a maintenance write permit on every local library mutation command', () => {
+    // DESK-065：维护窗口内写入必须被**拒**而不是排队。许可因此必须覆盖整次 IPC 调用——
+    // 若只在 store 内部取，save_web_package 的第二步（包事务）就落在窗口之外。
+    const libSource = readFileSync(path.join(tauriDirectory, 'src', 'lib.rs'), 'utf8');
+
+    const mutationCommands = [
+      'save_local_card',
+      'delete_local_card',
+      'restore_local_card',
+      'purge_local_card',
+      'save_web_package',
+      'delete_web_package',
+      'restore_web_package',
+      'purge_web_package',
+      'save_provider_profile',
+      'delete_provider_profile',
+    ];
+
+    for (const command of mutationCommands) {
+      const declaration = new RegExp(
+        `fn ${command}\\(([\\s\\S]*?)\\n\\}`,
+        'u',
+      ).exec(libSource);
+      expect(declaration, `${command} must have a declaration to inspect`).not.toBeNull();
+      expect(
+        declaration?.[1] ?? '',
+        `${command} must acquire a maintenance write permit`,
+      ).toContain('enter_write()');
+    }
+
+    // 读取路径刻意**不**取许可：GC 只回收无引用 blob，而读取只触达被引用的 blob，
+    // 因此维护期间读到的仍然是一致状态。要求读也取许可会让用户在备份时无法翻看本地库。
+    for (const command of ['get_local_card', 'list_local_cards', 'read_web_package_archive']) {
+      const declaration = new RegExp(`fn ${command}\\(([\\s\\S]*?)\\n\\}`, 'u').exec(libSource);
+      expect(declaration, `${command} must have a declaration to inspect`).not.toBeNull();
+      expect(
+        declaration?.[1] ?? '',
+        `${command} is a read and must not take the maintenance write permit`,
+      ).not.toContain('enter_write()');
+    }
+  });
+
   it('keeps the local library document free of a serde_json::Value write gate', () => {
     // DESK-062：serde_json::Value 会拒绝 \ud800，而 JSON.stringify 会产出它、Web 的
     // IndexedDB 也照常保存它。把 Value 解析当落盘前提会静默拒收 Web 已有的合法数据。

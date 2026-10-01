@@ -2,7 +2,7 @@
 
 MahoShojo Generator 的本地桌面客户端 runtime。它是独立 app，不是 `apps/web` 的桌面壳。
 
-当前阶段：**D1 执行核 + D1.5 摘要冻结 + D2.0 本地卡存储已落地**。
+当前阶段：**D1 执行核 + D1.5 摘要冻结 + D2.0 本地卡存储 + D2.1 blob 持久化 + D2.2a 并发地基已落地**。
 
 - **D0** skeleton、安全边界与 CI 接线；
 - **D0.5** 持久 secret 接入操作系统凭据存储；
@@ -14,8 +14,9 @@ MahoShojo Generator 的本地桌面客户端 runtime。它是独立 app，不是
 - **D2.0** 本地库本地卡存储：SQLite `local_card`、keyset 分页、业务级 IPC 与
   `CardRepository` adapter；
 - **D2.1** Web Package ZIP blob 持久化：内容寻址 `blob` 表、`local_web_package` 与真实外键
-  引用表、原子写入与去重自愈、业务级 IPC 与 `WebPackageRepository` adapter。
-  导入导出、备份与 GC 属 D2.2 之后的阶段。
+  引用表、原子写入与去重自愈、业务级 IPC 与 `WebPackageRepository` adapter；
+- **D2.2a** 并发地基：`LocalLibrary` 单一 managed state、维护窗口、数据目录单实例锁。
+  审计、GC、备份与导入导出属 D2.2b 之后的阶段。
 
 ## 权威边界
 
@@ -128,7 +129,37 @@ Profile 草稿
   OpenAI-compatible SSE 服务（含"取消真正中止上游 body"的断连观测）。这是 D1 退出门禁
   唯一未闭合的一条，且只能由人在真实 Provider 上确认。
 
-## 本地库（D2.0 / D2.1）
+## 本地库（D2.0 / D2.1 / D2.2a）
+
+### 并发模型（D2.2a）
+
+一次 Web 包保存跨**三个**资源：blob 文件系统、blob metadata、包记录与引用行的事务。因此并发
+控制分三层，各管一件事，互不替代：
+
+```text
+跨进程  数据目录 advisory lock（fs4）    同一数据目录只允许一个 Desktop 进程
+跨操作  MaintenanceGate                  维护独占；窗口内写入被拒而不是排队
+进程内  Mutex<Connection>（一条）          单次数据库往返的原子性
+```
+
+**四个 store 共用一条连接，且只经由一个 managed state（`LocalLibrary`）到达。** 这不只是为了
+GC：`save_web_package` 此前先写 blob（释放 blob 锁）再进包事务（取另一把锁），两步之间没有
+任何互斥——一条观察路径落在那里就会看到一个"有 metadata、无引用"的 blob，而那正是 GC 的
+回收候选。合并成一条连接之后，这个窗口才真正关闭。
+
+单实例用**数据目录**锁而不是 `tauri-plugin-single-instance`：后者按 app id 判定，而 dev 构建
+与另一个构建可以有不同 app id 却指向同一个 `app_data_dir`——那正是要防的情况。锁是 OS 持有的
+advisory lock，随进程死亡自动释放；锁文件在释放后**仍然存在**，否则第二个进程会新建一把锁、
+两个进程各拿一把。锁必须在打开数据库**之前**获取，且句柄被 manage 出 `setup`。
+
+维护窗口内的写入被**拒绝**（`maintenance-busy`）而不是排队。排队同样满足"不观察到中间态"，
+但会把 UI 挂起在一个无法解释的等待上；拒绝让 UI 可以立刻提示"本地库正在维护，请稍后重试"。
+渲染层用 `isRetryableLocalLibraryError` 判定该 code 是唯一"原样重试就会成功"的类别。
+
+读取路径刻意**不**取许可：GC 只回收无引用 blob，而读取只触达被引用的 blob，因此维护期间读到的
+仍是一致状态。要求读也受限只会让用户在备份时无法翻看本地库。
+
+### 存储
 
 `library.sqlite` 里目前有四张表，共享同一份 PRAGMA 与 migration journal（当前 `user_version` 为 4）：
 
@@ -198,7 +229,8 @@ IndexedDB adapter 未来可独立改进。软删只写 tombstone、**保留** do
 自由载荷走 `Box<RawValue>`，保留原始文本而不实例化 `String`，载荷里的孤立代理项被逐字节
 保留（见 `local_card.rs` 的兼容性测试与 `fixtures/desktop-local-cards.json`）。
 
-导入导出、备份与 GC 属 D2.2 之后的阶段，当前**不存在**。
+完整性审计、孤儿 GC、导入导出与备份属 D2.2b 之后的阶段，当前**不存在**。D2.2a 只落地了它们
+依赖的并发地基——维护窗口与单实例此刻没有任何生产调用方，这是刻意留到下一段接上的。
 
 ## 持久 secret
 
@@ -235,5 +267,11 @@ Rust 侧在编译期 `include_str!` 同一份 fixture，两侧测试同时消费
 ## 已知边界
 
 - GUI 交互行为无法在无头 CI 中验证，涉及"实际运行结果"的检查在文档中记为未验证并附复现步骤。
+  D2.2a 的单实例拒绝启动因此**未经真实双进程验证**：现有断言走的是同进程两次 `acquire`，
+  它复现了同一套 OS advisory 锁语义，但不是两个进程。需要在 `dev:tauri` 下手动启动第二个实例
+  确认提示可读。
 - Windows 上同源 iframe 会继承宿主 IPC（GHSA-57fm-592m-34r7），因此 Web Package 在任何阶段
   都不会放进 iframe；该能力属于 D4 的独立零 capability webview。
+- D2.2a 之后所有本地库写入都是同步 command。写路径本身是本地 SQLite 的单次往返，可以接受；
+  但审计、GC、备份会遍历整个库，**必须**改成 `async fn` + `spawn_blocking`，
+  否则会冻结 WebView（`DESK-067`）。
