@@ -28,17 +28,14 @@ const parseCursor = (cursor: string | undefined): number => {
   return Number.isSafeInteger(offset) && offset >= 0 ? offset : 0;
 };
 
-/**
- * 本地库记录的 Web 包 ID 由 canonical digest 派生：同一次导入永远落在同一行，
- * 修改过任何一个字节的包则是另一行。这正是「重新导入＝更新而不是新增」的身份基础。
- */
 const promisifyKeys = (request: IDBRequest<IDBValidKey[]>): Promise<IDBValidKey[]> =>
   new Promise((resolve, reject) => {
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error ?? new Error('IndexedDB 请求失败。'));
   });
 
-export const deriveLocalWebPackageId = (digest: string): string => `wp_${digest.replace(/^sha256:/u, '').slice(0, 32)}`;
+// `deriveLocalWebPackageId` 的权威实现在 @mahoshojo/local-library：包 id 是跨运行时共享的
+// 数据，派生规则不能是某个前端的私有细节。Web 与 Desktop 共用同一个实现。
 
 export class IndexedDbWebPackageRepository implements WebPackageRepository {
   async get(id: string): Promise<LocalWebPackageRecordV1 | null> {
@@ -103,10 +100,9 @@ export class IndexedDbWebPackageRepository implements WebPackageRepository {
   }
 
   async put(record: LocalWebPackageRecordV1, archive: Uint8Array): Promise<void> {
+    // canonical identity 由记录契约保证（id 必须是 ref.digest 的派生结果），因此这里
+    // 不再重复一遍同样的检查——每处重复的规则都是一个会漂移的地方。
     const parsed = LocalWebPackageRecordV1Schema.parse(record);
-    if (parsed.id !== deriveLocalWebPackageId(parsed.ref.digest)) {
-      throw new Error('本地库 Web 包 ID 与其内容摘要不一致。');
-    }
     const bytes = toDetachedArrayBuffer(archive);
     await runLocalLibraryTransaction(
       [LOCAL_LIBRARY_STORE_NAMES.webPackages, LOCAL_LIBRARY_STORE_NAMES.webPackageArchives],

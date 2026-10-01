@@ -1,6 +1,7 @@
 import {
   LocalWebPackageArchiveSchema,
   LocalWebPackageRecordV1Schema,
+  deriveLocalWebPackageId,
 } from '@mahoshojo/local-library/web-package-record';
 
 import { createLocalWebPackageRecord, createWebPackageManifest } from './web-package-fixtures';
@@ -11,6 +12,18 @@ describe('LocalWebPackageRecordV1', () => {
   it('accepts a locally owned package whose content digest is its ref digest', () => {
     const record = createLocalWebPackageRecord();
     expect(LocalWebPackageRecordV1Schema.parse(record)).toEqual(record);
+  });
+
+  it('canonical identity：id MUST 是 manifest 摘要的派生结果', () => {
+    // 这条此前只在 Web 的 put 里用代码检查，Desktop 侧没有任何保证。而"id 由摘要派生"
+    // 正是共享端口按摘要读档的前提：摘要不是 wp_ 形式的 id，id 不自洽就等于两个身份。
+    const record = createLocalWebPackageRecord();
+    expect(record.id).toBe(deriveLocalWebPackageId(record.ref.digest));
+
+    expect(LocalWebPackageRecordV1Schema.safeParse({
+      ...record,
+      id: 'wp_some_other_identity',
+    }).success).toBe(false);
   });
 
   it('refuses a record whose content digest drifts from the package identity', () => {

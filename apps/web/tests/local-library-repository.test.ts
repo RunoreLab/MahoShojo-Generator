@@ -2,7 +2,11 @@
 import '@/tests/helpers/fake-indexeddb';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { LocalCardRecordV1Schema, type LocalCardRecordV1 } from '@mahoshojo/local-library/record';
-import type { LocalWebPackageRecordV1 } from '@mahoshojo/local-library/web-package-record';
+import {
+  LocalWebPackageRecordV1Schema,
+  deriveLocalWebPackageId,
+  type LocalWebPackageRecordV1,
+} from '@mahoshojo/local-library/web-package-record';
 import {
   LOCAL_LIBRARY_DB_NAME,
   resetLocalLibraryDbConnection,
@@ -10,7 +14,6 @@ import {
 import { IndexedDbCardRepository, resetLocalCardRepository } from '@/lib/local-library/card-repository';
 import {
   IndexedDbWebPackageRepository,
-  deriveLocalWebPackageId,
   resetLocalWebPackageRepository,
 } from '@/lib/local-library/web-package-repository';
 
@@ -177,9 +180,11 @@ describe('IndexedDbWebPackageRepository', () => {
 
   it('rejects a record whose id was not derived from its own digest', async () => {
     const repository = new IndexedDbWebPackageRepository();
+    // 拒绝现在来自记录契约本身（`LocalWebPackageRecordV1Schema`），而不是 adapter 里重复的
+    // 一次检查——因此这里只断言"被拒"，不绑定是哪一层给出的错误文案。
     await expect(
       repository.put(createWebPackageRecord({ id: 'wp_forged' }), new Uint8Array([1])),
-    ).rejects.toThrow('内容摘要不一致');
+    ).rejects.toThrow();
   });
 
   it('keeps the archive bytes on soft delete so restore yields a usable package', async () => {

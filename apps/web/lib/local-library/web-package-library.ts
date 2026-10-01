@@ -1,12 +1,12 @@
 'use client';
 
 import { stageLocalWebPackage, unpackWebPackageZip } from '@mahoshojo/web-package';
-import type { LocalWebPackageRecordV1 } from '@mahoshojo/local-library/web-package-record';
-
 import {
   deriveLocalWebPackageId,
-  getLocalWebPackageRepository,
-} from './web-package-repository';
+  type LocalWebPackageRecordV1,
+} from '@mahoshojo/local-library/web-package-record';
+
+import { getLocalWebPackageRepository } from './web-package-repository';
 import {
   LOCAL_LIBRARY_META_KEYS,
   LOCAL_LIBRARY_SCHEMA_VERSION,

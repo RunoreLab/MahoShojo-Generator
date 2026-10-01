@@ -53,6 +53,16 @@ export const LocalWebPackageRecordV1Schema = z
         message: 'contentDigest must equal the package ref digest',
       });
     }
+    // canonical identity 在**记录契约**里成立，而不是每个 adapter 各写一遍。
+    // 它此前只在 Web 的 `put` 里用代码检查，于是 Desktop 侧没有任何保证，而"id 必须是摘要的
+    // 派生结果"正是共享端口按摘要读档的前提（`DESK-063`）。
+    if (record.id !== deriveLocalWebPackageId(record.ref.digest)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['id'],
+        message: 'id must be derived from the package ref digest',
+      });
+    }
     const createdAt = Date.parse(record.createdAt);
     const updatedAt = Date.parse(record.updatedAt);
     if (updatedAt < createdAt) {
@@ -116,12 +126,28 @@ export const LocalWebPackageArchiveSchema = z
 export type LocalWebPackageArchive = z.infer<typeof LocalWebPackageArchiveSchema>;
 
 /**
+ * 由 manifest 摘要派生本地 Web 包 id。
+ *
+ * 这是 **canonical identity** 的唯一权威实现：Web 的 IndexedDB adapter 与 Desktop 的 SQLite
+ * adapter 共用它。它此前住在 `apps/web` 里，等于把跨运行时共享数据的派生规则变成某个前端的
+ * 私有细节——规则一旦漂移，导出的库在另一端就对不上。
+ *
+ * 与 `deriveLocalDataCardIdV1` 同构：去掉 `sha256:` 前缀后取前 32 位十六进制。
+ * 改动会让所有历史 Web 包 id 变化，因此按 `DESK-061` 属于版本化演进，不能原地修改。
+ */
+export const deriveLocalWebPackageId = (digest: string): string =>
+  `wp_${digest.replace(/^sha256:/u, '').slice(0, 32)}`;
+
+/**
  * 本地 Web 包仓储端口。delete/restore 与 `CardRepository` 同为幂等软删语义，
  * 且永不触网——本地包不上传服务器。
  *
  * 软删**不改变归档字节的可达性**：`delete` 只写 tombstone 并保留字节，`restore` 因此能让包
  * 重新可用。只有 `purge` 才移除记录与它独占的字节。把丢弃字节的时机提前到 `delete` 会让
  * `restore` 产出一条"记录在、字节缺"的损坏行——这类行读出来是 `null`，与损坏无法区分。
+ *
+ * `readArchive` 的参数是 **manifest 摘要**（`record.ref.digest`），不是包 id：归档在存储层
+ * 以摘要为键，而摘要不是 `wp_…` 形式的 id。混用会让读取必然落空。
  */
 export interface WebPackageRepository {
   get(_id: string): Promise<LocalWebPackageRecordV1 | null>;

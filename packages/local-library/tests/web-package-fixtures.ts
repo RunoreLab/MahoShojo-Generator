@@ -1,6 +1,7 @@
 import type { WebPackageManifest } from '@mahoshojo/contracts/web-package';
 
 import type { LocalWebPackageRecordV1 } from '@mahoshojo/local-library/web-package-record';
+import { deriveLocalWebPackageId } from '@mahoshojo/local-library/web-package-record';
 
 const DIGEST = `sha256:${'b'.repeat(64)}`;
 
@@ -28,7 +29,8 @@ export const createWebPackageManifest = (
 export const createLocalWebPackageRecord = (
   overrides: Partial<LocalWebPackageRecordV1> = {},
 ): LocalWebPackageRecordV1 => ({
-  id: 'local-web-package-1',
+  // id MUST 由 manifest 摘要派生——记录契约里就有这条，夹具不能绕开它。
+  id: deriveLocalWebPackageId(DIGEST),
   schemaVersion: 1,
   storageLocation: 'local',
   entityKind: 'web-package',

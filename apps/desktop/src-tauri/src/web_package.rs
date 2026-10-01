@@ -41,7 +41,12 @@ pub const MIGRATION_4: &str = r#"
 CREATE TABLE IF NOT EXISTS local_web_package (
     id                  TEXT PRIMARY KEY NOT NULL,
     document            TEXT NOT NULL,
-    ref_digest          TEXT NOT NULL,
+    -- canonical identity：包 id 由该摘要派生，因此它必须唯一。Web 的 IndexedDB adapter
+    -- 对 contentDigest 建了 unique index；桌面侧缺这一条时，同一个 manifest 摘要能落进
+    -- 两行，而读档入口按摘要查只命中一行——另一行成了用户看不见、GC 也解释不了的行。
+    -- 派生规则本身由 @mahoshojo/local-library 的 deriveLocalWebPackageId 单点实现，
+    -- native 不重算，因此这里只有 UNIQUE 存储约束而没有 CHECK。
+    ref_digest          TEXT NOT NULL UNIQUE,
 
     updated_at          TEXT NOT NULL,
     updated_at_sort     INTEGER NOT NULL,
@@ -1122,6 +1127,36 @@ mod tests {
                 .expect("lookup"),
             None,
             "purge 之后 MUST 读不到归档"
+        );
+    }
+
+    /// canonical identity MUST 唯一。
+    ///
+    /// Web 的 IndexedDB adapter 对 `contentDigest` 建了 unique index；桌面侧缺这一条时，同一个
+    /// manifest 摘要能落进两行，而按摘要读档只命中一行——另一行成了用户看不见、GC 也解释不了
+    /// 的行。记录契约保证 id 由摘要派生，这里保证摘要不能占两行。
+    #[test]
+    fn one_manifest_digest_cannot_occupy_two_rows() {
+        let (packages, blobs, _root) = fixture();
+        let archive = b"PK\x03\x04dup".to_vec();
+        let (document, index) = package_for("wp_dup_a", NOW, None, &archive);
+        packages
+            .save(&blobs, &document, &index, &archive, NOW)
+            .expect("first save");
+
+        let (other, other_index) = package_for("wp_dup_b", NOW, None, &archive);
+        assert!(
+            packages
+                .save(&blobs, &other, &other_index, &archive, NOW)
+                .is_err(),
+            "同一个 manifest 摘要 MUST NOT 能落进两行"
+        );
+        assert_eq!(
+            packages
+                .archive_digest_for_content_digest(DIGEST)
+                .expect("lookup")
+                .expect("must exist"),
+            crate::blob::digest_of(&archive)
         );
     }
 
