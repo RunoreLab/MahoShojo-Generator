@@ -149,17 +149,30 @@ blob 的物理布局是 adapter 内部细节，对外契约与 portable archive 
 ### 两种摘要不是一回事
 
 Web 包记录里的 `contentDigest`（= `ref.digest`）是 **manifest** 的摘要，构成领域身份——包 id 由它
-派生。归档 blob 的摘要是**归档字节自身**的摘要，只充当存储地址与完整性校验。ZIP 除 manifest 外还
-含文件，两者必然不同，**不要**加"两者必须相等"的校验（`DESK-063`）。归档字节是否真的属于这条记录，
-由 TypeScript 侧 `unpackWebPackageZip` 解包后核对；native 不重建 ZIP 与 manifest 的规范化逻辑。
+派生，派生规则由 `@mahoshojo/local-library` 的 `deriveLocalWebPackageId` 单点实现、Web 与 Desktop
+共用，并由记录契约强制。归档 blob 的摘要是**归档字节自身**的摘要，只充当存储地址与完整性校验。
+ZIP 除 manifest 外还含文件，两者必然不同，**不要**加"两者必须相等"的校验（`DESK-063`）。归档字节
+是否真的属于这条记录，由 TypeScript 侧 `unpackWebPackageZip` 解包后核对；native 不重建 ZIP 与
+manifest 的规范化逻辑，也**不在 SQL 里重算 id 派生**——只加 `ref_digest UNIQUE` 作为存储约束。
 
 记录自称的 `archiveByteLength` 会被 native 与实际字节数比对，不一致直接拒绝。
 
+### 读档以 manifest 摘要为键
+
+`readArchive(contentDigest)` 按 **manifest 摘要**查询，而不是按包 id：共享端口与 Web 的 IndexedDB
+adapter 都以摘要为键，而摘要不是 `wp_…` 形式的 id。native 经 `local_web_package` →
+`web_package_archive_ref` 两跳解析。把参数当包 id 用会让每次读档都落空，表现为"包打不开"——
+而两侧单测都绿，因为它们各自用错了自己的那半边形状。
+
 ### 二进制传输
 
-IPC 用一个显式的 `{b64, len}` 信封承载归档字节，两端解码后都核对长度。Tauri 2 的原生 raw IPC
-要求整个请求体是 raw 形式、无法与结构化参数并存，所以这是字段而非自定义通道；代价约 33% 体积，
-收益是解包路径只有一条。`DESK-064` 记录了约束与将来切 raw IPC 的时机。
+IPC 用一个显式的 `{b64, len}` 信封承载归档字节，**请求与响应共用同一个 native DTO**：让读写各自
+定义形状，正是"读出来是一根裸字符串"这类 bug 的温床——两侧单测都会绿，因为它们各自 mock 了对方
+的形状。两端解码后都核对长度。编解码用标准 `base64` crate：手写解码器遇到 `=` 就 `break` 而不校验
+padding，尾随垃圾会被静默丢弃，且逐字符查表在 64 MiB 归档上是 10⁹ 量级的比较。
+
+Tauri 2 的原生 raw IPC 要求整个请求体是 raw 形式、无法与结构化参数并存，所以这是字段而非自定义
+通道；代价约 33% 体积，收益是解包路径只有一条。`DESK-064` 记录了约束与将来切 raw IPC 的时机。
 
 
 业务语义全部留在 TypeScript。索引列由渲染层从**已通过 `LocalCardRecordV1Schema` 校验的
