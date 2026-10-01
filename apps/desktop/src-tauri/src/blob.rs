@@ -295,9 +295,34 @@ impl BlobStore {
             Err(_) => {}
         }
 
+        // 文件不在。它是**首次落盘**，还是 metadata 还在而字节丢了（被人删、被清理工具扫掉、
+        // 磁盘故障）？两者对用户的意义完全不同：后者意味着这台设备的库已经不健康，需要
+        // 一次完整性检查（`DESK-065` 的审计）。报 `stored` 会把这种修复说成正常写入，
+        // 于是健康告警漏掉整整一类问题。
+        let outcome = match self.exists_in_metadata_unchecked(digest) {
+            true => BlobWriteOutcome::Repaired,
+            false => BlobWriteOutcome::Stored,
+        };
         write_atomically(&target, bytes)?;
         self.record(digest, byte_length, now)?;
-        Ok(BlobWriteOutcome::Stored)
+        Ok(outcome)
+    }
+
+    /// metadata 里是否已有该 digest。
+    ///
+    /// 与 [`Self::exists_in_metadata`] 的区别是不做 digest 语法解析：调用方已经校验过，
+    /// 这里只是为"该报 `stored` 还是 `repaired`"取一个事实。
+    fn exists_in_metadata_unchecked(&self, digest: &str) -> bool {
+        self.with_connection(|connection| {
+            Ok(connection
+                .query_row(
+                    "SELECT 1 FROM blob WHERE digest = ?1",
+                    rusqlite::params![digest],
+                    |_| Ok(()),
+                )
+                .is_ok())
+        })
+        .unwrap_or(false)
     }
 
     /// 读取一个 blob，并**校验**它的摘要。
@@ -497,6 +522,40 @@ mod tests {
         assert_eq!(metadata.last_referenced_at, NOW);
     }
 
+    /// metadata 还在、字节丢了 → 重写 MUST 报 `repaired`。
+    ///
+    /// 报 `stored` 会把"这台设备的库已经不健康"说成一次正常写入，于是健康告警漏掉整整
+    /// 一类问题：文件被删、被清理工具扫掉、或磁盘故障。`DESK-056` 要求"已修复损坏"对调用方
+    /// 可见，这个形态同样算修复。
+    #[test]
+    fn a_rewritten_blob_whose_metadata_survived_reports_repaired() {
+        let store = store();
+        let (digest, bytes) = bytes_of("zip-lost-file");
+        store.write(&digest, &bytes, NOW).expect("first write");
+
+        // 只删字节，metadata 与其长度/引用时间都留着。
+        let target = super::blob_path(&store.paths, &digest).expect("path");
+        std::fs::remove_file(&target).expect("simulate a lost blob file");
+        assert!(!target.exists());
+        assert!(store.exists_in_metadata(&digest).expect("metadata"));
+
+        assert_eq!(
+            store.write(&digest, &bytes, NOW),
+            Ok(BlobWriteOutcome::Repaired),
+            "字节丢失后的重写是一次修复，不是首次落盘"
+        );
+        assert_eq!(store.read(&digest), Ok(bytes));
+        // 首次落盘时间不应被这次修复改写：它是"这个 blob 何时进入本机"的事实。
+        assert_eq!(
+            store
+                .metadata(&digest)
+                .expect("metadata")
+                .expect("must exist")
+                .created_at,
+            NOW
+        );
+    }
+
     #[test]
     fn a_second_identical_write_is_a_success_not_an_error() {
         // DESK-051：已存在且摘要/长度校验通过的 blob MUST 视为成功。
@@ -656,9 +715,11 @@ mod tests {
             "metadata 仍在，正是悬空记录的可观测形态"
         );
         // 重写同一内容会把字节补回来，而不是留下一条指向缺失文件的记录。
+        // 报 `repaired` 而不是 `stored`：metadata 还在说明这个 blob 曾经落过盘，如今字节
+        // 丢了——把这次补写说成"首次落盘"会让健康告警漏掉这一类问题。
         assert_eq!(
             store.write(&digest, &bytes, NOW),
-            Ok(BlobWriteOutcome::Stored)
+            Ok(BlobWriteOutcome::Repaired)
         );
         assert_eq!(store.read(&digest), Ok(bytes));
     }
