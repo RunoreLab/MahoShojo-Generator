@@ -104,7 +104,7 @@ interface LocalCardFixture {
   cardTypes: string[];
   validIndex: unknown;
   tombstonedIndex: unknown;
-  cursor: unknown;
+  cursor: { updatedAtSort: number; updatedAt: string; id: string };
   cases: { name: string; index: unknown; document: string; expectReject?: boolean }[];
 }
 
