@@ -1,13 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { zipSync } from 'fflate';
+import { ZIP_DOS_EPOCH } from '@mahoshojo/contracts/zip';
 import { MAX_ARCHIVE_EXPANDED_BYTES } from '../src/archive';
 import { importWebPackageArchive, WebPackageImportError, type WebPackageImportErrorCode } from '../src/import';
 import { packWebPackageZip, resolveWebPackage, unpackWebPackageZip } from '../src';
 import { BUILTIN_ARENA_NEWS_PACKAGE_REF } from '../src/registry';
 
 const encoder = new TextEncoder();
-const MTIME = new Date('1980-01-01T00:00:00.000Z');
-const pack = (entries: Record<string, Uint8Array>): Uint8Array => zipSync(entries, { level: 6, mtime: MTIME });
+// 用共享纪元而不是本地字面量：这些夹具要模拟的是"别的工具打出来的 ZIP"，而在 UTC 以西的
+// 时区里，UTC 字面量会让 `zipSync` 在**构造夹具时**就抛错——于是一条本该验证导入逻辑的用例
+// 变成了"打包器坏了"，症状与根因完全无关。
+const pack = (entries: Record<string, Uint8Array>): Uint8Array =>
+  zipSync(entries, { level: 6, mtime: ZIP_DOS_EPOCH });
 
 const HTML = encoder.encode('<!doctype html><html lang="zh"><head><title>站点</title></head><body><h1>你好</h1></body></html>');
 const CSS = encoder.encode('body{color:red}');

@@ -1,11 +1,18 @@
 import { zipSync } from 'fflate';
 import { WEB_PACKAGE_MANIFEST_PATH } from '@mahoshojo/contracts/web-package';
+import { ZIP_DOS_EPOCH } from '@mahoshojo/contracts/zip';
 import { importWebPackageArchive } from './import';
 import type { VerifiedWebPackage } from './verify';
 
 const encoder = new TextEncoder();
-// ZIP local time must fall within 1980–2099; fixed epoch keeps packing deterministic.
-const ZIP_MTIME = new Date('1980-01-01T00:00:00.000Z');
+/**
+ * 固定条目时间让打包输出可复现。
+ *
+ * 纪元的构造方式（本地时间 vs UTC 字面量）不是风格问题：在 UTC 以西的时区，UTC 字面量会让
+ * `zipSync` 直接抛 `date not in range 1980-2099`，也就是**当前所有美洲用户都无法导出 Web 包**。
+ * 理由与实测见 {@link ZIP_DOS_EPOCH}。
+ */
+const ZIP_MTIME = ZIP_DOS_EPOCH;
 
 /** Deterministic logical layout: root web-package.json plus sorted payload paths. */
 export const packWebPackageZip = async (base: VerifiedWebPackage): Promise<Uint8Array> => {

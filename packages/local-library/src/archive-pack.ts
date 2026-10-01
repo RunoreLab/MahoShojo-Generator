@@ -1,4 +1,5 @@
 import { zipSync, type Zippable } from 'fflate';
+import { ZIP_DOS_EPOCH } from '@mahoshojo/contracts/zip';
 
 import {
   LOCAL_LIBRARY_ARCHIVE_MANIFEST_PATH,
@@ -22,15 +23,35 @@ import {
  * 体积又实打实烧 CPU——对一个几百 MiB 的库，这是导出耗时里最大的一块无谓开销。记录 JSON
  * （`manifest.json`、`cards/*.json`、`web-packages/*.json`）仍然压缩，它们是纯文本。
  *
- * ## 确定性
+ * ## 确定性到底保证什么
  *
- * 固定 mtime + 固定条目顺序 ⇒ 同一份库两次导出产出**逐字节相同**的归档。这让归档自身的摘要可以
- * 被断言与比对，也让"导出逻辑是否变了"有一个可验证的答案。代价是 ZIP 条目里没有真实导出时间
- * ——那个时间在 `manifest.exportedAt` 里，而它**刻意**不参与字节布局，否则每次导出都不同。
+ * 固定条目时间 + 固定条目顺序 + 固定的清单字节 ⇒ **在给定 `exportedAt` 的前提下**，同一份库两次
+ * 导出产出逐字节相同的归档。这让归档自身的摘要可被断言与比对，也让"导出逻辑是否变了"有一个可验证
+ * 的答案。
+ *
+ * **限定条件是 `exportedAt`，不是"打包器忽略时间"。** `manifest.json` 就是 `manifest` 的
+ * `JSON.stringify`，而 `exportedAt` 是它的必填字段，因此它必然进入字节。改它就改归档摘要。
+ * 这一点此前被写成"`exportedAt` 刻意不参与字节布局"，与实现相反，也与
+ * `archive-pack.test.ts` 里那条 deterministic 测试的通过方式一致——夹具把 `exportedAt` 钉死成
+ * 了同一个值，于是"忽略时间"从未被真正检验。
+ *
+ * 所以调用方想要的是哪一个，必须自己选：
+ *
+ * - 想知道"这份库的内容变了没有" → 比较各记录的 `contentDigest` / `archiveDigest`，**不要**比较
+ *   整个归档的字节摘要；
+ * - 想知道"打包逻辑变了没有" → 在夹具里固定 `exportedAt`，比较归档字节。
+ *
+ * ZIP 条目里没有真实导出时间是刻意的代价：那个时间在 `manifest.exportedAt` 里，而它必须可读、
+ * 必须对导入方可见，因此不能为了字节稳定而从归档里抹掉。
  */
 
-/** ZIP local time 必须落在 1980–2099；固定纪元让打包确定。 */
-const ZIP_MTIME = new Date('1980-01-01T00:00:00.000Z');
+/**
+ * 固定条目时间让打包输出可复现。
+ *
+ * 纪元的构造方式（本地时间 vs UTC 字面量）不是风格问题：在 UTC 以西的时区，UTC 字面量会让
+ * `zipSync` 直接抛 `date not in range 1980-2099`。理由与实测见 {@link ZIP_DOS_EPOCH}。
+ */
+const ZIP_MTIME = ZIP_DOS_EPOCH;
 
 /** 记录 JSON 的压缩级别。沿用 `packWebPackageZip` 的 6，避免同一仓库出现两套级别。 */
 const RECORD_DEFLATE_LEVEL = 6;

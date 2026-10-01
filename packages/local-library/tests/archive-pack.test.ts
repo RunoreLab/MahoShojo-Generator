@@ -143,11 +143,42 @@ describe('packLocalLibraryArchive', () => {
   });
 
   it('is byte-for-byte deterministic across runs', async () => {
-    // 确定性归档让"导出的摘要"可被断言与比对。它依赖固定 mtime **和**固定条目顺序，
-    // 两者缺一都会让它在两次导出之间变化，而症状（摘要漂移）与根因（打包顺序）完全无关。
+    // 确定性归档让"打包逻辑是否变了"有一个可验证的答案。它依赖固定条目时间 **和** 固定条目
+    // 顺序，两者缺一都会让归档在两次导出之间变化，而症状（摘要漂移）与根因（打包顺序）完全
+    // 无关。
+    //
+    // 注意前提：夹具把 `exportedAt` 钉死成同一个值，因此这条断言的是"给定同一份清单 ⇒ 同一份
+    // 字节"。`exportedAt` 参与字节这件事由下面那条用例单独断言。
     const first = await packFixture();
     const second = await packFixture();
     expect([...first.bytes]).toEqual([...second.bytes]);
+  });
+
+  it('changes its bytes when only exportedAt changes', async () => {
+    // `manifest.json` 就是清单的 JSON.stringify，而 `exportedAt` 是它的必填字段，因此它必然
+    // 进入字节。此前文档写成"exportedAt 刻意不参与字节布局"，与实现相反——而上面那条
+    // deterministic 用例因为把 `exportedAt` 钉死，从未检验过这一点。
+    //
+    // 这条断言的作用是**把边界钉死**：调用方要判断"这份库的内容变了没有"，必须比较各记录的
+    // contentDigest / archiveDigest，不能比较整个归档的字节摘要；反过来"打包逻辑变了没有"
+    // 才是在固定 exportedAt 的前提下比字节。两种用途一旦混淆，症状是"同一份库两次导出摘要
+    // 不同"，而根因是调用方问错了问题。
+    const { manifest, entries } = createLibrary();
+    const base = await packLocalLibraryArchive(manifest, readFrom(entries));
+    const later = await packLocalLibraryArchive(
+      { ...manifest, exportedAt: '2026-06-30T12:34:56.000Z' } as LocalLibraryArchiveManifestV2,
+      readFrom(entries),
+    );
+    expect([...later.bytes]).not.toEqual([...base.bytes]);
+    // 变的是清单本身，不是别的：条目载荷必须逐字节不变，否则这条断言会因为无关原因通过。
+    const before = unzipSync(base.bytes);
+    const after = unzipSync(later.bytes);
+    for (const [entryPath, bytes] of entries) {
+      expect([...after[entryPath]!], `${entryPath} must not depend on exportedAt`).toEqual([
+        ...bytes,
+      ]);
+    }
+    expect(Object.keys(after).sort()).toEqual(Object.keys(before).sort());
   });
 
   it('is independent of the order entries appear in the manifest', async () => {

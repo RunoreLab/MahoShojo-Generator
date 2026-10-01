@@ -5,6 +5,7 @@ import {
   WebPackagePathSchema,
   WebPackageRefSchema,
 } from '@mahoshojo/contracts/web-package';
+import { ZIP_DOS_EPOCH } from '@mahoshojo/contracts/zip';
 import {
   BUILTIN_ARENA_NEWS_PACKAGE_REF as ref,
   BUILTIN_WEB_PACKAGE_PRESETS,
@@ -186,37 +187,35 @@ describe('canonical ZIP artifact and generic JSON Schema validation', () => {
   it('rejects undeclared ZIP files while tolerating required directory placeholders', async () => {
     const { unzipSync, zipSync } = await import('fflate');
     const base = await resolveWebPackage(ref);
-    const mtime = new Date('1980-01-01T00:00:00.000Z');
     const entries = unzipSync(await packWebPackageZip(base));
 
     entries['extra.txt'] = new TextEncoder().encode('not declared');
-    await expect(unpackWebPackageZip(zipSync(entries, { level: 6, mtime })))
+    await expect(unpackWebPackageZip(zipSync(entries, { level: 6, mtime: ZIP_DOS_EPOCH })))
       .rejects.toThrow('未声明文件：extra.txt');
 
     delete entries['extra.txt'];
     entries['styles/'] = new Uint8Array();
-    await expect(unpackWebPackageZip(zipSync(entries, { level: 6, mtime })))
+    await expect(unpackWebPackageZip(zipSync(entries, { level: 6, mtime: ZIP_DOS_EPOCH })))
       .resolves.toMatchObject({ ref: base.ref });
   });
 
   it('rejects ZIP archives missing payload files or a valid manifest', async () => {
     const { unzipSync, zipSync } = await import('fflate');
     const base = await resolveWebPackage(ref);
-    const mtime = new Date('1980-01-01T00:00:00.000Z');
     const entries = unzipSync(await packWebPackageZip(base));
     const missingPath = base.manifest.files[0]!.path;
     const missingBytes = base.readFile(missingPath)!;
     delete entries[missingPath];
-    await expect(unpackWebPackageZip(zipSync(entries, { level: 6, mtime })))
+    await expect(unpackWebPackageZip(zipSync(entries, { level: 6, mtime: ZIP_DOS_EPOCH })))
       .rejects.toMatchObject({ code: 'missing-file' });
     entries[missingPath] = new Uint8Array(missingBytes);
     // A root-layout archive without a manifest is discovered from its contents
     // rather than rejected; only a malformed manifest is a hard failure.
     delete entries['web-package.json'];
-    await expect(unpackWebPackageZip(zipSync(entries, { level: 6, mtime })))
+    await expect(unpackWebPackageZip(zipSync(entries, { level: 6, mtime: ZIP_DOS_EPOCH })))
       .resolves.toMatchObject({ manifest: { entry: 'index.html' } });
     entries['web-package.json'] = new TextEncoder().encode('{');
-    await expect(unpackWebPackageZip(zipSync(entries, { level: 6, mtime }))).rejects.toThrow('合法 JSON');
+    await expect(unpackWebPackageZip(zipSync(entries, { level: 6, mtime: ZIP_DOS_EPOCH }))).rejects.toThrow('合法 JSON');
   });
 
   it('exposes discoverable builtin presets only for pinned refs', () => {

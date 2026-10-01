@@ -64,6 +64,11 @@
       "types": "./src/web-package.ts",
       "import": "./src/web-package.ts",
       "default": "./src/web-package.ts"
+    },
+    "./zip": {
+      "types": "./src/zip.ts",
+      "import": "./src/zip.ts",
+      "default": "./src/zip.ts"
     }
   },
   "scripts": {
