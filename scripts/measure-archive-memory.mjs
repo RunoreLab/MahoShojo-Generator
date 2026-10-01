@@ -5,6 +5,10 @@
  * 它在合成库上跑真实的 `packLocalLibraryArchive`，记录输入字节数、输出归档字节数，以及打包
  * 进程的常驻内存峰值。
  *
+ * 测的是**打包输入**上限（`MAX_LOCAL_LIBRARY_ARCHIVE_INPUT_BYTES`）。最终归档文件长度是另一个
+ * 上限：ZIP 有 local header、central directory 与 EOCD 开销，两者不相等。本脚本同时打印两者，
+ * 使下一次改档时能看到差额有多大。
+ *
  * 用法：
  *   node --experimental-strip-types scripts/measure-archive-memory.mjs
  *   node --experimental-strip-types scripts/measure-archive-memory.mjs 64 8   # 64 MiB × 8 个包
@@ -232,7 +236,7 @@ const runChild = async (config) => {
       archiveBytes: packed.bytes.byteLength,
       elapsedMs,
       entryCount: packed.entryCount,
-      capBytes: packer.MAX_LOCAL_LIBRARY_ARCHIVE_BYTES,
+      capBytes: packer.MAX_LOCAL_LIBRARY_ARCHIVE_INPUT_BYTES,
     })}\n`);
   } finally {
     await cleanup();
@@ -254,7 +258,7 @@ const runParent = async (custom) => {
     : LADDER;
 
   const { module: packerProbe } = await loadPacker();
-  await packerProbe.MAX_LOCAL_LIBRARY_ARCHIVE_BYTES;
+  await packerProbe.MAX_LOCAL_LIBRARY_ARCHIVE_INPUT_BYTES;
   console.log(`# node ${process.version}  fflate=${requireLibrary('fflate/package.json').version}`);
   console.log('# 每个档位跑在独立子进程里；峰值取 OS 维护的 maxRSS 高水位（同步峰值也逃不掉）\n');
   console.log(
@@ -299,6 +303,12 @@ const runParent = async (custom) => {
   console.log(`native 写文件时另持有一份归档字节，渲染层与 native 合计 ≈ `
     + `${Math.round(toMiB(ratio * capBytes + capBytes))} MiB。`);
   console.log('外层 ZIP 里 Web 包为 store，压缩比≈1 是预期结果，不是缺陷。');
+  // 输入预算不等于最终归档文件大小：ZIP 有 local header、central directory 与 EOCD 开销。
+  // 这个差额决定了输出上限与输入上限之间必须留多少余量，因此每次改档都把它打出来。
+  const overheadRatio = worst.archiveBytes / worst.inputBytes;
+  console.log(`归档输出/输入 = ${overheadRatio.toFixed(4)}×（ZIP 容器开销）；`
+    + `按此比例，${Math.round(toMiB(capBytes))} MiB 输入上限对应的输出归档 ≈ `
+    + `${Math.round(toMiB(overheadRatio * capBytes))} MiB。`);
   console.log('下一步必须在真机 WebView 里复核渲染层绝对值，再决定是否需要流式组装。');
 };
 

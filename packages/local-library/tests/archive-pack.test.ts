@@ -15,7 +15,7 @@ import {
 import {
   LOCAL_LIBRARY_ARCHIVE_TOO_LARGE_CODE,
   LocalLibraryArchiveTooLargeError,
-  MAX_LOCAL_LIBRARY_ARCHIVE_BYTES,
+  MAX_LOCAL_LIBRARY_ARCHIVE_INPUT_BYTES,
   packLocalLibraryArchive,
 } from '@mahoshojo/local-library/archive-pack';
 
@@ -293,9 +293,12 @@ describe('packLocalLibraryArchive', () => {
     await expect(packLocalLibraryArchive(tampered, readFrom(entries))).rejects.toThrow();
   });
 
-  it('defaults to the documented archive cap', async () => {
+  it('defaults to the documented archive input cap', async () => {
     // 上限是 DESK-070 的可诊断承诺；它由实测推导，改动需重跑实测脚本。
-    expect(MAX_LOCAL_LIBRARY_ARCHIVE_BYTES).toBe(256 * 1024 * 1024);
-    expect(MAX_LOCAL_LIBRARY_ARCHIVE_BYTES).toBeGreaterThan(64 * 1024 * 1024);
+    //
+    // 断言的是**输入**上限：最终归档文件长度另有一条断言（D2.3b2 落地），因为 ZIP 的
+    // local header / central directory / EOCD 开销使两者不相等。
+    expect(MAX_LOCAL_LIBRARY_ARCHIVE_INPUT_BYTES).toBe(256 * 1024 * 1024);
+    expect(MAX_LOCAL_LIBRARY_ARCHIVE_INPUT_BYTES).toBeGreaterThan(64 * 1024 * 1024);
   });
 });

@@ -57,7 +57,17 @@ const ZIP_MTIME = ZIP_DOS_EPOCH;
 const RECORD_DEFLATE_LEVEL = 6;
 
 /**
- * 归档级字节上限。
+ * **打包输入**字节上限：manifest 字节 + 全部未压缩载荷的声明长度之和，读取后再核对累计。
+ *
+ * 名字里的"输入"是刻意的（`DESK-070`）。此前它叫 `MAX_LOCAL_LIBRARY_ARCHIVE_BYTES`——一个
+ * 名字覆盖三件不同的事，而它们的上限来源与失败后果都不同：
+ *
+ * - 本常量：打包输入预算，由内存实测推导；
+ * - 最终归档文件长度：`zipSync` 之后**另有**一次断言，ZIP 有 local header、central directory
+ *   与 EOCD 开销，条目多时输入预算不等于输出文件大小；
+ * - 单次 raw IPC 块大小（仅 Desktop）。
+ *
+ * 三者 `MUST NOT` 互相充当。前者已实现，后两者是 D2.3b2 的工作。
  *
  * 与 `MAX_BLOB_BYTES`（单个 blob 的 64 MiB）**无关**：一个含几十个 Web 包的归档轻松超过它，而每个
  * 包都远小于 64 MiB（`DESK-070`）。
@@ -78,7 +88,7 @@ const RECORD_DEFLATE_LEVEL = 6;
  * 峰值降到 O(块大小)，上限即可由产品需要决定而不再受内存约束。改这个常量 **MUST** 重跑实测脚本
  * 并把新数字写进提交说明，不允许凭感觉调整。
  */
-export const MAX_LOCAL_LIBRARY_ARCHIVE_BYTES = 256 * 1024 * 1024;
+export const MAX_LOCAL_LIBRARY_ARCHIVE_INPUT_BYTES = 256 * 1024 * 1024;
 
 export const LOCAL_LIBRARY_ARCHIVE_TOO_LARGE_CODE = 'archive-too-large' as const;
 
@@ -91,7 +101,7 @@ export const LOCAL_LIBRARY_ARCHIVE_TOO_LARGE_CODE = 'archive-too-large' as const
 export type LocalLibraryArchiveReader = (_path: string) => Promise<Uint8Array>;
 
 export interface PackLocalLibraryArchiveOptions {
-  /** 覆盖默认上限。**只供测量与测试使用**；生产路径走 `MAX_LOCAL_LIBRARY_ARCHIVE_BYTES`。 */
+  /** 覆盖默认上限。**只供测量与测试使用**；生产路径走 `MAX_LOCAL_LIBRARY_ARCHIVE_INPUT_BYTES`。 */
   readonly maxTotalBytes?: number;
 }
 
@@ -144,7 +154,7 @@ export const packLocalLibraryArchive = async (
   read: LocalLibraryArchiveReader,
   options: PackLocalLibraryArchiveOptions = {},
 ): Promise<PackedLocalLibraryArchive> => {
-  const maxTotalBytes = options.maxTotalBytes ?? MAX_LOCAL_LIBRARY_ARCHIVE_BYTES;
+  const maxTotalBytes = options.maxTotalBytes ?? MAX_LOCAL_LIBRARY_ARCHIVE_INPUT_BYTES;
   const manifest = withCanonicalOrder(LocalLibraryArchiveManifestV2Schema.parse(manifestInput));
   assertArchivePathsAgree(manifest);
   const manifestBytes = new TextEncoder().encode(JSON.stringify(manifest, null, 2));
