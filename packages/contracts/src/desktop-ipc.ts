@@ -182,3 +182,139 @@ export const DesktopStoreErrorSchema = z
   })
   .strict();
 export type DesktopStoreError = z.infer<typeof DesktopStoreErrorSchema>;
+
+/**
+ * blob 存储的公开投影。与 `DesktopStoreError` **同一形状**，使渲染层只需要一个错误解析器。
+ *
+ * `blob-corrupt` 与 `blob-digest-mismatch` 分开是必要的：前者是本机存储损坏（可能需要提示
+ * 用户做完整性检查），后者是调用方交来的字节与它声称的地址不符（是调用方的 bug）。
+ */
+export const DesktopBlobErrorCodeSchema = z.enum([
+  'blob-unavailable',
+  'blob-digest-mismatch',
+  'blob-corrupt',
+  'blob-too-large',
+  'blob-not-found',
+  'blob-failure',
+]);
+export type DesktopBlobErrorCode = z.infer<typeof DesktopBlobErrorCodeSchema>;
+
+export const DesktopBlobErrorSchema = z
+  .object({
+    code: DesktopBlobErrorCodeSchema,
+    message: z.string().min(1).max(512),
+  })
+  .strict();
+export type DesktopBlobError = z.infer<typeof DesktopBlobErrorSchema>;
+
+/** 本地库错误：记录存储与 blob 存储共用同一个投影形状。 */
+export const DesktopLocalLibraryErrorSchema = z
+  .object({
+    code: z.union([DesktopStoreErrorCodeSchema, DesktopBlobErrorCodeSchema]),
+    message: z.string().min(1).max(512),
+  })
+  .strict();
+export type DesktopLocalLibraryError = z.infer<typeof DesktopLocalLibraryErrorSchema>;
+
+export const MAX_DESKTOP_LOCAL_PACKAGE_ARCHIVE_BYTES = 64 * 1024 * 1024;
+
+/**
+ * base64 传输的二进制载荷。
+ *
+ * 记录原始长度并在解码后核对：截断的 base64 若被静默接受，会变成一个"看起来完整"的短 ZIP，
+ * 而它的失败点会落在解包器里，离真正的原因很远。
+ */
+/**
+ * 承载字节的 base64 信封。
+ *
+ * `b64` 允许为空串：空字节序列在传输层是可表示的，而"一个空 archive 不是合法 ZIP"属于
+ * ZIP 校验的职责，不该由传输信封顺带断言。反过来，`b64` 与 `len` 的一致性**无法**在这里
+ * 断言（那需要先解码），因此由两端在解码后核对 `len`——静默接受截断载荷会产出一个看起来
+ * 完整的短包，把失败点推到解包器里，离真正原因很远。
+ */
+export const DesktopBase64BytesSchema = z
+  .object({
+    b64: z
+      .string()
+      .max(Math.ceil((MAX_DESKTOP_LOCAL_PACKAGE_ARCHIVE_BYTES * 4) / 3) + 8),
+    len: z.number().int().nonnegative().max(MAX_DESKTOP_LOCAL_PACKAGE_ARCHIVE_BYTES),
+  })
+  .strict();
+export type DesktopBase64Bytes = z.infer<typeof DesktopBase64BytesSchema>;
+
+/** blob 写入的三种结果。`repaired` MUST 被透传到 UI。 */
+export const DesktopBlobWriteOutcomeSchema = z.enum(['stored', 'alreadyPresent', 'repaired']);
+export type DesktopBlobWriteOutcome = z.infer<typeof DesktopBlobWriteOutcomeSchema>;
+
+/** Web 包记录的索引列。与本地卡同构：native 从 document 复核，不采信这些值。 */
+export const DesktopWebPackageIndexSchema = z
+  .object({
+    id: DesktopLocalCardIdSchema,
+    updatedAt: DesktopLocalCardTimestampSchema,
+    deletedAt: DesktopLocalCardTimestampSchema.optional(),
+    /** manifest 的内容摘要；必须等于 document 里的 `contentDigest`。 */
+    contentDigest: DesktopLocalCardDigestSchema,
+  })
+  .strict();
+export type DesktopWebPackageIndex = z.infer<typeof DesktopWebPackageIndexSchema>;
+
+/**
+ * 保存一个本地 Web 包。
+ *
+ * archive 的地址由 native **自行从字节算出**，调用方无处声明地址——因此不存在"声明与内容
+ * 不符"这种输入：同一份字节永远落在同一个地址。
+ */
+export const DesktopSaveWebPackageRequestSchema = z
+  .object({
+    document: utf8ByteLimitedStringSchema(MAX_DESKTOP_LOCAL_CARD_DOCUMENT_BYTES),
+    index: DesktopWebPackageIndexSchema,
+    archive: DesktopBase64BytesSchema,
+    /** 渲染层时钟。软删/恢复必须单调推进，native 不引入时间库。 */
+    now: DesktopLocalCardTimestampSchema,
+  })
+  .strict();
+export type DesktopSaveWebPackageRequest = z.infer<typeof DesktopSaveWebPackageRequestSchema>;
+
+export const DesktopSaveWebPackageResponseSchema = z
+  .object({
+    id: DesktopLocalCardIdSchema,
+    blobOutcome: DesktopBlobWriteOutcomeSchema,
+  })
+  .strict();
+export type DesktopSaveWebPackageResponse = z.infer<typeof DesktopSaveWebPackageResponseSchema>;
+
+/**
+ * 删除/恢复一个本地 Web 包。
+ *
+ * 与保存请求分开，是因为**状态转移不产生新字节**。若复用保存请求，"恢复一个包"也得先把整个
+ * ZIP 读回内存才能调一次命令——既慢，又在字节已缺失时把恢复变成不可能。
+ *
+ * 时间戳不作为独立参数：渲染层把算好的 `updatedAt`/`deletedAt` 写进 document，native 从
+ * document 复核单调性。这样索引列与 document 不可能出现两个时间来源。
+ */
+export const DesktopWebPackageTransitionRequestSchema = z
+  .object({
+    document: utf8ByteLimitedStringSchema(MAX_DESKTOP_LOCAL_CARD_DOCUMENT_BYTES),
+    index: DesktopWebPackageIndexSchema,
+  })
+  .strict();
+export type DesktopWebPackageTransitionRequest = z.infer<
+  typeof DesktopWebPackageTransitionRequestSchema
+>;
+
+export const DesktopListWebPackagesRequestSchema = z
+  .object({
+    includeDeleted: z.boolean().default(false),
+    limit: z.number().int().min(1).max(MAX_DESKTOP_LOCAL_CARD_PAGE_SIZE),
+    cursor: DesktopLocalCardCursorSchema.optional(),
+  })
+  .strict();
+export type DesktopListWebPackagesRequest = z.infer<typeof DesktopListWebPackagesRequestSchema>;
+
+export const DesktopListWebPackagesResponseSchema = z
+  .object({
+    documents: z.array(utf8ByteLimitedStringSchema(MAX_DESKTOP_LOCAL_CARD_DOCUMENT_BYTES)),
+    nextCursor: DesktopLocalCardCursorSchema.optional(),
+  })
+  .strict();
+export type DesktopListWebPackagesResponse = z.infer<typeof DesktopListWebPackagesResponseSchema>;

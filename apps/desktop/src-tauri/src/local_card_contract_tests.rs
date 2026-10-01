@@ -21,11 +21,37 @@ struct Fixture {
     limits: Limits,
     error_codes: Vec<String>,
     card_types: Vec<String>,
+    blob_error_codes: Vec<String>,
+    blob_write_outcomes: Vec<String>,
+    max_package_archive_bytes: usize,
+    web_package_index: WebPackageIndexFixture,
+    blob_archive: BlobArchiveFixture,
     valid_index: ValidIndex,
     tombstoned_index: TombstonedIndex,
     cursor: Cursor,
     timestamp_cases: Vec<TimestampCase>,
     cases: Vec<FixtureCase>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WebPackageIndexFixture {
+    id: String,
+    updated_at: String,
+    content_digest: String,
+    #[allow(dead_code)]
+    #[serde(default)]
+    deleted_at: Option<String>,
+}
+
+/// base64 传输信封。
+///
+/// `$case` 是给人看的说明，serde 直接忽略即可。
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BlobArchiveFixture {
+    b64: String,
+    len: usize,
 }
 
 /// 带 UTC offset 的时间戳用例。
@@ -293,4 +319,108 @@ fn every_fixture_case_behaves_as_declared() {
             );
         }
     }
+}
+
+/// 归档大小上限与 TypeScript 侧常量相等。
+#[test]
+fn blob_limits_match_the_typescript_authority() {
+    let fixture = parse();
+    assert_eq!(
+        crate::blob::MAX_BLOB_BYTES,
+        fixture.max_package_archive_bytes
+    );
+}
+
+/// blob 错误码与写入结果的集合、顺序都与 TypeScript 侧一致。
+///
+/// 顺序也要比：`zod` 的 `z.enum` 与这里的 `code()` 逐个对应，顺序变了说明有一侧加了新码而
+/// 另一侧没加。
+#[test]
+fn blob_error_codes_and_outcomes_match_the_typescript_authority_in_a_stable_order() {
+    let fixture = parse();
+    let actual_codes: Vec<&str> = [
+        crate::blob::BlobError::Unavailable,
+        crate::blob::BlobError::DigestMismatch,
+        crate::blob::BlobError::Corrupt {
+            digest: String::new(),
+        },
+        crate::blob::BlobError::TooLarge,
+        crate::blob::BlobError::NotFound,
+        crate::blob::BlobError::Failure,
+    ]
+    .iter()
+    .map(|error| error.code())
+    .collect();
+    assert_eq!(actual_codes, fixture.blob_error_codes);
+
+    // 写入结果的线上取值由 serde 的 camelCase 决定。这里刻意走序列化而不是另写一个
+    // `code()`——那会制造第二处真值来源，而两处迟早会对不上。
+    let actual_outcomes: Vec<serde_json::Value> = [
+        crate::blob::BlobWriteOutcome::Stored,
+        crate::blob::BlobWriteOutcome::AlreadyPresent,
+        crate::blob::BlobWriteOutcome::Repaired,
+    ]
+    .iter()
+    .map(|outcome| serde_json::to_value(outcome).expect("写入结果必须可序列化"))
+    .collect();
+    let expected_outcomes: Vec<serde_json::Value> = fixture
+        .blob_write_outcomes
+        .iter()
+        .map(|code| serde_json::Value::String(code.clone()))
+        .collect();
+    assert_eq!(actual_outcomes, expected_outcomes);
+}
+
+/// fixture 里的 base64 载荷能被**我们自己的**解码器还原成声明的长度与 ZIP 魔数。
+///
+/// 这是两侧最危险的一处耦合：载荷由 TypeScript 编码、由 native 解码。若只比较字符串，两侧
+/// 会一起通过一个解不开的 fixture——曾经就出现过声明 4 字节而实际解出 5 字节的情况。
+/// 这里让 native 用自己的解码器跑一遍，并把长度与魔数都钉住。
+#[test]
+fn the_shared_base64_payload_decodes_through_our_own_decoder() {
+    let fixture = parse();
+    let decoded = crate::base64_bytes::decode(&fixture.blob_archive.b64)
+        .expect("fixture 的 base64 载荷必须能被 native 解码");
+    assert_eq!(
+        decoded.len(),
+        fixture.blob_archive.len,
+        "解码长度必须与声明一致，否则失败点会被推到解包器里"
+    );
+    assert_eq!(&decoded[..4], b"PK\x03\x04", "载荷的语义是一个 ZIP");
+}
+
+/// fixture 里的 Web 包索引能通过我们自己的类型，且**线上字段名**与契约一致。
+///
+/// 只做 Rust 侧的往返是不够的：字段一旦改名（例如 `ref_digest` 被 camelCase 成 `refDigest`），
+/// Rust 自己的往返照样通过，而渲染层发来的 `contentDigest` 会静默对不上——IPC 在用户导入
+/// Web 包时才失败。因此这里断言完整的字段名集合。
+#[test]
+fn a_fixtures_web_package_index_survives_the_round_trip_through_our_own_type() {
+    let fixture = parse();
+    let index = crate::web_package::WebPackageIndex {
+        id: fixture.web_package_index.id.clone(),
+        updated_at: fixture.web_package_index.updated_at.clone(),
+        deleted_at: fixture.web_package_index.deleted_at.clone(),
+        content_digest: fixture.web_package_index.content_digest.clone(),
+    };
+    let wire = serde_json::to_value(&index).expect("索引必须可序列化");
+    assert_eq!(wire["id"], fixture.web_package_index.id);
+    assert_eq!(
+        wire["contentDigest"],
+        fixture.web_package_index.content_digest
+    );
+    // 字段名集合必须恰好是契约里的那三个加一个可选 tombstone。
+    let mut keys: Vec<&str> = wire
+        .as_object()
+        .expect("索引必须是对象")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    keys.sort_unstable();
+    assert_eq!(keys, vec!["contentDigest", "deletedAt", "id", "updatedAt"]);
+    assert_eq!(
+        serde_json::from_value::<crate::web_package::WebPackageIndex>(wire)
+            .expect("索引必须可反序列化"),
+        index
+    );
 }

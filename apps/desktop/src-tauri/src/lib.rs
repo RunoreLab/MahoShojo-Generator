@@ -14,6 +14,7 @@ mod ai;
 mod ai_contract_tests;
 #[cfg(test)]
 mod ai_e2e_tests;
+mod blob;
 mod local_card;
 #[cfg(test)]
 mod local_card_contract_tests;
@@ -21,6 +22,7 @@ mod provider_profile;
 mod secret;
 mod sse;
 mod store;
+mod web_package;
 
 use provider_profile::DirectProviderExecutionProfile;
 use secret::{default_secret_store, SharedSecretStore};
@@ -312,6 +314,238 @@ fn purge_local_card(
     cards.purge(&id)
 }
 
+/// Web 包 IPC 用的 DTO。
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SaveWebPackageRequest {
+    /// 已通过 `LocalWebPackageRecordV1Schema` 校验的完整记录，序列化为 JSON 文本。
+    document: String,
+    index: web_package::WebPackageIndex,
+    /// 原始 ZIP 字节的 base64。与文档分开传：文档是 JSON 文本，载荷是二进制，混在一个
+    /// 字段里会让两侧都要为对方的数据形状做让步。
+    #[serde(with = "base64_bytes")]
+    archive: Vec<u8>,
+    /// 渲染层时钟。软删/恢复必须单调推进，native 不引入时间库。
+    now: String,
+}
+
+/// 删除/恢复用的请求体。
+///
+/// 与保存请求分开是因为状态转移**不产生新字节**：若复用保存请求，恢复一个包也得先把整个 ZIP
+/// 读回内存才能调一次命令——既慢，又在字节已缺失时把恢复变成不可能。
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WebPackageTransitionRequest {
+    document: String,
+    index: web_package::WebPackageIndex,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SaveWebPackageResponse {
+    id: String,
+    /// `stored` / `alreadyPresent` / `repaired`。`repaired` **MUST** 被透传到 UI：
+    /// 存储损坏被静默吞掉的话，用户永远不会知道自己这份库已经不健康。
+    blob_outcome: blob::BlobWriteOutcome,
+}
+
+/// base64 传输二进制。
+///
+/// `DESK-053` 要求 IPC 接受字节流或受控句柄、**MUST NOT** 接受 renderer 提供的任意目标路径。
+/// 这里用 base64 而不是自定义协议：Tauri 2 有原生 raw IPC（`InvokeBody::Raw` /
+/// `tauri::ipc::Response`），但它要求请求体整体是 raw 形式，无法与结构化参数并存；而本阶段
+/// 的载荷是单个 Web 包 ZIP，base64 的开销可以接受。等 D2.3 要搬整个 archive 时再切 raw IPC。
+mod base64_bytes {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+    pub fn deserialize<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Vec<u8>, D::Error> {
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Raw {
+            b64: String,
+            len: usize,
+        }
+        use serde::Deserialize as _;
+        let raw = Raw::deserialize(deserializer)?;
+        let bytes = decode(&raw.b64)
+            .ok_or_else(|| serde::de::Error::custom("archive payload is not valid base64"))?;
+        if bytes.len() != raw.len {
+            return Err(serde::de::Error::custom("base64 payload length mismatch"));
+        }
+        Ok(bytes)
+    }
+
+    /// 对外暴露编码器：读路径必须复用它，否则两份实现会漂移。
+    pub fn encode(bytes: &[u8]) -> String {
+        let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+        for chunk in bytes.chunks(3) {
+            let b = [
+                chunk[0],
+                *chunk.get(1).unwrap_or(&0),
+                *chunk.get(2).unwrap_or(&0),
+            ];
+            let packed = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
+            out.push(ALPHABET[(packed >> 18) as usize & 63] as char);
+            out.push(ALPHABET[(packed >> 12) as usize & 63] as char);
+            out.push(if chunk.len() > 1 {
+                ALPHABET[(packed >> 6) as usize & 63] as char
+            } else {
+                '='
+            });
+            out.push(if chunk.len() > 2 {
+                ALPHABET[packed as usize & 63] as char
+            } else {
+                '='
+            });
+        }
+        out
+    }
+
+    pub fn decode(text: &str) -> Option<Vec<u8>> {
+        let mut out = Vec::with_capacity(text.len() / 4 * 3);
+        let mut accumulator: u32 = 0;
+        let mut bits = 0_u32;
+        for byte in text.bytes() {
+            if byte == b'=' {
+                break;
+            }
+            let value = ALPHABET.iter().position(|candidate| *candidate == byte)? as u32;
+            accumulator = (accumulator << 6) | value;
+            bits += 6;
+            if bits >= 8 {
+                bits -= 8;
+                out.push((accumulator >> bits) as u8);
+            }
+        }
+        Some(out)
+    }
+}
+
+/// 保存一条本地 Web 包及其 ZIP 字节。
+///
+/// blob 先落盘，再在一个事务里写包记录与**真实外键**引用行（`DESK-055`）。因此崩溃最多留下
+/// 孤儿 blob，而不会出现"引用行存在但包记录不存在"的中间态。
+#[tauri::command]
+fn save_web_package(
+    packages: State<'_, web_package::WebPackageStore>,
+    blobs: State<'_, blob::BlobStore>,
+    request: SaveWebPackageRequest,
+) -> Result<SaveWebPackageResponse, web_package::SaveWebPackageError> {
+    let outcome = packages.save(
+        blobs.inner(),
+        &request.document,
+        &request.index,
+        &request.archive,
+        &request.now,
+    )?;
+    Ok(SaveWebPackageResponse {
+        id: outcome.id,
+        blob_outcome: outcome.blob,
+    })
+}
+
+#[tauri::command]
+fn get_web_package(
+    packages: State<'_, web_package::WebPackageStore>,
+    id: String,
+) -> Result<Option<String>, store::StoreError> {
+    packages.get(&id)
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ListWebPackagesResponse {
+    documents: Vec<String>,
+    next_cursor: Option<LocalCardCursorDto>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ListWebPackagesRequest {
+    #[serde(default)]
+    include_deleted: bool,
+    limit: i64,
+    #[serde(default)]
+    cursor: Option<LocalCardCursorDto>,
+}
+
+#[tauri::command]
+fn list_web_packages(
+    packages: State<'_, web_package::WebPackageStore>,
+    request: ListWebPackagesRequest,
+) -> Result<ListWebPackagesResponse, store::StoreError> {
+    let page = packages.list(&web_package::WebPackageQuery {
+        include_deleted: request.include_deleted,
+        limit: request.limit,
+        cursor: request.cursor.map(|cursor| web_package::WebPackageCursor {
+            updated_at_sort: cursor.updated_at_sort,
+            updated_at: cursor.updated_at,
+            id: cursor.id,
+        }),
+    })?;
+    Ok(ListWebPackagesResponse {
+        documents: page.documents,
+        next_cursor: page.next_cursor.map(|cursor| LocalCardCursorDto {
+            updated_at_sort: cursor.updated_at_sort,
+            updated_at: cursor.updated_at,
+            id: cursor.id,
+        }),
+    })
+}
+
+/// 软删一条本地 Web 包。**不动引用行**，因此 restore 能真正恢复可用状态。
+///
+/// 复用删除/恢复专用的请求体（与保存请求分开）：状态转移不产生新字节，因此这里既不带
+/// `archive` 也不带 `now`——时间戳已由渲染层写进 document，native 从 document 复核单调性。
+#[tauri::command]
+fn delete_web_package(
+    packages: State<'_, web_package::WebPackageStore>,
+    request: WebPackageTransitionRequest,
+) -> Result<(), store::StoreError> {
+    packages.delete(&request.document, &request.index)
+}
+
+/// 恢复一条已软删的本地 Web 包。
+#[tauri::command]
+fn restore_web_package(
+    packages: State<'_, web_package::WebPackageStore>,
+    request: WebPackageTransitionRequest,
+) -> Result<(), store::StoreError> {
+    packages.restore(&request.document, &request.index)
+}
+
+/// 彻底删除一条本地 Web 包与其 blob 引用。幂等。
+#[tauri::command]
+fn purge_web_package(
+    packages: State<'_, web_package::WebPackageStore>,
+    id: String,
+) -> Result<(), store::StoreError> {
+    packages.purge(&id)
+}
+
+/// 读取一个本地 Web 包的原始 ZIP 字节。
+///
+/// 返回值是 base64 文本而非原始字节：与 `save_web_package` 的入参保持对称，且让渲染层只需
+/// 一个解码路径。字节本身来自内容寻址存储并已校验摘要。
+#[tauri::command]
+fn read_web_package_archive(
+    packages: State<'_, web_package::WebPackageStore>,
+    blobs: State<'_, blob::BlobStore>,
+    id: String,
+) -> Result<String, web_package::SaveWebPackageError> {
+    let digest = packages
+        .archive_digest(&id)
+        .map_err(web_package::SaveWebPackageError::Store)?;
+    let digest = digest.ok_or(web_package::SaveWebPackageError::Blob(
+        blob::BlobError::NotFound,
+    ))?;
+    let bytes = blobs.read(&digest)?;
+    // 复用与入参同一个编码器：两份 base64 实现必然漂移，而漂移表现为"存进去读不出来"。
+    Ok(base64_bytes::encode(&bytes))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -324,15 +558,31 @@ pub fn run() {
                 format!("cannot resolve the application data directory: {error}")
             })?;
             let paths = store::LocalStorePaths::under(&data_root);
-            // 两个存储访问**同一个** SQLite 文件：D1 的 Profile 与 D2.0 的本地卡同属一台
-            // 设备上的用户资产。分开存放会让备份、迁移与"重开应用"各多一套路径。
+            // 三个访问者共享**同一个** SQLite 文件与同一份迁移阶梯：Profile、本地卡、Web 包
+            // 与 blob 同属一台设备上的用户资产。分开存放会让备份、迁移与"重开应用"各多一套
+            // 路径，也更容易出现"某个库忘了迁移"这类按类型分叉的隐性差异。
             let store = LocalStore::open(&paths)
                 .map_err(|error| format!("cannot open the local store: {}", error.message()))?;
             let cards = local_card::LocalCardStore::open(&paths).map_err(|error| {
                 format!("cannot open the local card store: {}", error.message())
             })?;
+            let packages = web_package::WebPackageStore::open(&paths).map_err(|error| {
+                format!("cannot open the web package store: {}", error.message())
+            })?;
+
+            // blob 的 metadata 与上面三者同库，但它的**文件**区是独立的目录，因此需要自己的
+            // 连接句柄（同一文件、同一个 Mutex 家族，各自串行化自己的访问）。
+            let blob_connection = rusqlite::Connection::open(paths.database())
+                .map_err(|error| format!("cannot open the blob store connection: {error}"))?;
+            store::configure_and_migrate(&blob_connection)
+                .map_err(|error| format!("cannot migrate the blob store: {}", error.message()))?;
+            let blobs = blob::open(blob::BlobPaths::under(&data_root), blob_connection)
+                .map_err(|error| format!("cannot open the blob store: {}", error.message()))?;
+
             app.manage(store);
             app.manage(cards);
+            app.manage(packages);
+            app.manage(blobs);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -352,7 +602,14 @@ pub fn run() {
             list_local_cards,
             delete_local_card,
             restore_local_card,
-            purge_local_card
+            purge_local_card,
+            save_web_package,
+            get_web_package,
+            list_web_packages,
+            delete_web_package,
+            restore_web_package,
+            purge_web_package,
+            read_web_package_archive
         ])
         .run(tauri::generate_context!())
         .expect("error while running MahoShojo Generator desktop app");
@@ -360,7 +617,49 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::DesktopRuntimeInfo;
+    use super::{base64_bytes, DesktopRuntimeInfo};
+
+    /// 手写 base64 MUST 与标准实现逐字节一致。
+    ///
+    /// 这是自实现编码器最危险的地方：它与渲染层的解码器只有一次调用相隔，漂移的表现是
+    /// "存进去读不出来"，而且要到用户导入 Web 包时才暴露。逐长度覆盖 0/1/2/3 字节的尾部
+    /// 情形，期望值取自 Node 的 `Buffer.toString('base64')`。
+    #[test]
+    fn base64_matches_the_standard_encoding() {
+        for (bytes, expected) in [
+            (&b""[..], ""),
+            (&b"P"[..], "UA=="),
+            (&b"PK"[..], "UEs="),
+            (&b"PK\x03"[..], "UEsD"),
+            (&b"PK\x03\x04"[..], "UEsDBA=="),
+            (&b"PK\x03\x04z"[..], "UEsDBHo="),
+            (&b"PK\x03\x04zh"[..], "UEsDBHpo"),
+        ] {
+            assert_eq!(base64_bytes::encode(bytes), expected, "len={}", bytes.len());
+            assert_eq!(
+                base64_bytes::decode(expected).as_deref(),
+                Some(bytes),
+                "{expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn base64_round_trips_every_byte_value() {
+        let all: Vec<u8> = (0..=255_u8).collect();
+        let encoded = base64_bytes::encode(&all);
+        assert_eq!(
+            base64_bytes::decode(&encoded).as_deref(),
+            Some(all.as_slice())
+        );
+    }
+
+    #[test]
+    fn base64_decode_rejects_characters_outside_the_alphabet() {
+        // 静默接受非法字符会产出"看起来能用"的错误字节。
+        assert_eq!(base64_bytes::decode("UEsD*Q=="), None);
+        assert_eq!(base64_bytes::decode("UEsD Q=="), None);
+    }
 
     #[test]
     fn runtime_info_serializes_as_camel_case_without_secrets() {

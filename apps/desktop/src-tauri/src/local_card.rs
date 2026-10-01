@@ -490,20 +490,9 @@ fn upsert_row(
     Ok(())
 }
 
-/// 把 RFC3339 时间戳解析成 UTC epoch 毫秒，作为 keyset 的**排序键**。
-///
-/// 为什么不直接按 `updated_at` 文本排序：契约允许任意 UTC offset（`datetime({ offset: true })`），
-/// 而字符串比较不是时间比较。`2026-09-30T12:00:00+14:00` 的文本大于
-/// `2026-09-30T01:00:00Z`，实际却是**更早**的时刻。照文本排会让 keyset 漏读、让
-/// "时间戳不得回退"的判定误判，并让未来带 offset 的 archive 导入顺序错乱。
-///
-/// 排序键由 native 自己从 document 的 `updatedAt` 解析，**不采信**调用方提供的值——
-/// 因此它不可能被伪造或与 document 分叉。
+/// 见 [crate::store::timestamp_sort_key]���排序键是存储层关注点，两种记录类型共用同一份实现。
 fn sort_key(updated_at: &str) -> Result<i64, StoreError> {
-    time::OffsetDateTime::parse(updated_at, &time::format_description::well_known::Rfc3339)
-        // 秒与毫秒分开取，避免 unix_timestamp_nanos 的 i128 中间值。
-        .map(|value| value.unix_timestamp() * 1_000 + i64::from(value.nanosecond() / 1_000_000))
-        .map_err(|_| StoreError::InvalidDocument)
+    crate::store::timestamp_sort_key(updated_at).map_err(|_| StoreError::InvalidDocument)
 }
 
 /// 仅测试可见的 `sort_key` 出口，让契约测试能直接断言"这个时间戳解析成哪个时刻"。

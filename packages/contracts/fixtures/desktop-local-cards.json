@@ -17,6 +17,26 @@
     "store-failure"
   ],
   "cardTypes": ["character", "scenario", "history", "questionnaire"],
+  "blobErrorCodes": [
+    "blob-unavailable",
+    "blob-digest-mismatch",
+    "blob-corrupt",
+    "blob-too-large",
+    "blob-not-found",
+    "blob-failure"
+  ],
+  "blobWriteOutcomes": ["stored", "alreadyPresent", "repaired"],
+  "maxPackageArchiveBytes": 67108864,
+  "webPackageIndex": {
+    "id": "wp_0123456789abcdef0123456789abcdef",
+    "updatedAt": "2026-09-30T12:00:00.000Z",
+    "contentDigest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+  },
+  "blobArchive": {
+    "$case": "一份最小 ZIP 的 base64 载荷；len 记录解码后长度，两侧都必须核对",
+    "b64": "UEsDBA==",
+    "len": 4
+  },
   "validIndex": {
     "id": "lc_0123456789abcdef0123456789abcdef",
     "cardType": "character",

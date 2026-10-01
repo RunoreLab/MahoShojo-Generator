@@ -18,6 +18,13 @@ import {
   DesktopListLocalCardsRequestSchema,
   DesktopSaveLocalCardRequestSchema,
   DesktopStoreErrorCodeSchema,
+  MAX_DESKTOP_LOCAL_PACKAGE_ARCHIVE_BYTES,
+  DesktopBase64BytesSchema,
+  DesktopBlobErrorCodeSchema,
+  DesktopBlobWriteOutcomeSchema,
+  DesktopSaveWebPackageRequestSchema,
+  DesktopWebPackageIndexSchema,
+  DesktopWebPackageTransitionRequestSchema,
 } from '../src/desktop-ipc';
 
 interface SecretRefFixture {
@@ -194,5 +201,101 @@ describe('Desktop 本地卡 IPC 契约', () => {
     expect(
       DesktopLocalCardCursorSchema.parse({ updatedAt: fixture.cursor.updatedAt, id: fixture.cursor.id }),
     ).toMatchObject({ updatedAtSort: 0 });
+  });
+});
+
+interface BlobFixture {
+  blobErrorCodes: string[];
+  blobWriteOutcomes: string[];
+  maxPackageArchiveBytes: number;
+  webPackageIndex: unknown;
+  blobArchive: { $case: string; b64: string; len: number };
+}
+
+/**
+ * blob 与 Web 包 fixture 同样由 Rust 在编译期 `include_str!` 读取。
+ *
+ * 这里刻意**不**只断言 `b64` 是字符串：那份载荷的语义是"它解出来必须是一个 ZIP"。
+ * 曾经出现过声明 4 字节却实际解出 5 字节的 fixture——两侧如果只比较字符串就会一起通过，
+ * 直到用户导入时才炸。因此这里断言解码后的魔数与长度。
+ */
+const readBlobFixture = (): BlobFixture =>
+  JSON.parse(
+    readFileSync(path.resolve(process.cwd(), 'fixtures', 'desktop-local-cards.json'), 'utf8'),
+  ) as BlobFixture;
+
+describe('Desktop blob 与 Web 包 IPC 契约', () => {
+  const fixture = readBlobFixture();
+
+  it('上限与 native 侧常量一致', () => {
+    expect(MAX_DESKTOP_LOCAL_PACKAGE_ARCHIVE_BYTES).toBe(fixture.maxPackageArchiveBytes);
+  });
+
+  it('blob 错误码与写入结果集合与 native 侧一致且顺序稳定', () => {
+    expect(DesktopBlobErrorCodeSchema.options).toEqual(fixture.blobErrorCodes);
+    expect(DesktopBlobWriteOutcomeSchema.options).toEqual(fixture.blobWriteOutcomes);
+  });
+
+  it('base64 载荷的声明长度与实际解码长度一致，且解出 ZIP 魔数', () => {
+    // 剔除 fixture 的说明字段：契约是 strict 的，它只是给人看的注释。
+    const { $case: _case, ...payload } = fixture.blobArchive;
+    expect(_case).toEqual(expect.any(String));
+
+    const parsed = DesktopBase64BytesSchema.parse(payload);
+    const bytes = Buffer.from(parsed.b64, 'base64');
+    // 长度对不上却照样通过的话，失败点会被推到解包器里，离真正原因很远。
+    expect(bytes.byteLength, 'base64 载荷长度必须与声明一致').toBe(parsed.len);
+    // 载荷的语义是 ZIP：本地文件头魔数 PK\x03\x04。
+    expect([...bytes.subarray(0, 4)]).toEqual([0x50, 0x4b, 0x03, 0x04]);
+  });
+
+  it('base64 信封接受空字节序列——"空 archive 非法"是 ZIP 校验的职责', () => {
+    // 传输信封顺带断言"非空"会让 toBase64Bytes(new Uint8Array([])) 产出自己的 schema 都拒绝的载荷。
+    expect(DesktopBase64BytesSchema.parse({ b64: '', len: 0 })).toEqual({ b64: '', len: 0 });
+  });
+
+  it('不接受未知字段与越界长度', () => {
+    expect(() => DesktopBase64BytesSchema.parse({ b64: 'UEsDBA==', len: 4, extra: 1 })).toThrow();
+    expect(() =>
+      DesktopBase64BytesSchema.parse({
+        b64: 'UEsDBA==',
+        len: MAX_DESKTOP_LOCAL_PACKAGE_ARCHIVE_BYTES + 1,
+      }),
+    ).toThrow();
+  });
+
+  it('接受 fixture 中的 Web 包索引与 tombstone 索引', () => {
+    expect(DesktopWebPackageIndexSchema.parse(fixture.webPackageIndex)).toEqual(fixture.webPackageIndex);
+    const tombstoned = {
+      ...(fixture.webPackageIndex as object),
+      deletedAt: '2026-09-30T13:00:00.000Z',
+    };
+    expect(DesktopWebPackageIndexSchema.parse(tombstoned)).toEqual(tombstoned);
+  });
+
+  it('保存 Web 包必须带上 archive，缺字节的请求在契约层就被拒', () => {
+    // 契约层缺字节会一路走到 native 才失败；这里拒掉可以让失败更早、更明确。
+    const base = {
+      document: '{}',
+      index: fixture.webPackageIndex,
+      now: '2026-09-30T12:00:00.000Z',
+    };
+    expect(() => DesktopSaveWebPackageRequestSchema.parse(base)).toThrow();
+    expect(() =>
+      DesktopSaveWebPackageRequestSchema.parse({ ...base, archive: fixture.blobArchive }),
+    ).toThrow();
+    const { $case: _case, ...archive } = fixture.blobArchive;
+    expect(_case).toEqual(expect.any(String));
+    const parsed = DesktopSaveWebPackageRequestSchema.parse({ ...base, archive });
+    expect(parsed.archive).toEqual(archive);
+  });
+
+  it('删除/恢复 Web 包的请求只需要完整 document 与索引列，不需要 archive', () => {
+    // 状态转移不产生新字节；要求 archive 会让"恢复一个包"也必须先把 ZIP 读回内存。
+    const request = DesktopWebPackageTransitionRequestSchema.parse({
+      document: '{}',
+      index: fixture.webPackageIndex,
+    });
+    expect(Object.keys(request).sort()).toEqual(['document', 'index']);
   });
 });

@@ -440,6 +440,13 @@ describe('desktop workspace app ownership', () => {
       'delete_local_card',
       'restore_local_card',
       'purge_local_card',
+      'save_web_package',
+      'get_web_package',
+      'list_web_packages',
+      'delete_web_package',
+      'restore_web_package',
+      'purge_web_package',
+      'read_web_package_archive',
     ]);
 
     // renderer 可用的 secret 能力只有写入与存在性；任何读取形态都会让

@@ -13,10 +13,10 @@ use rusqlite::{Connection, OpenFlags};
 
 /// 当前 schema 版本。SQLite 的 `user_version` 与 migration journal 必须与它一致。
 ///
-/// D1 引入 `provider_profile`（版本 1）；D2.0 在**同一个库**上增加本地卡
-/// （`local_card` 与其索引，版本 2）。刻意不新开数据库文件：Profile 与本地库同属一台
-/// 设备上的用户资产，分库会让备份、迁移与"重开应用"各自多一套路径。
-pub const SCHEMA_VERSION: i64 = 2;
+/// D1 引入 `provider_profile`（版本 1）；D2.0 在**同一个库**上增加本地卡（版本 2）；
+/// D2.1 增加内容寻址 blob 与 Web 包记录（版本 3、4）。刻意不新开数据库文件：Profile、
+/// 本地卡、Web 包与 blob 同属一台设备上的用户资产，分库会让备份、迁移与"重开应用"各自多一套路径。
+pub const SCHEMA_VERSION: i64 = 4;
 
 /// 单条文档的 UTF-8 字节上限。
 ///
@@ -121,14 +121,6 @@ pub fn applied_migrations(connection: &Connection) -> Result<Vec<i64>, StoreErro
 ///
 /// 迁移只向前。已应用的版本不会重复执行，因此重复打开同一个数据库是安全的。
 pub fn migrate(connection: &Connection) -> Result<(), StoreError> {
-    let current: i64 = connection
-        .query_row("PRAGMA user_version", [], |row| row.get(0))
-        .map_err(|_| StoreError::Unavailable)?;
-
-    if current > SCHEMA_VERSION {
-        return Err(StoreError::Unavailable);
-    }
-
     let steps: &[MigrationStep] = &[
         MigrationStep {
             version: 1,
@@ -137,6 +129,14 @@ pub fn migrate(connection: &Connection) -> Result<(), StoreError> {
         MigrationStep {
             version: 2,
             sql: crate::local_card::MIGRATION_2,
+        },
+        MigrationStep {
+            version: 3,
+            sql: crate::blob::MIGRATION_3,
+        },
+        MigrationStep {
+            version: 4,
+            sql: crate::web_package::MIGRATION_4,
         },
     ];
 
@@ -174,6 +174,26 @@ fn table_exists(connection: &Connection, name: &str) -> bool {
         )
         .map(|count| count > 0)
         .unwrap_or(false)
+}
+
+/// 把 RFC3339 时间戳解析成 UTC epoch 毫秒，作为 keyset 的**排序键**。
+///
+/// 为什么不直接按 `updated_at` 文本排序：契约允许任意 UTC offset
+/// （`datetime({ offset: true })`），而字符串比较不是时间比较。
+/// `2026-09-30T12:00:00+14:00` 的文本大于 `2026-09-30T01:00:00Z`，实际却是**更早**的时刻。
+/// 照文本排会让 keyset 漏读、让"时间戳不得回退"的判定误判，并让未来带 offset 的 archive
+/// 导入顺序错乱。
+///
+/// 排序键由 native 自己从 document 的 `updatedAt` 解析，**不采信**调用方提供的值——因此它
+/// 不可能被伪造或与 document 分叉。
+///
+/// 住在 `store` 而不是某个记录模块：本地卡与 Web 包是两种记录，但"如何比较时间"是同一个
+/// 存储关注点。两份实现必然漂移，而漂移的后果是同一张卡在两种记录上顺序不同。
+pub fn timestamp_sort_key(updated_at: &str) -> Result<i64, StoreError> {
+    time::OffsetDateTime::parse(updated_at, &time::format_description::well_known::Rfc3339)
+        // 秒与毫秒分开取，避免 unix_timestamp_nanos 的 i128 中间值。
+        .map(|value| value.unix_timestamp() * 1_000 + i64::from(value.nanosecond() / 1_000_000))
+        .map_err(|_| StoreError::InvalidDocument)
 }
 
 /// 一次迁移 = 一个显式事务。
@@ -420,7 +440,7 @@ mod tests {
 
         let versions = applied_migrations(&store.connection.lock().expect("lock"))
             .expect("migration journal must be readable");
-        assert_eq!(versions, vec![1, 2]);
+        assert_eq!(versions, vec![1, 2, 3, 4]);
 
         // 重复打开同一个库不会重复执行迁移。
         let reopened = LocalStore::open_in_memory().expect("reopen");
@@ -469,7 +489,7 @@ mod tests {
         );
         let versions = applied_migrations(&store.connection.lock().expect("lock"))
             .expect("migration journal must be readable");
-        assert_eq!(versions, vec![1, 2]);
+        assert_eq!(versions, vec![1, 2, 3, 4]);
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -563,7 +583,7 @@ mod tests {
             assert_eq!(store.schema_version().expect("version"), SCHEMA_VERSION);
             let versions = applied_migrations(&store.connection.lock().expect("lock"))
                 .expect("journal must be readable");
-            assert_eq!(versions, vec![1, 2]);
+            assert_eq!(versions, vec![1, 2, 3, 4]);
         }
 
         // 第三次打开：全部已完成，不重复执行。
@@ -571,7 +591,7 @@ mod tests {
             let store = LocalStore::open(&LocalStorePaths::under(&root)).expect("third open");
             assert_eq!(
                 applied_migrations(&store.connection.lock().expect("lock")).expect("journal"),
-                vec![1, 2]
+                vec![1, 2, 3, 4]
             );
         }
 

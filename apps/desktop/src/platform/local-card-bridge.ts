@@ -6,6 +6,7 @@ import {
   type DesktopListLocalCardsRequest,
   type DesktopLocalCardCursor,
   type DesktopLocalCardIndex,
+  type DesktopBlobErrorCode,
   type DesktopStoreErrorCode,
 } from '@mahoshojo/contracts/desktop-ipc';
 import {
@@ -46,9 +47,9 @@ export const PURGE_LOCAL_CARD_COMMAND = 'purge_local_card' as const;
 
 export class DesktopLocalCardError extends Error {
   readonly command: string;
-  readonly code: DesktopLocalCardErrorCode;
+  readonly code: DesktopLocalLibraryErrorCode;
 
-  constructor(command: string, code: DesktopLocalCardErrorCode, message: string) {
+  constructor(command: string, code: DesktopLocalLibraryErrorCode, message: string) {
     super(message);
     this.name = 'DesktopLocalCardError';
     this.command = command;
@@ -59,14 +60,22 @@ export class DesktopLocalCardError extends Error {
 /**
  * 渲染层可能观察到的全部失败类别。
  *
- * `invalid-card` 与 `bridge-failure` 是渲染层自己的分类（native 不会返回它们）；
- * 其余与 native 的错误码一一对应。native 的 `message` 是固定文案，可直接透传；
- * 本地库相关的 `message` **MUST NOT** 回显用户数据或 SQLite / 文件系统的原始错误串。
+ * 记录存储与 blob 存储的投影**刻意是同一个形状**（`DesktopLocalLibraryErrorSchema`），
+ * 因此共用一个错误类别与一个错误类型——渲染层只需要一个解析器，而"哪种存储坏了"由 code
+ * 区分而不是由类型区分。
+ *
+ * `invalid-card` 与 `bridge-failure` 是渲染层自己的分类（native 不会返回它们）。
+ * native 的 `message` 是固定文案，可直接透传；本地库相关的 `message` **MUST NOT** 回显
+ * 用户数据或 SQLite / 文件系统的原始错误串。
  */
-export type DesktopLocalCardErrorCode =
+export type DesktopLocalLibraryErrorCode =
   | DesktopStoreErrorCode
+  | DesktopBlobErrorCode
   | 'invalid-card'
   | 'bridge-failure';
+
+/** @deprecated 本地库错误已是记录与 blob 的共用类别，改用 `DesktopLocalLibraryErrorCode`。 */
+export type DesktopLocalCardErrorCode = DesktopLocalLibraryErrorCode;
 
 const NATIVE_ERROR_CODES: readonly DesktopStoreErrorCode[] = [
   'store-unavailable',

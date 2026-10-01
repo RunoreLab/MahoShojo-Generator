@@ -12,7 +12,10 @@ MahoShojo Generator 的本地桌面客户端 runtime。它是独立 app，不是
 - **D1.5** 内容摘要语义下沉：`canonicalization` / 摘要 / ID 派生的唯一权威实现在
   `@mahoshojo/local-library/digest`，V1 逐字节输出由 golden fixture 冻结；
 - **D2.0** 本地库本地卡存储：SQLite `local_card`、keyset 分页、业务级 IPC 与
-  `CardRepository` adapter。blob、导入导出、备份与 GC 属 D2.1 之后的阶段。
+  `CardRepository` adapter；
+- **D2.1** Web Package ZIP blob 持久化：内容寻址 `blob` 表、`local_web_package` 与真实外键
+  引用表、原子写入与去重自愈、业务级 IPC 与 `WebPackageRepository` adapter。
+  导入导出、备份与 GC 属 D2.2 之后的阶段。
 
 ## 权威边界
 
@@ -125,13 +128,39 @@ Profile 草稿
   OpenAI-compatible SSE 服务（含"取消真正中止上游 body"的断连观测）。这是 D1 退出门禁
   唯一未闭合的一条，且只能由人在真实 Provider 上确认。
 
-## 本地库（D2.0）
+## 本地库（D2.0 / D2.1）
 
-`library.sqlite` 里目前有两张表，共享同一份 PRAGMA 与 migration journal：
+`library.sqlite` 里目前有四张表，共享同一份 PRAGMA 与 migration journal（当前 `user_version` 为 4）：
 
 - `provider_profile`（D1）：opaque JSON 文档；
 - `local_card`（D2.0）：opaque `document` + `card_type` / `updated_at` / `deleted_at` /
-  `content_digest` 四个索引列。
+  `content_digest` 四个索引列；
+- `blob`（D2.1）：内容寻址的字节，`<data_root>/blobs/<64hex>`（无扩展名，路径只由 `blob_path()`
+  决定）与 metadata 一一对应；
+- `local_web_package`（D2.1）+ `web_package_archive_ref`：Web 包记录与它的 blob 引用，两条
+  **真实外键**分别指向 `local_web_package(id)` 与 `blob(digest)`。
+
+blob 的物理布局是 adapter 内部细节，对外契约与 portable archive 都不依赖它。写入顺序是同目录
+临时文件 → flush → 原子 rename → metadata：因此崩溃后**可能**留下无引用 blob（孤儿，允许存在），
+但**不会**出现"记录在、文件不在"。已存在且校验通过的 blob 视为成功（去重）；已存在但损坏且本次
+持有正确字节时自愈覆盖并返回 `repaired`——这个状态必须透传到 UI，否则存储损坏对用户不可见。
+读取时损坏且无正确内容则 fail closed。
+
+### 两种摘要不是一回事
+
+Web 包记录里的 `contentDigest`（= `ref.digest`）是 **manifest** 的摘要，构成领域身份——包 id 由它
+派生。归档 blob 的摘要是**归档字节自身**的摘要，只充当存储地址与完整性校验。ZIP 除 manifest 外还
+含文件，两者必然不同，**不要**加"两者必须相等"的校验（`DESK-063`）。归档字节是否真的属于这条记录，
+由 TypeScript 侧 `unpackWebPackageZip` 解包后核对；native 不重建 ZIP 与 manifest 的规范化逻辑。
+
+记录自称的 `archiveByteLength` 会被 native 与实际字节数比对，不一致直接拒绝。
+
+### 二进制传输
+
+IPC 用一个显式的 `{b64, len}` 信封承载归档字节，两端解码后都核对长度。Tauri 2 的原生 raw IPC
+要求整个请求体是 raw 形式、无法与结构化参数并存，所以这是字段而非自定义通道；代价约 33% 体积，
+收益是解包路径只有一条。`DESK-064` 记录了约束与将来切 raw IPC 的时机。
+
 
 业务语义全部留在 TypeScript。索引列由渲染层从**已通过 `LocalCardRecordV1Schema` 校验的
 记录**投影而来，native 侧再从 document 里重新提取一遍并逐项比对，不一致即拒绝落盘：
@@ -156,7 +185,7 @@ IndexedDB adapter 未来可独立改进。软删只写 tombstone、**保留** do
 自由载荷走 `Box<RawValue>`，保留原始文本而不实例化 `String`，载荷里的孤立代理项被逐字节
 保留（见 `local_card.rs` 的兼容性测试与 `fixtures/desktop-local-cards.json`）。
 
-blob、内容寻址区、导入导出与 GC 属 D2.1 之后的阶段，当前**不存在**。
+导入导出、备份与 GC 属 D2.2 之后的阶段，当前**不存在**。
 
 ## 持久 secret
 

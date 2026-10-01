@@ -52,3 +52,17 @@ export {
   toLocalCardIndex,
 } from './local-card-bridge';
 export type { InvokeFn as LocalCardInvokeFn } from './local-card-bridge';
+
+export {
+  DELETE_WEB_PACKAGE_COMMAND,
+  GET_WEB_PACKAGE_COMMAND,
+  LIST_WEB_PACKAGES_COMMAND,
+  PURGE_WEB_PACKAGE_COMMAND,
+  READ_WEB_PACKAGE_ARCHIVE_COMMAND,
+  RESTORE_WEB_PACKAGE_COMMAND,
+  SAVE_WEB_PACKAGE_COMMAND,
+  IpcWebPackageRepository,
+  fromBase64Bytes,
+  toBase64Bytes,
+  toWebPackageIndex,
+} from './web-package-bridge';
