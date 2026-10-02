@@ -306,6 +306,13 @@ describe('Desktop blob 与 Web 包 IPC 契约', () => {
     expect(surface).not.toContain('DesktopReadWebPackageArchiveResponseSchema');
     // 写入方向仍在用 {b64, len}：单个包的量级没有到需要 raw 请求体的程度。
     expect(surface).toContain('DesktopBase64BytesSchema');
+    // fixture 也必须没有这一段：两侧的 Rust 契约测试都 `include_str!` 同一份 fixture，留下一个
+    // 没人读的键会让"契约包与实现同源"这件事变得无法验证（DESK-033）。
+    expect(fixture).not.toHaveProperty('readArchiveResponse');
+    // 请求侧的 fixture 仍在被断言（此前它没有任何读者）。
+    const { $case: _requestCase, ...readRequest } = fixture.readArchiveRequest;
+    expect(_requestCase).toEqual(expect.any(String));
+    expect(DesktopReadWebPackageArchiveRequestSchema.parse(readRequest)).toEqual(readRequest);
   });
 
   it('canonical identity：包 id 与内容摘要在 fixture 中成对出现', () => {

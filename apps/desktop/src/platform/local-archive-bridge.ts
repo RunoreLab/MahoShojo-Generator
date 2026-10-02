@@ -144,6 +144,15 @@ export const exportLocalLibraryArchive = async (
   source: LocalLibraryArchiveSource,
   options: ExportLocalLibraryArchiveOptions = {},
 ): Promise<ExportedLocalLibraryArchive> => {
+  // 块大小**先**校验，而且必须早于打包：`NaN <= 0` 是 false，所以此前 NaN 能穿过这道检查，
+  // 接着 `offset += NaN` 让分块循环一次都不执行，函数就把 `begun.absolutePath` 当成一次成功导出
+  // 返回——而一个字节都没送出去。`Infinity` 同样能穿过，并把整份归档当成一次请求发出去，
+  // 于是 `DESK-070` 那三个上限里的第三个被静默架空。
+  const chunkBytes = options.chunkBytes ?? MAX_LOCAL_LIBRARY_IPC_CHUNK_BYTES;
+  if (!Number.isSafeInteger(chunkBytes) || chunkBytes <= 0) {
+    throw new LocalArchiveExportError('export-failure', '块大小必须是正的安全整数');
+  }
+
   const collected = await collectLocalLibraryArchive(source, {
     ...(options.exportedAt === undefined ? {} : { exportedAt: options.exportedAt }),
   });
@@ -159,9 +168,6 @@ export const exportLocalLibraryArchive = async (
     if (cause instanceof LocalLibraryArchiveTooLargeError) throw cause;
     throw new LocalArchiveExportError('export-failure', '组装导出归档失败');
   }
-
-  const chunkBytes = options.chunkBytes ?? MAX_LOCAL_LIBRARY_IPC_CHUNK_BYTES;
-  if (chunkBytes <= 0) throw new LocalArchiveExportError('export-failure', '块大小必须为正');
 
   let begun;
   try {

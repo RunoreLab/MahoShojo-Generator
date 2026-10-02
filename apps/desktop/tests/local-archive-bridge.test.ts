@@ -240,6 +240,26 @@ describe('exportLocalLibraryArchive', () => {
     expect((error as LocalArchiveExportError).code).toBe('export-stale');
   });
 
+  it('块大小不是正的安全整数时在打包之前就失败', async () => {
+    // `NaN <= 0` 是 false，因此 NaN 曾能穿过那道检查；接着 `offset += NaN` 让分块循环一次都不
+    // 执行，函数就把 `begun.absolutePath` 当成一次**成功**导出返回——而一个字节都没送出去。
+    // `Infinity` 同样能穿过，并把整份归档当成一次请求发出去，于是 IPC 块上限被静默架空。
+    for (const chunkBytes of [0, -1, Number.NaN, Number.POSITIVE_INFINITY, 1.5]) {
+      await expect(runExport({ chunkBytes })).rejects.toMatchObject({ code: 'export-failure' });
+    }
+    // 校验必须早于打包：否则一次明显无效的调用要先付 256 MiB 的打包代价才失败。
+    const source = createArchiveExportSource(cardRepository([makeCard('lc_1')]), packageRepository([]));
+    const collect = vi.fn(async () => {
+      throw new Error('打包前就该失败');
+    });
+    await expect(
+      exportLocalLibraryArchive(async () => ({ exportId: 1, absolutePath: '/x.zip' }), collect, source, {
+        exportedAt: EXPORTED_AT,
+        chunkBytes: Number.NaN,
+      }),
+    ).rejects.toMatchObject({ code: 'export-failure' });
+  });
+
   it('目标被占用时保留 export-target-occupied，因为它是唯一可重试的原因', async () => {
     const source = createArchiveExportSource(cardRepository([makeCard('lc_1')]), packageRepository([]));
     const rawInvoke: RawInvokeFn = async () => {

@@ -159,6 +159,11 @@ export const fromBase64Bytes = (payload: unknown): Uint8Array => {
  * raw 响应没有 JSON 信封，因此长度无从声明——这正是它的好处：`ArrayBuffer` 的 `byteLength` 就是
  * 字节数，不存在"声明与实际不符"这种状态。反过来，任何**不是** `ArrayBuffer` 的返回值都必须被
  * 拒：把它当成字节数组会得到一堆 `undefined`，而症状是"解包器说这个 ZIP 坏了"，离真正的原因很远。
+ *
+ * 只认 `ArrayBuffer` 而不接受 `number[]` / 任意 TypedArray 是**刻意的**：接受它们会让 raw IPC 的
+ * 静默回退（见 {@link IpcWebPackageRepository.readArchive} 的注释）继续悄悄生效，而那正是
+ * `DESK-070` 明令禁止的形态。响亮地失败让这条回退在真机上可观测——代价是它属于 D2.3b2 那两条
+ * **仍需真机实测**的门禁。
  */
 const fromRawBytes = (payload: unknown): Uint8Array => {
   if (payload instanceof ArrayBuffer) {
@@ -301,6 +306,16 @@ export class IpcWebPackageRepository implements WebPackageRepository {
    *
    * 响应走 raw：`invoke` 对 raw 响应返回 `ArrayBuffer`，而**请求**仍是结构化的，因此这条路径
    * 不需要任何自定义封包。
+   *
+   * 代价与代价的边界：这条读取路径因此依赖自定义 IPC 协议。协议不可用时 Tauri 会**静默**回退到
+   * `postMessage`，那条路径把响应体序列化成 JSON——对 `Vec<u8>` 就是一串 `number[]`，于是
+   * {@link fromRawBytes} 会拒绝它。也就是说静默降级在这里变成响亮失败（比旧行为好，用户至少会
+   * 看到"归档不是 raw 字节"而不是悄悄多付 33% 体积），但"这条路径依赖自定义协议"这件事必须写在
+   * 两处：`DESK-071b` 的开放门禁目前只覆盖写入方向的分块。
+   *
+   * `new Uint8Array(payload)` 是**零拷贝视图**，不是复制——它直接别名 Tauri 的传输缓冲。这正是
+   * 这次改动的目的（不再多付一次解码峰值），代价是调用方 MUST NOT 修改它。共享端口的
+   * `readArchive` 只把字节交给解包器，而解包器不修改输入。
    */
   async readArchive(digest: string): Promise<Uint8Array | null> {
     let raw: unknown;

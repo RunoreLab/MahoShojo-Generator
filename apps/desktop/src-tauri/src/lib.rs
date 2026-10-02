@@ -630,6 +630,18 @@ async fn audit_local_library(
 ///
 /// 请求仍然走结构化参数：`tauri::ipc::Response` 只影响响应方向，"raw 请求无法携带结构化参数"
 /// 那条限制限制的是请求体，因此读取方向不需要任何自定义封包（`DESK-070` 字节传输）。
+///
+/// **这条路径现在依赖自定义 IPC 协议。** `DESK-071b` 记录了 raw IPC 在协议不可用时**静默**回退到
+/// `postMessage`，而那条路径会把响应体 `serde_json` 序列化成 JSON——对 `Vec<u8>` 就是一串
+/// `number[]`。渲染层因此会拿到 `number[]` 而不是 `ArrayBuffer`，`fromRawBytes` 会拒绝它。静默降级
+/// 变成了响亮的失败（比旧行为好：用户至少看到"归档不是 raw 字节"，而不是悄悄多付 33% 体积与一次
+/// 解码峰值），但这条依赖此前**只**为写入方向的分块记在计划的开放门禁里；读取方向现在同样受它
+/// 约束，因此两处注释与计划都要写明。
+///
+/// **另一个已知代价：这条命令不是 `async`。** Tauri 2 因此在主线程上跑它，于是每次读取都在主
+/// 线程做一次 `std::fs::read` 加一次完整 SHA-256 重算（最大 64 MiB）。D2.3 的导出对每个 Web 包都要
+/// 读一遍字节，所以导出会按包数冻结渲染层。改成 `async` + `spawn_blocking` 需要 `LocalLibrary`
+/// 有一个可跨线程的句柄（它目前没有 `Clone`），因此单独记在计划的待办里，而不是顺手改结构。
 #[tauri::command]
 fn read_web_package_archive(
     library: State<'_, LocalLibrary>,
