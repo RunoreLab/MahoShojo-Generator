@@ -43,8 +43,13 @@ const TEMPORARY_SUFFIX: &str = ".partial";
 /// 文件名主干。见 `DESK-071b`"导出目标路径的命名与保留"。
 const FILE_STEM: &str = "local-library";
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
+/// 导出归档失败。
+///
+/// 序列化形状是 `{code, message}` 而不是枚举名，理由是**跨语言契约**：渲染层用
+/// `DesktopArchiveExportErrorSchema` 校验它，而那个 schema 是 `.strict()` 的对象。枚举名会
+/// 变成 `"TooLarge"`，于是每一次失败都变成一次"渲染层拒绝了这个响应"——症状是 UI 拿不到错误码，
+/// 只能显示一句无法归类的失败。
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExportError {
     /// 声明的总长超过 [`MAX_LOCAL_LIBRARY_ARCHIVE_OUTPUT_BYTES`]。
     TooLarge,
@@ -52,12 +57,38 @@ pub enum ExportError {
     EmptyDeclaration,
     /// append 到达时没有任何进行中的导出。
     NoSession,
-    /// append 带着**上一轮**的 exportId。这正是 native 分配单调 id 的理由。
+    /// append 带着**上一轮**的 exportId，或 header 缺失/形状不对。这正是 native 分配单调 id
+    /// 的理由。
     StaleSession,
     /// 累计字节超过声明总长。
     Overflow,
     Unavailable,
     Failure,
+}
+
+impl ExportError {
+    /// 与 `DesktopArchiveExportErrorCodeSchema` 一一对应的 kebab-case 码。
+    fn code(&self) -> &'static str {
+        match self {
+            ExportError::TooLarge => "export-too-large",
+            ExportError::EmptyDeclaration => "export-empty-declaration",
+            ExportError::NoSession => "export-no-session",
+            ExportError::StaleSession => "export-stale",
+            ExportError::Overflow => "export-overflow",
+            ExportError::Unavailable => "export-unavailable",
+            ExportError::Failure => "export-failure",
+        }
+    }
+}
+
+impl Serialize for ExportError {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let mut state = serializer.serialize_struct("ExportError", 2)?;
+        state.serialize_field("code", self.code())?;
+        state.serialize_field("message", &self.to_string())?;
+        state.end()
+    }
 }
 
 impl std::fmt::Display for ExportError {
@@ -609,6 +640,27 @@ mod tests {
         // 用户自己拷进目录的备份 MUST NOT 被删。
         assert!(user_copy.exists());
         assert!(unrelated.exists());
+    }
+
+    #[test]
+    fn 错误序列化成渲染层契约要求的code加message() {
+        // 跨语言形状的回归：曾经这里是枚举名，于是渲染层的 `.strict()` schema 每次都拒收，
+        // 症状是"UI 拿不到错误码，只能显示无法归类的失败"。
+        let cases = [
+            (ExportError::TooLarge, "export-too-large"),
+            (ExportError::EmptyDeclaration, "export-empty-declaration"),
+            (ExportError::NoSession, "export-no-session"),
+            (ExportError::StaleSession, "export-stale"),
+            (ExportError::Overflow, "export-overflow"),
+            (ExportError::Unavailable, "export-unavailable"),
+            (ExportError::Failure, "export-failure"),
+        ];
+        for (error, expected_code) in cases {
+            let json = serde_json::to_value(&error).expect("serialize");
+            assert_eq!(json["code"], expected_code);
+            assert!(json["message"].as_str().is_some_and(|text| !text.is_empty()));
+            assert_eq!(json.as_object().expect("object").len(), 2);
+        }
     }
 
     #[test]

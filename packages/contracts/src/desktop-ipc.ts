@@ -541,3 +541,76 @@ export const DesktopLocalLibraryGcErrorSchema = z
   })
   .strict();
 export type DesktopLocalLibraryGcError = z.infer<typeof DesktopLocalLibraryGcErrorSchema>;
+
+/**
+ * 导出归档失败的投影。
+ *
+ * 错误码与 `export.rs` 的 `ExportError` 一一对应。`export-too-large` 刻意与打包侧的
+ * `archive-too-large` **分开**：前者的判定方是 native（按落盘上限），后者是打包器（按内存预算）。
+ * 合成一个码之后，UI 无法告诉用户"你的库太大"还是"我们的实现只能打包到这么大"——而这两件事
+ * 的建议动作不同（前者要删东西，后者要等流式实现）。
+ *
+ * `export-stale` 意味着 exportId 对不上当前会话：一次迟到的旧块。UI **MUST NOT** 把它显示成
+ * "导出失败，请重试"——真实原因是 renderer 刷新过，正确处理是重新走一次完整导出。
+ */
+export const DesktopArchiveExportErrorCodeSchema = z.enum([
+  'export-too-large',
+  'export-empty-declaration',
+  'export-no-session',
+  'export-stale',
+  'export-overflow',
+  'export-unavailable',
+  'export-failure',
+]);
+export type DesktopArchiveExportErrorCode = z.infer<
+  typeof DesktopArchiveExportErrorCodeSchema
+>;
+
+export const DesktopArchiveExportErrorSchema = z
+  .object({
+    code: DesktopArchiveExportErrorCodeSchema,
+    message: z.string().min(1).max(512),
+  })
+  .strict();
+export type DesktopArchiveExportError = z.infer<typeof DesktopArchiveExportErrorSchema>;
+
+export const DesktopBeginArchiveExportResponseSchema = z
+  .object({
+    /** 由 native 分配的单调 id。渲染层 MUST 在每次 append 时原样回传。 */
+    exportId: z.number().int().positive(),
+    /**
+     * 计划的最终绝对路径。
+     *
+     * 文件在 `begin` 时**还不存在**：它要到收满声明字节才被原子 rename 到这里。回显计划路径是
+     * 为了让 UI 在导出进行中就能显示"会存到哪里"，而不是让用户等到最后才知道。
+     */
+    absolutePath: z.string().min(1).max(4096),
+  })
+  .strict();
+export type DesktopBeginArchiveExportResponse = z.infer<
+  typeof DesktopBeginArchiveExportResponseSchema
+>;
+
+export const DesktopAppendArchiveExportChunkResponseSchema = z
+  .object({
+    writtenByteLength: z.number().int().nonnegative(),
+    /** 累计字节已达声明总长。此时文件已 sync 并原子 rename。 */
+    complete: z.boolean(),
+    /** 仅在 `complete` 为真时出现，且等于 `begin` 回显的那个路径。 */
+    absolutePath: z.string().min(1).max(4096).optional(),
+  })
+  .strict()
+  .superRefine((response, context) => {
+    // `complete` 与 `absolutePath` 必须同时出现或同时缺席。让 schema 强制这一点，
+    // 是因为渲染层要用它决定"导出成功了吗"——而"complete 但没有路径"会逼它自己编一个。
+    if (response.complete !== (response.absolutePath !== undefined)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['absolutePath'],
+        message: 'absolutePath must be present exactly when complete is true',
+      });
+    }
+  });
+export type DesktopAppendArchiveExportChunkResponse = z.infer<
+  typeof DesktopAppendArchiveExportChunkResponseSchema
+>;
