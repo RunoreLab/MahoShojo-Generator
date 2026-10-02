@@ -72,8 +72,8 @@ export interface LocalLibraryArchivePage<T> {
  * 拒绝，报错信息是"archive path must be unique"，而根因是分页不稳定——症状与根因完全无关。
  *
  * 实现 **MUST NOT** 在一次列举过程中把游标之前被更新的行藏起来（否则导出漏记录）。反过来，
- * 列举之后的新行被包含进来或被漏掉都**可以接受**：导出的一致性是"列举时刻的快照"
- * （`DESK-071b`），不是强一致。
+ * 列举之后的新行被包含进来或被漏掉都**可以接受**：导出的一致性是"成功产物自洽"
+ * （`DESK-071b`"一致性边界的表述"），不是 point-in-time 快照。
  */
 export interface LocalLibraryArchiveSource {
   readonly listCards: (
@@ -119,13 +119,6 @@ export interface CollectedLocalLibraryArchive {
   readonly read: (_path: string) => Promise<Uint8Array>;
 }
 
-/**
- * 构造导出所需的清单与读取器。
- *
- * 两者**必须**成对返回：清单声明 `checksum` 与 `byteLength`，读取器写出那些字节，分开构造就是
- * 允许"清单和字节各说各话"的结构。返回对象里只保留**记录**（每个几百字节），ZIP 字节按需读——
- * 缓存它们会把峰值从 1× 抬到 2×，而 `DESK-070` 的 256 MiB 正是按 `zipSync` 的 1× 峰值反推的。
- */
 /**
  * 构造导出所需的清单与读取器。
  *

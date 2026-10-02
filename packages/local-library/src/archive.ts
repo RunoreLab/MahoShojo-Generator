@@ -34,13 +34,15 @@ import {
  * 摘要）。复用它会让每一条真实 Web 包都被自己的 `superRefine` 拒绝，而症状表现为
  * "所有包都导入失败"——一个极难定位的失败。
  *
- * 因此 Web 包条目显式分开命名两个摘要：
+ * 因此 Web 包条目显式分开命名三个摘要：
  *
  * - `contentDigest`：manifest 摘要，构成领域身份，等于记录的 `contentDigest`；
- * - `archiveDigest`：ZIP 字节的摘要，只充当存储地址与完整性校验。
+ * - `archiveDigest`：ZIP 字节的摘要，充当存储地址与完整性校验，`archivePath` 由它推导；
+ * - `checksum`：`path` 处那条 JSON 记录自身的字节摘要。
  *
- * 两者 **MUST NOT** 被要求相等，也 **MUST NOT** 被断言不等——前者会破坏整个身份模型，
- * 后者会把一个合法的巧合变成拒绝理由。
+ * `contentDigest` 与 `archiveDigest` **MUST NOT** 被要求相等，也 **MUST NOT** 被断言不等——前者会
+ * 破坏整个身份模型，后者会把一个合法的巧合变成拒绝理由。ZIP 除 manifest 外还含文件，因此二者
+ * 作为**格式事实**必然不同；但这条事实刻意**不**被提升成强制不变量。
  *
  * ## 归档内布局
  *
@@ -141,8 +143,9 @@ export type LocalLibraryArchiveCardEntryV2 = z.infer<typeof LocalLibraryArchiveC
  * - `archiveDigest`：ZIP 字节摘要 = 存储地址 = 完整性校验，且**必须**由 `archivePath` 推导；
  * - `checksum`：`path` 处那条 JSON 记录自身的字节摘要。
  *
- * 前两个必然不同——ZIP 里除了 manifest 还有文件。把它们合成一个 `digest` 是 D2.1 之前
- * 差点犯的错，此处由 `DESK-059b` 明确禁止。
+ * 把它们合成一个 `digest` 是 D2.1 之前差点犯的错，此处由 `DESK-059b` 明确禁止。至于
+ * `contentDigest` 与 `archiveDigest` 之间的实际取值关系，见下方 `superRefine` 里的说明——本文件
+ * 刻意不在任何注释里断言"必然不同"，因为实现不强制它，注释就不该说得比实现更强。
  */
 export const LocalLibraryArchiveWebPackageEntryV2Schema = z
   .object({
@@ -151,12 +154,12 @@ export const LocalLibraryArchiveWebPackageEntryV2Schema = z
     path: webPackageJsonPathSchema,
     /** manifest 摘要，构成领域身份。必须等于记录 JSON 里的 `contentDigest`。 */
     contentDigest: LocalCardContentDigestSchema,
-    /** SHA-256 over the exact UTF-8 bytes stored at `path`。 */
+    /** SHA-256 over the exact UTF-8 bytes stored at `path`. */
     checksum: Sha256ChecksumSchema,
     byteLength: ArchiveByteLengthSchema,
-    /** 原始 ZIP 字节在归档内的位置。 */
+    /** 原始 ZIP 字节在归档内的位置。必须由 `archiveDigest` 推导。 */
     archivePath: webPackageArchivePathSchema,
-    /** ZIP 字节自身的摘要。**与 contentDigest 必然不同**（DESK-063）。 */
+    /** ZIP 字节自身的摘要。与 contentDigest 的取值关系刻意不被断言。 */
     archiveDigest: Sha256ChecksumSchema,
     archiveByteLength: ArchiveByteLengthSchema,
   })
@@ -172,7 +175,7 @@ export const LocalLibraryArchiveWebPackageEntryV2Schema = z
     }
     // contentDigest 与 archiveDigest 之间的关系**刻意不断言**。
     // 加 `must differ` 会把一个合法的巧合变成拒绝理由（虽然当前 ZIP 头使它不可能发生），
-    // 加 `must equal` 会直接破坏身份模型。见 DESK-059b。
+    // 加 `must equal` 会直接破坏身份模型。见 DESK-059b / DESK-063。
   });
 export type LocalLibraryArchiveWebPackageEntryV2 = z.infer<
   typeof LocalLibraryArchiveWebPackageEntryV2Schema
