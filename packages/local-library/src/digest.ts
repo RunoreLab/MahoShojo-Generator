@@ -121,6 +121,27 @@ const toHex = (buffer: ArrayBuffer): string =>
   Array.from(new Uint8Array(buffer), (byte) => byte.toString(16).padStart(2, '0')).join('');
 
 /**
+ * 计算**原始字节**的摘要，形如 `sha256:<64 位小写 hex>`。
+ *
+ * 与 [`digestLocalCardPayloadV1`] 的区别是本函数**不做** canonicalize：它就是 `sha256(bytes)`。
+ * 两者刻意不合并——canonicalize 是领域语义（什么算"同一张卡"），而字节摘要是存储与完整性语义
+ * （blob 的存储地址、归档内 `checksum` / `archiveDigest`）。把字节摘要写成"摘要"会让调用方
+ * 以为可以传对象。
+ *
+ * 归档导出侧需要它两次：`checksum` 覆盖记录 JSON 的确切字节，`archiveDigest` 覆盖 ZIP 字节。
+ * 两者都由本函数产生，因此"归档里声明的摘要"与"归档里实际写入的字节"只有一个计算入口。
+ */
+export const sha256DigestOfBytes = async (bytes: Uint8Array): Promise<string> => {
+  const digest = await crypto.subtle.digest(
+    'SHA-256',
+    // `crypto.subtle.digest` 要求独立 ArrayBuffer，而 `Uint8Array` 常是别的缓冲区的视图。
+    // 传视图在部分 runtime 上会抛，且报错信息与根因完全无关，因此显式复制一份。
+    bytes.slice().buffer,
+  );
+  return `${LOCAL_CARD_DIGEST_ALGORITHM_V1}:${toHex(digest)}`;
+};
+
+/**
  * 计算本地数据卡的内容摘要，形如 `sha256:<64 位小写 hex>`。
  *
  * 输入先剥离传输元数据再 canonicalize，因此同一张卡无论从哪条读取路径拿到 payload，

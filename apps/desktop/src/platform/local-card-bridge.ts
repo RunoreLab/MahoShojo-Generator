@@ -21,6 +21,7 @@ import {
   nextLocalTimestamp,
   type LocalCardRecordV1,
 } from '@mahoshojo/local-library/record';
+import { serializeLocalLibraryRecord } from '@mahoshojo/local-library/archive-export';
 
 /**
  * 本地数据卡的渲染层桥接，以及基于 IPC 的 `CardRepository` 实现。
@@ -168,7 +169,15 @@ export const toLocalCardIndex = (record: LocalCardRecordV1): DesktopLocalCardInd
 };
 
 /** 序列化为 native 落盘的 document 文本。 */
-const toDocumentText = (record: LocalCardRecordV1): string => JSON.stringify(record);
+/**
+ * 序列化为 native 存储的 document 文本。
+ *
+ * 走共享实现而非就地 `JSON.stringify`，是为了让本桥写入的行与 portable archive 里
+ * `cards/*.json` 的记录**是同一份字节**——`archive-export.ts` 的 `checksum` 覆盖的就是它。
+ * 两处各自序列化时，任何一边改了缩进或键序都会让"导入再导出"的 `checksum` 对不上，而症状是
+ * 导入侧报内容损坏，与根因完全无关。
+ */
+const toDocumentText = serializeLocalLibraryRecord;
 
 /**
  * keyset 游标在渲染层保持不透明。
