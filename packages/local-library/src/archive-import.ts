@@ -70,13 +70,34 @@ export const MAX_LOCAL_LIBRARY_ARCHIVE_MANIFEST_BYTES = 16 * 1024 * 1024;
 /**
  * 推给流式解包器的输入块大小。
  *
- * 它同时界定"一次 `push` 最多让解包器交付多少字节"，因此是内存边界的组成部分而不是性能参数。
- * apply 在块之间让出事件循环并等写入队列清空，块越大吞吐越高、在途条目越多——取 4 MiB 是因为
- * 256 MiB 归档下只有 64 次让出，而单次让出要等一次真实的异步写入。
+ * ## 这个数字被一条与 fflate 实现的耦合决定，不是性能调参
+ *
+ * `Unzip.push` 在**一次调用内**按条目数递归：每发现一个 local header 就 `return this.push(rest)`
+ * 一次（`fflate/esm/index.mjs` 的 `if (f & 2) return this.push(buf.subarray(i), final)`，以及
+ * `if (chunk.length) return this.push(chunk, final)`），即每个条目约 2 层。因此一次 push 里的
+ * 条目数直接就是调用栈深度，而条目密度由**攻击者**决定。
+ *
+ * 实测（10 万个恶意条目、每个约 108 字节）：4 MiB 块 → 深度 2829 → `RangeError`。而这不是纯粹的
+ * 攻击面——`packLocalLibraryArchive` **没有条目数上限**，`MAX_LOCAL_LIBRARY_ARCHIVE_ENTRIES` 是
+ * 100_000，因此本仓库自己的导出器能产出一个本模块读不回来的归档：约 2300 张卡就会炸。
+ *
+ * 32 KiB 块在同一探测下深度 1427（安全），因此本值取 32 KiB。改它 **MUST** 重跑
+ * `archive-import.test.ts` 里那条"数千条目仍可导入"的门禁——那条门禁存在的唯一理由就是钉住这里。
+ *
+ * 代价是 256 MiB 归档要 push 8192 次。每次 push 只扫一遍自己那块字节，总扫描量仍是 O(n)。
+ *
+ * `RangeError` 另有一层兜底：栈溢出不是可诊断的失败形态，因此 push 循环把任何非本模块的异常
+ * （含 `RangeError`）归成 `archive-malformed`。兜底保证的是**失败得可诊断**，不是"够用"。
  */
-const STREAM_CHUNK_BYTES = 4 * 1024 * 1024;
+const STREAM_CHUNK_BYTES = 32 * 1024;
 
-/** 归档内允许出现的路径命名空间。清单不在这里——它是第一个 entry，单独判定。 */
+/**
+ * 归档内允许出现的路径命名空间。清单不在这里——它是第一个 entry，单独判定。
+ *
+ * 它是一条**诊断**守卫而不是唯一防线：任何通过它的路径随后还必须在清单的期望路径集里，而清单
+ * schema 已经把声明路径限制在这三个命名空间内。留它是为了让"这个条目根本不属于归档布局"与
+ * "这个条目不在清单里"给出不同的错误码——两者的排障方向不同。
+ */
 const ALLOWED_NAMESPACES = ['cards/', 'web-packages/', 'archives/'] as const;
 
 /**
@@ -240,7 +261,21 @@ const scanArchiveSync = (
   let manifestBytes: Uint8Array = new Uint8Array();
 
   let entryCount = 0;
-  let totalActualBytes = 0;
+  /**
+   * 两个计数器，**MUST NOT** 合成一个。
+   *
+   * - `declaredTotalBytes` 是清单声明之��的累计，在条目开始解压**之前**收口：这是 OWASP ASVS
+   *   V5.2.3 要求的"解压前检查"。
+   * - `actualTotalBytes` 是**实际输出**的累计，DESK-074 要求它按实际输出计数而不是采信中央目录里
+   *   攻击者可控的 `originalSize`。
+   *
+   * 合成一个会让同一段字节被收两次费：对一份自洽归档，实际总量等于声明总量，于是计数器最终停在
+   * ≈2× 载荷，而预算比的是 1×。后果不是保守而是** importer 拒绝导出器自己的产物**——实测
+   * 200 MiB 的库导出成功、导入被拒，而错误信息写的是"归档声明总字节超过预算：272 MiB > 256 MiB"，
+   * 那个 272 MiB 里有一半是重复计费。
+   */
+  let declaredTotalBytes = 0;
+  let actualTotalBytes = 0;
 
   /** 当前条目的累积缓冲；条目结束即清空，因此峰值是**一个**条目。 */
   let buffer: Uint8Array = new Uint8Array(0);
@@ -254,6 +289,19 @@ const scanArchiveSync = (
   let entryDeclared: { byteLength: number; digest: string } | null = null;
   /** 当前条目实际长度允许多出的量：manifest 是它自己的上限，其余是清单声明的长度。 */
   let slack = 0;
+  /**
+   * 按 `slack` 几何增长，而不是每来一块就重新分配并拷贝全部。
+   *
+   * 逐块 `new Uint8Array(buffered + n)` 是 O(n²) 的拷贝：一个 128 MiB 的条目在最坏交付粒度下要
+   * 拷走约 2 GiB。缓冲区**永不**超过 `slack`（上面那道守卫先判），因此容量增长的终点是已知的。
+   */
+  const reserveCapacity = (required: number): Uint8Array => {
+    const capacity = Math.min(slack, Math.max(1024, buffer.byteLength * 2, required));
+    const grown = new Uint8Array(capacity);
+    grown.set(buffer, 0);
+    buffer = grown;
+    return grown;
+  };
   /** 当前条目的路径。`finishEntry` 在 `ondata` 回调里用它，而那时 handler 的局部变量已不可见。 */
   let currentName = '';
 
@@ -270,8 +318,11 @@ const scanArchiveSync = (
     entryFinished = true;
     const isManifest = entryIsManifest;
     const expected = entryDeclared;
-    const bytes = buffer;
     const length = buffered;
+    // **必须按长度切一份**：缓冲区现在按几何增长的容量分配，直接交出去会把尾部未使用的容量
+    // （以及它的零字节）当成条目内容——症状是"manifest.json 不是合法 JSON"，与真正的原因
+    // 隔了一个 ZIP 格式。切而不是视图，是为了让下游不留住整块容量。
+    const bytes = buffer.slice(0, length);
     entryIsManifest = false;
     entryDeclared = null;
     buffer = new Uint8Array(0);
@@ -340,11 +391,11 @@ const scanArchiveSync = (
       }
       entryDeclared = expected;
       // 声明长度先计入预算：这是"在任何分配发生前拒绝超限输入"的那一半。
-      totalActualBytes += expected.byteLength;
-      if (totalActualBytes > budgets.maxTotalBytes) {
+      declaredTotalBytes += expected.byteLength;
+      if (declaredTotalBytes > budgets.maxTotalBytes) {
         throw fail(
           'archive-budget-exceeded',
-          `归档声明总字节超过预算：${totalActualBytes} > ${budgets.maxTotalBytes}`,
+          `归档声明总字节超过预算：${declaredTotalBytes} > ${budgets.maxTotalBytes}`,
         );
       }
       // `slack` 就是**清单声明的长度**，而不是"声明长度 + 一个块"。多留一个块会让越界
@@ -364,15 +415,15 @@ const scanArchiveSync = (
           : fail('archive-malformed', `归档条目无法解压：${error.message}`);
       }
       if (data.byteLength > 0) {
-        totalActualBytes += data.byteLength;
+        actualTotalBytes += data.byteLength;
         // 预算守卫与单条目长度守卫的**先后顺序是有意义的**，因此它排在前面：当攻击者给一个条目
         // 谎报一个巨大长度时，预算先响，报的是"这个归档太大"；而谎报一个小长度时预算不会响，
         // 随后由单条目守卫报"这条比清单声称的长"。两种情况都带走了解压预算，只是一条归档级的
         // 诊断，一条条目级的。
-        if (totalActualBytes > budgets.maxTotalBytes) {
+        if (actualTotalBytes > budgets.maxTotalBytes) {
           throw fail(
             'archive-budget-exceeded',
-            `归档实际解压字节超过预算：${totalActualBytes} > ${budgets.maxTotalBytes}`,
+            `归档实际解压字节超过预算：${actualTotalBytes} > ${budgets.maxTotalBytes}`,
           );
         }
         if (buffered + data.byteLength > slack) {
@@ -385,10 +436,8 @@ const scanArchiveSync = (
               : `归档条目实际长度超过清单声明的 ${entryDeclared?.byteLength}`,
           );
         }
-        const next = new Uint8Array(buffered + data.byteLength);
-        next.set(buffer, 0);
-        next.set(data, buffered);
-        buffer = next;
+        if (buffered + data.byteLength > buffer.byteLength) reserveCapacity(buffered + data.byteLength);
+        buffer.set(data, buffered);
         buffered += data.byteLength;
       }
       if (final) finishEntry();
@@ -401,10 +450,20 @@ const scanArchiveSync = (
   });
   unzip.register(UnzipInflate);
 
-  for (let offset = 0; offset < archive.byteLength; offset += STREAM_CHUNK_BYTES) {
-    if (stopAfterManifest && manifest !== null) break;
-    const end = Math.min(offset + STREAM_CHUNK_BYTES, archive.byteLength);
-    unzip.push(archive.subarray(offset, end), end >= archive.byteLength);
+  try {
+    for (let offset = 0; offset < archive.byteLength; offset += STREAM_CHUNK_BYTES) {
+      if (stopAfterManifest && manifest !== null) break;
+      const end = Math.min(offset + STREAM_CHUNK_BYTES, archive.byteLength);
+      unzip.push(archive.subarray(offset, end), end >= archive.byteLength);
+    }
+  } catch (cause) {
+    // `ondata` 里的异常已经被原样回灌（解包器把下游抛出的错误当作 `error` 参数送回），因此这里
+    // 收到的是两类东西：解包器自己抛的（`err(13)` unexpected EOF、`err(4)`、`RangeError` 栈溢出），
+    // 以及我们自己抛的。后者带 code，**MUST** 保留——把"声明长度超限"压成"归档损坏"会让 UI 丢掉
+    // 最接近根因的那条诊断。前者没有 code，因此在这里归成 archive-malformed。
+    throw cause instanceof LocalLibraryArchiveImportError
+      ? cause
+      : fail('archive-malformed', `归档无法解压：${describe(cause)}`);
   }
 
   if (stopAfterManifest) {

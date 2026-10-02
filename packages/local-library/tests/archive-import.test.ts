@@ -16,7 +16,10 @@ import {
   collectLocalLibraryArchive,
   type LocalLibraryArchiveSource,
 } from '@mahoshojo/local-library/archive-export';
-import { packLocalLibraryArchive } from '@mahoshojo/local-library/archive-pack';
+import {
+  MAX_LOCAL_LIBRARY_ARCHIVE_INPUT_BYTES,
+  packLocalLibraryArchive,
+} from '@mahoshojo/local-library/archive-pack';
 import { sha256DigestOfBytes } from '@mahoshojo/local-library/digest';
 import type { CardRepository } from '@mahoshojo/local-library/repository';
 import type {
@@ -579,6 +582,53 @@ describe('不可信归档的解压边界（DESK-074）', () => {
     // 两者合成一个会让"清单巨大"与"载荷巨大"变成同一种失败。
     expect(MAX_LOCAL_LIBRARY_ARCHIVE_MANIFEST_BYTES).toBeLessThan(256 * 1024 * 1024);
   });
+});
+
+describe('规模：条目数本身就是一个攻击面', () => {
+  it('数千个条目的真实归档仍可导入', async () => {
+    // 这条门禁钉住的是 `STREAM_CHUNK_BYTES`：fflate 的 `Unzip.push` 在一次调用内按条目数递归，
+    // 因此**一次 push 里的条目数就是调用栈深度**，而条目密度由攻击者决定。块曾经是 4 MiB，
+    // 于是约 2300 个条目就 `RangeError`——而 `packLocalLibraryArchive` 本身没有条目数上限，
+    // 也就是说本仓库自己的导出器能产出一个本模块读不回来的归档。
+    const cards = Array.from({ length: 3000 }, (_, index) => makeCard(index + 1));
+    const source: LocalLibraryArchiveSource = {
+      listCards: async () => ({ items: cards, nextCursor: null }),
+      listWebPackages: async () => ({ items: [], nextCursor: null }),
+      readWebPackageArchive: async () => new Uint8Array(),
+    };
+    const collected = await collectLocalLibraryArchive(source, { exportedAt: EXPORTED_AT });
+    const packed = await packLocalLibraryArchive(collected.manifest, collected.read);
+
+    const plan = await inspectLocalLibraryArchive(createTarget().target, packed.bytes);
+    expect(plan.summary.cardCount).toBe(3000);
+  }, 60_000);
+
+  it('声明总量与实际总量各算一次，不重复计费', async () => {
+    // 合成一个"声明总量刚好落在预算内、但收两遍费就超预算"的归档。若两个计数器合成一个，
+    // 导入器会拒绝导出器自己的产物——实测 200 MiB 的库导出成功、导入被拒，而错误信息里的那个
+    // 数字有一半是重复计费。
+    const each = 20 * 1024 * 1024;
+    const cards = Array.from({ length: 10 }, (_, index) => ({
+      ...makeCard(index + 1),
+      data: { blob: 'x'.repeat(each) },
+    }));
+    const source: LocalLibraryArchiveSource = {
+      listCards: async () => ({ items: cards, nextCursor: null }),
+      listWebPackages: async () => ({ items: [], nextCursor: null }),
+      readWebPackageArchive: async () => new Uint8Array(),
+    };
+    const collected = await collectLocalLibraryArchive(source, { exportedAt: EXPORTED_AT });
+    const packed = await packLocalLibraryArchive(collected.manifest, collected.read);
+    // 打包侧先确认这份归档**合法地**落在预算内，否则这条用例测的是"两个上限都不够大"。
+    expect(packed.totalByteLength).toBeLessThanOrEqual(MAX_LOCAL_LIBRARY_ARCHIVE_INPUT_BYTES);
+
+    // 把预算钉死在打包侧的输入总量上：一份自洽归档的实际总量恰好等于它，因此必须被接受。
+    await expect(
+      inspectLocalLibraryArchive(createTarget().target, packed.bytes, {
+        maxTotalBytes: packed.totalByteLength,
+      }),
+    ).resolves.toMatchObject({ summary: { cardCount: 10 } });
+  }, 60_000);
 });
 
 describe('零网络断言的可信度', () => {
