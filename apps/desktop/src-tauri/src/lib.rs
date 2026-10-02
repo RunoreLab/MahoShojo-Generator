@@ -16,6 +16,7 @@ mod ai_contract_tests;
 mod ai_e2e_tests;
 mod audit;
 mod blob;
+mod export;
 mod gc;
 mod library;
 mod local_card;
@@ -641,6 +642,56 @@ fn read_web_package_archive(
     Ok(ReadWebPackageArchiveResponse { archive: bytes })
 }
 
+/// 开启一次导出归档。
+///
+/// 目标路径由 native 选定（`DESK-071b`"导出目标路径的命名与保留"），渲染层既不能指定目录也不能
+/// 指定文件名。它回显的 `absolutePath` 是**计划**路径：文件要到收满声明字节才出现在那里。
+#[tauri::command]
+fn begin_local_archive_export(
+    export: State<'_, crate::export::ArchiveExport>,
+    declared_total_byte_length: u64,
+) -> Result<crate::export::BeginExportOutcome, crate::export::ExportError> {
+    export.begin(declared_total_byte_length)
+}
+
+/// 追加一块导出字节。
+///
+/// **不持维护窗口**（`DESK-071b`）。本命令甚至拿不到数据库连接，因此在类型上就无法读到跨时点的
+/// 混合状态——这比在注释里承诺"我不读库"可靠得多。
+///
+/// 结构化参数刻意只有 `exportId`：字节本身走 raw IPC 请求体，而 raw body 会**取代整个请求体**，
+/// 因此长度、路径之类的元数据 MUST 走 header（`DESK-070` 字节传输节）。
+#[tauri::command]
+fn append_local_archive_export_chunk(
+    request: tauri::ipc::Request,
+    export: State<'_, crate::export::ArchiveExport>,
+) -> Result<crate::export::AppendExportOutcome, crate::export::ExportError> {
+    let export_id = export_id_header(&request)?;
+    let bytes = match request.body() {
+        tauri::ipc::InvokeBody::Raw(bytes) => bytes,
+        // 非 raw 请求体说明 renderer 走了结构化调用。接受它等于让一次编码差异把几百 MiB
+        // 序列化成 base64 字符串——而那正是 `DESK-064` 记在案的既有债务形态。
+        tauri::ipc::InvokeBody::Json(_) => return Err(crate::export::ExportError::Failure),
+    };
+    export.append(export_id, bytes)
+}
+
+/// 从 `x-export-id` header 取会话 id。
+///
+/// 缺失或形状不对一律失败：不猜、不回退到"当前会话"。回退会让一个迟到的旧块写进新会话的文件，
+/// 而结果是两份归档被拼成一份——它仍能打开，只是不再是用户点的那一份。
+fn export_id_header(request: &tauri::ipc::Request) -> Result<u64, crate::export::ExportError> {
+    const HEADER: &str = "x-export-id";
+    let value = request
+        .headers()
+        .get(HEADER)
+        .and_then(|value| value.to_str().ok())
+        .ok_or(crate::export::ExportError::StaleSession)?;
+    value
+        .parse::<u64>()
+        .map_err(|_| crate::export::ExportError::StaleSession)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -669,8 +720,22 @@ pub fn run() {
             let library = LocalLibrary::open(&data_root)
                 .map_err(|error| format!("cannot open the local store: {}", error.message()))?;
 
+            let archive_export =
+                export::ArchiveExport::open(export::ExportPaths::under(&data_root)).map_err(
+                    |error| {
+                        format!("cannot prepare the export directory: {error}")
+                    },
+                )?;
+            // 清理上一次进程留下的未完成 temp。刻意放在 manage **之前**：它会删磁盘上的文件，
+            // 因此失败必须让启动失败，而不是留一个已经 manage 却在后续命令里报错的半初始化状态。
+            // 顺序在 `InstanceGuard` 之后，与"先抢锁再动磁盘"一致。
+            archive_export
+                .reclaim_stale_temporaries()
+                .map_err(|error| format!("cannot clean up interrupted exports: {error}"))?;
+
             app.manage(instance);
             app.manage(library);
+            app.manage(archive_export);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -698,6 +763,8 @@ pub fn run() {
             restore_web_package,
             purge_web_package,
             read_web_package_archive,
+    begin_local_archive_export,
+    append_local_archive_export_chunk,
             audit_local_library,
             collect_local_garbage
         ])

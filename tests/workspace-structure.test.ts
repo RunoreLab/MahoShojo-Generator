@@ -447,6 +447,8 @@ describe('desktop workspace app ownership', () => {
       'restore_web_package',
       'purge_web_package',
       'read_web_package_archive',
+      'begin_local_archive_export',
+      'append_local_archive_export_chunk',
       'audit_local_library',
       'collect_local_garbage',
     ]);
