@@ -666,45 +666,34 @@ async fn audit_local_library(
     result
 }
 
-/// 读取一个本地 Web 包的原始 ZIP 字节。
 ///
-/// **按 `contentDigest` 查，不是按包 id。** 共享端口 `WebPackageRepository.readArchive(digest)`
-/// 与 Web 的 IndexedDB adapter 都以 manifest 摘要为键，业务侧传的也正是 `record.ref.digest`。
-/// 把它当成包 id 会让真实读取路径必然落空（manifest 摘要永远不是 `wp_…` 形式）。
+/// **已修：这条命令是 `async`，不再冻结主线程。** Tauri 2 对非 `async` 命令在主线程上跑它，
+/// 而这条命令做的是一次 `std::fs::read` 加一次完整 SHA-256 校验（最多 64 MiB）。D2.3 的导出对每个
+/// Web 包都要读一遍字节，所以导出会按包数冻结渲染层。
 ///
-/// **返回 raw 响应（`tauri::ipc::Response`），渲染层拿到 `ArrayBuffer`。** 这里曾经返回
-/// `{b64, len}` 信封：base64 带来约 33% 体积开销外加一次解码峰值，而 D2.3 的导出**每个 Web 包都要
-/// 读一遍**——整包路径的 1.33× 峰值就此出现在导出期间。（`DESK-064` 要求的"二进制载荷自带长度"
-/// 在 raw 响应下由传输层本身满足：字节数就是长度，不存在需要额外声明的截断。）
-///
-/// 请求仍然走结构化参数：`tauri::ipc::Response` 只影响响应方向，"raw 请求无法携带结构化参数"
-/// 那条限制限制的是请求体，因此读取方向不需要任何自定义封包（`DESK-070` 字节传输）。
-///
-/// **这条路径现在依赖自定义 IPC 协议。** `DESK-071b` 记录了 raw IPC 在协议不可用时**静默**回退到
-/// `postMessage`，而那条路径会把响应体 `serde_json` 序列化成 JSON——对 `Vec<u8>` 就是一串
-/// `number[]`。渲染层因此会拿到 `number[]` 而不是 `ArrayBuffer`，`fromRawBytes` 会拒绝它。静默降级
-/// 变成了响亮的失败（比旧行为好：用户至少看到"归档不是 raw 字节"，而不是悄悄多付 33% 体积与一次
-/// 解码峰值），但这条依赖此前**只**为写入方向的分块记在计划的开放门禁里；读取方向现在同样受它
-/// 约束，因此两处注释与计划都要写明。
-///
-/// **另一个已知代价：这条命令不是 `async`。** Tauri 2 因此在主线程上跑它，于是每次读取都在主
-/// 线程做一次 `std::fs::read` 加一次完整 SHA-256 重算（最大 64 MiB）。D2.3 的导出对每个 Web 包都要
-/// 读一遍字节，所以导出会按包数冻结渲染层。改成 `async` + `spawn_blocking` 需要 `LocalLibrary`
-/// 有一个可跨线程的句柄（它目前没有 `Clone`），因此单独记在计划的待办里，而不是顺手改结构。
+/// 模式直接借用 [`collect_local_garbage`]：`AppHandle` + `spawn_blocking` + `state::<LocalLibrary>()`。之前这里写着"需要
+/// `LocalLibrary` 有一个可跨线程的句柄（它目前没有 `Clone`）"，并把它当作不改的理由——那一条不对：
+/// [`collect_local_garbage`] 与审计命令早就在做完全同一件事，而它们不需要 `LocalLibrary: Clone`。
 #[tauri::command]
-fn read_web_package_archive(
-    library: State<'_, LocalLibrary>,
+async fn read_web_package_archive(
+    app: tauri::AppHandle,
     content_digest: String,
 ) -> Result<tauri::ipc::Response, web_package::SaveWebPackageError> {
-    let digest = library
-        .packages()
-        .archive_digest_for_content_digest(&content_digest)
-        .map_err(web_package::SaveWebPackageError::Store)?;
-    let digest = digest.ok_or(web_package::SaveWebPackageError::Blob(
-        blob::BlobError::NotFound,
-    ))?;
-    let bytes = library.blobs().read(&digest)?;
-    Ok(tauri::ipc::Response::new(bytes))
+    let handle = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let library = handle.state::<LocalLibrary>();
+        let digest = library
+            .packages()
+            .archive_digest_for_content_digest(&content_digest)
+            .map_err(web_package::SaveWebPackageError::Store)?
+            .ok_or(web_package::SaveWebPackageError::Blob(
+                blob::BlobError::NotFound,
+            ))?;
+        let bytes = library.blobs().read(&digest)?;
+        Ok::<_, web_package::SaveWebPackageError>(tauri::ipc::Response::new(bytes))
+    })
+    .await
+    .map_err(|_| web_package::SaveWebPackageError::Store(store::StoreError::Failure))?
 }
 
 /// 开启一次导出归档。
