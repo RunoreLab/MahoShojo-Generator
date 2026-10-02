@@ -16,6 +16,7 @@ import {
   LOCAL_LIBRARY_ARCHIVE_TOO_LARGE_CODE,
   LocalLibraryArchiveTooLargeError,
   MAX_LOCAL_LIBRARY_ARCHIVE_INPUT_BYTES,
+  MAX_LOCAL_LIBRARY_ARCHIVE_OUTPUT_BYTES,
   packLocalLibraryArchive,
 } from '@mahoshojo/local-library/archive-pack';
 
@@ -293,11 +294,31 @@ describe('packLocalLibraryArchive', () => {
     await expect(packLocalLibraryArchive(tampered, readFrom(entries))).rejects.toThrow();
   });
 
-  it('defaults to the documented archive input cap', async () => {
+  it('rejects an archive whose zipSync output exceeds the output cap', async () => {
+    // 输入预算不等于输出文件大小：ZIP 的 local header / central directory / EOCD 都是开销。
+    // 只断言输入预算时，一个条目极多、载荷极小的库可以悄悄产出超长归档。
+    const { manifest, entries } = createLibrary();
+    const read = readFrom(entries);
+    const withinInput = await packLocalLibraryArchive(manifest, read);
+    expect(withinInput.bytes.byteLength).toBeGreaterThan(0);
+
+    await expect(packLocalLibraryArchive(manifest, read, {
+      maxOutputBytes: withinInput.bytes.byteLength - 1,
+    })).rejects.toMatchObject({
+      code: LOCAL_LIBRARY_ARCHIVE_TOO_LARGE_CODE,
+      dimension: 'output',
+      actualBytes: withinInput.bytes.byteLength,
+      limitBytes: withinInput.bytes.byteLength - 1,
+    });
+  });
+
+it('the output cap is a separate constant even though both are 256 MiB today', () => {
+    expect(MAX_LOCAL_LIBRARY_ARCHIVE_OUTPUT_BYTES).toBe(256 * 1024 * 1024);
+    expect(MAX_LOCAL_LIBRARY_ARCHIVE_OUTPUT_BYTES).toBeGreaterThan(0);
+  });
+
+it('defaults to the documented archive input cap', async () => {
     // 上限是 DESK-070 的可诊断承诺；它由实测推导，改动需重跑实测脚本。
-    //
-    // 断言的是**输入**上限：最终归档文件长度另有一条断言（D2.3b2 落地），因为 ZIP 的
-    // local header / central directory / EOCD 开销使两者不相等。
     expect(MAX_LOCAL_LIBRARY_ARCHIVE_INPUT_BYTES).toBe(256 * 1024 * 1024);
     expect(MAX_LOCAL_LIBRARY_ARCHIVE_INPUT_BYTES).toBeGreaterThan(64 * 1024 * 1024);
   });

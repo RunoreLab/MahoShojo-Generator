@@ -67,7 +67,8 @@ const RECORD_DEFLATE_LEVEL = 6;
  *   与 EOCD 开销，条目多时输入预算不等于输出文件大小；
  * - 单次 raw IPC 块大小（仅 Desktop）。
  *
- * 三者 `MUST NOT` 互相充当。前者已实现，后两者是 D2.3b2 的工作。
+ * 三者 `MUST NOT` 互相充当。三者现已各自落地：输入预算在本文件、输出上限在本文件 `zipSync` 之后、
+ * IPC 块在 Desktop 的桥接层。
  *
  * 与 `MAX_BLOB_BYTES`（单个 blob 的 64 MiB）**无关**：一个含几十个 Web 包的归档轻松超过它，而每个
  * 包都远小于 64 MiB（`DESK-070`）。
@@ -90,6 +91,20 @@ const RECORD_DEFLATE_LEVEL = 6;
  */
 export const MAX_LOCAL_LIBRARY_ARCHIVE_INPUT_BYTES = 256 * 1024 * 1024;
 
+/**
+ * **最终归档文件**字节上限，即 `zipSync` 产出的那段字节的长度。
+ *
+ * 与 {@link MAX_LOCAL_LIBRARY_ARCHIVE_INPUT_BYTES} 分开命名、分开断言，理由是 ZIP 有 local header、
+ * central directory 与 EOCD 开销：输入预算不等于输出文件大小，条目数多时这部分开销可观。V1 两值
+ * 同为 256 MiB，因此 `tests/desktop-archive-byte-budget.test.ts` 仍把两侧绑在一起——但那是**当前**
+ * 取值下的绑定，不是"它们是同一个东西"的绑定。
+ *
+ * 为什么在共享层断言而只靠 native 兜底不够：native 那条核对发生在打包的内存与 CPU 代价已经付完
+ * 之后，而 Web 侧的导出**不经过 Rust**。"输入预算与输出上限是两个概念"这条不变量因此必须由写字节
+ * 的地方自己守住，否则它在 Web 侧就是一句空话。
+ */
+export const MAX_LOCAL_LIBRARY_ARCHIVE_OUTPUT_BYTES = 256 * 1024 * 1024;
+
 export const LOCAL_LIBRARY_ARCHIVE_TOO_LARGE_CODE = 'archive-too-large' as const;
 
 /**
@@ -101,8 +116,10 @@ export const LOCAL_LIBRARY_ARCHIVE_TOO_LARGE_CODE = 'archive-too-large' as const
 export type LocalLibraryArchiveReader = (_path: string) => Promise<Uint8Array>;
 
 export interface PackLocalLibraryArchiveOptions {
-  /** 覆盖默认上限。**只供测量与测试使用**；生产路径走 `MAX_LOCAL_LIBRARY_ARCHIVE_INPUT_BYTES`。 */
+  /** 覆盖默认的**输入**上限。**只供测量与测试使用**；生产路径走 `MAX_LOCAL_LIBRARY_ARCHIVE_INPUT_BYTES`。 */
   readonly maxTotalBytes?: number;
+  /** 覆盖默认的**输出**上限。**只供测试使用**；生产路径走 `MAX_LOCAL_LIBRARY_ARCHIVE_OUTPUT_BYTES`。 */
+  readonly maxOutputBytes?: number;
 }
 
 export interface PackedLocalLibraryArchive {
@@ -148,6 +165,8 @@ const withCanonicalOrder = (
  * 2. 读之后核对累计——否则一个返回 2 倍字节的来源会让归档悄悄超出上限，而上限正是这里要防的东西。
  *
  * 只做第 2 步，上限就退化成事后观测；只做第 1 步，则对不诚实的来源完全失效。
+ *
+ * **输出**上限另在 `zipSync` 之后断言一次（`DESK-070`）：它度量的不是同一段字节，因此不是重复。
  */
 export const packLocalLibraryArchive = async (
   manifestInput: LocalLibraryArchiveManifestV2,
@@ -155,6 +174,7 @@ export const packLocalLibraryArchive = async (
   options: PackLocalLibraryArchiveOptions = {},
 ): Promise<PackedLocalLibraryArchive> => {
   const maxTotalBytes = options.maxTotalBytes ?? MAX_LOCAL_LIBRARY_ARCHIVE_INPUT_BYTES;
+  const maxOutputBytes = options.maxOutputBytes ?? MAX_LOCAL_LIBRARY_ARCHIVE_OUTPUT_BYTES;
   const manifest = withCanonicalOrder(LocalLibraryArchiveManifestV2Schema.parse(manifestInput));
   assertArchivePathsAgree(manifest);
   const manifestBytes = new TextEncoder().encode(JSON.stringify(manifest, null, 2));
@@ -163,7 +183,7 @@ export const packLocalLibraryArchive = async (
   const declaredTotal = manifestBytes.byteLength
     + layout.reduce((sum, item) => sum + item.declaredByteLength, 0);
   if (declaredTotal > maxTotalBytes) {
-    throw new LocalLibraryArchiveTooLargeError(declaredTotal, maxTotalBytes);
+    throw new LocalLibraryArchiveTooLargeError(declaredTotal, maxTotalBytes, 'input');
   }
 
   const files: Record<string, Uint8Array | [Uint8Array, { level: number; mtime: Date }]> = {
@@ -174,13 +194,20 @@ export const packLocalLibraryArchive = async (
     const bytes = await read(item.path);
     totalByteLength += bytes.byteLength;
     if (totalByteLength > maxTotalBytes) {
-      throw new LocalLibraryArchiveTooLargeError(totalByteLength, maxTotalBytes);
+      throw new LocalLibraryArchiveTooLargeError(totalByteLength, maxTotalBytes, 'input');
     }
     files[item.path] = item.store ? [bytes, { level: 0, mtime: ZIP_MTIME }] : bytes;
   }
 
+  const bytes = zipSync(files as Zippable, { level: RECORD_DEFLATE_LEVEL, mtime: ZIP_MTIME });
+  // 输出上限在这之后才有意义：`zipSync` 之前那段字节还不存在。此时失败已经付出了完整的打包
+  // 代价，但那是唯一能拿到真实归档长度的地方——用输入预算代替它就是让两个概念互相充当。
+  if (bytes.byteLength > maxOutputBytes) {
+    throw new LocalLibraryArchiveTooLargeError(bytes.byteLength, maxOutputBytes, 'output');
+  }
+
   return {
-    bytes: zipSync(files as Zippable, { level: RECORD_DEFLATE_LEVEL, mtime: ZIP_MTIME }),
+    bytes,
     totalByteLength,
     entryCount: layout.length + 1,
   };
@@ -192,6 +219,9 @@ export const packLocalLibraryArchive = async (
  * 独立错误类型而非裸 `RangeError`：UI **MUST** 能把它与"某个条目坏了"区分开，并给出可诊断
  * 提示。`DESK-070` 要求以可诊断错误失败，`MUST NOT` 静默截断。
  *
+ * `dimension` 区分被撞到的是哪一条预算。两个上限当前同值，但它们度量的不是同一段字节——合成
+ * 一个上限会让"ZIP 开销"这类偏差无处可归，而症状（导出失败）与根因（条目太多）完全无关。
+ *
  * 字段显式声明而**不**用构造函数参数属性（`constructor(readonly x: T)`）：本类必须能被
  * `scripts/measure-archive-memory.mjs` 在 Node 的 `--experimental-strip-types` 下直接加载，而
  * 该模式不支持参数属性。为了让实测工具免于依赖打包器或 tsx，源码这一处刻意保持朴素。
@@ -200,12 +230,14 @@ export class LocalLibraryArchiveTooLargeError extends Error {
   readonly code = LOCAL_LIBRARY_ARCHIVE_TOO_LARGE_CODE;
   readonly actualBytes: number;
   readonly limitBytes: number;
+  readonly dimension: 'input' | 'output';
 
-  constructor(actualBytes: number, limitBytes: number) {
-    super(`portable archive 超出上限：${actualBytes} > ${limitBytes} 字节`);
+  constructor(actualBytes: number, limitBytes: number, dimension: 'input' | 'output') {
+    super(`portable archive ${dimension === 'input' ? '输入' : '输出'}超出上限：${actualBytes} > ${limitBytes} 字节`);
     this.name = 'LocalLibraryArchiveTooLargeError';
     this.actualBytes = actualBytes;
     this.limitBytes = limitBytes;
+    this.dimension = dimension;
   }
 }
 
