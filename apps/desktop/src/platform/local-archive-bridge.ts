@@ -10,6 +10,7 @@ import {
 } from '@mahoshojo/local-library/archive-export';
 import {
   LOCAL_LIBRARY_ARCHIVE_TOO_LARGE_CODE,
+  LocalLibraryArchiveEntryMismatchError,
   LocalLibraryArchiveTooLargeError,
   MAX_LOCAL_LIBRARY_ARCHIVE_INPUT_BYTES,
   packLocalLibraryArchive,
@@ -166,6 +167,11 @@ export const exportLocalLibraryArchive = async (
     });
   } catch (cause) {
     if (cause instanceof LocalLibraryArchiveTooLargeError) throw cause;
+    // 条目在 collect 与 pack 之间变了。这不是"归档组装失败"，是"请重试"，所以原样透传：
+    // 换成一句通用文案会把一个可重试的瞬时竞态报成不可恢复的失败。
+    if (cause instanceof LocalLibraryArchiveEntryMismatchError) {
+      throw new LocalArchiveExportError('export-race', cause.message);
+    }
     throw new LocalArchiveExportError('export-failure', '组装导出归档失败');
   }
 

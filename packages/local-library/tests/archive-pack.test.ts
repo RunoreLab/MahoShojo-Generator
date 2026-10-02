@@ -14,17 +14,17 @@ import {
 } from '@mahoshojo/local-library/archive';
 import {
   LOCAL_LIBRARY_ARCHIVE_TOO_LARGE_CODE,
+  LocalLibraryArchiveEntryMismatchError,
   LocalLibraryArchiveTooLargeError,
   MAX_LOCAL_LIBRARY_ARCHIVE_INPUT_BYTES,
   MAX_LOCAL_LIBRARY_ARCHIVE_OUTPUT_BYTES,
   packLocalLibraryArchive,
 } from '@mahoshojo/local-library/archive-pack';
+import { sha256DigestOfBytes } from '@mahoshojo/local-library/digest';
 
 import { createLocalWebPackageRecord } from './web-package-fixtures';
 
 const digest = (hex: string): string => `sha256:${hex}`;
-const HEX_A = 'a'.repeat(64);
-const HEX_B = 'b'.repeat(64);
 const HEX_C = 'c'.repeat(64);
 
 const encoder = new TextEncoder();
@@ -46,12 +46,16 @@ const distinctHex = (index: number): string => {
  *
  * 刻意**不**手写摘要：`archivePath` 必须由 `archiveDigest` 推导（`DESK-059c`），手写摘要
  * 就要同时维护三个字段的一致性，而不一致的夹具会让真正的门禁看起来像坏了。
+ *
+ * `async` 是因为摘要必须是**真的**：打包时逐条复核长度与摘要之后，一个写着 `digest(HEX_B)`
+ * 却装着别内容的夹具会被正确地拒绝，于是整个文件都会红，而根因是夹具不再自洽。用
+ * `sha256DigestOfBytes`（生产同款）而不是 `node:crypto` 手算，是为了让夹具无法与实现漂移。
  */
-const createLibrary = (options: { cardCount?: number; packageCount?: number } = {}) => {
+const createLibrary = async (options: { cardCount?: number; packageCount?: number } = {}) => {
   const { cardCount = 2, packageCount = 2 } = options;
   const entries = new Map<string, Uint8Array>();
 
-  const cards = Array.from({ length: cardCount }, (_, index) => {
+  const cardsPending = Array.from({ length: cardCount }, async (_, index) => {
     const id = `lc_${distinctHex(index + 1).slice(0, 32)}`;
     const record = {
       id,
@@ -72,14 +76,14 @@ const createLibrary = (options: { cardCount?: number; packageCount?: number } = 
       cardId: id,
       path,
       contentDigest: record.contentDigest,
-      checksum: digest(HEX_B),
+      checksum: await sha256DigestOfBytes(bytes),
       byteLength: bytes.byteLength,
     };
   });
+  const cards = await Promise.all(cardsPending);
 
-  const webPackages = Array.from({ length: packageCount }, (_, index) => {
+  const webPackagesPending = Array.from({ length: packageCount }, async (_, index) => {
     const contentDigest = digest(distinctHex(index + 1));
-    const archiveDigest = digest(distinctHex(index + 101));
     const record: LocalWebPackageRecordV1 = createLocalWebPackageRecord({
       id: deriveLocalWebPackageId(contentDigest),
       contentDigest,
@@ -89,19 +93,23 @@ const createLibrary = (options: { cardCount?: number; packageCount?: number } = 
     const recordBytes = encoder.encode(JSON.stringify(record, null, 2));
     const path = localLibraryArchiveWebPackagePath(localLibraryArchiveStem(record.id));
     const archiveBytes = encoder.encode(`PK\x03\x04 fake zip payload ${index} `.repeat(64));
+    // 先有字节、再有摘要、最后才有路径：顺序反了就会出现一个指向不存在内容的 archivePath。
+    const archiveDigest = await sha256DigestOfBytes(archiveBytes);
+    const archivePath = localLibraryArchiveWebPackageArchivePath(archiveDigest);
     entries.set(path, recordBytes);
-    entries.set(localLibraryArchiveWebPackageArchivePath(archiveDigest), archiveBytes);
+    entries.set(archivePath, archiveBytes);
     return {
       packageId: record.id,
       path,
       contentDigest: record.contentDigest,
-      checksum: digest(HEX_B),
+      checksum: await sha256DigestOfBytes(recordBytes),
       byteLength: recordBytes.byteLength,
-      archivePath: localLibraryArchiveWebPackageArchivePath(archiveDigest),
+      archivePath,
       archiveDigest,
       archiveByteLength: archiveBytes.byteLength,
     };
   });
+  const webPackages = await Promise.all(webPackagesPending);
 
   const manifest = {
     format: 'mahoshojo-local-library',
@@ -124,14 +132,14 @@ const readFrom = (entries: Map<string, Uint8Array>) => async (path: string): Pro
   return bytes;
 };
 
-const packFixture = (options: Parameters<typeof createLibrary>[0] = {}, packOptions = {}) => {
-  const { manifest, entries } = createLibrary(options);
+const packFixture = async (options: Parameters<typeof createLibrary>[0] = {}, packOptions = {}) => {
+  const { manifest, entries } = await createLibrary(options);
   return packLocalLibraryArchive(manifest, readFrom(entries), packOptions);
 };
 
 describe('packLocalLibraryArchive', () => {
   it('produces an archive that unzips back to exactly the bytes it was given', async () => {
-    const { manifest, entries } = createLibrary();
+    const { manifest, entries } = await createLibrary();
     const packed = await packLocalLibraryArchive(manifest, readFrom(entries));
     const extracted = unzipSync(packed.bytes);
 
@@ -164,7 +172,7 @@ describe('packLocalLibraryArchive', () => {
     // contentDigest / archiveDigest，不能比较整个归档的字节摘要；反过来"打包逻辑变了没有"
     // 才是在固定 exportedAt 的前提下比字节。两种用途一旦混淆，症状是"同一份库两次导出摘要
     // 不同"，而根因是调用方问错了问题。
-    const { manifest, entries } = createLibrary();
+    const { manifest, entries } = await createLibrary();
     const base = await packLocalLibraryArchive(manifest, readFrom(entries));
     const later = await packLocalLibraryArchive(
       { ...manifest, exportedAt: '2026-06-30T12:34:56.000Z' } as LocalLibraryArchiveManifestV2,
@@ -185,7 +193,7 @@ describe('packLocalLibraryArchive', () => {
   it('is independent of the order entries appear in the manifest', async () => {
     // 清单数组的顺序来自数据库查询/游标的实现细节。让它影响输出字节，等于让"两份相同的库"
     // 产出不同的归档摘要——而症状（摘要漂移）与根因（打包顺序）完全无关。
-    const { manifest, entries } = createLibrary({ cardCount: 4, packageCount: 3 });
+    const { manifest, entries } = await createLibrary({ cardCount: 4, packageCount: 3 });
     const forward = await packLocalLibraryArchive(manifest, readFrom(entries));
     const shuffled = await packLocalLibraryArchive({
       ...manifest,
@@ -199,12 +207,12 @@ describe('packLocalLibraryArchive', () => {
     // 双压缩既不省体积又烧 CPU。判据是"归档体积 ≈ 输入体积"：记录 JSON 会被压掉不少，
     // 所以只要 ZIP 真的被压了，归档就会明显小于输入。
     const highlyCompressible = encoder.encode('A'.repeat(4 * 1024 * 1024));
-    const { manifest, entries } = createLibrary({ packageCount: 0 });
+    const { manifest, entries } = await createLibrary({ packageCount: 0 });
     manifest.webPackageCount = 1;
     manifest.cards = [];
     manifest.cardCount = 0;
     const packageId = 'wp_probe';
-    const archiveDigest = digest(HEX_B);
+    const archiveDigest = await sha256DigestOfBytes(highlyCompressible);
     const archivePath = localLibraryArchiveWebPackageArchivePath(archiveDigest);
     const recordBytes = encoder.encode(JSON.stringify({ id: packageId }, null, 2));
     const path = localLibraryArchiveWebPackagePath(packageId);
@@ -214,7 +222,7 @@ describe('packLocalLibraryArchive', () => {
       packageId,
       path,
       contentDigest: digest(HEX_C),
-      checksum: digest(HEX_A),
+      checksum: await sha256DigestOfBytes(recordBytes),
       byteLength: recordBytes.byteLength,
       archivePath,
       archiveDigest,
@@ -229,7 +237,7 @@ describe('packLocalLibraryArchive', () => {
 
   it('compresses record JSON', async () => {
     // store 只针对 Web 包 ZIP；记录 JSON 仍应被压掉，否则白扛一份体积。
-    const { manifest, entries } = createLibrary({ cardCount: 8, packageCount: 0 });
+    const { manifest, entries } = await createLibrary({ cardCount: 8, packageCount: 0 });
     const packed = await packLocalLibraryArchive(manifest, readFrom(entries));
     const extracted = unzipSync(packed.bytes);
     const jsonBytes = Object.entries(extracted)
@@ -241,7 +249,7 @@ describe('packLocalLibraryArchive', () => {
 
   it('rejects an oversized library before reading anything', async () => {
     // 上限若只在读完才检查，超限分配已经发生——"上限"就退化成事后观测。
-    const { manifest } = createLibrary();
+    const { manifest } = await createLibrary();
     const read = vi.fn();
     await expect(packLocalLibraryArchive(manifest, read as never, { maxTotalBytes: 1 }))
       .rejects.toBeInstanceOf(LocalLibraryArchiveTooLargeError);
@@ -251,18 +259,24 @@ describe('packLocalLibraryArchive', () => {
   it('rejects a source that returns more bytes than the manifest declared', async () => {
     // 只按声明求和的检查对不诚实的来源完全失效：清单说 1 KiB，实际给 10 MiB，归档悄悄
     // 超出上限——而上限正是这里要防的东西。
-    const { manifest, entries } = createLibrary({ cardCount: 1, packageCount: 0 });
+    //
+    // 逐条长度复核把这条从"超限"变成了"清单与来源不符"，**并且更早**：谎报的长度先被抓住，
+    // 那 2 MiB 根本进不了预算累加。这不是把原断言换掉，而是把它升级成更强的失败点。
+    const { manifest, entries } = await createLibrary({ cardCount: 1, packageCount: 0 });
     const path = manifest.cards[0]!.path;
     const inflated = new Uint8Array(2 * 1024 * 1024);
-    await expect(packLocalLibraryArchive(manifest, async (requested) => (
+    const failure = await packLocalLibraryArchive(manifest, async (requested) => (
       requested === path ? inflated : entries.get(requested)!
-    ), { maxTotalBytes: 1024 * 1024 })).rejects.toMatchObject({
-      code: LOCAL_LIBRARY_ARCHIVE_TOO_LARGE_CODE,
-    });
+    ), { maxTotalBytes: 1024 * 1024 }).then(
+      () => { throw new Error('应当拒绝谎报长度的来源'); },
+      (cause: unknown) => cause,
+    );
+    expect(failure).toBeInstanceOf(LocalLibraryArchiveEntryMismatchError);
+    expect(failure).toMatchObject({ code: 'archive-entry-mismatch', path });
   });
 
   it('reports the limit it actually applied', async () => {
-    const { manifest, entries } = createLibrary();
+    const { manifest, entries } = await createLibrary();
     await expect(packLocalLibraryArchive(manifest, readFrom(entries), { maxTotalBytes: 1 }))
       .rejects.toMatchObject({ actualBytes: expect.any(Number), limitBytes: 1 });
   });
@@ -270,7 +284,7 @@ describe('packLocalLibraryArchive', () => {
   it('validates the manifest before writing anything', async () => {
     // 唯一能保证"写出的归档能被自己的导入侧接受"的地方就是写入点。让下游去发现
     // "自己刚写的归档打不开"，定位成本高得多。
-    const { manifest } = createLibrary();
+    const { manifest } = await createLibrary();
     const read = vi.fn();
     await expect(packLocalLibraryArchive(
       { ...manifest, webPackageCount: 99 } as LocalLibraryArchiveManifestV2,
@@ -282,7 +296,7 @@ describe('packLocalLibraryArchive', () => {
   it('rejects a manifest whose archivePath disagrees with its archiveDigest', async () => {
     // schema 管形状，这条管"两个概念是否指向同一件事"。让路径规则改了而某个构造点忘了更新，
     // 应该是一次立即失败，而不是一次内容地址错位、症状与根因无关的导入失败。
-    const { manifest, entries } = createLibrary();
+    const { manifest, entries } = await createLibrary();
     const tampered = {
       ...manifest,
       webPackages: manifest.webPackages.map((entry) => ({
@@ -294,10 +308,56 @@ describe('packLocalLibraryArchive', () => {
     await expect(packLocalLibraryArchive(tampered, readFrom(entries))).rejects.toThrow();
   });
 
+  it('rejects an entry that changed between collect and pack, and names it', async () => {
+    // 这是**导出侧**最危险的一条：清单里的 `checksum` / `archiveDigest` 是上一次读取时算的，而
+    // 本函数会再读一次。Web 包尤其危险——`WebPackageStore::save()` 允许同一个 canonical package id
+    // 被重新导入并把 `digest` 更新到新 blob。两个 ZIP 可以有相同的 package manifest、相同的
+    // `ref.digest`，却因为压缩参数或布局不同而拥有不同字节摘要。
+    //
+    // 不复核的失败模式极其难查：清单说 hash(A)、归档里是 B，而**导入器随后会拒绝它**——于是用户
+    // 导出了一个打不开的文件，UI 却显示成功。
+    const { manifest, entries } = await createLibrary({ cardCount: 1, packageCount: 1 });
+    const cardPath = manifest.cards[0]!.path;
+    const packageArchivePath = manifest.webPackages[0]!.archivePath;
+    // 长度相同、内容不同 ⇒ 只有摘要检查能抓住，这是更强的用例。
+    const swapped = new Map(entries);
+    swapped.set(cardPath, encoder.encode('X'.repeat(entries.get(cardPath)!.byteLength)));
+    swapped.set(packageArchivePath, encoder.encode('Y'.repeat(entries.get(packageArchivePath)!.byteLength)));
+
+    const failure = await packLocalLibraryArchive(manifest, readFrom(swapped)).then(
+      () => { throw new Error('应当拒绝与清单摘要不符的条目'); },
+      (cause: unknown) => cause,
+    );
+    expect(failure).toBeInstanceOf(LocalLibraryArchiveEntryMismatchError);
+    expect(failure).toMatchObject({ path: cardPath });
+    expect((failure as Error).message).toContain(cardPath);
+  });
+
+  it('rejects a web package ZIP whose bytes changed under a still-matching path', async () => {
+    // 上一条证明了"清单说谎"，这一条证明"来源说谎"：路径由 `archiveDigest` 推导，所以 ZIP 内容变了
+    // 而路径不变，意味着**只有**逐条摘要复核能发现它。Web 包导入正是把这条 ZIP 重新写回另一台
+    // 机器的地方，所以它必须在这里就被挡住。
+    const { manifest, entries } = await createLibrary({ cardCount: 0, packageCount: 1 });
+    const archivePath = manifest.webPackages[0]!.archivePath;
+    const original = entries.get(archivePath)!;
+    const reencoded = new Uint8Array(original.byteLength);
+    reencoded.set(original.subarray(0, original.byteLength - 1));
+    reencoded[reencoded.byteLength - 1] = original[original.byteLength - 1] ^ 0xff;
+    const swapped = new Map(entries);
+    swapped.set(archivePath, reencoded);
+
+    const failure = await packLocalLibraryArchive(manifest, readFrom(swapped)).then(
+      () => { throw new Error('应当拒绝内容变化的 Web 包 ZIP'); },
+      (cause: unknown) => cause,
+    );
+    expect(failure).toBeInstanceOf(LocalLibraryArchiveEntryMismatchError);
+    expect(failure).toMatchObject({ path: archivePath });
+  });
+
   it('rejects an archive whose zipSync output exceeds the output cap', async () => {
     // 输入预算不等于输出文件大小：ZIP 的 local header / central directory / EOCD 都是开销。
     // 只断言输入预算时，一个条目极多、载荷极小的库可以悄悄产出超长归档。
-    const { manifest, entries } = createLibrary();
+    const { manifest, entries } = await createLibrary();
     const read = readFrom(entries);
     const withinInput = await packLocalLibraryArchive(manifest, read);
     expect(withinInput.bytes.byteLength).toBeGreaterThan(0);

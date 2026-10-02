@@ -1,6 +1,8 @@
 import { zipSync, type Zippable } from 'fflate';
 import { ZIP_DOS_EPOCH } from '@mahoshojo/contracts/zip';
 
+import { sha256DigestOfBytes } from './digest';
+
 import {
   LOCAL_LIBRARY_ARCHIVE_MANIFEST_PATH,
   type LocalLibraryArchiveManifestV2,
@@ -108,6 +110,27 @@ export const MAX_LOCAL_LIBRARY_ARCHIVE_OUTPUT_BYTES = 256 * 1024 * 1024;
 export const LOCAL_LIBRARY_ARCHIVE_TOO_LARGE_CODE = 'archive-too-large' as const;
 
 /**
+ * 条目的实际字节与清单声明不符。
+ *
+ * 独立错误类型而非裸 `Error`：它与"超限"是两回事——超限是**这份库太大**，而这一条是**这份库在
+ * 打包期间变了**。UI 对前者的动作是"删东西或等流式实现"，对后者是"重试一次导出"。合成一个错误
+ * 会让两种完全不同的用户动作得到同一句提示。
+ *
+ * 字段显式声明而不���构造函数参数属性的理由与 {@link LocalLibraryArchiveTooLargeError} 相同：
+ * 本类同样要能被 `scripts/measure-archive-memory.mjs` 在 `--experimental-strip-types` 下加载。
+ */
+export class LocalLibraryArchiveEntryMismatchError extends Error {
+  readonly code = 'archive-entry-mismatch' as const;
+  readonly path: string;
+
+  constructor(_path: string, message: string) {
+    super(message);
+    this.name = 'LocalLibraryArchiveEntryMismatchError';
+    this.path = _path;
+  }
+}
+
+/**
  * 归档读取器。按归档内路径取字节。
  *
  * 键是**路径**而不是"卡片/包"这类实体概念：包层因此不需要知道字节来自 SQLite、IndexedDB、
@@ -192,6 +215,31 @@ export const packLocalLibraryArchive = async (
   let totalByteLength = manifestBytes.byteLength;
   for (const item of layout) {
     const bytes = await read(item.path);
+    // **逐条重新核对长度与摘要。** 清单里的 `checksum` / `archiveDigest` 是 `collectLocalLibraryArchive`
+    // 在**上一次**读取时算出来的，而本函数会在打包时**再次**读取同一条目——Web 包的 ZIP 尤其如此，
+    // 因为它在 collect 与 pack 之间要跨过一次几百 MiB 的组装。
+    //
+    // 这中间源可能变：`WebPackageStore::save()` 允许同一个 canonical package id 被重新导入，并把
+    // `digest` 更新到新的 blob（`ON CONFLICT(package_id) DO UPDATE SET digest = excluded.digest`）。
+    // 两个 ZIP 可以有相同的 package manifest、相同的 `ref.digest`，却因为压缩参数或布局不同而拥有
+    // 不同的字节摘要。于是"第一次读 A → 清单写 hash(A) → 第二次读 B → 把 B 写进归档 → 仍沿用
+    // hash(A)"会产出一个**自己的导入器随后会拒绝**的归档，而 UI 显示的是成功。
+    //
+    // 不缓存第一次读到的所有 ZIP 是刻意的：那会把峰值从 1× 抬到 2×，而 `DESK-070` 的 256 MiB 正是
+    // 按 `zipSync` 的 1× 峰值反推的。代价是同一段字节要哈希两次。
+    if (bytes.byteLength !== item.declaredByteLength) {
+      throw new LocalLibraryArchiveEntryMismatchError(
+        item.path,
+        `归档条目长度与清单声明不符：${item.path} 声明 ${item.declaredByteLength}，实际 ${bytes.byteLength}`,
+      );
+    }
+    const digest = await sha256DigestOfBytes(bytes);
+    if (digest !== item.declaredDigest) {
+      throw new LocalLibraryArchiveEntryMismatchError(
+        item.path,
+        `归档条目摘要与清单声明不符：${item.path} 声明 ${item.declaredDigest}，实际 ${digest}`,
+      );
+    }
     totalByteLength += bytes.byteLength;
     if (totalByteLength > maxTotalBytes) {
       throw new LocalLibraryArchiveTooLargeError(totalByteLength, maxTotalBytes, 'input');
@@ -246,6 +294,8 @@ interface ArchiveLayoutItem {
   /** ZIP 内部是否用 store（不压缩）。 */
   readonly store: boolean;
   readonly declaredByteLength: number;
+  /** 清单声明的这条目的字节摘要。打包时**必须**重新核对，见 {@link packLocalLibraryArchive}。 */
+  readonly declaredDigest: string;
 }
 
 /**
@@ -262,15 +312,26 @@ const planArchiveLayout = (manifest: LocalLibraryArchiveManifestV2): ArchiveLayo
   return [
     ...[...manifest.cards]
       .sort(byPath)
-      .map((entry) => ({ path: entry.path, store: false, declaredByteLength: entry.byteLength })),
+      .map((entry) => ({
+        path: entry.path,
+        store: false,
+        declaredByteLength: entry.byteLength,
+        declaredDigest: entry.checksum,
+      })),
     ...[...manifest.webPackages]
       .sort(byPath)
-      .map((entry) => ({ path: entry.path, store: false, declaredByteLength: entry.byteLength })),
+      .map((entry) => ({
+        path: entry.path,
+        store: false,
+        declaredByteLength: entry.byteLength,
+        declaredDigest: entry.checksum,
+      })),
     ...manifest.webPackages
       .map((entry) => ({
         path: entry.archivePath,
         store: true,
         declaredByteLength: entry.archiveByteLength,
+        declaredDigest: entry.archiveDigest,
       }))
       .sort(byPath),
   ];
