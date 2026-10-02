@@ -19,6 +19,11 @@
       "import": "./src/archive-export.ts",
       "default": "./src/archive-export.ts"
     },
+    "./archive-import": {
+      "types": "./src/archive-import.ts",
+      "import": "./src/archive-import.ts",
+      "default": "./src/archive-import.ts"
+    },
     "./archive-pack": {
       "types": "./src/archive-pack.ts",
       "import": "./src/archive-pack.ts",
