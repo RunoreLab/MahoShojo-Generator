@@ -20,10 +20,14 @@
 //!
 //! ## 为什么 temp 交给 RAII 而不是自己维护路径
 //!
-//! 溢出、落盘长度不符、`fsync` 失败、发布失败——每一条都是"已经写了一部分字节、然后失败"的路径，
-//! 每一条都需要删掉 temp。把这个责任放进 [`tempfile::NamedTempFile`] 的 `Drop` 之后，本模块就不必
-//! 在每条错误分支上重复"drop 句柄 + 删文件"，而漏掉某一条的后果是一个几百 MiB 的垃圾文件——
-//! 症状（导出失败、磁盘满了）与根因（某条错误路径忘了清理）完全无关。
+//! 溢出、写失败、落盘长度不符、`fsync` 失败、发布失败——每一条都是"已经写了一部分字节、然后失败"
+//! 的路径。把这个责任放进 [`tempfile::NamedTempFile`] 的 `Drop` 之后，本模块就不必在每条错误
+//! 分支上重复"drop 句柄 + 删文件"，而漏掉某一条的后果是一个几百 MiB 的垃圾文件——症状（导出失败、
+//! 磁盘满了）与根因（某条错误路径忘了清理）完全无关。
+//!
+//! RAII 保证的是**一次删除尝试**，不是删除成功：`TempPath::drop` 忽略 `remove_file` 的错误，因此
+//! 唯一有保证的清理是启动时的 [`ArchiveExport::reclaim_stale_temporaries`]。它也不保证清掉本进程
+//! 之外的残留——那是单实例守卫（`DESK-065` / `DESK-068`）的职责。
 
 use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
@@ -189,6 +193,8 @@ pub struct ArchiveExport {
     paths: ExportPaths,
     next_id: AtomicU64,
     session: Mutex<Option<ExportSession>>,
+    /// 上一次清理里删不掉的 temp 条数，见 [`Self::stale_temporaries_left`]。
+    stale_temporaries_left: AtomicU64,
 }
 
 impl ArchiveExport {
@@ -196,9 +202,11 @@ impl ArchiveExport {
         std::fs::create_dir_all(paths.root()).map_err(|_| ExportError::Unavailable)?;
         Ok(Self {
             paths,
-            // 0 是"没有会话"，因此第一个会话用 1。
+            // 从 1 起而不是 0：0 会让"第一条会话"与"没有会话"在日志里长得一样。真的会话状态由
+            // `Option` 表达，因此 0 本身是合法 id——这个数字只是为了让 id 从 1 开始。
             next_id: AtomicU64::new(1),
             session: Mutex::new(None),
+            stale_temporaries_left: AtomicU64::new(0),
         })
     }
 
@@ -209,6 +217,11 @@ impl ArchiveExport {
     ///
     /// 只删本模块自己命名的 temp（前缀 + 后缀同时匹配）。删"目录里所有看起来像临时文件的东西"
     /// 是不可接受的：这个目录里还有用户可能自己拷进去的备份。
+    ///
+    /// **删不掉不算失败。** 一个残留的 `.partial` 按设计就是惰性的：它不会被当作有效导出，
+    /// 下次启动还会再试一次。让它把应用启动整个卡住是纯粹的损失——`setup` 会把这里的错误
+    /// 往上抛，于是"一个删不掉的临时文件"变成"应用打不开"。因此逐条计数继续，
+    /// 删不掉的条数由 [`Self::stale_temporaries_left`] 如实报告。
     pub fn reclaim_stale_temporaries(&self) -> Result<usize, ExportError> {
         let entries = match std::fs::read_dir(self.paths.root()) {
             Ok(entries) => entries,
@@ -217,16 +230,38 @@ impl ArchiveExport {
             Err(_) => return Err(ExportError::Unavailable),
         };
         let mut removed = 0;
+        let mut failed = 0usize;
         for entry in entries {
-            let entry = entry.map_err(|_| ExportError::Unavailable)?;
+            // 目录项本身读不到（权限、索引器竞争）同样不该中止整轮清理：理由同上。
+            let Ok(entry) = entry else {
+                failed += 1;
+                continue;
+            };
             let name = entry.file_name();
             let name = name.to_string_lossy();
-            if name.starts_with(TEMPORARY_PREFIX) && name.ends_with(TEMPORARY_SUFFIX) {
-                std::fs::remove_file(entry.path()).map_err(|_| ExportError::Failure)?;
-                removed += 1;
+            if !name.starts_with(TEMPORARY_PREFIX) || !name.ends_with(TEMPORARY_SUFFIX) {
+                continue;
+            }
+            match std::fs::remove_file(entry.path()) {
+                Ok(()) => removed += 1,
+                // 已经不在了也算删掉：那是本进程自己刚删掉的。
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => removed += 1,
+                Err(_) => failed += 1,
             }
         }
+        if failed > 0 {
+            self.stale_temporaries_left
+                .store(failed as u64, Ordering::Relaxed);
+        }
         Ok(removed)
+    }
+
+    /// 上一次清理里删不掉的 temp 条数。
+    ///
+    /// 刻意**不**让 [`Self::reclaim_stale_temporaries`] 因此失败（见它的注释），但也不把这件事
+    /// 悄悄咽掉：它说明磁盘或权限有问题，而这个数字是唯一不靠日志就能看到的证据。
+    pub fn stale_temporaries_left(&self) -> usize {
+        self.stale_temporaries_left.load(Ordering::Relaxed) as usize
     }
 
     /// 开启一次导出。
@@ -288,14 +323,20 @@ impl ArchiveExport {
             discard_session(&mut guard);
             return Err(ExportError::Overflow);
         }
-        let next_written = session.written + bytes.len() as u64;
+        let next_written = session
+            .written
+            .checked_add(bytes.len() as u64)
+            .ok_or(ExportError::Overflow)?;
 
+        // 写失败**同样**是终态失败，而且理由与溢出完全一样：`write_all` 可能已经推进了文件游标
+        // （部分写入），而 `written` 停在旧值。留着会话的话，下一块会继续往一个位置已经错乱的
+        // temp 上写，最终以一句无法归类的 `Failure` 收场，同时在磁盘上留一个直到下次 `begin`
+        // 才被回收的几百 MiB temp。溢出被改成终态失败时，这条路径被留在了原地。
         let session = guard.as_mut().ok_or(ExportError::NoSession)?;
-        session
-            .temporary
-            .as_file_mut()
-            .write_all(bytes)
-            .map_err(|_| ExportError::Failure)?;
+        if session.temporary.as_file_mut().write_all(bytes).is_err() {
+            discard_session(&mut guard);
+            return Err(ExportError::Failure);
+        }
         session.written = next_written;
 
         if session.written < session.declared_total {
@@ -308,6 +349,10 @@ impl ArchiveExport {
         let written_byte_length = session.written;
         let target = session.target.clone();
         let session = guard.take().ok_or(ExportError::NoSession)?;
+        // 刻意在发布**之前**放开互斥锁：发布是一次几百 MiB 的 fsync，持有锁会让并发的
+        // `begin`（用户重试一次导出）阻塞到它结束。代价是一个显式且正确的失败：并发的那一轮可能
+        // 在本轮发布之后才发布，届时它的 no-clobber 会失败成 `TargetOccupied`——这是
+        // `DESK-071b` 规定的"失败并让用户重试"，而不是损坏。
         drop(guard);
         let absolute_path = self.publish_session(session, &target)?;
         Ok(AppendExportOutcome {
@@ -326,13 +371,19 @@ impl ArchiveExport {
     /// 另一个进程或用户创建了那个文件，于是这次 rename **覆盖**了它——毁掉用户唯一一份备份，而
     /// 症状是"导出成功"。补第二次 `exists()` 不解决问题，因为窗口只是被挪了位置。
     ///
-    /// `persist_noclobber` 是"目标存在即失败"的原语。它在 Windows 与现代 Linux 上一般原子；
-    /// 它可能把 temp 的原链接留下（那是 `.partial`，启动清理会处理），但它**绝不覆盖**。
+    /// `persist_noclobber` 是"目标存在即失败"的原语。它在 Windows 与现代 Linux 上一般原子，
+    /// 且它**绝不覆盖**（tempfile 文档对这条是明确保证的，与 `persist` 不同）。
+    ///
+    /// 失败时 temp **不会**被留下：`PersistError` 里带着那个 `NamedTempFile`，丢弃它就触发
+    /// `Drop` → 删除。tempfile 文档提到"可能留下原链接"指的是 Unix 上 `unlink` 权限不足的那种
+    /// 情况，本路径不依赖启动清理来收拾它（`temporaries() == vec![]` 那条门禁就在钉这件事）。
     ///
     /// ## 句柄为什么不用显式 `drop`
     ///
-    /// `tempfile` 以 `FILE_SHARE_DELETE` 打开 temp（`blob.rs` 的写入顺序依赖同一条性质），因此
-    /// Windows 上不必"先关句柄再 rename"。
+    /// Windows 上"移动一个仍打开的文件"会被拒绝，而 std 的 `OpenOptions` 默认共享模式包含
+    /// `FILE_SHARE_DELETE`，因此不必先关句柄再 rename。注意这不是 `tempfile` 提供的性质
+    /// （它不设 share mode），而是 std 的默认——一条被实测钉住、但没有编译期保证的 Windows 不变量，
+    /// 与 `blob.rs` 的原子写依赖同一条。
     ///
     /// `session` 按值传入：它在离开互斥锁时已经不可回滚——写入已经发生。此后任何失败都由
     /// `NamedTempFile` 的 `Drop` 删掉 temp。
@@ -355,10 +406,16 @@ impl ArchiveExport {
 
         // 目标被占用时**失败**，而不是换一个名字继续发布：`begin` 回显的 `absolutePath` 因此始终
         // 是真正的最终路径。悄悄换成 `-2` 会把它降级成"仅供参考"，契约复杂度随之上升。
+        //
+        // 只把 `AlreadyExists` 归成 `TargetOccupied`：磁盘满、只读、目录非空都不是撞名，而把它们
+        // 一律报成"重试即可"会让一个磁盘已满的用户反复重试一个永远会失败的导出。
         session
             .temporary
             .persist_noclobber(target)
-            .map_err(|_| ExportError::TargetOccupied)?;
+            .map_err(|error| match error.error.kind() {
+                std::io::ErrorKind::AlreadyExists => ExportError::TargetOccupied,
+                _ => ExportError::Failure,
+            })?;
         sync_parent_dir(self.paths.root());
         Ok(display_path(target))
     }
@@ -417,6 +474,12 @@ fn display_path(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
 
+#[cfg(unix)]
+/// **Windows 上是 no-op**，如实记录该平台没有这项保证而不是假装它存在（与 `blob.rs` 同一处理）。
+///
+/// 缺它不会让读者看到一个半截的 `.zip`：`MoveFileExW` 对可见性是原子的，桥也只在 `complete`
+/// 为真之后才报成功。弱的是**崩溃持久性**——断电后那个目录项可能落成 `.partial` 也可能落成
+/// `.zip`，而启动清理会删掉前者。最坏结果是丢一次导出，不是导出一个坏的归档。
 #[cfg(unix)]
 fn sync_parent_dir(parent: &Path) {
     if let Ok(handle) = std::fs::File::open(parent) {
@@ -513,17 +576,19 @@ mod tests {
         let root = scratch("echo");
         let export = open(&root);
         let begun = export.begin(1).expect("begin");
+        // 此前这条断言把路径与**它自己按 parent + file_name 的重建**比较——对任何有父目录与文件名
+        // 的路径都恒真，什么也没测。改成断言真正的不变式：回显的是导出目录下的 `.zip`，
+        // 而 temp 在被收满之前绝不出现。
+        let planned = PathBuf::from(&begun.absolute_path);
         assert_eq!(
-            PathBuf::from(&begun.absolute_path),
-            PathBuf::from(&begun.absolute_path)
-                .parent()
-                .expect("parent")
-                .join(
-                    PathBuf::from(&begun.absolute_path)
-                        .file_name()
-                        .expect("file name")
-                ),
-            "begin 必须回显最终的绝对路径，而不是 temp"
+            planned.parent(),
+            Some(exports_dir(&root).as_path()),
+            "begin 必须回显导出目录下的最终路径，而不是 temp"
+        );
+        assert!(
+            planned.extension().is_some_and(|ext| ext == "zip"),
+            "最终路径必须以 .zip 结尾：{}",
+            begun.absolute_path
         );
         assert!(!Path::new(&begun.absolute_path).exists());
         let done = export.append(1, b"x").expect("append");
@@ -718,6 +783,33 @@ mod tests {
         // 用户自己拷进目录的备份 MUST NOT 被删。
         assert!(user_copy.exists());
         assert!(unrelated.exists());
+    }
+
+    #[test]
+    fn 删不掉的temp不会让清理失败也不会让应用起不来() {
+        // 一个 `.partial` 按设计就是惰性的：它不会被当作有效导出，下次启动还会再试。让它把
+        // 清理整个卡住是纯粹的损失——`setup` 会把这里的错误往上抛，于是"一个删不掉的临时文件"
+        // 变成"应用打不开"。
+        let root = scratch("undeletable");
+        let export = open(&root);
+        // 用一个**目录**占住那个路径：`remove_file` 对目录会失败，而它仍然带着 temp 的名字，
+        // 因此被本模块的命名规则选中。
+        let stuck = exports_dir(&root).join(format!("{TEMPORARY_PREFIX}77{TEMPORARY_SUFFIX}"));
+        std::fs::create_dir(&stuck).expect("mkdir stuck");
+        let ordinary = exports_dir(&root).join(format!("{TEMPORARY_PREFIX}78{TEMPORARY_SUFFIX}"));
+        std::fs::write(&ordinary, b"stale").expect("write stale");
+
+        // 不返回错误，并且把能删的都删了。
+        assert_eq!(
+            export
+                .reclaim_stale_temporaries()
+                .expect("reclaim must not fail"),
+            1
+        );
+        assert!(!ordinary.exists());
+        assert!(stuck.exists());
+        // 但也不悄悄咽掉：这个数字是不靠日志就能看到"磁盘或权限有问题"的唯一证据。
+        assert_eq!(export.stale_temporaries_left(), 1);
     }
 
     #[test]

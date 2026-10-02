@@ -730,12 +730,21 @@ pub fn run() {
                         format!("cannot prepare the export directory: {error}")
                     },
                 )?;
-            // 清理上一次进程留下的未完成 temp。刻意放在 manage **之前**：它会删磁盘上的文件，
-            // 因此失败必须让启动失败，而不是留一个已经 manage 却在后续命令里报错的半初始化状态。
-            // 顺序在 `InstanceGuard` 之后，与"先抢锁再动磁盘"一致。
-            archive_export
-                .reclaim_stale_temporaries()
-                .map_err(|error| format!("cannot clean up interrupted exports: {error}"))?;
+            // 清理上一次进程留下的未完成 temp。顺序在 `InstanceGuard` 之后，与"先抢锁再动磁盘"
+            // 一致。
+            //
+            // 刻意放在 manage **之前**（它会动磁盘），但**不再让清理失败拖垮启动**：一个删不掉的
+            // `.partial` 按设计是惰性的——它不会被当作有效导出，下次启动还会再试。把它变成
+            // "应用打不开"是纯粹的损失。`reclaim_stale_temporaries` 本身也只把"读不到目录"
+            // 当失败。
+            archive_export.reclaim_stale_temporaries().map_err(|error| {
+                format!("cannot clean up interrupted exports: {error}")
+            })?;
+            let stuck = archive_export.stale_temporaries_left();
+            if stuck > 0 {
+                // 不吞掉：磁盘满或权限不足的证据只有这一条，诊断价值远高于一行噪声。
+                eprintln!("mahoshojo: {stuck} 个未完成的导出临时文件删不掉（磁盘或权限？）");
+            }
 
             app.manage(instance);
             app.manage(library);
@@ -767,8 +776,8 @@ pub fn run() {
             restore_web_package,
             purge_web_package,
             read_web_package_archive,
-    begin_local_archive_export,
-    append_local_archive_export_chunk,
+            begin_local_archive_export,
+            append_local_archive_export_chunk,
             audit_local_library,
             collect_local_garbage
         ])
