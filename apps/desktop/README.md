@@ -2,7 +2,9 @@
 
 MahoShojo Generator 的本地桌面客户端 runtime。它是独立 app，不是远端网站壳；产品页面、主题与业务能力按共享 package 与 Web 共源，而非直接 import `apps/web`。
 
-当前阶段（2026-10-02）：**D1 执行核、D1.5、D2.0–D2.2 与 D2.3a/b/c 的存储/归档桥已落地；归档产品 UI 与整体页面迁移尚未接线**。D2.5/D3 新计划不等于已完成页面。
+当前阶段（2026-10-03）：**D1 执行核、D1.5、D2.0–D2.2、D2.3a/b/c 的存储/归档桥，以及 D2.5a/D2.5b 的共源壳与路由接线、D2.3d 的归档产品 UI 已落地**。首页已是产品页（不再是运行时面板），`/local-library` 提供整库导出与导入，D0 的运行时自述与 Provider 面板移入 `/settings`。整体页面迁移（D3 首页功能卡、百科、`/details` 等）仍未开始。
+
+仍然开放、不记为 PASS 的门禁：`<input type="file">` 在真实 Tauri WebView 中打开原生文件对话框；D2.3 的真实 WebView 内存/响应性与 raw IPC 4 MiB 吞吐/回退；D2.5b 的返回/前进手感与原生窗口关闭（全部路由证据来自 jsdom）；D1 真实 Provider 端点与取消/流。整库**备份与灾难恢复**属 D2.4，回收站 UI 也尚未交付——`/local-library` 提供的是 portable archive，不是备份。
 
 - **D0** skeleton、安全边界与 CI 接线；
 - **D0.5** 持久 secret 接入操作系统凭据存储；
@@ -19,8 +21,10 @@ MahoShojo Generator 的本地桌面客户端 runtime。它是独立 app，不是
 - **D2.2b** 完整性审计：六个分桶的只读报告（缺失、摘要/长度不符、无引用 metadata、孤儿文件、
   记录缺引用、外键违规），`audit_local_library` command 与渲染层分组；
 - **D2.2c** 孤儿 GC：`collect_local_garbage`，只回收无引用 blob，先删 metadata 后删文件。
-- **D2.3a/b/c** portable V2、共享打包/预检导入、Desktop raw 导出与导入桥已落地；**尚未接产品 UI**，真实 WebView 内存/响应性、raw IPC 吞吐/回退门禁仍开放。
-- **D2.3d / D2.4 / D2.5 / D3** 分别继续双端归档 UI、备份恢复、共享产品壳与页面纵切；不因本轮文档更新关闭既有未验收项。
+- **D2.3a/b/c** portable V2、共享打包/预检导入、Desktop raw 导出与导入桥已落地；真实 WebView 内存/响应性、raw IPC 吞吐/回退门禁仍开放。
+- **D2.3d** 双端归档 UI 已接线：`/local-library` 复用 `@mahoshojo/ui-web/local-archive`，Web 用浏览器 adapter、Desktop 用现有窄桥。导出成功只以 native 最终确认判成功；`<input type="file">` 的真机行为待验。
+- **D2.5a/D2.5b** 共源基座与路由接线已落地：`packages/ui-web` 提供主题/导航/能力状态/壳/归档视图；Desktop 用 `@tanstack/react-router` + hash history 的三条 code-based 路由。共享边界门禁（`MONO-005-SHARED-UI-RUNTIME` 等）已生效。
+- **D2.4 / D3** 分别继续备份恢复与页面纵切；不因本轮更新关闭既有未验收项。
 
 ## 权威边界
 
