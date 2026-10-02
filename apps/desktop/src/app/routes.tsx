@@ -1,11 +1,15 @@
-import { useEffect, useState } from 'react';
-import { Outlet, createRootRoute, createRoute } from '@tanstack/react-router';
-import { useRouter } from '@tanstack/react-router';
+import { useEffect, useMemo, useState } from 'react';
+import { Outlet, createRootRoute, createRoute, useRouter } from '@tanstack/react-router';
+import { LocalArchiveSection } from '@mahoshojo/ui-web/local-archive';
 import { AppShell, ProductNav } from '@mahoshojo/ui-web/shell';
 
 import { loadDesktopRuntimeInfo, type DesktopRuntimeInfo } from '../platform';
 import { ProviderProfilesPanel } from '../features/providers/ProviderProfilesPanel';
 import { buildCapabilitySnapshot } from './capabilities';
+import {
+  DESKTOP_LIBRARY_ARCHIVE_LIMITS,
+  createDesktopArchiveHost,
+} from '../platform/desktop-archive-host';
 
 /**
  * Desktop 的产品路由树（code-based）。
@@ -161,20 +165,41 @@ const indexRoute = createRoute({
  * 路径 `/local-library` 与 Web 共用同一个产品路径（`DESK-059`）：它是设备级页面而不是账号级页面，
  * 因为本地库不要求登录。两个 app 的路径一致，用户在两者之间得到的是同一份心智模型。
  *
- * 内容在 D2.3d 接入；当前是明确的未实现说明，而不是空白页——`DESK-PROD-001` 禁止用占位页面声称
- * 功能已完成。
+ * 归档区块是共享实现（`@mahoshojo/ui-web/local-archive`），本文件只提供 Desktop 侧 adapter。导出
+ * 结果只以 native 的最终确认判成功，因此共享区块在 Desktop 上呈现确定的字节进度，而 Web 呈现不确定
+ * 态——这个差异由共享契约的可辨识 union 表达，而不是由两端各写一套界面。
  */
 const localLibraryRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/local-library',
-  component: () => (
-    <section data-testid="page-local-library">
-      <h1 className="text-lg font-semibold">本地库</h1>
-      <p className="mt-2 text-sm text-(--app-text-muted)">
-        本机数据卡与 Web 包的管理与导入导出。归档界面尚未接线（D2.3d 未实施）。
-      </p>
-    </section>
-  ),
+  component: () => {
+    // host 必须在渲染之间保持稳定：控制器用它做 useMemo 的依赖，重建会让已预检的字节与 plan 丢失。
+    const host = useMemo(() => createDesktopArchiveHost(), []);
+
+    return (
+      <section data-testid="page-local-library" className="flex flex-col gap-4">
+        <header className="flex flex-col gap-1">
+          <h1 className="text-lg font-semibold">本地库</h1>
+          <p className="text-sm text-(--app-text-muted)">
+            本机保存的数据卡与 Web 包，只存在于这台设备。不需要账号，也不会访问项目服务器。
+          </p>
+        </header>
+        <LocalArchiveSection host={host} maxArchiveBytes={DESKTOP_LIBRARY_ARCHIVE_LIMITS.fileBytes} />
+        <section className="rounded-lg border border-(--app-border) bg-(--app-surface) p-4">
+          <h2 className="mb-1 text-sm font-medium text-(--app-text-muted)">还没有的</h2>
+          <ul className="flex list-disc flex-col gap-1 pl-5 text-sm text-(--app-text-muted)">
+            <li>
+              <strong className="font-medium">整库备份与灾难恢复</strong>：上面的导出是 portable archive，
+              用于换设备；它不是设备状态的完整快照。恢复流程尚未交付。
+            </li>
+            <li>
+              <strong className="font-medium">回收站</strong>：删除的记录目前没有界面上的恢复入口。
+            </li>
+          </ul>
+        </section>
+      </section>
+    );
+  },
 });
 
 /** 设置承载 Provider 面板与运行时信息；调试信息不占首页（`DESK-PROD-001`）。 */

@@ -81,3 +81,35 @@ export {
   toBase64Bytes,
   toWebPackageIndex,
 } from './web-package-bridge';
+
+export {
+  APPEND_ARCHIVE_EXPORT_CHUNK_COMMAND,
+  ARCHIVE_EXPORT_ID_HEADER,
+  BEGIN_ARCHIVE_EXPORT_COMMAND,
+  LOCAL_LIBRARY_ARCHIVE_LIMITS,
+  LocalArchiveExportError,
+  MAX_LOCAL_LIBRARY_IPC_CHUNK_BYTES,
+  createArchiveExportSource,
+  exportLocalLibraryArchive,
+} from './local-archive-bridge';
+export type {
+  ExportLocalLibraryArchiveOptions,
+  ExportedLocalLibraryArchive,
+  RawInvokeFn,
+  StructuredInvokeFn,
+} from './local-archive-bridge';
+
+export {
+  DESKTOP_LIBRARY_IMPORT_LIMITS,
+  LocalLibraryArchiveImportError,
+  applyDesktopLibraryArchiveImport,
+  inspectDesktopLibraryArchive,
+  readFileBytes,
+} from './local-archive-import';
+export type {
+  LocalLibraryArchiveImportFailure,
+  LocalLibraryArchiveImportPlan,
+  LocalLibraryArchiveImportReport,
+  LocalLibraryArchiveImportSkip,
+  LocalLibraryArchiveImportSummary,
+} from './local-archive-import';
