@@ -8,6 +8,8 @@
 
 后续发布型 package 再单独设计稳定的 `dist` exports，不把当前 source export 当作发布约定。
 
+Desktop/Web 的新增共享边界按[产品共源 ADR](../docs/decisions/2026-10-02_184000_Desktop产品架构与Web共源决策.md)逐切片提取：`ui-web` 将承载共源 React DOM 页面/控件、主题、产品导航及资源，不能导入 Next/Tauri/服务器 runtime；现有纯业务与执行契约仍归专职包。`cloud-client` 只在真实在线能力接入时建立。**这两个包当前尚未实现**，不属于下方真实 package 清单，也不因本次文档修订而创建占位包。
+
 本目录不设一个无边界的 `common`/`shared` 倾倒包。新增 package 应按领域职责命名，并同步维护类型、exports、测试和依赖边界。当前真实 package 为：
 
 - `@mahoshojo/config`：仅导出非秘密的 workspace/layout 常量与类型；

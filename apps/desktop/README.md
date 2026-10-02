@@ -1,13 +1,13 @@
 # `@mahoshojo/desktop`
 
-MahoShojo Generator 的本地桌面客户端 runtime。它是独立 app，不是 `apps/web` 的桌面壳。
+MahoShojo Generator 的本地桌面客户端 runtime。它是独立 app，不是远端网站壳；产品页面、主题与业务能力按共享 package 与 Web 共源，而非直接 import `apps/web`。
 
-当前阶段：**D1 执行核 + D1.5 摘要冻结 + D2.0 本地卡存储 + D2.1 blob 持久化 + D2.2a/b/c 已落地**。
+当前阶段（2026-10-02）：**D1 执行核、D1.5、D2.0–D2.2 与 D2.3a/b/c 的存储/归档桥已落地；归档产品 UI 与整体页面迁移尚未接线**。D2.5/D3 新计划不等于已完成页面。
 
 - **D0** skeleton、安全边界与 CI 接线；
 - **D0.5** 持久 secret 接入操作系统凭据存储；
 - **D1** Direct AI 最薄纵切：Rust 持有出站 HTTP，`Channel<AiStreamEvent>` 流式，`requestId` +
-  取消注册表 + exactly-once 终态。**退出门禁尚未闭合**，唯一缺口是真实 Provider 端点实测
+  取消注册表 + exactly-once 终态。**退出门禁尚未闭合**，真实 Provider 端点仍待实测
   （见下方「已知边界」）；
 - **D1.5** 内容摘要语义下沉：`canonicalization` / 摘要 / ID 派生的唯一权威实现在
   `@mahoshojo/local-library/digest`，V1 逐字节输出由 golden fixture 冻结；
@@ -19,9 +19,16 @@ MahoShojo Generator 的本地桌面客户端 runtime。它是独立 app，不是
 - **D2.2b** 完整性审计：六个分桶的只读报告（缺失、摘要/长度不符、无引用 metadata、孤儿文件、
   记录缺引用、外键违规），`audit_local_library` command 与渲染层分组；
 - **D2.2c** 孤儿 GC：`collect_local_garbage`，只回收无引用 blob，先删 metadata 后删文件。
-  导入导出与备份属后续阶段。
+- **D2.3a/b/c** portable V2、共享打包/预检导入、Desktop raw 导出与导入桥已落地；**尚未接产品 UI**，真实 WebView 内存/响应性、raw IPC 吞吐/回退门禁仍开放。
+- **D2.3d / D2.4 / D2.5 / D3** 分别继续双端归档 UI、备份恢复、共享产品壳与页面纵切；不因本轮文档更新关闭既有未验收项。
 
 ## 权威边界
+
+- 产品决策：[Desktop 产品架构与 Web 共源决策](../../docs/decisions/2026-10-02_184000_Desktop产品架构与Web共源决策.md)
+- 整体架构：[Desktop 产品架构与共享边界](../../docs/architecture/2026-10-02_184000_Desktop产品架构与共享边界.md)
+- 产品规格：[Desktop 产品一致性与本地优先规格](../../docs/specs/2026-10-02_184000_Desktop产品一致性与本地优先规格.md)
+
+目标是熟悉的首页、问卷、角色管理、竞技场与百科，而不是扩建当前调试面板。Desktop 默认本地保存与 Direct，线上能力按需接入；首期不新增数据卡签名或手动申请按钮。未来自动签名需独立可信协议，设置默认关闭；updater 签名要求不变。
 
 - 决策：[Desktop Tauri V1 运行时与本地安全边界决策](../../docs/decisions/2026-09-30_160000_DesktopTauriV1运行时与本地安全边界决策.md)
 - 规格：[Desktop 客户端实施规格](../../docs/specs/2026-09-30_160000_Desktop客户端实施规格.md)
@@ -200,14 +207,11 @@ adapter 都以摘要为键，而摘要不是 `wp_…` 形式的 id。native 经 
 
 ### 二进制传输
 
-IPC 用一个显式的 `{b64, len}` 信封承载归档字节，**请求与响应共用同一个 native DTO**：让读写各自
-定义形状，正是"读出来是一根裸字符串"这类 bug 的温床——两侧单测都会绿，因为它们各自 mock 了对方
-的形状。两端解码后都核对长度。编解码用标准 `base64` crate：手写解码器遇到 `=` 就 `break` 而不校验
-padding，尾随垃圾会被静默丢弃，且逐字符查表在 64 MiB 归档上是 10⁹ 量级的比较。
+D2.3b2-r5 后，`read_web_package_archive` 返回 `tauri::ipc::Response`，渲染层接收 raw `ArrayBuffer`；结构化请求参数与 raw 响应可以共存。读取已改为 `async` + `spawn_blocking`，避免在 command 主线程读文件并计算摘要。
 
-Tauri 2 的原生 raw IPC 要求整个请求体是 raw 形式、无法与结构化参数并存，所以这是字段而非自定义
-通道；代价约 33% 体积，收益是解包路径只有一条。`DESK-064` 记录了约束与将来切 raw IPC 的时机。
+单包保存仍通过结构化请求中的 `{b64, len}` 信封传字节，并核对长度；标准 base64 decoder 拒绝非法尾随内容。整个本地库归档的导出则采用 begin + raw chunk，native 累计到声明长度后完成 fsync/无覆盖发布，UI 必须消费最终完成确认。
 
+输入预算、输出上限与单次 IPC 块上限是三个概念，见 `DESK-070` / `DESK-071b`；当前共享组装仍使用 `zipSync`，不能因为传输已经分块就声称全链路流式或主线程无阻塞。真实 WebView 内存、吞吐与 raw IPC 回退仍待验收。
 
 业务语义全部留在 TypeScript。索引列由渲染层从**已通过 `LocalCardRecordV1Schema` 校验的
 记录**投影而来，native 侧再从 document 里重新提取一遍并逐项比对，不一致即拒绝落盘：
@@ -284,7 +288,7 @@ GC 不会碰它。只有 purge 让它成为回收候选。这条是"恢复一个
 `gcReclaimedSomething` 单列这个判断。`filesRemoved < reclaimed` 表示有些行的文件本来就不在
 （桶一的损坏形态），`filesFailed` 表示权限或 I/O 错误导致文件留下成为孤儿。
 
-导入导出与备份属后续阶段，当前**不存在**。
+D2.3 已有导入导出平台桥，但还没有用户页面接线；完整备份/恢复仍属于 D2.4，尚未落地。不能把归档桥或共享函数的单测通过描述成用户已能完成完整备份。
 
 ## 持久 secret
 
@@ -326,6 +330,4 @@ Rust 侧在编译期 `include_str!` 同一份 fixture，两侧测试同时消费
   确认提示可读。
 - Windows 上同源 iframe 会继承宿主 IPC（GHSA-57fm-592m-34r7），因此 Web Package 在任何阶段
   都不会放进 iframe；该能力属于 D4 的独立零 capability webview。
-- D2.2a 之后所有本地库写入都是同步 command。写路径本身是本地 SQLite 的单次往返，可以接受；
-  但审计、GC、备份会遍历整个库，**必须**改成 `async fn` + `spawn_blocking`，
-  否则会冻结 WebView（`DESK-067`）。
+- 审计、GC 与 Web 包归档读取已有 `async fn` + `spawn_blocking`；这不代表所有 I/O 或 renderer 工作都不会阻塞。`zipSync` 仍是同步组装，真实响应性尚未验收；D2.4 备份仍须遵守 `DESK-067`，不能把尚未实现的路径写成已通过。
