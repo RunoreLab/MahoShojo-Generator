@@ -8,6 +8,12 @@ export default defineConfig({
     environment: 'node',
     globals: true,
     include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
+    /**
+     * 路由历史验证每次 traversal 都要等一次宏任务（jsdom 的 `popstate` 有 100ms 量级延迟，实测取
+     * 120ms 余量），单条用例因此天然比纯函数测试慢。默认的 5000ms 在本机够用，但在 CI 的负载下
+     * 离边界太近；显式给一个有界预算比让门禁偶发变红好。
+     */
+    testTimeout: 30_000,
   },
   esbuild: {
     jsx: 'automatic',
