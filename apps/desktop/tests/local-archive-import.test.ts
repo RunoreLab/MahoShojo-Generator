@@ -132,6 +132,13 @@ const createTarget = () => {
     async put(record: LocalCardRecordV1) {
       cardPuts.push(record.id);
     },
+    // 已写入的 id 集合：`putIfAbsent` 必须在已存在时报 `alreadyPresent`，否则 apply 会误报
+    // "写入成功"。双方定义的跳过判定是这个原语的结果，而不是写入前的 `get`。
+    async putIfAbsent(record: LocalCardRecordV1) {
+      if (cardPuts.includes(record.id)) return { alreadyPresent: true as const };
+      cardPuts.push(record.id);
+      return { written: true as const };
+    },
     async delete() {},
     async restore() {},
   } as unknown as CardRepository;
@@ -144,6 +151,11 @@ const createTarget = () => {
     },
     async put(record: LocalWebPackageRecordV1) {
       packagePuts.push(record.id);
+    },
+    async putIfAbsent(record: LocalWebPackageRecordV1) {
+      if (packagePuts.includes(record.id)) return { alreadyPresent: true as const };
+      packagePuts.push(record.id);
+      return { written: true as const };
     },
     async delete() {},
     async restore() {},

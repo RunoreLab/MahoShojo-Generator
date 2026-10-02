@@ -959,20 +959,26 @@ export const applyLocalLibraryArchiveImport = async (
     pendingArchiveBytes.delete(entry.archivePath);
     enqueue(async () => {
       try {
+        // 这一次 `get` 是**预筛**，不是判定依据：已存在的包不会被写入，因此也没有必要为它付出内层
+        // 验证的代价。真正的判定在下面的 `putIfAbsent`：若条目在两步之间被删掉，它会正常
+        // 写入；若被新增写入，它会报已存在。两种情形都正确，而前者把判定留在 `get` 上时不正确。
         if (await target.packages.get(entry.packageId) !== null) {
           skipped.push({ kind: 'web-package', id: entry.packageId, reason: 'already-present' });
           return;
         }
         const record = readArchiveWebPackageRecord(entry, recordBytes);
-        // 写入前**再**证明一次，而不是只依赖 preflight：apply 只校验 manifest 摘要与 `plan` 相同，
-        // 因此它接受的是"同一段 manifest"，而 ZIP 条目的字节在这期间可以被换掉。existing-wins 的
-        // 跳过分支不做这一步——那条路径本来就不写入这份 ZIP。
+        // 写入前证明归属。此处不能只依赖 preflight：apply 是导出接口，它只校验 manifest 摘要与 `plan` 相同，
+        // 而不曾重跑内层验证。
         requireArchiveWebPackageMatches(
           entry.archivePath,
           record.ref.digest,
           await readArchiveWebPackageRefDigest(entry.archivePath, archiveBytes),
         );
-        await target.packages.put(record, archiveBytes);
+        const outcome = await target.packages.putIfAbsent(record, archiveBytes);
+        if ('alreadyPresent' in outcome) {
+          skipped.push({ kind: 'web-package', id: entry.packageId, reason: 'already-present' });
+          return;
+        }
         succeededWebPackageIds.push(entry.packageId);
       } catch (cause) {
         failed.push({ kind: 'web-package', id: entry.packageId, reason: describeWriteFailure(cause) });
@@ -1003,11 +1009,13 @@ export const applyLocalLibraryArchiveImport = async (
         if (card !== undefined) {
           enqueue(async () => {
             try {
-              if (await target.cards.get(card.cardId) !== null) {
+              // 跳过判定来自 `putIfAbsent` 的结果，而不是写入前的 `get`。两者的差别就是原子性：
+              // `get` 与 `put` 之间可以插进来一个写者，而它们之间没有事实可以插进来。
+              const outcome = await target.cards.putIfAbsent(readArchiveCardRecord(card, bytes));
+              if ('alreadyPresent' in outcome) {
                 skipped.push({ kind: 'card', id: card.cardId, reason: 'already-present' });
                 return;
               }
-              await target.cards.put(readArchiveCardRecord(card, bytes));
               succeededCardIds.push(card.cardId);
             } catch (cause) {
               failed.push({ kind: 'card', id: card.cardId, reason: describeWriteFailure(cause) });

@@ -198,6 +198,14 @@ const createTarget = (existing: {
       cardPuts.push(record.id);
       cardRecords.set(record.id, record);
     },
+    // 跳过判定必须来自这个原语的结果，而不是写入前的 `get`。测试里的判定必须与
+    // 生产同形，否则一个"写了它"的记录可以被无意认为已存在而过关真正的跳过。
+    async putIfAbsent(record: CardRecord) {
+      if (cardRecords.has(record.id)) return { alreadyPresent: true as const };
+      cardPuts.push(record.id);
+      cardRecords.set(record.id, record);
+      return { written: true as const };
+    },
     async delete() {},
     async restore() {},
   } as unknown as CardRepository;
@@ -213,6 +221,13 @@ const createTarget = (existing: {
       packagePuts.push(record.id);
       packageArchiveBytes.set(record.id, archive);
       packageRecords.set(record.id, record);
+    },
+    async putIfAbsent(record: PackageRecord, archive: Uint8Array) {
+      if (packageRecords.has(record.id)) return { alreadyPresent: true as const };
+      packagePuts.push(record.id);
+      packageArchiveBytes.set(record.id, archive);
+      packageRecords.set(record.id, record);
+      return { written: true as const };
     },
     async delete() {},
     async restore() {},
@@ -561,16 +576,87 @@ describe('applyLocalLibraryArchiveImport', () => {
     const archive = await packFixture({ cardCount: 2 });
     const plan = await inspectLocalLibraryArchive(recorder.target, archive);
     const doomed = fixture.cards[0]!.id;
-    const originalPut = recorder.target.cards.put.bind(recorder.target.cards);
-    recorder.target.cards.put = (async (record) => {
+    // 报告的单条失败是从**实际走的那个原语**上报的。上一个提交里写入路径已经改成了
+    // `putIfAbsent`，若这里仍然抦住 `put`，用例会在变异的方式下绿掉。
+    const originalPutIfAbsent = recorder.target.cards.putIfAbsent.bind(recorder.target.cards);
+    recorder.target.cards.putIfAbsent = (async (record) => {
       if (record.id === doomed) throw new Error('磁盘满了');
-      return originalPut(record);
-    }) as typeof recorder.target.cards.put;
+      return originalPutIfAbsent(record);
+    }) as typeof recorder.target.cards.putIfAbsent;
 
     const report = await applyLocalLibraryArchiveImport(recorder.target, archive, plan);
 
     expect(report.failed).toEqual([{ kind: 'card', id: doomed, reason: '写入失败：磁盘满了' }]);
     expect(report.succeededCardIds).toEqual([fixture.cards[1]!.id]);
+  });
+
+  it('卡片的跳过判定不来自写入前的 get', async () => {
+    // 当 apply 对一条卡片写入时**不发出一次 get**：判定只能来自存储层的原语。
+    //
+    // 这条是结构性断言，而不是行为断言：旧实现的 `get` → `put` 在这两步之间留有窗口，
+    // 而这个窗口无法用一个同步的用例表现出来（它只在恰好的时机打开）。计数是唯一能把它写死的方式，
+    // 而它也正好就是不变量本身。
+    const recorder = createTarget();
+    const archive = await packFixture({ cardCount: 2, packageCount: 0 });
+    const plan = await inspectLocalLibraryArchive(recorder.target, archive);
+    const originalGet = recorder.target.cards.get.bind(recorder.target.cards);
+    const cardGets: string[] = [];
+    recorder.target.cards.get = (async (id) => {
+      cardGets.push(id);
+      return originalGet(id);
+    }) as typeof recorder.target.cards.get;
+
+    const report = await applyLocalLibraryArchiveImport(recorder.target, archive, plan);
+
+    expect(report.succeededCardIds).toHaveLength(2);
+    expect(cardGets).toEqual([]);
+  });
+
+  it('卡片的跳过来自 putIfAbsent 的结果，而非依赖存储里的内容', async () => {
+    // 把库里的记录换成同 id 的另一条，然后断言报告里的是"已存在"且库里尚未被动。
+    // 若判定来自存储的内容（而不是原语的结果），这条会报成"写入成功"。
+    const fixture = await buildFixture({ cardCount: 1, packageCount: 0 });
+    const recorder = createTarget();
+    const archive = await packFixture({ cardCount: 1, packageCount: 0 });
+    const plan = await inspectLocalLibraryArchive(recorder.target, archive);
+    const contender = fixture.cards[0]!.id;
+    const originalPutIfAbsent = recorder.target.cards.putIfAbsent.bind(recorder.target.cards);
+    recorder.target.cards.putIfAbsent = (async (record) => {
+      if (record.id === contender) {
+        await originalPutIfAbsent(createLocalCardRecord({
+          id: contender,
+          title: '已在库',
+          contentDigest: `sha256:${'e'.repeat(64)}`,
+        }) as CardRecord);
+      }
+      return originalPutIfAbsent(record);
+    }) as typeof recorder.target.cards.putIfAbsent;
+
+    const report = await applyLocalLibraryArchiveImport(recorder.target, archive, plan);
+
+    expect(report.succeededCardIds).toEqual([]);
+    expect(report.skipped).toEqual([{ kind: 'card', id: contender, reason: 'already-present' }]);
+    expect((await recorder.target.cards.get(contender))?.title).toBe('已在库');
+  });
+
+  it('即使预筛的 get 说“没有”，最终跳过仍由原语决定', async () => {
+    // 包的路径上仍保留一次 `get` 作为**预筛**（只为了不为已存在的包付内层验证的代价）。
+    // 这里让预筛**说假话**：它说库里没有，而库里确实有。判定必须由 `putIfAbsent` 决定，
+    // 否则预筛就又成了判定依据，而它本来只能保证“没有活跃会被覆盖”。
+    const fixture = await buildFixture({ cardCount: 0, packageCount: 1 });
+    const recorder = createTarget({
+      packages: [fixture.packages[0]!.record.id],
+    });
+    const archive = await packFixture({ cardCount: 0, packageCount: 1 });
+    const plan = await inspectLocalLibraryArchive(recorder.target, archive);
+    recorder.target.packages.get = (async () => null) as typeof recorder.target.packages.get;
+
+    const report = await applyLocalLibraryArchiveImport(recorder.target, archive, plan);
+
+    expect(report.succeededWebPackageIds).toEqual([]);
+    expect(report.skipped).toEqual([
+      { kind: 'web-package', id: fixture.packages[0]!.record.id, reason: 'already-present' },
+    ]);
   });
 
   it('existing-wins 保护墓碑，而不只是"存在的记录"', async () => {
