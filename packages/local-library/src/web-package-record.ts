@@ -149,12 +149,30 @@ export const deriveLocalWebPackageId = (digest: string): string =>
  * `readArchive` 的参数是 **manifest 摘要**（`record.ref.digest`），不是包 id：归档在存储层
  * 以摘要为键，而摘要不是 `wp_…` 形式的 id。混用会让读取必然落空。
  */
+/** `putIfAbsent` 的结果。 */
+export type WebPackageWriteOutcome =
+  | Readonly<{ written: true }>
+  | Readonly<{ alreadyPresent: true }>;
+
 export interface WebPackageRepository {
   get(_id: string): Promise<LocalWebPackageRecordV1 | null>;
   /** 排除 tombstone，除非显式 includeDeleted。 */
   list(_query: LocalWebPackageQuery): Promise<LocalWebPackagePage>;
   /** 按 canonical identity 覆盖写入；同一 digest 视为同一包的重新导入。 */
   put(_record: LocalWebPackageRecordV1, _archive: Uint8Array): Promise<void>;
+  /**
+   * 仅在 id **当前不存在**时写入记录与它的 archive 字节；已存在则两者都不动。
+   *
+   * "两者都不动"包含 archive 字节：只跳过记录却写了 blob，会留下一份没人引用的副本，
+   * 而 `reclaim` 要等到下一次维护窗口才收得掉。
+   *
+   * 与 `put` 的差别是**原子性**。`put` 允许按 canonical identity 覆盖同一 digest，因此导入侧的
+   * existing-wins 不能用它——先 `get` 再 `put` 之间有窗口，那会把"保留本地已有的包"降级成尽力而为。
+   */
+  putIfAbsent(
+    _record: LocalWebPackageRecordV1,
+    _archive: Uint8Array,
+  ): Promise<WebPackageWriteOutcome>;
   /** 幂等软删：只写 tombstone，保留 archive 字节，使 `restore` 能真正恢复可用状态。 */
   delete(_id: string): Promise<void>;
   restore(_id: string): Promise<void>;

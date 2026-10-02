@@ -3,6 +3,8 @@ import {
   DesktopListLocalCardsResponseSchema,
   DesktopLocalCardCursorSchema,
   DesktopSaveLocalCardRequestSchema,
+  DesktopSaveLocalCardResponseSchema,
+  type DesktopLocalLibraryWriteMode,
   type DesktopListLocalCardsRequest,
   type DesktopLocalCardCursor,
   type DesktopLocalCardIndex,
@@ -15,6 +17,7 @@ import {
   type LocalCardPage,
   type LocalCardQuery,
   type CardRepository,
+  type CardWriteOutcome,
 } from '@mahoshojo/local-library/repository';
 import {
   LocalCardRecordV1Schema,
@@ -302,6 +305,17 @@ export class IpcLocalCardRepository implements CardRepository {
   }
 
   /**
+   * `insert-if-absent`：只在 id 尚不存在时写入，已存在（含墓碑）则整条不动。
+   *
+   * 不在这里自己 `get`：那会把原子性变成两次 IPC 之间的一个约定。判定在 native 的插入点上，
+   * 而两种写法共用同一把写许可，所以这一路并不多事实。
+   */
+  async putIfAbsent(record: LocalCardRecordV1): Promise<CardWriteOutcome> {
+    const alreadyPresent = await this.write(SAVE_LOCAL_CARD_COMMAND, record, 'insert-if-absent');
+    return alreadyPresent ? { alreadyPresent: true } : { written: true };
+  }
+
+  /**
    * 幂等软删。
    *
    * 交出的是**组装完成的整条记录**（含 `deletedAt`），而不是 `(id, deletedAt)`：只让 native
@@ -344,17 +358,34 @@ export class IpcLocalCardRepository implements CardRepository {
   }
 
   /** 校验 → 投影索引列 → 序列化 document → 交给 native 原子写入整行。 */
-  private async write(command: string, record: LocalCardRecordV1): Promise<void> {
+  private async write(
+    command: string,
+    record: LocalCardRecordV1,
+    writeMode: DesktopLocalLibraryWriteMode = 'overwrite',
+  ): Promise<boolean> {
     // 先校验再投影：投影必须来自已通过契约的记录，否则调用方传入的多余字段能影响选择器。
     const validated = LocalCardRecordV1Schema.parse(record);
     const request = DesktopSaveLocalCardRequestSchema.parse({
       document: toDocumentText(validated),
       index: toLocalCardIndex(validated),
+      writeMode,
     });
+    let raw: unknown;
     try {
-      await this.invoke(command, { request });
+      raw = await this.invoke(command, { request });
     } catch (cause) {
       throw toBridgeError(command, cause);
     }
+    // 响应必须过一遍 schema：native 版本与渲染层不一致时，"我不知道有没有写进去"应当是一次明确的
+    // 失败，而不是一个被当成成功的 undefined。
+    const response = DesktopSaveLocalCardResponseSchema.safeParse(raw);
+    if (!response.success) {
+      throw new DesktopLocalCardError(
+        command,
+        'bridge-failure',
+        '本地库返回了无法识别的保存结果，本次写入状态未知。',
+      );
+    }
+    return response.data.alreadyPresent;
   }
 }

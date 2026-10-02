@@ -153,7 +153,47 @@ describe('IpcWebPackageRepository', () => {
     );
     return expect(repository.putWithOutcome(record(), ARCHIVE)).resolves.toEqual({
       blobOutcome: 'repaired',
+      alreadyPresent: false,
     });
+  });
+
+  it('putIfAbsent 交出 insert-if-absent 并把 alreadyPresent 翻译成两种结果', async () => {
+    // 断言的是**写下去的东西**：writeMode 必须真的到达请求体，否则 native 会静默按覆盖写处理，
+    // 而症状是"existing-wins 不生效"——没有任何一层会失败。
+    const seen: { writeMode: unknown }[] = [];
+    const repository = new IpcWebPackageRepository(async (_command, args) => {
+      seen.push((args as { request: { writeMode: unknown } }).request);
+      return DesktopSaveWebPackageResponseSchema.parse({
+        id: PKG_ID,
+        blobOutcome: 'alreadyPresent',
+        alreadyPresent: true,
+      });
+    });
+
+    await expect(repository.putIfAbsent(record(), ARCHIVE)).resolves.toEqual({ alreadyPresent: true });
+    expect(seen[0]?.writeMode).toBe('insert-if-absent');
+
+    const written = new IpcWebPackageRepository(async () =>
+      DesktopSaveWebPackageResponseSchema.parse({
+        id: PKG_ID,
+        blobOutcome: 'stored',
+        alreadyPresent: false,
+      }));
+    await expect(written.putIfAbsent(record(), ARCHIVE)).resolves.toEqual({ written: true });
+  });
+
+  it('put 仍然是覆盖写', async () => {
+    const seen: { writeMode: unknown }[] = [];
+    const repository = new IpcWebPackageRepository(async (_command, args) => {
+      seen.push((args as { request: { writeMode: unknown } }).request);
+      return DesktopSaveWebPackageResponseSchema.parse({
+        id: PKG_ID,
+        blobOutcome: 'stored',
+        alreadyPresent: false,
+      });
+    });
+    await repository.put(record(), ARCHIVE);
+    expect(seen[0]?.writeMode).toBe('overwrite');
   });
 
   it('get 区分缺失与解析失败', async () => {

@@ -125,14 +125,46 @@ export type DesktopLocalCardCursor = z.infer<typeof DesktopLocalCardCursorSchema
  * 不动 document，会让 `get()` 交回一条与索引列不一致的记录——`get()` 返回的正是 document，
  * 调用方因此会以为记录仍活动，而 `list` 却已把它隐藏。
  */
+/**
+ * 写入语义。
+ *
+ * `overwrite` 是常规覆盖写。`insert-if-absent` 只在 id **当前不存在**时写入，
+ * 已存在则整条不动并在响应里回报 `alreadyPresent`。
+ *
+ * 它存在的理由是 existing-wins 的导入策略此前只能是 `get` 然后 `put`：两步之间
+ * 另一个写入可以插进来，于是"本地已存在的记录一律保留"只是一个尽力
+ * 而为的约定，而不是保证。共享端口与 native 都提供这个原语后，导入侧可以在
+ * 存储层直接表达这条意图。
+ *
+ * 语义上它**不是** upsert 的别名：已存在时 tombstone 也不会被清除——保留意味着不动，
+ * 包括不动它的墓碑。因此导入无法靠它复活一条用户删掉的记录。
+ */
+export const DesktopLocalLibraryWriteModeSchema = z.enum(['overwrite', 'insert-if-absent']);
+export type DesktopLocalLibraryWriteMode = z.infer<typeof DesktopLocalLibraryWriteModeSchema>;
+
 export const DesktopSaveLocalCardRequestSchema = z
   .object({
     /** 已通过 `LocalCardRecordV1Schema` 校验的完整记录，序列化为 JSON 文本。 */
     document: utf8ByteLimitedStringSchema(MAX_DESKTOP_LOCAL_CARD_DOCUMENT_BYTES),
     index: DesktopLocalCardIndexSchema,
+    /** 缺省 `overwrite`，因此旧客户端的请求形状与行为都不变。 */
+    writeMode: DesktopLocalLibraryWriteModeSchema.default('overwrite'),
   })
   .strict();
 export type DesktopSaveLocalCardRequest = z.infer<typeof DesktopSaveLocalCardRequestSchema>;
+
+/**
+ * `alreadyPresent` 只在 `insert-if-absent` 下有意义：它告诉调用方"你要写的东西已经
+ * 在那里了，而且我没有动它"。与"写入成功"是两种不同的结果，UI 不能把它们
+ * 合并成同一个提示。
+ */
+export const DesktopSaveLocalCardResponseSchema = z
+  .object({
+    id: DesktopLocalCardIdSchema,
+    alreadyPresent: z.boolean().default(false),
+  })
+  .strict();
+export type DesktopSaveLocalCardResponse = z.infer<typeof DesktopSaveLocalCardResponseSchema>;
 
 export const DesktopLocalCardWriteIntentSchema = z.enum(['save', 'delete', 'restore']);
 export type DesktopLocalCardWriteIntent = z.infer<typeof DesktopLocalCardWriteIntentSchema>;
@@ -273,6 +305,8 @@ export const DesktopSaveWebPackageRequestSchema = z
     document: utf8ByteLimitedStringSchema(MAX_DESKTOP_LOCAL_CARD_DOCUMENT_BYTES),
     index: DesktopWebPackageIndexSchema,
     archive: DesktopBase64BytesSchema,
+    /** 语义同 `DesktopSaveLocalCardRequestSchema.writeMode`。 */
+    writeMode: DesktopLocalLibraryWriteModeSchema.default('overwrite'),
     /** 渲染层时钟。软删/恢复必须单调推进，native 不引入时间库。 */
     now: DesktopLocalCardTimestampSchema,
   })
@@ -283,6 +317,8 @@ export const DesktopSaveWebPackageResponseSchema = z
   .object({
     id: DesktopLocalCardIdSchema,
     blobOutcome: DesktopBlobWriteOutcomeSchema,
+    /** 语义同 `DesktopSaveLocalCardResponseSchema.alreadyPresent`。 */
+    alreadyPresent: z.boolean().default(false),
   })
   .strict();
 export type DesktopSaveWebPackageResponse = z.infer<typeof DesktopSaveWebPackageResponseSchema>;

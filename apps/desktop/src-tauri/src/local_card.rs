@@ -101,6 +101,16 @@ struct LocalCardIndexProjection {
 ///
 /// `camelCase` 与 `LocalCardRecordV1` 的字段名一致，因此 IPC 侧不需要额外映射层；
 /// `deny_unknown_fields` 刻意不加：多带一个无害字段不应让整次保存失败。
+/// `put_if_absent` 的结果。
+///
+/// 不用 bool："已经存在且我没动它"与"我写进去了"对调用方是两个不同的结果，
+/// 而对 UI 也是两个不同的提示。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CardWriteOutcome {
+    Written,
+    AlreadyPresent,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalCardIndex {
@@ -245,6 +255,42 @@ impl LocalCardStore {
             }
 
             upsert_row(connection, document, &declared, updated_at_sort)
+        })
+    }
+
+    /// 仅在 id 不存在时写入。
+    ///
+    /// 已存在时整条不动——包括不动其 tombstone。这与 `put` 的差别是**原子性**：`put`
+    /// 的存在性检查与写入之间没有任何事实可以插进来，因此“保留本地已有的记录”在
+    /// 存储层是一条可以当保证的不变量，而不是调用方的一个约定。
+    ///
+    /// 文档与索引列仍然先独立复核：一个违反契约的请求无论该 id 是否存在都应被拒绝——
+    /// 否则"已存在"会变成一个掩盖非法文档的退出。
+    pub fn put_if_absent(
+        &self,
+        document: &str,
+        index: &LocalCardIndex,
+    ) -> Result<CardWriteOutcome, StoreError> {
+        let declared = validate_and_extract(document, index)?;
+        if declared.id.trim().is_empty() {
+            return Err(StoreError::InvalidDocument);
+        }
+        let updated_at_sort = sort_key(&declared.updated_at)?;
+
+        self.with_connection(|connection| {
+            // 已存在时直接返回，不动任何列。
+            if connection
+                .query_row(
+                    "SELECT 1 FROM local_card WHERE id = ?1",
+                    rusqlite::params![declared.id],
+                    |_| Ok(()),
+                )
+                .is_ok()
+            {
+                return Ok(CardWriteOutcome::AlreadyPresent);
+            }
+            insert_row(connection, document, &declared, updated_at_sort)?;
+            Ok(CardWriteOutcome::Written)
         })
     }
 
@@ -439,6 +485,37 @@ enum Transition {
 ///
 /// 分成"先改索引列、再改 document"就是本模块早期版本的 bug 来源——任何中途失败或崩溃都会
 /// 留下两套状态。单语句让两者同生共死。
+/// 仅插入：已存在时不动任何列。
+///
+/// 用 `ON CONFLICT DO NOTHING` 而不是依赖上面那个 `SELECT`：那个 `SELECT` 只是优化（避免为已存在的
+/// id 去跑一次插入），真正的判定在 `DO NOTHING` 里：它在插入点上取行锁。因此两个写者之间插进来的
+/// 写入会在插入点上被 SQLite 挡下并让本次报为 `AlreadyPresent`。
+fn insert_row(
+    connection: &Connection,
+    document: &str,
+    declared: &LocalCardIndex,
+    updated_at_sort: i64,
+) -> Result<(), StoreError> {
+    connection
+        .execute(
+            "INSERT INTO local_card
+                (id, document, card_type, updated_at, updated_at_sort, deleted_at, content_digest)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+             ON CONFLICT(id) DO NOTHING",
+            rusqlite::params![
+                declared.id,
+                document,
+                declared.card_type,
+                declared.updated_at,
+                updated_at_sort,
+                declared.deleted_at,
+                declared.content_digest,
+            ],
+        )
+        .map_err(|_| StoreError::Failure)?;
+    Ok(())
+}
+
 fn upsert_row(
     connection: &Connection,
     document: &str,
@@ -514,8 +591,8 @@ fn validate_and_extract(
 #[cfg(test)]
 mod tests {
     use super::{
-        LocalCardCursor, LocalCardIndex, LocalCardQuery, LocalCardStore, StoreError,
-        MAX_LOCAL_CARD_DOCUMENT_BYTES, MAX_LOCAL_CARD_PAGE_SIZE,
+        CardWriteOutcome, LocalCardCursor, LocalCardIndex, LocalCardQuery, LocalCardStore,
+        StoreError, MAX_LOCAL_CARD_DOCUMENT_BYTES, MAX_LOCAL_CARD_PAGE_SIZE,
     };
     use crate::store::LocalStorePaths;
 
@@ -523,6 +600,100 @@ mod tests {
     ///
     /// 用 `format!` 而不是 `serde_json::json!`：后者会重新序列化，从而丢掉
     /// "document 文本必须原样落盘"这一前提——本模块承诺的是字节级往返。
+    fn index_for(id: &str, card_type: &str, updated_at: &str) -> LocalCardIndex {
+        let (_, index) = card(id, card_type, updated_at, "{}");
+        index
+    }
+
+    #[test]
+    fn put_if_absent_writes_only_when_absent() {
+        let store = new_store();
+        let (document, index) = card("lc_1", "character", "2026-01-02T00:00:00.000Z", "{}");
+
+        assert_eq!(
+            store
+                .put_if_absent(&document, &index)
+                .expect("first insert must succeed"),
+            CardWriteOutcome::Written
+        );
+        assert_eq!(
+            store.get("lc_1").expect("get must succeed"),
+            Some(document.clone())
+        );
+
+        // 同一 id 再来一次：**必须**不动。内容不同是这条用例的关键——若实现悄悄覆盖了，
+        // 症状是"导入保留了本地记录"变成一句不成立的话，而没有任何别处会失败。
+        let (other_document, other_index) = card(
+            "lc_1",
+            "character",
+            "2026-06-01T00:00:00.000Z",
+            r#"{"replaced":true}"#,
+        );
+        assert_eq!(
+            store
+                .put_if_absent(&other_document, &other_index)
+                .expect("second insert must be reported, not fail"),
+            CardWriteOutcome::AlreadyPresent
+        );
+        assert_eq!(
+            store.get("lc_1").expect("get must succeed"),
+            Some(document),
+            "insert-if-absent 不得覆盖既有记录"
+        );
+    }
+
+    #[test]
+    fn put_if_absent_does_not_clear_a_tombstone() {
+        // "保留"意味着不动，包括不动它的墓碑。若它会清除墓碑，导入就能靠它复活一条用户删掉的
+        // 记录——而 `DESK-074` 明文禁止强制覆盖与复活。
+        let store = new_store();
+        let (document, index) = card("lc_1", "character", "2026-01-02T00:00:00.000Z", "{}");
+        store.put(&document, &index).expect("put must succeed");
+        // 每个 document 都是**组装完成的整条**记录：`delete` 不接受 `(id, deletedAt)`，只改索引列会让 document 与
+        // 索引列分叉，而 `get()` 返回的正是 document。
+        let (tombstone, tombstone_index) = with_deleted_at(
+            "lc_1",
+            "character",
+            "2026-01-02T00:00:00.000Z",
+            "2026-01-03T00:00:00.000Z",
+            "2026-01-03T00:00:00.000Z",
+            "{}",
+        );
+        store
+            .delete(&tombstone, &tombstone_index)
+            .expect("delete must succeed");
+
+        assert_eq!(
+            store
+                .put_if_absent(&document, &index)
+                .expect("must be reported, not fail"),
+            CardWriteOutcome::AlreadyPresent
+        );
+        let stored = store
+            .get("lc_1")
+            .expect("get must succeed")
+            .expect("row must survive");
+        assert!(
+            stored.contains("deletedAt"),
+            "孤��存储必须保留墓碑，实际存储：{stored}"
+        );
+    }
+
+    #[test]
+    fn put_if_absent_still_rejects_a_contract_violating_document() {
+        // "已存在"不能变成一个掩盖非法文档的退出。否则一个脏 document 会被报成"已存在"，
+        // 而真实问题（记录与索引列不一致）永远不会被报出来。
+        let store = new_store();
+        let (document, _) = card("lc_1", "character", "2026-01-02T00:00:00.000Z", "{}");
+        let mut mismatched = index_for("lc_1", "character", "2026-01-02T00:00:00.000Z");
+        mismatched.content_digest = format!("sha256:{}", "b".repeat(64));
+
+        assert_eq!(
+            store.put_if_absent(&document, &mismatched),
+            Err(StoreError::IndexMismatch)
+        );
+    }
+
     fn card(id: &str, card_type: &str, updated_at: &str, data: &str) -> (String, LocalCardIndex) {
         card_with_deleted(id, card_type, updated_at, updated_at, data)
     }

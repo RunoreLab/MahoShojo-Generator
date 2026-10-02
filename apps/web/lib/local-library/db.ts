@@ -183,6 +183,20 @@ export const getAllLocalLibraryRecords = <T>(
 export const putLocalLibraryRecord = <T>(store: IDBObjectStore, value: T): Promise<IDBValidKey> =>
   promisifyRequest(store.put(value as unknown as Record<string, unknown>));
 
+/**
+ * 仅在键不存在时插入；冲突时拒绝。
+ *
+ * 这是 IndexedDB 自带的 `add`，而不是"先 `get` 再 `put`"——后者把原子性变成两个请求之间的
+ * 一个约定。冲突表达的是 `ConstraintError`，而不是一个自定义错误码：调用方应该识别它，
+ * 并且把它与"写入失败"区分开——前者是“已存在”，后者是“库存没了”。
+ */
+export const addLocalLibraryRecord = <T>(store: IDBObjectStore, value: T): Promise<IDBValidKey> =>
+  promisifyRequest(store.add(value as unknown as Record<string, unknown>));
+
+/** IndexedDB 的键冲突。判定应该基于**属性**而不是消息文本：两种 runtime 的拒绝文本不一致。 */
+export const isConstraintError = (cause: unknown): boolean =>
+  cause instanceof DOMException && cause.name === 'ConstraintError';
+
 export const deleteLocalLibraryRecord = (store: IDBObjectStore, key: IDBValidKey): Promise<undefined> =>
   promisifyRequest(store.delete(key) as IDBRequest<undefined>);
 

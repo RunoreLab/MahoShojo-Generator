@@ -201,18 +201,39 @@ fn cancel_direct_ai(
 ///
 /// 与 Rust 存储层解耦：command 层只搬运已校验的 JSON 记录与索引列，**不解释**卡的内容
 /// 语义。索引列由 TypeScript 提供，native 侧独立复核（见 `local_card::LocalCardStore::put`）。
+/// 写入语义，与 TS 侧 `DesktopLocalLibraryWriteModeSchema` 一一对应。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum DesktopLocalLibraryWriteMode {
+    Overwrite,
+    InsertIfAbsent,
+}
+
+impl Default for DesktopLocalLibraryWriteMode {
+    /// 缺省为覆盖写。不该用 `#[serde(default)]` 而在类型上实现 `Default`：这样旧客户端的请求仍然可用，
+    /// 而且读这个类型的代码都不会想到还要判断“字段先存在”。
+    fn default() -> Self {
+        Self::Overwrite
+    }
+}
+
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SaveLocalCardRequest {
     /// 已通过 `LocalCardRecordV1Schema` 校验的完整记录，序列化为 JSON 文本。
     document: String,
     index: local_card::LocalCardIndex,
+    #[serde(default)]
+    write_mode: DesktopLocalLibraryWriteMode,
 }
 
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SaveLocalCardResponse {
     id: String,
+    /// `insert-if-absent` 下说明目标已存在且**没有被动过**。
+    #[serde(default)]
+    already_present: bool,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -255,9 +276,19 @@ fn save_local_card(
     request: SaveLocalCardRequest,
 ) -> Result<SaveLocalCardResponse, store::StoreError> {
     let _permit = library.enter_write().map_err(store::StoreError::from)?;
-    library.cards().put(&request.document, &request.index)?;
+    // 存在性判定与写入必须在同一个写许可里。先 `get` 再 `put` 的 adapter 形式在这两步之间无事实可以插进来，
+    // 而现在两种写法共享同一把许可，所以这一个分支不引入任何新的竞态。
+    let outcome = if request.write_mode == DesktopLocalLibraryWriteMode::InsertIfAbsent {
+        library
+            .cards()
+            .put_if_absent(&request.document, &request.index)?
+    } else {
+        library.cards().put(&request.document, &request.index)?;
+        local_card::CardWriteOutcome::Written
+    };
     Ok(SaveLocalCardResponse {
         id: request.index.id,
+        already_present: matches!(outcome, local_card::CardWriteOutcome::AlreadyPresent),
     })
 }
 
@@ -339,6 +370,8 @@ struct SaveWebPackageRequest {
     archive: Vec<u8>,
     /// 渲染层时钟。软删/恢复必须单调推进，native 不引入时间库。
     now: String,
+    #[serde(default)]
+    write_mode: DesktopLocalLibraryWriteMode,
 }
 
 /// 删除/恢复用的请求体。
@@ -359,6 +392,10 @@ struct SaveWebPackageResponse {
     /// `stored` / `alreadyPresent` / `repaired`。`repaired` **MUST** 被透传到 UI：
     /// 存储损坏被静默吞掉的话，用户永远不会知道自己这份库已经不健康。
     blob_outcome: blob::BlobWriteOutcome,
+    /// `insert-if-absent` 下说明记录与 archive 字节都未被动过。与 `blob_outcome` 的
+    /// `already_present` 是两件事：后者说的是"那份 ZIP 字节本来就在 blob 库里"。
+    #[serde(default)]
+    already_present: bool,
 }
 
 /// base64 传输二进制。
@@ -449,16 +486,28 @@ fn save_web_package(
 ) -> Result<SaveWebPackageResponse, web_package::SaveWebPackageError> {
     // 许可覆盖"写 blob + 写包事务"整段，而不是各自一半。
     let _permit = library.enter_write().map_err(store::StoreError::from)?;
-    let outcome = library.packages().save(
-        library.blobs(),
-        &request.document,
-        &request.index,
-        &request.archive,
-        &request.now,
-    )?;
+    // 同理：许可覆盖“blob 写入 + 包事务”整段，两种写法因此不需要额外的互斥。
+    let outcome = if request.write_mode == DesktopLocalLibraryWriteMode::InsertIfAbsent {
+        library.packages().save_if_absent(
+            library.blobs(),
+            &request.document,
+            &request.index,
+            &request.archive,
+            &request.now,
+        )?
+    } else {
+        library.packages().save(
+            library.blobs(),
+            &request.document,
+            &request.index,
+            &request.archive,
+            &request.now,
+        )?
+    };
     Ok(SaveWebPackageResponse {
         id: outcome.id,
         blob_outcome: outcome.blob,
+        already_present: outcome.already_present,
     })
 }
 

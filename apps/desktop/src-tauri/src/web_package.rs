@@ -133,6 +133,11 @@ pub struct SaveWebPackageOutcome {
     /// blob 写入的结果。`Repaired` 必须透传给调用方，否则存储损坏在 UI 上完全不可见。
     pub blob: crate::blob::BlobWriteOutcome,
     pub id: String,
+    /// `insert-if-absent` 下 id 已存在：记录与 archive 字节都没有被动过。
+    ///
+    /// 与 `blob` 的 `AlreadyPresent` 是两件事：后者说的是"那份 ZIP 字节本来就在 blob 库里"，而本字段说的是
+    /// "这个包的记录本来就在"。existing-wins 需要的是后者。
+    pub already_present: bool,
 }
 
 /// 保存一条 Web 包可能失败在两处，因此需要能区分它们。
@@ -227,6 +232,47 @@ impl WebPackageStore {
     /// 由 TypeScript 侧 `unpackWebPackageZip` 负责核对（它会重算 `ref.digest` 再比对）——native
     /// 不做这件事，也不该做：那需要在 Rust 里重建一遍 ZIP 与 manifest 的规范化逻辑
     /// （同 `DESK-062` 的分工理由）。
+    /// 仅在 id 不存在时写入。已存在时**记录与 archive 字节都不动**。
+    ///
+    /// “都不动”包含 archive：只跳过记录却写了 blob，会留下一份没人引用的副本，而 `reclaim`
+    /// 要等到下一次维护窗口才能收得掉。因此在写 blob **之前**先做存在性预检，
+    /// 真正的判定交给事务里的 `ON CONFLICT DO NOTHING`。
+    pub fn save_if_absent(
+        &self,
+        blobs: &BlobStore,
+        document: &str,
+        index: &WebPackageIndex,
+        archive: &[u8],
+        now: &str,
+    ) -> Result<SaveWebPackageOutcome, SaveWebPackageError> {
+        let ValidatedWebPackage {
+            index: declared,
+            archive_byte_length,
+        } = validate_and_extract(document, index)?;
+        let updated_at_sort = timestamp_sort_key(&declared.updated_at)?;
+        if archive_byte_length != archive.len() as i64 {
+            return Err(SaveWebPackageError::Store(StoreError::IndexMismatch));
+        }
+        if self.existing_state(&declared.id)?.is_some() {
+            return Ok(SaveWebPackageOutcome {
+                id: declared.id.clone(),
+                blob: crate::blob::BlobWriteOutcome::AlreadyPresent,
+                already_present: true,
+            });
+        }
+        self.save_inner(
+            blobs,
+            document,
+            index,
+            archive,
+            now,
+            declared,
+            updated_at_sort,
+            archive_byte_length,
+            true,
+        )
+    }
+
     pub fn save(
         &self,
         blobs: &BlobStore,
@@ -240,47 +286,96 @@ impl WebPackageStore {
             archive_byte_length,
         } = validate_and_extract(document, index)?;
         let updated_at_sort = timestamp_sort_key(&declared.updated_at)?;
+        self.save_inner(
+            blobs,
+            document,
+            index,
+            archive,
+            now,
+            declared,
+            updated_at_sort,
+            archive_byte_length,
+            false,
+        )
+    }
+
+    /// `insert_if_absent` 为真时，幂等预检已经把 id 占位的情况排除并且不会写 blob。
+    #[allow(clippy::too_many_arguments)]
+    fn save_inner(
+        &self,
+        blobs: &BlobStore,
+        document: &str,
+        index: &WebPackageIndex,
+        archive: &[u8],
+        now: &str,
+        declared: WebPackageIndex,
+        updated_at_sort: i64,
+        archive_byte_length: i64,
+        insert_if_absent: bool,
+    ) -> Result<SaveWebPackageOutcome, SaveWebPackageError> {
         let archive_digest = crate::blob::digest_of(archive);
 
         // 记录自称的长度必须等于实际字节数。否则"这个包多大"这个问题在详情页和磁盘上会给出
         // 两个答案，而下载、进度与配额估算都建立在这个数字上。
+        // 此处用参数而不重新调 `validate_and_extract`：两个入口已经验证过一次，重复调用只会多一次拉拟好一份。
         if archive_byte_length != archive.len() as i64 {
             return Err(SaveWebPackageError::Store(StoreError::IndexMismatch));
         }
 
-        let existing = self.existing_state(&declared.id)?;
-        if let Some((true, _)) = existing {
-            if index.deleted_at.is_none() {
-                return Err(SaveWebPackageError::Store(StoreError::Tombstoned));
+        if insert_if_absent {
+            // 这里只是为了**不写 blob**：真正的判定在下面事务里的 `DO NOTHING`。预检若误拥有写入权，
+            // 真正的插入会落到 0 行、事务提交后本次报 `already_present`，那时已写的 blob 是孤儿。
+            if self.existing_state(&declared.id)?.is_some() {
+                return Ok(SaveWebPackageOutcome {
+                    id: declared.id.clone(),
+                    blob: crate::blob::BlobWriteOutcome::AlreadyPresent,
+                    already_present: true,
+                });
             }
-        }
-        if let Some((_, existing_sort)) = existing {
-            if updated_at_sort < existing_sort {
-                return Err(SaveWebPackageError::Store(
-                    StoreError::NonMonotonicTimestamp,
-                ));
+        } else {
+            let existing = self.existing_state(&declared.id)?;
+            if let Some((true, _)) = existing {
+                if index.deleted_at.is_none() {
+                    return Err(SaveWebPackageError::Store(StoreError::Tombstoned));
+                }
+            }
+            if let Some((_, existing_sort)) = existing {
+                if updated_at_sort < existing_sort {
+                    return Err(SaveWebPackageError::Store(
+                        StoreError::NonMonotonicTimestamp,
+                    ));
+                }
             }
         }
 
         // blob 先写。崩溃在这一步之后、事务之前 → 孤儿 blob（允许）。
         let blob_outcome = blobs.write(&archive_digest, archive, now)?;
 
+        // 插入落空时事务内部提前返回，因此结果先写进这个变量、事务提交后再返回。
+        let mut raced: Option<String> = None;
         self.with_connection(|connection| {
             let transaction = connection
                 .unchecked_transaction()
                 .map_err(|_| StoreError::Failure)?;
-            transaction
+            let conflict = if insert_if_absent {
+                "ON CONFLICT(id) DO NOTHING"
+            } else {
+                "ON CONFLICT(id) DO UPDATE SET
+                    document = excluded.document,
+                    ref_digest = excluded.ref_digest,
+                    updated_at = excluded.updated_at,
+                    updated_at_sort = excluded.updated_at_sort,
+                    deleted_at = excluded.deleted_at,
+                    archive_byte_length = excluded.archive_byte_length"
+            };
+            let inserted = transaction
                 .execute(
-                    "INSERT INTO local_web_package
-                        (id, document, ref_digest, updated_at, updated_at_sort, deleted_at, archive_byte_length)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-                     ON CONFLICT(id) DO UPDATE SET
-                        document = excluded.document,
-                        ref_digest = excluded.ref_digest,
-                        updated_at = excluded.updated_at,
-                        updated_at_sort = excluded.updated_at_sort,
-                        deleted_at = excluded.deleted_at,
-                        archive_byte_length = excluded.archive_byte_length",
+                    &format!(
+                        "INSERT INTO local_web_package
+                            (id, document, ref_digest, updated_at, updated_at_sort, deleted_at, archive_byte_length)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                         {conflict}"
+                    ),
                     rusqlite::params![
                         declared.id,
                         document,
@@ -292,6 +387,14 @@ impl WebPackageStore {
                     ],
                 )
                 .map_err(|_| StoreError::Failure)?;
+            // 插入为 0 行就是"插入点之间被别的写者抢先了"。此时不能去动已写的 blob（blob 与记录分属两个资源，
+            // 崩溃落在两者之间被允许，收拾由 `reclaim` 在维护窗口完成），但对调用方而言事实不变，
+            // 因此直接报已存在。
+            if inserted == 0 {
+                raced = Some(declared.id.clone());
+                transaction.commit().map_err(|_| StoreError::Failure)?;
+                return Ok(());
+            }
             // 引用行覆盖写：重新导入同一份 ZIP 是幂等的，而换 digest 时旧引用必须被替换，
             // 否则一个包会同时"可达"两个 blob，让 GC 无法判断该删哪个。
             transaction
@@ -301,12 +404,21 @@ impl WebPackageStore {
                     rusqlite::params![declared.id, archive_digest],
                 )
                 .map_err(|_| StoreError::Failure)?;
-            transaction.commit().map_err(|_| StoreError::Failure)
+            transaction.commit().map_err(|_| StoreError::Failure)?;
+            Ok(())
         })?;
 
-        Ok(SaveWebPackageOutcome {
-            blob: blob_outcome,
-            id: declared.id,
+        Ok(match raced {
+            Some(id) => SaveWebPackageOutcome {
+                blob: blob_outcome,
+                id,
+                already_present: true,
+            },
+            None => SaveWebPackageOutcome {
+                blob: blob_outcome,
+                id: declared.id,
+                already_present: false,
+            },
         })
     }
 
@@ -738,7 +850,8 @@ mod tests {
             outcome,
             SaveWebPackageOutcome {
                 blob: BlobWriteOutcome::Stored,
-                id: "wp_1".to_string()
+                id: "wp_1".to_string(),
+                already_present: false
             }
         );
         assert_eq!(
@@ -776,6 +889,63 @@ mod tests {
                 .documents
                 .len(),
             1
+        );
+    }
+
+    #[test]
+    fn save_if_absent_reports_the_second_caller_instead_of_overwriting() {
+        // 这条用例断言的是"第二个写者拿到的是 `already_present` 而不是一份被改写的记录"。它与
+        // `re_importing_identical_bytes_is_idempotent` 的差别在于**字节不同**：`save` 换 digest 时会
+        // 把引用指向新 blob，而 `save_if_absent` 必须两者都不动。
+        let (packages, blobs, _root) = fixture();
+        let first_archive = b"PK\x03\x04first".to_vec();
+        let (first_document, first_index) = package_for("wp_race", NOW, None, &first_archive);
+        assert!(
+            !packages
+                .save_if_absent(&blobs, &first_document, &first_index, &first_archive, NOW)
+                .expect("first")
+                .already_present
+        );
+
+        let second_archive = b"PK\x03\x04second-and-longer".to_vec();
+        let (second_document, second_index) = package_for("wp_race", NOW, None, &second_archive);
+        let outcome = packages
+            .save_if_absent(
+                &blobs,
+                &second_document,
+                &second_index,
+                &second_archive,
+                "2026-10-01T00:00:00Z",
+            )
+            .expect("second must be reported, not fail");
+        assert!(outcome.already_present);
+        assert_eq!(
+            packages.get("wp_race").expect("get"),
+            Some(first_document),
+            "insert-if-absent 不得改写既有记录"
+        );
+    }
+
+    #[test]
+    fn save_if_absent_does_not_write_an_archive_blob_for_an_existing_package() {
+        // "两者都不动"必须包含 archive 字节：否则每个撞名的导入都会留下一份没人引用的副本，
+        // 而 `reclaim` 要等到下一次维护窗口才收得掉。判据是 blob 目录里多出来的那个 digest。
+        let (packages, blobs, _root) = fixture();
+        let first_archive = b"PK\x03\x04kept".to_vec();
+        let (first_document, first_index) = package_for("wp_keep", NOW, None, &first_archive);
+        packages
+            .save_if_absent(&blobs, &first_document, &first_index, &first_archive, NOW)
+            .expect("first");
+        let other_archive = b"PK\x03\x04orphan-candidate".to_vec();
+        let other_digest = crate::blob::digest_of(&other_archive);
+        let (other_document, other_index) = package_for("wp_keep", NOW, None, &other_archive);
+        let outcome = packages
+            .save_if_absent(&blobs, &other_document, &other_index, &other_archive, NOW)
+            .expect("second must be reported, not fail");
+        assert!(outcome.already_present);
+        assert!(
+            blobs.metadata(&other_digest).expect("metadata").is_none(),
+            "已存在时不得写入 archive blob：否则留下的是一份没人引用的副本"
         );
     }
 

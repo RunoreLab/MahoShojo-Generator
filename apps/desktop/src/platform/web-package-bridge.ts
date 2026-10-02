@@ -5,6 +5,7 @@ import {
   DesktopReadWebPackageArchiveRequestSchema,
   DesktopSaveWebPackageRequestSchema,
   DesktopSaveWebPackageResponseSchema,
+  type DesktopLocalLibraryWriteMode,
   DesktopWebPackageTransitionRequestSchema,
   type DesktopBlobWriteOutcome,
   type DesktopWebPackageIndex,
@@ -17,6 +18,7 @@ import {
   type LocalWebPackageQuery,
   type LocalWebPackageRecordV1,
   type WebPackageRepository,
+  type WebPackageWriteOutcome,
 } from '@mahoshojo/local-library/web-package-record';
 import { nextLocalTimestamp } from '@mahoshojo/local-library/record';
 
@@ -196,13 +198,15 @@ export class IpcWebPackageRepository implements WebPackageRepository {
   async putWithOutcome(
     record: LocalWebPackageRecordV1,
     archive: Uint8Array,
-  ): Promise<{ blobOutcome: DesktopBlobWriteOutcome }> {
+    writeMode: DesktopLocalLibraryWriteMode = 'overwrite',
+  ): Promise<{ blobOutcome: DesktopBlobWriteOutcome; alreadyPresent: boolean }> {
     const validated = LocalWebPackageRecordV1Schema.parse(record);
     const request = DesktopSaveWebPackageRequestSchema.parse({
       document: JSON.stringify(validated),
       index: toWebPackageIndex(validated),
       archive: toBase64Bytes(archive),
       now: new Date().toISOString(),
+      writeMode,
     });
     let raw: unknown;
     try {
@@ -218,12 +222,26 @@ export class IpcWebPackageRepository implements WebPackageRepository {
         '本地库返回了无法识别的保存结果',
       );
     }
-    return { blobOutcome: response.data.blobOutcome };
+    return { blobOutcome: response.data.blobOutcome, alreadyPresent: response.data.alreadyPresent };
   }
 
   /** `WebPackageRepository` 端口形态。丢弃 blob 结果只适用于"确定不会损坏"的调用点。 */
   async put(record: LocalWebPackageRecordV1, archive: Uint8Array): Promise<void> {
     await this.putWithOutcome(record, archive);
+  }
+
+  /**
+   * `insert-if-absent`：只在 id 尚不存在时写入记录与 archive 字节，已存在则两者都不动。
+   *
+   * 不在这里自己 `get` 一次：那会把原子性变成两次 IPC 之间的一个约定。判定在 native 的事务里，
+   * 而两种写法共用同一把写许可，所以这一路并不多事���。
+   */
+  async putIfAbsent(
+    record: LocalWebPackageRecordV1,
+    archive: Uint8Array,
+  ): Promise<WebPackageWriteOutcome> {
+    const outcome = await this.putWithOutcome(record, archive, 'insert-if-absent');
+    return outcome.alreadyPresent ? { alreadyPresent: true } : { written: true };
   }
 
   async get(id: string): Promise<LocalWebPackageRecordV1 | null> {

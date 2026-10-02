@@ -7,14 +7,17 @@ import {
   type LocalWebPackageQuery,
   type LocalWebPackageRecordV1,
   type WebPackageRepository,
+  type WebPackageWriteOutcome,
 } from '@mahoshojo/local-library/web-package-record';
 
 import {
   LOCAL_LIBRARY_INDEX_NAMES,
   LOCAL_LIBRARY_STORE_NAMES,
+  addLocalLibraryRecord,
   deleteLocalLibraryRecord,
   getAllLocalLibraryRecords,
   getLocalLibraryRecord,
+  isConstraintError,
   monotonicNowIso,
   putLocalLibraryRecord,
   runLocalLibraryTransaction,
@@ -97,6 +100,47 @@ export class IndexedDbWebPackageRepository implements WebPackageRepository {
       }),
       unreadable,
     };
+  }
+
+  /**
+   * `insert-if-absent`：只在 id 尚不存在时写入记录与 archive 字节，已存在则两者都不动。
+   *
+   * 用 `add` 而不是"先 `get` 再 `put`"：后者把原子性变成两个请求之间的一个约定。
+   *
+   * "两者都不动"包含 archive 字节：先把记录写进去再遇到键冲突会留下一份没人引用的副本。
+   */
+  async putIfAbsent(
+    record: LocalWebPackageRecordV1,
+    archive: Uint8Array,
+  ): Promise<WebPackageWriteOutcome> {
+    const parsed = LocalWebPackageRecordV1Schema.parse(record);
+    const bytes = toDetachedArrayBuffer(archive);
+    try {
+      await runLocalLibraryTransaction(
+        [LOCAL_LIBRARY_STORE_NAMES.webPackages, LOCAL_LIBRARY_STORE_NAMES.webPackageArchives],
+        'readwrite',
+        async (transaction) => {
+          await addLocalLibraryRecord(
+            transaction.objectStore(LOCAL_LIBRARY_STORE_NAMES.webPackages),
+            parsed,
+          );
+          await putLocalLibraryRecord(
+            transaction.objectStore(LOCAL_LIBRARY_STORE_NAMES.webPackageArchives),
+            LocalWebPackageArchiveSchema.parse({
+              digest: parsed.ref.digest,
+              bytes,
+              cachedAt: monotonicNowIso(parsed.updatedAt),
+            }),
+          );
+        },
+      );
+      return { written: true };
+    } catch (cause) {
+      // 两个 store 在同一个事务里，因此记录插入失败会把 archive 字节一起回滚——“两者都不动”
+      // 在 IndexedDB 上是事务的性质，而不是需要额外编排的顺序。
+      if (isConstraintError(cause)) return { alreadyPresent: true };
+      throw cause;
+    }
   }
 
   async put(record: LocalWebPackageRecordV1, archive: Uint8Array): Promise<void> {

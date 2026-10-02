@@ -100,7 +100,7 @@ describe('IpcLocalCardRepository', () => {
     const calls: { command: string; args?: Record<string, unknown> }[] = [];
     const repository = new IpcLocalCardRepository(async (command, args) => {
       calls.push({ command, args });
-      return { id: 'lc_0123456789abcdef0123456789abcdef' };
+      return { id: 'lc_0123456789abcdef0123456789abcdef', alreadyPresent: false };
     });
 
     const value = record();
@@ -172,7 +172,7 @@ describe('IpcLocalCardRepository', () => {
       if (command === GET_LOCAL_CARD_COMMAND) return stored;
       const request = (args as { request: { document: string } }).request;
       stored = request.document;
-      return { id: 'lc_0123456789abcdef0123456789abcdef' };
+      return { id: 'lc_0123456789abcdef0123456789abcdef', alreadyPresent: false };
     });
 
     stored = documentText(record());
@@ -205,6 +205,32 @@ describe('IpcLocalCardRepository', () => {
     expect(commands).toEqual([GET_LOCAL_CARD_COMMAND]);
   });
 
+  it('putIfAbsent 交出 insert-if-absent 并把 alreadyPresent 翻译成两种结果', async () => {
+    // 断言的是**写下去的东西**：writeMode 必须真的到达请求体，否则 native 会静默地按覆盖写处理，
+    // 而症状是"existing-wins 不生效"——没有任何一层会失败。
+    const seen: { writeMode: unknown }[] = [];
+    const already = new IpcLocalCardRepository(async (_command, args) => {
+      seen.push((args as { request: { writeMode: unknown } }).request);
+      return { id: 'lc_0123456789abcdef0123456789abcdef', alreadyPresent: true };
+    });
+    await expect(already.putIfAbsent(record())).resolves.toEqual({ alreadyPresent: true });
+    expect(seen[0]?.writeMode).toBe('insert-if-absent');
+
+    const fresh = new IpcLocalCardRepository(async () =>
+      ({ id: 'lc_0123456789abcdef0123456789abcdef', alreadyPresent: false }));
+    await expect(fresh.putIfAbsent(record())).resolves.toEqual({ written: true });
+  });
+
+  it('put 仍然是覆盖写', async () => {
+    const seen: { writeMode: unknown }[] = [];
+    const repository = new IpcLocalCardRepository(async (_command, args) => {
+      seen.push((args as { request: { writeMode: unknown } }).request);
+      return { id: 'lc_0123456789abcdef0123456789abcdef', alreadyPresent: false };
+    });
+    await repository.put(record());
+    expect(seen[0]?.writeMode).toBe('overwrite');
+  });
+
   it('restore 交出移除 deletedAt 且推进 updatedAt 的完整记录', async () => {
     const calls: { command: string; args?: Record<string, unknown> }[] = [];
     let stored: string | null = documentText(
@@ -214,7 +240,8 @@ describe('IpcLocalCardRepository', () => {
       calls.push({ command, args });
       if (command === GET_LOCAL_CARD_COMMAND) return stored;
       stored = (args as { request: { document: string } }).request.document;
-      return null;
+      // 保存类命令的响应必须过一遍 schema，缺失 `alreadyPresent` 会是一次明确的失败而不是静默成功。
+      return { id: 'lc_0123456789abcdef0123456789abcdef', alreadyPresent: false };
     });
 
     await repository.restore('lc_0123456789abcdef0123456789abcdef');

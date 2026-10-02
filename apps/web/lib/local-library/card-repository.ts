@@ -2,6 +2,7 @@ import {
   LocalCardPageSchema,
   LocalCardQuerySchema,
   type CardRepository,
+  type CardWriteOutcome,
   type LocalCardPage,
   type LocalCardQuery,
 } from '@mahoshojo/local-library/repository';
@@ -10,9 +11,11 @@ import { LocalCardRecordV1Schema, type LocalCardRecordV1 } from '@mahoshojo/loca
 import {
   LOCAL_LIBRARY_INDEX_NAMES,
   LOCAL_LIBRARY_STORE_NAMES,
+  addLocalLibraryRecord,
   deleteLocalLibraryRecord,
   getAllLocalLibraryRecords,
   getLocalLibraryRecord,
+  isConstraintError,
   monotonicNowIso,
   putLocalLibraryRecord,
   runLocalLibraryTransaction,
@@ -93,6 +96,25 @@ export class IndexedDbCardRepository implements CardRepository {
       }
       await putLocalLibraryRecord(store, parsed);
     });
+  }
+
+  /**
+   * `insert-if-absent`：只在 id 尚不存在时写入，已存在（含墓碑）则整条不动。
+   *
+   * 用 `add` 而不是"先 `get` 再 `put`"：后者把原子性变成两个请求之间的一个约定。
+   */
+  async putIfAbsent(record: LocalCardRecordV1): Promise<CardWriteOutcome> {
+    const parsed = LocalCardRecordV1Schema.parse(record);
+    try {
+      await runLocalLibraryTransaction(LOCAL_LIBRARY_STORE_NAMES.dataCards, 'readwrite', async (transaction) => {
+        await addLocalLibraryRecord(transaction.objectStore(LOCAL_LIBRARY_STORE_NAMES.dataCards), parsed);
+      });
+      return { written: true };
+    } catch (cause) {
+      // 只把键冲突当作"已存在"；其他拒绝必须继续上抛，否则存储故障会被误报成"已存在"。
+      if (isConstraintError(cause)) return { alreadyPresent: true };
+      throw cause;
+    }
   }
 
   async delete(id: string): Promise<void> {
