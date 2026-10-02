@@ -101,17 +101,51 @@ interface RawCall {
   readonly headers: Record<string, string>;
 }
 
+/**
+ * 传输夹具的共享状态。
+ *
+ * `totalBytes` 与 `absolutePath` 由 `begin` 的 mock 回填——导出器先 `begin` 再分块，因此 raw 调用
+ * 发生时这两个值已经确定，夹具不需要猜归档多大。
+ */
+interface TransportState {
+  totalBytes: number;
+  absolutePath: string;
+  receivedByteLength: number;
+}
+
+/**
+ * 忠实的 native 侧行为：累计字节如实回显，收满当轮报告 `complete` 并回显最终路径。
+ *
+ * 默认用它而不是随手写个固定响应，是因为桥**必须**逐块断言这些回执；一个恒返回
+ * `{writtenByteLength: 0, complete: false}` 的 mock 会让那批断言在测试里恒真——
+ * 而"所有块都报未完成却仍然导出成功"正是 r4a 修掉的那个假成功路径。
+ */
+const honestAppendResponse = (
+  _call: RawCall,
+  _index: number,
+  state: TransportState,
+): unknown => {
+  const complete = state.receivedByteLength === state.totalBytes;
+  return {
+    writtenByteLength: state.receivedByteLength,
+    complete,
+    ...(complete ? { absolutePath: state.absolutePath } : {}),
+  };
+};
+
 const createTransport = (
-  responses: (call: RawCall, index: number) => unknown,
+  responses: (call: RawCall, index: number, state: TransportState) => unknown = honestAppendResponse,
+  state: TransportState = { totalBytes: 0, absolutePath: '', receivedByteLength: 0 },
 ) => {
   const calls: RawCall[] = [];
   let received: Uint8Array = new Uint8Array();
   const rawInvoke: RawInvokeFn = async (command, body, options) => {
     calls.push({ command, bytes: body, headers: options.headers });
     received = new Uint8Array([...received, ...body]);
-    return responses({ command, bytes: body, headers: options.headers }, calls.length - 1);
+    state.receivedByteLength += body.byteLength;
+    return responses({ command, bytes: body, headers: options.headers }, calls.length - 1, state);
   };
-  return { calls, rawInvoke, received: () => received };
+  return { calls, rawInvoke, received: () => received, state };
 };
 
 const runExport = async (
@@ -129,9 +163,12 @@ const runExport = async (
   const source = createArchiveExportSource(cardRepository(cards), packageRepository(packages));
 
   const begun = { exportId: 7, absolutePath: '/data/exports/local-library-20261001T000000Z.zip' };
-  const beginInvoke = vi.fn(async () => begun);
-  // 这里的 raw 传输只需要记录字节；complete 由 native 在收满时回，本用例不依赖它。
-  const transport = createTransport(() => ({ writtenByteLength: 0, complete: false }));
+  const transport = createTransport();
+  const beginInvoke = vi.fn(async (_command: string, args?: Record<string, unknown>) => {
+    transport.state.totalBytes = Number(args?.declaredTotalByteLength ?? 0);
+    transport.state.absolutePath = begun.absolutePath;
+    return begun;
+  });
   const result = await exportLocalLibraryArchive(beginInvoke, transport.rawInvoke, source, {
     exportedAt: EXPORTED_AT,
     ...(overrides.chunkBytes === undefined ? {} : { chunkBytes: overrides.chunkBytes }),
@@ -218,29 +255,36 @@ describe('exportLocalLibraryArchive', () => {
     ).rejects.toMatchObject({ code: 'export-failure' });
   });
 
-  it('回显 native 给出的绝对路径，并声明这是一次快照', async () => {
+  it('回显 native 给出的绝对路径，并声明一致性口径是自洽列举', async () => {
     const { result, begun } = await runExport();
     expect(result.absolutePath).toBe(begun.absolutePath);
     expect(result.byteLength).toBeGreaterThan(0);
-    expect(result.isSnapshot).toBe(true);
+    // 刻意**不是** isSnapshot：算法先列举后读 ZIP，给不出 point-in-time（DESK-071b）。
+    expect(result.consistency).toBe('self-consistent-enumeration');
+    expect(Object.keys(result)).not.toContain('isSnapshot');
   });
 
-  it('progress 由 native 的字节计数驱动且单调不减', async () => {
+  it('progress 逐块等于 native 的回执累计，且单调不减', async () => {
     const zip = fakeZip('b');
     const source = createArchiveExportSource(
       cardRepository([makeCard('lc_1')]),
       packageRepository([{ record: makePackage('wp_1', zip), bytes: zip }]),
     );
     const begun = { exportId: 3, absolutePath: '/data/exports/a.zip' };
-    let reported = 0;
-    const transport = createTransport(() => {
-      reported += 7;
-      return { writtenByteLength: reported, complete: false };
-    });
+    const transport = createTransport();
+    const echoed: number[] = [];
     const seen: Array<[number, number]> = [];
     const result = await exportLocalLibraryArchive(
-      async () => begun,
-      transport.rawInvoke,
+      async (_command, args) => {
+        transport.state.totalBytes = Number(args?.declaredTotalByteLength ?? 0);
+        transport.state.absolutePath = begun.absolutePath;
+        return begun;
+      },
+      async (command, body, options) => {
+        const raw = await transport.rawInvoke(command, body, options);
+        echoed.push(Number((raw as { writtenByteLength: number }).writtenByteLength));
+        return raw;
+      },
       source,
       {
         exportedAt: EXPORTED_AT,
@@ -248,8 +292,9 @@ describe('exportLocalLibraryArchive', () => {
         onProgress: (value, max) => seen.push([value, max]),
       },
     );
-    expect(seen.length).toBeGreaterThan(0);
+    expect(seen.length).toBeGreaterThan(1);
     // 进度必须来自 native 回执：渲染层自己数块数，会在某块被 native 拒绝时把进度条推到 100%。
+    expect(seen.map(([value]) => value)).toEqual(echoed);
     for (const [value, max] of seen) {
       expect(max).toBe(result.byteLength);
       expect(value).toBeGreaterThan(0);
@@ -257,6 +302,104 @@ describe('exportLocalLibraryArchive', () => {
     for (let index = 1; index < seen.length; index += 1) {
       expect(seen[index][0]).toBeGreaterThanOrEqual(seen[index - 1][0]);
     }
+    // 最后一次进度就是归档总长：进度条到 100% 必须等价于 native 已确认完成。
+    expect(seen[seen.length - 1][0]).toBe(result.byteLength);
+  });
+});
+
+describe('桥必须消费 native 的完成确认，而不是只看自己送了多少字节', () => {
+  const zip = fakeZip('e');
+  const source = () =>
+    createArchiveExportSource(
+      cardRepository([makeCard('lc_1')]),
+      packageRepository([{ record: makePackage('wp_1', zip), bytes: zip }]),
+    );
+
+  /** 用一个不诚实的 native 跑一次导出，返回它抛出的错误码。 */
+  const exportWithBrokenNative = async (
+    responses: (call: RawCall, index: number, state: TransportState) => unknown,
+  ): Promise<string> => {
+    const begun = { exportId: 11, absolutePath: '/data/exports/broken.zip' };
+    const transport = createTransport(responses);
+    const invoke = async (_command: string, args?: Record<string, unknown>) => {
+      transport.state.totalBytes = Number(args?.declaredTotalByteLength ?? 0);
+      transport.state.absolutePath = begun.absolutePath;
+      return begun;
+    };
+    const error = await exportLocalLibraryArchive(invoke, transport.rawInvoke, source(), {
+      exportedAt: EXPORTED_AT,
+      chunkBytes: 64,
+    }).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(LocalArchiveExportError);
+    return (error as LocalArchiveExportError).code;
+  };
+
+  /**
+   * 以**诚实响应**为基线、只扰动一个字段。
+   *
+   * 直接手写响应会让"报失败"可能来自另一条检查：例如只把 `complete` 改成 true 而不补
+   * `absolutePath`，schema 的 `superRefine` 就会先拒收，于是断言通过却与被测的那条检查无关。
+   */
+  const respondWith =
+    (
+      perturb: (
+        honest: Record<string, unknown>,
+        state: TransportState,
+      ) => Record<string, unknown>,
+    ) =>
+    (_call: RawCall, _index: number, state: TransportState): unknown =>
+      perturb(honestAppendResponse(_call, _index, state) as Record<string, unknown>, state);
+
+  it('累计字节与实际送达不符时报失败', async () => {
+    // native 少记了一块：产物会少东西，而 UI 正在显示成功。
+    expect(
+      await exportWithBrokenNative(
+        respondWith((honest) => ({
+          ...honest,
+          writtenByteLength: Math.max(0, Number(honest.writtenByteLength) - 1),
+        })),
+      ),
+    ).toBe('export-failure');
+  });
+
+  it('尚未送完却提前报告完成时报失败', async () => {
+    // 提前 complete 会让 native 提前 rename，剩下几块无人接收——一份被截断的归档。
+    expect(
+      await exportWithBrokenNative(
+        respondWith((honest, state) =>
+          honest.complete ? honest : { ...honest, complete: true, absolutePath: state.absolutePath },
+        ),
+      ),
+    ).toBe('export-failure');
+  });
+
+  it('全部送完却仍未确认完成时报失败', async () => {
+    // 这是 r4a 修掉的那条假成功路径的镜像：native 静默不完成，而桥宣称导出成功。
+    expect(
+      await exportWithBrokenNative(
+        respondWith((honest) =>
+          honest.complete
+            ? { writtenByteLength: honest.writtenByteLength, complete: false }
+            : honest,
+        ),
+      ),
+    ).toBe('export-failure');
+  });
+
+  it('最终路径与 begin 回显的不一致时报失败', async () => {
+    // 让 native 在最后偷偷换成 -2 会把 begin 的回显降级成"仅供参考"。
+    expect(
+      await exportWithBrokenNative(
+        respondWith((honest) =>
+          honest.complete ? { ...honest, absolutePath: '/data/exports/broken-2.zip' } : honest,
+        ),
+      ),
+    ).toBe('export-failure');
+  });
+
+  it('回执不符合 schema 时报失败而不是让 ZodError 逃出去', async () => {
+    // 契约形状错了必须走同一个错误类型，否则 UI 拿不到 code，只能显示无法归类的失败。
+    expect(await exportWithBrokenNative(() => ({ written: 1, done: true }))).toBe('export-failure');
   });
 });
 

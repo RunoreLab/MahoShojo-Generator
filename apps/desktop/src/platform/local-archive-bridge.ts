@@ -109,17 +109,23 @@ export interface ExportLocalLibraryArchiveOptions {
 }
 
 export interface ExportedLocalLibraryArchive {
-  /** 最终归档的绝对路径。 */
+  /** 最终归档的绝对路径。它与 `begin` 回显的计划路径相同。 */
   readonly absolutePath: string;
   readonly byteLength: number;
   readonly entryCount: number;
   /**
-   * `true` 表示导出反映的是**列举那一刻**的库。
+   * 导出的一致性口径。
    *
-   * 恒为 `true` 是刻意的：它当前没有第二种取值，但把它写成字段而不是省掉，是为了让"这是一次
-   * 快照而不是强一致"这条语义在类型上可见。将来若改成持维护窗口，这里才可以变成 `false`。
+   * `'self-consistent-enumeration'` 的含义是：**一次成功产出的归档，其内部的记录、digest 与 blob
+   * 必然自洽**。并发修改可能被纳入、可能被遗漏，也可能让本次导出显式失败；但它不会产出一个
+   * record / blob 错配的归档（`DESK-071b`）。
+   *
+   * 它**不是** point-in-time 快照。当前算法先分页列举、再逐个读取 Web 包 ZIP，中间任何一次并发
+   * 写入都可能改变结果范围——"点击那一刻的库"这个承诺算法给不出，因此类型上也不给。恒为单一取值
+   * 是刻意的：把这行写成字面量而不是省掉，是为了让这条语义在类型上可见、并且在算法真的变成
+   * point-in-time 之前无法被悄悄改成别的东西。
    */
-  readonly isSnapshot: true;
+  readonly consistency: 'self-consistent-enumeration';
 }
 
 /**
@@ -169,27 +175,53 @@ export const exportLocalLibraryArchive = async (
   }
 
   const total = packed.bytes.byteLength;
+  // 桥必须逐块确认 native 真的**收下了自己刚送达的那些字节**，而不是只把 `writtenByteLength`
+  // 喂给进度条。契约把 `complete` 定义成"文件已经 sync 并原子 rename"的确认信号，因此它是一个
+  // 可以断言的事实，而不是一个可以忽略的提示位——忽略它的症状是导出一个"能打开但少东西"的
+  // 归档，而 UI 显示的是成功。
+  let expectedWritten = 0;
   for (let offset = 0; offset < total; offset += chunkBytes) {
     const chunk = packed.bytes.subarray(offset, Math.min(offset + chunkBytes, total));
-    let raw: unknown;
+    let response;
     try {
-      raw = await rawInvoke(APPEND_ARCHIVE_EXPORT_CHUNK_COMMAND, chunk, {
+      const raw = await rawInvoke(APPEND_ARCHIVE_EXPORT_CHUNK_COMMAND, chunk, {
         headers: { [ARCHIVE_EXPORT_ID_HEADER]: String(begun.exportId) },
       });
+      response = DesktopAppendArchiveExportChunkResponseSchema.parse(raw);
     } catch (cause) {
       throw toExportError(cause);
     }
-    const response = DesktopAppendArchiveExportChunkResponseSchema.parse(raw);
-    options.onProgress?.(response.writtenByteLength, total);
+
+    expectedWritten += chunk.byteLength;
+    if (response.writtenByteLength !== expectedWritten) {
+      throw new LocalArchiveExportError(
+        'export-failure',
+        `导出进度与实际送达不符：native 报 ${response.writtenByteLength}，已送达 ${expectedWritten}`,
+      );
+    }
+    // 收满当轮就是最后一块，因此"是否完成"是本地已知的，而不是等 native 告诉我们的。
+    const isFinalBlock = expectedWritten === total;
+    if (response.complete !== isFinalBlock) {
+      throw new LocalArchiveExportError(
+        'export-failure',
+        isFinalBlock
+          ? '导出已送完全部字节，但 native 未确认完成'
+          : `导出尚未送完（${expectedWritten}/${total}），native 却报告已完成`,
+      );
+    }
+    // 最终路径必须与 `begin` 回显的那个一致。让 native 在最后换一个名字会把 `begin` 的回显
+    // 降级成"仅供参考"，契约复杂度随之上升；因此这里选择失败而不是接受一个不同的路径。
+    if (isFinalBlock && response.absolutePath !== begun.absolutePath) {
+      throw new LocalArchiveExportError('export-failure', 'native 回显的最终路径与 begin 不一致');
+    }
+    options.onProgress?.(expectedWritten, total);
   }
 
-  // 完成状态由**字节计数**决定，而不是"最后一块的返回值"：native 在收满时同步 rename，而一次
-  // 静默截断会产出一个能打开但少东西的归档。因此这里只把 native 回显的路径当作既定事实。
   return {
     absolutePath: begun.absolutePath,
     byteLength: total,
     entryCount: packed.entryCount,
-    isSnapshot: true,
+    consistency: 'self-consistent-enumeration',
   };
 };
 
