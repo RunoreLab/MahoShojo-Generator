@@ -11,6 +11,8 @@ import {
   parseLocalLibraryArchiveWebPackage,
 } from './archive';
 import { MAX_LOCAL_LIBRARY_ARCHIVE_OUTPUT_BYTES } from './archive-pack';
+import { unpackWebPackageZip } from '@mahoshojo/web-package';
+
 import { sha256DigestOfBytes } from './digest';
 import type { CardRepository } from './repository';
 import type { WebPackageRepository } from './web-package-record';
@@ -121,6 +123,14 @@ export const LOCAL_LIBRARY_ARCHIVE_IMPORT_ERROR_CODES = [
   'archive-budget-exceeded',
   /** 条目字节不是一条通过记录契约校验的记录 JSON。 */
   'archive-record-invalid',
+  /**
+   * 内层 Web 包 ZIP 不是记录所声明的那个包。
+   *
+   * 独立于 `archive-entry-corrupt`：那条说的是"这段字节与清单声明不符"（传输或截断问题，重试同一个
+   * 文件可能仍然失败但值得再试），这一条说的是"**记录与 ZIP 各说各话**"——归档是**有意**这样构造的，
+   * 因为每一段字节都与清单的声明自洽。因此 UI MUST NOT 把它显示成"文件损坏，请重试"。
+   */
+  'archive-package-mismatch',
 ] as const;
 
 export type LocalLibraryArchiveImportErrorCode =
@@ -548,7 +558,7 @@ const scanArchiveAsync = async (
 };
 
 /**
- * 扫描 + 摘要核对。
+ * 扫描 + 摘要核对 + 每条目的额外异步证明。
  *
  * ## 摘要为什么必须挂在这条接缝上
  *
@@ -572,32 +582,67 @@ const scanArchive = async (
     readonly expectedManifestDigest?: string;
     /** 块之间额外被 await 的东西。apply 用它把写入队列也纳入同一个闸门。 */
     readonly afterChunk?: () => Promise<void>;
+    /**
+     * 每条目在摘要核对**之后**必须完成的额外异步证明（目前只有内层 Web 包验证）。
+     *
+     * 它挂在与摘要**同一条串行链**上，而不是另开一条并发链，这是内存边界的前提：链被 await 于每个
+     * 输入块边界，因此同时存活的归档字节始终是一个条目。并发链会打破这一点——32 KiB 的块足以让
+     * 两个验证同时展开各自的 ZIP，峰值翻倍且与条目数无关。
+     *
+     * `onEntry` 保持同步正是因为这条链存在：让 `onEntry` 可 await 会诱使实现把验证写在那里，而它
+     * 在同步解包栈上，await 只挂起续体而不会真的让扫描交出控制权（见 `scanArchiveAsync` 里的注释）。
+     */
+    readonly verifyEntry?: (
+      _manifest: LocalLibraryArchiveManifestV2,
+      _entry: ScannedEntry,
+    ) => Promise<void> | void;
   } = {},
 ): Promise<ScanResult> => {
-  let digests: Promise<void> = Promise.resolve();
+  /**
+   * 失败**存起来**而不是让链本身拒绝。
+   *
+   * 链在块边界被 await，因此第一个失败点本应是那次 await。但扫描自身也可能在同一趟里抛错（例如某个更
+   * 早的条目触发了"清单未声明的条目"），那时循环已经跳出、链再也不会被 await，一个已拒绝的 promise
+   * 就成了 unhandled rejection——它既不携带主错误的诊断，又会让 Node 在测试之外报一条无关的崩溃。
+   *
+   * 所以链**永不拒绝**：失败被记进 `verificationFailure`，由下一次 `afterChunk` 或扫描正常结束时抛出。
+   * 记录第一个失败而不是最后一个，因为链条式执行会让后续任务继续跑，而用户该看到的是最早的原因。
+   */
+  let verificationFailure: unknown = null;
+  let verifications: Promise<void> = Promise.resolve();
+  const enqueueVerification = (task: () => Promise<void>): void => {
+    verifications = verifications.then(task).catch((cause: unknown) => {
+      verificationFailure ??= cause;
+    });
+  };
+  const settleVerifications = (): void => {
+    if (verificationFailure !== null) throw verificationFailure;
+  };
   const result = await scanArchiveAsync(
     archive,
     budgets,
     (manifest, entry) => {
       const { bytes } = entry;
-      digests = digests.then(() =>
-        sha256DigestOfBytes(bytes).then((digest) => {
-          if (digest !== entry.declaredDigest) {
-            throw fail(
-              'archive-entry-corrupt',
-              `归档条目摘要与清单声明不符：${entry.path} 声明 ${entry.declaredDigest}，实际 ${digest}`,
-            );
-          }
-        }),
-      );
+      enqueueVerification(async () => {
+        const digest = await sha256DigestOfBytes(bytes);
+        if (digest !== entry.declaredDigest) {
+          throw fail(
+            'archive-entry-corrupt',
+            `归档条目摘要与清单声明不符：${entry.path} 声明 ${entry.declaredDigest}，实际 ${digest}`,
+          );
+        }
+        await options.verifyEntry?.(manifest, entry);
+      });
       onEntry(manifest, entry);
     },
     false,
     async () => {
-      await digests;
+      await verifications;
+      settleVerifications();
       await options.afterChunk?.();
     },
   );
+  settleVerifications();
 
   if (options.expectedManifestDigest !== undefined) {
     const manifestDigest = await sha256DigestOfBytes(result.manifestBytes);
@@ -683,7 +728,47 @@ const readArchiveWebPackageRecord = (
 };
 
 /**
- * 完整 preflight：形状、预算、摘要、记录自洽、冲突判定。**一次本地库写入都没有。**
+ * 证明一段 ZIP 字节确实是记录所声明的那个 Web 包。
+ *
+ * 归档的形状与自洽检查到此为止就已经全部通过：`archives/<sha256(bytes)>` 与 `archiveDigest` 一致，
+ * 记录的 `id` / `contentDigest` / `archiveByteLength` 与清单一致，而记录契约又保证了
+ * `contentDigest === ref.digest` 且 `id` 由 `ref.digest` 派生。**仍然**没有任何一处把那份 ZIP 的内容
+ * 与 `ref.digest` 联系起来：于是构造者可以把包 X 的 ZIP 放进 `archives/<sha256(X)>`，让记录声明包 Y
+ * 的身份与摘要，两边各自与清单自洽。落到目标机器上，存储层里是"名为 Y、实为 X"。
+ *
+ * 症状出现在很久之后且与根因无关：用户打开这个包，看到的是 X 的内容，而注册表里它的身份是 Y。
+ *
+ * 比较 `verified.ref.digest` 与 `record.ref.digest` 就够了，不必逐字段比清单——`ref.digest` 是
+ * canonical manifest 的 SHA-256，两者相等即意味着两份 canonical manifest 相同（忽略碰撞）。
+ */
+const readArchiveWebPackageRefDigest = async (
+  archivePath: string,
+  archiveBytes: Uint8Array,
+): Promise<string> => {
+  try {
+    return (await unpackWebPackageZip(archiveBytes)).ref.digest;
+  } catch (cause) {
+    throw fail(
+      'archive-package-mismatch',
+      `内层 Web 包 ZIP 无法通过 Web 包校验：${archivePath}（${describe(cause)}）`,
+    );
+  }
+};
+
+const requireArchiveWebPackageMatches = (
+  archivePath: string,
+  declared: string,
+  actual: string,
+): void => {
+  if (actual === declared) return;
+  throw fail(
+    'archive-package-mismatch',
+    `内层 Web 包 ZIP 与记录声明的包不是同一个：${archivePath} 声明 ${declared}，实际 ${actual}`,
+  );
+};
+
+/**
+ * 完整 preflight：形状、预算、摘要、记录自洽、**内层 Web 包归属**、冲突判定。**一次本地库写入都没有。**
  *
  * UI 的顺序因此只能是"先 inspect、把摘要与冲突条数给用户看、再 apply"。这条顺序不是流程偏好，
  * 而是 `DESK-074`"所有 preflight 在第一次 mutation 之前完成"的直接后果。
@@ -705,6 +790,14 @@ export const inspectLocalLibraryArchive = async (
   // 第一次回调时已经可用。
   let cardByPath = new Map<string, LocalLibraryArchiveCardEntryV2>();
   let packageByPath = new Map<string, LocalLibraryArchiveWebPackageEntryV2>();
+  /**
+   * `archivePath` → 该 ZIP 自己的 `ref.digest`。
+   *
+   * 验证在 ZIP 条目到达时立刻做（那时字节在手），只留下 64 个十六进制字符；记录可能还没到，而比较
+   * 需要两侧，因此把 ZIP 一侧的结果存下来。反过来把 ZIP 字节留到记录到达时会占住整个 `archives/`
+   * 命名空间——正是 `afterChunk` 闸门要防的那个量。
+   */
+  const verifiedArchiveDigests = new Map<string, string>();
   const { manifest, manifestBytes } = await scanArchive(
     archive,
     resolved,
@@ -714,6 +807,13 @@ export const inspectLocalLibraryArchive = async (
         packageByPath = new Map(parsed.webPackages.map((entry) => [entry.path, entry]));
       }
       if (cardByPath.has(path) || packageByPath.has(path)) recordBytes.push({ path, bytes });
+    },
+    {
+      verifyEntry: async (parsed, { path, bytes }) => {
+        const owner = parsed.webPackages.find((candidate) => candidate.archivePath === path);
+        if (owner === undefined) return;
+        verifiedArchiveDigests.set(path, await readArchiveWebPackageRefDigest(path, bytes));
+      },
     },
   );
 
@@ -729,7 +829,17 @@ export const inspectLocalLibraryArchive = async (
       continue;
     }
     const pkg = packageByPath.get(path);
-    if (pkg !== undefined) readArchiveWebPackageRecord(pkg, bytes);
+    if (pkg !== undefined) {
+      const record = readArchiveWebPackageRecord(pkg, bytes);
+      const archiveDigest = verifiedArchiveDigests.get(pkg.archivePath);
+      if (archiveDigest === undefined) {
+        throw fail(
+          'archive-package-mismatch',
+          `归档缺少 Web 包记录 ${pkg.packageId} 对应的 ZIP 条目：${pkg.archivePath}`,
+        );
+      }
+      requireArchiveWebPackageMatches(pkg.archivePath, record.ref.digest, archiveDigest);
+    }
   }
 
   // 已有记录用**一次分页列举**取，而不是逐条 `get`。逐条 `get` 是 O(n) 次串行 IPC 往返
@@ -853,7 +963,16 @@ export const applyLocalLibraryArchiveImport = async (
           skipped.push({ kind: 'web-package', id: entry.packageId, reason: 'already-present' });
           return;
         }
-        await target.packages.put(readArchiveWebPackageRecord(entry, recordBytes), archiveBytes);
+        const record = readArchiveWebPackageRecord(entry, recordBytes);
+        // 写入前**再**证明一次，而不是只依赖 preflight：apply 只校验 manifest 摘要与 `plan` 相同，
+        // 因此它接受的是"同一段 manifest"，而 ZIP 条目的字节在这期间可以被换掉。existing-wins 的
+        // 跳过分支不做这一步——那条路径本来就不写入这份 ZIP。
+        requireArchiveWebPackageMatches(
+          entry.archivePath,
+          record.ref.digest,
+          await readArchiveWebPackageRefDigest(entry.archivePath, archiveBytes),
+        );
+        await target.packages.put(record, archiveBytes);
         succeededWebPackageIds.push(entry.packageId);
       } catch (cause) {
         failed.push({ kind: 'web-package', id: entry.packageId, reason: describeWriteFailure(cause) });

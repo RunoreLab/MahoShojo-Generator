@@ -3,13 +3,13 @@ import { describe, expect, it, vi } from 'vitest';
 import type { LocalCardRecordV1 } from '@mahoshojo/local-library/record';
 import {
   collectLocalLibraryArchive,
-  type LocalLibraryArchiveSource,
 } from '@mahoshojo/local-library/archive-export';
 import {
   MAX_LOCAL_LIBRARY_ARCHIVE_INPUT_BYTES,
   MAX_LOCAL_LIBRARY_ARCHIVE_OUTPUT_BYTES,
   packLocalLibraryArchive,
 } from '@mahoshojo/local-library/archive-pack';
+import { digestWebPackageBytes, packWebPackageZip, verifyWebPackage } from '@mahoshojo/web-package';
 import {
   deriveLocalWebPackageId,
   type LocalWebPackageRecordV1,
@@ -28,10 +28,6 @@ const encoder = new TextEncoder();
 const EXPORTED_AT = '2026-10-02T00:00:00.000Z';
 
 const DIGEST_A = `sha256:${'a'.repeat(64)}`;
-const DIGEST_B = `sha256:${'b'.repeat(64)}`;
-
-const zipBytes = (seed: string): Uint8Array =>
-  new Uint8Array([0x50, 0x4b, 0x03, 0x04, ...encoder.encode(seed.repeat(64)).slice(0, 256)]);
 
 /**
  * 记录夹具在本文件内自建，而不是从 `@mahoshojo/local-library` 的测试目录里 import。
@@ -51,16 +47,24 @@ const CARD: LocalCardRecordV1 = {
   createdAt: '2026-08-23T12:00:00.000Z',
   updatedAt: '2026-08-23T12:00:00.000Z',
 };
-const PACKAGE_ZIP = zipBytes('b');
-const PACKAGE: LocalWebPackageRecordV1 = {
-  id: deriveLocalWebPackageId(DIGEST_B),
-  schemaVersion: 1,
-  storageLocation: 'local',
-  entityKind: 'web-package',
-  title: '本地包',
-  summary: 'local.library-test@1.0.0',
-  ref: { id: 'local.library-test', version: '1.0.0', digest: DIGEST_B },
-  manifest: {
+/**
+ * 真实的 Web 包 ZIP，以及与之**逐字段一致**的记录。
+ *
+ * 这里此前是 `PK\x03\x04` + 重复字节的假 ZIP，配一份 `digest` / `size` 都随手写的清单。导入器现在会
+ * 调用共享的 Web 包校验来证明内层 ZIP 确实是记录所声明的那个包，于是这份夹具两处都不成立：它不是
+ * ZIP，而它的身份与它的内容无关——`ref.digest` 指向的包和 `archives/` 里那个 blob 没有关系。
+ *
+ * 记录由 `verifyWebPackage` 的输出**派生**而不是另写一份清单：`manifest` 字段必须是那份 ZIP 自己的
+ * 清单，否则一个正确实现了校验的导入器会正确地拒绝它，而症状与根因之间隔着一个夹具。
+ */
+const buildPackageFixture = async (): Promise<{
+  readonly bytes: Uint8Array;
+  readonly record: LocalWebPackageRecordV1;
+}> => {
+  // `entry` MUST 在 `files` 里存在且是 text/html——这条约束来自 Web 包契约，导入侧因此不能凭空造出
+  // 一个"清单说有、文件里没有"的包。
+  const files = [{ path: 'index.html', bytes: encoder.encode('<h1>本地包</h1>') }];
+  const manifest = {
     format: 'mahoshojo-web-package',
     formatVersion: 1,
     id: 'local.library-test',
@@ -69,25 +73,49 @@ const PACKAGE: LocalWebPackageRecordV1 = {
     entry: 'index.html',
     generation: { target: 'index.html', mode: 'replace', mediaType: 'text/html' },
     capabilities: ['scripts'],
-    // `entry` MUST 在 `files` 里存在且是 text/html——这条约束来自 Web 包契约，导入侧因此
-    // 不能凭空造出一个"清单说有、文件里没有"的包。
-    files: [{ path: 'index.html', mediaType: 'text/html', digest: DIGEST_B, size: 2 }],
-  },
-  contentDigest: DIGEST_B,
-  archiveByteLength: PACKAGE_ZIP.byteLength,
-  provenance: { kind: 'unsigned', execution: 'imported' },
-  createdAt: '2026-08-23T12:00:00.000Z',
-  updatedAt: '2026-08-23T12:00:00.000Z',
+    files: await Promise.all(files.map(async (file) => ({
+      path: file.path,
+      mediaType: 'text/html',
+      digest: await digestWebPackageBytes(file.bytes),
+      size: file.bytes.length,
+    }))),
+  };
+  const pkg = await verifyWebPackage(manifest, files);
+  const bytes = await packWebPackageZip(pkg);
+  return {
+    bytes,
+    record: {
+      id: deriveLocalWebPackageId(pkg.ref.digest),
+      schemaVersion: 1,
+      storageLocation: 'local',
+      entityKind: 'web-package',
+      title: '本地包',
+      summary: `${pkg.ref.id}@${pkg.ref.version}`,
+      ref: pkg.ref,
+      manifest: pkg.manifest,
+      contentDigest: pkg.ref.digest,
+      archiveByteLength: bytes.byteLength,
+      provenance: { kind: 'unsigned', execution: 'imported' },
+      createdAt: '2026-08-23T12:00:00.000Z',
+      updatedAt: '2026-08-23T12:00:00.000Z',
+    },
+  };
 };
 
-const source: LocalLibraryArchiveSource = {
-  listCards: async () => ({ items: [CARD], nextCursor: null }),
-  listWebPackages: async () => ({ items: [PACKAGE], nextCursor: null }),
-  readWebPackageArchive: async () => PACKAGE_ZIP,
+/** 同一个夹具被多条用例共享，而构造它是异步的；缓存 promise 而不是每次重建。 */
+let packageFixture: Promise<Awaited<ReturnType<typeof buildPackageFixture>>> | undefined;
+const packageFixtureOnce = (): Promise<Awaited<ReturnType<typeof buildPackageFixture>>> => {
+  packageFixture ??= buildPackageFixture();
+  return packageFixture;
 };
 
 const buildArchive = async (): Promise<Uint8Array> => {
-  const collected = await collectLocalLibraryArchive(source, { exportedAt: EXPORTED_AT });
+  const { bytes, record } = await packageFixtureOnce();
+  const collected = await collectLocalLibraryArchive({
+    listCards: async () => ({ items: [CARD], nextCursor: null }),
+    listWebPackages: async () => ({ items: [record], nextCursor: null }),
+    readWebPackageArchive: async () => bytes,
+  }, { exportedAt: EXPORTED_AT });
   return (await packLocalLibraryArchive(collected.manifest, collected.read)).bytes;
 };
 
@@ -129,7 +157,9 @@ const createTarget = () => {
 
 describe('readFileBytes', () => {
   it('把选中的文件读成字节', async () => {
-    const bytes = await readFileBytes(new File([zipBytes('a')], 'local-library.zip'));
+    // 这条只关心"把文件读成字节"，不需要一个真 ZIP；用字面量而不是旧的假 ZIP 夹具，免得有人
+    // 为了读文件去构造一个 Web 包。
+    const bytes = await readFileBytes(new File([new Uint8Array([0x50, 0x4b, 0x03, 0x04, 1, 2, 3])], 'local-library.zip'));
     expect(bytes.byteLength).toBeGreaterThan(0);
     expect(Array.from(bytes.subarray(0, 4))).toEqual([0x50, 0x4b, 0x03, 0x04]);
   });
@@ -170,7 +200,7 @@ describe('Desktop 导入的两步', () => {
 
     const report = await applyDesktopLibraryArchiveImport(recorder.target, archive, plan);
     expect(report.succeededCardIds).toEqual([CARD.id]);
-    expect(report.succeededWebPackageIds).toEqual([PACKAGE.id]);
+    expect(report.succeededWebPackageIds).toEqual([(await packageFixtureOnce()).record.id]);
     expect(report.failed).toEqual([]);
   });
 

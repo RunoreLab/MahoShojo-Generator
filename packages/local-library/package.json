@@ -63,6 +63,7 @@
   },
   "dependencies": {
     "@mahoshojo/contracts": "workspace:*",
+    "@mahoshojo/web-package": "workspace:*",
     "fflate": "^0.8.3",
     "zod": "^4.1.13"
   },

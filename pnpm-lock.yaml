@@ -209,6 +209,9 @@ importers:
         specifier: ^19.2.1
         version: 19.2.3(react@19.2.3)
     devDependencies:
+      '@mahoshojo/web-package':
+        specifier: workspace:*
+        version: link:../../packages/web-package
       '@tailwindcss/vite':
         specifier: ^4.3.3
         version: 4.3.3(vite@8.0.16(@types/node@20.19.27)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.16.9)(tsx@4.22.4)(yaml@2.9.0))
@@ -717,6 +720,9 @@ importers:
       '@mahoshojo/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@mahoshojo/web-package':
+        specifier: workspace:*
+        version: link:../web-package
       fflate:
         specifier: ^0.8.3
         version: 0.8.3

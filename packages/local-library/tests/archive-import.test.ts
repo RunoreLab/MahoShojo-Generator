@@ -1,5 +1,6 @@
 import { unzipSync, zipSync } from 'fflate';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { digestWebPackageBytes, packWebPackageZip, verifyWebPackage } from '@mahoshojo/web-package';
 
 import {
   LOCAL_LIBRARY_ARCHIVE_MANIFEST_PATH,
@@ -48,21 +49,52 @@ const makeCard = (index: number) =>
     contentDigest: `sha256:${distinctHex(index)}`,
   });
 
-const makePackage = (index: number, archive: Uint8Array) =>
+/**
+ * 造一个**真实的**最小 Web 包 ZIP，并交出它自己的 `ref.digest`。
+ *
+ * 此前这里用的是 `PK\x03\x04` + 重复字节的假 ZIP，`ref.digest` 也是随手写的十六进制。导入器现在会
+ * 调用共享的 Web 包校验来证明内层 ZIP 确实是记录所声明的那个包，于是这份夹具在两处都不成立：它不是
+ * ZIP，而且它的身份与它的内容无关。
+ *
+ * 真实 ZIP 不是"为了让测试变绿"：一条断言"内层 ZIP 与记录不是同一个包"的负向用例，只有在**其余**
+ * 一切都自洽（真 ZIP、真清单、真摘要、路径由摘要推导）时才有意义——否则它会因为假 ZIP 先失败，
+ * 证明的是一个更早的、与根因无关的原因。
+ */
+const buildRealWebPackageZip = async (
+  index: number,
+): Promise<{ bytes: Uint8Array; refDigest: string }> => {
+  const files = [{ path: 'index.html', bytes: encoder.encode(`<!doctype html><title>package ${index}</title>`) }];
+  const manifest = {
+    format: 'mahoshojo-web-package',
+    formatVersion: 1,
+    id: 'local.library-test',
+    version: `1.0.${index}`,
+    name: `package ${index}`,
+    entry: 'index.html',
+    generation: { target: 'index.html', mediaType: 'text/html', mode: 'replace' },
+    files: await Promise.all(files.map(async (file) => ({
+      path: file.path,
+      mediaType: 'text/html',
+      size: file.bytes.length,
+      digest: await digestWebPackageBytes(file.bytes),
+    }))),
+  };
+  const pkg = await verifyWebPackage(manifest, files);
+  return { bytes: await packWebPackageZip(pkg), refDigest: pkg.ref.digest };
+};
+
+const makePackage = (index: number, archive: Uint8Array, refDigest: string) =>
   createLocalWebPackageRecord({
-    id: deriveLocalWebPackageId(`sha256:${distinctHex(index)}`),
+    id: deriveLocalWebPackageId(refDigest),
     title: `package ${index}`,
-    contentDigest: `sha256:${distinctHex(index)}`,
+    contentDigest: refDigest,
     archiveByteLength: archive.byteLength,
     ref: {
       id: 'local.library-test',
       version: `1.0.${index}`,
-      digest: `sha256:${distinctHex(index)}`,
+      digest: refDigest,
     },
   });
-
-const fakeZip = (seed: string): Uint8Array =>
-  new Uint8Array([0x50, 0x4b, 0x03, 0x04, ...encoder.encode(seed.repeat(64)).slice(0, 256)]);
 
 interface Fixture {
   readonly source: LocalLibraryArchiveSource;
@@ -77,12 +109,16 @@ interface Fixture {
  * 走 `collectLocalLibraryArchive` + `packLocalLibraryArchive` 之后，归档与它自己的清单**必然自洽**，
  * 于是每一条负向断言失败时都能确定问题在被篡改的那一处，而不是在夹具本身。
  */
-const buildFixture = (options: { cardCount?: number; packageCount?: number } = {}): Fixture => {
+const buildFixture = async (
+  options: { cardCount?: number; packageCount?: number } = {},
+): Promise<Fixture> => {
   const cards = Array.from({ length: options.cardCount ?? 2 }, (_, index) => makeCard(index + 1));
-  const packages = Array.from({ length: options.packageCount ?? 2 }, (_, index) => {
-    const bytes = fakeZip(String.fromCharCode(97 + index));
-    return { record: makePackage(index + 1, bytes), bytes };
-  });
+  const packages = await Promise.all(
+    Array.from({ length: options.packageCount ?? 2 }, async (_, index) => {
+      const { bytes, refDigest } = await buildRealWebPackageZip(index + 1);
+      return { record: makePackage(index + 1, bytes, refDigest), bytes };
+    }),
+  );
   const byId = new Map(packages.map((entry) => [entry.record.id, entry.bytes]));
   return {
     cards,
@@ -99,10 +135,29 @@ const buildFixture = (options: { cardCount?: number; packageCount?: number } = {
   };
 };
 
+/** 直接把给定的记录与 ZIP 字节走一遍真实导出路径。 */
+const packFixtureFrom = async (fixture: {
+  readonly cards: readonly ReturnType<typeof makeCard>[];
+  readonly packages: readonly { readonly record: LocalWebPackageRecordV1; readonly bytes: Uint8Array }[];
+}): Promise<Uint8Array> => {
+  const byId = new Map(fixture.packages.map((entry) => [entry.record.id, entry.bytes]));
+  const collected = await collectLocalLibraryArchive({
+    listCards: async () => ({ items: [...fixture.cards], nextCursor: null }),
+    listWebPackages: async () => ({ items: fixture.packages.map((entry) => entry.record), nextCursor: null }),
+    readWebPackageArchive: async (id) => {
+      const bytes = byId.get(id);
+      if (bytes === undefined) throw new Error(`no fixture package ${id}`);
+      return bytes;
+    },
+  }, { exportedAt: EXPORTED_AT });
+  const packed = await packLocalLibraryArchive(collected.manifest, collected.read);
+  return packed.bytes;
+};
+
 const packFixture = async (
   options: { cardCount?: number; packageCount?: number } = {},
 ): Promise<Uint8Array> => {
-  const fixture = buildFixture(options);
+  const fixture = await buildFixture(options);
   const collected = await collectLocalLibraryArchive(fixture.source, { exportedAt: EXPORTED_AT });
   const packed = await packLocalLibraryArchive(collected.manifest, collected.read);
   return packed.bytes;
@@ -337,7 +392,7 @@ describe('inspectLocalLibraryArchive', () => {
   });
 
   it('报告本地已存在的条目，供 UI 在写入前展示冲突策略', async () => {
-    const fixture = buildFixture();
+    const fixture = await buildFixture();
     const recorder = createTarget({
       cards: [fixture.cards[0]!.id],
       packages: [fixture.packages[0]!.record.id],
@@ -363,11 +418,83 @@ describe('inspectLocalLibraryArchive', () => {
     expect(recorder.cardPuts).toHaveLength(2);
     expect(recorder.packagePuts).toHaveLength(2);
   });
+
+  it('拒绝记录与内层 ZIP 各说各话的归档，且每一段字节都与清单自洽', async () => {
+    // 这是本轮要堵的洞，也是唯一一条"所有既有检查都通过"的负向用例：把包 X 的 ZIP 放进
+    // `archives/<sha256(X)>`（于是 `archiveDigest` 与 `archivePath` 都对），让记录声明包 Y 的身份
+    // （于是 `id` 由摘要派生、`contentDigest === ref.digest`、记录与清单声明一致）。两边各自与清单
+    // 自洽，只有"ZIP 的内容是否就是这个记录所声明的包"这一条联系此前无人检查。
+    //
+    // 不堵住它的症状出现在很久之后且与根因无关：包落到目标机器上，存储层记的是 Y，里面装的是 X。
+    //
+    // 记录用 `makePackage` 重建而不是直接改字段：`archiveByteLength` 必须与实际字节一致，否则 collect
+    // 会先在别处失败，用例证明的就不是这条洞。
+    const fixture = await buildFixture({ cardCount: 0, packageCount: 2 });
+    const impostor = fixture.packages[1]!;
+    const claimed = makePackage(1, impostor.bytes, fixture.packages[0]!.record.ref.digest);
+    const archive = await packFixtureFrom({
+      cards: [],
+      packages: [{ record: claimed, bytes: impostor.bytes }],
+    });
+
+    const failure = await inspectLocalLibraryArchive(createTarget().target, archive).then(
+      () => { throw new Error('应当拒绝记录与内层 ZIP 不匹配的归档'); },
+      (cause: unknown) => cause,
+    );
+    expect(failure).toBeInstanceOf(LocalLibraryArchiveImportError);
+    expect(failure).toMatchObject({ code: 'archive-package-mismatch' });
+    // 诊断必须说清"声明的是什么"与"实际是什么"，否则用户无法判断该换哪个文件。
+    expect((failure as Error).message).toContain(claimed.ref.digest);
+    expect((failure as Error).message).toContain(impostor.record.ref.digest);
+  });
+
+  it('拒绝内层 ZIP 本身不是合法 Web 包的归档', async () => {
+    // 与上一条不同的失败点：字节与摘要都对，但那些字节不是一个 Web 包。合成者可以把任意 blob 放进
+    // `archives/`，因此"不是一个包"必须能被识别，而不是退化成一句"ZIP 与记录不匹配"。
+    const junk = encoder.encode('this is not a zip at all');
+    const { refDigest } = await buildRealWebPackageZip(99);
+    const archive = await packFixtureFrom({
+      cards: [],
+      packages: [{ record: makePackage(99, junk, refDigest), bytes: junk }],
+    });
+
+    await expect(inspectLocalLibraryArchive(createTarget().target, archive)).rejects.toMatchObject({
+      code: 'archive-package-mismatch',
+    });
+  });
+
+  it('ZIP 归属的证明挂在与摘要同一条串行链上，因此失败不会成为 unhandled rejection', async () => {
+    // 这条断言的是**结构**而不是诊断：验证链在块边界被 await，而扫描自身可能在同一趟里抛错（这里
+    // 是"归档含有清单未声明的条目"，它先命中）。那时循环已经跳出、链再也不会被 await——若链是已拒绝的
+    // promise，它就成了 unhandled rejection：既不携带主错误的诊断，又会在测试之外崩掉一条无关的栈。
+    // 因此链必须永不拒绝，失败改由下一次块边界抛出。
+    const archive = new Uint8Array(await packFixture({ cardCount: 1, packageCount: 1 }));
+    // 在中央目录之前插入一个清单未声明的条目：它比任何 Web 包条目都早，因此先命中"未声明"这条守卫。
+    const extra = encoder.encode('not declared by the manifest');
+    const injected = zipSync({
+      [LOCAL_LIBRARY_ARCHIVE_MANIFEST_PATH]: unzipSync(archive)[LOCAL_LIBRARY_ARCHIVE_MANIFEST_PATH]!,
+      'cards/unexpected.json': extra,
+    }, { level: 0 });
+
+    const rejections: unknown[] = [];
+    const onRejection = (reason: unknown): void => { rejections.push(reason); };
+    process.on('unhandledRejection', onRejection);
+    try {
+      await expect(inspectLocalLibraryArchive(createTarget().target, injected)).rejects.toMatchObject({
+        code: 'archive-entry-invalid',
+      });
+      // 让事件循环把任何已触发的 unhandledRejection 派发完。
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    } finally {
+      process.off('unhandledRejection', onRejection);
+    }
+    expect(rejections).toEqual([]);
+  });
 });
 
 describe('applyLocalLibraryArchiveImport', () => {
   it('写入清单里的每一条并给出精确报告', async () => {
-    const fixture = buildFixture();
+    const fixture = await buildFixture();
     const recorder = createTarget();
     const archive = await packFixture();
     const plan = await inspectLocalLibraryArchive(recorder.target, archive);
@@ -382,7 +509,7 @@ describe('applyLocalLibraryArchiveImport', () => {
   });
 
   it('写入的 ZIP 字节与归档里那一份逐字节相同', async () => {
-    const fixture = buildFixture();
+    const fixture = await buildFixture();
     const recorder = createTarget();
     const archive = await packFixture();
     const plan = await inspectLocalLibraryArchive(recorder.target, archive);
@@ -396,7 +523,7 @@ describe('applyLocalLibraryArchiveImport', () => {
   });
 
   it('existing wins：本地已有的记录被跳过且一个字节都不覆盖', async () => {
-    const fixture = buildFixture();
+    const fixture = await buildFixture();
     const recorder = createTarget({
       cards: [fixture.cards[0]!.id],
       packages: [fixture.packages[0]!.record.id],
@@ -429,7 +556,7 @@ describe('applyLocalLibraryArchiveImport', () => {
   });
 
   it('单条写入失败只记进报告，其余条目照常写入', async () => {
-    const fixture = buildFixture({ cardCount: 2 });
+    const fixture = await buildFixture({ cardCount: 2 });
     const recorder = createTarget();
     const archive = await packFixture({ cardCount: 2 });
     const plan = await inspectLocalLibraryArchive(recorder.target, archive);
@@ -449,7 +576,7 @@ describe('applyLocalLibraryArchiveImport', () => {
   it('existing-wins 保护墓碑，而不只是"存在的记录"', async () => {
     // 墓碑也是"本地已存在"。若探测漏掉 `deletedAt` 的行，导入就会**复活**一条用户删掉的记录，
     // 而症状是"我明明删过它，怎么又出现了"。
-    const fixture = buildFixture();
+    const fixture = await buildFixture();
     const tombstone = { ...fixture.cards[0]!, deletedAt: '2026-10-01T00:00:00.000Z' };
     const recorder = createTarget();
     await recorder.target.cards.put(tombstone as LocalCardRecordV1);
@@ -467,7 +594,7 @@ describe('applyLocalLibraryArchiveImport', () => {
     // `plan` 是一个普通导出接口，因此"用 A 库的 plan 去写 B 库"在类型层面完全合法。若 apply
     // 只看 plan，它会**静默覆盖** B 库里的同名记录——正是 DESK-074 禁止的强制覆盖。
     // 这里模拟"inspect 之后、apply 之前本地多了一条记录"。
-    const fixture = buildFixture();
+    const fixture = await buildFixture();
     const recorder = createTarget();
     const archive = await packFixture();
     const plan = await inspectLocalLibraryArchive(recorder.target, archive);
@@ -485,7 +612,7 @@ describe('applyLocalLibraryArchiveImport', () => {
 
   it('探测已有记录走一次分页列举，而不是逐条 get', async () => {
     // 逐条 `get` 是 O(n) 次串行 IPC 往返（上限 10 万条时是 10 万次）。
-    const fixture = buildFixture({ cardCount: 5, packageCount: 0 });
+    const fixture = await buildFixture({ cardCount: 5, packageCount: 0 });
     const recorder = createTarget({ cards: fixture.cards.map((card) => card.id) });
     const listCalls: unknown[] = [];
     const originalList = recorder.target.cards.list.bind(recorder.target.cards);
