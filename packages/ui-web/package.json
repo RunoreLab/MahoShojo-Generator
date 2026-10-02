@@ -1,0 +1,58 @@
+{
+  "name": "@mahoshojo/ui-web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./styles.css": "./src/styles.css",
+    "./navigation": {
+      "types": "./src/navigation.ts",
+      "import": "./src/navigation.ts",
+      "default": "./src/navigation.ts"
+    },
+    "./shell": {
+      "types": "./src/shell/index.ts",
+      "import": "./src/shell/index.ts",
+      "default": "./src/shell/index.ts"
+    },
+    "./capability": {
+      "types": "./src/capability/index.ts",
+      "import": "./src/capability/index.ts",
+      "default": "./src/capability/index.ts"
+    },
+    "./local-archive": {
+      "types": "./src/local-archive/index.ts",
+      "import": "./src/local-archive/index.ts",
+      "default": "./src/local-archive/index.ts"
+    }
+  },
+  "scripts": {
+    "test": "vitest run --config vitest.config.ts",
+    "lint": "eslint src tests --config eslint.config.mjs",
+    "build": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@mahoshojo/local-library": "workspace:*"
+  },
+  "peerDependencies": {
+    "react": "^19.2.1",
+    "react-dom": "^19.2.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@typescript-eslint/eslint-plugin": "^8.50.0",
+    "@typescript-eslint/parser": "^8.50.0",
+    "esbuild": "^0.28.1",
+    "eslint": "^9",
+    "eslint-plugin-react": "^7.37.0",
+    "eslint-plugin-react-hooks": "^5.0.0",
+    "jsdom": "^30.0.1",
+    "react": "^19.2.1",
+    "react-dom": "^19.2.1",
+    "tailwindcss": "^4",
+    "typescript": "^5",
+    "vitest": "^4.1.7"
+  }
+}

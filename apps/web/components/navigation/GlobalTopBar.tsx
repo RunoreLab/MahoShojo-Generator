@@ -2,7 +2,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { Menu, Sparkles } from 'lucide-react';
 
-import { getTopbarCoverage, NAV_GROUPS, type NavGroupId } from '@/lib/navigation';
+import { getTopbarCoverage, NAV_GROUPS, type NavGroupId } from '@mahoshojo/ui-web/navigation';
 import { useAuth } from '@/lib/useAuth';
 import { TopBarMessageButton } from '@/components/navigation/TopBarMessageButton';
 import { TopBarMobileDrawer } from '@/components/navigation/TopBarMobileDrawer';

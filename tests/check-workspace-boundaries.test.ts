@@ -473,6 +473,100 @@ describe('workspace dependency boundaries', () => {
     expect(violations.filter((violation) => violation.rule === 'MONO-005-CLIENT-SECRET')).toHaveLength(16);
   });
 
+  it('rejects host runtime imports in the shared UI package while allowing React, DOM globals, and sibling client packages', async () => {
+    const rootDir = await createWorkspaceFixture({
+      'packages/ui-web/package.json': manifest('@mahoshojo/ui-web'),
+      'packages/ui-web/src/index.tsx': [
+        "import 'react';",
+        "import 'react-dom/client';",
+        "import { readFileBytes } from '@mahoshojo/local-library/archive-import';",
+        "import 'next/navigation';",
+        "import 'next';",
+        "import '@tauri-apps/api/core';",
+        "import 'tauri-plugin-opener';",
+        "import 'hono';",
+        "import '@hono/context';",
+        "import 'wrangler';",
+        "import 'cloudflare:workers';",
+        "import '@cloudflare/workers-types';",
+        "import '@opennextjs/cloudflare';",
+        "import 'node:fs';",
+        "import 'drizzle-orm';",
+        "import 'better-sqlite3';",
+        "import 'ioredis';",
+        "const element = document.createElement('div');",
+        'void element;',
+      ].join('\n'),
+    });
+
+    const violations = checkWorkspaceBoundaries(rootDir).filter(
+      (violation) => violation.rule === 'MONO-005-SHARED-UI-RUNTIME',
+    );
+
+    expect(violations.map((violation) => violation.module)).toEqual([
+      'next/navigation',
+      'next',
+      '@tauri-apps/api/core',
+      'tauri-plugin-opener',
+      'hono',
+      '@hono/context',
+      'wrangler',
+      'cloudflare:workers',
+      '@cloudflare/workers-types',
+      '@opennextjs/cloudflare',
+      'node:fs',
+      'drizzle-orm',
+      'better-sqlite3',
+      'ioredis',
+    ]);
+  });
+
+  it('does not apply the shared UI runtime rule to other client packages or to similarly named third-party modules', async () => {
+    const rootDir = await createWorkspaceFixture({
+      'packages/local-library/package.json': manifest('@mahoshojo/local-library'),
+      'packages/local-library/src/index.ts': "import 'next';\nvoid 0;\n",
+      'packages/ui-web-tools/package.json': manifest('@mahoshojo/ui-web-tools'),
+      'packages/ui-web-tools/src/index.ts': "import 'next';\nvoid 0;\n",
+    });
+
+    const violations = checkWorkspaceBoundaries(rootDir);
+
+    expect(violations.some((violation) => violation.rule === 'MONO-005-SHARED-UI-RUNTIME')).toBe(false);
+  });
+
+  it('rejects non-literal dynamic module loads in shared UI source so host runtime imports cannot hide behind a computed path', async () => {
+    const rootDir = await createWorkspaceFixture({
+      'packages/ui-web/package.json': manifest('@mahoshojo/ui-web'),
+      'packages/ui-web/src/lazy.ts': [
+        "const hostModule = 'next/navigation';",
+        'export const loadHost = () => import(hostModule);',
+        "export const loadStatic = () => import('@mahoshojo/local-library/archive-import');",
+        'export const requireHost = () => require(hostModule);',
+      ].join('\n'),
+    });
+
+    const violations = checkWorkspaceBoundaries(rootDir);
+
+    expect(
+      violations
+        .filter((violation) => violation.rule === 'MONO-005-SHARED-UI-DYNAMIC-MODULE')
+        .map((violation) => violation.module),
+    ).toEqual(['<dynamic-import>', '<dynamic-require>']);
+  });
+
+  it('applies the shared UI runtime rule by package name so rescoping the workspace package cannot silently disable it', async () => {
+    const rootDir = await createWorkspaceFixture({
+      'packages/design-system/package.json': manifest('@mahoshojo/design-system'),
+      'packages/design-system/src/index.ts': "import '@tauri-apps/api/core';\nvoid 0;\n",
+    });
+
+    // 目录名与包名末段都命中才算数。这里只有包名命中，因此规则**不**生效——这一点必须被断言，
+    // 否则把两个匹配条件改成"任一命中"或"两者都命中"都不会有测试失败。
+    expect(
+      checkWorkspaceBoundaries(rootDir).some((violation) => violation.rule === 'MONO-005-SHARED-UI-RUNTIME'),
+    ).toBe(false);
+  });
+
   it('rejects undeclared workspace package deep imports across import forms', async () => {
     const rootDir = await createWorkspaceFixture({
       'packages/config/package.json': manifest('@mahoshojo/config'),

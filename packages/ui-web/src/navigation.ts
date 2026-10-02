@@ -1,3 +1,20 @@
+/**
+ * 共源产品导航。
+ *
+ * 它是产品路径与导航文案的**唯一**定义处（`ADR-desktop-shared-product` §3）。Web 原先在
+ * `apps/web/lib/navigation.ts` 持有这份数据；D2.5a 把它搬到这里，两个 app 都从本文件读。
+ *
+ * ## 这里只描述产品，不描述宿主
+ *
+ * 本文件不知道 Next、不知道 Tauri，也不知道某个入口是否已实现。`isTopbarCovered` 与
+ * `isExternal` 描述的是**产品导航的形状**（这条路径是否被顶栏覆盖、是否指向站外），而不是某个运行时的
+ * 可用性。可用性由宿主通过 `@mahoshojo/ui-web/capability` 注入，共享视图据此决定隐藏还是说明原因
+ * （`DESK-PROD-001`）。
+ *
+ * 共享导航因此**不锁定任何 router**：`href` 是产品路径，宿主各自决定它对应 `next/link`、hash history
+ * 还是系统浏览器。
+ */
+
 export type NavGroupId = 'creative' | 'battle' | 'character' | 'ecosystem' | 'knowledge';
 
 export interface NavItem {
@@ -27,6 +44,7 @@ export const TOPBAR_COVERED_ROUTES = [
   '/scenario',
   '/character-manager',
   '/character-party',
+  '/local-library',
   '/questionnaire-editor',
   '/sublimation',
   '/tachie',
@@ -117,6 +135,14 @@ export const NAV_GROUPS: NavGroup[] = [
         label: '角色管理',
         href: '/character-manager',
         description: '登录、云端保存与角色库管理',
+        isTopbarCovered: true,
+      },
+      {
+        label: '本地库',
+        href: '/local-library',
+        // 设备级页面而非账号级：本地库不要求登录，挂在个人页会让产品语义变成"本地数据属于账号"
+        //（DESK-059）。
+        description: '本机数据卡与 Web 包的管理、导入导出，无需登录',
         isTopbarCovered: true,
       },
       {

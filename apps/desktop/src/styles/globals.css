@@ -1,5 +1,16 @@
 @import 'tailwindcss';
+@import '@mahoshojo/ui-web/styles.css';
 
+/**
+ * D0 遗留的调试面板配色。
+ *
+ * 它**不是**产品主题：产品主题是 `@mahoshojo/ui-web/styles.css` 里的 `--app-*` 三段解析，Desktop 与 Web
+ * 共用同一份。下面的 `--color-*` 只服务尚未迁走的运行时/Provider 面板，随对应切片退出；不允许它扩成
+ * 第二套需要人工同步的主题（`DESK-PROD-009`）。
+ *
+ * 保留它而不是立刻删除，是因为本阶段仍有一个真实消费者（`src/app/App.tsx` 的运行时自述），删掉会让面板
+ * 无主题可读；而在没有第二个消费者之前，它不该被任何共源组件引用。
+ */
 @theme {
   --color-surface: oklch(0.18 0.012 300);
   --color-surface-raised: oklch(0.23 0.014 300);
@@ -16,7 +27,7 @@ body,
 
 body {
   margin: 0;
-  background: var(--color-surface);
-  color: var(--color-ink);
+  background: var(--app-page-bg);
+  color: var(--app-text);
   font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
 }

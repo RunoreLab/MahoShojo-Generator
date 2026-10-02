@@ -19,6 +19,14 @@ const IGNORED_DIRECTORIES = new Set([
 ]);
 const ROOT_TOOLING_DIRECTORIES = ['scripts', 'tests'];
 const CLIENT_PACKAGE_NAMES = new Set(['ai-direct', 'local-library', 'cloud-client', 'ui-web']);
+/**
+ * 承载共源 React DOM 页面的共享包（`ADR-desktop-shared-product` §3）。
+ *
+ * 与 `CLIENT_PACKAGE_NAMES` 分开而不是合并：客户端包的共同点是"不得接触服务器秘密"，而共享 UI 的
+ * 额外义务是"不得绑定任何具体宿主"。两者会随切片增长，合并成一个集合会让新增规则的作用范围
+ * 只能靠读代码推断。
+ */
+const SHARED_UI_PACKAGE_NAMES = new Set(['ui-web']);
 const REQUIRED_WORKSPACE_SCRIPTS = ['test', 'lint', 'build'];
 const LEGACY_ROOT_APP_DIRECTORIES = new Set([
   'app',
@@ -74,6 +82,69 @@ const CONTRACTS_BROWSER_ONLY_GLOBALS = new Set([
 
 const NODE_RUNTIME_MODULE = /^(?:node:|assert(?:\/|$)|buffer(?:\/|$)|child_process(?:\/|$)|cluster(?:\/|$)|crypto(?:\/|$)|dgram(?:\/|$)|dns(?:\/|$)|events(?:\/|$)|fs(?:\/|$)|http(?:\/|$)|https(?:\/|$)|module(?:\/|$)|net(?:\/|$)|os(?:\/|$)|path(?:\/|$)|perf_hooks(?:\/|$)|process(?:\/|$)|readline(?:\/|$)|stream(?:\/|$)|string_decoder(?:\/|$)|timers(?:\/|$)|tls(?:\/|$)|tty(?:\/|$)|url(?:\/|$)|util(?:\/|$)|v8(?:\/|$)|vm(?:\/|$)|worker_threads(?:\/|$)|zlib(?:\/|$))/;
 const FRAMEWORK_RUNTIME_MODULE = /^(?:next(?:\/|$)|react(?:\/|$)|react-dom(?:\/|$)|hono(?:\/|$)|@hono\/(?:.+)|wrangler(?:\/|$)|cloudflare:.+|cloudflare(?:\/|$)|@cloudflare\/(?:.+)|@opennextjs\/(?:.+)|@tauri\/(?:.+)|@tauri-apps\/(?:.+)|tauri(?:\/|$)|electron(?:\/|$)|@electron\/(?:.+)|drizzle-orm(?:\/|$)|better-sqlite3(?:\/|$)|kysely(?:\/|$)|redis(?:\/|$)|ioredis(?:\/|$)|pg(?:\/|$)|mysql2(?:\/|$)|sqlite3(?:\/|$)|@libsql\/(?:.+)|idb(?:\/|$)|indexeddb(?:\/|$))/;
+
+/**
+ * 共享 UI 不得导入的具体模块名。
+ *
+ * 它与 {@link FRAMEWORK_RUNTIME_MODULE} 的差别是**故意不含 `react` / `react-dom`**：那条正则服务
+ * `domain` 与 `contracts`，对它们来说 React 和 Next 一样是需要排除的框架依赖；而共享 UI 的全部职责
+ * 就是产出 React DOM 组件，把 React 一起禁掉会让规则本身无法成立。
+ *
+ * 因此这里不用正则而用精确名集合加命名空间前缀：`cloudflare` 与 `ioredis` 这类前缀重叠的名字，
+ * 用 `startsWith` 会把 `cloudflare-kit`、`ioredis-mock` 一并误判，而误报会让门禁很快被绕过。
+ */
+const SHARED_UI_FORBIDDEN_RUNTIME_MODULES = new Set([
+  'better-sqlite3',
+  'cloudflare',
+  'drizzle-orm',
+  'electron',
+  'hono',
+  'idb',
+  'indexeddb',
+  'ioredis',
+  'kysely',
+  'mysql2',
+  'next',
+  'pg',
+  'redis',
+  'sqlite3',
+  'tauri',
+  'wrangler',
+]);
+/** 上面那些包名带子路径时的匹配前缀。仓内已实际出现的形式是 `next/server` 与 `@tauri-apps/api/core`。 */
+const SHARED_UI_FORBIDDEN_RUNTIME_PREFIXES = [
+  '@cloudflare/',
+  '@electron/',
+  '@hono/',
+  '@libsql/',
+  '@opennextjs/',
+  '@tauri-apps/',
+  '@tauri/',
+  'cloudflare:',
+  'drizzle-orm/',
+  'hono/',
+  'next/',
+  'node:',
+  'tauri/',
+];
+/**
+ * Tauri 插件的 JS 侧有两种命名，`tauri(?:\/|$)` 之类的正则**两种都匹配不到**。
+ *
+ * 这不是假想：`tauri-plugin-opener` 是 Tauri v2 官方插件的正式包名，漏掉它就等于给共享 UI
+ * 留了一条装 opener/fs/dialog 的后门，而这类插件正是最不该由共源页面直接持有的能力。
+ */
+const TAURI_PLUGIN_MODULE = /^(?:tauri-plugin-|@tauri-apps\/plugin-)/;
+
+/**
+ * @param {string} moduleSpecifier
+ * @returns {boolean}
+ */
+function isSharedUiForbiddenRuntime(moduleSpecifier) {
+  if (SHARED_UI_FORBIDDEN_RUNTIME_MODULES.has(moduleSpecifier)) return true;
+  if (TAURI_PLUGIN_MODULE.test(moduleSpecifier)) return true;
+  return SHARED_UI_FORBIDDEN_RUNTIME_PREFIXES.some((prefix) => moduleSpecifier.startsWith(prefix));
+}
+
 const SECRET_MODULE_SEGMENT = /(^|[\\/_.-])(server|secret|secrets|signature|signatures|env|environment|environments|private)(?=$|[\\/_.-])/i;
 const CONTRACTS_EXCLUDED_SOURCE_SUFFIX = /\.(test|spec|config)\./i;
 
@@ -574,6 +645,19 @@ function isContractsPackage(unit) {
   return directoryName === 'contracts' || packageName === 'contracts';
 }
 
+/**
+ * 共享 React DOM 包。
+ *
+ * 与 {@link isClientPackage} 一样同时接受目录名与包名末段：workspace 的 `name` 允许 scope，
+ * 只按其中一种匹配会让改 scope 后规则静默失效——而一个静默失效的边界门禁比没有门禁更危险。
+ */
+function isSharedUiPackage(unit) {
+  if (unit.kind !== 'packages') return false;
+  const directoryName = path.basename(unit.directory);
+  const packageName = unit.name.split('/').at(-1) ?? unit.name;
+  return SHARED_UI_PACKAGE_NAMES.has(directoryName) || SHARED_UI_PACKAGE_NAMES.has(packageName);
+}
+
 function isContractsSourceFile(unit, sourceFile) {
   if (!isContractsPackage(unit)) return false;
   const relativeSource = path.relative(unit.directory, sourceFile);
@@ -723,6 +807,22 @@ export function checkWorkspaceBoundaries(rootDirectory = process.cwd()) {
         }
       }
 
+      if (isSharedUiPackage(unit)) {
+        // 非字面量 `import(x)` 无法静态判定是否指向宿主 runtime。一条能被 `import(变量)` 绕过的
+        // 边界规则不是门禁，所以共享 UI 直接禁掉这种写法——它的消费者都是同步 import，没有动态加载
+        // 宿主模块的真实需求。
+        for (const { module: moduleSpecifier, line } of nonLiteralModuleLoads) {
+          addViolation(
+            violations,
+            'MONO-005-SHARED-UI-DYNAMIC-MODULE',
+            sourceFile,
+            moduleSpecifier,
+            'shared UI package module specifiers must be statically analyzable so host runtime imports cannot hide behind a computed path',
+            line,
+          );
+        }
+      }
+
       if (contractsSourceFile) {
         for (const { module: browserGlobal, line } of contractsBrowserGlobals) {
           addViolation(
@@ -813,6 +913,17 @@ export function checkWorkspaceBoundaries(rootDirectory = process.cwd()) {
             sourceFile,
             moduleSpecifier,
             'client package must not import server secret, signature, environment, or private modules',
+            line,
+          );
+        }
+
+        if (isSharedUiPackage(unit) && isSharedUiForbiddenRuntime(moduleSpecifier)) {
+          addViolation(
+            violations,
+            'MONO-005-SHARED-UI-RUNTIME',
+            sourceFile,
+            moduleSpecifier,
+            'shared UI package must stay host-neutral: it must not import Next, Tauri, server runtime, Node builtins, or database clients',
             line,
           );
         }

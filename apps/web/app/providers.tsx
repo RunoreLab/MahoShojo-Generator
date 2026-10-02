@@ -8,7 +8,7 @@ import type { ReactNode } from 'react';
 
 import AnnouncementTicker from '@/components/Announcement/AnnouncementTicker';
 import { GlobalTopBar } from '@/components/navigation/GlobalTopBar';
-import { getTopbarCanonicalPathname, isTopbarCoveredPath } from '@/lib/navigation';
+import { getTopbarCanonicalPathname, isTopbarCoveredPath } from '@mahoshojo/ui-web/navigation';
 
 interface AppProvidersProps {
   children: ReactNode;
