@@ -82,7 +82,7 @@ export function DataCardEmptyState({
           <li>· 内容相同的卡会自动更新原卡，不会堆出一堆近似重复项</li>
         </ul>
         <p className="mx-auto mt-3 max-w-xl text-xs leading-6 text-amber-700 dark:text-amber-300">
-          ⚠️ 清除本站数据会一并删除本地库；目前还没有整库导出/备份，换设备前请先导出需要的卡。
+          ⚠️ 清除本站数据会一并删除本地库；换设备前请用「本地库」页面的整库导出一份 `.zip`。
         </p>
         <div className="mt-4 flex flex-wrap items-center justify-center gap-3">
           <Link

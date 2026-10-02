@@ -1,0 +1,55 @@
+'use client';
+
+import { useMemo } from 'react';
+import { LocalArchiveSection } from '@mahoshojo/ui-web/local-archive';
+
+import { LocalLibraryStatusNote } from '@/components/shared/LocalLibraryStatusNote';
+import { createWebArchiveHost, WEB_LIBRARY_ARCHIVE_LIMITS } from '@/lib/local-library/archive-host';
+
+/**
+ * 设备级本地库页面。
+ *
+ * ## 为什么它是独立路由而不是 `/me` 的一个 tab
+ *
+ * `DESK-059` 明确要求 portable archive 的承载页 MUST 是设备级而非账号级页面：本地库不要求登录，
+ * 挂在个人页会让产品语义变成「本地数据属于账号」。这个页面因此不读任何账号状态，未登录也能完整使用。
+ *
+ * ## 共源范围
+ *
+ * 归档区块本身是共享实现（`@mahoshojo/ui-web/local-archive`），本文件只提供 Web 侧的 adapter
+ * （IndexedDB 仓储 + 浏览器文件能力）。存储状态提示仍用 Web 既有的组件——它报告的是配额与持久化，
+ * 与归档区块里「数据库能不能打开」是两条不同的信息，两者都要出现而不是二选一。
+ */
+export function LocalLibraryPage() {
+  // host 必须在渲染之间保持稳定：控制器用它做 useMemo 的依赖，重建会让已预检的字节与 plan 丢失。
+  const host = useMemo(() => createWebArchiveHost(), []);
+
+  return (
+    <div className="mx-auto flex w-full max-w-4xl flex-col gap-6 px-4 py-6 sm:px-6 lg:px-10">
+      <header className="flex flex-col gap-1">
+        <h1 className="text-xl font-semibold">本地库</h1>
+        <p className="text-sm text-(--app-text-muted)">
+          本机保存的数据卡与 Web 包。它们只存在于这台设备，不会跨设备同步，也不需要登录。
+        </p>
+      </header>
+
+      <LocalLibraryStatusNote />
+
+      <LocalArchiveSection host={host} maxArchiveBytes={WEB_LIBRARY_ARCHIVE_LIMITS.fileBytes} />
+
+      <section className="rounded-lg border border-(--app-border) bg-(--app-surface) p-4">
+        <h2 className="mb-1 text-sm font-medium text-(--app-text-muted)">还没有的</h2>
+        <ul className="flex list-disc flex-col gap-1 pl-5 text-sm text-(--app-text-muted)">
+          <li>
+            <strong className="font-medium">整库备份与灾难恢复</strong>：上面的导出是 portable archive，
+            用于换设备与跨浏览器搬运；它不是「把整台设备的状态快照下来」的备份。恢复流程尚未交付。
+          </li>
+          <li>
+            <strong className="font-medium">回收站</strong>：删除的数据卡与 Web 包目前没有界面上的恢复
+            入口。导出是你目前唯一的退路。
+          </li>
+        </ul>
+      </section>
+    </div>
+  );
+}

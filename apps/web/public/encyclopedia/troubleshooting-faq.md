@@ -55,7 +55,7 @@
 服务器数据和浏览器本地数据要分开看：
 
 - 连续战报会话保存在当前浏览器的 IndexedDB 中；详细边界见：`/encyclopedia/continuous-battle-story`
-- **本地库**（数据卡与 Web 包）同样只在这台设备上，不随账号同步，清除本站数据会一并删除；它没有整库备份功能；详细边界见：`/encyclopedia/local-library`
+- **本地库**（数据卡与 Web 包）同样只在这台设备上，不随账号同步，清除本站数据会一并删除；换设备请用 `/local-library` 的整库导出留一份 `.zip`；详细边界见：`/encyclopedia/local-library`
 - 魔法茶会的会话与草稿也有本地保存内容，使用前应先导出；详细排查见：`/encyclopedia/magic-tea-party-troubleshooting`
 - 当前浏览器的本地数据不会因为登录而自动同步到另一台电脑、另一个浏览器或另一个站点来源。
 
@@ -117,7 +117,7 @@ Web 战报是在页面内受安全沙箱约束的 AI 生成 HTML。它和普通�
 | 保存时提示“可能超出浏览器存储配额” | 删掉不再需要的条目，或先申请持久化存储；Web 包通常比数据卡占得多。 |
 | 刚导入的 Web 包找不到 | 导入默认不落盘，只对本次会话有效并标注「仅本次会话」；勾选「导入时保存到本地库」后重新导入。 |
 
-⚠️ 本地库**没有**整库导出/备份与回收站；清除本站数据会一并删除。完整边界见：`/encyclopedia/local-library`
+⚠️ 本地库**没有**回收站，也没有设备级的灾难恢复备份（`/local-library` 的整库导出是换设备用的 portable archive）；清除本站数据会一并删除。完整边界见：`/encyclopedia/local-library`
 
 ## PVP 或房间卡住
 
