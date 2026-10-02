@@ -293,26 +293,19 @@ export type DesktopSaveWebPackageResponse = z.infer<typeof DesktopSaveWebPackage
  * 参数是 **manifest 摘要**（`record.ref.digest` = 记录的 `contentDigest`），**不是**包 id。
  * 共享端口 `WebPackageRepository.readArchive(digest)` 与 Web 的 IndexedDB adapter 都以摘要为
  * 键：manifest 摘要不是 `wp_…` 形式，拿它当 id 查会让真实读取路径必然落空。
+ *
+ * **响应方向没有 schema，这是刻意的。** 该命令返回 Tauri raw 响应，渲染层拿到 `ArrayBuffer`；
+ * 过去它返回 `{archive: {b64, len}}` 信封，而 base64 的 33% 体积开销加上一次解码峰值会落在 D2.3
+ * 导出期间——那条路径对**每个** Web 包都要读一遍字节。
+ *
+ * 因此 `DesktopBase64BytesSchema` 只剩**写入**方向在用。`DESK-064` 要求的"二进制载荷自带长度"
+ * 在 raw 响应下由传输层本身满足：字节数就是长度，不存在需要额外声明的截断。
  */
 export const DesktopReadWebPackageArchiveRequestSchema = z
   .object({ contentDigest: DesktopLocalCardDigestSchema })
   .strict();
 export type DesktopReadWebPackageArchiveRequest = z.infer<
   typeof DesktopReadWebPackageArchiveRequestSchema
->;
-
-/**
- * 读取一个本地 Web 包的原始归档字节的**响应**。
- *
- * 载荷包在 `archive` 字段里，而不是把 invoke 的返回值直接当载荷：native 曾返回一根裸
- * base64 字符串，而渲染层按 `{b64, len}` 解析——两侧各自的单测都绿（各自 mock 了对方的
- * 形状），真实 IPC 才炸。信封形状由 `DesktopBase64BytesSchema` 单点定义。
- */
-export const DesktopReadWebPackageArchiveResponseSchema = z
-  .object({ archive: DesktopBase64BytesSchema })
-  .strict();
-export type DesktopReadWebPackageArchiveResponse = z.infer<
-  typeof DesktopReadWebPackageArchiveResponseSchema
 >;
 
 /**

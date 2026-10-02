@@ -3,7 +3,6 @@ import {
   DesktopListWebPackagesRequestSchema,
   DesktopListWebPackagesResponseSchema,
   DesktopReadWebPackageArchiveRequestSchema,
-  DesktopReadWebPackageArchiveResponseSchema,
   DesktopSaveWebPackageRequestSchema,
   DesktopSaveWebPackageResponseSchema,
   DesktopWebPackageTransitionRequestSchema,
@@ -33,14 +32,20 @@ import {
  * 留在 TypeScript，native 侧只负责落盘、内容寻址与状态转移校验。archive 的**地址由 native
  * 自行从字节算出**，因此渲染层无处声明 digest，也就不存在"声明与内容不符"这种输入。
  *
- * ## 为什么用 base64 而不是 Tauri raw IPC
+ * ## 为什么读取方向走 raw 响应，而写入方向仍走 base64
  *
- * `DESK-053` 要求 IPC 接受字节流且不得接受 renderer 提供的任意目标路径。Tauri 2 的原生
- * raw IPC（`InvokeBody::Raw` / `tauri::ipc::Response`）要求整个请求体是 raw 形式，无法与结构化
- * 参数并存，因此这里用一个显式的 `{b64, len}` 字段承载字节。
+ * `DESK-053` 要求 IPC 接受字节流且不得接受 renderer 提供的任意目标路径。两条方向按**各自的字节
+ * 量级**分别决定，`MUST NOT` 把"是否切 raw"当成一次性全局决定：
  *
- * 代价是约 33% 的体积开销，收益是解包路径只有一条、且长度可在解码后核对。等 D2.3 要搬整个
- * archive 时再切 raw IPC——那时一次性传输的量级才配得上自定义通道。
+ * - **读取**（`read_web_package_archive`）返回 Tauri raw 响应，渲染层拿到 `ArrayBuffer`。D2.3 的
+ *   导出对**每个** Web 包都要读一遍字节，base64 的 33% 体积开销加一次解码峰值因此直接落在导出
+ *   期间的峰值内存里——它曾经让 `measure-archive-memory.mjs` 测出的 2.1× 明显偏低。
+ * - **写入**（`save_web_package`）仍是结构化请求 + `{b64, len}` 载荷。改成 raw 请求体会连带丢掉
+ *   它的结构化参数（记录 document 与索引列）与解码后的长度核对，而单个包的量级远没到需要那条
+ *   通道的程度；此处切换的成本与收益不成比例。
+ *
+ * 两条方向共同的事实是：raw **请求**无法携带结构化参数，而 raw **响应**可以与结构化请求共存
+ * （`tauri::ipc::Response` 只影响响应方向）。因此读取方向不需要任何自定义封包。
  */
 
 export const SAVE_WEB_PACKAGE_COMMAND = 'save_web_package' as const;
@@ -126,10 +131,10 @@ export const toBase64Bytes = (bytes: Uint8Array) => {
 };
 
 /**
- * native 返回的 base64 载荷。
+ * 把 native 返回的 base64 载荷解成字节。
  *
  * 长度核对**不可省**：静默接受截断的 base64 会变成一个"看起来完整"的短 ZIP，而失败点会落在
- * 解包器里，离真正的原因很远。
+ * 解包器里，离真正的原因很远。只在**写入**方向（native 侧的解包）使用。
  */
 export const fromBase64Bytes = (payload: unknown): Uint8Array => {
   const parsed = DesktopBase64BytesSchema.parse(payload);
@@ -146,6 +151,24 @@ export const fromBase64Bytes = (payload: unknown): Uint8Array => {
     bytes[index] = binary.charCodeAt(index);
   }
   return bytes;
+};
+
+/**
+ * native 的 raw 响应 → 字节。
+ *
+ * raw 响应没有 JSON 信封，因此长度无从声明——这正是它的好处：`ArrayBuffer` 的 `byteLength` 就是
+ * 字节数，不存在"声明与实际不符"这种状态。反过来，任何**不是** `ArrayBuffer` 的返回值都必须被
+ * 拒：把它当成字节数组会得到一堆 `undefined`，而症状是"解包器说这个 ZIP 坏了"，离真正的原因很远。
+ */
+const fromRawBytes = (payload: unknown): Uint8Array => {
+  if (payload instanceof ArrayBuffer) {
+    return new Uint8Array(payload);
+  }
+  throw new DesktopLocalCardError(
+    READ_WEB_PACKAGE_ARCHIVE_COMMAND,
+    'bridge-failure',
+    '本地库返回的归档不是 raw 字节',
+  );
 };
 
 /**
@@ -275,6 +298,9 @@ export class IpcWebPackageRepository implements WebPackageRepository {
    * `WebPackageRepository.readArchive(digest)` 与 Web 的 IndexedDB adapter 都以摘要为键。
    * 曾把它当包 id 传，native 按 id 查不到任何记录，于是每次读取都返回 null，表现为
    * "包打不开"；而两侧单测都绿，因为它们用的是包 id 当参数。
+   *
+   * 响应走 raw：`invoke` 对 raw 响应返回 `ArrayBuffer`，而**请求**仍是结构化的，因此这条路径
+   * 不需要任何自定义封包。
    */
   async readArchive(digest: string): Promise<Uint8Array | null> {
     let raw: unknown;
@@ -289,9 +315,7 @@ export class IpcWebPackageRepository implements WebPackageRepository {
       if (error.code === 'blob-not-found') return null;
       throw error;
     }
-    // native 返回 `{archive: {b64, len}}`，不是裸字符串；解包路径只有一条。
-    const envelope = DesktopReadWebPackageArchiveResponseSchema.parse(raw);
-    return fromBase64Bytes(envelope.archive);
+    return fromRawBytes(raw);
   }
 
   async delete(id: string): Promise<void> {

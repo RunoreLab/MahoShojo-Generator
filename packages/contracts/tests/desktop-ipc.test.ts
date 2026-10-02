@@ -3,6 +3,7 @@ import path from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
+import * as desktopIpc from '../src/desktop-ipc';
 import {
   DESKTOP_SECRET_REF_PATTERN,
   DesktopSecretRefSchema,
@@ -24,7 +25,6 @@ import {
   DesktopBlobWriteOutcomeSchema,
   DesktopSaveWebPackageRequestSchema,
   DesktopReadWebPackageArchiveRequestSchema,
-  DesktopReadWebPackageArchiveResponseSchema,
   DesktopWebPackageIndexSchema,
   DesktopWebPackageTransitionRequestSchema,
   DESKTOP_LOCAL_LIBRARY_AUDIT_DAMAGE_KINDS,
@@ -223,7 +223,6 @@ interface BlobFixture {
   webPackageIdentity: { $case: string; id: string; contentDigest: string };
   blobArchive: { $case: string; b64: string; len: number };
   readArchiveRequest: { $case: string; contentDigest: string };
-  readArchiveResponse: { $case: string; archive: { b64: string; len: number } };
 }
 
 /**
@@ -297,14 +296,16 @@ describe('Desktop blob 与 Web 包 IPC 契约', () => {
     ).toThrow();
   });
 
-  it('读取归档的响应是 {archive:{b64,len}}，不接受裸字符串载荷', () => {
-    // native 曾返回裸 base64 字符串。只比较字符串的两侧会一起通过，直到真实 IPC 才炸。
-    const { $case: _responseCase, ...response } = fixture.readArchiveResponse;
-    expect(_responseCase).toEqual(expect.any(String));
-    expect(DesktopReadWebPackageArchiveResponseSchema.parse(response)).toEqual(response);
-    expect(() =>
-      DesktopReadWebPackageArchiveResponseSchema.parse(fixture.blobArchive.b64),
-    ).toThrow();
+  it('读取归档的响应方向没有 schema，因为它是 raw 字节', () => {
+    // 该命令返回 `tauri::ipc::Response`，渲染层拿到 `ArrayBuffer`。base64 信封曾让每个 Web 包
+    // 的读取都多付 33% 体积与一次解码峰值，而 D2.3 导出对每个包都要读一遍字节。
+    //
+    // 因此这里断言的是"契约里**没有**这个响应 schema"：留着它会让后来者以为响应仍是 JSON
+    // 信封，而两侧各自的单测都会绿（各自 mock 了对方的形状），直到真实 IPC 才炸。
+    const surface = Object.keys(desktopIpc);
+    expect(surface).not.toContain('DesktopReadWebPackageArchiveResponseSchema');
+    // 写入方向仍在用 {b64, len}：单个包的量级没有到需要 raw 请求体的程度。
+    expect(surface).toContain('DesktopBase64BytesSchema');
   });
 
   it('canonical identity：包 id 与内容摘要在 fixture 中成对出现', () => {

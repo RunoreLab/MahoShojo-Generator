@@ -43,10 +43,6 @@
     "b64": "UEsDBA==",
     "len": 4
   },
-  "readArchiveResponse": {
-    "$case": "读取归档的**响应**形状：载荷包在 archive 字段里。曾经 native 返回裸 base64 字符串而渲染层按对象解析——两侧单测都绿（各自 mock 对方形状），真实 IPC 才炸。",
-    "archive": { "b64": "UEsDBA==", "len": 4 }
-  },
   "readArchiveRequest": {
     "$case": "读取归档的**请求**形状：参数是 manifest 摘要（record.ref.digest），不是包 id。两者混用会让真实读取路径必然落空。",
     "contentDigest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"

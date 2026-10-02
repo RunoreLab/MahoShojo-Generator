@@ -27,6 +27,15 @@ const DIGEST = `sha256:${'a'.repeat(64)}`;
 const PKG_ID = deriveLocalWebPackageId(DIGEST);
 const ARCHIVE = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x7a]);
 
+/**
+ * native 的 raw 响应在渲染层的真实形状。
+ *
+ * 刻意复制一份字节而不是复用同一个数组：`ArrayBuffer` 与 `Uint8Array` 之间存在视图关系，
+ * 共享同一段内存会让"渲染层有没有真的拷一份"这条断言变得没有意义。
+ */
+const rawBytes = (bytes: Uint8Array): ArrayBuffer =>
+  bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+
 const record = (overrides: Partial<LocalWebPackageRecordV1> = {}): LocalWebPackageRecordV1 =>
   LocalWebPackageRecordV1Schema.parse({
     id: PKG_ID,
@@ -188,20 +197,23 @@ describe('IpcWebPackageRepository', () => {
     const present = new IpcWebPackageRepository(async (_command, args) => {
       const payload = args as { contentDigest?: unknown; id?: unknown };
       seen.push({ digest: payload.contentDigest, id: payload.id });
-      return { archive: toBase64Bytes(ARCHIVE) };
+      return rawBytes(ARCHIVE);
     });
 
     expect([...(await present.readArchive(DIGEST))!]).toEqual([...ARCHIVE]);
-    expect(seen[0]).toEqual({ digest: DIGEST, id: undefined });  });
+    expect(seen[0]).toEqual({ digest: DIGEST, id: undefined });
+  });
 
-  it('readArchive 解析 native 的 {archive:{b64,len}} 信封，而不是裸字符串', async () => {
-    // native 曾返回裸 base64 字符串。这里 mock 真实形状：裸字符串必须被拒，
-    // 否则"读出来是一根字符串"这个 bug 会被 mock 再次掩盖。
-    const good = new IpcWebPackageRepository(async () => ({ archive: toBase64Bytes(ARCHIVE) }));
+  it('readArchive 直接收 raw 字节，不再经过 base64 信封', async () => {
+    // native 曾返回 `{archive:{b64,len}}`。mock 必须给出真实形状，否则"读出来是一根
+    // base64 字符串"这个 bug 会被 mock 再次掩盖。
+    const good = new IpcWebPackageRepository(async () => rawBytes(ARCHIVE));
     expect([...(await good.readArchive(DIGEST))!]).toEqual([...ARCHIVE]);
 
-    const bare = new IpcWebPackageRepository(async () => toBase64Bytes(ARCHIVE).b64);
-    await expect(bare.readArchive(DIGEST)).rejects.toBeInstanceOf(Error);
+    // 任何 JSON 信封都必须被拒：把它当字节数组会得到一堆 undefined，症状是"解包器说这个
+    // ZIP 坏了"，离真正的原因很远。
+    const enveloped = new IpcWebPackageRepository(async () => ({ archive: toBase64Bytes(ARCHIVE) }));
+    await expect(enveloped.readArchive(DIGEST)).rejects.toMatchObject({ code: 'bridge-failure' });
   });
 
   it('readArchive：字节缺失是一个状态而不是抛错', async () => {
@@ -276,7 +288,7 @@ describe('IpcWebPackageRepository', () => {
       if (command === GET_WEB_PACKAGE_COMMAND) return null;
       if (command === LIST_WEB_PACKAGES_COMMAND) return { documents: [] };
       if (command === READ_WEB_PACKAGE_ARCHIVE_COMMAND) {
-        return { archive: toBase64Bytes(ARCHIVE) };
+        return rawBytes(ARCHIVE);
       }
       if (command === SAVE_WEB_PACKAGE_COMMAND) {
         return DesktopSaveWebPackageResponseSchema.parse({ id: PKG_ID, blobOutcome: 'stored' });

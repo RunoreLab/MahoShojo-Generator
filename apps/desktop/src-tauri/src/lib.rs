@@ -335,7 +335,7 @@ struct SaveWebPackageRequest {
     index: web_package::WebPackageIndex,
     /// 原始 ZIP 字节的 base64。与文档分开传：文档是 JSON 文本，载荷是二进制，混在一个
     /// 字段里会让两侧都要为对方的数据形状做让步。
-    #[serde(with = "base64_bytes::field")]
+    #[serde(deserialize_with = "base64_bytes::deserialize_bytes")]
     archive: Vec<u8>,
     /// 渲染层时钟。软删/恢复必须单调推进，native 不引入时间库。
     now: String,
@@ -364,21 +364,29 @@ struct SaveWebPackageResponse {
 /// base64 传输二进制。
 ///
 /// `DESK-064` 要求二进制信封同时携带载荷与其字节长度，两端都在解码后核对长度。
-/// **请求与响应共用同一个类型**——让读写各自定义形状是"读出来是一根字符串"这类 bug 的温床：
-/// 两侧各自的单测都会绿，因为它们各自 mock 了对方的形状。
+///
+/// **只在写入方向使用。** `read_web_package_archive` 曾与请求共用这个信封，后来改成 raw 响应
+/// （`tauri::ipc::Response`）——每个 Web 包都经它读取，而 base64 的 33% 体积开销加一次解码峰值
+/// 正好落在 D2.3 导出的峰值内存上。两侧形状各自定义是"读出来是一根裸字符串"这类 bug 的温床，
+/// 因此本模块仍是**唯一**的 wire 定义，而不是各写各的。
+///
+/// 编码侧（`from_bytes`）在生产路径上已无调用方，但它保留下来有两个具体理由：它让"与标准实现
+/// 逐字节一致"这条断言能够真正对照参考实现，而不是自己和自己比；它也让 `decode` 的往返测试成为
+/// 可能。删掉它会把这两条测试一起删掉，而它们守的正是"TS 编码 / Rust 解码不会漂移"。
 ///
 /// 用标准 crate 而不是手写：宽松的 padding 处理会静默接受截断载荷（失败点被推到解包器里，
 /// 离真正原因很远），而逐字符线性查表在 64 MiB 归档上是 10^9 量级的字符比较。
 mod base64_bytes {
     use base64::engine::general_purpose::STANDARD;
     use base64::Engine as _;
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use serde::de::Error as _;
+    use serde::{Deserialize, Deserializer};
 
     /// IPC 上的 base64 信封：编码后的载荷 + 解码后的字节长度。
     ///
-    /// 请求与响应**共用这一个类型**：让读写各自定义形状，正是"读出来是一根裸字符串"这类
+    /// 同一份 wire 定义被请求侧解包与标准实现对照共用：让两端各自定义形状，正是"读出来是一根裸字符串"这类
     /// bug 的温床——两侧各自的单测都会绿，因为它们各自 mock 了对方的形状。
-    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+    #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
     #[serde(rename_all = "camelCase")]
     pub struct Base64Bytes {
         pub b64: String,
@@ -386,6 +394,12 @@ mod base64_bytes {
     }
 
     impl Base64Bytes {
+        /// 编码成信封。
+        ///
+        /// 生产路径上**没有**调用方：读取方向已改 raw 响应，写入方向只解包不编码。它因此只在
+        /// 测试里存在——存在的理由是让"与标准实现逐字节一致"这条断言能够真正对照参考实现，
+        /// 而不是拿本模块的编码去和本模块的编码比。
+        #[cfg(test)]
         pub fn from_bytes(bytes: &[u8]) -> Self {
             Self {
                 b64: STANDARD.encode(bytes),
@@ -411,24 +425,16 @@ mod base64_bytes {
         }
     }
 
-    /// serde 的 `(serialize, deserialize)` 适配器。请求与响应两个方向的实现相同——
-    /// 它们共享 `Base64Bytes`，因此不可能漂移。
-    pub mod field {
-        use super::{Base64Bytes, Deserializer, Serialize, Serializer};
-        use serde::de::Error as _;
-        use serde::Deserialize as _;
-
-        pub fn serialize<S: Serializer>(bytes: &[u8], serializer: S) -> Result<S::Ok, S::Error> {
-            Base64Bytes::from_bytes(bytes).serialize(serializer)
-        }
-
-        pub fn deserialize<'de, D: Deserializer<'de>>(
-            deserializer: D,
-        ) -> Result<Vec<u8>, D::Error> {
-            Base64Bytes::deserialize(deserializer)?
-                .decode()
-                .map_err(D::Error::custom)
-        }
+    /// `#[serde(deserialize_with = …)]` 的目标：信封 → 字节，并核对声明长度。
+    ///
+    /// **刻意只有解包一侧。** `#[serde(with = …)]` 会强制要求序列化函数存在，于是留下一个生产
+    /// 路径永不调用的 `serialize`；而 dead code 只会用 `allow` 掩盖"它其实没人用"这个事实。
+    pub fn deserialize_bytes<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Vec<u8>, D::Error> {
+        Base64Bytes::deserialize(deserializer)?
+            .decode()
+            .map_err(D::Error::custom)
     }
 }
 
@@ -617,20 +623,18 @@ async fn audit_local_library(
 /// 与 Web 的 IndexedDB adapter 都以 manifest 摘要为键，业务侧传的也正是 `record.ref.digest`。
 /// 把它当成包 id 会让真实读取路径必然落空（manifest 摘要永远不是 `wp_…` 形式）。
 ///
-/// 返回 `{b64, len}` 信封而非裸 base64 字符串：`DESK-064` 要求二进制载荷自带长度，
-/// 而裸字符串会让渲染层无法核对——它只能选择"要么不核对，要么解析失败"。
-#[derive(Debug, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ReadWebPackageArchiveResponse {
-    #[serde(with = "base64_bytes::field")]
-    archive: Vec<u8>,
-}
-
+/// **返回 raw 响应（`tauri::ipc::Response`），渲染层拿到 `ArrayBuffer`。** 这里曾经返回
+/// `{b64, len}` 信封：base64 带来约 33% 体积开销外加一次解码峰值，而 D2.3 的导出**每个 Web 包都要
+/// 读一遍**——整包路径的 1.33× 峰值就此出现在导出期间。（`DESK-064` 要求的"二进制载荷自带长度"
+/// 在 raw 响应下由传输层本身满足：字节数就是长度，不存在需要额外声明的截断。）
+///
+/// 请求仍然走结构化参数：`tauri::ipc::Response` 只影响响应方向，"raw 请求无法携带结构化参数"
+/// 那条限制限制的是请求体，因此读取方向不需要任何自定义封包（`DESK-070` 字节传输）。
 #[tauri::command]
 fn read_web_package_archive(
     library: State<'_, LocalLibrary>,
     content_digest: String,
-) -> Result<ReadWebPackageArchiveResponse, web_package::SaveWebPackageError> {
+) -> Result<tauri::ipc::Response, web_package::SaveWebPackageError> {
     let digest = library
         .packages()
         .archive_digest_for_content_digest(&content_digest)
@@ -639,7 +643,7 @@ fn read_web_package_archive(
         blob::BlobError::NotFound,
     ))?;
     let bytes = library.blobs().read(&digest)?;
-    Ok(ReadWebPackageArchiveResponse { archive: bytes })
+    Ok(tauri::ipc::Response::new(bytes))
 }
 
 /// 开启一次导出归档。
@@ -774,7 +778,7 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{base64_bytes, DesktopRuntimeInfo};
+    use super::{base64_bytes, DesktopRuntimeInfo, SaveWebPackageRequest};
 
     /// base64 MUST 与标准实现逐字节一致。
     ///
@@ -843,25 +847,27 @@ mod tests {
         .is_err());
     }
 
-    /// 请求与响应两个方向 MUST 产出同一形状的线上字段。
+    /// 信封的线上形状 MUST 由**生产类型**钉住，而不是由一个测试本地定义的假 struct 钉住。
     ///
-    /// 它们曾各写各的：native 返回裸字符串，渲染层按对象解析——两侧单测都绿（各自 mock 了
-    /// 对方），真实 IPC 才炸。因此这里断言序列化结果的字段名集合。
+    /// 原先这条测试本地定义了一个 `Response` 结构并断言它序列化成 `{b64, len}`——它证明的只是
+    /// serde 的 `with` 属性能用，与生产路径无关。读取方向改成 raw 响应之后，本地那个 struct 更
+    /// 是彻底没有任何生产对应物，于是这条断言只会让人误以为响应仍是信封。
+    ///
+    /// 现在直接反序列化 `SaveWebPackageRequest`：字段名、camelCase 与长度核对全部由生产类型承担。
     #[test]
-    fn the_base64_envelope_has_one_wire_shape_in_both_directions() {
-        #[derive(serde::Serialize)]
-        #[serde(rename_all = "camelCase")]
-        struct Response {
-            #[serde(with = "base64_bytes::field")]
-            archive: Vec<u8>,
-        }
-        let archive = b"PK\x03\x04".to_vec();
-        let value = serde_json::to_value(Response { archive }).expect("must serialize");
-        assert_eq!(
-            value,
-            serde_json::json!({ "archive": { "b64": "UEsDBA==", "len": 4 } }),
-            "响应方向必须也是 {{b64, len}}，不能是裸字符串"
-        );
+    fn the_request_side_envelope_is_pinned_by_the_production_type() {
+        let request: SaveWebPackageRequest = serde_json::from_value(serde_json::json!({
+            "document": "{}",
+            "index": {
+                "id": "wp_0123456789abcdef0123456789abcdef",
+                "updatedAt": "2026-09-30T12:00:00.000Z",
+                "contentDigest": format!("sha256:{}", "0".repeat(64)),
+            },
+            "archive": { "b64": "UEsDBA==", "len": 4 },
+            "now": "2026-09-30T12:00:00.000Z",
+        }))
+        .expect("envelope shape must deserialize into the production request type");
+        assert_eq!(request.archive, b"PK\x03\x04");
     }
 
     #[test]
