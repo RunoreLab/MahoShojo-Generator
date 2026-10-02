@@ -1,5 +1,5 @@
 import { unzipSync, zipSync } from 'fflate';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
   LOCAL_LIBRARY_ARCHIVE_MANIFEST_PATH,
@@ -279,6 +279,44 @@ const manifestBytesOf = (manifest: LocalLibraryArchiveManifestV2): number =>
     0,
   );
 
+/**
+ * 全文件级别的网络守卫。
+ *
+ * `DESK-052` / `DESK-074` 要求"导入路径上任何 fetch / XHR 都抛错"，而 `MUST` 由**可执行断言**
+ * 证明、`MUST NOT` 只靠代码审查声称。因此守卫装在文件级：本文件里每一条导入用例都在它之下跑。
+ *
+ * 此前它只替换了 `fetch`，而注释与计划都写着"fetch 与 XMLHttpRequest"——于是一条会发 XHR 的导入
+ * 路径仍然让门禁保持绿色。
+ *
+ * 守卫本身的有效性由下面那条独立用例断言。
+ */
+const originalFetch = globalThis.fetch;
+const originalXhr = typeof globalThis.XMLHttpRequest;
+
+/** fetch 返回被拒绝的 promise，XHR 一经构造就抛——两条路都要封。 */
+const denyNetwork = (): void => {
+  class DeniedXhr {
+    constructor() {
+      throw new Error('导入路径发起了 XHR');
+    }
+  }
+  Object.assign(globalThis, {
+    fetch: (): Promise<never> => Promise.reject(new Error('导入路径发起了网络请求')),
+    XMLHttpRequest: DeniedXhr,
+  });
+};
+
+beforeEach(denyNetwork);
+
+afterEach(() => {
+  Object.assign(globalThis, { fetch: originalFetch });
+  if (originalXhr === undefined) {
+    delete (globalThis as { XMLHttpRequest?: unknown }).XMLHttpRequest;
+  } else {
+    Object.assign(globalThis, { XMLHttpRequest: originalXhr });
+  }
+});
+
 describe('inspectLocalLibraryArchive', () => {
   it('接受一份自洽归档并给出摘要，且一次本地库写入都没有', async () => {
     const recorder = createTarget();
@@ -310,26 +348,20 @@ describe('inspectLocalLibraryArchive', () => {
     expect(plan.existingWebPackageIds).toEqual([fixture.packages[0]!.record.id]);
   });
 
-  it('全程零网络请求', async () => {
+  it('全程零网络请求：inspect 与 apply 都在 fetch / XHR 守卫下跑完并真的写入', async () => {
     // `DESK-052` / `DESK-074`：导入 MUST 零网络，且 MUST 由可执行断言证明。只靠"代码里没看到
     // fetch"是不成立的——间接依赖、未来的重构、polyfill 都会让它失效。
-    const originalFetch = globalThis.fetch;
-    const originalXhr = typeof globalThis.XMLHttpRequest;
-    const network = vi.fn(() => Promise.reject(new Error('导入路径发起了网络请求')));
-    Object.assign(globalThis, { fetch: network });
+    //
+    // 守卫由文件级 `beforeEach` 装上（fetch 与 XMLHttpRequest 都换成会抛的桩）。因此这条用例
+    // 跑得完就等于证明了整条导入路径没有发起过网络请求；下面那两条写入断言确保它**真的跑完了**，
+    // 而不是中途就退出了。
+    const recorder = createTarget();
+    const archive = await packFixture();
+    const plan = await inspectLocalLibraryArchive(recorder.target, archive);
+    await applyLocalLibraryArchiveImport(recorder.target, archive, plan);
 
-    try {
-      const recorder = createTarget();
-      const archive = await packFixture();
-      const plan = await inspectLocalLibraryArchive(recorder.target, archive);
-      await applyLocalLibraryArchiveImport(recorder.target, archive, plan);
-      expect(network).not.toHaveBeenCalled();
-      expect(recorder.cardPuts).toHaveLength(2);
-    } finally {
-      Object.assign(globalThis, { fetch: originalFetch });
-      if (originalXhr === undefined) delete (globalThis as { XMLHttpRequest?: unknown }).XMLHttpRequest;
-      else Object.assign(globalThis, { XMLHttpRequest: originalXhr });
-    }
+    expect(recorder.cardPuts).toHaveLength(2);
+    expect(recorder.packagePuts).toHaveLength(2);
   });
 });
 
@@ -410,7 +442,7 @@ describe('applyLocalLibraryArchiveImport', () => {
 
     const report = await applyLocalLibraryArchiveImport(recorder.target, archive, plan);
 
-    expect(report.failed).toEqual([{ kind: 'card', id: doomed, reason: '磁盘满了' }]);
+    expect(report.failed).toEqual([{ kind: 'card', id: doomed, reason: '写入失败：磁盘满了' }]);
     expect(report.succeededCardIds).toEqual([fixture.cards[1]!.id]);
   });
 
@@ -690,30 +722,6 @@ describe('规模：条目数本身就是一个攻击面', () => {
 });
 
 describe('零网络断言的可信度', () => {
-  const originalFetch = globalThis.fetch;
-  const originalXhr = typeof globalThis.XMLHttpRequest;
-
-  /** fetch 返回被拒绝的 promise，XHR 一经构造就抛——两条路都要封。 */
-  const denyNetwork = (): void => {
-    class DeniedXhr {
-      constructor() {
-        throw new Error('导入路径发起了 XHR');
-      }
-    }
-    Object.assign(globalThis, {
-      fetch: () => Promise.reject(new Error('导入路径发起了网络请求')),
-      XMLHttpRequest: DeniedXhr,
-    });
-  };
-
-  beforeEach(denyNetwork);
-
-  afterEach(() => {
-    Object.assign(globalThis, { fetch: originalFetch });
-    if (originalXhr === undefined) delete (globalThis as { XMLHttpRequest?: unknown }).XMLHttpRequest;
-    else Object.assign(globalThis, { XMLHttpRequest: originalXhr });
-  });
-
   it('守卫本身是有效的：真的发请求就会被挡住', async () => {
     // 没有这条，"零网络"那条断言可能在守卫早已失效的情况下一直是绿的。
     await expect(fetch('https://example.invalid')).rejects.toThrow(/网络请求/u);

@@ -5,7 +5,11 @@ import {
   collectLocalLibraryArchive,
   type LocalLibraryArchiveSource,
 } from '@mahoshojo/local-library/archive-export';
-import { packLocalLibraryArchive } from '@mahoshojo/local-library/archive-pack';
+import {
+  MAX_LOCAL_LIBRARY_ARCHIVE_INPUT_BYTES,
+  MAX_LOCAL_LIBRARY_ARCHIVE_OUTPUT_BYTES,
+  packLocalLibraryArchive,
+} from '@mahoshojo/local-library/archive-pack';
 import {
   deriveLocalWebPackageId,
   type LocalWebPackageRecordV1,
@@ -17,7 +21,6 @@ import {
   applyDesktopLibraryArchiveImport,
   DESKTOP_LIBRARY_IMPORT_LIMITS,
   inspectDesktopLibraryArchive,
-  LocalLibraryArchiveImportError,
   readFileBytes,
 } from '../src/platform/local-archive-import';
 
@@ -149,7 +152,8 @@ describe('readFileBytes', () => {
       size: 4,
       arrayBuffer: async () => new ArrayBuffer(8),
     } as unknown as File;
-    await expect(readFileBytes(lying)).rejects.toBeInstanceOf(LocalLibraryArchiveImportError);
+    // 断言 code 而不是"是个错误"：只断言类型的话，别的拒绝理由也会让它变绿。
+    await expect(readFileBytes(lying)).rejects.toMatchObject({ code: 'archive-malformed' });
   });
 });
 
@@ -178,8 +182,13 @@ describe('Desktop 导入的两步', () => {
     expect(report.succeededCardIds).toEqual([CARD.id]);
   });
 
-  it('UI 拿到的上限与导出侧同一个值', () => {
-    // UI 需要提前判定"这个文件太大了"，而它用的必须是导入侧真正会执行的那个上限。
-    expect(DESKTOP_LIBRARY_IMPORT_LIMITS.fileBytes).toBe(256 * 1024 * 1024);
+  it('UI 拿到的上限就是导入侧真正会执行的那个常量', () => {
+    // 被度量的是归档**文件长度**，因此必须引用 OUTPUT 上限。此前这条断言比的是字面量
+    // `256 * 1024 * 1024`，于是"误用 INPUT 上限"这件事它永远抓不到——而 `DESK-070` 明确
+    // `MUST NOT` 让这两个维度互相充当。
+    expect(DESKTOP_LIBRARY_IMPORT_LIMITS.fileBytes).toBe(MAX_LOCAL_LIBRARY_ARCHIVE_OUTPUT_BYTES);
+    // 两者今天同值，因此"不相等"不是可断言的事实；真正可断言的是**引用了哪一个**——上面那行
+    // 才是这条门禁的实质。
+    expect(MAX_LOCAL_LIBRARY_ARCHIVE_INPUT_BYTES).toBe(MAX_LOCAL_LIBRARY_ARCHIVE_OUTPUT_BYTES);
   });
 });

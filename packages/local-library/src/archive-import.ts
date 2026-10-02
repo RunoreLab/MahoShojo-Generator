@@ -150,6 +150,19 @@ const fail = (
 const describe = (cause: unknown): string => (cause instanceof Error ? cause.message : String(cause));
 
 /**
+ * 写���入失败的**用户可见**原因。
+ *
+ * 与 {@link describe} 的区别：`ZodError.message` 是整个 issues 数组的 JSON，几百字符、直接进报告，
+ * 而 UI 要展示的是一句"这条记录没写进去"。因此这里先把契约层已归类过的错误原样透出，其余压成
+ * 一句通用说明并保留原始消息的前若干字符用于本地排障。
+ */
+const describeWriteFailure = (cause: unknown): string => {
+  if (cause instanceof LocalLibraryArchiveImportError) return cause.message;
+  const detail = describe(cause);
+  return detail.length > 200 ? `写入失败：${detail.slice(0, 200)}…` : `写入失败：${detail}`;
+};
+
+/**
  * existing-wins 探测用的分页大小。
  *
  * 与两个端口各自的 `MAX_*_PAGE_SIZE` 上限一致取 100：`list` 的 limit 有契约上限，给一个更大的值
@@ -508,6 +521,8 @@ const scanArchiveAsync = async (
   }
 
   if (stopAfterManifest) {
+    // `manifest === null` 在这里不可达：条目 1 必须是 manifest.json，而它的 `finishEntry` 一定会
+    // 解析它或抛错。保留这条断言是因为它是"只读清单"这条短路径**唯一**的失败出口。
     if (manifest === null) {
       throw fail('archive-manifest-invalid', `归档缺少 ${LOCAL_LIBRARY_ARCHIVE_MANIFEST_PATH}`);
     }
@@ -519,6 +534,7 @@ const scanArchiveAsync = async (
     // 他们选错文件的问题，而正确诊断是"这不是一个归档"。
     throw fail('archive-malformed', '归档里没有任何条目，它可能不是 ZIP 文件');
   }
+  // 同上：`entryCount >= 1` 且条目 1 必须是 manifest.json，因此 `manifest` 必然已解析。
   if (manifest === null) {
     throw fail('archive-manifest-invalid', `归档缺少 ${LOCAL_LIBRARY_ARCHIVE_MANIFEST_PATH}`);
   }
@@ -840,7 +856,7 @@ export const applyLocalLibraryArchiveImport = async (
         await target.packages.put(readArchiveWebPackageRecord(entry, recordBytes), archiveBytes);
         succeededWebPackageIds.push(entry.packageId);
       } catch (cause) {
-        failed.push({ kind: 'web-package', id: entry.packageId, reason: describe(cause) });
+        failed.push({ kind: 'web-package', id: entry.packageId, reason: describeWriteFailure(cause) });
       }
     });
   };
@@ -875,7 +891,7 @@ export const applyLocalLibraryArchiveImport = async (
               await target.cards.put(readArchiveCardRecord(card, bytes));
               succeededCardIds.push(card.cardId);
             } catch (cause) {
-              failed.push({ kind: 'card', id: card.cardId, reason: describe(cause) });
+              failed.push({ kind: 'card', id: card.cardId, reason: describeWriteFailure(cause) });
             }
           });
           return;
