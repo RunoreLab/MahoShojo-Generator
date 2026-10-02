@@ -149,6 +149,42 @@ const fail = (
 
 const describe = (cause: unknown): string => (cause instanceof Error ? cause.message : String(cause));
 
+/**
+ * existing-wins 探测用的分页大小。
+ *
+ * 与两个端口各自的 `MAX_*_PAGE_SIZE` 上限一致取 100：`list` 的 limit 有契约上限，给一个更大的值
+ * 会在真实 adapter 上被 schema 拒掉，而这个错误与"归档有问题"无关。
+ */
+const EXISTENCE_PAGE_SIZE = 100;
+
+/**
+ * 拉完一个 keyset 分页源，把其中的 id 收成集合。
+ *
+ * 没有页数上限，而有**不重复**的硬要求：游标重复说明分页不前进，`continue` 会变成死循环，
+ * 因此直接失败。这与导出侧 `drain` 的处理一致——一个实现错误的来源（每页都返回第一页）在这里
+ * 会变成"已有记录被算成没有"，那会让 existing-wins 失效并**覆盖**本地记录，因此必须失败而不是
+ * 截断。
+ */
+const collectExistingIds = async <T>(
+  list: (_cursor?: string) => Promise<{ items: readonly T[]; nextCursor?: string | null }>,
+  idOf: (_item: T) => string,
+): Promise<string[]> => {
+  const ids: string[] = [];
+  const seenCursors = new Set<string>();
+  let cursor: string | undefined;
+  for (;;) {
+    const page = await list(cursor);
+    for (const item of page.items) ids.push(idOf(item));
+    const next = page.nextCursor;
+    if (next === undefined || next === null) return ids;
+    if (seenCursors.has(next)) {
+      throw new Error(`本地库分页未前进（游标重复：${next}）`);
+    }
+    seenCursors.add(next);
+    cursor = next;
+  }
+};
+
 /** 导入摘要。UI 在**写入之前**展示它（`DESK-052`：导入 MUST 先展示摘要、版本、条目数与冲突策略）。 */
 export interface LocalLibraryArchiveImportSummary {
   readonly format: string;
@@ -248,12 +284,14 @@ interface ScanResult {
  * `onEntry` 的第一个参数是已解析的清单：清单是第一个 entry，因此非 manifest 条目到达时它必然
  * 已经就绪——这正是"manifest 优先让期望集合可以在解压其余条目**之前**算出来"的具体形态。
  */
-const scanArchiveSync = (
+const scanArchiveAsync = async (
   archive: Uint8Array,
   budgets: ResolvedBudgets,
   onEntry: (_manifest: LocalLibraryArchiveManifestV2, _entry: ScannedEntry) => void,
   stopAfterManifest = false,
-): ScanResult => {
+  // 每推完一块就被 await 一次。它是**唯一**能让同步的解包流程与异步的下游真正交错的接缝。
+  afterChunk: () => Promise<void> = async () => undefined,
+): Promise<ScanResult> => {
   const declaredByPath = new Map<string, { byteLength: number; digest: string }>();
   const seenPaths = new Set<string>();
 
@@ -455,6 +493,9 @@ const scanArchiveSync = (
       if (stopAfterManifest && manifest !== null) break;
       const end = Math.min(offset + STREAM_CHUNK_BYTES, archive.byteLength);
       unzip.push(archive.subarray(offset, end), end >= archive.byteLength);
+      // 在这里让出，而不是在条目结束时：条目回调是同步栈上的一环，在那里 `await` 只会挂一个
+      // 续体而不会真的挂起扫描，于是"同时只留一个条目"就只是注释。
+      await afterChunk();
     }
   } catch (cause) {
     // `ondata` 里的异常已经被原样回灌（解包器把下游抛出的错误当作 `error` 参数送回），因此这里
@@ -493,56 +534,63 @@ const scanArchiveSync = (
 /**
  * 扫描 + 摘要核对。
  *
- * 摘要不能在同一趟里同步完成（解包器同步、摘要算子异步），因此在每个条目结束时立刻把字节交给
- * `crypto.subtle` 并丢掉自己的引用，最后统一 `await`。峰值因此仍是**一个条目**，而不是"全部条目
- * 加上待办 promise"。
+ * ## 摘要为什么必须挂在这条接缝上
  *
- * `crypto.subtle` 在调用时复制 buffer（WebCrypto 的算法接收的是副本），因此丢弃引用是安全的。
- * 这条依赖写在这里，是因为它一旦被破坏，症状是"偶发的摘要把关失败"——极难定位。
+ * 摘要不能在同一趟里同步完成（解包器同步、摘要算子异步）。把每条目的字节交给 `crypto.subtle`
+ * 之后**立刻丢掉引用**是不够的：`sha256DigestOfBytes` 在调用时就把 buffer 复制走（WebCrypto 的
+ * 算法接收副本），而复制品要等 promise 被 await 才被回收。因此若整趟扫描结束才统一 await，
+ * **所有条目的摘要副本会同时存活**——实测一个 64 MiB 条目的归档额外占用 128 MiB。
+ *
+ * 修法是让摘要串成一条链，并在**每个输入块之后** await 一次它。32 KiB 的块意味着一次块内最多
+ * 完成一个条目，于是同时存活的字节缓冲是 2 个条目（正在解出的那个 + 刚交完摘要的那个），
+ * 与归档总条目数无关。
+ *
+ * `crypto.subtle` 在调用时复制 buffer 这条依赖写在这里，是因为它一旦被破坏，症状是"偶发的摘要
+ * 把关失败"——极难定位。
  */
 const scanArchive = async (
   archive: Uint8Array,
   budgets: ResolvedBudgets,
   onEntry: (_manifest: LocalLibraryArchiveManifestV2, _entry: ScannedEntry) => void,
-  expectedManifestDigest?: string,
+  options: {
+    readonly expectedManifestDigest?: string;
+    /** 块之间额外被 await 的东西。apply 用它把写入队列也纳入同一个闸门。 */
+    readonly afterChunk?: () => Promise<void>;
+  } = {},
 ): Promise<ScanResult> => {
-  const digests: Array<Promise<void>> = [];
-  const result = scanArchiveSync(archive, budgets, (manifest, entry) => {
-    digests.push(
-      sha256DigestOfBytes(entry.bytes).then((digest) => {
-        if (digest !== entry.declaredDigest) {
-          throw fail(
-            'archive-entry-corrupt',
-            `归档条目摘要与清单声明不符：${entry.path} 声明 ${entry.declaredDigest}，实际 ${digest}`,
-          );
-        }
-      }),
-    );
-    onEntry(manifest, entry);
-  });
-
-  if (expectedManifestDigest !== undefined) {
-    digests.push(
-      sha256DigestOfBytes(result.manifestBytes).then((digest) => {
-        if (digest !== expectedManifestDigest) {
-          throw fail(
-            'archive-manifest-invalid',
-            '归档的 manifest 与 preflight 读到的那份不是同一段字节',
-          );
-        }
-      }),
-    );
-  }
-
-  // `allSettled` 而不是 `all`：一个条目摘要不符不该让其余条目被顺带判成通过或失败。
-  const settled = await Promise.allSettled(digests);
-  const failure = settled.find(
-    (outcome): outcome is PromiseRejectedResult => outcome.status === 'rejected',
+  let digests: Promise<void> = Promise.resolve();
+  const result = await scanArchiveAsync(
+    archive,
+    budgets,
+    (manifest, entry) => {
+      const { bytes } = entry;
+      digests = digests.then(() =>
+        sha256DigestOfBytes(bytes).then((digest) => {
+          if (digest !== entry.declaredDigest) {
+            throw fail(
+              'archive-entry-corrupt',
+              `归档条目摘要与清单声明不符：${entry.path} 声明 ${entry.declaredDigest}，实际 ${digest}`,
+            );
+          }
+        }),
+      );
+      onEntry(manifest, entry);
+    },
+    false,
+    async () => {
+      await digests;
+      await options.afterChunk?.();
+    },
   );
-  if (failure !== undefined) {
-    throw failure.reason instanceof LocalLibraryArchiveImportError
-      ? failure.reason
-      : fail('archive-malformed', `归档校验失败：${describe(failure.reason)}`);
+
+  if (options.expectedManifestDigest !== undefined) {
+    const manifestDigest = await sha256DigestOfBytes(result.manifestBytes);
+    if (manifestDigest !== options.expectedManifestDigest) {
+      throw fail(
+        'archive-manifest-invalid',
+        '归档的 manifest 与 preflight 读到的那份不是同一段字节',
+      );
+    }
   }
   return result;
 };
@@ -633,38 +681,63 @@ export const inspectLocalLibraryArchive = async (
   // 记录字节先留到摘要核对**之后**再解析：被篡改的字节往往连记录 schema 都过不了，于是
   // "这不是一条合法记录"会盖掉"这段字节与清单声明的摘要不符"——后者才是更接近根因的诊断。
   const recordBytes: Array<{ path: string; bytes: Uint8Array }> = [];
+  // 索引先建好：清单里的 `path` 与归档里出现的路径是同一个键集合，因此**一次** O(n) 建表就把
+  // 后面每次查找变成 O(1)。直接 `manifest.cards.find(...)` 会让整趟变成 O(n²)——而 n 由攻击者
+  // 与清单上限共同决定，实测 n=8000 时单是查找就 493 ms，且随条目数每翻一倍变成四倍。
+  //
+  // 键只能建一次：`scanArchive` 的回调在清单解析之后才被调用（清单是第一个 entry），所以表在
+  // 第一次回调时已经可用。
+  let cardByPath = new Map<string, LocalLibraryArchiveCardEntryV2>();
+  let packageByPath = new Map<string, LocalLibraryArchiveWebPackageEntryV2>();
   const { manifest, manifestBytes } = await scanArchive(
     archive,
     resolved,
     (parsed, { path, bytes }) => {
-      const isRecord = parsed.cards.some((entry) => entry.path === path)
-        || parsed.webPackages.some((entry) => entry.path === path);
-      if (isRecord) recordBytes.push({ path, bytes });
+      if (cardByPath.size === 0) {
+        cardByPath = new Map(parsed.cards.map((entry) => [entry.path, entry]));
+        packageByPath = new Map(parsed.webPackages.map((entry) => [entry.path, entry]));
+      }
+      if (cardByPath.has(path) || packageByPath.has(path)) recordBytes.push({ path, bytes });
     },
   );
 
   // 记录在 preflight 就必须解析并与清单交叉核对：等到 apply 才发现，冲突摘要与实际写入结果
   // 就会各说各话，而 UI 已经把"零冲突"说给用户听了。
+  //
+  // 解析结果被刻意丢弃——preflight 的义务是"证明这份归档自洽"，不是"把记录传下去"。apply 会
+  // 在写入前重新解析，因此这里多解析一次是有意的重复，而不是遗漏。
   for (const { path, bytes } of recordBytes) {
-    const card = manifest.cards.find((entry) => entry.path === path);
+    const card = cardByPath.get(path);
     if (card !== undefined) {
       readArchiveCardRecord(card, bytes);
       continue;
     }
-    const pkg = manifest.webPackages.find((entry) => entry.path === path);
+    const pkg = packageByPath.get(path);
     if (pkg !== undefined) readArchiveWebPackageRecord(pkg, bytes);
   }
 
-  const existingCardIds: string[] = [];
-  for (const entry of manifest.cards) {
-    if (await target.cards.get(entry.cardId) !== null) existingCardIds.push(entry.cardId);
-  }
-  const existingWebPackageIds: string[] = [];
-  for (const entry of manifest.webPackages) {
-    if (await target.packages.get(entry.packageId) !== null) {
-      existingWebPackageIds.push(entry.packageId);
-    }
-  }
+  // 已有记录用**一次分页列举**取，而不是逐条 `get`。逐条 `get` 是 O(n) 次串行 IPC 往返
+  // （上限 10 万条时是 10 万次），而 `list` 本来就带 keyset 游标。
+  //
+  // `includeDeleted: true` 是必需的：墓碑也是"本地已存在"，因此 existing-wins 会保护它——
+  // 而那正是导入**不应**做的事（复活一条用户删掉的记录）。逐条 `get` 恰好也对，因为端口契约
+  // 说它"返回记录，包括墓碑"。
+  const existingCardIds = await collectExistingIds(
+    (cursor) => target.cards.list({
+      includeDeleted: true,
+      limit: EXISTENCE_PAGE_SIZE,
+      ...(cursor === undefined ? {} : { cursor }),
+    }),
+    (item) => item.id,
+  );
+  const existingWebPackageIds = await collectExistingIds(
+    (cursor) => target.packages.list({
+      includeDeleted: true,
+      limit: EXISTENCE_PAGE_SIZE,
+      ...(cursor === undefined ? {} : { cursor }),
+    }),
+    (item) => item.id,
+  );
 
   return {
     summary: {
@@ -712,9 +785,15 @@ export const applyLocalLibraryArchiveImport = async (
   budgets: LocalLibraryArchiveImportBudgets = {},
 ): Promise<LocalLibraryArchiveImportReport> => {
   const resolved = resolveBudgets(budgets);
-  const skippedCards = new Set(plan.existingCardIds);
-  const skippedPackages = new Set(plan.existingWebPackageIds);
-
+  /**
+   * 跳过判定在**写入前**重新读一次存储，而不是只信任 `plan`。
+   *
+   * `plan` 是一个普通导出接口，因此"用 A 库的 plan 去写 B 库"在类型层面完全合法，而那会静默
+   * 覆盖——正是 `DESK-074` 禁止的强制覆盖。反过来，inspect 与 apply 之间本地库也可能变化
+   * （一次同步落库、一次 purge），陈旧的 plan 会让已经不在的记录被报成"已存在"而不再写入。
+   *
+   * 因此 `plan` 里的两个集合只用于**写入前**的摘要展示，apply 自己按存储的当前状态决定跳过。
+   */
   const succeededCardIds: string[] = [];
   const succeededWebPackageIds: string[] = [];
   const skipped: LocalLibraryArchiveImportSkip[] = [];
@@ -730,14 +809,17 @@ export const applyLocalLibraryArchiveImport = async (
    * 已解出但还没有配对完成的两半。
    *
    * 一个 Web 包的写入需要"记录 JSON"与"ZIP 字节"两半，而它们在归档里相隔整个 `archives/` 命名
-   * 空间。打包器的条目顺序是"卡片记录 → Web 包记录 → 归档字节"，因此记录先到、归档后到，一个包
-   * 真正占住内存的只有它的 ZIP；记录每个几百字节，全部留着也只是几十 KiB 量级。反序的归档会把
-   * ZIP 留在 map 里直到它的记录出现——同样是"在途"，而不是"全部"。
+   * 空间。打包器的条目顺序是"卡片记录 → Web 包记录 → 归档字节"，因此记录先到、归档后到。
+   *
+   * 代价要写清楚：记录是**每包一份**地留在 map 里，条目数上限（100_000）下就是几十 MB，
+   * 而不是"几十 KiB"。这是可接受的——记录本身是几百字节量级，而真正大的 ZIP 字节是**边解边写**
+   * 的：每个输入块边界都会 await 写入队列（见下面的 `afterChunk`），因此在途的归档字节不超过
+   * 一个块。
    */
   const pendingRecords = new Map<string, Uint8Array>();
   const pendingArchiveBytes = new Map<string, Uint8Array>();
 
-  /** 串行写入队列的尾部。`await` 它就是在途内存的闸门。 */
+  /** 串行写入队列的尾部。await 它就是在途内存的闸门。 */
   let tail: Promise<void> = Promise.resolve();
   const enqueue = (task: () => Promise<void>): void => {
     tail = tail.then(task);
@@ -751,6 +833,10 @@ export const applyLocalLibraryArchiveImport = async (
     pendingArchiveBytes.delete(entry.archivePath);
     enqueue(async () => {
       try {
+        if (await target.packages.get(entry.packageId) !== null) {
+          skipped.push({ kind: 'web-package', id: entry.packageId, reason: 'already-present' });
+          return;
+        }
         await target.packages.put(readArchiveWebPackageRecord(entry, recordBytes), archiveBytes);
         succeededWebPackageIds.push(entry.packageId);
       } catch (cause) {
@@ -762,7 +848,7 @@ export const applyLocalLibraryArchiveImport = async (
   // 清单身份**先**核对：它是 preflight 展示给用户的那一份摘要的来源，而"展示的清单"与
   // "实际写入的归档"不是同一份，正是最难排查的一种不一致。扫描只读到清单结束就停，因此这
   // 一步的开销与归档大小无关。
-  const declared = scanArchiveSync(archive, resolved, () => undefined, true);
+  const declared = await scanArchiveAsync(archive, resolved, () => undefined, true);
   const declaredDigest = await sha256DigestOfBytes(declared.manifestBytes);
   if (declaredDigest !== plan.manifestDigest) {
     throw fail(
@@ -771,66 +857,74 @@ export const applyLocalLibraryArchiveImport = async (
     );
   }
 
-  await scanArchive(
-    archive,
-    resolved,
-    // 查找一律走 `plan.manifest` 建好的索引，而不是 `parsed`：上面刚核对过两者的摘要相等，
-    // 因此它们是同一份清单，而 `parsed` 上的线性查找会让条目数变成 O(n²)。
-    (_parsed, { path, bytes }) => {
-      const card = cardByPath.get(path);
-      if (card !== undefined) {
-        if (skippedCards.has(card.cardId)) {
-          skipped.push({ kind: 'card', id: card.cardId, reason: 'already-present' });
+  try {
+    await scanArchive(
+      archive,
+      resolved,
+      // 查找一律走 `plan.manifest` 建好的索引，而不是 `parsed`：上面刚核对过两者的摘要相等，
+      // 因此它们是同一份清单，而 `parsed` 上的线性查找会让条目数变成 O(n²)。
+      (_parsed, { path, bytes }) => {
+        const card = cardByPath.get(path);
+        if (card !== undefined) {
+          enqueue(async () => {
+            try {
+              if (await target.cards.get(card.cardId) !== null) {
+                skipped.push({ kind: 'card', id: card.cardId, reason: 'already-present' });
+                return;
+              }
+              await target.cards.put(readArchiveCardRecord(card, bytes));
+              succeededCardIds.push(card.cardId);
+            } catch (cause) {
+              failed.push({ kind: 'card', id: card.cardId, reason: describe(cause) });
+            }
+          });
           return;
         }
-        enqueue(async () => {
-          try {
-            await target.cards.put(readArchiveCardRecord(card, bytes));
-            succeededCardIds.push(card.cardId);
-          } catch (cause) {
-            failed.push({ kind: 'card', id: card.cardId, reason: describe(cause) });
-          }
-        });
-        return;
-      }
 
-      const pkg = packageByPath.get(path);
-      if (pkg !== undefined) {
-        if (skippedPackages.has(pkg.packageId)) {
-          skipped.push({ kind: 'web-package', id: pkg.packageId, reason: 'already-present' });
-          pendingArchiveBytes.delete(pkg.archivePath);
+        const pkg = packageByPath.get(path);
+        if (pkg !== undefined) {
+          pendingRecords.set(path, bytes);
+          flushWebPackageIfComplete(pkg);
           return;
         }
-        pendingRecords.set(path, bytes);
-        flushWebPackageIfComplete(pkg);
-        return;
-      }
 
-      const owner = packageByArchivePath.get(path);
-      if (owner === undefined) return;
-      if (skippedPackages.has(owner.packageId)) return;
-      pendingArchiveBytes.set(path, bytes);
-      flushWebPackageIfComplete(owner);
-    },
-    plan.manifestDigest,
-  );
-  await tail;
+        const owner = packageByArchivePath.get(path);
+        if (owner === undefined) return;
+        pendingArchiveBytes.set(path, bytes);
+        flushWebPackageIfComplete(owner);
+      },
+      {
+        expectedManifestDigest: plan.manifestDigest,
+        // 每个输入块之后都让写入队列清空：在途的归档字节因此不超过一个块，而不是整个 `archives/`
+        // 命名空间。摘要在同一条接缝上 await（见 `scanArchive`）。
+        afterChunk: () => tail,
+      },
+    );
+  } finally {
+    // 写入队列**必须**在异常路径上也被排空：扫描中途失败时，已经入队的写入仍然会执行，
+    // 若不 await 就 return，用户既看不到报告、也不知道库里已经落了什么。
+    await tail;
+  }
 
   // 每个被声明的条目都必须有下落：succeeded、skipped、failed 三者之一。缺一条意味着"导入成功"
   // 却少了东西，而那正是这份报告唯一不允许的失败模式。
+  //
+  // 键带 kind：`LocalCardIdSchema` 只是 `z.string().trim().min(1).max(256)`，不强制 `lc_` 前缀，
+  // 因此一份构造过的归档可以让某个包的 id 与某张卡的 id 相同，只按 id 记账会让这张网放行一个
+  // 从未被处理的包。
   const accounted = new Set([
-    ...succeededCardIds,
-    ...succeededWebPackageIds,
-    ...skipped.map((item) => item.id),
-    ...failed.map((item) => item.id),
+    ...succeededCardIds.map((id) => `card:${id}`),
+    ...succeededWebPackageIds.map((id) => `web-package:${id}`),
+    ...skipped.map((item) => `${item.kind}:${item.id}`),
+    ...failed.map((item) => `${item.kind}:${item.id}`),
   ]);
   for (const entry of plan.manifest.cards) {
-    if (!accounted.has(entry.cardId)) {
+    if (!accounted.has(`card:${entry.cardId}`)) {
       failed.push({ kind: 'card', id: entry.cardId, reason: '该条目在导入过程中未被处理' });
     }
   }
   for (const entry of plan.manifest.webPackages) {
-    if (!accounted.has(entry.packageId)) {
+    if (!accounted.has(`web-package:${entry.packageId}`)) {
       failed.push({ kind: 'web-package', id: entry.packageId, reason: '该条目在导入过程中未被处理' });
     }
   }

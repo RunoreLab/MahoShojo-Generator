@@ -21,7 +21,8 @@ import {
   packLocalLibraryArchive,
 } from '@mahoshojo/local-library/archive-pack';
 import { sha256DigestOfBytes } from '@mahoshojo/local-library/digest';
-import type { CardRepository } from '@mahoshojo/local-library/repository';
+import type { CardRepository, LocalCardQuery } from '@mahoshojo/local-library/repository';
+import type { LocalCardRecordV1 } from '@mahoshojo/local-library/record';
 import type {
   LocalWebPackageRecordV1,
   WebPackageRepository,
@@ -133,8 +134,10 @@ const createTarget = (existing: {
     async get(id: string) {
       return cardRecords.get(id) ?? null;
     },
+    // existing-wins 的探测走一次分页列举而不是逐条 get，因此 `list` 必须像真实 adapter 那样
+    // 返回库里已有的记录——否则"本地已存在"永远是空的，那条断言就成了摆设。
     async list() {
-      return { items: [] };
+      return { items: [...cardRecords.values()] };
     },
     async put(record: CardRecord) {
       cardPuts.push(record.id);
@@ -149,7 +152,7 @@ const createTarget = (existing: {
       return packageRecords.get(id) ?? null;
     },
     async list() {
-      return { items: [] };
+      return { items: [...packageRecords.values()] };
     },
     async put(record: PackageRecord, archive: Uint8Array) {
       packagePuts.push(record.id);
@@ -409,6 +412,61 @@ describe('applyLocalLibraryArchiveImport', () => {
 
     expect(report.failed).toEqual([{ kind: 'card', id: doomed, reason: '磁盘满了' }]);
     expect(report.succeededCardIds).toEqual([fixture.cards[1]!.id]);
+  });
+
+  it('existing-wins 保护墓碑，而不只是"存在的记录"', async () => {
+    // 墓碑也是"本地已存在"。若探测漏掉 `deletedAt` 的行，导入就会**复活**一条用户删掉的记录，
+    // 而症状是"我明明删过它，怎么又出现了"。
+    const fixture = buildFixture();
+    const tombstone = { ...fixture.cards[0]!, deletedAt: '2026-10-01T00:00:00.000Z' };
+    const recorder = createTarget();
+    await recorder.target.cards.put(tombstone as LocalCardRecordV1);
+    recorder.cardPuts.length = 0;
+
+    const archive = await packFixture();
+    const plan = await inspectLocalLibraryArchive(recorder.target, archive);
+    expect(plan.existingCardIds).toContain(tombstone.id);
+    const report = await applyLocalLibraryArchiveImport(recorder.target, archive, plan);
+    expect(report.skipped.map((item) => item.id)).toContain(tombstone.id);
+    expect(recorder.cardPuts).not.toContain(tombstone.id);
+  });
+
+  it('写入前按存储的当前状态复核，而不是只信任 inspect 给出的 plan', async () => {
+    // `plan` 是一个普通导出接口，因此"用 A 库的 plan 去写 B 库"在类型层面完全合法。若 apply
+    // 只看 plan，它会**静默覆盖** B 库里的同名记录——正是 DESK-074 禁止的强制覆盖。
+    // 这里模拟"inspect 之后、apply 之前本地多了一条记录"。
+    const fixture = buildFixture();
+    const recorder = createTarget();
+    const archive = await packFixture();
+    const plan = await inspectLocalLibraryArchive(recorder.target, archive);
+    expect(plan.existingCardIds).toEqual([]);
+
+    await recorder.target.cards.put(createLocalCardRecord({ id: fixture.cards[0]!.id }));
+    recorder.cardPuts.length = 0;
+
+    const report = await applyLocalLibraryArchiveImport(recorder.target, archive, plan);
+    expect(report.skipped).toEqual([
+      { kind: 'card', id: fixture.cards[0]!.id, reason: 'already-present' },
+    ]);
+    expect(recorder.cardPuts).not.toContain(fixture.cards[0]!.id);
+  });
+
+  it('探测已有记录走一次分页列举，而不是逐条 get', async () => {
+    // 逐条 `get` 是 O(n) 次串行 IPC 往返（上限 10 万条时是 10 万次）。
+    const fixture = buildFixture({ cardCount: 5, packageCount: 0 });
+    const recorder = createTarget({ cards: fixture.cards.map((card) => card.id) });
+    const listCalls: unknown[] = [];
+    const originalList = recorder.target.cards.list.bind(recorder.target.cards);
+    recorder.target.cards.list = (async (query: LocalCardQuery) => {
+      listCalls.push(query);
+      return originalList(query);
+    }) as typeof recorder.target.cards.list;
+
+    const plan = await inspectLocalLibraryArchive(recorder.target, await packFixture({ cardCount: 5, packageCount: 0 }));
+    expect(plan.existingCardIds).toHaveLength(5);
+    expect(listCalls).toHaveLength(1);
+    // includeDeleted 是必需的：墓碑也是"已存在"，漏掉它会让导入复活用户删掉的记录。
+    expect(listCalls[0]).toMatchObject({ includeDeleted: true });
   });
 
   it('清单与归档不是同一段字节时拒绝写入', async () => {
