@@ -552,6 +552,11 @@ export type DesktopLocalLibraryGcError = z.infer<typeof DesktopLocalLibraryGcErr
  *
  * `export-stale` 意味着 exportId 对不上当前会话：一次迟到的旧块。UI **MUST NOT** 把它显示成
  * "导出失败，请重试"——真实原因是 renderer 刷新过，正确处理是重新走一次完整导出。
+ *
+ * `export-target-occupied` 与上面相反：导出本身没有问题，只是 `begin` 回显的最终路径在发布那一刻
+ * 已被别的进程或用户占用。它是**唯一**一个"重试即可"的原因，因此 UI **SHOULD** 明确提示重试，
+ * 而不是归入无法归类的失败。它 MUST NOT 被静默换成一个别的文件名——那会让 `begin` 回显的路径
+ * 变成仅供参考。
  */
 export const DesktopArchiveExportErrorCodeSchema = z.enum([
   'export-too-large',
@@ -559,6 +564,7 @@ export const DesktopArchiveExportErrorCodeSchema = z.enum([
   'export-no-session',
   'export-stale',
   'export-overflow',
+  'export-target-occupied',
   'export-unavailable',
   'export-failure',
 ]);

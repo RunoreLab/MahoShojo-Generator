@@ -1,4 +1,4 @@
-//! 导出归档的落盘：命名、temp 写入、原子 rename。
+//! 导出归档的落盘：命名、temp 写入、原子发布。
 //!
 //! ## 这里为什么只认字节，不认归档格式
 //!
@@ -17,14 +17,21 @@
 //! 完成是**累计字节等于声明总长**这一个函数，不是需要别人来调的动作（`DESK-071b`）。三段状态机
 //! 最容易泄漏的正是"begin 之后 renderer 崩溃，永远没人 finish"：一份永远不会被发布的 temp，加上一条
 //! 永远不返回的会话。本模块因此让 `begin` 回收既有会话，使 renderer 刷新自愈。
+//!
+//! ## 为什么 temp 交给 RAII 而不是自己维护路径
+//!
+//! 溢出、落盘长度不符、`fsync` 失败、发布失败——每一条都是"已经写了一部分字节、然后失败"的路径，
+//! 每一条都需要删掉 temp。把这个责任放进 [`tempfile::NamedTempFile`] 的 `Drop` 之后，本模块就不必
+//! 在每条错误分支上重复"drop 句柄 + 删文件"，而漏掉某一条的后果是一个几百 MiB 的垃圾文件——
+//! 症状（导出失败、磁盘满了）与根因（某条错误路径忘了清理）完全无关。
 
-use std::fs::File;
 use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
 use serde::Serialize;
+use tempfile::NamedTempFile;
 
 /// 最终归档的字节上限。**必须**与 `MAX_LOCAL_LIBRARY_ARCHIVE_OUTPUT_BYTES` 一致。
 ///
@@ -61,7 +68,16 @@ pub enum ExportError {
     /// 的理由。
     StaleSession,
     /// 累计字节超过声明总长。
+    ///
+    /// **终态失败**：本次导出的会话与 temp 一并丢弃。留着它们只会让一个已经失败的导出继续占磁盘，
+    /// 而症状（磁盘莫名被吃掉）与根因（这条错误路径忘了清理）完全无关。
     Overflow,
+    /// 发布时目标路径已被占用。
+    ///
+    /// 刻意与 [`ExportError::Failure`] 分开：处理动作不同——重试一次即可（换个时间戳，或用户手动
+    /// 清掉那个文件），而 `Failure` 意味着未知的 I/O 失败，重试没有意义。UI 把它显示成
+    /// "导出失败，请重试"会诱导用户反复重试一个更可能需要他先处理磁盘的失败。
+    TargetOccupied,
     Unavailable,
     Failure,
 }
@@ -75,6 +91,7 @@ impl ExportError {
             ExportError::NoSession => "export-no-session",
             ExportError::StaleSession => "export-stale",
             ExportError::Overflow => "export-overflow",
+            ExportError::TargetOccupied => "export-target-occupied",
             ExportError::Unavailable => "export-unavailable",
             ExportError::Failure => "export-failure",
         }
@@ -102,6 +119,10 @@ impl std::fmt::Display for ExportError {
             ExportError::NoSession => write!(formatter, "没有进行中的导出"),
             ExportError::StaleSession => write!(formatter, "导出已被新一轮取代"),
             ExportError::Overflow => write!(formatter, "导出字节超过声明总长"),
+            ExportError::TargetOccupied => write!(
+                formatter,
+                "导出目标已被占用（可能与另一轮导出撞名），请重试"
+            ),
             ExportError::Unavailable => write!(formatter, "导出目录不可用"),
             ExportError::Failure => write!(formatter, "导出失败"),
         }
@@ -152,8 +173,8 @@ struct ExportSession {
     id: u64,
     declared_total: u64,
     target: PathBuf,
-    temporary: PathBuf,
-    file: File,
+    /// 未完成的 temp。`Drop` 负责删除它，因此本模块不在任何错误分支上手写清理。
+    temporary: NamedTempFile,
     written: u64,
 }
 
@@ -224,11 +245,14 @@ impl ArchiveExport {
 
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let target = self.reserve_target_path();
-        let temporary = self
-            .paths
-            .root()
-            .join(format!("{TEMPORARY_PREFIX}{id}{TEMPORARY_SUFFIX}"));
-        let file = File::create(&temporary).map_err(|_| ExportError::Unavailable)?;
+        // 名字里带 export id 是为了排障时能看出"这份 temp 属于哪一轮"；随机后缀由 tempfile 生成，
+        // 它保证同一目录里两次 begin 不会撞名。前缀与后缀保持不变，`reclaim_stale_temporaries`
+        // 与启动清理因此不需要知道名字里还有什么。
+        let temporary = tempfile::Builder::new()
+            .prefix(&format!("{TEMPORARY_PREFIX}{id}"))
+            .suffix(TEMPORARY_SUFFIX)
+            .tempfile_in(self.paths.root())
+            .map_err(|_| ExportError::Unavailable)?;
         let absolute_path = display_path(&target);
 
         *guard = Some(ExportSession {
@@ -236,7 +260,6 @@ impl ArchiveExport {
             declared_total,
             target,
             temporary,
-            file,
             written: 0,
         });
         Ok(BeginExportOutcome {
@@ -250,22 +273,27 @@ impl ArchiveExport {
     /// `export_id` 不匹配即失败，且**不**动当前会话：一次迟到的旧块绝不能写进新一轮的文件。
     pub fn append(&self, export_id: u64, bytes: &[u8]) -> Result<AppendExportOutcome, ExportError> {
         let mut guard = self.session.lock().map_err(|_| ExportError::Failure)?;
-        let session = guard.as_mut().ok_or(ExportError::NoSession)?;
+        let session = guard.as_ref().ok_or(ExportError::NoSession)?;
         if session.id != export_id {
             return Err(ExportError::StaleSession);
         }
-        let next_written = session
-            .written
-            .checked_add(bytes.len() as u64)
-            .ok_or(ExportError::Overflow)?;
-        if next_written > session.declared_total {
-            // 超出的部分不落盘：写下去再失败会留下一个比声明更长的 temp，而"随后删掉它"这件事
-            // 在另一个错误路径上就很容易被忘掉。
+        // 溢出是**终态失败**：会话与 temp 一并丢弃。超出的字节不落盘——写下去再失败会留下一个
+        // 比声明更长的 temp，而"随后删掉它"在别的错误路径上就很容易被忘掉。留着会话同样有害：
+        // 下一块会继续往一个已被判定失败的 temp 上写，最终以一句无法归类的 Failure 收场。
+        let overflow = match session.written.checked_add(bytes.len() as u64) {
+            Some(total) => total > session.declared_total,
+            None => true,
+        };
+        if overflow {
+            discard_session(&mut guard);
             return Err(ExportError::Overflow);
         }
+        let next_written = session.written + bytes.len() as u64;
 
+        let session = guard.as_mut().ok_or(ExportError::NoSession)?;
         session
-            .file
+            .temporary
+            .as_file_mut()
             .write_all(bytes)
             .map_err(|_| ExportError::Failure)?;
         session.written = next_written;
@@ -289,49 +317,57 @@ impl ArchiveExport {
         })
     }
 
-    /// sync → 关闭句柄 → 原子 rename。
+    /// sync → no-clobber 发布。
     ///
-    /// 句柄**必须**在 rename 之前关闭：`rename(2)` 只在同一文件系统内原子，且 Windows 上"移动一个
-    /// 仍打开的文件"会被拒绝。`blob.rs` 的写入顺序靠 `tempfile` 以 FILE_SHARE_DELETE 打开绕开这一点，
-    /// 而这里的 temp 是普通 `File`，因此显式先 `drop`。
+    /// ## 为什么必须用 no-clobber 原语，而不是 `exists()` + `rename()`
     ///
-    /// `session` 按值传入：它在离开互斥锁时已经不可回滚——写入已经发生。
+    /// `std::fs::rename` 在目标存在时**替换**目标（Rust 标准库文档明写这一点），因此
+    /// "`exists()` 找一个不存在的名字，再 rename 过去"中间存在一个窗口：预检查之后、发布之前，
+    /// 另一个进程或用户创建了那个文件，于是这次 rename **覆盖**了它——毁掉用户唯一一份备份，而
+    /// 症状是"导出成功"。补第二次 `exists()` 不解决问题，因为窗口只是被挪了位置。
+    ///
+    /// `persist_noclobber` 是"目标存在即失败"的原语。它在 Windows 与现代 Linux 上一般原子；
+    /// 它可能把 temp 的原链接留下（那是 `.partial`，启动清理会处理），但它**绝不覆盖**。
+    ///
+    /// ## 句柄为什么不用显式 `drop`
+    ///
+    /// `tempfile` 以 `FILE_SHARE_DELETE` 打开 temp（`blob.rs` 的写入顺序依赖同一条性质），因此
+    /// Windows 上不必"先关句柄再 rename"。
+    ///
+    /// `session` 按值传入：它在离开互斥锁时已经不可回滚——写入已经发生。此后任何失败都由
+    /// `NamedTempFile` 的 `Drop` 删掉 temp。
     fn publish_session(
         &self,
         mut session: ExportSession,
         target: &Path,
     ) -> Result<String, ExportError> {
-        session.file.flush().map_err(|_| ExportError::Failure)?;
+        let file = session.temporary.as_file_mut();
+        file.flush().map_err(|_| ExportError::Failure)?;
         // 声明已保证上界，这里核对**实际**长度。一次静默截断会产出一个"能打开但少东西"的归档，
         // 而用户会以为迁移完成了。
-        session
-            .file
-            .seek(SeekFrom::End(0))
+        file.seek(SeekFrom::End(0))
             .map_err(|_| ExportError::Failure)?;
-        let actual = session
-            .file
-            .metadata()
-            .map_err(|_| ExportError::Failure)?
-            .len();
+        let actual = file.metadata().map_err(|_| ExportError::Failure)?.len();
         if actual != session.declared_total {
-            drop(session.file);
-            let _ = std::fs::remove_file(&session.temporary);
             return Err(ExportError::Failure);
         }
-        session.file.sync_all().map_err(|_| ExportError::Failure)?;
-        drop(session.file);
+        file.sync_all().map_err(|_| ExportError::Failure)?;
 
-        if let Err(_error) = std::fs::rename(&session.temporary, target) {
-            let _ = std::fs::remove_file(&session.temporary);
-            return Err(ExportError::Failure);
-        }
+        // 目标被占用时**失败**，而不是换一个名字继续发布：`begin` 回显的 `absolutePath` 因此始终
+        // 是真正的最终路径。悄悄换成 `-2` 会把它降级成"仅供参考"，契约复杂度随之上升。
+        session
+            .temporary
+            .persist_noclobber(target)
+            .map_err(|_| ExportError::TargetOccupied)?;
         sync_parent_dir(self.paths.root());
         Ok(display_path(target))
     }
 
     /// 挑一个不撞名的最终路径。
     ///
-    /// **绝不覆盖**：覆盖会毁掉用户唯一一份备份，而症状是"导出成功"。
+    /// 这只是**降低撞名概率**的启发式，绝不覆盖的保证来自 [`Self::publish_session`] 的 no-clobber
+    /// 发布。两者缺一不可：没有这段，文件名的可读性会退化；只保留这段而不做 `exists()` 循环，
+    /// 同一秒内连发两次导出会让第二次直接失败。
     fn reserve_target_path(&self) -> PathBuf {
         let stem = timestamped_stem();
         let first = self.paths.root().join(format!("{FILE_STEM}-{stem}.zip"));
@@ -368,14 +404,13 @@ fn timestamped_stem() -> String {
     )
 }
 
-/// 丢弃当前会话并删掉它的 temp。guard 已被锁住。
+/// 丢弃当前会话，temp 随之被 `Drop` 删掉。guard 已被锁住。
+///
+/// 不显式 `remove_file` 是刻意的：`NamedTempFile` 的 `Drop` 已经做了这件事，而重复一次除了多一
+/// 处可能写错的路径之外没有收益。删不掉也不算致命——它是 `.partial`，不会被当作有效导出，
+/// `reclaim_stale_temporaries` 会在下次启动时再试一次。
 fn discard_session(guard: &mut Option<ExportSession>) {
-    if let Some(session) = guard.take() {
-        drop(session.file);
-        // 删不掉不算致命：它是 .partial，不会被当作有效导出，而
-        // eclaim_stale_temporaries 会在下次启动时再试一次。
-        let _ = std::fs::remove_file(&session.temporary);
-    }
+    drop(guard.take());
 }
 
 fn display_path(path: &Path) -> String {
@@ -438,6 +473,14 @@ mod tests {
         found
     }
 
+    /// 未完成的 temp。名字里带 export id 与一段随机后缀，因此只按前后缀判定。
+    fn temporaries(root: &Path) -> Vec<String> {
+        names(root)
+            .into_iter()
+            .filter(|name| name.starts_with(TEMPORARY_PREFIX) && name.ends_with(TEMPORARY_SUFFIX))
+            .collect()
+    }
+
     #[test]
     fn 完整投递后原子发布且目录只剩最终文件() {
         let root = scratch("complete");
@@ -450,10 +493,8 @@ mod tests {
         assert!(!incomplete.complete);
         assert_eq!(incomplete.absolute_path, None);
         // 未收满时不得出现最终文件——症状必须是"还没导出完"而不是"拿到一个不完整的归档"。
-        assert_eq!(
-            names(&exports_dir(&root)),
-            vec![format!("{TEMPORARY_PREFIX}1{TEMPORARY_SUFFIX}")]
-        );
+        assert_eq!(temporaries(&exports_dir(&root)).len(), 1);
+        assert!(!Path::new(&begun.absolute_path).exists());
 
         let done = export.append(1, b"def").expect("append 2");
         assert!(done.complete);
@@ -463,7 +504,7 @@ mod tests {
             std::fs::read(&published).expect("read published"),
             b"abcdef"
         );
-        assert_eq!(names(&exports_dir(&root)).len(), 1);
+        assert!(names(&exports_dir(&root)).len() == 1);
         assert!(names(&exports_dir(&root))[0].ends_with(".zip"));
     }
 
@@ -528,15 +569,12 @@ mod tests {
         export.append(1, b"aa").expect("append 1");
         export.begin(8).expect("begin 2");
 
-        let temporaries: Vec<String> = names(&exports_dir(&root))
-            .into_iter()
-            .filter(|name| name.starts_with(TEMPORARY_PREFIX))
-            .collect();
+        let temporaries = temporaries(&exports_dir(&root));
         assert_eq!(temporaries.len(), 1, "旧 temp 必须被删掉：{temporaries:?}");
     }
 
     #[test]
-    fn 累计超过声明总长时失败且不发布() {
+    fn 累计超过声明总长时失败且不留下temp() {
         let root = scratch("overflow");
         let export = open(&root);
         let begun = export.begin(2).expect("begin");
@@ -545,12 +583,52 @@ mod tests {
             Err(ExportError::Overflow)
         );
 
-        // temp 已被这次失败丢弃：它不是一次导出，不能留在磁盘上冒充半个归档。
+        // 溢出是终态失败：temp 必须被删掉。它不是一次导出，不能留在磁盘上冒充半个归档。
+        // 只断言"没有 .zip"是不够的——那正是本条测试曾经的写法，因此溢出后的 .partial
+        // 一直没人检查，直到一次真实导出把磁盘占满才被发现。
         let remaining = names(&exports_dir(&root));
         assert!(
             !remaining.iter().any(|name| name.ends_with(".zip")),
             "溢出不得发布最终文件：{remaining:?}"
         );
+        assert_eq!(temporaries(&exports_dir(&root)), Vec::<String>::new());
+    }
+
+    #[test]
+    fn 溢出后会话被清空因此后续append报无会话() {
+        let root = scratch("overflow-terminal");
+        let export = open(&root);
+        let begun = export.begin(2).expect("begin");
+        assert_eq!(
+            export.append(begun.export_id, b"abc"),
+            Err(ExportError::Overflow)
+        );
+        // 会话留着的话，下一块会继续往一个已经被判定失败的 temp 上写，而最终归档的长度核对
+        // 会以一句无法归类的 Failure 收场。
+        assert_eq!(
+            export.append(begun.export_id, b"d"),
+            Err(ExportError::NoSession)
+        );
+    }
+
+    #[test]
+    fn 发布时目标被占用则失败且绝不覆盖() {
+        let root = scratch("occupied");
+        let export = open(&root);
+        let begun = export.begin(1).expect("begin");
+        // 这就是 `exists()` + `rename()` 的窗口：预检查通过之后、发布之前，另一个进程或用户
+        // 抢先把 begin 回显的那个路径占了。串行的"撞名递增"用例永远走不到这一步。
+        let squatted = PathBuf::from(&begun.absolute_path);
+        std::fs::write(&squatted, b"mine").expect("squatter writes");
+
+        assert_eq!(
+            export.append(begun.export_id, b"x"),
+            Err(ExportError::TargetOccupied)
+        );
+        // 绝不覆盖：对方那份必须一字不变。
+        assert_eq!(std::fs::read(&squatted).expect("read"), b"mine");
+        // 失败之后不留 temp。
+        assert_eq!(temporaries(&exports_dir(&root)), Vec::<String>::new());
     }
 
     #[test]
@@ -652,13 +730,16 @@ mod tests {
             (ExportError::NoSession, "export-no-session"),
             (ExportError::StaleSession, "export-stale"),
             (ExportError::Overflow, "export-overflow"),
+            (ExportError::TargetOccupied, "export-target-occupied"),
             (ExportError::Unavailable, "export-unavailable"),
             (ExportError::Failure, "export-failure"),
         ];
         for (error, expected_code) in cases {
             let json = serde_json::to_value(&error).expect("serialize");
             assert_eq!(json["code"], expected_code);
-            assert!(json["message"].as_str().is_some_and(|text| !text.is_empty()));
+            assert!(json["message"]
+                .as_str()
+                .is_some_and(|text| !text.is_empty()));
             assert_eq!(json.as_object().expect("object").len(), 2);
         }
     }

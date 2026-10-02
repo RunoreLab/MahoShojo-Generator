@@ -240,6 +240,22 @@ describe('exportLocalLibraryArchive', () => {
     expect((error as LocalArchiveExportError).code).toBe('export-stale');
   });
 
+  it('目标被占用时保留 export-target-occupied，因为它是唯一可重试的原因', async () => {
+    const source = createArchiveExportSource(cardRepository([makeCard('lc_1')]), packageRepository([]));
+    const rawInvoke: RawInvokeFn = async () => {
+      throw { code: 'export-target-occupied', message: '目标已被占用，请重试' };
+    };
+    const error = await exportLocalLibraryArchive(
+      async () => ({ exportId: 1, absolutePath: '/x.zip' }),
+      rawInvoke,
+      source,
+      { exportedAt: EXPORTED_AT },
+    ).catch((caught: unknown) => caught);
+    // 压成 export-failure 会让 UI 把"重试一下就好"显示成"导出失败"——两者的用户动作不同。
+    expect(error).toBeInstanceOf(LocalArchiveExportError);
+    expect((error as LocalArchiveExportError).code).toBe('export-target-occupied');
+  });
+
   it('无法识别的 native 失败归一成 export-failure 而不是丢掉', async () => {
     const source = createArchiveExportSource(cardRepository([makeCard('lc_1')]), packageRepository([]));
     const rawInvoke: RawInvokeFn = async () => {
