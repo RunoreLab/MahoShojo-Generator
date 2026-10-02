@@ -15,12 +15,4 @@ export default defineConfig({
      */
     testTimeout: 30_000,
   },
-  esbuild: {
-    jsx: 'automatic',
-    tsconfigRaw: {
-      compilerOptions: {
-        jsx: 'react-jsx',
-      },
-    },
-  },
 });

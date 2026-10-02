@@ -8,12 +8,4 @@ export default defineConfig({
     restoreMocks: true,
     clearMocks: true,
   },
-  esbuild: {
-    jsx: 'automatic',
-    tsconfigRaw: {
-      compilerOptions: {
-        jsx: 'react-jsx',
-      },
-    },
-  },
 });

@@ -141,8 +141,12 @@ it('空本地库给出填充入口与边界说明，而不是一句共用的「�
   expect(document.body.textContent).toContain('存到本地库');
   expect(document.body.textContent).toContain('同时保存到本地库');
   expect(document.body.textContent).toContain('清除本站数据会一并删除');
-  // 没有整库备份这件事必须在这里说，否则用户会以为清站点数据是安全的。
-  expect(document.body.textContent).toContain('还没有整库导出/备份');
+  // 空状态必须指向整库导出的实际入口——清站点数据会删掉本地库，用户需要一个可操作的退路。
+  //
+  // 这里曾经断言「还没有整库导出/备份」。D2.3d 交付了 `/local-library` 的整库导出与导入后，那句话
+  // 本身就是错的：一个仍在说「没有导出」的界面会把用户引向逐张手工导出，而不是那个一键入口。
+  // 保留这条断言的价值不变：它守的是"空状态必须给出退路"，只是退路现在真实存在了。
+  expect(document.body.textContent).toContain('整库导出');
   expect(document.body.querySelector('a[href="/encyclopedia/local-library"]')).not.toBeNull();
 });
 

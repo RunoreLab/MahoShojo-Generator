@@ -94,6 +94,15 @@ const RuntimeInfoPanel = () => {
 };
 
 /**
+ * 导航能力快照。
+ *
+ * 它由 `DELIVERED_ROUTES` 推导，而后者是模块级常量，因此快照也是。在模块作用域算一次而不是在组件
+ * 体内：每次渲染重建出一个新对象会让 `ProductNav` 的 `capabilities` prop 每次都变，虽然它目前不参与
+ * 任何 memo，但一个「本该是常量」的表达式写在渲染路径上正是将来被误加进依赖数组的起点。
+ */
+const CAPABILITIES = buildCapabilitySnapshot();
+
+/**
  * 壳。
  *
  * 这是 Desktop 唯一的装配点，职责只有三件：给共源导航喂能力快照、把导航点击交给 router、把页面内容
@@ -103,15 +112,13 @@ const RuntimeInfoPanel = () => {
  */
 const DesktopShell = () => {
   const router = useRouter();
-  // 快照由已交付路由推导，因此是常量；放在组件外算一次即可，不必每次渲染重建对象。
-  const capabilities = buildCapabilitySnapshot();
 
   return (
     <AppShell
       navigation={
         <ProductNav
           pathname={router.state.location.pathname}
-          capabilities={capabilities}
+          capabilities={CAPABILITIES}
           onNavigate={(href, event) => {
             // 共享导航渲染真实 `<a href>`，因此这里必须阻止默认行为，否则会触发一次整页加载。
             // Web 侧同理接 `router.push`——「宿主负责路由」这件事在两端是同一种形状。
@@ -217,11 +224,3 @@ const settingsRoute = createRoute({
 
 export const routeTree = rootRoute.addChildren([indexRoute, localLibraryRoute, settingsRoute]);
 
-/**
- * 本运行时已交付的产品路径。
- *
- * 它是导航能力快照的**唯一**来源：`@mahoshojo/ui-web/navigation` 里的入口中，只有列在这里的路径会
- * 在 Desktop 呈现为可点击。缺项不会自动渲染成可点链接——`ProductNav` 对未声明项按 `unknown` 处理，
- * 因此往这份清单里加一行是「交付了一个页面」这个决定的显式记录。
- */
-export const DELIVERED_ROUTES: readonly string[] = ['/', '/local-library', '/settings'];

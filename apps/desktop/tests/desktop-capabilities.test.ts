@@ -4,7 +4,7 @@ import { readCapability } from '@mahoshojo/ui-web/capability';
 import { NAV_GROUPS } from '@mahoshojo/ui-web/navigation';
 
 import { buildCapabilitySnapshot } from '../src/app/capabilities';
-import { DELIVERED_ROUTES } from '../src/app/routes';
+import { DELIVERED_ROUTES } from '../src/app/delivered-routes';
 
 /**
  * 能力快照是「哪些入口在 Desktop 可点」的唯一判据。
@@ -66,13 +66,32 @@ describe('desktop capability snapshot', () => {
     }
   });
 
-  it('does not advertise any route the router does not actually serve', () => {
+  it('does not advertise any route the router does not actually serve', async () => {
     // 反向检查：快照说可点的每一条，都必须真的在 DELIVERED_ROUTES 里，且该清单里的每一条都要有
     // 真实页面。两者任一方向不一致，都说明「可点击」与「真的能打开」已经脱钩。
-    const advertised = Object.entries(snapshot)
-      .filter(([, availability]) => availability.kind === 'available')
-      .map(([href]) => href);
+    //
+    // 这条断言的存在理由是 `DELIVERED_ROUTES` 与 `routeTree` 分处两个模块：分开是为了断掉
+    // `routes → capabilities → routes` 的循环依赖，但分开之后就没有任何机制保证两者同步了。
+    // 因此这里从**真实路由树**反推服务中的路径，而不是复述清单。
+    const { routeTree } = await import('../src/app/routes');
+    // 路径在 `options.path` 上，不在路由对象自身：`createRoute` 把声明参数收进 `options`，而路由实例
+    // 上暴露的是 `init/addChildren/Link` 这类方法与 `isRoot`。
+    const children = (
+      routeTree as unknown as { children?: ReadonlyArray<{ options?: { path?: string } }> }
+    ).children ?? [];
 
-    expect([...advertised].sort()).toEqual([...DELIVERED_ROUTES].sort());
+    const servedPaths = new Set(
+      children
+        .map((child) => child.options?.path)
+        .filter((path): path is string => typeof path === 'string'),
+    );
+
+    // 路由树里真实存在的路径。这条断言先把实际形状钉住：若 `routeTree.children` 的结构变了，下面
+    // 那条「必须与 DELIVERED_ROUTES 一致」会因为集合为空而**通过**，成为一个恒真的空检查。
+    expect([...servedPaths].sort()).toEqual(['/', '/local-library', '/settings']);
+
+    // DELIVERED_ROUTES 必须与真实路由树一致——不多不少。少一条意味着用户点不到一个已交付的页面；
+    // 多一条意味着用户拿到一个点了打不开的链接。
+    expect([...DELIVERED_ROUTES].sort()).toEqual([...servedPaths].sort());
   });
 });

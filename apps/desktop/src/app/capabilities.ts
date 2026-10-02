@@ -6,7 +6,7 @@ import {
 } from '@mahoshojo/ui-web/capability';
 import { NAV_GROUPS } from '@mahoshojo/ui-web/navigation';
 
-import { DELIVERED_ROUTES } from './routes';
+import { DELIVERED_ROUTES } from './delivered-routes';
 
 /**
  * Desktop 的导航能力快照。
