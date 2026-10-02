@@ -35,6 +35,24 @@ const ARCHIVE_METADATA_DIRECTORY = '__MACOSX/';
  */
 export const MAX_ARCHIVE_EXPANDED_BYTES = 256 * 1024 * 1024;
 
+/**
+ * Entry-count bound, same category as {@link MAX_ARCHIVE_EXPANDED_BYTES} and for
+ * the same reason: it limits decompression *work*, not product package size.
+ *
+ * It closes a vector the byte budget structurally cannot see. A 64 MiB archive of
+ * empty entries costs ~60 bytes each in headers, so it carries a declared
+ * expansion total of **zero** while still making `unzipSync` allocate ~1M result
+ * objects, and then making normalization build ~1M path strings. OWASP ASVS V5.2.3
+ * asks for a maximum file count in addition to a maximum decompressed size
+ * precisely because one does not imply the other.
+ *
+ * 4096 is far above any hand-authored package (tens to hundreds of files) and
+ * far below anything that stresses the process. It counts every entry fflate
+ * offers, including directory placeholders and archive-tool metadata, because
+ * the work is incurred before any of that is discarded.
+ */
+export const MAX_ARCHIVE_ENTRIES = 4096;
+
 export const isArchiveMetadataPath = (path: string): boolean => (
   path.startsWith(ARCHIVE_METADATA_DIRECTORY)
   || ARCHIVE_METADATA_NAMES.has(path.slice(path.lastIndexOf('/') + 1))
@@ -137,23 +155,69 @@ export const normalizeWebPackageArchive = (input: NormalizeArchiveInput): Archiv
 /**
  * Expand an archive under a decompression budget.
  *
+ * Three separate guards, because `unzipSync` trusts the central directory in
+ * three separate ways:
+ *
+ * 1. **Declared expansion total.** fflate pre-allocates
+ *    `new Uint8Array(originalSize)` before inflating, so the total is summed to
+ *    bound that allocation.
+ * 2. **Entry count.** `originalSize` is attacker-controlled and can be declared
+ *    as 0 for every entry, which makes guard 1 read 0 while the archive still
+ *    carries a million entries. See {@link MAX_ARCHIVE_ENTRIES}.
+ * 3. **Delivered length matches declared length.** `unzipSync` does not read
+ *    sizes from one place, and the two behaviours diverge in *opposite*
+ *    directions. Measured with a 100-byte entry re-declared as 92:
+ *
+ *    - stored (level 0): `filter.originalSize` reports 92 (central directory)
+ *      while the delivered payload is **100** bytes -- the local header wins, so
+ *      fflate can allocate and emit more than guard 1 accounted for. This is the
+ *      memory-safety direction, and guard 3 is what catches it.
+ *    - deflated (level 6): the delivered payload is **92** bytes and no error is
+ *      raised, so the archive silently yields a truncated file. Guard 3 cannot
+ *      see this one (declared == delivered by construction); it surfaces later as
+ *      a manifest file-digest mismatch, whose diagnostic points at package
+ *      content rather than at a malformed archive.
+ *
+ *    Either way the archive's two size declarations disagree, which is worth
+ *    rejecting explicitly: guard 3 turns "proceed and find out later" into a
+ *    named failure at the point where the inconsistency actually lives.
+ *
  * fflate treats a rejected filter as "skip this entry" and returns a partial
- * archive rather than failing, so the overflow flag is checked after the call
- * instead of relying on an exception.
+ * archive rather than failing, so every guard is decided after the call instead
+ * of relying on an exception.
  */
 export const expandWebPackageArchive = (
   archive: Uint8Array,
-  onExpandedOverflow: (_limit: number) => Error,
+  onLimitExceeded: {
+    expandedOverflow: (_limit: number) => Error;
+    entryCountOverflow: (_limit: number) => Error;
+    entryLengthMismatch: (_path: string, _declared: number, _delivered: number) => Error;
+  },
 ): Record<string, Uint8Array> => {
   let expanded = 0;
-  let overflowed = false;
+  let seen = 0;
+  let expandedOverflowed = false;
+  let entryCountOverflowed = false;
+  const declared = new Map<string, number>();
   const entries = unzipSync(archive, {
-    filter: ({ originalSize }) => {
+    filter: ({ name, originalSize }) => {
+      seen += 1;
+      if (seen > MAX_ARCHIVE_ENTRIES) { entryCountOverflowed = true; return false; }
+      declared.set(name, originalSize ?? 0);
       expanded += originalSize ?? 0;
-      if (expanded > MAX_ARCHIVE_EXPANDED_BYTES) { overflowed = true; return false; }
+      if (expanded > MAX_ARCHIVE_EXPANDED_BYTES) { expandedOverflowed = true; return false; }
       return true;
     },
   });
-  if (overflowed) throw onExpandedOverflow(MAX_ARCHIVE_EXPANDED_BYTES);
+  // Entry count is reported first: once the count is over the limit the byte
+  // total is untrustworthy, so the diagnostic has to name the real cause.
+  if (entryCountOverflowed) throw onLimitExceeded.entryCountOverflow(MAX_ARCHIVE_ENTRIES);
+  if (expandedOverflowed) throw onLimitExceeded.expandedOverflow(MAX_ARCHIVE_EXPANDED_BYTES);
+  for (const [path, bytes] of Object.entries(entries)) {
+    const expected = declared.get(path);
+    if (expected !== undefined && bytes.byteLength !== expected) {
+      throw onLimitExceeded.entryLengthMismatch(path, expected, bytes.byteLength);
+    }
+  }
   return entries;
 };

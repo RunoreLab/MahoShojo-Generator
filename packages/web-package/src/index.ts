@@ -36,7 +36,7 @@ export { packWebPackageZip, unpackWebPackageZip } from './zip';
 export { importWebPackageArchive, WebPackageImportError } from './import';
 export { buildGenerationReadinessHints } from './generation-readiness';
 export type { WebPackageImportErrorCode, WebPackageImportResult } from './import';
-export { MAX_ARCHIVE_EXPANDED_BYTES } from './archive';
+export { MAX_ARCHIVE_ENTRIES, MAX_ARCHIVE_EXPANDED_BYTES } from './archive';
 export { resolveWebPackageMediaType, WEB_PACKAGE_MEDIA_TYPES, WEB_PACKAGE_OPAQUE_MEDIA_TYPE } from './media-types';
 export { assertJsonSchema202012 } from './json-schema';
 export { normalizeJsonTargetContent } from './target-normalize';

@@ -19,6 +19,8 @@ export type WebPackageImportErrorCode =
   | 'not-a-zip'
   | 'empty-archive'
   | 'archive-too-large'
+  | 'archive-too-many-entries'
+  | 'archive-entry-truncated'
   | 'manifest-ambiguous'
   | 'manifest-nested'
   | 'manifest-invalid-json'
@@ -375,11 +377,23 @@ const buildManifest = async (
 
 const expandOrFail = (archive: Uint8Array): Record<string, Uint8Array> => {
   try {
-    return expandWebPackageArchive(archive, (limit) => new WebPackageImportError(
-      'archive-too-large',
-      `Web 包解压后超过 ${Math.round(limit / 1024 / 1024)} MiB，已停止导入。`,
-      '这是防止畸形归档耗尽内存的保护上限，不是 Web 包的产品大小限制；请精简包内容后重试。',
-    ));
+    return expandWebPackageArchive(archive, {
+      expandedOverflow: (limit) => new WebPackageImportError(
+        'archive-too-large',
+        `Web 包解压后超过 ${Math.round(limit / 1024 / 1024)} MiB，已停止导入。`,
+        '这是防止畸形归档耗尽内存的保护上限，不是 Web 包的产品大小限制；请精简包内容后重试。',
+      ),
+      entryCountOverflow: (limit) => new WebPackageImportError(
+        'archive-too-many-entries',
+        `Web 包归档包含超过 ${limit} 个条目，已停止导入。`,
+        '这是防止畸形归档耗尽内存的保护上限，不是 Web 包的产品大小限制；请减少包内文件数量后重试。',
+      ),
+      entryLengthMismatch: (path, declaredLength, deliveredLength) => new WebPackageImportError(
+        'archive-entry-truncated',
+        `Web 包归档条目 ${path} 的实际长度（${deliveredLength}）与归档声明的 ${declaredLength} 不符，已停止导入。`,
+        '这通常意味着归档已损坏或被截断，请重新获取或重新打包该 Web 包。',
+      ),
+    });
   } catch (error) {
     if (error instanceof WebPackageImportError) throw error;
     fail('not-a-zip', 'Web 包 ZIP 无法解析。', IMPORT_HINTS.repack);

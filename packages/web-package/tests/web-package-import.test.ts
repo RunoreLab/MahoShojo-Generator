@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { zipSync } from 'fflate';
 import { ZIP_DOS_EPOCH } from '@mahoshojo/contracts/zip';
-import { MAX_ARCHIVE_EXPANDED_BYTES } from '../src/archive';
+import { MAX_ARCHIVE_ENTRIES, MAX_ARCHIVE_EXPANDED_BYTES } from '../src/archive';
 import { importWebPackageArchive, WebPackageImportError, type WebPackageImportErrorCode } from '../src/import';
 import { packWebPackageZip, resolveWebPackage, unpackWebPackageZip } from '../src';
 import { BUILTIN_ARENA_NEWS_PACKAGE_REF } from '../src/registry';
@@ -12,6 +12,57 @@ const encoder = new TextEncoder();
 // 变成了"打包器坏了"，症状与根因完全无关。
 const pack = (entries: Record<string, Uint8Array>): Uint8Array =>
   zipSync(entries, { level: 6, mtime: ZIP_DOS_EPOCH });
+/** 不压缩：fflate 的尺寸处理在 store 与 deflate 下方向相反，两条用例需要分别指明。 */
+const packStored = (entries: Record<string, Uint8Array>): Uint8Array =>
+  zipSync(entries, { level: 0, mtime: ZIP_DOS_EPOCH });
+
+/**
+ * 把某个条目的**声明**解压尺寸改成别的值，模拟伪造的 central directory。
+ *
+ * 必须同时改 local header 与 central directory：fflate 按 central directory 的尺寸分配并切分输出，
+ * 只改一处会得到"两个尺寸互相矛盾"的另一种畸形归档，于是测试证明的是别的东西。
+ * compressed size 保持不变——这里伪造的正是展开尺寸这一个字段。
+ */
+const forgeUncompressedSize = (
+  archive: Uint8Array,
+  entryName: string,
+  declared: number,
+  scope: 'central' | 'both' = 'both',
+): Uint8Array => {
+  const patched = new Uint8Array(archive);
+  const put16 = (offset: number, value: number): void => {
+    patched[offset] = value & 0xff;
+    patched[offset + 1] = (value >> 8) & 0xff;
+  };
+  // local header 与 central directory 的字段偏移**不同**：文件名长度分别在 26 / 28，文件名分别在
+  // 30 / 46，展开尺寸分别在 22 / 24。用同一组偏移读两者会静默读错 central directory 的名字，于是
+  // 断言变成"只伪造了一半"——而 fflate 从 local header 决定输出长度，于是这条用例会安静地通过。
+  // ZIP 是小端签名：local header 的四个字节是 50 4B **03 04**，central directory 是 50 4B **01 02**。
+  // 把 0x0403 / 0x0102 当成 kind 会把两者对调，于是只改到 central directory，而 fflate 从 local
+  // header 决定输出长度——用例安静地通过，证明的是一个不存在的问题。
+  const LOCAL = 0x0304;
+  const CENTRAL = 0x0102;
+  let patchedLocal = 0;
+  let patchedCentral = 0;
+  for (let offset = 0; offset + 4 <= patched.length; offset += 1) {
+    if (patched[offset] !== 0x50 || patched[offset + 1] !== 0x4b) continue;
+    const kind = (patched[offset + 2]! << 8) | patched[offset + 3]!;
+    if (kind !== LOCAL && kind !== CENTRAL) continue;
+    if (kind === LOCAL && scope === 'central') continue;
+    const nameLengthOffset = kind === LOCAL ? 26 : 28;
+    const nameOffset = kind === LOCAL ? 30 : 46;
+    const sizeOffset = kind === LOCAL ? 22 : 24;
+    const nameLength = patched[offset + nameLengthOffset]! + (patched[offset + nameLengthOffset + 1]! << 8);
+    const name = new TextDecoder().decode(patched.subarray(offset + nameOffset, offset + nameOffset + nameLength));
+    if (name !== entryName) continue;
+    put16(offset + sizeOffset, declared);
+    if (kind === LOCAL) patchedLocal += 1; else patchedCentral += 1;
+  }
+  if (patchedCentral !== 1 || (scope === 'both' && patchedLocal !== 1)) {
+    throw new Error(`夹具里 ${entryName} 的头部数量异常：local ${patchedLocal}、central ${patchedCentral}`);
+  }
+  return patched;
+};
 
 const HTML = encoder.encode('<!doctype html><html lang="zh"><head><title>站点</title></head><body><h1>你好</h1></body></html>');
 const CSS = encoder.encode('body{color:red}');
@@ -108,6 +159,49 @@ describe('ZIP envelope normalization', () => {
     const bomb = new Uint8Array(MAX_ARCHIVE_EXPANDED_BYTES + 1024);
     const error = await expectCode(pack({ 'index.html': bomb, 'web-package.json': encoder.encode(JSON.stringify(manifestOf())) }), 'archive-too-large');
     expect(error.hint).toContain('不是 Web 包的产品大小限制');
+  });
+
+  it('bounds entry count, which the byte budget cannot see', async () => {
+    // 这个用例证明的是**字节预算失效**而不是它生效：一个 32 MiB 的归档，每个条目声明展开 0 字节，
+    // 因此展开总额读作 0——MAX_ARCHIVE_EXPANDED_BYTES 完全不会触发。但它携带 20 万个条目，
+    // 会让 unzipSync 分配 20 万个结果对象、再让归一化构造 20 万个路径字符串。
+    const many: Record<string, Uint8Array> = {};
+    for (let index = 0; index < MAX_ARCHIVE_ENTRIES + 100; index += 1) many[`f${index}`] = new Uint8Array();
+    const entries = { ...many, 'web-package.json': encoder.encode(JSON.stringify(manifestOf())) };
+    expect(entries).toHaveProperty('web-package.json');
+    const error = await expectCode(pack(entries), 'archive-too-many-entries');
+    expect(error.hint).toContain('不是 Web 包的产品大小限制');
+    // 上限必须真的紧：只比常见包大一个量级，否则它挡不住任何东西。
+    expect(MAX_ARCHIVE_ENTRIES).toBeLessThanOrEqual(4096);
+  });
+
+  it('rejects an archive whose declared entry size disagrees with what it delivers', async () => {
+    // 断言的是**交付长度 != 声明长度**，而"截断"只是它的一个可能形态。实测两种压缩方式的偏差方向
+    // 相反（见 archive.ts 的注释），所以这里必须用 store：只有 store 会交付**多于**声明的字节，而这
+    // 正是内存安全的方向——guard 1 的预算按 central directory 记账，fflate 却按 local header 分配。
+    // 少了这道断言，一个超出预算的实际分配会被静默接受。
+    //
+    // deflate 的形态（交付 == 声明、文件被静默截断）在这里**测不到**，因为声明与交付在构造上相等；
+    // 它最终由 manifest 的文件摘要校验挡住，代价是错误指向包内容而不是畸形归档。这一点写在这里，
+    // 是为了避免后来者以为这道断言覆盖了截断。
+    const archive = packStored({
+      'index.html': HTML,
+      'web-package.json': encoder.encode(JSON.stringify(manifestOf())),
+    });
+    const patched = forgeUncompressedSize(archive, 'index.html', HTML.byteLength - 8, 'central');
+    const error = await expectCode(patched, 'archive-entry-truncated');
+    expect(error.message).toContain('index.html');
+  });
+
+  it('accepts a stored archive whose size declarations agree', async () => {
+    // 上一条的前提是"store + 只伪造 central directory"。如果一个完全诚实的 store 归档也被这道
+    // 断言拒绝，那么被拒的不是畸形归档而是正常的包——所以这里必须钉住正向用例。
+    const archive = packStored({
+      'index.html': HTML,
+      'web-package.json': encoder.encode(JSON.stringify(manifestOf())),
+    });
+    const { pkg } = await importWebPackageArchive(archive);
+    expect(pkg.manifest.id).toBe(manifestOf().id);
   });
 });
 
