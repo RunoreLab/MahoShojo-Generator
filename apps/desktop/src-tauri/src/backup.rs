@@ -4,6 +4,7 @@
 //! verified. The final manifest is the completion marker; its contents are checked
 //! against the database and files whenever a backup is listed or used for restore.
 
+use std::collections::HashSet;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -20,7 +21,7 @@ use crate::store::{lock_connection, SCHEMA_VERSION};
 const BACKUPS_DIRECTORY: &str = "backups";
 const DATABASE_FILE: &str = "library.sqlite";
 const MANIFEST_FILE: &str = "manifest.json";
-const MANIFEST_VERSION: u32 = 1;
+const MANIFEST_VERSION: u32 = 2;
 const BACKUP_ID_LIMIT: usize = 128;
 const MAX_MANIFEST_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_BLOB_ENTRIES: usize = 200_000;
@@ -98,6 +99,8 @@ impl Serialize for BackupError {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct BackupManifest {
     format_version: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    schema_version: Option<i64>,
     backup_id: String,
     created_at: String,
     database: ManifestFile,
@@ -248,6 +251,16 @@ pub fn verify_backup_components(
     manifest_path: &Path,
     backup_id: &str,
 ) -> Result<BackupSummary, BackupError> {
+    verify_components(database_path, blobs_root, manifest_path, backup_id)
+        .map(|(summary, _)| summary)
+}
+
+fn verify_components(
+    database_path: &Path,
+    blobs_root: &Path,
+    manifest_path: &Path,
+    backup_id: &str,
+) -> Result<(BackupSummary, Vec<String>), BackupError> {
     if !valid_backup_id(backup_id) {
         return Err(BackupError::InvalidBackupId);
     }
@@ -265,7 +278,7 @@ pub fn verify_backup_components(
     let manifest_bytes = fs::read(manifest_path).map_err(|_| BackupError::Incomplete)?;
     let manifest: BackupManifest =
         serde_json::from_slice(&manifest_bytes).map_err(|_| BackupError::Corrupt)?;
-    if manifest.format_version != MANIFEST_VERSION {
+    if !matches!(manifest.format_version, 1 | MANIFEST_VERSION) {
         return Err(BackupError::UnsupportedVersion);
     }
     if manifest.backup_id != backup_id || !valid_backup_id(&manifest.backup_id) {
@@ -286,12 +299,24 @@ pub fn verify_backup_components(
     }
 
     let database = open_immutable_database(database_path)?;
-    verify_sqlite(&database)?;
-    verify_no_package_without_reference(&database)?;
-    let db_blobs = read_blob_rows(&database)?;
+    let schema_version = verify_sqlite(&database)?;
+    match (manifest.format_version, manifest.schema_version) {
+        (1, None) => {} // Original V1 backups predate an explicit schema version.
+        (_, Some(version)) if version == schema_version => {}
+        _ => return Err(BackupError::Corrupt),
+    }
+    if schema_version >= 4 {
+        verify_no_package_without_reference(&database)?;
+    }
+    let db_blobs = if schema_version >= 3 {
+        read_blob_rows(&database)?
+    } else {
+        Vec::new()
+    };
     if db_blobs.len() > MAX_BLOB_ENTRIES || db_blobs.len() != manifest.blobs.len() {
         return Err(BackupError::Corrupt);
     }
+    verify_blob_directory(blobs_root, &db_blobs)?;
     let mut blob_bytes = 0_u64;
     for (expected, recorded) in db_blobs.iter().zip(&manifest.blobs) {
         if expected.digest != recorded.digest || expected.byte_length != recorded.byte_length {
@@ -309,20 +334,31 @@ pub fn verify_backup_components(
         blob_bytes = blob_bytes.checked_add(length).ok_or(BackupError::Corrupt)?;
     }
 
-    Ok(BackupSummary {
-        backup_id: manifest.backup_id,
-        created_at: manifest.created_at,
-        absolute_path: display_path(database_path.parent().ok_or(BackupError::Corrupt)?),
-        directory: display_path(
-            database_path
-                .parent()
-                .and_then(Path::parent)
-                .ok_or(BackupError::Corrupt)?,
-        ),
-        database_bytes,
-        blob_count: manifest.blobs.len() as u64,
-        blob_bytes,
-    })
+    let blob_names = db_blobs
+        .iter()
+        .map(|blob| {
+            parse_digest(&blob.digest)
+                .map(str::to_owned)
+                .map_err(|_| BackupError::Corrupt)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok((
+        BackupSummary {
+            backup_id: manifest.backup_id,
+            created_at: manifest.created_at,
+            absolute_path: display_path(database_path.parent().ok_or(BackupError::Corrupt)?),
+            directory: display_path(
+                database_path
+                    .parent()
+                    .and_then(Path::parent)
+                    .ok_or(BackupError::Corrupt)?,
+            ),
+            database_bytes,
+            blob_count: manifest.blobs.len() as u64,
+            blob_bytes,
+        },
+        blob_names,
+    ))
 }
 
 fn build_backup(
@@ -392,6 +428,7 @@ fn build_backup(
     // final completion marker. verify_backup also compares the metadata table to manifest.
     let manifest = BackupManifest {
         format_version: MANIFEST_VERSION,
+        schema_version: Some(SCHEMA_VERSION),
         backup_id: backup_id.clone(),
         created_at: created_at.clone(),
         database: ManifestFile {
@@ -446,17 +483,63 @@ fn read_blob_rows(connection: &Connection) -> Result<Vec<BlobRow>, BackupError> 
     for row in rows {
         let row = row.map_err(|_| BackupError::Corrupt)?;
         parse_digest(&row.digest).map_err(|_| BackupError::Corrupt)?;
+        if blobs.len() >= MAX_BLOB_ENTRIES {
+            return Err(BackupError::Corrupt);
+        }
         blobs.push(row);
     }
     Ok(blobs)
 }
 
-fn verify_sqlite(connection: &Connection) -> Result<(), BackupError> {
+// Enumerate at most the declared bounded set plus one unexpected entry. A backup
+// is a closed payload: even a valid digest-named orphan must never enter restore.
+fn verify_blob_directory(root: &Path, blobs: &[BlobRow]) -> Result<(), BackupError> {
+    let mut expected: HashSet<&str> = blobs
+        .iter()
+        .map(|blob| parse_digest(&blob.digest).map_err(|_| BackupError::Corrupt))
+        .collect::<Result<_, _>>()?;
+    for (index, entry) in fs::read_dir(root)
+        .map_err(|_| BackupError::Corrupt)?
+        .enumerate()
+    {
+        if index >= blobs.len() || index >= MAX_BLOB_ENTRIES {
+            return Err(BackupError::Corrupt);
+        }
+        let entry = entry.map_err(|_| BackupError::Corrupt)?;
+        let name = entry.file_name();
+        let name = name.to_str().ok_or(BackupError::Corrupt)?;
+        if !expected.remove(name) || !is_regular_file(&entry.path()) {
+            return Err(BackupError::Corrupt);
+        }
+    }
+    if !expected.is_empty() {
+        return Err(BackupError::Corrupt);
+    }
+    Ok(())
+}
+
+/// Return only the manifest allowlist after full source validation. Staging is
+/// verified again after copying, so later source mutation cannot publish a backup.
+pub(crate) fn verified_blob_names(
+    directory: &Path,
+    backup_id: &str,
+) -> Result<Vec<String>, BackupError> {
+    require_real_directory(directory)?;
+    verify_components(
+        &directory.join(DATABASE_FILE),
+        &directory.join(BACKUP_BLOBS_DIRECTORY),
+        &directory.join(MANIFEST_FILE),
+        backup_id,
+    )
+    .map(|(_, names)| names)
+}
+
+fn verify_sqlite(connection: &Connection) -> Result<i64, BackupError> {
     let version = connection
         .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
         .map_err(|_| BackupError::Corrupt)?;
-    if version != SCHEMA_VERSION {
-        return Err(BackupError::Corrupt);
+    if !(1..=SCHEMA_VERSION).contains(&version) {
+        return Err(BackupError::UnsupportedVersion);
     }
     let mut statement = connection
         .prepare("SELECT version FROM schema_migration ORDER BY version")
@@ -466,10 +549,37 @@ fn verify_sqlite(connection: &Connection) -> Result<(), BackupError> {
         .map_err(|_| BackupError::Corrupt)?;
     let mut versions = Vec::new();
     for row in rows {
+        if versions.len() >= version as usize {
+            return Err(BackupError::Corrupt);
+        }
         versions.push(row.map_err(|_| BackupError::Corrupt)?);
     }
-    if versions != (1..=SCHEMA_VERSION).collect::<Vec<_>>() {
+    if versions != (1..=version).collect::<Vec<_>>() {
         return Err(BackupError::Corrupt);
+    }
+    // Check the actual tables/columns for this historical schema, not just its labels.
+    for (introduced, table, columns) in [
+        (1, "provider_profile", "id, document, updated_at"),
+        (2, "local_card", "id, document, card_type, updated_at, updated_at_sort, deleted_at, content_digest"),
+        (3, "blob", "digest, byte_length, created_at, last_referenced_at"),
+        (4, "local_web_package", "id, document, ref_digest, updated_at, updated_at_sort, deleted_at, archive_byte_length"),
+        (4, "web_package_archive_ref", "package_id, digest"),
+    ] {
+        if version >= introduced {
+            let is_table: bool = connection.query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+                [table], |row| row.get(0),
+            ).map_err(|_| BackupError::Corrupt)?;
+            if !is_table { return Err(BackupError::Corrupt); }
+            connection.prepare(&format!("SELECT {columns} FROM {table} LIMIT 0"))
+                .map_err(|_| BackupError::Corrupt)?;
+        } else {
+            let exists: bool = connection.query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name = ?1)",
+                [table], |row| row.get(0),
+            ).map_err(|_| BackupError::Corrupt)?;
+            if exists { return Err(BackupError::Corrupt); }
+        }
     }
     let integrity = connection
         .query_row("PRAGMA integrity_check", [], |row| row.get::<_, String>(0))
@@ -484,7 +594,7 @@ fn verify_sqlite(connection: &Connection) -> Result<(), BackupError> {
     if rows.next().map_err(|_| BackupError::Corrupt)?.is_some() {
         return Err(BackupError::Corrupt);
     }
-    Ok(())
+    Ok(version)
 }
 
 fn verify_no_package_without_reference(connection: &Connection) -> Result<(), BackupError> {
@@ -740,6 +850,200 @@ mod tests {
             )
             .expect("save web package");
         crate::blob::digest_of(b"PK\x03\x04")
+    }
+
+    fn historical_backup(root: &Path, version: i64, format_version: u32) -> String {
+        let id = "local-library-20261003T000000Z";
+        let directory = root.join(BACKUPS_DIRECTORY).join(id);
+        fs::create_dir_all(directory.join("blobs")).expect("backup directories");
+        let database_path = directory.join(DATABASE_FILE);
+        let database = Connection::open(&database_path).expect("historical database");
+        crate::store::migrate_to_version_for_test(&database, version);
+        database
+            .execute(
+                "INSERT INTO provider_profile VALUES ('historical', '{}', '2026-10-03T00:00:00Z')",
+                [],
+            )
+            .expect("historical profile");
+        let mut blobs = Vec::new();
+        if version >= 3 {
+            let bytes = b"historical blob";
+            let digest = crate::blob::digest_of(bytes);
+            database.execute("INSERT INTO blob VALUES (?1, ?2, '2026-10-03T00:00:00Z', '2026-10-03T00:00:00Z')",
+                rusqlite::params![digest, bytes.len() as i64]).expect("historical blob metadata");
+            fs::write(
+                directory.join("blobs").join(parse_digest(&digest).unwrap()),
+                bytes,
+            )
+            .unwrap();
+            blobs.push(ManifestBlob {
+                digest,
+                byte_length: bytes.len() as u64,
+            });
+        }
+        drop(database);
+        let (byte_length, digest) = digest_file(&database_path).unwrap();
+        let manifest = BackupManifest {
+            format_version,
+            schema_version: if format_version == 1 {
+                None
+            } else {
+                Some(version)
+            },
+            backup_id: id.into(),
+            created_at: "2026-10-03T00:00:00Z".into(),
+            database: ManifestFile {
+                path: DATABASE_FILE.into(),
+                byte_length,
+                digest,
+            },
+            blobs,
+        };
+        fs::write(
+            directory.join(MANIFEST_FILE),
+            serde_json::to_vec(&manifest).unwrap(),
+        )
+        .unwrap();
+        id.into()
+    }
+
+    #[test]
+    fn historical_schemas_restore_then_migrate_with_legacy_and_versioned_manifests() {
+        for version in 1..=SCHEMA_VERSION {
+            for format in [1, MANIFEST_VERSION] {
+                let temp = scratch();
+                let root = temp.path();
+                let _instance = InstanceGuard::acquire(root).expect("instance lock");
+                let library = LocalLibrary::open(root).expect("current live library");
+                let id = historical_backup(root, version, format);
+                let source = root.join(BACKUPS_DIRECTORY).join(&id).join(DATABASE_FILE);
+                let original = fs::read(&source).unwrap();
+                assert!(
+                    verify_backup(root, &id).is_ok(),
+                    "schema {version}, format {format}"
+                );
+                let prepared = crate::restore::prepare_restore(&library, &id)
+                    .expect("prepare historical restore");
+                drop(prepared);
+                drop(library);
+                crate::restore::recover_pending(root).expect("install historical generation");
+                let restored = LocalLibrary::open(root).expect("migrate restored generation");
+                let connection = restored.connection().lock().unwrap();
+                assert_eq!(verify_sqlite(&connection).unwrap(), SCHEMA_VERSION);
+                let document: String = connection
+                    .query_row(
+                        "SELECT document FROM provider_profile WHERE id='historical'",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .unwrap();
+                assert_eq!(document, "{}");
+                assert_eq!(
+                    read_blob_rows(&connection).unwrap().len(),
+                    if version >= 3 { 1 } else { 0 }
+                );
+                drop(connection);
+                restored
+                    .profiles()
+                    .put(
+                        "after-restore",
+                        r#"{"id":"after-restore"}"#,
+                        "2026-10-03T01:00:00Z",
+                    )
+                    .expect("write migrated database");
+                assert_eq!(
+                    fs::read(&source).unwrap(),
+                    original,
+                    "verification and migration must not mutate backup"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn version_metadata_and_missing_historical_tables_fail_closed() {
+        for case in [
+            "future",
+            "zero",
+            "missing-table",
+            "journal",
+            "manifest-mismatch",
+            "missing-schema",
+        ] {
+            let temp = scratch();
+            let id = historical_backup(temp.path(), 2, MANIFEST_VERSION);
+            let directory = temp.path().join(BACKUPS_DIRECTORY).join(&id);
+            let path = directory.join(DATABASE_FILE);
+            let database = Connection::open(&path).unwrap();
+            match case {
+                "future" => database
+                    .execute_batch(&format!("PRAGMA user_version = {}", SCHEMA_VERSION + 1))
+                    .unwrap(),
+                "zero" => database.execute_batch("PRAGMA user_version = 0").unwrap(),
+                "missing-table" => database.execute_batch("DROP TABLE local_card").unwrap(),
+                "journal" => database
+                    .execute_batch("DELETE FROM schema_migration WHERE version=2")
+                    .unwrap(),
+                _ => {}
+            }
+            drop(database);
+            let manifest_path = directory.join(MANIFEST_FILE);
+            let mut manifest: BackupManifest =
+                serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
+            let (length, digest) = digest_file(&path).unwrap();
+            manifest.database.byte_length = length;
+            manifest.database.digest = digest;
+            if case == "manifest-mismatch" {
+                manifest.schema_version = Some(3);
+            }
+            if case == "missing-schema" {
+                manifest.schema_version = None;
+            }
+            fs::write(manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+            assert_eq!(
+                verify_backup(temp.path(), &id),
+                Err(if matches!(case, "future" | "zero") {
+                    BackupError::UnsupportedVersion
+                } else {
+                    BackupError::Corrupt
+                }),
+                "{case}"
+            );
+        }
+    }
+
+    #[test]
+    fn undeclared_blob_entries_are_rejected_before_restore_preparation() {
+        for case in ["valid-orphan", "wrong-digest", "directory", "invalid-name"] {
+            let temp = scratch();
+            let root = temp.path();
+            let library = test_library(root);
+            let summary = create_backup(&library).unwrap();
+            let directory = root
+                .join(BACKUPS_DIRECTORY)
+                .join(&summary.backup_id)
+                .join("blobs");
+            let digest = crate::blob::digest_of(b"orphan");
+            let path = directory.join(parse_digest(&digest).unwrap());
+            match case {
+                "valid-orphan" => fs::write(path, b"orphan").unwrap(),
+                "wrong-digest" => fs::write(path, b"wrong").unwrap(),
+                "directory" => fs::create_dir(path).unwrap(),
+                "invalid-name" => fs::write(directory.join("unexpected.txt"), b"bad").unwrap(),
+                _ => unreachable!(),
+            }
+            assert_eq!(
+                verify_backup(root, &summary.backup_id),
+                Err(BackupError::Corrupt),
+                "{case}"
+            );
+            assert!(crate::restore::prepare_restore(&library, &summary.backup_id).is_err());
+            assert_eq!(
+                fs::read_dir(root.join(BACKUPS_DIRECTORY)).unwrap().count(),
+                1,
+                "rejected source must not create a safety backup"
+            );
+        }
     }
 
     #[test]

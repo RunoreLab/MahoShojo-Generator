@@ -219,26 +219,37 @@ pub fn applied_migrations(connection: &Connection) -> Result<Vec<i64>, StoreErro
 ///
 /// 迁移只向前。已应用的版本不会重复执行，因此重复打开同一个数据库是安全的。
 pub fn migrate(connection: &Connection) -> Result<(), StoreError> {
-    let steps: &[MigrationStep] = &[
-        MigrationStep {
-            version: 1,
-            sql: MIGRATION_1,
-        },
-        MigrationStep {
-            version: 2,
-            sql: crate::local_card::MIGRATION_2,
-        },
-        MigrationStep {
-            version: 3,
-            sql: crate::blob::MIGRATION_3,
-        },
-        MigrationStep {
-            version: 4,
-            sql: crate::web_package::MIGRATION_4,
-        },
-    ];
+    apply_steps(connection, MIGRATION_STEPS)
+}
 
-    apply_steps(connection, steps)
+const MIGRATION_STEPS: &[MigrationStep] = &[
+    MigrationStep {
+        version: 1,
+        sql: MIGRATION_1,
+    },
+    MigrationStep {
+        version: 2,
+        sql: crate::local_card::MIGRATION_2,
+    },
+    MigrationStep {
+        version: 3,
+        sql: crate::blob::MIGRATION_3,
+    },
+    MigrationStep {
+        version: 4,
+        sql: crate::web_package::MIGRATION_4,
+    },
+];
+
+#[cfg(test)]
+pub(crate) fn migrate_to_version_for_test(connection: &Connection, version: i64) {
+    assert!((1..=SCHEMA_VERSION).contains(&version));
+    for step in MIGRATION_STEPS
+        .iter()
+        .filter(|step| step.version <= version)
+    {
+        apply_step(connection, step).expect("apply historical migration");
+    }
 }
 
 /// 顺序应用所有 `version > current` 的步骤，每步一个事务。

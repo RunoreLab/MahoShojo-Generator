@@ -660,6 +660,7 @@ fn copy_backup_tree(
     destination: &Path,
     backup_id: &str,
 ) -> Result<BackupSummary, RestoreError> {
+    let blob_names = backup::verified_blob_names(source, backup_id)?;
     reject_reparse_tree(source)?;
     let source_manifest = source.join(backup::BACKUP_MANIFEST_FILE);
     let source_database = source.join(backup::BACKUP_DATABASE_FILE);
@@ -682,17 +683,8 @@ fn copy_backup_tree(
     let destination_blobs = destination.join(backup::BACKUP_BLOBS_DIRECTORY);
     ensure_native_id_directory(&destination_blobs)?;
     cleanup_copy_temporaries(&destination_blobs)?;
-    let entries = fs::read_dir(&source_blobs).map_err(|_| RestoreError::Failed)?;
-    for entry in entries {
-        let entry = entry.map_err(|_| RestoreError::Failed)?;
-        let file_type = entry.file_type().map_err(|_| RestoreError::Failed)?;
-        if !file_type.is_file() || entry.file_name().to_str().is_none() {
-            return Err(RestoreError::Failed);
-        }
-        let name = entry.file_name();
-        let digest = format!("sha256:{}", name.to_string_lossy());
-        crate::blob::parse_digest(&digest).map_err(|_| RestoreError::Failed)?;
-        copy_file_resumable(&entry.path(), &destination_blobs.join(name))?;
+    for name in blob_names {
+        copy_file_resumable(&source_blobs.join(&name), &destination_blobs.join(name))?;
     }
     backup::verify_backup_directory(destination, backup_id).map_err(Into::into)
 }
