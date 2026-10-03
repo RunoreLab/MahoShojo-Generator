@@ -104,7 +104,23 @@ describe('Hono route manifest', () => {
       expect(generatedSource).toContain(`import("../adapters/${routeId}")`);
       expect(generatedSource).not.toContain(`app/api/${routeId}/route`);
     }
-  });
+    /**
+     * 本条要 `await definition.load()` 把 24 条 shared 路由的模块图**真的加载一遍**，
+     * 这是它比其他用例贵一个量级的原因（其余两条都在 10ms 以内）。实测：
+     *
+     * | 场景 | 耗时 |
+     * | --- | --- |
+     * | 单独跑本文件 | 2,862ms |
+     * | 54 文件全量、worker=15 | 12,964ms |
+     *
+     * 4.5 倍差距来自同一台机器上的并发争抢，不是本条自身有 13 秒的活。因此它不能只吃
+     * 套件级的 15s——那只有 1.16 倍余量，在比本机慢的 CI 上就是定时炸弹。
+     *
+     * 30s ≈ 已实测最差 12.96s 的 2.3 倍，给慢机器留够余量，同时仍然远小于无限等待：
+     * 真的挂起时 30s 判红。**放宽的是预算不是断言**——「24 条路由都真的加载成功并导出
+     * handler」这条性质一条没动。
+     */
+  }, 30_000);
 
   it('generator 与 route type 不再保留 legacy Next import 回退口', () => {
     const generatorSource = readFileSync(
