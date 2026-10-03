@@ -161,15 +161,6 @@ export type StoredQuestionnaireAnswerItem = QuestionnaireAnswerItem & {
   key?: string;
 };
 
-export const compactQuestionnaireAnswerItems = (answers: QuestionnaireAnswerItem[]): QuestionnaireAnswerItem[] => {
-  return answers.map((item) => {
-    const compacted = { ...item };
-    delete compacted.questionnaireId;
-    delete compacted.questionnaireTitle;
-    return compacted;
-  });
-};
-
 export const buildQuestionKey = (questionnaireId: string | undefined, questionId: string | undefined, index: number) => {
   const base = (questionId ?? '').trim() || `Q${index + 1}`;
   const prefix = (questionnaireId ?? '').trim();
@@ -675,27 +666,8 @@ export const normalizeQuestionnaireDefinition = (
   };
 };
 
-export { extractQuestionTextsFromUserAnswers } from '@mahoshojo/domain/questionnaire';
-
-export const formatQuestionnaireAnswers = (answers: QuestionnaireAnswerItem[]): string => {
-  if (!answers.length) return '';
-  const grouped = new Map<string, QuestionnaireAnswerItem[]>();
-  for (const item of answers) {
-    const groupKey = item.questionnaireTitle?.trim() || '';
-    if (!grouped.has(groupKey)) grouped.set(groupKey, []);
-    grouped.get(groupKey)!.push(item);
-  }
-
-  const blocks: string[] = [];
-  for (const [groupTitle, items] of grouped.entries()) {
-    if (groupTitle) {
-      blocks.push(`【${groupTitle}】`);
-    }
-    items.forEach((item, index) => {
-      const qLabel = item.question?.trim() ? item.question.trim() : `问题 ${index + 1}`;
-      blocks.push(`Q: ${qLabel}`);
-      blocks.push(`A: ${item.answer}`);
-    });
-  }
-  return blocks.join('\n');
-};
+export {
+  compactQuestionnaireAnswerItems,
+  extractQuestionTextsFromUserAnswers,
+  formatQuestionnaireAnswers,
+} from '@mahoshojo/domain/questionnaire';
