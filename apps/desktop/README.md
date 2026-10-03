@@ -4,7 +4,7 @@ MahoShojo Generator 的本地桌面客户端 runtime。它是独立 app，不是
 
 当前阶段（2026-10-03）：**D1 执行核、D1.5、D2.0–D2.2、D2.3a/b/c 的存储/归档桥、D2.5a/D2.5b 的共源壳与路由接线、D2.3d 的归档产品 UI，以及 D3.0 首页与离线百科已落地**。首页复用 `@mahoshojo/ui-web/home` 的共源切片，只展示已交付的百科、本地库与设置入口；`/encyclopedia` 与 `/encyclopedia/$slug` 复用共源百科视图，离线可读全部 53 篇产品文档；`/local-library` 提供整库导出与导入，D0 的运行时自述与 Provider 面板移入 `/settings`。`/details` 等 D3.1 页面仍未开始。
 
-仍然开放、不记为 PASS 的门禁：`<input type="file">` 在真实 Tauri WebView 中打开原生文件对话框；D2.3 的真实 WebView 内存/响应性与 raw IPC 4 MiB 吞吐/回退；D2.5b 的返回/前进手感与原生窗口关闭（全部路由证据来自 jsdom）；D1 真实 Provider 端点与取消/流。D2.4 整库备份与重启恢复已接入 `/local-library`，与 portable archive 分区展示，真机验收仍开放；回收站 UI 尚未交付。
+仍然开放、不记为 PASS 的门禁：`<input type="file">` 在真实 Tauri WebView 中打开原生文件对话框；D2.3 的真实 WebView 内存/响应性与 raw IPC 4 MiB 吞吐/回退；D2.5b 的返回/前进手感与原生窗口关闭（全部路由证据来自 jsdom）；D1 真实 Provider 端点与取消/流。D2.4 整库备份与重启恢复已接入 `/local-library`，并有一次 Explorer 取消、恢复、导入与重启闭环实测；磁盘失败注入、大库性能基线与断电耐久性仍开放。回收站 UI 尚未交付。
 
 - **D0** skeleton、安全边界与 CI 接线；
 - **D0.5** 持久 secret 接入操作系统凭据存储；
@@ -25,11 +25,11 @@ MahoShojo Generator 的本地桌面客户端 runtime。它是独立 app，不是
 - **D2.3d** 双端归档 UI 已接线：`/local-library` 复用 `@mahoshojo/ui-web/local-archive`，Web 用浏览器 adapter、Desktop 用现有窄桥。导出成功只以 native 最终确认判成功；`<input type="file">` 的真机行为待验。
 - **D2.5a/D2.5b** 共源基座与路由接线已落地：`packages/ui-web` 提供主题/导航/能力状态/壳/归档视图；Desktop 用 `@tanstack/react-router` + hash history 的三条 code-based 路由。共享边界门禁（`MONO-005-SHARED-UI-RUNTIME` 等）已生效。
 - **D2.5c** 审查收口：归档 begin/append 已移出主线程；共享归档操作互斥，Desktop 在途导航/关闭保护已接线。真机证据仍待回传，见下方验收步骤；不宣称 D2.3 / D2.5 完全 PASS。
-- **D2.4a/b** 一致性整库备份、恢复前备份与启动前 journal 重放已交付；旧代际保留，失败拒绝打开混合状态。真机仍待验。
+- **D2.4a/b** 一致性整库备份、恢复前备份与启动前 journal 重放已交付；旧代际保留，失败拒绝打开混合状态。Explorer 实机已完成一次取消、恢复、恢复后导入与重启闭环，未测磁盘空间/写入失败、大库性能及断电；详见 D2.4 runbook。
 - **D3.0** 首页与离线百科已落地：产品内容权威在仓库根 `content/`，由
   `scripts/generate-encyclopedia-content.mjs` 在各宿主 dev/build 前生成到静态服务根，副本由 Git 忽略（Desktop 走 Tauri
   `frontendDist`，不需要新增 native 权限）；共源 Markdown 渲染层的 heading id 是显式 opt-in，
-  站外媒体缺省全部拒绝，外链缺少 opener 时不可执行。能力快照以共源导航与真实交付路由为准，Web 功能清单留在 Web，不为 PVP 建立桌面功能定义。真机证据待回传，见
+  站外媒体缺省全部拒绝，外链缺少 opener 时不可执行。能力快照以共源导航与真实交付路由为准，Web 功能清单留在 Web；旧 PVP `/battle`、`/arena` 已取消 Desktop 迁移，Web 现有功能与历史保留。断网打包冷启动、dev 环境主题/键盘/IME/DPI，以及原生测试库 renderer Network、减少动态效果模拟、KaTeX 和锚点已有实测；native 出站全旅程仍待验，真机整体门禁开放，见
   [首页与离线百科验收](../../docs/runbooks/2026-10-03_163000_Desktop首页与离线百科验收.md)。
 - **D3.1 及以后** 页面纵切尚未开始；不因本轮更新关闭既有未验收项。
 
@@ -39,7 +39,7 @@ MahoShojo Generator 的本地桌面客户端 runtime。它是独立 app，不是
 - 整体架构：[Desktop 产品架构与共享边界](../../docs/architecture/2026-10-02_184000_Desktop产品架构与共享边界.md)
 - 产品规格：[Desktop 产品一致性与本地优先规格](../../docs/specs/2026-10-02_184000_Desktop产品一致性与本地优先规格.md)
 
-目标是熟悉的首页、问卷、角色管理、竞技场与百科，而不是扩建当前调试面板。Desktop 默认本地保存与 Direct，线上能力按需接入；首期不新增数据卡签名或手动申请按钮。未来自动签名需独立可信协议，设置默认关闭；updater 签名要求不变。
+目标是熟悉的首页、问卷、角色管理与百科，而不是扩建当前调试面板。2026-10-03 维护者已取消旧 PVP `/battle`、`/arena` 的 Desktop 迁移，Web 现有功能与历史保留。Desktop 默认本地保存与 Direct，线上能力按需接入；首期不新增数据卡签名或手动申请按钮。未来自动签名需独立可信协议，设置默认关闭；updater 签名要求不变。
 
 - 决策：[Desktop Tauri V1 运行时与本地安全边界决策](../../docs/decisions/2026-09-30_160000_DesktopTauriV1运行时与本地安全边界决策.md)
 - 规格：[Desktop 客户端实施规格](../../docs/specs/2026-09-30_160000_Desktop客户端实施规格.md)
