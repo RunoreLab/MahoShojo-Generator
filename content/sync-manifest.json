@@ -1,0 +1,8 @@
+{
+  "$comment": "由 scripts/generate-encyclopedia-content.mjs 维护。它记录本脚本在两个 app 的 public/ 根目录里**拥有**哪些文件名，因此可以安全地剪除已从 content/ 删除或改名的品牌资源，而不会碰到 apps/web/public 下另外 50 多个无关文件。改动 content/brand/ 后必须重跑生成脚本。",
+  "brand": [
+    "encyclopedia.svg",
+    "logo-white.svg",
+    "logo.svg"
+  ]
+}

@@ -1,6 +1,6 @@
 import Link from 'next/link';
 
-import { getEncyclopediaEntry } from '@/lib/encyclopedia';
+import { getEncyclopediaEntry } from '@mahoshojo/ui-web/encyclopedia';
 
 export type EncyclopediaLinkItem = {
   slug: string;

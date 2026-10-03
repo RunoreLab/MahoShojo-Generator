@@ -11,7 +11,7 @@ import {
   groupEncyclopediaEntries,
   matchEncyclopediaEntry,
   type EncyclopediaCategoryId,
-} from '@/lib/encyclopedia';
+} from '@mahoshojo/ui-web/encyclopedia';
 
 type EncyclopediaCategoryFilter = EncyclopediaCategoryId | 'all';
 

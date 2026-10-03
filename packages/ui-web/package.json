@@ -20,6 +20,11 @@
       "import": "./src/capability/index.ts",
       "default": "./src/capability/index.ts"
     },
+    "./encyclopedia": {
+      "types": "./src/encyclopedia/index.ts",
+      "import": "./src/encyclopedia/index.ts",
+      "default": "./src/encyclopedia/index.ts"
+    },
     "./local-archive": {
       "types": "./src/local-archive/index.ts",
       "import": "./src/local-archive/index.ts",
