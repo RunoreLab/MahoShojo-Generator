@@ -166,11 +166,14 @@ describe('server-safe shared entrypoints stay free of React hooks', () => {
     );
 
     // 未列出的入口目前都是客户端专属或视图入口；如果哪天某个 Server Component 开始 import 它们，
-    // 这条断言会先提醒把它登记进来并验证。
+    // 这条断言会先提醒把它登记进来并验证。问卷与角色结果入口分别由客户端交互面板和结果卡使用，
+    // 因此保持在这里作为显式的客户端专属登记。
     expect(unlisted.sort()).toEqual([
+      './character-result',
       './encyclopedia-views',
       './local-archive',
       './markdown',
+      './questionnaire',
       './shell',
     ]);
   });
