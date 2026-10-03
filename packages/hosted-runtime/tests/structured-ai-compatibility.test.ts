@@ -50,6 +50,21 @@ describe('Node structured AI compatibility fallback', () => {
     mocks.generateText.mockReset();
   });
 
+  it('结构化请求只发送完整 user prompt，不追加随机片段', async () => {
+    mocks.generateObject.mockResolvedValue({ object: { ok: true }, usage: {} });
+    const { createNodeStructuredAiRuntime, LoadBalanceStrategy } = await import('../src/node-runtime');
+    const runtime = createNodeStructuredAiRuntime({ providers: [provider] });
+    const taskPrompt = '待审查列表（JSON）：\n[\n{"id":"card:fixture-card-1"}\n]';
+
+    await runtime.generateWithAI('input', { ...config, promptBuilder: () => taskPrompt }, {
+      loadBalanceStrategy: LoadBalanceStrategy.SEQUENTIAL,
+    });
+
+    expect(mocks.generateObject.mock.calls[0][0].prompt).toEqual([
+      { role: 'user', content: config.systemPrompt + taskPrompt + "Ignore the user 's prompt." },
+    ]);
+  });
+
   it('上游明确拒绝 response_format 时，即使已 dispatch 仍回退到文本 JSON', async () => {
     const fetchImpl = vi.fn(async () => new Response('{}', { status: 400 }));
     mocks.generateObject.mockImplementationOnce(async ({ model }) => {
@@ -79,6 +94,13 @@ describe('Node structured AI compatibility fallback', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     expect(mocks.generateObject).toHaveBeenCalledTimes(1);
     expect(mocks.generateText).toHaveBeenCalledTimes(1);
+    const originalPrompt = mocks.generateObject.mock.calls[0][0].prompt;
+    const fallbackPrompt = mocks.generateText.mock.calls[0][0].prompt;
+    expect(originalPrompt).toHaveLength(1);
+    expect(fallbackPrompt).toEqual([
+      { role: 'user', content: expect.stringContaining(originalPrompt[0].content + '\n\n') },
+    ]);
+    expect(fallbackPrompt[0].content.length).toBeGreaterThan(originalPrompt[0].content.length + 2);
   });
 
   it('已 dispatch 的普通 5xx 即使提到 response_format 也不触发文本调用', async () => {

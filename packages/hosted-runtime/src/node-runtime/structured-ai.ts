@@ -438,14 +438,6 @@ async function generateWithAIUsing<T, I = string>(
             role: 'user' as const,
             content: promptText,
           },
-          {
-            role: 'user' as const,
-            content: (() => {
-              const len = 20;
-              const start = Math.floor(Math.random() * Math.max(1, promptText.length - len));
-              return promptText.substring(start, start + len);
-            })(),
-          },
         ]);
         const resolvedSettings = resolveGenerationSettings({
           providerId: options?.generationSettingsContext?.providerId ?? generationConfig.generationSettingsContext?.providerId ?? provider.providerId ?? provider.type,
@@ -472,7 +464,6 @@ async function generateWithAIUsing<T, I = string>(
         const tryGenerateObject = async () => {
           return await generateObject({
             model,
-            // 应对风控，尝试直接全部放入系统提示词中
             prompt: buildPromptMessages(systemPrompt),
             schema: generationConfig.schema,
             maxRetries: 0,
