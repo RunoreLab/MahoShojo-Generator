@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 
 import React, { act } from 'react';
-import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ArenaRoomSharedConfig } from '@mahoshojo/contracts/arena-room';
@@ -9,11 +8,18 @@ import type { ArenaRoomSharedConfig } from '@mahoshojo/contracts/arena-room';
 import { createRoomProposalArenaEditorSession } from '@/components/arena/editor';
 import { ArenaRoomProposalWorkspaceView } from '@/components/arena/multiplayer/ArenaRoomProposalWorkspace';
 import { arenaProposalExpectedBaseSummary } from '@/components/arena/multiplayer/ArenaProposalPanel';
-import { MAX_ARENA_REFERENCE_ITEMS } from '@/lib/arena/resource-budget';
 import type {
   ArenaRoomController,
   ArenaRoomControllerState,
 } from '@/lib/arena-room/controller';
+import {
+  buildArenaRoomState,
+  closeArenaWorkspaceDom,
+  createArenaWorkspaceQueries,
+  openArenaWorkspaceDom,
+  setValue,
+  sharedConfig,
+} from './helpers/arena-room-proposal-workspace';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -95,118 +101,19 @@ vi.mock('@/components/BattleDataModal', () => ({
   },
 }));
 
-const sharedConfig: ArenaRoomSharedConfig = {
-  battleMode: 'classic',
-  combatants: [{
-    key: 'data-card:character-base',
-    ref: {
-      id: 'character-base',
-      kind: 'character',
-      versionToken: 'version-character-base',
-    },
-  }],
-  teams: [],
-  scenario: null,
-  auxScenarios: [],
-  materials: [],
-  userGuidance: '',
-  storyLength: 'default',
-  customStoryLength: null,
-  selectedLanguage: 'zh-CN',
-  historySettings: {
-    readArenaHistory: true,
-    readArenaHistoryLimit: 3,
-    isArenaHistoryUnlimited: false,
-    writeArenaHistory: true,
-    readCurrentState: true,
-    writeCurrentState: true,
-    readNarrativeHistory: false,
-    readNarrativeHistoryLimit: 10,
-    isNarrativeHistoryUnlimited: false,
-    writeNarrativeHistory: false,
-  },
-};
+const state = buildArenaRoomState();
 
-const member = {
-  userId: 'member-1',
-  role: 'member' as const,
-  displayName: '成员',
-  membershipState: 'active' as const,
-};
-
-const state: ArenaRoomControllerState = {
-  phase: 'connected',
-  rooms: [],
-  notice: null,
-  error: null,
-  unknownOperation: null,
-  proposalOperation: null,
-  proposalResultUnknown: false,
-  session: {
-    protocolVersion: 1,
-    roomId: 'room-1',
-    roomEpoch: 'epoch-1',
-    self: member,
-    snapshot: {
-      protocolVersion: 1,
-      schemaVersion: 1,
-      roomId: 'room-1',
-      roomEpoch: 'epoch-1',
-      revision: 7,
-      controlSeq: 0,
-      sharedConfig,
-      members: [member],
-      proposals: [],
-      activeGeneration: null,
-    },
-  },
-};
-
-const setValue = (
-  element: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement,
-  value: string,
-): void => {
-  const prototype = element instanceof HTMLSelectElement
-    ? HTMLSelectElement.prototype
-    : element instanceof HTMLTextAreaElement
-      ? HTMLTextAreaElement.prototype
-      : HTMLInputElement.prototype;
-  Object.getOwnPropertyDescriptor(prototype, 'value')?.set?.call(element, value);
-  element.dispatchEvent(new Event(element instanceof HTMLSelectElement ? 'change' : 'input', { bubbles: true }));
-};
+const { button, buttonsWithText, buttonContaining } = createArenaWorkspaceQueries();
 
 let container: HTMLDivElement;
-let root: Root;
-
-const button = (label: string): HTMLButtonElement => {
-  const target = [...document.body.querySelectorAll('button')]
-    .find((candidate) => candidate.textContent?.trim() === label);
-  if (!(target instanceof HTMLButtonElement)) throw new Error(`button not found: ${label}`);
-  return target;
-};
-
-const buttonsWithText = (label: string): HTMLButtonElement[] => [...document.body.querySelectorAll('button')]
-  .filter((candidate) => candidate.textContent?.trim() === label);
-
-const buttonContaining = (label: string): HTMLButtonElement => {
-  const target = [...document.body.querySelectorAll('button')]
-    .find((candidate) => candidate.textContent?.includes(label));
-  if (!(target instanceof HTMLButtonElement)) throw new Error(`button not found containing: ${label}`);
-  return target;
-};
+let root: ReturnType<typeof openArenaWorkspaceDom>['root'];
 
 beforeEach(() => {
-  localStorage.clear();
-  container = document.createElement('div');
-  document.body.append(container);
-  root = createRoot(container);
+  ({ container, root } = openArenaWorkspaceDom());
 });
 
 afterEach(async () => {
-  await act(async () => root.unmount());
-  container.remove();
-  vi.restoreAllMocks();
-  vi.unstubAllGlobals();
+  await closeArenaWorkspaceDom(container, root);
 });
 
 describe('Arena room Proposal workspace', () => {
@@ -753,79 +660,6 @@ describe('Arena room Proposal workspace', () => {
     expect(auxBrowseAfter[1]!.disabled).toBe(false);
     await act(async () => editor.dispose());
   });
-
-  it('素材与辅助情景入口投影参考项联合预算，预算用尽时禁用', async () => {
-    const auxScenarios = Array.from({ length: MAX_ARENA_REFERENCE_ITEMS }, (_, index) => ({
-      key: `data-card:scenario-aux-${index}`,
-      ref: {
-        id: `scenario-aux-${index}`,
-        kind: 'scenario' as const,
-        versionToken: `version-aux-${index}`,
-      },
-    }));
-    const exhaustedConfig: ArenaRoomSharedConfig = {
-      ...sharedConfig,
-      battleMode: 'scenario',
-      scenario: {
-        key: 'data-card:scenario-main',
-        ref: { id: 'scenario-main', kind: 'scenario', versionToken: 'version-main' },
-      },
-      auxScenarios,
-    };
-    const editor = createRoomProposalArenaEditorSession({
-      roomId: 'room-1',
-      roomEpoch: 'epoch-1',
-      revision: 7,
-      sharedConfig: exhaustedConfig,
-    });
-    const exhaustedState: ArenaRoomControllerState = {
-      ...state,
-      session: state.session ? {
-        ...state.session,
-        snapshot: { ...state.session.snapshot, sharedConfig: exhaustedConfig },
-      } : null,
-    };
-    const controller = {
-      submitProposal: vi.fn(async () => undefined),
-      withdrawProposal: vi.fn(async () => undefined),
-      reconnect: vi.fn(),
-    } satisfies Pick<ArenaRoomController, 'reconnect' | 'submitProposal' | 'withdrawProposal'>;
-
-    await act(async () => root.render(
-      <ArenaRoomProposalWorkspaceView editor={editor} state={exhaustedState} controller={controller} />,
-    ));
-
-    expect(container.textContent).toContain('已选素材 0；参考项合计 256/256');
-    expect(button('浏览在线数据卡').disabled).toBe(true);
-
-    await act(async () => buttonContaining('辅助情景（可选）').click());
-    expect(container.textContent).not.toContain('（请先选择主情景）');
-    expect(container.textContent).toContain('（参考项总预算已用尽）');
-    expect(container.textContent).toContain('参考项合计 256/256');
-    const auxBrowseButtons = buttonsWithText('浏览在线情景库');
-    expect(auxBrowseButtons.length).toBe(2);
-    expect(auxBrowseButtons[1]!.disabled).toBe(true);
-    await act(async () => editor.dispose());
-    /**
-     * 本条用例的 120s 预算不是随手写的，依据是实测：
-     *
-     * - 单独用 `-t` 只跑它：测试体约 **344ms**；
-     * - 与同文件其余 10 条一起跑：约 **5.7s**（同文件内 16 倍放大）；
-     * - 放进 428 个文件的 `apps/web` 全量：约 **45–57s**。
-     *
-     * 放大来自 CPU 超订，而不是这条用例自身有 5 秒的活——逐段插桩（建配置、建 editor、渲染 256 项、
-     * 点击重渲染、四次 textContent 断言、dispose、root.unmount）合计仅约 160ms。
-     *
-     * 它需要 256 项是因为「参考项预算用尽」本身就是 256 上限的契约（`maxReferenceItemsSanity`），
-     * 减项会让这条用例不再测它声称要测的东西，因此成本无法通过缩小数据消除。
-     *
-     * 120s = 最差实测 57s 的约 2 倍余量。它偏大，但断言一条没动：把预算压回 30s 只会让门禁在负载下
-     * 偶发变红，而偶发变红的门禁会让人开始习惯忽略失败——那比多等 60 秒更贵。
-     *
-     * 若要真正消除它，下一步是把这个渲染拆到独立文件并对该文件串行化，或让组件对长列表虚拟化。
-     * 两者都属于这个测试与组件的所有者的决定，不在本轮范围内。
-     */
-  }, 120_000);
 });
 
 describe('旧基准草稿提交策略', () => {
