@@ -559,6 +559,7 @@ fn verify_sqlite(connection: &Connection) -> Result<i64, BackupError> {
     }
     // Check the actual tables/columns for this historical schema, not just its labels.
     for (introduced, table, columns) in [
+        (1, "schema_migration", "version, applied_at"),
         (1, "provider_profile", "id, document, updated_at"),
         (2, "local_card", "id, document, card_type, updated_at, updated_at_sort, deleted_at, content_digest"),
         (3, "blob", "digest, byte_length, created_at, last_referenced_at"),
@@ -967,6 +968,8 @@ mod tests {
             "zero",
             "missing-table",
             "journal",
+            "journal-view",
+            "journal-missing-column",
             "manifest-mismatch",
             "missing-schema",
         ] {
@@ -981,6 +984,13 @@ mod tests {
                     .unwrap(),
                 "zero" => database.execute_batch("PRAGMA user_version = 0").unwrap(),
                 "missing-table" => database.execute_batch("DROP TABLE local_card").unwrap(),
+                "journal-view" => database.execute_batch(
+                    "ALTER TABLE schema_migration RENAME TO saved_journal;
+                     CREATE VIEW schema_migration AS SELECT version, applied_at FROM saved_journal;"
+                ).unwrap(),
+                "journal-missing-column" => database.execute_batch(
+                    "ALTER TABLE schema_migration DROP COLUMN applied_at;"
+                ).unwrap(),
                 "journal" => database
                     .execute_batch("DELETE FROM schema_migration WHERE version=2")
                     .unwrap(),
