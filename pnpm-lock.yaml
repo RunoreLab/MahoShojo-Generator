@@ -501,6 +501,9 @@ importers:
       '@mahoshojo/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@mahoshojo/domain':
+        specifier: workspace:*
+        version: link:../domain
       jsonrepair:
         specifier: ^3.13.1
         version: 3.14.0

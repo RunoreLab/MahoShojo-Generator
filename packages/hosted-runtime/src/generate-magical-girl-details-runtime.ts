@@ -1,3 +1,4 @@
+import { buildUnsignedMagicalGirlDetailsCard } from '@mahoshojo/ai-core/magical-girl-details-generation';
 import type { QuestionnaireAnswerItem } from '@mahoshojo/domain/questionnaire';
 import {
   createGenerateMagicalGirlDetailsService,
@@ -32,7 +33,6 @@ import {
   type RequestQuestionnaire,
 } from './questionnaire-generation-runtime';
 import {
-  compactQuestionnaireAnswerItems,
   resolveLegacyQuestionnaireProviderRuntime,
   type LegacyProviderRuntimeLogger,
 } from './questionnaire-composition-runtime-shared';
@@ -206,11 +206,7 @@ export const createGenerateMagicalGirlDetailsRuntime = (
     },
     recordActivity: ports.recordActivity,
     buildResponse: async (request, input, output) => {
-      const unsigned: Record<string, unknown> = {
-        ...output.details,
-        templateId: '魔法少女/心之花/魔法少女（问卷生成）',
-        userAnswers: compactQuestionnaireAnswerItems(input.normalizedAnswers),
-      };
+      const unsigned = buildUnsignedMagicalGirlDetailsCard(output.details, input.normalizedAnswers);
       const data = input.allowNativeSignature
         ? { ...unsigned, signature: await ports.sign(unsigned) }
         : unsigned;
