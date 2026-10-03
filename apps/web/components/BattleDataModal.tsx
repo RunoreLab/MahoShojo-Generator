@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useMemo, useRef, useId } from 'react';
 import { createPortal } from 'react-dom';
+import Link from 'next/link';
 import DataCard from './DataCard';
 import SortSelector from './SortSelector';
 import DataCardDetailsModal from './DataCardDetailsModal';
@@ -1877,7 +1878,20 @@ export default function BattleDataModal({
             id={activeTabPanelId}
             aria-labelledby={activeTabTabId}
           >
-	            {isLocalTab ? <LocalLibraryStatusNote className="mb-3" /> : null}
+            {isLocalTab ? (
+              <div className="mb-3">
+                <LocalLibraryStatusNote />
+                <Link
+                  href="/local-library"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  prefetch={false}
+                  className="mt-2 inline-flex min-h-11 items-center rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-purple-700 hover:bg-purple-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-purple-600"
+                >
+                  本地库管理与整库导入导出（新标签页）
+                </Link>
+              </div>
+            ) : null}
 	            {isPvpHandTab ? (
 	              filteredPvpHandCards.length === 0 ? (
 	                <div className="text-center text-gray-500 py-8">暂无手牌</div>
