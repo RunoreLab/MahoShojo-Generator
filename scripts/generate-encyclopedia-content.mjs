@@ -62,19 +62,53 @@ const CATALOG_MODULE = path.join(
  * 预设、favicon 等）。因此脚本**不**扫描并剪除整个根目录，而是只对 `sync-manifest.json` 登记过的文件名
  * 负责——否则一次 `rm` 就会删掉别人的资源。
  */
+/**
+ * 每个 app 同步哪些品牌资源由 manifest 决定，而不是「全部同步」。
+ *
+ * Desktop 首期不打包 13 个功能入口的资源：它们在 Desktop 全部不可用（`DESK-PROD-001`），因此根本
+ * 不会被渲染。把它们塞进安装包只会让一个刚打开的桌面应用多带 1.4MB 永远读不到的资源。
+ * D3.1 交付某个入口时，往 manifest 里加一行即可。
+ */
 const TARGETS = [
-  { app: 'apps/web', label: 'Web' },
-  { app: 'apps/desktop', label: 'Desktop' },
+  // `shared` 是两端都要的资源；Web 另外还要它首页功能卡的那一批。
+  { app: 'apps/web', label: 'Web', keys: ['shared', 'web'] },
+  { app: 'apps/desktop', label: 'Desktop', keys: ['shared'] },
 ];
 
 const SYNC_MANIFEST = path.join(CONTENT_ROOT, 'sync-manifest.json');
 
-const readOwnedBrandFiles = async () => {
+/**
+ * 共源首页功能目录。
+ *
+ * 它与正文一样是产品定义，因此从共享包源码就地求值（`ui-web` 是 source-export，没有构建产物）。
+ */
+const HOME_FEATURE_CATALOG = path.join(root, 'packages', 'ui-web', 'src', 'home', 'feature-catalog.ts');
+
+const readManifest = async () => {
   const manifest = JSON.parse(await readFile(SYNC_MANIFEST, 'utf8'));
-  if (!Array.isArray(manifest.brand)) {
-    throw new Error(`${path.relative(root, SYNC_MANIFEST)} 缺少 brand 数组`);
+  if (!manifest.brand || !Array.isArray(manifest.brand.shared) || !Array.isArray(manifest.brand.web)) {
+    throw new Error(`${path.relative(root, SYNC_MANIFEST)} 需要 brand.shared 与 brand.web 两个数组`);
   }
-  return manifest.brand;
+  return manifest;
+};
+
+const readHomeFeatureAssets = async () => {
+  const transpiled = await build({
+    entryPoints: [HOME_FEATURE_CATALOG],
+    bundle: true,
+    platform: 'node',
+    format: 'esm',
+    write: false,
+  });
+  const output = transpiled.outputFiles[0];
+  const module = await import(
+    `data:text/javascript;base64,${Buffer.from(output.text).toString('base64')}`
+  );
+  const categories = module.HOME_FEATURE_CATEGORIES;
+  if (!Array.isArray(categories) || categories.length === 0) {
+    throw new Error(`首页目录没有导出 HOME_FEATURE_CATEGORIES：${HOME_FEATURE_CATALOG}`);
+  }
+  return categories.flatMap((category) => category.features.map((feature) => feature.assetFile));
 };
 
 const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
@@ -148,7 +182,16 @@ const syncDirectory = async ({ from, to, files, ownedFiles, exclusive, check, pr
 
   const existing = new Set(await readdir(to).catch(() => []));
   for (const name of files) {
-    const source = await readFile(path.join(from, name));
+    const sourcePath = path.join(from, name);
+    const source = await readFile(sourcePath).catch(() => null);
+    if (source === null) {
+      // manifest 指向一个已被删除的资源。让它进入 problems 而不是抛 ENOENT：门禁失败时应该一次
+      // 列出所有问题，而不是在第一个就崩掉。
+      problems.push(`${path.relative(root, sourcePath)} 不存在，请修正 sync-manifest 或 content/brand/`);
+      existing.delete(name);
+      continue;
+    }
+
     const targetPath = path.join(to, name);
     // 无论是否写入都要从 `existing` 里移除：留在集合里就意味着「目标有而 content/ 没有」，
     // 那与本文件是否已同步无关。
@@ -192,23 +235,49 @@ const syncDirectory = async ({ from, to, files, ownedFiles, exclusive, check, pr
   }
 };
 
+/**
+ * 品牌资源与首页目录的一致性。
+ *
+ * 方向是单向的：目录引用了不存在的资源会让页面出现裂图，而 content/brand/ 里多出来的资源只是
+ * 尚未启用（或者已经废弃但还没删），因此不报错——但它必须真的存在于 content/brand/，否则
+ * 「资源权威在 content/」这件事就不成立。
+ */
+const collectBrandProblems = async (brandFiles, referencedByCatalog, manifest) => {
+  const problems = [];
+  const available = new Set(brandFiles);
+
+  for (const assetFile of referencedByCatalog) {
+    if (!available.has(assetFile)) {
+      problems.push(`首页目录引用了 content/brand/ 里不存在的资源 ${assetFile}`);
+    }
+  }
+
+  const owned = new Set([...manifest.brand.shared, ...manifest.brand.web]);
+  for (const name of owned) {
+    if (!available.has(name)) {
+      problems.push(`sync-manifest 登记了 content/brand/ 里不存在的资源 ${name}`);
+    }
+  }
+
+  const duplicated = [...manifest.brand.shared].filter((name) => manifest.brand.web.includes(name));
+  if (duplicated.length > 0) {
+    problems.push(`以下资源同时登记在 shared 与 web：${duplicated.join(', ')}`);
+  }
+
+  return problems;
+};
+
 export async function generate({ check = false } = {}) {
   const problems = [];
   const entries = await readCatalogEntries();
+  const manifest = await readManifest();
 
   const encyclopediaFiles = await listFiles(ENCYCLOPEDIA_DIR, '.md');
   const brandFiles = await listFiles(BRAND_DIR, '');
   problems.push(...(await collectProblems(encyclopediaFiles, entries)));
+  problems.push(...(await collectBrandProblems(brandFiles, await readHomeFeatureAssets(), manifest)));
 
-  const ownedBrandFiles = await readOwnedBrandFiles();
-  const expectedOwned = [...brandFiles].sort();
-  if (JSON.stringify([...ownedBrandFiles].sort()) !== JSON.stringify(expectedOwned)) {
-    problems.push(
-      `content/sync-manifest.json 登记的品牌资源与 content/brand/ 不一致：登记 ${[...ownedBrandFiles].sort().join(', ')}，实际 ${expectedOwned.join(', ')}`,
-    );
-  }
-
-  for (const { app, label } of TARGETS) {
+  for (const { app, label, keys } of TARGETS) {
     const publicRoot = path.join(root, app, 'public');
     await mkdir(publicRoot, { recursive: true });
 
@@ -223,15 +292,15 @@ export async function generate({ check = false } = {}) {
     await syncDirectory({
       from: BRAND_DIR,
       to: publicRoot,
-      files: brandFiles,
-      ownedFiles: ownedBrandFiles,
+      files: [...new Set(keys.flatMap((key) => manifest.brand[key]))].sort(),
+      ownedFiles: [...manifest.brand.shared, ...manifest.brand.web],
       exclusive: false,
       check,
       problems,
     });
 
     console.log(
-      `${label} 百科内容 ${check ? '已校验' : '已同步'}：${encyclopediaFiles.length} 篇正文、${brandFiles.length} 个品牌资源`,
+      `${label} 内容 ${check ? '已校验' : '已同步'}：${encyclopediaFiles.length} 篇正文、${keys.flatMap((key) => manifest.brand[key]).length} 个品牌资源`,
     );
   }
 
