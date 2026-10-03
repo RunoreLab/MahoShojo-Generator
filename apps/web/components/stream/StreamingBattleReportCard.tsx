@@ -9,7 +9,7 @@ import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import type { AdjudicationResult } from '@/types/arena';
 import remarkBattleTable from '@/lib/markdown/remarkBattleTable';
-import { fixNestedListIndentation } from '@/lib/markdown/fix-list-indentation';
+import { fixNestedListIndentation } from '@mahoshojo/ui-web/markdown';
 import {
     formatMarkdownImage,
     formatMarkdownLink,

@@ -9,7 +9,7 @@ import remarkMath from 'remark-math';
 // 1. [新增] 导入随机判定结果的类型定义
 import { AdjudicationResult } from '@/types/arena';
 import remarkBattleTable from '@/lib/markdown/remarkBattleTable';
-import { fixNestedListIndentation } from '@/lib/markdown/fix-list-indentation';
+import { fixNestedListIndentation } from '@mahoshojo/ui-web/markdown';
 import {
   formatMarkdownImage,
   formatMarkdownLink,
