@@ -44,6 +44,17 @@ const renderMarkdown = (content: string, props: Record<string, unknown> = {}): v
  * - 缺省策略拒绝一切站外媒体，宿主可以注入自己的判定。
  */
 describe('MarkdownBlock headings', () => {
+  it('includes nested emphasis, code and link text in stable duplicate heading ids', () => {
+    const content = '## **配置 `API`** 与 [说明](/encyclopedia/ai-errors)\n\n## 配置 API 与 说明';
+    for (const mode of ['compact', 'article']) {
+      renderMarkdown(content, { headingIds: 'github', mode });
+      expect([...container.querySelectorAll('[id]')].map((node) => node.id)).toEqual([
+        '配置-api-与-说明', '配置-api-与-说明-1',
+      ]);
+      expect(container.querySelector('strong code')?.textContent).toBe('API');
+    }
+  });
+
   it('does not write heading ids by default', () => {
     renderMarkdown('# 角色生成\n\n正文。');
     expect(container.querySelector('h2')).not.toBeNull();
@@ -104,6 +115,22 @@ describe('MarkdownBlock encyclopedia inline links', () => {
 });
 
 describe('MarkdownBlock navigation policy', () => {
+  it('lets the host render native external anchors without intercepting clicks', () => {
+    renderMarkdown('[仓库](https://github.com/example/repo "代码仓库")', {
+      renderExternalLink: ({ href, title, className, children }: InternalLinkRenderProps) => (
+        <a href={href} title={title} className={className} target="_blank" rel="noopener noreferrer">{children}</a>
+      ),
+    });
+    const anchor = container.querySelector('a')!;
+    expect(anchor.href).toBe('https://github.com/example/repo');
+    expect(anchor.title).toBe('代码仓库');
+    expect(anchor.target).toBe('_blank');
+    expect(anchor.rel).toBe('noopener noreferrer');
+    const click = new MouseEvent('click', { bubbles: true, cancelable: true, ctrlKey: true });
+    act(() => anchor.dispatchEvent(click));
+    expect(click.defaultPrevented).toBe(false);
+  });
+
   it('intercepts internal clicks when the host provides a handler', () => {
     const onNavigateInternal = vi.fn();
     renderMarkdown('[本地库](/local-library)', { onNavigateInternal });

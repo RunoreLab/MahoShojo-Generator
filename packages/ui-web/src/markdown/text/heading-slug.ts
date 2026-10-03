@@ -46,15 +46,23 @@ export const slugifyHeading = (text: string): string => {
  * 同名标题必须得到不同 slug（`foo`、`foo-1`…），否则条目页里两个同名小节会共用一个锚点，链接到
  * 第二个时浏览器会滚到第一个。用闭包而不是纯函数，是为了让「同一篇文章内的重名消解」这一上下文
  * 在多次调用之间保持——每次调用都新建一个分配器就等于没有消解。
+ * 自带数字后缀的标题也占用最终 id；宿主已有的外层标题通过 reservedIds 预占，避免正文再次分配。
  */
-export const createHeadingSlugger = (): ((text: string) => string) => {
-  const seen = new Map<string, number>();
+export const createHeadingSlugger = (reservedIds: readonly string[] = []): ((text: string) => string) => {
+  const usedIds = new Set(reservedIds);
+  const nextSuffix = new Map<string, number>();
 
   return (text: string) => {
     const base = slugifyHeading(text);
-    const used = seen.get(base) ?? 0;
-    seen.set(base, used + 1);
-    return used === 0 ? base : `${base}-${used}`;
+    let suffix = nextSuffix.get(base) ?? 0;
+    let id = suffix === 0 ? base : `${base}-${suffix}`;
+    while (usedIds.has(id)) {
+      suffix += 1;
+      id = `${base}-${suffix}`;
+    }
+    nextSuffix.set(base, suffix + 1);
+    usedIds.add(id);
+    return id;
   };
 };
 

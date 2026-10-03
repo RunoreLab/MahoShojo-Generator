@@ -1,4 +1,4 @@
-import type { ComponentPropsWithoutRef, ReactNode } from 'react';
+import { isValidElement, type ComponentPropsWithoutRef, type ReactNode } from 'react';
 import ReactMarkdown, { type Components, type ExtraProps, type Options } from 'react-markdown';
 import rehypeKatex from 'rehype-katex';
 import remarkGfm from 'remark-gfm';
@@ -38,6 +38,8 @@ export interface InternalLinkRenderProps {
   readonly children: ReactNode;
 }
 
+export type ExternalLinkRenderProps = InternalLinkRenderProps;
+
 /**
  * 链接策略。
  *
@@ -46,7 +48,8 @@ export interface InternalLinkRenderProps {
  * - **站内**产品路径：宿主可以只给 `onNavigateInternal`（拦截点击，其余用默认 `<a>`），也可以给
  *   `renderInternalLink` 换掉整个元素（Web 用 Next 的 `<Link>` 拿到客户端路由）。两者都不给时就是
  *   普通 `<a href>`，即浏览器默认导航。
- * - **站外**链接：缺省 `onNavigateExternal` 时渲染成**不可点击并说明原因**，而不是留一个点了没反应的
+ * - **站外**链接：宿主可以用 `renderExternalLink` 提供原生链接，或用 `onNavigateExternal` 调用打开能力。
+ *   两者都缺省时渲染成**不可点击并说明原因**，而不是留一个点了没反应的
  *   链接。这与 `ProductNav` 的处理是同一套形状：Desktop 目前没有 opener 能力，于是站外内容在该运行时
  *   里就是不可执行的，而不是「看起来能点但什么也不发生」。
  */
@@ -54,6 +57,7 @@ export type MarkdownNavigationPolicy = {
   readonly onNavigateInternal?: ((href: string) => void) | undefined;
   readonly renderInternalLink?: ((link: InternalLinkRenderProps) => ReactNode) | undefined;
   readonly onNavigateExternal?: ((href: string) => void) | undefined;
+  readonly renderExternalLink?: ((link: ExternalLinkRenderProps) => ReactNode) | undefined;
   readonly externalBlockedReason?: string;
 };
 
@@ -73,6 +77,8 @@ export interface MarkdownBlockProps extends MarkdownNavigationPolicy {
    * 对那两类内容默认不写 `id`，比"全局开启再想办法 sanitize"更保守，也更少改动既有行为。
    */
   headingIds?: false | 'github';
+  /** 宿主已经渲染的标题 id，生成正文锚点时避开这些值。仅在启用 headingIds 时生效。 */
+  reservedHeadingIds?: readonly string[];
   /** 站外媒体策略。缺省拒绝一切站外媒体，见 {@link DENY_EXTERNAL_MEDIA}。 */
   externalMediaPolicy?: ExternalMediaPolicy;
   /** 宿主的 remark 插件，按需追加在 GFM 与数学之后。 */
@@ -104,9 +110,10 @@ const getEncyclopediaHrefFromInlineCode = (value: string): string | null => {
 };
 
 const flattenText = (children: ReactNode): string => {
-  if (typeof children === 'string') return children;
-  if (Array.isArray(children)) {
-    return children.filter((child): child is string => typeof child === 'string').join('');
+  if (typeof children === 'string' || typeof children === 'number') return String(children);
+  if (Array.isArray(children)) return children.map(flattenText).join('');
+  if (isValidElement<{ children?: ReactNode }>(children)) {
+    return flattenText(children.props.children);
   }
   return '';
 };
@@ -117,10 +124,12 @@ export function MarkdownBlock({
   mode = 'compact',
   className,
   headingIds = false,
+  reservedHeadingIds,
   externalMediaPolicy = DENY_EXTERNAL_MEDIA,
   onNavigateInternal,
   renderInternalLink,
   onNavigateExternal,
+  renderExternalLink,
   externalBlockedReason = DEFAULT_EXTERNAL_BLOCKED_REASON,
   remarkPlugins = [],
   rehypePlugins = [],
@@ -156,7 +165,7 @@ export function MarkdownBlock({
    * 它在渲染期间创建，因此**每次渲染都是新的**——这正是需要的：一篇文章内同名标题要消解，而两次
    * 渲染之间不需要保留任何状态（重新渲染时 heading 集合相同，结果也相同）。
    */
-  const slugHeading = headingIds === 'github' ? createHeadingSlugger() : null;
+  const slugHeading = headingIds === 'github' ? createHeadingSlugger(reservedHeadingIds) : null;
 
   const headingId = (children: ReactNode): string | undefined =>
     slugHeading === null ? undefined : slugHeading(flattenText(children));
@@ -167,6 +176,10 @@ export function MarkdownBlock({
     linkClassName: string,
     title?: string,
   ) => {
+    if (renderExternalLink) {
+      return <>{renderExternalLink({ href, title, className: linkClassName, children: label })}</>;
+    }
+
     if (onNavigateExternal) {
       return (
         <a

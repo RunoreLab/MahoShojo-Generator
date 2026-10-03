@@ -5,6 +5,17 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { MarkdownBlock } from '@/components/MarkdownBlock';
 
 describe('MarkdownBlock', () => {
+  test('站外链接保留带隔离属性的原生新标签页导航', () => {
+    const html = renderToStaticMarkup(React.createElement(MarkdownBlock, {
+      content: '[仓库](https://github.com/example/repo "代码仓库")',
+    }));
+    expect(html).toContain('href="https://github.com/example/repo"');
+    expect(html).toContain('title="代码仓库"');
+    expect(html).toContain('target="_blank"');
+    expect(html).toContain('rel="noopener noreferrer"');
+    expect(html).not.toContain('cursor-not-allowed');
+  });
+
   test('将百科路径行内代码渲染为可点击链接', () => {
     const html = renderToStaticMarkup(
       React.createElement(MarkdownBlock, {

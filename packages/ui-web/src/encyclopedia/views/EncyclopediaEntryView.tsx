@@ -10,6 +10,7 @@ import {
   stripLeadingMatchingTitle,
   useHashScrollTarget,
   type InternalLinkRenderProps,
+  type ExternalLinkRenderProps,
 } from '../../markdown/index';
 import { useEncyclopediaContent } from './use-encyclopedia-content';
 
@@ -25,6 +26,7 @@ export interface EncyclopediaEntryViewProps {
   readonly hash?: string | undefined;
   /** 站外链接的打开方式。缺省时站外链接不可执行并说明原因。 */
   readonly onNavigateExternal?: ((href: string) => void) | undefined;
+  readonly renderExternalLink?: ((link: ExternalLinkRenderProps) => ReactNode) | undefined;
   /** 站内产品链接的自定义渲染（例如 Next 的 `<Link>`）。 */
   readonly renderInternalLink?: ((link: InternalLinkRenderProps) => ReactNode) | undefined;
   /** 追加在正文之后的宿主面板（例如 Web 的标签库）。 */
@@ -51,6 +53,7 @@ export function EncyclopediaEntryView({
   onNavigate,
   hash,
   onNavigateExternal,
+  renderExternalLink,
   renderInternalLink,
   extraPanel,
   headerLinks,
@@ -223,8 +226,10 @@ export function EncyclopediaEntryView({
                   variant="light"
                   mode="article"
                   headingIds="github"
+                  reservedHeadingIds={[titleSlug]}
                   onNavigateInternal={onNavigate}
                   {...(onNavigateExternal ? { onNavigateExternal } : {})}
+                  {...(renderExternalLink ? { renderExternalLink } : {})}
                   {...(renderInternalLink ? { renderInternalLink } : {})}
                 />
                 {extraPanel}

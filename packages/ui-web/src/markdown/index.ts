@@ -19,6 +19,7 @@ export {
   type MarkdownBlockProps,
   type MarkdownBlockVariant,
   type InternalLinkRenderProps,
+  type ExternalLinkRenderProps,
   type MarkdownNavigationPolicy,
   type MarkdownPlugin,
 } from './MarkdownBlock';

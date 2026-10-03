@@ -205,6 +205,24 @@ describe('EncyclopediaEntryView', () => {
     expect(container.textContent).toContain('另一个标题');
   });
 
+  it.each([true, false])('reserves the outer title id when the leading title is stripped: %s', async (matchingTitle) => {
+    const title = getEncyclopediaEntry('site-guide')!.title;
+    const titleId = slugifyHeading(title);
+    const leadingTitle = matchingTitle ? title : '另一个标题';
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(
+      `# ${leadingTitle}\n\n## ${title}\n\n## ${title}-1\n\n## ${title}`,
+    )));
+    renderEntry();
+    await flush();
+
+    expect(container.querySelector('h1')?.id).toBe(titleId);
+    expect([...container.querySelectorAll('main [id]')].map((node) => node.id)).toEqual([
+      ...(matchingTitle ? [] : ['另一个标题']),
+      `${titleId}-1`, `${titleId}-1-1`, `${titleId}-2`,
+    ]);
+    expect(container.querySelectorAll(`[id="${titleId}"]`)).toHaveLength(1);
+  });
+
   it('writes heading ids into the rendered body', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('# 标题\n\n## 角色生成\n\n正文。', { status: 200 })));
     renderEntry();

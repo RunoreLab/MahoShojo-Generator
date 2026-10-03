@@ -34,6 +34,23 @@ describe('slugifyHeading', () => {
 });
 
 describe('createHeadingSlugger', () => {
+  it('avoids collisions between natural suffixes and generated suffixes in either order', () => {
+    for (const [titles, expected] of [
+      [['foo', 'foo', 'foo-1', 'foo'], ['foo', 'foo-1', 'foo-1-1', 'foo-2']],
+      [['foo-1', 'foo', 'foo', 'foo-1'], ['foo-1', 'foo', 'foo-2', 'foo-1-1']],
+    ]) {
+      const slug = createHeadingSlugger();
+      expect(titles.map(slug)).toEqual(expected);
+    }
+  });
+
+  it('reserves host heading ids before allocating body headings', () => {
+    const slug = createHeadingSlugger(['概述', '概述-1']);
+    expect(slug('概述')).toBe('概述-2');
+    expect(slug('概述-1')).toBe('概述-1-1');
+    expect(slug('概述')).toBe('概述-3');
+  });
+
   it('suffixes duplicate headings instead of colliding', () => {
     const slug = createHeadingSlugger();
     expect(slug('常见问题')).toBe('常见问题');

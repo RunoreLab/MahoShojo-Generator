@@ -12,6 +12,7 @@ import {
 
 import remarkBattleTable from '@/lib/markdown/remarkBattleTable';
 import { webExternalMediaPolicy } from '@/lib/markdown/externalMedia';
+import { renderWebExternalLink } from './markdown-link-adapters';
 
 /**
  * Web 的 Markdown 包装。
@@ -54,6 +55,7 @@ export function MarkdownBlock(props: MarkdownBlockProps) {
     <SharedMarkdownBlock
       {...props}
       renderInternalLink={renderInternalLink}
+      renderExternalLink={renderWebExternalLink}
       externalMediaPolicy={webExternalMediaPolicy satisfies ExternalMediaPolicy}
       remarkPlugins={WEB_REMARK_PLUGINS}
     />

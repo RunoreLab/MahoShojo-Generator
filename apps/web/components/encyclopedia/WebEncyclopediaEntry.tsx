@@ -6,6 +6,7 @@ import { EncyclopediaEntryView } from '@mahoshojo/ui-web/encyclopedia-views';
 import type { InternalLinkRenderProps } from '@mahoshojo/ui-web/markdown';
 
 import { useLocationHash } from '@/lib/use-location-hash';
+import { renderWebExternalLink } from '../markdown-link-adapters';
 
 import { TagsLibraryPanel } from './TagsLibraryPanel';
 import {
@@ -37,6 +38,7 @@ export function WebEncyclopediaEntry({ slug }: { slug?: string }) {
       onNavigate={useWebEncyclopediaNavigate()}
       hash={hash}
       renderInternalLink={renderInternalLink}
+      renderExternalLink={renderWebExternalLink}
       extraPanel={slug === 'tags' ? <TagsLibraryPanel /> : null}
       headerLinks={<WebEncyclopediaHeaderLinks />}
     />
