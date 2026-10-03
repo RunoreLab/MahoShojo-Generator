@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "pnpm run typecheck:build && vite build",
+    "dev": "pnpm run generate:content && vite",
+    "build": "pnpm run generate:content && pnpm run typecheck:build && vite build",
     "typecheck:build": "tsc --noEmit --pretty false -p tsconfig.build.json",
     "preview": "vite preview",
     "test": "vitest run --config vitest.config.ts",
@@ -13,7 +13,8 @@
     "tauri": "tauri",
     "dev:tauri": "tauri dev",
     "build:tauri": "tauri build",
-    "check:rust": "cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check && cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings && cargo test --manifest-path src-tauri/Cargo.toml"
+    "check:rust": "cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check && cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings && cargo test --manifest-path src-tauri/Cargo.toml",
+    "generate:content": "node ../../scripts/generate-encyclopedia-content.mjs --target desktop"
   },
   "dependencies": {
     "@mahoshojo/ai-core": "workspace:*",

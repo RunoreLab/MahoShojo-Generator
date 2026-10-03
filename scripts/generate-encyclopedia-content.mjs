@@ -20,13 +20,14 @@
  * 里的 typed catalog，由本脚本**校验引用完整性**而不是生成它——把那 53 条元数据改成从 Markdown
  * frontmatter 推导，是一次独立的格式迁移，不属于 D3.0。
  *
- * 用法：`node scripts/generate-encyclopedia-content.mjs [--check]`
+ * 用法：`node scripts/generate-encyclopedia-content.mjs [--target web|desktop] [--check|--check-output]`
+ * `--check` 只读校验源；`--check-output` 另校验已生成文件；缺省生成两个宿主。
  */
 
 import { createHash } from 'node:crypto';
 import { lstat, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { build } from 'esbuild';
 
@@ -78,9 +79,9 @@ const TARGETS = [
 const SYNC_MANIFEST = path.join(CONTENT_ROOT, 'sync-manifest.json');
 
 /**
- * 共源首页功能目录。
+ * Web 首页资源引用。
  *
- * 它与正文一样是产品定义，因此从共享包源码就地求值（`ui-web` 是 source-export，没有构建产物）。
+ * 各宿主拥有自己的首页 inventory；这里仅验证 Web catalog 引用的资源确实会被同步。
  */
 const HOME_FEATURE_CATALOG = path.join(root, 'apps', 'web', 'config', 'features.ts');
 
@@ -88,6 +89,11 @@ const readManifest = async () => {
   const manifest = JSON.parse(await readFile(SYNC_MANIFEST, 'utf8'));
   if (!manifest.brand || !Array.isArray(manifest.brand.shared) || !Array.isArray(manifest.brand.web)) {
     throw new Error(`${path.relative(root, SYNC_MANIFEST)} 需要 brand.shared 与 brand.web 两个数组`);
+  }
+  for (const names of [manifest.brand.shared, manifest.brand.web]) {
+    if (new Set(names).size !== names.length || names.some((name) => typeof name !== 'string' || !/^[a-z0-9][a-z0-9.-]*$/i.test(name))) {
+      throw new Error('品牌资源清单必须是无重复的根目录文件名，不允许路径');
+    }
   }
   return manifest;
 };
@@ -178,7 +184,7 @@ const collectProblems = async (contentFiles, entries) => {
  * `ownedFiles` 登记过的文件名（品牌资源所在的 `public/` 根目录）。
  */
 const syncDirectory = async ({ from, to, files, ownedFiles, exclusive, check, problems }) => {
-  await mkdir(to, { recursive: true });
+  if (!check) await mkdir(to, { recursive: true });
 
   const existing = new Set(await readdir(to).catch(() => []));
   for (const name of files) {
@@ -250,6 +256,9 @@ const collectBrandProblems = async (brandFiles, referencedByCatalog, manifest) =
     if (!available.has(assetFile)) {
       problems.push(`首页目录引用了 content/brand/ 里不存在的资源 ${assetFile}`);
     }
+    if (!manifest.brand.shared.includes(assetFile) && !manifest.brand.web.includes(assetFile)) {
+      problems.push(`首页资源 ${assetFile} 未登记到 Web 同步清单`);
+    }
   }
 
   const owned = new Set([...manifest.brand.shared, ...manifest.brand.web]);
@@ -267,7 +276,8 @@ const collectBrandProblems = async (brandFiles, referencedByCatalog, manifest) =
   return problems;
 };
 
-export async function generate({ check = false } = {}) {
+export async function generate({ check = false, checkOutput = false, target = 'all', outputRoot = root } = {}) {
+  if (!['all', 'web', 'desktop'].includes(target)) throw new Error(`未知同步目标：${target}`);
   const problems = [];
   const entries = await readCatalogEntries();
   const manifest = await readManifest();
@@ -277,16 +287,23 @@ export async function generate({ check = false } = {}) {
   problems.push(...(await collectProblems(encyclopediaFiles, entries)));
   problems.push(...(await collectBrandProblems(brandFiles, await readHomeFeatureAssets(), manifest)));
 
+  // 在写入前检查全部源文件；--check 不依赖开发机残留的 public/ 生成物，也不写磁盘。
+  if (problems.length > 0) throw new Error(`百科内容源校验失败：\n- ${problems.join('\n- ')}`);
+  if (check && !checkOutput) {
+    console.log(`content/ 源校验通过：${entries.length} 篇正文、${brandFiles.length} 个品牌资源`);
+    return;
+  }
+
   for (const { app, label, keys } of TARGETS) {
-    const publicRoot = path.join(root, app, 'public');
-    await mkdir(publicRoot, { recursive: true });
+    if (target !== 'all' && app !== `apps/${target}`) continue;
+    const publicRoot = path.join(outputRoot, app, 'public');
 
     await syncDirectory({
       from: ENCYCLOPEDIA_DIR,
       to: path.join(publicRoot, 'encyclopedia'),
       files: encyclopediaFiles,
       exclusive: true,
-      check,
+      check: checkOutput,
       problems,
     });
     await syncDirectory({
@@ -295,12 +312,12 @@ export async function generate({ check = false } = {}) {
       files: [...new Set(keys.flatMap((key) => manifest.brand[key]))].sort(),
       ownedFiles: [...manifest.brand.shared, ...manifest.brand.web],
       exclusive: false,
-      check,
+      check: checkOutput,
       problems,
     });
 
     console.log(
-      `${label} 内容 ${check ? '已校验' : '已同步'}：${encyclopediaFiles.length} 篇正文、${keys.flatMap((key) => manifest.brand[key]).length} 个品牌资源`,
+      `${label} 内容 ${checkOutput ? '已校验' : '已同步'}：${encyclopediaFiles.length} 篇正文、${keys.flatMap((key) => manifest.brand[key]).length} 个品牌资源`,
     );
   }
 
@@ -312,8 +329,10 @@ export async function generate({ check = false } = {}) {
   console.log(`content/ 校验通过：目录 ${entries.length} 条，指纹 ${catalogDigest.slice(0, 12)}`);
 }
 
-if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) {
-  generate({ check: process.argv.includes('--check') }).catch((error) => {
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  const args = process.argv.slice(2);
+  const targetIndex = args.indexOf('--target');
+  generate({ check: args.includes('--check'), checkOutput: args.includes('--check-output'), target: targetIndex < 0 ? 'all' : args[targetIndex + 1] ?? '' }).catch((error) => {
     console.error(error instanceof Error ? error.message : error);
     process.exitCode = 1;
   });

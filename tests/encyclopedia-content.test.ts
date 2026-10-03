@@ -18,10 +18,13 @@
  * 该不变量由同步脚本强制；因此这里从文件名推导 slug 是安全的。
  */
 
-import { readFile, readdir } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
+import { generate } from '../scripts/generate-encyclopedia-content.mjs';
 
 const REPO_ROOT = path.resolve(import.meta.dirname, '..');
 const CONTENT_DIR = path.join(REPO_ROOT, 'content', 'encyclopedia');
@@ -39,9 +42,6 @@ const TARGETS = [
   { app: 'apps/web', label: 'Web' },
   { app: 'apps/desktop', label: 'Desktop' },
 ] as const;
-
-/** `/encyclopedia/<slug>` —— 条目页路径，也是正文里互链使用的形式。 */
-const entryPath = (slug) => `/encyclopedia/${slug}`;
 
 const listContentFiles = async () =>
   (await readdir(CONTENT_DIR)).filter((name) => name.endsWith('.md')).sort();
@@ -85,44 +85,57 @@ describe('encyclopedia content authority', () => {
   });
 });
 
-describe('encyclopedia content reaches both service roots', () => {
-  it('serves the whole encyclopedia from Web', async () => {
-    const served = (await readdir(path.join(REPO_ROOT, 'apps/web/public/encyclopedia')))
-      .filter((name) => name.endsWith('.md'))
-      .sort();
-    expect(served).toEqual(await listContentFiles());
+const temporaryRoots: string[] = [];
+afterEach(async () => {
+  for (const directory of temporaryRoots.splice(0)) await rm(directory, { recursive: true, force: true });
+});
+const freshRoot = async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'mahoshojo-content-'));
+  temporaryRoots.push(directory);
+  return directory;
+};
+
+describe('generated content from a clean output root', () => {
+  it('validates source without requiring or writing generated copies', async () => {
+    const outputRoot = await freshRoot();
+    await generate({ check: true, outputRoot });
+    expect(await readdir(outputRoot)).toEqual([]);
+    // Exercises the CLI entrypoint on Windows as well as POSIX; a silent no-op is a failure.
+    const output = execFileSync(process.execPath, ['scripts/generate-encyclopedia-content.mjs', '--check'], { cwd: REPO_ROOT, encoding: 'utf8' });
+    expect(output).toContain('content/ 源校验通过');
   });
 
-  it('serves the whole encyclopedia from Desktop', async () => {
-    // Desktop 从 D3.0 起必须在**没有账号、没有模型配置、项目服务器不可达**时仍能读到百科正文
-    // （`DESK-PROD-004`）。Tauri 的 `frontendDist` 不做 SPA fallback，所以正文必须真的躺在
-    // `apps/desktop/public/` 里，而不是由某个运行时去别处取。这一层断言「文件在且集合一致」；
-    // 逐字节一致性由同步脚本的 `--check` 负责。
-    const served = (await readdir(path.join(REPO_ROOT, 'apps/desktop/public/encyclopedia')))
-      .filter((name) => name.endsWith('.md'))
-      .sort();
-    expect(served).toEqual(await listContentFiles());
-  });
-
-  it('ships the brand assets both runtimes render', async () => {
-    // D3.0 的首页与百科页会渲染 logo 与百科标识。Desktop 此前根本没有这些文件，
-    // 「共用一个外观」并不证明离线启动达成——资源必须在产物里。
-    for (const { app, label } of TARGETS) {
+  it('generates both runtimes byte-for-byte, prunes stale content and preserves unrelated files', async () => {
+    const outputRoot = await freshRoot();
+    await generate({ outputRoot });
+    for (const { app } of TARGETS) {
+      const publicRoot = path.join(outputRoot, app, 'public');
+      expect((await readdir(path.join(publicRoot, 'encyclopedia'))).sort()).toEqual(await listContentFiles());
+      for (const file of await listContentFiles()) {
+        expect(await readFile(path.join(publicRoot, 'encyclopedia', file))).toEqual(await readFile(path.join(CONTENT_DIR, file)));
+      }
       for (const asset of SHARED_BRAND_ASSETS) {
-        const bytes = await readFile(path.join(REPO_ROOT, app, 'public', asset)).catch(() => null);
-        expect(bytes, `${label} 缺少 ${asset}`).not.toBeNull();
-        expect(bytes!.length, `${label} 的 ${asset} 是空文件`).toBeGreaterThan(0);
+        expect(await readFile(path.join(publicRoot, asset))).toEqual(await readFile(path.join(REPO_ROOT, 'content/brand', asset)));
       }
     }
+    const desktop = path.join(outputRoot, 'apps/desktop/public');
+    expect(await readdir(desktop)).not.toContain('arena-card-white.webp');
+    await writeFile(path.join(desktop, 'keep.txt'), 'unrelated');
+    await writeFile(path.join(desktop, 'encyclopedia/stale.md'), 'retired');
+    await writeFile(path.join(desktop, 'logo.svg'), 'drift');
+    await expect(generate({ outputRoot, checkOutput: true })).rejects.toThrow('不同步');
+    await generate({ outputRoot });
+    await generate({ outputRoot, checkOutput: true });
+    expect(await readFile(path.join(desktop, 'keep.txt'), 'utf8')).toBe('unrelated');
+    expect(await readdir(path.join(desktop, 'encyclopedia'))).not.toContain('stale.md');
   });
 
-  it('gives every article the same bytes in both service roots', async () => {
-    // 只比文件名不比内容是不够的：一次手改 `apps/web/public` 就能让两个 app 的百科内容分叉，
-    // 而这种分叉在开发机上完全看不出来。
-    for (const file of await listContentFiles()) {
-      const web = await readFile(path.join(REPO_ROOT, 'apps/web/public/encyclopedia', file));
-      const desktop = await readFile(path.join(REPO_ROOT, 'apps/desktop/public/encyclopedia', file));
-      expect(desktop.equals(web), `${file} 在两个服务根里内容不同`).toBe(true);
+  it('only writes the selected runtime', async () => {
+    for (const target of ['web', 'desktop']) {
+      const outputRoot = await freshRoot();
+      await generate({ outputRoot, target });
+      expect(await readdir(path.join(outputRoot, 'apps'))).toEqual([target]);
     }
+    await expect(generate({ target: 'typo' })).rejects.toThrow('未知同步目标');
   });
 });
