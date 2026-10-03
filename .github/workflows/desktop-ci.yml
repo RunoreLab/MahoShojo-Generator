@@ -11,6 +11,9 @@ on:
     paths:
       - 'apps/desktop/**'
       - 'packages/**'
+      - 'content/**'
+      - 'scripts/generate-encyclopedia-content.mjs'
+      - 'tests/desktop-offline-content.test.ts'
       - '.github/workflows/desktop-ci.yml'
   push:
     branches:
@@ -18,6 +21,9 @@ on:
     paths:
       - 'apps/desktop/**'
       - 'packages/**'
+      - 'content/**'
+      - 'scripts/generate-encyclopedia-content.mjs'
+      - 'tests/desktop-offline-content.test.ts'
       - '.github/workflows/desktop-ci.yml'
   workflow_dispatch:
 
@@ -74,6 +80,11 @@ jobs:
 
       - name: Verify desktop frontend
         run: pnpm --filter @mahoshojo/desktop run build
+
+      - name: Verify packaged desktop offline content
+        env:
+          DESKTOP_OFFLINE_CONTENT_REQUIRE_DIST: '1'
+        run: pnpm exec vitest run --config vitest.config.ts tests/desktop-offline-content.test.ts
 
       - name: Check Rust formatting
         run: cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --all -- --check
