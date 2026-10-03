@@ -15,6 +15,7 @@ mod ai_contract_tests;
 #[cfg(test)]
 mod ai_e2e_tests;
 mod audit;
+mod backup;
 mod blob;
 mod export;
 mod gc;
@@ -755,6 +756,29 @@ fn export_id_header(request: &tauri::ipc::Request) -> Result<u64, crate::export:
         .map_err(|_| crate::export::ExportError::StaleSession)
 }
 
+/// 所有维护等待与文件 I/O 都留在 blocking worker，包括取得维护窗口。
+#[tauri::command]
+async fn create_local_backup(
+    app: tauri::AppHandle,
+) -> Result<backup::BackupSummary, backup::BackupError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        backup::create_backup(&app.state::<LocalLibrary>())
+    })
+    .await
+    .map_err(|_| backup::BackupError::Failed)?
+}
+
+#[tauri::command]
+async fn list_local_backups(
+    app: tauri::AppHandle,
+) -> Result<backup::BackupList, backup::BackupError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        backup::list_backups(app.state::<LocalLibrary>().data_root())
+    })
+    .await
+    .map_err(|_| backup::BackupError::Failed)?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -838,6 +862,8 @@ pub fn run() {
             begin_local_archive_export,
             append_local_archive_export_chunk,
             audit_local_library,
+            create_local_backup,
+            list_local_backups,
             collect_local_garbage
         ])
         .run(tauri::generate_context!())

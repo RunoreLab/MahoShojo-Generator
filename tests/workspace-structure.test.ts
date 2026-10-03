@@ -450,6 +450,8 @@ describe('desktop workspace app ownership', () => {
       'begin_local_archive_export',
       'append_local_archive_export_chunk',
       'audit_local_library',
+      'create_local_backup',
+      'list_local_backups',
       'collect_local_garbage',
     ]);
 

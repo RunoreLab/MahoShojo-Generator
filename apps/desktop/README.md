@@ -294,7 +294,7 @@ GC 不会碰它。只有 purge 让它成为回收候选。这条是"恢复一个
 `gcReclaimedSomething` 单列这个判断。`filesRemoved < reclaimed` 表示有些行的文件本来就不在
 （桶一的损坏形态），`filesFailed` 表示权限或 I/O 错误导致文件留下成为孤儿。
 
-D2.3 的导入导出平台桥与双端 `/local-library` 用户页面均已接线；完整备份/恢复仍属于 D2.4，尚未落地。portable archive 是可移植的自洽列举，不是用于整体替换数据库的备份快照。真机验收步骤见 [D2.5c 收口验收](../../docs/runbooks/2026-10-03_120000_Desktop归档与产品壳真机验收.md)。
+D2.3 的导入导出平台桥与双端 `/local-library` 用户页面均已接线；D2.4a 已交付 native 整库备份创建与校验列表；D2.4b 重启恢复仍未落地。portable archive 是可移植的自洽列举，不是用于整体替换数据库的备份快照。真机验收步骤见 [D2.5c 收口验收](../../docs/runbooks/2026-10-03_120000_Desktop归档与产品壳真机验收.md)。
 
 ## 持久 secret
 
@@ -336,4 +336,4 @@ Rust 侧在编译期 `include_str!` 同一份 fixture，两侧测试同时消费
   确认提示可读。
 - Windows 上同源 iframe 会继承宿主 IPC（GHSA-57fm-592m-34r7），因此 Web Package 在任何阶段
   都不会放进 iframe；该能力属于 D4 的独立零 capability webview。
-- 审计、GC 与 Web 包归档读取已有 `async fn` + `spawn_blocking`；这不代表所有 I/O 或 renderer 工作都不会阻塞。`zipSync` 仍是同步组装，真实响应性尚未验收；D2.4 备份仍须遵守 `DESK-067`，不能把尚未实现的路径写成已通过。
+- 审计、GC 与 Web 包归档读取已有 `async fn` + `spawn_blocking`；这不代表所有 I/O 或 renderer 工作都不会阻塞。`zipSync` 仍是同步组装，真实响应性尚未验收；D2.4a 备份已通过 async command + spawn_blocking 执行，维护锁的等待也在 blocking worker 内；实际 WebView 响应性仍需真机验收。

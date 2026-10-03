@@ -3,9 +3,11 @@ import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { RouterProvider } from '@tanstack/react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { LIST_LOCAL_BACKUPS_COMMAND } from '../src/platform/local-backup-bridge';
 import { createDesktopRouter } from '../src/app/router';
 
 const native = vi.hoisted(() => ({ listen: vi.fn() }));
+const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
 const host = vi.hoisted(() => ({
   probeStorage: vi.fn(async () => null),
   runExport: vi.fn(),
@@ -14,7 +16,7 @@ const host = vi.hoisted(() => ({
   applyArchive: vi.fn(),
   describeError: () => '归档失败',
 }));
-vi.mock('@tauri-apps/api/core', () => ({ isTauri: () => true, invoke: vi.fn() }));
+vi.mock('@tauri-apps/api/core', () => ({ isTauri: () => true, invoke: bridge.invoke }));
 vi.mock('@tauri-apps/api/window', () => ({ getCurrentWindow: () => ({ onCloseRequested: native.listen }) }));
 vi.mock('../src/platform/desktop-archive-host', () => ({
   createDesktopArchiveHost: () => host,
@@ -30,6 +32,9 @@ const settle = () => act(async () => { await new Promise((resolve) => setTimeout
 beforeEach(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   vi.clearAllMocks();
+  bridge.invoke.mockImplementation((command: string) => command === LIST_LOCAL_BACKUPS_COMMAND
+    ? Promise.resolve({ backups: [], invalidCount: 0 })
+    : Promise.resolve(undefined));
   vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
   window.location.hash = '#/local-library';
   container = document.createElement('div');
@@ -67,7 +72,7 @@ describe('真实归档页面的离开保护（native API mock，仍需真机验�
     await settle();
     expect(prevented).toHaveBeenCalledOnce();
     expect(router.state.location.pathname).toBe('/local-library');
-    expect(container.textContent).toContain('归档操作仍在进行');
+    expect(container.textContent).toContain('本地库维护操作仍在进行');
     await act(async () => { void router.navigate({ to: '/local-library', search: { filter: 'changed' } }); });
     await settle();
     expect(router.state.location.search).toEqual({});

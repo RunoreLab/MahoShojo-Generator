@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Outlet, createRootRoute, createRoute, useRouter } from '@tanstack/react-router';
 import { LocalArchivePanel, createLocalArchiveController } from '@mahoshojo/ui-web/local-archive';
 import { useArchiveLeaveGuard } from './useArchiveLeaveGuard';
@@ -6,6 +6,7 @@ import { AppShell, ProductNav } from '@mahoshojo/ui-web/shell';
 
 import { loadDesktopRuntimeInfo, type DesktopRuntimeInfo } from '../platform';
 import { ProviderProfilesPanel } from '../features/providers/ProviderProfilesPanel';
+import { LocalBackupsPanel } from '../features/backups/LocalBackupsPanel';
 import { buildCapabilitySnapshot } from './capabilities';
 import {
   DESKTOP_LIBRARY_ARCHIVE_LIMITS,
@@ -185,11 +186,48 @@ const localLibraryRoute = createRoute({
     const host = useMemo(() => createDesktopArchiveHost(), []);
     const controller = useMemo(() => createLocalArchiveController(host), [host]);
     const model = useSyncExternalStore(controller.subscribe, () => controller.model);
-    useEffect(() => { controller.actions.probeStorage(); }, [controller]);
-    const guard = useArchiveLeaveGuard(() => {
+    const [maintenanceBusy, setMaintenanceBusy] = useState(false);
+    const maintenanceBusyRef = useRef(false);
+    const acquireOperation = useCallback((): boolean => {
+      if (maintenanceBusyRef.current) return false;
+      maintenanceBusyRef.current = true;
+      setMaintenanceBusy(true);
+      return true;
+    }, []);
+    const releaseOperation = useCallback((): void => {
+      maintenanceBusyRef.current = false;
+      setMaintenanceBusy(false);
+    }, []);
+    const archiveBusy = () => {
       const current = controller.model;
       return current.exporting || current.inspecting || current.applying;
-    });
+    };
+    const runArchiveAction = (action: () => void): void => {
+      if (!acquireOperation()) return;
+      action();
+      if (!archiveBusy()) {
+        releaseOperation();
+        return;
+      }
+      let unsubscribe = (): void => {};
+      unsubscribe = controller.subscribe(() => {
+        if (!archiveBusy()) {
+          unsubscribe();
+          releaseOperation();
+        }
+      });
+    };
+    useEffect(() => { controller.actions.probeStorage(); }, [controller]);
+    const guard = useArchiveLeaveGuard(
+      () => maintenanceBusyRef.current || archiveBusy(),
+      '本地库维护操作仍在进行，请等待完成后再离开或关闭窗口。',
+    );
+    const archiveActions = {
+      ...controller.actions,
+      startExport: () => runArchiveAction(controller.actions.startExport),
+      pickImportFile: () => runArchiveAction(controller.actions.pickImportFile),
+      confirmImport: () => runArchiveAction(controller.actions.confirmImport),
+    };
 
     return (
       <section data-testid="page-local-library" className="flex flex-col gap-4">
@@ -199,17 +237,17 @@ const localLibraryRoute = createRoute({
             本机保存的数据卡与 Web 包，只存在于这台设备。不需要账号，也不会访问项目服务器。
           </p>
         </header>
-        <fieldset disabled={!guard.ready} className="min-w-0">
+        <fieldset disabled={!guard.ready || maintenanceBusy} className="min-w-0">
           {!guard.ready && !guard.message && <p role="status">正在初始化窗口关闭保护…</p>}
           {guard.message && <p role="alert">{guard.message}</p>}
-          <LocalArchivePanel model={model} actions={controller.actions} limits={{ maxArchiveBytes: DESKTOP_LIBRARY_ARCHIVE_LIMITS.fileBytes }} />
+          <LocalArchivePanel model={model} actions={archiveActions} limits={{ maxArchiveBytes: DESKTOP_LIBRARY_ARCHIVE_LIMITS.fileBytes }} />
         </fieldset>
+        <LocalBackupsPanel enabled={guard.ready} acquireOperation={acquireOperation} releaseOperation={releaseOperation} />
         <section className="rounded-lg border border-(--app-border) bg-(--app-surface) p-4">
           <h2 className="mb-1 text-sm font-medium text-(--app-text-muted)">还没有的</h2>
           <ul className="flex list-disc flex-col gap-1 pl-5 text-sm text-(--app-text-muted)">
             <li>
-              <strong className="font-medium">整库备份与灾难恢复</strong>：上面的导出是 portable archive，
-              用于换设备；它不是设备状态的完整快照。恢复流程尚未交付。
+              <strong className="font-medium">整体替换恢复</strong>：本机整库备份创建与列表已开放；选择备份、二次确认并在下次启动前恢复仍待交付。
             </li>
             <li>
               <strong className="font-medium">回收站</strong>：删除的记录目前没有界面上的恢复入口。
@@ -235,4 +273,3 @@ const settingsRoute = createRoute({
 });
 
 export const routeTree = rootRoute.addChildren([indexRoute, localLibraryRoute, settingsRoute]);
-

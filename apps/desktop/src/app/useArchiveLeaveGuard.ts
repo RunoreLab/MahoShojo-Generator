@@ -3,19 +3,24 @@ import { useBlocker } from '@tanstack/react-router';
 import { isTauri } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 
-const BUSY_MESSAGE = '归档操作仍在进行，请等待完成后再离开或关闭窗口。';
+const DEFAULT_BUSY_MESSAGE = '归档操作仍在进行，请等待完成后再离开或关闭窗口。';
 
-/** 归档尚无可恢复的后台 owner：在途只能留在当前页面，不提供会丢失 owner 的强制继续。 */
-export const useArchiveLeaveGuard = (isBusy: () => boolean) => {
+/** 本地库维护尚无可恢复的后台 owner：在途只能留在当前页面，不提供会丢失 owner 的强制继续。 */
+export const useArchiveLeaveGuard = (
+  isBusy: () => boolean,
+  busyMessage = DEFAULT_BUSY_MESSAGE,
+) => {
   const busyRef = useRef(isBusy);
   busyRef.current = isBusy;
+  const messageRef = useRef(busyMessage);
+  messageRef.current = busyMessage;
   const [ready, setReady] = useState(!isTauri());
   const [message, setMessage] = useState<string | null>(null);
 
   useBlocker({
     shouldBlockFn: () => {
       if (!busyRef.current()) return false;
-      setMessage(BUSY_MESSAGE);
+      setMessage(messageRef.current);
       return true;
     },
     // 卸载单独处理，避免在 busy 更新后重新安装 native listener。
@@ -45,7 +50,7 @@ export const useArchiveLeaveGuard = (isBusy: () => boolean) => {
       }
       if (!busyRef.current()) return;
       event.preventDefault();
-      setMessage(BUSY_MESSAGE);
+      setMessage(messageRef.current);
     }).then((release) => {
       // StrictMode 或导航可能早于异步注册返回；晚到的 handle 也必须释放。
       if (disposed) release();
@@ -54,7 +59,7 @@ export const useArchiveLeaveGuard = (isBusy: () => boolean) => {
         setReady(true);
       }
     }).catch(() => {
-      if (!disposed) setMessage('窗口关闭保护初始化失败，归档操作暂不可用。请重新打开页面后重试。');
+      if (!disposed) setMessage('窗口关闭保护初始化失败，本地库维护操作暂不可用。请重新打开页面后重试。');
     });
     return () => {
       disposed = true;

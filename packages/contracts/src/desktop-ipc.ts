@@ -3,6 +3,36 @@ import { z } from './zod';
 import { MAX_SECRET_REF_LENGTH, SECRET_REF_PATTERN, SecretRefSchema, isSecretRef } from './secret-ref';
 import { utf8ByteLimitedStringSchema } from './wire-size';
 
+/** Native backup 的标识只能选择本机备份，不能充当路径。新增契约不改变 portable archive。 */
+export const DesktopBackupIdSchema = z.string().max(128).regex(
+  /^local-library-[0-9]{8}T[0-9]{6}Z(?:-(?:[2-9]|[1-9][0-9]+))?$/u,
+);
+const DesktopBackupByteCountSchema = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
+export const DesktopBackupSummarySchema = z.object({
+  backupId: DesktopBackupIdSchema,
+  createdAt: z.string().datetime({ offset: true }),
+  // 路径只允许由 native 回显；任何请求均不得接受这些字段。
+  absolutePath: z.string().min(1),
+  directory: z.string().min(1),
+  databaseBytes: DesktopBackupByteCountSchema,
+  blobCount: DesktopBackupByteCountSchema,
+  blobBytes: DesktopBackupByteCountSchema,
+}).strict();
+export type DesktopBackupSummary = z.infer<typeof DesktopBackupSummarySchema>;
+export const DesktopBackupListSchema = z.object({
+  backups: z.array(DesktopBackupSummarySchema),
+  invalidCount: DesktopBackupByteCountSchema,
+}).strict();
+export type DesktopBackupList = z.infer<typeof DesktopBackupListSchema>;
+export const DesktopBackupErrorSchema = z.object({
+  code: z.enum([
+    'invalid-backup-id', 'backup-incomplete', 'backup-unsupported-version', 'backup-corrupt',
+    'backup-source-unavailable', 'backup-failed', 'maintenance-busy',
+  ]),
+  message: z.string().min(1).max(512),
+}).strict();
+export type DesktopBackupError = z.infer<typeof DesktopBackupErrorSchema>;
+
 /**
  * Desktop IPC 的 runtime-neutral 契约片段。
  *
