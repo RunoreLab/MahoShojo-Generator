@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { Outlet, createRootRoute, createRoute, useRouter } from '@tanstack/react-router';
-import { LocalArchiveSection } from '@mahoshojo/ui-web/local-archive';
+import { LocalArchivePanel, createLocalArchiveController } from '@mahoshojo/ui-web/local-archive';
+import { useArchiveLeaveGuard } from './useArchiveLeaveGuard';
 import { AppShell, ProductNav } from '@mahoshojo/ui-web/shell';
 
 import { loadDesktopRuntimeInfo, type DesktopRuntimeInfo } from '../platform';
@@ -26,8 +27,8 @@ import {
  * 不注册「问卷」「竞技场」这类尚无实现的路径：由 `buildCapabilitySnapshot` 把它们标成不可用，
  * 而不是留下一条会白屏的路由。
  *
- * 离开保护同样不在这里预建。当前没有任何页面持有未保存内容或在途任务，因此**没有**需要阻止的离开；
- * 按 feature 切片各自决定（`DESK-PROD-008`）。路由原语本身是否可用由
+ * 归档页面以真实控制器的在途状态保护导航、刷新及 native close；
+ * 其他 feature 按各自任务 owner 决定（`DESK-PROD-008`）。路由原语本身是否可用由
  * `tests/desktop-router-history.test.tsx` 断言，不靠注释成立。
  */
 
@@ -182,6 +183,13 @@ const localLibraryRoute = createRoute({
   component: () => {
     // host 必须在渲染之间保持稳定：控制器用它做 useMemo 的依赖，重建会让已预检的字节与 plan 丢失。
     const host = useMemo(() => createDesktopArchiveHost(), []);
+    const controller = useMemo(() => createLocalArchiveController(host), [host]);
+    const model = useSyncExternalStore(controller.subscribe, () => controller.model);
+    useEffect(() => { controller.actions.probeStorage(); }, [controller]);
+    const guard = useArchiveLeaveGuard(() => {
+      const current = controller.model;
+      return current.exporting || current.inspecting || current.applying;
+    });
 
     return (
       <section data-testid="page-local-library" className="flex flex-col gap-4">
@@ -191,7 +199,11 @@ const localLibraryRoute = createRoute({
             本机保存的数据卡与 Web 包，只存在于这台设备。不需要账号，也不会访问项目服务器。
           </p>
         </header>
-        <LocalArchiveSection host={host} maxArchiveBytes={DESKTOP_LIBRARY_ARCHIVE_LIMITS.fileBytes} />
+        <fieldset disabled={!guard.ready} className="min-w-0">
+          {!guard.ready && !guard.message && <p role="status">正在初始化窗口关闭保护…</p>}
+          {guard.message && <p role="alert">{guard.message}</p>}
+          <LocalArchivePanel model={model} actions={controller.actions} limits={{ maxArchiveBytes: DESKTOP_LIBRARY_ARCHIVE_LIMITS.fileBytes }} />
+        </fieldset>
         <section className="rounded-lg border border-(--app-border) bg-(--app-surface) p-4">
           <h2 className="mb-1 text-sm font-medium text-(--app-text-muted)">还没有的</h2>
           <ul className="flex list-disc flex-col gap-1 pl-5 text-sm text-(--app-text-muted)">

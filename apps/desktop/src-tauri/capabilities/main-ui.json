@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main-ui",
-  "description": "主 UI webview 的授权面。只授予 Tauri core 默认集合，不含任何插件，也不含 shell、文件系统、SQL、HTTP 或路径参数化 scope。必须使用 webviews 粒度：使用 windows 会把该能力启用到该 window 下的所有 webview。",
+  "description": "主 UI webview 的授权面。只授予 Tauri core 默认集合与 onCloseRequested 空闲关闭所需的 destroy，不含任何插件，也不含 shell、文件系统、SQL、HTTP 或路径参数化 scope。必须使用 webviews 粒度：使用 windows 会把该能力启用到该 window 下的所有 webview。",
   "webviews": ["main-ui"],
-  "permissions": ["core:default"]
+  "permissions": ["core:default", "core:window:allow-destroy"]
 }

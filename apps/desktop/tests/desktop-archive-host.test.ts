@@ -47,7 +47,12 @@ describe('desktop archive host wiring', () => {
         path.resolve(import.meta.dirname, '..', 'src-tauri', 'capabilities', 'main-ui.json'),
         'utf8',
       ),
-    ) as { permissions: string[] };
+    ) as { permissions: string[]; webviews: string[]; windows?: string[] };
+
+    // onCloseRequested 放行时由 Tauri JS 调用 destroy；仅为主 UI 增加这一项。
+    expect(capability.permissions).toEqual(['core:default', 'core:window:allow-destroy']);
+    expect(capability.webviews).toEqual(['main-ui']);
+    expect(capability.windows).toBeUndefined();
 
     for (const permission of capability.permissions) {
       expect(permission).not.toMatch(/^(dialog|fs|shell|opener):/u);
