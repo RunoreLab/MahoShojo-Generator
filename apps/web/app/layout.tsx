@@ -6,7 +6,7 @@ import { getColorModeInitScript } from '@/lib/color-mode-init';
 import '@/styles/globals.css';
 import '@/styles/blue-theme.css';
 import '@/styles/gradient-buttons.css';
-import 'katex/dist/katex.min.css';
+import '@mahoshojo/ui-web/markdown.css';
 
 export const metadata: Metadata = {
   title: '✨ 魔法少女生成器 ✨',

@@ -25,11 +25,17 @@
       "import": "./src/encyclopedia/index.ts",
       "default": "./src/encyclopedia/index.ts"
     },
+    "./markdown": {
+      "types": "./src/markdown/index.ts",
+      "import": "./src/markdown/index.ts",
+      "default": "./src/markdown/index.ts"
+    },
     "./local-archive": {
       "types": "./src/local-archive/index.ts",
       "import": "./src/local-archive/index.ts",
       "default": "./src/local-archive/index.ts"
-    }
+    },
+    "./markdown.css": "./src/markdown/markdown.css"
   },
   "scripts": {
     "test": "vitest run --config vitest.config.ts",
@@ -37,7 +43,12 @@
     "build": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@mahoshojo/local-library": "workspace:*"
+    "@mahoshojo/local-library": "workspace:*",
+    "katex": "^0.16.27",
+    "react-markdown": "^10.1.0",
+    "rehype-katex": "^7.0.1",
+    "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0"
   },
   "peerDependencies": {
     "react": "^19.2.1",

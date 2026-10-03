@@ -1,11 +1,12 @@
 /**
- * Fix nested ordered list indentation to ensure sub-items are properly recognized.
+ * 修正嵌套有序列表的缩进。
  *
- * In CommonMark, a sub-list must be indented to at least the content column of
- * the parent list item. For example, under `12. ` (marker width 3), sub-items
- * need at least 4 spaces of indentation.
+ * CommonMark 要求子列表至少缩进到父列表项的内容列：`12. ` 的 marker 宽 3，因此子项需要至少 4 个
+ * 空格。百科正文里存在这类列表，不修正时它们会被渲染成同级项。
+ *
+ * 这是纯文本变换，没有领域知识也不依赖任何宿主，因此属于共享层而不是某个 app 的工具函数。
  */
-export function fixNestedListIndentation(markdown: string): string {
+export const fixNestedListIndentation = (markdown: string): string => {
     const lines = markdown.split('\n');
     const result: string[] = [];
 
