@@ -27,6 +27,7 @@ mod maintenance;
 #[cfg(test)]
 mod maintenance_contract_tests;
 mod provider_profile;
+mod restore;
 mod secret;
 mod sse;
 mod store;
@@ -779,11 +780,60 @@ async fn list_local_backups(
     .map_err(|_| backup::BackupError::Failed)?
 }
 
+/// 持有恢复准备取得的维护许可，直至退出；renderer 刷新不会重新开放写入。
+#[derive(Default)]
+struct PendingRestore(std::sync::Mutex<Option<maintenance::MaintenancePermit>>);
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PrepareLocalRestoreRequest {
+    backup_id: String,
+}
+
+#[tauri::command]
+async fn prepare_local_restore(
+    app: tauri::AppHandle,
+    request: PrepareLocalRestoreRequest,
+) -> Result<restore::PrepareRestoreResponse, restore::RestoreError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let pending = app.state::<PendingRestore>();
+        let mut slot = pending
+            .0
+            .try_lock()
+            .map_err(|_| restore::RestoreError::MaintenanceBusy)?;
+        if slot.is_some() {
+            return Err(restore::RestoreError::Pending);
+        }
+        let prepared = restore::prepare_restore(&app.state::<LocalLibrary>(), &request.backup_id)?;
+        let response = prepared.response;
+        *slot = Some(prepared.permit);
+        Ok(response)
+    })
+    .await
+    .map_err(|_| restore::RestoreError::Failed)?
+}
+
+/// 仅在 native 已写恢复 intent 后允许退出，不向 renderer 开放通用进程控制。
+#[tauri::command]
+fn exit_after_local_restore(app: tauri::AppHandle) -> Result<(), restore::RestoreError> {
+    let pending = app.state::<PendingRestore>();
+    let slot = pending
+        .0
+        .try_lock()
+        .map_err(|_| restore::RestoreError::MaintenanceBusy)?;
+    if slot.is_none() {
+        return Err(restore::RestoreError::InvalidIntent);
+    }
+    app.exit(0);
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .manage(default_secret_store())
         .manage(ai::RequestRegistry::default())
+        .manage(PendingRestore::default())
         .setup(|app| {
             // 应用数据目录只能在 Builder 内部解析，因此本地库在 setup 阶段打开。
             // 路径完全由 native 侧产生：renderer 既不能指定目录，也不能指定文件名或 SQL。
@@ -804,6 +854,12 @@ pub fn run() {
                 )
             })?;
 
+            restore::recover_pending(&data_root).map_err(|error| {
+                format!(
+                    "本地库恢复未完成（{}）：{}。已保留旧库与恢复日志；请勿删除恢复目录或强行创建空库。",
+                    error.code(), error.message()
+                )
+            })?;
             let library = LocalLibrary::open(&data_root)
                 .map_err(|error| format!("cannot open the local store: {}", error.message()))?;
 
@@ -864,6 +920,8 @@ pub fn run() {
             audit_local_library,
             create_local_backup,
             list_local_backups,
+            prepare_local_restore,
+            exit_after_local_restore,
             collect_local_garbage
         ])
         .run(tauri::generate_context!())
@@ -876,6 +934,22 @@ mod tests {
         base64_bytes, DesktopRuntimeInfo, ListLocalCardsResponse, ListWebPackagesResponse,
         SaveWebPackageRequest,
     };
+
+    #[test]
+    fn restore_request_matches_fixture_and_rejects_arbitrary_paths() {
+        let fixture: serde_json::Value =
+            serde_json::from_str(include_str!("../../../../fixtures/desktop-restore.json"))
+                .expect("shared restore fixture");
+        let request: super::PrepareLocalRestoreRequest =
+            serde_json::from_value(fixture["request"].clone()).expect("native request");
+        assert_eq!(
+            request.backup_id,
+            fixture["request"]["backupId"].as_str().unwrap()
+        );
+        let mut invalid = fixture["request"].clone();
+        invalid["path"] = serde_json::json!("C:/arbitrary");
+        assert!(serde_json::from_value::<super::PrepareLocalRestoreRequest>(invalid).is_err());
+    }
 
     #[test]
     fn empty_local_card_page_omits_optional_cursor() {

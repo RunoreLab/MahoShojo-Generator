@@ -4,7 +4,7 @@ MahoShojo Generator 的本地桌面客户端 runtime。它是独立 app，不是
 
 当前阶段（2026-10-03）：**D1 执行核、D1.5、D2.0–D2.2、D2.3a/b/c 的存储/归档桥，以及 D2.5a/D2.5b 的共源壳与路由接线、D2.3d 的归档产品 UI 已落地**。首页已是产品页（不再是运行时面板），`/local-library` 提供整库导出与导入，D0 的运行时自述与 Provider 面板移入 `/settings`。整体页面迁移（D3 首页功能卡、百科、`/details` 等）仍未开始。
 
-仍然开放、不记为 PASS 的门禁：`<input type="file">` 在真实 Tauri WebView 中打开原生文件对话框；D2.3 的真实 WebView 内存/响应性与 raw IPC 4 MiB 吞吐/回退；D2.5b 的返回/前进手感与原生窗口关闭（全部路由证据来自 jsdom）；D1 真实 Provider 端点与取消/流。整库**备份与灾难恢复**属 D2.4，回收站 UI 也尚未交付——`/local-library` 提供的是 portable archive，不是备份。
+仍然开放、不记为 PASS 的门禁：`<input type="file">` 在真实 Tauri WebView 中打开原生文件对话框；D2.3 的真实 WebView 内存/响应性与 raw IPC 4 MiB 吞吐/回退；D2.5b 的返回/前进手感与原生窗口关闭（全部路由证据来自 jsdom）；D1 真实 Provider 端点与取消/流。D2.4 整库备份与重启恢复已接入 `/local-library`，与 portable archive 分区展示，真机验收仍开放；回收站 UI 尚未交付。
 
 - **D0** skeleton、安全边界与 CI 接线；
 - **D0.5** 持久 secret 接入操作系统凭据存储；
@@ -25,7 +25,8 @@ MahoShojo Generator 的本地桌面客户端 runtime。它是独立 app，不是
 - **D2.3d** 双端归档 UI 已接线：`/local-library` 复用 `@mahoshojo/ui-web/local-archive`，Web 用浏览器 adapter、Desktop 用现有窄桥。导出成功只以 native 最终确认判成功；`<input type="file">` 的真机行为待验。
 - **D2.5a/D2.5b** 共源基座与路由接线已落地：`packages/ui-web` 提供主题/导航/能力状态/壳/归档视图；Desktop 用 `@tanstack/react-router` + hash history 的三条 code-based 路由。共享边界门禁（`MONO-005-SHARED-UI-RUNTIME` 等）已生效。
 - **D2.5c** 审查收口：归档 begin/append 已移出主线程；共享归档操作互斥，Desktop 在途导航/关闭保护已接线。真机证据仍待回传，见下方验收步骤；不宣称 D2.3 / D2.5 完全 PASS。
-- **D2.4 / D3** 分别继续备份恢复与页面纵切；不因本轮更新关闭既有未验收项。
+- **D2.4a/b** 一致性整库备份、恢复前备份与启动前 journal 重放已交付；旧代际保留，失败拒绝打开混合状态。真机仍待验。
+- **D3** 页面纵切尚未开始；不因本轮更新关闭既有未验收项。
 
 ## 权威边界
 
@@ -294,7 +295,7 @@ GC 不会碰它。只有 purge 让它成为回收候选。这条是"恢复一个
 `gcReclaimedSomething` 单列这个判断。`filesRemoved < reclaimed` 表示有些行的文件本来就不在
 （桶一的损坏形态），`filesFailed` 表示权限或 I/O 错误导致文件留下成为孤儿。
 
-D2.3 的导入导出平台桥与双端 `/local-library` 用户页面均已接线；D2.4a 已交付 native 整库备份创建与校验列表；D2.4b 重启恢复仍未落地。portable archive 是可移植的自洽列举，不是用于整体替换数据库的备份快照。真机验收步骤见 [D2.5c 收口验收](../../docs/runbooks/2026-10-03_120000_Desktop归档与产品壳真机验收.md)。
+D2.3 的导入导出平台桥与双端 `/local-library` 用户页面均已接线；D2.4a 已交付 native 整库备份创建与校验列表；D2.4b 已交付恢复前备份与重启恢复，真机步骤见 [D2.4 验收](../../docs/runbooks/2026-10-03_155000_Desktop整库备份与恢复验收.md)。portable archive 是可移植的自洽列举，不是用于整体替换数据库的备份快照。真机验收步骤见 [D2.5c 收口验收](../../docs/runbooks/2026-10-03_120000_Desktop归档与产品壳真机验收.md)。
 
 ## 持久 secret
 

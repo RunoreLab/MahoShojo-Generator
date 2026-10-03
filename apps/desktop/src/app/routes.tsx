@@ -247,9 +247,6 @@ const localLibraryRoute = createRoute({
           <h2 className="mb-1 text-sm font-medium text-(--app-text-muted)">还没有的</h2>
           <ul className="flex list-disc flex-col gap-1 pl-5 text-sm text-(--app-text-muted)">
             <li>
-              <strong className="font-medium">整体替换恢复</strong>：本机整库备份创建与列表已开放；选择备份、二次确认并在下次启动前恢复仍待交付。
-            </li>
-            <li>
               <strong className="font-medium">回收站</strong>：删除的记录目前没有界面上的恢复入口。
             </li>
           </ul>

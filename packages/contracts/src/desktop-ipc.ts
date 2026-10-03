@@ -33,6 +33,23 @@ export const DesktopBackupErrorSchema = z.object({
 }).strict();
 export type DesktopBackupError = z.infer<typeof DesktopBackupErrorSchema>;
 
+export const DesktopPrepareRestoreRequestSchema = z.object({ backupId: DesktopBackupIdSchema }).strict();
+export const DesktopRestoreIdSchema = z.string().max(128).regex(/^restore-[0-9]+-[0-9]+-[0-9]+$/u);
+export const DesktopPrepareRestoreResponseSchema = z.object({
+  restoreId: DesktopRestoreIdSchema,
+  backupId: DesktopBackupIdSchema,
+  preRestoreBackupId: DesktopBackupIdSchema,
+}).strict();
+export type DesktopPrepareRestoreResponse = z.infer<typeof DesktopPrepareRestoreResponseSchema>;
+export const DesktopRestoreErrorSchema = z.object({
+  code: z.enum([
+    ...DesktopBackupErrorSchema.shape.code.options,
+    'restore-pending', 'restore-invalid-intent', 'restore-failed',
+  ]),
+  message: z.string().min(1).max(512),
+}).strict();
+export type DesktopRestoreError = z.infer<typeof DesktopRestoreErrorSchema>;
+
 /**
  * Desktop IPC 的 runtime-neutral 契约片段。
  *

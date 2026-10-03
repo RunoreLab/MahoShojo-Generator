@@ -4,7 +4,12 @@ import { createRoot, type Root } from 'react-dom/client';
 import { RouterProvider } from '@tanstack/react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import backupFixture from '../../../fixtures/desktop-backup.json';
-import { CREATE_LOCAL_BACKUP_COMMAND, LIST_LOCAL_BACKUPS_COMMAND } from '../src/platform/local-backup-bridge';
+import {
+  CREATE_LOCAL_BACKUP_COMMAND,
+  EXIT_AFTER_LOCAL_RESTORE_COMMAND,
+  LIST_LOCAL_BACKUPS_COMMAND,
+  PREPARE_LOCAL_RESTORE_COMMAND,
+} from '../src/platform/local-backup-bridge';
 import { createDesktopRouter } from '../src/app/router';
 
 const native = vi.hoisted(() => ({ listen: vi.fn() }));
@@ -101,5 +106,86 @@ describe('local backup page integration', () => {
     expect(host.runExport).toHaveBeenCalledOnce();
     expect(bridge.invoke).not.toHaveBeenCalledWith(CREATE_LOCAL_BACKUP_COMMAND, undefined);
     await act(async () => { finish({ location: 'archive.zip', byteLength: 1, entryCount: 1 }); });
+  });
+
+  it('cancelling the second confirmation makes no restore or exit IPC call', async () => {
+    bridge.invoke.mockImplementation(async (command: string) => command === LIST_LOCAL_BACKUPS_COMMAND
+      ? { backups: [backupFixture.summary], invalidCount: 0 }
+      : undefined);
+    await mount();
+
+    await act(async () => { button('使用此备份整体替换本地库').dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const restoreTrigger = button('使用此备份整体替换本地库');
+    expect(container.querySelector('[role="region"]')?.textContent).toContain('整体替换当前本地库');
+    expect(document.activeElement).toBe(button('取消'));
+    await act(async () => { button('取消').dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(document.activeElement).toBe(restoreTrigger);
+
+    expect(bridge.invoke).not.toHaveBeenCalledWith(PREPARE_LOCAL_RESTORE_COMMAND, expect.anything());
+    expect(bridge.invoke).not.toHaveBeenCalledWith(EXIT_AFTER_LOCAL_RESTORE_COMMAND, undefined);
+  });
+
+  it('keeps a prepared restore read-only when exit fails and allows retrying exit', async () => {
+    let exitAttempts = 0;
+    bridge.invoke.mockImplementation(async (command: string) => {
+      if (command === LIST_LOCAL_BACKUPS_COMMAND) return { backups: [backupFixture.summary], invalidCount: 0 };
+      if (command === PREPARE_LOCAL_RESTORE_COMMAND) return {
+        restoreId: 'restore-1-2-3',
+        backupId: backupFixture.summary.backupId,
+        preRestoreBackupId: 'local-library-20261002T040000Z',
+      };
+      if (command === EXIT_AFTER_LOCAL_RESTORE_COMMAND) {
+        exitAttempts += 1;
+        if (exitAttempts === 1) throw { code: 'restore-failed', message: 'native detail' };
+        return undefined;
+      }
+      return undefined;
+    });
+    const router = await mount();
+
+    await act(async () => { button('使用此备份整体替换本地库').dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => {
+      button('确认整体替换并退出').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      // Same render tick must not publish two native restore intents.
+      button('确认整体替换并退出').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await settle();
+
+    expect(bridge.invoke).toHaveBeenCalledWith(PREPARE_LOCAL_RESTORE_COMMAND, {
+      request: { backupId: backupFixture.summary.backupId },
+    });
+    expect(bridge.invoke).toHaveBeenCalledTimes(3); // list, prepare, failed exit
+    expect(container.textContent).toContain('恢复前备份为 local-library-20261002T040000Z');
+    expect(container.textContent).toContain('无法退出应用');
+    expect(button('创建备份').disabled).toBe(true);
+    expect(button('导出整库').matches(':disabled')).toBe(true);
+
+    await act(async () => { button('退出应用并继续恢复').dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await settle();
+    expect(exitAttempts).toBe(2);
+    expect(container.textContent).toContain('退出请求已提交');
+    expect(button('创建备份').disabled).toBe(true);
+    await act(async () => { void router.navigate({ to: '/settings' }); });
+    await settle();
+    expect(router.state.location.pathname).toBe('/local-library');
+  });
+
+  it('locks editing and requests exit when preparation resolves with an invalid response', async () => {
+    bridge.invoke.mockImplementation(async (command: string) => {
+      if (command === LIST_LOCAL_BACKUPS_COMMAND) return { backups: [backupFixture.summary], invalidCount: 0 };
+      if (command === PREPARE_LOCAL_RESTORE_COMMAND) return { unexpected: true };
+      if (command === EXIT_AFTER_LOCAL_RESTORE_COMMAND) throw { code: 'restore-failed', message: 'private detail' };
+      return undefined;
+    });
+    await mount();
+    await act(async () => { button('使用此备份整体替换本地库').dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { button('确认整体替换并退出').dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await settle();
+
+    expect(container.textContent).toContain('恢复状态无法从请求结果中确认');
+    expect(container.textContent).not.toContain('private detail');
+    expect(bridge.invoke).toHaveBeenCalledWith(EXIT_AFTER_LOCAL_RESTORE_COMMAND, undefined);
+    expect(button('创建备份').disabled).toBe(true);
+    expect(button('导出整库').matches(':disabled')).toBe(true);
   });
 });

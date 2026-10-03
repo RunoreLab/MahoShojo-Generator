@@ -305,7 +305,7 @@ const ProfileRow = ({ profileId, onUse, onDelete }: ProfileRowProps) => {
     <div className="flex items-center gap-2 text-xs">
       <span className="font-mono">{profileId}</span>
       <span className="text-(--color-ink-muted)">
-        {hasSecret === null ? '凭据状态未知' : hasSecret ? '已存凭据' : '无凭据'}
+        {hasSecret === null ? '凭据状态未知' : hasSecret ? '已存凭据' : '无凭据，请重新录入 API Key'}
       </span>
       <button type="button" className="ml-auto underline" onClick={onUse}>
         载入

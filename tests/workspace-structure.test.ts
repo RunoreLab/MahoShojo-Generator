@@ -452,6 +452,8 @@ describe('desktop workspace app ownership', () => {
       'audit_local_library',
       'create_local_backup',
       'list_local_backups',
+      'prepare_local_restore',
+      'exit_after_local_restore',
       'collect_local_garbage',
     ]);
 
