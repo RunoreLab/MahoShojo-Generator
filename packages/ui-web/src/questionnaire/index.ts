@@ -5,4 +5,4 @@ export {
   type QuestionnaireQuestionPanelProps,
   type QuestionnaireTheme,
   type QuestionnaireOption,
-} from '@mahoshojo/ui-web/questionnaire';
+} from './QuestionnaireQuestionPanel';

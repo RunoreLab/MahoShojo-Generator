@@ -40,6 +40,16 @@
       "import": "./src/markdown/text/index.ts",
       "default": "./src/markdown/text/index.ts"
     },
+    "./questionnaire": {
+      "types": "./src/questionnaire/index.ts",
+      "import": "./src/questionnaire/index.ts",
+      "default": "./src/questionnaire/index.ts"
+    },
+    "./character-result": {
+      "types": "./src/character-result/index.ts",
+      "import": "./src/character-result/index.ts",
+      "default": "./src/character-result/index.ts"
+    },
     "./local-archive": {
       "types": "./src/local-archive/index.ts",
       "import": "./src/local-archive/index.ts",

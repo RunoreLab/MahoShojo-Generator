@@ -228,26 +228,6 @@ body {
     z-index: 1;
   }
 
-  .result-item {
-    margin-bottom: 20px;
-    padding: 15px;
-    background: rgba(255, 255, 255, 0.1);
-    border-radius: 10px;
-    backdrop-filter: blur(5px);
-  }
-
-  .result-label {
-    font-weight: bold;
-    font-size: 14px;
-    opacity: 0.9;
-    margin-bottom: 5px;
-  }
-
-  .result-value {
-    font-size: 16px;
-    line-height: 1.5;
-  }
-
   .level-badge {
     display: inline-block;
     padding: 8px 16px;
