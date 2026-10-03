@@ -215,6 +215,15 @@ describe('IpcWebPackageRepository', () => {
     await expect(repository.list({ limit: 10 })).rejects.toMatchObject({ code: 'invalid-card' });
   });
 
+  it('接受空库 native 分页响应省略游标字段的形状', async () => {
+    const repository = new IpcWebPackageRepository(async () => ({ documents: [] }));
+
+    const page = await repository.list({ limit: 10 });
+
+    expect(page.items).toEqual([]);
+    expect(page.nextCursor).toBeUndefined();
+  });
+
   it('list 原样透传不透明游标', async () => {
     const good = record();
     const cursor = { updatedAtSort: 1788072000000, updatedAt: '2026-09-30T12:00:00.000Z', id: PKG_ID };

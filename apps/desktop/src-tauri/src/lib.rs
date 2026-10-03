@@ -263,6 +263,8 @@ struct LocalCardCursorDto {
 #[serde(rename_all = "camelCase")]
 struct ListLocalCardsResponse {
     documents: Vec<String>,
+    // 与 DesktopListLocalCardsResponseSchema 的 optional 字段一致；serde 默认会把 None 输出成 null。
+    #[serde(skip_serializing_if = "Option::is_none")]
     next_cursor: Option<LocalCardCursorDto>,
 }
 
@@ -523,6 +525,8 @@ fn get_web_package(
 #[serde(rename_all = "camelCase")]
 struct ListWebPackagesResponse {
     documents: Vec<String>,
+    // 与 DesktopListWebPackagesResponseSchema 的 optional 字段一致；serde 默认会把 None 输出成 null。
+    #[serde(skip_serializing_if = "Option::is_none")]
     next_cursor: Option<LocalCardCursorDto>,
 }
 
@@ -842,7 +846,36 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{base64_bytes, DesktopRuntimeInfo, SaveWebPackageRequest};
+    use super::{
+        base64_bytes, DesktopRuntimeInfo, ListLocalCardsResponse, ListWebPackagesResponse,
+        SaveWebPackageRequest,
+    };
+
+    #[test]
+    fn empty_local_card_page_omits_optional_cursor() {
+        let response = ListLocalCardsResponse {
+            documents: Vec::new(),
+            next_cursor: None,
+        };
+
+        assert_eq!(
+            serde_json::to_value(response).expect("response serializes"),
+            serde_json::json!({"documents": []})
+        );
+    }
+
+    #[test]
+    fn empty_web_package_page_omits_optional_cursor() {
+        let response = ListWebPackagesResponse {
+            documents: Vec::new(),
+            next_cursor: None,
+        };
+
+        assert_eq!(
+            serde_json::to_value(response).expect("response serializes"),
+            serde_json::json!({"documents": []})
+        );
+    }
 
     /// base64 MUST 与标准实现逐字节一致。
     ///
