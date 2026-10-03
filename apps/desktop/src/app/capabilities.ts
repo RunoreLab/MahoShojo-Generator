@@ -4,7 +4,6 @@ import {
   type CapabilityAvailability,
   type CapabilitySnapshot,
 } from '@mahoshojo/ui-web/capability';
-import { HOME_FEATURE_CATEGORIES } from '@mahoshojo/ui-web/home';
 import { NAV_GROUPS } from '@mahoshojo/ui-web/navigation';
 
 import { DELIVERED_ROUTES } from './delivered-routes';
@@ -17,16 +16,6 @@ import { DELIVERED_ROUTES } from './delivered-routes';
  * 手写清单早晚会与实际交付的路由不一致，而不一致的方向恰好是最坏的那种：列出一个已删除的页面会给出
  * 可点击的死链，而 `DESK-PROD-001` 明确禁止「可点击但失效」。推导让两者不可能分叉——往
  * `DELIVERED_ROUTES` 加一行就是声明「该页面在本运行时可用」，而它必须与 `routeTree` 同步。
- *
- * ## 为什么遍历 `NAV_GROUPS ∪ HOME_FEATURES`
- *
- * 只遍历导航入口会漏掉首页功能卡指向的路径：`/details`、`/canshou`、`/character-party`、
- * `/magic-tea-party`、`/card-forge` 都不在 `NAV_GROUPS` 里（它们只在首页出现）。漏掉的后果是
- * 首页把这些入口显示成「未声明」——那是一个错误的理由：用户看到的是首页上的按钮，而它的问题不是
- * 本仓库没声明，是该页面尚未交付。
- *
- * 取并集还有一个好处：两条路径集合的分叉会在这里显式暴露，而不是等到某个入口在某个视图里显示成
- * 「未声明」才被发现。
  *
  * ## 为什么还要遍历站外入口
  *
@@ -48,9 +37,6 @@ export const buildCapabilitySnapshot = (): CapabilitySnapshot => {
 
   const declared = new Set([
     ...NAV_GROUPS.flatMap((group) => group.items.map((item) => ({ href: item.href, isExternal: item.isExternal === true }))),
-    ...HOME_FEATURE_CATEGORIES.flatMap((category) =>
-      category.features.map((feature) => ({ href: feature.href, isExternal: false })),
-    ),
   ]);
 
   for (const { href, isExternal } of declared) {
@@ -70,6 +56,5 @@ export const buildCapabilitySnapshot = (): CapabilitySnapshot => {
 export const DECLARED_PRODUCT_PATHS: readonly string[] = [
   ...new Set([
     ...NAV_GROUPS.flatMap((group) => group.items.map((item) => item.href)),
-    ...HOME_FEATURE_CATEGORIES.flatMap((category) => category.features.map((feature) => feature.href)),
   ]),
 ];

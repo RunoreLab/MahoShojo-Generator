@@ -82,7 +82,7 @@ const SYNC_MANIFEST = path.join(CONTENT_ROOT, 'sync-manifest.json');
  *
  * 它与正文一样是产品定义，因此从共享包源码就地求值（`ui-web` 是 source-export，没有构建产物）。
  */
-const HOME_FEATURE_CATALOG = path.join(root, 'packages', 'ui-web', 'src', 'home', 'feature-catalog.ts');
+const HOME_FEATURE_CATALOG = path.join(root, 'apps', 'web', 'config', 'features.ts');
 
 const readManifest = async () => {
   const manifest = JSON.parse(await readFile(SYNC_MANIFEST, 'utf8'));

@@ -1,8 +1,9 @@
 import type { Metadata } from 'next';
 import { preload } from 'react-dom';
 
+import { HOME_FEATURE_CATEGORIES } from '@/config/features';
 import { HomePage } from '@/components/home/HomePage';
-import { HOME_FEATURE_CATEGORIES, getHomeFeatureAssets } from '@mahoshojo/ui-web/home';
+import { getHomeFeatureAssets } from '@mahoshojo/ui-web/home';
 
 /**
  * 首页路由。

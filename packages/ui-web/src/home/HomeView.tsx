@@ -5,10 +5,10 @@ import { readCapability, type CapabilitySnapshot } from '../capability/index';
 // 是 Server Component 会经过的路径（`app/page.tsx` 只需要目录数据与 preload 列表）。
 import { EncyclopediaLinks } from '../encyclopedia/views/EncyclopediaLinks';
 import {
-  HOME_FEATURE_CATEGORIES,
   homeAssetUrl,
   type HomeAssetSource,
   type HomeFeature,
+  type HomeFeatureCategory,
 } from './feature-catalog';
 
 export interface HomeHeroProps {
@@ -120,29 +120,17 @@ export interface HomeFeatureGridProps {
   readonly onNavigate: (href: string) => void;
   /** 不可用入口的处置方式，与 `ProductNav` 同一套语义。 */
   readonly unavailable?: 'hide' | 'explain';
-  readonly categories?: typeof HOME_FEATURE_CATEGORIES;
+  /** 宿主提供实际功能清单，共享层不预设 Web 或 Desktop inventory。 */
+  readonly categories: readonly HomeFeatureCategory[];
 }
 
-/**
- * 共源功能分组网格。
- *
- * ## 为什么默认 `hide` 而不是把 13 个入口都标灰
- *
- * 13 个入口在 Desktop 首期只有一个可用。把另外 12 个全部渲染成禁用项，得到的是一张 roadmap 展板，
- * 而不是产品首页——`ProductNav` 的注释已经写过同一句话：把 18 个入口里 15 个标灰的导航不是导航。
- * 因此缺省丢弃不可用项，`'explain'` 留给已经交付大部分范围的宿主。
- *
- * ## 可用性由宿主给，不在这里判断
- *
- * 共享层只按 `capabilities` 过滤，绝不硬编码「哪些可用」。D3.1/D3.2/D3.3 交付后宿主往快照里加一条，
- * 这里的入口自动点亮，视图代码一行不改。
- */
+/** 共源功能分组网格，按宿主提供的清单与能力过滤不可执行入口。 */
 export function HomeFeatureGrid({
   assetSource,
   capabilities,
   onNavigate,
   unavailable = 'hide',
-  categories = HOME_FEATURE_CATEGORIES,
+  categories,
 }: HomeFeatureGridProps) {
   const reason = (feature: HomeFeature): string => {
     const availability = readCapability(capabilities, feature.href);

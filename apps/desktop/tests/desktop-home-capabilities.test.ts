@@ -1,21 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import { readCapability } from '@mahoshojo/ui-web/capability';
-import { HOME_FEATURE_CATEGORIES } from '@mahoshojo/ui-web/home';
 
 import { DECLARED_PRODUCT_PATHS, buildCapabilitySnapshot } from '../src/app/capabilities';
 import { DELIVERED_ROUTES } from '../src/app/delivered-routes';
 
-/**
- * D3.0 的导航能力快照。
- *
- * ## 为什么这里同时断言 `NAV_GROUPS ∪ HOME_FEATURES`
- *
- * 首页功能卡指向的路径里，`/details`、`/canshou`、`/character-party`、`/magic-tea-party`、
- * `/card-forge` 都不在 `NAV_GROUPS` 里——它们只在首页出现。如果快照只遍历导航入口，这五条会落在
- * `unknown`，于是首页把它们显示成「未声明」。那是一个错误的理由：用户点的是首页上的按钮，它的问题
- * 不是本仓库没声明，是该页面尚未在本地运行时交付。
- */
+/** Desktop 能力声明不把 Web 首页功能清单当成交付承诺。 */
 describe('desktop capability snapshot', () => {
   const snapshot = buildCapabilitySnapshot();
 
@@ -25,12 +15,9 @@ describe('desktop capability snapshot', () => {
     }
   });
 
-  it('covers every home feature, not just the navigation groups', () => {
-    for (const category of HOME_FEATURE_CATEGORIES) {
-      for (const feature of category.features) {
-        expect(snapshot, `能力快照缺少首页入口 ${feature.href}`).toHaveProperty(feature.href);
-        expect(readCapability(snapshot, feature.href).kind, `${feature.href} 不应是未声明`).not.toBe('unknown');
-      }
+  it('does not declare Web-only homepage entries', () => {
+    for (const href of ['/details', '/canshou', '/character-party', '/magic-tea-party', '/card-forge']) {
+      expect(readCapability(snapshot, href).kind).toBe('unknown');
     }
   });
 

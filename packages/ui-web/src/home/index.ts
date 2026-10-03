@@ -3,8 +3,8 @@
  *
  * ## 抽的是哪几块
  *
- * 品牌 Hero、功能分组网格、百科入口卡，以及首页功能目录的数据。这些是**产品**：两个 app 的首页
- * 呈现同一份信息架构，是 `ADR-desktop-shared-product` §2 的要求。
+ * 品牌 Hero、功能分组网格、百科入口卡与展示契约共源。功能清单由宿主按实际交付范围提供，
+ * Web 的完整功能目录不作为 Desktop 的交付承诺。
  *
  * ## 刻意不抽的是什么
  *
@@ -25,7 +25,6 @@ export {
 } from './HomeView';
 
 export {
-  HOME_FEATURE_CATEGORIES,
   getHomeFeatureAssets,
   homeAssetUrl,
   type HomeAssetSource,

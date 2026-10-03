@@ -132,6 +132,12 @@ describe('desktop router keeps the product path inside the hash', () => {
   it('renders the matching route for each delivered path', async () => {
     const router = await mount();
     expect(pageTestId()).toBe('page-home');
+    const home = container.querySelector('[data-testid="page-home"]')!;
+    expect([...home.querySelectorAll('a')].map((anchor) => anchor.getAttribute('href'))).toEqual([
+      '/encyclopedia', '#/local-library', '#/settings',
+    ]);
+    expect(home.querySelector('[data-testid="home-feature-grid"]')).toBeNull();
+    expect(home.textContent).not.toContain('PVP');
 
     for (const [to, expected] of [
       ['/local-library', 'page-local-library'],

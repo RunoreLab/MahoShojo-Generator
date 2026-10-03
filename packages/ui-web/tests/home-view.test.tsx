@@ -8,11 +8,22 @@ import {
   HomeEncyclopediaCard,
   HomeFeatureGrid,
   HomeHero,
-  HOME_FEATURE_CATEGORIES,
   getHomeFeatureAssets,
   homeAssetUrl,
   type HomeAssetSource,
+  type HomeFeatureCategory,
 } from '../src/home/index';
+
+
+const TEST_CATEGORIES: readonly HomeFeatureCategory[] = [
+  { id: 'generation', title: '内容生成', columns: 2, features: [
+    { id: 'form', href: '/details', assetFile: 'form.svg', width: 100, height: 50, alt: '问卷' },
+    { id: 'name', href: '/name', assetFile: 'name.svg', width: 100, height: 50, alt: '名称' },
+  ] },
+  { id: 'library', title: '内容管理', columns: 1, features: [
+    { id: 'library', href: '/library', assetFile: 'library.svg', width: 100, height: 50, alt: '本地库' },
+  ] },
+];
 
 let container: HTMLDivElement;
 let root: Root;
@@ -37,7 +48,7 @@ const render = (node: ReactNode): void => {
 
 /** 全部入口可用的快照，模拟 Web。 */
 const allAvailable = (): CapabilitySnapshot =>
-  Object.fromEntries(HOME_FEATURE_CATEGORIES.flatMap((c) => c.features.map((f) => [f.href, AVAILABLE])));
+  Object.fromEntries(TEST_CATEGORIES.flatMap((c) => c.features.map((f) => [f.href, AVAILABLE])));
 
 describe('home asset addressing', () => {
   it('keeps the base injectable and the asset path relative to it', () => {
@@ -48,7 +59,7 @@ describe('home asset addressing', () => {
   it('never emits a double slash after the origin', () => {
     // 协议自带的 `//` 不算；要看的是 base 与文件名之间有没有多出一个斜杠。
     for (const baseUrl of ['/', '/app/', 'https://example.invalid/sub/']) {
-      for (const category of HOME_FEATURE_CATEGORIES) {
+      for (const category of TEST_CATEGORIES) {
         for (const feature of category.features) {
           const url = homeAssetUrl({ baseUrl }, feature.assetFile);
           expect(url.slice(url.indexOf('//') + 2), `${baseUrl} + ${feature.assetFile}`).not.toContain('//');
@@ -97,21 +108,20 @@ describe('HomeEncyclopediaCard', () => {
 describe('HomeFeatureGrid', () => {
   const renderGrid = (capabilities: CapabilitySnapshot, props: Record<string, unknown> = {}) => {
     render(
-      <HomeFeatureGrid assetSource={ASSET_SOURCE} capabilities={capabilities} onNavigate={() => {}} {...props} />,
+      <HomeFeatureGrid categories={TEST_CATEGORIES} assetSource={ASSET_SOURCE} capabilities={capabilities} onNavigate={() => {}} {...props} />,
     );
   };
 
   it('renders every category and entry when everything is available', () => {
     renderGrid(allAvailable());
-    for (const category of HOME_FEATURE_CATEGORIES) {
+    for (const category of TEST_CATEGORIES) {
       expect(container.textContent, `缺少分组 ${category.title}`).toContain(category.title);
     }
     const tiles = container.querySelectorAll('a.feature-button');
-    expect(tiles).toHaveLength(getHomeFeatureAssets(HOME_FEATURE_CATEGORIES.flatMap((c) => [...c.features])).length);
+    expect(tiles).toHaveLength(getHomeFeatureAssets(TEST_CATEGORIES.flatMap((c) => [...c.features])).length);
   });
 
   it('hides unavailable entries by default instead of greying out a roadmap', () => {
-    // 13 个入口在 Desktop 首期只有一个可用。全渲染得到的是 roadmap 展板，不是产品首页。
     renderGrid({ '/encyclopedia': AVAILABLE });
     expect(container.querySelectorAll('a.feature-button')).toHaveLength(0);
     expect(container.querySelector('[data-testid="home-feature-grid"]')?.textContent).toBe('');
@@ -137,7 +147,7 @@ describe('HomeFeatureGrid', () => {
 
   it('never renders an unavailable entry as a clickable link', () => {
     const hrefs = [
-      ...HOME_FEATURE_CATEGORIES.flatMap((c) => c.features.map((f) => f.href)),
+      ...TEST_CATEGORIES.flatMap((c) => c.features.map((f) => f.href)),
     ];
     for (const href of hrefs) {
       renderGrid({ [href]: unavailable('not-implemented') }, { unavailable: 'explain' });

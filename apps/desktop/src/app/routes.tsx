@@ -7,7 +7,6 @@ import type { EncyclopediaContentSource } from '@mahoshojo/ui-web/encyclopedia';
 import { EncyclopediaEntryView, EncyclopediaIndexView } from '@mahoshojo/ui-web/encyclopedia-views';
 import {
   HomeEncyclopediaCard,
-  HomeFeatureGrid,
   HomeHero,
   type HomeAssetSource,
 } from '@mahoshojo/ui-web/home';
@@ -186,15 +185,12 @@ const indexRoute = createRoute({
           assetSource={DESKTOP_ASSET_SOURCE}
           width={220}
           height={140}
-          subtitle="本地运行时。本地浏览、编辑、导入与导出不需要账号，也不访问项目服务器。"
+          subtitle="本地浏览百科、导入与导出不需要账号，也不访问项目服务器。"
         />
         <p className="text-center text-sm text-(--app-text-muted)">
           桌面版的功能与网页版存在差异，各项功能预计将逐步开放。
         </p>
         <HomeEncyclopediaCard assetSource={DESKTOP_ASSET_SOURCE} onNavigate={navigate} />
-        {/* 功能分组缺省隐藏未交付入口：13 个入口里本地运行时只交付了少数几个，
-            全部渲染出来得到的是 roadmap 展板而不是产品首页（`DESK-PROD-001`）。 */}
-        <HomeFeatureGrid assetSource={DESKTOP_ASSET_SOURCE} capabilities={CAPABILITIES} onNavigate={navigate} />
         <section className="rounded-lg border border-(--app-border) bg-(--app-surface) p-4">
           <h2 className="mb-1 text-sm font-medium text-(--app-text-muted)">本机数据</h2>
           <ul className="flex flex-col gap-1 text-sm">
@@ -209,7 +205,7 @@ const indexRoute = createRoute({
               >
                 本地库
               </a>
-              ：本机数据卡与 Web 包的管理、导入导出。
+              ：本机数据卡与 Web 包的整库导入导出。
             </li>
             <li>
               <a
