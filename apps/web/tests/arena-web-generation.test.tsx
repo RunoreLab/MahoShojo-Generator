@@ -283,3 +283,120 @@ describe('single-player Web generation integration', () => {
     expect(mocks.shield.mock.calls.some(([text]) => text === source)).toBe(false);
   });
 });
+
+/**
+ * telemetry 恢复：原先这组性质是用 grep `useBattleEngine.ts` 的源码守住���
+ * （`tests/arena-snapshot-telemetry-restore.test.ts`，按 `indexOf("if (event === 'snapshot')")`
+ * 切分支再断言里面出现过 `applyTelemetryPayload`）。那种写法只要有人调整 SSE 分支的顺序、
+ * 或把调用挪进一个 helper，就会红，而行为一点没变。
+ *
+ * 换成真的驱动一次流之后，守的是同一组性质但从「源码长什么样」变成「状态变成什么」：
+ * snapshot bootstrap 必须把 telemetry 恢复到 store；`telemetry` 事件与它共用同一份
+ * 公开契约字段；旧 replay 存量仍可能只发内部字段 `model`，必须继续被接受。
+ *
+ * 前提是这三个字段在生成开始时被重置为 `null`（`useBattleEngine` 的 reset 段），
+ * 且本文件的 `streamHeaders` **不带** `ai.model`——所以下面的断言是真实的
+ * null → 值 转变，而不是「本来就是这个值」。
+ */
+describe('telemetry restore across snapshot bootstrap and telemetry events', () => {
+  const telemetryFields = () => {
+    const { streamAiModel, streamAiUsage, streamNarrativeHistoryReadCount } = useBattleStore.getState();
+    return { streamAiModel, streamAiUsage, streamNarrativeHistoryReadCount };
+  };
+
+  it('starts from null so the assertions below are real transitions', () => {
+    expect(telemetryFields()).toEqual({
+      streamAiModel: null,
+      streamAiUsage: null,
+      streamNarrativeHistoryReadCount: null,
+    });
+  });
+
+  it('restores model, usage and narrative count from the snapshot telemetry payload', async () => {
+    mocks.openStream.mockResolvedValue(new Response(
+      sse('snapshot', {
+        markdown: '# 恢复的战报',
+        status: 'completed',
+        telemetry: {
+          usage: { promptTokens: 11, completionTokens: 22, totalTokens: 33 },
+          narrativeHistoryReadCount: 4,
+          aiModel: 'arena-model-x',
+        },
+      }) + sse('done', { status: 'completed', ok: true }),
+      { headers: streamHeaders },
+    ));
+
+    await act(async () => current.handleGenerate());
+
+    expect(telemetryFields()).toEqual({
+      streamAiModel: 'arena-model-x',
+      streamAiUsage: { promptTokens: 11, completionTokens: 22, totalTokens: 33 },
+      streamNarrativeHistoryReadCount: 4,
+    });
+  });
+
+  it('does not fabricate telemetry when the snapshot carries none', async () => {
+    mocks.openStream.mockResolvedValue(new Response(
+      sse('snapshot', { markdown: '# 无 telemetry 的战报', status: 'completed' })
+      + sse('done', { status: 'completed', ok: true }),
+      { headers: streamHeaders },
+    ));
+
+    await act(async () => current.handleGenerate());
+
+    expect(useBattleStore.getState().streamingMarkdown).toBe('# 无 telemetry 的战报');
+    expect(telemetryFields()).toEqual({
+      streamAiModel: null,
+      streamAiUsage: null,
+      streamNarrativeHistoryReadCount: null,
+    });
+  });
+
+  it('applies the same public contract from a standalone telemetry event', async () => {
+    mocks.openStream.mockResolvedValue(new Response(
+      sse('telemetry', {
+        usage: { promptTokens: 5, completionTokens: 6, totalTokens: 11 },
+        narrativeHistoryReadCount: 9,
+        aiModel: 'arena-model-y',
+      }) + sse('done', { status: 'completed', ok: true }),
+      { headers: streamHeaders },
+    ));
+
+    await act(async () => current.handleGenerate());
+
+    expect(telemetryFields()).toEqual({
+      streamAiModel: 'arena-model-y',
+      streamAiUsage: { promptTokens: 5, completionTokens: 6, totalTokens: 11 },
+      streamNarrativeHistoryReadCount: 9,
+    });
+  });
+
+  it('keeps accepting the legacy replay field model, and prefers aiModel when both arrive', async () => {
+    mocks.openStream.mockResolvedValue(new Response(
+      sse('telemetry', { model: 'legacy-model', narrativeHistoryReadCount: 1 })
+      + sse('telemetry', { aiModel: 'new-model', model: 'legacy-model' })
+      + sse('done', { status: 'completed', ok: true }),
+      { headers: streamHeaders },
+    ));
+
+    await act(async () => current.handleGenerate());
+
+    expect(useBattleStore.getState().streamAiModel).toBe('new-model');
+  });
+
+  it('sanitizes the restored model name through the shield-word filter', async () => {
+    mocks.openStream.mockResolvedValue(new Response(
+      sse('snapshot', {
+        markdown: '# 战报',
+        status: 'completed',
+        telemetry: { aiModel: 'SHIELD-model' },
+      }) + sse('done', { status: 'completed', ok: true }),
+      { headers: streamHeaders },
+    ));
+
+    await act(async () => current.handleGenerate());
+
+    expect(useBattleStore.getState().streamAiModel).toBe('被替换-model');
+    expect(mocks.shield).toHaveBeenCalledWith('SHIELD-model');
+  });
+});
