@@ -35,6 +35,11 @@
       "import": "./src/local-archive/index.ts",
       "default": "./src/local-archive/index.ts"
     },
+    "./home": {
+      "types": "./src/home/index.ts",
+      "import": "./src/home/index.ts",
+      "default": "./src/home/index.ts"
+    },
     "./markdown.css": "./src/markdown/markdown.css"
   },
   "scripts": {

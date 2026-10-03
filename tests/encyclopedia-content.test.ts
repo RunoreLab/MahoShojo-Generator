@@ -25,6 +25,16 @@ import { describe, expect, it } from 'vitest';
 
 const REPO_ROOT = path.resolve(import.meta.dirname, '..');
 const CONTENT_DIR = path.join(REPO_ROOT, 'content', 'encyclopedia');
+
+/**
+ * 两端首屏都会渲染的品牌资源。
+ *
+ * Desktop 首期**不**打包 13 个功能入口的资源（它们在本地运行时全部不可用，因此根本不会被渲染），
+ * 所以这里断言的是交集而不是全集：把未渲染的资源塞进安装包只会让应用多带 1.4MB 读不到的文件。
+ * 逐 app 的资源清单由 `content/sync-manifest.json` 记录并由同步脚本的 `--check` 把关。
+ */
+const SHARED_BRAND_ASSETS = ['logo.svg', 'logo-white.svg', 'encyclopedia.svg'] as const;
+
 const TARGETS = [
   { app: 'apps/web', label: 'Web' },
   { app: 'apps/desktop', label: 'Desktop' },
@@ -98,7 +108,7 @@ describe('encyclopedia content reaches both service roots', () => {
     // D3.0 的首页与百科页会渲染 logo 与百科标识。Desktop 此前根本没有这些文件，
     // 「共用一个外观」并不证明离线启动达成——资源必须在产物里。
     for (const { app, label } of TARGETS) {
-      for (const asset of ['logo.svg', 'logo-white.svg', 'encyclopedia.svg']) {
+      for (const asset of SHARED_BRAND_ASSETS) {
         const bytes = await readFile(path.join(REPO_ROOT, app, 'public', asset)).catch(() => null);
         expect(bytes, `${label} 缺少 ${asset}`).not.toBeNull();
         expect(bytes!.length, `${label} 的 ${asset} 是空文件`).toBeGreaterThan(0);

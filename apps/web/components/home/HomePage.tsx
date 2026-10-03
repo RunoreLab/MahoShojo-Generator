@@ -1,62 +1,66 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+
+import {
+  HomeEncyclopediaCard,
+  HomeFeatureGrid,
+  HomeHero,
+  HOME_FEATURE_CATEGORIES,
+  type HomeAssetSource,
+} from '@mahoshojo/ui-web/home';
+
 import Footer from '@/components/Footer';
 import { useAuth } from '@/lib/useAuth';
 import { UserWithTitle } from '@/components/UserTitle';
-import { featureCategories, getAllFeatureImages } from '@/config/features';
-import { EncyclopediaLinks } from '@/components/encyclopedia/EncyclopediaLinks';
-import { ThemeImage } from '@/components/shared/ThemeImage';
+import type { CapabilitySnapshot } from '@mahoshojo/ui-web/capability';
+import { AVAILABLE } from '@mahoshojo/ui-web/capability';
+
+/**
+ * Web 的首页。
+ *
+ * 共享部分是品牌 Hero、功能分组网格与百科入口卡（`@mahoshojo/ui-web/home`）；本文件负责 Web 特有的
+ * 东西：账号欢迎语与 Footer。把它们一起搬进共享包会把 Web 在线 bootstrap 带进 Desktop
+ * （`DESK-PROD-004`），因此这里刻意保持组装者的角色。
+ *
+ * ## 能力快照为什么是「全部可用」
+ *
+ * Web 上首页的 13 个入口都真实存在。快照仍然由宿主显式给出而不是让共享层默认全开，是为了让
+ * 「可用性由宿主声明」这件事在两端是同一种形状——Desktop 那边传的是一份真实的、多数不可用的快照。
+ */
+const WEB_CAPABILITIES: CapabilitySnapshot = Object.fromEntries(
+  HOME_FEATURE_CATEGORIES.flatMap((category) => category.features.map((feature) => [feature.href, AVAILABLE])),
+);
+
+const WEB_ASSET_SOURCE: HomeAssetSource = { baseUrl: '/' };
 
 export function HomePage() {
-  const [, setImagesLoaded] = useState(false);
+  const router = useRouter();
   const { user, userBadges, isAuthenticated, loading } = useAuth();
-
-  useEffect(() => {
-    const preloadImages = async () => {
-      const imageUrls = getAllFeatureImages();
-
-      const imagePromises = imageUrls.map(url => {
-        return new Promise((resolve, reject) => {
-          const img = new window.Image();
-          img.onload = resolve;
-          img.onerror = reject;
-          img.src = url;
-        });
-      });
-
-      try {
-        await Promise.all(imagePromises);
-        setImagesLoaded(true);
-      } catch (error) {
-        console.log('图片预加载完成，但部分图片可能失败', error);
-        setImagesLoaded(true);
-      }
-    };
-
-    preloadImages();
-  }, []);
 
   return (
     <>
       <div className="magic-background-white">
         <div className="container">
           <div className="card">
-            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', marginBottom: '2rem' }}>
-              <ThemeImage lightSrc="/logo.svg" darkSrc="/logo-white.svg" width={280} height={180} alt="魔法少女生成器" />
-            </div>
+            <HomeHero
+              assetSource={WEB_ASSET_SOURCE}
+              subtitle="欢迎来到魔法国度！选择一个项目开始玩耍吧！"
+            />
 
             {(loading || isAuthenticated) && (
-              <div className="flex justify-center mb-4">
+              <div className="mb-4 flex justify-center">
                 {loading ? (
                   <span className="text-sm text-gray-600">加载中...</span>
                 ) : (
                   <div className="flex flex-col items-center gap-2">
-                    <Link
-                      prefetch={false}
+                    <a
                       href="/character-manager"
-                      className="inline-flex items-center px-4 py-2 text-sm bg-pink-100 text-pink-700 rounded-lg hover:bg-pink-200 transition-colors"
+                      onClick={(event) => {
+                        event.preventDefault();
+                        void router.push('/character-manager');
+                      }}
+                      className="inline-flex items-center rounded-lg bg-pink-100 px-4 py-2 text-sm text-pink-700 transition-colors hover:bg-pink-200"
                     >
                       <span>欢迎回来，</span>
                       <UserWithTitle
@@ -67,89 +71,46 @@ export function HomePage() {
                         showBadges={true}
                       />
                       <span className="ml-2">点击进入档案馆</span>
-                    </Link>
-                    <Link prefetch={false} href="/me" className="text-sm text-blue-600 hover:underline">
+                    </a>
+                    <a
+                      href="/me"
+                      onClick={(event) => {
+                        event.preventDefault();
+                        void router.push('/me');
+                      }}
+                      className="text-sm text-blue-600 hover:underline"
+                    >
                       个人页：战报记录 / PVP 战绩（测试版）
-                    </Link>
+                    </a>
                   </div>
                 )}
               </div>
             )}
-            <p className="subtitle text-center mb-4">
-              欢迎来到魔法国度！选择一个项目开始玩耍吧！
-            </p>
-            <EncyclopediaLinks
-              label="新手推荐："
-              items={[
+
+            <HomeEncyclopediaCard
+              assetSource={WEB_ASSET_SOURCE}
+              onNavigate={(href) => {
+                void router.push(href);
+              }}
+              recommended={[
                 { slug: 'site-guide', text: '站内功能速览（从生成到对战）' },
                 { slug: 'newbie-guide', text: '新手攻略（强度直觉）' },
                 { slug: 'community-rules', text: '社区守则与竞技场规范（必读）' },
               ]}
             />
-            <div className="mt-4 flex justify-center">
-              <Link
-                prefetch={false}
-                href="/encyclopedia"
-                className="group w-full max-w-md rounded-xl border border-blue-200 bg-blue-50/50 px-4 py-3 text-left transition-colors hover:bg-blue-50"
-              >
-                <div className="flex items-center gap-3">
-                  <img
-                    src="/encyclopedia.svg"
-                    width={160}
-                    height={64}
-                    alt="百科"
-                    className="shrink-0"
-                  />
-                  <div className="min-w-0">
-                    <div className="text-base font-semibold leading-tight text-blue-800">百科目录</div>
-                    <div className="text-xs text-blue-700/80">使用说明 / 规则 / 进阶</div>
-                  </div>
-                  <span className="ml-auto text-xs text-blue-700 group-hover:underline">打开</span>
-                </div>
-              </Link>
-            </div>
 
-            {/* 分类功能导航 */}
-            <div className="space-y-8">
-              {featureCategories.map((category) => (
-                <div key={category.id} className="feature-category">
-                  {/* 分类标题 */}
-                  <h2 className="text-center text-lg font-semibold mb-4 text-pink-700">
-                    {category.title}
-                  </h2>
-
-                  {/* 功能按钮网格 */}
-                  <div
-                    className={`feature-grid ${category.columns === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}
-                  >
-                    {category.features.map((feature) => (
-                      <Link
-                        prefetch={false}
-                        key={feature.id}
-                        href={feature.href}
-                        className={`feature-button ${feature.className}`}
-                      >
-                        <div className="gradient-overlay"></div>
-                        <div className="feature-button-content">
-                          <div className="feature-title-container">
-                            <img
-                              src={feature.src}
-                              width={feature.width}
-                              height={feature.height}
-                              alt={feature.alt}
-                              className="feature-title-svg"
-                            />
-                          </div>
-                        </div>
-                      </Link>
-                    ))}
-                  </div>
-                </div>
-              ))}
+            <div className="mt-4">
+              <HomeFeatureGrid
+                assetSource={WEB_ASSET_SOURCE}
+                capabilities={WEB_CAPABILITIES}
+                onNavigate={(href) => {
+                  void router.push(href);
+                }}
+              />
             </div>
 
             <div className="mt-8 text-center">
-              <p className="text-sm text-gray-500 italic">设定来源于小说《下班，然后变成魔法少女》</p>
+              <p className="text-sm italic text-gray-500">设定来源于小说《下班，然后变成魔法少女》</p>
             </div>
           </div>
 
