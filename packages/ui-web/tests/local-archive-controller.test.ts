@@ -239,6 +239,13 @@ describe('import flow', () => {
     expect(applyArchive.mock.calls[0]?.[0]).toBe(bytes);
     expect(applyArchive.mock.calls[0]?.[1]).toBe(inspectedPlan);
     expect(controller.model.report).not.toBeNull();
+    expect(controller.model.plan).toBeNull();
+
+    // resolved apply 是这份预检的终态。existing-wins 虽能让重复 apply 不覆盖数据，但 UI 不应继续
+    // 暴露一个已经消费过的“确认”动作；要再次导入必须重新选择并预检。
+    controller.actions.confirmImport();
+    await settle();
+    expect(applyArchive).toHaveBeenCalledTimes(1);
   });
 
   it('clears a stale preflight when a later preflight fails', async () => {
@@ -336,6 +343,7 @@ describe('import flow', () => {
     await settle();
 
     const result = controller.model.report;
+    expect(controller.model.plan).toBeNull();
     expect(result?.skipped).toHaveLength(2);
     expect(result?.failed).toHaveLength(1);
     expect(result?.failed[0]?.reason).toBe('ZIP 字节与清单不符');

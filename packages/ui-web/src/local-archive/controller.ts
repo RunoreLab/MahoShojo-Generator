@@ -154,7 +154,14 @@ export const createLocalArchiveController = (host: LocalArchiveHost): LocalArchi
     setModel({ applying: true, importError: null });
     try {
       const report = await host.applyArchive(inspectedArchive, inspectedPlan);
-      setModel({ applying: false, report, importError: null });
+      // 一次 resolved apply 已经消费了这份预检：即使 report 里有逐条失败，成功项也可能已经写入，
+      // 再次点击“确认导入”会把同一份 plan 当作尚未执行重新跑一遍。existing-wins 能避免覆盖，
+      // 但那只是数据安全兜底，不应让状态机保留一个已经完成的确认动作。
+      //
+      // 真正的 command/存储级失败走 catch，那里刻意保留 plan，允许用户直接重试。
+      inspectedArchive = null;
+      inspectedPlan = null;
+      setModel({ applying: false, plan: null, report, importError: null });
     } catch (cause) {
       setModel({ applying: false, importError: host.describeError(cause) });
     }
