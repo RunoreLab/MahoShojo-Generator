@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 
 import { EncyclopediaEntryPage } from '@/components/encyclopedia/EncyclopediaEntryPage';
-import { encyclopediaEntries, getEncyclopediaEntry } from '@/lib/encyclopedia';
+import { encyclopediaEntries, getEncyclopediaEntry } from '@mahoshojo/ui-web/encyclopedia';
 
 type RouteParams = {
   slug?: string | string[];

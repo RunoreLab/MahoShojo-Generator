@@ -1,4 +1,4 @@
-import { getEncyclopediaEntry, type EncyclopediaEntry } from '@/lib/encyclopedia';
+import { getEncyclopediaEntry, type EncyclopediaEntry } from '@mahoshojo/ui-web/encyclopedia';
 
 export type ErrorHelpInput = {
   message?: string | null;

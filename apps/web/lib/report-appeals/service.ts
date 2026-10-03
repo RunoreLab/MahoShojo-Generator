@@ -5,7 +5,7 @@ import type { AdminDatabase } from '@mahoshojo/hosted-runtime/admin/database';
 import { isAdverseFinalReportResolutionCode } from '@/lib/data-card-reports/outcome-enforcement';
 import { getDataCardByIdWithAuthorAndTags } from '@/lib/db/repositories/data-cards-core';
 import * as repo from '@/lib/db/repositories/report-appeals';
-import { getEncyclopediaEntry } from '@/lib/encyclopedia';
+import { getEncyclopediaEntry } from '@mahoshojo/ui-web/encyclopedia';
 import { createUserMessageEntry } from '@/lib/messages/service';
 import {
   REPORT_APPEAL_REASON_OPTIONS,

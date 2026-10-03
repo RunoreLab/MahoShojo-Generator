@@ -20,9 +20,12 @@ Desktop/Web 的新增共享边界按[产品共源 ADR](../docs/decisions/2026-10
 本目录不设一个无边界的 `common`/`shared` 倾倒包。新增 package 应按领域职责命名，并同步维护类型、exports、测试和依赖边界。当前真实 package 为：
 
 - `@mahoshojo/ui-web`：共源 React DOM 页面、控件、功能 hooks、主题与产品资源。显式 feature subpath
-  （`./styles.css`、`/navigation`、`/shell`、`/capability`、`/local-archive`），**不开根 barrel**——
+  （`./styles.css`、`/navigation`、`/shell`、`/capability`、`/encyclopedia`、`/markdown`、`/home`、`/local-archive`），**不开根 barrel**——
   ADR 要求它不成为 `common/shared` 倾倒包。对归档契约只做 `import type`，运行时导入由两端 adapter 承担。
-  不导入 Next/Tauri/服务器 runtime，也不用平台探测决定数据所有权或执行权威；
+  不导入 Next/Tauri/服务器 runtime，也不用平台探测决定数据所有权或执行权威。**产品内容不进这个包**：
+  百科正文与首页品牌资源的权威是仓库根 `content/`，由 `scripts/generate-encyclopedia-content.mjs`
+  复制到两个 app 的静态服务根；包内只保留目录数据与由宿主注入的 base URL 契约，共享源码里不出现
+  `import.meta.glob` / `?raw` 这类打包器专有语法；
 - `@mahoshojo/config`：仅导出非秘密的 workspace/layout 常量与类型；
 - `@mahoshojo/web-package`：共享 Web Standards 实现，校验不可变 Web Package 文件、构建 bounded Prompt Projection、验证单文件 overlay，并按精确 revision 解析 builtin 预设与 staged 本地 ZIP；通用根入口保持 Node / Worker / browser 可共享，DOM-dependent 的浏览器 materialization 只从显式 browser subpath 导出。Arena 当前统一通过 browser-local materialization 展示 Web Package，不依赖预设专用 renderer；默认 Restricted Mode，Trusted Same-Origin 为独立用户授权路径。generic resource-space 保留 transport-neutral 纯逻辑，不使用 Service Worker 作为资源传输方案；线上 source adapter / 独立 sandbox origin 仍是未来扩展。公开 manifest/ref/artifact schema 位于 `@mahoshojo/contracts/web-package`，含通用 Draft 2020-12 子集校验（未实现的标准 assertion fail-closed）；不提供宿主权限或线上上传；
 - `@mahoshojo/contracts`：导出版本化协议 DTO、Zod schema、错误码和 wire 安全限制；当前已覆盖 Arena Room v1、线上数据卡元数据、Game Card 卡面 wire schema、runtime-neutral `AiExecution` request/result v1、`DirectProviderProfileV1`，以及通用 API version/success/error envelope。AI 请求契约不携带 Provider Profile、Endpoint 或凭据，canonical result 会限制 UTF-8 总量并拒绝危险结构化键；Profile 只保存非秘密配置与 Vault reference，并限制总量、header/default 数量，拒绝非 HTTP(S) URL、URL 内嵌凭据、HTTP 控制字符、已知秘密 header 的明文值和传输层受控 header；API/AI 输出只接受 JSON-safe 数据；stream event 和执行端口分别由 `ai-core`、`ai-direct` 承担。`contracts/desktop-ipc` 子路径承载 Desktop IPC 的纯数据形状（secret 引用字符集与长度、secret 取值字节上限、secret 存储失败的公开投影），供渲染层与 Rust 侧共同引用，并由 `contracts/fixtures/desktop-secret-refs.json` 作为跨运行时一致性 fixture 驱动两侧测试；

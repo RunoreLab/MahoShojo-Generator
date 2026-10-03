@@ -6,12 +6,21 @@ import { useEffect, useMemo, useState } from 'react';
 import { MarkdownBlock } from '@/components/MarkdownBlock';
 import { TagsLibraryPanel } from '@/components/encyclopedia/TagsLibraryPanel';
 import {
+  encyclopediaContentUrl,
   encyclopediaEntries,
   getEncyclopediaCategory,
   getEncyclopediaEntry,
   groupEncyclopediaEntries,
   matchEncyclopediaEntry,
-} from '@/lib/encyclopedia';
+} from '@mahoshojo/ui-web/encyclopedia';
+
+/**
+ * Web 的百科正文服务根。
+ *
+ * 它是宿主事实而不是产品事实，因此由本文件注入共享层（`D3.0-1`）。Web 由 `public/` 提供正文，
+ * 也就是 origin 根；Desktop 的同一个值由 Tauri 自定义协议提供，不共享这一处的常量。
+ */
+const WEB_CONTENT_SOURCE = { baseUrl: '/' } as const;
 
 interface EncyclopediaEntryPageProps {
   slug?: string;
@@ -65,7 +74,7 @@ export function EncyclopediaEntryPage({ slug }: EncyclopediaEntryPageProps) {
     setLoading(true);
     setError(null);
 
-    void fetch(entry.markdownPath)
+    void fetch(encyclopediaContentUrl(WEB_CONTENT_SOURCE, entry.contentFile))
       .then(async (res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return await res.text();
