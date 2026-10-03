@@ -19,9 +19,9 @@ import { openLocalLibraryDb, LocalLibraryUnavailableError } from './db';
  */
 export const probeLocalLibraryStorage = async (): Promise<string | null> => {
   try {
-    const db = await openLocalLibraryDb();
-    // 立刻关掉：探测不应该长期占住一个连接，否则后续写入可能撞上 upgrade 阻塞。
-    db.close();
+    // `openLocalLibraryDb` 返回的是应用共享的长连接；关闭它会让 dbPromise 继续缓存一个已关闭连接，
+    // 导致紧随其后的归档导入/导出在创建 transaction 时失败。需要升级 schema 时由 onversionchange 释放。
+    await openLocalLibraryDb();
     return null;
   } catch (cause) {
     if (cause instanceof LocalLibraryUnavailableError) {
