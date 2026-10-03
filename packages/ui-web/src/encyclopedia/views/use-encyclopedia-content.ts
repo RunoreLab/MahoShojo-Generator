@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
-import { encyclopediaContentUrl, type EncyclopediaContentSource } from './content-source';
-import { getEncyclopediaEntry, type EncyclopediaEntry } from './catalog';
+import { encyclopediaContentUrl, type EncyclopediaContentSource } from '../content-source';
+import { getEncyclopediaEntry, type EncyclopediaEntry } from '../catalog';
 
 /**
  * 条目正文的取回。

@@ -18,7 +18,7 @@
 
 import { useEffect } from 'react';
 
-import { decodeFragmentId } from './heading-slug';
+import { decodeFragmentId } from './text/index';
 
 export interface HashScrollTargetOptions {
   /** 正文是否已渲染。`false` 时不做任何事，等它变成 `true` 再滚。 */

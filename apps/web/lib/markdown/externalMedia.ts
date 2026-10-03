@@ -234,11 +234,16 @@ export const isLikelyVideoUrl = (value: string | null | undefined) => {
 };
 
 /**
- * 纯文本格式化函数已搬到 `@mahoshojo/ui-web/markdown`，因为它们是渲染机制而不是 Web 策略。
+ * 纯文本格式化函数已搬到 `@mahoshojo/ui-web/markdown-text`，因为它们是渲染机制而不是 Web 策略。
+ *
+ * 必须走 `-text` 那个入口而不是 `@mahoshojo/ui-web/markdown`：本文件被 Route Handler
+ * （`app/api/media-proxy/route.ts`）经由这条 re-export 间接导入，而 `markdown` 入口里有 React hook
+ * ——Server 侧导入链上出现 hook 会被 Next 在构建期拒绝。
+ *
  * 这里保留 re-export：`AnnouncementTicker`、`StreamingBattleReportCard` 与 `BattleReportCard`
  * 都从这里导入，搬迁它们的导入路径属于与 D3.0 无关的改动。
  */
-export { formatMarkdownImage, formatMarkdownLink } from '@mahoshojo/ui-web/markdown';
+export { formatMarkdownImage, formatMarkdownLink } from '@mahoshojo/ui-web/markdown-text';
 
 /**
  * Web 的站外媒体策略。

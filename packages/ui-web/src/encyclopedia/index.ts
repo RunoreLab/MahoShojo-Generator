@@ -1,11 +1,14 @@
 /**
- * 共源百科：目录数据、正文寻址、检索与页面视图。
+ * 共源百科：目录数据、正文寻址与筛选语义。
  *
- * 本 subpath 是百科在两个运行时的完整承载：`apps/web` 与 `apps/desktop` 从这里读同一份目录、用同一
- * 对视图，因此不会出现"共享包里的 Desktop 副本"与 Web 原实现并存（`DESK-PROD-002`）。
+ * ## 这个入口是 RSC 安全的
  *
- * 宿主需要提供的只有三样：路由（`onNavigate`）、正文服务根（`contentSource`）、以及 fragment
- * （`hash`）。三者都是宿主事实，共享层一律不推断。
+ * 它只导出**纯**数据与纯函数，不 import 任何 React hook。Server Component（Web 的
+ * `generateStaticParams` / `generateMetadata`，以及 `error-help`、`report-appeals` 这类服务端模块）
+ * 从这里读目录，因此这条导入链上不能出现 `useState` / `useEffect`——否则 Next 的 App Router 会在
+ * 构建期拒绝，而 jsdom 测试抓不到。
+ *
+ * React 视图与 hook 在 `./encyclopedia-views`。`tests/server-safe-subpaths.test.ts` 对这条边界加门禁。
  */
 export {
   encyclopediaCategories,
@@ -28,33 +31,10 @@ export {
 
 export {
   ALL_CATEGORY,
+  filterEncyclopediaEntries,
   parseEncyclopediaFilter,
   serializeEncyclopediaFilter,
-  useEncyclopediaFilter,
-  useFilteredEncyclopediaEntries,
   type EncyclopediaCategoryFilter,
   type EncyclopediaFilter,
   type EncyclopediaFilteredEntries,
 } from './filter';
-
-export {
-  useEncyclopediaContent,
-  useEncyclopediaEntryHref,
-  type EncyclopediaContentState,
-} from './use-encyclopedia-content';
-
-export {
-  EncyclopediaEntryView,
-  type EncyclopediaEntryViewProps,
-} from './EncyclopediaEntryView';
-
-export {
-  EncyclopediaIndexView,
-  type EncyclopediaIndexViewProps,
-} from './EncyclopediaIndexView';
-
-export {
-  EncyclopediaLinks,
-  type EncyclopediaLinkItem,
-  type EncyclopediaLinksProps,
-} from './EncyclopediaLinks';

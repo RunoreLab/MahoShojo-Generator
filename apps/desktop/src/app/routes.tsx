@@ -3,11 +3,8 @@ import { Outlet, createRootRoute, createRoute, useParams, useRouter } from '@tan
 import { LocalArchivePanel, createLocalArchiveController } from '@mahoshojo/ui-web/local-archive';
 import { useArchiveLeaveGuard } from './useArchiveLeaveGuard';
 import { AppShell, ProductNav } from '@mahoshojo/ui-web/shell';
-import {
-  EncyclopediaEntryView,
-  EncyclopediaIndexView,
-  type EncyclopediaContentSource,
-} from '@mahoshojo/ui-web/encyclopedia';
+import type { EncyclopediaContentSource } from '@mahoshojo/ui-web/encyclopedia';
+import { EncyclopediaEntryView, EncyclopediaIndexView } from '@mahoshojo/ui-web/encyclopedia-views';
 import {
   HomeEncyclopediaCard,
   HomeFeatureGrid,

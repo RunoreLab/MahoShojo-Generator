@@ -1,7 +1,9 @@
 import type { ReactNode } from 'react';
 
 import { readCapability, type CapabilitySnapshot } from '../capability/index';
-import { EncyclopediaLinks } from '../encyclopedia/index';
+// 直接指向模块而不是 views 的 barrel：barrel 会把该 feature 下所有 hook 一起拖进来，而首页
+// 是 Server Component 会经过的路径（`app/page.tsx` 只需要目录数据与 preload 列表）。
+import { EncyclopediaLinks } from '../encyclopedia/views/EncyclopediaLinks';
 import {
   HOME_FEATURE_CATEGORIES,
   homeAssetUrl,

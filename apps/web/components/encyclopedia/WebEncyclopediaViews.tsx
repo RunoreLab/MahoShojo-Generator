@@ -3,11 +3,8 @@
 import { useRouter } from 'next/navigation';
 import { useSearchParams } from 'next/navigation';
 
-import {
-  EncyclopediaIndexView,
-  parseEncyclopediaFilter,
-  type EncyclopediaContentSource,
-} from '@mahoshojo/ui-web/encyclopedia';
+import { parseEncyclopediaFilter, type EncyclopediaContentSource } from '@mahoshojo/ui-web/encyclopedia';
+import { EncyclopediaIndexView } from '@mahoshojo/ui-web/encyclopedia-views';
 import Link from 'next/link';
 
 /**

@@ -1,15 +1,16 @@
 import type { ReactNode } from 'react';
 
-import { encyclopediaCategories, getEncyclopediaCategory } from './catalog';
-import type { EncyclopediaContentSource } from './content-source';
-import { ALL_CATEGORY, useEncyclopediaFilter, useFilteredEncyclopediaEntries } from './filter';
+import { encyclopediaCategories, getEncyclopediaCategory } from '../catalog';
+import type { EncyclopediaContentSource } from '../content-source';
+import { ALL_CATEGORY } from '../filter';
+import { useEncyclopediaFilter, useFilteredEncyclopediaEntries } from './use-encyclopedia-filter';
 import {
   MarkdownBlock,
   slugifyHeading,
   stripLeadingMatchingTitle,
   useHashScrollTarget,
   type InternalLinkRenderProps,
-} from '../markdown/index';
+} from '../../markdown/index';
 import { useEncyclopediaContent } from './use-encyclopedia-content';
 
 export interface EncyclopediaEntryViewProps {
