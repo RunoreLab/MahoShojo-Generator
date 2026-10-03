@@ -8,6 +8,10 @@
 
 后续发布型 package 再单独设计稳定的 `dist` exports，不把当前 source export 当作发布约定。
 
+D3.1a 增加 `@mahoshojo/ai-core/magical-girl-details-generation` 显式入口：结构化/Markdown Prompt、
+输出 schema 与未签名角色卡构造由 Web Hosted 和 Desktop Direct 共用；问卷答案分组/精简规则在
+`domain/questionnaire`。Hosted 模型设置、原生问卷许可、限流和签名不进入客户端共享核。
+
 Desktop/Web 的新增共享边界按[产品共源 ADR](../docs/decisions/2026-10-02_184000_Desktop产品架构与Web共源决策.md)逐切片提取：`ui-web` 承载共源 React DOM 页面/控件、主题、产品导航及资源，不能导入 Next/Tauri/服务器 runtime；现有纯业务与执行契约仍归专职包。`cloud-client` 只在真实在线能力接入时建立，**当前尚未实现**，也不因文档修订而创建占位包。
 
 `ui-web` **已于 D2.5a 建立**（见下方清单）。它的边界由 `check-workspace-boundaries.mjs` 的

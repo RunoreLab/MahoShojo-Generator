@@ -2,7 +2,7 @@
 
 MahoShojo Generator 的本地桌面客户端 runtime。它是独立 app，不是远端网站壳；产品页面、主题与业务能力按共享 package 与 Web 共源，而非直接 import `apps/web`。
 
-当前阶段（2026-10-03）：**D1 执行核、D1.5、D2.0–D2.2、D2.3a/b/c 的存储/归档桥、D2.5a/D2.5b 的共源壳与路由接线、D2.3d 的归档产品 UI，以及 D3.0 首页与离线百科已落地**。首页复用 `@mahoshojo/ui-web/home` 的共源切片，只展示已交付的百科、本地库与设置入口；`/encyclopedia` 与 `/encyclopedia/$slug` 复用共源百科视图，离线可读全部 53 篇产品文档；`/local-library` 提供整库导出与导入，D0 的运行时自述与 Provider 面板移入 `/settings`。`/details` 等 D3.1 页面仍未开始。
+当前阶段（2026-10-03）：**D1 执行核、D1.5、D2.0–D2.2、D2.3a/b/c 的存储/归档桥、D2.5a/D2.5b 的共源壳与路由接线、D2.3d 的归档产品 UI，以及 D3.0 首页与离线百科已落地**。首页复用 `@mahoshojo/ui-web/home` 的共源切片，只展示已交付的百科、本地库与设置入口；`/encyclopedia` 与 `/encyclopedia/$slug` 复用共源百科视图，离线可读全部 53 篇产品文档；`/local-library` 提供整库导出与导入，D0 的运行时自述与 Provider 面板移入 `/settings`。`/details` 尚未开放；D3.1a 已建立共源生成核与 Direct 调用模块，问卷 UI、草稿与本地保存待后续接线。
 
 仍然开放、不记为 PASS 的门禁：`<input type="file">` 在真实 Tauri WebView 中打开原生文件对话框；D2.3 的真实 WebView 内存/响应性与 raw IPC 4 MiB 吞吐/回退；D2.5b 的返回/前进手感与原生窗口关闭（全部路由证据来自 jsdom）；D1 真实 Provider 端点与取消/流。D2.4 整库备份与重启恢复已接入 `/local-library`，并有一次 Explorer 取消、恢复、导入与重启闭环实测；磁盘失败注入、大库性能基线与断电耐久性仍开放。回收站 UI 尚未交付。
 
@@ -31,7 +31,7 @@ MahoShojo Generator 的本地桌面客户端 runtime。它是独立 app，不是
   `frontendDist`，不需要新增 native 权限）；共源 Markdown 渲染层的 heading id 是显式 opt-in，
   站外媒体缺省全部拒绝，外链缺少 opener 时不可执行。能力快照以共源导航与真实交付路由为准，Web 功能清单留在 Web；旧 PVP `/battle`、`/arena` 已取消 Desktop 迁移，Web 现有功能与历史保留。断网打包冷启动、dev 环境主题/键盘/IME/DPI，以及原生测试库 renderer Network、减少动态效果模拟、KaTeX 和锚点已有实测；native 出站全旅程仍待验，真机整体门禁开放，见
   [首页与离线百科验收](../../docs/runbooks/2026-10-03_163000_Desktop首页与离线百科验收.md)。
-- **D3.1 及以后** 页面纵切尚未开始；不因本轮更新关闭既有未验收项。
+- **D3.1a** 共源生成核、Web Hosted 回用与 Desktop Direct 调用模块已落地；修复完整请求 DTO、模型回传与启动取消接线。尚无 `/details` 产品页、草稿恢复或生成结果本地保存，后续 D3.1b/c 接入；既有真机门禁保留。
 
 ## 权威边界
 
