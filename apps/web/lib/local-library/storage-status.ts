@@ -29,7 +29,9 @@ const isPersistApiAvailable = (): boolean =>
   typeof navigator !== 'undefined' && typeof navigator.storage?.persist === 'function';
 
 export const useLocalLibraryStorageStatus = (): LocalLibraryStorageStatus => {
-  const supported = isStorageManagerAvailable();
+  // Keep the initial server and browser snapshots identical. Capability detection can only run in the effect;
+  // reading navigator during the first client render changes the SSR text and causes a hydration mismatch.
+  const [supported, setSupported] = useState(false);
   const [persisted, setPersisted] = useState<boolean | null>(null);
   const [requestedPersist, setRequestedPersist] = useState(false);
   const [usage, setUsage] = useState<number | null>(null);
@@ -37,7 +39,9 @@ export const useLocalLibraryStorageStatus = (): LocalLibraryStorageStatus => {
   const [busy, setBusy] = useState(false);
 
   const refresh = useCallback(async () => {
-    if (!supported) return;
+    const storageManagerAvailable = isStorageManagerAvailable();
+    setSupported(storageManagerAvailable);
+    if (!storageManagerAvailable) return;
     setBusy(true);
     try {
       const [estimate, isPersisted] = await Promise.all([
@@ -54,7 +58,7 @@ export const useLocalLibraryStorageStatus = (): LocalLibraryStorageStatus => {
     } finally {
       setBusy(false);
     }
-  }, [supported]);
+  }, []);
 
   useEffect(() => {
     void refresh();
