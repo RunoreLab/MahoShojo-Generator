@@ -96,6 +96,7 @@ describe('DesktopAiExecutionPort', () => {
     });
     // profileId 是唯一选择器：请求里不得出现 endpoint 或 secret。
     expect(harness.commandArguments?.profileId).toBe('p1');
+    expect(harness.commandArguments?.request).toEqual(request);
     expect(JSON.stringify(harness.commandArguments)).not.toMatch(/https?:\/\/|sk-/u);
   });
 
@@ -115,6 +116,67 @@ describe('DesktopAiExecutionPort', () => {
     await consuming;
 
     expect(collected).toEqual(completedStream);
+    expect(harness.commandArguments?.request).toEqual(request);
+  });
+
+  it('forwards the complete business request without retaining mutable caller input', async () => {
+    const harness = createHarness();
+    const input: AiExecutionRequest = {
+      ...request,
+      messages: [{ role: 'system', content: '问卷规则' }, { role: 'user', content: '问卷回答' }],
+      modelId: 'chosen-model', temperature: 0.8, maxOutputTokens: 2048, responseFormat: 'json',
+    };
+    const expected = structuredClone(input);
+    const pending = createDesktopAiExecutionPort(harness.options).execute(input, new AbortController().signal);
+    input.messages[1]!.content = '调用后编辑';
+    expect(harness.commandArguments?.request).toEqual(expected);
+    for (const event of completedStream) harness.deliver(event);
+    harness.finish();
+    await pending;
+  });
+
+  it('rejects extra transport fields before IPC', async () => {
+    const harness = createHarness();
+    await expect(createDesktopAiExecutionPort(harness.options).execute(
+      { ...request, endpoint: 'https://example.invalid' } as AiExecutionRequest,
+      new AbortController().signal,
+    )).rejects.toThrow();
+    expect(harness.invoke).not.toHaveBeenCalled();
+  });
+
+  it('does not dispatch a pre-aborted streaming request', async () => {
+    const harness = createHarness();
+    const controller = new AbortController();
+    controller.abort();
+    const stream = createDesktopAiExecutionPort(harness.options).stream(request, controller.signal);
+    await expect(stream.next()).resolves.toMatchObject({ done: true });
+    expect(harness.invoke).not.toHaveBeenCalled();
+  });
+
+  it('cancels upstream when the consumer stops before completion', async () => {
+    const harness = createHarness();
+    const stream = createDesktopAiExecutionPort(harness.options).stream(request, new AbortController().signal);
+    const first = stream.next();
+    harness.deliver(completedStream[0] as AiStreamEvent);
+    await first;
+    const stopped = stream.return(undefined);
+    await vi.waitFor(() => expect(harness.invoke).toHaveBeenCalledWith(
+      CANCEL_DIRECT_AI_COMMAND, { requestId: request.requestId },
+    ));
+    harness.finish();
+    await stopped;
+  });
+
+  it('does not yield a queued delta after cancellation between yields', async () => {
+    const harness = createHarness();
+    const controller = new AbortController();
+    const stream = createDesktopAiExecutionPort(harness.options).stream(request, controller.signal);
+    const first = stream.next();
+    for (const event of completedStream) harness.deliver(event);
+    await first;
+    controller.abort();
+    harness.finish();
+    await expect(stream.next()).resolves.toMatchObject({ done: true });
   });
 
   it('delegates protocol enforcement to ai-core instead of re-implementing it', async () => {
@@ -158,6 +220,21 @@ describe('DesktopAiExecutionPort', () => {
     expect(harness.invoke).toHaveBeenCalledWith(CANCEL_DIRECT_AI_COMMAND, {
       requestId: 'req-1',
     });
+  });
+
+  it.each(['execute', 'stream'] as const)('retains cancellation before native registration for %s', async (method) => {
+    const harness = createHarness();
+    const port = createDesktopAiExecutionPort(harness.options);
+    const controller = new AbortController();
+    const pending = method === 'execute'
+      ? port.execute(request, controller.signal)
+      : port.stream(request, controller.signal).next();
+    controller.abort();
+    expect(harness.invoke).not.toHaveBeenCalledWith(CANCEL_DIRECT_AI_COMMAND, expect.anything());
+    harness.deliver(completedStream[0] as AiStreamEvent);
+    expect(harness.invoke).toHaveBeenCalledWith(CANCEL_DIRECT_AI_COMMAND, { requestId: request.requestId });
+    harness.finish();
+    await pending;
   });
 
   it('stops yielding once the signal aborts mid-stream', async () => {

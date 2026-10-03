@@ -669,6 +669,7 @@ fn emit_terminal(
 pub async fn run_stream(
     upstream: reqwest::Response,
     request: &AiExecutionRequest,
+    resolved_model_id: &str,
     token: CancellationToken,
     on_event: &dyn EventSink,
 ) -> Result<(), DirectAiError> {
@@ -676,17 +677,9 @@ pub async fn run_stream(
     let contract_version = request.contract_version;
     let mode = request.mode;
 
-    let mut sequence: u32 = 0;
-    emit_event(
-        on_event,
-        AiStreamEvent::Started {
-            request_id: request_id.clone(),
-            contract_version,
-            mode,
-            sequence,
-        },
-    )?;
-    sequence += 1;
+    // `started` is emitted by `stream_direct_ai` immediately after registering the
+    // cancellation token, before request preparation or network dispatch.
+    let mut sequence: u32 = 1;
 
     let mut parser = SseFrameParser::new();
     let mut text = String::new();
@@ -950,7 +943,7 @@ pub async fn run_stream(
             reasoning: Some(reasoning.clone()).filter(|value| !value.is_empty()),
         },
         finish_reason,
-        resolved_model_id: Some(request.model_id.clone().unwrap_or_default()),
+        resolved_model_id: Some(resolved_model_id.to_string()),
         usage: usage.clone(),
     });
     emit_terminal(
@@ -975,6 +968,42 @@ pub fn error_code_string(code: DirectAiErrorCode) -> &'static str {
         DirectAiErrorCode::Cancelled => "cancelled",
         DirectAiErrorCode::Failed => "internal-error",
     }
+}
+
+fn emit_pre_stream_error_terminal(
+    request: &AiExecutionRequest,
+    error: DirectAiError,
+    on_event: &dyn EventSink,
+) -> Result<(), DirectAiError> {
+    let result = match error.code {
+        DirectAiErrorCode::Cancelled => AiExecutionResult::Cancelled(AiExecutionCancelledResult {
+            request_id: request.request_id.clone(),
+            contract_version: request.contract_version,
+            mode: request.mode,
+            reason: Some("aborted".to_string()),
+        }),
+        _ => AiExecutionResult::Failed(AiExecutionFailedResult {
+            request_id: request.request_id.clone(),
+            contract_version: request.contract_version,
+            mode: request.mode,
+            error: AiExecutionErrorPayload {
+                code: error
+                    .contract_code
+                    .unwrap_or_else(|| error_code_string(error.code).to_string()),
+                message: Some(error.message),
+                retryable: None,
+                retry_after_ms: None,
+            },
+        }),
+    };
+    emit_terminal(
+        on_event,
+        &request.request_id,
+        request.contract_version,
+        request.mode,
+        1,
+        result,
+    )
 }
 
 /// 端到端入口：读 Profile、取 secret、发请求、跑流。
@@ -1018,7 +1047,20 @@ pub async fn stream_direct_ai(
     })?;
 
     let token = registry.register(&request.request_id)?;
-    let result = stream_direct_ai_inner(&profile, &request, secrets, token.clone(), on_event).await;
+    if let Err(error) = emit_event(
+        on_event,
+        AiStreamEvent::Started {
+            request_id: request.request_id.clone(),
+            contract_version: request.contract_version,
+            mode: request.mode,
+            sequence: 0,
+        },
+    ) {
+        registry.finish(&request.request_id);
+        return Err(error);
+    }
+
+    let result = stream_direct_ai_inner(&profile, &request, secrets, token, on_event).await;
     registry.finish(&request.request_id);
     result
 }
@@ -1030,15 +1072,28 @@ async fn stream_direct_ai_inner(
     token: CancellationToken,
     on_event: &dyn EventSink,
 ) -> Result<(), DirectAiError> {
-    let client = build_http_client(profile.max_redirects())?;
-    let endpoint = build_endpoint(profile)?;
-    let headers = build_headers(profile, secrets)?;
+    let client = match build_http_client(profile.max_redirects()) {
+        Ok(client) => client,
+        Err(error) => return emit_pre_stream_error_terminal(request, error, on_event),
+    };
+    let endpoint = match build_endpoint(profile) {
+        Ok(endpoint) => endpoint,
+        Err(error) => return emit_pre_stream_error_terminal(request, error, on_event),
+    };
+    let headers = match build_headers(profile, secrets) {
+        Ok(headers) => headers,
+        Err(error) => return emit_pre_stream_error_terminal(request, error, on_event),
+    };
     let body = build_request_body(profile, request);
 
     let upstream = tokio::select! {
         biased;
         _ = token.cancelled() => {
-            return Err(DirectAiError::new(DirectAiErrorCode::Cancelled, "cancelled before dispatch"));
+            return emit_pre_stream_error_terminal(
+                request,
+                DirectAiError::new(DirectAiErrorCode::Cancelled, "cancelled before dispatch"),
+                on_event,
+            );
         }
         result = client.post(endpoint).headers(headers).json(&body).send() => result,
     };
@@ -1046,25 +1101,34 @@ async fn stream_direct_ai_inner(
     let upstream = match upstream {
         Ok(response) => response,
         Err(error) => {
-            return Err(DirectAiError::new(
-                DirectAiErrorCode::UpstreamUnavailable,
-                format!("cannot reach the provider endpoint: {error}"),
-            ));
+            return emit_pre_stream_error_terminal(
+                request,
+                DirectAiError::new(
+                    DirectAiErrorCode::UpstreamUnavailable,
+                    format!("cannot reach the provider endpoint: {error}"),
+                ),
+                on_event,
+            );
         }
     };
 
     if !upstream.status().is_success() {
         // 不回显上游响应体：它可能包含供应商侧的内部标识，且对用户排障无帮助。
-        return Err(DirectAiError::new(
-            map_http_status(upstream.status()),
-            format!(
-                "provider endpoint returned HTTP {}",
-                upstream.status().as_u16()
+        return emit_pre_stream_error_terminal(
+            request,
+            DirectAiError::new(
+                map_http_status(upstream.status()),
+                format!(
+                    "provider endpoint returned HTTP {}",
+                    upstream.status().as_u16()
+                ),
             ),
-        ));
+            on_event,
+        );
     }
 
-    run_stream(upstream, request, token, on_event)
+    let resolved_model_id = request.model_id.as_deref().unwrap_or(&profile.model_id);
+    run_stream(upstream, request, resolved_model_id, token, on_event)
         .await
         .map(|_| ())
 }

@@ -1,4 +1,5 @@
 import { Channel } from '@tauri-apps/api/core';
+import { AiExecutionRequestSchema, type AiExecutionRequest } from '@mahoshojo/contracts/ai-execution';
 
 import type { AiStreamEvent } from '@mahoshojo/ai-core/stream-events';
 
@@ -70,16 +71,18 @@ const toAiError = (command: string, cause: unknown): DesktopAiError => {
  */
 export const openDirectAiStream = (
   options: DesktopAiExecutionOptions,
-  request: { requestId: string; contractVersion: number },
+  request: AiExecutionRequest,
   onEvent: (event: AiStreamEvent) => void,
 ): Promise<void> => {
+  // 校验并复制完整 DTO；不能把业务请求缩减为事件身份，否则 native 无法反序列化。
+  const parsedRequest = AiExecutionRequestSchema.parse(request);
   const channel = (options.createChannel ?? (() => new Channel<AiStreamEvent>()))();
   channel.onmessage = onEvent;
 
   return options
     .invoke(STREAM_DIRECT_AI_COMMAND, {
       profileId: options.profileId,
-      request,
+      request: parsedRequest,
       onEvent: channel,
     })
     .then(() => undefined)

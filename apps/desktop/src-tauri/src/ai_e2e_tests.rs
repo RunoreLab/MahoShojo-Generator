@@ -42,11 +42,14 @@ enum Scenario {
     Hang,
     /// 发一段正文后直接断开且不发 `[DONE]`。
     Truncated,
+    /// 接受请求后延迟 response headers，用于验证 headers 未到时可以取消 send。
+    DelayHeaders,
 }
 
 struct TestServer {
     base_url: String,
     observation: oneshot::Receiver<ServerObservation>,
+    request_received: oneshot::Receiver<()>,
 }
 
 async fn spawn_sse_server(scenario: Scenario) -> TestServer {
@@ -58,19 +61,25 @@ async fn spawn_sse_server(scenario: Scenario) -> TestServer {
         .expect("local address must resolve")
         .port();
     let (tx, rx) = oneshot::channel();
+    let (request_received_tx, request_received_rx) = oneshot::channel();
 
     tokio::spawn(async move {
-        let observation = serve_one(listener, scenario).await;
+        let observation = serve_one(listener, scenario, request_received_tx).await;
         let _ = tx.send(observation);
     });
 
     TestServer {
         base_url: format!("http://127.0.0.1:{port}/v1"),
         observation: rx,
+        request_received: request_received_rx,
     }
 }
 
-async fn serve_one(listener: TcpListener, scenario: Scenario) -> ServerObservation {
+async fn serve_one(
+    listener: TcpListener,
+    scenario: Scenario,
+    request_received: oneshot::Sender<()>,
+) -> ServerObservation {
     let (mut stream, _) = match listener.accept().await {
         Ok(accepted) => accepted,
         Err(_) => {
@@ -83,6 +92,14 @@ async fn serve_one(listener: TcpListener, scenario: Scenario) -> ServerObservati
     };
 
     let (request_line, saw_authorization) = read_request_head(&mut stream).await;
+    let _ = request_received.send(());
+
+    if matches!(&scenario, Scenario::DelayHeaders) {
+        // Deliberately withhold response headers. The client must be able to cancel
+        // the in-flight send after registration without waiting for a response.
+        return observe_disconnect(stream, request_line, saw_authorization).await;
+    }
+
     write_response_head(&mut stream).await;
 
     match scenario {
@@ -117,6 +134,7 @@ async fn serve_one(listener: TcpListener, scenario: Scenario) -> ServerObservati
             .await;
             observe_disconnect(stream, request_line, saw_authorization).await
         }
+        Scenario::DelayHeaders => unreachable!("handled before writing response headers"),
     }
 }
 
@@ -217,6 +235,23 @@ impl CollectingSink {
 impl EventSink for CollectingSink {
     fn send(&self, event: AiStreamEvent) -> Result<(), ()> {
         self.events.lock().map_err(|_| ())?.push(event);
+        Ok(())
+    }
+}
+
+#[derive(Default)]
+struct TerminalFailingSink {
+    attempts: Mutex<Vec<AiStreamEvent>>,
+    accepted: Mutex<Vec<AiStreamEvent>>,
+}
+
+impl EventSink for TerminalFailingSink {
+    fn send(&self, event: AiStreamEvent) -> Result<(), ()> {
+        self.attempts.lock().map_err(|_| ())?.push(event.clone());
+        if matches!(event, AiStreamEvent::Result { .. }) {
+            return Err(());
+        }
+        self.accepted.lock().map_err(|_| ())?.push(event);
         Ok(())
     }
 }
@@ -402,6 +437,11 @@ async fn streams_a_complete_response_with_exactly_one_terminal() {
         AiExecutionResult::Completed(result) => {
             assert_eq!(result.output.text.as_deref(), Some("魔法少女"));
             assert_eq!(result.usage.as_ref().and_then(|u| u.total_tokens), Some(9));
+            assert_eq!(
+                result.resolved_model_id.as_deref(),
+                Some("test-model"),
+                "omitting request.modelId must report the Profile model used for dispatch"
+            );
         }
         other => panic!("expected a completed terminal, got {other:?}"),
     }
@@ -421,6 +461,69 @@ async fn streams_a_complete_response_with_exactly_one_terminal() {
         0,
         "the request must be released from the registry when it finishes"
     );
+}
+
+#[tokio::test]
+async fn terminal_sink_failure_does_not_retry_with_a_duplicate_terminal() {
+    let server = spawn_sse_server(Scenario::Complete).await;
+    let store = LocalStore::open_in_memory().expect("in-memory store");
+    let secrets = TestSecretStore::default();
+    let registry = RequestRegistry::default();
+    let sink = TerminalFailingSink::default();
+
+    store
+        .put(
+            "loopback",
+            &stored_profile("loopback", &server.base_url, false),
+            "t",
+        )
+        .expect("put");
+
+    let error = stream_direct_ai(
+        "loopback",
+        request("req-sink-failure"),
+        &store,
+        &secrets,
+        &registry,
+        &sink,
+    )
+    .await
+    .expect_err("a closed event sink must fail the command");
+
+    let accepted = sink.accepted.lock().expect("accepted events").clone();
+    let attempts = sink.attempts.lock().expect("event attempts").clone();
+    assert!(matches!(
+        accepted.first(),
+        Some(AiStreamEvent::Started { sequence: 0, .. })
+    ));
+    assert_eq!(
+        accepted.len(),
+        3,
+        "started, usage, and text are delivered before terminal delivery fails"
+    );
+    assert!(matches!(
+        accepted.get(1),
+        Some(AiStreamEvent::Usage { sequence: 1, .. })
+    ));
+    assert!(matches!(
+        accepted.get(2),
+        Some(AiStreamEvent::TextDelta { sequence: 2, .. })
+    ));
+    assert!(matches!(
+        attempts.get(3),
+        Some(AiStreamEvent::Result { sequence: 3, .. })
+    ));
+    assert_eq!(
+        attempts.len(),
+        4,
+        "the wrapper must not retry a failed terminal at an earlier sequence"
+    );
+    assert!(format!("{error:?}").contains("Cancelled"));
+    assert_eq!(registry.len(), 0, "the failed request must be released");
+    let _ = server
+        .observation
+        .await
+        .expect("server observation must arrive");
 }
 
 #[tokio::test]
@@ -510,6 +613,68 @@ async fn cancelling_really_aborts_the_upstream_body() {
 }
 
 #[tokio::test]
+async fn cancellation_after_registration_works_while_response_headers_are_delayed() {
+    let server = spawn_sse_server(Scenario::DelayHeaders).await;
+    let store = LocalStore::open_in_memory().expect("in-memory store");
+    let secrets = TestSecretStore::default();
+    let registry = RequestRegistry::default();
+    let sink = CollectingSink::default();
+
+    store
+        .put(
+            "loopback",
+            &stored_profile("loopback", &server.base_url, false),
+            "t",
+        )
+        .expect("put");
+
+    let stream = stream_direct_ai(
+        "loopback",
+        request("req-delayed-headers"),
+        &store,
+        &secrets,
+        &registry,
+        &sink,
+    );
+    tokio::pin!(stream);
+
+    tokio::select! {
+        result = &mut stream => panic!("stream completed before the delayed response headers: {result:?}"),
+        received = server.request_received => received.expect("provider must receive the request"),
+    }
+
+    let events = sink.snapshot();
+    assert!(
+        matches!(
+            events.first(),
+            Some(AiStreamEvent::Started { sequence: 0, .. })
+        ),
+        "registration must be announced before waiting for HTTP response headers, got {events:?}"
+    );
+    assert!(registry.cancel("req-delayed-headers"));
+
+    stream
+        .await
+        .expect("cancellation must be represented by a terminal event");
+    let events = sink.snapshot();
+    assert_well_formed(&events, "req-delayed-headers");
+    assert!(matches!(
+        terminals(&events).first(),
+        Some(AiExecutionResult::Cancelled(result)) if result.reason.as_deref() == Some("aborted")
+    ));
+
+    let observation = server
+        .observation
+        .await
+        .expect("server observation must arrive");
+    assert!(
+        observation.client_disconnected,
+        "cancelling a request while headers are delayed must drop the pending HTTP send"
+    );
+    assert_eq!(registry.len(), 0, "the cancelled request must be released");
+}
+
+#[tokio::test]
 async fn a_truncated_stream_is_reported_as_a_failure_not_a_success() {
     let server = spawn_sse_server(Scenario::Truncated).await;
     let store = LocalStore::open_in_memory().expect("in-memory store");
@@ -572,7 +737,7 @@ async fn a_missing_secret_fails_before_any_request_is_dispatched() {
         )
         .expect("put");
 
-    let error = stream_direct_ai(
+    stream_direct_ai(
         "loopback",
         request("req-missing-secret"),
         &store,
@@ -581,15 +746,13 @@ async fn a_missing_secret_fails_before_any_request_is_dispatched() {
         &sink,
     )
     .await
-    .expect_err("a missing secret must fail the command");
+    .expect("the post-registration failure must be carried by a terminal event");
 
+    let events = sink.snapshot();
+    assert_well_formed(&events, "req-missing-secret");
     assert!(
-        sink.snapshot().is_empty(),
-        "no event may be emitted when the command fails before dispatch"
-    );
-    assert!(
-        format!("{error:?}").contains("MissingSecret"),
-        "the failure must be attributable to the missing secret, got {error:?}"
+        matches!(terminals(&events).first(), Some(AiExecutionResult::Failed(result)) if result.error.code == "authentication-failed"),
+        "the failure must be attributable to the missing secret, got {events:?}"
     );
 }
 

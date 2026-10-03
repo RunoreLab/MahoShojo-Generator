@@ -21,6 +21,32 @@ import {
 
 export type { DesktopAiExecutionOptions } from './direct-ai-bridge';
 
+const createNativeCancellation = (
+  options: DesktopAiExecutionOptions,
+  requestId: string,
+  signal: AbortSignal,
+) => {
+  let started = false;
+  let requested = false;
+  let sent = false;
+  const cancel = () => {
+    requested = true;
+    // started 在 native 注册取消句柄之后发出。提前 cancel 会因尚未注册而丢失。
+    if (!started || sent) return;
+    sent = true;
+    void options.invoke(CANCEL_DIRECT_AI_COMMAND, { requestId }).catch(() => undefined);
+  };
+  return {
+    cancel,
+    observe: (event: AiStreamEvent) => {
+      if (event.type === 'started' && event.requestId === requestId) {
+        started = true;
+        if (requested || signal.aborted) cancel();
+      }
+    },
+  };
+};
+
 export const createDesktopAiExecutionPort = (
   options: DesktopAiExecutionOptions,
 ): AiExecutionPort => {
@@ -30,11 +56,13 @@ export const createDesktopAiExecutionPort = (
   ): Promise<AiExecutionResult> => {
     const queued: AiStreamEvent[] = [];
     let failure: unknown;
+    const cancellation = createNativeCancellation(options, request.requestId, signal);
 
     const pump = openDirectAiStream(
       options,
-      { requestId: request.requestId, contractVersion: request.contractVersion },
+      request,
       (event) => {
+        cancellation.observe(event);
         queued.push(event);
       },
     ).catch((cause: unknown) => {
@@ -42,10 +70,7 @@ export const createDesktopAiExecutionPort = (
     });
 
     const onAbort = () => {
-      // 取消必须打到 native：只有它能真正中止上游 HTTP body。
-      void options
-        .invoke(CANCEL_DIRECT_AI_COMMAND, { requestId: request.requestId })
-        .catch(() => undefined);
+      cancellation.cancel();
     };
     signal.addEventListener('abort', onAbort, { once: true });
 
@@ -88,10 +113,12 @@ export const createDesktopAiExecutionPort = (
       return collect(request, signal);
     },
     stream: async function* stream(request, signal) {
+      if (signal.aborted) return;
       const queue: AiStreamEvent[] = [];
       let failure: unknown;
       let done = false;
       let waiter: (() => void) | undefined;
+      const cancellation = createNativeCancellation(options, request.requestId, signal);
 
       const wake = () => {
         waiter?.();
@@ -100,8 +127,9 @@ export const createDesktopAiExecutionPort = (
 
       const pump = openDirectAiStream(
         options,
-        { requestId: request.requestId, contractVersion: request.contractVersion },
+        request,
         (event) => {
+          cancellation.observe(event);
           queue.push(event);
           wake();
         },
@@ -115,10 +143,8 @@ export const createDesktopAiExecutionPort = (
         });
 
       const onAbort = () => {
-        // 取消必须打到 native：只有它能真正中止上游 HTTP body。
-        void options
-          .invoke(CANCEL_DIRECT_AI_COMMAND, { requestId: request.requestId })
-          .catch(() => undefined);
+        cancellation.cancel();
+        wake();
       };
       signal.addEventListener('abort', onAbort, { once: true });
 
@@ -127,6 +153,7 @@ export const createDesktopAiExecutionPort = (
           // abort 检查必须在排空队列**之前**：否则取消之后仍会把已到达的事件吐给调用方。
           if (signal.aborted) return;
           while (queue.length > 0) {
+            if (signal.aborted) return;
             yield queue.shift() as AiStreamEvent;
           }
           if (done) break;
@@ -136,11 +163,14 @@ export const createDesktopAiExecutionPort = (
           });
         }
         while (queue.length > 0) {
+          if (signal.aborted) return;
           yield queue.shift() as AiStreamEvent;
         }
         if (failure !== undefined) throw failure;
       } finally {
         signal.removeEventListener('abort', onAbort);
+        // 消费者提前退出也须终止上游，不能让付费生成在无人消费时继续运行。
+        if (!done && !signal.aborted) onAbort();
         await pump;
       }
     },
