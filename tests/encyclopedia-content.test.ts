@@ -32,11 +32,11 @@ const CONTENT_DIR = path.join(REPO_ROOT, 'content', 'encyclopedia');
 /**
  * 两端首屏都会渲染的品牌资源。
  *
- * Desktop 首期**不**打包 13 个功能入口的资源（它们在本地运行时全部不可用，因此根本不会被渲染），
- * 所以这里断言的是交集而不是全集：把未渲染的资源塞进安装包只会让应用多带 1.4MB 读不到的文件。
+ * Desktop 仅打包已交付入口的品牌资源，因此这里断言的是交集而不是全集。
  * 逐 app 的资源清单由 `content/sync-manifest.json` 记录并由同步脚本的 `--check` 把关。
  */
-const SHARED_BRAND_ASSETS = ['logo.svg', 'logo-white.svg', 'encyclopedia.svg'] as const;
+const SHARED_BRAND_ASSETS = ['logo.svg', 'logo-white.svg', 'encyclopedia.svg', 'questionnaire-logo.svg'] as const;
+const DEFAULT_QUESTIONNAIRE = 'questionnaires/presets/magical-girl-default.json';
 
 const TARGETS = [
   { app: 'apps/web', label: 'Web' },
@@ -117,17 +117,41 @@ describe('generated content from a clean output root', () => {
       for (const asset of SHARED_BRAND_ASSETS) {
         expect(await readFile(path.join(publicRoot, asset))).toEqual(await readFile(path.join(REPO_ROOT, 'content/brand', asset)));
       }
+      expect(await readFile(path.join(publicRoot, DEFAULT_QUESTIONNAIRE)))
+        .toEqual(await readFile(path.join(REPO_ROOT, 'content', DEFAULT_QUESTIONNAIRE)));
     }
+    const web = path.join(outputRoot, 'apps/web/public');
+    expect(await readFile(path.join(web, 'flowers.json')))
+      .toEqual(await readFile(path.join(REPO_ROOT, 'content/flowers.json')));
     const desktop = path.join(outputRoot, 'apps/desktop/public');
+    expect(await readdir(desktop)).not.toContain('flowers.json');
     expect(await readdir(desktop)).not.toContain('arena-card-white.webp');
     await writeFile(path.join(desktop, 'keep.txt'), 'unrelated');
     await writeFile(path.join(desktop, 'encyclopedia/stale.md'), 'retired');
     await writeFile(path.join(desktop, 'logo.svg'), 'drift');
+    await writeFile(path.join(web, 'questionnaires/presets/unrelated.json'), 'unrelated preset');
     await expect(generate({ outputRoot, checkOutput: true })).rejects.toThrow('不同步');
     await generate({ outputRoot });
     await generate({ outputRoot, checkOutput: true });
     expect(await readFile(path.join(desktop, 'keep.txt'), 'utf8')).toBe('unrelated');
     expect(await readdir(path.join(desktop, 'encyclopedia'))).not.toContain('stale.md');
+    expect(await readFile(path.join(web, 'questionnaires/presets/unrelated.json'), 'utf8')).toBe('unrelated preset');
+  });
+
+  it('detects missing and stale questionnaire or flower copies and restores them', async () => {
+    const outputRoot = await freshRoot();
+    await generate({ outputRoot });
+    const questionnaire = path.join(outputRoot, 'apps/desktop/public', DEFAULT_QUESTIONNAIRE);
+    await rm(questionnaire);
+    await expect(generate({ outputRoot, checkOutput: true })).rejects.toThrow('magical-girl-default.json 缺失');
+    await generate({ outputRoot });
+    await writeFile(questionnaire, '{}');
+    await expect(generate({ outputRoot, checkOutput: true })).rejects.toThrow('magical-girl-default.json 与 content/ 不同步');
+    await generate({ outputRoot });
+    await writeFile(path.join(outputRoot, 'apps/web/public/flowers.json'), '[]');
+    await expect(generate({ outputRoot, checkOutput: true })).rejects.toThrow('flowers.json 与 content/ 不同步');
+    await generate({ outputRoot });
+    await generate({ outputRoot, checkOutput: true });
   });
 
   it('only writes the selected runtime', async () => {

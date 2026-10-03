@@ -68,7 +68,6 @@ const assetMirrors = [
   ['apps/web/public/build-rules/presets/dnd-5e-lite.json', 'packages/hosted-runtime/src/assets/build-rules/presets/dnd-5e-lite.json'],
   ['apps/web/public/build-rules/presets/coc-7e-lite.json', 'packages/hosted-runtime/src/assets/build-rules/presets/coc-7e-lite.json'],
   ['apps/web/public/build-rules/presets/terrorinfinity-fx-v137.json', 'packages/hosted-runtime/src/assets/build-rules/presets/terrorinfinity-fx-v137.json'],
-  ['apps/web/public/flowers.json', 'packages/hosted-runtime/src/assets/flowers.json'],
 ] as const;
 
 describe('apps/web 与 hosted-runtime compatibility 边界', () => {
@@ -117,7 +116,7 @@ describe('apps/web 与 hosted-runtime compatibility 边界', () => {
     );
     for (const preset of QUESTIONNAIRE_PRESET_INDEX.presets) {
       expect(loadQuestionnairePresetAsset(preset.path)).toEqual(
-        JSON.parse(read(`apps/web/public${preset.path}`)),
+        JSON.parse(read(`${preset.path === '/questionnaires/presets/magical-girl-default.json' ? 'content' : 'apps/web/public'}${preset.path}`)),
       );
     }
   });

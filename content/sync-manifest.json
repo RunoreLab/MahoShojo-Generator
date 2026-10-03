@@ -4,7 +4,8 @@
     "shared": [
       "encyclopedia.svg",
       "logo-white.svg",
-      "logo.svg"
+      "logo.svg",
+      "questionnaire-logo.svg"
     ],
     "web": [
       "arena-card-white.webp",
@@ -15,7 +16,6 @@
       "free-generator-white.svg",
       "magic-tea-party-white.svg",
       "party-white.svg",
-      "questionnaire-logo.svg",
       "scenario.webp",
       "sublimation-white.svg",
       "tavern-white.svg"

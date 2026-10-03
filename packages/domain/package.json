@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./flowers": "./src/flowers.ts",
     ".": {
       "types": "./src/index.ts",
       "import": "./src/index.ts",

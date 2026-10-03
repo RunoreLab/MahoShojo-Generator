@@ -41,7 +41,11 @@ if (new Set(publicPaths).size !== publicPaths.length) {
 }
 const assets = Object.fromEntries(entries.map((entry, entryIndex) => {
   const publicPath = publicPaths[entryIndex];
-  return [publicPath, JSON.parse(readFileSync(path.join(publicDirectory, publicPath), 'utf8'))];
+  // 已共源的问卷直接读取权威，不能依赖 Web dev/build 才存在的 public 副本。
+  const sourceDirectory = publicPath === '/questionnaires/presets/magical-girl-default.json'
+    ? path.join(repositoryRoot, 'content')
+    : publicDirectory;
+  return [publicPath, JSON.parse(readFileSync(path.join(sourceDirectory, publicPath), 'utf8'))];
 }));
 if (JSON.stringify(Object.keys(assets)) !== JSON.stringify(publicPaths)) {
   throw new Error('questionnaire preset index 与生成资产 path 不一致');

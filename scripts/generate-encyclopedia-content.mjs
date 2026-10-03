@@ -3,7 +3,7 @@
  *
  * ## 为什么需要它
  *
- * 百科正文与首页品牌资源要同时出现在两个产物里：Web 由 `public/` 提供，Desktop 由 Tauri 自定义协议
+ * 百科正文、共享问卷与品牌资源要同时出现在两个产物里：Web 由 `public/` 提供，Desktop 由 Tauri 自定义协议
  * 伺服 `dist/`（`frontendDist` 目录会被递归嵌入）。而这两条路都不接受「从别处按需读取」——共享包里
  * 的 `import.meta.glob` 在本仓当前的 webpack `next build` 下不成立（dev 通过、build 静默失败），裸
  * `?raw` 是 Vite 专有语法。所以内容在**构建期**被复制到两个服务根，运行时只做同源的普通 fetch。
@@ -36,6 +36,8 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CONTENT_ROOT = path.join(root, 'content');
 const BRAND_DIR = path.join(CONTENT_ROOT, 'brand');
 const ENCYCLOPEDIA_DIR = path.join(CONTENT_ROOT, 'encyclopedia');
+const QUESTIONNAIRE_DIR = path.join(CONTENT_ROOT, 'questionnaires', 'presets');
+const SHARED_QUESTIONNAIRES = ['magical-girl-default.json'];
 
 /**
  * 目录数据的权威位置。
@@ -66,9 +68,7 @@ const CATALOG_MODULE = path.join(
 /**
  * 每个 app 同步哪些品牌资源由 manifest 决定，而不是「全部同步」。
  *
- * Desktop 首期不打包 13 个功能入口的资源：它们在 Desktop 全部不可用（`DESK-PROD-001`），因此根本
- * 不会被渲染。把它们塞进安装包只会让一个刚打开的桌面应用多带 1.4MB 永远读不到的资源。
- * D3.1 交付某个入口时，往 manifest 里加一行即可。
+ * Desktop 只同步已交付入口的资源；D3.1 默认问卷的 logo 已加入 shared，其余 Web 专用入口仍不打包。
  */
 const TARGETS = [
   // `shared` 是两端都要的资源；Web 另外还要它首页功能卡的那一批。
@@ -286,17 +286,49 @@ export async function generate({ check = false, checkOutput = false, target = 'a
   const brandFiles = await listFiles(BRAND_DIR, '');
   problems.push(...(await collectProblems(encyclopediaFiles, entries)));
   problems.push(...(await collectBrandProblems(brandFiles, await readHomeFeatureAssets(), manifest)));
+  for (const file of SHARED_QUESTIONNAIRES) {
+    const questionnaire = JSON.parse(await readFile(path.join(QUESTIONNAIRE_DIR, file), 'utf8'));
+    if (questionnaire.id !== file.slice(0, -5) || questionnaire.kind !== 'magical-girl' || !Array.isArray(questionnaire.questions) || questionnaire.questions.length === 0) {
+      problems.push(`共享问卷 ${file} 的身份或题目列表无效`);
+    }
+    if (!manifest.brand.shared.includes(questionnaire.logoUrl?.slice(1))) {
+      problems.push(`共享问卷 ${file} 的 logo 未登记为共享品牌资源`);
+    }
+  }
+  // 花名数据由 domain 直接消费；这里只维护 Web 既有 URL 的兼容副本。
+  JSON.parse(await readFile(path.join(CONTENT_ROOT, 'flowers.json'), 'utf8'));
 
   // 在写入前检查全部源文件；--check 不依赖开发机残留的 public/ 生成物，也不写磁盘。
   if (problems.length > 0) throw new Error(`百科内容源校验失败：\n- ${problems.join('\n- ')}`);
   if (check && !checkOutput) {
-    console.log(`content/ 源校验通过：${entries.length} 篇正文、${brandFiles.length} 个品牌资源`);
+    console.log(`content/ 源校验通过：${entries.length} 篇正文、${brandFiles.length} 个品牌资源、${SHARED_QUESTIONNAIRES.length} 份共享问卷及花名数据`);
     return;
   }
 
   for (const { app, label, keys } of TARGETS) {
     if (target !== 'all' && app !== `apps/${target}`) continue;
     const publicRoot = path.join(outputRoot, app, 'public');
+
+    await syncDirectory({
+      from: QUESTIONNAIRE_DIR,
+      to: path.join(publicRoot, 'questionnaires', 'presets'),
+      files: SHARED_QUESTIONNAIRES,
+      ownedFiles: SHARED_QUESTIONNAIRES,
+      exclusive: false,
+      check: checkOutput,
+      problems,
+    });
+    if (app === 'apps/web') {
+      await syncDirectory({
+        from: CONTENT_ROOT,
+        to: publicRoot,
+        files: ['flowers.json'],
+        ownedFiles: ['flowers.json'],
+        exclusive: false,
+        check: checkOutput,
+        problems,
+      });
+    }
 
     await syncDirectory({
       from: ENCYCLOPEDIA_DIR,
@@ -317,7 +349,7 @@ export async function generate({ check = false, checkOutput = false, target = 'a
     });
 
     console.log(
-      `${label} 内容 ${checkOutput ? '已校验' : '已同步'}：${encyclopediaFiles.length} 篇正文、${keys.flatMap((key) => manifest.brand[key]).length} 个品牌资源`,
+      `${label} 内容 ${checkOutput ? '已校验' : '已同步'}：${encyclopediaFiles.length} 篇正文、${keys.flatMap((key) => manifest.brand[key]).length} 个品牌资源、${SHARED_QUESTIONNAIRES.length} 份共享问卷`,
     );
   }
 
