@@ -176,4 +176,55 @@ jobs:
     expect(validateAdminSourceImports("import api from '@mahoshojo/api/internal';", 'apps/admin/src/example.ts'))
       .toEqual(['apps/admin/src/example.ts 跨 app 源码导入']);
   });
+
+  /**
+   * 以下两条原本住在 `admin-formal-boundary.test.ts`，那个文件整体删除：它对同两个导出函数
+   * 的覆盖是本文件的真子集（真实 config、多行 workflow、matrix、`cd`、`uses:`、后台 `&`、
+   * 命令替换、`--dry-run=false` 本文件都有），且没被 `check:admin-boundary` 挂进门禁，
+   * 只随 `test:repo` 跑。留着它等于让同一性质有两份会各自腐烂的副本。
+   *
+   * 但它确实独有两条断言，删之前先搬过来：静态资源必须先过 Worker 认证，
+   * 以及管理端发布只允许手动触发。
+   */
+  test('静态资源不得绕过 Worker 认证直接对外', () => {
+    const base = {
+      name: 'mahoshojo-admin',
+      main: 'src/index.ts',
+      compatibility_date: '2026-09-12',
+      compatibility_flags: ['nodejs_compat'],
+      workers_dev: false,
+      preview_urls: false,
+      assets: {
+        directory: './dist/client',
+        binding: 'ASSETS',
+        run_worker_first: true,
+      },
+      vars: {
+        ADMIN_ACCESS_ISSUER: 'https://unconfigured.cloudflareaccess.invalid',
+        ADMIN_ACCESS_AUDIENCE: 'UNCONFIGURED_DENY_ALL',
+        ADMIN_ACCESS_JWKS_URL: 'https://unconfigured.cloudflareaccess.invalid/cdn-cgi/access/certs',
+        ADMIN_PRINCIPALS_JSON: '[]',
+      },
+      d1_databases: [{
+        binding: 'DB',
+        database_name: 'admin-local',
+        database_id: '00000000-0000-0000-0000-000000000000',
+      }],
+    };
+
+    expect(validateAdminWranglerConfig(JSON.stringify(base))).toEqual([]);
+    expect(validateAdminWranglerConfig(JSON.stringify({
+      ...base,
+      assets: { ...base.assets, run_worker_first: false },
+    }))).not.toEqual([]);
+  });
+
+  test('管理端独立发布只允许手动触发并绑定生产 environment', () => {
+    const workflow = 'on: { workflow_dispatch: {} }\njobs:\n  deploy:\n    environment: admin-production\n    steps:\n      - run: pnpm --filter @mahoshojo/admin run deploy\n';
+    expect(validateAdminWorkflow(workflow, '.github/workflows/admin-deploy.yml')).toEqual([]);
+    expect(validateAdminWorkflow(
+      workflow.replace('workflow_dispatch', 'push'),
+      '.github/workflows/admin-deploy.yml',
+    )).not.toEqual([]);
+  });
 });

@@ -231,5 +231,13 @@ describe('competition domain App Router pages', () => {
     expect(pvpRoomProvider).not.toContain('PvpLobbyPage');
     expect(pvpRoomProvider).not.toContain('BattleLitePage');
     expect(pvpRoomProvider).not.toContain('ArenaPage');
+
+    // 原先另有一个只做三行 grep 的 `battle-lite-page.test.tsx`，其中两句与上面重复
+    // （`app/battle/page.tsx` 提到 BattleRouteProviders、BattleRouteProviders 提到
+    // BattleLitePage），已删除。`QueryClientProvider` 那句是它独有的，搬到这里——
+    // 路由 provider 接线本来就由这个用例负责。
+    expect(readProjectFile('app/battle/page.tsx')).toContain('BattleRouteProviders');
+    expect(readProjectFile('components/competition/QueryRouteProviders.tsx'))
+      .toContain('QueryClientProvider');
   });
 });
