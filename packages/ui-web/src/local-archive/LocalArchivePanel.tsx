@@ -79,6 +79,7 @@ export const LocalArchivePanel = ({ model, actions, limits }: LocalArchiveView) 
   }
 
   const preflight = model.plan === null ? null : toArchivePreflightView(model.plan);
+  const busy = model.exporting || model.inspecting || model.applying;
 
   return (
     <div className="flex flex-col gap-4" data-testid="local-archive-panel">
@@ -86,12 +87,12 @@ export const LocalArchivePanel = ({ model, actions, limits }: LocalArchiveView) 
         <p className="text-sm text-(--app-text-muted)">
           把本机的数据卡与 Web 包打包成一个归档文件。单个归档上限 {formatBytes(limits.maxArchiveBytes)}。
           <br />
-          归档**不包含** AI Provider 凭据、账号信息或服务器凭据；换设备后需要重新配置这些。
+          归档<strong>不包含</strong> AI Provider 凭据、账号信息或服务器凭据；换设备后需要重新配置这些。
         </p>
         <button
           type="button"
           data-testid="archive-export-start"
-          disabled={model.exporting}
+          disabled={busy}
           onClick={actions.startExport}
           className="mt-3 min-h-11 rounded-lg border border-(--app-border-strong) bg-(--app-surface-strong) px-4 py-2 text-sm font-medium hover:bg-(--app-surface-90) disabled:cursor-not-allowed disabled:opacity-50"
         >
@@ -116,7 +117,7 @@ export const LocalArchivePanel = ({ model, actions, limits }: LocalArchiveView) 
         <button
           type="button"
           data-testid="archive-import-pick"
-          disabled={model.inspecting || model.applying}
+          disabled={busy}
           onClick={actions.pickImportFile}
           className="mt-3 min-h-11 rounded-lg border border-(--app-border-strong) bg-(--app-surface-strong) px-4 py-2 text-sm font-medium hover:bg-(--app-surface-90) disabled:cursor-not-allowed disabled:opacity-50"
         >
@@ -156,7 +157,7 @@ export const LocalArchivePanel = ({ model, actions, limits }: LocalArchiveView) 
               <button
                 type="button"
                 data-testid="archive-import-confirm"
-                disabled={model.applying}
+                disabled={busy}
                 onClick={actions.confirmImport}
                 className="min-h-11 rounded-lg bg-(--app-accent) px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
               >
@@ -165,7 +166,7 @@ export const LocalArchivePanel = ({ model, actions, limits }: LocalArchiveView) 
               <button
                 type="button"
                 data-testid="archive-import-cancel"
-                disabled={model.applying}
+                disabled={busy}
                 onClick={actions.cancelImport}
                 className="min-h-11 rounded-lg border border-(--app-border-strong) px-4 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
               >
@@ -200,6 +201,7 @@ export const LocalArchivePanel = ({ model, actions, limits }: LocalArchiveView) 
             <button
               type="button"
               data-testid="archive-reset"
+              disabled={busy}
               onClick={actions.reset}
               className="mt-3 min-h-11 rounded-lg border border-(--app-border-strong) px-4 py-2 text-sm"
             >

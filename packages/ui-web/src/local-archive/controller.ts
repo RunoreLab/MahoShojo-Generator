@@ -92,6 +92,8 @@ export const createLocalArchiveController = (host: LocalArchiveHost): LocalArchi
   let inspectedPlan: LocalLibraryArchiveImportPlan | null = null;
 
   const listeners = new Set<() => void>();
+  // 同一控制器一次只运行一个归档操作；同步置位，避免快速点击在重渲染前绕过按钮禁用态。
+  const isBusy = (): boolean => model.exporting || model.inspecting || model.applying;
   const setModel = (next: Partial<LocalArchiveModel>): void => {
     model = { ...model, ...next };
     for (const listener of listeners) listener();
@@ -107,7 +109,7 @@ export const createLocalArchiveController = (host: LocalArchiveHost): LocalArchi
   };
 
   const startExport = async (): Promise<void> => {
-    if (model.exporting) return;
+    if (isBusy()) return;
     setModel({ exporting: true, exportError: null, exportProgress: { kind: 'indeterminate' } });
     try {
       const outcome = await host.runExport((progress) => setModel({ exportProgress: progress }));
@@ -120,7 +122,7 @@ export const createLocalArchiveController = (host: LocalArchiveHost): LocalArchi
   };
 
   const pickImportFile = async (): Promise<void> => {
-    if (model.inspecting || model.applying) return;
+    if (isBusy()) return;
     setModel({ inspecting: true, importError: null });
     try {
       const archive = await host.pickArchiveBytes();
@@ -144,7 +146,7 @@ export const createLocalArchiveController = (host: LocalArchiveHost): LocalArchi
   };
 
   const confirmImport = async (): Promise<void> => {
-    if (model.applying) return;
+    if (isBusy()) return;
     // 没有预检结果就没有"确认"。这条早退让 UI 不必自己判断能不能点，也保证 apply 永远拿得到配对的
     // 字节与 plan。
     if (inspectedArchive === null || inspectedPlan === null) return;
@@ -159,12 +161,14 @@ export const createLocalArchiveController = (host: LocalArchiveHost): LocalArchi
   };
 
   const cancelImport = (): void => {
+    if (isBusy()) return;
     inspectedArchive = null;
     inspectedPlan = null;
     setModel({ plan: null, report: null, importError: null, applying: false, inspecting: false });
   };
 
   const reset = (): void => {
+    if (isBusy()) return;
     cancelImport();
     setModel({ lastExport: null, exportError: null, exportProgress: null });
   };

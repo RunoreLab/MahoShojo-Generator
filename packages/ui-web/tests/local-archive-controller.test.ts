@@ -342,6 +342,60 @@ describe('import flow', () => {
   });
 });
 
+describe('archive operation serialization', () => {
+  it.each(['export', 'inspect', 'apply'] as const)(
+    'blocks competing actions and reset during %s, then releases the operation',
+    async (operation) => {
+      let release!: () => void;
+      const pending = new Promise<void>((resolve) => { release = resolve; });
+      const runExport = vi.fn(async () => {
+        if (operation === 'export') await pending;
+        return { location: 'archive.zip', byteLength: 1024, entryCount: 5 };
+      });
+      const inspectArchive = vi.fn(async () => plan());
+      const applyArchive = vi.fn(async () => {
+        if (operation === 'apply') await pending;
+        return report();
+      });
+      const pickArchiveBytes = vi.fn(async () => new Uint8Array([1, 2, 3]));
+      const controller = controllerFor({ runExport, inspectArchive, applyArchive, pickArchiveBytes });
+
+      // 留一份旧预检，确认新预检尚未结束时不能用旧 plan 写入。
+      controller.actions.pickImportFile();
+      await settle();
+      if (operation === 'inspect') {
+        inspectArchive.mockImplementationOnce(async () => { await pending; return plan(); });
+        controller.actions.pickImportFile();
+      } else if (operation === 'apply') {
+        controller.actions.confirmImport();
+      } else {
+        controller.actions.startExport();
+      }
+      await settle();
+
+      const before = controller.model;
+      const calls = [runExport.mock.calls.length, pickArchiveBytes.mock.calls.length, applyArchive.mock.calls.length];
+      controller.actions.startExport();
+      controller.actions.pickImportFile();
+      controller.actions.confirmImport();
+      controller.actions.cancelImport();
+      controller.actions.reset();
+      await settle();
+      expect(controller.model).toBe(before);
+      expect([runExport.mock.calls.length, pickArchiveBytes.mock.calls.length, applyArchive.mock.calls.length]).toEqual(calls);
+
+      release();
+      await settle();
+      expect(controller.model.exporting || controller.model.inspecting || controller.model.applying).toBe(false);
+      controller.actions.reset();
+      expect(controller.model.plan).toBeNull();
+      controller.actions.pickImportFile();
+      await settle();
+      expect(controller.model.plan).not.toBeNull();
+    },
+  );
+});
+
 describe('storage availability', () => {
   it('keeps storage failure distinct from an empty library', async () => {
     // DESK-PROD-003：MUST NOT 把「本地存储不可用」显示成「没有数据」。

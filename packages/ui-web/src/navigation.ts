@@ -251,7 +251,7 @@ export const getTopbarCanonicalPathname = (pathname: string): string => {
 };
 
 export const isTopbarCoveredPath = (pathname: string): boolean => {
-  return TOPBAR_COVERED_ROUTE_SET.has(normalizePathname(pathname));
+  return TOPBAR_COVERED_ROUTE_SET.has(getTopbarCanonicalPathname(pathname));
 };
 
 export const getNavGroupForPath = (pathname: string): NavGroup | null => {

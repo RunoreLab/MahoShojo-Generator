@@ -45,7 +45,7 @@ import {
   useRouter,
 } from '@tanstack/react-router';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createDesktopRouter } from '../src/app/router';
 
@@ -53,6 +53,8 @@ let container: HTMLDivElement;
 let root: Root;
 
 beforeEach(() => {
+  // jsdom 没有布局或滚动实现；本文件只验证路由状态，滚动由真实 WebView 验收。
+  vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   window.location.hash = '';
   container = document.createElement('div');
@@ -63,6 +65,7 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   container.remove();
+  vi.restoreAllMocks();
 });
 
 /**
@@ -199,8 +202,6 @@ describe('back/forward round trip on the locked version', () => {
     // 测试手里，于是「无有效 delta」与「delta 为零」这两类边界可以被**确定性地**断言——这正是
     // 调研里记录的临近仓库补丁所针对的形状。
     const history = createMemoryHistory({ initialEntries: ['/'] });
-    const seen: string[] = [];
-    history.subscribe((state) => seen.push(state.location.href));
 
     expect(history.location.pathname).toBe('/');
     expect(history.length).toBe(1);
@@ -227,19 +228,16 @@ describe('back/forward round trip on the locked version', () => {
     expect(history.location.pathname).toBe('/');
     expect(history.location.href).toBe('/');
 
-    // delta 为零：位置不变。**但会发出一次订阅通知。**
-    // 这一点是实测结论而不是假设：`@tanstack/history@1.162.4` 的 memory history 在 `go(0)` 时
-    // 仍然通知订阅者。因此调用方不得用「收到通知」推断「位置真的变了」——本仓库的
-    // router 状态本身已经是权威，通知只用来驱动重渲染，所以当前不受影响；但这条边界必须写下来，
-    // 否则将来有人写 `subscribe(() => refetch())` 就会得到一次无意义但真实的请求。
-    const before = seen.length;
+    // delta 为零只约束位置与历史栈不变，不把依赖的通知次数固化为产品契约。
+    const before = { ...history.location };
     history.go(0);
     expect(history.location.pathname).toBe('/');
     expect(history.location.href).toBe('/');
-    expect(seen.length).toBeGreaterThanOrEqual(before);
+    expect(history.location).toEqual(before);
+    expect(history.length).toBe(3);
   });
 
-  it('treats a zero delta as staying put rather than reloading', async () => {
+  it('keeps the mounted route state when a zero delta is requested in jsdom', async () => {
     const router = await mount();
     await act(async () => {
       await router.navigate({ to: '/settings' });
@@ -251,8 +249,8 @@ describe('back/forward round trip on the locked version', () => {
     });
     await settle();
 
-    // `go(0)` 在浏览器语义里是重载。断言它不会把路由状态清空——一个把当前页面弹回首页的「重载」
-    // 在桌面应用里就是一次看起来像崩溃的跳转。
+    // jsdom 不实现 document reload，并会报告 navigation 未实现；这里只保证现有状态未被清空，
+    // 不能据此宣称真实 WebView 不会重载。刷新后能否恢复当前路由仍需真机验收。
     expect(router.state.location.pathname).toBe('/settings');
     expect(pageTestId()).toBe('page-settings');
   });

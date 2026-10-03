@@ -101,6 +101,16 @@ describe('navigation config', () => {
     expect(getTopbarCanonicalPathname('/ranking?season=current#top')).toBe('/ranking');
   });
 
+  test.each([
+    ['/pvp/room-7', 'battle'],
+    ['/pvp/room-7/?round=2#turn', 'battle'],
+    ['/encyclopedia/site-guide', 'knowledge'],
+    ['/encyclopedia/使用指南/?from=nav#intro', 'knowledge'],
+  ])('coverage accepts the actual dynamic pathname %s', (pathname, activeGroupId) => {
+    expect(isTopbarCoveredPath(pathname)).toBe(true);
+    expect(getTopbarCoverage(pathname)).toEqual({ isCovered: true, activeGroupId });
+  });
+
   test('the device-level local library entry is a first-class navigation target', () => {
     // DESK-059：承载整库导入导出的页面 MUST 是设备级而非账号级。因此它有自己的产品路径，
     // 而不是个人页的一个 tab——挂在 /me 下会让产品语义变成"本地数据属于账号"。

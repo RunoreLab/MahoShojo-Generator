@@ -102,7 +102,9 @@ describe('ProductNav', () => {
 
   it('routes internal clicks to the host handler instead of navigating on its own', () => {
     // 共享导航只提供 <a href>，由宿主接自己的 router。这是"共享导航不锁定底层 router"的具体形态。
-    const onNavigate = vi.fn();
+    const onNavigate = vi.fn((_href: string, event: React.MouseEvent<HTMLAnchorElement>) => {
+      event.preventDefault();
+    });
     renderNav({ '/local-library': AVAILABLE }, { onNavigate });
 
     const link = entryFor('/local-library');
