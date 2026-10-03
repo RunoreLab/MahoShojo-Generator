@@ -7,7 +7,8 @@
  * fragment 共处同一个 `#`。而 `@tanstack/react-router` 解析后的 `location` **没有** `hash` 字段
  * （实测 `router.state.location.hash` 为 `undefined`），只有 `pathname` / `search`。
  *
- * 于是 fragment 只能从 `window.location.hash` 里取，而那个值是整段路由加 fragment，不能直接喂给
+ * 宿主从订阅的 `router.state.location.href`（`/route#anchor`）读取；本函数也接受原始
+ * `window.location.hash`（`#/route#anchor`）。两者都包含路由，不能直接喂给
  * `getElementById`——否则查的是 `"/encyclopedia/site-guide#角色生成"` 这个不存在的 id。
  *
  * ## 为什么不用通用 URL 解析

@@ -1,33 +1,20 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { Outlet, createRootRoute, createRoute, useParams, useRouter } from '@tanstack/react-router';
-import { LocalArchivePanel, createLocalArchiveController } from '@mahoshojo/ui-web/local-archive';
-import { useArchiveLeaveGuard } from './useArchiveLeaveGuard';
+import { useCallback } from 'react';
+import { Outlet, createRootRoute, createRoute, lazyRouteComponent, useRouter } from '@tanstack/react-router';
 import { AppShell, ProductNav } from '@mahoshojo/ui-web/shell';
-import type { EncyclopediaContentSource } from '@mahoshojo/ui-web/encyclopedia';
-import { EncyclopediaEntryView, EncyclopediaIndexView } from '@mahoshojo/ui-web/encyclopedia-views';
 import {
   HomeEncyclopediaCard,
   HomeHero,
   type HomeAssetSource,
 } from '@mahoshojo/ui-web/home';
 
-import { loadDesktopRuntimeInfo, type DesktopRuntimeInfo } from '../platform';
-import { ProviderProfilesPanel } from '../features/providers/ProviderProfilesPanel';
-import { LocalBackupsPanel } from '../features/backups/LocalBackupsPanel';
 import { buildCapabilitySnapshot } from './capabilities';
-import { getRouteFragmentFromHashHistory } from './hash-history-fragment';
-import {
-  DESKTOP_LIBRARY_ARCHIVE_LIMITS,
-  createDesktopArchiveHost,
-} from '../platform/desktop-archive-host';
 
 /**
  * Desktop 的产品路由树（code-based）。
  *
  * ## 为什么是 code-based 而不是文件路由
  *
- * D2.5 的目标不是预建完整 UI 框架。文件路由生成器会引入一个构建期插件与一套约定，而当前只有三条
- * 路由。`ADR-desktop-shared-product` §6 明确「无实际需要不引入生成插件/Start」，因此这里手写路由树
+ * D2.5 的目标不是预建完整 UI 框架。文件路由生成器会引入一个构建期插件与一套约定，当前路由规模较小。`ADR-desktop-shared-product` §6 明确「无实际需要不引入生成插件/Start」，因此这里手写路由树
  * ——它能被直接读、被直接测，也不需要在计划里记一个「将来迁到文件路由」的债。
  *
  * ## 路由只承载已交付的东西
@@ -44,74 +31,11 @@ import {
 /**
  * Desktop 的资源服务根。
  *
- * 宿主事实，不是产品事实（`D3.0-1`）：Tauri 用自定义协议伺服 `dist/`，因此正文与品牌资源都在
+ * 宿主事实，不是产品事实（`D3.0-1`）：Tauri 用自定义协议伺服 `dist/`，因此品牌资源位于
  * origin 根。它和 Web 侧那个 `baseUrl: '/'` 形状相同但来源不同——把两者当成"同一个常量"共享，
  * 会让任一端改动悄悄影响另一端。
  */
-const DESKTOP_CONTENT_SOURCE: EncyclopediaContentSource = { baseUrl: '/' };
 const DESKTOP_ASSET_SOURCE: HomeAssetSource = { baseUrl: '/' };
-
-interface RuntimeState {
-  status: 'loading' | 'ready' | 'failed';
-  info?: DesktopRuntimeInfo;
-  message?: string;
-}
-
-/**
- * 运行时自述。
- *
- * 它曾经是 D0 的**首页**，而 `DESK-PROD-001` 明确禁止运行时/Provider 面板作为最终首页。因此它现在
- * 只出现在设置页：产品入口必须是产品首页，调试信息归设置。
- *
- * 读取失败仍然要显示失败而不是静默降级——`DESK-PROD-007` 要求初始化失败必须报告。
- */
-const RuntimeInfoPanel = () => {
-  const [state, setState] = useState<RuntimeState>({ status: 'loading' });
-
-  useEffect(() => {
-    let cancelled = false;
-
-    loadDesktopRuntimeInfo()
-      .then((info) => {
-        if (!cancelled) setState({ status: 'ready', info });
-      })
-      .catch((cause: unknown) => {
-        if (cancelled) return;
-        setState({
-          status: 'failed',
-          message: cause instanceof Error ? cause.message : 'unknown desktop bridge failure',
-        });
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  return (
-    <section className="rounded-lg border border-(--app-border) bg-(--app-surface) p-4">
-      <h2 className="mb-2 text-sm font-medium text-(--app-text-muted)">本地运行时</h2>
-      {state.status === 'loading' && <p className="text-sm">正在读取本地运行时信息…</p>}
-      {state.status === 'failed' && (
-        <p className="text-sm text-(--app-accent-strong)">读取失败：{state.message}</p>
-      )}
-      {state.status === 'ready' && state.info && (
-        <dl className="grid grid-cols-[auto,1fr] gap-x-4 gap-y-1 text-sm">
-          <dt className="text-(--app-text-muted)">应用版本</dt>
-          <dd>{state.info.appVersion}</dd>
-          <dt className="text-(--app-text-muted)">Tauri 版本</dt>
-          <dd>{state.info.tauriVersion}</dd>
-          <dt className="text-(--app-text-muted)">平台</dt>
-          <dd>
-            {state.info.os} / {state.info.arch}
-          </dd>
-          <dt className="text-(--app-text-muted)">打包产物</dt>
-          <dd>{state.info.packaged ? '是' : '否（开发构建）'}</dd>
-        </dl>
-      )}
-    </section>
-  );
-};
 
 /**
  * 导航能力快照。
@@ -227,180 +151,31 @@ const indexRoute = createRoute({
   },
 });
 
-/** 百科目录。离线可用，不等待任何远端请求（`DESK-PROD-004`）。 */
+/** 百科代码随导航加载；首页不解析 Markdown 与数学排版引擎。 */
 const encyclopediaIndexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/encyclopedia',
-  component: () => {
-    const router = useRouter();
-    return (
-      <EncyclopediaIndexView
-        onNavigate={(href) => {
-          void router.navigate({ to: href });
-        }}
-        path="/encyclopedia"
-        headerLinks={
-          <a
-            href="#/"
-            onClick={(event) => {
-              event.preventDefault();
-              void router.navigate({ to: '/' });
-            }}
-            className="text-blue-600 hover:underline"
-          >
-            返回首页
-          </a>
-        }
-      />
-    );
-  },
+  component: lazyRouteComponent(() => import('./encyclopedia-pages'), 'DesktopEncyclopediaIndex'),
 });
 
-/**
- * 百科条目。
- *
- * fragment 必须由宿主注入，而 Desktop 的 hash history 让这件事不像看上去那么简单：
- * `window.location.hash` 在这里是整个 `#/encyclopedia/foo#heading`，直接喂给 `getElementById` 只会
- * 落空；而 `@tanstack/react-router` 解析后的 `location` 根本没有 `hash` 字段。因此由
- * `getRouteFragmentFromHashHistory` 从原始 hash 里切出后半段。
- *
- * 站内链接交给 router，站外链接不提供处理器：Desktop 没有 opener 能力，于是它们渲染成不可执行
- * 并说明原因，而不是留一个点了没反应的链接。
- */
 const encyclopediaEntryRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/encyclopedia/$slug',
-  component: () => {
-    const router = useRouter();
-    const { slug } = useParams({ strict: false }) as { slug?: string };
-    // `router.state.location` 不含 hash 字段，所以 fragment 订阅原始 hash；`location.href` 是这条
-    // 路径上唯一会因为 fragment 变化而更新的 URL 字符串，因此它而不是 pathname 才是依赖。
-    const fragment = getRouteFragmentFromHashHistory(router.state.location.href);
-
-    return (
-      <EncyclopediaEntryView
-        slug={slug}
-        contentSource={DESKTOP_CONTENT_SOURCE}
-        hash={fragment}
-        onNavigate={(href) => {
-          void router.navigate({ to: href });
-        }}
-        headerLinks={
-          <a
-            href="#/"
-            onClick={(event) => {
-              event.preventDefault();
-              void router.navigate({ to: '/' });
-            }}
-            className="text-blue-600 hover:underline"
-          >
-            返回首页
-          </a>
-        }
-      />
-    );
-  },
+  component: lazyRouteComponent(() => import('./encyclopedia-pages'), 'DesktopEncyclopediaEntry'),
 });
 
-/**
- * 设备级本地库页面。
- *
- * 路径 `/local-library` 与 Web 共用同一个产品路径（`DESK-059`）：它是设备级页面而不是账号级页面，
- * 因为本地库不要求登录。两个 app 的路径一致，用户在两者之间得到的是同一份心智模型。
- *
- * 归档区块是共享实现（`@mahoshojo/ui-web/local-archive`），本文件只提供 Desktop 侧 adapter。导出
- * 结果只以 native 的最终确认判成功，因此共享区块在 Desktop 上呈现确定的字节进度，而 Web 呈现不确定
- * 态——这个差异由共享契约的可辨识 union 表达，而不是由两端各写一套界面。
- */
+/** 归档与备份控制器只在进入本地库时加载。 */
 const localLibraryRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/local-library',
-  component: () => {
-    // host 必须在渲染之间保持稳定：控制器用它做 useMemo 的依赖，重建会让已预检的字节与 plan 丢失。
-    const host = useMemo(() => createDesktopArchiveHost(), []);
-    const controller = useMemo(() => createLocalArchiveController(host), [host]);
-    const model = useSyncExternalStore(controller.subscribe, () => controller.model);
-    const [maintenanceBusy, setMaintenanceBusy] = useState(false);
-    const maintenanceBusyRef = useRef(false);
-    const acquireOperation = useCallback((): boolean => {
-      if (maintenanceBusyRef.current) return false;
-      maintenanceBusyRef.current = true;
-      setMaintenanceBusy(true);
-      return true;
-    }, []);
-    const releaseOperation = useCallback((): void => {
-      maintenanceBusyRef.current = false;
-      setMaintenanceBusy(false);
-    }, []);
-    const archiveBusy = () => {
-      const current = controller.model;
-      return current.exporting || current.inspecting || current.applying;
-    };
-    const runArchiveAction = (action: () => void): void => {
-      if (!acquireOperation()) return;
-      action();
-      if (!archiveBusy()) {
-        releaseOperation();
-        return;
-      }
-      let unsubscribe = (): void => {};
-      unsubscribe = controller.subscribe(() => {
-        if (!archiveBusy()) {
-          unsubscribe();
-          releaseOperation();
-        }
-      });
-    };
-    useEffect(() => { controller.actions.probeStorage(); }, [controller]);
-    const guard = useArchiveLeaveGuard(
-      () => maintenanceBusyRef.current || archiveBusy(),
-      '本地库维护操作仍在进行，请等待完成后再离开或关闭窗口。',
-    );
-    const archiveActions = {
-      ...controller.actions,
-      startExport: () => runArchiveAction(controller.actions.startExport),
-      pickImportFile: () => runArchiveAction(controller.actions.pickImportFile),
-      confirmImport: () => runArchiveAction(controller.actions.confirmImport),
-    };
-
-    return (
-      <section data-testid="page-local-library" className="flex flex-col gap-4">
-        <header className="flex flex-col gap-1">
-          <h1 className="text-lg font-semibold">本地库</h1>
-          <p className="text-sm text-(--app-text-muted)">
-            本机保存的数据卡与 Web 包，只存在于这台设备。不需要账号，也不会访问项目服务器。
-          </p>
-        </header>
-        <fieldset disabled={!guard.ready || maintenanceBusy} className="min-w-0">
-          {!guard.ready && !guard.message && <p role="status">正在初始化窗口关闭保护…</p>}
-          {guard.message && <p role="alert">{guard.message}</p>}
-          <LocalArchivePanel model={model} actions={archiveActions} limits={{ maxArchiveBytes: DESKTOP_LIBRARY_ARCHIVE_LIMITS.fileBytes }} />
-        </fieldset>
-        <LocalBackupsPanel enabled={guard.ready} acquireOperation={acquireOperation} releaseOperation={releaseOperation} />
-        <section className="rounded-lg border border-(--app-border) bg-(--app-surface) p-4">
-          <h2 className="mb-1 text-sm font-medium text-(--app-text-muted)">还没有的</h2>
-          <ul className="flex list-disc flex-col gap-1 pl-5 text-sm text-(--app-text-muted)">
-            <li>
-              <strong className="font-medium">回收站</strong>：删除的记录目前没有界面上的恢复入口。
-            </li>
-          </ul>
-        </section>
-      </section>
-    );
-  },
+  component: lazyRouteComponent(() => import('./local-library-page'), 'DesktopLocalLibrary'),
 });
 
-/** 设置承载 Provider 面板与运行时信息；调试信息不占首页（`DESK-PROD-001`）。 */
+/** Provider 与运行时信息只在进入设置时加载。 */
 const settingsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/settings',
-  component: () => (
-    <section data-testid="page-settings" className="flex flex-col gap-4">
-      <h1 className="text-lg font-semibold">设置</h1>
-      <ProviderProfilesPanel />
-      <RuntimeInfoPanel />
-    </section>
-  ),
+  component: lazyRouteComponent(() => import('./settings-page'), 'DesktopSettings'),
 });
 
 export const routeTree = rootRoute.addChildren([
