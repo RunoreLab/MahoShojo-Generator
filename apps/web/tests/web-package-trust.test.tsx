@@ -111,7 +111,7 @@ describe('Web 包可信同源授权 UI',()=>{
 
   it('allows only the current result when persistence fails and reports the failure honestly', async () => {
     const input = await fixture(); await show(input);
-    const storage = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('quota'); });
+    const storage = vi.spyOn(window.localStorage, 'setItem').mockImplementation(() => { throw new Error('quota'); });
     await allow(true);
     expect(container.querySelector('iframe')!.getAttribute('sandbox')).toContain('allow-same-origin');
     expect(container.textContent).toContain('浏览器未能保存信任');
