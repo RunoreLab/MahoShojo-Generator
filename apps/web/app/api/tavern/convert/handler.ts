@@ -2,8 +2,6 @@ import { z } from 'zod/v3';
 import { UserGenerationOverridesSchema } from '@/lib/ai/generation-settings/schemas';
 import { NextRequest } from 'next/server';
 
-import questionnaire from '@/public/questionnaires/presets/magical-girl-default.json';
-import canshouQuestionnaire from '@/public/questionnaires/presets/canshou-default.json';
 import { generateWithAI, LoadBalanceStrategy, type GenerationConfig, type GenerateWithAIOptions } from '@/lib/ai';
 import { buildChannelContextFromPayload } from '@/lib/ai/availability';
 import { AI_PROVIDER_CATALOG, resolveAIProviderModel } from '@/lib/ai/constants';
@@ -19,6 +17,7 @@ import { CANSHOU_LORE } from '@/lib/canshou-lore';
 import { getRandomFlowers } from '@/lib/random-choose-hana-name';
 import { TAVERN_IMPORT_ATTACHMENT_LIMITS } from '@/lib/tavern-card/limits';
 import { normalizeUserAnswers, type QuestionnaireAnswerItem } from '@/lib/questionnaires';
+import { canshouQuestionnaire, magicalQuestionnaire as questionnaire } from '@/lib/questionnaire-presets';
 import {
   CanshouSchema as AppCanshouSchema,
   GeneralCharacterSchema as AppGeneralCharacterSchema,
