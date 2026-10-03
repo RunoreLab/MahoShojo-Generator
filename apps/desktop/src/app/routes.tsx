@@ -1,13 +1,25 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { Outlet, createRootRoute, createRoute, useRouter } from '@tanstack/react-router';
+import { Outlet, createRootRoute, createRoute, useParams, useRouter } from '@tanstack/react-router';
 import { LocalArchivePanel, createLocalArchiveController } from '@mahoshojo/ui-web/local-archive';
 import { useArchiveLeaveGuard } from './useArchiveLeaveGuard';
 import { AppShell, ProductNav } from '@mahoshojo/ui-web/shell';
+import {
+  EncyclopediaEntryView,
+  EncyclopediaIndexView,
+  type EncyclopediaContentSource,
+} from '@mahoshojo/ui-web/encyclopedia';
+import {
+  HomeEncyclopediaCard,
+  HomeFeatureGrid,
+  HomeHero,
+  type HomeAssetSource,
+} from '@mahoshojo/ui-web/home';
 
 import { loadDesktopRuntimeInfo, type DesktopRuntimeInfo } from '../platform';
 import { ProviderProfilesPanel } from '../features/providers/ProviderProfilesPanel';
 import { LocalBackupsPanel } from '../features/backups/LocalBackupsPanel';
 import { buildCapabilitySnapshot } from './capabilities';
+import { getRouteFragmentFromHashHistory } from './hash-history-fragment';
 import {
   DESKTOP_LIBRARY_ARCHIVE_LIMITS,
   createDesktopArchiveHost,
@@ -32,6 +44,16 @@ import {
  * 其他 feature 按各自任务 owner 决定（`DESK-PROD-008`）。路由原语本身是否可用由
  * `tests/desktop-router-history.test.tsx` 断言，不靠注释成立。
  */
+
+/**
+ * Desktop 的资源服务根。
+ *
+ * 宿主事实，不是产品事实（`D3.0-1`）：Tauri 用自定义协议伺服 `dist/`，因此正文与品牌资源都在
+ * origin 根。它和 Web 侧那个 `baseUrl: '/'` 形状相同但来源不同——把两者当成"同一个常量"共享，
+ * 会让任一端改动悄悄影响另一端。
+ */
+const DESKTOP_CONTENT_SOURCE: EncyclopediaContentSource = { baseUrl: '/' };
+const DESKTOP_ASSET_SOURCE: HomeAssetSource = { baseUrl: '/' };
 
 interface RuntimeState {
   status: 'loading' | 'ready' | 'failed';
@@ -141,31 +163,150 @@ const rootRoute = createRootRoute({
   component: DesktopShell,
 });
 
+/**
+ * 产品首页。
+ *
+ * 视图是共享实现（`@mahoshojo/ui-web/home`），本文件只提供 Desktop 的两样东西：能力快照与那句
+ * 说明。首页不发起任何请求——它读的是本地快照与本地产物（`DESK-PROD-004`）。
+ *
+ * ## 说明为什么只说「有差异」而不列清单
+ *
+ * 列出现在有哪些能力、与网页版差在哪里，会在每次交付后立刻过时，而过时的差异说明比没有更糟：
+ * 用户会照着它去找一个已经能用的功能。因此只说明差异存在，把它留给设置页与更新说明去讲细节。
+ */
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/',
-  component: () => (
-    <section data-testid="page-home">
-      <h1 className="text-lg font-semibold">MahoShojo Generator · Desktop</h1>
-      <p className="mt-2 text-sm text-(--app-text-muted)">
-        本地运行时。本地浏览、编辑、导入与导出不需要账号，也不访问项目服务器。
-      </p>
-      <ul className="mt-4 flex flex-col gap-2 text-sm">
-        <li>
-          <a href="#/local-library" className="text-(--app-accent-strong) underline">
-            本地库
+  component: () => {
+    const router = useRouter();
+    const navigate = useCallback((href: string) => {
+      void router.navigate({ to: href });
+    }, [router]);
+
+    return (
+      <section data-testid="page-home" className="flex flex-col gap-6">
+        <HomeHero
+          assetSource={DESKTOP_ASSET_SOURCE}
+          width={220}
+          height={140}
+          subtitle="本地运行时。本地浏览、编辑、导入与导出不需要账号，也不访问项目服务器。"
+        />
+        <p className="text-center text-sm text-(--app-text-muted)">
+          桌面版的功能与网页版存在差异，各项功能预计将逐步开放。
+        </p>
+        <HomeEncyclopediaCard assetSource={DESKTOP_ASSET_SOURCE} onNavigate={navigate} />
+        {/* 功能分组缺省隐藏未交付入口：13 个入口里本地运行时只交付了少数几个，
+            全部渲染出来得到的是 roadmap 展板而不是产品首页（`DESK-PROD-001`）。 */}
+        <HomeFeatureGrid assetSource={DESKTOP_ASSET_SOURCE} capabilities={CAPABILITIES} onNavigate={navigate} />
+        <section className="rounded-lg border border-(--app-border) bg-(--app-surface) p-4">
+          <h2 className="mb-1 text-sm font-medium text-(--app-text-muted)">本机数据</h2>
+          <ul className="flex flex-col gap-1 text-sm">
+            <li>
+              <a
+                href="#/local-library"
+                onClick={(event) => {
+                  event.preventDefault();
+                  navigate('/local-library');
+                }}
+                className="text-(--app-accent-strong) underline"
+              >
+                本地库
+              </a>
+              ：本机数据卡与 Web 包的管理、导入导出。
+            </li>
+            <li>
+              <a
+                href="#/settings"
+                onClick={(event) => {
+                  event.preventDefault();
+                  navigate('/settings');
+                }}
+                className="text-(--app-accent-strong) underline"
+              >
+                设置
+              </a>
+              ：AI Provider、凭据与运行时信息。
+            </li>
+          </ul>
+        </section>
+      </section>
+    );
+  },
+});
+
+/** 百科目录。离线可用，不等待任何远端请求（`DESK-PROD-004`）。 */
+const encyclopediaIndexRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/encyclopedia',
+  component: () => {
+    const router = useRouter();
+    return (
+      <EncyclopediaIndexView
+        onNavigate={(href) => {
+          void router.navigate({ to: href });
+        }}
+        path="/encyclopedia"
+        headerLinks={
+          <a
+            href="#/"
+            onClick={(event) => {
+              event.preventDefault();
+              void router.navigate({ to: '/' });
+            }}
+            className="text-blue-600 hover:underline"
+          >
+            返回首页
           </a>
-          ：本机数据卡与 Web 包的管理、导入导出。
-        </li>
-        <li>
-          <a href="#/settings" className="text-(--app-accent-strong) underline">
-            设置
+        }
+      />
+    );
+  },
+});
+
+/**
+ * 百科条目。
+ *
+ * fragment 必须由宿主注入，而 Desktop 的 hash history 让这件事不像看上去那么简单：
+ * `window.location.hash` 在这里是整个 `#/encyclopedia/foo#heading`，直接喂给 `getElementById` 只会
+ * 落空；而 `@tanstack/react-router` 解析后的 `location` 根本没有 `hash` 字段。因此由
+ * `getRouteFragmentFromHashHistory` 从原始 hash 里切出后半段。
+ *
+ * 站内链接交给 router，站外链接不提供处理器：Desktop 没有 opener 能力，于是它们渲染成不可执行
+ * 并说明原因，而不是留一个点了没反应的链接。
+ */
+const encyclopediaEntryRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/encyclopedia/$slug',
+  component: () => {
+    const router = useRouter();
+    const { slug } = useParams({ strict: false }) as { slug?: string };
+    // `router.state.location` 不含 hash 字段，所以 fragment 订阅原始 hash；`location.href` 是这条
+    // 路径上唯一会因为 fragment 变化而更新的 URL 字符串，因此它而不是 pathname 才是依赖。
+    const fragment = getRouteFragmentFromHashHistory(router.state.location.href);
+
+    return (
+      <EncyclopediaEntryView
+        slug={slug}
+        contentSource={DESKTOP_CONTENT_SOURCE}
+        hash={fragment}
+        onNavigate={(href) => {
+          void router.navigate({ to: href });
+        }}
+        headerLinks={
+          <a
+            href="#/"
+            onClick={(event) => {
+              event.preventDefault();
+              void router.navigate({ to: '/' });
+            }}
+            className="text-blue-600 hover:underline"
+          >
+            返回首页
           </a>
-          ：AI Provider、凭据与运行时信息。
-        </li>
-      </ul>
-    </section>
-  ),
+        }
+      />
+    );
+  },
 });
 
 /**
@@ -269,4 +410,10 @@ const settingsRoute = createRoute({
   ),
 });
 
-export const routeTree = rootRoute.addChildren([indexRoute, localLibraryRoute, settingsRoute]);
+export const routeTree = rootRoute.addChildren([
+  indexRoute,
+  encyclopediaIndexRoute,
+  encyclopediaEntryRoute,
+  localLibraryRoute,
+  settingsRoute,
+]);

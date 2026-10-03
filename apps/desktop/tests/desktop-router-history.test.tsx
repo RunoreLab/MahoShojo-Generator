@@ -47,6 +47,7 @@ import {
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { getRouteFragmentFromHashHistory } from '../src/app/hash-history-fragment';
 import { createDesktopRouter } from '../src/app/router';
 
 let container: HTMLDivElement;
@@ -103,6 +104,15 @@ const mount = async () => {
 const pageTestId = (): string | null | undefined =>
   container.querySelector('[data-testid^="page-"]')?.getAttribute('data-testid');
 
+/**
+ * 共源百科视图的 testid。
+ *
+ * 它们由 `@mahoshojo/ui-web/encyclopedia` 提供，用的是自己的命名而不是 Desktop 的 `page-` 前缀——
+ * 共享组件不该采用某个 app 的测试约定。因此这里按前缀分别取，而不是让 `pageTestId` 兼管。
+ */
+const encyclopediaTestId = (): string | null | undefined =>
+  container.querySelector('[data-testid^="encyclopedia-"]')?.getAttribute('data-testid');
+
 describe('desktop router keeps the product path inside the hash', () => {
   it('never writes the product path before the hash', async () => {
     const router = createDesktopRouter();
@@ -123,17 +133,72 @@ describe('desktop router keeps the product path inside the hash', () => {
     const router = await mount();
     expect(pageTestId()).toBe('page-home');
 
-    await act(async () => {
-      await router.navigate({ to: '/local-library' });
-    });
-    await settle();
-    expect(pageTestId()).toBe('page-local-library');
+    for (const [to, expected] of [
+      ['/local-library', 'page-local-library'],
+      ['/settings', 'page-settings'],
+    ] as const) {
+      await act(async () => {
+        await router.navigate({ to });
+      });
+      await settle();
+      expect(pageTestId(), `${to} 应当渲染 ${expected}`).toBe(expected);
+    }
+
+    for (const [to, expected] of [
+      ['/encyclopedia', 'encyclopedia-index'],
+      ['/encyclopedia/site-guide', 'encyclopedia-entry'],
+    ] as const) {
+      await act(async () => {
+        await router.navigate({ to });
+      });
+      await settle();
+      expect(encyclopediaTestId(), `${to} 应当渲染 ${expected}`).toBe(expected);
+    }
+  });
+});
+
+/**
+ * 百科锚点在 hash history 下的形状。
+ *
+ * 路由与 fragment 共处同一个 `#`：`/#/encyclopedia/site-guide#角色生成`。因此条目页**不能**读
+ * `window.location.hash`——在 Desktop 上那个值等于整个 `#/route#anchor`，直接喂给 `getElementById`
+ * 只会落空。共享层因此要求宿主注入 `router.state.location.hash`，这里断言注入的是**后半段**。
+ */
+describe('encyclopedia anchors under hash history', () => {
+  it('keeps the fragment behind the route inside the hash', async () => {
+    const router = await mount();
 
     await act(async () => {
-      await router.navigate({ to: '/settings' });
+      await router.navigate({ to: '/encyclopedia/site-guide', hash: '角色生成' });
     });
     await settle();
-    expect(pageTestId()).toBe('page-settings');
+
+    // 浏览器把 CJK fragment 写成 percent-encoded，这是 URL 的正常形态；解码由共享层负责。
+    expect(window.location.hash).toBe('#/encyclopedia/site-guide#%E8%A7%92%E8%89%B2%E7%94%9F%E6%88%90');
+    expect(window.location.pathname).toBe('/');
+    expect(getRouteFragmentFromHashHistory(router.state.location.href)).toBe(
+      '%E8%A7%92%E8%89%B2%E7%94%9F%E6%88%90',
+    );
+  });
+
+  it('changes only the fragment when staying on the same entry', async () => {
+    // 「已经在同一篇条目时只改变 hash」是 D3.0 的验收项：它不能触发一次新的正文取回。
+    const router = await mount();
+
+    await act(async () => {
+      await router.navigate({ to: '/encyclopedia/site-guide', hash: 'battle' });
+    });
+    await settle();
+    expect(router.state.location.pathname).toBe('/encyclopedia/site-guide');
+
+    await act(async () => {
+      await router.navigate({ to: '/encyclopedia/site-guide', hash: 'scoring' });
+    });
+    await settle();
+
+    expect(window.location.hash).toBe('#/encyclopedia/site-guide#scoring');
+    expect(router.state.location.pathname).toBe('/encyclopedia/site-guide');
+    expect(getRouteFragmentFromHashHistory(router.state.location.href)).toBe('scoring');
   });
 });
 
