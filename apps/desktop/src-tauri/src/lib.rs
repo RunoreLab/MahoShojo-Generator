@@ -700,7 +700,8 @@ async fn read_web_package_archive(
 ///
 /// 目标路径由 native 选定（`DESK-071b`"导出目标路径的命名与保留"），渲染层既不能指定目录也不能
 /// 指定文件名。它回显的 `absolutePath` 是**计划**路径：文件要到收满声明字节才出现在那里。
-#[tauri::command]
+/// 与 append 一起在异步运行时调度：等待会话锁、回收旧临时文件与创建新文件都不能占用 UI 主线程。
+#[tauri::command(async)]
 fn begin_local_archive_export(
     export: State<'_, crate::export::ArchiveExport>,
     declared_total_byte_length: u64,
@@ -715,7 +716,11 @@ fn begin_local_archive_export(
 ///
 /// 结构化参数刻意只有 `exportId`：字节本身走 raw IPC 请求体，而 raw body 会**取代整个请求体**，
 /// 因此长度、路径之类的元数据 MUST 走 header（`DESK-070` 字节传输节）。
-#[tauri::command]
+///
+/// `command(async)` 让同步写入及最终 sync/persist 在 Tauri 异步运行时调度，避免阻塞 UI 主线程。
+/// Tauri 宏将整个 InvokeMessage 移入 future 后才借用 Request/State，因此可直接借用 raw 字节，
+/// 无需为每块额外复制。这里的同步函数签名并不意味着同步 command 调度。
+#[tauri::command(async)]
 fn append_local_archive_export_chunk(
     request: tauri::ipc::Request,
     export: State<'_, crate::export::ArchiveExport>,

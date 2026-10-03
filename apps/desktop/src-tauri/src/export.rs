@@ -226,7 +226,10 @@ impl ArchiveExport {
         let entries = match std::fs::read_dir(self.paths.root()) {
             Ok(entries) => entries,
             // 目录刚创建时是空的；读不到说明它不可用，而 `open` 已经验证过一次了。
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                self.stale_temporaries_left.store(0, Ordering::Relaxed);
+                return Ok(0);
+            }
             Err(_) => return Err(ExportError::Unavailable),
         };
         let mut removed = 0;
@@ -249,10 +252,8 @@ impl ArchiveExport {
                 Err(_) => failed += 1,
             }
         }
-        if failed > 0 {
-            self.stale_temporaries_left
-                .store(failed as u64, Ordering::Relaxed);
-        }
+        self.stale_temporaries_left
+            .store(failed as u64, Ordering::Relaxed);
         Ok(removed)
     }
 
@@ -810,6 +811,32 @@ mod tests {
         assert!(stuck.exists());
         // 但也不悄悄咽掉：这个数字是不靠日志就能看到"磁盘或权限有问题"的唯一证据。
         assert_eq!(export.stale_temporaries_left(), 1);
+
+        // 同一实例再次清理成功时，诊断必须反映本轮，而非永久保留历史失败。
+        std::fs::remove_dir(&stuck).expect("remove stuck directory");
+        std::fs::write(&stuck, b"now removable").expect("replace with temporary file");
+        assert_eq!(export.reclaim_stale_temporaries().expect("retry"), 1);
+        assert_eq!(export.stale_temporaries_left(), 0);
+    }
+
+    #[test]
+    fn 临时目录消失时清理也会归零旧失败计数() {
+        let root = scratch("missing-after-failure");
+        let export = open(&root);
+        let stuck = exports_dir(&root).join(format!("{TEMPORARY_PREFIX}77{TEMPORARY_SUFFIX}"));
+        std::fs::create_dir(&stuck).expect("mkdir stuck");
+        assert_eq!(export.reclaim_stale_temporaries().expect("reclaim"), 0);
+        assert_eq!(export.stale_temporaries_left(), 1);
+
+        std::fs::remove_dir(&stuck).expect("remove stuck directory");
+        std::fs::remove_dir(exports_dir(&root)).expect("remove empty exports directory");
+        assert_eq!(
+            export
+                .reclaim_stale_temporaries()
+                .expect("missing directory"),
+            0
+        );
+        assert_eq!(export.stale_temporaries_left(), 0);
     }
 
     #[test]
