@@ -1,48 +1,47 @@
-import Link from 'next/link';
+'use client';
 
-import { getEncyclopediaEntry } from '@mahoshojo/ui-web/encyclopedia';
+import { useRouter } from 'next/navigation';
 
-export type EncyclopediaLinkItem = {
-  slug: string;
-  text?: string;
-};
+import {
+  EncyclopediaLinks as SharedEncyclopediaLinks,
+  type EncyclopediaLinkItem,
+} from '@mahoshojo/ui-web/encyclopedia';
+
+export type { EncyclopediaLinkItem };
 
 export interface EncyclopediaLinksProps {
-  items: EncyclopediaLinkItem[];
+  items: readonly EncyclopediaLinkItem[];
   className?: string;
-  label?: string | null;
+  label?: React.ReactNode;
   labelClassName?: string;
   linkClassName?: string;
 }
 
+/**
+ * Web 的百科链接条包装。
+ *
+ * 九个页面（创作各入口、竞技场、首页）都在用它。视图本身是共享实现；这里只补上 Web 的路由事实，
+ * 因此这些调用点不需要改动——搬迁它们的导入路径属于与 D3.0 无关的改动。
+ */
 export function EncyclopediaLinks({
   items,
-  className = 'mt-3 flex flex-wrap justify-center gap-3 text-xs',
-  label = null,
-  labelClassName = 'text-gray-500',
-  linkClassName = 'text-blue-600 hover:underline',
+  className,
+  label,
+  labelClassName,
+  linkClassName,
 }: EncyclopediaLinksProps) {
-  const normalized = items
-    .map((item) => {
-      const entry = getEncyclopediaEntry(item.slug);
-      if (!entry) return null;
-      return {
-        slug: entry.slug,
-        text: item.text ?? entry.title,
-      };
-    })
-    .filter((item): item is { slug: string; text: string } => Boolean(item));
-
-  if (normalized.length === 0) return null;
+  const router = useRouter();
 
   return (
-    <div className={className}>
-      {label ? <span className={labelClassName}>{label}</span> : null}
-      {normalized.map((item) => (
-        <Link key={item.slug} href={`/encyclopedia/${item.slug}`} className={linkClassName}>
-          {item.text}
-        </Link>
-      ))}
-    </div>
+    <SharedEncyclopediaLinks
+      items={items}
+      onNavigate={(href) => {
+        void router.push(href);
+      }}
+      {...(className === undefined ? {} : { className })}
+      {...(label === undefined ? {} : { label })}
+      {...(labelClassName === undefined ? {} : { labelClassName })}
+      {...(linkClassName === undefined ? {} : { linkClassName })}
+    />
   );
 }

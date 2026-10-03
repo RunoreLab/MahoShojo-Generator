@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { Suspense } from 'react';
 
-import { EncyclopediaIndexPage } from '@/components/encyclopedia/EncyclopediaIndexPage';
+import { WebEncyclopediaIndex } from '@/components/encyclopedia/WebEncyclopediaViews';
 
 export const metadata: Metadata = {
   title: '百科 - MahoShojo Generator',
@@ -19,7 +19,7 @@ export default function EncyclopediaRoute() {
         </div>
       }
     >
-      <EncyclopediaIndexPage />
+      <WebEncyclopediaIndex />
     </Suspense>
   );
 }

@@ -7,6 +7,7 @@ import {
   DENY_EXTERNAL_MEDIA,
   MarkdownBlock,
   type ExternalMediaPolicy,
+  type InternalLinkRenderProps,
 } from '../src/markdown/index';
 
 let container: HTMLDivElement;
@@ -118,7 +119,9 @@ describe('MarkdownBlock navigation policy', () => {
 
   it('lets the host replace the internal anchor entirely', () => {
     renderMarkdown('[本地库](/local-library)', {
-      renderInternalLink: ({ href, children }) => <span data-href={href}>{children}</span>,
+      renderInternalLink: ({ href, children }: InternalLinkRenderProps) => (
+        <span data-href={href}>{children}</span>
+      ),
     });
     expect(container.querySelector('a')).toBeNull();
     expect(container.querySelector('[data-href="/local-library"]')).not.toBeNull();
