@@ -36,6 +36,15 @@ import { createLocalWebPackageRecord } from './web-package-fixtures';
 const encoder = new TextEncoder();
 const EXPORTED_AT = '2026-10-02T00:00:00.000Z';
 
+/**
+ * 这两个别名原先声明在 `createTarget` **函数体内部**，于是「卡片跳过来自 `putIfAbsent`
+ * 的结果」那条用例（`archive-import` 末尾）在用 `as CardRecord` 时拿到的是
+ * `TS2304: Cannot find name 'CardRecord'`。提到模块作用域，两个用例都重新可见，
+ * 类型推导不变。
+ */
+type CardRecord = NonNullable<Awaited<ReturnType<CardRepository['get']>>>;
+type PackageRecord = NonNullable<Awaited<ReturnType<WebPackageRepository['get']>>>;
+
 /** 序号必须在摘要**前 32 位**里出现：卡片 id 与 Web 包 id 都由它派生。 */
 const distinctHex = (index: number): string => {
   const high = index.toString(16).padStart(32, '0');
@@ -175,8 +184,6 @@ const createTarget = (existing: {
   cards?: readonly string[];
   packages?: readonly string[];
 } = {}): Recorder => {
-  type CardRecord = NonNullable<Awaited<ReturnType<CardRepository['get']>>>;
-  type PackageRecord = NonNullable<Awaited<ReturnType<WebPackageRepository['get']>>>;
   const cardPuts: string[] = [];
   const packagePuts: string[] = [];
   const packageArchiveBytes = new Map<string, Uint8Array>();
