@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import {
   EncyclopediaLinks as SharedEncyclopediaLinks,
   type EncyclopediaLinkItem,
-} from '@mahoshojo/ui-web/encyclopedia';
+} from '@mahoshojo/ui-web/encyclopedia-views';
 
 export type { EncyclopediaLinkItem };
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { stripLeadingMatchingTitle } from '../src/markdown/strip-leading-matching-title';
+import { stripLeadingMatchingTitle } from '../src/markdown/text/strip-leading-matching-title';
 
 /**
  * 条目页的外层标题与正文 H1 之间的关系。

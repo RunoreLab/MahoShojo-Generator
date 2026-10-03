@@ -3,12 +3,9 @@ import { act, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { slugifyHeading } from '../src/markdown/index';
+import { slugifyHeading } from '../src/markdown/text/index';
 import {
   ALL_CATEGORY,
-  EncyclopediaEntryView,
-  EncyclopediaIndexView,
-  EncyclopediaLinks,
   encyclopediaContentUrl,
   encyclopediaEntries,
   getEncyclopediaEntry,
@@ -16,6 +13,11 @@ import {
   serializeEncyclopediaFilter,
   type EncyclopediaContentSource,
 } from '../src/encyclopedia/index';
+import {
+  EncyclopediaEntryView,
+  EncyclopediaIndexView,
+  EncyclopediaLinks,
+} from '../src/encyclopedia/views/index';
 
 let container: HTMLDivElement;
 let root: Root;

@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 
-import { getEncyclopediaEntry, type EncyclopediaEntry } from './catalog';
+import { getEncyclopediaEntry, type EncyclopediaEntry } from '../catalog';
 
 export interface EncyclopediaLinkItem {
   readonly slug: string;

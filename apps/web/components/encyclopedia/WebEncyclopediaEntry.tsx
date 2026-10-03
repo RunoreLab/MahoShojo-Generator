@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 
-import { EncyclopediaEntryView } from '@mahoshojo/ui-web/encyclopedia';
+import { EncyclopediaEntryView } from '@mahoshojo/ui-web/encyclopedia-views';
 import type { InternalLinkRenderProps } from '@mahoshojo/ui-web/markdown';
 
 import { useLocationHash } from '@/lib/use-location-hash';

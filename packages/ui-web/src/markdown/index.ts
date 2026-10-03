@@ -23,28 +23,26 @@ export {
   type MarkdownPlugin,
 } from './MarkdownBlock';
 
-export {
-  createHeadingSlugger,
-  decodeFragmentId,
-  slugifyHeading,
-} from './heading-slug';
+export { useHashScrollTarget, type HashScrollTargetOptions } from './use-hash-scroll-target';
 
-export { fixNestedListIndentation } from './fix-nested-list-indentation';
-
-export { stripLeadingMatchingTitle } from './strip-leading-matching-title';
-
+/**
+ * 纯文本部分从 `./markdown-text` 导出，这里同时再导出一次。
+ *
+ * 客户端组件从 `./markdown` 一处拿全；服务端代码必须走 `./markdown-text`，否则会把 React hook 拖进
+ * Route Handler 的导入链。两条路径的分工在各自的模块注释里写明。
+ */
 export {
   DENY_EXTERNAL_MEDIA,
+  createHeadingSlugger,
+  decodeFragmentId,
   detectMediaKindByExtension,
+  fixNestedListIndentation,
   formatMarkdownImage,
   formatMarkdownLink,
   isExternalMarkdownHref,
   normalizeMarkdownHref,
+  slugifyHeading,
+  stripLeadingMatchingTitle,
   type ExternalMediaKind,
   type ExternalMediaPolicy,
-} from './external-media';
-
-export {
-  useHashScrollTarget,
-  type HashScrollTargetOptions,
-} from './use-hash-scroll-target';
+} from './text/index';

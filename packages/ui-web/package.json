@@ -25,10 +25,20 @@
       "import": "./src/encyclopedia/index.ts",
       "default": "./src/encyclopedia/index.ts"
     },
+    "./encyclopedia-views": {
+      "types": "./src/encyclopedia/views/index.ts",
+      "import": "./src/encyclopedia/views/index.ts",
+      "default": "./src/encyclopedia/views/index.ts"
+    },
     "./markdown": {
       "types": "./src/markdown/index.ts",
       "import": "./src/markdown/index.ts",
       "default": "./src/markdown/index.ts"
+    },
+    "./markdown-text": {
+      "types": "./src/markdown/text/index.ts",
+      "import": "./src/markdown/text/index.ts",
+      "default": "./src/markdown/text/index.ts"
     },
     "./local-archive": {
       "types": "./src/local-archive/index.ts",

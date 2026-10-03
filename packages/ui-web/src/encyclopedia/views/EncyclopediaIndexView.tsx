@@ -1,12 +1,8 @@
 import type { ReactNode } from 'react';
 
-import { encyclopediaCategories } from './catalog';
-import {
-  ALL_CATEGORY,
-  useEncyclopediaFilter,
-  useFilteredEncyclopediaEntries,
-  type EncyclopediaCategoryFilter,
-} from './filter';
+import { encyclopediaCategories } from '../catalog';
+import { ALL_CATEGORY, type EncyclopediaCategoryFilter } from '../filter';
+import { useEncyclopediaFilter, useFilteredEncyclopediaEntries } from './use-encyclopedia-filter';
 
 export interface EncyclopediaIndexViewProps {
   /** 条目链接的目标。Web 交给 Next router，Desktop 交给 hash router。 */

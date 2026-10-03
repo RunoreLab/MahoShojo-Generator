@@ -6,15 +6,15 @@ import remarkMath from 'remark-math';
 
 import {
   DENY_EXTERNAL_MEDIA,
+  createHeadingSlugger,
+  fixNestedListIndentation,
   formatMarkdownImage,
   formatMarkdownLink,
   isExternalMarkdownHref,
   normalizeMarkdownHref,
   type ExternalMediaKind,
   type ExternalMediaPolicy,
-} from './external-media';
-import { createHeadingSlugger } from './heading-slug';
-import { fixNestedListIndentation } from './fix-nested-list-indentation';
+} from './text/index';
 
 type MarkdownCodeProps = ComponentPropsWithoutRef<'code'> & ExtraProps & { inline?: boolean };
 

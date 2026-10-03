@@ -157,9 +157,9 @@ describe('MarkdownBlock external media', () => {
 
   it('lets the host allow and resolve a specific media URL', () => {
     const policy: ExternalMediaPolicy = {
-      detectKind: (url) => (url.endsWith('.png') ? 'image' : null),
-      isAllowed: (url) => url.startsWith('https://cdn.example/'),
-      resolve: (url) => url.replace('https://cdn.example/', 'https://proxy.example/'),
+      detectKind: (url: string) => (url.endsWith('.png') ? 'image' : null),
+      isAllowed: (url: string) => url.startsWith('https://cdn.example/'),
+      resolve: (url: string) => url.replace('https://cdn.example/', 'https://proxy.example/'),
     };
 
     renderMarkdown('![图](https://cdn.example/a.png)\n\n![外](https://other.example/b.png)', {

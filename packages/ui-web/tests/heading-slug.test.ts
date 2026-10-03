@@ -4,7 +4,7 @@ import {
   createHeadingSlugger,
   decodeFragmentId,
   slugifyHeading,
-} from '../src/markdown/heading-slug';
+} from '../src/markdown/text/heading-slug';
 
 /**
  * heading slug 是「百科锚点可用」的地基。
