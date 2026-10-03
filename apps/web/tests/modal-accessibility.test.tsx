@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BaseModal } from '@/components/shared/BaseModal';
 import BattleDataModal from '@/components/BattleDataModal';
 import { DataCardReportModal } from '@/components/data-card-reports/DataCardReportModal';
+import { ArenaRoomDialog } from '@/components/arena/multiplayer/ArenaRoomDialog';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -419,4 +420,95 @@ describe('BattleDataModal accessibility and capabilities', () => {
     if (document.contains(detailButton)) expect(document.activeElement).toBe(detailButton);
   });
 
+});
+
+/**
+ * `ArenaRoomDialog` 是 `BaseModal` 的薄封装，但它**固定传 `closeOnBackdrop={false}`**，
+ * 因此继承到的可访问性契约与上面 `BaseModal` 那一族（默认 `closeOnBackdrop=true`）不同，
+ * 之前没有任何用例覆盖过这个差异。
+ *
+ * 关掉「点遮罩关闭」是有意的：房间提案窗口里有未提交的草稿，点错遮罩不该把它丢掉。
+ * 但关掉之后键盘用户不能被关在窗外，所以真正要守的是这三条：
+ *
+ * 1. 遮罩从可访问性树和 tab 序里退出（`aria-hidden` + `tabindex="-1"`）且点击不触发关闭
+ *    ——它不再是可用的关闭入口，就不能假装是；
+ * 2. 唯一的关闭入口是那个带可访问名称的按钮；
+ * 3. **Escape 仍然关闭**。这是关掉遮罩关闭之后键盘用户仅剩的出路，必须单独守住。
+ *
+ * 另外覆盖 `ArenaRoomDialog` 从 title 派生关闭按钮可访问名称的那段逻辑：title 是字符串时
+ * 用它自己，不是字符串时回退到「房间」。回退分支此前从未被执行过。
+ */
+describe('ArenaRoomDialog accessibility contract', () => {
+  const renderDialog = async (
+    node: React.ReactNode,
+  ): Promise<HTMLButtonElement> => {
+    await act(async () => root.render(node));
+    const dialog = document.querySelector('[role="dialog"]');
+    expect(dialog).not.toBeNull();
+    expect(dialog?.getAttribute('aria-modal')).toBe('true');
+    // 关闭按钮是初始焦点：遮罩不可用之后，它是第一个可达的控件
+    const closeButton = dialog?.querySelector<HTMLButtonElement>('button[aria-label^="关闭"]');
+    expect(closeButton).not.toBeNull();
+    expect(document.activeElement).toBe(closeButton);
+    return closeButton as HTMLButtonElement;
+  };
+
+  const backdrop = (): HTMLButtonElement => {
+    const target = document.querySelector<HTMLButtonElement>('button[aria-hidden="true"]');
+    expect(target).not.toBeNull();
+    return target as HTMLButtonElement;
+  };
+
+  it('closes via Escape and the labelled close button, but never via the backdrop', async () => {
+    const onClose = vi.fn();
+    const closeButton = await renderDialog(
+      <ArenaRoomDialog
+        open
+        titleId="arena-room-dialog-title"
+        title="房间邀请"
+        onClose={onClose}
+      >
+        <button type="button">房间操作</button>
+      </ArenaRoomDialog>,
+    );
+
+    // 标题通过 titleId 接到 aria-labelledby 上
+    const labelledBy = document.querySelector('[role="dialog"]')?.getAttribute('aria-labelledby');
+    expect(labelledBy).toBe('arena-room-dialog-title');
+    expect(document.getElementById('arena-room-dialog-title')?.textContent).toBe('房间邀请');
+
+    // 遮罩不再是关闭入口：被移出可访问性树与 tab 序，且没有 click handler
+    const mask = backdrop();
+    expect(mask.getAttribute('aria-hidden')).toBe('true');
+    expect(mask.getAttribute('tabindex')).toBe('-1');
+    expect(mask.getAttribute('aria-label')).toBeNull();
+    await act(async () => mask.click());
+    expect(onClose).not.toHaveBeenCalled();
+
+    // 唯一关闭入口：带可访问名称的按钮
+    expect(closeButton.getAttribute('aria-label')).toBe('关闭“房间邀请”对话框');
+    await act(async () => closeButton.click());
+    expect(onClose).toHaveBeenCalledOnce();
+
+    // 键盘用户不能被关在窗外：Escape 仍然关闭
+    onClose.mockClear();
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it('falls back to a generic accessible name when the title is not a string', async () => {
+    const closeButton = await renderDialog(
+      <ArenaRoomDialog
+        open
+        titleId="arena-room-dialog-node-title"
+        title={<span>房间状态</span>}
+        description="非字符串标题"
+        onClose={vi.fn()}
+      >
+        <button type="button">房间操作</button>
+      </ArenaRoomDialog>,
+    );
+
+    expect(closeButton.getAttribute('aria-label')).toBe('关闭“房间”对话框');
+  });
 });
