@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createDesktopArchiveHost } from '../src/platform/desktop-archive-host';
 
@@ -12,6 +12,11 @@ import { createDesktopArchiveHost } from '../src/platform/desktop-archive-host';
  * 方法，且导入侧确实不碰网络。真实调用路径由 `local-archive-bridge.test.ts` 与 Rust 侧测试覆盖。
  */
 describe('desktop archive host wiring', () => {
+  afterEach(() => {
+    document.body.innerHTML = '';
+    vi.restoreAllMocks();
+  });
+
   it('exposes exactly the shared host surface', () => {
     const host = createDesktopArchiveHost();
 
@@ -57,5 +62,55 @@ describe('desktop archive host wiring', () => {
     for (const permission of capability.permissions) {
       expect(permission).not.toMatch(/^(dialog|fs|shell|opener):/u);
     }
+  });
+
+  it('window focus does not cancel a picker before its selected-file change event', async () => {
+    vi.spyOn(HTMLInputElement.prototype, 'click').mockImplementation(() => undefined);
+    const host = createDesktopArchiveHost();
+    const pending = host.pickArchiveBytes();
+    const input = document.querySelector<HTMLInputElement>('input[type="file"]');
+    if (input === null) throw new Error('file picker input was not created');
+
+    let settled = false;
+    void pending.then(() => {
+      settled = true;
+    });
+
+    window.dispatchEvent(new Event('focus'));
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    expect(settled).toBe(false);
+
+    const file = new File([new Uint8Array([1, 2, 3])], 'synthetic.zip');
+    Object.defineProperty(input, 'files', { configurable: true, value: [file] });
+    input.dispatchEvent(new Event('change'));
+
+    await expect(pending).resolves.toEqual(new Uint8Array([1, 2, 3]));
+    expect(input.isConnected).toBe(false);
+  });
+
+  it('uses the picker cancel event to resolve a user cancellation', async () => {
+    vi.spyOn(HTMLInputElement.prototype, 'click').mockImplementation(() => undefined);
+    const host = createDesktopArchiveHost();
+    const pending = host.pickArchiveBytes();
+    const input = document.querySelector<HTMLInputElement>('input[type="file"]');
+    if (input === null) throw new Error('file picker input was not created');
+
+    input.dispatchEvent(new Event('cancel'));
+
+    await expect(pending).resolves.toBeNull();
+    expect(input.isConnected).toBe(false);
+  });
+
+  it('eventually resolves cancellation when the host omits the cancel event', async () => {
+    vi.spyOn(HTMLInputElement.prototype, 'click').mockImplementation(() => undefined);
+    const host = createDesktopArchiveHost();
+    const pending = host.pickArchiveBytes();
+    const input = document.querySelector<HTMLInputElement>('input[type="file"]');
+    if (input === null) throw new Error('file picker input was not created');
+
+    window.dispatchEvent(new Event('focus'));
+
+    await expect(pending).resolves.toBeNull();
+    expect(input.isConnected).toBe(false);
   });
 });

@@ -45,6 +45,8 @@ import type { RawInvokeFn } from './local-archive-bridge';
  */
 const rawInvoke: RawInvokeFn = (command, body, options) => invoke(command, body as never, options as never);
 
+const PICKER_CANCEL_FALLBACK_DELAY_MS = 250;
+
 /**
  * 打开一个文件选择器并读出选中的字节；用户取消返回 `null`。
  *
@@ -88,12 +90,14 @@ const pickArchiveBytes = async (): Promise<Uint8Array | null> => {
     });
 
     input.addEventListener('cancel', () => finish(null));
+    // WebView2 may restore focus before `change` exposes the chosen file, and some versions do not dispatch
+    // `cancel` for Escape. Defer the fallback so the file event can run first; focus alone is not cancellation.
     window.addEventListener(
       'focus',
       () => {
         window.setTimeout(() => {
           if (!settled && input.files?.length === 0) finish(null);
-        }, 0);
+        }, PICKER_CANCEL_FALLBACK_DELAY_MS);
       },
       { once: true },
     );
