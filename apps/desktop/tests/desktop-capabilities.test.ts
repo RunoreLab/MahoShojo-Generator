@@ -80,18 +80,23 @@ describe('desktop capability snapshot', () => {
       routeTree as unknown as { children?: ReadonlyArray<{ options?: { path?: string } }> }
     ).children ?? [];
 
+    // 路由语法与产品语法不同：TanStack 用 `$slug`，产品路径用 `[slug]`（`navigation.ts` 的
+    // canonical 形式，也是 `ProductNav` 的 `href`）。归一化之后两者才可比。
+    const toProductPath = (path: string): string => path.replace(/\$([A-Za-z0-9_]+)/g, '[$1]');
+
     const servedPaths = new Set(
       children
         .map((child) => child.options?.path)
-        .filter((path): path is string => typeof path === 'string'),
+        .filter((path): path is string => typeof path === 'string')
+        .map(toProductPath),
     );
-
-    // 路由树里真实存在的路径。这条断言先把实际形状钉住：若 `routeTree.children` 的结构变了，下面
-    // 那条「必须与 DELIVERED_ROUTES 一致」会因为集合为空而**通过**，成为一个恒真的空检查。
-    expect([...servedPaths].sort()).toEqual(['/', '/local-library', '/settings']);
 
     // DELIVERED_ROUTES 必须与真实路由树一致——不多不少。少一条意味着用户点不到一个已交付的页面；
     // 多一条意味着用户拿到一个点了打不开的链接。
+    //
+    // 这条断言同时钉住「路由树结构没变」：若 `routeTree.children` 的形状变了，`servedPaths` 会变成
+    // 空集，而下面的相等断言会**失败**——因此不需要另写一条会自己腐烂的硬编码路径清单。
     expect([...DELIVERED_ROUTES].sort()).toEqual([...servedPaths].sort());
+    expect(servedPaths.size).toBe(DELIVERED_ROUTES.length);
   });
 });

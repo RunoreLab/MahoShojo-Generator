@@ -4,6 +4,7 @@ import {
   type CapabilityAvailability,
   type CapabilitySnapshot,
 } from '@mahoshojo/ui-web/capability';
+import { HOME_FEATURE_CATEGORIES } from '@mahoshojo/ui-web/home';
 import { NAV_GROUPS } from '@mahoshojo/ui-web/navigation';
 
 import { DELIVERED_ROUTES } from './delivered-routes';
@@ -17,7 +18,17 @@ import { DELIVERED_ROUTES } from './delivered-routes';
  * 可点击的死链，而 `DESK-PROD-001` 明确禁止「可点击但失效」。推导让两者不可能分叉——往
  * `DELIVERED_ROUTES` 加一行就是声明「该页面在本运行时可用」，而它必须与 `routeTree` 同步。
  *
- * ## 遍历全部入口，包括站外的那些
+ * ## 为什么遍历 `NAV_GROUPS ∪ HOME_FEATURES`
+ *
+ * 只遍历导航入口会漏掉首页功能卡指向的路径：`/details`、`/canshou`、`/character-party`、
+ * `/magic-tea-party`、`/card-forge` 都不在 `NAV_GROUPS` 里（它们只在首页出现）。漏掉的后果是
+ * 首页把这些入口显示成「未声明」——那是一个错误的理由：用户看到的是首页上的按钮，而它的问题不是
+ * 本仓库没声明，是该页面尚未交付。
+ *
+ * 取并集还有一个好处：两条路径集合的分叉会在这里显式暴露，而不是等到某个入口在某个视图里显示成
+ * 「未声明」才被发现。
+ *
+ * ## 为什么还要遍历站外入口
  *
  * 站外入口同样需要一个明确判定，而不是因为「不在 `routeTree` 里」就被漏掉——漏掉会让
  * `ProductNav` 把它们显示成「未声明」，那是一个错误的理由：它们的问题不是本仓库没声明，而是宿主
@@ -27,25 +38,38 @@ export const buildCapabilitySnapshot = (): CapabilitySnapshot => {
   const delivered = new Set(DELIVERED_ROUTES);
   const snapshot: Record<string, CapabilityAvailability> = {};
 
-  // 先把已交付路由全部标为可用，**再**用导航入口覆盖未交付的那些。顺序不能反：`/`（首页）与
+  // 先把已交付路由全部标为可用，**再**用入口清单覆盖未交付的那些。顺序不能反：`/`（首页）与
   // `/settings` 都不是 `NAV_GROUPS` 的成员——它们分别是壳的容器与设置入口，不出现在分组导航里。
-  // 只遍历导航入口会让这两条永远落在 `unknown` 上，而 `ProductNav` 对 `unknown` 的处理是「不可点击
+  // 只遍历入口清单会让这两条永远落在 `unknown` 上，而 `ProductNav` 对 `unknown` 的处理是「不可点击
   // 并说明未声明」：首页在导航里不可点击虽然不至于白屏，但能力快照与事实不符本身就是缺陷。
   for (const href of delivered) {
     snapshot[href] = AVAILABLE;
   }
 
-  for (const group of NAV_GROUPS) {
-    for (const item of group.items) {
-      if (delivered.has(item.href)) continue;
-      snapshot[item.href] = unavailable(
-        'not-implemented',
-        item.isExternal === true
-          ? '打开站外站点需要系统浏览器能力，Desktop 尚未接入'
-          : '该页面尚未在 Desktop 交付',
-      );
-    }
+  const declared = new Set([
+    ...NAV_GROUPS.flatMap((group) => group.items.map((item) => ({ href: item.href, isExternal: item.isExternal === true }))),
+    ...HOME_FEATURE_CATEGORIES.flatMap((category) =>
+      category.features.map((feature) => ({ href: feature.href, isExternal: false })),
+    ),
+  ]);
+
+  for (const { href, isExternal } of declared) {
+    if (delivered.has(href)) continue;
+    snapshot[href] = unavailable(
+      'not-implemented',
+      isExternal
+        ? '打开站外站点需要系统浏览器能力，Desktop 尚未接入'
+        : '该页面尚未在 Desktop 交付',
+    );
   }
 
   return snapshot;
 };
+
+/** 全部被声明过的产品路径（不含已交付但不在入口里的 `/`、`/settings`）。 */
+export const DECLARED_PRODUCT_PATHS: readonly string[] = [
+  ...new Set([
+    ...NAV_GROUPS.flatMap((group) => group.items.map((item) => item.href)),
+    ...HOME_FEATURE_CATEGORIES.flatMap((category) => category.features.map((feature) => feature.href)),
+  ]),
+];

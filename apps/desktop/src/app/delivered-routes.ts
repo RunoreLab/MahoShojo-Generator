@@ -20,4 +20,10 @@
  * `tests/desktop-capabilities.test.ts` 覆盖了「快照宣称的可用集合等于本清单」，反向的
  * 「本清单的每一条都有真实页面」由阅读路由树保证。
  */
-export const DELIVERED_ROUTES: readonly string[] = ['/', '/local-library', '/settings'];
+export const DELIVERED_ROUTES: readonly string[] = [
+  '/',
+  '/encyclopedia',
+  '/encyclopedia/[slug]',
+  '/local-library',
+  '/settings',
+];
