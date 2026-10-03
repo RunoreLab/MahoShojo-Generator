@@ -237,23 +237,8 @@ describe('back/forward round trip on the locked version', () => {
     expect(history.length).toBe(3);
   });
 
-  it('keeps the mounted route state when a zero delta is requested in jsdom', async () => {
-    const router = await mount();
-    await act(async () => {
-      await router.navigate({ to: '/settings' });
-    });
-    await settle();
-
-    await act(async () => {
-      router.history.go(0);
-    });
-    await settle();
-
-    // jsdom 不实现 document reload，并会报告 navigation 未实现；这里只保证现有状态未被清空，
-    // 不能据此宣称真实 WebView 不会重载。刷新后能否恢复当前路由仍需真机验收。
-    expect(router.state.location.pathname).toBe('/settings');
-    expect(pageTestId()).toBe('page-settings');
-  });
+  // hash history 的 go(0) 会委托 document reload；jsdom 不实现它，不能在这里证明刷新恢复。
+  // memory history 的位置/栈契约见上，真实刷新恢复留在 D2.5c 真机验收。
 });
 
 describe('query, unicode paths and normalization', () => {

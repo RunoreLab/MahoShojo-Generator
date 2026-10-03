@@ -24,6 +24,7 @@ MahoShojo Generator 的本地桌面客户端 runtime。它是独立 app，不是
 - **D2.3a/b/c** portable V2、共享打包/预检导入、Desktop raw 导出与导入桥已落地；真实 WebView 内存/响应性、raw IPC 吞吐/回退门禁仍开放。
 - **D2.3d** 双端归档 UI 已接线：`/local-library` 复用 `@mahoshojo/ui-web/local-archive`，Web 用浏览器 adapter、Desktop 用现有窄桥。导出成功只以 native 最终确认判成功；`<input type="file">` 的真机行为待验。
 - **D2.5a/D2.5b** 共源基座与路由接线已落地：`packages/ui-web` 提供主题/导航/能力状态/壳/归档视图；Desktop 用 `@tanstack/react-router` + hash history 的三条 code-based 路由。共享边界门禁（`MONO-005-SHARED-UI-RUNTIME` 等）已生效。
+- **D2.5c** 审查收口：归档 begin/append 已移出主线程；共享归档操作互斥，Desktop 在途导航/关闭保护已接线。真机证据仍待回传，见下方验收步骤；不宣称 D2.3 / D2.5 完全 PASS。
 - **D2.4 / D3** 分别继续备份恢复与页面纵切；不因本轮更新关闭既有未验收项。
 
 ## 权威边界
@@ -45,7 +46,7 @@ apps/desktop/
 ├─ index.html
 ├─ vite.config.ts
 ├─ src/
-│  ├─ app/            # UI shell（当前只有一个本地运行时面板）
+│  ├─ app/            # 共源产品壳、首页、本地库归档与设置路由
 │  ├─ platform/       # 渲染层与 Rust 之间的窄桥
 │  └─ styles/
 └─ src-tauri/
@@ -109,6 +110,7 @@ Rust 门禁同时由 `.github/workflows/desktop-ci.yml` 执行。`build` 脚本�
   与 `unsafe-eval`；`frame-src 'none'` 从结构上禁止主 UI 内出现任何 iframe。
 - `withGlobalTauri: false`。
 - capability 只有 `main-ui` 一个，使用 `webviews` 粒度而非 `windows`。
+- 除 `core:default` 外，仅增加 `core:window:allow-destroy`，供 `onCloseRequested` 在空闲放行后完成窗口销毁；归档在途先 `preventDefault()`。监听注册完成前禁用归档操作，失败明确报错；异步晚到的监听也会释放。
 - **未引入任何 Tauri 插件**，因此 renderer 不存在 shell、文件系统、SQL 或 HTTP 通用能力。
 - Vite `envPrefix` 只保留 `TAURI_ENV_*`，不暴露 `VITE_`。
 - Rust 侧的出站 HTTP 只服务于 Direct AI：endpoint 与 header 只能来自已保存 Profile 的窄投影，
@@ -292,7 +294,7 @@ GC 不会碰它。只有 purge 让它成为回收候选。这条是"恢复一个
 `gcReclaimedSomething` 单列这个判断。`filesRemoved < reclaimed` 表示有些行的文件本来就不在
 （桶一的损坏形态），`filesFailed` 表示权限或 I/O 错误导致文件留下成为孤儿。
 
-D2.3 已有导入导出平台桥，但还没有用户页面接线；完整备份/恢复仍属于 D2.4，尚未落地。不能把归档桥或共享函数的单测通过描述成用户已能完成完整备份。
+D2.3 的导入导出平台桥与双端 `/local-library` 用户页面均已接线；完整备份/恢复仍属于 D2.4，尚未落地。portable archive 是可移植的自洽列举，不是用于整体替换数据库的备份快照。真机验收步骤见 [D2.5c 收口验收](../../docs/runbooks/2026-10-03_120000_Desktop归档与产品壳真机验收.md)。
 
 ## 持久 secret
 
