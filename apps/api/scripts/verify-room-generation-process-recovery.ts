@@ -2,25 +2,33 @@ import { createHash, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-import {
-  createArenaGenerationService,
-  type ArenaGenerationExecutor,
-  type ArenaGenerationTerminalStore,
+import type {
+  ArenaGenerationExecutor,
+  ArenaGenerationTerminalStore,
 } from '@mahoshojo/hosted-api/arena-generation/service';
-import {
-  canonicalizeNodeArenaGenerationSemanticPayload,
-  deriveArenaGenerationId,
-  hashArenaGenerationPayload,
-} from '@mahoshojo/hosted-runtime/arena-generation';
-import { createClient } from 'redis';
-
-import { createArenaRoomGenerationPort } from '../src/arena-generation/room-generation-port';
-import { createArenaRoomGenerationService } from '../src/arena-room/room-generation-service';
-import { createRoomActorRegistry } from '../src/arena-room/room-actor-registry';
-import { RedisRuntime } from '../src/redis/runtime';
+import type { RedisRuntime } from '../src/redis/runtime';
 import { requireSafeRoomVerifierPrefix } from './room-verifier-safety';
-import { createRoomGenerationVerifierMaterializer } from './room-generation-verifier-materializer';
-import { createRoomVerifierMembershipService } from './room-verifier-membership';
+
+/**
+ * 下面这一段 guard 是本脚本的安全边界：任何一条不满足都必须在**产生任何 TCP/Redis 副作用之前**
+ * 退出。`scripts/room-generation-process-recovery.test.ts` 的每个用例都断言这一点。
+ *
+ * 因此这里只静态 import 了 `room-verifier-safety`——它是一个零依赖的 20 行纯函数模块。
+ * 其余全部（`redis` 客户端、`@mahoshojo/hosted-api` 的 generation service、
+ * `hosted-runtime` 的 canonicalize/derive/hash、本地 arena-room 模块）都改成在 guard
+ * **之后**动态 import。
+ *
+ * 原因不是洁癖，是可测的代价：ESM 的静态 import 是提升的，改之前这些模块在 guard 有机会
+ * 抛错**之前**就全部加载完了。本机实测 `node --import tsx <本脚本>` 到子进程退出要
+ * **7.4–8.1 秒**（连续四次：7364 / 7450 / 7478 / 8083ms，且有无 tsx 缓存都一样），
+ * 全部花在加载模块图上——也就是说这个 fail-closed 门禁要等 7 秒才 fail closed。
+ * `apps/api/tests/room-generation-process-verifier-safety.test.ts` 的 7 个用例各自派生一次
+ * 子进程，因此这一个文件要 52 秒，是整个 apps/api 最大的单文件成本。
+ *
+ * 改成动态 import 后这些用例各自在**几百毫秒**内退出。安全性是**提高**而不是降低：
+ * guard 失败时那些重模块根本不会被加载，也不会有任何模块级副作用（`createClient` 原本
+ * 在模块作用域，现已移进 `runParent`）有机会发生。
+ */
 
 const redisUrl = process.env.REDIS_URL?.trim();
 if (!redisUrl) throw new Error('Room generation process verifier 需要 REDIS_URL');
@@ -110,10 +118,19 @@ const terminalStore = (): ArenaGenerationTerminalStore => ({
   }),
 });
 
-const createPort = (
+const createPort = async (
   runtime: RedisRuntime,
   executor: ArenaGenerationExecutor,
 ) => {
+  const [
+    { createArenaGenerationService },
+    { canonicalizeNodeArenaGenerationSemanticPayload, deriveArenaGenerationId, hashArenaGenerationPayload },
+    { createArenaRoomGenerationPort },
+  ] = await Promise.all([
+    import('@mahoshojo/hosted-api/arena-generation/service'),
+    import('@mahoshojo/hosted-runtime/arena-generation'),
+    import('../src/arena-generation/room-generation-port'),
+  ]);
   const generationService = createArenaGenerationService({
     store: runtime.getGenerationReplayStore(),
     terminalStore: terminalStore(),
@@ -157,6 +174,19 @@ const waitFor = async <T>(
 };
 
 const runProducerProcess = async (): Promise<never> => {
+  const [
+    { RedisRuntime },
+    { createArenaRoomGenerationService },
+    { createRoomActorRegistry },
+    { createRoomVerifierMembershipService },
+    { createRoomGenerationVerifierMaterializer },
+  ] = await Promise.all([
+    import('../src/redis/runtime'),
+    import('../src/arena-room/room-generation-service'),
+    import('../src/arena-room/room-actor-registry'),
+    import('./room-verifier-membership'),
+    import('./room-generation-verifier-materializer'),
+  ]);
   const runtime = new RedisRuntime(redisUrl, true, undefined, undefined, keyPrefix);
   await runtime.connect();
   const actors = createRoomActorRegistry({
@@ -187,7 +217,7 @@ const runProducerProcess = async (): Promise<never> => {
       return new Promise<never>(() => undefined);
     },
   };
-  const port = createPort(runtime, executor);
+  const port = await createPort(runtime, executor);
   const coordinator = createArenaRoomGenerationService({
     memberships,
     materializer: createRoomGenerationVerifierMaterializer(),
@@ -225,8 +255,21 @@ const runProducerProcess = async (): Promise<never> => {
   return new Promise<never>(() => undefined);
 };
 
-const cleanupClient = createClient({ url: redisUrl });
-cleanupClient.on('error', () => undefined);
+/**
+ * `createClient` 是泛型函数，手写 `RedisClientType<...>` 会和实际调用点推导出的类型对不上，
+ * 所以让类型从真实调用点流出来：下面这个工厂是唯一的创建处，`CleanupClient` 由它推导。
+ * 顺带把动态 import 与 `connect()` 收在同一个地方——`runParent` 的 `finally` 依赖
+ * 「client 已创建」这个前提。
+ */
+const openCleanupClient = async (url: string) => {
+  const { createClient } = await import('redis');
+  const client = createClient({ url });
+  client.on('error', () => undefined);
+  await client.connect();
+  return client;
+};
+
+type CleanupClient = Awaited<ReturnType<typeof openCleanupClient>>;
 
 const isolatedKeyPatterns = Object.freeze([
   `mahoshojo:room:v1:${keyPrefix}:*`,
@@ -234,7 +277,7 @@ const isolatedKeyPatterns = Object.freeze([
   `mahoshojo:gen:v1:${keyPrefix}:*`,
 ]);
 
-const isolatedKeys = async (): Promise<string[]> => {
+const isolatedKeys = async (cleanupClient: CleanupClient): Promise<string[]> => {
   const keys: string[] = [];
   for (const pattern of isolatedKeyPatterns) {
     for await (const batch of cleanupClient.scanIterator({
@@ -245,17 +288,19 @@ const isolatedKeys = async (): Promise<string[]> => {
   return keys;
 };
 
-const deleteIsolatedKeys = async (): Promise<void> => {
-  const keys = await isolatedKeys();
+const deleteIsolatedKeys = async (cleanupClient: CleanupClient): Promise<void> => {
+  const keys = await isolatedKeys(cleanupClient);
   if (keys.length > 0) await cleanupClient.del(keys);
 };
 
-const inspectSecretPersistence = async (): Promise<Readonly<{
+const inspectSecretPersistence = async (
+  cleanupClient: CleanupClient,
+): Promise<Readonly<{
   scannedKeys: number;
   secretPersisted: boolean;
 }>> => {
   let scannedKeys = 0;
-  for (const key of await isolatedKeys()) {
+  for (const key of await isolatedKeys(cleanupClient)) {
     scannedKeys += 1;
     const type = await cleanupClient.type(key);
     let value: unknown = null;
@@ -309,8 +354,21 @@ const waitForProducerReady = (
 });
 
 const runParent = async (): Promise<void> => {
-  await cleanupClient.connect();
-  await deleteIsolatedKeys();
+  const [
+    { RedisRuntime },
+    { createArenaRoomGenerationService },
+    { createRoomActorRegistry },
+    { createRoomVerifierMembershipService },
+    { createRoomGenerationVerifierMaterializer },
+  ] = await Promise.all([
+    import('../src/redis/runtime'),
+    import('../src/arena-room/room-generation-service'),
+    import('../src/arena-room/room-actor-registry'),
+    import('./room-verifier-membership'),
+    import('./room-generation-verifier-materializer'),
+  ]);
+  const cleanupClient = await openCleanupClient(redisUrl);
+  await deleteIsolatedKeys(cleanupClient);
   let runtime: RedisRuntime | null = null;
   let child: ReturnType<typeof spawn> | null = null;
   try {
@@ -347,7 +405,7 @@ const runParent = async (): Promise<void> => {
     });
     const memberships = createRoomVerifierMembershipService({ actors });
     let recoveryProviderStarts = 0;
-    const port = createPort(runtime, {
+    const port = await createPort(runtime, {
       async execute() {
         recoveryProviderStarts += 1;
         throw new Error('ROOM_GENERATION_PROCESS_SECOND_PROVIDER_STARTED');
@@ -428,7 +486,7 @@ const runParent = async (): Promise<void> => {
     if (retry.status !== 'producer_lost' || recoveryProviderStarts !== 0) {
       throw new Error('ROOM_GENERATION_PROCESS_TERMINAL_RETRY_INVALID');
     }
-    const secretInspection = await inspectSecretPersistence();
+    const secretInspection = await inspectSecretPersistence(cleanupClient);
     if (secretInspection.secretPersisted) {
       throw new Error('ROOM_GENERATION_PROCESS_SECRET_PERSISTED');
     }
@@ -455,7 +513,7 @@ const runParent = async (): Promise<void> => {
     await runtime?.close().catch(() => undefined);
     if (!cleanupClient.isOpen) await cleanupClient.connect().catch(() => undefined);
     if (cleanupClient.isOpen) {
-      await deleteIsolatedKeys().catch(() => undefined);
+      await deleteIsolatedKeys(cleanupClient).catch(() => undefined);
       await cleanupClient.quit();
     }
   }
