@@ -13,12 +13,12 @@ const titles: Record<AdminResource, string> = {
   dashboard: '运营概览', users: '用户', 'user-accounts': '账号安全计数', 'data-cards': '内容卡片', 'data-card-updates': '待审更新',
   tags: '标签', 'tag-aliases': '标签别名', badges: '徽章', 'redemption-codes': '兑换码', messages: '站点消息', 'user-messages': '用户消息',
   'report-cases': '举报案件', 'report-appeals': '申诉', 'crowd-review': '众裁案件', inspectors: '巡查员', ratings: '竞技评分', 'rating-events': '积分事件',
-  'risk-audits': '风险审计', generations: '生成记录', 'pvp-rooms': '旧 PVP 房间', 'large-objects': '对象与业务维护', analytics: '活跃分析', 'ai-availability': '渠道可用性',
+  'risk-audits': '风险审计', generations: '生成记录', 'large-objects': '对象与业务维护', analytics: '活跃分析', 'ai-availability': '渠道可用性',
 };
 const specials: Record<string, string> = { 'arena-observation': '新多人只读观测', jobs: '作业与下载', operations: '操作恢复与查询', models: '可用模型', 'audit-events': '管理操作审计' };
 const labels: Record<string, string> = { id: '编号', name: '名称', username: '用户名', user_id: '用户编号', created_at: '创建时间', updated_at: '更新时间', title: '标题', status: '状态', type: '类型', is_public: '可见性', review_status: '审核状态', description: '描述', data: '内容', content: '正文', metric_date: '统计日期', expires_at: '到期时间', currentCard: '当前卡片（与待审更新对照）', currentCase: '当前举报案件', reports: '相关举报', badges: '持有徽章', users: '用户总数', cards: '有效卡片', pending_cards: '待审卡片', open_cases: '待处理案件', authentication_events: '认证事件数', reset_requests: '密码重置请求数', verifications: '验证记录数', account_links: '账号关联数' };
 const searchResources = ['users', 'user-accounts', 'data-cards', 'data-card-updates', 'tags', 'tag-aliases', 'badges', 'messages', 'user-messages', 'ratings', 'generations', 'ai-availability'];
-const userResources = ['user-accounts', 'data-cards', 'data-card-updates', 'user-messages', 'report-cases', 'report-appeals', 'inspectors', 'rating-events', 'risk-audits', 'generations', 'pvp-rooms', 'large-objects'];
+const userResources = ['user-accounts', 'data-cards', 'data-card-updates', 'user-messages', 'report-cases', 'report-appeals', 'inspectors', 'rating-events', 'risk-audits', 'generations', 'large-objects'];
 const statuses: Record<string, string[]> = { users: ['active', 'banned'], 'data-cards': ['pending', 'approved', 'rejected'], tags: ['user', 'system', 'admin'], 'report-cases': ['open', 'under_review', 'resolved', 'dismissed'], 'report-appeals': ['submitted', 'under_review', 'resolved', 'withdrawn'], 'crowd-review': ['pending_dispatch', 'active', 'waiting_more_votes', 'concluded', 'escalated', 'cancelled'], inspectors: ['active', 'suspended', 'revoked'], ratings: ['strict', 'free'], 'rating-events': ['pending', 'applied', 'skipped', 'failed'], 'risk-audits': ['skipped', 'failed'], generations: ['started', 'completed', 'aborted', 'failed'] };
 
 function App() {

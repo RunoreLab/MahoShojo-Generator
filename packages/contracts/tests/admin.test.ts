@@ -12,5 +12,6 @@ describe('Admin read contracts', () => {
   it('accepts only declared resources', () => {
     for (const resource of ADMIN_RESOURCES) expect(AdminResourceSchema.parse(resource)).toBe(resource);
     expect(AdminResourceSchema.safeParse('ba_account').success).toBe(false);
+    expect(AdminResourceSchema.safeParse('pvp-rooms').success).toBe(false);
   });
 });

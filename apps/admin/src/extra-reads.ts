@@ -1,5 +1,5 @@
 import { readAdminAnalytics, readAdminAvailability, type AdminAnalyticsOptions } from '@mahoshojo/hosted-runtime/admin/analytics';
-import { readAdminArenaRisk, readAdminPvpRoomDetail, readAdminPvpMatchDetail, listAdminPvpMatches } from '@mahoshojo/hosted-runtime/admin/arena-management';
+import { readAdminArenaRisk } from '@mahoshojo/hosted-runtime/admin/arena-management';
 import { readAdminArenaObservation } from '@mahoshojo/hosted-runtime/admin/arena-observation';
 import { previewAdminCleanup, readAdminJobs, downloadAdminExport, downloadAdminExportBody, ADMIN_CLEANUP_TARGETS, type AdminPrivateBucket } from '@mahoshojo/hosted-runtime/admin/jobs';
 import type { AdminDatabase } from '@mahoshojo/hosted-runtime/admin/database';
@@ -9,7 +9,6 @@ import { parseAIProvidersFromEnv } from '@mahoshojo/hosted-runtime/node-runtime/
 import { adminAiSystemModels, readAdminAiJobResult } from '@mahoshojo/hosted-runtime/admin/ai-review';
 type Environment={ADMIN_ARENA_ORIGIN?:string;ADMIN_ARENA_OBSERVATION_SECRET?:string;ADMIN_AI_PROVIDERS_CONFIG?:string};
 function query(request:Request,allowed:string[]){const params=new URL(request.url).searchParams;if([...params.keys()].some(k=>!allowed.includes(k))||[...params.keys()].length!==new Set(params.keys()).size)throw new AdminHttpError(400,'ADMIN_QUERY_INVALID');return params;}
-function idQuery(request:Request){const id=query(request,['id']).get('id');if(!id||id.length>128)throw new AdminHttpError(400,'ADMIN_QUERY_INVALID');return id;}
 function integerParameter(params:URLSearchParams,name:string,max:number):number|undefined{
  const value=params.get(name);if(value===null)return undefined;
  if(!/^[1-9]\d*$/.test(value)||!Number.isSafeInteger(Number(value))||Number(value)>max)throw new AdminHttpError(400,'ADMIN_QUERY_INVALID');
@@ -35,15 +34,6 @@ export function createExtraReads(db:()=>AdminDatabase,bucket:()=>AdminPrivateBuc
   {path:'analytics-summary',capability:'analytics.read',run:async(request:Request)=>readAdminAnalytics(db(),analyticsQuery(request))},
   {path:'availability-summary',capability:'ai.read',run:async(request:Request)=>{query(request,[]);return readAdminAvailability(db());}},
   {path:'risk-summary',capability:'ratings.read',run:async(request:Request)=>{query(request,[]);return readAdminArenaRisk(db());}},
-  {path:'pvp-room-detail',capability:'pvp.read',run:async(request:Request)=>readAdminPvpRoomDetail(db(),idQuery(request))},
-  {path:'pvp-match-detail',capability:'pvp.read',run:async(request:Request)=>readAdminPvpMatchDetail(db(),idQuery(request))},
-  {path:'pvp-matches',capability:'pvp.read',run:async(request:Request)=>{
-   const params=query(request,['roomId','cursor','limit','status','userId']);
-   for(const field of ['roomId','cursor'])if(params.has(field)&&(!params.get(field)||params.get(field)!.length>128))throw new AdminHttpError(400,'ADMIN_QUERY_INVALID');
-   if(params.has('status')&&!['active','completed','aborted'].includes(params.get('status')!))throw new AdminHttpError(400,'ADMIN_QUERY_INVALID');
-   return listAdminPvpMatches(db(),{roomId:params.get('roomId')??undefined,cursor:params.get('cursor')??undefined,
-    limit:integerParameter(params,'limit',100)??50,status:params.get('status')??undefined,userId:integerParameter(params,'userId',Number.MAX_SAFE_INTEGER)});
-  }},
   {path:'arena-observation',capability:'arena.observe',run:async(request:Request,principalId:string,requestId:string)=>{
    const params=query(request,['roomId','cursor']);if(!env.ADMIN_ARENA_ORIGIN||!env.ADMIN_ARENA_OBSERVATION_SECRET)throw new AdminHttpError(503,'ADMIN_ARENA_UNAVAILABLE');
    return readAdminArenaObservation({origin:env.ADMIN_ARENA_ORIGIN,secret:env.ADMIN_ARENA_OBSERVATION_SECRET,identity:{principalId,requestId},query:Object.fromEntries(params)});
@@ -64,6 +54,6 @@ export function createExtraReads(db:()=>AdminDatabase,bucket:()=>AdminPrivateBuc
  ];
  return routes.map(route=>({path:'/api/admin/v1/'+route.path,capability:route.capability,execute:async(request:Request,principalId:string,requestId:string)=>{
   try{const result=await route.run(request,principalId,requestId);return result instanceof Response?result:Response.json(result);}
-  catch(error){if(error instanceof AdminOperationError)throw new AdminHttpError(error.status as 400|403|404|409,error.code);if(error instanceof Error&&(error.name==='ZodError'||/^ADMIN_PVP_(?:ID|LIMIT|USER|STATUS)_INVALID$/.test(error.message)))throw new AdminHttpError(400,'ADMIN_QUERY_INVALID');throw error;}
+  catch(error){if(error instanceof AdminOperationError)throw new AdminHttpError(error.status as 400|403|404|409,error.code);if(error instanceof Error&&error.name==='ZodError')throw new AdminHttpError(400,'ADMIN_QUERY_INVALID');throw error;}
  }}));
 }

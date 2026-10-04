@@ -33,7 +33,7 @@ async function jobStep(env:AdminRuntimeBindings,id:string,providerFetch?:typeof 
 }
 export const ADMIN_CAPABILITIES = [...new Set(['admin.shell.read','admin.principals.manage',...Object.values(READ_CAPABILITIES),
  'content.write','tags.write','users.write','badges.write','redemption.write','messages.write','moderation.write',
- 'analytics.write','ai.write','ai.review','ratings.write','pvp.write','storage.write','exports.read','data.maintenance','audit.read','arena.observe',...ACTION_CAPABILITIES])];
+ 'analytics.write','ai.write','ai.review','ratings.write','storage.write','exports.read','data.maintenance','audit.read','arena.observe',...ACTION_CAPABILITIES])];
 const configError = (): Response => {
  const response=Response.json({error:'ADMIN_CONFIGURATION_INVALID'},{status:503});setAdminSecurityHeaders(response.headers);return response;
 };

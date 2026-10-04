@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { getTableColumns } from 'drizzle-orm';
-import { battleReportGenerations, battleReportGenerationCombatants, arenaRatingEvents, pvpRounds, pvpRoomChatMessages, pvpRoomHands, pvpRoomSubmissions, pvpRoomCardSnapshots, pvpRoundChoices, largeObjects } from '../db/schema/business';
+import { battleReportGenerations, battleReportGenerationCombatants, arenaRatingEvents, largeObjects } from '../db/schema/business';
 import { type AdminDatabase, assertAdminBatchSucceeded } from './database';
 import { executeAdminOperation, AdminOperationError, type AdminGuardedStatement } from './operations';
 import { commonInput, type AdminActionContext } from './actions/core';
@@ -13,18 +13,11 @@ export interface AdminPrivateBucket {
   delete(_key:string):Promise<unknown>;
 }
 const terminalGeneration = (alias:string) => `${alias}.status IN ('completed','aborted','failed') AND (${alias}.extra_json IS NULL OR (json_valid(${alias}.extra_json)=1 AND coalesce(json_extract(${alias}.extra_json,'$.finalizationCompleted'),1)=1))`;
-const terminalRoom = (column:string) => `EXISTS (SELECT 1 FROM pvp_rooms room WHERE room.id=${column} AND room.status IN ('closed','ended') AND NOT EXISTS (SELECT 1 FROM pvp_matches active WHERE active.room_id=room.id AND active.status NOT IN ('completed','aborted','failed','cancelled')) AND NOT EXISTS (SELECT 1 FROM pvp_rounds busy WHERE busy.room_id=room.id AND busy.status NOT IN ('completed','aborted','failed','cancelled'))) `;
 const terminalLinkedGeneration = (column:string) => `EXISTS (SELECT 1 FROM battle_report_generations g WHERE g.id=${column} AND ${terminalGeneration('g')}) AND NOT EXISTS (SELECT 1 FROM pvp_rounds r WHERE r.battle_generation_id=${column})`;
 const definitions = {
   battle_report_generations:{table:battleReportGenerations,key:'id',safe:`${terminalGeneration('battle_report_generations')} AND NOT EXISTS (SELECT 1 FROM pvp_rounds r WHERE r.battle_generation_id=battle_report_generations.id) AND NOT EXISTS (SELECT 1 FROM arena_rating_events e WHERE e.generation_id=battle_report_generations.id) AND NOT EXISTS (SELECT 1 FROM battle_report_generation_combatants c WHERE c.generation_id=battle_report_generations.id) AND NOT EXISTS (SELECT 1 FROM large_objects o WHERE o.owner_ref_id=battle_report_generations.id)`},
   battle_report_generation_combatants:{table:battleReportGenerationCombatants,key:'id',safe:terminalLinkedGeneration('battle_report_generation_combatants.generation_id')},
   arena_rating_events:{table:arenaRatingEvents,key:'id',safe:`status IN ('applied','skipped','failed') AND ${terminalLinkedGeneration('arena_rating_events.generation_id')}`},
-  pvp_rounds:{table:pvpRounds,key:'id',safe:`status IN ('completed','aborted','failed','cancelled') AND ${terminalRoom('pvp_rounds.room_id')} AND NOT EXISTS (SELECT 1 FROM pvp_round_choices c WHERE c.round_id=pvp_rounds.id)`},
-  pvp_room_chat_messages:{table:pvpRoomChatMessages,key:'id',safe:terminalRoom('pvp_room_chat_messages.room_id')},
-  pvp_room_hands:{table:pvpRoomHands,key:'json_array(room_id,user_id)',safe:terminalRoom('pvp_room_hands.room_id')},
-  pvp_room_submissions:{table:pvpRoomSubmissions,key:'json_array(room_id,user_id)',safe:terminalRoom('pvp_room_submissions.room_id')},
-  pvp_room_card_snapshots:{table:pvpRoomCardSnapshots,key:'id',safe:terminalRoom('pvp_room_card_snapshots.room_id')},
-  pvp_round_choices:{table:pvpRoundChoices,key:'json_array(round_id,user_id)',safe:`EXISTS (SELECT 1 FROM pvp_rounds r WHERE r.id=pvp_round_choices.round_id AND r.status IN ('completed','aborted','failed','cancelled') AND ${terminalRoom('r.room_id')})`},
   large_objects:{table:largeObjects,key:'id',safe:`kind='battle_report_generation_output' AND NOT EXISTS (SELECT 1 FROM large_objects other WHERE other.r2_key=large_objects.r2_key AND other.id<>large_objects.id) AND ${terminalLinkedGeneration('large_objects.owner_ref_id')}`},
 } as const;
 export const ADMIN_CLEANUP_TARGETS=Object.keys(definitions);

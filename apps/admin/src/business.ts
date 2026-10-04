@@ -7,7 +7,7 @@ export const READ_CAPABILITIES: Record<AdminResource, string> = {
   badges: 'badges.read', 'redemption-codes': 'redemption.read', messages: 'messages.read', 'user-messages': 'messages.read',
   'report-cases': 'moderation.read', 'report-appeals': 'moderation.read', 'crowd-review': 'moderation.read', inspectors: 'moderation.read',
   ratings: 'ratings.read', 'rating-events': 'ratings.read', 'risk-audits': 'ratings.read', generations: 'generations.read',
-  'pvp-rooms': 'pvp.read', 'large-objects': 'storage.read', analytics: 'analytics.read', 'ai-availability': 'ai.read',
+  'large-objects': 'storage.read', analytics: 'analytics.read', 'ai-availability': 'ai.read',
 };
 export type AdminAction = {
   name: string; label: string; resource: string; capability: string;

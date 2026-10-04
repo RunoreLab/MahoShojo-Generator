@@ -89,7 +89,6 @@ export async function readAdminResource(db: AdminReadDatabase, resource: AdminRe
     items[0].expectedVersion = await adminActionVersion(versionResource,Object.fromEntries(versionColumns.map((name,index)=>[name,result[0]['__version_'+index]])));
   }
   if (resource === 'data-cards' && items.some((item) => ![-1, 0, 1].includes(item.is_public as number))) throw new Error('ADMIN_INVALID_READ_RESULT');
-  if (query.id && items.length && resource === 'pvp-rooms') items[0].expectedVersion=items[0].version;
   if (query.id && items.length && resource === 'data-cards') items[0].tags=JSON.stringify(await rows(db,'SELECT t.id,t.name,t.scope FROM data_card_tags c JOIN tags t ON t.id=c.tag_id WHERE c.data_card_id=? ORDER BY t.scope,t.id LIMIT 100',[query.id]));
   if (query.id && items.length && resource === 'data-card-updates') {
     const definition = ADMIN_ACTION_VERSIONS['data-cards'];

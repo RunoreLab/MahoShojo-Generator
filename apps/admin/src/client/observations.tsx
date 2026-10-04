@@ -65,12 +65,11 @@ export function AuditEvents() {
   return <section className="detail"><h2>管理操作审计</h2><p>审计保留 180 天，记录操作主体、范围、理由与结果。待终结作业的关联记录保留至终结。</p>{error ? <p role="alert" className="notice error">{error}</p> : loading ? <p>正在读取…</p> : <Values value={page.items} />}{page.nextCursor && <a className="button" href={'/?view=audit-events&cursor=' + encodeURIComponent(page.nextCursor)}>下一页 →</a>}</section>;
 }
 
-export function RelatedDetails({ resource, selected }: { resource: string; selected: Row }) {
+export function RelatedDetails({ selected }: { resource: string; selected: Row }) {
   const reports = parseJson(selected.reports); const badges = parseJson(selected.badges);
-  const [reportId, setReportId] = useState(''); const [matchId, setMatchId] = useState('');
+  const [reportId, setReportId] = useState('');
   return <>
     {Array.isArray(reports) && reports.length > 0 && <section className="detail"><h2>举报原始材料</h2><div className="actions">{reports.map(report => <button className="quiet" key={report.id} onClick={() => setReportId(String(report.id))}>举报 {String(report.id)}</button>)}</div>{reportId && <Observation path={'report-detail?id=' + encodeURIComponent(reportId)} title="举报详情与引用快照" />}</section>}
     {Array.isArray(badges) && badges.length > 0 && <section className="detail"><h2>徽章持有记录</h2><Values value={badges} /><p>撤销时需要对应持有记录编号及获得时间。</p>{badges.map(badge => <a className="button quiet" key={String(badge.assignmentId)} href={'/?' + new URLSearchParams({ view: 'badges', id: String(badge.badge_id), assignmentId: String(badge.assignmentId), obtainedAt: String(badge.obtainedAt), userId: String(selected.id), action: 'badges.revoke' })}>管理徽章 {String(badge.badge_id)}</a>)}</section>}
-    {resource === 'pvp-rooms' && <><Observation path={'pvp-room-detail?id=' + encodeURIComponent(String(selected.id))} title="房间、比赛与恢复诊断" /><Observation path={'pvp-matches?roomId=' + encodeURIComponent(String(selected.id))} title="房间比赛列表" /><form className="toolbar" onSubmit={event => { event.preventDefault(); const form = new FormData(event.currentTarget); setMatchId(String(form.get('matchId'))); }}><label>比赛编号<input name="matchId" required defaultValue={String(selected.current_match_id ?? '')} /></label><button>查看比赛详情</button></form>{matchId && <Observation path={'pvp-match-detail?id=' + encodeURIComponent(matchId)} title="比赛与恢复上下文" />}</>}
   </>;
 }

@@ -10,7 +10,10 @@ describe('持久化管理作业',()=>{
  it('拒绝认证表与无界清理，preview全程只读',async()=>{
   const f=await adminManagementFixture(['data.maintenance']);
   await expect(previewAdminCleanup(f.db,{target:'auth_audit_logs',ids:['1']})).rejects.toThrow();
-  await expect(previewAdminCleanup(f.db,{target:'pvp_rounds',ids:[]})).rejects.toThrow();
+  await expect(previewAdminCleanup(f.db,{target:'battle_report_generations',ids:[]})).rejects.toThrow();
+  for (const target of ['pvp_rounds','pvp_room_chat_messages','pvp_room_hands','pvp_room_submissions','pvp_room_card_snapshots','pvp_round_choices']) {
+   await expect(previewAdminCleanup(f.db,{target,ids:['retired-item']})).rejects.toThrow();
+  }
   expect(f.sqlite.prepare('SELECT count(*) AS n FROM admin_jobs').get()).toEqual({n:0});f.sqlite.close();
  });
  it('清理生成记录时通过 FK cascade 删除多人参与关系',async()=>{

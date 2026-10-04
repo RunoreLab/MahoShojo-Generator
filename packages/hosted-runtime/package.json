@@ -387,21 +387,18 @@
     "./admin/arena-management": "./src/admin/arena-management.ts",
     "./admin/actions/arena": "./src/admin/actions/arena.ts",
     "./admin/actions/jobs": "./src/admin/actions/jobs.ts",
-    "./admin/arena-card-range": "./src/admin/arena-card-range.ts",
-    "./admin/arena-submission": "./src/admin/arena-submission.ts",
     "./metrics/tech-index": "./src/metrics/tech-index.ts",
     "./admin/ai-review-prompt": "./src/admin/ai-review-prompt.ts",
     "./admin/ai-review": "./src/admin/ai-review.ts",
     "./admin/actions/metrics": "./src/admin/actions/metrics.ts",
-    "./admin/actions/moderation": "./src/admin/actions/moderation.ts",
-    "./admin/pvp-presets": "./src/generated/pvp-presets.ts"
+    "./admin/actions/moderation": "./src/admin/actions/moderation.ts"
   },
   "scripts": {
     "assets:questionnaires": "node scripts/generate-questionnaire-assets.mjs",
     "assets:questionnaires:check": "node scripts/generate-questionnaire-assets.mjs --check",
     "test": "vitest run --config vitest.config.ts",
     "lint": "eslint src tests --config eslint.config.mjs",
-    "build": "node scripts/generate-questionnaire-assets.mjs --check && tsc --noEmit -p tsconfig.json && node scripts/generate-pvp-assets.mjs --check"
+    "build": "node scripts/generate-questionnaire-assets.mjs --check && tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
     "@ai-sdk/deepseek": "^2.0.35",
