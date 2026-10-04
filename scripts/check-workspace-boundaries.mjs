@@ -149,6 +149,17 @@ const SECRET_MODULE_SEGMENT = /(^|[\\/_.-])(server|secret|secrets|signature|sign
 const CONTRACTS_EXCLUDED_SOURCE_SUFFIX = /\.(test|spec|config)\./i;
 
 /**
+ * `content/` 是这些静态文件的权威源，app `public/` 只是构建期生成物。
+ *
+ * 不是所有 `public/` 内容都属于百科内容生成器：各宿主仍可以拥有自己的 JSON 种子、预设和图标。
+ * 因此这里先登记生成器固定维护的路径，再从 sync-manifest 补充品牌资源，而不是把整个 public/ 一刀切掉。
+ */
+const CORE_GENERATED_PUBLIC_PATHS = Object.freeze({
+  web: new Set(['flowers.json', 'questionnaires/presets/magical-girl-default.json']),
+  desktop: new Set(['questionnaires/presets/magical-girl-default.json']),
+});
+
+/**
  * @typedef {'apps' | 'packages'} WorkspaceKind
  * @typedef {{ kind: WorkspaceKind, name: string, directory: string, packageJsonPath: string | null, manifest: Record<string, any> | null, sourceFiles: string[] }} WorkspaceUnit
  * @typedef {{ rule: string, file: string, line?: number, module: string, message: string }} BoundaryViolation
@@ -671,6 +682,50 @@ function isContractsSourceFile(unit, sourceFile) {
   return true;
 }
 
+function generatedPublicPaths(rootDirectory) {
+  const pathsByApp = new Map(Object.entries(CORE_GENERATED_PUBLIC_PATHS).map(([app, paths]) => [app, new Set(paths)]));
+  const syncManifest = readManifest(path.join(rootDirectory, 'content', 'sync-manifest.json'));
+  const sharedBrand = Array.isArray(syncManifest?.brand?.shared) ? syncManifest.brand.shared : [];
+  const webBrand = Array.isArray(syncManifest?.brand?.web) ? syncManifest.brand.web : [];
+  for (const name of sharedBrand) {
+    pathsByApp.get('web')?.add(name);
+    pathsByApp.get('desktop')?.add(name);
+  }
+  for (const name of webBrand) pathsByApp.get('web')?.add(name);
+  return pathsByApp;
+}
+
+function resolveLocalImportTarget(rootDirectory, sourceFile, moduleSpecifier, apps) {
+  const cleanSpecifier = moduleSpecifier.split(/[?#]/u, 1)[0];
+  let unresolvedTarget;
+  if (cleanSpecifier.startsWith('./') || cleanSpecifier.startsWith('../')) {
+    unresolvedTarget = path.resolve(path.dirname(sourceFile), cleanSpecifier);
+  } else if (cleanSpecifier.startsWith('@/')) {
+    const sourceApp = apps.find((app) => isWithin(sourceFile, app.directory));
+    if (!sourceApp) return null;
+    unresolvedTarget = path.resolve(sourceApp.directory, cleanSpecifier.slice(2));
+  } else if (cleanSpecifier === 'apps' || cleanSpecifier.startsWith('apps/')) {
+    unresolvedTarget = path.resolve(rootDirectory, cleanSpecifier);
+  } else {
+    return null;
+  }
+
+  return isWithin(unresolvedTarget, rootDirectory) ? unresolvedTarget : null;
+}
+
+function generatorOwnedPublicImport(rootDirectory, sourceFile, moduleSpecifier, apps, pathsByApp) {
+  const target = resolveLocalImportTarget(rootDirectory, sourceFile, moduleSpecifier, apps);
+  if (!target) return null;
+
+  const relativeTarget = path.relative(rootDirectory, target).split(path.sep).join('/');
+  const [, appName, publicDirectory, ...publicPathParts] = relativeTarget.split('/');
+  if (relativeTarget.split('/')[0] !== 'apps' || publicDirectory !== 'public') return null;
+
+  const publicPath = publicPathParts.join('/');
+  if (publicPath === 'encyclopedia' || publicPath.startsWith('encyclopedia/')) return publicPath;
+  return pathsByApp.get(appName)?.has(publicPath) ? publicPath : null;
+}
+
 function addViolation(violations, rule, filePath, moduleSpecifier, message, line) {
   violations.push({
     rule,
@@ -694,6 +749,7 @@ export function checkWorkspaceBoundaries(rootDirectory = process.cwd()) {
   const packages = discoverUnits(normalizedRoot, 'packages');
   const units = [...apps, ...packages];
   const rootAliases = readManifest(path.join(normalizedRoot, 'tsconfig.json'))?.compilerOptions?.paths;
+  const generatedPublicPathMap = generatedPublicPaths(normalizedRoot);
   const violations = [];
   for (const unit of units) {
     if (!unit.manifest || !unit.packageJsonPath) continue;
@@ -850,6 +906,24 @@ export function checkWorkspaceBoundaries(rootDirectory = process.cwd()) {
       }
 
       for (const { module: moduleSpecifier, line } of imports) {
+        const generatedPublicPath = generatorOwnedPublicImport(
+          normalizedRoot,
+          sourceFile,
+          moduleSpecifier,
+          apps,
+          generatedPublicPathMap,
+        );
+        if (generatedPublicPath) {
+          addViolation(
+            violations,
+            'MONO-006-GENERATED-PUBLIC-IMPORT',
+            sourceFile,
+            moduleSpecifier,
+            `business source must import generator-owned content from content/ instead of generated public/${generatedPublicPath}`,
+            line,
+          );
+        }
+
         const appTarget = appTargetFromSpecifier(normalizedRoot, moduleSpecifier, apps)(sourceFile);
         if (appTarget && (unit.kind === 'packages' || appTarget.name !== unit.name)) {
           addViolation(

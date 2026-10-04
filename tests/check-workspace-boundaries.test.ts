@@ -95,6 +95,29 @@ describe('workspace dependency boundaries', () => {
     expect(violations).toEqual([]);
   });
 
+  it('rejects business imports of generator-owned public files but allows app-owned public data and content authority', async () => {
+    const rootDir = await createWorkspaceFixture({
+      'apps/web/package.json': manifest('@mahoshojo/web'),
+      'apps/web/src/index.ts': [
+        "import magicalQuestionnaire from '../public/questionnaires/presets/magical-girl-default.json';",
+        "import flowers from '@/public/flowers.json';",
+        "import canshouQuestionnaire from '../public/questionnaires/presets/canshou-default.json';",
+        "import canonicalQuestionnaire from '../../../content/questionnaires/presets/magical-girl-default.json';",
+        'void magicalQuestionnaire; void flowers; void canshouQuestionnaire; void canonicalQuestionnaire;',
+      ].join('\n'),
+    });
+
+    const violations = checkWorkspaceBoundaries(rootDir).filter(
+      (violation) => violation.rule === 'MONO-006-GENERATED-PUBLIC-IMPORT',
+    );
+
+    expect(violations).toHaveLength(2);
+    expect(violations.map((violation) => violation.module)).toEqual([
+      '../public/questionnaires/presets/magical-girl-default.json',
+      '@/public/flowers.json',
+    ]);
+  });
+
   it('rejects package imports into apps through relative paths and root aliases', async () => {
     const rootDir = await createWorkspaceFixture({
       'apps/web/src/index.ts': 'export const value = 1;\n',
