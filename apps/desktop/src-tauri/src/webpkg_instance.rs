@@ -25,9 +25,11 @@
 //!
 //! ## staging TTL 与"为什么没有 finish/abort command"
 //!
-//! 渲染层崩在 staging 中途时，没有任何人会来收尾。本模块因此给 Collecting 会话一个 TTL，
-//! 并在 `begin`/`append`/`open` 时惰性回收——与 `export.rs` 让 `begin` 回收旧会话是同一
-//! 种自愈，只是这里用时间窗而不是顶替关系（同一个包可能同时被开两次）。
+//! 渲染层崩在 staging 中途时，没有任何人会来收尾。本模块因此给 Collecting 会话一个 TTL：
+//! `begin` 在异步运行时排一个到点 reaper（`expire_collecting`），到点只回收"仍是同一
+//! Collecting generation 且确实过期"的会话；`begin`/`append`/`open` 路径上的惰性回收
+//! 保留为调度被错过时的兜底。刻意不加 finish/abort command——它唯一的用途是"取消"，
+//! 而为取消维护一份幂等语义，成本高于让 TTL 自然到期。
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -457,6 +459,23 @@ impl WebPackageInstances {
             InstanceState::Open { .. } => true,
         });
         inner.live_bytes = inner.live_bytes.saturating_sub(freed);
+    }
+
+    /// 真实 TTL 的回收入口：由 `begin_web_package_instance` 在 `async_runtime` 上定时
+    /// 调度。到点时仅回收**仍是同一 Collecting generation** 的会话——instance id 单调
+    /// 不复用，`deadline <= now` 的复核同时充当"没有被提前续约"的生成代检查：若该 id
+    /// 已经进入 Opening/Serving 或被惰性回收，本调用什么都不做。
+    /// 惰性回收（`evict_expired`）保留为兜底：调度被延迟或错过时行为不变。
+    pub fn expire_collecting(&self, instance_id: &str, now: Instant) {
+        let Ok(mut inner) = self.inner.lock() else {
+            return;
+        };
+        if matches!(
+            inner.instances.get(instance_id),
+            Some(InstanceState::Collecting { deadline, .. }) if *deadline <= now
+        ) {
+            Self::remove_instance(&mut inner, instance_id);
+        }
     }
 
     /// 开启一次 staging。声明的全部校验都在这里，command 层只做 DTO 形状转换。
@@ -1475,6 +1494,62 @@ mod tests {
                 .unwrap_err(),
             WebpkgError::InstanceMissing
         );
+    }
+
+    #[test]
+    fn expire_collecting_只回收过期且仍_collecting_的会话() {
+        let registry = WebPackageInstances::default();
+        let t0 = Instant::now();
+        let begun = registry
+            .begin(
+                "index.html",
+                "t",
+                vec![
+                    declared("index.html", "text/html", 1),
+                    declared("app.js", "application/javascript", 1),
+                ],
+                t0,
+            )
+            .expect("begin");
+        // TTL 未到时 reaper 不动作。
+        registry.expire_collecting(
+            &begun.instance_id,
+            t0 + COLLECT_TTL - Duration::from_secs(1),
+        );
+        assert!(registry
+            .inner
+            .lock()
+            .unwrap()
+            .instances
+            .contains_key(&begun.instance_id));
+
+        let after_ttl = t0 + COLLECT_TTL + Duration::from_secs(1);
+        // 已进入 Open 的会话不归 reaper 管——它的生命周期挂在窗口上。
+        let promoted = registry
+            .begin(
+                "index.html",
+                "t",
+                vec![declared("index.html", "text/html", 1)],
+                t0,
+            )
+            .expect("begin 2");
+        promote_to_open(&registry, &promoted.instance_id, OpenPhase::Serving);
+        registry.expire_collecting(&promoted.instance_id, after_ttl);
+        assert!(registry
+            .inner
+            .lock()
+            .unwrap()
+            .instances
+            .contains_key(&promoted.instance_id));
+
+        // 到点且仍 Collecting：回收并归还 live_bytes。
+        registry.expire_collecting(&begun.instance_id, after_ttl);
+        let inner = registry.inner.lock().unwrap();
+        assert!(!inner.instances.contains_key(&begun.instance_id));
+        assert_eq!(inner.live_bytes, 0);
+        drop(inner);
+        // 不存在的 id 是 no-op，不 panic。
+        registry.expire_collecting("wpk-999", after_ttl);
     }
 
     #[test]

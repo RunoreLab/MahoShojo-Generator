@@ -726,17 +726,32 @@ struct OpenWebPackageInstanceRequest {
 ///
 /// 三条命令都不持维护许可：暂存是纯内存注册表，类型上就够不着数据库连接，与
 /// `append_local_archive_export_chunk` 同一理由链。
+///
+/// begin 成功后立刻在异步运行时排一个 TTL reaper：渲染层崩在 staging 中途时，已收
+/// 字节必须在 COLLECT_TTL 到点时真正释放，而不是等下一次 IPC 才被惰性发现。reaper
+/// 到点按 `expire_collecting` 的同 generation 校验回收，误删一个还在正常投递的
+/// 会话是不可能的（id 单调不复用，且只在仍是 Collecting 且已过期时动手）。
 #[tauri::command]
 fn begin_web_package_instance(
+    app: tauri::AppHandle,
     instances: State<'_, webpkg_instance::WebPackageInstances>,
     request: BeginWebPackageInstanceRequest,
 ) -> Result<webpkg_instance::BeginInstanceOutcome, webpkg_instance::WebpkgError> {
-    instances.begin(
+    let begun = instances.begin(
         &request.entry,
         &request.title,
         request.files,
         std::time::Instant::now(),
-    )
+    )?;
+    let reaper_app = app.clone();
+    let instance_id = begun.instance_id.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(webpkg_instance::COLLECT_TTL).await;
+        reaper_app
+            .state::<webpkg_instance::WebPackageInstances>()
+            .expire_collecting(&instance_id, std::time::Instant::now());
+    });
+    Ok(begun)
 }
 
 /// 向暂存会话投递一个文件的一段字节（≤ `MAX_APPEND_CHUNK_BYTES`）。

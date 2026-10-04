@@ -44,8 +44,9 @@ import type { RawInvokeFn, StructuredInvokeFn } from './local-archive-bridge';
  *
  * ## 失败与孤儿会话
  *
- * 三段流程没有 abort command：中途失败留下的 Collecting 会话由 native 的 staging TTL 惰性
- * 回收（见 `webpkg_instance.rs`）。渲染层崩在中间的窗口期上限是 TTL，不是泄漏；刻意不加
+ * 三段流程没有 abort command：中途失败留下的 Collecting 会话由 native 的 staging TTL
+ * 到点回收（begin 时排定的 reaper，另有 IPC 路径上的惰性回收兜底——见
+ * `webpkg_instance.rs`）。渲染层崩在中间的窗口期上限是 TTL，不是泄漏；刻意不加
  * 第四条命令，是因为它唯一的用途是"取消"——而为取消维护一份幂等语义，成本高于让 TTL
  * 自然到期。
  */
