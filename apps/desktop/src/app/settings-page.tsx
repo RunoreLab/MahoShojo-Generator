@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 
 import { loadDesktopRuntimeInfo, type DesktopRuntimeInfo } from '../platform';
 import { ProviderProfilesPanel } from '../features/providers/ProviderProfilesPanel';
+import { WebPackageDiagnosticsPanel } from '../features/webpkg/WebPackageDiagnosticsPanel';
 
 interface RuntimeState {
   status: 'loading' | 'ready' | 'failed';
@@ -70,6 +71,7 @@ export const DesktopSettings = () => (
   <section data-testid="page-settings" className="flex flex-col gap-4">
     <h1 className="text-lg font-semibold">设置</h1>
     <ProviderProfilesPanel />
+    <WebPackageDiagnosticsPanel />
     <RuntimeInfoPanel />
   </section>
 );

@@ -34,6 +34,7 @@ mod store;
 #[cfg(test)]
 mod test_fixture;
 mod web_package;
+mod webpkg_instance;
 
 use library::LocalLibrary;
 use provider_profile::DirectProviderExecutionProfile;
@@ -702,6 +703,104 @@ async fn read_web_package_archive(
     .map_err(|_| web_package::SaveWebPackageError::Store(store::StoreError::Failure))?
 }
 
+/// `begin_web_package_instance` 的请求体。
+///
+/// renderer 只交**已声明的文件表**（逻辑路径 + mediaType + 字节数）：native 不读 ZIP、
+/// 不读 manifest、不接触文件系统——解包与 overlay 语义全部在 TypeScript 权威实现一侧
+/// 完成（`DESK-059`），这里的职责只有按声明接收字节并把它们钉进只读资源空间。
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct BeginWebPackageInstanceRequest {
+    entry: String,
+    title: String,
+    files: Vec<webpkg_instance::DeclaredResourceFile>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct OpenWebPackageInstanceRequest {
+    instance_id: String,
+}
+
+/// 开启一个 Web Package instance 的暂存会话（D4b / DESK-013）。
+///
+/// 三条命令都不持维护许可：暂存是纯内存注册表，类型上就够不着数据库连接，与
+/// `append_local_archive_export_chunk` 同一理由链。
+#[tauri::command]
+fn begin_web_package_instance(
+    instances: State<'_, webpkg_instance::WebPackageInstances>,
+    request: BeginWebPackageInstanceRequest,
+) -> Result<webpkg_instance::BeginInstanceOutcome, webpkg_instance::WebpkgError> {
+    instances.begin(
+        &request.entry,
+        &request.title,
+        request.files,
+        std::time::Instant::now(),
+    )
+}
+
+/// 向暂存会话投递一个文件的全部字节。
+///
+/// 与 `append_local_archive_export_chunk` 同构：字节是整个 raw 请求体，instance 与
+/// 逻辑路径走 header（raw body 会取代整个请求体，`DESK-070` 字节传输节）。
+/// `x-webpkg-path` 携带 `encodeURIComponent` 逐段编码后的路径——编码形态写在 header
+/// 而不是 path 参数里，因为 IPC 请求行本身会被框架解析一次，让"编码层"与"逻辑路径"
+/// 各占一层能避免二次解码歧义。
+///
+/// `command(async)` 的理由与导出 append 相同：单次投递可达数百 MiB（声明上限），
+/// 同步调度会让整个 WebView 停一次复制。
+#[tauri::command(async)]
+fn append_web_package_resource(
+    request: tauri::ipc::Request,
+    instances: State<'_, webpkg_instance::WebPackageInstances>,
+) -> Result<webpkg_instance::AppendResourceOutcome, webpkg_instance::WebpkgError> {
+    let instance_id = webpkg_header(&request, webpkg_instance::INSTANCE_ID_HEADER)?;
+    let encoded_path = webpkg_header(&request, webpkg_instance::RESOURCE_PATH_HEADER)?;
+    let bytes = match request.body() {
+        tauri::ipc::InvokeBody::Raw(bytes) => bytes,
+        // 与导出 append 同一判据：JSON 请求体意味着渲染层走了结构化调用，
+        // 接受它会静默退回 base64 形态。
+        tauri::ipc::InvokeBody::Json(_) => return Err(webpkg_instance::WebpkgError::Failure),
+    };
+    instances.append(
+        &instance_id,
+        &encoded_path,
+        bytes,
+        std::time::Instant::now(),
+    )
+}
+
+/// 声明表收齐后创建 `webpkg-<instanceId>` webview。
+///
+/// 同步 command：窗口创建本就落在主线程路径上，registry 的收尾也只是内存移动，
+/// 没有可以挪到 worker 的开销。
+///
+/// 渲染层**不**提供 label、URL 或窗口位置——三者分别由 `label_for_instance`、
+/// `entry_url` 与 `WebviewWindowBuilder` 产生；返回值里的 `label` 只是回显给调用方
+/// 用于诊断与聚焦。
+#[tauri::command]
+fn open_web_package_instance(
+    app: tauri::AppHandle,
+    instances: State<'_, webpkg_instance::WebPackageInstances>,
+    request: OpenWebPackageInstanceRequest,
+) -> Result<webpkg_instance::OpenInstanceOutcome, webpkg_instance::WebpkgError> {
+    instances.open(&app, &request.instance_id, std::time::Instant::now())
+}
+
+/// webpkg raw 请求的 header 读取。缺失或非法一律 `webpkg-invalid`——
+/// 不猜、不回退，与 `export_id_header` 同一纪律。
+fn webpkg_header(
+    request: &tauri::ipc::Request,
+    name: &'static str,
+) -> Result<String, webpkg_instance::WebpkgError> {
+    request
+        .headers()
+        .get(name)
+        .and_then(|value| value.to_str().ok())
+        .map(|value| value.to_string())
+        .ok_or(webpkg_instance::WebpkgError::Invalid)
+}
+
 /// 开启一次导出归档。
 ///
 /// 目标路径由 native 选定（`DESK-071b`"导出目标路径的命名与保留"），渲染层既不能指定目录也不能
@@ -834,6 +933,25 @@ pub fn run() {
         .manage(default_secret_store())
         .manage(ai::RequestRegistry::default())
         .manage(PendingRestore::default())
+        .manage(webpkg_instance::WebPackageInstances::default())
+        // D4b / DESK-013：受限 Web Package 的只读资源空间。resolver 按"请求方
+        // webview label ↔ URL 中 instance id"双向钉定，本协议因此对 main-ui 与
+        // 任何非 webpkg-* label 一律 404——capability 从未授予任何非 main-ui
+        // webview，协议层再把请求方钉死是第二道，不是重复。
+        //
+        // 刻意用同步 responder：字节都在内存里，没有可挪到异步路径的 I/O；
+        // `register_asynchronous_uri_scheme_protocol` 只会把"一次 HashMap 查找 +
+        // 一次 clone"变成一次无谓的线程往返。
+        .register_uri_scheme_protocol(webpkg_instance::URI_SCHEME, |context, request| {
+            webpkg_instance::resolve_webpkg_request(
+                context
+                    .app_handle()
+                    .state::<webpkg_instance::WebPackageInstances>()
+                    .inner(),
+                context.webview_label(),
+                request.uri().path(),
+            )
+        })
         .setup(|app| {
             // 应用数据目录只能在 Builder 内部解析，因此本地库在 setup 阶段打开。
             // 路径完全由 native 侧产生：renderer 既不能指定目录，也不能指定文件名或 SQL。
@@ -915,6 +1033,9 @@ pub fn run() {
             restore_web_package,
             purge_web_package,
             read_web_package_archive,
+            begin_web_package_instance,
+            append_web_package_resource,
+            open_web_package_instance,
             begin_local_archive_export,
             append_local_archive_export_chunk,
             audit_local_library,

@@ -23,13 +23,13 @@
     "@mahoshojo/contracts": "workspace:*",
     "@mahoshojo/local-library": "workspace:*",
     "@mahoshojo/ui-web": "workspace:*",
+    "@mahoshojo/web-package": "workspace:*",
     "@tanstack/react-router": "1.170.41",
     "@tauri-apps/api": "^2.12.0",
     "react": "^19.2.1",
     "react-dom": "^19.2.1"
   },
   "devDependencies": {
-    "@mahoshojo/web-package": "workspace:*",
     "@tailwindcss/vite": "^4.3.3",
     "@tauri-apps/cli": "^2.12.0",
     "@types/react": "^19",

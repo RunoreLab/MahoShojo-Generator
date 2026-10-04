@@ -34,7 +34,29 @@ import {
   DesktopLocalLibraryAuditReportSchema,
   DesktopLocalLibraryGcErrorSchema,
   DesktopLocalLibraryGcReportSchema,
+  DESKTOP_WEBPKG_INSTANCE_ID_HEADER,
+  DESKTOP_WEBPKG_INSTANCE_URL_PREFIX,
+  DESKTOP_WEBPKG_RESOURCE_HOST,
+  DESKTOP_WEBPKG_RESOURCE_PATH_HEADER,
+  DESKTOP_WEBPKG_URI_SCHEME,
+  DESKTOP_WEBPKG_WEBVIEW_LABEL_PREFIX,
+  DESKTOP_WEBPKG_WINDOWS_RESOURCE_HOST,
+  DesktopAppendWebPackageResourceResponseSchema,
+  DesktopBeginWebPackageInstanceRequestSchema,
+  DesktopBeginWebPackageInstanceResponseSchema,
+  DesktopOpenWebPackageInstanceRequestSchema,
+  DesktopOpenWebPackageInstanceResponseSchema,
+  DesktopWebPackageInstanceErrorCodeSchema,
+  DesktopWebPackageInstanceErrorSchema,
+  DesktopWebPackageInstanceIdSchema,
+  DesktopWebPackageInstanceWebviewLabelSchema,
+  MAX_DESKTOP_WEBPKG_INSTANCE_FILES,
+  MAX_DESKTOP_WEBPKG_INSTANCE_TOTAL_BYTES,
+  MAX_DESKTOP_WEBPKG_LIVE_BYTES,
+  MAX_DESKTOP_WEBPKG_LIVE_INSTANCES,
+  MAX_DESKTOP_WEBPKG_TITLE_LENGTH,
 } from '../src/desktop-ipc';
+import { WebPackageMediaTypeSchema, WebPackagePathSchema } from '../src/web-package';
 
 interface SecretRefFixture {
   validRefs: string[];
@@ -528,5 +550,187 @@ describe('Desktop 本地库维护 IPC 契约（D2.2）', () => {
         path: 'blobs/abc',
       }),
     ).toThrow();
+  });
+});
+
+interface WebpkgFixture {
+  uriScheme: string;
+  resourceHost: string;
+  windowsResourceHost: string;
+  instanceUrlPrefix: string;
+  webviewLabelPrefix: string;
+  instanceIdExample: string;
+  webviewLabelExample: string;
+  entryUrlExample: string;
+  windowsEntryUrlExample: string;
+  commands: { begin: string; append: string; open: string };
+  headers: { instanceId: string; resourcePath: string };
+  budgets: {
+    maxFiles: number;
+    maxTotalBytes: number;
+    maxLiveInstances: number;
+    maxLiveBytes: number;
+    maxTitleLength: number;
+    collectTimeoutSeconds: number;
+  };
+  errorCodes: string[];
+  responseHeaders: {
+    base: [string, string][];
+    htmlContentSecurityPolicy: string;
+    charsetRules: { prefixes: string[]; exact: string[]; suffixes: string[] };
+    contentTypeCases: { mediaType: string; contentType: string }[];
+  };
+  validPaths: string[];
+  invalidPaths: string[];
+  validMediaTypes: string[];
+  invalidMediaTypes: string[];
+  beginRequestExample: unknown;
+  beginResponseExample: { instanceId: string };
+  appendResponseExample: { receivedByteLength: number };
+  openRequestExample: { instanceId: string };
+  openResponseExample: { label: string };
+}
+
+/**
+ * webpkg fixture 同样由 Rust 在编译期 `include_str!` 读取
+ * （`apps/desktop/src-tauri/src/webpkg_instance.rs`）。这里断言的是契约常量、
+ * schema 与 fixture 的**具体取值**相等，而不是两边各自内联期望值。
+ */
+const webpkgFixture = JSON.parse(
+  readFileSync(
+    path.resolve(process.cwd(), 'fixtures', 'desktop-web-package-instance.json'),
+    'utf8',
+  ),
+) as WebpkgFixture;
+
+describe('Desktop Web Package 受限 webview IPC 契约（D4b）', () => {
+  it('协议与命名常量与 fixture 一致', () => {
+    expect(DESKTOP_WEBPKG_URI_SCHEME).toBe(webpkgFixture.uriScheme);
+    expect(DESKTOP_WEBPKG_RESOURCE_HOST).toBe(webpkgFixture.resourceHost);
+    expect(DESKTOP_WEBPKG_WINDOWS_RESOURCE_HOST).toBe(webpkgFixture.windowsResourceHost);
+    expect(DESKTOP_WEBPKG_INSTANCE_URL_PREFIX).toBe(webpkgFixture.instanceUrlPrefix);
+    expect(DESKTOP_WEBPKG_WEBVIEW_LABEL_PREFIX).toBe(webpkgFixture.webviewLabelPrefix);
+    expect(DESKTOP_WEBPKG_INSTANCE_ID_HEADER).toBe(webpkgFixture.headers.instanceId);
+    expect(DESKTOP_WEBPKG_RESOURCE_PATH_HEADER).toBe(webpkgFixture.headers.resourcePath);
+    // instance URL 前缀的字面值钉在这里；`packages/web-package` 的
+    // `WEB_PACKAGE_INSTANCE_PREFIX` 与它的一致性由 resource-space.test.ts 反向断言
+    // （contracts 不能反向 import web-package，那会是依赖环）。
+    expect(DESKTOP_WEBPKG_INSTANCE_URL_PREFIX).toBe('/__web-package__/instance/');
+    // 示例 URL/label 必须真是从常量拼出来的形状，而不是写死在 fixture 里的近似串。
+    expect(webpkgFixture.webviewLabelExample).toBe(
+      `${DESKTOP_WEBPKG_WEBVIEW_LABEL_PREFIX}${webpkgFixture.instanceIdExample}`,
+    );
+    expect(webpkgFixture.entryUrlExample).toBe(
+      `${DESKTOP_WEBPKG_URI_SCHEME}://${DESKTOP_WEBPKG_RESOURCE_HOST}${DESKTOP_WEBPKG_INSTANCE_URL_PREFIX}${webpkgFixture.instanceIdExample}/index.html`,
+    );
+    expect(webpkgFixture.windowsEntryUrlExample).toBe(
+      `http://${DESKTOP_WEBPKG_WINDOWS_RESOURCE_HOST}${DESKTOP_WEBPKG_INSTANCE_URL_PREFIX}${webpkgFixture.instanceIdExample}/index.html`,
+    );
+  });
+
+  it('预算常量与 native 侧一致', () => {
+    expect(MAX_DESKTOP_WEBPKG_INSTANCE_FILES).toBe(webpkgFixture.budgets.maxFiles);
+    expect(MAX_DESKTOP_WEBPKG_INSTANCE_TOTAL_BYTES).toBe(webpkgFixture.budgets.maxTotalBytes);
+    expect(MAX_DESKTOP_WEBPKG_LIVE_INSTANCES).toBe(webpkgFixture.budgets.maxLiveInstances);
+    expect(MAX_DESKTOP_WEBPKG_LIVE_BYTES).toBe(webpkgFixture.budgets.maxLiveBytes);
+    expect(MAX_DESKTOP_WEBPKG_TITLE_LENGTH).toBe(webpkgFixture.budgets.maxTitleLength);
+  });
+
+  it('错误码集合与 native 侧一致且顺序稳定', () => {
+    expect(DesktopWebPackageInstanceErrorCodeSchema.options).toEqual(webpkgFixture.errorCodes);
+    expect(
+      DesktopWebPackageInstanceErrorSchema.parse({ code: 'webpkg-instance-stale', message: 'x' }),
+    ).toMatchObject({ code: 'webpkg-instance-stale' });
+    expect(
+      DesktopWebPackageInstanceErrorSchema.safeParse({ code: 'export-stale', message: 'x' }).success,
+    ).toBe(false);
+  });
+
+  it('接受 fixture 中每一条合法路径，拒绝每一条非法路径', () => {
+    for (const path of webpkgFixture.validPaths) {
+      expect(WebPackagePathSchema.safeParse(path).success, `${JSON.stringify(path)} 必须合法`).toBe(true);
+    }
+    for (const path of webpkgFixture.invalidPaths) {
+      expect(WebPackagePathSchema.safeParse(path).success, `${JSON.stringify(path)} 必须被拒`).toBe(false);
+    }
+    // 超长路径：fixture 不逐字携带 513 字节，由用例现场生成。
+    expect(WebPackagePathSchema.safeParse('a'.repeat(513)).success).toBe(false);
+    expect(WebPackagePathSchema.safeParse('a'.repeat(512)).success).toBe(true);
+  });
+
+  it('接受 fixture 中每一个合法 mediaType，拒绝每一个非法 mediaType', () => {
+    for (const mediaType of webpkgFixture.validMediaTypes) {
+      expect(
+        WebPackageMediaTypeSchema.safeParse(mediaType).success,
+        `${JSON.stringify(mediaType)} 必须合法`,
+      ).toBe(true);
+    }
+    for (const mediaType of webpkgFixture.invalidMediaTypes) {
+      expect(
+        WebPackageMediaTypeSchema.safeParse(mediaType).success,
+        `${JSON.stringify(mediaType)} 必须被拒`,
+      ).toBe(false);
+    }
+  });
+
+  it('接受 fixture 的 begin/open 请求与三个响应形状', () => {
+    expect(
+      DesktopBeginWebPackageInstanceRequestSchema.parse(webpkgFixture.beginRequestExample),
+    ).toEqual(webpkgFixture.beginRequestExample);
+    expect(
+      DesktopBeginWebPackageInstanceResponseSchema.parse(webpkgFixture.beginResponseExample),
+    ).toEqual(webpkgFixture.beginResponseExample);
+    expect(
+      DesktopAppendWebPackageResourceResponseSchema.parse(webpkgFixture.appendResponseExample),
+    ).toEqual(webpkgFixture.appendResponseExample);
+    expect(
+      DesktopOpenWebPackageInstanceRequestSchema.parse(webpkgFixture.openRequestExample),
+    ).toEqual(webpkgFixture.openRequestExample);
+    expect(
+      DesktopOpenWebPackageInstanceResponseSchema.parse(webpkgFixture.openResponseExample),
+    ).toEqual(webpkgFixture.openResponseExample);
+  });
+
+  it('begin 请求拒绝未声明 entry、非 html entry、重复路径与越界字节表', () => {
+    const example = webpkgFixture.beginRequestExample as {
+      entry: string; title: string; files: { path: string; mediaType: string; byteLength: number }[];
+    };
+    expect(() =>
+      DesktopBeginWebPackageInstanceRequestSchema.parse({ ...example, entry: 'missing.html' }),
+    ).toThrow();
+    expect(() =>
+      DesktopBeginWebPackageInstanceRequestSchema.parse({
+        ...example,
+        entry: 'assets/app.js',
+      }),
+    ).toThrow();
+    expect(() =>
+      DesktopBeginWebPackageInstanceRequestSchema.parse({
+        ...example,
+        files: [...example.files, { path: 'INDEX.HTML', mediaType: 'text/html', byteLength: 1 }],
+      }),
+    ).toThrow();
+    expect(() =>
+      DesktopBeginWebPackageInstanceRequestSchema.parse({
+        ...example,
+        files: [
+          { path: 'index.html', mediaType: 'text/html', byteLength: MAX_DESKTOP_WEBPKG_INSTANCE_TOTAL_BYTES },
+          { path: 'a.bin', mediaType: 'application/octet-stream', byteLength: 1 },
+        ],
+      }),
+    ).toThrow();
+    expect(() =>
+      DesktopBeginWebPackageInstanceRequestSchema.parse({ ...example, title: '  ' }),
+    ).toThrow();
+  });
+
+  it('instance id 与 webview label 的形状不可互换', () => {
+    // `wpk-7` 是 id，`webpkg-wpk-7` 是 label——互相代入会让 resolver 的钉定检查静默失效。
+    expect(DesktopWebPackageInstanceIdSchema.safeParse('wpk-7').success).toBe(true);
+    expect(DesktopWebPackageInstanceIdSchema.safeParse('webpkg-wpk-7').success).toBe(false);
+    expect(DesktopWebPackageInstanceWebviewLabelSchema.safeParse('webpkg-wpk-7').success).toBe(true);
+    expect(DesktopWebPackageInstanceWebviewLabelSchema.safeParse('wpk-7').success).toBe(false);
+    expect(DesktopWebPackageInstanceIdSchema.safeParse('wpk-0').success).toBe(false);
+    expect(DesktopWebPackageInstanceIdSchema.safeParse('wpk-99999999999999999').success).toBe(false);
   });
 });

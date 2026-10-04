@@ -24,14 +24,20 @@ export type WebPackageResourceSnapshot = Readonly<{
   files: ReadonlyMap<string, WebPackageResourceFile>;
 }>;
 
-/** Minimal instance shape so resource-space does not import the package index (avoids cycles). */
+/**
+ * Minimal instance shape so resource-space does not import the package index (avoids cycles).
+ *
+ * `overlay` 允许为 `null`：纯 base 运行（"按导入原样打开一个本地包"）没有 overlay，
+ * 而 Desktop 的受限 webview staging 需要走与同一份合并语义。`WebPackageInstance`
+ * 的领域模型仍要求 overlay——那是"生成后实例"的形状，不是资源空间的必需输入。
+ */
 export type WebPackageResourceSource = Readonly<{
   base: Readonly<{
     ref: WebPackageRef;
     manifest: WebPackageManifest;
     readFile: (_path: string) => Uint8Array | undefined;
   }>;
-  overlay: WebPackageOverlay;
+  overlay: WebPackageOverlay | null;
   readFile: (_path: string) => Uint8Array | undefined;
 }>;
 
@@ -75,9 +81,10 @@ export const createWebPackageResourceSnapshot = (
   if (!INSTANCE_ID_PATTERN.test(instanceId)) throw new Error('非法 Web Package instance id');
   const { base, overlay } = source;
   if (
-    base.ref.id !== overlay.packageRef.id
-    || base.ref.version !== overlay.packageRef.version
-    || base.ref.digest !== overlay.packageRef.digest
+    overlay !== null
+    && (base.ref.id !== overlay.packageRef.id
+      || base.ref.version !== overlay.packageRef.version
+      || base.ref.digest !== overlay.packageRef.digest)
   ) {
     throw new Error('Web Package overlay 与冻结契约不匹配');
   }
@@ -85,11 +92,13 @@ export const createWebPackageResourceSnapshot = (
   for (const file of base.manifest.files) {
     const bytes = source.readFile(file.path);
     if (!bytes) throw new Error(`Web Package 文件不存在：${file.path}`);
-    const mediaType = file.path === overlay.targetPath ? overlay.targetMediaType : file.mediaType;
+    const mediaType = overlay !== null && file.path === overlay.targetPath
+      ? overlay.targetMediaType
+      : file.mediaType;
     files.set(file.path, Object.freeze({ mediaType, bytes: bytes.slice() }));
   }
   // Legal overlays may create a target that never existed in the immutable base tree.
-  if (!files.has(overlay.targetPath)) {
+  if (overlay !== null && !files.has(overlay.targetPath)) {
     const bytes = source.readFile(overlay.targetPath);
     if (!bytes) throw new Error(`Web Package overlay target 不存在：${overlay.targetPath}`);
     files.set(overlay.targetPath, Object.freeze({ mediaType: overlay.targetMediaType, bytes: bytes.slice() }));

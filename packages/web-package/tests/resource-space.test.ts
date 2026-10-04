@@ -1,5 +1,6 @@
 import { stageJsonPackage } from './helpers/json-package';
 import { afterEach, describe, expect, it } from 'vitest';
+import { DESKTOP_WEBPKG_INSTANCE_URL_PREFIX } from '@mahoshojo/contracts/desktop-ipc';
 import {
   WEB_PACKAGE_INSTANCE_PREFIX,
   buildWebPackageInstanceUrl,
@@ -221,6 +222,42 @@ describe('generic Web package resource space', () => {
     const missing = createWebPackageResourceResponse(snapshot, `${WEB_PACKAGE_INSTANCE_PREFIX}${INSTANCE_ID}/missing.json`);
     expect(missing.status).toBe(404);
     expect(missing.headers.get('access-control-allow-origin')).toBe('*');
+  });
+
+  it('pins the shared instance URL prefix to the Desktop webpkg contract', () => {
+    // Desktop 的 maho-webpkg resolver 复用同一命名空间；两侧各写一份字面量会静默漂移，
+    // 而漂移的症状是"包能打开但所有资源 404"——离根因很远。
+    expect(WEB_PACKAGE_INSTANCE_PREFIX).toBe(DESKTOP_WEBPKG_INSTANCE_URL_PREFIX);
+  });
+
+  it('materializes a base-only snapshot when no overlay is present', async () => {
+    // 纯 base 运行：按导入原样打开一个本地包。overlay 为 null 时合并语义是
+    // "manifest 文件表原样生效"，target 覆盖与新增分支都不触发。
+    const base = await stageJsonPackage();
+    const snapshot = createWebPackageResourceSnapshot(INSTANCE_ID, {
+      base,
+      overlay: null,
+      readFile: (path) => base.readFile(path),
+    });
+
+    expect(snapshot.instanceId).toBe(INSTANCE_ID);
+    expect(snapshot.packageRef).toEqual(base.ref);
+    expect(snapshot.entry).toBe(base.manifest.entry);
+    expect(snapshot.files.size).toBe(base.manifest.files.length);
+    for (const file of base.manifest.files) {
+      const staged = snapshot.files.get(file.path);
+      expect(staged?.mediaType, file.path).toBe(file.mediaType);
+      expect(staged?.bytes, file.path).toEqual(base.readFile(file.path));
+    }
+
+    // 响应面与带 overlay 的实例一致：entry 有 sandbox CSP，资源有 ACAO *。
+    const entry = createWebPackageResourceResponse(
+      snapshot,
+      `${WEB_PACKAGE_INSTANCE_PREFIX}${INSTANCE_ID}/${base.manifest.entry}`,
+    );
+    expect(entry.status).toBe(200);
+    expect(entry.headers.get('content-security-policy')).toBe('sandbox allow-scripts');
+    expect(entry.headers.get('access-control-allow-origin')).toBe('*');
   });
 
   it('keeps foreign instance bytes out of this snapshot even when paths match', async () => {

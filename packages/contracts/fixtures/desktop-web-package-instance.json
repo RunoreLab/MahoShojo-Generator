@@ -1,0 +1,140 @@
+{
+  "$comment": "D4b Web Package 受限 webview 的 IPC 与协议常量。Rust 侧 apps/desktop/src-tauri/src/webpkg_instance.rs 通过 include_str! 在编译期读取；TypeScript 侧 packages/contracts/tests/desktop-ipc.test.ts 校验。两侧任一漂移都会让对应一侧失败（DESK-033）。",
+  "uriScheme": "maho-webpkg",
+  "resourceHost": "localhost",
+  "windowsResourceHost": "maho-webpkg.localhost",
+  "instanceUrlPrefix": "/__web-package__/instance/",
+  "webviewLabelPrefix": "webpkg-",
+  "instanceIdExample": "wpk-7",
+  "webviewLabelExample": "webpkg-wpk-7",
+  "entryUrlExample": "maho-webpkg://localhost/__web-package__/instance/wpk-7/index.html",
+  "windowsEntryUrlExample": "http://maho-webpkg.localhost/__web-package__/instance/wpk-7/index.html",
+  "commands": {
+    "begin": "begin_web_package_instance",
+    "append": "append_web_package_resource",
+    "open": "open_web_package_instance"
+  },
+  "headers": {
+    "instanceId": "x-webpkg-instance",
+    "resourcePath": "x-webpkg-path"
+  },
+  "budgets": {
+    "maxFiles": 4096,
+    "maxTotalBytes": 268435456,
+    "maxLiveInstances": 8,
+    "maxLiveBytes": 536870912,
+    "maxTitleLength": 128,
+    "collectTimeoutSeconds": 300
+  },
+  "errorCodes": [
+    "webpkg-invalid",
+    "webpkg-too-many-files",
+    "webpkg-too-large",
+    "webpkg-too-many-instances",
+    "webpkg-instance-missing",
+    "webpkg-instance-stale",
+    "webpkg-instance-incomplete",
+    "webpkg-resource-undeclared",
+    "webpkg-resource-duplicate",
+    "webpkg-resource-mismatch",
+    "webpkg-window-unavailable",
+    "webpkg-failure"
+  ],
+  "responseHeaders": {
+    "$note": "与 packages/web-package/src/resource-space.ts 的安全响应头同一语义：ACAO * 是因为受限 origin 为 opaque；charset 规则镜像 withCharset。",
+    "base": [
+      ["Access-Control-Allow-Origin", "*"],
+      ["Referrer-Policy", "no-referrer"],
+      ["X-Content-Type-Options", "nosniff"]
+    ],
+    "htmlContentSecurityPolicy": "sandbox allow-scripts",
+    "notFoundBody": "Not Found",
+    "charsetRules": {
+      "prefixes": ["text/"],
+      "exact": ["application/json", "image/svg+xml", "application/javascript"],
+      "suffixes": ["+json", "+xml"]
+    },
+    "contentTypeCases": [
+      { "mediaType": "text/html", "contentType": "text/html; charset=utf-8" },
+      { "mediaType": "text/css", "contentType": "text/css; charset=utf-8" },
+      { "mediaType": "application/javascript", "contentType": "application/javascript; charset=utf-8" },
+      { "mediaType": "application/json", "contentType": "application/json; charset=utf-8" },
+      { "mediaType": "image/svg+xml", "contentType": "image/svg+xml; charset=utf-8" },
+      { "mediaType": "application/vnd.api+json", "contentType": "application/vnd.api+json; charset=utf-8" },
+      { "mediaType": "application/atom+xml", "contentType": "application/atom+xml; charset=utf-8" },
+      { "mediaType": "image/png", "contentType": "image/png" },
+      { "mediaType": "font/woff2", "contentType": "font/woff2" },
+      { "mediaType": "application/octet-stream", "contentType": "application/octet-stream" }
+    ]
+  },
+  "validPaths": [
+    "index.html",
+    "assets/app.js",
+    "a/b/c/data.json",
+    "名称 文件.css",
+    "com10.txt",
+    "a.b/.hidden/file.txt"
+  ],
+  "invalidPaths": [
+    "",
+    "/index.html",
+    "a//b.png",
+    "./x.js",
+    "../x.js",
+    "a/./b",
+    "a/../b",
+    "a /b",
+    "a./b",
+    "con",
+    "CON.txt",
+    "nul",
+    "aux.png",
+    "prn",
+    "com1",
+    "lpt9.png",
+    "a%20b",
+    "a\\b",
+    "a:b",
+    "a*b",
+    "a?b",
+    "a<b",
+    "a|b",
+    "a\"b",
+    "a\u001fb",
+    "ab"
+  ],
+  "validMediaTypes": [
+    "text/html",
+    "text/css",
+    "application/javascript",
+    "image/svg+xml",
+    "application/json",
+    "application/vnd.api+json",
+    "application/atom+xml",
+    "image/png",
+    "font/woff2",
+    "application/octet-stream"
+  ],
+  "invalidMediaTypes": [
+    "",
+    "text",
+    "TEXT/HTML",
+    "text/html; charset=utf-8",
+    "text//html",
+    "/html",
+    "text /html",
+    "text/html "
+  ],
+  "beginRequestExample": {
+    "entry": "index.html",
+    "title": "示例包",
+    "files": [
+      { "path": "index.html", "mediaType": "text/html", "byteLength": 42 },
+      { "path": "assets/app.js", "mediaType": "application/javascript", "byteLength": 7 }
+    ]
+  },
+  "beginResponseExample": { "instanceId": "wpk-7" },
+  "appendResponseExample": { "receivedByteLength": 42 },
+  "openRequestExample": { "instanceId": "wpk-7" },
+  "openResponseExample": { "label": "webpkg-wpk-7" }
+}

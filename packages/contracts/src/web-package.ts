@@ -11,6 +11,12 @@ export const WEB_PACKAGE_TEXT_MEDIA_TYPES = [
 const DigestSchema = z.string().regex(/^sha256:[0-9a-f]{64}$/u);
 const IdentitySchema = z.string().min(1).max(128).regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/u);
 const MediaTypeSchema = z.string().max(128).regex(/^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/u);
+/**
+ * Media type 形状的唯一权威：Desktop 的 webpkg IPC 契约在同包内直接复用它，
+ * 不另写一份 regex——两个判据一旦分叉，resolver 的 Content-Type 决策就会与
+ * manifest 校验不一致。名字按对外契约风格加 `WebPackage` 前缀导出。
+ */
+export const WebPackageMediaTypeSchema = MediaTypeSchema;
 const ByteLengthSchema = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const ReservedFileStem = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/iu;
 // Controls, Windows-invalid filename characters, path separators and '%'

@@ -1,6 +1,7 @@
 import { z } from './zod';
 
 import { MAX_SECRET_REF_LENGTH, SECRET_REF_PATTERN, SecretRefSchema, isSecretRef } from './secret-ref';
+import { WebPackageMediaTypeSchema, WebPackagePathSchema } from './web-package';
 import { utf8ByteLimitedStringSchema } from './wire-size';
 
 /** Native backup 的标识只能选择本机备份，不能充当路径。新增契约不改变 portable archive。 */
@@ -702,4 +703,175 @@ export const DesktopAppendArchiveExportChunkResponseSchema = z
   });
 export type DesktopAppendArchiveExportChunkResponse = z.infer<
   typeof DesktopAppendArchiveExportChunkResponseSchema
+>;
+
+/**
+ * Web Package 受限 webview（D4b / DESK-013 / DESK-014）的 IPC 与协议契约。
+ *
+ * ## 形状
+ *
+ * 一次"打开 Web Package"分三步，与归档导出同构（begin 声明、raw 追加、确认完成）：
+ *
+ * 1. `begin_web_package_instance`：渲染层声明 entry、窗口标题与**完整文件表**
+ *    （路径 + mediaType + 字节数）。native 校验声明并分配 instance id；它不接触任何
+ *    ZIP/manifest——解包与 overlay 语义全部留在 TypeScript 权威实现。
+ * 2. `append_web_package_resource`：逐文件 raw 字节投递，instance 与路径走 header。
+ *    每个声明的文件恰好投递一次，字节数必须与声明一致。
+ * 3. `open_web_package_instance`：全部文件到齐后 native 创建 `webpkg-<id>` webview。
+ *
+ * 资源随后由 `maho-webpkg://` 自定义协议服务。URL 形状与
+ * `WEB_PACKAGE_INSTANCE_PREFIX` 同源：`maho-webpkg://localhost/__web-package__/instance/<id>/<path>`
+ * （Windows/Android 上映射为 `http://maho-webpkg.localhost/…`）。
+ *
+ * ## 边界
+ *
+ * - webview label `webpkg-<instanceId>` 与 instance id **双向钉定**：resolver 只响应
+ *   与请求 webview label 匹配的 instance 资源，任何 label 不带 `webpkg-` 前缀或
+ *   id 不一致的请求都以 404 告终——包括 main-ui 自己。
+ * - 渲染层**不能**决定 instance id、webview label 或资源 URL：三者全由 native 分配。
+ * - renderer 不提供任何文件系统路径、URL 或命令面；`x-webpkg-path` 只携带
+ *   percent-encode 后的逻辑包路径，且仍须通过 portable path 校验。
+ * - 与导出一样，三条命令**不持维护许可**：它们不读写本地库，类型上就够不着连接。
+ */
+export const DESKTOP_WEBPKG_URI_SCHEME = 'maho-webpkg' as const;
+export const DESKTOP_WEBPKG_RESOURCE_HOST = 'localhost' as const;
+export const DESKTOP_WEBPKG_WINDOWS_RESOURCE_HOST = 'maho-webpkg.localhost' as const;
+export const DESKTOP_WEBPKG_INSTANCE_URL_PREFIX = '/__web-package__/instance/' as const;
+export const DESKTOP_WEBPKG_WEBVIEW_LABEL_PREFIX = 'webpkg-' as const;
+export const DESKTOP_WEBPKG_INSTANCE_ID_HEADER = 'x-webpkg-instance' as const;
+export const DESKTOP_WEBPKG_RESOURCE_PATH_HEADER = 'x-webpkg-path' as const;
+
+export const MAX_DESKTOP_WEBPKG_INSTANCE_FILES = 4096;
+export const MAX_DESKTOP_WEBPKG_INSTANCE_TOTAL_BYTES = 256 * 1024 * 1024;
+export const MAX_DESKTOP_WEBPKG_LIVE_INSTANCES = 8;
+export const MAX_DESKTOP_WEBPKG_LIVE_BYTES = 512 * 1024 * 1024;
+export const MAX_DESKTOP_WEBPKG_TITLE_LENGTH = 128;
+
+/**
+ * instance id 由 native 以 `wpk-<单调正整数>` 分配；webview label 是 `webpkg-<id>`。
+ * id 形态对调用方**不透明**：契约只要求原样回传，native 侧按自己的分配规则复核。
+ */
+export const DesktopWebPackageInstanceIdSchema = z
+  .string()
+  .regex(/^wpk-[1-9][0-9]{0,15}$/u)
+  .max(32);
+export type DesktopWebPackageInstanceId = z.infer<typeof DesktopWebPackageInstanceIdSchema>;
+
+export const DesktopWebPackageInstanceWebviewLabelSchema = z
+  .string()
+  .regex(/^webpkg-wpk-[1-9][0-9]{0,15}$/u)
+  .max(40);
+export type DesktopWebPackageInstanceWebviewLabel = z.infer<
+  typeof DesktopWebPackageInstanceWebviewLabelSchema
+>;
+
+/** 文件表的一项：渲染层声明，native 逐项复核并按声明长度验收字节。 */
+export const DesktopWebPackageInstanceFileSchema = z
+  .object({
+    path: WebPackagePathSchema,
+    mediaType: WebPackageMediaTypeSchema,
+    byteLength: z.number().int().nonnegative().max(MAX_DESKTOP_WEBPKG_INSTANCE_TOTAL_BYTES),
+  })
+  .strict();
+export type DesktopWebPackageInstanceFile = z.infer<typeof DesktopWebPackageInstanceFileSchema>;
+
+export const DesktopBeginWebPackageInstanceRequestSchema = z
+  .object({
+    /** 渲染入口。必须是文件表中的一个 `text/html` 文件。 */
+    entry: WebPackagePathSchema,
+    /** 窗口标题（通常取 `manifest.name`）。由渲染层提供，native 只按长度截断式校验。 */
+    title: z.string().trim().min(1).max(MAX_DESKTOP_WEBPKG_TITLE_LENGTH),
+    files: z.array(DesktopWebPackageInstanceFileSchema).min(1).max(MAX_DESKTOP_WEBPKG_INSTANCE_FILES),
+  })
+  .strict()
+  .superRefine((request, context) => {
+    // 与 manifest 的 path 唯一性同规则：大小写折叠后判重（`WebPackageManifestSchema` 注释）。
+    const seen = new Set<string>();
+    let total = 0;
+    for (const [index, file] of request.files.entries()) {
+      const folded = file.path.toLowerCase();
+      if (seen.has(folded)) {
+        context.addIssue({ code: 'custom', path: ['files', index, 'path'], message: 'duplicate package path' });
+      }
+      seen.add(folded);
+      total += file.byteLength;
+    }
+    if (total > MAX_DESKTOP_WEBPKG_INSTANCE_TOTAL_BYTES) {
+      context.addIssue({ code: 'custom', path: ['files'], message: 'declared total exceeds instance budget' });
+    }
+    const entry = request.files.find((file) => file.path === request.entry);
+    if (entry?.mediaType !== 'text/html') {
+      context.addIssue({ code: 'custom', path: ['entry'], message: 'entry must be declared and be text/html' });
+    }
+  });
+export type DesktopBeginWebPackageInstanceRequest = z.infer<
+  typeof DesktopBeginWebPackageInstanceRequestSchema
+>;
+
+export const DesktopBeginWebPackageInstanceResponseSchema = z
+  .object({ instanceId: DesktopWebPackageInstanceIdSchema })
+  .strict();
+export type DesktopBeginWebPackageInstanceResponse = z.infer<
+  typeof DesktopBeginWebPackageInstanceResponseSchema
+>;
+
+/**
+ * `append_web_package_resource` 的响应。
+ *
+ * 请求方向没有 schema——与 `append_local_archive_export_chunk` 同构：字节是整个 raw
+ * 请求体，instance 与逻辑路径走 `x-webpkg-instance` / `x-webpkg-path` header
+ * （路径以 `encodeURIComponent` 逐段编码，native 解码后仍须通过 portable path 校验）。
+ */
+export const DesktopAppendWebPackageResourceResponseSchema = z
+  .object({ receivedByteLength: z.number().int().nonnegative() })
+  .strict();
+export type DesktopAppendWebPackageResourceResponse = z.infer<
+  typeof DesktopAppendWebPackageResourceResponseSchema
+>;
+
+export const DesktopOpenWebPackageInstanceRequestSchema = z
+  .object({ instanceId: DesktopWebPackageInstanceIdSchema })
+  .strict();
+export type DesktopOpenWebPackageInstanceRequest = z.infer<
+  typeof DesktopOpenWebPackageInstanceRequestSchema
+>;
+
+/** native 回显它实际创建的 webview label；渲染层 MUST 把它当返回值而不是自己拼。 */
+export const DesktopOpenWebPackageInstanceResponseSchema = z
+  .object({ label: DesktopWebPackageInstanceWebviewLabelSchema })
+  .strict();
+export type DesktopOpenWebPackageInstanceResponse = z.infer<
+  typeof DesktopOpenWebPackageInstanceResponseSchema
+>;
+
+/**
+ * webpkg 会话失败的公开投影。与 `export-*` 同规则：`webpkg-instance-stale` 意味着
+ * staging TTL 已过（或新一轮 begin 顶替），正确处理是重新走完整流程，不是重试一次 append。
+ */
+export const DesktopWebPackageInstanceErrorCodeSchema = z.enum([
+  'webpkg-invalid',
+  'webpkg-too-many-files',
+  'webpkg-too-large',
+  'webpkg-too-many-instances',
+  'webpkg-instance-missing',
+  'webpkg-instance-stale',
+  'webpkg-instance-incomplete',
+  'webpkg-resource-undeclared',
+  'webpkg-resource-duplicate',
+  'webpkg-resource-mismatch',
+  'webpkg-window-unavailable',
+  'webpkg-failure',
+]);
+export type DesktopWebPackageInstanceErrorCode = z.infer<
+  typeof DesktopWebPackageInstanceErrorCodeSchema
+>;
+
+export const DesktopWebPackageInstanceErrorSchema = z
+  .object({
+    code: DesktopWebPackageInstanceErrorCodeSchema,
+    message: z.string().min(1).max(512),
+  })
+  .strict();
+export type DesktopWebPackageInstanceError = z.infer<
+  typeof DesktopWebPackageInstanceErrorSchema
 >;

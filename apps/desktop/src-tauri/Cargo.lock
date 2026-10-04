@@ -2395,6 +2395,7 @@ dependencies = [
  "fs4",
  "futures-util",
  "keyring",
+ "percent-encoding",
  "reqwest",
  "rusqlite",
  "serde",

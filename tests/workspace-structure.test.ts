@@ -492,6 +492,98 @@ describe('desktop workspace app ownership', () => {
     }
   });
 
+  it('keeps the webpkg webview at zero capability with a pinned resolver and hardened window', () => {
+    // D4b / DESK-013 / DESK-014：受限 Web Package webview 的隔离面由四层构成，每层各钉一条：
+    //
+    // 1. **能力为零**：capability 目录里只有 main-ui.json，且任何 capability 的 webviews
+    //    集合都不许出现 `webpkg-` 前缀或通配——capability 匹配 label，`webpkg-<id>` 因此天然
+    //    不在任何授权面内。
+    // 2. **协议钉定**：`maho-webpkg` 只经 `register_uri_scheme_protocol` 落在 Builder 上，
+    //    resolver 由 `resolve_webpkg_request` 承担——源码形状钉住"没有第二个资源入口"。
+    // 3. **窗口 hardening**：incognito + 导航钉定 + 新窗拒绝 + 权限拒绝 + 下载拒绝。
+    //    这些不是"建议"而是创建该 webview 的唯一路径上的强制接线。
+    // 4. **纯内存资源空间**：staging 模块不得出现任何文件系统 API——包字节的唯一持久
+    //    化形态是 blob store，临时镜像只在注册表里。
+    const capabilityDirectory = path.join(tauriDirectory, 'capabilities');
+    const capabilityFiles = readdirSync(capabilityDirectory).filter((file) =>
+      file.endsWith('.json'),
+    );
+    expect(capabilityFiles, 'capability 目录里只允许存在 main-ui.json').toEqual(['main-ui.json']);
+    for (const file of capabilityFiles) {
+      const capability = JSON.parse(
+        readFileSync(path.join(capabilityDirectory, file), 'utf8'),
+      ) as { webviews?: string[]; windows?: string[] };
+      for (const label of [...(capability.webviews ?? []), ...(capability.windows ?? [])]) {
+        expect(
+          label.startsWith('webpkg-') || label.includes('*'),
+          `capability ${file} must not match webpkg or wildcard labels`,
+        ).toBe(false);
+      }
+    }
+
+    const webpkgSource = readFileSync(
+      path.join(tauriDirectory, 'src', 'webpkg_instance.rs'),
+      'utf8',
+    );
+    const libSource = readFileSync(path.join(tauriDirectory, 'src', 'lib.rs'), 'utf8');
+
+    // resolver 只能经 Builder 的协议注册进入，且 instance 模块在编译期读入共享 fixture。
+    expect(libSource).toContain('register_uri_scheme_protocol(webpkg_instance::URI_SCHEME');
+    expect(libSource).toContain('resolve_webpkg_request');
+    expect(webpkgSource).toContain(
+      'packages/contracts/fixtures/desktop-web-package-instance.json',
+    );
+    expect(
+      existsSync(
+        path.join(rootDirectory, 'packages/contracts/fixtures/desktop-web-package-instance.json'),
+      ),
+    ).toBe(true);
+
+    // 窗口创建路径上的全部 hardening 接线。缺任何一条，受限渲染面就悄悄降级。
+    for (const marker of [
+      '.incognito(true)',
+      '.on_navigation(',
+      '.on_new_window(',
+      'NewWindowResponse::Deny',
+      '.on_permission_request(',
+      'PermissionResponse::Deny',
+      '.on_download(',
+      'WindowEvent::Destroyed',
+    ]) {
+      expect(webpkgSource, `webpkg window must wire ${marker}`).toContain(marker);
+    }
+
+    // 暂存是纯内存的：模块里出现文件系统 API 本身就是审查点。
+    for (const forbidden of [
+      /\bstd::fs\b/u,
+      /\bFile::open\b/u,
+      /\bread_dir\b/u,
+      /\bPathBuf\b/u,
+      /\bdirs?::/u,
+    ]) {
+      expect(
+        webpkgSource,
+        `webpkg_instance must not touch the filesystem via ${forbidden}`,
+      ).not.toMatch(forbidden);
+    }
+
+    // fixture 声明的三条命令必须全部真在 handler 里注册——反过来 fixture 就变成
+    // "契约写了但没人实现"的死清单。
+    const fixture = JSON.parse(
+      readFileSync(
+        path.join(rootDirectory, 'packages/contracts/fixtures/desktop-web-package-instance.json'),
+        'utf8',
+      ),
+    ) as { commands?: Record<string, string> };
+    const handlerCommands = (libSource.match(/generate_handler!\[([\s\S]*?)\]/)?.[1] ?? '')
+      .split(',')
+      .map((command) => command.trim())
+      .filter((command) => command.length > 0);
+    for (const command of Object.values(fixture.commands ?? {})) {
+      expect(handlerCommands, `fixture command ${command} must be registered`).toContain(command);
+    }
+  });
+
   it('exposes no plaintext secret read surface on the Rust command set', () => {
     const libSource = readFileSync(path.join(tauriDirectory, 'src', 'lib.rs'), 'utf8');
     const handler = libSource.match(/generate_handler!\[([\s\S]*?)\]/);
@@ -527,6 +619,9 @@ describe('desktop workspace app ownership', () => {
       'restore_web_package',
       'purge_web_package',
       'read_web_package_archive',
+      'begin_web_package_instance',
+      'append_web_package_resource',
+      'open_web_package_instance',
       'begin_local_archive_export',
       'append_local_archive_export_chunk',
       'audit_local_library',

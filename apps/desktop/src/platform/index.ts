@@ -83,6 +83,15 @@ export {
 } from './web-package-bridge';
 
 export {
+  APPEND_WEB_PACKAGE_RESOURCE_COMMAND,
+  BEGIN_WEB_PACKAGE_INSTANCE_COMMAND,
+  DesktopWebPackageInstanceError,
+  OPEN_WEB_PACKAGE_INSTANCE_COMMAND,
+  openWebPackageInstanceInIsolatedWebview,
+} from './webpkg-instance-bridge';
+export type { OpenedWebPackageInstance } from './webpkg-instance-bridge';
+
+export {
   APPEND_ARCHIVE_EXPORT_CHUNK_COMMAND,
   ARCHIVE_EXPORT_ID_HEADER,
   BEGIN_ARCHIVE_EXPORT_COMMAND,
