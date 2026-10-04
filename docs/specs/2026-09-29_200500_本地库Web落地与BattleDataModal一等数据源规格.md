@@ -148,5 +148,5 @@ archive manifest，但**没有任何 runtime 消费它**：无 IndexedDB adapter
 - ~~本地库回收站 UI~~（数据卡部分 2026-10-04 已由 Desktop 计划 D3.2a 落地）：`/local-library` 挂载共源
   `@mahoshojo/ui-web/local-cards`，提供数据卡回收站的恢复与彻底删除（`purge`，二次确认）。Web 包仍无回收站：
   「从本机删除 Web 包」（`removeLocalWebPackage`）对用户的承诺是彻底移除而非移入回收站。
-- 导入同内容但已被软删的数据卡：§2.3 要求显式 `restore`，当前 Web 自动保存路径遇墓碑只记为失败，
-  待 D3.2b 单卡导入一并收口。
+- ~~导入同内容但已被软删的数据卡~~（2026-10-04 已收口）：Web 自动保存遇墓碑不写入、计为“在回收站中”并提示到
+  本地库恢复；Desktop 单卡导入同样不隐式复活，提供显式“从回收站恢复并打开”。
