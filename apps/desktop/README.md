@@ -29,7 +29,7 @@ MahoShojo Generator 的本地桌面客户端 runtime。它是独立 app，不是
 - **D3.0** 首页与离线百科已落地：产品内容权威在仓库根 `content/`，由
   `scripts/generate-encyclopedia-content.mjs` 在各宿主 dev/build 前生成到静态服务根，副本由 Git 忽略（Desktop 走 Tauri
   `frontendDist`，不需要新增 native 权限）；共源 Markdown 渲染层的 heading id 是显式 opt-in，
-  站外媒体缺省全部拒绝，外链缺少 opener 时不可执行。能力快照以共源导航与真实交付路由为准，Web 功能清单留在 Web；旧 PVP `/battle`、`/arena` 已取消 Desktop 迁移，Web 现有功能与历史保留。断网打包冷启动、dev 环境主题/键盘/IME/DPI，以及原生测试库 renderer Network、减少动态效果模拟、KaTeX 和锚点已有实测；native 出站全旅程仍待验，真机整体门禁开放，见
+  站外媒体缺省全部拒绝，外链缺少 opener 时不可执行。能力快照以共源导航与真实交付路由为准，Web 功能清单留在 Web；旧 PVP `/battle`、`/arena` 已取消 Desktop 迁移，Web `/battle`、`/arena` 与历史保留；`/pvp` 卡牌对决按 2026-10-04 退休规格移除。断网打包冷启动、dev 环境主题/键盘/IME/DPI，以及原生测试库 renderer Network、减少动态效果模拟、KaTeX 和锚点已有实测；native 出站全旅程仍待验，真机整体门禁开放，见
   [首页与离线百科验收](../../docs/runbooks/2026-10-03_163000_Desktop首页与离线百科验收.md)。
 - **D3.1a** 共源生成核、Web Hosted 回用与 Desktop Direct 调用模块已落地；修复完整请求 DTO、模型回传与启动取消接线。D3.1b/c 已接入 `/details`，共用问卷面板和角色正文，支持默认 16 题问卷、Direct 生成/取消、显式恢复草稿与 unsigned 本地保存；既有真机门禁保留。
 
@@ -39,7 +39,7 @@ MahoShojo Generator 的本地桌面客户端 runtime。它是独立 app，不是
 - 整体架构：[Desktop 产品架构与共享边界](../../docs/architecture/2026-10-02_184000_Desktop产品架构与共享边界.md)
 - 产品规格：[Desktop 产品一致性与本地优先规格](../../docs/specs/2026-10-02_184000_Desktop产品一致性与本地优先规格.md)
 
-目标是熟悉的首页、问卷、角色管理与百科，而不是扩建当前调试面板。2026-10-03 维护者已取消旧 PVP `/battle`、`/arena` 的 Desktop 迁移，Web 现有功能与历史保留。Desktop 默认本地保存与 Direct，线上能力按需接入；首期不新增数据卡签名或手动申请按钮。未来自动签名需独立可信协议，设置默认关闭；updater 签名要求不变。
+目标是熟悉的首页、问卷、角色管理与百科，而不是扩建当前调试面板。2026-10-03 维护者已取消旧 PVP `/battle`、`/arena` 的 Desktop 迁移，Web `/battle`、`/arena` 与历史保留；`/pvp` 卡牌对决按 2026-10-04 退休规格移除。Desktop 默认本地保存与 Direct，线上能力按需接入；首期不新增数据卡签名或手动申请按钮。未来自动签名需独立可信协议，设置默认关闭；updater 签名要求不变。
 
 - 决策：[Desktop Tauri V1 运行时与本地安全边界决策](../../docs/decisions/2026-09-30_160000_DesktopTauriV1运行时与本地安全边界决策.md)
 - 规格：[Desktop 客户端实施规格](../../docs/specs/2026-09-30_160000_Desktop客户端实施规格.md)
