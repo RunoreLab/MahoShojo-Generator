@@ -1,22 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { useRouter } from '@tanstack/react-router';
 import { LocalArchivePanel, createLocalArchiveController } from '@mahoshojo/ui-web/local-archive';
 import { LocalCardsPanel, useLocalCardsController, type LocalCardsActions, type LocalCardsHost } from '@mahoshojo/ui-web/local-cards';
 
 import { useLeaveGuard } from './useLeaveGuard';
 import { LocalBackupsPanel } from '../features/backups/LocalBackupsPanel';
+import { isEditableLocalCard } from '../features/character-manager/editor';
 import {
   DESKTOP_LIBRARY_ARCHIVE_LIMITS,
   createDesktopArchiveHost,
 } from '../platform/desktop-archive-host';
-import { DesktopLocalCardError, IpcLocalCardRepository, isRetryableLocalLibraryError } from '../platform/local-card-bridge';
-
-const describeLocalCardError = (cause: unknown): string => {
-  if (cause instanceof DesktopLocalCardError) {
-    return isRetryableLocalLibraryError(cause.code) ? '本地库正在维护，请稍后重试。' : cause.message;
-  }
-  return '本地库操作失败，请重试。';
-};
+import { IpcLocalCardRepository, describeLocalCardError } from '../platform/local-card-bridge';
 
 /**
  * 设备级本地库页面。
@@ -32,6 +27,7 @@ const describeLocalCardError = (cause: unknown): string => {
  * 恢复/彻底删除也随之锁定，不会在“等待整体替换”的库上继续写入。
  */
 export function DesktopLocalLibrary() {
+  const router = useRouter();
   // host 必须在渲染之间保持稳定：控制器用它做 useMemo 的依赖，重建会让已预检的字节与 plan 丢失。
   const host = useMemo(() => createDesktopArchiveHost(), []);
   const controller = useMemo(() => createLocalArchiveController(host), [host]);
@@ -117,7 +113,13 @@ export function DesktopLocalLibrary() {
       </header>
       {!guard.ready && !guard.message && <p role="status">正在初始化窗口关闭保护…</p>}
       {guard.message && <p role="alert">{guard.message}</p>}
-      <LocalCardsPanel model={cards.model} actions={cardActions} disabled={!guard.ready || maintenanceBusy} />
+      <LocalCardsPanel
+        model={cards.model}
+        actions={cardActions}
+        disabled={!guard.ready || maintenanceBusy}
+        onEdit={(record) => { void router.navigate({ to: '/character-manager', search: { card: record.id } }); }}
+        canEdit={isEditableLocalCard}
+      />
       <fieldset disabled={!guard.ready || maintenanceBusy} className="min-w-0">
         <LocalArchivePanel model={model} actions={archiveActions} limits={{ maxArchiveBytes: DESKTOP_LIBRARY_ARCHIVE_LIMITS.fileBytes }} />
       </fieldset>
@@ -126,7 +128,7 @@ export function DesktopLocalLibrary() {
         <h2 className="mb-1 text-sm font-medium text-(--app-text-muted)">还没有的</h2>
         <ul className="flex list-disc flex-col gap-1 pl-5 text-sm text-(--app-text-muted)">
           <li>
-            <strong className="font-medium">单张数据卡导出、编辑与 Web 包管理</strong>：目前只能通过整库归档与备份携带。
+            <strong className="font-medium">单张数据卡导出与 Web 包管理</strong>：目前只能通过整库归档与备份携带。角色与情景卡的编辑和单卡导入在“角色管理”。
           </li>
         </ul>
       </section>

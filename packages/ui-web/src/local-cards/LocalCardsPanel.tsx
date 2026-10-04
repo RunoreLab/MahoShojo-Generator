@@ -15,6 +15,9 @@ export interface LocalCardsPanelProps {
   readonly actions: LocalCardsActions;
   /** 宿主的维护互斥或存储不可用时整体禁用写操作；读与浏览不受影响。 */
   readonly disabled?: boolean;
+  /** 宿主提供编辑入口时，活动列表中可编辑的记录显示“编辑”。未提供则不出现该入口。 */
+  readonly onEdit?: (record: LocalCardRecordV1) => void;
+  readonly canEdit?: (record: LocalCardRecordV1) => boolean;
 }
 
 const PAGE_SIZE = 20;
@@ -83,10 +86,10 @@ const CardDetails = ({ record }: { record: LocalCardRecordV1 }) => {
  * 共源本地数据卡列表与回收站。
  *
  * 两端 `/local-library` 挂载同一份实现；宿主只提供仓储与错误文案（`DESK-PROD-002/003`）。
- * 文案只描述真实能力：软删进入回收站且可恢复；彻底删除不可在应用内撤销。单卡导出、编辑与选卡不在
- * 这里，因此界面不提供这些入口。
+ * 文案只描述真实能力：软删进入回收站且可恢复；彻底删除不可在应用内撤销。单卡导出与选卡不在这里；
+ * 编辑入口只在宿主提供 `onEdit` 时出现，编辑本身由宿主页面负责。
  */
-export const LocalCardsPanel = ({ model, actions, disabled = false }: LocalCardsPanelProps) => {
+export const LocalCardsPanel = ({ model, actions, disabled = false, onEdit, canEdit }: LocalCardsPanelProps) => {
   const [query, setQuery] = useState('');
   const [cardType, setCardType] = useState<LocalCardType | ''>('');
   const [visible, setVisible] = useState(PAGE_SIZE);
@@ -236,6 +239,11 @@ export const LocalCardsPanel = ({ model, actions, disabled = false }: LocalCards
                       >
                         {expanded ? '收起详情' : '详情'}
                       </button>
+                      {!recycle && onEdit !== undefined && (canEdit?.(record) ?? true) && (
+                        <button type="button" className={buttonClass} onClick={() => onEdit(record)}>
+                          编辑
+                        </button>
+                      )}
                       {recycle && (
                         <button
                           type="button"

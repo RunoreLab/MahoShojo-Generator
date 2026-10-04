@@ -126,7 +126,7 @@ export const NAV_GROUPS: NavGroup[] = [
       {
         label: '角色管理',
         href: '/character-manager',
-        description: '登录、云端保存与角色库管理',
+        description: '角色编辑与角色库管理',
         isTopbarCovered: true,
       },
       {

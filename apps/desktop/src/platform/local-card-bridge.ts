@@ -107,6 +107,20 @@ export const isRetryableLocalLibraryError = (
   code: DesktopLocalLibraryErrorCode,
 ): boolean => code === 'maintenance-busy';
 
+/**
+ * 页面展示用的本地库错误文案。
+ *
+ * native `message` 是固定文案可直接展示；`maintenance-busy` 改说“稍后重试”。渲染层契约校验失败
+ * （例如正文超过单条 document 上限）不透传 Zod 细节，只说明内容超出限制。
+ */
+export const describeLocalCardError = (cause: unknown): string => {
+  if (cause instanceof DesktopLocalCardError) {
+    return isRetryableLocalLibraryError(cause.code) ? '本地库正在维护，请稍后重试。' : cause.message;
+  }
+  if (cause instanceof Error && cause.name === 'ZodError') return '数据卡内容超出本地库限制或格式不受支持。';
+  return '本地库操作失败，请重试。';
+};
+
 const isStoreErrorCode = (value: string): value is DesktopStoreErrorCode =>
   (NATIVE_ERROR_CODES as readonly string[]).includes(value);
 

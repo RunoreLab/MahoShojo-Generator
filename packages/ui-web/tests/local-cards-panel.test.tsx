@@ -105,6 +105,35 @@ test('宿主禁用时只读浏览仍可用，写入口不可点', async () => {
   expect(container.querySelector('[data-testid="local-card-details"]')?.textContent).toContain('"codename": "a"');
 });
 
+test('宿主提供编辑入口时只对可编辑记录显示“编辑”，回收站中不显示', async () => {
+  const { host } = createHost([
+    record('a'),
+    record('q', { cardType: 'questionnaire' }),
+    record('gone', { deletedAt: '2026-10-02T00:00:00.000Z', updatedAt: '2026-10-02T00:00:00.000Z' }),
+  ]);
+  const onEdit = vi.fn();
+  const EditableHarness = () => {
+    const { controller, model } = useLocalCardsController(host);
+    return <LocalCardsPanel model={model} actions={controller.actions} onEdit={onEdit} canEdit={(item) => item.cardType === 'character'} />;
+  };
+  await act(async () => root.render(<EditableHarness />));
+  await settle();
+  const editButtons = [...container.querySelectorAll('button')].filter((item) => item.textContent === '编辑');
+  expect(editButtons).toHaveLength(1);
+  await click(editButtons[0]);
+  expect(onEdit).toHaveBeenCalledWith(expect.objectContaining({ id: 'a' }));
+  await click(container.querySelector('[data-testid="local-cards-view-recycle"]')!);
+  await settle();
+  expect(button('编辑')).toBeUndefined();
+});
+
+test('未提供编辑入口时不出现“编辑”', async () => {
+  const { host } = createHost([record('a')]);
+  await act(async () => root.render(<Harness host={host} />));
+  await settle();
+  expect(button('编辑')).toBeUndefined();
+});
+
 test('搜索与类型筛选只影响显示，无结果时说明是筛选所致', async () => {
   const { host } = createHost([record('a', { title: '星光' }), record('b', { title: '雾港', cardType: 'scenario' })]);
   await act(async () => root.render(<Harness host={host} />));

@@ -119,6 +119,7 @@ const indexRoute = createRoute({
           <h2 className="mb-1 text-sm font-medium text-(--app-text-muted)">本机数据</h2>
           <ul className="flex flex-col gap-1 text-sm">
             <li><a href="#/details" className="text-(--app-accent-strong) underline" onClick={(event) => { event.preventDefault(); navigate('/details'); }}>问卷生成魔法少女</a>：使用你的模型生成角色，并保存到本地卡库。</li>
+            <li><a href="#/character-manager" className="text-(--app-accent-strong) underline" onClick={(event) => { event.preventDefault(); navigate('/character-manager'); }}>角色管理</a>：编辑本地角色与情景卡，导入单个 JSON 数据卡。</li>
             <li>
               <a
                 href="#/local-library"
@@ -179,6 +180,15 @@ const settingsRoute = createRoute({
   component: lazyRouteComponent(() => import('./settings-page'), 'DesktopSettings'),
 });
 
+/** 本地角色编辑；`?card=<id>` 打开一条本地库记录，其余查询参数一律丢弃。 */
+const characterManagerRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/character-manager',
+  validateSearch: (search: Record<string, unknown>): { card?: string } =>
+    typeof search.card === 'string' && search.card !== '' ? { card: search.card } : {},
+  component: lazyRouteComponent(() => import('./character-manager-page'), 'DesktopCharacterManager'),
+});
+
 const detailsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/details',
@@ -188,6 +198,7 @@ const detailsRoute = createRoute({
 export const routeTree = rootRoute.addChildren([
   indexRoute,
   detailsRoute,
+  characterManagerRoute,
   encyclopediaIndexRoute,
   encyclopediaEntryRoute,
   localLibraryRoute,
