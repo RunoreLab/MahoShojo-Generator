@@ -2,15 +2,28 @@
   "schemaVersion": 1,
   "seasons": [
     {
+      "id": "S4",
+      "name": "泉涌赛季",
+      "startsAt": "2026-10-04",
+      "status": "current",
+      "description": "泉涌赛季（S4）开启！本赛季采用经典模式并启用故事引导：战斗必须发生在水环境中，善用水域条件者可获得战术优势。",
+      "specialRules": {
+        "mode": "classic",
+        "storyGuidance": "战斗发生在水环境中（湖面、海上、水下或船上等）。请让角色利用浮力、水阻、水流、水压、潮汐、视野、湿滑落脚点与漂浮物等条件；更好地应对水环境可带来战术优势，但不得凭空改变角色能力或直接指定胜负。双方全力以赴禁止平局。"
+      }
+    },
+    {
       "id": "S3",
       "name": "八角笼赛季",
       "startsAt": "2026-07-03",
-      "status": "current",
-      "description": "八角笼赛季（S3）开启！本赛季特殊规则：采用「羁绊」故事模式，仅使用预设情景 拳愿八角笼：原始搏斗竞技。",
+      "endsAt": "2026-10-04",
+      "status": "history",
+      "description": "八角笼赛季（S3）开启！本赛季特殊规则：采用「情景」故事模式，仅使用预设情景 拳愿八角笼：原始搏斗竞技。",
       "specialRules": {
         "mode": "scenario",
         "scenarioPresetFilename": "S04_kengan_gold_tournament_v3.json"
-      }
+      },
+      "archivedAt": "2026-10-04T02:05:06.121Z"
     },
     {
       "id": "S2",
