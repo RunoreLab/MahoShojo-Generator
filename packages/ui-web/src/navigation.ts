@@ -55,8 +55,6 @@ export const TOPBAR_COVERED_ROUTES = [
   '/badge-manager',
   '/redeem',
   '/password-recovery',
-  '/pvp',
-  '/pvp/[roomId]',
   '/ranking',
   '/messages',
   '/report-appeals',
@@ -114,12 +112,6 @@ export const NAV_GROUPS: NavGroup[] = [
         isTopbarCovered: true,
       },
       {
-        label: 'PVP',
-        href: '/pvp',
-        description: '卡牌对决大厅',
-        isTopbarCovered: true,
-      },
-      {
         label: '排行榜',
         href: '/ranking',
         description: '排位榜单与赛季信息',
@@ -148,7 +140,7 @@ export const NAV_GROUPS: NavGroup[] = [
       {
         label: '个人页',
         href: '/me',
-        description: '战报记录、PVP 记录与个人设置',
+        description: '战报记录与个人设置',
         isTopbarCovered: true,
       },
       {
@@ -238,10 +230,6 @@ const normalizePathname = (pathname: string): string => {
 
 export const getTopbarCanonicalPathname = (pathname: string): string => {
   const normalized = normalizePathname(pathname);
-
-  if (normalized.startsWith('/pvp/') && normalized !== '/pvp/[roomId]') {
-    return '/pvp/[roomId]';
-  }
 
   if (normalized.startsWith('/encyclopedia/') && normalized !== '/encyclopedia/[slug]') {
     return '/encyclopedia/[slug]';

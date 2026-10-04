@@ -66,7 +66,7 @@ export const encyclopediaCategories: EncyclopediaCategory[] = [
   {
     id: 'gameplay',
     title: '对战与计分',
-    description: '竞技场、PVP、排位规则、裁判事件与计分口径。',
+    description: '竞技场、排位规则、裁判事件与计分口径。',
   },
   {
     id: 'mechanics',
@@ -176,7 +176,6 @@ export const encyclopediaEntries: EncyclopediaEntry[] = [
       '恢复生成',
       '重新连接',
       'Web 战报',
-      'PVP',
       '浏览器',
     ],
   },
@@ -523,14 +522,6 @@ export const encyclopediaEntries: EncyclopediaEntry[] = [
     contentFile: 'shield-words.md',
     categoryId: 'management',
     keywords: ['屏蔽词', '和谐', '遮罩', '替换'],
-  },
-  {
-    slug: 'pvp',
-    title: 'PVP 与计分',
-    summary: '房间制卡牌对决：玩法流程、隐私提示，以及计分口径摘要。',
-    contentFile: 'pvp.md',
-    categoryId: 'gameplay',
-    keywords: ['房间', '对决', '隐私', '计分'],
   },
 ];
 

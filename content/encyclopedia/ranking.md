@@ -276,7 +276,6 @@ free：仍允许自由挑选对手，并以脱敏 IP 做类似限速/去重（�
 - 竞技场：`/encyclopedia/arena`
 - 竞技场多人模式：`/encyclopedia/arena-multiplayer`
 - 引导与读写状态（strict/free 的关键差异）：`/encyclopedia/guidance`
-- PVP 与计分：`/encyclopedia/pvp`
 - 公开与审核机制（为什么公共榜需要已通过）：`/encyclopedia/review`
 - 技术值（风险/风格提示）：`/encyclopedia/tech-index`
 - 代码杀（概念与礼仪）：`/encyclopedia/code-kill`

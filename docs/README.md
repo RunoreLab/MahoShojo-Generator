@@ -1,5 +1,7 @@
 # 文档导航
 
+2026-10-04：维护者已授权退休 Web `/pvp` 卡牌对决，当前范围以[PVP 卡牌对决退休规格](./specs/2026-10-04_150000_PVP卡牌对决退休规格.md)为准；下文较早“保留 Web PVP 产品”的口径被取代。`/battle`、`/arena`、Arena 多人及历史数据继续保留，本轮不执行生产清理。
+
 2026-10-03 收口补充：Desktop 备份新写 manifest V2（显式 schemaVersion），兼容读取 V1 和迁移链支持的旧库，
 并严格验证 blob 文件集合；见[运行时规格](./specs/2026-09-30_160000_Desktop客户端实施规格.md)。
 维护者已确认取消 Desktop 旧 PVP `/battle`、`/arena` 迁移，Web 现有功能与历史保留；

@@ -35,8 +35,6 @@ describe('navigation config', () => {
       '/badge-manager',
       '/redeem',
       '/password-recovery',
-      '/pvp',
-      '/pvp/[roomId]',
       '/ranking',
       '/messages',
       '/report-appeals',
@@ -74,7 +72,7 @@ describe('navigation config', () => {
   test('route group metadata covers navigation targets but coverage controls active topbar display', () => {
     expect(getNavGroupForPath('/battle')?.id).toBe('battle');
     expect(getNavGroupForPath('/arena')?.id).toBe('battle');
-    expect(getNavGroupForPath('/pvp')?.id).toBe('battle');
+    expect(getNavGroupForPath('/pvp')).toBeNull();
     expect(getNavGroupForPath('/ranking')?.id).toBe('battle');
 
     expect(getNavGroupForPath('/creator')?.id).toBe('creative');
@@ -90,20 +88,18 @@ describe('navigation config', () => {
     expect(getTopbarCoverage('/battle')).toEqual({ isCovered: true, activeGroupId: 'battle' });
     expect(getTopbarCoverage('/scenario')).toEqual({ isCovered: true, activeGroupId: 'creative' });
     expect(getTopbarCoverage('/encyclopedia/[slug]')).toEqual({ isCovered: true, activeGroupId: 'knowledge' });
-    expect(getTopbarCoverage('/pvp/[roomId]')).toEqual({ isCovered: true, activeGroupId: 'battle' });
+    expect(getTopbarCoverage('/pvp/room-7')).toEqual({ isCovered: false, activeGroupId: null });
     expect(getTopbarCoverage('/messages')).toEqual({ isCovered: true, activeGroupId: null });
     expect(getTopbarCoverage('/investigation')).toEqual({ isCovered: true, activeGroupId: 'knowledge' });
   });
 
   test('App Router dynamic pathnames can be mapped to legacy topbar route patterns', () => {
-    expect(getTopbarCanonicalPathname('/pvp/room-7')).toBe('/pvp/[roomId]');
+    expect(getTopbarCanonicalPathname('/pvp/room-7')).toBe('/pvp/room-7');
     expect(getTopbarCanonicalPathname('/encyclopedia/site-guide')).toBe('/encyclopedia/[slug]');
     expect(getTopbarCanonicalPathname('/ranking?season=current#top')).toBe('/ranking');
   });
 
   test.each([
-    ['/pvp/room-7', 'battle'],
-    ['/pvp/room-7/?round=2#turn', 'battle'],
     ['/encyclopedia/site-guide', 'knowledge'],
     ['/encyclopedia/使用指南/?from=nav#intro', 'knowledge'],
   ])('coverage accepts the actual dynamic pathname %s', (pathname, activeGroupId) => {

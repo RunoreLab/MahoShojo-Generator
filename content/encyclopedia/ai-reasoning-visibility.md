@@ -17,9 +17,9 @@
 
 ## 2) 具体在哪看？
 
-### A. 竞技场与 PVP 战报（最常用）
+### A. 竞技场战报（最常用）
 
-- 页面：`/arena`（旧入口 `/battle`）与 `/pvp`
+- 页面：`/arena`（旧入口 `/battle`）
 - 位置：**战报卡顶部信息区里，“模型 / tokens”这行的下方，正文上方**
 - 你会看到一条可折叠区域，文案通常是：
   - `AI 正在思考…`
@@ -88,4 +88,3 @@
 - AI 输出格式异常：`/encyclopedia/ai-output-format`
 - 魔法茶会（功能与快速开始）：`/encyclopedia/magic-tea-party`
 - 竞技场：`/encyclopedia/arena`
-- PVP 与计分：`/encyclopedia/pvp`

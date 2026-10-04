@@ -13,7 +13,6 @@
 | 显示“正在恢复上一场战报生成”或“正在重新连接” | 不要再次点击生成；如果不想继续这场任务，可点击“放弃恢复”请求停止，再等待服务器确认。 |
 | Web 战报空白、按钮失效或外部图片不显示 | 先重新加载 Web 战报，再切换到普通战报查看最终内容。 |
 | 本地库页签打不开、显示 `—` 或保存时报配额 | 先用提示条上的「重试」；仍失败见下方「本地库与本地数据」。 |
-| PVP 一直停在 resolving/advancing，或房间没有进展 | 刷新；房主可使用“强制重试”；仍无变化时退出并重新进入房间。 |
 | 看到 `Failed to fetch`、429、5xx、AI 输出或数据卡错误 | 直接查看本文末尾的专题入口，不要在同一个页面反复提交。 |
 
 ## 先做这些安全排查
@@ -119,18 +118,6 @@ Web 战报是在页面内受安全沙箱约束的 AI 生成 HTML。它和普通�
 
 ⚠️ 本地库**没有**回收站，也没有设备级的灾难恢复备份（`/local-library` 的整库导出是换设备用的 portable archive）；清除本站数据会一并删除。完整边界见：`/encyclopedia/local-library`
 
-## PVP 或房间卡住
-
-### 一直停在 resolving/advancing 怎么办？
-
-先刷新页面一次。房主可以点击“强制重试”；如果仍长时间没有变化，退出房间后重新进入。不要连续点击推进、结算或生成按钮，以免把短暂延迟变成重复请求。
-
-如果同时出现 Cloudflare 502/5xx，请先按：`/encyclopedia/cloudflare-errors`；明确是 524 超时则看：`/encyclopedia/cloudflare-524-timeout`。
-
-### 为什么观战者没有“确认已阅读”按钮？
-
-这是角色权限差异：该按钮只给需要推进流程的玩家，观战者不需要确认，也不能在当前 reviewing 阶段临时切换为玩家。等待下一回合，或请房主重新开始合适的流程即可。
-
 ## 明确错误应该看哪里？
 
 如果错误文字已经明确，优先阅读对应专题：
@@ -149,7 +136,7 @@ Web 战报是在页面内受安全沙箱约束的 AI 生成 HTML。它和普通�
 
 ```text
 出现时间（含时区）：
-页面/路由（例如 /arena、/pvp）：
+页面/路由（例如 /arena、/magic-tea-party）：
 浏览器及版本：
 操作系统：
 完整提示文字：
@@ -166,6 +153,5 @@ Web 战报是在页面内受安全沙箱约束的 AI 生成 HTML。它和普通�
 
 - 竞技场总览：`/encyclopedia/arena`
 - 竞技场多人模式：`/encyclopedia/arena-multiplayer`
-- PVP：`/encyclopedia/pvp`
 - 连续战报：`/encyclopedia/continuous-battle-story`
 - 网络与服务错误：`/encyclopedia/network-errors`

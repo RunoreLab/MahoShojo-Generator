@@ -88,7 +88,7 @@
 
 当一次战报满足排位资格时，服务端会在写入 `battle_report_generations` 与参战者信息后进行结算：
 
-- 非流式：`/api/generate-battle-story`（当前前端与 PVP 结算主入口）
+- 非流式：`/api/generate-battle-story`（当前前端非流式入口）
 - 兼容端点：`/api/arena/generate`
 - 流式：`/api/arena/generate-stream`（写库后异步结算，不影响流式输出）
 

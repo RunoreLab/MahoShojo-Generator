@@ -33,7 +33,7 @@
 - `/arena`（和旧入口 `/battle`）选择参战者
 - `/details`、`/canshou`、`/creator` 选择角色或情景
 - `/sublimation` 选择升华对象
-- `/character-party` 组队、`/pvp` 大厅、`/magic-tea-party` 选卡（PVP 对局房间内只有「手牌」页签，不含本地库）
+- `/character-party` 组队、`/magic-tea-party` 选卡
 - 竞技场内的历史战报、问卷面板
 
 本地库页签的标签里带一个总数（如 `本地库 (5)`），页签上方还有一行**存储状态提示**（见 §5）。
