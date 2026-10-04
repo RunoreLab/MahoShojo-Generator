@@ -56,6 +56,14 @@ let root: Root;
 let container: HTMLDivElement;
 let close: (event: { preventDefault: () => void }) => void;
 const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 60)); });
+/** 懒加载路由与 IPC mock 在负载下可能晚于固定等待；按条件轮询而不是赌一个时长。 */
+const waitFor = async (predicate: () => boolean, timeoutMs = 5000) => {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() > deadline) throw new Error('等待条件超时');
+    await settle();
+  }
+};
 const button = (label: string) =>
   [...container.querySelectorAll('button')].find((item) => item.textContent?.trim() === label) as HTMLButtonElement | undefined;
 const click = async (target: Element | undefined) => {
@@ -116,7 +124,9 @@ const mount = async () => {
 describe('Desktop 本地角色管理（IPC mock，仍需真机重启验收）', () => {
   it('从本地库进入编辑，只改标题时原记录整卡替换，未保存修改受离开保护', async () => {
     const router = await mount();
+    await waitFor(() => button('编辑') !== undefined);
     await click(button('编辑'));
+    await waitFor(() => container.textContent?.includes('编辑：星光') === true);
     expect(router.state.location.pathname).toBe('/character-manager');
     expect(router.state.location.search).toEqual({ card: original.id });
     expect(container.textContent).toContain('编辑：星光');
@@ -132,7 +142,7 @@ describe('Desktop 本地角色管理（IPC mock，仍需真机重启验收）', 
     expect(prevented).toHaveBeenCalledOnce();
 
     await click(button('保存到本地库'));
-    expect(container.textContent).toContain('已更新本地库中的记录。');
+    await waitFor(() => container.textContent?.includes('已更新本地库中的记录。') === true);
     expect(rows.get(original.id)?.title).toBe('星光·改');
     expect(rows.size).toBe(1);
 
@@ -146,31 +156,34 @@ describe('Desktop 本地角色管理（IPC mock，仍需真机重启验收）', 
   it('改正文另存为新记录，原记录保留并可显式移入回收站', async () => {
     window.location.hash = `#/character-manager?card=${original.id}`;
     const router = await mount();
+    await waitFor(() => container.querySelector('#editor-field-appearance__outfit') !== null);
     await type(container.querySelector<HTMLInputElement>('#editor-field-appearance__outfit')!, '黑裙');
     await click(button('保存到本地库'));
-    expect(container.textContent).toContain('已另存为一条新记录');
+    await waitFor(() => container.textContent?.includes('已另存为一条新记录') === true);
     expect(rows.size).toBe(2);
     const created = [...rows.values()].find((item) => item.id !== original.id)!;
     expect(created.provenance).toEqual({ kind: 'unsigned', execution: 'edited' });
-    expect(router.state.location.search).toEqual({ card: created.id });
+    await waitFor(() => router.state.location.search.card === created.id);
 
     await click(button('将原记录移入回收站'));
+    await waitFor(() => container.textContent?.includes('原记录已移入回收站') === true);
     expect(rows.get(original.id)?.deletedAt).toBeDefined();
-    expect(container.textContent).toContain('原记录已移入回收站');
   });
 
   it('粘贴导入命中回收站中的同内容卡时需显式恢复', async () => {
     rows.set(original.id, { ...original, deletedAt: '2026-10-02T00:00:00.000Z', updatedAt: '2026-10-02T00:00:00.000Z' });
     window.location.hash = '#/character-manager';
     const router = await mount();
+    await waitFor(() => container.querySelector('textarea') !== null);
     await type(container.querySelector<HTMLTextAreaElement>('textarea')!, JSON.stringify(original.data));
     await click(button('从文本载入'));
     expect(container.textContent).toContain('编辑导入的数据卡');
     await click(button('保存到本地库'));
-    expect(container.textContent).toContain('内容相同的记录在回收站中');
+    await waitFor(() => container.textContent?.includes('内容相同的记录在回收站中') === true);
     expect(rows.get(original.id)?.deletedAt).toBeDefined();
 
     await click(button('从回收站恢复并打开'));
+    await waitFor(() => container.textContent?.includes('编辑：星光') === true);
     expect(rows.get(original.id)?.deletedAt).toBeUndefined();
     expect(router.state.location.search).toEqual({ card: original.id });
     expect(container.textContent).toContain('编辑：星光');
@@ -179,6 +192,7 @@ describe('Desktop 本地角色管理（IPC mock，仍需真机重启验收）', 
   it('非法导入给出原因且不进入编辑', async () => {
     window.location.hash = '#/character-manager';
     await mount();
+    await waitFor(() => container.querySelector('textarea') !== null);
     await type(container.querySelector<HTMLTextAreaElement>('textarea')!, '[1, 2]');
     await click(button('从文本载入'));
     expect(container.textContent).toContain('数据卡必须是一个 JSON 对象。');

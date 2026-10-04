@@ -52,9 +52,19 @@ const card = (id: string, overrides: Partial<LocalCardRecordV1> = {}): LocalCard
 });
 
 let rows: Map<string, LocalCardRecordV1>;
+let deleteFailure: unknown = null;
 let root: Root;
 let container: HTMLDivElement;
 const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 60)); });
+/** 懒加载路由与 IPC mock 在负载下可能晚于固定等待；按条件轮询。 */
+const waitFor = async (predicate: () => boolean, timeoutMs = 5000) => {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() > deadline) throw new Error('等待条件超时');
+    await settle();
+  }
+};
+const hasText = (text: string) => () => container.textContent?.includes(text) === true;
 const button = (label: string) =>
   [...container.querySelectorAll('button')].find((item) => item.textContent?.trim() === label) as HTMLButtonElement | undefined;
 const click = (target: Element | undefined) => act(async () => {
@@ -65,6 +75,7 @@ beforeEach(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   vi.clearAllMocks();
   rows = new Map([['lc_a', card('lc_a')]]);
+  deleteFailure = null;
   bridge.invoke.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
     if (command === LIST_LOCAL_BACKUPS_COMMAND) return { backups: [], invalidCount: 0 };
     if (command === LIST_LOCAL_CARDS_COMMAND) {
@@ -80,6 +91,7 @@ beforeEach(() => {
       return found === undefined ? null : serializeLocalLibraryRecord(found);
     }
     if (command === DELETE_LOCAL_CARD_COMMAND) {
+      if (deleteFailure !== null) throw deleteFailure;
       const document = JSON.parse((args?.request as { document: string }).document) as LocalCardRecordV1;
       rows.set(document.id, document);
       return { id: document.id };
@@ -103,7 +115,7 @@ const mount = async () => {
   const router = createDesktopRouter();
   await router.load();
   await act(async () => { root.render(<RouterProvider router={router} />); });
-  await settle();
+  await waitFor(hasText('本机角色 lc_a'));
   return router;
 };
 
@@ -115,16 +127,14 @@ describe('Desktop 本地库数据卡列表与回收站（IPC mock，仍需真机
 
     await click(button('移入回收站…'));
     await click(button('确认移入回收站'));
-    await settle();
+    await waitFor(hasText('已移入回收站'));
     expect(rows.get('lc_a')?.deletedAt).toBeDefined();
-    expect(container.textContent).toContain('已移入回收站');
 
     await click(container.querySelector('[data-testid="local-cards-view-recycle"]')!);
-    await settle();
-    expect(container.textContent).toContain('本机角色 lc_a');
+    await waitFor(hasText('本机角色 lc_a'));
     await click(button('彻底删除…'));
     await click(button('确认彻底删除'));
-    await settle();
+    await waitFor(hasText('回收站是空的'));
     expect(bridge.invoke).toHaveBeenCalledWith(PURGE_LOCAL_CARD_COMMAND, { id: 'lc_a' });
     expect(rows.has('lc_a')).toBe(false);
     expect(container.textContent).toContain('回收站是空的');
@@ -138,17 +148,15 @@ describe('Desktop 本地库数据卡列表与回收站（IPC mock，仍需真机
     await click(button('导出整库'));
     expect(button('移入回收站…')?.disabled).toBe(true);
     await act(async () => { finish({ location: 'archive.zip', byteLength: 1, entryCount: 1 }); });
-    await settle();
-    expect(button('移入回收站…')?.disabled).toBe(false);
+    await waitFor(() => button('移入回收站…')?.disabled === false);
   });
 
   it('维护窗口内的写入显示可重试提示，不当作数据损坏', async () => {
     await mount();
-    bridge.invoke.mockImplementationOnce(async () => serializeLocalLibraryRecord(rows.get('lc_a')!))
-      .mockImplementationOnce(async () => { throw { code: 'maintenance-busy', message: 'busy' }; });
+    deleteFailure = { code: 'maintenance-busy', message: 'busy' };
     await click(button('移入回收站…'));
     await click(button('确认移入回收站'));
-    await settle();
+    await waitFor(() => container.querySelector('[data-testid="local-cards-action-error"]') !== null);
     expect(container.querySelector('[data-testid="local-cards-action-error"]')?.textContent)
       .toBe('本地库正在维护，请稍后重试。');
     expect(container.textContent).toContain('本机角色 lc_a');
@@ -168,8 +176,7 @@ describe('Desktop 本地库数据卡列表与回收站（IPC mock，仍需真机
     expect(button('移入回收站…')?.disabled).toBe(false);
     await click([...container.querySelectorAll('button')].find((item) => item.textContent?.includes('使用此备份整体替换本地库')));
     await click(button('确认整体替换并退出'));
-    await settle();
-    expect(container.textContent).toContain('本地库已锁定');
+    await waitFor(hasText('本地库已锁定'));
     expect(button('移入回收站…')?.disabled).toBe(true);
   });
 
@@ -187,9 +194,8 @@ describe('Desktop 本地库数据卡列表与回收站（IPC mock，仍需真机
     });
     await mount();
     await click(button('选择归档文件'));
-    await settle();
+    await waitFor(() => button('确认导入') !== undefined);
     await click(button('确认导入'));
-    await settle();
-    expect(container.textContent).toContain('本机角色 lc_b');
+    await waitFor(hasText('本机角色 lc_b'));
   });
 });
