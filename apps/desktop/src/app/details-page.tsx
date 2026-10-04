@@ -10,7 +10,7 @@ import { DetailsSession } from '../features/details/session';
 import { buildDetailsAnswers, loadDefaultQuestionnaire, type DetailsQuestionnaire } from '../features/details/questionnaire';
 import { getProviderProfile, listProviderProfileIds } from '../platform/provider-profile-bridge';
 import { IpcLocalCardRepository } from '../platform/local-card-bridge';
-import { useArchiveLeaveGuard } from './useArchiveLeaveGuard';
+import { useLeaveGuard } from './useLeaveGuard';
 
 const actionClass = 'rounded-lg border border-(--app-border) px-4 py-2 disabled:opacity-50';
 
@@ -34,7 +34,7 @@ function DetailsForm({ session }: { session: DetailsSession }) {
     if (confirmRegenerate && !dialog?.open) dialog?.showModal();
     else if (!confirmRegenerate && dialog?.open) dialog.close();
   }, [confirmRegenerate]);
-  const guard = useArchiveLeaveGuard(
+  const guard = useLeaveGuard(
     () => session.isBusy() || (!session.getSnapshot().draftSaved && !session.getSnapshot().pendingRestore && !session.isDraftBlocked()),
     '生成或保存尚未完成，或当前草稿未能保存。请等待、取消生成，或重试保存草稿后再离开。也可以确认清除草稿以放弃当前内容。',
     '窗口关闭保护初始化失败，生成与保存暂不可用。请重新打开页面后重试。',

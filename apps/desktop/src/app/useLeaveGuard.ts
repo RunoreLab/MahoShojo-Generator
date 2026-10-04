@@ -3,13 +3,19 @@ import { useBlocker } from '@tanstack/react-router';
 import { isTauri } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 
-const DEFAULT_BUSY_MESSAGE = '归档操作仍在进行，请等待完成后再离开或关闭窗口。';
+const DEFAULT_BUSY_MESSAGE = '仍有操作在进行，请等待完成后再离开或关闭窗口。';
 
-/** 本地库维护尚无可恢复的后台 owner：在途只能留在当前页面，不提供会丢失 owner 的强制继续。 */
-export const useArchiveLeaveGuard = (
+/**
+ * 在途操作离开守卫：`isBusy` 为真时阻止路由导航、页面刷新与原生窗口关闭。
+ *
+ * 调用方用 `isBusy` 声明"什么算在途"，可选 `confirmLeave` 提供"确认后放行"。
+ * 没有可恢复后台 owner 的在途工作（如本地库维护）不提供 confirmLeave：
+ * 强制离开会丢失 owner。
+ */
+export const useLeaveGuard = (
   isBusy: () => boolean,
   busyMessage = DEFAULT_BUSY_MESSAGE,
-  initializationFailureMessage = '窗口关闭保护初始化失败，本地库维护操作暂不可用。请重新打开页面后重试。',
+  initializationFailureMessage = '窗口关闭保护初始化失败，相关操作暂不可用。请重新打开页面后重试。',
   confirmLeave?: () => boolean,
 ) => {
   const confirmLeaveRef = useRef(confirmLeave);

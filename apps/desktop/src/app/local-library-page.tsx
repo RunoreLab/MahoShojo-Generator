@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { LocalArchivePanel, createLocalArchiveController } from '@mahoshojo/ui-web/local-archive';
 
-import { useArchiveLeaveGuard } from './useArchiveLeaveGuard';
+import { useLeaveGuard } from './useLeaveGuard';
 import { LocalBackupsPanel } from '../features/backups/LocalBackupsPanel';
 import {
   DESKTOP_LIBRARY_ARCHIVE_LIMITS,
@@ -55,9 +55,10 @@ export function DesktopLocalLibrary() {
     });
   };
   useEffect(() => { controller.actions.probeStorage(); }, [controller]);
-  const guard = useArchiveLeaveGuard(
+  const guard = useLeaveGuard(
     () => maintenanceBusyRef.current || archiveBusy(),
     '本地库维护操作仍在进行，请等待完成后再离开或关闭窗口。',
+    '窗口关闭保护初始化失败，本地库维护操作暂不可用。请重新打开页面后重试。',
   );
   const archiveActions = {
     ...controller.actions,
