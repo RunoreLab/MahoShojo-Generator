@@ -54,8 +54,10 @@ describe('desktop archive host wiring', () => {
       ),
     ) as { permissions: string[]; webviews: string[]; windows?: string[] };
 
-    // onCloseRequested 放行时由 Tauri JS 调用 destroy；仅为主 UI 增加这一项。
-    expect(capability.permissions).toEqual(['core:default', 'core:window:allow-destroy']);
+    // onCloseRequested 放行时由 Tauri JS 调用 destroy；D4a 后 core 只保留显式最小集，
+    // 不得回退到 core:default 大集合。
+    expect(capability.permissions).toContain('core:window:allow-destroy');
+    expect(capability.permissions).not.toContain('core:default');
     expect(capability.webviews).toEqual(['main-ui']);
     expect(capability.windows).toBeUndefined();
 

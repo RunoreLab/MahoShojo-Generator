@@ -117,7 +117,8 @@ Rust 门禁同时由 `.github/workflows/desktop-ci.yml` 执行。`build` 脚本�
   与 `unsafe-eval`；`frame-src 'none'` 从结构上禁止主 UI 内出现任何 iframe。
 - `withGlobalTauri: false`。
 - capability 只有 `main-ui` 一个，使用 `webviews` 粒度而非 `windows`。
-- 除 `core:default` 外，仅增加 `core:window:allow-destroy`，供 `onCloseRequested` 在空闲放行后完成窗口销毁；归档在途先 `preventDefault()`。监听注册完成前禁用归档操作，失败明确报错；异步晚到的监听也会释放。
+- 自有 command 全部经 `build.rs` 的 `AppManifest::commands` 纳入 ACL，`main-ui` 逐一持有 `allow-*`；`generate_handler!`、AppManifest 与 capability 三方一致由仓库结构门禁钉住，新 command 漏登记会变红。
+- core 只保留逐项核对过的最小显式权限：`core:event:allow-listen` / `allow-unlisten`（`onCloseRequested` 监听注册与释放）与 `core:window:allow-destroy`（空闲放行后销毁窗口），不回退 `core:default`；归档在途先 `preventDefault()`。监听注册完成前禁用归档操作，失败明确报错；异步晚到的监听也会释放。
 - **未引入任何 Tauri 插件**，因此 renderer 不存在 shell、文件系统、SQL 或 HTTP 通用能力。
 - Vite `envPrefix` 只保留 `TAURI_ENV_*`，不暴露 `VITE_`。
 - Rust 侧的出站 HTTP 只服务于 Direct AI：endpoint 与 header 只能来自已保存 Profile 的窄投影，
