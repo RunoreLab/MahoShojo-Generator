@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 
+import type { DirectProviderAdapter } from '@mahoshojo/contracts';
 import {
   AI_PROVIDER_CATALOG,
   AI_PROVIDER_PRESETS,
@@ -7,7 +8,9 @@ import {
   MAX_CUSTOM_AI_MODEL_ID_LENGTH,
   SYSTEM_PROVIDER_OPTION,
   describeAiPresetDirectSupport,
+  describeAiPresetDirectWire,
   describeAiPresetModelDirectSupport,
+  describeAiPresetModelDirectWire,
   findAiProviderPreset,
   isDirectCapableAiPreset,
   isSystemProviderOption,
@@ -15,6 +18,11 @@ import {
   listDirectCapableAiPresets,
   resolveAIProviderModel,
 } from '@mahoshojo/ai-core/provider-catalog';
+
+/** 测试宿主的 Direct 执行能力集：由调用方注入，ai-core 不镜像 native 实现。 */
+const OPENAI_COMPATIBLE_ONLY: ReadonlySet<DirectProviderAdapter> = new Set([
+  'openai-compatible',
+]);
 
 describe('shared provider catalog', () => {
   it('exposes the system default and every configured system model', () => {
@@ -98,21 +106,23 @@ describe('system option 与预设分层', () => {
   });
 });
 
-describe('Direct 能力语义（fail-closed，显式声明而非 type 推导）', () => {
-  it('system 是服务器策略而非可直连端点', () => {
-    expect(describeAiPresetDirectSupport(SYSTEM_PROVIDER_OPTION)).toEqual({
-      supported: false,
+describe('Direct wire 核验（端点证据层，fail-closed）', () => {
+  it('system 是服务器策略而非端点，wire 判定为 server-policy', () => {
+    expect(describeAiPresetDirectWire(SYSTEM_PROVIDER_OPTION)).toEqual({
+      status: 'unavailable',
       reason: 'server-policy',
     });
   });
 
-  it('已声明 wire 的 provider-public 预设返回对应 adapter', () => {
+  it('已声明 wire 的 provider-public 预设返回 verified 与核验证据', () => {
     const deepseek = findAiProviderPreset('deepseek')!;
     expect(deepseek.endpointKind).toBe('provider-public');
     expect(deepseek.direct?.adapter).toBe('openai-compatible');
-    expect(describeAiPresetDirectSupport(deepseek)).toEqual({
-      supported: true,
+    expect(describeAiPresetDirectWire(deepseek)).toEqual({
+      status: 'verified',
       adapter: 'openai-compatible',
+      sourceUrl: deepseek.direct!.sourceUrl,
+      reviewedAt: deepseek.direct!.reviewedAt,
     });
   });
 
@@ -121,84 +131,52 @@ describe('Direct 能力语义（fail-closed，显式声明而非 type 推导）'
       ...findAiProviderPreset('deepseek')!,
       direct: undefined,
     };
-    expect(describeAiPresetDirectSupport(undeclared)).toEqual({
-      supported: false,
-      reason: 'unverified',
-    });
-    // 没有 endpointKind 的裸目录项同样不得被当作支持。
+    expect(describeAiPresetDirectWire(undeclared)).toEqual({ status: 'unverified' });
+    // 没有 endpointKind 的裸目录项同样不得被当作已核验。
     const bare = { ...undeclared, endpointKind: undefined } as unknown as typeof undeclared;
-    expect(describeAiPresetDirectSupport(bare)).toEqual({
-      supported: false,
-      reason: 'unverified',
-    });
+    expect(describeAiPresetDirectWire(bare)).toEqual({ status: 'unverified' });
   });
 
-  it('已核验但 native 未实现对应 adapter 的 wire 报 unsupported-protocol', () => {
-    const anthropicOnly = {
-      ...findAiProviderPreset('deepseek')!,
-      direct: { adapter: 'anthropic' as const, reviewedAt: '2026-10-04' },
-    };
-    expect(describeAiPresetDirectSupport(anthropicOnly)).toEqual({
-      supported: false,
-      reason: 'unsupported-protocol',
-    });
-  });
-
-  it('project-forward 端点即使将来有 adapter 也不得直连', () => {
+  it('project-forward 端点永远核验为 project-forward-endpoint', () => {
     const forwards = AI_PROVIDER_PRESETS.filter((p) => p.endpointKind === 'project-forward');
     expect(forwards.map((p) => p.id).sort()).toEqual(['google-cloudflare', 'mystery']);
     for (const preset of forwards) {
-      expect(describeAiPresetDirectSupport(preset)).toEqual({
-        supported: false,
+      expect(describeAiPresetDirectWire(preset)).toEqual({
+        status: 'unavailable',
         reason: 'project-forward-endpoint',
       });
     }
   });
 
-  it('project-forward 端点不得携带任何 direct 声明（预设级或模型级）', () => {
-    const forwards = AI_PROVIDER_PRESETS.filter((p) => p.endpointKind === 'project-forward');
-    for (const preset of forwards) {
-      expect(preset.direct).toBeUndefined();
-      expect(preset.models.every((model) => model.direct === undefined)).toBe(true);
-    }
-  });
-
-  it('多协议端点无 preset 级结论：OpenCode 预设级 unverified、逐模型判定', () => {
+  it('多协议端点核验证据按 (preset, model) 归属，不跨端点继承', () => {
     const zen = findAiProviderPreset('opencode-zen')!;
     const go = findAiProviderPreset('opencode-go')!;
+    // 两端点都无 preset 级声明。
     for (const preset of [zen, go]) {
-      expect(preset.endpointKind).toBe('provider-public');
       expect(preset.direct).toBeUndefined();
-      expect(describeAiPresetDirectSupport(preset)).toEqual({
-        supported: false,
-        reason: 'unverified',
-      });
+      expect(describeAiPresetDirectWire(preset)).toEqual({ status: 'unverified' });
     }
-    // 已核验走 /chat/completions 的收录模型可直连。
-    expect(describeAiPresetModelDirectSupport(zen, 'deepseek-v4-flash')).toEqual({
-      supported: true,
+    // MiniMax 在 Zen 走 /chat/completions、在 Go 走 /messages：Go 侧（未收录）
+    // 不得因 Zen 侧已核验而获得 openai-compatible 结论。
+    expect(describeAiPresetModelDirectWire(zen, 'minimax-m3')).toMatchObject({
+      status: 'verified',
       adapter: 'openai-compatible',
     });
-    expect(describeAiPresetModelDirectSupport(go, 'kimi-k3')).toEqual({
-      supported: true,
+    expect(describeAiPresetModelDirectWire(go, 'minimax-m3')).toEqual({
+      status: 'unverified',
+    });
+    // 各端点核验证据的 provenance 指向各自官方文档。
+    expect(describeAiPresetModelDirectWire(go, 'kimi-k3')).toMatchObject({
+      status: 'verified',
       adapter: 'openai-compatible',
+      sourceUrl: 'https://opencode.ai/docs/go/',
     });
     // 未核验模型与未收录 modelId 一律 unverified——新增模型不静默继承。
-    expect(describeAiPresetModelDirectSupport(zen, 'big-pickle')).toEqual({
-      supported: false,
-      reason: 'unverified',
-    });
-    expect(describeAiPresetModelDirectSupport(zen, 'gpt-5.6-luna')).toEqual({
-      supported: false,
-      reason: 'unverified',
-    });
-    expect(describeAiPresetModelDirectSupport(go, 'some-unlisted-model')).toEqual({
-      supported: false,
-      reason: 'unverified',
-    });
+    expect(describeAiPresetModelDirectWire(zen, 'big-pickle')).toEqual({ status: 'unverified' });
+    expect(describeAiPresetModelDirectWire(zen, 'gpt-5.6-luna')).toEqual({ status: 'unverified' });
   });
 
-  it('模型级 direct 覆盖优先于 preset 级声明', () => {
+  it('模型级 direct 覆盖优先于 preset 级声明（none → unsupported-model）', () => {
     const zen = findAiProviderPreset('opencode-zen')!;
     const blocked = {
       ...zen,
@@ -207,17 +185,16 @@ describe('Direct 能力语义（fail-closed，显式声明而非 type 推导）'
         model.value === 'deepseek-v4-flash' ? { ...model, direct: 'none' as const } : model
       ),
     };
-    // 显式核验为不可直连的模型优先于整条声明。
-    expect(describeAiPresetModelDirectSupport(blocked, 'deepseek-v4-flash')).toEqual({
-      supported: false,
+    expect(describeAiPresetModelDirectWire(blocked, 'deepseek-v4-flash')).toEqual({
+      status: 'unavailable',
       reason: 'unsupported-model',
     });
   });
 
   it('单协议端点上未收录的自定义 modelId 继承 preset 级声明', () => {
     const deepseek = findAiProviderPreset('deepseek')!;
-    expect(describeAiPresetModelDirectSupport(deepseek, 'custom-model-v1')).toEqual({
-      supported: true,
+    expect(describeAiPresetModelDirectWire(deepseek, 'custom-model-v1')).toMatchObject({
+      status: 'verified',
       adapter: 'openai-compatible',
     });
   });
@@ -237,15 +214,108 @@ describe('Direct 能力语义（fail-closed，显式声明而非 type 推导）'
       }
     }
   });
+});
+
+describe('Direct 支持度判定（wire 核验 ∩ 宿主注入的已实现 adapter）', () => {
+  it('已核验 wire 且宿主实现该 adapter 时 supported', () => {
+    const deepseek = findAiProviderPreset('deepseek')!;
+    expect(describeAiPresetDirectSupport(deepseek, OPENAI_COMPATIBLE_ONLY)).toEqual({
+      supported: true,
+      adapter: 'openai-compatible',
+    });
+    expect(describeAiPresetModelDirectSupport(deepseek, 'custom-model-v1', OPENAI_COMPATIBLE_ONLY)).toEqual({
+      supported: true,
+      adapter: 'openai-compatible',
+    });
+  });
+
+  it('system 与 project-forward 在宿主能力判定前已被排除', () => {
+    expect(describeAiPresetDirectSupport(SYSTEM_PROVIDER_OPTION, OPENAI_COMPATIBLE_ONLY)).toEqual({
+      supported: false,
+      reason: 'server-policy',
+    });
+    for (const preset of AI_PROVIDER_PRESETS.filter((p) => p.endpointKind === 'project-forward')) {
+      expect(describeAiPresetDirectSupport(preset, OPENAI_COMPATIBLE_ONLY)).toEqual({
+        supported: false,
+        reason: 'project-forward-endpoint',
+      });
+    }
+  });
+
+  it('已核验但宿主未实现对应 adapter 的 wire 报 unsupported-protocol', () => {
+    const anthropicOnly = {
+      ...findAiProviderPreset('deepseek')!,
+      direct: { adapter: 'anthropic' as const, reviewedAt: '2026-10-04' },
+    };
+    expect(describeAiPresetDirectSupport(anthropicOnly, OPENAI_COMPATIBLE_ONLY)).toEqual({
+      supported: false,
+      reason: 'unsupported-protocol',
+    });
+    // wire 层仍如实报告该端点已核验使用 anthropic——不支持是宿主事实而非证据缺失。
+    expect(describeAiPresetDirectWire(anthropicOnly)).toMatchObject({
+      status: 'verified',
+      adapter: 'anthropic',
+    });
+  });
+
+  it('宿主能力集为空时一切已核验 wire 均报 unsupported-protocol', () => {
+    const nothing: ReadonlySet<DirectProviderAdapter> = new Set();
+    expect(describeAiPresetDirectSupport(findAiProviderPreset('deepseek')!, nothing)).toEqual({
+      supported: false,
+      reason: 'unsupported-protocol',
+    });
+  });
+
+  it('多协议端点 OpenCode 逐模型判定：verified 模型 ∩ 宿主能力', () => {
+    const zen = findAiProviderPreset('opencode-zen')!;
+    const go = findAiProviderPreset('opencode-go')!;
+    for (const preset of [zen, go]) {
+      expect(describeAiPresetDirectSupport(preset, OPENAI_COMPATIBLE_ONLY)).toEqual({
+        supported: false,
+        reason: 'unverified',
+      });
+    }
+    expect(describeAiPresetModelDirectSupport(zen, 'deepseek-v4-flash', OPENAI_COMPATIBLE_ONLY)).toEqual({
+      supported: true,
+      adapter: 'openai-compatible',
+    });
+    expect(describeAiPresetModelDirectSupport(go, 'kimi-k3', OPENAI_COMPATIBLE_ONLY)).toEqual({
+      supported: true,
+      adapter: 'openai-compatible',
+    });
+    expect(describeAiPresetModelDirectSupport(zen, 'big-pickle', OPENAI_COMPATIBLE_ONLY)).toEqual({
+      supported: false,
+      reason: 'unverified',
+    });
+    expect(describeAiPresetModelDirectSupport(go, 'some-unlisted-model', OPENAI_COMPATIBLE_ONLY)).toEqual({
+      supported: false,
+      reason: 'unverified',
+    });
+  });
+
+  it('模型级 none 核验在宿主判定中返回 unsupported-model', () => {
+    const zen = findAiProviderPreset('opencode-zen')!;
+    const blocked = {
+      ...zen,
+      direct: { adapter: 'openai-compatible' as const, reviewedAt: '2026-10-04' },
+      models: zen.models.map((model) =>
+        model.value === 'deepseek-v4-flash' ? { ...model, direct: 'none' as const } : model
+      ),
+    };
+    expect(describeAiPresetModelDirectSupport(blocked, 'deepseek-v4-flash', OPENAI_COMPATIBLE_ONLY)).toEqual({
+      supported: false,
+      reason: 'unsupported-model',
+    });
+  });
 
   it('listDirectCapableAiPresets 给出至少一个已核验可直连模型的 preset', () => {
-    const capable = listDirectCapableAiPresets();
+    const capable = listDirectCapableAiPresets(OPENAI_COMPATIBLE_ONLY);
     expect(capable.length).toBeGreaterThan(0);
     expect(capable.every((p) => p.endpointKind === 'provider-public')).toBe(true);
     expect(capable.some((p) => p.id === 'system')).toBe(false);
     // 每个入选 preset 至少一个收录模型可直连；多协议端点也按模型计入。
     for (const preset of capable) {
-      const capableModels = listDirectCapableAiPresetModels(preset);
+      const capableModels = listDirectCapableAiPresetModels(preset, OPENAI_COMPATIBLE_ONLY);
       expect(capableModels.length).toBeGreaterThan(0);
     }
     // OpenCode 两个预设虽无 preset 级声明，但收录模型已核验可直连。
@@ -256,7 +326,7 @@ describe('Direct 能力语义（fail-closed，显式声明而非 type 推导）'
     expect(capable.map((p) => p.id)).not.toContain('mystery');
     // isDirectCapableAiPreset 仍是 preset 级整条判定：多协议端点返回 false。
     const zen = findAiProviderPreset('opencode-zen')!;
-    expect(isDirectCapableAiPreset(zen)).toBe(false);
-    expect(isDirectCapableAiPreset(findAiProviderPreset('deepseek')!)).toBe(true);
+    expect(isDirectCapableAiPreset(zen, OPENAI_COMPATIBLE_ONLY)).toBe(false);
+    expect(isDirectCapableAiPreset(findAiProviderPreset('deepseek')!, OPENAI_COMPATIBLE_ONLY)).toBe(true);
   });
 });

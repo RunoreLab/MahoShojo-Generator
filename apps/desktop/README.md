@@ -37,8 +37,11 @@ MahoShojo Generator 的本地桌面客户端 runtime。它是独立 app，不是
   标注端点归属（`provider-public` 可作 Direct 候选，`project-forward` 的项目转发端点只能走
   服务器 BYOK）；Direct 能力由显式 `direct` 核验声明给出——单协议端点 preset 级声明、
   OpenCode 等多协议端点逐模型标注，缺省 `unverified` fail-closed，不从 provider `type`
-  推导；`describeAiPresetDirectSupport`/`describeAiPresetModelDirectSupport`/
-  `listDirectCapableAiPresets` 给出支持度与原因，`AI_PROVIDER_CATALOG` 保持旧选择器/wire
+  推导（OpenCode 核验证据按 (preset, model) 归属各自维护，同名模型不跨端点继承）；
+  `describeAiPresetDirectWire`/`describeAiPresetModelDirectWire` 给出端点侧核验结论，
+  `describeAiPresetDirectSupport`/`describeAiPresetModelDirectSupport`/
+  `listDirectCapableAiPresets` 再叠加调用方注入的宿主已实现 adapter 集给出最终支持度——
+  ai-core 不镜像 Rust native 实现状态，`AI_PROVIDER_CATALOG` 保持旧选择器/wire
   形状不变（legacy wire 由 fixture 冻结）。`@mahoshojo/ai-core/ai-connections`
   把 `DirectProviderProfileV1` 投影为 display-only 的 `AiConnectionListItem`——
   不含 headers/defaults/transport，持久化权威始终是完整 Profile；端点相同不会把

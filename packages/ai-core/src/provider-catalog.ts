@@ -8,28 +8,28 @@
 import type { DirectProviderAdapter } from '@mahoshojo/contracts/provider-profile';
 
 export interface AIModelOption {
-    value: string;
-    label: string;
-    description: string;
+    readonly value: string;
+    readonly label: string;
+    readonly description: string;
     /**
      * 该 served model 在所属 preset 端点下的 Direct wire 核验结果，仅多协议端点需要
      * 逐模型声明。缺省继承 `AiProviderPreset.direct`——包括它的「未核验」：
      * - `AiDirectWireEvidence`：已核验该模型经此 wire 可达；
      * - `'none'`：已核验该模型不可 Direct（例如端点对它使用另一协议）。
      */
-    direct?: AiDirectWireEvidence | 'none';
+    readonly direct?: AiDirectWireEvidence | 'none';
 }
 
 export interface AIProviderOption {
-    id: string;
-    name: string;
-    description: string;
-    docsUrl: string;
-    baseUrl: string;
-    type: 'openai' | 'google' | 'deepseek';
+    readonly id: string;
+    readonly name: string;
+    readonly description: string;
+    readonly docsUrl: string;
+    readonly baseUrl: string;
+    readonly type: 'openai' | 'google' | 'deepseek';
     // 待实现
-    mode?: 'auto' | 'json' | 'tool';
-    models: readonly AIModelOption[];
+    readonly mode?: 'auto' | 'json' | 'tool';
+    readonly models: readonly AIModelOption[];
 }
 
 /** 「系统默认配置」在 wire 与旧选择器里的身份。 */
@@ -61,15 +61,15 @@ export type AiPresetEndpointKind = 'provider-public' | 'project-forward';
  * （DESK-ONLINE-004：目录项不是 adapter 已实现的证明）。
  */
 export interface AiDirectWireEvidence {
-    adapter: DirectProviderAdapter;
+    readonly adapter: DirectProviderAdapter;
     /** 核验所依据的公开一手资料（官方协议文档）；缺省时依据写在相邻注释。 */
-    sourceUrl?: string;
+    readonly sourceUrl?: string;
     /** 核验日期（YYYY-MM-DD）。供应商改版会让旧证据过期，必须记录时间。 */
-    reviewedAt: string;
+    readonly reviewedAt: string;
 }
 
 export interface AiProviderPreset extends AIProviderOption {
-    endpointKind: AiPresetEndpointKind;
+    readonly endpointKind: AiPresetEndpointKind;
     /**
      * 项目核验过的 preset 级 Direct wire；缺省 = 未核验（`unverified`）。
      * `project-forward` 端点恒不可直连，不得声明。
@@ -79,106 +79,172 @@ export interface AiProviderPreset extends AIProviderOption {
      * 标注——未收录/未核验的模型自动回落到 `unverified`，新增模型不会静默继承
      * 一个并不成立的整条结论。
      */
-    direct?: AiDirectWireEvidence;
+    readonly direct?: AiDirectWireEvidence;
 }
+
+/** 端点/模型侧核验给出的「不可提供 Direct wire」原因（不含宿主能力判定）。 */
+export type AiDirectWireUnavailableReason =
+    | 'server-policy'
+    | 'project-forward-endpoint'
+    | 'unsupported-model';
+
+/**
+ * 目录层对「该 endpoint / 该模型走哪条 Direct wire」的核验结论。
+ *
+ * 只描述端点侧证据，**不回答宿主能否执行**——宿主能力由调用方注入
+ * `implementedDirectAdapters` 后经 `describeAiPreset*DirectSupport` 判定；
+ * 本包不镜像 native 实现状态，避免跨层双权威漂移。
+ */
+export type AiDirectWireResolution =
+    | {
+          status: 'verified';
+          adapter: DirectProviderAdapter;
+          sourceUrl?: string;
+          reviewedAt: string;
+      }
+    | { status: 'unverified' }
+    | { status: 'unavailable'; reason: AiDirectWireUnavailableReason };
 
 /** Desktop Direct 暂不可用的原因；用于 UI 说明而非静默隐藏。 */
 export type AiPresetDirectUnsupportedReason =
-    | 'server-policy'
-    | 'project-forward-endpoint'
+    | AiDirectWireUnavailableReason
     | 'unsupported-protocol'
-    | 'unsupported-model'
     | 'unverified';
 
 export type AiPresetDirectSupport =
     | { supported: true; adapter: DirectProviderAdapter }
     | { supported: false; reason: AiPresetDirectUnsupportedReason };
 
-/**
- * 当前 native Direct 执行层真正实现的 wire adapter（`apps/desktop` Rust 侧）。
- * 这是「我们代码」的事实，与预设声明的「端点 wire」证据是两回事：声明证明
- * 端点会说什么协议，本集合证明我们实际能执行哪些协议。native 新增 adapter
- * 实现时同步扩充；不得反向用它放宽预设的证据要求。
- */
-const IMPLEMENTED_DIRECT_ADAPTERS: ReadonlySet<DirectProviderAdapter> = new Set([
-    'openai-compatible',
-]);
-
-const describeDeclaredDirectSupport = (
+const resolveDeclaredDirectWire = (
     declared: AiDirectWireEvidence | undefined
-): AiPresetDirectSupport => {
-    if (declared === undefined) {
-        return { supported: false, reason: 'unverified' };
-    }
-    if (!IMPLEMENTED_DIRECT_ADAPTERS.has(declared.adapter)) {
-        return { supported: false, reason: 'unsupported-protocol' };
-    }
-    return { supported: true, adapter: declared.adapter };
-};
+): AiDirectWireResolution =>
+    declared === undefined ? { status: 'unverified' } : { status: 'verified', ...declared };
 
 /**
- * 判定一个目录项在 **preset 级**能否成为 Desktop Direct 连接。
+ * 判定一个目录项在 **preset 级**核验过哪条 Direct wire。
  *
  * 检查顺序有语义：`server-policy` 先于端点归属（`system` 没有端点可判），
- * `project-forward-endpoint` 先于协议能力——即使将来实现了对应 adapter，
- * 项目转发端点依然不得直连。
+ * `project-forward-endpoint` 先于协议能力——即使将来 native 实现了对应
+ * adapter，项目转发端点依然不得直连。
  *
  * 这里只反映 preset 级整条声明；多协议端点（preset 级 `unverified`）下个别
- * 已核验模型是否可直连，要查 `describeAiPresetModelDirectSupport`。
+ * 已核验模型的 wire，要查 `describeAiPresetModelDirectWire`。
  */
-export const describeAiPresetDirectSupport = (
+export const describeAiPresetDirectWire = (
     provider: AIProviderOption | AiProviderPreset
-): AiPresetDirectSupport => {
+): AiDirectWireResolution => {
     if (isSystemProviderOption(provider)) {
-        return { supported: false, reason: 'server-policy' };
+        return { status: 'unavailable', reason: 'server-policy' };
     }
     if ((provider as AiProviderPreset).endpointKind === 'project-forward') {
-        return { supported: false, reason: 'project-forward-endpoint' };
+        return { status: 'unavailable', reason: 'project-forward-endpoint' };
     }
-    return describeDeclaredDirectSupport((provider as AiProviderPreset).direct);
+    return resolveDeclaredDirectWire((provider as AiProviderPreset).direct);
 };
 
 /**
- * 判定一条具体的 (preset, modelId) 路径当前能否走 Desktop Direct。
+ * 判定一条具体的 (preset, modelId) 路径核验过哪条 Direct wire。
  *
  * 模型级声明优先于 preset 级；未收录的 modelId（如自定义 modelId）继承
  * `preset.direct`——单协议端点下成立，多协议端点下自然回落 `unverified`。
  */
-export const describeAiPresetModelDirectSupport = (
+export const describeAiPresetModelDirectWire = (
     preset: AiProviderPreset,
     modelId: string
-): AiPresetDirectSupport => {
+): AiDirectWireResolution => {
     if (preset.endpointKind === 'project-forward') {
-        return { supported: false, reason: 'project-forward-endpoint' };
+        return { status: 'unavailable', reason: 'project-forward-endpoint' };
     }
     const modelDirect = preset.models.find((model) => model.value === modelId)?.direct;
     if (modelDirect === 'none') {
-        return { supported: false, reason: 'unsupported-model' };
+        return { status: 'unavailable', reason: 'unsupported-model' };
     }
-    return describeDeclaredDirectSupport(modelDirect ?? preset.direct);
+    return resolveDeclaredDirectWire(modelDirect ?? preset.direct);
 };
 
-/** preset 级整条声明是否可直连；多协议端点请按模型查询。 */
-export const isDirectCapableAiPreset = (preset: AiProviderPreset): boolean =>
-    describeAiPresetDirectSupport(preset).supported;
+/**
+ * 把端点侧 wire 核验结论与「宿主当前能执行哪些 adapter」合成最终支持度。
+ *
+ * `implementedDirectAdapters` 必须由调用方按宿主真实实现注入（Desktop 是
+ * Rust native adapter 集合）；已核验但宿主未实现的 wire 报
+ * `unsupported-protocol`，而不是被当作「可用」。
+ */
+const describeDeclaredDirectSupport = (
+    resolution: AiDirectWireResolution,
+    implementedDirectAdapters: ReadonlySet<DirectProviderAdapter>
+): AiPresetDirectSupport => {
+    if (resolution.status === 'unverified') {
+        return { supported: false, reason: 'unverified' };
+    }
+    if (resolution.status === 'unavailable') {
+        return { supported: false, reason: resolution.reason };
+    }
+    if (!implementedDirectAdapters.has(resolution.adapter)) {
+        return { supported: false, reason: 'unsupported-protocol' };
+    }
+    return { supported: true, adapter: resolution.adapter };
+};
 
 /**
- * 可作为 Desktop Direct 连接来源的 preset：至少一个收录模型已核验可直连
+ * 判定一个目录项在 **preset 级**当前能否成为该宿主的 Direct 连接
+ * （wire 核验 ∩ 宿主已实现的 adapter 集合）。
+ */
+export const describeAiPresetDirectSupport = (
+    provider: AIProviderOption | AiProviderPreset,
+    implementedDirectAdapters: ReadonlySet<DirectProviderAdapter>
+): AiPresetDirectSupport =>
+    describeDeclaredDirectSupport(
+        describeAiPresetDirectWire(provider),
+        implementedDirectAdapters
+    );
+
+/**
+ * 判定一条具体的 (preset, modelId) 路径当前能否在该宿主上走 Direct
+ * （wire 核验 ∩ 宿主已实现的 adapter 集合）。
+ */
+export const describeAiPresetModelDirectSupport = (
+    preset: AiProviderPreset,
+    modelId: string,
+    implementedDirectAdapters: ReadonlySet<DirectProviderAdapter>
+): AiPresetDirectSupport =>
+    describeDeclaredDirectSupport(
+        describeAiPresetModelDirectWire(preset, modelId),
+        implementedDirectAdapters
+    );
+
+/** preset 级整条声明在该宿主上是否可直连；多协议端点请按模型查询。 */
+export const isDirectCapableAiPreset = (
+    preset: AiProviderPreset,
+    implementedDirectAdapters: ReadonlySet<DirectProviderAdapter>
+): boolean => describeAiPresetDirectSupport(preset, implementedDirectAdapters).supported;
+
+/**
+ * 可作为该宿主 Direct 连接来源的 preset：至少一个收录模型已核验可直连
  * （`project-forward` 与全未核验条目被排除）。
  */
-export const listDirectCapableAiPresets = (): readonly AiProviderPreset[] =>
+export const listDirectCapableAiPresets = (
+    implementedDirectAdapters: ReadonlySet<DirectProviderAdapter>
+): readonly AiProviderPreset[] =>
     AI_PROVIDER_PRESETS.filter((preset) =>
         preset.models.some(
-            (model) => describeAiPresetModelDirectSupport(preset, model.value).supported
+            (model) =>
+                describeAiPresetModelDirectSupport(
+                    preset,
+                    model.value,
+                    implementedDirectAdapters
+                ).supported
         )
     );
 
-/** preset 内已核验可直连的收录模型清单。 */
+/** preset 内在该宿主上已核验可直连的收录模型清单。 */
 export const listDirectCapableAiPresetModels = (
-    preset: AiProviderPreset
+    preset: AiProviderPreset,
+    implementedDirectAdapters: ReadonlySet<DirectProviderAdapter>
 ): readonly AIModelOption[] =>
     preset.models.filter(
-        (model) => describeAiPresetModelDirectSupport(preset, model.value).supported
+        (model) =>
+            describeAiPresetModelDirectSupport(preset, model.value, implementedDirectAdapters)
+                .supported
     );
 
 /** 只在项目预设集合中查找；`'system'` 属服务器策略，永远查不到。 */
@@ -361,23 +427,26 @@ const OPENAI_COMPATIBLE_DIRECT_WIRE: AiDirectWireEvidence = Object.freeze({
 /**
  * OpenCode Zen/Go 是多协议端点（同一 baseUrl 按模型分流到
  * `/chat/completions`、`/messages`、`/responses`），不做 preset 级整条声明。
- * 已收录模型中非 GPT/Claude 家族者均走 OpenAI-compatible
- * `/chat/completions`；新增模型必须逐条核验，否则自动 `unverified`。
- * 证据：<https://opencode.ai/docs/en/zen/>
+ * 同一 modelId 在不同端点的 wire 未必相同（如 MiniMax 系在 Zen 走
+ * `/chat/completions`、在 Go 走 `/messages`），因此核验证据按
+ * (preset, model) 归属各自维护，**不跨端点共享 allowlist**——否则给
+ * Go 补一个 Zen 已核验的同名模型就会被静默误判。
+ * 新增模型必须逐条核验，否则自动 `unverified`。
+ * 证据：Zen <https://opencode.ai/docs/en/zen/>、Go <https://opencode.ai/docs/go/>
  */
-const OPENCODE_CHAT_COMPLETIONS_WIRE: AiDirectWireEvidence = Object.freeze({
+const OPENCODE_ZEN_CHAT_COMPLETIONS_WIRE: AiDirectWireEvidence = Object.freeze({
     adapter: 'openai-compatible',
     sourceUrl: 'https://opencode.ai/docs/en/zen/',
     reviewedAt: '2026-10-04',
 });
 
-/**
- * OpenCode Zen/Go 端点上已核验走 OpenAI-compatible `/chat/completions` 的
- * 收录模型：该网关按模型家族分流（GPT→`/responses`、Claude→`/messages`、
- * 其余→`/chat/completions`）。未列入此集合的收录模型保持 `unverified`，
- * 新增模型默认不继承——这正是多协议端点要逐模型标注的原因。
- */
-const OPENCODE_CHAT_COMPLETIONS_MODEL_IDS: ReadonlySet<string> = new Set([
+const OPENCODE_GO_CHAT_COMPLETIONS_WIRE: AiDirectWireEvidence = Object.freeze({
+    adapter: 'openai-compatible',
+    sourceUrl: 'https://opencode.ai/docs/go/',
+    reviewedAt: '2026-10-04',
+});
+
+const OPENCODE_ZEN_CHAT_COMPLETIONS_MODEL_IDS: ReadonlySet<string> = new Set([
     'deepseek-v4-flash',
     'deepseek-v4-flash-free',
     'deepseek-v4-pro',
@@ -386,24 +455,34 @@ const OPENCODE_CHAT_COMPLETIONS_MODEL_IDS: ReadonlySet<string> = new Set([
     'glm-5.2',
     'glm-5.3',
     'glm-5.3-flash',
-    'hy3',
     'kimi-k2.5',
+    'kimi-k2.6',
+    'kimi-k2.7-code',
+    'kimi-k3',
+    'minimax-m2.7',
+    'minimax-m3',
+]);
+
+const OPENCODE_GO_CHAT_COMPLETIONS_MODEL_IDS: ReadonlySet<string> = new Set([
+    'deepseek-v4-flash',
+    'deepseek-v4-pro',
+    'glm-5.3',
+    'glm-5.3-flash',
+    'hy3',
     'kimi-k2.6',
     'kimi-k2.7-code',
     'kimi-k3',
     'mimo-v2.5',
     'mimo-v2.5-pro',
-    'minimax-m2.7',
-    'minimax-m3',
 ]);
 
-const markOpenCodeChatCompletionsModels = (
-    models: readonly AIModelOption[]
+const markModelsWithDirectWire = (
+    models: readonly AIModelOption[],
+    verifiedModelIds: ReadonlySet<string>,
+    wire: AiDirectWireEvidence
 ): AIModelOption[] =>
     models.map((model) =>
-        OPENCODE_CHAT_COMPLETIONS_MODEL_IDS.has(model.value)
-            ? { ...model, direct: OPENCODE_CHAT_COMPLETIONS_WIRE }
-            : model
+        verifiedModelIds.has(model.value) ? { ...model, direct: wire } : model
     );
 
 /**
@@ -1947,8 +2026,9 @@ export const AI_PROVIDER_PRESETS: readonly AiProviderPreset[] = Object.freeze([
         type: 'openai',
         mode: 'auto',
         endpointKind: 'provider-public',
-        // 多协议端点：无 preset 级 direct 声明，逐模型核验（见 OPENCODE_CHAT_COMPLETIONS_MODEL_IDS）。
-        models: markOpenCodeChatCompletionsModels([
+        // 多协议端点：无 preset 级 direct 声明，逐模型核验（Zen 侧 allowlist）。
+        models: markModelsWithDirectWire(
+            [
             {
                 value: 'deepseek-v4-flash',
                 label: 'DeepSeek V4 Flash',
@@ -2019,7 +2099,10 @@ export const AI_PROVIDER_PRESETS: readonly AiProviderPreset[] = Object.freeze([
                 label: 'DeepSeek V4 Flash（免费）',
                 description: 'OpenCode Zen 限时免费的 DeepSeek V4 Flash，适合低成本尝试。'
             },
-        ])
+            ],
+            OPENCODE_ZEN_CHAT_COMPLETIONS_MODEL_IDS,
+            OPENCODE_ZEN_CHAT_COMPLETIONS_WIRE
+        )
     },
     {
         id: 'opencode-go',
@@ -2030,8 +2113,9 @@ export const AI_PROVIDER_PRESETS: readonly AiProviderPreset[] = Object.freeze([
         type: 'openai',
         mode: 'auto',
         endpointKind: 'provider-public',
-        // 多协议端点：无 preset 级 direct 声明，逐模型核验（见 OPENCODE_CHAT_COMPLETIONS_MODEL_IDS）。
-        models: markOpenCodeChatCompletionsModels([
+        // 多协议端点：无 preset 级 direct 声明，逐模型核验（Go 侧 allowlist）。
+        models: markModelsWithDirectWire(
+            [
             {
                 value: 'deepseek-v4-flash',
                 label: 'DeepSeek V4 Flash',
@@ -2073,7 +2157,10 @@ export const AI_PROVIDER_PRESETS: readonly AiProviderPreset[] = Object.freeze([
                 label: '混元 Hy3',
                 description: '腾讯混元通用模型，提供多档思考模式，适合复杂任务执行。'
             },
-        ])
+            ],
+            OPENCODE_GO_CHAT_COMPLETIONS_MODEL_IDS,
+            OPENCODE_GO_CHAT_COMPLETIONS_WIRE
+        )
     },
     {
         id: 'mystery',
