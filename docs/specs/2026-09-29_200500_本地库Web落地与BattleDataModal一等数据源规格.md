@@ -131,6 +131,8 @@ archive manifest，但**没有任何 runtime 消费它**：无 IndexedDB adapter
 - `apps/web/tests/battle-data-modal-local-library.test.tsx`：未登录可用、本地动作集、删除二次确认、
   详情与选择都不发线上请求。
 - `apps/web/tests/local-library-status.test.tsx`：持久化状态、申请入口、不支持时的保守措辞。
+- `apps/web/tests/local-library-page-cards.test.tsx`：`/local-library` 回用共源数据卡列表，软删进入回收站、
+  恢复走真实 IndexedDB adapter，全程不触网。
 - `apps/web/tests/web-package-cache.test.ts`：导入不再写旧缓存、重新导入整卡替换、会话与历史
   水合、一次性迁移的幂等与失败保留。
 - `apps/web/tests/data-card-local-library.test.tsx`：真实 `DataCard` 的本地分支（不是只断言 prop 回显）。
@@ -143,7 +145,8 @@ archive manifest，但**没有任何 runtime 消费它**：无 IndexedDB adapter
 
 - `LIB-007` 导出/备份/恢复的完整实现。
 - `LIB-004` Installed APP（SQLite + 文件内容寻址区 + Secure Vault）。
-- 本地库回收站 UI：仓储已支持 `restore`，当前只有软删，没有面向用户的恢复入口。
-  `purge` 已在两类仓储上具备能力，但只有「从本机删除 Web 包」这一入口有调用方
-  （`removeLocalWebPackage`，因为它对用户的承诺是彻底移除而非移入回收站）。
-  回收站 UI 属 `LIB-007` 的承载页面范围。
+- ~~本地库回收站 UI~~（数据卡部分 2026-10-04 已由 Desktop 计划 D3.2a 落地）：`/local-library` 挂载共源
+  `@mahoshojo/ui-web/local-cards`，提供数据卡回收站的恢复与彻底删除（`purge`，二次确认）。Web 包仍无回收站：
+  「从本机删除 Web 包」（`removeLocalWebPackage`）对用户的承诺是彻底移除而非移入回收站。
+- 导入同内容但已被软删的数据卡：§2.3 要求显式 `restore`，当前 Web 自动保存路径遇墓碑只记为失败，
+  待 D3.2b 单卡导入一并收口。
