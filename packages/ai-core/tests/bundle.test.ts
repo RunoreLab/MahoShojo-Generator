@@ -6,6 +6,7 @@ describe('ai-core public entrypoint portability', () => {
     '@mahoshojo/ai-core/stream-events',
     '@mahoshojo/ai-core/structured-json',
     '@mahoshojo/ai-core/provider-catalog',
+    '@mahoshojo/ai-core/ai-connections',
   ] as const)('bundles %s for every target without runtime imports', async (entrypoint) => {
     for (const platform of ['node', 'browser', 'neutral'] as const) {
       const contents = entrypoint.endsWith('/stream-events')
@@ -14,6 +15,8 @@ describe('ai-core public entrypoint portability', () => {
           ? `import { parseStructuredJsonWithSchema, buildStructuredJsonInstructionFromZodSchema } from '${entrypoint}'; export { parseStructuredJsonWithSchema, buildStructuredJsonInstructionFromZodSchema };`
           : entrypoint.endsWith('/provider-catalog')
             ? `import { AI_PROVIDER_CATALOG, resolveAIProviderModel } from '${entrypoint}'; export { AI_PROVIDER_CATALOG, resolveAIProviderModel };`
+          : entrypoint.endsWith('/ai-connections')
+            ? `import { describeProviderProfileConnection, matchAiPresetByBaseUrl } from '${entrypoint}'; export { describeProviderProfileConnection, matchAiPresetByBaseUrl };`
             : `import { AiStreamEventSchema, parseStructuredJsonWithSchema } from '${entrypoint}'; export { AiStreamEventSchema, parseStructuredJsonWithSchema };`;
       const result = await build({
         absWorkingDir: process.cwd(),

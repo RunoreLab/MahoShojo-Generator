@@ -35,6 +35,11 @@
       "import": "./src/provider-catalog.ts",
       "default": "./src/provider-catalog.ts"
     },
+    "./ai-connections": {
+      "types": "./src/ai-connections.ts",
+      "import": "./src/ai-connections.ts",
+      "default": "./src/ai-connections.ts"
+    },
     "./magical-girl-details-generation": {
       "types": "./src/magical-girl-details-generation.ts",
       "import": "./src/magical-girl-details-generation.ts",

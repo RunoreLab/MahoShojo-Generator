@@ -32,6 +32,14 @@ MahoShojo Generator 的本地桌面客户端 runtime。它是独立 app，不是
   站外媒体缺省全部拒绝，外链缺少 opener 时不可执行。能力快照以共源导航与真实交付路由为准，Web 功能清单留在 Web；旧 PVP `/battle`、`/arena` 已取消 Desktop 迁移，Web `/battle`、`/arena` 与历史保留；`/pvp` 卡牌对决按 2026-10-04 退休规格移除。断网打包冷启动、dev 环境主题/键盘/IME/DPI，以及原生测试库 renderer Network、减少动态效果模拟、KaTeX 和锚点已有实测；native 出站全旅程仍待验，真机整体门禁开放，见
   [首页与离线百科验收](../../docs/runbooks/2026-10-03_163000_Desktop首页与离线百科验收.md)。
 - **D3.1a** 共源生成核、Web Hosted 回用与 Desktop Direct 调用模块已落地；修复完整请求 DTO、模型回传与启动取消接线。D3.1b/c 已接入 `/details`，共用问卷面板和角色正文，支持默认 16 题问卷、Direct 生成/取消、显式恢复草稿与 unsigned 本地保存；既有真机门禁保留。
+- **D5.0a-1** AI 配置共源地基已落地：`@mahoshojo/ai-core/provider-catalog` 把服务器策略项 `system`
+  拆为 `SYSTEM_PROVIDER_OPTION`，项目预设归入 `AI_PROVIDER_REGISTRY` 并按 `endpointKind`
+  标注端点归属（`provider-public` 可作 Direct 候选，`project-forward` 的项目转发端点只能走
+  服务器 BYOK）；`describeAiPresetDirectSupport` 给出 Direct 支持度与原因，
+  `AI_PROVIDER_CATALOG` 保持旧选择器/wire 形状不变。`@mahoshojo/ai-core/ai-connections`
+  把 `DirectProviderProfileV1` 投影为无秘密的自定义连接摘要，并提供
+  `matchAiPresetByBaseUrl` 信息性端点匹配——端点相同不会把自定义连接认领为预设。
+  Desktop 尚未消费这些 API，成熟 Provider 配置界面与 Direct 执行接线属后续切片。
 
 ## 权威边界
 
@@ -153,6 +161,11 @@ Profile 草稿
 
 明文 API Key 只在录入那一刻存在于输入框与保存调用中，保存后立即从组件状态清除，且本页
 **没有任何读回凭据的入口**（`hasProviderSecret` 只返回布尔值）。
+
+D5.0a-1 起，预设/连接语义在 `@mahoshojo/ai-core`：`provider-catalog` 区分服务器策略项
+`system`（`SYSTEM_PROVIDER_OPTION`，不可直连）与项目预设注册表，`ai-connections` 把
+Profile 投影为自定义连接摘要并提供端点信息性匹配。上面这个面板仍是 D1 调试面板，
+尚未接入这些 API；成熟配置交互属于后续切片。
 
 已知边界：
 

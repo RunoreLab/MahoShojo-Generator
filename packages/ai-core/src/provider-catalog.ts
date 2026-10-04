@@ -1,5 +1,11 @@
 // constants.ts
 // 定义前端可选的 AI 供应商与模型映射，供配置组件展示使用。
+//
+// 本文件按两层组织：`AI_PROVIDER_REGISTRY` 是项目维护的预设注册表（供应商实体），
+// `SYSTEM_PROVIDER_OPTION` 是服务器策略的兼容展示项；`AI_PROVIDER_CATALOG` 只是把两者
+// 拼回旧选择器/wire 形状的派生视图，不是「可配置连接」的枚举。
+
+import type { DirectProviderAdapter } from '@mahoshojo/contracts/provider-profile';
 
 export interface AIModelOption {
     value: string;
@@ -19,6 +25,79 @@ export interface AIProviderOption {
     models: AIModelOption[];
 }
 
+/** 「系统默认配置」在 wire 与旧选择器里的身份。 */
+export const SYSTEM_PROVIDER_ID = 'system';
+export const SYSTEM_PROVIDER_DEFAULT_MODEL_ID = 'default';
+
+/**
+ * `providerId === 'system'` 表达「交给项目服务端策略」，不是一条供应商连接。
+ * BYOK 判定、出站校验与 Direct 候选都必须先排除它，而不是靠约定俗成的字符串比较。
+ */
+export const isSystemProviderOption = (
+    provider: Pick<AIProviderOption, 'id'> | null | undefined
+): boolean => provider?.id === SYSTEM_PROVIDER_ID;
+
+/**
+ * 预设端点的归属。
+ *
+ * - `provider-public`：供应商公开 endpoint，用户 Key 直发供应商，可作 Desktop Direct 候选；
+ * - `project-forward`：项目自有或运营的转发端点（如项目 Cloudflare AI Gateway、项目代理）。
+ *   用户 Key 经过它会流经项目设施，只能经服务器 BYOK 使用，不得晋升为 Direct preset。
+ */
+export type AiPresetEndpointKind = 'provider-public' | 'project-forward';
+
+export interface AiProviderPreset extends AIProviderOption {
+    endpointKind: AiPresetEndpointKind;
+}
+
+/** Desktop Direct 暂不可用的原因；用于 UI 说明而非静默隐藏。 */
+export type AiPresetDirectUnsupportedReason =
+    | 'server-policy'
+    | 'project-forward-endpoint'
+    | 'unsupported-protocol';
+
+export type AiPresetDirectSupport =
+    | { supported: true; adapter: DirectProviderAdapter }
+    | { supported: false; reason: AiPresetDirectUnsupportedReason };
+
+/** 当前 native `openai-compatible` adapter 实际覆盖的 wire 协议。 */
+const DIRECT_CAPABLE_PROVIDER_TYPES: ReadonlySet<AIProviderOption['type']> = new Set([
+    'openai',
+    'deepseek',
+]);
+
+/**
+ * 判定一个目录项当前能否成为 Desktop Direct 连接。
+ *
+ * 检查顺序有语义：`server-policy` 先于端点归属（`system` 没有端点可判），
+ * `project-forward-endpoint` 先于协议能力——即使将来实现了对应 adapter，
+ * 项目转发端点依然不得直连。
+ */
+export const describeAiPresetDirectSupport = (
+    provider: AIProviderOption | AiProviderPreset
+): AiPresetDirectSupport => {
+    if (isSystemProviderOption(provider)) {
+        return { supported: false, reason: 'server-policy' };
+    }
+    if ((provider as AiProviderPreset).endpointKind === 'project-forward') {
+        return { supported: false, reason: 'project-forward-endpoint' };
+    }
+    if (!DIRECT_CAPABLE_PROVIDER_TYPES.has(provider.type)) {
+        return { supported: false, reason: 'unsupported-protocol' };
+    }
+    return { supported: true, adapter: 'openai-compatible' };
+};
+
+export const isDirectCapableAiPreset = (preset: AiProviderPreset): boolean =>
+    describeAiPresetDirectSupport(preset).supported;
+
+export const listDirectCapableAiPresets = (): AiProviderPreset[] =>
+    AI_PROVIDER_REGISTRY.filter(isDirectCapableAiPreset);
+
+/** 只在 Registry（项目预设）中查找；`'system'` 属服务器策略，永远查不到。 */
+export const findAiProviderPreset = (providerId: string): AiProviderPreset | null =>
+    AI_PROVIDER_REGISTRY.find((preset) => preset.id === providerId) ?? null;
+
 export const CUSTOM_AI_MODEL_OPTION_VALUE = '__custom_model_id__';
 export const MAX_CUSTOM_AI_MODEL_ID_LENGTH = 200;
 
@@ -35,7 +114,7 @@ export type ResolvedAIProviderModel = {
 
 export const canUseCustomModelId = (provider: AIProviderOption | null | undefined): boolean => {
     if (!provider) return false;
-    return provider.id !== 'system' && provider.baseUrl.trim().length > 0;
+    return !isSystemProviderOption(provider) && provider.baseUrl.trim().length > 0;
 };
 
 const normalizeCustomModelId = (modelId: string): string | null => {
@@ -88,98 +167,108 @@ const XIAOMI_MIMO_MODELS: AIModelOption[] = [
 ];
 
 /**
- * 可选 AI 供应商目录。
+ * 「系统默认配置」的服务器策略展示项。
+ *
+ * 它不是 Registry 预设：没有可直连的 endpoint，也不承担供应商身份。选择它在 wire 上等于
+ * 把执行交给项目生成服务的服务端策略（旧 `providerId: 'system'` / `modelId: 'default'`
+ * 以及公开可选模型 ID 原样保留）；它继续出现在 `AI_PROVIDER_CATALOG` 里只为旧选择器与
+ * 旧 wire 兼容，不参与 Desktop Direct 的「复制为自定义连接」候选。
+ */
+export const SYSTEM_PROVIDER_OPTION: AIProviderOption = {
+    id: 'system',
+    name: '使用系统默认配置',
+    description: '依照服务器轮询策略自动选择供应商与模型。',
+    docsUrl: '',
+    baseUrl: '',
+    type: 'openai',
+    models: [
+        {
+            value: 'default',
+            label: '默认策略',
+            description: '常规场景保持原有调用顺序，默认倾向使用 GLM 5.3 Flash；排位优先使用轻量模型。'
+        },
+        // {
+        //     value: 'big-pickle',
+        //     label: '实验性/推广模型',
+        //     description: '可能会随时更换的、处于实验或推广期的模型，或许能带来一些新奇的体验，但不建议发送敏感或私密数据。'
+        // },
+        // {
+        //     value: 'deepseek-v4-flash-0731',
+        //     label: 'DeepSeek V4 Flash',
+        //     description: 'DeepSeek V4 Flash 正式版，Agent 能力大幅增强，百万级上下文，兼顾质量与成本。'
+        // },
+        // {
+        //     value: 'deepseek-v4-pro',
+        //     label: 'DeepSeek V4 Pro',
+        //     description: 'DeepSeek V4 完全体，适合复杂分析、长文本写作与高质量生成。'
+        // },
+        {
+            value: 'glm-5.3-flash',
+            label: 'GLM 5.3 Flash',
+            description: '【推荐】牛来模型，智谱的最先进小模型。由 Kouri AI 热情赞助。'
+        },
+        {
+            value: 'deepseek-v4-flash-0731',
+            label: 'DeepSeek V4 Flash 0731',
+            description: '蓝色大肥鱼正式版，Agent 能力大幅增强，百万级上下文，兼顾质量与成本。由 Kouri AI 热情赞助。'
+        },
+        // {
+        //     value: 'glm-5.2',
+        //     label: 'GLM-5.2',
+        //     description: '智谱开源旗舰模型，支持 1M 无损上下文，编程能力领先，适合复杂长程任务。'
+        // },
+        {
+            value: 'glm-5.1',
+            label: 'GLM-5.1',
+            description: '智谱开源旗舰模型，适合复杂指令、多轮对话与高质量创作。由 Kouri AI 热情赞助。'
+        },
+        {
+            value: 'gemini-3.8-flash',
+            label: 'Gemini 3.8 Flash',
+            description: 'Google 的新模型，Benchmark 分数超级高，但代价是 Tokens 消耗也高。'
+        },
+        {
+            value: 'gemini-3.7-flash',
+            label: 'Gemini 3.7 Flash',
+            description: 'Google 的新模型，据用户评测说很喜欢一惊一乍，还挺中二的。'
+        },
+        // {
+        //     value: 'glm-5.2',
+        //     label: 'GLM-5.2',
+        //     description: '智谱开源旗舰模型，支持 1M 无损上下文，编程能力领先，适合复杂长程任务。'
+        // },
+        {
+            value: 'gemini-3.5-flash-lite',
+            label: 'Gemini 3.5 Flash Lite',
+            description: 'Google 高速轻量模型，适合预算敏感与高并发生成场景。'
+        },
+        // {
+        //     value: 'gemma-4-31b-it',
+        //     label: 'Gemma 4 31B IT',
+        //     description: 'Gemma 4 指令模型（31B），适合作为高优先级的 Gemma 备用选择。'
+        // },
+        // {
+        //     value: 'gemma-4-26b-a4b-it',
+        //     label: 'Gemma 4 26B A4B IT',
+        //     description: 'Gemma 4 指令模型（26B A4B），建议先作为可选备用通道使用。'
+        // },
+        // {
+        //     value: 'gemma-3-27b-it',
+        //     label: 'Gemma 3 27B IT',
+        //     description: '更便宜但也更弱的 Gemma 3 指令模型（27B），建议仅作为流式输出的备用选择。'
+        // }
+    ]
+};
+
+/**
+ * 项目维护的供应商预设注册表（不含服务器策略项 `system`）。
  * - description 用于向用户解释供应商特色。
  * - docsUrl 用于跳转至官方文档，帮助用户快速查看接入方式。
  * - baseUrl 为默认的 API 访问地址(当前版本由目录固定，未在 UI 中开放覆盖)。
+ * - endpointKind 标注端点归属；`project-forward` 只经服务器 BYOK，不得作 Desktop Direct。
  * - models 按常见用途给出推荐模型，方便快速选择。
  */
-export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
-    {
-        id: 'system',
-        name: '使用系统默认配置',
-        description: '依照服务器轮询策略自动选择供应商与模型。',
-        docsUrl: '',
-        baseUrl: '',
-        type: 'openai',
-        models: [
-            {
-                value: 'default',
-                label: '默认策略',
-                description: '常规场景保持原有调用顺序，默认倾向使用 GLM 5.3 Flash；排位优先使用轻量模型。'
-            },
-            // {
-            //     value: 'big-pickle',
-            //     label: '实验性/推广模型',
-            //     description: '可能会随时更换的、处于实验或推广期的模型，或许能带来一些新奇的体验，但不建议发送敏感或私密数据。'
-            // },
-            // {
-            //     value: 'deepseek-v4-flash-0731',
-            //     label: 'DeepSeek V4 Flash',
-            //     description: 'DeepSeek V4 Flash 正式版，Agent 能力大幅增强，百万级上下文，兼顾质量与成本。'
-            // },
-            // {
-            //     value: 'deepseek-v4-pro',
-            //     label: 'DeepSeek V4 Pro',
-            //     description: 'DeepSeek V4 完全体，适合复杂分析、长文本写作与高质量生成。'
-            // },
-            {
-                value: 'glm-5.3-flash',
-                label: 'GLM 5.3 Flash',
-                description: '【推荐】牛来模型，智谱的最先进小模型。由 Kouri AI 热情赞助。'
-            },
-            {
-                value: 'deepseek-v4-flash-0731',
-                label: 'DeepSeek V4 Flash 0731',
-                description: '蓝色大肥鱼正式版，Agent 能力大幅增强，百万级上下文，兼顾质量与成本。由 Kouri AI 热情赞助。'
-            },
-            // {
-            //     value: 'glm-5.2',
-            //     label: 'GLM-5.2',
-            //     description: '智谱开源旗舰模型，支持 1M 无损上下文，编程能力领先，适合复杂长程任务。'
-            // },
-            {
-                value: 'glm-5.1',
-                label: 'GLM-5.1',
-                description: '智谱开源旗舰模型，适合复杂指令、多轮对话与高质量创作。由 Kouri AI 热情赞助。'
-            },
-            {
-                value: 'gemini-3.8-flash',
-                label: 'Gemini 3.8 Flash',
-                description: 'Google 的新模型，Benchmark 分数超级高，但代价是 Tokens 消耗也高。'
-            },
-            {
-                value: 'gemini-3.7-flash',
-                label: 'Gemini 3.7 Flash',
-                description: 'Google 的新模型，据用户评测说很喜欢一惊一乍，还挺中二的。'
-            },
-            // {
-            //     value: 'glm-5.2',
-            //     label: 'GLM-5.2',
-            //     description: '智谱开源旗舰模型，支持 1M 无损上下文，编程能力领先，适合复杂长程任务。'
-            // },
-            {
-                value: 'gemini-3.5-flash-lite',
-                label: 'Gemini 3.5 Flash Lite',
-                description: 'Google 高速轻量模型，适合预算敏感与高并发生成场景。'
-            },
-            // {
-            //     value: 'gemma-4-31b-it',
-            //     label: 'Gemma 4 31B IT',
-            //     description: 'Gemma 4 指令模型（31B），适合作为高优先级的 Gemma 备用选择。'
-            // },
-            // {
-            //     value: 'gemma-4-26b-a4b-it',
-            //     label: 'Gemma 4 26B A4B IT',
-            //     description: 'Gemma 4 指令模型（26B A4B），建议先作为可选备用通道使用。'
-            // },
-            // {
-            //     value: 'gemma-3-27b-it',
-            //     label: 'Gemma 3 27B IT',
-            //     description: '更便宜但也更弱的 Gemma 3 指令模型（27B），建议仅作为流式输出的备用选择。'
-            // }
-        ]
-    },
+export const AI_PROVIDER_REGISTRY: AiProviderPreset[] = [
     {
         id: 'kourichat',
         name: 'KouriChat',
@@ -188,6 +277,7 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         baseUrl: 'https://api.kourichat.com/v1',
         type: 'openai',
         mode: 'json',
+        endpointKind: 'provider-public',
         models: [
             {
                 value: 'gemini-3.8-flash',
@@ -309,6 +399,7 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         baseUrl: 'https://ai.chatboxai.app/v1',
         type: 'openai',
         mode: 'auto',
+        endpointKind: 'provider-public',
         models: [
             {
                 value: 'gpt-5.5',
@@ -390,6 +481,7 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         baseUrl: 'https://tokendance.space/gateway/v1',
         type: 'openai',
         mode: 'auto',
+        endpointKind: 'provider-public',
         models: [
             {
                 value: 'minimax-m3',
@@ -591,6 +683,7 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         baseUrl: 'https://api.xiaomimimo.com/v1',
         type: 'openai',
         mode: 'auto',
+        endpointKind: 'provider-public',
         models: XIAOMI_MIMO_MODELS,
     },
     {
@@ -601,6 +694,7 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         baseUrl: 'https://apihub.agnes-ai.com/v1',
         type: 'openai',
         mode: 'auto',
+        endpointKind: 'provider-public',
         models: [
             {
                 value: 'agnes-3.0-flash',
@@ -632,6 +726,7 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         baseUrl: 'https://api.qnaigc.com/v1',
         type: 'openai',
         mode: 'auto',
+        endpointKind: 'provider-public',
         models: [
             {
                 value: 'deepseek/deepseek-v4-flash-20260731',
@@ -733,6 +828,7 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         baseUrl: 'https://88996.cloud/v1',
         type: 'openai',
         mode: 'json',
+        endpointKind: 'provider-public',
         models: [
             {
                 value: 'gemini-3.8-flash',
@@ -869,6 +965,7 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         baseUrl: 'https://tokenrhythm.studio/v1',
         type: 'openai',
         mode: 'auto',
+        endpointKind: 'provider-public',
         models: [
             {
                 value: 'deepseek-v4-flash-0731',
@@ -945,6 +1042,7 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         baseUrl: 'https://nova.cervus.top/v1',
         type: 'openai',
         mode: 'json',
+        endpointKind: 'provider-public',
         models: [
             {
                 value: '[ruru10]gemini-3.8-flash',
@@ -1076,6 +1174,7 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         baseUrl: 'https://api-inference.modelscope.cn/v1',
         type: 'openai',
         mode: 'json',
+        endpointKind: 'provider-public',
         models: [
             {
                 value: 'deepseek-ai/DeepSeek-V4-Flash-0731',
@@ -1207,6 +1306,9 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         docsUrl: 'https://aistudio.google.com/',
         baseUrl: 'https://gateway.ai.cloudflare.com/v1/5e2c3572782d87ae449e050ac15d6c5d/mhsj-custom/google-ai-studio/v1beta',
         type: 'google',
+        // 项目运营的 Cloudflare AI Gateway（路径含项目账号与 gateway 名）：
+        // 用户 Key 经它会流过项目设施，只能由服务器 BYOK 使用。
+        endpointKind: 'project-forward',
         models: [
             {
                 value: 'gemini-3.8-flash',
@@ -1278,6 +1380,7 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         baseUrl: 'https://api.deepseek.com',
         type: 'deepseek',
         mode: 'auto',
+        endpointKind: 'provider-public',
         models: [
             { value: 'deepseek-flash', label: 'DeepSeek V4.1 Flash', description: 'DeepSeek V4.1 Flash 官方 API 模型，原生支持多模态，适合高吞吐 Agent、推理与通用生成。' },
             { value: 'deepseek-v4-flash-0731', label: 'DeepSeek V4 Flash（兼容 ID）', description: '保留旧 V4 Flash catalog ID 以兼容既有配置；请求仍按现有兼容解析逻辑发送。' },
@@ -1295,6 +1398,7 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         baseUrl: 'https://api.siliconflow.cn/v1',
         type: 'openai',
         mode: 'auto',
+        endpointKind: 'provider-public',
         models: [
             {
                 value: 'deepseek-ai/DeepSeek-V3.2',
@@ -1361,6 +1465,7 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         baseUrl: 'https://openrouter.ai/api/v1',
         type: 'openai',
         mode: 'auto',
+        endpointKind: 'provider-public',
         models: [
             {
                 value: 'google/gemini-3.8-flash',
@@ -1408,6 +1513,7 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         baseUrl: 'https://api.poe.com/v1', // 视实际接入的桥接服务地址而定
         type: 'openai',
         mode: 'auto',
+        endpointKind: 'provider-public',
         models: [
             {
                 value: 'gemini-2.5-pro',
@@ -1555,6 +1661,7 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         type: 'openai',
         mode: 'auto',
 
+        endpointKind: 'provider-public',
         models: [
             {
                 value: 'google/gemma-4-31b-it',
@@ -1661,6 +1768,7 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         baseUrl: 'https://opencode.ai/zen/v1',
         type: 'openai',
         mode: 'auto',
+        endpointKind: 'provider-public',
         models: [
             {
                 value: 'deepseek-v4-flash',
@@ -1742,6 +1850,7 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         baseUrl: 'https://opencode.ai/zen/go/v1',
         type: 'openai',
         mode: 'auto',
+        endpointKind: 'provider-public',
         models: [
             {
                 value: 'deepseek-v4-flash',
@@ -1794,6 +1903,8 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         baseUrl: 'https://fmxalteyoxwi.jp-members-1.clawcloudrun.com/proxy/gemini-suda/v1beta',
         type: 'google',
         mode: 'auto',
+        // 项目运营的 clawcloudrun 代理转发，不是供应商公开端点；只能由服务器 BYOK 使用。
+        endpointKind: 'project-forward',
         models: [
             {
                 value: 'gemini-2.5-flash',
@@ -1802,4 +1913,16 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
             },
         ]
     },
+];
+
+/**
+ * 旧选择器与 wire 仍在使用的目录视图：服务器策略项在前，Registry 预设顺序不变。
+ *
+ * 新增消费者应区分两类来源——`AI_PROVIDER_REGISTRY` 只含项目预设（连接可引用的实体），
+ * `SYSTEM_PROVIDER_OPTION` 只表达服务器策略。本数组只保证旧 `providerId`/`modelId`
+ * 解析与展示不变；不要把它当作「可配置连接」的枚举。
+ */
+export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
+    SYSTEM_PROVIDER_OPTION,
+    ...AI_PROVIDER_REGISTRY,
 ];
