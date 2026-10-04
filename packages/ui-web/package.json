@@ -55,6 +55,11 @@
       "import": "./src/local-archive/index.ts",
       "default": "./src/local-archive/index.ts"
     },
+    "./card-editor": {
+      "types": "./src/card-editor/index.ts",
+      "import": "./src/card-editor/index.ts",
+      "default": "./src/card-editor/index.ts"
+    },
     "./local-cards": {
       "types": "./src/local-cards/index.ts",
       "import": "./src/local-cards/index.ts",
