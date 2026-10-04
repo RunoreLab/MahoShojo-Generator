@@ -16,3 +16,4 @@ export {
   setDataCardFieldValue,
   toDataCardFieldId,
 } from './field-rules';
+export type { DataCardFieldPath } from './field-rules';

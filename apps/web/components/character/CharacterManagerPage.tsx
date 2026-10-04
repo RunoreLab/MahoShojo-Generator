@@ -1319,9 +1319,11 @@ export const CharacterManagerPage: React.FC = () => {
     }, [characterData, setCharacterData, setOriginalData, setIsNative, setHasLostNativeness, setSelectedTemplate, setValidationResult, setMessage]);
 
     // 统一的字段更新处理器
-    const handleFieldChange = useCallback((path: string, value: any) => {
-        // 路径写入语义（深拷贝、按下一段是否为数字补数组/对象、templateId 不可改）由共源规则持有。
-        setCharacterData((prev: any) => (prev ? setDataCardFieldValue(prev, path, value) : prev));
+    const handleFieldChange = useCallback((path: string | readonly string[], value: any) => {
+        // 共源字段编辑器交回逐段键名；ScenarioEditor 等旧调用方仍用点分字符串 DSL，在此展开成段。
+        // 路径写入语义（copy-on-write、按下一段是否为数字补数组/对象、templateId 不可改）由共源规则持有。
+        const segments = typeof path === 'string' ? path.split('.') : path;
+        setCharacterData((prev: any) => (prev ? setDataCardFieldValue(prev, segments, value) : prev));
     }, []);
 
     // 一键替换所有旧名称的事件处理器

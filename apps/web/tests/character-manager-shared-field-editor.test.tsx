@@ -17,7 +17,7 @@ describe('角色管理回用共源字段编辑器（D3.2b-1）', () => {
   test('递归表单与路径写入不再在 Web 内另有一份实现', () => {
     expect(characterManagerSource).toContain("from '@mahoshojo/ui-web/card-editor'");
     expect(characterManagerSource).toContain('<DataCardFieldEditor');
-    expect(characterManagerSource).toContain('setDataCardFieldValue(prev, path, value)');
+    expect(characterManagerSource).toContain('setDataCardFieldValue(prev, segments, value)');
     expect(characterManagerSource).not.toContain('isNextKeyNumeric');
     expect(characterManagerSource).not.toContain('const keyOrder = [');
   });

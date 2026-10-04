@@ -40,12 +40,27 @@ describe('字段规则', () => {
 
   it('路径写入返回新对象，按下一段补数组或对象，模板 ID 不可改', () => {
     const original = { codename: 'a', appearance: { outfit: 'x' }, templateId: 't' };
-    const next = setDataCardFieldValue(original, 'appearance.outfit', 'y');
+    const next = setDataCardFieldValue(original, ['appearance', 'outfit'], 'y');
     expect(next).toEqual({ codename: 'a', appearance: { outfit: 'y' }, templateId: 't' });
     expect(original.appearance.outfit).toBe('x');
-    expect(setDataCardFieldValue(original, 'list.0', 'v')).toMatchObject({ list: ['v'] });
-    expect(setDataCardFieldValue(original, 'deep.key', 1)).toMatchObject({ deep: { key: 1 } });
-    expect(setDataCardFieldValue(original, 'templateId', 'other')).toBe(original);
+    expect(setDataCardFieldValue(original, ['list', '0'], 'v')).toMatchObject({ list: ['v'] });
+    expect(setDataCardFieldValue(original, ['deep', 'key'], 1)).toMatchObject({ deep: { key: 1 } });
+    expect(setDataCardFieldValue(original, ['templateId'], 'other')).toBe(original);
+  });
+
+  it('含 `.` 的键按单段处理，不会写错到嵌套字段', () => {
+    const original = { 'profile.name': 'Alice', other: 1 };
+    const next = setDataCardFieldValue(original, ['profile.name'], 'Bob');
+    expect(next).toEqual({ 'profile.name': 'Bob', other: 1 });
+    expect(next).not.toHaveProperty('profile');
+  });
+
+  it('路径写入做结构共享：未触及的子树保持原引用', () => {
+    const original = { codename: 'a', appearance: { outfit: 'x' }, analysis: { trait: 'y' } };
+    const next = setDataCardFieldValue(original, ['appearance', 'outfit'], 'z');
+    expect(next.appearance).not.toBe(original.appearance);
+    expect(next.appearance.outfit).toBe('z');
+    expect(next.analysis).toBe(original.analysis);
   });
 });
 
@@ -56,7 +71,7 @@ const change = (element: HTMLInputElement | HTMLTextAreaElement, value: string) 
 });
 
 describe('DataCardFieldEditor', () => {
-  it('渲染各类字段并以完整路径回报修改', async () => {
+  it('渲染各类字段并以逐段路径回报修改', async () => {
     const onFieldChange = vi.fn();
     const data = {
       templateId: '魔法少女/心之花/魔法少女（问卷生成）',
@@ -74,19 +89,55 @@ describe('DataCardFieldEditor', () => {
     expect(codename.maxLength).toBe(20);
     expect(codename.getAttribute('autocomplete')).toBe('off');
     await change(codename, '月影');
-    expect(onFieldChange).toHaveBeenLastCalledWith('codename', '月影');
+    expect(onFieldChange).toHaveBeenLastCalledWith(['codename'], '月影');
 
     await change(container.querySelector<HTMLInputElement>('#editor-field-appearance__outfit')!, '黑裙');
-    expect(onFieldChange).toHaveBeenLastCalledWith('appearance.outfit', '黑裙');
+    expect(onFieldChange).toHaveBeenLastCalledWith(['appearance', 'outfit'], '黑裙');
 
     const traits = container.querySelector<HTMLTextAreaElement>('#editor-field-analysis__coreTraits')!;
     expect(traits.value).toBe('勇敢\n温柔');
     await change(traits, '勇敢\n坚定');
-    expect(onFieldChange).toHaveBeenLastCalledWith('analysis.coreTraits', ['勇敢', '坚定']);
+    expect(onFieldChange).toHaveBeenLastCalledWith(['analysis', 'coreTraits'], ['勇敢', '坚定']);
 
     const abilities = container.querySelector<HTMLTextAreaElement>('#editor-field-magicConstruct__basicAbilities')!;
     expect(abilities.readOnly).toBe(true);
     expect(container.textContent).toContain('basic Abilities (只读)');
+  });
+
+  it('number / boolean 保持原 JSON 类型，null 只读展示', async () => {
+    const onFieldChange = vi.fn();
+    act(() => root.render(
+      <DataCardFieldEditor
+        data={{ level: 3, enabled: true, note: null }}
+        onFieldChange={onFieldChange}
+      />,
+    ));
+
+    const level = container.querySelector<HTMLInputElement>('#editor-field-level')!;
+    expect(level.type).toBe('number');
+    await change(level, '4');
+    expect(onFieldChange).toHaveBeenLastCalledWith(['level'], 4);
+    expect(typeof onFieldChange.mock.lastCall![1]).toBe('number');
+
+    const enabled = container.querySelector<HTMLInputElement>('#editor-field-enabled')!;
+    expect(enabled.type).toBe('checkbox');
+    expect(enabled.checked).toBe(true);
+    await act(async () => { enabled.click(); });
+    expect(onFieldChange).toHaveBeenLastCalledWith(['enabled'], false);
+
+    const note = container.querySelector<HTMLInputElement>('#editor-field-note')!;
+    expect(note.readOnly).toBe(true);
+    expect(note.value).toBe('null');
+  });
+
+  it('键本身含 `.` 时仍按单段路径回报', async () => {
+    const onFieldChange = vi.fn();
+    act(() => root.render(
+      <DataCardFieldEditor data={{ 'profile.name': 'Alice' }} onFieldChange={onFieldChange} />,
+    ));
+    const field = container.querySelector<HTMLInputElement>('#editor-field-profile__name')!;
+    await change(field, 'Bob');
+    expect(onFieldChange).toHaveBeenLastCalledWith(['profile.name'], 'Bob');
   });
 
   it('宿主插槽注入行内与下方附件，并切换问题样式', () => {
