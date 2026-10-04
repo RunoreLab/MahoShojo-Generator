@@ -260,19 +260,28 @@ export function DesktopCharacterManager() {
               <input id={titleId} value={draft.title} maxLength={512} onChange={(event) => setDraft({ ...draft, title: event.target.value })} className={inputClass} />
             </label>
             <label htmlFor={typeId} className="flex flex-col gap-1 text-sm">
-              类型
-              <select
-                id={typeId}
-                value={draft.cardType}
-                onChange={(event) => setDraft({ ...draft, cardType: event.target.value as LocalCardType })}
-                className={inputClass}
-              >
-                {EDITABLE_CARD_TYPES.map((type) => <option key={type} value={type}>{LOCAL_CARD_TYPE_LABELS[type]}</option>)}
-              </select>
+              类型{draft.original === null ? '' : '（创建后不可修改）'}
+              {draft.original === null ? (
+                <select
+                  id={typeId}
+                  value={draft.cardType}
+                  onChange={(event) => setDraft({ ...draft, cardType: event.target.value as LocalCardType })}
+                  className={inputClass}
+                >
+                  {EDITABLE_CARD_TYPES.map((type) => <option key={type} value={type}>{LOCAL_CARD_TYPE_LABELS[type]}</option>)}
+                </select>
+              ) : (
+                <input
+                  id={typeId}
+                  value={LOCAL_CARD_TYPE_LABELS[draft.cardType]}
+                  readOnly
+                  className={`${inputClass} cursor-not-allowed opacity-70`}
+                />
+              )}
             </label>
           </div>
           <p className="text-xs text-(--app-text-muted)">
-            标题不影响内容身份。修改正文会另存为一条新记录，原记录保留；正文中已有的签名字段原样保存，本机不校验签名，新记录标记为无签名。
+            标题与既有记录的类型不影响内容身份。修改正文会另存为一条新记录，原记录保留；正文中已有的签名字段原样保存，本机不校验签名，新记录标记为无签名。
           </p>
           <DataCardFieldEditor
             data={draft.data}
@@ -322,6 +331,9 @@ export function DesktopCharacterManager() {
                 从回收站恢复并打开
               </button>
             </div>
+          )}
+          {outcome?.kind === 'document-too-large' && (
+            <p role="alert" className="text-sm">保存后的本地库记录超过大小上限（4 MiB），请精简正文后重试。</p>
           )}
         </section>
       )}

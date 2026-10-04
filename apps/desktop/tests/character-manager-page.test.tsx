@@ -130,6 +130,9 @@ describe('Desktop 本地角色管理（IPC mock，仍需真机重启验收）', 
     expect(router.state.location.pathname).toBe('/character-manager');
     expect(router.state.location.search).toEqual({ card: original.id });
     expect(container.textContent).toContain('编辑：星光');
+    // 已有记录的类型创建后不可修改：编辑器里是只读文本而不是下拉选择。
+    expect(container.textContent).toContain('类型（创建后不可修改）');
+    expect(container.querySelector('select')).toBeNull();
 
     await type(fieldByLabel('记录标题'), '星光·改');
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
@@ -138,7 +141,8 @@ describe('Desktop 本地角色管理（IPC mock，仍需真机重启验收）', 
     expect(confirm).toHaveBeenCalled();
     expect(router.state.location.pathname).toBe('/character-manager');
     const prevented = vi.fn();
-    close({ preventDefault: prevented });
+    // 关窗回调会同步写入提示状态（guard message），与真实事件一样需要 act 包裹。
+    await act(async () => { close({ preventDefault: prevented }); });
     expect(prevented).toHaveBeenCalledOnce();
 
     await click(button('保存到本地库'));
@@ -178,6 +182,8 @@ describe('Desktop 本地角色管理（IPC mock，仍需真机重启验收）', 
     await type(container.querySelector<HTMLTextAreaElement>('textarea')!, JSON.stringify(original.data));
     await click(button('从文本载入'));
     expect(container.textContent).toContain('编辑导入的数据卡');
+    // 尚未首次保存的导入草稿可以选择类型。
+    expect(container.querySelector('select')).not.toBeNull();
     await click(button('保存到本地库'));
     await waitFor(() => container.textContent?.includes('内容相同的记录在回收站中') === true);
     expect(rows.get(original.id)?.deletedAt).toBeDefined();
@@ -196,6 +202,17 @@ describe('Desktop 本地角色管理（IPC mock，仍需真机重启验收）', 
     await type(container.querySelector<HTMLTextAreaElement>('textarea')!, '[1, 2]');
     await click(button('从文本载入'));
     expect(container.textContent).toContain('数据卡必须是一个 JSON 对象。');
+    expect(container.textContent).not.toContain('编辑导入的数据卡');
+  });
+
+  it('粘贴超过 4 MiB 的文本在解析前拒绝且不进入编辑', async () => {
+    window.location.hash = '#/character-manager';
+    await mount();
+    await waitFor(() => container.querySelector('textarea') !== null);
+    const oversized = `{"a":"${'x'.repeat(4 * 1024 * 1024)}"}`;
+    await type(container.querySelector<HTMLTextAreaElement>('textarea')!, oversized);
+    await click(button('从文本载入'));
+    expect(container.textContent).toContain('内容超过单张数据卡的大小上限（4 MiB）。');
     expect(container.textContent).not.toContain('编辑导入的数据卡');
   });
 });

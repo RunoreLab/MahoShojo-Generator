@@ -1,6 +1,7 @@
 import { GENERAL_SCENARIO_TEMPLATE_ID, inferCharacterKind } from '@mahoshojo/domain/data-cards';
 import { deriveLocalDataCardIdV1, digestLocalCardPayloadV1 } from '@mahoshojo/local-library/digest';
 import { LocalCardRecordV1Schema, nextLocalTimestamp, type LocalCardRecordV1 } from '@mahoshojo/local-library/record';
+import { localLibraryRecordBytes } from '@mahoshojo/local-library/archive-export';
 import type { CardRepository } from '@mahoshojo/local-library/repository';
 import { MAX_DESKTOP_LOCAL_CARD_DOCUMENT_BYTES } from '@mahoshojo/contracts/desktop-ipc';
 import { SafeJsonValueSchema } from '@mahoshojo/contracts/json-value';
@@ -22,8 +23,37 @@ export const EDITABLE_CARD_TYPES: readonly LocalCardType[] = ['character', 'scen
 export const isEditableLocalCard = (record: LocalCardRecordV1): boolean =>
   EDITABLE_CARD_TYPES.includes(record.cardType) && isPlainObject(record.data);
 
-/** 单个导入文件的读取上限，与 native 单条 document 上限同一量级。 */
+/** 单个导入文件/粘贴文本的读取上限，与 native 单条 document 上限同一量级。 */
 export const MAX_IMPORT_FILE_BYTES = MAX_DESKTOP_LOCAL_CARD_DOCUMENT_BYTES;
+
+/**
+ * 文本的 UTF-8 编码字节数是否超限：逐码点累加、超限即返回。
+ *
+ * 不用 `TextEncoder().encode(text)`：那会为超大输入先分配一份等长缓冲，而字节上限的意义
+ * 正是赶在 `JSON.parse` 与任何 buffering 之前拦住这种输入（bounded-input）。孤立代理项按
+ * `TextEncoder` 语义计作 U+FFFD 的 3 字节，保证与落盘/IPC 侧的字节口径一致。
+ */
+export const exceedsUtf8ByteLimit = (text: string, maxBytes: number): boolean => {
+  // UTF-8 字节数恒不小于 UTF-16 码元数：先用 O(1) 拦住最明显的大输入。
+  if (text.length > maxBytes) return true;
+  let bytes = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    const unit = text.charCodeAt(index);
+    if (unit < 0x80) {
+      bytes += 1;
+    } else if (unit < 0x800) {
+      bytes += 2;
+    } else if (unit >= 0xd800 && unit <= 0xdbff && index + 1 < text.length
+      && text.charCodeAt(index + 1) >= 0xdc00 && text.charCodeAt(index + 1) <= 0xdfff) {
+      bytes += 4;
+      index += 1;
+    } else {
+      bytes += 3;
+    }
+    if (bytes > maxBytes) return true;
+  }
+  return false;
+};
 
 export interface CardDraft {
   /** 编辑既有本地记录时为该记录；导入时为 `null`。 */
@@ -55,6 +85,11 @@ export type ParsedImport =
   | { readonly ok: false; readonly error: string };
 
 export const parseImportedCard = (text: string): ParsedImport => {
+  // 字节上限先于解析：文件与粘贴共用同一入口，`file.size` 的早检只是少读一次大文件，
+  // 解析前的这一次检查才是 bounded-input 的保证（schema 校验发生在 parse 之后，拦不住它）。
+  if (exceedsUtf8ByteLimit(text, MAX_IMPORT_FILE_BYTES)) {
+    return { ok: false, error: '内容超过单张数据卡的大小上限（4 MiB）。' };
+  }
   let raw: unknown;
   try {
     raw = JSON.parse(text);
@@ -80,25 +115,32 @@ export const draftFromRecord = (record: LocalCardRecordV1): CardDraft => ({
 
 export type SaveOutcome =
   | { readonly kind: 'unchanged' }
-  /** 正文摘要不变，只有标题或类型变化：原记录整卡替换。 */
+  /** 正文摘要不变，只有标题变化：原记录整卡替换。 */
   | { readonly kind: 'updated'; readonly record: LocalCardRecordV1 }
   /** 正文改变或新导入：以新摘要写入一条新记录。 */
   | { readonly kind: 'created'; readonly record: LocalCardRecordV1 }
   /** 同内容的活动记录已在本地库，未重复写入。 */
   | { readonly kind: 'exists'; readonly id: string }
   /** 同内容记录在回收站中；不隐式复活，交由用户显式恢复。 */
-  | { readonly kind: 'in-recycle-bin'; readonly id: string };
+  | { readonly kind: 'in-recycle-bin'; readonly id: string }
+  /** 组装后的 document 超出单条记录上限：envelope 让 4 MiB 原文可能装不进 4 MiB document。 */
+  | { readonly kind: 'document-too-large' };
 
 type SaveRepository = Pick<CardRepository, 'get' | 'put' | 'putIfAbsent'>;
 
 /**
  * 保存一份草稿。
  *
- * - 正文摘要与原记录相同：标题/类型没变则什么也不写；变了则以原记录为底整卡替换（保留 provenance、
+ * - 正文摘要与原记录相同：标题没变则什么也不写；变了则以原记录为底整卡替换（保留 provenance、
  *   createdAt 与 cloudRef），时间戳单调抬升。
+ * - 已有记录的 `cardType` 不可改：分类影响筛选、编辑入口与未来的类型消费逻辑，“重新分类”
+ *   不是普通元数据编辑（冻结规格只定义“改标题直接更新、改正文另存新记录”）。草稿里的
+ *   `cardType` 只在 `original === null`（导入、尚未首存）时生效。
  * - 正文改变或来自导入：以新摘要 `putIfAbsent` 写入 `unsigned` 新记录（编辑记为 `edited`，导入记为
  *   `imported`）。原记录不动——是否移入回收站由用户另行决定。正文中既有的签名字段原样保留、不在本机
  *   校验，因此 provenance 不继承原记录的签名判定。
+ * - 写库前对最终 document 做字节预检：envelope（id/title/provenance/时间戳）会让接近 4 MiB
+ *   的原文装不进 4 MiB 记录，此时返回 `document-too-large` 而不是落到泛化校验失败。
  */
 export const saveCardDraft = async (
   repository: SaveRepository,
@@ -106,18 +148,23 @@ export const saveCardDraft = async (
   now: () => number = Date.now,
 ): Promise<SaveOutcome> => {
   const title = draft.title.trim() || '未命名数据卡';
+  const { original } = draft;
+  // 已有记录的类型只读；新导入草稿才允许选择类型。
+  const cardType = original?.cardType ?? draft.cardType;
   const contentDigest = await digestLocalCardPayloadV1(draft.data);
   const id = deriveLocalDataCardIdV1(contentDigest);
-  const { original } = draft;
 
   if (original !== null && original.id === id) {
-    if (original.title === title && original.cardType === draft.cardType) return { kind: 'unchanged' };
+    if (original.title === title && original.cardType === cardType) return { kind: 'unchanged' };
     const record = LocalCardRecordV1Schema.parse({
       ...original,
       title,
-      cardType: draft.cardType,
+      cardType,
       updatedAt: nextLocalTimestamp(original.updatedAt, now),
     });
+    if (localLibraryRecordBytes(record).byteLength > MAX_DESKTOP_LOCAL_CARD_DOCUMENT_BYTES) {
+      return { kind: 'document-too-large' };
+    }
     await repository.put(record);
     return { kind: 'updated', record };
   }
@@ -127,7 +174,7 @@ export const saveCardDraft = async (
     id,
     schemaVersion: 1,
     storageLocation: 'local',
-    cardType: draft.cardType,
+    cardType,
     title,
     data: draft.data,
     contentDigest,
@@ -135,6 +182,9 @@ export const saveCardDraft = async (
     createdAt: timestamp,
     updatedAt: timestamp,
   });
+  if (localLibraryRecordBytes(record).byteLength > MAX_DESKTOP_LOCAL_CARD_DOCUMENT_BYTES) {
+    return { kind: 'document-too-large' };
+  }
   const outcome = await repository.putIfAbsent(record);
   if ('written' in outcome) return { kind: 'created', record };
   const existing = await repository.get(id);

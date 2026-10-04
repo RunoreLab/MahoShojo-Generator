@@ -6,8 +6,10 @@ import type { CardWriteOutcome } from '@mahoshojo/local-library/repository';
 import {
   asMagicalGirlPreview,
   draftFromRecord,
+  exceedsUtf8ByteLimit,
   inferEditableCardType,
   isEditableLocalCard,
+  MAX_IMPORT_FILE_BYTES,
   parseImportedCard,
   saveCardDraft,
 } from '../src/features/character-manager/editor';
@@ -60,6 +62,30 @@ describe('单卡导入解析', () => {
     expect(parseImportedCard('{"__proto__": {"x": 1}}')).toMatchObject({ ok: false });
   });
 
+  it('UTF-8 字节数按真实编码计：孤立代理按 U+FFFD、ASCII 1 字节、CJK 3 字节', () => {
+    expect(exceedsUtf8ByteLimit('abcd', 4)).toBe(false);
+    expect(exceedsUtf8ByteLimit('abcde', 4)).toBe(true);
+    // '汉' 3 字节：字符串长度 2 < 5，字节数 6 > 5。
+    expect(exceedsUtf8ByteLimit('汉汉', 5)).toBe(true);
+    expect(exceedsUtf8ByteLimit('汉汉', 6)).toBe(false);
+    // 孤立高代理 → U+FFFD（3 字节）；成对代理 → 4 字节。
+    expect(exceedsUtf8ByteLimit('\ud800a', 3)).toBe(true);
+    expect(exceedsUtf8ByteLimit('\ud800a', 4)).toBe(false);
+    expect(exceedsUtf8ByteLimit('\ud83d\ude00', 4)).toBe(false);
+    expect(exceedsUtf8ByteLimit('\ud83d\ude00x', 4)).toBe(true);
+  });
+
+  it('粘贴与文件共用同一字节上限：超限文本在解析前拒绝，恰在上限接受', () => {
+    // {"a":"…"} 包装 8 字节；填满恰好 4 MiB 应通过，多一字节应拒绝。
+    const wrap = (payload: string) => `{"a":"${payload}"}`;
+    expect(parseImportedCard(wrap('x'.repeat(MAX_IMPORT_FILE_BYTES - 8)))).toMatchObject({ ok: true });
+    expect(parseImportedCard(wrap('x'.repeat(MAX_IMPORT_FILE_BYTES - 7))))
+      .toEqual({ ok: false, error: '内容超过单张数据卡的大小上限（4 MiB）。' });
+    // CJK 文本字符串长度远低于 4 MiB，但 UTF-8 字节数超限：按字节而非字符计数。
+    expect(parseImportedCard(wrap('汉'.repeat(Math.ceil(MAX_IMPORT_FILE_BYTES / 3)))))
+      .toEqual({ ok: false, error: '内容超过单张数据卡的大小上限（4 MiB）。' });
+  });
+
   it('只把角色与情景卡视为可编辑', async () => {
     expect(isEditableLocalCard(await storedRecord({ codename: 'a' }))).toBe(true);
     expect(isEditableLocalCard(await storedRecord({ questions: [] }, { cardType: 'questionnaire' }))).toBe(false);
@@ -83,6 +109,22 @@ describe('保存规则', () => {
     const saved = repository.map.get(record.id)!;
     expect(saved).toMatchObject({ id: record.id, title: '新标题', provenance: record.provenance, cloudRef: record.cloudRef, createdAt: record.createdAt });
     expect(saved.updatedAt).toBe('2026-10-04T08:00:00.000Z');
+  });
+
+  it('已有记录的 cardType 不可改：草稿里的不同类型被忽略，新记录也继承原类型', async () => {
+    const record = await storedRecord({ codename: '星光' });
+    const repository = memoryRepository([record]);
+    // 只有类型不同的草稿没有任何可写内容。
+    await expect(saveCardDraft(repository, { ...draftFromRecord(record), cardType: 'scenario' }, () => NOW))
+      .resolves.toEqual({ kind: 'unchanged' });
+    // 标题变化时整卡替换仍保留原类型。
+    const updated = await saveCardDraft(repository, { ...draftFromRecord(record), cardType: 'scenario', title: '新标题' }, () => NOW);
+    expect(updated.kind).toBe('updated');
+    expect(repository.map.get(record.id)?.cardType).toBe('character');
+    // 正文改变时另存的新记录同样继承原类型。
+    const created = await saveCardDraft(repository, { ...draftFromRecord(record), cardType: 'scenario', data: { codename: '月影' } }, () => NOW);
+    expect(created.kind).toBe('created');
+    if (created.kind === 'created') expect(created.record.cardType).toBe('character');
   });
 
   it('正文改变时以新摘要另存为 unsigned/edited 新记录，原记录不动', async () => {
@@ -111,6 +153,16 @@ describe('保存规则', () => {
 
     const created = await saveCardDraft(repository, importDraft({ codename: '新角色' }), () => NOW);
     expect(created).toMatchObject({ kind: 'created', record: { provenance: { kind: 'unsigned', execution: 'imported' }, title: '导入' } });
+  });
+
+  it('组装后的 document 超出单条上限时返回 document-too-large，不写入', async () => {
+    const repository = memoryRepository();
+    // 4 MiB 原文加上 envelope（id/title/provenance/时间戳）必然超过 4 MiB document 上限。
+    const draft = { original: null, cardType: 'character' as const, title: '大卡', data: { content: 'x'.repeat(MAX_IMPORT_FILE_BYTES) } };
+    await expect(saveCardDraft(repository, draft, () => NOW)).resolves.toEqual({ kind: 'document-too-large' });
+    expect(repository.put).not.toHaveBeenCalled();
+    expect(repository.putIfAbsent).not.toHaveBeenCalled();
+    expect(repository.map.size).toBe(0);
   });
 });
 
