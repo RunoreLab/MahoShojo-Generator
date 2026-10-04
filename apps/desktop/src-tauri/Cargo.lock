@@ -1767,6 +1767,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "http-range"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "21dec9db110f5f872ed9699c3ecf50cf16f423502706ba5c72462e28d3157573"
+
+[[package]]
 name = "httparse"
 version = "1.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2394,6 +2400,7 @@ dependencies = [
  "base64 0.22.1",
  "fs4",
  "futures-util",
+ "http-range",
  "keyring",
  "percent-encoding",
  "reqwest",

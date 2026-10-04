@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { MAX_DESKTOP_WEBPKG_APPEND_CHUNK_BYTES } from '@mahoshojo/contracts/desktop-ipc';
 import type { WebPackageResourceSnapshot } from '@mahoshojo/web-package';
 
 import type { RawInvokeFn, StructuredInvokeFn } from '../src/platform/local-archive-bridge';
@@ -57,19 +58,30 @@ const makeIpc = (handlers: {
   return { invoke, rawInvoke, structuredCalls, rawCalls };
 };
 
-const okHandlers = (receivedBytes = true) => ({
-  structured: (command: string) => {
-    if (command === BEGIN_WEB_PACKAGE_INSTANCE_COMMAND) return { instanceId: 'wpk-7' };
-    if (command === OPEN_WEB_PACKAGE_INSTANCE_COMMAND) return { label: 'webpkg-wpk-7' };
-    throw new Error(`unexpected structured command: ${command}`);
-  },
-  raw: (command: string, body: Uint8Array) => {
-    if (command === APPEND_WEB_PACKAGE_RESOURCE_COMMAND) {
-      return { receivedByteLength: receivedBytes ? body.byteLength : body.byteLength + 1 };
-    }
-    throw new Error(`unexpected raw command: ${command}`);
-  },
-});
+const okHandlers = (receivedBytes = true) => {
+  // 回执是逐文件累计量：native 返回"该文件已收字节数"，不是"本块字节数"。
+  const received = new Map<string, number>();
+  return {
+    structured: (command: string) => {
+      if (command === BEGIN_WEB_PACKAGE_INSTANCE_COMMAND) return { instanceId: 'wpk-7' };
+      if (command === OPEN_WEB_PACKAGE_INSTANCE_COMMAND) return { label: 'webpkg-wpk-7' };
+      throw new Error(`unexpected structured command: ${command}`);
+    },
+    raw: (command: string, body: Uint8Array, headers: Record<string, string>) => {
+      if (command === APPEND_WEB_PACKAGE_RESOURCE_COMMAND) {
+        const path = headers['x-webpkg-path'] ?? '';
+        const offset = Number(headers['x-webpkg-offset']);
+        if (offset !== (received.get(path) ?? 0)) {
+          return { receivedByteLength: -1 };
+        }
+        const next = offset + body.byteLength;
+        received.set(path, next);
+        return { receivedByteLength: receivedBytes ? next : next + 1 };
+      }
+      throw new Error(`unexpected raw command: ${command}`);
+    },
+  };
+};
 
 describe('Web Package 受限 webview 桥接（D4b）', () => {
   it('按 begin → 逐文件 append → open 的顺序完成三段流程', async () => {
@@ -99,13 +111,15 @@ describe('Web Package 受限 webview 桥接（D4b）', () => {
       },
     });
 
-    // 每个文件恰好投递一次，instance 与编码路径走 header，字节是整个 raw body。
+    // 每个文件按 offset 升序分块投递（小文件恰一块），instance/路径/偏移走 header，
+    // 字节是整个 raw body。
     expect(ipc.rawCalls).toHaveLength(2);
     for (const [index, path] of ['index.html', 'assets/app.js'].entries()) {
       const call = ipc.rawCalls[index];
       expect(call?.command).toBe(APPEND_WEB_PACKAGE_RESOURCE_COMMAND);
       expect(call?.headers['x-webpkg-instance']).toBe('wpk-7');
       expect(call?.headers['x-webpkg-path']).toBe(path);
+      expect(call?.headers['x-webpkg-offset']).toBe('0');
       expect(call?.bytes).toEqual(snapshot.files.get(path)?.bytes);
     }
 
@@ -128,6 +142,64 @@ describe('Web Package 受限 webview 桥接（D4b）', () => {
     const headers = ipc.rawCalls.map((call) => call.headers['x-webpkg-path']);
     // '#' 必须被编进路径段——裸写会变成 URL fragment 分隔符，resolver 收到的就是另一条路径。
     expect(headers).toEqual(['index.html', 'notes/report%231.js', 'my%20file.css']);
+  });
+
+  it('大文件按 4 MiB 块与升序 offset 分块投递，零长文件也发一个空块', async () => {
+    const chunk = MAX_DESKTOP_WEBPKG_APPEND_CHUNK_BYTES;
+    // 4 MiB + 3：边界跨一块，验证第二块 offset 接在第一块末尾。
+    const big = new Uint8Array(chunk + 3).fill(7);
+    const snapshot = makeSnapshot([
+      ['index.html', 'text/html', encode('<html></html>')],
+      ['assets/video.bin', 'application/octet-stream', big],
+      ['empty.bin', 'application/octet-stream', new Uint8Array(0)],
+    ]);
+    const ipc = makeIpc(okHandlers());
+
+    await openWebPackageInstanceInIsolatedWebview(ipc.invoke, ipc.rawInvoke, snapshot, 't');
+
+    // index.html 1 块 + video 2 块 + empty 1 空块。
+    expect(ipc.rawCalls).toHaveLength(4);
+    const videoCalls = ipc.rawCalls.filter(
+      (call) => call.headers['x-webpkg-path'] === 'assets/video.bin',
+    );
+    expect(videoCalls.map((call) => call.headers['x-webpkg-offset'])).toEqual(['0', String(chunk)]);
+    expect(videoCalls[0]?.bytes.byteLength).toBe(chunk);
+    expect(videoCalls[1]?.bytes.byteLength).toBe(3);
+    // 分块只切视图不复制：第二块仍是同一份快照字节的尾段。
+    expect(videoCalls[1]?.bytes).toEqual(big.subarray(chunk));
+    const emptyCall = ipc.rawCalls.find(
+      (call) => call.headers['x-webpkg-path'] === 'empty.bin',
+    );
+    expect(emptyCall?.headers['x-webpkg-offset']).toBe('0');
+    expect(emptyCall?.bytes.byteLength).toBe(0);
+    // 任何一块都不超过契约上限。
+    for (const call of ipc.rawCalls) {
+      expect(call.bytes.byteLength).toBeLessThanOrEqual(chunk);
+    }
+  });
+
+  it('append 回执按累计偏移验收，错序块的错位回执按 resource-mismatch 失败', async () => {
+    const snapshot = makeSnapshot([
+      ['index.html', 'text/html', encode('<html></html>')],
+    ]);
+    const ipc = makeIpc({
+      structured: (command) => {
+        if (command === BEGIN_WEB_PACKAGE_INSTANCE_COMMAND) return { instanceId: 'wpk-7' };
+        throw new Error(`unexpected structured command: ${command}`);
+      },
+      // native 回执声称收到了与本块偏移不符的累计量。
+      raw: () => ({ receivedByteLength: 9999 }),
+    });
+
+    const failure = await openWebPackageInstanceInIsolatedWebview(
+      ipc.invoke,
+      ipc.rawInvoke,
+      snapshot,
+      't',
+    ).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(DesktopWebPackageInstanceError);
+    expect((failure as DesktopWebPackageInstanceError).code).toBe('webpkg-resource-mismatch');
   });
 
   it('native 的 webpkg-* 失败按 code 归一成类型化错误', async () => {

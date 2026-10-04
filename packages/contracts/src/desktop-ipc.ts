@@ -715,8 +715,10 @@ export type DesktopAppendArchiveExportChunkResponse = z.infer<
  * 1. `begin_web_package_instance`：渲染层声明 entry、窗口标题与**完整文件表**
  *    （路径 + mediaType + 字节数）。native 校验声明并分配 instance id；它不接触任何
  *    ZIP/manifest——解包与 overlay 语义全部留在 TypeScript 权威实现。
- * 2. `append_web_package_resource`：逐文件 raw 字节投递，instance 与路径走 header。
- *    每个声明的文件恰好投递一次，字节数必须与声明一致。
+ * 2. `append_web_package_resource`：逐文件 raw 字节投递，instance、路径与块内偏移
+ *    走 header。每份文件按 `x-webpkg-offset` 升序切成不超过
+ *    `MAX_DESKTOP_WEBPKG_APPEND_CHUNK_BYTES` 的块投递——"实例总预算"不是
+ *    "单次 IPC 预算"，与 `MAX_LOCAL_LIBRARY_IPC_CHUNK_BYTES` 同一原则。
  * 3. `open_web_package_instance`：全部文件到齐后 native 创建 `webpkg-<id>` webview。
  *
  * 资源随后由 `maho-webpkg://` 自定义协议服务。URL 形状与
@@ -740,9 +742,29 @@ export const DESKTOP_WEBPKG_INSTANCE_URL_PREFIX = '/__web-package__/instance/' a
 export const DESKTOP_WEBPKG_WEBVIEW_LABEL_PREFIX = 'webpkg-' as const;
 export const DESKTOP_WEBPKG_INSTANCE_ID_HEADER = 'x-webpkg-instance' as const;
 export const DESKTOP_WEBPKG_RESOURCE_PATH_HEADER = 'x-webpkg-path' as const;
+/** 本块字节在文件内的偏移（十进制 u64）。native 按"offset == 已收长度"验收。 */
+export const DESKTOP_WEBPKG_RESOURCE_OFFSET_HEADER = 'x-webpkg-offset' as const;
 
 export const MAX_DESKTOP_WEBPKG_INSTANCE_FILES = 4096;
+/**
+ * 单实例**常驻 staging 字节**上限：native 注册表里一个 instance 允许容纳的已收字节
+ * 合计。它与 `MAX_ARCHIVE_EXPANDED_BYTES`（ZIP 解压防护）**语义独立**——一个是运行时
+ * 内存占用界，一个是解包工作量界——即使当前恰好都取 256 MiB，任何一侧的调整都必须
+ * 单独评审，不得因为数值相等就把它们当成同一个常量。
+ */
 export const MAX_DESKTOP_WEBPKG_INSTANCE_TOTAL_BYTES = 256 * 1024 * 1024;
+/**
+ * `append_web_package_resource` 单次请求的体上限。分块让"实例预算"与"单次 IPC
+ * 预算"成为两个独立的量：渲染层可以投递 256 MiB 的文件，但任何一次请求体不超过
+ * 4 MiB——与 `MAX_LOCAL_LIBRARY_IPC_CHUNK_BYTES` 同源。
+ */
+export const MAX_DESKTOP_WEBPKG_APPEND_CHUNK_BYTES = 4 * 1024 * 1024;
+/**
+ * `maho-webpkg` resolver 单帧响应上限：Range 请求的 206 响应不超过此值（镜像 Tauri
+ * 官方 streaming 示例的单帧截断语义）。无 Range 的请求返回完整资源——单次响应分配的
+ * 诚实上界因此是"实例预算"，不是这个数字；把大文件切成 Range 读是 webview 自己的事。
+ */
+export const MAX_DESKTOP_WEBPKG_RESPONSE_BYTES = 4 * 1024 * 1024;
 export const MAX_DESKTOP_WEBPKG_LIVE_INSTANCES = 8;
 export const MAX_DESKTOP_WEBPKG_LIVE_BYTES = 512 * 1024 * 1024;
 export const MAX_DESKTOP_WEBPKG_TITLE_LENGTH = 128;
@@ -819,8 +841,9 @@ export type DesktopBeginWebPackageInstanceResponse = z.infer<
  * `append_web_package_resource` 的响应。
  *
  * 请求方向没有 schema——与 `append_local_archive_export_chunk` 同构：字节是整个 raw
- * 请求体，instance 与逻辑路径走 `x-webpkg-instance` / `x-webpkg-path` header
- * （路径以 `encodeURIComponent` 逐段编码，native 解码后仍须通过 portable path 校验）。
+ * 请求体，instance、逻辑路径与块内偏移走 `x-webpkg-instance` / `x-webpkg-path` /
+ * `x-webpkg-offset` header（路径以 `encodeURIComponent` 逐段编码，native 解码后仍须
+ * 通过 portable path 校验；offset 必须等于该文件已收字节数）。
  */
 export const DesktopAppendWebPackageResourceResponseSchema = z
   .object({ receivedByteLength: z.number().int().nonnegative() })

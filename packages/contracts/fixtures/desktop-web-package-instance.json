@@ -16,11 +16,14 @@
   },
   "headers": {
     "instanceId": "x-webpkg-instance",
-    "resourcePath": "x-webpkg-path"
+    "resourcePath": "x-webpkg-path",
+    "resourceOffset": "x-webpkg-offset"
   },
   "budgets": {
     "maxFiles": 4096,
     "maxTotalBytes": 268435456,
+    "maxAppendChunkBytes": 4194304,
+    "maxResponseBytes": 4194304,
     "maxLiveInstances": 8,
     "maxLiveBytes": 536870912,
     "maxTitleLength": 128,

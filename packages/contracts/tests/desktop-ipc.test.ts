@@ -37,6 +37,7 @@ import {
   DESKTOP_WEBPKG_INSTANCE_ID_HEADER,
   DESKTOP_WEBPKG_INSTANCE_URL_PREFIX,
   DESKTOP_WEBPKG_RESOURCE_HOST,
+  DESKTOP_WEBPKG_RESOURCE_OFFSET_HEADER,
   DESKTOP_WEBPKG_RESOURCE_PATH_HEADER,
   DESKTOP_WEBPKG_URI_SCHEME,
   DESKTOP_WEBPKG_WEBVIEW_LABEL_PREFIX,
@@ -50,8 +51,10 @@ import {
   DesktopWebPackageInstanceErrorSchema,
   DesktopWebPackageInstanceIdSchema,
   DesktopWebPackageInstanceWebviewLabelSchema,
+  MAX_DESKTOP_WEBPKG_APPEND_CHUNK_BYTES,
   MAX_DESKTOP_WEBPKG_INSTANCE_FILES,
   MAX_DESKTOP_WEBPKG_INSTANCE_TOTAL_BYTES,
+  MAX_DESKTOP_WEBPKG_RESPONSE_BYTES,
   MAX_DESKTOP_WEBPKG_LIVE_BYTES,
   MAX_DESKTOP_WEBPKG_LIVE_INSTANCES,
   MAX_DESKTOP_WEBPKG_TITLE_LENGTH,
@@ -564,10 +567,12 @@ interface WebpkgFixture {
   entryUrlExample: string;
   windowsEntryUrlExample: string;
   commands: { begin: string; append: string; open: string };
-  headers: { instanceId: string; resourcePath: string };
+  headers: { instanceId: string; resourcePath: string; resourceOffset: string };
   budgets: {
     maxFiles: number;
     maxTotalBytes: number;
+    maxAppendChunkBytes: number;
+    maxResponseBytes: number;
     maxLiveInstances: number;
     maxLiveBytes: number;
     maxTitleLength: number;
@@ -612,6 +617,7 @@ describe('Desktop Web Package 受限 webview IPC 契约（D4b）', () => {
     expect(DESKTOP_WEBPKG_WEBVIEW_LABEL_PREFIX).toBe(webpkgFixture.webviewLabelPrefix);
     expect(DESKTOP_WEBPKG_INSTANCE_ID_HEADER).toBe(webpkgFixture.headers.instanceId);
     expect(DESKTOP_WEBPKG_RESOURCE_PATH_HEADER).toBe(webpkgFixture.headers.resourcePath);
+    expect(DESKTOP_WEBPKG_RESOURCE_OFFSET_HEADER).toBe(webpkgFixture.headers.resourceOffset);
     // instance URL 前缀的字面值钉在这里；`packages/web-package` 的
     // `WEB_PACKAGE_INSTANCE_PREFIX` 与它的一致性由 resource-space.test.ts 反向断言
     // （contracts 不能反向 import web-package，那会是依赖环）。
@@ -631,6 +637,8 @@ describe('Desktop Web Package 受限 webview IPC 契约（D4b）', () => {
   it('预算常量与 native 侧一致', () => {
     expect(MAX_DESKTOP_WEBPKG_INSTANCE_FILES).toBe(webpkgFixture.budgets.maxFiles);
     expect(MAX_DESKTOP_WEBPKG_INSTANCE_TOTAL_BYTES).toBe(webpkgFixture.budgets.maxTotalBytes);
+    expect(MAX_DESKTOP_WEBPKG_APPEND_CHUNK_BYTES).toBe(webpkgFixture.budgets.maxAppendChunkBytes);
+    expect(MAX_DESKTOP_WEBPKG_RESPONSE_BYTES).toBe(webpkgFixture.budgets.maxResponseBytes);
     expect(MAX_DESKTOP_WEBPKG_LIVE_INSTANCES).toBe(webpkgFixture.budgets.maxLiveInstances);
     expect(MAX_DESKTOP_WEBPKG_LIVE_BYTES).toBe(webpkgFixture.budgets.maxLiveBytes);
     expect(MAX_DESKTOP_WEBPKG_TITLE_LENGTH).toBe(webpkgFixture.budgets.maxTitleLength);

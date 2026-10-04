@@ -19,8 +19,9 @@
 //! 与 `export.rs` 同一条理由链：raw **请求**体不能携带结构化参数，而一个 ≤ 256 MiB 的文件表
 //! 若用 base64 JSON 一次传入，会把 33% 体积膨胀与一次解码峰值直接落在渲染层——那正是
 //! `DESK-064`/`DESK-070` 记在案的既有债务形态。begin 声明文件表（含每文件长度），append
-//! 逐文件 raw 投递并核对长度，open 只在"声明 = 已收"时开窗——完整性不是 UI 的礼貌约定，
-//! 是 native 的接收条件。
+//! 按 `x-webpkg-offset` 升序、以不超过 `MAX_APPEND_CHUNK_BYTES` 的块投递并核对偏移与
+//! 声明长度，open 只在"每文件已收 = 声明"时开窗——完整性不是 UI 的礼貌约定，是 native
+//! 的接收条件。"实例预算"（256 MiB 常驻字节）与"单次 IPC 预算"（4 MiB）是两个独立的量。
 //!
 //! ## staging TTL 与"为什么没有 finish/abort command"
 //!
@@ -53,11 +54,24 @@ pub const WEBVIEW_LABEL_PREFIX: &str = "webpkg-";
 pub const INSTANCE_ID_HEADER: &str = "x-webpkg-instance";
 /// append 请求携带 percent-encode 后逻辑路径的 header。
 pub const RESOURCE_PATH_HEADER: &str = "x-webpkg-path";
+/// append 请求携带块内偏移的 header（十进制 u64）。native 按 "offset == 该文件已收字节数"
+/// 验收——偏移乱序或越界都是 `webpkg-resource-mismatch`，不存在可猜测的语义。
+pub const RESOURCE_OFFSET_HEADER: &str = "x-webpkg-offset";
 
 /// 单实例文件数上限：与 `MAX_ARCHIVE_ENTRIES` 同源（解压工作量界，不是产品尺寸）。
 pub const MAX_INSTANCE_FILES: usize = 4096;
-/// 单实例总字节上限：与 `MAX_ARCHIVE_EXPANDED_BYTES` 同源。
+/// 单实例**常驻 staging 字节**上限。与 `MAX_ARCHIVE_EXPANDED_BYTES`（ZIP 解压防护）
+/// **语义独立**：一个是运行时内存占用界，一个是解包工作量界——当前恰好同取 256 MiB，
+/// 任何一侧调整都必须单独评审。
 pub const MAX_INSTANCE_TOTAL_BYTES: u64 = 256 * 1024 * 1024;
+/// `append_web_package_resource` 单次请求的体上限。"实例预算"与"单次 IPC 预算"是两个
+/// 独立的量——前者允许 256 MiB，后者钉在 4 MiB（与 `MAX_LOCAL_LIBRARY_IPC_CHUNK_BYTES`
+/// 同源），大文件由渲染层按 `x-webpkg-offset` 升序分块投递。
+pub const MAX_APPEND_CHUNK_BYTES: u64 = 4 * 1024 * 1024;
+/// resolver 单帧响应上限：Range 请求的 206 响应不超过此值（镜像 Tauri 官方 streaming
+/// 示例的单帧截断语义）。无 Range 的请求返回完整资源——单次响应分配的诚实上界因此是
+/// 实例预算而非此数；把大文件切成 Range 读是 webview 自己的事。
+pub const MAX_RESPONSE_BYTES: u64 = 4 * 1024 * 1024;
 /// 同时存活的 instance 上限（Collecting + Open）。机制界，不是产品承诺。
 pub const MAX_LIVE_INSTANCES: usize = 8;
 /// 全部存活 instance 的合计字节上限。
@@ -514,12 +528,14 @@ impl WebPackageInstances {
         Ok(BeginInstanceOutcome { instance_id: id })
     }
 
-    /// 追加一个文件的全部字节。每个声明的文件恰好投递一次——
-    /// "一个文件一次"让长度核对变成"送达 = 声明"而不是滑窗累计。
+    /// 追加一个文件的一段字节。每个声明的文件按 `x-webpkg-offset` 升序、以不超过
+    /// `MAX_APPEND_CHUNK_BYTES` 的块投递——单次 IPC 预算与实例预算是两个独立的量。
+    /// 偏移必须恰好接上已收字节：乱序、跳跃、重叠与越界都是 `webpkg-resource-mismatch`。
     pub fn append(
         &self,
         instance_id: &str,
         encoded_path: &str,
+        offset: u64,
         bytes: &[u8],
         now: Instant,
     ) -> Result<AppendResourceOutcome, WebpkgError> {
@@ -528,6 +544,9 @@ impl WebPackageInstances {
             .map_err(|_| WebpkgError::Invalid)?;
         if !is_valid_package_path(&path) {
             return Err(WebpkgError::Invalid);
+        }
+        if bytes.len() as u64 > MAX_APPEND_CHUNK_BYTES {
+            return Err(WebpkgError::TooLarge);
         }
         let mut inner = self.inner.lock().map_err(|_| WebpkgError::Failure)?;
         self.fail_if_stale(&mut inner, instance_id, now)?;
@@ -549,26 +568,34 @@ impl WebPackageInstances {
         let Some(file) = declared.get(path.as_ref()) else {
             return Err(WebpkgError::ResourceUndeclared);
         };
-        if received.contains_key(path.as_ref()) {
+        // 已收满的文件再收任何字节都是重复投递——比"偏移不对"更接近调用方的错误。
+        // 先查已有条目再插：0 字节文件的首次空块 append 也满足 len==declared，
+        // 顺序反了会让零长文件永远无法完成。
+        if received
+            .get(path.as_ref())
+            .is_some_and(|s| s.bytes.len() as u64 == file.byte_length)
+        {
             return Err(WebpkgError::ResourceDuplicate);
         }
-        if bytes.len() as u64 != file.byte_length {
+        let staged = received
+            .entry(path.clone().into_owned())
+            .or_insert_with(|| StagedFile {
+                media_type: file.media_type.clone(),
+                bytes: Vec::new(),
+            });
+        let end = offset
+            .checked_add(bytes.len() as u64)
+            .ok_or(WebpkgError::ResourceMismatch)?;
+        if end > file.byte_length || offset != staged.bytes.len() as u64 {
             return Err(WebpkgError::ResourceMismatch);
         }
         if live_bytes.saturating_add(bytes.len() as u64) > MAX_LIVE_BYTES {
             return Err(WebpkgError::TooLarge);
         }
-        let received_byte_length = bytes.len() as u64;
-        received.insert(
-            path.into_owned(),
-            StagedFile {
-                media_type: file.media_type.clone(),
-                bytes: bytes.to_vec(),
-            },
-        );
-        *live_bytes += received_byte_length;
+        staged.bytes.extend_from_slice(bytes);
+        *live_bytes += bytes.len() as u64;
         Ok(AppendResourceOutcome {
-            received_byte_length,
+            received_byte_length: staged.bytes.len() as u64,
         })
     }
 
@@ -612,7 +639,15 @@ impl WebPackageInstances {
                     received,
                     ..
                 }) => {
-                    if declared.len() != received.len() {
+                    // 分块 staging 后"到齐"是逐文件的 len 等式，不是条目数等式——
+                    // 文件收到第一块时就已经在表里了。
+                    let complete = declared.len() == received.len()
+                        && declared.iter().all(|(p, d)| {
+                            received
+                                .get(p)
+                                .is_some_and(|f| f.bytes.len() as u64 == d.byte_length)
+                        });
+                    if !complete {
                         return Err(WebpkgError::InstanceIncomplete);
                     }
                     OpenStep::Take(title.clone(), entry.clone(), std::mem::take(received))
@@ -723,33 +758,92 @@ impl WebPackageInstances {
     /// resolver 的资源查找：只在 label↔instance 钉定成立且 instance 已进入
     /// Opening/Serving 时返回文件——`Opening` 起即可服务，因为初始页面请求可能
     /// 先于 `.build()` 返回到达。
-    fn resolve(&self, webview_label: &str, uri_path: &str) -> Option<StagedFileRef> {
-        let instance_id = webview_label.strip_prefix(WEBVIEW_LABEL_PREFIX)?;
-        let (url_instance, path) = parse_instance_path(uri_path)?;
+    ///
+    /// `range_header` 非空时按 RFC 7233 单段字节区间服务：`HttpRange::parse` 的
+    /// clamp/越界语义直接复用，不可满足与多段请求都归一成 `NotSatisfiable`（416）。
+    /// 返回体只包含区间内的切片——大文件的瞬态副本由 `MAX_RESPONSE_BYTES` 封顶，
+    /// 不再随文件尺寸线性放大。
+    fn resolve(
+        &self,
+        webview_label: &str,
+        uri_path: &str,
+        range_header: Option<&str>,
+    ) -> ResolveOutcome {
+        let Some(instance_id) = webview_label.strip_prefix(WEBVIEW_LABEL_PREFIX) else {
+            return ResolveOutcome::NotFound;
+        };
+        let Some((url_instance, path)) = parse_instance_path(uri_path) else {
+            return ResolveOutcome::NotFound;
+        };
         if url_instance != instance_id {
-            return None;
+            return ResolveOutcome::NotFound;
         }
-        let inner = self.inner.lock().ok()?;
-        let InstanceState::Open { files, label, .. } = inner.instances.get(instance_id)? else {
-            return None;
+        let Ok(inner) = self.inner.lock() else {
+            return ResolveOutcome::NotFound;
+        };
+        let Some(InstanceState::Open { files, label, .. }) = inner.instances.get(instance_id)
+        else {
+            return ResolveOutcome::NotFound;
         };
         if label != webview_label {
-            return None;
+            return ResolveOutcome::NotFound;
         }
         // 借用跨不出 MutexGuard，复制 header/字节——见 StagedFileRef 上的注释。
-        let file = files.get(&path)?;
-        Some(StagedFileRef {
-            media_type: file.media_type.clone(),
-            bytes: file.bytes.clone(),
-        })
+        let Some(file) = files.get(&path) else {
+            return ResolveOutcome::NotFound;
+        };
+        let total = file.bytes.len() as u64;
+        match range_header {
+            Some(header) => {
+                let Ok(ranges) = http_range::HttpRange::parse(header, total) else {
+                    return ResolveOutcome::NotSatisfiable { total };
+                };
+                // 只服务单段 Range：multipart/byteranges 的复杂度远超其在本协议里的
+                // 价值，webview 的媒体栈也只发单段请求。
+                if ranges.len() != 1 {
+                    return ResolveOutcome::NotSatisfiable { total };
+                }
+                let range = ranges[0];
+                // 单帧截断：请求段可以很大，一次响应最多 MAX_RESPONSE_BYTES——
+                // 与 Tauri 官方 streaming 示例同一语义，调用方按 Content-Range 续读。
+                let end_inclusive = (range.start + range.length - 1)
+                    .min(range.start + MAX_RESPONSE_BYTES - 1)
+                    .min(total - 1);
+                ResolveOutcome::Found(StagedFileRef {
+                    media_type: file.media_type.clone(),
+                    total,
+                    start: range.start,
+                    bytes: file.bytes[range.start as usize..=end_inclusive as usize].to_vec(),
+                })
+            }
+            None => ResolveOutcome::Found(StagedFileRef {
+                media_type: file.media_type.clone(),
+                total,
+                start: 0,
+                bytes: file.bytes.clone(),
+            }),
+        }
     }
 }
 
+/// `resolve` 的裁决。`NotFound` 覆盖**全部**拒绝路径（未知 instance / label 不匹配 /
+/// 未 Open / 非法或越权路径）——对外只有一种失败，见模块文档第 3 条。
+enum ResolveOutcome {
+    NotFound,
+    /// 资源存在但 Range 不可满足。只对已通过钉定校验的请求方可见，不构成侧信道。
+    NotSatisfiable {
+        total: u64,
+    },
+    Found(StagedFileRef),
+}
+
 /// `resolve` 的返回面。文件字节被 `Clone` 出来而不是借用：注册表锁不能跨响应生命周期
-/// 持有（resolver 在 Tauri 协议线程上同步返回，借用会把锁变成请求级临界区）。包资源
-/// 量级以 KiB 计，复制的代价远低于把锁挂在 IO 上。
+/// 持有（resolver 在 Tauri 协议线程上同步返回，借用会把锁变成请求级临界区）。Range
+/// 服务时 `bytes` 只是区间内的一段切片，`total`/`start` 供 `Content-Range` 拼接。
 struct StagedFileRef {
     media_type: String,
+    total: u64,
+    start: u64,
     bytes: Vec<u8>,
 }
 
@@ -801,22 +895,42 @@ fn build_webpkg_window(
 
 /// `maho-webpkg` 协议响应。返回类型与 `register_uri_scheme_protocol` 的 `T: Into<Cow>` 匹配。
 ///
-/// 所有失败统一 404 + 同一组安全响应头。见模块文档第 3 条。
+/// 读完整 `Request` 而不是只读 URI：`Range` 头决定返回 200 全量还是 206 区间
+/// （镜像 Tauri 官方 streaming 示例的 Range → 206 → 单帧截断语义）。所有授权类失败
+/// 统一 404 + 同一组安全响应头，Range 不可满足单独走 416——它只对已通过钉定校验的
+/// 请求方可见，见模块文档第 3 条。
 pub fn resolve_webpkg_request(
     registry: &WebPackageInstances,
     webview_label: &str,
-    uri_path: &str,
+    request: &http::Request<Vec<u8>>,
 ) -> http::Response<std::borrow::Cow<'static, [u8]>> {
-    match registry.resolve(webview_label, uri_path) {
-        Some(file) => {
-            let mut builder = http::Response::builder().status(http::StatusCode::OK);
+    let uri_path = request.uri().path();
+    let range_header = request
+        .headers()
+        .get(http::header::RANGE)
+        .and_then(|value| value.to_str().ok());
+    match registry.resolve(webview_label, uri_path, range_header) {
+        ResolveOutcome::Found(file) => {
+            let mut builder = http::Response::builder();
             for (name, value) in BASE_HEADERS {
                 builder = builder.header(*name, *value);
             }
-            builder = builder.header(
-                http::header::CONTENT_TYPE,
-                content_type_for(&file.media_type),
-            );
+            builder = builder
+                .header(http::header::ACCEPT_RANGES, "bytes")
+                .header(
+                    http::header::CONTENT_TYPE,
+                    content_type_for(&file.media_type),
+                )
+                .header(http::header::CONTENT_LENGTH, file.bytes.len());
+            if range_header.is_some() {
+                let end = file.start + file.bytes.len() as u64 - 1;
+                builder = builder.status(http::StatusCode::PARTIAL_CONTENT).header(
+                    http::header::CONTENT_RANGE,
+                    format!("bytes {}-{}/{}", file.start, end, file.total),
+                );
+            } else {
+                builder = builder.status(http::StatusCode::OK);
+            }
             if file.media_type == "text/html" {
                 builder = builder.header("Content-Security-Policy", HTML_SANDBOX_CSP);
             }
@@ -824,7 +938,21 @@ pub fn resolve_webpkg_request(
                 .body(std::borrow::Cow::Owned(file.bytes))
                 .unwrap_or_else(|_| not_found_response())
         }
-        None => not_found_response(),
+        ResolveOutcome::NotSatisfiable { total } => {
+            let mut builder =
+                http::Response::builder().status(http::StatusCode::RANGE_NOT_SATISFIABLE);
+            for (name, value) in BASE_HEADERS {
+                builder = builder.header(*name, *value);
+            }
+            builder
+                .header(http::header::CONTENT_RANGE, format!("bytes */{total}"))
+                .header(http::header::CONTENT_TYPE, "text/plain; charset=utf-8")
+                .body(std::borrow::Cow::Borrowed(
+                    b"Range Not Satisfiable" as &[u8],
+                ))
+                .unwrap_or_else(|_| not_found_response())
+        }
+        ResolveOutcome::NotFound => not_found_response(),
     }
 }
 
@@ -873,6 +1001,36 @@ mod tests {
         registry.begin(entry, "示例包", files, Instant::now())
     }
 
+    /// resolver 测试的 Request 构造：`uri()` 只有 path 段参与判定，host 任意取
+    /// scheme 的正则形态即可。
+    fn request(path: &str, range: Option<&str>) -> http::Request<Vec<u8>> {
+        let mut builder =
+            http::Request::builder().uri(format!("{URI_SCHEME}://{RESOURCE_HOST}{path}"));
+        if let Some(range) = range {
+            builder = builder.header(http::header::RANGE, range);
+        }
+        builder.body(Vec::new()).expect("static request must build")
+    }
+
+    /// 把一个 Collecting instance 直接推入 Open：open() 需要真窗口，
+    /// resolver 语义与窗口创建解耦单测。
+    fn promote_to_open(registry: &WebPackageInstances, instance_id: &str, phase: OpenPhase) {
+        let mut inner = registry.inner.lock().unwrap();
+        if let Some(InstanceState::Collecting { received, .. }) =
+            inner.instances.get_mut(instance_id)
+        {
+            let files = std::mem::take(received);
+            inner.instances.insert(
+                instance_id.to_string(),
+                InstanceState::Open {
+                    files,
+                    label: label_for_instance(instance_id),
+                    phase,
+                },
+            );
+        }
+    }
+
     #[test]
     fn 协议与命名常量与共享_fixture_一致() {
         let fixture = fixture();
@@ -899,12 +1057,24 @@ mod tests {
             fixture["headers"]["resourcePath"].as_str().unwrap()
         );
         assert_eq!(
+            RESOURCE_OFFSET_HEADER,
+            fixture["headers"]["resourceOffset"].as_str().unwrap()
+        );
+        assert_eq!(
             MAX_INSTANCE_FILES as u64,
             fixture["budgets"]["maxFiles"].as_u64().unwrap()
         );
         assert_eq!(
             MAX_INSTANCE_TOTAL_BYTES,
             fixture["budgets"]["maxTotalBytes"].as_u64().unwrap()
+        );
+        assert_eq!(
+            MAX_APPEND_CHUNK_BYTES,
+            fixture["budgets"]["maxAppendChunkBytes"].as_u64().unwrap()
+        );
+        assert_eq!(
+            MAX_RESPONSE_BYTES,
+            fixture["budgets"]["maxResponseBytes"].as_u64().unwrap()
         );
         assert_eq!(
             MAX_LIVE_INSTANCES as u64,
@@ -1128,35 +1298,151 @@ mod tests {
             vec![
                 declared("index.html", "text/html", 5),
                 declared("app.js", "application/javascript", 3),
+                declared("empty.bin", "application/octet-stream", 0),
             ],
         )
         .expect("begin");
 
+        // 越过声明长度的块。
         assert_eq!(
             registry
-                .append(&begun.instance_id, "app.js", b"xx", Instant::now())
+                .append(&begun.instance_id, "app.js", 0, b"xxxx", Instant::now())
                 .unwrap_err(),
             WebpkgError::ResourceMismatch
         );
         assert_eq!(
             registry
-                .append(&begun.instance_id, "not-declared.css", b"x", Instant::now())
+                .append(
+                    &begun.instance_id,
+                    "not-declared.css",
+                    0,
+                    b"x",
+                    Instant::now()
+                )
                 .unwrap_err(),
             WebpkgError::ResourceUndeclared
         );
         assert_eq!(
             registry
-                .append("wpk-999", "app.js", b"xxx", Instant::now())
+                .append("wpk-999", "app.js", 0, b"xxx", Instant::now())
                 .unwrap_err(),
             WebpkgError::InstanceMissing
         );
         // percent-encode 的路径解码后命中声明。
         registry
-            .append(&begun.instance_id, "index.html", b"hello", Instant::now())
+            .append(
+                &begun.instance_id,
+                "index.html",
+                0,
+                b"hello",
+                Instant::now(),
+            )
             .expect("append entry");
         assert_eq!(
             registry
-                .append(&begun.instance_id, "index.html", b"hello", Instant::now())
+                .append(
+                    &begun.instance_id,
+                    "index.html",
+                    0,
+                    b"hello",
+                    Instant::now()
+                )
+                .unwrap_err(),
+            WebpkgError::ResourceDuplicate
+        );
+        // 零长文件：一次空块 append 即完成，再投按 duplicate 拒。
+        registry
+            .append(&begun.instance_id, "empty.bin", 0, b"", Instant::now())
+            .expect("append empty");
+        assert_eq!(
+            registry
+                .append(&begun.instance_id, "empty.bin", 0, b"", Instant::now())
+                .unwrap_err(),
+            WebpkgError::ResourceDuplicate
+        );
+    }
+
+    #[test]
+    fn append_分块按偏移连续验收() {
+        let registry = WebPackageInstances::default();
+        let begun = begin(
+            &registry,
+            "index.html",
+            vec![
+                declared("index.html", "text/html", 1),
+                declared("video.mp4", "video/mp4", 10),
+            ],
+        )
+        .expect("begin");
+
+        // 偏移必须从 0 起。
+        assert_eq!(
+            registry
+                .append(&begun.instance_id, "video.mp4", 1, b"x", Instant::now())
+                .unwrap_err(),
+            WebpkgError::ResourceMismatch
+        );
+        // 单块超过 MAX_APPEND_CHUNK_BYTES 直接拒——协议预算，不是实例预算。
+        let oversized = vec![0u8; (MAX_APPEND_CHUNK_BYTES + 1) as usize];
+        assert_eq!(
+            registry
+                .append(
+                    &begun.instance_id,
+                    "video.mp4",
+                    0,
+                    &oversized,
+                    Instant::now()
+                )
+                .unwrap_err(),
+            WebpkgError::TooLarge
+        );
+        let outcome = registry
+            .append(&begun.instance_id, "video.mp4", 0, b"0123", Instant::now())
+            .expect("chunk 0");
+        assert_eq!(outcome.received_byte_length, 4);
+        // 乱序/重叠/跳跃都是 mismatch——offset 必须恰好接上已收长度。
+        for bad_offset in [0u64, 3, 5] {
+            assert_eq!(
+                registry
+                    .append(
+                        &begun.instance_id,
+                        "video.mp4",
+                        bad_offset,
+                        b"xy",
+                        Instant::now()
+                    )
+                    .unwrap_err(),
+                WebpkgError::ResourceMismatch,
+                "offset {bad_offset} must be rejected"
+            );
+        }
+        // 偏移正确但末端越界。
+        assert_eq!(
+            registry
+                .append(
+                    &begun.instance_id,
+                    "video.mp4",
+                    4,
+                    b"456789a",
+                    Instant::now()
+                )
+                .unwrap_err(),
+            WebpkgError::ResourceMismatch
+        );
+        let outcome = registry
+            .append(
+                &begun.instance_id,
+                "video.mp4",
+                4,
+                b"456789",
+                Instant::now(),
+            )
+            .expect("chunk 1");
+        assert_eq!(outcome.received_byte_length, 10);
+        // 收满之后再投一律 duplicate。
+        assert_eq!(
+            registry
+                .append(&begun.instance_id, "video.mp4", 10, b"", Instant::now())
                 .unwrap_err(),
             WebpkgError::ResourceDuplicate
         );
@@ -1178,14 +1464,14 @@ mod tests {
         // TTL 一过，目标会话报 stale 并当场回收——与"从未存在"的 missing 区分开。
         assert_eq!(
             registry
-                .append(&begun.instance_id, "index.html", b"x", after_ttl)
+                .append(&begun.instance_id, "index.html", 0, b"x", after_ttl)
                 .unwrap_err(),
             WebpkgError::InstanceStale
         );
         // 回收已经发生：第二次再问就是 missing，stale 不重复播报。
         assert_eq!(
             registry
-                .append(&begun.instance_id, "index.html", b"x", after_ttl)
+                .append(&begun.instance_id, "index.html", 0, b"x", after_ttl)
                 .unwrap_err(),
             WebpkgError::InstanceMissing
         );
@@ -1204,31 +1490,21 @@ mod tests {
         )
         .expect("begin");
         registry
-            .append(&begun.instance_id, "index.html", b"hello", Instant::now())
+            .append(
+                &begun.instance_id,
+                "index.html",
+                0,
+                b"hello",
+                Instant::now(),
+            )
             .expect("append");
         registry
-            .append(&begun.instance_id, "app.js", b"let", Instant::now())
+            .append(&begun.instance_id, "app.js", 0, b"let", Instant::now())
             .expect("append");
 
-        // 直接推入 Open 状态：open() 需要真窗口， resolver 语义与窗口创建解耦单测。
-        {
-            let mut inner = registry.inner.lock().unwrap();
-            if let Some(InstanceState::Collecting { received, .. }) =
-                inner.instances.get_mut(&begun.instance_id)
-            {
-                let files = std::mem::take(received);
-                inner.instances.insert(
-                    begun.instance_id.clone(),
-                    InstanceState::Open {
-                        files,
-                        label: label_for_instance(&begun.instance_id),
-                        phase: OpenPhase::Serving,
-                    },
-                );
-            }
-        }
+        promote_to_open(&registry, &begun.instance_id, OpenPhase::Serving);
         let label = label_for_instance(&begun.instance_id);
-        let ok = |path: &str| resolve_webpkg_request(&registry, &label, path);
+        let ok = |path: &str| resolve_webpkg_request(&registry, &label, &request(path, None));
 
         let response = ok(&format!(
             "{INSTANCE_URL_PREFIX}{}/index.html",
@@ -1270,24 +1546,15 @@ mod tests {
         )
         .expect("begin");
         registry
-            .append(&begun.instance_id, "index.html", b"hello", Instant::now())
+            .append(
+                &begun.instance_id,
+                "index.html",
+                0,
+                b"hello",
+                Instant::now(),
+            )
             .expect("append");
-        {
-            let mut inner = registry.inner.lock().unwrap();
-            if let Some(InstanceState::Collecting { received, .. }) =
-                inner.instances.get_mut(&begun.instance_id)
-            {
-                let files = std::mem::take(received);
-                inner.instances.insert(
-                    begun.instance_id.clone(),
-                    InstanceState::Open {
-                        files,
-                        label: label_for_instance(&begun.instance_id),
-                        phase: OpenPhase::Serving,
-                    },
-                );
-            }
-        }
+        promote_to_open(&registry, &begun.instance_id, OpenPhase::Serving);
         let label = label_for_instance(&begun.instance_id);
         let url_path = format!("{INSTANCE_URL_PREFIX}{}/index.html", begun.instance_id);
 
@@ -1316,7 +1583,7 @@ mod tests {
             (label.as_str(), "/index.html"),
             (label.as_str(), "/__web-package__/sw.js"),
         ] {
-            let response = resolve_webpkg_request(&registry, case_label, case_path);
+            let response = resolve_webpkg_request(&registry, case_label, &request(case_path, None));
             assert_eq!(
                 response.status(),
                 http::StatusCode::NOT_FOUND,
@@ -1348,31 +1615,122 @@ mod tests {
         )
         .expect("begin");
         registry
-            .append(&begun.instance_id, "index.html", b"hello", Instant::now())
+            .append(
+                &begun.instance_id,
+                "index.html",
+                0,
+                b"hello",
+                Instant::now(),
+            )
             .expect("append");
-        {
-            let mut inner = registry.inner.lock().unwrap();
-            if let Some(InstanceState::Collecting { received, .. }) =
-                inner.instances.get_mut(&begun.instance_id)
-            {
-                let files = std::mem::take(received);
-                inner.instances.insert(
-                    begun.instance_id.clone(),
-                    InstanceState::Open {
-                        files,
-                        label: label_for_instance(&begun.instance_id),
-                        phase: OpenPhase::Opening,
-                    },
-                );
-            }
-        }
+        promote_to_open(&registry, &begun.instance_id, OpenPhase::Opening);
         let label = label_for_instance(&begun.instance_id);
         let response = resolve_webpkg_request(
             &registry,
             &label,
-            &format!("{INSTANCE_URL_PREFIX}{}/index.html", begun.instance_id),
+            &request(
+                &format!("{INSTANCE_URL_PREFIX}{}/index.html", begun.instance_id),
+                None,
+            ),
         );
         assert_eq!(response.status(), http::StatusCode::OK);
         assert_eq!(response.body().as_ref(), b"hello");
+    }
+
+    #[test]
+    fn resolver_支持单段_range_并按帧截断() {
+        let registry = WebPackageInstances::default();
+        let total = MAX_RESPONSE_BYTES + 100;
+        let begun = begin(
+            &registry,
+            "index.html",
+            vec![
+                declared("index.html", "text/html", 1),
+                declared("video.mp4", "video/mp4", total),
+            ],
+        )
+        .expect("begin");
+        registry
+            .append(&begun.instance_id, "index.html", 0, b"x", Instant::now())
+            .expect("append");
+        // 分块送达一份超过单帧上限的资源。
+        let video: Vec<u8> = (0..total).map(|i| (i % 251) as u8).collect();
+        for chunk in video.chunks(MAX_APPEND_CHUNK_BYTES as usize) {
+            let offset = registry
+                .inner
+                .lock()
+                .ok()
+                .and_then(|inner| match inner.instances.get(&begun.instance_id) {
+                    Some(InstanceState::Collecting { received, .. }) => {
+                        received.get("video.mp4").map(|f| f.bytes.len() as u64)
+                    }
+                    _ => None,
+                })
+                .unwrap_or(0);
+            registry
+                .append(
+                    &begun.instance_id,
+                    "video.mp4",
+                    offset,
+                    chunk,
+                    Instant::now(),
+                )
+                .expect("append chunk");
+        }
+        promote_to_open(&registry, &begun.instance_id, OpenPhase::Serving);
+        let label = label_for_instance(&begun.instance_id);
+        let path = format!("{INSTANCE_URL_PREFIX}{}/video.mp4", begun.instance_id);
+
+        // 无 Range：200 全量 + Accept-Ranges 广告。
+        let full = resolve_webpkg_request(&registry, &label, &request(&path, None));
+        assert_eq!(full.status(), http::StatusCode::OK);
+        assert_eq!(full.body().len() as u64, total);
+        assert_eq!(full.headers().get("accept-ranges").unwrap(), "bytes");
+        assert_eq!(
+            full.headers().get("content-length").unwrap(),
+            &total.to_string()
+        );
+
+        // 单段 Range：206 + Content-Range；请求段超过单帧上限时截断。
+        let ranged = resolve_webpkg_request(&registry, &label, &request(&path, Some("bytes=0-")));
+        assert_eq!(ranged.status(), http::StatusCode::PARTIAL_CONTENT);
+        assert_eq!(ranged.body().len() as u64, MAX_RESPONSE_BYTES);
+        assert_eq!(
+            ranged.headers().get("content-range").unwrap(),
+            &format!("bytes 0-{}/{}", MAX_RESPONSE_BYTES - 1, total)
+        );
+        assert_eq!(&ranged.body()[..], &video[..MAX_RESPONSE_BYTES as usize]);
+
+        // 中段区间与后缀区间。
+        let mid = resolve_webpkg_request(&registry, &label, &request(&path, Some("bytes=4-7")));
+        assert_eq!(mid.status(), http::StatusCode::PARTIAL_CONTENT);
+        assert_eq!(mid.body().as_ref(), &video[4..=7]);
+        assert_eq!(
+            mid.headers().get("content-range").unwrap(),
+            &format!("bytes 4-7/{total}")
+        );
+        let suffix = resolve_webpkg_request(&registry, &label, &request(&path, Some("bytes=-10")));
+        assert_eq!(suffix.status(), http::StatusCode::PARTIAL_CONTENT);
+        assert_eq!(suffix.body().as_ref(), &video[total as usize - 10..]);
+
+        // 不可满足 / 多段 / 畸形：416 + `bytes */total`。
+        for bad_range in [
+            &*format!("bytes={}-", total + 10),
+            "bytes=0-1,4-5",
+            "items=0-1",
+            "bytes=abc",
+        ] {
+            let response =
+                resolve_webpkg_request(&registry, &label, &request(&path, Some(bad_range)));
+            assert_eq!(
+                response.status(),
+                http::StatusCode::RANGE_NOT_SATISFIABLE,
+                "range {bad_range:?} must be 416"
+            );
+            assert_eq!(
+                response.headers().get("content-range").unwrap(),
+                &format!("bytes */{total}")
+            );
+        }
     }
 }

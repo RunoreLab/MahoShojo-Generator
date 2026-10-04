@@ -1,6 +1,8 @@
 import {
   DESKTOP_WEBPKG_INSTANCE_ID_HEADER,
+  DESKTOP_WEBPKG_RESOURCE_OFFSET_HEADER,
   DESKTOP_WEBPKG_RESOURCE_PATH_HEADER,
+  MAX_DESKTOP_WEBPKG_APPEND_CHUNK_BYTES,
   DesktopAppendWebPackageResourceResponseSchema,
   DesktopBeginWebPackageInstanceRequestSchema,
   DesktopBeginWebPackageInstanceResponseSchema,
@@ -34,9 +36,11 @@ import type { RawInvokeFn, StructuredInvokeFn } from './local-archive-bridge';
  *
  * ## 与导出桥的差异
  *
- * `local-archive-bridge` 的 append 是"一份大字节流按 4 MiB 切块"；这里是"每份文件恰好投递
- * 一次"。完整性判据因此从滑窗累计（`writtenByteLength` 递增）变成逐文件回执
- * （`receivedByteLength === bytes.byteLength`）——没有第二把尺可以复用。
+ * `local-archive-bridge` 的 append 是"一份大字节流按 4 MiB 切块"；这里是"每份文件
+ * 按 `x-webpkg-offset` 升序分块投递"。分块的原因与导出相同——"实例预算"（256 MiB
+ * 常驻字节）不是"单次 IPC 预算"——但完整性判据不同：导出是滑窗累计
+ * （`writtenByteLength` 递增），这里是逐文件回执（`receivedByteLength` 递增到
+ * `bytes.byteLength`）。
  *
  * ## 失败与孤儿会话
  *
@@ -145,27 +149,37 @@ export const openWebPackageInstanceInIsolatedWebview = async (
     const encodedPath = buildWebPackageInstanceUrl(instanceId, path).slice(
       `${WEB_PACKAGE_INSTANCE_PREFIX}${instanceId}/`.length,
     );
-    let received;
-    try {
-      received = DesktopAppendWebPackageResourceResponseSchema.parse(
-        await rawInvoke(APPEND_WEB_PACKAGE_RESOURCE_COMMAND, file.bytes, {
-          headers: {
-            [DESKTOP_WEBPKG_INSTANCE_ID_HEADER]: instanceId,
-            [DESKTOP_WEBPKG_RESOURCE_PATH_HEADER]: encodedPath,
-          },
-        }),
-      );
-    } catch (cause) {
-      throw cause instanceof DesktopWebPackageInstanceError ? cause : toWebpkgError(APPEND_WEB_PACKAGE_RESOURCE_COMMAND, cause);
-    }
-    // 回执必须等于本文件的实际字节数：native 也按声明长度核对，双侧核对让"截断送达"
-    // 没有可以钻过去的缝隙。
-    if (received.receivedByteLength !== file.bytes.byteLength) {
-      throw new DesktopWebPackageInstanceError(
-        APPEND_WEB_PACKAGE_RESOURCE_COMMAND,
-        'webpkg-resource-mismatch',
-        `native 回执 ${received.receivedByteLength} 字节，已送达 ${file.bytes.byteLength}`,
-      );
+    // 每文件按 offset 升序、以不超过 MAX_DESKTOP_WEBPKG_APPEND_CHUNK_BYTES 的块投递。
+    // `subarray` 是视图不是拷贝——IPC 序列化按 byteOffset/byteLength 取视图字节，
+    // 不会把整份快照随每块重发；零长文件也要发一个空块，native 按"块送达"记完成。
+    const total = file.bytes.byteLength;
+    for (let offset = 0; ; offset += MAX_DESKTOP_WEBPKG_APPEND_CHUNK_BYTES) {
+      const end = Math.min(offset + MAX_DESKTOP_WEBPKG_APPEND_CHUNK_BYTES, total);
+      const chunk = file.bytes.subarray(offset, end);
+      let received;
+      try {
+        received = DesktopAppendWebPackageResourceResponseSchema.parse(
+          await rawInvoke(APPEND_WEB_PACKAGE_RESOURCE_COMMAND, chunk, {
+            headers: {
+              [DESKTOP_WEBPKG_INSTANCE_ID_HEADER]: instanceId,
+              [DESKTOP_WEBPKG_RESOURCE_PATH_HEADER]: encodedPath,
+              [DESKTOP_WEBPKG_RESOURCE_OFFSET_HEADER]: String(offset),
+            },
+          }),
+        );
+      } catch (cause) {
+        throw cause instanceof DesktopWebPackageInstanceError ? cause : toWebpkgError(APPEND_WEB_PACKAGE_RESOURCE_COMMAND, cause);
+      }
+      // 回执必须等于本文件已送达的累计字节数：native 按声明长度验收，桥按回执复核，
+      // 双侧核对让"截断送达"没有可以钻过去的缝隙。
+      if (received.receivedByteLength !== end) {
+        throw new DesktopWebPackageInstanceError(
+          APPEND_WEB_PACKAGE_RESOURCE_COMMAND,
+          'webpkg-resource-mismatch',
+          `native 回执 ${received.receivedByteLength} 字节，已送达 ${end}`,
+        );
+      }
+      if (end === total) break;
     }
   }
 

@@ -739,16 +739,17 @@ fn begin_web_package_instance(
     )
 }
 
-/// 向暂存会话投递一个文件的全部字节。
+/// 向暂存会话投递一个文件的一段字节（≤ `MAX_APPEND_CHUNK_BYTES`）。
 ///
-/// 与 `append_local_archive_export_chunk` 同构：字节是整个 raw 请求体，instance 与
-/// 逻辑路径走 header（raw body 会取代整个请求体，`DESK-070` 字节传输节）。
+/// 与 `append_local_archive_export_chunk` 同构：字节是整个 raw 请求体，instance、
+/// 逻辑路径与块内偏移走 header（raw body 会取代整个请求体，`DESK-070` 字节传输节）。
 /// `x-webpkg-path` 携带 `encodeURIComponent` 逐段编码后的路径——编码形态写在 header
 /// 而不是 path 参数里，因为 IPC 请求行本身会被框架解析一次，让"编码层"与"逻辑路径"
-/// 各占一层能避免二次解码歧义。
+/// 各占一层能避免二次解码歧义。`x-webpkg-offset` 是本块在文件内的偏移（十进制 u64），
+/// native 按"offset == 已收长度"验收，乱序/越界一律 `webpkg-resource-mismatch`。
 ///
-/// `command(async)` 的理由与导出 append 相同：单次投递可达数百 MiB（声明上限），
-/// 同步调度会让整个 WebView 停一次复制。
+/// `command(async)` 的理由与导出 append 相同：raw body 的搬运留在 worker 线程上，
+/// 即使单块已封顶 4 MiB，复制也不该落在 WebView 的事件循环里。
 #[tauri::command(async)]
 fn append_web_package_resource(
     request: tauri::ipc::Request,
@@ -756,6 +757,9 @@ fn append_web_package_resource(
 ) -> Result<webpkg_instance::AppendResourceOutcome, webpkg_instance::WebpkgError> {
     let instance_id = webpkg_header(&request, webpkg_instance::INSTANCE_ID_HEADER)?;
     let encoded_path = webpkg_header(&request, webpkg_instance::RESOURCE_PATH_HEADER)?;
+    let offset = webpkg_header(&request, webpkg_instance::RESOURCE_OFFSET_HEADER)?
+        .parse::<u64>()
+        .map_err(|_| webpkg_instance::WebpkgError::Invalid)?;
     let bytes = match request.body() {
         tauri::ipc::InvokeBody::Raw(bytes) => bytes,
         // 与导出 append 同一判据：JSON 请求体意味着渲染层走了结构化调用，
@@ -765,6 +769,7 @@ fn append_web_package_resource(
     instances.append(
         &instance_id,
         &encoded_path,
+        offset,
         bytes,
         std::time::Instant::now(),
     )
@@ -945,7 +950,7 @@ pub fn run() {
         //
         // 刻意用同步 responder：字节都在内存里，没有可挪到异步路径的 I/O；
         // `register_asynchronous_uri_scheme_protocol` 只会把"一次 HashMap 查找 +
-        // 一次 clone"变成一次无谓的线程往返。
+        // 一段切片 clone"变成一次无谓的线程往返。
         .register_uri_scheme_protocol(webpkg_instance::URI_SCHEME, |context, request| {
             webpkg_instance::resolve_webpkg_request(
                 context
@@ -953,7 +958,7 @@ pub fn run() {
                     .state::<webpkg_instance::WebPackageInstances>()
                     .inner(),
                 context.webview_label(),
-                request.uri().path(),
+                &request,
             )
         })
         .setup(|app| {

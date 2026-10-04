@@ -556,6 +556,15 @@ describe('desktop workspace app ownership', () => {
       'OpenPhase::Opening',
       'OpenPhase::Serving',
       'open_ready',
+      // staging 分块与 resolver Range：单次 IPC 预算（4 MiB）与实例预算（256 MiB）
+      // 是两个独立的量；大资源经 `Range` → `206` + 单帧截断服务。
+      'RESOURCE_OFFSET_HEADER',
+      'MAX_APPEND_CHUNK_BYTES',
+      'MAX_RESPONSE_BYTES',
+      'http_range::HttpRange',
+      'PARTIAL_CONTENT',
+      'RANGE_NOT_SATISFIABLE',
+      'ACCEPT_RANGES',
     ]) {
       expect(webpkgSource, `webpkg window must wire ${marker}`).toContain(marker);
     }
