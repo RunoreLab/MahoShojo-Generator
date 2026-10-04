@@ -2010,7 +2010,7 @@ export default function BattleDataModal({
       >
         <p className="text-sm text-gray-700 dark:text-gray-200">
           「{pendingLocalRemoval?.name}」只会从这台设备的本地库中移除，不影响任何线上数据卡，
-          也不会同步到其他设备。删除后如需再次使用，需要重新导入该文件。
+          也不会同步到其他设备。删除后会移入本地库回收站，可在「本地库」页面恢复或彻底删除。
         </p>
       </BaseModal>
 

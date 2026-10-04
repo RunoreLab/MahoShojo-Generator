@@ -44,7 +44,7 @@ const SRC = path.join(PACKAGE_ROOT, 'src');
  * - `./markdown-text` 被 `app/api/media-proxy/route.ts` 经由 `lib/markdown/externalMedia.ts` 读；
  * - `./home` 被 `app/page.tsx` 读功能目录与 preload 列表。
  *
- * `./local-archive` 的控制器是客户端状态机，`./markdown` 与 `./encyclopedia-views` 与
+ * `./local-archive` 与 `./local-cards` 的控制器是客户端状态机，`./markdown` 与 `./encyclopedia-views` 与
  * `./shell` 只在 Client Component 里用，因此不在此列。
  *
  * 往这个列表里加一个入口之前，先确认它真的会被服务端代码导入——把一个纯客户端模块误列为
@@ -167,11 +167,12 @@ describe('server-safe shared entrypoints stay free of React hooks', () => {
 
     // 未列出的入口目前都是客户端专属或视图入口；如果哪天某个 Server Component 开始 import 它们，
     // 这条断言会先提醒把它登记进来并验证。问卷与角色结果入口分别由客户端交互面板和结果卡使用，
-    // 因此保持在这里作为显式的客户端专属登记。
+    // 本地数据卡列表只在客户端读设备存储，因此保持在这里作为显式的客户端专属登记。
     expect(unlisted.sort()).toEqual([
       './character-result',
       './encyclopedia-views',
       './local-archive',
+      './local-cards',
       './markdown',
       './questionnaire',
       './shell',

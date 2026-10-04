@@ -55,6 +55,11 @@
       "import": "./src/local-archive/index.ts",
       "default": "./src/local-archive/index.ts"
     },
+    "./local-cards": {
+      "types": "./src/local-cards/index.ts",
+      "import": "./src/local-cards/index.ts",
+      "default": "./src/local-cards/index.ts"
+    },
     "./home": {
       "types": "./src/home/index.ts",
       "import": "./src/home/index.ts",

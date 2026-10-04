@@ -24,8 +24,8 @@ Desktop/Web 的新增共享边界按[产品共源 ADR](../docs/decisions/2026-10
 本目录不设一个无边界的 `common`/`shared` 倾倒包。新增 package 应按领域职责命名，并同步维护类型、exports、测试和依赖边界。当前真实 package 为：
 
 - `@mahoshojo/ui-web`：共源 React DOM 页面、控件、功能 hooks、主题与产品资源。显式 feature subpath
-  （`./styles.css`、`/navigation`、`/shell`、`/capability`、`/encyclopedia`、`/markdown`、`/home`、`/local-archive`），**不开根 barrel**——
-  ADR 要求它不成为 `common/shared` 倾倒包。对归档契约只做 `import type`，运行时导入由两端 adapter 承担。
+  （`./styles.css`、`/navigation`、`/shell`、`/capability`、`/encyclopedia`、`/markdown`、`/home`、`/local-archive`、`/local-cards` 等），**不开根 barrel**——
+  ADR 要求它不成为 `common/shared` 倾倒包。对归档与本地卡契约只做 `import type`，运行时导入由两端 adapter 承担。
   不导入 Next/Tauri/服务器 runtime，也不用平台探测决定数据所有权或执行权威。**产品内容不进这个包**：
   百科正文与首页品牌资源的权威是仓库根 `content/`，由 `scripts/generate-encyclopedia-content.mjs`
   复制到两个 app 的静态服务根；包内只保留目录数据与由宿主注入的 base URL 契约，共享源码里不出现
@@ -46,3 +46,5 @@ Desktop/Web 的新增共享边界按[产品共源 ADR](../docs/decisions/2026-10
 - `@mahoshojo/multiplayer-core`：承载 Arena Room Shared Config 的白名单投影、不可变 working copy、typed Proposal diff/selection/conflict/apply 纯逻辑；只依赖 `@mahoshojo/contracts`，不依赖应用、框架、数据库、网络或任何 Node/DOM/Cloudflare runtime。`buildArenaRoomSharedConfig` 的公开输入边界是 `ArenaRoomNormalizedSource`，只负责 normalized source 的白名单投影；`applyArenaProposal` 只接受 `({ roomId, config, revision }, proposalInput, selectedChangeIds?)`，并在 apply 边界拒绝跨房间 Proposal。真实 `BattleStoreState -> normalized source` 投影、stable host-local key/versionToken 映射与 Room authority 回建均已在 `apps/web/lib/arena-room/` 的 Web adapter 层实现，不反向引入本包。
 
 D3.1b/c：`ui-web/questionnaire` 与 `ui-web/character-result` 为 Web/Desktop 共源的问卷面板和角色结果正文。宿主分别管理请求、Markdown 策略与持久化；默认问卷及花名数据由根 `content/` 单点维护，花名选择通过 `domain/flowers` 复用，Hosted 保留兼容出口。
+
+D3.2a：`ui-web/local-cards` 为两端 `/local-library` 共源的本地数据卡列表、详情与回收站，只消费 `CardRepository` 的 `list/delete/restore` 与两端仓储已有的 `purge`；读代次丢弃切换视图后的晚到响应，写操作单飞，维护互斥由宿主负责。
