@@ -218,7 +218,8 @@ describe('Desktop 导入的两步', () => {
 
   it('走 <input type="file"> 读入的真实字节同样能导入', async () => {
     const recorder = createTarget();
-    const bytes = await readFileBytes(new File([await buildArchive()], 'x.zip'));
+    const archiveBytes = Uint8Array.from(await buildArchive());
+    const bytes = await readFileBytes(new File([archiveBytes.buffer], 'x.zip'));
     const plan = await inspectDesktopLibraryArchive(recorder.target, bytes);
     const report = await applyDesktopLibraryArchiveImport(recorder.target, bytes, plan);
     expect(report.succeededCardIds).toEqual([CARD.id]);

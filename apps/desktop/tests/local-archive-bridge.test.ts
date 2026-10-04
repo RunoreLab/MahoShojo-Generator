@@ -2,10 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type {
   LocalCardRecordV1,
-  LocalWebPackageRecordV1,
 } from '@mahoshojo/local-library/record';
 import type { CardRepository, LocalCardPage } from '@mahoshojo/local-library/repository';
-import type { WebPackageRepository } from '@mahoshojo/local-library/web-package-record';
+import type { LocalWebPackageRecordV1, WebPackageRepository } from '@mahoshojo/local-library/web-package-record';
 
 import {
   APPEND_ARCHIVE_EXPORT_CHUNK_COMMAND,
@@ -75,7 +74,7 @@ const makePackage = (id: string, zip: Uint8Array): LocalWebPackageRecordV1 =>
 const cardRepository = (records: LocalCardRecordV1[]): CardRepository =>
   ({
     async list(): Promise<LocalCardPage> {
-      return { items: records, nextCursor: null } as LocalCardPage & { unreadable?: number };
+      return { items: records } as LocalCardPage & { unreadable?: number };
     },
   }) as unknown as CardRepository;
 

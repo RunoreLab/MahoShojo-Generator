@@ -34,9 +34,10 @@ const invokeMock = vi.mocked(invoke);
  */
 const installNativeStub = () => {
   invokeMock.mockReset();
-  invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+  invokeMock.mockImplementation(async (command, args) => {
     if (command === 'validate_provider_execution_profile') {
-      return (args as { document: unknown }).document;
+      if (args === undefined || args instanceof ArrayBuffer || ArrayBuffer.isView(args) || Array.isArray(args)) return undefined;
+      return (args as Record<string, unknown>).document;
     }
     if (command === 'list_provider_profile_ids') return [];
     return undefined;

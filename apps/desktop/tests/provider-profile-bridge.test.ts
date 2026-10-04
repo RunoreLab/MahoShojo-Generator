@@ -27,7 +27,7 @@ const profile: DirectProviderProfileV1 = {
 };
 
 const nativeAccepting = () =>
-  vi.fn(async (command: string) => {
+  vi.fn(async (command: string, _args?: Record<string, unknown>) => {
     if (command === VALIDATE_PROVIDER_EXECUTION_PROFILE_COMMAND) {
       return toDirectProviderExecutionProfile(profile);
     }
@@ -54,10 +54,10 @@ describe('provider profile bridge', () => {
     const invoke = nativeAccepting();
     await saveProviderProfile(invoke, profile);
 
-    const [, savedArgs] = invoke.mock.calls.find(
+    const savedCall = invoke.mock.calls.find(
       (call) => call[0] === SAVE_PROVIDER_PROFILE_COMMAND,
-    ) as [string, Record<string, unknown>];
-    expect(savedArgs.document).toEqual(profile);
+    );
+    expect(savedCall?.[1]?.document).toEqual(profile);
   });
 
   it('refuses to persist when client-side validation fails', async () => {

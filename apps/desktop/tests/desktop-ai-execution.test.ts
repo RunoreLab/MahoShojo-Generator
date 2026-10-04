@@ -148,17 +148,18 @@ describe('DesktopAiExecutionPort', () => {
     const harness = createHarness();
     const controller = new AbortController();
     controller.abort();
-    const stream = createDesktopAiExecutionPort(harness.options).stream(request, controller.signal);
+    const stream = createDesktopAiExecutionPort(harness.options).stream(request, controller.signal)[Symbol.asyncIterator]();
     await expect(stream.next()).resolves.toMatchObject({ done: true });
     expect(harness.invoke).not.toHaveBeenCalled();
   });
 
   it('cancels upstream when the consumer stops before completion', async () => {
     const harness = createHarness();
-    const stream = createDesktopAiExecutionPort(harness.options).stream(request, new AbortController().signal);
+    const stream = createDesktopAiExecutionPort(harness.options).stream(request, new AbortController().signal)[Symbol.asyncIterator]();
     const first = stream.next();
     harness.deliver(completedStream[0] as AiStreamEvent);
     await first;
+    if (!stream.return) throw new Error('stream iterator does not support return()');
     const stopped = stream.return(undefined);
     await vi.waitFor(() => expect(harness.invoke).toHaveBeenCalledWith(
       CANCEL_DIRECT_AI_COMMAND, { requestId: request.requestId },
@@ -170,7 +171,7 @@ describe('DesktopAiExecutionPort', () => {
   it('does not yield a queued delta after cancellation between yields', async () => {
     const harness = createHarness();
     const controller = new AbortController();
-    const stream = createDesktopAiExecutionPort(harness.options).stream(request, controller.signal);
+    const stream = createDesktopAiExecutionPort(harness.options).stream(request, controller.signal)[Symbol.asyncIterator]();
     const first = stream.next();
     for (const event of completedStream) harness.deliver(event);
     await first;
@@ -228,7 +229,7 @@ describe('DesktopAiExecutionPort', () => {
     const controller = new AbortController();
     const pending = method === 'execute'
       ? port.execute(request, controller.signal)
-      : port.stream(request, controller.signal).next();
+      : port.stream(request, controller.signal)[Symbol.asyncIterator]().next();
     controller.abort();
     expect(harness.invoke).not.toHaveBeenCalledWith(CANCEL_DIRECT_AI_COMMAND, expect.anything());
     harness.deliver(completedStream[0] as AiStreamEvent);
