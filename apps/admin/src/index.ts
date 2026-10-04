@@ -34,6 +34,8 @@ async function jobStep(env:AdminRuntimeBindings,id:string,providerFetch?:typeof 
 export const ADMIN_CAPABILITIES = [...new Set(['admin.shell.read','admin.principals.manage',...Object.values(READ_CAPABILITIES),
  'content.write','tags.write','users.write','badges.write','redemption.write','messages.write','moderation.write',
  'analytics.write','ai.write','ai.review','ratings.write','storage.write','exports.read','data.maintenance','audit.read','arena.observe',...ACTION_CAPABILITIES])];
+/** Retired PVP capabilities: still parseable for legacy persisted principals, but grant no admin resource/action and cannot be re-granted via bootstrap/restore. */
+export const RETIRED_ADMIN_CAPABILITIES = ['pvp.read','pvp.write'];
 const configError = (): Response => {
  const response=Response.json({error:'ADMIN_CONFIGURATION_INVALID'},{status:503});setAdminSecurityHeaders(response.headers);return response;
 };
@@ -63,7 +65,7 @@ export const createAdminWorker = ({ createAccessVerifier = createAccessJwtVerifi
     const db=()=>{if(!native.DB)throw new AdminHttpError(503,'ADMIN_UNAVAILABLE');return native.DB;};
     const signature=env.SIGNATURE_SECRET_KEY?createSignatureService({getSigningKey:()=>crypto.subtle.importKey('raw',new TextEncoder().encode(env.SIGNATURE_SECRET_KEY),{name:'HMAC',hash:'SHA-256'},false,['sign','verify'])}):undefined;
     const app=createAdminApp({accessVerifier:verifier,principals:createPrincipalDirectory([]),
-     resolvePrincipal:identity=>resolveAdminPrincipal(db(),identity,ADMIN_CAPABILITIES),
+     resolvePrincipal:identity=>resolveAdminPrincipal(db(),identity,ADMIN_CAPABILITIES,RETIRED_ADMIN_CAPABILITIES),
      readResource:async(resource,query)=>{
       try{return await readAdminResource(db(),resource,query);}
       catch(error){if(error instanceof AdminReadInputError)throw new AdminHttpError(400,'ADMIN_QUERY_INVALID');

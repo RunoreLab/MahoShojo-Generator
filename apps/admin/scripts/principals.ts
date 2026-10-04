@@ -4,7 +4,7 @@ import { createD1HttpTransport, createHttpD1Client } from '@mahoshojo/hosted-run
 import { bootstrapAdminPrincipal, revokeAdminPrincipal, restoreAdminPrincipal } from '@mahoshojo/hosted-runtime/admin/principals';
 import type { AdminDatabase } from '@mahoshojo/hosted-runtime/admin/database';
 import { createAccessJwtVerifier } from '../src/security/access';
-import { ADMIN_CAPABILITIES } from '../src/index';
+import { ADMIN_CAPABILITIES, RETIRED_ADMIN_CAPABILITIES } from '../src/index';
 import { readAdminPrincipalStatus } from './principal-status';
 
 const required = (key: string) => { const value = process.env[key]?.trim(); if (!value) throw new Error(`${key} is required`); return value; };
@@ -31,7 +31,7 @@ try {
   if (command === 'status') {
     const verifier = createAccessJwtVerifier({ issuer: required('ADMIN_ACCESS_ISSUER'), audience: required('ADMIN_ACCESS_AUDIENCE'), jwksUrl: required('ADMIN_ACCESS_JWKS_URL') });
     const assertion = (await readFile(required('ADMIN_ACCESS_JWT_FILE'), 'utf8')).trim();
-    const status = await readAdminPrincipalStatus(db, verifier, assertion, ADMIN_CAPABILITIES);
+    const status = await readAdminPrincipalStatus(db, verifier, assertion, ADMIN_CAPABILITIES, RETIRED_ADMIN_CAPABILITIES);
     console.log(JSON.stringify(status));
     if (!status.shellAllowed) process.exitCode = 2;
   } else {

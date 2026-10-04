@@ -4,6 +4,7 @@ import { convertV4MiniflareOptions, Miniflare } from 'miniflare';
 import type { AdminDatabase } from '@mahoshojo/hosted-runtime/admin/database';
 import { createAccessJwtVerifier, type AccessVerifier } from '../src/security/access';
 import { readAdminPrincipalStatus } from '../scripts/principal-status';
+import { ADMIN_CAPABILITIES, RETIRED_ADMIN_CAPABILITIES } from '../src/index';
 
 const issuer = 'https://status-fixture.cloudflareaccess.com';
 const audience = 'status-fixture';
@@ -25,6 +26,7 @@ beforeAll(async () => {
     ['limited', 'human', 'active', ['users.read']],
     ['service-only', 'service', 'active', ['admin.shell.read']],
     ['invalid', 'human', 'active', ['unknown.capability']],
+    ['legacy-pvp', 'human', 'active', ['admin.shell.read', 'pvp.read']],
   ] as const) {
     await db.prepare('INSERT INTO admin_principals VALUES (?, ?, ?, ?, ?, ?)')
       .bind(subject, issuer, subject, kind, status, JSON.stringify(capabilities)).run();
@@ -69,6 +71,16 @@ test('损坏的 principal 不被报告为 missing 或允许访问', async () => 
 test('真实 service claim 保持 service 身份，不降级为 human', async () => {
   expect(await readAdminPrincipalStatus(db, verifier, await token('service-only', audience, true), allowedCapabilities))
     .toEqual({access: 'valid', identityKind: 'service', principal: 'active', shellAllowed: true, denialCode: null});
+});
+
+test('退休 capability 不再可授予，但存量 principal 仍可解析', async () => {
+  expect(RETIRED_ADMIN_CAPABILITIES).toEqual(['pvp.read', 'pvp.write']);
+  expect(RETIRED_ADMIN_CAPABILITIES.some((capability) => ADMIN_CAPABILITIES.includes(capability))).toBe(false);
+  expect(ADMIN_CAPABILITIES.some((capability) => capability.startsWith('pvp.'))).toBe(false);
+  await expect(readAdminPrincipalStatus(db, verifier, await token('legacy-pvp'), allowedCapabilities))
+    .rejects.toThrow('ADMIN_PRINCIPAL_INVALID');
+  expect(await readAdminPrincipalStatus(db, verifier, await token('legacy-pvp'), allowedCapabilities, RETIRED_ADMIN_CAPABILITIES))
+    .toEqual({access: 'valid', identityKind: 'human', principal: 'active', shellAllowed: true, denialCode: null});
 });
 
 test('数据库故障不被误报为 missing', async () => {

@@ -10,9 +10,10 @@ export async function readAdminPrincipalStatus(
   verifier: AccessVerifier,
   assertion: string,
   allowedCapabilities: readonly string[],
+  retiredCapabilities: readonly string[] = [],
 ) {
   const identity = await verifier.verify(assertion);
-  const principal = await resolveAdminPrincipal(db, identity, allowedCapabilities);
+  const principal = await resolveAdminPrincipal(db, identity, allowedCapabilities, retiredCapabilities);
   let denialCode: 'ADMIN_PRINCIPAL_MISSING' | 'ADMIN_PRINCIPAL_DISABLED' | 'ADMIN_CAPABILITY_MISSING' | null = null;
   try {
     authorizeIdentity(identity, {resolve: () => principal}, 'admin.shell.read');

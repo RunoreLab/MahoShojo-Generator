@@ -126,6 +126,21 @@ describe('Admin principal persistence', () => {
     await expect(resolveAdminPrincipal(db, identity, allowed)).rejects.toThrow('ADMIN_PRINCIPAL_INVALID');
   });
 
+  it('resolves persisted retired capabilities without granting them; grant paths stay strict', async () => {
+    const { db, sqlite } = await setup();
+    sqlite.exec("UPDATE admin_principals SET capabilities_json='[\"admin.shell.read\",\"pvp.read\",\"pvp.write\"]'");
+    await expect(resolveAdminPrincipal(db, identity, allowed)).rejects.toThrow('ADMIN_PRINCIPAL_INVALID');
+    const principal = await resolveAdminPrincipal(db, identity, allowed, ['pvp.read', 'pvp.write']);
+    expect(principal?.status).toBe('active');
+    expect(principal?.capabilities).toEqual(['admin.shell.read']);
+    await expect(bootstrapAdminPrincipal(db, { id: 'principal-2', verifiedIdentity: { ...identity, subject: 'second' },
+      capabilities: ['pvp.read'], allowedCapabilities: allowed, requestId: 'b2', reason: '配置', operatorSafeRef: 'control' }))
+      .rejects.toThrow();
+    expect(await resolveAdminPrincipal(db, { ...identity, subject: 'second' }, allowed)).toBeNull();
+    sqlite.exec("UPDATE admin_principals SET capabilities_json='[\"pvp.read\"]'");
+    expect((await resolveAdminPrincipal(db, identity, allowed, ['pvp.read']))?.capabilities).toEqual([]);
+  });
+
   it('rolls back bootstrap/revoke when audit persistence fails', async () => {
     const { db, sqlite } = await setup();
     sqlite.exec("CREATE TRIGGER fail_audit BEFORE INSERT ON admin_audit_events BEGIN SELECT RAISE(ABORT,'fixture audit failure'); END");

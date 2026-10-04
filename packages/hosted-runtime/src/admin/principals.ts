@@ -23,11 +23,13 @@ const validateCapabilities = (value: unknown, allowed: readonly string[]): strin
   return [...value].sort();
 };
 
-/** Must be called after cryptographic Access verification, for every request. */
+/** Must be called after cryptographic Access verification, for every request.
+ *  Retired capabilities keep persisted legacy principals resolvable but are filtered from granted access. */
 export const resolveAdminPrincipal = async (
   db: AdminDatabase,
   identity: AdminExternalIdentity,
   allowedCapabilities: readonly string[],
+  retiredCapabilities: readonly string[] = [],
 ): Promise<PersistedAdminPrincipal | null> => {
   validateIdentity(identity);
   const row = await db.prepare(`SELECT id, status, capabilities_json FROM admin_principals
@@ -37,11 +39,11 @@ export const resolveAdminPrincipal = async (
   if (!row) return null;
   if (!row.id || !['active', 'disabled'].includes(row.status)) throw new Error('ADMIN_PRINCIPAL_INVALID');
   let capabilities: string[];
-  try { capabilities = validateCapabilities(JSON.parse(row.capabilities_json), allowedCapabilities); }
+  try { capabilities = validateCapabilities(JSON.parse(row.capabilities_json), [...allowedCapabilities, ...retiredCapabilities]); }
   catch { throw new Error('ADMIN_PRINCIPAL_INVALID'); }
   return {
     id: row.id, externalIdentity: { ...identity }, status: row.status as 'active' | 'disabled',
-    capabilities: Object.freeze(capabilities),
+    capabilities: Object.freeze(capabilities.filter((capability) => allowedCapabilities.includes(capability))),
   };
 };
 
