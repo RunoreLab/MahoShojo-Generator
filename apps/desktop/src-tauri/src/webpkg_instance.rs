@@ -107,21 +107,19 @@ const PATH_SEGMENT_ENCODE_SET: &AsciiSet = &NON_ALPHANUMERIC
 /// 同一结论。两侧的同一断言由 `fixtures/desktop-web-package-instance.json` 的
 /// validPaths/invalidPaths 驱动。
 ///
-/// - 长度 1..=512（按 `char` 数计，与 JS 的 UTF-16 code unit 口径不同——见下）。
-/// - 不得以 `/` 开头；不得含 `\0-\x1f \x7f < > : " | ? * % \\`。
+/// - 长度 1..=512，按 **UTF-16 code unit** 计——与 JS `.length`/`max(512)` 同一口径
+///   （见下）。不得以 `/` 开头；不得含 `\0-\x1f \x7f < > : " | ? * % \\`。
 /// - 每个 `/` 分段：非空、非 `.`/`..`、不以 `.` 或空格结尾、文件名主干不是
 ///   `con|prn|aux|nul|com[1-9]|lpt[1-9]`（大小写不敏感）。
 ///
-/// ## 长度口径差
+/// ## 长度口径
 ///
-/// JS 的 `.length`/`max(512)` 数的是 UTF-16 code unit，Rust 的 `chars().count()` 数的是
-/// Unicode scalar。BMP 外字符（emoji 等）在 JS 里占 2、在 Rust 里占 1——即某些 513-code-unit
-/// 路径会被 TS 拒、被 Rust 收。反过来（Rust 拒、TS 收）不可能发生：scalar 数永远
-/// ≤ code unit 数。本函数是**接收侧**校验，更宽意味着唯一后果是"TS 放不进来的路径在
-/// Rust 这里也能存"——而那样的路径根本到不了这里（TS 已经拒了）。按 UTF-8 字节数
-/// 收紧会让合法的 512-code-unit 中文路径被误拒，因此选 `chars()` 口径并在测试里钉住。
+/// 本函数是 trust-boundary 校验器，不是"TS 先拦过、Rust 宽松复收"的后置门——两侧必须
+/// 对同一条路径给出同一结论。JS 的 `.length` 数 UTF-16 code unit，BMP 外字符（emoji
+/// 等）占 2；Rust 的 `chars().count()` 数 scalar 只占 1——用 `encode_utf16().count()`
+/// 对齐，否则一条 513-code-unit 的路径会被 TS 拒、被 Rust 收，边界不一致本身就是缺陷。
 pub fn is_valid_package_path(path: &str) -> bool {
-    let length = path.chars().count();
+    let length = path.encode_utf16().count();
     if length == 0 || length > 512 || path.starts_with('/') {
         return false;
     }
@@ -493,7 +491,9 @@ impl WebPackageInstances {
             return Err(WebpkgError::TooManyFiles);
         }
         let title = title.trim();
-        if title.is_empty() || title.chars().count() > MAX_TITLE_LENGTH {
+        // 与 Zod `.max()` 同为 UTF-16 code unit 口径——窗口标题是给 WebView 的字符串，
+        // 长度界必须和 TS 侧对同一输入给出同一结论（emoji 边界用例见测试）。
+        if title.is_empty() || title.encode_utf16().count() > MAX_TITLE_LENGTH {
             return Err(WebpkgError::Invalid);
         }
         if !is_valid_package_path(entry) {
@@ -1163,6 +1163,38 @@ mod tests {
         // 超长由现场生成（fixture 不逐字携带 513 字节），与 TS 侧同一断言。
         assert!(!is_valid_package_path(&"a".repeat(513)));
         assert!(is_valid_package_path(&"a".repeat(512)));
+    }
+
+    #[test]
+    fn 长度边界按_utf16_code_unit_计() {
+        // BMP 外字符占 2 个 code unit：'a'*510 + '😀' = 512 → 收；511 + '😀' = 513 → 拒。
+        // 用 chars() 会分别是 511/512——旧口径恰恰在这个边界放错方向。
+        assert!(is_valid_package_path(&format!("{}😀", "a".repeat(510))));
+        assert!(!is_valid_package_path(&format!("{}😀", "a".repeat(511))));
+
+        // title 同一口径：126 + 😀 = 128 收；127 + 😀 = 129 拒。
+        let files = || vec![declared("index.html", "text/html", 1)];
+        let registry = WebPackageInstances::default();
+        registry
+            .begin(
+                "index.html",
+                &format!("{}😀", "t".repeat(126)),
+                files(),
+                Instant::now(),
+            )
+            .expect("128 code-unit title must pass");
+        assert_eq!(
+            registry
+                .begin(
+                    "index.html",
+                    &format!("{}😀", "t".repeat(127)),
+                    files(),
+                    Instant::now()
+                )
+                .unwrap_err(),
+            WebpkgError::Invalid,
+            "129 code-unit title must fail"
+        );
     }
 
     #[test]

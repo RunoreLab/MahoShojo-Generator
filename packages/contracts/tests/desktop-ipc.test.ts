@@ -664,6 +664,10 @@ describe('Desktop Web Package 受限 webview IPC 契约（D4b）', () => {
     // 超长路径：fixture 不逐字携带 513 字节，由用例现场生成。
     expect(WebPackagePathSchema.safeParse('a'.repeat(513)).success).toBe(false);
     expect(WebPackagePathSchema.safeParse('a'.repeat(512)).success).toBe(true);
+    // 长度口径是 UTF-16 code unit：'a'*510 + '😀' = 512 收、511 + '😀' = 513 拒——
+    // 与 native `encode_utf16().count()` 同一断言方向。
+    expect(WebPackagePathSchema.safeParse(`${'a'.repeat(510)}😀`).success).toBe(true);
+    expect(WebPackagePathSchema.safeParse(`${'a'.repeat(511)}😀`).success).toBe(false);
   });
 
   it('接受 fixture 中每一个合法 mediaType，拒绝每一个非法 mediaType', () => {
@@ -730,6 +734,19 @@ describe('Desktop Web Package 受限 webview IPC 契约（D4b）', () => {
     expect(() =>
       DesktopBeginWebPackageInstanceRequestSchema.parse({ ...example, title: '  ' }),
     ).toThrow();
+    // title 长度同为 UTF-16 code unit 口径：126 + 😀 = 128 收，127 + 😀 = 129 拒。
+    expect(
+      DesktopBeginWebPackageInstanceRequestSchema.safeParse({
+        ...example,
+        title: `${'t'.repeat(126)}😀`,
+      }).success,
+    ).toBe(true);
+    expect(
+      DesktopBeginWebPackageInstanceRequestSchema.safeParse({
+        ...example,
+        title: `${'t'.repeat(127)}😀`,
+      }).success,
+    ).toBe(false);
   });
 
   it('instance id 与 webview label 的形状不可互换', () => {
