@@ -38,7 +38,7 @@ import type { RawInvokeFn, StructuredInvokeFn } from './local-archive-bridge';
  *
  * `local-archive-bridge` 的 append 是"一份大字节流按 4 MiB 切块"；这里是"每份文件
  * 按 `x-webpkg-offset` 升序分块投递"。分块的原因与导出相同——"实例预算"（256 MiB
- * 常驻字节）不是"单次 IPC 预算"——但完整性判据不同：导出是滑窗累计
+ * 有效载荷字节）不是"单次 IPC 预算"——但完整性判据不同：导出是滑窗累计
  * （`writtenByteLength` 递增），这里是逐文件回执（`receivedByteLength` 递增到
  * `bytes.byteLength`）。
  *

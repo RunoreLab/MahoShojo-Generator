@@ -1,4 +1,6 @@
 import { stageJsonPackage } from './helpers/json-package';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { DESKTOP_WEBPKG_INSTANCE_URL_PREFIX } from '@mahoshojo/contracts/desktop-ipc';
 import {
@@ -219,9 +221,28 @@ describe('generic Web package resource space', () => {
     const snapshot = await buildSnapshot(JSON.stringify({ title: 'CORS', records: [{ value: 'x' }] }));
     const ok = createWebPackageResourceResponse(snapshot, `${WEB_PACKAGE_INSTANCE_PREFIX}${INSTANCE_ID}/data/record.json`);
     expect(ok.headers.get('access-control-allow-origin')).toBe('*');
+    // `Content-Range` 不是 safelisted header：不暴露则受限 JS 的 Range reader 读不到区间元数据。
+    expect(ok.headers.get('access-control-expose-headers')).toBe('Content-Range');
     const missing = createWebPackageResourceResponse(snapshot, `${WEB_PACKAGE_INSTANCE_PREFIX}${INSTANCE_ID}/missing.json`);
     expect(missing.status).toBe(404);
     expect(missing.headers.get('access-control-allow-origin')).toBe('*');
+  });
+
+  it('安全基线响应头与 desktop webpkg fixture 同源', () => {
+    // `responseHeaders.base` 是三端同源集（web resource-space / desktop resolver /
+    // contracts fixture）：TS 侧若漏掉某条，受限 JS 看到的响应语义就与 native 漂移。
+    const fixture = JSON.parse(
+      readFileSync(
+        fileURLToPath(
+          new URL('../../contracts/fixtures/desktop-web-package-instance.json', import.meta.url),
+        ),
+        'utf8',
+      ),
+    ) as { responseHeaders: { base: [string, string][] } };
+    const headers = createWebPackageResourceHeaders('image/png');
+    for (const [name, value] of fixture.responseHeaders.base) {
+      expect(headers.get(name), name).toBe(value);
+    }
   });
 
   it('pins the shared instance URL prefix to the Desktop webpkg contract', () => {

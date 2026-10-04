@@ -21,7 +21,7 @@
 //! `DESK-064`/`DESK-070` 记在案的既有债务形态。begin 声明文件表（含每文件长度），append
 //! 按 `x-webpkg-offset` 升序、以不超过 `MAX_APPEND_CHUNK_BYTES` 的块投递并核对偏移与
 //! 声明长度，open 只在"每文件已收 = 声明"时开窗——完整性不是 UI 的礼貌约定，是 native
-//! 的接收条件。"实例预算"（256 MiB 常驻字节）与"单次 IPC 预算"（4 MiB）是两个独立的量。
+//! 的接收条件。"实例预算"（256 MiB 有效载荷字节）与"单次 IPC 预算"（4 MiB）是两个独立的量。
 //!
 //! ## staging TTL 与"为什么没有 finish/abort command"
 //!
@@ -62,9 +62,11 @@ pub const RESOURCE_OFFSET_HEADER: &str = "x-webpkg-offset";
 
 /// 单实例文件数上限：与 `MAX_ARCHIVE_ENTRIES` 同源（解压工作量界，不是产品尺寸）。
 pub const MAX_INSTANCE_FILES: usize = 4096;
-/// 单实例**常驻 staging 字节**上限。与 `MAX_ARCHIVE_EXPANDED_BYTES`（ZIP 解压防护）
-/// **语义独立**：一个是运行时内存占用界，一个是解包工作量界——当前恰好同取 256 MiB，
-/// 任何一侧调整都必须单独评审。
+/// 单实例**常驻 staging 有效载荷字节预算**。与 `MAX_ARCHIVE_EXPANDED_BYTES`（ZIP
+/// 解压防护）**语义独立**：一个是运行时内存占用界，一个是解包工作量界——当前恰好
+/// 同取 256 MiB，任何一侧调整都必须单独评审。预算按已收 `Vec::len` 合计，不构成
+/// 进程 RSS/allocator hard cap（`capacity`、扩容瞬态与响应期 clone 均在此界之外）；
+/// 真实峰值由 D4 实机 RSS 门禁验证。
 pub const MAX_INSTANCE_TOTAL_BYTES: u64 = 256 * 1024 * 1024;
 /// `append_web_package_resource` 单次请求的体上限。"实例预算"与"单次 IPC 预算"是两个
 /// 独立的量——前者允许 256 MiB，后者钉在 4 MiB（与 `MAX_LOCAL_LIBRARY_IPC_CHUNK_BYTES`
@@ -76,7 +78,9 @@ pub const MAX_APPEND_CHUNK_BYTES: u64 = 4 * 1024 * 1024;
 pub const MAX_RESPONSE_BYTES: u64 = 4 * 1024 * 1024;
 /// 同时存活的 instance 上限（Collecting + Open）。机制界，不是产品承诺。
 pub const MAX_LIVE_INSTANCES: usize = 8;
-/// 全部存活 instance 的合计字节上限。
+/// 全部存活 instance 的合计**有效载荷字节**预算：口径与
+/// `MAX_INSTANCE_TOTAL_BYTES` 相同（已收 `Vec::len` 之和），同样不是
+/// RSS/allocator hard cap。
 pub const MAX_LIVE_BYTES: u64 = 512 * 1024 * 1024;
 /// 窗口标题上限。渲染层提供（通常 manifest.name），native 只按长度验收。
 pub const MAX_TITLE_LENGTH: usize = 128;
@@ -223,15 +227,41 @@ pub fn entry_url(instance_id: &str, entry: &str) -> String {
     )
 }
 
-/// 导航 allowlist：只允许 `maho-webpkg://localhost` 或 Windows 映射 `http://maho-webpkg.localhost`
-/// 的 **本 instance** 路径。foreign instance 连导航都被拒（resolver 层还有第二道）。
-pub fn is_allowed_navigation(url: &url::Url, instance_id: &str) -> bool {
-    let host_ok = (url.scheme() == URI_SCHEME && url.host_str() == Some(RESOURCE_HOST))
-        || (url.scheme() == "http" && url.host_str() == Some(WINDOWS_RESOURCE_HOST));
-    host_ok
-        && url
-            .path()
-            .starts_with(&format!("{INSTANCE_URL_PREFIX}{instance_id}/"))
+/// 导航 URL 的 origin 形态：`maho-webpkg://localhost` 或 Windows 映射
+/// `http://maho-webpkg.localhost`。
+fn is_allowed_navigation_origin(url: &url::Url) -> bool {
+    (url.scheme() == URI_SCHEME && url.host_str() == Some(RESOURCE_HOST))
+        || (url.scheme() == "http" && url.host_str() == Some(WINDOWS_RESOURCE_HOST))
+}
+
+/// 顶层导航 allowlist：只允许本 instance URL 前缀下、`navigable_documents` 中的
+/// 路径——即声明为 `text/html` 的资源。foreign instance、外链、about:/data:/
+/// javascript: 与一切非 HTML 目标一律拒；非 HTML 资源作为 subresource 由 resolver
+/// 正常服务，不受本判定影响。
+///
+/// 为什么必须判资源类型而不只看 URL：CSP `sandbox` 是**当次响应**的 policy，不粘在
+/// browsing context 上——受限 HTML（`sandbox allow-scripts` → opaque origin）一旦
+/// 顶层导航到不携带 CSP sandbox 的 Document，新 Document 就以普通 origin 运行，
+/// Restricted Mode 就此失效。可执行 Document 又不限于 HTML（`image/svg+xml` 的
+/// `<script>`、XML/XHTML 等），`WebPackageMediaTypeSchema` 本身是开放集合，枚举
+/// "哪些 MIME 危险"必然漏；fail-closed 的规则因此是"navigation 白名单 = 已声明
+/// HTML"。
+///
+/// `navigable_documents` 是开窗时刻的冻结快照而不是回调时查注册表：`on_navigation`
+/// 在 webview 事件线程上运行，在那里持 `inner` 锁会让"回调等锁"遇上"命令持锁等
+/// 主线程"，构成死锁窗口；而文件表自 Open 起就不再变化，快照语义与查表等价。
+fn is_allowed_navigation(
+    url: &url::Url,
+    instance_id: &str,
+    navigable_documents: &HashSet<String>,
+) -> bool {
+    if !is_allowed_navigation_origin(url) {
+        return false;
+    }
+    let Some((url_instance, path)) = parse_instance_path(url.path()) else {
+        return false;
+    };
+    url_instance == instance_id && navigable_documents.contains(&path)
 }
 
 /// instance URL path → (instance_id, package_path)。任何一步不合法都是 `None`。
@@ -708,6 +738,14 @@ impl WebPackageInstances {
 
         let label = label_for_instance(instance_id);
         let url = entry_url(instance_id, &entry);
+        // 顶层导航白名单：declared `text/html` 路径集。文件表自这一刻冻结（Open
+        // 不再接受 append），快照与回调时查表因此等价——见 `is_allowed_navigation`
+        // 上"不持锁进 webview 回调"的说明。
+        let navigable_documents: HashSet<String> = files
+            .iter()
+            .filter(|(_, file)| file.media_type == "text/html")
+            .map(|(path, _)| path.clone())
+            .collect();
         // 在放开互斥锁前把状态推进到 Opening——并发第二次 open 会走"等待建窗"分支，
         // resolver 此刻起也已经能服务资源（初始页面请求可能先于 .build() 返回）。
         if let Some(state) = inner.instances.get_mut(instance_id) {
@@ -721,7 +759,7 @@ impl WebPackageInstances {
         }
         drop(inner);
 
-        match build_webpkg_window(app, instance_id, &label, &title, &url) {
+        match build_webpkg_window(app, instance_id, &label, &title, &url, navigable_documents) {
             Ok(()) => {
                 if let Ok(mut inner) = self.inner.lock() {
                     if let Some(InstanceState::Open { phase, .. }) =
@@ -874,6 +912,7 @@ fn build_webpkg_window(
     label: &str,
     title: &str,
     url: &str,
+    navigable_documents: HashSet<String>,
 ) -> Result<(), WebpkgError> {
     let parsed = url::Url::parse(url).map_err(|_| WebpkgError::WindowUnavailable)?;
     let nav_instance = instance_id.to_string();
@@ -885,8 +924,11 @@ fn build_webpkg_window(
         .resizable(true)
         // 受限渲染面的持久化边界：不与别的会话共享 profile，关闭即清。
         .incognito(true)
-        // 导航钉在本 instance 命名空间：外链/他实例/about:/data:/javascript: 一律拒。
-        .on_navigation(move |url| is_allowed_navigation(url, &nav_instance))
+        // 导航钉在本 instance 命名空间：外链/他实例/about:/data:/javascript: 一律拒；
+        // 包内顶层导航也只放行 declared `text/html`——`sandbox` 是响应级 policy，
+        // 不带它的可执行 Document（SVG/XML 等）一旦成为新顶层 Document，受限页面的
+        // opaque origin 就丢了。
+        .on_navigation(move |url| is_allowed_navigation(url, &nav_instance, &navigable_documents))
         // 包不得弹出新窗口——弹窗会是一个没有 capability、但仍携带包内容的新渲染面，
         // DESK-013 的"独立 webview"只有一个。
         .on_new_window(|_url, _features| tauri::webview::NewWindowResponse::Deny)
@@ -976,8 +1018,14 @@ pub fn resolve_webpkg_request(
 }
 
 /// 每个响应（包括 404）都带的安全基线头。与 fixture 的 `responseHeaders.base` 同源。
+///
+/// `Access-Control-Expose-Headers: Content-Range` 的理由：`Content-Range` 不在 CORS
+/// safelisted response headers 里——opaque origin 下 `fetch()` 拿到的是 CORS
+/// response，不显式暴露它，包内 JS 的 Range reader 就读不到（Tauri 在 generic
+/// protocol 上踩过同一坑，#11371）。
 const BASE_HEADERS: &[(&str, &str)] = &[
     ("Access-Control-Allow-Origin", "*"),
+    ("Access-Control-Expose-Headers", "Content-Range"),
     ("Referrer-Policy", "no-referrer"),
     ("X-Content-Type-Options", "nosniff"),
 ];
@@ -1217,6 +1265,28 @@ mod tests {
     }
 
     #[test]
+    fn 安全基线响应头与_shared_fixture_一致() {
+        let fixture = fixture();
+        let expected: Vec<Vec<String>> = fixture["responseHeaders"]["base"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|pair| {
+                pair.as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|value| value.as_str().unwrap().to_string())
+                    .collect()
+            })
+            .collect();
+        let actual: Vec<Vec<String>> = BASE_HEADERS
+            .iter()
+            .map(|(name, value)| vec![name.to_string(), value.to_string()])
+            .collect();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
     fn content_type_决策与_fixture_的_cases_一致() {
         let fixture = fixture();
         for case in fixture["responseHeaders"]["contentTypeCases"]
@@ -1261,14 +1331,48 @@ mod tests {
     }
 
     #[test]
-    fn 导航只允许本_instance_的两种_origin_形态() {
-        let allow = |raw: &str| is_allowed_navigation(&url::Url::parse(raw).unwrap(), "wpk-7");
-        assert!(allow(
-            "maho-webpkg://localhost/__web-package__/instance/wpk-7/index.html"
-        ));
-        assert!(allow(
-            "http://maho-webpkg.localhost/__web-package__/instance/wpk-7/index.html"
-        ));
+    fn 导航只允许本_instance_中声明的_html_资源() {
+        // 顶层导航白名单 = declared `text/html` 路径集（开窗时刻的冻结快照，见
+        // `is_allowed_navigation` 文档）。包内可以合法存在 SVG/XML/JS——它们是
+        // subresource，只是不得成为顶层 Document。
+        let navigable_documents: HashSet<String> = ["index.html", "page2.html"]
+            .iter()
+            .map(|path| path.to_string())
+            .collect();
+        let allow = |raw: &str| {
+            is_allowed_navigation(
+                &url::Url::parse(raw).unwrap(),
+                "wpk-7",
+                &navigable_documents,
+            )
+        };
+        // 两种 origin 形态 + 多 HTML 页面都放行。
+        for path in ["index.html", "page2.html"] {
+            assert!(allow(&format!(
+                "{URI_SCHEME}://{RESOURCE_HOST}{INSTANCE_URL_PREFIX}wpk-7/{path}"
+            )));
+            assert!(allow(&format!(
+                "http://{WINDOWS_RESOURCE_HOST}{INSTANCE_URL_PREFIX}wpk-7/{path}"
+            )));
+        }
+        // 非 HTML 目标一律拒：CSP `sandbox` 是当次响应的 policy，SVG/XML 等
+        // 可执行 Document 不携带它，导航成功就会丢 opaque origin。percent-encode
+        // 绕不过——判定与 resolver 一样落在解码后的逻辑路径上。
+        for path in [
+            "evil.svg",
+            "data.xml",
+            "app.js",
+            "missing.html",
+            "%65vil.svg",
+            "..%2findex.html",
+        ] {
+            assert!(
+                !allow(&format!(
+                    "{URI_SCHEME}://{RESOURCE_HOST}{INSTANCE_URL_PREFIX}wpk-7/{path}"
+                )),
+                "{path} MUST be denied"
+            );
+        }
         // foreign instance、根路径、外部 URL、https 形态、data: 一律拒。
         for raw in [
             "maho-webpkg://localhost/__web-package__/instance/wpk-8/index.html",
@@ -1799,12 +1903,22 @@ mod tests {
         );
 
         // 单段 Range：206 + Content-Range；请求段超过单帧上限时截断。
+        // `Access-Control-Expose-Headers` 必须同行——opaque origin 的 fetch() 拿到
+        // 的是 CORS response，`Content-Range` 非 safelisted，不暴露则包内 JS 的
+        // Range reader 读不到区间元数据（Tauri #11371 同类问题）。
         let ranged = resolve_webpkg_request(&registry, &label, &request(&path, Some("bytes=0-")));
         assert_eq!(ranged.status(), http::StatusCode::PARTIAL_CONTENT);
         assert_eq!(ranged.body().len() as u64, MAX_RESPONSE_BYTES);
         assert_eq!(
             ranged.headers().get("content-range").unwrap(),
             &format!("bytes 0-{}/{}", MAX_RESPONSE_BYTES - 1, total)
+        );
+        assert_eq!(
+            ranged
+                .headers()
+                .get("access-control-expose-headers")
+                .unwrap(),
+            "Content-Range"
         );
         assert_eq!(&ranged.body()[..], &video[..MAX_RESPONSE_BYTES as usize]);
 
@@ -1837,6 +1951,13 @@ mod tests {
             assert_eq!(
                 response.headers().get("content-range").unwrap(),
                 &format!("bytes */{total}")
+            );
+            assert_eq!(
+                response
+                    .headers()
+                    .get("access-control-expose-headers")
+                    .unwrap(),
+                "Content-Range"
             );
         }
     }

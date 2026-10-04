@@ -569,6 +569,23 @@ describe('desktop workspace app ownership', () => {
       expect(webpkgSource, `webpkg window must wire ${marker}`).toContain(marker);
     }
 
+    // D4b-r2：顶层导航只放行本 instance 中 declared `text/html`——CSP `sandbox`
+    // 是当次响应的 policy，顶层导航到无 CSP 的可执行 Document（SVG/XML 等）会让
+    // 新 Document 丢 opaque origin。钉住"navigation 经 declared-HTML 判定"这条
+    // 因果链，而不只是 `.on_navigation(` 存在：白名单由 files 的 text/html 过滤
+    // 构建成冻结快照，navigation 判定消费它。
+    expect(
+      webpkgSource,
+      'navigation allowlist must be built from declared text/html files',
+    ).toMatch(
+      /let navigable_documents: HashSet<String> = files[\s\S]{0,200}?media_type == "text\/html"/u,
+    );
+    const navigationGate = /fn is_allowed_navigation\([\s\S]*?\n\}/u.exec(webpkgSource)?.[0] ?? '';
+    expect(
+      navigationGate,
+      'navigation gate must consult the declared-HTML snapshot',
+    ).toContain('navigable_documents.contains');
+
     // Windows 下在同步 command/event handler 中创建 WebviewWindow 可能死锁
     // （wry#583，Tauri 官方把"async command 建窗"列为推荐形态）。这条门禁钉住
     // `open_web_package_instance` 不得退回 sync。

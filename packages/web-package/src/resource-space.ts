@@ -136,6 +136,10 @@ const withCharset = (mediaType: string): string => {
 
 const securityBaseHeaders = (): Record<string, string> => ({
   'Access-Control-Allow-Origin': WEB_PACKAGE_RESOURCE_CORS_ORIGIN,
+  // `Content-Range` 不在 CORS safelisted response headers 里：opaque origin 的
+  // fetch() 拿到的是 CORS response，不显式暴露则包内 JS 的 Range reader 读不到
+  // 区间元数据。与 fixture `responseHeaders.base` 同源（desktop resolver 同带）。
+  'Access-Control-Expose-Headers': 'Content-Range',
   'Referrer-Policy': 'no-referrer',
   'X-Content-Type-Options': 'nosniff',
 });

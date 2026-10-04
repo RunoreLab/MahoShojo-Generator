@@ -747,10 +747,12 @@ export const DESKTOP_WEBPKG_RESOURCE_OFFSET_HEADER = 'x-webpkg-offset' as const;
 
 export const MAX_DESKTOP_WEBPKG_INSTANCE_FILES = 4096;
 /**
- * 单实例**常驻 staging 字节**上限：native 注册表里一个 instance 允许容纳的已收字节
- * 合计。它与 `MAX_ARCHIVE_EXPANDED_BYTES`（ZIP 解压防护）**语义独立**——一个是运行时
- * 内存占用界，一个是解包工作量界——即使当前恰好都取 256 MiB，任何一侧的调整都必须
- * 单独评审，不得因为数值相等就把它们当成同一个常量。
+ * 单实例**常驻 staging 有效载荷字节预算**：native 注册表里一个 instance 允许容纳的
+ * 已收字节合计。它与 `MAX_ARCHIVE_EXPANDED_BYTES`（ZIP 解压防护）**语义独立**——
+ * 一个是运行时内存占用界，一个是解包工作量界——即使当前恰好都取 256 MiB，任何一侧
+ * 的调整都必须单独评审，不得因为数值相等就把它们当成同一个常量。预算按已收
+ * payload 长度计，不构成 native 进程 RSS/allocator hard cap（Vec capacity、扩容
+ * 瞬态与响应期 clone 均在此界之外）；真实峰值由 D4 实机 RSS 门禁验证。
  */
 export const MAX_DESKTOP_WEBPKG_INSTANCE_TOTAL_BYTES = 256 * 1024 * 1024;
 /**
@@ -766,6 +768,7 @@ export const MAX_DESKTOP_WEBPKG_APPEND_CHUNK_BYTES = 4 * 1024 * 1024;
  */
 export const MAX_DESKTOP_WEBPKG_RESPONSE_BYTES = 4 * 1024 * 1024;
 export const MAX_DESKTOP_WEBPKG_LIVE_INSTANCES = 8;
+/** 全部存活 instance 的合计有效载荷字节预算：口径同 `MAX_DESKTOP_WEBPKG_INSTANCE_TOTAL_BYTES`。 */
 export const MAX_DESKTOP_WEBPKG_LIVE_BYTES = 512 * 1024 * 1024;
 export const MAX_DESKTOP_WEBPKG_TITLE_LENGTH = 128;
 

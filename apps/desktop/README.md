@@ -120,7 +120,9 @@ Rust 门禁同时由 `.github/workflows/desktop-ci.yml` 执行。`build` 脚本�
 - Web Package 渲染面是独立零 capability webview（`webpkg-<id>`，不匹配任何 capability）：
   资源只经 `maho-webpkg://` 只读协议从内存暂存提供，label 与 URL 中 instance 双向钉定使
   `main-ui`、foreign instance 与非法路径一律 404；窗口 incognito，浏览器权限、新窗、
-  下载默认全拒，导航钉在本 instance 命名空间。staging 按 ≤4 MiB 块投递，资源支持
+  下载默认全拒，顶层导航只放行本 instance 中声明为 `text/html` 的资源（CSP
+  `sandbox` 是响应级 policy，非 HTML 的可执行 Document 一旦成为顶层 Document 会丢
+  opaque origin）。staging 按 ≤4 MiB 块投递，资源支持
   `Range` 分段读取（206 + 单帧截断）。暂存是纯内存的——字节唯一持久形态是 blob
   store；staging 会话 300 秒 TTL 到点回收、窗口 Destroyed 即回收。真实 webview 的
   隔离验收属运行期实机门禁，设置页诊断面板是人工验收入口。
