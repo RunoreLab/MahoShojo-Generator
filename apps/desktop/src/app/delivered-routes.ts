@@ -22,6 +22,7 @@
  */
 export const DELIVERED_ROUTES: readonly string[] = [
   '/',
+  '/details',
   '/encyclopedia',
   '/encyclopedia/[slug]',
   '/local-library',

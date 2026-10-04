@@ -110,10 +110,12 @@ describe('Desktop Details generation seam', () => {
       send({ type: 'started', ...identity, sequence: 0 });
       await new Promise<void>((resolve, reject) => { finish = resolve; fail = () => reject(new Error('lost connection')); });
     });
-    const pending = executeDetailsGeneration({ invoke, profileId: 'saved-profile', createChannel: () => ({}) }, input, intent, controller.signal);
+    const onPartialText = vi.fn();
+    const pending = executeDetailsGeneration({ invoke, profileId: 'saved-profile', createChannel: () => ({}) }, input, intent, controller.signal, onPartialText);
     send!({ type: 'text-delta', ...identity, sequence: 1, delta: '已收到的部分角色正文' });
     // 让共享归约器消费 delta 后再模拟上游中断，避免把尚未消费的队列当作已展示正文。
     await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(onPartialText).toHaveBeenCalledExactlyOnceWith('已收到的部分角色正文');
     if (ending === 'cancel') controller.abort();
     else if (ending === 'failed') {
       send!({ type: 'result', ...identity, sequence: 2, result: { ...identity, status: 'failed', error: { code: 'service-unavailable' } } });

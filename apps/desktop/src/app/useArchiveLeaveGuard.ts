@@ -9,6 +9,7 @@ const DEFAULT_BUSY_MESSAGE = '归档操作仍在进行，请等待完成后再�
 export const useArchiveLeaveGuard = (
   isBusy: () => boolean,
   busyMessage = DEFAULT_BUSY_MESSAGE,
+  initializationFailureMessage = '窗口关闭保护初始化失败，本地库维护操作暂不可用。请重新打开页面后重试。',
 ) => {
   const busyRef = useRef(isBusy);
   busyRef.current = isBusy;
@@ -59,13 +60,13 @@ export const useArchiveLeaveGuard = (
         setReady(true);
       }
     }).catch(() => {
-      if (!disposed) setMessage('窗口关闭保护初始化失败，本地库维护操作暂不可用。请重新打开页面后重试。');
+      if (!disposed) setMessage(initializationFailureMessage);
     });
     return () => {
       disposed = true;
       unlisten?.();
     };
-  }, []);
+  }, [initializationFailureMessage]);
 
   return { ready, message: !isBusy() && ready ? null : message };
 };

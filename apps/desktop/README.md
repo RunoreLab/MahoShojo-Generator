@@ -2,7 +2,7 @@
 
 MahoShojo Generator 的本地桌面客户端 runtime。它是独立 app，不是远端网站壳；产品页面、主题与业务能力按共享 package 与 Web 共源，而非直接 import `apps/web`。
 
-当前阶段（2026-10-03）：**D1 执行核、D1.5、D2.0–D2.2、D2.3a/b/c 的存储/归档桥、D2.5a/D2.5b 的共源壳与路由接线、D2.3d 的归档产品 UI，以及 D3.0 首页与离线百科已落地**。首页复用 `@mahoshojo/ui-web/home` 的共源切片，只展示已交付的百科、本地库与设置入口；`/encyclopedia` 与 `/encyclopedia/$slug` 复用共源百科视图，离线可读全部 53 篇产品文档；`/local-library` 提供整库导出与导入，D0 的运行时自述与 Provider 面板移入 `/settings`。`/details` 尚未开放；D3.1a 已建立共源生成核与 Direct 调用模块，问卷 UI、草稿与本地保存待后续接线。
+当前阶段（2026-10-04）：**D1 执行核、D1.5、D2.0–D2.2、D2.3a/b/c 的存储/归档桥、D2.5a/D2.5b 的共源壳与路由接线、D2.3d 的归档产品 UI，以及 D3.0 首页与离线百科已落地**。首页复用 `@mahoshojo/ui-web/home` 的共源切片，展示已交付的问卷、百科、本地库与设置入口；`/encyclopedia` 与 `/encyclopedia/$slug` 复用共源百科视图，离线可读全部 53 篇产品文档；`/local-library` 提供整库导出与导入，D0 的运行时自述与 Provider 面板移入 `/settings`。`/details` 已接入 D3.1b/c 默认问卷、Direct 生成、草稿恢复与本地保存；真实 Provider 和 Tauri 完整旅程仍待验收。
 
 仍然开放、不记为 PASS 的门禁：`<input type="file">` 在真实 Tauri WebView 中打开原生文件对话框；D2.3 的真实 WebView 内存/响应性与 raw IPC 4 MiB 吞吐/回退；D2.5b 的返回/前进手感与原生窗口关闭（全部路由证据来自 jsdom）；D1 真实 Provider 端点与取消/流。D2.4 整库备份与重启恢复已接入 `/local-library`，并有一次 Explorer 取消、恢复、导入与重启闭环实测；磁盘失败注入、大库性能基线与断电耐久性仍开放。回收站 UI 尚未交付。
 
@@ -31,7 +31,7 @@ MahoShojo Generator 的本地桌面客户端 runtime。它是独立 app，不是
   `frontendDist`，不需要新增 native 权限）；共源 Markdown 渲染层的 heading id 是显式 opt-in，
   站外媒体缺省全部拒绝，外链缺少 opener 时不可执行。能力快照以共源导航与真实交付路由为准，Web 功能清单留在 Web；旧 PVP `/battle`、`/arena` 已取消 Desktop 迁移，Web 现有功能与历史保留。断网打包冷启动、dev 环境主题/键盘/IME/DPI，以及原生测试库 renderer Network、减少动态效果模拟、KaTeX 和锚点已有实测；native 出站全旅程仍待验，真机整体门禁开放，见
   [首页与离线百科验收](../../docs/runbooks/2026-10-03_163000_Desktop首页与离线百科验收.md)。
-- **D3.1a** 共源生成核、Web Hosted 回用与 Desktop Direct 调用模块已落地；修复完整请求 DTO、模型回传与启动取消接线。尚无 `/details` 产品页、草稿恢复或生成结果本地保存，后续 D3.1b/c 接入；既有真机门禁保留。
+- **D3.1a** 共源生成核、Web Hosted 回用与 Desktop Direct 调用模块已落地；修复完整请求 DTO、模型回传与启动取消接线。D3.1b/c 已接入 `/details`，共用问卷面板和角色正文，支持默认 16 题问卷、Direct 生成/取消、显式恢复草稿与 unsigned 本地保存；既有真机门禁保留。
 
 ## 权威边界
 
@@ -344,3 +344,9 @@ Rust 侧在编译期 `include_str!` 同一份 fixture，两侧测试同时消费
 - Windows 上同源 iframe 会继承宿主 IPC（GHSA-57fm-592m-34r7），因此 Web Package 在任何阶段
   都不会放进 iframe；该能力属于 D4 的独立零 capability webview。
 - 审计、GC 与 Web 包归档读取已有 `async fn` + `spawn_blocking`；这不代表所有 I/O 或 renderer 工作都不会阻塞。`zipSync` 仍是同步组装，真实响应性尚未验收；D2.4a 备份已通过 async command + spawn_blocking 执行，维护锁的等待也在 blocking worker 内；实际 WebView 响应性仍需真机验收。
+
+## 问卷草稿与保存范围
+
+默认问卷与花名数据以根 `content/` 为权威来源。草稿由单个 DetailsSession 持有，通过 WebView localStorage 保存版本化回答、输出语言、结果和已接收部分正文；上限为序列化后 4 Mi 字符，不存 Provider 凭据、不恢复上游请求。旧草稿需明确恢复或清除；读写失败显式报告，在途生成/保存和未持久化内容阻止路由离开、刷新及原生关闭。
+
+只有点击保存到本地卡库的角色进入 SQLite，并参与 portable archive 与整库备份；页面草稿、未保存结果和部分输出均不在这些备份中。相同摘要采用原子 putIfAbsent，不覆写既有记录或自动恢复墓碑。当前只开放 OpenAI-compatible Direct，在线问卷和其他问卷类型仍待迁移。

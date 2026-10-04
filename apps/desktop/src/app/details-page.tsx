@@ -1,0 +1,164 @@
+import { useEffect, useState, useSyncExternalStore } from 'react';
+import { invoke } from '@tauri-apps/api/core';
+import { Link } from '@tanstack/react-router';
+import { isLoopbackHost, type DirectProviderProfileV1 } from '@mahoshojo/contracts/provider-profile';
+import { getRandomFlowers } from '@mahoshojo/domain/flowers';
+import { getAnswerLimitInfo, isAnswerOverLimit } from '@mahoshojo/domain/questionnaire';
+import { DETAILS_QUESTIONNAIRE_THEME, QuestionnaireQuestionPanel } from '@mahoshojo/ui-web/questionnaire';
+import { MagicalGirlResultBody } from '@mahoshojo/ui-web/character-result';
+import { DetailsSession } from '../features/details/session';
+import { buildDetailsAnswers, loadDefaultQuestionnaire, type DetailsQuestionnaire } from '../features/details/questionnaire';
+import { getProviderProfile, listProviderProfileIds } from '../platform/provider-profile-bridge';
+import { IpcLocalCardRepository } from '../platform/local-card-bridge';
+import { useArchiveLeaveGuard } from './useArchiveLeaveGuard';
+
+const actionClass = 'rounded-lg border border-(--app-border) px-4 py-2 disabled:opacity-50';
+
+function DetailsForm({ session }: { session: DetailsSession }) {
+  const state = useSyncExternalStore(session.subscribe, session.getSnapshot);
+  const [questionnaire, setQuestionnaire] = useState<DetailsQuestionnaire | null>(null);
+  const [profiles, setProfiles] = useState<DirectProviderProfileV1[]>([]);
+  const [profileId, setProfileId] = useState('');
+  const [questionnaireError, setQuestionnaireError] = useState<string | null>(null);
+  const [profilesError, setProfilesError] = useState<string | null>(null);
+  const [questionnaireLoading, setQuestionnaireLoading] = useState(true);
+  const [profilesLoading, setProfilesLoading] = useState(true);
+  const [reload, setReload] = useState(0);
+  const [questionIndex, setQuestionIndex] = useState(0);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [confirmClear, setConfirmClear] = useState(false);
+  const guard = useArchiveLeaveGuard(
+    () => session.isBusy() || (!session.getSnapshot().draftSaved && !session.getSnapshot().pendingRestore && !session.isDraftBlocked()),
+    '生成或保存尚未完成，或当前草稿未能保存。请等待、取消生成，或重试保存草稿后再离开。也可以确认清除草稿以放弃当前内容。',
+    '窗口关闭保护初始化失败，生成与保存暂不可用。请重新打开页面后重试。',
+  );
+  useEffect(() => {
+    const controller = new AbortController();
+    setQuestionnaireLoading(true); setProfilesLoading(true);
+    setQuestionnaireError(null); setProfilesError(null);
+    void loadDefaultQuestionnaire(controller.signal).then((questions) => {
+      if (!controller.signal.aborted) setQuestionnaire(questions);
+    }).catch(() => {
+      if (!controller.signal.aborted) setQuestionnaireError('内置问卷加载失败，请重试。');
+    }).finally(() => { if (!controller.signal.aborted) setQuestionnaireLoading(false); });
+    void listProviderProfileIds(invoke)
+      .then((ids) => Promise.all(ids.map((id) => getProviderProfile(invoke, id))))
+      .then((loaded) => {
+        if (controller.signal.aborted) return;
+        const available = loaded.filter((profile): profile is DirectProviderProfileV1 => profile !== null);
+        setProfiles(available);
+        setProfileId((previous) => available.some((profile) => profile.id === previous) ? previous : available[0]?.id ?? '');
+      }).catch(() => {
+        if (!controller.signal.aborted) setProfilesError('本地 Provider 配置加载失败，可以稍后重试。');
+      }).finally(() => { if (!controller.signal.aborted) setProfilesLoading(false); });
+    return () => controller.abort();
+  }, [reload]);
+  const selected = profiles.find((profile) => profile.id === profileId);
+  const mode = selected && isLoopbackHost(new URL(selected.baseUrl).hostname) ? 'direct-local' : 'direct-remote';
+  const busy = state.phase === 'generating' || state.saving;
+  const blockedDraft = state.pendingRestore || session.isDraftBlocked();
+  // 写入失败仍允许编辑/重试；读取失败由 session 拒绝覆盖，页面明确要求清除。
+  const question = questionnaire?.questions[questionIndex];
+  const answer = question ? state.draft.answers[question.id] ?? '' : '';
+  const updateAnswer = (value: string) => {
+    if (!question) return;
+    session.updateDraft({ ...state.draft, answers: { ...state.draft.answers, [question.id]: value } });
+  };
+  const generate = () => {
+    if (!guard.ready || busy || !selected || selected.adapter !== 'openai-compatible' || !questionnaire || questionnaireLoading || profilesLoading || profilesError || questionnaireError || state.pendingRestore || session.isDraftBlocked()) return;
+    try {
+      const answers = buildDetailsAnswers(questionnaire, session.getSnapshot().draft.answers);
+      setActionError(null);
+      void session.generate({ invoke, profileId: selected.id }, { answers, language: session.getSnapshot().draft.language, loreText: '' }, { mode, modelId: selected.modelId, flowers: getRandomFlowers() });
+    } catch (error) { setActionError(error instanceof Error ? error.message : '问卷无法生成。'); }
+  };
+  return (
+    <section data-testid="page-details" className="flex flex-col gap-5">
+      <header>
+        <h1 className="text-2xl font-semibold">魔法少女问卷生成</h1>
+        <p className="mt-2 text-sm text-(--app-text-muted)">填写内置问卷后，直接向你配置的模型发送回答，生成未签名角色卡。当前支持默认问卷，不提供自定义问卷或账号存档。</p>
+      </header>
+      <section aria-label="草稿" className="rounded-lg border border-(--app-border) p-4">
+        <p>问卷、结果与中断正文自动保存在本机页面草稿中，恢复草稿不会自动重新生成。</p>
+        <p className="text-sm text-(--app-text-muted)">草稿不参与本地库整库备份或归档；保存到本地卡库的角色卡参与。草稿上限为序列化后 4 Mi 字符，超出或写入失败时请保留当前页面。</p>
+        {state.pendingRestore && <div role="status" className="mt-2 flex flex-wrap items-center gap-2"><span>发现上次草稿，请选择恢复或清除。</span><button className={actionClass} onClick={() => session.restoreDraft()}>恢复草稿</button></div>}
+        {state.draftError && <p role="alert">{state.draftError}</p>}
+        {!state.pendingRestore && <p role="status">{state.draftSaved ? '当前内容已保存或无待保存变更。' : '当前内容尚未保存到草稿。'}</p>}
+        <div className="mt-2 flex flex-wrap gap-2">
+          {state.draftError && !session.isDraftBlocked() && <button className={actionClass} disabled={busy || state.pendingRestore} onClick={() => session.retryDraftSave()}>重试保存草稿</button>}
+          <button className={actionClass} disabled={busy} onClick={() => setConfirmClear(true)}>清除草稿</button>
+        </div>
+        {confirmClear && <div role="group" aria-label="确认清除草稿" className="mt-3 rounded border p-3">
+          <p>确认清除本页回答、生成结果和中断正文？已保存的本地卡不受影响。此操作无法撤销。</p>
+          <button className={actionClass} disabled={busy} onClick={() => { session.discardDraft(); setConfirmClear(false); setQuestionIndex(0); }}>确认清除</button>
+          <button className={actionClass} onClick={() => setConfirmClear(false)}>保留草稿</button>
+        </div>}
+      </section>
+      {!guard.ready && !guard.message && <p role="status">正在初始化窗口关闭保护…</p>}
+      {guard.message && <p role="alert">{guard.message}</p>}
+      {questionnaireLoading && <p role="status">正在读取内置问卷…</p>}
+      {questionnaireError && <p role="alert">{questionnaireError}</p>}
+      {profilesLoading && <p role="status">正在读取本地 Provider 配置…</p>}
+      {profilesError && <p role="alert">{profilesError}</p>}
+      <button className={`${actionClass} self-start`} disabled={busy} onClick={() => setReload((value) => value + 1)}>重新加载问卷与配置</button>
+      <fieldset disabled={busy || blockedDraft || questionnaireLoading || !guard.ready} className="flex min-w-0 flex-col gap-4">
+        <legend className="mb-2 font-semibold">生成设置</legend>
+        <label className="flex flex-col gap-1">AI Provider
+          <select aria-label="AI Provider" className="w-full rounded border border-(--app-border) bg-(--app-surface) px-3 py-2 text-(--app-text)" value={profileId} onChange={(event) => setProfileId(event.target.value)}>
+            {!profiles.length && <option value="">尚无配置</option>}
+            {profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name} · {profile.modelId}{profile.adapter === 'openai-compatible' ? '' : ` · 当前客户端不支持 ${profile.adapter}`}</option>)}
+          </select>
+        </label>
+        {!profilesLoading && !profiles.length && !profilesError && <p>请先在<Link to="/settings" className="underline">设置</Link>中保存 Provider。问卷可以先填写，配置加载后再生成。</p>}
+        {selected && selected.adapter !== 'openai-compatible' && <p role="status">此配置使用 {selected.adapter} 适配器；当前桌面客户端尚不支持该适配器。请在设置中选择 OpenAI-compatible 配置后生成。</p>}
+        {selected && <div className="rounded border border-(--app-border) p-3">
+          <p>{mode === 'direct-local' ? 'Direct-local：发送到本机模型服务' : 'Direct-remote：发送到你指定的外部模型服务'}</p>
+          <p className="break-all">接收方：{selected.baseUrl}</p>
+          <p>模型：{selected.modelId}。点击生成会发送已填写的问卷回答；结果不带官方签名。</p>
+        </div>}
+        <label className="flex flex-col gap-1">输出语言
+          <select aria-label="输出语言" className="w-full rounded border border-(--app-border) bg-(--app-surface) px-3 py-2 text-(--app-text)" value={state.draft.language} onChange={(event) => session.updateDraft({ ...state.draft, language: event.target.value })}>
+            {['简体中文', '繁體中文', 'English', '日本語'].map((language) => <option key={language}>{language}</option>)}
+          </select>
+        </label>
+        {question && questionnaire && <QuestionnaireQuestionPanel
+          theme={DETAILS_QUESTIONNAIRE_THEME} progressLabel={`第 ${questionIndex + 1} / ${questionnaire.questions.length} 题`} progressPercent={(questionIndex + 1) / questionnaire.questions.length * 100}
+          questionText={question.question} questionnaireTitle={questionnaire.title} noticeText="至少回答一题即可生成，其他题目可以跳过。" helperText={question.helperText}
+          isRequired={false} skipText="可跳过本题" options={question.options} optionsHintText="点击选项填写回答" onOptionSelect={updateAnswer} suggestions={question.suggestions} onSuggestionSelect={updateAnswer}
+          showTextInput={question.allowCustom !== false} answer={answer} onAnswerChange={updateAnswer} placeholder={question.placeholder} answerLength={answer.trim().length}
+          showLimitLabel limitLabel={`建议不超过 ${getAnswerLimitInfo(question.maxLength).limit ?? 500} 字，不限制生成`} isOverLimit={isAnswerOverLimit(answer, question.maxLength)} overLimitText="回答超过建议长度，仍可生成未签名角色卡。"
+          prevLabel="上一题" nextButtonContent="下一题" onPrev={() => setQuestionIndex((index) => Math.max(0, index - 1))} onNext={() => setQuestionIndex((index) => Math.min(questionnaire.questions.length - 1, index + 1))}
+          disablePrev={questionIndex === 0} disableNext={questionIndex === questionnaire.questions.length - 1} prevButtonClass={actionClass} nextButtonClass={actionClass}
+        />}
+      </fieldset>
+      <div className="flex flex-wrap gap-2">
+        <button className={actionClass} disabled={!guard.ready || busy || questionnaireLoading || profilesLoading || !questionnaire || !selected || selected.adapter !== 'openai-compatible' || blockedDraft || !!questionnaireError || !!profilesError} onClick={generate}>{state.phase === 'generating' ? '正在生成…' : state.phase === 'idle' ? '发送问卷并生成' : '重新发送问卷并生成'}</button>
+        {state.phase === 'generating' && <button className={actionClass} onClick={() => session.cancel()}>取消生成</button>}
+      </div>
+      {actionError && <p role="alert">{actionError}</p>}
+      {state.message && <p role="status">{state.message}</p>}
+      {state.card && <section aria-label="生成结果" className="flex flex-col gap-3">
+        <h2 className="text-xl font-semibold">{state.card.codename || '未命名魔法少女'} · 未签名</h2>
+        <MagicalGirlResultBody magicalGirl={state.card} />
+        <button className={actionClass} disabled={!guard.ready || busy || state.saveStatus === 'saved' || state.saveStatus === 'already-present'} onClick={() => { if (guard.ready) void session.saveResult(); }}>{state.saving ? '正在保存…' : '保存到本地卡库'}</button>
+        {state.saveStatus === 'saved' && <p role="status">已保存到本地卡库。</p>}
+        {state.saveStatus === 'already-present' && <p role="status">本地卡库已存在相同内容，原记录保持不变。</p>}
+        {state.saveError && <p role="alert">{state.saveError}</p>}
+      </section>}
+      {state.rawText && <details open={state.phase !== 'completed'}><summary>原始输出正文</summary><pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded border p-3">{state.rawText}</pre></details>}
+    </section>
+  );
+}
+
+export function DesktopDetails() {
+  const [session, setSession] = useState<DetailsSession | null>(null);
+  useEffect(() => {
+    const owner = new DetailsSession({
+      storage: { getItem: (key) => window.localStorage.getItem(key), setItem: (key, value) => window.localStorage.setItem(key, value), removeItem: (key) => window.localStorage.removeItem(key) },
+      repository: new IpcLocalCardRepository(invoke), initialDraft: { answers: {}, language: '简体中文' },
+    });
+    setSession(owner);
+    return () => owner.dispose();
+  }, []);
+  return session ? <DetailsForm session={session} /> : <p role="status">正在准备问卷草稿…</p>;
+}

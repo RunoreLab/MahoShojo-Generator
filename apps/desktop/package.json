@@ -17,6 +17,7 @@
     "generate:content": "node ../../scripts/generate-encyclopedia-content.mjs --target desktop"
   },
   "dependencies": {
+    "@mahoshojo/domain": "workspace:*",
     "@mahoshojo/ai-core": "workspace:*",
     "@mahoshojo/ai-direct": "workspace:*",
     "@mahoshojo/contracts": "workspace:*",

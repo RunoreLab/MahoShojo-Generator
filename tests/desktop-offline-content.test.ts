@@ -68,6 +68,7 @@ describe('the local-request guard actually rejects remote origins', () => {
   it('accepts the addresses a packaged desktop app legitimately uses', () => {
     for (const url of [
       '/encyclopedia/site-guide.md',
+      '/questionnaires/presets/magical-girl-default.json',
       '/assets/index-abc.css',
       './relative.js',
       'data:image/svg+xml;base64,AAA',
@@ -170,9 +171,22 @@ describe.skipIf(!REQUIRE_DESKTOP_DIST && !existsSync(DESKTOP_DIST))(
         );
       }
 
-      for (const asset of ['logo.svg', 'logo-white.svg', 'encyclopedia.svg']) {
+      for (const asset of ['logo.svg', 'logo-white.svg', 'encyclopedia.svg', 'questionnaire-logo.svg']) {
         expect(existsSync(path.join(DESKTOP_DIST, asset)), `产物缺少 ${asset}`).toBe(true);
       }
+    });
+
+    it('ships the default questionnaire and its logo from the shared content authority', () => {
+      const relative = 'questionnaires/presets/magical-girl-default.json';
+      const bundled = readFileSync(path.join(DESKTOP_DIST, relative));
+      expect(bundled).toEqual(readFileSync(path.join(REPO_ROOT, 'content', relative)));
+      const questionnaire = JSON.parse(bundled.toString('utf8'));
+      expect(questionnaire.questions).toHaveLength(16);
+      expect(isLocalRuntimeRequest(questionnaire.logoUrl)).toBe(true);
+      expect(readFileSync(path.join(DESKTOP_DIST, questionnaire.logoUrl)))
+        .toEqual(readFileSync(path.join(REPO_ROOT, 'content/brand', questionnaire.logoUrl)));
+      // 花名经 domain 静态打包，不再为 Desktop 提供第二份 public 资产。
+      expect(existsSync(path.join(DESKTOP_DIST, 'flowers.json'))).toBe(false);
     });
   },
 );

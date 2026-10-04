@@ -20,7 +20,7 @@ import { buildCapabilitySnapshot } from './capabilities';
  * ## 路由只承载已交付的东西
  *
  * 每条路由对应一个真实可操作的面。`DESK-PROD-001` 要求功能未落地时隐藏入口或说明原因，因此这里
- * 不注册「问卷」「竞技场」这类尚无实现的路径：由 `buildCapabilitySnapshot` 把它们标成不可用，
+ * 不注册尚未交付的功能路径：由 `buildCapabilitySnapshot` 把它们标成不可用，
  * 而不是留下一条会白屏的路由。
  *
  * 归档页面以真实控制器的在途状态保护导航、刷新及 native close；
@@ -118,6 +118,7 @@ const indexRoute = createRoute({
         <section className="rounded-lg border border-(--app-border) bg-(--app-surface) p-4">
           <h2 className="mb-1 text-sm font-medium text-(--app-text-muted)">本机数据</h2>
           <ul className="flex flex-col gap-1 text-sm">
+            <li><a href="#/details" className="text-(--app-accent-strong) underline" onClick={(event) => { event.preventDefault(); navigate('/details'); }}>问卷生成魔法少女</a>：使用你的模型生成角色，并保存到本地卡库。</li>
             <li>
               <a
                 href="#/local-library"
@@ -178,8 +179,15 @@ const settingsRoute = createRoute({
   component: lazyRouteComponent(() => import('./settings-page'), 'DesktopSettings'),
 });
 
+const detailsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/details',
+  component: lazyRouteComponent(() => import('./details-page'), 'DesktopDetails'),
+});
+
 export const routeTree = rootRoute.addChildren([
   indexRoute,
+  detailsRoute,
   encyclopediaIndexRoute,
   encyclopediaEntryRoute,
   localLibraryRoute,

@@ -73,6 +73,9 @@ export function DesktopLocalLibrary() {
         <p className="text-sm text-(--app-text-muted)">
           本机保存的数据卡与 Web 包，只存在于这台设备。不需要账号，也不会访问项目服务器。
         </p>
+        <p className="text-sm text-(--app-text-muted)">
+          问卷中已保存到本地卡库的角色会参与归档与备份；问卷草稿、未保存结果和部分生成正文不在其中，仅保留在当前应用的草稿存储中。
+        </p>
       </header>
       <fieldset disabled={!guard.ready || maintenanceBusy} className="min-w-0">
         {!guard.ready && !guard.message && <p role="status">正在初始化窗口关闭保护…</p>}
@@ -91,4 +94,3 @@ export function DesktopLocalLibrary() {
     </section>
   );
 }
-

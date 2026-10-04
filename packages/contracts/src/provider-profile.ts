@@ -163,7 +163,7 @@ const GenerationDefaultsSchema = z
 
 const LOOPBACK_HOSTNAMES = new Set(['localhost', '::1', '[::1]']);
 
-const isLoopbackHost = (hostname: string): boolean => {
+export const isLoopbackHost = (hostname: string): boolean => {
   const normalized = hostname.toLowerCase();
   if (LOOPBACK_HOSTNAMES.has(normalized)) return true;
   return /^127(?:\.\d{1,3}){3}$/u.test(normalized);

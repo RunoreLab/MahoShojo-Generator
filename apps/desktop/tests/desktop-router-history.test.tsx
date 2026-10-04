@@ -134,12 +134,13 @@ describe('desktop router keeps the product path inside the hash', () => {
     expect(pageTestId()).toBe('page-home');
     const home = container.querySelector('[data-testid="page-home"]')!;
     expect([...home.querySelectorAll('a')].map((anchor) => anchor.getAttribute('href'))).toEqual([
-      '/encyclopedia', '#/local-library', '#/settings',
+      '/encyclopedia', '#/details', '#/local-library', '#/settings',
     ]);
     expect(home.querySelector('[data-testid="home-feature-grid"]')).toBeNull();
     expect(home.textContent).not.toContain('PVP');
 
     for (const [to, expected] of [
+      ['/details', 'page-details'],
       ['/local-library', 'page-local-library'],
       ['/settings', 'page-settings'],
     ] as const) {

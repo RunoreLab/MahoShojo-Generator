@@ -41,6 +41,7 @@ export const executeDetailsGeneration = async (
   input: MagicalGirlDetailsGenerationInput,
   intent: DetailsGenerationIntent,
   signal: AbortSignal,
+  onPartialText?: (text: string) => void,
 ): Promise<DetailsGenerationOutcome> => {
   if (input.answers.length === 0) throw new Error('请先填写问卷。');
   if (intent.mode !== 'direct-local' && intent.mode !== 'direct-remote') {
@@ -67,7 +68,10 @@ export const executeDetailsGeneration = async (
     for await (const event of port.stream(request, signal)) {
       yield event;
       // collectAiStreamResult 接受该事件（身份、顺序及资源上限）后才保留正文。
-      if (event.type === 'text-delta') partialText += event.delta;
+      if (event.type === 'text-delta') {
+        partialText += event.delta;
+        onPartialText?.(partialText);
+      }
     }
   };
   let result: AiExecutionResult;
