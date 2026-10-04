@@ -44,6 +44,8 @@ enum Scenario {
     Truncated,
     /// 接受请求后延迟 response headers，用于验证 headers 未到时可以取消 send。
     DelayHeaders,
+    /// 逐字节 HTTP chunk，用于覆盖 UTF-8 字符与传输分块边界互不对齐。
+    ByteChunks(Vec<u8>),
 }
 
 struct TestServer {
@@ -100,6 +102,22 @@ async fn serve_one(
         return observe_disconnect(stream, request_line, saw_authorization).await;
     }
 
+    if let Scenario::ByteChunks(bytes) = &scenario {
+        let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n").await;
+        for byte in bytes {
+            if stream
+                .write_all(&[b'1', b'\r', b'\n', *byte, b'\r', b'\n'])
+                .await
+                .is_err()
+            {
+                break;
+            }
+        }
+        let _ = stream.write_all(b"0\r\n\r\n").await;
+        let _ = stream.shutdown().await;
+        return observe_disconnect(stream, request_line, saw_authorization).await;
+    }
+
     write_response_head(&mut stream).await;
 
     match scenario {
@@ -135,6 +153,7 @@ async fn serve_one(
             observe_disconnect(stream, request_line, saw_authorization).await
         }
         Scenario::DelayHeaders => unreachable!("handled before writing response headers"),
+        Scenario::ByteChunks(_) => unreachable!("handled before writing response headers"),
     }
 }
 
@@ -378,6 +397,63 @@ fn assert_well_formed(events: &[AiStreamEvent], request_id: &str) {
             "every event must carry the request identity"
         );
         assert_eq!(version, 1);
+    }
+}
+
+#[tokio::test]
+async fn unicode_http_byte_chunks_preserve_text_and_reject_malformed_or_incomplete_utf8() {
+    let text = "魔法少女・かなé🪄";
+    let good = format!(
+        "data: {{\"choices\":[{{\"delta\":{{\"content\":\"{text}\"}}}}]}}\n\ndata: [DONE]\n\n"
+    )
+    .into_bytes();
+    let invalid = vec![0xff];
+    // 即使已经收到 DONE，也不能把包含不完整 UTF-8 的传输静默当作成功。
+    let mut incomplete = good.clone();
+    incomplete.extend_from_slice(&[0xf0, 0x9f]);
+    for (wire, expected_text) in [(good, Some(text)), (invalid, None), (incomplete, None)] {
+        let server = spawn_sse_server(Scenario::ByteChunks(wire)).await;
+        let store = LocalStore::open_in_memory().expect("in-memory store");
+        store
+            .put(
+                "loopback",
+                &stored_profile("loopback", &server.base_url, false),
+                "t",
+            )
+            .expect("put");
+        let registry = RequestRegistry::default();
+        let sink = CollectingSink::default();
+        stream_direct_ai(
+            "loopback",
+            request("req-utf8"),
+            &store,
+            &TestSecretStore::default(),
+            &registry,
+            &sink,
+        )
+        .await
+        .expect("terminal event delivered");
+        let events = sink.snapshot();
+        assert_well_formed(&events, "req-utf8");
+        match (terminals(&events)[0], expected_text) {
+            (AiExecutionResult::Completed(result), Some(expected)) => {
+                assert_eq!(result.output.text.as_deref(), Some(expected))
+            }
+            (AiExecutionResult::Failed(result), None) => {
+                assert_eq!(result.error.code, "invalid-response")
+            }
+            (result, expected) => {
+                panic!("unexpected terminal {result:?}, expected text {expected:?}")
+            }
+        }
+        assert_eq!(registry.len(), 0);
+        assert!(
+            server
+                .observation
+                .await
+                .expect("server observation")
+                .client_disconnected
+        );
     }
 }
 

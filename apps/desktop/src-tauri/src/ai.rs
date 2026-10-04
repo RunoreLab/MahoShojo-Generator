@@ -31,9 +31,6 @@ use futures_util::StreamExt;
 const DELTA_FLUSH_CHARS: usize = 48;
 const DELTA_FLUSH_INTERVAL: Duration = Duration::from_millis(40);
 
-/// 本地 Direct 生成的默认超时。有界，且不复用 Web 的 300 秒上限。
-const DEFAULT_TIMEOUT: Duration = Duration::from_secs(180);
-
 #[cfg(test)]
 pub(crate) const STREAM_FIXTURE: &str =
     include_str!("../../../../packages/contracts/fixtures/ai-stream-events.json");
@@ -594,9 +591,9 @@ pub fn build_http_client(max_redirects: u8) -> Result<reqwest::Client, DirectAiE
     let mut builder = reqwest::Client::builder()
         // 不读取环境代理：Direct 出站不应被机器上的 HTTP_PROXY 改写目标。
         .no_proxy()
-        .user_agent(concat!("MahoShojo-Desktop/", env!("CARGO_PKG_VERSION")))
-        .connect_timeout(Duration::from_secs(15))
-        .timeout(DEFAULT_TIMEOUT);
+        // Direct 不占用本站服务器资源，默认不设应用层连接或总时长硬超时；
+        // 等待响应头和读取 body 都由同一取消令牌中止。
+        .user_agent(concat!("MahoShojo-Desktop/", env!("CARGO_PKG_VERSION")));
     builder = if max_redirects == 0 {
         builder.redirect(reqwest::redirect::Policy::none())
     } else {
@@ -659,6 +656,49 @@ fn emit_terminal(
     )
 }
 
+/// HTTP chunk 不保证落在字符边界，只保留尚未完整的 UTF-8 尾部（最多 3 字节）。
+#[derive(Default)]
+struct Utf8StreamDecoder {
+    pending: Vec<u8>,
+}
+
+impl Utf8StreamDecoder {
+    fn push(&mut self, chunk: &[u8]) -> Result<String, DirectAiError> {
+        let bytes = if self.pending.is_empty() {
+            std::borrow::Cow::Borrowed(chunk)
+        } else {
+            let mut bytes = std::mem::take(&mut self.pending);
+            bytes.extend_from_slice(chunk);
+            std::borrow::Cow::Owned(bytes)
+        };
+        match std::str::from_utf8(&bytes) {
+            Ok(text) => Ok(text.to_owned()),
+            Err(error) if error.error_len().is_none() => {
+                let valid = error.valid_up_to();
+                self.pending = bytes[valid..].to_vec();
+                Ok(std::str::from_utf8(&bytes[..valid])
+                    .expect("validated UTF-8 prefix")
+                    .to_owned())
+            }
+            Err(_) => Err(DirectAiError::new(
+                DirectAiErrorCode::StreamProtocol,
+                "upstream stream contains invalid UTF-8",
+            )),
+        }
+    }
+
+    fn finish(&self) -> Result<(), DirectAiError> {
+        if self.pending.is_empty() {
+            Ok(())
+        } else {
+            Err(DirectAiError::new(
+                DirectAiErrorCode::StreamProtocol,
+                "upstream stream ended with incomplete UTF-8",
+            ))
+        }
+    }
+}
+
 /// 把上游 SSE 帧折叠成事件序列，并通过 Channel 投递。
 ///
 /// 保证：
@@ -682,6 +722,7 @@ pub async fn run_stream(
     let mut sequence: u32 = 1;
 
     let mut parser = SseFrameParser::new();
+    let mut decoder = Utf8StreamDecoder::default();
     let mut text = String::new();
     let mut reasoning = String::new();
     let mut usage: Option<AiExecutionUsage> = None;
@@ -763,15 +804,10 @@ pub async fn run_stream(
             }
         };
 
-        let text_chunk = match std::str::from_utf8(&chunk) {
-            Ok(value) => value.to_string(),
-            // 上游可能把一个多字节字符切在两个 chunk 之间。按 lossy 处理会在极端情况下
-            // 产生替换字符，因此这里选择显式失败而不是静默损坏正文。
-            Err(_) => {
-                failure = Some(DirectAiError::new(
-                    DirectAiErrorCode::StreamProtocol,
-                    "upstream sent a chunk that is not valid UTF-8",
-                ));
+        let text_chunk = match decoder.push(&chunk) {
+            Ok(value) => value,
+            Err(error) => {
+                failure = Some(error);
                 break;
             }
         };
@@ -856,6 +892,10 @@ pub async fn run_stream(
                 break;
             }
         }
+    }
+
+    if failure.is_none() {
+        failure = decoder.finish().err();
     }
 
     // 冲刷没有空行收尾的最后一帧，再收掉 body。
@@ -1131,4 +1171,70 @@ async fn stream_direct_ai_inner(
     run_stream(upstream, request, resolved_model_id, token, on_event)
         .await
         .map(|_| ())
+}
+
+#[cfg(test)]
+mod utf8_tests {
+    use super::{DirectAiErrorCode, Utf8StreamDecoder};
+    use crate::sse::{SseFrame, SseFrameParser};
+
+    #[test]
+    fn decodes_unicode_sse_at_every_byte_boundary() {
+        let payload = "魔法少女・かなé🪄";
+        let wire = format!("data: {payload}\r\n\r\ndata: [DONE]\r\n\r\n");
+        for split in 0..=wire.len() {
+            let mut decoder = Utf8StreamDecoder::default();
+            let mut parser = SseFrameParser::new();
+            let mut frames = Vec::new();
+            for bytes in [&wire.as_bytes()[..split], &wire.as_bytes()[split..]] {
+                frames.extend(parser.push(&decoder.push(bytes).expect("valid UTF-8 stream")));
+                assert!(decoder.pending.len() <= 3);
+            }
+            decoder.finish().expect("complete UTF-8 stream");
+            frames.extend(parser.finish());
+            assert_eq!(frames, vec![SseFrame::Data(payload.to_string())]);
+            assert!(parser.is_done());
+        }
+    }
+
+    #[test]
+    fn decodes_one_byte_chunks_without_replacement_characters() {
+        let source = "魔法少女・かなé🪄";
+        let mut decoder = Utf8StreamDecoder::default();
+        let mut decoded = String::new();
+        for byte in source.as_bytes() {
+            decoded.push_str(&decoder.push(&[*byte]).expect("valid byte sequence"));
+            assert!(decoder.pending.len() <= 3);
+        }
+        decoder.finish().expect("complete UTF-8 stream");
+        assert_eq!(decoded, source);
+    }
+
+    #[test]
+    fn rejects_invalid_utf8_instead_of_replacing_it() {
+        for bytes in [vec![0xff], vec![0xc0, 0xaf], vec![0xed, 0xa0, 0x80]] {
+            let error = Utf8StreamDecoder::default().push(&bytes).unwrap_err();
+            assert_eq!(error.code, DirectAiErrorCode::StreamProtocol);
+        }
+        let mut decoder = Utf8StreamDecoder::default();
+        assert_eq!(decoder.push(&[0xe9]).unwrap(), "");
+        assert_eq!(
+            decoder.push(b"x").unwrap_err().code,
+            DirectAiErrorCode::StreamProtocol
+        );
+    }
+
+    #[test]
+    fn rejects_incomplete_unicode_at_eof() {
+        for character in ["é", "魔", "🪄"] {
+            for split in 1..character.len() {
+                let mut decoder = Utf8StreamDecoder::default();
+                assert_eq!(decoder.push(&character.as_bytes()[..split]).unwrap(), "");
+                assert_eq!(
+                    decoder.finish().unwrap_err().code,
+                    DirectAiErrorCode::StreamProtocol
+                );
+            }
+        }
+    }
 }
