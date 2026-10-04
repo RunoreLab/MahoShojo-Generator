@@ -812,7 +812,18 @@ pub async fn run_stream(
             }
         };
 
-        for frame in parser.push(&text_chunk) {
+        let parsed = match parser.push(&text_chunk) {
+            Ok(frames) => frames,
+            Err(error) => {
+                failure = Some(DirectAiError::new(
+                    DirectAiErrorCode::StreamProtocol,
+                    format!("upstream stream exceeded parser limits: {error}"),
+                ));
+                break;
+            }
+        };
+
+        for frame in parsed {
             saw_done = parser.is_done();
             match frame {
                 SseFrame::Data(payload) => {
@@ -900,7 +911,19 @@ pub async fn run_stream(
 
     // 冲刷没有空行收尾的最后一帧，再收掉 body。
     // drop body 是"取消真正中止上游"的关键：只停止投递不算取消。
-    for frame in parser.finish() {
+    let tail = match parser.finish() {
+        Ok(frames) => frames,
+        Err(error) => {
+            if failure.is_none() {
+                failure = Some(DirectAiError::new(
+                    DirectAiErrorCode::StreamProtocol,
+                    format!("upstream stream exceeded parser limits: {error}"),
+                ));
+            }
+            Vec::new()
+        }
+    };
+    for frame in tail {
         saw_done = saw_done || parser.is_done();
         let SseFrame::Data(payload) = frame;
         if let Ok(chunk) = serde_json::from_str::<UpstreamChunk>(&payload) {
@@ -1187,11 +1210,15 @@ mod utf8_tests {
             let mut parser = SseFrameParser::new();
             let mut frames = Vec::new();
             for bytes in [&wire.as_bytes()[..split], &wire.as_bytes()[split..]] {
-                frames.extend(parser.push(&decoder.push(bytes).expect("valid UTF-8 stream")));
+                frames.extend(
+                    parser
+                        .push(&decoder.push(bytes).expect("valid UTF-8 stream"))
+                        .expect("within SSE limits"),
+                );
                 assert!(decoder.pending.len() <= 3);
             }
             decoder.finish().expect("complete UTF-8 stream");
-            frames.extend(parser.finish());
+            frames.extend(parser.finish().expect("within SSE limits"));
             assert_eq!(frames, vec![SseFrame::Data(payload.to_string())]);
             assert!(parser.is_done());
         }
