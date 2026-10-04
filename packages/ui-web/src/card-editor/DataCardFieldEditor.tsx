@@ -11,8 +11,9 @@ import {
 } from './field-rules';
 
 /**
- * 宿主为单个字段注入的附件。`path` 是 `.` 连接的展示路径（例如 `appearance.outfit`）：
- * 键本身含 `.` 时该串有歧义，但它只用于展示匹配（敏感词、随机按钮），不参与写入。
+ * 宿主为单个字段注入的附件。`renderFieldAddon` 回调收到逐段 `path` 与 `.` 连接的
+ * `displayPath`：字段身份以 `path` 为准；`displayPath` 仅供展示或对接仍以点分串为
+ * 键的旧口径（如 Web 敏感词提示），键本身含 `.` 时该串有歧义，不参与写入。
  */
 export interface DataCardFieldAddon {
   /** 标记该字段有问题（例如敏感词命中），输入框改用 `invalidInput` 样式。 */
@@ -49,7 +50,7 @@ export interface DataCardFieldEditorProps {
   /** 路径为逐段键名（`DataCardFieldPath`），不是点分字符串；写入侧不做 `split('.')` 解释。 */
   readonly onFieldChange: (path: DataCardFieldPath, value: unknown) => void;
   readonly classes?: Partial<DataCardFieldEditorClasses>;
-  readonly renderFieldAddon?: (path: string) => DataCardFieldAddon | null;
+  readonly renderFieldAddon?: (path: DataCardFieldPath, displayPath: string) => DataCardFieldAddon | null;
 }
 
 /** 字段编辑不是凭据输入：阻止浏览器与密码管理器把它当成登录表单自动填充。 */
@@ -121,13 +122,14 @@ export const DataCardFieldEditor = ({ data, onFieldChange, classes, renderFieldA
     orderDataCardFieldKeys(Object.keys(record)).map((key) => {
       if (isHiddenDataCardField(key)) return null;
       const segments = [...path, key];
-      // `displayPath` 只用于展示与 DOM id（键含 `.` 时可能与嵌套路径撞串，属可接受的展示歧义）；
-      // React key 用无歧义编码，保证 `{ "a.b": 1, "a": { "b": 2 } }` 这种数据不产生重复 key。
+      // 字段身份一律用逐段 `segments`：`displayPath` 只用于展示（键含 `.` 时可能与嵌套路径撞串，
+      // 属可接受的展示歧义）；React key 与 DOM id 都用无歧义编码，`{ "a.b": 1, "a": { "b": 2 } }`
+      // 这种数据不会产生重复 key、duplicate id 或指错输入框的 label。
       const displayPath = segments.join('.');
       const reactKey = JSON.stringify(segments);
-      const fieldId = toDataCardFieldId(displayPath);
+      const fieldId = toDataCardFieldId(segments);
       const value = record[key];
-      const addon = renderFieldAddon?.(displayPath) ?? null;
+      const addon = renderFieldAddon?.(segments, displayPath) ?? null;
       const inputClassName = addon?.invalid ? css.invalidInput : css.input;
       const label = formatDataCardFieldLabel(key);
 

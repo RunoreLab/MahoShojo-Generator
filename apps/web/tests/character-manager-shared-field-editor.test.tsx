@@ -30,7 +30,7 @@ describe('角色管理回用共源字段编辑器（D3.2b-1）', () => {
         data={{ codename: '星光', appearance: { outfit: '白裙' } }}
         onFieldChange={() => {}}
         classes={{ input: 'input-field', label: 'block text-sm font-medium text-gray-700 capitalize' }}
-        renderFieldAddon={(path) => (path === 'codename' ? { inline: <button type="button">随机</button> } : null)}
+        renderFieldAddon={(path) => (path.length === 1 && path[0] === 'codename' ? { inline: <button type="button">随机</button> } : null)}
       />,
     ));
     const codename = container.querySelector('#editor-field-codename')!;

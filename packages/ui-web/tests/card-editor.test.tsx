@@ -8,6 +8,7 @@ import {
   isHiddenDataCardField,
   orderDataCardFieldKeys,
   setDataCardFieldValue,
+  toDataCardFieldId,
 } from '../src/card-editor/index';
 
 let container: HTMLDivElement;
@@ -61,6 +62,19 @@ describe('字段规则', () => {
     expect(next.appearance).not.toBe(original.appearance);
     expect(next.appearance.outfit).toBe('z');
     expect(next.analysis).toBe(original.analysis);
+  });
+
+  it('DOM id 按逐段路径单射编码，含 `.`、`__`、空白的键互不冲突', () => {
+    expect(toDataCardFieldId(['codename'])).toBe('editor-field-codename');
+    expect(toDataCardFieldId(['appearance', 'outfit'])).toBe('editor-field-appearance__outfit');
+    const ids = [
+      toDataCardFieldId(['a.b']),
+      toDataCardFieldId(['a', 'b']),
+      toDataCardFieldId(['a__b']),
+      toDataCardFieldId(['a b']),
+      toDataCardFieldId(['a_b']),
+    ];
+    expect(new Set(ids).size).toBe(ids.length);
   });
 });
 
@@ -135,9 +149,29 @@ describe('DataCardFieldEditor', () => {
     act(() => root.render(
       <DataCardFieldEditor data={{ 'profile.name': 'Alice' }} onFieldChange={onFieldChange} />,
     ));
-    const field = container.querySelector<HTMLInputElement>('#editor-field-profile__name')!;
+    const field = container.querySelector<HTMLInputElement>('#editor-field-profile_u002ename')!;
     await change(field, 'Bob');
     expect(onFieldChange).toHaveBeenLastCalledWith(['profile.name'], 'Bob');
+  });
+
+  it('含 `.` 的键与嵌套路径产生不同 DOM id，label 各自指向正确输入框', async () => {
+    const onFieldChange = vi.fn();
+    act(() => root.render(
+      <DataCardFieldEditor
+        data={{ 'a.b': 'literal', a: { b: 'nested' } }}
+        onFieldChange={onFieldChange}
+      />,
+    ));
+    const literal = container.querySelector<HTMLInputElement>('#editor-field-a_u002eb')!;
+    const nested = container.querySelector<HTMLInputElement>('#editor-field-a__b')!;
+    expect(literal).not.toBe(nested);
+    const htmlFors = [...container.querySelectorAll('label')].map((el) => el.htmlFor);
+    expect(htmlFors).toContain('editor-field-a_u002eb');
+    expect(htmlFors).toContain('editor-field-a__b');
+    await change(nested, '改嵌套');
+    expect(onFieldChange).toHaveBeenLastCalledWith(['a', 'b'], '改嵌套');
+    await change(literal, '改字面');
+    expect(onFieldChange).toHaveBeenLastCalledWith(['a.b'], '改字面');
   });
 
   it('宿主插槽注入行内与下方附件，并切换问题样式', () => {
@@ -146,7 +180,7 @@ describe('DataCardFieldEditor', () => {
         data={{ codename: '星光', name: '名' }}
         onFieldChange={() => {}}
         classes={{ input: 'host-input', invalidInput: 'host-invalid' }}
-        renderFieldAddon={(path) => (path === 'codename'
+        renderFieldAddon={(path, displayPath) => (path.length === 1 && path[0] === 'codename' && displayPath === 'codename'
           ? { invalid: true, inline: <button type="button">随机</button>, below: <p>提示</p> }
           : null)}
       />,

@@ -67,6 +67,7 @@ import {
     setDataCardFieldValue,
     type DataCardFieldAddon,
     type DataCardFieldEditorClasses,
+    type DataCardFieldPath,
 } from '@mahoshojo/ui-web/card-editor';
 
 // Web 角色管理沿用既有全局表单类（`input-field` 等随蓝色主题切换），共源编辑器只接收类名。
@@ -1415,9 +1416,10 @@ export const CharacterManagerPage: React.FC = () => {
     }, [sensitiveIssues]);
 
     // 递归字段表单由共源 `DataCardFieldEditor` 渲染（D3.2b-1）；Web 只注入随机代号、名称替换、
-    // 敏感词提示与既有全局样式类。
-    const renderFieldAddon = (currentPath: string): DataCardFieldAddon => {
-        const fieldIssues = fieldIssueMap.get(currentPath) || [];
+    // 敏感词提示与既有全局样式类。字段身份以逐段 `path` 为准；敏感词扫描的 path/parentPath
+    // 仍是点分串口径，查表沿用 `displayPath`。
+    const renderFieldAddon = (currentPath: DataCardFieldPath, displayPath: string): DataCardFieldAddon => {
+        const fieldIssues = fieldIssueMap.get(displayPath) || [];
         const hasIssue = fieldIssues.length > 0;
         const issueCount = fieldIssues.reduce((total, issue) => total + issue.matches.length, 0);
         const issueHint = hasIssue ? (
@@ -1430,10 +1432,10 @@ export const CharacterManagerPage: React.FC = () => {
                 </span>
             </p>
         ) : null;
-        const isNameField = currentPath === 'codename' || currentPath === 'name';
+        const isNameField = currentPath.length === 1 && (currentPath[0] === 'codename' || currentPath[0] === 'name');
         return {
             invalid: hasIssue,
-            inline: currentPath === 'codename' ? (
+            inline: currentPath.length === 1 && currentPath[0] === 'codename' ? (
                 <button onClick={handleRandomCodename} type="button" className="ml-2 px-3 py-1.5 text-xs font-semibold text-white bg-pink-500 rounded-lg hover:bg-pink-600">随机</button>
             ) : null,
             below: (

@@ -88,6 +88,22 @@ export const setDataCardFieldValue = <T>(data: T, path: DataCardFieldPath, value
   return writeAtPath(data, path, 0, value) as T;
 };
 
-/** 表单元素的统一 DOM id，路径中的非安全字符折叠为 `_`。 */
-export const toDataCardFieldId = (path: string): string =>
-  `editor-field-${path.replace(/\./g, '__').replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+/**
+ * 表单元素的统一 DOM id，由逐段键名生成且对路径单射。
+ *
+ * 段内 `[a-zA-Z0-9-]` 以外的字符编码为 `_uXXXX`（UTF-16 code unit，`_` 自身编码为 `_u005f`），
+ * 段间以 `__` 连接：编码输出中 `_` 只作为转义前缀出现且其后必跟 `u`，所以 `__` 永远是无歧义分隔符，
+ * `["a.b"]`（`a_u002eb`）与 `["a","b"]`（`a__b`）、`["a b"]` 与 `["a_b"]` 都得到不同 id，
+ * 不会产生 duplicate DOM id 或 `htmlFor` 指错输入框。
+ */
+const encodeFieldIdSegment = (key: string): string => {
+  let out = '';
+  for (let i = 0; i < key.length; i += 1) {
+    const ch = key[i]!;
+    out += /[a-zA-Z0-9-]/.test(ch) ? ch : `_u${ch.charCodeAt(0).toString(16).padStart(4, '0')}`;
+  }
+  return out;
+};
+
+export const toDataCardFieldId = (path: DataCardFieldPath): string =>
+  `editor-field-${path.map(encodeFieldIdSegment).join('__')}`;
