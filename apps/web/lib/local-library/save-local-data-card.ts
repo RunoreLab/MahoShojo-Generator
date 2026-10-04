@@ -17,6 +17,11 @@ export interface SaveLocalDataCardResult {
   record: LocalCardRecordV1;
   /** 命中的既有记录被整卡替换，而不是新增一行。 */
   updated: boolean;
+  /**
+   * 同内容记录在回收站中，本次**没有写入**。用户删掉之后再导入同一份内容需要显式恢复，
+   * 不能隐式复活（`SPEC-local-library-web-landing-v1` §2.3）；`record` 此时是那条墓碑。
+   */
+  inRecycleBin: boolean;
 }
 
 /**
@@ -38,6 +43,7 @@ export const saveLocalDataCard = async (
   const id = deriveLocalDataCardIdV1(contentDigest);
   const timestamp = now();
   const existing = await repository.get(id);
+  if (existing?.deletedAt !== undefined) return { record: existing, updated: false, inRecycleBin: true };
   const record: LocalCardRecordV1 = {
     id,
     schemaVersion: 1,
@@ -54,5 +60,5 @@ export const saveLocalDataCard = async (
     updatedAt: timestamp,
   };
   await repository.put(record);
-  return { record, updated: existing !== null };
+  return { record, updated: existing !== null, inRecycleBin: false };
 };

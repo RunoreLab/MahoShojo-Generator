@@ -16,6 +16,8 @@ export interface LocalLibraryAutoSaveResult {
   saved: number;
   updated: number;
   failed: number;
+  /** 同内容记录在回收站中、未写入的条数；需要用户到本地库显式恢复。 */
+  inRecycleBin: number;
 }
 
 /**
@@ -30,7 +32,7 @@ export const useLocalLibraryAutoSave = () => {
   const [error, setError] = useState<string | null>(null);
 
   const save = useCallback(async (entries: LocalLibraryAutoSaveInput[]): Promise<LocalLibraryAutoSaveResult> => {
-    const empty: LocalLibraryAutoSaveResult = { saved: 0, updated: 0, failed: 0 };
+    const empty: LocalLibraryAutoSaveResult = { saved: 0, updated: 0, failed: 0, inRecycleBin: 0 };
     if (entries.length === 0) {
       setResult(empty);
       return empty;
@@ -43,7 +45,8 @@ export const useLocalLibraryAutoSave = () => {
       for (const entry of entries) {
         try {
           const outcome = await saveLocalDataCard(repository, { ...entry, execution: 'imported' });
-          if (outcome.updated) summary.updated += 1;
+          if (outcome.inRecycleBin) summary.inRecycleBin += 1;
+          else if (outcome.updated) summary.updated += 1;
           else summary.saved += 1;
         } catch {
           // 单条失败不阻断其余条目：一次多文件导入不该因为其中一张卡不可存就全盘失败。

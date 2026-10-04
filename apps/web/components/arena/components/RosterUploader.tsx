@@ -104,6 +104,11 @@ export function RosterUploader() {
             已保存到本地库：新增 {autoSave.result.saved} 张，更新 {autoSave.result.updated} 张。
           </p>
         ) : null}
+        {autoSave.result && autoSave.result.inRecycleBin > 0 ? (
+          <p className="mt-1 text-xs text-gray-500" role="status" data-testid="roster-local-library-recycle-bin">
+            {autoSave.result.inRecycleBin} 张内容相同的数据卡在本地库回收站中，未重复保存；可在「本地库」页面恢复。
+          </p>
+        ) : null}
       </div>
 
       <div className="mb-6">

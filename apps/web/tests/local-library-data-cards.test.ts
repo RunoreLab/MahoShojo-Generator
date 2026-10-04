@@ -90,6 +90,21 @@ describe('saveLocalDataCard', () => {
     expect(page.items).toHaveLength(1);
   });
 
+  it('does not revive a recycled card with the same content and reports it instead of failing', async () => {
+    const repository = new IndexedDbCardRepository();
+    const now = () => '2026-09-29T12:00:00.000Z';
+    const { record } = await saveLocalDataCard(repository, { cardType: 'character', title: '焰', payload: character('焰') }, now);
+    await repository.delete(record.id);
+
+    const again = await saveLocalDataCard(repository, { cardType: 'character', title: '焰（再导入）', payload: character('焰') }, now);
+    expect(again.inRecycleBin).toBe(true);
+    expect(again.updated).toBe(false);
+    const stored = await repository.get(record.id);
+    expect(stored?.deletedAt).toBeDefined();
+    expect(stored?.title).toBe('焰');
+    expect((await repository.list({ limit: 10 })).items).toHaveLength(0);
+  });
+
   it('keeps a different payload as a separate local card', async () => {
     const repository = new IndexedDbCardRepository();
     const now = () => '2026-09-29T12:00:00.000Z';

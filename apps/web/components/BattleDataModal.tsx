@@ -988,9 +988,11 @@ export default function BattleDataModal({
       ? `已保存到本地库：${summary.saved} 张。`
       : summary.updated > 0
         ? '本地库中已有内容相同的数据卡，已更新原卡。'
-        : summary.failed > 0
-          ? '保存到本地库失败。'
-          : null);
+        : summary.inRecycleBin > 0
+          ? '内容相同的数据卡在本地库回收站中，未重复保存；可在「本地库」页面恢复。'
+          : summary.failed > 0
+            ? '保存到本地库失败。'
+            : null);
   }, [libraryAutoSave]);
 
   const handleSaveSelectedCardToLibrary = useCallback(async () => {
