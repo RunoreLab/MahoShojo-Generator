@@ -16,7 +16,7 @@ describe('ai-core public entrypoint portability', () => {
           : entrypoint.endsWith('/provider-catalog')
             ? `import { AI_PROVIDER_CATALOG, resolveAIProviderModel } from '${entrypoint}'; export { AI_PROVIDER_CATALOG, resolveAIProviderModel };`
           : entrypoint.endsWith('/ai-connections')
-            ? `import { describeProviderProfileConnection, matchAiPresetByBaseUrl } from '${entrypoint}'; export { describeProviderProfileConnection, matchAiPresetByBaseUrl };`
+            ? `import { describeProviderProfileConnection } from '${entrypoint}'; export { describeProviderProfileConnection };`
             : `import { AiStreamEventSchema, parseStructuredJsonWithSchema } from '${entrypoint}'; export { AiStreamEventSchema, parseStructuredJsonWithSchema };`;
       const result = await build({
         absWorkingDir: process.cwd(),

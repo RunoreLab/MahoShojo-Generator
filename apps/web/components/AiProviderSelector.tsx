@@ -166,7 +166,7 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({
     label = '自定义 AI 能力提供商 (可选)',
 }) => {
 
-    const providerOptions = useMemo<AIProviderOption[]>(() => {
+    const providerOptions = useMemo<readonly AIProviderOption[]>(() => {
         const options = AI_PROVIDER_CATALOG;
         if (allowSystemProvider) return options;
         return options.filter((item) => item.id !== 'system');
