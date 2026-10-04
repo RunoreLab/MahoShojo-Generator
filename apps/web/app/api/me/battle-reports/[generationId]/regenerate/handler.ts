@@ -10,7 +10,7 @@ import {
 } from '@/lib/arena/battle-report-record-utils';
 import { resolveBattleReportAccess } from '@/lib/arena/battle-report-access';
 import { hydrateBattleReportCardFromGenerationRecord } from '@/lib/arena/battle-report-card-fallback';
-import { json, readJson, requireAuthUser } from '@/lib/pvp/server';
+import { json, readJson, requireAuthUser } from '@/lib/api/server';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 import type { BattleReportRenderSnapshotV1 } from '@mahoshojo/contracts';
 

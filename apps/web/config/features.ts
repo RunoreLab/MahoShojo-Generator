@@ -118,16 +118,6 @@ export const HOME_FEATURE_CATEGORIES: readonly HomeFeatureCategory[] = [
         className: 'battle-arena',
         onDark: true,
       },
-      {
-        id: 'pvp-arena',
-        assetFile: 'arena-card-white.webp',
-        width: 240,
-        height: 100,
-        alt: 'PVP 卡牌对决',
-        href: '/pvp',
-        className: 'card-duel',
-        onDark: true,
-      },
     ],
   },
   {

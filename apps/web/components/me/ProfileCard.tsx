@@ -70,16 +70,6 @@ type TopRatedCharacterHighlight = CardLite & {
   };
 };
 
-type PvpMatchLite = {
-  id: string;
-  roomId: string | null;
-  status: string;
-  startedAt: string;
-  endedAt: string | null;
-  winnerUserId: number | null;
-  players: Array<{ userId: number; seat: number; username: string | null; prefix: string | null }>;
-};
-
 type BattleReportLite = {
   id: string;
   startedAt: string;
@@ -144,21 +134,6 @@ export type MeProfileCardPayload = {
     battleReportsAll: {
       total: number;
     };
-  };
-  pvp: {
-    summary: {
-      completedMatches: number;
-      wins: number;
-      losses: number;
-      draws: number;
-      abortedMatches: number;
-      lastPlayedAt: string | null;
-    };
-    recentMatches: Array<
-      PvpMatchLite & {
-        roundSummary: { total: number; wins: number; losses: number; draws: number } | null;
-      }
-    >;
   };
   recentBattleReports: BattleReportLite[];
 };
@@ -300,14 +275,6 @@ export function ProfileCard({
     staleTime: 60_000,
   });
   const currentSeason = useMemo(() => getCurrentSeason(seasonsQuery.data), [seasonsQuery.data]);
-
-  const winRate = useMemo(() => {
-    const completed = data.pvp.summary.completedMatches || 0;
-    if (completed <= 0) return null;
-    const wins = data.pvp.summary.wins || 0;
-    const pct = (wins / completed) * 100;
-    return `${pct.toFixed(1)}%`;
-  }, [data.pvp.summary.completedMatches, data.pvp.summary.wins]);
 
   const handleSaveImage = async () => {
     if (!cardRef.current) return;
@@ -617,58 +584,6 @@ export function ProfileCard({
                   <div className="text-xs text-white/70">暂无情景卡数据</div>
                 )}
               </div>
-            </div>
-          </div>
-
-          <div className="rounded-2xl bg-black/15 p-4">
-            <div className="flex min-w-0 items-end justify-between gap-2">
-              <div className="min-w-0 flex-1 truncate whitespace-nowrap text-sm font-semibold">卡牌对决战绩（PVP）</div>
-              {winRate ? <div className="shrink-0 whitespace-nowrap text-xs text-white/85">胜率 {winRate}</div> : null}
-            </div>
-            <div className="mt-2 text-sm text-white/90">
-              {data.pvp.summary.completedMatches} 场 · 胜 {data.pvp.summary.wins} · 负 {data.pvp.summary.losses} · 平 {data.pvp.summary.draws} · 中止{' '}
-              {data.pvp.summary.abortedMatches}
-            </div>
-            <div className="mt-1 text-xs text-white/75">
-              最近对局：{data.pvp.summary.lastPlayedAt ? formatDateTime(data.pvp.summary.lastPlayedAt) : '—'}
-            </div>
-
-            <div className="mt-4 text-xs font-semibold text-white/85">最近 3 场对局</div>
-            <div className="mt-2 space-y-2">
-              {(data.pvp.recentMatches ?? []).length > 0 ? (
-                data.pvp.recentMatches.slice(0, 3).map((m) => {
-                  const myId = data.profile.id;
-                  const outcome =
-                    m.status !== 'completed'
-                      ? '未结算'
-                      : m.winnerUserId == null
-                        ? '平'
-                        : m.winnerUserId === myId
-                          ? '胜'
-                          : '负';
-                  const opponents = m.players
-                    .filter((p) => p.userId !== myId)
-                    .map((p) => p.username || `用户${p.userId}`)
-                    .slice(0, 3)
-                    .join(' / ');
-                  const roundSummaryText = m.roundSummary
-                    ? `回合：胜 ${m.roundSummary.wins} / 负 ${m.roundSummary.losses} / 平 ${m.roundSummary.draws}（共 ${m.roundSummary.total}）`
-                    : '回合：—';
-                  return (
-                    <div key={`match-${m.id}`} className="rounded-xl bg-white/10 px-3 py-2">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div className="text-sm font-semibold">
-                          {outcome} · {opponents || '对手未知'}
-                        </div>
-                        <div className="text-[11px] text-white/80">{formatDateTime(m.startedAt)}</div>
-                      </div>
-                      <div className="mt-1 text-[11px] text-white/80">{roundSummaryText}</div>
-                    </div>
-                  );
-                })
-              ) : (
-                <div className="text-xs text-white/70">暂无对局记录</div>
-              )}
             </div>
           </div>
 

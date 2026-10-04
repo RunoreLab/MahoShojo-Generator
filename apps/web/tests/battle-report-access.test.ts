@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/lib/database/battle-report-generations', () => ({
   getBattleReportGenerationAccessByUserId: mocks.getAccess,
 }));
-vi.mock('@/lib/database/pvp', () => ({
+vi.mock('@/lib/database/legacy-pvp-access', () => ({
   isUserInPvpMatch: mocks.isUserInPvpMatch,
 }));
 

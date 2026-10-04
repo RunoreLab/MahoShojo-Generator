@@ -28,7 +28,7 @@ vi.mock('@/lib/arena/battle-report-access', () => ({
   resolveBattleReportAccess: mocks.resolveBattleReportAccess,
 }));
 vi.mock('@/lib/sensitive-word-filter', () => ({ quickCheck: mocks.quickCheck }));
-vi.mock('@/lib/pvp/server', () => ({
+vi.mock('@/lib/api/server', () => ({
   json: (body: unknown, init?: ResponseInit) => new Response(JSON.stringify(body), {
     ...init,
     headers: { 'Content-Type': 'application/json; charset=utf-8' },

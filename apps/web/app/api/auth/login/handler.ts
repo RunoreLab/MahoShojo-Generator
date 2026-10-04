@@ -23,7 +23,7 @@ import {
   countRecentFailedLoginsByIpAnonymized,
   countRecentFailedLoginsByLoginIdentifierHash,
 } from '@/lib/db/repositories/auth-audit-logs';
-import { sha256Hex } from '@/lib/pvp/crypto';
+import { sha256Hex } from '@/lib/auth/sha256';
 import { verifyTurnstileToken } from '@/lib/turnstile';
 
 type LoginMode = 'password' | 'legacy';

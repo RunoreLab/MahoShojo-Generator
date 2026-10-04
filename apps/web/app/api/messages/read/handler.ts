@@ -4,7 +4,7 @@ import {
   MessagesServiceUnavailableError,
   markMessagesRead,
 } from '@/lib/messages/service';
-import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
+import { json, readJson, requireAuthUser, withApiErrorBoundary } from '@/lib/api/server';
 
 type RequireAuthResult = Awaited<ReturnType<typeof requireAuthUser>> | { user: { id: number } } | Response;
 
@@ -82,5 +82,5 @@ export const createMessagesReadHandler =
     }
   };
 
-export const appRouteHandler = withPvpErrorBoundary(createMessagesReadHandler());
+export const appRouteHandler = withApiErrorBoundary(createMessagesReadHandler());
 export default appRouteHandler;

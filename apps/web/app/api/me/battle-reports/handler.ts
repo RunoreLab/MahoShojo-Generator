@@ -6,7 +6,7 @@ import {
 } from '@/lib/database/battle-report-generations';
 import { resolveBattleReportDisplayTitle } from '@/lib/arena/battle-report-display-title';
 import { extractBattleReportGenerationErrorMessage } from '@/lib/arena/battle-report-record-utils';
-import { json, requireAuthUser } from '@/lib/pvp/server';
+import { json, requireAuthUser } from '@/lib/api/server';
 
 const clampInt = (value: unknown, fallback: number, min: number, max: number): number => {
   const n = typeof value === 'string' ? Number(value) : typeof value === 'number' ? value : NaN;

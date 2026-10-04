@@ -1,6 +1,6 @@
 import { getRequestUrl } from '@/lib/request-url';
 import { listMyReportAppeals, submitReportAppeal, ReportAppealConflictError, ReportAppealForbiddenError, ReportAppealNotFoundError, ReportAppealServiceUnavailableError, ReportAppealUnprocessableError, ReportAppealValidationError } from '@/lib/report-appeals/service';
-import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
+import { json, readJson, requireAuthUser, withApiErrorBoundary } from '@/lib/api/server';
 import type { ReportAppealReferenceDraft } from '@/lib/report-appeals/types';
 
 type HandlerDeps = {
@@ -115,5 +115,5 @@ export const createReportAppealsHandler =
     return json({ error: 'Method not allowed' }, { status: 405 });
   };
 
-export const appRouteHandler = withPvpErrorBoundary(createReportAppealsHandler());
+export const appRouteHandler = withApiErrorBoundary(createReportAppealsHandler());
 export default appRouteHandler;

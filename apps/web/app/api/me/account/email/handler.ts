@@ -14,7 +14,7 @@ import {
   getAuthUserProfileByAuthUserId,
   getUserAuthLinkByBusinessUserId,
 } from '@/lib/db/repositories/user-auth-links';
-import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
+import { json, readJson, requireAuthUser, withApiErrorBoundary } from '@/lib/api/server';
 
 type ChangeEmailPayload = {
   newEmail?: unknown;
@@ -28,7 +28,7 @@ const toNonEmptyString = (value: unknown): string | null => {
 
 const isValidEmail = (email: string): boolean => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 
-const handler = withPvpErrorBoundary(async function handler(req: Request): Promise<Response> {
+const handler = withApiErrorBoundary(async function handler(req: Request): Promise<Response> {
   if (req.method !== 'PUT') return json({ error: 'Method not allowed' }, { status: 405 });
 
   const auth = await requireAuthUser(req);

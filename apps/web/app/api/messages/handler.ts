@@ -9,7 +9,7 @@ import {
   UnauthorizedMessagesFilterError,
   listMessages,
 } from '@/lib/messages/service';
-import { getAuthUser, json, withPvpErrorBoundary } from '@/lib/pvp/server';
+import { getAuthUser, json, withApiErrorBoundary } from '@/lib/api/server';
 
 type HandlerDeps = {
   getAuthUser: typeof getAuthUser;
@@ -98,5 +98,5 @@ export const createMessagesHandler =
     }
   };
 
-export const appRouteHandler = withPvpErrorBoundary(createMessagesHandler());
+export const appRouteHandler = withApiErrorBoundary(createMessagesHandler());
 export default appRouteHandler;

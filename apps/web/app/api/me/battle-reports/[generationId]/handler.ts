@@ -10,7 +10,7 @@ import {
 import { getBattleReportGenerationCombatantsByGenerationId } from '@/lib/database/battle-report-generation-combatants';
 import { parseGenerationCombatantsFallback } from '@/lib/database/arena-ratings';
 import { resolveBattleReportAccess } from '@/lib/arena/battle-report-access';
-import { json, requireAuthUser } from '@/lib/pvp/server';
+import { json, requireAuthUser } from '@/lib/api/server';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 
 const getGenerationIdFromUrl = (url: string): string | null => {

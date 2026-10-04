@@ -79,18 +79,6 @@ vi.mock('@/components/investigation/InvestigationPage', () => ({
   },
 }));
 
-vi.mock('@/components/pvp/PvpLobbyPage', () => ({
-  PvpLobbyPage: function PvpLobbyPageMock() {
-    return <main data-page="pvp">PVP 大厅</main>;
-  },
-}));
-
-vi.mock('@/components/pvp/PvpRoomPage', () => ({
-  PvpRoomPage: function PvpRoomPageMock() {
-    return <main data-page="pvp-room">PVP 房间</main>;
-  },
-}));
-
 vi.mock('@/components/competition/SublimationPage', () => ({
   SublimationPage: function SublimationPageMock() {
     return <main data-page="sublimation">成长升华</main>;
@@ -141,18 +129,6 @@ describe('competition domain App Router pages', () => {
     expect(investigationMetadata).toMatchObject({ title: '调查院 - MahoShojo Generator' });
   });
 
-  test('pvp lobby and room routes render migrated pages and dynamic room metadata', async () => {
-    const { default: PvpRoute, metadata: pvpMetadata } = await import('@/app/pvp/page');
-    const { default: PvpRoomRoute, generateMetadata } = await import('@/app/pvp/[roomId]/page');
-
-    expect(renderToStaticMarkup(<PvpRoute />)).toContain('data-page="pvp"');
-    expect(renderToStaticMarkup(<PvpRoomRoute />)).toContain('data-page="pvp-room"');
-    expect(pvpMetadata).toMatchObject({ title: 'PVP 大厅 - MahoShojo Generator' });
-    await expect(generateMetadata({ params: Promise.resolve({ roomId: 'room-7' }) })).resolves.toMatchObject({
-      title: 'PVP 房间 - room-7',
-    });
-  });
-
   test('arrested route renders migrated page and keeps topbar exclusion metadata', async () => {
     const { default: ArrestedRoute, metadata } = await import('@/app/arrested/page');
     const html = renderToStaticMarkup(<ArrestedRoute />);
@@ -172,21 +148,14 @@ describe('competition domain App Router pages', () => {
       'app/ranking/page.tsx',
       'app/sublimation/page.tsx',
       'app/investigation/page.tsx',
-      'app/pvp/page.tsx',
-      'app/pvp/[roomId]/page.tsx',
       'app/arrested/page.tsx',
       'components/competition/BattleRouteProviders.tsx',
       'components/competition/ArenaRouteProviders.tsx',
       'components/competition/RankingRouteProviders.tsx',
-      'components/competition/PvpRouteProviders.tsx',
-      'components/competition/PvpRoomRouteProviders.tsx',
       'components/competition/QueryRouteProviders.tsx',
       'components/arena/ArenaPage.tsx',
       'components/arena-lite/BattleLitePage.tsx',
       'components/ranking/RankingPage.tsx',
-      'components/pvp/PvpLobbyPage.tsx',
-      'components/pvp/PvpRoomPage.tsx',
-      'components/pvp/PvpRoomBrowserModal.tsx',
       'components/arena/hooks/useBattleEngine.ts',
     ];
 
@@ -205,8 +174,6 @@ describe('competition domain App Router pages', () => {
       battle: 'components/competition/BattleRouteProviders.tsx',
       arena: 'components/competition/ArenaRouteProviders.tsx',
       ranking: 'components/competition/RankingRouteProviders.tsx',
-      pvp: 'components/competition/PvpRouteProviders.tsx',
-      pvpRoom: 'components/competition/PvpRoomRouteProviders.tsx',
     };
 
     for (const path of Object.values(routeProviderFiles)) {
@@ -215,22 +182,7 @@ describe('competition domain App Router pages', () => {
 
     const battleProvider = readProjectFile(routeProviderFiles.battle);
     expect(battleProvider).toContain('BattleLitePage');
-    expect(battleProvider).not.toContain('PvpLobbyPage');
-    expect(battleProvider).not.toContain('PvpRoomPage');
     expect(battleProvider).not.toContain('RankingPage');
-
-    const pvpProvider = readProjectFile(routeProviderFiles.pvp);
-    expect(pvpProvider).toContain('PvpLobbyPage');
-    expect(pvpProvider).not.toContain('PvpRoomPage');
-    expect(pvpProvider).not.toContain('BattleLitePage');
-    expect(pvpProvider).not.toContain('ArenaPage');
-    expect(pvpProvider).not.toContain('RankingPage');
-
-    const pvpRoomProvider = readProjectFile(routeProviderFiles.pvpRoom);
-    expect(pvpRoomProvider).toContain('PvpRoomPage');
-    expect(pvpRoomProvider).not.toContain('PvpLobbyPage');
-    expect(pvpRoomProvider).not.toContain('BattleLitePage');
-    expect(pvpRoomProvider).not.toContain('ArenaPage');
 
     // 原先另有一个只做三行 grep 的 `battle-lite-page.test.tsx`，其中两句与上面重复
     // （`app/battle/page.tsx` 提到 BattleRouteProviders、BattleRouteProviders 提到

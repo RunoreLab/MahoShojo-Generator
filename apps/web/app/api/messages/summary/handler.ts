@@ -1,5 +1,5 @@
 import { type MessageServiceDb, MessagesServiceUnavailableError, getMessageSummary } from '@/lib/messages/service';
-import { getAuthUser, json, withPvpErrorBoundary } from '@/lib/pvp/server';
+import { getAuthUser, json, withApiErrorBoundary } from '@/lib/api/server';
 
 type HandlerDeps = {
   getAuthUser: typeof getAuthUser;
@@ -57,5 +57,5 @@ export const createMessagesSummaryHandler =
     }
   };
 
-export const appRouteHandler = withPvpErrorBoundary(createMessagesSummaryHandler());
+export const appRouteHandler = withApiErrorBoundary(createMessagesSummaryHandler());
 export default appRouteHandler;

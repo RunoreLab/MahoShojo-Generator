@@ -2,7 +2,7 @@ import {
   getBattleReportGenerationAccessByUserId,
   type BattleReportGenerationParticipantRole,
 } from '@/lib/database/battle-report-generations';
-import { isUserInPvpMatch } from '@/lib/database/pvp';
+import { isUserInPvpMatch } from '@/lib/database/legacy-pvp-access';
 
 export type BattleReportAccessScope = 'owner' | 'arena-participant' | 'pvp-participant';
 

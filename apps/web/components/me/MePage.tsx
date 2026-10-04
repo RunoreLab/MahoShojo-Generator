@@ -12,20 +12,18 @@ import { BattleReportsPanel } from '@/components/me/BattleReportsPanel';
 import { AccountSecurityPanel } from '@/components/me/AccountSecurityPanel';
 import { AuthMigrationPanel } from '@/components/me/AuthMigrationPanel';
 import { MeTabs } from '@/components/me/MeTabs';
-import { PvpMatchDetailsModal } from '@/components/me/PvpMatchDetailsModal';
-import { PvpMatchesPanel } from '@/components/me/PvpMatchesPanel';
 import { ProfileHeader } from '@/components/me/ProfileHeader';
 import { ProfileCardModal } from '@/components/me/ProfileCardModal';
 import { ProfileSettingsPanel } from '@/components/me/ProfileSettingsPanel';
 import { useGenerationApiIntentLatch } from '@/lib/use-generation-api-intent-latch';
 import { useAuth } from '@/lib/useAuth';
 
-type MeTab = 'reports' | 'pvp' | 'settings';
+type MeTab = 'reports' | 'settings';
 
 const parseMeTabFromSearch = (search: string): MeTab | null => {
   const params = new URLSearchParams(search);
   const tab = params.get('tab');
-  if (tab === 'reports' || tab === 'pvp' || tab === 'settings') return tab;
+  if (tab === 'reports' || tab === 'settings') return tab;
   if (params.get('token')) return 'settings';
   return null;
 };
@@ -37,9 +35,6 @@ export function MePage() {
 
   const [activeReportId, setActiveReportId] = useState<string | null>(null);
   const [showReportDetails, setShowReportDetails] = useState(false);
-
-  const [activeMatchId, setActiveMatchId] = useState<string | null>(null);
-  const [showMatchDetails, setShowMatchDetails] = useState(false);
 
   const [generated, setGenerated] = useState<{
     report: NewsReport;
@@ -84,7 +79,7 @@ export function MePage() {
 
   const retentionNotice = (
     <div className="rounded-xl border border-yellow-200 bg-yellow-50 px-4 py-3 text-sm text-yellow-900">
-      提示：受资源限制，战报记录与 PVP 记录 <span className="font-semibold">随时可能被清理</span>，不保证长期保存。建议你及时保存战报卡片图片/Markdown 作为留档。
+      提示：受资源限制，战报记录 <span className="font-semibold">随时可能被清理</span>，不保证长期保存。建议你及时保存战报卡片图片/Markdown 作为留档。
     </div>
   );
 
@@ -96,9 +91,6 @@ export function MePage() {
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h1 className="text-xl font-bold">个人页</h1>
               <div className="flex items-center gap-3">
-                <Link href="/pvp" className="text-sm text-blue-600 hover:underline">
-                  PVP 大厅
-                </Link>
                 <Link href="/" className="text-sm text-blue-600 hover:underline">
                   返回首页
                 </Link>
@@ -141,17 +133,6 @@ export function MePage() {
               />
             ) : null}
 
-            {tab === 'pvp' ? (
-              <PvpMatchesPanel
-                isAuthenticated={Boolean(isAuthenticated)}
-                myUserId={user?.id ?? null}
-                onOpenMatchDetails={(matchId) => {
-                  setActiveMatchId(matchId);
-                  setShowMatchDetails(true);
-                }}
-              />
-            ) : null}
-
             {tab === 'settings' ? (
               <div className="mt-4">
                 <AuthMigrationPanel userId={user?.id ?? null} />
@@ -172,19 +153,6 @@ export function MePage() {
         onRegenerate={(generationId) => regenerateMutation.mutate(generationId)}
         isRegenerating={regenerateMutation.isPending}
         regenerateError={regenerateMutation.error ? (regenerateMutation.error as Error).message : null}
-      />
-
-      <PvpMatchDetailsModal
-        isOpen={showMatchDetails}
-        matchId={activeMatchId}
-        myUserId={user?.id ?? null}
-        onClose={() => setShowMatchDetails(false)}
-        onOpenBattleReport={(generationId) => {
-          setShowMatchDetails(false);
-          setActiveMatchId(null);
-          setActiveReportId(generationId);
-          setShowReportDetails(true);
-        }}
       />
 
       <BattleReportCardModal

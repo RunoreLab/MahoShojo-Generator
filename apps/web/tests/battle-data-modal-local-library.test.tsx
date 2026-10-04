@@ -197,7 +197,7 @@ it('选择本地库卡片直接产出 payload，不经过线上单卡接口', as
   const payload = onSelectCard.mock.calls[0][0];
   expect(payload).toMatchObject({ _cardName: '本机焰', name: '焰', _storageLocation: 'local' });
   // 本地库记录没有服务器身份：给出本地 id 会让它在下游被当成 online content reference
-  // 发布进 Arena 房间共享配置与 PVP 提交（ADR-local-library-data-ownership §2）。
+  // 发布进 Arena 房间共享配置（ADR-local-library-data-ownership §2）。
   expect(payload._cardId).toBe('');
   expect(mapDataCardRuntimeSourceInfo(payload).sourceDataCardId).toBeUndefined();
   expect(mapDataCardRuntimeSourceInfo(payload).sourceIsLocalLibrary).toBe(true);

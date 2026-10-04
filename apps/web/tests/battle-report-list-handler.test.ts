@@ -18,11 +18,6 @@ vi.mock('@/lib/database/data-cards', () => ({
   getUserProfileCardDataStats: async () => ({}),
   getUserTopDataCardsByEngagement: async () => [],
 }));
-vi.mock('@/lib/database/pvp', () => ({
-  getPvpUserSummariesByUserIds: async () => [],
-  getPvpMatchesByUserId: async () => ({ matches: [], players: [] }),
-  getPvpMatchRoundOutcomeSummariesByMatchIds: async () => [],
-}));
 vi.mock('@/lib/db/drizzle', () => ({ getDrizzleDbFromRuntime: () => null }));
 vi.mock('@/lib/arena/battle-report-display-title', () => ({
   resolveBattleReportDisplayTitle: ({ headline }: { headline: string | null }) => headline || '无标题',
@@ -30,13 +25,13 @@ vi.mock('@/lib/arena/battle-report-display-title', () => ({
 vi.mock('@/lib/arena/battle-report-record-utils', () => ({
   extractBattleReportGenerationErrorMessage: () => null,
 }));
-vi.mock('@/lib/pvp/server', () => ({
+vi.mock('@/lib/api/server', () => ({
   json: (body: unknown, init?: ResponseInit) => new Response(JSON.stringify(body), {
     ...init,
     headers: { 'Content-Type': 'application/json; charset=utf-8' },
   }),
   requireAuthUser: async () => ({ user: { id: 42, username: 'member' }, source: 'better-auth-session' }),
-  withPvpErrorBoundary: (handler: (req: Request) => Promise<Response>) => handler,
+  withApiErrorBoundary: (handler: (req: Request) => Promise<Response>) => handler,
 }));
 
 import { appRouteHandler } from '@/app/api/me/battle-reports/handler';
@@ -79,6 +74,7 @@ describe('battle report list and profile card handlers', () => {
     const payload = await response.json() as any;
 
     expect(response.status).toBe(200);
+    if (route === 'profile-card') expect(payload).not.toHaveProperty('pvp');
     expect(payload[recordsKey]).toMatchObject([
       { id: 'member-generation', sourceKind: 'arena-multiplayer', arenaParticipantRole: 'member' },
       { id: 'legacy-generation', sourceKind: 'arena-multiplayer', arenaParticipantRole: null },

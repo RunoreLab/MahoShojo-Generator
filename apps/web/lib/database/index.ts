@@ -7,4 +7,3 @@ export * from './deck-cards';
 export * from './deck-favorites';
 export * from './battle-report-generations';
 export * from './battle-report-generation-combatants';
-export * from './pvp';

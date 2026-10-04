@@ -4,12 +4,6 @@ import {
   countBattleReportGenerationsByUserIdSince,
 } from '@/lib/database/battle-report-generations';
 import {
-  getPvpMatchRoundOutcomeSummariesByMatchIds,
-  getPvpMatchesByUserId,
-  getPvpUserSummariesByUserIds,
-  type PvpMatchRoundOutcomeSummary,
-} from '@/lib/database/pvp';
-import {
   getUserBadges,
 } from '@/lib/database/badges';
 import {
@@ -31,8 +25,7 @@ import {
   queryArenaPublicQueenEntityByQueue,
   type TopRatedCharacterCardRow,
 } from '@/lib/db/repositories/data-card-meta';
-import { json, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
-import { buildDefaultPvpUserSummary, mapPvpMatchPlayerRow, mapPvpMatchRow, mapPvpUserSummaryRow } from '@/lib/pvp/read-mappers';
+import { json, requireAuthUser, withApiErrorBoundary } from '@/lib/api/server';
 import type { UserBadge } from '@/types/badge';
 
 type CardLite = {
@@ -105,17 +98,6 @@ type TopRatedCharacterHighlight = CardLite & {
   };
 };
 
-type PvpMatchLite = {
-  id: string;
-  roomId: string | null;
-  status: string;
-  startedAt: string;
-  endedAt: string | null;
-  winnerUserId: number | null;
-  players: Array<{ userId: number; seat: number; username: string | null; prefix: string | null }>;
-  roundSummary: { total: number; wins: number; losses: number; draws: number } | null;
-};
-
 type BattleReportLite = {
   id: string;
   startedAt: string;
@@ -137,12 +119,6 @@ type BattleReportLite = {
 
 const ARENA_TIER_WHITELIST = new Set(['无牌', '白牌', '字牌', '花牌', '权杖', '女王']);
 
-function clampInt(value: unknown): number | null {
-  const n = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN;
-  if (!Number.isFinite(n)) return null;
-  return Math.max(0, Math.floor(n));
-}
-
 function buildBadgeLists(allBadges: UserBadge[]) {
   const equipped = allBadges
     .filter((b) => Boolean(b?.isEquipped))
@@ -162,15 +138,6 @@ function buildBadgeLists(allBadges: UserBadge[]) {
     .slice(0, 5);
 
   return { equipped, recent };
-}
-
-function normalizeRoundSummary(row: PvpMatchRoundOutcomeSummary): { total: number; wins: number; losses: number; draws: number } {
-  const record = row as unknown as Record<string, unknown>;
-  const total = clampInt(record.total_rounds) ?? 0;
-  const wins = clampInt(record.wins) ?? 0;
-  const losses = clampInt(record.losses) ?? 0;
-  const draws = clampInt(record.draws) ?? 0;
-  return { total, wins, losses, draws };
 }
 
 function buildSeasonExtreme(
@@ -216,7 +183,7 @@ export function buildTopRatedStrictRating(
   };
 }
 
-const handler = withPvpErrorBoundary(async function handler(req: Request): Promise<Response> {
+const handler = withApiErrorBoundary(async function handler(req: Request): Promise<Response> {
   if (req.method !== 'GET') return json({ error: 'Method not allowed' }, { status: 405 });
 
   const auth = await requireAuthUser(req);
@@ -230,8 +197,6 @@ const handler = withPvpErrorBoundary(async function handler(req: Request): Promi
     allBadges,
     topCharacters,
     topScenarios,
-    pvpSummaries,
-    pvp,
     recentReports,
     dataCardStats,
     battleReports7d,
@@ -242,8 +207,6 @@ const handler = withPvpErrorBoundary(async function handler(req: Request): Promi
       getUserBadges(auth.user.id),
       getUserTopDataCardsByEngagement(auth.user.id, 'character', 6),
       getUserTopDataCardsByEngagement(auth.user.id, 'scenario', 1),
-      getPvpUserSummariesByUserIds([auth.user.id]),
-      getPvpMatchesByUserId(auth.user.id, 3, 0),
       getBattleReportGenerationsByUserIdLite(auth.user.id, 3, 0),
       getUserProfileCardDataStats(auth.user.id),
       countBattleReportGenerationsByUserIdSince(auth.user.id, sinceIso),
@@ -253,23 +216,6 @@ const handler = withPvpErrorBoundary(async function handler(req: Request): Promi
   if (!userRow) return json({ error: '用户不存在' }, { status: 404 });
 
   const badgeLists = buildBadgeLists(allBadges);
-
-  const summary = (() => {
-    for (const row of pvpSummaries) {
-      const mapped = mapPvpUserSummaryRow(row, auth.user.id);
-      if (mapped.userId === auth.user.id) return mapped;
-    }
-    return buildDefaultPvpUserSummary(auth.user.id);
-  })();
-
-  const playersByMatchId = new Map<string, ReturnType<typeof mapPvpMatchPlayerRow>[]>();
-  for (const row of pvp.players) {
-    const mapped = mapPvpMatchPlayerRow(row);
-    if (!mapped.matchId) continue;
-    const list = playersByMatchId.get(mapped.matchId) ?? [];
-    list.push(mapped);
-    playersByMatchId.set(mapped.matchId, list);
-  }
 
   const normalizeTopRatedRow = (row: TopRatedCharacterCardRow): UserTopDataCardRow => ({
     id: row.id,
@@ -461,28 +407,6 @@ const handler = withPvpErrorBoundary(async function handler(req: Request): Promi
     arenaParticipantRole: r.arena_participant_generation_id ? (r.arena_participant_role ?? null) : null,
   }));
 
-  const matchIds = pvp.matches.map((m) => m.id);
-  const roundRows = await getPvpMatchRoundOutcomeSummariesByMatchIds(matchIds, auth.user.id);
-  const roundSummaryByMatchId = new Map<string, { total: number; wins: number; losses: number; draws: number }>();
-  for (const row of roundRows) {
-    if (!row?.match_id) continue;
-    roundSummaryByMatchId.set(row.match_id, normalizeRoundSummary(row));
-  }
-
-  const recentMatches: PvpMatchLite[] = pvp.matches.map((m) => {
-    const mappedMatch = mapPvpMatchRow(m);
-    return {
-      ...mappedMatch,
-      players: (playersByMatchId.get(mappedMatch.id) ?? []).map((p) => ({
-        userId: p.userId,
-        seat: p.seat,
-        username: p.username,
-        prefix: p.prefix,
-      })),
-      roundSummary: roundSummaryByMatchId.get(mappedMatch.id) ?? null,
-    };
-  });
-
   return json(
     {
       success: true,
@@ -508,10 +432,6 @@ const handler = withPvpErrorBoundary(async function handler(req: Request): Promi
         dataCards: dataCardStats,
         battleReports7d,
         battleReportsAll: { total: battleReportsAllTotal },
-      },
-      pvp: {
-        summary,
-        recentMatches,
       },
       recentBattleReports: reports,
     },

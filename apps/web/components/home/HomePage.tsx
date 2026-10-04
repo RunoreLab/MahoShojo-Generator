@@ -80,7 +80,7 @@ export function HomePage() {
                       }}
                       className="text-sm text-blue-600 hover:underline"
                     >
-                      个人页：战报记录 / PVP 战绩（测试版）
+                      个人页：战报记录（测试版）
                     </a>
                   </div>
                 )}

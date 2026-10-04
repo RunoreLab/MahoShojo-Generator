@@ -111,17 +111,6 @@ function buildPayload(): MeProfileCardPayload {
         total: 0,
       },
     },
-    pvp: {
-      summary: {
-        completedMatches: 0,
-        wins: 0,
-        losses: 0,
-        draws: 0,
-        abortedMatches: 0,
-        lastPlayedAt: null,
-      },
-      recentMatches: [],
-    },
     recentBattleReports: [],
   };
 

@@ -46,8 +46,8 @@ export type DataCardSourceMeta = {
 export type DataCardRuntimeSourceInfo = {
   /**
    * 仅线上数据卡有服务器身份。本地库记录 MUST NOT 产出该字段：
-   * 一旦产出，它会被当作 online content reference 发布进 Arena 房间共享配置或
-   * PVP 提交（`arena-room/shared-config.ts` / `pvp`），把 device-owned 数据
+   * 一旦产出，它会被当作 online content reference 发布进 Arena 房间共享配置
+   * （`arena-room/shared-config.ts`），把 device-owned 数据
    * 冒充成 server-authoritative 实体。参见 ADR-local-library-data-ownership §2。
    */
   sourceDataCardId?: string;

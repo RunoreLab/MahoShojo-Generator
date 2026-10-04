@@ -63,7 +63,7 @@ describe('character domain App Router pages', () => {
 
     expect(metadata).toMatchObject({
       title: '个人页 - MahoShojo Generator',
-      description: '查看战报记录、PVP 战绩与个人设置',
+      description: '查看战报记录与个人设置',
     });
     expect(html).toContain('data-page="me"');
   });

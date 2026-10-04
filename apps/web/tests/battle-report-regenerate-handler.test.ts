@@ -19,7 +19,7 @@ vi.mock('@/lib/database/battle-report-generations', () => ({
 vi.mock('@/lib/database/large-objects', () => ({ getLargeObjectByOwnerRef: mocks.getLargeObjectByOwnerRef }));
 vi.mock('@/lib/r2', () => ({ getObjectText: mocks.getObjectText }));
 
-vi.mock('@/lib/database/pvp', () => ({
+vi.mock('@/lib/database/legacy-pvp-access', () => ({
   isUserInPvpMatch: mocks.isUserInPvpMatch,
 }));
 
@@ -27,7 +27,7 @@ vi.mock('@/lib/sensitive-word-filter', () => ({
   quickCheck: mocks.quickCheck,
 }));
 
-vi.mock('@/lib/pvp/server', () => ({
+vi.mock('@/lib/api/server', () => ({
   json: (body: unknown, init?: ResponseInit) => new Response(JSON.stringify(body), {
     ...init,
     headers: { 'Content-Type': 'application/json; charset=utf-8' },
