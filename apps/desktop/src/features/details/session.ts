@@ -7,6 +7,7 @@ import { DetailsGenerationError, executeDetailsGeneration, type DetailsGeneratio
 
 export const DETAILS_DRAFT_KEY = 'mahoshojo.desktop.details.draft.v1';
 const MAX_DRAFT_CHARACTERS = 4 * 1024 * 1024;
+const STREAM_DRAFT_SAVE_INTERVAL_MS = 1000;
 export interface DetailsDraftStorage {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
@@ -67,6 +68,7 @@ export class DetailsSession {
   private disposed = false;
   private controller: AbortController | null = null;
   private mode: Mode = 'direct-local';
+  private draftSaveTimer: ReturnType<typeof setTimeout> | null = null;
   constructor(private readonly dependencies: {
     storage: DetailsDraftStorage;
     repository: CardRepository;
@@ -86,6 +88,7 @@ export class DetailsSession {
   }
   getSnapshot = (): DetailsSessionState => this.state;
   isBusy = (): boolean => this.controller !== null || this.state.saving;
+  hasUnsavedResult = (): boolean => this.state.card !== null && this.state.saveStatus !== 'saved' && this.state.saveStatus !== 'already-present';
   /** Corrupt or future-version storage is preserved until the user explicitly clears it. */
   isDraftBlocked = (): boolean => this.blocked;
   subscribe = (listener: () => void): (() => void) => { this.listeners.add(listener); return () => this.listeners.delete(listener); };
@@ -116,6 +119,8 @@ export class DetailsSession {
     } catch { this.publish({ draftError: '清除草稿失败，原草稿保护仍生效。', draftSaved: false }); }
   }
   retryDraftSave(): void {
+    if (this.draftSaveTimer !== null) clearTimeout(this.draftSaveTimer);
+    this.draftSaveTimer = null;
     if (this.disposed || this.blocked || this.state.pendingRestore) return;
     const { draft, card, rawText, phase } = this.state;
     const stored: StoredDraft = { version: 1, ...draft, output: { mode: this.mode, card, rawText, phase: phase === 'generating' ? 'cancelled' : phase } };
@@ -126,8 +131,14 @@ export class DetailsSession {
       this.publish({ draftSaved: true, draftError: null });
     } catch { this.publish({ draftSaved: false, draftError: '草稿写入失败，当前内容仅保留在此页面。请重试保存草稿。' }); }
   }
-  async generate(options: DesktopAiExecutionOptions, input: MagicalGirlDetailsGenerationInput, intent: Omit<DetailsGenerationIntent, 'requestId'>): Promise<void> {
+  private scheduleDraftSave(): void {
+    // 固定窗口合并，不随 delta 重置计时，持续输出也会定期落盘。
+    if (this.draftSaveTimer !== null) return;
+    this.draftSaveTimer = setTimeout(() => this.retryDraftSave(), STREAM_DRAFT_SAVE_INTERVAL_MS);
+  }
+  async generate(options: DesktopAiExecutionOptions, input: MagicalGirlDetailsGenerationInput, intent: Omit<DetailsGenerationIntent, 'requestId'>, discardUnsavedResult = false): Promise<void> {
     if (this.disposed || this.controller || this.state.saving || this.blocked || this.state.pendingRestore) return;
+    if (this.hasUnsavedResult() && !discardUnsavedResult) return;
     const controller = new AbortController();
     this.controller = controller;
     this.mode = intent.mode;
@@ -137,7 +148,7 @@ export class DetailsSession {
       const outcome = await (this.dependencies.execute ?? executeDetailsGeneration)(options, clone(input), { ...intent, requestId: (this.dependencies.requestId ?? (() => crypto.randomUUID()))() }, controller.signal, (text: string) => {
         if (this.disposed || controller.signal.aborted) return;
         this.publish({ rawText: text, draftSaved: false });
-        this.retryDraftSave();
+        this.scheduleDraftSave();
       });
       if (this.disposed) return;
       if (outcome.status === 'completed' && !controller.signal.aborted) {
@@ -152,27 +163,31 @@ export class DetailsSession {
       if (!this.disposed) this.retryDraftSave();
     }
   }
-  cancel(): void { this.controller?.abort(); }
+  cancel(): void {
+    this.controller?.abort();
+    if (!this.state.draftSaved) this.retryDraftSave();
+  }
   clearOutput(): void {
     if (this.disposed || this.isBusy() || this.blocked || this.state.pendingRestore) return;
     this.publish({ phase: 'idle', rawText: '', card: null, message: null, saveStatus: 'idle', saveError: null, draftSaved: false });
     this.retryDraftSave();
   }
-  async saveResult(): Promise<void> {
-    if (this.disposed || this.state.saving || this.controller || this.state.phase !== 'completed' || !this.state.card) return;
+  async saveResult(): Promise<boolean> {
+    if (this.disposed || this.state.saving || this.controller || this.state.phase !== 'completed' || !this.state.card) return false;
     const card = clone(this.state.card);
     const mode = this.mode;
     this.publish({ saving: true, saveError: null });
     try {
       const data = validateCard(card);
       const digest = await digestLocalCardPayloadV1(data);
-      if (this.disposed) return;
+      if (this.disposed) return false;
       const now = new Date().toISOString();
       const record = LocalCardRecordV1Schema.parse({ id: deriveLocalDataCardIdV1(digest), schemaVersion: 1, storageLocation: 'local', cardType: 'character', title: data.codename.trim() || '未命名魔法少女', data, contentDigest: digest, provenance: { kind: 'unsigned', execution: mode }, createdAt: now, updatedAt: now });
       const result = await this.dependencies.repository.putIfAbsent(record);
       this.publish({ saveStatus: 'written' in result ? 'saved' : 'already-present' });
-    } catch { this.publish({ saveStatus: 'failed', saveError: '保存到本地卡库失败，生成结果仍保留。可以重试保存，无需重新生成。' }); }
+      return !this.disposed;
+    } catch { this.publish({ saveStatus: 'failed', saveError: '保存到本地卡库失败，生成结果仍保留。可以重试保存，无需重新生成。' }); return false; }
     finally { this.publish({ saving: false }); }
   }
-  dispose(): void { if (this.controller) this.retryDraftSave(); this.disposed = true; this.controller?.abort(); this.listeners.clear(); }
+  dispose(): void { if (!this.state.draftSaved) this.retryDraftSave(); this.disposed = true; this.controller?.abort(); this.listeners.clear(); }
 }

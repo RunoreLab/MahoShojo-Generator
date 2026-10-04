@@ -10,7 +10,10 @@ export const useArchiveLeaveGuard = (
   isBusy: () => boolean,
   busyMessage = DEFAULT_BUSY_MESSAGE,
   initializationFailureMessage = '窗口关闭保护初始化失败，本地库维护操作暂不可用。请重新打开页面后重试。',
+  confirmLeave?: () => boolean,
 ) => {
+  const confirmLeaveRef = useRef(confirmLeave);
+  confirmLeaveRef.current = confirmLeave;
   const busyRef = useRef(isBusy);
   busyRef.current = isBusy;
   const messageRef = useRef(busyMessage);
@@ -21,6 +24,7 @@ export const useArchiveLeaveGuard = (
   useBlocker({
     shouldBlockFn: () => {
       if (!busyRef.current()) return false;
+      if (confirmLeaveRef.current?.()) return false;
       setMessage(messageRef.current);
       return true;
     },
@@ -50,6 +54,7 @@ export const useArchiveLeaveGuard = (
         return;
       }
       if (!busyRef.current()) return;
+      if (confirmLeaveRef.current?.()) return;
       event.preventDefault();
       setMessage(messageRef.current);
     }).then((release) => {

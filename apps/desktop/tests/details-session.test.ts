@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildUnsignedMagicalGirlDetailsCard } from '@mahoshojo/ai-core/magical-girl-details-generation';
 import type { CardRepository } from '@mahoshojo/local-library/repository';
 import { DetailsGenerationError, type DetailsGenerationOutcome, type executeDetailsGeneration } from '../src/features/details/generation';
@@ -25,6 +25,7 @@ const harness = (initial: string | null = null, execute?: typeof executeDetailsG
   const session = new DetailsSession({ storage, repository, initialDraft: draft, execute: execute ?? vi.fn(async () => completed), requestId: () => `request-${++id}` });
   return { session, storage, repository, raw: () => raw };
 };
+afterEach(() => vi.useRealTimers());
 
 describe('Details session intent ownership', () => {
   it('locks synchronously against double clicks; cancellation retains partial and retry gets new identity', async () => {
@@ -80,6 +81,45 @@ describe('Details session intent ownership', () => {
 });
 
 describe('Details draft protection and restoration', () => {
+  it('coalesces streaming writes on a fixed interval and flushes the latest terminal output', async () => {
+    vi.useFakeTimers();
+    let partial!: (text: string) => void;
+    let finish!: (result: DetailsGenerationOutcome) => void;
+    const { session, storage, raw } = harness(null, (_o, _i, _t, _s, onPartial) => {
+      partial = onPartial!;
+      return new Promise((resolve) => { finish = resolve; });
+    });
+    const pending = session.generate(options, input, intent);
+    for (let i = 1; i <= 24; i++) { partial(`正文${i}`); await vi.advanceTimersByTimeAsync(40); }
+    expect(storage.setItem).toHaveBeenCalledTimes(1);
+    expect(session.getSnapshot().draftSaved).toBe(false);
+    await vi.advanceTimersByTimeAsync(40);
+    expect(storage.setItem).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(raw()!).output.rawText).toBe('正文24');
+    partial('最终前的正文');
+    finish(completed); await pending;
+    expect(JSON.parse(raw()!).output).toMatchObject({ phase: 'completed', card });
+    const writes = vi.mocked(storage.setItem).mock.calls.length;
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(storage.setItem).toHaveBeenCalledTimes(writes);
+  });
+  it('flushes on cancellation and reports a failed scheduled save without dropping live output', async () => {
+    vi.useFakeTimers();
+    let partial!: (text: string) => void;
+    let finish!: (result: DetailsGenerationOutcome) => void;
+    const { session, storage, raw } = harness(null, (_o, _i, _t, _s, onPartial) => {
+      partial = onPartial!; return new Promise((resolve) => { finish = resolve; });
+    });
+    const pending = session.generate(options, input, intent);
+    vi.mocked(storage.setItem).mockImplementationOnce(() => { throw new Error('quota'); });
+    partial('未落盘'); await vi.advanceTimersByTimeAsync(1000);
+    expect(session.getSnapshot()).toMatchObject({ rawText: '未落盘', draftSaved: false });
+    expect(session.getSnapshot().draftError).toBeTruthy();
+    partial('取消时最新正文'); session.cancel();
+    expect(JSON.parse(raw()!).output).toMatchObject({ phase: 'cancelled', rawText: '取消时最新正文' });
+    finish({ status: 'cancelled', contractVersion: 1, requestId: 'r', mode: 'direct-local', rawText: '取消时最新正文', reason: 'aborted' });
+    await pending;
+  });
   it('requires explicit restoration, never writes over pending data or auto-generates', () => {
     const raw = JSON.stringify({ version: 1, ...draft });
     const { session, storage } = harness(raw);
@@ -138,6 +178,23 @@ describe('Details draft protection and restoration', () => {
 });
 
 describe('Details local card save', () => {
+  it('refuses to replace an unsaved successful result without explicit discard, including after save failure', async () => {
+    const execute = vi.fn<typeof executeDetailsGeneration>(async () => completed);
+    const { session, repository } = harness(null, execute);
+    await session.generate(options, input, intent);
+    await session.generate(options, input, intent);
+    expect(execute).toHaveBeenCalledTimes(1);
+    vi.mocked(repository.putIfAbsent).mockRejectedValueOnce(new Error('disk'));
+    expect(await session.saveResult()).toBe(false);
+    await session.generate(options, input, intent);
+    expect(session.getSnapshot().card).toEqual(card);
+    expect(execute).toHaveBeenCalledTimes(1);
+    await session.generate(options, input, intent, true);
+    expect(execute).toHaveBeenCalledTimes(2);
+    expect(await session.saveResult()).toBe(true);
+    await session.generate(options, input, intent);
+    expect(execute).toHaveBeenCalledTimes(3);
+  });
   it('owns an in-flight save synchronously and prevents generate from replacing its result', async () => {
     let finish!: (result: { written: true }) => void;
     const execute = vi.fn<typeof executeDetailsGeneration>(async () => completed);

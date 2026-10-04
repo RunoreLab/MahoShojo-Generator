@@ -41,6 +41,9 @@ beforeEach(() => {
   mocks.listen.mockImplementation(async (handler) => { close = handler; return vi.fn(); });
   vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => questionnaire })));
   vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
+  vi.spyOn(window, 'confirm').mockReturnValue(false);
+  HTMLDialogElement.prototype.showModal = function () { this.open = true; };
+  HTMLDialogElement.prototype.close = function () { this.open = false; };
   window.location.hash = '#/details';
   container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
 });
@@ -52,6 +55,58 @@ const mount = async () => {
 };
 
 describe('Desktop Details real route and session UI (native adapter mock)', () => {
+  it('confirms replacement, keeps the old result on cancel/save failure, and saves before regenerating', async () => {
+    window.localStorage.setItem(DETAILS_DRAFT_KEY, JSON.stringify(draft()));
+    await mount(); await click('恢复草稿'); await click('发送问卷并生成');
+    await click('重新生成');
+    expect(container.querySelector('dialog')?.open).toBe(true);
+    expect(mocks.execute).toHaveBeenCalledTimes(1);
+    await click('取消');
+    expect(container.querySelector('dialog')?.open).toBe(false);
+    expect(container.textContent).toContain('百合 · 未签名');
+    await click('重新生成');
+    mocks.save.mockRejectedValueOnce(new Error('disk'));
+    await click('保存后重新生成');
+    expect(container.querySelector('dialog')?.open).toBe(true);
+    expect(mocks.execute).toHaveBeenCalledTimes(1);
+    expect(container.textContent).toContain('生成结果仍保留');
+    await click('保存后重新生成');
+    expect(mocks.save).toHaveBeenCalledTimes(2);
+    expect(mocks.execute).toHaveBeenCalledTimes(2);
+    expect(container.querySelector('dialog')?.open).toBe(false);
+    await click('重新生成'); await click('确定重新生成');
+    expect(mocks.execute).toHaveBeenCalledTimes(3);
+    expect(mocks.save).toHaveBeenCalledTimes(2);
+  });
+  it.each(['route', 'native'] as const)('cancels and flushes after confirming %s leave', async (kind) => {
+    window.localStorage.setItem(DETAILS_DRAFT_KEY, JSON.stringify(draft()));
+    let finish!: (outcome: DetailsGenerationOutcome) => void;
+    mocks.execute.mockImplementation((_o, _i, _t, _s, partial) => { partial('离开前正文'); return new Promise((resolve) => { finish = resolve; }); });
+    const router = await mount(); await click('恢复草稿'); await click('发送问卷并生成');
+    vi.mocked(window.confirm).mockReturnValue(true);
+    const preventDefault = vi.fn();
+    await act(async () => { if (kind === 'route') await router.navigate({ to: '/' }); else close({ preventDefault }); });
+    expect(window.confirm).toHaveBeenCalledOnce();
+    expect(mocks.execute.mock.calls[0]![3].aborted).toBe(true);
+    expect(JSON.parse(window.localStorage.getItem(DETAILS_DRAFT_KEY)!).output).toMatchObject({ phase: 'cancelled', rawText: '离开前正文' });
+    if (kind === 'route') expect(router.state.location.pathname).toBe('/');
+    else expect(preventDefault).not.toHaveBeenCalled();
+    await act(async () => finish({ status: 'cancelled', contractVersion: 1, requestId: 'r', mode: 'direct-local', rawText: '离开前正文', reason: 'aborted' }));
+  });
+  it('does not abort on a browser unload prompt, and flushes only when pagehide actually occurs', async () => {
+    window.localStorage.setItem(DETAILS_DRAFT_KEY, JSON.stringify(draft()));
+    let finish!: (outcome: DetailsGenerationOutcome) => void;
+    mocks.execute.mockImplementation((_o, _i, _t, _s, partial) => { partial('刷新前正文'); return new Promise((resolve) => { finish = resolve; }); });
+    await mount(); await click('恢复草稿'); await click('发送问卷并生成');
+    const unload = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(unload);
+    expect(unload.defaultPrevented).toBe(true);
+    expect(mocks.execute.mock.calls[0]![3].aborted).toBe(false);
+    await act(async () => window.dispatchEvent(new Event('pagehide')));
+    expect(mocks.execute.mock.calls[0]![3].aborted).toBe(true);
+    expect(JSON.parse(window.localStorage.getItem(DETAILS_DRAFT_KEY)!).output.rawText).toBe('刷新前正文');
+    await act(async () => finish({ status: 'cancelled', contractVersion: 1, requestId: 'r', mode: 'direct-local', rawText: '刷新前正文', reason: 'aborted' }));
+  });
   it('restores only on explicit action then generates Direct once and saves the shared result', async () => {
     window.localStorage.setItem(DETAILS_DRAFT_KEY, JSON.stringify(draft()));
     await mount();
@@ -74,7 +129,8 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
   it('synchronous generation locks route/refresh/native close, cancel keeps partial, then leaving is allowed', async () => {
     window.localStorage.setItem(DETAILS_DRAFT_KEY, JSON.stringify(draft()));
     let finish!: (outcome: DetailsGenerationOutcome) => void;
-    mocks.execute.mockImplementation((_options, _input, _intent, _signal, partial) => { partial('部分正文'); return new Promise((resolve) => { finish = resolve; }); });
+    let emitPartial!: (text: string) => void;
+    mocks.execute.mockImplementation((_options, _input, _intent, _signal, partial) => { emitPartial = partial; partial('部分正文'); return new Promise((resolve) => { finish = resolve; }); });
     const router = await mount(); await click('恢复草稿');
     const preventDefault = vi.fn();
     await act(async () => {
@@ -84,14 +140,22 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
     await settle();
     expect(mocks.execute).toHaveBeenCalledTimes(1);
     expect(preventDefault).toHaveBeenCalledOnce();
+    expect(window.confirm).toHaveBeenCalledTimes(2);
     expect(router.state.location.pathname).toBe('/details');
+    expect(mocks.execute.mock.calls[0]![3].aborted).toBe(false);
+    await act(async () => emitPartial('拒绝离开后继续收到正文'));
+    expect(container.querySelector('pre')?.textContent).toBe('拒绝离开后继续收到正文');
     const unload = new Event('beforeunload', { cancelable: true });
     window.dispatchEvent(unload); expect(unload.defaultPrevented).toBe(true);
+    expect(mocks.execute.mock.calls[0]![3].aborted).toBe(false);
+    expect(router.state.location.pathname).toBe('/details');
+    await act(async () => emitPartial('取消刷新后仍继续收到正文'));
+    expect(container.querySelector('pre')?.textContent).toBe('取消刷新后仍继续收到正文');
     await click('取消生成');
     expect(mocks.execute.mock.calls[0]![3].aborted).toBe(true);
-    await act(async () => finish({ status: 'cancelled', contractVersion: 1, requestId: 'r', mode: 'direct-local', rawText: '部分正文', reason: 'aborted' }));
+    await act(async () => finish({ status: 'cancelled', contractVersion: 1, requestId: 'r', mode: 'direct-local', rawText: '取消刷新后仍继续收到正文', reason: 'aborted' }));
     await settle();
-    expect(container.querySelector('pre')?.textContent).toBe('部分正文');
+    expect(container.querySelector('pre')?.textContent).toBe('取消刷新后仍继续收到正文');
     await act(async () => { void router.navigate({ to: '/' }); }); await settle();
     expect(router.state.location.pathname).toBe('/');
     expect(container.querySelector('a[href="#/details"]')).toBeTruthy();
@@ -120,7 +184,7 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
     expect(container.textContent).toContain('https://model.example/v1');
     expect(container.querySelector('pre')?.textContent).toBe('上次中断');
     expect(mocks.execute).not.toHaveBeenCalled();
-    await click('重新发送问卷并生成');
+    await click('重新生成');
     mocks.save.mockRejectedValueOnce(new Error('busy'));
     await click('保存到本地卡库');
     expect(container.textContent).toContain('生成结果仍保留');

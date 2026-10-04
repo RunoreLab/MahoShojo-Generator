@@ -1,4 +1,4 @@
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Link } from '@tanstack/react-router';
 import { isLoopbackHost, type DirectProviderProfileV1 } from '@mahoshojo/contracts/provider-profile';
@@ -27,10 +27,24 @@ function DetailsForm({ session }: { session: DetailsSession }) {
   const [questionIndex, setQuestionIndex] = useState(0);
   const [actionError, setActionError] = useState<string | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
+  const [confirmRegenerate, setConfirmRegenerate] = useState(false);
+  const regenerateDialog = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const dialog = regenerateDialog.current;
+    if (confirmRegenerate && !dialog?.open) dialog?.showModal();
+    else if (!confirmRegenerate && dialog?.open) dialog.close();
+  }, [confirmRegenerate]);
   const guard = useArchiveLeaveGuard(
     () => session.isBusy() || (!session.getSnapshot().draftSaved && !session.getSnapshot().pendingRestore && !session.isDraftBlocked()),
     '生成或保存尚未完成，或当前草稿未能保存。请等待、取消生成，或重试保存草稿后再离开。也可以确认清除草稿以放弃当前内容。',
     '窗口关闭保护初始化失败，生成与保存暂不可用。请重新打开页面后重试。',
+    () => {
+      const current = session.getSnapshot();
+      if (current.saving || current.phase !== 'generating') return false;
+      if (!window.confirm('生成尚未完成。确认终止生成并离开？已收到的正文将保留在本机草稿中。')) return false;
+      session.cancel();
+      return session.getSnapshot().draftSaved;
+    },
   );
   useEffect(() => {
     const controller = new AbortController();
@@ -64,12 +78,13 @@ function DetailsForm({ session }: { session: DetailsSession }) {
     if (!question) return;
     session.updateDraft({ ...state.draft, answers: { ...state.draft.answers, [question.id]: value } });
   };
-  const generate = () => {
+  const generate = (discardUnsavedResult = false) => {
     if (!guard.ready || busy || !selected || selected.adapter !== 'openai-compatible' || !questionnaire || questionnaireLoading || profilesLoading || profilesError || questionnaireError || state.pendingRestore || session.isDraftBlocked()) return;
+    if (session.hasUnsavedResult() && !discardUnsavedResult) { setConfirmRegenerate(true); return; }
     try {
       const answers = buildDetailsAnswers(questionnaire, session.getSnapshot().draft.answers);
       setActionError(null);
-      void session.generate({ invoke, profileId: selected.id }, { answers, language: session.getSnapshot().draft.language, loreText: '' }, { mode, modelId: selected.modelId, flowers: getRandomFlowers() });
+      void session.generate({ invoke, profileId: selected.id }, { answers, language: session.getSnapshot().draft.language, loreText: '' }, { mode, modelId: selected.modelId, flowers: getRandomFlowers() }, discardUnsavedResult);
     } catch (error) { setActionError(error instanceof Error ? error.message : '问卷无法生成。'); }
   };
   return (
@@ -132,9 +147,19 @@ function DetailsForm({ session }: { session: DetailsSession }) {
         />}
       </fieldset>
       <div className="flex flex-wrap gap-2">
-        <button className={actionClass} disabled={!guard.ready || busy || questionnaireLoading || profilesLoading || !questionnaire || !selected || selected.adapter !== 'openai-compatible' || blockedDraft || !!questionnaireError || !!profilesError} onClick={generate}>{state.phase === 'generating' ? '正在生成…' : state.phase === 'idle' ? '发送问卷并生成' : '重新发送问卷并生成'}</button>
+        <button className={actionClass} disabled={!guard.ready || busy || questionnaireLoading || profilesLoading || !questionnaire || !selected || selected.adapter !== 'openai-compatible' || blockedDraft || !!questionnaireError || !!profilesError} onClick={() => generate()}>{state.phase === 'generating' ? '正在生成…' : state.phase === 'idle' ? '发送问卷并生成' : '重新生成'}</button>
         {state.phase === 'generating' && <button className={actionClass} onClick={() => session.cancel()}>取消生成</button>}
       </div>
+      <dialog ref={regenerateDialog} aria-labelledby="regenerate-title" aria-describedby="regenerate-description" className="m-auto max-w-lg rounded-lg border border-(--app-border) bg-(--app-surface) p-5 text-(--app-text) backdrop:bg-black/40" onCancel={(event) => { event.preventDefault(); if (!session.isBusy()) setConfirmRegenerate(false); }}>
+        <h2 id="regenerate-title" className="text-xl font-semibold">重新生成？</h2>
+        <p id="regenerate-description" className="my-3">当前结果尚未保存到本地卡库。重新生成将替换当前结果；即使新生成失败或取消，也无法恢复。可以先保存当前结果再生成。</p>
+        {state.saveError && <p role="alert">{state.saveError}</p>}
+        <div className="flex flex-wrap gap-2">
+          <button autoFocus className={actionClass} disabled={busy} onClick={() => setConfirmRegenerate(false)}>取消</button>
+          <button className={actionClass} disabled={busy} onClick={async () => { if (await session.saveResult()) { setConfirmRegenerate(false); generate(); } }}>{state.saving ? '正在保存…' : '保存后重新生成'}</button>
+          <button className={actionClass} disabled={busy} onClick={() => { setConfirmRegenerate(false); generate(true); }}>确定重新生成</button>
+        </div>
+      </dialog>
       {actionError && <p role="alert">{actionError}</p>}
       {state.message && <p role="status">{state.message}</p>}
       {state.card && <section aria-label="生成结果" className="flex flex-col gap-3">
@@ -158,7 +183,9 @@ export function DesktopDetails() {
       repository: new IpcLocalCardRepository(invoke), initialDraft: { answers: {}, language: '简体中文' },
     });
     setSession(owner);
-    return () => owner.dispose();
+    const onPageHide = () => owner.cancel();
+    window.addEventListener('pagehide', onPageHide);
+    return () => { window.removeEventListener('pagehide', onPageHide); owner.dispose(); };
   }, []);
   return session ? <DetailsForm session={session} /> : <p role="status">正在准备问卷草稿…</p>;
 }
