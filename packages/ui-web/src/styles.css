@@ -59,6 +59,68 @@
   line-height: 1.5;
 }
 
+.ui-web-questionnaire-answer-group {
+  margin-bottom: 20px;
+}
+
+.ui-web-questionnaire-answer-input {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 15px;
+  border: 2px solid var(--app-input-border, #e0e0e0);
+  border-radius: 12px;
+  color: var(--app-text, #1f2937);
+  background: var(--app-input-bg, rgba(255, 255, 255, 0.85));
+  font-size: 16px;
+  transition: all 0.3s ease;
+}
+
+.ui-web-questionnaire-answer-input::placeholder {
+  color: var(--app-text-subtle, #6b7280);
+}
+
+.ui-web-questionnaire-answer-input:focus {
+  outline: none;
+  border-color: var(--app-accent, #ff6b6b);
+  box-shadow: 0 0 0 3px var(--app-focus-ring, rgba(255, 107, 107, 0.2));
+}
+
+.ui-web-questionnaire-step-button {
+  flex: 1 1 0%;
+  width: 100%;
+  padding: 15px;
+  border: 0;
+  border-radius: 12px;
+  color: white;
+  background: linear-gradient(45deg, var(--app-accent, #ff6b6b), var(--app-accent-strong, #ee5a6f));
+  font-size: 18px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.ui-web-questionnaire-step-button:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 20px var(--app-accent-shadow, rgba(255, 107, 107, 0.3));
+}
+
+.ui-web-questionnaire-step-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-web-questionnaire-answer-input,
+  .ui-web-questionnaire-step-button {
+    transition: none;
+  }
+
+  .ui-web-questionnaire-step-button:hover:not(:disabled) {
+    transform: none;
+  }
+}
+
 :root[data-color-mode='dark'] .details-questionnaire-settings-panel,
 :root[data-color-mode='dark'] .details-questionnaire-surface,
 :root[data-color-mode='dark'] .details-questionnaire-subcard {

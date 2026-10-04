@@ -156,8 +156,8 @@ export function QuestionnaireQuestionPanel({
   onNext,
   disablePrev,
   disableNext,
-  prevButtonClass = 'generate-button',
-  nextButtonClass = 'generate-button',
+  prevButtonClass = 'ui-web-questionnaire-step-button',
+  nextButtonClass = 'ui-web-questionnaire-step-button',
 }: QuestionnaireQuestionPanelProps) {
   const safeQuestion = questionText?.trim() ? questionText : '未加载题目';
   const quickOptionList = (quickOptions ?? []).filter(Boolean);
@@ -252,12 +252,13 @@ export function QuestionnaireQuestionPanel({
       </div>
 
       {showTextInput && (
-        <div className="input-group mt-4">
+        <div className="ui-web-questionnaire-answer-group mt-4">
           <textarea
             value={answer}
             onChange={(e) => onAnswerChange?.(e.target.value)}
             placeholder={placeholder}
-            className="input-field min-h-[6rem] resize-y"
+            aria-label={safeQuestion}
+            className="ui-web-questionnaire-answer-input min-h-[6rem] resize-y"
           />
           <div className={`mt-1 flex items-center justify-between ${theme.inputCounterText}`}>
             <span>有效字数：{answerLength}/{maxLength ?? '不限'}</span>

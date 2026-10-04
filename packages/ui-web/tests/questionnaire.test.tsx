@@ -50,7 +50,9 @@ test('details questionnaire panel retains its shared dark-theme classes and answ
   expect(html).toContain('details-questionnaire-surface');
   expect(html).toContain('details-questionnaire-action');
   expect(html).toContain('details-questionnaire-choice');
-  expect(html).toContain('<textarea class="input-field min-h-[6rem] resize-y">答案</textarea>');
+  expect(html).toContain('aria-label="你的愿望是什么？"');
+  expect(html).toContain('ui-web-questionnaire-answer-input');
+  expect(html).toContain('ui-web-questionnaire-step-button');
   expect(html).toContain('返回上题');
   expect(html).toContain('下一题');
 });
