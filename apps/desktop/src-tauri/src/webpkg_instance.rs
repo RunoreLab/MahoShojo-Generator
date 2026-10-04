@@ -30,7 +30,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::{Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
@@ -330,6 +330,16 @@ struct StagedFile {
     bytes: Vec<u8>,
 }
 
+/// `Open` 实例的两个阶段。区别只在窗口句柄是否已建成；字节与 label 都已在位。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OpenPhase {
+    /// 字节已收齐、正在创建窗口。**resolver 从这个阶段起就允许服务**——初始页面
+    /// 可能在 `.build()` 返回前就发出资源请求。
+    Opening,
+    /// 窗口已建立。回收挂在窗口 Destroyed 事件上。
+    Serving,
+}
+
 #[derive(Debug)]
 enum InstanceState {
     Collecting {
@@ -342,6 +352,7 @@ enum InstanceState {
     Open {
         files: HashMap<String, StagedFile>,
         label: String,
+        phase: OpenPhase,
     },
 }
 
@@ -359,6 +370,9 @@ struct RegistryInner {
 #[derive(Debug)]
 pub struct WebPackageInstances {
     inner: Mutex<RegistryInner>,
+    /// 第二次 `open` 遇到 `Opening` 时挂在这里等第一次建窗完成，而不是把
+    /// instance 当成"窗口缺失"删掉。任何离开 `Opening` 的转移都必须 `notify_all`。
+    open_ready: Condvar,
     next_id: AtomicU64,
 }
 
@@ -384,6 +398,7 @@ impl Default for WebPackageInstances {
     fn default() -> Self {
         Self {
             inner: Mutex::new(RegistryInner::default()),
+            open_ready: Condvar::new(),
             next_id: AtomicU64::new(1),
         }
     }
@@ -410,7 +425,8 @@ impl WebPackageInstances {
         Ok(())
     }
 
-    /// 回收超时的 Collecting 会话。Open 实例不参与——它们的回收挂在窗口 Destroyed 上。
+    /// 回收超时的 Collecting 会话。Open 实例不参与——它们的回收挂在
+    /// 窗口生命周期上（建窗失败即时回收、Destroyed 事件回收）。
     fn evict_expired(inner: &mut RegistryInner, now: Instant) {
         let mut freed = 0u64;
         inner.instances.retain(|_id, state| match state {
@@ -570,51 +586,81 @@ impl WebPackageInstances {
         self.fail_if_stale(&mut inner, instance_id, now)?;
         Self::evict_expired(&mut inner, now);
 
-        // 已经打开：聚焦既有窗口而不是再开一个。Destroyed 清理保证 Open ⇒ 窗口仍在；
-        // 若竞态下窗口恰好不在，收掉这条 instance 让调用方重新 staging。
-        if matches!(
-            inner.instances.get(instance_id),
-            Some(InstanceState::Open { .. })
-        ) {
-            let label = label_for_instance(instance_id);
-            if let Some(window) = app.get_webview_window(&label) {
-                let _ = window.set_focus();
-                drop(inner);
-                return Ok(OpenInstanceOutcome { label });
-            }
-            Self::remove_instance(&mut inner, instance_id);
-            drop(inner);
-            return Err(WebpkgError::InstanceMissing);
+        /// `open` 状态机的一步裁决：先在不持锁借用的块内判出动作，再执行——
+        /// `get_mut` 的借用与 `drop(inner)`/等待不能在同一个 match 里共存。
+        enum OpenStep {
+            Focus(String),
+            Wait,
+            Take(String, String, HashMap<String, StagedFile>),
+            Missing,
         }
-
-        let (title, entry, files) = {
-            let Some(state) = inner.instances.get_mut(instance_id) else {
-                return Err(WebpkgError::InstanceMissing);
+        let (title, entry, files) = loop {
+            let step = match inner.instances.get_mut(instance_id) {
+                Some(InstanceState::Open {
+                    label,
+                    phase: OpenPhase::Serving,
+                    ..
+                }) => OpenStep::Focus(label.clone()),
+                Some(InstanceState::Open {
+                    phase: OpenPhase::Opening,
+                    ..
+                }) => OpenStep::Wait,
+                Some(InstanceState::Collecting {
+                    title,
+                    entry,
+                    declared,
+                    received,
+                    ..
+                }) => {
+                    if declared.len() != received.len() {
+                        return Err(WebpkgError::InstanceIncomplete);
+                    }
+                    OpenStep::Take(title.clone(), entry.clone(), std::mem::take(received))
+                }
+                None => OpenStep::Missing,
             };
-            let InstanceState::Collecting {
-                title,
-                entry,
-                declared,
-                received,
-                ..
-            } = state
-            else {
-                return Err(WebpkgError::InstanceMissing);
-            };
-            if declared.len() != received.len() {
-                return Err(WebpkgError::InstanceIncomplete);
+            match step {
+                // 已经打开：聚焦既有窗口而不是再开一个。Destroyed 清理保证
+                // Serving ⇒ 窗口仍在；若竞态下窗口恰好不在，收掉这条 instance
+                // 让调用方重新 staging。
+                OpenStep::Focus(label) => {
+                    if let Some(window) = app.get_webview_window(&label) {
+                        let _ = window.set_focus();
+                        drop(inner);
+                        return Ok(OpenInstanceOutcome { label });
+                    }
+                    Self::remove_instance(&mut inner, instance_id);
+                    drop(inner);
+                    return Err(WebpkgError::InstanceMissing);
+                }
+                // 第一次 open 正在建窗：等它出结果。窗口不存在是 `Opening` 的
+                // 正常中间态而不是删除条件——若在此时按"窗口缺失"回收，第一次
+                // 建窗完成后 resolver 只剩 404。
+                OpenStep::Wait => {
+                    inner = self
+                        .open_ready
+                        .wait(inner)
+                        .map_err(|_| WebpkgError::Failure)?;
+                }
+                OpenStep::Take(taken_title, taken_entry, taken_files) => {
+                    break (taken_title, taken_entry, taken_files);
+                }
+                OpenStep::Missing => {
+                    drop(inner);
+                    return Err(WebpkgError::InstanceMissing);
+                }
             }
-            (title.clone(), entry.clone(), std::mem::take(received))
         };
 
         let label = label_for_instance(instance_id);
         let url = entry_url(instance_id, &entry);
-        // 在放开互斥锁前把状态推进到 Open——并发第二次 open 会走"聚焦既有窗口"分支，
-        // 而不是同时再建一个窗口。
+        // 在放开互斥锁前把状态推进到 Opening——并发第二次 open 会走"等待建窗"分支，
+        // resolver 此刻起也已经能服务资源（初始页面请求可能先于 .build() 返回）。
         if let Some(state) = inner.instances.get_mut(instance_id) {
             *state = InstanceState::Open {
                 files,
                 label: label.clone(),
+                phase: OpenPhase::Opening,
             };
         } else {
             return Err(WebpkgError::Failure);
@@ -622,12 +668,23 @@ impl WebPackageInstances {
         drop(inner);
 
         match build_webpkg_window(app, instance_id, &label, &title, &url) {
-            Ok(()) => Ok(OpenInstanceOutcome { label }),
+            Ok(()) => {
+                if let Ok(mut inner) = self.inner.lock() {
+                    if let Some(InstanceState::Open { phase, .. }) =
+                        inner.instances.get_mut(instance_id)
+                    {
+                        *phase = OpenPhase::Serving;
+                    }
+                    self.open_ready.notify_all();
+                }
+                Ok(OpenInstanceOutcome { label })
+            }
             Err(error) => {
                 // 窗口没建成：回收 instance，字节立即释放——否则它们会以"永远不会被
                 // 服务"的形态占到 TTL 结束。
                 if let Ok(mut inner) = self.inner.lock() {
                     Self::remove_instance(&mut inner, instance_id);
+                    self.open_ready.notify_all();
                 }
                 Err(error)
             }
@@ -659,10 +716,13 @@ impl WebPackageInstances {
         });
         if let Some(instance_id) = instance_id {
             Self::remove_instance(&mut inner, &instance_id);
+            self.open_ready.notify_all();
         }
     }
 
-    /// resolver 的资源查找：只在 label↔instance 钉定成立且 instance 已 Open 时返回文件。
+    /// resolver 的资源查找：只在 label↔instance 钉定成立且 instance 已进入
+    /// Opening/Serving 时返回文件——`Opening` 起即可服务，因为初始页面请求可能
+    /// 先于 `.build()` 返回到达。
     fn resolve(&self, webview_label: &str, uri_path: &str) -> Option<StagedFileRef> {
         let instance_id = webview_label.strip_prefix(WEBVIEW_LABEL_PREFIX)?;
         let (url_instance, path) = parse_instance_path(uri_path)?;
@@ -670,7 +730,7 @@ impl WebPackageInstances {
             return None;
         }
         let inner = self.inner.lock().ok()?;
-        let InstanceState::Open { files, label } = inner.instances.get(instance_id)? else {
+        let InstanceState::Open { files, label, .. } = inner.instances.get(instance_id)? else {
             return None;
         };
         if label != webview_label {
@@ -704,7 +764,9 @@ fn build_webpkg_window(
 ) -> Result<(), WebpkgError> {
     let parsed = url::Url::parse(url).map_err(|_| WebpkgError::WindowUnavailable)?;
     let nav_instance = instance_id.to_string();
-    let window = WebviewWindowBuilder::new(app, label, WebviewUrl::External(parsed))
+    // `External` 的 API 契约是 http/https；自定义 scheme 必须走 `CustomProtocol`——
+    // 虽然当前实现在内部兼容透传，依赖"恰好能跑"会让一次上游收紧变成无提示回归。
+    let window = WebviewWindowBuilder::new(app, label, WebviewUrl::CustomProtocol(parsed))
         .title(title)
         .inner_size(1024.0, 720.0)
         .resizable(true)
@@ -1160,6 +1222,7 @@ mod tests {
                     InstanceState::Open {
                         files,
                         label: label_for_instance(&begun.instance_id),
+                        phase: OpenPhase::Serving,
                     },
                 );
             }
@@ -1220,6 +1283,7 @@ mod tests {
                     InstanceState::Open {
                         files,
                         label: label_for_instance(&begun.instance_id),
+                        phase: OpenPhase::Serving,
                     },
                 );
             }
@@ -1270,5 +1334,45 @@ mod tests {
                 "*"
             );
         }
+    }
+
+    #[test]
+    fn resolver_在_opening_阶段已经服务() {
+        // 初始页面可能在 `.build()` 返回前发出资源请求——若 Opening 不可服务，
+        // 每个包的首个文档请求都会撞 404。
+        let registry = WebPackageInstances::default();
+        let begun = begin(
+            &registry,
+            "index.html",
+            vec![declared("index.html", "text/html", 5)],
+        )
+        .expect("begin");
+        registry
+            .append(&begun.instance_id, "index.html", b"hello", Instant::now())
+            .expect("append");
+        {
+            let mut inner = registry.inner.lock().unwrap();
+            if let Some(InstanceState::Collecting { received, .. }) =
+                inner.instances.get_mut(&begun.instance_id)
+            {
+                let files = std::mem::take(received);
+                inner.instances.insert(
+                    begun.instance_id.clone(),
+                    InstanceState::Open {
+                        files,
+                        label: label_for_instance(&begun.instance_id),
+                        phase: OpenPhase::Opening,
+                    },
+                );
+            }
+        }
+        let label = label_for_instance(&begun.instance_id);
+        let response = resolve_webpkg_request(
+            &registry,
+            &label,
+            &format!("{INSTANCE_URL_PREFIX}{}/index.html", begun.instance_id),
+        );
+        assert_eq!(response.status(), http::StatusCode::OK);
+        assert_eq!(response.body().as_ref(), b"hello");
     }
 }

@@ -549,9 +549,26 @@ describe('desktop workspace app ownership', () => {
       'PermissionResponse::Deny',
       '.on_download(',
       'WindowEvent::Destroyed',
+      // 自定义 scheme 必须走 CustomProtocol——`External` 的 API 契约是 http/https。
+      'WebviewUrl::CustomProtocol',
+      // Opening/Serving 两阶段：resolver 自 Opening 起可服务，并发第二次 open
+      // 必须等待而不是把 instance 按"窗口缺失"删掉。
+      'OpenPhase::Opening',
+      'OpenPhase::Serving',
+      'open_ready',
     ]) {
       expect(webpkgSource, `webpkg window must wire ${marker}`).toContain(marker);
     }
+
+    // Windows 下在同步 command/event handler 中创建 WebviewWindow 可能死锁
+    // （wry#583，Tauri 官方把"async command 建窗"列为推荐形态）。这条门禁钉住
+    // `open_web_package_instance` 不得退回 sync。
+    const openCommand = /fn open_web_package_instance\(/.exec(libSource);
+    expect(openCommand, 'open_web_package_instance must exist').not.toBeNull();
+    expect(
+      /async fn open_web_package_instance\(/.test(libSource),
+      'open_web_package_instance must stay an async command (Windows sync-command deadlock)',
+    ).toBe(true);
 
     // 暂存是纯内存的：模块里出现文件系统 API 本身就是审查点。
     for (const forbidden of [

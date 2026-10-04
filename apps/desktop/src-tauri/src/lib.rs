@@ -772,14 +772,18 @@ fn append_web_package_resource(
 
 /// 声明表收齐后创建 `webpkg-<instanceId>` webview。
 ///
-/// 同步 command：窗口创建本就落在主线程路径上，registry 的收尾也只是内存移动，
-/// 没有可以挪到 worker 的开销。
+/// 必须是 async command：`WebviewWindowBuilder` 官方文档明确记录 Windows 下在同步
+/// command/event handler 中创建 WebviewWindow 可能死锁（wry#583）。`async fn` 让
+/// registry 收尾与建窗都落在 Tauri 异步运行时线程上——同步 command 在主线程执行，
+/// 正好命中那条已知死锁路径；registry 本身只有内存操作，没有需要阻塞 worker 的 I/O，
+/// 因此不需要 `spawn_blocking`。第二次并发 open 对 `Opening` 的等待同理发生在
+/// worker 线程上，不会冻住 UI。
 ///
 /// 渲染层**不**提供 label、URL 或窗口位置——三者分别由 `label_for_instance`、
 /// `entry_url` 与 `WebviewWindowBuilder` 产生；返回值里的 `label` 只是回显给调用方
 /// 用于诊断与聚焦。
 #[tauri::command]
-fn open_web_package_instance(
+async fn open_web_package_instance(
     app: tauri::AppHandle,
     instances: State<'_, webpkg_instance::WebPackageInstances>,
     request: OpenWebPackageInstanceRequest,
