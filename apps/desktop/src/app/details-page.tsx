@@ -77,7 +77,7 @@ function DetailsForm({ session }: { session: DetailsSession }) {
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionInfo, setActionInfo] = useState<string | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
-  const [confirmRegenerate, setConfirmRegenerate] = useState(false);
+  const [confirmRegenerate, setConfirmRegenerate] = useState<false | 'unsaved' | 'uncertain'>(false);
   const regenerateDialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const dialog = regenerateDialog.current;
@@ -196,7 +196,11 @@ function DetailsForm({ session }: { session: DetailsSession }) {
   const generate = (discardUnsavedResult = false) => {
     if (!guard.ready || busy || !executionMode || !questionnaire || questionnaireLoading || profilesLoading || profilesError || questionnaireError || state.pendingRestore || session.isDraftBlocked()) return;
     if (target.location === 'client' && !selected) return;
-    if (session.hasUnsavedResult() && !discardUnsavedResult) { setConfirmRegenerate(true); return; }
+    if (!discardUnsavedResult) {
+      if (session.hasUnsavedResult()) { setConfirmRegenerate('unsaved'); return; }
+      // hosted-json 结果不确定时再次生成 = 可能的第二次调用，必须显式确认（D5.1a-r1）。
+      if (state.phase === 'uncertain') { setConfirmRegenerate('uncertain'); return; }
+    }
     try {
       const answers = buildDetailsAnswers(flow, session.getSnapshot().draft.answers);
       setActionError(null);
@@ -412,24 +416,30 @@ function DetailsForm({ session }: { session: DetailsSession }) {
       </div>
       <dialog ref={regenerateDialog} aria-labelledby="regenerate-title" aria-describedby="regenerate-description" className="m-auto max-w-lg rounded-lg border border-(--app-border) bg-(--app-surface) p-5 text-(--app-text) backdrop:bg-black/40" onCancel={(event) => { event.preventDefault(); if (!session.isBusy()) setConfirmRegenerate(false); }}>
         <h2 id="regenerate-title" className="text-xl font-semibold">重新生成？</h2>
-        <p id="regenerate-description" className="my-3">当前结果尚未保存到本地卡库。重新生成将替换当前结果；即使新生成失败或取消，也无法恢复。可以先保存当前结果再生成。</p>
+        {confirmRegenerate === 'uncertain' ? (
+          <p id="regenerate-description" className="my-3">无法确认上次请求是否在服务器执行——它可能已经完成并计费。再次生成会发起新的请求，可能产生重复调用与费用。</p>
+        ) : (
+          <p id="regenerate-description" className="my-3">当前结果尚未保存到本地卡库。重新生成将替换当前结果；即使新生成失败或取消，也无法恢复。可以先保存当前结果再生成。</p>
+        )}
         {state.saveError && <p role="alert">{state.saveError}</p>}
         <div className="flex flex-wrap gap-2">
           <button autoFocus className={actionClass} disabled={busy} onClick={() => setConfirmRegenerate(false)}>取消</button>
-          <button className={actionClass} disabled={busy} onClick={async () => { if (await session.saveResult()) { setConfirmRegenerate(false); generate(); } }}>{state.saving ? '正在保存…' : '保存后重新生成'}</button>
+          {confirmRegenerate === 'unsaved' && <button className={actionClass} disabled={busy} onClick={async () => { if (await session.saveResult()) { setConfirmRegenerate(false); generate(); } }}>{state.saving ? '正在保存…' : '保存后重新生成'}</button>}
           <button className={actionClass} disabled={busy} onClick={() => { setConfirmRegenerate(false); generate(true); }}>确定重新生成</button>
         </div>
       </dialog>
       {actionError && <p role="alert">{actionError}</p>}
       {actionInfo && <p role="status">{actionInfo}</p>}
-      {state.message && <p role="status">{state.message}</p>}
+      {state.message && <p role={state.phase === 'uncertain' ? 'alert' : 'status'}>{state.message}</p>}
       {state.reasoning && <AiReasoningPanel reasoning={state.reasoning} />}
       {state.card && <section aria-label="生成结果" className="flex flex-col gap-3">
         <h2 className="text-xl font-semibold">
           {state.cardKind === 'general'
             ? (typeof state.card.name === 'string' && state.card.name ? state.card.name : '未命名角色')
             : (typeof state.card.codename === 'string' && state.card.codename ? state.card.codename : '未命名魔法少女')}
-          {' · '}{typeof state.card.signature === 'string' && state.card.signature ? '官方签名' : '未签名'}
+          {' · '}{typeof state.card.signature === 'string' && state.card.signature
+            ? (state.resultRestored ? '含签名字段（本机未验证）' : '官方签名')
+            : '未签名'}
         </h2>
         {state.cardKind === 'general'
           ? <GeneralCharacterCard general={state.card as GeneralCharacterCardData} />

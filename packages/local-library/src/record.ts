@@ -20,6 +20,7 @@ export const LocalCardProvenanceKindSchema = z.enum([
   'official-signed',
   'unsigned',
   'signature-invalid',
+  'signature-unverified',
 ]);
 export type LocalCardProvenanceKind = z.infer<typeof LocalCardProvenanceKindSchema>;
 
@@ -40,6 +41,11 @@ const LocalCardSignatureEvidenceShape = {
   execution: LocalCardExecutionProvenanceSchema.optional(),
 };
 
+/**
+ * `official-signed`：签名证据来自本次会话的新鲜服务端响应（或线上下载副本）；
+ * `signature-unverified`：签名证据存在，但载体是可编辑的本地草稿/导入件——
+ * 只陈述“含签名字段”，不声称官方签名（本机不做验签，DESK-PROD-012）。
+ */
 export const LocalCardProvenanceSchema = z.discriminatedUnion('kind', [
   z
     .object({
@@ -50,6 +56,12 @@ export const LocalCardProvenanceSchema = z.discriminatedUnion('kind', [
   z
     .object({
       kind: z.literal('signature-invalid'),
+      ...LocalCardSignatureEvidenceShape,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('signature-unverified'),
       ...LocalCardSignatureEvidenceShape,
     })
     .strict(),

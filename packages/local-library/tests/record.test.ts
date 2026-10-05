@@ -79,6 +79,7 @@ describe('LocalCardProvenance', () => {
   it.each([
     { kind: 'official-signed', execution: 'downloaded' },
     { kind: 'signature-invalid', execution: 'edited' },
+    { kind: 'signature-unverified', execution: 'hosted' },
   ])('rejects signed provenance without signature: $kind', (provenance) => {
     expect(LocalCardProvenanceSchema.safeParse(provenance).success).toBe(false);
   });
@@ -101,6 +102,11 @@ describe('LocalCardProvenance', () => {
       kind: 'signature-invalid',
       signature: 'legacy-invalid-signature',
       execution: 'edited',
+    },
+    {
+      kind: 'signature-unverified',
+      signature: 'draft-restored-signature',
+      execution: 'hosted',
     },
   ])('accepts legacy signature evidence without version or key ID: $kind', (provenance) => {
     expect(LocalCardProvenanceSchema.safeParse(provenance).success).toBe(true);

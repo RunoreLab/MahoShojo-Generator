@@ -285,4 +285,68 @@ describe('Details hosted execution outcomes', () => {
     session.restoreDraft();
     expect(session.getSnapshot().card).not.toHaveProperty('signature');
   });
+
+  it('surfaces hosted-json uncertain outcome without auto-replay', async () => {
+    const execute = vi.fn<typeof executeDetailsGeneration>(async () => ({
+      status: 'uncertain', mode: 'hosted-json', rawText: '',
+      message: '无法确认这次生成是否在服务器执行——请求可能已发送。不会自动重试；再次生成会发起新请求，可能产生重复调用与费用。',
+    }));
+    const { session, repository } = harness(null, execute);
+    await session.generate(options, input, { mode: 'hosted-json', flowers: '百合' });
+    expect(session.getSnapshot()).toMatchObject({ phase: 'uncertain', card: null });
+    expect(session.getSnapshot().message).toContain('重复调用与费用');
+    // uncertain 不是 completed：不可保存、不自动重放。
+    await session.saveResult();
+    expect(repository.putIfAbsent).not.toHaveBeenCalled();
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  it('persists an in-flight hosted-json abort as uncertain, not clean cancelled', async () => {
+    let finish!: (result: DetailsGenerationOutcome) => void;
+    const execute = vi.fn<typeof executeDetailsGeneration>(() => new Promise((resolve) => { finish = resolve; }));
+    const { session, raw } = harness(null, execute);
+    const pending = session.generate(options, input, { mode: 'hosted-json', flowers: '百合' });
+    session.cancel();
+    expect(JSON.parse(raw()!).output).toMatchObject({ phase: 'uncertain' });
+    finish({ status: 'uncertain', mode: 'hosted-json', rawText: '', message: 'uncertain' });
+    await pending;
+    expect(session.getSnapshot().phase).toBe('uncertain');
+  });
+
+  it('restores a persisted uncertain phase instead of auto-regenerating', () => {
+    const stored = JSON.stringify({ version: 1, ...draft, output: { mode: 'hosted-json', phase: 'uncertain', rawText: '', card: null } });
+    const execute = vi.fn<typeof executeDetailsGeneration>();
+    const { session } = harness(stored, execute);
+    session.restoreDraft();
+    expect(session.getSnapshot()).toMatchObject({ phase: 'uncertain', card: null });
+    expect(session.getSnapshot().message).toContain('未能确认');
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it('saves a signed card restored from editable draft as signature-unverified', async () => {
+    const signedCard = { ...card, signature: 'server-issued-signature' };
+    const stored = JSON.stringify({ version: 1, ...draft, output: { mode: 'hosted-json', phase: 'completed', rawText: JSON.stringify(signedCard), card: signedCard } });
+    const { session, repository } = harness(stored);
+    session.restoreDraft();
+    expect(session.getSnapshot()).toMatchObject({ phase: 'completed', resultRestored: true });
+    expect(session.getSnapshot().card).toMatchObject({ signature: 'server-issued-signature' });
+    await session.saveResult();
+    expect(repository.putIfAbsent).toHaveBeenCalledWith(expect.objectContaining({
+      provenance: { kind: 'signature-unverified', signature: 'server-issued-signature', execution: 'hosted' },
+    }));
+  });
+
+  it('keeps a fresh hosted-json signed card as official-signed after a restore round-trip elsewhere', async () => {
+    const signedCard = { ...card, signature: 'server-issued-signature' };
+    const execute = vi.fn<typeof executeDetailsGeneration>(async () => ({
+      status: 'completed', mode: 'hosted-json', card: signedCard, cardKind: 'magical-girl', rawText: JSON.stringify(signedCard),
+    }));
+    const { session, repository } = harness(null, execute);
+    await session.generate(options, input, { mode: 'hosted-json', flowers: '百合' });
+    expect(session.getSnapshot().resultRestored).toBe(false);
+    await session.saveResult();
+    expect(repository.putIfAbsent).toHaveBeenCalledWith(expect.objectContaining({
+      provenance: { kind: 'official-signed', signature: 'server-issued-signature', execution: 'hosted' },
+    }));
+  });
 });

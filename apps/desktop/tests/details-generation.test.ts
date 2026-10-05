@@ -247,7 +247,7 @@ describe('Desktop Details hosted generation', () => {
       .resolves.toMatchObject({ status: 'invalid-output', mode: 'hosted-json' });
   });
 
-  it('cancels a pending hosted-json request through the shared registry', async () => {
+  it('reports uncertain when aborting a dispatched hosted-json request, never replaying it', async () => {
     const cancelled: string[] = [];
     let resolveRequest: ((value: { status: number; body: null }) => void) | undefined;
     const invoke = vi.fn(async (command: string, args?: Record<string, unknown>) => {
@@ -260,8 +260,57 @@ describe('Desktop Details hosted generation', () => {
     const controller = new AbortController();
     const pending = executeDetailsGeneration({ invoke, profileId: '' }, hostedInput, hostedJsonIntent, controller.signal);
     controller.abort();
+    // 请求仍在飞行：取消确认与否都无法证明服务器没有执行——不得声称干净取消。
     resolveRequest?.({ status: 200, body: null });
-    await expect(pending).resolves.toMatchObject({ status: 'cancelled' });
+    await expect(pending).resolves.toMatchObject({ status: 'uncertain', mode: 'hosted-json' });
     expect(cancelled).toEqual(['hosted-json-1']);
+    expect(invoke.mock.calls.filter(([command]) => command === HOSTED_AI_REQUEST_COMMAND)).toHaveLength(1);
+  });
+
+  it.each([
+    ['cancelled', 'native select 取消'],
+    ['network-error', '网络中断/超时'],
+    ['invalid-response', '响应不可信'],
+    ['bridge-invalid', 'native 返回契约外载荷'],
+  ] as const)('maps post-dispatch %s failure to uncertain without replay', async (code, _label) => {
+    const invoke = vi.fn(async (command: string) => {
+      if (command === HOSTED_AI_REQUEST_COMMAND) {
+        if (code === 'bridge-invalid') return { unexpected: 'shape' };
+        throw { code, message: `${code} happened` };
+      }
+      throw new Error(`unexpected command: ${command}`);
+    });
+    const outcome = await executeDetailsGeneration({ invoke, profileId: '' }, hostedInput, hostedJsonIntent, new AbortController().signal);
+    expect(outcome).toMatchObject({ status: 'uncertain', mode: 'hosted-json' });
+    expect(invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    'invalid-request',
+    'protocol-mismatch',
+    'server-unavailable',
+    'storage-unavailable',
+    'internal-error',
+  ] as const)('keeps pre-dispatch %s failure as an ordinary failed outcome', async (code) => {
+    const invoke = vi.fn(async (command: string) => {
+      if (command === HOSTED_AI_REQUEST_COMMAND) throw { code, message: `${code} happened` };
+      throw new Error(`unexpected command: ${command}`);
+    });
+    const outcome = await executeDetailsGeneration({ invoke, profileId: '' }, hostedInput, hostedJsonIntent, new AbortController().signal);
+    expect(outcome).toMatchObject({ status: 'failed', mode: 'hosted-json', code });
+  });
+
+  it('keeps an abort that raced a pre-dispatch failure as honest cancelled', async () => {
+    const controller = new AbortController();
+    let rejectRequest: ((reason: unknown) => void) | undefined;
+    const invoke = vi.fn(async (command: string, _args?: Record<string, unknown>) => {
+      if (command === CANCEL_HOSTED_AI_COMMAND) return true;
+      return new Promise<never>((_resolve, reject) => { rejectRequest = reject; });
+    });
+    const pending = executeDetailsGeneration({ invoke, profileId: '' }, hostedInput, hostedJsonIntent, controller.signal);
+    controller.abort();
+    // DESK-094 探测失败属于 dispatch 前终态：生成请求从未上线路，取消语义干净。
+    rejectRequest?.({ code: 'server-unavailable', message: '项目服务暂不可达' });
+    await expect(pending).resolves.toMatchObject({ status: 'cancelled', mode: 'hosted-json' });
   });
 });

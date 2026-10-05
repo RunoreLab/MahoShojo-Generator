@@ -28,7 +28,7 @@ export const describeLocalCardProvenance = (record: LocalCardRecordV1): string =
   const { provenance } = record;
   const signature = provenance.kind === 'unsigned'
     ? '无签名'
-    : provenance.kind === 'official-signed'
+    : provenance.kind === 'official-signed' || provenance.kind === 'signature-unverified'
       ? '含签名字段（本机未验证）'
       : '签名无效';
   return provenance.execution === undefined ? signature : `${signature} · ${EXECUTION_LABELS[provenance.execution]}`;

@@ -28,6 +28,7 @@ import {
 } from '../../platform/desktop-ai-execution';
 import {
   cancelHostedAi,
+  DesktopCloudError,
   hostedAiRequest,
   streamHostedAi,
   type HostedAiChannel,
@@ -95,7 +96,14 @@ export type DetailsGenerationOutcome =
       code?: string;
       retryAfterSeconds?: number;
     }
-  | { status: 'cancelled'; mode: DetailsExecutionMode; rawText: string; reason?: string };
+  | { status: 'cancelled'; mode: DetailsExecutionMode; rawText: string; reason?: string }
+  | {
+      /** 结果无法确认：请求可能已到达服务器（也可能没有），不自动重放。 */
+      status: 'uncertain';
+      mode: DetailsExecutionMode;
+      rawText: string;
+      message: string;
+    };
 
 export class DetailsGenerationError extends Error {
   constructor(readonly rawText: string, cause: unknown) {
@@ -364,6 +372,31 @@ const readErrorMessage = (payload: unknown, status: number): string => {
   return status >= 500 ? '服务器内部错误' : '生成失败';
 };
 
+/**
+ * dispatch 前错误码：这些失败发生在 generation 请求上线路之前（请求校验、
+ * DESK-094 契约兼容探测、凭据装载、requestId 注册），可以诚实按普通
+ * failed/cancelled 处理——服务器绝不可能执行过这次生成。
+ *
+ * 其余错误（`cancelled`：native select 取消时 send 可能已在飞行中；
+ * `network-error`：含 reqwest 超时；`invalid-response`/`bridge-invalid`：
+ * 已收到响应但无法信任；未知 invoke 异常）都无法确认服务器是否已执行，
+ * 一律投影为 `uncertain`——不声称干净取消，也不自动重放。
+ */
+const HOSTED_JSON_PRE_DISPATCH_CODES: ReadonlySet<DesktopCloudError['code']> = new Set([
+  'invalid-request',
+  'protocol-mismatch',
+  'server-unavailable',
+  'storage-unavailable',
+  'internal-error',
+  'not-authenticated',
+  'state-mismatch',
+  'flow-not-found',
+  'flow-in-progress',
+]);
+
+const HOSTED_JSON_UNCERTAIN_MESSAGE =
+  '无法确认这次生成是否在服务器执行——请求可能已发送。不会自动重试；再次生成会发起新请求，可能产生重复调用与费用。';
+
 const executeHostedJsonGeneration = async (
   options: DesktopAiExecutionOptions,
   input: DetailsGenerationInput,
@@ -382,7 +415,8 @@ const executeHostedJsonGeneration = async (
       body,
     });
     if (signal.aborted) {
-      return { status: 'cancelled', mode: intent.mode, rawText: '', reason: 'aborted' };
+      // 响应已返回但用户已要求取消：请求肯定到达过服务器，不能声称干净取消。
+      return { status: 'uncertain', mode: intent.mode, rawText: '', message: HOSTED_JSON_UNCERTAIN_MESSAGE };
     }
     const { status, body: payload } = response;
     if (status < 200 || status >= 300) {
@@ -405,9 +439,8 @@ const executeHostedJsonGeneration = async (
       reasoning,
     };
   } catch (cause) {
-    if (signal.aborted) {
-      return { status: 'cancelled', mode: intent.mode, rawText: '', reason: 'aborted' };
-    }
+    // 请求体 schema 校验与 structured-json 解析在 renderer 侧抛出（前者 dispatch 前，
+    // 后者是已确认响应），都属于「结果已知」而非「结果不确定」。
     if (cause instanceof SyntaxError || (cause instanceof Error && cause.name === 'ZodError')) {
       return {
         status: 'invalid-output',
@@ -416,7 +449,22 @@ const executeHostedJsonGeneration = async (
         message: '服务器返回的角色卡未通过校验。',
       };
     }
-    throw new DetailsGenerationError('', cause);
+    const cloudCode = cause instanceof DesktopCloudError ? cause.code : null;
+    if (cloudCode !== null && HOSTED_JSON_PRE_DISPATCH_CODES.has(cloudCode)) {
+      if (signal.aborted) {
+        return { status: 'cancelled', mode: intent.mode, rawText: '', reason: 'aborted' };
+      }
+      return {
+        status: 'failed',
+        mode: intent.mode,
+        rawText: '',
+        message: cause instanceof Error ? cause.message : '生成失败。',
+        code: cloudCode,
+      };
+    }
+    // cancelled / network-error / timeout / invalid-response / bridge-invalid / 未知异常：
+    // 服务器是否已执行无从确认——诚实投影为 uncertain，由用户显式决定是否再试。
+    return { status: 'uncertain', mode: intent.mode, rawText: '', message: HOSTED_JSON_UNCERTAIN_MESSAGE };
   } finally {
     signal.removeEventListener('abort', onAbort);
   }

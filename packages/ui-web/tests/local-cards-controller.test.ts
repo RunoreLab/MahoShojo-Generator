@@ -198,6 +198,9 @@ describe('本地数据卡展示规则', () => {
   it('签名字段只陈述为本机未验证', () => {
     expect(describeLocalCardProvenance(record('a', { provenance: { kind: 'official-signed', signature: 'sig' } })))
       .toBe('含签名字段（本机未验证）');
+    // 草稿恢复等不可信载体中的签名证据同样只陈述事实，不升格为官方签名。
+    expect(describeLocalCardProvenance(record('a', { provenance: { kind: 'signature-unverified', signature: 'sig' } })))
+      .toBe('含签名字段（本机未验证）');
     expect(describeLocalCardProvenance(record('a', { provenance: { kind: 'unsigned', execution: 'direct-local' } })))
       .toBe('无签名 · 本机模型生成');
   });

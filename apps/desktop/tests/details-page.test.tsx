@@ -287,4 +287,45 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
     expect(mocks.execute).toHaveBeenCalledTimes(1);
     expect(mocks.execute.mock.calls[0]![1].hosted.allowNativeSignature).toBe(false);
   });
+
+  it('warns about possible duplicate cost before regenerating after an uncertain hosted-json outcome', async () => {
+    window.localStorage.setItem(DESKTOP_AI_CONFIG_STORAGE_KEY, JSON.stringify({
+      version: 2,
+      selection: { executionPreference: 'server', clientConnectionId: null },
+      hiddenPresetIds: [],
+    }));
+    window.localStorage.setItem(DETAILS_DRAFT_KEY, JSON.stringify(draft()));
+    mocks.execute.mockResolvedValueOnce({
+      status: 'uncertain', mode: 'hosted-json', rawText: '',
+      message: '无法确认这次生成是否在服务器执行——请求可能已发送。不会自动重试；再次生成会发起新请求，可能产生重复调用与费用。',
+    } satisfies DetailsGenerationOutcome);
+    await mount(); await click('恢复草稿'); await click('发送问卷并生成');
+    expect(container.textContent).toContain('无法确认这次生成是否在服务器执行');
+    expect(mocks.execute).toHaveBeenCalledTimes(1);
+    await click('重新生成');
+    // uncertain 终态下再次生成必须显式确认——无保存按钮（没有卡可保存）。
+    expect(container.querySelector('dialog')?.open).toBe(true);
+    expect(container.querySelector('dialog')?.textContent).toContain('重复调用与费用');
+    expect(container.querySelector('dialog')?.textContent).not.toContain('保存后重新生成');
+    expect(mocks.execute).toHaveBeenCalledTimes(1);
+    await click('取消');
+    expect(mocks.execute).toHaveBeenCalledTimes(1);
+    await click('重新生成'); await click('确定重新生成');
+    expect(mocks.execute).toHaveBeenCalledTimes(2);
+  });
+
+  it('shows a restored signed card as unverified evidence instead of official-signed', async () => {
+    const signedCard = { ...card, signature: 'server-issued-signature' };
+    window.localStorage.setItem(DETAILS_DRAFT_KEY, JSON.stringify({
+      ...draft(),
+      output: { mode: 'hosted-json', phase: 'completed', rawText: JSON.stringify(signedCard), card: signedCard },
+    }));
+    await mount(); await click('恢复草稿');
+    const heading = container.querySelector('section[aria-label="生成结果"] h2');
+    expect(heading?.textContent).toBe('百合 · 含签名字段（本机未验证）');
+    await click('保存到本地卡库');
+    expect(mocks.save).toHaveBeenCalledWith(expect.objectContaining({
+      provenance: { kind: 'signature-unverified', signature: 'server-issued-signature', execution: 'hosted' },
+    }));
+  });
 });
