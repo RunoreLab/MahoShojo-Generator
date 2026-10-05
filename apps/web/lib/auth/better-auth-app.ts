@@ -2,6 +2,7 @@ import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { toNextJsHandler } from 'better-auth/next-js';
 import { getBetterAuthBootstrapStatus } from '@/lib/auth/better-auth';
+import { desktopNativeAuthPlugin } from '@/lib/auth/native-desktop-plugin';
 import { ensureAuthUserLink } from '@/lib/auth/user-auth-linking';
 import { getDrizzleDbFromRuntime } from '@/lib/db/drizzle';
 import { baAccounts, baSessions, baUsers, baVerifications } from '@/lib/db/schema/auth';
@@ -189,6 +190,7 @@ const createBetterAuthInstance = (secret: string) =>
         },
       },
     },
+    plugins: [desktopNativeAuthPlugin()],
   });
 
 type BetterAuthInstance = ReturnType<typeof createBetterAuthInstance>;

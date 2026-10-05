@@ -34,6 +34,11 @@
       "import": "./src/desktop-ipc.ts",
       "default": "./src/desktop-ipc.ts"
     },
+    "./desktop-cloud": {
+      "types": "./src/desktop-cloud.ts",
+      "import": "./src/desktop-cloud.ts",
+      "default": "./src/desktop-cloud.ts"
+    },
     "./game-card": {
       "types": "./src/game-card.ts",
       "import": "./src/game-card.ts",
