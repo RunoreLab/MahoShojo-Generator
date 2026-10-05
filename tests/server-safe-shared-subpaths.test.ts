@@ -173,15 +173,19 @@ describe('server-safe shared entrypoints stay free of React hooks', () => {
     // 带 hook 的客户端状态机，因此保持在这里作为显式的客户端专属登记。
     // `./color-mode` 承载 `useColorModePreference` 与 DOM 应用逻辑，是刻意的客户端入口；
     // RSC 只消费同目录的 `./color-mode-init`。
+    // `./card-library` 是 D5.0e 抽出的卡库模态框与客户端状态机，`./modal` 是客户端弹窗
+    // 基件；两者都只在 Client Component/宿主适配层消费，不进入 Server Component 导入链。
     expect(unlisted.sort()).toEqual([
       './ai-provider',
       './card-editor',
+      './card-library',
       './character-result',
       './color-mode',
       './encyclopedia-views',
       './local-archive',
       './local-cards',
       './markdown',
+      './modal',
       './questionnaire',
       './shell',
     ]);

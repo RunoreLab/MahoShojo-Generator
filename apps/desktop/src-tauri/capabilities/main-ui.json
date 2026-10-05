@@ -49,6 +49,7 @@
     "allow-cloud-sign-out",
     "allow-cloud-online-status",
     "allow-stream-hosted-ai",
+    "allow-cloud-card-library-request",
     "allow-cancel-hosted-ai"
   ]
 }

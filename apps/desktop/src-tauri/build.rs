@@ -54,6 +54,7 @@ fn main() {
             "cloud_sign_out",
             "cloud_online_status",
             "stream_hosted_ai",
+            "cloud_card_library_request",
             "cancel_hosted_ai",
         ]),
     ))

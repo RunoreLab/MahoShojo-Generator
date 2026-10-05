@@ -683,6 +683,7 @@ describe('desktop workspace app ownership', () => {
       'cloud_sign_out',
       'cloud_online_status',
       'stream_hosted_ai',
+      'cloud_card_library_request',
       'cancel_hosted_ai',
     ]);
 
