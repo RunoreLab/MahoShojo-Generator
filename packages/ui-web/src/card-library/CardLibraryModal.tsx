@@ -4,7 +4,7 @@
 // 运行地能力全部由 `host` 端口注入：在线请求、本地库仓储、设备标记、链接组件、
 // 详情/卡组插槽。本文件不得 import 任何 apps/* 源码或宿主传输层。
 
-import React, { useState, useEffect, useCallback, useMemo, useRef, useId } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef, useId } from 'react';
 import { createPortal } from 'react-dom';
 import { inferCharacterKind } from '@mahoshojo/domain/data-cards';
 import DataCard from './DataCard';
@@ -63,6 +63,14 @@ export interface CardLibraryModalProps {
 }
 
 export type BattleDataTab = 'my' | 'public' | 'recommended' | 'favorites' | 'local';
+
+/**
+ * 「最近一次已提交」值的镜像只能写于提交之后。layout effect 在 commit 内同步
+ * 完成，保证同一事件循环里到达的迟到 Promise（微任务）已经能看到新值——普通
+ * effect 经调度器异步冲刷，存在被微任务抢先的窗口。SSR 下 layout effect 为空
+ * 操作且会告警（服务端也没有可判的异步竞态），退回 `useEffect`。
+ */
+const useIsomorphicLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect;
 
 const normalizeCardTypeForLibrary = (card: unknown): DataCardType => {
   const parsed = OnlineDataCardTypeSchema.safeParse((card as { type?: unknown })?.type);
@@ -185,22 +193,38 @@ export function CardLibraryModal({
   const [publicTotalPages, setPublicTotalPages] = useState<number | null>(null);
 
   /**
-   * 账号身份纪元（D5.0e-r1）：`authenticated` 按 userId 区分，其余状态按
-   * status 本身区分（unknown ↔ unauthenticated ↔ authenticated 之间互不同纪）。
-   * 所有账号绑定的异步操作发起时捕获 `accountEpochRef.current.epoch`，await
-   * 返回后若 epoch 已前进则一律不得写回 UI。
+   * 账号身份（D5.0e-r2）：稳定 identity key，不再维护数值纪元。
+   * `authenticated` → `account:<userId>`；`unauthenticated` → `session:unauthenticated`；
+   * `unknown`（未确认登录态）不产出新身份，沿用最后一个已确认 key（冷启动为
+   * `session:unknown`）——A→checking→A 不换 key，收藏等账号绑定缓存不因一次
+   * 会话探测而失配；A→B 与 A→登出则立即换 key 隔离。
+   * render-phase adjust 是 React 官方收敛模式；render 阶段不得写 ref（并发渲染
+   * 被丢弃时 ref 不随快照回滚）。
    */
-  const accountEpochRef = useRef({ key: '', epoch: 0 });
-  const accountKey = isAuthenticated ? `account:${userId}` : `session:${authStatus}`;
-  if (accountEpochRef.current.key !== accountKey) {
-    accountEpochRef.current = { key: accountKey, epoch: accountEpochRef.current.epoch + 1 };
+  const confirmedAccountKey = isAuthenticated
+    ? `account:${userId}`
+    : authStatus === 'unauthenticated'
+      ? 'session:unauthenticated'
+      : null;
+  const [committedAccountKey, setCommittedAccountKey] = useState<string>(confirmedAccountKey ?? 'session:unknown');
+  if (confirmedAccountKey !== null && confirmedAccountKey !== committedAccountKey) {
+    setCommittedAccountKey(confirmedAccountKey);
   }
-  const accountEpoch = accountEpochRef.current.epoch;
+  const accountKey = committedAccountKey;
+  /**
+   * 「最近一次已提交身份」的镜像：账号绑定的异步操作发起时捕获
+   * `latestAccountKeyRef.current`，await 返回后若不一致则一律不得写回 UI。
+   * 镜像只能在提交后更新（useIsomorphicLayoutEffect 在 commit 内同步完成）。
+   */
+  const latestAccountKeyRef = useRef(accountKey);
+  useIsomorphicLayoutEffect(() => {
+    latestAccountKeyRef.current = accountKey;
+  }, [accountKey]);
 
-  // 收藏集合按纪元持有一份：渲染只投影当前纪元的值，旧纪元的迟到写入天然失效。
+  // 收藏集合按账号身份持有一份：渲染只投影当前身份的值，旧身份的迟到写入天然失效。
   const EMPTY_FAVORITE_IDS = useRef(new Set<string>()).current;
-  const [favoriteView, setFavoriteView] = useState<{ epoch: number; ids: Set<string> }>({ epoch: accountEpoch, ids: EMPTY_FAVORITE_IDS });
-  const favoriteIds = favoriteView.epoch === accountEpoch ? favoriteView.ids : EMPTY_FAVORITE_IDS;
+  const [favoriteView, setFavoriteView] = useState<{ owner: string; ids: Set<string> }>({ owner: accountKey, ids: EMPTY_FAVORITE_IDS });
+  const favoriteIds = favoriteView.owner === accountKey ? favoriteView.ids : EMPTY_FAVORITE_IDS;
   const [isLoading, setIsLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<BattleDataTab>('public');
   const [showDecksModal, setShowDecksModal] = useState(false);
@@ -418,14 +442,17 @@ export function CardLibraryModal({
   const [libraryCopyMessage, setLibraryCopyMessage] = useState<string | null>(null);
 
   /**
-   * 账号纪元切换的清场（render-phase adjust）：渲染途中发现纪元已前进时，
+   * 账号身份切换的清场（render-phase adjust）：渲染途中发现身份已更换时，
    * 把「上个账号留下的可辨认痕迹」在本帧同步清掉，不等 effect——否则
    * 下一个绘制帧之前新账号界面仍会短暂显示旧账号的通知/错误。
+   * 卡组弹窗同属账号私有面：注入实现内部持有 myDecks/favoriteDecks 等不以
+   * 账号隔离的 state，换身份必须关闭（重开时经 `key={accountKey}` 重挂载）。
    * 本地库操作状态（pendingLocalRemoval 等）属于设备动作，不在此列。
    */
-  const [appliedAccountEpoch, setAppliedAccountEpoch] = useState(accountEpoch);
-  if (appliedAccountEpoch !== accountEpoch) {
-    setAppliedAccountEpoch(accountEpoch);
+  const [appliedAccountKey, setAppliedAccountKey] = useState(accountKey);
+  if (appliedAccountKey !== accountKey) {
+    setAppliedAccountKey(accountKey);
+    setShowDecksModal(false);
     setLocalActionError(null);
     setLocalActionNotice(null);
     setLibraryCopyMessage(null);
@@ -454,17 +481,17 @@ export function CardLibraryModal({
   }, [isOpen, isPublicTab, activeTab, myPage.status, myPage.total, favoritesPage.status, favoritesPage.total, currentPage, cardsPerPage]);
   useEffect(() => {
     if (!isOpen || !isAuthenticated) return;
-    // 收藏 id 是账号私有偏好：写入打发起时的纪元标签，渲染只投影当前纪元——
+    // 收藏 id 是账号私有偏好：写入打发起时的身份标签，渲染只投影当前身份——
     // 切账号/登出后，旧账号迟到的响应不可能投影进新会话。
-    const epoch = accountEpoch;
+    const ownerKey = accountKey;
     let cancelled = false;
     void host.online.listFavoriteIds().then((result) => {
-      if (!cancelled && result.success) setFavoriteView({ epoch, ids: new Set(result.favorites as string[]) });
+      if (!cancelled && result.success) setFavoriteView({ owner: ownerKey, ids: new Set(result.favorites as string[]) });
     }).catch(() => {
       // 收藏标记是纯装饰：失败时保持空集，列表照常渲染。
     });
     return () => { cancelled = true; };
-  }, [isOpen, isAuthenticated, userId, host.online, accountEpoch]);
+  }, [isOpen, isAuthenticated, userId, host.online, accountKey]);
 
   const inferRoleType = useCallback((card: any): 'magical-girl' | 'canshou' | 'general' | null => {
     if (!card || card.type !== 'character') return null;
@@ -904,8 +931,12 @@ export function CardLibraryModal({
     if (!allowDeckImport) return;
     if (selectionMode !== 'multi') return;
 
+    // 卡组读取是账号绑定请求：await 期间账号可能已切换——旧账号的迟到响应
+    // 绝不能经 onToggleCard/onSelectCard 写进新账号的选择状态（DESK-ONLINE-010）。
+    const ownerKey = latestAccountKeyRef.current;
     try {
       const detail = await host.online.getDeckCards(deckId);
+      if (latestAccountKeyRef.current !== ownerKey) return;
       const entries = Array.isArray(detail?.cards) ? detail.cards : [];
 
       let remaining = typeof maxSelected === 'number' && maxSelected > 0 ? Math.max(0, maxSelected - selectedCount) : Number.POSITIVE_INFINITY;
@@ -1014,20 +1045,20 @@ export function CardLibraryModal({
     setUploadingLocalId(card.id);
     // 上传是账号绑定的写操作：await 返回时账号可能已切换，迟到的成功/失败
     // 提示都不得投影到新账号会话（DESK-ONLINE-010 stale-result rejection）。
-    const epoch = accountEpochRef.current.epoch;
+    const ownerKey = latestAccountKeyRef.current;
     try {
       const result = await upload(record);
-      if (accountEpochRef.current.epoch !== epoch) return;
+      if (latestAccountKeyRef.current !== ownerKey) return;
       if (result.ok) {
         setLocalActionNotice('已上传为云端新数据卡（默认私有）。');
       } else {
         setLocalActionError(result.error);
       }
     } catch (error) {
-      if (accountEpochRef.current.epoch !== epoch) return;
+      if (latestAccountKeyRef.current !== ownerKey) return;
       setLocalActionError(error instanceof Error ? error.message : '上传到云端失败，请重试。');
     } finally {
-      // spinner 是本行本地状态，不属于账号投影：无论纪元是否前进都要复位。
+      // spinner 是本行本地状态，不属于账号投影：无论身份是否已更换都要复位。
       setUploadingLocalId((current) => (current === card.id ? null : current));
     }
   }, [host.online, localRecordById]);
@@ -1154,10 +1185,10 @@ export function CardLibraryModal({
     if (!isAuthenticated) {
       return false;
     }
-    // 账号纪元捕获：await 之后账号可能已切换——旧账号的迟到结果绝不能写回
+    // 账号身份捕获：await 之后账号可能已切换——旧账号的迟到结果绝不能写回
     // 新账号的 UI（收藏集合、列表计数、收藏列表内容一律拒绝投影）。
-    const epoch = accountEpochRef.current.epoch;
-    const isCurrentSession = () => accountEpochRef.current.epoch === epoch;
+    const ownerKey = latestAccountKeyRef.current;
+    const isCurrentSession = () => latestAccountKeyRef.current === ownerKey;
 
     if (nextState) {
       const result = await host.online.addFavorite(card.id);
@@ -1171,10 +1202,10 @@ export function CardLibraryModal({
       const delta = result.alreadyExists ? 0 : 1;
 
       setFavoriteView((prev) => {
-        if (prev.epoch !== epoch) return prev;
+        if (prev.owner !== ownerKey) return prev;
         const next = new Set(prev.ids);
         next.add(card.id);
-        return { epoch, ids: next };
+        return { owner: ownerKey, ids: next };
       });
 
       if (delta !== 0) {
@@ -1210,10 +1241,10 @@ export function CardLibraryModal({
     }
 
     setFavoriteView((prev) => {
-      if (prev.epoch !== epoch) return prev;
+      if (prev.owner !== ownerKey) return prev;
       const next = new Set(prev.ids);
       next.delete(card.id);
-      return { epoch, ids: next };
+      return { owner: ownerKey, ids: next };
     });
 
     setPublicDataCards((prev) => adjustFavoriteCount(prev, card.id, -1));
@@ -1991,13 +2022,16 @@ export function CardLibraryModal({
 	              </div>
       )}
 
-	      {allowDeckImport && host.slots.DecksModal ? (
-	        <host.slots.DecksModal
-	          isOpen={showDecksModal}
-	          onClose={() => setShowDecksModal(false)}
-	          onImportDeck={(deckId) => void handleImportDeck(deckId)}
-	        />
-	      ) : null}
+      {/* 注入的 DecksModal 内部持有账号私有 state 且不按账号隔离：
+          `key` 绑定账号身份，换身份即整体重挂载，旧账号内容不可见。 */}
+      {allowDeckImport && host.slots.DecksModal ? (
+        <host.slots.DecksModal
+          key={accountKey}
+          isOpen={showDecksModal}
+          onClose={() => setShowDecksModal(false)}
+          onImportDeck={(deckId) => void handleImportDeck(deckId)}
+        />
+      ) : null}
 
           {/* 分页与底部 */}
           {(

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act } from 'react';
+import { act, useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type { LocalCardRecordV1 } from '@mahoshojo/local-library/record';
@@ -249,6 +249,7 @@ const deferred = <T,>() => {
 
 const publicCard = (id: string) => ({
   id, type: 'character', name: `公开角色 ${id}`, description: '公开描述',
+  data: { codename: id, description: `公开描述 ${id}` },
   is_public: 1, review_status: 'approved', created_at: '2026-01-01T00:00:00Z',
   updated_at: '2026-01-01T00:00:00Z', usage_count: 0, like_count: 0, favorite_count: 0,
   is_recommended: 0, username: 'author', roleType: 'magical-girl', nativeAllowed: false,
@@ -353,4 +354,154 @@ test('选中回调携带来源实例上下文（local:<recordId> / cloud:<cardId
   expect(onSelectCard.mock.calls[0]![1]).toEqual({
     selectionId: 'local:a', storageLocation: 'local',
   });
+});
+
+test('卡组导入的迟到结果不得写进切换后的账号，且换账号即关闭并重挂载卡组弹窗', async () => {
+  const deckA = deferred<{ cards?: Array<{ isAccessible?: boolean; card?: any }> } | null>();
+  const getDeckCards = vi.fn(() => deckA.promise);
+  const fetchPublicCards = vi.fn(async () => ({
+    ok: true as const, status: 200,
+    data: { success: true, cards: [], total: 0, nextOffset: null },
+  }));
+  let decksMounts = 0;
+  const DecksModalStub = ({ isOpen, onImportDeck }: { isOpen: boolean; onImportDeck: (id: string) => void }) => {
+    // 记录真实挂载次数：key={accountKey} 换身份时必须整树重挂载。
+    useEffect(() => { decksMounts += 1; }, []);
+    return (
+      <div data-testid="decks-modal">
+        {isOpen ? 'open' : 'closed'}
+        <button type="button" onClick={() => onImportDeck('deck-1')}>import-deck</button>
+      </div>
+    );
+  };
+  const onToggleCard = vi.fn();
+  const onSelectCard = vi.fn();
+
+  const { host: hostA } = createHost([], {
+    auth: { status: 'authenticated', userId: 1, userBadges: [] },
+    online: { fetchPublicCards, getDeckCards },
+  });
+  hostA.slots.DecksModal = DecksModalStub;
+  await render({
+    host: hostA, isOpen: true, onClose: vi.fn(), onToggleCard, onSelectCard,
+    selectedType: 'character', initialTab: 'public', selectionMode: 'multi', selectedCardIds: [],
+  });
+  await settle();
+  expect(decksMounts).toBe(1);
+
+  // 打开卡组弹窗并发起导入：getDeckCards 在飞。
+  await click([...document.body.querySelectorAll('button')].find((b) => b.textContent?.trim() === '卡组导入')!);
+  await settle();
+  expect(document.body.querySelector('[data-testid="decks-modal"]')!.textContent).toContain('open');
+  await click([...document.body.querySelectorAll('button')].find((b) => b.textContent === 'import-deck')!);
+  await settle();
+  expect(getDeckCards).toHaveBeenCalledWith('deck-1');
+
+  // 请求在飞时切到账号 B：弹窗立即关闭且 DecksModal 整体重挂载。
+  const { host: hostB } = createHost([], {
+    auth: { status: 'authenticated', userId: 2, userBadges: [] },
+    online: { fetchPublicCards, getDeckCards },
+  });
+  hostB.slots.DecksModal = DecksModalStub;
+  await act(async () => {
+    root.render(<CardLibraryModal
+      host={hostB} isOpen onClose={vi.fn()} onToggleCard={onToggleCard} onSelectCard={onSelectCard}
+      selectedType="character" initialTab="public" selectionMode="multi" selectedCardIds={[]}
+    />);
+  });
+  await settle();
+  expect(document.body.querySelector('[data-testid="decks-modal"]')!.textContent).toContain('closed');
+  expect(decksMounts).toBe(2);
+
+  // A 的卡组明细迟到到达：不得经 onToggleCard/onSelectCard 落进 B 的选择状态。
+  deckA.resolve({ cards: [{ isAccessible: true, card: publicCard('card-9') }] });
+  await settle();
+  expect(onToggleCard).not.toHaveBeenCalled();
+  expect(onSelectCard).not.toHaveBeenCalled();
+});
+
+test('同账号下的卡组导入正常写入多选状态并跳不可访问项', async () => {
+  const { host } = createHost([], {
+    auth: { status: 'authenticated', userId: 1, userBadges: [] },
+    online: {
+      fetchPublicCards: vi.fn(async () => ({
+        ok: true as const, status: 200,
+        data: { success: true, cards: [], total: 0, nextOffset: null },
+      })),
+      getDeckCards: vi.fn(async () => ({
+        cards: [
+          { isAccessible: true, card: publicCard('card-9') },
+          { isAccessible: false, card: publicCard('card-x') },
+        ],
+      })),
+    },
+  });
+  host.slots.DecksModal = ({ onImportDeck }) => (
+    <button type="button" onClick={() => onImportDeck('deck-1')}>import-deck</button>
+  );
+  const onToggleCard = vi.fn();
+  await render({
+    host, isOpen: true, onClose: vi.fn(), onToggleCard,
+    selectedType: 'character', initialTab: 'public', selectionMode: 'multi', selectedCardIds: [],
+  });
+  await settle();
+
+  await click([...document.body.querySelectorAll('button')].find((b) => b.textContent === 'import-deck')!);
+  await settle();
+
+  expect(onToggleCard).toHaveBeenCalledTimes(1);
+  const [payload, nextSelected, context] = onToggleCard.mock.calls[0]! as [Record<string, unknown>, boolean, unknown];
+  expect(payload._cardId).toBe('card-9');
+  expect(nextSelected).toBe(true);
+  expect(context).toEqual({ selectionId: 'cloud:card-9', storageLocation: 'cloud', cloudCardId: 'card-9' });
+});
+
+test('会话探测（unknown）不清账号绑定状态：A→unknown→A 收藏投影不失配', async () => {
+  const listA = deferred<{ success: boolean; favorites?: string[] }>();
+  const fetchPublicCards = vi.fn(async () => ({
+    ok: true as const, status: 200,
+    data: { success: true, cards: [publicCard('card-1')], total: 1, nextOffset: null },
+  }));
+  const { host: hostA } = createHost([], {
+    auth: { status: 'authenticated', userId: 1, userBadges: [] },
+    online: { fetchPublicCards, listFavoriteIds: vi.fn(() => listA.promise) },
+  });
+  await render({
+    host: hostA, isOpen: true, onClose: vi.fn(), onSelectCard: vi.fn(),
+    selectedType: 'character', initialTab: 'public',
+  });
+  await settle();
+  expect(document.body.textContent).toContain('公开角色 card-1');
+
+  listA.resolve({ success: true, favorites: ['card-1'] });
+  await settle();
+  expect(isFavoritedRendered()).toBe(true);
+
+  // 会话探测期（unknown）：登录态未确认不产出新身份，已确认账号的投影保留。
+  const { host: hostUnknown } = createHost([], {
+    auth: { status: 'unknown', userId: null, userBadges: [] },
+    online: { fetchPublicCards, listFavoriteIds: vi.fn(() => new Promise<never>(() => {})) },
+  });
+  await act(async () => {
+    root.render(<CardLibraryModal
+      host={hostUnknown} isOpen onClose={vi.fn()} onSelectCard={vi.fn()}
+      selectedType="character" initialTab="public"
+    />);
+  });
+  await settle();
+  expect(isFavoritedRendered()).toBe(true);
+
+  // 探测结束回到同一账号：旧投影仍然有效，不必等重新拉取才显示星标。
+  const { host: hostA2 } = createHost([], {
+    auth: { status: 'authenticated', userId: 1, userBadges: [] },
+    online: { fetchPublicCards, listFavoriteIds: vi.fn(() => new Promise<never>(() => {})) },
+  });
+  await act(async () => {
+    root.render(<CardLibraryModal
+      host={hostA2} isOpen onClose={vi.fn()} onSelectCard={vi.fn()}
+      selectedType="character" initialTab="public"
+    />);
+  });
+  await settle();
+  expect(isFavoritedRendered()).toBe(true);
 });

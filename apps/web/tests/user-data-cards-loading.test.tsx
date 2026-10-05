@@ -406,7 +406,7 @@ it('公开库下一页发 offset=12 并停留在第 2 页，不被公开查询 e
   expect(document.body.textContent).not.toContain('第 1 页');
 });
 
-it('roleType 高级筛选后本地分页第 2 页不被公开查询 effect 重置', async () => {
+it('roleType 高级筛选后服务端分页第 2 页不被公开查询 effect 重置', async () => {
   const roleCards = Array.from({ length: 13 }, (_, index) => ({
     ...card,
     id: `role-${index + 1}`,
@@ -417,7 +417,15 @@ it('roleType 高级筛选后本地分页第 2 页不被公开查询 effect 重�
   const listUrls: string[] = [];
   vi.stubGlobal('fetch', makePublicBatchFetch((url) => {
     listUrls.push(url);
-    return Response.json({ success: true, cards: roleCards });
+    // 摘要分页契约（D5.0e）：服务端按 offset/limit 切片并回 total。
+    const params = new URL(url, 'http://localhost').searchParams;
+    const offset = Number(params.get('offset') ?? '0');
+    const limit = Number(params.get('limit') ?? '12');
+    const cards = roleCards.slice(offset, offset + limit);
+    return Response.json({
+      success: true, cards, total: roleCards.length,
+      nextOffset: offset + cards.length < roleCards.length ? offset + cards.length : null,
+    });
   }));
   await act(async () => root.render(
     <BattleDataModal isOpen onClose={vi.fn()} onSelectCard={vi.fn()} selectedType="character" initialTab="public" />,
@@ -439,6 +447,8 @@ it('roleType 高级筛选后本地分页第 2 页不被公开查询 effect 重�
   await act(async () => applyButton!.click());
   await flushAsync();
   await flushAsync();
+  // roleType 已下沉服务端：筛选请求必须携带该参数并按服务端分页。
+  expect(listUrls.at(-1)).toContain('roleType=magical-girl');
   expect(document.body.textContent).toContain('第 1 页 / 2');
 
   const nextButton = findButton((text) => text === '下一页');
@@ -449,7 +459,10 @@ it('roleType 高级筛选后本地分页第 2 页不被公开查询 effect 重�
   await flushAsync();
   await flushAsync();
 
-  expect(listUrls.length).toBe(requestsBeforePageChange);
+  // 翻页只发 offset=12 的服务端请求，不被查询 effect 弹回第 1 页重拉。
+  const pageChangeRequests = listUrls.slice(requestsBeforePageChange);
+  expect(pageChangeRequests.some((url) => url.includes('offset=12'))).toBe(true);
+  expect(pageChangeRequests.some((url) => url.includes('offset=0'))).toBe(false);
   expect(document.body.textContent).toContain('第 2 页 / 2');
   expect(document.body.textContent).not.toContain('第 1 页 / 2');
 });
