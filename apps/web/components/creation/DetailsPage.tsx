@@ -210,6 +210,7 @@ export const DetailsPage: React.FC = () => {
   const [nonStreamReasoning, setNonStreamReasoning] = useState<AIReasoningEnvelope | null>(null);
   const [streamNotice, setStreamNotice] = useState<string | null>(null);
   const streamAbortControllerRef = useRef<AbortController | null>(null);
+  const resultSectionRef = useRef<HTMLDivElement | null>(null);
   const [characterPortraitAsset, setCharacterPortraitAsset] = useState<CharacterCardPortraitAsset | null>(null);
 
   // 多语言支持
@@ -638,6 +639,16 @@ export const DetailsPage: React.FC = () => {
       }),
     );
   }, [allQuestionTargets, questionAnswerLookup, questionTargetSignature]);
+
+  // 生成完成（含快速随机）：视口仍停留在结果卡上方时自动滚动定位到结果开头；
+  // 已在结果内或其下方（可能正边看边生成）则不打断。
+  useEffect(() => {
+    if (!magicalGirlDetails && !streamedGeneralCard) return;
+    const element = resultSectionRef.current;
+    if (element && element.getBoundingClientRect().top > 0) {
+      element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, [magicalGirlDetails, streamedGeneralCard]);
 
   const applySelection = (selection: QuestionnaireSelection) => {
     setSelectedQuestionnaires((prev) =>
@@ -1885,7 +1896,7 @@ export const DetailsPage: React.FC = () => {
                 <div className="my-4 bg-gray-100 rounded-lg p-3">
                   <button
                     onClick={() => setShowLanguageSection(!showLanguageSection)}
-                    className="flex items-center justify-between w-full text-left font-medium text-gray-700 hover:text-blue-600"
+                    className="flex items-center justify-between w-full text-left font-medium text-gray-700 hover:text-gray-900"
                   >
                     <span>生成语言</span>
                     <span className="ml-2">{showLanguageSection ? '▼' : '▶'}</span>
@@ -2003,6 +2014,8 @@ export const DetailsPage: React.FC = () => {
             )}
           </div>
 
+          <div ref={resultSectionRef}>
+
           {/* 流式：通用角色卡（Markdown） */}
           {generationMode === 'stream' && (streamingMarkdown !== null || streamedGeneralCard) && (
             <>
@@ -2020,7 +2033,7 @@ export const DetailsPage: React.FC = () => {
                   <AiReasoningPanel reasoning={streamingReasoning} status={streamingReasoning?.status ?? 'idle'} compact />
                   <div className="card" style={{ marginTop: '1rem' }}>
                     <div className="text-center">
-                      <h3 className="text-lg font-medium text-blue-900" style={{ marginBottom: '1rem' }}>生成立绘</h3>
+                      <h3 className="text-lg font-medium text-gray-800" style={{ marginBottom: '1rem' }}>生成立绘</h3>
                       <CharacterPortraitAssetPanel
                         prompt={streamPortraitPrompt}
                         onPortraitAssetChange={setCharacterPortraitAsset}
@@ -2035,20 +2048,23 @@ export const DetailsPage: React.FC = () => {
                   <div className="card" style={{ marginTop: '1rem' }}>
                     <div className="text-center">
                       <h3 className="text-lg font-medium text-gray-800" style={{ marginBottom: '1rem' }}>后续操作</h3>
-                      <div className="flex flex-col sm:flex-row gap-3 justify-center">
-                        <button onClick={() => downloadStreamedGeneralCard(streamedGeneralCard)} className="generate-button flex-1">
+                      <div className="flex flex-col gap-3">
+                        <button onClick={() => downloadStreamedGeneralCard(streamedGeneralCard)} className="generate-button">
                           下载通用角色卡
                         </button>
-                        <SaveToCloudButton
-                          data={streamedGeneralCard}
-                          cardType="character"
-                          buttonText="保存到云端"
-                          className="generate-button flex-1"
-                          style={{ backgroundColor: '#22c55e', backgroundImage: 'linear-gradient(to right, #22c55e, #16a34a)' }}
-                        />
+                        {/* SaveToCloudButton 内部为「保存 + 替换」双按钮，独占一列避免与相邻按钮挤压 */}
+                        <div className="flex flex-col gap-3">
+                          <SaveToCloudButton
+                            data={streamedGeneralCard}
+                            cardType="character"
+                            buttonText="保存到云端"
+                            className="generate-button w-full"
+                            style={{ marginLeft: 0, backgroundColor: '#22c55e', backgroundImage: 'linear-gradient(to right, #22c55e, #16a34a)' }}
+                          />
+                        </div>
                         <button
                           onClick={() => void copyStreamedGeneralCard(streamedGeneralCard)}
-                          className="generate-button flex-1"
+                          className="generate-button"
                           style={{ backgroundColor: '#3b82f6', backgroundImage: 'linear-gradient(to right, #3b82f6, #2563eb)' }}
                         >
                           复制到剪贴板
@@ -2071,8 +2087,8 @@ export const DetailsPage: React.FC = () => {
             </>
           )}
 
-          {/* 非流式：魔法少女详细信息结果 */}
-          {generationMode === 'non-stream' && magicalGirlDetails && (
+          {/* 非流式/快速随机：魔法少女详细信息结果（不设模式门禁，快速随机在任何模式下都渲染） */}
+          {magicalGirlDetails && (
             <>
               <MagicalGirlCard
                 magicalGirl={magicalGirlDetails}
@@ -2094,7 +2110,7 @@ export const DetailsPage: React.FC = () => {
                 <div className="space-y-5 text-left">
                   <div>
                     <div className="flex items-center justify-between text-sm">
-                      <span className="font-medium text-blue-900">设定长图保存方式</span>
+                      <span className="font-medium text-gray-800">设定长图保存方式</span>
                       <span className="text-xs text-gray-500">推荐：{recommendedImageMode === 'download' ? '一键下载' : '长按保存弹窗'}</span>
                     </div>
                     <div className="flex flex-col sm:flex-row gap-2 mt-2">
@@ -2124,7 +2140,7 @@ export const DetailsPage: React.FC = () => {
 
                   <div>
                     <div className="flex items-center justify-between text-sm">
-                      <span className="font-medium text-blue-900">设定文件保存方式</span>
+                      <span className="font-medium text-gray-800">设定文件保存方式</span>
                       <span className="text-xs text-gray-500">推荐：{recommendedJsonMode === 'download' ? '直接下载 JSON' : '复制原始数据'}</span>
                     </div>
                     <div className="flex flex-col sm:flex-row gap-2 mt-2">
@@ -2160,7 +2176,7 @@ export const DetailsPage: React.FC = () => {
                 <div className="text-center">
                   <button
                     onClick={() => setShowDetails(!showDetails)}
-                    className="text-lg font-medium text-blue-900 hover:text-blue-700 transition-colors duration-200"
+                    className="text-lg font-medium text-gray-800 hover:text-gray-600 transition-colors duration-200"
                     style={{ background: 'none', border: 'none', cursor: 'pointer' }}
                   >
                     {showDetails ? '点击收起设定说明' : '点击展开设定说明'} {showDetails ? '▼' : '▶'}
@@ -2168,19 +2184,19 @@ export const DetailsPage: React.FC = () => {
                   {showDetails && (
                     <div className="text-left" style={{ marginTop: '1rem' }}>
                       <div className="mb-4">
-                        <h4 className="font-medium text-blue-800 mb-2">1. 魔力构装（简称魔装）</h4>
+                        <h4 className="font-medium text-gray-700 mb-2">1. 魔力构装（简称魔装）</h4>
                         <p className="text-sm text-gray-700 leading-relaxed">
                           魔法少女的本相魔力所孕育的能力具现，是魔法少女能力体系的基础。一般呈现为魔法少女在现实生活中接触过，在冥冥之中与其命运关联或映射的物体，并且与魔法少女特色能力相关。例如，泡泡机形态的魔装可以使魔法少女制造魔法泡泡，而这些泡泡可以拥有产生幻象、缓冲防护、束缚困敌等能力。这部分的内容需包含魔装的名字（通常为2字词），魔装的形态，魔装的基本能力。
                         </p>
                       </div>
                       <div className="mb-4">
-                        <h4 className="font-medium text-blue-800 mb-2">2. 奇境规则</h4>
+                        <h4 className="font-medium text-gray-700 mb-2">2. 奇境规则</h4>
                         <p className="text-sm text-gray-700 leading-relaxed">
                           魔法少女的本相灵魂所孕育的能力，是魔装能力的一体两面。奇境是魔装能力在规则层面上的升华，体现为与魔装相关的规则领域，而规则的倾向则会根据魔法少女的倾向而有不同的发展。例如，泡泡机形态的魔装升华而来的奇境规则可以是倾向于守护的&ldquo;戳破泡泡的东西将会立即无效化&rdquo;，也可以是倾向于进攻的&ldquo;沾到身上的泡泡被戳破会立即遭受伤害&rdquo;。
                         </p>
                       </div>
                       <div className="mb-4">
-                        <h4 className="font-medium text-blue-800 mb-2">3. 繁开</h4>
+                        <h4 className="font-medium text-gray-700 mb-2">3. 繁开</h4>
                         <p className="text-sm text-gray-700 leading-relaxed">
                           是魔法少女魔装能力的二段进化与解放，无论是作为魔法少女的魔力衣装还是魔装的武器外形都会发生改变。需包含繁开状态魔装名（需要包含原魔装名的每个字），繁开后的进化能力，繁开后的魔装形态，繁开后的魔法少女衣装样式（在通常变身外观上的升级与改变）。
                         </p>
@@ -2193,8 +2209,8 @@ export const DetailsPage: React.FC = () => {
               {/* 保存原始数据按钮 */}
               <div className="card" style={{ marginTop: '1rem' }}>
                 <div className="text-center">
-                  <h3 className="text-lg font-medium text-blue-900" style={{ marginBottom: '1rem' }}>保存人物设定</h3>
-                  <div className="flex flex-col sm:flex-row gap-3 justify-center">
+                  <h3 className="text-lg font-medium text-gray-800" style={{ marginBottom: '1rem' }}>保存人物设定</h3>
+                  <div className="flex flex-col gap-3">
                     {resolvedResultPayload && (
                       <>
                         <SaveJsonButton
@@ -2203,11 +2219,15 @@ export const DetailsPage: React.FC = () => {
                           recommendedMode={recommendedJsonMode}
                           resolveFileName={resolveDetailsJsonFileName}
                         />
-                        <SaveToCloudButton
-                          data={resolvedResultPayload}
-                          buttonText="保存到云端"
-                          style={{ backgroundColor: '#22c55e', backgroundImage: 'linear-gradient(to right, #22c55e, #16a34a)' }}
-                        />
+                        {/* SaveToCloudButton 内部为「保存 + 替换」双按钮，独占一列避免与相邻按钮挤压 */}
+                        <div className="flex flex-col gap-3">
+                          <SaveToCloudButton
+                            data={resolvedResultPayload}
+                            buttonText="保存到云端"
+                            className="generate-button w-full"
+                            style={{ marginLeft: 0, backgroundColor: '#22c55e', backgroundImage: 'linear-gradient(to right, #22c55e, #16a34a)' }}
+                          />
+                        </div>
                       </>
                     )}
                   </div>
@@ -2222,7 +2242,7 @@ export const DetailsPage: React.FC = () => {
                     <p className="text-sm text-gray-600 mb-2">
                       保存好你的设定文件了吗？
                     </p>
-                    <Link href="/battle" className="footer-link text-lg text-blue-600">
+                    <Link href="/battle" className="footer-link text-lg">
                       前往竞技场，开始战斗！→
                     </Link>
                   </div>
@@ -2232,7 +2252,7 @@ export const DetailsPage: React.FC = () => {
               {/* 立绘生成器 */}
               <div className="card" style={{ marginTop: '1rem' }}>
                 <div className="text-center">
-                  <h3 className="text-lg font-medium text-blue-900" style={{ marginBottom: '1rem' }}>生成立绘</h3>
+                  <h3 className="text-lg font-medium text-gray-800" style={{ marginBottom: '1rem' }}>生成立绘</h3>
                   <CharacterPortraitAssetPanel
                     prompt={`${JSON.stringify(magicalGirlDetails.appearance)} , Xiabanmo, 二次元, 魔法少女`}
                     onPortraitAssetChange={setCharacterPortraitAsset}
@@ -2241,6 +2261,7 @@ export const DetailsPage: React.FC = () => {
               </div>
             </>
           )}
+          </div>
 
           <Footer textWhite={true} />
         </div>
