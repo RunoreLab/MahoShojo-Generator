@@ -118,7 +118,7 @@ export interface HomeFeatureGridProps {
   readonly assetSource: HomeAssetSource;
   readonly capabilities: CapabilitySnapshot;
   readonly onNavigate: (href: string) => void;
-  /** 不可用入口的处置方式，与 `ProductNav` 同一套语义。 */
+  /** 不可用入口的处置方式，与共源顶栏同一套语义。 */
   readonly unavailable?: 'hide' | 'explain';
   /** 宿主提供实际功能清单，共享层不预设 Web 或 Desktop inventory。 */
   readonly categories: readonly HomeFeatureCategory[];

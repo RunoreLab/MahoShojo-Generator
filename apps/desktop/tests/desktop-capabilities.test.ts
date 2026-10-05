@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { readCapability } from '@mahoshojo/ui-web/capability';
 import { NAV_GROUPS } from '@mahoshojo/ui-web/navigation';
+import { TOPBAR_PRODUCT_HREFS } from '@mahoshojo/ui-web/shell';
 
 import { buildCapabilitySnapshot } from '../src/app/capabilities';
 import { DELIVERED_ROUTES } from '../src/app/delivered-routes';
@@ -24,6 +25,26 @@ describe('desktop capability snapshot', () => {
     for (const href of allHrefs) {
       expect(snapshot, `能力快照缺少入口 ${href}`).toHaveProperty(href);
     }
+  });
+
+  it('covers the topbar-owned product paths so they never fall to undeclared', () => {
+    // 顶栏自己消费的路径（logo 首页、消息中心、账号下拉）不在 NAV_GROUPS 里——漏声明
+    // 会把它们按 `unknown` 置灰并写成「未声明」的错误理由。每条都必须落在明确判定上。
+    for (const href of TOPBAR_PRODUCT_HREFS) {
+      const availability = readCapability(snapshot, href);
+      expect(availability.kind, `顶栏路径 ${href} 不应是未声明`).not.toBe('unknown');
+    }
+    expect(readCapability(snapshot, '/')).toEqual({ kind: 'available' });
+    expect(readCapability(snapshot, '/character-manager')).toEqual({ kind: 'available' });
+    // Desktop 还没有消息中心与个人页：如实标 not-implemented，而不是可点击的死链。
+    expect(readCapability(snapshot, '/messages')).toMatchObject({
+      kind: 'unavailable',
+      reason: 'not-implemented',
+    });
+    expect(readCapability(snapshot, '/me')).toMatchObject({
+      kind: 'unavailable',
+      reason: 'not-implemented',
+    });
   });
 
   it('marks exactly the delivered routes as available', () => {
@@ -81,7 +102,7 @@ describe('desktop capability snapshot', () => {
     ).children ?? [];
 
     // 路由语法与产品语法不同：TanStack 用 `$slug`，产品路径用 `[slug]`（`navigation.ts` 的
-    // canonical 形式，也是 `ProductNav` 的 `href`）。归一化之后两者才可比。
+    // canonical 形式，也是共源顶栏的 `href`）。归一化之后两者才可比。
     const toProductPath = (path: string): string => path.replace(/\$([A-Za-z0-9_]+)/g, '[$1]');
 
     const servedPaths = new Set(

@@ -1,12 +1,14 @@
 import { useCallback } from 'react';
 import { Outlet, createRootRoute, createRoute, lazyRouteComponent, useRouter } from '@tanstack/react-router';
-import { AppShell, ProductNav } from '@mahoshojo/ui-web/shell';
+import { AppShell, ProductTopBar } from '@mahoshojo/ui-web/shell';
 import {
   HomeEncyclopediaCard,
   HomeHero,
   type HomeAssetSource,
 } from '@mahoshojo/ui-web/home';
 
+import { projectTopBarAccount } from '../features/account/topbar-projection';
+import { useDesktopCloudSession } from '../features/account/use-desktop-cloud-session';
 import { buildCapabilitySnapshot } from './capabilities';
 
 /**
@@ -41,7 +43,7 @@ const DESKTOP_ASSET_SOURCE: HomeAssetSource = { baseUrl: '/' };
  * 导航能力快照。
  *
  * 它由 `DELIVERED_ROUTES` 推导，而后者是模块级常量，因此快照也是。在模块作用域算一次而不是在组件
- * 体内：每次渲染重建出一个新对象会让 `ProductNav` 的 `capabilities` prop 每次都变，虽然它目前不参与
+ * 体内：每次渲染重建出一个新对象会让 `ProductTopBar` 的 `capabilities` prop 每次都变，虽然它目前不参与
  * 任何 memo，但一个「本该是常量」的表达式写在渲染路径上正是将来被误加进依赖数组的起点。
  */
 const CAPABILITIES = buildCapabilitySnapshot();
@@ -49,28 +51,41 @@ const CAPABILITIES = buildCapabilitySnapshot();
 /**
  * 壳。
  *
- * 这是 Desktop 唯一的装配点，职责只有三件：给共源导航喂能力快照、把导航点击交给 router、把页面内容
- * 放进共源外框。**它不挂载任何在线 bootstrap**——公告轮询、账号探测、统计、挑战页与远端图片都不
- * 在这里，因为 `DESK-PROD-004` 要求本地启动与本地旅程不自动请求项目服务。一个「长得像 Web」的布局
- * 不构成离线启动达成的证据。
+ * 这是 Desktop 唯一的装配点，职责只有三件：给共源顶栏喂宿主投影、把导航点击交给 router、把页面
+ * 内容放进共源外框。**它不挂载任何在线 bootstrap**——公告轮询、账号探测、统计、消息摘要与远端
+ * 图片都不在这里（`DESK-PROD-004` 要求本地启动与本地旅程不自动请求项目服务）：
+ *
+ * - 账号投影来自 `DesktopCloudSessionStore` 的当前快照；冷启动是 `idle → 'unknown'` 的
+ *   中性「账号」占位，点按经 `requestAuth` 才触发第一次 `cloud_auth_status`；
+ * - 消息摘要不注入：Desktop 没有消息中心，`/messages` 在快照里是 not-implemented，
+ *   按 `hide` 策略整条入口不出现——也不会有任何未读角标的伪造；
+ * - 站外入口不提供 `onNavigateExternal`：系统浏览器能力尚未接入（DESK-ONLINE-014），
+ *   共源组件会把它们按「需系统浏览器」禁用/隐藏，而不是给点了没反应的链接。
  */
 const DesktopShell = () => {
   const router = useRouter();
+  const { state: cloudSession, store: cloudSessionStore } = useDesktopCloudSession();
 
   return (
     <AppShell
-      navigation={
-        <ProductNav
+      topBar={
+        <ProductTopBar
           pathname={router.state.location.pathname}
           capabilities={CAPABILITIES}
+          logoSrc="/logo.svg"
+          account={projectTopBarAccount(cloudSession.phase)}
           onNavigate={(href, event) => {
-            // 共享导航渲染真实 `<a href>`，因此这里必须阻止默认行为，否则会触发一次整页加载。
+            // 共享顶栏渲染真实 `<a href>`，因此这里必须阻止默认行为，否则会触发一次整页加载。
             // Web 侧同理接 `router.push`——「宿主负责路由」这件事在两端是同一种形状。
             event.preventDefault();
             void router.navigate({ to: href });
           }}
-          // 站外入口不提供处理器：打开外部站点需要新的 native 能力（Tauri 的 opener），不属于 D2.5
-          // 的范围。缺省时 `ProductNav` 把它们渲染成不可点击并说明原因，而不是给一个点了没反应的链接。
+          onRequestAuth={() => {
+            void cloudSessionStore.requestAuth();
+          }}
+          onSignOut={() => {
+            void cloudSessionStore.signOut();
+          }}
         />
       }
     >

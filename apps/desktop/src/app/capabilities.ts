@@ -5,6 +5,7 @@ import {
   type CapabilitySnapshot,
 } from '@mahoshojo/ui-web/capability';
 import { NAV_GROUPS } from '@mahoshojo/ui-web/navigation';
+import { TOPBAR_PRODUCT_HREFS } from '@mahoshojo/ui-web/shell';
 
 import { DELIVERED_ROUTES } from './delivered-routes';
 
@@ -20,7 +21,7 @@ import { DELIVERED_ROUTES } from './delivered-routes';
  * ## 为什么还要遍历站外入口
  *
  * 站外入口同样需要一个明确判定，而不是因为「不在 `routeTree` 里」就被漏掉——漏掉会让
- * `ProductNav` 把它们显示成「未声明」，那是一个错误的理由：它们的问题不是本仓库没声明，而是宿主
+ * 共源顶栏把它们显示成「未声明」，那是一个错误的理由：它们的问题不是本仓库没声明，而是宿主
  * 没有打开外部站点的能力。
  */
 export const buildCapabilitySnapshot = (): CapabilitySnapshot => {
@@ -29,14 +30,18 @@ export const buildCapabilitySnapshot = (): CapabilitySnapshot => {
 
   // 先把已交付路由全部标为可用，**再**用入口清单覆盖未交付的那些。顺序不能反：`/`（首页）与
   // `/settings` 都不是 `NAV_GROUPS` 的成员——它们分别是壳的容器与设置入口，不出现在分组导航里。
-  // 只遍历入口清单会让这两条永远落在 `unknown` 上，而 `ProductNav` 对 `unknown` 的处理是「不可点击
+  // 只遍历入口清单会让这两条永远落在 `unknown` 上，而共源组件对 `unknown` 的处理是「不可点击
   // 并说明未声明」：首页在导航里不可点击虽然不至于白屏，但能力快照与事实不符本身就是缺陷。
   for (const href of delivered) {
     snapshot[href] = AVAILABLE;
   }
 
+  // `TOPBAR_PRODUCT_HREFS` 是 NAV_GROUPS 之外、共源顶栏自身消费的产品路径（logo 首页、
+  // 消息中心、账号下拉的个人页/角色管理）。未声明时顶栏会把它们按 `unknown` 置灰——
+  // 首页被标成「未声明」是能力快照与路由事实的分叉，必须并入声明集合（D5.0d）。
   const declared = new Set([
     ...NAV_GROUPS.flatMap((group) => group.items.map((item) => ({ href: item.href, isExternal: item.isExternal === true }))),
+    ...TOPBAR_PRODUCT_HREFS.map((href) => ({ href, isExternal: false })),
   ]);
 
   for (const { href, isExternal } of declared) {
@@ -56,5 +61,6 @@ export const buildCapabilitySnapshot = (): CapabilitySnapshot => {
 export const DECLARED_PRODUCT_PATHS: readonly string[] = [
   ...new Set([
     ...NAV_GROUPS.flatMap((group) => group.items.map((item) => item.href)),
+    ...TOPBAR_PRODUCT_HREFS,
   ]),
 ];

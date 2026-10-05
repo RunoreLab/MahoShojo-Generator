@@ -17,7 +17,7 @@ import { routeTree } from './routes';
  * 桌面应用的基本要求，不是可选项。
  *
  * 共享导航不受影响：`@mahoshojo/ui-web/navigation` 只产出产品路径，宿主各自决定如何映射
- * （`ProductNav` 渲染 `<a href>` 并把点击交给宿主）。因此将来若换 router 或改 history 类型，
+ * （共源顶栏渲染 `<a href>` 并把点击交给宿主）。因此将来若换 router 或改 history 类型，
  * 要改的只有这个文件。
  */
 export const createDesktopRouter = () =>

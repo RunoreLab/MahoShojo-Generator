@@ -50,7 +50,7 @@ export type ExternalLinkRenderProps = InternalLinkRenderProps;
  *   普通 `<a href>`，即浏览器默认导航。
  * - **站外**链接：宿主可以用 `renderExternalLink` 提供原生链接，或用 `onNavigateExternal` 调用打开能力。
  *   两者都缺省时渲染成**不可点击并说明原因**，而不是留一个点了没反应的
- *   链接。这与 `ProductNav` 的处理是同一套形状：Desktop 目前没有 opener 能力，于是站外内容在该运行时
+ *   链接。这与共源顶栏的处理是同一套形状：Desktop 目前没有 opener 能力，于是站外内容在该运行时
  *   里就是不可执行的，而不是「看起来能点但什么也不发生」。
  */
 export type MarkdownNavigationPolicy = {

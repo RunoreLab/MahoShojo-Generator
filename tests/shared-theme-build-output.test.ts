@@ -46,7 +46,7 @@ const SHARED_STYLESHEET = path.join(REPO_ROOT, 'packages', 'ui-web', 'src', 'sty
 const SHARED_ONLY_UTILITIES = [
   'bg-\\(--app-page-bg\\)',
   'text-\\(--app-text\\)',
-  'bg-\\(--app-surface-70\\)',
+  'bg-\\(--app-surface\\)',
 ] as const;
 
 /** 共源主题 token。断言存在，不在此断言取值——取值归 `packages/ui-web/tests/shared-theme.test.ts` 管。 */

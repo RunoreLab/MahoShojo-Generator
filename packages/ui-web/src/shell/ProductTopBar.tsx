@@ -38,7 +38,7 @@ export interface ProductTopBarProps {
    * 系统浏览器前的诚实降级路径。
    */
   onNavigateExternal?: TopBarNavigate;
-  /** 不可用入口处置：`'hide'` 隐藏、`'explain'` 置灰保留（默认 hide，与 ProductNav 一致）。 */
+  /** 不可用入口处置：`'hide'` 隐藏、`'explain'` 置灰保留（默认 hide）。 */
   unavailable?: TopBarUnavailablePolicy;
   /** 品牌 logo 资源路径；加载失败时降级渲染 Sparkles + 名称（结构自 GlobalTopBar 保留）。 */
   logoSrc: string;

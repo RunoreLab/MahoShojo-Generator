@@ -2,6 +2,10 @@
 @import '@mahoshojo/ui-web/styles.css';
 @import '@mahoshojo/ui-web/markdown.css';
 
+/* 与 Web `globals.css` 同一行：dark: 变体挂在 `data-color-mode` 上，由共源
+ * color-mode init 脚本在首屏前写入（apps/desktop/index.html）。 */
+@custom-variant dark (&:where([data-color-mode='dark'], [data-color-mode='dark'] *));
+
 /**
  * D0 遗留的调试面板配色。
  *

@@ -1,7 +1,5 @@
 export { AppShell } from './AppShell';
 export type { AppShellProps } from './AppShell';
-export { ProductNav } from './ProductNav';
-export type { NavigateHandler, ProductNavProps } from './ProductNav';
 export { ProductTopBar } from './ProductTopBar';
 export type { ProductTopBarProps } from './ProductTopBar';
 export { TopBarMessageButton } from './TopBarMessageButton';

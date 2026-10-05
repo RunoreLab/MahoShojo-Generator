@@ -167,7 +167,7 @@ describe('MarkdownBlock navigation policy', () => {
 
   it('renders external links as non-executable with a reason when no handler exists', () => {
     // Desktop 目前没有 opener 能力。一个"看起来能点但什么也不发生"的链接比说明原因更糟，
-    // 这与 ProductNav 的处理是同一套形状。
+    // 这与共源顶栏的处理是同一套形状。
     renderMarkdown('[仓库](https://github.com/example/repo)');
     expect(container.querySelector('a')).toBeNull();
     expect(container.textContent).toContain('仓库');

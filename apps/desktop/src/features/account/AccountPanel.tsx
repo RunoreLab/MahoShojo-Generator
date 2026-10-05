@@ -1,221 +1,216 @@
-// 账号面板（D5.0c）：native `desktop-auth-v1` 登录/状态/登出 + 按需在线探测。
+// 设置页：云账号面板（`DESK-ONLINE-008`）。
 //
-// 凭据边界：UI 只看到「登录中 / 已登录（账号摘要）/ 未登录 / 服务不可达」，会话
-// cookie、授权码、PKCE verifier 都不会出现在 IPC 投影里，这里也无法获取。
+// 会话状态来自 `DesktopCloudSessionStore` 进程级单例——顶栏账号区与本面板读的是
+// 同一份投影、同一个授权流程（`use-desktop-cloud-session.ts`）。面板只保留自己
+// 私有的交互状态：在线探针 busy 结果、授权 URL 的「已复制」提示与退出后的
+// revoked 说明。
+//
+// `refresh()` 在进入设置页时主动触发一次：这不是后台轮询，而是「用户打开了
+// 账号面板」这一动作的结果——DESK-ONLINE-012 禁止的是无用户动作的在线探测。
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
+
+import type { DesktopCloudOnlineStatus } from '@mahoshojo/contracts/desktop-cloud';
+
 import { invoke } from '@tauri-apps/api/core';
+import { DesktopCloudError, probeCloudOnlineStatus } from '../../platform/cloud-bridge';
+import { useDesktopCloudSession } from './use-desktop-cloud-session';
 
-import type { DesktopCloudSessionStatus } from '@mahoshojo/contracts/desktop-cloud';
+const describeProbeError = (cause: unknown): string =>
+  cause instanceof DesktopCloudError ? `${cause.code}：${cause.message}` : 'unknown bridge failure';
 
-import {
-  DesktopCloudError,
-  awaitCloudLogin,
-  beginCloudLogin,
-  cancelCloudLogin,
-  probeCloudOnlineStatus,
-  readCloudAuthStatus,
-  signOutCloud,
-} from '../../platform/cloud-bridge';
-
-type Status =
-  | { kind: 'loading' }
-  | { kind: 'ready'; session: DesktopCloudSessionStatus };
-
-interface LoginAttempt {
-  flowId: string;
-  authorizeUrl: string;
-}
-
-const describeError = (cause: unknown): string =>
-  cause instanceof DesktopCloudError
-    ? `${cause.code}：${cause.message}`
-    : cause instanceof Error
-      ? cause.message
-      : '未知错误';
+const StatusChip = ({ label, className }: { label: string; className: string }) => (
+  <span className={`rounded-full border px-2 py-0.5 text-xs ${className}`}>{label}</span>
+);
 
 export const AccountPanel = () => {
-  const [status, setStatus] = useState<Status>({ kind: 'loading' });
-  const [attempt, setAttempt] = useState<LoginAttempt | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
-  const flowRef = useRef<string | null>(null);
+  const { state: sessionState, store: sessionStore } = useDesktopCloudSession();
+  const phase = sessionState.phase;
+  const session = phase.kind === 'ready' ? phase.session : null;
+  const checking = phase.kind === 'checking';
+  const attempt = phase.kind === 'authenticating' ? phase : null;
+  const busy = checking || attempt !== null;
 
-  const refresh = useCallback(async () => {
-    try {
-      const session = await readCloudAuthStatus(invoke);
-      setStatus({ kind: 'ready', session });
-    } catch (cause) {
-      setError(`会话状态读取失败：${describeError(cause)}`);
-      setStatus({ kind: 'ready', session: { state: 'unreachable' } });
-    }
-  }, []);
+  // 面板私有状态：退出结果说明、在线探针、授权 URL 复制提示。
+  const [notice, setNotice] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [probeBusy, setProbeBusy] = useState(false);
+  const [probe, setProbe] = useState<DesktopCloudOnlineStatus | null>(null);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    void refresh();
+    void sessionStore.refresh();
+    // 离开设置页时取消在途授权：flowId 只在 native 进程里有效，用户离开面板
+    // 意味着放弃了这次「手动复制 URL」的机会——继续挂着只会留一条孤儿流程。
     return () => {
-      // 卸载时若还有进行中的流程，取消它——listener 与 await 都由 native 收尾。
-      const flowId = flowRef.current;
-      if (flowId) void cancelCloudLogin(invoke, flowId);
+      const latest = sessionStore.getSnapshot();
+      if (latest.phase.kind === 'authenticating') void sessionStore.cancelLogin();
     };
-  }, [refresh]);
+  }, [sessionStore]);
 
-  const startLogin = useCallback(async () => {
-    setError(null);
-    setCopied(false);
-    setBusy(true);
-    try {
-      const begin = await beginCloudLogin(invoke);
-      flowRef.current = begin.flowId;
-      setAttempt({ flowId: begin.flowId, authorizeUrl: begin.authorizeUrl });
-      const outcome = await awaitCloudLogin(invoke, begin.flowId);
-      setAttempt(null);
-      flowRef.current = null;
-      if (outcome.status === 'failed') {
-        setError(`登录未完成（${outcome.code}）：${outcome.message}`);
-      }
-      await refresh();
-    } catch (cause) {
-      setAttempt(null);
-      flowRef.current = null;
-      setError(describeError(cause));
-    } finally {
-      setBusy(false);
-    }
-  }, [refresh]);
-
-  const cancelLogin = useCallback(async () => {
-    if (!attempt) return;
-    try {
-      await cancelCloudLogin(invoke, attempt.flowId);
-    } finally {
-      setAttempt(null);
-      flowRef.current = null;
-      setBusy(false);
-    }
-  }, [attempt]);
-
-  const signOut = useCallback(async () => {
-    setError(null);
-    setBusy(true);
-    try {
-      const result = await signOutCloud(invoke);
-      if (!result.revoked) {
-        setError('本地会话已删除；服务端会话未能同步作废（离线或服务不可用时会话仍会自行过期）。');
-      }
-      await refresh();
-    } catch (cause) {
-      setError(describeError(cause));
-    } finally {
-      setBusy(false);
-    }
-  }, [refresh]);
-
-  const probe = useCallback(async () => {
+  const login = async () => {
     setError(null);
     setNotice(null);
-    setBusy(true);
-    try {
-      const online = await probeCloudOnlineStatus(invoke);
-      if (!online.reachable) {
-        setError('项目服务暂不可达。本地功能不受影响。');
-      } else if (online.compatible === true) {
-        setNotice(`项目服务在线（契约 ${online.contractVersion ?? '未声明'}，兼容）。`);
-      } else if (online.compatible === false) {
-        setError(
-          `在线契约版本不兼容（服务端 ${online.contractVersion ?? '未知'}）。`
-          + '本次在线操作已被阻止，请升级桌面客户端后再试。',
-        );
-      } else {
-        // 可达但未声明契约版本：fail-closed，不得按「兼容」提示。
-        setError('项目服务在线但未声明契约版本，无法确认兼容性；为安全起见在线操作已被阻止。');
-      }
-    } catch (cause) {
-      setError(describeError(cause));
-    } finally {
-      setBusy(false);
-    }
-  }, []);
+    setCopied(false);
+    await sessionStore.startLogin();
+  };
 
-  const session = status.kind === 'ready' ? status.session : null;
+  const signOut = async () => {
+    setError(null);
+    setNotice(null);
+    const result = await sessionStore.signOut();
+    if (result !== null) {
+      setNotice(
+        result.revoked
+          ? '已退出登录，服务端会话已同步作废。'
+          : '已退出登录：本地凭据已删除，但服务端会话未能确认作废（可能已过期）。',
+      );
+      setProbe(null);
+    }
+  };
+
+  const runProbe = async () => {
+    setProbeBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const result = await probeCloudOnlineStatus(invoke);
+      setProbe(result);
+    } catch (cause) {
+      setProbe(null);
+      setError(`在线探针失败：${describeProbeError(cause)}`);
+    } finally {
+      setProbeBusy(false);
+    }
+  };
+
+  const copyAuthorizeUrl = async () => {
+    if (!attempt) return;
+    try {
+      await navigator.clipboard.writeText(attempt.authorizeUrl);
+      setCopied(true);
+    } catch {
+      setCopied(false);
+      setError('复制授权地址失败，请手动选中地址复制。');
+    }
+  };
+
+  const panelError = error ?? sessionState.lastError;
 
   return (
-    <section className="rounded-lg border border-(--app-border) bg-(--app-surface) p-4">
-      <h2 className="mb-2 text-sm font-medium text-(--app-text-muted)">账号与项目服务</h2>
+    <section
+      data-testid="account-panel"
+      className="rounded-lg border border-(--app-border) bg-(--app-surface) p-4"
+    >
+      <h2 className="mb-2 text-sm font-medium text-(--app-text-muted)">云账号</h2>
 
-      {status.kind === 'loading' && <p className="text-sm">正在读取会话状态…</p>}
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <span>会话状态：</span>
+        {checking && <span>正在读取…</span>}
+        {!checking && (!session || session.state === 'signed-out') && (
+          <StatusChip
+            label="未登录"
+            className="border-(--app-border) text-(--app-text-muted)"
+          />
+        )}
+        {!checking && session?.state === 'active' && (
+          <StatusChip
+            label={`已登录 · ${session.account.displayName ?? session.account.username}`}
+            className="border-(--app-accent) text-(--app-accent-strong)"
+          />
+        )}
+        {!checking && session?.state === 'expired' && (
+          <StatusChip
+            label="会话已过期"
+            className="border-(--app-accent) text-(--app-accent-strong)"
+          />
+        )}
+        {!checking && session?.state === 'unreachable' && (
+          <StatusChip
+            label="服务不可用（本地凭据保留）"
+            className="border-(--app-border) text-(--app-text-muted)"
+          />
+        )}
+      </div>
 
-      {session?.state === 'active' && (
-        <div className="text-sm">
-          <p>
-            已登录：
-            <span className="font-medium">{session.account.displayName ?? session.account.username}</span>
-            <span className="text-(--app-text-muted)">（{session.account.username}）</span>
-          </p>
-          {session.sessionExpiresAt && (
-            <p className="mt-1 text-(--app-text-muted)">
-              会话有效期至 {new Date(session.sessionExpiresAt).toLocaleString()}
-            </p>
-          )}
-        </div>
-      )}
-
-      {session?.state === 'signed-out' && (
-        <p className="text-sm text-(--app-text-muted)">未登录。登录通过系统浏览器完成，凭据只保存在本机凭据存储。</p>
-      )}
-      {session?.state === 'expired' && (
-        <p className="text-sm text-(--app-text-muted)">会话已过期，请重新登录。</p>
-      )}
-      {session?.state === 'unreachable' && (
-        <p className="text-sm text-(--app-text-muted)">
-          项目服务暂不可达。已保存的登录凭据仍然保留；本地功能不受影响。
-        </p>
-      )}
-
-      {attempt && (
-        <div className="mt-3 rounded border border-(--app-border) p-3 text-sm">
-          <p>等待系统浏览器中的授权完成…</p>
-          <p className="mt-1 text-(--app-text-muted)">
-            若浏览器未自动打开，请手动复制授权地址：
-          </p>
-          <p className="mt-1 break-all text-xs text-(--app-text-muted)">{attempt.authorizeUrl}</p>
+      <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
+        {!busy && session?.state !== 'active' && (
           <button
             type="button"
-            className="mt-2 text-xs underline"
-            onClick={() => {
-              void navigator.clipboard?.writeText(attempt.authorizeUrl).then(() => setCopied(true));
-            }}
+            className="rounded-md border border-(--app-border) px-3 py-1.5 hover:bg-(--app-surface-muted)"
+            onClick={() => void login()}
           >
-            {copied ? '已复制' : '复制授权地址'}
-          </button>
-        </div>
-      )}
-
-      {error && <p role="alert" className="mt-3 text-sm text-(--app-accent-strong)">{error}</p>}
-      {notice && <p className="mt-3 text-sm text-(--app-text-muted)">{notice}</p>}
-
-      <div className="mt-3 flex gap-2 text-sm">
-        {session?.state !== 'active' && !attempt && (
-          <button type="button" disabled={busy} onClick={() => void startLogin()}>
-            {busy ? '处理中…' : '登录账号'}
+            登录账号
           </button>
         )}
         {attempt && (
-          <button type="button" onClick={() => void cancelLogin()}>取消登录</button>
+          <button
+            type="button"
+            className="rounded-md border border-(--app-border) px-3 py-1.5 hover:bg-(--app-surface-muted)"
+            onClick={() => void sessionStore.cancelLogin()}
+          >
+            取消登录
+          </button>
         )}
-        {session?.state === 'active' && (
-          <button type="button" disabled={busy} onClick={() => void signOut()}>
+        {session?.state === 'active' && !attempt && (
+          <button
+            type="button"
+            className="rounded-md border border-(--app-border) px-3 py-1.5 hover:bg-(--app-surface-muted)"
+            onClick={() => void signOut()}
+          >
             退出登录
           </button>
         )}
-        {!attempt && (
-          <button type="button" disabled={busy} onClick={() => void probe()}>
-            检查服务连通性
-          </button>
-        )}
+        <button
+          type="button"
+          className="rounded-md border border-(--app-border) px-3 py-1.5 hover:bg-(--app-surface-muted)"
+          disabled={probeBusy}
+          onClick={() => void runProbe()}
+        >
+          {probeBusy ? '正在探测…' : '检查在线服务'}
+        </button>
       </div>
+
+      {attempt && (
+        <div className="mt-3 space-y-1.5 text-sm">
+          <p>
+            已在系统浏览器中打开授权页。完成登录后本面板会自动更新；若浏览器未弹出，请复制以下地址手动打开：
+          </p>
+          <p className="break-all rounded-md border border-(--app-border) bg-(--app-surface-muted) px-2 py-1.5 font-mono text-xs">
+            {attempt.authorizeUrl}
+          </p>
+          <button
+            type="button"
+            className="rounded-md border border-(--app-border) px-3 py-1.5 hover:bg-(--app-surface-muted)"
+            onClick={() => void copyAuthorizeUrl()}
+          >
+            复制授权地址
+          </button>
+          {copied && <span className="ml-2 text-xs text-(--app-text-muted)">已复制</span>}
+        </div>
+      )}
+
+      {probe && (
+        <dl className="mt-3 grid grid-cols-[auto,1fr] gap-x-4 gap-y-1 text-sm">
+          <dt className="text-(--app-text-muted)">服务可达</dt>
+          <dd>{probe.reachable ? '是' : '否'}</dd>
+          <dt className="text-(--app-text-muted)">服务端契约</dt>
+          <dd>{probe.contractVersion ?? '未声明'}</dd>
+          <dt className="text-(--app-text-muted)">版本兼容</dt>
+          <dd>
+            {probe.compatible === null ? '无法判定' : probe.compatible ? '兼容' : '不兼容'}
+          </dd>
+        </dl>
+      )}
+
+      {notice && <p className="mt-3 text-sm text-(--app-text-muted)">{notice}</p>}
+      {panelError && (
+        <p role="alert" className="mt-3 text-sm text-(--app-accent-strong)">
+          {panelError}
+        </p>
+      )}
     </section>
   );
 };
+
+

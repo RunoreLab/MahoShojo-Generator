@@ -141,7 +141,7 @@ describe('navigation config', () => {
 
     // 打开站外站点需要宿主能力（Tauri 侧是新的 native command）。共享导航只声明"这是站外"，
     // 由宿主决定能不能打开——因此这个集合非空且每一项都有绝对 URL，两条断言缺一都会让
-    // `ProductNav` 的站外分支永远走不到。
+    // 共源顶栏的站外分支永远走不到。
     expect(externalItems.length).toBeGreaterThan(0);
     for (const item of externalItems) {
       expect(item.href.startsWith('https://'), `${item.href} 应当是绝对 URL`).toBe(true);

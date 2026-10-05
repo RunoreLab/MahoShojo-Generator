@@ -4,6 +4,22 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>MahoShojo Generator</title>
+    <!--
+      共源亮暗偏好的首屏前初始化（D5.0d）。这段脚本与 Web `layout.tsx` 注入的是
+      同一份生成产物——`getColorModeInitScript()`（@mahoshojo/ui-web/color-mode-init）；
+      tests/color-mode-init.test.ts 断言两者逐字相等，改脚本必须先改共享源。
+    -->
+    <script>
+(() => {
+  try {
+    var stored = window.localStorage.getItem("mahoshojo.color-mode");
+    var preference = stored === 'light' || stored === 'dark' || stored === 'system' ? stored : 'system';
+    var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    var resolved = preference === 'system' ? (prefersDark ? 'dark' : 'light') : preference;
+    document.documentElement.dataset.colorMode = resolved;
+  } catch (e) {}
+})();
+    </script>
   </head>
   <body>
     <div id="root"></div>

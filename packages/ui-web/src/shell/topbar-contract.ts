@@ -73,7 +73,7 @@ export const TOPBAR_PRODUCT_HREFS: readonly string[] = [
   ...TOPBAR_ACCOUNT_LINK_HREFS,
 ];
 
-/** 不可用原因的产品文案（与 `ProductNav` 同一份表述——两组件共用同一口径）。 */
+/** 不可用原因的产品文案——所有能力判定入口共用这一份表述。 */
 export const describeUnavailableReason = (
   availability: CapabilityAvailability,
   isExternal: boolean,
@@ -102,7 +102,8 @@ export const describeUnavailableReason = (
 
 /**
  * 入口的有效可用性：站外链接额外要求宿主提供系统浏览器接管回调，
- * 没有回调时无论快照如何都按"需系统浏览器"禁用（与 ProductNav 同一规则）。
+ * 没有回调时无论快照如何都按"需系统浏览器"禁用——打开站外站点是宿主能力，
+ * 共源组件绝不渲染一个点了没反应的链接。
  */
 export const topBarEntryAvailability = (
   availability: CapabilityAvailability,
