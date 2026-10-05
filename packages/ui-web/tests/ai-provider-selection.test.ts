@@ -229,4 +229,45 @@ describe('resolveAiExecutionLocation', () => {
       }).location,
     ).toBe('client');
   });
+
+  it('无偏好且默认位置不可用时回退到另一可用位置', () => {
+    const result = resolveAiExecutionLocation({
+      client: { enabled: false, reason: '尚无可用连接' },
+      server: { enabled: true },
+      defaultLocation: 'client',
+    });
+    expect(result.location).toBe('server');
+    expect(result.fallbackReason).toBe('尚无可用连接');
+  });
+
+  it('偏好与默认位置都不可用时退到任一可用位置', () => {
+    const result = resolveAiExecutionLocation({
+      preference: 'server',
+      client: { enabled: true },
+      server: { enabled: false, reason: '服务器未接入' },
+      defaultLocation: 'server',
+    });
+    expect(result.location).toBe('client');
+    expect(result.fallbackReason).toBe('服务器未接入');
+  });
+
+  it('两个位置都不可用时仍返回默认位置并给出原因', () => {
+    const result = resolveAiExecutionLocation({
+      preference: 'server',
+      client: { enabled: false, reason: '无连接' },
+      server: { enabled: false, reason: '服务器未接入' },
+      defaultLocation: 'client',
+    });
+    expect(result.location).toBe('client');
+    expect(result.fallbackReason).toBe('服务器未接入');
+  });
+
+  it('无任何可用位置且无原因时给通用提示', () => {
+    const result = resolveAiExecutionLocation({
+      client: { enabled: false },
+      server: { enabled: false },
+    });
+    expect(result.location).toBe('client');
+    expect(result.fallbackReason).toBe('当前没有可用的执行位置');
+  });
 });

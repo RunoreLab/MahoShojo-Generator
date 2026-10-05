@@ -95,10 +95,17 @@ export const parseProviderProfileDocument = (document: unknown): DirectProviderP
   return parsed.data;
 };
 
-export const saveProviderProfile = async (
+/**
+ * 保存前的完整校验：schema → 投影 → native 回显比对。不落盘。
+ *
+ * 单独导出是为了让调用方能在写凭据**之前**先确认 Profile 会被接受——否则编辑既有
+ * 连接时会出现「凭据已更新但 Profile 保存失败」的部分成功窗口，旧 Profile 会静默开始
+ * 使用新 Key。
+ */
+export const validateProviderExecutionProfile = async (
   invoke: InvokeFn,
   document: DirectProviderProfileV1,
-): Promise<void> => {
+): Promise<DirectProviderProfileV1> => {
   const validated = parseProviderProfileDocument(document);
   const projection = toDirectProviderExecutionProfile(validated);
 
@@ -111,6 +118,14 @@ export const saveProviderProfile = async (
     throw toBridgeError(VALIDATE_PROVIDER_EXECUTION_PROFILE_COMMAND, cause);
   }
   assertNativeAccepts(VALIDATE_PROVIDER_EXECUTION_PROFILE_COMMAND, echoed, projection);
+  return validated;
+};
+
+export const saveProviderProfile = async (
+  invoke: InvokeFn,
+  document: DirectProviderProfileV1,
+): Promise<void> => {
+  const validated = await validateProviderExecutionProfile(invoke, document);
 
   try {
     await invoke(SAVE_PROVIDER_PROFILE_COMMAND, {

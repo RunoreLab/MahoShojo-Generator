@@ -9,6 +9,7 @@ import { buildUnsignedMagicalGirlDetailsCard } from '@mahoshojo/ai-core/magical-
 import type { DetailsGenerationOutcome } from '../src/features/details/generation';
 import { DETAILS_DRAFT_KEY } from '../src/features/details/session';
 import { resetDesktopAiConfigStoreForTests } from '../src/features/ai-config/use-desktop-ai-config';
+import { DESKTOP_AI_CONFIG_STORAGE_KEY } from '../src/features/ai-config/desktop-ai-config-store';
 import { createDesktopRouter } from '../src/app/router';
 
 const mocks = vi.hoisted(() => ({ execute: vi.fn(), save: vi.fn(), listen: vi.fn(), profiles: vi.fn() }));
@@ -37,6 +38,13 @@ const draft = () => ({ version: 1, answers: { [questionnaire.questions[0].id]: '
 beforeEach(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   vi.clearAllMocks(); window.localStorage.clear();
+  // 新 overlay 模型下执行位置与连接选择正交且默认不自动选中；
+  // 需要走通生成路径的用例统一预置"客户端执行 + 已选 local 连接"。
+  window.localStorage.setItem(DESKTOP_AI_CONFIG_STORAGE_KEY, JSON.stringify({
+    version: 2,
+    selection: { executionPreference: 'client', clientConnectionId: 'local' },
+    hiddenPresetIds: [],
+  }));
   resetDesktopAiConfigStoreForTests();
   mocks.profiles.mockResolvedValue({ id: 'local', name: '本地模型', adapter: 'openai-compatible', baseUrl: 'http://127.0.0.1:11434/v1', modelId: 'model' });
   mocks.execute.mockResolvedValue(completed); mocks.save.mockResolvedValue({ written: true });

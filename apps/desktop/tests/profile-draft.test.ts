@@ -14,6 +14,7 @@ import {
 import {
   DELETE_PROVIDER_PROFILE_COMMAND,
   DELETE_PROVIDER_SECRET_COMMAND,
+  GET_PROVIDER_PROFILE_COMMAND,
   SET_PROVIDER_SECRET_COMMAND,
 } from '../src/platform';
 
@@ -115,16 +116,18 @@ const isValidSecretRefFor = (ref: string): boolean =>
   ref.length > 0 && ref.length <= 256 && /^[A-Za-z0-9._:-]+$/u.test(ref);
 
 describe('saveProfileDraft', () => {
-  it('writes the credential before the profile', async () => {
+  it('validates the profile before the credential, and persists the profile last', async () => {
     installNativeStub();
     const outcome = await saveProfileDraft(draft(), now);
 
     expect(outcome.secretWritten).toBe(true);
     const commands = invokeMock.mock.calls.map((call) => call[0]);
-    expect(commands[0]).toBe(SET_PROVIDER_SECRET_COMMAND);
-    expect(commands).toContain('validate_provider_execution_profile');
-    expect(commands).toContain('save_provider_profile');
-    // 先凭据后 Profile：反过来的话崩溃会留下"引用存在但取不到值"的 Profile。
+    // 顺序不变量：native 校验 → 凭据 → Profile。
+    // 校验先跑，避免无效 Profile 搭配新 Key 的半成功态；
+    // 凭据在 Profile 之前，避免崩溃留下"引用存在但取不到值"的 Profile。
+    expect(commands.indexOf('validate_provider_execution_profile')).toBeLessThan(
+      commands.indexOf(SET_PROVIDER_SECRET_COMMAND),
+    );
     expect(commands.indexOf(SET_PROVIDER_SECRET_COMMAND)).toBeLessThan(
       commands.indexOf('save_provider_profile'),
     );
@@ -145,7 +148,12 @@ describe('removeProfile', () => {
     await removeProfile('p_test');
 
     const commands = invokeMock.mock.calls.map((call) => call[0]);
-    expect(commands).toEqual([DELETE_PROVIDER_PROFILE_COMMAND, DELETE_PROVIDER_SECRET_COMMAND]);
+    // 先读回 Profile 拿它实际记录的 apiKeyRef，再按 Profile → 凭据的顺序删除。
+    expect(commands).toEqual([
+      GET_PROVIDER_PROFILE_COMMAND,
+      DELETE_PROVIDER_PROFILE_COMMAND,
+      DELETE_PROVIDER_SECRET_COMMAND,
+    ]);
   });
 
   it('does not fail when the credential is already gone', async () => {

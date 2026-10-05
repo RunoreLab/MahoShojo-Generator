@@ -33,24 +33,36 @@ export interface ResolveAiExecutionLocationInput {
 }
 
 /**
- * 纯解析：偏好优先，偏好不可用则按 defaultLocation 回退并给出原因；
- * 两个位置都不可用时仍返回 defaultLocation（由调用方决定如何禁用操作）。
+ * 纯解析：偏好优先；偏好不可用则回退 defaultLocation，defaultLocation 也不可用时
+ * 退到另一个可用位置；两个位置都不可用时仍返回 defaultLocation（由调用方决定
+ * 如何禁用操作）。
  */
 export const resolveAiExecutionLocation = (
   input: ResolveAiExecutionLocationInput,
 ): AiExecutionLocationResolution => {
   const defaultLocation = input.defaultLocation ?? 'client';
   const preference = input.preference ?? null;
+  const otherLocation: AiExecutionLocation =
+    defaultLocation === 'client' ? 'server' : 'client';
 
   if (preference && input[preference].enabled) {
     return { location: preference, fallbackReason: null };
   }
 
-  const preferredReason = preference ? input[preference].reason : null;
-  const fallback = input[defaultLocation].enabled ? defaultLocation : preference && input[preference].enabled ? preference : defaultLocation;
+  const fallback = input[defaultLocation].enabled
+    ? defaultLocation
+    : input[otherLocation].enabled
+      ? otherLocation
+      : defaultLocation;
+
+  // fallbackReason 解释「为什么生效位置不是想要的位置」：优先用被跳过的偏好原因；
+  // 无偏好但默认位置不可用时，说明默认位置为何不可用；仍落到不可用位置时给通用提示。
+  const skipped = preference ?? (fallback === defaultLocation ? null : defaultLocation);
   return {
     location: fallback,
-    fallbackReason: preferredReason ?? (input[fallback].enabled ? null : (input[fallback].reason ?? '当前没有可用的执行位置')),
+    fallbackReason:
+      (skipped ? input[skipped].reason : null) ??
+      (input[fallback].enabled ? null : input[fallback].reason ?? '当前没有可用的执行位置'),
   };
 };
 

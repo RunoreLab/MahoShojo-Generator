@@ -4,7 +4,7 @@
 // （隐藏/恢复/复制为自定义连接）、自定义连接 CRUD。凭据只写 OS 凭据存储，
 // UI 只展示「是否存在」，永远读不回明文。
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 
 import { getModelGenerationCapabilities } from '@mahoshojo/ai-core/generation-settings';
@@ -28,10 +28,12 @@ import {
 } from '../providers/profile-draft';
 
 import {
+  DESKTOP_DIRECT_ADAPTERS,
   describeDesktopPresetModelSupport,
   listDesktopPresetEntries,
   resolveDesktopAiTarget,
   type DesktopPresetEntry,
+  type DesktopSecretPresence,
 } from './desktop-ai-config';
 import { useDesktopAiConfig, type UseDesktopAiConfigResult } from './use-desktop-ai-config';
 
@@ -200,22 +202,42 @@ const ConnectionEditor = ({
   );
 };
 
+/** DESK-ONLINE-004：区分未配置、缺失、已配置与存储失败；未知不猜成「未配置」。 */
+const secretStatusLabel = (
+  status: DesktopSecretPresence | undefined,
+  hasKeyRef: boolean,
+): string => {
+  switch (status ?? 'unknown') {
+    case 'present':
+      return '已存凭据';
+    case 'error':
+      return '凭据存储读取失败';
+    case 'absent':
+      return hasKeyRef ? '凭据缺失' : '未配置凭据';
+    default:
+      return '凭据状态未知';
+  }
+};
+
 const ConnectionRow = ({
   profile,
   selected,
-  hasSecret,
+  secretStatus,
   onSelect,
   onEdit,
   onDelete,
 }: {
   profile: DirectProviderProfileV1;
   selected: boolean;
-  hasSecret: boolean | undefined;
+  secretStatus: DesktopSecretPresence | undefined;
   onSelect: () => void;
   onEdit: () => void;
   onDelete: () => void;
 }) => {
   const [confirming, setConfirming] = useState(false);
+  // 简化编辑器只表达 openai-compatible；其他 adapter 的旧 Profile 只读展示，
+  // 避免保存时把 adapter 静默改写（DESK-ONLINE-003/004）。
+  const editable = DESKTOP_DIRECT_ADAPTERS.has(profile.adapter);
   return (
     <li className="flex flex-col gap-1 rounded-lg border border-(--app-border) p-3 text-sm">
       <div className="flex flex-wrap items-center gap-2">
@@ -224,11 +246,7 @@ const ConnectionRow = ({
           <span className="battle-lite-info-pill rounded px-1.5 py-0.5 text-xs">当前使用</span>
         )}
         <span className="battle-lite-subtle-text ml-auto text-xs">
-          {hasSecret === undefined
-            ? '凭据状态未知'
-            : hasSecret
-              ? '已存凭据'
-              : '未配置凭据'}
+          {secretStatusLabel(secretStatus, profile.apiKeyRef !== undefined)}
         </span>
       </div>
       <p className="battle-lite-muted-text break-all font-mono text-xs">
@@ -240,9 +258,15 @@ const ConnectionRow = ({
             设为当前
           </button>
         )}
-        <button type="button" className="battle-lite-link underline" onClick={onEdit}>
-          编辑
-        </button>
+        {editable ? (
+          <button type="button" className="battle-lite-link underline" onClick={onEdit}>
+            编辑
+          </button>
+        ) : (
+          <span className="battle-lite-subtle-text">
+            当前版本尚未提供该协议的配置编辑器
+          </span>
+        )}
         {confirming ? (
           <>
             <button
@@ -360,8 +384,10 @@ const ConnectionsPanelBody = ({ aiConfig }: { aiConfig: UseDesktopAiConfigResult
     | { status: 'idle' }
     | { status: 'running' }
     | { status: 'done'; text: string }
+    | { status: 'cancelled' }
     | { status: 'failed'; message: string }
   >({ status: 'idle' });
+  const testAbortRef = useRef<AbortController | null>(null);
 
   const target = resolveDesktopAiTarget(
     state.selection,
@@ -404,6 +430,7 @@ const ConnectionsPanelBody = ({ aiConfig }: { aiConfig: UseDesktopAiConfigResult
     if (!profile || !mode || testState.status === 'running') return;
     setTestState({ status: 'running' });
     const controller = new AbortController();
+    testAbortRef.current = controller;
     try {
       const result = await createDesktopAiExecutionPort({
         invoke,
@@ -422,21 +449,42 @@ const ConnectionsPanelBody = ({ aiConfig }: { aiConfig: UseDesktopAiConfigResult
         result.status === 'completed'
           ? { status: 'done', text: result.output.text ?? '' }
           : result.status === 'cancelled'
-            ? { status: 'failed', message: '已取消' }
+            ? { status: 'cancelled' }
             : { status: 'failed', message: result.error.message ?? result.error.code },
       );
     } catch (cause) {
-      setTestState({
-        status: 'failed',
-        message:
-          cause instanceof DesktopAiError
-            ? `${cause.code}: ${cause.message}`
-            : cause instanceof Error
-              ? cause.message
-              : '连接测试失败',
-      });
+      setTestState(
+        controller.signal.aborted
+          ? { status: 'cancelled' }
+          : {
+              status: 'failed',
+              message:
+                cause instanceof DesktopAiError
+                  ? `${cause.code}: ${cause.message}`
+                  : cause instanceof Error
+                    ? cause.message
+                    : '连接测试失败',
+            },
+      );
+    } finally {
+      if (testAbortRef.current === controller) testAbortRef.current = null;
     }
   };
+
+  const cancelConnectionTest = () => {
+    testAbortRef.current?.abort();
+  };
+
+  // 切换/删除当前连接时中止在途测试并重置结果；卸载同样中止（Direct 默认无应用层
+  // 硬超时，挂着没人收会一直占流）。用字段值做依赖而不是拼字符串，id/modelId 含
+  // 分隔符也不会误判。
+  const testTargetId = target.profile?.id ?? null;
+  const testTargetModel = target.profile?.modelId ?? null;
+  useEffect(() => {
+    testAbortRef.current?.abort();
+    setTestState({ status: 'idle' });
+  }, [testTargetId, testTargetModel]);
+  useEffect(() => () => testAbortRef.current?.abort(), []);
 
   const blockedOverlay = state.overlayState === 'blocked';
 
@@ -464,19 +512,10 @@ const ConnectionsPanelBody = ({ aiConfig }: { aiConfig: UseDesktopAiConfigResult
 
       <AiExecutionLocationField
         value={target.location}
-        client={{
-          enabled: state.profiles.length > 0,
-          reason:
-            state.profiles.length > 0
-              ? undefined
-              : '尚无可用连接：请先新增自定义连接或复制一个预设',
-        }}
+        // 执行位置偏好不依赖能力：客户端被偏好但没有连接时，由不可用说明引导配置。
+        client={{ enabled: true }}
         server={{ enabled: false, reason: '服务器执行将在接入在线能力后开放' }}
-        onChange={(location) => {
-          if (location === 'client' && state.profiles[0]) {
-            store.selectConnection(state.profiles[0].id);
-          }
-        }}
+        onChange={(location) => store.selectExecutionLocation(location)}
       />
 
       <div className="flex flex-col gap-2">
@@ -486,13 +525,13 @@ const ConnectionsPanelBody = ({ aiConfig }: { aiConfig: UseDesktopAiConfigResult
             aria-label="当前 AI 连接"
             className="input-field"
             disabled={blockedOverlay}
-            value={state.selection.kind === 'connection' ? state.selection.profileId : ''}
+            value={state.selection.clientConnectionId ?? ''}
             onChange={(event) => {
               if (event.target.value) store.selectConnection(event.target.value);
             }}
           >
-            {state.selection.kind !== 'connection' && (
-              <option value="">未选择连接（当前为服务器策略）</option>
+            {state.selection.clientConnectionId === null && (
+              <option value="">未选择连接</option>
             )}
             {state.profiles.map((profile) => (
               <option key={profile.id} value={profile.id}>
@@ -524,14 +563,23 @@ const ConnectionsPanelBody = ({ aiConfig }: { aiConfig: UseDesktopAiConfigResult
         )}
         {target.profile && target.mode && (
           <div className="flex gap-2">
-            <button
-              type="button"
-              className="rounded-lg border border-(--app-border-strong) px-3 py-1.5 text-xs disabled:opacity-50"
-              disabled={testState.status === 'running'}
-              onClick={() => void runConnectionTest()}
-            >
-              {testState.status === 'running' ? '测试中…' : '测试当前连接'}
-            </button>
+            {testState.status === 'running' ? (
+              <button
+                type="button"
+                className="rounded-lg border border-(--app-border-strong) px-3 py-1.5 text-xs"
+                onClick={cancelConnectionTest}
+              >
+                取消测试
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="rounded-lg border border-(--app-border-strong) px-3 py-1.5 text-xs"
+                onClick={() => void runConnectionTest()}
+              >
+                测试当前连接
+              </button>
+            )}
           </div>
         )}
         {testState.status === 'done' && (
@@ -539,12 +587,17 @@ const ConnectionsPanelBody = ({ aiConfig }: { aiConfig: UseDesktopAiConfigResult
             测试输出：{testState.text || '（空）'}
           </p>
         )}
+        {testState.status === 'cancelled' && (
+          <p className="battle-lite-subtle-text text-xs">测试已取消。</p>
+        )}
         {testState.status === 'failed' && (
           <p className="battle-lite-subtle-text text-xs">测试失败：{testState.message}</p>
         )}
       </div>
 
-      {target.profile && (
+      {/* 未实现 adapter 的连接不展示高级参数——不显示无实际发送效果的控件
+          （DESK-ONLINE-004）。 */}
+      {target.profile && target.mode && (
         <AdvancedGenerationSettings
           value={target.generationOverrides}
           onChange={(next) =>
@@ -628,9 +681,10 @@ const ConnectionsPanelBody = ({ aiConfig }: { aiConfig: UseDesktopAiConfigResult
               key={profile.id}
               profile={profile}
               selected={
-                state.selection.kind === 'connection' && state.selection.profileId === profile.id
+                state.selection.executionPreference === 'client' &&
+                state.selection.clientConnectionId === profile.id
               }
-              hasSecret={state.secretStatus[profile.id]}
+              secretStatus={state.secretStatus[profile.id]}
               onSelect={() => store.selectConnection(profile.id)}
               onEdit={() =>
                 setEditing({ draft: draftFromProfile(profile), presetModels: null, isExisting: true })
@@ -671,7 +725,7 @@ const ConnectionsPanelBody = ({ aiConfig }: { aiConfig: UseDesktopAiConfigResult
         <ConnectionEditor
           editing={editing}
           existingSecretKnown={
-            state.secretStatus[editing.draft.id] === true
+            state.secretStatus[editing.draft.id] === 'present'
           }
           saving={state.savingConnection}
           onCancel={() => setEditing(null)}

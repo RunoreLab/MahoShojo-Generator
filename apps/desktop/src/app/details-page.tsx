@@ -120,26 +120,19 @@ function DetailsForm({ session }: { session: DetailsSession }) {
         <legend className="mb-2 font-semibold">生成设置</legend>
         <AiExecutionLocationField
           value={target.location}
-          client={{
-            enabled: aiState.profiles.length > 0,
-            reason: '尚无可用连接：请先在设置中新增或复制一个连接',
-          }}
+          client={{ enabled: true }}
           server={{ enabled: false, reason: '服务器执行将在接入在线能力后开放' }}
-          onChange={(location) => {
-            if (location === 'client' && aiState.profiles[0]) {
-              aiStore.selectConnection(aiState.profiles[0].id);
-            }
-          }}
+          onChange={(location) => aiStore.selectExecutionLocation(location)}
         />
         <label className="flex flex-col gap-1">AI 连接
           <select
             aria-label="AI 连接"
             className="w-full rounded border border-(--app-border) bg-(--app-surface) px-3 py-2 text-(--app-text)"
-            value={aiState.selection.kind === 'connection' ? aiState.selection.profileId : ''}
+            value={aiState.selection.clientConnectionId ?? ''}
             disabled={aiState.overlayState !== 'ready'}
             onChange={(event) => { if (event.target.value) aiStore.selectConnection(event.target.value); }}
           >
-            {aiState.selection.kind !== 'connection' && <option value="">未选择连接（当前为服务器策略）</option>}
+            {aiState.selection.clientConnectionId === null && <option value="">未选择连接</option>}
             {aiState.profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name} · {profile.modelId}</option>)}
           </select>
         </label>
@@ -150,7 +143,8 @@ function DetailsForm({ session }: { session: DetailsSession }) {
           <p className="break-all">接收方：{selected.baseUrl}</p>
           <p>模型：{selected.modelId}。点击生成会发送已填写的问卷回答；结果不带官方签名。</p>
         </div>}
-        {selected && <AdvancedGenerationSettings
+        {/* 未实现 adapter 的连接不展示高级参数——不显示无实际发送效果的控件。 */}
+        {selected && mode && <AdvancedGenerationSettings
           value={target.generationOverrides}
           onChange={(next) => aiStore.setGenerationOverrides(selected.id, selected.modelId, next)}
           temperatureSupported={targetCapabilities ? targetCapabilities.temperature.support !== 'unsupported' : true}

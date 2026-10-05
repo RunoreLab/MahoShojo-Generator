@@ -12,6 +12,7 @@ import {
   getProviderProfile,
   listProviderProfileIds,
   saveProviderProfile,
+  validateProviderExecutionProfile,
 } from '../../platform/provider-profile-bridge';
 import {
   deleteProviderSecret,
@@ -136,7 +137,10 @@ export const saveProfileDraft = async (
   const profile = buildProfile(draft, now);
   const secretWritten = draft.apiKey !== undefined && draft.apiKey.length > 0;
 
-  // 先凭据后 Profile：反过来的话，崩溃会留下一个"引用存在但取不到值"的 Profile。
+  // 顺序：先让 native 校验 Profile（含投影回显），再写凭据，最后落盘。
+  // 凭据先于 Profile 落盘保证不会留下"引用存在但取不到值"的 Profile；
+  // 校验先于凭据写入保证校验失败不会悄悄改掉旧连接正在使用的 Key。
+  await validateProviderExecutionProfile(tauriInvoke, profile);
   if (secretWritten) {
     await setProviderSecret(
       tauriInvoke,
@@ -159,17 +163,22 @@ export const loadProfileIds = async (): Promise<string[]> =>
  * 删除 Profile 及其凭据。
  *
  * 先删 Profile 再删凭据：Profile 是索引，凭据是内容。保留孤儿凭据比保留悬空 Profile 安全，
- * 因为前者不会让任何执行路径误用一个已删除的配置。
+ * 因为前者不会让任何执行路径误用一个已删除的配置。凭据按被删 Profile 实际记录的
+ * `apiKeyRef` 删除；读不到 Profile 时才退回派生 ref 做一次清理尝试。
  */
 export const removeProfile = async (profileId: string): Promise<void> => {
+  const existing = await getProviderProfile(tauriInvoke, profileId).catch(() => null);
   await deleteProviderProfile(tauriInvoke, profileId);
   await deleteProviderSecret(
     tauriInvoke,
-    deriveApiKeyRef(profileId),
+    existing?.apiKeyRef ?? deriveApiKeyRef(profileId),
   ).catch(() => undefined);
 };
 
-export const profileHasStoredSecret = async (profileId: string): Promise<boolean> =>
-  hasProviderSecret(tauriInvoke, deriveApiKeyRef(profileId));
+export const profileHasStoredSecret = async (profileId: string): Promise<boolean> => {
+  const profile = await getProviderProfile(tauriInvoke, profileId).catch(() => null);
+  if (profile?.apiKeyRef === undefined) return false;
+  return hasProviderSecret(tauriInvoke, profile.apiKeyRef);
+};
 
 export { MAX_DIRECT_PROVIDER_PROFILE_BYTES };

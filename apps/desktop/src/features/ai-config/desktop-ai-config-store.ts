@@ -18,6 +18,7 @@ import {
   getProviderProfile,
   listProviderProfileIds,
   saveProviderProfile,
+  validateProviderExecutionProfile,
 } from '../../platform/provider-profile-bridge';
 import {
   deleteProviderSecret,
@@ -33,11 +34,11 @@ import {
 
 import {
   DESKTOP_AI_CONFIG_DEFAULT_OVERLAY,
-  desktopConnectionOverridesScope,
   parseDesktopAiConfigOverlay,
   serializeDesktopAiConfigOverlay,
   type DesktopAiConfigOverlay,
   type DesktopAiSelection,
+  type DesktopSecretPresence,
 } from './desktop-ai-config';
 
 export const DESKTOP_AI_CONFIG_STORAGE_KEY = 'mahoshojo.desktop.ai-config.v1';
@@ -70,12 +71,12 @@ export interface DesktopAiConfigState {
   overlayError: string | null;
   selection: DesktopAiSelection;
   hiddenPresetIds: ReadonlySet<string>;
-  generationOverrides: Readonly<Record<string, UserGenerationOverrides>>;
+  generationOverrides: Readonly<Record<string, Readonly<Record<string, UserGenerationOverrides>>>>;
   profiles: readonly DirectProviderProfileV1[];
   profilesState: DesktopAiProfilesState;
   profilesError: string | null;
-  /** profileId → 是否存在已保存凭据；只回答存在性，永不读回明文。 */
-  secretStatus: Readonly<Record<string, boolean>>;
+  /** profileId → 凭据存在性；只回答存在性，永不读回明文。 */
+  secretStatus: Readonly<Record<string, DesktopSecretPresence>>;
   savingConnection: boolean;
 }
 
@@ -184,37 +185,30 @@ export class DesktopAiConfigStore {
 
         const secretEntries = await Promise.all(
           profiles.map(async (profile) => {
-            if (profile.apiKeyRef === undefined) return [profile.id, false] as const;
+            if (profile.apiKeyRef === undefined) {
+              return [profile.id, 'absent'] as const;
+            }
             try {
-              return [profile.id, await hasProviderSecret(this.deps.invoke, profile.apiKeyRef)] as const;
+              const present = await hasProviderSecret(this.deps.invoke, profile.apiKeyRef);
+              return [profile.id, present ? 'present' : 'absent'] as const;
             } catch {
-              // 凭据存在性查询失败时不猜测：按未知→false 处理，UI 提示用户重新录入。
-              return [profile.id, false] as const;
+              // 凭据存在性查询失败时不猜测：标记 error，由 UI 明确显示存储读取失败。
+              return [profile.id, 'error'] as const;
             }
           }),
         );
 
-        // 清理指向已删除连接的 overlay 引用（选择项与孤儿 overrides）。
+        // 清理指向已删除连接的孤儿 overrides。选择本身**不**被改写：
+        // 悬空的 clientConnectionId 保留原 ID 由解析层给出诊断（DESK-ONLINE-002
+        // 要求显式解除/替换引用，不做 silent fallback）。
         const knownIds = new Set(profiles.map((profile) => profile.id));
-        const selection: DesktopAiSelection = (() => {
-          const dangling =
-            this.overlay.selection.kind === 'connection' &&
-            !knownIds.has(this.overlay.selection.profileId);
-          // 'server' 位置当前禁用，不存在「显式选择服务器」的持久偏好：悬空或无
-          // 连接选择时自动选中第一条可用连接（沿用旧详情页的 available[0] 语义）。
-          if ((dangling || this.overlay.selection.kind === 'server') && profiles.length > 0) {
-            return { kind: 'connection', profileId: profiles[0]!.id };
-          }
-          return dangling ? { kind: 'server' } : this.overlay.selection;
-        })();
         const generationOverrides = Object.fromEntries(
-          Object.entries(this.overlay.generationOverrides).filter(([scope]) =>
-            knownIds.has(scope.split('::')[0] ?? ''),
+          Object.entries(this.overlay.generationOverrides).filter(([profileId]) =>
+            knownIds.has(profileId),
           ),
         );
         this.overlay = {
-          selection,
-          hiddenPresetIds: this.overlay.hiddenPresetIds,
+          ...this.overlay,
           generationOverrides,
         };
         this.persistOverlay();
@@ -239,18 +233,23 @@ export class DesktopAiConfigStore {
     return this.profilesPromise;
   };
 
-  selectServer = (): void => {
+  /** 只改执行位置偏好；客户端连接选择保持不变（两个维度正交）。 */
+  selectExecutionLocation = (location: 'client' | 'server'): void => {
     if (!this.overlayWritable) return;
-    this.overlay = { ...this.overlay, selection: { kind: 'server' } };
+    this.overlay = {
+      ...this.overlay,
+      selection: { ...this.overlay.selection, executionPreference: location },
+    };
     this.persistOverlay();
     this.publishOverlay();
   };
 
+  /** 选择一条客户端连接；同时把执行偏好落到 client——选中即表示要用它执行。 */
   selectConnection = (profileId: string): void => {
     if (!this.overlayWritable) return;
     this.overlay = {
       ...this.overlay,
-      selection: { kind: 'connection', profileId },
+      selection: { executionPreference: 'client', clientConnectionId: profileId },
     };
     this.persistOverlay();
     this.publishOverlay();
@@ -284,19 +283,24 @@ export class DesktopAiConfigStore {
     this.publishOverlay();
   };
 
-  /** 写入某连接+模型的生成覆盖；undefined 表示恢复默认（删除 scope）。 */
+  /** 写入某连接+模型的生成覆盖；undefined 表示恢复默认（删除该模型条目）。 */
   setGenerationOverrides = (
     profileId: string,
     modelId: string,
     overrides: UserGenerationOverrides | undefined,
   ): void => {
     if (!this.overlayWritable) return;
-    const scope = desktopConnectionOverridesScope(profileId, modelId);
     const next = { ...this.overlay.generationOverrides };
     if (overrides === undefined) {
-      delete next[scope];
+      const models = { ...(next[profileId] ?? {}) };
+      delete models[modelId];
+      if (Object.keys(models).length === 0) {
+        delete next[profileId];
+      } else {
+        next[profileId] = models;
+      }
     } else {
-      next[scope] = overrides;
+      next[profileId] = { ...(next[profileId] ?? {}), [modelId]: overrides };
     }
     this.overlay = { ...this.overlay, generationOverrides: next };
     this.persistOverlay();
@@ -304,8 +308,9 @@ export class DesktopAiConfigStore {
   };
 
   /**
-   * 保存连接草稿：先写凭据再落 Profile（顺序与 `saveProfileDraft` 注释一致，
-   * 不能反过来），随后刷新列表。`ProfileDraftError.field` 供 UI 定位失败字段。
+   * 保存连接草稿：先做 native 校验，再写凭据，最后落 Profile（顺序与
+   * `saveProfileDraft` 注释一致），随后刷新列表。`ProfileDraftError.field` 供 UI
+   * 定位失败字段。
    *
    * 编辑既有连接时保留编辑器不管理的字段：未提供新明文就沿用旧 `apiKeyRef`，
    * `createdAt` 与编辑器未暴露的 header/默认参数也不被静默清掉。
@@ -313,15 +318,21 @@ export class DesktopAiConfigStore {
   saveConnection = async (draft: ProfileDraft): Promise<void> => {
     this.publish({ savingConnection: true });
     try {
+      const existing = this.state.profiles.find((item) => item.id === draft.id);
+      // 简化编辑器只表达 openai-compatible；其他 adapter 的旧 Profile 只读展示，
+      // 不得借保存把 adapter 静默改写（DESK-ONLINE-003/004）。
+      if (existing && existing.adapter !== 'openai-compatible') {
+        throw new ProfileDraftError(
+          'adapter',
+          `当前版本的连接编辑器仅支持 openai-compatible；该连接为 ${existing.adapter}`,
+        );
+      }
+
       const built = buildProfile(draft, this.deps.now);
       const plaintextApiKey = draft.apiKey !== undefined && draft.apiKey.length > 0
         ? draft.apiKey
         : undefined;
-      if (plaintextApiKey !== undefined) {
-        await setProviderSecret(this.deps.invoke, deriveApiKeyRef(built.id), plaintextApiKey);
-      }
 
-      const existing = this.state.profiles.find((item) => item.id === built.id);
       const transport = (() => {
         const rest = { ...(existing?.transport ?? {}) };
         delete rest.allowPublicHttp;
@@ -336,15 +347,28 @@ export class DesktopAiConfigStore {
             name: built.name,
             baseUrl: built.baseUrl,
             modelId: built.modelId,
-            adapter: built.adapter,
+            adapter: existing.adapter,
             transport,
             apiKeyRef: plaintextApiKey !== undefined ? built.apiKeyRef : existing.apiKeyRef,
             updatedAt: built.updatedAt,
           }
         : built;
 
-      // provider-profile-bridge 内部完成 native 投影回显校验后再落盘。
+      // Profile 先过 native 校验（含投影回显），凭据写入放到校验之后：否则编辑既有
+      // 连接时会出现「凭据已更新但 Profile 保存失败」的部分成功窗口，旧 Profile 会
+      // 静默开始使用新 Key。
+      await validateProviderExecutionProfile(this.deps.invoke, profile);
+      if (plaintextApiKey !== undefined) {
+        await setProviderSecret(this.deps.invoke, deriveApiKeyRef(built.id), plaintextApiKey);
+      }
       await saveProviderProfile(this.deps.invoke, profile);
+      // apiKeyRef 因重输 Key 而更换时清理旧凭据，避免孤儿 secret 留在系统钥匙串。
+      if (
+        existing?.apiKeyRef !== undefined &&
+        existing.apiKeyRef !== profile.apiKeyRef
+      ) {
+        await deleteProviderSecret(this.deps.invoke, existing.apiKeyRef).catch(() => undefined);
+      }
       await this.refreshProfiles();
       // 新建的连接直接成为当前选择——用户保存它就是为了用它。
       this.selectConnection(profile.id);
@@ -353,11 +377,32 @@ export class DesktopAiConfigStore {
     }
   };
 
-  /** 删除连接 + 凭据，并清掉 overlay 里的相关引用。 */
+  /**
+   * 删除连接及其凭据，并显式解除 overlay 里的引用。
+   *
+   * - 凭据按被删 Profile 实际记录的 `apiKeyRef` 删除；推导 ref 对旧数据可能不准。
+   * - `secretHeaderRefs` 未来可能引入共享语义，不随 Profile 盲删。
+   * - 删除当前正在使用的连接时显式清掉 `clientConnectionId`，不自动换供应商
+   *   （DESK-ONLINE-002）。Profile 是索引、凭据是内容；孤儿凭据比悬空 Profile 安全。
+   */
   deleteConnection = async (profileId: string): Promise<void> => {
+    const existing =
+      this.state.profiles.find((item) => item.id === profileId) ??
+      (await getProviderProfile(this.deps.invoke, profileId).catch(() => null));
+
     await deleteProviderProfile(this.deps.invoke, profileId);
-    // Profile 是索引、凭据是内容；孤儿凭据比悬空 Profile 安全（沿用 removeProfile 的语义）。
-    await deleteProviderSecret(this.deps.invoke, deriveApiKeyRef(profileId)).catch(() => undefined);
+    if (existing?.apiKeyRef !== undefined) {
+      await deleteProviderSecret(this.deps.invoke, existing.apiKeyRef).catch(() => undefined);
+    }
+
+    if (this.overlay.selection.clientConnectionId === profileId && this.overlayWritable) {
+      this.overlay = {
+        ...this.overlay,
+        selection: { ...this.overlay.selection, clientConnectionId: null },
+      };
+      this.persistOverlay();
+      this.publishOverlay();
+    }
     await this.refreshProfiles();
   };
 }

@@ -2,10 +2,12 @@
 //
 // 被测不变量：
 // - overlay fail-closed；损坏即 blocked，显式重置前拒绝一切写入；
+// - 执行位置与客户端连接正交：默认 client+null；悬空保留原 ID 由解析层诊断；
+//   删除当前连接显式解除引用，绝不自动换供应商；
 // - 预设目录不含 `system`；Direct 候选 = 已核验 wire ∩ `DESKTOP_DIRECT_ADAPTERS`；
 // - secret 只有 set/has/delete 三个调用面，明文永不进 overlay/Profile；
-// - 先凭据后 Profile、先 Profile 后凭据的两个删除顺序；
-// - 编辑连接时不提供新明文则保留既有 `apiKeyRef` 与 `createdAt`。
+// - Profile native 校验先于凭据写入，Profile 落盘在凭据之后；
+// - 编辑连接时不提供新明文则保留既有 `apiKeyRef` 与 `createdAt`，adapter 不被改写。
 
 import { describe, expect, it, vi } from 'vitest';
 
@@ -29,7 +31,6 @@ vi.mock('@tauri-apps/api/core', () => ({
 import {
   DESKTOP_AI_CONFIG_DEFAULT_OVERLAY,
   DESKTOP_DIRECT_ADAPTERS,
-  desktopConnectionOverridesScope,
   describeDesktopPresetEntry,
   describeDesktopPresetModelSupport,
   listDesktopPresetEntries,
@@ -77,8 +78,16 @@ const profileFixture = (
     ...overrides,
   });
 
+const clientSelection = (profileId: string | null) => ({
+  executionPreference: 'client' as const,
+  clientConnectionId: profileId,
+});
+
 /** 按真实 bridge 的 IPC 形状模拟 native：投影回显 + opaque 文档存取 + 只写凭据库。 */
-const createNativeStub = (initial: DirectProviderProfileV1[] = []) => {
+const createNativeStub = (
+  initial: DirectProviderProfileV1[] = [],
+  options: { failSecretProbe?: boolean; failValidation?: boolean } = {},
+) => {
   const profiles = new Map(initial.map((profile) => [profile.id, profile]));
   const secrets = new Set<string>();
   const calls: string[] = [];
@@ -90,6 +99,9 @@ const createNativeStub = (initial: DirectProviderProfileV1[] = []) => {
       case 'get_provider_profile':
         return profiles.get(args?.profileId as string) ?? null;
       case 'validate_provider_execution_profile':
+        if (options.failValidation) {
+          throw { code: 'provider-profile-rejected', message: 'native rejected the profile' };
+        }
         return args?.document;
       case 'save_provider_profile': {
         const document = args?.document as DirectProviderProfileV1;
@@ -103,6 +115,7 @@ const createNativeStub = (initial: DirectProviderProfileV1[] = []) => {
         secrets.add(args?.secretRef as string);
         return undefined;
       case 'has_provider_secret':
+        if (options.failSecretProbe) throw new Error('keychain unavailable');
         return secrets.has(args?.secretRef as string);
       case 'delete_provider_secret':
         secrets.delete(args?.secretRef as string);
@@ -133,26 +146,52 @@ describe('parseDesktopAiConfigOverlay', () => {
     expect(parsed).toEqual(DESKTOP_AI_CONFIG_DEFAULT_OVERLAY);
   });
 
+  it('defaults to client execution with no connection selected', () => {
+    expect(DESKTOP_AI_CONFIG_DEFAULT_OVERLAY.selection).toEqual({
+      executionPreference: 'client',
+      clientConnectionId: null,
+    });
+  });
+
   it('fails closed on unsupported version, corrupt selection and non-schema overrides', () => {
-    expect(() => parseDesktopAiConfigOverlay('{"version":2}')).toThrow('版本');
+    expect(() => parseDesktopAiConfigOverlay('{"version":1}')).toThrow('版本');
+    expect(() => parseDesktopAiConfigOverlay('{"version":3}')).toThrow('版本');
     expect(() =>
       parseDesktopAiConfigOverlay(
-        JSON.stringify({ version: 1, selection: { kind: 'connection' }, hiddenPresetIds: [] }),
+        JSON.stringify({
+          version: 2,
+          selection: { executionPreference: 'client' },
+          hiddenPresetIds: [],
+        }),
       ),
     ).toThrow('选择');
     expect(() =>
       parseDesktopAiConfigOverlay(
         JSON.stringify({
-          version: 1,
-          selection: { kind: 'server' },
+          version: 2,
+          selection: clientSelection(null),
           hiddenPresetIds: [],
-          generationOverrides: { 'a::b': { temperature: 'hot' } },
+          generationOverrides: { p1: { m1: { temperature: 'hot' } } },
         }),
       ),
     ).toThrow('schema');
     expect(() =>
       parseDesktopAiConfigOverlay(
-        JSON.stringify({ version: 1, selection: { kind: 'server' }, hiddenPresetIds: [1] }),
+        JSON.stringify({
+          version: 2,
+          selection: clientSelection(null),
+          hiddenPresetIds: [],
+          generationOverrides: { p1: 'flat' },
+        }),
+      ),
+    ).toThrow('覆盖');
+    expect(() =>
+      parseDesktopAiConfigOverlay(
+        JSON.stringify({
+          version: 2,
+          selection: clientSelection(null),
+          hiddenPresetIds: [1],
+        }),
       ),
     ).toThrow('隐藏');
   });
@@ -161,29 +200,36 @@ describe('parseDesktopAiConfigOverlay', () => {
 describe('resolveDesktopAiTarget', () => {
   const profile = profileFixture();
 
-  it('server selection is an unavailable placeholder until hosted lands', () => {
-    const target = resolveDesktopAiTarget({ kind: 'server' }, [profile], {});
+  it('server preference is an unavailable placeholder until hosted lands', () => {
+    const target = resolveDesktopAiTarget(
+      { executionPreference: 'server', clientConnectionId: 'p_local' },
+      [profile],
+      {},
+    );
     expect(target.location).toBe('server');
     expect(target.profile).toBeNull();
     expect(target.unavailableReason).toContain('服务器执行');
   });
 
-  it('reports a dangling selection instead of crashing', () => {
-    const target = resolveDesktopAiTarget(
-      { kind: 'connection', profileId: 'gone' },
-      [profile],
-      {},
-    );
+  it('guides configuration when no client connection is selected', () => {
+    const target = resolveDesktopAiTarget(clientSelection(null), [profile], {});
+    expect(target.location).toBe('client');
+    expect(target.profile).toBeNull();
+    expect(target.unavailableReason).toContain('尚未选择客户端连接');
+  });
+
+  it('reports a dangling selection instead of crashing or switching providers', () => {
+    const target = resolveDesktopAiTarget(clientSelection('gone'), [profile], {});
     expect(target.profile).toBeNull();
     expect(target.unavailableReason).toContain('已不存在');
   });
 
   it('derives direct-local for loopback and direct-remote otherwise', () => {
-    expect(resolveDesktopAiTarget({ kind: 'connection', profileId: 'p_local' }, [profile], {}).mode).toBe(
+    expect(resolveDesktopAiTarget(clientSelection('p_local'), [profile], {}).mode).toBe(
       'direct-local',
     );
     const remote = profileFixture({ baseUrl: 'https://api.example.com/v1' });
-    expect(resolveDesktopAiTarget({ kind: 'connection', profileId: 'p_local' }, [remote], {}).mode).toBe(
+    expect(resolveDesktopAiTarget(clientSelection('p_local'), [remote], {}).mode).toBe(
       'direct-remote',
     );
   });
@@ -193,28 +239,40 @@ describe('resolveDesktopAiTarget', () => {
       adapter: 'anthropic',
       baseUrl: 'https://api.anthropic.com/v1',
     });
-    const target = resolveDesktopAiTarget(
-      { kind: 'connection', profileId: 'p_local' },
-      [anthropic],
-      {},
-    );
+    const target = resolveDesktopAiTarget(clientSelection('p_local'), [anthropic], {});
     expect(target.mode).toBeNull();
     expect(target.unavailableReason).toContain('anthropic');
   });
 
   it('scopes generation overrides by profile id and model id', () => {
-    const overrides = { 'p_local::qwen3:8b': { temperature: 0.2 }, 'other::m': { temperature: 1 } };
-    const target = resolveDesktopAiTarget(
-      { kind: 'connection', profileId: 'p_local' },
-      [profile],
-      overrides,
-    );
+    const overrides = {
+      p_local: { 'qwen3:8b': { temperature: 0.2 } },
+      other: { m: { temperature: 1 } },
+    };
+    const target = resolveDesktopAiTarget(clientSelection('p_local'), [profile], overrides);
     expect(target.generationOverrides).toEqual({ temperature: 0.2 });
     const renamed = profileFixture({ modelId: 'other-model' });
     expect(
-      resolveDesktopAiTarget({ kind: 'connection', profileId: 'p_local' }, [renamed], overrides)
+      resolveDesktopAiTarget(clientSelection('p_local'), [renamed], overrides)
         .generationOverrides,
     ).toBeUndefined();
+  });
+
+  it('cannot collide overrides between ids containing colons', () => {
+    // 旧 `${profileId}::${modelId}` 复合键下 ("a","b::c") 与 ("a::b","c") 同键；
+    // 嵌套结构天然无碰撞。
+    const overrides = {
+      'a::b': { c: { temperature: 0.1 } },
+      a: { 'b::c': { temperature: 0.9 } },
+    };
+    const first = profileFixture({ id: 'a::b', modelId: 'c' });
+    const second = profileFixture({ id: 'a', modelId: 'b::c' });
+    expect(
+      resolveDesktopAiTarget(clientSelection('a::b'), [first], overrides).generationOverrides,
+    ).toEqual({ temperature: 0.1 });
+    expect(
+      resolveDesktopAiTarget(clientSelection('a'), [second], overrides).generationOverrides,
+    ).toEqual({ temperature: 0.9 });
   });
 });
 
@@ -258,39 +316,68 @@ describe('preset layering (DESKTOP_DIRECT_ADAPTERS = openai-compatible)', () => 
 });
 
 describe('DesktopAiConfigStore', () => {
-  it('auto-selects the first loaded connection (server is a disabled placeholder)', async () => {
+  it('keeps client+null on fresh profiles load instead of auto-selecting the first', async () => {
     const storage = createStorage();
     const native = createNativeStub([profileFixture()]);
     const store = createStore(storage, native.invoke);
     store.init();
     await vi.waitFor(() => expect(store.getSnapshot().profilesState).toBe('ready'));
 
-    expect(store.getSnapshot().selection).toEqual({ kind: 'connection', profileId: 'p_local' });
-    const persisted = JSON.parse(storage.data.get(DESKTOP_AI_CONFIG_STORAGE_KEY)!);
-    expect(persisted.selection).toEqual({ kind: 'connection', profileId: 'p_local' });
+    // 没有「找到一个就自动选中」：执行位置保持客户端偏好，连接等用户显式选择。
+    expect(store.getSnapshot().selection).toEqual(clientSelection(null));
+    expect(
+      resolveDesktopAiTarget(
+        store.getSnapshot().selection,
+        store.getSnapshot().profiles,
+        store.getSnapshot().generationOverrides,
+      ).unavailableReason,
+    ).toContain('尚未选择客户端连接');
   });
 
-  it('drops a dangling selection and keeps hidden presets on refresh', async () => {
+  it('keeps a dangling selection for diagnosis instead of silently falling back', async () => {
     const storage = createStorage();
     storage.setItem(
       DESKTOP_AI_CONFIG_STORAGE_KEY,
       JSON.stringify({
-        version: 1,
-        selection: { kind: 'connection', profileId: 'deleted' },
+        version: 2,
+        selection: { executionPreference: 'client', clientConnectionId: 'deleted' },
         hiddenPresetIds: ['deepseek'],
-        generationOverrides: { 'deleted::m': { temperature: 1 }, 'p_local::qwen3:8b': { temperature: 0.5 } },
+        generationOverrides: {
+          deleted: { m: { temperature: 1 } },
+          p_local: { 'qwen3:8b': { temperature: 0.5 } },
+        },
       }),
     );
     const store = createStore(storage, createNativeStub([profileFixture()]).invoke);
     store.init();
     await vi.waitFor(() => expect(store.getSnapshot().profilesState).toBe('ready'));
 
-    expect(store.getSnapshot().selection).toEqual({ kind: 'connection', profileId: 'p_local' });
+    // 悬空引用保留原 ID（诊断见 resolveDesktopAiTarget），不自动改选其他连接。
+    expect(store.getSnapshot().selection).toEqual(clientSelection('deleted'));
     expect(store.getSnapshot().hiddenPresetIds.has('deepseek')).toBe(true);
-    // 孤儿 overrides 清掉，存活连接的 scope 保留。
+    // 孤儿 overrides 清掉，存活连接的覆盖保留。
     expect(store.getSnapshot().generationOverrides).toEqual({
-      'p_local::qwen3:8b': { temperature: 0.5 },
+      p_local: { 'qwen3:8b': { temperature: 0.5 } },
     });
+  });
+
+  it('switches execution preference without losing the client connection', async () => {
+    const storage = createStorage();
+    const native = createNativeStub([profileFixture()]);
+    const store = createStore(storage, native.invoke);
+    store.init();
+    await vi.waitFor(() => expect(store.getSnapshot().profilesState).toBe('ready'));
+    store.selectConnection('p_local');
+    expect(store.getSnapshot().selection).toEqual(clientSelection('p_local'));
+
+    store.selectExecutionLocation('server');
+    expect(store.getSnapshot().selection).toEqual({
+      executionPreference: 'server',
+      clientConnectionId: 'p_local',
+    });
+
+    store.selectExecutionLocation('client');
+    expect(store.getSnapshot().selection).toEqual(clientSelection('p_local'));
   });
 
   it('blocks on corrupt overlay: refuses writes until explicit reset', async () => {
@@ -302,15 +389,16 @@ describe('DesktopAiConfigStore', () => {
 
     expect(store.getSnapshot().overlayState).toBe('blocked');
     store.selectConnection('p_local');
+    store.selectExecutionLocation('server');
     store.hidePreset('deepseek');
-    expect(store.getSnapshot().selection.kind).toBe('server');
+    expect(store.getSnapshot().selection).toEqual(clientSelection(null));
     // 原数据不被覆盖。
     expect(storage.data.get(DESKTOP_AI_CONFIG_STORAGE_KEY)).toBe('{broken');
 
     store.resetBlockedOverlay();
     await vi.waitFor(() => expect(store.getSnapshot().profilesState).toBe('ready'));
     expect(store.getSnapshot().overlayState).toBe('ready');
-    expect(storage.data.get(DESKTOP_AI_CONFIG_STORAGE_KEY)).toContain('"version":1');
+    expect(storage.data.get(DESKTOP_AI_CONFIG_STORAGE_KEY)).toContain('"version":2');
   });
 
   it('persists hide/restore of presets', async () => {
@@ -330,7 +418,7 @@ describe('DesktopAiConfigStore', () => {
     expect(JSON.parse(storage.data.get(DESKTOP_AI_CONFIG_STORAGE_KEY)!).hiddenPresetIds).toEqual([]);
   });
 
-  it('writes the credential before the profile and never persists plaintext', async () => {
+  it('validates the profile natively before writing the credential, and never persists plaintext', async () => {
     const storage = createStorage();
     const native = createNativeStub();
     const store = createStore(storage, native.invoke);
@@ -345,17 +433,68 @@ describe('DesktopAiConfigStore', () => {
       apiKey: 'sk-secret',
     });
 
+    const validateIndex = native.calls.indexOf('validate_provider_execution_profile');
     const secretIndex = native.calls.indexOf('set_provider_secret');
     const saveIndex = native.calls.indexOf('save_provider_profile');
-    expect(secretIndex).toBeGreaterThanOrEqual(0);
+    // native 校验先于凭据写入，Profile 落盘在最后。
+    expect(validateIndex).toBeGreaterThanOrEqual(0);
+    expect(validateIndex).toBeLessThan(secretIndex);
     expect(secretIndex).toBeLessThan(saveIndex);
     // 写入的是凭据目标名，Profile 内只有 apiKeyRef。
     expect(native.profiles.get('p_new')?.apiKeyRef).toBe('provider:p_new:api-key');
     expect(JSON.stringify(native.profiles.get('p_new'))).not.toContain('sk-secret');
     expect(storage.data.get(DESKTOP_AI_CONFIG_STORAGE_KEY)!).not.toContain('sk-secret');
     // 保存后自动选中。
-    expect(store.getSnapshot().selection).toEqual({ kind: 'connection', profileId: 'p_new' });
-    expect(store.getSnapshot().secretStatus['p_new']).toBe(true);
+    expect(store.getSnapshot().selection).toEqual(clientSelection('p_new'));
+    expect(store.getSnapshot().secretStatus['p_new']).toBe('present');
+  });
+
+  it('does not rewrite the credential when native profile validation fails', async () => {
+    const storage = createStorage();
+    const native = createNativeStub([profileFixture()], { failValidation: true });
+    native.secrets.add('provider:p_local:api-key');
+    const store = createStore(storage, native.invoke);
+    store.init();
+    await vi.waitFor(() => expect(store.getSnapshot().profilesState).toBe('ready'));
+
+    // native 校验失败时新 Key 不得写进凭据库——否则旧 Profile 会静默开始使用新 Key。
+    await expect(
+      store.saveConnection({
+        id: 'p_local',
+        name: '改名',
+        baseUrl: 'http://127.0.0.1:11434/v1',
+        modelId: 'qwen3:8b',
+        apiKey: 'sk-new-key',
+      }),
+    ).rejects.toThrow();
+    expect(native.calls).toContain('validate_provider_execution_profile');
+    expect(native.calls).not.toContain('set_provider_secret');
+    expect(native.profiles.get('p_local')?.name).toBe('本地模型');
+  });
+
+  it('refuses to edit a legacy profile whose adapter the editor cannot express', async () => {
+    const legacy = profileFixture({
+      id: 'p_anthropic',
+      adapter: 'anthropic',
+      baseUrl: 'https://api.anthropic.com/v1',
+    });
+    const native = createNativeStub([legacy]);
+    const store = createStore(createStorage(), native.invoke);
+    store.init();
+    await vi.waitFor(() => expect(store.getSnapshot().profilesState).toBe('ready'));
+
+    await expect(
+      store.saveConnection({
+        id: 'p_anthropic',
+        name: '改名而已',
+        baseUrl: 'https://api.anthropic.com/v1',
+        modelId: 'claude',
+      }),
+    ).rejects.toThrow(/openai-compatible/u);
+    // 原 Profile 完全未被触碰，adapter 没被静默改写成 openai-compatible。
+    expect(native.profiles.get('p_anthropic')?.adapter).toBe('anthropic');
+    expect(native.profiles.get('p_anthropic')?.name).toBe('本地模型');
+    expect(native.calls).not.toContain('save_provider_profile');
   });
 
   it('keeps the existing apiKeyRef and createdAt when editing without a new key', async () => {
@@ -405,7 +544,7 @@ describe('DesktopAiConfigStore', () => {
     expect(native.profiles.get('p_http')?.transport?.allowPublicHttp).toBe(true);
   });
 
-  it('deletes the profile before attempting its credential', async () => {
+  it('deletes the profile first, then the credential recorded on it', async () => {
     const native = createNativeStub([profileFixture()]);
     native.secrets.add('provider:p_local:api-key');
     const store = createStore(createStorage(), native.invoke);
@@ -421,7 +560,33 @@ describe('DesktopAiConfigStore', () => {
     );
     expect(native.profiles.size).toBe(0);
     expect(native.secrets.size).toBe(0);
-    expect(store.getSnapshot().selection).toEqual({ kind: 'server' });
+    // 显式解除当前连接引用：不自动换供应商。
+    expect(store.getSnapshot().selection).toEqual(clientSelection(null));
+  });
+
+  it('deletes the credential by the profile\'s actual apiKeyRef, not a derived one', async () => {
+    // 旧数据的 secret ref 可能与派生规则不同；删除必须指向真实记录的 ref。
+    const legacy = profileFixture({ apiKeyRef: 'provider:legacy-name:api-key' });
+    const native = createNativeStub([legacy]);
+    native.secrets.add('provider:legacy-name:api-key');
+    const store = createStore(createStorage(), native.invoke);
+    store.init();
+    await vi.waitFor(() => expect(store.getSnapshot().profilesState).toBe('ready'));
+
+    await store.deleteConnection('p_local');
+
+    expect(native.secrets.size).toBe(0);
+    expect(native.calls).toContain('delete_provider_secret');
+    expect(native.calls.filter((c) => c === 'delete_provider_secret')).toHaveLength(1);
+  });
+
+  it('marks credential existence failures as error instead of pretending absent', async () => {
+    const native = createNativeStub([profileFixture()], { failSecretProbe: true });
+    const store = createStore(createStorage(), native.invoke);
+    store.init();
+    await vi.waitFor(() => expect(store.getSnapshot().profilesState).toBe('ready'));
+
+    expect(store.getSnapshot().secretStatus['p_local']).toBe('error');
   });
 
   it('scopes generation overrides per connection+model and persists them', async () => {
@@ -431,14 +596,21 @@ describe('DesktopAiConfigStore', () => {
     await vi.waitFor(() => expect(store.getSnapshot().profilesState).toBe('ready'));
 
     store.setGenerationOverrides('p_local', 'qwen3:8b', { temperature: 0.3 });
-    const scope = desktopConnectionOverridesScope('p_local', 'qwen3:8b');
-    expect(store.getSnapshot().generationOverrides[scope]).toEqual({ temperature: 0.3 });
-    expect(JSON.parse(storage.data.get(DESKTOP_AI_CONFIG_STORAGE_KEY)!).generationOverrides[scope]).toEqual(
-      { temperature: 0.3 },
-    );
+    expect(store.getSnapshot().generationOverrides).toEqual({
+      p_local: { 'qwen3:8b': { temperature: 0.3 } },
+    });
+    expect(
+      JSON.parse(storage.data.get(DESKTOP_AI_CONFIG_STORAGE_KEY)!).generationOverrides,
+    ).toEqual({ p_local: { 'qwen3:8b': { temperature: 0.3 } } });
 
+    // id/modelId 含冒号也不会与其他条目串键。
+    store.setGenerationOverrides('p_local', 'qwen3:8b::vision', { temperature: 0.9 });
     store.setGenerationOverrides('p_local', 'qwen3:8b', undefined);
-    expect(store.getSnapshot().generationOverrides[scope]).toBeUndefined();
+    expect(store.getSnapshot().generationOverrides).toEqual({
+      p_local: { 'qwen3:8b::vision': { temperature: 0.9 } },
+    });
+    store.setGenerationOverrides('p_local', 'qwen3:8b::vision', undefined);
+    expect(store.getSnapshot().generationOverrides).toEqual({});
   });
 
   it('never issues a secret-read command: only set/has/delete exist', async () => {
