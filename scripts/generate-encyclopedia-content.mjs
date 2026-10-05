@@ -37,7 +37,9 @@ const CONTENT_ROOT = path.join(root, 'content');
 const BRAND_DIR = path.join(CONTENT_ROOT, 'brand');
 const ENCYCLOPEDIA_DIR = path.join(CONTENT_ROOT, 'encyclopedia');
 const QUESTIONNAIRE_DIR = path.join(CONTENT_ROOT, 'questionnaires', 'presets');
-const SHARED_QUESTIONNAIRES = ['magical-girl-default.json'];
+const QUESTIONNAIRE_CATALOG_FILE = 'index.json';
+/** 双端同源的根级 JSON 资产：languages.json 由问卷页语言选择直接 fetch。 */
+const SHARED_ROOT_JSON = ['languages.json'];
 
 /**
  * 目录数据的权威位置。
@@ -286,9 +288,16 @@ export async function generate({ check = false, checkOutput = false, target = 'a
   const brandFiles = await listFiles(BRAND_DIR, '');
   problems.push(...(await collectProblems(encyclopediaFiles, entries)));
   problems.push(...(await collectBrandProblems(brandFiles, await readHomeFeatureAssets(), manifest)));
-  for (const file of SHARED_QUESTIONNAIRES) {
+  const questionnaireFiles = await listFiles(QUESTIONNAIRE_DIR, '.json');
+  if (!questionnaireFiles.includes(QUESTIONNAIRE_CATALOG_FILE)) {
+    problems.push(`预设问卷目录缺少 ${QUESTIONNAIRE_CATALOG_FILE}`);
+  }
+  for (const file of questionnaireFiles) {
+    if (file === QUESTIONNAIRE_CATALOG_FILE) continue;
     const questionnaire = JSON.parse(await readFile(path.join(QUESTIONNAIRE_DIR, file), 'utf8'));
-    if (questionnaire.id !== file.slice(0, -5) || questionnaire.kind !== 'magical-girl' || !Array.isArray(questionnaire.questions) || questionnaire.questions.length === 0) {
+    // kind 为字符串即可（magical-girl/canshou 均合法）；questions 允许为空数组——
+    // 纯 lore 预设没有题目，靠 loreMarkdown 参与多问卷组合。
+    if (questionnaire.id !== file.slice(0, -5) || typeof questionnaire.kind !== 'string' || !Array.isArray(questionnaire.questions)) {
       problems.push(`共享问卷 ${file} 的身份或题目列表无效`);
     }
     if (!manifest.brand.shared.includes(questionnaire.logoUrl?.slice(1))) {
@@ -297,11 +306,16 @@ export async function generate({ check = false, checkOutput = false, target = 'a
   }
   // 花名数据由 domain 直接消费；这里只维护 Web 既有 URL 的兼容副本。
   JSON.parse(await readFile(path.join(CONTENT_ROOT, 'flowers.json'), 'utf8'));
+  // 语言清单同步到双端 public；内容本身由 fetch 消费，这里只校验是合法 JSON 数组。
+  const languages = JSON.parse(await readFile(path.join(CONTENT_ROOT, 'languages.json'), 'utf8'));
+  if (!Array.isArray(languages) || languages.length === 0) {
+    problems.push('languages.json 必须是非空数组');
+  }
 
   // 在写入前检查全部源文件；--check 不依赖开发机残留的 public/ 生成物，也不写磁盘。
   if (problems.length > 0) throw new Error(`百科内容源校验失败：\n- ${problems.join('\n- ')}`);
   if (check && !checkOutput) {
-    console.log(`content/ 源校验通过：${entries.length} 篇正文、${brandFiles.length} 个品牌资源、${SHARED_QUESTIONNAIRES.length} 份共享问卷及花名数据`);
+    console.log(`content/ 源校验通过：${entries.length} 篇正文、${brandFiles.length} 个品牌资源、${questionnaireFiles.length - 1} 份预设问卷及花名/语言数据`);
     return;
   }
 
@@ -309,11 +323,21 @@ export async function generate({ check = false, checkOutput = false, target = 'a
     if (target !== 'all' && app !== `apps/${target}`) continue;
     const publicRoot = path.join(outputRoot, app, 'public');
 
+    // 预设目录全量由本脚本拥有：增删预设只改 content/，双端副本一致剪除。
     await syncDirectory({
       from: QUESTIONNAIRE_DIR,
       to: path.join(publicRoot, 'questionnaires', 'presets'),
-      files: SHARED_QUESTIONNAIRES,
-      ownedFiles: SHARED_QUESTIONNAIRES,
+      files: questionnaireFiles,
+      ownedFiles: questionnaireFiles,
+      exclusive: true,
+      check: checkOutput,
+      problems,
+    });
+    await syncDirectory({
+      from: CONTENT_ROOT,
+      to: publicRoot,
+      files: SHARED_ROOT_JSON,
+      ownedFiles: SHARED_ROOT_JSON,
       exclusive: false,
       check: checkOutput,
       problems,
@@ -349,7 +373,7 @@ export async function generate({ check = false, checkOutput = false, target = 'a
     });
 
     console.log(
-      `${label} 内容 ${checkOutput ? '已校验' : '已同步'}：${encyclopediaFiles.length} 篇正文、${keys.flatMap((key) => manifest.brand[key]).length} 个品牌资源、${SHARED_QUESTIONNAIRES.length} 份共享问卷`,
+      `${label} 内容 ${checkOutput ? '已校验' : '已同步'}：${encyclopediaFiles.length} 篇正文、${keys.flatMap((key) => manifest.brand[key]).length} 个品牌资源、${questionnaireFiles.length - 1} 份预设问卷`,
     );
   }
 

@@ -66,6 +66,7 @@ function DetailsForm({ session }: { session: DetailsSession }) {
   const cloudSignedIn = cloudSessionState.phase.kind === 'ready'
     && cloudSessionState.phase.session.state === 'active';
   const [generationMode, setGenerationMode] = useState<GenerationMode>('non-stream');
+  const [languages, setLanguages] = useState<{ code: string; name: string }[]>([]);
   const [questionnaire, setQuestionnaire] = useState<DetailsQuestionnaire | null>(null);
   const [questionnaireSource, setQuestionnaireSource] = useState<QuestionnaireSource | null>(null);
   const [questionnaireError, setQuestionnaireError] = useState<string | null>(null);
@@ -95,6 +96,15 @@ function DetailsForm({ session }: { session: DetailsSession }) {
       return session.getSnapshot().draftSaved;
     },
   );
+  // 语言清单与 Web 同一来源（content/languages.json → public 同步副本）。
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch('/languages.json', { signal: controller.signal, credentials: 'omit', redirect: 'error' })
+      .then((response) => (response.ok ? response.json() : []))
+      .then((data) => { if (!controller.signal.aborted && Array.isArray(data)) setLanguages(data); })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, []);
   useEffect(() => {
     const controller = new AbortController();
     setQuestionnaireLoading(true);
@@ -325,7 +335,10 @@ function DetailsForm({ session }: { session: DetailsSession }) {
         />}
         <label className="flex flex-col gap-1">输出语言
           <select aria-label="输出语言" className="w-full rounded border border-(--app-border) bg-(--app-surface) px-3 py-2 text-(--app-text)" value={state.draft.language} onChange={(event) => session.updateDraft({ ...state.draft, language: event.target.value })}>
-            {['简体中文', '繁體中文', 'English', '日本語'].map((language) => <option key={language}>{language}</option>)}
+            {/* languages.json 未加载完成前先呈现当前值，避免选择态回空。 */}
+            {(languages.length ? languages : [{ code: state.draft.language, name: state.draft.language }]).map((lang) => (
+              <option key={lang.code} value={lang.code}>{lang.name}</option>
+            ))}
           </select>
         </label>
         {flow.length > 0 && <QuestionNavigator
@@ -438,7 +451,7 @@ export function DesktopDetails() {
   useEffect(() => {
     const owner = new DetailsSession({
       storage: { getItem: (key) => window.localStorage.getItem(key), setItem: (key, value) => window.localStorage.setItem(key, value), removeItem: (key) => window.localStorage.removeItem(key) },
-      repository: new IpcLocalCardRepository(invoke), initialDraft: { answers: {}, language: '简体中文' },
+      repository: new IpcLocalCardRepository(invoke), initialDraft: { answers: {}, language: 'zh-CN' },
     });
     setSession(owner);
     const onPageHide = () => owner.cancel();
