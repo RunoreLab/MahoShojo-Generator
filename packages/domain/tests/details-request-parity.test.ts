@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -15,18 +14,15 @@ import {
   type QuestionnaireSelection,
   type QuestionnaireSelectionSource,
 } from '../src/questionnaire-selection';
+// 域包不得触达 node:fs（MONO-005-DOMAIN-RUNTIME）：夹具走静态 JSON import。
+import fixtureJson from '../fixtures/details-generation-request-parity.json';
 
 /**
  * D5.1a-r1 跨宿主 golden：夹具是权威 expected，本文件跑「选择集 → 可见流程
  * → answers → 请求体」的共源管线；Web/Desktop 各自再有一份宿主侧对拍测试
  * 证明它们消费同一管线与同一夹具。
  */
-const fixture = JSON.parse(
-  readFileSync(
-    new URL('../../contracts/fixtures/details-generation-request-parity.json', import.meta.url),
-    'utf8',
-  ),
-) as {
+const fixture = fixtureJson as unknown as {
   language: string;
   questionnaires: Record<string, QuestionnaireDefinition>;
   cases: Array<{

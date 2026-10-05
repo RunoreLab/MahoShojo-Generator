@@ -402,7 +402,7 @@ export const buildQuestionnaireGenerationRequestFields = (
  * answers → questionnaireSelections → questionnaires → allowNativeSignature
  * → language。宿主特有字段由调用方在展开后追加：Web 追加 `customProvider`
  * （无自定义供应商时为 `undefined`，序列化省略）；Desktop 不追加任何字段。
- * golden 夹具 `packages/contracts/fixtures/details-generation-request-parity.json`
+ * golden 夹具 `packages/domain/fixtures/details-generation-request-parity.json`
  * 以本函数输出为权威 expected。
  */
 export interface QuestionnaireGenerationRequestBody extends QuestionnaireGenerationRequestFields {

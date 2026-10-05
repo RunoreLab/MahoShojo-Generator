@@ -29,7 +29,7 @@ import { HOSTED_AI_REQUEST_COMMAND } from '../src/platform/cloud-bridge';
  */
 const fixture = JSON.parse(
   readFileSync(
-    new URL('../../../packages/contracts/fixtures/details-generation-request-parity.json', import.meta.url),
+    new URL('../../../packages/domain/fixtures/details-generation-request-parity.json', import.meta.url),
     'utf8',
   ),
 ) as {

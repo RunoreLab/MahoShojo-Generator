@@ -24,7 +24,7 @@ import {
  */
 const fixture = JSON.parse(
   readFileSync(
-    new URL('../../../packages/contracts/fixtures/details-generation-request-parity.json', import.meta.url),
+    new URL('../../../packages/domain/fixtures/details-generation-request-parity.json', import.meta.url),
     'utf8',
   ),
 ) as {
