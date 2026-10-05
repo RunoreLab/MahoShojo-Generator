@@ -83,9 +83,17 @@ let cachedAuthValue: AuthData | null = null;
 let cachedAuthPromise: Promise<AuthData | null> | null = null;
 let sessionBootstrapPromise: Promise<AuthData | null> | null = null;
 
+/**
+ * 当前身份由哪类凭据证明（与服务端 `AuthUserSource` 对齐，客户端侧不 import server 模块）。
+ * `better-auth-session` 表示存在有效 BA 会话 cookie；`legacy-bearer` 表示仅由旧版 authKey 证明。
+ */
+export type AuthSessionSource = 'better-auth-session' | 'legacy-bearer';
+
 type VerifyAuthResponse = {
   success: boolean;
   authKey?: string | null;
+  /** 服务端认证来源；仅 2xx 且 success 时存在。 */
+  authSource?: AuthSessionSource | null;
   user?: { id: number; username: string; prefix?: string | null };
   badges?: UserBadge[];
   activityToken?: string | null;
@@ -461,13 +469,7 @@ export const authApi = {
   },
 
   // 验证当前认证状态
-  async verify(): Promise<{
-    success: boolean;
-    authKey?: string | null;
-    user?: { id: number; username: string; prefix?: string | null };
-    badges?: UserBadge[];
-    activityToken?: string | null;
-  }> {
+  async verify(): Promise<VerifyAuthResponse> {
     const auth = await authStorage.getAuth();
     const authHeader = readStoredAuthHeader(auth);
 

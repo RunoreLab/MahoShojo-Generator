@@ -167,9 +167,10 @@ describe('server-safe shared entrypoints stay free of React hooks', () => {
 
     // 未列出的入口目前都是客户端专属或视图入口；如果哪天某个 Server Component 开始 import 它们，
     // 这条断言会先提醒把它登记进来并验证。问卷与角色结果入口分别由客户端交互面板和结果卡使用，
-    // 本地数据卡列表只在客户端读设备存储，字段编辑器只在客户端编辑页使用，因此保持在这里作为显式的
-    // 客户端专属登记。
+    // 本地数据卡列表只在客户端读设备存储，字段编辑器只在客户端编辑页使用，AI Provider 选择器是
+    // 带 hook 的客户端状态机，因此保持在这里作为显式的客户端专属登记。
     expect(unlisted.sort()).toEqual([
+      './ai-provider',
       './card-editor',
       './character-result',
       './encyclopedia-views',

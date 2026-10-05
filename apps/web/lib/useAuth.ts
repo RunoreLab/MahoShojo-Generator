@@ -24,6 +24,8 @@ export function useAuth() {
     userBadges: snapshot.userBadges,
     loading: snapshot.loading,
     isAuthenticated: !!snapshot.user,
+    /** 当前身份的凭据来源；`better-auth-session` 才可签发桌面端 native grant。 */
+    authSource: snapshot.authSource,
     badgesLoading: snapshot.badgesLoading,
     register: registerAndSyncAuthState,
     login: loginAndSyncAuthState,

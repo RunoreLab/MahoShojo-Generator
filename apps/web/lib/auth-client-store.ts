@@ -1,4 +1,4 @@
-import { authApi, authStorage } from '@/lib/auth';
+import { authApi, authStorage, type AuthSessionSource } from '@/lib/auth';
 import { getUserBadges } from '@/lib/userBadges';
 import type { UserBadge } from '@/types/badge';
 
@@ -13,6 +13,11 @@ export interface AuthSnapshot {
   userBadges: UserBadge[];
   loading: boolean;
   badgesLoading: boolean;
+  /**
+   * 当前身份的凭据来源。`better-auth-session` 才可用于桌面端 native grant；
+   * `legacy-bearer`（旧版密钥）与 null 均不可。
+   */
+  authSource: AuthSessionSource | null;
 }
 
 const createInitialAuthSnapshot = (): AuthSnapshot => ({
@@ -20,7 +25,17 @@ const createInitialAuthSnapshot = (): AuthSnapshot => ({
   userBadges: [],
   loading: true,
   badgesLoading: false,
+  authSource: null,
 });
+
+const authModeToSessionSource = (
+  authMode: 'better-auth' | 'legacy' | undefined,
+): AuthSessionSource | null =>
+  authMode === 'better-auth'
+    ? 'better-auth-session'
+    : authMode === 'legacy'
+      ? 'legacy-bearer'
+      : null;
 
 let authSnapshot = createInitialAuthSnapshot();
 let authCheckPromise: Promise<void> | null = null;
@@ -64,6 +79,7 @@ const syncVerifiedAuthState = async (
     mergeAuthSnapshot({
       user: result.user,
       loading: false,
+      authSource: result.authSource ?? null,
     });
 
     if (Array.isArray(result.badges)) {
@@ -87,6 +103,7 @@ const syncVerifiedAuthState = async (
     userBadges: [],
     loading: false,
     badgesLoading: false,
+    authSource: null,
   });
 };
 
@@ -145,6 +162,7 @@ export const loginAndSyncAuthState = async (
     mergeAuthSnapshot({
       user: result.user,
       loading: false,
+      authSource: authModeToSessionSource(result.authMode),
     });
     await loadAuthUserBadges();
   }
@@ -159,6 +177,7 @@ export const logoutAndSyncAuthState = async () => {
     userBadges: [],
     loading: false,
     badgesLoading: false,
+    authSource: null,
   });
 };
 

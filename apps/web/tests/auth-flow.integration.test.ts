@@ -474,32 +474,47 @@ const buildAuthHarness = async () => {
         getCookieValue(cookieHeader, 'better-auth.session_token') ??
         getCookieValue(cookieHeader, '__Secure-better-auth.session_token');
 
-      if (!sessionToken) {
-        return { response: createJsonResponse({ error: '未授权' }, 401) };
+      if (sessionToken) {
+        const authUserId = state.sessions.get(sessionToken);
+        const userId = authUserId ? state.usersByAuthUserId.get(authUserId) : null;
+        const sessionUser = userId ? getUserById(userId) : null;
+        if (sessionUser) {
+          return {
+            source: 'better-auth-session',
+            user: {
+              id: sessionUser.id,
+              username: sessionUser.username,
+              prefix: sessionUser.prefix,
+              is_banned: sessionUser.isBanned,
+              is_admin: sessionUser.isAdmin,
+              is_review_exempt: sessionUser.isReviewExempt,
+            },
+          };
+        }
       }
 
-      const authUserId = state.sessions.get(sessionToken);
-      if (!authUserId) {
-        return { response: createJsonResponse({ error: '未授权' }, 401) };
+      // 与真实实现一致：会话不成立时回退到 legacy bearer 校验。
+      const bearerHeader = req.headers.get('authorization');
+      if (bearerHeader?.startsWith('Bearer ')) {
+        const authKey = bearerHeader.slice('Bearer '.length).trim();
+        const bearerUser = Array.from(state.usersById.values())
+          .find((candidate) => candidate.authKey === authKey);
+        if (bearerUser) {
+          return {
+            source: 'legacy-bearer',
+            user: {
+              id: bearerUser.id,
+              username: bearerUser.username,
+              prefix: bearerUser.prefix,
+              is_banned: bearerUser.isBanned,
+              is_admin: bearerUser.isAdmin,
+              is_review_exempt: bearerUser.isReviewExempt,
+            },
+          };
+        }
       }
 
-      const userId = state.usersByAuthUserId.get(authUserId);
-      const user = userId ? getUserById(userId) : null;
-      if (!user) {
-        return { response: createJsonResponse({ error: '未授权' }, 401) };
-      }
-
-      return {
-        source: 'better-auth-session',
-        user: {
-          id: user.id,
-          username: user.username,
-          prefix: user.prefix,
-          is_banned: user.isBanned,
-          is_admin: user.isAdmin,
-          is_review_exempt: user.isReviewExempt,
-        },
-      };
+      return { response: createJsonResponse({ error: '未授权' }, 401) };
     },
   });
 
@@ -840,13 +855,34 @@ describe('auth 全链路集成', () => {
     const verifyPayload = (await verifyResp.json()) as {
       success: boolean;
       authKey: string | null;
+      authSource?: string;
       user: { id: number; username: string };
       activityToken: string;
     };
     expect(verifyPayload.success).toBe(true);
     expect(verifyPayload.authKey).toBe(registerPayload.authKey);
     expect(verifyPayload.user.username).toBe('hikari');
+    expect(verifyPayload.authSource).toBe('better-auth-session');
     expect(verifyPayload.activityToken).toContain(`activity-${registerPayload.user.id}-`);
+
+    // legacy bearer（旧版密钥）身份也应被如实投影，授权页据此区分能否签发 grant。
+    const legacyVerifyResp = await harness.verifyPost(
+      new Request('https://example.com/api/auth/verify', {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${registerPayload.authKey}`,
+        },
+      }),
+    );
+    expect(legacyVerifyResp.status).toBe(200);
+    const legacyVerifyPayload = (await legacyVerifyResp.json()) as {
+      success: boolean;
+      authSource?: string;
+      user: { id: number; username: string };
+    };
+    expect(legacyVerifyPayload.success).toBe(true);
+    expect(legacyVerifyPayload.authSource).toBe('legacy-bearer');
+    expect(legacyVerifyPayload.user.id).toBe(registerPayload.user.id);
 
     const recoverResp = await harness.recoverPost(
       postJsonRequest(

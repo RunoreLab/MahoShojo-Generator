@@ -111,6 +111,14 @@ vi.mock('@/lib/auth/user-auth-linking', () => ({
   ensureAuthUserLink: vi.fn(async () => mockBusinessUser),
 }));
 
+vi.mock('@/lib/auth/auth-audit', () => ({
+  recordAuthAuditLog: vi.fn(async () => undefined),
+}));
+
+import { recordAuthAuditLog } from '@/lib/auth/auth-audit';
+
+const mockRecordAuthAuditLog = vi.mocked(recordAuthAuditLog);
+
 const TEST_BASE_URL = 'http://localhost:3000/api/auth';
 const BETTER_AUTH_SECRET = 'better-auth-secret-that-is-long-enough-for-desktop-native-test';
 
@@ -221,6 +229,8 @@ describe('desktop-auth-v1 端点集成', () => {
     `);
     auth = createAuth();
     __resetAuthAttemptRateLimitForTest();
+    mockRecordAuthAuditLog.mockReset();
+    mockRecordAuthAuditLog.mockResolvedValue(undefined);
   });
 
   test('grant 无会话 → 401', async () => {
@@ -321,5 +331,89 @@ describe('desktop-auth-v1 端点集成', () => {
     });
     expect(response.status).toBeGreaterThanOrEqual(400);
     expect(response.status).toBeLessThan(500);
+  });
+
+  test('grant 按授权用户限流：同一用户的第 9 次签发被拒绝', async () => {
+    const cookie = await signUpAndGetCookie();
+    const headers = {
+      Cookie: cookie,
+      Origin: 'http://localhost:3000',
+      'cf-connecting-ip': '192.0.2.10',
+    };
+
+    for (let i = 0; i < 8; i += 1) {
+      const response = await postJson('/native/grant', grantBody, headers);
+      expect(response.status).toBe(200);
+    }
+
+    const blocked = await postJson('/native/grant', grantBody, headers);
+    expect(blocked.status).toBe(429);
+    expect(mockRecordAuthAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({ eventType: 'desktop_native_grant', resultCode: 'RATE_LIMITED' }),
+    );
+  });
+
+  test('exchange 不共享全局 identifier 桶：不同来源互不误伤', async () => {
+    // 旧实现把所有请求记到固定 'native-exchange' 标识（容量 8），第 9 次起
+    // 任何用户都会收到 429；现在只有按来源 IP 的突发桶，这些请求都应走到
+    // invalid-grant 判定（401）而不是限流（429）。
+    for (let i = 0; i < 12; i += 1) {
+      const response = await postJson('/native/exchange', {
+        protocolVersion: 'desktop-auth-v1',
+        code: 'x'.repeat(43),
+        codeVerifier: 'v'.repeat(50),
+      }, { 'cf-connecting-ip': `198.51.100.${i + 1}` });
+      expect(response.status).toBe(401);
+    }
+  });
+
+  test('exchange 同一来源 IP 的突发仍被限流', async () => {
+    const headers = { 'cf-connecting-ip': '198.51.100.200' };
+    const body = {
+      protocolVersion: 'desktop-auth-v1',
+      code: 'x'.repeat(43),
+      codeVerifier: 'v'.repeat(50),
+    };
+
+    for (let i = 0; i < 24; i += 1) {
+      const response = await postJson('/native/exchange', body, headers);
+      expect(response.status).toBe(401);
+    }
+
+    const blocked = await postJson('/native/exchange', body, headers);
+    expect(blocked.status).toBe(429);
+    expect(mockRecordAuthAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({ eventType: 'desktop_native_exchange', resultCode: 'RATE_LIMITED' }),
+    );
+  });
+
+  test('grant/exchange 的审计写入被 await（fire-and-forget 回归）', async () => {
+    const cookie = await signUpAndGetCookie();
+
+    // 让审计写入挂起：若端点是 `void recordAuthAuditLog(...)`，响应会立即返回；
+    // 正确实现必须等审计 Promise 完成后才产生响应。
+    let releaseAudit: (() => void) | null = null;
+    mockRecordAuthAuditLog.mockImplementation(
+      () => new Promise<void>((resolve) => {
+        releaseAudit = resolve;
+      }),
+    );
+
+    const pending = postJson('/native/grant', grantBody, {
+      Cookie: cookie,
+      Origin: 'http://localhost:3000',
+    });
+
+    await vi.waitFor(() => expect(releaseAudit).not.toBeNull());
+    let settled = false;
+    void pending.then(() => {
+      settled = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(settled).toBe(false);
+
+    releaseAudit!();
+    const response = await pending;
+    expect(response.status).toBe(200);
   });
 });

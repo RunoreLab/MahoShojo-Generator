@@ -1,6 +1,14 @@
 import { getClientIpFromHeaders } from '@/lib/arena/battle-report-log-utils';
 
-export type AuthAttemptAction = 'register' | 'login';
+/**
+ * 限流动作维度。`native-grant` / `native-exchange` 属于桌面端 `desktop-auth-v1`
+ * 窄协议，使用独立的桶命名空间，不与站点登录/注册共享配额：
+ * - `native-grant` 需要已登录会话，按 IP + 授权用户双维度限制；
+ * - `native-exchange` 只按 IP 做突发保护——grant 本身已是 256-bit 一次性 code
+ *   （120s TTL + 原子消费 + PKCE verifier），不需要也不应有跨用户的共享
+ *   identifier 桶，否则不同桌面用户会互相误限流。
+ */
+export type AuthAttemptAction = 'register' | 'login' | 'native-grant' | 'native-exchange';
 
 export type AcquireAuthAttemptRateLimitInput = {
   req: Request;
@@ -62,6 +70,23 @@ const LOGIN_IP_RULE: TokenBucketRule = {
 
 const LOGIN_IDENTIFIER_RULE: TokenBucketRule = {
   capacity: 8,
+  windowMs: 10 * 60 * 1000,
+};
+
+const NATIVE_GRANT_IP_RULE: TokenBucketRule = {
+  capacity: 12,
+  windowMs: 10 * 60 * 1000,
+};
+
+const NATIVE_GRANT_USER_RULE: TokenBucketRule = {
+  capacity: 8,
+  windowMs: 10 * 60 * 1000,
+};
+
+// 每次桌面登录消耗一次 exchange（外加少量失败重试）；IP 维度给得比登录宽，
+// 容忍 NAT 出口聚集，同时仍约束单 IP 对 verification 表的写入压力。
+const NATIVE_EXCHANGE_IP_RULE: TokenBucketRule = {
+  capacity: 24,
   windowMs: 10 * 60 * 1000,
 };
 
@@ -170,6 +195,32 @@ export const acquireAuthAttemptRateLimit = (
         scope: 'username',
       });
     }
+  } else if (input.actionType === 'native-grant') {
+    checks.push({
+      key: `native-grant:ip:${requestIpKey}`,
+      rule: NATIVE_GRANT_IP_RULE,
+      reason: 'ip_burst',
+      scope: 'ip',
+    });
+
+    // identifier 维度按授权用户计（调用方传 authUserId），不是登录账号字符串。
+    const grantUserKey = normalizeScopeValue(input.identifier);
+    if (grantUserKey) {
+      checks.push({
+        key: `native-grant:user:${grantUserKey}`,
+        rule: NATIVE_GRANT_USER_RULE,
+        reason: 'identifier_burst',
+        scope: 'identifier',
+      });
+    }
+  } else if (input.actionType === 'native-exchange') {
+    // 只保留 IP 突发保护；不得引入固定 identifier 桶（会让所有桌面用户共用一桶）。
+    checks.push({
+      key: `native-exchange:ip:${requestIpKey}`,
+      rule: NATIVE_EXCHANGE_IP_RULE,
+      reason: 'ip_burst',
+      scope: 'ip',
+    });
   } else {
     checks.push({
       key: `login:ip:${requestIpKey}`,

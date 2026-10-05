@@ -114,11 +114,11 @@ export const desktopNativeAuthPlugin = () => ({
 
         const rate = acquireAuthAttemptRateLimit({
           req,
-          actionType: 'login',
-          identifier: `native-grant:${authUserId}`,
+          actionType: 'native-grant',
+          identifier: authUserId,
         });
         if (!rate.allowed) {
-          void recordAuthAuditLog({
+          await recordAuthAuditLog({
             req,
             eventType: GRANT_EVENT_TYPE,
             authSource: DESKTOP_AUTH_SOURCE,
@@ -138,7 +138,7 @@ export const desktopNativeAuthPlugin = () => ({
           });
 
         if (!businessUser || isBusinessUserBanned(businessUser)) {
-          void recordAuthAuditLog({
+          await recordAuthAuditLog({
             req,
             eventType: GRANT_EVENT_TYPE,
             authSource: DESKTOP_AUTH_SOURCE,
@@ -166,7 +166,7 @@ export const desktopNativeAuthPlugin = () => ({
           expiresAt,
         });
 
-        void recordAuthAuditLog({
+        await recordAuthAuditLog({
           req,
           eventType: GRANT_EVENT_TYPE,
           authSource: DESKTOP_AUTH_SOURCE,
@@ -202,13 +202,14 @@ export const desktopNativeAuthPlugin = () => ({
         const req = genericCtx.request ?? new Request('http://localhost/');
         const body = ctx.body as z.infer<typeof exchangeBodySchema>;
 
+        // 不做 identifier 维度：所有桌面用户共用同一桶会造成跨用户误限流；
+        // grant 的一次性 code + PKCE + 原子消费已覆盖猜测/重放防护。
         const rate = acquireAuthAttemptRateLimit({
           req,
-          actionType: 'login',
-          identifier: 'native-exchange',
+          actionType: 'native-exchange',
         });
         if (!rate.allowed) {
-          void recordAuthAuditLog({
+          await recordAuthAuditLog({
             req,
             eventType: EXCHANGE_EVENT_TYPE,
             authSource: DESKTOP_AUTH_SOURCE,
@@ -226,7 +227,7 @@ export const desktopNativeAuthPlugin = () => ({
           : false;
 
         if (!record || !verifierOk) {
-          void recordAuthAuditLog({
+          await recordAuthAuditLog({
             req,
             eventType: EXCHANGE_EVENT_TYPE,
             authSource: DESKTOP_AUTH_SOURCE,
@@ -246,7 +247,7 @@ export const desktopNativeAuthPlugin = () => ({
           user: authUser as Parameters<typeof setSessionCookie>[1]['user'],
         });
 
-        void recordAuthAuditLog({
+        await recordAuthAuditLog({
           req,
           eventType: EXCHANGE_EVENT_TYPE,
           authSource: DESKTOP_AUTH_SOURCE,

@@ -21,6 +21,11 @@ interface AuthModalProps {
   ) => Promise<{ requiresTurnstile?: boolean } | void>;
   onRegister: (username: string, email: string, turnstileToken: string, password: string) => Promise<void>;
   authMessage: { type: 'error' | 'success'; text: string } | null;
+  /**
+   * 为 true 时只允许密码登录：隐藏「旧密钥登录」选项。用于必须建立 Better Auth
+   * 会话的入口（旧版密钥登录不产生 BA session，放行会让用户走进死路）。
+   */
+  passwordLoginOnly?: boolean;
 }
 
 type LoginMethod = 'password' | 'legacy';
@@ -53,9 +58,11 @@ export default function AuthModal({
   onLogin,
   onRegister,
   authMessage,
+  passwordLoginOnly = false,
 }: AuthModalProps) {
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [loginMethod, setLoginMethod] = useState<LoginMethod>('password');
+  const effectiveLoginMethod: LoginMethod = passwordLoginOnly ? 'password' : loginMethod;
   const [authForm, setAuthForm] = useState<AuthFormState>(EMPTY_FORM);
   const [turnstileToken, setTurnstileToken] = useState<string>('');
   const [loginRequiresTurnstile, setLoginRequiresTurnstile] = useState(false);
@@ -201,7 +208,7 @@ export default function AuthModal({
         return;
       }
 
-      if (loginMethod === 'password') {
+      if (effectiveLoginMethod === 'password') {
         const result = await onLogin(authForm.identifier.trim(), authForm.password, turnstileToken, 'password');
         if (result?.requiresTurnstile) setLoginRequiresTurnstile(true);
         return;
@@ -238,7 +245,7 @@ export default function AuthModal({
     (!shouldShowTurnstile || Boolean(turnstileToken)) &&
     !isSubmitting &&
     !(authMode === 'register' && (!authForm.password || Boolean(usernameError) || Boolean(identifierError) || Boolean(passwordError))) &&
-    !(authMode === 'login' && loginMethod === 'password' && !authForm.identifier.trim());
+    !(authMode === 'login' && effectiveLoginMethod === 'password' && !authForm.identifier.trim());
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
@@ -267,7 +274,7 @@ export default function AuthModal({
         ) : null}
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          {authMode === 'login' ? (
+          {authMode === 'login' && !passwordLoginOnly ? (
             <div className="grid grid-cols-2 gap-2 rounded-md bg-gray-100 p-1">
               <button
                 type="button"
@@ -290,7 +297,7 @@ export default function AuthModal({
             </div>
           ) : null}
 
-          {authMode === 'register' || loginMethod === 'legacy' ? (
+          {authMode === 'register' || effectiveLoginMethod === 'legacy' ? (
             <div>
               <label className="mb-1 block text-sm font-medium text-gray-700">用户名</label>
               <input
@@ -307,13 +314,13 @@ export default function AuthModal({
                 }}
                 className={`input-field ${usernameError ? 'border-red-300 focus:border-red-500' : ''}`}
                 placeholder="请输入用户名"
-                required={authMode === 'register' || loginMethod === 'legacy'}
+                required={authMode === 'register' || effectiveLoginMethod === 'legacy'}
               />
               {usernameError ? <p className="mt-1 text-sm text-red-600">{usernameError}</p> : null}
             </div>
           ) : null}
 
-          {authMode === 'register' || loginMethod === 'password' ? (
+          {authMode === 'register' || effectiveLoginMethod === 'password' ? (
             <div>
               <label className="mb-1 block text-sm font-medium text-gray-700">
                 {authMode === 'register' ? '邮箱地址' : '登录标识（邮箱 / 用户名 / ID）'}
@@ -338,7 +345,7 @@ export default function AuthModal({
             </div>
           ) : null}
 
-          {authMode === 'register' || loginMethod === 'password' ? (
+          {authMode === 'register' || effectiveLoginMethod === 'password' ? (
             <div>
               <label className="mb-1 block text-sm font-medium text-gray-700">密码</label>
               <input
@@ -399,7 +406,7 @@ export default function AuthModal({
             </div>
           ) : null}
 
-          {authMode === 'login' && loginMethod === 'legacy' ? (
+          {authMode === 'login' && effectiveLoginMethod === 'legacy' ? (
             <div>
               <label className="mb-1 block text-sm font-medium text-gray-700">登录密钥</label>
               <input

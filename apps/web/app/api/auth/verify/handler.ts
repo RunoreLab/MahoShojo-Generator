@@ -45,6 +45,9 @@ const buildVerifyHandler = (deps: VerifyDeps): ((req: Request) => Promise<Respon
         JSON.stringify({
           success: true,
           authKey,
+          // 区分当前身份由 Better Auth 会话还是 Legacy bearer 证明；
+          // Desktop 授权页据此判断能否签发 native grant（仅 BA 会话可签发）。
+          authSource: auth.source,
           user: {
             id: user.id,
             username: user.username,
