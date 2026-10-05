@@ -55,7 +55,7 @@ export class DesktopCloudError extends Error {
   }
 }
 
-const toCloudError = (command: string, cause: unknown): DesktopCloudError => {
+export const toCloudError = (command: string, cause: unknown): DesktopCloudError => {
   if (
     cause !== null
     && typeof cause === 'object'

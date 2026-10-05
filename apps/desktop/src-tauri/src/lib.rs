@@ -1027,6 +1027,19 @@ fn cancel_hosted_ai(registry: State<'_, ai::RequestRegistry>, request_id: String
     registry.cancel(&request_id)
 }
 
+/// 数据卡库云端请求：固定路由表驱动的窄通道（D5.0e，`DESK-ONLINE-010`）。
+/// renderer 只能给 `routeId` + `query` + `body`；method/path/cookie 由 native
+/// 路由表注入，`deny_unknown_fields` 拒绝凭据与 URL 字段。无会话访问
+/// Required 路由直接 `not-authenticated`，不产生网络请求。
+#[tauri::command]
+async fn cloud_card_library_request(
+    cloud: State<'_, cloud::CloudState>,
+    secrets: State<'_, SharedSecretStore>,
+    request: cloud::CloudCardLibraryRequest,
+) -> Result<cloud::CloudCardLibraryResponse, cloud::CloudError> {
+    cloud::cloud_card_library_request(&cloud, secrets.inner().as_ref(), request).await
+}
+
 /// 仅在 native 已写恢复 intent 后允许退出，不向 renderer 开放通用进程控制。
 #[tauri::command]
 fn exit_after_local_restore(app: tauri::AppHandle) -> Result<(), restore::RestoreError> {
@@ -1174,6 +1187,7 @@ pub fn run() {
             cloud_sign_out,
             cloud_online_status,
             stream_hosted_ai,
+            cloud_card_library_request,
             cancel_hosted_ai
         ])
         .run(tauri::generate_context!())

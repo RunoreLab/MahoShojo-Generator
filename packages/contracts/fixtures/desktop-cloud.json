@@ -53,6 +53,22 @@
   "hostedGenerationRouteIds": [
     "generate-magical-girl-details-stream"
   ],
+  "cardLibrary": {
+    "routes": {
+      "data-cards.query": { "method": "GET", "path": "/api/data-cards", "auth": "required" },
+      "data-cards.create": { "method": "POST", "path": "/api/data-cards", "auth": "required" },
+      "favorites.query": { "method": "GET", "path": "/api/favorites", "auth": "required" },
+      "favorites.add": { "method": "POST", "path": "/api/favorites", "auth": "required" },
+      "favorites.remove": { "method": "DELETE", "path": "/api/favorites", "auth": "required" },
+      "decks.query": { "method": "GET", "path": "/api/decks", "auth": "required" },
+      "deck-cards.query": { "method": "GET", "path": "/api/deck-cards", "auth": "required" },
+      "public-data-cards.query": { "method": "GET", "path": "/api/public-data-cards", "auth": "optional" },
+      "tags.query": { "method": "GET", "path": "/api/tags", "auth": "optional" },
+      "data-card-stats.report": { "method": "POST", "path": "/api/data-card-stats", "auth": "optional" },
+      "data-card-meta-batch.query": { "method": "POST", "path": "/api/data-card-meta-batch", "auth": "optional" },
+      "badges-batch.query": { "method": "POST", "path": "/api/badges/batch", "auth": "optional" }
+    }
+  },
   "validRedirectUris": [
     "http://127.0.0.1:1/callback",
     "http://127.0.0.1:45231/callback",

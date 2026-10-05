@@ -292,3 +292,58 @@ export const DesktopHostedGenerateRequestSchema = z.object({
   body: SafeJsonValueSchema,
 }).strict();
 export type DesktopHostedGenerateRequest = z.infer<typeof DesktopHostedGenerateRequestSchema>;
+
+/* ── 数据卡库云端通路（D5.0e，`DESK-ONLINE-010`） ────────────────────────
+ *
+ * 与 hosted 生成同一套边界：renderer 只能给「路由标识 + 业务参数」，method、
+ * path、凭据注入全部在 native 的固定路由表里。任何白名单外的标识、给 GET
+ * 路由带 body、或注入 `authorization`/`cookie`/`path`/`url`/`method` 等字段的
+ * 尝试都在 IPC 边界被 strict/枚举拒绝。
+ */
+
+/**
+ * 数据卡库允许的路由标识白名单。与 `fixtures/desktop-cloud.json` 的
+ * `cardLibrary.routes` 同源——任一侧增删路由而另一侧未同步时，Rust 侧的
+ * fixture 对拍测试必须失败。
+ */
+export const DesktopCardLibraryRouteIdSchema = z.enum([
+  // 需要账号会话（无会话时 native 直接 `not-authenticated` fail-closed）
+  'data-cards.query',
+  'data-cards.create',
+  'favorites.query',
+  'favorites.add',
+  'favorites.remove',
+  'decks.query',
+  'deck-cards.query',
+  // 公开可读；有会话时 native 附带会话（个性化/审计由服务端决定）
+  'public-data-cards.query',
+  'tags.query',
+  'data-card-stats.report',
+  'data-card-meta-batch.query',
+  'badges-batch.query',
+]);
+export type DesktopCardLibraryRouteId = z.infer<typeof DesktopCardLibraryRouteIdSchema>;
+
+/**
+ * 数据卡库 IPC 输入。
+ * - `query`：拼到路由对应 path 的 query string；键值都是字符串；
+ * - `body`：仅允许对非 GET 路由携带，序列化后受 native 侧大小上限约束；
+ * - 不提供 `path`/`url`/`method`/`headers` 字段——这些全是 native 的私有事实。
+ */
+export const DesktopCardLibraryRequestSchema = z.object({
+  routeId: DesktopCardLibraryRouteIdSchema,
+  query: z.record(z.string().max(64), z.string().max(1024)).optional(),
+  body: SafeJsonValueSchema.optional(),
+}).strict();
+export type DesktopCardLibraryRequest = z.infer<typeof DesktopCardLibraryRequestSchema>;
+
+/**
+ * 数据卡库 IPC 输出。业务响应体的形状因路由而异，契约层只保证
+ * 「HTTP 状态 + JSON 正文」；各路由的业务校验在 renderer 适配层完成
+ * （失败统一投影为传输/契约错误，不冒充业务失败）。
+ */
+export const DesktopCardLibraryResponseSchema = z.object({
+  status: z.number().int().min(100).max(599),
+  body: SafeJsonValueSchema,
+}).strict();
+export type DesktopCardLibraryResponse = z.infer<typeof DesktopCardLibraryResponseSchema>;

@@ -80,6 +80,11 @@ export type {
 } from './cloud-bridge';
 
 export {
+  CARD_LIBRARY_REQUEST_COMMAND,
+  requestCardLibraryRoute,
+} from './card-library-bridge';
+
+export {
   DELETE_LOCAL_CARD_COMMAND,
   GET_LOCAL_CARD_COMMAND,
   LIST_LOCAL_CARDS_COMMAND,

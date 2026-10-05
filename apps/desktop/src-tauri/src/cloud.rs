@@ -1417,6 +1417,257 @@ pub async fn stream_hosted_ai(
     outcome
 }
 
+/* ── 数据卡库固定路由通路（D5.0e，`DESK-ONLINE-010`） ────────────────────
+ *
+ * 数据卡列表/详情/收藏/标签/统计/上传副本都是「窄 HTTP + JSON 正文」的服务端
+ * API。它们共用同一条边界：renderer 只给 `routeId` + `query` + `body`；
+ * method、path、会话 cookie 全部由这里的固定路由表注入。白名单之外的标识
+ * 在 IPC 反序列化（枚举拒绝）与查表两处都失败；renderer 没有携带 URL、
+ * header 或凭据字段的通道。
+ */
+
+/// 卡库响应正文上限：列表页与单卡正文都远小于它，超限视为异常流量。
+const CARD_LIBRARY_RESPONSE_MAX_BYTES: usize = 4 * 1024 * 1024;
+/// 请求 body 上限：上传副本即 `{type,name,description,data,isPublic}`，
+/// 与本地库单卡记录同一量级，512 KiB 足够且能拦住畸形大载荷。
+const CARD_LIBRARY_BODY_MAX_BYTES: usize = 512 * 1024;
+const CARD_LIBRARY_QUERY_MAX_PAIRS: usize = 32;
+const CARD_LIBRARY_QUERY_KEY_MAX: usize = 64;
+const CARD_LIBRARY_QUERY_VALUE_MAX: usize = 1024;
+
+/// 路由的凭据语义：
+/// - `Required`：无已存会话即 `not-authenticated` fail-closed（「我的」「收藏」
+///   「卡组」「创建」入口）；服务端明确回 401 时按会话被拒处理（清本地凭据）；
+/// - `Optional`：有会话附带、没有则匿名（公开列表/标签/统计上报）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CardRouteAuth {
+    Required,
+    Optional,
+}
+
+struct CardLibraryRoute {
+    id: &'static str,
+    method: reqwest::Method,
+    path: &'static str,
+    auth: CardRouteAuth,
+}
+
+// 与 `packages/contracts/fixtures/desktop-cloud.json` 的 `cardLibrary.routes`
+// 同源对拍：任一侧改动未同步，fixture 测试必须失败（DESK-033 同款漂移防护）。
+const CARD_LIBRARY_ROUTES: &[CardLibraryRoute] = &[
+    CardLibraryRoute {
+        id: "data-cards.query",
+        method: reqwest::Method::GET,
+        path: "/api/data-cards",
+        auth: CardRouteAuth::Required,
+    },
+    CardLibraryRoute {
+        id: "data-cards.create",
+        method: reqwest::Method::POST,
+        path: "/api/data-cards",
+        auth: CardRouteAuth::Required,
+    },
+    CardLibraryRoute {
+        id: "favorites.query",
+        method: reqwest::Method::GET,
+        path: "/api/favorites",
+        auth: CardRouteAuth::Required,
+    },
+    CardLibraryRoute {
+        id: "favorites.add",
+        method: reqwest::Method::POST,
+        path: "/api/favorites",
+        auth: CardRouteAuth::Required,
+    },
+    CardLibraryRoute {
+        id: "favorites.remove",
+        method: reqwest::Method::DELETE,
+        path: "/api/favorites",
+        auth: CardRouteAuth::Required,
+    },
+    CardLibraryRoute {
+        id: "decks.query",
+        method: reqwest::Method::GET,
+        path: "/api/decks",
+        auth: CardRouteAuth::Required,
+    },
+    CardLibraryRoute {
+        id: "deck-cards.query",
+        method: reqwest::Method::GET,
+        path: "/api/deck-cards",
+        auth: CardRouteAuth::Required,
+    },
+    CardLibraryRoute {
+        id: "public-data-cards.query",
+        method: reqwest::Method::GET,
+        path: "/api/public-data-cards",
+        auth: CardRouteAuth::Optional,
+    },
+    CardLibraryRoute {
+        id: "tags.query",
+        method: reqwest::Method::GET,
+        path: "/api/tags",
+        auth: CardRouteAuth::Optional,
+    },
+    CardLibraryRoute {
+        id: "data-card-stats.report",
+        method: reqwest::Method::POST,
+        path: "/api/data-card-stats",
+        auth: CardRouteAuth::Optional,
+    },
+    CardLibraryRoute {
+        id: "data-card-meta-batch.query",
+        method: reqwest::Method::POST,
+        path: "/api/data-card-meta-batch",
+        auth: CardRouteAuth::Optional,
+    },
+    CardLibraryRoute {
+        id: "badges-batch.query",
+        method: reqwest::Method::POST,
+        path: "/api/badges/batch",
+        auth: CardRouteAuth::Optional,
+    },
+];
+
+fn lookup_card_library_route(route_id: &str) -> Option<&'static CardLibraryRoute> {
+    CARD_LIBRARY_ROUTES
+        .iter()
+        .find(|route| route.id == route_id)
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CloudCardLibraryRequest {
+    pub route_id: String,
+    #[serde(default)]
+    pub query: Option<std::collections::BTreeMap<String, String>>,
+    #[serde(default)]
+    pub body: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloudCardLibraryResponse {
+    pub status: u16,
+    pub body: serde_json::Value,
+}
+
+/// 有界读取响应正文并解析为 JSON。空正文按 `null` 处理（204/HEAD 兼容）；
+/// 超限或非 JSON 都是「响应无法识别」而不是「业务失败」。
+async fn read_bounded_json(
+    response: reqwest::Response,
+    context: &str,
+) -> Result<serde_json::Value, CloudError> {
+    use futures_util::StreamExt;
+
+    let mut stream = response.bytes_stream();
+    let mut buffer = Vec::new();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|error| CloudError::network(context, &error))?;
+        if buffer.len() + chunk.len() > CARD_LIBRARY_RESPONSE_MAX_BYTES {
+            return Err(CloudError::new(
+                CloudErrorCode::InvalidResponse,
+                format!("{context} 响应正文超出大小上限"),
+            ));
+        }
+        buffer.extend_from_slice(&chunk);
+    }
+    if buffer.iter().all(|byte| byte.is_ascii_whitespace()) {
+        return Ok(serde_json::Value::Null);
+    }
+    serde_json::from_slice(&buffer).map_err(|_| CloudError::invalid_response(context))
+}
+
+/// `cloud_card_library_request`：数据卡库的固定路由窄请求。
+///
+/// - `query`/`body` 只是业务参数——renderer 携带 URL/path/header/凭据字段的
+///   尝试在 `deny_unknown_fields` 处被拒；
+/// - Required 路由在本地无会话时直接 `not-authenticated`，不产生网络请求；
+///   服务端对 Required 路由回 401 时按「会话被服务端否认」清除本地凭据
+///   （与 `cloud_auth_status` 同一语义），响应仍原样回给 renderer；
+/// - 任何传输失败都是 `network-error`/`server-unavailable`，绝不伪装成
+///   业务成功。
+pub async fn cloud_card_library_request(
+    state: &CloudState,
+    secrets: &dyn SecretStore,
+    request: CloudCardLibraryRequest,
+) -> Result<CloudCardLibraryResponse, CloudError> {
+    let route = lookup_card_library_route(&request.route_id)
+        .ok_or_else(|| invalid_request("未知的数据卡路由标识"))?;
+
+    if request.body.is_some() && route.method == reqwest::Method::GET {
+        return Err(invalid_request("GET 路由不允许携带请求体"));
+    }
+    if let Some(query) = &request.query {
+        if query.len() > CARD_LIBRARY_QUERY_MAX_PAIRS {
+            return Err(invalid_request("查询参数过多"));
+        }
+        for (key, value) in query {
+            if key.is_empty()
+                || key.len() > CARD_LIBRARY_QUERY_KEY_MAX
+                || value.len() > CARD_LIBRARY_QUERY_VALUE_MAX
+            {
+                return Err(invalid_request("查询参数超出大小约束"));
+            }
+        }
+    }
+    let body_bytes = match &request.body {
+        None => None,
+        Some(body) => {
+            let bytes =
+                serde_json::to_vec(body).map_err(|_| invalid_request("请求体不是可序列化 JSON"))?;
+            if bytes.is_empty() || bytes.len() > CARD_LIBRARY_BODY_MAX_BYTES {
+                return Err(invalid_request("请求体超出大小约束"));
+            }
+            Some(bytes)
+        }
+    };
+
+    let session = load_session(secrets)?;
+    if route.auth == CardRouteAuth::Required && session.is_none() {
+        return Err(CloudError::new(
+            CloudErrorCode::NotAuthenticated,
+            "该操作需要登录云端账号",
+        ));
+    }
+
+    let mut url = url::Url::parse(&format!("{}{}", state.origin, route.path))
+        .map_err(|_| CloudError::new(CloudErrorCode::InternalError, "固定路由 URL 组装失败"))?;
+    if let Some(query) = &request.query {
+        url.query_pairs_mut().extend_pairs(query.iter());
+    }
+
+    let mut builder = state
+        .http
+        .request(route.method.clone(), url)
+        .header(reqwest::header::ORIGIN, &state.origin)
+        .header(reqwest::header::ACCEPT, "application/json");
+    if let Some(session) = &session {
+        builder = builder.header(reqwest::header::COOKIE, &session.cookie);
+    }
+    if let Some(bytes) = body_bytes {
+        builder = builder
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .body(bytes);
+    }
+
+    let response = builder
+        .timeout(SHORT_REQUEST_TIMEOUT)
+        .send()
+        .await
+        .map_err(|error| CloudError::network("数据卡请求", &error))?;
+
+    let status = response.status().as_u16();
+    // 服务端对 Required 路由明确 401 = 本地凭据已被否认：与 `cloud_auth_status`
+    // 一致地清除会话，但响应原样透传给 renderer（业务错误不是传输失败）。
+    if route.auth == CardRouteAuth::Required && status == 401 {
+        clear_session(secrets)?;
+    }
+
+    let body = read_bounded_json(response, "数据卡请求").await?;
+    Ok(CloudCardLibraryResponse { status, body })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1610,6 +1861,10 @@ mod tests {
         hosted_sse_body: Mutex<Option<String>>,
         /// `Some((status, body))` 时 readiness 路由返回覆盖响应（测门禁分支）。
         readiness_override: Mutex<Option<(u16, String)>>,
+        /// 最近一次命中数据卡路由表路径的请求（target、原始 head、JSON body）。
+        last_card_request: Mutex<Option<(String, String, Option<serde_json::Value>)>>,
+        /// `Some((status, body))` 时卡库路由返回覆盖响应（测 401/错误分支）。
+        card_response_override: Mutex<Option<(u16, String)>>,
         shutdown: CancellationToken,
     }
 
@@ -1625,6 +1880,8 @@ mod tests {
             get_session_ok: std::sync::atomic::AtomicBool::new(true),
             hosted_sse_body: Mutex::new(None),
             readiness_override: Mutex::new(None),
+            last_card_request: Mutex::new(None),
+            card_response_override: Mutex::new(None),
             shutdown: CancellationToken::new(),
         });
         let handle = server.clone();
@@ -1758,6 +2015,28 @@ mod tests {
                     }
                 }
                 SIGN_OUT_PATH => json(serde_json::json!({"success": true})),
+                // 数据卡路由表里的所有 path：记录请求后回 `{"success": true}`，
+                // 覆盖响应优先（测 401 / 错误分支）。
+                path if CARD_LIBRARY_ROUTES.iter().any(|route| route.path == path) => {
+                    *self.last_card_request.lock().unwrap() = Some((
+                        target.to_string(),
+                        head.to_string(),
+                        serde_json::from_slice(body).ok(),
+                    ));
+                    if let Some((status, override_body)) =
+                        self.card_response_override.lock().unwrap().clone()
+                    {
+                        return MockResponse {
+                            status,
+                            headers: vec![(
+                                "Content-Type".to_string(),
+                                "application/json".to_string(),
+                            )],
+                            body: override_body,
+                        };
+                    }
+                    json(serde_json::json!({"success": true}))
+                }
                 DR_READINESS_PATH => {
                     let override_response = self.readiness_override.lock().unwrap().clone();
                     match override_response {
@@ -2072,6 +2351,47 @@ mod tests {
             .map(|value| value.as_str().unwrap().to_string())
             .collect();
         assert_eq!(rust_codes, fixture_codes);
+
+        // 数据卡库路由表与 fixture `cardLibrary.routes` 同源对拍：route id、
+        // method、path、凭据语义四项都必须逐一相等，任一侧漂移即失败。
+        let fixture_routes = fixture["cardLibrary"]["routes"]
+            .as_object()
+            .expect("fixture cardLibrary.routes must be an object");
+        assert_eq!(
+            fixture_routes.len(),
+            CARD_LIBRARY_ROUTES.len(),
+            "卡库路由表与 fixture 条目数不一致"
+        );
+        for route in CARD_LIBRARY_ROUTES {
+            let entry = &fixture_routes[route.id];
+            assert!(
+                entry.is_object(),
+                "fixture 缺少卡库路由 {id}",
+                id = route.id
+            );
+            assert_eq!(
+                entry["method"].as_str(),
+                Some(route.method.as_str()),
+                "卡库路由 {id} method 不一致",
+                id = route.id
+            );
+            assert_eq!(
+                entry["path"].as_str(),
+                Some(route.path),
+                "卡库路由 {id} path 不一致",
+                id = route.id
+            );
+            let expected_auth = match route.auth {
+                CardRouteAuth::Required => "required",
+                CardRouteAuth::Optional => "optional",
+            };
+            assert_eq!(
+                entry["auth"].as_str(),
+                Some(expected_auth),
+                "卡库路由 {id} 凭据语义不一致",
+                id = route.id
+            );
+        }
     }
 
     /* ── hosted 生成适配 ─────────────────────────────────────────────── */
@@ -2487,6 +2807,210 @@ mod tests {
             stream_hosted_ai(&state, &secrets, &registry, hosted_request(), &sink)
                 .await
                 .expect("compatible probe must let the request through");
+        });
+    }
+
+    /* ── 数据卡库固定路由通路（D5.0e） ────────────────────────────────── */
+
+    fn card_request(route_id: &str) -> CloudCardLibraryRequest {
+        CloudCardLibraryRequest {
+            route_id: route_id.to_string(),
+            query: None,
+            body: None,
+        }
+    }
+
+    fn stored_test_session() -> StoredSession {
+        StoredSession {
+            cookie: "better-auth.session_token=native.tok".to_string(),
+            session_expires_at: Some("2026-10-12T00:00:00Z".to_string()),
+            account: CloudAccountRecord {
+                user_id: 7,
+                username: "homura".to_string(),
+                display_name: None,
+            },
+        }
+    }
+
+    #[test]
+    fn card_library_rejects_unknown_route_and_get_body() {
+        rt().block_on(async {
+            let server = spawn_mock_server();
+            let state = CloudState::with_origin(&server.origin);
+            let secrets = MemorySecrets::new();
+            store_session(&secrets, &stored_test_session()).unwrap();
+
+            let error = cloud_card_library_request(
+                &state,
+                &secrets,
+                card_request("arbitrary-internal-route"),
+            )
+            .await
+            .unwrap_err();
+            assert_eq!(error.code, CloudErrorCode::InvalidRequest);
+            assert!(server.last_card_request.lock().unwrap().is_none());
+
+            // GET 路由携带 body 被拒：方法语义由路由表独占，renderer 不能扩展。
+            let error = cloud_card_library_request(
+                &state,
+                &secrets,
+                CloudCardLibraryRequest {
+                    route_id: "public-data-cards.query".to_string(),
+                    query: None,
+                    body: Some(serde_json::json!({"x": 1})),
+                },
+            )
+            .await
+            .unwrap_err();
+            assert_eq!(error.code, CloudErrorCode::InvalidRequest);
+            assert!(server.last_card_request.lock().unwrap().is_none());
+        });
+    }
+
+    #[test]
+    fn card_library_required_route_without_session_fails_closed() {
+        rt().block_on(async {
+            let server = spawn_mock_server();
+            let state = CloudState::with_origin(&server.origin);
+            let secrets = MemorySecrets::new();
+
+            let error =
+                cloud_card_library_request(&state, &secrets, card_request("data-cards.query"))
+                    .await
+                    .unwrap_err();
+            assert_eq!(error.code, CloudErrorCode::NotAuthenticated);
+            // fail-closed 不能产生网络请求。
+            assert!(server.last_card_request.lock().unwrap().is_none());
+        });
+    }
+
+    #[test]
+    fn card_library_optional_route_works_anonymously_and_attaches_session() {
+        rt().block_on(async {
+            let server = spawn_mock_server();
+            let state = CloudState::with_origin(&server.origin);
+            let secrets = MemorySecrets::new();
+
+            // 无会话：公开路由匿名成功，不带 Cookie。
+            let mut request = card_request("public-data-cards.query");
+            request.query = Some(std::collections::BTreeMap::from([
+                ("type".to_string(), "character".to_string()),
+                ("limit".to_string(), "12".to_string()),
+            ]));
+            let response = cloud_card_library_request(&state, &secrets, request)
+                .await
+                .expect("optional route must work anonymously");
+            assert_eq!(response.status, 200);
+            assert_eq!(response.body["success"], serde_json::json!(true));
+            let (target, head, _) =
+                server.last_card_request.lock().unwrap().clone().unwrap();
+            assert!(target.contains("type=character"), "query 必须透传：{target}");
+            assert!(target.contains("limit=12"));
+            assert!(
+                !head.to_ascii_lowercase().contains("\r\ncookie:"),
+                "无会话时不得携带 Cookie：{head}"
+            );
+
+            // 有会话：Required 路由附带 Cookie 并把 body 原样送达。
+            store_session(&secrets, &stored_test_session()).unwrap();
+            let response = cloud_card_library_request(
+                &state,
+                &secrets,
+                CloudCardLibraryRequest {
+                    route_id: "data-cards.create".to_string(),
+                    query: None,
+                    body: Some(serde_json::json!({
+                        "type": "character", "name": "n", "description": "", "data": {}, "isPublic": 0,
+                    })),
+                },
+            )
+            .await
+            .unwrap();
+            assert_eq!(response.status, 200);
+            let (_, head, body) = server.last_card_request.lock().unwrap().clone().unwrap();
+            assert!(
+                head.to_ascii_lowercase().contains("cookie: better-auth.session_token=native.tok"),
+                "已登录请求必须附带会话 cookie：{head}"
+            );
+            assert_eq!(body.unwrap()["name"], serde_json::json!("n"));
+        });
+    }
+
+    #[test]
+    fn card_library_required_401_clears_stored_session() {
+        rt().block_on(async {
+            let server = spawn_mock_server();
+            let state = CloudState::with_origin(&server.origin);
+            let secrets = MemorySecrets::new();
+            store_session(&secrets, &stored_test_session()).unwrap();
+
+            *server.card_response_override.lock().unwrap() =
+                Some((401, r#"{"success":false,"error":"未登录"}"#.to_string()));
+            let response =
+                cloud_card_library_request(&state, &secrets, card_request("favorites.query"))
+                    .await
+                    .expect("401 是业务响应而不是传输失败");
+            assert_eq!(response.status, 401);
+            // 服务端明确否认会话 → 本地凭据清除（与 cloud_auth_status 同语义）。
+            assert!(load_session(&secrets).unwrap().is_none());
+        });
+    }
+
+    #[test]
+    fn card_library_bounds_query_and_body() {
+        rt().block_on(async {
+            let server = spawn_mock_server();
+            let state = CloudState::with_origin(&server.origin);
+            let secrets = MemorySecrets::new();
+            store_session(&secrets, &stored_test_session()).unwrap();
+
+            // 超长 query value 拒绝。
+            let mut request = card_request("data-cards.query");
+            request.query = Some(std::collections::BTreeMap::from([(
+                "search".to_string(),
+                "x".repeat(CARD_LIBRARY_QUERY_VALUE_MAX + 1),
+            )]));
+            let error = cloud_card_library_request(&state, &secrets, request)
+                .await
+                .unwrap_err();
+            assert_eq!(error.code, CloudErrorCode::InvalidRequest);
+
+            // 超限 body 拒绝。
+            let error = cloud_card_library_request(
+                &state,
+                &secrets,
+                CloudCardLibraryRequest {
+                    route_id: "data-cards.create".to_string(),
+                    query: None,
+                    body: Some(serde_json::json!({
+                        "data": "x".repeat(CARD_LIBRARY_BODY_MAX_BYTES),
+                    })),
+                },
+            )
+            .await
+            .unwrap_err();
+            assert_eq!(error.code, CloudErrorCode::InvalidRequest);
+            assert!(server.last_card_request.lock().unwrap().is_none());
+        });
+    }
+
+    #[test]
+    fn card_library_rejects_oversize_response() {
+        rt().block_on(async {
+            let server = spawn_mock_server();
+            let state = CloudState::with_origin(&server.origin);
+            let secrets = MemorySecrets::new();
+
+            *server.card_response_override.lock().unwrap() =
+                Some((200, "x".repeat(CARD_LIBRARY_RESPONSE_MAX_BYTES + 8)));
+            let error = cloud_card_library_request(
+                &state,
+                &secrets,
+                card_request("public-data-cards.query"),
+            )
+            .await
+            .unwrap_err();
+            assert_eq!(error.code, CloudErrorCode::InvalidResponse);
         });
     }
 }
