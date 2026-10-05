@@ -8,9 +8,8 @@
     "noEmit": true,
     "allowJs": true,
     "resolveJsonModule": true,
-    "baseUrl": ".",
     "paths": {
-      "@/*": ["apps/web/*"]
+      "@/*": ["./apps/web/*"]
     },
     "types": ["node", "vitest/globals"]
   },
