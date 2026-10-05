@@ -997,9 +997,11 @@ async fn cloud_online_status(
     cloud::cloud_online_status(&cloud, secrets.inner().as_ref()).await
 }
 
-/// hosted 生成流（DESK-ONLINE-005）：唯一允许携带 Provider Key 的项目请求。
-/// renderer 传 `routeId/body/byok.secretRef`；native 校验路由白名单、拒绝 body 中
-/// 预置的 `customProvider`，并在 `provider:*` 命名空间内解析 secretRef 注入 Key。
+/// hosted 生成流：固定 origin + 路由白名单的项目生成通路，当前只开放系统默认
+/// 通道。服务器 BYOK 在 native 持有并校验的 Provider 绑定落地前保持关闭
+/// （DESK-093）——renderer 传 `routeId/body/requestId`，任何凭据字段
+/// （byok/secretRef/providerId/modelId）由 `deny_unknown_fields` 拒绝；
+/// native 同时拒绝 body 中预置的 `customProvider`。
 /// 事件按 hosted SSE 契约（`HostedGenerationEvent`）经 Channel 原样转发。
 #[tauri::command]
 async fn stream_hosted_ai(
