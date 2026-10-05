@@ -1,6 +1,8 @@
 import Link from 'next/link';
 import { useMemo } from 'react';
 
+import { ErrorMessageBox } from '@mahoshojo/ui-web/details-controls';
+
 import { getEncyclopediaHelpForError } from '@/lib/error-help';
 
 export interface ErrorMessageProps {
@@ -14,8 +16,7 @@ export function ErrorMessage({ message, status, className = 'error-message', lin
   const help = useMemo(() => getEncyclopediaHelpForError({ message, status }), [message, status]);
 
   return (
-    <div className={className} role="alert">
-      <div className="whitespace-pre-wrap">{message}</div>
+    <ErrorMessageBox message={message} className={className}>
       {help ? (
         <div className="mt-2 text-xs opacity-95">
           <Link
@@ -26,7 +27,6 @@ export function ErrorMessage({ message, status, className = 'error-message', lin
           </Link>
         </div>
       ) : null}
-    </div>
+    </ErrorMessageBox>
   );
 }
-

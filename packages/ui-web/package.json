@@ -55,6 +55,16 @@
       "import": "./src/questionnaire/index.ts",
       "default": "./src/questionnaire/index.ts"
     },
+    "./client": {
+      "types": "./src/client/index.ts",
+      "import": "./src/client/index.ts",
+      "default": "./src/client/index.ts"
+    },
+    "./details-controls": {
+      "types": "./src/details-controls/index.ts",
+      "import": "./src/details-controls/index.ts",
+      "default": "./src/details-controls/index.ts"
+    },
     "./character-result": {
       "types": "./src/character-result/index.ts",
       "import": "./src/character-result/index.ts",

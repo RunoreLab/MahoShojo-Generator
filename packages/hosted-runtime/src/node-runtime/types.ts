@@ -8,26 +8,16 @@ import type { NodeAiLogger } from './logger';
 import type { OutcomeClassification } from './outcome-classification';
 import type { StreamReadTimeoutMode } from './stream-timeout';
 
-export type AIReasoningStatus = 'idle' | 'thinking' | 'done' | 'unavailable' | 'error';
-export type AIReasoningSource = 'sdk' | 'provider' | 'heuristic' | 'unknown';
+// canonical 定义在 @mahoshojo/contracts/ai-reasoning；此处 re-export 保持内部
+// `node-runtime/types` 消费面不变。
+export type {
+  AIReasoningEnvelope,
+  AIReasoningPart,
+  AIReasoningSource,
+  AIReasoningStatus,
+} from '@mahoshojo/contracts/ai-reasoning';
 
-export interface AIReasoningPart {
-  id?: string;
-  text: string;
-  source?: AIReasoningSource;
-  createdAt?: string;
-}
-
-export interface AIReasoningEnvelope {
-  status: AIReasoningStatus;
-  source: AIReasoningSource;
-  summary?: string | null;
-  text?: string | null;
-  parts?: AIReasoningPart[];
-  reasoningTokens?: number | null;
-  anomalyFlags?: string[] | null;
-  errorMessage?: string | null;
-}
+import type { AIReasoningEnvelope } from '@mahoshojo/contracts/ai-reasoning';
 
 export interface AIProvider {
   name: string;

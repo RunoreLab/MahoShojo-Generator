@@ -1,24 +1,9 @@
-export function isBlobUrl(url: string): boolean {
-  return url.startsWith('blob:');
-}
+// Blob/ObjectURL 工具已上移至 @mahoshojo/ui-web/client（canonical 实现）。
+// 本文件保留原路径，既有 `@/lib/client/blobUrl` 调用点无需改动。
 
-export function revokeBlobUrl(url: string | null | undefined): void {
-  if (!url) return;
-  if (!isBlobUrl(url)) return;
-  URL.revokeObjectURL(url);
-}
-
-export function createBlobUrl(blob: Blob): string {
-  return URL.createObjectURL(blob);
-}
-
-export function downloadBlob(blob: Blob, filename: string): void {
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  setTimeout(() => URL.revokeObjectURL(url), 10_000);
-}
+export {
+  createBlobUrl,
+  downloadBlob,
+  isBlobUrl,
+  revokeBlobUrl,
+} from '@mahoshojo/ui-web/client';

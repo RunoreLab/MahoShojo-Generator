@@ -10,6 +10,7 @@ import { generateRandomCanshou } from '@/lib/random-character-generator';
 import SaveToCloudButton from '@/components/SaveToCloudButton';
 import Footer from '@/components/Footer';
 import QuestionNavigator from '@/components/QuestionNavigator';
+import { SaveJsonButton } from '@mahoshojo/ui-web/details-controls';
 import { useAppRouterAdapter } from '@/lib/app-router-adapter';
 import BattleDataModal from '@/components/BattleDataModal';
 import DataCardDetailsModal from '@/components/DataCardDetailsModal';
@@ -103,88 +104,8 @@ type CanshouResultPayload = CanshouDetails & {
   userAnswers?: QuestionnaireAnswerItem[] | string[] | Record<string, string>;
 };
 
-interface SaveJsonButtonProps {
-  data: CanshouResultPayload;
-  mode: JsonSaveMode;
-  recommendedMode: JsonSaveMode;
-}
-
-// 用于保存JSON的按钮组件
-const SaveJsonButton: React.FC<SaveJsonButtonProps> = ({ data, mode, recommendedMode }) => {
-  const [copyStatus, setCopyStatus] = useState<'idle' | 'success' | 'error'>('idle');
-  const jsonPayload = useMemo(() => JSON.stringify(data, null, 2), [data]);
-
-  const downloadJson = () => {
-    const blob = new Blob([jsonPayload], { type: 'application/json' });
-    const sanitizedName = (data.name || 'data').replace(/[^a-z0-9\u4e00-\u9fa5]/gi, '_');
-    downloadBlob(blob, `残兽档案_${sanitizedName}.json`);
-    setCopyStatus('idle');
-  };
-
-  const handleCopy = async () => {
-    try {
-      if (typeof navigator === 'undefined' || !navigator.clipboard) {
-        throw new Error('clipboard-not-available');
-      }
-      await navigator.clipboard.writeText(jsonPayload);
-      setCopyStatus('success');
-      setTimeout(() => setCopyStatus('idle'), 2000);
-    } catch (err) {
-      console.error('复制 JSON 失败：', err);
-      setCopyStatus('error');
-      setTimeout(() => setCopyStatus('idle'), 2500);
-    }
-  };
-
-  const statusMessage = copyStatus === 'success'
-    ? '✅ JSON 已复制，记得粘贴到文件中保存'
-    : copyStatus === 'error'
-      ? '⚠️ 复制遇到问题，请手动长按选择'
-      : recommendedMode === 'text'
-        ? '推荐复制后在本地编辑器中保存为 .json 文件'
-        : '若下载失败，可切换到复制模式';
-
-  if (mode === 'download') {
-    return (
-      <div className="flex-1 min-w-[260px] text-left">
-        <p className="text-xs text-gray-500 mb-2 text-center">
-          {recommendedMode === 'download'
-            ? '推荐：直接下载 JSON 文件，方便在桌面端继续编辑'
-            : '实验功能：部分移动端浏览器支持直接下载，若失败请使用复制模式'}
-        </p>
-        <button onClick={downloadJson} className="generate-button w-full">
-          {recommendedMode === 'download' ? '💾 下载残兽档案' : '🧪 尝试直接下载 JSON'}
-        </button>
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex-1 min-w-[260px] text-left">
-      <div className="mb-3 rounded-lg border border-yellow-200 bg-yellow-50 p-3 text-xs text-yellow-800">
-        <p className="font-semibold mb-1">复制模式</p>
-        <p>复制完整内容后，粘贴到文本编辑器中，以 <code className="bg-yellow-100 px-1 rounded">.json</code> 结尾保存。</p>
-      </div>
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <span className="text-xs text-gray-500">{statusMessage}</span>
-        <button
-          onClick={handleCopy}
-          className="rounded-md border border-indigo-200 bg-white px-3 py-1 text-xs font-medium text-indigo-600 hover:border-indigo-400 hover:text-indigo-700"
-          type="button"
-        >
-          复制 JSON
-        </button>
-      </div>
-      <textarea
-        value={jsonPayload}
-        readOnly
-        className="w-full h-64 p-3 border rounded-lg text-xs font-mono bg-gray-50 text-gray-900"
-        onClick={(e) => (e.target as HTMLTextAreaElement).select()}
-      />
-      <p className="text-xs text-gray-400 mt-2 text-center">点击文本框可全选内容</p>
-    </div>
-  );
-};
+const resolveCanshouJsonFileName = (data: CanshouResultPayload): string =>
+  `残兽档案_${(data.name || 'data').replace(/[^a-z0-9一-龥]/gi, '_')}.json`;
 
 const LOCAL_STORAGE_KEY = 'canshouAnswersDraft'; // 定义本地存储的键
 const CANSHOU_PREFERENCE_KEY = 'mahoshojo.canshou.preferences.v1';
@@ -2210,6 +2131,8 @@ export const CanshouPage: React.FC = () => {
                                 data={resolvedResultPayload}
                                 mode={jsonSaveMode}
                                 recommendedMode={recommendedJsonMode}
+                                resolveFileName={resolveCanshouJsonFileName}
+                                downloadLabel="💾 下载残兽档案"
                               />
                               <SaveToCloudButton
                                 data={resolvedResultPayload}

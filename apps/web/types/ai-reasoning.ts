@@ -1,21 +1,9 @@
-export type AIReasoningStatus = 'idle' | 'thinking' | 'done' | 'unavailable' | 'error';
+// AI 推理信封类型已收敛到 @mahoshojo/contracts/ai-reasoning（canonical 定义）。
+// 本文件保留原路径，既有 `@/types/ai-reasoning` 调用点无需改动。
 
-export type AIReasoningSource = 'sdk' | 'provider' | 'heuristic' | 'unknown';
-
-export interface AIReasoningPart {
-  id?: string;
-  text: string;
-  source?: AIReasoningSource;
-  createdAt?: string;
-}
-
-export interface AIReasoningEnvelope {
-  status: AIReasoningStatus;
-  source: AIReasoningSource;
-  summary?: string | null;
-  text?: string | null;
-  parts?: AIReasoningPart[];
-  reasoningTokens?: number | null;
-  anomalyFlags?: string[] | null;
-  errorMessage?: string | null;
-}
+export type {
+  AIReasoningEnvelope,
+  AIReasoningPart,
+  AIReasoningSource,
+  AIReasoningStatus,
+} from '@mahoshojo/contracts/ai-reasoning';

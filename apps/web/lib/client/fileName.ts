@@ -1,7 +1,3 @@
-export function buildSafeFileName(base: string, ext: string, fallbackBase = 'file'): string {
-  const raw = base.trim() || fallbackBase;
-  const cleaned = raw.replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim().slice(0, 80);
-  const normalizedExt = ext.replace(/^\./, '').trim() || 'txt';
-  return `${cleaned}.${normalizedExt}`;
-}
+// 文件名清洗已上移至 @mahoshojo/ui-web/client（canonical 实现）。
 
+export { buildSafeFileName } from '@mahoshojo/ui-web/client';
