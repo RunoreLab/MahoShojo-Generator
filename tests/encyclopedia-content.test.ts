@@ -129,13 +129,17 @@ describe('generated content from a clean output root', () => {
     await writeFile(path.join(desktop, 'keep.txt'), 'unrelated');
     await writeFile(path.join(desktop, 'encyclopedia/stale.md'), 'retired');
     await writeFile(path.join(desktop, 'logo.svg'), 'drift');
-    await writeFile(path.join(web, 'questionnaires/presets/unrelated.json'), 'unrelated preset');
+    // 预设目录为脚本全权拥有（exclusive）：外来文件应被剪除而不是保留；
+    // 目录外的无关文件（如 keep.txt）仍不受同步影响。
+    await writeFile(path.join(web, 'questionnaires/presets/stale-preset.json'), 'stale preset');
+    await writeFile(path.join(web, 'questionnaires/unrelated.json'), 'unrelated');
     await expect(generate({ outputRoot, checkOutput: true })).rejects.toThrow('不同步');
     await generate({ outputRoot });
     await generate({ outputRoot, checkOutput: true });
     expect(await readFile(path.join(desktop, 'keep.txt'), 'utf8')).toBe('unrelated');
     expect(await readdir(path.join(desktop, 'encyclopedia'))).not.toContain('stale.md');
-    expect(await readFile(path.join(web, 'questionnaires/presets/unrelated.json'), 'utf8')).toBe('unrelated preset');
+    expect(await readdir(path.join(web, 'questionnaires/presets'))).not.toContain('stale-preset.json');
+    expect(await readFile(path.join(web, 'questionnaires/unrelated.json'), 'utf8')).toBe('unrelated');
   });
 
   it('detects missing and stale questionnaire or flower copies and restores them', async () => {
