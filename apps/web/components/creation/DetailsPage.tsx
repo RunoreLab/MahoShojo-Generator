@@ -71,6 +71,7 @@ import { downloadBlob } from '@/lib/client/blobUrl';
 import { getAnswerLimitInfo, isAnswerOverLimit, QUESTIONNAIRE_NATIVE_MAX_ANSWER_CHARS } from '@/lib/questionnaire-limits';
 import { authStorage } from '@/lib/auth';
 import { useGenerationApiIntentLatch } from '@/lib/use-generation-api-intent-latch';
+import { useResultAutoScroll } from '@/lib/use-result-auto-scroll';
 import { buildCustomProviderRequestPayload } from '@/lib/ai/custom-provider';
 import { mapDataCardSourceMeta } from '@/lib/data-card-read-mappers';
 import {
@@ -641,15 +642,9 @@ export const DetailsPage: React.FC = () => {
     );
   }, [allQuestionTargets, questionAnswerLookup, questionTargetSignature]);
 
-  // 生成完成（含快速随机）：视口仍停留在结果卡上方时自动滚动定位到结果开头；
-  // 已在结果内或其下方（可能正边看边生成）则不打断。
-  useEffect(() => {
-    if (!magicalGirlDetails && !streamedGeneralCard) return;
-    const element = resultSectionRef.current;
-    if (element && element.getBoundingClientRect().top > 0) {
-      element.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-  }, [magicalGirlDetails, streamedGeneralCard]);
+  // 生成完成（含快速随机）：仅当结果整体仍在视口下方时自动滚动定位一次；
+  // 已可见/已滚过/正边看边生成的位置不打断（语义见 useResultAutoScroll）。
+  useResultAutoScroll(resultSectionRef, Boolean(magicalGirlDetails || streamedGeneralCard));
 
   const applySelection = (selection: QuestionnaireSelection) => {
     setSelectedQuestionnaires((prev) =>
