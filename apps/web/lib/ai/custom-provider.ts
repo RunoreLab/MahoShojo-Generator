@@ -1,12 +1,14 @@
+import {
+  MAX_CUSTOM_PROVIDER_OUTPUT_TOKENS,
+  normalizeCustomProviderMaxOutputTokens,
+  type UserAIProviderConfig,
+} from '@mahoshojo/ai-core/generation-settings';
 import type { UserGenerationOverrides } from '@/lib/ai/generation-settings/types';
 
-export interface UserAIProviderConfig {
-  providerId: string;
-  modelId: string;
-  apiKey: string;
-  maxOutputTokens?: number;
-  generationOverrides?: UserGenerationOverrides;
-}
+// `UserAIProviderConfig` 与 normalize/上限常量的权威定义已上移到 ai-core
+// （D5.0b 共源：Desktop 与同一份选择器逻辑共用）；这里保留 re-export 兼容既有导入。
+export { MAX_CUSTOM_PROVIDER_OUTPUT_TOKENS, normalizeCustomProviderMaxOutputTokens };
+export type { UserAIProviderConfig } from '@mahoshojo/ai-core/generation-settings';
 
 export type CustomProviderPayload = {
   providerId: string;
@@ -18,16 +20,6 @@ export type CustomProviderPayload = {
 
 export const isUsingUserProvidedKey = (config: UserAIProviderConfig | null | undefined): boolean =>
   config?.providerId !== 'system' && Boolean(config?.apiKey?.trim());
-
-export const MAX_CUSTOM_PROVIDER_OUTPUT_TOKENS = 1_000_000;
-
-export const normalizeCustomProviderMaxOutputTokens = (value: unknown): number | undefined => {
-  if (typeof value !== 'number') return undefined;
-  if (!Number.isFinite(value)) return undefined;
-  if (!Number.isInteger(value)) return undefined;
-  if (value <= 0 || value > MAX_CUSTOM_PROVIDER_OUTPUT_TOKENS) return undefined;
-  return value;
-};
 
 export const isDeepSeekV4Model = (modelId: string | null | undefined): boolean => {
   const normalized = modelId?.trim();

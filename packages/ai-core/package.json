@@ -40,6 +40,11 @@
       "import": "./src/ai-connections.ts",
       "default": "./src/ai-connections.ts"
     },
+    "./generation-settings": {
+      "types": "./src/generation-settings/index.ts",
+      "import": "./src/generation-settings/index.ts",
+      "default": "./src/generation-settings/index.ts"
+    },
     "./magical-girl-details-generation": {
       "types": "./src/magical-girl-details-generation.ts",
       "import": "./src/magical-girl-details-generation.ts",

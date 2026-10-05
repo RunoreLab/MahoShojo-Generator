@@ -60,6 +60,11 @@
       "import": "./src/card-editor/index.ts",
       "default": "./src/card-editor/index.ts"
     },
+    "./ai-provider": {
+      "types": "./src/ai-provider/index.ts",
+      "import": "./src/ai-provider/index.ts",
+      "default": "./src/ai-provider/index.ts"
+    },
     "./local-cards": {
       "types": "./src/local-cards/index.ts",
       "import": "./src/local-cards/index.ts",
@@ -78,6 +83,7 @@
     "build": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@mahoshojo/ai-core": "workspace:*",
     "@mahoshojo/local-library": "workspace:*",
     "katex": "^0.16.27",
     "react-markdown": "^10.1.0",

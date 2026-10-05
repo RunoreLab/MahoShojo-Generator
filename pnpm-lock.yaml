@@ -794,6 +794,9 @@ importers:
 
   packages/ui-web:
     dependencies:
+      '@mahoshojo/ai-core':
+        specifier: workspace:*
+        version: link:../ai-core
       '@mahoshojo/local-library':
         specifier: workspace:*
         version: link:../local-library

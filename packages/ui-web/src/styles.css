@@ -38,6 +38,85 @@
  */
 @source "./**/*.{ts,tsx}";
 
+/*
+ * 共享表单/选择器底座样式。
+ *
+ * 这些类随 `src/ai-provider/` 等共享组件一起从 `apps/web/styles/globals.css` 上移；
+ * 声明逐字保留（`--battle-lite-*` 变量引用在 Web 的 `battle-lite-shell` 里依然生效，
+ * Desktop 下自然落到 `--app-*` 回退）。Web 侧同名定义已删除，本文件是唯一权威。
+ * 通用 `battle-lite-*` 主题面的收敛是独立的 DESK-PROD-009 工作，不在本切片处理。
+ */
+@layer components {
+  .input-group {
+    margin-bottom: 20px;
+  }
+
+  .input-label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: 600;
+    color: var(--app-text-muted);
+  }
+
+  .input-field {
+    width: 100%;
+    padding: 15px;
+    border: 2px solid var(--app-input-border);
+    color: var(--app-text);
+    border-radius: 12px;
+    font-size: 16px;
+    transition: all 0.3s ease;
+    background: var(--app-input-bg);
+  }
+
+  .input-field::placeholder {
+    color: var(--app-text-subtle);
+  }
+
+  .input-field:focus {
+    outline: none;
+    border-color: var(--app-accent);
+    box-shadow: 0 0 0 3px var(--app-focus-ring);
+  }
+
+  .battle-lite-strong-text {
+    color: var(--app-text);
+  }
+
+  .battle-lite-muted-text {
+    color: var(--battle-lite-muted-text, var(--app-text-muted));
+  }
+
+  .battle-lite-subtle-text {
+    color: var(--battle-lite-subtle-text, var(--app-text-subtle));
+  }
+
+  .battle-lite-accent-box {
+    background: var(--battle-lite-accent-bg, var(--app-surface-80));
+    border: 1px solid var(--battle-lite-accent-border, var(--app-border-strong));
+    color: var(--battle-lite-accent-text, var(--app-text));
+  }
+
+  .battle-lite-select-menu {
+    background: var(--battle-lite-modal-bg, var(--app-surface-strong));
+    border: 1px solid var(--battle-lite-subpanel-border, var(--app-border-strong));
+    box-shadow: var(--app-card-shadow);
+  }
+
+  .battle-lite-select-option {
+    color: var(--app-text);
+  }
+
+  .battle-lite-select-option:hover {
+    background: var(--battle-lite-subpanel-bg, var(--app-surface));
+  }
+
+  .battle-lite-select-option-active {
+    background: rgba(244, 114, 182, 0.14);
+    color: var(--app-text);
+  }
+}
+
 /* Shared questionnaire and magical-girl result view details. */
 .result-item {
   margin-bottom: 20px;

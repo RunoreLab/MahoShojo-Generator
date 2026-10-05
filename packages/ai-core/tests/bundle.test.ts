@@ -7,6 +7,7 @@ describe('ai-core public entrypoint portability', () => {
     '@mahoshojo/ai-core/structured-json',
     '@mahoshojo/ai-core/provider-catalog',
     '@mahoshojo/ai-core/ai-connections',
+    '@mahoshojo/ai-core/generation-settings',
   ] as const)('bundles %s for every target without runtime imports', async (entrypoint) => {
     for (const platform of ['node', 'browser', 'neutral'] as const) {
       const contents = entrypoint.endsWith('/stream-events')
@@ -17,7 +18,9 @@ describe('ai-core public entrypoint portability', () => {
             ? `import { AI_PROVIDER_CATALOG, resolveAIProviderModel } from '${entrypoint}'; export { AI_PROVIDER_CATALOG, resolveAIProviderModel };`
           : entrypoint.endsWith('/ai-connections')
             ? `import { describeProviderProfileConnection } from '${entrypoint}'; export { describeProviderProfileConnection };`
-            : `import { AiStreamEventSchema, parseStructuredJsonWithSchema } from '${entrypoint}'; export { AiStreamEventSchema, parseStructuredJsonWithSchema };`;
+            : entrypoint.endsWith('/generation-settings')
+              ? `import { getModelGenerationCapabilities, UserGenerationOverridesSchema } from '${entrypoint}'; export { getModelGenerationCapabilities, UserGenerationOverridesSchema };`
+              : `import { AiStreamEventSchema, parseStructuredJsonWithSchema } from '${entrypoint}'; export { AiStreamEventSchema, parseStructuredJsonWithSchema };`;
       const result = await build({
         absWorkingDir: process.cwd(),
         bundle: true,

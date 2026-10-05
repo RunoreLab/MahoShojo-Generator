@@ -454,18 +454,11 @@ body.announcement-visible {
     color: var(--battle-lite-hero-pill-text, var(--app-accent-strong));
   }
 
-  .battle-lite-strong-text {
-    color: var(--app-text);
-  }
-
-  .battle-lite-muted-text {
-    color: var(--battle-lite-muted-text, var(--app-text-muted));
-  }
-
-  .battle-lite-subtle-text {
-    color: var(--battle-lite-subtle-text, var(--app-text-subtle));
-  }
-
+  /*
+   * `.battle-lite-strong-text` / `-muted-text` / `-subtle-text` / `-accent-box` /
+   * `-select-menu` / `-select-option(-active)` 与 `.input-group/-label/-field`
+   * 已上移至 `@mahoshojo/ui-web/styles.css`（D5.0b 共源选择器底座）。
+   */
   .battle-lite-link {
     color: var(--battle-lite-link, var(--app-accent-strong));
   }
@@ -484,12 +477,6 @@ body.announcement-visible {
   .battle-lite-info-pill {
     background: var(--battle-lite-info-pill-bg, var(--app-surface));
     color: var(--battle-lite-info-pill-text, var(--app-text));
-  }
-
-  .battle-lite-accent-box {
-    background: var(--battle-lite-accent-bg, var(--app-surface-80));
-    border: 1px solid var(--battle-lite-accent-border, var(--app-border-strong));
-    color: var(--battle-lite-accent-text, var(--app-text));
   }
 
   .battle-lite-danger-button {
@@ -518,25 +505,6 @@ body.announcement-visible {
     background: linear-gradient(45deg, var(--app-accent), var(--app-accent-strong));
     color: #fff;
     box-shadow: 0 10px 20px var(--app-accent-shadow);
-  }
-
-  .battle-lite-select-menu {
-    background: var(--battle-lite-modal-bg, var(--app-surface-strong));
-    border: 1px solid var(--battle-lite-subpanel-border, var(--app-border-strong));
-    box-shadow: var(--app-card-shadow);
-  }
-
-  .battle-lite-select-option {
-    color: var(--app-text);
-  }
-
-  .battle-lite-select-option:hover {
-    background: var(--battle-lite-subpanel-bg, var(--app-surface));
-  }
-
-  .battle-lite-select-option-active {
-    background: rgba(244, 114, 182, 0.14);
-    color: var(--app-text);
   }
 
   .battle-lite-modal-surface {
@@ -639,40 +607,6 @@ body.announcement-visible {
     50% {
       opacity: 0.7;
     }
-  }
-
-
-
-  .input-group {
-    margin-bottom: 20px;
-  }
-
-  .input-label {
-    display: block;
-    margin-bottom: 8px;
-    font-weight: 600;
-    color: var(--app-text-muted);
-  }
-
-  .input-field {
-    width: 100%;
-    padding: 15px;
-    border: 2px solid var(--app-input-border);
-    color: var(--app-text);
-    border-radius: 12px;
-    font-size: 16px;
-    transition: all 0.3s ease;
-    background: var(--app-input-bg);
-  }
-
-  .input-field::placeholder {
-    color: var(--app-text-subtle);
-  }
-
-  .input-field:focus {
-    outline: none;
-    border-color: var(--app-accent);
-    box-shadow: 0 0 0 3px var(--app-focus-ring);
   }
 
   .generate-button {
