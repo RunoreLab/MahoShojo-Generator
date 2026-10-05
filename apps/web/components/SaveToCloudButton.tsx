@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import SaveCardModal from './CharManager/SaveCardModal';
 import DataCardsModal from './CharManager/DataCardsModal';
@@ -19,11 +19,6 @@ interface SaveToCloudButtonProps {
   className?: string;
   style?: React.CSSProperties;
 }
-
-type DataCardsLoadState = {
-  status: 'idle' | 'loading' | 'success' | 'error';
-  error: string | null;
-};
 
 // 检测是否为情景文件
 const isScenarioData = (data: any): boolean => {
@@ -46,7 +41,7 @@ export default function SaveToCloudButton({
   style = {}
 }: SaveToCloudButtonProps) {
   const router = useRouter();
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [cardName, setCardName] = useState('');
   const [cardDescription, setCardDescription] = useState('');
@@ -55,52 +50,23 @@ export default function SaveToCloudButton({
   const [isSaving, setIsSaving] = useState(false);
   const [isPreparing, setIsPreparing] = useState(false);
   const [preparedData, setPreparedData] = useState<any>(null);
-  const [userDataCards, setUserDataCards] = useState<any[]>([]);
+  const [cardsRefresh, setCardsRefresh] = useState(0);
   const [userCapacity, setUserCapacity] = useState(config.DEFAULT_DATA_CARD_CAPACITY);
+  const [userUsedSlots, setUserUsedSlots] = useState(0);
   const [showDataCardsForReplace, setShowDataCardsForReplace] = useState(false);
   const [replaceEditingCard, setReplaceEditingCard] = useState<any | null>(null);
   const [replaceCurrentPage, setReplaceCurrentPage] = useState(1);
-  const [, setCardsLoadState] = useState<DataCardsLoadState>({ status: 'idle', error: null });
 
   const navigateToArrested = () => {
     router.push('/arrested');
   };
 
-  // 加载用户数据卡信息
-  useEffect(() => {
-    if (isAuthenticated) {
-      void loadUserDataCards();
-      return;
-    }
-    setUserDataCards([]);
-    setCardsLoadState({ status: 'idle', error: null });
-  }, [isAuthenticated]);
-
   const loadUserDataCards = async () => {
-    setCardsLoadState((current) => ({
-      status: 'loading',
-      error: current.error,
-    }));
-    try {
-      const [cardsResult, capacity] = await Promise.all([
-        dataCardApi.getCardsDetailed(),
-        dataCardApi.getUserCapacity()
-      ]);
-      setUserDataCards(cardsResult.cards);
-      if (capacity !== null) {
-        setUserCapacity(capacity);
-      }
-      setCardsLoadState({
-        status: cardsResult.success ? 'success' : 'error',
-        error: cardsResult.success ? null : (cardsResult.error || '获取数据卡失败'),
-      });
-      return cardsResult;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : '加载用户数据卡失败';
-      console.error("加载用户数据卡失败:", error);
-      setUserDataCards([]);
-      setCardsLoadState({ status: 'error', error: message });
-      return { success: false, cards: [], error: message };
+    setCardsRefresh((value) => value + 1);
+    const capacityInfo = await dataCardApi.getUserCapacity();
+    if (capacityInfo) {
+      setUserCapacity(capacityInfo.capacity);
+      setUserUsedSlots(capacityInfo.usedSlots);
     }
   };
 
@@ -167,6 +133,11 @@ export default function SaveToCloudButton({
     setCardDescription((defaultDescription && defaultDescription.trim()) ? defaultDescription : inferredDescription);
     setIsPublic(defaultIsPublic);
     setSaveError(null);
+    const capacityInfo = await dataCardApi.getUserCapacity();
+    if (capacityInfo !== null) {
+      setUserCapacity(capacityInfo.capacity);
+      setUserUsedSlots(capacityInfo.usedSlots);
+    }
     setShowSaveModal(true);
   };
 
@@ -359,7 +330,7 @@ export default function SaveToCloudButton({
         onPublicChange={setIsPublic}
         error={saveError}
         isSaving={isSaving}
-        currentCardCount={userDataCards.length}
+        usedSlots={userUsedSlots}
         userCapacity={userCapacity}
       />
 
@@ -369,7 +340,9 @@ export default function SaveToCloudButton({
           setShowDataCardsForReplace(false);
           setReplaceEditingCard(null);
         }}
-        dataCards={userDataCards}
+        dataCards={[]}
+        summaryOwnerId={user?.id}
+        refreshKey={cardsRefresh}
         editingCard={replaceEditingCard}
         currentPage={replaceCurrentPage}
         cardsPerPage={8}
@@ -381,6 +354,7 @@ export default function SaveToCloudButton({
         onCancelEdit={() => setReplaceEditingCard(null)}
         onReplaceCard={handleReplaceFromDataCards}
         userCapacity={userCapacity}
+        userUsedSlots={userUsedSlots}
         title="替换已有数据卡"
         emptyText="暂无数据卡"
         defaultFilters={cardType ? { type: cardType } : undefined}

@@ -1,4 +1,5 @@
 import {
+  generationCancelCode,
   isArenaPreparationSeed,
   isArenaPreparationVersion,
 } from './service';
@@ -25,6 +26,7 @@ const cloneState = (state: GenerationReplayStoreState): GenerationReplayStoreSta
       ? { publicError: { ...state.terminal.publicError } }
       : {}),
   } : null,
+  intendedTerminal: state.intendedTerminal ? { ...state.intendedTerminal } : null,
 });
 
 /**
@@ -132,6 +134,7 @@ export const createMemoryGenerationReplayStore = (
         generationRequestId: input.generationRequestId,
         payloadHash: input.payloadHash,
         mode: input.mode ?? null,
+        ...(input.multiplayerParticipation ? { multiplayerParticipation: structuredClone(input.multiplayerParticipation) } : {}),
         producerToken: input.producerToken,
         status: 'reserved',
         lastEventId: null,
@@ -139,6 +142,7 @@ export const createMemoryGenerationReplayStore = (
         leaseExpiresAt: input.leaseExpiresAt,
         snapshot: null,
         terminal: null,
+        intendedTerminal: null,
         cancelRequested: false,
         cancelReason: null,
         preparationSeed,
@@ -194,13 +198,18 @@ export const createMemoryGenerationReplayStore = (
         || !ownsUnexpiredLease(state, input.now)
       ) return { kind: 'fenced' };
       if (state.cancelRequested) {
+        const cancelReason = state.cancelReason ?? 'user';
         writeState({
           ...state,
           status: 'finalizing',
           updatedAt: input.now,
           leaseExpiresAt: input.leaseExpiresAt,
+          intendedTerminal: {
+            status: 'cancelled',
+            code: generationCancelCode(cancelReason),
+          },
         });
-        return { kind: 'cancelled', cancelReason: state.cancelReason ?? 'user' };
+        return { kind: 'cancelled', cancelReason };
       }
       if (state.status !== 'running' && state.status !== 'finalizing') return { kind: 'fenced' };
       writeState({
@@ -208,6 +217,7 @@ export const createMemoryGenerationReplayStore = (
         status: 'finalizing',
         updatedAt: input.now,
         leaseExpiresAt: input.leaseExpiresAt,
+        intendedTerminal: input.terminal ?? state.intendedTerminal ?? null,
       });
       return { kind: 'claimed' };
     },
@@ -236,6 +246,7 @@ export const createMemoryGenerationReplayStore = (
         generationRequestId: state.generationRequestId,
         payloadHash: state.payloadHash,
         mode: state.mode ?? null,
+        intendedTerminal: state.intendedTerminal ?? null,
       };
     },
 
@@ -397,6 +408,7 @@ export const createMemoryGenerationReplayStore = (
             ? { publicError: { ...input.terminal.publicError } }
             : {}),
         },
+        intendedTerminal: null,
         lastEventId: terminalEvent.id,
         snapshot: input.terminalSnapshot ? {
           ...input.terminalSnapshot,

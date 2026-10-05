@@ -25,7 +25,10 @@ export type BattleSelectionPayload = Record<string, unknown> & {
   _cardId: string;
   _cardName: string;
   _cardDescription: string;
+  _cardType: OnlineDataCardType;
   _isPublic: boolean | number;
+  /** `local` 表示这条内容属于用户本机本地库，没有服务器侧身份。 */
+  _storageLocation: 'cloud' | 'local';
   _updatedAt?: string;
   _createdAt?: string;
   _author: string;
@@ -41,7 +44,14 @@ export type DataCardSourceMeta = {
 };
 
 export type DataCardRuntimeSourceInfo = {
+  /**
+   * 仅线上数据卡有服务器身份。本地库记录 MUST NOT 产出该字段：
+   * 一旦产出，它会被当作 online content reference 发布进 Arena 房间共享配置
+   * （`arena-room/shared-config.ts`），把 device-owned 数据
+   * 冒充成 server-authoritative 实体。参见 ADR-local-library-data-ownership §2。
+   */
   sourceDataCardId?: string;
+  sourceIsLocalLibrary?: boolean;
   sourceDataCardName?: string;
   sourceDataCardDescription?: string;
   sourceDataCardCreatedAt?: string;
@@ -52,21 +62,6 @@ export type DataCardRuntimeSourceInfo = {
   sourceDataCardFavoriteCount?: number;
   sourceDataCardUsageCount?: number;
 };
-
-const BATTLE_SELECTION_TRANSPORT_META_KEYS = new Set([
-  '_cardId',
-  '_cardName',
-  '_cardDescription',
-  '_cardType',
-  '_isPublic',
-  '_updatedAt',
-  '_createdAt',
-  '_author',
-  '_authorName',
-  '_likeCount',
-  '_favoriteCount',
-  '_usageCount',
-]);
 
 const toRecord = (value: unknown): Record<string, unknown> | null =>
   typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
@@ -135,6 +130,16 @@ export const mapDataCardSourceMeta = (rowInput: unknown): DataCardSourceMeta => 
 
 export const mapDataCardRuntimeSourceInfo = (rowInput: unknown): DataCardRuntimeSourceInfo => {
   const row = toRecord(rowInput) ?? {};
+  const isLocalLibrary = readString(row, ['_storageLocation']) === 'local';
+  if (isLocalLibrary) {
+    // 本地库内容没有线上记录可指；不产出 sourceDataCardId / sourceIsPublic，
+    // 下游因此走 host-local 分支，与 ADR §8 / LIB-012 一致。
+    return {
+      sourceDataCardName: normalizeOptionalText(readString(row, ['_cardName', 'name'])),
+      sourceDataCardDescription: normalizeOptionalText(readString(row, ['_cardDescription', 'description'])),
+      sourceIsLocalLibrary: true,
+    };
+  }
   const sourceMeta = mapDataCardSourceMeta(row);
 
   const numericVisibility = readNumber(row, ['_isPublic', 'is_public', 'isPublic']);
@@ -173,23 +178,6 @@ const parseDataCardDataObject = (source: Record<string, unknown>): Record<string
   const rawRecord = toRecord(raw);
   if (rawRecord) return rawRecord;
   throw new Error('数据卡内容为空或格式不受支持。');
-};
-
-export const stripBattleSelectionTransportMeta = <T>(input: T): T => {
-  if (Array.isArray(input)) {
-    return input.map((item) => stripBattleSelectionTransportMeta(item)) as T;
-  }
-  const record = toRecord(input);
-  if (!record) return input;
-
-  const cleaned: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(record)) {
-    if (BATTLE_SELECTION_TRANSPORT_META_KEYS.has(key)) {
-      continue;
-    }
-    cleaned[key] = stripBattleSelectionTransportMeta(value);
-  }
-  return cleaned as T;
 };
 
 export const mapPublicDataCardRowToDetailsCard = (
@@ -235,13 +223,17 @@ export const mapPublicDataCardRowToBattleSelectionPayload = (rowInput: unknown):
   const visibility = normalizePublicVisibilityValue(row);
   const author = sourceMeta.dataCardAuthor ?? '未知';
 
+  const isLocalLibrary = readString(row, ['storageLocation', '_storageLocation']) === 'local';
+
   return {
     ...dataObject,
-    _cardId: cardId,
+    // 本地库记录没有服务器 ID。给一个本地 id 会让它在下游被当成线上引用发布出去。
+    _cardId: isLocalLibrary ? '' : cardId,
     _cardName: cardName,
     _cardDescription: description,
     _cardType: normalizeCardType(readString(row, ['type'])),
     _isPublic: visibility,
+    _storageLocation: isLocalLibrary ? 'local' : 'cloud',
     _updatedAt: readString(row, ['updated_at', 'updatedAt']) ?? undefined,
     _createdAt: readString(row, ['created_at', 'createdAt']) ?? undefined,
     _author: author,

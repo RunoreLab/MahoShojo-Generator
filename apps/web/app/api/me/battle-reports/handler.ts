@@ -4,8 +4,9 @@ import {
   getBattleReportGenerationsByUserIdLite,
   type BattleReportGenerationsListFilter,
 } from '@/lib/database/battle-report-generations';
+import { resolveBattleReportDisplayTitle } from '@/lib/arena/battle-report-display-title';
 import { extractBattleReportGenerationErrorMessage } from '@/lib/arena/battle-report-record-utils';
-import { json, requireAuthUser } from '@/lib/pvp/server';
+import { json, requireAuthUser } from '@/lib/api/server';
 
 const clampInt = (value: unknown, fallback: number, min: number, max: number): number => {
   const n = typeof value === 'string' ? Number(value) : typeof value === 'number' ? value : NaN;
@@ -73,6 +74,12 @@ async function handler(req: Request): Promise<Response> {
       generationMode: r.generation_mode,
       mode: r.mode,
       headline: r.headline,
+      displayTitle: resolveBattleReportDisplayTitle({
+        headline: r.headline,
+        content: contentBlocked ? null : outputPreview,
+        contextLabel: r.scenario_title,
+        mode: r.mode,
+      }),
       winner: r.winner,
       hasPreview: Boolean(outputPreview && outputPreview.trim()) && !contentBlocked,
       canRegenerate: !contentBlocked && (r.status === 'completed' || Boolean(outputPreview && outputPreview.trim())),
@@ -82,6 +89,8 @@ async function handler(req: Request): Promise<Response> {
       pvpRoomId: r.pvp_room_id,
       pvpMatchId: r.pvp_match_id,
       pvpRoundId: r.pvp_round_id,
+      sourceKind: r.source_kind,
+      arenaParticipantRole: r.arena_participant_generation_id ? (r.arena_participant_role ?? null) : null,
     };
   });
 

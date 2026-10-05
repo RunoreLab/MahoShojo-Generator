@@ -4,7 +4,7 @@ import { once } from 'node:events';
 import type { AddressInfo } from 'node:net';
 
 import { honoApiConfig } from '../config/hono-api';
-import { hostedDrClientRouting } from '../config/hosted-dr-client.generated';
+import { hostedDrClientRouting } from '../config/hosted-routing';
 import {
   createGenerationApiIntent,
   type GenerationApiClientError,
@@ -19,14 +19,14 @@ type Counters = {
   primaryPostCount: number;
   drPostCount: number;
 };
-type EvidenceCase = Counters & {
+type VerificationCase = Counters & {
   id: string;
   passed: boolean;
   operationId: string;
   selectedPlacement: string;
   terminalClass: string;
-  primaryProbeDurationMs: number;
-  drProbeDurationMs: number | null;
+  primaryProbeDurationBucket: string;
+  drProbeDurationBucket: string;
 };
 
 const emptyCounters = (): Counters => ({
@@ -141,8 +141,16 @@ const expectedByCase = {
     selectedPlacement: 'next-dr',
     terminalClass: 'response-ok',
   },
-  'PRIMARY-UNAVAILABLE-FAIL-CLOSED': {
-    primaryProbeCount: 1,
+  'PRIMARY-ONLY-NO-PROBE': {
+    primaryProbeCount: 0,
+    drProbeCount: 0,
+    primaryPostCount: 1,
+    drPostCount: 0,
+    selectedPlacement: 'hono-primary',
+    terminalClass: 'response-ok',
+  },
+  'TRULY-UNKNOWN-NO-DISPATCH': {
+    primaryProbeCount: 0,
     drProbeCount: 0,
     primaryPostCount: 0,
     drPostCount: 0,
@@ -163,7 +171,7 @@ const main = async () => {
   const primaryOrigin = await listen(primaryServer);
   const drOrigin = await listen(drServer);
   const original = { ...honoApiConfig };
-  const evidence: EvidenceCase[] = [];
+  const cases: VerificationCase[] = [];
 
   try {
     honoApiConfig.enabled = true;
@@ -183,6 +191,7 @@ const main = async () => {
       id: keyof typeof expectedByCase,
       mode: PrimaryMode,
       route: string,
+      method = 'POST',
     ) => {
       primaryMode = mode;
       counters = emptyCounters();
@@ -197,14 +206,14 @@ const main = async () => {
 
       try {
         const response = await intent.dispatch(route, {
-          method: 'POST',
+          method,
           headers: { 'x-operation-id': expectedOperationId },
           body: JSON.stringify({ inputClass: 'synthetic' }),
         });
         await response.text();
       } catch (error) {
-        const expectedCode = id === 'PRIMARY-UNAVAILABLE-FAIL-CLOSED'
-          ? 'DR_NOT_ELIGIBLE'
+        const expectedCode = id === 'TRULY-UNKNOWN-NO-DISPATCH'
+          ? 'OPERATION_NOT_DECLARED'
           : 'AMBIGUOUS_OPERATION_OUTCOME';
         assert.equal((error as GenerationApiClientError).code, expectedCode);
       }
@@ -219,13 +228,13 @@ const main = async () => {
         terminalClass: terminal.terminalClass,
       };
       assert.deepEqual(actual, expectedByCase[id]);
-      evidence.push({
+      cases.push({
         id,
         passed: true,
         operationId: expectedOperationId,
         ...actual,
-        primaryProbeDurationMs: selection.primaryProbeDurationMs,
-        drProbeDurationMs: selection.drProbeDurationMs,
+        primaryProbeDurationBucket: selection.primaryProbeDurationBucket,
+        drProbeDurationBucket: selection.drProbeDurationBucket,
       });
     };
 
@@ -236,9 +245,15 @@ const main = async () => {
       '/api/generate-free',
     );
     await runCase(
-      'PRIMARY-UNAVAILABLE-FAIL-CLOSED',
+      'PRIMARY-ONLY-NO-PROBE',
       'transport-down',
       '/api/arena/generate',
+    );
+    await runCase(
+      'TRULY-UNKNOWN-NO-DISPATCH',
+      'transport-down',
+      '/api/generate-free',
+      'DELETE',
     );
     await runCase(
       'POST-DISCONNECT-NO-REPLAY',
@@ -247,9 +262,9 @@ const main = async () => {
     );
 
     process.stdout.write(`${JSON.stringify({
-      event: 'hosted.dr.client-preflight.evidence',
+      event: 'hosted.dr.client-preflight.verification',
       environment: 'isolated-loopback',
-      cases: evidence,
+      cases,
     })}\n`);
   } finally {
     Object.assign(honoApiConfig, original);

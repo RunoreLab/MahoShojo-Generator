@@ -5,6 +5,7 @@ import {
   type ArenaGenerationExecutor,
   type GenerationReplayStore,
 } from '@mahoshojo/hosted-api/arena-generation/service';
+import { ArenaRoomGenerationResultSchema } from '@mahoshojo/contracts/arena-room';
 import {
   canonicalizeNodeArenaGenerationSemanticPayload,
   createArenaGenerationFinalizer,
@@ -29,8 +30,9 @@ import {
   ARENA_ROOM_INTERNAL_GUIDANCE,
   createArenaRoomGenerationService,
 } from '../src/arena-room/room-generation-service';
-import { createArenaRoomMembershipService } from '../src/arena-room/room-membership-service';
 import { RedisRuntime } from '../src/redis/runtime';
+import { createRoomGenerationVerifierMaterializer } from './room-generation-verifier-materializer';
+import { createRoomVerifierMembershipService } from './room-verifier-membership';
 import { requireSafeRoomVerifierPrefix } from './room-verifier-safety';
 
 const redisUrl = process.env.REDIS_URL?.trim();
@@ -63,6 +65,7 @@ const generationRequestId = `request-generation-durable-${token}`;
 const actorKey = `pvp-room:${roomId}`;
 const objects = new Map<string, string>();
 const generationRows = new Map<string, Record<string, unknown>>();
+const participantRows = new Map<string, Map<number, string | null>>();
 const objectRows = new Map<string, Record<string, unknown>>();
 const cleanupClient = createClient({ url: redisUrl });
 cleanupClient.on('error', () => undefined);
@@ -86,6 +89,18 @@ const createVerifierD1Adapter = (): NodeDataD1Client => ({
         return d1Statement;
       },
       async all() {
+        if (sql.includes('FROM battle_report_generation_participants')) {
+          const participantGenerationId = String(parameters[0] ?? '');
+          const limit = Number(parameters[1] ?? 0);
+          const boundedLimit = Number.isFinite(limit) && limit > 0
+            ? limit
+            : Number.POSITIVE_INFINITY;
+          const rows = [...(participantRows.get(participantGenerationId)
+            ?? new Map<number, string | null>())]
+            .slice(0, boundedLimit)
+            .map(([userId, role]) => ({ user_id: userId, role }));
+          return { success: true, results: rows, meta: {} };
+        }
         const generationId = String(parameters[0] ?? '');
         const generation = generationRows.get(generationId);
         if (sql.includes('FROM battle_report_generations\nWHERE id = ?')) {
@@ -128,6 +143,18 @@ const createVerifierD1Adapter = (): NodeDataD1Client => ({
           generationRows.set(generationId, {
             id: generationId,
             status: parameters[4],
+            mode: parameters[8],
+            scenario_title: parameters[10],
+            language: parameters[13],
+            story_length: parameters[14],
+            ai_model: parameters[32],
+            headline: parameters[33],
+            winner: parameters[34],
+            prompt_tokens: parameters[37],
+            completion_tokens: parameters[38],
+            total_tokens: parameters[39],
+            cached_tokens: parameters[40],
+            reasoning_tokens: parameters[41],
             updated_at: parameters.at(-1),
             output_preview: parameters[extraIndex - 1],
             extra_json: parameters[extraIndex],
@@ -160,6 +187,26 @@ const createVerifierD1Adapter = (): NodeDataD1Client => ({
         if (sql.includes('INSERT INTO battle_report_generation_combatants')) {
           return { success: true, results: [], meta: { changes: 1 } };
         }
+        if (sql.includes('INSERT INTO battle_report_generation_participants')) {
+          let changes = 0;
+          for (let index = 0; index + 2 < parameters.length; index += 3) {
+            const participantGenerationId = String(parameters[index] ?? '');
+            const userId = Number(parameters[index + 1]);
+            const role = typeof parameters[index + 2] === 'string'
+              ? parameters[index + 2] as string
+              : null;
+            let rows = participantRows.get(participantGenerationId);
+            if (!rows) {
+              rows = new Map<number, string | null>();
+              participantRows.set(participantGenerationId, rows);
+            }
+            if (!rows.has(userId)) {
+              rows.set(userId, role);
+              changes += 1;
+            }
+          }
+          return { success: true, results: [], meta: { changes } };
+        }
         throw new Error('ROOM_GENERATION_DURABLE_D1_WRITE_UNEXPECTED');
       },
     };
@@ -169,9 +216,13 @@ const createVerifierD1Adapter = (): NodeDataD1Client => ({
 
 const sharedConfig = () => ({
   battleMode: 'classic' as const,
+  reportFormat: 'markdown' as const,
   combatants: [{
     key: 'data-card:character-1',
     ref: { id: 'character-1', kind: 'character' as const, versionToken: 'v1' },
+  }, {
+    key: 'data-card:character-2',
+    ref: { id: 'character-2', kind: 'character' as const, versionToken: 'v1' },
   }],
   teams: [],
   scenario: null,
@@ -207,6 +258,20 @@ const readAll = async <T>(stream: ReadableStream<T>): Promise<T[]> => {
   } finally {
     reader.releaseLock();
   }
+};
+
+const verifierCombatantImpact = '验证历战影响';
+const verifierCombatantStateSummary = '验证当前状态';
+
+const hasVerifierRoomSafeResult = (value: unknown): boolean => {
+  const parsed = ArenaRoomGenerationResultSchema.safeParse(value);
+  if (!parsed.success || parsed.data.mode !== 'classic') return false;
+  const update = parsed.data.combatantUpdates?.find((item) => (
+    item.combatantKey === 'data-card:character-1'
+  ));
+  return update?.displayName === 'Verifier character-1'
+    && update.impact === verifierCombatantImpact
+    && update.currentStateSummary === verifierCombatantStateSummary;
 };
 
 const waitFor = async <T>(
@@ -267,8 +332,9 @@ try {
     },
     async getText(key: string) {
       const value = objects.get(key);
-      if (value === undefined) throw new Error('ROOM_GENERATION_DURABLE_R2_NOT_FOUND');
-      return value;
+      return value === undefined
+        ? { kind: 'not-found' as const }
+        : { kind: 'found' as const, text: value };
     },
   };
   let ratingSettlementInvocations = 0;
@@ -345,7 +411,16 @@ try {
         actorKey: input.actorKey,
         payloadHash: input.payloadHash,
         payload: input.payload,
-        metadata: {},
+        metadata: {
+          streamMeta: {
+            impacts: [{
+              combatantIndex: 0,
+              characterName: 'Verifier character-1',
+              impact: verifierCombatantImpact,
+              currentStateSummary: verifierCombatantStateSummary,
+            }],
+          },
+        },
         markdown: expectedMarkdown,
         telemetry: {},
         status: 'completed' as const,
@@ -405,7 +480,7 @@ try {
     now: Date.now,
   });
   let nextUser = 0;
-  const memberships = createArenaRoomMembershipService({
+  const memberships = createRoomVerifierMembershipService({
     actors: roomActors,
     createUserId: () => `durable-user-${++nextUser}`,
     now: () => new Date().toISOString(),
@@ -417,20 +492,25 @@ try {
   });
   await memberships.join({ roomId, accountUserId: 202, displayName: 'Durable Member' });
   const port = createHostedPort(runtime.getGenerationReplayStore());
+  const generationMaterializer = createRoomGenerationVerifierMaterializer();
   const coordinator = createArenaRoomGenerationService({
     memberships,
-    references: { verify: async (input) => input.refs },
+    materializer: generationMaterializer,
     generation: port,
     now: () => new Date().toISOString(),
   });
+  const generationControlSeq = roomActors.get(roomId)?.getSnapshot()?.snapshot.controlSeq;
+  if (generationControlSeq === undefined) {
+    throw new Error('ROOM_GENERATION_DURABLE_VERIFIER_ACTOR_MISSING');
+  }
   const generationRequest = {
     expectedRoomEpoch: host.roomEpoch,
     expectedRevision: host.snapshot.revision,
+    expectedControlSeq: generationControlSeq,
     generationRequestId,
     sharedConfig: sharedConfig(),
+    hostLocalPayloads: [],
     generation: {
-      mode: 'classic',
-      combatants: [{ data: { name: 'Verifier' } }],
       customProvider: { apiKey: `secret-${token}` },
     },
   };
@@ -476,12 +556,21 @@ try {
     configRevision: historical.mirror.configRevision,
     collaborativeInfluence: historical.mirror.collaborativeInfluence,
     participantUserIds: historical.mirror.participantUserIds,
+    ...(historical.mirror.hostAccountUserId === undefined ? {} : {
+      hostAccountUserId: historical.mirror.hostAccountUserId,
+    }),
     sharedConfig: generationRequest.sharedConfig,
+  });
+  const retryPayload = await generationMaterializer.materialize({
+    sharedConfig: generationRequest.sharedConfig,
+    hostAccountUserId: 101,
+    hostLocalPayloads: generationRequest.hostLocalPayloads,
+    hostRuntime: generationRequest.generation,
   });
   const retryPayloadDigest = await port.hashSemanticPayload({
     roomId,
     generationRequestId,
-    payload: generationRequest.generation,
+    payload: retryPayload,
     internalGuidance: ARENA_ROOM_INTERNAL_GUIDANCE,
     pvpContext: { matchId: generationId, roundId: 'attempt-1' },
     multiplayerSnapshot: retrySnapshot,
@@ -526,14 +615,14 @@ try {
     recoveryTimestamp: () => new Date().toISOString(),
     now: Date.now,
   });
-  const activeRecoveredMemberships = createArenaRoomMembershipService({
+  const activeRecoveredMemberships = createRoomVerifierMembershipService({
     actors: activeRecoveredActors,
     now: () => new Date().toISOString(),
   });
   const activeRecoveredPort = createHostedPort(runtime.getGenerationReplayStore());
   const activeRecoveredCoordinator = createArenaRoomGenerationService({
     memberships: activeRecoveredMemberships,
-    references: { verify: async (input) => input.refs },
+    materializer: createRoomGenerationVerifierMaterializer(),
     generation: activeRecoveredPort,
     now: () => new Date().toISOString(),
   });
@@ -588,8 +677,19 @@ try {
     terminal?.markdown !== expectedMarkdown
     || terminal.resultRef === null
     || terminal.contentAvailable !== true
+    || !hasVerifierRoomSafeResult(terminal.roomSafeResult)
     || await terminalStore.readOwnedTerminal({ generationId, actorKey: `${actorKey}:other` }) !== null
   ) throw new Error('ROOM_GENERATION_DURABLE_D1_R2_AUTHORITY_INVALID');
+
+  const persistedParticipants = participantRows.get(generationId);
+  const persistedParticipantRoles = persistedParticipants
+    ? Object.fromEntries([...persistedParticipants])
+    : {};
+  if (
+    persistedParticipants?.size !== 2
+    || persistedParticipants.get(101) !== 'host'
+    || persistedParticipants.get(202) !== 'member'
+  ) throw new Error('ROOM_GENERATION_DURABLE_PARTICIPANTS_INVALID');
 
   activeRecoveredActors.forceClose();
   activeRecoveredActors = null;
@@ -606,14 +706,14 @@ try {
     recoveryTimestamp: () => new Date().toISOString(),
     now: Date.now,
   });
-  const recoveredMemberships = createArenaRoomMembershipService({
+  const recoveredMemberships = createRoomVerifierMembershipService({
     actors: recoveredActors,
     now: () => new Date().toISOString(),
   });
   const recoveredPort = createHostedPort(recoveredRuntime.getGenerationReplayStore());
   const recoveredCoordinator = createArenaRoomGenerationService({
     memberships: recoveredMemberships,
-    references: { verify: async (input) => input.refs },
+    materializer: createRoomGenerationVerifierMaterializer(),
     generation: recoveredPort,
     now: () => new Date().toISOString(),
   });
@@ -627,6 +727,7 @@ try {
     || recoveredView.status !== 'completed'
     || recoveredView.markdown !== expectedMarkdown
     || recoveredView.generationRecordId !== generationId
+    || !hasVerifierRoomSafeResult(recoveredView.result)
     || providerStarts !== 1
   ) throw new Error('ROOM_GENERATION_DURABLE_PROCESS_RECOVERY_INVALID');
 
@@ -672,6 +773,7 @@ try {
     roomTerminal: roomTerminal?.snapshot.activeGeneration?.state,
     d1R2TerminalFallback: true,
     ownerMismatchHidden: true,
+    persistedParticipants: persistedParticipantRoles,
     terminalRecoveryEpoch: recoveredView.roomEpoch,
     realFinalizerRuns: finalizerRuns,
     duplicateFinalizationIdempotent: finalizerRuns === 2,

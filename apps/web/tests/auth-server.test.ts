@@ -1,256 +1,82 @@
-import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 import { createAuthServer } from '@/lib/auth/server';
 
-const createJsonResponse = (payload: unknown, status = 200): Response =>
-  new Response(JSON.stringify(payload), {
-    status,
-    headers: {
-      'Content-Type': 'application/json',
-    },
-  });
-
 describe('auth/server unified chain', () => {
-  beforeEach(() => {
-    vi.stubEnv('BETTER_AUTH_URL', 'https://auth.example.com');
-  });
+  afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 
-  afterEach(() => {
-    vi.unstubAllEnvs();
-  });
-
-  test('session 链路应透传并解析 admin/exempt 字段', async () => {
-    const fetchCalls: Array<{ url: string; init?: RequestInit }> = [];
-    const authServer = createAuthServer({
-      hasBetterAuthSessionCookieImpl: () => true,
-      getUserByAuthKeyImpl: async () => null,
-      buildSubrequestAuthHeadersImpl: () => ({
-        'cf-access-jwt-assertion': 'cf-jwt-token',
-      }),
-      fetchImpl: async (input, init) => {
-        const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
-        fetchCalls.push({ url, init });
-        return createJsonResponse({
-          user: {
-            id: '12',
-            username: 'session-user',
-            prefix: '会话前缀',
-            is_banned: null,
-            is_admin: true,
-            is_review_exempt: '1',
-          },
-        });
-      },
-    });
-
-    const req = new Request('https://attacker.invalid/api/data-cards', {
-      headers: {
-        cookie: '__Secure-better-auth.session_token=token',
-        authorization: 'Bearer should-not-win',
-        'cf-access-jwt-assertion': 'source-token',
-      },
-    });
-
-    const context = await authServer.getAuthUser(req);
-    expect(context).not.toBeNull();
-    expect(context?.source).toBe('better-auth-session');
-    expect(context?.user.id).toBe(12);
-    expect(context?.user.username).toBe('session-user');
-    expect(context?.user.is_admin).toBe(1);
-    expect(context?.user.is_review_exempt).toBe(1);
-
-    expect(fetchCalls).toHaveLength(1);
-    expect(fetchCalls[0]?.url).toBe('https://auth.example.com/api/auth/verify');
-    const headers = new Headers(fetchCalls[0]?.init?.headers);
-    expect(headers.get('cf-access-jwt-assertion')).toBe('cf-jwt-token');
-    expect(headers.get('cookie')?.includes('session_token=token')).toBe(true);
-  });
-
-  test('缺少可信 Better Auth URL 时应 fail closed 并回落 bearer', async () => {
-    vi.stubEnv('BETTER_AUTH_URL', '');
-    let fetchCount = 0;
-    const authServer = createAuthServer({
-      hasBetterAuthSessionCookieImpl: () => true,
-      buildSubrequestAuthHeadersImpl: () => ({
-        'cf-access-client-secret': 'must-not-leak',
-      }),
-      fetchImpl: async () => {
-        fetchCount += 1;
-        return createJsonResponse({ user: { id: 88, username: 'session-user' } });
-      },
-      getUserByAuthKeyImpl: async (authKey) => authKey === 'fallback-auth-key'
-        ? { id: 7, username: 'legacy-user' }
-        : null,
-    });
-
-    const context = await authServer.getAuthUser(new Request('https://attacker.invalid/api/protected', {
-      headers: {
-        cookie: '__Secure-better-auth.session_token=token',
-        authorization: 'Bearer fallback-auth-key',
-      },
+  test('本地校验 session，保留权限且不发 HTTP 子请求', async () => {
+    const fetchSpy = vi.fn(() => { throw new Error('不得调用 HTTP verify'); });
+    vi.stubGlobal('fetch', fetchSpy);
+    const getSessionAuthUserImpl = vi.fn(async () => ({
+      id: '12', username: 'session-user', is_banned: null, is_admin: true, is_review_exempt: '1',
     }));
-
-    expect(fetchCount).toBe(0);
-    expect(context).toMatchObject({ source: 'legacy-bearer', user: { id: 7 } });
+    const getUserByAuthKeyImpl = vi.fn(async () => null);
+    const auth = createAuthServer({ hasBetterAuthSessionCookieImpl: () => true, getSessionAuthUserImpl, getUserByAuthKeyImpl });
+    const req = new Request('https://example.test', { headers: { authorization: 'Bearer ignored' } });
+    expect(await auth.requireAuthUser(req)).toMatchObject({
+      source: 'better-auth-session', user: { id: 12, is_admin: 1, is_review_exempt: 1 },
+    });
+    expect(getSessionAuthUserImpl).toHaveBeenCalledWith(req);
+    expect(getUserByAuthKeyImpl).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  test('无会话时应回落到 legacy bearer 鉴权', async () => {
-    let receivedAuthKey: string | null = null;
-    const authServer = createAuthServer({
-      hasBetterAuthSessionCookieImpl: () => false,
-      buildSubrequestAuthHeadersImpl: () => ({}),
-      fetchImpl: async () => createJsonResponse({}, 500),
-      getUserByAuthKeyImpl: async (authKey) => {
-        receivedAuthKey = authKey;
-        return {
-          id: 7,
-          username: 'legacy-user',
-          prefix: null,
-          is_banned: null,
-          is_admin: 1,
-          is_review_exempt: 0,
-        };
-      },
+  test.each([null, { id: 0, username: 'invalid' }])('无效 session %j 回落 legacy bearer', async (session) => {
+    const getUserByAuthKeyImpl = vi.fn(async () => ({ id: 7, username: 'legacy' }));
+    const auth = createAuthServer({
+      hasBetterAuthSessionCookieImpl: () => true, getSessionAuthUserImpl: async () => session, getUserByAuthKeyImpl,
     });
-
-    const req = new Request('https://example.com/api/decks', {
-      headers: {
-        authorization: 'Bearer legacy-auth-key',
-      },
-    });
-
-    const result = await authServer.requireAuthUser(req);
-    expect('response' in result).toBe(false);
-    if ('response' in result) return;
-    expect(result.source).toBe('legacy-bearer');
-    expect(result.user.id).toBe(7);
-    expect(result.user.is_admin).toBe(1);
-    expect(result.user.is_review_exempt).toBe(0);
-    expect(receivedAuthKey).toBe('legacy-auth-key');
+    expect(await auth.getAuthUser(new Request('https://example.test', {
+      headers: { authorization: 'Bearer legacy-key' },
+    }))).toMatchObject({ source: 'legacy-bearer', user: { id: 7 } });
+    expect(getUserByAuthKeyImpl).toHaveBeenCalledWith('legacy-key');
   });
 
-  test('未登录用户应返回 401', async () => {
-    const authServer = createAuthServer({
-      hasBetterAuthSessionCookieImpl: () => false,
-      buildSubrequestAuthHeadersImpl: () => ({}),
-      fetchImpl: async () => createJsonResponse({}, 500),
+  test('解析异常且无有效 bearer 时返回 401', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const auth = createAuthServer({
+      hasBetterAuthSessionCookieImpl: () => true,
+      getSessionAuthUserImpl: async () => { throw new Error('invalid session'); },
       getUserByAuthKeyImpl: async () => null,
     });
-
-    const req = new Request('https://example.com/api/favorites');
-    const result = await authServer.requireAuthUser(req);
-    expect('response' in result).toBe(true);
-    if (!('response' in result)) return;
-    expect(result.response.status).toBe(401);
-    const payload = (await result.response.json()) as { error?: string };
-    expect(payload.error).toBe('未授权');
+    const result = await auth.requireAuthUser(new Request('https://example.test'));
+    expect('response' in result && result.response.status).toBe(401);
   });
 
-  test('封禁用户应返回 403', async () => {
-    const authServer = createAuthServer({
+  test('封禁 session 返回 403，不能通过 bearer 回落绕过', async () => {
+    const getUserByAuthKeyImpl = vi.fn(async () => ({ id: 7, username: 'other' }));
+    const auth = createAuthServer({
       hasBetterAuthSessionCookieImpl: () => true,
-      buildSubrequestAuthHeadersImpl: () => ({}),
-      getUserByAuthKeyImpl: async () => null,
-      fetchImpl: async () =>
-        createJsonResponse({
-          user: {
-            id: 99,
-            username: 'banned-user',
-            is_banned: '2026-02-26T00:00:00.000Z',
-          },
-        }),
+      getSessionAuthUserImpl: async () => ({ id: 99, username: 'banned', is_banned: '2026-01-01' }),
+      getUserByAuthKeyImpl,
     });
-
-    const req = new Request('https://example.com/api/public-decks', {
-      headers: {
-        cookie: '__Secure-better-auth.session_token=token',
-      },
-    });
-
-    const result = await authServer.requireAuthUser(req);
-    expect('response' in result).toBe(true);
-    if (!('response' in result)) return;
-    expect(result.response.status).toBe(403);
-    const payload = (await result.response.json()) as { error?: string };
-    expect(payload.error).toBe('账号已被封禁');
+    const result = await auth.requireAuthUser(new Request('https://example.test', {
+      headers: { authorization: 'Bearer other-user' },
+    }));
+    expect('response' in result && result.response.status).toBe(403);
+    expect(getUserByAuthKeyImpl).not.toHaveBeenCalled();
   });
 
-  test('存在会话时应优先使用 session，不回落 bearer', async () => {
-    let bearerLookupCount = 0;
-    const authServer = createAuthServer({
-      hasBetterAuthSessionCookieImpl: () => true,
-      buildSubrequestAuthHeadersImpl: () => ({}),
-      getUserByAuthKeyImpl: async () => {
-        bearerLookupCount += 1;
-        return {
-          id: 1,
-          username: 'legacy',
-        };
-      },
-      fetchImpl: async () =>
-        createJsonResponse({
-          user: {
-            id: 88,
-            username: 'session-first',
-            is_admin: 0,
-            is_review_exempt: 0,
-          },
-        }),
-    });
-
-    const req = new Request('https://example.com/api/redeem-code', {
-      headers: {
-        cookie: '__Secure-better-auth.session_token=token',
-        authorization: 'Bearer legacy-auth-key',
-      },
-    });
-
-    const context = await authServer.getAuthUser(req);
-    expect(context).not.toBeNull();
-    expect(context?.source).toBe('better-auth-session');
-    expect(context?.user.id).toBe(88);
-    expect(bearerLookupCount).toBe(0);
+  test('无 cookie 时不初始化 Better Auth', async () => {
+    const getSessionAuthUserImpl = vi.fn(async () => null);
+    const auth = createAuthServer({ hasBetterAuthSessionCookieImpl: () => false, getSessionAuthUserImpl });
+    const result = await auth.requireAuthUser(new Request('https://example.test'));
+    expect('response' in result && result.response.status).toBe(401);
+    expect(getSessionAuthUserImpl).not.toHaveBeenCalled();
   });
 
-  test('bearer 模式应忽略 Better Auth 会话并只校验 authkey', async () => {
+  test('bearer-only 模式忽略 session，只有 cookie 时仍为 401', async () => {
     vi.stubEnv('HONO_AUTH_MODE', 'bearer');
-    let sessionLookupCount = 0;
-    const authServer = createAuthServer({
-      hasBetterAuthSessionCookieImpl: () => true,
-      buildSubrequestAuthHeadersImpl: () => ({}),
-      fetchImpl: async () => {
-        sessionLookupCount += 1;
-        return createJsonResponse({ user: { id: 88, username: 'session-user' } });
-      },
-      getUserByAuthKeyImpl: async (authKey) => authKey === 'hono-authkey'
-        ? { id: 21, username: 'bearer-user' }
-        : null,
+    const getSessionAuthUserImpl = vi.fn(async () => ({ id: 88, username: 'session' }));
+    const auth = createAuthServer({
+      hasBetterAuthSessionCookieImpl: () => true, getSessionAuthUserImpl,
+      getUserByAuthKeyImpl: async (key) => key === 'valid' ? { id: 21, username: 'bearer' } : null,
     });
-
-    const context = await authServer.getAuthUser(new Request('https://example.com/api/protected', {
-      headers: {
-        cookie: '__Secure-better-auth.session_token=must-be-ignored',
-        authorization: 'Bearer hono-authkey',
-      },
-    }));
-
-    expect(context).toMatchObject({ source: 'legacy-bearer', user: { id: 21 } });
-    expect(sessionLookupCount).toBe(0);
-  });
-
-  test('bearer 模式下只有会话 Cookie 仍应返回 401', async () => {
-    vi.stubEnv('HONO_AUTH_MODE', 'bearer');
-    const authServer = createAuthServer({
-      hasBetterAuthSessionCookieImpl: () => true,
-      buildSubrequestAuthHeadersImpl: () => ({}),
-      fetchImpl: async () => createJsonResponse({ user: { id: 88, username: 'session-user' } }),
-      getUserByAuthKeyImpl: async () => null,
-    });
-
-    const result = await authServer.requireAuthUser(new Request('https://example.com/api/protected', {
-      headers: { cookie: '__Secure-better-auth.session_token=ignored' },
-    }));
-
-    expect('response' in result).toBe(true);
-    if ('response' in result) expect(result.response.status).toBe(401);
+    expect(await auth.getAuthUser(new Request('https://example.test', {
+      headers: { authorization: 'Bearer valid' },
+    }))).toMatchObject({ source: 'legacy-bearer', user: { id: 21 } });
+    const result = await auth.requireAuthUser(new Request('https://example.test'));
+    expect('response' in result && result.response.status).toBe(401);
+    expect(getSessionAuthUserImpl).not.toHaveBeenCalled();
   });
 });

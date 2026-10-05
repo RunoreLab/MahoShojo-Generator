@@ -8,6 +8,8 @@ export {
 export * from './conflicts';
 export * from './diff';
 export * from './errors';
+export * from './gate-types';
+export * from './generation-readiness';
 export * from './projection';
 export * from './selection';
 export * from './state-machine';

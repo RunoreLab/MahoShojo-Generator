@@ -18,6 +18,9 @@ schema，也不向其他应用暴露源码级依赖。
 
 `GET /health` 是无鉴权 liveness，只证明 Worker 路由能够响应，不探测 D1，也不代表依赖 readiness。
 
+单条 SQL 最多接受 100 个 bound parameters，与 D1 当前硬上限保持一致；消费方需在
+Gateway 之前对更大输入分批，不得依赖 Gateway 转发一个 D1 必然拒绝的语句。
+
 ## 生命周期命令
 
 在仓库根目录执行：

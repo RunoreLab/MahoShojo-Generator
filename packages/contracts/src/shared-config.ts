@@ -1,14 +1,15 @@
-import { z } from 'zod';
+import { z } from './zod';
 
 import { ArenaContractError } from './errors';
+import { WebPackageRefSchema } from './web-package';
 import {
-  MAX_AUX_SCENARIOS,
+  MAX_ARENA_REFERENCE_ITEMS,
   MAX_COMBATANTS,
   MAX_HISTORY_LIMIT,
-  MAX_MATERIALS,
   MAX_OPAQUE_KEY_LENGTH,
 } from './limits';
 import {
+  ArenaReportFormatSchema,
   BattleModeSchema,
   CharacterDataCardRefSchema,
   DisplayNameSchema,
@@ -54,6 +55,8 @@ export type TeamAssignment = z.infer<typeof TeamAssignmentSchema>;
 
 const isOnlineKeyForRef = (key: string, id: string): boolean =>
   key === `data-card:${id}` || key === `preset:${id}`;
+
+const isServerKnownPresetKey = (key: string): boolean => key.startsWith('preset:');
 
 const OnlineCombatantEntrySchema = z
   .object({
@@ -109,6 +112,9 @@ export const MaterialEntrySchema = z.union([
     if (!isOnlineKeyForRef(entry.key, entry.ref.id)) {
       context.addIssue({ code: 'custom', path: ['key'], message: 'online material key must identify its ref id' });
     }
+    if (isServerKnownPresetKey(entry.key)) {
+      context.addIssue({ code: 'custom', path: ['key'], message: 'material preset is unsupported: server-known registry is unavailable' });
+    }
   }
 });
 export type MaterialEntry = z.infer<typeof MaterialEntrySchema>;
@@ -116,11 +122,13 @@ export type MaterialEntry = z.infer<typeof MaterialEntrySchema>;
 export const ArenaRoomSharedConfigSchema = z
   .object({
     battleMode: BattleModeSchema,
-    combatants: z.array(CombatantEntrySchema).min(1).max(MAX_COMBATANTS),
+    reportFormat: ArenaReportFormatSchema.default('markdown'),
+    webPackageRef: WebPackageRefSchema.optional(),
+    combatants: z.array(CombatantEntrySchema).max(MAX_COMBATANTS),
     teams: z.array(TeamAssignmentSchema).max(MAX_COMBATANTS),
     scenario: ScenarioEntrySchema,
-    auxScenarios: z.array(AuxiliaryScenarioEntrySchema).max(MAX_AUX_SCENARIOS),
-    materials: z.array(MaterialEntrySchema).max(MAX_MATERIALS),
+    auxScenarios: z.array(AuxiliaryScenarioEntrySchema).max(MAX_ARENA_REFERENCE_ITEMS),
+    materials: z.array(MaterialEntrySchema).max(MAX_ARENA_REFERENCE_ITEMS),
     userGuidance: GlobalGuidanceSchema,
     storyLength: StoryLengthSchema,
     customStoryLength: CustomStoryLengthSchema.nullable(),
@@ -129,6 +137,9 @@ export const ArenaRoomSharedConfigSchema = z
   })
   .strict()
   .superRefine((config, context) => {
+    if (config.webPackageRef && config.reportFormat !== 'web') {
+      context.addIssue({ code: 'custom', path: ['webPackageRef'], message: 'Web Package requires reportFormat=web' });
+    }
     const validateUniqueKeys = (keys: readonly string[], path: string): void => {
       if (new Set(keys).size !== keys.length) {
         context.addIssue({ code: 'custom', path: [path], message: `${path} keys must be unique` });
@@ -142,6 +153,20 @@ export const ArenaRoomSharedConfigSchema = z
     validateUniqueKeys(auxiliaryScenarioKeys, 'auxScenarios');
     validateUniqueKeys(materialKeys, 'materials');
     validateUniqueKeys(teamKeys, 'teams');
+
+    const referenceItemCount = config.auxScenarios.length + config.materials.length;
+    if (referenceItemCount > MAX_ARENA_REFERENCE_ITEMS) {
+      context.addIssue({
+        code: 'custom',
+        path: ['auxScenarios'],
+        params: {
+          gateCode: 'ROOM_CONFIG_REFERENCE_LIMIT',
+          current: referenceItemCount,
+          maximum: MAX_ARENA_REFERENCE_ITEMS,
+        },
+        message: `auxScenarios and materials must contain at most ${MAX_ARENA_REFERENCE_ITEMS} references in total`,
+      });
+    }
 
     const knownCombatants = new Set(combatantKeys);
     const assignedCombatants = new Set<string>();

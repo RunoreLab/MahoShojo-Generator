@@ -12,6 +12,8 @@ export const fetchPublicDataCardRowById = async (
   cardId: string,
   options?: {
     fetcher?: PublicDataCardApiFetchLike;
+    /** 房间正文物化跳过以 URL 为键的短期公开读取缓存。 */
+    fresh?: boolean;
   },
 ): Promise<PublicCardFetchResult> => {
   const normalizedId = cardId.trim();
@@ -25,8 +27,10 @@ export const fetchPublicDataCardRowById = async (
   }
 
   try {
-    const response = await (options?.fetcher ?? fetch)(`/api/public-data-cards?id=${encodeURIComponent(normalizedId)}`, {
+    const freshness = options?.fresh ? `&refresh=${crypto.randomUUID()}` : '';
+    const response = await (options?.fetcher ?? fetch)(`/api/public-data-cards?id=${encodeURIComponent(normalizedId)}${freshness}`, {
       method: 'GET',
+      ...(options?.fresh ? { cache: 'no-store' as const } : {}),
       headers: {
         Accept: 'application/json',
       },

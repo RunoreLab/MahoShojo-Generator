@@ -1,0 +1,310 @@
+// @vitest-environment jsdom
+
+import React, { act } from 'react';
+import { createRoot } from 'react-dom/client';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const mocks = vi.hoisted(() => ({
+  startCooldown: vi.fn(),
+  dispatch: vi.fn((input: RequestInfo | URL, init?: RequestInit) => fetch(input, init)),
+  captureActorToken: vi.fn(),
+}));
+
+vi.mock('@/lib/cooldown', () => ({
+  useProviderModeCooldown: () => ({
+    isCooldown: false,
+    remainingTime: 0,
+    startCooldown: mocks.startCooldown,
+  }),
+}));
+vi.mock('@/lib/use-generation-api-intent-latch', () => ({
+  useGenerationApiIntentLatch: () => ({
+    tryAcquire: () => ({ dispatch: mocks.dispatch }),
+  }),
+}));
+vi.mock('@/lib/arena/resumable-generation-client', () => ({
+  withArenaGenerationActorToken: (headers: HeadersInit) => {
+    const result = new Headers(headers);
+    result.set('X-Mahoshojo-Generation-Actor-Token', 'actor-token');
+    return result;
+  },
+  captureArenaGenerationActorToken: mocks.captureActorToken,
+}));
+vi.mock('@/components/arena/multiplayer/useArenaRoom', () => ({
+  useArenaRoomContext: () => null,
+}));
+
+import { useCombatantRepair } from '@/components/arena/hooks/useCombatantRepair';
+import { useBattleStore } from '@/components/arena/stores/useBattleStore';
+
+let currentHook: ReturnType<typeof useCombatantRepair> | null = null;
+
+const Harness = () => {
+  currentHook = useCombatantRepair();
+  return <pre data-testid="draft">{currentHook.draftText}</pre>;
+};
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
+
+afterEach(() => {
+  currentHook = null;
+  vi.unstubAllGlobals();
+  useBattleStore.setState({
+    combatants: [],
+    newsReport: null,
+    streamingMarkdown: null,
+    latestAiImpacts: null,
+    updatedCombatants: [],
+    lastGenerationId: null,
+    lastGenerationRepairContext: null,
+    repairAppliedGenerationId: null,
+    isCombatantMutationPending: false,
+    isGenerating: false,
+  });
+});
+
+describe('useCombatantRepair', () => {
+  it('AI 成功只填充草稿，不自动修改 roster 或 repair 标记', async () => {
+    const originalCombatant = {
+      type: 'magical-girl' as const,
+      filename: '角色-a.json',
+      isValid: true,
+      isPreset: false,
+      data: { name: '角色 A', signature: 'signed-a' },
+    };
+    useBattleStore.setState((state) => ({
+      combatants: [originalCombatant],
+      generationMode: 'non-stream',
+      newsReport: {
+        headline: '终局战报',
+        reporterInfo: { name: '记者', publication: '日报' },
+        article: {
+          body: '角色 A 在漫长的魔法竞技中完成了清晰且可验证的成长。'.repeat(8),
+          analysis: '分析',
+        },
+        officialReport: { winner: '角色 A', conclusion: '战斗结束。' },
+      },
+      latestAiImpacts: null,
+      updatedCombatants: [],
+      lastGenerationId: 'generation-hook-repair-001',
+      lastGenerationRepairContext: {
+        generationId: 'generation-hook-repair-001',
+        customProvider: {
+          providerId: 'openai-compatible',
+          modelId: 'generation-model',
+          apiKey: 'generation-key',
+        },
+      },
+      repairAppliedGenerationId: null,
+      userProviderConfig: {
+        providerId: 'anthropic-compatible',
+        modelId: 'current-ui-model',
+        apiKey: 'current-ui-key',
+      },
+      settings: {
+        ...state.settings,
+        writeArenaHistory: true,
+        writeCurrentState: true,
+        userGuidance: '保持角色既有性格',
+      },
+      battleMode: 'classic',
+      isGenerating: false,
+    }));
+
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      success: true,
+      impacts: [{
+        combatantIndex: 0,
+        characterName: '角色 A',
+        impact: 'AI 草稿影响',
+        currentStateSummary: 'AI 草稿状态',
+      }],
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => root.render(<Harness />));
+    if (!currentHook) throw new Error('repair hook 未挂载');
+
+    await act(async () => currentHook!.generateAiRepairDraft());
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('/api/arena/repair-combatant-meta');
+    expect(new Headers(init.headers).get('X-Mahoshojo-Generation-Actor-Token'))
+      .toBe('actor-token');
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      generationId: 'generation-hook-repair-001',
+      mode: 'classic',
+      writeArenaHistory: true,
+      writeCurrentState: true,
+      combatants: [{
+        type: 'magical-girl',
+        isNative: true,
+        filename: null,
+        data: { name: '角色 A', signature: 'signed-a' },
+      }],
+      customProvider: {
+        providerId: 'openai-compatible',
+        modelId: 'generation-model',
+        apiKey: 'generation-key',
+      },
+    });
+    expect(String(init.body)).not.toContain('current-ui-key');
+    expect(mocks.captureActorToken).toHaveBeenCalledOnce();
+    expect(currentHook!.draftText).toContain('AI 草稿影响');
+    expect(useBattleStore.getState().combatants).toEqual([originalCombatant]);
+    expect(useBattleStore.getState().updatedCombatants).toEqual([]);
+    expect(useBattleStore.getState().repairAppliedGenerationId).toBeNull();
+    expect(mocks.startCooldown).toHaveBeenCalledOnce();
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it('generation 在 AI 请求期间变化时丢弃旧草稿', async () => {
+    useBattleStore.setState((state) => ({
+      combatants: [{
+        type: 'general-character',
+        filename: '角色-a.json',
+        isValid: false,
+        isPreset: false,
+        data: { name: '角色 A' },
+      }],
+      generationMode: 'stream',
+      streamingMarkdown: `# 旧战报\n\n## 胜利者\n\n- 角色 A\n\n${'完整正文。'.repeat(40)}`,
+      lastGenerationId: 'generation-stale-001',
+      lastGenerationRepairContext: {
+        generationId: 'generation-stale-001',
+        customProvider: null,
+      },
+      repairAppliedGenerationId: null,
+      settings: {
+        ...state.settings,
+        writeArenaHistory: true,
+        writeCurrentState: false,
+      },
+      isGenerating: false,
+    }));
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => {
+      useBattleStore.getState().setLastGenerationId('generation-new-002');
+      return new Response(JSON.stringify({
+        success: true,
+        impacts: [{
+          combatantIndex: 0,
+          characterName: '角色 A',
+          impact: '不得写入的新草稿',
+        }],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }));
+
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => root.render(<Harness />));
+    if (!currentHook) throw new Error('repair hook 未挂载');
+
+    await act(async () => currentHook!.generateAiRepairDraft());
+
+    expect(currentHook!.draftText).not.toContain('不得写入的新草稿');
+    expect(currentHook!.repairError).toContain('上下文已变化');
+    expect(mocks.startCooldown).not.toHaveBeenCalled();
+    expect(useBattleStore.getState().lastGenerationId).toBe('generation-new-002');
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it('generation Provider 内存快照缺失时不发送 AI 修复请求', async () => {
+    useBattleStore.setState((state) => ({
+      combatants: [{
+        type: 'general-character',
+        filename: '角色-a.json',
+        isValid: false,
+        isPreset: false,
+        data: { name: '角色 A' },
+      }],
+      generationMode: 'stream',
+      streamingMarkdown: `# 战报\n\n## 胜利者\n\n- 角色 A\n\n${'完整正文。'.repeat(40)}`,
+      lastGenerationId: 'generation-context-missing-001',
+      lastGenerationRepairContext: null,
+      settings: {
+        ...state.settings,
+        writeArenaHistory: true,
+        writeCurrentState: false,
+      },
+      isGenerating: false,
+    }));
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => root.render(<Harness />));
+    if (!currentHook) throw new Error('repair hook 未挂载');
+
+    await act(async () => currentHook!.generateAiRepairDraft());
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(currentHook!.repairError).toContain('缺少 generationId 或角色 roster');
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it('权威角色更新占用写入锁时拒绝应用本地修复', async () => {
+    const originalCombatant = {
+      type: 'general-character' as const,
+      filename: '角色-a.json',
+      isValid: false,
+      isPreset: false,
+      data: { name: '角色 A' },
+    };
+    useBattleStore.setState((state) => ({
+      combatants: [originalCombatant],
+      generationMode: 'stream',
+      streamingMarkdown: `# 锁定战报\n\n## 胜利者\n\n- 角色 A\n\n${'完整正文。'.repeat(40)}`,
+      lastGenerationId: 'generation-lock-001',
+      repairAppliedGenerationId: null,
+      settings: {
+        ...state.settings,
+        writeArenaHistory: true,
+        writeCurrentState: false,
+      },
+      isGenerating: false,
+    }));
+
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => root.render(<Harness />));
+    if (!currentHook) throw new Error('repair hook 未挂载');
+
+    act(() => currentHook!.setDraftText(JSON.stringify({
+      impacts: [{
+        combatantIndex: 0,
+        characterName: '角色 A',
+        impact: '不得应用的修复',
+      }],
+    })));
+    act(() => expect(useBattleStore.getState().tryBeginCombatantMutation()).toBe(true));
+
+    await act(async () => currentHook!.applyArenaRepairDraft());
+
+    expect(currentHook!.repairError).toContain('角色更新正在进行');
+    expect(useBattleStore.getState().combatants).toEqual([originalCombatant]);
+    expect(useBattleStore.getState().repairAppliedGenerationId).toBeNull();
+
+    act(() => useBattleStore.getState().endCombatantMutation());
+    await act(async () => root.unmount());
+    container.remove();
+  });
+});

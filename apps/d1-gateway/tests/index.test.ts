@@ -275,6 +275,56 @@ describe('D1 Gateway Worker', () => {
     });
   });
 
+  it('在 Gateway 边界拒绝超过 D1 100 个 bound parameters 的语句', async () => {
+    const token = 'test-gateway-token';
+    const body = JSON.stringify({
+      sql: `SELECT ${Array.from({ length: 101 }, () => '?').join(', ')}`,
+      params: Array.from({ length: 101 }, (_, index) => index),
+    });
+    const request = new Request('https://gateway.example.com/v1/query', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body,
+    });
+    const { calls, database } = createDatabase();
+
+    const response = await gateway.fetch(request, { DB: database, D1_GATEWAY_TOKEN: token });
+
+    expect(response.status).toBe(400);
+    expect(calls).toEqual([]);
+    expect(await response.json()).toEqual({
+      success: false,
+      errors: [{ message: 'SQL params 格式异常或数量过多' }],
+    });
+  });
+
+  it('允许 D1 上限内的 100 个 bound parameters', async () => {
+    const token = 'test-gateway-token';
+    const params = Array.from({ length: 100 }, (_, index) => index);
+    const body = JSON.stringify({
+      sql: `SELECT ${params.map(() => '?').join(', ')}`,
+      params,
+    });
+    const request = new Request('https://gateway.example.com/v1/query', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body,
+    });
+    const { calls, database } = createDatabase();
+
+    const response = await gateway.fetch(request, { DB: database, D1_GATEWAY_TOKEN: token });
+
+    expect(response.status).toBe(200);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.params).toEqual(params);
+  });
+
   it('在读取请求体前拒绝声明超过 512 KiB 的载荷', async () => {
     const { database } = createDatabase();
     const response = await gateway.fetch(

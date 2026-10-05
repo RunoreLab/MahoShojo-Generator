@@ -1,3 +1,5 @@
+import { projectStoryPromptCombatant, projectStoryPromptMaterial, sanitizeStoryPromptValue } from './story-prompt-data';
+
 export type BattleStorySessionAction = 'start' | 'continue' | 'branch' | 'rewrite';
 export type BattleStoryChapterPlanSource = 'user' | 'scenario';
 export type BattleStoryDraftChapterPlanMode = 'auto' | 'none' | 'custom';
@@ -78,6 +80,8 @@ export type BattleStoryPromptSection = {
 };
 
 export type BattleStoryPromptContextInput = {
+  /** 内部组合选项；仅当 Arena 已提供基础设定与本轮引导时使用，不接受客户端决定。 */
+  baseContext?: 'standalone' | 'arena-provided';
   source?: object;
   seed?: {
     combatants: unknown[];
@@ -331,21 +335,6 @@ const truncateText = (text: string, maxChars: number): { text: string; truncated
     : { text: `${text.slice(0, Math.max(1, maxChars - 1)).trimEnd()}…`, truncated: true }
 );
 
-const sanitizeStoryPromptValue = (
-  value: unknown,
-  options: { readArenaHistory: boolean; readCurrentState: boolean },
-): unknown => {
-  if (Array.isArray(value)) return value.map((entry) => sanitizeStoryPromptValue(entry, options));
-  if (!isRecord(value)) return value;
-  const result: Record<string, unknown> = {};
-  for (const [key, entry] of Object.entries(value)) {
-    if (key === 'creationInputs' || key === 'isPreset') continue;
-    if (!options.readArenaHistory && key === 'arena_history') continue;
-    if (!options.readCurrentState && key === 'current_state') continue;
-    result[key === 'buildState' ? '角色参数' : key] = sanitizeStoryPromptValue(entry, options);
-  }
-  return result;
-};
 
 const resolveArenaHistoryReadLimit = (
   settings: BattleStorySessionSettings | null | undefined,
@@ -381,7 +370,7 @@ const sanitizeCombatant = (
   value: unknown,
   settings: BattleStorySessionSettings | null | undefined,
 ): unknown => {
-  const sanitized = sanitizeStoryPromptValue(value, {
+  const sanitized = projectStoryPromptCombatant(value, {
     readArenaHistory: settings?.readArenaHistory === true,
     readCurrentState: settings?.readCurrentState === true,
   });
@@ -439,7 +428,7 @@ export const resolveBattleStoryRecentWindow = (input: {
         truncated: false,
       };
     }
-    const full = normalizeText(chapter.markdown) || digestText(chapter);
+    const full = stripMetaComments(normalizeText(chapter.markdown)) || digestText(chapter);
     const bounded = truncateText(full, maxChars);
     return {
       chapterId: chapter.id,
@@ -452,6 +441,23 @@ export const resolveBattleStoryRecentWindow = (input: {
   });
 };
 
+const promptSettings = (value: unknown): Record<string, unknown> => isRecord(value)
+  ? Object.fromEntries(Object.entries(value).filter(([key]) => (
+    ['mode', 'language', 'storyLength', 'customStoryLength'].includes(key)
+  ))) : {};
+const promptMaterials = (value: unknown): unknown[] => !Array.isArray(value) ? [] : value.map((item) => (
+  isRecord(item) && 'content' in item && !('cardKind' in item) && !('templateId' in item) ? {
+    name: item.name,
+    sourceType: item.sourceType,
+    content: projectStoryPromptMaterial(item.content),
+  } : projectStoryPromptMaterial(item)
+));
+const promptQuestionnaires = (value: unknown): unknown[] => !Array.isArray(value) ? [] : value.flatMap((item) => (
+  isRecord(item) && item.useLore !== false && normalizeText(item.loreMarkdown)
+    ? [{ title: item.title, loreMarkdown: item.loreMarkdown }]
+    : []
+));
+
 export const buildBattleStoryPromptContext = (
   input: BattleStoryPromptContextInput,
 ): BattleStoryPromptContextResult => {
@@ -461,19 +467,27 @@ export const buildBattleStoryPromptContext = (
     chapterIndex: input.chapterIndex,
   });
   const settings = input.seed?.settings;
-  const seed = input.seed
-    ? {
-      ...input.seed,
-      combatants: input.seed.combatants.map((combatant) => sanitizeCombatant(combatant, settings)),
-    }
-    : input.seed;
-  const workingCombatants = (input.workingCombatants ?? [])
+  const delegated = input.baseContext === 'arena-provided';
+  const workingCombatants = delegated ? [] : (input.workingCombatants ?? [])
     .map((combatant) => sanitizeCombatant(combatant, settings));
-  if (input.source || seed) {
+  const source = delegated ? null : promptSettings(input.source);
+  const seed = !delegated && input.seed
+    ? {
+      ...promptSettings(input.seed),
+      ...(workingCombatants.length ? {} : {
+        combatants: input.seed.combatants.map((combatant) => sanitizeCombatant(combatant, settings)),
+      }),
+      scenario: sanitizeStoryPromptValue(input.seed.scenario, { readArenaHistory: false, readCurrentState: false }),
+      auxScenarios: sanitizeStoryPromptValue(input.seed.auxScenarios, { readArenaHistory: false, readCurrentState: false }),
+      materials: promptMaterials(input.seed.materials),
+      questionnaires: promptQuestionnaires(input.seed.questionnaires),
+    }
+    : null;
+  if ((source && Object.keys(source).length) || seed) {
     sections.push({
       key: 'seed',
       title: '固定种子层',
-      text: safeJsonBlock({ source: input.source ?? null, seed: seed ?? null }),
+      text: safeJsonBlock({ source, seed }),
     });
   }
   if (chapterPlanState) {
@@ -514,7 +528,7 @@ export const buildBattleStoryPromptContext = (
     normalizeText(input.userGuidance),
     Math.max(120, Math.floor(input.maxUserGuidanceChars ?? DEFAULT_MAX_USER_GUIDANCE_CHARS)),
   ).text;
-  if (normalizedUserGuidance) {
+  if (normalizedUserGuidance && !delegated) {
     sections.push({ key: 'user-guidance', title: '本轮用户引导层', text: normalizedUserGuidance });
   }
   return {

@@ -1,5 +1,10 @@
 import { GENERAL_SCENARIO_TEMPLATE_ID } from '@mahoshojo/domain/data-cards';
 import {
+  STORY_PROMPT_CHARACTER_PARAMETERS_KEY, getStoryPromptCharacterParameters,
+  sanitizeStoryPromptRecord, sanitizeStoryPromptValue,
+  projectStoryPromptMaterial as stripArenaMaterialInternalFields,
+} from '@mahoshojo/domain/story-prompt-data';
+import {
   normalizeUserAnswers,
   type QuestionnaireAnswerItem,
 } from '@mahoshojo/domain/questionnaire';
@@ -80,37 +85,9 @@ const formatQuestionnaireAnswers = (answers: QuestionnaireAnswerItem[]): string 
   return blocks.join('\n');
 };
 
-const STORY_PROMPT_CHARACTER_PARAMETERS_KEY = '角色参数' as const;
 const isRecord = (value: unknown): value is Record<string, unknown> => (
   typeof value === 'object' && value !== null && !Array.isArray(value)
 );
-const sanitizeStoryPromptValue = (
-  value: unknown,
-  options: { readArenaHistory: boolean; readCurrentState: boolean },
-): unknown => {
-  if (Array.isArray(value)) return value.map((item) => sanitizeStoryPromptValue(item, options));
-  if (!isRecord(value)) return value;
-  const sanitized: Record<string, unknown> = {};
-  for (const [key, rawValue] of Object.entries(value)) {
-    if (key === 'creationInputs' || key === 'isPreset' || key === 'signature') continue;
-    if (!options.readArenaHistory && key === 'arena_history') continue;
-    if (!options.readCurrentState && key === 'current_state') continue;
-    sanitized[key === 'buildState' ? STORY_PROMPT_CHARACTER_PARAMETERS_KEY : key] =
-      sanitizeStoryPromptValue(rawValue, options);
-  }
-  return sanitized;
-};
-const sanitizeStoryPromptRecord = (
-  value: unknown,
-  options: { readArenaHistory: boolean; readCurrentState: boolean },
-): Record<string, unknown> | null => {
-  const sanitized = sanitizeStoryPromptValue(value, options);
-  return isRecord(sanitized) ? sanitized : null;
-};
-const getStoryPromptCharacterParameters = (
-  value: unknown,
-  options: { readArenaHistory: boolean; readCurrentState: boolean },
-): unknown => sanitizeStoryPromptRecord(value, options)?.[STORY_PROMPT_CHARACTER_PARAMETERS_KEY] ?? null;
 
 const normalizeCustomStoryLength = (value: unknown): string => {
   if (typeof value === 'number' && Number.isFinite(value) && Number.isInteger(value) && value > 0) {
@@ -141,20 +118,6 @@ const buildStoryLengthRequirementText = (input: {
     : null;
 };
 
-const stripArenaMaterialInternalFields = (value: unknown): unknown => {
-  if (Array.isArray(value)) return value.map(stripArenaMaterialInternalFields);
-  if (!isRecord(value)) return value;
-  const out: Record<string, unknown> = {};
-  for (const [key, nested] of Object.entries(value)) {
-    if (
-      key === 'signature'
-      || key === 'metadata'
-      || key.startsWith('_')
-    ) continue;
-    out[key] = stripArenaMaterialInternalFields(nested);
-  }
-  return out;
-};
 const materialJson = (value: unknown): string => {
   try {
     return JSON.stringify(value, null, 2);
@@ -164,7 +127,7 @@ const materialJson = (value: unknown): string => {
 };
 const formatArenaMaterialsForPrompt = (raw: unknown): string => {
   if (!Array.isArray(raw) || raw.length === 0) return '';
-  const materials = raw.slice(0, 10).flatMap((item, index) => {
+  const materials = raw.flatMap((item, index) => {
     if (!isRecord(item)) return [];
     const name = typeof item.name === 'string' && item.name.trim()
       ? item.name.trim()
@@ -619,7 +582,8 @@ const buildCombatantProfilesForPrompt = (params: {
     } = params;
     const allNames = combatants.map(c => c.data.codename || c.data.name);
     const isPureBattle = !userGuidance && !scenario && !(auxScenarios && auxScenarios.length > 0);
-    const sanitizeOptions = { readArenaHistory, readCurrentState };
+    // History and state have dedicated prompt sections.
+    const sanitizeOptions = { readArenaHistory: false, readCurrentState: false };
 
     return combatants.map((c, index) => {
         const { data, type } = c;
@@ -664,8 +628,13 @@ const buildCombatantProfilesForPrompt = (params: {
             return profileString;
         }
 
-        const sanitizedFallbackData = sanitizeStoryPromptValue(data, sanitizeOptions);
+        const fallbackData = data && typeof data === 'object' ? { ...data } : data;
+        if (fallbackData && typeof fallbackData === 'object') delete fallbackData.userAnswers;
+        const sanitizedFallbackData = sanitizeStoryPromptValue(fallbackData, sanitizeOptions);
         profileString += `// [注意] 该角色为非结构化设定参考，请基于以下文本内容进行理解和创作：\n${typeof sanitizedFallbackData === 'string' ? sanitizedFallbackData : safeJsonStringify(sanitizedFallbackData)}\n`;
+        if (includeQuestionnaireAnswers) {
+            profileString += formatUserAnswersForPrompt(data?.userAnswers, fallbackQuestions);
+        }
         return profileString;
     }).join('\n\n');
 };
@@ -693,7 +662,11 @@ export const createStreamPromptBuilder = (
     narrativeHistory?: ArenaPromptNarrativeHistoryEntry[] | null,
     loreText?: string | null,
     includeQuestionnaireAnswers: boolean = true,
-    materials?: unknown[] | null
+    materials?: unknown[] | null,
+    outputContract: 'stream-markdown' | 'structured-report' | 'web-document' | 'web-package-target' = 'stream-markdown',
+    packagePrompt?: string,
+    /** Web 包生成目标的媒体类型；数据类目标没有"正文长度"可言。 */
+    packageTargetMediaType: string | null = null,
 ) => (input: { combatants: any[] }): string => {
     const { combatants } = input;
     const profiles = buildCombatantProfilesForPrompt({
@@ -743,9 +716,7 @@ export const createStreamPromptBuilder = (
             }
             finalPrompt += `${scenario.content}\n\n`;
         } else {
-            const scenarioForPrompt = { ...scenario };
-            delete scenarioForPrompt.signature;
-            delete scenarioForPrompt.metadata;
+            const scenarioForPrompt = sanitizeStoryPromptRecord(scenario, { readArenaHistory: false, readCurrentState: false }) ?? {};
             finalPrompt += `## 【情景设定】\n这是本次故事必须严格遵守的背景和框架：\n\`\`\`json\n${JSON.stringify(scenarioForPrompt, null, 2)}\n\`\`\`\n\n`;
         }
     }
@@ -760,9 +731,7 @@ export const createStreamPromptBuilder = (
                 return;
             }
 
-            const auxForPrompt: any = { ...aux };
-            delete auxForPrompt.signature;
-            delete auxForPrompt.metadata;
+            const auxForPrompt = sanitizeStoryPromptRecord(aux, { readArenaHistory: false, readCurrentState: false }) ?? {};
             const title = typeof auxForPrompt.title === 'string' && auxForPrompt.title.trim() ? auxForPrompt.title.trim() : '';
             finalPrompt += `### 辅助情景 #${index + 1}${title ? `：${title}` : ''}\n\`\`\`json\n${JSON.stringify(auxForPrompt, null, 2)}\n\`\`\`\n\n`;
         });
@@ -792,10 +761,16 @@ export const createStreamPromptBuilder = (
         finalPrompt += `\n\n【重要提醒】\n故事引导可能不完全符合世界观，请你在创作时，务必确保最终生成的故事符合魔法少女的世界观，修正或忽略不恰当的元素。`;
     }
 
-    const storyLengthRequirement = buildStoryLengthRequirementText({
+    // 「约 600 字」描述的是散文正文。当唯一输出是一份 JSON/Markdown 数据文件时，
+    // 这条要求会和包自己的 instructions 正面冲突，把模型推向输出战报纯文本。
+    const targetIsDataFile = outputContract === 'web-package-target'
+        && packageTargetMediaType === 'application/json';
+    const storyLengthRequirement = targetIsDataFile ? null : buildStoryLengthRequirementText({
         storyLength,
         customStoryLength,
-        targetLabel: '故事正文',
+        targetLabel: outputContract === 'structured-report'
+            ? '故事正文(article.body)'
+            : '故事正文',
     });
     if (storyLengthRequirement) {
         finalPrompt += `\n\n【字数要求】\n${storyLengthRequirement}`;
@@ -804,35 +779,53 @@ export const createStreamPromptBuilder = (
     finalPrompt += `\n\n【重要指令】请你必须使用【${language}】进行内容创作。`;
 
     if (writeCurrentState) {
-        finalPrompt += `\n\n【当前状态同步】请在输出的 impacts 数组中为每位角色填写 currentStateSummary 字段，精确描述事件结束后的即时状态（如身体状况、关系、心情或想法）。如果当前状态已有既定格式，请遵循该格式。如果当前状态中存在物品列表，请确保物品名称和数量准确反映事后情况。`;
+        finalPrompt += `\n\n【当前状态同步】请在文末 Arena control trailer 的 impacts 数组中为每位角色填写 currentStateSummary 字段，精确描述事件结束后的即时状态（如身体状况、关系、心情或想法）。如果当前状态已有既定格式，请遵循该格式。如果当前状态中存在物品列表，请确保物品名称和数量准确反映事后情况。`;
     }
 
-    // 流式生成的关键：要求输出 Markdown 格式的战报
-    const shouldAllowStreamMeta = forceStreamMeta || writeArenaHistory || writeCurrentState;
-    finalPrompt += `\n\n【输出格式】\n请以 Markdown 格式输出战报，请严格按照格式输出，不要携带任何其他内容：\n` +
+    if (outputContract === 'structured-report') return finalPrompt;
+
+    // 支持输出 Markdown 和 Web/HTML 或 Package target 格式
+    const isWebContract = outputContract === 'web-document' || outputContract === 'web-package-target';
+    const shouldAllowStreamMeta = isWebContract || forceStreamMeta || writeArenaHistory || writeCurrentState;
+    if (outputContract === 'web-package-target') {
+        finalPrompt += `\n\n${packagePrompt ?? ''}`;
+    } else if (outputContract === 'web-document') {
+        finalPrompt += `\n\n【输出格式】\n直接输出一个完整 HTML5 document，从 <!doctype html> 开始，包含 html/head/body、UTF-8 charset 与 viewport，不要 Markdown 代码围栏或解释文本。\n` +
+            `这是独立 Web 内容，可自由使用 HTML、CSS、inline/external SVG、Canvas、JavaScript、browser-native ES Module、动画与外部 Web 资源。\n` +
+            `根据故事设计响应式排版，适合桌面和手机阅读，建议遵循最新 Web Content Accessibility Guidelines (WCAG)。页面将在大小可变化的 iframe 中运行。在约 360px 的窄屏下，核心信息与主要操作仍必须可访问，重要操作不得仅依赖 hover 或屏幕底部固定坐标。可按需加入时间线、状态面板、Tab、折叠、图表、互动按钮等元素。\n` +
+            `优先使用文档内 style/script、SVG 和 Canvas，自包含实现布局与交互；用 addEventListener 绑定事件，不使用 onclick 等内联事件属性。\n` +
+            `srcdoc 继承宿主 CSP，第三方 JavaScript/CSS/fonts 可能被浏览器限制，不保证可用，不得依赖外部库。外部图片、音视频与 fetch 可尝试完整 HTTPS URL，仍受 CSP/CORS 等浏览器规则约束；加载失败时保持基本可读。iframe srcdoc 相对 URL 可能按宿主 URL 解析。\n` +
+            `页面运行在 sandbox=allow-scripts 的独立 iframe 中，不依赖宿主 React、变量、函数、cookie、localStorage 或 DOM；不提供编译。\n` +
+            `完整 </html> 后必须追加下述 MAHOSHOJO_ARENA_META 注释；这是机器事实的唯一来源。\n`;
+    } else {
+    finalPrompt += `\n\n【输出格式】\n内容为 Markdown 格式，请严格按照格式输出，不要携带任何其他内容：\n` +
         `- 输出第 1 行必须从第 1 个字符开始就是 "# "（不要有任何前置空格、不要多输出额外的 # 号）。\n` +
         `- 正文部分不要输出 JSON/YAML/代码块，也不要输出任何字段名（例如 winner/impact/currentStateSummary）。\n` +
         (shouldAllowStreamMeta
             ? `  （仅允许在最后一行的 HTML 注释元数据中出现 JSON 与字段名，供系统解析更新用。）\n\n`
             : `  （请勿在任何位置追加 HTML 注释元数据；也不要输出任何类似 MAHOSHOJO_ARENA_META 的标记。）\n\n`) +
-        `# 故事 / 战报标题\n` +
-        `随后紧跟故事或者战报的正文，用段落呈现，保持流畅性和可读性\n` +
-        `## 记者点评\n` +
-        `记者的分析与猜测，允许带有主观色彩和有逻辑的引申，制造“爆点”，约100-150字；直接输出纯文本，不要使用引用块或重复标题\n` +
+        `# 标题\n` +
+        `随后紧跟正文，用段落呈现，保持流畅性和可读性\n` +
         `## 胜利者\n` +
         `胜利者名称（如无胜负，请列出所有核心参与角色的名字，并用顿号“、”分隔；如平局请写“平局”）\n` +
         `## 最终结果\n\n` +
-        `- 使用一级标题(#)作为战报标题\n` +
+        `- 使用一级标题(#)作为总标题\n` +
         `- 使用二级标题(##)分隔各个板块\n` +
         `- 使用三级标题(###)标注内部小标题\n` +
-        `- 使用引用块(>)来强调记者点评以外的特殊说明\n` +
+        `- 使用引用块(>)来强调点评或特殊说明\n` +
         `- 使用列表来展示判定记录或关键信息`;
+    }
 
     // 如果用户开启了“写入历战记录/当前状态”，则要求模型在文末追加一段 HTML 注释元数据，
     // 供客户端在流式完成后提取 impacts/currentStateSummary，从而最大化“流式生成后自动更新角色”的成功率。
     if (shouldAllowStreamMeta) {
         const requiresImpact = writeArenaHistory;
         const requiresCurrentState = writeCurrentState;
+        // 数据类目标没有"正文标题/胜利者"。沿用散文的措辞会反向暗示模型
+        // "你要写一篇有标题和胜者的正文"，这正是纯文本战报的一个诱因。
+        const headlineWinnerRule = targetIsDataFile
+            ? 'report.headline 与 report.winner 请根据目标文件里的实际内容概括（目标文件是数据文件，没有正文标题与胜利者）'
+            : 'report.headline 与 report.winner 需与正文标题/胜利者保持一致';
 
         if (requiresImpact || requiresCurrentState) {
             const requiredFields = [
@@ -846,22 +839,112 @@ export const createStreamPromptBuilder = (
                 `要求：\n` +
                 `- 注释必须以 "<!-- MAHOSHOJO_ARENA_META " 开头，以 " -->" 结尾。\n` +
                 `- JSON 必须是一个对象，包含 version=1 以及 impacts 数组。\n` +
-                `- JSON 中请额外包含 report 对象：report.headline 与 report.winner（与正文标题/胜利者保持一致），用于兜底解析。\n` +
+                `- JSON 中请额外包含 report 对象用于兜底解析：${headlineWinnerRule}。\n` +
                 `- impacts 必须覆盖每一位参战角色；每个元素字段要求：${requiredFields}。\n` +
                 `- 除注释外不要输出任何额外文本。\n\n` +
                 `示例（仅示例，不要照抄名字）：\n` +
-                `<!-- MAHOSHOJO_ARENA_META {\"version\":1,\"report\":{\"headline\":\"……\",\"winner\":\"……\"},\"impacts\":[{\"characterName\":\"角色A\",\"impact\":\"……\",\"currentStateSummary\":\"……\"}]} -->`;
+                `<!-- MAHOSHOJO_ARENA_META {"version":1,"report":{"headline":"……","winner":"……"},"impacts":[{"characterName":"角色A","impact":"……","currentStateSummary":"……"}]} -->`;
         } else {
-            finalPrompt += `\n\n【战报元数据（务必输出）】\n` +
+            finalPrompt += `\n\n【元数据（务必输出）】\n` +
                 `在全文最后一行，追加一段 HTML 注释（不会显示给用户），内容必须包含一段 JSON，用于系统兜底解析。\n` +
                 `要求：\n` +
                 `- 注释必须以 "<!-- MAHOSHOJO_ARENA_META " 开头，以 " -->" 结尾。\n` +
-                `- JSON 必须是一个对象，至少包含 version=1 与 report 对象（report.headline 与 report.winner 与正文标题/胜利者保持一致）。\n` +
+                `- JSON 必须是一个对象，至少包含 version=1 与 report 对象（${headlineWinnerRule}）。\n` +
                 `- 除注释外不要输出任何额外文本。\n\n` +
                 `示例（仅示例，不要照抄名字）：\n` +
-                `<!-- MAHOSHOJO_ARENA_META {\"version\":1,\"report\":{\"headline\":\"……\",\"winner\":\"……\"}} -->`;
+                `<!-- MAHOSHOJO_ARENA_META {"version":1,"report":{"headline":"……","winner":"……"}} -->`;
         }
     }
 
     return finalPrompt;
+};
+
+/**
+ * System-role instruction for package-backed generation.
+ *
+ * The task prompt is deliberately self-contained (it still carries the mode
+ * system prompt and the whole host contract), but a single user turn makes the
+ * output discipline compete with the creative persona for attention — and the
+ * creative personas are all "write a story". Observed failure: the model
+ * produces the target file and drops the Arena control trailer, or returns
+ * prose. A real system role is the one place a provider will treat output
+ * discipline as an instruction rather than as part of the material.
+ *
+ * For data targets the creative persona is explicitly subordinated: the model
+ * is told to apply it to the *content* of the target file, never to override
+ * the target's shape.
+ */
+export const buildPackageTargetSystemPrompt = (modeSystemPrompt: string, targetMediaType: string | null): string => {
+    const dataTarget = targetMediaType === 'application/json';
+    return [
+        '[HOST OUTPUT DISCIPLINE]',
+        '本场你不是在写一篇可以独立阅读的文章。你在按宿主输出契约生成一个目标文件。',
+        '你的回复必须恰好由两部分组成，顺序固定：',
+        '1) 目标文件内容——' + (dataTarget
+            ? '一段可被 JSON.parse 直接解析的 JSON 文档，顶层类型必须严格符合任务提示中的目标文件形态要求（不要额外包一层容器对象）。'
+            : `一份完整的 ${targetMediaType ?? '文本'} 文档正文。`)
+            + '除此之外不要写任何前导或结尾文字，不要用 Markdown 代码围栏。',
+        '2) 一行 Arena control trailer：<!-- MAHOSHOJO_ARENA_META {"version":1,"report":{"headline":"…","winner":"…"},"impacts":[…]} -->',
+        'trailer 必须出现在回复的最末尾，且必须是能被 JSON.parse 解析的合法 JSON。省略 trailer 会让本次生成整体作废。',
+        dataTarget
+            ? '下方的创作原则只用于决定目标文件"写什么内容"，不得用来改变目标文件的形态；目标文件里不要出现标题、导语、结语或解说。'
+            : '下方的创作原则用于决定目标文件"写什么内容"。',
+        '[/HOST OUTPUT DISCIPLINE]',
+        '',
+        modeSystemPrompt,
+    ].join('\n');
+};
+
+// Non-stream Arena generation intentionally keeps a separate structured-output
+// contract while sharing all character/scenario/history/guidance construction.
+export const createPromptBuilder = (
+    questions: PromptFallbackQuestions,
+    userGuidance: string | null,
+    internalGuidance: string | null,
+    worldviewWarning: boolean,
+    language: string,
+    mode: string | undefined,
+    scenario: any | null,
+    auxScenarios: any[] | null,
+    teams: { [key: string]: string[] } | undefined,
+    teamNames: { [key: string]: string } | undefined,
+    readArenaHistory: boolean,
+    historyReadLimit: number | null,
+    readCurrentState: boolean,
+    writeCurrentState: boolean,
+    adjudicationResults: ArenaPromptAdjudicationResult[] | null,
+    storyLength: string | undefined,
+    customStoryLength: string | undefined,
+    narrativeHistory?: ArenaPromptNarrativeHistoryEntry[] | null,
+    loreText?: string | null,
+    includeQuestionnaireAnswers: boolean = true,
+    materials?: unknown[] | null
+) => (input: { combatants: any[] }): string => {
+    const structuredPrompt = createStreamPromptBuilder(
+        questions,
+        userGuidance,
+        internalGuidance,
+        worldviewWarning,
+        language,
+        mode,
+        scenario,
+        auxScenarios,
+        teams,
+        teamNames,
+        readArenaHistory,
+        historyReadLimit,
+        readCurrentState,
+        false,
+        writeCurrentState,
+        false,
+        adjudicationResults,
+        storyLength,
+        customStoryLength,
+        narrativeHistory,
+        loreText,
+        includeQuestionnaireAnswers,
+        materials,
+        'structured-report',
+    )(input);
+    return structuredPrompt;
 };

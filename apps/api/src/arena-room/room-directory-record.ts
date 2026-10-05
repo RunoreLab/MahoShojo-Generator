@@ -1,8 +1,10 @@
 import {
+  MAX_ROOM_MEMBERS,
   OpaqueKeySchema,
   RoomDirectoryEntrySchema,
   type RoomDirectoryEntry,
 } from '@mahoshojo/contracts/arena-room';
+import type { ArenaRoomAuthorityState } from '@mahoshojo/multiplayer-core';
 
 import { hashArenaRoomId } from './redis-room-keyspace';
 
@@ -123,13 +125,27 @@ export const parseStoredRoomDirectoryRecord = (
   }
 };
 
+/**
+ * 目录条目投影：从当前 authority 状态补充房主名与活跃成员数等可选展示字段。
+ * authority 状态在 discover/lookup 时本就会读取用于校验，这里零额外 IO。
+ */
 export const publicRoomDirectoryEntry = (
   record: StoredRoomDirectoryRecord,
-): RoomDirectoryEntry => RoomDirectoryEntrySchema.parse({
-  roomId: record.roomId,
-  title: record.title,
-  visibility: record.visibility,
-  status: record.status,
-  createdAt: record.createdAt,
-  lastActivityAt: record.lastActivityAt,
-});
+  authorityState?: ArenaRoomAuthorityState | null,
+): RoomDirectoryEntry => {
+  const activeMembers = authorityState?.snapshot.members.filter(
+    (member) => member.membershipState === 'active',
+  ) ?? [];
+  const hostMember = activeMembers.find((member) => member.role === 'host');
+  return RoomDirectoryEntrySchema.parse({
+    roomId: record.roomId,
+    title: record.title,
+    visibility: record.visibility,
+    status: record.status,
+    createdAt: record.createdAt,
+    lastActivityAt: record.lastActivityAt,
+    memberLimit: MAX_ROOM_MEMBERS,
+    ...(hostMember ? { hostDisplayName: hostMember.displayName } : {}),
+    ...(activeMembers.length > 0 ? { memberCount: activeMembers.length } : {}),
+  });
+};

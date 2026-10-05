@@ -1,13 +1,17 @@
 import {
   ArenaMultiplayerGenerationSnapshotSchema,
+  ArenaRoomGenerationResultSchema,
   type ArenaMultiplayerGenerationSnapshot,
+  type ArenaRoomGenerationResult,
 } from '@mahoshojo/contracts/arena-room';
-import type {
-  ArenaGenerationApplicationService,
-  ArenaGenerationOwnedProjectionResult,
-  ArenaGenerationSubscription,
-  GenerationStatus,
-  GenerationStreamEvent,
+import {
+  ARENA_OUTPUT_NOT_ARCHIVED_WARNING,
+  type ArenaGenerationApplicationService,
+  type ArenaGenerationOwnedCancelResult,
+  type ArenaGenerationOwnedProjectionResult,
+  type ArenaGenerationSubscription,
+  type GenerationStatus,
+  type GenerationStreamEvent,
 } from '@mahoshojo/hosted-api/arena-generation/service';
 import {
   ARENA_INTERNAL_GUIDANCE_SIGNATURE_HEADER,
@@ -36,6 +40,8 @@ export type ArenaRoomGenerationEvent =
     status: TerminalGenerationStatus;
     generationRecordId: string | null;
     resultAvailable: boolean;
+    persistenceWarning?: typeof ARENA_OUTPUT_NOT_ARCHIVED_WARNING;
+    replayUnavailable?: true;
   }>
   | Readonly<{
     id: string;
@@ -47,6 +53,7 @@ export type ArenaRoomGenerationEvent =
 export type ArenaRoomGenerationSubscription = Readonly<{
   generationId: string;
   generationRequestId: string;
+  roomSafeMetadata?: ArenaRoomGenerationResult;
   events: ReadableStream<ArenaRoomGenerationEvent>;
 }>;
 
@@ -60,6 +67,9 @@ export type ArenaRoomGenerationSubscriptionResult =
   | Readonly<{ kind: 'unavailable'; code: string }>;
 
 export type ArenaRoomGenerationProjectionResult = ArenaGenerationOwnedProjectionResult;
+
+export type ArenaRoomGenerationCancelResult = ArenaGenerationOwnedCancelResult
+  | Readonly<{ kind: 'unavailable'; code: 'GENERATION_STATE_UNAVAILABLE' }>;
 
 export type ArenaRoomGenerationIdentityInput = Readonly<{
   roomId: string;
@@ -91,6 +101,7 @@ export type ArenaRoomGenerationResumeInput = ArenaRoomGenerationOwnedInput & Rea
 }>;
 
 export interface ArenaRoomGenerationPort {
+  cancelOwned(_input: ArenaRoomGenerationOwnedInput): Promise<ArenaRoomGenerationCancelResult>;
   deriveGenerationId(_input: ArenaRoomGenerationIdentityInput): Promise<string>;
   hashSemanticPayload(_input: ArenaRoomGenerationSemanticPayloadInput): Promise<string>;
   startFromHostRequest(_input: ArenaRoomGenerationStartInput): Promise<ArenaRoomGenerationStartResult>;
@@ -103,7 +114,7 @@ export interface ArenaRoomGenerationPort {
 type ArenaRoomGenerationPortDependencies = Readonly<{
   generationService: Pick<
     ArenaGenerationApplicationService,
-    'createSubscription' | 'readOwnedProjection' | 'resumeOwnedSubscription'
+    'cancelOwned' | 'createSubscription' | 'readOwnedProjection' | 'resumeOwnedSubscription'
   >;
   pvpAuthority: Readonly<{
     sign(_input: {
@@ -217,12 +228,21 @@ const projectEvent = (
       && status !== 'producer_lost'
     ) return null;
     const resultAvailable = typeof data?.resultRef === 'string' && data.resultRef.length > 0;
+    const outputNotArchived = status === 'completed'
+      && !resultAvailable
+      && data?.persistenceWarning === ARENA_OUTPUT_NOT_ARCHIVED_WARNING
+      && data.replayUnavailable === true
+      && data.resultAvailable === false;
     return Object.freeze({
       id: event.id,
       type: 'done',
       status,
-      generationRecordId: resultAvailable ? generationId : null,
+      generationRecordId: resultAvailable || outputNotArchived ? generationId : null,
       resultAvailable,
+      ...(outputNotArchived ? {
+        persistenceWarning: ARENA_OUTPUT_NOT_ARCHIVED_WARNING,
+        replayUnavailable: true as const,
+      } : {}),
     });
   }
   if (event.type === 'error') {
@@ -242,19 +262,54 @@ const projectEvent = (
 
 const projectSubscription = (
   subscription: ArenaGenerationSubscription,
-): ArenaRoomGenerationSubscription => Object.freeze({
-  generationId: subscription.generationId,
-  generationRequestId: subscription.generationRequestId,
-  events: subscription.events.pipeThrough(new TransformStream<
-    GenerationStreamEvent,
-    ArenaRoomGenerationEvent
-  >({
-    transform(event, controller) {
-      const projected = projectEvent(subscription.generationId, event);
-      if (projected) controller.enqueue(projected);
-    },
-  })),
-});
+): ArenaRoomGenerationSubscription => {
+  const rawHeader = Object.entries(subscription.headers).find(
+    ([name]) => name.toLowerCase() === 'x-mahoshojo-stream-meta',
+  )?.[1];
+  let roomSafeMetadata: ArenaRoomGenerationResult | undefined;
+  if (rawHeader) {
+    try {
+      const decoded = recordOf(JSON.parse(decodeURIComponent(rawHeader)));
+      const reporter = recordOf(decoded?.reporterInfo);
+      const candidate = {
+        version: 1,
+        format: decoded?.outputContract === 'web-document' || decoded?.outputContract === 'web-package-target' ? 'stream-web' : 'stream-markdown',
+        ...(reporter ? {
+          reporterInfo: { name: reporter.name, publication: reporter.publication },
+        } : {}),
+        mode: decoded?.mode,
+        ...(decoded?.scenarioDisplayName === undefined
+          ? {} : { scenarioDisplayName: decoded.scenarioDisplayName }),
+        ...(decoded?.userGuidance === undefined
+          ? {} : { sharedGuidance: decoded.userGuidance }),
+        ...(decoded?.language === undefined ? {} : { language: decoded.language }),
+        ...(decoded?.storyLength === undefined ? {} : { storyLength: decoded.storyLength }),
+        ...(decoded?.adjudicationResults === undefined
+          ? {} : { adjudicationResults: decoded.adjudicationResults }),
+        ...(decoded?.narrativeHistoryReadCount === undefined
+          ? {} : { narrativeHistoryReadCount: decoded.narrativeHistoryReadCount }),
+      };
+      const parsed = ArenaRoomGenerationResultSchema.safeParse(candidate);
+      if (parsed.success) roomSafeMetadata = parsed.data;
+    } catch {
+      // Malformed or unrecognized headers never cross the Room projection boundary.
+    }
+  }
+  return Object.freeze({
+    generationId: subscription.generationId,
+    generationRequestId: subscription.generationRequestId,
+    ...(roomSafeMetadata ? { roomSafeMetadata } : {}),
+    events: subscription.events.pipeThrough(new TransformStream<
+      GenerationStreamEvent,
+      ArenaRoomGenerationEvent
+    >({
+      transform(event, controller) {
+        const projected = projectEvent(subscription.generationId, event);
+        if (projected) controller.enqueue(projected);
+      },
+    })),
+  });
+};
 
 const projectOwnedProjectionResult = (
   result: ArenaGenerationOwnedProjectionResult,
@@ -267,6 +322,9 @@ const projectOwnedProjectionResult = (
     };
   }
   const projection = result.projection;
+  const roomSafeResult = projection.status === 'completed'
+    ? ArenaRoomGenerationResultSchema.safeParse(projection.roomSafeResult)
+    : null;
   const errorCode = projection.status === 'failed' || projection.status === 'producer_lost'
     ? safeErrorCode(
       projection.errorCode,
@@ -288,6 +346,14 @@ const projectOwnedProjectionResult = (
       resultAvailable: projection.resultAvailable,
       generationRecordId: projection.generationRecordId,
       errorCode,
+      ...(projection.persistenceWarning === ARENA_OUTPUT_NOT_ARCHIVED_WARNING
+        && projection.replayUnavailable === true
+        ? { persistenceWarning: ARENA_OUTPUT_NOT_ARCHIVED_WARNING, replayUnavailable: true }
+        : {}),
+      ...(projection.contentRetention === 'expired'
+        ? { contentRetention: 'expired' as const }
+        : {}),
+      ...(roomSafeResult?.success ? { roomSafeResult: roomSafeResult.data } : {}),
     }),
   };
 };
@@ -310,6 +376,18 @@ const projectRejectedResponse = async (response: Response): Promise<
 export const createArenaRoomGenerationPort = (
   dependencies: ArenaRoomGenerationPortDependencies,
 ): ArenaRoomGenerationPort => Object.freeze({
+  async cancelOwned(input: ArenaRoomGenerationOwnedInput): Promise<ArenaRoomGenerationCancelResult> {
+    try {
+      return await dependencies.generationService.cancelOwned({
+        actorKey: actorKeyForRoom(input.roomId),
+        generationId: input.generationId,
+        reason: 'user',
+      });
+    } catch {
+      return { kind: 'unavailable', code: 'GENERATION_STATE_UNAVAILABLE' };
+    }
+  },
+
   deriveGenerationId: (input: ArenaRoomGenerationIdentityInput) => dependencies.deriveGenerationId({
     actorKey: actorKeyForRoom(input.roomId),
     generationRequestId: input.generationRequestId,

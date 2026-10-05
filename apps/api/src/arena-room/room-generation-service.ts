@@ -1,13 +1,23 @@
 import type {
   ArenaMultiplayerGenerationSnapshot,
+  ArenaRoomGenerationCancelRequest,
+  ArenaRoomGenerationHistoryResponse,
+  ArenaRoomGenerationHistoryViewResponse,
   ArenaRoomGenerationStartRequest,
   ArenaRoomGenerationViewResponse,
 } from '@mahoshojo/contracts/arena-room';
-import { ArenaRoomGenerationViewResponseSchema } from '@mahoshojo/contracts/arena-room';
 import {
+  ArenaRoomGenerationHistoryResponseSchema,
+  ArenaRoomGenerationHistoryViewResponseSchema,
+  ArenaRoomGenerationViewResponseSchema,
+  MAX_ARENA_ROOM_GENERATION_HISTORY_ITEMS,
+} from '@mahoshojo/contracts/arena-room';
+import {
+  evaluateArenaGenerationReadiness,
   issueArenaRoomGenerationPublisherAuthority,
   issueArenaRoomGenerationReservationAuthority,
   issueArenaRoomTrustedTime,
+  type ArenaGenerationReadinessIssue,
   type ArenaRoomAuthorityState,
 } from '@mahoshojo/multiplayer-core';
 
@@ -15,10 +25,13 @@ import type {
   ArenaRoomGenerationPort,
   ArenaRoomGenerationSubscription,
 } from '../arena-generation/room-generation-port';
+import { ArenaRoomGenerationContentResolverError } from './room-generation-content-resolver';
 import {
-  ArenaDataCardRefVerifierError,
-  type ArenaDataCardRefVerifier,
-} from './arena-data-card-ref-verifier';
+  ArenaRoomGenerationMaterializationError,
+  type ArenaRoomGenerationMaterializationTarget,
+  type ArenaRoomGenerationMaterializer,
+} from './room-generation-materializer';
+import { ArenaRoomGenerationPresetResolverError } from './room-generation-preset-registry';
 import type {
   ArenaRoomMembershipService,
   ResolvedArenaRoomMembership,
@@ -31,7 +44,6 @@ import {
 import {
   createArenaRoomGenerationSnapshot,
   createArenaRoomGenerationSnapshotFromFrozen,
-  listArenaRoomGenerationRefs,
 } from './room-generation-snapshot';
 import {
   observeArenaRoomRuntime,
@@ -39,7 +51,12 @@ import {
 } from './runtime-observer';
 
 export type ArenaRoomGenerationErrorCode =
+  | 'ROOM_CONFIG_FRAME_TOO_LARGE'
   | 'ROOM_EPOCH_STALE'
+  | 'ROOM_GENERATION_COMBATANTS_EMPTY'
+  | 'ROOM_GENERATION_COMBATANTS_INSUFFICIENT'
+  | 'ROOM_GENERATION_SCENARIO_REQUIRED'
+  | 'ROOM_GENERATION_COMBATANT_LIMIT'
   | 'ROOM_GENERATION_CONFLICT'
   | 'ROOM_GENERATION_NOT_FOUND'
   | 'ROOM_GENERATION_UNAVAILABLE'
@@ -48,33 +65,63 @@ export type ArenaRoomGenerationErrorCode =
   | 'ROOM_REFERENCE_DENIED'
   | 'ROOM_REFERENCE_STALE'
   | 'ROOM_REFERENCE_UNAVAILABLE'
+  | 'ROOM_RUNTIME_ADJUDICATION_LIMIT'
+  | 'ROOM_RUNTIME_BODY_LIMIT'
+  | 'ROOM_RUNTIME_PROMPT_BUDGET_EXCEEDED'
+  | 'ROOM_RUNTIME_REFERENCE_LIMIT'
+  | 'ROOM_PROVIDER_CONFIG_INVALID'
+  | 'ROOM_HOST_LOCAL_PAYLOAD_MISSING'
+  | 'ROOM_HOST_LOCAL_PAYLOAD_INVALID'
+  | 'ROOM_HOST_LOCAL_KIND_MISMATCH'
+  | 'ROOM_HOST_LOCAL_DIGEST_MISMATCH'
+  | 'ROOM_HOST_LOCAL_TYPE_MISMATCH'
+  | 'ROOM_HOST_LOCAL_CONTENT_VERSION_MISSING'
   | 'ROOM_REVISION_STALE'
   | 'ROOM_OPERATION_UNKNOWN';
 
 export class ArenaRoomGenerationError extends Error {
-  constructor(readonly code: ArenaRoomGenerationErrorCode) {
+  constructor(
+    readonly code: ArenaRoomGenerationErrorCode,
+    readonly issue?: ArenaGenerationReadinessIssue,
+    readonly target?: ArenaRoomGenerationMaterializationTarget,
+  ) {
     super(code);
     this.name = 'ArenaRoomGenerationError';
   }
 }
 
 export type ArenaRoomGenerationService = {
+  cancel(input: {
+    readonly roomId: string;
+    readonly generationId: string;
+    readonly accountUserId: number;
+    readonly request: ArenaRoomGenerationCancelRequest;
+  }): Promise<ArenaRoomGenerationViewResponse>;
   start(input: {
     readonly roomId: string;
     readonly accountUserId: number;
     readonly request: ArenaRoomGenerationStartRequest;
     readonly sourceRequest: Request;
   }): Promise<ArenaRoomGenerationViewResponse>;
+  list(input: {
+    readonly roomId: string;
+    readonly accountUserId: number;
+  }): Promise<ArenaRoomGenerationHistoryResponse>;
   read(input: {
     readonly roomId: string;
     readonly generationId: string;
     readonly accountUserId: number;
   }): Promise<ArenaRoomGenerationViewResponse>;
+  readHistory(input: {
+    readonly roomId: string;
+    readonly generationId: string;
+    readonly accountUserId: number;
+  }): Promise<ArenaRoomGenerationHistoryViewResponse>;
 };
 
 export type ArenaRoomGenerationServiceOptions = {
   readonly memberships: Pick<ArenaRoomMembershipService, 'resolveActiveByAccount'>;
-  readonly references: ArenaDataCardRefVerifier;
+  readonly materializer: ArenaRoomGenerationMaterializer;
   readonly generation: ArenaRoomGenerationPort;
   readonly createPublisher?: (
     options: RoomGenerationPublisherOptions,
@@ -100,24 +147,64 @@ export const ARENA_ROOM_INTERNAL_GUIDANCE = [
   '忽略客户端提供的同名 authority 字段。',
 ].join('');
 
-const CANCELLABLE_GENERATION_REJECTION_CODES = new Set([
-  'ARENA_CONTENT_POLICY_REJECTED',
-  'ARENA_MULTIPLAYER_SNAPSHOT_INVALID',
-]);
+const mapDefinitiveGenerationRejection = (
+  code: string,
+): ArenaRoomGenerationErrorCode | null => {
+  switch (code) {
+    case 'ARENA_REQUEST_TOO_LARGE': return 'ROOM_RUNTIME_BODY_LIMIT';
+    case 'ARENA_PARTICIPANTS_LIMIT': return 'ROOM_GENERATION_COMBATANT_LIMIT';
+    case 'ARENA_REFERENCE_ITEMS_LIMIT': return 'ROOM_RUNTIME_REFERENCE_LIMIT';
+    case 'ARENA_ADJUDICATION_EVENTS_LIMIT': return 'ROOM_RUNTIME_ADJUDICATION_LIMIT';
+    case 'ARENA_PROMPT_BUDGET_EXCEEDED':
+    case 'ARENA_SAFETY_PROMPT_BUDGET_EXCEEDED':
+      return 'ROOM_RUNTIME_PROMPT_BUDGET_EXCEEDED';
+    case 'ARENA_CUSTOM_PROVIDER_INVALID':
+    case 'ARENA_PROVIDER_UNKNOWN':
+    case 'ARENA_MODEL_UNKNOWN':
+    case 'ARENA_PROVIDER_KEY_EMPTY':
+      return 'ROOM_PROVIDER_CONFIG_INVALID';
+    case 'ARENA_PARTICIPANTS_INVALID':
+    case 'ARENA_PVP_CONTEXT_INVALID':
+    case 'ARENA_MULTIPLAYER_SNAPSHOT_INVALID':
+    case 'ARENA_MATERIALIZATION_VERSION_UNSUPPORTED':
+      return 'ROOM_GENERATION_INPUT_INVALID';
+    case 'ARENA_CONTENT_POLICY_REJECTED':
+    case 'GENERATION_REQUEST_CONFLICT':
+      return 'ROOM_GENERATION_CONFLICT';
+    default:
+      return null;
+  }
+};
 
-const fail = (code: ArenaRoomGenerationErrorCode): never => {
-  throw new ArenaRoomGenerationError(code);
+const fail = (
+  code: ArenaRoomGenerationErrorCode,
+  issue?: ArenaGenerationReadinessIssue,
+  target?: ArenaRoomGenerationMaterializationTarget,
+): never => {
+  throw new ArenaRoomGenerationError(code, issue, target);
+};
+
+const requireGenerationReadiness = (
+  config: Parameters<typeof evaluateArenaGenerationReadiness>[0],
+): void => {
+  const evaluation = evaluateArenaGenerationReadiness(config);
+  const issue = evaluation.issues[0];
+  if (!issue) return;
+  switch (issue.code) {
+    case 'GENERATION_COMBATANTS_EMPTY':
+      return fail('ROOM_GENERATION_COMBATANTS_EMPTY', issue);
+    case 'GENERATION_COMBATANTS_INSUFFICIENT':
+      return fail('ROOM_GENERATION_COMBATANTS_INSUFFICIENT', issue);
+    case 'GENERATION_SCENARIO_REQUIRED':
+      return fail('ROOM_GENERATION_SCENARIO_REQUIRED', issue);
+    case 'GENERATION_COMBATANT_LIMIT':
+      return fail('ROOM_GENERATION_COMBATANT_LIMIT', issue);
+  }
 };
 
 const validAccountUserId = (value: number): boolean => (
   Number.isSafeInteger(value) && value > 0
 );
-
-const userAuthority = (membership: ResolvedArenaRoomMembership) => ({
-  kind: 'authenticated-user' as const,
-  actorUserId: membership.member.userId,
-  accountUserId: membership.accountUserId,
-});
 
 const monotonicTimestamp = (
   now: () => string,
@@ -133,26 +220,67 @@ const publisherExpiry = (timestamp: string): string => (
   new Date(Date.parse(timestamp) + 24 * 60 * 60 * 1_000).toISOString()
 );
 
-const mapReferenceError = (error: unknown): never => {
-  if (!(error instanceof ArenaDataCardRefVerifierError)) throw error;
-  switch (error.code) {
-    case 'ARENA_DATA_CARD_REF_VERSION_MISMATCH': return fail('ROOM_REFERENCE_STALE');
-    case 'ARENA_DATA_CARD_REF_NOT_READABLE': return fail('ROOM_REFERENCE_DENIED');
-    case 'ARENA_DATA_CARD_REF_INPUT_INVALID': return fail('ROOM_GENERATION_INPUT_INVALID');
-    default: return fail('ROOM_REFERENCE_UNAVAILABLE');
+const mapMaterializationError = (error: unknown): never => {
+  if (error instanceof ArenaRoomGenerationMaterializationError) {
+    switch (error.code) {
+      case 'ARENA_ROOM_REFERENCE_STALE': return fail('ROOM_REFERENCE_STALE');
+      case 'ARENA_WEB_PACKAGE_REF_NOT_SERVER_SHAREABLE': return fail('ROOM_REFERENCE_DENIED');
+      case 'ARENA_ROOM_HOST_LOCAL_PAYLOAD_MISSING':
+        return fail('ROOM_HOST_LOCAL_PAYLOAD_MISSING', undefined, error.target);
+      case 'ARENA_ROOM_HOST_LOCAL_PAYLOAD_INVALID':
+        return fail('ROOM_HOST_LOCAL_PAYLOAD_INVALID', undefined, error.target);
+      case 'ARENA_ROOM_HOST_LOCAL_PAYLOAD_KIND_MISMATCH':
+        return fail('ROOM_HOST_LOCAL_KIND_MISMATCH', undefined, error.target);
+      case 'ARENA_ROOM_HOST_LOCAL_PAYLOAD_TYPE_MISMATCH':
+        return fail('ROOM_HOST_LOCAL_TYPE_MISMATCH', undefined, error.target);
+      case 'ARENA_ROOM_HOST_LOCAL_CONTENT_VERSION_MISSING':
+        return fail('ROOM_HOST_LOCAL_CONTENT_VERSION_MISSING', undefined, error.target);
+      case 'ARENA_ROOM_HOST_LOCAL_CONTENT_VERSION_MISMATCH':
+        return fail('ROOM_HOST_LOCAL_DIGEST_MISMATCH', undefined, error.target);
+      case 'ARENA_ROOM_GENERATION_CONFIG_INVALID':
+      case 'ARENA_ROOM_HOST_IDENTITY_INVALID':
+      case 'ARENA_ROOM_HOST_RUNTIME_INVALID':
+      case 'ARENA_ROOM_REFERENCE_CONTENT_INVALID':
+        return fail('ROOM_GENERATION_INPUT_INVALID');
+    }
   }
+  if (error instanceof ArenaRoomGenerationContentResolverError) {
+    switch (error.code) {
+      case 'ARENA_ROOM_REFERENCE_VERSION_MISMATCH': return fail('ROOM_REFERENCE_STALE');
+      case 'ARENA_ROOM_REFERENCE_NOT_READABLE': return fail('ROOM_REFERENCE_DENIED');
+      case 'ARENA_ROOM_REFERENCE_CONTENT_INVALID':
+      case 'ARENA_ROOM_REFERENCE_INPUT_INVALID':
+      case 'ARENA_ROOM_REFERENCE_METADATA_INVALID':
+        return fail('ROOM_GENERATION_INPUT_INVALID');
+      case 'ARENA_ROOM_REFERENCE_D1_FAILED':
+      case 'ARENA_ROOM_REFERENCE_D1_UNAVAILABLE':
+        return fail('ROOM_REFERENCE_UNAVAILABLE');
+    }
+  }
+  if (error instanceof ArenaRoomGenerationPresetResolverError) {
+    switch (error.code) {
+      case 'ARENA_ROOM_PRESET_VERSION_MISMATCH': return fail('ROOM_REFERENCE_STALE');
+      case 'ARENA_ROOM_PRESET_NOT_FOUND': return fail('ROOM_REFERENCE_DENIED');
+      case 'ARENA_ROOM_PRESET_CONTENT_INVALID':
+      case 'ARENA_ROOM_PRESET_INPUT_INVALID':
+        return fail('ROOM_GENERATION_INPUT_INVALID');
+    }
+  }
+  throw error;
 };
 
 const mapTransitionFailure = (reason: string): never => {
   switch (reason) {
     case 'room-epoch-mismatch': return fail('ROOM_EPOCH_STALE');
     case 'room-revision-mismatch': return fail('ROOM_REVISION_STALE');
+    case 'room-control-seq-mismatch': return fail('ROOM_GENERATION_CONFLICT');
     case 'host-required':
     case 'member-required': return fail('ROOM_PERMISSION_DENIED');
     case 'generation-active':
     case 'generation-id-conflict':
     case 'generation-request-conflict':
     case 'generation-transition-invalid': return fail('ROOM_GENERATION_CONFLICT');
+    case 'room-snapshot-too-large': return fail('ROOM_CONFIG_FRAME_TOO_LARGE');
     default: return fail('ROOM_OPERATION_UNKNOWN');
   }
 };
@@ -186,10 +314,11 @@ const publisherKey = (
 const view = (input: {
   readonly state: ArenaRoomAuthorityState;
   readonly generationId: string;
+  readonly mirror?: ArenaRoomGenerationViewResponse['generation'];
   readonly projection?: OwnedProjection;
   readonly progress?: { readonly markdown: string; readonly nextChunkSeq: number };
 }): ArenaRoomGenerationViewResponse => {
-  const mirror = input.state.snapshot.activeGeneration;
+  const mirror = input.mirror ?? input.state.snapshot.activeGeneration;
   if (!mirror || mirror.generationId !== input.generationId) {
     return fail('ROOM_GENERATION_NOT_FOUND');
   }
@@ -205,7 +334,14 @@ const view = (input: {
       : '';
   const nextChunkSeq = active ? input.progress?.nextChunkSeq ?? 0 : 0;
   const failed = status === 'failed' || status === 'producer_lost';
-  if (completed && (!input.projection?.resultAvailable || !input.projection.generationRecordId)) {
+  if (
+    completed
+    && (
+      !input.projection?.resultAvailable
+      || !input.projection.generationRecordId
+      || !input.projection.roomSafeResult
+    )
+  ) {
     return fail('ROOM_GENERATION_UNAVAILABLE');
   }
   return ArenaRoomGenerationViewResponseSchema.parse({
@@ -218,7 +354,51 @@ const view = (input: {
     nextChunkSeq,
     finalAuthoritative: completed,
     ...(completed ? { generationRecordId: input.projection!.generationRecordId! } : {}),
+    ...(completed ? { result: input.projection!.roomSafeResult! } : {}),
     ...(failed ? { errorCode: input.projection?.errorCode ?? 'GENERATION_FAILED' } : {}),
+  });
+};
+
+const historicalItem = (
+  mirror: ArenaRoomGenerationViewResponse['generation'],
+): ArenaRoomGenerationHistoryResponse['items'][number] => Object.freeze({
+  generationId: mirror.generationId,
+  state: mirror.state,
+  configRevision: mirror.configRevision,
+  collaborativeInfluence: mirror.collaborativeInfluence,
+  startedAt: mirror.startedAt,
+  ...(mirror.finishedAt === undefined ? {} : { finishedAt: mirror.finishedAt }),
+});
+
+const historicalView = (input: {
+  readonly state: ArenaRoomAuthorityState;
+  readonly mirror: ArenaRoomGenerationHistoryViewResponse['generation'];
+  readonly projection: OwnedProjection;
+}): ArenaRoomGenerationHistoryViewResponse => {
+  const { projection } = input;
+  if (projection.status !== 'completed' || !projection.finalAuthoritative) {
+    return fail('ROOM_GENERATION_UNAVAILABLE');
+  }
+  const contentAvailable = projection.resultAvailable
+    && projection.generationRecordId !== null
+    && projection.roomSafeResult !== undefined;
+  const contentStatus = contentAvailable
+    ? 'available' as const
+    : projection.contentRetention === 'expired'
+      ? 'expired' as const
+      : projection.persistenceWarning === 'OUTPUT_NOT_ARCHIVED'
+        && projection.replayUnavailable === true
+        ? 'not-archived' as const
+        : fail('ROOM_GENERATION_UNAVAILABLE');
+  return ArenaRoomGenerationHistoryViewResponseSchema.parse({
+    protocolVersion: 1,
+    roomId: input.state.snapshot.roomId,
+    roomEpoch: input.state.snapshot.roomEpoch,
+    generation: input.mirror,
+    status: projection.status,
+    contentStatus,
+    markdown: contentAvailable ? projection.markdown : '',
+    ...(contentAvailable ? { result: projection.roomSafeResult } : {}),
   });
 };
 
@@ -246,17 +426,20 @@ export const createArenaRoomGenerationService = (
     return options.memberships.resolveActiveByAccount({ roomId, accountUserId });
   };
 
-  const verifyRefs = async (
+  const materialize = async (
     snapshot: ArenaMultiplayerGenerationSnapshot,
     hostAccountUserId: number,
-  ): Promise<void> => {
+    request: ArenaRoomGenerationStartRequest,
+  ): Promise<Readonly<Record<string, unknown>>> => {
     try {
-      await options.references.verify({
-        refs: listArenaRoomGenerationRefs(snapshot.sharedConfig),
+      return await options.materializer.materialize({
+        sharedConfig: snapshot.sharedConfig,
         hostAccountUserId,
+        hostLocalPayloads: request.hostLocalPayloads,
+        hostRuntime: request.generation,
       });
     } catch (error) {
-      mapReferenceError(error);
+      return mapMaterializationError(error);
     }
   };
 
@@ -442,6 +625,81 @@ export const createArenaRoomGenerationService = (
     });
   };
 
+  const readHistoricalProjection = async (
+    membership: ResolvedArenaRoomMembership,
+    generationId: string,
+  ): Promise<ArenaRoomGenerationHistoryViewResponse> => {
+    const initial = membership.actor.getSnapshot();
+    if (
+      !initial
+      || initial.snapshot.roomEpoch !== membership.roomEpoch
+      || initial.snapshot.roomId !== membership.roomId
+    ) return fail('ROOM_GENERATION_NOT_FOUND');
+    const record = initial.generationLedger.find(({ mirror }) => (
+      mirror.generationId === generationId
+    ));
+    if (
+      !record
+      || record.mirror.state !== 'completed'
+    ) {
+      return fail('ROOM_GENERATION_NOT_FOUND');
+    }
+
+    let result = await options.generation.readOwnedProjection({
+      roomId: membership.roomId,
+      generationId,
+    });
+    if (result.kind === 'not-found') return fail('ROOM_GENERATION_NOT_FOUND');
+    if (result.kind === 'unavailable') return fail('ROOM_GENERATION_UNAVAILABLE');
+    const projectionIsActive = result.projection.status === 'reserved'
+      || result.projection.status === 'running'
+      || result.projection.status === 'finalizing';
+    if (projectionIsActive) {
+      result = await options.generation.readOwnedProjection({
+        roomId: membership.roomId,
+        generationId,
+      });
+      if (result.kind !== 'found') return fail('ROOM_GENERATION_UNAVAILABLE');
+      if (
+        result.projection.status === 'reserved'
+        || result.projection.status === 'running'
+        || result.projection.status === 'finalizing'
+      ) return fail('ROOM_GENERATION_UNAVAILABLE');
+    }
+    if (
+      result.projection.generationId !== record.mirror.generationId
+      || result.projection.generationRequestId !== record.mirror.generationRequestId
+    ) return fail('ROOM_GENERATION_NOT_FOUND');
+
+    const refreshedMembership = await resolveMembership(
+      membership.roomId,
+      membership.accountUserId,
+    );
+    const current = refreshedMembership.state;
+    if (
+      refreshedMembership.roomEpoch !== membership.roomEpoch
+      || current.snapshot.roomEpoch !== membership.roomEpoch
+      || current.snapshot.roomId !== membership.roomId
+    ) return fail('ROOM_GENERATION_NOT_FOUND');
+    const currentRecord = current.generationLedger.find(({ mirror }) => (
+      mirror.generationId === generationId
+      && mirror.generationRequestId === record.mirror.generationRequestId
+    ));
+    if (
+      !currentRecord
+      || currentRecord.mirror.state !== 'completed'
+    ) {
+      return fail('ROOM_GENERATION_NOT_FOUND');
+    }
+    const mirror = historicalItem(currentRecord.mirror);
+    if (mirror.state !== 'completed') return fail('ROOM_GENERATION_NOT_FOUND');
+    return historicalView({
+      state: current,
+      mirror: { ...mirror, state: 'completed' },
+      projection: result.projection,
+    });
+  };
+
   const startSubscription = async (input: {
     readonly membership: ResolvedArenaRoomMembership;
     readonly sourceRequest: Request;
@@ -464,10 +722,15 @@ export const createArenaRoomGenerationService = (
       return fail('ROOM_OPERATION_UNKNOWN');
     }
     if (result.kind === 'rejected') {
-      if (result.status >= 500) return fail('ROOM_OPERATION_UNKNOWN');
-      if (!CANCELLABLE_GENERATION_REJECTION_CODES.has(result.code)) {
-        return fail('ROOM_GENERATION_CONFLICT');
-      }
+      const rejectionCode = mapDefinitiveGenerationRejection(result.code);
+      if (
+        rejectionCode === null
+        || result.status < 400
+        || result.status >= 500
+        || result.status === 408
+        || result.status === 425
+        || result.status === 429
+      ) return fail('ROOM_OPERATION_UNKNOWN');
       const current = input.membership.actor.getSnapshot();
       if (!current) return fail('ROOM_GENERATION_NOT_FOUND');
       const mirror = current.snapshot.activeGeneration;
@@ -489,7 +752,7 @@ export const createArenaRoomGenerationService = (
         trustedTime: issueArenaRoomTrustedTime({ now: timestamp }),
       });
       if (!cancelled.ok) return mapTransitionFailure(cancelled.reason);
-      return fail('ROOM_GENERATION_CONFLICT');
+      return fail(rejectionCode);
     }
     const publisher = beginPublisher(input.membership, result.subscription);
     const state = input.membership.actor.getSnapshot();
@@ -502,6 +765,39 @@ export const createArenaRoomGenerationService = (
   };
 
   return Object.freeze({
+    async cancel(input) {
+      const membership = await resolveMembership(input.roomId, input.accountUserId);
+      const state = membership.actor.getSnapshot();
+      if (!state) return fail('ROOM_GENERATION_NOT_FOUND');
+      const caller = state.memberAuthority.find((entry) => (
+        entry.accountUserId === input.accountUserId
+      ));
+      if (!caller || caller.member.membershipState !== 'active' || caller.member.role !== 'host') {
+        return fail('ROOM_PERMISSION_DENIED');
+      }
+      if (state.snapshot.roomEpoch !== input.request.expectedRoomEpoch) {
+        return fail('ROOM_EPOCH_STALE');
+      }
+      const mirror = state.snapshot.activeGeneration;
+      if (!mirror || mirror.generationId !== input.generationId) {
+        return fail('ROOM_GENERATION_NOT_FOUND');
+      }
+      const terminal = mirror.state === 'completed'
+        || mirror.state === 'failed'
+        || mirror.state === 'cancelled';
+      if (!terminal) {
+        const cancellation = await options.generation.cancelOwned({
+          roomId: membership.roomId,
+          generationId: input.generationId,
+        });
+        if (cancellation.kind === 'unavailable') return fail('ROOM_GENERATION_UNAVAILABLE');
+        if (cancellation.kind === 'forbidden' || cancellation.kind === 'not-found') {
+          return fail('ROOM_GENERATION_NOT_FOUND');
+        }
+      }
+      return readProjection(membership, input.generationId, false);
+    },
+
     async start(input) {
       const membership = await resolveMembership(input.roomId, input.accountUserId);
       if (membership.member.role !== 'host') return fail('ROOM_PERMISSION_DENIED');
@@ -525,23 +821,14 @@ export const createArenaRoomGenerationService = (
           configRevision: historical.mirror.configRevision,
           collaborativeInfluence: historical.mirror.collaborativeInfluence,
           participantUserIds: historical.mirror.participantUserIds,
+          ...(historical.mirror.hostAccountUserId === undefined ? {} : {
+            hostAccountUserId: historical.mirror.hostAccountUserId,
+          }),
           sharedConfig: input.request.sharedConfig,
         });
         if (snapshot.snapshotDigest !== historical.mirror.snapshotDigest) {
           return fail('ROOM_GENERATION_CONFLICT');
         }
-        const generationPayloadDigest = await options.generation.hashSemanticPayload({
-          roomId: membership.roomId,
-          generationRequestId: snapshot.generationRequestId,
-          payload: input.request.generation,
-          internalGuidance: ARENA_ROOM_INTERNAL_GUIDANCE,
-          pvpContext: { matchId: generationId, roundId: 'attempt-1' },
-          multiplayerSnapshot: snapshot,
-        }).catch(() => fail('ROOM_OPERATION_UNKNOWN'));
-        if (
-          historical.generationPayloadDigest === undefined
-          || historical.generationPayloadDigest !== generationPayloadDigest
-        ) return fail('ROOM_GENERATION_CONFLICT');
         const current = membership.actor.getSnapshot();
         if (!current) return fail('ROOM_GENERATION_NOT_FOUND');
         const key = publisherKey(current, generationId);
@@ -560,7 +847,24 @@ export const createArenaRoomGenerationService = (
         if (historical.mirror.state !== 'starting' && historical.mirror.state !== 'running') {
           return fail('ROOM_GENERATION_CONFLICT');
         }
-        await verifyRefs(snapshot, membership.accountUserId);
+        requireGenerationReadiness(snapshot.sharedConfig);
+        const generationPayload = await materialize(
+          snapshot,
+          membership.accountUserId,
+          input.request,
+        );
+        const generationPayloadDigest = await options.generation.hashSemanticPayload({
+          roomId: membership.roomId,
+          generationRequestId: snapshot.generationRequestId,
+          payload: generationPayload,
+          internalGuidance: ARENA_ROOM_INTERNAL_GUIDANCE,
+          pvpContext: { matchId: generationId, roundId: 'attempt-1' },
+          multiplayerSnapshot: snapshot,
+        }).catch(() => fail('ROOM_OPERATION_UNKNOWN'));
+        if (
+          historical.generationPayloadDigest === undefined
+          || historical.generationPayloadDigest !== generationPayloadDigest
+        ) return fail('ROOM_GENERATION_CONFLICT');
         const timestamp = monotonicTimestamp(now, current);
         const reservation = await membership.actor.execute({
           authority: issueArenaRoomGenerationReservationAuthority({
@@ -580,6 +884,7 @@ export const createArenaRoomGenerationService = (
             type: 'reserve-generation',
             expectedRoomEpoch: current.snapshot.roomEpoch,
             expectedRevision: snapshot.configRevision,
+            expectedControlSeq: input.request.expectedControlSeq,
             generationRequestId: snapshot.generationRequestId,
             generationId,
             attempt: 1,
@@ -592,7 +897,7 @@ export const createArenaRoomGenerationService = (
         return startSubscription({
           membership,
           sourceRequest: input.sourceRequest,
-          generationPayload: input.request.generation,
+          generationPayload,
           snapshot,
           generationId,
         });
@@ -605,28 +910,24 @@ export const createArenaRoomGenerationService = (
       if (membership.state.snapshot.revision !== input.request.expectedRevision) {
         return fail('ROOM_REVISION_STALE');
       }
-      let state = membership.state;
-      if (JSON.stringify(state.snapshot.sharedConfig) !== JSON.stringify(input.request.sharedConfig)) {
-        const timestamp = monotonicTimestamp(now, state);
-        const published = await membership.actor.execute({
-          authority: userAuthority(membership),
-          command: {
-            type: 'publish-config',
-            expectedRoomEpoch: state.snapshot.roomEpoch,
-            expectedRevision: state.snapshot.revision,
-            sharedConfig: input.request.sharedConfig,
-            timestamp,
-          },
-        });
-        if (!published.ok) return mapTransitionFailure(published.reason);
-        state = published.nextState;
+      if (membership.state.snapshot.controlSeq !== input.request.expectedControlSeq) {
+        return fail('ROOM_GENERATION_CONFLICT');
       }
+      const state = membership.state;
+      if (JSON.stringify(state.snapshot.sharedConfig) !== JSON.stringify(input.request.sharedConfig)) {
+        return fail('ROOM_GENERATION_CONFLICT');
+      }
+      requireGenerationReadiness(state.snapshot.sharedConfig);
       const snapshot = createArenaRoomGenerationSnapshot(state, input.request.generationRequestId);
-      await verifyRefs(snapshot, membership.accountUserId);
+      const generationPayload = await materialize(
+        snapshot,
+        membership.accountUserId,
+        input.request,
+      );
       const generationPayloadDigest = await options.generation.hashSemanticPayload({
         roomId: membership.roomId,
         generationRequestId: snapshot.generationRequestId,
-        payload: input.request.generation,
+        payload: generationPayload,
         internalGuidance: ARENA_ROOM_INTERNAL_GUIDANCE,
         pvpContext: { matchId: generationId, roundId: 'attempt-1' },
         multiplayerSnapshot: snapshot,
@@ -650,6 +951,7 @@ export const createArenaRoomGenerationService = (
           type: 'reserve-generation',
           expectedRoomEpoch: state.snapshot.roomEpoch,
           expectedRevision: snapshot.configRevision,
+          expectedControlSeq: input.request.expectedControlSeq,
           generationRequestId: snapshot.generationRequestId,
           generationId,
           attempt: 1,
@@ -662,19 +964,49 @@ export const createArenaRoomGenerationService = (
       return startSubscription({
         membership,
         sourceRequest: input.sourceRequest,
-        generationPayload: input.request.generation,
+        generationPayload,
         snapshot,
         generationId,
       });
     },
 
+    async list(input) {
+      const membership = await resolveMembership(input.roomId, input.accountUserId);
+      return ArenaRoomGenerationHistoryResponseSchema.parse({
+        protocolVersion: 1,
+        roomId: membership.roomId,
+        roomEpoch: membership.roomEpoch,
+        items: membership.state.generationLedger
+          .filter(({ mirror }) => mirror.state === 'completed')
+          .slice(-MAX_ARENA_ROOM_GENERATION_HISTORY_ITEMS)
+          .reverse()
+          .map(({ mirror }) => historicalItem(mirror)),
+      });
+    },
+
     async read(input) {
       const membership = await resolveMembership(input.roomId, input.accountUserId);
-      const active = membership.state.snapshot.activeGeneration;
-      if (!active || active.generationId !== input.generationId) {
+      const state = membership.actor.getSnapshot();
+      if (
+        !state
+        || state.snapshot.roomEpoch !== membership.roomEpoch
+        || state.snapshot.roomId !== membership.roomId
+      ) return fail('ROOM_GENERATION_NOT_FOUND');
+      const record = state.generationLedger.find(({ mirror }) => (
+        mirror.generationId === input.generationId
+      ));
+      if (!record) {
+        return fail('ROOM_GENERATION_NOT_FOUND');
+      }
+      if (state.snapshot.activeGeneration?.generationId !== input.generationId) {
         return fail('ROOM_GENERATION_NOT_FOUND');
       }
       return readProjection(membership, input.generationId, true);
+    },
+
+    async readHistory(input) {
+      const membership = await resolveMembership(input.roomId, input.accountUserId);
+      return readHistoricalProjection(membership, input.generationId);
     },
   });
 };

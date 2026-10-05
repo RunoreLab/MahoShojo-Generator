@@ -6,13 +6,13 @@ describe('message templates', () => {
   test('renders site issue update from payload', () => {
     const result = renderMessageTemplate({
       templateKey: 'site.issue.update',
-      payload: { issueTitle: 'PVP 结算异常', statusText: '已修复' },
+      payload: { issueTitle: '竞技场生成异常', statusText: '已修复' },
       titleText: null,
       bodyText: null,
     });
 
     expect(result.title).toContain('问题处理');
-    expect(result.body).toContain('PVP 结算异常');
+    expect(result.body).toContain('竞技场生成异常');
     expect(result.body).toContain('已修复');
   });
 

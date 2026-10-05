@@ -82,9 +82,9 @@ describe('Hosted DR activation candidate Wrangler config', () => {
       ...(environments.preview?.ratelimits ?? []),
     ].map(({ namespace_id }) => namespace_id));
 
-    expect(candidateIds.size).toBe(3);
+    expect(candidateIds.size).toBe(5);
     for (const id of candidateIds) {
-      expect(id).toMatch(/^7320[1-3]$/u);
+      expect(id).toMatch(/^7320[1-5]$/u);
       expect(existingIds).not.toContain(id);
     }
   });

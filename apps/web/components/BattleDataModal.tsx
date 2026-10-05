@@ -1,22 +1,35 @@
 // components/BattleDataModal.tsx
 
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef, useId } from 'react';
 import { createPortal } from 'react-dom';
+import Link from 'next/link';
 import DataCard from './DataCard';
 import SortSelector from './SortSelector';
 import DataCardDetailsModal from './DataCardDetailsModal';
 import { useAuth } from '@/lib/useAuth';
-import { authStorage, dataCardApi, favoritesApi, deckApi } from '@/lib/auth';
+import { useDataCardSummaryPage } from '@/lib/use-data-card-summary-page';
+import { loadFullDataCard } from '@/lib/data-card-list-client';
+import { fetchJsonWithBoundedRetry, isRetryableStatus } from '@/lib/bounded-fetch';
+import { authStorage, favoritesApi, deckApi } from '@/lib/auth';
 import {
   isPublicVisibility,
   mapPublicDataCardRowToBattleSelectionPayload,
   normalizePublicVisibilityValue,
 } from '@/lib/data-card-read-mappers';
 import { addUsedCard, isCardUsed } from '@/lib/localStorage';
+import { getLocalCardRepository } from '@/lib/local-library/card-repository';
+import { isLocalDataCardRow, mapLocalCardRecordToDetailsCard, type LocalDataCardRow } from '@/lib/local-library/data-card-rows';
+import { useLocalDataCards } from '@/lib/local-library/use-local-data-cards';
+import { useLocalLibraryAutoSave } from '@/lib/local-library/use-local-library-auto-save';
 import { inferTemplate } from '@/lib/data-card-converter';
-import { buildTitleDisplay } from '@/lib/text';
+import { downloadBlob } from '@/lib/client/blobUrl';
 import { ChevronDown, Filter } from 'lucide-react';
 import DecksModal from './DecksModal';
+import { BaseModal } from './shared/BaseModal';
+import { ModalTabs, modalTabIds, type ModalTabItem } from './shared/ModalTabs';
+import { buttonClassName } from './shared/ui';
+import { DataCardEmptyState } from './shared/DataCardEmptyState';
+import { LocalLibraryStatusNote } from './shared/LocalLibraryStatusNote';
 import { getDataCardStatus } from '@/lib/data-card-status';
 import type { BadgeDefinition } from '@/types/badge';
 import {
@@ -28,6 +41,14 @@ import {
 type DataCardType = OnlineDataCardType;
 type BattleDataSelectedType = DataCardType | 'all';
 
+/** 同时喂给 ModalTabs 的 idPrefix 和下方 tabpanel 的 id，两边必须同源。 */
+const TAB_ID_PREFIX = 'battle-data-source';
+const TAB_ARIA_LABEL = '数据卡来源';
+
+// 4xx 业务终态（400/401/403/404 等，不含 408/429）：与 bounded-retry 的不可重试语义对齐。
+const isDefinitiveClientTerminalStatus = (status: number): boolean =>
+  status >= 400 && status < 500 && !isRetryableStatus(status);
+
 interface BattleDataModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -38,15 +59,23 @@ interface BattleDataModalProps {
   initialTab?: BattleDataTab;
   visibleTabs?: BattleDataTab[];
   titleOverride?: string;
-  pvpHandTab?: PvpHandTabProps;
   selectionMode?: 'single' | 'multi';
   selectedCardIds?: string[];
   selectedCountOverride?: number;
   maxSelected?: number;
   externalError?: string | null;
+  /** 是否允许从私有卡组批量导入；默认保持既有 Arena 行为。 */
+  allowDeckImport?: boolean;
+  /** 是否允许打开数据卡详情（以及详情中的举报等嵌套入口）；默认保持既有行为。 */
+  allowCardDetails?: boolean;
 }
 
-type BattleDataTab = 'my' | 'public' | 'recommended' | 'favorites' | 'pvpHand';
+type BattleDataTab = 'my' | 'public' | 'recommended' | 'favorites' | 'local';
+
+const normalizeCardTypeForLibrary = (card: unknown): DataCardType => {
+  const parsed = OnlineDataCardTypeSchema.safeParse((card as { type?: unknown })?.type);
+  return parsed.success ? parsed.data : 'character';
+};
 
 const normalizeTagIds = (value: unknown): string[] => {
   const rawList: string[] = [];
@@ -97,55 +126,6 @@ const resolveQuestionnaireNativeAllowed = (card: any): boolean => {
   return false;
 };
 
-type PvpHandTabCard = {
-  snapshotId: string;
-  name: string;
-  type?: string | null;
-  dataJson?: string | null;
-  ref?: any;
-};
-
-type PvpHandTabProps = {
-  cards: PvpHandTabCard[];
-  hasChosenMe: boolean;
-  isChoosing: boolean;
-  onChoose: (snapshotId: string) => void;
-};
-
-const getPvpHandSourceLabel = (ref: any): string => {
-  const kind = typeof ref?.kind === 'string' ? ref.kind : '';
-  if (kind === 'preset') return '预设';
-  if (kind === 'data_card') return '数据卡';
-  return '快照';
-};
-
-const getPvpHandRefHint = (ref: any): string | null => {
-  const kind = typeof ref?.kind === 'string' ? ref.kind : '';
-  if (kind === 'preset') return typeof ref?.filename === 'string' ? ref.filename : null;
-  if (kind === 'data_card') return typeof ref?.id === 'string' ? ref.id : null;
-  return null;
-};
-
-const getPvpHandPreviewText = (dataJson: string | null | undefined): string => {
-  if (!dataJson) return '';
-  try {
-    const parsed = JSON.parse(dataJson);
-    const codename = typeof parsed?.codename === 'string' ? parsed.codename : null;
-    const name = typeof parsed?.name === 'string' ? parsed.name : null;
-    const templateId: unknown = parsed?.templateId || parsed?.template || parsed?.template_id;
-    const templateText = typeof templateId === 'string' ? templateId : null;
-    const parts = [codename, name, templateText].filter((x): x is string => typeof x === 'string' && Boolean(x.trim()));
-    const line = parts.join(' / ').trim();
-    if (line) return line.length > 120 ? `${line.slice(0, 120)}…` : line;
-  } catch {
-    // ignore
-  }
-
-  const collapsed = dataJson.replace(/\s+/g, ' ').trim();
-  if (!collapsed) return '';
-  return collapsed.length > 120 ? `${collapsed.slice(0, 120)}…` : collapsed;
-};
-
 // 【新增】筛选条件的状态接口
 interface Filters {
   author: string;
@@ -180,23 +160,32 @@ export default function BattleDataModal({
   initialTab,
   visibleTabs,
   titleOverride,
-  pvpHandTab,
   selectionMode = 'single',
   selectedCardIds,
   selectedCountOverride,
   maxSelected,
   externalError,
+  allowDeckImport = true,
+  allowCardDetails = true,
 }: BattleDataModalProps) {
   const { isAuthenticated, user, userBadges } = useAuth();
+  const modalTitleId = useId();
+  const modalRef = useRef<HTMLDivElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
   const isComposingSearchRef = useRef(false);
   const publicFetchAbortControllerRef = useRef<AbortController | null>(null);
   const metaFetchAbortControllerRef = useRef<AbortController | null>(null);
   const badgeFetchAbortControllerRef = useRef<AbortController | null>(null);
   const selectingCardIdsRef = useRef<Set<string>>(new Set());
+  const cardReadController = useRef<AbortController>(new AbortController());
+  // 详情按“每次动作”创建：新的详情点击会中止上一次未完成的详情读取（last-click-wins）。
+  const cardDetailControllerRef = useRef<AbortController | null>(null);
   const isSingleSelectingRef = useRef(false);
-  const [userDataCards, setUserDataCards] = useState<any[]>([]);
   const [publicDataCards, setPublicDataCards] = useState<any[]>([]);
-  const [favoriteCards, setFavoriteCards] = useState<any[]>([]);
+  // 记录当前 publicDataCards 展示结果所属的查询；只有相同查询的刷新失败才允许保留 stale 数据。
+  const publicLoadedRequestKeyRef = useRef<string | null>(null);
   const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
   const [isLoading, setIsLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<BattleDataTab>('public');
@@ -209,6 +198,8 @@ export default function BattleDataModal({
   const [sortBy, setSortBy] = useState<'likes' | 'usage' | 'favorites' | 'created_at'>('created_at');
   const [selectedCard, setSelectedCard] = useState<any | null>(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
+  const detailsModalOpenRef = useRef(false);
+  detailsModalOpenRef.current = allowCardDetails && showDetailsModal && selectedCard !== null;
   const [selectError, setSelectError] = useState<string | null>(null);
   const cardsPerPage = 12;
   const [cardMetaById, setCardMetaById] = useState<Record<string, { techScore: number | null; techLevel: string | null; strictTier: string | null; isNative: boolean | null }>>({});
@@ -250,6 +241,69 @@ export default function BattleDataModal({
   const [tagOptions, setTagOptions] = useState<ApiTag[]>([]);
   const [tagOptionsLoading, setTagOptionsLoading] = useState(false);
   const [tagOptionsError, setTagOptionsError] = useState<string | null>(null);
+  /**
+   * 「已经取过标签库」必须显式记一份，不能用 `tagOptions.length > 0` 代替：
+   * 标签库为空时长度恒为 0，旧实现会把它当成「还没取过」，于是每次渲染都重新请求，
+   * loading true/false 交替触发无限重渲染。用 ref 承载以保持 callback 身份稳定。
+   */
+  const tagOptionsSettledRef = useRef(false);
+  const tagOptionsInFlightRef = useRef(false);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const previouslyFocused = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    const previousBodyOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    closeButtonRef.current?.focus();
+
+    const focusableSelector = [
+      'button:not([disabled])',
+      'a[href]',
+      'input:not([disabled])',
+      'select:not([disabled])',
+      'textarea:not([disabled])',
+      '[tabindex]:not([tabindex="-1"])',
+    ].join(',');
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (detailsModalOpenRef.current) return;
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+
+      const focusable = [...(modalRef.current?.querySelectorAll<HTMLElement>(focusableSelector) ?? [])]
+        .filter((element) => !element.hidden && element.getAttribute('aria-hidden') !== 'true');
+      if (focusable.length === 0) {
+        event.preventDefault();
+        modalRef.current?.focus();
+        return;
+      }
+
+      const first = focusable[0]!;
+      const last = focusable.at(-1)!;
+      const current = document.activeElement;
+      if (event.shiftKey && (current === first || !modalRef.current?.contains(current))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (current === last || !modalRef.current?.contains(current))) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      document.body.style.overflow = previousBodyOverflow;
+      if (previouslyFocused && document.contains(previouslyFocused)) {
+        previouslyFocused.focus();
+      }
+    };
+  }, [isOpen]);
 
   const buildPublicFilters = useCallback((source: Filters, tab: BattleDataTab) => {
     if (tab === 'recommended') {
@@ -262,6 +316,23 @@ export default function BattleDataModal({
   }, []);
 
   const publicFilters = useMemo(() => buildPublicFilters(activeFilters, activeTab), [activeFilters, activeTab, buildPublicFilters]);
+  // 公开库请求键覆盖 page/search/filter/tab/UUID 语义；任一变化都让旧结果先失效。
+  const buildPublicRequestKey = useCallback((
+    kind: 'list' | 'id',
+    args: { page?: number; sort?: string; search?: string; filters?: Filters | null; tagIds?: string[]; tagMatch?: string; cardId?: string } = {},
+  ) => JSON.stringify({
+    kind,
+    tab: activeTab,
+    page: args.page ?? null,
+    sort: args.sort ?? null,
+    search: args.search ?? '',
+    filters: args.filters ?? null,
+    tagIds: args.tagIds ?? [],
+    tagMatch: args.tagMatch ?? 'any',
+    cardId: args.cardId ?? null,
+    selectedType,
+    types: effectiveAllowedTypes,
+  }), [activeTab, effectiveAllowedTypes, selectedType]);
   const normalizeFiltersBySelectedType = useCallback((source: Filters): Filters => {
     let next = source;
 
@@ -282,8 +353,8 @@ export default function BattleDataModal({
     const candidates = Array.isArray(visibleTabs) && visibleTabs.length > 0
       ? visibleTabs
       : ([
-        ...(pvpHandTab ? (['pvpHand'] as const) : []),
         ...(isAuthenticated ? (['my'] as const) : []),
+        'local' as const,
         'public' as const,
         'recommended' as const,
         ...(isAuthenticated ? (['favorites'] as const) : []),
@@ -293,19 +364,71 @@ export default function BattleDataModal({
     const out: BattleDataTab[] = [];
     for (const tab of candidates as BattleDataTab[]) {
       if ((tab === 'my' || tab === 'favorites') && !isAuthenticated) continue;
-      if (tab === 'pvpHand' && !pvpHandTab) continue;
       if (seen.has(tab)) continue;
       seen.add(tab);
       out.push(tab);
     }
     return out.length > 0 ? out : ['public'];
-  }, [visibleTabs, pvpHandTab, isAuthenticated]);
+  }, [visibleTabs, isAuthenticated]);
 
-  const isPvpHandTab = activeTab === 'pvpHand';
   const isPublicTab = activeTab === 'public' || activeTab === 'recommended';
+  // 私有/收藏摘要只继承这些 Tab 上实际可见且有语义的条件。
+  // 公开库高级筛选（author/数值/roleType/native*/recommendedOnly）只随公开列表请求发送，
+  // 避免切换 Tab 后界面已隐藏的筛选继续污染 my/favorites 查询（例如 owner=Alice 且 author=Bob 恒为空）。
+  const summaryQuery = {
+    limit: cardsPerPage, offset: (currentPage - 1) * cardsPerPage,
+    search: debouncedSearchQuery.trim() || undefined, sortBy, types: effectiveAllowedTypes,
+    tagIds: selectedTagIds, tagMatch: tagMatchMode,
+  };
+  const myPage = useDataCardSummaryPage('my', isAuthenticated ? user?.id ?? null : null, isOpen && activeTab === 'my', summaryQuery);
+  const favoritesPage = useDataCardSummaryPage('favorites', isAuthenticated ? user?.id ?? null : null, isOpen && activeTab === 'favorites', summaryQuery);
+  const { cards: rawUserDataCards, setCards: setUserDataCards, reload: loadUserDataCards } = myPage;
+  const { setCards: setFavoriteCards } = favoritesPage;
+  const [publicError, setPublicError] = useState<string | null>(null);
+  const isLocalTab = activeTab === 'local';
+  const localCards = useLocalDataCards(isOpen && isLocalTab, effectiveAllowedTypes, debouncedSearchQuery);
+  const localRecordById = useMemo(
+    () => new Map(localCards.records.map((record) => [record.id, record])),
+    [localCards.records],
+  );
+  const [localActionError, setLocalActionError] = useState<string | null>(null);
+  const [removingLocalId, setRemovingLocalId] = useState<string | null>(null);
+  const [pendingLocalRemoval, setPendingLocalRemoval] = useState<LocalDataCardRow | null>(null);
+  const libraryAutoSave = useLocalLibraryAutoSave();
+  const [libraryCopyMessage, setLibraryCopyMessage] = useState<string | null>(null);
+
+  const listLoading = activeTab === 'my' ? myPage.loading : activeTab === 'favorites' ? favoritesPage.loading : isLocalTab ? localCards.loading : isLoading;
+  const listError = activeTab === 'my' ? myPage.error : activeTab === 'favorites' ? favoritesPage.error : isLocalTab ? localCards.error : publicError;
+  const listIdle = activeTab === 'my' ? myPage.status === 'idle' : activeTab === 'favorites' ? favoritesPage.status === 'idle' : false;
+  const { reload: reloadFavorites } = favoritesPage;
+  useEffect(() => {
+    cardReadController.current = new AbortController();
+    return () => {
+      cardReadController.current.abort();
+      cardDetailControllerRef.current?.abort();
+      cardDetailControllerRef.current = null;
+    };
+  }, [isOpen, activeTab, user?.id]);
+  useEffect(() => {
+    if (!isOpen || isPublicTab) return;
+    const status = activeTab === 'my' ? myPage.status : activeTab === 'favorites' ? favoritesPage.status : null;
+    const total = activeTab === 'my' ? myPage.total : favoritesPage.total;
+    if (status === 'success' && currentPage > Math.max(1, Math.ceil(total / cardsPerPage))) {
+      setCurrentPage(Math.max(1, Math.ceil(total / cardsPerPage)));
+    }
+  }, [isOpen, isPublicTab, activeTab, myPage.status, myPage.total, favoritesPage.status, favoritesPage.total, currentPage, cardsPerPage]);
+  useEffect(() => {
+    if (!isOpen || !isAuthenticated) return;
+    let cancelled = false;
+    void favoritesApi.getFavorites({ idsOnly: true }).then((result) => {
+      if (!cancelled && result.success) setFavoriteIds(new Set(result.favorites as string[]));
+    });
+    return () => { cancelled = true; };
+  }, [isOpen, isAuthenticated, user?.id]);
 
   const inferRoleType = useCallback((card: any): 'magical-girl' | 'canshou' | 'general' | null => {
     if (!card || card.type !== 'character') return null;
+    if (card.roleType) return card.roleType;
 
     let payload = card.data;
     if (typeof payload === 'string') {
@@ -345,8 +468,10 @@ export default function BattleDataModal({
     }));
   }, [inferRoleType]);
 
-  const loadTagOptions = useCallback(async () => {
-    if (tagOptionsLoading || tagOptions.length > 0) return;
+  const loadTagOptions = useCallback(async (options: { force?: boolean } = {}) => {
+    if (tagOptionsInFlightRef.current) return;
+    if (!options.force && tagOptionsSettledRef.current) return;
+    tagOptionsInFlightRef.current = true;
     setTagOptionsLoading(true);
     setTagOptionsError(null);
     try {
@@ -361,64 +486,69 @@ export default function BattleDataModal({
         return;
       }
       setTagOptions(Array.isArray(json.tags) ? json.tags : []);
+      // 空标签库同样是成功结果：记为已取过，避免"永远在加载"。
+      tagOptionsSettledRef.current = true;
     } catch (error) {
       setTagOptionsError(String(error));
     } finally {
+      tagOptionsInFlightRef.current = false;
       setTagOptionsLoading(false);
     }
-  }, [tagOptions.length, tagOptionsLoading]);
+  }, []);
 
   const ensureTagOptions = useCallback(() => {
-    if (tagOptions.length > 0 || tagOptionsLoading) return;
     void loadTagOptions();
-  }, [loadTagOptions, tagOptions.length, tagOptionsLoading]);
+  }, [loadTagOptions]);
 
-
-  // 获取用户的数据卡
-  const loadUserDataCards = useCallback(async (searchTerm?: string, sortBy?: 'likes' | 'usage' | 'favorites' | 'created_at') => {
-    if (!isAuthenticated) return;
-
-    try {
-      setIsLoading(true);
-      const cards = await dataCardApi.getCards(searchTerm, sortBy);
-      // 根据选择的类型过滤数据卡
-      const filteredCards = cards.filter((card: any) => effectiveAllowedTypeSet.has(card.type));
-      setUserDataCards(mapWithRoleType(filteredCards));
-    } catch (error) {
-      console.error('获取用户数据卡失败:', error);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [isAuthenticated, effectiveAllowedTypeSet, mapWithRoleType]);
+  const userDataCards = useMemo(() => mapWithRoleType(
+    rawUserDataCards.filter((card: any) => effectiveAllowedTypeSet.has(card.type)),
+  ), [rawUserDataCards, effectiveAllowedTypeSet, mapWithRoleType]);
+  const favoriteCards = useMemo(() => mapWithRoleType(favoritesPage.cards), [favoritesPage.cards, mapWithRoleType]);
 
   // 通过 ID 获取数据卡并显示在列表中
   const loadCardByIdForDisplay = useCallback(async (cardId: string) => {
+    const requestKey = buildPublicRequestKey('id', { cardId });
     publicFetchAbortControllerRef.current?.abort();
     const abortController = new AbortController();
     publicFetchAbortControllerRef.current = abortController;
+    if (publicLoadedRequestKeyRef.current !== requestKey) {
+      // 查询语义变化（含 UUID 切换）：旧结果不得冒充新查询结果。
+      publicLoadedRequestKeyRef.current = null;
+      setPublicDataCards([]);
+    }
+    let failedStatus: number | null = null;
     try {
       setIsLoading(true);
-      const response = await fetch(`/api/public-data-cards?id=${cardId}`, { signal: abortController.signal });
-      if (response.ok) {
-        const result = await response.json();
-        const card = result.success && result.card && effectiveAllowedTypeSet.has(result.card.type) ? result.card : null;
+      setPublicError(null);
+      const result = await fetchJsonWithBoundedRetry<any>(`/api/public-data-cards?id=${cardId}`, { signal: abortController.signal });
+      if (result.ok) {
+        if (abortController.signal.aborted) return;
+        const card = result.data.success && result.data.card && effectiveAllowedTypeSet.has(result.data.card.type) ? result.data.card : null;
+        publicLoadedRequestKeyRef.current = requestKey;
         setPublicDataCards(card ? mapWithRoleType([card]) : []);
       } else {
-        setPublicDataCards([]);
+        failedStatus = result.status;
+        throw new Error(`获取数据卡失败（HTTP ${result.status}）`);
       }
     } catch (error) {
       if (abortController.signal.aborted || (error instanceof Error && error.name === 'AbortError')) {
         return;
       }
-      console.error('通过ID获取数据卡失败:', error);
-      setPublicDataCards([]);
+      // 同 requestKey 的 5xx/timeout 保留 stale 单卡；4xx 业务终态（卡被转私有/删除）必须清掉。
+      const keepStale = publicLoadedRequestKeyRef.current === requestKey
+        && !(failedStatus !== null && isDefinitiveClientTerminalStatus(failedStatus));
+      if (!keepStale) {
+        publicLoadedRequestKeyRef.current = null;
+        setPublicDataCards([]);
+      }
+      setPublicError(error instanceof Error ? error.message : '获取数据卡失败');
     } finally {
       if (publicFetchAbortControllerRef.current === abortController) {
         publicFetchAbortControllerRef.current = null;
         setIsLoading(false);
       }
     }
-  }, [effectiveAllowedTypeSet, mapWithRoleType]);
+  }, [buildPublicRequestKey, effectiveAllowedTypeSet, mapWithRoleType]);
 
   // 【修改】获取公开数据卡，现在会接收所有筛选条件
   const loadPublicDataCards = useCallback(async (
@@ -429,11 +559,21 @@ export default function BattleDataModal({
     currentTagIds?: string[],
     currentTagMatch?: 'any' | 'all'
   ) => {
+    const requestKey = buildPublicRequestKey('list', {
+      page, sort: currentSortBy, search: currentSearchTerm, filters: currentFilters ?? null,
+      tagIds: currentTagIds ?? [], tagMatch: currentTagMatch,
+    });
     publicFetchAbortControllerRef.current?.abort();
     const abortController = new AbortController();
     publicFetchAbortControllerRef.current = abortController;
+    if (publicLoadedRequestKeyRef.current !== requestKey) {
+      // 翻页/搜索/筛选/Tab 变化：旧查询结果不得冒充新查询结果。
+      publicLoadedRequestKeyRef.current = null;
+      setPublicDataCards([]);
+    }
     try {
       setIsLoading(true);
+      setPublicError(null);
       const useRoleTypeFilter = Boolean(currentFilters?.roleType && selectedType === 'character');
       const effectiveLimit = useRoleTypeFilter ? 500 : cardsPerPage;
       const offset = useRoleTypeFilter ? 0 : (page - 1) * cardsPerPage;
@@ -466,30 +606,52 @@ export default function BattleDataModal({
           if (currentFilters.nativeAllowedOnly) params.append('nativeAllowedOnly', '1');
         }
 
-        const response = await fetch(`/api/public-data-cards?${params}`, { signal: abortController.signal });
-        if (!response.ok) return [];
-        const result = await response.json();
-        return result.success ? (result.cards || []) : [];
+        const result = await fetchJsonWithBoundedRetry<any>(`/api/public-data-cards?${params}`, { signal: abortController.signal });
+        if (!result.ok) throw new Error(`获取公开数据卡失败（HTTP ${result.status}）`);
+        if (!result.data.success || !Array.isArray(result.data.cards)) {
+          throw new Error(result.data.error || '列表响应无效');
+        }
+        return result.data.cards;
       };
 
       const batches = await Promise.all(effectiveAllowedTypes.map((type) => fetchType(type)));
+      if (abortController.signal.aborted) return;
       let cards = mapWithRoleType(batches.flat());
       if (currentFilters?.roleType && selectedType === 'character') {
         cards = cards.filter((card: any) => card.roleType === currentFilters.roleType);
       }
+      publicLoadedRequestKeyRef.current = requestKey;
       setPublicDataCards(cards);
     } catch (error) {
       if (abortController.signal.aborted || (error instanceof Error && error.name === 'AbortError')) {
         return;
       }
-      console.error('获取公开数据卡失败:', error);
+      if (publicLoadedRequestKeyRef.current !== requestKey) {
+        publicLoadedRequestKeyRef.current = null;
+        setPublicDataCards([]);
+      }
+      setPublicError(error instanceof Error ? error.message : '获取公开数据卡失败');
     } finally {
       if (publicFetchAbortControllerRef.current === abortController) {
         publicFetchAbortControllerRef.current = null;
         setIsLoading(false);
       }
     }
-  }, [selectedType, effectiveAllowedTypes, cardsPerPage, mapWithRoleType]);
+  }, [buildPublicRequestKey, selectedType, effectiveAllowedTypes, cardsPerPage, mapWithRoleType]);
+
+  // 公开查询的显式重放入口：始终使用当前 debouncedSearchQuery + publicFilters，
+  // 页码由调用方显式传入（不读取 currentPage，避免翻页 → callback identity → effect 的间接依赖），
+  // 供 effect、重试按钮、翻页与“再次点击当前 Tab”复用，避免 closure 里的过期查询语义。
+  const reloadPublicCurrentQuery = useCallback((page: number) => {
+    if (!isPublicTab) return;
+    const trimmed = debouncedSearchQuery.trim();
+    const uuidMatch = trimmed.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+    if (uuidMatch) {
+      loadCardByIdForDisplay(uuidMatch[0]);
+      return;
+    }
+    loadPublicDataCards(page, sortBy, trimmed || undefined, publicFilters, selectedTagIds, tagMatchMode);
+  }, [isPublicTab, debouncedSearchQuery, sortBy, publicFilters, selectedTagIds, tagMatchMode, loadCardByIdForDisplay, loadPublicDataCards]);
 
   const sortFavorites = useCallback((items: any[], criteria: 'likes' | 'usage' | 'favorites' | 'created_at') => {
     const sorted = [...items];
@@ -518,44 +680,6 @@ export default function BattleDataModal({
     });
   }, []);
 
-  const loadFavorites = useCallback(async (
-    typeParam?: BattleDataSelectedType,
-    showLoading: boolean = false,
-    sortCriteria?: 'likes' | 'usage' | 'favorites' | 'created_at'
-  ) => {
-    if (!isAuthenticated) return;
-
-    try {
-      if (showLoading) {
-        setIsLoading(true);
-      }
-      const targetType = typeParam ?? selectedType;
-      const results = targetType === 'all'
-        ? await Promise.all(effectiveAllowedTypes.map((type) => favoritesApi.getFavorites({ type })))
-        : [await favoritesApi.getFavorites({ type: targetType as DataCardType })];
-      const favorites = results.flatMap((result) =>
-        result.success && Array.isArray(result.favorites) ? result.favorites : []
-      );
-      if (results.some((result) => result.success)) {
-        const cards = mapWithRoleType(favorites);
-        const finalSort = sortCriteria ?? sortBy;
-        setFavoriteCards(sortFavorites(cards, finalSort));
-        setFavoriteIds(new Set(cards.map((card: any) => card.id)));
-      } else {
-        setFavoriteCards([]);
-        setFavoriteIds(new Set());
-      }
-    } catch (error) {
-      console.error('获取收藏数据卡失败:', error);
-      setFavoriteCards([]);
-      setFavoriteIds(new Set());
-    } finally {
-      if (showLoading) {
-        setIsLoading(false);
-      }
-    }
-  }, [isAuthenticated, selectedType, effectiveAllowedTypes, sortFavorites, mapWithRoleType, sortBy]);
-
   // 防抖功能 - 延迟500ms执行搜索（兼容 IME：组词期不触发，结束后会继续等待并触发）
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -579,64 +703,33 @@ export default function BattleDataModal({
 
   useEffect(() => {
     if (!isOpen) return;
-    if (isPvpHandTab) return;
     void loadTagOptions();
-  }, [isOpen, isPvpHandTab, loadTagOptions]);
+  }, [isOpen, loadTagOptions]);
 
-  // 当防抖搜索词变化时执行搜索
+  useEffect(() => {
+    if (!isOpen || !isPublicTab) {
+      publicFetchAbortControllerRef.current?.abort();
+      publicFetchAbortControllerRef.current = null;
+    }
+  }, [isOpen, isPublicTab]);
+
+  // 公开查询的唯一请求 owner：防抖搜索、Tab、排序、筛选、标签变化都从这里发起。
+  // 翻页不在其中：reloadPublicCurrentQuery 不读取 currentPage（页码显式传参），
+  // 本 effect 依赖链也不含 currentPage，翻页由 handlePageChange 独占发起。
   useEffect(() => {
     if (!isOpen) return;
 
-    const trimmed = debouncedSearchQuery.trim();
     setCurrentPage(1);
-
-    // 私有库搜索：直接从用户数据卡接口查询
-    if (activeTab === 'my') {
-      loadUserDataCards(trimmed || undefined, sortBy);
-      return;
-    }
-
-    // 收藏库本地过滤，避免重复请求
-    if (activeTab === 'favorites') {
-      return;
-    }
-
-    if (activeTab === 'pvpHand') {
-      return;
-    }
-
-    // 检查是否包含 UUID 格式的 ID
-    const uuidRegex = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
-    const match = trimmed.match(uuidRegex);
-
-    if (match) {
-      loadCardByIdForDisplay(match[0]);
-    } else {
-      loadPublicDataCards(1, sortBy, trimmed || undefined, publicFilters, selectedTagIds, tagMatchMode);
-    }
-  }, [debouncedSearchQuery, isOpen, activeTab, loadUserDataCards, loadCardByIdForDisplay, loadPublicDataCards, sortBy, publicFilters, selectedTagIds, tagMatchMode]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    if (isPvpHandTab) return;
     if (!isPublicTab) return;
 
-    const trimmed = debouncedSearchQuery.trim();
-    if (trimmed) {
-      const uuidRegex = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
-      if (uuidRegex.test(trimmed)) return;
-    }
-
-    setCurrentPage(1);
-    loadPublicDataCards(1, sortBy, trimmed || undefined, publicFilters, selectedTagIds, tagMatchMode);
-  }, [isPublicTab, publicFilters, debouncedSearchQuery, isOpen, isPvpHandTab, loadPublicDataCards, selectedTagIds, sortBy, tagMatchMode]);
+    reloadPublicCurrentQuery(1);
+  }, [debouncedSearchQuery, isOpen, activeTab, isPublicTab, sortBy, publicFilters, selectedTagIds, tagMatchMode, reloadPublicCurrentQuery]);
 
   useEffect(() => {
     return () => {
       publicFetchAbortControllerRef.current?.abort();
     };
   }, []);
-
 
   // 当模态框打开时加载数据
   useEffect(() => {
@@ -651,6 +744,8 @@ export default function BattleDataModal({
     setSelectedTagIds([]);
     setTagMatchMode('any');
     setTagOptionsError(null);
+    tagOptionsSettledRef.current = false;
+    tagOptionsInFlightRef.current = false;
 
     const fallbackTab: BattleDataTab = effectiveTabs[0] ?? 'public';
     const canUseInitialTab = Boolean(initialTab && effectiveTabs.includes(initialTab));
@@ -667,22 +762,6 @@ export default function BattleDataModal({
 
     setActiveTab(nextTab);
 
-    // 按当前 Tab 触发首屏加载
-    if (isAuthenticated && effectiveTabs.includes('my') && (nextTab === 'my' || (!hasUserSelectedTabRef.current && nextTab === 'public'))) {
-      loadUserDataCards(undefined, sortBy);
-      if (effectiveTabs.includes('favorites')) {
-        loadFavorites(selectedType, false, sortBy);
-      }
-    }
-
-    if (isAuthenticated && effectiveTabs.includes('favorites') && nextTab === 'favorites') {
-      loadFavorites(selectedType, true, sortBy);
-    }
-
-    if (effectiveTabs.includes('public') || effectiveTabs.includes('recommended')) {
-      const initialPublicFilters = buildPublicFilters(initialFilters, nextTab);
-      loadPublicDataCards(1, sortBy, undefined, initialPublicFilters, [], 'any');
-    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, selectedType, isAuthenticated]);
 
@@ -696,7 +775,7 @@ export default function BattleDataModal({
   const selectedCount = typeof selectedCountOverride === 'number' ? selectedCountOverride : selectedIdSet.size;
   const atLimit = selectionMode === 'multi' && typeof maxSelected === 'number' && maxSelected > 0 && selectedCount >= maxSelected;
   const canToggle = selectionMode === 'multi' && typeof onToggleCard === 'function';
-  const canImportDeck = isAuthenticated && selectionMode === 'multi' && selectedType === 'character' && (typeof onToggleCard === 'function' || typeof onSelectCard === 'function');
+  const canImportDeck = allowDeckImport && isAuthenticated && selectionMode === 'multi' && selectedType === 'character' && (typeof onToggleCard === 'function' || typeof onSelectCard === 'function');
 
   // 处理卡片选择
   const handleSelectCard = async (card: any) => {
@@ -723,7 +802,13 @@ export default function BattleDataModal({
         }
       }
 
-      const payload = mapPublicDataCardRowToBattleSelectionPayload(card);
+      const signal = cardReadController.current.signal;
+      // 本地库记录本来就带着完整正文；走 loadFullDataCard 只会得到一次注定 404 的请求。
+      const full = isLocalDataCardRow(card)
+        ? card
+        : typeof card.data === 'string' ? card : await loadFullDataCard(card, activeTab === 'my' ? 'my' : 'public', signal);
+      if (signal.aborted) return;
+      const payload = mapPublicDataCardRowToBattleSelectionPayload(full);
 
       if (selectionMode === 'multi') {
         if (canToggle) {
@@ -764,6 +849,7 @@ export default function BattleDataModal({
         })();
       }
     } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') return;
       console.error('解析数据卡失败:', error);
       setSelectError(error instanceof Error ? error.message : '解析数据卡失败，请稍后重试。');
     } finally {
@@ -774,6 +860,7 @@ export default function BattleDataModal({
 
   const handleImportDeck = useCallback(async (deckId: string) => {
     if (!deckId) return;
+    if (!allowDeckImport) return;
     if (selectionMode !== 'multi') return;
 
     try {
@@ -829,28 +916,118 @@ export default function BattleDataModal({
     } catch (error) {
       console.error('导入卡组失败:', error);
     }
-  }, [canToggle, effectiveAllowedTypeSet, maxSelected, onSelectCard, onToggleCard, selectedCount, selectedIdSet, selectionMode]);
+  }, [allowDeckImport, canToggle, effectiveAllowedTypeSet, maxSelected, onSelectCard, onToggleCard, selectedCount, selectedIdSet, selectionMode]);
 
-  const handleDownloadCard = useCallback((card: any) => {
+  const handleDownloadCard = useCallback(async (card: any) => {
     try {
-      let cardPayload = card.data;
+      const signal = cardReadController.current.signal;
+      const full = isLocalDataCardRow(card)
+        ? card
+        : typeof card.data === 'string' ? card : await loadFullDataCard(card, activeTab === 'my' ? 'my' : 'public', signal);
+      if (signal.aborted) return;
+      let cardPayload = full.data;
       if (typeof cardPayload === 'string') {
         cardPayload = JSON.parse(cardPayload);
       }
       const blob = new Blob([JSON.stringify(cardPayload, null, 2)], { type: 'application/json' });
       const sanitizedName = (card.name || '数据卡').replace(/[\\/:*?"<>|]/g, '_');
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `${sanitizedName}.json`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
+      downloadBlob(blob, `${sanitizedName}.json`);
     } catch (error) {
-      console.error('保存数据卡失败:', error);
+      if (error instanceof Error && error.name === 'AbortError') return;
+      setSelectError(error instanceof Error ? error.message : '保存数据卡失败');
     }
-  }, []);
+  }, [activeTab]);
+
+  /**
+   * 从本机本地库删除一张数据卡。
+   *
+   * 与"取消选择"是两件事：删除后本地库不再保留这条记录，而取消选择只影响本次会话。
+   * 这里刻意不做静默删除——tombstone 由仓储负责，UI 只负责把后果说清楚。
+   */
+  const handleRemoveLocalCard = useCallback(async (card: LocalDataCardRow) => {
+    setLocalActionError(null);
+    setRemovingLocalId(card.id);
+    try {
+      await getLocalCardRepository().delete(card.id);
+      localCards.reload();
+    } catch (error) {
+      setLocalActionError(error instanceof Error ? error.message : '本地库删除失败，请重试。');
+    } finally {
+      setRemovingLocalId((current) => (current === card.id ? null : current));
+    }
+  }, [localCards]);
+
+  /**
+   * LIB-007「下载本地副本」：把线上数据卡复制一份进本机本地库。
+   *
+   * 复制而非移动：线上记录不受影响，本地副本通过 `cloudRef` 与它保持可辨认的对应关系。
+   * 内容相同则整卡更新，用户不会因为多点一次就多出一张几乎一样的卡。
+   */
+  const handleSaveCardToLibrary = useCallback(async (card: any) => {
+    setLocalActionError(null);
+    // 详情弹窗用 `void onSaveCopyToLocalLibrary()` 调用：这里抛出去就是未处理
+    // rejection，用户既看不到提示，弹窗也不会关。
+    let payload: unknown;
+    try {
+      payload = typeof card?.data === 'string' ? JSON.parse(card.data) : card?.data;
+    } catch {
+      setLocalActionError('这张数据卡的正文不是合法 JSON，无法保存到本地库。');
+      return;
+    }
+    if (payload === undefined || payload === null) {
+      setLocalActionError('这张数据卡没有可保存的正文。');
+      return;
+    }
+    const summary = await libraryAutoSave.save([{
+      cardType: normalizeCardTypeForLibrary(card),
+      title: typeof card?.name === 'string' && card.name.trim() ? card.name : '未命名数据卡',
+      payload,
+    }]);
+    if (libraryAutoSave.error) setLocalActionError(libraryAutoSave.error);
+    setLibraryCopyMessage(summary.saved > 0
+      ? `已保存到本地库：${summary.saved} 张。`
+      : summary.updated > 0
+        ? '本地库中已有内容相同的数据卡，已更新原卡。'
+        : summary.inRecycleBin > 0
+          ? '内容相同的数据卡在本地库回收站中，未重复保存；可在「本地库」页面恢复。'
+          : summary.failed > 0
+            ? '保存到本地库失败。'
+            : null);
+  }, [libraryAutoSave]);
+
+  const handleSaveSelectedCardToLibrary = useCallback(async () => {
+    if (!selectedCard) return;
+    await handleSaveCardToLibrary(selectedCard);
+    if (isLocalTab) localCards.reload();
+  }, [selectedCard, handleSaveCardToLibrary, isLocalTab, localCards]);
+
+  // 查看详情：与 DataCardsModal.withFullCard 一致，新动作 abort 旧动作，
+  // 避免连续点击 A、B 时先返回的 A 覆盖最后点击的 B。
+  const openCardDetails = useCallback(async (card: any) => {
+    cardDetailControllerRef.current?.abort();
+    const controller = new AbortController();
+    cardDetailControllerRef.current = controller;
+    const { signal } = controller;
+    try {
+      if (isLocalDataCardRow(card)) {
+        const record = localRecordById.get(card.id);
+        if (!record) throw new Error('本地库中的这张数据卡已不可用。');
+        if (signal.aborted) return;
+        setSelectedCard(mapLocalCardRecordToDetailsCard(record));
+        setShowDetailsModal(true);
+        return;
+      }
+      const full = await loadFullDataCard(card, activeTab === 'my' ? 'my' : 'public', signal);
+      if (signal.aborted) return;
+      setSelectedCard(full);
+      setShowDetailsModal(true);
+    } catch (error) {
+      if (signal.aborted) return;
+      setSelectError(error instanceof Error ? error.message : '读取数据卡失败');
+    } finally {
+      if (cardDetailControllerRef.current === controller) cardDetailControllerRef.current = null;
+    }
+  }, [activeTab, localRecordById]);
 
   // 【新增】处理高级筛选输入变化
   const handleFilterChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
@@ -948,29 +1125,23 @@ export default function BattleDataModal({
     setPublicDataCards((prev) => adjustFavoriteCount(prev, card.id, -1));
     setUserDataCards((prev) => adjustFavoriteCount(prev, card.id, -1));
     setFavoriteCards((prev) => prev.filter((item) => item.id !== card.id));
+    reloadFavorites();
 
     return true;
-  }, [isAuthenticated, adjustFavoriteCount, sortFavorites, sortBy]);
+  }, [isAuthenticated, adjustFavoriteCount, sortFavorites, sortBy, setUserDataCards, setFavoriteCards, reloadFavorites]);
 
-  // 处理页码变化
+  // 处理页码变化：翻页请求的显式 owner；roleType 高级筛选走本地 500 条分页，只切页不请求。
   const handlePageChange = (newPage: number) => {
     setCurrentPage(newPage);
     if (isPublicTab && !(publicFilters.roleType && selectedType === 'character')) {
-      loadPublicDataCards(newPage, sortBy, debouncedSearchQuery.trim() || undefined, publicFilters, selectedTagIds, tagMatchMode);
+      reloadPublicCurrentQuery(newPage);
     }
   };
 
-  // 处理排序变化
+  // 处理排序变化：只更新 state，由公开查询 effect 统一发起请求
   const handleSortChange = (newSortBy: 'likes' | 'usage' | 'favorites' | 'created_at') => {
     setSortBy(newSortBy);
     setCurrentPage(1);
-    if (activeTab === 'my') {
-      loadUserDataCards(debouncedSearchQuery.trim() || undefined, newSortBy);
-    } else if (isPublicTab) {
-      loadPublicDataCards(1, newSortBy, debouncedSearchQuery.trim() || undefined, publicFilters, selectedTagIds, tagMatchMode);
-    } else if (activeTab === 'favorites') {
-      setFavoriteCards((prev) => sortFavorites(prev, newSortBy));
-    }
   };
 
   const tagById = useMemo(() => {
@@ -1039,45 +1210,12 @@ export default function BattleDataModal({
     });
   }, [selectedTagIds, tagFilterSet, tagMatchMode]);
 
-  const filteredUserCards = useMemo(() => applyTagFilter(userDataCards), [applyTagFilter, userDataCards]);
-  const filteredFavoriteCards = useMemo(() => {
-    const keyword = debouncedSearchQuery.trim().toLowerCase();
-    const baseList = keyword
-      ? favoriteCards.filter((card) => {
-        const name = (card.name || '').toLowerCase();
-        const desc = (card.description || '').toLowerCase();
-        return name.includes(keyword) || desc.includes(keyword);
-      })
-      : favoriteCards;
-    return applyTagFilter(baseList);
-  }, [favoriteCards, debouncedSearchQuery, applyTagFilter]);
   const filteredPublicCards = useMemo(() => applyTagFilter(publicDataCards), [applyTagFilter, publicDataCards]);
+  const userTotalPages = Math.max(1, Math.ceil(myPage.total / cardsPerPage));
 
-  const userTotalPages = Math.max(1, Math.ceil(filteredUserCards.length / cardsPerPage));
-
-  const filteredPvpHandCards = useMemo<PvpHandTabCard[]>(() => {
-    const cards = Array.isArray(pvpHandTab?.cards) ? pvpHandTab.cards : [];
-    const keyword = debouncedSearchQuery.trim().toLowerCase();
-    if (!keyword) return cards;
-
-    return cards.filter((card) => {
-      const name = (card.name || '').toLowerCase();
-      const type = (typeof card.type === 'string' ? card.type : '').toLowerCase();
-      const source = getPvpHandSourceLabel(card.ref).toLowerCase();
-      const refHint = (getPvpHandRefHint(card.ref) || '').toLowerCase();
-      return `${name} ${type} ${source} ${refHint}`.includes(keyword);
-    });
-  }, [pvpHandTab?.cards, debouncedSearchQuery]);
-
-  const favoritesTotalPages = Math.max(1, Math.ceil(filteredFavoriteCards.length / cardsPerPage));
-  const paginatedUserCards = useMemo(
-    () => filteredUserCards.slice((currentPage - 1) * cardsPerPage, currentPage * cardsPerPage),
-    [filteredUserCards, currentPage, cardsPerPage]
-  );
-  const paginatedFavoriteCards = useMemo(
-    () => filteredFavoriteCards.slice((currentPage - 1) * cardsPerPage, currentPage * cardsPerPage),
-    [filteredFavoriteCards, currentPage, cardsPerPage]
-  );
+  const favoritesTotalPages = Math.max(1, Math.ceil(favoritesPage.total / cardsPerPage));
+  const paginatedUserCards = userDataCards;
+  const paginatedFavoriteCards = favoriteCards;
 
   const publicPaginatedCards = useMemo(() => {
     if (publicFilters.roleType && selectedType === 'character') {
@@ -1086,17 +1224,42 @@ export default function BattleDataModal({
     return filteredPublicCards;
   }, [filteredPublicCards, publicFilters.roleType, selectedType, currentPage, cardsPerPage]);
 
+  const localPaginatedCards = useMemo(
+    () => localCards.rows.slice((currentPage - 1) * cardsPerPage, currentPage * cardsPerPage),
+    [localCards.rows, currentPage, cardsPerPage],
+  );
+  const localTotalPages = Math.max(1, Math.ceil(localCards.total / cardsPerPage));
+
   const displayCards = useMemo(() => {
     if (activeTab === 'my') return paginatedUserCards;
     if (activeTab === 'favorites') return paginatedFavoriteCards;
+    if (isLocalTab) return localPaginatedCards;
     if (isPublicTab) return publicPaginatedCards;
     return [];
-  }, [activeTab, isPublicTab, paginatedUserCards, paginatedFavoriteCards, publicPaginatedCards]);
+  }, [activeTab, isLocalTab, isPublicTab, paginatedUserCards, paginatedFavoriteCards, localPaginatedCards, publicPaginatedCards]);
+
+  // 「搜索/筛选无命中」和「这个库里本来就没有」对用户是两件事，空状态必须分开说。
+  // 标签是与关键词、高级筛选各自独立的状态，且在每一个页签上都渲染，
+  // 只看关键词和 Filters 会把「只按标签筛出了 0 条」误判成「库里本来就没有」。
+  const hasActiveQuery = useMemo(() => (
+    debouncedSearchQuery.trim().length > 0
+    || selectedTagIds.length > 0
+    || JSON.stringify(activeFilters) !== JSON.stringify(initialFilters)
+  ), [debouncedSearchQuery, selectedTagIds, activeFilters, initialFilters]);
+
+  const reloadActiveList = useCallback(() => {
+    if (activeTab === 'my') { loadUserDataCards(); return; }
+    if (activeTab === 'favorites') { favoritesPage.reload(); return; }
+    if (isLocalTab) { localCards.reload(); return; }
+    reloadPublicCurrentQuery(currentPage);
+  }, [activeTab, isLocalTab, localCards, favoritesPage, reloadPublicCurrentQuery, currentPage, loadUserDataCards]);
 
   const displayCardIds = useMemo(() => {
     const out: string[] = [];
     const seen = new Set<string>();
     for (const card of displayCards as any[]) {
+      // 本地库记录不参与服务器侧的批量元数据请求：它们没有技术值、段位或审核状态。
+      if (isLocalDataCardRow(card)) continue;
       const id = typeof card?.id === 'string' ? card.id.trim() : '';
       if (!id) continue;
       if (seen.has(id)) continue;
@@ -1108,9 +1271,9 @@ export default function BattleDataModal({
 
   useEffect(() => {
     if (!isOpen) return;
-    if (isPvpHandTab) return;
     if (displayCardIds.length === 0) return;
 
+    // 本地库记录没有服务器侧技术值/段位；为它们发批量请求只会得到空响应。
     const pendingIds = displayCardIds.filter((id) => !Object.prototype.hasOwnProperty.call(cardMetaById, id));
     if (pendingIds.length === 0) return;
 
@@ -1165,7 +1328,7 @@ export default function BattleDataModal({
     return () => {
       abortController.abort();
     };
-  }, [isOpen, isPvpHandTab, displayCardIds, cardMetaById]);
+  }, [isOpen, displayCardIds, cardMetaById]);
 
   // 批量获取作者佩戴的徽章
   const currentUserEquippedBadges = useMemo(() => {
@@ -1177,7 +1340,6 @@ export default function BattleDataModal({
 
   useEffect(() => {
     if (!isOpen) return;
-    if (isPvpHandTab) return;
     if (displayCards.length === 0) return;
 
     // "我的" 标签页直接使用当前用户的徽章
@@ -1242,7 +1404,7 @@ export default function BattleDataModal({
     return () => {
       abortController.abort();
     };
-  }, [isOpen, isPvpHandTab, activeTab, displayCards, user?.id, currentUserEquippedBadges, authorBadgesById]);
+  }, [isOpen, activeTab, displayCards, user?.id, currentUserEquippedBadges, authorBadgesById]);
 
   const publicTotalPages = publicFilters.roleType && selectedType === 'character'
     ? Math.max(1, Math.ceil(filteredPublicCards.length / cardsPerPage))
@@ -1252,6 +1414,8 @@ export default function BattleDataModal({
     ? userTotalPages
     : activeTab === 'favorites'
       ? favoritesTotalPages
+    : isLocalTab
+      ? localTotalPages
     : isPublicTab
         ? publicTotalPages
         : null;
@@ -1263,6 +1427,7 @@ export default function BattleDataModal({
     all: '素材',
   };
   const typeLabel = typeLabelMap[selectedType] ?? '数据';
+  const modalTitle = titleOverride || `选择${typeLabel}数据卡`;
   const isFilterActive = useMemo(() => {
     return Boolean(
       publicFilters.author ||
@@ -1279,18 +1444,88 @@ export default function BattleDataModal({
     );
   }, [publicFilters]);
 
+  const { tabId: activeTabTabId, panelId: activeTabPanelId } = modalTabIds(TAB_ID_PREFIX, activeTab);
+
+  /**
+   * 页签定义。顺序即 effectiveTabs 的声明顺序，直接决定 rail 上的左右次序。
+   *
+   * 数量交给 ModalTabs 的 `count` 渲染成 `tabular-nums` 片段，而不是拼进 label：
+   * 切换页签时数字变化不该把整条 rail 的宽度顶得跳动。
+   */
+  const tabItems: ModalTabItem<BattleDataTab>[] = [];
+  if (effectiveTabs.includes('my')) {
+    tabItems.push({ value: 'my', label: `我的${typeLabel}`, count: myPage.hasLoaded ? myPage.total : '—' });
+  }
+  if (effectiveTabs.includes('local')) {
+    tabItems.push({
+      value: 'local',
+      label: '本地库',
+      count: localCards.status === 'success' ? localCards.libraryTotal : '—',
+      title: '本机本地库，无需登录；清除站点数据会一并删除',
+    });
+  }
+  if (effectiveTabs.includes('public')) {
+    tabItems.push({ value: 'public', label: `公开${typeLabel}` });
+  }
+  if (effectiveTabs.includes('recommended')) {
+    tabItems.push({ value: 'recommended', label: '管理员推荐' });
+  }
+  if (effectiveTabs.includes('favorites')) {
+    tabItems.push({ value: 'favorites', label: '我的收藏', count: favoritesPage.hasLoaded ? favoritesPage.total : '—' });
+  }
+
+  /**
+   * 页签切换统一入口：原先每个按钮各自内联一套 onClick，现在按「是否当前页签」分派。
+   *
+   * 再次点击当前页签 = 用当前查询刷新，这是既有交互，不因为收敛到 ModalTabs 而丢掉；
+   * 各页签的刷新入口本来就不同，切换页签只改 state、请求仍由 effect 发起。
+   */
+  const handleTabChange = (next: BattleDataTab) => {
+    hasUserSelectedTabRef.current = true;
+    if (next === activeTab) {
+      setCurrentPage(1);
+      if (next === 'my') loadUserDataCards();
+      else if (next === 'local') localCards.reload();
+      else if (next === 'favorites') favoritesPage.reload();
+      else if (next === 'public' || next === 'recommended') reloadPublicCurrentQuery(1);
+      return;
+    }
+    setActiveTab(next);
+    setCurrentPage(1);
+  };
+
   if (!isOpen) {
     return null;
   }
 
   const modal = (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg p-6 w-[96vw] max-w-[90rem] h-[85vh] max-h-[90vh] overflow-hidden flex flex-col relative">
-        <button onClick={onClose} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 text-2xl z-10">×</button>
-		        <h2 className="text-xl font-bold pr-8">{titleOverride || (isPvpHandTab ? '我的手牌' : `选择${typeLabel}数据卡`)}</h2>
+      <div
+        ref={modalRef}
+        role="dialog"
+        aria-modal={detailsModalOpenRef.current ? undefined : 'true'}
+        aria-hidden={detailsModalOpenRef.current ? 'true' : undefined}
+        aria-labelledby={modalTitleId}
+        aria-label={modalTitle}
+        tabIndex={-1}
+        className="bg-white rounded-xl p-4 shadow-2xl sm:p-6 w-full max-w-[90rem] h-[85dvh] max-h-[90dvh] overflow-hidden flex flex-col relative"
+      >
+        <button
+          type="button"
+          ref={closeButtonRef}
+          onClick={onClose}
+          aria-label={`关闭${modalTitle}`}
+          className="absolute right-4 top-4 z-10 inline-flex min-h-10 min-w-10 items-center justify-center text-gray-400 hover:text-gray-600 text-2xl"
+        >×</button>
+		        <h2 id={modalTitleId} className="text-xl font-bold pr-8">{modalTitle}</h2>
           {selectError && (
             <div className="mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
               {selectError}
+            </div>
+          )}
+          {localActionError && (
+            <div className="mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
+              {localActionError}
             </div>
           )}
           {externalError && (
@@ -1323,13 +1558,13 @@ export default function BattleDataModal({
                   onCompositionEnd={() => {
 	                    isComposingSearchRef.current = false;
 	                  }}
-	                  placeholder={isPvpHandTab ? '搜索手牌：名称 / 类型 / 来源（预设/数据卡）' : `搜索${typeLabel}名称或粘贴分享链接...`}
+	                  placeholder={`搜索${typeLabel}名称或粘贴分享链接...`}
 	                  className="w-full input-field pr-10"
 	                />
 	                {searchQuery && searchQuery !== debouncedSearchQuery && <div className="absolute right-3 top-1/2 -translate-y-1/2"><div className="w-4 h-4 border-2 border-pink-500 border-t-transparent rounded-full animate-spin"></div></div>}
 	              </div>
-	              {!isPvpHandTab && <SortSelector value={sortBy} onChange={handleSortChange} />}
-              {!isPvpHandTab && (
+	              <SortSelector value={sortBy} onChange={handleSortChange} />
+              {isPublicTab && (
                 <button
                   onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
                   className={`flex items-center gap-1 px-3 py-2 text-sm rounded-lg transition-colors ${isFilterActive ? 'bg-purple-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
@@ -1338,7 +1573,7 @@ export default function BattleDataModal({
                 </button>
               )}
             </div>
-            {!isPvpHandTab && (
+            {(
               <div className="mb-2 rounded-lg border border-gray-200 bg-gray-50/60 px-3 py-2">
                 <div className="flex flex-wrap items-center gap-2">
                   <div className="text-xs font-semibold text-gray-600">标签过滤</div>
@@ -1530,75 +1765,27 @@ export default function BattleDataModal({
             )}
           </div>
 
-          {/* 标签页切换 */}
-          <div className="flex items-center justify-between gap-2 mb-4 flex-wrap">
-            <div className="flex gap-2">
-            {effectiveTabs.includes('pvpHand') && (
-              <button
-                onClick={() => {
-                  hasUserSelectedTabRef.current = true;
-                  setActiveTab('pvpHand');
-                  setCurrentPage(1);
-                }}
-                className={`px-4 py-2 rounded text-sm font-medium ${activeTab === 'pvpHand' ? 'bg-pink-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
-              >
-                手牌 ({pvpHandTab?.cards?.length ?? 0})
-              </button>
-            )}
-            {effectiveTabs.includes('my') && (
-              <button
-                onClick={() => {
-                  hasUserSelectedTabRef.current = true;
-                  setActiveTab('my');
-                  setCurrentPage(1);
-                  loadUserDataCards(undefined, sortBy);
-                }}
-                className={`px-4 py-2 rounded text-sm font-medium ${activeTab === 'my' ? 'bg-pink-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
-              >
-                我的{typeLabel} ({userDataCards.length})
-              </button>
-            )}
-            {effectiveTabs.includes('public') && (
-              <button
-                onClick={() => {
-                  hasUserSelectedTabRef.current = true;
-                  setActiveTab('public');
-                  setCurrentPage(1);
-                  loadPublicDataCards(1, sortBy, '', buildPublicFilters(filters, 'public'), selectedTagIds, tagMatchMode);
-                }}
-                className={`px-4 py-2 rounded text-sm font-medium ${activeTab === 'public' ? 'bg-pink-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
-              >
-                公开{typeLabel}
-              </button>
-            )}
-            {effectiveTabs.includes('recommended') && (
-              <button
-                onClick={() => {
-                  hasUserSelectedTabRef.current = true;
-                  setActiveTab('recommended');
-                  setCurrentPage(1);
-                  loadPublicDataCards(1, sortBy, '', buildPublicFilters(filters, 'recommended'), selectedTagIds, tagMatchMode);
-                }}
-                className={`px-4 py-2 rounded text-sm font-medium ${activeTab === 'recommended' ? 'bg-pink-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
-              >
-                管理员推荐
-              </button>
-            )}
-            {effectiveTabs.includes('favorites') && (
-              <button
-                onClick={() => {
-                  hasUserSelectedTabRef.current = true;
-                  setActiveTab('favorites');
-                  setCurrentPage(1);
-                  loadFavorites(selectedType, true, sortBy);
-                }}
-                className={`px-4 py-2 rounded text-sm font-medium ${activeTab === 'favorites' ? 'bg-pink-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
-              >
-                我的收藏 ({favoriteCards.length})
-              </button>
-            )}
-            </div>
+          {listError && <div role="alert" className="mb-3 rounded-lg bg-red-50 p-3 text-sm text-red-700">
+            {displayCards.length ? `刷新失败，当前显示上次成功结果：${listError}` : `数据卡加载失败：${listError}`}
+            <button type="button" disabled={listLoading} className="ml-3 px-3 py-2 rounded bg-white disabled:opacity-50"
+              onClick={reloadActiveList}>重试</button>
+          </div>}
+          {/* 标签页切换。窄屏由 ModalTabs 内部横向滚动承载，不再让 flex 收缩把中文标签压成竖排。
+              整行 sticky：卡片网格在滚动容器里，往下翻页时页签必须留在视野内，
+              否则手机上滚到列表底部就再也切不了页签，只能一路滚回顶部。
+              z-10 只在「下方内容区已自成一个层叠上下文」时成立——卡片网格的 `isolate` 是
+              这个前提，两处必须一起改，否则卡内浮层会穿透上来。 */}
+          <div className="sticky top-0 z-10 mb-4 flex flex-wrap items-center justify-between gap-2 bg-white py-1">
+            <ModalTabs
+              idPrefix={TAB_ID_PREFIX}
+              ariaLabel={TAB_ARIA_LABEL}
+              items={tabItems}
+              value={activeTab}
+              onValueChange={handleTabChange}
+              className="max-w-full"
+            />
 
+            {/* 卡组导入不是页签，必须留在滚动 rail 之外，否则它会被一起卷走。 */}
             {canImportDeck && (
               <button
                 onClick={() => setShowDecksModal(true)}
@@ -1610,75 +1797,44 @@ export default function BattleDataModal({
           </div>
 
 	          {/* 内容区域 */}
-	          <div>
-	            {isPvpHandTab ? (
-	              filteredPvpHandCards.length === 0 ? (
-	                <div className="text-center text-gray-500 py-8">暂无手牌</div>
-	              ) : (
-	                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-	                  {filteredPvpHandCards.map((card) => {
-	                    const sourceLabel = getPvpHandSourceLabel(card.ref);
-	                    const refHint = getPvpHandRefHint(card.ref);
-	                    const type = typeof card.type === 'string' && card.type ? card.type : 'unknown';
-	                    const preview = getPvpHandPreviewText(card.dataJson);
-	                    const { display: displayName, full: fullName } = buildTitleDisplay(card.name || '未命名');
-
-	                    const disableChoose = Boolean(pvpHandTab?.isChoosing || pvpHandTab?.hasChosenMe);
-
-	                    return (
-	                      <div key={card.snapshotId} className="rounded-lg border bg-white p-4 flex flex-col">
-	                        <div className="min-w-0">
-	                          <div className="font-semibold text-gray-900 break-words" title={fullName}>
-	                            {displayName}
-	                          </div>
-	                          <div className="mt-1 flex flex-wrap gap-2 text-xs">
-	                            <span className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-700">{type}</span>
-	                            <span className="px-2 py-0.5 rounded-full bg-blue-50 text-blue-700">{sourceLabel}</span>
-	                            {refHint && <span className="px-2 py-0.5 rounded-full bg-white border text-gray-600">{refHint}</span>}
-	                          </div>
-	                        </div>
-
-	                        {preview ? <div className="mt-3 text-xs text-gray-600 break-words">{preview}</div> : null}
-
-	                        <div className="mt-4 grid grid-cols-2 gap-2">
-	                          <button
-	                            className="px-3 py-2 rounded-lg border bg-white hover:bg-gray-50 text-sm"
-	                            onClick={() => {
-	                              const author = sourceLabel === '预设' ? '预设角色（快照）' : sourceLabel === '数据卡' ? '数据卡（快照）' : 'PVP 快照';
-	                              setSelectedCard({
-	                                id: `pvp:hand:${card.snapshotId}`,
-	                                name: card.name || '未命名',
-	                                description: refHint ? `PVP 手牌（${sourceLabel}快照：${refHint}）` : `PVP 手牌（${sourceLabel}快照）`,
-	                                type: 'character',
-	                                data: typeof card.dataJson === 'string' ? card.dataJson : JSON.stringify(card.dataJson ?? {}),
-	                                isPublic: true,
-	                                username: author,
-	                              });
-	                              setShowDetailsModal(true);
-	                            }}
-	                          >
-	                            详情
-	                          </button>
-	                          <button
-	                            className="px-3 py-2 rounded-lg text-sm text-white bg-gradient-to-r from-pink-500 to-purple-500 disabled:opacity-50 disabled:cursor-not-allowed"
-	                            onClick={() => pvpHandTab?.onChoose(card.snapshotId)}
-	                            disabled={disableChoose}
-	                            title={pvpHandTab?.hasChosenMe ? '你已选择过出战卡' : undefined}
-	                          >
-	                            {pvpHandTab?.hasChosenMe ? '已出战' : pvpHandTab?.isChoosing ? '提交中…' : '出战'}
-	                          </button>
-	                        </div>
-	                      </div>
-	                    );
-	                  })}
-	                </div>
-	              )
-	            ) : isLoading ? (
+          <div
+            role="tabpanel"
+            id={activeTabPanelId}
+            aria-labelledby={activeTabTabId}
+          >
+            {isLocalTab ? (
+              <div className="mb-3">
+                <LocalLibraryStatusNote />
+                <Link
+                  href="/local-library"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  prefetch={false}
+                  className="mt-2 inline-flex min-h-11 items-center rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-purple-700 hover:bg-purple-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-purple-600"
+                >
+                  本地库管理与整库导入导出（新标签页）
+                </Link>
+              </div>
+            ) : null}
+	            {(listLoading || listIdle) && displayCards.length === 0 ? (
 	              <div className="flex justify-center items-center min-h-[40vh]"><div className="text-gray-500">加载中...</div></div>
 	            ) : displayCards.length === 0 ? (
-	              <div className="text-center text-gray-500 py-8">暂无数据卡</div>
+	              <DataCardEmptyState
+	                tab={activeTab}
+	                typeLabel={typeLabel}
+	                error={Boolean(listError)}
+	                hasActiveSearch={hasActiveQuery}
+	                onRetry={listError ? reloadActiveList : undefined}
+	              />
 	            ) : (
-		              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+		              <div
+                        // `isolate` 让网格自成一个层叠上下文。卡片右上角的 +/- 浮层是
+                        // `absolute z-20`，而卡片容器只是 `relative`（z-index 为 auto，不构成
+                        // 层叠上下文），于是这个 z-20 直接和弹窗的 chrome 参与比较，压过上方
+                        // `z-10` 的 sticky 页签行——卡片被遮住了，浮层按钮却还浮在页签行上。
+                        // 隔离后 z-20 只在网格内部生效，sticky 行仍然盖住整片列表。
+                        className="isolate grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4"
+                      >
 		                {displayCards.map((card: any) => {
 		                  const isFavorited = favoriteIds.has(card.id);
 		                  const enableFavorite = isAuthenticated && activeTab !== 'my';
@@ -1695,15 +1851,27 @@ export default function BattleDataModal({
 		                    <div
                         key={card.id}
                         className={`relative h-full ${itemDisabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                        {...(selectionMode === 'single' ? {
+                          role: 'button',
+                          tabIndex: itemDisabled ? -1 : 0,
+                          'aria-label': `选择${card.name || typeLabel}`,
+                          'aria-disabled': itemDisabled || undefined,
+                          onKeyDown: (event: React.KeyboardEvent<HTMLDivElement>) => {
+                            if (itemDisabled) return;
+                            if (event.key !== 'Enter' && event.key !== ' ') return;
+                            event.preventDefault();
+                            void handleSelectCard(card);
+                          },
+                        } : {})}
                         onClick={() => {
                           if (itemDisabled) return;
                           void handleSelectCard(card);
                         }}
                       >
-	                      {showQuickToggle && (
-	                        <button
-	                          type="button"
-	                          className={`absolute top-2 right-2 z-20 inline-flex h-8 w-8 items-center justify-center rounded-full border-2 text-lg font-bold leading-none shadow-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 ${
+                      {showQuickToggle && (
+		                        <button
+		                          type="button"
+		                          className={`absolute top-2 right-2 z-20 inline-flex h-8 w-8 items-center justify-center rounded-full border-2 text-lg font-bold leading-none shadow-sm transition-colors after:absolute after:rounded-full after:content-[''] focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 after:-inset-1 ${
 	                            quickToggleDisabled
 	                              ? 'cursor-not-allowed border-gray-200 bg-gray-100 text-gray-400'
 	                              : isSelected
@@ -1723,6 +1891,10 @@ export default function BattleDataModal({
 	                        </button>
 	                      )}
 	                      <DataCard
+	                        storageLocation={isLocalDataCardRow(card) ? 'local' : 'cloud'}
+	                        onRemoveFromLibrary={isLocalDataCardRow(card) ? () => setPendingLocalRemoval(card) : undefined}
+	                        removePending={removingLocalId === card.id}
+	                        localLibraryOriginHint={isLocalDataCardRow(card) ? '仅保存在本机，不会上传' : null}
 	                        id={card.id}
 	                        name={card.name}
 	                        description={card.description}
@@ -1744,7 +1916,7 @@ export default function BattleDataModal({
 	                        isRecommended={card.is_recommended === 1}
 	                        author={activeTab === 'my' ? '我' : (card.username || '未知')}
 	                        authorBadges={activeTab === 'my' ? currentUserEquippedBadges : (authorBadgesById[card.user_id] ?? [])}
-	                        onViewDetails={() => { setSelectedCard(card); setShowDetailsModal(true); }}
+		                        onViewDetails={allowCardDetails ? () => { void openCardDetails(card); } : undefined}
 	                        onAuthorClick={handleAuthorClick}
 	                        onToggleFavorite={enableFavorite ? (next) => handleFavoriteToggleForCard(card, next) : undefined}
 	                        onDownload={() => handleDownloadCard(card)}
@@ -1755,17 +1927,18 @@ export default function BattleDataModal({
 	              </div>
       )}
 
-      <DecksModal
-        isOpen={showDecksModal}
-        onClose={() => setShowDecksModal(false)}
-        onImportDeck={(deckId) => void handleImportDeck(deckId)}
-      />
-	          </div>
+	      {allowDeckImport ? (
+	        <DecksModal
+	          isOpen={showDecksModal}
+	          onClose={() => setShowDecksModal(false)}
+	          onImportDeck={(deckId) => void handleImportDeck(deckId)}
+	        />
+	      ) : null}
 
           {/* 分页与底部 */}
           {(
-            (activeTab === 'my' && filteredUserCards.length > cardsPerPage) ||
-            (activeTab === 'favorites' && filteredFavoriteCards.length > cardsPerPage) ||
+            (activeTab === 'my' && myPage.total > cardsPerPage) ||
+            (activeTab === 'favorites' && favoritesPage.total > cardsPerPage) ||
             (isPublicTab && (
               (publicFilters.roleType && selectedType === 'character')
                 ? publicPaginatedCards.length > 0 || publicTotalPages! > 1
@@ -1773,7 +1946,13 @@ export default function BattleDataModal({
             ))
           ) &&
             <div className="flex justify-center items-center gap-2 pt-4 border-t mt-4">
-              <button onClick={() => handlePageChange(currentPage - 1)} disabled={currentPage === 1} className="page-button">上一页</button>
+              <button
+                onClick={() => handlePageChange(currentPage - 1)}
+                disabled={currentPage === 1}
+                className={buttonClassName({ variant: 'secondary', size: 'md' })}
+              >
+                上一页
+              </button>
               <span className="text-sm text-gray-600">
                 第 {currentPage} 页
                 {currentTabTotalPages ? ` / ${currentTabTotalPages}` : ''}
@@ -1785,26 +1964,69 @@ export default function BattleDataModal({
                     ? currentPage >= userTotalPages
                     : activeTab === 'favorites'
                       ? currentPage >= favoritesTotalPages
-                      : publicTotalPages
-                        ? currentPage >= publicTotalPages
-                        : displayCards.length < cardsPerPage
+                      : isLocalTab
+                        ? currentPage >= localTotalPages
+                        : publicTotalPages
+                          ? currentPage >= publicTotalPages
+                          : displayCards.length < cardsPerPage
                 }
-                className="page-button"
+                className={buttonClassName({ variant: 'secondary', size: 'md' })}
               >
                 下一页
               </button>
             </div>
           }
+            </div>
 	    </div>
 	  </div>
 
+	  {/* 本地库删除二次确认：删除只影响本机，但不可从选择弹窗里撤销，措辞必须说清楚 */}
+      <BaseModal
+        isOpen={pendingLocalRemoval !== null}
+        title="从本地库删除这张数据卡？"
+        maxWidthClassName="max-w-md"
+        closeOnBackdrop={!removingLocalId}
+        onClose={() => { if (!removingLocalId) setPendingLocalRemoval(null); }}
+        footer={(
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              className="px-4 py-2 rounded text-sm border border-gray-300 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:hover:bg-gray-800"
+              disabled={removingLocalId !== null}
+              onClick={() => setPendingLocalRemoval(null)}
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              className="px-4 py-2 rounded text-sm bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+              disabled={removingLocalId !== null}
+              onClick={() => {
+                if (pendingLocalRemoval) void handleRemoveLocalCard(pendingLocalRemoval).then(() => setPendingLocalRemoval(null));
+              }}
+            >
+              {removingLocalId !== null ? '正在删除…' : '删除'}
+            </button>
+          </div>
+        )}
+      >
+        <p className="text-sm text-gray-700 dark:text-gray-200">
+          「{pendingLocalRemoval?.name}」只会从这台设备的本地库中移除，不影响任何线上数据卡，
+          也不会同步到其他设备。删除后会移入本地库回收站，可在「本地库」页面恢复或彻底删除。
+        </p>
+      </BaseModal>
+
 	  {/* 详情模态框 */}
-	  {selectedCard && (
+      {allowCardDetails && selectedCard && (
         <DataCardDetailsModal
+          onSaveCopyToLocalLibrary={isLocalDataCardRow(selectedCard) ? undefined : handleSaveSelectedCardToLibrary}
+          localLibrarySaveState={{ busy: libraryAutoSave.busy, message: libraryCopyMessage }}
           isOpen={showDetailsModal}
+          fallbackFocusRef={closeButtonRef}
           onClose={() => {
             setShowDetailsModal(false);
             setSelectedCard(null);
+            closeButtonRef.current?.focus();
           }}
           card={{
             id: selectedCard.id,

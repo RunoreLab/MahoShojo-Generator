@@ -47,9 +47,66 @@ import {
   resolveLegacyQuestionnaireProviderRuntime,
   type LegacyProviderRuntimeLogger,
 } from './questionnaire-composition-runtime-shared';
+import { sanitizePublicErrorMessage } from './node-runtime/error-extraction';
 
 export const CREATOR_MAGICAL_GIRL_ACTION_TYPE = 'magical_girl_details_generate' as const;
 export const CREATOR_CANSHOU_ACTION_TYPE = 'canshou_generate' as const;
+
+const CREATOR_VALIDATION_ERROR_MESSAGES = new Set([
+  'BUILD_RULE_PAYLOAD_INVALID',
+  'BUILD_RULE_RULE_ID_REQUIRED',
+  'BUILD_RULE_VERSION_MISMATCH',
+  'BUILD_RULE_INPUTS_REQUIRED',
+  'BUILD_RULE_INPUTS_INVALID',
+  'BUILD_RULE_LIST_INVALID',
+  'PRIMARY_RULE_REQUIRED',
+  'PRIMARY_RULE_NOT_SELECTED',
+  'FREEFORM_BRIEF_REQUIRED',
+  'RULE_VALIDATION_FAILED',
+  'RULE_TEMPLATE_UNSUPPORTED',
+  'QUESTIONNAIRE_REQUIRED_FOR_RULE',
+  'PRIMARY_RULE_INELIGIBLE',
+  'CREATOR_TEMPLATE_MODE_UNSUPPORTED',
+]);
+
+const readCreatorValidationMessage = (error: unknown): string | null => {
+  if (!(error instanceof Error)) return null;
+  const message = error.message;
+  if (CREATOR_VALIDATION_ERROR_MESSAGES.has(message)) return message;
+  return /^BUILD_RULE_PRESET_NOT_FOUND:[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(message)
+    ? message
+    : null;
+};
+
+export const buildCreatorPreparationErrorResponse = (
+  error: unknown,
+  options: Readonly<{
+    allowValidationMessage: boolean;
+    providerSecret: string;
+    sensitiveTexts: readonly string[];
+  }>,
+): Response => {
+  const validationMessage = options.allowValidationMessage
+    ? readCreatorValidationMessage(error)
+    : null;
+  if (validationMessage) {
+    return new Response(JSON.stringify({ error: '创作请求无效', message: validationMessage }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+  return new Response(JSON.stringify({
+    error: '创作失败',
+    message: sanitizePublicErrorMessage(error, {
+      fallbackMessage: '创作服务暂时不可用，请稍后重试',
+      secrets: [options.providerSecret],
+      sensitiveTexts: options.sensitiveTexts,
+    }),
+  }), {
+    status: 500,
+    headers: { 'Content-Type': 'application/json' },
+  });
+};
 
 export const CREATOR_MAGICAL_GIRL_SCHEMA = z.object({
   codename: z.string().describe('代号：魔法少女对应的一种花的名字，根据性格、理念匹配合适的花语对应的花名。可以从我提供的花名中选取最合适的一个，也可以生成一个其他的更合适的花名。'),
@@ -275,9 +332,22 @@ export const createGenerateCreatorRuntime = (
         ports.logInfo('问卷答案超过字数上限，已取消原生签名', overLimitAnswer);
       }
 
+      const customProviderPayload = requestBody.customProvider;
+      const providerSecret = customProviderPayload
+        && typeof customProviderPayload === 'object'
+        && !Array.isArray(customProviderPayload)
+        && typeof (customProviderPayload as Record<string, unknown>).apiKey === 'string'
+        ? (customProviderPayload as Record<string, string>).apiKey
+        : '';
+      const sensitiveTexts = [
+        freeformBrief ?? '',
+        ...normalizedAnswers.flatMap((answer) => [answer.question ?? '', answer.answer]),
+      ];
+      let buildRules: CreatorBuildRuleRuntimeResult[];
+      let creatorRequestInput: CreatorRequestInput;
       try {
-        const buildRules = ports.resolveBuildRules(requestBody.buildRules);
-        const creatorRequestInput: CreatorRequestInput = {
+        buildRules = ports.resolveBuildRules(requestBody.buildRules);
+        creatorRequestInput = {
           template,
           freeformBrief,
           questionnaires: effectiveQuestionnaires.map((questionnaire) => ({
@@ -292,26 +362,35 @@ export const createGenerateCreatorRuntime = (
           throw new Error('CREATOR_TEMPLATE_MODE_UNSUPPORTED');
         }
         ports.validateCreatorRequest(creatorRequestInput);
-        const creatorPromptInput = ports.buildCreatorPromptInput(creatorRequestInput);
-        return completeStep({
-          normalizedAnswers,
-          effectiveQuestionnaires,
-          allowNativeSignature,
-          language,
-          customProviderPayload: requestBody.customProvider,
-          template,
-          freeformBrief,
-          primaryRuleId,
-          buildRules,
-          creatorPromptInput,
-        });
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'CREATOR_REQUEST_INVALID';
-        return respondStep(new Response(JSON.stringify({ error: '创作请求无效', message }), {
-          status: 400,
-          headers: { 'Content-Type': 'application/json' },
+        return respondStep(buildCreatorPreparationErrorResponse(error, {
+          allowValidationMessage: true,
+          providerSecret,
+          sensitiveTexts,
         }));
       }
+      let creatorPromptInput: CreatorPromptInput;
+      try {
+        creatorPromptInput = ports.buildCreatorPromptInput(creatorRequestInput);
+      } catch (error) {
+        return respondStep(buildCreatorPreparationErrorResponse(error, {
+          allowValidationMessage: false,
+          providerSecret,
+          sensitiveTexts,
+        }));
+      }
+      return completeStep({
+        normalizedAnswers,
+        effectiveQuestionnaires,
+        allowNativeSignature,
+        language,
+        customProviderPayload,
+        template,
+        freeformBrief,
+        primaryRuleId,
+        buildRules,
+        creatorPromptInput,
+      });
     },
     resolveExecution: async (_request, input) => {
       const resolved = resolveLegacyQuestionnaireProviderRuntime(

@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createRequire } from 'node:module';
+import { ArenaRoomSharedConfigSchema } from '@mahoshojo/contracts/arena-room';
+import { persistArenaGenerationParticipants } from '../src/arena-generation/participants';
 
 import {
   createNodeArenaGenerationFinalizationPorts,
@@ -7,8 +9,8 @@ import {
   createNodeArenaGenerationTerminalStore,
   MAX_ARENA_TERMINAL_COMBATANTS,
   MAX_ARENA_TERMINAL_EXTRA_JSON_BYTES,
-  readNodeArenaGenerationReconciliation,
 } from '../src/arena-generation/d1-finalization';
+import * as arenaD1Finalization from '../src/arena-generation/d1-finalization';
 import type { NodeDataD1Client } from '../src/node-runtime/data-ports';
 import type { ArenaGenerationRejectedTerminalRecordInput } from '@mahoshojo/hosted-api/arena-generation/service';
 
@@ -93,8 +95,8 @@ const claimInput = {
     mode: 'classic',
     language: 'zh-CN',
     combatants: [
-      { type: 'magical-girl', data: { name: 'A' } },
-      { type: 'magical-girl', data: { name: 'B' } },
+      { roomCombatantKey: 'data-card:character-a', type: 'magical-girl', data: { name: 'A' } },
+      { roomCombatantKey: 'host-local:character:1:b', type: 'magical-girl', data: { name: 'B' } },
     ],
   },
   metadata: {
@@ -105,6 +107,46 @@ const claimInput = {
   status: 'completed' as const,
   errorCode: null,
   resultRef: 'r2:v1/battle-report-generations/generation-1/output.md',
+};
+
+const multiplayerSharedConfig = ArenaRoomSharedConfigSchema.parse({
+  battleMode: 'classic',
+  reportFormat: 'markdown',
+  combatants: [{
+    key: 'data-card:character-1',
+    ref: { id: 'character-1', kind: 'character', versionToken: 'v1' },
+  }],
+  teams: [],
+  scenario: null,
+  auxScenarios: [],
+  materials: [],
+  userGuidance: '',
+  storyLength: 'standard',
+  customStoryLength: null,
+  selectedLanguage: 'zh-CN',
+  historySettings: {
+    readArenaHistory: true,
+    readArenaHistoryLimit: 3,
+    isArenaHistoryUnlimited: false,
+    writeArenaHistory: true,
+    readCurrentState: true,
+    writeCurrentState: true,
+    readNarrativeHistory: false,
+    readNarrativeHistoryLimit: 10,
+    isNarrativeHistoryUnlimited: false,
+    writeNarrativeHistory: false,
+  },
+});
+
+const multiplayerSnapshot = {
+  roomId: 'room-1',
+  generationRequestId: 'request-1',
+  configRevision: 0,
+  snapshotDigest: 'sha256:test',
+  collaborativeInfluence: true,
+  participantUserIds: [42, 99],
+  hostAccountUserId: 42,
+  sharedConfig: multiplayerSharedConfig,
 };
 
 const rejectedInput: ArenaGenerationRejectedTerminalRecordInput = {
@@ -121,7 +163,79 @@ const rejectedInput: ArenaGenerationRejectedTerminalRecordInput = {
   pvpContext: { roomId: 'room-1', matchId: 'match-1', roundId: 'round-1' },
 };
 
+const sha256Hex = async (value: string): Promise<string> => crypto.subtle.digest(
+  'SHA-256',
+  new TextEncoder().encode(value),
+).then((bytes) => Array.from(
+  new Uint8Array(bytes),
+  (byte) => byte.toString(16).padStart(2, '0'),
+).join(''));
+
+const readRoomSafeResult = async (extra: Record<string, unknown>) => {
+  const actorKey = 'anonymous:room-safe-test';
+  const client = sequentialD1([result([{
+    id: 'generation-room-safe-test',
+    status: 'completed',
+    updated_at: '2026-08-25T04:00:00.000Z',
+    mode: 'classic',
+    extra_json: JSON.stringify({
+      generationRequestId: 'request-room-safe-test',
+      generationOwnerHash: await sha256Hex(actorKey),
+      generationPayloadHash: 'payload-room-safe-test',
+      generationTerminalStatus: 'completed',
+      finalizationCompleted: true,
+      resultRef: 'r2:room-safe-test',
+      ...extra,
+    }),
+    r2_key: 'room-safe-test',
+  }])]);
+  const store = createNodeArenaGenerationTerminalStore({
+    getD1Client: () => client,
+    objectStore: {
+      put: vi.fn(),
+      getText: vi.fn(async () => ({ kind: 'found' as const, text: 'room-safe body' })),
+    },
+  });
+  return (await store.readOwnedTerminal({
+    generationId: 'generation-room-safe-test',
+    actorKey,
+  }))?.roomSafeResult;
+};
+
 describe('Arena D1/R2 finalization ports', () => {
+  it('persists bounded completion diagnostics and restores a failed partial output by owner', async () => {
+    const writer = sequentialD1([result([], 1)]);
+    const ports = createNodeArenaGenerationFinalizationPorts({ getD1Client: () => writer });
+    await ports.claimTerminal({
+      ...claimInput, status: 'failed', errorCode: 'AI_OUTPUT_TRUNCATED',
+      markdown: 'partial body',
+      telemetry: { finishReason: 'length', usage: { completionTokens: 20, reasoningTokens: 15, textTokens: 5 },
+        streamCompletion: { sdkFinishEvent: true, maxOutputTokens: 20, textChars: 12,
+          lastTextMs: 100, apiKey: 'must-not-persist' }, providerBaseUrl: 'must-not-persist' },
+    });
+    const extra = writer.boundCalls[0]?.map((value) => {
+      try { return typeof value === 'string' ? JSON.parse(value) : null; } catch { return null; }
+    }).find((value) => value?.partialOutput === true);
+    expect(extra).toMatchObject({
+      completion: { finishReason: 'length', sdkFinishEvent: true, maxOutputTokens: 20 },
+      usageDetails: { completionTokens: 20, reasoningTokens: 15, textTokens: 5 },
+      partialOutput: true,
+    });
+    expect(JSON.stringify(extra)).not.toContain('must-not-persist');
+    const reader = sequentialD1([result([{
+      id: claimInput.generationId, status: 'failed',
+      updated_at: '2026-09-28T00:00:00Z', r2_key: 'key',
+      extra_json: JSON.stringify({ ...extra, finalizationCompleted: true }),
+    }])]);
+    const terminal = await createNodeArenaGenerationTerminalStore({
+      getD1Client: () => reader,
+      objectStore: { put: vi.fn(), getText: vi.fn(async () => ({ kind: 'found' as const, text: 'partial body' })) },
+    }).readOwnedTerminal({ generationId: claimInput.generationId, actorKey: claimInput.actorKey });
+    expect(terminal).toMatchObject({
+      status: 'failed', markdown: 'partial body', errorCode: 'AI_OUTPUT_TRUNCATED',
+      roomSafeResult: null, telemetry: { usage: { textTokens: 5 } },
+    });
+  });
   it('records a bounded failed PVP rejection without success-side-effect data', async () => {
     const client = sequentialD1([result([], 1)]);
     const recorder = createNodeArenaRejectedTerminalRecorder({
@@ -270,6 +384,401 @@ describe('Arena D1/R2 finalization ports', () => {
     expect(client.boundCalls[0]?.[6]).toBe('api/generate-battle-story');
   });
 
+  it('indexes structured non-stream JSON without relying on Markdown headings', async () => {
+    const client = sequentialD1([result([], 1)]);
+    const ports = createNodeArenaGenerationFinalizationPorts({
+      getD1Client: () => client,
+      now: () => new Date('2026-08-25T04:00:00.000Z'),
+    });
+    const structured = {
+      headline: '原生 JSON 战报',
+      article: { body: '正文', analysis: '点评' },
+      officialReport: { winner: '角色B', conclusion: '结论' },
+      impacts: [{ characterName: '角色B', impact: '成长' }],
+    };
+
+    await ports.claimTerminal({
+      ...claimInput,
+      payload: {
+        ...claimInput.payload,
+        writeArenaHistory: true,
+        writeCurrentState: false,
+        __arenaServerContextV1: {
+          endpoint: 'api/arena/generate',
+          deliveryMode: 'non-stream',
+        },
+      },
+      metadata: { outputContract: 'structured-report' },
+      markdown: JSON.stringify(structured),
+    });
+
+    expect(client.boundCalls[0]?.[33]).toBe(structured.headline);
+    expect(client.boundCalls[0]?.[34]).toBe(structured.officialReport.winner);
+    const extraJson = client.boundCalls[0]?.[44];
+    expect(extraJson).toEqual(expect.any(String));
+    expect(JSON.parse(extraJson as string).localCardReconciliation).toMatchObject({
+      report: {
+        headline: structured.headline,
+        officialReport: { winner: structured.officialReport.winner },
+      },
+      impacts: structured.impacts,
+    });
+  });
+
+  it('Web presentation snapshot 超预算时仍保存格式以保证历史解释正确', async () => {
+    const client = sequentialD1([result([], 1)]);
+    const ports = createNodeArenaGenerationFinalizationPorts({ getD1Client: () => client });
+    await ports.claimTerminal({
+      ...claimInput,
+      metadata: { outputContract: 'web-document', userGuidance: '长'.repeat(60_000) },
+    });
+    expect(JSON.parse(client.boundCalls[0]?.[44] as string).battleReportRenderSnapshotV1)
+      .toEqual({ version: 1, reportFormat: 'web' });
+  });
+
+  it('preserves package identity and overlay digest through compact snapshot and room replay', async () => {
+    const webPackage = {
+      packageRef: { id: 'test.fixture', version: '1.0.0', digest: `sha256:${'a'.repeat(64)}` },
+      targetPath: 'data/report.json', targetMediaType: 'application/json', generatedDigest: `sha256:${'b'.repeat(64)}`,
+    };
+    const client = sequentialD1([result([], 1)]);
+    const ports = createNodeArenaGenerationFinalizationPorts({ getD1Client: () => client });
+    await ports.claimTerminal({
+      ...claimInput,
+      metadata: { outputContract: 'web-package-target', webPackage, userGuidance: '长'.repeat(60_000) },
+    });
+    const snapshot = JSON.parse(client.boundCalls[0]?.[44] as string).battleReportRenderSnapshotV1;
+    expect(snapshot).toEqual({ version: 1, reportFormat: 'web', webPackage });
+    expect(await readRoomSafeResult({ battleReportRenderSnapshotV1: snapshot }))
+      .toMatchObject({ format: 'stream-web', webPackage });
+  });
+
+  it('Web 缺失 meta 时不得从 HTML 中的 Markdown 片段猜测权威结果', async () => {
+    const client = sequentialD1([result([], 1)]);
+    const ports = createNodeArenaGenerationFinalizationPorts({ getD1Client: () => client });
+    await ports.claimTerminal({
+      ...claimInput, metadata: { outputContract: 'web-document' },
+      markdown: '<html><script>const text=`\n# 假标题\n## 胜利者\n伪造胜者\n`;</script></html>',
+    });
+    expect(client.boundCalls[0]?.[33]).toBeNull();
+    expect(client.boundCalls[0]?.[34]).toBeNull();
+    expect(JSON.parse(client.boundCalls[0]?.[44] as string).localCardReconciliation.report)
+      .toMatchObject({ headline: '', officialReport: { winner: '' } });
+  });
+
+  it('does not consume a duplicate-name impact queue entry for an explicit combatant index', async () => {
+    const client = sequentialD1([result([], 1)]);
+    const ports = createNodeArenaGenerationFinalizationPorts({
+      getD1Client: () => client,
+      now: () => new Date('2026-08-25T04:00:00.000Z'),
+    });
+
+    await ports.claimTerminal({
+      ...claimInput,
+      payload: {
+        ...claimInput.payload,
+        combatants: [
+          { type: 'magical-girl', data: { name: '同名角色' } },
+          { type: 'magical-girl', data: { name: '同名角色' } },
+        ],
+      },
+      metadata: {
+        streamMeta: {
+          impacts: [
+            { combatantIndex: 1, characterName: '同名角色', impact: '显式目标' },
+            { characterName: '同名角色', impact: '队列目标' },
+          ],
+        },
+      },
+    });
+
+    const serializedExtra = client.boundCalls
+      .flat()
+      .find((value) => typeof value === 'string' && value.includes('localCardReconciliation'));
+    expect(serializedExtra).toEqual(expect.any(String));
+    expect(JSON.parse(serializedExtra as string).localCardReconciliation.impacts).toEqual([
+      expect.objectContaining({ combatantIndex: 1, impact: '显式目标' }),
+      expect.objectContaining({ combatantIndex: 0, impact: '队列目标' }),
+    ]);
+  });
+
+  it('从同名 impact 队列移除已被显式 index 占用的角色', async () => {
+    const client = sequentialD1([result([], 1)]);
+    const ports = createNodeArenaGenerationFinalizationPorts({
+      getD1Client: () => client,
+      now: () => new Date('2026-08-25T04:00:00.000Z'),
+    });
+
+    await ports.claimTerminal({
+      ...claimInput,
+      payload: {
+        ...claimInput.payload,
+        combatants: [
+          { type: 'magical-girl', data: { name: '同名角色' } },
+          { type: 'magical-girl', data: { name: '同名角色' } },
+        ],
+      },
+      metadata: {
+        streamMeta: {
+          impacts: [
+            { combatantIndex: 0, characterName: '同名角色', impact: '显式目标' },
+            { characterName: '同名角色', impact: '队列目标' },
+          ],
+        },
+      },
+    });
+
+    const serializedExtra = client.boundCalls
+      .flat()
+      .find((value) => typeof value === 'string' && value.includes('localCardReconciliation'));
+    expect(serializedExtra).toEqual(expect.any(String));
+    expect(JSON.parse(serializedExtra as string).localCardReconciliation.impacts).toEqual([
+      expect.objectContaining({ combatantIndex: 0, impact: '显式目标' }),
+      expect.objectContaining({ combatantIndex: 1, impact: '队列目标' }),
+    ]);
+  });
+
+  it('builds Room-safe updates by combatantIndex even when the model display name differs', async () => {
+    const result = await readRoomSafeResult({
+      combatantsFallback: [
+        { sortIndex: 0, roomCombatantKey: 'data-card:character-a', name: '角色甲' },
+        { sortIndex: 1, roomCombatantKey: 'data-card:character-b', name: '双头猎犬-蠖' },
+      ],
+      localCardReconciliation: {
+        impacts: [{
+          combatantIndex: 1,
+          characterName: '双头猎犬 - 蠖',
+          impact: '完成逆阶进化准备',
+          currentStateSummary: '进入消化阶段',
+        }],
+      },
+    });
+
+    expect(result?.combatantUpdates).toEqual([{
+      combatantKey: 'data-card:character-b',
+      displayName: '双头猎犬-蠖',
+      impact: '完成逆阶进化准备',
+      currentStateSummary: '进入消化阶段',
+    }]);
+  });
+
+  it('does not use a name fallback when an explicit combatantIndex is invalid', async () => {
+    const result = await readRoomSafeResult({
+      combatantsFallback: [{
+        sortIndex: 0,
+        roomCombatantKey: 'data-card:character-a',
+        name: '唯一角色',
+      }],
+      localCardReconciliation: {
+        impacts: [{
+          combatantIndex: 99,
+          characterName: '唯一角色',
+          impact: '错误索引不应绑定',
+        }],
+      },
+    });
+
+    expect(result).not.toHaveProperty('combatantUpdates');
+  });
+
+  it('keeps duplicate-name updates on their indexed Room-safe combatants', async () => {
+    const result = await readRoomSafeResult({
+      combatantsFallback: [
+        { sortIndex: 0, roomCombatantKey: 'host-local:character-a', name: '同名角色' },
+        { sortIndex: 1, roomCombatantKey: 'host-local:character-b', name: '同名角色' },
+      ],
+      localCardReconciliation: {
+        impacts: [
+          { combatantIndex: 0, characterName: '同名角色', impact: '甲的变化' },
+          { combatantIndex: 1, characterName: '同名角色', impact: '乙的变化' },
+        ],
+      },
+    });
+
+    expect(result?.combatantUpdates).toEqual([
+      { combatantKey: 'host-local:character-a', displayName: '同名角色', impact: '甲的变化' },
+      { combatantKey: 'host-local:character-b', displayName: '同名角色', impact: '乙的变化' },
+    ]);
+  });
+
+  it('uses the unique normalized display name only as the legacy fallback', async () => {
+    const result = await readRoomSafeResult({
+      combatantsFallback: [{
+        sortIndex: 0,
+        roomCombatantKey: 'data-card:character-a',
+        name: '唯一 角色',
+      }],
+      localCardReconciliation: {
+        impacts: [{ characterName: '  唯一   角色  ', impact: '旧数据中的变化' }],
+      },
+    });
+
+    expect(result?.combatantUpdates).toEqual([{
+      combatantKey: 'data-card:character-a',
+      displayName: '唯一 角色',
+      impact: '旧数据中的变化',
+    }]);
+  });
+
+  it('skips ambiguous legacy name matches instead of emitting name-only updates', async () => {
+    const result = await readRoomSafeResult({
+      combatantsFallback: [
+        { sortIndex: 0, roomCombatantKey: 'data-card:character-a', name: '同名角色' },
+        { sortIndex: 1, roomCombatantKey: 'data-card:character-b', name: '同名角色' },
+      ],
+      localCardReconciliation: {
+        impacts: [{ characterName: '同名角色', impact: '无法确定目标' }],
+      },
+    });
+
+    expect(result).not.toHaveProperty('combatantUpdates');
+  });
+
+  it('fails locally on conflicting effects for one indexed combatant and deduplicates identical effects', async () => {
+    const conflicted = await readRoomSafeResult({
+      combatantsFallback: [{
+        sortIndex: 0,
+        roomCombatantKey: 'data-card:character-a',
+        name: '角色甲',
+      }],
+      localCardReconciliation: {
+        impacts: [
+          { combatantIndex: 0, characterName: '角色甲', impact: '第一条变化' },
+          { combatantIndex: 0, characterName: '角色甲', impact: '第二条变化' },
+        ],
+      },
+    });
+    expect(conflicted).not.toHaveProperty('combatantUpdates');
+
+    const deduplicated = await readRoomSafeResult({
+      combatantsFallback: [{
+        sortIndex: 0,
+        roomCombatantKey: 'data-card:character-a',
+        name: '角色甲',
+      }],
+      localCardReconciliation: {
+        impacts: [
+          { combatantIndex: 0, characterName: '角色甲', impact: '同一条变化' },
+          { combatantIndex: 0, characterName: '角色甲', impact: '同一条变化' },
+        ],
+      },
+    });
+    expect(deduplicated?.combatantUpdates).toEqual([{
+      combatantKey: 'data-card:character-a',
+      displayName: '角色甲',
+      impact: '同一条变化',
+    }]);
+  });
+
+  it('does not materialize combatant updates when reconciliation is unavailable or has no details', async () => {
+    const unavailable = await readRoomSafeResult({
+      combatantsFallback: [{
+        sortIndex: 0,
+        roomCombatantKey: 'data-card:character-a',
+        name: '角色甲',
+      }],
+      localCardReconciliation: {
+        available: false,
+        reason: 'manifest_budget_exceeded',
+        impacts: [{
+          combatantIndex: 0,
+          characterName: '角色甲',
+          impact: '不可公开的变化',
+        }],
+      },
+    });
+    expect(unavailable).not.toHaveProperty('combatantUpdates');
+
+    const nameOnly = await readRoomSafeResult({
+      combatantsFallback: [{
+        sortIndex: 0,
+        roomCombatantKey: 'data-card:character-a',
+        name: '角色甲',
+      }],
+      localCardReconciliation: {
+        impacts: [{ combatantIndex: 0, characterName: '角色甲' }],
+      },
+    });
+    expect(nameOnly).not.toHaveProperty('combatantUpdates');
+  });
+
+  it.each([
+    ['stream', 'api/arena/generate-stream', 'stream-markdown'],
+    ['non-stream', 'api/arena/generate', 'structured-report'],
+    ['web', 'api/arena/generate-stream', 'web-document'],
+  ] as const)('persists the %s render snapshot without rerolling or leaking undeclared metadata', async (
+    _label,
+    endpoint,
+    outputContract,
+  ) => {
+    const client = sequentialD1([result([], 1)]);
+    const ports = createNodeArenaGenerationFinalizationPorts({
+      getD1Client: () => client,
+      now: () => new Date('2026-08-25T04:00:00.000Z'),
+    });
+    const adjudicationResults = [{
+      depth: 0,
+      description: '攻击是否命中？',
+      type: 'binary',
+      roll: 42,
+      outcome: '成功',
+      details: '掷骰(42) vs 成功率(65%)',
+    }];
+
+    await ports.claimTerminal({
+      ...claimInput,
+      payload: {
+        ...claimInput.payload,
+        combatants: [{
+          roomCombatantKey: 'data-card:character-a',
+          type: 'magical-girl',
+          isNative: true,
+          data: { name: 'A', signature: 'signature-a' },
+        }, claimInput.payload.combatants[1]],
+        __arenaServerContextV1: {
+          endpoint,
+          deliveryMode: outputContract === 'structured-report' ? 'non-stream' : 'stream',
+        },
+      },
+      metadata: {
+        outputContract,
+        reporterInfo: { name: '测试记者', publication: 'A.R.E.N.A.' },
+        userGuidance: '保持克制',
+        characterGuidances: [{ characterName: '角色甲', guidance: '保护队友' }],
+        adjudicationResults,
+        narrativeHistoryReadCount: 3,
+        rawReasoning: 'must-not-enter-render-snapshot',
+        apiKey: 'must-not-enter-render-snapshot',
+      },
+    });
+
+    const serializedExtra = client.boundCalls
+      .flat()
+      .find((value) => typeof value === 'string' && value.includes('generationOwnerHash'));
+    expect(serializedExtra).toEqual(expect.any(String));
+    const extra = JSON.parse(serializedExtra as string);
+    expect(extra.battleReportRenderSnapshotV1).toEqual({
+      version: 1,
+      ...(outputContract === 'web-document' ? { reportFormat: 'web' } : {}),
+      reporterInfo: { name: '测试记者', publication: 'A.R.E.N.A.' },
+      userGuidance: '保持克制',
+      characterGuidances: [{ characterName: '角色甲', guidance: '保护队友' }],
+      adjudicationResults,
+      narrativeHistoryReadCount: 3,
+    });
+    expect(extra.combatantsFallback.map((entry: Record<string, unknown>) => (
+      entry.roomCombatantKey
+    ))).toEqual(['data-card:character-a', 'host-local:character:1:b']);
+    expect(extra.combatantsFallback[0]).toMatchObject({
+      isNative: true,
+      nativeSignature: 'signature-a',
+    });
+    expect(extra.combatantsFallback[1]).not.toHaveProperty('nativeSignature');
+    expect(extra.localCardReconciliation).not.toHaveProperty('baseRevisionHash');
+    expect(JSON.stringify(extra)).not.toContain('baseRevisionHash');
+    expect(JSON.stringify(extra.battleReportRenderSnapshotV1)).not.toContain('must-not-enter-render-snapshot');
+  });
+
   it('writes PVP columns only from the trusted server context', async () => {
     const unsignedClient = sequentialD1([result([], 1)]);
     const unsignedPorts = createNodeArenaGenerationFinalizationPorts({
@@ -367,6 +876,25 @@ describe('Arena D1/R2 finalization ports', () => {
     expect(JSON.stringify(client.boundCalls)).not.toContain(failedMarkdown);
   });
 
+  it('stops writing completed terminal Markdown into the D1 output preview', async () => {
+    const client = sequentialD1([result([], 1)]);
+    const ports = createNodeArenaGenerationFinalizationPorts({
+      getD1Client: () => client,
+      now: () => new Date('2026-08-25T04:00:00.000Z'),
+    });
+
+    await ports.claimTerminal(claimInput);
+
+    const insertSql = vi.mocked(client.prepare).mock.calls[0]?.[0] ?? '';
+    const columns = insertSql
+      .match(/battle_report_generations\s*\(([\s\S]*?)\)\s*VALUES/u)?.[1]
+      ?.split(',')
+      .map((column) => column.trim()) ?? [];
+    const outputPreviewIndex = columns.indexOf('output_preview');
+    expect(outputPreviewIndex).toBeGreaterThan(-1);
+    expect(client.boundCalls[0]?.[outputPreviewIndex]).toBeNull();
+  });
+
   it('reconciles an indeterminate INSERT error before reporting terminal failure', async () => {
     const ownerHash = await crypto.subtle.digest(
       'SHA-256',
@@ -411,6 +939,7 @@ describe('Arena D1/R2 finalization ports', () => {
       generationId: 'generation-1',
       actorKey: 'user:42',
       markdown: 'body',
+      contentType: 'text/markdown; charset=utf-8',
       signal: new AbortController().signal,
     })).resolves.toEqual({
       resultRef: 'r2:v1/battle-report-generations/generation-1/output.md',
@@ -418,6 +947,7 @@ describe('Arena D1/R2 finalization ports', () => {
     expect(put).toHaveBeenCalledWith(expect.objectContaining({
       key: 'v1/battle-report-generations/generation-1/output.md',
       body: 'body',
+      contentType: 'text/markdown; charset=utf-8',
     }));
     expect(client.prepare).toHaveBeenCalledWith(expect.stringContaining('large_objects'));
   });
@@ -492,6 +1022,14 @@ describe('Arena D1/R2 finalization ports', () => {
             currentStateSummary: 'x'.repeat(10_000),
           })),
         },
+        adjudicationResults: Array.from({ length: 16 }, (_, index) => ({
+          depth: 0,
+          description: `event-${index}`,
+          type: 'binary',
+          roll: 50,
+          outcome: '成功',
+          details: 'x'.repeat(2_000),
+        })),
       },
     };
 
@@ -509,6 +1047,8 @@ describe('Arena D1/R2 finalization ports', () => {
       .toBeLessThanOrEqual(MAX_ARENA_TERMINAL_EXTRA_JSON_BYTES);
     expect(JSON.parse(serializedExtra as string).combatantsFallback)
       .toHaveLength(MAX_ARENA_TERMINAL_COMBATANTS);
+    expect(JSON.parse(serializedExtra as string).battleReportRenderSnapshotV1.adjudicationResults)
+      .toHaveLength(16);
     const combatantWrites = vi.mocked(client.prepare).mock.calls.filter(([sql]) => (
       sql.includes('battle_report_generation_combatants')
       && sql.includes('WHERE NOT EXISTS')
@@ -577,7 +1117,101 @@ ORDER BY sort_index
     }
   });
 
-  it('authorizes terminal fallback by actor hash and reads full R2 output', async () => {
+  it('persists frozen multiplayer participants with host/member roles idempotently', async () => {
+    const database = new DatabaseSync(':memory:');
+    try {
+      database.exec(`
+CREATE TABLE battle_report_generation_participants (
+  generation_id TEXT NOT NULL,
+  user_id INTEGER NOT NULL,
+  role TEXT,
+  PRIMARY KEY (generation_id, user_id)
+)
+      `.trim());
+      const ports = createNodeArenaGenerationFinalizationPorts({
+        getD1Client: () => sqliteD1(database),
+      });
+      const input = {
+        ...claimInput,
+        actorKey: 'pvp-room:room-1',
+        payload: {
+          ...claimInput.payload,
+          multiplayerGenerationSnapshot: multiplayerSnapshot,
+        },
+        idempotencyKey: 'arena-terminal:generation-1:participants',
+      };
+
+      await ports.persistParticipants(input);
+      await ports.persistParticipants(input);
+      database.exec('DELETE FROM battle_report_generation_participants WHERE user_id = 99');
+      await ports.persistParticipants(input);
+      await persistArenaGenerationParticipants(sqliteD1(database), 'generation-1', {
+        roomId: 'room-1', participantUserIds: [42, 99], collaborativeInfluence: true,
+      });
+
+      expect(database.prepare(`
+SELECT generation_id AS generationId, user_id AS userId, role
+FROM battle_report_generation_participants
+ORDER BY user_id
+      `.trim()).all()).toEqual([
+        { generationId: 'generation-1', userId: 42, role: 'host' },
+        { generationId: 'generation-1', userId: 99, role: 'member' },
+      ]);
+
+      database.exec("UPDATE battle_report_generation_participants SET role = NULL WHERE user_id = 42");
+      await ports.persistParticipants(input);
+      expect(database.prepare('SELECT role FROM battle_report_generation_participants WHERE user_id = 42').all())
+        .toEqual([{ role: null }]);
+    } finally {
+      database.close();
+    }
+  });
+
+  it('preserves null role for legacy multiplayer snapshots and batches at most sixteen users', async () => {
+    const client = sequentialD1([result(), result(), result()]);
+    await persistArenaGenerationParticipants(client, 'generation-legacy', {
+      roomId: 'room-legacy',
+      participantUserIds: Array.from({ length: 32 }, (_, index) => index + 1),
+      collaborativeInfluence: false,
+    });
+
+    expect(client.boundCalls).toHaveLength(3);
+    expect(client.boundCalls[0]).toEqual(['generation-legacy', 33]);
+    expect(client.boundCalls[1]).toHaveLength(16 * 3);
+    expect(client.boundCalls[2]).toHaveLength(16 * 3);
+    expect(client.boundCalls.flat()).toContain(null);
+  });
+
+  it.each(['role', 'membership'])('rejects conflicting participant %s before writing more access rows', async (conflict) => {
+    const database = new DatabaseSync(':memory:');
+    try {
+      database.exec(`CREATE TABLE battle_report_generation_participants (
+        generation_id TEXT, user_id INTEGER, role TEXT, PRIMARY KEY (generation_id, user_id)
+      )`);
+      database.prepare('INSERT INTO battle_report_generation_participants VALUES (?, ?, ?)')
+        .run('generation-1', conflict === 'role' ? 42 : 77, 'member');
+      await expect(persistArenaGenerationParticipants(sqliteD1(database), 'generation-1', {
+        roomId: 'room-1', participantUserIds: [42, 99], hostAccountUserId: 42, collaborativeInfluence: true,
+      })).rejects.toThrow('ARENA_PARTICIPANTS_EVIDENCE_CONFLICT');
+      expect(database.prepare('SELECT user_id FROM battle_report_generation_participants WHERE user_id = 99').all())
+        .toEqual([]);
+    } finally {
+      database.close();
+    }
+  });
+
+  it('rejects participant persistence when the effect idempotency identity is wrong', async () => {
+    const client = sequentialD1([]);
+    const ports = createNodeArenaGenerationFinalizationPorts({ getD1Client: () => client });
+
+    await expect(ports.persistParticipants({
+      ...claimInput,
+      idempotencyKey: 'arena-terminal:another-generation:participants',
+    })).rejects.toThrow('ARENA_PARTICIPANTS_IDEMPOTENCY_KEY_INVALID');
+    expect(client.prepare).not.toHaveBeenCalled();
+  });
+
+  it.each(['markdown', 'web'] as const)('authorizes %s terminal fallback by actor hash and reads full R2 output', async (reportFormat) => {
     const ownerHash = await crypto.subtle.digest(
       'SHA-256',
       new TextEncoder().encode('anonymous:anon-id-1'),
@@ -587,24 +1221,115 @@ ORDER BY sort_index
       status: 'completed',
       updated_at: '2026-08-25T04:00:00.000Z',
       output_preview: 'preview',
+      mode: 'classic',
+      scenario_title: '雨夜车站',
+      language: 'zh-CN',
+      story_length: 'standard',
+      ai_provider_name: 'must-not-project-provider-name',
+      ai_provider_type: 'must-not-project-provider-type',
+      ai_model: 'gpt-safe',
+      headline: '雨夜决战',
+      winner: '角色甲',
+      prompt_tokens: 10,
+      completion_tokens: 20,
+      total_tokens: 30,
+      cached_tokens: 2,
+      reasoning_tokens: 4,
       extra_json: JSON.stringify({
         generationRequestId: 'request-1',
         generationOwnerHash: ownerHash,
         generationPayloadHash: 'payload-hash-1',
+        generationTerminalStatus: 'completed',
         finalizationCompleted: true,
         resultRef: 'r2:key',
+        battleReportRenderSnapshotV1: {
+          version: 1,
+          reportFormat,
+          reporterInfo: { name: '测试记者', publication: 'A.R.E.N.A.' },
+          userGuidance: '保持克制',
+          characterGuidances: [{ characterName: '角色甲', guidance: '保护队友' }],
+          adjudicationResults: [{
+            depth: 0,
+            description: '攻击是否命中？',
+            type: 'binary',
+            roll: 42,
+            outcome: '成功',
+            details: '掷骰(42) vs 成功率(65%)',
+          }],
+          narrativeHistoryReadCount: 3,
+        },
+        combatantsFallback: [{
+          sortIndex: 0,
+          roomCombatantKey: 'data-card:character-1',
+          name: '角色甲',
+          privatePayload: { apiKey: 'must-not-leak' },
+        }],
+        localCardReconciliation: {
+          impacts: [{
+            characterName: '角色甲',
+            impact: '受轻伤',
+            currentStateSummary: '仍可行动',
+            fullCharacter: { private: true },
+          }],
+        },
+        rawReasoning: 'must-not-leak',
+        providerDiagnostic: { requestId: 'must-not-leak' },
       }),
       r2_key: 'key',
     }])]);
     const store = createNodeArenaGenerationTerminalStore({
       getD1Client: () => client,
-      objectStore: { put: vi.fn(), getText: vi.fn(async () => 'full body') },
+      objectStore: {
+        put: vi.fn(),
+        getText: vi.fn(async () => ({ kind: 'found' as const, text: 'full body' })),
+      },
     });
 
-    await expect(store.readOwnedTerminal({
+    const terminal = await store.readOwnedTerminal({
       generationId: 'generation-1',
       actorKey: 'anonymous:anon-id-1',
-    })).resolves.toMatchObject({ markdown: 'full body', generationRequestId: 'request-1' });
+    });
+    expect(terminal).toMatchObject({
+      markdown: 'full body',
+      generationRequestId: 'request-1',
+      roomSafeResult: {
+        version: 1,
+        format: reportFormat === 'web' ? 'stream-web' : 'stream-markdown',
+        reporterInfo: { name: '测试记者', publication: 'A.R.E.N.A.' },
+        mode: 'classic',
+        scenarioDisplayName: '雨夜车站',
+        sharedGuidance: '保持克制',
+        characterGuidances: [{
+          combatantKey: 'data-card:character-1',
+          displayName: '角色甲',
+          guidance: '保护队友',
+        }],
+        language: 'zh-CN',
+        storyLength: 'standard',
+        adjudicationResults: expect.any(Array),
+        narrativeHistoryReadCount: 3,
+        report: { headline: '雨夜决战', winner: '角色甲' },
+        ai: {
+          model: 'gpt-safe',
+          usage: {
+            promptTokens: 10,
+            completionTokens: 20,
+            totalTokens: 30,
+            cachedTokens: 2,
+            reasoningTokens: 4,
+          },
+        },
+        combatantUpdates: [{
+          combatantKey: 'data-card:character-1',
+          displayName: '角色甲',
+          impact: '受轻伤',
+          currentStateSummary: '仍可行动',
+        }],
+      },
+    });
+    expect(JSON.stringify(terminal?.roomSafeResult)).not.toMatch(
+      /extra_json|must-not-leak|must-not-project-provider|rawReasoning|providerDiagnostic|privatePayload|fullCharacter/u,
+    );
     await expect(store.readOwnedTerminal({
       generationId: 'generation-1',
       actorKey: 'anonymous:other-id',
@@ -643,6 +1368,45 @@ ORDER BY sort_index
     });
   });
 
+  it('projects a minimal safe result for a legacy completed row with only a valid mode', async () => {
+    const ownerHash = await crypto.subtle.digest(
+      'SHA-256',
+      new TextEncoder().encode('anonymous:anon-id-1'),
+    ).then((bytes) => Array.from(
+      new Uint8Array(bytes),
+      (byte) => byte.toString(16).padStart(2, '0'),
+    ).join(''));
+    const client = sequentialD1([result([{
+      id: 'generation-legacy-1',
+      status: 'completed',
+      updated_at: '2026-08-25T04:00:00.000Z',
+      mode: 'classic',
+      extra_json: JSON.stringify({
+        generationRequestId: 'request-legacy-1',
+        generationOwnerHash: ownerHash,
+        generationPayloadHash: 'payload-hash-legacy-1',
+        generationTerminalStatus: 'completed',
+        finalizationCompleted: true,
+        resultRef: 'r2:legacy',
+      }),
+      r2_key: 'legacy-key',
+    }])]);
+    const store = createNodeArenaGenerationTerminalStore({
+      getD1Client: () => client,
+      objectStore: {
+        put: vi.fn(),
+        getText: vi.fn(async () => ({ kind: 'found' as const, text: 'legacy full body' })),
+      },
+    });
+
+    await expect(store.readOwnedTerminal({
+      generationId: 'generation-legacy-1',
+      actorKey: 'anonymous:anon-id-1',
+    })).resolves.toMatchObject({
+      roomSafeResult: { version: 1, format: 'stream-markdown', mode: 'classic' },
+    });
+  });
+
   it('marks completed terminal content unavailable instead of silently serving its preview', async () => {
     const ownerHash = await crypto.subtle.digest(
       'SHA-256',
@@ -676,10 +1440,48 @@ ORDER BY sort_index
     })).resolves.toMatchObject({
       markdown: '',
       contentAvailable: false,
+      contentUnavailableReason: 'temporary',
     });
   });
 
-  it('does not expose a completed preview when the required R2 object index is missing', async () => {
+  it('classifies an expired R2 object as not-found without exposing the historical preview', async () => {
+    const ownerHash = await crypto.subtle.digest(
+      'SHA-256',
+      new TextEncoder().encode('anonymous:anon-id-1'),
+    ).then((bytes) => Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, '0')).join(''));
+    const client = sequentialD1([result([{
+      id: 'generation-1',
+      status: 'completed',
+      updated_at: '2026-08-25T04:00:00.000Z',
+      output_preview: 'truncated historical preview',
+      extra_json: JSON.stringify({
+        generationRequestId: 'request-1',
+        generationOwnerHash: ownerHash,
+        generationPayloadHash: 'payload-hash-1',
+        finalizationCompleted: true,
+        resultRef: 'r2:key',
+      }),
+      r2_key: 'key',
+    }])]);
+    const store = createNodeArenaGenerationTerminalStore({
+      getD1Client: () => client,
+      objectStore: {
+        put: vi.fn(),
+        getText: vi.fn(async () => ({ kind: 'not-found' as const })),
+      },
+    });
+
+    await expect(store.readOwnedTerminal({
+      generationId: 'generation-1',
+      actorKey: 'anonymous:anon-id-1',
+    })).resolves.toMatchObject({
+      markdown: '',
+      contentAvailable: false,
+      contentUnavailableReason: 'not-found',
+    });
+  });
+
+  it('classifies completed output without an archive pointer as not archived', async () => {
     const ownerHash = await crypto.subtle.digest(
       'SHA-256',
       new TextEncoder().encode('anonymous:anon-id-1'),
@@ -695,7 +1497,7 @@ ORDER BY sort_index
         generationPayloadHash: 'payload-hash-1',
         generationTerminalStatus: 'completed',
         finalizationCompleted: true,
-        resultRef: 'r2:key',
+        resultRef: null,
       }),
       r2_key: null,
     }])]);
@@ -704,7 +1506,13 @@ ORDER BY sort_index
     await expect(store.readOwnedTerminal({
       generationId: 'generation-1',
       actorKey: 'anonymous:anon-id-1',
-    })).resolves.toMatchObject({ contentAvailable: false });
+    })).resolves.toMatchObject({
+      markdown: '',
+      resultRef: null,
+      contentAvailable: false,
+      contentUnavailableReason: 'not-archived',
+      persistenceWarning: 'OUTPUT_NOT_ARCHIVED',
+    });
   });
 
   it('reports an actor-owned incomplete finalization without treating it as not found', async () => {
@@ -764,6 +1572,8 @@ ORDER BY sort_index
       result([], 1),
       result([], 1),
       result([], 1),
+      result([], 1),
+      result([], 1),
       result([{
         id: 'generation-1',
         status: 'completed',
@@ -787,10 +1597,18 @@ ORDER BY sort_index
       mode: 'classic',
       updatedAt: '2026-08-25T04:01:00.000Z',
       code: 'PRODUCER_LEASE_EXPIRED',
+      multiplayerParticipation: {
+        roomId: 'room-1',
+        participantUserIds: [42, 99],
+        hostAccountUserId: 42,
+        collaborativeInfluence: true,
+      },
     })).resolves.toMatchObject({
       status: 'completed',
       resultRef: 'r2:key',
-      markdown: 'preview',
+      markdown: '',
+      contentAvailable: false,
+      contentUnavailableReason: 'not-found',
     });
     expect(settleRatings).toHaveBeenCalledWith({
       generationId: 'generation-1',
@@ -801,22 +1619,149 @@ ORDER BY sort_index
     ));
   });
 
-  it('reads bounded local-card reconciliation authority without persisting client cards', async () => {
-    const payload = { rosterCount: 2, writeArenaHistory: true };
-    const client = sequentialD1([result([{
+  it('reads bounded local-card reconciliation only for the completed finalized owner', async () => {
+    const readOwnedReconciliation = (
+      arenaD1Finalization as typeof arenaD1Finalization & {
+        readOwnedNodeArenaGenerationReconciliation?: (_input: {
+          client: NodeDataD1Client;
+          generationId: string;
+          actorKey: string;
+        }) => Promise<unknown>;
+      }
+    ).readOwnedNodeArenaGenerationReconciliation;
+    expect(readOwnedReconciliation).toBeTypeOf('function');
+    if (!readOwnedReconciliation) return;
+
+    const payload = { writeArenaHistory: true };
+    const roster = [
+      { sortIndex: 0, name: 'A', type: 'magical-girl', dataCardId: 'card-a' },
+      { sortIndex: 1, name: 'B', type: 'general-character', templateId: 'B.json' },
+    ];
+    const ownerHash = await crypto.subtle.digest(
+      'SHA-256',
+      new TextEncoder().encode('user:42'),
+    ).then((bytes) => Array.from(
+      new Uint8Array(bytes),
+      (byte) => byte.toString(16).padStart(2, '0'),
+    ).join(''));
+    const completedRow = {
       status: 'completed',
       extra_json: JSON.stringify({
+        generationOwnerHash: ownerHash,
         finalizationCompleted: true,
         localCardReconciliation: payload,
+        combatantsFallback: roster,
       }),
-    }])]);
+    };
+    const foundClient = sequentialD1([result([completedRow])]);
 
-    await expect(readNodeArenaGenerationReconciliation({
-      client,
+    await expect(readOwnedReconciliation({
+      client: foundClient,
       generationId: 'generation-1',
-    })).resolves.toEqual(payload);
-    expect(client.prepare).toHaveBeenCalledWith(expect.stringContaining(
+      actorKey: 'user:42',
+    })).resolves.toEqual({
+      kind: 'found',
+      reconciliation: { ...payload, roster },
+    });
+    await expect(readOwnedReconciliation({
+      client: sequentialD1([result([completedRow])]),
+      generationId: 'generation-1',
+      actorKey: 'user:7',
+    })).resolves.toEqual({ kind: 'not-found', reason: 'owner_mismatch' });
+    await expect(readOwnedReconciliation({
+      client: sequentialD1([result()]),
+      generationId: 'generation-1',
+      actorKey: 'user:42',
+    })).resolves.toEqual({ kind: 'not-found', reason: 'row_missing' });
+    await expect(readOwnedReconciliation({
+      client: sequentialD1([result([{
+        ...completedRow,
+        extra_json: JSON.stringify({
+          generationOwnerHash: ownerHash,
+          finalizationCompleted: false,
+          localCardReconciliation: payload,
+        }),
+      }])]),
+      generationId: 'generation-1',
+      actorKey: 'user:42',
+    })).resolves.toEqual({ kind: 'unavailable', reason: 'finalization_pending' });
+    await expect(readOwnedReconciliation({
+      client: sequentialD1([result([{ ...completedRow, status: 'failed' }])]),
+      generationId: 'generation-1',
+      actorKey: 'user:42',
+    })).resolves.toEqual({ kind: 'unavailable', reason: 'generation_not_completed' });
+    await expect(readOwnedReconciliation({
+      client: sequentialD1([result([{
+        status: 'completed',
+        extra_json: JSON.stringify({
+          generationOwnerHash: ownerHash,
+          finalizationCompleted: true,
+        }),
+      }])]),
+      generationId: 'generation-1',
+      actorKey: 'user:42',
+    })).resolves.toEqual({ kind: 'unavailable', reason: 'manifest_missing' });
+    expect(foundClient.prepare).toHaveBeenCalledWith(expect.stringContaining(
       'FROM battle_report_generations',
     ));
+  });
+
+  it('reads exact Provider provenance only for the completed finalized owner', async () => {
+    const readOwnedProvenance = (
+      arenaD1Finalization as typeof arenaD1Finalization & {
+        readOwnedNodeArenaGenerationProvenance?: (_input: {
+          client: NodeDataD1Client;
+          generationId: string;
+          actorKey: string;
+        }) => Promise<unknown>;
+      }
+    ).readOwnedNodeArenaGenerationProvenance;
+    expect(readOwnedProvenance).toBeTypeOf('function');
+    if (!readOwnedProvenance) return;
+
+    const ownerHash = await crypto.subtle.digest(
+      'SHA-256',
+      new TextEncoder().encode('user:42'),
+    ).then((bytes) => Array.from(
+      new Uint8Array(bytes),
+      (byte) => byte.toString(16).padStart(2, '0'),
+    ).join(''));
+    const completedRow = {
+      status: 'completed',
+      custom_provider_id: 'kourichat',
+      custom_model_id: 'gpt-5.5',
+      ai_provider_name: 'KouriChat',
+      ai_provider_type: 'openai',
+      ai_model: 'gpt-5.5',
+      extra_json: JSON.stringify({
+        generationOwnerHash: ownerHash,
+        finalizationCompleted: true,
+      }),
+    };
+
+    await expect(readOwnedProvenance({
+      client: sequentialD1([result([completedRow])]),
+      generationId: 'generation-1',
+      actorKey: 'user:42',
+    })).resolves.toEqual({
+      kind: 'found',
+      provenance: {
+        customProviderId: 'kourichat',
+        customModelId: 'gpt-5.5',
+        aiProviderName: 'KouriChat',
+        aiProviderType: 'openai',
+        aiModel: 'gpt-5.5',
+      },
+    });
+    await expect(readOwnedProvenance({
+      client: sequentialD1([result([completedRow])]),
+      generationId: 'generation-1',
+      actorKey: 'user:7',
+    })).resolves.toEqual({ kind: 'not-found', reason: 'owner_mismatch' });
+    await expect(readOwnedProvenance({
+      client: sequentialD1([result([{ ...completedRow, ai_model: null }])]),
+      generationId: 'generation-1',
+      actorKey: 'user:42',
+    })).resolves.toEqual({ kind: 'unavailable', reason: 'provenance_missing' });
   });
 });

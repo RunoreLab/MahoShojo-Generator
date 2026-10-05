@@ -9,7 +9,7 @@ import { mapChangePasswordError } from '@/lib/auth/error-message';
 import { getPasswordPolicySummaryMessage, validatePasswordPolicy } from '@/lib/auth/password-policy';
 import { getDrizzleDbFromRuntime } from '@/lib/db/drizzle';
 import { getBusinessUserById } from '@/lib/db/repositories/business-users';
-import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
+import { json, readJson, requireAuthUser, withApiErrorBoundary } from '@/lib/api/server';
 
 type ChangePasswordPayload = {
   currentPassword?: unknown;
@@ -28,7 +28,7 @@ const toBoolean = (value: unknown): boolean | undefined => {
   return undefined;
 };
 
-const handler = withPvpErrorBoundary(async function handler(req: Request): Promise<Response> {
+const handler = withApiErrorBoundary(async function handler(req: Request): Promise<Response> {
   if (req.method !== 'PUT') return json({ error: 'Method not allowed' }, { status: 405 });
 
   const auth = await requireAuthUser(req);

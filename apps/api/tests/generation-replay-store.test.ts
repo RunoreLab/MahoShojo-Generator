@@ -160,6 +160,40 @@ describe('RedisGenerationReplayStore', () => {
     expect(options.arguments).toContain('900000');
   });
 
+  it('将 event.data 预序列化后透传给 XADD，不经过 Lua cjson 重编码', async () => {
+    const client = createClient();
+    vi.mocked(client.eval).mockResolvedValue(['1724570000000-0']);
+    const store = createRedisGenerationReplayStore({ getClient: () => client });
+
+    await store.appendEvents({
+      generationId: 'generation-1234',
+      producerToken: reserveInput.producerToken,
+      events: [{
+        type: 'ranking',
+        data: {
+          success: true,
+          generationId: 'generation-1234',
+          state: 'ready',
+          participants: [],
+        },
+      }],
+      now: reserveInput.now,
+    });
+
+    const [script, options] = vi.mocked(client.eval).mock.calls[0]!;
+    expect(script).toContain("'data', event.dataJson");
+    expect(script).not.toContain('cjson.encode(event.data)');
+    expect(JSON.parse(options.arguments[1]!)).toEqual([{
+      type: 'ranking',
+      dataJson: JSON.stringify({
+        success: true,
+        generationId: 'generation-1234',
+        state: 'ready',
+        participants: [],
+      }),
+    }]);
+  });
+
   it('cursor 仍在窗口内时只返回严格晚于 cursor 的独立 subscriber 事件', async () => {
     const client = createClient();
     vi.mocked(client.eval).mockResolvedValueOnce([
@@ -312,6 +346,28 @@ describe('RedisGenerationReplayStore', () => {
     );
   });
 
+  it.each([
+    { blockMs: 0, expectedBlockMs: 1 },
+    { blockMs: 10_000, expectedBlockMs: 1_000 },
+    { blockMs: Number.NaN, expectedBlockMs: 1_000 },
+  ])('将 XREAD BLOCK $blockMs 规范到安全范围', async ({ blockMs, expectedBlockMs }) => {
+    const client = createClient();
+    vi.mocked(client.eval).mockResolvedValueOnce(['events', '[]']);
+    vi.mocked(client.xRead).mockResolvedValueOnce(null);
+    const store = createRedisGenerationReplayStore({ getClient: () => client });
+
+    await expect(store.readAfter({
+      generationId: 'generation-1234',
+      after: '10-0',
+      blockMs,
+    })).resolves.toEqual({ kind: 'events', events: [] });
+
+    expect(client.xRead).toHaveBeenCalledWith(
+      [{ key: 'mahoshojo:gen:v1:generation-1234:events', id: '10-0' }],
+      { BLOCK: expectedBlockMs, COUNT: 256 },
+    );
+  });
+
   it('兼容 Redis Lua cjson 将空数组编码为空对象的返回形状', async () => {
     const client = createClient();
     vi.mocked(client.eval).mockResolvedValueOnce(['events', '{}']);
@@ -417,6 +473,12 @@ describe('RedisGenerationReplayStore', () => {
       'mahoshojo:gen:v1:generation-1234:state',
       'mahoshojo:gen:v1:generation-1234:events',
     ]);
+    expect(script).toContain("'data', terminalEvent.dataJson");
+    expect(script).not.toContain('cjson.encode(terminalEvent.data)');
+    expect(JSON.parse(options.arguments[5]!)).toEqual({
+      type: 'done',
+      dataJson: JSON.stringify({ status: 'completed', ok: true, resultRef: 'r2://report/1' }),
+    });
   });
 
   it('在执行 Lua 前拒绝 marker-only 或未决定 snapshot 的 terminal mutation', async () => {
@@ -549,6 +611,49 @@ describe('RedisGenerationReplayStore', () => {
     );
   });
 
+  it('从 Redis 恢复 completed 未归档告警而不改判失败', async () => {
+    const client = createClient();
+    vi.mocked(client.get).mockResolvedValue(JSON.stringify({
+      actorHash: 'actor-hash',
+      reservationKey: 'reservation-key',
+      generationId: 'generation-1234',
+      generationRequestId: 'request-1234',
+      payloadHash: 'payload-sha256',
+      producerToken: reserveInput.producerToken,
+      status: 'completed',
+      lastEventId: '12-0',
+      updatedAt: reserveInput.now,
+      leaseExpiresAt: null,
+      snapshot: {
+        status: 'completed',
+        markdown: '本次连接内仍可读取的完整正文',
+        reasoning: '',
+        lastEventId: '12-0',
+        updatedAt: reserveInput.now,
+        terminalResultRef: null,
+        persistenceWarning: 'OUTPUT_NOT_ARCHIVED',
+      },
+      terminal: {
+        status: 'completed',
+        resultRef: null,
+        persistenceWarning: 'OUTPUT_NOT_ARCHIVED',
+      },
+      cancelRequested: false,
+    }));
+    const store = createRedisGenerationReplayStore({ getClient: () => client });
+
+    await expect(store.readState({ generationId: 'generation-1234' })).resolves.toMatchObject({
+      status: 'completed',
+      snapshot: {
+        persistenceWarning: 'OUTPUT_NOT_ARCHIVED',
+      },
+      terminal: {
+        status: 'completed',
+        persistenceWarning: 'OUTPUT_NOT_ARCHIVED',
+      },
+    });
+  });
+
   it('markRunning 原子观察 reserved cancel，阻止旧 producer 启动 Provider', async () => {
     const client = createClient();
     vi.mocked(client.eval).mockResolvedValue('cancelled:content_policy');
@@ -621,6 +726,44 @@ describe('RedisGenerationReplayStore', () => {
       );
     },
   );
+
+  it('persists completed intent in finalization CAS and returns it to the lease reaper', async () => {
+    const client = createClient();
+    vi.mocked(client.eval)
+      .mockResolvedValueOnce('claimed')
+      .mockResolvedValueOnce([
+        'claimed',
+        reserveInput.generationRequestId,
+        reserveInput.payloadHash,
+        'classic',
+        JSON.stringify({ status: 'completed' }),
+      ]);
+    const store = createRedisGenerationReplayStore({ getClient: () => client });
+
+    await store.claimFinalization({
+      generationId: reserveInput.generationId,
+      producerToken: reserveInput.producerToken,
+      now: reserveInput.now,
+      leaseExpiresAt: reserveInput.leaseExpiresAt,
+      terminal: { status: 'completed' },
+    });
+    await expect(store.claimLeaseExpiry({
+      generationId: reserveInput.generationId,
+      actorKey: reserveInput.actorKey,
+      reaperToken: 'reaper-token-1',
+      now: '2026-08-25T04:02:00.000Z',
+      leaseExpiresAt: '2026-08-25T04:03:00.000Z',
+    })).resolves.toMatchObject({
+      kind: 'claimed',
+      intendedTerminal: { status: 'completed' },
+    });
+
+    const [claimScript, claimOptions] = vi.mocked(client.eval).mock.calls[0]!;
+    expect(claimScript).toContain('state.intendedTerminal');
+    expect(claimOptions.arguments).toContain(JSON.stringify({ status: 'completed' }));
+    const [reaperScript] = vi.mocked(client.eval).mock.calls[1]!;
+    expect(reaperScript).toContain('state.intendedTerminal');
+  });
 
   it('expired lease reaper CAS rotates producer ownership before durable terminal write', async () => {
     const client = createClient();

@@ -46,6 +46,8 @@ export {
 export {
   enhanceErrorWithUpstreamMessage,
   extractUpstreamErrorMessage,
+  sanitizePublicErrorMessage,
+  type SanitizePublicErrorMessageOptions,
 } from './error-extraction';
 export {
   buildLiveReasoningSummary,

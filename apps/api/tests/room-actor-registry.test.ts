@@ -73,10 +73,12 @@ const publishCommand = (
   expectedRevision: number,
   guidance: string,
   timestamp: string,
+  controlSeq = state.snapshot.controlSeq,
 ): ArenaRoomCommand => ({
   type: 'publish-config',
   expectedRoomEpoch: state.snapshot.roomEpoch,
   expectedRevision,
+  expectedControlSeq: controlSeq,
   sharedConfig: { ...state.snapshot.sharedConfig, userGuidance: guidance },
   timestamp,
 });
@@ -318,7 +320,7 @@ describe('RoomActorRegistry', () => {
       command: publishCommand(created.nextState, 0, 'first', ARENA_ROOM_NEXT_TIMESTAMP),
       authority: hostAuthority,
     });
-    const secondCommand = publishCommand(created.nextState, 1, 'second', THIRD_TIMESTAMP);
+    const secondCommand = publishCommand(created.nextState, 1, 'second', THIRD_TIMESTAMP, 1);
     const second = registry.execute({
       roomId: 'room-1',
       command: secondCommand,
@@ -376,7 +378,7 @@ describe('RoomActorRegistry', () => {
     await vi.waitFor(() => expect(store.activeSaves).toBe(1));
     const queued = registry.execute({
       roomId: 'room-1',
-      command: publishCommand(created.nextState, 1, 'queued', THIRD_TIMESTAMP),
+      command: publishCommand(created.nextState, 1, 'queued', THIRD_TIMESTAMP, 1),
       authority: hostAuthority,
     });
     await expect(registry.execute({
@@ -928,6 +930,7 @@ describe('RoomActorRegistry', () => {
         type: 'reserve-generation',
         expectedRoomEpoch: 'epoch-2',
         expectedRevision: 0,
+        expectedControlSeq: store.state!.snapshot.controlSeq,
         generationRequestId: 'next-request',
         generationId: 'next-generation',
         attempt: 1,
@@ -1066,6 +1069,7 @@ describe('RoomActorRegistry', () => {
         type: 'reserve-generation',
         expectedRoomEpoch: 'epoch-2',
         expectedRevision: 0,
+        expectedControlSeq: store.state!.snapshot.controlSeq,
         generationRequestId: 'next-request',
         generationId: 'next-generation',
         attempt: 1,
@@ -1101,6 +1105,7 @@ describe('RoomActorRegistry', () => {
         type: 'reserve-generation',
         expectedRoomEpoch: 'epoch-3',
         expectedRevision: 0,
+        expectedControlSeq: store.state!.snapshot.controlSeq,
         generationRequestId: 'recovered-request',
         generationId: 'recovered-generation',
         attempt: 1,
@@ -1154,6 +1159,7 @@ describe('RoomActorRegistry', () => {
         type: 'reserve-generation',
         expectedRoomEpoch: 'epoch-2',
         expectedRevision: 0,
+        expectedControlSeq: store.state!.snapshot.controlSeq,
         generationRequestId: 'next-request',
         generationId: 'next-generation',
         attempt: 1,
@@ -1433,7 +1439,7 @@ describe('RoomActorRegistry', () => {
     await vi.waitFor(() => expect(store.activeSaves).toBe(1));
     const queued = registry.execute({
       roomId: 'room-1',
-      command: publishCommand(created.nextState, 1, 'queued-drain', THIRD_TIMESTAMP),
+      command: publishCommand(created.nextState, 1, 'queued-drain', THIRD_TIMESTAMP, 1),
       authority: hostAuthority,
     });
 

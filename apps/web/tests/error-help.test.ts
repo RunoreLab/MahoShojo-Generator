@@ -152,4 +152,56 @@ describe('error-help', () => {
       })?.id,
     ).toBe('auth');
   });
+
+  // 魔法茶会历史总量超限：同为 400/413，但语义与数据卡无关，
+  // 必须优先命中上下文超限分支，否则会误导用户去看数据卡导入文档。
+  test('infer by status: 413 maps to magic tea party context limits', () => {
+    expect(inferEncyclopediaSlugForError({ status: 413, message: 'whatever' })).toBe(
+      'magic-tea-party-context-limits'
+    );
+  });
+
+  test('infer by message: history total overflow beats the blanket 400 rule', () => {
+    expect(
+      inferEncyclopediaSlugForError({
+        status: 413,
+        message:
+          '本次提交的对话历史共 900000 字，超过单次请求 800000 字上限。请减少消息条数、删除无关长消息，或先生成摘要后再继续。',
+      }),
+    ).toBe('magic-tea-party-context-limits');
+  });
+
+  test('infer by message: clipped middle notice resolves to context limits', () => {
+    expect(
+      inferEncyclopediaSlugForError({
+        status: 400,
+        message: '有 2 条消息超过单条 32000 字预算，已自动省略中段（共 12000 字）。',
+      }),
+    ).toBe('magic-tea-party-context-limits');
+  });
+
+  test('infer by message: upstream context_length_exceeded resolves to context limits', () => {
+    expect(
+      inferEncyclopediaSlugForError({
+        message: "This model's maximum context length is 8192 tokens, however you requested 9000 tokens.",
+      }),
+    ).toBe('magic-tea-party-context-limits');
+  });
+
+  test('category: 400 with context length message is context_limit, not validation', () => {
+    expect(
+      inferErrorCategoryForError({
+        status: 400,
+        message: '本次提交的对话历史共 900000 字，超过单次请求 800000 字上限。',
+      })?.id,
+    ).toBe('context_limit');
+  });
+
+  test('category: plain 400 stays validation', () => {
+    expect(inferErrorCategoryForError({ status: 400, message: 'whatever' })?.id).toBe('validation');
+  });
+
+  test('plain 400 still maps to data card encyclopedia (unchanged)', () => {
+    expect(inferEncyclopediaSlugForError({ status: 400, message: 'whatever' })).toBe('data-card-errors');
+  });
 });

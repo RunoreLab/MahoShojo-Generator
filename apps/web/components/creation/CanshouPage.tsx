@@ -41,6 +41,7 @@ import { buildGeneralCharacterCardFromMarkdown } from '@/lib/stream/markdown-car
 import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
 import { AI_META_REQUEST_HEADER, AI_META_REQUEST_VALUE, readJsonWithAiMeta } from '@/lib/client/read-json-with-ai-meta';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
+import { downloadBlob } from '@/lib/client/blobUrl';
 import { authStorage } from '@/lib/auth';
 import { useGenerationApiIntentLatch } from '@/lib/use-generation-api-intent-latch';
 import { buildCustomProviderRequestPayload } from '@/lib/ai/custom-provider';
@@ -115,15 +116,8 @@ const SaveJsonButton: React.FC<SaveJsonButtonProps> = ({ data, mode, recommended
 
   const downloadJson = () => {
     const blob = new Blob([jsonPayload], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
     const sanitizedName = (data.name || 'data').replace(/[^a-z0-9\u4e00-\u9fa5]/gi, '_');
-    link.href = url;
-    link.download = `残兽档案_${sanitizedName}.json`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    downloadBlob(blob, `残兽档案_${sanitizedName}.json`);
     setCopyStatus('idle');
   };
 
@@ -1400,16 +1394,9 @@ export const CanshouPage: React.FC = () => {
     if (!data) return;
     const jsonPayload = JSON.stringify(data, null, 2);
     const blob = new Blob([jsonPayload], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
     const rawName = (data?.codename || data?.name || '未命名角色').toString();
     const sanitizedName = rawName.replace(/[^a-z0-9\u4e00-\u9fa5]/gi, '_').slice(0, 80) || 'data';
-    link.href = url;
-    link.download = `通用残兽角色_${sanitizedName}.json`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    downloadBlob(blob, `通用残兽角色_${sanitizedName}.json`);
   };
 
   const copyStreamedGeneralCard = async (data: any) => {

@@ -1,11 +1,18 @@
 import {
+  ARENA_ROOM_PRESENCE_WEBSOCKET_PROTOCOL,
+  ArenaRoomPublishConfigRequestSchema,
+  type RoomPresenceSnapshot,
   parseRoomServerTransportFrame,
   type ArenaRoomCreateRequest,
   type ArenaRoomGenerationProjectionStatus,
+  type ArenaRoomGenerationResult,
   type ArenaRoomGenerationStartRequest,
   type ArenaRoomGenerationViewResponse,
+  type ArenaRoomProposalMutationResponse,
+  type ArenaRoomProposalMutationStatus,
   type ArenaRoomProposalResolveRequest,
   type ArenaRoomProposalSubmitRequest,
+  type ArenaRoomPublishConfigRequest,
   type ArenaRoomSessionResponse,
   type GenerationMirror,
   type RoomControlCursor,
@@ -20,6 +27,11 @@ import {
   ArenaRoomClientError,
   type ArenaRoomClient,
 } from './client';
+import { secureRandomUUID } from '@/lib/crypto';
+import {
+  areArenaRoomSharedConfigsExactlyEqual,
+  areArenaRoomSharedConfigsSemanticallyEqual,
+} from './shared-config-equality';
 
 export type ArenaRoomControllerPhase =
   | 'closed'
@@ -37,14 +49,29 @@ export type ArenaRoomControllerPhase =
 export type ArenaRoomControllerState = {
   readonly phase: ArenaRoomControllerPhase;
   readonly rooms: readonly RoomDirectoryEntry[];
+  readonly directoryNextCursor?: string | null;
+  readonly directoryLoadingMore?: boolean;
   readonly session: ArenaRoomSessionResponse | null;
+  /** Ephemeral and fresh only while the current socket is connected. */
+  readonly presence?: RoomPresenceSnapshot | null;
   readonly notice: string | null;
   readonly error: string | null;
   readonly unknownOperation: 'create' | 'join' | null;
   readonly proposalOperation: 'resolve' | 'submit' | 'withdraw' | null;
   readonly proposalResultUnknown: boolean;
+  readonly configPublishPending: boolean;
+  readonly configPublishResultUnknown: boolean;
+  readonly managementOperation: ArenaRoomManagementOperation;
+  readonly managementResultUnknown: boolean;
   readonly generation: ArenaRoomGenerationControllerView;
 };
+
+export type ArenaRoomManagementOperation =
+  | 'cancel-generation'
+  | 'close'
+  | 'kick'
+  | 'leave'
+  | null;
 
 export type ArenaRoomGenerationPhase =
   | 'cancelled'
@@ -74,8 +101,11 @@ export type ArenaRoomGenerationControllerView = {
   readonly finalAuthoritative: boolean;
   readonly generationRecordId: string | null;
   readonly errorCode: string | null;
+  /** safe-read recovery outcome; kept separate from the generation/provider outcome above. */
+  readonly recoveryCode?: string | null;
   readonly pendingRequestId: string | null;
   readonly startResultUnknown: boolean;
+  readonly result: ArenaRoomGenerationResult | null;
 };
 
 type ProposalMutationOperation = 'resolve' | 'submit' | 'withdraw';
@@ -85,7 +115,14 @@ type UnknownProposalMutation = {
   readonly proposalId: string;
 };
 
+type UnknownManagementMutation =
+  | { readonly operation: 'cancel-generation'; readonly generationId: string }
+  | { readonly operation: 'close' }
+  | { readonly operation: 'kick'; readonly targetUserId: string }
+  | { readonly operation: 'leave' };
+
 export type ArenaRoomSocket = {
+  readonly protocol?: string;
   onopen: (() => void) | null;
   onmessage: ((event: { readonly data: unknown }) => void) | null;
   onclose: ((event: { readonly code: number; readonly reason: string }) => void) | null;
@@ -96,12 +133,17 @@ export type ArenaRoomSocket = {
 
 type ArenaRoomControllerOptions = {
   readonly client: ArenaRoomClient;
-  readonly createSocket: (url: string, protocol: string) => ArenaRoomSocket;
+  readonly createSocket: (url: string, protocol: string | string[]) => ArenaRoomSocket;
   readonly initialAccess?: { readonly enabled: boolean; readonly authenticated: boolean };
   readonly maxReconnectAttempts?: number;
   readonly reconnectDelayMs?: (attempt: number) => number;
+  readonly recoveryDelayMs?: (attempt: number, retryAfterSeconds?: number) => number;
+  readonly generationRecoveryAttemptTimeoutMs?: number;
+  readonly reconnectRandom?: () => number;
   readonly setTimer?: (callback: () => void, delayMs: number) => unknown;
   readonly clearTimer?: (handle: unknown) => void;
+  readonly setRecoveryAttemptTimer?: (callback: () => void, delayMs: number) => unknown;
+  readonly clearRecoveryAttemptTimer?: (handle: unknown) => void;
   readonly createRequestId?: () => string;
 };
 
@@ -112,16 +154,22 @@ export type ArenaRoomController = {
   subscribe(listener: () => void): () => void;
   setAccess(access: { readonly enabled: boolean; readonly authenticated: boolean }): void;
   discover(): Promise<void>;
+  discoverMore(): Promise<void>;
   create(request: ArenaRoomCreateIntent): Promise<void>;
   join(roomId: string, displayName: string): Promise<void>;
   retryUnknownOperation(): Promise<void>;
   leave(): Promise<void>;
   close(): Promise<void>;
+  kickMember(targetUserId: string): Promise<void>;
+  cancelGeneration(): Promise<void>;
   submitProposal(request: ArenaRoomProposalSubmitRequest): Promise<void>;
   resolveProposal(proposalId: string, request: ArenaRoomProposalResolveRequest): Promise<void>;
   withdrawProposal(proposalId: string): Promise<void>;
+  publishConfig(request: ArenaRoomPublishConfigRequest): Promise<void>;
   startGeneration(request: ArenaRoomGenerationStartRequest): Promise<void>;
   retryGenerationStart(): Promise<void>;
+  /** 仅重新读取当前 generation，不创建新的 generation intent。 */
+  retryGenerationRecovery(): Promise<void>;
   reconnect(): void;
   reset(): void;
   dispose(): void;
@@ -138,19 +186,28 @@ const EMPTY_GENERATION_VIEW: ArenaRoomGenerationControllerView = Object.freeze({
   finalAuthoritative: false,
   generationRecordId: null,
   errorCode: null,
+  recoveryCode: null,
   pendingRequestId: null,
   startResultUnknown: false,
+  result: null,
 });
 
 const READY_STATE: ArenaRoomControllerState = Object.freeze({
   phase: 'ready',
+  presence: null,
   rooms: [],
+  directoryNextCursor: null,
+  directoryLoadingMore: false,
   session: null,
   notice: null,
   error: null,
   unknownOperation: null,
   proposalOperation: null,
   proposalResultUnknown: false,
+  configPublishPending: false,
+  configPublishResultUnknown: false,
+  managementOperation: null,
+  managementResultUnknown: false,
   generation: EMPTY_GENERATION_VIEW,
 });
 
@@ -164,9 +221,158 @@ const safeErrorMessage = (error: unknown): string => (
   error instanceof ArenaRoomClientError ? error.message : '房间运行时暂不可用'
 );
 
-const defaultReconnectDelay = (attempt: number): number => (
-  Math.min(4_000, 500 * (2 ** Math.max(0, attempt - 1)))
+type GenerationRecoveryFailureKind = 'not-found' | 'transient' | 'protocol';
+
+type GenerationRecoveryFailure = {
+  readonly kind: GenerationRecoveryFailureKind;
+  readonly retryAfterSeconds?: number;
+};
+
+type GenerationRecoveryEntry = {
+  promise: Promise<void>;
+  rerunAfterFlight: boolean;
+  cancelled: boolean;
+  activeAbortController: AbortController | null;
+  activeReject: ((reason?: unknown) => void) | null;
+  activeTimeoutTimer: unknown;
+  delayTimer: unknown;
+  resolveDelay: (() => void) | null;
+};
+
+const GENERATION_RECOVERY_MAX_ATTEMPTS = 4;
+const GENERATION_RECOVERY_ATTEMPT_TIMEOUT_MS = 10_000;
+const GENERATION_RECOVERY_MAX_AUTOMATIC_DELAY_MS = 8_000;
+const GENERATION_RECOVERY_TRANSIENT_CODE = 'ROOM_GENERATION_RECOVERY_TRANSIENT';
+const GENERATION_RECOVERY_NOT_FOUND_CODE = 'ROOM_GENERATION_RECOVERY_NOT_FOUND';
+const GENERATION_RECOVERY_PROTOCOL_CODE = 'ROOM_GENERATION_RECOVERY_PROTOCOL';
+
+const isAbortError = (error: unknown): boolean => (
+  error instanceof Error && error.name === 'AbortError'
 );
+
+const generationRecoveryFailureFor = (error: unknown): GenerationRecoveryFailure => {
+  if (!(error instanceof ArenaRoomClientError)) {
+    // The concrete Room client maps transport failures to ROOM_UNAVAILABLE. Keep
+    // direct client implementations/mocks equally conservative: TypeError and
+    // AbortError are browser fetch transport failure shapes, while other errors
+    // remain protocol faults.
+    return error instanceof TypeError || isAbortError(error)
+      ? { kind: 'transient' }
+      : { kind: 'protocol' };
+  }
+  if (error.status === 404 || error.code === 'ROOM_NOT_FOUND') {
+    return { kind: 'not-found' };
+  }
+  if (
+    error.code === 'ROOM_UNAVAILABLE'
+    || error.status === 408
+    || error.status === 425
+    || error.status === 429
+    || (error.status !== null && error.status >= 500)
+  ) {
+    return {
+      kind: 'transient',
+      retryAfterSeconds: error.retryAfterSeconds,
+    };
+  }
+  return { kind: 'protocol' };
+};
+
+const defaultGenerationRecoveryDelay = (
+  attempt: number,
+  random: () => number,
+  retryAfterSeconds?: number,
+): number => {
+  if (retryAfterSeconds !== undefined && Number.isFinite(retryAfterSeconds)) {
+    return Math.max(0, Math.round(retryAfterSeconds * 1_000));
+  }
+  const exponential = Math.min(4_000, 500 * (2 ** Math.max(0, attempt - 1)));
+  return Math.round(exponential * (0.8 + random() * 0.4));
+};
+
+/**
+ * 重放管理 mutation 时服务器给出的确定性拒绝（权限/输入等 4xx）：
+ * 这类响应证明 intent 未被执行且重试无意义，应解除 unknown 呈现真实错误，
+ * 而不是继续把结果标记为“未知”。ROOM_CONFLICT 意味着状态再次变化需重新对账，
+ * ROOM_RATE_LIMITED 属于可重试拒绝，二者都不算确定性拒绝。
+ */
+const isDeterministicMutationRejection = (error: ArenaRoomClientError): boolean => (
+  error.status !== null
+  && error.status >= 400
+  && error.status < 500
+  && error.code !== 'ROOM_CONFLICT'
+  && error.code !== 'ROOM_RATE_LIMITED'
+);
+
+
+const proposalResolvedNotice = (status: ArenaRoomProposalMutationStatus): string => (
+  status === 'withdrawn'
+    ? '提案已撤回'
+    : status === 'rejected'
+      ? '提案已拒绝'
+      : '提案已应用'
+);
+
+/**
+ * resolve 的 HTTP 响应携带 mutation 后的权威状态时，把它立即安装进
+ * 本地 session 视图：命令响应是本次操作的主收敛路径，WSS 只是复制/恢复通道。
+ * 优先安装完整权威 snapshot（含 members/proposals/activeGeneration）：
+ * 部分安装只改 config/proposal 字段却把整个 snapshot 的 controlSeq 宣布到
+ * 响应值，尚未送达的中间控制事件（如另一个成员的 proposal.submitted）会被
+ * WSS 的 `controlSeq <= current` 去重规则永久丢弃。旧服务器只带 sharedConfig
+ * 时退回部分安装，仅收敛 revision/config/proposal。
+ * 任一 fence 不满足（旧服务器响应、本地已看到更新状态、revision/config 矛盾）
+ * 都返回 null，退回旧行为：等待 WSS 权威事件或快照对账。
+ */
+const resolveAuthoritySession = (
+  latest: ArenaRoomSessionResponse,
+  response: ArenaRoomProposalMutationResponse,
+): ArenaRoomSessionResponse | null => {
+  if (latest.self.role !== 'host' || latest.self.membershipState !== 'active') return null;
+  if (latest.snapshot.revision > response.revision) return null;
+  if (latest.snapshot.controlSeq > response.controlSeq) return null;
+  if (response.roomId !== latest.roomId || response.roomEpoch !== latest.roomEpoch) return null;
+  const snapshot = response.snapshot;
+  if (snapshot) {
+    if (snapshot.revision !== response.revision || snapshot.controlSeq !== response.controlSeq) {
+      return null;
+    }
+    if (
+      latest.snapshot.revision === snapshot.revision
+      && !areArenaRoomSharedConfigsExactlyEqual(latest.snapshot.sharedConfig, snapshot.sharedConfig)
+    ) return null;
+    const self = snapshot.members.find((member) => member.userId === latest.self.userId);
+    if (!self || self.membershipState !== 'active') return null;
+    return { ...latest, snapshot };
+  }
+  if (response.sharedConfig === undefined) return null;
+  if (
+    latest.snapshot.revision === response.revision
+    && !areArenaRoomSharedConfigsExactlyEqual(latest.snapshot.sharedConfig, response.sharedConfig)
+  ) return null;
+  return {
+    ...latest,
+    snapshot: {
+      ...latest.snapshot,
+      controlSeq: response.controlSeq,
+      revision: response.revision,
+      sharedConfig: response.sharedConfig,
+      proposals: latest.snapshot.proposals.filter(
+        (proposal) => proposal.proposalId !== response.proposalId,
+      ),
+    },
+  };
+};
+
+// 服务器给房主 45 分钟离线宽限；客户端的重连预算也应对齐「秒级服务抖动不毁房间」的
+// 产品语义：默认 8 次指数退避（约 40 秒恢复窗口），耗尽后才进入 replacement 熔断。
+// 延迟再叠加 ±20% 乘性 jitter（0.8–1.2×）：Hono 整体重启时大量房间不会在相同时间点
+// 同步重连打回服务端。注入 reconnectDelayMs 时完全接管延迟（不叠加 jitter）；
+// 测试可通过 reconnectRandom 注入固定 RNG 求得确定性断言。
+const defaultReconnectDelay = (attempt: number, random: () => number): number => {
+  const exponential = Math.min(8_000, 500 * (2 ** Math.max(0, attempt - 1)));
+  return Math.round(exponential * (0.8 + random() * 0.4));
+};
 
 const replaceMember = (
   session: ArenaRoomSessionResponse,
@@ -177,7 +383,9 @@ const replaceMember = (
   const incoming = event.payload.member;
   const existing = session.snapshot.members.findIndex((member) => member.userId === incoming.userId);
   const members = [...session.snapshot.members];
-  if (existing >= 0) members[existing] = incoming;
+  if (incoming.membershipState === 'revoked') {
+    if (existing >= 0) members.splice(existing, 1);
+  } else if (existing >= 0) members[existing] = incoming;
   else members.push(incoming);
   const self = incoming.userId === session.self.userId ? incoming : session.self;
   return {
@@ -241,6 +449,9 @@ const mirrorFromGenerationControl = (
     snapshotDigest: event.payload.snapshotDigest,
     collaborativeInfluence: event.payload.collaborativeInfluence,
     participantUserIds: event.payload.participantUserIds,
+    ...(event.payload.hostAccountUserId === undefined ? {} : {
+      hostAccountUserId: event.payload.hostAccountUserId,
+    }),
     startedAt: sameAttempt ? current.startedAt : event.timestamp,
     ...(event.type === 'generation.started' ? {} : { finishedAt: event.timestamp }),
   };
@@ -265,6 +476,7 @@ const reduceGenerationControl = (
       finalAuthoritative: false,
       generationRecordId: null,
       errorCode: null,
+      recoveryCode: null,
       pendingRequestId: null,
       startResultUnknown: false,
     };
@@ -278,6 +490,7 @@ const reduceGenerationControl = (
     finalAuthoritative: false,
     generationRecordId: null,
     errorCode: event.type === 'generation.failed' ? event.payload.errorCode : null,
+    recoveryCode: null,
     pendingRequestId: null,
     startResultUnknown: false,
   };
@@ -286,14 +499,29 @@ const reduceGenerationControl = (
 export const createArenaRoomController = (
   options: ArenaRoomControllerOptions,
 ): ArenaRoomController => {
-  const maxReconnectAttempts = options.maxReconnectAttempts ?? 3;
+  const maxReconnectAttempts = options.maxReconnectAttempts ?? 8;
   if (!Number.isSafeInteger(maxReconnectAttempts) || maxReconnectAttempts < 1) {
     throw new Error('maxReconnectAttempts 必须是正安全整数');
   }
-  const reconnectDelayMs = options.reconnectDelayMs ?? defaultReconnectDelay;
+  const reconnectRandom = options.reconnectRandom ?? Math.random;
+  const reconnectDelayMs = options.reconnectDelayMs
+    ?? ((attempt: number) => defaultReconnectDelay(attempt, reconnectRandom));
+  const recoveryDelayMs = options.recoveryDelayMs
+    ?? ((attempt: number, retryAfterSeconds?: number) => (
+      defaultGenerationRecoveryDelay(attempt, reconnectRandom, retryAfterSeconds)
+    ));
+  const generationRecoveryAttemptTimeoutMs = options.generationRecoveryAttemptTimeoutMs
+    ?? GENERATION_RECOVERY_ATTEMPT_TIMEOUT_MS;
+  if (!Number.isSafeInteger(generationRecoveryAttemptTimeoutMs) || generationRecoveryAttemptTimeoutMs < 1) {
+    throw new Error('generationRecoveryAttemptTimeoutMs 必须是正安全整数');
+  }
   const setTimer = options.setTimer ?? ((callback, delayMs) => setTimeout(callback, delayMs));
   const clearTimer = options.clearTimer ?? ((handle) => clearTimeout(handle as ReturnType<typeof setTimeout>));
-  const createRequestId = options.createRequestId ?? (() => globalThis.crypto.randomUUID());
+  const setRecoveryAttemptTimer = options.setRecoveryAttemptTimer
+    ?? ((callback, delayMs) => setTimeout(callback, delayMs));
+  const clearRecoveryAttemptTimer = options.clearRecoveryAttemptTimer
+    ?? ((handle) => clearTimeout(handle as ReturnType<typeof setTimeout>));
+  const createRequestId = options.createRequestId ?? secureRandomUUID;
   let access = options.initialAccess ?? { enabled: false, authenticated: false };
   let state: ArenaRoomControllerState = {
     ...READY_STATE,
@@ -310,21 +538,35 @@ export const createArenaRoomController = (
   let pendingGenerationStartRequest: ArenaRoomGenerationStartRequest | null = null;
   let generationFence = 0;
   let unknownProposalMutation: UnknownProposalMutation | null = null;
+  let configPublishOperation = 0;
+  let configPublishPending = false;
+  let configPublishIntent: Readonly<{
+    roomId: string;
+    selfUserId: string;
+    request: ArenaRoomPublishConfigRequest;
+  }> | null = null;
+  let managementMutationGeneration = 0;
+  let managementMutationPending = false;
+  let unknownManagementMutation: UnknownManagementMutation | null = null;
   let disposed = false;
   let unresolvedCreateResult = false;
   let unresolvedCreateNotice: string | null = null;
   let pendingCreateRequest: ArenaRoomCreateRequest | null = null;
   let pendingJoinRoomId: string | null = null;
   let controlCursor: RoomControlCursor | undefined;
-  const generationRecoveries = new Map<string, {
-    promise: Promise<void>;
-    rerunAfterFlight: boolean;
-  }>();
+  const generationRecoveries = new Map<string, GenerationRecoveryEntry>();
   const listeners = new Set<() => void>();
 
   const publish = (patch: Partial<ArenaRoomControllerState>): void => {
     if (disposed) return;
-    state = { ...state, ...patch };
+    const next = { ...state, ...patch };
+    if (next.phase !== 'connected' || !next.session
+      || next.session.roomId !== state.session?.roomId
+      || next.session.roomEpoch !== state.session?.roomEpoch
+      || next.session.self.userId !== state.session?.self.userId) {
+      next.presence = null;
+    }
+    state = next;
     for (const listener of listeners) listener();
   };
 
@@ -335,10 +577,59 @@ export const createArenaRoomController = (
     && access.authenticated
   );
 
+  const invalidateConfigPublish = (): void => {
+    configPublishOperation += 1;
+    configPublishPending = false;
+    configPublishIntent = null;
+  };
+
+  const invalidateManagementMutation = (): void => {
+    managementMutationGeneration += 1;
+    managementMutationPending = false;
+    unknownManagementMutation = null;
+  };
+
   const clearReconnectTimer = (): void => {
     if (reconnectTimer === null) return;
     clearTimer(reconnectTimer);
     reconnectTimer = null;
+  };
+
+  /**
+   * 取消当前 recovery 的 transport/delay，但保留 promise entry 直到 finally。
+   * 同 generation 的 terminal event 可以借此保持 single-flight，并在旧请求
+   * 结束后补一次新权威读取；reset/dispose 则会额外清空 map，禁止旧任务续跑。
+   */
+  const cancelGenerationRecoveries = (clearEntries: boolean): void => {
+    for (const entry of generationRecoveries.values()) {
+      entry.cancelled = true;
+      entry.activeAbortController?.abort();
+      entry.activeAbortController = null;
+      const rejectActiveRead = entry.activeReject;
+      entry.activeReject = null;
+      rejectActiveRead?.(new ArenaRoomClientError(
+        'ROOM_UNAVAILABLE',
+        null,
+        '房间运行时暂不可用',
+      ));
+      if (entry.activeTimeoutTimer !== null) {
+        clearRecoveryAttemptTimer(entry.activeTimeoutTimer);
+        entry.activeTimeoutTimer = null;
+      }
+      if (entry.delayTimer !== null) {
+        clearTimer(entry.delayTimer);
+        entry.delayTimer = null;
+      }
+      const resolveDelay = entry.resolveDelay;
+      entry.resolveDelay = null;
+      resolveDelay?.();
+    }
+    if (clearEntries) generationRecoveries.clear();
+  };
+
+  const advanceGenerationFence = (clearRecoveries = false): void => {
+    generationFence += 1;
+    cancelGenerationRecoveries(clearRecoveries);
   };
 
   const detachSocket = (close = false): void => {
@@ -352,13 +643,44 @@ export const createArenaRoomController = (
     if (close) current.close(1000, 'client-disconnect');
   };
 
-  const enterReplacement = (): void => {
+  const finishRoomSession = (input: {
+    readonly notice: string;
+    readonly phase?: ArenaRoomControllerPhase;
+  }): void => {
+    operationGeneration += 1;
+    proposalMutationGeneration += 1;
+    generationStartOperation += 1;
+    advanceGenerationFence(true);
+    invalidateConfigPublish();
+    invalidateManagementMutation();
+    proposalMutationPending = false;
+    generationStartPending = false;
+    pendingGenerationStartRequest = null;
+    pendingCreateRequest = null;
+    pendingJoinRoomId = null;
+    unknownProposalMutation = null;
     clearReconnectTimer();
     detachSocket(true);
+    reconnectAttempts = 0;
+    controlCursor = undefined;
     publish({
+      ...READY_STATE,
+      phase: input.phase ?? phaseForAccess(access),
+      notice: input.notice,
+    });
+  };
+
+  const enterReplacement = (): void => {
+    finishRoomSession({
       phase: 'replacement',
       notice: '原房间无法恢复，请房主创建新房间',
-      error: null,
+    });
+  };
+
+  const enterMembershipRevoked = (): void => {
+    finishRoomSession({
+      phase: 'replacement',
+      notice: '当前成员资格已结束，原房间无法恢复',
     });
   };
 
@@ -448,6 +770,13 @@ export const createArenaRoomController = (
     const storyCursor = view.nextChunkSeq === 0
       ? null
       : { generationId: view.generation.generationId, chunkSeq: view.nextChunkSeq - 1 };
+    const terminal = view.status === 'completed'
+      || view.status === 'failed'
+      || view.status === 'cancelled'
+      || view.status === 'producer_lost';
+    if (terminal && unknownManagementMutation?.operation === 'cancel-generation') {
+      unknownManagementMutation = null;
+    }
     publish({
       session: {
         ...current,
@@ -467,15 +796,24 @@ export const createArenaRoomController = (
         finalAuthoritative: view.finalAuthoritative,
         generationRecordId: view.generationRecordId ?? null,
         errorCode: view.errorCode ?? null,
+        recoveryCode: null,
         pendingRequestId: null,
         startResultUnknown: false,
+        result: view.result ?? null,
       },
+      ...(terminal && state.managementOperation === 'cancel-generation' ? {
+        managementOperation: null,
+        managementResultUnknown: false,
+        notice: view.status === 'cancelled'
+          ? '生成已由服务器确认取消'
+          : '战报已完成',
+      } : {}),
     });
     return true;
   };
 
   const requestGenerationRecovery = (
-    reason: 'baseline' | 'gap' | 'reconnect' | 'resync' | 'terminal',
+    reason: 'baseline' | 'gap' | 'manual' | 'reconnect' | 'resync' | 'terminal',
   ): Promise<void> | null => {
     const current = state.session;
     const mirror = current?.snapshot.activeGeneration;
@@ -499,26 +837,222 @@ export const createArenaRoomController = (
         mirror,
         phase: 'resyncing',
         status: state.generation.status ?? projectionStatusForMirror(mirror),
+        recoveryCode: GENERATION_RECOVERY_TRANSIENT_CODE,
       },
     });
-    const entry = {
+    const entry: GenerationRecoveryEntry = {
       promise: Promise.resolve(),
       rerunAfterFlight: false,
+      cancelled: false,
+      activeAbortController: null,
+      activeReject: null,
+      activeTimeoutTimer: null,
+      delayTimer: null,
+      resolveDelay: null,
     };
-    entry.promise = options.client.getGenerationView(current.roomId, mirror.generationId)
-      .then((view) => {
+    const readWithTimeout = async <T>(
+      read: (signal: AbortSignal) => Promise<T>,
+    ): Promise<T> => {
+      const abortController = new AbortController();
+      entry.activeAbortController = abortController;
+      let timeoutHandle: unknown = null;
+      let rejectTimeout: ((reason?: unknown) => void) | null = null;
+      const timeoutPromise = new Promise<never>((_resolve, reject) => {
+        rejectTimeout = reject;
+      });
+      try {
+        entry.activeReject = rejectTimeout;
+        timeoutHandle = setRecoveryAttemptTimer(
+          () => {
+            abortController.abort();
+            const rejectCurrentRead = entry.activeReject;
+            entry.activeReject = null;
+            rejectCurrentRead?.(new ArenaRoomClientError(
+              'ROOM_UNAVAILABLE',
+              null,
+              '房间运行时暂不可用',
+            ));
+          },
+          generationRecoveryAttemptTimeoutMs,
+        );
+        entry.activeTimeoutTimer = timeoutHandle;
+        return await Promise.race([
+          read(abortController.signal),
+          timeoutPromise,
+        ]);
+      } finally {
+        if (timeoutHandle !== null && entry.activeTimeoutTimer === timeoutHandle) {
+          clearRecoveryAttemptTimer(timeoutHandle);
+          entry.activeTimeoutTimer = null;
+        }
+        if (entry.activeReject === rejectTimeout) {
+          entry.activeReject = null;
+        }
+        if (entry.activeAbortController === abortController) {
+          entry.activeAbortController = null;
+        }
+      }
+    };
+    const phaseAfterRecoveryFailure = (): ArenaRoomGenerationPhase => {
+      switch (state.generation.status) {
+        case 'completed': return 'completed';
+        case 'failed':
+        case 'producer_lost': return 'failed';
+        case 'cancelled': return 'cancelled';
+        default: return 'unavailable';
+      }
+    };
+    const finishRecovery = (recoveryCode: string): void => {
+      publish({
+        generation: {
+          ...state.generation,
+          phase: phaseAfterRecoveryFailure(),
+          recoveryCode,
+        },
+        notice: null,
+      });
+    };
+    const recover = async (attempt: number): Promise<void> => {
+      if (entry.cancelled || !recoveryFenceIsCurrent(captured)) return;
+      try {
+        const view = await readWithTimeout((signal) => (
+          options.client.getGenerationView(captured.roomId, captured.generationId, signal)
+        ));
         if (!recoveryFenceIsCurrent(captured)) return;
-        installAuthoritativeGenerationView(view, captured);
-      })
-      .catch(() => {
+        const hadRecoveryNotice = state.notice === '正在核对战报状态，稍后重试…'
+          || state.notice === '暂时无法同步战报，正在自动重试…'
+          || state.generation.recoveryCode != null;
+        const noticeBeforeInstall = state.notice;
+        if (
+          installAuthoritativeGenerationView(view, captured)
+          && hadRecoveryNotice
+          && state.notice === noticeBeforeInstall
+        ) {
+          publish({ notice: null });
+        }
+        return;
+      } catch (error) {
         if (!recoveryFenceIsCurrent(captured)) return;
+        const failure = generationRecoveryFailureFor(error);
+        let retryFailure = failure;
+
+        if (failure.kind === 'not-found') {
+          try {
+            const authoritative = await readWithTimeout((signal) => (
+              options.client.getSession(captured.roomId, signal)
+            ));
+            if (!recoveryFenceIsCurrent(captured)) return;
+            const currentSession = state.session;
+            if (
+              !currentSession
+              || authoritative.roomId !== captured.roomId
+              || authoritative.self.userId !== currentSession.self.userId
+              || authoritative.self.membershipState !== 'active'
+            ) {
+              finishRoomSession({ notice: '当前房间成员资格已结束，无法继续恢复战报' });
+              return;
+            }
+            const active = authoritative.snapshot.activeGeneration;
+            const sameGeneration = authoritative.roomEpoch === captured.roomEpoch
+              && active?.generationId === captured.generationId
+              && active.attempt === captured.attempt;
+            if (!sameGeneration) {
+              const epochChanged = authoritative.roomEpoch !== captured.roomEpoch;
+              advanceGenerationFence();
+              controlCursor = {
+                roomEpoch: authoritative.roomEpoch,
+                controlSeq: authoritative.snapshot.controlSeq,
+              };
+              const reconciledGeneration = generationViewForSnapshot(active, true);
+              publish({
+                session: authoritative,
+                generation: active
+                  ? reconciledGeneration
+                  : {
+                    ...reconciledGeneration,
+                    phase: 'unavailable',
+                    errorCode: state.generation.errorCode,
+                    recoveryCode: GENERATION_RECOVERY_NOT_FOUND_CODE,
+                  },
+                notice: active
+                  ? '房间已切换到新的战报，正在同步…'
+                  : '当前房间已不再生成这份战报',
+                error: null,
+              });
+              if (active) void requestGenerationRecovery('baseline');
+              if (epochChanged) {
+                void connectSession(authoritative, true, operationGeneration);
+              }
+              return;
+            }
+          } catch (sessionError) {
+            if (!recoveryFenceIsCurrent(captured)) return;
+            if (
+              sessionError instanceof ArenaRoomClientError
+              && (
+                sessionError.code === 'ROOM_NOT_FOUND'
+                || sessionError.code === 'ROOM_FORBIDDEN'
+              )
+            ) {
+              finishRoomSession({ notice: '当前房间已结束，无法继续恢复战报' });
+              return;
+            }
+            if (generationRecoveryFailureFor(sessionError).kind === 'protocol') {
+              finishRecovery(GENERATION_RECOVERY_PROTOCOL_CODE);
+              return;
+            }
+            const sessionFailure = generationRecoveryFailureFor(sessionError);
+            if (sessionFailure.kind === 'transient') retryFailure = sessionFailure;
+          }
+
+        }
+
+        // A valid Retry-After is a server instruction, not a value the
+        // client may shorten. If it exceeds the automatic recovery window,
+        // stop here and let the user explicitly retry later.
+        if (
+          retryFailure.retryAfterSeconds !== undefined
+          && Number.isFinite(retryFailure.retryAfterSeconds)
+          && retryFailure.retryAfterSeconds * 1_000 > GENERATION_RECOVERY_MAX_AUTOMATIC_DELAY_MS
+        ) {
+          finishRecovery(GENERATION_RECOVERY_TRANSIENT_CODE);
+          return;
+        }
+
+        if (retryFailure.kind === 'protocol' || attempt >= GENERATION_RECOVERY_MAX_ATTEMPTS) {
+          finishRecovery(
+            retryFailure.kind === 'protocol'
+              ? GENERATION_RECOVERY_PROTOCOL_CODE
+              : GENERATION_RECOVERY_TRANSIENT_CODE,
+          );
+          return;
+        }
+
         publish({
           generation: {
             ...state.generation,
-            phase: 'unavailable',
+            phase: 'resyncing',
+            recoveryCode: GENERATION_RECOVERY_TRANSIENT_CODE,
           },
+          notice: retryFailure.kind === 'not-found'
+            ? '正在核对战报状态，稍后重试…'
+            : '暂时无法同步战报，正在自动重试…',
+          error: null,
         });
-      })
+        await new Promise<void>((resolve) => {
+          entry.resolveDelay = resolve;
+          let timer: unknown = null;
+          timer = setTimer(() => {
+            if (entry.delayTimer === timer) entry.delayTimer = null;
+            entry.resolveDelay = null;
+            resolve();
+          }, recoveryDelayMs(attempt, retryFailure.retryAfterSeconds));
+          entry.delayTimer = timer;
+        });
+        if (!entry.cancelled && recoveryFenceIsCurrent(captured)) await recover(attempt + 1);
+      }
+    };
+    entry.promise = recover(1)
       .finally(() => {
         if (generationRecoveries.get(key) !== entry) return;
         generationRecoveries.delete(key);
@@ -553,7 +1087,8 @@ export const createArenaRoomController = (
       gap: null,
       finalAuthoritative: false,
       generationRecordId: null,
-      errorCode: null,
+      errorCode: base.errorCode ?? null,
+      recoveryCode: null,
       pendingRequestId,
       startResultUnknown: false,
     };
@@ -633,12 +1168,29 @@ export const createArenaRoomController = (
     if (event.type === 'room.snapshot') {
       const self = event.payload.members.find((member) => member.userId === current.self.userId);
       if (!self || self.membershipState !== 'active') {
-        enterReplacement();
+        if (current.self.role === 'member') enterMembershipRevoked();
+        else enterReplacement();
         return;
       }
       const epochChanged = current.roomEpoch !== event.roomEpoch;
+      const configReconciled = !epochChanged
+        && state.configPublishResultUnknown
+        && configPublishIntent?.roomId === event.roomId
+        && configPublishIntent.request.expectedRoomEpoch === event.roomEpoch
+        && (
+          event.payload.revision === configPublishIntent.request.expectedRevision
+          || event.payload.revision === configPublishIntent.request.expectedRevision + 1
+        )
+        && areArenaRoomSharedConfigsSemanticallyEqual(
+          event.payload.sharedConfig,
+          configPublishIntent.request.sharedConfig,
+        );
+      if (epochChanged) {
+        invalidateConfigPublish();
+        invalidateManagementMutation();
+      } else if (configReconciled) configPublishIntent = null;
       unknownProposalMutation = null;
-      generationFence += 1;
+      advanceGenerationFence();
       publish({
         session: {
           protocolVersion: 1,
@@ -651,6 +1203,17 @@ export const createArenaRoomController = (
         ...(epochChanged ? { notice: '房间已由服务器恢复，需要重新同步' } : {}),
         proposalOperation: null,
         proposalResultUnknown: false,
+        ...(configReconciled ? {
+          configPublishPending: false,
+          configPublishResultUnknown: false,
+          notice: '房间配置已更新',
+          error: null,
+        } : epochChanged ? {
+          configPublishPending: false,
+          configPublishResultUnknown: false,
+          managementOperation: null,
+          managementResultUnknown: false,
+        } : {}),
       });
       if (event.payload.activeGeneration) void requestGenerationRecovery('baseline');
       return;
@@ -663,21 +1226,37 @@ export const createArenaRoomController = (
       || event.type === 'room.host.online'
     ) {
       const next = replaceMember(current, event);
+      const kickReconciled = event.type === 'room.member.left'
+        && unknownManagementMutation?.operation === 'kick'
+        && unknownManagementMutation.targetUserId === event.payload.member.userId;
+      if (kickReconciled) unknownManagementMutation = null;
       if (event.type === 'room.member.left' && event.payload.member.userId === current.self.userId) {
-        detachSocket(true);
-        publish({
-          phase: 'closed',
-          session: next,
+        finishRoomSession({
           notice: '房间成员资格已结束',
-          error: null,
         });
         return;
       }
-      publish({ session: next });
+      publish({
+        session: next,
+        ...(kickReconciled ? {
+          managementOperation: null,
+          managementResultUnknown: false,
+          notice: '已从房间事件确认成员移除',
+        } : {}),
+      });
       return;
     }
 
     if (event.type === 'room.config.updated') {
+      const configReconciled = state.configPublishResultUnknown
+        && configPublishIntent?.roomId === event.roomId
+        && configPublishIntent.request.expectedRoomEpoch === event.roomEpoch
+        && event.payload.revision === configPublishIntent.request.expectedRevision + 1
+        && areArenaRoomSharedConfigsSemanticallyEqual(
+          event.payload.sharedConfig,
+          configPublishIntent.request.sharedConfig,
+        );
+      if (configReconciled) configPublishIntent = null;
       publish({
         session: {
           ...current,
@@ -688,6 +1267,12 @@ export const createArenaRoomController = (
             sharedConfig: event.payload.sharedConfig,
           },
         },
+        ...(configReconciled ? {
+          configPublishPending: false,
+          configPublishResultUnknown: false,
+          notice: '房间配置已更新',
+          error: null,
+        } : {}),
       });
       return;
     }
@@ -712,7 +1297,7 @@ export const createArenaRoomController = (
         ...(state.proposalResultUnknown && !reconciledUnknown ? {} : {
           proposalOperation: null,
           proposalResultUnknown: false,
-          notice: event.type === 'proposal.submitted' ? 'Proposal 已进入房间' : 'Proposal 已更新',
+          notice: event.type === 'proposal.submitted' ? '提案已进入房间' : '提案已更新',
           error: null,
         }),
       });
@@ -736,11 +1321,7 @@ export const createArenaRoomController = (
         ...(state.proposalResultUnknown && !reconciledUnknown ? {} : {
           proposalOperation: null,
           proposalResultUnknown: false,
-          notice: event.payload.status === 'withdrawn'
-            ? 'Proposal 已撤回'
-            : event.payload.status === 'rejected'
-              ? 'Proposal 已拒绝'
-              : 'Proposal 已应用',
+          notice: proposalResolvedNotice(event.payload.status),
           error: null,
         }),
       });
@@ -753,7 +1334,7 @@ export const createArenaRoomController = (
       || event.type === 'generation.failed'
     ) {
       const generation = reduceGenerationControl(state.generation, event);
-      generationFence += 1;
+      advanceGenerationFence();
       publish({
         session: {
           ...current,
@@ -766,12 +1347,14 @@ export const createArenaRoomController = (
         generation,
       });
       if (event.type !== 'generation.started') void requestGenerationRecovery('terminal');
+      else void requestGenerationRecovery('baseline');
       return;
     }
 
     if (event.type === 'room.closing') {
-      detachSocket(true);
-      publish({ phase: 'closed', notice: '房间已关闭', error: null });
+      finishRoomSession({
+        notice: '房间已关闭',
+      });
       return;
     }
   };
@@ -785,6 +1368,20 @@ export const createArenaRoomController = (
       message = parseRoomServerTransportFrame(raw);
     } catch {
       scheduleReconnect(true);
+      return;
+    }
+    if (message.type === 'room.presence') {
+      const current = state.session;
+      if (state.phase !== 'connected' || !current
+        || socket?.protocol !== ARENA_ROOM_PRESENCE_WEBSOCKET_PROTOCOL
+        || message.roomId !== current.roomId || message.roomEpoch !== current.roomEpoch) return;
+      if (!message.onlineUserIds.every((userId) => current.snapshot.members.some((member) => (
+        member.userId === userId && member.membershipState === 'active'
+      )))) {
+        publish({ presence: null });
+        return;
+      }
+      publish({ presence: message });
       return;
     }
     if (message.type === 'room.resync.required') {
@@ -827,7 +1424,7 @@ export const createArenaRoomController = (
       if (disposed || generation !== operationGeneration) return;
       const current = options.createSocket(
         options.client.buildWebSocketUrl(issued),
-        issued.websocket.protocol,
+        [ARENA_ROOM_PRESENCE_WEBSOCKET_PROTOCOL, issued.websocket.protocol],
       );
       detachSocket(true);
       socket = current;
@@ -840,20 +1437,26 @@ export const createArenaRoomController = (
       };
       current.onerror = () => {
         if (socket === current && !disposed) {
-          publish({ notice: '房间运行时暂不可用，正在重试' });
+          publish({ presence: null, notice: '房间运行时暂不可用，正在重试' });
         }
       };
       current.onclose = (event) => {
         if (socket !== current || disposed) return;
         socket = null;
-        if (event.code === 1000) {
-          publish({ phase: 'closed', notice: '房间已关闭', error: null });
+        if (event.code === 1000 && event.reason === 'room-closed') {
+          finishRoomSession({
+            notice: '房间已关闭',
+          });
           return;
         }
         if (event.code === 1008 && event.reason === 'membership-revoked') {
-          enterReplacement();
+          if (state.session?.self.role === 'member') enterMembershipRevoked();
+          else enterReplacement();
           return;
         }
+        // room-authority-fenced（1008/1013）只表示当前进程 incarnation 失去
+        // authority，房间可经服务端重启后从 checkpoint 恢复，纳入重连预算而非
+        // 直接终态；确定性终局仅限 membership-revoked / room-closed。
         scheduleReconnect(event.code === 1008 && event.reason !== 'room-epoch-stale');
       };
     } catch {
@@ -870,13 +1473,16 @@ export const createArenaRoomController = (
     unresolvedCreateNotice = null;
     pendingCreateRequest = null;
     pendingJoinRoomId = null;
-    generationFence += 1;
+    invalidateManagementMutation();
+    advanceGenerationFence();
     publish({
       session,
       generation: generationViewForSnapshot(session.snapshot.activeGeneration, true),
       unknownOperation: null,
       proposalOperation: null,
       proposalResultUnknown: false,
+      managementOperation: null,
+      managementResultUnknown: false,
     });
     reconnectAttempts = 0;
     controlCursor = {
@@ -887,7 +1493,7 @@ export const createArenaRoomController = (
     await connectSession(session, false, generation);
   };
 
-  const reconcileUnknownProposal = async (
+  const reconcileUnknownMutations = async (
     current: ArenaRoomSessionResponse,
     generation: number,
   ): Promise<void> => {
@@ -895,23 +1501,42 @@ export const createArenaRoomController = (
     detachSocket(true);
     publish({
       phase: 'reconnecting',
-      notice: '正在获取房间权威快照并对账…',
+      notice: '正在与服务器核对房间状态…',
       error: null,
     });
     try {
+      const pendingConfigIntent = configPublishIntent;
+      const hadConfigUnknown = state.configPublishResultUnknown;
       const authoritative = await options.client.getSession(current.roomId);
       if (
         disposed
         || generation !== operationGeneration
         || authoritative.roomId !== current.roomId
+        || authoritative.self.userId !== current.self.userId
       ) return;
+      const configConfirmed = hadConfigUnknown
+        && pendingConfigIntent?.roomId === authoritative.roomId
+        && pendingConfigIntent.selfUserId === authoritative.self.userId
+        && authoritative.self.role === 'host'
+        && authoritative.self.membershipState === 'active'
+        && pendingConfigIntent.request.expectedRoomEpoch === authoritative.roomEpoch
+        && (
+          authoritative.snapshot.revision === pendingConfigIntent.request.expectedRevision
+          || authoritative.snapshot.revision === pendingConfigIntent.request.expectedRevision + 1
+        )
+        && areArenaRoomSharedConfigsSemanticallyEqual(
+          authoritative.snapshot.sharedConfig,
+          pendingConfigIntent.request.sharedConfig,
+        );
       controlCursor = {
         roomEpoch: authoritative.roomEpoch,
         controlSeq: authoritative.snapshot.controlSeq,
       };
       reconnectAttempts = 0;
       unknownProposalMutation = null;
-      generationFence += 1;
+      configPublishIntent = null;
+      configPublishPending = false;
+      advanceGenerationFence();
       publish({
         session: authoritative,
         generation: generationViewForSnapshot(
@@ -920,7 +1545,13 @@ export const createArenaRoomController = (
         ),
         proposalOperation: null,
         proposalResultUnknown: false,
-        notice: '已取得房间权威快照，正在重新连接…',
+        configPublishPending: false,
+        configPublishResultUnknown: false,
+        notice: hadConfigUnknown
+          ? configConfirmed
+            ? '已确认配置同步完成，正在重新连接…'
+            : '已核对房间状态；先前的配置同步未生效，请重新确认'
+          : '已核对房间状态，正在重新连接…',
         error: null,
       });
       if (authoritative.snapshot.activeGeneration) void requestGenerationRecovery('baseline');
@@ -971,7 +1602,7 @@ export const createArenaRoomController = (
     operation: ProposalMutationOperation,
     proposalId: string,
     requiredRole: 'host' | 'member',
-    execute: (session: ArenaRoomSessionResponse) => Promise<unknown>,
+    execute: (session: ArenaRoomSessionResponse) => Promise<ArenaRoomProposalMutationResponse>,
   ): Promise<void> => {
     const current = state.session;
     if (
@@ -990,24 +1621,39 @@ export const createArenaRoomController = (
     publish({
       proposalOperation: operation,
       notice: operation === 'submit'
-        ? '正在提交 Proposal…'
+        ? '正在提交提案…'
         : operation === 'resolve'
-          ? '正在处理 Proposal…'
-          : '正在撤回 Proposal…',
+          ? '正在处理提案…'
+          : '正在撤回提案…',
       error: null,
     });
     try {
-      await execute(current);
+      const response = await execute(current);
       if (
         disposed
         || generation !== proposalMutationGeneration
         || state.session?.roomId !== current.roomId
         || state.session.roomEpoch !== current.roomEpoch
       ) return;
+      const latest = state.session;
+      const installed = operation === 'resolve' && latest
+        ? resolveAuthoritySession(latest, response)
+        : null;
+      if (installed && response.snapshot) {
+        // 完整权威 snapshot 安装：controlCursor 一并推进到快照确认已见的
+        // 位置，保证重连游标与已安装内容一致。
+        controlCursor = {
+          roomEpoch: installed.roomEpoch,
+          controlSeq: installed.snapshot.controlSeq,
+        };
+      }
       publish({
+        ...(installed ? { session: installed } : {}),
         proposalOperation: null,
         proposalResultUnknown: false,
-        notice: '请求已确认，等待房间权威状态同步',
+        notice: installed
+          ? proposalResolvedNotice(response.status)
+          : '请求已确认，等待房间状态同步',
         error: null,
       });
       unknownProposalMutation = null;
@@ -1037,6 +1683,671 @@ export const createArenaRoomController = (
       }
     } finally {
       if (generation === proposalMutationGeneration) proposalMutationPending = false;
+    }
+  };
+
+  const runConfigPublish = async (
+    input: ArenaRoomPublishConfigRequest,
+  ): Promise<void> => {
+    if (disposed || !access.enabled || !access.authenticated) return;
+    const parsed = ArenaRoomPublishConfigRequestSchema.safeParse(input);
+    if (!parsed.success) {
+      publish({
+        configPublishPending: false,
+        configPublishResultUnknown: false,
+        notice: null,
+        error: '房间配置请求无效',
+      });
+      return;
+    }
+    const request = parsed.data;
+    const current = state.session;
+    if (
+      disposed
+      || !access.enabled
+      || !access.authenticated
+      || !current
+      || configPublishPending
+      || state.configPublishResultUnknown
+    ) return;
+    if (
+      current.self.role !== 'host'
+      || current.self.membershipState !== 'active'
+    ) {
+      publish({
+        configPublishPending: false,
+        configPublishResultUnknown: false,
+        notice: null,
+        error: '只有当前房主可以更新房间配置',
+      });
+      return;
+    }
+    if (
+      request.expectedRoomEpoch !== current.roomEpoch
+      || request.expectedRevision !== current.snapshot.revision
+    ) {
+      publish({
+        configPublishPending: false,
+        configPublishResultUnknown: false,
+        notice: null,
+        error: '房间配置已发生变化，请重新确认后再发布',
+      });
+      return;
+    }
+
+    configPublishPending = true;
+    configPublishOperation += 1;
+    const operation = configPublishOperation;
+    const captured = {
+      roomId: current.roomId,
+      roomEpoch: current.roomEpoch,
+      revision: current.snapshot.revision,
+      controlSeq: current.snapshot.controlSeq,
+      selfUserId: current.self.userId,
+    };
+    configPublishIntent = {
+      roomId: current.roomId,
+      selfUserId: current.self.userId,
+      request,
+    };
+    publish({
+      configPublishPending: true,
+      configPublishResultUnknown: false,
+      notice: '正在更新房间配置…',
+      error: null,
+    });
+    try {
+      const authoritative = await options.client.publishConfig(current.roomId, request);
+      const latest = state.session;
+      if (
+        disposed
+        || operation !== configPublishOperation
+        || !latest
+        || latest.roomId !== captured.roomId
+        || latest.roomEpoch !== captured.roomEpoch
+        || latest.self.userId !== captured.selfUserId
+        || latest.self.role !== 'host'
+        || latest.self.membershipState !== 'active'
+      ) return;
+      const responseMatchesIntent = authoritative.roomId === captured.roomId
+        && authoritative.roomEpoch === captured.roomEpoch
+        && authoritative.self.userId === captured.selfUserId
+        && authoritative.self.role === 'host'
+        && authoritative.snapshot.controlSeq >= captured.controlSeq
+        && (
+          authoritative.snapshot.revision === captured.revision
+          || authoritative.snapshot.revision === captured.revision + 1
+        )
+        && areArenaRoomSharedConfigsSemanticallyEqual(authoritative.snapshot.sharedConfig, request.sharedConfig);
+      if (!responseMatchesIntent) {
+        publish({
+          configPublishPending: false,
+          configPublishResultUnknown: true,
+          notice: '配置同步结果无法确认，请先重新连接核对房间状态',
+          error: null,
+        });
+        return;
+      }
+      const canInstall = latest.snapshot.revision === captured.revision
+        && latest.snapshot.controlSeq === captured.controlSeq;
+      const alreadyInstalled = latest.snapshot.revision === authoritative.snapshot.revision
+        && latest.snapshot.controlSeq >= authoritative.snapshot.controlSeq
+        && areArenaRoomSharedConfigsExactlyEqual(latest.snapshot.sharedConfig, authoritative.snapshot.sharedConfig);
+      if (!canInstall && !alreadyInstalled) {
+        configPublishIntent = null;
+        publish({
+          configPublishPending: false,
+          configPublishResultUnknown: false,
+          notice: '房间状态已变化，未安装过期的配置响应',
+          error: null,
+        });
+        return;
+      }
+      configPublishIntent = null;
+      publish({
+        ...(canInstall ? { session: authoritative } : {}),
+        configPublishPending: false,
+        configPublishResultUnknown: false,
+        notice: '房间配置已更新',
+        error: null,
+      });
+    } catch (error) {
+      if (
+        disposed
+        || operation !== configPublishOperation
+        || state.session?.roomId !== captured.roomId
+        || state.session.roomEpoch !== captured.roomEpoch
+        || state.session.self.userId !== captured.selfUserId
+      ) return;
+      if (error instanceof ArenaRoomClientError && error.code === 'ROOM_RESULT_UNKNOWN') {
+        publish({
+          configPublishPending: false,
+          configPublishResultUnknown: true,
+          notice: error.message,
+          error: null,
+        });
+      } else {
+        configPublishIntent = null;
+        publish({
+          configPublishPending: false,
+          configPublishResultUnknown: false,
+          notice: null,
+          error: safeErrorMessage(error),
+        });
+      }
+    } finally {
+      if (operation === configPublishOperation) configPublishPending = false;
+    }
+  };
+
+  const runKickMember = async (targetUserId: string): Promise<void> => {
+    const current = state.session;
+    const target = current?.snapshot.members.find((member) => member.userId === targetUserId);
+    if (
+      disposed
+      || !access.enabled
+      || !access.authenticated
+      || !current
+      || current.self.role !== 'host'
+      || current.self.membershipState !== 'active'
+      || !target
+      || target.role === 'host'
+      || target.userId === current.self.userId
+      || target.membershipState !== 'active'
+      || managementMutationPending
+      || state.managementOperation !== null
+      || state.managementResultUnknown
+    ) return;
+    managementMutationPending = true;
+    managementMutationGeneration += 1;
+    const operation = managementMutationGeneration;
+    const captured = {
+      roomId: current.roomId,
+      roomEpoch: current.roomEpoch,
+      selfUserId: current.self.userId,
+      targetUserId,
+    };
+    publish({
+      managementOperation: 'kick',
+      managementResultUnknown: false,
+      notice: `正在移除成员 ${target.displayName}…`,
+      error: null,
+    });
+    try {
+      const authoritative = await options.client.kick(
+        captured.roomId,
+        captured.targetUserId,
+        captured.roomEpoch,
+      );
+      if (
+        disposed
+        || operation !== managementMutationGeneration
+        || state.session?.roomId !== captured.roomId
+        || state.session.roomEpoch !== captured.roomEpoch
+        || state.session.self.userId !== captured.selfUserId
+      ) return;
+      controlCursor = {
+        roomEpoch: authoritative.roomEpoch,
+        controlSeq: authoritative.snapshot.controlSeq,
+      };
+      publish({
+        session: authoritative,
+        managementOperation: null,
+        managementResultUnknown: false,
+        notice: `已移除成员 ${target.displayName}`,
+        error: null,
+      });
+    } catch (error) {
+      if (
+        disposed
+        || operation !== managementMutationGeneration
+        || state.session?.roomId !== captured.roomId
+        || state.session.roomEpoch !== captured.roomEpoch
+      ) return;
+      if (error instanceof ArenaRoomClientError && error.code === 'ROOM_RESULT_UNKNOWN') {
+        unknownManagementMutation = {
+          operation: 'kick',
+          targetUserId: captured.targetUserId,
+        };
+        publish({
+          managementOperation: 'kick',
+          managementResultUnknown: true,
+          notice: '移除成员结果尚未确认；请先核对房间状态，不要重复提交',
+          error: null,
+        });
+      } else {
+        publish({
+          managementOperation: null,
+          managementResultUnknown: false,
+          notice: null,
+          error: safeErrorMessage(error),
+        });
+      }
+    } finally {
+      if (operation === managementMutationGeneration) managementMutationPending = false;
+    }
+  };
+
+  const runCancelGeneration = async (): Promise<void> => {
+    const current = state.session;
+    const active = current?.snapshot.activeGeneration;
+    if (
+      disposed
+      || !access.enabled
+      || !access.authenticated
+      || !current
+      || current.self.role !== 'host'
+      || current.self.membershipState !== 'active'
+      || !active
+      || (active.state !== 'starting' && active.state !== 'running')
+      || managementMutationPending
+      || state.managementOperation !== null
+      || state.managementResultUnknown
+    ) return;
+    managementMutationPending = true;
+    managementMutationGeneration += 1;
+    const operation = managementMutationGeneration;
+    const captured = {
+      roomId: current.roomId,
+      roomEpoch: current.roomEpoch,
+      selfUserId: current.self.userId,
+      generationId: active.generationId,
+      attempt: active.attempt,
+    };
+    publish({
+      managementOperation: 'cancel-generation',
+      managementResultUnknown: false,
+      notice: '正在请求服务器停止当前生成…',
+      error: null,
+    });
+    try {
+      const authoritative = await options.client.cancelGeneration(
+        captured.roomId,
+        captured.generationId,
+        captured.roomEpoch,
+      );
+      if (
+        disposed
+        || operation !== managementMutationGeneration
+        || state.session?.roomId !== captured.roomId
+        || state.session.roomEpoch !== captured.roomEpoch
+        || state.session.self.userId !== captured.selfUserId
+      ) return;
+      installAuthoritativeGenerationView(authoritative, captured);
+      if (
+        authoritative.status === 'reserved'
+        || authoritative.status === 'running'
+        || authoritative.status === 'finalizing'
+      ) {
+        publish({
+          managementOperation: 'cancel-generation',
+          managementResultUnknown: false,
+          notice: '已提交停止请求，正在等待服务器确认…',
+          error: null,
+        });
+      }
+    } catch (error) {
+      if (
+        disposed
+        || operation !== managementMutationGeneration
+        || state.session?.roomId !== captured.roomId
+        || state.session.roomEpoch !== captured.roomEpoch
+      ) return;
+      if (error instanceof ArenaRoomClientError && error.code === 'ROOM_RESULT_UNKNOWN') {
+        unknownManagementMutation = {
+          operation: 'cancel-generation',
+          generationId: captured.generationId,
+        };
+        publish({
+          managementOperation: 'cancel-generation',
+          managementResultUnknown: true,
+          notice: '停止生成结果尚未确认；请先核对服务器状态，不要重复提交',
+          error: null,
+        });
+      } else {
+        publish({
+          managementOperation: null,
+          managementResultUnknown: false,
+          notice: null,
+          error: safeErrorMessage(error),
+        });
+      }
+    } finally {
+      if (operation === managementMutationGeneration) managementMutationPending = false;
+    }
+  };
+
+  /**
+   * 以 GET /session 取得的服务器权威 session 重建本地会话。
+   * Room recovery 会保留成员并轮换 roomEpoch，因此对账时 epoch 不一致
+   * 不能静默放弃：先安装新权威（必要时重置生成视图并触发权威基线恢复），
+   * 再基于新 epoch 重新评估管理 intent。epoch 未变化时只安装 session。
+   * 返回 epoch 是否轮换；轮换后旧 WSS 控制面随旧实例终结，
+   * 留在房间的调用方必须据此重建控制传输。
+   */
+  const installRebasedAuthoritativeSession = (
+    authoritative: ArenaRoomSessionResponse,
+    notice: string,
+  ): boolean => {
+    const epochChanged = authoritative.roomEpoch !== state.session?.roomEpoch;
+    controlCursor = {
+      roomEpoch: authoritative.roomEpoch,
+      controlSeq: authoritative.snapshot.controlSeq,
+    };
+    if (!epochChanged) {
+      publish({ session: authoritative, notice });
+      return false;
+    }
+    advanceGenerationFence();
+    publish({
+      session: authoritative,
+      generation: generationViewForSnapshot(authoritative.snapshot.activeGeneration, true),
+      notice,
+    });
+    if (authoritative.snapshot.activeGeneration) void requestGenerationRecovery('baseline');
+    return true;
+  };
+
+  /**
+   * leave 结果未知的对账：优先幂等重放同一 leave intent，而不是先 GET session。
+   * 服务端 leave 对同 epoch 的已撤销成员直接幂等返回成功，因此“已提交但成功响应
+   * 丢失（self 已 revoked）”与“未提交”两个方向都会在重放下收敛；若先 GET
+   * session，revoked 成员的读取只会得到 403 ROOM_FORBIDDEN，无法据此收敛。
+   * 重放遇到 ROOM_CONFLICT（epoch 因 Room recovery 轮换）时安装权威 session，
+   * self 仍 active 则以新 epoch 再重放一次；任何一步返回 ROOM_NOT_FOUND /
+   * ROOM_FORBIDDEN 都证明 self 已不在房间（或房间已结束），按 leave 已生效收敛。
+   */
+  const reconcileUnknownLeave = async (operation: number): Promise<void> => {
+    const current = state.session;
+    if (!current || disposed) return;
+    publish({ notice: '正在重放退出请求以确认结果…', error: null });
+    const exitNoticeFor = (error: ArenaRoomClientError): string => (
+      error.code === 'ROOM_NOT_FOUND'
+        ? '已确认当前房间会话已结束'
+        : '已离开房间'
+    );
+    const isExitConfirmed = (error: ArenaRoomClientError): boolean => (
+      error.code === 'ROOM_NOT_FOUND' || error.code === 'ROOM_FORBIDDEN'
+    );
+    let expectedEpoch = current.roomEpoch;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        await options.client.leave(current.roomId, expectedEpoch);
+      } catch (replayError) {
+        if (disposed || operation !== managementMutationGeneration) return;
+        if (
+          replayError instanceof ArenaRoomClientError
+          && isExitConfirmed(replayError)
+        ) {
+          finishRoomSession({ notice: exitNoticeFor(replayError) });
+          return;
+        }
+        if (
+          !(replayError instanceof ArenaRoomClientError)
+          || replayError.code !== 'ROOM_CONFLICT'
+          || attempt > 0
+        ) {
+          // 网络/5xx/限流/未知等非确定性失败：不猜测结果，保持 unknown 等待下次对账。
+          publish({
+            managementResultUnknown: true,
+            notice: '退出请求已再次提交，结果仍无法确认；请稍后重新确认',
+            error: safeErrorMessage(replayError),
+          });
+          scheduleReconnect(false);
+          return;
+        }
+        // ROOM_CONFLICT：epoch 已轮换，读取权威 session 后以新 epoch 重放。
+        let authoritative: ArenaRoomSessionResponse;
+        try {
+          authoritative = await options.client.getSession(current.roomId);
+        } catch (sessionError) {
+          if (disposed || operation !== managementMutationGeneration) return;
+          if (
+            sessionError instanceof ArenaRoomClientError
+            && isExitConfirmed(sessionError)
+          ) {
+            finishRoomSession({ notice: exitNoticeFor(sessionError) });
+            return;
+          }
+          publish({
+            managementResultUnknown: true,
+            notice: '退出结果仍无法确认；请稍后重新确认',
+            error: safeErrorMessage(sessionError),
+          });
+          scheduleReconnect(false);
+          return;
+        }
+        if (
+          disposed
+          || operation !== managementMutationGeneration
+          || authoritative.roomId !== current.roomId
+          || authoritative.self.userId !== current.self.userId
+        ) return;
+        installRebasedAuthoritativeSession(
+          authoritative,
+          '房间已恢复为新实例，正在重新执行退出…',
+        );
+        expectedEpoch = authoritative.roomEpoch;
+        continue;
+      }
+      if (disposed || operation !== managementMutationGeneration) return;
+      finishRoomSession({ notice: '已离开房间' });
+      return;
+    }
+  };
+
+  const reconcileUnknownManagementMutation = async (): Promise<void> => {
+    const current = state.session;
+    const intent = unknownManagementMutation;
+    if (!current || !intent || disposed) return;
+    const operation = managementMutationGeneration;
+    const reconnectGeneration = operationGeneration;
+    publish({ notice: '正在核对服务器状态并确认上次操作…', error: null });
+    let resubmitted = false;
+    let epochRebased = false;
+    try {
+      if (intent.operation === 'kick') {
+        const authoritative = await options.client.getSession(current.roomId);
+        if (
+          disposed
+          || operation !== managementMutationGeneration
+          || state.session?.roomId !== current.roomId
+          || authoritative.roomId !== current.roomId
+          || authoritative.self.userId !== current.self.userId
+        ) return;
+        const targetActive = authoritative.snapshot.members.some((member) => (
+          member.userId === intent.targetUserId && member.membershipState === 'active'
+        ));
+        if (!targetActive) {
+          unknownManagementMutation = null;
+          const rebased = installRebasedAuthoritativeSession(
+            authoritative,
+            '已确认成员移除',
+          );
+          publish({
+            managementOperation: null,
+            managementResultUnknown: false,
+            error: null,
+          });
+          if (rebased) await connectSession(authoritative, true, reconnectGeneration);
+          return;
+        }
+        // 权威状态证明目标仍在房间、kick 尚未生效：安全重放同一幂等 intent
+        // （服务端对已撤销目标幂等返回，且带 expectedRoomEpoch fence）。
+        // epoch 已因 Room recovery 轮换时先安装新权威 session，再以新 epoch 重放。
+        if (authoritative.roomEpoch !== current.roomEpoch) {
+          epochRebased = installRebasedAuthoritativeSession(
+            authoritative,
+            '房间已恢复为新实例，正在重新执行成员移除…',
+          );
+        }
+        resubmitted = true;
+        const replayed = await options.client.kick(
+          current.roomId,
+          intent.targetUserId,
+          authoritative.roomEpoch,
+        );
+        if (
+          disposed
+          || operation !== managementMutationGeneration
+          || state.session?.roomId !== current.roomId
+          || state.session.roomEpoch !== authoritative.roomEpoch
+          || state.session.self.userId !== current.self.userId
+        ) return;
+        unknownManagementMutation = null;
+        controlCursor = {
+          roomEpoch: replayed.roomEpoch,
+          controlSeq: replayed.snapshot.controlSeq,
+        };
+        const target = authoritative.snapshot.members.find((member) => (
+          member.userId === intent.targetUserId
+        ));
+        publish({
+          session: replayed,
+          managementOperation: null,
+          managementResultUnknown: false,
+          notice: `已移除成员 ${target?.displayName ?? intent.targetUserId}`,
+          error: null,
+        });
+        if (epochRebased) await connectSession(replayed, true, reconnectGeneration);
+        return;
+      }
+
+      if (intent.operation === 'leave') {
+        await reconcileUnknownLeave(operation);
+        return;
+      }
+
+      if (intent.operation === 'close') {
+        const authoritative = await options.client.getSession(current.roomId);
+        if (
+          disposed
+          || operation !== managementMutationGeneration
+          || authoritative.roomId !== current.roomId
+          || authoritative.self.userId !== current.self.userId
+        ) return;
+        // 权威状态仍可读取证明 intent 尚未生效（房间仍开放、close 未提交）：
+        // 安全重放同一幂等 intent。若 close 已生效，房间关闭后 GET session 会
+        // 返回 ROOM_NOT_FOUND，由下方 catch 收敛为会话结束。
+        // epoch 已因 Room recovery 轮换时先安装新权威 session，再以新 epoch 重放，
+        // 否则旧 epoch fence 会让重放永远无法收敛。
+        if (authoritative.roomEpoch !== current.roomEpoch) {
+          epochRebased = installRebasedAuthoritativeSession(
+            authoritative,
+            '房间已恢复为新实例，正在重新执行操作…',
+          );
+        }
+        resubmitted = true;
+        await options.client.close(current.roomId, authoritative.roomEpoch);
+        if (
+          disposed
+          || operation !== managementMutationGeneration
+          || state.session?.roomId !== current.roomId
+          || state.session.roomEpoch !== authoritative.roomEpoch
+          || state.session.self.userId !== current.self.userId
+        ) return;
+        unknownManagementMutation = null;
+        finishRoomSession({ notice: '房间已关闭' });
+        return;
+      }
+
+      const authoritative = await options.client.getGenerationView(
+        current.roomId,
+        intent.generationId,
+      );
+      if (
+        disposed
+        || operation !== managementMutationGeneration
+        || state.session?.roomId !== current.roomId
+        || state.session.roomEpoch !== current.roomEpoch
+      ) return;
+      if (authoritative.roomEpoch !== current.roomEpoch) {
+        // Room 已轮换到新 epoch：安装服务器权威 session 并解除停止锁，
+        // 让房主基于新实例重新执行（或等待生成权威终态自然出现）。
+        const rebased = await options.client.getSession(current.roomId);
+        if (
+          disposed
+          || operation !== managementMutationGeneration
+          || rebased.roomId !== current.roomId
+          || rebased.self.userId !== current.self.userId
+        ) return;
+        const active = rebased.snapshot.activeGeneration;
+        const terminal = active !== null
+          && (active.state === 'completed' || active.state === 'failed' || active.state === 'cancelled');
+        unknownManagementMutation = null;
+        const rebasedEpoch = installRebasedAuthoritativeSession(
+          rebased,
+          terminal ? '战报已完成' : '房间已恢复为新实例，请重新执行停止生成',
+        );
+        publish({
+          managementOperation: null,
+          managementResultUnknown: false,
+          error: null,
+        });
+        if (rebasedEpoch) await connectSession(rebased, true, reconnectGeneration);
+        return;
+      }
+      installAuthoritativeGenerationView(authoritative, {
+        roomId: current.roomId,
+        roomEpoch: current.roomEpoch,
+        generationId: intent.generationId,
+        attempt: authoritative.generation.attempt,
+      });
+      if (
+        authoritative.status === 'reserved'
+        || authoritative.status === 'running'
+        || authoritative.status === 'finalizing'
+      ) {
+        publish({
+          managementOperation: 'cancel-generation',
+          managementResultUnknown: true,
+          notice: '服务器尚未确认停止结果；未重复提交请求',
+          error: null,
+        });
+      }
+    } catch (error) {
+      if (disposed || operation !== managementMutationGeneration) return;
+      if (
+        intent.operation !== 'cancel-generation'
+        && error instanceof ArenaRoomClientError
+        && error.code === 'ROOM_NOT_FOUND'
+      ) {
+        unknownManagementMutation = null;
+        finishRoomSession({
+          notice: intent.operation === 'close' && error.code === 'ROOM_NOT_FOUND'
+            ? '已确认当前房间会话已结束'
+            : intent.operation === 'leave'
+              ? '已确认当前房间会话已结束'
+              : '房间会话已结束',
+        });
+        return;
+      }
+      if (
+        resubmitted
+        && error instanceof ArenaRoomClientError
+        && isDeterministicMutationRejection(error)
+      ) {
+        // 重放被服务器确定性拒绝：结果不再是“未知”，解除 unknown 并呈现真实错误。
+        // leave/close 的发起动作已拆除本地 socket，必须重连；kick 在 epoch
+        // 未轮换时旧 socket 仍存活，但轮换后旧实例 socket 已终结，同样必须重连。
+        unknownManagementMutation = null;
+        if (intent.operation !== 'kick' || epochRebased) scheduleReconnect(false);
+        publish({
+          managementOperation: null,
+          managementResultUnknown: false,
+          notice: '管理动作未被执行，服务器已明确拒绝',
+          error: safeErrorMessage(error),
+        });
+        return;
+      }
+      publish({
+        managementResultUnknown: true,
+        notice: resubmitted
+          ? '管理动作已再次提交，结果仍无法确认；请稍后重新确认'
+          : '管理动作结果仍无法确认；未重复提交请求',
+        error: safeErrorMessage(error),
+      });
+      if (resubmitted) scheduleReconnect(false);
     }
   };
 
@@ -1079,6 +2390,9 @@ export const createArenaRoomController = (
     const operation = generationStartOperation;
     const expectedRoomId = current.roomId;
     const expectedRoomEpoch = current.roomEpoch;
+    // Establish the new generation intent before awaiting its POST response;
+    // an older safe-read recovery must not be able to write into this start.
+    advanceGenerationFence(true);
     publish({
       generation: {
         ...(retry ? state.generation : EMPTY_GENERATION_VIEW),
@@ -1097,33 +2411,14 @@ export const createArenaRoomController = (
         || state.session?.roomId !== expectedRoomId
         || state.session.roomEpoch !== expectedRoomEpoch
       ) return;
-      generationFence += 1;
+      advanceGenerationFence(true);
       if (!installAuthoritativeGenerationView(view, {
         roomId: expectedRoomId,
         roomEpoch: expectedRoomEpoch,
         generationId: view.generation.generationId,
         attempt: view.generation.attempt,
       })) return;
-      const installedSession = state.session;
-      if (
-        installedSession
-        && installedSession.roomId === expectedRoomId
-        && installedSession.roomEpoch === expectedRoomEpoch
-        && installedSession.snapshot.revision === request.expectedRevision
-        && view.generation.configRevision === request.expectedRevision + 1
-      ) {
-        publish({
-          session: {
-            ...installedSession,
-            snapshot: {
-              ...installedSession.snapshot,
-              revision: view.generation.configRevision,
-              sharedConfig: request.sharedConfig,
-            },
-          },
-        });
-      }
-      publish({ notice: '多人生成已进入房间权威流程', error: null });
+      publish({ notice: '多人生成已开始', error: null });
     } catch (error) {
       if (
         disposed
@@ -1178,7 +2473,8 @@ export const createArenaRoomController = (
       operationGeneration += 1;
       proposalMutationGeneration += 1;
       generationStartOperation += 1;
-      generationFence += 1;
+      advanceGenerationFence(true);
+      invalidateConfigPublish();
       proposalMutationPending = false;
       generationStartPending = false;
       pendingGenerationStartRequest = null;
@@ -1199,13 +2495,21 @@ export const createArenaRoomController = (
       if (disposed || !access.enabled || !access.authenticated) return;
       operationGeneration += 1;
       const generation = operationGeneration;
-      publish({ phase: 'listing', error: null });
+      publish({
+        phase: 'listing',
+        rooms: [],
+        directoryNextCursor: null,
+        directoryLoadingMore: false,
+        error: null,
+      });
       try {
         const page = await options.client.discover({ limit: 20 });
         if (!operationIsCurrent(generation)) return;
         publish({
           phase: unresolvedCreateResult ? 'unknown' : 'ready',
           rooms: page.items,
+          directoryNextCursor: page.nextCursor,
+          directoryLoadingMore: false,
           error: null,
         });
       } catch (error) {
@@ -1214,6 +2518,33 @@ export const createArenaRoomController = (
         } else {
           failOperation(error, generation);
         }
+      }
+    },
+
+    async discoverMore() {
+      if (disposed || !access.enabled || !access.authenticated) return;
+      const cursor = state.directoryNextCursor;
+      if (!cursor || state.directoryLoadingMore || state.phase !== 'ready') return;
+      operationGeneration += 1;
+      const generation = operationGeneration;
+      publish({ directoryLoadingMore: true, error: null });
+      try {
+        const page = await options.client.discover({ limit: 20, cursor });
+        if (!operationIsCurrent(generation)) return;
+        const byRoomId = new Map(state.rooms.map((room) => [room.roomId, room]));
+        page.items.forEach((room) => byRoomId.set(room.roomId, room));
+        publish({
+          rooms: [...byRoomId.values()],
+          directoryNextCursor: page.nextCursor,
+          directoryLoadingMore: false,
+          error: null,
+        });
+      } catch (error) {
+        if (!operationIsCurrent(generation)) return;
+        publish({
+          directoryLoadingMore: false,
+          error: safeErrorMessage(error),
+        });
       }
     },
 
@@ -1229,7 +2560,9 @@ export const createArenaRoomController = (
       operationGeneration += 1;
       proposalMutationGeneration += 1;
       generationStartOperation += 1;
-      generationFence += 1;
+      advanceGenerationFence(true);
+      invalidateConfigPublish();
+      invalidateManagementMutation();
       proposalMutationPending = false;
       generationStartPending = false;
       pendingGenerationStartRequest = null;
@@ -1261,7 +2594,9 @@ export const createArenaRoomController = (
       operationGeneration += 1;
       proposalMutationGeneration += 1;
       generationStartOperation += 1;
-      generationFence += 1;
+      advanceGenerationFence(true);
+      invalidateConfigPublish();
+      invalidateManagementMutation();
       proposalMutationPending = false;
       generationStartPending = false;
       pendingGenerationStartRequest = null;
@@ -1335,11 +2670,21 @@ export const createArenaRoomController = (
     },
 
     async leave() {
-      if (!state.session || disposed) return;
+      if (
+        !state.session
+        || disposed
+        || managementMutationPending
+        || state.managementOperation !== null
+        || state.managementResultUnknown
+      ) return;
+      managementMutationPending = true;
+      managementMutationGeneration += 1;
+      const managementGeneration = managementMutationGeneration;
       operationGeneration += 1;
       proposalMutationGeneration += 1;
       generationStartOperation += 1;
-      generationFence += 1;
+      advanceGenerationFence(true);
+      invalidateConfigPublish();
       proposalMutationPending = false;
       generationStartPending = false;
       pendingGenerationStartRequest = null;
@@ -1347,21 +2692,68 @@ export const createArenaRoomController = (
       const { roomId, roomEpoch } = state.session;
       clearReconnectTimer();
       detachSocket(true);
+      publish({
+        managementOperation: 'leave',
+        managementResultUnknown: false,
+        notice: '正在离开房间…',
+        error: null,
+      });
       try {
         await options.client.leave(roomId, roomEpoch);
         if (!operationIsCurrent(generation)) return;
-        publish({ phase: 'closed', notice: '已离开房间', error: null });
+        finishRoomSession({
+          notice: '已离开房间',
+        });
       } catch (error) {
-        failOperation(error, generation);
+        if (!operationIsCurrent(generation)) return;
+        if (
+          error instanceof ArenaRoomClientError
+          && error.code === 'ROOM_NOT_FOUND'
+        ) {
+          finishRoomSession({ notice: '房间成员资格已结束' });
+          return;
+        }
+        if (error instanceof ArenaRoomClientError && error.code === 'ROOM_RESULT_UNKNOWN') {
+          unknownManagementMutation = { operation: 'leave' };
+          publish({
+            managementOperation: 'leave',
+            managementResultUnknown: true,
+            notice: '离开房间结果尚未确认；请先核对服务器状态',
+            error: null,
+          });
+        } else {
+          scheduleReconnect(false);
+          publish({
+            managementOperation: null,
+            managementResultUnknown: false,
+            notice: '离开房间失败，正在重新连接…',
+            error: safeErrorMessage(error),
+          });
+        }
+      } finally {
+        if (managementGeneration === managementMutationGeneration) {
+          managementMutationPending = false;
+        }
       }
     },
 
     async close() {
-      if (!state.session || state.session.self.role !== 'host' || disposed) return;
+      if (
+        !state.session
+        || state.session.self.role !== 'host'
+        || disposed
+        || managementMutationPending
+        || state.managementOperation !== null
+        || state.managementResultUnknown
+      ) return;
+      managementMutationPending = true;
+      managementMutationGeneration += 1;
+      const managementGeneration = managementMutationGeneration;
       operationGeneration += 1;
       proposalMutationGeneration += 1;
       generationStartOperation += 1;
-      generationFence += 1;
+      advanceGenerationFence(true);
+      invalidateConfigPublish();
       proposalMutationPending = false;
       generationStartPending = false;
       pendingGenerationStartRequest = null;
@@ -1369,13 +2761,57 @@ export const createArenaRoomController = (
       const { roomId, roomEpoch } = state.session;
       clearReconnectTimer();
       detachSocket(true);
+      publish({
+        managementOperation: 'close',
+        managementResultUnknown: false,
+        notice: '正在关闭房间…',
+        error: null,
+      });
       try {
         await options.client.close(roomId, roomEpoch);
         if (!operationIsCurrent(generation)) return;
-        publish({ phase: 'closed', notice: '房间已关闭', error: null });
+        finishRoomSession({
+          notice: '房间已关闭',
+        });
       } catch (error) {
-        failOperation(error, generation);
+        if (!operationIsCurrent(generation)) return;
+        if (
+          error instanceof ArenaRoomClientError
+          && error.code === 'ROOM_NOT_FOUND'
+        ) {
+          finishRoomSession({ notice: '房间已结束' });
+          return;
+        }
+        if (error instanceof ArenaRoomClientError && error.code === 'ROOM_RESULT_UNKNOWN') {
+          unknownManagementMutation = { operation: 'close' };
+          publish({
+            managementOperation: 'close',
+            managementResultUnknown: true,
+            notice: '关闭房间结果尚未确认；请先核对服务器状态',
+            error: null,
+          });
+        } else {
+          scheduleReconnect(false);
+          publish({
+            managementOperation: null,
+            managementResultUnknown: false,
+            notice: '关闭房间失败，正在重新连接…',
+            error: safeErrorMessage(error),
+          });
+        }
+      } finally {
+        if (managementGeneration === managementMutationGeneration) {
+          managementMutationPending = false;
+        }
       }
+    },
+
+    async kickMember(targetUserId) {
+      await runKickMember(targetUserId);
+    },
+
+    async cancelGeneration() {
+      await runCancelGeneration();
     },
 
     async submitProposal(request) {
@@ -1396,6 +2832,10 @@ export const createArenaRoomController = (
       ));
     },
 
+    async publishConfig(request) {
+      await runConfigPublish(request);
+    },
+
     async startGeneration(request) {
       await runGenerationStart(request);
     },
@@ -1406,14 +2846,51 @@ export const createArenaRoomController = (
       await runGenerationStart(request, true);
     },
 
+    async retryGenerationRecovery() {
+      const current = state.session;
+      const mirror = current?.snapshot.activeGeneration;
+      const recoveryCode = state.generation.recoveryCode;
+      if (
+        !current
+        || !mirror
+        || !recoveryCode
+        || recoveryCode === GENERATION_RECOVERY_NOT_FOUND_CODE
+        || disposed
+        || !access.enabled
+        || !access.authenticated
+      ) return;
+      const key = recoveryKeyFor(current.roomId, current.roomEpoch, mirror);
+      const existing = generationRecoveries.get(key);
+      const flight = requestGenerationRecovery('manual');
+      if (!flight) return;
+      await flight;
+      const latest = state.session?.snapshot.activeGeneration;
+      if (
+        existing !== undefined
+        && !disposed
+        && state.generation.recoveryCode === recoveryCode
+        && state.session?.roomId === current.roomId
+        && state.session.roomEpoch === current.roomEpoch
+        && latest?.generationId === mirror.generationId
+        && latest.attempt === mirror.attempt
+        && state.generation.phase !== 'resyncing'
+      ) {
+        await requestGenerationRecovery('manual');
+      }
+    },
+
     reconnect() {
       if (!state.session || disposed || !access.enabled || !access.authenticated) return;
       operationGeneration += 1;
       proposalMutationGeneration += 1;
       proposalMutationPending = false;
       reconnectAttempts = 0;
-      if (state.proposalResultUnknown) {
-        void reconcileUnknownProposal(state.session, operationGeneration);
+      if (state.managementResultUnknown && unknownManagementMutation) {
+        void reconcileUnknownManagementMutation();
+        return;
+      }
+      if (state.proposalResultUnknown || state.configPublishResultUnknown) {
+        void reconcileUnknownMutations(state.session, operationGeneration);
         return;
       }
       scheduleReconnect(false);
@@ -1423,7 +2900,9 @@ export const createArenaRoomController = (
       operationGeneration += 1;
       proposalMutationGeneration += 1;
       generationStartOperation += 1;
-      generationFence += 1;
+      advanceGenerationFence(true);
+      invalidateConfigPublish();
+      invalidateManagementMutation();
       proposalMutationPending = false;
       generationStartPending = false;
       pendingGenerationStartRequest = null;
@@ -1444,7 +2923,9 @@ export const createArenaRoomController = (
       operationGeneration += 1;
       proposalMutationGeneration += 1;
       generationStartOperation += 1;
-      generationFence += 1;
+      advanceGenerationFence(true);
+      invalidateConfigPublish();
+      invalidateManagementMutation();
       proposalMutationPending = false;
       generationStartPending = false;
       pendingGenerationStartRequest = null;

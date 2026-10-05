@@ -52,6 +52,7 @@ describe('Arena Room checkpoint commit receipt', () => {
       type: 'publish-config',
       expectedRoomEpoch: created.nextState.snapshot.roomEpoch,
       expectedRevision: created.nextState.snapshot.revision,
+      expectedControlSeq: created.nextState.snapshot.controlSeq,
       sharedConfig: created.nextState.snapshot.sharedConfig,
       timestamp: created.nextState.lifecycle.updatedAt,
     }, hostAuthority());
@@ -68,6 +69,7 @@ describe('Arena Room checkpoint commit receipt', () => {
       type: 'publish-config',
       expectedRoomEpoch: created.nextState.snapshot.roomEpoch,
       expectedRevision: created.nextState.snapshot.revision,
+      expectedControlSeq: created.nextState.snapshot.controlSeq,
       sharedConfig: { ...created.nextState.snapshot.sharedConfig, userGuidance: 'next' },
       timestamp: '2026-08-28T00:01:00.000Z',
     }, hostAuthority());

@@ -23,6 +23,8 @@ import {
 } from '@mahoshojo/contracts/data-cards';
 import type { AppDrizzleDb } from '@/lib/db/drizzle';
 import { dataCardMetrics, dataCards, dataCardTags, dataCardUpdates, users } from '@/lib/db/schema';
+import { HOT_CARD_FAVORITE_THRESHOLD, HOT_CARD_USAGE_THRESHOLD } from '@/lib/constants';
+import { DATA_CARD_SLOT_BYTES } from '@/lib/data-card-size';
 
 export type DataCardType = OnlineDataCardType;
 export type DataCardSortBy = 'likes' | 'usage' | 'favorites' | 'created_at';
@@ -341,9 +343,10 @@ export const insertDataCard = async (
 
 export const listUserDataCards = async (
   db: AppDrizzleDb,
-  input: { userId: number; search?: string; sortBy?: DataCardSortBy },
+  input: { userId: number; id?: string; search?: string; sortBy?: DataCardSortBy; limit: number; offset: number },
 ): Promise<UserDataCardDbRow[]> => {
   const conditions: SQL[] = [eq(dataCards.userId, input.userId), isNull(dataCards.deletedAt)];
+  if (input.id) conditions.push(eq(dataCards.id, input.id));
   if (input.search) {
     const keyword = `%${input.search}%`;
     conditions.push(or(like(dataCards.name, keyword), like(dataCards.description, keyword))!);
@@ -376,7 +379,9 @@ export const listUserDataCards = async (
     .from(dataCards)
     .leftJoin(dataCardUpdates, eq(dataCardUpdates.dataCardId, dataCards.id))
     .where(and(...conditions))
-    .orderBy(...orderBy);
+    .orderBy(...orderBy)
+    .limit(input.limit)
+    .offset(input.offset);
 
   return rows.map((row) => ({
     ...mapDataCardDbRow(row),
@@ -416,6 +421,31 @@ export const updateDataCardByIdAndUser = async (
     .update(dataCards)
     .set(setValues as never)
     .where(and(eq(dataCards.id, input.id), eq(dataCards.userId, input.userId), isNull(dataCards.deletedAt)))
+    .returning({ id: dataCards.id });
+
+  return updated.length;
+};
+
+export const repairQuestionnaireDataCardType = async (
+  db: AppDrizzleDb,
+  input: { id: string; userId: number },
+): Promise<number> => {
+  const updated = await db
+    .update(dataCards)
+    .set({
+      type: 'questionnaire',
+      data: sql`json_set(${dataCards.data}, '$.nativeAllowed', json('false'))`,
+      updatedAt: sql`CURRENT_TIMESTAMP`,
+    })
+    .where(
+      and(
+        eq(dataCards.id, input.id),
+        eq(dataCards.userId, input.userId),
+        eq(dataCards.type, 'character'),
+        sql`json_valid(${dataCards.data}) = 1`,
+        isNull(dataCards.deletedAt),
+      ),
+    )
     .returning({ id: dataCards.id });
 
   return updated.length;
@@ -484,19 +514,29 @@ export const upsertDataCardUpdateByDataCardId = async (
 export const countUserUsedDataCardSlots = async (
   db: AppDrizzleDb,
   userId: number,
+  excludeCardId?: string,
 ): Promise<number> => {
-  const rows = await db
-    .select({ count: count() })
-    .from(dataCards)
-    .where(
-      and(
-        eq(dataCards.userId, userId),
-        isNull(dataCards.deletedAt),
-        sql`NOT (COALESCE(${dataCards.favoriteCount}, 0) > 10 AND COALESCE(${dataCards.usageCount}, 0) > 30)`,
-      ),
-    );
+  const conditions: SQL[] = [eq(dataCards.userId, userId), isNull(dataCards.deletedAt)];
+  if (excludeCardId) {
+    conditions.push(sql`${dataCards.id} <> ${excludeCardId}`);
+  }
 
-  return Math.max(0, toInt(rows[0]?.count, 0));
+  const currentBytes = sql<number>`length(CAST(${dataCards.data} AS BLOB))`;
+  const pendingBytes = sql<number>`COALESCE(length(CAST(${dataCardUpdates.data} AS BLOB)), 0)`;
+  const effectiveBytes = sql<number>`MAX(${currentBytes}, ${pendingBytes})`;
+  const baseSlots = sql<number>`MAX(1, CAST((${effectiveBytes} + ${DATA_CARD_SLOT_BYTES - 1}) / ${DATA_CARD_SLOT_BYTES} AS INTEGER))`;
+  const hotDiscount = sql<number>`CASE
+    WHEN COALESCE(${dataCards.favoriteCount}, 0) > ${HOT_CARD_FAVORITE_THRESHOLD}
+      AND COALESCE(${dataCards.usageCount}, 0) > ${HOT_CARD_USAGE_THRESHOLD}
+    THEN 1 ELSE 0 END`;
+
+  const rows = await db
+    .select({ usedSlots: sql<number>`COALESCE(SUM(MAX(0, ${baseSlots} - ${hotDiscount})), 0)` })
+    .from(dataCards)
+    .leftJoin(dataCardUpdates, eq(dataCardUpdates.dataCardId, dataCards.id))
+    .where(and(...conditions));
+
+  return Math.max(0, toInt(rows[0]?.usedSlots, 0));
 };
 
 export const getDataCardUpdateByDataCardId = async (

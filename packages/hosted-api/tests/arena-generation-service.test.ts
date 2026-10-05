@@ -3,6 +3,7 @@ import { describe, expect, test, vi } from 'vitest';
 import {
   ArenaGenerationFinalizationPendingError,
   createArenaGenerationService,
+  isArenaGenerationDispatchReady,
   MAX_ARENA_CREATE_BODY_BYTES,
   type ArenaGenerationExecutor,
   type ArenaGenerationRejectedTerminalRecorder,
@@ -11,7 +12,10 @@ import {
   type GenerationReplayStoreState,
   type GenerationStreamEvent,
 } from '../src/arena-generation/service';
-import { evaluateHostedDrVersionGate } from '../src/hosted-dr';
+import {
+  parseGenerationSseBlock,
+  projectArenaTelemetryForClient,
+} from '../src/arena-generation/sse';
 
 const readResponseText = async (response: Response): Promise<string> => response.text();
 
@@ -65,6 +69,7 @@ class MemoryReplayStore implements GenerationReplayStore {
       leaseExpiresAt: input.leaseExpiresAt,
       snapshot: null,
       terminal: null,
+      intendedTerminal: null,
       cancelRequested: false,
       cancelReason: null,
       preparationSeed: input.preparationSeed ?? null,
@@ -112,6 +117,9 @@ class MemoryReplayStore implements GenerationReplayStore {
       status: 'finalizing',
       updatedAt: input.now,
       leaseExpiresAt: input.leaseExpiresAt,
+      intendedTerminal: state.cancelRequested
+        ? { status: 'cancelled', code: 'USER_CANCELLED' }
+        : input.terminal ?? state.intendedTerminal ?? null,
     });
     return state.cancelRequested
       ? { kind: 'cancelled' as const, cancelReason: state.cancelReason ?? 'user' as const }
@@ -138,6 +146,7 @@ class MemoryReplayStore implements GenerationReplayStore {
       generationRequestId: state.generationRequestId,
       payloadHash: state.payloadHash,
       mode: state.mode ?? null,
+      intendedTerminal: state.intendedTerminal ?? null,
     };
   }
 
@@ -236,6 +245,7 @@ class MemoryReplayStore implements GenerationReplayStore {
       ...state,
       status: input.terminal.status,
       terminal: input.terminal,
+      intendedTerminal: null,
       lastEventId: event?.id ?? state.lastEventId,
       snapshot: input.terminalSnapshot ? {
         ...input.terminalSnapshot,
@@ -339,15 +349,123 @@ const createService = (
 });
 
 describe('Arena generation lifecycle service', () => {
-  test('G25E2-VERSION-SKEW：rollout 保持 authenticated authority 读写与 public contract 兼容', async () => {
-    expect(evaluateHostedDrVersionGate({
-      stage: 'rollout',
-      primaryContractVersion: 'g25e1-v1',
-      drContractVersion: 'g25e1-v2',
-      clientContractVersion: 'g25e1-v1',
-      schemaState: 'expanded',
-    })).toEqual({ allowed: true, reason: 'compatible' });
+  test('preserves package artifact for live, retained and durable snapshot replay without redispatch', async () => {
+    const webPackage = {
+      packageRef: { id: 'test.fixture', version: '1.0.0', digest: `sha256:${'a'.repeat(64)}` },
+      targetPath: 'data/report.json', targetMediaType: 'application/json' as const, generatedDigest: `sha256:${'b'.repeat(64)}`,
+    };
+    const content = ' {"title":"测试","scenes":[{"text":"故事"}]}\n';
+    const execute = vi.fn(async ({ emit }) => {
+      await emit({ type: 'markdown', data: { chunk: content } });
+      return { status: 'completed' as const, resultRef: 'r2:package', webPackage };
+    });
+    const service = createService(new MemoryReplayStore(), { execute });
+    const live = await service.create(createRequest('request-package'));
+    const liveText = await live.text();
+    const retained = await service.create(createRequest('request-package'));
+    for (const body of [liveText, await retained.text()]) {
+      expect(body).toContain(JSON.stringify(webPackage));
+      expect(body).toContain('event: done');
+    }
+    expect(execute).toHaveBeenCalledOnce();
 
+    const unavailable = new MemoryReplayStore();
+    unavailable.reserveUnavailable = true;
+    const readOwnedTerminal = vi.fn(async () => ({
+      generationId: 'generation-1', generationRequestId: 'request-package', status: 'completed' as const,
+      updatedAt: '2026-08-25T04:00:00.000Z', resultRef: 'r2:package', markdown: content, reasoning: '',
+      payloadHash: 'hash:{"value":"same"}', contentAvailable: true, webPackage,
+    }));
+    const fallbackService = createService(unavailable, { execute }, { terminalStore: { readOwnedTerminal } });
+    const fallback = await fallbackService.create(createRequest('request-package'));
+    expect(fallback.status).toBe(200);
+    const fallbackText = await fallback.text();
+    expect(fallbackText).toContain(JSON.stringify(webPackage));
+    expect(fallbackText).toContain('event: snapshot');
+    expect(execute).toHaveBeenCalledOnce();
+  });
+
+  test('dispatch readiness requires D1/signing but does not require an archive object store', () => {
+    expect(isArenaGenerationDispatchReady({
+      d1Available: true,
+      signatureSecret: 'x'.repeat(32),
+      finalizationBridgeReady: true,
+    })).toBe(true);
+    expect(isArenaGenerationDispatchReady({
+      d1Available: false,
+      signatureSecret: 'x'.repeat(32),
+      finalizationBridgeReady: true,
+    })).toBe(false);
+  });
+  test('trusted parsed seam does not consume or parse the request body again', async () => {
+    const prepare = vi.fn(async ({ payload, actorKey }) => {
+      expect(payload).toEqual({ value: 'already-parsed' });
+      expect(actorKey).toBe('user:42');
+      return Response.json({ code: 'TEST_STOP' }, { status: 409 });
+    });
+    const service = createService(new MemoryReplayStore(), {
+      prepare,
+      execute: vi.fn(async () => ({ status: 'completed' as const })),
+    });
+    const request = new Request('https://example.test/api/arena/generate-stream', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer test-actor' },
+      body: 'this body must remain unread',
+    });
+
+    const response = await service.createParsedSubscription(request, {
+      generationRequestId: 'request-parsed-seam',
+      payload: { value: 'already-parsed' },
+      bodyBytes: 128,
+    });
+
+    expect(response).toBeInstanceOf(Response);
+    expect((response as Response).status).toBe(409);
+    expect(request.bodyUsed).toBe(false);
+    expect(prepare).toHaveBeenCalledTimes(1);
+  });
+
+  test('resolves payload-dependent operation actor after the single body parse', async () => {
+    const resolveCreateActor = vi.fn(async ({ generationRequestId, payload }) => {
+      expect(generationRequestId).toBe('request-operation-actor');
+      expect(payload).toEqual({ roomId: 'room-1' });
+      return { actorKey: 'pvp-room:room-1' };
+    });
+    const prepare = vi.fn(async ({ actorKey }) => {
+      expect(actorKey).toBe('pvp-room:room-1');
+      return Response.json({ code: 'TEST_STOP' }, { status: 409 });
+    });
+    const service = createArenaGenerationService({
+      store: new MemoryReplayStore(),
+      executor: {
+        prepare,
+        execute: vi.fn(async () => ({ status: 'completed' as const })),
+      },
+      resolveActor: async () => ({ actorKey: 'user:42' }),
+      resolveCreateActor,
+      deriveGenerationId: async () => 'generation-1',
+      now: () => new Date('2026-08-25T04:00:00.000Z'),
+      hashPayload: async (payload) => `hash:${JSON.stringify(payload)}`,
+    });
+
+    const response = await service.createSubscription(new Request(
+      'https://example.test/api/arena/generate-stream',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          generationRequestId: 'request-operation-actor',
+          roomId: 'room-1',
+        }),
+      },
+    ));
+
+    expect(response).toBeInstanceOf(Response);
+    expect((response as Response).status).toBe(409);
+    expect(resolveCreateActor).toHaveBeenCalledTimes(1);
+    expect(prepare).toHaveBeenCalledTimes(1);
+  });
+
+  test('相邻 materialization version 保持 authenticated authority 读写兼容', async () => {
     const createVersionedRequest = (payload: Record<string, unknown>) => new Request(
       'https://example.test/api/arena/generate-stream',
       {
@@ -1804,6 +1922,37 @@ describe('Arena generation lifecycle service', () => {
     expect(execute).toHaveBeenCalledOnce();
   });
 
+  test('does not rewrite a completed executor result as failed when Redis terminal projection fails', async () => {
+    const store = new MemoryReplayStore();
+    const markTerminal = vi.spyOn(store, 'markTerminal')
+      .mockRejectedValueOnce(new Error('Redis terminal write unavailable'));
+    const execute = vi.fn(async (input: Parameters<ArenaGenerationExecutor['execute']>[0]) => {
+      await input.emit({ type: 'markdown', data: { chunk: '完整战报正文' } });
+      await input.claimFinalization({ status: 'completed' });
+      return { status: 'completed' as const };
+    });
+    const service = createService(store, { execute });
+
+    const response = await service.create(createRequest('request-1'));
+    await vi.waitFor(() => {
+      expect(markTerminal).toHaveBeenCalledTimes(1);
+    });
+    await response.body?.cancel();
+
+    expect(markTerminal).toHaveBeenCalledWith(expect.objectContaining({
+      terminal: expect.objectContaining({ status: 'completed' }),
+    }));
+    expect(store.events.get('generation-1') ?? []).not.toContainEqual(
+      expect.objectContaining({ type: 'error' }),
+    );
+    expect(store.states.get('generation-1')).toMatchObject({
+      status: 'finalizing',
+      terminal: null,
+      snapshot: expect.objectContaining({ markdown: '完整战报正文' }),
+    });
+    expect(execute).toHaveBeenCalledOnce();
+  });
+
   test('an indeterminate finalization claim cannot be converted into a Redis-only terminal', async () => {
     const store = new MemoryReplayStore();
     const execute = vi.fn(async (input: Parameters<ArenaGenerationExecutor['execute']>[0]) => {
@@ -1830,7 +1979,7 @@ describe('Arena generation lifecycle service', () => {
     expect(execute).toHaveBeenCalledOnce();
   });
 
-  test('an already-open replay stream reaps an expired pending finalization without Provider replay', async () => {
+  test('an expired completed intent stays pending instead of becoming producer_lost', async () => {
     const store = new MemoryReplayStore();
     let currentTime = new Date('2026-08-25T04:00:00.000Z');
     const execute = vi.fn(async (input: Parameters<ArenaGenerationExecutor['execute']>[0]) => {
@@ -1839,16 +1988,13 @@ describe('Arena generation lifecycle service', () => {
     });
     const terminalStore: ArenaGenerationTerminalStore = {
       readOwnedTerminal: vi.fn(async () => null),
-      reconcileExpiredLease: vi.fn(async (input) => ({
-        generationId: input.generationId,
-        generationRequestId: input.generationRequestId,
-        status: 'producer_lost' as const,
-        updatedAt: input.updatedAt,
-        resultRef: null,
-        markdown: '',
-        reasoning: '',
-        payloadHash: input.payloadHash,
-      })),
+      inspectOwnedFinalization: vi.fn()
+        .mockResolvedValueOnce({ kind: 'not-found' as const })
+        .mockResolvedValue({
+          kind: 'pending' as const,
+          payloadHash: 'hash:{"value":"same"}',
+        }),
+      reconcileExpiredLease: vi.fn(async () => { throw new Error('must not reap intent'); }),
     };
     const service = createService(store, { execute }, {
       terminalStore,
@@ -1857,11 +2003,23 @@ describe('Arena generation lifecycle service', () => {
     });
 
     const response = await service.create(createRequest('request-1'));
+    await vi.waitFor(() => {
+      expect(store.states.get('generation-1')?.status).toBe('finalizing');
+    });
     currentTime = new Date('2026-08-25T04:01:00.000Z');
-    const body = await response.text();
+    const status = await service.status(new Request(
+      'https://example.test/api/arena/generations/generation-1',
+    ), { generationId: 'generation-1' });
+    await response.body?.cancel();
 
-    expect(body).toContain('producer_lost');
-    expect(terminalStore.reconcileExpiredLease).toHaveBeenCalledOnce();
+    expect(status.status).toBe(503);
+    await expect(status.json()).resolves.toMatchObject({
+      code: 'GENERATION_FINALIZATION_PENDING',
+    });
+    expect(terminalStore.reconcileExpiredLease).not.toHaveBeenCalled();
+    expect(store.events.get('generation-1') ?? []).not.toContainEqual(
+      expect.objectContaining({ type: 'error' }),
+    );
     expect(execute).toHaveBeenCalledOnce();
   });
 
@@ -2110,6 +2268,93 @@ describe('Arena generation lifecycle service', () => {
     expect(store.states.get('generation-1')?.terminal?.status).toBe('cancelled');
   });
 
+  test('trusted cancelOwned binds the exact server actor and aborts the active producer once', async () => {
+    const store = new MemoryReplayStore();
+    let abortCount = 0;
+    let resolveAbort!: () => void;
+    const aborted = new Promise<void>((resolve) => { resolveAbort = resolve; });
+    const resolveActor = vi.fn(async () => ({ actorKey: 'pvp-room:room-1' }));
+    const service = createArenaGenerationService({
+      store,
+      executor: {
+        execute: vi.fn(async ({ signal }) => {
+          signal.addEventListener('abort', () => {
+            abortCount += 1;
+            resolveAbort();
+          }, { once: true });
+          await aborted;
+          return { status: 'cancelled' as const, code: 'USER_CANCELLED' };
+        }),
+      },
+      resolveActor,
+      deriveGenerationId: async () => 'generation-1',
+      now: () => new Date('2026-08-25T04:00:00.000Z'),
+      hashPayload: async (payload) => `hash:${JSON.stringify(payload)}`,
+    });
+    const stream = await service.create(createRequest('request-trusted-cancel'));
+    const resolverCallsBeforeCancel = resolveActor.mock.calls.length;
+
+    await expect(service.cancelOwned({
+      actorKey: 'pvp-room:other-room',
+      generationId: 'generation-1',
+      reason: 'user',
+    })).resolves.toEqual({ kind: 'forbidden' });
+    const repeated = await service.cancelOwned({
+      actorKey: 'pvp-room:room-1',
+      generationId: 'generation-1',
+      reason: 'user',
+    });
+    expect(repeated.kind === 'accepted' || repeated.kind === 'terminal').toBe(true);
+    await expect(service.cancelOwned({
+      actorKey: 'pvp-room:room-1',
+      generationId: 'generation-1',
+      reason: 'user',
+    })).resolves.toEqual({ kind: 'accepted', cancelReason: 'user' });
+
+    await aborted;
+    await readResponseText(stream);
+    expect(abortCount).toBe(1);
+    expect(resolveActor).toHaveBeenCalledTimes(resolverCallsBeforeCancel);
+  });
+
+  test('trusted cancelOwned returns terminal state idempotently without touching another owner', async () => {
+    const store = new MemoryReplayStore();
+    store.states.set('generation-terminal', {
+      actorKey: 'pvp-room:room-1',
+      generationId: 'generation-terminal',
+      generationRequestId: 'request-terminal',
+      payloadHash: 'hash:terminal',
+      producerToken: 'producer-terminal',
+      status: 'completed',
+      lastEventId: null,
+      updatedAt: '2026-08-25T04:00:00.000Z',
+      leaseExpiresAt: null,
+      snapshot: null,
+      terminal: {
+        status: 'completed',
+        resultRef: 'r2://report/terminal',
+      },
+      cancelRequested: false,
+      cancelReason: null,
+      preparationSeed: null,
+      preparationVersion: null,
+    });
+    const service = createService(store, {
+      execute: vi.fn(async () => ({ status: 'completed' as const })),
+    });
+
+    await expect(service.cancelOwned({
+      actorKey: 'pvp-room:other-room',
+      generationId: 'generation-terminal',
+      reason: 'user',
+    })).resolves.toEqual({ kind: 'forbidden' });
+    await expect(service.cancelOwned({
+      actorKey: 'pvp-room:room-1',
+      generationId: 'generation-terminal',
+      reason: 'user',
+    })).resolves.toEqual({ kind: 'terminal', status: 'completed' });
+  });
+
   test('content-policy cancel reaches the matching producer with its fixed reason', async () => {
     const store = new MemoryReplayStore();
     let resolveAbort!: () => void;
@@ -2348,6 +2593,176 @@ describe('Arena generation lifecycle service', () => {
     });
   });
 
+  test('projects internal telemetry into the client-facing aiModel contract on create and replay', async () => {
+    const store = new MemoryReplayStore();
+    const service = createService(store, {
+      execute: vi.fn(async ({ emit }) => {
+        await emit({ type: 'markdown', data: { chunk: 'A' } });
+        await emit({
+          type: 'telemetry',
+          data: {
+            model: 'gemini-x',
+            providerName: 'google',
+            providerType: 'google',
+            providerIndex: 0,
+            attempt: 1,
+            finishReason: 'stop',
+            reasoning: { status: 'complete' },
+            usage: { promptTokens: 10, completionTokens: 5 },
+          },
+        });
+        return { status: 'completed' as const, resultRef: 'r2://report/1' };
+      }),
+    });
+
+    const createResponse = await service.create(createRequest('request-1'));
+    const createBody = await readResponseText(createResponse);
+    const replayResponse = await service.resume(new Request(
+      'https://example.test/api/arena/generations/generation-1/stream',
+    ), { generationId: 'generation-1' });
+    const replayBody = await readResponseText(replayResponse);
+
+    for (const body of [createBody, replayBody]) {
+      const telemetryBlock = body
+        .split('\n\n')
+        .map((block) => parseGenerationSseBlock(block))
+        .find((block) => block?.event === 'telemetry');
+      expect(telemetryBlock).not.toBeNull();
+      expect(JSON.parse(telemetryBlock!.data)).toEqual({
+        version: 1,
+        aiModel: 'gemini-x',
+        usage: { promptTokens: 10, completionTokens: 5 },
+      });
+    }
+    expect(createBody).not.toContain('providerName');
+    expect(replayBody).not.toContain('providerName');
+  });
+
+  test('telemetry client projection is idempotent and preserves payloads without a model field', () => {
+    const clientFacing = {
+      version: 1,
+      aiModel: 'model-a',
+      usage: { totalTokens: 42 },
+      narrativeHistoryReadCount: 3,
+    };
+    expect(projectArenaTelemetryForClient(clientFacing)).toEqual(clientFacing);
+    expect(projectArenaTelemetryForClient({
+      model: 'model-a',
+      narrativeHistoryReadCount: 3,
+      usage: { totalTokens: 42 },
+    })).toEqual(clientFacing);
+    expect(projectArenaTelemetryForClient({ errorClass: 'Error' })).toEqual({ errorClass: 'Error' });
+    expect(projectArenaTelemetryForClient({})).toEqual({});
+    expect(projectArenaTelemetryForClient(null)).toBeNull();
+    expect(projectArenaTelemetryForClient({ model: '  ' })).toEqual({ version: 1 });
+  });
+
+  test('projects snapshot bootstrap telemetry into the client contract on window-lost replay', async () => {
+    const store = new MemoryReplayStore();
+    const service = createService(store, {
+      execute: vi.fn(async ({ emit }) => {
+        await emit({ type: 'markdown', data: { chunk: 'A' } });
+        await emit({
+          type: 'telemetry',
+          data: {
+            model: 'gemini-x',
+            providerName: 'google',
+            providerType: 'google',
+            attempt: 2,
+            reasoning: { status: 'complete' },
+            usage: { promptTokens: 10, completionTokens: 5 },
+            narrativeHistoryReadCount: 2,
+          },
+        });
+        return { status: 'completed' as const, resultRef: 'r2://report/1' };
+      }),
+    });
+
+    const createResponse = await service.create(createRequest('request-1'));
+    await readResponseText(createResponse);
+    const replayResponse = await service.resume(new Request(
+      'https://example.test/api/arena/generations/generation-1/stream?after=999-0',
+    ), { generationId: 'generation-1' });
+    const replayBody = await readResponseText(replayResponse);
+
+    const snapshotBlock = replayBody
+      .split('\n\n')
+      .map((block) => parseGenerationSseBlock(block))
+      .find((block) => block?.event === 'snapshot');
+    expect(snapshotBlock).not.toBeNull();
+    expect(JSON.parse(snapshotBlock!.data)).toMatchObject({
+      status: 'completed',
+      telemetry: {
+        version: 1,
+        aiModel: 'gemini-x',
+        usage: { promptTokens: 10, completionTokens: 5 },
+        narrativeHistoryReadCount: 2,
+      },
+    });
+    expect(replayBody).not.toContain('providerName');
+    expect(replayBody).not.toContain('"model"');
+  });
+
+  test('projects telemetry on the running snapshot bootstrap path before a terminal exists', async () => {
+    const store = new MemoryReplayStore();
+    await store.reserve({
+      actorKey: 'user:42',
+      generationRequestId: 'request-running-bootstrap',
+      generationId: 'generation-1',
+      payloadHash: 'hash:{"value":"same"}',
+      producerToken: 'producer-1',
+      now: '2026-08-25T04:00:00.000Z',
+      leaseExpiresAt: '2026-08-25T04:02:00.000Z',
+    });
+    await store.markRunning({
+      generationId: 'generation-1',
+      producerToken: 'producer-1',
+      now: '2026-08-25T04:00:00.000Z',
+      leaseExpiresAt: '2026-08-25T04:02:00.000Z',
+    });
+    await store.writeSnapshot({
+      generationId: 'generation-1',
+      producerToken: 'producer-1',
+      now: '2026-08-25T04:00:01.000Z',
+      snapshot: {
+        status: 'running',
+        markdown: '部分正文',
+        reasoning: '部分思考',
+        telemetry: {
+          model: 'gemini-x',
+          providerName: 'google',
+          usage: { promptTokens: 7, completionTokens: 3 },
+        },
+        lastEventId: '7-0',
+        updatedAt: '2026-08-25T04:00:01.000Z',
+      },
+    });
+    const service = createService(store, {
+      execute: vi.fn(async () => ({ status: 'completed' as const })),
+    });
+
+    const replayResponse = await service.resume(new Request(
+      'https://example.test/api/arena/generations/generation-1/stream?after=999-0',
+    ), { generationId: 'generation-1' });
+    const replayBody = await readResponseText(replayResponse);
+
+    const snapshotBlock = replayBody
+      .split('\n\n')
+      .map((block) => parseGenerationSseBlock(block))
+      .find((block) => block?.event === 'snapshot');
+    expect(snapshotBlock).not.toBeNull();
+    expect(JSON.parse(snapshotBlock!.data)).toMatchObject({
+      status: 'running',
+      telemetry: {
+        version: 1,
+        aiModel: 'gemini-x',
+        usage: { promptTokens: 7, completionTokens: 3 },
+      },
+    });
+    expect(replayBody).not.toContain('providerName');
+    expect(replayBody).not.toContain('"model"');
+  });
+
   test('flushes a delta batch early when its byte budget is reached', async () => {
     const store = new MemoryReplayStore();
     let observedAppendCount = 0;
@@ -2508,7 +2923,40 @@ describe('Arena generation lifecycle service', () => {
     expect(JSON.stringify(observeArenaGeneration.mock.calls)).not.toContain('余额不足');
   });
 
-  test('bounds Redis snapshot bytes while retaining the terminal fallback path', async () => {
+  test('compacts an oversized completed Redis snapshot without dropping Markdown', async () => {
+    const store = new MemoryReplayStore();
+    const observeArenaGeneration = vi.fn();
+    const service = createService(store, {
+      execute: vi.fn(async ({ emit }) => {
+        await emit({ type: 'markdown', data: { chunk: '完整正文' } });
+        await emit({ type: 'reasoning', data: { chunk: 'R'.repeat(1_024) } });
+        await emit({ type: 'telemetry', data: { trace: 'T'.repeat(1_024) } });
+        return { status: 'completed' as const, resultRef: 'r2://report/compact' };
+      }),
+    }, {
+      snapshotMaxBytes: 512,
+      observer: { observeArenaGeneration },
+    });
+
+    const response = await service.create(createRequest('request-1'));
+    await response.text();
+
+    const state = store.states.get('generation-1');
+    expect(state?.snapshot).toMatchObject({
+      status: 'completed',
+      markdown: '完整正文',
+      reasoning: '',
+      telemetry: null,
+      terminalResultRef: 'r2://report/compact',
+      lastEventId: state?.lastEventId,
+    });
+    expect(observeArenaGeneration).toHaveBeenCalledWith(expect.objectContaining({
+      event: 'redis_degraded',
+      operation: 'snapshot_budget',
+    }));
+  });
+
+  test('clears a completed Redis snapshot when Markdown alone exceeds the byte budget', async () => {
     const store = new MemoryReplayStore();
     const observeArenaGeneration = vi.fn();
     let finalized = false;
@@ -2561,6 +3009,33 @@ describe('Arena generation lifecycle service', () => {
       actorKey: 'user:42',
       generationId: 'generation-1',
     });
+  });
+
+  test('latches a running snapshot budget overflow instead of reserializing every later delta', async () => {
+    const store = new MemoryReplayStore();
+    const observeArenaGeneration = vi.fn();
+    const service = createService(store, {
+      execute: vi.fn(async ({ emit }) => {
+        await emit({ type: 'markdown', data: { chunk: 'X'.repeat(300) } });
+        await emit({ type: 'markdown', data: { chunk: 'Y'.repeat(300) } });
+        await emit({ type: 'markdown', data: { chunk: 'Z'.repeat(300) } });
+        return { status: 'completed' as const };
+      }),
+    }, {
+      deltaFlushBytes: 1,
+      snapshotFlushBytes: 1,
+      snapshotMaxBytes: 256,
+      observer: { observeArenaGeneration },
+    });
+
+    const response = await service.create(createRequest('request-snapshot-overflow-latch'));
+    await response.text();
+
+    const budgetObservations = observeArenaGeneration.mock.calls.filter(([observation]) => (
+      observation.event === 'redis_degraded' && observation.operation === 'snapshot_budget'
+    ));
+    expect(budgetObservations).toHaveLength(2);
+    expect(store.writeSnapshotCalls).toBe(0);
   });
 
   test('oversized failed terminal clears the old running partial and keeps bounded terminal evidence', async () => {
@@ -2883,6 +3358,13 @@ describe('Arena generation lifecycle service', () => {
         reasoning: '',
         payloadHash: 'payload-hash',
         contentAvailable: true,
+        roomSafeResult: {
+          version: 1,
+          format: 'stream-markdown',
+          mode: 'classic',
+          report: { headline: '权威标题' },
+          providerDiagnostic: 'must-be-presanitized-by-terminal-adapter',
+        },
       });
     const service = createService(store, {
       execute: vi.fn(async () => ({ status: 'completed' as const })),
@@ -2901,9 +3383,55 @@ describe('Arena generation lifecycle service', () => {
         resumeCursor: '1-0',
         finalAuthoritative: true,
         resultAvailable: true,
+        roomSafeResult: {
+          version: 1,
+          format: 'stream-markdown',
+          mode: 'classic',
+          report: { headline: '权威标题' },
+          providerDiagnostic: 'must-be-presanitized-by-terminal-adapter',
+        },
       }),
     });
     expect(readOwnedTerminal).toHaveBeenCalledTimes(2);
+  });
+
+  test('completed owned projection reloads the durable Room-safe result after service recovery', async () => {
+    const store = new MemoryReplayStore();
+    const readOwnedTerminal = vi.fn(async () => ({
+      generationId: 'generation-1',
+      generationRequestId: 'request-1',
+      status: 'completed' as const,
+      updatedAt: '2026-08-25T03:30:00.000Z',
+      resultRef: 'r2:terminal',
+      markdown: 'durable completed report',
+      reasoning: '',
+      payloadHash: 'hash:{"value":"same"}',
+      contentAvailable: true,
+      roomSafeResult: { version: 1, format: 'stream-markdown', mode: 'classic' },
+    }));
+    const service = createService(store, {
+      execute: vi.fn(async ({ emit }) => {
+        await emit({ type: 'markdown', data: { chunk: 'durable completed report' } });
+        return { status: 'completed' as const, resultRef: 'r2:terminal' };
+      }),
+    }, { terminalStore: { readOwnedTerminal } });
+    const response = await service.create(createRequest('request-1'));
+    await response.text();
+
+    await expect(service.readOwnedProjection({
+      actorKey: 'user:42',
+      generationId: 'generation-1',
+    })).resolves.toMatchObject({
+      kind: 'found',
+      projection: {
+        status: 'completed',
+        roomSafeResult: { version: 1, format: 'stream-markdown', mode: 'classic' },
+      },
+    });
+    expect(readOwnedTerminal).toHaveBeenCalledWith({
+      generationId: 'generation-1',
+      actorKey: 'user:42',
+    });
   });
 
   test('expired Redis lease adopts a durable completed finalization instead of overwriting it', async () => {
@@ -2943,7 +3471,7 @@ describe('Arena generation lifecycle service', () => {
         updatedAt: '2026-08-25T03:30:00.000Z',
         resultRef: 'r2:terminal',
         markdown: 'durable completed report',
-        reasoning: '',
+        reasoning: 'R'.repeat(1_024),
         payloadHash: 'payload-hash',
         contentAvailable: true,
       })),
@@ -2953,7 +3481,7 @@ describe('Arena generation lifecycle service', () => {
     };
     const service = createService(store, {
       execute: vi.fn(async () => ({ status: 'completed' as const })),
-    }, { terminalStore });
+    }, { snapshotMaxBytes: 512, terminalStore });
 
     const response = await service.status(new Request(
       'https://example.test/api/arena/generations/generation-1',
@@ -2968,6 +3496,8 @@ describe('Arena generation lifecycle service', () => {
     expect(store.states.get('generation-1')?.snapshot).toMatchObject({
       status: 'completed',
       markdown: 'durable completed report',
+      reasoning: '',
+      telemetry: null,
       terminalResultRef: 'r2:terminal',
     });
     expect(store.events.get('generation-1')).toHaveLength(301);
@@ -3227,6 +3757,29 @@ describe('Arena generation lifecycle service', () => {
     expect(replay).toContain('event: error');
     expect(replay).toContain('"code":"AI_UPSTREAM_REQUEST_FAILED"');
     expect(replay).not.toMatch(/message|余额不足|provider/u);
+  });
+
+  test('durable truncated terminal replays partial text, usage and a fixed explanation without redispatch', async () => {
+    const execute = vi.fn(async () => ({ status: 'completed' as const }));
+    const terminalStore: ArenaGenerationTerminalStore = {
+      readOwnedTerminal: vi.fn(async () => ({
+        generationId: 'generation-1', generationRequestId: 'request-1',
+        status: 'failed' as const, updatedAt: '2026-09-28T00:00:00Z',
+        resultRef: 'r2:partial', markdown: 'partial body', reasoning: '',
+        errorCode: 'AI_OUTPUT_TRUNCATED', payloadHash: 'hash', contentAvailable: true,
+        telemetry: { usage: { completionTokens: 20, reasoningTokens: 15, textTokens: 5 } },
+      })),
+    };
+    const service = createService(new MemoryReplayStore(), { execute }, { terminalStore });
+    const response = await service.resume(new Request('https://example.test/api/arena/generations/generation-1/stream'),
+      { generationId: 'generation-1' });
+    const replay = await response.text();
+    expect(replay).toContain('partial body');
+    expect(replay).toContain('"textTokens":5');
+    expect(replay).toContain('生成达到输出上限');
+    expect(replay).toContain('event: error');
+    expect(replay).not.toContain('event: done');
+    expect(execute).not.toHaveBeenCalled();
   });
 
   test('validates the resume cursor before generation lookup and advances terminal fallback ids', async () => {
@@ -3489,6 +4042,194 @@ describe('Arena generation lifecycle service', () => {
     await expect(resumed.json()).resolves.toMatchObject({
       code: 'GENERATION_TERMINAL_CONTENT_UNAVAILABLE',
     });
+  });
+
+  test('reports an expired durable body as completed without a retryable storage failure', async () => {
+    const store = new MemoryReplayStore();
+    const terminalStore: ArenaGenerationTerminalStore = {
+      readOwnedTerminal: vi.fn(async () => ({
+        generationId: 'generation-1',
+        generationRequestId: 'request-1',
+        status: 'completed' as const,
+        updatedAt: '2026-08-25T04:00:00.000Z',
+        resultRef: 'r2://report/expired',
+        markdown: '',
+        reasoning: '',
+        payloadHash: 'payload-hash',
+        contentAvailable: false,
+        contentUnavailableReason: 'not-found' as const,
+      })),
+    };
+    const service = createService(store, {
+      execute: vi.fn(async () => ({ status: 'completed' as const })),
+    }, { terminalStore });
+
+    const status = await service.status(new Request(
+      'https://example.test/api/arena/generations/generation-1',
+    ), { generationId: 'generation-1' });
+    const lookup = await service.lookup(new Request(
+      'https://example.test/api/arena/generation-requests/request-1',
+    ), { generationRequestId: 'request-1' });
+    const projection = await service.readOwnedProjection({
+      actorKey: 'user:42',
+      generationId: 'generation-1',
+    });
+    const resumed = await service.resume(new Request(
+      'https://example.test/api/arena/generations/generation-1/stream',
+    ), { generationId: 'generation-1' });
+
+    for (const response of [status, lookup]) {
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({
+        status: 'completed',
+        resumable: false,
+        finalAuthoritative: true,
+        resultAvailable: false,
+        contentRetention: 'expired',
+      });
+    }
+    expect(projection).toEqual({
+      kind: 'found',
+      projection: expect.objectContaining({
+        status: 'completed',
+        markdown: '',
+        finalAuthoritative: true,
+        resultAvailable: false,
+        generationRecordId: null,
+        contentRetention: 'expired',
+      }),
+    });
+    expect(resumed.status).toBe(410);
+    await expect(resumed.json()).resolves.toMatchObject({
+      code: 'GENERATION_TERMINAL_CONTENT_EXPIRED',
+    });
+    await expect(service.resumeOwnedSubscription({
+      actorKey: 'user:42',
+      generationId: 'generation-1',
+      after: null,
+    })).resolves.toEqual({
+      kind: 'unavailable',
+      code: 'GENERATION_TERMINAL_CONTENT_EXPIRED',
+    });
+  });
+
+  test('reports a completed unarchived output as completed with a narrow warning', async () => {
+    const store = new MemoryReplayStore();
+    const terminalStore: ArenaGenerationTerminalStore = {
+      readOwnedTerminal: vi.fn(async () => ({
+        generationId: 'generation-1',
+        generationRequestId: 'request-1',
+        status: 'completed' as const,
+        updatedAt: '2026-08-25T04:00:00.000Z',
+        resultRef: null,
+        markdown: '',
+        reasoning: '',
+        payloadHash: 'payload-hash',
+        persistenceWarning: 'OUTPUT_NOT_ARCHIVED' as const,
+        contentAvailable: false,
+        contentUnavailableReason: 'not-archived' as const,
+      })),
+    };
+    const service = createService(store, {
+      execute: vi.fn(async () => ({ status: 'completed' as const })),
+    }, { terminalStore });
+
+    const status = await service.status(new Request(
+      'https://example.test/api/arena/generations/generation-1',
+    ), { generationId: 'generation-1' });
+    const lookup = await service.lookup(new Request(
+      'https://example.test/api/arena/generation-requests/request-1',
+    ), { generationRequestId: 'request-1' });
+    const projection = await service.readOwnedProjection({
+      actorKey: 'user:42',
+      generationId: 'generation-1',
+    });
+    const resumed = await service.resume(new Request(
+      'https://example.test/api/arena/generations/generation-1/stream',
+    ), { generationId: 'generation-1' });
+    const resumedBody = await resumed.text();
+
+    for (const response of [status, lookup]) {
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({
+        status: 'completed',
+        resumable: false,
+        finalAuthoritative: true,
+        resultAvailable: false,
+        persistenceWarning: 'OUTPUT_NOT_ARCHIVED',
+        replayUnavailable: true,
+      });
+    }
+    expect(projection).toEqual({
+      kind: 'found',
+      projection: expect.objectContaining({
+        status: 'completed',
+        finalAuthoritative: true,
+        resultAvailable: false,
+        persistenceWarning: 'OUTPUT_NOT_ARCHIVED',
+        replayUnavailable: true,
+      }),
+    });
+    expect(resumed.status).toBe(200);
+    expect(resumedBody).toContain('event: done');
+    expect(resumedBody).toContain('"status":"completed"');
+    expect(resumedBody).toContain('"persistenceWarning":"OUTPUT_NOT_ARCHIVED"');
+    expect(resumedBody).toContain('"replayUnavailable":true');
+    expect(resumedBody).not.toContain('event: error');
+  });
+
+  test('keeps an expired terminal completed when durable fallback wins an SSE replay race', async () => {
+    const store = new MemoryReplayStore();
+    await store.reserve({
+      actorKey: 'user:42',
+      generationRequestId: 'request-1',
+      generationId: 'generation-1',
+      payloadHash: 'payload-hash',
+      producerToken: 'producer-token-1',
+      now: '2026-08-25T04:00:00.000Z',
+      leaseExpiresAt: '2026-08-25T05:00:00.000Z',
+    });
+    await store.markRunning({
+      generationId: 'generation-1',
+      producerToken: 'producer-token-1',
+      now: '2026-08-25T04:00:00.000Z',
+      leaseExpiresAt: '2026-08-25T05:00:00.000Z',
+    });
+    const originalReadState = store.readState.bind(store);
+    vi.spyOn(store, 'readState')
+      .mockImplementationOnce(originalReadState)
+      .mockResolvedValueOnce(null);
+    const service = createService(store, {
+      execute: vi.fn(async () => ({ status: 'completed' as const })),
+    }, {
+      terminalStore: {
+        readOwnedTerminal: vi.fn(async () => ({
+          generationId: 'generation-1',
+          generationRequestId: 'request-1',
+          status: 'completed' as const,
+          updatedAt: '2026-08-25T04:00:00.000Z',
+          resultRef: 'r2://report/expired',
+          markdown: '',
+          reasoning: '',
+          payloadHash: 'payload-hash',
+          contentAvailable: false,
+          contentUnavailableReason: 'not-found' as const,
+        })),
+      },
+    });
+
+    const resumed = await service.resume(new Request(
+      'https://example.test/api/arena/generations/generation-1/stream',
+    ), { generationId: 'generation-1' });
+    const body = await resumed.text();
+
+    expect(resumed.status).toBe(200);
+    expect(body).toContain('event: snapshot');
+    expect(body).toContain('event: done');
+    expect(body).toContain('"status":"completed"');
+    expect(body).toContain('"resultAvailable":false');
+    expect(body).toContain('"contentRetention":"expired"');
+    expect(body).not.toContain('"status":"failed"');
   });
 
   test('fails closed when the exact replay terminal entry was trimmed', async () => {

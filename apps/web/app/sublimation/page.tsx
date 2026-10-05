@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 
+import { ArenaPersistedStateBoundary } from '@/components/arena/ArenaPersistedStateBoundary';
 import { AppRouteAdapterProvider } from '@/components/competition/AppRouteAdapterProvider';
 import { SublimationPage } from '@/components/competition/SublimationPage';
 
@@ -11,7 +12,9 @@ export const metadata: Metadata = {
 export default function SublimationRoute() {
   return (
     <AppRouteAdapterProvider>
-      <SublimationPage />
+      <ArenaPersistedStateBoundary hydrateBattleStore={false}>
+        <SublimationPage />
+      </ArenaPersistedStateBoundary>
     </AppRouteAdapterProvider>
   );
 }

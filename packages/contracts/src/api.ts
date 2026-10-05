@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z } from './zod';
 
 import { OpaqueKeySchema } from './primitives';
 import { JsonValueSchema } from './json-value';

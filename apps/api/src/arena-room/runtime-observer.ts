@@ -51,6 +51,7 @@ export type ArenaRoomRuntimeObservation =
   | { event: 'socket_backlog'; queuedFrames: number; queuedBytes: number }
   | { event: 'slow_consumer_resync_close' }
   | { event: 'sync'; action: 'reconnect_attempt' }
+  | { event: 'sync'; action: 'membership_rejected' | 'authority_fenced' | 'authority_unavailable' }
   | { event: 'sync'; action: 'delivery'; mode: ArenaRoomSyncMode }
   | { event: 'sync'; action: 'resync_requested' | 'resync_required' }
   | { event: 'publisher'; action: 'started' | 'finished' }

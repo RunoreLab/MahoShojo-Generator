@@ -4,21 +4,34 @@ import type {
   ArenaGenerationTerminalRecord,
   ArenaGenerationTerminalStore,
 } from '@mahoshojo/hosted-api/arena-generation/service';
+import { ARENA_OUTPUT_NOT_ARCHIVED_WARNING } from '@mahoshojo/hosted-api/arena-generation/service';
+import { extractArenaMultiplayerParticipation, type ArenaMultiplayerParticipation } from '@mahoshojo/contracts/arena-room';
+import { persistArenaGenerationParticipants } from './participants';
 import type {
   ArenaTerminalEffectInput,
   ArenaGenerationFinalizationPorts,
   ArenaTerminalClaimInput,
 } from './finalization';
+import {
+  ArenaRoomGenerationResultSchema,
+  parseBattleReportRenderSnapshotV1,
+} from '@mahoshojo/contracts';
+import { parseArenaStructuredReportJson } from './structured-report';
 import { buildArenaTerminalEffectIdempotencyKey } from './finalization';
+import { isWebArenaOutputContract } from './output-contract';
+import { canArchivePartialOutput, completionDiagnostics } from './completion';
+import { normalizeUsage } from '../node-runtime/usage';
 import type { NodeDataD1Client } from '../node-runtime/data-ports';
-import { hashArenaCombatantBaseRevision } from '@mahoshojo/domain/arena-reconciliation';
 
 const OUTPUT_KIND = 'battle_report_generation_output';
-const OUTPUT_PREVIEW_CHARS = 120_000;
 const LOCAL_RECONCILIATION_MAX_BYTES = 64 * 1_024;
 export const MAX_ARENA_TERMINAL_COMBATANTS = 32;
 export const MAX_ARENA_TERMINAL_EXTRA_JSON_BYTES = 96 * 1_024;
 const MAX_ARENA_TERMINAL_IMPACTS = 32;
+
+export type ArenaGenerationObjectReadResult =
+  | Readonly<{ kind: 'found'; text: string }>
+  | Readonly<{ kind: 'not-found' }>;
 
 export type ArenaGenerationObjectStore = {
   put(_input: {
@@ -31,7 +44,7 @@ export type ArenaGenerationObjectStore = {
     storedBytes: number;
     contentEncoding: string | null;
   }>;
-  getText(_key: string): Promise<string>;
+  getText(_key: string): Promise<ArenaGenerationObjectReadResult>;
 };
 
 export type NodeArenaGenerationPersistenceOptions = {
@@ -68,6 +81,10 @@ const outputKey = (generationId: string): string => (
 
 const numberOf = (value: unknown): number | null => (
   typeof value === 'number' && Number.isFinite(value) ? Math.floor(value) : null
+);
+
+const integerOf = (value: unknown): number | null => (
+  typeof value === 'number' && Number.isSafeInteger(value) ? value : null
 );
 
 const stringOf = (value: unknown): string | null => (
@@ -215,6 +232,30 @@ const streamImpacts = (metadata: Record<string, unknown>): Array<Record<string, 
     : [];
 };
 
+const structuredReport = (
+  input: Pick<ArenaTerminalClaimInput, 'markdown' | 'payload'>,
+): Record<string, unknown> | null => parseArenaStructuredReportJson(input.markdown, {
+  enableImpacts: input.payload.writeArenaHistory === true || input.payload.writeCurrentState === true,
+  enableImpactText: input.payload.writeArenaHistory === true,
+  enableCurrentState: input.payload.writeCurrentState === true,
+});
+
+const terminalReport = (
+  input: Pick<ArenaTerminalClaimInput, 'metadata' | 'markdown' | 'payload'>,
+): Record<string, unknown> | null => streamReport(input.metadata)
+  ?? (isWebArenaOutputContract(input.metadata.outputContract) ? null : structuredReport(input));
+
+const terminalImpacts = (
+  input: Pick<ArenaTerminalClaimInput, 'metadata' | 'markdown' | 'payload'>,
+): Array<Record<string, unknown>> => {
+  const streamed = streamImpacts(input.metadata);
+  if (streamed.length > 0) return streamed;
+  const report = isWebArenaOutputContract(input.metadata.outputContract) ? null : structuredReport(input);
+  return Array.isArray(report?.impacts)
+    ? report.impacts.flatMap((value) => recordOf(value) ? [recordOf(value)!] : [])
+    : [];
+};
+
 const headlineFromMarkdown = (markdown: string): string | null => {
   for (const line of markdown.split(/\r?\n/u)) {
     const match = line.trim().match(/^#{1,3}\s+(.+)$/u);
@@ -278,8 +319,15 @@ const buildExtraJson = async (
     .map((value, sortIndex) => {
       const combatant = recordOf(value);
       const data = recordOf(combatant?.data);
+      const roomCombatantKey = boundedString(combatant?.roomCombatantKey, 512);
+      const nativeSignature = combatant?.isNative === true
+        ? boundedString(data?.signature, 512)
+        : null;
       return {
         sortIndex,
+        ...(roomCombatantKey && /^(data-card|preset|host-local):.+$/u.test(roomCombatantKey)
+          ? { roomCombatantKey }
+          : {}),
         name: boundedString(data?.codename, 300)
           ?? boundedString(data?.name, 300)
           ?? `未知角色#${sortIndex + 1}`,
@@ -287,6 +335,7 @@ const buildExtraJson = async (
         templateId: boundedString(combatant?.filename, 256)
           ?? boundedString(data?.templateId, 256),
         isNative: combatant?.isNative === true,
+        ...(nativeSignature ? { nativeSignature } : {}),
         isPreset: combatant?.isPreset === true,
         teamId: numberOf(combatant?.teamId),
         characterGuidance: boundedString(combatant?.characterGuidance, 100),
@@ -294,30 +343,82 @@ const buildExtraJson = async (
         dataCardUpdatedAt: boundedString(combatant?.sourceDataCardUpdatedAt, 128),
       };
     });
-  const baseRevisionHash = await hashArenaCombatantBaseRevision(
-    boundedCombatants,
-  );
-  const report = streamReport(input.metadata);
+  const report = terminalReport(input);
+  const officialReport = recordOf(report?.officialReport);
   const scenario = recordOf(input.payload.scenario);
+  const snapshotReporterInfo = recordOf(input.metadata.reporterInfo);
+  const battleReportRenderSnapshotV1 = parseBattleReportRenderSnapshotV1({
+    version: 1,
+    ...(isWebArenaOutputContract(input.metadata.outputContract) ? { reportFormat: 'web' } : {}),
+    ...(input.metadata.webPackage ? { webPackage: input.metadata.webPackage } : {}),
+    ...(snapshotReporterInfo ? {
+      reporterInfo: {
+        name: snapshotReporterInfo.name,
+        publication: snapshotReporterInfo.publication,
+      },
+    } : {}),
+    ...(typeof input.metadata.userGuidance === 'string'
+      ? { userGuidance: input.metadata.userGuidance }
+      : {}),
+    ...(Array.isArray(input.metadata.characterGuidances)
+      ? { characterGuidances: input.metadata.characterGuidances }
+      : {}),
+    ...(Array.isArray(input.metadata.adjudicationResults)
+      ? { adjudicationResults: input.metadata.adjudicationResults }
+      : {}),
+    ...(typeof input.metadata.narrativeHistoryReadCount === 'number'
+      ? { narrativeHistoryReadCount: input.metadata.narrativeHistoryReadCount }
+      : {}),
+  }) ?? (isWebArenaOutputContract(input.metadata.outputContract)
+    ? parseBattleReportRenderSnapshotV1({ version: 1, reportFormat: 'web',
+      ...(input.metadata.webPackage ? { webPackage: input.metadata.webPackage } : {}) })
+    : null);
+  const impactRosterQueues = new Map<string, number[]>();
+  for (const combatant of combatantsFallback) {
+    const key = combatant.name.replace(/\s+/gu, '').toLocaleLowerCase();
+    const indexes = impactRosterQueues.get(key) ?? [];
+    indexes.push(combatant.sortIndex);
+    impactRosterQueues.set(key, indexes);
+  }
   const reconciliationCandidate = {
     report: {
-      headline: boundedString(report?.headline, 300) ?? headlineFromMarkdown(input.markdown) ?? '',
+      headline: boundedString(report?.headline, 300) ?? (isWebArenaOutputContract(input.metadata.outputContract) ? null : headlineFromMarkdown(input.markdown)) ?? '',
       mode: boundedString(input.payload.mode, 64) ?? 'classic',
       officialReport: {
-        winner: boundedString(report?.winner, 300) ?? winnerFromMarkdown(input.markdown) ?? '',
+        winner: boundedString(report?.winner, 300)
+          ?? boundedString(officialReport?.winner, 300)
+          ?? (isWebArenaOutputContract(input.metadata.outputContract) ? null : winnerFromMarkdown(input.markdown))
+          ?? '',
       },
     },
-    impacts: streamImpacts(input.metadata).slice(0, MAX_ARENA_TERMINAL_IMPACTS).flatMap((impact) => {
+    impacts: terminalImpacts(input).slice(0, MAX_ARENA_TERMINAL_IMPACTS).flatMap((impact) => {
       const characterName = boundedString(impact.characterName, 300);
       if (!characterName) return [];
+      const hasCombatantIndex = Object.prototype.hasOwnProperty.call(impact, 'combatantIndex');
+      const explicitIndex = integerOf(impact.combatantIndex);
+      const hasValidExplicitIndex = explicitIndex !== null
+        && explicitIndex >= 0
+        && explicitIndex < combatantsFallback.length;
+      if (hasCombatantIndex && !hasValidExplicitIndex) return [];
+      if (hasValidExplicitIndex && explicitIndex !== null) {
+        const explicitCombatant = combatantsFallback[explicitIndex];
+        const explicitKey = explicitCombatant?.name.replace(/\s+/gu, '').toLocaleLowerCase();
+        const explicitQueue = explicitKey ? impactRosterQueues.get(explicitKey) : undefined;
+        const queuedPosition = explicitQueue?.indexOf(explicitIndex) ?? -1;
+        if (explicitQueue && queuedPosition >= 0) explicitQueue.splice(queuedPosition, 1);
+      }
+      const combatantIndex = hasValidExplicitIndex
+        ? explicitIndex
+        : impactRosterQueues
+          .get(characterName.replace(/\s+/gu, '').toLocaleLowerCase())
+          ?.shift();
       return [{
+        ...(combatantIndex === undefined ? {} : { combatantIndex }),
         characterName,
         impact: boundedString(impact.impact, 2_000),
         currentStateSummary: boundedString(impact.currentStateSummary, 2_000),
       }];
     }),
-    rosterCount: combatantsFallback.length,
-    baseRevisionHash,
     userGuidance: boundedString(input.payload.userGuidance, 600),
     scenario: {
       title: boundedString(scenario?.title, 300) ?? boundedString(scenario?.name, 300),
@@ -331,16 +432,19 @@ const buildExtraJson = async (
     : {
       available: false,
       reason: 'manifest_budget_exceeded',
-      baseRevisionHash,
-      rosterCount: combatantsFallback.length,
     };
   const authority = {
+    arenaMultiplayer: extractArenaMultiplayerParticipation(input.payload.multiplayerGenerationSnapshot, input.actorKey),
     generationRequestId: boundedString(input.generationRequestId, 128),
     generationOwnerHash: await sha256(input.actorKey),
     generationPayloadHash: boundedString(input.payloadHash, 128),
     generationTerminalStatus: input.status,
     finalizationCompleted: false,
+    completion: completionDiagnostics(input.telemetry),
+    usageDetails: normalizeUsage(input.telemetry.usage),
+    partialOutput: canArchivePartialOutput(input) && Boolean(input.markdown.trim()),
     resultRef: boundedString(input.resultRef, 512),
+    persistenceWarning: input.persistenceWarning ?? null,
     errorCode: boundedString(input.errorCode, 80),
   };
   const candidate = {
@@ -376,27 +480,26 @@ const buildExtraJson = async (
     resolvedModelOverride: boundedString(input.telemetry.model, 256),
     combatantsFallback,
     localCardReconciliation,
+    ...(battleReportRenderSnapshotV1 ? { battleReportRenderSnapshotV1 } : {}),
   };
   if (jsonBytes(candidate) <= MAX_ARENA_TERMINAL_EXTRA_JSON_BYTES) return candidate;
   const compact = {
     ...authority,
     combatantsFallback,
+    ...(battleReportRenderSnapshotV1 ? { battleReportRenderSnapshotV1 } : {}),
     localCardReconciliation: {
       available: false,
       reason: 'manifest_budget_exceeded',
-      baseRevisionHash,
-      rosterCount: combatantsFallback.length,
     },
   };
   if (jsonBytes(compact) <= MAX_ARENA_TERMINAL_EXTRA_JSON_BYTES) return compact;
   return {
     ...authority,
     combatantsFallback: [],
+    ...(battleReportRenderSnapshotV1 ? { battleReportRenderSnapshotV1 } : {}),
     localCardReconciliation: {
       available: false,
       reason: 'manifest_budget_exceeded',
-      baseRevisionHash,
-      rosterCount: combatantsFallback.length,
     },
   };
 };
@@ -442,6 +545,18 @@ SELECT
   brg.status,
   brg.updated_at,
   brg.output_preview,
+  brg.mode,
+  brg.scenario_title,
+  brg.language,
+  brg.story_length,
+  brg.ai_model,
+  brg.headline,
+  brg.winner,
+  brg.prompt_tokens,
+  brg.completion_tokens,
+  brg.total_tokens,
+  brg.cached_tokens,
+  brg.reasoning_tokens,
   brg.extra_json,
   lo.r2_key
 FROM battle_report_generations AS brg
@@ -484,6 +599,171 @@ const validateStoredTerminalIdentity = async (input: {
   return extra;
 };
 
+const buildRoomSafeResult = (
+  row: StoredTerminalRow,
+  extra: Record<string, unknown>,
+): Readonly<Record<string, unknown>> | null => {
+  type RoomSafeCombatantCandidate = Readonly<{
+    combatantIndex: number;
+    combatantKey: string;
+    displayName: string;
+  }>;
+  type RoomSafeImpact = Readonly<{
+    impact?: string;
+    currentStateSummary?: string;
+  }>;
+
+  const normalizeDisplayName = (value: unknown): string | null => {
+    const text = stringOf(value);
+    return text ? text.replace(/\s+/gu, ' ').toLocaleLowerCase() : null;
+  };
+  const render = parseBattleReportRenderSnapshotV1(extra.battleReportRenderSnapshotV1);
+  const fallback = Array.isArray(extra.combatantsFallback)
+    ? extra.combatantsFallback.slice(0, MAX_ARENA_TERMINAL_COMBATANTS)
+    : [];
+  const candidates = fallback.flatMap((value, fallbackIndex) => {
+    const combatant = recordOf(value);
+    const combatantKey = stringOf(combatant?.roomCombatantKey);
+    const displayName = boundedString(combatant?.name, 300);
+    const storedIndex = integerOf(combatant?.sortIndex);
+    const combatantIndex = storedIndex !== null
+      && storedIndex >= 0
+      && storedIndex < fallback.length
+      ? storedIndex
+      : fallbackIndex;
+    return combatantKey && /^(data-card|preset|host-local):.+$/u.test(combatantKey) && displayName
+      ? [{ combatantIndex, combatantKey, displayName } satisfies RoomSafeCombatantCandidate]
+      : [];
+  });
+  const countsByName = new Map<string, number>();
+  for (const candidate of candidates) {
+    const normalizedName = normalizeDisplayName(candidate.displayName);
+    if (!normalizedName) continue;
+    countsByName.set(normalizedName, (countsByName.get(normalizedName) ?? 0) + 1);
+  }
+  const uniqueByName = new Map(candidates.flatMap((candidate) => {
+    const normalizedName = normalizeDisplayName(candidate.displayName);
+    return normalizedName && countsByName.get(normalizedName) === 1
+      ? [[normalizedName, candidate] as const]
+      : [];
+  }));
+  const candidateByIndex = new Map<number, RoomSafeCombatantCandidate>();
+  const duplicateCandidateIndexes = new Set<number>();
+  for (const candidate of candidates) {
+    if (duplicateCandidateIndexes.has(candidate.combatantIndex)) continue;
+    if (candidateByIndex.has(candidate.combatantIndex)) {
+      candidateByIndex.delete(candidate.combatantIndex);
+      duplicateCandidateIndexes.add(candidate.combatantIndex);
+      continue;
+    }
+    candidateByIndex.set(candidate.combatantIndex, candidate);
+  }
+  const characterGuidances = render?.characterGuidances?.flatMap((entry) => {
+    const candidate = uniqueByName.get(normalizeDisplayName(entry.characterName) ?? '');
+    return candidate ? [{
+      combatantKey: candidate.combatantKey,
+      displayName: candidate.displayName,
+      guidance: entry.guidance,
+    }] : [];
+  });
+  const reconciliation = recordOf(extra.localCardReconciliation);
+  const impacts = reconciliation?.available !== false && Array.isArray(reconciliation?.impacts)
+    ? reconciliation.impacts.slice(0, MAX_ARENA_TERMINAL_IMPACTS)
+    : [];
+  const impactByIndex = new Map<number, {
+    fingerprint: string;
+    detail: RoomSafeImpact;
+  }>();
+  const conflictedIndexes = new Set<number>();
+  for (const value of impacts) {
+    const impact = recordOf(value);
+    const displayName = boundedString(impact?.characterName, 300);
+    const impactText = boundedString(impact?.impact, 2_000);
+    const currentStateSummary = boundedString(impact?.currentStateSummary, 2_000);
+    if (!impact || (!impactText && !currentStateSummary)) continue;
+
+    const explicitIndex = integerOf(impact.combatantIndex);
+    const hasValidExplicitIndex = explicitIndex !== null
+      && explicitIndex >= 0
+      && explicitIndex < fallback.length;
+    if (
+      Object.prototype.hasOwnProperty.call(impact, 'combatantIndex')
+      && !hasValidExplicitIndex
+    ) continue;
+    const candidate = hasValidExplicitIndex
+      ? candidateByIndex.get(explicitIndex)
+      : uniqueByName.get(normalizeDisplayName(displayName) ?? '');
+    if (!candidate) continue;
+
+    const detail: RoomSafeImpact = {
+      ...(impactText ? { impact: impactText } : {}),
+      ...(currentStateSummary ? { currentStateSummary } : {}),
+    };
+    const fingerprint = JSON.stringify(detail);
+    if (conflictedIndexes.has(candidate.combatantIndex)) continue;
+    const existing = impactByIndex.get(candidate.combatantIndex);
+    if (!existing) {
+      impactByIndex.set(candidate.combatantIndex, { fingerprint, detail });
+    } else if (existing.fingerprint !== fingerprint) {
+      impactByIndex.delete(candidate.combatantIndex);
+      conflictedIndexes.add(candidate.combatantIndex);
+    }
+  }
+  const combatantUpdates = candidates.flatMap((candidate) => {
+    if (candidateByIndex.get(candidate.combatantIndex) !== candidate) return [];
+    const detail = impactByIndex.get(candidate.combatantIndex)?.detail;
+    return detail ? [{
+      combatantKey: candidate.combatantKey,
+      displayName: candidate.displayName,
+      ...detail,
+    }] : [];
+  });
+  const usage = {
+    ...(numberOf(recordOf(extra.usageDetails)?.textTokens) === null ? {}
+      : { textTokens: numberOf(recordOf(extra.usageDetails)?.textTokens)! }),
+    ...(numberOf(row.prompt_tokens) === null ? {} : { promptTokens: numberOf(row.prompt_tokens)! }),
+    ...(numberOf(row.completion_tokens) === null
+      ? {} : { completionTokens: numberOf(row.completion_tokens)! }),
+    ...(numberOf(row.total_tokens) === null ? {} : { totalTokens: numberOf(row.total_tokens)! }),
+    ...(numberOf(row.cached_tokens) === null ? {} : { cachedTokens: numberOf(row.cached_tokens)! }),
+    ...(numberOf(row.reasoning_tokens) === null
+      ? {} : { reasoningTokens: numberOf(row.reasoning_tokens)! }),
+  };
+  const ai = {
+    ...(boundedString(row['ai_model'], 256)
+      ? { model: boundedString(row['ai_model'], 256)! }
+      : {}),
+    ...(Object.keys(usage).length > 0 ? { usage } : {}),
+  };
+  const report = {
+    ...(boundedString(row.headline, 300) ? { headline: boundedString(row.headline, 300)! } : {}),
+    ...(boundedString(row.winner, 300) ? { winner: boundedString(row.winner, 300)! } : {}),
+  };
+  const candidate = {
+    version: 1,
+    format: render?.reportFormat === 'web' ? 'stream-web' : 'stream-markdown',
+    ...(render?.webPackage ? { webPackage: render.webPackage } : {}),
+    ...(render?.reporterInfo ? { reporterInfo: render.reporterInfo } : {}),
+    mode: row.mode,
+    ...(boundedString(row.scenario_title, 300)
+      ? { scenarioDisplayName: boundedString(row.scenario_title, 300)! } : {}),
+    ...(render?.userGuidance !== undefined ? { sharedGuidance: render.userGuidance } : {}),
+    ...(characterGuidances && characterGuidances.length > 0 ? { characterGuidances } : {}),
+    ...(boundedString(row.language, 32) ? { language: boundedString(row.language, 32)! } : {}),
+    ...(boundedString(row['story_length'], 32)
+      ? { storyLength: boundedString(row['story_length'], 32)! }
+      : {}),
+    ...(render?.adjudicationResults ? { adjudicationResults: render.adjudicationResults } : {}),
+    ...(render?.narrativeHistoryReadCount === undefined
+      ? {} : { narrativeHistoryReadCount: render.narrativeHistoryReadCount }),
+    ...(Object.keys(report).length > 0 ? { report } : {}),
+    ...(Object.keys(ai).length > 0 ? { ai } : {}),
+    ...(combatantUpdates.length > 0 ? { combatantUpdates } : {}),
+  };
+  const parsed = ArenaRoomGenerationResultSchema.safeParse(candidate);
+  return parsed.success ? Object.freeze(parsed.data) : null;
+};
+
 const materializeStoredTerminal = async (input: {
   row: StoredTerminalRow;
   generationId: string;
@@ -500,18 +780,35 @@ const materializeStoredTerminal = async (input: {
   const status = logicalTerminalStatus(input.row, extra);
   const requestId = stringOf(extra.generationRequestId);
   if (!status || !requestId) return null;
-  const resultRef = status === 'completed' ? stringOf(extra.resultRef) : null;
+  const partialOutput = status === 'failed' && extra.partialOutput === true
+    && canArchivePartialOutput({ status, errorCode: stringOf(extra.errorCode) });
+  const resultRef = status === 'completed' || partialOutput ? stringOf(extra.resultRef) : null;
   const r2Key = stringOf(input.row['r2_key']);
-  let markdown = status === 'completed' ? stringOf(input.row['output_preview']) ?? '' : '';
-  let contentAvailable = status !== 'completed';
-  if (status === 'completed' && r2Key && resultRef) {
-    if (input.objectStore) {
+  let markdown = '';
+  let contentAvailable = status !== 'completed' && !partialOutput;
+  let contentUnavailableReason: 'not-archived' | 'not-found' | 'temporary' | undefined;
+  let persistenceWarning = extra.persistenceWarning === ARENA_OUTPUT_NOT_ARCHIVED_WARNING
+    ? ARENA_OUTPUT_NOT_ARCHIVED_WARNING
+    : undefined;
+  if (status === 'completed' || partialOutput) {
+    if (!resultRef) {
+      contentUnavailableReason = 'not-archived';
+      persistenceWarning = ARENA_OUTPUT_NOT_ARCHIVED_WARNING;
+    } else if (!r2Key) {
+      contentUnavailableReason = 'not-found';
+    } else if (!input.objectStore) {
+      contentUnavailableReason = 'temporary';
+    } else {
       try {
-        markdown = await input.objectStore.getText(r2Key);
-        contentAvailable = true;
+        const stored = await input.objectStore.getText(r2Key);
+        if (stored.kind === 'found') {
+          markdown = stored.text;
+          contentAvailable = true;
+        } else {
+          contentUnavailableReason = 'not-found';
+        }
       } catch {
-        markdown = '';
-        contentAvailable = false;
+        contentUnavailableReason = 'temporary';
       }
     }
   }
@@ -523,11 +820,24 @@ const materializeStoredTerminal = async (input: {
     resultRef,
     markdown,
     reasoning: '',
+    telemetry: {
+      ...(boundedString(input.row['ai_model'], 256) ? { aiModel: boundedString(input.row['ai_model'], 256) } : {}),
+      usage: normalizeUsage(extra.usageDetails) ?? normalizeUsage({
+        promptTokens: input.row.prompt_tokens, completionTokens: input.row.completion_tokens,
+        reasoningTokens: input.row.reasoning_tokens, totalTokens: input.row.total_tokens,
+        cachedTokens: input.row.cached_tokens,
+      }),
+    },
     errorCode: stableErrorCodeOf(extra.finalizationFailureCode)
       ?? stableErrorCodeOf(extra.errorCode)
       ?? stableErrorCodeOf(extra.rejectionCode),
     payloadHash: stringOf(extra.generationPayloadHash),
+    persistenceWarning,
     contentAvailable,
+    contentUnavailableReason,
+    roomSafeResult: status === 'completed' ? buildRoomSafeResult(input.row, extra) : null,
+    ...(status === 'completed' && parseBattleReportRenderSnapshotV1(extra.battleReportRenderSnapshotV1)?.webPackage
+      ? { webPackage: parseBattleReportRenderSnapshotV1(extra.battleReportRenderSnapshotV1)!.webPackage } : {}),
   };
 };
 
@@ -587,7 +897,7 @@ export const createNodeArenaGenerationFinalizationPorts = (
       const stored = await options.objectStore.put({
         key,
         body: input.markdown,
-        contentType: 'text/markdown; charset=utf-8',
+        contentType: input.contentType,
         signal: input.signal,
       });
       const id = `arena-output:${input.generationId}`;
@@ -614,7 +924,7 @@ ON CONFLICT(kind, owner_ref_id) DO UPDATE SET
         stored.bytes,
         stored.storedBytes,
         null,
-        'text/markdown; charset=utf-8',
+        input.contentType,
         stored.contentEncoding,
         timestamp.toISOString(),
         timestamp.toISOString(),
@@ -633,14 +943,14 @@ ON CONFLICT(kind, owner_ref_id) DO UPDATE SET
       const durationMs = Number.isFinite(startedAtMs)
         ? Math.max(0, endedAt.getTime() - startedAtMs)
         : 0;
-      const report = streamReport(input.metadata);
+      const report = terminalReport(input);
+      const officialReport = recordOf(report?.officialReport);
       const customProvider = recordOf(input.payload.customProvider);
       const pvp = recordOf(serverContext?.trustedPvpContext);
       const usage = recordOf(input.telemetry.usage);
       const extraJson = await buildExtraJson(input);
-      const terminalMarkdown = input.status === 'completed' ? input.markdown : '';
+      const terminalMarkdown = input.status === 'completed' || canArchivePartialOutput(input) ? input.markdown : '';
       const markdownBytes = new TextEncoder().encode(terminalMarkdown).byteLength;
-      const preview = terminalMarkdown.slice(0, OUTPUT_PREVIEW_CHARS);
       let inserted: Awaited<ReturnType<ReturnType<NodeDataD1Client['prepare']>['run']>>;
       try {
         inserted = await client.prepare(`
@@ -699,8 +1009,10 @@ VALUES (
         boundedString(input.telemetry.providerName, 128),
         boundedString(input.telemetry.providerType, 64),
         boundedString(input.telemetry.model, 256),
-        boundedString(report?.headline, 300) ?? headlineFromMarkdown(terminalMarkdown),
-        boundedString(report?.winner, 300) ?? winnerFromMarkdown(terminalMarkdown),
+        boundedString(report?.headline, 300) ?? (isWebArenaOutputContract(input.metadata.outputContract) ? null : headlineFromMarkdown(terminalMarkdown)),
+        boundedString(report?.winner, 300)
+          ?? boundedString(officialReport?.winner, 300)
+          ?? (isWebArenaOutputContract(input.metadata.outputContract) ? null : winnerFromMarkdown(terminalMarkdown)),
         terminalMarkdown.length,
         markdownBytes,
         numberOf(usage?.promptTokens),
@@ -709,7 +1021,7 @@ VALUES (
         numberOf(usage?.cachedTokens),
         numberOf(usage?.reasoningTokens),
         boundedString(input.payload.userGuidance, 600),
-        preview || null,
+        null,
         JSON.stringify(extraJson),
         endedAt.toISOString(),
         endedAt.toISOString(),
@@ -814,6 +1126,17 @@ WHERE id = ?
           throw new Error('ARENA_TERMINAL_FAILURE_PENDING');
         }
       }
+    },
+
+    async persistParticipants(input: ArenaTerminalEffectInput) {
+      if (input.idempotencyKey !== buildArenaTerminalEffectIdempotencyKey(input.generationId, 'participants')) {
+        throw new Error('ARENA_PARTICIPANTS_IDEMPOTENCY_KEY_INVALID');
+      }
+      const evidence = extractArenaMultiplayerParticipation(input.payload.multiplayerGenerationSnapshot, input.actorKey);
+      if (!evidence) return;
+      const client = options.getD1Client();
+      if (!client) throw new Error('ARENA_D1_UNAVAILABLE');
+      await persistArenaGenerationParticipants(client, input.generationId, evidence);
     },
 
     async persistCombatants(input: ArenaTerminalEffectInput) {
@@ -945,6 +1268,7 @@ export const createNodeArenaGenerationTerminalStore = (
     mode: string | null;
     updatedAt: string;
     code: string;
+    multiplayerParticipation?: ArenaMultiplayerParticipation;
   }): Promise<ArenaGenerationTerminalRecord> {
     const client = options.getD1Client();
     if (!client) throw new Error('ARENA_D1_UNAVAILABLE');
@@ -959,6 +1283,11 @@ export const createNodeArenaGenerationTerminalStore = (
       const status = logicalTerminalStatus(existing, extra);
       if (!status) throw new Error('ARENA_TERMINAL_STATUS_INVALID');
       if (extra.finalizationCompleted !== true) {
+        await persistArenaGenerationParticipants(
+          client,
+          input.generationId,
+          extra.arenaMultiplayer ?? input.multiplayerParticipation,
+        );
         await persistFallbackCombatants({
           client,
           generationId: input.generationId,
@@ -1008,11 +1337,12 @@ WHERE id = ?
       return terminal;
     }
     const extra = {
+      arenaMultiplayer: input.multiplayerParticipation,
       generationRequestId: input.generationRequestId,
       generationOwnerHash: await sha256(input.actorKey),
       generationPayloadHash: input.payloadHash,
       generationTerminalStatus: 'producer_lost',
-      finalizationCompleted: true,
+      finalizationCompleted: false,
       errorCode: input.code,
       resultRef: null,
     };
@@ -1042,6 +1372,10 @@ VALUES (?, ?, ?, 0, 'failed', 'stream', 'api/arena/generate-stream',
       || storedExtra?.generationPayloadHash !== input.payloadHash
       || storedExtra?.generationTerminalStatus !== 'producer_lost'
     ) throw new Error('ARENA_PRODUCER_LOST_TERMINAL_CONFLICT');
+    await persistArenaGenerationParticipants(client, input.generationId, storedExtra.arenaMultiplayer);
+    await client.prepare(`UPDATE battle_report_generations
+SET extra_json = json_set(extra_json, '$.finalizationCompleted', json('true')) WHERE id = ?`)
+      .bind(input.generationId).run({ retry: 'none' });
     return {
       generationId: input.generationId,
       generationRequestId: input.generationRequestId,
@@ -1057,10 +1391,25 @@ VALUES (?, ?, ?, 0, 'failed', 'stream', 'api/arena/generate-stream',
   },
 });
 
-export const readNodeArenaGenerationReconciliation = async (input: {
+export type OwnedNodeArenaGenerationReconciliationResult =
+  | Readonly<{
+    kind: 'found';
+    reconciliation: Record<string, unknown>;
+  }>
+  | Readonly<{
+    kind: 'not-found';
+    reason: 'row_missing' | 'owner_mismatch';
+  }>
+  | Readonly<{
+    kind: 'unavailable';
+    reason: 'generation_not_completed' | 'finalization_pending' | 'manifest_missing';
+  }>;
+
+export const readOwnedNodeArenaGenerationReconciliation = async (input: {
   client: NodeDataD1Client;
   generationId: string;
-}): Promise<Record<string, unknown> | null> => {
+  actorKey: string;
+}): Promise<OwnedNodeArenaGenerationReconciliationResult> => {
   const stored = await input.client.prepare(`
 SELECT status, extra_json
 FROM battle_report_generations
@@ -1068,8 +1417,94 @@ WHERE id = ?
 LIMIT 1
   `.trim()).bind(input.generationId).all({ retry: 'safe-read' });
   const row = stored.results[0];
-  if (row?.status !== 'completed') return null;
+  if (!row) return { kind: 'not-found', reason: 'row_missing' };
   const extra = parseExtra(row['extra_json']);
-  if (extra?.finalizationCompleted !== true) return null;
-  return recordOf(extra?.localCardReconciliation);
+  if (!extra || extra.generationOwnerHash !== await sha256(input.actorKey)) {
+    return { kind: 'not-found', reason: 'owner_mismatch' };
+  }
+  if (row.status !== 'completed') {
+    return { kind: 'unavailable', reason: 'generation_not_completed' };
+  }
+  if (extra.finalizationCompleted !== true) {
+    return { kind: 'unavailable', reason: 'finalization_pending' };
+  }
+  const reconciliation = recordOf(extra.localCardReconciliation);
+  const roster = Array.isArray(extra.combatantsFallback)
+    ? extra.combatantsFallback.slice(0, MAX_ARENA_TERMINAL_COMBATANTS)
+    : [];
+  return reconciliation
+    ? { kind: 'found', reconciliation: { ...reconciliation, roster } }
+    : { kind: 'unavailable', reason: 'manifest_missing' };
+};
+
+export type OwnedNodeArenaGenerationProvenanceResult =
+  | Readonly<{
+    kind: 'found';
+    provenance: Readonly<{
+      customProviderId: string | null;
+      customModelId: string | null;
+      aiProviderName: string;
+      aiProviderType: 'openai' | 'google' | 'deepseek';
+      aiModel: string;
+    }>;
+  }>
+  | Readonly<{
+    kind: 'not-found';
+    reason: 'row_missing' | 'owner_mismatch';
+  }>
+  | Readonly<{
+    kind: 'unavailable';
+    reason: 'generation_not_completed' | 'finalization_pending' | 'provenance_missing';
+  }>;
+
+export const readOwnedNodeArenaGenerationProvenance = async (input: {
+  client: NodeDataD1Client;
+  generationId: string;
+  actorKey: string;
+}): Promise<OwnedNodeArenaGenerationProvenanceResult> => {
+  const stored = await input.client.prepare(`
+SELECT
+  status,
+  custom_provider_id,
+  custom_model_id,
+  ai_provider_name,
+  ai_provider_type,
+  ai_model,
+  extra_json
+FROM battle_report_generations
+WHERE id = ?
+LIMIT 1
+  `.trim()).bind(input.generationId).all({ retry: 'safe-read' });
+  const row = stored.results[0];
+  if (!row) return { kind: 'not-found', reason: 'row_missing' };
+  const extra = parseExtra(row.extra_json);
+  if (!extra || extra.generationOwnerHash !== await sha256(input.actorKey)) {
+    return { kind: 'not-found', reason: 'owner_mismatch' };
+  }
+  if (row.status !== 'completed') {
+    return { kind: 'unavailable', reason: 'generation_not_completed' };
+  }
+  if (extra.finalizationCompleted !== true) {
+    return { kind: 'unavailable', reason: 'finalization_pending' };
+  }
+  const aiProviderName = stringOf(row['ai_provider_name']);
+  const aiProviderType = stringOf(row['ai_provider_type']);
+  const aiModel = stringOf(row['ai_model']);
+  if (
+    !aiProviderName
+    || !aiModel
+    || !['openai', 'google', 'deepseek'].includes(aiProviderType ?? '')
+  ) {
+    return { kind: 'unavailable', reason: 'provenance_missing' };
+  }
+  return {
+    kind: 'found',
+    provenance: {
+      customProviderId: stringOf(row['custom_provider_id']),
+      customModelId: stringOf(row['custom_model_id']),
+      aiProviderName,
+      aiProviderType: aiProviderType as 'openai' | 'google' | 'deepseek',
+      aiModel,
+    },
+  };
 };

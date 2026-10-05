@@ -3,6 +3,10 @@
 import { ChangeEvent, useEffect, useRef, useState } from 'react';
 
 import { DisclosureButton } from '@/components/shared/CollapsibleSection';
+import { useLocalLibraryAutoSave } from '@/lib/local-library/use-local-library-auto-save';
+import { LocalLibrarySavePreference } from '@/components/shared/LocalLibrarySavePreference';
+import { useLocalLibraryPreferences } from '@/lib/local-library/preferences';
+import type { CombatantData } from '../types';
 
 import { useBattleStore } from '../stores/useBattleStore';
 import { BattleStoreState, isCombatantLimitReached, MAX_COMBATANTS } from '../types';
@@ -18,6 +22,8 @@ export function RosterUploader() {
   const [isPasting, setIsPasting] = useState(false);
   const setError = useBattleSelector((state) => state.setError);
   const { handleFileUpload, handlePaste } = useBattleActions();
+  const { preferences, setPreference } = useLocalLibraryPreferences();
+  const autoSave = useLocalLibraryAutoSave();
 
   useEffect(() => {
     const isMobile =
@@ -28,11 +34,21 @@ export function RosterUploader() {
     }
   }, []);
 
+  const persistImported = async (imported: CombatantData[]): Promise<void> => {
+    if (!preferences.saveImportedDataCards || imported.length === 0) return;
+    await autoSave.save(imported.map((item) => ({
+      cardType: 'character' as const,
+      title: item.filename,
+      payload: item.data,
+    })));
+  };
+
   const onFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
     if (!files) return;
     try {
-      await handleFileUpload(files);
+      const imported = await handleFileUpload(files);
+      await persistImported(imported);
       setError(null);
     } catch (error) {
       setError(error instanceof Error ? error.message : '上传文件解析失败');
@@ -46,7 +62,8 @@ export function RosterUploader() {
   const onPaste = async () => {
     setIsPasting(true);
     try {
-      await handlePaste(pastedJson);
+      const imported = await handlePaste(pastedJson);
+      await persistImported(imported);
       setError(null);
       setPastedJson('');
     } catch (error) {
@@ -72,6 +89,26 @@ export function RosterUploader() {
           disabled={isGenerating}
           className="cursor-pointer input-field file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-pink-50 file:text-pink-700 hover:file:bg-pink-100 disabled:opacity-50 disabled:cursor-not-allowed"
         />
+        <LocalLibrarySavePreference
+          checked={preferences.saveImportedDataCards}
+          onChange={(next) => setPreference('saveImportedDataCards', next)}
+          disabled={isGenerating}
+        />
+        {autoSave.error ? (
+          <p className="mt-1 text-xs text-red-600 dark:text-red-400" role="status">
+            {autoSave.error}
+          </p>
+        ) : null}
+        {autoSave.result && (autoSave.result.saved > 0 || autoSave.result.updated > 0) ? (
+          <p className="mt-1 text-xs text-gray-500" role="status" data-testid="roster-local-library-status">
+            已保存到本地库：新增 {autoSave.result.saved} 张，更新 {autoSave.result.updated} 张。
+          </p>
+        ) : null}
+        {autoSave.result && autoSave.result.inRecycleBin > 0 ? (
+          <p className="mt-1 text-xs text-gray-500" role="status" data-testid="roster-local-library-recycle-bin">
+            {autoSave.result.inRecycleBin} 张内容相同的数据卡在本地库回收站中，未重复保存；可在「本地库」页面恢复。
+          </p>
+        ) : null}
       </div>
 
       <div className="mb-6">

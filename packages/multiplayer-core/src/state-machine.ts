@@ -399,12 +399,28 @@ const revokeMember = (
   state: ArenaRoomAuthorityState,
   targetUserId: string,
   timestamp: string,
+  reason: 'left' | 'kicked',
 ): ArenaRoomTransitionResult => {
   const authorityIndex = state.memberAuthority.findIndex((record) => record.member.userId === targetUserId);
   if (authorityIndex < 0) return transitionFailure('not-found', 'member-not-active');
   const authority = state.memberAuthority[authorityIndex];
   if (!authority) return transitionFailure('not-found', 'member-not-active');
-  if (authority.member.membershipState === 'revoked') return finishIdempotent(state);
+  if (authority.member.membershipState === 'revoked') {
+    // kicked is the monotonic terminal state: a host kick that lands after the
+    // target's voluntary leave must still fence the room, so it upgrades the
+    // tombstone reason instead of collapsing into plain idempotency.
+    if (reason === 'kicked' && authority.revocationReason === 'left') {
+      const upgraded = cloneState(state);
+      upgraded.memberAuthority[authorityIndex] = {
+        accountUserId: authority.accountUserId,
+        member: authority.member,
+        revocationReason: 'kicked',
+      };
+      upgraded.lifecycle = { ...upgraded.lifecycle, updatedAt: timestamp };
+      return finishApplied(state, upgraded, []);
+    }
+    return finishIdempotent(state);
+  }
   const member = activeMember(state, targetUserId);
   if (!member) return transitionFailure('validation-failed', 'invalid-state');
 
@@ -426,6 +442,7 @@ const revokeMember = (
   next.memberAuthority[authorityIndex] = {
     accountUserId: authority.accountUserId,
     member: revoked,
+    revocationReason: reason,
   };
   next.terminalProposalIds.push(...proposalIdsToTombstone);
   next.lifecycle = { ...next.lifecycle, updatedAt: timestamp };
@@ -443,6 +460,47 @@ const revokeMember = (
   return finishApplied(state, next, events);
 };
 
+const rejoinMember = (
+  state: ArenaRoomAuthorityState,
+  command: Extract<ArenaRoomCommand, { type: 'rejoin-member' }>,
+  context: ArenaRoomAuthorityContext,
+): ArenaRoomTransitionResult => {
+  if (context.kind !== 'authenticated-user') {
+    return transitionFailure('forbidden', 'invalid-authority-context');
+  }
+  const record = memberAuthorityRecord(state, context.actorUserId);
+  if (!record || record.accountUserId !== context.accountUserId) {
+    return transitionFailure('forbidden', 'member-not-active');
+  }
+  if (record.member.membershipState === 'active') return finishIdempotent(state);
+  // Kicked and legacy (reason-less) tombstones stay fenced for the room lifetime.
+  if (record.revocationReason !== 'left') {
+    return transitionFailure('forbidden', 'member-not-active');
+  }
+  if (state.snapshot.members.filter((member) => member.membershipState === 'active').length >= MAX_ROOM_MEMBERS) {
+    return transitionFailure('capability-denied', 'member-limit-reached');
+  }
+  const reactivated: RoomMember = {
+    ...record.member,
+    displayName: command.displayName,
+    membershipState: 'active',
+    joinedAt: command.timestamp,
+  };
+  const next = cloneState(state);
+  next.snapshot.members.push(deepClone(reactivated));
+  next.memberAuthority[next.memberAuthority.findIndex((entry) => entry.member.userId === reactivated.userId)] = {
+    accountUserId: record.accountUserId,
+    member: reactivated,
+  };
+  next.lifecycle = { ...next.lifecycle, updatedAt: command.timestamp };
+  const events: ControlRoomEvent[] = [];
+  if (!pushControlEvent(next, events, command.timestamp, {
+    type: 'room.member.joined',
+    payload: { member: deepClone(reactivated) },
+  })) return eventOverflow();
+  return finishApplied(state, next, events);
+};
+
 const publishConfig = (
   state: ArenaRoomAuthorityState,
   command: Extract<ArenaRoomCommand, { type: 'publish-config' }>,
@@ -454,6 +512,9 @@ const publishConfig = (
     return transitionFailure('stale', 'room-revision-mismatch');
   }
   if (deepEqual(state.snapshot.sharedConfig, command.sharedConfig)) return finishIdempotent(state);
+  if (command.expectedControlSeq !== state.snapshot.controlSeq) {
+    return transitionFailure('stale', 'room-control-seq-mismatch');
+  }
   const next = cloneState(state);
   next.snapshot.sharedConfig = deepClone(command.sharedConfig);
   next.snapshot.revision += 1;
@@ -510,7 +571,7 @@ const submitProposal = (
     item.authorUserId === actor.actorUserId && item.status === 'submitted'
   )).length;
   if (pendingCount >= MAX_PENDING_PROPOSALS_PER_MEMBER) {
-    return transitionFailure('capability-denied', 'member-limit-reached');
+    return transitionFailure('capability-denied', 'proposal-pending-limit-reached');
   }
   const next = cloneState(state);
   next.snapshot.proposals.push(deepClone(command.proposal));
@@ -544,9 +605,16 @@ const resolveProposal = (
 ): ArenaRoomTransitionResult => {
   const authorization = requireRole(state, context, 'host');
   if (authorization) return authorization;
-  if (command.expectedRevision !== state.snapshot.revision) {
+  // Explicit human overrides bind to the state that was actually reviewed.
+  // Ordinary typed merges still tolerate unrelated revision advances.
+  if (command.overrideChangeIds?.length && command.expectedRevision !== state.snapshot.revision) {
     return transitionFailure('stale', 'room-revision-mismatch');
   }
+  // No global exact-revision fence for ordinary acceptance: the authoritative apply
+  // below re-runs the dependency-ordered typed expectedBase merge against the
+  // latest state inside this single atomic transition. A proposal whose bases
+  // still match (or are already satisfied) merges safely even after unrelated
+  // revisions; only genuine per-target conflicts fail closed.
   const proposalIndex = state.snapshot.proposals.findIndex((item) => item.proposalId === command.proposalId);
   if (proposalIndex < 0) {
     return state.terminalProposalIds.includes(command.proposalId)
@@ -574,7 +642,7 @@ const resolveProposal = (
     roomId: state.snapshot.roomId,
     config: state.snapshot.sharedConfig,
     revision: state.snapshot.revision,
-  }, proposal, command.selectedChangeIds);
+  }, proposal, command.selectedChangeIds, { overrideChangeIds: command.overrideChangeIds });
   if (applied.status === 'rejected') {
     return applied.conflicts.length > 0
       ? transitionFailure('conflict', 'proposal-conflict')
@@ -704,6 +772,9 @@ const reserveGeneration = (
   if (state.generationLedger.some((record) => record.mirror.generationId === command.generationId)) {
     return transitionFailure('conflict', 'generation-id-conflict');
   }
+  if (command.expectedControlSeq !== state.snapshot.controlSeq) {
+    return transitionFailure('stale', 'room-control-seq-mismatch');
+  }
   if (command.expectedRevision !== state.snapshot.revision) {
     return transitionFailure('stale', 'room-revision-mismatch');
   }
@@ -719,6 +790,12 @@ const reserveGeneration = (
     .map((record) => record.accountUserId)
     .sort((left, right) => left - right);
   const collaborativeInfluence = state.collaborativeChanges.length > 0;
+  const hosts = state.memberAuthority.filter((record) => (
+    record.member.membershipState === 'active' && record.member.role === 'host'
+  ));
+  if (hosts.length !== 1 || !participantUserIds.includes(hosts[0]!.accountUserId)) {
+    return transitionFailure('forbidden', 'invalid-state');
+  }
   const mirror: GenerationMirror = {
     generationRequestId: command.generationRequestId,
     generationId: command.generationId,
@@ -728,6 +805,7 @@ const reserveGeneration = (
     snapshotDigest: scope.snapshotDigest,
     collaborativeInfluence,
     participantUserIds,
+    hostAccountUserId: hosts[0]!.accountUserId,
     startedAt: command.timestamp,
   };
   const next = cloneState(state);
@@ -750,6 +828,7 @@ const generationEventPayload = (mirror: GenerationMirror) => ({
   snapshotDigest: mirror.snapshotDigest,
   collaborativeInfluence: mirror.collaborativeInfluence,
   participantUserIds: [...mirror.participantUserIds],
+  ...(mirror.hostAccountUserId === undefined ? {} : { hostAccountUserId: mirror.hostAccountUserId }),
 });
 
 const terminalMetadataMatches = (
@@ -936,6 +1015,8 @@ export const transitionArenaRoom = (
   switch (command.type) {
     case 'join-member':
       return joinMember(state, command, context);
+    case 'rejoin-member':
+      return rejoinMember(state, command, context);
     case 'leave-member': {
       if (context.kind !== 'authenticated-user') {
         return transitionFailure('forbidden', 'invalid-authority-context');
@@ -949,14 +1030,14 @@ export const transitionArenaRoom = (
       if (!member) return transitionFailure('validation-failed', 'invalid-state');
       return member.role === 'host'
         ? closeRoom(state, command.timestamp)
-        : revokeMember(state, context.actorUserId, command.timestamp);
+        : revokeMember(state, context.actorUserId, command.timestamp, 'left');
     }
     case 'kick-member': {
       const authorization = requireRole(state, context, 'host');
       if (authorization) return authorization;
       const target = memberAuthorityRecord(state, command.targetUserId)?.member;
       if (target?.role === 'host') return transitionFailure('forbidden', 'host-required');
-      return revokeMember(state, command.targetUserId, command.timestamp);
+      return revokeMember(state, command.targetUserId, command.timestamp, 'kicked');
     }
     case 'sync-presence':
       return syncPresence(state, command, context);

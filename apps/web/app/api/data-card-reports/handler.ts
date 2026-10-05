@@ -1,5 +1,5 @@
 import { getRequestUrl } from '@/lib/request-url';
-import { getAuthUser, json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
+import { getAuthUser, json, readJson, requireAuthUser, withApiErrorBoundary } from '@/lib/api/server';
 import {
   DataCardReportConflictError,
   DataCardReportForbiddenError,
@@ -178,5 +178,5 @@ export const createDataCardReportsHandler =
     return json({ error: 'Method not allowed' }, { status: 405 });
   };
 
-export const appRouteHandler = withPvpErrorBoundary(createDataCardReportsHandler());
+export const appRouteHandler = withApiErrorBoundary(createDataCardReportsHandler());
 export default appRouteHandler;

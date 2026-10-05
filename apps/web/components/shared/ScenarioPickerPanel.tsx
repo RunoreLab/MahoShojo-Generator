@@ -7,7 +7,8 @@ import { DisclosureButton } from '@/components/shared/CollapsibleSection';
 
 type ScenarioPickerPanelProps = {
   onOpenScenarioModal: () => void;
-  onRandomMatchScenario: () => void | Promise<void>;
+  /** 缺省时隐藏随机匹配入口（如 proposal 只允许 exact ref 场景）。 */
+  onRandomMatchScenario?: () => void | Promise<void>;
   enableLocalInput?: boolean;
   onScenarioUpload?: (file: File) => void | Promise<void>;
   onScenarioPaste?: (jsonText: string) => void | Promise<void>;
@@ -90,13 +91,15 @@ export function ScenarioPickerPanel({
           >
             浏览在线情景库
           </button>
-          <button
-            onClick={() => void onRandomMatchScenario()}
-            disabled={isGenerating || isMatchingBlocked}
-            className="flex-1 px-4 py-2 bg-teal-500 text-white rounded hover:bg-teal-600 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
-          >
-            {isMatchingScenario ? '匹配中...' : '随机匹配情景'}
-          </button>
+          {onRandomMatchScenario ? (
+            <button
+              onClick={() => void onRandomMatchScenario()}
+              disabled={isGenerating || isMatchingBlocked}
+              className="flex-1 px-4 py-2 bg-teal-500 text-white rounded hover:bg-teal-600 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+            >
+              {isMatchingScenario ? '匹配中...' : '随机匹配情景'}
+            </button>
+          ) : null}
         </div>
         {!isAuthenticated && (
           <div className="battle-lite-subtle-text flex flex-1 items-center px-2 text-xs">
@@ -166,7 +169,9 @@ export function ScenarioPickerPanel({
           <p className="mt-1">
             {enableLocalInput
               ? '选择一个情景数据卡或上传情景文件，让角色们在自定义的舞台上展开故事吧！'
-              : '请选择一个已通过审查且未被封禁的在线情景数据卡（也可使用随机匹配）。'}
+              : onRandomMatchScenario
+                ? '请选择一个已通过审查且未被封禁的在线情景数据卡（也可使用随机匹配）。'
+                : '请选择一个已通过审查且未被封禁的在线情景数据卡。'}
           </p>
         </div>
       </div>

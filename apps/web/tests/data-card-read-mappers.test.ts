@@ -7,7 +7,6 @@ import {
   mapPublicDataCardRowToBattleSelectionPayload,
   mapPublicDataCardRowToDetailsCard,
   normalizePublicVisibilityValue,
-  stripBattleSelectionTransportMeta,
 } from '@/lib/data-card-read-mappers';
 
 describe('data-card read mappers', () => {
@@ -94,6 +93,7 @@ describe('data-card read mappers', () => {
       id: 'snake-id',
       name: 'snake-name',
       description: 'desc',
+      type: 'scenario',
       data: '{"codename":"A"}',
       is_public: 1,
       updated_at: '2026-01-02T00:00:00.000Z',
@@ -104,6 +104,7 @@ describe('data-card read mappers', () => {
       usage_count: 30,
     });
     expect(snakePayload._cardId).toBe('snake-id');
+    expect(snakePayload._cardType).toBe('scenario');
     expect(snakePayload._isPublic).toBe(1);
     expect(snakePayload._author).toBe('alice');
     expect(snakePayload._likeCount).toBe(10);
@@ -270,43 +271,5 @@ describe('data-card read mappers', () => {
     expect(() => mapPublicDataCardRowToBattleSelectionPayload({ id: 'x', data: '[]' })).toThrow(
       '数据卡内容为空或格式不受支持。',
     );
-  });
-
-  test('stripBattleSelectionTransportMeta 只移除在线选卡传输元字段，保留内容层 _ 扩展字段', () => {
-    const cleaned = stripBattleSelectionTransportMeta({
-      title: '固定章节情景',
-      _battle_story: {
-        total_chapters: 5,
-        plan_mode: 'fixed',
-      },
-      elements: {
-        scene: {
-          time: '深夜',
-        },
-      },
-      _cardId: 'card-1',
-      _cardName: '固定章节情景',
-      _author: 'alice',
-      nested: {
-        _battle_story: {
-          total_chapters: 3,
-          plan_mode: 'suggested',
-        },
-        _cardDescription: 'transport meta should be removed',
-      },
-    });
-
-    expect((cleaned as any)._cardId).toBeUndefined();
-    expect((cleaned as any)._cardName).toBeUndefined();
-    expect((cleaned as any)._author).toBeUndefined();
-    expect((cleaned as any)._battle_story).toEqual({
-      total_chapters: 5,
-      plan_mode: 'fixed',
-    });
-    expect((cleaned as any).nested._cardDescription).toBeUndefined();
-    expect((cleaned as any).nested._battle_story).toEqual({
-      total_chapters: 3,
-      plan_mode: 'suggested',
-    });
   });
 });

@@ -1,7 +1,10 @@
 import type { OnlineDataCardType } from '@mahoshojo/contracts/data-cards';
 import type { UserBadge } from '@/types/badge';
 import { signOutBetterAuthSession } from '@/lib/auth/logout';
+import { fetchJsonWithBoundedRetry, throwIfAborted, type BoundedJsonFailure } from '@/lib/bounded-fetch';
+import { resolveApiErrorMessage } from '@/lib/client/apiError';
 import { mapDeckDetailPayload, mapDeckListPayload } from '@/lib/deck-client-mappers';
+import { DATA_CARD_LIST_PAGE_SIZE } from '@/lib/data-card-list-page';
 
 const STORAGE_KEY = 'mahoshojo_auth';
 const ENCRYPTION_KEY = 'mahoshojo_2024_secret_encryption_key';
@@ -284,30 +287,55 @@ export type DataCardsListResult = {
   status?: number;
 };
 
-const resolveApiErrorMessage = async (response: Response, fallback: string): Promise<string> => {
-  const contentType = (response.headers.get('content-type') || '').toLowerCase();
+const resolveBoundedFailureMessage = (failure: BoundedJsonFailure, fallback: string): string => {
+  const payload = failure.data ?? failure.bodyText ?? null;
+  return resolveApiErrorMessage({ payload, fallback });
+};
 
-  if (contentType.includes('application/json')) {
-    const payload = await response.json().catch(() => null);
-    if (payload && typeof payload === 'object') {
-      const record = payload as Record<string, unknown>;
-      const message = typeof record.message === 'string' ? record.message.trim() : '';
-      const error = typeof record.error === 'string' ? record.error.trim() : '';
-      if (message) return message;
-      if (error) return error;
-    }
+// 只用于幂等卡片 GET：有界重试与超时由 fetchJsonWithBoundedRetry 统一执行（含 JSON body 消费）。
+export async function fetchDataCardJson(url: string, signal?: AbortSignal): Promise<any> {
+  const result = await fetchJsonWithBoundedRetry<any>(url, {
+    fetcher: (input, init) => authStorage.fetch(input, init),
+    signal,
+  });
+  if (!result.ok) {
+    throw Object.assign(
+      new Error(resolveBoundedFailureMessage(result, `获取数据卡失败（HTTP ${result.status}）`)),
+      { status: result.status },
+    );
   }
+  return result.data;
+}
 
-  const text = await response.text().catch(() => '');
-  const trimmed = typeof text === 'string' ? text.trim() : '';
-  if (trimmed) return trimmed.slice(0, 200);
-
-  return fallback;
+const fetchCardListPages = async (
+  path: string,
+  params: URLSearchParams,
+  key: 'cards' | 'favorites',
+  signal?: AbortSignal,
+): Promise<DataCardsListResult> => {
+  const cards: any[] = [];
+  let offset = 0;
+  while (true) {
+    params.set('limit', String(DATA_CARD_LIST_PAGE_SIZE));
+    params.set('offset', String(offset));
+    const data = await fetchDataCardJson(`${path}?${params}`, signal);
+    throwIfAborted(signal);
+    if (data?.success === false || !Array.isArray(data?.[key])) {
+      throw new Error(typeof data?.error === 'string' ? data.error : '列表响应无效');
+    }
+    cards.push(...data[key]);
+    // 兼容尚未升级分页的服务端；不把分页中途失败伪装成完整列表。
+    if (data.nextOffset == null) return { success: true, cards };
+    if (!Number.isSafeInteger(data.nextOffset) || data.nextOffset <= offset
+      || data.nextOffset !== offset + data[key].length) throw new Error('列表分页响应无效');
+    offset = data.nextOffset;
+  }
 };
 
 const fetchDataCardsDetailed = async (
   search?: string,
   sortBy?: 'likes' | 'usage' | 'favorites' | 'created_at',
+  signal?: AbortSignal,
 ): Promise<DataCardsListResult> => {
   try {
     const searchParams = new URLSearchParams();
@@ -318,30 +346,15 @@ const fetchDataCardsDetailed = async (
       searchParams.append('sortBy', sortBy);
     }
 
-    const queryString = searchParams.toString();
-    const url = `/api/data-cards${queryString ? `?${queryString}` : ''}`;
-    const response = await authStorage.fetch(url);
-
-    if (response.ok) {
-      const data = await response.json().catch(() => null);
-      return {
-        success: true,
-        cards: Array.isArray(data?.cards) ? data.cards : [],
-      };
-    }
-
-    const fallback = `获取数据卡失败（HTTP ${response.status}）`;
-    return {
-      success: false,
-      cards: [],
-      status: response.status,
-      error: await resolveApiErrorMessage(response, fallback),
-    };
+    return await fetchCardListPages('/api/data-cards', searchParams, 'cards', signal);
   } catch (error) {
     return {
       success: false,
       cards: [],
-      error: error instanceof Error ? error.message : '获取数据卡失败',
+      status: (error as { status?: number })?.status,
+      error: error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')
+        ? '加载数据卡超时，请重试'
+        : error instanceof Error ? error.message : '获取数据卡失败',
     };
   }
 };
@@ -482,8 +495,9 @@ export const dataCardApi = {
   async getCardsDetailed(
     search?: string,
     sortBy?: 'likes' | 'usage' | 'favorites' | 'created_at',
+    signal?: AbortSignal,
   ): Promise<DataCardsListResult> {
-    return fetchDataCardsDetailed(search, sortBy);
+    return fetchDataCardsDetailed(search, sortBy, signal);
   },
 
   // 获取所有数据卡
@@ -495,14 +509,18 @@ export const dataCardApi = {
     return result.cards;
   },
 
-  // 获取用户数据卡容量
-  async getUserCapacity(): Promise<number | null> {
+  // 获取用户数据卡容量与已用槽位
+  async getUserCapacity(): Promise<{ capacity: number; usedSlots: number } | null> {
     try {
       const response = await authStorage.fetch('/api/user-capacity');
 
       if (response.ok) {
         const data = await response.json();
-        return data.capacity || null;
+        const capacity = Number(data?.capacity);
+        const usedSlots = Number(data?.usedSlots);
+        if (Number.isFinite(capacity) && capacity > 0 && Number.isFinite(usedSlots) && usedSlots >= 0) {
+          return { capacity: Math.floor(capacity), usedSlots: Math.floor(usedSlots) };
+        }
       }
       return null;
     } catch (error) {
@@ -575,6 +593,30 @@ export const dataCardApi = {
     } catch (error) {
       console.error('Replace card error:', error);
       return { success: false, error: '替换失败' };
+    }
+  },
+
+  // 恢复历史上被误标为角色的问卷数据卡类型
+  async repairQuestionnaireType(id: string): Promise<{
+    success: boolean;
+    repaired?: boolean;
+    error?: string;
+  }> {
+    try {
+      const response = await authStorage.fetch('/api/data-cards/repair-questionnaire-type', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ id }),
+      });
+
+      const result = await response.json().catch(() => ({}));
+      if (response.ok) return result;
+      return { success: false, error: result?.error || '恢复问卷数据卡类型失败' };
+    } catch (error) {
+      console.error('Repair questionnaire data-card type error:', error);
+      return { success: false, error: '恢复问卷数据卡类型失败' };
     }
   },
 
@@ -661,6 +703,13 @@ export const favoritesApi = {
     }
     if (options?.idsOnly) {
       params.append('idsOnly', '1');
+    } else {
+      try {
+        const result = await fetchCardListPages('/api/favorites', params, 'favorites');
+        return { success: result.success, favorites: result.cards, error: result.error };
+      } catch (error) {
+        return { success: false, favorites: [], error: error instanceof Error ? error.message : '获取收藏失败' };
+      }
     }
 
     const response = await authStorage.fetch(`/api/favorites${params.size ? `?${params.toString()}` : ''}`);

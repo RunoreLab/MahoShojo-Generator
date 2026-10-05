@@ -1,5 +1,16 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
+import {
+  ArenaDataCardRefVerifierError,
+  type ArenaDataCardRefVerifier,
+} from '#/arena-room/arena-data-card-ref-verifier';
+import type { DataCardRef } from '@mahoshojo/contracts/arena-room';
+import {
+  ArenaRoomGenerationPresetResolverError,
+  type ArenaRoomGenerationPresetResolver,
+} from '#/arena-room/room-generation-preset-registry';
+import type { ArenaRoomGenerationCanonicalContent } from '#/arena-room/room-generation-materializer';
+import { MAX_ROOM_MEMBERS } from '@mahoshojo/contracts/arena-room';
 import {
   checkpointPredecessorOf,
   consumeArenaRoomCheckpointCommit,
@@ -14,7 +25,10 @@ import {
   createArenaRoomMembershipService,
 } from '#/arena-room/room-membership-service';
 import type { RoomDirectoryRecord } from '#/arena-room/room-directory-record';
-import { createArenaRoomState } from './arena-room-fixtures';
+import {
+  createArenaRoomState,
+  createTestArenaDataCardRefVerifier,
+} from './arena-room-fixtures';
 
 class MemoryRoomStore implements RoomActorCheckpointStore {
   state: ArenaRoomAuthorityState | null = null;
@@ -67,7 +81,36 @@ class MemoryRoomStore implements RoomActorCheckpointStore {
   }
 }
 
-const createHarness = () => {
+const presetConfig = () => ({
+  ...createArenaRoomState().snapshot.sharedConfig,
+  combatants: [{
+    key: 'preset:M00_white_lily.json',
+    ref: {
+      id: 'M00_white_lily.json',
+      kind: 'character' as const,
+      versionToken: `sha256:${'1'.repeat(64)}`,
+    },
+  }],
+});
+
+const createPresetResolver = (
+  errorCode?: ConstructorParameters<typeof ArenaRoomGenerationPresetResolverError>[0],
+): ArenaRoomGenerationPresetResolver => ({
+  resolve: vi.fn(async ({ ref }): Promise<ArenaRoomGenerationCanonicalContent> => {
+    if (errorCode) throw new ArenaRoomGenerationPresetResolverError(errorCode);
+    return {
+      ref,
+      payload: { codename: '白百合' },
+      displayName: '白百合',
+      sourceType: 'character',
+    };
+  }),
+});
+
+const createHarness = (
+  references: ArenaDataCardRefVerifier | null = createTestArenaDataCardRefVerifier(),
+  presets?: ArenaRoomGenerationPresetResolver,
+) => {
   const store = new MemoryRoomStore();
   let userIndex = 0;
   let nowIndex = 0;
@@ -87,6 +130,8 @@ const createHarness = () => {
   const service = createArenaRoomMembershipService({
     actors: registry,
     creationReceipts: store,
+    ...(references === null ? {} : { references }),
+    ...(presets === undefined ? {} : { presets }),
     createUserId: () => `server-user-${++userIndex}`,
     now: () => timestamps[Math.min(++nowIndex, timestamps.length - 1)]!,
   });
@@ -94,6 +139,149 @@ const createHarness = () => {
 };
 
 describe('Arena Room membership service', () => {
+  it('允许以空角色草稿创建房间，并允许未签名的 host-local 角色按普通模式准入', async () => {
+    const emptyHarness = createHarness();
+    const emptyConfig = {
+      ...createArenaRoomState().snapshot.sharedConfig,
+      combatants: [],
+    };
+    await expect(emptyHarness.service.create({
+      accountUserId: 101,
+      displayName: 'Host',
+      sharedConfig: emptyConfig,
+    })).resolves.toMatchObject({
+      snapshot: { sharedConfig: { combatants: [] } },
+    });
+
+    const localHarness = createHarness();
+    const localConfig = {
+      ...createArenaRoomState().snapshot.sharedConfig,
+      battleMode: 'daily' as const,
+      combatants: [{
+        key: 'host-local:character:unsigned',
+        displayName: '未签名本地角色',
+        type: 'general-character' as const,
+        source: 'host-local' as const,
+      }],
+    };
+    await expect(localHarness.service.create({
+      accountUserId: 101,
+      displayName: 'Host',
+      sharedConfig: localConfig,
+    })).resolves.toMatchObject({
+      snapshot: { sharedConfig: { combatants: localConfig.combatants } },
+    });
+  });
+
+  it('create 将在线 DataCard ref 规范化为 verifier 返回的 latest token', async () => {
+    const references: ArenaDataCardRefVerifier = {
+      verify: vi.fn(async ({ refs }) => refs.map((ref: DataCardRef) => ({ ...ref, versionToken: 'latest-v2' }))),
+    };
+    const { service } = createHarness(references);
+
+    await expect(service.create({
+      accountUserId: 101,
+      displayName: 'Host',
+      sharedConfig: createArenaRoomState().snapshot.sharedConfig,
+    })).resolves.toMatchObject({
+      snapshot: {
+        sharedConfig: {
+          combatants: [{ ref: { versionToken: 'latest-v2' } }],
+        },
+      },
+    });
+  });
+
+  it('create 在 canonical ref 复验失败时不创建房间', async () => {
+    const references: ArenaDataCardRefVerifier = {
+      verify: vi.fn(async () => {
+        throw new ArenaDataCardRefVerifierError('ARENA_DATA_CARD_REF_NOT_READABLE');
+      }),
+    };
+    const { service, store } = createHarness(references);
+
+    await expect(service.create({
+      accountUserId: 101,
+      displayName: 'Host',
+      sharedConfig: createArenaRoomState().snapshot.sharedConfig,
+    })).rejects.toEqual(new ArenaRoomMembershipError('ROOM_REFERENCE_DENIED'));
+
+    expect(references.verify).toHaveBeenCalledWith({
+      refs: [{ id: 'character-1', kind: 'character', versionToken: 'v1' }],
+      hostAccountUserId: 101,
+    });
+    expect(store.state).toBeNull();
+  });
+
+  it('create 拒绝非 builtin 的 server-shareable Web Package ref，不创建房间', async () => {
+    const { service, store } = createHarness();
+    const sharedConfig = {
+      ...createArenaRoomState().snapshot.sharedConfig,
+      reportFormat: 'web' as const,
+      webPackageRef: { id: 'local.not-builtin', version: '1.0.0', digest: `sha256:${'a'.repeat(64)}` },
+    };
+
+    await expect(service.create({
+      accountUserId: 101,
+      displayName: 'Host',
+      sharedConfig,
+    })).rejects.toEqual(new ArenaRoomMembershipError('ROOM_REFERENCE_DENIED'));
+    expect(store.state).toBeNull();
+  });
+
+  it('Shared Config 含 online ref 但未注入 verifier 时 fail closed', async () => {
+    const { service, store } = createHarness(null);
+
+    await expect(service.create({
+      accountUserId: 101,
+      displayName: 'Host',
+      sharedConfig: createArenaRoomState().snapshot.sharedConfig,
+    })).rejects.toEqual(new ArenaRoomMembershipError('ROOM_REFERENCE_UNAVAILABLE'));
+    expect(store.state).toBeNull();
+  });
+
+  it('create 在 checkpoint 前用 server-known resolver exact 验证 preset ref', async () => {
+    const presets = createPresetResolver();
+    const { service, store } = createHarness(undefined, presets);
+
+    await expect(service.create({
+      accountUserId: 101,
+      displayName: 'Host',
+      sharedConfig: presetConfig(),
+    })).resolves.toMatchObject({ roomId: 'room-1' });
+
+    expect(presets.resolve).toHaveBeenCalledWith({ ref: presetConfig().combatants[0]!.ref });
+    expect(store.state?.snapshot.sharedConfig).toEqual(presetConfig());
+  });
+
+  it.each([
+    ['stale', 'ARENA_ROOM_PRESET_VERSION_MISMATCH', 'ROOM_REFERENCE_STALE'],
+    ['not found', 'ARENA_ROOM_PRESET_NOT_FOUND', 'ROOM_REFERENCE_STALE'],
+  ] as const)('create 在 preset %s 时不写入 checkpoint', async (_label, errorCode, expectedCode) => {
+    const presets = createPresetResolver(errorCode);
+    const { service, store } = createHarness(undefined, presets);
+
+    await expect(service.create({
+      accountUserId: 101,
+      displayName: 'Host',
+      sharedConfig: presetConfig(),
+    })).rejects.toEqual(new ArenaRoomMembershipError(expectedCode));
+
+    expect(store.state).toBeNull();
+  });
+
+  it('Shared Config 含 preset ref 但未注入 resolver 时 fail closed', async () => {
+    const { service, store } = createHarness();
+
+    await expect(service.create({
+      accountUserId: 101,
+      displayName: 'Host',
+      sharedConfig: presetConfig(),
+    })).rejects.toEqual(new ArenaRoomMembershipError('ROOM_REFERENCE_UNAVAILABLE'));
+
+    expect(store.state).toBeNull();
+  });
+
   it('只暴露安全 session snapshot，host close 使用固定 lifecycle seam', async () => {
     const { service, store } = createHarness();
     const created = await service.create({
@@ -178,6 +366,7 @@ describe('Arena Room membership service', () => {
     const service = createArenaRoomMembershipService({
       actors: preparedRegistry,
       createUserId: () => 'host-1',
+      references: createTestArenaDataCardRefVerifier(),
     });
 
     await expect(service.create({
@@ -289,6 +478,29 @@ describe('Arena Room membership service', () => {
       .toHaveLength(1);
   });
 
+  it('房间成员达到上限时返回独立容量错误，不伪装成普通状态冲突', async () => {
+    const { service, store } = createHarness();
+    await service.create({
+      accountUserId: 101,
+      displayName: 'Host',
+      sharedConfig: createArenaRoomState().snapshot.sharedConfig,
+    });
+    for (let index = 0; index < MAX_ROOM_MEMBERS - 1; index += 1) {
+      await service.join({
+        roomId: 'room-1',
+        accountUserId: 200 + index,
+        displayName: `Member ${index + 1}`,
+      });
+    }
+
+    await expect(service.join({
+      roomId: 'room-1',
+      accountUserId: 999,
+      displayName: 'Overflow',
+    })).rejects.toMatchObject({ code: 'ROOM_MEMBER_LIMIT_REACHED' });
+    expect(store.state?.snapshot.members).toHaveLength(MAX_ROOM_MEMBERS);
+  });
+
   it('session snapshot 只向 host 暴露全部 Proposal，member 只能看到自己的 Proposal', async () => {
     const { registry, service } = createHarness();
     const host = await service.create({
@@ -365,12 +577,15 @@ describe('Arena Room membership service', () => {
       roomId: 'room-1',
       accountUserId: 101,
       targetUserId: member.member.userId,
+      expectedRoomEpoch: host.roomEpoch,
     });
+    expect(store.state?.memberAuthority.find((entry) => entry.accountUserId === 202))
+      .toMatchObject({ revocationReason: 'kicked' });
     await expect(service.join({
       roomId: 'room-1',
       accountUserId: 202,
       displayName: 'Member',
-    })).rejects.toMatchObject({ code: 'ROOM_MEMBERSHIP_REVOKED' });
+    })).rejects.toMatchObject({ code: 'ROOM_MEMBERSHIP_KICKED' });
 
     await service.leave({
       roomId: host.roomId,
@@ -378,6 +593,250 @@ describe('Arena Room membership service', () => {
       expectedRoomEpoch: host.roomEpoch,
     });
     expect(store.state?.lifecycle).toMatchObject({ status: 'closed' });
+  });
+
+  it('自愿离开后可重新加入同一房间，沿用原身份并刷新显示名与 joinedAt', async () => {
+    const { service, store } = createHarness();
+    await service.create({
+      accountUserId: 101,
+      displayName: 'Host',
+      sharedConfig: createArenaRoomState().snapshot.sharedConfig,
+    });
+    const first = await service.join({
+      roomId: 'room-1',
+      accountUserId: 202,
+      displayName: 'Member',
+    });
+    await service.leave({ roomId: 'room-1', accountUserId: 202, expectedRoomEpoch: 'epoch-1' });
+    expect(store.state?.memberAuthority.find((entry) => entry.accountUserId === 202))
+      .toMatchObject({ revocationReason: 'left' });
+
+    const rejoined = await service.join({
+      roomId: 'room-1',
+      accountUserId: 202,
+      displayName: 'Rejoined Member',
+    });
+
+    expect(rejoined.member).toMatchObject({
+      userId: first.member.userId,
+      role: 'member',
+      displayName: 'Rejoined Member',
+      membershipState: 'active',
+    });
+    expect(rejoined.member.joinedAt).not.toBe(first.member.joinedAt);
+    expect(store.state?.snapshot.members).toHaveLength(2);
+    expect(store.state?.memberAuthority).toHaveLength(2);
+    expect(store.state?.memberAuthority.find((entry) => entry.accountUserId === 202))
+      .toMatchObject({ member: { membershipState: 'active' } });
+    expect(store.state?.memberAuthority.find((entry) => entry.accountUserId === 202))
+      .not.toHaveProperty('revocationReason');
+  });
+
+  it('重进后离开前的 pending proposal 不会复活', async () => {
+    const { registry, service } = createHarness();
+    const host = await service.create({
+      accountUserId: 101,
+      displayName: 'Host',
+      sharedConfig: createArenaRoomState().snapshot.sharedConfig,
+    });
+    const author = await service.join({
+      roomId: 'room-1',
+      accountUserId: 202,
+      displayName: 'Author',
+    });
+    const actor = registry.get('room-1');
+    if (!actor) throw new Error('actor missing');
+    const submitted = await actor.execute({
+      authority: {
+        kind: 'authenticated-user',
+        actorUserId: author.member.userId,
+        accountUserId: 202,
+      },
+      command: {
+        type: 'submit-proposal',
+        expectedRoomEpoch: host.roomEpoch,
+        timestamp: '2026-08-28T00:04:00.000Z',
+        proposal: {
+          proposalVersion: 1,
+          proposalId: 'proposal-orphan',
+          roomId: 'room-1',
+          authorUserId: author.member.userId,
+          baseRevision: 0,
+          status: 'submitted',
+          changes: [{
+            changeId: 'guidance-1',
+            type: 'setUserGuidance',
+            value: '离开前提交',
+            expectedBase: { kind: 'value', value: '' },
+          }],
+          createdAt: '2026-08-28T00:04:00.000Z',
+        },
+      },
+    });
+    expect(submitted.ok).toBe(true);
+
+    await service.leave({ roomId: 'room-1', accountUserId: 202, expectedRoomEpoch: 'epoch-1' });
+    const rejoined = await service.join({
+      roomId: 'room-1',
+      accountUserId: 202,
+      displayName: 'Author',
+    });
+
+    expect(rejoined.snapshot.proposals).toEqual([]);
+    expect(registry.get('room-1')?.getSnapshot()?.terminalProposalIds).toContain('proposal-orphan');
+  });
+
+  it('leave 后被房主补踢则升级为 kicked，join 永久拒绝；kick 后重复 leave 也无法恢复', async () => {
+    const { service, store } = createHarness();
+    const host = await service.create({
+      accountUserId: 101,
+      displayName: 'Host',
+      sharedConfig: createArenaRoomState().snapshot.sharedConfig,
+    });
+    const member = await service.join({
+      roomId: 'room-1',
+      accountUserId: 202,
+      displayName: 'Member',
+    });
+
+    await service.leave({ roomId: 'room-1', accountUserId: 202, expectedRoomEpoch: 'epoch-1' });
+    await service.kick({
+      roomId: 'room-1',
+      accountUserId: 101,
+      targetUserId: member.member.userId,
+      expectedRoomEpoch: host.roomEpoch,
+    });
+    expect(store.state?.memberAuthority.find((entry) => entry.accountUserId === 202))
+      .toMatchObject({ revocationReason: 'kicked' });
+    await expect(service.join({
+      roomId: 'room-1',
+      accountUserId: 202,
+      displayName: 'Member',
+    })).rejects.toMatchObject({ code: 'ROOM_MEMBERSHIP_KICKED' });
+
+    await service.leave({ roomId: 'room-1', accountUserId: 202, expectedRoomEpoch: 'epoch-1' });
+    expect(store.state?.memberAuthority.find((entry) => entry.accountUserId === 202))
+      .toMatchObject({ revocationReason: 'kicked' });
+    await expect(service.join({
+      roomId: 'room-1',
+      accountUserId: 202,
+      displayName: 'Member',
+    })).rejects.toMatchObject({ code: 'ROOM_MEMBERSHIP_KICKED' });
+  });
+
+  it('重进重新占用成员容量额度，房间满员时拒绝重进', async () => {
+    const { service, store } = createHarness();
+    await service.create({
+      accountUserId: 101,
+      displayName: 'Host',
+      sharedConfig: createArenaRoomState().snapshot.sharedConfig,
+    });
+    const leaver = await service.join({
+      roomId: 'room-1',
+      accountUserId: 202,
+      displayName: 'Leaver',
+    });
+    for (let index = 0; index < MAX_ROOM_MEMBERS - 2; index += 1) {
+      await service.join({
+        roomId: 'room-1',
+        accountUserId: 300 + index,
+        displayName: `Filler ${index + 1}`,
+      });
+    }
+    await service.leave({ roomId: 'room-1', accountUserId: 202, expectedRoomEpoch: 'epoch-1' });
+    expect(store.state?.memberAuthority.find((entry) => entry.accountUserId === 202)?.member.userId)
+      .toBe(leaver.member.userId);
+    await service.join({
+      roomId: 'room-1',
+      accountUserId: 999,
+      displayName: 'Backfill',
+    });
+
+    await expect(service.join({
+      roomId: 'room-1',
+      accountUserId: 202,
+      displayName: 'Leaver',
+    })).rejects.toMatchObject({ code: 'ROOM_MEMBER_LIMIT_REACHED' });
+  });
+
+  it('legacy 无 reason 的 revoked tombstone 保持 fail-closed，不能重进', async () => {
+    const { service, store } = createHarness();
+    await service.create({
+      accountUserId: 101,
+      displayName: 'Host',
+      sharedConfig: createArenaRoomState().snapshot.sharedConfig,
+    });
+    await service.join({ roomId: 'room-1', accountUserId: 202, displayName: 'Member' });
+    await service.leave({ roomId: 'room-1', accountUserId: 202, expectedRoomEpoch: 'epoch-1' });
+    const record = store.state?.memberAuthority.find((entry) => entry.accountUserId === 202);
+    if (!record || !('revocationReason' in record)) throw new Error('missing tombstone');
+    delete record.revocationReason;
+
+    const recoveredRegistry = createRoomActorRegistry({
+      store,
+      now: () => Date.parse('2026-08-28T00:02:00.000Z'),
+    });
+    const recoveredService = createArenaRoomMembershipService({
+      actors: recoveredRegistry,
+      creationReceipts: store,
+    });
+    await expect(recoveredService.join({
+      roomId: 'room-1',
+      accountUserId: 202,
+      displayName: 'Member',
+    })).rejects.toMatchObject({ code: 'ROOM_MEMBERSHIP_REVOKED' });
+  });
+
+  it('kick 以 server host authority 与 epoch fence 决策，禁止 self/host 并对重复撤销幂等', async () => {
+    const { service } = createHarness();
+    const host = await service.create({
+      accountUserId: 101,
+      displayName: 'Host',
+      sharedConfig: createArenaRoomState().snapshot.sharedConfig,
+    });
+    const member = await service.join({
+      roomId: host.roomId,
+      accountUserId: 202,
+      displayName: 'Member',
+    });
+
+    await expect(service.kick({
+      roomId: host.roomId,
+      accountUserId: 202,
+      targetUserId: host.member.userId,
+      expectedRoomEpoch: 'epoch-stale',
+    })).rejects.toMatchObject({ code: 'ROOM_PERMISSION_DENIED' });
+    await expect(service.kick({
+      roomId: host.roomId,
+      accountUserId: 101,
+      targetUserId: member.member.userId,
+      expectedRoomEpoch: 'epoch-stale',
+    })).rejects.toMatchObject({ code: 'ROOM_EPOCH_STALE' });
+    await expect(service.kick({
+      roomId: host.roomId,
+      accountUserId: 101,
+      targetUserId: host.member.userId,
+      expectedRoomEpoch: host.roomEpoch,
+    })).rejects.toMatchObject({ code: 'ROOM_PERMISSION_DENIED' });
+
+    const kicked = await service.kick({
+      roomId: host.roomId,
+      accountUserId: 101,
+      targetUserId: member.member.userId,
+      expectedRoomEpoch: host.roomEpoch,
+    });
+    const duplicate = await service.kick({
+      roomId: host.roomId,
+      accountUserId: 101,
+      targetUserId: member.member.userId,
+      expectedRoomEpoch: host.roomEpoch,
+    });
+
+    expect(kicked).toMatchObject({
+      member: { userId: host.member.userId, role: 'host', membershipState: 'active' },
+      snapshot: { members: [{ userId: host.member.userId }] },
+    });
+    expect(duplicate).toEqual(kicked);
   });
 
   it('普通 member 显式 leave 不受 socket 数量影响，重复 leave 幂等', async () => {
@@ -422,6 +881,7 @@ describe('Arena Room membership service', () => {
     });
     const original = createArenaRoomMembershipService({
       actors: originalRegistry,
+      references: createTestArenaDataCardRefVerifier(),
       createUserId: () => 'host-1',
     });
     await original.create({
@@ -467,6 +927,7 @@ describe('Arena Room membership service', () => {
       actors: registry,
       createUserId: () => 'host-1',
       now: () => now,
+      references: createTestArenaDataCardRefVerifier(),
     });
     await service.create({
       accountUserId: 101,

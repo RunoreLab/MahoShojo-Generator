@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { hostedDrClientRouting } from '@/config/hosted-dr-client.generated';
+import { hostedDrClientRouting } from '@/config/hosted-routing';
 import {
+  classifyHostedRoute,
   lookupHostedDrClientOperation,
   selectHostedDrPlacement,
 } from '@/lib/hosted-dr/client-preflight';
@@ -95,7 +96,7 @@ describe('Hosted DR client preflight selector', () => {
     expect(decision.drProbe?.outcome).toBe('protocol-error');
   });
 
-  it('隔离验证可以注入 loopback routing，而 production 默认仍来自 generated projection', async () => {
+  it('隔离验证可以注入 loopback routing，而 production 默认仍来自小型运行配置', async () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(Response.json({ ok: false }, { status: 503 }))
       .mockResolvedValueOnce(readyResponse('next-dr', {
@@ -121,8 +122,8 @@ describe('Hosted DR client preflight selector', () => {
     ]);
   });
 
-  it('fail-closed operation 在 primary non-ready 时不探测 DR', async () => {
-    const fetcher = vi.fn(async () => Response.json({ ok: false }, { status: 503 }));
+  it('已知 Hono primary-only operation 不执行 probe 并直接固定 primary', async () => {
+    const fetcher = vi.fn();
 
     const decision = await selectHostedDrPlacement({
       path: '/api/arena/generate',
@@ -131,15 +132,17 @@ describe('Hosted DR client preflight selector', () => {
     });
 
     expect(decision).toMatchObject({
-      placement: 'unavailable',
-      reason: 'DR_NOT_ELIGIBLE',
+      placement: 'hono-primary',
+      reason: 'PRIMARY_ONLY',
       routeFamily: '/api/arena/generate',
+      primaryProbe: null,
+      drProbe: null,
     });
-    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(fetcher).not.toHaveBeenCalled();
   });
 
-  it('未登记 route/method 在 primary non-ready 时不探测 DR', async () => {
-    const fetcher = vi.fn(async () => Response.json({ ok: false }, { status: 503 }));
+  it('已知 Hono route 的未知 method 在业务 dispatch 前 fail closed', async () => {
+    const fetcher = vi.fn();
 
     const decision = await selectHostedDrPlacement({
       path: '/api/generate-free',
@@ -150,9 +153,45 @@ describe('Hosted DR client preflight selector', () => {
     expect(decision).toMatchObject({
       placement: 'unavailable',
       reason: 'OPERATION_NOT_DECLARED',
-      routeFamily: 'undeclared',
+      routeFamily: '/api/generate-free',
+      primaryProbe: null,
+      drProbe: null,
     });
-    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it('真正未知 route 在业务 dispatch 前 fail closed', async () => {
+    const fetcher = vi.fn();
+
+    const decision = await selectHostedDrPlacement({
+      path: '/api/not-declared',
+      method: 'POST',
+      fetcher,
+    });
+
+    expect(decision).toMatchObject({
+      placement: 'unavailable',
+      reason: 'OPERATION_NOT_DECLARED',
+      routeFamily: 'undeclared',
+      primaryProbe: null,
+      drProbe: null,
+    });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it('route class 复用 Hono inventory 并区分 primary-only/DR-selectable/unknown', () => {
+    expect(classifyHostedRoute('/api/arena/generate', 'POST')).toEqual({
+      kind: 'primary-only',
+      routeFamily: '/api/arena/generate',
+    });
+    expect(classifyHostedRoute('/api/generate-free', 'POST')).toMatchObject({
+      kind: 'dr-selectable',
+      routeFamily: '/api/generate-free',
+    });
+    expect(classifyHostedRoute('/api/generate-free', 'DELETE')).toEqual({
+      kind: 'unknown',
+      routeFamily: '/api/generate-free',
+    });
   });
 
   it('动态 route 只匹配单个非空 segment 与精确 method', () => {
@@ -161,7 +200,7 @@ describe('Hosted DR client preflight selector', () => {
       'GET',
     )).toMatchObject({
       route: '/api/arena/generations/[generationId]/stream',
-      drMode: 'safe-read',
+      safety: 'safe-read',
     });
     expect(lookupHostedDrClientOperation(
       '/api/arena/generations/generation-1/extra/stream',
@@ -194,7 +233,7 @@ describe('Hosted DR client preflight selector', () => {
     });
 
     expect(decision.placement).toBe('next-dr');
-    expect(decision.primaryProbe.outcome).toBe('protocol-error');
+    expect(decision.primaryProbe?.outcome).toBe('protocol-error');
   });
 
   it.each([
@@ -213,7 +252,7 @@ describe('Hosted DR client preflight selector', () => {
     });
 
     expect(decision.placement).toBe('hono-primary');
-    expect(decision.primaryProbe.outcome).toBe('ready');
+    expect(decision.primaryProbe?.outcome).toBe('ready');
   });
 
   it('旧 client 在 primary down 时接受相邻新版 DR', async () => {
@@ -253,7 +292,7 @@ describe('Hosted DR client preflight selector', () => {
     });
 
     expect(decision.placement).toBe('unavailable');
-    expect(decision.primaryProbe.outcome).toBe('protocol-error');
+    expect(decision.primaryProbe?.outcome).toBe('protocol-error');
     expect(decision.drProbe?.outcome).toBe('protocol-error');
   });
 
@@ -275,14 +314,16 @@ describe('Hosted DR client preflight selector', () => {
 
   it('probe 超时会 abort 自己的 transport，不自动重试', async () => {
     vi.useFakeTimers();
-    const fetcher = vi.fn(async (_url: string, init?: RequestInit) => new Promise<Response>(
-      (_resolve, reject) => init?.signal?.addEventListener('abort', () => {
-        reject(new DOMException('aborted', 'AbortError'));
-      }),
-    ));
+    const fetcher = vi.fn()
+      .mockImplementationOnce(async (_url: string, init?: RequestInit) => new Promise<Response>(
+        (_resolve, reject) => init?.signal?.addEventListener('abort', () => {
+          reject(new DOMException('aborted', 'AbortError'));
+        }),
+      ))
+      .mockResolvedValueOnce(Response.json({ ok: false }, { status: 503 }));
 
     const pending = selectHostedDrPlacement({
-      path: '/api/arena/generate',
+      path: '/api/generate-free',
       method: 'POST',
       fetcher,
       timeoutMs: 500,
@@ -293,9 +334,10 @@ describe('Hosted DR client preflight selector', () => {
 
     expect(decision).toMatchObject({
       placement: 'unavailable',
-      reason: 'DR_NOT_ELIGIBLE',
+      reason: 'NO_READY_PLACEMENT',
       primaryProbe: { outcome: 'timeout' },
+      drProbe: { outcome: 'not-ready' },
     });
-    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(fetcher).toHaveBeenCalledTimes(2);
   });
 });

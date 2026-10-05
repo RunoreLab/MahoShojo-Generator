@@ -43,6 +43,7 @@ import { readSafeTextAndReasoningStreamFromResponse } from '@/lib/stream/read-sa
 import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
 import { AI_META_REQUEST_HEADER, AI_META_REQUEST_VALUE, readJsonWithAiMeta } from '@/lib/client/read-json-with-ai-meta';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
+import { downloadBlob } from '@/lib/client/blobUrl';
 import { getAnswerLimitInfo, isAnswerOverLimit, QUESTIONNAIRE_NATIVE_MAX_ANSWER_CHARS } from '@/lib/questionnaire-limits';
 import { authStorage } from '@/lib/auth';
 import { useGenerationApiIntentLatch } from '@/lib/use-generation-api-intent-latch';
@@ -76,6 +77,10 @@ import {
   type CreatorTemplateId,
 } from '@/lib/creator/templates';
 import { createDefaultBuildRuleInputs, loadBuildRulePresetIndex, tryLoadBuildRulePresetById } from '@/lib/creator/build-rules';
+import {
+  readCreatorBuildRulePreference,
+  writeCreatorBuildRulePreference,
+} from '@/lib/creator/build-rule-preferences';
 import { reconcileCreatorBuildRuleSelection } from '@/lib/creator/build-rule-selection';
 import {
   filterCreatorQuestionnairePresetEntries,
@@ -213,14 +218,7 @@ const SaveJsonButton: React.FC<SaveJsonButtonProps> = ({ template, data, mode, r
 
   const downloadJson = () => {
     const blob = new Blob([jsonPayload], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = followUp.downloadFileName;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    downloadBlob(blob, followUp.downloadFileName);
     setCopyStatus('idle');
   };
 
@@ -362,6 +360,7 @@ export const CreatorPage: React.FC = () => {
   const [freeformBrief, setFreeformBrief] = useState('');
   const [selectedBuildRuleIds, setSelectedBuildRuleIds] = useState<string[]>(['arena-trpg-lite']);
   const [primaryBuildRuleId, setPrimaryBuildRuleId] = useState<string | null>('arena-trpg-lite');
+  const hasExplicitBuildRulePreferenceRef = useRef(false);
   const [buildRuleInputsById, setBuildRuleInputsById] = useState<Record<string, Record<string, unknown>>>(() => ({
     'arena-trpg-lite': createDefaultBuildRuleInputs('arena-trpg-lite'),
   }));
@@ -758,6 +757,24 @@ export const CreatorPage: React.FC = () => {
       .then(data => setLanguages(data))
       .catch(err => console.error("Failed to load languages:", err));
   }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const preference = readCreatorBuildRulePreference(window.localStorage);
+    if (!preference) return;
+
+    hasExplicitBuildRulePreferenceRef.current = true;
+    setSelectedBuildRuleIds(preference.selectedRuleIds);
+    setPrimaryBuildRuleId(preference.primaryRuleId);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !hasExplicitBuildRulePreferenceRef.current) return;
+    writeCreatorBuildRulePreference(window.localStorage, {
+      selectedRuleIds: selectedBuildRuleIds,
+      primaryRuleId: primaryBuildRuleId,
+    });
+  }, [selectedBuildRuleIds, primaryBuildRuleId]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
@@ -2026,17 +2043,10 @@ export const CreatorPage: React.FC = () => {
     if (!data) return;
     const jsonPayload = JSON.stringify(data, null, 2);
     const blob = new Blob([jsonPayload], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
     const rawName = (data?.title || data?.codename || data?.name || '未命名结果').toString();
     const sanitizedName = rawName.replace(/[^a-z0-9\u4e00-\u9fa5]/gi, '_').slice(0, 80) || 'data';
     const filenamePrefix = data?.templateId === '通用情景' ? '通用情景' : '通用角色';
-    link.href = url;
-    link.download = `${filenamePrefix}_${sanitizedName}.json`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    downloadBlob(blob, `${filenamePrefix}_${sanitizedName}.json`);
   };
 
   const copyStreamedGeneralCard = async (data: any) => {
@@ -2056,6 +2066,7 @@ export const CreatorPage: React.FC = () => {
   };
 
   const handleToggleBuildRule = useCallback((ruleId: string) => {
+    hasExplicitBuildRulePreferenceRef.current = true;
     setSelectedBuildRuleIds((current) => {
       if (current.includes(ruleId)) {
         const next = current.filter((item) => item !== ruleId);
@@ -2076,6 +2087,7 @@ export const CreatorPage: React.FC = () => {
   }, []);
 
   const handleSelectPrimaryBuildRule = useCallback((ruleId: string) => {
+    hasExplicitBuildRulePreferenceRef.current = true;
     setPrimaryBuildRuleId(ruleId);
     setSelectedBuildRuleIds((current) => (current.includes(ruleId) ? current : [...current, ruleId]));
     setBuildRuleInputsById((currentInputs) => ({

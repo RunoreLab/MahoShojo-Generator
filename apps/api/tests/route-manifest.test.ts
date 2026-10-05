@@ -16,7 +16,7 @@ const EXITED_ROUTE_IDS = [
 ] as const;
 
 describe('Hono route manifest', () => {
-  it('只挂载已经脱离 legacy Next import 的二十三条 shared capability', () => {
+  it('只挂载已经脱离 legacy Next import 的二十四条 shared capability', () => {
     expect(routeDefinitions.map((route) => route.id).sort()).toEqual([
       'arena/generate',
       'arena/generate-stream',
@@ -24,6 +24,7 @@ describe('Hono route manifest', () => {
       'arena/generations/[generationId]',
       'arena/generations/[generationId]/cancel',
       'arena/generations/[generationId]/stream',
+      'arena/repair-combatant-meta',
       'arena/session/generate-next',
       'creator/generate',
       'creator/generate-stream',
@@ -42,7 +43,7 @@ describe('Hono route manifest', () => {
       'generate-sublimation-stream',
       'hosted/dr-readiness',
     ]);
-    expect(routeDefinitions).toHaveLength(23);
+    expect(routeDefinitions).toHaveLength(24);
     expect(routeDefinitions.some((route) => route.pattern === '/api/auth/*')).toBe(false);
     expect(routeDefinitions.some((route) => route.pattern.startsWith('/api/pvp/'))).toBe(false);
     expect(routeDefinitions.find((route) => route.id === 'generate-free')?.methods).toEqual(['POST']);
@@ -58,6 +59,7 @@ describe('Hono route manifest', () => {
       'arena/generations/[generationId]',
       'arena/generations/[generationId]/cancel',
       'arena/generations/[generationId]/stream',
+      'arena/repair-combatant-meta',
       'arena/session/generate-next',
       'creator/generate',
       'creator/generate-stream',
@@ -83,18 +85,13 @@ describe('Hono route manifest', () => {
       exitedRouteIds?: string[];
       legacyRouteIds?: string[];
       sharedRouteIds?: string[];
+      methods?: Record<string, string[]>;
     };
     expect(routeInventory.exitedRouteIds).toEqual(EXITED_ROUTE_IDS);
     expect(routeInventory.legacyRouteIds).toEqual([]);
-    expect(routeInventory.sharedRouteIds?.length).toBe(23);
-    const hostedManifest = JSON.parse(readFileSync(
-      path.join(REPOSITORY_ROOT, 'config/hosted-dr-capabilities.json'),
-      'utf8',
-    )) as { capabilities: Array<{ id: string; operations: Array<{ method: string }> }> };
-
+    expect(routeInventory.sharedRouteIds?.length).toBe(24);
     for (const definition of sharedDefinitions) {
-      const capability = hostedManifest.capabilities.find(({ id }) => id === definition.id);
-      expect(definition.methods).toEqual(capability?.operations.map(({ method }) => method));
+      expect(definition.methods).toEqual(routeInventory.methods?.[definition.id]);
       const routeModule = await definition.load();
       expect(routeModule.POST ?? routeModule.GET).toEqual(expect.any(Function));
     }
@@ -107,7 +104,23 @@ describe('Hono route manifest', () => {
       expect(generatedSource).toContain(`import("../adapters/${routeId}")`);
       expect(generatedSource).not.toContain(`app/api/${routeId}/route`);
     }
-  });
+    /**
+     * 本条要 `await definition.load()` 把 24 条 shared 路由的模块图**真的加载一遍**，
+     * 这是它比其他用例贵一个量级的原因（其余两条都在 10ms 以内）。实测：
+     *
+     * | 场景 | 耗时 |
+     * | --- | --- |
+     * | 单独跑本文件 | 2,862ms |
+     * | 54 文件全量、worker=15 | 12,964ms |
+     *
+     * 4.5 倍差距来自同一台机器上的并发争抢，不是本条自身有 13 秒的活。因此它不能只吃
+     * 套件级的 15s——那只有 1.16 倍余量，在比本机慢的 CI 上就是定时炸弹。
+     *
+     * 30s ≈ 已实测最差 12.96s 的 2.3 倍，给慢机器留够余量，同时仍然远小于无限等待：
+     * 真的挂起时 30s 判红。**放宽的是预算不是断言**——「24 条路由都真的加载成功并导出
+     * handler」这条性质一条没动。
+     */
+  }, 30_000);
 
   it('generator 与 route type 不再保留 legacy Next import 回退口', () => {
     const generatorSource = readFileSync(

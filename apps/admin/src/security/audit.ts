@@ -1,4 +1,5 @@
 import type { AccessIdentity } from './access';
+import { assertSafeAuditText } from '@mahoshojo/hosted-runtime/admin/audit-text';
 import {
   isRegisteredAdminRoutePolicy,
   type AdminPrincipal,
@@ -45,19 +46,9 @@ const OUTCOME_ALLOWED_FIELDS = new Set<string>([
   ...OUTCOME_OPTIONAL_FIELDS,
 ]);
 
-const CREDENTIAL_PATTERN = /(?:\bBearer\s+\S+|\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]+\.|-----BEGIN [A-Z ]*PRIVATE KEY-----|\b(?:Authorization|password|api[_-]?token|secret)\s*[:=]\s*\S+|\b(?:postgres|mysql):\/\/[^\s:@/]+:[^\s@/]+@|\bsk_(?:live|prod)_[A-Za-z0-9_-]{8,})/i;
-const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/;
-
 const assertAuditString: (value: unknown) => asserts value is string = (value) => {
-  if (
-    typeof value !== 'string'
-    || !value.trim()
-    || value.length > 1024
-    || CONTROL_CHARACTER_PATTERN.test(value)
-    || CREDENTIAL_PATTERN.test(value)
-  ) {
-    throw new AdminSecurityError('ADMIN_AUDIT_INVALID');
-  }
+  try { assertSafeAuditText(value); }
+  catch { throw new AdminSecurityError('ADMIN_AUDIT_INVALID'); }
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
@@ -127,6 +118,7 @@ export const createAuditEnvelope = async (
   assertAuditString(errorCodeSafe);
   assertAuditString(eventId);
   assertAuditString(requestId);
+  assertAuditString(context.principal.id);
 
   const envelope: AdminAuditEnvelope = {
     eventId,

@@ -11,6 +11,18 @@ export const createAdjudicatorId: IdFactory = (prefix) => {
 
 const normalizeStringId = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
 
+// 编辑器删除可选项后，内存中可能仍有显式 undefined；仅清理已知可选字段。
+const omitAbsentFields = <T extends object>(input: T, keys: readonly string[]): T => {
+  let next = input;
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(input, key) && (input as Record<string, unknown>)[key] === undefined) {
+      if (next === input) next = { ...input };
+      delete (next as Record<string, unknown>)[key];
+    }
+  }
+  return next;
+};
+
 const normalizeOutcomeList = (
   input: unknown,
   createId: IdFactory
@@ -23,7 +35,8 @@ const normalizeOutcomeList = (
   let changed = false;
   const outcomes = input.map((raw) => {
     const outcome = (raw ?? {}) as any;
-    let next = outcome;
+    let next = omitAbsentFields(outcome, ['chainedEvent']);
+    if (next !== outcome) changed = true;
 
     const originalId = outcome.id;
     let id = normalizeStringId(originalId);
@@ -54,8 +67,8 @@ const normalizeOutcomeList = (
 
 const normalizeAdjudicatorEvent = (input: unknown, createId: IdFactory): AdjudicatorEvent => {
   const event = (input ?? {}) as any;
-  let next = event;
-  let changed = false;
+  let next = omitAbsentFields(event, ['sourceKey', 'probability', 'outcomes', 'onSuccess', 'onFailure']);
+  let changed = next !== event;
 
   const originalId = event.id;
   let id = normalizeStringId(originalId);
@@ -99,6 +112,7 @@ const normalizeAdjudicatorEvent = (input: unknown, createId: IdFactory): Adjudic
  * 规范化“随机判定器事件链”的 id：
  * - 事件 id：缺失则补齐；同一层级重复则重写后者，避免 React key 冲突。
  * - 结果 id：同上（并递归修复 chainedEvent / onSuccess / onFailure）。
+ * - 已知可选字段：undefined 视为缺省并移除，保持请求 JSON 兼容。
  *
  * 若输入本身已经满足约束，则返回原引用，避免无意义的重渲染。
  */
@@ -133,4 +147,3 @@ export const normalizeAdjudicationEvents = (
 
   return changed ? next : events;
 };
-

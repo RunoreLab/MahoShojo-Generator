@@ -16,6 +16,7 @@ import { DatabaseSelector } from '@/components/arena/components/DatabaseSelector
 
 import { useAuth } from '@/lib/useAuth';
 import { copyTextToClipboard } from '@/lib/clipboard';
+import { downloadBlob } from '@/lib/client/blobUrl';
 import { randomUUID } from '@/lib/crypto';
 import { mapDataCardSourceMeta, mapPublicDataCardRowToBattleSelectionPayload } from '@/lib/data-card-read-mappers';
 import { COLOR_GRADIENTS, MainColor } from '@/lib/main-color';
@@ -89,14 +90,7 @@ const sanitizeFileName = (value: string): string =>
 
 const downloadJson = (data: unknown, suggestedName: string): void => {
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = suggestedName;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
+  downloadBlob(blob, suggestedName);
 };
 
 const buildTachiePrompt = (data: Record<string, unknown>): string => {

@@ -119,20 +119,26 @@ export const createArenaRoomDirectoryService = (
     }
   };
 
-  const currentAuthority = async (record: StoredRoomDirectoryRecord): Promise<boolean> => {
+  /** 返回 null 表示候选已失效；否则返回当前 open 的 authority 状态用于校验与投影。 */
+  const currentAuthorityState = async (
+    record: StoredRoomDirectoryRecord,
+  ): Promise<ArenaRoomAuthorityState | null> => {
     const state = await readAuthority(record.roomId);
     if (state === null) {
       observeArenaRoomRuntime(options.observer, {
         event: 'incident',
         outcome: 'replacement_required',
       });
-      return false;
+      return null;
     }
-    return state.lifecycle.status === 'open'
+    if (
+      state.lifecycle.status === 'open'
       && !deadlineExpired(state, now())
       && state.snapshot.roomId === record.roomId
       && state.snapshot.roomEpoch === record.roomEpoch
-      && activeHostUserId(state) === record.hostUserId;
+      && activeHostUserId(state) === record.hostUserId
+    ) return state;
+    return null;
   };
 
   const cleanup = async (candidate: RedisRoomDirectoryCandidate): Promise<void> => {
@@ -181,11 +187,12 @@ export const createArenaRoomDirectoryService = (
       if (candidate === null) return null;
       const parsed = await parseCandidate(candidate, roomId.data);
       if (parsed === null) return null;
-      if (!(await currentAuthority(parsed.record))) {
+      const state = await currentAuthorityState(parsed.record);
+      if (state === null) {
         await cleanup(parsed.candidate);
         return null;
       }
-      return publicRoomDirectoryEntry(parsed.record);
+      return publicRoomDirectoryEntry(parsed.record, state);
     },
 
     async discoverPublic(input) {
@@ -201,14 +208,15 @@ export const createArenaRoomDirectoryService = (
       for (const candidate of scanned) {
         const parsed = await parseCandidate(candidate);
         if (parsed === null) continue;
+        const state = await currentAuthorityState(parsed.record);
         if (
           parsed.record.visibility !== 'public'
-          || !(await currentAuthority(parsed.record))
+          || state === null
         ) {
           await cleanup(parsed.candidate);
           continue;
         }
-        items.push(publicRoomDirectoryEntry(parsed.record));
+        items.push(publicRoomDirectoryEntry(parsed.record, state));
       }
       const nextIndexMember = scanned.at(-1)?.indexMember;
       let nextCursor: string | null = null;

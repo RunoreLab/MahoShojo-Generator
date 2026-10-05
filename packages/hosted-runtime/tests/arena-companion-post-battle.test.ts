@@ -22,7 +22,6 @@ const baseInput = {
   writeCurrentState: true,
   generationId: 'arena_generation_1',
   occurredAt: '2026-08-26T00:00:00.000Z',
-  baseRevisionHash: null,
 } as const;
 
 describe('Arena companion post-battle projector', () => {

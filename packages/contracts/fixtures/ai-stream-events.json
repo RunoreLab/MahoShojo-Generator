@@ -1,0 +1,103 @@
+{
+  "$comment": "AiStreamEvent 的跨运行时 fixture。TypeScript 侧由 apps/desktop/tests/direct-ai-stream-events.test.ts 用 @mahoshojo/ai-core 的 AiStreamEventSchema 校验；Rust 侧由 apps/desktop/src-tauri/src/ai.rs 通过 include_str! 在编译期读入并反序列化。任何一侧新增或改名事件字段都会让另一侧失败。",
+  "identity": {
+    "requestId": "req-1",
+    "contractVersion": 1,
+    "mode": "direct-local"
+  },
+  "events": [
+    {
+      "type": "started",
+      "requestId": "req-1",
+      "contractVersion": 1,
+      "mode": "direct-local",
+      "sequence": 0
+    },
+    {
+      "type": "text-delta",
+      "requestId": "req-1",
+      "contractVersion": 1,
+      "mode": "direct-local",
+      "sequence": 1,
+      "delta": "你"
+    },
+    {
+      "type": "reasoning-delta",
+      "requestId": "req-1",
+      "contractVersion": 1,
+      "mode": "direct-local",
+      "sequence": 2,
+      "delta": "先想"
+    },
+    {
+      "type": "usage",
+      "requestId": "req-1",
+      "contractVersion": 1,
+      "mode": "direct-local",
+      "sequence": 3,
+      "usage": {
+        "inputTokens": 11,
+        "outputTokens": 5,
+        "reasoningTokens": 2,
+        "cachedInputTokens": 0,
+        "totalTokens": 16
+      }
+    },
+    {
+      "type": "result",
+      "requestId": "req-1",
+      "contractVersion": 1,
+      "mode": "direct-local",
+      "sequence": 4,
+      "result": {
+        "status": "completed",
+        "requestId": "req-1",
+        "contractVersion": 1,
+        "mode": "direct-local",
+        "output": {
+          "text": "你",
+          "reasoning": "先想"
+        },
+        "finishReason": "stop",
+        "usage": {
+          "inputTokens": 11,
+          "outputTokens": 5,
+          "totalTokens": 16
+        }
+      }
+    },
+    {
+      "type": "result",
+      "requestId": "req-2",
+      "contractVersion": 1,
+      "mode": "direct-remote",
+      "sequence": 0,
+      "result": {
+        "status": "failed",
+        "requestId": "req-2",
+        "contractVersion": 1,
+        "mode": "direct-remote",
+        "error": {
+          "code": "rate-limited",
+          "message": "slow down",
+          "retryable": true,
+          "retryAfterMs": 1500
+        }
+      }
+    },
+    {
+      "type": "result",
+      "requestId": "req-3",
+      "contractVersion": 1,
+      "mode": "direct-local",
+      "sequence": 0,
+      "result": {
+        "status": "cancelled",
+        "requestId": "req-3",
+        "contractVersion": 1,
+        "mode": "direct-local",
+        "reason": "aborted"
+      }
+    }
+  ]
+}

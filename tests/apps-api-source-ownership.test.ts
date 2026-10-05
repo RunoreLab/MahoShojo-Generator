@@ -53,9 +53,11 @@ describe('apps/api source ownership', () => {
     expect(Object.keys(manifest.dependencies ?? {}).sort()).toEqual([
       '@hono/node-server',
       '@mahoshojo/contracts',
+      '@mahoshojo/domain',
       '@mahoshojo/hosted-api',
       '@mahoshojo/hosted-runtime',
       '@mahoshojo/multiplayer-core',
+      '@mahoshojo/web-package',
       'dotenv',
       'hono',
       'redis',

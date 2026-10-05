@@ -1,0 +1,693 @@
+// @vitest-environment jsdom
+
+import React, { act } from 'react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import type { ArenaRoomSharedConfig } from '@mahoshojo/contracts/arena-room';
+
+import { createRoomProposalArenaEditorSession } from '@/components/arena/editor';
+import { ArenaRoomProposalWorkspaceView } from '@/components/arena/multiplayer/ArenaRoomProposalWorkspace';
+import { arenaProposalExpectedBaseSummary } from '@/components/arena/multiplayer/ArenaProposalPanel';
+import type {
+  ArenaRoomController,
+  ArenaRoomControllerState,
+} from '@/lib/arena-room/controller';
+import {
+  buildArenaRoomState,
+  closeArenaWorkspaceDom,
+  createArenaWorkspaceQueries,
+  openArenaWorkspaceDom,
+  setValue,
+  sharedConfig,
+} from './helpers/arena-room-proposal-workspace';
+
+globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+
+vi.mock('@/lib/config', () => ({
+  config: { ENABLE_ARENA_USER_GUIDANCE: true },
+}));
+
+vi.mock('@/components/arena/hooks/useArenaData', () => ({
+  useLanguagesQuery: () => ({
+    data: [
+      { code: 'zh-CN', name: '简体中文' },
+      { code: 'ja', name: '日本語' },
+    ],
+  }),
+}));
+
+vi.mock('@/components/BattleDataModal', () => ({
+  default: ({
+    isOpen,
+    onClose,
+    visibleTabs,
+    selectedType,
+    titleOverride,
+    onSelectCard,
+    onToggleCard,
+    selectedCardIds,
+    allowDeckImport,
+    allowCardDetails,
+  }: {
+    readonly isOpen: boolean;
+    readonly onClose: () => void;
+    readonly visibleTabs: readonly string[];
+    readonly selectedType: string;
+    readonly titleOverride?: string;
+    readonly onSelectCard?: (card: unknown) => void;
+    readonly onToggleCard?: (card: unknown, selected: boolean) => void;
+    readonly selectedCardIds?: readonly string[];
+    readonly allowDeckImport?: boolean;
+    readonly allowCardDetails?: boolean;
+  }) => {
+    if (!isOpen) return null;
+    const isAuxScenario = titleOverride === '选择辅助情景';
+    const isMaterial = titleOverride === '选择素材';
+    const actionLabel = selectedType === 'character'
+      ? '模拟选择角色'
+      : isAuxScenario
+        ? '模拟选择辅助情景'
+        : isMaterial
+          ? '模拟选择素材'
+          : '模拟选择主情景';
+    const kind = selectedType === 'character'
+      ? 'character'
+      : isMaterial ? 'material' : 'scenario';
+    const id = selectedType === 'character'
+      ? 'character-public-1'
+      : isAuxScenario
+        ? 'scenario-public-aux'
+        : isMaterial
+          ? 'material-public-1'
+          : 'scenario-public-main';
+    const select = () => {
+      const card = { _cardId: id, _updatedAt: `version-${id}`, type: kind };
+      if (onSelectCard) onSelectCard(card);
+      else onToggleCard?.(card, true);
+    };
+    return (
+      <div
+        data-testid="battle-data-modal"
+        data-visible-tabs={visibleTabs.join(',')}
+        data-selected-type={selectedType}
+        data-selected-card-ids={selectedCardIds?.join(',') ?? ''}
+        data-allow-deck-import={String(allowDeckImport)}
+        data-allow-card-details={String(allowCardDetails)}
+      >
+        <button type="button" onClick={select}>{actionLabel}</button>
+        <button type="button" onClick={onClose}>关闭数据卡</button>
+      </div>
+    );
+  },
+}));
+
+const state = buildArenaRoomState();
+
+const { button, buttonsWithText, buttonContaining } = createArenaWorkspaceQueries();
+
+let container: HTMLDivElement;
+let root: ReturnType<typeof openArenaWorkspaceDom>['root'];
+
+beforeEach(() => {
+  ({ container, root } = openArenaWorkspaceDom());
+});
+
+afterEach(async () => {
+  await closeArenaWorkspaceDom(container, root);
+});
+
+describe('Arena room Proposal workspace', () => {
+  it('复用 Arena 编辑控件产生完整 typed diff，且公开数据卡不携带正文', async () => {
+    const editor = createRoomProposalArenaEditorSession({
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      revision: 7,
+      sharedConfig,
+    });
+    const controller = {
+      submitProposal: vi.fn(async () => undefined),
+      withdrawProposal: vi.fn(async () => undefined),
+      reconnect: vi.fn(),
+    } satisfies Pick<ArenaRoomController, 'reconnect' | 'submitProposal' | 'withdrawProposal'>;
+
+    await act(async () => root.render(
+      <ArenaRoomProposalWorkspaceView editor={editor} state={state} controller={controller} />,
+    ));
+
+    expect(container.textContent).toContain('🎴 预设角色');
+    expect(container.textContent).toContain('选择预设魔法少女');
+    expect(container.textContent).toContain('选择预设残兽');
+    expect(container.textContent).toContain('🌐 在线角色库 / 随机匹配');
+    expect(container.textContent).not.toContain('选择内置预设角色');
+
+    const curatedPresetToggle = container.querySelector<HTMLButtonElement>('button[aria-label="选择预设角色：翠雀"]');
+    if (!curatedPresetToggle) throw new Error('curated preset picker item not found');
+    await act(async () => curatedPresetToggle.click());
+
+    await act(async () => button('浏览在线角色库').click());
+    const modal = container.querySelector('[data-testid="battle-data-modal"]');
+    expect(modal?.getAttribute('data-visible-tabs')).toBe('public,recommended');
+    expect(modal?.getAttribute('data-allow-deck-import')).toBe('false');
+    expect(modal?.getAttribute('data-allow-card-details')).toBe('false');
+    expect(container.textContent).not.toContain('上传');
+    expect(container.textContent).not.toContain('粘贴');
+    await act(async () => button('模拟选择角色').click());
+    await act(async () => button('关闭数据卡').click());
+
+    const guidanceRow = [...container.querySelectorAll('.group')]
+      .find((row) => row.textContent?.includes('character-public-1'));
+    if (!guidanceRow) throw new Error('character row not found');
+    const openGuidanceButton = [...(guidanceRow.querySelectorAll('button') ?? [])]
+      .find((candidate) => candidate.textContent?.trim() === '行动');
+    if (!(openGuidanceButton instanceof HTMLButtonElement)) throw new Error('guidance toggle button not found');
+    await act(async () => openGuidanceButton.click());
+    const guidance = container.querySelector<HTMLTextAreaElement>('#arena-roster-guidance-data-card\\:character-public-1');
+    if (!guidance) throw new Error('character guidance not found');
+    await act(async () => setValue(guidance, '优先保护同伴'));
+    expect(container.querySelector('label[for="arena-roster-guidance-data-card:character-public-1"]')?.textContent)
+      .toContain('角色行动引导');
+    const collapseGuidanceButton = [...(guidanceRow.querySelectorAll('button') ?? [])]
+      .find((candidate) => candidate.textContent?.trim() === '收起');
+    if (!(collapseGuidanceButton instanceof HTMLButtonElement)) throw new Error('guidance collapse button not found');
+    await act(async () => collapseGuidanceButton.click());
+    expect(container.querySelector('#arena-roster-guidance-data-card\\:character-public-1')).toBeNull();
+    const reopenGuidanceButton = [...(guidanceRow.querySelectorAll('button') ?? [])]
+      .find((candidate) => candidate.textContent?.trim() === '行动');
+    if (!(reopenGuidanceButton instanceof HTMLButtonElement)) throw new Error('guidance toggle button not found');
+    await act(async () => reopenGuidanceButton.click());
+    expect(container.querySelector('#arena-roster-guidance-data-card\\:character-public-1')).not.toBeNull();
+
+    await act(async () => button('+ 新建分队').click());
+    const teamNameInput = container.querySelector<HTMLInputElement>('input[aria-label="分队名称"]');
+    if (!teamNameInput) throw new Error('team rename input not found');
+    await act(async () => setValue(teamNameInput, '守护队'));
+    await act(async () => {
+      teamNameInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    });
+    expect(container.textContent).toContain('守护队');
+    const teamSelect = [...container.querySelectorAll<HTMLSelectElement>('select:not(#language-select)')].at(-1);
+    const memberOption = [...(teamSelect?.options ?? [])].find((option) => option.value === 'data-card:character-public-1');
+    if (!teamSelect || !memberOption) throw new Error('team assignment select not found');
+    await act(async () => setValue(teamSelect, memberOption.value));
+
+    await act(async () => buttonContaining('情景模式').click());
+    await act(async () => buttonContaining('预设情景（内置）').click());
+    await act(async () => button('浏览在线情景库').click());
+    await act(async () => button('模拟选择主情景').click());
+    await act(async () => buttonContaining('辅助情景（可选）').click());
+    const auxBrowseButtons = buttonsWithText('浏览在线情景库');
+    expect(auxBrowseButtons.length).toBe(2);
+    await act(async () => auxBrowseButtons.at(-1)!.click());
+    await act(async () => button('模拟选择辅助情景').click());
+    await act(async () => button('关闭数据卡').click());
+    const curatedScenarioToggle = container.querySelector<HTMLButtonElement>('button[aria-label="选择预设情景：谨遵女王之意（A.R.E.N.A.）"]');
+    if (!curatedScenarioToggle) throw new Error('curated scenario picker item not found');
+    await act(async () => curatedScenarioToggle.click());
+    await act(async () => button('浏览在线数据卡').click());
+    await act(async () => button('模拟选择素材').click());
+    await act(async () => button('关闭数据卡').click());
+
+    const storyGuidance = container.querySelector<HTMLInputElement>('#arena-story-guidance');
+    const language = container.querySelector<HTMLSelectElement>('#language-select');
+    if (!storyGuidance || !language) throw new Error('shared story controls not found');
+    await act(async () => setValue(storyGuidance, '雨夜守城'));
+    await act(async () => button('标准(600+)').click());
+    await act(async () => setValue(language, 'ja'));
+
+    const narrativeRead = [...container.querySelectorAll('label')]
+      .find((label) => label.textContent?.includes('生成时读取（用于延续剧情）'))
+      ?.querySelector<HTMLInputElement>('input[type="checkbox"]');
+    if (!narrativeRead) throw new Error('narrative history checkbox not found');
+    await act(async () => narrativeRead.click());
+
+    const previewTrigger = button('预览提案');
+    previewTrigger.focus();
+    await act(async () => previewTrigger.click());
+    expect(document.body.querySelectorAll('[role="dialog"][aria-modal="true"]')).toHaveLength(1);
+    expect(document.activeElement?.textContent).toBe('关闭');
+    expect(document.body.textContent).toContain('逐项检查后将提交给房主审阅');
+    expect(document.body.textContent).toContain('将提交');
+    expect(document.body.textContent).toContain('新增角色');
+    expect(document.body.textContent).toContain('新增队伍');
+    expect(document.body.textContent).toContain('主情景改为 在线:scenario-public-main');
+    expect(document.body.textContent).toContain('新增辅助情景');
+    expect(document.body.textContent).toContain('新增素材');
+    expect(document.body.textContent).toContain('语言改为 日本語');
+    expect(document.body.textContent).toContain(
+      '角色 在线:character-public-1 引导改为“优先保护同伴”',
+    );
+    expect(document.body.textContent).toContain(
+      '角色 在线:character-public-1 分配至队伍 守护队',
+    );
+    expect(document.body.textContent).toContain('叙事历史 读取=开(10)、写入=关');
+    for (const exposedTerm of ['Proposal', 'typed diff', 'BASE', 'PROPOSED', 'revision', 'server-known', 'payload']) {
+      expect(document.body.textContent).not.toContain(exposedTerm);
+    }
+
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.activeElement).toBe(previewTrigger);
+    await act(async () => previewTrigger.click());
+
+    await act(async () => {
+      button('提交提案').click();
+      await Promise.resolve();
+    });
+
+    expect(controller.submitProposal).toHaveBeenCalledOnce();
+    const intent = vi.mocked(controller.submitProposal).mock.calls[0]?.[0];
+    expect(intent).toMatchObject({
+      expectedRoomEpoch: 'epoch-1',
+      baseRevision: 7,
+    });
+    const changes = intent?.changes ?? [];
+    expect(changes.map((change) => change.type)).toEqual(expect.arrayContaining([
+      'addCombatant',
+      'setCharacterGuidance',
+      'addTeam',
+      'assignTeam',
+      'setBattleMode',
+      'setScenario',
+      'addAuxScenario',
+      'addMaterial',
+      'setUserGuidance',
+      'setStoryLength',
+      'setSelectedLanguage',
+      'setHistorySettings',
+    ]));
+    expect(JSON.stringify(intent)).not.toContain('"content"');
+    expect(JSON.stringify(intent)).not.toContain('"data"');
+    expect(JSON.stringify(intent)).not.toContain('"payload"');
+    expect(JSON.stringify(intent)).not.toContain('"sourcePath"');
+    expect(intent?.changes.find((change) => change.type === 'addCombatant' && change.ref.id === 'character-public-1')).toMatchObject({
+      ref: {
+        id: 'character-public-1',
+        kind: 'character',
+        versionToken: 'version-character-public-1',
+      },
+    });
+    expect(intent?.changes.find((change) => change.type === 'addCombatant' && change.ref.id === 'M01_centaurea.json')).toMatchObject({
+      key: 'preset:M01_centaurea.json',
+      ref: {
+        id: 'M01_centaurea.json',
+        versionToken: expect.stringMatching(/^sha256:/),
+      },
+    });
+    expect(intent?.changes.find((change) => change.type === 'addAuxScenario' && change.ref.id === 'S01_queen_will.json')).toMatchObject({
+      key: 'preset:S01_queen_will.json',
+      ref: {
+        kind: 'scenario',
+        versionToken: expect.stringMatching(/^sha256:/),
+      },
+    });
+    await act(async () => editor.dispose());
+  });
+
+  it('随机匹配复用公开角色入口并只写入 exact ref', async () => {
+    const fetcher = vi.fn(async () => Response.json({
+      success: true,
+      card: {
+        id: 'character-random-1',
+        updated_at: 'version-character-random-1',
+        type: 'character',
+        content: { secret: '不得进入提案' },
+      },
+    }));
+    vi.stubGlobal('fetch', fetcher);
+    const editor = createRoomProposalArenaEditorSession({
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      revision: 7,
+      sharedConfig,
+    });
+    const controller = {
+      submitProposal: vi.fn(async () => undefined),
+      withdrawProposal: vi.fn(async () => undefined),
+      reconnect: vi.fn(),
+    } satisfies Pick<ArenaRoomController, 'reconnect' | 'submitProposal' | 'withdrawProposal'>;
+
+    await act(async () => root.render(
+      <ArenaRoomProposalWorkspaceView editor={editor} state={state} controller={controller} />,
+    ));
+    await act(async () => {
+      button('随机匹配角色').click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(fetcher).toHaveBeenCalledWith('/api/random-public-card?type=character');
+    const change = editor.preview().changes.find((item) => (
+      item.type === 'addCombatant' && item.ref.id === 'character-random-1'
+    ));
+    expect(change).toMatchObject({
+      ref: {
+        kind: 'character',
+        versionToken: 'version-character-random-1',
+      },
+    });
+    expect(change).not.toHaveProperty('key');
+    expect(JSON.stringify(change)).not.toContain('secret');
+    await act(async () => editor.dispose());
+  });
+
+  it('expectedBase 摘要保留 preset namespace', () => {
+    const change = {
+      type: 'setScenario',
+      changeId: 'scenario-preset-summary',
+      key: 'preset:S01_queen_will.json',
+      ref: {
+        id: 'S01_queen_will.json',
+        kind: 'scenario',
+        versionToken: 'sha256:test',
+      },
+      expectedBase: {
+        kind: 'ref',
+        key: 'preset:S00_old.json',
+        ref: {
+          id: 'S00_old.json',
+          kind: 'scenario',
+          versionToken: 'sha256:old',
+        },
+      },
+    } as const;
+    expect(arenaProposalExpectedBaseSummary(change)).toBe('提案基准：preset:S00_old.json');
+  });
+
+  it('online data-card modal 不把仅存在于 preset namespace 的同名引用标为已选', async () => {
+    const presetOnlyConfig: ArenaRoomSharedConfig = {
+      ...sharedConfig,
+      combatants: [{
+        key: 'preset:character-public-1',
+        ref: {
+          id: 'character-public-1',
+          kind: 'character',
+          versionToken: 'sha256:preset',
+        },
+      }],
+    };
+    const editor = createRoomProposalArenaEditorSession({
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      revision: 7,
+      sharedConfig: presetOnlyConfig,
+    });
+    const presetOnlyState: ArenaRoomControllerState = {
+      ...state,
+      session: state.session ? {
+        ...state.session,
+        snapshot: { ...state.session.snapshot, sharedConfig: presetOnlyConfig },
+      } : null,
+    };
+    const controller = {
+      submitProposal: vi.fn(async () => undefined),
+      withdrawProposal: vi.fn(async () => undefined),
+      reconnect: vi.fn(),
+    } satisfies Pick<ArenaRoomController, 'reconnect' | 'submitProposal' | 'withdrawProposal'>;
+
+    await act(async () => root.render(
+      <ArenaRoomProposalWorkspaceView editor={editor} state={presetOnlyState} controller={controller} />,
+    ));
+    await act(async () => button('浏览在线角色库').click());
+    const modal = container.querySelector('[data-testid="battle-data-modal"]');
+    expect(modal?.getAttribute('data-selected-card-ids')).toBe('');
+    await act(async () => editor.dispose());
+  });
+
+  it('暴露共享列表移动控件并产生五类全序 typed change', async () => {
+    const reorderableConfig: ArenaRoomSharedConfig = {
+      ...sharedConfig,
+      battleMode: 'scenario',
+      combatants: [
+        { key: 'data-card:character-one', ref: { id: 'character-one', kind: 'character', versionToken: 'v1' } },
+        { key: 'data-card:character-four', ref: { id: 'character-four', kind: 'character', versionToken: 'v1' } },
+        { key: 'data-card:character-two', ref: { id: 'character-two', kind: 'character', versionToken: 'v1' } },
+        { key: 'data-card:character-three', ref: { id: 'character-three', kind: 'character', versionToken: 'v1' } },
+      ],
+      teams: [
+        { key: 'team:a', displayName: 'A 队', combatantKeys: ['data-card:character-one', 'data-card:character-two'] },
+        { key: 'team:b', displayName: 'B 队', combatantKeys: ['data-card:character-three'] },
+      ],
+      auxScenarios: [
+        { key: 'data-card:aux-one', ref: { id: 'aux-one', kind: 'scenario', versionToken: 'v1' } },
+        { key: 'data-card:aux-two', ref: { id: 'aux-two', kind: 'scenario', versionToken: 'v1' } },
+      ],
+      materials: [
+        { key: 'data-card:material-one', ref: { id: 'material-one', kind: 'material', versionToken: 'v1' } },
+        { key: 'data-card:material-two', ref: { id: 'material-two', kind: 'material', versionToken: 'v1' } },
+      ],
+    };
+    const editor = createRoomProposalArenaEditorSession({
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      revision: 7,
+      sharedConfig: reorderableConfig,
+    });
+    const reorderState: ArenaRoomControllerState = {
+      ...state,
+      session: state.session ? {
+        ...state.session,
+        snapshot: { ...state.session.snapshot, sharedConfig: reorderableConfig },
+      } : null,
+    };
+    const controller = {
+      submitProposal: vi.fn(async () => undefined),
+      withdrawProposal: vi.fn(async () => undefined),
+      reconnect: vi.fn(),
+    } satisfies Pick<ArenaRoomController, 'reconnect' | 'submitProposal' | 'withdrawProposal'>;
+
+    await act(async () => root.render(
+      <ArenaRoomProposalWorkspaceView editor={editor} state={reorderState} controller={controller} />,
+    ));
+    const move = async (label: string): Promise<void> => {
+      const target = container.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
+      if (!target) throw new Error(`move button not found: ${label}`);
+      await act(async () => target.click());
+    };
+
+    // 参战角色行展示解析后的名称（在线引用显示 `在线:<名称>` 回退）。
+    await move('下移 在线:character-four');
+    await move('下移队伍 A 队');
+    await move('下移 A 队内 在线:character-one');
+    await act(async () => buttonContaining('辅助情景（可选）').click());
+    await move('下移 在线:aux-one');
+    await move('下移 在线:material-one');
+
+    expect(editor.preview().changes.map((change) => change.type)).toEqual([
+      'reorderCombatants',
+      'reorderTeams',
+      'reorderTeamCombatants',
+      'reorderAuxScenarios',
+      'reorderMaterials',
+    ]);
+    await act(async () => button('预览提案').click());
+    expect(document.body.textContent).toContain('调整角色顺序');
+    // teamKey 摘要解析为分队 displayName。
+    expect(document.body.textContent).toContain('调整队伍 A 队 内角色顺序');
+    expect(document.body.textContent).toContain('调整素材顺序');
+    await act(async () => editor.dispose());
+  });
+
+  it('成员工作区提供同步配置入口与底部生成区替代按钮', async () => {
+    const editor = createRoomProposalArenaEditorSession({
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      revision: 7,
+      sharedConfig,
+    });
+    const onSyncFromRoom = vi.fn();
+    const controller = {
+      submitProposal: vi.fn(async () => undefined),
+      withdrawProposal: vi.fn(async () => undefined),
+      reconnect: vi.fn(),
+    } satisfies Pick<ArenaRoomController, 'reconnect' | 'submitProposal' | 'withdrawProposal'>;
+
+    await act(async () => root.render(
+      <ArenaRoomProposalWorkspaceView
+        editor={editor}
+        state={state}
+        controller={controller}
+        onSyncFromRoom={onSyncFromRoom}
+      />,
+    ));
+
+    expect(container.textContent).toContain('提案完成后由房主开始生成');
+    expect(container.querySelectorAll('.arena-cta-button')).toHaveLength(2);
+    expect(container.querySelector('.arena-cta-button--preview')).toBeTruthy();
+    expect(container.querySelector('.arena-cta-button--sync')).toBeTruthy();
+    // 顶部入口是纯文本【同步配置】；底部 CTA 文本带装饰图标（↻‌），精确文本
+    // 匹配只命中顶部一处，底部由 arena-cta-button--sync class + 文本包含锁定。
+    expect(buttonsWithText('同步配置')).toHaveLength(1);
+    expect(container.querySelector('.arena-cta-button--sync')?.textContent).toContain('同步配置');
+    expect(button('预览提案').disabled).toBe(true);
+
+    // 干净草稿：直接同步，不需要确认
+    await act(async () => button('同步配置').click());
+    expect(onSyncFromRoom).toHaveBeenCalledOnce();
+    expect(document.body.textContent).not.toContain('确认丢弃并同步');
+
+    // 脏草稿：先确认再丢弃同步
+    const storyGuidance = container.querySelector<HTMLInputElement>('#arena-story-guidance');
+    if (!storyGuidance) throw new Error('story guidance input not found');
+    await act(async () => setValue(storyGuidance, '同步前草稿'));
+    expect(button('预览提案').disabled).toBe(false);
+
+    await act(async () => button('同步配置').click());
+    expect(onSyncFromRoom).toHaveBeenCalledOnce();
+    expect(document.body.textContent).toContain('确认丢弃并同步');
+
+    await act(async () => button('保留草稿').click());
+    expect(document.body.textContent).not.toContain('确认丢弃并同步');
+    expect(onSyncFromRoom).toHaveBeenCalledOnce();
+
+    await act(async () => button('同步配置').click());
+    await act(async () => button('确认丢弃并同步').click());
+    expect(onSyncFromRoom).toHaveBeenCalledTimes(2);
+    await act(async () => editor.dispose());
+  });
+
+  it('成员随机匹配进行中禁用两处同步配置入口，避免中途销毁提案草稿', async () => {
+    const editor = createRoomProposalArenaEditorSession({
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      revision: 7,
+      sharedConfig,
+    });
+    const onSyncFromRoom = vi.fn();
+    const controller = {
+      submitProposal: vi.fn(async () => undefined),
+      withdrawProposal: vi.fn(async () => undefined),
+      reconnect: vi.fn(),
+    } satisfies Pick<ArenaRoomController, 'reconnect' | 'submitProposal' | 'withdrawProposal'>;
+    let releaseMatch!: (value: unknown) => void;
+    const pendingMatch = new Promise((resolve) => { releaseMatch = resolve; });
+    // 引用名称缓存等非匹配请求立即失败返回；只有随机匹配请求被挂起。
+    const fetchMock = vi.fn((input: RequestInfo | URL): Promise<Response> => {
+      if (String(input).includes('random-public-card')) return pendingMatch as Promise<Response>;
+      return Promise.resolve(new Response(JSON.stringify({ success: false }), { status: 404 }));
+    });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = fetchMock as typeof globalThis.fetch;
+
+    try {
+      await act(async () => root.render(
+        <ArenaRoomProposalWorkspaceView
+          editor={editor}
+          state={state}
+          controller={controller}
+          onSyncFromRoom={onSyncFromRoom}
+        />,
+      ));
+
+      await act(async () => button('随机匹配角色').click());
+      const matchCalls = fetchMock.mock.calls.filter(([input]) => String(input).includes('random-public-card'));
+      expect(matchCalls).toHaveLength(1);
+      expect(button('同步配置').disabled).toBe(true);
+      expect(container.querySelector<HTMLButtonElement>('.arena-cta-button--sync')?.disabled).toBe(true);
+
+      await act(async () => {
+        releaseMatch({
+          ok: true,
+          json: async () => ({
+            success: true,
+            card: { _cardId: 'character-random-1', _updatedAt: 'version-random-1' },
+          }),
+        });
+        await pendingMatch;
+      });
+
+      expect(button('同步配置').disabled).toBe(false);
+      expect(container.querySelector<HTMLButtonElement>('.arena-cta-button--sync')?.disabled).toBe(false);
+      expect(onSyncFromRoom).not.toHaveBeenCalled();
+    } finally {
+      globalThis.fetch = originalFetch;
+      await act(async () => editor.dispose());
+    }
+  });
+
+  it('情景区块在无主情景时禁用辅助情景在线库入口并提示门槛，选择主情景后恢复', async () => {
+    const scenarioModeConfig: ArenaRoomSharedConfig = {
+      ...sharedConfig,
+      battleMode: 'scenario',
+    };
+    const editor = createRoomProposalArenaEditorSession({
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      revision: 7,
+      sharedConfig: scenarioModeConfig,
+    });
+    const scenarioModeState: ArenaRoomControllerState = {
+      ...state,
+      session: state.session ? {
+        ...state.session,
+        snapshot: { ...state.session.snapshot, sharedConfig: scenarioModeConfig },
+      } : null,
+    };
+    const controller = {
+      submitProposal: vi.fn(async () => undefined),
+      withdrawProposal: vi.fn(async () => undefined),
+      reconnect: vi.fn(),
+    } satisfies Pick<ArenaRoomController, 'reconnect' | 'submitProposal' | 'withdrawProposal'>;
+
+    await act(async () => root.render(
+      <ArenaRoomProposalWorkspaceView editor={editor} state={scenarioModeState} controller={controller} />,
+    ));
+
+    expect(container.textContent).toContain('参考项合计 0/256');
+    await act(async () => buttonContaining('辅助情景（可选）').click());
+    expect(container.textContent).toContain('（请先选择主情景）');
+    const auxBrowseButtons = buttonsWithText('浏览在线情景库');
+    expect(auxBrowseButtons.length).toBe(2);
+    expect(auxBrowseButtons[0]!.disabled).toBe(false);
+    expect(auxBrowseButtons[1]!.disabled).toBe(true);
+    const materialBrowse = button('浏览在线数据卡');
+    expect(materialBrowse.disabled).toBe(false);
+
+    await act(async () => buttonContaining('预设情景（内置）').click());
+    const curatedScenarioToggle = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="选择预设情景：谨遵女王之意（A.R.E.N.A.）"]',
+    );
+    if (!curatedScenarioToggle) throw new Error('curated scenario picker item not found');
+    await act(async () => curatedScenarioToggle.click());
+
+    expect(editor.exportSharedConfig().scenario).toMatchObject({
+      key: 'preset:S01_queen_will.json',
+    });
+    expect(container.textContent).not.toContain('（请先选择主情景）');
+    const auxBrowseAfter = buttonsWithText('浏览在线情景库');
+    expect(auxBrowseAfter.length).toBe(2);
+    expect(auxBrowseAfter[1]!.disabled).toBe(false);
+    await act(async () => editor.dispose());
+  });
+});
+
+describe('旧基准草稿提交策略', () => {
+  it('同 epoch 的旧草稿保留并允许提交，真实冲突留给房主裁决', async () => {
+    const editor = createRoomProposalArenaEditorSession(state.session!.snapshot);
+    editor.update((draft) => ({ ...draft, userGuidance: '成员希望采用B' }));
+    const latest = { ...state, session: { ...state.session!, snapshot: { ...state.session!.snapshot,
+      revision: 8, sharedConfig: { ...sharedConfig, userGuidance: '房主已改C' },
+    } } };
+    editor.sync(latest.session.snapshot);
+    const controller = { submitProposal: vi.fn(async () => undefined), withdrawProposal: vi.fn(async () => undefined), reconnect: vi.fn() };
+    await act(async () => root.render(<ArenaRoomProposalWorkspaceView editor={editor} state={latest} controller={controller} />));
+    expect(container.textContent).toContain('草稿仍可提交，冲突项将由房主审阅决定');
+    expect(editor.store.getState()).toMatchObject({ baselineRevision: 7, stale: true, dirty: true });
+    await act(async () => button('预览提案').click());
+    await act(async () => button('提交提案').click());
+    expect(controller.submitProposal).toHaveBeenCalledWith(expect.objectContaining({ baseRevision: 7,
+      changes: [expect.objectContaining({ type: 'setUserGuidance', value: '成员希望采用B', expectedBase: { kind: 'value', value: '' } })],
+    }));
+  });
+  it('房间实例变更仍禁止旧草稿提交', async () => {
+    const editor = createRoomProposalArenaEditorSession(state.session!.snapshot);
+    editor.update((draft) => ({ ...draft, userGuidance: 'B' }));
+    editor.sync({ ...state.session!.snapshot, roomEpoch: 'epoch-2' });
+    const controller = { submitProposal: vi.fn(async () => undefined), withdrawProposal: vi.fn(async () => undefined), reconnect: vi.fn() };
+    await act(async () => root.render(<ArenaRoomProposalWorkspaceView editor={editor} state={state} controller={controller} />));
+    expect(container.textContent).toContain('房间实例已变化，请重新同步');
+    expect(button('预览提案').disabled).toBe(true);
+    expect(controller.submitProposal).not.toHaveBeenCalled();
+  });
+});

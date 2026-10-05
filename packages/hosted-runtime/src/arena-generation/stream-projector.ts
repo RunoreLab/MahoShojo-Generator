@@ -15,7 +15,7 @@ export type ArenaStreamProjector = {
 };
 
 export const createArenaStreamProjector = (
-  options: { expectsMeta: boolean },
+  options: { expectsMeta: boolean; strictTrailer?: boolean },
 ): ArenaStreamProjector => {
   let pending = '';
   let metaBuffer: string | null = null;
@@ -118,7 +118,10 @@ export const createArenaStreamProjector = (
       if (finished) return { markdown: [] };
       finished = true;
       metaEvent = options.expectsMeta ? parseMeta() : null;
-      const markdown = [pending, trailing].filter(Boolean);
+      if (options.strictTrailer && trailing.trim()) {
+        metaEvent = { type: 'meta_error', data: { parseOk: false, error: 'MAHOSHOJO_ARENA_META 必须位于输出结尾' } };
+      }
+      const markdown = [pending, ...(options.strictTrailer ? [] : [trailing])].filter(Boolean);
       pending = '';
       trailing = '';
       return { markdown };

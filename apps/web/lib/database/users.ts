@@ -1,3 +1,5 @@
+import { config as appConfig } from '@/lib/config';
+
 export type UserProfileRow = {
   signature: string | null;
   avatar_webp_base64: string | null;
@@ -48,7 +50,7 @@ type UsersRepoBundle = {
     avatarWebpBase64: string | null,
   ) => Promise<number>;
   updateBusinessUserSlotCountById: (db: unknown, userId: number, slotCount: number) => Promise<number>;
-  increaseBusinessUserSlotCountById: (db: unknown, userId: number, increaseBy: number) => Promise<number>;
+  increaseBusinessUserSlotCountById: (db: unknown, userId: number, increaseBy: number, baseIfNull?: number) => Promise<number>;
 };
 
 const readUsersRepoBundle = async (): Promise<UsersRepoBundle | null> => {
@@ -310,13 +312,30 @@ export async function getUserDataCardCapacity(userId: number, defaultCapacity: n
   }
 }
 
+export async function increaseUserSlotCountStrict(userId: number, increaseBy: number): Promise<boolean> {
+  const bundle = await readUsersRepoBundle();
+  if (!bundle) throw new Error('未检测到可用的 D1 连接，无法增加用户槽位');
+  const affected = await bundle.increaseBusinessUserSlotCountById(
+    bundle.db,
+    userId,
+    increaseBy,
+    appConfig.DEFAULT_DATA_CARD_CAPACITY,
+  );
+  return affected > 0;
+}
+
 // 增加用户的槽位数量
 export async function increaseUserSlotCount(userId: number, increaseBy: number): Promise<boolean> {
   try {
     const bundle = await readUsersRepoBundle();
     if (!bundle) return false;
 
-    const affected = await bundle.increaseBusinessUserSlotCountById(bundle.db, userId, increaseBy);
+    const affected = await bundle.increaseBusinessUserSlotCountById(
+      bundle.db,
+      userId,
+      increaseBy,
+      appConfig.DEFAULT_DATA_CARD_CAPACITY,
+    );
     return affected > 0;
   } catch (error) {
     console.error('增加用户槽位数量失败:', error);

@@ -88,8 +88,9 @@ export const createArenaR2ObjectStoreFromEnvironment = (
     async getText(key) {
       const signed = await signer.sign(objectUrl(key), { method: 'GET' });
       const response = await fetcher(signed.url, signed);
+      if (response.status === 404) return { kind: 'not-found' };
       if (!response.ok) throw new Error(`ARENA_R2_GET_FAILED_${response.status}`);
-      return response.text();
+      return { kind: 'found', text: await response.text() };
     },
   });
 };

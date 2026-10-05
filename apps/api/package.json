@@ -10,7 +10,7 @@
     "dev": "node scripts/generate-route-manifest.mjs && tsx watch src/index.ts",
     "start": "node dist/index.mjs",
     "test": "vitest run --config vitest.config.ts",
-    "lint": "eslint src tests scripts/room-verifier-safety.ts scripts/verify-room-redis.ts scripts/verify-room-generation-redis.ts scripts/verify-room-generation-process-recovery.ts scripts/verify-room-hardening-faults.ts scripts/verify-room-hardening-load.ts --config eslint.config.mjs",
+    "lint": "eslint src tests scripts/room-verifier-safety.ts scripts/room-verifier-membership.ts scripts/room-generation-verifier-materializer.ts scripts/verify-room-redis.ts scripts/verify-room-generation-redis.ts scripts/verify-room-generation-process-recovery.ts scripts/verify-room-hardening-faults.ts scripts/verify-room-hardening-load.ts --config eslint.config.mjs",
     "build": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.room-verifier.json",
     "build:bundle": "node scripts/generate-route-manifest.mjs && node scripts/build.mjs",
     "routes": "node scripts/generate-route-manifest.mjs",
@@ -22,14 +22,16 @@
     "verify:room-hardening-faults": "tsx scripts/verify-room-hardening-faults.ts",
     "verify:room-hardening-load": "node --import tsx scripts/verify-room-hardening-load.ts",
     "verify:hosted-dr:redis": "tsx scripts/verify-hosted-dr-redis.ts",
-    "deploy:prepare": "pnpm --dir ../.. run check:arena-room-release -- --mode deploy && node scripts/generate-route-manifest.mjs && node scripts/build.mjs"
+    "deploy:prepare": "node scripts/generate-route-manifest.mjs && node scripts/build.mjs"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.1",
     "@mahoshojo/contracts": "workspace:*",
+    "@mahoshojo/domain": "workspace:*",
     "@mahoshojo/hosted-api": "workspace:*",
     "@mahoshojo/hosted-runtime": "workspace:*",
     "@mahoshojo/multiplayer-core": "workspace:*",
+    "@mahoshojo/web-package": "workspace:*",
     "dotenv": "^17.4.2",
     "hono": "^4.13.3",
     "redis": "^6.2.1",

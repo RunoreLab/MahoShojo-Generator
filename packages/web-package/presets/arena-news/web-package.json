@@ -1,0 +1,16 @@
+{
+  "format": "mahoshojo-web-package",
+  "formatVersion": 1,
+  "id": "mahoshojo.arena-news",
+  "version": "1.0.0",
+  "name": "竞技场新闻",
+  "entry": "index.html",
+  "generation": {
+    "target": "index.html",
+    "mode": "replace",
+    "mediaType": "text/html",
+    "instructions": "ai/instructions.md",
+    "assetCatalog": "ai/assets.json"
+  },
+  "capabilities": ["scripts"]
+}

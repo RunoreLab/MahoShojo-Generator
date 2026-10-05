@@ -37,7 +37,7 @@ type BadgesRepoBundle = {
   listRecentUserBadgesExcludingEquipped: (db: unknown, userId: number, limit: number) => Promise<UserBadgeJoinedRow[]>;
   clearEquippedUserBadges: (db: unknown, userId: number) => Promise<void>;
   setUserBadgeEquippedOrder: (db: unknown, userId: number, badgeId: string, displayOrder: number) => Promise<number>;
-  insertUserBadgeIgnore: (db: unknown, userId: number, badgeId: string) => Promise<void>;
+  insertUserBadgeIgnore: (db: unknown, userId: number, badgeId: string) => Promise<boolean>;
   deleteUserBadge: (db: unknown, userId: number, badgeId: string) => Promise<number>;
   countUserBadgesByBadgeId: (db: unknown, userId: number, badgeId: string) => Promise<number>;
   listActiveBadgeDefinitions: (db: unknown) => Promise<BadgeDefinitionRow[]>;
@@ -48,6 +48,7 @@ type LegacyD1Payload = {
   result?: Array<{
     success?: boolean;
     results?: unknown;
+    meta?: Record<string, unknown>;
   }>;
 };
 
@@ -119,6 +120,20 @@ const executeLegacyQuery = async (sqlText: string, params: unknown[] = []): Prom
   const { queryFromD1 } = await import('./core');
   const payload = await queryFromD1(sqlText, params);
   return readLegacyRows(payload);
+};
+
+const executeLegacyWrite = async (sqlText: string, params: unknown[] = []): Promise<number> => {
+  const { queryFromD1 } = await import('./core');
+  const payload = await queryFromD1(sqlText, params);
+  const envelope = asObject(payload) as LegacyD1Payload | null;
+  if (!envelope || envelope.success !== true || !Array.isArray(envelope.result) || envelope.result.length === 0) {
+    throw new Error('D1 写入未返回成功结果');
+  }
+  const first = asObject(envelope.result[0]) as { success?: boolean; meta?: Record<string, unknown> } | null;
+  if (!first || first.success === false) throw new Error('D1 写入失败');
+  const changes = Number(first.meta?.changes);
+  if (!Number.isFinite(changes)) throw new Error('D1 写入缺少 changes 元数据');
+  return Math.max(0, Math.trunc(changes));
 };
 
 const mapJoinedRowToUserBadge = (row: UserBadgeJoinedRow): UserBadge => ({
@@ -392,6 +407,43 @@ export async function updateEquippedBadges(userId: number, badgeIds: string[]): 
     } catch {
       return false;
     }
+  }
+}
+
+
+export type TryGrantBadgeResult = 'granted' | 'already-exists' | 'failed';
+
+/**
+ * 尝试授予徽章，并区分本次实际插入与既有徽章。
+ * 奖励流程应使用此函数，避免并发/重试时重复发放关联奖励。
+ */
+export async function tryGrantBadgeToUser(userId: number, badgeId: string): Promise<TryGrantBadgeResult> {
+  try {
+    const bundle = await readBadgesRepoBundle();
+    if (bundle) {
+      const inserted = await bundle.insertUserBadgeIgnore(bundle.db, userId, badgeId);
+      return inserted ? 'granted' : 'already-exists';
+    }
+
+    const inserted = await executeLegacyWrite(
+      'INSERT OR IGNORE INTO user_badges (user_id, badge_id) VALUES (?, ?)',
+      [userId, badgeId],
+    );
+    return inserted > 0 ? 'granted' : 'already-exists';
+  } catch (error) {
+    console.error('尝试授予徽章失败:', error);
+    return 'failed';
+  }
+}
+
+export async function tryRevokeBadgeFromUser(userId: number, badgeId: string): Promise<boolean> {
+  try {
+    const bundle = await readBadgesRepoBundle();
+    if (bundle) return (await bundle.deleteUserBadge(bundle.db, userId, badgeId)) > 0;
+    return (await executeLegacyWrite('DELETE FROM user_badges WHERE user_id = ? AND badge_id = ?', [userId, badgeId])) > 0;
+  } catch (error) {
+    console.error('尝试撤销徽章失败:', error);
+    return false;
   }
 }
 

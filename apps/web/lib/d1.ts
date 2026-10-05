@@ -3,13 +3,8 @@
 
 // 重新导出核心功能
 export {
-  generateRandomId,
   generateUUID,
   queryFromD1,
-  createWithCustomId,
-  updateById,
-  getRecordById,
-  saveToD1
 } from './database/core';
 
 // 重新导出用户相关功能
@@ -105,69 +100,6 @@ export {
   getUserDeckFavorites,
   getUserDeckFavoriteIds
 } from './database/deck-favorites';
-
-// 重新导出 PVP 相关功能
-export {
-  createPvpRoom,
-  getPvpRoomById,
-  getPvpRoomBrowseRows,
-  getPvpRoomPlayers,
-  getPvpRoomMembers,
-  addPvpRoomPlayer,
-  removePvpRoomPlayer,
-  updatePvpRoomMember,
-  updatePvpRoomCas,
-  upsertPvpRoomSubmission,
-  getPvpRoomSubmissions,
-  deletePvpRoomSubmission,
-  getPvpEligibleDataCard,
-  getPvpEligibleScenarioDataCard,
-  clearPvpRoomMatchState,
-  clearPvpRoomRuntimeState,
-  clearPvpRoomEphemeralState,
-  upsertPvpRoomHand,
-  deletePvpRoomHand,
-  getPvpRoomHands,
-  createPvpCardSnapshot,
-  getPvpCardSnapshots,
-  createPvpRound,
-  getPvpRoundById,
-  getLatestPvpRoundByRoom,
-  getLatestPvpRoundByMatch,
-  getPvpRoundsByRoom,
-  getPvpRoundsByMatch,
-  updatePvpRound,
-  upsertPvpRoundChoice,
-  getPvpRoundChoices,
-  getPvpCardSnapshotById,
-  createPvpMatch,
-  createPvpMatchPlayers,
-  updatePvpMatch,
-  getPvpMatchById,
-  getPvpMatchPlayersByMatchId,
-  getPvpRoomChatMessages,
-  getLatestPvpRoomChatMessageBySender,
-  createPvpRoomChatMessage,
-  getPvpMatchesByUserId,
-  getPvpMatchRoundOutcomeSummariesByMatchIds,
-  countPvpMatchesByUserId,
-  isUserInPvpMatch,
-  getPvpUserSummariesByUserIds,
-  type PvpMatchPlayerRow,
-  type PvpUserSummaryRow,
-  type PvpMatchRow,
-  type PvpMatchStatus,
-  type PvpMatchRoundOutcomeSummary,
-  type PvpRoomPhase,
-  type PvpRoomStatus,
-  type PvpRoomMemberRole,
-  type PvpRoundStatus,
-  type PvpRoomRow,
-  type PvpRoomBrowseRow,
-  type PvpRoomPlayerRow,
-  type PvpRoomChatMessageRow,
-  type PvpRoundRow,
-} from './database/pvp';
 
 // 重新导出战报生成记录相关功能
 export {

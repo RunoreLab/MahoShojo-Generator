@@ -1,16 +1,8 @@
 import type { AppDrizzleDb } from '@/lib/db/drizzle';
 import type { ReportResolutionCode } from '@/lib/db/schema';
 
-const ADVERSE_FINAL_REPORT_RESOLUTION_CODES: ReadonlyArray<ReportResolutionCode> = [
-  'confirmed_violation',
-  'content_removed',
-  'self_remediated',
-];
-
-export const isAdverseFinalReportResolutionCode = (
-  resolutionCode: ReportResolutionCode | null,
-): resolutionCode is 'confirmed_violation' | 'content_removed' | 'self_remediated' =>
-  resolutionCode != null && ADVERSE_FINAL_REPORT_RESOLUTION_CODES.includes(resolutionCode);
+import { isAdverseFinalReportResolutionCode } from '@mahoshojo/hosted-runtime/admin/moderation/transitions';
+export { isAdverseFinalReportResolutionCode } from '@mahoshojo/hosted-runtime/admin/moderation/transitions';
 
 export async function enforceResolvedReportCaseTargetCard(input: {
   db: AppDrizzleDb;

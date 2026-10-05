@@ -1,14 +1,15 @@
 import {
   hostedDrClientOperations,
   hostedDrClientRouting,
-} from '@/config/hosted-dr-client.generated';
+  type HostedDrClientOperation,
+} from '@/config/hosted-routing';
 import { isHostedDrContractVersionCompatible } from '@mahoshojo/hosted-api/hosted-dr';
+import { lookupHonoApiRoute } from '@/lib/hono-api-routing';
 import {
   HOSTED_DR_CAPABILITY_HEADER,
   HOSTED_DR_OPERATION_METHOD_HEADER,
 } from '@/lib/hosted-dr/probe-contract';
 
-export type HostedDrClientOperation = (typeof hostedDrClientOperations)[number];
 export type HostedDrClientRouting = Readonly<{
   primaryOrigin: string;
   drOrigin: string;
@@ -34,6 +35,7 @@ export type HostedDrProbeReason =
   | 'DR_NOT_READY'
   | 'DR_PROBE_PROTOCOL_ERROR';
 export type HostedDrDecisionReason =
+  | 'PRIMARY_ONLY'
   | 'PRIMARY_READY'
   | 'DR_READY'
   | 'OPERATION_NOT_DECLARED'
@@ -51,9 +53,15 @@ export type HostedPlacementDecision = Readonly<{
   reason: HostedDrDecisionReason;
   contractVersion: string;
   routeFamily: string;
-  primaryProbe: HostedDrProbeResult;
+  primaryProbe: HostedDrProbeResult | null;
   drProbe: HostedDrProbeResult | null;
 }>;
+
+export type HostedRouteClass = Readonly<
+  | { kind: 'primary-only'; routeFamily: string }
+  | { kind: 'dr-selectable'; routeFamily: string; operation: HostedDrClientOperation }
+  | { kind: 'unknown'; routeFamily: string }
+>;
 
 type HostedDrFetch = (
   input: string,
@@ -107,20 +115,32 @@ export const lookupHostedDrClientOperation = (
 export const isHostedDrOperationEligible = (
   operation: HostedDrClientOperation,
 ): boolean => (
-  operation.contractStatus === 'verified'
-  && (
-    (
-      operation.requestClass === 'safe-read'
-      && operation.drMode === 'safe-read'
-      && operation.replayPolicy === 'safe-read-only'
-    )
-    || (
-      operation.requestClass === 'non-idempotent-operation'
-      && operation.drMode === 'new-request-only'
-      && operation.replayPolicy === 'never-after-dispatch'
-    )
-  )
+  operation.safety === 'safe-read'
+  || operation.safety === 'new-non-idempotent'
 );
+
+export const classifyHostedRoute = (
+  path: string,
+  method: string,
+): HostedRouteClass => {
+  const honoRoute = lookupHonoApiRoute(path);
+  if (!honoRoute) {
+    return Object.freeze({ kind: 'unknown', routeFamily: 'undeclared' });
+  }
+  if (!lookupHonoApiRoute(path, method)) {
+    return Object.freeze({ kind: 'unknown', routeFamily: honoRoute.route });
+  }
+
+  const operation = lookupHostedDrClientOperation(path, method);
+  if (!operation || !isHostedDrOperationEligible(operation)) {
+    return Object.freeze({ kind: 'primary-only', routeFamily: honoRoute.route });
+  }
+  return Object.freeze({
+    kind: 'dr-selectable',
+    routeFamily: honoRoute.route,
+    operation,
+  });
+};
 
 const hasNoStore = (response: Response): boolean => (
   response.headers.get('cache-control')
@@ -232,7 +252,7 @@ const freezeDecision = (
   reason: HostedDrDecisionReason,
   contractVersion: string,
   routeFamily: string,
-  primaryProbe: HostedDrProbeResult,
+  primaryProbe: HostedDrProbeResult | null,
   drProbe: HostedDrProbeResult | null,
 ): HostedPlacementDecision => Object.freeze({
   placement,
@@ -254,8 +274,30 @@ export const selectHostedDrPlacement = async ({
   if (!Number.isInteger(timeoutMs) || timeoutMs < 500 || timeoutMs > 3000) {
     throw new TypeError('Hosted DR preflight timeout 必须在 500..3000ms');
   }
-  const operation = lookupHostedDrClientOperation(path, method);
-  const routeFamily = operation?.route ?? 'undeclared';
+  const routeClass = classifyHostedRoute(path, method);
+  if (routeClass.kind === 'unknown') {
+    return freezeDecision(
+      'unavailable',
+      'OPERATION_NOT_DECLARED',
+      routing.contractVersion,
+      routeClass.routeFamily,
+      null,
+      null,
+    );
+  }
+  if (routeClass.kind === 'primary-only') {
+    return freezeDecision(
+      'hono-primary',
+      'PRIMARY_ONLY',
+      routing.contractVersion,
+      routeClass.routeFamily,
+      null,
+      null,
+    );
+  }
+
+  const operation = routeClass.operation;
+  const routeFamily = routeClass.routeFamily;
   const primaryProbe = await probeOnce({
     fetcher,
     url: `${routing.primaryOrigin}${routing.primaryProbePath}`,
@@ -274,27 +316,6 @@ export const selectHostedDrPlacement = async ({
       null,
     );
   }
-  if (!operation) {
-    return freezeDecision(
-      'unavailable',
-      'OPERATION_NOT_DECLARED',
-      routing.contractVersion,
-      routeFamily,
-      primaryProbe,
-      null,
-    );
-  }
-  if (!isHostedDrOperationEligible(operation)) {
-    return freezeDecision(
-      'unavailable',
-      'DR_NOT_ELIGIBLE',
-      routing.contractVersion,
-      routeFamily,
-      primaryProbe,
-      null,
-    );
-  }
-
   const drProbe = await probeOnce({
     fetcher,
     url: `${routing.drOrigin}${routing.drProbePath}`,

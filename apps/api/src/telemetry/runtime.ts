@@ -44,21 +44,51 @@ type OutcomeDurationSummary = {
   duration: DurationSummary;
 };
 
+export type HonoReadinessObservation = Readonly<{
+  outcome: 'ready' | 'not-ready';
+  durationMs: number;
+  redisReady: boolean;
+  d1Ready: boolean;
+  d1Transport: 'gateway' | 'cloudflare-api' | 'none';
+}>;
+
+type HonoReadinessLatencyBucket =
+  | '0-49ms'
+  | '50-199ms'
+  | '200-999ms'
+  | '1000-2999ms'
+  | '3000ms+';
+
 export interface RuntimeTelemetryService {
   beginRequest(): FinishObservation;
   beginStream(): FinishObservation;
   beginSocket(): FinishObservation;
+  observeReadiness?(observation: HonoReadinessObservation): void;
 }
 
 export type HonoRuntimeTelemetrySnapshot = {
   event: 'hono.runtime.telemetry';
-  schemaVersion: 5;
+  schemaVersion: 6;
   service: 'mahoshojo-hono';
   capturedAt: string;
   runtime: {
     origin: 'hono-node';
     selection: 'not-observed';
     failoverReason: null;
+  };
+  hostedReadiness: {
+    arrivals: number;
+    outcomes: { ready: number; notReady: number };
+    latencyBuckets: Record<HonoReadinessLatencyBucket, number>;
+    dependencies: {
+      redisReady: { true: number; false: number };
+      d1Ready: { true: number; false: number };
+      d1Transport: {
+        gateway: number;
+        'cloudflare-api': number;
+        none: number;
+      };
+    };
   };
   process: {
     uptimeSeconds: number;
@@ -169,6 +199,7 @@ export type HonoRuntimeTelemetrySnapshot = {
         arenaGenerate: number;
         generateBattleStory: number;
         arenaSessionGenerateNext: number;
+        arenaRepairCombatantMeta: number;
       };
       byPlacement: { honoPrimary: number; nextDr: number };
       outcomes: { success: number; rejected: number; failure: number; cancelled: number };
@@ -188,6 +219,7 @@ export type HonoRuntimeTelemetrySnapshot = {
       latency: DurationSummary;
     };
     replay: { events: number; bytes: number; snapshotBootstraps: number };
+    reasoning: { done: number; unavailable: number; eventCount: number; chars: number };
     provider: {
       started: number;
       outcomes: { success: number; failure: number; cancelled: number };
@@ -306,6 +338,11 @@ type ArenaGenerationAudit = {
   resumeAttempts: number;
   snapshotBootstrap: boolean;
   secondProviderPrevention: boolean;
+  reasoning: {
+    status: 'done' | 'unavailable' | 'not-observed';
+    eventCount: number;
+    chars: number;
+  };
   finalization: 'success' | 'failure' | 'not-observed';
   r2: 'success' | 'failure' | 'not-observed';
 };
@@ -316,6 +353,7 @@ const createArenaGenerationAudit = (): ArenaGenerationAudit => ({
   resumeAttempts: 0,
   snapshotBootstrap: false,
   secondProviderPrevention: false,
+  reasoning: { status: 'not-observed', eventCount: 0, chars: 0 },
   finalization: 'not-observed',
   r2: 'not-observed',
 });
@@ -478,6 +516,15 @@ const normalizeDuration = (value: number): number => Math.min(
   Number.isFinite(value) && value > 0 ? value : 0,
 );
 
+const readinessLatencyBucket = (durationMs: number): HonoReadinessLatencyBucket => {
+  const normalized = normalizeDuration(durationMs);
+  if (normalized < 50) return '0-49ms';
+  if (normalized < 200) return '50-199ms';
+  if (normalized < 1_000) return '200-999ms';
+  if (normalized < 3_000) return '1000-2999ms';
+  return '3000ms+';
+};
+
 const normalizeMetricInteger = (value: number | null): number | null => {
   if (value === null || !Number.isFinite(value) || value < 0) return null;
   return Math.min(Number.MAX_SAFE_INTEGER, Math.floor(value));
@@ -581,6 +628,7 @@ export class HonoRuntimeTelemetry implements
     arenaGenerate: 0,
     generateBattleStory: 0,
     arenaSessionGenerateNext: 0,
+    arenaRepairCombatantMeta: 0,
   };
 
   private readonly arenaCompanionByPlacement = { honoPrimary: 0, nextDr: 0 };
@@ -611,6 +659,13 @@ export class HonoRuntimeTelemetry implements
   private readonly arenaResumeLatency = new DurationAccumulator();
 
   private readonly arenaReplay = { events: 0, bytes: 0, snapshotBootstraps: 0 };
+
+  private readonly arenaReasoning = {
+    done: 0,
+    unavailable: 0,
+    eventCount: 0,
+    chars: 0,
+  };
 
   private arenaProviderStarted = 0;
 
@@ -733,6 +788,27 @@ export class HonoRuntimeTelemetry implements
     replacementRequired: 0,
   };
 
+  private readonly hostedReadiness = {
+    arrivals: 0,
+    outcomes: { ready: 0, notReady: 0 },
+    latencyBuckets: {
+      '0-49ms': 0,
+      '50-199ms': 0,
+      '200-999ms': 0,
+      '1000-2999ms': 0,
+      '3000ms+': 0,
+    } satisfies Record<HonoReadinessLatencyBucket, number>,
+    dependencies: {
+      redisReady: { true: 0, false: 0 },
+      d1Ready: { true: 0, false: 0 },
+      d1Transport: {
+        gateway: 0,
+        'cloudflare-api': 0,
+        none: 0,
+      },
+    },
+  };
+
   private readonly delayMonitor = monitorEventLoopDelay({
     resolution: EVENT_LOOP_DELAY_RESOLUTION_MS,
   });
@@ -788,6 +864,16 @@ export class HonoRuntimeTelemetry implements
 
   beginSocket(): FinishObservation {
     return this.sockets.begin();
+  }
+
+  observeReadiness(observation: HonoReadinessObservation): void {
+    this.hostedReadiness.arrivals += 1;
+    if (observation.outcome === 'ready') this.hostedReadiness.outcomes.ready += 1;
+    else this.hostedReadiness.outcomes.notReady += 1;
+    this.hostedReadiness.latencyBuckets[readinessLatencyBucket(observation.durationMs)] += 1;
+    this.hostedReadiness.dependencies.redisReady[observation.redisReady ? 'true' : 'false'] += 1;
+    this.hostedReadiness.dependencies.d1Ready[observation.d1Ready ? 'true' : 'false'] += 1;
+    this.hostedReadiness.dependencies.d1Transport[observation.d1Transport] += 1;
   }
 
   beginAiUpstream(): AiUpstreamAttemptObserver {
@@ -909,7 +995,9 @@ export class HonoRuntimeTelemetry implements
           ? 'arenaGenerate'
           : observation.operation === 'generate-battle-story'
             ? 'generateBattleStory'
-            : 'arenaSessionGenerateNext';
+            : observation.operation === 'arena/session/generate-next'
+              ? 'arenaSessionGenerateNext'
+              : 'arenaRepairCombatantMeta';
         const placement = observation.placement === 'hono-primary' ? 'honoPrimary' : 'nextDr';
         this.arenaCompanionByOperation[operation] += 1;
         this.arenaCompanionByPlacement[placement] += 1;
@@ -972,6 +1060,16 @@ export class HonoRuntimeTelemetry implements
           this.arenaProviderDuration.observe(observation.durationMs ?? 0);
         }
         break;
+      case 'reasoning': {
+        this.arenaReasoning[observation.status] += 1;
+        this.arenaReasoning.eventCount += Math.max(0, Math.floor(observation.eventCount));
+        this.arenaReasoning.chars += Math.max(0, Math.floor(observation.chars));
+        const reasoningAudit = this.getArenaAudit(observation.generationId).reasoning;
+        reasoningAudit.status = observation.status;
+        reasoningAudit.eventCount = Math.max(0, Math.floor(observation.eventCount));
+        reasoningAudit.chars = Math.max(0, Math.floor(observation.chars));
+        break;
+      }
       case 'phase':
         this.arenaPhaseOutcomes[observation.phase][observation.outcome] += 1;
         this.arenaPhaseDurations[observation.phase].observe(observation.durationMs);
@@ -1012,6 +1110,7 @@ export class HonoRuntimeTelemetry implements
             snapshotBootstrap: audit.snapshotBootstrap,
             secondProviderPrevention: audit.secondProviderPrevention,
             terminal: { status: observation.status, code: observation.code },
+            reasoning: audit.reasoning,
             finalization: audit.finalization,
             r2: audit.r2,
           }));
@@ -1233,13 +1332,23 @@ export class HonoRuntimeTelemetry implements
 
     return {
       event: TELEMETRY_EVENT,
-      schemaVersion: 5,
+      schemaVersion: 6,
       service: 'mahoshojo-hono',
       capturedAt,
       runtime: {
         origin: 'hono-node',
         selection: 'not-observed',
         failoverReason: null,
+      },
+      hostedReadiness: {
+        arrivals: this.hostedReadiness.arrivals,
+        outcomes: { ...this.hostedReadiness.outcomes },
+        latencyBuckets: { ...this.hostedReadiness.latencyBuckets },
+        dependencies: {
+          redisReady: { ...this.hostedReadiness.dependencies.redisReady },
+          d1Ready: { ...this.hostedReadiness.dependencies.d1Ready },
+          d1Transport: { ...this.hostedReadiness.dependencies.d1Transport },
+        },
       },
       process: {
         uptimeSeconds: round(process.uptime(), 3),
@@ -1332,6 +1441,7 @@ export class HonoRuntimeTelemetry implements
           outcomes: { ...this.arenaProviderOutcomes },
           duration: this.arenaProviderDuration.read(),
         },
+        reasoning: { ...this.arenaReasoning },
         phases: {
           safety: {
             outcomes: { ...this.arenaPhaseOutcomes.safety },
@@ -1490,6 +1600,22 @@ export class HonoRuntimeTelemetry implements
   }
 
   private resetIntervalCounters(): void {
+    this.hostedReadiness.arrivals = 0;
+    Object.assign(this.hostedReadiness.outcomes, { ready: 0, notReady: 0 });
+    Object.assign(this.hostedReadiness.latencyBuckets, {
+      '0-49ms': 0,
+      '50-199ms': 0,
+      '200-999ms': 0,
+      '1000-2999ms': 0,
+      '3000ms+': 0,
+    });
+    Object.assign(this.hostedReadiness.dependencies.redisReady, { true: 0, false: 0 });
+    Object.assign(this.hostedReadiness.dependencies.d1Ready, { true: 0, false: 0 });
+    Object.assign(this.hostedReadiness.dependencies.d1Transport, {
+      gateway: 0,
+      'cloudflare-api': 0,
+      none: 0,
+    });
     this.aiAttemptsStarted = 0;
     this.aiAttemptsCompleted = 0;
     Object.assign(this.aiOutcomes, { success: 0, error: 0, aborted: 0, timeout: 0 });
@@ -1545,6 +1671,7 @@ export class HonoRuntimeTelemetry implements
       arenaGenerate: 0,
       generateBattleStory: 0,
       arenaSessionGenerateNext: 0,
+      arenaRepairCombatantMeta: 0,
     });
     Object.assign(this.arenaCompanionByPlacement, { honoPrimary: 0, nextDr: 0 });
     Object.assign(this.arenaCompanionOutcomes, {
@@ -1566,6 +1693,7 @@ export class HonoRuntimeTelemetry implements
     });
     this.arenaResumeLatency.reset();
     Object.assign(this.arenaReplay, { events: 0, bytes: 0, snapshotBootstraps: 0 });
+    Object.assign(this.arenaReasoning, { done: 0, unavailable: 0, eventCount: 0, chars: 0 });
     this.arenaProviderStarted = 0;
     Object.assign(this.arenaProviderOutcomes, { success: 0, failure: 0, cancelled: 0 });
     this.arenaProviderDuration.reset();

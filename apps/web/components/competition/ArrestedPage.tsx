@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useClientRouteAdapter } from '@/lib/client-route-adapter';
+import { downloadBlob } from '@/lib/client/blobUrl';
 import { loadArrestedBackup, clearArrestedBackup, type ArrestedBackupPackage, type ArrestedBackupItem } from '@/lib/arrested-backup';
 
 export function ArrestedPage() {
@@ -134,14 +135,7 @@ export function ArrestedPage() {
     const downloadItem = (item: ArrestedBackupItem) => {
         if (typeof window === 'undefined') return;
         const blob = new Blob([item.content], { type: item.mimeType });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = item.filename;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
+        downloadBlob(blob, item.filename);
     };
 
     const handleDownloadSelected = () => {

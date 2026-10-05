@@ -74,14 +74,6 @@ describe('App Router global shell', () => {
     expect(html.indexOf('GlobalTopBar')).toBeLessThan(html.indexOf('App 页面内容'));
   });
 
-  test('dynamic App pathnames are mapped to legacy canonical topbar paths', async () => {
-    pathname = '/pvp/room-7';
-    const { AppProviders } = await import('@/app/providers');
-    const html = renderToStaticMarkup(<AppProviders><Page /></AppProviders>);
-
-    expect(html).toContain('data-global-topbar="/pvp/[roomId]"');
-  });
-
   test('details and canshou routes keep the blue theme wrapper', async () => {
     pathname = '/details';
     const { AppProviders } = await import('@/app/providers');

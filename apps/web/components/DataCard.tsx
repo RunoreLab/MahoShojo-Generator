@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { Download, Heart, Share, Info, Ban, AlertTriangle, Clock, XCircle, Star, BadgeCheck } from 'lucide-react';
+import { Download, Heart, Share, Info, Ban, AlertTriangle, Clock, XCircle, Star, BadgeCheck, Trash2, HardDrive } from 'lucide-react';
 import { isCardLiked, addLikedCard } from '@/lib/localStorage';
 import { getDataCardStatus } from '@/lib/data-card-status';
 import { TechBadge } from '@/components/ranking/TechBadge';
@@ -46,6 +46,16 @@ interface DataCardProps {
   pending?: boolean;
   onReplace?: () => void;
   authorBadges?: BadgeDefinition[];
+  /**
+   * 数据卡所在的数据源。`local` 表示这条记录属于用户本机的本地库：
+   * 线上语义（点赞/收藏/分享/审核状态）在这里一律不存在，动作集换成删除/下载/详情。
+   */
+  storageLocation?: 'cloud' | 'local';
+  /** 仅本地库卡片：删除本地库记录。 */
+  onRemoveFromLibrary?: () => void;
+  removePending?: boolean;
+  /** 仅本地库卡片：来源说明（来自本地文件 / 线上副本 / 本机生成）。 */
+  localLibraryOriginHint?: string | null;
 }
 
 const typeMap = {
@@ -103,6 +113,10 @@ export default function DataCard({
   pending = false,
   onReplace,
   authorBadges,
+  storageLocation = 'cloud',
+  onRemoveFromLibrary,
+  removePending = false,
+  localLibraryOriginHint,
 }: DataCardProps) {
   const [shareStatus, setShareStatus] = useState<'idle' | 'copied'>('idle');
   const [liked, setLiked] = useState(false);
@@ -110,6 +124,7 @@ export default function DataCard({
   const [currentLikeCount, setCurrentLikeCount] = useState(likeCount);
   const [favoriting, setFavoriting] = useState(false);
   const cardStatus = getDataCardStatus({ is_public: isPublic });
+  const isLocalLibraryCard = storageLocation === 'local';
   const canDownload = Boolean(onDownload);
   const resolvedName = name?.trim() ? name : '未命名';
   const { display: displayName, full: fullName } = buildTitleDisplay(resolvedName);
@@ -308,16 +323,23 @@ export default function DataCard({
                 未通过
               </Link>
             )}
-            <span className={`text-xs px-2 py-1 rounded flex items-center gap-1 ${
-              cardStatus.status === 'banned' 
-                ? 'bg-red-100 text-red-700 border border-red-200' 
-                : cardStatus.status === 'public' 
-                ? 'bg-green-100 text-green-700' 
-                : 'bg-gray-100 text-gray-700'
-            }`}>
-              {cardStatus.status === 'banned' && <Ban className="w-3 h-3" />}
-              {cardStatus.label}
-            </span>
+            {isLocalLibraryCard ? (
+              <span className="text-xs px-2 py-1 rounded flex items-center gap-1 bg-slate-100 text-slate-700 border border-slate-200">
+                <HardDrive className="w-3 h-3" />
+                本地库
+              </span>
+            ) : (
+              <span className={`text-xs px-2 py-1 rounded flex items-center gap-1 ${
+                cardStatus.status === 'banned'
+                  ? 'bg-red-100 text-red-700 border border-red-200'
+                  : cardStatus.status === 'public'
+                  ? 'bg-green-100 text-green-700'
+                  : 'bg-gray-100 text-gray-700'
+              }`}>
+                {cardStatus.status === 'banned' && <Ban className="w-3 h-3" />}
+                {cardStatus.label}
+              </span>
+            )}
             {type === 'scenario' && (
               <span className="text-xs px-2 py-1 bg-purple-100 text-purple-700 rounded">
                 情景
@@ -385,7 +407,11 @@ export default function DataCard({
       {/* 底部区域 */}
       <div className="mt-auto flex flex-col gap-2">
         {/* 作者信息现在是单独一行，避免与按钮竞争空间 */}
-        {author && (
+        {isLocalLibraryCard ? (
+          <p className="text-xs leading-[18px] text-gray-500 truncate" title={localLibraryOriginHint ?? undefined}>
+            {localLibraryOriginHint ?? '仅保存在本机，不会上传'}
+          </p>
+        ) : author ? (
           <div className="data-card-author-row flex flex-wrap items-center gap-x-1 gap-y-1 min-w-0 max-w-full overflow-hidden">
             {onAuthorClick ? (
               <button
@@ -411,10 +437,63 @@ export default function DataCard({
               </span>
             )}
           </div>
-        )}
+        ) : null}
 
         {/* 操作按钮行 */}
         <div className="flex flex-wrap gap-3 text-sm items-center">
+          {isLocalLibraryCard ? (
+            <>
+              {/* 本地库卡片的删除入口。删除是不可逆的本地操作，必须与"取消选择"区分开。 */}
+              {onRemoveFromLibrary ? (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onRemoveFromLibrary();
+                  }}
+                  className={`flex items-center gap-1 transition-colors ${
+                    removePending ? 'text-gray-400 cursor-not-allowed' : 'text-gray-500 hover:text-red-500'
+                  }`}
+                  disabled={removePending}
+                  title="从本机本地库删除"
+                  aria-label="从本地库删除"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  <span className="text-xs">删除</span>
+                </button>
+              ) : null}
+
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDownload?.();
+                }}
+                className={`flex items-center gap-1 transition-colors ${
+                  canDownload ? 'text-gray-500 hover:text-blue-500' : 'text-gray-400 cursor-not-allowed'
+                }`}
+                disabled={!canDownload}
+                title={canDownload ? '导出这张本地数据卡' : '暂不支持导出'}
+                aria-label="导出本地数据卡"
+              >
+                <Download className="w-4 h-4" />
+                <span className="text-xs">导出</span>
+              </button>
+
+              {onViewDetails ? (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onViewDetails();
+                  }}
+                  className="flex items-center gap-1 text-gray-500 hover:text-purple-500 transition-colors"
+                  title="查看详细设定"
+                >
+                  <Info className="w-4 h-4" />
+                  <span className="text-xs">详情</span>
+                </button>
+              ) : null}
+            </>
+          ) : (
+            <>
           <button
             onClick={handleFavoriteToggle}
             className={`flex items-center gap-1 transition-colors ${
@@ -453,7 +532,7 @@ export default function DataCard({
             disabled={cardStatus.status !== 'public' || liked || liking}
             title={
               cardStatus.status === 'banned' ? '封禁数据卡无法点赞' :
-              cardStatus.status === 'private' ? '私有数据卡无法点赞' : 
+              cardStatus.status === 'private' ? '私有数据卡无法点赞' :
               liked ? '已点赞' : '点赞'
             }
           >
@@ -512,17 +591,21 @@ export default function DataCard({
           </button>
 
           {/* 详情按钮 */}
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onViewDetails?.();
-            }}
-            className="flex items-center gap-1 text-gray-500 hover:text-purple-500 transition-colors"
-            title="查看详细设定"
-          >
-            <Info className="w-4 h-4" />
-            <span className="text-xs">详情</span>
-          </button>
+          {onViewDetails ? (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onViewDetails();
+              }}
+              className="flex items-center gap-1 text-gray-500 hover:text-purple-500 transition-colors"
+              title="查看详细设定"
+            >
+              <Info className="w-4 h-4" />
+              <span className="text-xs">详情</span>
+            </button>
+          ) : null}
+            </>
+          )}
         </div>
       </div>
 

@@ -3,10 +3,10 @@ import { describe, expect, it } from 'vitest';
 import { buildBattleReportGenerationsWhereClause } from '@/lib/database/battle-report-generations';
 
 describe('battle report generations list filters', () => {
-  it('默认仅按 user_id 查询并按 started_at 倒序', () => {
+  it('默认通过 user_id 索引合并 owner/participant 并按 started_at 倒序', () => {
     const built = buildBattleReportGenerationsWhereClause(42);
-    expect(built.whereSql).toBe('user_id = ?');
-    expect(built.params).toEqual([42]);
+    expect(built.whereSql).toBe('id IN (SELECT id FROM battle_report_generations WHERE user_id = ? UNION SELECT generation_id FROM battle_report_generation_participants WHERE user_id = ?)');
+    expect(built.params).toEqual([42, 42]);
     expect(built.orderBySql).toBe('started_at DESC');
   });
 
@@ -25,8 +25,9 @@ describe('battle report generations list filters', () => {
     expect(built.whereSql).toContain('generation_mode = ?');
     expect(built.whereSql).toContain('mode = ?');
     expect(built.whereSql).toContain('pvp_match_id IS NOT NULL');
+    expect(built.whereSql).toContain('NOT EXISTS (SELECT 1 FROM battle_report_generation_participants participant WHERE participant.generation_id = battle_report_generations.id)');
     expect(built.whereSql).toContain('(headline LIKE ? OR scenario_title LIKE ?)');
-    expect(built.params).toEqual([7, 'completed', 'stream', 'classic', '%小圆%', '%小圆%']);
+    expect(built.params).toEqual([7, 7, 'completed', 'stream', 'classic', '%小圆%', '%小圆%']);
     expect(built.orderBySql).toBe('started_at ASC');
   });
 
@@ -38,13 +39,13 @@ describe('battle report generations list filters', () => {
       titleQuery: long,
     });
 
-    expect(built.whereSql).toBe('user_id = ? AND (headline LIKE ? OR scenario_title LIKE ?)');
+    expect(built.whereSql).toBe('id IN (SELECT id FROM battle_report_generations WHERE user_id = ? UNION SELECT generation_id FROM battle_report_generation_participants WHERE user_id = ?) AND (headline LIKE ? OR scenario_title LIKE ?)');
     expect(built.params[0]).toBe(1);
 
-    const like = built.params[1] as string;
+    expect(built.params[1]).toBe(1);
+    const like = built.params[2] as string;
     expect(like.startsWith('%')).toBe(true);
     expect(like.endsWith('%')).toBe(true);
     expect(like.length).toBe(122);
   });
 });
-

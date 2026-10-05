@@ -56,6 +56,7 @@ describe('stream timeout', () => {
   });
 
   test('外部活动会延长 idle timeout，直到读取到正文 chunk', async () => {
+    vi.useFakeTimers();
     let lastActivityAtMs: number | null = null;
     const timers: Array<ReturnType<typeof setTimeout>> = [];
     const stream = new ReadableStream<string>({
@@ -84,13 +85,16 @@ describe('stream timeout', () => {
     });
 
     try {
-      const first = await readWithTimeout(reader);
+      const pendingRead = readWithTimeout(reader);
+      await vi.advanceTimersByTimeAsync(110);
+      const first = await pendingRead;
       expect(first.done).toBe(false);
       expect(first.value).toBe('ok-after-thinking');
     } finally {
       for (const timer of timers) {
         clearTimeout(timer);
       }
+      vi.useRealTimers();
     }
   });
 

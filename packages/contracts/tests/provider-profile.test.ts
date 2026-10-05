@@ -1,182 +1,139 @@
-import {
-  DIRECT_PROVIDER_PROFILE_VERSION,
-  DirectProviderAdapterSchema,
-  DirectProviderProfileV1Schema,
-  MAX_DIRECT_PROVIDER_PROFILE_BYTES,
-  MAX_DIRECT_PROVIDER_PROFILE_HEADERS,
-  type DirectProviderProfileV1,
-} from '@mahoshojo/contracts/provider-profile';
-import {
-  DirectProviderProfileV1Schema as RootDirectProviderProfileV1Schema,
-  type DirectProviderProfileV1 as RootDirectProviderProfileV1,
-} from '@mahoshojo/contracts';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 
-const validProfile: DirectProviderProfileV1 = {
+import { describe, expect, it } from 'vitest';
+
+import {
+  DirectProviderExecutionProfileSchema,
+  DirectProviderProfileV1Schema,
+  toDirectProviderExecutionProfile,
+  type DirectProviderProfileV1,
+} from '../src/provider-profile';
+
+interface ExecutionProfileFixture {
+  valid: unknown[];
+  invalid: { $case: string; profile: unknown }[];
+}
+
+const fixture: ExecutionProfileFixture = JSON.parse(
+  readFileSync(
+    path.join(import.meta.dirname, '..', 'fixtures', 'provider-execution-profiles.json'),
+    'utf8',
+  ),
+) as ExecutionProfileFixture;
+
+const baseProfile: DirectProviderProfileV1 = {
   version: 1,
-  id: 'profile-local',
-  name: 'Local model',
+  id: 'profile-fixture',
+  name: 'Fixture',
   adapter: 'openai-compatible',
-  baseUrl: 'http://127.0.0.1:11434/v1',
-  modelId: 'qwen3:8b',
-  apiKeyRef: 'vault:profile-local:api-key',
-  secretHeaderRefs: {
-    Authorization: 'vault:profile-local:authorization',
-  },
-  publicHeaders: {
-    'X-Client-Name': 'MahoShojo',
-  },
-  generationDefaults: {
-    temperature: 0.5,
-    thinking: { mode: 'enabled' },
-  },
-  transport: {
-    allowPublicHttp: false,
-    maxRedirects: 3,
-  },
-  createdAt: '2026-08-23T00:00:00.000Z',
-  updatedAt: '2026-08-23T00:01:00.000Z',
+  baseUrl: 'https://api.example.com/v1',
+  modelId: 'model-1',
+  createdAt: '2026-09-30T00:00:00.000Z',
+  updatedAt: '2026-09-30T00:00:00.000Z',
 };
 
-describe('Direct Provider Profile v1 contract', () => {
-  it('accepts the versioned non-secret profile and re-exports it', () => {
-    expect(DIRECT_PROVIDER_PROFILE_VERSION).toBe(1);
-    expect(DirectProviderAdapterSchema.options).toEqual([
-      'openai-compatible',
-      'anthropic',
-      'google',
-    ]);
-    expect(DirectProviderProfileV1Schema.parse(validProfile)).toEqual(validProfile);
-    expect(RootDirectProviderProfileV1Schema).toBe(DirectProviderProfileV1Schema);
-
-    const rootProfile: RootDirectProviderProfileV1 = validProfile;
-    expect(rootProfile.version).toBe(1);
-  });
-
-  it('keeps credentials as vault references and rejects plaintext secret fields', () => {
-    expect(DirectProviderProfileV1Schema.parse(validProfile)).toMatchObject({
-      apiKeyRef: 'vault:profile-local:api-key',
-      secretHeaderRefs: {
-        Authorization: 'vault:profile-local:authorization',
-      },
+describe('DirectProviderExecutionProfile', () => {
+  it('projects only the fields the native executor must resolve itself', () => {
+    const projection = toDirectProviderExecutionProfile({
+      ...baseProfile,
+      apiKeyRef: 'provider:profile-fixture:api-key',
+      generationDefaults: { temperature: 0.4 },
+      publicHeaders: { 'x-client': 'mahoshojo-desktop' },
+      transport: { maxRedirects: 1 },
     });
 
-    for (const field of ['apiKey', 'secretHeaders', 'credentials', 'cookie']) {
-      expect(DirectProviderProfileV1Schema.safeParse({
-        ...validProfile,
-        [field]: 'plaintext-secret',
-      }).success).toBe(false);
+    expect(Object.keys(projection).sort()).toEqual([
+      'adapter',
+      'apiKeyRef',
+      'baseUrl',
+      'id',
+      'modelId',
+      'name',
+      'publicHeaders',
+      'transport',
+    ]);
+    expect(projection).not.toHaveProperty('generationDefaults');
+    expect(projection).not.toHaveProperty('createdAt');
+    expect(projection).not.toHaveProperty('version');
+  });
+
+  it('never carries a plaintext secret into the projection', () => {
+    const projection = toDirectProviderExecutionProfile({
+      ...baseProfile,
+      secretHeaderRefs: { 'x-tenant-token': 'provider:profile-fixture:x-tenant-token' },
+      publicHeaders: { 'x-client': 'mahoshojo-desktop' },
+    });
+
+    expect(projection.secretHeaderRefs).toEqual({
+      'x-tenant-token': 'provider:profile-fixture:x-tenant-token',
+    });
+    expect(projection.apiKeyRef).toBeUndefined();
+    expect(JSON.stringify(projection)).not.toMatch(/Bearer|sk-/u);
+  });
+
+  it('accepts every profile the shared fixture marks valid', () => {
+    expect(fixture.valid.length).toBeGreaterThan(0);
+    for (const profile of fixture.valid) {
+      const parsed = DirectProviderExecutionProfileSchema.safeParse(profile);
+      expect(parsed.success, JSON.stringify(profile)).toBe(true);
     }
   });
 
-  it('allows only HTTP(S) endpoints and bounded redirect configuration', () => {
-    for (const baseUrl of [
-      'https://provider.example/v1',
-      'http://localhost:11434/v1',
-      'http://192.168.1.10:1234/v1',
-    ]) {
-      expect(DirectProviderProfileV1Schema.safeParse({ ...validProfile, baseUrl }).success).toBe(true);
-    }
-
-    for (const baseUrl of [
-      'file:///tmp/model',
-      'data:text/plain,secret',
-      'javascript:alert(1)',
-      'not a url',
-    ]) {
-      expect(DirectProviderProfileV1Schema.safeParse({ ...validProfile, baseUrl }).success).toBe(false);
-    }
-
-    expect(DirectProviderProfileV1Schema.safeParse({
-      ...validProfile,
-      transport: { maxRedirects: 4 },
-    }).success).toBe(false);
-    expect(DirectProviderProfileV1Schema.safeParse({
-      ...validProfile,
-      transport: { maxRedirects: -1 },
-    }).success).toBe(false);
-  });
-
-  it('separates known secret headers and blocks transport-controlled headers', () => {
-    for (const headerName of ['Authorization', 'Cookie', 'Proxy-Authorization', 'X-Api-Key']) {
-      expect(DirectProviderProfileV1Schema.safeParse({
-        ...validProfile,
-        publicHeaders: { [headerName]: 'plaintext-secret' },
-      }).success).toBe(false);
-    }
-
-    for (const headerName of ['Host', 'Content-Length', 'Connection']) {
-      expect(DirectProviderProfileV1Schema.safeParse({
-        ...validProfile,
-        publicHeaders: { [headerName]: 'value' },
-      }).success).toBe(false);
-      expect(DirectProviderProfileV1Schema.safeParse({
-        ...validProfile,
-        secretHeaderRefs: { [headerName]: 'vault:ref' },
-      }).success).toBe(false);
-    }
-
-    for (const value of ['safe\r\nX-Injected: yes', 'safe\nX-Injected: yes', 'safe\u0000value']) {
-      expect(DirectProviderProfileV1Schema.safeParse({
-        ...validProfile,
-        publicHeaders: { 'X-Public': value },
-      }).success).toBe(false);
+  it('rejects every profile the shared fixture marks invalid', () => {
+    expect(fixture.invalid.length).toBeGreaterThan(0);
+    for (const { $case, profile } of fixture.invalid) {
+      const parsed = DirectProviderExecutionProfileSchema.safeParse(profile);
+      expect(parsed.success, `${$case} must be rejected`).toBe(false);
     }
   });
 
-  it('rejects case-insensitive duplicate header names within and across maps', () => {
-    expect(DirectProviderProfileV1Schema.safeParse({
-      ...validProfile,
-      publicHeaders: {
-        'X-Client-Name': 'MahoShojo',
-        'x-client-name': 'MahoShojo Desktop',
-      },
-    }).success).toBe(false);
+  it('re-applies the cross-field rules instead of relying on pick() inheritance', () => {
+    // Zod 4 的 .pick() 不携带对象级检查，所以投影必须显式挂同一份规则；
+    // 同时投影是 strict 的，Rust 不解析的字段不得借此通道进入执行路径。
+    const overlapping = {
+      id: 'profile-fixture',
+      name: 'Fixture',
+      adapter: 'openai-compatible',
+      baseUrl: 'https://api.example.com/v1',
+      modelId: 'model-1',
+      secretHeaderRefs: { 'X-Client': 'provider:profile-fixture:x-client' },
+      publicHeaders: { 'x-client': 'value' },
+    };
+    expect(DirectProviderExecutionProfileSchema.safeParse(overlapping).success).toBe(false);
+    expect(DirectProviderProfileV1Schema.safeParse({ ...baseProfile, ...overlapping }).success).toBe(
+      false,
+    );
 
-    expect(DirectProviderProfileV1Schema.safeParse({
-      ...validProfile,
-      secretHeaderRefs: {
-        'X-Custom-Token': 'vault:profile-local:custom-token',
-        'x-custom-token': 'vault:profile-local:alternate-custom-token',
-      },
-    }).success).toBe(false);
-
-    expect(DirectProviderProfileV1Schema.safeParse({
-      ...validProfile,
-      publicHeaders: {
-        'X-Custom-Token': 'public-value',
-      },
-      secretHeaderRefs: {
-        'x-custom-token': 'vault:profile-local:custom-token',
-      },
-    }).success).toBe(false);
+    expect(
+      DirectProviderExecutionProfileSchema.safeParse({
+        ...toDirectProviderExecutionProfile(baseProfile),
+        generationDefaults: { temperature: 0.4 },
+      }).success,
+    ).toBe(false);
   });
 
-  it('rejects invalid timestamps, blank identifiers, and non-JSON defaults', () => {
-    expect(DirectProviderProfileV1Schema.safeParse({
-      ...validProfile,
-      updatedAt: 'yesterday',
-    }).success).toBe(false);
-    expect(DirectProviderProfileV1Schema.safeParse({
-      ...validProfile,
-      modelId: '   ',
-    }).success).toBe(false);
-    expect(DirectProviderProfileV1Schema.safeParse({
-      ...validProfile,
-      generationDefaults: { invalid: new Date() },
-    }).success).toBe(false);
-  });
+  it('requires explicit confirmation for cleartext HTTP to a non-loopback host', () => {
+    // transport.allowPublicHttp 在此之前只是一个从未被强制执行的字段。
+    for (const host of ['api.example.com', '10.0.0.5', 'mahoshojo.colanns.me']) {
+      const insecure = { ...baseProfile, baseUrl: `http://${host}/v1` };
+      expect(DirectProviderProfileV1Schema.safeParse(insecure).success, host).toBe(false);
+      expect(
+        DirectProviderProfileV1Schema.safeParse({
+          ...insecure,
+          transport: { allowPublicHttp: true },
+        }).success,
+        host,
+      ).toBe(true);
+    }
 
-  it('bounds aggregate profile and header collection sizes', () => {
-    expect(DirectProviderProfileV1Schema.safeParse({
-      ...validProfile,
-      publicHeaders: Object.fromEntries(
-        Array.from({ length: MAX_DIRECT_PROVIDER_PROFILE_HEADERS + 1 }, (_, index) => [`X-Header-${index}`, 'value']),
-      ),
-    }).success).toBe(false);
-
-    expect(DirectProviderProfileV1Schema.safeParse({
-      ...validProfile,
-      generationDefaults: { prompt: 'x'.repeat(MAX_DIRECT_PROVIDER_PROFILE_BYTES) },
-    }).success).toBe(false);
+    // loopback 明文 HTTP 是本地推理服务的正常形态，不需要额外确认。
+    for (const host of ['127.0.0.1', '127.0.0.53', 'localhost', '[::1]']) {
+      expect(
+        DirectProviderProfileV1Schema.safeParse({ ...baseProfile, baseUrl: `http://${host}:11434/v1` })
+          .success,
+        host,
+      ).toBe(true);
+    }
   });
 });

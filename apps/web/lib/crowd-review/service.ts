@@ -1,11 +1,14 @@
 import type { AppDrizzleDb } from '@/lib/db/drizzle';
+import { crowdReviewCaseDecision } from '@mahoshojo/hosted-runtime/admin/moderation/transitions';
+import { applyAutomaticCrowdResolution } from '@mahoshojo/hosted-runtime/admin/moderation/notifications';
+import type { AdminDatabase } from '@mahoshojo/hosted-runtime/admin/database';
 import { countUserBadgesByBadgeId } from '@/lib/db/repositories/badges';
-import { enforceDataCardModerationOutcome as enforceDataCardModerationOutcomeRow } from '@/lib/db/repositories/data-cards-core';
 import {
   createCrowdReviewAssignment as createCrowdReviewAssignmentRow,
   createCrowdReviewRound as createCrowdReviewRoundRow,
   finalizeAssignment as finalizeAssignmentRow,
   getActiveAssignmentByInspector as getActiveAssignmentByInspectorRow,
+  getCrowdReviewPendingFlags,
   getAssignmentByIdForInspector as getAssignmentByIdForInspectorRow,
   getInspectorState as getInspectorStateRow,
   getLatestCompletedAssignmentByInspector as getLatestCompletedAssignmentByInspectorRow,
@@ -84,6 +87,7 @@ type ServiceAssignmentRow = CrowdReviewAssignmentRow & {
 };
 
 type CrowdReviewServiceRepo = {
+  getPendingFlags: typeof getCrowdReviewPendingFlags;
   getInspectorState: (db: AppDrizzleDb, userId: number) => Promise<CrowdReviewInspectorRow | null>;
   getActiveAssignmentByInspector: (db: AppDrizzleDb, userId: number) => Promise<ServiceAssignmentRow | null>;
   getLatestCompletedAssignmentByInspector: (
@@ -134,6 +138,7 @@ type CrowdReviewServiceRepo = {
       extensionCount?: number;
       resultCode?: string | null;
       resultSummaryJson?: string;
+      expectedUpdatedAt?: string;
       now: string;
     },
   ) => Promise<boolean>;
@@ -141,6 +146,7 @@ type CrowdReviewServiceRepo = {
     db: AppDrizzleDb,
     input: {
       reportCaseId: string;
+      roundId?: string;
       status: ReportCaseStatus;
       resolutionCode: ReportResolutionCode | null;
       closedAt: string | null;
@@ -648,6 +654,7 @@ const hydrateAssignmentForRuntime = async (
 };
 
 const createRuntimeRepo = (): CrowdReviewServiceRepo => ({
+  getPendingFlags: getCrowdReviewPendingFlags,
   getInspectorState: (db, userId) => getInspectorStateRow(db, userId),
   getActiveAssignmentByInspector: async (db, userId) =>
     hydrateAssignmentForRuntime(db, await getActiveAssignmentByInspectorRow(db, userId)),
@@ -689,27 +696,15 @@ const createRuntimeRepo = (): CrowdReviewServiceRepo => ({
   updateAssignmentPostVoteSummary: (db, input) => updateAssignmentPostVoteSummaryRow(db, input),
   updateRound: (db, input) => updateRoundRow(db, input),
   updateReportCaseResolution: async (db, input) => {
-    const rows = await db
-      .update(reportCases)
-      .set({
-        status: input.status,
-        resolutionCode: input.resolutionCode,
-        closedAt: input.closedAt,
-        updatedAt: input.now,
-      })
-      .where(eq(reportCases.id, input.reportCaseId))
-      .returning({ id: reportCases.id });
-
-    return rows.length > 0;
+    const native = (db as AppDrizzleDb & { $client: AdminDatabase }).$client;
+    if (!native || !input.roundId) throw new CrowdReviewServiceUnavailableError('众查事务存储不可用');
+    return applyAutomaticCrowdResolution(native, { ...input, roundId: input.roundId });
   },
   listCrowdReviewHistoryByInspector: (db, userId, limit) => listCrowdReviewHistoryByInspectorRows(db, userId, limit),
-  enforceTargetDataCardModerationOutcome: async (db, input) =>
-    enforceDataCardModerationOutcomeRow(db, {
-      cardId: input.cardId,
-      reviewStatus: input.reviewStatus,
-      isPublic: input.isPublic,
-      now: input.now,
-    }),
+  enforceTargetDataCardModerationOutcome: async (db, input) => ({
+    found: Boolean(await db.query.dataCards.findFirst({ where: eq(dataCards.id, input.cardId), columns: { id: true } })),
+    changed: false,
+  }),
   advanceExpiredState: async (db, now) => {
     await db
       .update(crowdReviewAssignments)
@@ -829,21 +824,24 @@ const createCrowdReviewService = (deps: CrowdReviewServiceDeps) => {
     }
 
     if (summaryPlan.nextRoundStatus === round.status) {
-      await deps.repo.updateRound(db, {
+      const changed = await deps.repo.updateRound(db, {
         roundId: round.id,
+        expectedUpdatedAt: round.updatedAt,
         status: round.status,
         resultCode: round.resultCode,
         resultSummaryJson: JSON.stringify(summaryPlan.summary),
         now,
       });
+      if (!changed) return summaryPlan.summary;
       await syncVotedAssignmentSummaries(db, assignments, summaryPlan.summary, now, deps.repo.updateAssignmentPostVoteSummary);
       return summaryPlan.summary;
     }
 
     if (summaryPlan.nextRoundStatus === 'waiting_more_votes') {
       const waitingSummaryJson = JSON.stringify(summaryPlan.summary);
-      await deps.repo.updateRound(db, {
+      const changed = await deps.repo.updateRound(db, {
         roundId: round.id,
+        expectedUpdatedAt: round.updatedAt,
         status: summaryPlan.nextRoundStatus,
         deadlineAt: summaryPlan.nextDeadlineAt,
         extensionCount: summaryPlan.nextExtensionCount,
@@ -851,20 +849,24 @@ const createCrowdReviewService = (deps: CrowdReviewServiceDeps) => {
         resultSummaryJson: waitingSummaryJson,
         now,
       });
+      if (!changed) return summaryPlan.summary;
       await syncVotedAssignmentSummaries(db, assignments, summaryPlan.summary, now, deps.repo.updateAssignmentPostVoteSummary);
       return summaryPlan.summary;
     }
 
     if (summaryPlan.nextRoundStatus === 'escalated') {
-      await deps.repo.updateRound(db, {
+      const changed = await deps.repo.updateRound(db, {
         roundId: round.id,
+        expectedUpdatedAt: round.updatedAt,
         status: summaryPlan.nextRoundStatus,
         resultCode: summaryPlan.nextResultCode,
         resultSummaryJson: JSON.stringify(summaryPlan.summary),
         now,
       });
-      await applyCrowdReviewRoundResultToReportCase({
+      if (!changed) return summaryPlan.summary;
+      const applied = await applyCrowdReviewRoundResultToReportCase({
         db,
+        roundId: round.id,
         reportCaseId: round.reportCaseId,
         roundResult: 'escalated',
         now,
@@ -872,19 +874,23 @@ const createCrowdReviewService = (deps: CrowdReviewServiceDeps) => {
         notifyReportCaseResolutionIfNeeded: deps.notifyReportCaseResolutionIfNeeded,
         skipNotification: true,
       });
+      if (!applied) return summaryPlan.summary;
       await syncFinalizedRoundAssignments(db, assignments, summaryPlan.summary, now);
       return summaryPlan.summary;
     }
 
-    await deps.repo.updateRound(db, {
+    const changed = await deps.repo.updateRound(db, {
       roundId: round.id,
+      expectedUpdatedAt: round.updatedAt,
       status: summaryPlan.nextRoundStatus,
       resultCode: summaryPlan.nextResultCode,
       resultSummaryJson: JSON.stringify(summaryPlan.summary),
       now,
     });
-    await applyCrowdReviewRoundResultToReportCase({
+    if (!changed) return summaryPlan.summary;
+    const applied = await applyCrowdReviewRoundResultToReportCase({
       db,
+      roundId: round.id,
       reportCaseId: round.reportCaseId,
       roundResult: summaryPlan.nextResultCode as 'violation' | 'no_violation',
       now,
@@ -892,6 +898,7 @@ const createCrowdReviewService = (deps: CrowdReviewServiceDeps) => {
       notifyReportCaseResolutionIfNeeded: deps.notifyReportCaseResolutionIfNeeded,
       skipNotification: true,
     });
+    if (!applied) return summaryPlan.summary;
     if (summaryPlan.nextResultCode === 'violation') {
       const targetEntityId =
         assignments.find((item) => typeof item.targetEntityId === 'string' && item.targetEntityId.length > 0)
@@ -974,8 +981,9 @@ const createCrowdReviewService = (deps: CrowdReviewServiceDeps) => {
     async getCrowdReviewSummary(input: {
       db: AppDrizzleDb | null;
       userId: number | null;
+      readOnly?: boolean;
     }): Promise<CrowdReviewSummaryDto> {
-      await advanceExpiredState(input.db);
+      if (!input.readOnly) await advanceExpiredState(input.db);
 
       const eligibility = await ensureEligibility(input.db, input.userId);
       if (!eligibility.eligible || input.userId == null) {
@@ -983,6 +991,15 @@ const createCrowdReviewService = (deps: CrowdReviewServiceDeps) => {
       }
 
       const db = requireDb(input.db);
+      if (input.readOnly) {
+        return {
+          eligible: true,
+          inspectorStatus: 'active',
+          statusReason: null,
+          ...await deps.repo.getPendingFlags(db, input.userId, deps.now()),
+          entryUrl: CROWD_REVIEW_ENTRY_URL,
+        };
+      }
       const activeAssignment = await deps.repo.getActiveAssignmentByInspector(db, input.userId);
       const assignableCase =
         activeAssignment == null
@@ -1276,48 +1293,23 @@ const createCrowdReviewService = (deps: CrowdReviewServiceDeps) => {
 export async function applyCrowdReviewRoundResultToReportCase(input: {
   db: AppDrizzleDb;
   reportCaseId: string;
+  roundId?: string;
   roundResult: 'violation' | 'no_violation' | 'tie' | 'escalated';
   now: string;
   updateReportCaseResolution: CrowdReviewServiceRepo['updateReportCaseResolution'];
   notifyReportCaseResolutionIfNeeded?: (input: { db: AppDrizzleDb | null; reportCaseId: string }) => Promise<boolean>;
   skipNotification?: boolean;
-}): Promise<void> {
-  if (input.roundResult === 'violation') {
-    await input.updateReportCaseResolution(input.db, {
-      reportCaseId: input.reportCaseId,
-      status: 'resolved',
-      resolutionCode: 'confirmed_violation',
-      closedAt: input.now,
-      now: input.now,
-    });
-    if (!input.skipNotification) {
-      await retryReportCaseResolutionNotification({
-        db: input.db,
-        reportCaseId: input.reportCaseId,
-        notify: input.notifyReportCaseResolutionIfNeeded,
-      });
-    }
-    return;
-  }
-
-  if (input.roundResult === 'no_violation') {
-    await input.updateReportCaseResolution(input.db, {
-      reportCaseId: input.reportCaseId,
-      status: 'dismissed',
-      resolutionCode: 'no_violation',
-      closedAt: input.now,
-      now: input.now,
-    });
-    return;
-  }
-
-  await input.updateReportCaseResolution(input.db, {
+}): Promise<boolean> {
+  const applied = await input.updateReportCaseResolution(input.db, {
     reportCaseId: input.reportCaseId,
-    status: 'under_review',
-    resolutionCode: null,
-    closedAt: null,
+    ...(input.roundId ? { roundId: input.roundId } : {}),
+    ...crowdReviewCaseDecision(input.roundResult, input.now),
     now: input.now,
   });
+  if (applied && input.roundResult === 'violation' && !input.skipNotification) {
+    await retryReportCaseResolutionNotification({ db: input.db, reportCaseId: input.reportCaseId, notify: input.notifyReportCaseResolutionIfNeeded });
+  }
+  return applied;
 }
 
 export function createCrowdReviewServiceForTests(
@@ -1336,6 +1328,7 @@ export function createCrowdReviewServiceForTests(
       }),
     hasInspectorBadge: deps.hasInspectorBadge ?? (async () => missing('hasInspectorBadge')),
     repo: {
+      getPendingFlags: deps.repo?.getPendingFlags ?? (async () => missing('getPendingFlags')),
       getInspectorState: deps.repo?.getInspectorState ?? (async () => missing('getInspectorState')),
       getActiveAssignmentByInspector:
         deps.repo?.getActiveAssignmentByInspector ?? (async () => missing('getActiveAssignmentByInspector')),
@@ -1383,6 +1376,7 @@ const defaultService = createCrowdReviewService({
 export async function getCrowdReviewSummary(input: {
   db: AppDrizzleDb | null;
   userId: number | null;
+  readOnly?: boolean;
 }): Promise<CrowdReviewSummaryDto> {
   return defaultService.getCrowdReviewSummary(input);
 }

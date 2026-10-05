@@ -2,7 +2,7 @@ import type {
   DataCardReportReferenceType,
   NormalizedReportReference,
 } from '@/lib/data-card-reports/types';
-import { getEncyclopediaEntry } from '@/lib/encyclopedia';
+import { getEncyclopediaEntry } from '@mahoshojo/ui-web/encyclopedia';
 import { normalizePublicDataCardReferenceId } from '@/lib/data-card-reports/public-reference-id';
 
 export const MAX_DATA_CARD_REPORT_REFERENCES = 5;

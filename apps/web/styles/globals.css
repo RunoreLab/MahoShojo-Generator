@@ -1,4 +1,7 @@
 @import "tailwindcss";
+@import "@mahoshojo/ui-web/styles.css";
+
+@custom-variant dark (&:where([data-color-mode='dark'], [data-color-mode='dark'] *));
 
 /* 使用CSS层来控制优先级，确保Tailwind类优先 */
 @layer base {
@@ -43,137 +46,16 @@
     @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-200;
     @apply disabled:cursor-not-allowed disabled:opacity-50;
   }
-}
 
-:root {
-  color-scheme: light;
-  --app-page-bg: linear-gradient(135deg, #ffffff 0%, #ffffff 25%, #ffe3f6 86%, #fecfef 100%);
-  --app-magic-bg: linear-gradient(135deg, #ffffff 0%, #ffffff 25%, #ffe3f6 86%, #fecfef 100%);
-  --app-magic-bg-white: linear-gradient(135deg, #ffffff 0%, #ffffff 25%, #ffe3f6 86%, #fecfef 100%);
-  --app-magic-bg-dark: linear-gradient(155deg, #0b1220 0%, #0b1220 42%, #241827 68%, #6f294d 88%, #d8578b 100%);
-  --app-text: #1f2937;
-  --app-text-muted: #4b5563;
-  --app-text-subtle: #6b7280;
-  --app-surface-strong: rgba(255, 255, 255, 0.98);
-  --app-surface: rgba(255, 255, 255, 0.95);
-  --app-surface-95: rgba(255, 255, 255, 0.95);
-  --app-surface-90: rgba(255, 255, 255, 0.9);
-  --app-surface-80: rgba(255, 255, 255, 0.8);
-  --app-surface-70: rgba(255, 255, 255, 0.7);
-  --app-surface-60: rgba(255, 255, 255, 0.6);
-  --app-surface-50: rgba(255, 255, 255, 0.5);
-  --app-surface-40: rgba(255, 255, 255, 0.4);
-  --app-border: rgba(255, 255, 255, 0.3);
-  --app-border-strong: rgba(229, 231, 235, 0.8);
-  --app-input-bg: rgba(255, 255, 255, 0.85);
-  --app-input-border: #e0e0e0;
-  --creator-panel-bg: rgba(255, 255, 255, 0.94);
-  --creator-panel-border: rgba(203, 213, 225, 0.9);
-  --creator-subpanel-bg: rgba(248, 250, 252, 0.92);
-  --creator-subpanel-border: rgba(203, 213, 225, 0.92);
-  --creator-subpanel-emphasis-bg: rgba(255, 255, 255, 0.97);
-  --creator-subpanel-muted-bg: rgba(241, 245, 249, 0.92);
-  --creator-input-bg: rgba(255, 255, 255, 0.98);
-  --creator-input-border: rgba(203, 213, 225, 0.95);
-  --app-card-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
-  --app-accent: #ff6b6b;
-  --app-accent-strong: #ee5a6f;
-  --app-accent-shadow: rgba(255, 107, 107, 0.3);
-  --app-focus-ring: rgba(255, 107, 107, 0.2);
-  --app-result-item-bg: rgba(255, 255, 255, 0.1);
-  --app-result-card-bg: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  --app-footer-link: #ff6b6b;
-  --app-footer-link-hover: #ee5a6f;
-  --global-topbar-height: 56px;
-  --global-topbar-z-index: 40;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root:not([data-color-mode]) {
-    color-scheme: dark;
-    --app-page-bg: linear-gradient(155deg, #0b1220 0%, #0b1220 42%, #241827 68%, #6f294d 88%, #d8578b 100%);
-    --app-magic-bg: linear-gradient(155deg, #0b1220 0%, #0b1220 42%, #241827 68%, #6f294d 88%, #d8578b 100%);
-    --app-magic-bg-white: linear-gradient(155deg, #0b1220 0%, #0b1220 42%, #241827 68%, #6f294d 88%, #d8578b 100%);
-    --app-magic-bg-dark: linear-gradient(155deg, #0b1220 0%, #0b1220 42%, #241827 68%, #6f294d 88%, #d8578b 100%);
-    --app-text: #e5e7eb;
-    --app-text-muted: #d7dde8;
-    --app-text-subtle: #a7b0c0;
-    --app-surface-strong: rgba(15, 23, 42, 0.98);
-    --app-surface: rgba(15, 23, 42, 0.92);
-    --app-surface-95: rgba(15, 23, 42, 0.95);
-    --app-surface-90: rgba(15, 23, 42, 0.9);
-    --app-surface-80: rgba(15, 23, 42, 0.82);
-    --app-surface-70: rgba(15, 23, 42, 0.7);
-    --app-surface-60: rgba(15, 23, 42, 0.6);
-    --app-surface-50: rgba(15, 23, 42, 0.5);
-    --app-surface-40: rgba(15, 23, 42, 0.4);
-    --app-border: rgba(148, 163, 184, 0.25);
-    --app-border-strong: rgba(148, 163, 184, 0.45);
-    --app-input-bg: rgba(15, 23, 42, 0.6);
-    --app-input-border: rgba(148, 163, 184, 0.35);
-    --creator-panel-bg: rgba(15, 23, 42, 0.92);
-    --creator-panel-border: rgba(148, 163, 184, 0.45);
-    --creator-subpanel-bg: rgba(30, 41, 59, 0.86);
-    --creator-subpanel-border: rgba(148, 163, 184, 0.32);
-    --creator-subpanel-emphasis-bg: rgba(51, 65, 85, 0.86);
-    --creator-subpanel-muted-bg: rgba(30, 41, 59, 0.72);
-    --creator-input-bg: rgba(15, 23, 42, 0.7);
-    --creator-input-border: rgba(148, 163, 184, 0.4);
-    --app-card-shadow: 0 20px 40px rgba(0, 0, 0, 0.45);
-    --app-accent: #fb7185;
-    --app-accent-strong: #f43f5e;
-    --app-accent-shadow: rgba(248, 113, 113, 0.45);
-    --app-focus-ring: rgba(248, 113, 113, 0.35);
-    --app-result-item-bg: rgba(255, 255, 255, 0.08);
-    --app-result-card-bg: linear-gradient(135deg, #111827 0%, #1f2937 100%);
-    --app-footer-link: #fda4af;
-    --app-footer-link-hover: #fb7185;
+  .animate-fade-in-down {
+    animation: fadeInDown 0.18s ease-out;
   }
-}
 
-:root[data-color-mode='light'] {
-  color-scheme: light;
-}
-
-:root[data-color-mode='dark'] {
-  color-scheme: dark;
-  --app-page-bg: linear-gradient(155deg, #0b1220 0%, #0b1220 42%, #241827 68%, #6f294d 88%, #d8578b 100%);
-  --app-magic-bg: linear-gradient(155deg, #0b1220 0%, #0b1220 42%, #241827 68%, #6f294d 88%, #d8578b 100%);
-  --app-magic-bg-white: linear-gradient(155deg, #0b1220 0%, #0b1220 42%, #241827 68%, #6f294d 88%, #d8578b 100%);
-  --app-magic-bg-dark: linear-gradient(155deg, #0b1220 0%, #0b1220 42%, #241827 68%, #6f294d 88%, #d8578b 100%);
-  --app-text: #e5e7eb;
-  --app-text-muted: #d7dde8;
-  --app-text-subtle: #a7b0c0;
-  --app-surface-strong: rgba(15, 23, 42, 0.98);
-  --app-surface: rgba(15, 23, 42, 0.92);
-  --app-surface-95: rgba(15, 23, 42, 0.95);
-  --app-surface-90: rgba(15, 23, 42, 0.9);
-  --app-surface-80: rgba(15, 23, 42, 0.82);
-  --app-surface-70: rgba(15, 23, 42, 0.7);
-  --app-surface-60: rgba(15, 23, 42, 0.6);
-  --app-surface-50: rgba(15, 23, 42, 0.5);
-  --app-surface-40: rgba(15, 23, 42, 0.4);
-  --app-border: rgba(148, 163, 184, 0.25);
-  --app-border-strong: rgba(148, 163, 184, 0.45);
-  --app-input-bg: rgba(15, 23, 42, 0.6);
-  --app-input-border: rgba(148, 163, 184, 0.35);
-  --creator-panel-bg: rgba(15, 23, 42, 0.92);
-  --creator-panel-border: rgba(148, 163, 184, 0.45);
-  --creator-subpanel-bg: rgba(30, 41, 59, 0.86);
-  --creator-subpanel-border: rgba(148, 163, 184, 0.32);
-  --creator-subpanel-emphasis-bg: rgba(51, 65, 85, 0.86);
-  --creator-subpanel-muted-bg: rgba(30, 41, 59, 0.72);
-  --creator-input-bg: rgba(15, 23, 42, 0.7);
-  --creator-input-border: rgba(148, 163, 184, 0.4);
-  --app-card-shadow: 0 20px 40px rgba(0, 0, 0, 0.45);
-  --app-accent: #fb7185;
-  --app-accent-strong: #f43f5e;
-  --app-accent-shadow: rgba(248, 113, 113, 0.45);
-  --app-focus-ring: rgba(248, 113, 113, 0.35);
-  --app-result-item-bg: rgba(255, 255, 255, 0.08);
-  --app-result-card-bg: linear-gradient(135deg, #111827 0%, #1f2937 100%);
-  --app-footer-link: #fda4af;
-  --app-footer-link-hover: #fb7185;
+  @media (prefers-reduced-motion: reduce) {
+    .animate-fade-in-down {
+      animation: none;
+    }
+  }
 }
 
 .battle-lite-shell {
@@ -503,6 +385,20 @@ body.announcement-visible {
   }
 }
 
+/* 披露式面板自上而下展开。BattleDataModal 的高级筛选面板一直在引用
+   `animate-fade-in-down`，但这条 keyframes 从未定义，展开实际是瞬间弹出。 */
+@keyframes fadeInDown {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 @layer components {
 
   /* 魔法少女主题样式 */
@@ -558,43 +454,12 @@ body.announcement-visible {
     color: var(--battle-lite-hero-pill-text, var(--app-accent-strong));
   }
 
-  .battle-lite-strong-text {
-    color: var(--app-text);
-  }
-
-  .battle-lite-muted-text {
-    color: var(--battle-lite-muted-text, var(--app-text-muted));
-  }
-
-  .battle-lite-subtle-text {
-    color: var(--battle-lite-subtle-text, var(--app-text-subtle));
-  }
-
-  .battle-lite-link {
-    color: var(--battle-lite-link, var(--app-accent-strong));
-  }
-
-  .battle-lite-link:hover {
-    color: var(--battle-lite-link-hover, var(--app-accent));
-    text-decoration: underline;
-  }
-
-  .battle-lite-info-box {
-    background: var(--battle-lite-info-bg, var(--app-surface-80));
-    border: 1px solid var(--battle-lite-info-border, var(--app-border-strong));
-    color: var(--battle-lite-info-text, var(--app-text));
-  }
-
-  .battle-lite-info-pill {
-    background: var(--battle-lite-info-pill-bg, var(--app-surface));
-    color: var(--battle-lite-info-pill-text, var(--app-text));
-  }
-
-  .battle-lite-accent-box {
-    background: var(--battle-lite-accent-bg, var(--app-surface-80));
-    border: 1px solid var(--battle-lite-accent-border, var(--app-border-strong));
-    color: var(--battle-lite-accent-text, var(--app-text));
-  }
+  /*
+   * `.battle-lite-strong-text` / `-muted-text` / `-subtle-text` / `-accent-box` /
+   * `-link` / `-info-box` / `-info-pill` / `-select-menu` / `-select-option(-active)`
+   * 与 `.input-group/-label/-field` 已上移至 `@mahoshojo/ui-web/styles.css`
+   *（D5.0b 共源选择器/连接面板底座）。
+   */
 
   .battle-lite-danger-button {
     border: 1px solid var(--battle-lite-danger-border, var(--app-border-strong));
@@ -622,25 +487,6 @@ body.announcement-visible {
     background: linear-gradient(45deg, var(--app-accent), var(--app-accent-strong));
     color: #fff;
     box-shadow: 0 10px 20px var(--app-accent-shadow);
-  }
-
-  .battle-lite-select-menu {
-    background: var(--battle-lite-modal-bg, var(--app-surface-strong));
-    border: 1px solid var(--battle-lite-subpanel-border, var(--app-border-strong));
-    box-shadow: var(--app-card-shadow);
-  }
-
-  .battle-lite-select-option {
-    color: var(--app-text);
-  }
-
-  .battle-lite-select-option:hover {
-    background: var(--battle-lite-subpanel-bg, var(--app-surface));
-  }
-
-  .battle-lite-select-option-active {
-    background: rgba(244, 114, 182, 0.14);
-    color: var(--app-text);
   }
 
   .battle-lite-modal-surface {
@@ -745,40 +591,6 @@ body.announcement-visible {
     }
   }
 
-
-
-  .input-group {
-    margin-bottom: 20px;
-  }
-
-  .input-label {
-    display: block;
-    margin-bottom: 8px;
-    font-weight: 600;
-    color: var(--app-text-muted);
-  }
-
-  .input-field {
-    width: 100%;
-    padding: 15px;
-    border: 2px solid var(--app-input-border);
-    color: var(--app-text);
-    border-radius: 12px;
-    font-size: 16px;
-    transition: all 0.3s ease;
-    background: var(--app-input-bg);
-  }
-
-  .input-field::placeholder {
-    color: var(--app-text-subtle);
-  }
-
-  .input-field:focus {
-    outline: none;
-    border-color: var(--app-accent);
-    box-shadow: 0 0 0 3px var(--app-focus-ring);
-  }
-
   .generate-button {
     width: 100%;
     padding: 15px;
@@ -802,6 +614,56 @@ body.announcement-visible {
     opacity: 0.6;
     cursor: not-allowed;
     transform: none;
+  }
+
+  .arena-cta-button {
+    width: 100%;
+    padding: 15px;
+    color: white;
+    border: none;
+    border-radius: 12px;
+    font-size: 18px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    margin-bottom: 20px;
+  }
+
+  .arena-cta-button:hover:not(:disabled) {
+    transform: translateY(-2px);
+  }
+
+  .arena-cta-button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+  }
+
+  .arena-cta-button--preview {
+    background: linear-gradient(45deg, #d946ef, #c026d3);
+  }
+
+  .arena-cta-button--preview:hover:not(:disabled) {
+    box-shadow: 0 10px 20px rgba(217, 70, 239, 0.35);
+  }
+
+  .arena-cta-button--preview:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(217, 70, 239, 0.45);
+  }
+
+  .arena-cta-button--sync {
+    background: linear-gradient(45deg, #34d399, #059669);
+    margin-bottom: 0;
+  }
+
+  .arena-cta-button--sync:hover:not(:disabled) {
+    box-shadow: 0 10px 20px rgba(16, 185, 129, 0.35);
+  }
+
+  .arena-cta-button--sync:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.45);
   }
 
   .result-card {
@@ -837,26 +699,6 @@ body.announcement-visible {
   .result-content {
     position: relative;
     z-index: 1;
-  }
-
-  .result-item {
-    margin-bottom: 20px;
-    padding: 15px;
-    background: var(--app-result-item-bg);
-    border-radius: 10px;
-    backdrop-filter: blur(5px);
-  }
-
-  .result-label {
-    font-weight: bold;
-    font-size: 14px;
-    opacity: 0.9;
-    margin-bottom: 5px;
-  }
-
-  .result-value {
-    font-size: 16px;
-    line-height: 1.5;
   }
 
   .level-badge {
@@ -1628,75 +1470,6 @@ body.announcement-visible {
     :root:not([data-color-mode]) .divide-gray-200> :not([hidden])~ :not([hidden]) {
       border-color: var(--app-border);
     }
-  }
-}
-
-:root[data-color-mode='dark'] .details-questionnaire-settings-panel,
-:root[data-color-mode='dark'] .details-questionnaire-surface,
-:root[data-color-mode='dark'] .details-questionnaire-subcard {
-  background-color: rgba(15, 23, 42, 0.82);
-  border-color: rgba(129, 140, 248, 0.28);
-  color: #dbeafe;
-}
-
-:root[data-color-mode='dark'] .details-questionnaire-settings-panel {
-  background-color: rgba(30, 41, 59, 0.72);
-}
-
-:root[data-color-mode='dark'] .details-questionnaire-settings-toggle {
-  color: #c7d2fe;
-}
-
-:root[data-color-mode='dark'] .details-questionnaire-action,
-:root[data-color-mode='dark'] .details-questionnaire-choice {
-  background-color: rgba(15, 23, 42, 0.88);
-  border-color: rgba(244, 114, 182, 0.32);
-  color: #fbcfe8;
-}
-
-:root[data-color-mode='dark'] .details-questionnaire-choice {
-  color: #e5e7eb;
-}
-
-:root[data-color-mode='dark'] .details-questionnaire-action:hover,
-:root[data-color-mode='dark'] .details-questionnaire-choice:hover {
-  background-color: rgba(51, 65, 85, 0.82);
-  border-color: rgba(244, 114, 182, 0.55);
-}
-
-@media (prefers-color-scheme: dark) {
-
-  :root:not([data-color-mode]) .details-questionnaire-settings-panel,
-  :root:not([data-color-mode]) .details-questionnaire-surface,
-  :root:not([data-color-mode]) .details-questionnaire-subcard {
-    background-color: rgba(15, 23, 42, 0.82);
-    border-color: rgba(129, 140, 248, 0.28);
-    color: #dbeafe;
-  }
-
-  :root:not([data-color-mode]) .details-questionnaire-settings-panel {
-    background-color: rgba(30, 41, 59, 0.72);
-  }
-
-  :root:not([data-color-mode]) .details-questionnaire-settings-toggle {
-    color: #c7d2fe;
-  }
-
-  :root:not([data-color-mode]) .details-questionnaire-action,
-  :root:not([data-color-mode]) .details-questionnaire-choice {
-    background-color: rgba(15, 23, 42, 0.88);
-    border-color: rgba(244, 114, 182, 0.32);
-    color: #fbcfe8;
-  }
-
-  :root:not([data-color-mode]) .details-questionnaire-choice {
-    color: #e5e7eb;
-  }
-
-  :root:not([data-color-mode]) .details-questionnaire-action:hover,
-  :root:not([data-color-mode]) .details-questionnaire-choice:hover {
-    background-color: rgba(51, 65, 85, 0.82);
-    border-color: rgba(244, 114, 182, 0.55);
   }
 }
 

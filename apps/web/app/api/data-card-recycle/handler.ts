@@ -1,13 +1,15 @@
 import { getRequestUrl } from '@/lib/request-url';
 import {
-  getUserDataCards,
   getUserRecycleBinCards,
+  getUserUsedSlots,
+  getDataCardUpdate,
   restoreDataCard,
   permanentlyDeleteDataCards
 } from '@/lib/database/data-cards';
 import { getUserDataCardCapacity } from '@/lib/database/users';
 import { requireAuthUser } from '@/lib/auth/server';
 import { config as appConfig } from '@/lib/config';
+import { getDataCardSlotUsage } from '@/lib/data-card-quota';
 
 async function handler(req: Request): Promise<Response> {
   const auth = await requireAuthUser(req);
@@ -34,14 +36,29 @@ async function handler(req: Request): Promise<Response> {
           });
         }
 
-        const [activeCards, capacity] = await Promise.all([
-          getUserDataCards(userId),
-          getUserDataCardCapacity(userId, appConfig.DEFAULT_DATA_CARD_CAPACITY)
+        const [recycleCards, usedSlots, capacity] = await Promise.all([
+          getUserRecycleBinCards(userId),
+          getUserUsedSlots(userId),
+          getUserDataCardCapacity(userId, appConfig.DEFAULT_DATA_CARD_CAPACITY),
         ]);
+        const recycleCard = recycleCards.find((card) => card.id === id);
+        if (!recycleCard) {
+          return new Response(JSON.stringify({ error: '数据卡不存在或无法恢复' }), {
+            status: 404,
+            headers: { 'Content-Type': 'application/json' }
+          });
+        }
+        const pendingUpdate = await getDataCardUpdate(id);
+        const requiredSlots = getDataCardSlotUsage({
+          data: recycleCard.data,
+          pendingData: pendingUpdate?.data ?? null,
+          favoriteCount: recycleCard.favorite_count,
+          usageCount: recycleCard.usage_count,
+        });
 
-        if (capacity !== null && activeCards.length >= capacity) {
+        if (usedSlots + requiredSlots > capacity) {
           return new Response(JSON.stringify({
-            error: `当前槽位已满（${capacity}个），请删除部分数据卡后再尝试恢复`
+            error: `恢复该数据卡需要 ${requiredSlots} 个槽位，当前已用 ${usedSlots}/${capacity}，请释放足够槽位后再尝试恢复`
           }), {
             status: 409,
             headers: { 'Content-Type': 'application/json' }

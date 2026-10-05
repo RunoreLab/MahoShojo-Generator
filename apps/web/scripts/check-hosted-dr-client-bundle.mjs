@@ -9,8 +9,8 @@ import path from 'node:path';
 import process from 'node:process';
 
 const repositoryRoot = path.resolve(import.meta.dirname, '../../..');
-const manifest = JSON.parse(readFileSync(
-  path.join(repositoryRoot, 'config/hosted-dr-capabilities.json'),
+const routing = JSON.parse(readFileSync(
+  path.join(repositoryRoot, 'config/hosted-routing.json'),
   'utf8',
 ));
 
@@ -36,19 +36,14 @@ const listJavaScript = (directory) => readdirSync(directory, { withFileTypes: tr
     return entry.isFile() && entry.name.endsWith('.js') ? [target] : [];
   });
 
-const controlPlane = manifest.controlPlane;
 const routingTokens = [
-  controlPlane.primaryOrigin,
-  controlPlane.drOrigin,
-  controlPlane.primaryProbePath,
-  controlPlane.drProbePath,
+  routing.origins.primary,
+  routing.origins.dr,
+  routing.probes.primaryPath,
+  routing.probes.drPath,
 ];
-const secretNames = [...new Set(manifest.capabilities.flatMap((capability) => (
-  capability.requiredSecrets.map(({ name }) => name)
-)))].sort();
-const bindingNames = [...new Set(manifest.capabilities.flatMap((capability) => (
-  capability.requiredBindings
-)))].sort();
+const secretNames = ['R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY', 'SIGNATURE_SECRET_KEY'];
+const bindingNames = ['DB', 'R2_OBJECT_STORE'];
 const failures = [];
 const routingSources = [];
 
@@ -218,7 +213,7 @@ const scanBindings = (relativePath, source) => {
 
 for (const filePath of listJavaScript(staticRoot)) {
   const source = readFileSync(filePath, 'utf8');
-  const relativePath = path.relative(staticRoot, filePath);
+  const relativePath = path.relative(staticRoot, filePath).split(path.sep).join('/');
   for (const secretName of secretNames) {
     if (source.includes(secretName)) {
       failures.push(`${relativePath}: client bundle 包含 secret ${secretName}`);

@@ -5,7 +5,7 @@ import {
   CrowdReviewNotFoundError,
   CrowdReviewServiceUnavailableError,
 } from '@/lib/crowd-review/service';
-import { json, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
+import { json, requireAuthUser, withApiErrorBoundary } from '@/lib/api/server';
 
 type HandlerDeps = {
   requireAuthUser: typeof requireAuthUser;
@@ -64,5 +64,5 @@ export const createCrowdReviewCurrentAssignHandler =
     }
   };
 
-export const appRouteHandler = withPvpErrorBoundary(createCrowdReviewCurrentAssignHandler());
+export const appRouteHandler = withApiErrorBoundary(createCrowdReviewCurrentAssignHandler());
 export default appRouteHandler;

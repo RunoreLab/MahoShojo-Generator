@@ -9,12 +9,13 @@ type CombatantItem = {
   sortIndex: number;
   name: string;
   type: string | null;
-  templateId: string | null;
-  isNative: boolean;
-  isPreset: boolean;
+  templateId?: string | null;
+  isNative?: boolean;
+  isPreset?: boolean;
   teamId: number | null;
-  dataCardId: string | null;
-  dataCardUpdatedAt: string | null;
+  characterGuidance?: string | null;
+  dataCardId?: string | null;
+  dataCardUpdatedAt?: string | null;
 };
 
 type DetailResponse = {
@@ -32,6 +33,7 @@ type DetailResponse = {
     language: string | null;
     storyLength: string | null;
     headline: string | null;
+    displayTitle: string;
     winner: string | null;
     outputPreview: string | null;
     hasPreview: boolean;
@@ -39,11 +41,15 @@ type DetailResponse = {
     canRegenerate: boolean;
     outputSource: 'd1' | 'r2' | 'none';
     outputReadError: string | null;
+    contentExpired: boolean;
     errorMessage: string | null;
     outputHasShieldWords: boolean;
     pvpRoomId: string | null;
     pvpMatchId: string | null;
     pvpRoundId: string | null;
+    accessScope: 'owner' | 'arena-participant' | 'pvp-participant';
+    arenaParticipantRole: 'host' | 'member' | null;
+    sourceKind: 'solo' | 'arena-multiplayer' | 'pvp';
   };
   combatants: CombatantItem[];
 };
@@ -73,6 +79,16 @@ const formatDuration = (ms: number): string => {
   return `${min}m ${rest}s`;
 };
 
+const sourceLabel = (record: DetailResponse['record']): string => {
+  if (record.sourceKind === 'pvp') return 'PVP';
+  if (record.sourceKind === 'arena-multiplayer') {
+    if (record.arenaParticipantRole === 'host') return '多人 · 房主';
+    if (record.arenaParticipantRole === 'member') return '多人 · 成员';
+    return '多人参与';
+  }
+  return '单人';
+};
+
 export function BattleReportDetailsModal({ isOpen, generationId, onClose, onRegenerate, isRegenerating, regenerateError }: Props) {
   const detailQuery = useQuery({
     queryKey: ['me', 'battle-reports', 'detail', generationId],
@@ -92,7 +108,7 @@ export function BattleReportDetailsModal({ isOpen, generationId, onClose, onRege
     <BaseModal
       isOpen={isOpen}
       onClose={onClose}
-      title={record?.headline || '战报详情'}
+      title={record?.displayTitle || record?.headline || '战报详情'}
       description={record ? `generationId：${record.id}` : undefined}
       maxWidthClassName="max-w-5xl"
       footer={
@@ -100,6 +116,8 @@ export function BattleReportDetailsModal({ isOpen, generationId, onClose, onRege
           <div className="text-xs text-gray-500">
             {record?.contentBlocked
               ? '该记录包含敏感词，已禁止展示正文预览。'
+              : record?.contentExpired
+                ? '战报正文已超过保留期，但历史元数据仍可查看。'
               : record && !record.canRegenerate
                 ? '该记录当前没有可重生正文；可先查看失败原因或稍后重试。'
                 : '提示：详情仅用于回溯；建议及时下载战报卡片/Markdown。'}
@@ -166,18 +184,18 @@ export function BattleReportDetailsModal({ isOpen, generationId, onClose, onRege
             </div>
             <div className="text-sm">
               <div className="text-xs text-gray-500">来源</div>
-              <div className="font-medium text-gray-900 break-all">{record.endpoint}</div>
+              <div className="font-medium text-gray-900 break-all">{sourceLabel(record)} · {record.endpoint}</div>
             </div>
             <div className="text-sm">
               <div className="text-xs text-gray-500">PVP 关联</div>
               <div className="font-medium text-gray-900 break-all">
-                {record.pvpMatchId ? `match=${record.pvpMatchId}` : '无'}
+                {record.sourceKind === 'pvp' && record.pvpMatchId ? `match=${record.pvpMatchId}` : '无'}
               </div>
             </div>
             <div className="text-sm">
               <div className="text-xs text-gray-500">正文存储</div>
               <div className="font-medium text-gray-900">
-                {record.outputSource === 'r2' ? 'R2 外部存储' : record.outputSource === 'd1' ? 'D1 预览' : '无正文'}
+                {record.contentExpired ? 'R2 正文已超过保留期' : record.outputSource === 'r2' ? 'R2 外部存储' : record.outputSource === 'd1' ? 'D1 预览' : '无正文'}
               </div>
             </div>
           </div>
@@ -202,7 +220,9 @@ export function BattleReportDetailsModal({ isOpen, generationId, onClose, onRege
                       <div className="col-span-5 truncate font-medium text-gray-900">{c.name}</div>
                       <div className="col-span-3 truncate text-gray-700">{c.type || '未知'}</div>
                       <div className="col-span-4 truncate text-gray-600">
-                        {c.dataCardId ? `数据卡 ${c.dataCardId}` : c.isPreset ? '预设角色' : c.isNative ? '本地原生' : '未知'}
+                        {record.accessScope === 'arena-participant'
+                          ? '多人共享投影'
+                          : c.dataCardId ? `数据卡 ${c.dataCardId}` : c.isPreset ? '预设角色' : c.isNative ? '本地原生' : '未知'}
                       </div>
                     </div>
                   ))}
@@ -232,6 +252,10 @@ export function BattleReportDetailsModal({ isOpen, generationId, onClose, onRege
             ) : record.outputReadError ? (
               <div className="mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
                 正文读取失败：{record.outputReadError}
+              </div>
+            ) : record.contentExpired ? (
+              <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                战报正文已超过保留期，当前仅保留标题、时间、状态和参与身份等历史元数据。
               </div>
             ) : record.outputPreview ? (
               <pre className="mt-2 whitespace-pre-wrap rounded-lg border bg-gray-50 p-3 text-xs leading-relaxed text-gray-800">

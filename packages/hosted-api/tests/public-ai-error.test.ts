@@ -59,4 +59,16 @@ describe('hosted public AI error carrier', () => {
       message: 'Provider failed: "apiKey":"secret-canary"',
     })).toThrow('Invalid public AI error projection');
   });
+
+  it('允许公开稳定的关闭思考但仅收到 reasoning 异常码', () => {
+    const error = createSafePublicAiError({
+      code: 'THINKING_DISABLED_REASONING_ONLY',
+      message: '模型在已关闭思考的情况下未返回可安全显示的正文，请重试或切换模型。',
+    });
+
+    expect(readSafePublicAiError(error)).toEqual({
+      code: 'THINKING_DISABLED_REASONING_ONLY',
+      message: '模型在已关闭思考的情况下未返回可安全显示的正文，请重试或切换模型。',
+    });
+  });
 });

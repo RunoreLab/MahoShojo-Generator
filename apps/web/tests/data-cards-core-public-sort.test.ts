@@ -3,7 +3,8 @@ import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 
 import type { AppDrizzleDb } from '@/lib/db/drizzle';
-import { listPublicDataCardsWithFilters } from '@/lib/db/repositories/data-cards-core';
+import { listPublicDataCardsWithFilters, listUserDataCards } from '@/lib/db/repositories/data-cards-core';
+import { listUserFavoritesWithCards } from '@/lib/db/repositories/favorites';
 import * as schema from '@/lib/db/schema';
 
 let sqlite: Database;
@@ -47,6 +48,10 @@ describe('listPublicDataCardsWithFilters', () => {
         created_at TEXT NOT NULL,
         PRIMARY KEY (data_card_id, tag_id)
       );
+      CREATE TABLE data_card_updates (
+        data_card_id TEXT PRIMARY KEY, data TEXT, name TEXT, description TEXT, updated_at TEXT
+      );
+      CREATE TABLE favorites (user_id INTEGER, data_card_id TEXT, created_at TEXT);
 
       INSERT INTO users (id, username, email) VALUES
         (1, 'alice', 'alice@example.test');
@@ -64,6 +69,32 @@ describe('listPublicDataCardsWithFilters', () => {
 
   afterEach(() => {
     sqlite.close();
+  });
+
+  test('自有卡片分页稳定排序，保留正文/待审内容并隔离其他用户', async () => {
+    exec(`INSERT INTO data_card_updates (data_card_id, data) VALUES ('not-recommended', '{"pending":true}')`);
+    const first = await listUserDataCards(db, { userId: 1, limit: 2, offset: 0 });
+    const second = await listUserDataCards(db, { userId: 1, limit: 2, offset: 2 });
+    expect(first).toHaveLength(2);
+    expect(second).toHaveLength(2);
+    expect(new Set([...first, ...second].map(row => row.id)).size).toBe(4);
+    expect(first[0]).toMatchObject({ id: 'not-recommended', data: '{}', pending_data: '{"pending":true}' });
+    expect(await listUserDataCards(db, { userId: 2, limit: 2, offset: 0 })).toEqual([]);
+  });
+
+  test('收藏同时间分页不重复，并保持公开审核权限过滤', async () => {
+    exec(`INSERT INTO favorites SELECT 7, id, '2026-09-20' FROM data_cards`);
+    const first = await listUserFavoritesWithCards(db, 7, undefined, { limit: 2, offset: 0 });
+    const second = await listUserFavoritesWithCards(db, 7, undefined, { limit: 2, offset: 2 });
+    expect(new Set([...first, ...second].map(row => row.id)).size).toBe(4);
+    expect(first).toHaveLength(2);
+    expect(second).toHaveLength(2);
+    expect(first.every(row => row.data === '{}')).toBe(true);
+    exec(`UPDATE data_cards SET is_public = 0 WHERE id = 'old-high-likes'`);
+    const visible = await listUserFavoritesWithCards(db, 7, undefined, { limit: 8, offset: 0 });
+    expect(visible).toHaveLength(3);
+    expect(visible.map(row => row.id)).not.toContain('old-high-likes');
+    expect(await listUserFavoritesWithCards(db, 8, undefined, { limit: 8, offset: 0 })).toEqual([]);
   });
 
   test('管理员推荐列表应保留用户选择的排序方式', async () => {

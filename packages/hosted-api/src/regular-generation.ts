@@ -9,9 +9,44 @@ export const PUBLIC_AI_ERROR_CODES = Object.freeze([
   'AI_UPSTREAM_TIMEOUT',
   'AI_REQUEST_ABORTED',
   'AI_PROVIDER_REDIRECT_BLOCKED',
+  'THINKING_DISABLED_REASONING_ONLY',
+  'AI_OUTPUT_TRUNCATED',
+  'AI_OUTPUT_FILTERED',
+  'AI_STREAM_INCOMPLETE',
+  'ARENA_WEB_PACKAGE_OUTPUT_INVALID',
+  'ARENA_WEB_PACKAGE_TARGET_INVALID',
+  'ARENA_WEB_PACKAGE_TARGET_MALFORMED',
+  'ARENA_WEB_PACKAGE_TARGET_SCHEMA',
 ] as const);
 
 export type PublicAiErrorCode = typeof PUBLIC_AI_ERROR_CODES[number];
+
+/**
+ * Output-contract failures the user can act on. They carry no model output, no
+ * validation detail and no provider data: only what happened and what to do, so
+ * a code that reaches the client always explains itself.
+ */
+const PUBLIC_AI_ERROR_MESSAGES: Readonly<Partial<Record<PublicAiErrorCode, string>>> = Object.freeze({
+  AI_OUTPUT_TRUNCATED: '生成达到输出上限，正文未完整完成。已保留收到的内容，请调整生成设置后手动重试。',
+  AI_OUTPUT_FILTERED: '上游内容过滤终止了生成，当前内容不构成完整战报。',
+  AI_STREAM_INCOMPLETE: '未收到可靠的正常结束信号，无法确认战报完整性。已保留收到的内容，不会自动重新生成。',
+  ARENA_WEB_PACKAGE_OUTPUT_INVALID:
+    'Web 包输出缺少可解析的 Arena 战报元数据结尾，无法确认本次结果完整。收到的内容已按纯文本保留，可在下方查看后重试。',
+  ARENA_WEB_PACKAGE_TARGET_INVALID:
+    'AI 生成的 Web 包目标文件未通过格式或 schema 校验，本次结果不会应用到 Web 包。收到的内容已按纯文本保留，可在下方查看后重试。',
+  ARENA_WEB_PACKAGE_TARGET_MALFORMED:
+    'AI 没有按 Web 包要求的形态输出目标文件（宿主已尝试剥离 Markdown 代码围栏与前导路径行，仍不是可直接解析的 JSON）。'
+    + '收到的内容已按纯文本保留，可在下方查看：若模型输出的是一段散文，说明该包的创作指引不足。',
+  ARENA_WEB_PACKAGE_TARGET_SCHEMA:
+    'AI 输出的目标是合法 JSON，但不符合这个 Web 包声明的数据结构，本次结果不会应用到 Web 包。'
+    + '收到的内容已按纯文本保留，可在下方对照查看：若结构明显跑偏，通常说明该包的 generation.schema 约束不够，需要补全嵌套结构。',
+});
+
+export const getPublicAiErrorMessage = (code: unknown): string | null => (
+  typeof code === 'string' && Object.prototype.hasOwnProperty.call(PUBLIC_AI_ERROR_MESSAGES, code)
+    ? PUBLIC_AI_ERROR_MESSAGES[code as PublicAiErrorCode] ?? null
+    : null
+);
 
 export type SafePublicAiErrorProjection = Readonly<{
   code: PublicAiErrorCode;
@@ -91,7 +126,11 @@ export const createSafePublicAiError = (
       ? 'StreamReadTimeoutError'
       : projection.code === 'AI_PROVIDER_REDIRECT_BLOCKED'
         ? 'AIProviderRedirectError'
-        : 'AI_APICallError';
+        : projection.code === 'ARENA_WEB_PACKAGE_OUTPUT_INVALID'
+          ? 'ArenaWebPackageOutputError'
+          : projection.code === 'ARENA_WEB_PACKAGE_TARGET_INVALID'
+            ? 'ArenaWebPackageTargetError'
+            : 'AI_APICallError';
   if (projection.upstreamStatus !== undefined) {
     Object.assign(error, {
       status: projection.upstreamStatus,

@@ -1,3 +1,5 @@
+import { readFile } from 'node:fs/promises';
+
 import { describe, expect, it, vi } from 'vitest';
 import { isArenaGenerationAuditableRejection } from '@mahoshojo/hosted-api/arena-generation/service';
 
@@ -6,10 +8,6 @@ import {
   canonicalizeNodeArenaGenerationSemanticPayload,
   createNodeArenaGenerationExecutor,
 } from '../src/arena-generation/node-executor';
-import type {
-  GenerateWithAIOptions,
-  RawGenerationConfig,
-} from '../src/node-runtime/types';
 import type { SignatureService } from '../src/signature';
 
 const validPayload = {
@@ -31,6 +29,7 @@ const finalizer = createArenaGenerationFinalizer({
   completeTerminal: vi.fn(async () => undefined),
   failTerminal: vi.fn(async () => undefined),
   persistCombatants: vi.fn(async () => undefined),
+  persistParticipants: vi.fn(async () => undefined),
   applyStoryImpacts: vi.fn(async () => undefined),
   settleRatings: vi.fn(async () => undefined),
   readRanking: vi.fn(async () => null),
@@ -46,6 +45,80 @@ const signatureService: SignatureService = {
 };
 
 describe('Node Arena generation executor', () => {
+  it('旧请求与显式 Markdown 保持语义 hash 等价，Web 独立', async () => {
+    const canonical = (reportFormat?: string) => canonicalizeNodeArenaGenerationSemanticPayload({
+      payload: {
+        ...validPayload, ...(reportFormat ? { reportFormat } : {}),
+        multiplayerGenerationSnapshot: { sharedConfig: { mode: 'classic', ...(reportFormat ? { reportFormat } : {}) } },
+      },
+      signatures: signatureService, trustedInternalGuidance: null, trustedPvpContext: null,
+    });
+    expect(await canonical('markdown')).toEqual(await canonical());
+    expect(await canonical('web')).not.toEqual(await canonical());
+  });
+
+  it.each(['generate-stream', 'generate'])('Web %s 只调用 raw provider 并剥离 meta', async (route) => {
+    const content = '<!doctype html><html><script>const x="原始字节";</script></html>';
+    const generateWithStructuredAI = vi.fn();
+    const generateWithStreamAI = vi.fn(async () => ({
+      response: new Response(content + '<!-- MAHOSHOJO_ARENA_META {"version":1,"report":{"winner":"A"}} -->'),
+      usagePromise: Promise.resolve({ totalTokens: 9 }), finishReasonPromise: Promise.resolve('stop'),
+    }));
+    const executor = createNodeArenaGenerationExecutor({
+      env: {}, finalizer, signatureService, generateWithStreamAI, generateWithStructuredAI,
+      enforceSafety: vi.fn(async () => null),
+    });
+    const prepared = await executor.prepare!({
+      request: new Request(`https://example.test/api/arena/${route}`),
+      actorKey: 'anonymous:test', generationRequestId: 'web-request',
+      payload: { ...validPayload, reportFormat: 'web', writeArenaHistory: false, writeCurrentState: false },
+    });
+    if (prepared instanceof Response || isArenaGenerationAuditableRejection(prepared)) throw new Error('unexpected rejection');
+    const emit = vi.fn(async () => undefined);
+    const terminal = await executor.execute({
+      generationId: 'web-generation', generationRequestId: 'web-request', actorKey: 'anonymous:test',
+      producerToken: 'producer', payloadHash: 'hash', payload: prepared.executionPayload,
+      signal: new AbortController().signal, emit,
+      claimFinalization: vi.fn(async () => ({ kind: 'claimed' as const })),
+    });
+    expect(terminal.status).toBe('completed');
+    expect(generateWithStreamAI).toHaveBeenCalledOnce();
+    expect(generateWithStructuredAI).not.toHaveBeenCalled();
+    expect(JSON.parse(decodeURIComponent(prepared.responseHeaders?.['X-Mahoshojo-Stream-Meta'] ?? '{}')).outputContract).toBe('web-document');
+    const events = emit.mock.calls as unknown as Array<[{ type: string; data: { chunk?: string } }]>;
+    expect(events.filter(([event]) => event.type === 'markdown').map(([event]) => event.data.chunk).join('')).toBe(content);
+  });
+
+  it('keeps canonical preset identity while deriving native authority on the server', async () => {
+    const data = JSON.parse(await readFile(
+      new URL('../../../apps/web/public/presets/C01_egg.json', import.meta.url),
+      'utf8',
+    )) as Record<string, unknown>;
+    const browserCombatants = [{
+      type: 'character',
+      filename: 'C01_egg.json',
+      isNative: true,
+      isPreset: true,
+      data,
+    }];
+
+    const canonical = await canonicalizeNodeArenaGenerationSemanticPayload({
+      payload: { combatants: browserCombatants },
+      signatures: signatureService,
+      trustedInternalGuidance: null,
+      trustedPvpContext: null,
+    });
+
+    expect(canonical).toMatchObject({
+      combatants: [{
+        type: 'character',
+        filename: 'C01_egg.json',
+        isPreset: true,
+        isNative: true,
+      }],
+    });
+  });
+
   it('canonicalizes retry identity with legacy defaults and server-derived native authority', async () => {
     const base = {
       combatants: [{
@@ -361,6 +434,158 @@ describe('Node Arena generation executor', () => {
     expect(generateWithStreamAI).not.toHaveBeenCalled();
   });
 
+  it('keeps built-in AI safety on the system-channel prompt budget for BYOK requests', async () => {
+    const generateWithStructuredAI = vi.fn();
+    const executor = createNodeArenaGenerationExecutor({
+      env: {
+        NEXT_PUBLIC_ENABLE_SENSITIVE_WORD_FILTER: 'false',
+        NEXT_PUBLIC_ENABLE_AI_SAFETY_CHECK: 'true',
+      },
+      finalizer,
+      signatureService,
+      generateWithStructuredAI,
+      generateWithStreamAI: vi.fn(),
+    });
+
+    const result = await executor.prepare!({
+      request: new Request('https://example.test/api/arena/generate-stream'),
+      actorKey: 'anonymous:test',
+      generationRequestId: 'request-byok-safety-budget',
+      payload: {
+        ...validPayload,
+        userGuidance: '安'.repeat(130_000),
+        customProvider: {
+          providerId: 'chatbox',
+          modelId: 'gpt-5.4',
+          apiKey: 'secret-value',
+        },
+      },
+    });
+
+    expect(result).toBeInstanceOf(Response);
+    expect((result as Response).status).toBe(413);
+    await expect((result as Response).json()).resolves.toMatchObject({
+      code: 'ARENA_SAFETY_PROMPT_BUDGET_EXCEEDED',
+      maxEstimatedPromptTokens: 128_000,
+    });
+    expect(generateWithStructuredAI).not.toHaveBeenCalled();
+  });
+
+  it('keeps legacy non-stream guidance bounds before safety and prompting', async () => {
+    let inspectedText = '';
+    const inspected = vi.fn(async (input: { combinedText: string }) => {
+      inspectedText = input.combinedText;
+      return null;
+    });
+    const executor = createNodeArenaGenerationExecutor({
+      env: {},
+      finalizer,
+      signatureService,
+      enforceSafety: inspected,
+      generateWithStructuredAI: vi.fn(),
+      generateWithStreamAI: vi.fn(),
+    });
+    const userGuidance = `${'用'.repeat(200)}USER_TAIL`;
+    const characterGuidance = `${'角'.repeat(100)}CHARACTER_TAIL`;
+
+    const prepared = await executor.prepare!({
+      request: new Request('https://example.test/api/arena/generate'),
+      actorKey: 'anonymous:test',
+      generationRequestId: 'request-guidance-bounds',
+      payload: {
+        ...validPayload,
+        userGuidance,
+        combatants: validPayload.combatants.map((combatant, index) => ({
+          ...combatant,
+          ...(index === 0 ? { characterGuidance } : {}),
+        })),
+      },
+    });
+
+    if (
+      prepared instanceof Response
+      || isArenaGenerationAuditableRejection(prepared)
+    ) throw new Error('unexpected response');
+    expect(prepared.executionPayload.userGuidance).toBe('用'.repeat(200));
+    expect(inspected).toHaveBeenCalledWith(expect.objectContaining({
+      combinedText: expect.not.stringContaining('USER_TAIL'),
+    }));
+    expect(inspectedText).not.toContain('CHARACTER_TAIL');
+  });
+
+  it('stream safety keeps full user guidance but bounds character guidance to prompt parity', async () => {
+    let inspectedText = '';
+    const executor = createNodeArenaGenerationExecutor({
+      env: {},
+      finalizer,
+      signatureService,
+      enforceSafety: vi.fn(async ({ combinedText }) => {
+        inspectedText = combinedText;
+        return null;
+      }),
+      generateWithStreamAI: vi.fn(),
+    });
+    const userGuidance = `${'用'.repeat(200)}STREAM_USER_TAIL`;
+    const characterGuidance = `${'角'.repeat(100)}STREAM_CHARACTER_TAIL`;
+
+    const prepared = await executor.prepare!({
+      request: new Request('https://example.test/api/arena/generate-stream'),
+      actorKey: 'anonymous:test',
+      generationRequestId: 'request-stream-guidance-bounds',
+      payload: {
+        ...validPayload,
+        userGuidance,
+        combatants: validPayload.combatants.map((combatant, index) => ({
+          ...combatant,
+          ...(index === 0 ? { characterGuidance } : {}),
+        })),
+      },
+    });
+
+    if (
+      prepared instanceof Response
+      || isArenaGenerationAuditableRejection(prepared)
+    ) throw new Error('unexpected response');
+    expect(prepared.executionPayload.userGuidance).toBe(userGuidance);
+    expect(inspectedText).toContain('STREAM_USER_TAIL');
+    expect(inspectedText).not.toContain('STREAM_CHARACTER_TAIL');
+  });
+
+  it('includes manual adjudication event drafts in the authoritative input safety check', async () => {
+    let inspectedText = '';
+    const executor = createNodeArenaGenerationExecutor({
+      env: {},
+      finalizer,
+      signatureService,
+      enforceSafety: vi.fn(async ({ combinedText }) => {
+        inspectedText = combinedText;
+        return null;
+      }),
+      generateWithStreamAI: vi.fn(),
+    });
+
+    const prepared = await executor.prepare!({
+      request: new Request('https://example.test/api/arena/generate-stream'),
+      actorKey: 'anonymous:test',
+      generationRequestId: 'request-adjudication-safety',
+      payload: {
+        ...validPayload,
+        adjudicationEvents: [{
+          id: 'event-1',
+          description: 'ADJUDICATION_SAFETY_MARKER',
+          type: 'binary',
+          probability: 50,
+        }],
+      },
+    });
+
+    if (
+      prepared instanceof Response
+      || isArenaGenerationAuditableRejection(prepared)
+    ) throw new Error('unexpected response');
+    expect(inspectedText).toContain('ADJUDICATION_SAFETY_MARKER');
+  });
+
   it('fail-closes invalid custom provider before reservation/provider dispatch', async () => {
     const generateWithStreamAI = vi.fn();
     const executor = createNodeArenaGenerationExecutor({
@@ -529,7 +754,7 @@ describe('Node Arena generation executor', () => {
     ]);
   });
 
-  it('在 reservation 前拒绝超过 companion 兼容上限的辅助情景与素材', async () => {
+  it('allows reference collections above legacy per-type caps and rejects only aggregate sanity overflow', async () => {
     const executor = createNodeArenaGenerationExecutor({
       env: {},
       finalizer,
@@ -537,34 +762,46 @@ describe('Node Arena generation executor', () => {
       enforceSafety: vi.fn(async () => null),
       generateWithStreamAI: vi.fn(),
     });
-    const tooManyAux = await executor.prepare!({
+    const relaxed = await executor.prepare!({
       request: new Request('https://example.test/api/generate-battle-story'),
       actorKey: 'anonymous:test',
       generationRequestId: 'request-direct-node',
-      payload: { ...validPayload, auxScenarios: Array.from({ length: 11 }, () => ({})) },
+      payload: {
+        ...validPayload,
+        auxScenarios: Array.from({ length: 12 }, () => ({})),
+        materials: Array.from({ length: 12 }, () => ({})),
+      },
     });
-    const tooManyMaterials = await executor.prepare!({
+    const overflow = await executor.prepare!({
       request: new Request('https://example.test/api/arena/generate'),
       actorKey: 'anonymous:test',
       generationRequestId: 'request-direct-node',
-      payload: { ...validPayload, materials: Array.from({ length: 11 }, () => ({})) },
+      payload: {
+        ...validPayload,
+        narrativeHistory: Array.from({ length: 250 }, (_, index) => ({
+          content: `history-${index}`,
+          createdAt: new Date(index).toISOString(),
+        })),
+        narrativeHistoryReadLimit: 10,
+        readNarrativeHistory: true,
+        materials: Array.from({ length: 7 }, () => ({})),
+      },
     });
 
-    expect(tooManyAux).toBeInstanceOf(Response);
-    expect((tooManyAux as Response).status).toBe(400);
-    expect(await (tooManyAux as Response).json()).toMatchObject({
-      code: 'ARENA_AUX_SCENARIOS_LIMIT',
-    });
-    expect(tooManyMaterials).toBeInstanceOf(Response);
-    expect((tooManyMaterials as Response).status).toBe(400);
-    expect(await (tooManyMaterials as Response).json()).toMatchObject({
-      code: 'ARENA_MATERIALS_LIMIT',
+    expect(relaxed).not.toBeInstanceOf(Response);
+    expect(overflow).toBeInstanceOf(Response);
+    expect((overflow as Response).status).toBe(413);
+    expect(await (overflow as Response).json()).toMatchObject({
+      code: 'ARENA_REFERENCE_ITEMS_LIMIT',
     });
   });
 
-  it('uses the strict-ranked model fallback order until a provider attempt succeeds', async () => {
+  it('uses the strict-ranked model fallback order after an explicit pre-dispatch failure', async () => {
     const generateWithStreamAI = vi.fn()
-      .mockRejectedValueOnce(new Error('first model unavailable'))
+      .mockRejectedValueOnce(Object.assign(
+        new Error('first model unavailable before dispatch'),
+        { retrySafety: 'pre-dispatch-safe' as const },
+      ))
       .mockResolvedValueOnce({ response: new Response('body') });
     const executor = createNodeArenaGenerationExecutor({
       env: {},
@@ -592,7 +829,6 @@ describe('Node Arena generation executor', () => {
       prepared instanceof Response
       || isArenaGenerationAuditableRejection(prepared)
     ) throw new Error('unexpected response');
-
     const terminal = await executor.execute({
       generationId: 'generation-strict',
       generationRequestId: 'request-strict',
@@ -613,16 +849,120 @@ describe('Node Arena generation executor', () => {
     ]);
   });
 
-  it('preserves the public non-strict downgrade model contract', async () => {
-    const generateWithStreamAI = vi.fn(async (
-      _config: RawGenerationConfig,
-      _options?: GenerateWithAIOptions,
-    ) => ({ response: new Response('body') }));
+  it('does not try a second strict-ranked stream model after an unclassified dispatch failure', async () => {
+    const generateWithStreamAI = vi.fn()
+      .mockRejectedValueOnce(new Error('provider returned 500 after dispatch'))
+      .mockResolvedValueOnce({ response: new Response('must not be used') });
     const executor = createNodeArenaGenerationExecutor({
       env: {},
       finalizer,
       signatureService,
       enforceSafety: vi.fn(async () => null),
+      generateWithStreamAI,
+    });
+    const prepared = await executor.prepare!({
+      request: new Request('https://example.test/api/arena/generate-stream'),
+      actorKey: 'anonymous:test',
+      generationRequestId: 'request-no-replay-stream',
+      payload: {
+        ...validPayload,
+        readArenaHistory: false,
+        readCurrentState: false,
+        readNarrativeHistory: false,
+        writeArenaHistory: false,
+        writeCurrentState: false,
+        isDowngrade: true,
+      },
+    });
+    if (prepared instanceof Response || isArenaGenerationAuditableRejection(prepared)) {
+      throw new Error('unexpected response');
+    }
+
+    const terminal = await executor.execute({
+      generationId: 'generation-no-replay-stream',
+      generationRequestId: 'request-no-replay-stream',
+      actorKey: 'anonymous:test',
+      producerToken: 'producer-token-no-replay-stream',
+      payloadHash: 'payload-hash-no-replay-stream',
+      payload: prepared.executionPayload,
+      signal: new AbortController().signal,
+      emit: vi.fn(async () => undefined),
+      claimFinalization: vi.fn(async () => ({ kind: 'claimed' as const })),
+    });
+
+    expect(terminal.status).toBe('failed');
+    expect(generateWithStreamAI).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not try a second strict-ranked structured model after an unclassified dispatch failure', async () => {
+    const generateWithStructuredAI = vi.fn()
+      .mockRejectedValueOnce(new Error('provider returned 500 after dispatch'))
+      .mockResolvedValueOnce({
+        headline: 'must not be used',
+        article: { body: 'must not be used', analysis: 'must not be used' },
+        officialReport: { winner: 'A', conclusion: 'must not be used' },
+        impacts: [],
+      });
+    const executor = createNodeArenaGenerationExecutor({
+      env: {},
+      finalizer,
+      signatureService,
+      enforceSafety: vi.fn(async () => null),
+      generateWithStructuredAI,
+      generateWithStreamAI: vi.fn(),
+    });
+    const prepared = await executor.prepare!({
+      request: new Request('https://example.test/api/arena/generate'),
+      actorKey: 'anonymous:test',
+      generationRequestId: 'request-no-replay-structured',
+      payload: {
+        ...validPayload,
+        readArenaHistory: false,
+        readCurrentState: false,
+        readNarrativeHistory: false,
+        writeArenaHistory: false,
+        writeCurrentState: false,
+        isDowngrade: true,
+      },
+    });
+    if (prepared instanceof Response || isArenaGenerationAuditableRejection(prepared)) {
+      throw new Error('unexpected response');
+    }
+
+    const terminal = await executor.execute({
+      generationId: 'generation-no-replay-structured',
+      generationRequestId: 'request-no-replay-structured',
+      actorKey: 'anonymous:test',
+      producerToken: 'producer-token-no-replay-structured',
+      payloadHash: 'payload-hash-no-replay-structured',
+      payload: prepared.executionPayload,
+      signal: new AbortController().signal,
+      emit: vi.fn(async () => undefined),
+      claimFinalization: vi.fn(async () => ({ kind: 'claimed' as const })),
+    });
+
+    expect(terminal.status).toBe('failed');
+    expect(generateWithStructuredAI).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserves the public non-strict downgrade model contract', async () => {
+    const generateWithStreamAI = vi.fn();
+    let receivedStructuredConfig: unknown = null;
+    const generateWithStructuredAI = vi.fn(async (_input: unknown, config: unknown) => {
+      receivedStructuredConfig = config;
+      return {
+        headline: '结构化战报',
+        article: { body: '正文', analysis: '记者点评' },
+        officialReport: { winner: 'A', conclusion: '结论' },
+        impacts: [],
+      };
+    });
+    const executor = createNodeArenaGenerationExecutor({
+      env: {},
+      finalizer,
+      signatureService,
+      enforceSafety: vi.fn(async () => null),
+      generateWithStructuredAI,
       generateWithStreamAI,
     });
     const prepared = await executor.prepare!({
@@ -639,6 +979,10 @@ describe('Node Arena generation executor', () => {
       prepared instanceof Response
       || isArenaGenerationAuditableRejection(prepared)
     ) throw new Error('unexpected response');
+    const streamMeta = JSON.parse(decodeURIComponent(
+      prepared.responseHeaders?.['X-Mahoshojo-Stream-Meta'] ?? '',
+    )) as Record<string, unknown>;
+    expect(streamMeta.outputContract).toBe('structured-report');
 
     const terminal = await executor.execute({
       generationId: 'generation-downgrade',
@@ -653,9 +997,77 @@ describe('Node Arena generation executor', () => {
     });
 
     expect(terminal.status).toBe('completed');
-    expect(generateWithStreamAI).toHaveBeenCalledTimes(1);
-    expect(generateWithStreamAI.mock.calls[0]?.[0]).toMatchObject({
+    expect(generateWithStreamAI).not.toHaveBeenCalled();
+    expect(generateWithStructuredAI).toHaveBeenCalledTimes(1);
+    expect(receivedStructuredConfig).toMatchObject({
       modelOverride: 'gemini-2.5-flash-lite',
+      taskName: '生成classic模式故事',
+    });
+  });
+
+  it.each(['stop', 'length', 'unknown'])('preserves usage and handles provider finish reason %s', async (finishReason) => {
+    const generateWithStreamAI = vi.fn(async () => ({
+      response: new Response('正文'),
+      usagePromise: Promise.resolve({
+        inputTokens: 100,
+        outputTokens: 20,
+        reasoningTokens: 5,
+        cachedInputTokens: 8,
+        totalTokens: 120,
+      }),
+      finishReasonPromise: Promise.resolve(finishReason),
+    }));
+    const executor = createNodeArenaGenerationExecutor({
+      env: {},
+      finalizer,
+      signatureService,
+      enforceSafety: vi.fn(async () => null),
+      generateWithStreamAI,
+    });
+    const prepared = await executor.prepare!({
+      request: new Request('https://example.test/api/arena/generate-stream'),
+      actorKey: 'anonymous:test',
+      generationRequestId: 'request-usage-normalize',
+      payload: {
+        ...validPayload,
+        readArenaHistory: false,
+        readCurrentState: false,
+        readNarrativeHistory: false,
+        writeArenaHistory: false,
+        writeCurrentState: false,
+        isDowngrade: true,
+      },
+    });
+    if (
+      prepared instanceof Response
+      || isArenaGenerationAuditableRejection(prepared)
+    ) throw new Error('unexpected response');
+    const emitted: Array<{ type: string; data?: unknown }> = [];
+    const terminal = await executor.execute({
+      generationId: 'generation-usage-normalize',
+      generationRequestId: 'request-usage-normalize',
+      actorKey: 'anonymous:test',
+      producerToken: 'producer-token-usage-normalize',
+      payloadHash: 'payload-hash-usage-normalize',
+      payload: prepared.executionPayload,
+      signal: new AbortController().signal,
+      emit: vi.fn(async (event: { type: string; data?: unknown }) => {
+        emitted.push(event);
+      }),
+      claimFinalization: vi.fn(async () => ({ kind: 'claimed' as const })),
+    });
+
+    expect(terminal.status).toBe(finishReason === 'stop' ? 'completed' : 'failed');
+    const telemetryEvent = emitted.find((event) => event.type === 'telemetry');
+    expect(telemetryEvent).toBeDefined();
+    expect(telemetryEvent?.data).toMatchObject({
+      usage: {
+        promptTokens: 100,
+        completionTokens: 20,
+        reasoningTokens: 5,
+        cachedTokens: 8,
+        totalTokens: 120,
+      },
     });
   });
 });

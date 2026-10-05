@@ -5,8 +5,8 @@ import {
   getUserSlotCountById,
   listEligibleReporterUsers,
 } from '@/lib/database/badges-granting';
-import { grantBadgeToUser, userHasBadge } from '@/lib/database/badges';
-import { increaseUserSlotCount } from '@/lib/database/users';
+import { userHasBadge } from '@/lib/database/badges';
+import { grantBadgeWithSlotReward } from '@/lib/rewards/badge-slot-reward';
 import { getReporterTierByBadgeId } from './reporter-rules';
 
 const EXCELLENT_REPORTER_TIER = (() => {
@@ -55,58 +55,59 @@ async function processUsers(users: EligibleUser[], dryRun: boolean) {
     badgeGranted: 0,
     slotIncreased: 0,
     skipped: 0,
+    rolledBack: 0,
+    manualReview: 0,
     errors: 0,
     dryRun
   };
 
   for (const user of users) {
     try {
-      const alreadyHasBadge = await userHasBadge(user.user_id, EXCELLENT_REPORTER_TIER.badgeId);
       const beforeSlot = await getUserSlotCount(user.user_id);
 
       if (dryRun) {
+        const alreadyHasBadge = await userHasBadge(user.user_id, EXCELLENT_REPORTER_TIER.badgeId);
         if (alreadyHasBadge) {
           summary.skipped += 1;
-          console.log(
-            `[dry-run] 用户 ${user.username} (ID: ${user.user_id}) 已拥有徽章，跳过授予和槽位增加`
-          );
+          console.log(`[dry-run] 用户 ${user.username} (ID: ${user.user_id}) 已拥有徽章，跳过授予和槽位增加`);
         } else {
           summary.badgeGranted += 1;
           summary.slotIncreased += 1;
-          console.log(
-            `[dry-run] 用户 ${user.username} (ID: ${user.user_id}) 将被授予徽章，槽位 ${beforeSlot} -> ${beforeSlot + EXCELLENT_REPORTER_TIER.slotIncrement}`
-          );
+          console.log(`[dry-run] 用户 ${user.username} (ID: ${user.user_id}) 将被授予徽章，槽位 ${beforeSlot} -> ${beforeSlot + EXCELLENT_REPORTER_TIER.slotIncrement}`);
         }
         continue;
       }
 
-      if (alreadyHasBadge) {
+      const result = await grantBadgeWithSlotReward({
+        userId: user.user_id,
+        badgeId: EXCELLENT_REPORTER_TIER.badgeId,
+        slotIncrement: EXCELLENT_REPORTER_TIER.slotIncrement,
+      });
+      if (result.status === 'already-granted') {
         summary.skipped += 1;
-        console.log(
-          `用户 ${user.username} (ID: ${user.user_id}) 已拥有徽章，跳过授予和槽位变更`
-        );
+        console.log(`用户 ${user.username} (ID: ${user.user_id}) 已拥有徽章，跳过授予和槽位变更`);
         continue;
       }
-
-      const granted = await grantBadgeToUser(user.user_id, EXCELLENT_REPORTER_TIER.badgeId);
-      if (!granted) {
-        summary.errors += 1;
-        console.error(`授予用户 ${user.username} (ID: ${user.user_id}) 徽章失败，已跳过槽位增加`);
-        continue;
-      }
-
-      summary.badgeGranted += 1;
-
-      const increased = await increaseUserSlotCount(user.user_id, EXCELLENT_REPORTER_TIER.slotIncrement);
-      if (increased) {
+      if (result.status === 'granted') {
+        summary.badgeGranted += 1;
         summary.slotIncreased += 1;
         const afterSlot = await getUserSlotCount(user.user_id);
-        console.log(
-          `用户 ${user.username} (ID: ${user.user_id}) 已处理：授予徽章，槽位 ${beforeSlot} -> ${afterSlot}`
-        );
+        console.log(`用户 ${user.username} (ID: ${user.user_id}) 已处理：授予徽章，槽位 ${beforeSlot} -> ${afterSlot}`);
+        continue;
+      }
+
+      summary.errors += 1;
+      if (result.status === 'slot-failed-rolled-back') {
+        summary.rolledBack += 1;
+        console.error(`用户 ${user.username} (ID: ${user.user_id}) 槽位增加失败，本次徽章已回滚，可安全重试`);
+      } else if (result.status === 'slot-failed-rollback-failed') {
+        summary.manualReview += 1;
+        console.error(`用户 ${user.username} (ID: ${user.user_id}) 槽位增加失败且徽章回滚失败，需要人工核对`);
+      } else if (result.status === 'slot-outcome-unknown') {
+        summary.manualReview += 1;
+        console.error(`用户 ${user.username} (ID: ${user.user_id}) 槽位写入结果不确定，需要人工核对，未自动撤销徽章`);
       } else {
-        summary.errors += 1;
-        console.error(`用户 ${user.username} (ID: ${user.user_id}) 槽位增加失败`);
+        console.error(`授予用户 ${user.username} (ID: ${user.user_id}) 徽章失败，未修改槽位`);
       }
     } catch (error) {
       summary.errors += 1;

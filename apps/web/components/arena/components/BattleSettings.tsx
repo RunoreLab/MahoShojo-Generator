@@ -1,36 +1,46 @@
 'use client';
 
-import { useMemo } from 'react';
-
-import { ArenaDataSettingsPanel } from '@/components/shared/ArenaDataSettingsPanel';
-
 import { useBattleStore } from '../stores/useBattleStore';
-import { BattleStoreState, CombatantData } from '../types';
+import {
+  useArenaEditorActions,
+  useArenaEditorSelector,
+  useArenaEditorSession,
+} from '../editor';
+import { SharedBattleSettingsControl } from '../editor/presentation/SharedBattleSettingsControl';
 import { BattleReportCardWidthSettings } from './BattleReportCardWidthSettings';
-import { NarrativeHistorySettings } from './NarrativeHistorySettings';
+
+function HostOnlyBattleReportCardWidthSettings({ disabled }: { readonly disabled: boolean }) {
+  const localSettings = useBattleStore((state) => state.settings);
+  const updateLocalSettings = useBattleStore((state) => state.updateSettings);
+  return (
+    <BattleReportCardWidthSettings
+      value={localSettings}
+      onChange={updateLocalSettings}
+      disabled={disabled}
+    />
+  );
+}
 
 export function BattleSettings() {
-  const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
-  const settings = useBattleSelector((state) => state.settings);
-  const updateSettings = useBattleSelector((state) => state.updateSettings);
-  const isGenerating = useBattleSelector((state) => state.isGenerating);
-  const combatants = useBattleSelector((state) => state.combatants);
-
-  const readableCombatantCount = useMemo(
-    () => combatants.filter((item): item is CombatantData => 'data' in item).length,
-    [combatants]
-  );
+  const session = useArenaEditorSession();
+  const settings = useArenaEditorSelector((state) => state.historySettings);
+  const isGenerating = useArenaEditorSelector((state) => state.busy);
+  const readableCombatantCount = useArenaEditorSelector((state) => (
+    state.combatants.filter((item) => item.access === 'full').length
+  ));
+  const { updateHistorySettings } = useArenaEditorActions();
 
   return (
     <>
-      <ArenaDataSettingsPanel
+      <SharedBattleSettingsControl
         value={settings}
-        onChange={updateSettings}
+        onChange={updateHistorySettings}
         disabled={isGenerating}
         combatantCountForEstimate={readableCombatantCount}
       />
-      <NarrativeHistorySettings value={settings} onChange={updateSettings} disabled={isGenerating} />
-      <BattleReportCardWidthSettings value={settings} onChange={updateSettings} disabled={isGenerating} />
+      {session.capabilities.canUseHostOnlyGenerationOptions ? (
+        <HostOnlyBattleReportCardWidthSettings disabled={isGenerating} />
+      ) : null}
     </>
   );
 }

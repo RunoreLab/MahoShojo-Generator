@@ -9,6 +9,7 @@ import {
   type ArenaRoomProposalMutationResult,
   type ArenaRoomProposalMutationStatus,
   type ArenaRoomSharedConfig,
+  type ArenaRoomSnapshot,
   type DataCardRef,
 } from '@mahoshojo/contracts/arena-room';
 import {
@@ -22,18 +23,32 @@ import {
   ArenaDataCardRefVerifierError,
   type ArenaDataCardRefVerifier,
 } from './arena-data-card-ref-verifier';
+import {
+  ArenaRoomPresetRefVerifierError,
+  canonicalArenaRoomSharedConfigRefs,
+  verifyArenaRoomPresetRefs,
+  verifyArenaRoomSharedConfigPresetRefs,
+} from './arena-room-shared-config-refs';
+import {
+  assertSharedConfigServerShareableWebPackage,
+  isServerShareableWebPackageRef,
+} from './web-package-shareability';
+import type { ArenaRoomGenerationPresetResolver } from './room-generation-preset-registry';
 import type {
   ArenaRoomMembershipService,
   ResolvedArenaRoomMembership,
 } from './room-membership-service';
 
 export type ArenaRoomProposalErrorCode =
+  | 'ROOM_CONFIG_FRAME_TOO_LARGE'
   | 'ROOM_EPOCH_STALE'
   | 'ROOM_OPERATION_UNKNOWN'
   | 'ROOM_PERMISSION_DENIED'
   | 'ROOM_PROPOSAL_CONFLICT'
   | 'ROOM_PROPOSAL_INPUT_INVALID'
   | 'ROOM_PROPOSAL_NOT_FOUND'
+  | 'ROOM_PROPOSAL_BYTE_LIMIT'
+  | 'ROOM_PROPOSAL_PENDING_LIMIT_REACHED'
   | 'ROOM_REFERENCE_DENIED'
   | 'ROOM_REFERENCE_STALE'
   | 'ROOM_REFERENCE_UNAVAILABLE'
@@ -55,6 +70,8 @@ export type ArenaRoomProposalMutationView = {
   readonly proposalId: string;
   readonly status: ArenaRoomProposalMutationStatus;
   readonly result: ArenaRoomProposalMutationResult;
+  readonly sharedConfig?: ArenaRoomSharedConfig;
+  readonly snapshot?: ArenaRoomSnapshot;
 };
 
 export type ArenaRoomProposalService = {
@@ -80,6 +97,7 @@ export type ArenaRoomProposalService = {
 export type ArenaRoomProposalServiceOptions = {
   readonly memberships: Pick<ArenaRoomMembershipService, 'resolveActiveByAccount'>;
   readonly references: ArenaDataCardRefVerifier;
+  readonly presets?: Pick<ArenaRoomGenerationPresetResolver, 'resolve'>;
   readonly now?: () => string;
 };
 
@@ -132,6 +150,7 @@ const mutationView = (
   proposalId: string,
   status: ArenaRoomProposalMutationStatus,
   result: ArenaRoomProposalMutationResult,
+  includeAuthoritativeState = false,
 ): ArenaRoomProposalMutationView => ({
   roomId: state.snapshot.roomId,
   roomEpoch: state.snapshot.roomEpoch,
@@ -140,6 +159,12 @@ const mutationView = (
   proposalId,
   status,
   result,
+  // resolve 的响应直接携带 mutation 后的完整权威状态（含 snapshot）：
+  // state 已在内存中，无额外读取成本；房主端以完整 snapshot 做原子安装，
+  // 避免部分安装把尚未收到的控制事件「宣布已见」而被 WSS 去重丢弃。
+  ...(includeAuthoritativeState
+    ? { sharedConfig: state.snapshot.sharedConfig, snapshot: state.snapshot }
+    : {}),
 });
 
 const mapTransitionFailure = (failure: ArenaRoomTransitionFailure): never => {
@@ -154,6 +179,9 @@ const mapTransitionFailure = (failure: ArenaRoomTransitionFailure): never => {
     case 'proposal-id-conflict':
     case 'proposal-not-submitted':
     case 'proposal-selection-invalid': return fail('ROOM_PROPOSAL_CONFLICT');
+    case 'proposal-pending-limit-reached':
+      return fail('ROOM_PROPOSAL_PENDING_LIMIT_REACHED');
+    case 'room-snapshot-too-large': return fail('ROOM_CONFIG_FRAME_TOO_LARGE');
     case 'invalid-command':
     case 'invalid-state': return fail('ROOM_PROPOSAL_INPUT_INVALID');
     default: return fail('ROOM_TRANSITION_DENIED');
@@ -180,8 +208,13 @@ const uniqueRefs = (refs: readonly DataCardRef[]): readonly DataCardRef[] => {
   });
 };
 
+const presetChange = (change: ArenaProposalChange): boolean => (
+  ('key' in change && typeof change.key === 'string' && change.key.startsWith('preset:'))
+);
+
 const introducedRefs = (changes: readonly ArenaProposalChange[]): readonly DataCardRef[] => (
   uniqueRefs(changes.flatMap((change) => {
+    if (presetChange(change)) return [];
     switch (change.type) {
       case 'addCombatant':
       case 'addAuxScenario':
@@ -192,16 +225,34 @@ const introducedRefs = (changes: readonly ArenaProposalChange[]): readonly DataC
   }))
 );
 
-const canonicalConfigRefs = (config: ArenaRoomSharedConfig): readonly DataCardRef[] => {
-  const entries = [
-    ...config.combatants,
-    ...(config.scenario === null ? [] : [config.scenario]),
-    ...config.auxScenarios,
-    ...config.materials,
-  ];
-  return uniqueRefs(entries.flatMap((entry) => (
-    entry.key.startsWith('data-card:') && 'ref' in entry ? [entry.ref] : []
-  )));
+const introducedPresetRefs = (changes: readonly ArenaProposalChange[]): readonly DataCardRef[] => (
+  uniqueRefs(changes.flatMap((change) => {
+    if (!presetChange(change)) return [];
+    switch (change.type) {
+      case 'addCombatant':
+      case 'addAuxScenario': return [change.ref];
+      case 'setScenario': return change.ref === null ? [] : [change.ref];
+      default: return [];
+    }
+  }))
+);
+
+/** Proposals carrying a non-shareable Web Package ref must not even be stored. */
+const assertSubmittedWebPackageRefsShareable = (changes: readonly ArenaProposalChange[]): void => {
+  for (const change of changes) {
+    if (change.type !== 'setWebPackageRef' || change.value === null) continue;
+    if (!isServerShareableWebPackageRef(change.value)) fail('ROOM_REFERENCE_DENIED');
+  }
+};
+
+const mapPresetReferenceError = (error: unknown): never => {
+  if (!(error instanceof ArenaRoomPresetRefVerifierError)) throw error;
+  switch (error.code) {
+    case 'ARENA_ROOM_PRESET_REF_INPUT_INVALID': return fail('ROOM_PROPOSAL_INPUT_INVALID');
+    case 'ARENA_ROOM_PRESET_REF_NOT_FOUND':
+    case 'ARENA_ROOM_PRESET_REF_VERSION_MISMATCH': return fail('ROOM_REFERENCE_STALE');
+    default: return fail('ROOM_REFERENCE_UNAVAILABLE');
+  }
 };
 
 const hostAccountUserId = (state: ArenaRoomAuthorityState): number => {
@@ -214,10 +265,6 @@ const hostAccountUserId = (state: ArenaRoomAuthorityState): number => {
 
 const requireEpoch = (state: ArenaRoomAuthorityState, expectedRoomEpoch: string): void => {
   if (state.snapshot.roomEpoch !== expectedRoomEpoch) fail('ROOM_EPOCH_STALE');
-};
-
-const requireRevision = (state: ArenaRoomAuthorityState, expectedRevision: number): void => {
-  if (state.snapshot.revision !== expectedRevision) fail('ROOM_REVISION_STALE');
 };
 
 const executeOnce = async (
@@ -287,13 +334,22 @@ export const createArenaRoomProposalService = (
       if (membership.state.terminalProposalIds.includes(request.data.proposalId)) {
         return fail('ROOM_PROPOSAL_CONFLICT');
       }
+      assertSubmittedWebPackageRefsShareable(request.data.changes);
 
       await verifyRefs(options.references, {
         refs: introducedRefs(request.data.changes),
         hostAccountUserId: hostAccountUserId(membership.state),
       });
+      try {
+        await verifyArenaRoomPresetRefs({
+          presets: options.presets,
+          refs: introducedPresetRefs(request.data.changes),
+        });
+      } catch (error) {
+        mapPresetReferenceError(error);
+      }
       const timestamp = monotonicTimestamp(now, membership.state);
-      const proposal = ArenaProposalSchema.parse({
+      const parsedProposal = ArenaProposalSchema.safeParse({
         proposalVersion: 1,
         proposalId: request.data.proposalId,
         roomId: membership.state.snapshot.roomId,
@@ -303,6 +359,13 @@ export const createArenaRoomProposalService = (
         changes: request.data.changes,
         createdAt: timestamp,
       });
+      if (!parsedProposal.success) {
+        if (parsedProposal.error.issues.some((issue) => issue.message === 'payload-too-large')) {
+          return fail('ROOM_PROPOSAL_BYTE_LIMIT');
+        }
+        return fail('ROOM_PROPOSAL_INPUT_INVALID');
+      }
+      const proposal = parsedProposal.data;
 
       let transition: ArenaRoomTransitionSuccess;
       try {
@@ -332,8 +395,15 @@ export const createArenaRoomProposalService = (
       if (!request.success) return fail('ROOM_PROPOSAL_INPUT_INVALID');
       const membership = await resolveMembership(input.roomId, input.accountUserId);
       requireEpoch(membership.state, request.data.expectedRoomEpoch);
-      requireRevision(membership.state, request.data.expectedRevision);
+      // No ordinary exact-revision veto: applyArenaProposal re-runs the dependency-ordered
+      // typed expectedBase merge against the latest authoritative config inside
+      // the atomic transition below, so unrelated concurrent revisions do not
+      // invalidate a still-mergeable proposal.
       if (membership.member.role !== 'host') return fail('ROOM_PERMISSION_DENIED');
+      if (request.data.overrideChangeIds?.length
+        && request.data.expectedRevision !== membership.state.snapshot.revision) {
+        return fail('ROOM_REVISION_STALE');
+      }
       const proposal = membership.state.snapshot.proposals.find((item) => item.proposalId === proposalId);
       if (!proposal) {
         return membership.state.terminalProposalIds.includes(proposalId)
@@ -346,12 +416,33 @@ export const createArenaRoomProposalService = (
           roomId: membership.state.snapshot.roomId,
           config: membership.state.snapshot.sharedConfig,
           revision: membership.state.snapshot.revision,
-        }, proposal, request.data.selectedChangeIds);
-        if (applied.status === 'rejected') return fail('ROOM_PROPOSAL_CONFLICT');
+        }, proposal, request.data.selectedChangeIds, {
+          overrideChangeIds: request.data.overrideChangeIds,
+          isServerShareableWebPackageRef,
+        });
+        if (applied.status === 'rejected') {
+          if (applied.issues.some((issue) => issue.message.includes('not server-shareable'))) {
+            return fail('ROOM_REFERENCE_DENIED');
+          }
+          return fail('ROOM_PROPOSAL_CONFLICT');
+        }
+        try {
+          assertSharedConfigServerShareableWebPackage(applied.config);
+        } catch {
+          return fail('ROOM_REFERENCE_DENIED');
+        }
         await verifyRefs(options.references, {
-          refs: canonicalConfigRefs(applied.config),
+          refs: canonicalArenaRoomSharedConfigRefs(applied.config),
           hostAccountUserId: membership.accountUserId,
         });
+        try {
+          await verifyArenaRoomSharedConfigPresetRefs({
+            presets: options.presets,
+            sharedConfig: applied.config,
+          });
+        } catch (error) {
+          mapPresetReferenceError(error);
+        }
       }
 
       const timestamp = monotonicTimestamp(now, membership.state);
@@ -364,13 +455,16 @@ export const createArenaRoomProposalService = (
         ...(request.data.selectedChangeIds === undefined
           ? {}
           : { selectedChangeIds: request.data.selectedChangeIds }),
+        ...(request.data.overrideChangeIds === undefined
+          ? {}
+          : { overrideChangeIds: request.data.overrideChangeIds }),
         timestamp,
       });
       const event = transition.events.find((item) => (
         item.type === 'proposal.resolved' && item.payload.proposalId === proposalId
       ));
       if (!event || event.type !== 'proposal.resolved') return fail('ROOM_TRANSITION_DENIED');
-      return mutationView(transition.nextState, proposalId, event.payload.status, transition.kind);
+      return mutationView(transition.nextState, proposalId, event.payload.status, transition.kind, true);
     },
 
     async withdraw(input) {

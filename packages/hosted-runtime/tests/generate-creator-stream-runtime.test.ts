@@ -18,6 +18,34 @@ const createRequest = (body: unknown, signal?: AbortSignal): Request => new Requ
   },
 );
 
+const createPrepareDependencies = (
+  overrides: Partial<GenerateCreatorStreamRuntimeDependencies> = {},
+): GenerateCreatorStreamRuntimeDependencies => ({
+  findProvider: () => null,
+  resolveModel: () => null,
+  resolveBuildRules: () => [],
+  validateCreatorRequest: () => undefined,
+  buildCreatorPromptInput: (input) => ({
+    template: input.template,
+    userIntent: input.freeformBrief ?? '',
+    questionnaireSummary: '',
+    buildRuleProjection: { primary: null, references: [] },
+  }),
+  checkRateLimit: async () => null,
+  enforceSafety: async () => null,
+  shouldUseReasoningSse: () => false,
+  createReasoningSseBridge: () => ({
+    onReasoningEvent: () => undefined,
+    toResponse: (response) => response,
+  }),
+  generateWithStreamAI: async () => { throw new Error('unexpected generation'); },
+  recordActivity: () => undefined,
+  logInfo: () => undefined,
+  logWarn: () => undefined,
+  logError: () => undefined,
+  ...overrides,
+});
+
 describe('generate creator stream hosted runtime', () => {
   it('持有 general-scenario validation/prompt，并透传 signal/reasoning/usage 与上游 response', async () => {
     const events: string[] = [];
@@ -127,5 +155,43 @@ describe('generate creator stream hosted runtime', () => {
       'bridge:203:observed-model',
     ]);
     expect(JSON.stringify(events)).not.toContain('top-secret-key');
+  });
+
+  it('保留已知 Creator validation 的 400 可行动文案', async () => {
+    const runtime = createGenerateCreatorStreamRuntime(createPrepareDependencies({
+      validateCreatorRequest: () => { throw new Error('FREEFORM_BRIEF_REQUIRED'); },
+    }));
+
+    const response = await runtime.service(createRequest({ freeformBrief: '已有补充说明' }));
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: '创作请求无效',
+      message: 'FREEFORM_BRIEF_REQUIRED',
+    });
+  });
+
+  it('prompt 构造内部异常返回 500 且不泄漏 Provider secret', async () => {
+    const providerSecret = 'creator-stream-provider-secret-canary';
+    const runtime = createGenerateCreatorStreamRuntime(createPrepareDependencies({
+      buildCreatorPromptInput: () => {
+        throw new Error(`Prompt adapter failed at /srv/creator/private.ts: ${providerSecret}`);
+      },
+    }));
+
+    const response = await runtime.service(createRequest({
+      freeformBrief: '已有补充说明',
+      customProvider: {
+        providerId: 'proxy',
+        modelId: 'model',
+        apiKey: providerSecret,
+      },
+    }));
+    const body = await response.text();
+
+    expect(response.status).toBe(500);
+    expect(body).toContain('Prompt adapter failed');
+    expect(body).not.toContain(providerSecret);
+    expect(body).not.toContain('/srv/creator/private.ts');
   });
 });

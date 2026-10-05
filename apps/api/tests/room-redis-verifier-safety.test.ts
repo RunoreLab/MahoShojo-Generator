@@ -1,3 +1,4 @@
+import { registerBundledVerifier } from './helpers/bundled-verifier';
 import { spawn } from 'node:child_process';
 import { createServer, type Socket } from 'node:net';
 import { fileURLToPath } from 'node:url';
@@ -6,6 +7,7 @@ const verifierPaths = {
   room: fileURLToPath(new URL('../scripts/verify-room-redis.ts', import.meta.url)),
   generation: fileURLToPath(new URL('../scripts/verify-room-generation-redis.ts', import.meta.url)),
 } as const;
+const bundledVerifiers = { room: registerBundledVerifier(verifierPaths.room), generation: registerBundledVerifier(verifierPaths.generation) };
 const CHILD_TIMEOUT_MS = 10_000;
 
 const runAgainstTcpSentinel = async (input: Readonly<{
@@ -30,7 +32,7 @@ const runAgainstTcpSentinel = async (input: Readonly<{
   const address = sentinel.address();
   if (!address || typeof address === 'string') throw new Error('TCP_SENTINEL_ADDRESS_INVALID');
 
-  const child = spawn(process.execPath, ['--import', 'tsx', verifierPaths[input.verifier]], {
+  const child = spawn(process.execPath, [bundledVerifiers[input.verifier]()], {
     env: {
       ...process.env,
       HOSTED_API_ENVIRONMENT: input.hostedApiEnvironment,

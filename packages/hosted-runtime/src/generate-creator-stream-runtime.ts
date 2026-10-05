@@ -19,7 +19,10 @@ import {
   inferCustomProviderMode,
   type CustomProviderRuntimeDependencies,
 } from './custom-provider-runtime';
-import { CREATOR_MAGICAL_GIRL_ACTION_TYPE } from './generate-creator-runtime';
+import {
+  buildCreatorPreparationErrorResponse,
+  CREATOR_MAGICAL_GIRL_ACTION_TYPE,
+} from './generate-creator-runtime';
 import {
   type GenerationAiTelemetry,
   type RawGenerationConfig,
@@ -101,13 +104,25 @@ export const createGenerateCreatorStreamRuntime = (
       const questionnaires = normalizeQuestionnaires(parsedBody.questionnaires);
       const normalizedAnswers = resolveAnswerItems(parsedBody.answers, questionnaires);
       const template = normalizeCreatorTemplate(parsedBody.template, 'stream');
+      const customProviderPayload = parsedBody.customProvider;
+      const providerSecret = customProviderPayload
+        && typeof customProviderPayload === 'object'
+        && !Array.isArray(customProviderPayload)
+        && typeof (customProviderPayload as Record<string, unknown>).apiKey === 'string'
+        ? (customProviderPayload as Record<string, string>).apiKey
+        : '';
+      const sensitiveTexts = [
+        typeof parsedBody.freeformBrief === 'string' ? parsedBody.freeformBrief : '',
+        ...normalizedAnswers.flatMap((answer) => [answer.question ?? '', answer.answer]),
+      ];
+      let creatorRequestInput: CreatorRequestInput;
       try {
         const buildRules = ports.resolveBuildRules(parsedBody.buildRules);
         const primaryRuleId = typeof parsedBody.primaryRuleId === 'string'
           && parsedBody.primaryRuleId.trim()
           ? parsedBody.primaryRuleId.trim()
           : null;
-        const creatorRequestInput: CreatorRequestInput = {
+        creatorRequestInput = {
           template,
           freeformBrief: typeof parsedBody.freeformBrief === 'string'
             ? parsedBody.freeformBrief
@@ -124,23 +139,33 @@ export const createGenerateCreatorStreamRuntime = (
           throw new Error('CREATOR_TEMPLATE_MODE_UNSUPPORTED');
         }
         ports.validateCreatorRequest(creatorRequestInput);
-        return completeStep({
-          normalizedAnswers,
-          questionnaires,
-          language: parsedBody.language === undefined
-            ? 'zh-CN'
-            : parsedBody.language as string,
-          customProviderPayload: parsedBody.customProvider,
-          template,
-          creatorPromptInput: ports.buildCreatorPromptInput(creatorRequestInput),
-        });
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'CREATOR_REQUEST_INVALID';
-        return respondStep(new Response(JSON.stringify({ error: '创作请求无效', message }), {
-          status: 400,
-          headers: { 'Content-Type': 'application/json' },
+        return respondStep(buildCreatorPreparationErrorResponse(error, {
+          allowValidationMessage: true,
+          providerSecret,
+          sensitiveTexts,
         }));
       }
+      let creatorPromptInput: CreatorPromptInput;
+      try {
+        creatorPromptInput = ports.buildCreatorPromptInput(creatorRequestInput);
+      } catch (error) {
+        return respondStep(buildCreatorPreparationErrorResponse(error, {
+          allowValidationMessage: false,
+          providerSecret,
+          sensitiveTexts,
+        }));
+      }
+      return completeStep({
+        normalizedAnswers,
+        questionnaires,
+        language: parsedBody.language === undefined
+          ? 'zh-CN'
+          : parsedBody.language as string,
+        customProviderPayload,
+        template,
+        creatorPromptInput,
+      });
     },
     checkRateLimit: (request, input) => ports.checkRateLimit({
       request,

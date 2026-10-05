@@ -25,6 +25,7 @@ describe('requestMetadata', () => {
     }));
     app.options('/resource', (context) => context.body(null, 204));
     app.post('/resource', (context) => context.text('created', 201));
+    app.post('/generations/:generationId/cancel', (context) => context.json({ cancelled: true }));
     app.get('/failure', (context) => context.json({ error: 'failed' }, 500));
     return app;
   };
@@ -59,6 +60,7 @@ describe('requestMetadata', () => {
     expect(infoSpy).toHaveBeenCalledWith('[hono][request]', expect.objectContaining({
       requestId: 'failed-get-request-id',
       method: 'GET',
+      route: '/failure',
       status: 500,
     }));
     expect(infoSpy.mock.calls[0]?.[1]).not.toHaveProperty('path');
@@ -75,9 +77,29 @@ describe('requestMetadata', () => {
     expect(infoSpy).toHaveBeenCalledWith('[hono][request]', expect.objectContaining({
       requestId: 'post-request-id',
       method: 'POST',
+      route: '/resource',
       status: 201,
     }));
     expect(infoSpy.mock.calls[0]?.[1]).not.toHaveProperty('path');
+  });
+
+  it('只记录低基数路由模板，不记录动态 ID 或 query', async () => {
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    const response = await createApp().request(
+      '/generations/private-generation-id/cancel?secret=query-canary',
+      { method: 'POST', headers: { 'x-request-id': 'route-template-request' } },
+    );
+
+    expect(response.status).toBe(200);
+    expect(infoSpy).toHaveBeenCalledWith('[hono][request]', expect.objectContaining({
+      requestId: 'route-template-request',
+      method: 'POST',
+      route: '/generations/:generationId/cancel',
+      status: 200,
+    }));
+    expect(JSON.stringify(infoSpy.mock.calls)).not.toMatch(
+      /private-generation-id|query-canary|secret=/u,
+    );
   });
 
   it('客户端 request id 不符合低基数格式时生成服务器 ID', async () => {

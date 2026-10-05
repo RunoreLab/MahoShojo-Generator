@@ -1,6 +1,9 @@
 import { createHash } from 'node:crypto';
+import { ArenaMultiplayerParticipationSchema } from '@mahoshojo/contracts/arena-room';
 
 import {
+  generationCancelCode,
+  isArenaGenerationPersistenceWarning,
   isArenaPreparationSeed,
   isArenaPreparationVersion,
   isGenerationCancelReason,
@@ -20,7 +23,19 @@ const DEFAULT_ACTIVE_TTL_SECONDS = 3_600;
 const DEFAULT_TERMINAL_TTL_SECONDS = 2_700;
 const DEFAULT_MAX_EVENTS = 2_048;
 const MAX_READ_EVENTS = 256;
+const MIN_BLOCKING_READ_MS = 1;
+const MAX_BLOCKING_READ_MS = 1_000;
 const KEY_PREFIX = 'mahoshojo:gen:v1';
+
+const normalizeBlockingReadMs = (blockMs: number): number => {
+  if (!Number.isFinite(blockMs)) {
+    return MAX_BLOCKING_READ_MS;
+  }
+  return Math.min(
+    MAX_BLOCKING_READ_MS,
+    Math.max(MIN_BLOCKING_READ_MS, Math.floor(blockMs)),
+  );
+};
 
 type RedisStreamMessage = {
   id: string;
@@ -117,8 +132,16 @@ if state.leaseExpiresAt == nil or state.leaseExpiresAt == cjson.null or state.le
 state.status = 'finalizing'
 state.updatedAt = ARGV[2]
 state.leaseExpiresAt = ARGV[3]
+if ARGV[5] ~= '' then state.intendedTerminal = cjson.decode(ARGV[5]) end
 if state.cancelRequested == true and state.cancelReason ~= 'content_policy' then
   state.cancelReason = 'user'
+end
+if state.cancelRequested == true then
+  if state.cancelReason == 'content_policy' then
+    state.intendedTerminal = cjson.decode(ARGV[7])
+  else
+    state.intendedTerminal = cjson.decode(ARGV[6])
+  end
 end
 redis.call('SET', KEYS[1], cjson.encode(state), 'PX', ARGV[4])
 redis.call('PEXPIRE', state.reservationKey, ARGV[4])
@@ -149,7 +172,11 @@ state.updatedAt = ARGV[2]
 state.leaseExpiresAt = ARGV[4]
 redis.call('SET', KEYS[1], cjson.encode(state), 'PX', ARGV[5])
 redis.call('PEXPIRE', state.reservationKey, ARGV[5])
-return { 'claimed', state.generationRequestId, state.payloadHash, state.mode or '' }
+local intendedTerminal = ''
+if state.intendedTerminal ~= nil and state.intendedTerminal ~= cjson.null then
+  intendedTerminal = cjson.encode(state.intendedTerminal)
+end
+return { 'claimed', state.generationRequestId, state.payloadHash, state.mode or '', intendedTerminal }
 `;
 
 const RELEASE_RESERVATION_SCRIPT = `
@@ -198,7 +225,7 @@ for index, event in ipairs(events) do
   ids[index] = redis.call(
     'XADD', KEYS[2], '*',
     'type', event.type,
-    'data', cjson.encode(event.data)
+    'data', event.dataJson
   )
 end
 redis.call('XTRIM', KEYS[2], 'MAXLEN', ARGV[3])
@@ -255,7 +282,7 @@ end
 local terminalEventId = redis.call(
   'XADD', KEYS[2], '*',
   'type', terminalEvent.type,
-  'data', cjson.encode(terminalEvent.data)
+  'data', terminalEvent.dataJson
 )
 redis.call('XTRIM', KEYS[2], 'MAXLEN', ARGV[5])
 state.lastEventId = terminalEventId
@@ -267,6 +294,7 @@ elseif ARGV[8] == '1' then
 end
 state.status = terminal.status
 state.terminal = terminal
+state.intendedTerminal = cjson.null
 state.leaseExpiresAt = cjson.null
 state.updatedAt = ARGV[3]
 redis.call('SET', KEYS[1], cjson.encode(state), 'PX', ARGV[4])
@@ -417,6 +445,7 @@ const parseStoredSnapshot = (value: unknown): GenerationSnapshot | null => {
   const lastEventId = value.lastEventId ?? null;
   const telemetry = value.telemetry ?? null;
   const terminalResultRef = value.terminalResultRef ?? null;
+  const persistenceWarning = value.persistenceWarning;
   if (
     !isGenerationStatus(value.status)
     || typeof value.markdown !== 'string'
@@ -425,6 +454,7 @@ const parseStoredSnapshot = (value: unknown): GenerationSnapshot | null => {
     || typeof value.updatedAt !== 'string'
     || (telemetry !== null && !isRecord(telemetry))
     || !nullableString(terminalResultRef)
+    || (persistenceWarning !== undefined && !isArenaGenerationPersistenceWarning(persistenceWarning))
   ) {
     throw new Error('REDIS_GENERATION_STATE_INVALID');
   }
@@ -436,6 +466,9 @@ const parseStoredSnapshot = (value: unknown): GenerationSnapshot | null => {
     updatedAt: value.updatedAt,
     telemetry: telemetry as Record<string, unknown> | null,
     terminalResultRef,
+    ...(persistenceWarning === undefined ? {} : {
+      persistenceWarning,
+    }),
   };
 };
 
@@ -445,9 +478,12 @@ const parseStoredTerminal = (value: unknown): GenerationTerminal | null => {
     throw new Error('REDIS_GENERATION_STATE_INVALID');
   }
   const publicError = value.publicError;
+  const persistenceWarning = value.persistenceWarning;
   if (
     ('code' in value && typeof value.code !== 'string')
     || ('resultRef' in value && !nullableString(value.resultRef))
+    || (persistenceWarning !== undefined
+      && !isArenaGenerationPersistenceWarning(persistenceWarning))
     || (publicError !== undefined && !isSafePublicAiErrorProjection(publicError))
   ) {
     throw new Error('REDIS_GENERATION_STATE_INVALID');
@@ -458,6 +494,9 @@ const parseStoredTerminal = (value: unknown): GenerationTerminal | null => {
     status: value.status,
     ...(code === undefined ? {} : { code: code as string }),
     ...(resultRef === undefined ? {} : { resultRef: resultRef as string | null }),
+    ...(persistenceWarning === undefined ? {} : {
+      persistenceWarning,
+    }),
     ...(publicError === undefined ? {} : { publicError: { ...publicError } }),
   };
 };
@@ -487,6 +526,7 @@ const parseStoredState = (raw: string): StoredGenerationState => {
   const preparationVersion = parsed.preparationVersion ?? null;
   const snapshot = parseStoredSnapshot(parsed.snapshot);
   const terminal = parseStoredTerminal(parsed.terminal);
+  const intendedTerminal = parseStoredTerminal(parsed.intendedTerminal);
   if (
     typeof parsed.actorHash !== 'string'
     || typeof parsed.reservationKey !== 'string'
@@ -507,6 +547,7 @@ const parseStoredState = (raw: string): StoredGenerationState => {
       snapshot.status !== terminal.status
       || snapshot.lastEventId !== parsed.lastEventId
       || (snapshot.terminalResultRef ?? null) !== (terminal.resultRef ?? null)
+      || (snapshot.persistenceWarning ?? null) !== (terminal.persistenceWarning ?? null)
     ))
   ) {
     throw new Error('REDIS_GENERATION_STATE_INVALID');
@@ -518,6 +559,9 @@ const parseStoredState = (raw: string): StoredGenerationState => {
     generationRequestId: parsed.generationRequestId,
     payloadHash: parsed.payloadHash,
     mode: typeof parsed.mode === 'string' ? parsed.mode : null,
+    ...(parsed.multiplayerParticipation === undefined ? {} : {
+      multiplayerParticipation: ArenaMultiplayerParticipationSchema.parse(parsed.multiplayerParticipation),
+    }),
     producerToken: parsed.producerToken,
     status: parsed.status,
     lastEventId: typeof parsed.lastEventId === 'string' ? parsed.lastEventId : null,
@@ -525,6 +569,7 @@ const parseStoredState = (raw: string): StoredGenerationState => {
     leaseExpiresAt: typeof parsed.leaseExpiresAt === 'string' ? parsed.leaseExpiresAt : null,
     snapshot,
     terminal,
+    intendedTerminal,
     cancelRequested: parsed.cancelRequested === true,
     cancelReason: isGenerationCancelReason(parsed.cancelReason)
       ? parsed.cancelReason
@@ -664,6 +709,9 @@ export const createRedisGenerationReplayStore = (
         generationRequestId: input.generationRequestId,
         payloadHash: input.payloadHash,
         mode: input.mode ?? null,
+        ...(input.multiplayerParticipation ? {
+          multiplayerParticipation: ArenaMultiplayerParticipationSchema.parse(input.multiplayerParticipation),
+        } : {}),
         producerToken: input.producerToken,
         status: 'reserved',
         lastEventId: null,
@@ -671,6 +719,7 @@ export const createRedisGenerationReplayStore = (
         leaseExpiresAt: input.leaseExpiresAt,
         snapshot: null,
         terminal: null,
+        intendedTerminal: null,
         cancelRequested: false,
         cancelReason: null,
         preparationSeed,
@@ -724,6 +773,15 @@ export const createRedisGenerationReplayStore = (
           input.now,
           input.leaseExpiresAt,
           String(activeTtlMs),
+          input.terminal ? JSON.stringify(input.terminal) : '',
+          JSON.stringify({
+            status: 'cancelled',
+            code: generationCancelCode('user'),
+          }),
+          JSON.stringify({
+            status: 'cancelled',
+            code: generationCancelCode('content_policy'),
+          }),
         ],
       });
       const cancelReason = cancelReasonFromTaggedResult(result, 'cancelled:');
@@ -756,12 +814,16 @@ export const createRedisGenerationReplayStore = (
         && typeof result[1] === 'string'
         && typeof result[2] === 'string'
         && typeof result[3] === 'string'
+        && (result[4] === undefined || typeof result[4] === 'string')
       ) {
         return {
           kind: 'claimed' as const,
           generationRequestId: result[1],
           payloadHash: result[2],
           mode: result[3] || null,
+          ...(result[4]
+            ? { intendedTerminal: parseStoredTerminal(JSON.parse(result[4])) }
+            : {}),
         };
       }
       if (kind === 'not-expired' || kind === 'forbidden' || kind === 'not-found') {
@@ -807,11 +869,15 @@ export const createRedisGenerationReplayStore = (
 
     async appendEvents(input) {
       if (input.events.length === 0) return { owned: true, events: [] };
+      const serializedEvents = input.events.map((event) => ({
+        type: event.type,
+        dataJson: JSON.stringify(event.data) ?? 'null',
+      }));
       const raw = await options.getClient().eval(APPEND_SCRIPT, {
         keys: [stateKey(input.generationId), eventsKey(input.generationId)],
         arguments: [
           input.producerToken,
-          JSON.stringify(input.events),
+          JSON.stringify(serializedEvents),
           String(maxEvents),
           String(activeTtlMs),
           input.now,
@@ -879,7 +945,10 @@ export const createRedisGenerationReplayStore = (
 
       const tail = await client.xRead(
         [{ key, id: input.after ?? '0-0' }],
-        { BLOCK: Math.max(1, Math.floor(input.blockMs)), COUNT: MAX_READ_EVENTS },
+        {
+          BLOCK: normalizeBlockingReadMs(input.blockMs),
+          COUNT: MAX_READ_EVENTS,
+        },
       );
       if (!tail?.some((stream) => stream.messages.length > 0)) {
         return immediate;
@@ -909,7 +978,12 @@ export const createRedisGenerationReplayStore = (
           input.now,
           String(terminalTtlMs),
           String(maxEvents),
-          input.terminalEvent ? JSON.stringify(input.terminalEvent) : '',
+          input.terminalEvent
+            ? JSON.stringify({
+                type: input.terminalEvent.type,
+                dataJson: JSON.stringify(input.terminalEvent.data) ?? 'null',
+              })
+            : '',
           input.terminalSnapshot ? JSON.stringify(input.terminalSnapshot) : '',
           input.clearTerminalSnapshot ? '1' : '0',
         ],

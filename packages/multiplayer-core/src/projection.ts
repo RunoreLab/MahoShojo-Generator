@@ -23,6 +23,8 @@ import { deepClone, isRecord } from './utils';
  */
 export interface ArenaRoomNormalizedSource {
   readonly battleMode: ArenaRoomSharedConfig['battleMode'];
+  readonly reportFormat?: ArenaRoomSharedConfig['reportFormat'];
+  readonly webPackageRef?: ArenaRoomSharedConfig['webPackageRef'];
   readonly combatants: readonly ({
     readonly key: string;
     readonly ref: DataCardRef;
@@ -61,6 +63,7 @@ const projectCombatant = (value: unknown): unknown => {
       type: value.type,
       source: 'host-local',
     };
+    if (value.contentVersion !== undefined) output.contentVersion = value.contentVersion;
     if (value.characterGuidance !== undefined) output.characterGuidance = value.characterGuidance;
     return output;
   }
@@ -84,6 +87,7 @@ const projectScenarioOrMaterial = (value: unknown): unknown => {
       type: value.type,
       source: 'host-local',
     };
+    if (value.contentVersion !== undefined) output.contentVersion = value.contentVersion;
     if (value.guidance !== undefined) output.guidance = value.guidance;
     return output;
   }
@@ -122,6 +126,14 @@ const projectConfig = (input: unknown): unknown => {
   if (!isRecord(input)) return input;
   return {
     battleMode: input.battleMode,
+    reportFormat: input.reportFormat,
+    ...(input.webPackageRef === undefined ? {} : {
+      webPackageRef: isRecord(input.webPackageRef) ? {
+        id: input.webPackageRef.id,
+        version: input.webPackageRef.version,
+        digest: input.webPackageRef.digest,
+      } : input.webPackageRef,
+    }),
     combatants: Array.isArray(input.combatants) ? input.combatants.map(projectCombatant) : input.combatants,
     teams: Array.isArray(input.teams) ? input.teams.map(projectTeam) : input.teams,
     scenario: projectScenarioOrMaterial(input.scenario),

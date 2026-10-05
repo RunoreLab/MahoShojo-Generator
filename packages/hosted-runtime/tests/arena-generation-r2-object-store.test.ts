@@ -47,4 +47,75 @@ describe('Arena R2 object store', () => {
     expect(fetcher).toHaveBeenCalledOnce();
     expect(JSON.stringify(sign.mock.calls)).not.toContain('private-secret');
   });
+
+  it('returns a typed found result for an existing object', async () => {
+    const sign = vi.fn(async (url: string, init: RequestInit) => new Request(url, init));
+    const store = createArenaR2ObjectStoreFromEnvironment({
+      env: {
+        R2_ACCESS_KEY_ID: 'access-secret',
+        R2_SECRET_ACCESS_KEY: 'private-secret',
+        R2_BUCKET_NAME: 'arena-output',
+        R2_ENDPOINT: 'https://r2.example.test',
+      },
+      signer: { sign } as never,
+      fetch: vi.fn(async () => new Response('full body', { status: 200 })),
+    });
+
+    await expect(store!.getText('v1/battle/generation-1/output.md')).resolves.toEqual({
+      kind: 'found',
+      text: 'full body',
+    });
+  });
+
+  it('returns a typed not-found result only for R2 404', async () => {
+    const sign = vi.fn(async (url: string, init: RequestInit) => new Request(url, init));
+    const store = createArenaR2ObjectStoreFromEnvironment({
+      env: {
+        R2_ACCESS_KEY_ID: 'access-secret',
+        R2_SECRET_ACCESS_KEY: 'private-secret',
+        R2_BUCKET_NAME: 'arena-output',
+        R2_ENDPOINT: 'https://r2.example.test',
+      },
+      signer: { sign } as never,
+      fetch: vi.fn(async () => new Response(null, { status: 404 })),
+    });
+
+    await expect(store!.getText('v1/battle/generation-1/output.md')).resolves.toEqual({
+      kind: 'not-found',
+    });
+  });
+
+  it.each([403, 500])('keeps R2 %s as a temporary read failure', async (status) => {
+    const sign = vi.fn(async (url: string, init: RequestInit) => new Request(url, init));
+    const store = createArenaR2ObjectStoreFromEnvironment({
+      env: {
+        R2_ACCESS_KEY_ID: 'access-secret',
+        R2_SECRET_ACCESS_KEY: 'private-secret',
+        R2_BUCKET_NAME: 'arena-output',
+        R2_ENDPOINT: 'https://r2.example.test',
+      },
+      signer: { sign } as never,
+      fetch: vi.fn(async () => new Response(null, { status })),
+    });
+
+    await expect(store!.getText('v1/battle/generation-1/output.md'))
+      .rejects.toThrow(`ARENA_R2_GET_FAILED_${status}`);
+  });
+
+  it('propagates R2 network failures instead of treating them as not-found', async () => {
+    const sign = vi.fn(async (url: string, init: RequestInit) => new Request(url, init));
+    const networkFailure = new TypeError('network timeout');
+    const store = createArenaR2ObjectStoreFromEnvironment({
+      env: {
+        R2_ACCESS_KEY_ID: 'access-secret',
+        R2_SECRET_ACCESS_KEY: 'private-secret',
+        R2_BUCKET_NAME: 'arena-output',
+        R2_ENDPOINT: 'https://r2.example.test',
+      },
+      signer: { sign } as never,
+      fetch: vi.fn(async () => { throw networkFailure; }),
+    });
+
+    await expect(store!.getText('v1/battle/generation-1/output.md')).rejects.toBe(networkFailure);
+  });
 });

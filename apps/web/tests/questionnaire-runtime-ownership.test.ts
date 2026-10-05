@@ -11,6 +11,8 @@ describe('questionnaire runtime ownership', () => {
     expect(legacyRuntime.resolveNativeQuestionnaires).toBe(packageRuntime.resolveNativeQuestionnaires);
     expect(legacyRuntime.resolveAnswerItems).toBe(packageRuntime.resolveAnswerItems);
     expect(legacyQuestionnaires.normalizeUserAnswers).toBe(questionnaireDomain.normalizeUserAnswers);
+    expect(legacyQuestionnaires.formatQuestionnaireAnswers).toBe(questionnaireDomain.formatQuestionnaireAnswers);
+    expect(legacyQuestionnaires.compactQuestionnaireAnswerItems).toBe(questionnaireDomain.compactQuestionnaireAnswerItems);
     expect(legacyQuestionnaires.buildQuestionnaireAnswerLookup)
       .toBe(questionnaireDomain.buildQuestionnaireAnswerLookup);
     expect(legacyLimits.getAnswerLimitInfo).toBe(questionnaireDomain.getAnswerLimitInfo);

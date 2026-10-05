@@ -1,6 +1,6 @@
 'use client';
 
-type TabKey = 'reports' | 'pvp' | 'settings';
+type TabKey = 'reports' | 'settings';
 
 type Props = {
   value: TabKey;
@@ -22,16 +22,6 @@ export function MeTabs({ value, onChange }: Props) {
         onClick={() => onChange('reports')}
       >
         战报记录
-      </button>
-      <button
-        type="button"
-        className={[
-          tabBase,
-          value === 'pvp' ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200',
-        ].join(' ')}
-        onClick={() => onChange('pvp')}
-      >
-        PVP 战绩
       </button>
       <button
         type="button"

@@ -38,6 +38,16 @@ export const isOnlineRef = (value: unknown): value is { id: string; kind: string
 
 export const canonicalDataCardKey = (id: string): string => `data-card:${id}`;
 
+export const canonicalPresetKey = (id: string): string => `preset:${id}`;
+
+export const canonicalResourceKey = (id: string, key?: string): string => (
+  key ?? canonicalDataCardKey(id)
+);
+
+export const isCanonicalResourceKey = (key: string, id: string): boolean => (
+  key === canonicalDataCardKey(id) || key === canonicalPresetKey(id)
+);
+
 export const isCanonicalDataCardKey = (key: string, id: string): boolean => key === canonicalDataCardKey(id);
 
 export const hasVersionDrift = (expected: unknown, current: unknown): boolean => (
@@ -46,6 +56,14 @@ export const hasVersionDrift = (expected: unknown, current: unknown): boolean =>
   && expected.id === current.id
   && expected.kind === current.kind
   && expected.versionToken !== current.versionToken
+);
+
+/** Online DataCard refs float to the latest version; id + kind remain stable. */
+export const sameOnlineDataCardIdentity = (left: unknown, right: unknown): boolean => (
+  isOnlineRef(left)
+  && isOnlineRef(right)
+  && left.id === right.id
+  && left.kind === right.kind
 );
 
 export const arrayEqual = (left: readonly string[], right: readonly string[]): boolean => (

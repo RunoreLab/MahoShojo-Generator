@@ -10,9 +10,13 @@ import {
 } from '@mahoshojo/contracts/arena-room';
 
 import { ArenaMultiplayerCoreError } from './errors';
-import { detectProposalConflicts, type ArenaProposalConflict } from './conflicts';
+import {
+  analyzeProposalChanges,
+  type ArenaProposalChangeAnalysis,
+  type ArenaProposalConflict,
+} from './conflicts';
 import { validateProposalChanges, type ProposalSelectionIssue, type ProposalSelectionValidation } from './selection';
-import { canonicalDataCardKey, deepClone } from './utils';
+import { canonicalResourceKey, deepClone, deepEqual } from './utils';
 
 export interface ArenaProposalState {
   readonly roomId: string;
@@ -20,12 +24,33 @@ export interface ArenaProposalState {
   readonly revision: number;
 }
 
+/** Pure application options. Host authorization and review revision fences live at the authority boundary. */
+export interface ArenaProposalApplyOptions {
+  readonly overrideChangeIds?: readonly string[];
+  /**
+   * Server-side source-capability check for `setWebPackageRef`.
+   * Pure multiplayer logic cannot import the package registry; hosts inject
+   * the exact-builtin predicate when applying proposals on the authority path.
+   */
+  readonly isServerShareableWebPackageRef?: (_ref: NonNullable<ArenaRoomSharedConfig['webPackageRef']>) => boolean;
+}
+
 export interface ArenaProposalApplyResult {
   readonly status: 'accepted' | 'partially_accepted' | 'rejected';
   readonly config: ArenaRoomSharedConfig;
   readonly revision: number;
   readonly acceptedChangeIds: readonly string[];
+  readonly satisfiedChangeIds: readonly string[];
   readonly rejectedChangeIds: readonly string[];
+  readonly conflicts: readonly ArenaProposalConflict[];
+  readonly issues: readonly ProposalSelectionIssue[];
+}
+
+export interface ArenaProposalApplicationPreview {
+  readonly status: 'accepted' | 'partially_accepted' | 'rejected';
+  readonly plan: readonly ArenaProposalChangeAnalysis[];
+  readonly acceptedChangeIds: readonly string[];
+  readonly satisfiedChangeIds: readonly string[];
   readonly conflicts: readonly ArenaProposalConflict[];
   readonly issues: readonly ProposalSelectionIssue[];
 }
@@ -66,6 +91,7 @@ const rejected = (
   config: deepClone(config),
   revision,
   acceptedChangeIds: [],
+  satisfiedChangeIds: [],
   rejectedChangeIds: [...ids],
   conflicts: [...conflicts],
   issues: [...issues],
@@ -82,15 +108,65 @@ const changeTargetExists = (config: ArenaRoomSharedConfig, change: ArenaProposal
       return config.auxScenarios.some((entry) => entry.key === change.scenarioKey);
     case 'removeMaterial':
       return config.materials.some((entry) => entry.key === change.materialKey);
+    case 'removeTeam':
+    case 'renameTeam':
+    case 'reorderTeamCombatants':
+      return config.teams.some((team) => team.key === change.teamKey);
     default:
       return true;
   }
 };
 
-const applyChange = (config: ArenaRoomSharedConfig, change: ArenaProposalChange): void => {
+const overrideBlockedReason = (
+  config: ArenaRoomSharedConfig,
+  change: ArenaProposalChange,
+  analysis: ArenaProposalChangeAnalysis,
+): ArenaProposalChangeAnalysis['overrideBlockedReason'] => {
+  if (analysis.conflict?.code === 'reference-changed') return 'reference-changed';
+  if (!changeTargetExists(config, change)
+    || (change.type === 'assignTeam' && change.teamKey !== null
+      && !config.teams.some((team) => team.key === change.teamKey))) return 'target-missing';
+  // Explicit allowlist: never force an add-key collision or a full-list reorder.
+  switch (change.type) {
+    case 'setCharacterGuidance':
+    case 'setUserGuidance':
+    case 'setReportFormat':
+    case 'setWebPackageRef':
+    case 'setBattleMode':
+    case 'setSelectedLanguage':
+    case 'setStoryLength':
+    case 'setHistorySettings':
+    case 'setScenario':
+    case 'renameTeam':
+    case 'assignTeam':
+    case 'removeCombatant':
+    case 'removeAuxScenario':
+    case 'removeMaterial':
+    case 'removeTeam': return undefined;
+    default: return 'unsupported-change';
+  }
+};
+
+const reorderByKeys = <Entry extends { readonly key: string }>(
+  entries: readonly Entry[],
+  orderedKeys: readonly string[],
+): Entry[] => {
+  const byKey = new Map(entries.map((entry) => [entry.key, entry]));
+  return orderedKeys.map((key) => {
+    const entry = byKey.get(key);
+    if (!entry) throw new ArenaMultiplayerCoreError('unsupported-change', `reorder key ${key} is absent`);
+    return entry;
+  });
+};
+
+const applyChange = (
+  config: ArenaRoomSharedConfig,
+  change: ArenaProposalChange,
+  options: ArenaProposalApplyOptions,
+): void => {
   switch (change.type) {
     case 'addCombatant': {
-      config.combatants.push({ key: canonicalDataCardKey(change.ref.id), ref: deepClone(change.ref) });
+      config.combatants.push({ key: canonicalResourceKey(change.ref.id, change.key), ref: deepClone(change.ref) });
       return;
     }
     case 'removeCombatant': {
@@ -130,25 +206,77 @@ const applyChange = (config: ArenaRoomSharedConfig, change: ArenaProposalChange)
       }
       return;
     }
+    case 'addTeam':
+      if (config.teams.some((team) => team.key === change.teamKey)) {
+        throw new ArenaMultiplayerCoreError('unsupported-change', `team ${change.teamKey} already exists`);
+      }
+      config.teams.push({ key: change.teamKey, displayName: change.displayName, combatantKeys: [] });
+      return;
+    case 'removeTeam':
+      config.teams = config.teams.filter((team) => team.key !== change.teamKey);
+      return;
+    case 'renameTeam':
+      config.teams = config.teams.map((team) => team.key === change.teamKey
+        ? { ...team, displayName: change.value }
+        : team);
+      return;
+    case 'reorderCombatants':
+      config.combatants = reorderByKeys(config.combatants, change.value);
+      return;
+    case 'reorderTeams':
+      config.teams = reorderByKeys(config.teams, change.value);
+      return;
+    case 'reorderTeamCombatants':
+      config.teams = config.teams.map((team) => team.key === change.teamKey
+        ? { ...team, combatantKeys: [...change.value] }
+        : team);
+      return;
+    case 'setReportFormat':
+      config.reportFormat = change.value;
+      return;
+    case 'setWebPackageRef':
+      if (change.value === null) delete config.webPackageRef;
+      else {
+        if (
+          options.isServerShareableWebPackageRef
+          && !options.isServerShareableWebPackageRef(change.value)
+        ) {
+          throw new ArenaMultiplayerCoreError(
+            'unsupported-change',
+            'web package ref is not server-shareable',
+          );
+        }
+        config.webPackageRef = deepClone(change.value);
+      }
+      return;
     case 'setBattleMode':
       config.battleMode = change.value;
+      return;
+    case 'setSelectedLanguage':
+      config.selectedLanguage = change.value;
       return;
     case 'setScenario':
       config.scenario = change.ref === null
         ? null
-        : { key: canonicalDataCardKey(change.ref.id), ref: deepClone(change.ref) };
+        : { key: canonicalResourceKey(change.ref.id, change.key), ref: deepClone(change.ref) };
       return;
     case 'addAuxScenario':
-      config.auxScenarios.push({ key: canonicalDataCardKey(change.ref.id), ref: deepClone(change.ref) });
+      config.auxScenarios.push({ key: canonicalResourceKey(change.ref.id, change.key), ref: deepClone(change.ref) });
       return;
     case 'removeAuxScenario':
       config.auxScenarios = config.auxScenarios.filter((entry) => entry.key !== change.scenarioKey);
       return;
+    case 'reorderAuxScenarios':
+      config.auxScenarios = reorderByKeys(config.auxScenarios, change.value);
+      return;
     case 'addMaterial':
-      config.materials.push({ key: canonicalDataCardKey(change.ref.id), ref: deepClone(change.ref) });
+      config.materials.push({ key: canonicalResourceKey(change.ref.id, change.key), ref: deepClone(change.ref) });
       return;
     case 'removeMaterial':
       config.materials = config.materials.filter((entry) => entry.key !== change.materialKey);
+      return;
+    case 'reorderMaterials':
+      config.materials = reorderByKeys(config.materials, change.value);
       return;
     case 'setUserGuidance':
       config.userGuidance = change.value;
@@ -201,12 +329,20 @@ const collectIds = (input: unknown): string[] => (
 );
 
 /** Applies one complete Proposal as one immutable revision transition. */
-export function applyArenaProposal(
-  stateInput: ArenaProposalState,
+type StagedAnalysis = Readonly<{
+  working: ArenaRoomSharedConfig;
+  plan: readonly ArenaProposalChangeAnalysis[];
+  conflicts: readonly ArenaProposalConflict[];
+  applicableChangeIds: readonly string[];
+  satisfiedChangeIds: readonly string[];
+}>;
+
+const guardProposal = (
+  state: ArenaProposalState,
   proposalInput: unknown,
   selectedChangeIds?: readonly string[],
-): ArenaProposalApplyResult {
-  const state = parseState(stateInput);
+  options: ArenaProposalApplyOptions = {},
+): { proposal: ArenaProposal; validation: ProposalSelectionValidation } | ArenaProposalApplyResult => {
   const config = parseArenaRoomSharedConfig(state.config);
   const proposal = parseProposal(proposalInput);
   const allIds = collectIds(proposalInput);
@@ -236,40 +372,171 @@ export function applyArenaProposal(
   if (validation.selectedChangeIds.length === 0) {
     return rejected(config, state.revision, proposal.changes.map((change) => change.changeId), validation.issues);
   }
+  const overrides = options.overrideChangeIds ?? [];
+  if (!Array.isArray(overrides) || new Set(overrides).size !== overrides.length
+    || overrides.some((id) => !validation.selectedChangeIds.includes(id))) {
+    return rejected(config, state.revision, allIds, [{
+      code: 'invalid-changes',
+      message: 'overrideChangeIds must be unique selected change IDs',
+    }]);
+  }
+  return { proposal, validation };
+};
 
+/**
+ * Dependency-ordered staged analysis shared by the authoritative apply path and
+ * the host/member review preview. Every selected change is evaluated against the
+ * intermediate state produced by its dependencies, so "add combatant -> guidance
+ * on the added combatant" is never reported as a conflict, and changes whose
+ * target state already equals the proposal's postcondition are reported as
+ * satisfied no-ops instead of conflicts.
+ */
+const analyzeStagedApplication = (
+  config: ArenaRoomSharedConfig,
+  proposal: ArenaProposal,
+  validation: ProposalSelectionValidation,
+  options: ArenaProposalApplyOptions,
+): StagedAnalysis => {
+  const overrides = new Set(options.overrideChangeIds ?? []);
   const selectedSet = new Set(validation.selectedChangeIds);
   const working = deepClone(config);
   const orderedSelected = topologicalOrder(validation.changes, validation.selectedChangeIds);
+  const planById = new Map<string, ArenaProposalChangeAnalysis>();
   const conflicts: ArenaProposalConflict[] = [];
-  try {
-    // Evaluate each target immediately before its dependency-ordered application.
-    // This lets a dependent change (e.g. add combatant -> guidance) compare its
-    // expected base against the staged semantic value without exposing a partial
-    // result if a later change conflicts.
-    for (const change of orderedSelected) {
-      const changeConflicts = detectProposalConflicts(working, [change]);
-      if (changeConflicts.length > 0) {
-        conflicts.push(...changeConflicts);
+  const applicableChangeIds: string[] = [];
+  const satisfiedChangeIds: string[] = [];
+  // Evaluate each target immediately before its dependency-ordered application.
+  // This lets a dependent change (e.g. add combatant -> guidance) compare its
+  // expected base against the staged semantic value without exposing a partial
+  // result if a later change conflicts.
+  for (const change of orderedSelected) {
+    const [analysis] = analyzeProposalChanges(working, [change]);
+    if (!analysis) continue;
+    let reviewed = analysis;
+    if (analysis.outcome === 'conflict' && analysis.conflict) {
+      const blockedReason = overrideBlockedReason(working, change, analysis);
+      reviewed = { ...analysis, overrideAllowed: blockedReason === undefined,
+        ...(blockedReason ? { overrideBlockedReason: blockedReason } : {}),
+      };
+      if (overrides.has(change.changeId) && !blockedReason) {
+        reviewed = { ...reviewed, outcome: 'overridden' };
+      } else {
+        planById.set(change.changeId, reviewed);
+        conflicts.push(analysis.conflict);
         continue;
       }
-      if (!changeTargetExists(working, change)) {
-        throw new ArenaMultiplayerCoreError('unsupported-change', `proposal target is absent for ${change.changeId}`);
-      }
-      applyChange(working, change);
     }
-    if (conflicts.length > 0) {
-      return rejected(config, state.revision, proposal.changes.map((change) => change.changeId), validation.issues, conflicts);
+    planById.set(change.changeId, reviewed);
+    if (analysis.outcome === 'satisfied') {
+      satisfiedChangeIds.push(change.changeId);
+      continue;
     }
-    const finalConfig = ArenaRoomSharedConfigSchema.parse(working);
-    const accepted = [...validation.selectedChangeIds];
-    const rejectedIds = proposal.changes
+    if (reviewed.outcome !== 'applicable' && reviewed.outcome !== 'overridden') continue;
+    if (!changeTargetExists(working, change)) {
+      throw new ArenaMultiplayerCoreError('unsupported-change', `proposal target is absent for ${change.changeId}`);
+    }
+    applicableChangeIds.push(change.changeId);
+    applyChange(working, change, options);
+  }
+  // Unselected changes are reference-only for reviewers: analyze them against
+  // the pristine config like the old non-staged review did.
+  const plan = proposal.changes.flatMap((change) => {
+    const staged = planById.get(change.changeId);
+    if (staged) return [staged];
+    if (selectedSet.has(change.changeId)) return [];
+    const [reference] = analyzeProposalChanges(config, [change]);
+    return reference ? [{ ...reference, outcome: 'unselected' as const }] : [];
+  });
+  return {
+    working,
+    plan,
+    conflicts,
+    applicableChangeIds,
+    satisfiedChangeIds,
+  };
+};
+
+/** Dry-run of applyArenaProposal for host/member review UIs. Same staged semantics. */
+export function previewArenaProposalApplication(
+  stateInput: ArenaProposalState,
+  proposalInput: unknown,
+  selectedChangeIds?: readonly string[],
+  options: ArenaProposalApplyOptions = {},
+): ArenaProposalApplicationPreview {
+  const state = parseState(stateInput);
+  const config = parseArenaRoomSharedConfig(state.config);
+  const guarded = guardProposal(state, proposalInput, selectedChangeIds, options);
+  if ('status' in guarded) {
+    return {
+      status: 'rejected',
+      plan: [],
+      acceptedChangeIds: [],
+      satisfiedChangeIds: [],
+      conflicts: guarded.conflicts,
+      issues: guarded.issues,
+    };
+  }
+  try {
+    const staged = analyzeStagedApplication(config, guarded.proposal, guarded.validation, options);
+    if (staged.conflicts.length === 0) ArenaRoomSharedConfigSchema.parse(staged.working);
+    const accepted = [...guarded.validation.selectedChangeIds];
+    return {
+      status: staged.conflicts.length > 0 ? 'rejected' : (
+        accepted.length === guarded.proposal.changes.length ? 'accepted' : 'partially_accepted'
+      ),
+      plan: staged.plan,
+      acceptedChangeIds: accepted,
+      satisfiedChangeIds: staged.satisfiedChangeIds,
+      conflicts: staged.conflicts,
+      issues: [],
+    };
+  } catch (error) {
+    return {
+      status: 'rejected',
+      plan: [],
+      acceptedChangeIds: [],
+      satisfiedChangeIds: [],
+      conflicts: [],
+      issues: [{
+        code: 'invalid-changes',
+        message: error instanceof Error ? error.message : 'selected changes could not be applied',
+      }],
+    };
+  }
+}
+
+export function applyArenaProposal(
+  stateInput: ArenaProposalState,
+  proposalInput: unknown,
+  selectedChangeIds?: readonly string[],
+  options: ArenaProposalApplyOptions = {},
+): ArenaProposalApplyResult {
+  const state = parseState(stateInput);
+  const config = parseArenaRoomSharedConfig(state.config);
+  const guarded = guardProposal(state, proposalInput, selectedChangeIds, options);
+  if ('status' in guarded) return guarded;
+
+  const selectedSet = new Set(guarded.validation.selectedChangeIds);
+  try {
+    const staged = analyzeStagedApplication(config, guarded.proposal, guarded.validation, options);
+    if (staged.conflicts.length > 0) {
+      return rejected(config, state.revision, guarded.proposal.changes.map((change) => change.changeId), guarded.validation.issues, staged.conflicts);
+    }
+    const finalConfig = ArenaRoomSharedConfigSchema.parse(staged.working);
+    const accepted = [...guarded.validation.selectedChangeIds];
+    const rejectedIds = guarded.proposal.changes
       .map((change) => change.changeId)
       .filter((changeId) => !selectedSet.has(changeId));
     return {
-      status: accepted.length === proposal.changes.length ? 'accepted' : 'partially_accepted',
+      status: accepted.length === guarded.proposal.changes.length ? 'accepted' : 'partially_accepted',
       config: deepClone(finalConfig),
-      revision: state.revision + 1,
+      // Satisfied no-ops terminate the proposal without mutating the config, so
+      // they must not mint a new revision. This keeps the exported contract
+      // aligned with the authority state machine, which only increments the
+      // revision when the shared config actually changed.
+      revision: deepEqual(config, finalConfig) ? state.revision : state.revision + 1,
       acceptedChangeIds: accepted,
+      satisfiedChangeIds: staged.satisfiedChangeIds,
       rejectedChangeIds: rejectedIds,
       conflicts: [],
       issues: [],
@@ -279,6 +546,6 @@ export function applyArenaProposal(
       code: 'invalid-changes',
       message: error instanceof Error ? error.message : 'selected changes could not be applied',
     };
-    return rejected(config, state.revision, proposal.changes.map((change) => change.changeId), [issue]);
+    return rejected(config, state.revision, guarded.proposal.changes.map((change) => change.changeId), [issue]);
   }
 }

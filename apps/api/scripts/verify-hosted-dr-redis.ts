@@ -126,7 +126,7 @@ VALUES (?, ?, ?, ?)
       },
       async getText(key) {
         if (key !== authorityR2Key) throw new Error('G25E2 authority R2 key mismatch');
-        return authorityMarkdown;
+        return { kind: 'found' as const, text: authorityMarkdown };
       },
     },
   });

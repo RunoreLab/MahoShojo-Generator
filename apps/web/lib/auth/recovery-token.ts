@@ -1,5 +1,5 @@
 import { getSecureRandomValues } from '@/lib/crypto';
-import { sha256Hex } from '@/lib/pvp/crypto';
+import { sha256Hex } from '@/lib/auth/sha256';
 
 export const RECOVERY_TOKEN_TTL_SECONDS = 15 * 60;
 const FALLBACK_RECOVERY_TOKEN_PEPPER = 'mahoshojo-recovery-token-v1';

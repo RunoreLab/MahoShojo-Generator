@@ -90,6 +90,8 @@ const createRunningActor = async (options: { running?: boolean } = {}) => {
   });
   const actor = actors.get(ROOM_ID);
   if (!actor) throw new Error('expected RoomActor');
+  const createdState = actor.getSnapshot();
+  if (!createdState) throw new Error('expected room state');
 
   now = Date.parse('2026-08-28T00:01:00.000Z');
   const reservation = await actor.execute({
@@ -110,6 +112,7 @@ const createRunningActor = async (options: { running?: boolean } = {}) => {
       type: 'reserve-generation',
       expectedRoomEpoch: ROOM_EPOCH,
       expectedRevision: 0,
+      expectedControlSeq: createdState.snapshot.controlSeq,
       generationRequestId: GENERATION_REQUEST_ID,
       generationId: GENERATION_ID,
       attempt: 1,
@@ -679,6 +682,38 @@ describe('RoomGenerationPublisher typed generation consumer', () => {
     });
   });
 
+  it('Web 包输出契约失败不塌缩成可重试的 generation-failed', async () => {
+    for (const code of [
+      'ARENA_WEB_PACKAGE_OUTPUT_INVALID',
+      'ARENA_WEB_PACKAGE_TARGET_INVALID',
+      'ARENA_WEB_PACKAGE_TARGET_MALFORMED',
+      'ARENA_WEB_PACKAGE_TARGET_SCHEMA',
+    ]) {
+      const harness = await createRunningActor({ running: false });
+      harness.setNow('2026-08-28T00:03:00.000Z');
+      const publisher = createRoomGenerationPublisher({
+        actor: harness.actor,
+        authority: issueArenaRoomGenerationPublisherAuthority({
+          roomId: ROOM_ID,
+          roomEpoch: ROOM_EPOCH,
+          generationRequestId: GENERATION_REQUEST_ID,
+          generationId: GENERATION_ID,
+          attempt: 1,
+          expiresAt: EXPIRES_AT,
+        }),
+        now: () => Date.parse('2026-08-28T00:03:00.000Z'),
+      });
+
+      await expect(publisher.attach(subscriptionOf([
+        { id: '1', type: 'error', status: 'failed', code },
+      ]))).resolves.toEqual({ kind: 'failed', errorCode: 'web-package-output-invalid' });
+      const state = harness.actor.getSnapshot();
+      expect(state?.snapshot.activeGeneration?.state).toBe('failed');
+      expect(state?.generationLedger.find((entry) => entry.mirror.generationId === GENERATION_ID)?.errorCode)
+        .toBe('web-package-output-invalid');
+    }
+  });
+
   it('把 typed error/无 result identity 的 completed 映射为稳定 generation-failed', async () => {
     for (const terminal of [
       { id: '1', type: 'error', status: 'producer_lost', code: 'PRODUCER_OWNERSHIP_LOST' },
@@ -711,6 +746,41 @@ describe('RoomGenerationPublisher typed generation consumer', () => {
       });
       expect(harness.actor.getSnapshot()?.snapshot.activeGeneration?.state).toBe('failed');
     }
+  });
+
+  it('正文未归档的 typed completed 仍镜像为 completed authority record', async () => {
+    const harness = await createRunningActor({ running: false });
+    harness.setNow('2026-08-28T00:03:00.000Z');
+    const publisher = createRoomGenerationPublisher({
+      actor: harness.actor,
+      authority: issueArenaRoomGenerationPublisherAuthority({
+        roomId: ROOM_ID,
+        roomEpoch: ROOM_EPOCH,
+        generationRequestId: GENERATION_REQUEST_ID,
+        generationId: GENERATION_ID,
+        attempt: 1,
+        expiresAt: EXPIRES_AT,
+      }),
+      now: () => Date.parse('2026-08-28T00:03:00.000Z'),
+    });
+
+    await expect(publisher.attach(subscriptionOf([{
+      id: '1',
+      type: 'done',
+      status: 'completed',
+      generationRecordId: GENERATION_ID,
+      resultAvailable: false,
+      persistenceWarning: 'OUTPUT_NOT_ARCHIVED',
+      replayUnavailable: true,
+    }]))).resolves.toEqual({
+      kind: 'completed',
+      generationRecordId: GENERATION_ID,
+    });
+    expect(harness.actor.getSnapshot()?.snapshot.activeGeneration?.state).toBe('completed');
+    expect(harness.actor.getSnapshot()?.generationLedger[0]).toMatchObject({
+      generationRecordId: GENERATION_ID,
+      mirror: { state: 'completed' },
+    });
   });
 
   it('subscription identity mismatch 在消费或 mirror 前 fail closed', async () => {

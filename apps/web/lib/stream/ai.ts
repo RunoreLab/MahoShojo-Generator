@@ -276,20 +276,11 @@ export async function generateWithStreamAI<T, I = string>(
         }
         const result = streamObject({
           model: provider.type === 'openai' ? llm.chat(selectedModel) : llm(selectedModel), // Type assertion for AI SDK 5 compatibility
-          // 应对风控，尝试直接全部放入系统提示词中
           prompt: [
             {
               role: 'user',
               content: systemPrompt,
             },
-            {
-              role: 'user',
-              content: (() => {
-                const len = 20;
-                const start = Math.floor(Math.random() * Math.max(1, systemPrompt.length - len));
-                return systemPrompt.substring(start, start + len);
-              })(),
-            }
           ],
           schema: generationConfig.schema,
           maxRetries: 0,

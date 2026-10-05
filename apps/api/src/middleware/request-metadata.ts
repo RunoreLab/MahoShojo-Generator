@@ -47,6 +47,7 @@ export const requestMetadata = (
       console.info('[hono][request]', {
         requestId,
         method: context.req.method,
+        route: context.req.routePath || 'unmatched',
         status: context.res.status,
         durationMs,
       });

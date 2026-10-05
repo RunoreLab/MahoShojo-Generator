@@ -1,10 +1,19 @@
-import { and, asc, count, desc, eq, gte, isNotNull, like, or } from 'drizzle-orm';
+import { and, asc, count, desc, eq, gte, isNotNull, like, not, or, sql } from 'drizzle-orm';
 import type { AppDrizzleDb } from '@/lib/db/drizzle';
-import { battleReportGenerations } from '@/lib/db/schema';
+import { battleReportGenerationParticipants, battleReportGenerations } from '@/lib/db/schema';
 
 export type BattleReportGenerationStatus = 'completed' | 'aborted' | 'failed';
 export type BattleReportGenerationMode = 'stream' | 'non-stream';
 export type BattleReportGenerationListSort = 'started_at_desc' | 'started_at_asc';
+export type BattleReportGenerationParticipantRole = 'host' | 'member' | null;
+
+export type BattleReportGenerationAccessRow = {
+  generationId: string;
+  ownerUserId: number | null;
+  pvpMatchId: string | null;
+  arenaParticipantGenerationId: string | null;
+  arenaParticipantRole: BattleReportGenerationParticipantRole;
+};
 
 export type BattleReportGenerationsListFilter = {
   status?: BattleReportGenerationStatus;
@@ -110,6 +119,9 @@ export type BattleReportGenerationRowLite = {
   pvp_round_id: string | null;
   created_at: string;
   updated_at: string;
+  source_kind: 'solo' | 'arena-multiplayer' | 'pvp';
+  arena_participant_generation_id?: string | null;
+  arena_participant_role?: BattleReportGenerationParticipantRole;
 };
 
 export type BattleReportCountsByStatus = {
@@ -137,11 +149,35 @@ const toIntOrNull = (value: unknown): number | null => {
   return Math.trunc(n);
 };
 
+const toParticipantRole = (value: unknown): BattleReportGenerationParticipantRole => (
+  value === 'host' || value === 'member' ? value : null
+);
+
+// Resolve the user's small access set through both user indexes before reading generations.
+// UNION also deduplicates generations where the owner is a frozen participant.
+const accessibleGenerationPredicate = (userId: number) => sql`${battleReportGenerations.id} IN (
+  SELECT ${battleReportGenerations.id}
+  FROM ${battleReportGenerations}
+  WHERE ${battleReportGenerations.userId} = ${userId}
+  UNION
+  SELECT ${battleReportGenerationParticipants.generationId}
+  FROM ${battleReportGenerationParticipants}
+  WHERE ${battleReportGenerationParticipants.userId} = ${userId}
+)`;
+
+// Room generations also populate pvp_*; the relation identifies their actual source,
+// independently of whether the current viewer has a participant row.
+const arenaMultiplayerPredicate = sql<number>`EXISTS (
+  SELECT 1
+  FROM ${battleReportGenerationParticipants}
+  WHERE ${battleReportGenerationParticipants.generationId} = ${battleReportGenerations.id}
+)`;
+
 const buildWhereForListQuery = (
   userId: number,
   filter?: BattleReportGenerationsListFilter,
 ) => {
-  const conditions = [eq(battleReportGenerations.userId, userId)];
+  const conditions = [accessibleGenerationPredicate(userId)];
 
   const status = filter?.status;
   if (status === 'completed' || status === 'aborted' || status === 'failed') {
@@ -159,7 +195,7 @@ const buildWhereForListQuery = (
   }
 
   if (filter?.pvpOnly) {
-    conditions.push(isNotNull(battleReportGenerations.pvpMatchId));
+    conditions.push(isNotNull(battleReportGenerations.pvpMatchId), not(arenaMultiplayerPredicate));
   }
 
   const titleQuery = typeof filter?.titleQuery === 'string' ? filter.titleQuery.trim() : '';
@@ -210,6 +246,9 @@ const mapLiteRow = (row: {
   pvpRoundId: string | null;
   createdAt: string;
   updatedAt: string;
+  arenaMultiplayer: number;
+  arenaParticipantGenerationId?: string | null;
+  arenaParticipantRole?: string | null;
 }): BattleReportGenerationRowLite => ({
   id: row.id,
   started_at: row.startedAt,
@@ -243,6 +282,9 @@ const mapLiteRow = (row: {
   pvp_round_id: row.pvpRoundId,
   created_at: row.createdAt,
   updated_at: row.updatedAt,
+  source_kind: row.arenaMultiplayer ? 'arena-multiplayer' : row.pvpMatchId ? 'pvp' : 'solo',
+  arena_participant_generation_id: row.arenaParticipantGenerationId ?? null,
+  arena_participant_role: toParticipantRole(row.arenaParticipantRole),
 });
 
 export const insertBattleReportGenerationRecord = async (
@@ -382,6 +424,7 @@ export const getBattleReportGenerationByIdLite = async (
       pvpRoundId: battleReportGenerations.pvpRoundId,
       createdAt: battleReportGenerations.createdAt,
       updatedAt: battleReportGenerations.updatedAt,
+      arenaMultiplayer: arenaMultiplayerPredicate,
     })
     .from(battleReportGenerations)
     .where(eq(battleReportGenerations.id, generationId))
@@ -390,6 +433,41 @@ export const getBattleReportGenerationByIdLite = async (
   const row = rows[0];
   if (!row) return null;
   return mapLiteRow(row);
+};
+
+export const getBattleReportGenerationAccessByUserId = async (
+  db: AppDrizzleDb,
+  generationId: string,
+  userId: number,
+): Promise<BattleReportGenerationAccessRow | null> => {
+  const rows = await db
+    .select({
+      generationId: battleReportGenerations.id,
+      ownerUserId: battleReportGenerations.userId,
+      pvpMatchId: battleReportGenerations.pvpMatchId,
+      arenaParticipantGenerationId: battleReportGenerationParticipants.generationId,
+      arenaParticipantRole: battleReportGenerationParticipants.role,
+    })
+    .from(battleReportGenerations)
+    .leftJoin(
+      battleReportGenerationParticipants,
+      and(
+        eq(battleReportGenerationParticipants.generationId, battleReportGenerations.id),
+        eq(battleReportGenerationParticipants.userId, userId),
+      ),
+    )
+    .where(eq(battleReportGenerations.id, generationId))
+    .limit(1);
+
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    generationId: row.generationId,
+    ownerUserId: toIntOrNull(row.ownerUserId),
+    pvpMatchId: row.pvpMatchId,
+    arenaParticipantGenerationId: row.arenaParticipantGenerationId,
+    arenaParticipantRole: toParticipantRole(row.arenaParticipantRole),
+  };
 };
 
 export const listBattleReportGenerationsByUserIdLite = async (
@@ -438,8 +516,18 @@ export const listBattleReportGenerationsByUserIdLite = async (
       pvpRoundId: battleReportGenerations.pvpRoundId,
       createdAt: battleReportGenerations.createdAt,
       updatedAt: battleReportGenerations.updatedAt,
+      arenaMultiplayer: arenaMultiplayerPredicate,
+      arenaParticipantGenerationId: battleReportGenerationParticipants.generationId,
+      arenaParticipantRole: battleReportGenerationParticipants.role,
     })
     .from(battleReportGenerations)
+    .leftJoin(
+      battleReportGenerationParticipants,
+      and(
+        eq(battleReportGenerationParticipants.generationId, battleReportGenerations.id),
+        eq(battleReportGenerationParticipants.userId, userId),
+      ),
+    )
     .where(where)
     .orderBy(sort === 'started_at_asc' ? asc(battleReportGenerations.startedAt) : desc(battleReportGenerations.startedAt))
     .limit(safeLimit)
@@ -511,7 +599,10 @@ export const countBattleReportGenerationsByUserIdSince = async (
       total: count(),
     })
     .from(battleReportGenerations)
-    .where(and(eq(battleReportGenerations.userId, userId), gte(battleReportGenerations.startedAt, sinceIso)))
+    .where(and(
+      accessibleGenerationPredicate(userId),
+      gte(battleReportGenerations.startedAt, sinceIso),
+    ))
     .groupBy(battleReportGenerations.status);
 
   for (const row of rows) {

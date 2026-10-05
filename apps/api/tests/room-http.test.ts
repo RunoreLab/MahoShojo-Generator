@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { ARENA_ROOM_ERROR_TAXONOMY_ACCEPT, MAX_ROOM_MEMBERS } from '@mahoshojo/contracts/arena-room';
 
 import type { HonoServerConfig } from '#/config';
 import { createHonoApp } from '#/app';
@@ -15,6 +16,10 @@ import {
   ArenaRoomGenerationError,
   type ArenaRoomGenerationService,
 } from '#/arena-room/room-generation-service';
+import {
+  ArenaRoomConfigError,
+  type ArenaRoomConfigService,
+} from '#/arena-room/room-config-service';
 import type { RedisService } from '#/redis/runtime';
 import { createArenaRoomState } from './arena-room-fixtures';
 
@@ -82,6 +87,31 @@ const generationView = {
   finalAuthoritative: false,
 };
 
+const generationHistory = {
+  protocolVersion: 1 as const,
+  roomId: authority.snapshot.roomId,
+  roomEpoch: authority.snapshot.roomEpoch,
+  items: [{
+    generationId: 'generation-1',
+    state: 'completed' as const,
+    configRevision: authority.snapshot.revision,
+    collaborativeInfluence: false,
+    startedAt: '2026-08-28T00:00:00.000Z',
+    finishedAt: '2026-08-28T00:03:00.000Z',
+  }],
+};
+
+const generationHistoryView = {
+  protocolVersion: 1 as const,
+  roomId: authority.snapshot.roomId,
+  roomEpoch: authority.snapshot.roomEpoch,
+  generation: generationHistory.items[0],
+  status: 'completed' as const,
+  contentStatus: 'available' as const,
+  markdown: '# 历史正文',
+  result: { version: 1 as const, format: 'stream-markdown' as const, mode: 'classic' as const },
+};
+
 const createDependencies = (
   overrides: Partial<ArenaRoomHttpDependencies> = {},
 ): ArenaRoomHttpDependencies => ({
@@ -118,6 +148,7 @@ const createDependencies = (
       roomEpoch: session.roomEpoch,
       member: session.member,
     })),
+    kick: vi.fn(async () => session),
     getSession: vi.fn(async () => session),
   } as unknown as ArenaRoomMembershipService,
   directory: {
@@ -144,6 +175,7 @@ const createDependencies = (
       proposalId: input.proposalId,
       status: 'accepted' as const,
       result: 'applied' as const,
+      sharedConfig: session.snapshot.sharedConfig,
     })),
     withdraw: vi.fn(async (input) => ({
       roomId: input.roomId,
@@ -156,9 +188,21 @@ const createDependencies = (
     })),
   } satisfies ArenaRoomProposalService,
   generations: {
+    cancel: vi.fn(async () => ({
+      ...generationView,
+      generation: { ...generationView.generation, state: 'cancelled' as const },
+      status: 'cancelled' as const,
+      markdown: '',
+      nextChunkSeq: 0,
+    })),
+    list: vi.fn(async () => generationHistory),
     start: vi.fn(async () => generationView),
     read: vi.fn(async () => generationView),
+    readHistory: vi.fn(async () => generationHistoryView),
   } satisfies ArenaRoomGenerationService,
+  configs: {
+    publish: vi.fn(async () => session),
+  } satisfies ArenaRoomConfigService,
   rateLimit: vi.fn(async () => allowRateLimit()),
   ...overrides,
 });
@@ -169,6 +213,7 @@ const createRequest = (body: Record<string, unknown>) => ({
     authorization: 'Bearer legacy-key',
     'content-type': 'application/json',
     origin: 'http://localhost:3000',
+    'x-mahoshojo-arena-error-taxonomy': '2',
   },
   body: JSON.stringify(body),
 });
@@ -294,6 +339,47 @@ describe('Arena Room HTTP product routes', () => {
     expect(dependencies.memberships.getSession).not.toHaveBeenCalled();
   });
 
+  it('join 对已离开/被移出的成员返回明确 403 文案，不伪装成泛化权限错误', async () => {
+    const dependencies = createDependencies();
+    vi.mocked(dependencies.memberships.join).mockRejectedValue(
+      new ArenaRoomMembershipError('ROOM_MEMBERSHIP_REVOKED'),
+    );
+    const app = createHonoApp(config, createRedisStub(), undefined, {
+      arenaRoom: dependencies,
+    });
+
+    const response = await app.request(
+      `/api/arena/rooms/v1/${session.roomId}/join`,
+      createRequest({ displayName: '成员' }),
+    );
+
+    expect(response.status).toBe(403);
+    const body = await response.json() as { code: string; error: string };
+    expect(body.code).toBe('ROOM_FORBIDDEN');
+    expect(body.error).toContain('无法重新加入');
+  });
+
+  it('join 对被房主移出的成员返回可区分的 kicked 文案', async () => {
+    const dependencies = createDependencies();
+    vi.mocked(dependencies.memberships.join).mockRejectedValue(
+      new ArenaRoomMembershipError('ROOM_MEMBERSHIP_KICKED'),
+    );
+    const app = createHonoApp(config, createRedisStub(), undefined, {
+      arenaRoom: dependencies,
+    });
+
+    const response = await app.request(
+      `/api/arena/rooms/v1/${session.roomId}/join`,
+      createRequest({ displayName: '成员' }),
+    );
+
+    expect(response.status).toBe(403);
+    const body = await response.json() as { code: string; error: string };
+    expect(body.code).toBe('ROOM_FORBIDDEN');
+    expect(body.error).toContain('被房主移出');
+    expect(body.error).not.toContain('你已离开');
+  });
+
   it('多人 generation start 使用独立 12MiB 上限、strict intent 与 headers-only source context', async () => {
     const dependencies = createDependencies();
     const app = createHonoApp(config, createRedisStub(), undefined, {
@@ -303,12 +389,13 @@ describe('Arena Room HTTP product routes', () => {
     const body = {
       expectedRoomEpoch: authority.snapshot.roomEpoch,
       expectedRevision: authority.snapshot.revision,
+      expectedControlSeq: authority.snapshot.controlSeq,
       generationRequestId: 'request-1234',
       sharedConfig: authority.snapshot.sharedConfig,
+      hostLocalPayloads: [],
       generation: {
-        internalGuidance: '多人生成',
         customProvider: { apiKey: secret },
-        padding: 'x'.repeat(70 * 1_024),
+        narrativeHistory: [{ content: 'x'.repeat(70 * 1_024) }],
       },
     };
     const response = await app.request(
@@ -348,6 +435,565 @@ describe('Arena Room HTTP product routes', () => {
     expect(oversized.status).toBe(413);
   });
 
+  it.each([
+    [
+      new ArenaRoomGenerationError('ROOM_GENERATION_COMBATANTS_EMPTY', {
+        code: 'GENERATION_COMBATANTS_EMPTY',
+        gate: 'generation-readiness',
+        severity: 'blocking',
+        target: { kind: 'combatant' },
+        params: { current: 0, required: 1 },
+        messageKey: 'arena.multiplayer.gate.generationCombatantsEmpty',
+        userAction: '至少添加 1 位参战角色后再开始生成。',
+      }),
+      409,
+      'ROOM_GENERATION_COMBATANTS_EMPTY',
+      '当前有 0 位参战角色，至少需要 1 位',
+    ],
+    [
+      new ArenaRoomGenerationError('ROOM_GENERATION_COMBATANTS_INSUFFICIENT', {
+        code: 'GENERATION_COMBATANTS_INSUFFICIENT',
+        gate: 'generation-readiness',
+        severity: 'blocking',
+        target: { kind: 'combatant' },
+        params: { current: 1, required: 2, mode: 'classic' },
+        messageKey: 'arena.multiplayer.gate.generationCombatantsInsufficient',
+        userAction: '当前模式至少需要 2 位参战角色，请继续添加角色。',
+      }),
+      409,
+      'ROOM_GENERATION_COMBATANTS_INSUFFICIENT',
+      '经典模式当前有 1 位参战角色，至少需要 2 位',
+    ],
+    [
+      new ArenaRoomGenerationError('ROOM_GENERATION_SCENARIO_REQUIRED'),
+      409,
+      'ROOM_GENERATION_SCENARIO_REQUIRED',
+      '情景模式需要主情景',
+    ],
+    [
+      new ArenaRoomGenerationError('ROOM_GENERATION_COMBATANT_LIMIT'),
+      400,
+      'ROOM_GENERATION_COMBATANT_LIMIT',
+      '运行时上限 32 位',
+    ],
+    [
+      new ArenaRoomGenerationError('ROOM_RUNTIME_BODY_LIMIT'),
+      413,
+      'ROOM_RUNTIME_BODY_LIMIT',
+      '12 MiB',
+    ],
+    [
+      new ArenaRoomGenerationError('ROOM_RUNTIME_REFERENCE_LIMIT'),
+      400,
+      'ROOM_RUNTIME_REFERENCE_LIMIT',
+      '运行时上限 256 项',
+    ],
+    [
+      new ArenaRoomGenerationError('ROOM_RUNTIME_ADJUDICATION_LIMIT'),
+      400,
+      'ROOM_RUNTIME_ADJUDICATION_LIMIT',
+      '运行时上限 100 项',
+    ],
+    [
+      new ArenaRoomGenerationError('ROOM_RUNTIME_PROMPT_BUDGET_EXCEEDED'),
+      400,
+      'ROOM_RUNTIME_PROMPT_BUDGET_EXCEEDED',
+      '生成提示词超过当前渠道的安全预算',
+    ],
+    [
+      new ArenaRoomGenerationError('ROOM_PROVIDER_CONFIG_INVALID'),
+      400,
+      'ROOM_PROVIDER_CONFIG_INVALID',
+      '检查服务商、模型和 API Key',
+    ],
+    [
+      new ArenaRoomGenerationError(
+        'ROOM_HOST_LOCAL_PAYLOAD_MISSING',
+        undefined,
+        { kind: 'combatant', displayName: '星野' },
+      ),
+      400,
+      'ROOM_HOST_LOCAL_PAYLOAD_MISSING',
+      '角色「星野」',
+    ],
+    [
+      new ArenaRoomGenerationError(
+        'ROOM_HOST_LOCAL_PAYLOAD_INVALID',
+        undefined,
+        { kind: 'room' },
+      ),
+      400,
+      'ROOM_HOST_LOCAL_PAYLOAD_INVALID',
+      '本地内容列表',
+    ],
+    [
+      new ArenaRoomGenerationError(
+        'ROOM_HOST_LOCAL_KIND_MISMATCH',
+        undefined,
+        { kind: 'scenario', displayName: '雨夜' },
+      ),
+      400,
+      'ROOM_HOST_LOCAL_KIND_MISMATCH',
+      '情景「雨夜」',
+    ],
+    [
+      new ArenaRoomGenerationError(
+        'ROOM_HOST_LOCAL_DIGEST_MISMATCH',
+        undefined,
+        { kind: 'material', displayName: '银剑' },
+      ),
+      409,
+      'ROOM_HOST_LOCAL_DIGEST_MISMATCH',
+      '素材「银剑」',
+    ],
+    [
+      new ArenaRoomGenerationError(
+        'ROOM_HOST_LOCAL_TYPE_MISMATCH',
+        undefined,
+        { kind: 'combatant', displayName: '星野' },
+      ),
+      400,
+      'ROOM_HOST_LOCAL_TYPE_MISMATCH',
+      '角色「星野」',
+    ],
+    [
+      new ArenaRoomGenerationError('ROOM_HOST_LOCAL_CONTENT_VERSION_MISSING'),
+      400,
+      'ROOM_HOST_LOCAL_CONTENT_VERSION_MISSING',
+      '重新发布房间配置',
+    ],
+    [
+      new ArenaRoomGenerationError('ROOM_REFERENCE_STALE'),
+      409,
+      'ROOM_REFERENCE_STALE',
+      '数据卡加入房间后已更新',
+    ],
+  ] as const)('generation 门禁和 host-local 错误保持独立 wire code：%s', async (
+    serviceError,
+    status,
+    wireCode,
+    message,
+  ) => {
+    const dependencies = createDependencies();
+    vi.mocked(dependencies.generations.start).mockRejectedValueOnce(serviceError);
+    const app = createHonoApp(config, createRedisStub(), undefined, {
+      arenaRoom: dependencies,
+    });
+    const response = await app.request(
+      `/api/arena/rooms/v1/${authority.snapshot.roomId}/generations`,
+      {
+        ...createRequest({
+        expectedRoomEpoch: authority.snapshot.roomEpoch,
+        expectedRevision: authority.snapshot.revision,
+        expectedControlSeq: authority.snapshot.controlSeq,
+        generationRequestId: 'request-1234',
+        sharedConfig: authority.snapshot.sharedConfig,
+        hostLocalPayloads: [],
+        generation: {},
+        }),
+        headers: {
+          ...createRequest({}).headers,
+          'x-mahoshojo-arena-error-taxonomy': '2',
+        },
+      },
+    );
+
+    expect(response.status).toBe(status);
+    const errorBody = await response.json() as { code: string; error: string };
+    expect(errorBody).toMatchObject({ code: wireCode });
+    expect(errorBody.error).toContain(message);
+  });
+
+  it('granular error taxonomy 需显式协商，旧客户端与未知版本只收到 0bb6b883 基线 code', async () => {
+    const serviceError = new ArenaRoomGenerationError('ROOM_GENERATION_COMBATANTS_EMPTY', {
+      code: 'GENERATION_COMBATANTS_EMPTY',
+      gate: 'generation-readiness',
+      severity: 'blocking',
+      target: { kind: 'combatant' },
+      params: { current: 0, required: 1 },
+      messageKey: 'arena.multiplayer.gate.generationCombatantsEmpty',
+      userAction: '至少添加 1 位参战角色后再开始生成。',
+    });
+    const dependencies = createDependencies();
+    vi.mocked(dependencies.generations.start).mockRejectedValue(serviceError);
+    const app = createHonoApp(config, createRedisStub(), undefined, {
+      arenaRoom: dependencies,
+    });
+    const body = {
+      expectedRoomEpoch: authority.snapshot.roomEpoch,
+      expectedRevision: authority.snapshot.revision,
+      expectedControlSeq: authority.snapshot.controlSeq,
+      generationRequestId: 'request-1234',
+      sharedConfig: authority.snapshot.sharedConfig,
+      hostLocalPayloads: [],
+      generation: {},
+    };
+
+    for (const taxonomyVersion of [undefined, '999'] as const) {
+      const request = createRequest(body);
+      const headers: Record<string, string> = { ...request.headers };
+      if (taxonomyVersion === undefined) {
+        delete headers['x-mahoshojo-arena-error-taxonomy'];
+      } else {
+        headers['x-mahoshojo-arena-error-taxonomy'] = taxonomyVersion;
+      }
+      const response = await app.request(
+        `/api/arena/rooms/v1/${authority.snapshot.roomId}/generations`,
+        {
+          ...request,
+          headers,
+        },
+      );
+      expect(response.status).toBe(409);
+      expect(await response.json()).toMatchObject({
+        code: 'ROOM_CONFLICT',
+        error: expect.stringContaining('至少需要 1 位'),
+      });
+    }
+
+    const negotiatedRequest = createRequest(body);
+    const acceptHeaders: Record<string, string> = { ...negotiatedRequest.headers };
+    delete acceptHeaders['x-mahoshojo-arena-error-taxonomy'];
+    acceptHeaders.accept = ARENA_ROOM_ERROR_TAXONOMY_ACCEPT;
+    const negotiated = await app.request(
+      `/api/arena/rooms/v1/${authority.snapshot.roomId}/generations`,
+      {
+        ...negotiatedRequest,
+        headers: acceptHeaders,
+      },
+    );
+    expect(negotiated.status).toBe(409);
+    expect(await negotiated.json()).toMatchObject({
+      code: 'ROOM_GENERATION_COMBATANTS_EMPTY',
+    });
+    expect(negotiated.headers.get('vary')).toContain('Accept');
+    expect(negotiated.headers.get('vary')).toContain('x-mahoshojo-arena-error-taxonomy');
+    expect(negotiated.headers.get('cache-control')).toBe('no-store');
+
+    const customHeaderNegotiated = await app.request(
+      `/api/arena/rooms/v1/${authority.snapshot.roomId}/generations`,
+      createRequest(body),
+    );
+    expect(customHeaderNegotiated.status).toBe(409);
+    expect(await customHeaderNegotiated.json()).toMatchObject({
+      code: 'ROOM_GENERATION_COMBATANTS_EMPTY',
+    });
+  });
+
+  it.each([
+    [new ArenaRoomGenerationError('ROOM_HOST_LOCAL_PAYLOAD_MISSING'), 400, 'ROOM_REQUEST_INVALID'],
+    [new ArenaRoomGenerationError('ROOM_HOST_LOCAL_DIGEST_MISMATCH'), 409, 'ROOM_CONFLICT'],
+    [new ArenaRoomGenerationError('ROOM_HOST_LOCAL_CONTENT_VERSION_MISSING'), 400, 'ROOM_REQUEST_INVALID'],
+    [new ArenaRoomGenerationError('ROOM_REFERENCE_STALE'), 409, 'ROOM_CONFLICT'],
+    [new ArenaRoomGenerationError('ROOM_CONFIG_FRAME_TOO_LARGE'), 413, 'ROOM_PAYLOAD_TOO_LARGE'],
+  ] as const)('旧客户端只收到 0bb6b883 可解析的生成错误 code：%s', async (
+    serviceError,
+    status,
+    legacyCode,
+  ) => {
+    const dependencies = createDependencies();
+    vi.mocked(dependencies.generations.start).mockRejectedValueOnce(serviceError);
+    const app = createHonoApp(config, createRedisStub(), undefined, { arenaRoom: dependencies });
+    const request = createRequest({
+      expectedRoomEpoch: authority.snapshot.roomEpoch,
+      expectedRevision: authority.snapshot.revision,
+      expectedControlSeq: authority.snapshot.controlSeq,
+      generationRequestId: 'request-legacy-host-local',
+      sharedConfig: authority.snapshot.sharedConfig,
+      hostLocalPayloads: [],
+      generation: {},
+    });
+    const headers: Record<string, string> = { ...request.headers };
+    delete headers['x-mahoshojo-arena-error-taxonomy'];
+    const response = await app.request(
+      `/api/arena/rooms/v1/${authority.snapshot.roomId}/generations`,
+      { ...request, headers },
+    );
+    expect(response.status).toBe(status);
+    expect(await response.json()).toMatchObject({ code: legacyCode });
+  });
+
+  it('v1 客户端保留 reference denied 的既有 code 与状态语义', async () => {
+    const membershipDependencies = createDependencies();
+    vi.mocked(membershipDependencies.memberships.getSession).mockRejectedValueOnce(
+      new ArenaRoomMembershipError('ROOM_REFERENCE_DENIED'),
+    );
+    const membershipApp = createHonoApp(config, createRedisStub(), undefined, {
+      arenaRoom: membershipDependencies,
+    });
+    const membershipResponse = await membershipApp.request(
+      `/api/arena/rooms/v1/${session.roomId}/session`,
+      { headers: { authorization: 'Bearer legacy-key' } },
+    );
+    expect(membershipResponse.status).toBe(409);
+    expect(await membershipResponse.json()).toMatchObject({ code: 'ROOM_CONFLICT' });
+
+    const proposalDependencies = createDependencies();
+    vi.mocked(proposalDependencies.proposals.submit).mockRejectedValueOnce(
+      new ArenaRoomProposalError('ROOM_REFERENCE_DENIED'),
+    );
+    const proposalApp = createHonoApp(config, createRedisStub(), undefined, {
+      arenaRoom: proposalDependencies,
+    });
+    const proposalRequest = createRequest({
+      proposalId: 'proposal-legacy-reference-denied',
+      expectedRoomEpoch: session.roomEpoch,
+      baseRevision: session.snapshot.revision,
+      changes: [guidanceChangeForHttp()],
+    });
+    const proposalHeaders: Record<string, string> = { ...proposalRequest.headers };
+    delete proposalHeaders['x-mahoshojo-arena-error-taxonomy'];
+    const proposalResponse = await proposalApp.request(
+      `/api/arena/rooms/v1/${session.roomId}/proposals`,
+      { ...proposalRequest, headers: proposalHeaders },
+    );
+    expect(proposalResponse.status).toBe(409);
+    expect(await proposalResponse.json()).toMatchObject({ code: 'ROOM_CONFLICT' });
+
+    const configDependencies = createDependencies();
+    vi.mocked(configDependencies.configs.publish).mockRejectedValueOnce(
+      new ArenaRoomConfigError('ROOM_REFERENCE_DENIED'),
+    );
+    const configApp = createHonoApp(config, createRedisStub(), undefined, {
+      arenaRoom: configDependencies,
+    });
+    const configRequest = createRequest({
+      expectedRoomEpoch: session.roomEpoch,
+      expectedRevision: session.snapshot.revision,
+      expectedControlSeq: session.snapshot.controlSeq,
+      sharedConfig: session.snapshot.sharedConfig,
+    });
+    const configHeaders: Record<string, string> = { ...configRequest.headers };
+    delete configHeaders['x-mahoshojo-arena-error-taxonomy'];
+    const configResponse = await configApp.request(
+      `/api/arena/rooms/v1/${session.roomId}/config`,
+      { ...configRequest, headers: configHeaders },
+    );
+    expect(configResponse.status).toBe(409);
+    expect(await configResponse.json()).toMatchObject({ code: 'ROOM_CONFLICT' });
+  });
+
+  it('schema preflight 保留角色、累计引用与版本缺失的可行动原因', async () => {
+    const dependencies = createDependencies();
+    const app = createHonoApp(config, createRedisStub(), undefined, {
+      arenaRoom: dependencies,
+    });
+    const combatants = Array.from({ length: 33 }, (_, index) => ({
+      key: `data-card:character-${index}`,
+      ref: { id: `character-${index}`, kind: 'character', versionToken: 'v1' },
+    }));
+    const generationRequest = {
+      expectedRoomEpoch: authority.snapshot.roomEpoch,
+      expectedRevision: authority.snapshot.revision,
+      expectedControlSeq: authority.snapshot.controlSeq,
+      generationRequestId: 'request-1234',
+      sharedConfig: { ...authority.snapshot.sharedConfig, combatants, teams: [] },
+      hostLocalPayloads: [],
+      generation: {},
+    };
+    const generationLimit = await app.request(
+      `/api/arena/rooms/v1/${authority.snapshot.roomId}/generations`,
+      createRequest(generationRequest),
+    );
+    expect(generationLimit.status).toBe(400);
+    expect(await generationLimit.json()).toMatchObject({
+      code: 'ROOM_GENERATION_COMBATANT_LIMIT',
+      error: expect.stringMatching(/33.*32/u),
+    });
+
+    const configLimit = await app.request('/api/arena/rooms/v1', createRequest({
+      creationRequestId: 'create-request-limits',
+      displayName: '房主',
+      directory: { title: '容量测试', visibility: 'public' },
+      sharedConfig: generationRequest.sharedConfig,
+    }));
+    expect(configLimit.status).toBe(400);
+    expect(await configLimit.json()).toMatchObject({
+      code: 'ROOM_CONFIG_COMBATANT_LIMIT',
+      error: expect.stringMatching(/33.*32/u),
+    });
+
+    const auxScenarios = Array.from({ length: 128 }, (_, index) => ({
+      key: `data-card:scenario-${index}`,
+      ref: { id: `scenario-${index}`, kind: 'scenario', versionToken: 'v1' },
+    }));
+    const materials = Array.from({ length: 129 }, (_, index) => ({
+      key: `data-card:material-${index}`,
+      ref: { id: `material-${index}`, kind: 'material', versionToken: 'v1' },
+    }));
+    const referenceLimit = await app.request('/api/arena/rooms/v1', createRequest({
+      creationRequestId: 'create-request-refs',
+      displayName: '房主',
+      directory: { title: '引用容量测试', visibility: 'public' },
+      sharedConfig: {
+        ...authority.snapshot.sharedConfig,
+        auxScenarios,
+        materials,
+      },
+    }));
+    expect(referenceLimit.status).toBe(400);
+    expect(await referenceLimit.json()).toMatchObject({
+      code: 'ROOM_CONFIG_REFERENCE_LIMIT',
+      error: expect.stringMatching(/257.*256/u),
+    });
+
+    const missingVersionCombatant = {
+      key: 'data-card:missing-version',
+      ref: { id: 'missing-version', kind: 'character' },
+    };
+    const missingVersion = await app.request('/api/arena/rooms/v1', createRequest({
+      creationRequestId: 'create-request-version',
+      displayName: '房主',
+      directory: { title: '版本测试', visibility: 'public' },
+      sharedConfig: {
+        ...authority.snapshot.sharedConfig,
+        combatants: [missingVersionCombatant],
+        teams: [],
+      },
+    }));
+    expect(missingVersion.status).toBe(400);
+    expect(await missingVersion.json()).toMatchObject({
+      code: 'ROOM_REFERENCE_VERSION_MISSING',
+      error: expect.stringContaining('角色 1'),
+    });
+
+    const invalidShareability = await app.request('/api/arena/rooms/v1', createRequest({
+      creationRequestId: 'create-request-invalid-team',
+      displayName: '房主',
+      directory: { title: '引用关系测试', visibility: 'public' },
+      sharedConfig: {
+        ...authority.snapshot.sharedConfig,
+        teams: [{ key: 'team-1', displayName: '一队', combatantKeys: ['missing-combatant'] }],
+      },
+    }));
+    expect(invalidShareability.status).toBe(400);
+    expect(await invalidShareability.json()).toMatchObject({
+      code: 'ROOM_CONFIG_SHAREABILITY_INVALID',
+      error: expect.stringContaining('房间配置'),
+    });
+    expect(dependencies.memberships.create).not.toHaveBeenCalled();
+    expect(dependencies.generations.start).not.toHaveBeenCalled();
+  });
+
+  it('显式 config publish 只接收 strict intent，并返回 checkpoint 产生的安全 session', async () => {
+    const published = {
+      ...session,
+      snapshot: {
+        ...session.snapshot,
+        revision: session.snapshot.revision + 1,
+        sharedConfig: { ...session.snapshot.sharedConfig, userGuidance: '显式发布' },
+      },
+    };
+    const dependencies = createDependencies({
+      configs: { publish: vi.fn(async () => published) },
+    });
+    const app = createHonoApp(config, createRedisStub(), undefined, {
+      arenaRoom: dependencies,
+    });
+    const request = {
+      expectedRoomEpoch: session.roomEpoch,
+      expectedRevision: session.snapshot.revision,
+      expectedControlSeq: session.snapshot.controlSeq,
+      sharedConfig: published.snapshot.sharedConfig,
+    };
+
+    const response = await app.request(
+      `/api/arena/rooms/v1/${session.roomId}/config`,
+      createRequest(request),
+    );
+
+    expect(response.status).toBe(200);
+    expect(dependencies.configs.publish).toHaveBeenCalledWith({
+      roomId: session.roomId,
+      accountUserId: 101,
+      request,
+    });
+    expect(await response.json()).toMatchObject({
+      roomId: session.roomId,
+      roomEpoch: session.roomEpoch,
+      self: { userId: self.userId, role: 'host' },
+      snapshot: { revision: 1, sharedConfig: published.snapshot.sharedConfig },
+    });
+
+    const injected = await app.request(
+      `/api/arena/rooms/v1/${session.roomId}/config`,
+      createRequest({ ...request, payload: { providerApiKey: 'secret-canary' } }),
+    );
+    expect(injected.status).toBe(400);
+    expect(dependencies.configs.publish).toHaveBeenCalledTimes(1);
+    expect(await injected.text()).not.toContain('secret-canary');
+  });
+
+  it.each([
+    ['ROOM_CONFIG_FRAME_TOO_LARGE', 413, 'ROOM_CONFIG_FRAME_TOO_LARGE'],
+    ['ROOM_PERMISSION_DENIED', 403, 'ROOM_FORBIDDEN'],
+    ['ROOM_REFERENCE_DENIED', 403, 'ROOM_REFERENCE_DENIED'],
+    ['ROOM_REFERENCE_STALE', 409, 'ROOM_REFERENCE_STALE'],
+    ['ROOM_REFERENCE_UNAVAILABLE', 503, 'ROOM_UNAVAILABLE'],
+    ['ROOM_EPOCH_STALE', 409, 'ROOM_CONFLICT'],
+    ['ROOM_REVISION_STALE', 409, 'ROOM_CONFLICT'],
+    ['ROOM_TRANSITION_DENIED', 409, 'ROOM_CONFLICT'],
+  ] as const)('config publish fail closed: %s', async (serviceCode, status, wireCode) => {
+    const dependencies = createDependencies();
+    vi.mocked(dependencies.configs.publish).mockRejectedValueOnce(
+      new ArenaRoomConfigError(serviceCode),
+    );
+    const app = createHonoApp(config, createRedisStub(), undefined, {
+      arenaRoom: dependencies,
+    });
+
+    const response = await app.request(
+      `/api/arena/rooms/v1/${session.roomId}/config`,
+      createRequest({
+        expectedRoomEpoch: session.roomEpoch,
+        expectedRevision: session.snapshot.revision,
+        expectedControlSeq: session.snapshot.controlSeq,
+        sharedConfig: session.snapshot.sharedConfig,
+      }),
+    );
+
+    expect(response.status).toBe(status);
+    const body = await response.json() as { code: string; error: string };
+    expect(body).toMatchObject({ code: wireCode });
+    if (serviceCode === 'ROOM_CONFIG_FRAME_TOO_LARGE') {
+      expect(body.error).toContain('64 KiB');
+    }
+  });
+
+  it('config publish 受独立 account/room limiter 保护，超额时不触发 authority', async () => {
+    const dependencies = createDependencies({
+      rateLimit: vi.fn(async () => ({
+        allowed: false,
+        limit: 10,
+        remaining: 0,
+        retryAfterSeconds: 9,
+      })),
+    });
+    const app = createHonoApp(config, createRedisStub(), undefined, {
+      arenaRoom: dependencies,
+    });
+
+    const response = await app.request(
+      `/api/arena/rooms/v1/${session.roomId}/config`,
+      createRequest({
+        expectedRoomEpoch: session.roomEpoch,
+        expectedRevision: session.snapshot.revision,
+        expectedControlSeq: session.snapshot.controlSeq,
+        sharedConfig: session.snapshot.sharedConfig,
+      }),
+    );
+
+    expect(response.status).toBe(429);
+    expect(dependencies.rateLimit).toHaveBeenCalledWith({
+      operation: 'configPublish',
+      accountUserId: 101,
+      roomId: session.roomId,
+      limit: 10,
+      windowSeconds: 60,
+    });
+    expect(dependencies.configs.publish).not.toHaveBeenCalled();
+  });
+
   it('多人 generation read 只传认证 account/room/generation，并稳定映射恢复错误', async () => {
     const dependencies = createDependencies();
     const app = createHonoApp(config, createRedisStub(), undefined, {
@@ -373,6 +1019,65 @@ describe('Arena Room HTTP product routes', () => {
     );
     expect(unavailable.status).toBe(503);
     expect(await unavailable.json()).toMatchObject({ code: 'ROOM_UNAVAILABLE' });
+  });
+
+  it('多人历史详情走严格安全视图，正文过期仍为非重试 200', async () => {
+    const dependencies = createDependencies();
+    vi.mocked(dependencies.generations.readHistory).mockResolvedValueOnce({
+      ...generationHistoryView,
+      contentStatus: 'expired',
+      markdown: '',
+      result: undefined,
+    });
+    const app = createHonoApp(config, createRedisStub(), undefined, {
+      arenaRoom: dependencies,
+    });
+
+    const response = await app.request(
+      `/api/arena/rooms/v1/${authority.snapshot.roomId}/generations/generation-1?view=history`,
+      { headers: { authorization: 'Bearer legacy-key' } },
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    expect(response.headers.get('retry-after')).toBeNull();
+    expect(dependencies.generations.readHistory).toHaveBeenCalledWith({
+      roomId: authority.snapshot.roomId,
+      generationId: 'generation-1',
+      accountUserId: 101,
+    });
+    expect(dependencies.generations.read).not.toHaveBeenCalled();
+    expect(await response.json()).toMatchObject({
+      contentStatus: 'expired',
+      markdown: '',
+    });
+  });
+
+  it('多人 generation history 只传认证 account/room，并返回 no-store 的严格列表', async () => {
+    const dependencies = createDependencies();
+    const app = createHonoApp(config, createRedisStub(), undefined, {
+      arenaRoom: dependencies,
+    });
+
+    const response = await app.request(
+      `/api/arena/rooms/v1/${authority.snapshot.roomId}/generations`,
+      { headers: { authorization: 'Bearer legacy-key' } },
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    expect(dependencies.generations.list).toHaveBeenCalledWith({
+      roomId: authority.snapshot.roomId,
+      accountUserId: 101,
+    });
+    expect(dependencies.rateLimit).toHaveBeenCalledWith({
+      operation: 'generationRead',
+      accountUserId: 101,
+      roomId: authority.snapshot.roomId,
+      limit: 120,
+      windowSeconds: 60,
+    });
+    expect(await response.json()).toEqual(generationHistory);
   });
 
   it('discover/join/session/ticket/leave/close 使用窄 service 且返回 versioned wire', async () => {
@@ -531,6 +1236,7 @@ describe('Arena Room HTTP product routes', () => {
       proposalId,
       status: 'accepted',
       revision: 1,
+      sharedConfig: session.snapshot.sharedConfig,
     });
 
     const withdrawRequest = { expectedRoomEpoch: session.roomEpoch };
@@ -556,8 +1262,9 @@ describe('Arena Room HTTP product routes', () => {
 
   it('Proposal stale/permission/unknown 使用稳定泛化错误，unknown 不自动重放', async () => {
     for (const [proposalCode, status, code] of [
-      ['ROOM_REFERENCE_STALE', 409, 'ROOM_CONFLICT'],
-      ['ROOM_REFERENCE_DENIED', 409, 'ROOM_CONFLICT'],
+      ['ROOM_PROPOSAL_PENDING_LIMIT_REACHED', 409, 'ROOM_PROPOSAL_PENDING_LIMIT_REACHED'],
+      ['ROOM_REFERENCE_STALE', 409, 'ROOM_REFERENCE_STALE'],
+      ['ROOM_REFERENCE_DENIED', 403, 'ROOM_REFERENCE_DENIED'],
       ['ROOM_PERMISSION_DENIED', 403, 'ROOM_FORBIDDEN'],
       ['ROOM_OPERATION_UNKNOWN', 503, 'ROOM_UNAVAILABLE'],
     ] as const) {
@@ -583,7 +1290,12 @@ describe('Arena Room HTTP product routes', () => {
         }),
       );
       expect(response.status).toBe(status);
-      expect(await response.json()).toMatchObject({ code });
+      const body = await response.json() as { code: string; error: string };
+      expect(body).toMatchObject({ code });
+      if (proposalCode === 'ROOM_PROPOSAL_PENDING_LIMIT_REACHED') {
+        expect(body.error).toContain('最多保留 8 个');
+        expect(body.error).toContain('当前已有 8 个');
+      }
       expect(dependencies.proposals.submit).toHaveBeenCalledOnce();
     }
   });
@@ -657,7 +1369,7 @@ describe('Arena Room HTTP product routes', () => {
     expect(dependencies.proposals.submit).not.toHaveBeenCalled();
   });
 
-  it('Proposal route 对 malformed JSON、bad UTF-8 与 oversized body 分别稳定返回 400/413', async () => {
+  it('Proposal route 对 malformed JSON、bad UTF-8、change limit 与 byte limit 返回独立错误', async () => {
     const dependencies = createDependencies();
     const app = createHonoApp(config, createRedisStub(), undefined, {
       arenaRoom: dependencies,
@@ -667,6 +1379,7 @@ describe('Arena Room HTTP product routes', () => {
       authorization: 'Bearer legacy-key',
       'content-type': 'application/json',
       origin: 'http://localhost:3000',
+      'x-mahoshojo-arena-error-taxonomy': '2',
     };
     const malformed = await app.request(path, {
       method: 'POST',
@@ -683,11 +1396,28 @@ describe('Arena Room HTTP product routes', () => {
       headers,
       body: JSON.stringify({ padding: 'x'.repeat(64 * 1_024) }),
     });
+    const tooManyChanges = await app.request(path, createRequest({
+      proposalId: 'proposal-too-many-changes',
+      expectedRoomEpoch: session.roomEpoch,
+      baseRevision: session.snapshot.revision,
+      changes: Array.from({ length: 33 }, (_, index) => ({
+        ...guidanceChangeForHttp(),
+        changeId: `guidance-${index}`,
+      })),
+    }));
 
     expect(malformed.status).toBe(400);
     expect(invalidUtf8.status).toBe(400);
     expect(oversized.status).toBe(413);
-    expect(await oversized.json()).toMatchObject({ code: 'ROOM_PAYLOAD_TOO_LARGE' });
+    expect(await oversized.json()).toMatchObject({
+      code: 'ROOM_PROPOSAL_BYTE_LIMIT',
+      error: expect.stringMatching(/64 KiB/u),
+    });
+    expect(tooManyChanges.status).toBe(400);
+    expect(await tooManyChanges.json()).toMatchObject({
+      code: 'ROOM_PROPOSAL_CHANGE_LIMIT',
+      error: expect.stringMatching(/33.*32/u),
+    });
     expect(dependencies.proposals.submit).not.toHaveBeenCalled();
   });
 
@@ -861,9 +1591,15 @@ describe('Arena Room HTTP product routes', () => {
 
   it('membership error 不泄漏 closed/not-found 差异，permission 与 conflict 可判别', async () => {
     for (const [membershipCode, status, code] of [
+      ['ROOM_MEMBER_LIMIT_REACHED', 409, 'ROOM_MEMBER_LIMIT_REACHED'],
       ['ROOM_CLOSED', 404, 'ROOM_NOT_FOUND'],
       ['ROOM_NOT_FOUND', 404, 'ROOM_NOT_FOUND'],
+      ['ROOM_MEMBERSHIP_NOT_ACTIVE', 404, 'ROOM_NOT_FOUND'],
+      ['ROOM_MEMBERSHIP_REVOKED', 404, 'ROOM_NOT_FOUND'],
       ['ROOM_PERMISSION_DENIED', 403, 'ROOM_FORBIDDEN'],
+      ['ROOM_REFERENCE_DENIED', 403, 'ROOM_REFERENCE_DENIED'],
+      ['ROOM_REFERENCE_STALE', 409, 'ROOM_REFERENCE_STALE'],
+      ['ROOM_REFERENCE_UNAVAILABLE', 503, 'ROOM_UNAVAILABLE'],
       ['ROOM_MEMBERSHIP_TRANSITION_DENIED', 409, 'ROOM_CONFLICT'],
     ] as const) {
       const dependencies = createDependencies();
@@ -874,10 +1610,119 @@ describe('Arena Room HTTP product routes', () => {
         arenaRoom: dependencies,
       });
       const response = await app.request(`/api/arena/rooms/v1/${session.roomId}/session`, {
-        headers: { authorization: 'Bearer legacy-key' },
+        headers: {
+          authorization: 'Bearer legacy-key',
+          'x-mahoshojo-arena-error-taxonomy': '2',
+        },
       });
       expect(response.status).toBe(status);
-      expect(await response.json()).toMatchObject({ code });
+      const body = await response.json() as { code: string; error: string };
+      expect(body).toMatchObject({ code });
+      if (membershipCode === 'ROOM_MEMBER_LIMIT_REACHED') {
+        expect(body.error).toContain(`最多容纳 ${MAX_ROOM_MEMBERS} 人`);
+        expect(body.error).toContain(`当前已有 ${MAX_ROOM_MEMBERS} 人`);
+      }
     }
+  });
+
+  it('kick/cancel 路由重新认证账号，只接受 strict epoch fence 并返回权威视图', async () => {
+    const dependencies = createDependencies();
+    const app = createHonoApp(config, createRedisStub(), undefined, {
+      arenaRoom: dependencies,
+    });
+    const body = { expectedRoomEpoch: session.roomEpoch };
+    const kick = await app.request(
+      `/api/arena/rooms/v1/${session.roomId}/members/member-2/kick`,
+      createRequest(body),
+    );
+    const cancel = await app.request(
+      `/api/arena/rooms/v1/${session.roomId}/generations/generation-1/cancel`,
+      createRequest(body),
+    );
+
+    expect(kick.status).toBe(200);
+    await expect(kick.json()).resolves.toMatchObject({
+      roomId: session.roomId,
+      self: { role: 'host' },
+    });
+    expect(dependencies.memberships.kick).toHaveBeenCalledWith({
+      roomId: session.roomId,
+      accountUserId: 101,
+      targetUserId: 'member-2',
+      expectedRoomEpoch: session.roomEpoch,
+    });
+    expect(cancel.status).toBe(200);
+    await expect(cancel.json()).resolves.toMatchObject({
+      roomId: session.roomId,
+      status: 'cancelled',
+      generation: { generationId: 'generation-1', state: 'cancelled' },
+    });
+    expect(dependencies.generations.cancel).toHaveBeenCalledWith({
+      roomId: session.roomId,
+      generationId: 'generation-1',
+      accountUserId: 101,
+      request: body,
+    });
+    expect(dependencies.rateLimit).toHaveBeenCalledWith({
+      operation: 'kick',
+      accountUserId: 101,
+      roomId: session.roomId,
+      limit: 30,
+      windowSeconds: 60,
+    });
+    expect(dependencies.rateLimit).toHaveBeenCalledWith({
+      operation: 'generationCancel',
+      accountUserId: 101,
+      roomId: session.roomId,
+      limit: 10,
+      windowSeconds: 60,
+    });
+
+    vi.mocked(dependencies.generations.cancel).mockRejectedValueOnce(
+      new Error('provider-internal-secret-canary'),
+    );
+    const unknown = await app.request(
+      `/api/arena/rooms/v1/${session.roomId}/generations/generation-1/cancel`,
+      createRequest(body),
+    );
+    expect(unknown.status).toBe(503);
+    expect(await unknown.text()).not.toContain('provider-internal-secret-canary');
+  });
+
+  it('kick/cancel 拒绝 authority 镜像、越界 path 与伪造 host，不触发 mutation', async () => {
+    const dependencies = createDependencies();
+    const app = createHonoApp(config, createRedisStub(), undefined, {
+      arenaRoom: dependencies,
+    });
+    const injected = {
+      expectedRoomEpoch: session.roomEpoch,
+      role: 'host',
+      accountUserId: 999,
+      actorKey: `pvp-room:${session.roomId}`,
+      secret: 'secret-canary',
+    };
+    const [kick, cancel, longTarget, longGeneration] = await Promise.all([
+      app.request(
+        `/api/arena/rooms/v1/${session.roomId}/members/member-2/kick`,
+        createRequest(injected),
+      ),
+      app.request(
+        `/api/arena/rooms/v1/${session.roomId}/generations/generation-1/cancel`,
+        createRequest(injected),
+      ),
+      app.request(
+        `/api/arena/rooms/v1/${session.roomId}/members/${'x'.repeat(300)}/kick`,
+        createRequest({ expectedRoomEpoch: session.roomEpoch }),
+      ),
+      app.request(
+        `/api/arena/rooms/v1/${session.roomId}/generations/${'x'.repeat(300)}/cancel`,
+        createRequest({ expectedRoomEpoch: session.roomEpoch }),
+      ),
+    ]);
+
+    expect([kick.status, cancel.status, longTarget.status, longGeneration.status])
+      .toEqual([400, 400, 400, 400]);
+    expect(dependencies.memberships.kick).not.toHaveBeenCalled();
+    expect(dependencies.generations.cancel).not.toHaveBeenCalled();
   });
 });

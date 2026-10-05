@@ -1,12 +1,17 @@
 import {
   compareGenerationSseIds,
   encodeGenerationSseEvent,
+  projectArenaGenerationEventForClient,
   resolveResumeCursor,
 } from './sse';
 import type { SafePublicAiErrorProjection } from '../regular-generation';
+import { getPublicAiErrorMessage } from '../regular-generation';
+import { ARENA_RESOURCE_BUDGET } from './resource-budget';
+import { extractArenaMultiplayerParticipation, type ArenaMultiplayerParticipation } from '@mahoshojo/contracts/arena-room';
+import { WebPackageArtifactSchema, type WebPackageArtifact } from '@mahoshojo/contracts/web-package';
 
-export const MAX_ARENA_CREATE_BODY_BYTES = 12 * 1_024 * 1_024;
-export const MAX_ARENA_CANCEL_BODY_BYTES = 1_024;
+export const MAX_ARENA_CREATE_BODY_BYTES = ARENA_RESOURCE_BUDGET.hardBodyBytes;
+export const MAX_ARENA_CANCEL_BODY_BYTES = ARENA_RESOURCE_BUDGET.cancelBodyBytes;
 export const ARENA_PREPARATION_SEED_BYTES = 32;
 export const ARENA_SEEDED_RESERVATION_HASH_VERSION = 'arena-seeded-reservation-v1';
 const ARENA_PREPARATION_SEED_PATTERN = new RegExp(
@@ -62,6 +67,19 @@ export type GenerationStreamEvent = GenerationEventInput & {
   id: string;
 };
 
+export const ARENA_OUTPUT_NOT_ARCHIVED_WARNING = 'OUTPUT_NOT_ARCHIVED' as const;
+export const ARENA_PERSISTENCE_UNAVAILABLE_WARNING = 'PERSISTENCE_UNAVAILABLE' as const;
+export type ArenaGenerationPersistenceWarning =
+  | typeof ARENA_OUTPUT_NOT_ARCHIVED_WARNING
+  | typeof ARENA_PERSISTENCE_UNAVAILABLE_WARNING;
+
+export const isArenaGenerationPersistenceWarning = (
+  value: unknown,
+): value is ArenaGenerationPersistenceWarning => (
+  value === ARENA_OUTPUT_NOT_ARCHIVED_WARNING
+  || value === ARENA_PERSISTENCE_UNAVAILABLE_WARNING
+);
+
 export type GenerationSnapshot = {
   status: GenerationStatus;
   markdown: string;
@@ -70,13 +88,16 @@ export type GenerationSnapshot = {
   updatedAt: string;
   telemetry?: Record<string, unknown> | null;
   terminalResultRef?: string | null;
+  persistenceWarning?: ArenaGenerationPersistenceWarning | null;
 };
 
 export type GenerationTerminal = {
   status: Extract<GenerationStatus, 'completed' | 'failed' | 'cancelled' | 'producer_lost'>;
   code?: string;
   resultRef?: string | null;
+  persistenceWarning?: ArenaGenerationPersistenceWarning;
   publicError?: SafePublicAiErrorProjection;
+  webPackage?: WebPackageArtifact;
 };
 
 export type GenerationCancelReason = 'user' | 'content_policy';
@@ -87,7 +108,18 @@ export const isGenerationCancelReason = (value: unknown): value is GenerationCan
 export const generationCancelCode = (reason: GenerationCancelReason): string =>
   reason === 'content_policy' ? 'CONTENT_POLICY_CANCELLED' : 'USER_CANCELLED';
 
+export const isArenaGenerationDispatchReady = (input: Readonly<{
+  d1Available: boolean;
+  signatureSecret: string;
+  finalizationBridgeReady: boolean;
+}>): boolean => (
+  input.d1Available
+  && input.signatureSecret.trim().length >= 32
+  && input.finalizationBridgeReady
+);
+
 export type GenerationReplayStoreState = {
+  multiplayerParticipation?: ArenaMultiplayerParticipation;
   actorKey: string;
   generationId: string;
   generationRequestId: string;
@@ -100,6 +132,8 @@ export type GenerationReplayStoreState = {
   leaseExpiresAt: string | null;
   snapshot: GenerationSnapshot | null;
   terminal: GenerationTerminal | null;
+  /** Terminal selected after complete Provider output, before auxiliary persistence settles. */
+  intendedTerminal?: GenerationTerminal | null;
   cancelRequested: boolean;
   cancelReason?: GenerationCancelReason | null;
   preparationSeed?: string | null;
@@ -108,6 +142,7 @@ export type GenerationReplayStoreState = {
 
 export interface GenerationReplayStore {
   reserve(_input: {
+    multiplayerParticipation?: ArenaMultiplayerParticipation;
     actorKey: string;
     generationRequestId: string;
     generationId: string;
@@ -148,6 +183,7 @@ export interface GenerationReplayStore {
     producerToken: string;
     now: string;
     leaseExpiresAt: string;
+    terminal?: GenerationTerminal;
   }): Promise<ArenaGenerationFinalizationClaim>;
   claimLeaseExpiry(_input: {
     generationId: string;
@@ -161,6 +197,7 @@ export interface GenerationReplayStore {
       generationRequestId: string;
       payloadHash: string;
       mode: string | null;
+      intendedTerminal?: GenerationTerminal | null;
     }
     | { kind: 'terminal'; status: GenerationTerminal['status'] }
     | { kind: 'not-expired' }
@@ -345,6 +382,8 @@ export interface ArenaGenerationExecutor {
 }
 
 export type ArenaGenerationTerminalRecord = {
+  /** Only canonical usage and display model; never provider diagnostics or reasoning text. */
+  telemetry?: Record<string, unknown>;
   generationId: string;
   generationRequestId: string;
   status: GenerationTerminal['status'];
@@ -354,7 +393,12 @@ export type ArenaGenerationTerminalRecord = {
   reasoning: string;
   errorCode?: string | null;
   payloadHash?: string | null;
+  persistenceWarning?: ArenaGenerationPersistenceWarning | null;
   contentAvailable?: boolean;
+  contentUnavailableReason?: 'not-archived' | 'not-found' | 'temporary' | null;
+  /** Strictly sanitized by the durable terminal adapter; callers must parse again at wire boundary. */
+  roomSafeResult?: Readonly<Record<string, unknown>> | null;
+  webPackage?: WebPackageArtifact;
 };
 
 export interface ArenaGenerationTerminalStore {
@@ -371,6 +415,7 @@ export interface ArenaGenerationTerminalStore {
     | { kind: 'terminal'; terminal: ArenaGenerationTerminalRecord }
   >;
   reconcileExpiredLease?(_input: {
+    multiplayerParticipation?: ArenaMultiplayerParticipation;
     generationId: string;
     generationRequestId: string;
     actorKey: string;
@@ -405,7 +450,10 @@ export interface ArenaGenerationRejectedTerminalRecorder {
 export type ArenaGenerationObservation =
   | {
     event: 'companion';
-    operation: 'arena/generate' | 'generate-battle-story' | 'arena/session/generate-next';
+    operation: 'arena/generate'
+      | 'generate-battle-story'
+      | 'arena/session/generate-next'
+      | 'arena/repair-combatant-meta';
     placement: 'hono-primary' | 'next-dr';
     outcome: 'success' | 'rejected' | 'failure' | 'cancelled';
     durationMs: number;
@@ -436,6 +484,13 @@ export type ArenaGenerationObservation =
     generationId: string;
     outcome: 'started' | 'success' | 'failure' | 'cancelled';
     durationMs?: number;
+  }
+  | {
+    event: 'reasoning';
+    generationId: string;
+    status: 'done' | 'unavailable';
+    eventCount: number;
+    chars: number;
   }
   | {
     event: 'phase';
@@ -476,10 +531,22 @@ export type ArenaGenerationActor = {
   responseHeaders?: Readonly<Record<string, string>>;
 };
 
+export type ArenaGenerationCreateCommand = Readonly<{
+  generationRequestId: string;
+  payload: Record<string, unknown>;
+  bodyBytes: number;
+}>;
+
 export type ArenaGenerationServiceDependencies = {
   store: GenerationReplayStore;
   executor: ArenaGenerationExecutor;
   resolveActor(_request: Request): Promise<ArenaGenerationActor | null>;
+  resolveCreateActor?(_input: {
+    request: Request;
+    actor: ArenaGenerationActor;
+    generationRequestId: string;
+    payload: Readonly<Record<string, unknown>>;
+  }): Promise<ArenaGenerationActor | null>;
   deriveGenerationId(_input: {
     actorKey: string;
     generationRequestId: string;
@@ -527,6 +594,10 @@ export type ArenaGenerationOwnedProjection = Readonly<{
   resultAvailable: boolean;
   generationRecordId: string | null;
   errorCode: string | null;
+  persistenceWarning?: ArenaGenerationPersistenceWarning;
+  replayUnavailable?: boolean;
+  contentRetention?: 'expired';
+  roomSafeResult?: Readonly<Record<string, unknown>>;
 }>;
 
 export type ArenaGenerationOwnedProjectionResult =
@@ -539,7 +610,19 @@ export type ArenaGenerationOwnedSubscriptionResult =
   | Readonly<{ kind: 'not-found' }>
   | Readonly<{ kind: 'unavailable'; code: string }>;
 
+export type ArenaGenerationOwnedCancelResult =
+  | Readonly<{ kind: 'accepted'; cancelReason: GenerationCancelReason }>
+  | Readonly<{ kind: 'finalizing' }>
+  | Readonly<{ kind: 'terminal'; status: GenerationTerminal['status'] }>
+  | Readonly<{ kind: 'forbidden' }>
+  | Readonly<{ kind: 'not-found' }>;
+
 export interface ArenaGenerationTrustedOwnedService {
+  cancelOwned(_input: {
+    actorKey: string;
+    generationId: string;
+    reason: GenerationCancelReason;
+  }): Promise<ArenaGenerationOwnedCancelResult>;
   readOwnedProjection(_input: {
     actorKey: string;
     generationId: string;
@@ -555,6 +638,10 @@ export interface ArenaGenerationService {
   createSubscription(
     _request: Request,
   ): Promise<ArenaGenerationSubscription | Response>;
+  createParsedSubscription?(
+    _request: Request,
+    _command: ArenaGenerationCreateCommand,
+  ): Promise<ArenaGenerationSubscription | Response>;
   create(_request: Request): Promise<Response>;
   cancelRequest(_request: Request): Promise<Response>;
   lookup(
@@ -566,8 +653,16 @@ export interface ArenaGenerationService {
   cancel(_request: Request, _params: ArenaGenerationRouteParams): Promise<Response>;
 }
 
+export interface ArenaGenerationParsedPayloadService {
+  createParsedSubscription(
+    _request: Request,
+    _command: ArenaGenerationCreateCommand,
+  ): Promise<ArenaGenerationSubscription | Response>;
+}
+
 export type ArenaGenerationApplicationService = ArenaGenerationService
-  & ArenaGenerationTrustedOwnedService;
+  & ArenaGenerationTrustedOwnedService
+  & ArenaGenerationParsedPayloadService;
 
 type ActiveProducer = {
   controller: AbortController;
@@ -679,7 +774,9 @@ const subscriptionToSseResponse = (
           controller.close();
           return;
         }
-        controller.enqueue(encodeGenerationSseEvent(next.value));
+        controller.enqueue(encodeGenerationSseEvent(
+          projectArenaGenerationEventForClient(next.value),
+        ));
       } catch (error) {
         reader.releaseLock();
         controller.error(error);
@@ -775,7 +872,7 @@ const readOptionalCancelPayload = async (
 
 const parseCreatePayload = async (
   request: Request,
-): Promise<{ generationRequestId: string; payload: Record<string, unknown> } | Response> => {
+): Promise<ArenaGenerationCreateCommand | Response> => {
   if (request.method !== 'POST') {
     return jsonResponse({ code: 'METHOD_NOT_ALLOWED', error: 'Method not allowed' }, 405);
   }
@@ -789,10 +886,10 @@ const parseCreatePayload = async (
   }
 
   let body: unknown;
+  let bodyBytes = 0;
   try {
     const reader = request.body?.getReader();
     const chunks: Uint8Array[] = [];
-    let bodyBytes = 0;
     if (reader) {
       try {
         while (true) {
@@ -837,7 +934,7 @@ const parseCreatePayload = async (
     }, 400);
   }
   delete payload.generationRequestId;
-  return { generationRequestId, payload };
+  return { generationRequestId, payload, bodyBytes };
 };
 
 const addLeaseDuration = (now: Date, durationMs: number): string => new Date(
@@ -861,6 +958,7 @@ export const createArenaGenerationService = (
   const splitMaterialization = hasPreflight && hasMaterialize;
   const materializationVersion = dependencies.executor.materializationVersion;
   const activeProducers = new Map<string, ActiveProducer>();
+  const parsedCreateCommands = new WeakMap<Request, ArenaGenerationCreateCommand>();
   const observe = (observation: ArenaGenerationObservation): void => {
     try {
       dependencies.observer?.observeArenaGeneration(observation);
@@ -874,6 +972,25 @@ export const createArenaGenerationService = (
     } catch {
       return 0;
     }
+  };
+  const selectTerminalSnapshotWithinBudget = (
+    fullSnapshot: GenerationSnapshot,
+    contentAvailable = true,
+  ): { snapshot: GenerationSnapshot | null; overBudget: boolean } => {
+    if (!contentAvailable) return { snapshot: null, overBudget: false };
+    if (encodedBytes(fullSnapshot) <= snapshotMaxBytes) {
+      return { snapshot: fullSnapshot, overBudget: false };
+    }
+    const compactSnapshot: GenerationSnapshot = {
+      ...fullSnapshot,
+      ...(fullSnapshot.status === 'completed' ? {} : { markdown: '' }),
+      reasoning: '',
+      telemetry: null,
+    };
+    return {
+      snapshot: encodedBytes(compactSnapshot) <= snapshotMaxBytes ? compactSnapshot : null,
+      overBudget: true,
+    };
   };
 
   if (!Number.isFinite(deltaFlushIntervalMs) || deltaFlushIntervalMs < 1) {
@@ -913,6 +1030,7 @@ export const createArenaGenerationService = (
     let pendingBytes = 0;
     let pendingSnapshotBytes = 0;
     let lastSnapshotAtMs: number | null = null;
+    let runningSnapshotBudgetExceeded = false;
     let flushTimer: ReturnType<typeof setTimeout> | null = null;
     let operation = Promise.resolve();
 
@@ -920,6 +1038,7 @@ export const createArenaGenerationService = (
       status: GenerationStatus,
       updatedAt: string,
       terminalResultRef: string | null = null,
+      persistenceWarning: ArenaGenerationPersistenceWarning | null = null,
     ): GenerationSnapshot => ({
       status,
       markdown,
@@ -928,6 +1047,7 @@ export const createArenaGenerationService = (
       updatedAt,
       telemetry,
       terminalResultRef,
+      ...(persistenceWarning ? { persistenceWarning } : {}),
     });
 
     const writeSnapshot = async (
@@ -937,6 +1057,7 @@ export const createArenaGenerationService = (
     ): Promise<boolean> => {
       const nextSnapshot = snapshot(status, now, terminalResultRef);
       if (encodedBytes(nextSnapshot) > snapshotMaxBytes) {
+        if (status === 'running') runningSnapshotBudgetExceeded = true;
         observe({ event: 'redis_degraded', generationId, operation: 'snapshot_budget' });
         return false;
       }
@@ -986,7 +1107,11 @@ export const createArenaGenerationService = (
         || forceSnapshot
         || nowMs - lastSnapshotAtMs >= snapshotFlushIntervalMs
         || pendingSnapshotBytes >= snapshotFlushBytes;
-      if (snapshotDue && await writeSnapshot('running', now)) {
+      if (
+        !runningSnapshotBudgetExceeded
+        && snapshotDue
+        && await writeSnapshot('running', now)
+      ) {
         lastSnapshotAtMs = nowMs;
         pendingSnapshotBytes = 0;
       }
@@ -1074,6 +1199,12 @@ export const createArenaGenerationService = (
               status: terminal.status,
               ...(terminal.code ? { code: terminal.code } : {}),
               ...(terminal.resultRef ? { resultRef: terminal.resultRef } : {}),
+              ...(terminal.status === 'completed' && terminal.webPackage ? { webPackage: terminal.webPackage } : {}),
+              ...(terminal.persistenceWarning ? {
+                persistenceWarning: terminal.persistenceWarning,
+                replayUnavailable: true,
+                resultAvailable: false,
+              } : {}),
               ...(publicError ? {
                 error: publicError.message,
                 message: publicError.message,
@@ -1086,21 +1217,16 @@ export const createArenaGenerationService = (
               } : {}),
             },
           };
-          const fullTerminalSnapshot = snapshot(terminal.status, now, terminal.resultRef ?? null);
-          const snapshotWithinBudget = encodedBytes(fullTerminalSnapshot) <= snapshotMaxBytes;
-          let terminalSnapshot = snapshotWithinBudget ? fullTerminalSnapshot : null;
-          if (!terminalSnapshot && terminal.status !== 'completed') {
-            const boundedTerminalSnapshot: GenerationSnapshot = {
-              ...fullTerminalSnapshot,
-              markdown: '',
-              reasoning: '',
-              telemetry: null,
-            };
-            if (encodedBytes(boundedTerminalSnapshot) <= snapshotMaxBytes) {
-              terminalSnapshot = boundedTerminalSnapshot;
-            }
-          }
-          if (!snapshotWithinBudget) {
+          const fullTerminalSnapshot = snapshot(
+            terminal.status,
+            now,
+            terminal.resultRef ?? null,
+            terminal.persistenceWarning ?? null,
+          );
+          const selectedTerminalSnapshot = selectTerminalSnapshotWithinBudget(
+            fullTerminalSnapshot,
+          );
+          if (selectedTerminalSnapshot.overBudget) {
             observe({ event: 'redis_degraded', generationId, operation: 'snapshot_budget' });
           }
           let result: Awaited<ReturnType<GenerationReplayStore['markTerminal']>>;
@@ -1110,7 +1236,9 @@ export const createArenaGenerationService = (
               producerToken,
               terminal,
               terminalEvent,
-              ...(terminalSnapshot ? { terminalSnapshot } : { clearTerminalSnapshot: true }),
+              ...(selectedTerminalSnapshot.snapshot
+                ? { terminalSnapshot: selectedTerminalSnapshot.snapshot }
+                : { clearTerminalSnapshot: true }),
               now,
             });
           } catch (error) {
@@ -1151,8 +1279,13 @@ export const createArenaGenerationService = (
   } => {
     const terminal: GenerationTerminal = {
       status: record.status,
+      ...(record.status === 'completed' && WebPackageArtifactSchema.safeParse(record.webPackage).success
+        ? { webPackage: WebPackageArtifactSchema.parse(record.webPackage) } : {}),
       ...(record.errorCode ? { code: record.errorCode } : {}),
       ...(record.resultRef ? { resultRef: record.resultRef } : {}),
+      ...(record.persistenceWarning ? {
+        persistenceWarning: record.persistenceWarning,
+      } : {}),
     };
     const terminalCode = terminal.status === 'producer_lost'
       ? terminal.code ?? 'PRODUCER_OWNERSHIP_LOST'
@@ -1170,6 +1303,12 @@ export const createArenaGenerationService = (
           status: terminal.status,
           ...(terminalCode ? { code: terminalCode } : {}),
           ...(terminal.resultRef ? { resultRef: terminal.resultRef } : {}),
+          ...(terminal.webPackage ? { webPackage: terminal.webPackage } : {}),
+          ...(terminal.persistenceWarning ? {
+            persistenceWarning: terminal.persistenceWarning,
+            replayUnavailable: true,
+            resultAvailable: false,
+          } : {}),
         },
       },
     };
@@ -1208,6 +1347,7 @@ export const createArenaGenerationService = (
       code?: unknown;
       ok?: unknown;
       resultRef?: unknown;
+      persistenceWarning?: unknown;
       status?: unknown;
     };
     const expectedType = terminal.status === 'failed' || terminal.status === 'producer_lost'
@@ -1224,12 +1364,14 @@ export const createArenaGenerationService = (
       || eventData.ok !== (terminal.status === 'completed')
       || (eventData.code ?? null) !== expectedCode
       || (eventData.resultRef ?? null) !== (terminal.resultRef ?? null)
+      || (eventData.persistenceWarning ?? null) !== (terminal.persistenceWarning ?? null)
     ) return false;
     if (input.requireSnapshot && state.snapshot === null) return false;
     return state.snapshot === null || (
       state.snapshot.status === terminal.status
       && state.snapshot.lastEventId === event.id
       && (state.snapshot.terminalResultRef ?? null) === (terminal.resultRef ?? null)
+      && (state.snapshot.persistenceWarning ?? null) === (terminal.persistenceWarning ?? null)
     );
   };
 
@@ -1283,6 +1425,8 @@ export const createArenaGenerationService = (
       || durableState.terminal?.status !== terminal.status
       || (durableState.terminal.resultRef ?? null) !== (terminal.resultRef ?? null)
       || (durableState.terminal.code ?? null) !== (terminal.code ?? null)
+      || (durableState.terminal.persistenceWarning ?? null)
+        !== (terminal.persistenceWarning ?? null)
     ) return null;
     return durableState;
   };
@@ -1305,12 +1449,18 @@ export const createArenaGenerationService = (
       updatedAt: input.now,
       telemetry: input.priorState.snapshot?.telemetry ?? null,
       terminalResultRef: terminal.resultRef ?? null,
+      ...(terminal.persistenceWarning ? {
+        persistenceWarning: terminal.persistenceWarning,
+      } : {}),
     };
     const terminalContentAvailable = terminal.status !== 'completed'
       || input.record.contentAvailable === true;
-    const snapshotWithinBudget = encodedBytes(terminalSnapshot) <= snapshotMaxBytes;
-    const persistTerminalSnapshot = terminalContentAvailable && snapshotWithinBudget;
-    if (terminalContentAvailable && !snapshotWithinBudget) {
+    const selectedTerminalSnapshot = selectTerminalSnapshotWithinBudget(
+      terminalSnapshot,
+      terminalContentAvailable,
+    );
+    const persistTerminalSnapshot = selectedTerminalSnapshot.snapshot !== null;
+    if (selectedTerminalSnapshot.overBudget) {
       observe({
         event: 'redis_degraded',
         generationId: input.generationId,
@@ -1322,7 +1472,9 @@ export const createArenaGenerationService = (
       producerToken: input.producerToken,
       terminal,
       terminalEvent,
-      ...(persistTerminalSnapshot ? { terminalSnapshot } : { clearTerminalSnapshot: true }),
+      ...(selectedTerminalSnapshot.snapshot
+        ? { terminalSnapshot: selectedTerminalSnapshot.snapshot }
+        : { clearTerminalSnapshot: true }),
       now: input.now,
     }).catch(() => null);
     if (!committed?.owned) return null;
@@ -1440,6 +1592,19 @@ export const createArenaGenerationService = (
       }, 503);
     }
     if (!terminalFallback) {
+      if (claimed.intendedTerminal) {
+        const durable = await inspectOwnedFinalization(generationId, actor.actorKey)
+          .catch(() => ({ kind: 'not-found' as const }));
+        if (durable.kind === 'terminal') terminalFallback = durable.terminal;
+        if (durable.kind !== 'terminal') {
+          return jsonResponse({
+            code: 'GENERATION_FINALIZATION_PENDING',
+            error: 'Generation durable finalization remains pending',
+          }, 503);
+        }
+      }
+    }
+    if (!terminalFallback) {
       if (!dependencies.terminalStore?.reconcileExpiredLease) {
         return jsonResponse({
           code: 'GENERATION_TERMINAL_RECONCILIATION_PENDING',
@@ -1447,6 +1612,7 @@ export const createArenaGenerationService = (
         }, 503);
       }
       terminalFallback = await dependencies.terminalStore.reconcileExpiredLease({
+        multiplayerParticipation: state.multiplayerParticipation,
         generationId,
         generationRequestId: claimed.generationRequestId,
         actorKey: actor.actorKey,
@@ -1572,10 +1738,16 @@ export const createArenaGenerationService = (
           lastEventId: null,
           updatedAt: terminalFallback.updatedAt,
           terminalResultRef: terminalFallback.resultRef,
+          ...(terminalFallback.persistenceWarning ? {
+            persistenceWarning: terminalFallback.persistenceWarning,
+          } : {}),
         },
         terminal: {
           status: terminalFallback.status,
           resultRef: terminalFallback.resultRef,
+          ...(terminalFallback.persistenceWarning ? {
+            persistenceWarning: terminalFallback.persistenceWarning,
+          } : {}),
         },
         cancelRequested: terminalFallback.status === 'cancelled',
         cancelReason: terminalFallback.status === 'cancelled' ? 'user' : null,
@@ -1660,6 +1832,7 @@ export const createArenaGenerationService = (
     const allowedCodes = new Set([
       'GENERATION_FINALIZATION_PENDING',
       'GENERATION_STATE_UNAVAILABLE',
+      'GENERATION_TERMINAL_CONTENT_EXPIRED',
       'GENERATION_TERMINAL_CONTENT_UNAVAILABLE',
       'GENERATION_TERMINAL_RECONCILIATION_PENDING',
     ]);
@@ -1699,6 +1872,14 @@ export const createArenaGenerationService = (
     ...(state.status === 'completed' && state.terminal?.resultRef
       ? { resultRef: state.terminal.resultRef }
       : {}),
+    ...(state.status === 'completed' && state.terminal?.persistenceWarning
+      ? {
+        finalAuthoritative: true,
+        resultAvailable: false,
+        persistenceWarning: state.terminal.persistenceWarning,
+        replayUnavailable: true,
+      }
+      : {}),
   }, 200), actor);
 
   const createTerminalContentUnavailableResponse = (): Response => jsonResponse({
@@ -1706,15 +1887,72 @@ export const createArenaGenerationService = (
     error: 'Generation terminal content is temporarily unavailable',
   }, 503);
 
+  const isTerminalContentExpired = (
+    terminal: ArenaGenerationTerminalRecord | null,
+  ): terminal is ArenaGenerationTerminalRecord => Boolean(
+    terminal?.status === 'completed'
+    && terminal.contentAvailable !== true
+    && terminal.contentUnavailableReason === 'not-found'
+  );
+
+  const isTerminalContentNotArchived = (
+    terminal: ArenaGenerationTerminalRecord | null,
+  ): terminal is ArenaGenerationTerminalRecord => Boolean(
+    terminal?.status === 'completed'
+    && terminal.contentAvailable !== true
+    && terminal.contentUnavailableReason === 'not-archived'
+  );
+
+  const createNotArchivedTerminalStatusResponse = (
+    state: GenerationReplayStoreState,
+    terminal: ArenaGenerationTerminalRecord,
+    actor: ArenaGenerationActor,
+  ): Response => withActorHeaders(jsonResponse({
+    generationId: state.generationId,
+    generationRequestId: state.generationRequestId,
+    status: 'completed',
+    resumable: false,
+    lastEventId: state.lastEventId,
+    updatedAt: terminal.updatedAt,
+    finalAuthoritative: true,
+    resultAvailable: false,
+    persistenceWarning: ARENA_OUTPUT_NOT_ARCHIVED_WARNING,
+    replayUnavailable: true,
+  }, 200), actor);
+
+  const createExpiredTerminalStatusResponse = (
+    state: GenerationReplayStoreState,
+    terminal: ArenaGenerationTerminalRecord,
+    actor: ArenaGenerationActor,
+  ): Response => withActorHeaders(jsonResponse({
+    generationId: state.generationId,
+    generationRequestId: state.generationRequestId,
+    status: 'completed',
+    resumable: false,
+    lastEventId: state.lastEventId,
+    updatedAt: terminal.updatedAt,
+    finalAuthoritative: true,
+    resultAvailable: false,
+    contentRetention: 'expired',
+  }, 200), actor);
+
+  const createTerminalContentExpiredResponse = (): Response => jsonResponse({
+    code: 'GENERATION_TERMINAL_CONTENT_EXPIRED',
+    error: 'Generation terminal content retention has expired',
+  }, 410);
+
   const createTerminalFallbackSubscription = (
     terminal: ArenaGenerationTerminalRecord,
     after: string | null = null,
   ): ArenaGenerationSubscription | Response => {
-    if (terminal.status === 'completed' && terminal.contentAvailable !== true) {
-      return jsonResponse({
-        code: 'GENERATION_TERMINAL_CONTENT_UNAVAILABLE',
-        error: 'Generation terminal content is temporarily unavailable',
-      }, 503);
+    if (
+      terminal.status === 'completed'
+      && terminal.contentAvailable !== true
+      && !isTerminalContentNotArchived(terminal)
+    ) {
+      return isTerminalContentExpired(terminal)
+        ? createTerminalContentExpiredResponse()
+        : createTerminalContentUnavailableResponse();
     }
     const [snapshotId, terminalId] = (() => {
       if (!after) return ['0-0', '0-1'];
@@ -1729,11 +1967,16 @@ export const createArenaGenerationService = (
     })();
     const snapshot: GenerationSnapshot = {
       status: terminal.status,
-      markdown: terminal.status === 'completed' ? terminal.markdown : '',
+      ...(terminal.telemetry ? { telemetry: terminal.telemetry } : {}),
+      markdown: terminal.status === 'completed' || (terminal.status === 'failed' && terminal.resultRef)
+        ? terminal.markdown : '',
       reasoning: terminal.status === 'completed' ? terminal.reasoning : '',
       lastEventId: null,
       updatedAt: terminal.updatedAt,
       terminalResultRef: terminal.status === 'completed' ? terminal.resultRef : null,
+      ...(isTerminalContentNotArchived(terminal) ? {
+        persistenceWarning: ARENA_OUTPUT_NOT_ARCHIVED_WARNING,
+      } : {}),
     };
     const snapshotEvent: GenerationStreamEvent = {
       id: snapshotId,
@@ -1748,6 +1991,8 @@ export const createArenaGenerationService = (
       data: {
         ok: terminal.status === 'completed',
         status: terminal.status,
+        ...(getPublicAiErrorMessage(terminal.errorCode)
+          ? { message: getPublicAiErrorMessage(terminal.errorCode) } : {}),
         ...(
           terminal.status === 'failed' || terminal.status === 'producer_lost'
             ? {
@@ -1761,6 +2006,13 @@ export const createArenaGenerationService = (
         ...(terminal.status === 'completed' && terminal.resultRef
           ? { resultRef: terminal.resultRef }
           : {}),
+        ...(terminal.status === 'completed' && WebPackageArtifactSchema.safeParse(terminal.webPackage).success
+          ? { webPackage: WebPackageArtifactSchema.parse(terminal.webPackage) } : {}),
+        ...(isTerminalContentNotArchived(terminal) ? {
+          persistenceWarning: ARENA_OUTPUT_NOT_ARCHIVED_WARNING,
+          replayUnavailable: true,
+          resultAvailable: false,
+        } : {}),
       },
     };
     const stream = new ReadableStream<GenerationStreamEvent>({
@@ -1842,6 +2094,49 @@ export const createArenaGenerationService = (
             cursor = id;
             controller.close();
           };
+          const enqueueExpiredTerminal = (
+            terminal: ArenaGenerationTerminalRecord,
+          ): void => {
+            const snapshotId = nextSyntheticId();
+            cursor = snapshotId;
+            const terminalId = nextSyntheticId();
+            const snapshotEvent: GenerationStreamEvent = {
+              id: snapshotId,
+              type: 'snapshot',
+              data: {
+                status: 'completed',
+                markdown: '',
+                reasoning: '',
+                lastEventId: null,
+                updatedAt: terminal.updatedAt,
+                telemetry: null,
+                terminalResultRef: null,
+              },
+            };
+            const terminalEvent: GenerationStreamEvent = {
+              id: terminalId,
+              type: 'done',
+              data: {
+                ok: true,
+                status: 'completed',
+                code: 'GENERATION_TERMINAL_CONTENT_EXPIRED',
+                resultAvailable: false,
+                contentRetention: 'expired',
+              },
+            };
+            controller.enqueue(snapshotEvent);
+            controller.enqueue(terminalEvent);
+            observe({
+              event: 'replay',
+              generationId,
+              events: 2,
+              bytes: encodeGenerationSseEvent(snapshotEvent).byteLength
+                + encodeGenerationSseEvent(terminalEvent).byteLength,
+              snapshotBootstrap: true,
+            });
+            cursor = terminalId;
+            controller.close();
+          };
           const enqueueTerminalSnapshot = (
             snapshot: GenerationSnapshot,
             terminal: GenerationTerminal,
@@ -1858,7 +2153,12 @@ export const createArenaGenerationService = (
                 ...snapshot,
                 status: terminal.status,
                 ...(terminal.status === 'completed'
-                  ? { terminalResultRef: terminal.resultRef ?? null }
+                  ? {
+                    terminalResultRef: terminal.resultRef ?? null,
+                    ...(terminal.persistenceWarning
+                      ? { persistenceWarning: terminal.persistenceWarning }
+                      : {}),
+                  }
                   : { markdown: '', reasoning: '', terminalResultRef: null }),
               },
             };
@@ -1874,6 +2174,12 @@ export const createArenaGenerationService = (
                 ...(terminal.status === 'completed' && terminal.resultRef
                   ? { resultRef: terminal.resultRef }
                   : {}),
+                ...(terminal.status === 'completed' && terminal.webPackage ? { webPackage: terminal.webPackage } : {}),
+                ...(terminal.persistenceWarning ? {
+                  persistenceWarning: terminal.persistenceWarning,
+                  replayUnavailable: true,
+                  resultAvailable: false,
+                } : {}),
                 ...(terminal.status === 'failed' && terminal.publicError ? {
                   error: terminal.publicError.message,
                   message: terminal.publicError.message,
@@ -1911,7 +2217,13 @@ export const createArenaGenerationService = (
               return;
             }
             if (fallback.status === 'completed' && fallback.contentAvailable !== true) {
-              throw new Error('GENERATION_TERMINAL_CONTENT_UNAVAILABLE');
+              if (isTerminalContentExpired(fallback)) {
+                enqueueExpiredTerminal(fallback);
+                return;
+              }
+              if (!isTerminalContentNotArchived(fallback)) {
+                throw new Error('GENERATION_TERMINAL_CONTENT_UNAVAILABLE');
+              }
             }
             const fallbackSubscription = createTerminalFallbackSubscription(fallback, cursor);
             if (fallbackSubscription instanceof Response) {
@@ -2215,6 +2527,7 @@ export const createArenaGenerationService = (
           producerToken: input.producerToken,
           now: claimNow.toISOString(),
           leaseExpiresAt: addLeaseDuration(claimNow, leaseDurationMs),
+          ...(_terminal.status === 'completed' ? { terminal: _terminal } : {}),
         });
         if (claimed.kind === 'fenced') loseOwnership();
         if (claimed.kind === 'cancelled' && !controller.signal.aborted) {
@@ -2248,7 +2561,16 @@ export const createArenaGenerationService = (
           });
         }, heartbeatIntervalMs);
         const terminal = await executionPromise;
-        await replayWriter.finish(terminal);
+        try {
+          await replayWriter.finish(terminal);
+        } catch (error) {
+          if (terminal.status !== 'completed') throw error;
+          // The Provider result has already been delivered and durable finalization
+          // has already decided success. A Redis terminal projection failure may
+          // leave replay/finalization pending, but must not manufacture a failed
+          // generation and overwrite the completed intent.
+          return;
+        }
       } catch (error) {
         const terminal: GenerationTerminal = controller.signal.reason === 'producer_lost'
           ? { status: 'producer_lost', code: 'PRODUCER_OWNERSHIP_LOST' }
@@ -2435,15 +2757,66 @@ export const createArenaGenerationService = (
   };
 
   const service: ArenaGenerationApplicationService = {
+    async cancelOwned(input): Promise<ArenaGenerationOwnedCancelResult> {
+      const result = await dependencies.store.requestCancel({
+        generationId: input.generationId,
+        actorKey: input.actorKey,
+        reason: input.reason,
+        now: dependencies.now().toISOString(),
+      });
+      if (result.kind === 'accepted') {
+        const producer = activeProducers.get(input.generationId);
+        if (producer && !producer.controller.signal.aborted) {
+          producer.controller.abort(result.cancelReason);
+        }
+        observe({
+          event: 'cancel',
+          generationId: input.generationId,
+          reason: result.cancelReason,
+          outcome: 'accepted',
+        });
+      } else if (result.kind === 'terminal') {
+        observe({
+          event: 'cancel',
+          generationId: input.generationId,
+          reason: input.reason,
+          outcome: 'terminal',
+        });
+      }
+      return result;
+    },
+
     async readOwnedProjection(input): Promise<ArenaGenerationOwnedProjectionResult> {
       const owned = await resolveOwnedStateForActor(
         { actorKey: input.actorKey },
         input.generationId,
       );
       if (owned instanceof Response) return ownedFailureFromResponse(owned);
+      let terminalFallback = owned.terminalFallback;
       if (
-        owned.terminalFallback?.status === 'completed'
-        && owned.terminalFallback.contentAvailable !== true
+        owned.state.status === 'completed'
+        && !terminalFallback?.roomSafeResult
+        && dependencies.terminalStore
+      ) {
+        const durable = await readOwnedTerminal(input.generationId, input.actorKey)
+          .catch(() => null);
+        if (
+          durable?.status === 'completed'
+          && terminalRecordMatchesIdentity({
+            record: durable,
+            generationId: owned.state.generationId,
+            generationRequestId: owned.state.generationRequestId,
+            acceptedPayloadHashes: [owned.state.payloadHash],
+          })
+        ) terminalFallback = durable;
+      }
+      const terminalContentExpired = isTerminalContentExpired(terminalFallback);
+      const terminalContentNotArchived = isTerminalContentNotArchived(terminalFallback);
+      if (
+        terminalFallback?.status === 'completed'
+        && terminalFallback.contentAvailable !== true
+        && !terminalContentExpired
+        && !terminalContentNotArchived
       ) {
         return {
           kind: 'unavailable',
@@ -2455,9 +2828,12 @@ export const createArenaGenerationService = (
         || owned.state.status === 'failed'
         || owned.state.status === 'cancelled'
         || owned.state.status === 'producer_lost';
-      const resultAvailable = owned.state.status === 'completed' && Boolean(
-        owned.terminalFallback?.resultRef
-        ?? owned.state.terminal?.resultRef
+      const resultAvailable = owned.state.status === 'completed'
+        && !terminalContentExpired
+        && !terminalContentNotArchived
+        && Boolean(
+          terminalFallback?.resultRef
+          ?? owned.state.terminal?.resultRef
         ?? snapshot?.terminalResultRef,
       );
       return {
@@ -2467,14 +2843,16 @@ export const createArenaGenerationService = (
           generationRequestId: owned.state.generationRequestId,
           status: owned.state.status,
           markdown: owned.state.status === 'completed'
-            ? owned.terminalFallback?.markdown ?? snapshot?.markdown ?? ''
+            ? terminalContentExpired
+              ? ''
+              : terminalFallback?.markdown ?? snapshot?.markdown ?? ''
             : owned.state.status === 'reserved'
                 || owned.state.status === 'running'
                 || owned.state.status === 'finalizing'
               ? snapshot?.markdown ?? ''
               : '',
           resumeCursor: snapshot?.lastEventId ?? owned.state.lastEventId,
-          updatedAt: owned.terminalFallback?.updatedAt
+          updatedAt: terminalFallback?.updatedAt
             ?? snapshot?.updatedAt
             ?? owned.state.updatedAt,
           finalAuthoritative,
@@ -2482,8 +2860,16 @@ export const createArenaGenerationService = (
           generationRecordId: resultAvailable ? owned.state.generationId : null,
           errorCode: safeTerminalErrorCode(
             owned.state.status,
-            owned.terminalFallback?.errorCode ?? owned.state.terminal?.code,
+            terminalFallback?.errorCode ?? owned.state.terminal?.code,
           ),
+          ...(terminalContentNotArchived ? {
+            persistenceWarning: ARENA_OUTPUT_NOT_ARCHIVED_WARNING,
+            replayUnavailable: true,
+          } : {}),
+          ...(terminalContentExpired ? { contentRetention: 'expired' as const } : {}),
+          ...(owned.state.status === 'completed' && terminalFallback?.roomSafeResult
+            ? { roomSafeResult: terminalFallback.roomSafeResult }
+            : {}),
         }),
       };
     },
@@ -2515,16 +2901,72 @@ export const createArenaGenerationService = (
         : subscriptionToSseResponse(subscription);
     },
 
+    async createParsedSubscription(
+      request: Request,
+      command: ArenaGenerationCreateCommand,
+    ): Promise<ArenaGenerationSubscription | Response> {
+      if (request.method !== 'POST') {
+        return jsonResponse({ code: 'METHOD_NOT_ALLOWED', error: 'Method not allowed' }, 405);
+      }
+      const generationRequestId = typeof command?.generationRequestId === 'string'
+        ? command.generationRequestId.trim()
+        : '';
+      if (!isGenerationRequestId(generationRequestId)) {
+        return jsonResponse({
+          code: 'INVALID_GENERATION_REQUEST_ID',
+          error: 'generationRequestId 无效',
+        }, 400);
+      }
+      if (
+        !command.payload
+        || typeof command.payload !== 'object'
+        || Array.isArray(command.payload)
+      ) {
+        return jsonResponse({ code: 'INVALID_REQUEST', error: '请求体必须是对象' }, 400);
+      }
+      if (
+        !Number.isSafeInteger(command.bodyBytes)
+        || command.bodyBytes < 0
+        || command.bodyBytes > MAX_ARENA_CREATE_BODY_BYTES
+      ) {
+        return jsonResponse({
+          code: 'ARENA_REQUEST_TOO_LARGE',
+          error: '请求体超过允许的大小',
+        }, 413);
+      }
+      const payload = { ...command.payload };
+      delete payload.generationRequestId;
+      parsedCreateCommands.set(request, {
+        generationRequestId,
+        payload,
+        bodyBytes: command.bodyBytes,
+      });
+      try {
+        return await service.createSubscription(request);
+      } finally {
+        parsedCreateCommands.delete(request);
+      }
+    },
+
     async createSubscription(
       request: Request,
     ): Promise<ArenaGenerationSubscription | Response> {
       if (request.method !== 'POST') {
         return jsonResponse({ code: 'METHOD_NOT_ALLOWED', error: 'Method not allowed' }, 405);
       }
-      const actor = await dependencies.resolveActor(request);
+      let actor = await dependencies.resolveActor(request);
       if (!actor) return jsonResponse({ code: 'UNAUTHORIZED', error: 'Unauthorized' }, 401);
-      const parsed = await parseCreatePayload(request);
+      const parsed = parsedCreateCommands.get(request) ?? await parseCreatePayload(request);
       if (parsed instanceof Response) return parsed;
+      if (dependencies.resolveCreateActor) {
+        actor = await dependencies.resolveCreateActor({
+          request,
+          actor,
+          generationRequestId: parsed.generationRequestId,
+          payload: parsed.payload,
+        });
+        if (!actor) return jsonResponse({ code: 'UNAUTHORIZED', error: 'Unauthorized' }, 401);
+      }
 
       let semanticPayload: Record<string, unknown>;
       let materializationPayload: Record<string, unknown> | null = null;
@@ -2597,6 +3039,7 @@ export const createArenaGenerationService = (
       let reservation: Awaited<ReturnType<GenerationReplayStore['reserve']>>;
       try {
         reservation = await dependencies.store.reserve({
+          multiplayerParticipation: extractArenaMultiplayerParticipation(semanticPayload.multiplayerGenerationSnapshot, actor.actorKey),
           actorKey: actor.actorKey,
           generationRequestId: parsed.generationRequestId,
           generationId,
@@ -3034,7 +3477,19 @@ export const createArenaGenerationService = (
         owned.terminalFallback?.status === 'completed'
         && owned.terminalFallback.contentAvailable !== true
       ) {
-        return createTerminalContentUnavailableResponse();
+        return isTerminalContentNotArchived(owned.terminalFallback)
+          ? createNotArchivedTerminalStatusResponse(
+              owned.state,
+              owned.terminalFallback,
+              owned.actor,
+            )
+          : isTerminalContentExpired(owned.terminalFallback)
+            ? createExpiredTerminalStatusResponse(
+              owned.state,
+              owned.terminalFallback,
+              owned.actor,
+            )
+            : createTerminalContentUnavailableResponse();
       }
       return createStatusResponse(owned.state, owned.actor);
     },
@@ -3104,7 +3559,19 @@ export const createArenaGenerationService = (
         owned.terminalFallback?.status === 'completed'
         && owned.terminalFallback.contentAvailable !== true
       ) {
-        return createTerminalContentUnavailableResponse();
+        return isTerminalContentNotArchived(owned.terminalFallback)
+          ? createNotArchivedTerminalStatusResponse(
+              owned.state,
+              owned.terminalFallback,
+              owned.actor,
+            )
+          : isTerminalContentExpired(owned.terminalFallback)
+            ? createExpiredTerminalStatusResponse(
+              owned.state,
+              owned.terminalFallback,
+              owned.actor,
+            )
+            : createTerminalContentUnavailableResponse();
       }
       return createStatusResponse(owned.state, owned.actor);
     },

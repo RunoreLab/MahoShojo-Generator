@@ -1,16 +1,16 @@
 'use client';
 
 import { create } from 'zustand';
-import { createJSONStorage, persist } from 'zustand/middleware';
+import { persist } from 'zustand/middleware';
+import { WebPackageRefSchema } from '@mahoshojo/contracts/web-package';
 
 import {
   BattleStoreState,
   BattleSettings,
+  type ArenaGenerationRepairContext,
   isCombatantLimitReached,
   MAX_COMBATANTS,
   ScenarioState,
-  MAX_AUX_SCENARIOS,
-  MAX_ARENA_MATERIALS,
 } from '../types';
 import {
   DEFAULT_BATTLE_REPORT_CARD_WIDTH_MODE,
@@ -18,8 +18,37 @@ import {
 } from '../utils/battleReportCardWidth';
 import type { AdjudicatorEvent } from '@/types/arena';
 import { buildAdjudicationSourceKey, filterAdjudicationEventsBySources } from '@/lib/arena/adjudication-events';
+import {
+  ARENA_ADJUDICATION_DRAFT_VERSION,
+  createArenaAdjudicationDraft,
+  restoreArenaAdjudicationDraft,
+} from '@/lib/arena/adjudication-draft-persistence';
+import { canAddArenaReferenceItems } from '@/lib/arena/resource-budget';
+import { randomUUID } from '@/lib/crypto';
+import { createHydrationSafeJsonStorage } from '@/lib/zustand-persist-storage';
 
 const normalizeSourceKey = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
+
+const cloneGenerationRepairContext = (
+  context: ArenaGenerationRepairContext | null,
+): ArenaGenerationRepairContext | null => {
+  if (!context) return null;
+  const customProvider = context.customProvider;
+  return {
+    generationId: context.generationId,
+    customProvider: customProvider ? {
+      ...customProvider,
+      ...(customProvider.generationOverrides ? {
+        generationOverrides: {
+          ...customProvider.generationOverrides,
+          ...(customProvider.generationOverrides.thinking ? {
+            thinking: { ...customProvider.generationOverrides.thinking },
+          } : {}),
+        },
+      } : {}),
+    } : null,
+  };
+};
 
 const getCombatantSourceKey = (combatant: unknown): string => {
   if (!combatant || typeof combatant !== 'object') return '';
@@ -76,6 +105,7 @@ const defaultScenario: ScenarioState = {
   content: null,
   fileName: null,
   isNative: false,
+  isPreset: false,
 };
 
 const defaultSettings: BattleSettings = {
@@ -120,7 +150,12 @@ export const useBattleStore = create<BattleStoreState>()(
       materials: [],
       selectedQuestionnaires: [],
       battleMode: 'classic',
-      generationMode: 'non-stream',
+      generationMode: 'stream',
+      reportFormat: 'markdown',
+      webPackageRef: null,
+      resultReportFormat: 'markdown',
+      resultWebPackage: null,
+      resultWebReady: false,
       arenaFreeRankingEnabled: false,
       isStreaming: false,
       streamingMarkdown: null,
@@ -138,6 +173,8 @@ export const useBattleStore = create<BattleStoreState>()(
       customStoryLength: '',
       selectedLanguage: 'zh-CN',
       lastGenerationId: null,
+      lastGenerationRepairContext: null,
+      repairAppliedGenerationId: null,
       settings: defaultSettings,
       adjudicationEvents: [],
       adjudicationResults: null,
@@ -145,13 +182,20 @@ export const useBattleStore = create<BattleStoreState>()(
       updatedCombatants: [],
       error: null,
       isGenerating: false,
+      arenaGenerationConnectionState: null,
       isRedoingUpdates: false,
+      isCombatantMutationPending: false,
       isMatching: null,
       loadingPreset: null,
       userProviderConfig: null,
 
       setBattleMode: (mode) => set({ battleMode: mode }),
       setGenerationMode: (mode) => set({ generationMode: mode }),
+      setReportFormat: (reportFormat) => set((state) => ({ reportFormat, webPackageRef: reportFormat === 'web' ? state.webPackageRef : null })),
+      setWebPackageRef: (webPackageRef) => set({ webPackageRef }),
+      setResultWebPackage: (resultWebPackage) => set({ resultWebPackage }),
+      setResultReportFormat: (resultReportFormat) => set({ resultReportFormat }),
+      setResultWebReady: (resultWebReady) => set({ resultWebReady }),
       setArenaFreeRankingEnabled: (enabled) => set({ arenaFreeRankingEnabled: enabled }),
       setIsStreaming: (stateValue) => set({ isStreaming: stateValue }),
       setStreamingMarkdown: (markdown) => set({ streamingMarkdown: markdown }),
@@ -168,7 +212,32 @@ export const useBattleStore = create<BattleStoreState>()(
       setStoryLength: (storyLength) => set({ storyLength }),
       setCustomStoryLength: (customStoryLength) => set({ customStoryLength }),
       setSelectedLanguage: (selectedLanguage) => set({ selectedLanguage }),
-      setLastGenerationId: (lastGenerationId) => set({ lastGenerationId }),
+      setLastGenerationId: (lastGenerationId) => set((state) => ({
+        lastGenerationId,
+        lastGenerationRepairContext:
+          state.lastGenerationRepairContext?.generationId === lastGenerationId
+            ? state.lastGenerationRepairContext
+            : null,
+        repairAppliedGenerationId:
+          state.repairAppliedGenerationId === lastGenerationId
+            ? state.repairAppliedGenerationId
+            : null,
+      })),
+      setLastGenerationRepairContext: (context) => set((state) => {
+        const clonedContext = cloneGenerationRepairContext(context);
+        const lastGenerationId = clonedContext?.generationId ?? null;
+        return {
+          lastGenerationId,
+          lastGenerationRepairContext: clonedContext,
+          repairAppliedGenerationId:
+            state.repairAppliedGenerationId === lastGenerationId
+              ? state.repairAppliedGenerationId
+              : null,
+        };
+      }),
+      setRepairAppliedGenerationId: (repairAppliedGenerationId) => set({
+        repairAppliedGenerationId,
+      }),
       updateSettings: (incoming) =>
         set((state) => ({
           settings: {
@@ -309,7 +378,7 @@ export const useBattleStore = create<BattleStoreState>()(
 
       addAuxScenario: (scenario) =>
         set((state) => {
-          if (state.auxScenarios.length >= MAX_AUX_SCENARIOS) {
+          if (!canAddArenaReferenceItems(state)) {
             return state;
           }
           return { auxScenarios: [...state.auxScenarios, scenario] };
@@ -350,6 +419,12 @@ export const useBattleStore = create<BattleStoreState>()(
         })),
       setAuxScenarios: (scenarios) =>
         set((state) => {
+          if (!canAddArenaReferenceItems({
+            ...state,
+            auxScenarios: [],
+          }, scenarios.length)) {
+            return state;
+          }
           const nextKeys = new Set(scenarios.map(getScenarioSourceKey).filter(Boolean));
           const removedKeys = state.auxScenarios
             .map(getScenarioSourceKey)
@@ -364,7 +439,7 @@ export const useBattleStore = create<BattleStoreState>()(
 
       addMaterial: (material) =>
         set((state) => {
-          if (state.materials.length >= MAX_ARENA_MATERIALS) {
+          if (!canAddArenaReferenceItems(state)) {
             return state;
           }
           return { materials: [...state.materials, material] };
@@ -389,7 +464,12 @@ export const useBattleStore = create<BattleStoreState>()(
         }),
 
       clearMaterials: () => set({ materials: [] }),
-      setMaterials: (materials) => set({ materials }),
+      setMaterials: (materials) =>
+        set((state) => (
+          canAddArenaReferenceItems({ ...state, materials: [] }, materials.length)
+            ? { materials }
+            : state
+        )),
 
       setAdjudicationEvents: (events) => set({ adjudicationEvents: events }),
       appendAdjudicationEvents: (events, sourceKey) =>
@@ -417,7 +497,18 @@ export const useBattleStore = create<BattleStoreState>()(
 
       setError: (message) => set({ error: message }),
       setIsGenerating: (stateValue) => set({ isGenerating: stateValue }),
+      setArenaGenerationConnectionState: (state) => set({ arenaGenerationConnectionState: state }),
       setIsRedoingUpdates: (stateValue) => set({ isRedoingUpdates: stateValue }),
+      tryBeginCombatantMutation: () => {
+        let acquired = false;
+        set((state) => {
+          if (state.isCombatantMutationPending) return state;
+          acquired = true;
+          return { isCombatantMutationPending: true };
+        });
+        return acquired;
+      },
+      endCombatantMutation: () => set({ isCombatantMutationPending: false }),
       setIsMatching: (target) => set({ isMatching: target }),
       setLoadingPreset: (filename) => set({ loadingPreset: filename }),
       setUserProviderConfig: (config) => set({ userProviderConfig: config }),
@@ -434,6 +525,7 @@ export const useBattleStore = create<BattleStoreState>()(
             return true;
           });
           if (isDuplicate) return state;
+          if (!canAddArenaReferenceItems(state)) return state;
 
           const usedSelectionIds = new Set<string>();
           state.selectedQuestionnaires.forEach((item) => {
@@ -443,9 +535,7 @@ export const useBattleStore = create<BattleStoreState>()(
 
           const createSelectionSuffix = () => {
             try {
-              if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
-                return crypto.randomUUID();
-              }
+              return randomUUID();
             } catch {
               // ignore
             }
@@ -470,7 +560,12 @@ export const useBattleStore = create<BattleStoreState>()(
           ),
         })),
 
-      setQuestionnaireSelections: (selections) => set({ selectedQuestionnaires: selections }),
+      setQuestionnaireSelections: (selections) =>
+        set((state) => (
+          canAddArenaReferenceItems({ ...state, selectedQuestionnaires: [] }, selections.length)
+            ? { selectedQuestionnaires: selections }
+            : state
+        )),
 
       toggleQuestionnaireSelectionLore: (selectionId, enabled) =>
         set((state) => ({
@@ -483,23 +578,49 @@ export const useBattleStore = create<BattleStoreState>()(
     }),
     {
       name: 'arena-storage',
-      storage: createJSONStorage(createStorage),
+      storage: createHydrationSafeJsonStorage(createStorage),
+      // SSR 与 hydration 首帧都使用默认状态；路由 boundary mount 后再读取 localStorage。
+      skipHydration: true,
       merge: (persistedState, currentState) => {
-        const merged = { ...currentState, ...(persistedState as any) };
-        if ((persistedState as any)?.settings && typeof (persistedState as any).settings === 'object') {
-          merged.settings = { ...currentState.settings, ...(persistedState as any).settings };
+        const persisted = persistedState && typeof persistedState === 'object'
+          ? persistedState as Record<string, unknown>
+          : {};
+        const persistedWithoutDraft = { ...persisted };
+        delete persistedWithoutDraft.adjudicationDraftV1;
+        delete persistedWithoutDraft.adjudicationEvents;
+        delete persistedWithoutDraft.lastGenerationId;
+        delete persistedWithoutDraft.lastGenerationRepairContext;
+        delete persistedWithoutDraft.repairAppliedGenerationId;
+        delete persistedWithoutDraft.userProviderConfig;
+        const merged = {
+          ...currentState,
+          ...persistedWithoutDraft,
+          adjudicationEvents: restoreArenaAdjudicationDraft(persisted),
+          reportFormat: persisted.reportFormat === 'web' ? 'web' : 'markdown',
+          webPackageRef: persisted.reportFormat === 'web' ? WebPackageRefSchema.safeParse(persisted.webPackageRef).data ?? null : null,
+          resultWebPackage: null,
+          resultReportFormat: 'markdown',
+          resultWebReady: false,
+        } as BattleStoreState;
+        if (persisted.settings && typeof persisted.settings === 'object') {
+          merged.settings = { ...currentState.settings, ...(persisted.settings as Partial<BattleSettings>) };
         }
         return merged;
       },
       partialize: (state) => ({
         battleMode: state.battleMode,
         generationMode: state.generationMode,
+        reportFormat: state.reportFormat,
+        webPackageRef: state.webPackageRef,
         arenaFreeRankingEnabled: state.arenaFreeRankingEnabled,
         storyLength: state.storyLength,
         customStoryLength: state.customStoryLength,
         selectedLanguage: state.selectedLanguage,
         settings: state.settings,
+        adjudicationDraftV1: createArenaAdjudicationDraft(state.adjudicationEvents),
       }),
+      version: ARENA_ADJUDICATION_DRAFT_VERSION,
+      migrate: (persistedState) => persistedState,
     }
   )
 );

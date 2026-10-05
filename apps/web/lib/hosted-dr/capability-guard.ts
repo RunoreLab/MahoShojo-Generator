@@ -10,27 +10,15 @@ import {
   parseHostedApiDeploymentTarget,
   withHostedApiCorsHeaders,
 } from '@mahoshojo/hosted-api/hosted-dr';
-import hostedDrManifest from '../../../../config/hosted-dr-capabilities.json';
 
+import { hostedDrClientOperations } from '@/config/hosted-routing';
 import { cloudflareDrDatabaseProvider } from '@/lib/hosted-dr/database-provider';
-
-type HostedDrCapability = {
-  id: string;
-  operations: Array<{
-    method: string;
-    drMode: 'safe-read' | 'new-request-only' | 'fail-closed';
-  }>;
-  requiredSecrets: Array<{ name: string; minLength?: number }>;
-  requiredBindings: string[];
-  drDatabaseProvider: 'cloudflare-d1-binding';
-  consistency: 'replica-ok' | 'primary';
-};
 
 type GuardUnavailableCategory =
   | 'environment'
   | 'contract'
   | 'method'
-  | 'dr-mode'
+  | 'operation-safety'
   | 'cors'
   | 'secret'
   | 'binding'
@@ -54,10 +42,34 @@ type NextRouteHandler<Args extends unknown[]> = (
   ..._args: Args
 ) => Response | Promise<Response>;
 
-const capabilities = new Map(
-  (hostedDrManifest.capabilities as HostedDrCapability[])
-    .map((capability) => [capability.id, capability]),
-);
+const operationsByCapability = new Map<string, typeof hostedDrClientOperations>();
+for (const operation of hostedDrClientOperations) {
+  const capabilityId = operation.route.slice('/api/'.length);
+  operationsByCapability.set(
+    capabilityId,
+    Object.freeze([
+      ...(operationsByCapability.get(capabilityId) ?? []),
+      operation,
+    ]),
+  );
+}
+
+const SIGNED_CAPABILITIES = new Set([
+  'creator/generate',
+  'creator/generate-stream',
+  'generate-canshou',
+  'generate-canshou-stream',
+  'generate-magical-girl',
+  'generate-magical-girl-details',
+  'generate-magical-girl-details-stream',
+  'generate-scenario',
+  'generate-sublimation',
+  'generate-sublimation-stream',
+]);
+
+const R2_CAPABILITIES = new Set([
+  'arena/generations/[generationId]/stream',
+]);
 
 const defaultLogUnavailable = (event: GuardUnavailableEvent): void => {
   console.error(JSON.stringify({
@@ -114,17 +126,8 @@ const hasR2ObjectStoreConfiguration = (
   ].some((value) => Boolean(value?.trim()));
 };
 
-const hasRequiredBindings = (
-  bindings: readonly string[],
-  environment: Readonly<Record<string, string | undefined>>,
-): boolean => bindings.every((binding) => {
-  if (binding === 'DB') return true;
-  if (binding === 'R2_OBJECT_STORE') return hasR2ObjectStoreConfiguration(environment);
-  return false;
-});
-
-export const isExecutableHostedDrMode = (value: unknown): boolean => (
-  value === 'safe-read' || value === 'new-request-only'
+export const isExecutableHostedDrOperationSafety = (value: unknown): boolean => (
+  value === 'safe-read' || value === 'new-non-idempotent'
 );
 
 export const withNextDrCapability = <Args extends unknown[]>(
@@ -144,8 +147,8 @@ export const withNextDrCapability = <Args extends unknown[]>(
     return unavailableResponse();
   }
 
-  const capability = capabilities.get(capabilityId);
-  if (!capability) {
+  const operations = operationsByCapability.get(capabilityId);
+  if (!operations) {
     logUnavailable({ capabilityId, category: 'contract' });
     return unavailableResponse();
   }
@@ -167,38 +170,44 @@ export const withNextDrCapability = <Args extends unknown[]>(
     allowedOrigins,
   );
   const method = (options.operationMethod ?? request.method).trim().toUpperCase();
-  const operation = capability.operations.find((candidate) => candidate.method === method);
+  const operation = operations.find((candidate) => candidate.method === method);
   if (!operation) {
     logUnavailable({ capabilityId, category: 'method' });
     return respond(methodNotAllowedResponse(
-      capability.operations.map(({ method: allowed }) => allowed),
+      operations.map(({ method: allowed }) => allowed),
     ));
   }
-  if (!isExecutableHostedDrMode(operation.drMode)) {
-    logUnavailable({ capabilityId, category: 'dr-mode' });
+  if (!isExecutableHostedDrOperationSafety(operation.safety)) {
+    logUnavailable({ capabilityId, category: 'operation-safety' });
     return respond(unavailableResponse());
   }
 
-  for (const secret of capability.requiredSecrets) {
-    const value = environment[secret.name]?.trim() ?? '';
-    if (!value || (secret.minLength !== undefined && value.length < secret.minLength)) {
+  if (
+    SIGNED_CAPABILITIES.has(capabilityId)
+    && (environment.SIGNATURE_SECRET_KEY?.trim().length ?? 0) < 32
+  ) {
+    logUnavailable({ capabilityId, category: 'secret' });
+    return respond(unavailableResponse());
+  }
+  if (R2_CAPABILITIES.has(capabilityId)) {
+    if (!environment.R2_ACCESS_KEY_ID?.trim() || !environment.R2_SECRET_ACCESS_KEY?.trim()) {
       logUnavailable({ capabilityId, category: 'secret' });
       return respond(unavailableResponse());
     }
-  }
-  if (!hasRequiredBindings(capability.requiredBindings, environment)) {
-    logUnavailable({ capabilityId, category: 'binding' });
-    return respond(unavailableResponse());
+    if (!hasR2ObjectStoreConfiguration(environment)) {
+      logUnavailable({ capabilityId, category: 'binding' });
+      return respond(unavailableResponse());
+    }
   }
 
   const provider = options.provider ?? cloudflareDrDatabaseProvider;
-  if (provider.id !== capability.drDatabaseProvider) {
+  if (provider.id !== 'cloudflare-d1-binding') {
     logUnavailable({ capabilityId, category: 'database-provider' });
     return respond(unavailableResponse());
   }
   let session: DatabaseSession | null;
   try {
-    session = provider.openSession({ consistency: capability.consistency });
+    session = provider.openSession({ consistency: 'primary' });
   } catch {
     session = null;
   }

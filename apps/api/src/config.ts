@@ -6,16 +6,10 @@ import {
 import { parseAIProvidersFromEnv } from '@mahoshojo/hosted-runtime/node-runtime/providers';
 import { parseTrustedD1GatewayOrigin } from '@mahoshojo/hosted-runtime/node-runtime/d1-client';
 import {
-  evaluateHostedDrVersionGate,
   hasValidHostedApiProductionCorsOrigins,
-  HOSTED_DR_CONTRACT_VERSION,
   parseHostedApiDeploymentTarget,
   resolveHostedApiCorsOrigin,
-  type HostedDrVersionGateInput,
 } from '@mahoshojo/hosted-api/hosted-dr';
-
-const ARENA_ROOM_CHECKPOINT_CONTRACT =
-  'arena-room-authority-v2-generation-payload-digest-v1';
 
 export type HonoServerConfig = {
   host: string;
@@ -29,6 +23,8 @@ export type HonoServerConfig = {
   arenaRoomAllowedOrigins: string[];
   authMode: HonoAuthMode;
   arenaMultiplayerEnabled: boolean;
+  /** Dedicated Admin-to-Arena service key; never reuse public session or room-ticket signing keys. */
+  adminArenaObservationSecret?: string;
 };
 
 const hasText = (value: string | undefined): boolean => Boolean(value?.trim());
@@ -65,24 +61,6 @@ const hasLoopbackRedisAuthority = (value: string): boolean => {
 const hasValidAiProviderConfig = (env: NodeJS.ProcessEnv): boolean =>
   parseAIProvidersFromEnv(env).length > 0;
 
-const validateHostedDrVersionGate = (env: NodeJS.ProcessEnv): void => {
-  const stage = env.HOSTED_DR_GATE_STAGE?.trim() || 'rollout';
-  const schemaState = env.HOSTED_DR_SCHEMA_STATE?.trim() || 'expanded';
-  const result = evaluateHostedDrVersionGate({
-    stage: stage as HostedDrVersionGateInput['stage'],
-    primaryContractVersion: env.HOSTED_DR_PRIMARY_CONTRACT_VERSION?.trim()
-      || HOSTED_DR_CONTRACT_VERSION,
-    drContractVersion: env.HOSTED_DR_DR_CONTRACT_VERSION?.trim() || HOSTED_DR_CONTRACT_VERSION,
-    clientContractVersion: env.HOSTED_DR_CLIENT_CONTRACT_VERSION?.trim()
-      || HOSTED_DR_CONTRACT_VERSION,
-    schemaState: schemaState as HostedDrVersionGateInput['schemaState'],
-    cleanupRequested: env.HOSTED_DR_CLEANUP_REQUESTED?.trim().toLowerCase() === 'true',
-  });
-  if (!result.allowed) {
-    throw new Error(`HOSTED_DR_VERSION_GATE_${result.reason.toUpperCase()}`);
-  }
-};
-
 const validateProductionEnvironment = (
   env: NodeJS.ProcessEnv,
   config: HonoServerConfig,
@@ -100,21 +78,6 @@ const validateProductionEnvironment = (
   }
   if (deploymentTarget === 'production' && config.redisKeyPrefix !== '') {
     problems.push('production target 的 REDIS_KEY_PREFIX 必须为空');
-  }
-  const arenaRoomWriterActivation = env.ARENA_ROOM_WRITER_ACTIVATION?.trim() || 'disabled';
-  if (!['disabled', 'enabled'].includes(arenaRoomWriterActivation)) {
-    problems.push('ARENA_ROOM_WRITER_ACTIVATION 必须是 disabled 或 enabled');
-  }
-  if (protectedHostedTarget && config.arenaMultiplayerEnabled) {
-    if (env.ARENA_ROOM_READER_ROLLOUT_CONTRACT !== ARENA_ROOM_CHECKPOINT_CONTRACT) {
-      problems.push('Arena writer activation 缺少 compatible reader rollout attestation');
-    }
-    if (env.ARENA_ROOM_PRODUCTION_GO_NO_GO !== 'approved') {
-      problems.push('Arena writer activation 缺少独立 production go/no-go approval');
-    }
-    if (!isTrustedHttpsOrigin(env.ARENA_ROOM_LOGICAL_ORIGIN)) {
-      problems.push('ARENA_ROOM_LOGICAL_ORIGIN 必须是已 provision 的 HTTPS root origin');
-    }
   }
   if (!config.redisUrl) problems.push('Redis 未配置（REDIS_URL 或 REDIS_HOST）');
   if (protectedHostedTarget
@@ -211,12 +174,6 @@ const readBoolean = (name: string, fallback: boolean): boolean => {
   throw new Error(`${name} 必须是 true/false、1/0、yes/no 或 on/off`);
 };
 
-const readArenaRoomWriterActivation = (): 'disabled' | 'enabled' => {
-  const value = process.env.ARENA_ROOM_WRITER_ACTIVATION?.trim() || 'disabled';
-  if (value === 'disabled' || value === 'enabled') return value;
-  throw new Error('ARENA_ROOM_WRITER_ACTIVATION 必须是 disabled 或 enabled');
-};
-
 const readPort = (): number => {
   const raw = process.env.HONO_PORT?.trim() || '8787';
   const port = Number(raw);
@@ -311,13 +268,14 @@ export const readHonoServerConfig = (): HonoServerConfig => {
     throw new Error('HOSTED_API_ENVIRONMENT 必须显式设为 production、preview、local 或 test');
   }
   const protectedHostedTarget = deploymentTarget === 'production' || deploymentTarget === 'preview';
-  const arenaMultiplayerRequested = readBoolean('ARENA_MULTIPLAYER_ENABLED', false);
-  const arenaRoomWriterActivation = protectedHostedTarget
-    ? readArenaRoomWriterActivation()
-    : 'disabled';
   const redisUrl = readRedisUrl();
-  validateHostedDrVersionGate(process.env);
-
+  const adminArenaObservationSecret = process.env.ADMIN_ARENA_OBSERVATION_SECRET?.trim();
+  if (adminArenaObservationSecret && (adminArenaObservationSecret.length < 32
+    || adminArenaObservationSecret.length > 4096
+    || ['SIGNATURE_SECRET_KEY', 'BETTER_AUTH_SECRET', 'D1_GATEWAY_HMAC_SECRET', 'ARENA_FINALIZATION_HMAC_SECRET']
+      .some((name) => process.env[name]?.trim() === adminArenaObservationSecret))) {
+    throw new Error('ADMIN_ARENA_OBSERVATION_SECRET 必须是独立的至少 32 字符密钥');
+  }
   const config: HonoServerConfig = {
     host: process.env.HONO_HOST?.trim() || '0.0.0.0',
     port: readPort(),
@@ -329,9 +287,8 @@ export const readHonoServerConfig = (): HonoServerConfig => {
     corsOrigins: readCorsOrigins(),
     arenaRoomAllowedOrigins: readArenaRoomAllowedOrigins(),
     authMode: readHonoAuthMode(),
-    arenaMultiplayerEnabled: arenaMultiplayerRequested && (
-      !protectedHostedTarget || arenaRoomWriterActivation === 'enabled'
-    ),
+    arenaMultiplayerEnabled: readBoolean('ARENA_MULTIPLAYER_ENABLED', false),
+    ...(adminArenaObservationSecret ? { adminArenaObservationSecret } : {}),
   };
   validateArenaRoomOrigins(config);
   validateProductionEnvironment(process.env, config);

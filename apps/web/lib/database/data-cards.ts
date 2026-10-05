@@ -1,4 +1,5 @@
 import { generateUUID } from './core';
+import type { DataCardListPage } from '@/lib/data-card-list-page';
 import type {
   DataCardReviewStatus,
   OnlineDataCardType,
@@ -28,7 +29,7 @@ type DataCardsRepoBundle = {
   ) => Promise<boolean>;
   listUserDataCards: (
     db: unknown,
-    input: { userId: number; search?: string; sortBy?: DataCardSortBy },
+    input: { userId: number; search?: string; sortBy?: DataCardSortBy } & DataCardListPage,
   ) => Promise<any[]>;
   updateDataCardByIdAndUser: (
     db: unknown,
@@ -40,6 +41,10 @@ type DataCardsRepoBundle = {
       isPublic?: OnlineDataCardVisibility;
       reviewStatus?: DataCardReviewStatus;
     },
+  ) => Promise<number>;
+  repairQuestionnaireDataCardType: (
+    db: unknown,
+    input: { id: string; userId: number },
   ) => Promise<number>;
   updateDataCardContentByIdAndUserWithChanges: (
     db: unknown,
@@ -56,7 +61,7 @@ type DataCardsRepoBundle = {
       payload: { name?: string; description?: string; data?: string };
     },
   ) => Promise<boolean>;
-  countUserUsedDataCardSlots: (db: unknown, userId: number) => Promise<number>;
+  countUserUsedDataCardSlots: (db: unknown, userId: number, excludeCardId?: string) => Promise<number>;
   getDataCardUpdateByDataCardId: (db: unknown, dataCardId: string) => Promise<any | null>;
   deleteDataCardUpdateByDataCardId: (db: unknown, dataCardId: string) => Promise<void>;
   softDeleteDataCardByIdAndUser: (db: unknown, cardId: string, userId: number) => Promise<number>;
@@ -134,6 +139,7 @@ const readDataCardsRepoBundle = async (): Promise<DataCardsRepoBundle | null> =>
       insertDataCard: repo.insertDataCard as DataCardsRepoBundle['insertDataCard'],
       listUserDataCards: repo.listUserDataCards as DataCardsRepoBundle['listUserDataCards'],
       updateDataCardByIdAndUser: repo.updateDataCardByIdAndUser as DataCardsRepoBundle['updateDataCardByIdAndUser'],
+      repairQuestionnaireDataCardType: repo.repairQuestionnaireDataCardType as DataCardsRepoBundle['repairQuestionnaireDataCardType'],
       updateDataCardContentByIdAndUserWithChanges: repo.updateDataCardContentByIdAndUserWithChanges as DataCardsRepoBundle['updateDataCardContentByIdAndUserWithChanges'],
       upsertDataCardUpdateByDataCardId: repo.upsertDataCardUpdateByDataCardId as DataCardsRepoBundle['upsertDataCardUpdateByDataCardId'],
       countUserUsedDataCardSlots: repo.countUserUsedDataCardSlots as DataCardsRepoBundle['countUserUsedDataCardSlots'],
@@ -159,22 +165,44 @@ const readDataCardsRepoBundle = async (): Promise<DataCardsRepoBundle | null> =>
   }
 };
 
+/** 公开库 strict 读取专用：存储不可用时不得伪装成空列表/404。 */
+export class DatabaseUnavailableError extends Error {
+  override readonly name = 'DatabaseUnavailableError';
+
+  constructor(message = '数据卡存储不可用') {
+    super(message);
+  }
+}
+
+export const isDatabaseUnavailableError = (error: unknown): boolean => (
+  error instanceof DatabaseUnavailableError
+  || (typeof error === 'object'
+    && error !== null
+    && (error as { name?: unknown }).name === 'DatabaseUnavailableError')
+);
+
+const readDataCardsRepoBundleStrict = async (): Promise<DataCardsRepoBundle> => {
+  const bundle = await readDataCardsRepoBundle();
+  if (!bundle) throw new DatabaseUnavailableError();
+  return bundle;
+};
+
+const mapDataCardRowWithTags = (row: any): any => {
+  const raw = typeof row?.tag_ids === 'string' ? row.tag_ids : '';
+  const tagIds = raw
+    .split(',')
+    .map((id: string) => id.trim())
+    .filter(Boolean);
+  return { ...row, tagIds };
+};
+
 const normalizeIsPublicValue = (isPublic: boolean | number): OnlineDataCardVisibility => {
   const normalized = normalizeOnlineDataCardVisibilityCompat(isPublic);
   if (normalized === null) throw new Error('无效的数据卡可见性');
   return normalized;
 };
 
-const withTagIds = (rows: any[]): any[] => {
-  return rows.map((row) => {
-    const raw = typeof row?.tag_ids === 'string' ? row.tag_ids : '';
-    const tagIds = raw
-      .split(',')
-      .map((id: string) => id.trim())
-      .filter(Boolean);
-    return { ...row, tagIds };
-  });
-};
+const withTagIds = (rows: any[]): any[] => rows.map(mapDataCardRowWithTags);
 
 // 检查公开数据卡是否存在同名
 export async function checkPublicCardNameExists(
@@ -270,26 +298,28 @@ export async function createDataCard(
   }
 }
 
-// 获取用户的所有数据卡
+// 获取用户的一页数据卡，保留正文供现有编辑/导出消费者使用。
 export async function getUserDataCards(
   userId: number,
-  search?: string,
-  sortBy?: DataCardSortBy,
+  search: string | undefined,
+  sortBy: DataCardSortBy | undefined,
+  page: DataCardListPage,
 ): Promise<any[]> {
   try {
     const bundle = await readDataCardsRepoBundle();
-    if (!bundle) return [];
+    if (!bundle) throw new Error('数据卡存储不可用');
 
     const rows = await bundle.listUserDataCards(bundle.db, {
       userId,
       search,
       sortBy,
+      ...page,
     });
 
     return withTagIds(rows);
   } catch (error) {
     console.error('获取数据卡失败:', error);
-    return [];
+    throw error;
   }
 }
 
@@ -318,6 +348,23 @@ export async function updateDataCard(
     return changes > 0;
   } catch (error) {
     console.error('更新数据卡失败:', error);
+    return false;
+  }
+}
+
+// 仅恢复历史上被误标为角色的问卷数据卡类型
+export async function repairQuestionnaireDataCardType(
+  id: string,
+  userId: number,
+): Promise<boolean> {
+  try {
+    const bundle = await readDataCardsRepoBundle();
+    if (!bundle) return false;
+
+    const changes = await bundle.repairQuestionnaireDataCardType(bundle.db, { id, userId });
+    return changes > 0;
+  } catch (error) {
+    console.error('恢复问卷数据卡类型失败:', error);
     return false;
   }
 }
@@ -368,12 +415,12 @@ export async function upsertDataCardUpdate(
   }
 }
 
-// 计算用户已占用的槽位数量（热门卡片不计入）
-export async function getUserUsedSlots(userId: number): Promise<number> {
+// 计算用户已占用的槽位数量（按体积计费，热门卡仅减免 1 个基础槽位）
+export async function getUserUsedSlots(userId: number, excludeCardId?: string): Promise<number> {
   try {
     const bundle = await readDataCardsRepoBundle();
     if (!bundle) return 0;
-    return await bundle.countUserUsedDataCardSlots(bundle.db, userId);
+    return await bundle.countUserUsedDataCardSlots(bundle.db, userId, excludeCardId);
   } catch (error) {
     console.error('获取已用槽位失败:', error);
     return 0;
@@ -504,17 +551,27 @@ export async function getDataCardById(cardId: string, isPublic: boolean = false)
     });
     if (!row) return null;
 
-    const raw = typeof row?.tag_ids === 'string' ? row.tag_ids : '';
-    const tagIds = raw
-      .split(',')
-      .map((id: string) => id.trim())
-      .filter(Boolean);
-
-    return { ...row, tagIds };
+    return mapDataCardRowWithTags(row);
   } catch (error) {
     console.error('通过ID获取数据卡失败:', error);
     return null;
   }
+}
+
+/**
+ * 公开库单卡 strict 读取：
+ * - 存储不可用 → 抛 DatabaseUnavailableError（映射 503）
+ * - 查询异常 → 继续抛出（映射 500）
+ * - 仅当查询成功且无行 → 返回 null（映射 404）
+ */
+export async function getPublicDataCardByIdStrict(cardId: string): Promise<any | null> {
+  const bundle = await readDataCardsRepoBundleStrict();
+  const row = await bundle.getDataCardByIdWithAuthorAndTags(bundle.db, {
+    cardId,
+    publicOnly: true,
+  });
+  if (!row) return null;
+  return mapDataCardRowWithTags(row);
 }
 
 // 增加数据卡的点赞数
@@ -566,10 +623,7 @@ export async function getPublicDataCards(
   nativeAllowedOnly?: boolean,
 ): Promise<any[]> {
   try {
-    const bundle = await readDataCardsRepoBundle();
-    if (!bundle) return [];
-
-    const rows = await bundle.listPublicDataCardsWithFilters(bundle.db, {
+    return await getPublicDataCardsStrict(
       limit,
       offset,
       type,
@@ -587,13 +641,61 @@ export async function getPublicDataCards(
       recommendedOnly,
       nativeOnly,
       nativeAllowedOnly,
-    });
-
-    return withTagIds(rows);
+    );
   } catch (error) {
     console.error('获取公开数据卡失败:', error);
     return [];
   }
+}
+
+/**
+ * 公开库列表 strict 读取：
+ * - 存储不可用 → 抛 DatabaseUnavailableError（映射 503）
+ * - 查询异常 → 继续抛出（映射 500）
+ * - 仅当查询成功且无结果 → 返回 []（映射 200 空列表）
+ */
+export async function getPublicDataCardsStrict(
+  limit: number = 20,
+  offset: number = 0,
+  type?: DataCardType,
+  search?: string,
+  sortBy?: DataCardSortBy,
+  tagIds?: string[],
+  tagMatch?: 'any' | 'all',
+  author?: string,
+  minLikes?: number,
+  maxLikes?: number,
+  minUsage?: number,
+  maxUsage?: number,
+  minFavorites?: number,
+  maxFavorites?: number,
+  recommendedOnly?: boolean,
+  nativeOnly?: boolean,
+  nativeAllowedOnly?: boolean,
+): Promise<any[]> {
+  const bundle = await readDataCardsRepoBundleStrict();
+
+  const rows = await bundle.listPublicDataCardsWithFilters(bundle.db, {
+    limit,
+    offset,
+    type,
+    search,
+    sortBy,
+    tagIds,
+    tagMatch,
+    author,
+    minLikes,
+    maxLikes,
+    minUsage,
+    maxUsage,
+    minFavorites,
+    maxFavorites,
+    recommendedOnly,
+    nativeOnly,
+    nativeAllowedOnly,
+  });
+
+  return withTagIds(rows);
 }
 
 /**

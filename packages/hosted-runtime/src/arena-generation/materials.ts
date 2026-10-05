@@ -1,5 +1,3 @@
-export const MAX_ARENA_MATERIALS = 10;
-
 export type NodeArenaMaterial = {
   id: string;
   name: string;

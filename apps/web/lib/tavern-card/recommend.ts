@@ -1,6 +1,5 @@
-import magicalQuestionnaire from '../../public/questionnaires/presets/magical-girl-default.json';
-import canshouQuestionnaire from '../../public/questionnaires/presets/canshou-default.json';
 import { formatQuestionnaireAnswers, normalizeUserAnswers, type QuestionnaireAnswerItem } from '@/lib/questionnaires';
+import { canshouQuestionnaire, magicalQuestionnaire } from '@/lib/questionnaire-presets';
 
 export interface TavernExportRecommendations {
   tags: string[];

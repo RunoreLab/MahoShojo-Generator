@@ -94,6 +94,7 @@ describe('Arena Room WebSocket transport contract', () => {
       revision: 0,
       sharedConfig: {
         battleMode: 'classic',
+        reportFormat: 'markdown',
         combatants: [{
           key: 'data-card:character-1',
           ref: { id: 'character-1', kind: 'character', versionToken: 'v1' },

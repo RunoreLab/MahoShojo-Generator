@@ -13,10 +13,16 @@ const routeInventory = JSON.parse(readFileSync(
 };
 
 describe('Hono/Next route ownership parity', () => {
-  it('keeps the accepted 23 shared / 6 exited / 0 legacy inventory', () => {
-    expect(routeInventory.sharedRouteIds).toHaveLength(23);
-    expect(routeInventory.exitedRouteIds).toHaveLength(6);
+  it('legacy 路由必须清零，且 shared/exited 互不重叠', () => {
+    // 原来这里钉的是「24 shared / 6 exited」两个字面量。那是迁移进度快照，不是性质：
+    // 新增任何一条 shared 路由都会让门禁变红，而那是一次纯增量的正当改动。
+    // 真正要守住的是迁移**已经完成**（legacy 清零）以及两侧不重叠。
     expect(routeInventory.legacyRouteIds).toEqual([]);
+    const shared = new Set(routeInventory.sharedRouteIds);
+    for (const routeId of routeInventory.exitedRouteIds) {
+      expect(shared.has(routeId), routeId).toBe(false);
+    }
+    expect(shared.size).toBe(routeInventory.sharedRouteIds.length);
   });
 
   it('keeps every exited capability on the apps/web Next POST surface', () => {

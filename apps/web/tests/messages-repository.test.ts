@@ -37,6 +37,7 @@ describe('messages repository', () => {
         priority TEXT NOT NULL DEFAULT 'normal',
         expires_at TEXT,
         created_by_user_id INTEGER,
+        created_by_admin_principal_id TEXT,
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
@@ -44,6 +45,7 @@ describe('messages repository', () => {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         recipient_user_id INTEGER NOT NULL,
         actor_user_id INTEGER,
+        created_by_admin_principal_id TEXT,
         channel TEXT NOT NULL DEFAULT 'system',
         message_type TEXT NOT NULL,
         template_key TEXT NOT NULL,

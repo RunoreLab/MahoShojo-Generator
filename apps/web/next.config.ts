@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 
 import { loadRepositoryRootEnvFallback } from "./config/load-root-env-fallback";
 import { buildStaticBrowserSecurityHeaders } from "./lib/security/browser-headers";
+import { WEB_PACKAGE_RUNNER_HEADERS, WEB_PACKAGE_RUNNER_PATH } from "./lib/web-package/runner";
 
 const repositoryRoot = fileURLToPath(new URL('../..', import.meta.url));
 
@@ -58,6 +59,10 @@ const createNextConfig = (phase: string): NextConfig => {
         {
           source: '/:path*',
           headers: staticSecurityHeaders,
+        },
+        {
+          source: WEB_PACKAGE_RUNNER_PATH,
+          headers: [...WEB_PACKAGE_RUNNER_HEADERS],
         },
         {
           source: '/api/:path*',

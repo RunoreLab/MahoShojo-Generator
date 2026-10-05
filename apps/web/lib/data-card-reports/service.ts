@@ -3,7 +3,7 @@ import { hasActiveCrowdReviewRoundForCase } from '@/lib/db/repositories/crowd-re
 import type { DataCardByIdDbRow } from '@/lib/db/repositories/data-cards-core';
 import { getDataCardByIdWithAuthorAndTags } from '@/lib/db/repositories/data-cards-core';
 import * as repo from '@/lib/db/repositories/data-card-reports';
-import { getEncyclopediaEntry } from '@/lib/encyclopedia';
+import { getEncyclopediaEntry } from '@mahoshojo/ui-web/encyclopedia';
 import { createUserMessageEntry } from '@/lib/messages/service';
 import {
   buildNormalizedReportPayloadHash,

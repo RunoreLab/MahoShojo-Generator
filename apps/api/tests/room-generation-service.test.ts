@@ -11,6 +11,14 @@ import {
   createArenaRoomGenerationService,
 } from '#/arena-room/room-generation-service';
 import type { ArenaRoomGenerationPort } from '#/arena-generation/room-generation-port';
+import {
+  ArenaRoomGenerationMaterializationError,
+  type ArenaRoomGenerationMaterializer,
+} from '#/arena-room/room-generation-materializer';
+import { ArenaRoomGenerationContentResolverError } from '#/arena-room/room-generation-content-resolver';
+import type {
+  ArenaRoomSharedConfig,
+} from '@mahoshojo/contracts/arena-room';
 import type {
   RoomGenerationPublisher,
   RoomGenerationPublisherOptions,
@@ -23,6 +31,7 @@ import {
   issueArenaRoomTrustedTime,
   type ArenaRoomAuthorityState,
 } from '@mahoshojo/multiplayer-core';
+import { createTestArenaDataCardRefVerifier } from './arena-room-fixtures';
 
 class MemoryRoomStore implements RoomActorCheckpointStore {
   state: ArenaRoomAuthorityState | null = null;
@@ -51,12 +60,19 @@ class MemoryRoomStore implements RoomActorCheckpointStore {
   }
 }
 
-const sharedConfig = () => ({
+const sharedConfig = (): ArenaRoomSharedConfig => ({
   battleMode: 'classic' as const,
-  combatants: [{
-    key: 'data-card:character-1',
-    ref: { id: 'character-1', kind: 'character' as const, versionToken: 'v1' },
-  }],
+  reportFormat: 'markdown' as const,
+  combatants: [
+    {
+      key: 'data-card:character-1',
+      ref: { id: 'character-1', kind: 'character' as const, versionToken: 'v1' },
+    },
+    {
+      key: 'data-card:character-2',
+      ref: { id: 'character-2', kind: 'character' as const, versionToken: 'v1' },
+    },
+  ],
   teams: [],
   scenario: null,
   auxScenarios: [],
@@ -90,7 +106,7 @@ const subscription = () => ({
   events: new ReadableStream({ start(controller) { controller.close(); } }),
 });
 
-const createHarness = async () => {
+const createHarness = async (authorityConfig = sharedConfig()) => {
   const store = new MemoryRoomStore();
   let user = 0;
   const actors = createRoomActorRegistry({
@@ -101,22 +117,36 @@ const createHarness = async () => {
   });
   const memberships = createArenaRoomMembershipService({
     actors,
+    references: createTestArenaDataCardRefVerifier(),
     createUserId: () => `user-${++user}`,
     now: () => '2026-08-28T00:00:30.000Z',
   });
   const session = await memberships.create({
     accountUserId: 101,
     displayName: 'Host',
-    sharedConfig: sharedConfig(),
+    sharedConfig: authorityConfig,
   });
-  const references = { verify: vi.fn(async (input) => input.refs) };
+  const materializer = {
+    materialize: vi.fn<ArenaRoomGenerationMaterializer['materialize']>(async (input) => ({
+      mode: input.sharedConfig.battleMode,
+      combatants: input.sharedConfig.combatants,
+      userGuidance: input.sharedConfig.userGuidance,
+      ...input.hostRuntime,
+    })),
+  } satisfies ArenaRoomGenerationMaterializer;
   const generation = {
+    cancelOwned: vi.fn<ArenaRoomGenerationPort['cancelOwned']>(async () => ({
+      kind: 'accepted' as const,
+      cancelReason: 'user' as const,
+    })),
     deriveGenerationId: vi.fn<ArenaRoomGenerationPort['deriveGenerationId']>(
       async () => 'generation-1',
     ),
     hashSemanticPayload: vi.fn<ArenaRoomGenerationPort['hashSemanticPayload']>(
       async (input) => `sha256:${
-        input.payload.mode === 'scenario' ? 'b'.repeat(64) : 'a'.repeat(64)
+        (input.payload.customProvider as { apiKey?: string } | undefined)?.apiKey === 'changed-secret'
+          ? 'b'.repeat(64)
+          : 'a'.repeat(64)
       }`,
     ),
     startFromHostRequest: vi.fn<ArenaRoomGenerationPort['startFromHostRequest']>(async () => ({
@@ -144,7 +174,7 @@ const createHarness = async () => {
   const onBackgroundError = vi.fn();
   const service = createArenaRoomGenerationService({
     memberships,
-    references,
+    materializer,
     generation,
     createPublisher,
     observer: { observeArenaRoomRuntime },
@@ -155,7 +185,7 @@ const createHarness = async () => {
     store,
     memberships,
     session,
-    references,
+    materializer,
     generation,
     publisher,
     observeArenaRoomRuntime,
@@ -166,22 +196,504 @@ const createHarness = async () => {
   };
 };
 
-const startRequest = (config = sharedConfig()) => ({
+const startRequest = (config = sharedConfig(), expectedControlSeq = 0) => ({
   expectedRoomEpoch: 'epoch-1',
   expectedRevision: 0,
+  expectedControlSeq,
   generationRequestId: 'request-1234',
   sharedConfig: config,
+  hostLocalPayloads: [],
   generation: {
     customProvider: { apiKey: 'provider-secret-canary' },
   },
 });
 
+const prepareHistoricalGeneration = async (
+  harness: Awaited<ReturnType<typeof createHarness>>,
+  reserveNextGeneration = true,
+) => {
+  await harness.service.start({
+    roomId: 'room-1',
+    accountUserId: 101,
+    request: startRequest(),
+    sourceRequest: sourceRequest(),
+  });
+  harness.finishPublisher();
+  await Promise.resolve();
+  const membership = await harness.memberships.resolveActiveByAccount({
+    roomId: 'room-1',
+    accountUserId: 101,
+  });
+  const authority = issueArenaRoomGenerationPublisherAuthority({
+    roomId: 'room-1',
+    roomEpoch: 'epoch-1',
+    generationRequestId: 'request-1234',
+    generationId: 'generation-1',
+    attempt: 1,
+    expiresAt: '2026-08-29T00:00:00.000Z',
+  });
+  for (const command of [
+    { state: 'running' as const, timestamp: '2026-08-28T00:02:00.000Z' },
+    {
+      state: 'completed' as const,
+      generationRecordId: 'generation-1',
+      timestamp: '2026-08-28T00:03:00.000Z',
+    },
+  ]) {
+    const result = await membership.actor.execute({
+      authority,
+      command: {
+        type: 'mirror-generation',
+        expectedRoomEpoch: 'epoch-1',
+        generationRequestId: 'request-1234',
+        generationId: 'generation-1',
+        attempt: 1,
+        ...command,
+      },
+      trustedTime: issueArenaRoomTrustedTime({ now: command.timestamp }),
+    });
+    expect(result.ok).toBe(true);
+  }
+
+  if (!reserveNextGeneration) return;
+  vi.mocked(harness.generation.deriveGenerationId).mockResolvedValueOnce('generation-2');
+  vi.mocked(harness.generation.startFromHostRequest).mockResolvedValueOnce({
+    kind: 'subscribed',
+    subscription: {
+      generationId: 'generation-2',
+      generationRequestId: 'request-5678',
+      events: new ReadableStream({ start(controller) { controller.close(); } }),
+    },
+  });
+  await harness.service.start({
+    roomId: 'room-1',
+    accountUserId: 101,
+    request: {
+      ...startRequest(sharedConfig(), harness.store.state!.snapshot.controlSeq),
+      generationRequestId: 'request-5678',
+    },
+    sourceRequest: sourceRequest(),
+  });
+};
+
 describe('Arena Room generation coordinator', () => {
-  it('先 publish/config refs/reservation checkpoint，再调用 existing generation 且 duplicate 不二次启动', async () => {
+  it('当前 epoch 的 active member 可列出有界 ledger 摘要，不读取 durable 正文', async () => {
     const harness = await createHarness();
-    const pending = sharedConfig();
-    pending.userGuidance = '房主尚未发布的最终配置';
-    const request = startRequest(pending);
+    await prepareHistoricalGeneration(harness);
+    await harness.memberships.join({
+      roomId: 'room-1',
+      accountUserId: 202,
+      displayName: 'Member',
+    });
+    vi.mocked(harness.generation.readOwnedProjection).mockClear();
+
+    const history = await harness.service.list({
+      roomId: 'room-1',
+      accountUserId: 202,
+    });
+
+    expect(history).toEqual({
+      protocolVersion: 1,
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      items: [
+        {
+          generationId: 'generation-1',
+          state: 'completed',
+          configRevision: 0,
+          collaborativeInfluence: false,
+          startedAt: '2026-08-28T00:01:00.000Z',
+          finishedAt: '2026-08-28T00:03:00.000Z',
+        },
+      ],
+    });
+    expect(harness.generation.readOwnedProjection).not.toHaveBeenCalled();
+    expect(JSON.stringify(history)).not.toContain('sha256:');
+    expect(JSON.stringify(history)).not.toContain('participantUserIds');
+    expect(JSON.stringify(history)).not.toContain('provider-secret-canary');
+  });
+
+  it.each(['markdown', 'package'])('active member 可读取当前 epoch ledger 中的历史终态，不 resume 或改写 current generation (%s)', async (format) => {
+    const harness = await createHarness();
+    const webPackage = {
+      packageRef: { id: 'test.fixture', version: '1.0.0', digest: `sha256:${'a'.repeat(64)}` },
+      targetPath: 'data/report.json', targetMediaType: 'application/json' as const, generatedDigest: `sha256:${'b'.repeat(64)}`,
+    };
+    await prepareHistoricalGeneration(harness);
+    await harness.memberships.join({
+      roomId: 'room-1',
+      accountUserId: 202,
+      displayName: 'Member',
+    });
+    vi.mocked(harness.generation.readOwnedProjection).mockResolvedValue({
+      kind: 'found',
+      projection: {
+        generationId: 'generation-1',
+        generationRequestId: 'request-1234',
+        status: 'completed',
+        markdown: '# 历史权威战报',
+        resumeCursor: null,
+        updatedAt: '2026-08-28T00:03:00.000Z',
+        finalAuthoritative: true,
+        resultAvailable: true,
+        generationRecordId: 'generation-1',
+        errorCode: null,
+        roomSafeResult: {
+          version: 1,
+          format: format === 'package' ? 'stream-web' : 'stream-markdown',
+          ...(format === 'package' ? { webPackage } : {}),
+          mode: 'classic',
+          report: { headline: '历史标题' },
+        },
+      },
+    });
+    vi.mocked(harness.generation.resumeOwnedSubscription).mockClear();
+
+    const detail = await harness.service.readHistory({
+      roomId: 'room-1',
+      generationId: 'generation-1',
+      accountUserId: 202,
+    });
+
+    expect(detail).toMatchObject({
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      status: 'completed',
+      contentStatus: 'available',
+      markdown: '# 历史权威战报',
+      generation: {
+        generationId: 'generation-1',
+        state: 'completed',
+      },
+    });
+    expect(JSON.stringify(detail)).not.toContain('generationRequestId');
+    expect(JSON.stringify(detail)).not.toContain('snapshotDigest');
+    expect(JSON.stringify(detail)).not.toContain('participantUserIds');
+    expect(JSON.stringify(detail)).not.toContain('generationRecordId');
+    expect(harness.generation.readOwnedProjection).toHaveBeenCalledWith({
+      roomId: 'room-1',
+      generationId: 'generation-1',
+    });
+    expect(harness.generation.resumeOwnedSubscription).not.toHaveBeenCalled();
+    if (format === 'package') {
+      expect(detail.result?.webPackage).toEqual(webPackage);
+      const hostDetail = await harness.service.readHistory({
+        roomId: 'room-1', generationId: 'generation-1', accountUserId: 101,
+      });
+      expect(hostDetail.result?.webPackage).toEqual(detail.result?.webPackage);
+    }
+    expect(harness.store.state?.snapshot.activeGeneration).toMatchObject({
+      generationId: 'generation-2',
+      state: 'starting',
+    });
+  });
+
+  it.each([
+    ['正文已过期', { contentRetention: 'expired' as const }, 'expired'],
+    [
+      '正文未归档',
+      { persistenceWarning: 'OUTPUT_NOT_ARCHIVED' as const, replayUnavailable: true as const },
+      'not-archived',
+    ],
+  ])('%s 时返回非重试的安全历史终态', async (_label, marker, contentStatus) => {
+    const harness = await createHarness();
+    await prepareHistoricalGeneration(harness);
+    vi.mocked(harness.generation.readOwnedProjection).mockResolvedValueOnce({
+      kind: 'found',
+      projection: {
+        generationId: 'generation-1',
+        generationRequestId: 'request-1234',
+        status: 'completed',
+        markdown: '',
+        resumeCursor: null,
+        updatedAt: '2026-08-28T00:03:00.000Z',
+        finalAuthoritative: true,
+        resultAvailable: false,
+        generationRecordId: null,
+        errorCode: null,
+        ...marker,
+      },
+    });
+
+    await expect(harness.service.readHistory({
+      roomId: 'room-1',
+      generationId: 'generation-1',
+      accountUserId: 101,
+    })).resolves.toMatchObject({
+      status: 'completed',
+      contentStatus,
+      markdown: '',
+    });
+  });
+
+  it('最新 completed 指针也进入历史列表并返回非重试 retention 终态', async () => {
+    const harness = await createHarness();
+    await prepareHistoricalGeneration(harness, false);
+    vi.mocked(harness.generation.readOwnedProjection).mockResolvedValueOnce({
+      kind: 'found',
+      projection: {
+        generationId: 'generation-1',
+        generationRequestId: 'request-1234',
+        status: 'completed',
+        markdown: '',
+        resumeCursor: null,
+        updatedAt: '2026-08-28T00:03:00.000Z',
+        finalAuthoritative: true,
+        resultAvailable: false,
+        generationRecordId: null,
+        errorCode: null,
+        contentRetention: 'expired',
+      },
+    });
+
+    await expect(harness.service.list({
+      roomId: 'room-1',
+      accountUserId: 101,
+    })).resolves.toMatchObject({
+      items: [{ generationId: 'generation-1', state: 'completed' }],
+    });
+    await expect(harness.service.readHistory({
+      roomId: 'room-1',
+      generationId: 'generation-1',
+      accountUserId: 101,
+    })).resolves.toMatchObject({
+      contentStatus: 'expired',
+      status: 'completed',
+    });
+  });
+
+  it('durable 历史读取期间成员资格被撤销时在返回正文前 fail closed', async () => {
+    const harness = await createHarness();
+    await prepareHistoricalGeneration(harness);
+    const joined = await harness.memberships.join({
+      roomId: 'room-1',
+      accountUserId: 202,
+      displayName: 'Member',
+    });
+    let releaseProjection!: (value: Awaited<ReturnType<
+      ArenaRoomGenerationPort['readOwnedProjection']
+    >>) => void;
+    let projectionStarted!: () => void;
+    const started = new Promise<void>((resolve) => { projectionStarted = resolve; });
+    vi.mocked(harness.generation.readOwnedProjection).mockImplementationOnce(() => (
+      new Promise((resolve) => {
+        releaseProjection = resolve;
+        projectionStarted();
+      })
+    ));
+
+    const reading = harness.service.readHistory({
+      roomId: 'room-1',
+      generationId: 'generation-1',
+      accountUserId: 202,
+    });
+    await started;
+    const hostMembership = await harness.memberships.resolveActiveByAccount({
+      roomId: 'room-1',
+      accountUserId: 101,
+    });
+    const timestamp = '2026-08-28T00:05:00.000Z';
+    const kicked = await hostMembership.actor.execute({
+      authority: {
+        kind: 'authenticated-user',
+        actorUserId: hostMembership.member.userId,
+        accountUserId: 101,
+      },
+      command: {
+        type: 'kick-member',
+        expectedRoomEpoch: 'epoch-1',
+        targetUserId: joined.member.userId,
+        timestamp,
+      },
+      trustedTime: issueArenaRoomTrustedTime({ now: timestamp }),
+    });
+    expect(kicked.ok).toBe(true);
+    releaseProjection({
+      kind: 'found',
+      projection: {
+        generationId: 'generation-1',
+        generationRequestId: 'request-1234',
+        status: 'completed',
+        markdown: '# 不应返回给已撤销成员',
+        resumeCursor: null,
+        updatedAt: '2026-08-28T00:03:00.000Z',
+        finalAuthoritative: true,
+        resultAvailable: true,
+        generationRecordId: 'generation-1',
+        errorCode: null,
+        roomSafeResult: {
+          version: 1,
+          format: 'stream-markdown',
+          mode: 'classic',
+        },
+      },
+    });
+
+    await expect(reading).rejects.toMatchObject({ code: 'ROOM_MEMBERSHIP_REVOKED' });
+  });
+
+  it('无法分类的 completed 正文缺失仍 fail closed 为 unavailable', async () => {
+    const harness = await createHarness();
+    await prepareHistoricalGeneration(harness);
+    vi.mocked(harness.generation.readOwnedProjection).mockResolvedValueOnce({
+      kind: 'found',
+      projection: {
+        generationId: 'generation-1',
+        generationRequestId: 'request-1234',
+        status: 'completed',
+        markdown: '',
+        resumeCursor: null,
+        updatedAt: '2026-08-28T00:03:00.000Z',
+        finalAuthoritative: true,
+        resultAvailable: false,
+        generationRecordId: null,
+        errorCode: null,
+      },
+    });
+
+    await expect(harness.service.readHistory({
+      roomId: 'room-1',
+      generationId: 'generation-1',
+      accountUserId: 101,
+    })).rejects.toMatchObject({ code: 'ROOM_GENERATION_UNAVAILABLE' });
+  });
+
+  it('durable completed 尚未成为权威终态时拒绝作为历史战报读取', async () => {
+    const harness = await createHarness();
+    await prepareHistoricalGeneration(harness);
+    vi.mocked(harness.generation.readOwnedProjection).mockResolvedValueOnce({
+      kind: 'found',
+      projection: {
+        generationId: 'generation-1',
+        generationRequestId: 'request-1234',
+        status: 'completed',
+        markdown: '# 尚未权威确认',
+        resumeCursor: null,
+        updatedAt: '2026-08-28T00:03:00.000Z',
+        finalAuthoritative: false,
+        resultAvailable: true,
+        generationRecordId: 'generation-1',
+        errorCode: null,
+        roomSafeResult: {
+          version: 1,
+          format: 'stream-markdown',
+          mode: 'classic',
+        },
+      },
+    });
+
+    await expect(harness.service.readHistory({
+      roomId: 'room-1',
+      generationId: 'generation-1',
+      accountUserId: 101,
+    })).rejects.toMatchObject({ code: 'ROOM_GENERATION_UNAVAILABLE' });
+  });
+
+  it('历史详情对 ledger 外 ID 与 durable identity mismatch fail closed', async () => {
+    const harness = await createHarness();
+    await prepareHistoricalGeneration(harness);
+    vi.mocked(harness.generation.readOwnedProjection).mockClear();
+
+    await expect(harness.service.readHistory({
+      roomId: 'room-1',
+      generationId: 'generation-from-old-epoch',
+      accountUserId: 101,
+    })).rejects.toMatchObject({ code: 'ROOM_GENERATION_NOT_FOUND' });
+    expect(harness.generation.readOwnedProjection).not.toHaveBeenCalled();
+
+    vi.mocked(harness.generation.readOwnedProjection).mockResolvedValueOnce({
+      kind: 'found',
+      projection: {
+        generationId: 'generation-1',
+        generationRequestId: 'request-from-other-owner',
+        status: 'completed',
+        markdown: '# 不得暴露',
+        resumeCursor: null,
+        updatedAt: '2026-08-28T00:03:00.000Z',
+        finalAuthoritative: true,
+        resultAvailable: true,
+        generationRecordId: 'generation-1',
+        errorCode: null,
+        roomSafeResult: {
+          version: 1,
+          format: 'stream-markdown',
+          mode: 'classic',
+        },
+      },
+    });
+    await expect(harness.service.readHistory({
+      roomId: 'room-1',
+      generationId: 'generation-1',
+      accountUserId: 101,
+    })).rejects.toMatchObject({ code: 'ROOM_GENERATION_NOT_FOUND' });
+  });
+
+  it('非 active member 不能列出房间历史', async () => {
+    const harness = await createHarness();
+    const joined = await harness.memberships.join({
+      roomId: 'room-1',
+      accountUserId: 202,
+      displayName: 'Member',
+    });
+    await harness.memberships.leave({
+      roomId: 'room-1',
+      accountUserId: 202,
+      expectedRoomEpoch: joined.roomEpoch,
+    });
+
+    await expect(harness.service.list({
+      roomId: 'room-1',
+      accountUserId: 202,
+    })).rejects.toMatchObject({ code: 'ROOM_MEMBERSHIP_REVOKED' });
+  });
+
+  it.each([
+    [
+      '空角色草稿',
+      { ...sharedConfig(), battleMode: 'daily', combatants: [] } as ArenaRoomSharedConfig,
+      'ROOM_GENERATION_COMBATANTS_EMPTY',
+    ],
+    [
+      '经典模式人数不足',
+      {
+        ...sharedConfig(),
+        combatants: sharedConfig().combatants.slice(0, 1),
+      } as ArenaRoomSharedConfig,
+      'ROOM_GENERATION_COMBATANTS_INSUFFICIENT',
+    ],
+    [
+      '情景模式缺少主情景',
+      {
+        ...sharedConfig(),
+        battleMode: 'scenario',
+        combatants: sharedConfig().combatants.slice(0, 1),
+        scenario: null,
+      } as ArenaRoomSharedConfig,
+      'ROOM_GENERATION_SCENARIO_REQUIRED',
+    ],
+  ] as const)('%s 可以作为房间草稿保存，但开始生成时在物化/预留/provider 前拒绝', async (
+    _label,
+    authorityConfig,
+    code,
+  ) => {
+    const harness = await createHarness(authorityConfig);
+
+    await expect(harness.service.start({
+      roomId: 'room-1',
+      accountUserId: 101,
+      request: startRequest(authorityConfig),
+      sourceRequest: sourceRequest(),
+    })).rejects.toMatchObject({ code });
+
+    expect(harness.store.order).toEqual(['checkpoint:config']);
+    expect(harness.materializer.materialize).not.toHaveBeenCalled();
+    expect(harness.generation.hashSemanticPayload).not.toHaveBeenCalled();
+    expect(harness.generation.startFromHostRequest).not.toHaveBeenCalled();
+  });
+
+  it('从当前 Room authority 物化，先 hash/reservation checkpoint 再调用 existing generation，duplicate 不二次启动', async () => {
+    const harness = await createHarness();
+    const request = startRequest();
     const view = await harness.service.start({
       roomId: 'room-1',
       accountUserId: 101,
@@ -191,31 +703,36 @@ describe('Arena Room generation coordinator', () => {
 
     expect(harness.store.order).toEqual([
       'checkpoint:config',
-      'checkpoint:config',
       'checkpoint:starting',
     ]);
-    expect(harness.references.verify).toHaveBeenCalledWith({
-      refs: [{ id: 'character-1', kind: 'character', versionToken: 'v1' }],
+    expect(harness.materializer.materialize).toHaveBeenCalledWith({
+      sharedConfig: request.sharedConfig,
       hostAccountUserId: 101,
+      hostLocalPayloads: [],
+      hostRuntime: request.generation,
     });
     expect(harness.generation.startFromHostRequest).toHaveBeenCalledTimes(1);
     const start = vi.mocked(harness.generation.startFromHostRequest).mock.calls[0]![0];
     expect(start).toMatchObject({
       roomId: 'room-1',
       generationRequestId: 'request-1234',
-      payload: request.generation,
+      payload: expect.objectContaining({
+        mode: 'classic',
+        userGuidance: '',
+        customProvider: request.generation.customProvider,
+      }),
       internalGuidance: ARENA_ROOM_INTERNAL_GUIDANCE,
       pvpContext: { matchId: 'generation-1', roundId: 'attempt-1' },
       multiplayerSnapshot: {
-        configRevision: 1,
-        sharedConfig: pending,
+        configRevision: 0,
+        sharedConfig: request.sharedConfig,
         participantUserIds: [101],
       },
     });
     expect(view).toMatchObject({
       roomId: 'room-1',
       status: 'reserved',
-      generation: { generationId: 'generation-1', state: 'starting', configRevision: 1 },
+      generation: { generationId: 'generation-1', state: 'starting', configRevision: 0 },
     });
     expect(JSON.stringify(harness.store.state)).not.toContain('provider-secret-canary');
     expect(harness.createPublisher).toHaveBeenCalledTimes(1);
@@ -238,6 +755,94 @@ describe('Arena Room generation coordinator', () => {
       event: 'publisher',
       action: 'finished',
     }));
+  });
+
+  it('请求 sharedConfig 与 Room authority 不同时拒绝，不再隐式 publish', async () => {
+    const harness = await createHarness();
+    const stale = sharedConfig();
+    stale.userGuidance = '尚未发布的 host 本地修改';
+    await expect(harness.service.start({
+      roomId: 'room-1',
+      accountUserId: 101,
+      request: startRequest(stale),
+      sourceRequest: sourceRequest(),
+    })).rejects.toMatchObject({ code: 'ROOM_GENERATION_CONFLICT' });
+    expect(harness.store.order).toEqual(['checkpoint:config']);
+    expect(harness.materializer.materialize).not.toHaveBeenCalled();
+    expect(harness.generation.hashSemanticPayload).not.toHaveBeenCalled();
+    expect(harness.generation.startFromHostRequest).not.toHaveBeenCalled();
+  });
+
+  it('controlSeq 已变化时在 materialize 前拒绝生成，覆盖确认后的新 Proposal', async () => {
+    const harness = await createHarness();
+    await expect(harness.service.start({
+      roomId: 'room-1',
+      accountUserId: 101,
+      request: { ...startRequest(), expectedControlSeq: 99 },
+      sourceRequest: sourceRequest(),
+    })).rejects.toMatchObject({ code: 'ROOM_GENERATION_CONFLICT' });
+    expect(harness.materializer.materialize).not.toHaveBeenCalled();
+    expect(harness.generation.startFromHostRequest).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      new ArenaRoomGenerationContentResolverError('ARENA_ROOM_REFERENCE_VERSION_MISMATCH'),
+      'ROOM_REFERENCE_STALE',
+    ],
+    [
+      new ArenaRoomGenerationMaterializationError(
+        'ARENA_ROOM_HOST_LOCAL_PAYLOAD_MISSING',
+        { kind: 'combatant', displayName: '星野' },
+      ),
+      'ROOM_HOST_LOCAL_PAYLOAD_MISSING',
+    ],
+    [
+      new ArenaRoomGenerationMaterializationError(
+        'ARENA_ROOM_HOST_LOCAL_PAYLOAD_INVALID',
+        { kind: 'room' },
+      ),
+      'ROOM_HOST_LOCAL_PAYLOAD_INVALID',
+    ],
+    [
+      new ArenaRoomGenerationMaterializationError(
+        'ARENA_ROOM_HOST_LOCAL_PAYLOAD_KIND_MISMATCH',
+        { kind: 'scenario', displayName: '雨夜' },
+      ),
+      'ROOM_HOST_LOCAL_KIND_MISMATCH',
+    ],
+    [
+      new ArenaRoomGenerationMaterializationError(
+        'ARENA_ROOM_HOST_LOCAL_PAYLOAD_TYPE_MISMATCH',
+        { kind: 'combatant', displayName: '星野' },
+      ),
+      'ROOM_HOST_LOCAL_TYPE_MISMATCH',
+    ],
+    [
+      new ArenaRoomGenerationMaterializationError('ARENA_ROOM_HOST_LOCAL_CONTENT_VERSION_MISSING'),
+      'ROOM_HOST_LOCAL_CONTENT_VERSION_MISSING',
+    ],
+    [
+      new ArenaRoomGenerationMaterializationError('ARENA_ROOM_HOST_LOCAL_CONTENT_VERSION_MISMATCH'),
+      'ROOM_HOST_LOCAL_DIGEST_MISMATCH',
+    ],
+  ])('materialization fail closed (%s) 且不 hash/reserve/start provider', async (error, code) => {
+    const harness = await createHarness();
+    harness.materializer.materialize.mockRejectedValueOnce(error);
+    await expect(harness.service.start({
+      roomId: 'room-1',
+      accountUserId: 101,
+      request: startRequest(),
+      sourceRequest: sourceRequest(),
+    })).rejects.toMatchObject({
+      code,
+      target: error instanceof ArenaRoomGenerationMaterializationError
+        ? error.target
+        : undefined,
+    });
+    expect(harness.store.order).toEqual(['checkpoint:config']);
+    expect(harness.generation.hashSemanticPayload).not.toHaveBeenCalled();
+    expect(harness.generation.startFromHostRequest).not.toHaveBeenCalled();
   });
 
   it('注入 publisher 同步抛错仍关闭 lifecycle gauge 并只走 background error', async () => {
@@ -284,7 +889,7 @@ describe('Arena Room generation coordinator', () => {
     };
     const unavailable = createArenaRoomGenerationService({
       memberships: harness.memberships,
-      references: harness.references,
+      materializer: harness.materializer,
       generation: unavailablePort,
       createPublisher: harness.createPublisher,
       now: () => '2026-08-28T00:02:00.000Z',
@@ -307,7 +912,7 @@ describe('Arena Room generation coordinator', () => {
     };
     const recovered = createArenaRoomGenerationService({
       memberships: harness.memberships,
-      references: harness.references,
+      materializer: harness.materializer,
       generation: notFoundPort,
       createPublisher: harness.createPublisher,
       now: () => '2026-08-28T00:02:00.000Z',
@@ -320,6 +925,106 @@ describe('Arena Room generation coordinator', () => {
     });
     expect(notFoundPort.readOwnedProjection).toHaveBeenCalledTimes(1);
     expect(notFoundPort.startFromHostRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it('reservation 恢复时 latest 正文已变化则拒绝补启动，不替换本次冻结输入', async () => {
+    const harness = await createHarness();
+    const request = startRequest();
+    const start = {
+      roomId: 'room-1',
+      accountUserId: 101,
+      request,
+      sourceRequest: sourceRequest(),
+    };
+    let version = 'v1';
+    harness.materializer.materialize.mockImplementation(async () => ({
+      mode: 'classic',
+      combatants: [{ data: { name: version }, sourceDataCardUpdatedAt: version }],
+    }));
+    harness.generation.hashSemanticPayload.mockImplementation(async ({ payload }) => (
+      `sha256:${JSON.stringify(payload).includes('v2') ? 'b'.repeat(64) : 'a'.repeat(64)}`
+    ));
+    await harness.service.start(start);
+    harness.finishPublisher();
+    await Promise.resolve();
+
+    version = 'v2';
+    const historicalPort = {
+      ...harness.generation,
+      readOwnedProjection: vi.fn(async () => ({ kind: 'not-found' as const })),
+      startFromHostRequest: vi.fn(async () => ({
+        kind: 'subscribed' as const,
+        subscription: subscription(),
+      })),
+    };
+    const restarted = createArenaRoomGenerationService({
+      memberships: harness.memberships,
+      materializer: harness.materializer,
+      generation: historicalPort,
+      createPublisher: harness.createPublisher,
+      now: () => '2026-08-28T00:02:00.000Z',
+    });
+    await expect(restarted.start(start)).rejects.toMatchObject({ code: 'ROOM_GENERATION_CONFLICT' });
+    expect(historicalPort.startFromHostRequest).not.toHaveBeenCalled();
+  });
+
+  it('历史 durable terminal 先返回权威结果，不被后续 ref stale 遮蔽', async () => {
+    const harness = await createHarness();
+    const request = startRequest();
+    await harness.service.start({
+      roomId: 'room-1',
+      accountUserId: 101,
+      request,
+      sourceRequest: sourceRequest(),
+    });
+    harness.finishPublisher();
+    await Promise.resolve();
+
+    harness.materializer.materialize.mockClear();
+    harness.materializer.materialize.mockRejectedValue(
+      new ArenaRoomGenerationMaterializationError('ARENA_ROOM_REFERENCE_STALE'),
+    );
+    vi.mocked(harness.generation.readOwnedProjection).mockResolvedValue({
+      kind: 'found',
+      projection: {
+        generationId: 'generation-1',
+        generationRequestId: 'request-1234',
+        status: 'completed',
+        markdown: '# 已存在的权威终态',
+        resumeCursor: null,
+        updatedAt: '2026-08-28T00:02:00.000Z',
+        finalAuthoritative: true,
+        resultAvailable: true,
+        generationRecordId: 'generation-1',
+        errorCode: null,
+        roomSafeResult: {
+          version: 1,
+          format: 'stream-markdown',
+          mode: 'classic',
+          report: { headline: '权威标题' },
+        },
+      },
+    });
+    const restarted = createArenaRoomGenerationService({
+      memberships: harness.memberships,
+      materializer: harness.materializer,
+      generation: harness.generation,
+      createPublisher: harness.createPublisher,
+      now: () => '2026-08-28T00:02:00.000Z',
+    });
+
+    await expect(restarted.start({
+      roomId: 'room-1',
+      accountUserId: 101,
+      request,
+      sourceRequest: sourceRequest(),
+    })).resolves.toMatchObject({
+      status: 'completed',
+      markdown: '# 已存在的权威终态',
+      finalAuthoritative: true,
+    });
+    expect(harness.materializer.materialize).not.toHaveBeenCalled();
+    expect(harness.generation.startFromHostRequest).toHaveBeenCalledTimes(1);
   });
 
   it('历史 not-found 只允许 exact semantic payload；terminal ledger 永不再次 POST', async () => {
@@ -344,7 +1049,7 @@ describe('Arena Room generation coordinator', () => {
     };
     const restarted = createArenaRoomGenerationService({
       memberships: harness.memberships,
-      references: harness.references,
+      materializer: harness.materializer,
       generation: historicalPort,
       createPublisher: harness.createPublisher,
       now: () => '2026-08-28T00:02:00.000Z',
@@ -354,7 +1059,10 @@ describe('Arena Room generation coordinator', () => {
       accountUserId: 101,
       request: {
         ...request,
-        generation: { ...request.generation, mode: 'scenario' },
+        generation: {
+          ...request.generation,
+          customProvider: { apiKey: 'changed-secret' },
+        },
       },
       sourceRequest: sourceRequest(),
     })).rejects.toMatchObject({ code: 'ROOM_GENERATION_CONFLICT' });
@@ -403,27 +1111,54 @@ describe('Arena Room generation coordinator', () => {
     expect(historicalPort.startFromHostRequest).not.toHaveBeenCalled();
   });
 
-  it('definitive preflight rejection 终结 Room attempt；5xx unknown 保留 starting 等待对账', async () => {
+  it.each([
+    ['ARENA_CONTENT_POLICY_REJECTED', 400, 'ROOM_GENERATION_CONFLICT'],
+    ['ARENA_REQUEST_TOO_LARGE', 413, 'ROOM_RUNTIME_BODY_LIMIT'],
+    ['ARENA_PARTICIPANTS_LIMIT', 400, 'ROOM_GENERATION_COMBATANT_LIMIT'],
+    ['ARENA_REFERENCE_ITEMS_LIMIT', 400, 'ROOM_RUNTIME_REFERENCE_LIMIT'],
+    ['ARENA_ADJUDICATION_EVENTS_LIMIT', 400, 'ROOM_RUNTIME_ADJUDICATION_LIMIT'],
+    ['ARENA_PROMPT_BUDGET_EXCEEDED', 400, 'ROOM_RUNTIME_PROMPT_BUDGET_EXCEEDED'],
+    ['ARENA_SAFETY_PROMPT_BUDGET_EXCEEDED', 400, 'ROOM_RUNTIME_PROMPT_BUDGET_EXCEEDED'],
+    ['ARENA_CUSTOM_PROVIDER_INVALID', 400, 'ROOM_PROVIDER_CONFIG_INVALID'],
+    ['ARENA_PROVIDER_UNKNOWN', 400, 'ROOM_PROVIDER_CONFIG_INVALID'],
+    ['ARENA_MODEL_UNKNOWN', 400, 'ROOM_PROVIDER_CONFIG_INVALID'],
+    ['ARENA_PROVIDER_KEY_EMPTY', 400, 'ROOM_PROVIDER_CONFIG_INVALID'],
+    ['ARENA_PARTICIPANTS_INVALID', 400, 'ROOM_GENERATION_INPUT_INVALID'],
+    ['ARENA_PVP_CONTEXT_INVALID', 400, 'ROOM_GENERATION_INPUT_INVALID'],
+    ['ARENA_MULTIPLAYER_SNAPSHOT_INVALID', 400, 'ROOM_GENERATION_INPUT_INVALID'],
+    ['ARENA_MATERIALIZATION_VERSION_UNSUPPORTED', 400, 'ROOM_GENERATION_INPUT_INVALID'],
+    ['GENERATION_REQUEST_CONFLICT', 409, 'ROOM_GENERATION_CONFLICT'],
+  ] as const)('definitive downstream rejection %s 终结 Room attempt 并保留具体原因', async (
+    downstreamCode,
+    status,
+    expectedCode,
+  ) => {
     const rejected = await createHarness();
     vi.mocked(rejected.generation.startFromHostRequest).mockResolvedValueOnce({
       kind: 'rejected',
-      status: 400,
-      code: 'ARENA_CONTENT_POLICY_REJECTED',
+      status,
+      code: downstreamCode,
     });
     await expect(rejected.service.start({
       roomId: 'room-1',
       accountUserId: 101,
       request: startRequest(),
       sourceRequest: sourceRequest(),
-    })).rejects.toMatchObject({ code: 'ROOM_GENERATION_CONFLICT' });
+    })).rejects.toMatchObject({ code: expectedCode });
     expect(rejected.store.state?.snapshot.activeGeneration?.state).toBe('cancelled');
     expect(rejected.publisher.attach).not.toHaveBeenCalled();
+  });
 
+  it.each([
+    [503, 'GENERATION_RESERVATION_UNAVAILABLE'],
+    [400, 'UNKNOWN_DETERMINISM'],
+    [429, 'ARENA_PROVIDER_UNKNOWN'],
+  ] as const)('%s / %s 不确定拒绝保留 starting 等待对账', async (status, code) => {
     const unknown = await createHarness();
     vi.mocked(unknown.generation.startFromHostRequest).mockResolvedValueOnce({
       kind: 'rejected',
-      status: 503,
-      code: 'GENERATION_RESERVATION_UNAVAILABLE',
+      status,
+      code,
     });
     await expect(unknown.service.start({
       roomId: 'room-1',
@@ -433,20 +1168,6 @@ describe('Arena Room generation coordinator', () => {
     })).rejects.toMatchObject({ code: 'ROOM_OPERATION_UNKNOWN' });
     expect(unknown.store.state?.snapshot.activeGeneration?.state).toBe('starting');
     expect(unknown.publisher.attach).not.toHaveBeenCalled();
-
-    const conflict = await createHarness();
-    vi.mocked(conflict.generation.startFromHostRequest).mockResolvedValueOnce({
-      kind: 'rejected',
-      status: 409,
-      code: 'GENERATION_REQUEST_CONFLICT',
-    });
-    await expect(conflict.service.start({
-      roomId: 'room-1',
-      accountUserId: 101,
-      request: startRequest(),
-      sourceRequest: sourceRequest(),
-    })).rejects.toMatchObject({ code: 'ROOM_GENERATION_CONFLICT' });
-    expect(conflict.store.state?.snapshot.activeGeneration?.state).toBe('starting');
   });
 
   it('active member 只能读取 current generation；running projection 先 reconcile Room 再只读 resume attach', async () => {
@@ -484,7 +1205,7 @@ describe('Arena Room generation coordinator', () => {
     });
     const restarted = createArenaRoomGenerationService({
       memberships: harness.memberships,
-      references: harness.references,
+      materializer: harness.materializer,
       generation: harness.generation,
       createPublisher: harness.createPublisher,
       now: () => '2026-08-28T00:02:00.000Z',
@@ -534,11 +1255,17 @@ describe('Arena Room generation coordinator', () => {
         resultAvailable: true,
         generationRecordId: 'generation-1',
         errorCode: null,
+        roomSafeResult: {
+          version: 1,
+          format: 'stream-markdown',
+          mode: 'classic',
+          report: { headline: '权威标题' },
+        },
       },
     });
     const restarted = createArenaRoomGenerationService({
       memberships: harness.memberships,
-      references: harness.references,
+      materializer: harness.materializer,
       generation: harness.generation,
       createPublisher: harness.createPublisher,
       now: () => '2026-08-28T00:03:00.000Z',
@@ -552,6 +1279,12 @@ describe('Arena Room generation coordinator', () => {
       markdown: '# 来自 R2/D1 terminal fallback 的完整战报',
       finalAuthoritative: true,
       generationRecordId: 'generation-1',
+      result: {
+        version: 1,
+        format: 'stream-markdown',
+        mode: 'classic',
+        report: { headline: '权威标题' },
+      },
       generation: { state: 'completed' },
     });
     expect(harness.generation.resumeOwnedSubscription).not.toHaveBeenCalled();
@@ -615,6 +1348,13 @@ describe('Arena Room generation coordinator', () => {
         resultAvailable: scenario.resultAvailable,
         generationRecordId: scenario.generationRecordId,
         errorCode: scenario.errorCode,
+        ...(scenario.status === 'completed' ? {
+          roomSafeResult: {
+            version: 1 as const,
+            format: 'stream-markdown' as const,
+            mode: 'classic' as const,
+          },
+        } : {}),
       },
     });
 
@@ -695,11 +1435,16 @@ describe('Arena Room generation coordinator', () => {
           finalAuthoritative: true,
           resultAvailable: true,
           generationRecordId: 'generation-1',
+          roomSafeResult: {
+            version: 1,
+            format: 'stream-markdown',
+            mode: 'classic',
+          },
         },
       });
     const restarted = createArenaRoomGenerationService({
       memberships: harness.memberships,
-      references: harness.references,
+      materializer: harness.materializer,
       generation: harness.generation,
       createPublisher: harness.createPublisher,
       now: () => '2026-08-28T00:05:00.000Z',
@@ -715,5 +1460,112 @@ describe('Arena Room generation coordinator', () => {
       finalAuthoritative: true,
     });
     expect(harness.generation.readOwnedProjection).toHaveBeenCalledTimes(2);
+  });
+
+  it('cancel 重新确认 host/epoch/current generation，并以 trusted owner cancel 后权威 reconcile', async () => {
+    const harness = await createHarness();
+    const member = await harness.memberships.join({
+      roomId: 'room-1',
+      accountUserId: 202,
+      displayName: 'Member',
+    });
+    await harness.service.start({
+      roomId: 'room-1',
+      accountUserId: 101,
+      request: startRequest(
+        sharedConfig(),
+        harness.store.state!.snapshot.controlSeq,
+      ),
+      sourceRequest: sourceRequest(),
+    });
+    vi.mocked(harness.generation.readOwnedProjection).mockResolvedValue({
+      kind: 'found',
+      projection: {
+        generationId: 'generation-1',
+        generationRequestId: 'request-1234',
+        status: 'cancelled',
+        markdown: '# 不得作为终态正文',
+        resumeCursor: null,
+        updatedAt: '2026-08-28T00:03:00.000Z',
+        finalAuthoritative: true,
+        resultAvailable: false,
+        generationRecordId: null,
+        errorCode: null,
+      },
+    });
+
+    await expect(harness.service.cancel({
+      roomId: 'room-1',
+      generationId: 'generation-1',
+      accountUserId: 202,
+      request: { expectedRoomEpoch: member.roomEpoch },
+    })).rejects.toMatchObject({ code: 'ROOM_PERMISSION_DENIED' });
+    await expect(harness.service.cancel({
+      roomId: 'room-1',
+      generationId: 'generation-1',
+      accountUserId: 101,
+      request: { expectedRoomEpoch: 'epoch-stale' },
+    })).rejects.toMatchObject({ code: 'ROOM_EPOCH_STALE' });
+    await expect(harness.service.cancel({
+      roomId: 'room-1',
+      generationId: 'generation-other',
+      accountUserId: 101,
+      request: { expectedRoomEpoch: 'epoch-1' },
+    })).rejects.toMatchObject({ code: 'ROOM_GENERATION_NOT_FOUND' });
+
+    const cancelled = await harness.service.cancel({
+      roomId: 'room-1',
+      generationId: 'generation-1',
+      accountUserId: 101,
+      request: { expectedRoomEpoch: 'epoch-1' },
+    });
+    const duplicate = await harness.service.cancel({
+      roomId: 'room-1',
+      generationId: 'generation-1',
+      accountUserId: 101,
+      request: { expectedRoomEpoch: 'epoch-1' },
+    });
+
+    expect(harness.generation.cancelOwned).toHaveBeenCalledTimes(1);
+    expect(harness.generation.cancelOwned).toHaveBeenCalledWith({
+      roomId: 'room-1',
+      generationId: 'generation-1',
+    });
+    expect(cancelled).toMatchObject({
+      status: 'cancelled',
+      markdown: '',
+      generation: { generationId: 'generation-1', state: 'cancelled' },
+    });
+    expect(duplicate).toEqual(cancelled);
+    harness.finishPublisher();
+  });
+
+  it('cancel 对 trusted owner mismatch/unavailable fail closed', async () => {
+    for (const result of [
+      { kind: 'forbidden' as const },
+      { kind: 'not-found' as const },
+      { kind: 'unavailable' as const, code: 'GENERATION_STATE_UNAVAILABLE' as const },
+    ]) {
+      const harness = await createHarness();
+      await harness.service.start({
+        roomId: 'room-1',
+        accountUserId: 101,
+        request: startRequest(),
+        sourceRequest: sourceRequest(),
+      });
+      vi.mocked(harness.generation.cancelOwned).mockResolvedValueOnce(result);
+
+      await expect(harness.service.cancel({
+        roomId: 'room-1',
+        generationId: 'generation-1',
+        accountUserId: 101,
+        request: { expectedRoomEpoch: 'epoch-1' },
+      })).rejects.toMatchObject({
+        code: result.kind === 'unavailable'
+          ? 'ROOM_GENERATION_UNAVAILABLE'
+          : 'ROOM_GENERATION_NOT_FOUND',
+      });
+      harness.finishPublisher();
+    }
   });
 });

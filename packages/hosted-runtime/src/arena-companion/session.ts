@@ -10,6 +10,7 @@ import type {
   ArenaGenerationService,
   GenerationStreamEvent,
 } from '@mahoshojo/hosted-api/arena-generation/service';
+import { ARENA_RESOURCE_BUDGET } from '@mahoshojo/hosted-api/arena-generation/resource-budget';
 import { encodeGenerationSseEvent } from '@mahoshojo/hosted-api/arena-generation/sse';
 import type { SignatureService } from '../signature';
 import {
@@ -24,6 +25,7 @@ import {
   ARENA_COMPANION_OPERATION_HEADER,
   readArenaCompanionJsonPayload,
 } from './service';
+import { sanitizePublicErrorMessage } from '../node-runtime/error-extraction';
 
 const SessionRequestSchema = z.object({
   sessionId: z.string().min(1),
@@ -58,8 +60,12 @@ const SessionRequestSchema = z.object({
   seed: z.object({
     combatants: z.array(z.unknown()).min(1),
     scenario: z.record(z.unknown()).nullable().optional(),
-    auxScenarios: z.array(z.record(z.unknown())).max(10).optional(),
-    materials: z.array(z.unknown()).max(10).optional(),
+    auxScenarios: z.array(z.record(z.unknown()))
+      .max(ARENA_RESOURCE_BUDGET.maxReferenceItemsSanity)
+      .optional(),
+    materials: z.array(z.unknown())
+      .max(ARENA_RESOURCE_BUDGET.maxReferenceItemsSanity)
+      .optional(),
     adjudicationEvents: z.array(z.unknown()).optional(),
     questionnaires: z.array(z.object({
       id: z.string().min(1),
@@ -67,7 +73,7 @@ const SessionRequestSchema = z.object({
       kind: z.enum(['magical-girl', 'canshou']),
       useLore: z.boolean().optional(),
       loreMarkdown: z.string().optional(),
-    })).max(20).optional(),
+    })).max(ARENA_RESOURCE_BUDGET.maxReferenceItemsSanity).optional(),
     mode: z.enum(['classic', 'kizuna', 'daily', 'scenario']),
     storyLength: z.enum(['default', 'short', 'standard', 'detailed', 'long']).default('standard'),
     customStoryLength: z.string().optional(),
@@ -222,6 +228,7 @@ const createUpstreamRequest = (input: {
   request: Request;
   body: Record<string, unknown>;
   guidanceSignature: string;
+  includeBody: boolean;
 }): Request => {
   const headers = new Headers(input.request.headers);
   headers.delete('content-length');
@@ -231,7 +238,7 @@ const createUpstreamRequest = (input: {
   return new Request(input.request.url, {
     method: 'POST',
     headers,
-    body: JSON.stringify(input.body),
+    ...(input.includeBody ? { body: JSON.stringify(input.body) } : {}),
     signal: input.request.signal,
   });
 };
@@ -254,9 +261,9 @@ export const createArenaSessionCompanionService = (
         // Telemetry transport failures must not affect session execution.
       }
     };
-    const raw = await readArenaCompanionJsonPayload(request);
-    if (raw instanceof Response) return raw;
-    const parsed = SessionRequestSchema.safeParse(raw);
+    const parsedBody = await readArenaCompanionJsonPayload(request);
+    if (parsedBody instanceof Response) return parsedBody;
+    const parsed = SessionRequestSchema.safeParse(parsedBody.payload);
     if (!parsed.success) return jsonResponse({ error: '请求参数无效' }, 400);
     const payload = parsed.data;
     const customProviderResolution = resolveArenaCustomProvider(payload.customProvider);
@@ -280,6 +287,7 @@ export const createArenaSessionCompanionService = (
     if (!validation.ok) return jsonResponse({ error: validation.error }, 400);
     const chapterIndex = validation.chapterIndex;
     const promptContext = buildBattleStoryPromptContext({
+      baseContext: 'arena-provided',
       source: {
         mode: payload.seed.mode,
         language: payload.seed.language,
@@ -364,20 +372,38 @@ export const createArenaSessionCompanionService = (
         }
         : null;
       options.recordActivity?.(request);
-      subscription = await options.generationService.createSubscription(createUpstreamRequest({
-        request,
-        body: buildArenaSessionUpstreamRequestBody(
-          payload,
-          internalGuidance,
-          customProviderPayload,
-        ),
-        guidanceSignature,
-      }));
+      const upstreamBody = buildArenaSessionUpstreamRequestBody(
+        payload,
+        internalGuidance,
+        customProviderPayload,
+      );
+      const parsedUpstreamPayload = { ...upstreamBody };
+      delete parsedUpstreamPayload.generationRequestId;
+      subscription = options.generationService.createParsedSubscription
+        ? await options.generationService.createParsedSubscription(createUpstreamRequest({
+          request,
+          body: parsedUpstreamPayload,
+          guidanceSignature,
+          includeBody: false,
+        }), {
+          generationRequestId: payload.generationRequestId,
+          payload: parsedUpstreamPayload,
+          bodyBytes: parsedBody.bodyBytes,
+        })
+        : await options.generationService.createSubscription(createUpstreamRequest({
+          request,
+          body: upstreamBody,
+          guidanceSignature,
+          includeBody: true,
+        }));
     } catch (error) {
       releaseOnce();
       return jsonResponse({
         error: '生成失败',
-        message: error instanceof Error ? error.message : '未知错误',
+        message: sanitizePublicErrorMessage(error, {
+          fallbackMessage: '生成服务暂时不可用，请稍后重试',
+          secrets: [resolvedCustomProvider?.apiKey ?? '', guidanceSignature],
+        }),
       }, 500);
     }
     if (subscription instanceof Response) {

@@ -2,6 +2,7 @@
 
 import { randomUUID } from '@/lib/crypto';
 import { formatBattleStoryChapterProgress } from '@/lib/ai-session/battle-story/plan';
+import { normalizeUsage } from '@/lib/arena/battle-report-log-utils';
 import { normalizeCustomStoryLength } from '@/lib/story-length';
 import {
   buildAdjudicationRecordMarkdown,
@@ -53,14 +54,6 @@ const getCombatantName = (combatant: CombatantData | Record<string, unknown>): s
   return normalizeText(raw);
 };
 
-const normalizeNameToken = (value: string): string => {
-  return value
-    .trim()
-    .replace(/^[“”"'「」『』《》【】\[\]（）()]+|[“”"'「」『』《》【】\[\]（）()]+$/g, '')
-    .replace(/\s+/g, '')
-    .toLowerCase();
-};
-
 const buildScenarioTitle = (scenario: ScenarioState): string => {
   return (
     normalizeText((scenario.content as any)?.title) ||
@@ -97,24 +90,8 @@ const normalizeCharacterGuidances = (
   return normalized.length > 0 ? normalized : null;
 };
 
-const normalizeAiUsage = (value: unknown): BattleStoryChapterCardSnapshot['aiUsage'] | null => {
-  if (!isRecord(value)) return null;
-  const normalized: NonNullable<BattleStoryChapterCardSnapshot['aiUsage']> = {};
-  const fields: Array<keyof NonNullable<BattleStoryChapterCardSnapshot['aiUsage']>> = [
-    'promptTokens',
-    'reasoningTokens',
-    'completionTokens',
-    'totalTokens',
-    'cachedTokens',
-  ];
-  for (const field of fields) {
-    const tokenValue = value[field];
-    if (typeof tokenValue === 'number' && Number.isFinite(tokenValue)) {
-      normalized[field] = tokenValue;
-    }
-  }
-  return Object.keys(normalized).length > 0 ? normalized : null;
-};
+const normalizeAiUsage = (value: unknown): BattleStoryChapterCardSnapshot['aiUsage'] | null =>
+  normalizeUsage(value);
 
 const buildInlineMetaDebugFromReportJson = (
   reportJson: Record<string, unknown>
@@ -346,7 +323,11 @@ export const resolveBattleStoryChapterCardSnapshot = (
 
 export const mergeUpdatedCombatantsIntoWorkingCombatants = (
   workingCombatants: unknown[],
-  updatedCombatants: Array<Record<string, unknown>>
+  updatedCombatants: Array<{
+    combatantIndex: number;
+    data: Record<string, unknown>;
+    isNative: boolean;
+  }>
 ): Array<Record<string, unknown>> => {
   if (!Array.isArray(workingCombatants) || workingCombatants.length === 0) return [];
   if (!Array.isArray(updatedCombatants) || updatedCombatants.length === 0) {
@@ -355,29 +336,25 @@ export const mergeUpdatedCombatantsIntoWorkingCombatants = (
     );
   }
 
-  const updateByName = new Map<string, Record<string, unknown>>();
-  updatedCombatants.forEach((combatant) => {
-    const name = getCombatantName(combatant);
-    if (!name) return;
-    updateByName.set(normalizeNameToken(name), combatant);
-  });
+  const updateByIndex = new Map(updatedCombatants.flatMap((entry) => (
+    Number.isSafeInteger(entry.combatantIndex)
+      && entry.combatantIndex >= 0
+      && entry.data
+      && typeof entry.data === 'object'
+      ? [[entry.combatantIndex, entry] as const]
+      : []
+  )));
 
   return workingCombatants
     .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
-    .map((combatant) => {
-      const currentData =
-        combatant.data && typeof combatant.data === 'object'
-          ? (combatant.data as Record<string, unknown>)
-          : null;
-      const currentName = currentData ? getCombatantName(currentData) : '';
-      if (!currentName) return combatant;
-
-      const matched = updateByName.get(normalizeNameToken(currentName));
+    .map((combatant, combatantIndex) => {
+      const matched = updateByIndex.get(combatantIndex);
       if (!matched) return combatant;
 
       return {
         ...combatant,
-        data: matched,
+        data: matched.data,
+        isNative: matched.isNative,
       };
     });
 };

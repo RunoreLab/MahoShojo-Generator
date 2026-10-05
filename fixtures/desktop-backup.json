@@ -1,0 +1,14 @@
+{
+  "summary": {
+    "backupId": "local-library-20261003T040000Z-2",
+    "createdAt": "2026-10-03T04:00:00Z",
+    "absolutePath": "C:/example/backups/local-library-20261003T040000Z-2",
+    "directory": "C:/example/backups",
+    "databaseBytes": 49152,
+    "blobCount": 2,
+    "blobBytes": 1024
+  },
+  "validIds": ["local-library-20261003T040000Z", "local-library-20261003T040000Z-2", "local-library-20261003T040000Z-10"],
+  "invalidIds": ["", "../library.sqlite", "C:/backup", "local-library-20261003T040000Z-1", "local-library-20261003T040000Z-02", "local-library-20261003T040000Z/../other", "local-library-123456789012345🪄"],
+  "errorCodes": ["invalid-backup-id", "backup-incomplete", "backup-unsupported-version", "backup-corrupt", "backup-source-unavailable", "backup-failed", "maintenance-busy"]
+}

@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { X, Info, Star, Heart, Download, ChevronDown, ChevronUp, Flag, MoreHorizontal, Layers } from 'lucide-react';
+import { X, Info, Star, Heart, Download, ChevronDown, ChevronUp, Flag, MoreHorizontal, Layers, HardDrive } from 'lucide-react';
 import { MarkdownBlock } from '@/components/MarkdownBlock';
 import { DataCardReportModal } from '@/components/data-card-reports/DataCardReportModal';
 import { getFieldDisplayName } from '@/lib/fieldTranslations';
 import { formatDateTime } from '@/lib/constants';
+import { downloadBlob } from '@/lib/client/blobUrl';
 import { authStorage } from '@/lib/auth';
 import { upsertArenaRankCacheFromMeta } from '@/lib/arena/rank-cache';
 import { EntityRatingHistoryButton } from '@/components/ranking/EntityRatingHistoryButton';
@@ -167,6 +168,13 @@ interface DataCardDetailsModalProps {
     updatedAt?: string;
   };
   pendingNotice?: string;
+  fallbackFocusRef?: React.RefObject<HTMLElement | null>;
+  /**
+   * LIB-007「下载本地副本」：把线上数据卡的正文复制一份存入本机本地库。
+   * 只对线上数据卡开放；本地库卡片已经在此，没有再复制一次的道理。
+   */
+  onSaveCopyToLocalLibrary?: () => Promise<void> | void;
+  localLibrarySaveState?: { busy: boolean; message: string | null };
 }
 
 export default function DataCardDetailsModal({
@@ -179,7 +187,13 @@ export default function DataCardDetailsModal({
   isOwner = false,
   adminTagEditor = false,
   initialReportCapability = null,
+  fallbackFocusRef,
+  onSaveCopyToLocalLibrary,
+  localLibrarySaveState,
 }: DataCardDetailsModalProps) {
+  const titleId = React.useId();
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
   const canEditTags = isOwner || adminTagEditor;
   const [tagScope, setTagScope] = useState<'user' | 'system' | 'admin'>(adminTagEditor ? 'admin' : 'user');
   const [metaNonce, setMetaNonce] = useState(0);
@@ -225,6 +239,65 @@ export default function DataCardDetailsModal({
   const descriptionText = card.description?.trim() ? card.description : '暂无简介';
   const tagSectionRef = useRef<HTMLDivElement | null>(null);
   const tagSearchInputRef = useRef<HTMLInputElement | null>(null);
+  const moreActionsButtonRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const previouslyFocused = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    const fallbackFocus = fallbackFocusRef?.current ?? null;
+    const previousBodyOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    closeButtonRef.current?.focus();
+
+    return () => {
+      document.body.style.overflow = previousBodyOverflow;
+      if (previouslyFocused && document.contains(previouslyFocused)) {
+        previouslyFocused.focus();
+      } else {
+        fallbackFocus?.focus();
+      }
+    };
+  }, [fallbackFocusRef, isOpen]);
+
+  const handleDialogKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (isReportModalOpen) return;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      onClose();
+      return;
+    }
+    if (event.key !== 'Tab') return;
+
+    const focusableSelector = [
+      'button:not([disabled])',
+      'a[href]',
+      'input:not([disabled])',
+      'select:not([disabled])',
+      'textarea:not([disabled])',
+      '[tabindex]:not([tabindex="-1"])',
+    ].join(',');
+    const focusable = [...(dialogRef.current?.querySelectorAll<HTMLElement>(focusableSelector) ?? [])]
+      .filter((element) => !element.hidden && element.getAttribute('aria-hidden') !== 'true');
+    if (focusable.length === 0) {
+      event.preventDefault();
+      dialogRef.current?.focus();
+      return;
+    }
+
+    const first = focusable[0]!;
+    const last = focusable.at(-1)!;
+    const current = document.activeElement;
+    if (event.shiftKey && current === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && current === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
 
   const reloadMeta = useCallback(async (dataCardId: string) => {
     const requestId = (metaRequestIdRef.current += 1);
@@ -544,17 +617,7 @@ export default function DataCardDetailsModal({
       const payload = JSON.parse(card.data);
       const jsonString = JSON.stringify(payload, null, 2);
       const blob = new Blob([jsonString], { type: 'application/json;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `${sanitizeDownloadFilename(card.name || '数据卡')}.json`;
-
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-
-      URL.revokeObjectURL(url);
+      downloadBlob(blob, `${sanitizeDownloadFilename(card.name || '数据卡')}.json`);
     } catch (error) {
       console.error('下载数据卡失败:', error);
       setDownloadError('下载失败：数据卡内容不是有效的 JSON');
@@ -728,7 +791,16 @@ export default function DataCardDetailsModal({
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal={isReportModalOpen ? undefined : 'true'}
+        aria-hidden={isReportModalOpen ? 'true' : undefined}
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        onKeyDown={handleDialogKeyDown}
+        className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col"
+      >
         {/* 头部 */}
         <div className="flex items-center justify-between p-6 border-b">
           <div className="flex items-center gap-3">
@@ -748,7 +820,7 @@ export default function DataCardDetailsModal({
               />
             </div>
             <div>
-              <h2 className="text-xl font-bold text-gray-800" title={fullName}>
+              <h2 id={titleId} className="text-xl font-bold text-gray-800" title={fullName}>
                 {displayName}
               </h2>
               <p className="text-xs text-gray-500 mt-1">类型：{cardTypeLabel}</p>
@@ -757,6 +829,7 @@ export default function DataCardDetailsModal({
           <div className="relative flex items-center gap-2">
             {canShowReportActions ? (
               <button
+                ref={moreActionsButtonRef}
                 type="button"
                 onClick={() => setIsMoreActionsOpen((prev) => !prev)}
                 className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
@@ -766,7 +839,10 @@ export default function DataCardDetailsModal({
               </button>
             ) : null}
             <button
+              type="button"
+              ref={closeButtonRef}
               onClick={onClose}
+              aria-label={`关闭${cardTypeLabel}详情`}
               className="text-gray-400 hover:text-gray-600 p-2 rounded-lg hover:bg-gray-100"
             >
               <X className="w-5 h-5" />
@@ -1113,6 +1189,9 @@ export default function DataCardDetailsModal({
             {downloadError && (
               <div className="text-xs text-red-600">{downloadError}</div>
             )}
+            {localLibrarySaveState?.message && (
+              <div className="text-xs text-gray-600" role="status">{localLibrarySaveState.message}</div>
+            )}
           </div>
 
           <div className="flex items-center gap-2">
@@ -1161,6 +1240,17 @@ export default function DataCardDetailsModal({
                     : '不可下载'}
               </span>
             </button>
+            {onSaveCopyToLocalLibrary && isCloudDataCard ? (
+              <button
+                onClick={() => { void onSaveCopyToLocalLibrary(); }}
+                disabled={localLibrarySaveState?.busy === true}
+                className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors inline-flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                title="把这张数据卡的正文复制一份存入本机本地库，不会影响线上记录"
+              >
+                <HardDrive className="w-4 h-4" />
+                <span>{localLibrarySaveState?.busy === true ? '保存中...' : '存到本地库'}</span>
+              </button>
+            ) : null}
             <button
               onClick={onClose}
               className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
@@ -1172,6 +1262,7 @@ export default function DataCardDetailsModal({
       </div>
       <DataCardReportModal
         isOpen={isReportModalOpen}
+        fallbackFocusRef={moreActionsButtonRef}
         cardName={card.name}
         reasons={reportCapability?.reasons ?? []}
         initialReport={reportCapability?.myActiveReport ?? null}

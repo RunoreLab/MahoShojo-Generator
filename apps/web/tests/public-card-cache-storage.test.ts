@@ -1,9 +1,8 @@
 import { beforeEach, describe, expect, test } from 'vitest';
 import '@/tests/helpers/fake-indexeddb';
 
-import { __resetAiSessionDbForTest, requestToPromise, transactionToPromise } from '@/lib/ai-session/storage';
+import { __resetAiSessionDbForTest, openAiSessionDb, requestToPromise, transactionToPromise } from '@/lib/ai-session/storage';
 import { AI_SESSION_DB_NAME, AI_SESSION_STORE_NAMES } from '@/lib/ai-session/types';
-import { openChallengeDb } from '@/lib/challenge/storage';
 import {
   cleanupExpiredPublicCardCache,
   getPublicCardCacheRecord,
@@ -23,7 +22,7 @@ describe('public card cache storage', () => {
   });
 
   test('创建 public_card_cache store 与索引', async () => {
-    const db = await openChallengeDb();
+    const db = await openAiSessionDb();
     expect(db.objectStoreNames.contains(AI_SESSION_STORE_NAMES.publicCardCache)).toBe(true);
 
     const store = db.transaction(AI_SESSION_STORE_NAMES.publicCardCache, 'readonly')
@@ -104,7 +103,7 @@ describe('public card cache storage', () => {
     expect(await getPublicCardCacheRecord('card-256')).not.toBeNull();
     expect(await getPublicCardCacheRecord('negative-128')).not.toBeNull();
 
-    const db = await openChallengeDb();
+    const db = await openAiSessionDb();
     const transaction = db.transaction([AI_SESSION_STORE_NAMES.publicCardCache], 'readonly');
     const store = transaction.objectStore(AI_SESSION_STORE_NAMES.publicCardCache);
     const count = await requestToPromise(store.count());

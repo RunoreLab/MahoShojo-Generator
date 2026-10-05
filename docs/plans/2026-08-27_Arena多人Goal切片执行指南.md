@@ -6,6 +6,10 @@
 适用分支：`refactor/platform-rearchitecture` 及从其切出的 Arena 多人功能分支/工作树
 首个基线：`cbe29d8c3aff16c9a87a9c7e20d03056d7d5af85`
 
+历史说明：本文记录的 Room release gate、writer activation 与 reader compatibility 发布门禁已由
+[平台复杂度预算与故障降级决策](../decisions/2026-09-01_193200_平台复杂度预算与故障降级决策.md)
+取代，不再是当前实现或发布要求；auth、authority、fence、资源上限与真实行为测试仍适用。
+
 ## 1. 用途与权威边界
 
 本文用于把 Arena 多人 Hono + Redis v1 拆成适合 Codex `/goal` 持续推进的**单轮可验证切片**。它是执行索引、状态总账和停止条件，不是新的产品规格或架构 ADR。
@@ -105,10 +109,11 @@ read authority / current state
 | `GMR-08` Proposal E2E | `DONE` | GMR-05,GMR-07 | typed Proposal server/UI 闭环 | 不扩展 private sharing |
 | `GMR-09` generation publisher | `DONE` | GMR-03,GMR-05,GMR-06R,GMR-07 | single producer + Room safe fan-out/resync | 不复制 AI lifecycle |
 | `GMR-10` hardening/fault/load audit | `DONE` | GMR-06R,GMR-08,GMR-09 | telemetry + failure drills + v1 exit audit | 不自动进入生产 activation |
-| `GMR-11` production activation review | `IN_PROGRESS` | GMR-10 + Production Gate | Preview Hono 已激活；等待 Preview Web/SSE canary 与 production 授权 | 必须人工/平台授权 |
+| `GMR-10P` product parity remediation | `DONE` | GMR-10 | A 至 G 全部完成；golden flow、durable verifier、full gate 与独立复审关闭 | 不自动激活 production |
+| `GMR-11` production activation review | `READY` | GMR-10,GMR-10P + Production Gate | GMR-10P 前置已关闭；须重新独立审查 production readiness，不沿用旧 go/no-go | 未获单独授权不执行 production activation |
 | `GMR-H` multi-instance / DO evaluation | `DEFERRED` | 真实指标触发 | 新 ADR/PoC 决策 | v1 不预建 |
 
-`GMR-06` 与 `GMR-07` 在 GMR-05 后 MAY 并行，但一个 `/goal` 仍只执行其中一个。2026-08-28 的 Redis-only superseding 修订把 `GMR-06R` 加为后续 generation/hardening 前置门禁；`GMR-08` 的已完成结果保留。GMR-10 的代码、真实故障/负载证据、最终复审与 full gate 已完成。2026-08-30 用户明确启动 GMR-11 收尾；默认关闭的激活门禁、回滚绑定、实时流整改与 Preview Hono writer 激活已完成，Preview Web/SSE canary 和 production activation 仍受平台配置、授权及公网证据阻断。GMR-H 继续保持 `DEFERRED`。
+`GMR-06` 与 `GMR-07` 在 GMR-05 后 MAY 并行，但一个 `/goal` 仍只执行其中一个。2026-08-28 的 Redis-only superseding 修订把 `GMR-06R` 加为后续 generation/hardening 前置门禁；`GMR-08` 的已完成结果保留。GMR-10 的代码、真实故障/负载证据、最终复审与 full gate 已完成。2026-08-30 用户明确启动 GMR-11 收尾；回滚绑定、实时流整改、Preview Hono/Web 曝光及双成员 canary 已完成。2026-08-31 产品一致性修订在 GMR-10 与 GMR-11 之间插入 `GMR-10P`；2026-09-01 A 至 G、golden/durable 证据、full gate 与独立复审均已关闭，GMR-10P 为 `DONE`。GMR-11 恢复为 `READY`，但仍须重新独立审查 production readiness，且不授权 production activation。真实 provider SSE 仍是可选 UX audit；GMR-H 继续保持 `DEFERRED`。
 
 ## 6. Goal 详细定义
 
@@ -782,29 +787,58 @@ validate -> pure derive -> conditional checkpoint
   security/compatibility/replay/data、test-adequacy/load/evidence 三路最终独立复审均为 Critical `0` /
   Important `0` / Minor `0`。
 
+### GMR-10P product parity remediation
+
+**Status：`DONE`**
+
+该 Goal 以 accepted
+[Arena 多人产品一致性修订](../specs/2026-08-31_150000_Arena多人产品一致性与既有Arena复用修订.md)
+和
+[GMR-10P 实施计划](./2026-08-31_150000_Arena多人GMR-10P产品一致性整改实施计划.md)
+为权威入口。A 已完成真实 generation input、Room Shared Config、Proposal changes 与现有 Arena UI 的
+machine-readable coverage matrix，并在普通仓库验证中校验 gate 结构；production Hono workflow 在任何 deploy 前额外要求
+`GMR-10P-A` 至 `GMR-10P-G` 全部 `DONE`，production parity gate 已转为 `READY`。B 已完成 frozen authority
+materialization、exact ref/host-local payload 校验、显式 config publish 与 host generation preflight；C 至 F 已完成 scoped
+Arena editor、完整 Proposal、共享 BattleResult 与轻量 room shell/management；G 已完成真实 hosted golden flow、Node WSS、
+loopback Redis durable verifier、focused READY、full `ci:verify` 与综合独立复审。focused READY 最终覆盖 API
+`5 files / 65 tests`、Web `9 / 51`、multiplayer-core `4 / 60`、contracts `5 / 55`；复审发现的 authority namespace、
+modal/a11y、verifier composition、GMR-11 gate 与文档口径问题均已整改并由原审查者复看关闭。最终 findings 为
+Critical `0` / Important `0` / Minor `0`。完整证据见
+[GMR-10P 产品一致性实施与退出审计](../logs/2026-09-01_002500_Arena多人GMR-10P产品一致性实施与退出审计.md)。
+
 ### GMR-11 production activation review
 
-**Status：`IN_PROGRESS`**
+**Status：`READY`**
 
-这是用户于 2026-08-30 明确启动的新 go/no-go，不是 GMR-10 自动续跑。
+这是用户于 2026-08-30 明确启动的 production activation review，不是 GMR-10 自动续跑。旧版 go/no-go ceremony 已由
+2026-08-31 发布流程修订取代。2026-08-31 产品一致性修订增加的 `GMR-10P = DONE` 强制依赖已于
+2026-09-01 关闭，因此本 Goal 恢复为可重新执行 production activation review 的 `READY`。本节以下已完成事实仍只作为
+保留基础设施与历史证据；不得沿用整改前的 go/no-go，也不授权自动上线。
 
-当前已完成 production activation 的默认关闭代码路径：release tuple 绑定 writer activation、reader-first/go-no-go
-attestation、Hono 先于 Web 的启用顺序、Room 专用 logical-origin provisioning、HTTP/WSS 发布探针与安全回滚；同时把
+当前已完成 production activation 的代码路径：release tuple 绑定 writer capability、Hono 先于 Web 的发布依赖、shared
+Hono primary ingress、HTTP/WSS 发布探针与安全回滚；同时把
 generation delta 调为 `40 ms / 512 bytes`，隔离 Redis blocking replay connection，并摊销 running snapshot 写入。
-用户已确认 production logical Room origin 为 `https://api.mahoshojo.colanns.me`，并确认 Room v1 排除在 Cloudflare DR
-之外。Preview Hono 已按 request=false → writer-capable tuple → request=true 两阶段顺序激活并通过三个 exact Origin
-的 HTTP/WSS canary；production manifest 继续 `not-provisioned`。
+2026-08-31 accepted ADR 已覆盖旧的独立 Room hostname 前置，production Room 复用 Hosted Hono primary，并继续排除在
+Cloudflare DR 之外。Preview Hono 已按 request=false → writer-capable tuple → request=true 两阶段顺序激活并通过三个 exact Origin
+的 HTTP/WSS canary，Preview Web 多人面板与双成员 join/WSS/resync/reconnect 也已验证；production manifest 继续
+保持 optional Hosted control plane `not-provisioned`，但它不再阻断 Room。
 
-以下外部条件仍未关闭，因此不得把本 Goal 标为 `DONE`，也不得执行 production activation：
+以下 production activation 前置需在发布时关闭：
 
-- production stable logical HTTPS/WSS routing、Access/origin protection 与 provisioning；
-- production runtime/GitHub variables 与 tuple writer enable 授权；
-- Preview Web bundle 部署与真实 provider 公网 SSE 分块 canary；
-- 容量/告警观察与 production fault drill。
+- production shared Hono primary readiness、Access/origin protection 与只读 contract 验证；
+- production runtime/GitHub secrets/variables 存在性、request flag 与 Web exposure 核对。
 
-本阶段没有 D1/Redis schema migration；最终激活必须继续维持 backend reader → backend writer → Web 的顺序，失败时
-先把 Web 与 request flag 关闭，再回退到 writer-disabled tuple。证据见
-[GMR-11 激活准备与实时流收尾日志](../logs/2026-08-30_183857_Arena多人GMR-11激活准备与实时流收尾日志.md)。
+production current 的历史 writer-disabled tuple 继续作为 compatible rollback baseline；默认分支的正常发布固定生成
+writer-enabled tuple 是独立批准后的目标态。当前门禁仍为 `READY`：正常 push 固定生成 writer-disabled tuple，只有显式
+enabled dispatch 才请求 writer-enabled，且必须先通过 reviewed commit、源码树摘要与独立批准证据校验。完成 GMR-11
+批准和对应 workflow 切换前不得把目标态描述成当前事实。上线后容量/告警观察完成前不得把本 Goal 标为 `DONE`。
+dual-path provider SSE 只是可选 UX audit，production fault drill 继续 `DEFERRED`，二者都不是本次 activation 前置。
+
+本阶段没有 D1/Redis schema migration；最终激活维持 Hono transaction/probe → Web 的顺序，失败时先关闭 Web exposure
+与 request flag，再按 immutable baseline contract 回退。证据见
+[GMR-11 激活准备与实时流收尾日志](../logs/2026-08-30_183857_Arena多人GMR-11激活准备与实时流收尾日志.md)；
+production 的精确执行与回滚顺序见
+[Arena 多人生产激活与回滚实施计划](./2026-08-30_231000_Arena多人生产激活与回滚实施计划.md)。
 
 ### GMR-H multi-instance / Durable Object evaluation
 

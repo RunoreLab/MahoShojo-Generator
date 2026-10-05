@@ -6,7 +6,7 @@ import type {
 } from '@mahoshojo/hosted-api/arena-generation/service';
 import { createArenaCompanionRouteService } from '../src/arena-companion';
 import { createArenaCompanionService } from '../src/arena-companion/service';
-import { createArenaGenerationActorResolver } from '../src/arena-generation/actor';
+import { createArenaGenerationActorResolvers } from '../src/arena-generation/actor';
 import {
   ARENA_PVP_GENERATION_SIGNATURE_HEADER,
   ARENA_PVP_GENERATION_SIGNATURE_PURPOSE,
@@ -18,8 +18,10 @@ const response = (): Promise<Response> => Promise.resolve(new Response(null));
 
 const generationService = (
   createSubscription: ArenaGenerationService['createSubscription'],
+  createParsedSubscription?: NonNullable<ArenaGenerationService['createParsedSubscription']>,
 ): ArenaGenerationService => ({
   createSubscription,
+  ...(createParsedSubscription ? { createParsedSubscription } : {}),
   create: () => response(),
   cancelRequest: () => response(),
   lookup: () => response(),
@@ -71,7 +73,7 @@ describe('Arena companion service', () => {
       pvpContext: { roomId: 'room-1', matchId: 'match-1', roundId: 'round-1' },
     };
     const signature = await pvpAuthority.sign({ generationRequestId, payload });
-    const resolveActor = createArenaGenerationActorResolver({
+    const { resolveActor, resolveCreateActor } = createArenaGenerationActorResolvers({
       env: { ...env, HONO_AUTH_MODE: 'bearer' },
       signatures,
       pvpSignatures,
@@ -83,12 +85,29 @@ describe('Arena companion service', () => {
         })),
       }),
     });
-    const createSubscription = vi.fn(async (request: Request) => {
-      await expect(resolveActor(request)).resolves.toEqual({ actorKey: 'pvp-room:room-1' });
+    const createSubscription = vi.fn();
+    const createParsedSubscription = vi.fn(async (
+      request: Request,
+      command: Parameters<NonNullable<ArenaGenerationService['createParsedSubscription']>>[1],
+    ) => {
+      const actor = await resolveActor(request);
+      expect(actor).toEqual({ actorKey: 'user:42' });
+      await expect(resolveCreateActor({
+        request,
+        actor: actor!,
+        generationRequestId: command.generationRequestId,
+        payload: command.payload,
+      })).resolves.toEqual({ actorKey: 'pvp-room:room-1' });
+      expect(command).toMatchObject({
+        generationRequestId,
+        payload: { ...payload, forceStreamMeta: true },
+      });
+      expect(command.bodyBytes).toBeGreaterThan(0);
+      expect(request.body).toBeNull();
       return Response.json({ code: 'TEST_STOP' }, { status: 409 });
     });
     const service = createArenaCompanionService({
-      generationService: generationService(createSubscription),
+      generationService: generationService(createSubscription, createParsedSubscription),
       createGenerationRequestId: () => generationRequestId,
       projectUpdatedCombatants: vi.fn(async () => []),
     });
@@ -107,7 +126,8 @@ describe('Arena companion service', () => {
     ));
 
     expect(result.status).toBe(409);
-    expect(createSubscription).toHaveBeenCalledTimes(1);
+    expect(createParsedSubscription).toHaveBeenCalledTimes(1);
+    expect(createSubscription).not.toHaveBeenCalled();
   });
 
   it('preserves the durable terminal marker when projecting a failed fallback', async () => {
@@ -296,6 +316,145 @@ describe('Arena companion service', () => {
     expect(json.report.article).toEqual({
       body: '重放正文。',
       analysis: '重放仍应保持同一份点评。',
+    });
+  });
+
+  it('Web non-stream 原样返回 HTML，权威结果仅来自 meta', async () => {
+    const source = '<!doctype html><html><h1>错误的 DOM 标题</h1><script>const a="x";</script></html>';
+    const service = createArenaCompanionService({
+      generationService: generationService(async () => ({
+        ...subscription([]),
+        headers: { 'X-Mahoshojo-Stream-Meta': encodeURIComponent(JSON.stringify({ outputContract: 'web-document' })) },
+        events: streamOf(
+          { id: '1-0', type: 'snapshot', data: { markdown: source } },
+          { id: '2-0', type: 'meta', data: { meta: { version: 1, report: { headline: '可信标题', winner: 'A' } } } },
+          { id: '3-0', type: 'done', data: { status: 'completed' } },
+        ),
+      })),
+      projectUpdatedCombatants: vi.fn(async () => []),
+    });
+    const result = await service.generate(new Request('https://example.test/api/arena/generate', {
+      method: 'POST', body: JSON.stringify({ reportFormat: 'web' }),
+    }));
+    expect(result.status).toBe(200);
+    expect((await result.json() as Record<string, unknown>).report).toMatchObject({
+      reportFormat: 'web', webHtml: source, headline: '可信标题',
+      article: { body: source, analysis: '' }, officialReport: { winner: 'A', conclusion: '' },
+    });
+  });
+
+  it('package snapshot replay preserves exact JSON and its artifact without interpreting it as a structured report', async () => {
+    const source = ' {"title":"测试","scenes":[{"text":"故事"}]}\n';
+    const webPackage = {
+      packageRef: { id: 'test.fixture', version: '1.0.0', digest: `sha256:${'a'.repeat(64)}` },
+      targetPath: 'data/report.json', targetMediaType: 'application/json', generatedDigest: `sha256:${'b'.repeat(64)}`,
+    };
+    const service = createArenaCompanionService({
+      generationService: generationService(async () => subscription([
+        { id: '1-0', type: 'snapshot', data: { markdown: source } },
+        { id: '2-0', type: 'done', data: { status: 'completed', webPackage } },
+      ])),
+      projectUpdatedCombatants: vi.fn(async () => []),
+    });
+    const response = await service.generate(new Request('https://example.test/api/arena/generate', {
+      method: 'POST', body: JSON.stringify({ reportFormat: 'web' }),
+    }));
+    expect(response.status).toBe(200);
+    const result = await response.json() as { report: Record<string, unknown> };
+    expect(result.report).toMatchObject({ reportFormat: 'web', webPackage, article: { body: source, analysis: '' } });
+    expect(result.report).not.toHaveProperty('webHtml');
+  });
+
+  it('从 structured JSON snapshot 原样投影 non-stream 战报与 impacts', async () => {
+    const structured = {
+      headline: '结构化重放战报',
+      article: {
+        body: '正文中可以自由出现\n## 胜利者\n而不应被 Markdown parser 截断。',
+        analysis: '独立的记者点评。',
+      },
+      officialReport: { winner: '角色乙', conclusion: '结构化结论。' },
+      impacts: [{ characterName: '角色乙', impact: '获得成长' }],
+    };
+    const projectUpdatedCombatants = vi.fn(async () => []);
+    const service = createArenaCompanionService({
+      generationService: generationService(async () => subscription([
+        {
+          id: '30-0',
+          type: 'snapshot',
+          data: { markdown: JSON.stringify(structured) },
+        },
+        {
+          id: '30-1',
+          type: 'telemetry',
+          data: {
+            model: 'reasoning-model',
+            reasoning: {
+              status: 'done',
+              source: 'sdk',
+              summary: '推理摘要',
+              text: '结构化模型推理',
+              reasoningTokens: 8,
+            },
+          },
+        },
+        { id: '31-0', type: 'done', data: { ok: true, status: 'completed' } },
+      ])),
+      createGenerationRequestId: () => 'request-12345678',
+      projectUpdatedCombatants,
+    });
+
+    const result = await service.generate(new Request('https://example.test/api/arena/generate', {
+      method: 'POST',
+      body: JSON.stringify({ writeArenaHistory: true, writeCurrentState: false }),
+    }));
+    const json = await result.json() as Record<string, any>;
+
+    expect(result.status).toBe(200);
+    expect(json.report).toMatchObject(structured);
+    expect(json.report.aiReasoning).toEqual({
+      status: 'done',
+      source: 'sdk',
+      summary: '推理摘要',
+      text: '结构化模型推理',
+      reasoningTokens: 8,
+    });
+    expect(json.impacts).toEqual(structured.impacts);
+    expect(projectUpdatedCombatants).toHaveBeenCalledWith(expect.objectContaining({
+      report: expect.objectContaining(structured),
+      impacts: structured.impacts,
+    }));
+  });
+
+  it('当前 structured contract 的 malformed snapshot 必须 fail closed', async () => {
+    const malformed: ArenaGenerationSubscription = {
+      ...subscription([]),
+      headers: {
+        ...subscription([]).headers,
+        'X-Mahoshojo-Stream-Meta': encodeURIComponent(JSON.stringify({
+          outputContract: 'structured-report',
+        })),
+      },
+      events: streamOf(
+        { id: '40-0', type: 'snapshot', data: { markdown: 'not-json' } },
+        { id: '41-0', type: 'done', data: { ok: true, status: 'completed' } },
+      ),
+    };
+    const service = createArenaCompanionService({
+      generationService: generationService(async () => malformed),
+      createGenerationRequestId: () => 'request-12345678',
+      projectUpdatedCombatants: async () => [],
+    });
+
+    const result = await service.generate(new Request('https://example.test/api/arena/generate', {
+      method: 'POST',
+      body: '{}',
+    }));
+
+    expect(result.status).toBe(502);
+    expect(await result.json()).toEqual({
+      code: 'ARENA_STRUCTURED_REPORT_INVALID',
+      error: 'Arena structured report validation failed',
+      generationId: 'arena_generation_1',
     });
   });
 

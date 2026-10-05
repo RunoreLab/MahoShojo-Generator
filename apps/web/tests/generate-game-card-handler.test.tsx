@@ -208,7 +208,8 @@ test('卡牌工坊展示 Token 指示器', () => {
   const html = renderToStaticMarkup(<CardForgePage />);
 
   expect(html).toContain('tokens');
-  expect(html).toContain('估算仅供参考');
+  expect(html).toContain('近似估算');
+  expect(html).toContain('不等同于当前模型的真实 tokenizer 结果');
 });
 
 test('卡牌尚未生成时仍展示卡面存档导入入口并禁用导出', () => {

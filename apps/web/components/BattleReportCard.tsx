@@ -1,6 +1,7 @@
 // components/BattleReportCard.tsx
 
 import React, { useRef, useState } from 'react';
+import { getVisibleOutputTokens } from '@mahoshojo/ai-core/token-usage';
 import ReactMarkdown, { type Components, type ExtraProps } from 'react-markdown';
 import rehypeKatex from 'rehype-katex';
 import remarkGfm from 'remark-gfm';
@@ -8,7 +9,7 @@ import remarkMath from 'remark-math';
 // 1. [新增] 导入随机判定结果的类型定义
 import { AdjudicationResult } from '@/types/arena';
 import remarkBattleTable from '@/lib/markdown/remarkBattleTable';
-import { fixNestedListIndentation } from '@/lib/markdown/fix-list-indentation';
+import { fixNestedListIndentation } from '@mahoshojo/ui-web/markdown';
 import {
   formatMarkdownImage,
   formatMarkdownLink,
@@ -31,6 +32,10 @@ import type { AIReasoningEnvelope } from '@/types/ai-reasoning';
 type MarkdownCodeProps = React.ComponentPropsWithoutRef<'code'> & ExtraProps & { inline?: boolean };
 
 export interface NewsReport {
+  reportFormat?: 'markdown' | 'web';
+  webHtml?: string;
+  webPackage?: import('@mahoshojo/contracts/web-package').WebPackageArtifact;
+  webReady?: boolean;
   headline: string;
   scenario?: string;
   reporterInfo: {
@@ -51,6 +56,7 @@ export interface NewsReport {
   aiUsage?: {
     promptTokens?: number | null;
     reasoningTokens?: number | null;
+    textTokens?: number | null;
     completionTokens?: number | null;
     totalTokens?: number | null;
     cachedTokens?: number | null;
@@ -127,7 +133,7 @@ const BattleReportCard: React.FC<BattleReportCardProps> = ({
   const aiUsage = report.aiUsage;
   const hasAnyTokenNumber =
     aiUsage != null &&
-    [aiUsage.promptTokens, aiUsage.reasoningTokens, aiUsage.completionTokens].some(
+    [aiUsage.promptTokens, aiUsage.reasoningTokens, aiUsage.completionTokens, aiUsage.textTokens].some(
       (value) => typeof value === 'number' && Number.isFinite(value)
     );
   const shouldShowNarrativeReadCount = typeof report.narrativeHistoryReadCount === 'number';
@@ -271,15 +277,8 @@ ${adjudicationMarkdown}
 
     // 创建Blob对象并触发下载
     const blob = new Blob([markdownContent], { type: 'text/markdown;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
     const sanitizedTitle = headline.replace(/[^a-z0-9\u4e00-\u9fa5]/gi, '_') || 'battle_report';
-    link.download = `魔法少女速报_${sanitizedTitle}.md`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    downloadBlob(blob, `魔法少女速报_${sanitizedTitle}.md`);
   };
 
   const markdownComponents: Components = {
@@ -534,7 +533,7 @@ ${adjudicationMarkdown}
                 {hasAnyTokenNumber && (
                   <>
                     tokens：输入 {formatToken(aiUsage?.promptTokens)}｜推理 {formatToken(aiUsage?.reasoningTokens)}｜输出{' '}
-                    {formatToken(aiUsage?.completionTokens)}
+                    {formatToken(getVisibleOutputTokens(aiUsage))}
                   </>
                 )}
                 {hasAnyTokenNumber && shouldShowNarrativeReadCount ? ' · ' : ''}

@@ -2,10 +2,10 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DatabaseProvider } from '@mahoshojo/hosted-runtime/database-provider';
-import hostedDrManifest from '../../../config/hosted-dr-capabilities.json';
+import hostedRouting from '../../../config/hosted-routing.json';
 import routeInventory from '../../../config/hono-api-routes.json';
 import {
-  isExecutableHostedDrMode,
+  isExecutableHostedDrOperationSafety,
   withNextDrCapability,
 } from '@/lib/hosted-dr/capability-guard';
 
@@ -33,7 +33,7 @@ describe('Next production DR capability guard', () => {
     productionOptions.logUnavailable.mockClear();
   });
 
-  it('drMode=fail-closed 时不调用 handler', async () => {
+  it('未列入 Next DR 运行规则的 route 不调用 handler', async () => {
     const handler = vi.fn(async () => new Response('should-not-run'));
     const guarded = withNextDrCapability('arena/generate', handler, productionOptions);
 
@@ -46,7 +46,7 @@ describe('Next production DR capability guard', () => {
     expect(handler).not.toHaveBeenCalled();
     expect(productionOptions.logUnavailable).toHaveBeenCalledWith({
       capabilityId: 'arena/generate',
-      category: 'dr-mode',
+      category: 'contract',
     });
   });
 
@@ -167,7 +167,7 @@ describe('Next production DR capability guard', () => {
     expect(handler).toHaveBeenCalledOnce();
   });
 
-  it('manifest 未声明的方法返回 405，非 production 保持现有本地行为', async () => {
+  it('routing 未声明的方法返回 405，非 production 保持现有本地行为', async () => {
     const handler = vi.fn(async () => new Response('local'));
     const production = withNextDrCapability('generate-free', handler, productionOptions);
     const methodResponse = await production(new Request(
@@ -300,9 +300,6 @@ describe('Next production DR capability guard', () => {
   });
 
   it('每条 shared Next route 都显式包裹同一 guard', () => {
-    expect(hostedDrManifest.capabilities.map(({ id }) => id).sort()).toEqual(
-      [...routeInventory.sharedRouteIds].sort(),
-    );
     for (const routeId of routeInventory.sharedRouteIds) {
       const source = readFileSync(path.join(
         process.cwd(),
@@ -315,15 +312,15 @@ describe('Next production DR capability guard', () => {
     }
   });
 
-  it('未知 drMode 运行时 fail closed', () => {
-    expect(isExecutableHostedDrMode('safe-read')).toBe(true);
-    expect(isExecutableHostedDrMode('new-request-only')).toBe(true);
-    expect(isExecutableHostedDrMode('fail-closed')).toBe(false);
-    expect(isExecutableHostedDrMode('unknown-mode')).toBe(false);
-    expect(isExecutableHostedDrMode(undefined)).toBe(false);
+  it('未知 operation safety 运行时 fail closed', () => {
+    expect(isExecutableHostedDrOperationSafety('safe-read')).toBe(true);
+    expect(isExecutableHostedDrOperationSafety('new-non-idempotent')).toBe(true);
+    expect(isExecutableHostedDrOperationSafety('durably-idempotent')).toBe(false);
+    expect(isExecutableHostedDrOperationSafety('unknown-mode')).toBe(false);
+    expect(isExecutableHostedDrOperationSafety(undefined)).toBe(false);
   });
 
-  it('逐项执行 23 capability 的 operation/secret/provider fail-closed 矩阵', async () => {
+  it('逐项执行实际 Next DR operation 的 safety/provider 边界', async () => {
     const completeEnvironment: Record<string, string> = {
       HONO_CORS_ORIGINS: 'https://app.example.test',
       SIGNATURE_SECRET_KEY: 's'.repeat(32),
@@ -333,61 +330,67 @@ describe('Next production DR capability guard', () => {
       R2_ACCOUNT_ID: 'local-account',
     };
 
-    for (const capability of hostedDrManifest.capabilities) {
-      for (const operation of capability.operations) {
-        const handler = vi.fn(async () => new Response('executed'));
-        const guarded = withNextDrCapability(capability.id, handler, {
-          ...productionOptions,
-          environment: completeEnvironment,
-        });
-        const response = await guarded(new Request(
-          `https://api.example.test${capability.route.replace(/\[[^\]]+\]/gu, 'test-id')}`,
+    for (const operation of hostedRouting.operations) {
+      const capabilityId = operation.route.slice('/api/'.length);
+      const handler = vi.fn(async () => new Response('executed'));
+      const guarded = withNextDrCapability(capabilityId, handler, {
+        ...productionOptions,
+        environment: completeEnvironment,
+      });
+      const response = await guarded(new Request(
+        `https://api.example.test${operation.route.replace(/\[[^\]]+\]/gu, 'test-id')}`,
+        { method: operation.method },
+      ));
+
+      if (operation.safety === 'durably-idempotent') {
+        expect(response.status, `${capabilityId}:${operation.method}`).toBe(503);
+        expect(handler, `${capabilityId}:${operation.method}`).not.toHaveBeenCalled();
+      } else {
+        expect(response.status, `${capabilityId}:${operation.method}`).toBe(200);
+        expect(handler, `${capabilityId}:${operation.method}`).toHaveBeenCalledOnce();
+
+        const unavailableProviderHandler = vi.fn(async () => new Response('should-not-run'));
+        const unavailableProviderRoute = withNextDrCapability(
+          capabilityId,
+          unavailableProviderHandler,
+          {
+            ...productionOptions,
+            environment: completeEnvironment,
+            provider: { id: 'cloudflare-d1-binding', openSession: () => null },
+          },
+        );
+        expect((await unavailableProviderRoute(new Request(
+          `https://api.example.test${operation.route.replace(/\[[^\]]+\]/gu, 'test-id')}`,
           { method: operation.method },
-        ));
-
-        if (operation.drMode === 'fail-closed') {
-          expect(response.status, `${capability.id}:${operation.method}`).toBe(503);
-          expect(handler, `${capability.id}:${operation.method}`).not.toHaveBeenCalled();
-        } else {
-          expect(response.status, `${capability.id}:${operation.method}`).toBe(200);
-          expect(handler, `${capability.id}:${operation.method}`).toHaveBeenCalledOnce();
-
-          const unavailableProviderHandler = vi.fn(async () => new Response('should-not-run'));
-          const unavailableProviderRoute = withNextDrCapability(
-            capability.id,
-            unavailableProviderHandler,
-            {
-              ...productionOptions,
-              environment: completeEnvironment,
-              provider: { id: 'cloudflare-d1-binding', openSession: () => null },
-            },
-          );
-          expect((await unavailableProviderRoute(new Request(
-            `https://api.example.test${capability.route.replace(/\[[^\]]+\]/gu, 'test-id')}`,
-            { method: operation.method },
-          ))).status, `${capability.id}:${operation.method}:provider`).toBe(503);
-          expect(unavailableProviderHandler).not.toHaveBeenCalled();
-        }
+        ))).status, `${capabilityId}:${operation.method}:provider`).toBe(503);
+        expect(unavailableProviderHandler).not.toHaveBeenCalled();
       }
+    }
+  });
 
-      const executableOperation = capability.operations.find(
-        ({ drMode }) => drMode !== 'fail-closed',
-      );
-      if (!executableOperation) continue;
-      for (const secret of capability.requiredSecrets) {
-        const handler = vi.fn(async () => new Response('should-not-run'));
-        const environment = { ...completeEnvironment, [secret.name]: '' };
-        const guarded = withNextDrCapability(capability.id, handler, {
+  it('需要签名或 R2 的 route 在依赖缺失时 fail closed', async () => {
+    for (const [capabilityId, route, method, environment] of [
+      [
+        'generate-magical-girl',
+        '/api/generate-magical-girl',
+        'POST',
+        { ...productionOptions.environment, SIGNATURE_SECRET_KEY: '' },
+      ],
+      [
+        'arena/generations/[generationId]/stream',
+        '/api/arena/generations/generation-1/stream',
+        'GET',
+        { ...productionOptions.environment },
+      ],
+    ] as const) {
+      const handler = vi.fn(async () => new Response('should-not-run'));
+      const guarded = withNextDrCapability(capabilityId, handler, {
           ...productionOptions,
           environment,
         });
-        const response = await guarded(new Request(
-          `https://api.example.test${capability.route.replace(/\[[^\]]+\]/gu, 'test-id')}`,
-          { method: executableOperation.method },
-        ));
-        expect(response.status, `${capability.id}:${secret.name}`).toBe(503);
-        expect(handler, `${capability.id}:${secret.name}`).not.toHaveBeenCalled();
-      }
+      const response = await guarded(new Request(`https://api.example.test${route}`, { method }));
+      expect(response.status, capabilityId).toBe(503);
+      expect(handler, capabilityId).not.toHaveBeenCalled();
     }
   });
 });

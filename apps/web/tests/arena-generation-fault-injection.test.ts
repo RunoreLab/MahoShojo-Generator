@@ -364,6 +364,7 @@ const successfulPorts = (counts: SideEffectCounts): ArenaGenerationFinalizationP
     return { kind: 'created', resultRef: input.resultRef, finalized: false };
   },
   async persistCombatants() { counts.combatants += 1; },
+  async persistParticipants() {},
   async applyStoryImpacts() { counts.impacts += 1; },
   async settleRatings() { counts.ratings += 1; },
   async completeTerminal() { counts.complete += 1; },
@@ -808,7 +809,68 @@ describe.sequential('Arena resumable generation fault-injection matrix', () => {
     });
   });
 
-  it('leaves permanent R2+D1 failure pending until lease reaping and never replays Provider', async () => {
+  it('keeps Provider/D1/Redis completed when permanent R2 archival fails', async () => {
+    const counts = emptyCounts();
+    const ports: ArenaGenerationFinalizationPorts = {
+      ...successfulPorts(counts),
+      async storeOutput() {
+        counts.storage += 1;
+        throw new Error('injected permanent R2 outage');
+      },
+    };
+    const { provider, service, store } = createHarness({ ports });
+
+    const initial = await service.create(request());
+    const initialBody = await initial.text();
+    const duplicate = await service.create(request());
+    const duplicateBody = await duplicate.text();
+    const resumed = await service.resume(new Request(
+      `https://example.test/api/arena/generations/${generationId}/stream`,
+    ), { generationId });
+    const resumedBody = await resumed.text();
+    const status = await service.status(new Request(
+      `https://example.test/api/arena/generations/${generationId}`,
+    ), { generationId });
+    const state = await store.readState({ generationId, actorKey });
+
+    for (const body of [initialBody, duplicateBody, resumedBody]) {
+      expect(body).toContain('event: done');
+      expect(body).toContain('"status":"completed"');
+      expect(body).toContain('"persistenceWarning":"OUTPUT_NOT_ARCHIVED"');
+      expect(body).not.toContain('event: error');
+    }
+    expect(provider).toHaveBeenCalledOnce();
+    expect(status.status).toBe(200);
+    await expect(status.json()).resolves.toMatchObject({
+      status: 'completed',
+      resultAvailable: false,
+      persistenceWarning: 'OUTPUT_NOT_ARCHIVED',
+      replayUnavailable: true,
+    });
+    expect(counts).toEqual({
+      storage: 3,
+      claim: 1,
+      combatants: 1,
+      impacts: 1,
+      ratings: 1,
+      complete: 1,
+    });
+    expect(state).toMatchObject({
+      status: 'completed',
+      snapshot: {
+        status: 'completed',
+        markdown: '# fault matrix\nterminal body',
+        persistenceWarning: 'OUTPUT_NOT_ARCHIVED',
+      },
+      terminal: {
+        status: 'completed',
+        resultRef: null,
+        persistenceWarning: 'OUTPUT_NOT_ARCHIVED',
+      },
+    });
+  });
+
+  it('keeps complete output successful when R2 and D1 persistence are unavailable', async () => {
     let currentTime = new Date('2026-08-25T04:00:00.000Z');
     let reconciliationCount = 0;
     const failedPorts: ArenaGenerationFinalizationPorts = {
@@ -816,6 +878,7 @@ describe.sequential('Arena resumable generation fault-injection matrix', () => {
       async claimTerminal() { throw new Error('injected D1 outage'); },
       async failTerminal() { throw new Error('injected D1 outage'); },
       async persistCombatants() { throw new Error('unexpected side effect'); },
+      async persistParticipants() { throw new Error('unexpected side effect'); },
       async applyStoryImpacts() { throw new Error('unexpected side effect'); },
       async settleRatings() { throw new Error('unexpected side effect'); },
       async completeTerminal() { throw new Error('unexpected side effect'); },
@@ -846,20 +909,24 @@ describe.sequential('Arena resumable generation fault-injection matrix', () => {
 
     const response = await service.create(request());
     await vi.waitFor(async () => {
-      expect((await store.readState({ generationId, actorKey }))?.status).toBe('finalizing');
+      expect((await store.readState({ generationId, actorKey }))?.status).toBe('completed');
     });
     currentTime = new Date('2026-08-25T04:01:00.000Z');
-    expect(await response.text()).toContain('producer_lost');
+    const body = await response.text();
 
     const evidence: FaultEvidence = {
-      scenario: 'permanent-r2+d1+lease-reaper', generationRequestId, generationId,
+      scenario: 'permanent-r2+d1+completed-degraded', generationRequestId, generationId,
       createAttempts: 1, disconnects: 0, resumeAttempts: 0, resumeSuccesses: 0,
       cancelAttempts: 0, providerStarts: provider.mock.calls.length,
-      terminal: 'producer_lost', redis: 'terminal', d1: 'producer_lost', r2: 'failed',
+      terminal: 'completed', redis: 'terminal', d1: 'none', r2: 'failed',
       sideEffects: emptyCounts(),
     };
-    expect(evidence).toMatchObject({ providerStarts: 1, terminal: 'producer_lost' });
-    expect(reconciliationCount).toBe(1);
+    expect(body).toContain('event: done');
+    expect(body).toContain('"status":"completed"');
+    expect(body).toContain('"persistenceWarning":"PERSISTENCE_UNAVAILABLE"');
+    expect(body).not.toContain('event: error');
+    expect(evidence).toMatchObject({ providerStarts: 1, terminal: 'completed' });
+    expect(reconciliationCount).toBe(0);
   });
 
   it('fails reservation closed before Provider and records no durable side effect', async () => {
@@ -1126,6 +1193,7 @@ describe.sequential('Arena resumable generation fault-injection matrix', () => {
       async claimTerminal() { throw new Error('fault-injected process died before durable terminal'); },
       async failTerminal() { throw new Error('fault-injected process died before durable terminal'); },
       async persistCombatants() { throw new Error('unexpected combatant write'); },
+      async persistParticipants() { throw new Error('unexpected participant write'); },
       async applyStoryImpacts() { throw new Error('unexpected impact write'); },
       async settleRatings() { throw new Error('unexpected rating write'); },
       async completeTerminal() { throw new Error('unexpected terminal completion'); },

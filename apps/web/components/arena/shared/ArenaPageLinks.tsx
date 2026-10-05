@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 
-import { NAV_GROUPS } from '@/lib/navigation';
+import { NAV_GROUPS } from '@mahoshojo/ui-web/navigation';
 
 type ArenaPageLinksProps = {
   variant: 'lite' | 'full';

@@ -1,28 +1,26 @@
 'use client';
 
-import { useEffect } from 'react';
-
 import { ArenaPage } from '@/components/arena/ArenaPage';
-import { useBattleStore } from '@/components/arena/stores/useBattleStore';
+import { ArenaPersistedStateBoundary } from '@/components/arena/ArenaPersistedStateBoundary';
 import { QueryRouteProviders } from '@/components/competition/QueryRouteProviders';
 import { arenaMultiplayerConfig } from '@/config/arena-multiplayer';
 
 export function ArenaRouteProviders() {
   return (
     <QueryRouteProviders>
-      <ArenaPage multiplayer={arenaMultiplayerConfig} />
+      <ArenaPersistedStateBoundary>
+        <ArenaPage multiplayer={arenaMultiplayerConfig} />
+      </ArenaPersistedStateBoundary>
     </QueryRouteProviders>
   );
 }
 
 export function ArenaStreamRouteProviders() {
-  useEffect(() => {
-    useBattleStore.getState().setGenerationMode('stream');
-  }, []);
-
   return (
     <QueryRouteProviders>
-      <ArenaPage multiplayer={{ enabled: false, origin: arenaMultiplayerConfig.origin }} />
+      <ArenaPersistedStateBoundary generationModeAfterHydration="stream">
+        <ArenaPage multiplayer={{ enabled: false, origin: arenaMultiplayerConfig.origin }} />
+      </ArenaPersistedStateBoundary>
     </QueryRouteProviders>
   );
 }

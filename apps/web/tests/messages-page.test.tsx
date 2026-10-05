@@ -15,8 +15,8 @@ describe('messages page UI', () => {
           messageType: 'issue',
           templateKey: 'site.issue.update',
           title: '问题处理进展',
-          body: 'PVP 结算异常已修复。',
-          actionUrl: '/pvp',
+          body: '竞技场生成异常已修复。',
+          actionUrl: '/arena',
           priority: 'normal',
           isRead: false,
           readAt: null,
@@ -26,8 +26,8 @@ describe('messages page UI', () => {
     );
 
     expect(html).toContain('问题处理进展');
-    expect(html).toContain('PVP 结算异常已修复');
-    expect(html).toContain('href="/pvp"');
+    expect(html).toContain('竞技场生成异常已修复');
+    expect(html).toContain('href="/arena"');
     expect(html).toContain('普通优先级');
   });
 
@@ -60,7 +60,7 @@ describe('messages page UI', () => {
           messageType: 'issue',
           templateKey: 'site.issue.update',
           title: '问题处理进展',
-          body: 'PVP 结算异常已修复。',
+          body: '竞技场生成异常已修复。',
           actionUrl: null,
           priority: 'normal',
           isRead: false,

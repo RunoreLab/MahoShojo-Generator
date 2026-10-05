@@ -8,6 +8,8 @@ import { formatDateTime } from '@/lib/constants';
 import { CollapsibleSection } from '@/components/shared/CollapsibleSection';
 import { StreamStopButton } from '@/components/shared/StreamStopButton';
 import { limitNarrativeHistoryEntriesForPrompt } from '@/lib/narrative-history';
+import { buildCustomProviderRequestPayload } from '@/lib/ai/custom-provider';
+import { ARENA_ESTIMATED_PROMPT_TOKEN_BUDGETS } from '@/lib/arena/resource-budget';
 
 import { useBattleStore } from '../stores/useBattleStore';
 import { useBattleEngine } from '../hooks/useBattleEngine';
@@ -16,6 +18,7 @@ import { NarrativeHistoryModal } from './NarrativeHistoryModal';
 import { useNarrativeHistoryStore } from '../stores/useNarrativeHistoryStore';
 import { resolveArenaRoomGenerationAction } from '../multiplayer/generation-bridge';
 import { useArenaRoomContext } from '../multiplayer/useArenaRoom';
+import { ArenaRoomGenerationPreflightDialog } from '../multiplayer/ArenaRoomGenerationPreflightDialog';
 
 const normalizeArenaHistoryReadLimitForEstimate = (value: unknown): number | null => {
   if (value === null) return null;
@@ -92,11 +95,16 @@ export function BattleActions({ showAdvancedUtilities = true }: { showAdvancedUt
     handleGenerate,
     stopGeneration,
     isGenerating,
+    isRecoveringArenaGeneration,
+    arenaGenerationConnectionState,
+    arenaGenerationStatusNotice,
     isCooldown,
     remainingTime,
     providerCooldownMode,
     otherRemainingTime,
     streamSoftTimeoutWarning,
+    arenaRoomGenerationPreflight,
+    resolveArenaRoomGenerationPreflight,
   } = useBattleEngine();
   const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
   const combatants = useBattleSelector((state) => state.combatants);
@@ -108,6 +116,7 @@ export function BattleActions({ showAdvancedUtilities = true }: { showAdvancedUt
   const storyLength = useBattleSelector((state) => state.storyLength);
   const settings = useBattleSelector((state) => state.settings);
   const teamsState = useBattleSelector((state) => state.teams);
+  const userProviderConfig = useBattleSelector((state) => state.userProviderConfig);
   const [showNarrativeModal, setShowNarrativeModal] = useState(false);
   const narrativeCount = useNarrativeHistoryStore((state) => state.entries.length);
   const narrativeLastUpdatedAt = useNarrativeHistoryStore((state) => state.lastUpdatedAt);
@@ -115,6 +124,25 @@ export function BattleActions({ showAdvancedUtilities = true }: { showAdvancedUt
   const roomAction = arenaRoomRuntime
     ? resolveArenaRoomGenerationAction(arenaRoomRuntime.state)
     : { inRoom: false, canStart: true, canRetry: false, reason: null } as const;
+  const roomPanel = arenaRoomRuntime?.panelUi ?? null;
+  const roomSession = arenaRoomRuntime?.state.session ?? null;
+  const isRoomHost = roomSession?.self.role === 'host';
+  const pendingProposalCount = isRoomHost && roomSession
+    ? roomSession.snapshot.proposals.length
+    : 0;
+  const hostConfigNeedsAttention = Boolean(arenaRoomRuntime && (
+    arenaRoomRuntime.state.configPublishResultUnknown
+    || arenaRoomRuntime.hostReconciliation?.state.kind === 'conflicted'
+    || arenaRoomRuntime.hostReconciliation?.state.kind === 'error'
+  ));
+  const customProviderPayload = buildCustomProviderRequestPayload(userProviderConfig);
+  const promptFundingMode = customProviderPayload?.providerId === 'system' || !customProviderPayload
+    ? 'hosted-system'
+    : 'hosted-byok';
+  const maxEstimatedPromptTokens = ARENA_ESTIMATED_PROMPT_TOKEN_BUDGETS[promptFundingMode];
+  const promptBudgetLabel = promptFundingMode === 'hosted-byok'
+    ? 'Hosted BYOK 应用预算'
+    : '当前默认渠道应用预算';
 
   const estimatePayloadText = (() => {
     const readableCombatants = combatants.filter((item): item is any => 'data' in item);
@@ -220,11 +248,14 @@ export function BattleActions({ showAdvancedUtilities = true }: { showAdvancedUt
   const getButtonText = () => {
     if (roomAction.inRoom && roomAction.reason === 'member') return '等待房主开始生成';
     if (roomAction.inRoom && roomAction.reason === 'unknown') return '正在确认上次启动结果…';
+    if (roomAction.inRoom && roomAction.reason === 'config-unknown') return '正在确认房间配置发布…';
     if (roomAction.inRoom && roomAction.reason === 'recovery') return '确认并重试同一次启动';
     if (roomAction.inRoom && roomAction.reason === 'connection') return '等待房间重新连接…';
     if (roomAction.inRoom && roomAction.reason === 'active') return '房间战报生成中…';
     if (isCooldown) return `记者赶稿中...请等待 ${remainingTime} 秒`;
     if (isGenerating) {
+      if (isRecoveringArenaGeneration) return '正在恢复上一场战报…';
+      if (arenaGenerationConnectionState === 'cancelling') return '正在停止生成…';
       switch (battleMode) {
         case 'daily':
           return '撰写日常逸闻中... (｡･ω･｡)ﾉ';
@@ -243,6 +274,15 @@ export function BattleActions({ showAdvancedUtilities = true }: { showAdvancedUt
 
   return (
     <>
+      <ArenaRoomGenerationPreflightDialog
+        isOpen={arenaRoomGenerationPreflight !== null}
+        reasons={arenaRoomGenerationPreflight?.reasons ?? []}
+        canPublish={arenaRoomGenerationPreflight?.canPublish ?? false}
+        canConfirmStart={arenaRoomGenerationPreflight?.canConfirmStart ?? false}
+        pendingProposalCount={arenaRoomGenerationPreflight?.pendingProposalCount ?? 0}
+        busy={arenaRoomGenerationPreflight?.busy ?? false}
+        onChoice={resolveArenaRoomGenerationPreflight}
+      />
       <div className="flex items-center justify-center gap-2 flex-wrap">
         <button
           onClick={() => handleGenerate()}
@@ -250,9 +290,9 @@ export function BattleActions({ showAdvancedUtilities = true }: { showAdvancedUt
             isGenerating ||
             isCooldown ||
             (roomAction.inRoom && !roomAction.canStart && !roomAction.canRetry) ||
-            (battleMode === 'daily' || battleMode === 'scenario'
+            (!roomAction.inRoom && (battleMode === 'daily' || battleMode === 'scenario'
               ? combatants.length < 1
-              : combatants.length < 2)
+              : combatants.length < 2))
           }
           className="generate-button"
         >
@@ -262,10 +302,64 @@ export function BattleActions({ showAdvancedUtilities = true }: { showAdvancedUt
           <StreamStopButton
             onClick={stopGeneration}
             compact
-            label="停止生成"
+            disabled={arenaGenerationConnectionState === 'cancelling'}
+            label={
+              arenaGenerationConnectionState === 'cancelling'
+                ? '正在停止…'
+                : isRecoveringArenaGeneration
+                  ? '放弃恢复'
+                  : '停止生成'
+            }
           />
         ) : null}
       </div>
+      {isGenerating && arenaGenerationStatusNotice ? (
+        <div
+          className={`mt-2 rounded-lg border px-3 py-2 text-center text-xs ${
+            isRecoveringArenaGeneration
+              ? 'border-sky-300 bg-sky-50 text-sky-900'
+              : 'border-amber-300 bg-amber-50 text-amber-900'
+          }`}
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+          data-arena-generation-status="true"
+        >
+          <div className="font-medium">{arenaGenerationStatusNotice}</div>
+          {isRecoveringArenaGeneration ? (
+            <div className="mt-1">
+              上一场战报可能仍在服务器生成。点击“放弃恢复”会请求停止这场生成；如果服务器暂时无法确认，生成可能仍在后台继续。
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+      {roomPanel && isRoomHost ? (
+        <div className="mt-2 flex items-center justify-center gap-2 flex-wrap">
+          <button
+            type="button"
+            className={`generate-button${hostConfigNeedsAttention ? ' border-amber-500' : ''}`}
+            onClick={() => roomPanel.setConfigOpen(true)}
+          >
+            {hostConfigNeedsAttention ? '房间配置（需处理）' : '房间配置'}
+          </button>
+          <button
+            type="button"
+            className="generate-button relative"
+            aria-label={pendingProposalCount > 0 ? `房间提案，${pendingProposalCount} 个待处理` : '房间提案'}
+            onClick={() => roomPanel.setProposalsOpen(true)}
+          >
+            房间提案
+            {pendingProposalCount > 0 ? (
+              <span
+                aria-hidden="true"
+                className="absolute -right-2 -top-2 inline-flex min-h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1 text-[11px] font-bold leading-none text-white ring-2 ring-white dark:ring-gray-900"
+              >
+                {pendingProposalCount > 99 ? '99+' : pendingProposalCount}
+              </span>
+            ) : null}
+          </button>
+        </div>
+      ) : null}
       {isGenerating && generationMode === 'stream' && streamSoftTimeoutWarning ? (
         <div
           className="mt-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-center text-xs text-amber-900"
@@ -304,6 +398,9 @@ export function BattleActions({ showAdvancedUtilities = true }: { showAdvancedUt
 
             <TokenIndicator
               text={estimatePayloadText}
+              maxTokens={maxEstimatedPromptTokens}
+              warnTokens={Math.round(maxEstimatedPromptTokens * 0.8)}
+              budgetLabel={promptBudgetLabel}
               warningText="⚠️ 预计上下文较长，可能更易超时/失败。可尝试关闭“叙事历史读取”或“历战记录读取”，或减少历史条目/参战角色。"
             />
           </CollapsibleSection>

@@ -1,0 +1,47 @@
+{
+  "name": "@mahoshojo/web-package",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./browser": {
+      "types": "./src/browser.ts",
+      "import": "./src/browser.ts",
+      "default": "./src/browser.ts"
+    },
+    "./security": {
+      "types": "./src/security.ts",
+      "import": "./src/security.ts",
+      "default": "./src/security.ts"
+    },
+    "./testing/fixtures": "./tests/helpers/generic-package.ts"
+  },
+  "scripts": {
+    "test": "vitest run --config vitest.config.ts",
+    "lint": "eslint src tests --config eslint.config.mjs",
+    "build": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@cfworker/json-schema": "^4.1.1",
+    "@mahoshojo/contracts": "workspace:*",
+    "acorn": "8.18.0",
+    "css-tree": "3.2.1",
+    "fflate": "^0.8.3",
+    "parse5": "8.0.1",
+    "zod": "^4.1.13"
+  },
+  "devDependencies": {
+    "@types/css-tree": "2.3.11",
+    "@types/node": "^20",
+    "@typescript-eslint/parser": "^8.50.0",
+    "esbuild": "^0.28.1",
+    "eslint": "^9",
+    "typescript": "^5",
+    "vitest": "^4.1.7"
+  }
+}

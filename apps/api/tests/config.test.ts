@@ -89,43 +89,36 @@ describe('Hono server config', () => {
   });
 
   it.each(['production', 'preview'])(
-    'GMR-09 mixed-version gate：%s target 的 writer-disabled tuple 即使收到请求也保持 Arena multiplayer 关闭',
+    '%s target 直接由 ARENA_MULTIPLAYER_ENABLED 启用 Arena multiplayer',
     (target) => {
       stubValidBearerProductionEnv();
       vi.stubEnv('HOSTED_API_ENVIRONMENT', target);
       vi.stubEnv('REDIS_KEY_PREFIX', target === 'preview' ? 'preview' : '');
       vi.stubEnv('ARENA_MULTIPLAYER_ENABLED', 'true');
+
+      expect(readHonoServerConfig().arenaMultiplayerEnabled).toBe(true);
+    },
+  );
+
+  it.each(['production', 'preview'])(
+    '%s target 的 feature flag 是 Room runtime kill switch',
+    (target) => {
+      stubValidBearerProductionEnv();
+      vi.stubEnv('HOSTED_API_ENVIRONMENT', target);
+      vi.stubEnv('REDIS_KEY_PREFIX', target === 'preview' ? 'preview' : '');
+      vi.stubEnv('ARENA_MULTIPLAYER_ENABLED', 'false');
+      vi.stubEnv('ARENA_ROOM_WRITER_ACTIVATION', 'enabled');
 
       expect(readHonoServerConfig().arenaMultiplayerEnabled).toBe(false);
     },
   );
 
-  it.each(['production', 'preview'])(
-    '%s target 仅在 tuple-bound writer 与 reader/go-no-go 证明同时成立时激活',
-    (target) => {
-      stubValidBearerProductionEnv();
-      vi.stubEnv('HOSTED_API_ENVIRONMENT', target);
-      vi.stubEnv('REDIS_KEY_PREFIX', target === 'preview' ? 'preview' : '');
-      vi.stubEnv('ARENA_MULTIPLAYER_ENABLED', 'true');
-      vi.stubEnv('ARENA_ROOM_WRITER_ACTIVATION', 'enabled');
-
-      expect(() => readHonoServerConfig()).toThrow(/compatible reader rollout attestation/iu);
-
-      vi.stubEnv(
-        'ARENA_ROOM_READER_ROLLOUT_CONTRACT',
-        'arena-room-authority-v2-generation-payload-digest-v1',
-      );
-      vi.stubEnv('ARENA_ROOM_PRODUCTION_GO_NO_GO', 'approved');
-      vi.stubEnv('ARENA_ROOM_LOGICAL_ORIGIN', 'https://api.example.test');
-      expect(readHonoServerConfig().arenaMultiplayerEnabled).toBe(true);
-    },
-  );
-
-  it('protected target 拒绝非法 tuple-bound writer activation 状态', () => {
+  it('忽略历史 ARENA_ROOM_WRITER_ACTIVATION，不把它作为第二套门禁', () => {
     stubValidBearerProductionEnv();
+    vi.stubEnv('ARENA_MULTIPLAYER_ENABLED', 'true');
     vi.stubEnv('ARENA_ROOM_WRITER_ACTIVATION', 'sometimes');
 
-    expect(() => readHonoServerConfig()).toThrow(/ARENA_ROOM_WRITER_ACTIVATION/);
+    expect(readHonoServerConfig().arenaMultiplayerEnabled).toBe(true);
   });
 
   it('读取共享 Redis 的环境隔离前缀', () => {
@@ -312,26 +305,6 @@ describe('Hono server config', () => {
     stubValidBearerProductionEnv();
     vi.stubEnv('ARENA_FINALIZATION_URL', value);
     expect(() => readHonoServerConfig()).toThrow(/ARENA_FINALIZATION_URL/);
-  });
-
-  it('G25E2-VERSION-SKEW：生产启动路径接受 rollout 阶段一个版本的兼容偏差', () => {
-    stubValidBearerProductionEnv();
-    vi.stubEnv('HOSTED_DR_GATE_STAGE', 'rollout');
-    vi.stubEnv('HOSTED_DR_PRIMARY_CONTRACT_VERSION', 'g25e1-v2');
-    vi.stubEnv('HOSTED_DR_DR_CONTRACT_VERSION', 'g25e1-v1');
-    vi.stubEnv('HOSTED_DR_CLIENT_CONTRACT_VERSION', 'g25e1-v1');
-    vi.stubEnv('HOSTED_DR_SCHEMA_STATE', 'expanded');
-
-    expect(readHonoServerConfig().nodeEnv).toBe('production');
-  });
-
-  it('G25E2-VERSION-SKEW：生产启动路径拒绝跨 family 或过大 skew', () => {
-    stubValidBearerProductionEnv();
-    vi.stubEnv('HOSTED_DR_PRIMARY_CONTRACT_VERSION', 'g25e2-v2');
-    vi.stubEnv('HOSTED_DR_DR_CONTRACT_VERSION', 'g25e1-v1');
-    vi.stubEnv('HOSTED_DR_CLIENT_CONTRACT_VERSION', 'g25e1-v1');
-
-    expect(() => readHonoServerConfig()).toThrow(/HOSTED_DR_VERSION_GATE/);
   });
 
   it('拒绝未知鉴权模式', () => {

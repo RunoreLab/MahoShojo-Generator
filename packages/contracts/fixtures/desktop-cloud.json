@@ -1,0 +1,112 @@
+{
+  "protocolVersion": "desktop-auth-v1",
+  "paths": {
+    "authorize": "/auth/desktop",
+    "grant": "/api/auth/native/grant",
+    "exchange": "/api/auth/native/exchange",
+    "getSession": "/api/auth/get-session",
+    "signOut": "/api/auth/sign-out",
+    "hostedDrReadiness": "/api/hosted/dr-readiness",
+    "hostedGenerateDetailsStream": "/api/generate-magical-girl-details-stream",
+    "loopbackCallback": "/callback"
+  },
+  "limits": {
+    "maxStateLength": 128,
+    "codeLength": 43,
+    "codeChallengeLength": 43,
+    "minCodeVerifierLength": 43,
+    "maxCodeVerifierLength": 128,
+    "grantTtlSeconds": 120
+  },
+  "authErrorCodes": [
+    "invalid-request",
+    "unauthorized",
+    "invalid-grant",
+    "protocol-mismatch",
+    "rate-limited",
+    "account-unavailable",
+    "internal-error"
+  ],
+  "ipcErrorCodes": [
+    "not-authenticated",
+    "flow-not-found",
+    "flow-in-progress",
+    "cancelled",
+    "timeout",
+    "state-mismatch",
+    "protocol-mismatch",
+    "network-error",
+    "server-unavailable",
+    "invalid-response",
+    "storage-unavailable",
+    "missing-secret",
+    "internal-error"
+  ],
+  "hostedGenerationEventNames": [
+    "markdown",
+    "reasoning",
+    "reasoning_done",
+    "telemetry",
+    "done",
+    "error"
+  ],
+  "hostedGenerationRouteIds": [
+    "generate-magical-girl-details-stream"
+  ],
+  "validRedirectUris": [
+    "http://127.0.0.1:1/callback",
+    "http://127.0.0.1:45231/callback",
+    "http://127.0.0.1:65535/callback",
+    "http://[::1]:8080/callback"
+  ],
+  "invalidRedirectUris": [
+    "https://127.0.0.1:45231/callback",
+    "http://localhost:45231/callback",
+    "http://127.0.0.1:45231/callback?x=1",
+    "http://127.0.0.1:45231/other",
+    "http://127.0.0.1:45231/callback#frag",
+    "http://evil.example.com:45231/callback",
+    "http://127.0.0.1:0/callback",
+    "http://user@127.0.0.1:45231/callback",
+    "mahoshojo://callback",
+    "http://127.0.0.1/callback/extra"
+  ],
+  "validAuthorizeQuery": {
+    "state": "AbC123_-xyz",
+    "code_challenge": "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ",
+    "code_challenge_method": "S256",
+    "redirect_uri": "http://127.0.0.1:45231/callback"
+  },
+  "invalidAuthorizeQueries": [
+    {
+      "state": "",
+      "code_challenge": "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ",
+      "code_challenge_method": "S256",
+      "redirect_uri": "http://127.0.0.1:45231/callback"
+    },
+    {
+      "state": "has spaces not allowed",
+      "code_challenge": "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ",
+      "code_challenge_method": "S256",
+      "redirect_uri": "http://127.0.0.1:45231/callback"
+    },
+    {
+      "state": "AbC123_-xyz",
+      "code_challenge": "too-short",
+      "code_challenge_method": "S256",
+      "redirect_uri": "http://127.0.0.1:45231/callback"
+    },
+    {
+      "state": "AbC123_-xyz",
+      "code_challenge": "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ",
+      "code_challenge_method": "plain",
+      "redirect_uri": "http://127.0.0.1:45231/callback"
+    },
+    {
+      "state": "AbC123_-xyz",
+      "code_challenge": "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ",
+      "code_challenge_method": "S256",
+      "redirect_uri": "http://localhost:45231/callback"
+    }
+  ]
+}

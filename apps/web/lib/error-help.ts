@@ -1,4 +1,4 @@
-import { getEncyclopediaEntry, type EncyclopediaEntry } from '@/lib/encyclopedia';
+import { getEncyclopediaEntry, type EncyclopediaEntry } from '@mahoshojo/ui-web/encyclopedia';
 
 export type ErrorHelpInput = {
   message?: string | null;
@@ -23,6 +23,7 @@ export type ErrorCategoryId =
   | 'ai_empty_output'
   | 'ai_output_format'
   | 'data_card'
+  | 'context_limit'
   | 'ai';
 
 export type ErrorCategory = {
@@ -59,6 +60,27 @@ const DATA_CARD_MESSAGE_HINTS = [
   '校验失败',
   'templateid',
   '签名',
+] as const;
+
+/**
+ * 上下文/单条消息长度类错误。
+ *
+ * 必须排在 `status === 400` 的兜底分支之前：这些错误同样是 400，
+ * 但语义与数据卡校验无关，落到数据卡百科会误导用户。
+ */
+const CONTEXT_LIMIT_MESSAGE_HINTS = [
+  '单条消息过长',
+  '省略中段',
+  '对话历史共',
+  '历史内容共',
+  '超过单次请求',
+  '上下文过长',
+  'context length',
+  'context_length_exceeded',
+  'maximum context',
+  'too many tokens',
+  'prompt is too long',
+  'reduce the length',
 ] as const;
 
 const AI_MESSAGE_HINTS = [
@@ -229,7 +251,12 @@ export function inferErrorCategoryForError(input: ErrorHelpInput): ErrorCategory
   const status = statusInput ?? statusFromMessage;
   const isAiApiCallError = message ? includesAny(message, AI_API_CALL_ERROR_MESSAGE_HINTS) : false;
 
-  if (status === 400) return { id: 'validation', label: '请求参数无效 / 校验失败' };
+  if (status === 400) {
+    if (includesAny(message, CONTEXT_LIMIT_MESSAGE_HINTS)) {
+      return { id: 'context_limit', label: '上下文/消息长度超限' };
+    }
+    return { id: 'validation', label: '请求参数无效 / 校验失败' };
+  }
   if (status === 401) return { id: 'auth', label: '鉴权失败 / API Key 问题' };
   if (status === 403) return { id: 'forbidden', label: '权限不足 / Key 不可用' };
   if (status === 524) return { id: 'timeout', label: 'Cloudflare 超时' };
@@ -262,6 +289,7 @@ export function inferErrorCategoryForError(input: ErrorHelpInput): ErrorCategory
   if (includesAny(message, AI_OUTPUT_FORMAT_MESSAGE_HINTS) && includesAny(message, AI_OUTPUT_FORMAT_CONTEXT_HINTS)) {
     return { id: 'ai_output_format', label: 'AI 输出格式异常' };
   }
+  if (includesAny(message, CONTEXT_LIMIT_MESSAGE_HINTS)) return { id: 'context_limit', label: '上下文/消息长度超限' };
   if (includesAny(message, DATA_CARD_MESSAGE_HINTS)) return { id: 'data_card', label: '数据卡/导入解析问题' };
   if (includesAny(message, AI_MESSAGE_HINTS)) return { id: 'ai', label: 'AI 生成失败' };
 
@@ -280,7 +308,9 @@ export function inferEncyclopediaSlugForError(input: ErrorHelpInput): string | n
 
   if (status === 524) return 'cloudflare-524-timeout';
   if (status === 429) return 'rate-limit-429';
+  if (message && includesAny(message, CONTEXT_LIMIT_MESSAGE_HINTS)) return 'magic-tea-party-context-limits';
   if (status === 400) return 'data-card-errors';
+  if (status === 413) return 'magic-tea-party-context-limits';
   if (
     isAiApiCallError
     && typeof status === 'number'
@@ -313,6 +343,7 @@ export function inferEncyclopediaSlugForError(input: ErrorHelpInput): string | n
   if (includesAny(message, AI_OUTPUT_FORMAT_MESSAGE_HINTS) && includesAny(message, AI_OUTPUT_FORMAT_CONTEXT_HINTS)) {
     return 'ai-output-format';
   }
+  if (includesAny(message, CONTEXT_LIMIT_MESSAGE_HINTS)) return 'magic-tea-party-context-limits';
   if (includesAny(message, DATA_CARD_MESSAGE_HINTS)) return 'data-card-errors';
   if (includesAny(message, AI_MESSAGE_HINTS)) return 'ai-errors';
 

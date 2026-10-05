@@ -50,20 +50,13 @@ const submit = (state: ArenaRoomAuthorityState, proposalValue = proposal([guidan
 );
 
 describe('Arena Room Proposal authority transitions', () => {
-  it('requires an exact room revision fence before resolving a Proposal', () => {
+  it('resolves a Proposal on the latest authoritative state without an exact-revision veto', () => {
+    // 语义修订：resolve 不再做全局 exact-revision 门禁。typed expectedBase 的
+    // staged 三方合并才是并发保护；无关 revision 前进不再让仍可合并的提案失败。
     const submitted = submit(createJoinedState()).nextState;
-    const stale = failure(transitionArenaRoomAt(submitted, {
-      type: 'resolve-proposal',
-      expectedRoomEpoch: 'epoch-1',
-      expectedRevision: 1,
-      proposalId: 'proposal-1',
-      resolution: 'reject',
-      timestamp: '2026-08-27T16:02:00.000Z',
-    }, hostAuthority()));
-    expect(stale).toMatchObject({ code: 'stale', reason: 'room-revision-mismatch' });
-    expect(submitted.snapshot.proposals).toHaveLength(1);
+    expect(submitted.snapshot.revision).toBe(0);
 
-    const resolved = success(transitionArenaRoomAt(submitted, {
+    const resolvedWithStaleDiagnostic = success(transitionArenaRoomAt(submitted, {
       type: 'resolve-proposal',
       expectedRoomEpoch: 'epoch-1',
       expectedRevision: 0,
@@ -71,7 +64,20 @@ describe('Arena Room Proposal authority transitions', () => {
       resolution: 'reject',
       timestamp: '2026-08-27T16:02:00.000Z',
     }, hostAuthority()));
-    expect(resolved.nextState.snapshot.proposals).toEqual([]);
+    expect(resolvedWithStaleDiagnostic.nextState.snapshot.proposals).toEqual([]);
+
+    // 房间 revision 已前进后提交的提案仍应在最新状态上原子 resolve。
+    const advanced = submit(createJoinedState()).nextState;
+    const bumped = success(transitionArenaRoomAt(advanced, {
+      type: 'resolve-proposal',
+      expectedRoomEpoch: 'epoch-1',
+      proposalId: 'proposal-1',
+      resolution: 'accept-selected',
+      selectedChangeIds: ['guidance-1'],
+      timestamp: NEXT_TIMESTAMP,
+    }, hostAuthority()));
+    expect(bumped.nextState.snapshot.revision).toBe(1);
+    expect(bumped.nextState.snapshot.proposals).toEqual([]);
   });
 
   it('submits once, rejects ID conflicts, and never accepts host-authored member proposals', () => {
@@ -129,6 +135,40 @@ describe('Arena Room Proposal authority transitions', () => {
       'proposal.resolved',
     ]);
     expect(resolved.events.every((event) => RoomEventSchema.safeParse(event).success)).toBe(true);
+  });
+
+  it('retains distinct collaborative provenance for data-card and preset refs sharing one id', () => {
+    const changes = [{
+      changeId: 'add-online-c2',
+      type: 'addCombatant' as const,
+      ref: { id: 'character-2', kind: 'character' as const, versionToken: 'online-v1' },
+      expectedBase: { kind: 'absent' as const },
+    }, {
+      changeId: 'add-preset-c2',
+      type: 'addCombatant' as const,
+      key: 'preset:character-2',
+      ref: { id: 'character-2', kind: 'character' as const, versionToken: 'preset-v1' },
+      expectedBase: { kind: 'absent' as const },
+    }];
+    const submitted = submit(
+      createJoinedState(),
+      proposal(changes, 'proposal-ref-namespaces'),
+    ).nextState;
+    const resolved = success(transitionArenaRoomAt(submitted, {
+      type: 'resolve-proposal',
+      expectedRoomEpoch: 'epoch-1',
+      expectedRevision: 0,
+      proposalId: 'proposal-ref-namespaces',
+      resolution: 'accept-selected',
+      selectedChangeIds: changes.map((change) => change.changeId),
+      timestamp: '2026-08-27T16:02:00.000Z',
+    }, hostAuthority()));
+
+    expect(resolved.nextState.snapshot.sharedConfig.combatants).toEqual(expect.arrayContaining([
+      expect.objectContaining({ key: 'data-card:character-2' }),
+      expect.objectContaining({ key: 'preset:character-2' }),
+    ]));
+    expect(resolved.nextState.collaborativeChanges).toHaveLength(2);
   });
 
   it('supports host rejection and author withdrawal without changing config revision', () => {
@@ -245,7 +285,7 @@ describe('Arena Room Proposal authority transitions', () => {
       },
     }], 'proposal-version-drift');
     const driftSubmitted = submit(createJoinedState(), versionDrift).nextState;
-    expect(failure(transitionArenaRoomAt(driftSubmitted, {
+    expect(success(transitionArenaRoomAt(driftSubmitted, {
       type: 'resolve-proposal',
       expectedRoomEpoch: 'epoch-1',
       expectedRevision: 0,
@@ -253,7 +293,7 @@ describe('Arena Room Proposal authority transitions', () => {
       resolution: 'accept-selected',
       selectedChangeIds: ['remove-character-1'],
       timestamp: '2026-08-27T16:02:00.000Z',
-    }, hostAuthority()))).toMatchObject({ code: 'conflict', reason: 'proposal-conflict' });
+    }, hostAuthority()))).toMatchObject({ ok: true });
   });
 
   it('enforces the pending Proposal cap with a stable failure', () => {
@@ -269,7 +309,10 @@ describe('Arena Room Proposal authority transitions', () => {
       expectedRoomEpoch: 'epoch-1',
       proposal: proposal([guidanceChange()], 'proposal-pending-overflow'),
       timestamp: NEXT_TIMESTAMP,
-    }, memberAuthority()))).toMatchObject({ code: 'capability-denied', reason: 'member-limit-reached' });
+    }, memberAuthority()))).toMatchObject({
+      code: 'capability-denied',
+      reason: 'proposal-pending-limit-reached',
+    });
   });
 
   it('resolves a semantic no-op without incrementing revision or collaborative provenance', () => {
@@ -295,15 +338,42 @@ describe('Arena Room Proposal authority transitions', () => {
 });
 
 describe('Arena Room authoritative generation transitions', () => {
-  const reserveCommand = () => ({
+  const reserveCommand = (state = createJoinedState()) => ({
     type: 'reserve-generation' as const,
     expectedRoomEpoch: 'epoch-1',
     expectedRevision: 0,
+    expectedControlSeq: state.snapshot.controlSeq,
     generationRequestId: 'request-1',
     generationId: 'generation-1',
     attempt: 1,
     generationPayloadDigest: `sha256:${'b'.repeat(64)}`,
     timestamp: '2026-08-27T16:04:00.000Z',
+  });
+
+  it('Proposal 在途变更 controlSeq 后原子拒绝过期的配置发布与生成预约', () => {
+    const clean = createJoinedState();
+    const expectedControlSeq = clean.snapshot.controlSeq;
+    const submitted = submit(clean).nextState;
+
+    expect(failure(transitionArenaRoomAt(submitted, {
+      type: 'publish-config',
+      expectedRoomEpoch: 'epoch-1',
+      expectedRevision: 0,
+      expectedControlSeq,
+      sharedConfig: { ...submitted.snapshot.sharedConfig, userGuidance: '房主本地修改' },
+      timestamp: '2026-08-27T16:04:00.000Z',
+    }, hostAuthority()))).toMatchObject({
+      code: 'stale',
+      reason: 'room-control-seq-mismatch',
+    });
+
+    expect(failure(transitionArenaRoomAt(submitted, {
+      ...reserveCommand(),
+      expectedControlSeq,
+    }, generationReservationAuthority()))).toMatchObject({
+      code: 'stale',
+      reason: 'room-control-seq-mismatch',
+    });
   });
 
   it('reserves one immutable attempt and treats an exact duplicate as idempotent', () => {
@@ -318,6 +388,7 @@ describe('Arena Room authoritative generation transitions', () => {
       snapshotDigest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
       collaborativeInfluence: false,
       participantUserIds: [101, 202],
+      hostAccountUserId: 101,
       startedAt: '2026-08-27T16:04:00.000Z',
     });
     expect(reserved.nextState.generationLedger[0]?.generationPayloadDigest)
@@ -326,14 +397,14 @@ describe('Arena Room authoritative generation transitions', () => {
 
     const duplicate = success(transitionArenaRoomAt(
       reserved.nextState,
-      reserveCommand(),
+      reserveCommand(reserved.nextState),
       generationReservationAuthority(),
     ));
     expect(duplicate.kind).toBe('idempotent');
     expect(duplicate.events).toEqual([]);
 
     expect(failure(transitionArenaRoomAt(reserved.nextState, {
-      ...reserveCommand(),
+      ...reserveCommand(reserved.nextState),
       generationPayloadDigest: `sha256:${'c'.repeat(64)}`,
     }, generationReservationAuthority(
       'request-1',
@@ -345,16 +416,17 @@ describe('Arena Room authoritative generation transitions', () => {
       .toMatchObject({ code: 'conflict', reason: 'generation-request-conflict' });
 
     expect(failure(transitionArenaRoomAt(reserved.nextState, {
-      ...reserveCommand(),
+      ...reserveCommand(reserved.nextState),
       generationId: 'generation-conflict',
     }, generationReservationAuthority('request-1', 'generation-conflict'))))
       .toMatchObject({ code: 'conflict', reason: 'generation-request-conflict' });
   });
 
   it('derives participant and collaboration provenance from trusted authority state', () => {
+    const joinedForClean = createJoinedState();
     const clean = success(transitionArenaRoomAt(
-      createJoinedState(),
-      reserveCommand(),
+      joinedForClean,
+      reserveCommand(joinedForClean),
       generationReservationAuthority(),
     ));
     expect(clean.nextState.snapshot.activeGeneration).toMatchObject({
@@ -373,7 +445,7 @@ describe('Arena Room authoritative generation transitions', () => {
       timestamp: '2026-08-27T16:02:00.000Z',
     }, hostAuthority())).nextState;
     const collaborative = success(transitionArenaRoomAt(accepted, {
-      ...reserveCommand(),
+      ...reserveCommand(accepted),
       expectedRevision: 1,
       generationRequestId: 'request-collaborative',
       generationId: 'generation-collaborative',
@@ -388,11 +460,12 @@ describe('Arena Room authoritative generation transitions', () => {
       type: 'publish-config',
       expectedRoomEpoch: 'epoch-1',
       expectedRevision: 1,
+      expectedControlSeq: accepted.snapshot.controlSeq,
       sharedConfig: { ...accepted.snapshot.sharedConfig, userGuidance: '房主覆盖' },
       timestamp: '2026-08-27T16:03:00.000Z',
     }, hostAuthority())).nextState;
     const overridden = success(transitionArenaRoomAt(hostOverride, {
-      ...reserveCommand(),
+      ...reserveCommand(hostOverride),
       expectedRevision: 2,
       generationRequestId: 'request-host-override',
       generationId: 'generation-host-override',
@@ -403,11 +476,12 @@ describe('Arena Room authoritative generation transitions', () => {
       type: 'publish-config',
       expectedRoomEpoch: 'epoch-1',
       expectedRevision: 1,
+      expectedControlSeq: accepted.snapshot.controlSeq,
       sharedConfig: { ...accepted.snapshot.sharedConfig, battleMode: 'kizuna' },
       timestamp: '2026-08-27T16:03:00.000Z',
     }, hostAuthority())).nextState;
     const retained = success(transitionArenaRoomAt(unrelatedHostPublish, {
-      ...reserveCommand(),
+      ...reserveCommand(unrelatedHostPublish),
       expectedRevision: 2,
       generationRequestId: 'request-retained-collaboration',
       generationId: 'generation-retained-collaboration',
@@ -462,7 +536,7 @@ describe('Arena Room authoritative generation transitions', () => {
       expect.objectContaining({ type: 'setStoryLength', value: 'long' }),
     ]);
     const reserved = success(transitionArenaRoomAt(accepted, {
-      ...reserveCommand(),
+      ...reserveCommand(accepted),
       expectedRevision: 1,
       generationRequestId: 'request-story-length',
       generationId: 'generation-story-length',

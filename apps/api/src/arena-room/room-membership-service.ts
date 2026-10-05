@@ -15,8 +15,22 @@ import {
 import {
   projectArenaRoomSnapshotForViewer,
   type ArenaRoomAuthorityState,
+  type ArenaRoomMemberAuthorityRecord,
 } from '@mahoshojo/multiplayer-core';
 
+import {
+  ArenaDataCardRefVerifierError,
+  type ArenaDataCardRefVerifier,
+} from './arena-data-card-ref-verifier';
+import {
+  ArenaRoomPresetRefVerifierError,
+  verifyArenaRoomSharedConfigPresetRefs,
+  verifyArenaRoomSharedConfigRefs,
+} from './arena-room-shared-config-refs';
+import {
+  assertSharedConfigServerShareableWebPackage,
+} from './web-package-shareability';
+import type { ArenaRoomGenerationPresetResolver } from './room-generation-preset-registry';
 import {
   RoomActor,
   RoomActorRegistry,
@@ -28,14 +42,20 @@ import type {
 
 export type ArenaRoomMembershipErrorCode =
   | 'ROOM_CLOSED'
+  | 'ROOM_CONFIG_FRAME_TOO_LARGE'
   | 'ROOM_EPOCH_STALE'
   | 'ROOM_INPUT_INVALID'
   | 'ROOM_CREATION_REQUEST_CONFLICT'
   | 'ROOM_MEMBERSHIP_NOT_ACTIVE'
   | 'ROOM_MEMBERSHIP_REVOKED'
+  | 'ROOM_MEMBERSHIP_KICKED'
   | 'ROOM_MEMBERSHIP_TRANSITION_DENIED'
+  | 'ROOM_MEMBER_LIMIT_REACHED'
   | 'ROOM_PERMISSION_DENIED'
-  | 'ROOM_NOT_FOUND';
+  | 'ROOM_NOT_FOUND'
+  | 'ROOM_REFERENCE_DENIED'
+  | 'ROOM_REFERENCE_STALE'
+  | 'ROOM_REFERENCE_UNAVAILABLE';
 
 export class ArenaRoomMembershipError extends Error {
   constructor(readonly code: ArenaRoomMembershipErrorCode) {
@@ -95,7 +115,8 @@ export type ArenaRoomMembershipService = {
     readonly roomId: string;
     readonly accountUserId: number;
     readonly targetUserId: string;
-  }): Promise<ArenaRoomMembershipView>;
+    readonly expectedRoomEpoch: string;
+  }): Promise<ArenaRoomSessionView>;
   resolveActiveByAccount(input: {
     readonly roomId: string;
     readonly accountUserId: number;
@@ -113,6 +134,8 @@ export type ArenaRoomMembershipService = {
 export type ArenaRoomMembershipServiceOptions = {
   readonly actors: RoomActorRegistry;
   readonly creationReceipts?: Pick<RedisRoomStore, 'loadCreationReceipt'>;
+  readonly references?: ArenaDataCardRefVerifier;
+  readonly presets?: Pick<ArenaRoomGenerationPresetResolver, 'resolve'>;
   readonly createUserId?: () => string;
   readonly now?: () => string;
 };
@@ -124,6 +147,25 @@ const fail = (code: ArenaRoomMembershipErrorCode): never => {
 const validAccountUserId = (value: number): boolean => (
   Number.isSafeInteger(value) && value > 0
 );
+
+const mapReferenceError = (error: unknown): never => {
+  if (!(error instanceof ArenaDataCardRefVerifierError)) throw error;
+  switch (error.code) {
+    case 'ARENA_DATA_CARD_REF_VERSION_MISMATCH': return fail('ROOM_REFERENCE_STALE');
+    case 'ARENA_DATA_CARD_REF_NOT_READABLE': return fail('ROOM_REFERENCE_DENIED');
+    default: return fail('ROOM_REFERENCE_UNAVAILABLE');
+  }
+};
+
+const mapPresetReferenceError = (error: unknown): never => {
+  if (!(error instanceof ArenaRoomPresetRefVerifierError)) throw error;
+  switch (error.code) {
+    case 'ARENA_ROOM_PRESET_REF_INPUT_INVALID': return fail('ROOM_INPUT_INVALID');
+    case 'ARENA_ROOM_PRESET_REF_NOT_FOUND':
+    case 'ARENA_ROOM_PRESET_REF_VERSION_MISMATCH': return fail('ROOM_REFERENCE_STALE');
+    default: return fail('ROOM_REFERENCE_UNAVAILABLE');
+  }
+};
 
 const canonicalJsonValue = (value: unknown): unknown => {
   if (Array.isArray(value)) return value.map(canonicalJsonValue);
@@ -256,6 +298,50 @@ export const createArenaRoomMembershipService = (
     };
   };
 
+  /**
+   * 自愿离开（revocationReason='left'）成员的重进：沿用原 authority record 的
+   * member userId，不消耗新的 authority history 槽位；被踢/legacy tombstone
+   * 不走此路径。并发重进已在状态机内幂等，这里仅在失败后对账一次。
+   */
+  const rejoinSession = async (
+    target: { readonly actor: RoomActor; readonly state: ArenaRoomAuthorityState },
+    record: ArenaRoomMemberAuthorityRecord,
+    accountUserId: number,
+    displayName: string,
+  ): Promise<ArenaRoomSessionView> => {
+    const result = await target.actor.execute({
+      authority: {
+        kind: 'authenticated-user',
+        actorUserId: record.member.userId,
+        accountUserId,
+      },
+      command: {
+        type: 'rejoin-member',
+        expectedRoomEpoch: target.state.snapshot.roomEpoch,
+        displayName,
+        timestamp: now(),
+      },
+    });
+    if (result.ok) {
+      const member = result.nextState.snapshot.members.find((entry) => entry.userId === record.member.userId);
+      if (!member) return fail('ROOM_MEMBERSHIP_TRANSITION_DENIED');
+      return sessionView(target.state.snapshot.roomId, result.nextState, member);
+    }
+    const current = target.actor.getSnapshot();
+    const concurrent = current && activeRecordByAccount(current, accountUserId);
+    if (current && concurrent?.member.membershipState === 'active') {
+      return sessionView(current.snapshot.roomId, current, concurrent.member);
+    }
+    if (result.reason === 'member-limit-reached') return fail('ROOM_MEMBER_LIMIT_REACHED');
+    return fail('ROOM_MEMBERSHIP_TRANSITION_DENIED');
+  };
+
+  const revokedJoinFailure = (record: ArenaRoomMemberAuthorityRecord): never => fail(
+    record.revocationReason === 'kicked'
+      ? 'ROOM_MEMBERSHIP_KICKED'
+      : 'ROOM_MEMBERSHIP_REVOKED',
+  );
+
   return Object.freeze({
     async hasCreationReceipt(input) {
       const creationRequestId = ArenaRoomCreationRequestIdSchema.safeParse(
@@ -322,6 +408,29 @@ export const createArenaRoomMembershipService = (
       } else if (input.requireExistingCreationReceipt === true) {
         return fail('ROOM_INPUT_INVALID');
       }
+      let resolvedSharedConfig = sharedConfig.data;
+      try {
+        resolvedSharedConfig = await verifyArenaRoomSharedConfigRefs({
+          references: options.references,
+          sharedConfig: sharedConfig.data,
+          hostAccountUserId: input.accountUserId,
+        });
+      } catch (error) {
+        mapReferenceError(error);
+      }
+      try {
+        await verifyArenaRoomSharedConfigPresetRefs({
+          presets: options.presets,
+          sharedConfig: resolvedSharedConfig,
+        });
+      } catch (error) {
+        mapPresetReferenceError(error);
+      }
+      try {
+        assertSharedConfigServerShareableWebPackage(resolvedSharedConfig);
+      } catch {
+        return fail('ROOM_REFERENCE_DENIED');
+      }
       const userId = createUserId();
       let result;
       try {
@@ -332,7 +441,7 @@ export const createArenaRoomMembershipService = (
             accountUserId: input.accountUserId,
           },
           host: { userId, displayName: displayName.data },
-          sharedConfig: sharedConfig.data,
+          sharedConfig: resolvedSharedConfig,
           ...(receiptIdentity === null ? {} : { creationReceipt: receiptIdentity }),
           ...(directoryTitle?.success && directoryVisibility?.success
             ? {
@@ -354,7 +463,12 @@ export const createArenaRoomMembershipService = (
         }
         throw error;
       }
-      if (!result.result.ok) return fail('ROOM_MEMBERSHIP_TRANSITION_DENIED');
+      if (!result.result.ok) {
+        if (result.result.reason === 'room-snapshot-too-large') {
+          return fail('ROOM_CONFIG_FRAME_TOO_LARGE');
+        }
+        return fail('ROOM_MEMBERSHIP_TRANSITION_DENIED');
+      }
       const member = result.result.nextState.snapshot.members.find((entry) => entry.userId === userId);
       if (!member) return fail('ROOM_MEMBERSHIP_TRANSITION_DENIED');
       return sessionView(result.roomId, result.result.nextState, member);
@@ -367,8 +481,15 @@ export const createArenaRoomMembershipService = (
       }
       const initial = await recoverOpenActor(input.roomId);
       const existing = activeRecordByAccount(initial.state, input.accountUserId);
-      if (existing?.member.membershipState === 'revoked') return fail('ROOM_MEMBERSHIP_REVOKED');
-      if (existing) return sessionView(input.roomId, initial.state, existing.member);
+      if (existing?.member.membershipState === 'active') {
+        return sessionView(input.roomId, initial.state, existing.member);
+      }
+      if (existing?.member.membershipState === 'revoked') {
+        if (existing.revocationReason === 'left') {
+          return rejoinSession(initial, existing, input.accountUserId, displayName.data);
+        }
+        return revokedJoinFailure(existing);
+      }
 
       const userId = createUserId();
       const timestamp = now();
@@ -398,7 +519,18 @@ export const createArenaRoomMembershipService = (
         if (current && concurrent?.member.membershipState === 'active') {
           return sessionView(input.roomId, current, concurrent.member);
         }
-        if (concurrent?.member.membershipState === 'revoked') return fail('ROOM_MEMBERSHIP_REVOKED');
+        if (current && concurrent?.member.membershipState === 'revoked') {
+          if (concurrent.revocationReason === 'left') {
+            return rejoinSession(
+              { actor: initial.actor, state: current },
+              concurrent,
+              input.accountUserId,
+              displayName.data,
+            );
+          }
+          return revokedJoinFailure(concurrent);
+        }
+        if (result.reason === 'member-limit-reached') return fail('ROOM_MEMBER_LIMIT_REACHED');
         return fail('ROOM_MEMBERSHIP_TRANSITION_DENIED');
       }
       const member = result.nextState.snapshot.members.find((entry) => entry.userId === userId);
@@ -469,14 +601,29 @@ export const createArenaRoomMembershipService = (
     },
 
     async kick(input) {
-      if (!validAccountUserId(input.accountUserId)) return fail('ROOM_INPUT_INVALID');
+      const expectedRoomEpoch = OpaqueKeySchema.safeParse(input.expectedRoomEpoch);
+      const targetUserId = OpaqueKeySchema.safeParse(input.targetUserId);
+      if (
+        !validAccountUserId(input.accountUserId)
+        || !expectedRoomEpoch.success
+        || !targetUserId.success
+      ) return fail('ROOM_INPUT_INVALID');
       const { actor, state } = await recoverOpenActor(input.roomId);
       const caller = activeRecordByAccount(state, input.accountUserId);
-      const target = activeRecordByUser(state, input.targetUserId);
       if (!caller || caller.member.membershipState !== 'active') {
         return fail('ROOM_MEMBERSHIP_NOT_ACTIVE');
       }
+      if (caller.member.role !== 'host') return fail('ROOM_PERMISSION_DENIED');
+      if (state.snapshot.roomEpoch !== expectedRoomEpoch.data) return fail('ROOM_EPOCH_STALE');
+      if (caller.member.userId === targetUserId.data) return fail('ROOM_PERMISSION_DENIED');
+      const target = activeRecordByUser(state, targetUserId.data);
       if (!target) return fail('ROOM_MEMBERSHIP_NOT_ACTIVE');
+      if (target.member.role === 'host') return fail('ROOM_PERMISSION_DENIED');
+      // 已被踢（或 legacy 无 reason）保持幂等成功；自愿离开（left）的目标必须
+      // 继续提交 kick，把 tombstone 单调升级为 kicked，压缩 leave/kick 竞态。
+      if (target.member.membershipState === 'revoked' && target.revocationReason !== 'left') {
+        return sessionView(input.roomId, state, caller.member);
+      }
       const result = await actor.execute({
         authority: {
           kind: 'authenticated-user',
@@ -485,16 +632,17 @@ export const createArenaRoomMembershipService = (
         },
         command: {
           type: 'kick-member',
-          expectedRoomEpoch: state.snapshot.roomEpoch,
-          targetUserId: input.targetUserId,
+          expectedRoomEpoch: expectedRoomEpoch.data,
+          targetUserId: targetUserId.data,
           timestamp: now(),
         },
       });
       if (!result.ok) return fail('ROOM_MEMBERSHIP_TRANSITION_DENIED');
-      const current = result.nextState.memberAuthority.find((entry) => (
-        entry.member.userId === input.targetUserId
-      ))?.member ?? target.member;
-      return view(input.roomId, result.nextState.snapshot.roomEpoch, current);
+      const currentCaller = activeRecordByAccount(result.nextState, input.accountUserId);
+      if (!currentCaller || currentCaller.member.membershipState !== 'active') {
+        return fail('ROOM_MEMBERSHIP_NOT_ACTIVE');
+      }
+      return sessionView(input.roomId, result.nextState, currentCaller.member);
     },
 
     async resolveActiveByAccount(input) {

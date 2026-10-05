@@ -38,6 +38,30 @@ const fixture = async (name: string): Promise<unknown> => {
 };
 
 describe('spec review C: wire byte limits, frozen generation metadata, and compatibility', () => {
+  it.each([undefined, 101, 999])('validates frozen host %s in mirrors and every generation control event', (hostAccountUserId) => {
+    const generation = {
+      generationRequestId: 'request-1', generationId: 'generation-1', attempt: 1,
+      configRevision: 7, snapshotDigest: 'sha256:abc', collaborativeInfluence: true,
+      participantUserIds: [101, 202],
+      ...(hostAccountUserId === undefined ? {} : { hostAccountUserId }),
+    };
+    const expected = hostAccountUserId !== 999;
+    expect(GenerationMirrorSchema.safeParse({
+      ...generation, state: 'running', startedAt: '2026-09-22T00:00:00.000Z',
+    }).success).toBe(expected);
+    for (const type of ['generation.started', 'generation.completed', 'generation.failed'] as const) {
+      expect(RoomEventSchema.safeParse({
+        protocolVersion: 1, roomId: 'room-1', roomEpoch: 'epoch-1', controlSeq: 1,
+        timestamp: '2026-09-22T00:00:00.000Z', type,
+        payload: {
+          ...generation,
+          ...(type === 'generation.completed' ? { generationRecordId: 'generation-1' } : {}),
+          ...(type === 'generation.failed' ? { errorCode: 'generation-failed' } : {}),
+        },
+      }).success).toBe(expected);
+    }
+  });
+
   it('centralizes custom/history/display/error/reason/proposal wire limits', () => {
     expect(MAX_PROPOSAL_BYTES).toBeGreaterThan(0);
     expect(CustomStoryLengthSchema.safeParse('9'.repeat(40)).success).toBe(false);

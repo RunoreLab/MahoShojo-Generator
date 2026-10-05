@@ -1,16 +1,23 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   ARENA_GENERATION_ACTOR_TOKEN_HEADER,
   ARENA_GENERATION_ACTOR_TOKEN_KEY,
   ARENA_GENERATION_CLIENT_STATE_KEY,
   arenaGenerationConnectionNotice,
+  mergeArenaGenerationSnapshotMarkdown,
   openArenaGenerationStream,
+  readPersistedArenaGeneration,
 } from '@/lib/arena/resumable-generation-client';
 import {
   STREAM_ABORT_REASON_CONTENT_POLICY,
   STREAM_ABORT_REASON_USER,
 } from '@/lib/stream/abort';
+import type { GenerationApiRoutePin } from '@/lib/hono-api-client';
+import {
+  GenerationApiClientError,
+  isGenerationApiClientErrorCode,
+} from '@/lib/hono-api-client';
 
 class MemoryStorage {
   values = new Map<string, string>();
@@ -18,6 +25,10 @@ class MemoryStorage {
   setItem(key: string, value: string) { this.values.set(key, value); }
   removeItem(key: string) { this.values.delete(key); }
 }
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 const response = (body: ReadableStream<Uint8Array> | string, generationId = 'generation-1') => new Response(body, {
   status: 200,
@@ -60,14 +71,63 @@ const readWithDeadline = async <T>(
 };
 
 describe('resumable Arena generation client', () => {
+  it('does not let an empty not-archived snapshot erase delivered markdown', () => {
+    expect(mergeArenaGenerationSnapshotMarkdown('# 已交付正文', '')).toBe('# 已交付正文');
+    expect(mergeArenaGenerationSnapshotMarkdown('# 旧正文', '# 权威快照')).toBe('# 权威快照');
+  });
+
   it('给取消确认与恢复状态提供稳定用户文案', () => {
     expect(arenaGenerationConnectionNotice('cancelling')).toContain('正在请求服务器停止');
     expect(arenaGenerationConnectionNotice('cancelled')).toContain('服务器已接受停止请求');
     expect(arenaGenerationConnectionNotice('cancel_unconfirmed')).toContain('可能仍在后台继续');
     expect(arenaGenerationConnectionNotice('reconnecting')).toContain('仍在服务器生成');
+    expect(arenaGenerationConnectionNotice('interrupted')).toContain('已接收正文会保留');
     expect(arenaGenerationConnectionNotice('completed')).toBeNull();
   });
+
+  it('严格验证 v3 persisted route pin', () => {
+    const storage = new MemoryStorage();
+    const base = {
+      version: 3,
+      generationRequestId: 'request-route-pin-state',
+      generationId: 'generation-route-pin-state',
+      lastEventId: '1-0',
+      state: 'generating',
+      updatedAt: '2026-08-31T00:00:00.000Z',
+      endpoint: '/api/arena/generate-stream',
+      bodyHash: 'body-hash',
+    };
+    storage.setItem('state', JSON.stringify({
+      ...base,
+      routePin: { placement: 'unknown-runtime' },
+    }));
+    expect(readPersistedArenaGeneration(storage, 'state')).toBeNull();
+
+    storage.setItem('state', JSON.stringify({
+      ...base,
+      routePin: { placement: 'next-dr' },
+    }));
+    expect(readPersistedArenaGeneration(storage, 'state')).toMatchObject({
+      version: 3,
+      routePin: { placement: 'next-dr' },
+    });
+
+    storage.setItem('state', JSON.stringify({
+      ...base,
+      routePin: null,
+    }));
+    expect(readPersistedArenaGeneration(storage, 'state')).toMatchObject({
+      version: 3,
+      routePin: null,
+    });
+  });
   it('persists a bootstrap actor credential before the first POST', async () => {
+    vi.stubGlobal('crypto', {
+      getRandomValues: (array: Uint8Array) => {
+        array.fill(0);
+        return array;
+      },
+    });
     const storage = new MemoryStorage();
     const fetcher = vi.fn(async (_url: string, init?: RequestInit) => {
       const headers = new Headers(init?.headers);
@@ -82,6 +142,34 @@ describe('resumable Arena generation client', () => {
       endpoint: '/api/arena/generate-stream',
       body: {}, headers: {}, fetcher, storage,
       generationRequestId: 'request-1234',
+    });
+    await opened.text();
+  });
+
+  it('在 randomUUID 缺失时仍为首次请求和 actor token 使用兼容 UUID', async () => {
+    vi.stubGlobal('crypto', {
+      getRandomValues: (array: Uint8Array) => {
+        array.fill(0);
+        return array;
+      },
+    });
+    const storage = new MemoryStorage();
+    const fetcher = vi.fn(async (_url: string, init?: RequestInit) => {
+      const headers = new Headers(init?.headers);
+      const requestBody = JSON.parse(String(init?.body)) as { generationRequestId?: string };
+      expect(requestBody.generationRequestId).toBe('00000000-0000-4000-8000-000000000000');
+      expect(headers.get(ARENA_GENERATION_ACTOR_TOKEN_HEADER)).toBe(
+        'bootstrap.00000000-0000-4000-8000-000000000000',
+      );
+      return response('id: 1-0\nevent: done\ndata: {"status":"completed"}\n\n', 'generation-compat');
+    });
+
+    const opened = await openArenaGenerationStream({
+      endpoint: '/api/arena/generate-stream',
+      body: { mode: 'classic' },
+      headers: {},
+      fetcher,
+      storage,
     });
     await opened.text();
   });
@@ -115,12 +203,15 @@ describe('resumable Arena generation client', () => {
       generationRequestId: 'request-1234',
       baseReconnectDelayMs: 1,
       random: () => 0,
+      getInitialRoutePin: () => ({ placement: 'hono-primary' }),
     });
 
     await expect(opened.text()).resolves.toContain('data: {"chunk":"A"}');
     expect(fetcher).toHaveBeenCalledTimes(2);
     expect(fetcher.mock.calls[0]?.[1]?.method).toBe('POST');
     expect(fetcher.mock.calls[1]?.[0]).toBe('/api/arena/generations/generation-1/stream?after=1-0');
+    expect(fetcher.mock.calls[0]?.[2]).toBeUndefined();
+    expect(fetcher.mock.calls[1]?.[2]).toEqual({ placement: 'hono-primary' });
     expect(JSON.parse(storage.getItem(ARENA_GENERATION_CLIENT_STATE_KEY)!)).toMatchObject({
       generationId: 'generation-1',
       lastEventId: '3-0',
@@ -151,6 +242,320 @@ describe('resumable Arena generation client', () => {
     ]);
     expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body))).toMatchObject({
       generationRequestId: 'request-1234',
+    });
+  });
+
+  it.each([
+    'DR_NOT_ELIGIBLE',
+    'NO_READY_PLACEMENT',
+    'OPERATION_NOT_DECLARED',
+    'GENERATION_INTENT_ALREADY_DISPATCHED',
+  ] as const)('does not recover a definite generation client error: %s', async (code) => {
+    const error = new GenerationApiClientError(code, `definite: ${code}`);
+    const fetcher = vi.fn().mockRejectedValue(error);
+    const states: string[] = [];
+
+    await expect(openArenaGenerationStream({
+      endpoint: '/api/arena/generate-stream',
+      body: { mode: 'classic' },
+      headers: {},
+      fetcher,
+      storage: new MemoryStorage(),
+      generationRequestId: `request-${code.toLowerCase().replaceAll('_', '-')}`,
+      maxReconnectAttempts: 0,
+      onStateChange: (state) => states.push(state),
+    })).rejects.toBe(error);
+
+    expect(fetcher.mock.calls.map(([, init]) => init?.method)).toEqual(['POST']);
+    expect(states).toEqual(['connecting', 'failed']);
+    expect(states).not.toContain('recovering_initial');
+  });
+
+  it('does not recover an ordinary application Error from the initial POST', async () => {
+    const error = new Error('application precondition failed');
+    const fetcher = vi.fn().mockRejectedValue(error);
+    const states: string[] = [];
+    const storage = new MemoryStorage();
+
+    await expect(openArenaGenerationStream({
+      endpoint: '/api/arena/generate-stream',
+      body: { mode: 'classic' },
+      headers: {},
+      fetcher,
+      storage,
+      generationRequestId: 'request-application-error',
+      maxReconnectAttempts: 0,
+      onStateChange: (state) => states.push(state),
+    })).rejects.toBe(error);
+
+    expect(fetcher.mock.calls.map(([, init]) => init?.method)).toEqual(['POST']);
+    expect(states).toEqual(['connecting', 'failed']);
+
+    const retryFetcher = vi.fn(async () => response(
+      'id: 1-0\nevent: done\ndata: {"status":"completed"}\n\n',
+      'generation-retry',
+    ));
+    const opened = await openArenaGenerationStream({
+      endpoint: '/api/arena/generate-stream',
+      body: { mode: 'classic' },
+      headers: {},
+      fetcher: retryFetcher,
+      storage,
+      generationRequestId: 'request-application-error',
+    });
+    await opened.text();
+
+    expect(retryFetcher.mock.calls.map(([url, init]) => [url, init?.method])).toEqual([
+      ['/api/arena/generate-stream', 'POST'],
+    ]);
+  });
+
+  it('recovers a cross-realm AMBIGUOUS_OPERATION_OUTCOME by request-id lookup', async () => {
+    const requestId = 'request-ambiguous-error';
+    const error = {
+      name: 'GenerationApiClientError',
+      code: 'AMBIGUOUS_OPERATION_OUTCOME',
+      message: 'request outcome is ambiguous',
+    };
+    const fetcher = vi.fn()
+      .mockRejectedValueOnce(error)
+      .mockResolvedValueOnce(lookupResponse('generation-ambiguous', requestId))
+      .mockResolvedValueOnce(response(
+        'id: 1-0\nevent: done\ndata: {"status":"completed"}\n\n',
+        'generation-ambiguous',
+      ));
+    const states: string[] = [];
+
+    const opened = await openArenaGenerationStream({
+      endpoint: '/api/arena/generate-stream',
+      body: { mode: 'classic' },
+      headers: {},
+      fetcher,
+      storage: new MemoryStorage(),
+      generationRequestId: requestId,
+      maxReconnectAttempts: 0,
+      getInitialRoutePin: () => ({ placement: 'hono-primary' }),
+      onStateChange: (state) => states.push(state),
+    });
+    await opened.text();
+
+    expect(fetcher.mock.calls.map(([url, init]) => [url, init?.method])).toEqual([
+      ['/api/arena/generate-stream', 'POST'],
+      [`/api/arena/generation-requests/${requestId}`, 'GET'],
+      ['/api/arena/generations/generation-ambiguous/stream', 'GET'],
+    ]);
+    expect(fetcher.mock.calls[0]?.[2]).toBeUndefined();
+    expect(fetcher.mock.calls[1]?.[2]).toEqual({ placement: 'hono-primary' });
+    expect(fetcher.mock.calls[2]?.[2]).toEqual({ placement: 'hono-primary' });
+    expect(states).toContain('recovering_initial');
+  });
+
+  it('persists a v3 route pin and reuses it directly after refresh', async () => {
+    const storage = new MemoryStorage();
+    const pending = new ReadableStream<Uint8Array>({ start() {} });
+    let resolveCreate: ((response: Response) => void) | null = null;
+    const firstFetcher = vi.fn((
+      _input: string,
+      _init?: RequestInit,
+      _routePin?: GenerationApiRoutePin,
+      onRoutePinSelected?: (routePin: GenerationApiRoutePin) => void,
+    ) => {
+      onRoutePinSelected?.({ placement: 'hono-primary' });
+      return new Promise<Response>((resolve) => {
+        resolveCreate = resolve;
+      });
+    });
+    const firstOpening = openArenaGenerationStream({
+      endpoint: '/api/arena/generate-stream',
+      body: { mode: 'classic', routePinRefresh: true },
+      headers: {},
+      fetcher: firstFetcher,
+      storage,
+      generationRequestId: 'request-route-pin-refresh',
+    });
+    await vi.waitFor(() => expect(firstFetcher).toHaveBeenCalledOnce());
+    expect(JSON.parse(storage.getItem(ARENA_GENERATION_CLIENT_STATE_KEY)!)).toMatchObject({
+      version: 3,
+      generationId: null,
+      state: 'connecting',
+      routePin: { placement: 'hono-primary' },
+    });
+
+    resolveCreate!(response(pending, 'generation-pinned'));
+    const first = await firstOpening;
+    await first.body!.cancel('refresh');
+
+    expect(JSON.parse(storage.getItem(ARENA_GENERATION_CLIENT_STATE_KEY)!)).toMatchObject({
+      version: 3,
+      generationId: 'generation-pinned',
+      routePin: { placement: 'hono-primary' },
+    });
+
+    const refreshFetcher = vi.fn(async () => response(
+      'id: 1-0\nevent: done\ndata: {"status":"completed"}\n\n',
+      'generation-pinned',
+    ));
+    const refreshed = await openArenaGenerationStream({
+      endpoint: '/api/arena/generate-stream',
+      body: { mode: 'classic', routePinRefresh: true },
+      headers: {},
+      fetcher: refreshFetcher,
+      storage,
+    });
+    await refreshed.text();
+
+    expect(refreshFetcher.mock.calls.map(([url, init, routePin]) => [
+      url,
+      init?.method,
+      routePin,
+    ])).toEqual([[
+      '/api/arena/generations/generation-pinned/stream',
+      'GET',
+      { placement: 'hono-primary' },
+    ]]);
+  });
+
+  it('keeps v2 active persistence on the unpinned fallback path', async () => {
+    const storage = new MemoryStorage();
+    const pending = new ReadableStream<Uint8Array>({ start() {} });
+    const first = await openArenaGenerationStream({
+      endpoint: '/api/arena/generate-stream',
+      body: { mode: 'classic', v2Fallback: true },
+      headers: {},
+      fetcher: vi.fn(async () => response(pending, 'generation-v2-fallback')),
+      storage,
+      generationRequestId: 'request-v2-fallback',
+    });
+    await first.body!.cancel('prepare v2 fixture');
+    const scopedStateKey = Array.from(storage.values.keys()).find((key) => (
+      key.startsWith(`${ARENA_GENERATION_CLIENT_STATE_KEY}:`)
+    ))!;
+    const persisted = JSON.parse(storage.getItem(scopedStateKey)!);
+    delete persisted.routePin;
+    persisted.version = 2;
+    storage.setItem(scopedStateKey, JSON.stringify(persisted));
+
+    const refreshFetcher = vi.fn(async () => response(
+      'id: 1-0\nevent: done\ndata: {"status":"completed"}\n\n',
+      'generation-v2-fallback',
+    ));
+    const refreshed = await openArenaGenerationStream({
+      endpoint: '/api/arena/generate-stream',
+      body: { mode: 'classic', v2Fallback: true },
+      headers: {},
+      fetcher: refreshFetcher,
+      storage,
+    });
+    await refreshed.text();
+
+    expect(refreshFetcher.mock.calls[0]?.[2]).toBeUndefined();
+  });
+
+  it('allows a production classifier to reject an auth/application TypeError', async () => {
+    const error = new TypeError('auth storage unavailable');
+    const fetcher = vi.fn().mockRejectedValue(error);
+    const states: string[] = [];
+
+    await expect(openArenaGenerationStream({
+      endpoint: '/api/arena/generate-stream',
+      body: { mode: 'classic' },
+      headers: {},
+      fetcher,
+      storage: new MemoryStorage(),
+      generationRequestId: 'request-production-classifier',
+      maxReconnectAttempts: 0,
+      isInitialCreateOutcomeAmbiguous: (candidate) => (
+        isGenerationApiClientErrorCode(candidate, 'AMBIGUOUS_OPERATION_OUTCOME')
+      ),
+      onStateChange: (state) => states.push(state),
+    })).rejects.toBe(error);
+
+    expect(fetcher.mock.calls.map(([, init]) => init?.method)).toEqual(['POST']);
+    expect(states).toEqual(['connecting', 'failed']);
+  });
+
+  it('does not resume a malformed generation id returned by request lookup', async () => {
+    const requestId = 'request-invalid-lookup-id';
+    const fetcher = vi.fn()
+      .mockRejectedValueOnce(new TypeError('initial response lost'))
+      .mockResolvedValueOnce(lookupResponse('bad', requestId))
+      .mockResolvedValueOnce(response(
+        'id: 1-0\nevent: done\ndata: {"status":"completed"}\n\n',
+        'generation-unexpected',
+      ));
+
+    await expect(openArenaGenerationStream({
+      endpoint: '/api/arena/generate-stream',
+      body: { mode: 'classic' },
+      headers: {},
+      fetcher,
+      storage: new MemoryStorage(),
+      generationRequestId: requestId,
+      maxReconnectAttempts: 0,
+    })).rejects.toThrow('ARENA_GENERATION_STATE_UNKNOWN');
+
+    expect(fetcher.mock.calls.map(([url, init]) => [url, init?.method])).toEqual([
+      ['/api/arena/generate-stream', 'POST'],
+      [`/api/arena/generation-requests/${requestId}`, 'GET'],
+    ]);
+  });
+
+  it('recovers a successful create handshake with a malformed generation id header', async () => {
+    const requestId = 'request-invalid-create-header';
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(response(
+        'id: 1-0\nevent: done\ndata: {"status":"completed"}\n\n',
+        'bad',
+      ))
+      .mockResolvedValueOnce(lookupResponse('generation-recovered', requestId))
+      .mockResolvedValueOnce(response(
+        'id: 1-0\nevent: done\ndata: {"status":"completed"}\n\n',
+        'generation-recovered',
+      ));
+
+    const opened = await openArenaGenerationStream({
+      endpoint: '/api/arena/generate-stream',
+      body: { mode: 'classic' },
+      headers: {},
+      fetcher,
+      storage: new MemoryStorage(),
+      generationRequestId: requestId,
+      maxReconnectAttempts: 0,
+    });
+    await opened.text();
+
+    expect(fetcher.mock.calls.map(([url, init]) => [url, init?.method])).toEqual([
+      ['/api/arena/generate-stream', 'POST'],
+      [`/api/arena/generation-requests/${requestId}`, 'GET'],
+      ['/api/arena/generations/generation-recovered/stream', 'GET'],
+    ]);
+  });
+
+  it('does not replace a valid lookup id with a malformed resume response header', async () => {
+    const requestId = 'request-invalid-resume-header';
+    const storage = new MemoryStorage();
+    const fetcher = vi.fn()
+      .mockRejectedValueOnce(new TypeError('initial response lost'))
+      .mockResolvedValueOnce(lookupResponse('generation-valid', requestId))
+      .mockResolvedValueOnce(response(
+        'id: 1-0\nevent: done\ndata: {"status":"completed"}\n\n',
+        'bad',
+      ));
+
+    const opened = await openArenaGenerationStream({
+      endpoint: '/api/arena/generate-stream',
+      body: { mode: 'classic' },
+      headers: {},
+      fetcher,
+      storage,
+      generationRequestId: requestId,
+      maxReconnectAttempts: 0,
+    });
+    await opened.text();
+
+    expect(opened.headers.get('X-Mahoshojo-Generation-Id')).toBe('generation-valid');
+    expect(JSON.parse(storage.getItem(ARENA_GENERATION_CLIENT_STATE_KEY)!)).toMatchObject({
+      generationId: 'generation-valid',
     });
   });
 
@@ -383,6 +788,74 @@ describe('resumable Arena generation client', () => {
     ]);
   });
 
+  it.each([
+    ['generationRequestId', { generationRequestId: 'bad' }],
+    ['generationId', { generationId: 'bad' }],
+  ] as const)('ignores persisted state with invalid %s', async (_field, invalidPatch) => {
+    const storage = new MemoryStorage();
+    const seedFetcher = vi.fn()
+      .mockRejectedValueOnce(new TypeError('initial response lost'))
+      .mockResolvedValueOnce(new Response(null, { status: 404 }));
+    await expect(openArenaGenerationStream({
+      endpoint: '/api/arena/generate-stream',
+      body: { mode: 'classic', persistedValidation: _field },
+      headers: {},
+      fetcher: seedFetcher,
+      storage,
+      maxReconnectAttempts: 0,
+    })).rejects.toThrow('ARENA_GENERATION_STATE_UNKNOWN');
+
+    const scopedStateKey = Array.from(storage.values.keys()).find((key) => (
+      key.startsWith(`${ARENA_GENERATION_CLIENT_STATE_KEY}:`)
+    ));
+    expect(scopedStateKey).toBeTruthy();
+    const persisted = JSON.parse(storage.getItem(scopedStateKey!)!);
+    storage.setItem(scopedStateKey!, JSON.stringify({
+      ...persisted,
+      state: 'recovering_initial',
+      ...invalidPatch,
+    }));
+
+    const fetcher = vi.fn(async () => response(
+      'id: 1-0\nevent: done\ndata: {"status":"completed"}\n\n',
+      'generation-fresh',
+    ));
+    const opened = await openArenaGenerationStream({
+      endpoint: '/api/arena/generate-stream',
+      body: { mode: 'classic', persistedValidation: _field },
+      headers: {},
+      fetcher,
+      storage,
+      generationRequestId: 'request-fresh-1234',
+      maxReconnectAttempts: 0,
+    });
+    await opened.text();
+
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(fetcher.mock.calls[0]?.[0]).toBe('/api/arena/generate-stream');
+    expect(fetcher.mock.calls[0]?.[1]?.method).toBe('POST');
+    expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body))).toMatchObject({
+      generationRequestId: 'request-fresh-1234',
+    });
+  });
+
+  it('rejects an invalid explicit request id before persistence or fetch', async () => {
+    const storage = new MemoryStorage();
+    const fetcher = vi.fn();
+
+    await expect(openArenaGenerationStream({
+      endpoint: '/api/arena/generate-stream',
+      body: { mode: 'classic' },
+      headers: {},
+      fetcher,
+      storage,
+      generationRequestId: 'bad',
+    })).rejects.toThrow('ARENA_GENERATION_REQUEST_ID_INVALID');
+
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(storage.values.size).toBe(0);
+  });
+
   it('does not reuse a pending request identity for a different semantic body', async () => {
     const storage = new MemoryStorage();
     let firstRequestId = '';
@@ -547,6 +1020,47 @@ describe('resumable Arena generation client', () => {
     ]);
   });
 
+  it('keeps delivered markdown and reports interruption after resume attempts are exhausted', async () => {
+    let delivered = false;
+    const partial = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (delivered) {
+          controller.error(new Error('network lost'));
+          return;
+        }
+        delivered = true;
+        controller.enqueue(new TextEncoder().encode(
+          'id: 1-0\nevent: markdown\ndata: {"chunk":"# 已交付正文"}\n\n',
+        ));
+      },
+    });
+    const states: string[] = [];
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(response(partial, 'generation-partial'))
+      .mockResolvedValue(new Response(JSON.stringify({ code: 'STATE_UNAVAILABLE' }), {
+        status: 503,
+        headers: { 'Content-Type': 'application/json' },
+      }));
+
+    const opened = await openArenaGenerationStream({
+      endpoint: '/api/arena/generate-stream',
+      body: { mode: 'classic', partial: true },
+      headers: {},
+      fetcher,
+      storage: new MemoryStorage(),
+      generationRequestId: 'request-partial-resume',
+      maxReconnectAttempts: 1,
+      baseReconnectDelayMs: 1,
+      random: () => 0,
+      onStateChange: (state) => states.push(state),
+    });
+
+    await expect(opened.text()).resolves.toContain('# 已交付正文');
+    expect(states).toContain('interrupted');
+    expect(states.at(-1)).toBe('interrupted');
+    expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
+  });
+
   it('does not use an unscoped v1 pointer to resume a possibly different request body', async () => {
     const storage = new MemoryStorage();
     storage.setItem(ARENA_GENERATION_CLIENT_STATE_KEY, JSON.stringify({
@@ -669,6 +1183,7 @@ describe('resumable Arena generation client', () => {
       endpoint: '/api/arena/generate-stream',
       body: {}, headers: {}, fetcher, storage: new MemoryStorage(),
       generationRequestId: `request-${cancelReason}`, signal: abort.signal,
+      getInitialRoutePin: () => ({ placement: 'hono-primary' }),
       onStateChange: (state) => states.push(state),
     });
     const pendingRead = opened.body!.getReader().read();
@@ -686,6 +1201,7 @@ describe('resumable Arena generation client', () => {
       method: 'POST',
       body: JSON.stringify({ reason: cancelReason }),
     });
+    expect(explicitCancels[0]?.[2]).toBeUndefined();
     expect(states).toContain('cancelling');
     expect(states.at(-1)).toBe('cancelled');
   });

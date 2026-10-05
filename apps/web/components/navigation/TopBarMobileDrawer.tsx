@@ -2,8 +2,8 @@ import { useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { X } from 'lucide-react';
 
-import type { NavGroupId } from '@/lib/navigation';
-import { NAV_GROUPS } from '@/lib/navigation';
+import type { NavGroupId } from '@mahoshojo/ui-web/navigation';
+import { NAV_GROUPS } from '@mahoshojo/ui-web/navigation';
 import { TopBarUserMenu } from '@/components/navigation/TopBarUserMenu';
 
 interface TopBarMobileDrawerProps {
@@ -90,6 +90,7 @@ export function TopBarMobileDrawer({
               <div className="mt-2 grid gap-1">
                 {group.items.map((item) => (
                   <Link
+                    prefetch={false}
                     key={item.href}
                     href={item.href}
                     target={item.isExternal ? '_blank' : undefined}

@@ -25,6 +25,11 @@ import { useGenerationApiIntentLatch } from '@/lib/use-generation-api-intent-lat
 import { resolveApiErrorMessage } from '@/lib/client/apiError';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { estimateMagicTeaPartyTokens, resolveMagicTeaPartyTokenBudget } from '@/lib/magic-tea-party/budget';
+import {
+  createMagicTeaPartyDraftState,
+  editMagicTeaPartyDraftState,
+  hydrateMagicTeaPartyDraftFromSession,
+} from '@/lib/magic-tea-party/draft-state';
 import { readMagicTeaPartyDraft, writeMagicTeaPartyDraft } from '@/lib/magic-tea-party/drafts';
 import { buildMagicTeaPartyHistory } from '@/lib/magic-tea-party/history';
 import { checkMagicTeaPartySensitiveText, maskMagicTeaPartyText } from '@/lib/magic-tea-party/import-safety';
@@ -137,6 +142,8 @@ export function MagicTeaPartyPage() {
     generateChoices,
     regenerateMessage,
     deleteMessage,
+    compactMessageContent,
+    getMessageCharLimit,
     generateSummary,
     clearSummary,
   } = useMagicTeaPartyChat({
@@ -156,8 +163,10 @@ export function MagicTeaPartyPage() {
   const [showRoleModal, setShowRoleModal] = useState(false);
   const [showScenarioModal, setShowScenarioModal] = useState(false);
 
-  const [draft, setDraft] = useState('');
+  const [draftState, setDraftState] = useState(() => createMagicTeaPartyDraftState(null, null));
   const draftPersistTimerRef = useRef<number | null>(null);
+  const draftStateRef = useRef(draftState);
+  const activeSessionRef = useRef(activeSession);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editingDraft, setEditingDraft] = useState('');
   const [tachieReferenceText, setTachieReferenceText] = useState('');
@@ -169,35 +178,54 @@ export function MagicTeaPartyPage() {
   const [isGeneratingUpdates, setIsGeneratingUpdates] = useState(false);
   const [isApplyingUpdates, setIsApplyingUpdates] = useState(false);
 
-  useEffect(() => {
-    if (!activeSessionId) {
-      setDraft('');
-      return;
-    }
-    const sessionDraft = typeof activeSession?.draft === 'string' ? activeSession.draft : null;
-    const storedDraft = readMagicTeaPartyDraft(activeSessionId);
-    setDraft(sessionDraft ?? storedDraft ?? '');
-  }, [activeSession?.draft, activeSessionId]);
+  const draft = draftState.sessionId === activeSessionId ? draftState.value : '';
+  draftStateRef.current = draftState;
+  activeSessionRef.current = activeSession;
+
+  const updateDraft = (value: string) => {
+    setDraftState((current) => editMagicTeaPartyDraftState(current, activeSessionId, value));
+  };
 
   useEffect(() => {
-    if (!activeSessionId) return;
-    writeMagicTeaPartyDraft(activeSessionId, draft);
-  }, [activeSessionId, draft]);
+    setDraftState(createMagicTeaPartyDraftState(
+      activeSessionId,
+      activeSessionId ? readMagicTeaPartyDraft(activeSessionId) : null
+    ));
+  }, [activeSessionId]);
 
   useEffect(() => {
-    if (!activeSession || !activeSessionId) return;
+    setDraftState((current) => hydrateMagicTeaPartyDraftFromSession(current, activeSession));
+  }, [activeSession]);
+
+  useEffect(() => {
+    if (draftState.canHydrateFromSession || !draftState.sessionId || draftState.sessionId !== activeSessionId) return;
+    writeMagicTeaPartyDraft(draftState.sessionId, draftState.value);
+  }, [activeSessionId, draftState]);
+
+  useEffect(() => {
+    const sessionId = draftState.sessionId;
+    if (
+      draftState.canHydrateFromSession ||
+      !sessionId ||
+      sessionId !== activeSessionId ||
+      activeSession?.id !== sessionId
+    ) return;
     if (draftPersistTimerRef.current) {
       clearTimeout(draftPersistTimerRef.current);
     }
-    const capped = draft.length > 20_000 ? draft.slice(0, 20_000) : draft;
+    const capped = draftState.value.length > 20_000 ? draftState.value.slice(0, 20_000) : draftState.value;
     draftPersistTimerRef.current = window.setTimeout(() => {
+      const latestDraft = draftStateRef.current;
+      const latestSession = activeSessionRef.current;
+      if (latestDraft.sessionId !== sessionId || latestDraft.value !== draftState.value) return;
+      if (!latestSession || latestSession.id !== sessionId) return;
       const trimmed = capped.trim();
       const nextDraft = trimmed ? capped : undefined;
-      if (nextDraft === activeSession.draft || (!nextDraft && !activeSession.draft)) return;
+      if (nextDraft === latestSession.draft || (!nextDraft && !latestSession.draft)) return;
       void persistSession({
-        ...activeSession,
+        ...latestSession,
         draft: nextDraft,
-        updatedAt: activeSession.updatedAt,
+        updatedAt: latestSession.updatedAt,
       });
     }, 400);
     return () => {
@@ -205,7 +233,7 @@ export function MagicTeaPartyPage() {
         clearTimeout(draftPersistTimerRef.current);
       }
     };
-  }, [activeSession, activeSessionId, draft, persistSession]);
+  }, [activeSession?.id, activeSessionId, draftState, persistSession]);
 
   useEffect(() => {
     setTachieReferenceText('');
@@ -262,7 +290,7 @@ export function MagicTeaPartyPage() {
     if (nextSessionId) {
       setEditingMessageId(null);
       setEditingDraft('');
-      setDraft('');
+      updateDraft('');
     }
   };
 
@@ -907,23 +935,26 @@ export function MagicTeaPartyPage() {
                     onCancelEdit={handleCancelEditMessage}
                     onConfirmEdit={handleConfirmEditMessage}
                     onDeleteMessage={(message) => void deleteMessage(message)}
+                    onCompactMessage={(message) => void compactMessageContent(message)}
+                    messageCharLimit={getMessageCharLimit()}
                   />
 
                   <MagicTeaPartyChatComposer
                     activeSession={activeSession}
                     preferences={preferences}
                     draft={draft}
-                    onDraftChange={setDraft}
+                    onDraftChange={updateDraft}
                     onSend={(value) => {
                       if (!value.trim()) return;
                       void handleSendMessage(value).then((sent) => {
-                        if (sent) setDraft('');
+                        if (sent) updateDraft('');
                       });
                     }}
                     onContinue={() => void handleContinueGeneration()}
                     onGenerateChoices={() => void handleGenerateChoices()}
                     isGenerating={isGenerating}
                     hasMessages={messages.length > 0}
+                    messageCharLimit={getMessageCharLimit()}
                   />
 
                   <MagicTeaPartyHistoryImageExportPanel

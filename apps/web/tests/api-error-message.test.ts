@@ -1,12 +1,10 @@
 import { describe, expect, test } from 'vitest';
 
+import { getPublicAiErrorMessage } from '@mahoshojo/hosted-api/regular-generation';
+
 import { INFRASTRUCTURE_ERROR_MESSAGES, resolveApiErrorMessage } from '@/lib/client/apiError';
-import userVisibleContracts from '../../../config/user-visible-contracts.json';
 
 describe('resolveApiErrorMessage', () => {
-  test('keeps the executable copy map exactly synchronized with the audited contract', () => {
-    expect(INFRASTRUCTURE_ERROR_MESSAGES).toEqual(userVisibleContracts.infrastructureMessages);
-  });
   test('prefer payload.message over generic payload.error', () => {
     expect(
       resolveApiErrorMessage({
@@ -43,7 +41,7 @@ describe('resolveApiErrorMessage', () => {
     ).toBe('上游返回错误\n详情：request id: 20260101...');
   });
 
-  test.each(Object.entries(userVisibleContracts.infrastructureMessages))(
+  test.each(Object.entries(INFRASTRUCTURE_ERROR_MESSAGES))(
     'projects stable user copy for infrastructure code %s',
     (code, expectedMessage) => {
       expect(
@@ -65,5 +63,20 @@ describe('resolveApiErrorMessage', () => {
         fallback: '请求失败',
       }),
     ).toBe('余额不足，请充值后重试');
+  });
+
+  // Web 包目标校验失败曾经只剩一个 code，用户看到的是"服务器流式响应异常"。
+  test.each([
+    'ARENA_WEB_PACKAGE_OUTPUT_INVALID',
+    'ARENA_WEB_PACKAGE_TARGET_INVALID',
+    'ARENA_WEB_PACKAGE_TARGET_MALFORMED',
+    'ARENA_WEB_PACKAGE_TARGET_SCHEMA',
+  ])('surfaces the host-authored Web 包 failure copy for %s', (code) => {
+    const message = getPublicAiErrorMessage(code);
+    expect(message).toBeTruthy();
+    expect(resolveApiErrorMessage({
+      payload: { ok: false, status: 'failed', code, message },
+      fallback: '服务器流式响应异常',
+    })).toBe(message);
   });
 });

@@ -4,13 +4,18 @@ import {
   type ArenaGenerationSubscription,
   type GenerationStreamEvent,
 } from '@mahoshojo/hosted-api/arena-generation/service';
+import { parseArenaStructuredReportJson } from '../arena-generation/structured-report';
+import { isWebArenaOutputContract } from '../arena-generation/output-contract';
+import { normalizeUsage } from '../node-runtime/usage';
+import { WebPackageArtifactSchema, type WebPackageArtifact } from '@mahoshojo/contracts/web-package';
 
 export const ARENA_COMPANION_OPERATION_HEADER = 'x-mahoshojo-arena-companion-operation';
 export const ARENA_COMPANION_PLACEMENT_HEADER = 'x-mahoshojo-arena-execution-placement';
 
 export type ArenaCompanionOperation = 'arena/generate' | 'generate-battle-story';
 export type ArenaCompanionResponseOperation = ArenaCompanionOperation
-  | 'arena/session/generate-next';
+  | 'arena/session/generate-next'
+  | 'arena/repair-combatant-meta';
 export type ArenaCompanionPlacement = 'hono-primary' | 'next-dr';
 
 export const withArenaCompanionResponseMarkers = (
@@ -46,7 +51,6 @@ export type ArenaCompanionProjectInput = {
   writeCurrentState: boolean;
   generationId: string;
   occurredAt: string;
-  baseRevisionHash: string | null;
 };
 
 export type ArenaCompanionServiceOptions = {
@@ -98,7 +102,10 @@ const isGenerationRequestId = (value: unknown): value is string => (
 
 export const readArenaCompanionJsonPayload = async (
   request: Request,
-): Promise<Record<string, unknown> | Response> => {
+): Promise<Readonly<{
+  payload: Record<string, unknown>;
+  bodyBytes: number;
+}> | Response> => {
   if (request.method !== 'POST') {
     return jsonResponse({ code: 'METHOD_NOT_ALLOWED', error: 'Method not allowed' }, 405);
   }
@@ -141,8 +148,10 @@ export const readArenaCompanionJsonPayload = async (
   }
   try {
     const parsed = JSON.parse(new TextDecoder().decode(body)) as unknown;
-    return recordOf(parsed)
-      ?? jsonResponse({ code: 'INVALID_REQUEST', error: '请求体必须是对象' }, 400);
+    const payload = recordOf(parsed);
+    return payload
+      ? { payload, bodyBytes }
+      : jsonResponse({ code: 'INVALID_REQUEST', error: '请求体必须是对象' }, 400);
   } catch {
     return jsonResponse({ code: 'INVALID_JSON', error: '请求体必须是 JSON' }, 400);
   }
@@ -231,6 +240,7 @@ type CollectedGeneration = {
   terminalErrorMessage: string | null;
   completed: boolean;
   occurredAt: string | null;
+  webPackage?: WebPackageArtifact;
 };
 
 const occurredAtFromEventId = (id: string): string | null => {
@@ -256,6 +266,7 @@ const collectSubscription = async (
   let terminalErrorMessage: string | null = null;
   let completed = false;
   let occurredAt: string | null = null;
+  let webPackage: WebPackageArtifact | undefined;
   const reader = subscription.events.getReader();
   try {
     while (true) {
@@ -263,6 +274,10 @@ const collectSubscription = async (
       if (next.done) break;
       const event = next.value;
       const data = eventData(event);
+      if (event.type === 'meta' || event.type === 'done') {
+        const artifact = WebPackageArtifactSchema.safeParse(data.webPackage);
+        if (artifact.success) webPackage = artifact.data;
+      }
       occurredAt ??= occurredAtFromEventId(event.id);
       if (event.type === 'markdown') markdown += rawTextOf(data.chunk);
       if (event.type === 'reasoning') reasoning += rawTextOf(data.chunk);
@@ -298,6 +313,7 @@ const collectSubscription = async (
     terminalErrorMessage,
     completed,
     occurredAt,
+    ...(webPackage ? { webPackage } : {}),
   };
 };
 
@@ -312,6 +328,7 @@ const rebuildRequest = (
   payload: Record<string, unknown>,
   generationRequestId: string,
   operation: ArenaCompanionOperation,
+  includeBody: boolean,
 ): Request => {
   const headers = new Headers(source.headers);
   headers.set('Content-Type', 'application/json; charset=utf-8');
@@ -320,11 +337,13 @@ const rebuildRequest = (
   return new Request(source.url, {
     method: 'POST',
     headers,
-    body: JSON.stringify({
-      ...payload,
-      forceStreamMeta: true,
-      generationRequestId,
-    }),
+    ...(includeBody ? {
+      body: JSON.stringify({
+        ...payload,
+        forceStreamMeta: true,
+        generationRequestId,
+      }),
+    } : {}),
     signal: source.signal,
   });
 };
@@ -336,8 +355,9 @@ export const createArenaCompanionService = (
     request: Request,
     requestedOperation?: ArenaCompanionOperation,
   ): Promise<Response> {
-    const payload = await readArenaCompanionJsonPayload(request);
-    if (payload instanceof Response) return payload;
+    const parsedBody = await readArenaCompanionJsonPayload(request);
+    if (parsedBody instanceof Response) return parsedBody;
+    const { payload, bodyBytes } = parsedBody;
     if ('generationRequestId' in payload && !isGenerationRequestId(payload.generationRequestId)) {
       return jsonResponse({
         code: 'INVALID_GENERATION_REQUEST_ID',
@@ -348,9 +368,16 @@ export const createArenaCompanionService = (
       ? payload.generationRequestId.trim()
       : options.createGenerationRequestId?.() ?? crypto.randomUUID();
     const operation = requestedOperation ?? operationFromRequest(request);
-    const upstream = await options.generationService.createSubscription(
-      rebuildRequest(request, payload, generationRequestId, operation),
-    );
+    const upstreamPayload: Record<string, unknown> = { ...payload, forceStreamMeta: true };
+    delete upstreamPayload.generationRequestId;
+    const upstream = options.generationService.createParsedSubscription
+      ? await options.generationService.createParsedSubscription(
+        rebuildRequest(request, upstreamPayload, generationRequestId, operation, false),
+        { generationRequestId, payload: upstreamPayload, bodyBytes },
+      )
+      : await options.generationService.createSubscription(
+        rebuildRequest(request, payload, generationRequestId, operation, true),
+      );
     if (upstream instanceof Response) return upstream;
     let collected: CollectedGeneration;
     try {
@@ -371,21 +398,49 @@ export const createArenaCompanionService = (
     }
 
     const headerMeta = parseHeaderMeta(upstream.headers);
+    const isWeb = isWebArenaOutputContract(headerMeta.outputContract) || Boolean(collected.webPackage);
+    const writeArenaHistory = booleanOf(payload.writeArenaHistory, true);
+    const writeCurrentState = booleanOf(payload.writeCurrentState, true);
+    const structuredReport = isWeb ? null : parseArenaStructuredReportJson(collected.markdown, {
+      enableImpacts: writeArenaHistory || writeCurrentState,
+      enableImpactText: writeArenaHistory,
+      enableCurrentState: writeCurrentState,
+    });
+    const expectsStructuredReport = headerMeta.outputContract === 'structured-report'
+      || !isWeb && collected.markdown.trimStart().startsWith('{');
+    if (expectsStructuredReport && !structuredReport) {
+      return jsonResponse({
+        code: 'ARENA_STRUCTURED_REPORT_INVALID',
+        error: 'Arena structured report validation failed',
+        generationId: upstream.generationId,
+      }, 502, upstream.headers);
+    }
     const metaReport = recordOf(collected.meta.report) ?? {};
-    const headline = textOf(metaReport.headline) || headlineFromMarkdown(collected.markdown);
-    const winner = textOf(metaReport.winner) || section(collected.markdown, '(?:胜利者|winner)');
-    const conclusion = section(collected.markdown, '(?:最终结果|final result)');
-    const impacts = normalizeImpacts(collected.meta.impacts);
+    const structuredArticle = recordOf(structuredReport?.article);
+    const structuredOfficialReport = recordOf(structuredReport?.officialReport);
+    const headline = textOf(structuredReport?.headline)
+      || textOf(metaReport.headline)
+      || (isWeb ? '' : headlineFromMarkdown(collected.markdown));
+    const winner = textOf(structuredOfficialReport?.winner)
+      || textOf(metaReport.winner)
+      || (isWeb ? '' : section(collected.markdown, '(?:胜利者|winner)'));
+    const conclusion = textOf(structuredOfficialReport?.conclusion)
+      || (isWeb ? '' : section(collected.markdown, '(?:最终结果|final result)'));
+    const impacts = normalizeImpacts(structuredReport?.impacts ?? collected.meta.impacts);
     const reporterInfo = recordOf(headerMeta.reporterInfo) ?? { name: '', publication: '' };
-    const usage = recordOf(collected.telemetry.usage);
+    const usage = normalizeUsage(collected.telemetry.usage);
+    const telemetryReasoning = recordOf(collected.telemetry.reasoning);
     const model = textOf(collected.telemetry.model);
     const mode = textOf(payload.mode) || 'classic';
     const report: Record<string, unknown> = {
+      ...(structuredReport ?? {}),
+      ...(isWeb ? { reportFormat: 'web', ...(collected.webPackage
+        ? { webPackage: collected.webPackage } : { webHtml: collected.markdown }) } : {}),
       headline,
       reporterInfo,
       article: {
-        body: bodyFromMarkdown(collected.markdown),
-        analysis: analysisFromMarkdown(collected.markdown),
+        body: isWeb ? collected.markdown : textOf(structuredArticle?.body) || bodyFromMarkdown(collected.markdown),
+        analysis: isWeb ? '' : textOf(structuredArticle?.analysis) || analysisFromMarkdown(collected.markdown),
       },
       officialReport: { winner, conclusion },
       mode,
@@ -398,7 +453,9 @@ export const createArenaCompanionService = (
       ...(typeof headerMeta.narrativeHistoryReadCount === 'number'
         ? { narrativeHistoryReadCount: headerMeta.narrativeHistoryReadCount }
         : {}),
-      ...(collected.reasoning
+      ...(telemetryReasoning
+        ? { aiReasoning: telemetryReasoning }
+        : collected.reasoning
         ? { aiReasoning: { text: collected.reasoning, status: 'complete' } }
         : {}),
     };
@@ -410,11 +467,10 @@ export const createArenaCompanionService = (
         impacts,
         userGuidance: textOf(headerMeta.userGuidance) || null,
         scenario: recordOf(payload.scenario),
-        writeArenaHistory: booleanOf(payload.writeArenaHistory, true),
-        writeCurrentState: booleanOf(payload.writeCurrentState, true),
+        writeArenaHistory,
+        writeCurrentState,
         generationId: upstream.generationId,
         occurredAt: collected.occurredAt ?? new Date(0).toISOString(),
-        baseRevisionHash: textOf(payload.baseRevisionHash) || null,
       });
     } catch {
       return jsonResponse({

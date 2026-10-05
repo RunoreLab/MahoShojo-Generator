@@ -1,5 +1,7 @@
 # Challenge 完整对手卡与低 Rows Read Implementation Plan
 
+> 状态：superseded（2026-09-19）。维护者已确认放弃肉鸽半成品；本文保留为历史设计，当前行为以[肉鸽挑战功能退休规格](../specs/2026-09-19_180000_肉鸽挑战功能退休规格.md)为准。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 让 `/challenge` 的竞技场对手只在“完整公开卡可读且可渲染”时进入 remote 候选池，节点主链路改为服务端选敌并回传瞬时 sidecar，失败时稳定回退 `preset-only`，同时把额外 D1 读约束在有限 leaderboard 窗口与最多两次 `id IN (...)` 查询内。

@@ -12,9 +12,11 @@ describe('G25D repository data tooling ownership', () => {
   ])('%s uses the app-owned pinned Wrangler without network fallback', (scriptPath) => {
     const source = read(scriptPath);
 
-    expect(source).toContain("spawnSync('pnpm'");
-    expect(source).toContain("'--filter', WRANGLER_WORKSPACE, 'exec', 'wrangler'");
     expect(source).toContain("const WRANGLER_WORKSPACE = '@mahoshojo/web';");
+    expect(source).toContain("'--filter', WRANGLER_WORKSPACE, 'exec', 'wrangler'");
+    expect(source).toContain('node_modules/wrangler/bin/wrangler.js');
+    expect(source).toContain('spawnSync(process.execPath, [wranglerBin, ...commandArgs]');
+    expect(source).not.toContain('dlx');
     expect(source).not.toContain("spawnSync('npx'");
     expect(source).not.toContain("'--yes'");
   });

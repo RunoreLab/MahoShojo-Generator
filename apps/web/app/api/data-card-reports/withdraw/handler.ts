@@ -1,4 +1,4 @@
-import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
+import { json, readJson, requireAuthUser, withApiErrorBoundary } from '@/lib/api/server';
 import {
   DataCardReportConflictError,
   DataCardReportsServiceUnavailableError,
@@ -80,5 +80,5 @@ export const createDataCardReportWithdrawHandler =
     }
   };
 
-export const appRouteHandler = withPvpErrorBoundary(createDataCardReportWithdrawHandler());
+export const appRouteHandler = withApiErrorBoundary(createDataCardReportWithdrawHandler());
 export default appRouteHandler;

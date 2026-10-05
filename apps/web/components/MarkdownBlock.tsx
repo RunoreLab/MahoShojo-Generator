@@ -1,389 +1,63 @@
+'use client';
+
 import Link from 'next/link';
-import ReactMarkdown, { type Components, type ExtraProps } from 'react-markdown';
-import rehypeKatex from 'rehype-katex';
-import remarkGfm from 'remark-gfm';
-import remarkMath from 'remark-math';
+
+import {
+  MarkdownBlock as SharedMarkdownBlock,
+  type ExternalMediaPolicy,
+  type InternalLinkRenderProps,
+  type MarkdownBlockProps,
+  type MarkdownPlugin,
+} from '@mahoshojo/ui-web/markdown';
 
 import remarkBattleTable from '@/lib/markdown/remarkBattleTable';
-import { fixNestedListIndentation } from '@/lib/markdown/fix-list-indentation';
-import {
-  formatMarkdownImage,
-  formatMarkdownLink,
-  isAllowedExternalMediaUrl,
-  isLikelyAudioUrl,
-  isLikelyVideoUrl,
-  resolveExternalMediaUrl,
-} from '@/lib/markdown/externalMedia';
+import { webExternalMediaPolicy } from '@/lib/markdown/externalMedia';
+import { renderWebExternalLink } from './markdown-link-adapters';
 
-type MarkdownCodeProps = React.ComponentPropsWithoutRef<'code'> & ExtraProps & { inline?: boolean };
+/**
+ * Web 的 Markdown 包装。
+ *
+ * 它是 `DESK-PROD-002` 要求的「Web 回用同一实现」的具体形态：本文件**不再持有任何渲染逻辑**，
+ * 只提供三样宿主事实——竞技场领域插件、外部媒体策略（白名单 + 网易云等地址知识），以及站内/站外
+ * 链接的接法。删掉这个包装里的任何一行，剩下的仍然是 Desktop 也在跑的那份共享实现。
+ *
+ * ## 领域插件为什么留在这里
+ *
+ * `remarkBattleTable` 把战报里的对局表格语法翻译成 mdast 表格。它是竞技场领域知识：百科不需要它，
+ * 而让 Desktop 的百科页依赖它会让 `ui-web` 变成倾倒包（`packages/README.md`）。因此共享层把它留成
+ * 注入点，由本文件按既有顺序插在 GFM 与数学公式之间。
+ *
+ * ## 站内链接走 `next/link`
+ *
+ * 共享实现默认渲染普通 `<a>`，正文里的站内链接因此是整页加载。这里换成 `<Link>`：百科正文与战报正文
+ * 里有大量站内互链，整页加载会让每次跳转都重新拉起整个应用壳。用 `renderInternalLink` 而不是
+ * `onNavigateInternal` + `useRouter()`，是因为后者会让本组件在 App Router 之外无法渲染——
+ * 而 `/encyclopedia/[slug]` 是 SSG 预渲染的，测试里也直接 `renderToStaticMarkup`，两者都不在
+ * Router 上下文里。
+ */
 
-export type MarkdownBlockVariant = 'light' | 'dark';
-export type MarkdownBlockMode = 'compact' | 'article';
+const WEB_REMARK_PLUGINS: readonly MarkdownPlugin[] = [remarkBattleTable];
 
-export interface MarkdownBlockProps {
-  content: string;
-  variant?: MarkdownBlockVariant;
-  mode?: MarkdownBlockMode;
-  className?: string;
-}
+const renderInternalLink = ({ href, title, className, children }: InternalLinkRenderProps) => (
+  <Link href={href} title={title} className={className} prefetch={false}>
+    {children}
+  </Link>
+);
 
-const getEncyclopediaHrefFromInlineCode = (value: string) => {
-  const trimmed = value.trim();
-  if (!trimmed.startsWith('/encyclopedia/')) return null;
-  const match = trimmed.match(/^\/encyclopedia\/[a-z0-9-]+(?:#[A-Za-z0-9-_]+)?$/);
-  return match ? trimmed : null;
-};
+export type {
+  MarkdownBlockMode,
+  MarkdownBlockProps,
+  MarkdownBlockVariant,
+} from '@mahoshojo/ui-web/markdown';
 
-export function MarkdownBlock({ content, variant = 'dark', mode = 'compact', className }: MarkdownBlockProps) {
-  const borderClass = variant === 'light' ? 'border-gray-200' : 'border-white/15';
-  const headerBgClass = variant === 'light' ? 'bg-gray-50' : 'bg-white/10';
-  const cellBorderClass = variant === 'light' ? 'border-gray-200' : 'border-white/10';
-  const rowDividerClass = variant === 'light' ? 'divide-gray-200' : 'divide-white/10';
-  const textClass = variant === 'light' ? 'text-gray-800' : 'text-white/90';
-  const mutedTextClass = variant === 'light' ? 'text-gray-600' : 'text-white/70';
-
-  const isArticle = mode === 'article';
-  const paragraphClass = isArticle
-    ? `my-3 whitespace-normal break-words leading-7 ${textClass}`
-    : `my-0 whitespace-pre-wrap break-words leading-relaxed ${textClass}`;
-  const unorderedListClass = isArticle
-    ? `my-3 list-disc pl-6 space-y-1 ${textClass}`
-    : `my-1 list-disc pl-5 space-y-1 ${textClass}`;
-  const orderedListClass = isArticle
-    ? `my-3 list-decimal pl-6 space-y-1 ${textClass}`
-    : `my-1 list-decimal pl-5 space-y-1 ${textClass}`;
-  const blockquoteClass = isArticle
-    ? `my-4 border-l-4 ${borderClass} pl-4 text-sm leading-6 ${mutedTextClass} [&>p]:my-1 [&>p]:leading-6`
-    : `my-2 border-l-4 ${borderClass} pl-3 ${mutedTextClass}`;
-  const hrClass = isArticle ? `my-6 ${borderClass}` : `my-3 ${borderClass}`;
-  const preClass = isArticle
-    ? `my-4 overflow-x-auto rounded-lg border ${borderClass} bg-black/10 p-3 text-xs leading-relaxed ${textClass}`
-    : `my-2 overflow-x-auto rounded-lg border ${borderClass} bg-black/10 p-3 text-xs leading-relaxed ${textClass}`;
-
-  const getLinkText = (children: React.ReactNode) => {
-    if (typeof children === 'string') return children;
-    if (Array.isArray(children)) {
-      return children.filter((child): child is string => typeof child === 'string').join('');
-    }
-    return '';
-  };
-
-  const normalizeHref = (href: string) => (href.startsWith('//') ? `https:${href}` : href);
-
-  const components: Components = {
-    h1: ({ children }) =>
-      isArticle ? (
-        <h2 className={`mt-8 mb-3 text-lg font-semibold leading-tight first:mt-0 ${textClass}`}>{children}</h2>
-      ) : (
-        <h3 className={`mt-3 mb-2 text-base font-semibold ${textClass}`}>{children}</h3>
-      ),
-    h2: ({ children }) =>
-      isArticle ? (
-        <h3 className={`mt-7 mb-3 text-base font-semibold leading-tight ${textClass}`}>{children}</h3>
-      ) : (
-        <h4 className={`mt-3 mb-2 text-sm font-semibold ${textClass}`}>{children}</h4>
-      ),
-    h3: ({ children }) =>
-      isArticle ? (
-        <h4 className={`mt-5 mb-2 text-sm font-semibold leading-tight ${textClass}`}>{children}</h4>
-      ) : (
-        <h5 className={`mt-2 mb-1 text-sm font-semibold ${textClass}`}>{children}</h5>
-      ),
-    p: ({ children }) => <p className={paragraphClass}>{children}</p>,
-    ul: ({ children }) => <ul className={unorderedListClass}>{children}</ul>,
-    ol: ({ children }) => <ol className={orderedListClass}>{children}</ol>,
-    li: ({ children }) => <li className="break-words">{children}</li>,
-    a: ({ href, title, children, ...props }) => {
-      const rawHref = typeof href === 'string' ? href : '';
-      const isExternal = /^https?:\/\//i.test(rawHref);
-      const isAudioLink = Boolean(rawHref && isLikelyAudioUrl(rawHref));
-      const isVideoLink = Boolean(rawHref && isLikelyVideoUrl(rawHref));
-      const normalizedHref = rawHref ? normalizeHref(rawHref) : '';
-      const isAudioAllowed = isAudioLink && isAllowedExternalMediaUrl(rawHref, 'audio');
-      const isVideoAllowed = isVideoLink && isAllowedExternalMediaUrl(rawHref, 'video');
-      const linkText = getLinkText(children) || '播放音频';
-      const resolvedAudioHref = isAudioLink ? resolveExternalMediaUrl(rawHref, 'audio') : normalizedHref;
-      const resolvedVideoHref = isVideoLink ? resolveExternalMediaUrl(rawHref, 'video') : normalizedHref;
-
-      if (isAudioLink) {
-        if (!isAudioAllowed) {
-          return (
-            <code
-              className={`font-mono text-xs rounded px-1 py-0.5 break-all ${
-                variant === 'light' ? 'bg-gray-100 text-gray-800' : 'bg-white/10 text-pink-200'
-              }`}
-            >
-              {formatMarkdownLink(linkText, rawHref, title)}
-            </code>
-          );
-        }
-
-        return (
-          <span className="inline-flex max-w-full flex-col gap-1 align-middle">
-            <audio
-              controls
-              preload="none"
-              src={resolvedAudioHref}
-              className="h-8 max-w-full"
-            />
-            <a
-              href={resolvedAudioHref}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={`text-[11px] underline underline-offset-2 ${
-                variant === 'light' ? 'text-blue-700' : 'text-blue-200'
-              }`}
-              {...props}
-            >
-              {linkText}
-            </a>
-          </span>
-        );
-      }
-
-      if (isVideoLink) {
-        const videoLabel = getLinkText(children) || '播放视频';
-        if (!isVideoAllowed) {
-          return (
-            <code
-              className={`font-mono text-xs rounded px-1 py-0.5 break-all ${
-                variant === 'light' ? 'bg-gray-100 text-gray-800' : 'bg-white/10 text-pink-200'
-              }`}
-            >
-              {formatMarkdownLink(videoLabel, rawHref, title)}
-            </code>
-          );
-        }
-
-        return (
-          <span className="inline-flex max-w-full flex-col gap-1 align-middle">
-            <video
-              controls
-              preload="metadata"
-              playsInline
-              src={resolvedVideoHref}
-              className={`my-2 max-w-full rounded-md border ${borderClass}`}
-            />
-            <a
-              href={resolvedVideoHref}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={`text-[11px] underline underline-offset-2 ${
-                variant === 'light' ? 'text-blue-700' : 'text-blue-200'
-              }`}
-              {...props}
-            >
-              {videoLabel}
-            </a>
-          </span>
-        );
-      }
-
-      return (
-        <a
-          href={href}
-          target={isExternal ? '_blank' : undefined}
-          rel={isExternal ? 'noopener noreferrer' : undefined}
-          className={[
-            'underline underline-offset-2 transition-opacity hover:opacity-100',
-            variant === 'light' ? 'text-blue-700 opacity-95' : 'text-blue-200 opacity-90',
-          ].join(' ')}
-          {...props}
-        >
-          {children}
-        </a>
-      );
-    },
-    blockquote: ({ children }) => <blockquote className={blockquoteClass}>{children}</blockquote>,
-    hr: () => <hr className={hrClass} />,
-    pre: ({ children }) => <pre className={preClass}>{children}</pre>,
-    code: ({ inline, className: codeClassName, children, node, ...props }: MarkdownCodeProps) => {
-      void node;
-
-      const text =
-        typeof children === 'string'
-          ? children
-          : Array.isArray(children)
-            ? children.filter((child): child is string => typeof child === 'string').join('')
-            : '';
-
-      const looksLikeBlock = Boolean(codeClassName && /\blanguage-/.test(codeClassName)) || text.includes('\n');
-      const isInline = typeof inline === 'boolean' ? inline : !looksLikeBlock;
-
-      if (isInline) {
-        const encyclopediaHref = getEncyclopediaHrefFromInlineCode(text);
-        if (encyclopediaHref) {
-          return (
-            <Link
-              href={encyclopediaHref}
-              className="inline-flex rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-300"
-              title="打开对应百科条目"
-            >
-              <code
-                className={`font-mono text-xs rounded px-1 py-0.5 ${
-                  variant === 'light' ? 'bg-gray-100 text-gray-800' : 'bg-white/10 text-pink-200'
-                } underline underline-offset-2 decoration-dotted hover:decoration-solid`}
-                {...props}
-              >
-                {text}
-              </code>
-            </Link>
-          );
-        }
-      }
-
-      return isInline ? (
-        <code
-          className={`font-mono text-xs rounded px-1 py-0.5 ${variant === 'light' ? 'bg-gray-100 text-gray-800' : 'bg-white/10 text-pink-200'}`}
-          {...props}
-        >
-          {children}
-        </code>
-      ) : (
-        <code className={['font-mono text-xs', codeClassName].filter(Boolean).join(' ')} {...props}>
-          {children}
-        </code>
-      );
-    },
-    table: ({ children }) => (
-      <div className={`my-2 overflow-x-auto rounded-lg border ${borderClass} bg-black/10`}>
-        <table className={`min-w-full border-collapse text-left text-sm ${textClass}`}>{children}</table>
-      </div>
-    ),
-    thead: ({ children }) => <thead className={headerBgClass}>{children}</thead>,
-    // 全局深色模式会重写基础的 bg-white/bg-gray-* utility。
-    // odd:/even: 前缀会生成不同的选择器，无法命中该兼容层，因此浅色表格的
-    // 行背景不能直接使用 odd:bg-white / even:bg-gray-*。
-    tbody: ({ children }) => (
-      <tbody className={`divide-y ${rowDividerClass}${variant === 'light' ? ' bg-white' : ''}`}>{children}</tbody>
-    ),
-    tr: ({ children }) => (
-      <tr className={variant === 'light' ? 'even:bg-black/5' : 'odd:bg-white/5'}>
-        {children}
-      </tr>
-    ),
-    th: ({ children }) => (
-      <th className={`px-3 py-2 font-semibold border-b ${cellBorderClass} whitespace-nowrap`}>{children}</th>
-    ),
-    td: ({ children }) => (
-      <td className={`px-3 py-2 align-top border-b ${variant === 'light' ? 'border-gray-100' : 'border-white/5'} whitespace-pre-wrap break-words`}>
-        {children}
-      </td>
-    ),
-    img: ({ src, alt, title, ...props }) => {
-      const rawSrc = typeof src === 'string' ? src : '';
-      const isAudioLink = Boolean(rawSrc && isLikelyAudioUrl(rawSrc));
-      const isVideoLink = Boolean(rawSrc && isLikelyVideoUrl(rawSrc));
-      if (isAudioLink) {
-        const isAudioAllowed = isAllowedExternalMediaUrl(rawSrc, 'audio');
-        const normalizedSrc = resolveExternalMediaUrl(rawSrc, 'audio');
-        const audioLabel = typeof alt === 'string' && alt.trim() ? alt.trim() : '播放音频';
-
-        if (!isAudioAllowed) {
-          return (
-            <code
-              className={`font-mono text-xs rounded px-1 py-0.5 break-all ${
-                variant === 'light' ? 'bg-gray-100 text-gray-800' : 'bg-white/10 text-pink-200'
-              }`}
-            >
-              {formatMarkdownImage(alt, rawSrc, title)}
-            </code>
-          );
-        }
-
-        return (
-          <span className="inline-flex max-w-full flex-col gap-1 align-middle">
-            <audio controls preload="none" src={normalizedSrc} className="h-8 max-w-full" />
-            <a
-              href={normalizedSrc}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={`text-[11px] underline underline-offset-2 ${
-                variant === 'light' ? 'text-blue-700' : 'text-blue-200'
-              }`}
-            >
-              {audioLabel}
-            </a>
-          </span>
-        );
-      }
-
-      if (isVideoLink) {
-        const isVideoAllowed = isAllowedExternalMediaUrl(rawSrc, 'video');
-        const normalizedSrc = resolveExternalMediaUrl(rawSrc, 'video');
-        const videoLabel = typeof alt === 'string' && alt.trim() ? alt.trim() : '播放视频';
-
-        if (!isVideoAllowed) {
-          return (
-            <code
-              className={`font-mono text-xs rounded px-1 py-0.5 break-all ${
-                variant === 'light' ? 'bg-gray-100 text-gray-800' : 'bg-white/10 text-pink-200'
-              }`}
-            >
-              {formatMarkdownImage(alt, rawSrc, title)}
-            </code>
-          );
-        }
-
-        return (
-          <span className="inline-flex max-w-full flex-col gap-1 align-middle">
-            <video
-              controls
-              preload="metadata"
-              playsInline
-              src={normalizedSrc}
-              className={`my-2 max-w-full rounded-md border ${borderClass}`}
-            />
-            <a
-              href={normalizedSrc}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={`text-[11px] underline underline-offset-2 ${
-                variant === 'light' ? 'text-blue-700' : 'text-blue-200'
-              }`}
-            >
-              {videoLabel}
-            </a>
-          </span>
-        );
-      }
-
-      const isAllowed = isAllowedExternalMediaUrl(rawSrc, 'image');
-      const normalizedSrc = resolveExternalMediaUrl(rawSrc, 'image');
-      if (!isAllowed) {
-        return (
-          <code
-            className={`font-mono text-xs rounded px-1 py-0.5 break-all ${
-              variant === 'light' ? 'bg-gray-100 text-gray-800' : 'bg-white/10 text-pink-200'
-            }`}
-          >
-            {formatMarkdownImage(alt, rawSrc, title)}
-          </code>
-        );
-      }
-
-      return (
-        <img
-          src={normalizedSrc}
-          alt={typeof alt === 'string' ? alt : ''}
-          title={typeof title === 'string' ? title : undefined}
-          className={`my-2 max-w-full rounded-md border ${variant === 'light' ? 'border-gray-200' : 'border-white/10'}`}
-          loading="lazy"
-          {...props}
-        />
-      );
-    },
-  };
-
+export function MarkdownBlock(props: MarkdownBlockProps) {
   return (
-    <div className={className}>
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkBattleTable, [remarkMath, { singleDollarTextMath: true }]]}
-        rehypePlugins={[[rehypeKatex, { throwOnError: false, strict: 'ignore' }]]}
-        components={components}
-      >
-        {fixNestedListIndentation(content)}
-      </ReactMarkdown>
-    </div>
+    <SharedMarkdownBlock
+      {...props}
+      renderInternalLink={renderInternalLink}
+      renderExternalLink={renderWebExternalLink}
+      externalMediaPolicy={webExternalMediaPolicy satisfies ExternalMediaPolicy}
+      remarkPlugins={WEB_REMARK_PLUGINS}
+    />
   );
 }

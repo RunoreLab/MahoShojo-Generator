@@ -1,0 +1,270 @@
+import {
+  LocalWebPackageArchiveSchema,
+  LocalWebPackagePageSchema,
+  LocalWebPackageQuerySchema,
+  LocalWebPackageRecordV1Schema,
+  type LocalWebPackagePage,
+  type LocalWebPackageQuery,
+  type LocalWebPackageRecordV1,
+  type WebPackageRepository,
+  type WebPackageWriteOutcome,
+} from '@mahoshojo/local-library/web-package-record';
+
+import {
+  LOCAL_LIBRARY_INDEX_NAMES,
+  LOCAL_LIBRARY_STORE_NAMES,
+  addLocalLibraryRecord,
+  deleteLocalLibraryRecord,
+  getAllLocalLibraryRecords,
+  getLocalLibraryRecord,
+  isConstraintError,
+  monotonicNowIso,
+  putLocalLibraryRecord,
+  runLocalLibraryTransaction,
+  toDetachedArrayBuffer,
+  toStoredBytes,
+} from './db';
+
+const parseCursor = (cursor: string | undefined): number => {
+  if (cursor === undefined) return 0;
+  const offset = Number(cursor);
+  return Number.isSafeInteger(offset) && offset >= 0 ? offset : 0;
+};
+
+const promisifyKeys = (request: IDBRequest<IDBValidKey[]>): Promise<IDBValidKey[]> =>
+  new Promise((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error ?? new Error('IndexedDB 请求失败。'));
+  });
+
+// `deriveLocalWebPackageId` 的权威实现在 @mahoshojo/local-library：包 id 是跨运行时共享的
+// 数据，派生规则不能是某个前端的私有细节。Web 与 Desktop 共用同一个实现。
+
+export class IndexedDbWebPackageRepository implements WebPackageRepository {
+  async get(id: string): Promise<LocalWebPackageRecordV1 | null> {
+    const stored = await runLocalLibraryTransaction(LOCAL_LIBRARY_STORE_NAMES.webPackages, 'readonly', (transaction) =>
+      getLocalLibraryRecord<LocalWebPackageRecordV1>(transaction.objectStore(LOCAL_LIBRARY_STORE_NAMES.webPackages), id),
+    );
+    if (stored === undefined) return null;
+    const parsed = LocalWebPackageRecordV1Schema.safeParse(stored);
+    if (!parsed.success) {
+      throw new Error('本地库中存在无法解析的 Web 包记录。');
+    }
+    return parsed.data;
+  }
+
+  async findByDigest(digest: string): Promise<LocalWebPackageRecordV1 | null> {
+    const stored = await runLocalLibraryTransaction(LOCAL_LIBRARY_STORE_NAMES.webPackages, 'readonly', (transaction) =>
+      getLocalLibraryRecord<LocalWebPackageRecordV1>(
+        transaction.objectStore(LOCAL_LIBRARY_STORE_NAMES.webPackages).index(LOCAL_LIBRARY_INDEX_NAMES.byDigest),
+        digest,
+      ),
+    );
+    if (stored === undefined) return null;
+    const parsed = LocalWebPackageRecordV1Schema.safeParse(stored);
+    return parsed.success ? parsed.data : null;
+  }
+
+  /** `unreadable` 列出被跳过的损坏行 ID；为空表示全部可读。 */
+  async list(query: LocalWebPackageQuery): Promise<LocalWebPackagePage & { unreadable: string[] }> {
+    const parsedQuery = LocalWebPackageQuerySchema.parse(query);
+    const offset = parseCursor(parsedQuery.cursor);
+    const rows = await runLocalLibraryTransaction(LOCAL_LIBRARY_STORE_NAMES.webPackages, 'readonly', (transaction) =>
+      getAllLocalLibraryRecords<LocalWebPackageRecordV1>(
+        transaction.objectStore(LOCAL_LIBRARY_STORE_NAMES.webPackages).index(LOCAL_LIBRARY_INDEX_NAMES.byUpdatedAt),
+      ),
+    );
+
+    // 逐行解析：一条坏行不该让整个本地库显示为"读取失败"的空列表。
+    const unreadable: string[] = [];
+    const parsed = rows.flatMap((row) => {
+      const result = LocalWebPackageRecordV1Schema.safeParse(row);
+      if (result.success) return [result.data];
+      unreadable.push(typeof row?.id === 'string' ? row.id : '(未知)');
+      return [];
+    });
+
+    const matching = parsed
+      .filter((row) => parsedQuery.includeDeleted === true || row.deletedAt === undefined)
+      .sort((left, right) => {
+        if (left.updatedAt !== right.updatedAt) return right.updatedAt.localeCompare(left.updatedAt);
+        return left.id.localeCompare(right.id);
+      });
+
+    const page = matching.slice(offset, offset + parsedQuery.limit);
+    const nextOffset = offset + page.length;
+    return {
+      ...LocalWebPackagePageSchema.parse({
+        items: page,
+        ...(nextOffset < matching.length ? { nextCursor: String(nextOffset) } : {}),
+      }),
+      unreadable,
+    };
+  }
+
+  /**
+   * `insert-if-absent`：只在 id 尚不存在时写入记录与 archive 字节，已存在则两者都不动。
+   *
+   * 用 `add` 而不是"先 `get` 再 `put`"：后者把原子性变成两个请求之间的一个约定。
+   *
+   * "两者都不动"包含 archive 字节：先把记录写进去再遇到键冲突会留下一份没人引用的副本。
+   */
+  async putIfAbsent(
+    record: LocalWebPackageRecordV1,
+    archive: Uint8Array,
+  ): Promise<WebPackageWriteOutcome> {
+    const parsed = LocalWebPackageRecordV1Schema.parse(record);
+    const bytes = toDetachedArrayBuffer(archive);
+    try {
+      await runLocalLibraryTransaction(
+        [LOCAL_LIBRARY_STORE_NAMES.webPackages, LOCAL_LIBRARY_STORE_NAMES.webPackageArchives],
+        'readwrite',
+        async (transaction) => {
+          await addLocalLibraryRecord(
+            transaction.objectStore(LOCAL_LIBRARY_STORE_NAMES.webPackages),
+            parsed,
+          );
+          await putLocalLibraryRecord(
+            transaction.objectStore(LOCAL_LIBRARY_STORE_NAMES.webPackageArchives),
+            LocalWebPackageArchiveSchema.parse({
+              digest: parsed.ref.digest,
+              bytes,
+              cachedAt: monotonicNowIso(parsed.updatedAt),
+            }),
+          );
+        },
+      );
+      return { written: true };
+    } catch (cause) {
+      // 两个 store 在同一个事务里，因此记录插入失败会把 archive 字节一起回滚——“两者都不动”
+      // 在 IndexedDB 上是事务的性质，而不是需要额外编排的顺序。
+      if (isConstraintError(cause)) return { alreadyPresent: true };
+      throw cause;
+    }
+  }
+
+  async put(record: LocalWebPackageRecordV1, archive: Uint8Array): Promise<void> {
+    // canonical identity 由记录契约保证（id 必须是 ref.digest 的派生结果），因此这里
+    // 不再重复一遍同样的检查——每处重复的规则都是一个会漂移的地方。
+    const parsed = LocalWebPackageRecordV1Schema.parse(record);
+    const bytes = toDetachedArrayBuffer(archive);
+    await runLocalLibraryTransaction(
+      [LOCAL_LIBRARY_STORE_NAMES.webPackages, LOCAL_LIBRARY_STORE_NAMES.webPackageArchives],
+      'readwrite',
+      async (transaction) => {
+        const recordStore = transaction.objectStore(LOCAL_LIBRARY_STORE_NAMES.webPackages);
+        const existing = await getLocalLibraryRecord<LocalWebPackageRecordV1>(recordStore, parsed.id);
+        if (existing?.deletedAt !== undefined && parsed.deletedAt === undefined) {
+          throw new Error('本地库中的 Web 包已被删除；请先恢复再保存。');
+        }
+        await putLocalLibraryRecord(recordStore, parsed);
+        // 走契约 schema：收紧 LocalWebPackageArchiveSchema 时才真的能传导到实现，
+        // 而不是各自维护一份"看起来一样"的读取判断。
+        await putLocalLibraryRecord(
+          transaction.objectStore(LOCAL_LIBRARY_STORE_NAMES.webPackageArchives),
+          LocalWebPackageArchiveSchema.parse({
+            digest: parsed.ref.digest,
+            bytes,
+            cachedAt: monotonicNowIso(parsed.updatedAt),
+          }),
+        );
+      },
+    );
+  }
+
+  /**
+   * 幂等软删：只写 tombstone，**保留** archive 字节。
+   *
+   * 丢弃字节的时机是 `purge` 而不是这里。提前丢弃会让 `restore` 产出一条"记录在、字节缺"
+   * 的行，而 `readArchive` 对它返回 `null`——与真正的存储损坏无法区分，用户恢复后只会看到
+   * 一个打不开的包。
+   */
+  async delete(id: string): Promise<void> {
+    await runLocalLibraryTransaction(LOCAL_LIBRARY_STORE_NAMES.webPackages, 'readwrite', async (transaction) => {
+      const recordStore = transaction.objectStore(LOCAL_LIBRARY_STORE_NAMES.webPackages);
+      const existing = await getLocalLibraryRecord<LocalWebPackageRecordV1>(recordStore, id);
+      if (existing === undefined || existing.deletedAt !== undefined) return;
+      await putLocalLibraryRecord(recordStore, { ...existing, deletedAt: monotonicNowIso(existing.updatedAt) });
+    });
+  }
+
+  async restore(id: string): Promise<void> {
+    await runLocalLibraryTransaction(LOCAL_LIBRARY_STORE_NAMES.webPackages, 'readwrite', async (transaction) => {
+      const store = transaction.objectStore(LOCAL_LIBRARY_STORE_NAMES.webPackages);
+      const existing = await getLocalLibraryRecord<LocalWebPackageRecordV1>(store, id);
+      if (existing === undefined || existing.deletedAt === undefined) return;
+      const restored = { ...existing, updatedAt: monotonicNowIso(existing.updatedAt) };
+      delete restored.deletedAt;
+      await putLocalLibraryRecord(store, restored);
+    });
+  }
+
+  /**
+   * 彻底删除记录与它独占的 archive 字节。记录与字节在同一个事务里消失，
+   * 因此不会出现"记录没了但字节还在"的中间态。
+   */
+  async purge(id: string): Promise<void> {
+    await runLocalLibraryTransaction(
+      [LOCAL_LIBRARY_STORE_NAMES.webPackages, LOCAL_LIBRARY_STORE_NAMES.webPackageArchives],
+      'readwrite',
+      async (transaction) => {
+        const recordStore = transaction.objectStore(LOCAL_LIBRARY_STORE_NAMES.webPackages);
+        const existing = await getLocalLibraryRecord<LocalWebPackageRecordV1>(recordStore, id);
+        if (existing === undefined) return;
+        await deleteLocalLibraryRecord(recordStore, id);
+        await deleteLocalLibraryRecord(
+          transaction.objectStore(LOCAL_LIBRARY_STORE_NAMES.webPackageArchives),
+          existing.ref.digest,
+        );
+      },
+    );
+  }
+
+  async readArchive(digest: string): Promise<Uint8Array | null> {
+    const row = await this.readArchiveRow(digest);
+    return row === null ? null : toStoredBytes(row.bytes);
+  }
+
+  /** 归档行读取；解析失败视为损坏行（返回 null），不冒充空包。 */
+  private async readArchiveRow(digest: string): Promise<{ digest: string; bytes: ArrayBufferLike } | null> {
+    const stored = await runLocalLibraryTransaction(
+      LOCAL_LIBRARY_STORE_NAMES.webPackageArchives,
+      'readonly',
+      (transaction) =>
+        getLocalLibraryRecord<{ digest: string; bytes: unknown }>(
+          transaction.objectStore(LOCAL_LIBRARY_STORE_NAMES.webPackageArchives),
+          digest,
+        ),
+    );
+    if (stored === undefined) return null;
+    const parsed = LocalWebPackageArchiveSchema.safeParse(stored);
+    return parsed.success ? (parsed.data as { digest: string; bytes: ArrayBufferLike }) : null;
+  }
+
+  /**
+   * 一次读出所有已存 archive 的 digest。
+   *
+   * 列表渲染要判断每条记录"字节是否还在"，逐条查询等于 N 次事务；ZIP 库常有几十条，
+   * 在移动端会明显卡顿。keyPath 就是 digest，所以 `getAllKeys` 一次就够。
+   */
+  async listArchiveDigests(): Promise<Set<string>> {
+    const keys = await runLocalLibraryTransaction(
+      LOCAL_LIBRARY_STORE_NAMES.webPackageArchives,
+      'readonly',
+      (transaction) =>
+        promisifyKeys(transaction.objectStore(LOCAL_LIBRARY_STORE_NAMES.webPackageArchives).getAllKeys()),
+    );
+    return new Set(keys.filter((key): key is string => typeof key === 'string'));
+  }
+}
+
+let sharedRepository: IndexedDbWebPackageRepository | null = null;
+
+export const getLocalWebPackageRepository = (): IndexedDbWebPackageRepository => {
+  sharedRepository ??= new IndexedDbWebPackageRepository();
+  return sharedRepository;
+};
+
+export const resetLocalWebPackageRepository = (): void => {
+  sharedRepository = null;
+};

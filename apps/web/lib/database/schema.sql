@@ -19,15 +19,6 @@ CREATE TABLE IF NOT EXISTS battles (
   created_at TEXT NOT NULL                -- 战斗发生时间
 );
 
--- 新增的测试数据表，使用 32 位随机字符串 ID
--- 用于测试自定义 ID 插入功能
-CREATE TABLE IF NOT EXISTS player_data (
-  id TEXT PRIMARY KEY NOT NULL,           -- 32位随机字符串ID
-  data TEXT NOT NULL,                     -- JSON格式的数据
-  created_at TEXT NOT NULL,               -- 创建时间
-  updated_at TEXT NOT NULL                -- 更新时间
-);
-
 -- 用户表
 CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -720,6 +711,15 @@ CREATE INDEX IF NOT EXISTS idx_large_objects_owner_user_id_created_at ON large_o
 
 -- 战报生成记录-参战者明细表
 -- 用于记录每条生成记录中每位角色的可查询信息（未来排行榜/统计的关键维度）。
+CREATE TABLE IF NOT EXISTS battle_report_generation_participants (
+  generation_id TEXT NOT NULL REFERENCES battle_report_generations(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  role TEXT CHECK (role IS NULL OR role IN ('host', 'member')),
+  PRIMARY KEY (generation_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_battle_report_generation_participants_user_generation
+  ON battle_report_generation_participants(user_id, generation_id);
+
 CREATE TABLE IF NOT EXISTS battle_report_generation_combatants (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   generation_id TEXT NOT NULL,

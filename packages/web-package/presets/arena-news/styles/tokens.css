@@ -1,0 +1,19 @@
+/* Optional design tokens: override on :root or any scoped news container. */
+:root {
+  --news-paper:#faf8f2; --news-surface:#fffefa; --news-ink:#202a34;
+  --news-muted:#586471; --news-line:#d6d8d4; --news-accent:#a32e39;
+  --news-accent-ink:#fff; --news-soft:#eee8df; --news-focus:#146bb3;
+  --news-serif:Georgia,"Noto Serif SC","Songti SC",serif;
+  --news-sans:system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
+  --news-radius:.35rem; --news-gap:clamp(1rem,3vw,2rem); --news-width:76rem;
+}
+[data-news-theme="night"] {
+  --news-paper:#111922; --news-surface:#1b2733; --news-ink:#f4f0e9;
+  --news-muted:#bbc6cf; --news-line:#495865; --news-accent:#efad81;
+  --news-accent-ink:#191b20; --news-soft:#293744; --news-focus:#8ecbff;
+}
+[data-news-theme="broadcast"] {
+  --news-paper:#f1f5fa; --news-surface:#fff; --news-ink:#162a4c;
+  --news-muted:#4d617c; --news-line:#cbd6e5; --news-accent:#2454ab;
+  --news-accent-ink:#fff; --news-soft:#e2ebfa; --news-radius:.9rem;
+}

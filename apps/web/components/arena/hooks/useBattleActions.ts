@@ -2,15 +2,19 @@
 
 import { useCallback } from 'react';
 
-import { inferTemplate } from '@/lib/data-card-converter';
 import { buildAdjudicationSourceKey, markAdjudicationEventsWithSource } from '@/lib/arena/adjudication-events';
 import { buildArenaMaterialState } from '@/lib/arena/materials';
 import {
+  canAddArenaReferenceItems,
+  MAX_ARENA_REFERENCE_ITEMS,
+} from '@/lib/arena/resource-budget';
+import { stripLocalCardTransportMeta } from '@mahoshojo/local-library/digest';
+import {
   mapDataCardRuntimeSourceInfo,
   mapPublicDataCardRowToBattleSelectionPayload,
-  stripBattleSelectionTransportMeta,
 } from '@/lib/data-card-read-mappers';
 import { generateRandomCanshou, generateRandomMagicalGirl } from '@/lib/random-character-generator';
+import { verifyArenaContentOrigin as verifyOrigin } from '@/lib/arena/verify-origin';
 
 import { useBattleStore } from '../stores/useBattleStore';
 import {
@@ -18,8 +22,6 @@ import {
   BattleStoreState,
   CombatantData,
   isCombatantLimitReached,
-  MAX_ARENA_MATERIALS,
-  MAX_AUX_SCENARIOS,
   MAX_COMBATANTS,
   RandomCombatantPlaceholder,
 } from '../types';
@@ -29,23 +31,34 @@ import {
   isLegacyAdjudicatorFormat,
 } from '../utils/characterValidator';
 import { parseCombatantsFromText } from '../utils/fileParser';
+import { resolveArenaDataCardTemplate } from '../utils/data-card-template';
 import { ScenarioSchema } from '../utils/schemas';
-
-const verifyOrigin = async (payload: any): Promise<boolean> => {
-  const response = await fetch('/api/verify-origin', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  if (!response.ok) return false;
-  const { isValid } = await response.json();
-  return Boolean(isValid);
-};
 
 // 追踪正在处理中的卡片，防止重复点击
 const loadingCards = new Set<string>();
 
 const createClientId = (prefix: string): string => `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+const hasArenaReferenceCapacity = (): boolean => canAddArenaReferenceItems(useBattleStore.getState());
+const arenaReferenceLimitMessage = `参考项（辅助情景、素材和问卷）合计最多 ${MAX_ARENA_REFERENCE_ITEMS} 项。`;
+
+export const materializeRandomCombatants = (
+  placeholders: readonly RandomCombatantPlaceholder[],
+): CombatantData[] => placeholders.map((placeholder) => {
+  const data = placeholder.type === 'random-magical-girl'
+    ? generateRandomMagicalGirl()
+    : generateRandomCanshou();
+  return {
+    type: data.codename ? 'magical-girl' : 'canshou',
+    data,
+    filename: `${placeholder.filename} - ${data.codename || data.name}`,
+    // 本地随机生成器不持有签名能力，不得自行授予原生标记。
+    isValid: false,
+    isPreset: false,
+    isNonStandard: false,
+    teamId: placeholder.teamId,
+  };
+});
 
 export const useBattleActions = () => {
   const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
@@ -82,6 +95,7 @@ export const useBattleActions = () => {
       sourceDataCardUpdatedAt?: string;
       sourceIsPublic?: boolean;
       sourceAuthor?: string;
+      isPreset?: boolean;
     }): Promise<AuxiliaryScenarioState> => {
       const parsed = ScenarioSchema.safeParse(input.rawScenario);
       if (!parsed.success) {
@@ -101,6 +115,7 @@ export const useBattleActions = () => {
         content: parsed.data,
         fileName: input.fileName,
         isNative,
+        isPreset: input.isPreset === true,
         ...(adjudicationSourceKey ? { adjudicationSourceKey } : {}),
         sourceDataCardId: input.sourceDataCardId,
         sourceDataCardUpdatedAt: input.sourceDataCardUpdatedAt,
@@ -167,15 +182,17 @@ export const useBattleActions = () => {
       } else {
         setError(null);
       }
+
+      return uniqueResults;
     },
     [addCombatant, appendAdjudicationEvents, combatants, setError]
   );
 
   const handleFileUpload = useCallback(
     async (files: FileList | null) => {
-      if (!files || isGenerating) return;
+      if (!files || isGenerating) return [];
       const texts = await Promise.all(Array.from(files).map((file) => file.text()));
-      await importFromText(texts.join('\n'));
+      return importFromText(texts.join('\n'));
     },
     [importFromText, isGenerating]
   );
@@ -183,8 +200,8 @@ export const useBattleActions = () => {
   const handlePaste = useCallback(
     async (text: string) => {
       const trimmed = text.trim();
-      if (!trimmed) return;
-      await importFromText(trimmed);
+      if (!trimmed) return [];
+      return importFromText(trimmed);
     },
     [importFromText]
   );
@@ -221,9 +238,12 @@ export const useBattleActions = () => {
         sourceDataCardUsageCount,
       } = mapDataCardRuntimeSourceInfo(cardData);
 
-      const cleanedCardData = stripBattleSelectionTransportMeta(cardData);
+      // _cardType 是在线选卡的传输元数据，最终仍需从正文中移除；但在清理前
+      // 读取它，让正文无法识别的 scenario 不会掉入参战角色分支。
+      const declaredCardType = cardData?._cardType;
+      const cleanedCardData = stripLocalCardTransportMeta(cardData);
       const resolvedName = getCombatantDisplayName(cleanedCardData);
-      const inferredTemplate = inferTemplate(cleanedCardData);
+      const inferredTemplate = resolveArenaDataCardTemplate(cleanedCardData, declaredCardType);
       const targetFilename = `${sourceDataCardName || resolvedName}.json`;
       const adjudicationSourceKey = buildAdjudicationSourceKey({
         sourceDataCardId,
@@ -251,6 +271,7 @@ export const useBattleActions = () => {
             content: cleanedCardData,
             fileName: `${sourceDataCardName || resolvedName}.json`,
             isNative,
+            isPreset: false,
             ...(adjudicationSourceKey ? { adjudicationSourceKey } : {}),
             sourceDataCardId,
             sourceDataCardDescription,
@@ -353,8 +374,9 @@ export const useBattleActions = () => {
         sourceAuthor,
       } = mapDataCardRuntimeSourceInfo(cardData);
 
-      const cleanedCardData = stripBattleSelectionTransportMeta(cardData);
-      const inferredTemplate = inferTemplate(cleanedCardData);
+      const declaredCardType = cardData?._cardType;
+      const cleanedCardData = stripLocalCardTransportMeta(cardData);
+      const inferredTemplate = resolveArenaDataCardTemplate(cleanedCardData, declaredCardType);
       if (inferredTemplate !== 'scenario' && inferredTemplate !== 'general-scenario') {
         setError('❌ 请选择“情景”类型的数据卡。');
         return;
@@ -375,8 +397,8 @@ export const useBattleActions = () => {
         return;
       }
 
-      if (useBattleStore.getState().auxScenarios.length >= MAX_AUX_SCENARIOS) {
-        setError(`❌ 最多只能添加 ${MAX_AUX_SCENARIOS} 个辅助情景。`);
+      if (!hasArenaReferenceCapacity()) {
+        setError(`❌ ${arenaReferenceLimitMessage}`);
         return;
       }
       if (sourceDataCardId && useBattleStore.getState().auxScenarios.some((item) => item.sourceDataCardId === sourceDataCardId)) {
@@ -434,8 +456,8 @@ export const useBattleActions = () => {
       setError('❌ 请先选择主情景，再添加辅助情景。');
       return;
     }
-    if (useBattleStore.getState().auxScenarios.length >= MAX_AUX_SCENARIOS) {
-      setError(`最多只能选择 ${MAX_AUX_SCENARIOS} 个辅助情景。`);
+    if (!hasArenaReferenceCapacity()) {
+      setError(arenaReferenceLimitMessage);
       return;
     }
     useBattleStore.getState().setIsMatching('scenario');
@@ -473,6 +495,7 @@ export const useBattleActions = () => {
         content: parsed.data,
         fileName: file.name,
         isNative,
+        isPreset: false,
         ...(adjudicationSourceKey ? { adjudicationSourceKey } : {}),
       });
       appendAdjudicationEvents((parsed.data as any).adjudicationEvents, scenarioLabel, adjudicationSourceKey);
@@ -489,8 +512,8 @@ export const useBattleActions = () => {
       if (!useBattleStore.getState().scenario.content) {
         throw new Error('请先选择主情景，再添加辅助情景。');
       }
-      if (useBattleStore.getState().auxScenarios.length >= MAX_AUX_SCENARIOS) {
-        throw new Error(`最多只能添加 ${MAX_AUX_SCENARIOS} 个辅助情景。`);
+      if (!hasArenaReferenceCapacity()) {
+        throw new Error(arenaReferenceLimitMessage);
       }
 
       const text = await file.text();
@@ -507,7 +530,7 @@ export const useBattleActions = () => {
   );
 
   const handleScenarioPaste = useCallback(
-    async (text: string, options?: { fileName?: string }) => {
+    async (text: string, options?: { fileName?: string; isPreset?: boolean }) => {
       const parsed = ScenarioSchema.safeParse(JSON.parse(text));
       if (!parsed.success) {
         throw new Error(parsed.error.issues[0]?.message || '情景文件缺少必需字段');
@@ -523,6 +546,7 @@ export const useBattleActions = () => {
         content: parsed.data,
         fileName: scenarioFileName,
         isNative,
+        isPreset: options?.isPreset === true,
         ...(adjudicationSourceKey ? { adjudicationSourceKey } : {}),
       });
       appendAdjudicationEvents((parsed.data as any).adjudicationEvents, scenarioLabel, adjudicationSourceKey);
@@ -532,15 +556,15 @@ export const useBattleActions = () => {
   );
 
   const handleAuxScenarioPaste = useCallback(
-    async (text: string, options?: { fileName?: string }) => {
+    async (text: string, options?: { fileName?: string; isPreset?: boolean }) => {
       if (useBattleStore.getState().battleMode !== 'scenario') {
         throw new Error('仅在情景模式下可添加辅助情景。');
       }
       if (!useBattleStore.getState().scenario.content) {
         throw new Error('请先选择主情景，再添加辅助情景。');
       }
-      if (useBattleStore.getState().auxScenarios.length >= MAX_AUX_SCENARIOS) {
-        throw new Error(`最多只能添加 ${MAX_AUX_SCENARIOS} 个辅助情景。`);
+      if (!hasArenaReferenceCapacity()) {
+        throw new Error(arenaReferenceLimitMessage);
       }
 
       const parsed = ScenarioSchema.safeParse(JSON.parse(text));
@@ -554,6 +578,7 @@ export const useBattleActions = () => {
       const built = await buildAuxScenario({
         rawScenario: parsed.data,
         fileName: scenarioFileName,
+        isPreset: options?.isPreset === true,
       });
       addAuxScenario(built);
       appendAdjudicationEvents((parsed.data as any).adjudicationEvents, scenarioLabel, built.adjudicationSourceKey);
@@ -568,8 +593,8 @@ export const useBattleActions = () => {
       const errors: string[] = [];
       for (const file of Array.from(files)) {
         try {
-          if (useBattleStore.getState().materials.length >= MAX_ARENA_MATERIALS) {
-            errors.push(`${file.name}: 最多只能添加 ${MAX_ARENA_MATERIALS} 个素材。`);
+          if (!hasArenaReferenceCapacity()) {
+            errors.push(`${file.name}: ${arenaReferenceLimitMessage}`);
             continue;
           }
           const json = JSON.parse(await file.text());
@@ -592,8 +617,8 @@ export const useBattleActions = () => {
     async (text: string, options?: { fileName?: string }) => {
       const trimmed = text.trim();
       if (!trimmed) return;
-      if (useBattleStore.getState().materials.length >= MAX_ARENA_MATERIALS) {
-        throw new Error(`最多只能添加 ${MAX_ARENA_MATERIALS} 个素材。`);
+      if (!hasArenaReferenceCapacity()) {
+        throw new Error(arenaReferenceLimitMessage);
       }
       const json = JSON.parse(trimmed);
       const isNative = await verifyOrigin(json).catch(() => false);
@@ -624,8 +649,8 @@ export const useBattleActions = () => {
         return;
       }
 
-      if (useBattleStore.getState().materials.length >= MAX_ARENA_MATERIALS) {
-        setError(`❌ 最多只能添加 ${MAX_ARENA_MATERIALS} 个素材。`);
+      if (!hasArenaReferenceCapacity()) {
+        setError(`❌ ${arenaReferenceLimitMessage}`);
         return;
       }
       if (sourceDataCardId && useBattleStore.getState().materials.some((item) => item.sourceDataCardId === sourceDataCardId)) {
@@ -635,7 +660,7 @@ export const useBattleActions = () => {
       loadingCards.add(materialId);
 
       try {
-        const cleanedCardData = stripBattleSelectionTransportMeta(cardData);
+        const cleanedCardData = stripLocalCardTransportMeta(cardData);
         const isNative = await verifyOrigin(cleanedCardData).catch(() => false);
         const material = buildArenaMaterialState({
           payload: cardData,
@@ -660,18 +685,7 @@ export const useBattleActions = () => {
     const placeholders = combatants.filter((item): item is RandomCombatantPlaceholder => 'id' in item);
     if (placeholders.length === 0) return;
     setError('正在生成随机角色...');
-    const generatedCharacters = placeholders.map((placeholder) =>
-      placeholder.type === 'random-magical-girl' ? generateRandomMagicalGirl() : generateRandomCanshou()
-    );
-    const newCombatantData: CombatantData[] = generatedCharacters.map((data, index) => ({
-      type: data.codename ? 'magical-girl' : 'canshou',
-      data,
-      filename: `${placeholders[index].filename} - ${data.codename || data.name}`,
-      isValid: true,
-      isPreset: false,
-      isNonStandard: false,
-      teamId: placeholders[index].teamId,
-    }));
+    const newCombatantData = materializeRandomCombatants(placeholders);
     const existing = combatants.filter((item): item is CombatantData => !('id' in item));
     setCombatants([...existing, ...newCombatantData]);
     setError(null);

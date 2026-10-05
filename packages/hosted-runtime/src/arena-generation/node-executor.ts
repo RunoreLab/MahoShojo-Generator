@@ -1,4 +1,9 @@
 import { STRICT_RANKED_MODEL_FALLBACKS } from '@mahoshojo/domain/arena-ranked-model-policy';
+import {
+  WebPackagePromptProjectionSchema,
+  WebPackageRefSchema,
+} from '@mahoshojo/contracts/web-package';
+import { resolveWebPackage, buildWebPackagePromptProjection } from '@mahoshojo/web-package';
 
 import type {
   ArenaGenerationAuditableRejection,
@@ -6,8 +11,19 @@ import type {
   ArenaGenerationObserver,
   ArenaTrustedPvpContext,
 } from '@mahoshojo/hosted-api/arena-generation/service';
-import { buildArenaGenerationPrompt, isStrictRankedArenaRequest } from './prompt';
-import { MAX_ARENA_MATERIALS, normalizeNodeArenaMaterials } from './materials';
+import {
+  buildArenaGenerationPrompt,
+  isStrictRankedArenaRequest,
+  resolveArenaGenerationOutputContract,
+} from './prompt';
+import { getSystemPrompt } from './compatibility-prompt';
+import { buildArenaStructuredReportSchema } from './structured-report';
+import { normalizeNodeArenaMaterials } from './materials';
+import { resolveArenaCombatantNativeAuthority } from './native-authority';
+import {
+  evaluateArenaPromptBudget,
+  type ArenaHostedFundingMode,
+} from '@mahoshojo/hosted-api/arena-generation/resource-budget';
 import type { ArenaSeasonContext } from './season-context';
 import {
   createArenaInternalGuidanceAuthority,
@@ -35,10 +51,14 @@ import { parseAIProvidersFromEnv } from '../node-runtime/providers';
 import { createNodeRawStreamAiRuntime } from '../node-runtime/raw-stream-ai';
 import { createNodeStructuredAiRuntime } from '../node-runtime/structured-ai';
 import { quickCheckForServer } from '../node-runtime/sensitive-word-filter';
+import { isAiPreDispatchRetrySafe } from '../node-runtime/retry-safety';
+import { normalizeUsage } from '../node-runtime/usage';
+import { normalizeFinishReason } from './completion';
 import type { SignatureService } from '../signature';
 import {
   LoadBalanceStrategy,
   type AiTelemetry,
+  type GenerationConfig,
   type GenerateWithAIOptions,
   type RawGenerationConfig,
 } from '../node-runtime/types';
@@ -71,8 +91,9 @@ export type NodeArenaGenerationExecutorOptions = {
   pvpSignatureService?: SignatureService;
   generateWithStreamAI?: GenerateWithStreamAI;
   generateWithStructuredAI?(
-    _input: string,
+    _input: unknown,
     _config: unknown,
+    _options?: GenerateWithAIOptions,
   ): Promise<unknown>;
   enforceSafety?(_input: NodeArenaSafetyInput): Promise<Response | null>;
   resolveTrustedInternalGuidance?(_input: {
@@ -163,6 +184,8 @@ const arenaRequestAuditContext = (request: Request): {
 };
 
 const normalizeLegacyPayloadDefaults = (payload: Record<string, unknown>): void => {
+  // Explicit default and legacy absence must retain the same idempotency hash.
+  if (payload.reportFormat === 'markdown') delete payload.reportFormat;
   payload.mode = readString(payload.mode) || 'classic';
   payload.language = readString(payload.language) || 'zh-CN';
   const useArenaHistory = typeof payload.useArenaHistory === 'boolean'
@@ -201,9 +224,7 @@ const normalizeLegacyPayloadDefaults = (payload: Record<string, unknown>): void 
     ? payload.auxScenarios.filter((value) => value && typeof value === 'object' && !Array.isArray(value))
     : [];
   const rawMaterials = Array.isArray(payload.materials) ? payload.materials : [];
-  payload.materials = rawMaterials.length <= MAX_ARENA_MATERIALS
-    ? normalizeNodeArenaMaterials(rawMaterials)
-    : rawMaterials;
+  payload.materials = normalizeNodeArenaMaterials(rawMaterials);
   payload.questionnaires = Array.isArray(payload.questionnaires)
     ? payload.questionnaires.filter((value) => value && typeof value === 'object' && !Array.isArray(value))
     : [];
@@ -310,7 +331,10 @@ const normalizeNativeAuthority = async (
         ? { ...(combatant.data as Record<string, unknown>) }
         : combatant.data;
       combatant.data = data;
-      combatant.isNative = await signatures.verifySignature(data);
+      combatant.isNative = await resolveArenaCombatantNativeAuthority(
+        combatant,
+        (value) => signatures.verifySignature(value),
+      );
       return combatant;
     }));
   }
@@ -368,6 +392,7 @@ const buildSafetyText = async (
   policy: SafetyCheckPolicy,
   enableBundle: boolean,
 ): Promise<string> => {
+  const preserveLegacyNonStreamBounds = (payload.__arenaServerContextV1 as Record<string, unknown> | undefined)?.deliveryMode === 'non-stream';
   const inputs: Array<{
     type: keyof SafetyCheckPolicy;
     content: string;
@@ -381,15 +406,25 @@ const buildSafetyText = async (
       content: serializeForSafety(combatant.data),
       isNative: combatant.isNative === true,
     });
-    const guidance = readString(combatant.characterGuidance);
+    const guidance = readString(combatant.characterGuidance).slice(0, 100);
     if (guidance) inputs.push({ type: 'userGuidance', content: guidance, isNative: false });
   }
-  const userGuidance = readString(payload.userGuidance);
+  const rawUserGuidance = readString(payload.userGuidance);
+  const userGuidance = preserveLegacyNonStreamBounds
+    ? rawUserGuidance.slice(0, 200)
+    : rawUserGuidance;
   if (userGuidance) inputs.push({ type: 'userGuidance', content: userGuidance, isNative: false });
   if (payload.readNarrativeHistory === true && Array.isArray(payload.narrativeHistory)) {
     inputs.push({
       type: 'userGuidance',
       content: serializeForSafety(payload.narrativeHistory),
+      isNative: false,
+    });
+  }
+  if (Array.isArray(payload.adjudicationEvents)) {
+    inputs.push({
+      type: 'userGuidance',
+      content: serializeForSafety(payload.adjudicationEvents),
       isNative: false,
     });
   }
@@ -445,12 +480,21 @@ const wrapTelemetry = (
           usagePromise?.catch(() => null) ?? null,
           finishReasonPromise?.catch(() => null) ?? null,
         ]);
-        if (usage !== null) telemetry.usage = usage;
-        if (typeof finishReason === 'string' && finishReason.trim()) {
-          telemetry.finishReason = finishReason.trim();
-        }
+        const normalizedUsage = normalizeUsage(usage);
+        if (normalizedUsage) telemetry.usage = normalizedUsage;
+        if (finishReasonPromise) telemetry.finishReason = normalizeFinishReason(finishReason);
         controller.close();
       } catch (error) {
+        telemetry.finishReason = 'error';
+        // Error paths must not wait indefinitely for SDK usage promises.
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const usage = await Promise.race([
+          usagePromise?.catch(() => null) ?? Promise.resolve(null),
+          new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), 250); }),
+        ]);
+        if (timer) clearTimeout(timer);
+        const normalized = normalizeUsage(usage);
+        if (normalized) telemetry.usage = normalized;
         controller.error(error);
       }
     },
@@ -485,6 +529,7 @@ export const createNodeArenaGenerationExecutor = (
     : createNodeStructuredAiRuntime(aiDependencies);
   const generateWithStreamAI = options.generateWithStreamAI
     ?? rawRuntime!.generateWithStreamAI;
+  const enableAiSafetyCheck = readBoolean(env, 'NEXT_PUBLIC_ENABLE_AI_SAFETY_CHECK', false);
   const contentSafety = createContentSafetyService({
     defaults: {
       enableSensitiveWordFilter: readBoolean(
@@ -492,7 +537,7 @@ export const createNodeArenaGenerationExecutor = (
         'NEXT_PUBLIC_ENABLE_SENSITIVE_WORD_FILTER',
         true,
       ),
-      enableAiSafetyCheck: readBoolean(env, 'NEXT_PUBLIC_ENABLE_AI_SAFETY_CHECK', false),
+      enableAiSafetyCheck,
     },
     quickCheck: quickCheckForServer,
     generateWithAI: async <T>(
@@ -530,6 +575,41 @@ export const createNodeArenaGenerationExecutor = (
           })
           : Promise.resolve(null))
       )({ request, generationRequestId, payload });
+      if (payload.reportFormat !== undefined && payload.reportFormat !== 'markdown' && payload.reportFormat !== 'web') {
+        return jsonResponse({ code: 'INVALID_REPORT_FORMAT', error: 'reportFormat 无效' }, 400);
+      }
+      if (payload.webPackageRef !== undefined) {
+        if (payload.reportFormat !== 'web' || requestAuditContext.endpoint === 'api/arena/session/generate-next'
+          || trustedPvpContext && !payload.multiplayerGenerationSnapshot) {
+          return jsonResponse({ code: 'ARENA_WEB_PACKAGE_REQUIRES_WEB', error: 'Web Package 仅用于 Arena Web 战报' }, 400);
+        }
+        const ref = WebPackageRefSchema.safeParse(payload.webPackageRef);
+        if (!ref.success) return jsonResponse({ code: 'ARENA_WEB_PACKAGE_INVALID', error: 'Web Package 引用无效' }, 400);
+        if (payload.webPackagePromptProjection !== undefined) {
+          const projection = WebPackagePromptProjectionSchema.safeParse(payload.webPackagePromptProjection);
+          if (!projection.success
+            || projection.data.package.id !== ref.data.id
+            || projection.data.package.version !== ref.data.version
+            || projection.data.package.digest !== ref.data.digest) {
+            return jsonResponse({ code: 'ARENA_WEB_PACKAGE_INVALID', error: 'Web Package Prompt Projection 无效' }, 400);
+          }
+        }
+        // Server-resolvable packages must match a server-rebuilt canonical Projection;
+        // unresolvable local packages are only valid through a client Projection.
+        try {
+          const base = await resolveWebPackage(ref.data);
+          if (payload.webPackagePromptProjection !== undefined) {
+            const canonical = buildWebPackagePromptProjection(base);
+            if (JSON.stringify(payload.webPackagePromptProjection) !== JSON.stringify(canonical)) {
+              return jsonResponse({ code: 'ARENA_WEB_PACKAGE_INVALID', error: 'Web Package Prompt Projection 与可解析 revision 不一致' }, 400);
+            }
+          }
+        } catch {
+          if (payload.webPackagePromptProjection === undefined) {
+            return jsonResponse({ code: 'ARENA_WEB_PACKAGE_UNAVAILABLE', error: 'Web Package revision 不可用' }, 400);
+          }
+        }
+      }
       const normalized = clonePayload(payload);
       normalizeLegacyPayloadDefaults(normalized);
       const customProviderResolution = resolveArenaCustomProvider(normalized.customProvider);
@@ -576,21 +656,43 @@ export const createNodeArenaGenerationExecutor = (
           error: 'Arena season authority unavailable',
         }, 503);
       }
+      const fundingMode: ArenaHostedFundingMode = customProviderResolution.value
+        && customProviderResolution.value.provider.id !== 'system'
+        ? 'hosted-byok'
+        : 'hosted-system';
       normalized.__arenaServerContextV1 = {
         startedAt,
         ipAnonymized: anonymizeIp(requestIp(request)),
         ...requestAuditContext,
+        fundingMode,
         ...(trustedPvpContext ? { trustedPvpContext } : {}),
         season,
         scenarioNative: normalized.scenario
           ? await signatures.verifySignature(normalized.scenario)
           : true,
       };
+      if (requestAuditContext.deliveryMode === 'non-stream') {
+        normalized.userGuidance = readString(normalized.userGuidance).slice(0, 200) || null;
+      }
       return normalized;
     },
     checkSafety: async ({ request, actorKey, payload }) => {
       const combinedText = await buildSafetyText(payload, signatures, safetyPolicy, enableBundle);
       if (!combinedText) return null;
+      if (enableAiSafetyCheck && !options.enforceSafety) {
+        const safetyBudget = evaluateArenaPromptBudget({
+          fundingMode: 'hosted-system',
+          prompt: combinedText,
+        });
+        if (!safetyBudget.allowed) {
+          return jsonResponse({
+            code: 'ARENA_SAFETY_PROMPT_BUDGET_EXCEEDED',
+            error: '安全检查输入超过默认渠道允许的估算 token 预算',
+            estimatedPromptTokens: safetyBudget.estimatedPromptTokens,
+            maxEstimatedPromptTokens: safetyBudget.maxEstimatedPromptTokens,
+          }, 413);
+        }
+      }
       if (options.enforceSafety) {
         return options.enforceSafety({ request, actorKey, payload, combinedText });
       }
@@ -600,7 +702,7 @@ export const createNodeArenaGenerationExecutor = (
       });
     },
     buildPrompt: buildArenaGenerationPrompt,
-    generate: async ({ payload, prompt, signal, onReasoning }) => {
+    generate: async ({ payload, prompt, systemPrompt, signal, onReasoning }) => {
       const customProvider = parseCustomProvider(payload.customProvider);
       if (customProvider instanceof Response) throw new Error('ARENA_CUSTOM_PROVIDER_INVALID');
       const telemetry: AiTelemetry = {};
@@ -635,6 +737,11 @@ export const createNodeArenaGenerationExecutor = (
       const config: RawGenerationConfig = {
         prompt,
         temperature: 0.9,
+        // structured-report splits the prompt itself below; every other path
+        // forwards the system role the prompt builder already produced.
+        ...(systemPrompt && resolveArenaGenerationOutputContract(payload) !== 'structured-report'
+          ? { systemPrompt }
+          : {}),
         ...(customProvider ? {
           generationSettingsContext: {
             providerId: customProvider.providerId,
@@ -648,9 +755,7 @@ export const createNodeArenaGenerationExecutor = (
         abortSignal: signal,
         streamReadTimeoutMode: 'hard',
         telemetry,
-        onReasoningEvent: (event) => {
-          void onReasoning(event);
-        },
+        onReasoningEvent: (event) => onReasoning(event),
         ...(providerOverride ? { providerOverride } : {}),
         ...(loadBalanceStrategy ? { loadBalanceStrategy } : {}),
         ...(customProvider ? {
@@ -667,6 +772,75 @@ export const createNodeArenaGenerationExecutor = (
           : payload.isDowngrade === true && !customProvider
             ? ['gemini-2.5-flash-lite']
             : [undefined];
+      if (resolveArenaGenerationOutputContract(payload) === 'structured-report') {
+        const mode = readString(payload.mode) || 'classic';
+        const combatants = Array.isArray(payload.combatants) ? payload.combatants : [];
+        const systemPrompt = getSystemPrompt(mode, combatants);
+        const combinedPrefix = `${systemPrompt}\n\n`;
+        const taskPrompt = prompt.startsWith(combinedPrefix)
+          ? prompt.slice(combinedPrefix.length)
+          : prompt;
+        const schema = buildArenaStructuredReportSchema({
+          enableImpacts: payload.writeArenaHistory === true || payload.writeCurrentState === true,
+          enableImpactText: payload.writeArenaHistory === true,
+          enableCurrentState: payload.writeCurrentState === true,
+        });
+        const structuredInput = { combatants };
+        const baseStructuredConfig: GenerationConfig<
+          Record<string, unknown>,
+          typeof structuredInput
+        > = {
+          systemPrompt,
+          temperature: 0.9,
+          promptBuilder: () => taskPrompt,
+          schema,
+          taskName: `生成${mode}模式故事`,
+          ...(customProvider ? {
+            generationSettingsContext: {
+              providerId: customProvider.providerId,
+              ...(customProvider.generationOverrides
+                ? { userOverrides: customProvider.generationOverrides }
+                : {}),
+            },
+          } : {}),
+        };
+        let structuredResult: unknown = null;
+        let lastStructuredError: unknown = null;
+        for (const fallback of modelFallbacks) {
+          try {
+            const structuredConfig = {
+              ...baseStructuredConfig,
+              ...(fallback ? { modelOverride: fallback } : {}),
+            };
+            structuredResult = await (options.generateWithStructuredAI
+              ? options.generateWithStructuredAI(
+                structuredInput,
+                structuredConfig,
+                generationOptions,
+              )
+              : structuredRuntime!.generateWithAI(
+                structuredInput,
+                structuredConfig,
+                generationOptions,
+              ));
+            break;
+          } catch (error) {
+            lastStructuredError = error;
+            if (signal.aborted) throw error;
+            if (!isAiPreDispatchRetrySafe(error)) throw error;
+          }
+        }
+        if (!structuredResult || typeof structuredResult !== 'object') {
+          throw lastStructuredError ?? new Error('ARENA_PROVIDER_UNAVAILABLE');
+        }
+        const validatedStructuredResult = schema.parse(structuredResult);
+        const body = new Response(JSON.stringify(validatedStructuredResult)).body;
+        if (!body) throw new Error('ARENA_PROVIDER_STRUCTURED_RESULT_MISSING');
+        return {
+          body,
+          telemetry: telemetry as Record<string, unknown>,
+        };
+      }
       let result: StreamAiResult | null = null;
       let lastError: unknown = null;
       for (const fallback of modelFallbacks) {
@@ -679,6 +853,7 @@ export const createNodeArenaGenerationExecutor = (
         } catch (error) {
           lastError = error;
           if (signal.aborted) throw error;
+          if (!isAiPreDispatchRetrySafe(error)) throw error;
         }
       }
       if (!result) throw lastError ?? new Error('ARENA_PROVIDER_UNAVAILABLE');

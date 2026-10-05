@@ -1,6 +1,7 @@
 // components/StreamingBattleReportCard.tsx
 
 import React, { useRef, useState } from 'react';
+import { getVisibleOutputTokens } from '@mahoshojo/ai-core/token-usage';
 import ReactMarkdown from 'react-markdown';
 import { Components } from 'react-markdown';
 import rehypeKatex from 'rehype-katex';
@@ -8,7 +9,7 @@ import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import type { AdjudicationResult } from '@/types/arena';
 import remarkBattleTable from '@/lib/markdown/remarkBattleTable';
-import { fixNestedListIndentation } from '@/lib/markdown/fix-list-indentation';
+import { fixNestedListIndentation } from '@mahoshojo/ui-web/markdown';
 import {
     formatMarkdownImage,
     formatMarkdownLink,
@@ -31,6 +32,12 @@ import type { AIReasoningEnvelope } from '@/types/ai-reasoning';
 import type { BattleReportIllustrationAsset } from '@/components/BattleReportCard';
 
 interface StreamingBattleReportCardProps {
+    /** 共享卡片外壳内的已隔离 Web 内容。 */
+    reportContent?: React.ReactNode;
+    /** Web 显示不支持卡片截图或 Markdown 导出。 */
+    disableExport?: boolean;
+    /** 与默认导出操作共用卡片底部操作栏。 */
+    additionalActions?: React.ReactNode;
     /** 流式输入的 Markdown 文本内容 */
     content: string;
     onSaveImage?: (imageUrl: string) => void;
@@ -49,6 +56,7 @@ interface StreamingBattleReportCardProps {
     aiUsage?: {
         promptTokens?: number | null;
         reasoningTokens?: number | null;
+        textTokens?: number | null;
         completionTokens?: number | null;
         totalTokens?: number | null;
         cachedTokens?: number | null;
@@ -66,6 +74,10 @@ interface StreamingBattleReportCardProps {
     softTimeoutWarning?: string | null;
     /** 流式生成中的手动中止回调。 */
     onStopGeneration?: () => void;
+    /** 流式生成中止按钮的上下文文案。 */
+    stopGenerationLabel?: string;
+    /** 流式生成中止请求已发出，禁止重复点击。 */
+    stopGenerationDisabled?: boolean;
     /** 战报插图（可选，支持生成图或用户上传图） */
     illustrationAsset?: BattleReportIllustrationAsset | null;
     /** 手动指定卡片宽度（px）；为空时自动铺满容器。 */
@@ -74,6 +86,9 @@ interface StreamingBattleReportCardProps {
 
 const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
     content,
+    reportContent,
+    disableExport = false,
+    additionalActions,
     onSaveImage,
     mode,
     scenarioName,
@@ -88,11 +103,14 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
     isStreaming = false,
     softTimeoutWarning = null,
     onStopGeneration,
+    stopGenerationLabel = '停止生成',
+    stopGenerationDisabled = false,
     illustrationAsset = null,
     cardWidthPx = null
 }) => {
     const cardRef = useRef<HTMLDivElement>(null);
     const [isSavingImage, setIsSavingImage] = useState(false);
+    const showingWeb = reportContent != null;
     const headlineMatch = content.match(/^\s*#{1,3}\s*(.*)(?:\r?\n|$)/);
     const headline = headlineMatch ? headlineMatch[1].trim() : '';
     const markdownBody = fixNestedListIndentation(headlineMatch && headline ? content.slice(headlineMatch[0].length).trimStart() : content);
@@ -125,13 +143,14 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
 
     const modeDisplay = mode ? getModeDisplay(mode) : null;
     const hasAnyTokenNumber =
+        !showingWeb &&
         aiUsage != null &&
-        [aiUsage.promptTokens, aiUsage.reasoningTokens, aiUsage.completionTokens].some(
+        [aiUsage.promptTokens, aiUsage.reasoningTokens, aiUsage.completionTokens, aiUsage.textTokens].some(
             (value) => typeof value === 'number' && Number.isFinite(value)
         );
     const shouldShowNarrativeReadCount = typeof narrativeHistoryReadCount === 'number';
     const aiModelText = typeof aiModel === 'string' ? aiModel.trim() : '';
-    const shouldShowAiModel = Boolean(aiModelText);
+    const shouldShowAiModel = !showingWeb && Boolean(aiModelText);
 
     const formatToken = (value: unknown): string => {
         if (typeof value !== 'number' || !Number.isFinite(value)) return '-';
@@ -261,21 +280,14 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
 
     // --- 下载 Markdown 逻辑 ---
     const handleSaveMarkdown = () => {
-        const exportMarkdown = buildExportMarkdown();
-        const blob = new Blob([exportMarkdown], { type: 'text/markdown;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
+    const exportMarkdown = buildExportMarkdown();
+    const blob = new Blob([exportMarkdown], { type: 'text/markdown;charset=utf-8;' });
 
         const titleMatch = exportMarkdown.match(/^#{1,3}\s*(.+)$/m);
         const title = titleMatch ? titleMatch[1] : '战斗战报';
         const sanitizedTitle = title.replace(/[^a-z0-9\u4e00-\u9fa5]/gi, '_');
 
-        link.download = `魔法少女速报_${sanitizedTitle}.md`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
+        downloadBlob(blob, `魔法少女速报_${sanitizedTitle}.md`);
     };
 
     // --- 自定义 Markdown 渲染组件 ---
@@ -539,11 +551,13 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
     return (
         <div
             ref={cardRef}
-            className="result-card relative"
+            className={`result-card relative${showingWeb ? ' before:hidden' : ''}`}
             style={{
-                background: 'linear-gradient(135deg, #434343 0%, #000000 100%)',
+                background: showingWeb
+                    ? 'linear-gradient(180deg, #18181b 0%, #000000 100%)'
+                    : 'linear-gradient(135deg, #434343 0%, #000000 100%)',
                 color: 'white',
-                padding: '1.5rem',
+                padding: showingWeb ? 0 : '1.5rem',
                 borderRadius: '1rem',
                 width: '100%',
                 maxWidth: cardWidthPx ? `${cardWidthPx}px` : '100%',
@@ -553,206 +567,212 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
             }}
         >
             <div className="result-content">
-                {/* 顶部 Logo */}
-                <img
-                    src="/arena-white.svg"
-                    style={{ marginBottom: '0rem', marginTop: '0.5rem' }}
-                    width={280}
-                    height={90}
-                    alt="魔法少女竞技场"
-                />
+                {reportContent}
+                <div style={showingWeb ? { padding: '1rem' } : undefined}>
+                    {/* 顶部 Logo */}
+                    {!showingWeb && <img
+                        src="/arena-white.svg"
+                        style={{ marginBottom: '0rem', marginTop: '0.5rem' }}
+                        width={280}
+                        height={90}
+                        alt="魔法少女竞技场"
+                    />}
 
-                {/* 模式 Logo (绝对定位) */}
-                <div style={{ position: 'relative', width: '100%' }}>
-                    {modeDisplay && (
-                        <img
-                            src={modeDisplay.logo}
-                            alt={modeDisplay.text}
-                            style={{
-                                position: 'absolute',
-                                top: '-7.1rem', // 调整位置以适应流式布局的顶部
-                                right: '-1rem',
-                                width: '120px',
-                                height: '60px',
-                                opacity: 0.8
-                            }}
+                    {/* 模式 Logo (绝对定位) */}
+                    <div style={{ position: 'relative', width: '100%' }}>
+                        {modeDisplay && (
+                            <img
+                                src={modeDisplay.logo}
+                                alt={modeDisplay.text}
+                                style={showingWeb ? { width: '120px', height: '60px', opacity: 0.8 } : {
+                                    position: 'absolute',
+                                    top: '-7.1rem', // 调整位置以适应流式布局的顶部
+                                    right: '-1rem',
+                                    width: '120px',
+                                    height: '60px',
+                                    opacity: 0.8
+                                }}
+                            />
+                        )}
+                    </div>
+                    { scenarioName && <h3 className='ml-2 mb-4 font-bold text-gray-100'>~ {scenarioName.replace(".json", "")} ~</h3> }
+
+                    {!showingWeb && headline && <h2 className="text-xl font-bold mb-2 mt-2 px-1">{headline}</h2>}
+
+                    {isStreaming && softTimeoutWarning ? (
+                        <div
+                            className="mb-4 rounded-lg border border-amber-300/70 bg-amber-500/15 px-3 py-2 text-sm text-amber-100"
+                            role="status"
+                        >
+                            ⚠️ {softTimeoutWarning}
+                        </div>
+                    ) : null}
+
+                    {(reporterInfo?.name && reporterInfo?.publication) || shouldShowAiModel || hasAnyTokenNumber || shouldShowNarrativeReadCount ? (
+                        <div className="px-1 mb-4 text-sm text-gray-300">
+                            {reporterInfo?.name && reporterInfo?.publication && (
+                                <>
+                                    <p>记者 | {reporterInfo.name}</p>
+                                    <p>来源 | {reporterInfo.publication}</p>
+                                </>
+                            )}
+                            {(shouldShowAiModel || hasAnyTokenNumber || shouldShowNarrativeReadCount) && (
+                                <p className="text-xs text-gray-400 mt-1">
+                                    {shouldShowAiModel && <>模型：{aiModelText}</>}
+                                    {shouldShowAiModel && (hasAnyTokenNumber || shouldShowNarrativeReadCount) ? ' · ' : ''}
+                                    {hasAnyTokenNumber && (
+                                        <>
+                                            tokens：输入 {formatToken(aiUsage?.promptTokens)}｜推理 {formatToken(aiUsage?.reasoningTokens)}｜输出{' '}
+                                            {formatToken(getVisibleOutputTokens(aiUsage))}
+                                        </>
+                                    )}
+                                    {hasAnyTokenNumber && shouldShowNarrativeReadCount ? ' · ' : ''}
+                                    {shouldShowNarrativeReadCount && <>叙事历史读取：{narrativeHistoryReadCount} 条</>}
+                                </p>
+                            )}
+                        </div>
+                    ) : null}
+
+                    {reasoningForPanel && (
+                        <AiReasoningPanel
+                            reasoning={reasoningForPanel}
+                            status={reasoningForPanel.status}
+                            compact
+                            defaultExpanded={false}
                         />
                     )}
-                </div>
-                { scenarioName && <h3 className='ml-2 mb-4 font-bold text-gray-100'>~ {scenarioName.replace(".json", "")} ~</h3> }
 
-                {headline && <h2 className="text-xl font-bold mb-2 mt-2 px-1">{headline}</h2>}
-
-                {isStreaming && softTimeoutWarning ? (
-                    <div
-                        className="mb-4 rounded-lg border border-amber-300/70 bg-amber-500/15 px-3 py-2 text-sm text-amber-100"
-                        role="status"
-                    >
-                        ⚠️ {softTimeoutWarning}
-                    </div>
-                ) : null}
-
-                {(reporterInfo?.name && reporterInfo?.publication) || shouldShowAiModel || hasAnyTokenNumber || shouldShowNarrativeReadCount ? (
-                    <div className="px-1 mb-4 text-sm text-gray-300">
-                        {reporterInfo?.name && reporterInfo?.publication && (
-                            <>
-                                <p>记者 | {reporterInfo.name}</p>
-                                <p>来源 | {reporterInfo.publication}</p>
-                            </>
-                        )}
-                        {(shouldShowAiModel || hasAnyTokenNumber || shouldShowNarrativeReadCount) && (
-                            <p className="text-xs text-gray-400 mt-1">
-                                {shouldShowAiModel && <>模型：{aiModelText}</>}
-                                {shouldShowAiModel && (hasAnyTokenNumber || shouldShowNarrativeReadCount) ? ' · ' : ''}
-                                {hasAnyTokenNumber && (
-                                    <>
-                                        tokens：输入 {formatToken(aiUsage?.promptTokens)}｜推理 {formatToken(aiUsage?.reasoningTokens)}｜输出{' '}
-                                        {formatToken(aiUsage?.completionTokens)}
-                                    </>
-                                )}
-                                {hasAnyTokenNumber && shouldShowNarrativeReadCount ? ' · ' : ''}
-                                {shouldShowNarrativeReadCount && <>叙事历史读取：{narrativeHistoryReadCount} 条</>}
-                            </p>
-                        )}
-                    </div>
-                ) : null}
-
-                {reasoningForPanel && (
-                    <AiReasoningPanel
-                        reasoning={reasoningForPanel}
-                        status={reasoningForPanel.status}
-                        compact
-                        defaultExpanded={false}
-                    />
-                )}
-
-                {illustrationImageUrl && (
-                    <div className="mt-4 border-l-4 border-pink-300 bg-black/20 p-3 rounded">
-                        <div className="text-sm font-semibold mb-2">🎨 战报插图</div>
-                        <img
-                            src={illustrationImageUrl}
-                            alt={`${headline || '战报'} 插图`}
-                            className="w-full max-h-[560px] object-contain rounded-lg border border-white/15 bg-black/15"
-                            loading="eager"
-                            decoding="async"
-                        />
-                        {uploadedIllustrationNote && (
-                            <p className="mt-2 text-[11px] text-gray-300 text-right">
-                                注：{uploadedIllustrationNote}
-                            </p>
-                        )}
-                    </div>
-                )}
-
-                {/* Markdown 内容渲染区域 */}
-                <div className="min-h-[200px]">
-                    <ReactMarkdown
-                        remarkPlugins={[remarkGfm, remarkBattleTable, [remarkMath, { singleDollarTextMath: true }]]}
-                        rehypePlugins={[[rehypeKatex, { throwOnError: false, strict: 'ignore' }]]}
-                        components={markdownComponents}
-                    >
-                        {markdownBody}
-                    </ReactMarkdown>
-                    {/* 闪烁光标，模拟打字效果 */}
-                    {isStreaming && (
-                        <span className="inline-block w-2 h-4 bg-pink-500 animate-pulse align-middle ml-1"></span>
+                    {illustrationImageUrl && (
+                        <div className="mt-4 border-l-4 border-pink-300 bg-black/20 p-3 rounded">
+                            <div className="text-sm font-semibold mb-2">🎨 战报插图</div>
+                            <img
+                                src={illustrationImageUrl}
+                                alt={`${headline || '战报'} 插图`}
+                                className="w-full max-h-[560px] object-contain rounded-lg border border-white/15 bg-black/15"
+                                loading="eager"
+                                decoding="async"
+                            />
+                            {uploadedIllustrationNote && (
+                                <p className="mt-2 text-[11px] text-gray-300 text-right">
+                                    注：{uploadedIllustrationNote}
+                                </p>
+                            )}
+                        </div>
                     )}
-                </div>
 
-                {userGuidance?.trim() && (
-                    <div className="mt-6 border-l-4 border-purple-400 bg-black/20 p-3 rounded">
-                        <div className="text-sm font-semibold mb-1">📖 故事引导</div>
-                        <p className="text-sm opacity-90 italic">“{userGuidance.trim()}”</p>
-                    </div>
-                )}
+                    {/* Markdown 内容渲染区域 */}
+                    {!showingWeb && <div className="min-h-[200px]">
+                        <ReactMarkdown
+                            remarkPlugins={[remarkGfm, remarkBattleTable, [remarkMath, { singleDollarTextMath: true }]]}
+                            rehypePlugins={[[rehypeKatex, { throwOnError: false, strict: 'ignore' }]]}
+                            components={markdownComponents}
+                        >
+                            {markdownBody}
+                        </ReactMarkdown>
+                        {/* 闪烁光标，模拟打字效果 */}
+                        {isStreaming && (
+                            <span className="inline-block w-2 h-4 bg-pink-500 animate-pulse align-middle ml-1"></span>
+                        )}
+                    </div>}
 
-                {Array.isArray(characterGuidances) && characterGuidances.length > 0 && (
-                    <div className="mt-4 border-l-4 border-indigo-300 bg-black/20 p-3 rounded">
-                        <div className="text-sm font-semibold mb-2">🎭 角色行动引导</div>
-                        <div className="space-y-2 text-sm">
-                            {characterGuidances
-                                .map((item, index) => {
-                                    const characterName = typeof item?.characterName === 'string' ? item.characterName.trim() : '';
-                                    const guidance = typeof item?.guidance === 'string' ? item.guidance.trim() : '';
-                                    if (!characterName || !guidance) return null;
+                    {userGuidance?.trim() && (
+                        <div className="mt-6 border-l-4 border-purple-400 bg-black/20 p-3 rounded">
+                            <div className="text-sm font-semibold mb-1">📖 故事引导</div>
+                            <p className="text-sm opacity-90 italic">“{userGuidance.trim()}”</p>
+                        </div>
+                    )}
+
+                    {Array.isArray(characterGuidances) && characterGuidances.length > 0 && (
+                        <div className="mt-4 border-l-4 border-indigo-300 bg-black/20 p-3 rounded">
+                            <div className="text-sm font-semibold mb-2">🎭 角色行动引导</div>
+                            <div className="space-y-2 text-sm">
+                                {characterGuidances
+                                    .map((item, index) => {
+                                        const characterName = typeof item?.characterName === 'string' ? item.characterName.trim() : '';
+                                        const guidance = typeof item?.guidance === 'string' ? item.guidance.trim() : '';
+                                        if (!characterName || !guidance) return null;
+                                        return (
+                                            <div key={`${characterName}-${index}`} className="opacity-90">
+                                                <span className="font-semibold">{characterName}</span>
+                                                <span className="opacity-80">：{guidance}</span>
+                                            </div>
+                                        );
+                                    })
+                                    .filter(Boolean)}
+                            </div>
+                        </div>
+                    )}
+
+                    {adjudicationResults && adjudicationResults.length > 0 && (
+                        <div className="mt-4 border-l-4 border-green-400 bg-black/20 p-3 rounded">
+                            <div className="text-sm font-semibold mb-2">🎲 随机判定记录</div>
+                            <div className="space-y-2 text-sm">
+                                {adjudicationResults.map((result, index) => {
+                                    const outcomeTone = resolveAdjudicationOutcomeTone(result.outcome);
                                     return (
-                                        <div key={`${characterName}-${index}`} className="opacity-90">
-                                            <span className="font-semibold">{characterName}</span>
-                                            <span className="opacity-80">：{guidance}</span>
+                                        <div key={index} style={{ marginLeft: `${result.depth * 16}px` }}>
+                                            <p className="opacity-90">
+                                                {result.depth > 0 && <span className="text-gray-400">↳ </span>}
+                                                <span className="font-semibold">{result.description}</span>
+                                            </p>
+                                            <p className="text-xs opacity-70">
+                                                判定结果:{' '}
+                                                <span
+                                                    className={`font-bold ${
+                                                        outcomeTone === 'success'
+                                                            ? 'text-green-300'
+                                                            : outcomeTone === 'failure'
+                                                                ? 'text-red-300'
+                                                                : 'text-blue-300'
+                                                    }`}
+                                                >
+                                                    {result.outcome}
+                                                </span>{' '}
+                                                ({result.details})
+                                            </p>
                                         </div>
                                     );
-                                })
-                                .filter(Boolean)}
+                                })}
+                            </div>
                         </div>
-                    </div>
-                )}
-
-                {adjudicationResults && adjudicationResults.length > 0 && (
-                    <div className="mt-4 border-l-4 border-green-400 bg-black/20 p-3 rounded">
-                        <div className="text-sm font-semibold mb-2">🎲 随机判定记录</div>
-                        <div className="space-y-2 text-sm">
-                            {adjudicationResults.map((result, index) => {
-                                const outcomeTone = resolveAdjudicationOutcomeTone(result.outcome);
-                                return (
-                                    <div key={index} style={{ marginLeft: `${result.depth * 16}px` }}>
-                                        <p className="opacity-90">
-                                            {result.depth > 0 && <span className="text-gray-400">↳ </span>}
-                                            <span className="font-semibold">{result.description}</span>
-                                        </p>
-                                        <p className="text-xs opacity-70">
-                                            判定结果:{' '}
-                                            <span
-                                                className={`font-bold ${
-                                                    outcomeTone === 'success'
-                                                        ? 'text-green-300'
-                                                        : outcomeTone === 'failure'
-                                                            ? 'text-red-300'
-                                                            : 'text-blue-300'
-                                                }`}
-                                            >
-                                                {result.outcome}
-                                            </span>{' '}
-                                            ({result.details})
-                                        </p>
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    </div>
-                )}
-
-                {/* 底部按钮 */}
-                <div className="buttons-container flex gap-2 justify-center mt-6 pt-4 border-t border-gray-700" style={{ alignItems: 'stretch' }}>
-                    {onSaveImage && (
-                        <button
-                            onClick={isStreaming && onStopGeneration ? onStopGeneration : handleSaveImage}
-                            disabled={isSavingImage}
-                            className="save-button flex-1 bg-white/10 hover:bg-white/20 text-white py-2 px-4 rounded transition-all disabled:opacity-60 disabled:cursor-not-allowed"
-                        >
-                            {isStreaming && onStopGeneration ? '⏹ 停止生成' : isSavingImage ? '生成中...' : '📱 保存为图片'}
-                        </button>
                     )}
-                    <button
-                        onClick={handleSaveMarkdown}
-                        className="save-button flex-1 bg-white/10 hover:bg-white/20 text-white py-2 px-4 rounded transition-all"
-                    >
-                        📄 下载记录
-                    </button>
-                </div>
 
-                {/* Logo占位符，用于截图 */}
-                <div
-                    className="logo-placeholder"
-                    style={{ display: 'none', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', marginTop: '1rem' }}
-                >
-                    <img
-                        src="/logo-white-qrcode.svg"
-                        width={280}
-                        height={280}
-                        alt="Logo"
-                        style={{ display: 'block', maxWidth: '100%', height: 'auto' }}
-                    />
-                    <GeneratedByUserBadge variant="dark" className="mt-3" />
+                    {/* 底部按钮 */}
+                    {(!disableExport || additionalActions != null) && <div className="buttons-container flex flex-wrap gap-2 justify-center mt-6 pt-4 border-t border-gray-700" style={{ alignItems: 'stretch' }}>
+                        {!disableExport && onSaveImage && (
+                            <button
+                                onClick={isStreaming && onStopGeneration ? onStopGeneration : handleSaveImage}
+                                disabled={isSavingImage || stopGenerationDisabled}
+                                className="save-button flex-1 bg-white/10 hover:bg-white/20 text-white py-2 px-4 rounded transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                            >
+                                {isStreaming && onStopGeneration
+                                    ? `⏹ ${stopGenerationDisabled ? '正在停止…' : stopGenerationLabel}`
+                                    : isSavingImage ? '生成中...' : '📱 保存为图片'}
+                            </button>
+                        )}
+                        {!disableExport && <button
+                            onClick={handleSaveMarkdown}
+                            className="save-button flex-1 bg-white/10 hover:bg-white/20 text-white py-2 px-4 rounded transition-all"
+                        >
+                            📄 下载记录
+                        </button>}
+                        {additionalActions}
+                    </div>}
+
+                    {/* Logo占位符，用于截图 */}
+                    <div
+                        className="logo-placeholder"
+                        style={{ display: 'none', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', marginTop: '1rem' }}
+                    >
+                        <img
+                            src="/logo-white-qrcode.svg"
+                            width={280}
+                            height={280}
+                            alt="Logo"
+                            style={{ display: 'block', maxWidth: '100%', height: 'auto' }}
+                        />
+                        <GeneratedByUserBadge variant="dark" className="mt-3" />
+                    </div>
                 </div>
             </div>
         </div>

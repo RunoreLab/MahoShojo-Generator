@@ -1,6 +1,15 @@
 'use client';
 
+import { SegmentedControl, type SegmentedOption } from './SegmentedControl';
+
 export type BattleModeKey = 'daily' | 'kizuna' | 'classic' | 'scenario';
+
+const MODE_OPTIONS: readonly SegmentedOption<BattleModeKey>[] = [
+  { value: 'daily', label: '日常模式', icon: '☕', description: '聚焦角色间的日常互动与故事。' },
+  { value: 'kizuna', label: '羁绊模式', icon: '✨', description: '战斗更注重友情、羁绊与信念，能力强度并非唯一关键。' },
+  { value: 'classic', label: '经典模式', icon: '⚔️', description: '主要依据角色能力设定与战斗推演规则决定结果。' },
+  { value: 'scenario', label: '情景模式', icon: '📜', description: '结合所选情景卡的背景、规则与事件展开故事。' },
+];
 
 type BattleModeSelectorProps = {
   value: BattleModeKey;
@@ -49,28 +58,8 @@ export function BattleModeSelector({
 }: BattleModeSelectorProps) {
   return (
     <div className="input-group">
-      <label className="input-label">{label}</label>
-      <div className="flex items-center space-x-1 bg-gray-200 p-1 rounded-full">
-        {([
-          { key: 'daily', label: '日常模式☕' },
-          { key: 'kizuna', label: '羁绊模式✨' },
-          { key: 'classic', label: '经典模式⚔️' },
-          { key: 'scenario', label: '情景模式📜' },
-        ] as const).map((option) => (
-          <button
-            key={option.key}
-            onClick={() => onChange(option.key)}
-            disabled={disabled}
-            className={`w-1/4 py-2 text-sm font-semibold rounded-full transition-colors duration-300 ${
-              value === option.key ? 'bg-white text-pink-600 shadow' : 'text-gray-600 hover:bg-gray-300'
-            } disabled:opacity-50 disabled:cursor-not-allowed`}
-          >
-            {option.label}
-          </button>
-        ))}
-      </div>
+      <SegmentedControl label={label} value={value} options={MODE_OPTIONS} onChange={onChange} disabled={disabled} />
       {showHelper ? renderHelper(value) : null}
     </div>
   );
 }
-

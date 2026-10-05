@@ -6,10 +6,13 @@ import {
   resolveGenerationApiUrl,
 } from '@/lib/hono-api-routing';
 import {
+  isHostedDrOperationEligible,
+  lookupHostedDrClientOperation,
   selectHostedDrPlacement,
   type HostedDrDecisionReason,
   type HostedPlacementDecision,
 } from '@/lib/hosted-dr/client-preflight';
+import { hostedDrClientRouting } from '@/config/hosted-routing';
 import {
   createHostedDrSelectionTelemetry,
   createHostedDrTerminalTelemetry,
@@ -28,6 +31,19 @@ export type GenerationApiClientErrorCode =
   | 'AMBIGUOUS_OPERATION_OUTCOME'
   | 'GENERATION_INTENT_ALREADY_DISPATCHED';
 
+export type GenerationApiRoutePin = Readonly<{
+  placement: 'hono-primary' | 'next-dr';
+}>;
+
+export const isGenerationApiRoutePin = (value: unknown): value is GenerationApiRoutePin => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  if (Object.keys(value).length !== 1 || !Object.prototype.hasOwnProperty.call(value, 'placement')) {
+    return false;
+  }
+  const placement = (value as { placement?: unknown }).placement;
+  return placement === 'hono-primary' || placement === 'next-dr';
+};
+
 export class GenerationApiClientError extends Error {
   readonly code: GenerationApiClientErrorCode;
   readonly decision: HostedPlacementDecision | null;
@@ -43,6 +59,15 @@ export class GenerationApiClientError extends Error {
     this.decision = decision;
   }
 }
+
+export const isGenerationApiClientErrorCode = (
+  error: unknown,
+  code: GenerationApiClientErrorCode,
+): boolean => {
+  if (!error || typeof error !== 'object' || Array.isArray(error)) return false;
+  const candidate = error as { name?: unknown; code?: unknown };
+  return candidate.name === 'GenerationApiClientError' && candidate.code === code;
+};
 
 type GenerationFetch = (
   input: string,
@@ -63,6 +88,14 @@ export type GenerationApiIntentDependencies = {
 };
 
 export type GenerationApiIntent = Readonly<{
+  dispatch: (input: string, init?: RequestInit) => Promise<Response>;
+  getRoutePin: () => GenerationApiRoutePin | null;
+  subscribeRoutePinSelected: (
+    observer: (_routePin: GenerationApiRoutePin) => void,
+  ) => () => void;
+}>;
+
+export type PinnedGenerationApiSafeReadDispatcher = Readonly<{
   dispatch: (input: string, init?: RequestInit) => Promise<Response>;
 }>;
 
@@ -111,6 +144,23 @@ const responseTerminalClass = (
 const isPotentiallyMutatingMethod = (method: string): boolean => (
   method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS'
 );
+
+export const buildGenerationApiHeaders = async (
+  auth: GenerationApiAuth,
+  headersInit: HeadersInit | undefined,
+): Promise<Headers> => {
+  const headers = new Headers(headersInit ?? {});
+  const authHeader = await auth.getAuthHeader();
+  if (authHeader && !headers.has('Authorization')) {
+    headers.set('Authorization', authHeader);
+  }
+
+  const activityHeaders = await auth.getActivityHeaders();
+  for (const [name, value] of Object.entries(activityHeaders)) {
+    if (!headers.has(name)) headers.set(name, value);
+  }
+  return headers;
+};
 
 const wrapAmbiguousBodyErrors = (
   response: Response,
@@ -233,6 +283,58 @@ const wrapAmbiguousBodyErrors = (
   });
 };
 
+type PinnedGenerationApiSafeReadDependencies = Pick<
+  GenerationApiIntentDependencies,
+  'auth' | 'fetcher' | 'observe'
+>;
+
+export const createPinnedGenerationApiSafeReadDispatcher = (
+  routePin: GenerationApiRoutePin,
+  {
+    auth = authStorage,
+    fetcher = fetch,
+    observe = observeHostedDrClientTelemetry,
+  }: PinnedGenerationApiSafeReadDependencies = {},
+): PinnedGenerationApiSafeReadDispatcher => {
+  if (!isGenerationApiRoutePin(routePin)) {
+    throw new TypeError('GENERATION_API_ROUTE_PIN_INVALID');
+  }
+  const pinnedRoute = Object.freeze({ placement: routePin.placement });
+
+  return Object.freeze({
+    async dispatch(input: string, init: RequestInit = {}): Promise<Response> {
+      const method = (init.method ?? 'GET').trim().toUpperCase();
+      const operation = lookupHostedDrClientOperation(input, method);
+      const isVerifiedSafeRead = (method === 'GET' || method === 'HEAD')
+        && operation !== null
+        && operation.safety === 'safe-read'
+        && isHostedDrOperationEligible(operation);
+      if (!isVerifiedSafeRead) {
+        throw new Error('PINNED_GENERATION_SAFE_READ_NOT_ALLOWED');
+      }
+
+      const headers = await buildGenerationApiHeaders(auth, init.headers);
+      const target = pinnedRoute.placement === 'hono-primary'
+        ? `${hostedDrClientRouting.primaryOrigin.replace(/\/+$/u, '')}${input}`
+        : input;
+      let response: Response;
+      try {
+        response = await fetcher(target, {
+          ...init,
+          method,
+          headers,
+          credentials: pinnedRoute.placement === 'hono-primary'
+            ? 'omit'
+            : (init.credentials ?? 'same-origin'),
+        });
+      } catch {
+        throw ambiguousOutcomeError(null);
+      }
+      return wrapAmbiguousBodyErrors(response, null, observe, () => undefined, false);
+    },
+  });
+};
+
 export const createGenerationApiIntent = ({
   auth = authStorage,
   fetcher = fetch,
@@ -242,6 +344,21 @@ export const createGenerationApiIntent = ({
 }: GenerationApiIntentDependencies = {}): GenerationApiIntent => {
   let consumed = false;
   let settled = false;
+  let routePin: GenerationApiRoutePin | null = null;
+  let routePinReadyForDispatch = false;
+  const routePinObservers = new Set<(routePin: GenerationApiRoutePin) => void>();
+  const notifyRoutePinSelected = () => {
+    if (!routePin) return;
+    routePinReadyForDispatch = true;
+    for (const observer of routePinObservers) {
+      try {
+        observer(routePin);
+      } catch {
+        // route pin observer 不得改变业务请求 dispatch 结果。
+      }
+    }
+    routePinObservers.clear();
+  };
   const settle = () => {
     if (settled) return;
     settled = true;
@@ -253,6 +370,19 @@ export const createGenerationApiIntent = ({
   };
 
   return Object.freeze({
+    getRoutePin: () => routePin,
+    subscribeRoutePinSelected(observer) {
+      if (routePinReadyForDispatch && routePin) {
+        try {
+          observer(routePin);
+        } catch {
+          // route pin observer 不得改变业务请求 dispatch 结果。
+        }
+        return () => undefined;
+      }
+      routePinObservers.add(observer);
+      return () => routePinObservers.delete(observer);
+    },
     async dispatch(
       input: string,
       init: RequestInit = {},
@@ -289,26 +419,26 @@ export const createGenerationApiIntent = ({
           settle();
           throw unavailableError(decision);
         }
+        routePin = Object.freeze({ placement: decision.placement });
         target = decision.placement === 'hono-primary'
           ? `${honoApiConfig.origin.replace(/\/+$/u, '')}${input}`
           : input;
       }
 
-      const headers = new Headers(init.headers ?? {});
+      let headers: Headers;
       try {
-        const authHeader = await auth.getAuthHeader();
-        if (authHeader && !headers.has('Authorization')) {
-          headers.set('Authorization', authHeader);
-        }
-
-        const activityHeaders = await auth.getActivityHeaders();
-        for (const [name, value] of Object.entries(activityHeaders)) {
-          if (!headers.has(name)) headers.set(name, value);
-        }
+        headers = await buildGenerationApiHeaders(auth, init.headers);
       } catch (error) {
+        if (decision) {
+          emitHostedDrClientTelemetry(
+            observe,
+            createHostedDrTerminalTelemetry(decision, 'not-dispatched'),
+          );
+        }
         settle();
         throw error;
       }
+      notifyRoutePinSelected();
 
       let response: Response;
       try {

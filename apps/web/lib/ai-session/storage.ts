@@ -48,6 +48,7 @@ const openAiSessionDbInternal = (): Promise<IDBDatabase> =>
         store.createIndex('by_session_createdAt', ['sessionId', 'createdAt']);
       }
 
+      // 挑战已退休；保留 v4 store 布局，避免同版本的新旧数据库结构不同或删除用户历史本地数据。
       if (!db.objectStoreNames.contains(AI_SESSION_STORE_NAMES.challengeRuns)) {
         const store = db.createObjectStore(AI_SESSION_STORE_NAMES.challengeRuns, { keyPath: 'id' });
         store.createIndex('by_status_updatedAt', ['status', 'updatedAt']);

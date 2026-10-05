@@ -1,34 +1,43 @@
 'use client';
 
 import SaveToCloudButton from '@/components/SaveToCloudButton';
-import BattleReportCard, { NewsReport, type BattleReportIllustrationAsset } from '@/components/BattleReportCard';
-import StreamingBattleReportCard from '@/components/stream/StreamingBattleReportCard';
+import { NewsReport, type BattleReportIllustrationAsset } from '@/components/BattleReportCard';
 
 import { useEffect, useMemo, useState } from 'react';
 import { useBattleStore } from '../stores/useBattleStore';
 import { useBattleEngine } from '../hooks/useBattleEngine';
+import { useCombatantRepair } from '../hooks/useCombatantRepair';
 import { getCombatantDisplayName } from '../utils/characterValidator';
-import { toBattleReportMarkdown } from '../utils/battleReportMarkdown';
 import { inferTemplate } from '@/lib/data-card-converter';
-import { precheckBattleReportForRedo } from '@/lib/arena/redo-updates';
-import { resolveAdjudicationOutcomeTone } from '@/lib/adjudicator/presentation';
-import { AdjudicationResult } from '@/types/arena';
-import { BattleStoreState, CombatantData, UpdatedCombatantData } from '../types';
+import { BattleStoreState, CombatantData } from '../types';
 import { MarkdownBlock } from '@/components/MarkdownBlock';
 import { CollapsibleSection } from '@/components/shared/CollapsibleSection';
 import { JsonSizeIndicator } from '@/components/shared/JsonSizeIndicator';
 import { BattleIllustrationPanel } from './BattleIllustrationPanel';
+import { BattleResultPresentation } from './BattleResultPresentation';
+import { CombatantUpdatesPresentation } from './CombatantUpdatesPresentation';
 import { resolveBattleReportCardManualWidthPx } from '../utils/battleReportCardWidth';
+import { downloadBlob } from '@/lib/client/blobUrl';
 
 interface BattleResultProps {
   onSaveImage: (imageUrl: string) => void;
 }
 
 export function BattleResult({ onSaveImage }: BattleResultProps) {
-  const { handleRedoUpdates, handleApplyManualMetaUpdates, stopGeneration, isCooldown, remainingTime, isRedoingUpdates } = useBattleEngine();
+  const {
+    handleRetryUpdates,
+    stopGeneration,
+    isRedoingUpdates,
+    isRecoveringArenaGeneration,
+    arenaGenerationConnectionState,
+  } = useBattleEngine();
+  const combatantRepair = useCombatantRepair();
   const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
   const adjudicationResults = useBattleSelector((state) => state.adjudicationResults);
   const newsReport = useBattleSelector((state) => state.newsReport);
+  const resultReportFormat = useBattleSelector((state) => state.resultReportFormat);
+  const resultWebReady = useBattleSelector((state) => state.resultWebReady);
+  const resultWebPackage = useBattleSelector((state) => state.resultWebPackage);
   const generationMode = useBattleSelector((state) => state.generationMode);
   const streamingMarkdown = useBattleSelector((state) => state.streamingMarkdown);
   const streamReporterInfo = useBattleSelector((state) => state.streamReporterInfo);
@@ -48,9 +57,8 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
   const settings = useBattleSelector((state) => state.settings);
   const battleMode = useBattleSelector((state) => state.battleMode);
   const scenario = useBattleSelector((state) => state.scenario);
+  const isCancellingArenaGeneration = arenaGenerationConnectionState === 'cancelling';
   const [illustrationAsset, setIllustrationAsset] = useState<BattleReportIllustrationAsset | null>(null);
-  const [manualMetaInput, setManualMetaInput] = useState('');
-  const [manualMetaMessage, setManualMetaMessage] = useState<string | null>(null);
   const battleReportCardWidthPx = resolveBattleReportCardManualWidthPx(settings);
 
   const scenarioDisplayName = useMemo(() => {
@@ -73,12 +81,44 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
     () => combatants.filter((item): item is CombatantData => 'data' in item),
     [combatants]
   );
+  const updatedCombatantPresentationItems = useMemo(() => (
+    updatedCombatants.flatMap((character, index) => {
+      const entries = character.arena_history?.entries;
+      const latestEntry = Array.isArray(entries) && entries.length > 0
+        ? entries[entries.length - 1]
+        : null;
+      const impact = typeof latestEntry?.impact === 'string' ? latestEntry.impact.trim() : null;
+      const stateSummary = typeof character.current_state?.summary === 'string'
+        ? character.current_state.summary.trim()
+        : null;
+      if (!impact && !stateSummary) return [];
+
+      const name = getCombatantDisplayName(character);
+      const template = inferTemplate(character);
+      const typeDisplay = template === 'magical-girl'
+        ? '魔法少女'
+        : template === 'canshou'
+          ? '残兽'
+          : '通用角色';
+      return [{
+        key: `updated-combatant-${index}`,
+        displayName: name,
+        typeLabel: typeDisplay,
+        impact,
+        currentStateSummary: stateSummary,
+      }];
+    })
+  ), [updatedCombatants]);
+  const updatedCombatantsByPresentationKey = useMemo(
+    () => new Map(updatedCombatants.map((character, index) => [
+      `updated-combatant-${index}`,
+      character,
+    ])),
+    [updatedCombatants]
+  );
   const canWriteUpdates = settings.writeArenaHistory || settings.writeCurrentState;
-  const reportMarkdownForRedo =
-    generationMode === 'stream'
-      ? (streamingMarkdown ?? '').trim()
-      : (newsReport ? toBattleReportMarkdown(newsReport as NewsReport) : '').trim();
-  const redoPrecheck = precheckBattleReportForRedo(reportMarkdownForRedo, battleMode);
+  const shouldShowCombatantUpdates =
+    canWriteUpdates || Boolean(lastGenerationId) || updatedCombatants.length > 0;
   const streamMetaDebugSummary = useMemo(() => {
     if (!streamUpdateMetaDebug) return null;
     const sourceLabel = streamUpdateMetaDebug.source === 'sse' ? 'SSE' : '注释解析';
@@ -94,26 +134,11 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
       return '';
     }
   }, [streamUpdateMetaDebug?.meta]);
-  const manualMetaDefault = useMemo(() => {
-    if (streamMetaParsedJson) return streamMetaParsedJson;
-    if (typeof streamUpdateMetaDebug?.raw === 'string' && streamUpdateMetaDebug.raw.trim()) {
-      return streamUpdateMetaDebug.raw;
-    }
-    return '';
-  }, [streamMetaParsedJson, streamUpdateMetaDebug?.raw]);
-
   const downloadUpdatedJson = (characterData: any) => {
     const name = characterData.codename || characterData.name;
     const jsonData = JSON.stringify(characterData, null, 2);
     const blob = new Blob([jsonData], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `角色设定_${name}_更新.json`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    downloadBlob(blob, `角色设定_${name}_更新.json`);
   };
 
   useEffect(() => {
@@ -126,107 +151,70 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
     }
   }, [hasBattleReport]);
 
-  useEffect(() => {
-    setManualMetaInput(manualMetaDefault);
-    setManualMetaMessage(null);
-  }, [manualMetaDefault, lastGenerationId]);
-
-  const handleResetManualMetaInput = () => {
-    setManualMetaInput(manualMetaDefault);
-    setManualMetaMessage(manualMetaDefault ? '已恢复为当前解析结果。' : '当前暂无可恢复的解析结果。');
-  };
-
-  const handleApplyManualMeta = async () => {
-    const ok = await handleApplyManualMetaUpdates(manualMetaInput);
-    if (ok) {
-      setManualMetaMessage('手动修改已应用，角色更新完成。');
-    } else {
-      setManualMetaMessage('应用失败，请检查 JSON 与角色名是否完整匹配。');
-    }
-  };
-
   return (
     <>
-      {adjudicationResults && (
-        <div className="card mt-6">
-          <CollapsibleSection
-            title="🎲 随机判定结果"
-            description={`共 ${adjudicationResults.length} 条`}
-            defaultOpen={false}
-            storageKey="arena.section.adjudicationResults.open"
-            variant="plain"
-            titleClassName="text-lg font-bold text-gray-800"
-            headerClassName="mb-3"
-          >
-            <div className="space-y-2">
-              {adjudicationResults.map((result: AdjudicationResult, index: number) => {
-                const outcomeTone = resolveAdjudicationOutcomeTone(result.outcome);
-                return (
-                  <div
-                    key={index}
-                    className="p-3 bg-gray-50 border border-gray-200 rounded-lg text-sm"
-                    style={{ marginLeft: `${result.depth * 20}px` }}
-                  >
-                    {result.depth > 0 && <span className="text-gray-400">↳ </span>}
-                    <span className="font-semibold text-gray-700">{result.description}</span>
-                    <p className="text-gray-600 mt-1">
-                      判定结果:{' '}
-                      <span
-                        className={`font-bold ${
-                          outcomeTone === 'success'
-                            ? 'text-green-600'
-                            : outcomeTone === 'failure'
-                              ? 'text-red-600'
-                              : 'text-blue-600'
-                        }`}
-                      >
-                        {result.outcome}
-                      </span>{' '}
-                      ({result.details})
-                    </p>
-                  </div>
-                );
-              })}
-            </div>
-          </CollapsibleSection>
-        </div>
-      )}
-
-      {generationMode === 'stream' ? (
-        isGenerating || streamingMarkdown !== null ? (
-          <div className="mt-6">
-            <StreamingBattleReportCard
-              content={streamingMarkdown ?? ''}
-              onSaveImage={onSaveImage}
-              mode={battleMode}
-              scenarioName={scenarioDisplayName}
-              reporterInfo={streamReporterInfo}
-              userGuidance={streamUserGuidance}
-              characterGuidances={streamCharacterGuidances}
-              adjudicationResults={adjudicationResults}
-              aiUsage={streamAiUsage}
-              aiModel={streamAiModel}
-              narrativeHistoryReadCount={streamNarrativeHistoryReadCount}
-              aiReasoning={streamReasoning}
-              isStreaming={isGenerating}
-              softTimeoutWarning={streamSoftTimeoutWarning}
-              onStopGeneration={stopGeneration}
-              illustrationAsset={illustrationAsset}
-              cardWidthPx={battleReportCardWidthPx}
-            />
-          </div>
-        ) : null
-      ) : (
-        newsReport && (
-          <BattleReportCard
-            report={newsReport as NewsReport}
-            onSaveImage={onSaveImage}
-            mode={battleMode}
-            illustrationAsset={illustrationAsset}
-            cardWidthPx={battleReportCardWidthPx}
-          />
-        )
-      )}
+      <BattleResultPresentation
+        report={generationMode === 'stream'
+          ? isGenerating || streamingMarkdown !== null
+            ? {
+                format: resultReportFormat === 'web' ? 'stream-web' : 'stream-markdown',
+                webReady: resultWebReady,
+                webPackage: resultWebPackage,
+                content: streamingMarkdown ?? '',
+                headline: streamUpdateMetaDebug?.meta?.report?.headline ?? null,
+                mode: battleMode,
+                scenarioName: scenarioDisplayName,
+                reporterInfo: streamReporterInfo,
+                userGuidance: streamUserGuidance,
+                characterGuidances: streamCharacterGuidances,
+                aiUsage: streamAiUsage,
+                aiModel: streamAiModel,
+                narrativeHistoryReadCount: streamNarrativeHistoryReadCount,
+                aiReasoning: streamReasoning,
+                isStreaming: isGenerating,
+                softTimeoutWarning: streamSoftTimeoutWarning,
+                onStopGeneration: stopGeneration,
+                stopGenerationLabel: isCancellingArenaGeneration
+                  ? '正在停止…'
+                  : isRecoveringArenaGeneration
+                    ? '放弃恢复'
+                    : '停止生成',
+                stopGenerationDisabled: isCancellingArenaGeneration,
+                illustrationAsset,
+                cardWidthPx: battleReportCardWidthPx,
+              }
+            : null
+          : newsReport
+            ? newsReport.reportFormat === 'web'
+              ? {
+                  format: 'web-document',
+                  content: newsReport.webHtml ?? newsReport.article.body,
+                  webPackage: newsReport.webPackage,
+                  headline: newsReport.headline ?? null,
+                  webReady: resultWebReady,
+                  isStreaming: false,
+                  mode: battleMode,
+                  reporterInfo: newsReport.reporterInfo,
+                  userGuidance: newsReport.userGuidance,
+                  characterGuidances: newsReport.characterGuidances,
+                  aiUsage: newsReport.aiUsage,
+                  aiModel: newsReport.aiModel,
+                  aiReasoning: newsReport.aiReasoning,
+                  narrativeHistoryReadCount: newsReport.narrativeHistoryReadCount,
+                  illustrationAsset,
+                  cardWidthPx: battleReportCardWidthPx,
+                }
+              : {
+                format: 'structured-report',
+                report: newsReport as NewsReport,
+                mode: battleMode,
+                illustrationAsset,
+                cardWidthPx: battleReportCardWidthPx,
+              }
+            : null}
+        onSaveImage={onSaveImage}
+        adjudicationResults={adjudicationResults}
+      />
 
       {shouldShowIllustrationPanel && (
         <BattleIllustrationPanel
@@ -240,34 +228,130 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
         />
       )}
 
-      {hasBattleReport && canWriteUpdates && (
-        <div className="card mt-6">
-          <CollapsibleSection
-            title="角色更新"
-            description={`可下载/保存本次更新的角色设定（共 ${updatedCombatants.length} 个）`}
-            defaultOpen
-            storageKey="arena.section.updatedCombatants.open"
-            variant="plain"
-            titleClassName="text-lg font-bold text-gray-800"
-            headerClassName="mb-3"
-            headerRight={
-              <button
-                onClick={() => handleRedoUpdates()}
-                disabled={isGenerating || isRedoingUpdates || isCooldown || !redoPrecheck.ok}
-                className="px-3 py-1.5 text-xs font-semibold text-white bg-purple-500 rounded-lg hover:bg-purple-600 transition-colors disabled:opacity-60 disabled:cursor-not-allowed shrink-0"
-                title={
-                  isCooldown
-                    ? `冷却中，请等待 ${remainingTime} 秒`
-                    : !redoPrecheck.ok
-                      ? redoPrecheck.error
-                      : '基于战报重做角色更新'
-                }
-              >
-                {isCooldown ? `冷却中 ${remainingTime}s` : isRedoingUpdates ? '重做中...' : '重做角色更新'}
-              </button>
-            }
-          >
-            <div className="space-y-4">
+      {hasBattleReport && shouldShowCombatantUpdates && (
+        <CombatantUpdatesPresentation
+          title="角色更新"
+          description={`可下载/保存本次更新的角色设定（共 ${updatedCombatants.length} 个）`}
+          defaultOpen
+          itemDefaultOpen={false}
+          storageKey="arena.section.updatedCombatants.open"
+          emptyMessage="本次尚未产生可展示的角色更新。你可以点击“重试角色更新”，重试应用本次服务器已生成的历战记录/当前状态摘要。"
+          headerRight={!combatantRepair.isInRoom ? (
+            <button
+              onClick={() => handleRetryUpdates()}
+              disabled={
+                isGenerating
+                || isRedoingUpdates
+                || combatantRepair.isCombatantMutationPending
+                || !lastGenerationId
+                || combatantRepair.isRepairAppliedForGeneration
+              }
+              className="px-3 py-1.5 text-xs font-semibold text-white bg-purple-500 rounded-lg hover:bg-purple-600 transition-colors disabled:opacity-60 disabled:cursor-not-allowed shrink-0"
+              title={combatantRepair.isRepairAppliedForGeneration
+                ? '当前 roster 已应用自定义修复；需要生成新战报后才能再次权威重试'
+                : lastGenerationId
+                  ? '重试应用本次服务器已生成的角色更新'
+                  : '本次战报缺少 generationId，无法安全重试'}
+            >
+              {isRedoingUpdates ? '重试中...' : '重试角色更新'}
+            </button>
+          ) : undefined}
+          items={updatedCombatantPresentationItems}
+          renderBeforeItems={(
+            <>
+              {combatantRepair.hasRepairContext && !combatantRepair.isInRoom && (
+                <CollapsibleSection
+                  title="自定义修复本次角色变化"
+                  description="AI 只生成可编辑草稿；应用后会得到 unsigned、non-canonical 的当前会话副本"
+                  defaultOpen={false}
+                  storageKey="arena.section.combatantRepair.open"
+                  variant="panel"
+                >
+                  <div className="space-y-3 text-sm text-gray-700">
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-900">
+                      修复原生角色或 preset/DataCard 时，会创建非原生可编辑版本；服务器不会重新签名，源角色也不会被自动覆盖。
+                    </div>
+
+                    {combatantRepair.isRepairAppliedForGeneration && (
+                      <div className="rounded-lg border border-purple-200 bg-purple-50 p-3 text-purple-800">
+                        当前 roster 已应用本次自定义修复。同 generation 的服务器权威重试已禁用；生成新战报后会恢复。
+                      </div>
+                    )}
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => combatantRepair.generateAiRepairDraft()}
+                        disabled={
+                          isGenerating
+                          || combatantRepair.isGeneratingDraft
+                          || combatantRepair.isApplyingRepair
+                          || combatantRepair.isCooldown
+                          || !combatantRepair.canGenerateAiDraft
+                        }
+                        className="rounded-lg bg-indigo-500 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-indigo-600 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {combatantRepair.isGeneratingDraft
+                          ? 'AI 草稿生成中...'
+                          : 'AI 重新生成修复草稿'}
+                      </button>
+                      {combatantRepair.isCooldown && (
+                        <span className="text-xs text-gray-500">
+                          Provider 冷却中（{combatantRepair.remainingTime}s）
+                        </span>
+                      )}
+                      {!combatantRepair.canGenerateAiDraft && (
+                        <span className="text-xs text-gray-500">
+                          AI 草稿需要开启历战记录或当前状态写入；手动编辑仍可使用。
+                        </span>
+                      )}
+                    </div>
+
+                    <label className="block">
+                      <span className="mb-1 block font-medium text-gray-700">手动编辑修复草稿</span>
+                      <textarea
+                        value={combatantRepair.draftText}
+                        onChange={(event) => combatantRepair.setDraftText(event.target.value)}
+                        rows={12}
+                        spellCheck={false}
+                        className="w-full rounded-lg border border-gray-300 bg-white p-3 font-mono text-xs leading-5 text-gray-800 outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-100"
+                        placeholder={'{"impacts":[{"combatantIndex":0,"characterName":"角色名","impact":"修复后的历战影响"}]}'}
+                      />
+                    </label>
+                    <div className="text-xs text-gray-500">
+                      可只提交需要修改的角色。重名角色必须保留 combatantIndex；也可粘贴 MAHOSHOJO_ARENA_META 内容。
+                    </div>
+
+                    {combatantRepair.repairError && (
+                      <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-red-700">
+                        {combatantRepair.repairError}
+                      </div>
+                    )}
+                    {combatantRepair.repairNotice && (
+                      <div className="rounded-lg border border-green-200 bg-green-50 p-3 text-green-800">
+                        {combatantRepair.repairNotice}
+                      </div>
+                    )}
+
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => combatantRepair.applyArenaRepairDraft()}
+                        disabled={
+                          isGenerating
+                          || combatantRepair.isGeneratingDraft
+                          || combatantRepair.isApplyingRepair
+                          || combatantRepair.isCombatantMutationPending
+                          || !combatantRepair.draftText.trim()
+                        }
+                        className="rounded-lg bg-purple-600 px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-purple-700 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {combatantRepair.isApplyingRepair ? '应用中...' : '应用修复'}
+                      </button>
+                    </div>
+                  </div>
+                </CollapsibleSection>
+              )}
               {generationMode === 'stream' && streamUpdateMetaDebug && (
                 <CollapsibleSection
                   title="元数据诊断"
@@ -301,116 +385,39 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
                         </div>
                       </div>
                     )}
-                    <div className="p-3 border border-gray-200 rounded-lg bg-white">
-                      <div className="font-medium text-gray-700">手动修正并应用</div>
-                      <div className="mt-1 text-xs text-gray-500">
-                        支持粘贴 JSON 对象/数组或 MAHOSHOJO_ARENA_META 注释。应用后会直接更新当前角色数据。
-                      </div>
-                      <textarea
-                        value={manualMetaInput}
-                        onChange={(event) => {
-                          setManualMetaInput(event.target.value);
-                          setManualMetaMessage(null);
-                        }}
-                        spellCheck={false}
-                        rows={12}
-                        className="mt-2 w-full rounded-lg border border-gray-300 bg-slate-950 text-slate-100 p-2 text-xs font-mono leading-relaxed focus:outline-none focus:ring-2 focus:ring-purple-400"
-                        placeholder={'{"version":1,"impacts":[{"characterName":"角色名","impact":"变化","currentStateSummary":"状态"}]}'}
-                      />
-                      {manualMetaMessage && (
-                        <div className="mt-2 text-xs text-gray-600">{manualMetaMessage}</div>
-                      )}
-                      <div className="mt-2 flex flex-wrap gap-2">
-                        <button
-                          onClick={handleResetManualMetaInput}
-                          type="button"
-                          disabled={isGenerating || isRedoingUpdates}
-                          className="px-3 py-1.5 text-xs font-semibold text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-                        >
-                          恢复当前解析结果
-                        </button>
-                        <button
-                          onClick={() => void handleApplyManualMeta()}
-                          type="button"
-                          disabled={isGenerating || isRedoingUpdates || !manualMetaInput.trim()}
-                          className="px-3 py-1.5 text-xs font-semibold text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-                        >
-                          {isRedoingUpdates ? '应用中...' : '应用手动修改'}
-                        </button>
-                      </div>
-                    </div>
                   </div>
                 </CollapsibleSection>
               )}
-              {updatedCombatants.length === 0 && (
-                <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-600">
-                  本次尚未产生可展示的角色更新。你仍可点击“重做角色更新”，让 AI 基于战报生成（或修正）历战记录/当前状态摘要。
-                </div>
-              )}
-              {updatedCombatants.map((character: UpdatedCombatantData) => {
-                const entries = character.arena_history?.entries;
-                const latestEntry = Array.isArray(entries) && entries.length > 0 ? entries[entries.length - 1] : null;
-                const stateSummary = character.current_state?.summary?.trim();
-                const name = getCombatantDisplayName(character);
-                const template = inferTemplate(character);
-                const typeDisplay =
-                  template === 'magical-girl' ? '魔法少女' : template === 'canshou' ? '残兽' : '通用角色';
-
-                if (!latestEntry && !stateSummary) return null;
-
-                return (
-                  <CollapsibleSection
-                    key={name}
-                    title={
-                      <span className="font-semibold text-gray-700">
-                        {name} <span className="text-xs text-gray-500">({typeDisplay})</span>
-                      </span>
-                    }
-                    defaultOpen={false}
-                    variant="panel"
+            </>
+          )}
+          renderActions={(item) => {
+            const character = updatedCombatantsByPresentationKey.get(item.key);
+            if (!character) return null;
+            return (
+              <>
+                <div className="mt-2 flex justify-end gap-2">
+                  <button
+                    onClick={() => downloadUpdatedJson(character)}
+                    className="shrink-0 rounded-lg bg-blue-500 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-blue-600"
                   >
-                    <div className="text-sm text-gray-600">
-                      <div className="font-medium text-gray-700">历战记录</div>
-                      <div className="mt-1">
-                        <MarkdownBlock
-                          content={latestEntry ? latestEntry.impact : '已跳过写入，改为仅更新其它字段。'}
-                          variant="light"
-                        />
-                      </div>
-                    </div>
-                    {stateSummary && (
-                      <div className="text-sm text-gray-600 mt-3">
-                        <div className="font-medium text-gray-700">当前状态</div>
-                        <div className="mt-1">
-                          <MarkdownBlock content={stateSummary} variant="light" />
-                        </div>
-                      </div>
-                    )}
-                    <div className="flex gap-2 mt-2 justify-end">
-                      <button
-                        onClick={() => downloadUpdatedJson(character)}
-                        className="px-3 py-1.5 text-xs font-semibold text-white bg-blue-500 rounded-lg hover:bg-blue-600 transition-colors shrink-0"
-                      >
-                        下载更新设定
-                      </button>
-                      <SaveToCloudButton
-                        data={character}
-                        buttonText="保存到云端"
-                        className="px-3 py-1.5 text-xs font-semibold text-white rounded-lg transition-colors shrink-0"
-                        style={{ backgroundColor: '#22c55e', backgroundImage: 'linear-gradient(to right, #22c55e, #16a34a)' }}
-                      />
-                    </div>
-                    <JsonSizeIndicator
-                      data={character}
-                      className="mt-2"
-                      warningText="⚠️ 接近云端 300KB 上限，保存/替换可能失败，请先精简数据。"
-                    />
-                  </CollapsibleSection>
-                );
-              })}
-            </div>
-          </CollapsibleSection>
-        </div>
+                    下载更新设定
+                  </button>
+                  <SaveToCloudButton
+                    data={character}
+                    buttonText="保存到云端"
+                    className="shrink-0 rounded-lg px-3 py-1.5 text-xs font-semibold text-white transition-colors"
+                    style={{ backgroundColor: '#22c55e', backgroundImage: 'linear-gradient(to right, #22c55e, #16a34a)' }}
+                  />
+                </div>
+                <JsonSizeIndicator
+                  data={character}
+                  className="mt-2"
+                  warningText="⚠️ 接近云端 300KB 上限，保存/替换可能失败，请先精简数据。"
+                />
+              </>
+            );
+          }}
+        />
       )}
     </>
   );

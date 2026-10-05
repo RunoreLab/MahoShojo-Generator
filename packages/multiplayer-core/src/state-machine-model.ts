@@ -2,13 +2,14 @@ import {
   ArenaErrorCodeSchema,
   ArenaProposalChangeSchema,
   ArenaProposalSchema,
+  ArenaRoomProposalResolveRequestSchema,
   ArenaRoomSharedConfigSchema,
   ArenaRoomSnapshotSchema,
+  DisplayNameSchema,
   GENERATION_BRIDGE_VERSION,
   GenerationBridgeScopeSchema,
   GenerationMirrorSchema,
   IsoTimestampSchema,
-  MAX_PROPOSAL_CHANGES,
   OpaqueKeySchema,
   RoomMemberSchema,
   RoomEventSchema,
@@ -18,10 +19,10 @@ import {
   type ArenaRoomSnapshot,
   type ControlRoomEvent,
 } from '@mahoshojo/contracts/arena-room';
-import { z } from 'zod';
+import { z } from './zod';
 
 import { ArenaMultiplayerCoreError } from './errors';
-import { hasCollaborativeChangeEffect } from './provenance';
+import { collaborativeChangeTarget, hasCollaborativeChangeEffect } from './provenance';
 
 export const ARENA_ROOM_AUTHORITY_STATE_VERSION = 2 as const;
 
@@ -55,10 +56,26 @@ export const MAX_ROOM_COLLABORATIVE_CHANGES = 256;
 export const CanonicalSnapshotDigestSchema = z.string()
   .regex(/^sha256:[0-9a-f]{64}$/u, 'must be a lowercase SHA-256 digest');
 
+/**
+ * Server-only membership tombstone. `revocationReason` distinguishes a
+ * voluntary leave (`left`, rejoinable) from a host kick (`kicked`, fenced for
+ * the room lifetime). Records revoked before this field existed carry no
+ * reason and stay fail-closed: they can never be reactivated. The public
+ * `RoomMember.membershipState` intentionally remains two-state.
+ */
 export const ArenaRoomMemberAuthorityRecordSchema = z.object({
   accountUserId: z.number().int().positive(),
   member: RoomMemberSchema,
-}).strict();
+  revocationReason: z.enum(['left', 'kicked']).optional(),
+}).strict().superRefine((record, context) => {
+  if (record.member.membershipState === 'active' && record.revocationReason !== undefined) {
+    context.addIssue({
+      code: 'custom',
+      path: ['revocationReason'],
+      message: 'active member authority must not carry a revocation reason',
+    });
+  }
+});
 export type ArenaRoomMemberAuthorityRecord = z.infer<typeof ArenaRoomMemberAuthorityRecordSchema>;
 
 export const ArenaRoomGenerationRecordSchema = z.object({
@@ -182,13 +199,7 @@ export const ArenaRoomAuthorityStateSchema = z.object({
       });
     }
   });
-  const collaborativeTargets = state.collaborativeChanges.map((change) => JSON.stringify([
-    change.type,
-    'combatantKey' in change ? change.combatantKey : null,
-    'scenarioKey' in change ? change.scenarioKey : null,
-    'materialKey' in change ? change.materialKey : null,
-    'ref' in change && change.ref !== null ? change.ref.id : null,
-  ]));
+  const collaborativeTargets = state.collaborativeChanges.map(collaborativeChangeTarget);
   if (new Set(collaborativeTargets).size !== collaborativeTargets.length) {
     context.addIssue({ code: 'custom', path: ['collaborativeChanges'], message: 'collaborative provenance targets must be unique' });
   }
@@ -471,6 +482,17 @@ export const LeaveArenaRoomMemberCommandSchema = z.object({
   ...epochCommand,
 }).strict();
 
+/**
+ * Server-normalized reactivation of a voluntarily-left membership. Identity
+ * binding is derived from the existing authority record (same member userId),
+ * never from the command; the command only supplies the fresh displayName.
+ */
+export const RejoinArenaRoomMemberCommandSchema = z.object({
+  type: z.literal('rejoin-member'),
+  ...epochCommand,
+  displayName: DisplayNameSchema,
+}).strict();
+
 export const KickArenaRoomMemberCommandSchema = z.object({
   type: z.literal('kick-member'),
   ...epochCommand,
@@ -500,6 +522,7 @@ export const PublishArenaRoomConfigCommandSchema = z.object({
   type: z.literal('publish-config'),
   ...epochCommand,
   expectedRevision: RoomRevisionSchema,
+  expectedControlSeq: z.number().int().nonnegative(),
   sharedConfig: ArenaRoomSharedConfigSchema,
 }).strict();
 
@@ -509,17 +532,11 @@ export const SubmitArenaRoomProposalCommandSchema = z.object({
   proposal: ArenaProposalSchema,
 }).strict();
 
-export const ResolveArenaRoomProposalCommandSchema = z.object({
+// Reuse canonical DTO refinements; direct actor callers cannot bypass override guards.
+export const ResolveArenaRoomProposalCommandSchema = ArenaRoomProposalResolveRequestSchema.safeExtend({
   type: z.literal('resolve-proposal'),
   ...epochCommand,
-  expectedRevision: RoomRevisionSchema,
   proposalId: OpaqueKeySchema,
-  resolution: z.enum(['accept-selected', 'reject']),
-  selectedChangeIds: z.array(OpaqueKeySchema).max(MAX_PROPOSAL_CHANGES).optional(),
-}).strict().superRefine((command, context) => {
-  if (command.resolution === 'reject' && command.selectedChangeIds !== undefined) {
-    context.addIssue({ code: 'custom', path: ['selectedChangeIds'], message: 'reject cannot select changes' });
-  }
 });
 
 export const WithdrawArenaRoomProposalCommandSchema = z.object({
@@ -532,6 +549,7 @@ export const ReserveArenaRoomGenerationCommandSchema = z.object({
   type: z.literal('reserve-generation'),
   ...epochCommand,
   expectedRevision: RoomRevisionSchema,
+  expectedControlSeq: z.number().int().nonnegative(),
   generationRequestId: OpaqueKeySchema,
   generationId: OpaqueKeySchema,
   attempt: z.number().int().min(1),
@@ -566,6 +584,7 @@ export const MirrorArenaRoomGenerationCommandSchema = z.object({
 export const ArenaRoomCommandSchema = z.union([
   CreateArenaRoomCommandSchema,
   JoinArenaRoomMemberCommandSchema,
+  RejoinArenaRoomMemberCommandSchema,
   LeaveArenaRoomMemberCommandSchema,
   KickArenaRoomMemberCommandSchema,
   CloseArenaRoomCommandSchema,
@@ -585,45 +604,51 @@ export const ArenaRoomCommandSchema = z.union([
  */
 export type ArenaRoomCommand = z.infer<typeof ArenaRoomCommandSchema>;
 
-export type ArenaRoomTransitionFailureReason =
-  | 'invalid-state'
-  | 'invalid-command'
-  | 'invalid-authority-context'
-  | 'state-required'
-  | 'state-already-exists'
-  | 'room-epoch-mismatch'
-  | 'room-epoch-reuse'
-  | 'room-revision-mismatch'
-  | 'room-closed'
-  | 'host-required'
-  | 'member-required'
-  | 'member-not-active'
-  | 'member-limit-reached'
-  | 'member-history-limit-reached'
-  | 'member-id-conflict'
-  | 'proposal-id-conflict'
-  | 'proposal-history-limit-reached'
-  | 'proposal-not-found'
-  | 'proposal-not-submitted'
-  | 'proposal-author-required'
-  | 'proposal-selection-invalid'
-  | 'proposal-conflict'
-  | 'generation-active'
-  | 'generation-history-limit-reached'
-  | 'generation-request-conflict'
-  | 'generation-id-conflict'
-  | 'generation-identity-mismatch'
-  | 'generation-attempt-mismatch'
-  | 'generation-transition-invalid'
-  | 'generation-terminal-conflict'
-  | 'authority-scope-mismatch'
-  | 'authority-scope-expired'
-  | 'deadline-not-reached'
-  | 'invalid-trusted-time'
-  | 'command-timestamp-mismatch'
-  | 'command-timestamp-regression'
-  | 'collaborative-history-limit-reached'
-  | 'room-snapshot-too-large';
+export const ARENA_ROOM_TRANSITION_FAILURE_REASONS = [
+  'invalid-state',
+  'invalid-command',
+  'invalid-authority-context',
+  'state-required',
+  'state-already-exists',
+  'room-epoch-mismatch',
+  'room-epoch-reuse',
+  'room-revision-mismatch',
+  'room-control-seq-mismatch',
+  'room-closed',
+  'host-required',
+  'member-required',
+  'member-not-active',
+  'member-limit-reached',
+  'member-history-limit-reached',
+  'member-id-conflict',
+  'proposal-id-conflict',
+  'proposal-pending-limit-reached',
+  'proposal-history-limit-reached',
+  'proposal-not-found',
+  'proposal-not-submitted',
+  'proposal-author-required',
+  'proposal-selection-invalid',
+  'proposal-conflict',
+  'generation-active',
+  'generation-history-limit-reached',
+  'generation-request-conflict',
+  'generation-id-conflict',
+  'generation-identity-mismatch',
+  'generation-attempt-mismatch',
+  'generation-transition-invalid',
+  'generation-terminal-conflict',
+  'authority-scope-mismatch',
+  'authority-scope-expired',
+  'deadline-not-reached',
+  'invalid-trusted-time',
+  'command-timestamp-mismatch',
+  'command-timestamp-regression',
+  'collaborative-history-limit-reached',
+  'room-snapshot-too-large',
+] as const;
+export type ArenaRoomTransitionFailureReason = (
+  typeof ARENA_ROOM_TRANSITION_FAILURE_REASONS
+)[number];
 
 export interface ArenaRoomTransitionFailure {
   readonly ok: false;

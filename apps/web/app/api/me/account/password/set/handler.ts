@@ -14,7 +14,7 @@ import {
   createAuthResetPasswordVerification,
   getAuthMigrationStatusByBusinessUserId,
 } from '@/lib/db/repositories/user-auth-links';
-import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
+import { json, readJson, requireAuthUser, withApiErrorBoundary } from '@/lib/api/server';
 
 const RESET_TOKEN_TTL_SECONDS = 5 * 60;
 
@@ -55,7 +55,7 @@ const createVerificationId = (): string => {
 
 const createResetPasswordToken = (): string => randomHex(24);
 
-const handler = withPvpErrorBoundary(async function handler(req: Request): Promise<Response> {
+const handler = withApiErrorBoundary(async function handler(req: Request): Promise<Response> {
   if (req.method !== 'PUT') return json({ error: 'Method not allowed' }, { status: 405 });
 
   const auth = await requireAuthUser(req);

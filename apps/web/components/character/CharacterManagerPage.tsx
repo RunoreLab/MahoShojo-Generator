@@ -31,6 +31,7 @@ import { useAuth } from '@/lib/useAuth';
 import { dataCardApi, authStorage } from '@/lib/auth';
 import { loadAuthMigrationStatus, type AuthMigrationStatus } from '@/components/me/authMigrationStatus';
 import { getDataCardVisibilityValue } from '@/lib/data-card-status';
+import { isQuestionnaireDataCard } from '@/lib/questionnaire-data-card';
 
 // 引入 AdjudicatorEditor 和新类型
 import AdjudicatorEditor from '@/components/AdjudicatorEditor';
@@ -61,6 +62,24 @@ import {
     writeCharacterManagerPageDraft,
 } from '@/lib/character-manager-page-draft';
 import type { CharacterCardPortraitAsset } from '@/types/visual-asset';
+import {
+    DataCardFieldEditor,
+    setDataCardFieldValue,
+    type DataCardFieldAddon,
+    type DataCardFieldEditorClasses,
+    type DataCardFieldPath,
+} from '@mahoshojo/ui-web/card-editor';
+
+// Web 角色管理沿用既有全局表单类（`input-field` 等随蓝色主题切换），共源编辑器只接收类名。
+const CHARACTER_MANAGER_FIELD_CLASSES: DataCardFieldEditorClasses = {
+    input: 'input-field',
+    invalidInput: 'input-field border-red-400 focus:border-red-500 focus:ring-red-300 bg-red-50',
+    readonlyInput: 'input-field bg-gray-100 cursor-not-allowed',
+    label: 'block text-sm font-medium text-gray-700 capitalize',
+    fieldset: 'border border-gray-300 p-4 rounded-lg mt-4',
+    legend: 'text-sm font-semibold px-2 text-gray-600 capitalize',
+    hint: 'text-xs text-gray-500 mt-1',
+};
 
 
 // 定义允许保持原生性的可编辑字段 (顶级键) (SRS 3.7.3)
@@ -309,8 +328,9 @@ export const CharacterManagerPage: React.FC = () => {
     const [legacyMigrationDeferCount, setLegacyMigrationDeferCount] = useState(0);
 
     // 数据卡管理相关状态
-    const [userDataCards, setUserDataCards] = useState<any[]>([]);
+    const [cardsRefresh, setCardsRefresh] = useState(0);
     const [userCapacity, setUserCapacity] = useState(config.DEFAULT_DATA_CARD_CAPACITY);
+    const [userUsedSlots, setUserUsedSlots] = useState(0);
   const [showDataCardsModal, setShowDataCardsModal] = useState(false);
   const [recycleBinCards, setRecycleBinCards] = useState<any[]>([]);
   const [showRecycleBinModal, setShowRecycleBinModal] = useState(false);
@@ -376,23 +396,22 @@ export const CharacterManagerPage: React.FC = () => {
     // 加载用户数据卡和容量
     const loadUserDataCards = useCallback(async () => {
         if (!isAuthenticated) return;
-        const [cards, capacity, recycleCards] = await Promise.all([
-            dataCardApi.getCards(),
-            dataCardApi.getUserCapacity(),
-            dataCardApi.getRecycleBin()
+        setCardsRefresh((value) => value + 1);
+        await Promise.all([
+            dataCardApi.getUserCapacity().then((capacityInfo) => {
+                if (capacityInfo !== null) {
+                    setUserCapacity(capacityInfo.capacity);
+                    setUserUsedSlots(capacityInfo.usedSlots);
+                }
+            }),
+            dataCardApi.getRecycleBin().then(setRecycleBinCards),
         ]);
-        setUserDataCards(cards);
-        setRecycleBinCards(recycleCards);
-        if (capacity !== null) {
-            setUserCapacity(capacity);
-        }
     }, [isAuthenticated]);
 
     useEffect(() => {
         if (isAuthenticated) {
             loadUserDataCards();
         } else {
-            setUserDataCards([]);
             setRecycleBinCards([]);
             setShowDataCardsModal(false);
             setShowRecycleBinModal(false);
@@ -695,7 +714,7 @@ export const CharacterManagerPage: React.FC = () => {
                 setShowDataCardsModal(false);
                 return;
             }
-            if (card?.type === 'questionnaire') {
+            if (isQuestionnaireDataCard(card)) {
                 const raw = typeof card.data === 'string' ? card.data : JSON.stringify(card.data ?? {}, null, 2);
                 openQuestionnaireCompat(raw, {
                     id: card.id,
@@ -790,7 +809,7 @@ export const CharacterManagerPage: React.FC = () => {
             await handleLoadDataCard(card);
             return;
         }
-        if (card?.type === 'questionnaire') {
+        if (isQuestionnaireDataCard(card)) {
             const raw = typeof card.data === 'string' ? card.data : JSON.stringify(card.data ?? {}, null, 2);
             openQuestionnaireCompat(raw, {
                 id: card.id,
@@ -1301,30 +1320,11 @@ export const CharacterManagerPage: React.FC = () => {
     }, [characterData, setCharacterData, setOriginalData, setIsNative, setHasLostNativeness, setSelectedTemplate, setValidationResult, setMessage]);
 
     // 统一的字段更新处理器
-    const handleFieldChange = useCallback((path: string, value: any) => {
-        setCharacterData((prev: any) => {
-            if (!prev) return prev;
-            if (path === 'templateId') {
-                return prev;
-            }
-            const newData = JSON.parse(JSON.stringify(prev)); // 深拷贝以安全地修改
-            let current = newData;
-            const keys = path.split('.');
-            for (let i = 0; i < keys.length - 1; i++) {
-                const key = keys[i];
-                const nextKey = keys[i + 1];
-                const isNextKeyNumeric = !isNaN(parseInt(nextKey, 10));
-
-                if (isNextKeyNumeric && !Array.isArray(current[key])) {
-                    current[key] = [];
-                } else if (!isNextKeyNumeric && !isObject(current[key])) {
-                    current[key] = {};
-                }
-                current = current[key];
-            }
-            current[keys[keys.length - 1]] = value;
-            return newData;
-        });
+    const handleFieldChange = useCallback((path: string | readonly string[], value: any) => {
+        // 共源字段编辑器交回逐段键名；ScenarioEditor 等旧调用方仍用点分字符串 DSL，在此展开成段。
+        // 路径写入语义（copy-on-write、按下一段是否为数字补数组/对象、templateId 不可改）由共源规则持有。
+        const segments = typeof path === 'string' ? path.split('.') : path;
+        setCharacterData((prev: any) => (prev ? setDataCardFieldValue(prev, segments, value) : prev));
     }, []);
 
     // 一键替换所有旧名称的事件处理器
@@ -1415,155 +1415,33 @@ export const CharacterManagerPage: React.FC = () => {
         return map;
     }, [sensitiveIssues]);
 
-    // 递归渲染表单
-    // 【修正】渲染表单的递归函数，移除了未被使用的变量以修复ESLint报错
-    const renderFormFields = (data: any, path: string = ''): React.ReactNode => {
-        // 渲染顺序：基本信息 -> 外观 -> 魔装 -> 奇境 -> 繁开 -> 分析 -> 问卷 -> 历战记录
-        if (!isObject(data)) return null;
-
-        const keyOrder = [
-            'templateId', 'codename', 'name', 'title', 'appearance', 'magicConstruct', 'wonderlandRule',
-            'blooming', 'analysis', 'content', 'userAnswers', 'elements', 'arena_history', 'current_state', 'adjudicationEvents'
-        ];
-
-        const sortedKeys = Object.keys(data).sort((a, b) => {
-            const indexA = keyOrder.indexOf(a);
-            const indexB = keyOrder.indexOf(b);
-            if (indexA === -1 && indexB === -1) return a.localeCompare(b);
-            if (indexA === -1) return 1;
-            if (indexB === -1) return -1;
-            return indexA - indexB;
-        });
-
-        return sortedKeys.map(key => {
-            const currentPath = path ? `${path}.${key}` : key;
-            const fieldId = `editor-field-${currentPath.replace(/\./g, '__').replace(/[^a-zA-Z0-9_-]/g, '_')}`;
-            const nonCredentialInputProps = {
-                name: 'maho-editor-field',
-                autoComplete: 'off',
-                autoCorrect: 'off',
-                autoCapitalize: 'off',
-                spellCheck: false,
-                'data-form-type': 'other',
-                'data-lpignore': 'true',
-                'data-1p-ignore': 'true',
-                'data-bwignore': 'true',
-            };
-            // 过滤掉不应在表单中编辑的字段
-            if (key.startsWith('_')) return null;
-            if (key === 'signature' || key === 'isPreset' || key === 'arena_history' || key === 'current_state' || key === 'adjudicationEvents') return null;
-            if (key === 'templateId') return null;
-
-            const value = data[key];
-            const fieldIssues = fieldIssueMap.get(currentPath) || [];
-            const hasIssue = fieldIssues.length > 0;
-            const issueCount = fieldIssues.reduce((total, issue) => total + issue.matches.length, 0);
-            const inputClassName = hasIssue
-                ? 'input-field border-red-400 focus:border-red-500 focus:ring-red-300 bg-red-50'
-                : 'input-field';
-            const issueHint = hasIssue ? (
-                <p className="text-xs text-red-500 mt-1">
-                    检测到 {issueCount} 处敏感词，建议参考下方“敏感词检测”面板进行修正。
-                    <span className="ml-1">
-                        <Link href="/encyclopedia/sensitive-words" className="text-blue-600 hover:underline">为什么会触发？</Link>
-                        <span className="mx-1 text-gray-400">·</span>
-                        <Link href="/encyclopedia/shield-words" className="text-blue-600 hover:underline">屏蔽词/和谐说明</Link>
-                    </span>
-                </p>
-            ) : null;
-
-            // 专门处理数组类型的逻辑
-            if (Array.isArray(value)) {
-                // 判断是否为字符串数组，这是我们主要支持编辑的类型
-                const isStringArray = value.every(item => typeof item === 'string');
-                if (isStringArray) {
-                    return (
-                        <div key={currentPath} className="mt-4">
-                            <label htmlFor={fieldId} className="block text-sm font-medium text-gray-700 capitalize">{key.replace(/([A-Z])/g, ' $1')}</label>
-                            <textarea
-                                id={fieldId}
-                                value={value.join('\n')}
-                                onChange={(e) => handleFieldChange(currentPath, e.target.value.split('\n'))}
-                                rows={Math.max(3, value.length)} // 动态调整高度
-                                className={inputClassName}
-                                placeholder="每行输入一个项目"
-                                {...nonCredentialInputProps}
-                            />
-                            <p className="text-xs text-gray-500 mt-1">此字段为列表，请每行输入一个项目。</p>
-                            {issueHint}
-                        </div>
-                    );
-                }
-                // 对于其他类型的数组（如对象数组），暂时以只读JSON形式显示，防止数据结构被破坏
-                return (
-                    <div key={currentPath} className="mt-4">
-                        <label htmlFor={fieldId} className="block text-sm font-medium text-gray-700 capitalize">{key.replace(/([A-Z])/g, ' $1')} (只读)</label>
-                        <textarea
-                            id={fieldId}
-                            value={JSON.stringify(value, null, 2)}
-                            readOnly
-                            rows={5}
-                            className="input-field bg-gray-100 cursor-not-allowed"
-                        />
-                    </div>
-                );
-            }
-
-            // 处理嵌套对象的逻辑
-            if (isObject(value)) {
-                return (
-                    <fieldset key={currentPath} className="border border-gray-300 p-4 rounded-lg mt-4">
-                        <legend className="text-sm font-semibold px-2 text-gray-600 capitalize">{key.replace(/([A-Z])/g, ' $1')}</legend>
-                        <div className="space-y-4">{renderFormFields(value, currentPath)}</div>
-                    </fieldset>
-                );
-            }
-
-            if (typeof value === 'string' && currentPath === 'content') {
-                const lineCount = Math.max(1, value.split(/\r?\n/).length);
-                const rows = Math.min(30, Math.max(10, lineCount + 2));
-                return (
-                    <div key={currentPath}>
-                        <label htmlFor={fieldId} className="block text-sm font-medium text-gray-700 capitalize">{key.replace(/([A-Z])/g, ' $1')}</label>
-                        <textarea
-                            id={fieldId}
-                            value={value}
-                            onChange={(e) => handleFieldChange(currentPath, e.target.value)}
-                            rows={rows}
-                            className={inputClassName}
-                            style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', overflowWrap: 'break-word' }}
-                            wrap="soft"
-                            {...nonCredentialInputProps}
-                        />
-                        {issueHint}
-                    </div>
-                );
-            }
-
-            return (
-                <div key={currentPath}>
-                    <label htmlFor={fieldId} className="block text-sm font-medium text-gray-700 capitalize">{key.replace(/([A-Z])/g, ' $1')}</label>
-                    <div className="mt-1 flex items-center">
-                        {typeof value === 'string' && value.length > 80 ?
-                            <textarea id={fieldId} value={value as string} onChange={(e) => handleFieldChange(currentPath, e.target.value)} rows={3} className={inputClassName} {...nonCredentialInputProps} />
-                            :
-                            <input
-                                type="text"
-                                id={fieldId}
-                                value={value as any}
-                                onChange={(e) => handleFieldChange(currentPath, e.target.value)}
-                                className={inputClassName}
-                                // 当字段为 codename 或 name 时，限制最大长度为20
-                                maxLength={(key === 'codename' || key === 'name') ? 20 : undefined}
-                                {...nonCredentialInputProps}
-                            />
-                        }
-                        {currentPath === 'codename' && (
-                            <button onClick={handleRandomCodename} type="button" className="ml-2 px-3 py-1.5 text-xs font-semibold text-white bg-pink-500 rounded-lg hover:bg-pink-600">随机</button>
-                        )}
-                    </div>
+    // 递归字段表单由共源 `DataCardFieldEditor` 渲染（D3.2b-1）；Web 只注入随机代号、名称替换、
+    // 敏感词提示与既有全局样式类。字段身份以逐段 `path` 为准；敏感词扫描的 path/parentPath
+    // 仍是点分串口径，查表沿用 `displayPath`。
+    const renderFieldAddon = (currentPath: DataCardFieldPath, displayPath: string): DataCardFieldAddon => {
+        const fieldIssues = fieldIssueMap.get(displayPath) || [];
+        const hasIssue = fieldIssues.length > 0;
+        const issueCount = fieldIssues.reduce((total, issue) => total + issue.matches.length, 0);
+        const issueHint = hasIssue ? (
+            <p className="text-xs text-red-500 mt-1">
+                检测到 {issueCount} 处敏感词，建议参考下方“敏感词检测”面板进行修正。
+                <span className="ml-1">
+                    <Link href="/encyclopedia/sensitive-words" className="text-blue-600 hover:underline">为什么会触发？</Link>
+                    <span className="mx-1 text-gray-400">·</span>
+                    <Link href="/encyclopedia/shield-words" className="text-blue-600 hover:underline">屏蔽词/和谐说明</Link>
+                </span>
+            </p>
+        ) : null;
+        const isNameField = currentPath.length === 1 && (currentPath[0] === 'codename' || currentPath[0] === 'name');
+        return {
+            invalid: hasIssue,
+            inline: currentPath.length === 1 && currentPath[0] === 'codename' ? (
+                <button onClick={handleRandomCodename} type="button" className="ml-2 px-3 py-1.5 text-xs font-semibold text-white bg-pink-500 rounded-lg hover:bg-pink-600">随机</button>
+            ) : null,
+            below: (
+                <>
                     {/* 条件渲染“一键替换”按钮 */}
-                    {showNameReplaceButton && (currentPath === 'codename' || currentPath === 'name') && (
+                    {showNameReplaceButton && isNameField && (
                         <div className="mt-2">
                             <button
                                 onClick={handleReplaceAllNames}
@@ -1577,9 +1455,21 @@ export const CharacterManagerPage: React.FC = () => {
                         </div>
                     )}
                     {issueHint}
-                </div>
-            );
-        });
+                </>
+            ),
+        };
+    };
+
+    const renderFormFields = (data: any): React.ReactNode => {
+        if (!isObject(data)) return null;
+        return (
+            <DataCardFieldEditor
+                data={data}
+                onFieldChange={handleFieldChange}
+                classes={CHARACTER_MANAGER_FIELD_CLASSES}
+                renderFieldAddon={renderFieldAddon}
+            />
+        );
     };
 
     const handleRandomCodename = () => {
@@ -1867,14 +1757,7 @@ export const CharacterManagerPage: React.FC = () => {
 
             if (type === 'download') {
                 const blob = new Blob([jsonData], { type: 'application/json' });
-                const url = URL.createObjectURL(blob);
-                const link = document.createElement('a');
-                link.href = url;
-                link.download = `${filenamePrefix}_${resolvedName}_已编辑.json`;
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
-                URL.revokeObjectURL(url);
+                downloadBlob(blob, `${filenamePrefix}_${resolvedName}_已编辑.json`);
                 // 延迟更新消息，确保用户能看到签名成功的提示
                 setTimeout(() => setMessage({ type: 'success', text: '文件已下载！' }), 1000);
             } else {
@@ -2049,7 +1932,7 @@ export const CharacterManagerPage: React.FC = () => {
                                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
                                                 </svg>
                                                 <span className="text-sm">
-                                                    我的数据卡 <span className="font-bold">({userDataCards.length}/{userCapacity})</span>
+                                                    我的数据卡 <span className="font-bold">({userUsedSlots}/{userCapacity} 槽)</span>
                                                 </span>
                                             </button>
                                         </div>
@@ -2711,7 +2594,9 @@ export const CharacterManagerPage: React.FC = () => {
                     setShowDataCardsModal(false);
                     setCurrentPage(1);
                 }}
-                dataCards={userDataCards}
+                dataCards={[]}
+                summaryOwnerId={user?.id}
+                refreshKey={cardsRefresh}
                 editingCard={editingCard}
                 currentPage={currentPage}
                 cardsPerPage={cardsPerPage}
@@ -2725,6 +2610,7 @@ export const CharacterManagerPage: React.FC = () => {
             onReplaceCard={handleReplaceExistingCard}
             allowHistoryReplace={true}
             userCapacity={userCapacity}
+            userUsedSlots={userUsedSlots}
             onOpenRecycleBin={() => {
                 setShowDataCardsModal(false);
                 setShowRecycleBinModal(true);
@@ -2790,7 +2676,7 @@ export const CharacterManagerPage: React.FC = () => {
                 onPublicChange={(value) => setNewCardForm({ ...newCardForm, isPublic: value })}
                 error={saveCardError}
                 isSaving={isSavingCard}
-                currentCardCount={userDataCards.length}
+                usedSlots={userUsedSlots}
                 userCapacity={userCapacity}
             />
 

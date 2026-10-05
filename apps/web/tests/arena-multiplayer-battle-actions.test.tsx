@@ -5,25 +5,45 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ArenaRoomControllerState } from '@/lib/arena-room/controller';
+import type { UserAIProviderConfig } from '@/lib/ai/custom-provider';
+import type { ArenaGenerationConnectionState } from '@/lib/arena/resumable-generation-client';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 const mocks = vi.hoisted(() => ({
   handleGenerate: vi.fn(async () => {}),
   stopGeneration: vi.fn(),
+  isGenerating: false,
+  arenaGenerationConnectionState: null as ArenaGenerationConnectionState | null,
+  isRecoveringArenaGeneration: false,
+  arenaGenerationStatusNotice: null as string | null,
+  resolvePreflight: vi.fn(),
+  preflight: null as null | {
+    reasons: readonly ('baseline-missing' | 'host-local-content' | 'shared-config' | 'working-copy-invalid')[];
+    canPublish: boolean;
+    canConfirmStart: boolean;
+    pendingProposalCount: number;
+    busy: boolean;
+  },
   roomState: null as ArenaRoomControllerState | null,
+  tokenIndicatorProps: null as Record<string, unknown> | null,
 }));
 
 vi.mock('@/components/arena/hooks/useBattleEngine', () => ({
   useBattleEngine: () => ({
     handleGenerate: mocks.handleGenerate,
     stopGeneration: mocks.stopGeneration,
-    isGenerating: false,
+    isGenerating: mocks.isGenerating,
+    arenaGenerationConnectionState: mocks.arenaGenerationConnectionState,
+    isRecoveringArenaGeneration: mocks.isRecoveringArenaGeneration,
+    arenaGenerationStatusNotice: mocks.arenaGenerationStatusNotice,
     isCooldown: false,
     remainingTime: 0,
     providerCooldownMode: 'system',
     otherRemainingTime: 0,
     streamSoftTimeoutWarning: null,
+    arenaRoomGenerationPreflight: mocks.preflight,
+    resolveArenaRoomGenerationPreflight: mocks.resolvePreflight,
   }),
 }));
 
@@ -46,6 +66,7 @@ const battleState = {
     isNarrativeHistoryUnlimited: false,
   },
   teams: [],
+  userProviderConfig: null as UserAIProviderConfig | null,
 };
 
 vi.mock('@/components/arena/stores/useBattleStore', () => ({
@@ -67,12 +88,21 @@ vi.mock('@/components/arena/multiplayer/useArenaRoom', () => ({
 vi.mock('@/components/ai/ProviderCooldownNotice', () => ({
   ProviderCooldownNotice: () => null,
 }));
-vi.mock('@/components/shared/TokenIndicator', () => ({ TokenIndicator: () => null }));
+vi.mock('@/components/shared/TokenIndicator', () => ({
+  TokenIndicator: (props: Record<string, unknown>) => {
+    mocks.tokenIndicatorProps = props;
+    return null;
+  },
+}));
 vi.mock('@/components/shared/CollapsibleSection', () => ({
   CollapsibleSection: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
 }));
 vi.mock('@/components/shared/StreamStopButton', () => ({
-  StreamStopButton: () => <button type="button">停止生成</button>,
+  StreamStopButton: (props: { onClick: () => void; label?: string; disabled?: boolean }) => (
+    <button type="button" onClick={props.onClick} aria-label={props.label} disabled={props.disabled}>
+      {props.label ?? '停止生成'}
+    </button>
+  ),
 }));
 vi.mock('@/components/arena/components/NarrativeHistoryModal', () => ({
   NarrativeHistoryModal: () => null,
@@ -134,8 +164,18 @@ let root: Root;
 let container: HTMLDivElement;
 
 beforeEach(() => {
+  battleState.combatants.splice(0, battleState.combatants.length, { data: { name: '甲' } }, { data: { name: '乙' } });
   mocks.handleGenerate.mockClear();
+  mocks.stopGeneration.mockClear();
+  mocks.isGenerating = false;
+  mocks.arenaGenerationConnectionState = null;
+  mocks.isRecoveringArenaGeneration = false;
+  mocks.arenaGenerationStatusNotice = null;
+  mocks.resolvePreflight.mockClear();
+  mocks.preflight = null;
   mocks.roomState = null;
+  mocks.tokenIndicatorProps = null;
+  battleState.userProviderConfig = null;
   container = document.createElement('div');
   document.body.append(container);
   root = createRoot(container);
@@ -146,10 +186,38 @@ afterEach(async () => {
   container.remove();
 });
 
-const render = async () => {
-  await act(async () => root.render(<BattleActions showAdvancedUtilities={false} />));
+const render = async (showAdvancedUtilities = false) => {
+  await act(async () => root.render(<BattleActions showAdvancedUtilities={showAdvancedUtilities} />));
   return container.querySelector<HTMLButtonElement>('.generate-button')!;
 };
+
+describe('Arena context budget indicator', () => {
+  it('uses the 128k hosted-system application budget', async () => {
+    await render(true);
+
+    expect(mocks.tokenIndicatorProps).toMatchObject({
+      maxTokens: 128_000,
+      warnTokens: 102_400,
+      budgetLabel: '当前默认渠道应用预算',
+    });
+  });
+
+  it('uses the 1M Hosted BYOK application budget for a valid custom Provider', async () => {
+    battleState.userProviderConfig = {
+      providerId: 'chatbox',
+      modelId: 'gpt-5.4',
+      apiKey: 'test-api-key',
+    };
+
+    await render(true);
+
+    expect(mocks.tokenIndicatorProps).toMatchObject({
+      maxTokens: 1_000_000,
+      warnTokens: 800_000,
+      budgetLabel: 'Hosted BYOK 应用预算',
+    });
+  });
+});
 
 describe('Arena multiplayer BattleActions authority gate', () => {
   it('feature-off / 非房间页面继续调用既有单人生成动作', async () => {
@@ -159,6 +227,39 @@ describe('Arena multiplayer BattleActions authority gate', () => {
     expect(button.textContent).toContain('生成独家新闻');
     await act(async () => button.click());
     expect(mocks.handleGenerate).toHaveBeenCalledTimes(1);
+  });
+
+  it('恢复上一场战报时明确展示恢复状态与放弃恢复动作', async () => {
+    mocks.isGenerating = true;
+    mocks.arenaGenerationConnectionState = 'resuming';
+    mocks.isRecoveringArenaGeneration = true;
+    mocks.arenaGenerationStatusNotice = '正在恢复上一场战报生成。';
+
+    const button = await render();
+    expect(button.disabled).toBe(true);
+    expect(button.textContent).toContain('正在恢复上一场战报');
+
+    const stopButton = document.body.querySelector<HTMLButtonElement>('[aria-label="放弃恢复"]');
+    expect(stopButton).not.toBeNull();
+    expect(document.body.querySelector('[data-arena-generation-status="true"]')?.textContent)
+      .toContain('上一场战报可能仍在服务器生成');
+
+    await act(async () => stopButton?.click());
+    expect(mocks.stopGeneration).toHaveBeenCalledOnce();
+  });
+
+  it('停止生成请求处理中统一展示文案并禁用重复操作', async () => {
+    mocks.isGenerating = true;
+    mocks.arenaGenerationConnectionState = 'cancelling';
+    mocks.arenaGenerationStatusNotice = '正在请求服务器停止生成，请稍候。';
+
+    const button = await render();
+    expect(button.textContent).toContain('正在停止生成');
+
+    const stopButton = document.body.querySelector<HTMLButtonElement>('[aria-label="正在停止…"]');
+    expect(stopButton).not.toBeNull();
+    expect(stopButton?.disabled).toBe(true);
+    expect(stopButton?.textContent).toContain('正在停止…');
   });
 
   it('成员只显示等待房主且按钮不可提交', async () => {
@@ -186,5 +287,60 @@ describe('Arena multiplayer BattleActions authority gate', () => {
     button = await render();
     expect(button.disabled).toBe(false);
     expect(button.textContent).toContain('确认并重试同一次启动');
+  });
+
+  it('房间 host 不被 stale 本地人数门禁阻断，仍可进入 Room authority preflight', async () => {
+    mocks.roomState = stateFor('host');
+    battleState.combatants.splice(0, battleState.combatants.length);
+    const button = await render();
+    expect(button.disabled).toBe(false);
+    await act(async () => button.click());
+    expect(mocks.handleGenerate).toHaveBeenCalledOnce();
+  });
+
+  it('dirty preflight 只暴露显式发布、同步房间配置与取消三个决策', async () => {
+    mocks.roomState = stateFor('host');
+    mocks.preflight = {
+      reasons: ['shared-config', 'host-local-content'],
+      canPublish: true,
+      canConfirmStart: false,
+      pendingProposalCount: 0,
+      busy: false,
+    };
+    await render();
+
+    const buttons = Array.from(document.body.querySelectorAll<HTMLButtonElement>('button'));
+    const publish = buttons.find((button) => button.textContent?.includes('更新房间并开始'));
+    const syncRoom = buttons.find((button) => button.textContent?.includes('使用房间设置'));
+    const cancel = buttons.find((button) => button.textContent?.trim() === '取消');
+    expect(publish).toBeTruthy();
+    expect(syncRoom).toBeTruthy();
+    expect(cancel).toBeTruthy();
+    expect(buttons.find((button) => button.textContent?.includes('按当前房间配置开始'))).toBeUndefined();
+
+    await act(async () => syncRoom!.click());
+    expect(mocks.resolvePreflight).toHaveBeenCalledWith('sync-room');
+  });
+
+  it('干净配置 + 待处理提案的 preflight 只提供确认开始与取消', async () => {
+    mocks.roomState = stateFor('host');
+    mocks.preflight = {
+      reasons: [],
+      canPublish: false,
+      canConfirmStart: true,
+      pendingProposalCount: 2,
+      busy: false,
+    };
+    await render();
+
+    const buttons = Array.from(document.body.querySelectorAll<HTMLButtonElement>('button'));
+    const confirmStart = buttons.find((button) => button.textContent?.includes('确认按当前配置开始'));
+    const cancel = buttons.find((button) => button.textContent?.trim() === '取消');
+    expect(confirmStart).toBeTruthy();
+    expect(cancel).toBeTruthy();
+    expect(buttons.find((button) => button.textContent?.includes('更新房间并开始'))).toBeUndefined();
+
+    await act(async () => confirmStart!.click());
+    expect(mocks.resolvePreflight).toHaveBeenCalledWith('confirm-start');
   });
 });

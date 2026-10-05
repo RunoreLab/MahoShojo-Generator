@@ -1,5 +1,9 @@
 import type { OnlineDataCardType } from '@mahoshojo/contracts/data-cards';
 import { getRequestUrl } from '@/lib/request-url';
+import { readDataCardListPage } from '@/lib/data-card-list-page';
+import { readDataCardSummaryQuery } from '@/lib/data-card-summary-query';
+import { listDataCardSummaries } from '@/lib/db/repositories/data-card-summaries';
+import { getDrizzleDbFromRuntime } from '@/lib/db/drizzle';
 import {
   addFavorite,
   removeFavorite,
@@ -27,6 +31,17 @@ async function handler(req: Request): Promise<Response> {
       const type = url.searchParams.get('type') as OnlineDataCardType | null;
       const idsOnly = url.searchParams.get('idsOnly') === '1';
 
+      if (!idsOnly && url.searchParams.get('view') === 'summary') {
+        const query = readDataCardSummaryQuery(url.searchParams);
+        if (!query) return Response.json({ success: false, error: '无效的列表查询参数' }, { status: 400 });
+        const db = getDrizzleDbFromRuntime();
+        if (!db) throw new Error('数据卡存储不可用');
+        const started = Date.now();
+        const result = await listDataCardSummaries(db, auth.user.id, 'favorites', query);
+        console.info('data-card-list', { source: 'favorites', summary: true, limit: query.limit, offset: query.offset, count: result.cards.length, durationMs: Date.now() - started, status: 200 });
+        return Response.json(result, { headers: { 'Cache-Control': 'private, no-store' } });
+      }
+
       if (idsOnly) {
         const favorites = await getUserFavoriteIds(auth.user.id, type ?? undefined);
         return new Response(JSON.stringify({ success: true, favorites }), {
@@ -35,10 +50,14 @@ async function handler(req: Request): Promise<Response> {
         });
       }
 
-      const favorites = await getUserFavorites(auth.user.id, type ?? undefined);
-      return new Response(JSON.stringify({ success: true, favorites }), {
+      const page = readDataCardListPage(url.searchParams);
+      if (!page) return Response.json({ success: false, error: '无效的分页参数' }, { status: 400 });
+      const rows = await getUserFavorites(auth.user.id, type ?? undefined, { ...page, limit: page.limit + 1 });
+      const favorites = rows.slice(0, page.limit);
+      const nextOffset = rows.length > page.limit ? page.offset + page.limit : null;
+      return new Response(JSON.stringify({ success: true, favorites, nextOffset }), {
         status: 200,
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 'Content-Type': 'application/json', 'Cache-Control': 'private, no-store' }
       });
     }
 
@@ -100,7 +119,7 @@ async function handler(req: Request): Promise<Response> {
       headers: { 'Content-Type': 'application/json' }
     });
   } catch (error) {
-    console.error('收藏接口错误:', error);
+    console.error('favorites-request-failed', { method: req.method, status: 500, category: error instanceof Error ? error.name : 'unknown' });
     return new Response(JSON.stringify({ success: false, error: '服务器错误' }), {
       status: 500,
       headers: { 'Content-Type': 'application/json' }

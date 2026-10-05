@@ -3,6 +3,7 @@ import type {
   ArenaGenerationService,
 } from '@mahoshojo/hosted-api/arena-generation/service';
 import type { SignatureService } from '../signature';
+import type { ArenaRepairMetaService } from './repair-meta';
 import { createArenaPostBattleProjector } from './post-battle';
 import { acquireArenaSessionSoftRateLimit } from './rate-limit';
 import {
@@ -17,11 +18,14 @@ import {
 
 export * from './post-battle';
 export * from './rate-limit';
+export * from './repair-meta';
 export * from './service';
 export * from './service-registry';
 export * from './session';
 
-export type ArenaCompanionRouteService = ArenaCompanionService & ArenaSessionCompanionService;
+export type ArenaCompanionRouteService = ArenaCompanionService
+& ArenaSessionCompanionService
+& Readonly<{ repairCombatantMeta(_request: Request): Promise<Response> }>;
 
 export const createArenaCompanionRouteService = (input: {
   generationService: ArenaGenerationService;
@@ -30,9 +34,13 @@ export const createArenaCompanionRouteService = (input: {
   observer?: ArenaGenerationObserver;
   now?(): Date;
   recordActivity?(_request: Request): void;
+  repairMetaService?: ArenaRepairMetaService;
 }): ArenaCompanionRouteService => {
   const observe = (
-    operation: 'arena/generate' | 'generate-battle-story' | 'arena/session/generate-next',
+    operation: 'arena/generate'
+      | 'generate-battle-story'
+      | 'arena/session/generate-next'
+      | 'arena/repair-combatant-meta',
     outcome: 'success' | 'rejected' | 'failure' | 'cancelled',
     durationMs: number,
   ): void => {
@@ -71,7 +79,10 @@ export const createArenaCompanionRouteService = (input: {
     ),
   });
   const observeCall = async (
-    operation: 'arena/generate' | 'generate-battle-story' | 'arena/session/generate-next',
+    operation: 'arena/generate'
+      | 'generate-battle-story'
+      | 'arena/session/generate-next'
+      | 'arena/repair-combatant-meta',
     call: () => Promise<Response>,
     deferSuccessfulStream = false,
   ): Promise<Response> => {
@@ -103,6 +114,20 @@ export const createArenaCompanionRouteService = (input: {
       'arena/session/generate-next',
       () => session.generateNext(request),
       true,
+    ),
+    repairCombatantMeta: (request: Request) => observeCall(
+      'arena/repair-combatant-meta',
+      () => input.repairMetaService?.generate(request)
+        ?? Promise.resolve(new Response(JSON.stringify({
+          code: 'ARENA_REPAIR_META_SERVICE_UNAVAILABLE',
+          error: 'Arena repair metadata service unavailable',
+        }), {
+          status: 503,
+          headers: {
+            'Cache-Control': 'no-store',
+            'Content-Type': 'application/json; charset=utf-8',
+          },
+        })),
     ),
   });
 };

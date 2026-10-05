@@ -101,6 +101,10 @@ describe('resolveGenerationSettings - thinking', () => {
     expect(result.providerOptions).toEqual({
       google: { thinkingConfig: { thinkingBudget: 0 } },
     });
+    expect(result.thinkingResolution).toEqual({
+      requestedMode: 'disabled',
+      disposition: 'applied',
+    });
   });
 
   it('DeepSeek：enabled → thinking.type=enabled', () => {
@@ -125,6 +129,23 @@ describe('resolveGenerationSettings - thinking', () => {
       { providerId: 'custom-vendor', modelId: 'custom-model' },
     );
     expect(result.providerOptions).toBeUndefined();
+    expect(result.thinkingResolution).toEqual({
+      requestedMode: 'enabled',
+      disposition: 'unknown',
+    });
+  });
+
+  it('不能关闭 Thinking 的已知模型保留 cannot-disable 解析结果', () => {
+    const result = resolve(
+      { thinking: { mode: 'disabled' } },
+      { providerId: 'google-cloudflare', modelId: 'gemini-3.6-flash' },
+    );
+
+    expect(result.providerOptions).toBeUndefined();
+    expect(result.thinkingResolution).toEqual({
+      requestedMode: 'disabled',
+      disposition: 'cannot-disable',
+    });
   });
 });
 
@@ -152,17 +173,19 @@ describe('getModelGenerationCapabilities', () => {
     expect(caps.thinking.efforts).toEqual(['minimal', 'low', 'medium', 'high', 'xhigh']);
   });
 
-  it('DeepSeek V4 Flash 同时登记 canonical API ID 与 catalog 兼容 ID', () => {
+  it('DeepSeek V4.1 Flash 登记当前 canonical API ID，并保留 V4 Flash 兼容能力', () => {
     const catalogModel = AI_PROVIDER_CATALOG
       .find((p) => p.id === 'deepseek')
-      ?.models.find((m) => m.label === 'DeepSeek V4 Flash');
-    expect(catalogModel?.value).toBe('deepseek-v4-flash-0731');
+      ?.models.find((m) => m.label === 'DeepSeek V4.1 Flash');
+    expect(catalogModel?.value).toBe('deepseek-flash');
 
-    const legacyCaps = getModelGenerationCapabilities('deepseek', 'deepseek-v4-flash-0731');
-    const canonicalCaps = getModelGenerationCapabilities('deepseek', 'deepseek-v4-flash');
-    expect(legacyCaps.thinking.adapter).toBe('deepseek-thinking-toggle');
-    expect(canonicalCaps.thinking.adapter).toBe('deepseek-thinking-toggle');
-    expect(canonicalCaps.maxOutputTokens.max).toBe(384_000);
+    const currentCaps = getModelGenerationCapabilities('deepseek', 'deepseek-flash');
+    const legacyApiCaps = getModelGenerationCapabilities('deepseek', 'deepseek-v4-flash');
+    const legacyCatalogCaps = getModelGenerationCapabilities('deepseek', 'deepseek-v4-flash-0731');
+    expect(currentCaps.thinking.adapter).toBe('deepseek-thinking-toggle');
+    expect(legacyApiCaps.thinking.adapter).toBe('deepseek-thinking-toggle');
+    expect(legacyCatalogCaps.thinking.adapter).toBe('deepseek-thinking-toggle');
+    expect(currentCaps.maxOutputTokens.max).toBe(384_000);
   });
 });
 
@@ -174,6 +197,7 @@ describe('capability ↔ catalog 一致性：registry 声称支持的预置模�
     ['google-cloudflare', 'gemini-3.6-flash'],
     ['google-cloudflare', 'gemini-3.5-flash-lite'],
     ['google-cloudflare', 'gemini-3.1-pro-preview'],
+    ['deepseek', 'deepseek-flash'],
     ['deepseek', 'deepseek-v4-flash-0731'],
     ['deepseek', 'deepseek-v4-pro'],
     ['system', 'gemini-2.5-flash'],

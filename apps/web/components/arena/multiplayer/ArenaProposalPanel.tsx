@@ -1,17 +1,27 @@
 'use client';
 
-import {
-  useMemo,
-  useRef,
-  useState,
-  type ChangeEvent,
-} from 'react';
+import { useMemo, useRef, useState, useSyncExternalStore, type ChangeEvent } from 'react';
 
 import type {
   ArenaProposal,
   ArenaProposalChange,
   ArenaRoomSharedConfig,
 } from '@mahoshojo/contracts/arena-room';
+import {
+  previewArenaProposalApplication,
+  type ArenaProposalChangeAnalysis,
+} from '@mahoshojo/multiplayer-core';
+
+import {
+  arenaRoomReferenceSourcePrefix,
+  dataCardReferenceRequest,
+  parseArenaRoomReferenceKey,
+  presetReferenceRequest,
+  resolveArenaRoomReferenceName,
+  shortReferenceId,
+  useArenaRoomReferenceNames,
+  type ArenaRoomReferenceRequest,
+} from '@/lib/arena-room/reference-presentation';
 
 import type {
   ArenaRoomController,
@@ -20,13 +30,17 @@ import type {
 import {
   ArenaProposalEditorError,
   assertArenaProposalSelection,
-  buildArenaProposalSubmitIntent,
-  editWorkingConfig,
-  previewArenaProposal,
-  resetArenaProposalEditor,
-  syncArenaProposalEditor,
-  type ArenaProposalEditorState,
 } from '@/lib/arena-room/proposal-editor';
+import { buttonClassName } from '@/components/shared/ui/Button';
+import { ActionBar } from '@/components/shared/ui/ActionBar';
+import { ArenaProposalConflictReview } from './ArenaProposalConflictReview';
+
+import type { ArenaRoomProposalWorkspace } from './useArenaRoom';
+import {
+  arenaBattleModeCopy,
+  arenaLanguageCopy,
+  arenaStoryLengthValueCopy,
+} from './presentation/value-copy';
 
 type ProposalController = Pick<
   ArenaRoomController,
@@ -36,14 +50,8 @@ type ProposalController = Pick<
 export type ArenaProposalPanelProps = {
   readonly state: ArenaRoomControllerState;
   readonly controller: ProposalController;
-  readonly createProposalId?: () => string;
+  readonly workspace: ArenaRoomProposalWorkspace;
 };
-
-const buttonClass = 'rounded-lg border px-3 py-2 text-sm font-medium transition-colors motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fuchsia-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50';
-const primaryButtonClass = `${buttonClass} border-fuchsia-600 bg-fuchsia-600 text-white hover:bg-fuchsia-700`;
-const secondaryButtonClass = `${buttonClass} border-gray-300 bg-white text-gray-800 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800`;
-const dangerButtonClass = `${buttonClass} border-red-300 bg-white text-red-700 hover:bg-red-50 dark:border-red-800 dark:bg-gray-900 dark:text-red-300`;
-const inputClass = 'w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fuchsia-500 dark:border-gray-600 dark:bg-gray-950 dark:text-gray-100';
 
 const safeText = (value: string, max = 80): string => (
   value.length <= max ? value : `${value.slice(0, max)}…`
@@ -57,43 +65,308 @@ const refIdentity = (value: unknown): string => {
   return '已绑定目标';
 };
 
-const expectedBaseSummary = (change: ArenaProposalChange): string => {
-  const expected = change.expectedBase;
-  if (expected.kind === 'absent') return '预期基线：目标不存在';
-  if (expected.kind === 'ref') return `预期基线：${refIdentity(expected.ref)}`;
-  if (expected.kind === 'present') return `预期基线：${refIdentity(expected.ref)}`;
-  return typeof expected.value === 'string'
-    ? `预期基线：${safeText(expected.value || '空值')}`
-    : '预期基线：已绑定安全值';
+const namespacedRefIdentity = (ref: { readonly id: string }, key?: string): string => (
+  `${key?.startsWith('preset:') ? '预设' : '在线'}:${safeText(ref.id)}`
+);
+
+/**
+ * 提案摘要的可读名称解析插槽：返回 undefined 时回退到原始 key/ID 展示。
+ * 名称来自统一引用 resolver（预设策展目录 + 公开卡名称缓存 + 房主本地分享名）。
+ */
+export type ArenaProposalChangeLabels = {
+  readonly combatantKey?: (key: string) => string | undefined;
+  readonly scenarioKey?: (key: string) => string | undefined;
+  readonly materialKey?: (key: string) => string | undefined;
+  readonly teamKey?: (key: string) => string | undefined;
+  readonly ref?: (
+    ref: { readonly id: string; readonly kind: string; readonly versionToken?: string },
+    key?: string,
+  ) => string | undefined;
 };
 
-const changeSummary = (change: ArenaProposalChange): string => {
+export const arenaProposalExpectedBaseSummary = (change: ArenaProposalChange): string => {
+  const expected = change.expectedBase;
+  if (expected.kind === 'absent') return '提案基准：目标不存在';
+  if (expected.kind === 'ref' || expected.kind === 'present') {
+    return `提案基准：${typeof expected.key === 'string' ? safeText(expected.key) : refIdentity(expected.ref)}`;
+  }
+  return typeof expected.value === 'string'
+    ? `提案基准：${safeText(expected.value || '空值')}`
+    : '提案基准：已绑定安全值';
+};
+
+const safeJsonSummary = (value: unknown): string => {
+  if (value === undefined) return '无';
+  if (typeof value === 'string') return safeText(value || '空值', 120);
+  try {
+    return safeText(JSON.stringify(value), 160);
+  } catch {
+    return '不可序列化值';
+  }
+};
+
+const combatantLabelOf = (labels: ArenaProposalChangeLabels | undefined, key: string): string => (
+  labels?.combatantKey ? labels.combatantKey(key) ?? key : key
+);
+const teamKeyLabelOf = (labels: ArenaProposalChangeLabels | undefined, key: string): string => (
+  labels?.teamKey ? labels.teamKey(key) ?? key : key
+);
+const scenarioKeyLabelOf = (labels: ArenaProposalChangeLabels | undefined, key: string): string => (
+  labels?.scenarioKey ? labels.scenarioKey(key) ?? key : key
+);
+const materialKeyLabelOf = (labels: ArenaProposalChangeLabels | undefined, key: string): string => (
+  labels?.materialKey ? labels.materialKey(key) ?? key : key
+);
+
+/** 从房间共享配置找回被 key 引用的在线卡版本；预设版本由策展目录提供。 */
+const onlineVersionTokenOf = (
+  config: ArenaRoomSharedConfig | null | undefined,
+  key: string,
+): string | undefined => {
+  if (!config) return undefined;
+  const entry = config.combatants.find((item) => item.key === key)
+    ?? config.auxScenarios.find((item) => item.key === key)
+    ?? config.materials.find((item) => item.key === key)
+    ?? (config.scenario?.key === key ? config.scenario : undefined);
+  return entry && 'ref' in entry ? entry.ref.versionToken : undefined;
+};
+
+/** key 解析为引用请求：绑定房间引用的版本；预设目录版本仅作回退。 */
+const referenceRequestOfKey = (
+  config: ArenaRoomSharedConfig | null | undefined,
+  key: string,
+  fallbackKind: ArenaRoomReferenceRequest['kind'],
+): ArenaRoomReferenceRequest | null => {
+  const parsed = parseArenaRoomReferenceKey(key, fallbackKind);
+  if (!parsed) return null;
+  if (parsed.source === 'preset') {
+    return presetReferenceRequest(parsed.kind, parsed.id, onlineVersionTokenOf(config, key));
+  }
+  return dataCardReferenceRequest(parsed.kind, {
+    id: parsed.id,
+    versionToken: onlineVersionTokenOf(config, key),
+  });
+};
+
+/** add/setScenario 的 ref + 可选 namespace key 解析为绑定版本的引用请求。 */
+const referenceRequestOfRef = (
+  kind: ArenaRoomReferenceRequest['kind'],
+  ref: { readonly id: string; readonly versionToken?: string },
+  key: string | undefined,
+): ArenaRoomReferenceRequest => ({
+  source: key !== undefined && key.startsWith('preset:') ? 'preset' : 'data-card',
+  kind,
+  id: ref.id,
+  ...(ref.versionToken === undefined ? {} : { versionToken: ref.versionToken }),
+});
+
+/** 收集提案变更中所有可解析为预设/在线公开引用的名称请求（绑定引用版本）。 */
+export const collectArenaProposalReferenceRequests = (
+  changes: readonly ArenaProposalChange[],
+  config?: ArenaRoomSharedConfig | null,
+): ArenaRoomReferenceRequest[] => {
+  const requests: ArenaRoomReferenceRequest[] = [];
+  const push = (request: ArenaRoomReferenceRequest | null): void => {
+    if (request) requests.push(request);
+  };
+  for (const change of changes) {
+    switch (change.type) {
+      case 'addCombatant':
+        push(referenceRequestOfRef('character', change.ref, change.key));
+        break;
+      case 'removeCombatant':
+      case 'setCharacterGuidance':
+      case 'assignTeam':
+        push(referenceRequestOfKey(config, change.combatantKey, 'character'));
+        break;
+      case 'setScenario':
+        if (change.ref !== null) {
+          push(referenceRequestOfRef('scenario', change.ref, change.key));
+        }
+        break;
+      case 'addAuxScenario':
+        push(referenceRequestOfRef('scenario', change.ref, change.key));
+        break;
+      case 'removeAuxScenario':
+        push(referenceRequestOfKey(config, change.scenarioKey, 'scenario'));
+        break;
+      case 'addMaterial':
+        push(referenceRequestOfRef('material', change.ref, change.key));
+        break;
+      case 'removeMaterial':
+        push(referenceRequestOfKey(config, change.materialKey, 'material'));
+        break;
+      case 'reorderCombatants':
+      case 'reorderTeamCombatants':
+        change.value.forEach((key) => push(referenceRequestOfKey(config, key, 'character')));
+        break;
+      case 'reorderAuxScenarios':
+        change.value.forEach((key) => push(referenceRequestOfKey(config, key, 'scenario')));
+        break;
+      case 'reorderMaterials':
+        change.value.forEach((key) => push(referenceRequestOfKey(config, key, 'material')));
+        break;
+      default:
+        break;
+    }
+  }
+  return requests;
+};
+
+/** 由共享配置 + 统一引用名称缓存构建提案摘要标签；找不到时回退原始 key。 */
+export const buildArenaProposalChangeLabels = (
+  changes: readonly ArenaProposalChange[],
+  config: ArenaRoomSharedConfig | null,
+  onlineNames: ReadonlyMap<string, string>,
+): ArenaProposalChangeLabels => {
+  const prefixedName = (
+    request: ArenaRoomReferenceRequest,
+    fallback: string | undefined,
+  ): string | undefined => {
+    const name = resolveArenaRoomReferenceName(request, onlineNames);
+    if (name) return `${arenaRoomReferenceSourcePrefix(request.source)}:${name}`;
+    return fallback;
+  };
+  const fallbackOf = (request: ArenaRoomReferenceRequest): string => (
+    `${arenaRoomReferenceSourcePrefix(request.source)}:${shortReferenceId(request.id)}`
+  );
+  const hostLocalNameOf = (key: string): string | undefined => {
+    const entry = config?.combatants.find((item) => item.key === key);
+    if (entry && !('ref' in entry)) return `房主本地:${entry.displayName}`;
+    const scenario = config?.auxScenarios.find((item) => item.key === key)
+      ?? (config?.scenario && config.scenario.key === key ? config.scenario : undefined);
+    if (scenario && !('ref' in scenario)) return `房主本地:${scenario.displayName}`;
+    const material = config?.materials.find((item) => item.key === key);
+    if (material && !('ref' in material)) return `房主本地:${material.displayName}`;
+    return undefined;
+  };
+  const keyLabelOf = (fallbackKind: ArenaRoomReferenceRequest['kind']) => (key: string): string | undefined => {
+    const request = referenceRequestOfKey(config, key, fallbackKind);
+    if (!request) return hostLocalNameOf(key);
+    return prefixedName(request, fallbackOf(request));
+  };
+  return {
+    combatantKey: keyLabelOf('character'),
+    scenarioKey: keyLabelOf('scenario'),
+    materialKey: keyLabelOf('material'),
+    teamKey: (key) => config?.teams.find((team) => team.key === key)?.displayName,
+    ref: (ref, key) => {
+      const request = referenceRequestOfRef(
+        ref.kind === 'scenario' ? 'scenario' : ref.kind === 'material' ? 'material' : 'character',
+        ref,
+        key,
+      );
+      return prefixedName(request, fallbackOf(request));
+    },
+  };
+};
+
+/** 提案摘要标签 hook：预设走策展目录，在线公开卡走共享名称缓存（按引用版本缓存）。 */
+export const useArenaProposalChangeLabels = (
+  config: ArenaRoomSharedConfig | null,
+  changes: readonly ArenaProposalChange[],
+): ArenaProposalChangeLabels => {
+  const requests = useMemo(
+    () => collectArenaProposalReferenceRequests(changes, config),
+    [changes, config],
+  );
+  const onlineNames = useArenaRoomReferenceNames(requests);
+  return useMemo(
+    () => buildArenaProposalChangeLabels(changes, config, onlineNames),
+    [changes, config, onlineNames],
+  );
+};
+
+export const arenaProposalChangeSummary = (
+  change: ArenaProposalChange,
+  labels?: ArenaProposalChangeLabels,
+): string => {
+  const refLabel = (ref: { readonly id: string; readonly kind: string }, key?: string): string => (
+    labels?.ref ? labels.ref(ref, key) ?? namespacedRefIdentity(ref, key) : namespacedRefIdentity(ref, key)
+  );
   switch (change.type) {
-    case 'addCombatant': return `新增角色 ${change.ref.id}`;
-    case 'removeCombatant': return `移除角色 ${change.combatantKey}`;
-    case 'setCharacterGuidance': return `修改角色引导 ${change.combatantKey}`;
-    case 'assignTeam': return `调整队伍 ${change.combatantKey}`;
-    case 'setBattleMode': return `战斗模式改为 ${change.value}`;
-    case 'setScenario': return change.ref === null ? '清除主情景' : `主情景改为 ${change.ref.id}`;
-    case 'addAuxScenario': return `新增辅助情景 ${change.ref.id}`;
-    case 'removeAuxScenario': return `移除辅助情景 ${change.scenarioKey}`;
-    case 'addMaterial': return `新增素材 ${change.ref.id}`;
-    case 'removeMaterial': return `移除素材 ${change.materialKey}`;
+    case 'addCombatant': return `新增角色 ${refLabel(change.ref, change.key)}`;
+    case 'removeCombatant': return `移除角色 ${combatantLabelOf(labels, change.combatantKey)}`;
+    case 'setCharacterGuidance': return `修改角色引导 ${combatantLabelOf(labels, change.combatantKey)}`;
+    case 'assignTeam': return `调整队伍 ${combatantLabelOf(labels, change.combatantKey)}`;
+    case 'addTeam': return `新增队伍 ${change.displayName}`;
+    case 'removeTeam': return `移除队伍 ${teamKeyLabelOf(labels, change.teamKey)}`;
+    case 'renameTeam': return `队伍 ${teamKeyLabelOf(labels, change.teamKey)} 改名为 ${safeText(change.value)}`;
+    case 'reorderCombatants': return '调整角色顺序';
+    case 'reorderTeams': return '调整队伍顺序';
+    case 'reorderTeamCombatants': return `调整队伍 ${teamKeyLabelOf(labels, change.teamKey)} 内角色顺序`;
+    case 'setReportFormat': return `战报格式改为 ${change.value === 'web' ? 'Web（实验性）' : 'Markdown'}`;
+    case 'setWebPackageRef': return change.value ? `Web 包改为 ${change.value.id}@${change.value.version}` : '使用自由生成的 Web 战报';
+    case 'setBattleMode': return `战斗模式改为 ${arenaBattleModeCopy[change.value]}`;
+    case 'setSelectedLanguage': return `语言改为 ${arenaLanguageCopy(change.value)}`;
+    case 'setScenario': return change.ref === null ? '清除主情景' : `主情景改为 ${refLabel(change.ref, change.key)}`;
+    case 'addAuxScenario': return `新增辅助情景 ${refLabel(change.ref, change.key)}`;
+    case 'removeAuxScenario': return `移除辅助情景 ${scenarioKeyLabelOf(labels, change.scenarioKey)}`;
+    case 'reorderAuxScenarios': return '调整辅助情景顺序';
+    case 'addMaterial': return `新增素材 ${refLabel(change.ref, change.key)}`;
+    case 'removeMaterial': return `移除素材 ${materialKeyLabelOf(labels, change.materialKey)}`;
+    case 'reorderMaterials': return '调整素材顺序';
     case 'setUserGuidance': return `全局引导改为“${safeText(change.value || '空值')}”`;
-    case 'setStoryLength': return `故事长度改为 ${change.value}`;
+    case 'setStoryLength': return `故事长度改为 ${arenaStoryLengthValueCopy(change.value, change.customStoryLength ?? null)}`;
     case 'setHistorySettings': return '修改共享历史读取/写入设置';
   }
 };
 
-const SelectionDetails = ({ change }: { readonly change: ArenaProposalChange }) => (
+const enabledSummary = (enabled: boolean): string => enabled ? '开' : '关';
+
+const historyReadSummary = (
+  enabled: boolean,
+  unlimited: boolean,
+  limit: number,
+): string => {
+  if (!enabled) return '关';
+  return unlimited ? '开(无限)' : `开(${limit})`;
+};
+
+export const arenaProposalChangeProposedSummary = (
+  change: ArenaProposalChange,
+  labels?: ArenaProposalChangeLabels,
+): string => {
+  switch (change.type) {
+    case 'reorderCombatants':
+    case 'reorderTeamCombatants':
+      return `${arenaProposalChangeSummary(change, labels)}：${change.value.map((key) => combatantLabelOf(labels, key)).join(' → ')}`;
+    case 'reorderTeams':
+      return `${arenaProposalChangeSummary(change, labels)}：${change.value.map((key) => teamKeyLabelOf(labels, key)).join(' → ')}`;
+    case 'reorderAuxScenarios':
+      return `${arenaProposalChangeSummary(change, labels)}：${change.value.map((key) => scenarioKeyLabelOf(labels, key)).join(' → ')}`;
+    case 'reorderMaterials':
+      return `${arenaProposalChangeSummary(change, labels)}：${change.value.map((key) => materialKeyLabelOf(labels, key)).join(' → ')}`;
+    case 'setCharacterGuidance':
+      return change.value === null
+        ? `清空角色 ${combatantLabelOf(labels, change.combatantKey)} 引导`
+        : `角色 ${combatantLabelOf(labels, change.combatantKey)} 引导改为“${safeText(change.value, 120)}”`;
+    case 'assignTeam':
+      return change.teamKey === null
+        ? `角色 ${combatantLabelOf(labels, change.combatantKey)} 取消队伍分配`
+        : `角色 ${combatantLabelOf(labels, change.combatantKey)} 分配至队伍 ${teamKeyLabelOf(labels, change.teamKey)}`;
+    case 'setHistorySettings': {
+      const value = change.value;
+      return [
+        `竞技场历史 读取=${historyReadSummary(value.readArenaHistory, value.isArenaHistoryUnlimited, value.readArenaHistoryLimit)}、写入=${enabledSummary(value.writeArenaHistory)}`,
+        `当前状态 读取=${enabledSummary(value.readCurrentState)}、写入=${enabledSummary(value.writeCurrentState)}`,
+        `叙事历史 读取=${historyReadSummary(value.readNarrativeHistory, value.isNarrativeHistoryUnlimited, value.readNarrativeHistoryLimit)}、写入=${enabledSummary(value.writeNarrativeHistory)}`,
+      ].join('；');
+    }
+    default:
+      return arenaProposalChangeSummary(change, labels);
+  }
+};
+
+export const ArenaProposalSelectionDetails = ({ change }: { readonly change: ArenaProposalChange }) => (
   <span className="mt-1 block text-xs text-gray-600 dark:text-gray-400">
-    {expectedBaseSummary(change)}
+    {arenaProposalExpectedBaseSummary(change)}
     {change.dependsOn?.length ? ` · 依赖 ${change.dependsOn.join('、')}` : ''}
-    {change.atomicGroupId ? ` · 原子组 ${change.atomicGroupId}` : ''}
+    {change.atomicGroupId ? ` · 联动变更组 ${change.atomicGroupId}` : ''}
   </span>
 );
 
-const selectionError = (
+export const arenaProposalSelectionError = (
   changes: readonly ArenaProposalChange[],
   selected: ReadonlySet<string>,
 ): string | null => {
@@ -103,41 +376,125 @@ const selectionError = (
     return null;
   } catch (error) {
     return error instanceof ArenaProposalEditorError
-      ? '所选变更缺少依赖或拆分了原子组'
+      ? '所选变更缺少依赖或拆分了联动变更组'
       : '所选变更无效';
   }
 };
 
+/**
+ * 悬停提示：可读名称可能被名称缓存/策展目录遮蔽原始引用身份，
+ * 这里统一暴露完整原始 key（含 namespace 与完整 ID）。
+ */
+export const changeRefTitle = (change: ArenaProposalChange): string | undefined => {
+  switch (change.type) {
+    case 'addCombatant':
+    case 'addAuxScenario':
+    case 'addMaterial':
+      return change.key ?? `data-card:${change.ref.id}`;
+    case 'setScenario':
+      return change.ref === null ? undefined : change.key ?? `data-card:${change.ref.id}`;
+    case 'removeCombatant':
+    case 'setCharacterGuidance':
+    case 'assignTeam':
+      return change.combatantKey;
+    case 'removeAuxScenario':
+      return change.scenarioKey;
+    case 'removeMaterial':
+      return change.materialKey;
+    case 'reorderCombatants':
+    case 'reorderTeams':
+    case 'reorderTeamCombatants':
+    case 'reorderAuxScenarios':
+    case 'reorderMaterials':
+      return change.value.join(' → ');
+    default:
+      return undefined;
+  }
+};
+
+export const arenaProposalConflictSummary = (analysis: ArenaProposalChangeAnalysis): string => {
+  if (analysis.outcome !== 'conflict' || !analysis.conflict) return '';
+  return analysis.conflict.code === 'reference-changed'
+    ? '引用的数据卡已更新版本，需要重新选择数据卡'
+    : '该目标的当前值已与提案基准不一致';
+};
+
 const HostProposalCard = ({
   proposal,
+  roomId,
   revision,
   roomEpoch,
+  currentConfig,
+  authorDisplayName,
   controller,
   disabled,
 }: {
   readonly proposal: ArenaProposal;
+  readonly roomId: string;
   readonly revision: number;
   readonly roomEpoch: string;
+  readonly currentConfig: ArenaRoomSharedConfig;
+  readonly authorDisplayName: string;
   readonly controller: ProposalController;
   readonly disabled: boolean;
 }) => {
   const [selected, setSelected] = useState<ReadonlySet<string>>(
     () => new Set(proposal.changes.map((change) => change.changeId)),
   );
+  // Consent belongs to this exact review, not to every future conflict on the ID.
+  const reviewKey = useMemo(() => JSON.stringify([roomId, roomEpoch, revision, proposal.changes]),
+    [roomId, roomEpoch, revision, proposal.changes]);
+  const [overrideReview, setOverrideReview] = useState<{ key: string; ids: readonly string[] } | null>(null);
+  const overrideChangeIds = useMemo(() => overrideReview?.key === reviewKey
+    ? overrideReview.ids.filter((id) => selected.has(id)) : [], [overrideReview, reviewKey, selected]);
+  const reviewExpired = Boolean(overrideReview?.ids.length && overrideReview.key !== reviewKey);
+  const [actionError, setActionError] = useState<string | null>(null);
   const actionLock = useRef(false);
-  const validationError = selectionError(proposal.changes, selected);
+  const validationError = arenaProposalSelectionError(proposal.changes, selected);
+  // 与服务器权威 apply 相同的依赖排序 + staged expectedBase 分析：
+  // “新增角色 -> 修改该角色引导”不再误报冲突；目标已由其他修改满足的变更
+  // 显示为安全跳过，而不是阻塞整份提案。
+  const preview = useMemo(
+    () => previewArenaProposalApplication({ roomId, config: currentConfig, revision }, proposal, [...selected], { overrideChangeIds }),
+    [roomId, currentConfig, revision, proposal, selected, overrideChangeIds],
+  );
+  const analysisByChangeId = new Map(preview.plan.map((item) => [item.changeId, item] as const));
+  const selectedConflictCount = preview.conflicts.length;
+  const applicationError = validationError ?? (preview.issues.length > 0
+    ? '所选变更无法应用，请检查目标、依赖和配置约束。' : null);
+  const cannotAccept = Boolean(applicationError) || preview.status === 'rejected';
+  const selectChange = (changeId: string, accepted: boolean): void => {
+    const next = new Set(selected);
+    if (accepted) next.add(changeId);
+    else next.delete(changeId);
+    setSelected(next);
+    // A changed selection can alter staged dependency values: do not revive old consent.
+    setOverrideReview(null);
+    setActionError(null);
+  };
+  const adoptChange = (changeId: string): void => {
+    if (disabled || !selected.has(changeId)) return;
+    setOverrideReview({ key: reviewKey, ids: [...new Set([...overrideChangeIds, changeId])] });
+    setActionError(null);
+  };
+  const labels = useArenaProposalChangeLabels(currentConfig, proposal.changes);
 
   const resolve = async (resolution: 'accept-selected' | 'reject'): Promise<void> => {
     if (actionLock.current || disabled) return;
-    if (resolution === 'accept-selected' && validationError) return;
+    if (resolution === 'accept-selected' && cannotAccept) return;
     actionLock.current = true;
+    setActionError(null);
     try {
       await controller.resolveProposal(proposal.proposalId, {
         expectedRoomEpoch: roomEpoch,
         expectedRevision: revision,
         resolution,
-        ...(resolution === 'accept-selected' ? { selectedChangeIds: [...selected] } : {}),
+        ...(resolution === 'accept-selected' ? { selectedChangeIds: [...selected],
+          ...(overrideChangeIds.length > 0 ? { overrideChangeIds } : {}),
+        } : {}),
       });
+    } catch {
+      setActionError('审阅未完成，请核对房间最新状态；结果未知时先重新连接并对账。');
     } finally {
       actionLock.current = false;
     }
@@ -145,57 +502,105 @@ const HostProposalCard = ({
 
   return (
     <li className="rounded-xl border border-gray-200 bg-white/80 p-3 dark:border-gray-700 dark:bg-gray-900/70">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="font-mono text-xs text-gray-700 dark:text-gray-300">
-          {proposal.proposalId}
-        </p>
-        <span className="text-xs text-gray-600 dark:text-gray-400">
-          基线 revision {proposal.baseRevision}
-        </span>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <p className="text-sm font-semibold text-gray-950 dark:text-gray-100">
+            {authorDisplayName} 提出了 {proposal.changes.length} 项修改
+          </p>
+          <p className="mt-1 text-xs text-gray-600 dark:text-gray-400" title={proposal.proposalId}>
+            提交于 {proposal.createdAt}
+          </p>
+        </div>
       </div>
       <fieldset className="mt-3 space-y-2">
         <legend className="text-sm font-semibold text-gray-950 dark:text-gray-100">逐项审阅</legend>
-        {proposal.changes.map((change) => (
-          <label key={change.changeId} className="flex items-start gap-2 rounded-lg border border-gray-200 p-2 text-sm dark:border-gray-700">
+        {proposal.changes.map((change) => {
+          const analysis = analysisByChangeId.get(change.changeId);
+          const conflict = analysis?.outcome === 'conflict' || analysis?.outcome === 'overridden' ? analysis.conflict : undefined;
+          const satisfied = analysis?.outcome === 'satisfied';
+          return (
+          <div key={change.changeId} className="flex items-start gap-2 rounded-lg border border-gray-200 p-2 text-sm dark:border-gray-700">
             <input
               type="checkbox"
               className="mt-1"
               checked={selected.has(change.changeId)}
-              onChange={(event: ChangeEvent<HTMLInputElement>) => {
-                const next = new Set(selected);
-                if (event.target.checked) next.add(change.changeId);
-                else next.delete(change.changeId);
-                setSelected(next);
-              }}
+              disabled={disabled}
+              aria-label={`接受变更：${arenaProposalChangeProposedSummary(change, labels)}`}
+              onChange={(event: ChangeEvent<HTMLInputElement>) => selectChange(change.changeId, event.target.checked)}
             />
-            <span>
-              <span className="font-medium text-gray-950 dark:text-gray-100">{changeSummary(change)}</span>
-              <SelectionDetails change={change} />
-            </span>
-          </label>
-        ))}
+            <div className="min-w-0 flex-1">
+              <span
+                className="font-medium text-gray-950 dark:text-gray-100"
+                title={changeRefTitle(change)}
+              >
+                {arenaProposalChangeProposedSummary(change, labels)}
+              </span>
+              {satisfied ? (
+                <span
+                  className="mt-1 block font-medium text-emerald-700 dark:text-emerald-300"
+                  data-change-outcome="satisfied"
+                >
+                  该项目标已由其他修改满足；接受时将自动跳过，不会重复应用。
+                </span>
+              ) : null}
+              {conflict && analysis ? (
+                <ArenaProposalConflictReview change={change} analysis={analysis} disabled={disabled}
+                  onAdopt={() => adoptChange(change.changeId)}
+                  onKeep={() => selectChange(change.changeId, false)} />
+              ) : null}
+            </div>
+          </div>
+          );
+        })}
       </fieldset>
       <div aria-live="polite" className="mt-2 min-h-5 text-xs text-red-700 dark:text-red-300">
-        {validationError ?? ''}
+        {applicationError ?? actionError ?? ''}
       </div>
-      <div className="mt-2 flex flex-wrap gap-2">
+      {selectedConflictCount > 0 ? (
+        <p role="status" className="mt-1 text-xs text-amber-700 dark:text-amber-300">
+          所选变更中有 {selectedConflictCount} 项尚未裁决或无法应用；请采用提案值，或取消相关项后接受其余变更。
+        </p>
+      ) : null}
+      {reviewExpired ? <p role="status" className="mt-2 text-sm text-amber-800 dark:text-amber-200">
+        房间或提案在审阅期间发生变化，请重新确认覆盖项。
+      </p> : null}
+      <ActionBar className="mt-2">
         <button
           type="button"
-          className={primaryButtonClass}
-          disabled={disabled || Boolean(validationError)}
+          className={buttonClassName({ variant: 'primary' })}
+          disabled={disabled || cannotAccept}
           onClick={() => { void resolve('accept-selected'); }}
         >
           接受所选
         </button>
         <button
           type="button"
-          className={dangerButtonClass}
+          className={buttonClassName({ variant: 'danger' })}
           disabled={disabled}
           onClick={() => { void resolve('reject'); }}
         >
           拒绝全部
         </button>
-      </div>
+      </ActionBar>
+      <details className="mt-2 border-t pt-2 dark:border-gray-800">
+        <summary className="cursor-pointer select-none text-xs text-gray-600 dark:text-gray-400">技术详情</summary>
+        <div className="mt-2 space-y-1.5 text-xs text-gray-600 dark:text-gray-400">
+          <p>提案 ID：{proposal.proposalId} · 基于房间配置版本 {proposal.baseRevision}</p>
+          {proposal.changes.map((change) => {
+            const analysis = analysisByChangeId.get(change.changeId);
+            const conflict = analysis?.outcome === 'conflict' || analysis?.outcome === 'overridden' ? analysis.conflict : undefined;
+            return (
+              <p key={`detail-${change.changeId}`}>
+                <span className="font-mono">{change.changeId}</span>
+                {' · '}{arenaProposalExpectedBaseSummary(change)}
+                {change.dependsOn?.length ? ` · 依赖 ${change.dependsOn.join('、')}` : ''}
+                {change.atomicGroupId ? ` · 联动变更组 ${change.atomicGroupId}` : ''}
+                {conflict ? ` · 当前房间值：${safeJsonSummary(conflict.current)}` : ''}
+              </p>
+            );
+          })}
+        </div>
+      </details>
     </li>
   );
 };
@@ -210,32 +615,50 @@ const HostProposalInbox = ({
   const session = state.session;
   if (!session) return null;
   const disabled = state.proposalOperation !== null || state.proposalResultUnknown;
+  const proposals = session.snapshot.proposals;
   return (
-    <section aria-labelledby="arena-proposal-inbox-heading" className="rounded-xl border border-gray-200 bg-white/50 p-4 dark:border-gray-700 dark:bg-gray-950/20">
-      <h3 id="arena-proposal-inbox-heading" className="text-sm font-semibold text-gray-950 dark:text-gray-100">
-        Proposal 审阅箱
-      </h3>
-      <p className="mt-1 text-xs text-gray-600 dark:text-gray-400">
-        客户端选择只用于表达意图；服务器会再次校验 revision、引用权限与 expectedBase。
-      </p>
+    <section aria-labelledby="arena-proposal-inbox-heading" className="rounded-xl border border-gray-200 bg-white/50 p-3 dark:border-gray-700 dark:bg-gray-950/20">
+      <div>
+        <h3 id="arena-proposal-inbox-heading" className="text-sm font-semibold text-gray-950 dark:text-gray-100">
+          待处理提案 ({proposals.length})
+        </h3>
+        <p className="mt-1 text-xs text-gray-600 dark:text-gray-400">
+          在当前房间提案窗口逐项审阅配置变更，不占用主编辑区。
+        </p>
+      </div>
       {state.proposalResultUnknown ? (
         <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
           <p>上次审阅结果未知，已冻结重复处理。</p>
-          <button type="button" className={`${secondaryButtonClass} mt-2`} onClick={controller.reconnect}>
+          <button type="button" className={buttonClassName({ className: 'mt-2' })} onClick={controller.reconnect}>
             重新连接并对账
           </button>
         </div>
       ) : null}
-      {session.snapshot.proposals.length === 0 ? (
-        <p className="mt-3 text-sm text-gray-600 dark:text-gray-400">暂无待处理 Proposal</p>
+      {state.error && !state.proposalResultUnknown ? (
+        <div role="alert" className="mt-3 rounded-lg border border-red-300 p-3 text-sm text-red-800 dark:text-red-200">
+          <p>{state.error}</p>
+          <button type="button" className={buttonClassName({ className: 'mt-2' })}
+            disabled={disabled} onClick={controller.reconnect}>重新连接并核对房间状态</button>
+        </div>
+      ) : null}
+      <p className="mt-3 text-xs text-gray-600 dark:text-gray-400">
+        接受时服务器会再次校验这些修改是否仍然适用。
+      </p>
+      {proposals.length === 0 ? (
+        <p className="mt-3 text-sm text-gray-600 dark:text-gray-400">
+          暂无待处理提案。成员在主编辑区编辑并提交提案后会出现在这里；接受后的内容才会进入本局配置。
+        </p>
       ) : (
-        <ul className="mt-3 space-y-3" aria-label="待审阅 Proposal">
-          {session.snapshot.proposals.map((proposal) => (
+        <ul className="mt-3 space-y-3" aria-label="待审阅提案">
+          {proposals.map((proposal) => (
             <HostProposalCard
-              key={`${proposal.proposalId}:${proposal.updatedAt ?? proposal.createdAt}`}
+              key={`${session.roomId}:${session.roomEpoch}:${proposal.proposalId}:${proposal.updatedAt ?? proposal.createdAt}`}
               proposal={proposal}
+              roomId={session.snapshot.roomId}
               revision={session.snapshot.revision}
               roomEpoch={session.roomEpoch}
+              currentConfig={session.snapshot.sharedConfig}
+              authorDisplayName={session.snapshot.members.find((member) => member.userId === proposal.authorUserId)?.displayName ?? '未知成员'}
               controller={controller}
               disabled={disabled}
             />
@@ -246,281 +669,150 @@ const HostProposalInbox = ({
   );
 };
 
-type MemberPreview = {
-  readonly baselineEpoch: string;
-  readonly baselineRevision: number;
-  readonly changes: readonly ArenaProposalChange[];
-};
-
-const MemberProposalEditor = ({
+const MemberProposalEntry = ({
   state,
   controller,
-  createProposalId,
+  workspace,
 }: {
   readonly state: ArenaRoomControllerState;
   readonly controller: ProposalController;
-  readonly createProposalId: () => string;
+  readonly workspace: ArenaRoomProposalWorkspace;
 }) => {
+  const [confirmResync, setConfirmResync] = useState(false);
   const session = state.session;
-  const [editor, setEditor] = useState<ArenaProposalEditorState | null>(null);
-  const [preview, setPreview] = useState<MemberPreview | null>(null);
-  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
-  const [localError, setLocalError] = useState<string | null>(null);
-  const submitLock = useRef(false);
-  const currentEditor = useMemo(() => {
-    if (!editor || !session) return editor;
-    try {
-      return syncArenaProposalEditor(editor, session.snapshot);
-    } catch {
-      return { ...editor, stale: true, replacementRequired: true };
-    }
-  }, [editor, session]);
+  const editor = workspace.editor;
+  const editorState = useSyncExternalStore(
+    editor?.store.subscribe ?? (() => () => undefined),
+    editor?.store.getState ?? (() => null),
+    editor?.store.getInitialState ?? (() => null),
+  );
   if (!session) return null;
 
-  const visiblePreview = preview
-    && currentEditor
-    && preview.baselineEpoch === currentEditor.baselineEpoch
-    && preview.baselineRevision === currentEditor.baselineRevision
-      ? preview
-      : null;
-  const validationError = visiblePreview
-    ? selectionError(visiblePreview.changes, selected)
-    : null;
-  const disabled = state.proposalOperation !== null || state.proposalResultUnknown;
-
-  const sync = (): void => {
-    setEditor(resetArenaProposalEditor(session.snapshot));
-    setPreview(null);
-    setSelected(new Set());
-    setLocalError(null);
-  };
-
-  const edit = (update: (config: ArenaRoomSharedConfig) => ArenaRoomSharedConfig): void => {
-    if (!currentEditor) return;
-    try {
-      setEditor(editWorkingConfig(currentEditor, update));
-      setPreview(null);
-      setSelected(new Set());
-      setLocalError(null);
-    } catch {
-      setLocalError('此安全配置修改无效');
-    }
-  };
-
-  const buildPreview = (): void => {
-    if (!currentEditor) return;
-    try {
-      const result = previewArenaProposal(currentEditor);
-      setPreview({
-        baselineEpoch: currentEditor.baselineEpoch,
-        baselineRevision: currentEditor.baselineRevision,
-        changes: result.changes,
-      });
-      setSelected(new Set(result.selectedChangeIds));
-      setLocalError(null);
-    } catch (error) {
-      setLocalError(error instanceof ArenaProposalEditorError && error.code === 'empty-proposal'
-        ? '草稿没有可提交的变更'
-        : '草稿无法生成安全 Proposal，请重新同步');
-    }
-  };
-
-  const submit = async (): Promise<void> => {
-    if (
-      !currentEditor
-      || !visiblePreview
-      || validationError
-      || disabled
-      || submitLock.current
-    ) return;
-    submitLock.current = true;
-    try {
-      const intent = buildArenaProposalSubmitIntent(
-        currentEditor,
-        createProposalId(),
-        [...selected],
-      );
-      await controller.submitProposal(intent);
-      setLocalError(null);
-    } catch {
-      setLocalError('Proposal 意图无效，请重新预览');
-    } finally {
-      submitLock.current = false;
-    }
-  };
-
   return (
-    <section aria-labelledby="arena-proposal-editor-heading" className="rounded-xl border border-gray-200 bg-white/50 p-4 dark:border-gray-700 dark:bg-gray-950/20">
+    <section aria-labelledby="arena-proposal-editor-heading" className="rounded-xl border border-gray-200 bg-white/50 p-3 dark:border-gray-700 dark:bg-gray-950/20">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <h3 id="arena-proposal-editor-heading" className="text-sm font-semibold text-gray-950 dark:text-gray-100">
-            Shared Config 草稿
+            配置提案
           </h3>
           <p className="mt-1 text-xs text-gray-600 dark:text-gray-400">
-            草稿与单人竞技场状态完全分离；编辑过程不会联网。
+            {editorState
+              ? '主编辑区已进入提案模式'
+              : '同步房间当前设置后，主编辑区会切换到提案模式。'}
           </p>
         </div>
-        <button type="button" className={secondaryButtonClass} onClick={sync}>
-          {currentEditor ? '丢弃草稿并同步' : '同步当前房间配置'}
-        </button>
-      </div>
-
-      {currentEditor ? (
-        <div className="mt-4 space-y-3">
-          {currentEditor.replacementRequired ? (
-            <p role="alert" className="rounded-lg border border-red-300 bg-red-50 p-2 text-sm text-red-800 dark:border-red-800 dark:bg-red-950/30 dark:text-red-200">
-              房间 incarnation 已变化，旧草稿禁止提交；请重新同步。
-            </p>
-          ) : currentEditor.stale ? (
-            <p className="rounded-lg border border-amber-300 bg-amber-50 p-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
-              房间 revision 已更新；当前草稿仍绑定旧基线 {currentEditor.baselineRevision}。
-            </p>
-          ) : null}
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div>
-              <label htmlFor="arena-proposal-battle-mode" className="mb-1 block text-sm font-medium text-gray-800 dark:text-gray-200">
-                战斗模式
-              </label>
-              <select
-                id="arena-proposal-battle-mode"
-                className={inputClass}
-                value={currentEditor.workingConfig.battleMode}
-                onChange={(event: ChangeEvent<HTMLSelectElement>) => edit((config) => ({
-                  ...config,
-                  battleMode: event.target.value as ArenaRoomSharedConfig['battleMode'],
-                }))}
-              >
-                <option value="classic">classic</option>
-                <option value="kizuna">kizuna</option>
-                <option value="daily">daily</option>
-                <option value="scenario">scenario</option>
-              </select>
-            </div>
-            <div>
-              <label htmlFor="arena-proposal-story-length" className="mb-1 block text-sm font-medium text-gray-800 dark:text-gray-200">
-                故事长度
-              </label>
-              <select
-                id="arena-proposal-story-length"
-                className={inputClass}
-                value={currentEditor.workingConfig.storyLength}
-                onChange={(event: ChangeEvent<HTMLSelectElement>) => edit((config) => ({
-                  ...config,
-                  storyLength: event.target.value as ArenaRoomSharedConfig['storyLength'],
-                  customStoryLength: null,
-                }))}
-              >
-                <option value="default">default</option>
-                <option value="short">short</option>
-                <option value="standard">standard</option>
-                <option value="detailed">detailed</option>
-                <option value="long">long</option>
-              </select>
-            </div>
-          </div>
-          <div>
-            <label htmlFor="arena-proposal-user-guidance" className="mb-1 block text-sm font-medium text-gray-800 dark:text-gray-200">
-              全局引导
-            </label>
-            <textarea
-              id="arena-proposal-user-guidance"
-              className={`${inputClass} min-h-24 resize-y`}
-              value={currentEditor.workingConfig.userGuidance}
-              onChange={(event: ChangeEvent<HTMLTextAreaElement>) => edit((config) => ({
-                ...config,
-                userGuidance: event.target.value,
-              }))}
-            />
-          </div>
+        <div className="flex flex-wrap gap-2">
           <button
             type="button"
-            className={secondaryButtonClass}
-            disabled={!currentEditor.dirty || currentEditor.replacementRequired}
-            onClick={buildPreview}
+            className={buttonClassName()}
+            onClick={() => {
+              if (editorState?.dirty) {
+                setConfirmResync(true);
+                return;
+              }
+              workspace.syncFromRoom();
+            }}
           >
-            预览 typed diff
+            {editorState?.dirty
+              ? '丢弃草稿并重新同步'
+              : editorState ? '重新同步房间配置' : '同步房间配置'}
           </button>
-
-          {visiblePreview ? (
-            <fieldset className="space-y-2 rounded-lg border border-gray-200 p-3 dark:border-gray-700">
-              <legend className="px-1 text-sm font-semibold text-gray-950 dark:text-gray-100">选择提交变更</legend>
-              {visiblePreview.changes.map((change) => (
-                <label key={change.changeId} className="flex items-start gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    className="mt-1"
-                    checked={selected.has(change.changeId)}
-                    onChange={(event: ChangeEvent<HTMLInputElement>) => {
-                      const next = new Set(selected);
-                      if (event.target.checked) next.add(change.changeId);
-                      else next.delete(change.changeId);
-                      setSelected(next);
-                    }}
-                  />
-                  <span>
-                    <span className="font-medium text-gray-950 dark:text-gray-100">{changeSummary(change)}</span>
-                    <SelectionDetails change={change} />
-                  </span>
-                </label>
-              ))}
-              <div aria-live="polite" className="min-h-5 text-xs text-red-700 dark:text-red-300">
-                {validationError ?? ''}
-              </div>
-              <button
-                type="button"
-                className={primaryButtonClass}
-                disabled={disabled || Boolean(validationError) || currentEditor.replacementRequired}
-                onClick={() => { void submit(); }}
-              >
-                提交 Proposal
-              </button>
-            </fieldset>
-          ) : null}
         </div>
-      ) : (
-        <p className="mt-3 text-sm text-gray-600 dark:text-gray-400">
-          先同步当前权威 snapshot，再建立本地草稿。
+      </div>
+      {confirmResync ? (
+        <div
+          role="alertdialog"
+          aria-labelledby="arena-proposal-resync-confirm-heading"
+          aria-describedby="arena-proposal-resync-confirm-description"
+          className="mt-3 rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-900 dark:border-red-800 dark:bg-red-950/30 dark:text-red-100"
+        >
+          <p id="arena-proposal-resync-confirm-heading" className="font-semibold">确认重新同步？</p>
+          <p id="arena-proposal-resync-confirm-description" className="mt-1">
+            当前未提交修改将被丢弃，并以房间最新配置重新建立提案草稿。
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              className={buttonClassName({ variant: 'danger' })}
+              onClick={() => {
+                setConfirmResync(false);
+                workspace.syncFromRoom();
+              }}
+            >
+              确认丢弃并同步
+            </button>
+            <button type="button" className={buttonClassName()} onClick={() => setConfirmResync(false)}>
+              保留草稿
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {editorState?.replacementRequired ? (
+        <p role="alert" className="mt-3 rounded-lg border border-red-300 bg-red-50 p-2 text-sm text-red-800 dark:border-red-800 dark:bg-red-950/30 dark:text-red-200">
+          房间实例已变化，旧草稿禁止提交；请重新同步。
         </p>
-      )}
+      ) : editorState?.stale ? (
+        <p className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
+          房间设置已更新；草稿仍可提交，冲突项将由房主审阅决定。
+        </p>
+      ) : null}
+      <ArenaMemberProposalStatus state={state} controller={controller} />
+      <p className="mt-3 text-xs text-gray-600 dark:text-gray-400">
+        只想围观也完全可以：不提交提案，等房主开始生成即可。
+      </p>
+    </section>
+  );
+};
 
-      {localError ? <p role="alert" className="mt-2 text-sm text-red-700 dark:text-red-300">{localError}</p> : null}
+export function ArenaMemberProposalStatus({
+  state,
+  controller,
+}: {
+  readonly state: ArenaRoomControllerState;
+  readonly controller: Pick<ArenaRoomController, 'reconnect' | 'withdrawProposal'>;
+}) {
+  const session = state.session;
+  if (!session || session.self.role !== 'member') return null;
+  const disabled = state.proposalOperation !== null || state.proposalResultUnknown;
+  const proposals = session.snapshot.proposals.filter((proposal) => (
+    proposal.authorUserId === session.self.userId
+  ));
+  return (
+    <>
       {state.proposalResultUnknown ? (
         <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
-          <p>上次 Proposal 请求结果未知，已冻结重复提交。</p>
-          <button type="button" className={`${secondaryButtonClass} mt-2`} onClick={controller.reconnect}>
+          <p>上次提案请求结果未知，已冻结重复提交。</p>
+          <button type="button" className={buttonClassName({ className: 'mt-2' })} onClick={controller.reconnect}>
             重新连接并对账
           </button>
         </div>
       ) : null}
 
-      {session.snapshot.proposals.length > 0 ? (
+      {proposals.length > 0 ? (
         <div className="mt-4">
-          <h4 className="text-sm font-semibold text-gray-950 dark:text-gray-100">我的待处理 Proposal</h4>
+          <h4 className="text-sm font-semibold text-gray-950 dark:text-gray-100">我的待处理提案</h4>
           <ul className="mt-2 space-y-2">
-            {session.snapshot.proposals.map((proposal) => (
+            {proposals.map((proposal) => (
               <li key={proposal.proposalId} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-gray-200 p-2 dark:border-gray-700">
-                <span className="font-mono text-xs">{proposal.proposalId}</span>
+                <span className="text-xs text-gray-600 dark:text-gray-400" title={proposal.proposalId}>
+                  提交于 {proposal.createdAt}
+                </span>
                 <button
                   type="button"
-                  className={dangerButtonClass}
+                  className={buttonClassName({ variant: 'danger' })}
                   disabled={disabled}
                   onClick={() => { void controller.withdrawProposal(proposal.proposalId); }}
                 >
-                  撤回 Proposal
+                  撤回提案
                 </button>
               </li>
             ))}
           </ul>
         </div>
       ) : null}
-    </section>
+    </>
   );
-};
-
-const defaultProposalId = (): string => {
-  const random = globalThis.crypto?.randomUUID?.();
-  return `proposal-${random ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`}`;
-};
+}
 
 export function ArenaProposalPanel(props: ArenaProposalPanelProps) {
   const session = props.state.session;
@@ -528,10 +820,10 @@ export function ArenaProposalPanel(props: ArenaProposalPanelProps) {
   return session.self.role === 'host' ? (
     <HostProposalInbox state={props.state} controller={props.controller} />
   ) : (
-    <MemberProposalEditor
+    <MemberProposalEntry
       state={props.state}
       controller={props.controller}
-      createProposalId={props.createProposalId ?? defaultProposalId}
+      workspace={props.workspace}
     />
   );
 }

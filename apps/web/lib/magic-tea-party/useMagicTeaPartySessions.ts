@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent, Dispatch, SetStateAction } from 'react';
 
 import type { UserAIProviderConfig } from '@/components/AiProviderSelector';
@@ -33,6 +33,10 @@ import {
   putMagicTeaPartyTachieBlob,
 } from '@/lib/magic-tea-party/storage';
 import { deriveMagicTeaPartyTitle } from '@/lib/magic-tea-party/title';
+import {
+  isMagicTeaPartySessionCurrent,
+  resolveMagicTeaPartyActiveSession,
+} from '@/lib/magic-tea-party/session-identity';
 import type {
   MagicTeaPartyMessage,
   MagicTeaPartyPreferences,
@@ -276,6 +280,9 @@ export function useMagicTeaPartySessions(options: UseMagicTeaPartySessionsOption
   const [activeSession, setActiveSession] = useState<MagicTeaPartySession | null>(null);
   const [messages, setMessages] = useState<MagicTeaPartyMessage[]>([]);
   const [preferences, setPreferences] = useState(() => DEFAULT_MAGIC_TEA_PARTY_PREFERENCES);
+  const activeSessionLoadRevisionRef = useRef(0);
+  const activeSessionIdRef = useRef(activeSessionId);
+  activeSessionIdRef.current = activeSessionId;
 
   useEffect(() => {
     migrateMagicTeaPartyLocalStorage();
@@ -310,9 +317,18 @@ export function useMagicTeaPartySessions(options: UseMagicTeaPartySessionsOption
   );
 
   const refreshActiveSession = useCallback(async (sessionId: string) => {
+    const loadRevision = ++activeSessionLoadRevisionRef.current;
     const session = await getMagicTeaPartySession(sessionId);
+    if (
+      loadRevision !== activeSessionLoadRevisionRef.current
+      || !isMagicTeaPartySessionCurrent(activeSessionIdRef.current, sessionId)
+    ) return;
     setActiveSession(session);
     const nextMessagesRaw = await listMagicTeaPartyMessages(sessionId);
+    if (
+      loadRevision !== activeSessionLoadRevisionRef.current
+      || !isMagicTeaPartySessionCurrent(activeSessionIdRef.current, sessionId)
+    ) return;
 
     const patchedMessages = nextMessagesRaw.map((message) => {
       if (message.role !== 'assistant') return message;
@@ -408,6 +424,10 @@ export function useMagicTeaPartySessions(options: UseMagicTeaPartySessionsOption
             updatedAt: Date.now(),
           };
           await putMagicTeaPartySession(updatedSession);
+          if (
+            loadRevision !== activeSessionLoadRevisionRef.current
+            || !isMagicTeaPartySessionCurrent(activeSessionIdRef.current, sessionId)
+          ) return;
           setActiveSession(updatedSession);
           setSessions((prev) => sortSessionsByUpdatedAtDesc([updatedSession, ...prev.filter((item) => item.id !== updatedSession.id)]));
         }
@@ -437,12 +457,15 @@ export function useMagicTeaPartySessions(options: UseMagicTeaPartySessionsOption
   }, [onGlobalError, refreshSessions]);
 
   useEffect(() => {
+    activeSessionLoadRevisionRef.current += 1;
     if (!activeSessionId) {
       setActiveSession(null);
       setMessages([]);
       return;
     }
 
+    setActiveSession(null);
+    setMessages([]);
     writeLocalStorageString(STORAGE_RECENT_SESSION, activeSessionId);
     void refreshActiveSession(activeSessionId).catch((error) => {
       const message = error instanceof Error ? error.message : '加载会话失败';
@@ -452,7 +475,9 @@ export function useMagicTeaPartySessions(options: UseMagicTeaPartySessionsOption
 
   const persistSession = useCallback(async (next: MagicTeaPartySession) => {
     // 先同步更新 React 状态，避免受控输入在异步落盘后重放 value 导致光标跳到末尾。
-    setActiveSession(next);
+    if (isMagicTeaPartySessionCurrent(activeSessionIdRef.current, next.id)) {
+      setActiveSession(next);
+    }
     setSessions((prev) => sortSessionsByUpdatedAtDesc([next, ...prev.filter((item) => item.id !== next.id)]));
     await putMagicTeaPartySession(next);
   }, []);
@@ -1344,7 +1369,7 @@ export function useMagicTeaPartySessions(options: UseMagicTeaPartySessionsOption
     sessions,
     activeSessionId,
     setActiveSessionId,
-    activeSession,
+    activeSession: resolveMagicTeaPartyActiveSession(activeSessionId, activeSession),
     messages,
     setMessages,
     preferences,

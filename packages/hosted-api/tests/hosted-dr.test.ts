@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { ARENA_ROOM_ERROR_TAXONOMY_HEADER } from '@mahoshojo/contracts/arena-room';
 import {
   createHostedApiCorsPreflightResponse,
   createHostedDrReadinessService,
@@ -47,6 +48,7 @@ describe('Hosted API cross-runtime CORS contract', () => {
     expect(resolveHostedApiCorsOrigin('https://preview.example.com', allowedOrigins)).toBe('');
     expect(HOSTED_API_CORS_ALLOW_METHODS).toContain('POST');
     expect(HOSTED_API_CORS_ALLOW_HEADERS).toContain('Authorization');
+    expect(HOSTED_API_CORS_ALLOW_HEADERS).toContain(ARENA_ROOM_ERROR_TAXONOMY_HEADER);
     expect(hasValidHostedApiProductionCorsOrigins(allowedOrigins)).toBe(true);
     expect(hasValidHostedApiProductionCorsOrigins(['*'])).toBe(false);
     expect(hasValidHostedApiProductionCorsOrigins(['http://localhost:3000'])).toBe(false);
@@ -72,6 +74,8 @@ describe('Hosted API cross-runtime CORS contract', () => {
     );
     expect(response.headers.get('access-control-allow-methods')).toContain('POST');
     expect(response.headers.get('access-control-allow-headers')).toContain('Authorization');
+    expect(response.headers.get('access-control-allow-headers'))
+      .toContain(ARENA_ROOM_ERROR_TAXONOMY_HEADER);
     expect(response.headers.get('access-control-allow-credentials')).toBeNull();
   });
 

@@ -30,6 +30,8 @@ type MagicTeaPartyChatTimelineProps = {
   onCancelEdit: () => void;
   onConfirmEdit: (message: MagicTeaPartyMessage) => void;
   onDeleteMessage: (message: MagicTeaPartyMessage) => void;
+  onCompactMessage: (message: MagicTeaPartyMessage) => void;
+  messageCharLimit: number;
 };
 
 const InlineSpinner = () => (
@@ -57,6 +59,8 @@ export function MagicTeaPartyChatTimeline(props: MagicTeaPartyChatTimelineProps)
     onCancelEdit,
     onConfirmEdit,
     onDeleteMessage,
+    onCompactMessage,
+    messageCharLimit,
   } = props;
 
   const currentOutputFormat = activeSession?.settings.outputFormat ?? preferences.outputFormat;
@@ -193,6 +197,8 @@ export function MagicTeaPartyChatTimeline(props: MagicTeaPartyChatTimelineProps)
                       onCancelEdit={onCancelEdit}
                       onConfirmEdit={onConfirmEdit}
                       onDeleteMessage={onDeleteMessage}
+                      onCompactMessage={onCompactMessage}
+                      messageCharLimit={messageCharLimit}
                     />
                   </div>
                 </div>

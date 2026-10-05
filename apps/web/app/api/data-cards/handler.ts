@@ -1,6 +1,10 @@
 import { OnlineDataCardTypeSchema } from '@mahoshojo/contracts/data-cards';
 import { normalizeOnlineDataCardVisibilityCompat } from '@/lib/data-card-visibility';
 import { getRequestUrl } from '@/lib/request-url';
+import { readDataCardListPage } from '@/lib/data-card-list-page';
+import { readDataCardSummaryQuery } from '@/lib/data-card-summary-query';
+import { listDataCardSummaries } from '@/lib/db/repositories/data-card-summaries';
+import { listUserDataCards } from '@/lib/db/repositories/data-cards-core';
 import { 
   createDataCardWithAuthor, 
   getUserDataCards, 
@@ -22,6 +26,7 @@ import {
   updateDataCardContentByIdAndUser as updateDataCardContentByIdAndUserOrm,
 } from '@/lib/db/repositories/data-cards-write';
 import { formatKilobytes, getUtf8ByteLength, MAX_DATA_CARD_BYTES } from '@/lib/data-card-size';
+import { getDataCardChargedSlotsFromBytes, isHotDataCardForQuota } from '@/lib/data-card-quota';
 import { computeTechIndex } from '@/lib/metrics/techIndex';
 import { verifySignature } from '@/lib/signature';
 import { upsertDataCardMetrics } from '@/lib/database/data-card-metrics';
@@ -95,19 +100,41 @@ async function handler(req: Request): Promise<Response> {
 
   switch (req.method) {
     case 'GET':
-      // 获取用户的所有数据卡
+      // 有界分页，避免一次读取所有正文耗尽 Worker 内存。
       try {
         const url = getRequestUrl(req);
+        if (url.searchParams.has('id')) {
+          const id = url.searchParams.get('id')?.trim();
+          if (!id || id.length > 200) return Response.json({ error: '无效的数据卡 ID' }, { status: 400 });
+          if (!db) throw new Error('数据卡存储不可用');
+          const [card] = await listUserDataCards(db, { userId, id, limit: 1, offset: 0 });
+          return Response.json(card ? { success: true, card } : { error: '数据卡不存在或无权访问' }, {
+            status: card ? 200 : 404, headers: { 'Cache-Control': 'private, no-store' },
+          });
+        }
+        if (url.searchParams.get('view') === 'summary') {
+          const query = readDataCardSummaryQuery(url.searchParams);
+          if (!query) return Response.json({ error: '无效的列表查询参数' }, { status: 400 });
+          if (!db) throw new Error('数据卡存储不可用');
+          const started = Date.now();
+          const result = await listDataCardSummaries(db, userId, 'my', query);
+          console.info('data-card-list', { source: 'my', summary: true, limit: query.limit, offset: query.offset, count: result.cards.length, durationMs: Date.now() - started, status: 200 });
+          return Response.json(result, { headers: { 'Cache-Control': 'private, no-store' } });
+        }
+        const page = readDataCardListPage(url.searchParams);
+        if (!page) return Response.json({ error: '无效的分页参数' }, { status: 400 });
         const search = url.searchParams.get('search'); // 搜索关键词
         const sortBy = url.searchParams.get('sortBy') as 'likes' | 'usage' | 'favorites' | 'created_at' | null; // 排序方式
         
-        const cards = await getUserDataCards(userId, search || undefined, sortBy || undefined);
-        return new Response(JSON.stringify({ success: true, cards }), {
+        const rows = await getUserDataCards(userId, search || undefined, sortBy || undefined, { ...page, limit: page.limit + 1 });
+        const cards = rows.slice(0, page.limit);
+        const nextOffset = rows.length > page.limit ? page.offset + page.limit : null;
+        return new Response(JSON.stringify({ success: true, cards, nextOffset }), {
           status: 200,
-          headers: { 'Content-Type': 'application/json' }
+          headers: { 'Content-Type': 'application/json', 'Cache-Control': 'private, no-store' }
         });
       } catch (error) {
-        console.error('Get cards error:', error);
+        console.error('data-card-list-failed', { source: 'my', status: 500, category: error instanceof Error ? error.name : 'unknown' });
         return new Response(JSON.stringify({ error: '获取数据卡失败' }), {
           status: 500,
           headers: { 'Content-Type': 'application/json' }
@@ -182,12 +209,13 @@ async function handler(req: Request): Promise<Response> {
           });
         }
 
-        // 检查用户数据卡数量限制（热门卡不占槽）
+        // 检查用户数据卡槽位限制：每开始使用 300KiB 占 1 槽；新卡尚不具备热门豁免。
         const usedSlots = await getUserUsedSlots(userId);
         const userCapacity = await getUserDataCardCapacity(userId, appConfig.DEFAULT_DATA_CARD_CAPACITY);
-        if (usedSlots >= userCapacity) {
-          return new Response(JSON.stringify({ 
-            error: `数据卡数量已达上限（${userCapacity}个），请删除部分数据卡后再试` 
+        const requiredSlots = getDataCardChargedSlotsFromBytes(dataSize, false);
+        if (usedSlots + requiredSlots > userCapacity) {
+          return new Response(JSON.stringify({
+            error: `数据卡需要 ${requiredSlots} 个槽位，当前已用 ${usedSlots}/${userCapacity}，请释放足够槽位后再试`
           }), {
             status: 429, // Too Many Requests
             headers: { 'Content-Type': 'application/json' }
@@ -319,6 +347,24 @@ async function handler(req: Request): Promise<Response> {
 
           const dataSizeBytes = getUtf8ByteLength(dataString);
           if (dataSizeBytes > MAX_DATA_CARD_BYTES) return makePayloadTooLargeResponse(dataSizeBytes);
+
+          const [usedSlotsExcludingCurrent, userCapacity] = await Promise.all([
+            getUserUsedSlots(userId, id),
+            getUserDataCardCapacity(userId, appConfig.DEFAULT_DATA_CARD_CAPACITY),
+          ]);
+          const isHot = isHotDataCardForQuota(currentCard.favorite_count, currentCard.usage_count);
+          const currentData = typeof currentCard.data === 'string' ? currentCard.data : '';
+          const currentSlots = getDataCardChargedSlotsFromBytes(getUtf8ByteLength(currentData), isHot);
+          const nextSlots = getDataCardChargedSlotsFromBytes(dataSizeBytes, isHot);
+          const requiredSlots = Math.max(currentSlots, nextSlots);
+          if (usedSlotsExcludingCurrent + requiredSlots > userCapacity) {
+            return new Response(JSON.stringify({
+              error: `更新后该数据卡需要 ${requiredSlots} 个槽位，其他数据卡已用 ${usedSlotsExcludingCurrent}/${userCapacity}，请释放足够槽位后再试`,
+            }), {
+              status: 429,
+              headers: { 'Content-Type': 'application/json' },
+            });
+          }
         }
 
         // 敏感词检查：标题+描述+（可选）数据

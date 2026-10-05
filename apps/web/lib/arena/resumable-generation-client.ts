@@ -3,10 +3,27 @@ import {
   STREAM_ABORT_REASON_CONTENT_POLICY,
   STREAM_ABORT_REASON_USER,
 } from '@/lib/stream/abort';
+import {
+  isGenerationApiClientErrorCode,
+  isGenerationApiRoutePin,
+  type GenerationApiRoutePin,
+} from '@/lib/hono-api-client';
+import { encodeUtf8, secureRandomUUID, sha256Hex } from '@/lib/crypto';
 
 export const ARENA_GENERATION_CLIENT_STATE_KEY = 'mahoshojo:arena:generation:v1';
 export const ARENA_GENERATION_ACTOR_TOKEN_KEY = 'mahoshojo:arena:generation-actor:v1';
 export const ARENA_GENERATION_ACTOR_TOKEN_HEADER = 'X-Mahoshojo-Generation-Actor-Token';
+
+const GENERATION_IDENTIFIER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/u;
+
+const isGenerationIdentifier = (value: unknown): value is string => (
+  typeof value === 'string' && GENERATION_IDENTIFIER_PATTERN.test(value)
+);
+
+const shouldRecoverInitialCreateError = (error: unknown): boolean => (
+  error instanceof TypeError
+  || isGenerationApiClientErrorCode(error, 'AMBIGUOUS_OPERATION_OUTCOME')
+);
 
 export type ArenaGenerationConnectionState =
   | 'connecting'
@@ -20,7 +37,18 @@ export type ArenaGenerationConnectionState =
   | 'cancelled'
   | 'cancel_unconfirmed'
   | 'producer_lost'
+  | 'interrupted'
   | 'unknown';
+
+const ARENA_GENERATION_RECOVERY_STATES: readonly ArenaGenerationConnectionState[] = [
+  'recovering_initial',
+  'reconnecting',
+  'resuming',
+];
+
+export const isArenaGenerationRecoveryState = (
+  state: ArenaGenerationConnectionState | null | undefined,
+): boolean => Boolean(state && ARENA_GENERATION_RECOVERY_STATES.includes(state));
 
 export const arenaGenerationConnectionNotice = (
   state: ArenaGenerationConnectionState,
@@ -29,7 +57,7 @@ export const arenaGenerationConnectionNotice = (
     return '网络连接暂时中断，战报仍在服务器生成，正在恢复连接。';
   }
   if (state === 'resuming' || state === 'recovering_initial') {
-    return '正在恢复同一场战报生成。';
+    return '正在恢复上一场战报生成。';
   }
   if (state === 'producer_lost') return '生成进程已丢失，无法安全自动重试。';
   if (state === 'cancelling') return '正在请求服务器停止生成，请稍候。';
@@ -39,11 +67,19 @@ export const arenaGenerationConnectionNotice = (
   if (state === 'cancel_unconfirmed') {
     return '未能确认服务器已收到停止请求；生成可能仍在后台继续，请稍后检查。';
   }
+  if (state === 'interrupted') {
+    return '战报连接恢复次数已耗尽；已接收正文会保留，但保存与恢复状态暂时无法确认。';
+  }
   return null;
 };
 
+export const mergeArenaGenerationSnapshotMarkdown = (
+  deliveredMarkdown: string,
+  snapshotMarkdown: string,
+): string => snapshotMarkdown || deliveredMarkdown;
+
 export type PersistedArenaGeneration = {
-  version: 1 | 2;
+  version: 1 | 2 | 3;
   generationRequestId: string;
   generationId: string | null;
   lastEventId: string | null;
@@ -51,6 +87,7 @@ export type PersistedArenaGeneration = {
   updatedAt: string;
   endpoint?: string;
   bodyHash?: string;
+  routePin?: GenerationApiRoutePin | null;
 };
 
 type StoragePort = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
@@ -62,7 +99,12 @@ export type OpenArenaGenerationStreamOptions = {
   body: Record<string, unknown>;
   headers: HeadersInit;
   signal?: AbortSignal;
-  fetcher(_input: string, _init?: RequestInit): Promise<Response>;
+  fetcher(
+    _input: string,
+    _init?: RequestInit,
+    _routePin?: GenerationApiRoutePin,
+    _onRoutePinSelected?: (_routePin: GenerationApiRoutePin) => void,
+  ): Promise<Response>;
   storage?: StoragePort | null;
   generationRequestId?: string;
   maxReconnectAttempts?: number;
@@ -70,6 +112,8 @@ export type OpenArenaGenerationStreamOptions = {
   cancelConfirmationTimeoutMs?: number;
   random?: () => number;
   now?: () => Date;
+  isInitialCreateOutcomeAmbiguous?(_error: unknown): boolean;
+  getInitialRoutePin?(): GenerationApiRoutePin | null;
   onStateChange?(_state: ArenaGenerationConnectionState): void;
 };
 
@@ -99,13 +143,19 @@ export const readPersistedArenaGeneration = (
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
     const value = parsed as Partial<PersistedArenaGeneration>;
     if (
-      (value.version !== 1 && value.version !== 2)
-      || typeof value.generationRequestId !== 'string'
-      || !value.generationRequestId
-      || (value.generationId !== null && typeof value.generationId !== 'string')
+      (value.version !== 1 && value.version !== 2 && value.version !== 3)
+      || !isGenerationIdentifier(value.generationRequestId)
+      || (value.generationId !== null && !isGenerationIdentifier(value.generationId))
       || (value.lastEventId !== null && typeof value.lastEventId !== 'string')
       || typeof value.state !== 'string'
       || typeof value.updatedAt !== 'string'
+      || (
+        value.version === 3
+        && !(
+          Object.prototype.hasOwnProperty.call(value, 'routePin')
+          && (value.routePin === null || isGenerationApiRoutePin(value.routePin))
+        )
+      )
     ) return null;
     return value as PersistedArenaGeneration;
   } catch {
@@ -139,11 +189,6 @@ const canonicalJson = (value: unknown): string => {
     .join(',')}}`;
 };
 
-const sha256 = async (value: string): Promise<string> => {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
-};
-
 const compareDecimal = (left: string, right: string): number => {
   const normalizedLeft = left.replace(/^0+(?=\d)/u, '');
   const normalizedRight = right.replace(/^0+(?=\d)/u, '');
@@ -174,7 +219,7 @@ const actorToken = (storage: StoragePort | null): string | null => {
 const ensureActorToken = (storage: StoragePort | null): string | null => {
   const existing = actorToken(storage);
   if (existing) return existing;
-  const bootstrap = `bootstrap.${crypto.randomUUID()}`;
+  const bootstrap = `bootstrap.${secureRandomUUID()}`;
   inMemoryActorToken = bootstrap;
   try {
     storage?.setItem(ARENA_GENERATION_ACTOR_TOKEN_KEY, bootstrap);
@@ -193,6 +238,11 @@ const captureActorToken = (storage: StoragePort | null, response: Response): voi
   } catch {
     // A blocked storage backend only disables anonymous cross-network resume.
   }
+};
+
+const generationIdFromResponse = (response: Response): string | null => {
+  const value = response.headers.get('x-mahoshojo-generation-id')?.trim();
+  return isGenerationIdentifier(value) ? value : null;
 };
 
 const delay = (milliseconds: number): Promise<void> => new Promise((resolve) => {
@@ -277,6 +327,12 @@ export const captureArenaGenerationActorToken = (
 export const openArenaGenerationStream = async (
   options: OpenArenaGenerationStreamOptions,
 ): Promise<Response> => {
+  if (
+    options.generationRequestId !== undefined
+    && !isGenerationIdentifier(options.generationRequestId)
+  ) {
+    throw new Error('ARENA_GENERATION_REQUEST_ID_INVALID');
+  }
   const storage = options.storage === undefined ? defaultStorage() : options.storage;
   const actorStorage = options.storage === undefined ? defaultActorStorage() : options.storage;
   const now = options.now ?? (() => new Date());
@@ -284,12 +340,14 @@ export const openArenaGenerationStream = async (
   const maxAttempts = options.maxReconnectAttempts ?? 8;
   const baseDelayMs = options.baseReconnectDelayMs ?? 500;
   const cancelConfirmationTimeoutMs = Math.max(1, options.cancelConfirmationTimeoutMs ?? 5_000);
-  const bodyHash = await sha256(canonicalJson(options.body));
-  const stateIdentity = await sha256(`${options.endpoint}\n${bodyHash}`);
+  const isInitialCreateOutcomeAmbiguous = options.isInitialCreateOutcomeAmbiguous
+    ?? shouldRecoverInitialCreateError;
+  const bodyHash = await sha256Hex(canonicalJson(options.body));
+  const stateIdentity = await sha256Hex(`${options.endpoint}\n${bodyHash}`);
   const scopedStateKey = `${ARENA_GENERATION_CLIENT_STATE_KEY}:${stateIdentity}`;
   const previous = readPersistedArenaGeneration(storage, scopedStateKey);
   const resumablePrevious = previous
-    && previous.version === 2
+    && (previous.version === 1 || previous.version === 2 || previous.version === 3)
     && (
       previous.endpoint === options.endpoint
       && previous.bodyHash === bodyHash
@@ -306,9 +364,12 @@ export const openArenaGenerationStream = async (
     : null;
   const generationRequestId = resumablePrevious?.generationRequestId
     ?? options.generationRequestId
-    ?? crypto.randomUUID();
+    ?? secureRandomUUID();
   let generationId = resumablePrevious?.generationId ?? null;
   let lastEventId = resumablePrevious?.lastEventId ?? null;
+  let routePin = resumablePrevious?.version === 3
+    ? resumablePrevious.routePin ?? null
+    : null;
   let state: ArenaGenerationConnectionState = resumablePrevious?.generationId
     ? 'resuming'
     : resumablePrevious
@@ -320,11 +381,9 @@ export const openArenaGenerationStream = async (
   let cancelConfirmationPromise: Promise<void> | null = null;
   let terminal = false;
   let connectedViaResume = false;
-  const updateState = (next: ArenaGenerationConnectionState): void => {
-    state = next;
-    options.onStateChange?.(next);
+  const persistCurrentState = (): void => {
     save(storage, scopedStateKey, {
-      version: 2,
+      version: 3,
       generationRequestId,
       generationId,
       lastEventId,
@@ -332,19 +391,39 @@ export const openArenaGenerationStream = async (
       updatedAt: now().toISOString(),
       endpoint: options.endpoint,
       bodyHash,
+      routePin,
     });
+  };
+  const acceptInitialRoutePin = (selected: GenerationApiRoutePin): void => {
+    if (routePin || !isGenerationApiRoutePin(selected)) return;
+    routePin = Object.freeze({ placement: selected.placement });
+    persistCurrentState();
+  };
+  const captureInitialRoutePin = (): void => {
+    if (routePin) return;
+    const selected = options.getInitialRoutePin?.() ?? null;
+    if (isGenerationApiRoutePin(selected)) acceptInitialRoutePin(selected);
+  };
+  const updateState = (next: ArenaGenerationConnectionState): void => {
+    state = next;
+    options.onStateChange?.(next);
+    persistCurrentState();
   };
 
   const fetchResume = async (): Promise<Response> => {
-    if (!generationId) throw new Error('ARENA_GENERATION_ID_MISSING');
+    if (!isGenerationIdentifier(generationId)) throw new Error('ARENA_GENERATION_ID_MISSING');
     const cursor = lastEventId ? `?after=${encodeURIComponent(lastEventId)}` : '';
     updateState('resuming');
     connectedViaResume = true;
-    return options.fetcher(`/api/arena/generations/${encodeURIComponent(generationId)}/stream${cursor}`, {
-      method: 'GET',
-      headers: withActorToken({ Accept: 'text/event-stream' }, actorStorage),
-      signal: options.signal,
-    });
+    return options.fetcher(
+      `/api/arena/generations/${encodeURIComponent(generationId)}/stream${cursor}`,
+      {
+        method: 'GET',
+        headers: withActorToken({ Accept: 'text/event-stream' }, actorStorage),
+        signal: options.signal,
+      },
+      routePin ?? undefined,
+    );
   };
 
   updateState(state);
@@ -417,12 +496,17 @@ export const openArenaGenerationStream = async (
     await cancelConfirmationPromise;
     throw new Error('ARENA_GENERATION_CANCELLED');
   }
-  const fetchCreate = (): Promise<Response> => options.fetcher(options.endpoint, {
+  const fetchCreate = (): Promise<Response> => options.fetcher(
+    options.endpoint,
+    {
       method: 'POST',
       headers: initialHeaders,
       body: createBody,
       signal: options.signal,
-    });
+    },
+    undefined,
+    acceptInitialRoutePin,
+  );
   const fetchLookup = (): Promise<Response> => options.fetcher(
     `/api/arena/generation-requests/${encodeURIComponent(generationRequestId)}`,
     {
@@ -430,6 +514,7 @@ export const openArenaGenerationStream = async (
       headers: withActorToken({ Accept: 'application/json' }, actorStorage),
       signal: options.signal,
     },
+    routePin ?? undefined,
   );
   const fetchResumeWithRetry = async (): Promise<Response> => {
     let attempt = 0;
@@ -498,8 +583,7 @@ export const openArenaGenerationStream = async (
           const record = payload as Record<string, unknown>;
           if (
             record.generationRequestId === generationRequestId
-            && typeof record.generationId === 'string'
-            && record.generationId.length > 0
+            && isGenerationIdentifier(record.generationId)
             && isKnownGenerationStatus(record.status)
           ) {
             generationId = record.generationId;
@@ -533,11 +617,17 @@ export const openArenaGenerationStream = async (
         created = await fetchCreate();
       } catch (error) {
         if (options.signal?.aborted) throw error;
+        captureInitialRoutePin();
+        if (!isInitialCreateOutcomeAmbiguous(error)) {
+          updateState('failed');
+          throw error;
+        }
         response = await recoverInitial();
       }
       if (created) {
+        captureInitialRoutePin();
         captureActorToken(actorStorage, created);
-        generationId = created.headers.get('x-mahoshojo-generation-id')?.trim() || generationId;
+        generationId = generationIdFromResponse(created) ?? generationId;
         const completeSuccess = created.ok && created.body && generationId;
         const ambiguous = (created.ok && !completeSuccess)
           || created.status === 408
@@ -560,14 +650,14 @@ export const openArenaGenerationStream = async (
     throw error;
   }
   captureActorToken(actorStorage, response);
-  generationId = response.headers.get('x-mahoshojo-generation-id')?.trim() || generationId;
+  generationId = generationIdFromResponse(response) ?? generationId;
   if (!response.ok || !response.body || !generationId) {
     options.signal?.removeEventListener('abort', cancelOnExplicitAbort);
     return response;
   }
   updateState(connectedViaResume ? 'resuming' : 'generating');
 
-  const encoder = new TextEncoder();
+  const encoder = { encode: encodeUtf8 };
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
       const pump = async (): Promise<void> => {
@@ -651,8 +741,16 @@ export const openArenaGenerationStream = async (
           if (!stopped) controller.close();
         } catch (error) {
           if (!stopped) {
-            updateState('failed');
-            controller.error(error);
+            if (
+              error instanceof Error
+              && error.message === 'ARENA_RESUME_ATTEMPTS_EXHAUSTED'
+            ) {
+              updateState('interrupted');
+              controller.close();
+            } else {
+              updateState('failed');
+              controller.error(error);
+            }
           }
         } finally {
           if (explicitlyAborted) {

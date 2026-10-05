@@ -1,9 +1,28 @@
 import type { ArenaGenerationPrompt } from './runtime';
 import {
+  WebPackagePromptProjectionSchema,
+  WebPackageRefSchema,
+} from '@mahoshojo/contracts/web-package';
+import {
+  buildWebPackagePromptFromProjection,
+  buildWebPackagePromptProjection,
+  resolveWebPackage,
+} from '@mahoshojo/web-package';
+import {
+  buildPackageTargetSystemPrompt,
+  createPromptBuilder,
   createStreamPromptBuilder,
   DEFAULT_ARENA_PROMPT_QUESTIONS,
   getSystemPrompt,
 } from './compatibility-prompt';
+import {
+  isPackageBackedOutputContract,
+  isWebArenaOutputContract,
+  type ArenaGenerationOutputContract,
+} from './output-contract';
+
+export type { ArenaGenerationOutputContract } from './output-contract';
+export { isPackageBackedOutputContract, isWebArenaOutputContract } from './output-contract';
 
 const text = (value: unknown): string => typeof value === 'string' ? value.trim() : '';
 
@@ -24,6 +43,23 @@ const asRecord = (value: unknown): Record<string, unknown> | null => (
     ? value as Record<string, unknown>
     : null
 );
+
+export const resolveArenaGenerationOutputContract = (
+  payload: Record<string, unknown>,
+): ArenaGenerationOutputContract => {
+  const serverContext = asRecord(payload.__arenaServerContextV1);
+  const endpoint = text(serverContext?.endpoint);
+  // Room producers have a signed frozen snapshot; legacy PVP producers do not.
+  const legacyPvp = Boolean(asRecord(serverContext?.trustedPvpContext) ?? asRecord(payload.pvpContext))
+    && !asRecord(payload.multiplayerGenerationSnapshot);
+  if (payload.reportFormat === 'web' && !legacyPvp && endpoint !== 'api/arena/session/generate-next') {
+    return payload.webPackageRef != null ? 'web-package-target' : 'web-document';
+  }
+  return serverContext?.deliveryMode === 'non-stream'
+    && (endpoint === 'api/arena/generate' || endpoint === 'api/generate-battle-story')
+    ? 'structured-report'
+    : 'stream-markdown';
+};
 
 const JOURNALISTS = [
   ['蓝星单推人', '兽扑'],
@@ -86,7 +122,57 @@ export const buildArenaGenerationPrompt = async (input: {
   const language = text(payload.language) || 'zh-CN';
   const combatants = Array.isArray(payload.combatants) ? payload.combatants : [];
   const lore = questionnaireLore(payload.questionnaires);
-  const userGuidance = text(payload.userGuidance) || null;
+  const outputContract = resolveArenaGenerationOutputContract(payload);
+  const webPackageRef = payload.webPackageRef === undefined
+    ? undefined
+    : WebPackageRefSchema.parse(payload.webPackageRef);
+  if (webPackageRef && !isPackageBackedOutputContract(outputContract)) {
+    throw new Error('ARENA_WEB_PACKAGE_REQUIRES_WEB');
+  }
+  const webPackagePromptProjection = payload.webPackagePromptProjection === undefined
+    ? undefined
+    : WebPackagePromptProjectionSchema.parse(payload.webPackagePromptProjection);
+  if (webPackagePromptProjection) {
+    if (!webPackageRef
+      || webPackagePromptProjection.package.id !== webPackageRef.id
+      || webPackagePromptProjection.package.version !== webPackageRef.version
+      || webPackagePromptProjection.package.digest !== webPackageRef.digest) {
+      throw new Error('ARENA_WEB_PACKAGE_PROJECTION_MISMATCH');
+    }
+  }
+  // Server-resolvable packages always rebuild a canonical Projection; a client
+  // Projection is only authoritative when the server cannot resolve the ref.
+  let trustedProjection = webPackagePromptProjection;
+  let packagePrompt: string | undefined;
+  if (webPackageRef) {
+    try {
+      const base = await resolveWebPackage(webPackageRef);
+      const canonical = buildWebPackagePromptProjection(base);
+      if (
+        webPackagePromptProjection
+        && JSON.stringify(webPackagePromptProjection) !== JSON.stringify(canonical)
+      ) {
+        throw new Error('ARENA_WEB_PACKAGE_PROJECTION_MISMATCH');
+      }
+      trustedProjection = canonical;
+      packagePrompt = buildWebPackagePromptFromProjection(canonical);
+    } catch (error) {
+      if (error instanceof Error && error.message === 'ARENA_WEB_PACKAGE_PROJECTION_MISMATCH') {
+        throw error;
+      }
+      if (!webPackagePromptProjection) throw error;
+      packagePrompt = buildWebPackagePromptFromProjection(webPackagePromptProjection);
+    }
+  }
+  const rawUserGuidance = text(payload.userGuidance);
+  // Legacy non-stream handlers bounded this field before safety, prompting,
+  // response projection and history writes. Streaming intentionally remains
+  // free-form and keeps the full guidance text.
+  const userGuidance = (
+    asRecord(payload.__arenaServerContextV1)?.deliveryMode === 'non-stream'
+      ? rawUserGuidance.slice(0, 200)
+      : rawUserGuidance
+  ) || null;
   const materials = Array.isArray(payload.materials) ? payload.materials : [];
   const adjudicationResults = Array.isArray(payload.adjudicationResults)
     ? payload.adjudicationResults
@@ -95,8 +181,40 @@ export const buildArenaGenerationPrompt = async (input: {
   const writeArenaHistory = payload.writeArenaHistory !== false;
   const writeCurrentState = payload.writeCurrentState !== false;
   const forceStreamMeta = payload.forceStreamMeta === true;
-  const expectsMeta = forceStreamMeta || writeArenaHistory || writeCurrentState;
-  const streamPrompt = createStreamPromptBuilder(
+  const expectsMeta = isWebArenaOutputContract(outputContract) || outputContract === 'stream-markdown'
+    && (forceStreamMeta || writeArenaHistory || writeCurrentState);
+  const promptBuilder = outputContract === 'structured-report'
+    ? createPromptBuilder(
+      {
+        ...DEFAULT_ARENA_PROMPT_QUESTIONS,
+        default: DEFAULT_ARENA_PROMPT_QUESTIONS.magicalGirl,
+      },
+      userGuidance,
+      text(payload.internalGuidance) || null,
+      false,
+      language,
+      mode,
+      asRecord(payload.scenario),
+      Array.isArray(payload.auxScenarios) ? payload.auxScenarios : null,
+      asRecord(payload.teams) as Record<string, string[]> | null ?? undefined,
+      asRecord(payload.teamNames) as Record<string, string> | null ?? undefined,
+      payload.readArenaHistory === true,
+      payload.arenaHistoryReadLimit === null
+        ? null
+        : typeof payload.arenaHistoryReadLimit === 'number'
+          ? payload.arenaHistoryReadLimit
+          : 3,
+      payload.readCurrentState === true,
+      writeCurrentState,
+      adjudicationResults,
+      text(payload.storyLength) || undefined,
+      text(payload.customStoryLength) || undefined,
+      Array.isArray(payload.narrativeHistory) ? payload.narrativeHistory : null,
+      lore || null,
+      !strictRankedMatch,
+      materials,
+    )
+    : createStreamPromptBuilder(
     {
       ...DEFAULT_ARENA_PROMPT_QUESTIONS,
       default: DEFAULT_ARENA_PROMPT_QUESTIONS.magicalGirl,
@@ -127,21 +245,36 @@ export const buildArenaGenerationPrompt = async (input: {
     lore || null,
     !strictRankedMatch,
     materials,
-  )({ combatants });
+    outputContract,
+    packagePrompt,
+    trustedProjection?.target.mediaType ?? null,
+  );
+  const taskPrompt = promptBuilder({ combatants });
+  const systemPrompt = getSystemPrompt(mode, combatants);
   const characterGuidances = combatants.flatMap((value) => {
     const combatant = asRecord(value);
     const data = asRecord(combatant?.data);
     const characterName = text(data?.codename) || text(data?.name);
-    const guidance = text(combatant?.characterGuidance);
+    const guidance = text(combatant?.characterGuidance).slice(0, 100);
     return characterName && guidance ? [{ characterName, guidance }] : [];
   });
   const reporterInfo = randomReporter(random);
 
   return {
-    prompt: `${getSystemPrompt(mode, combatants)}\n\n${streamPrompt}`,
+    // Package targets carry the mode persona in the system role, so repeating it
+    // here would re-introduce the "prose author" framing the system role exists
+    // to subordinate. The host output contract stays in the task prompt, so a
+    // provider that ignores the system role still sees the shape requirements.
+    ...(outputContract === 'web-package-target'
+      ? { prompt: taskPrompt, systemPrompt: buildPackageTargetSystemPrompt(systemPrompt, trustedProjection?.target.mediaType ?? null) }
+      : { prompt: `${systemPrompt}\n\n${taskPrompt}` }),
     metadata: {
       mode,
       language,
+      outputContract,
+      reportFormat: isWebArenaOutputContract(outputContract) ? 'web' : 'markdown',
+      ...(webPackageRef ? { webPackageRef } : {}),
+      ...(trustedProjection ? { webPackagePromptProjection: trustedProjection } : {}),
       expectsMeta,
       combatantCount: combatants.length,
       pvpContext: asRecord(payload.pvpContext),

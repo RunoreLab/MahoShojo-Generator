@@ -1,6 +1,6 @@
 import { getDrizzleDbFromRuntime } from '@/lib/db/drizzle';
 import { updateBusinessUserAvatarWebpBase64ById } from '@/lib/db/repositories/business-users';
-import { json, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
+import { json, requireAuthUser, withApiErrorBoundary } from '@/lib/api/server';
 
 const AVATAR_SIZE = 128;
 const WEBP_QUALITY = 0.82;
@@ -72,7 +72,7 @@ async function compressAvatarToWebpBase64(file: File) {
   return base64;
 }
 
-const handler = withPvpErrorBoundary(async function handler(req: Request): Promise<Response> {
+const handler = withApiErrorBoundary(async function handler(req: Request): Promise<Response> {
   const auth = await requireAuthUser(req);
   if ('response' in auth) return auth.response;
   const db = getDrizzleDbFromRuntime();
@@ -142,7 +142,6 @@ const handler = withPvpErrorBoundary(async function handler(req: Request): Promi
 
   return json({ error: 'Method not allowed' }, { status: 405 });
 });
-
 
 export const appRouteHandler = handler;
 export default appRouteHandler;

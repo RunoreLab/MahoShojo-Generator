@@ -42,11 +42,8 @@ const deterministicWorldLineId = async (
 const matchesAppliedRevision = (
   record: Record<string, unknown> | null,
   generationId: string,
-  baseRevisionHash: string | null,
 ): boolean => {
-  if (textOf(record?.['generation_id']) !== generationId) return false;
-  const appliedBase = textOf(record?.['base_revision_hash']);
-  return !baseRevisionHash || !appliedBase || appliedBase === baseRevisionHash;
+  return textOf(record?.['generation_id']) === generationId;
 };
 
 const combatantName = (data: Record<string, unknown>): string => (
@@ -113,7 +110,6 @@ export const createArenaPostBattleProjector = (
       const alreadyApplied = existingEntries.some((entry) => matchesAppliedRevision(
         recordOf(entry.metadata),
         input.generationId,
-        input.baseRevisionHash,
       ));
       if (!alreadyApplied) {
         const existingAttributes = recordOf(existingHistory?.attributes) ?? {};
@@ -150,7 +146,6 @@ export const createArenaPostBattleProjector = (
               scenario_title: scenarioTitle(input.scenario),
               non_native_data_involved: anyNonNative,
               generation_id: input.generationId,
-              ...(input.baseRevisionHash ? { base_revision_hash: input.baseRevisionHash } : {}),
             },
           }],
         };
@@ -160,13 +155,12 @@ export const createArenaPostBattleProjector = (
 
     if (input.writeCurrentState && textOf(impact?.currentStateSummary)) {
       const existingState = recordOf(data.current_state);
-      if (!matchesAppliedRevision(existingState, input.generationId, input.baseRevisionHash)) {
+      if (!matchesAppliedRevision(existingState, input.generationId)) {
         data.current_state = {
           ...(existingState ?? {}),
           summary: textOf(impact?.currentStateSummary),
           updated_at: nowIso,
           generation_id: input.generationId,
-          ...(input.baseRevisionHash ? { base_revision_hash: input.baseRevisionHash } : {}),
         };
         didMutate = true;
       }

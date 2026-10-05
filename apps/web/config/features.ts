@@ -1,23 +1,7 @@
-export interface FeatureConfig {
-  id: string;
-  src: string;
-  width: number;
-  height: number;
-  alt: string;
-  href: string;
-  className?: string;
-  color?: string;
-}
+import type { HomeFeatureCategory } from '@mahoshojo/ui-web/home';
 
-export interface FeatureCategory {
-  id: string;
-  title: string;
-  columns: 1 | 2; // 1列或2列网格
-  features: FeatureConfig[];
-}
-
-// 功能分类配置
-export const featureCategories: FeatureCategory[] = [
+/** Web 首页功能清单；不代表 Desktop 已交付或计划交付的功能。 */
+export const HOME_FEATURE_CATEGORIES: readonly HomeFeatureCategory[] = [
   {
     id: 'character-generation',
     title: '~ 内容生成 ~',
@@ -25,43 +9,43 @@ export const featureCategories: FeatureCategory[] = [
     features: [
       {
         id: 'fairy-quest',
-        src: '/questionnaire-logo.svg',
+        assetFile: 'questionnaire-logo.svg',
         width: 320,
         height: 50,
         alt: '奇妙妖精大调查',
         href: '/details',
-        className: 'fairy-quest'
+        className: 'fairy-quest',
       },
       {
         id: 'canshou-generator',
-        src: '/beast-logo-white.svg',
+        assetFile: 'beast-logo-white.svg',
         width: 350,
         height: 50,
         alt: '危险残兽大调查',
         href: '/canshou',
         className: 'canshou-generator',
-        color: 'white'
+        onDark: true,
       },
       {
         id: 'magical-generator',
-        src: '/logo-white.svg',
+        assetFile: 'logo-white.svg',
         width: 320,
         height: 80,
         alt: '魔法少女生成器',
         href: '/name',
         className: 'magical-generator',
-        color: 'white'
+        onDark: true,
       },
       {
         id: 'scenario-generator',
-        src: '/scenario.webp',
+        assetFile: 'scenario.webp',
         width: 350,
         height: 50,
         alt: '自定义情景生成',
         href: '/scenario',
-        className: 'scenario-generator'
-      }
-    ]
+        className: 'scenario-generator',
+      },
+    ],
   },
   {
     id: 'utilities',
@@ -70,54 +54,54 @@ export const featureCategories: FeatureCategory[] = [
     features: [
       {
         id: 'free-generator',
-        src: '/free-generator-white.svg',
+        assetFile: 'free-generator-white.svg',
         width: 240,
         height: 100,
         alt: '自由生成',
         href: '/free',
-        className: 'free-generator'
+        className: 'free-generator',
       },
       {
         id: 'character-party',
-        src: '/party-white.svg',
+        assetFile: 'party-white.svg',
         width: 240,
         height: 100,
         alt: '角色组队',
         href: '/character-party',
         className: 'character-party',
-        color: 'white'
+        onDark: true,
       },
       {
         id: 'tavern-ecosystem',
-        src: '/tavern-white.svg',
+        assetFile: 'tavern-white.svg',
         width: 240,
         height: 100,
         alt: '酒馆生态',
         href: '/tavern',
         className: 'tavern-ecosystem',
-        color: 'white'
+        onDark: true,
       },
       {
         id: 'magic-tea-party',
-        src: '/magic-tea-party-white.svg',
+        assetFile: 'magic-tea-party-white.svg',
         width: 240,
         height: 100,
         alt: '魔法茶会',
         href: '/magic-tea-party',
         className: 'magic-tea-party',
-        color: 'white'
+        onDark: true,
       },
       {
         id: 'card-forge',
-        src: '/card-forge-white.svg',
+        assetFile: 'card-forge-white.svg',
         width: 240,
         height: 100,
         alt: '卡牌工坊',
         href: '/card-forge',
         className: 'card-forge',
-        color: 'white'
-      }
-    ]
+        onDark: true,
+      },
+    ],
   },
   {
     id: 'battle',
@@ -126,25 +110,15 @@ export const featureCategories: FeatureCategory[] = [
     features: [
       {
         id: 'battle-arena',
-        src: '/arena-white.svg',
+        assetFile: 'arena-white.svg',
         width: 240,
         height: 100,
         alt: '魔法少女竞技场',
         href: '/battle',
         className: 'battle-arena',
-        color: 'white'
+        onDark: true,
       },
-      {
-        id: 'pvp-arena',
-        src: '/arena-card-white.webp',
-        width: 240,
-        height: 100,
-        alt: 'PVP 卡牌对决',
-        href: '/pvp',
-        className: 'card-duel',
-        color: 'white'
-      }
-    ]
+    ],
   },
   {
     id: 'character-management',
@@ -153,29 +127,22 @@ export const featureCategories: FeatureCategory[] = [
     features: [
       {
         id: 'sublimation',
-        src: '/sublimation-white.svg',
+        assetFile: 'sublimation-white.svg',
         width: 350,
         height: 50,
         alt: '角色成长升华',
         href: '/sublimation',
-        className: 'sublimation'
+        className: 'sublimation',
       },
       {
         id: 'character-manager',
-        src: '/character-manager-white.svg',
+        assetFile: 'character-manager-white.svg',
         width: 350,
         height: 50,
         alt: '角色数据管理',
         href: '/character-manager',
-        className: 'character-manager'
-      }
-    ]
-  }
+        className: 'character-manager',
+      },
+    ],
+  },
 ];
-
-// 获取所有图片路径用于预加载
-export const getAllFeatureImages = (): string[] => {
-  return featureCategories.flatMap(category =>
-    category.features.map(feature => feature.src)
-  );
-};

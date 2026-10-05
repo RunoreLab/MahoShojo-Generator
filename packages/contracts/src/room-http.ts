@@ -1,14 +1,25 @@
-import { z } from 'zod';
+import { z } from './zod';
+
+import { ARENA_ROOM_HTTP_ERROR_CODES } from './arena-error-taxonomy';
 
 import {
   ArenaRoomSnapshotSchema,
   GenerationMirrorSchema,
+  GenerationStateSchema,
   RoomMemberSchema,
   RoomRevisionSchema,
 } from './protocol';
 import {
+  BattleModeSchema,
+  DataCardKindSchema,
   DisplayNameSchema,
+  GlobalGuidanceSchema,
+  GuidanceSchema,
+  HostLocalObjectKeySchema,
+  IsoTimestampSchema,
+  LanguageSchema,
   OpaqueKeySchema,
+  StableObjectKeySchema,
   WireErrorMessageSchema,
   WireReasonSchema,
 } from './primitives';
@@ -17,7 +28,14 @@ import {
   ArenaProposalChangesSchema,
   ResolvedArenaProposalStatusSchema,
 } from './proposals';
-import { MAX_PROPOSAL_CHANGES } from './limits';
+import {
+  MAX_ARENA_REFERENCE_ITEMS,
+  MAX_COMBATANTS,
+  MAX_PROPOSAL_CHANGES,
+} from './limits';
+import { SafeJsonValueSchema } from './json-value';
+import { BattleReportAdjudicationResultSchema } from './battle-report-render-snapshot';
+import { WebPackageArtifactSchema } from './web-package';
 import {
   RoomDirectoryTitleSchema,
   RoomDirectoryVisibilitySchema,
@@ -38,16 +56,20 @@ export const ARENA_ROOM_HTTP_ROUTES = Object.freeze({
   ticket: `${ARENA_ROOM_HTTP_BASE_PATH}/:roomId/ticket`,
   leave: `${ARENA_ROOM_HTTP_BASE_PATH}/:roomId/leave`,
   close: `${ARENA_ROOM_HTTP_BASE_PATH}/:roomId/close`,
+  config: `${ARENA_ROOM_HTTP_BASE_PATH}/:roomId/config`,
   proposals: `${ARENA_ROOM_HTTP_BASE_PATH}/:roomId/proposals`,
   proposalResolve: `${ARENA_ROOM_HTTP_BASE_PATH}/:roomId/proposals/:proposalId/resolve`,
   proposalWithdraw: `${ARENA_ROOM_HTTP_BASE_PATH}/:roomId/proposals/:proposalId/withdraw`,
   generations: `${ARENA_ROOM_HTTP_BASE_PATH}/:roomId/generations`,
   generation: `${ARENA_ROOM_HTTP_BASE_PATH}/:roomId/generations/:generationId`,
+  generationCancel: `${ARENA_ROOM_HTTP_BASE_PATH}/:roomId/generations/:generationId/cancel`,
+  memberKick: `${ARENA_ROOM_HTTP_BASE_PATH}/:roomId/members/:targetUserId/kick`,
 });
 
 export const MAX_ARENA_ROOM_HTTP_TICKET_BYTES = 4_096;
 export const MAX_ARENA_ROOM_GENERATION_START_BYTES = 12 * 1_024 * 1_024;
 export const MAX_ARENA_ROOM_GENERATION_MARKDOWN_LENGTH = 12 * 1_024 * 1_024;
+export const MAX_ARENA_ROOM_GENERATION_HISTORY_ITEMS = 64;
 
 export const ArenaGenerationRequestIdSchema = z.string()
   .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/u);
@@ -77,6 +99,21 @@ export const ArenaRoomEpochMutationRequestSchema = z.object({
   expectedRoomEpoch: OpaqueKeySchema,
 }).strict();
 
+export const ArenaRoomMemberKickRequestSchema = z.object({
+  expectedRoomEpoch: OpaqueKeySchema,
+}).strict();
+
+export const ArenaRoomGenerationCancelRequestSchema = z.object({
+  expectedRoomEpoch: OpaqueKeySchema,
+}).strict();
+
+export const ArenaRoomPublishConfigRequestSchema = z.object({
+  expectedRoomEpoch: OpaqueKeySchema,
+  expectedRevision: RoomRevisionSchema,
+  expectedControlSeq: z.number().int().nonnegative(),
+  sharedConfig: ArenaRoomSharedConfigSchema,
+}).strict();
+
 /** Client intent only; authority/provenance fields are injected by the server. */
 export const ArenaRoomProposalSubmitRequestSchema = z.object({
   proposalId: ArenaProposalIdSchema,
@@ -87,9 +124,12 @@ export const ArenaRoomProposalSubmitRequestSchema = z.object({
 
 export const ArenaRoomProposalResolveRequestSchema = z.object({
   expectedRoomEpoch: OpaqueKeySchema,
-  expectedRevision: RoomRevisionSchema,
+  // Diagnostic for ordinary merges; required exact review revision for overrides.
+  // Unrelated revisions must not invalidate a still-mergeable ordinary proposal.
+  expectedRevision: RoomRevisionSchema.optional(),
   resolution: z.enum(['accept-selected', 'reject']),
   selectedChangeIds: z.array(OpaqueKeySchema).max(MAX_PROPOSAL_CHANGES).optional(),
+  overrideChangeIds: z.array(OpaqueKeySchema).max(MAX_PROPOSAL_CHANGES).optional(),
 }).strict().superRefine((request, context) => {
   if (request.resolution === 'reject' && request.selectedChangeIds !== undefined) {
     context.addIssue({
@@ -98,20 +138,76 @@ export const ArenaRoomProposalResolveRequestSchema = z.object({
       message: 'reject cannot select changes',
     });
   }
+  if (request.overrideChangeIds !== undefined) {
+    if (request.resolution === 'reject') {
+      context.addIssue({ code: 'custom', path: ['overrideChangeIds'], message: 'reject cannot override changes' });
+    }
+    const overrides = request.overrideChangeIds;
+    if (new Set(overrides).size !== overrides.length) {
+      context.addIssue({ code: 'custom', path: ['overrideChangeIds'], message: 'overrideChangeIds must be unique' });
+    }
+    if (overrides.length > 0 && request.expectedRevision === undefined) {
+      context.addIssue({ code: 'custom', path: ['expectedRevision'], message: 'overrides require the reviewed revision' });
+    }
+    if (overrides.some((id) => !request.selectedChangeIds?.includes(id))) {
+      context.addIssue({ code: 'custom', path: ['overrideChangeIds'], message: 'overrides must be explicitly selected' });
+    }
+  }
 });
 
 export const ArenaRoomProposalWithdrawRequestSchema = z.object({
   expectedRoomEpoch: OpaqueKeySchema,
 }).strict();
 
-/** Full generation payload is request-scoped and MUST NOT enter Room durable/wire state. */
+export const MAX_ARENA_ROOM_HOST_LOCAL_PAYLOADS = (
+  MAX_COMBATANTS + MAX_ARENA_REFERENCE_ITEMS + 1
+);
+
+const SafeJsonObjectSchema = SafeJsonValueSchema.refine(
+  (value) => typeof value === 'object' && value !== null && !Array.isArray(value),
+  { message: 'payload must be a plain JSON object' },
+);
+
+export const ArenaRoomHostLocalPayloadSchema = z.object({
+  key: HostLocalObjectKeySchema,
+  kind: DataCardKindSchema,
+  payload: SafeJsonObjectSchema,
+}).strict();
+
+/**
+ * Only request-scoped host runtime/local/deferred fields are accepted here.
+ * Every Room-shared semantic is rebuilt from the frozen Shared Config.
+ */
+export const ArenaRoomHostRuntimeGenerationSchema = z.object({
+  arenaFreeRankingEnabled: z.boolean().optional(),
+  customProvider: SafeJsonValueSchema.optional(),
+  isDowngrade: z.boolean().optional(),
+  narrativeHistory: SafeJsonValueSchema.optional(),
+  adjudicationEvents: SafeJsonValueSchema.optional(),
+  questionnaireSelections: SafeJsonValueSchema.optional(),
+  questionnaires: SafeJsonValueSchema.optional(),
+}).strict();
+
+/** Request-scoped payloads MUST NOT enter Room durable/wire state. */
 export const ArenaRoomGenerationStartRequestSchema = z.object({
   expectedRoomEpoch: OpaqueKeySchema,
   expectedRevision: RoomRevisionSchema,
+  expectedControlSeq: z.number().int().nonnegative(),
   generationRequestId: ArenaGenerationRequestIdSchema,
   sharedConfig: ArenaRoomSharedConfigSchema,
-  generation: z.record(z.string(), z.unknown()),
-}).strict();
+  hostLocalPayloads: z.array(ArenaRoomHostLocalPayloadSchema)
+    .max(MAX_ARENA_ROOM_HOST_LOCAL_PAYLOADS),
+  generation: ArenaRoomHostRuntimeGenerationSchema,
+}).strict().superRefine((request, context) => {
+  const keys = request.hostLocalPayloads.map((entry) => entry.key);
+  if (new Set(keys).size !== keys.length) {
+    context.addIssue({
+      code: 'custom',
+      path: ['hostLocalPayloads'],
+      message: 'host-local payload keys must be unique',
+    });
+  }
+});
 
 export const ArenaRoomGenerationProjectionStatusSchema = z.enum([
   'reserved',
@@ -123,6 +219,103 @@ export const ArenaRoomGenerationProjectionStatusSchema = z.enum([
   'producer_lost',
 ]);
 
+export const ArenaRoomGenerationHistoryItemSchema = z.object({
+  generationId: OpaqueKeySchema,
+  state: GenerationStateSchema,
+  configRevision: RoomRevisionSchema,
+  collaborativeInfluence: z.boolean(),
+  startedAt: IsoTimestampSchema,
+  finishedAt: IsoTimestampSchema.optional(),
+}).strict();
+
+export const ArenaRoomGenerationHistoryResponseSchema = z.object({
+  protocolVersion: z.literal(PROTOCOL_VERSION),
+  roomId: OpaqueKeySchema,
+  roomEpoch: OpaqueKeySchema,
+  items: z.array(ArenaRoomGenerationHistoryItemSchema)
+    .max(MAX_ARENA_ROOM_GENERATION_HISTORY_ITEMS),
+}).strict();
+
+const ArenaRoomGenerationUsageSchema = z.object({
+  textTokens: z.number().int().nonnegative().optional(),
+  promptTokens: z.number().int().nonnegative().optional(),
+  completionTokens: z.number().int().nonnegative().optional(),
+  totalTokens: z.number().int().nonnegative().optional(),
+  cachedTokens: z.number().int().nonnegative().optional(),
+  reasoningTokens: z.number().int().nonnegative().optional(),
+}).strict();
+
+export const ArenaRoomGenerationResultSchema = z.object({
+  version: z.literal(1),
+  format: z.enum(['stream-markdown', 'stream-web']),
+  webPackage: WebPackageArtifactSchema.optional(),
+  reporterInfo: z.object({
+    name: z.string().max(300),
+    publication: z.string().max(300),
+  }).strict().optional(),
+  mode: BattleModeSchema,
+  scenarioDisplayName: DisplayNameSchema.optional(),
+  sharedGuidance: GlobalGuidanceSchema.optional(),
+  characterGuidances: z.array(z.object({
+    combatantKey: StableObjectKeySchema,
+    displayName: DisplayNameSchema,
+    guidance: GuidanceSchema,
+  }).strict()).max(MAX_COMBATANTS).optional(),
+  language: LanguageSchema.optional(),
+  storyLength: z.string().trim().min(1).max(32).optional(),
+  adjudicationResults: z.array(BattleReportAdjudicationResultSchema).max(2_100).optional(),
+  narrativeHistoryReadCount: z.number().int().nonnegative().max(1_000_000).optional(),
+  report: z.object({
+    headline: z.string().max(300).optional(),
+    winner: z.string().max(300).optional(),
+  }).strict().optional(),
+  ai: z.object({
+    model: z.string().max(256).optional(),
+    usage: ArenaRoomGenerationUsageSchema.optional(),
+  }).strict().optional(),
+  combatantUpdates: z.array(z.object({
+    combatantKey: StableObjectKeySchema,
+    displayName: DisplayNameSchema,
+    impact: z.string().max(2_000).optional(),
+    currentStateSummary: z.string().max(2_000).optional(),
+  }).strict()).max(MAX_COMBATANTS).optional(),
+}).strict().refine((result) => !result.webPackage || result.format === 'stream-web', {
+  path: ['webPackage'], message: 'Web Package requires stream-web result format',
+});
+
+export const ArenaRoomGenerationHistoryViewResponseSchema = z.object({
+  protocolVersion: z.literal(PROTOCOL_VERSION),
+  roomId: OpaqueKeySchema,
+  roomEpoch: OpaqueKeySchema,
+  generation: ArenaRoomGenerationHistoryItemSchema.extend({ state: z.literal('completed') }),
+  status: z.literal('completed'),
+  contentStatus: z.enum(['available', 'expired', 'not-archived']),
+  markdown: z.string().max(MAX_ARENA_ROOM_GENERATION_MARKDOWN_LENGTH),
+  result: ArenaRoomGenerationResultSchema.optional(),
+}).strict().superRefine((response, context) => {
+  if (response.contentStatus === 'available' && response.result === undefined) {
+    context.addIssue({
+      code: 'custom',
+      path: ['result'],
+      message: 'available completed history must include a room-safe result',
+    });
+  }
+  if (response.contentStatus !== 'available' && response.result !== undefined) {
+    context.addIssue({
+      code: 'custom',
+      path: ['result'],
+      message: 'unavailable historical content cannot expose a result',
+    });
+  }
+  if (response.contentStatus !== 'available' && response.markdown !== '') {
+    context.addIssue({
+      code: 'custom',
+      path: ['markdown'],
+      message: 'unavailable historical content cannot expose markdown',
+    });
+  }
+});
+
 export const ArenaRoomGenerationViewResponseSchema = z.object({
   protocolVersion: z.literal(PROTOCOL_VERSION),
   roomId: OpaqueKeySchema,
@@ -133,6 +326,7 @@ export const ArenaRoomGenerationViewResponseSchema = z.object({
   nextChunkSeq: z.number().int().nonnegative(),
   finalAuthoritative: z.boolean(),
   generationRecordId: OpaqueKeySchema.optional(),
+  result: ArenaRoomGenerationResultSchema.optional(),
   errorCode: WireReasonSchema.optional(),
 }).strict().superRefine((response, context) => {
   const expectedMirrorState = (() => {
@@ -154,14 +348,22 @@ export const ArenaRoomGenerationViewResponseSchema = z.object({
     });
   }
   if (response.status === 'completed') {
-    if (!response.finalAuthoritative || response.generationRecordId === undefined) {
+    if (
+      !response.finalAuthoritative
+      || response.generationRecordId === undefined
+      || response.result === undefined
+    ) {
       context.addIssue({
         code: 'custom',
         path: ['finalAuthoritative'],
         message: 'completed projection must identify authoritative final content',
       });
     }
-  } else if (response.finalAuthoritative || response.generationRecordId !== undefined) {
+  } else if (
+    response.finalAuthoritative
+    || response.generationRecordId !== undefined
+    || response.result !== undefined
+  ) {
     context.addIssue({
       code: 'custom',
       path: ['generationRecordId'],
@@ -249,19 +451,38 @@ export const ArenaRoomProposalMutationResponseSchema = z.object({
   proposalId: ArenaProposalIdSchema,
   status: ArenaRoomProposalMutationStatusSchema,
   result: ArenaRoomProposalMutationResultSchema,
-}).strict();
+  // resolve 响应携带 mutation 后的权威 sharedConfig，让房主端能把
+  // 「服务器提交」与「本地落地」合并为同一次命令收敛；不改变配置的
+  // mutation（submit/withdraw）省略该字段。
+  sharedConfig: ArenaRoomSharedConfigSchema.optional(),
+  // resolve 响应携带 mutation 后的完整权威 snapshot（members/proposals/
+  // sharedConfig/activeGeneration）：房主端用它做原子安装并同步推进复制
+  // 游标，避免部分安装把尚未收到的控制事件「宣布已见」而被 WSS 去重
+  // 规则永久丢弃。不改变配置的 mutation 省略该字段。
+  snapshot: ArenaRoomSnapshotSchema.optional(),
+}).strict().superRefine((response, context) => {
+  if (response.snapshot === undefined) return;
+  const checks: ReadonlyArray<[
+    'roomId' | 'roomEpoch' | 'revision' | 'controlSeq',
+    string,
+  ]> = [
+    ['roomId', 'snapshot roomId must match response roomId'],
+    ['roomEpoch', 'snapshot roomEpoch must match response roomEpoch'],
+    ['revision', 'snapshot revision must match response revision'],
+    ['controlSeq', 'snapshot controlSeq must match response controlSeq'],
+  ];
+  for (const [key, message] of checks) {
+    if (response.snapshot[key] !== response[key]) {
+      context.addIssue({
+        code: 'custom',
+        path: ['snapshot', key],
+        message,
+      });
+    }
+  }
+});
 
-export const ArenaRoomHttpErrorCodeSchema = z.enum([
-  'ROOM_AUTHENTICATION_REQUIRED',
-  'ROOM_AUTHENTICATION_DENIED',
-  'ROOM_FORBIDDEN',
-  'ROOM_NOT_FOUND',
-  'ROOM_PAYLOAD_TOO_LARGE',
-  'ROOM_REQUEST_INVALID',
-  'ROOM_CONFLICT',
-  'ROOM_RATE_LIMITED',
-  'ROOM_UNAVAILABLE',
-]);
+export const ArenaRoomHttpErrorCodeSchema = z.enum(ARENA_ROOM_HTTP_ERROR_CODES);
 
 export const ArenaRoomHttpErrorResponseSchema = z.object({
   code: ArenaRoomHttpErrorCodeSchema,
@@ -273,21 +494,41 @@ export type ArenaRoomCreateRequest = z.infer<typeof ArenaRoomCreateRequestSchema
 export type ArenaRoomJoinRequest = z.infer<typeof ArenaRoomJoinRequestSchema>;
 export type ArenaRoomTicketRequest = z.infer<typeof ArenaRoomTicketRequestSchema>;
 export type ArenaRoomEpochMutationRequest = z.infer<typeof ArenaRoomEpochMutationRequestSchema>;
+export type ArenaRoomMemberKickRequest = z.infer<typeof ArenaRoomMemberKickRequestSchema>;
+export type ArenaRoomGenerationCancelRequest = z.infer<
+  typeof ArenaRoomGenerationCancelRequestSchema
+>;
+export type ArenaRoomPublishConfigRequest = z.infer<
+  typeof ArenaRoomPublishConfigRequestSchema
+>;
 export type ArenaRoomProposalSubmitRequest = z.infer<typeof ArenaRoomProposalSubmitRequestSchema>;
 export type ArenaRoomProposalResolveRequest = z.infer<typeof ArenaRoomProposalResolveRequestSchema>;
 export type ArenaRoomProposalWithdrawRequest = z.infer<typeof ArenaRoomProposalWithdrawRequestSchema>;
 export type ArenaRoomGenerationStartRequest = z.infer<typeof ArenaRoomGenerationStartRequestSchema>;
+export type ArenaRoomHostLocalPayload = z.infer<typeof ArenaRoomHostLocalPayloadSchema>;
+export type ArenaRoomHostRuntimeGeneration = z.infer<
+  typeof ArenaRoomHostRuntimeGenerationSchema
+>;
 export type ArenaRoomGenerationProjectionStatus = z.infer<
   typeof ArenaRoomGenerationProjectionStatusSchema
+>;
+export type ArenaRoomGenerationHistoryItem = z.infer<
+  typeof ArenaRoomGenerationHistoryItemSchema
+>;
+export type ArenaRoomGenerationHistoryResponse = z.infer<
+  typeof ArenaRoomGenerationHistoryResponseSchema
+>;
+export type ArenaRoomGenerationHistoryViewResponse = z.infer<
+  typeof ArenaRoomGenerationHistoryViewResponseSchema
 >;
 export type ArenaRoomGenerationViewResponse = z.infer<
   typeof ArenaRoomGenerationViewResponseSchema
 >;
+export type ArenaRoomGenerationResult = z.infer<typeof ArenaRoomGenerationResultSchema>;
 export type ArenaRoomSessionResponse = z.infer<typeof ArenaRoomSessionResponseSchema>;
 export type ArenaRoomTicketResponse = z.infer<typeof ArenaRoomTicketResponseSchema>;
 export type ArenaRoomLeaveResponse = z.infer<typeof ArenaRoomLeaveResponseSchema>;
 export type ArenaRoomProposalMutationStatus = z.infer<typeof ArenaRoomProposalMutationStatusSchema>;
 export type ArenaRoomProposalMutationResult = z.infer<typeof ArenaRoomProposalMutationResultSchema>;
 export type ArenaRoomProposalMutationResponse = z.infer<typeof ArenaRoomProposalMutationResponseSchema>;
-export type ArenaRoomHttpErrorCode = z.infer<typeof ArenaRoomHttpErrorCodeSchema>;
 export type ArenaRoomHttpErrorResponse = z.infer<typeof ArenaRoomHttpErrorResponseSchema>;

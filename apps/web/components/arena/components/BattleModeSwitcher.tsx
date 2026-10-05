@@ -1,18 +1,16 @@
 'use client';
 
-import { useBattleStore } from '../stores/useBattleStore';
-import { BattleStoreState } from '../types';
-import { BattleModeSelector, type BattleModeKey } from '@/components/shared/BattleModeSelector';
+import { useArenaEditorActions, useArenaEditorSelector } from '../editor';
+import { BattleModeControl } from '../editor/presentation/BattleModeControl';
 
 export function BattleModeSwitcher() {
-  const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
-  const battleMode = useBattleSelector((state) => state.battleMode);
-  const setBattleMode = useBattleSelector((state) => state.setBattleMode);
-  const isGenerating = useBattleSelector((state) => state.isGenerating);
+  const battleMode = useArenaEditorSelector((state) => state.battleMode);
+  const isGenerating = useArenaEditorSelector((state) => state.busy);
+  const { setBattleMode } = useArenaEditorActions();
 
   return (
-    <BattleModeSelector
-      value={battleMode as BattleModeKey}
+    <BattleModeControl
+      value={battleMode}
       onChange={(next) => setBattleMode(next)}
       disabled={isGenerating}
     />

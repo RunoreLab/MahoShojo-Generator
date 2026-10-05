@@ -3,7 +3,7 @@ import type {
   ArenaRoomSharedConfig,
 } from '@mahoshojo/contracts/arena-room';
 
-import { canonicalDataCardKey, deepClone, deepEqual } from './utils';
+import { canonicalResourceKey, deepClone, deepEqual } from './utils';
 
 const assignmentOf = (config: ArenaRoomSharedConfig, combatantKey: string): string | null => {
   for (const team of config.teams) {
@@ -20,26 +20,57 @@ const refMatches = (
   && 'ref' in entry
   && deepEqual(entry.ref, expectedRef);
 
+const retainsRelativeOrder = (
+  currentKeys: readonly string[],
+  orderedKeys: readonly string[],
+): boolean => {
+  const currentSet = new Set(currentKeys);
+  if (orderedKeys.some((key) => !currentSet.has(key))) return false;
+  const orderedSet = new Set(orderedKeys);
+  return deepEqual(currentKeys.filter((key) => orderedSet.has(key)), orderedKeys);
+};
+
 /** A semantic target is replaced as one unit when a later accepted change owns it. */
-const collaborativeTarget = (change: ArenaProposalChange): string => {
+export const collaborativeChangeTarget = (change: ArenaProposalChange): string => {
   switch (change.type) {
     case 'addCombatant':
     case 'removeCombatant':
-      return `combatant:${change.type === 'addCombatant' ? canonicalDataCardKey(change.ref.id) : change.combatantKey}`;
+      return `combatant:${change.type === 'addCombatant' ? canonicalResourceKey(change.ref.id, change.key) : change.combatantKey}`;
     case 'setCharacterGuidance':
       return `combatant-guidance:${change.combatantKey}`;
     case 'assignTeam':
       return `combatant-team:${change.combatantKey}`;
+    case 'addTeam':
+    case 'removeTeam':
+      return `team:${change.teamKey}`;
+    case 'renameTeam':
+      return `team-name:${change.teamKey}`;
+    case 'reorderCombatants':
+      return 'combatants-order';
+    case 'reorderTeams':
+      return 'teams-order';
+    case 'reorderTeamCombatants':
+      return `team-combatants-order:${change.teamKey}`;
+    case 'setReportFormat':
+      return 'report-format';
+    case 'setWebPackageRef':
+      return 'web-package';
     case 'setBattleMode':
       return 'battle-mode';
+    case 'setSelectedLanguage':
+      return 'selected-language';
     case 'setScenario':
       return 'scenario';
     case 'addAuxScenario':
     case 'removeAuxScenario':
-      return `aux-scenario:${change.type === 'addAuxScenario' ? canonicalDataCardKey(change.ref.id) : change.scenarioKey}`;
+      return `aux-scenario:${change.type === 'addAuxScenario' ? canonicalResourceKey(change.ref.id, change.key) : change.scenarioKey}`;
+    case 'reorderAuxScenarios':
+      return 'aux-scenarios-order';
     case 'addMaterial':
     case 'removeMaterial':
-      return `material:${change.type === 'addMaterial' ? canonicalDataCardKey(change.ref.id) : change.materialKey}`;
+      return `material:${change.type === 'addMaterial' ? canonicalResourceKey(change.ref.id, change.key) : change.materialKey}`;
+    case 'reorderMaterials':
+      return 'materials-order';
     case 'setUserGuidance':
       return 'user-guidance';
     case 'setStoryLength':
@@ -57,7 +88,7 @@ export const hasCollaborativeChangeEffect = (
   switch (change.type) {
     case 'addCombatant':
       return refMatches(
-        config.combatants.find((entry) => entry.key === canonicalDataCardKey(change.ref.id)),
+        config.combatants.find((entry) => entry.key === canonicalResourceKey(change.ref.id, change.key)),
         change.ref,
       );
     case 'removeCombatant':
@@ -69,26 +100,51 @@ export const hasCollaborativeChangeEffect = (
     case 'assignTeam':
       return config.combatants.some((entry) => entry.key === change.combatantKey)
         && assignmentOf(config, change.combatantKey) === change.teamKey;
+    case 'addTeam': {
+      return config.teams.some((entry) => entry.key === change.teamKey);
+    }
+    case 'removeTeam':
+      return !config.teams.some((entry) => entry.key === change.teamKey);
+    case 'renameTeam':
+      return config.teams.find((entry) => entry.key === change.teamKey)?.displayName === change.value;
+    case 'reorderCombatants':
+      return retainsRelativeOrder(config.combatants.map((entry) => entry.key), change.value);
+    case 'reorderTeams':
+      return retainsRelativeOrder(config.teams.map((team) => team.key), change.value);
+    case 'reorderTeamCombatants': {
+      const team = config.teams.find((entry) => entry.key === change.teamKey);
+      return team !== undefined && retainsRelativeOrder(team.combatantKeys, change.value);
+    }
+    case 'setReportFormat':
+      return config.reportFormat === change.value;
+    case 'setWebPackageRef':
+      return deepEqual(config.webPackageRef ?? null, change.value);
     case 'setBattleMode':
       return config.battleMode === change.value;
+    case 'setSelectedLanguage':
+      return config.selectedLanguage === change.value;
     case 'setScenario':
       return change.ref === null
         ? config.scenario === null
         : refMatches(config.scenario ?? undefined, change.ref);
     case 'addAuxScenario':
       return refMatches(
-        config.auxScenarios.find((entry) => entry.key === canonicalDataCardKey(change.ref.id)),
+        config.auxScenarios.find((entry) => entry.key === canonicalResourceKey(change.ref.id, change.key)),
         change.ref,
       );
     case 'removeAuxScenario':
       return !config.auxScenarios.some((entry) => entry.key === change.scenarioKey);
+    case 'reorderAuxScenarios':
+      return retainsRelativeOrder(config.auxScenarios.map((entry) => entry.key), change.value);
     case 'addMaterial':
       return refMatches(
-        config.materials.find((entry) => entry.key === canonicalDataCardKey(change.ref.id)),
+        config.materials.find((entry) => entry.key === canonicalResourceKey(change.ref.id, change.key)),
         change.ref,
       );
     case 'removeMaterial':
       return !config.materials.some((entry) => entry.key === change.materialKey);
+    case 'reorderMaterials':
+      return retainsRelativeOrder(config.materials.map((entry) => entry.key), change.value);
     case 'setUserGuidance':
       return config.userGuidance === change.value;
     case 'setStoryLength':
@@ -121,8 +177,8 @@ export const mergeCollaborativeChanges = (input: {
   for (const change of input.acceptedChanges) {
     if (hasCollaborativeChangeEffect(input.previousConfig, change)
       || !hasCollaborativeChangeEffect(input.nextConfig, change)) continue;
-    const target = collaborativeTarget(change);
-    const previousIndex = next.findIndex((candidate) => collaborativeTarget(candidate) === target);
+    const target = collaborativeChangeTarget(change);
+    const previousIndex = next.findIndex((candidate) => collaborativeChangeTarget(candidate) === target);
     if (previousIndex >= 0) next.splice(previousIndex, 1);
     next.push(deepClone(change));
   }

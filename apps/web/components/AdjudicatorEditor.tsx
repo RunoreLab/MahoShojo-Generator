@@ -39,7 +39,7 @@ const AdjudicatorEditor: React.FC<AdjudicatorEditorProps> = ({
     const handleEventChange = (index: number, updatedEvent: AdjudicatorEvent) => {
         const newEvents = [...events];
         newEvents[index] = updatedEvent;
-        onEventsChange(newEvents);
+        onEventsChange(normalizeAdjudicationEvents(newEvents));
     };
 
     /**
@@ -216,7 +216,7 @@ const AdjudicatorEditor: React.FC<AdjudicatorEditorProps> = ({
                                  {/* 连锁事件编辑器 */}
                                 {renderChainedEventEditor(outcome.chainedEvent, (ce) => {
                                     const newOutcomes = [...(event.outcomes || [])];
-                                    newOutcomes[oIndex].chainedEvent = ce;
+                                    newOutcomes[oIndex] = { ...newOutcomes[oIndex], chainedEvent: ce };
                                     handleEventChange(index, {...event, outcomes: newOutcomes});
                                 }, outcome.name)}
                             </div>

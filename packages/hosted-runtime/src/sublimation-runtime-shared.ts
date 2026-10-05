@@ -1,3 +1,4 @@
+import { sanitizeStoryPromptRecord } from '@mahoshojo/domain/story-prompt-data';
 import {
   extractQuestionTextsFromUserAnswers,
   normalizeUserAnswers,
@@ -258,6 +259,19 @@ export const createSublimationGenerationConfig = (input: {
     pruneTopLevelFields(original, promptOmissions);
     pruneTopLevelFields(skeleton, promptOmissions);
 
+    // 历史、状态、问卷已在专用块提供；原卡与目标模板不重复发送相同字段。
+    const projectionOptions = { readArenaHistory: false, readCurrentState: false };
+    const originalForPrompt = sanitizeStoryPromptRecord(original, projectionOptions) ?? {};
+    const skeletonForPrompt = sanitizeStoryPromptRecord(skeleton, projectionOptions) ?? {};
+    delete originalForPrompt.userAnswers;
+    delete skeletonForPrompt.userAnswers;
+    for (const [key, value] of Object.entries(skeletonForPrompt)) {
+      if (Object.prototype.hasOwnProperty.call(originalForPrompt, key)
+        && JSON.stringify(value) === JSON.stringify(originalForPrompt[key])) {
+        delete skeletonForPrompt[key];
+      }
+    }
+
     return `
 # 角色成长升华任务
 你是一位资深的角色设定师。你的任务是为一个${SUBLIMATION_TEMPLATE_LABELS[input.targetTemplate]}角色进行“成长升华”。
@@ -273,12 +287,12 @@ ${lore}
 
 ## 原始角色设定
 \`\`\`json
-${JSON.stringify(original, null, 2)}
+${JSON.stringify(originalForPrompt, null, 2)}
 \`\`\`
 
-## 目标模板初始结构（供参考，可在其基础上重塑）
+## 目标模板差异参考（与原设定相同的字段已省略，完整输出仍须遵循 JSON Schema）
 \`\`\`json
-${JSON.stringify(skeleton, null, 2)}
+${JSON.stringify(skeletonForPrompt, null, 2)}
 \`\`\`
 
 ## 历战记录回顾
@@ -338,12 +352,10 @@ export const extractSublimationSafetyText = (value: unknown): string => {
 export const pruneSublimationStreamCard = (
   data: Record<string, unknown>,
 ): Record<string, unknown> => {
-  const cloned = { ...data };
-  for (const key of [
-    'arena_history', 'adjudicationEvents', 'signature', 'metadata', 'extraJson', 'extra_json',
-    'updatedAt', 'updated_at', 'createdAt', 'created_at',
-  ]) delete cloned[key];
-  return cloned;
+  return sanitizeStoryPromptRecord(data, {
+    readArenaHistory: false,
+    readCurrentState: true,
+  }) ?? {};
 };
 
 export const buildSublimationStreamConfig = (input: {

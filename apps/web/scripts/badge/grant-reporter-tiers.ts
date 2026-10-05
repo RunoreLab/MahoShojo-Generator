@@ -17,8 +17,8 @@ import {
   countUsersWithPublicApprovedCards as countUsersWithPublicApprovedCardsFromRepo,
   listUsersWithPublicApprovedCardTotals,
 } from '@/lib/database/badges-granting';
-import { grantBadgeToUser, userHasBadge } from '@/lib/database/badges';
-import { increaseUserSlotCount } from '@/lib/database/users';
+import { userHasBadge } from '@/lib/database/badges';
+import { grantBadgeWithSlotReward } from '@/lib/rewards/badge-slot-reward';
 import { REPORTER_TIERS } from './reporter-rules';
 
 type UserTotalsRow = {
@@ -90,9 +90,9 @@ async function main() {
 
   const summary = {
     totalUsers: users.length,
-    tiers: Object.fromEntries(tiers.map((t) => [t.badgeId, { qualified: 0, granted: 0, skippedHasBadge: 0 }])) as Record<
+    tiers: Object.fromEntries(tiers.map((t) => [t.badgeId, { qualified: 0, granted: 0, skippedHasBadge: 0, rolledBack: 0, manualReview: 0 }])) as Record<
       string,
-      { qualified: number; granted: number; skippedHasBadge: number }
+      { qualified: number; granted: number; skippedHasBadge: number; rolledBack: number; manualReview: number }
     >,
     slotIncreased: 0,
     errors: 0,
@@ -106,13 +106,12 @@ async function main() {
       summary.tiers[tier.badgeId].qualified += 1;
 
       try {
-        const alreadyHas = await userHasBadge(user.userId, tier.badgeId);
-        if (alreadyHas) {
-          summary.tiers[tier.badgeId].skippedHasBadge += 1;
-          continue;
-        }
-
         if (dryRun) {
+          const alreadyHas = await userHasBadge(user.userId, tier.badgeId);
+          if (alreadyHas) {
+            summary.tiers[tier.badgeId].skippedHasBadge += 1;
+            continue;
+          }
           summary.tiers[tier.badgeId].granted += 1;
           summary.slotIncreased += 1;
           console.log(
@@ -121,20 +120,34 @@ async function main() {
           continue;
         }
 
-        const granted = await grantBadgeToUser(user.userId, tier.badgeId);
-        if (!granted) {
-          summary.errors += 1;
-          console.error(`❌ 用户 ${user.username} (ID: ${user.userId}) 授予 ${tier.badgeId} 失败`);
+        const result = await grantBadgeWithSlotReward({
+          userId: user.userId,
+          badgeId: tier.badgeId,
+          slotIncrement: tier.slotIncrement,
+        });
+        if (result.status === 'already-granted') {
+          summary.tiers[tier.badgeId].skippedHasBadge += 1;
+          continue;
+        }
+        if (result.status === 'granted') {
+          summary.tiers[tier.badgeId].granted += 1;
+          summary.slotIncreased += 1;
+          console.log(`✅ 用户 ${user.username} (ID: ${user.userId}) 已授予 ${tier.badgeId}，槽位 +${tier.slotIncrement}`);
           continue;
         }
 
-        summary.tiers[tier.badgeId].granted += 1;
-        const increased = await increaseUserSlotCount(user.userId, tier.slotIncrement);
-        if (increased) {
-          summary.slotIncreased += 1;
+        summary.errors += 1;
+        if (result.status === 'slot-failed-rolled-back') {
+          summary.tiers[tier.badgeId].rolledBack += 1;
+          console.error(`❌ 用户 ${user.username} (ID: ${user.userId}) 槽位增加失败；本次徽章已回滚，可安全重试`);
+        } else if (result.status === 'slot-failed-rollback-failed') {
+          summary.tiers[tier.badgeId].manualReview += 1;
+          console.error(`🚨 用户 ${user.username} (ID: ${user.userId}) 槽位增加失败且徽章回滚失败，需要人工核对`);
+        } else if (result.status === 'slot-outcome-unknown') {
+          summary.tiers[tier.badgeId].manualReview += 1;
+          console.error(`🚨 用户 ${user.username} (ID: ${user.userId}) 槽位写入结果不确定，需要人工核对，未自动撤销徽章`);
         } else {
-          summary.errors += 1;
-          console.error(`❌ 用户 ${user.username} (ID: ${user.userId}) 槽位增加失败（${tier.badgeId}）`);
+          console.error(`❌ 用户 ${user.username} (ID: ${user.userId}) 授予 ${tier.badgeId} 失败`);
         }
       } catch (error) {
         summary.errors += 1;

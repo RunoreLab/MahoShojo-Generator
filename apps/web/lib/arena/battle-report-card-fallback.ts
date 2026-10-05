@@ -1,4 +1,6 @@
 import type { NewsReport } from '@/components/BattleReportCard';
+import type { BattleReportRenderSnapshotV1 } from '@mahoshojo/contracts';
+import { normalizeUsage } from '@/lib/arena/battle-report-log-utils';
 import { summarizeStreamBattleReportPreview } from '@/lib/arena/stream-report-summary';
 import {
   extractStreamTelemetryMeta,
@@ -155,6 +157,27 @@ export type BattleReportCardHydrateResult = {
   liveBody?: string;
 };
 
+const applyRenderSnapshot = (
+  report: NewsReport,
+  snapshot: BattleReportRenderSnapshotV1 | null | undefined,
+  explicitUserGuidance: string | undefined,
+): NewsReport => {
+  if (!snapshot) return report;
+
+  const merged: NewsReport = {
+    ...report,
+    ...(snapshot.reporterInfo ? { reporterInfo: snapshot.reporterInfo } : {}),
+    ...(snapshot.userGuidance ? { userGuidance: snapshot.userGuidance } : {}),
+    ...(snapshot.characterGuidances ? { characterGuidances: snapshot.characterGuidances } : {}),
+    ...(snapshot.adjudicationResults ? { adjudicationResults: snapshot.adjudicationResults } : {}),
+    ...(typeof snapshot.narrativeHistoryReadCount === 'number'
+      ? { narrativeHistoryReadCount: snapshot.narrativeHistoryReadCount }
+      : {}),
+  };
+  if (explicitUserGuidance) merged.userGuidance = explicitUserGuidance;
+  return merged;
+};
+
 export async function hydrateBattleReportCardFromGenerationRecord(input: {
   generationMode: string | null | undefined;
   endpoint: string | null | undefined;
@@ -164,12 +187,15 @@ export async function hydrateBattleReportCardFromGenerationRecord(input: {
   winner: unknown;
   outputPreview: unknown;
   aiModel?: unknown;
+  usageDetails?: unknown;
   promptTokens: number | null;
   completionTokens: number | null;
   totalTokens: number | null;
   cachedTokens: number | null;
   reasoningTokens: number | null;
   userGuidance?: string;
+  renderSnapshot?: BattleReportRenderSnapshotV1 | null;
+  authoritativeWebContent?: boolean;
 }): Promise<BattleReportCardHydrateResult> {
   const generationMode = typeof input.generationMode === 'string' ? input.generationMode : '';
   const endpoint = typeof input.endpoint === 'string' ? input.endpoint : '';
@@ -178,13 +204,33 @@ export async function hydrateBattleReportCardFromGenerationRecord(input: {
   const userGuidance = typeof input.userGuidance === 'string' && input.userGuidance.trim() ? input.userGuidance.trim() : undefined;
   const aiModelFromRecord = typeof input.aiModel === 'string' && input.aiModel.trim() ? input.aiModel.trim() : undefined;
 
-  const usageFromRecord = buildUsageFromRecord({
+  const usageFromRecord = mergeUsage(normalizeUsage(input.usageDetails) ?? undefined, buildUsageFromRecord({
     prompt_tokens: input.promptTokens,
     completion_tokens: input.completionTokens,
     total_tokens: input.totalTokens,
     cached_tokens: input.cachedTokens,
     reasoning_tokens: input.reasoningTokens,
-  });
+  }));
+
+  // Web 的格式来自持久化的权威快照；不检查 DOM 或从 HTML 猜测胜者。
+  if (input.renderSnapshot?.reportFormat === 'web') {
+    const sourceContent = typeof input.outputPreview === 'string' ? input.outputPreview : '';
+    const content = input.renderSnapshot.webPackage ? sourceContent : stripAllStreamMetaComments(sourceContent);
+    const report: NewsReport = {
+      reportFormat: 'web',
+      webReady: input.authoritativeWebContent === true,
+      ...(input.renderSnapshot.webPackage ? { webPackage: input.renderSnapshot.webPackage } : { webHtml: content }),
+      headline: typeof input.headline === 'string' && input.headline.trim() ? input.headline : '战报',
+      ...(scenario ? { scenario } : {}),
+      reporterInfo: { name: '系统', publication: endpoint || 'A.R.E.N.A.' },
+      article: { body: content, analysis: '' },
+      officialReport: { winner: typeof input.winner === 'string' ? input.winner : '未知', conclusion: '' },
+      aiUsage: usageFromRecord,
+      ...(aiModelFromRecord ? { aiModel: aiModelFromRecord } : {}),
+      ...(safeMode(input.mode) ? { mode: safeMode(input.mode) } : {}),
+    };
+    return { report: applyRenderSnapshot(report, input.renderSnapshot, userGuidance), liveBody: content };
+  }
 
   const parsedPreview = parseJsonSafely(rawPreview);
   const parsedReportCandidate = (() => {
@@ -248,7 +294,7 @@ export async function hydrateBattleReportCardFromGenerationRecord(input: {
     }
 
     // 非流式：优先用结构化 report.article.body；若 preview 为截断 JSON，则 body 可能缺失，不强行塞 JSON。
-    return { report: merged };
+    return { report: applyRenderSnapshot(merged, input.renderSnapshot, userGuidance) };
   }
 
   // 2) 其余非空内容按 Markdown 解析；只有 stream consumer 需要保留 liveBody。
@@ -286,7 +332,7 @@ export async function hydrateBattleReportCardFromGenerationRecord(input: {
     ...(userGuidance ? { userGuidance } : {}),
   };
 
-  const usageFromTelemetry = telemetryExtracted?.meta?.usage as NewsReport['aiUsage'] | undefined;
+  const usageFromTelemetry = normalizeUsage(telemetryExtracted?.meta?.usage ?? null) ?? undefined;
   report.aiUsage = mergeUsage(usageFromTelemetry, usageFromRecord);
 
   const aiModelFromTelemetry = typeof telemetryExtracted?.meta?.aiModel === 'string' && telemetryExtracted.meta.aiModel.trim()
@@ -301,7 +347,8 @@ export async function hydrateBattleReportCardFromGenerationRecord(input: {
     report.narrativeHistoryReadCount = telemetryExtracted.meta.narrativeHistoryReadCount;
   }
 
+  const renderedReport = applyRenderSnapshot(report, input.renderSnapshot, userGuidance);
   return generationMode === 'stream'
-    ? { report, liveBody: stripped }
-    : { report };
+    ? { report: renderedReport, liveBody: stripped }
+    : { report: renderedReport };
 }

@@ -68,6 +68,7 @@ export type AiTelemetry = {
   attempt?: number;
   usage?: unknown;
   finishReason?: unknown;
+  streamCompletion?: Record<string, unknown>;
   reasoning?: AIReasoningEnvelope | null;
 };
 
@@ -85,6 +86,8 @@ export interface GenerationConfig<T, I = string> {
 
 export interface RawGenerationConfig {
   prompt: string;
+  /** Sent as a real system message when present, ahead of the single user turn. */
+  systemPrompt?: string;
   temperature?: number;
   maxOutputTokens?: number;
   modelOverride?: string;
@@ -103,7 +106,7 @@ export interface GenerateWithAIOptions {
   abortSignal?: AbortSignal;
   streamReadTimeoutMode?: StreamReadTimeoutMode;
   telemetry?: AiTelemetry;
-  onReasoningEvent?(_event: RawReasoningStreamEvent): void;
+  onReasoningEvent?(_event: RawReasoningStreamEvent): void | Promise<void>;
   channelContext?: AiChannelContext;
   generationSettingsContext?: GenerationSettingsContext;
 }

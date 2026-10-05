@@ -1,6 +1,6 @@
 import { getCrowdReviewSummary } from '@/lib/crowd-review/service';
 import type { CrowdReviewSummaryDto } from '@/lib/crowd-review/types';
-import { getAuthUser, json, withPvpErrorBoundary } from '@/lib/pvp/server';
+import { getAuthUser, json, withApiErrorBoundary } from '@/lib/api/server';
 
 type HandlerDeps = {
   getAuthUser: typeof getAuthUser;
@@ -48,5 +48,5 @@ export const createCrowdReviewSummaryHandler =
     }
   };
 
-export const appRouteHandler = withPvpErrorBoundary(createCrowdReviewSummaryHandler());
+export const appRouteHandler = withApiErrorBoundary(createCrowdReviewSummaryHandler());
 export default appRouteHandler;

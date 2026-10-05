@@ -8,7 +8,6 @@ import DataCardDetailsModal from '@/components/DataCardDetailsModal';
 import Footer from '@/components/Footer';
 import { ErrorMessage } from '@/components/ErrorMessage';
 import { useAuth } from '@/lib/useAuth';
-import { CollapsibleSection } from '@/components/shared/CollapsibleSection';
 import { ONLINE_DATA_CARD_TYPES } from '@mahoshojo/contracts/data-cards';
 
 import { BattleHeader } from './components/BattleHeader';
@@ -27,6 +26,7 @@ import { BattleResult } from './components/BattleResult';
 import { BattleStorySessionPanel } from './components/BattleStorySessionPanel';
 import { BattleModeSwitcher } from './components/BattleModeSwitcher';
 import { GenerationModeSwitcher } from './components/GenerationModeSwitcher';
+import { ReportFormatSwitcher } from './components/ReportFormatSwitcher';
 import { RankingQuickActions } from './components/RankingQuickActions';
 import { useBattleStore } from './stores/useBattleStore';
 import {
@@ -34,8 +34,6 @@ import {
   CombatantData,
   formatCombatantCount,
   hasCombatantLimit,
-  MAX_AUX_SCENARIOS,
-  MAX_ARENA_MATERIALS,
   MAX_COMBATANTS,
 } from './types';
 import { useBattleActions } from './hooks/useBattleActions';
@@ -45,10 +43,25 @@ import { ArenaCommunitySection } from './shared/ArenaCommunitySection';
 import { ArenaPageLinks } from './shared/ArenaPageLinks';
 import { ArenaRankingLinks } from './shared/ArenaRankingLinks';
 import { ArenaRoomProvider } from './multiplayer/useArenaRoom';
+import { ArenaEditorWorkspaceBoundary } from './multiplayer/ArenaRoomProposalWorkspace';
+import { ArenaRoomDialog } from './multiplayer/ArenaRoomDialog';
+import { ArenaEditorWorkspaceLayout } from './editor/ArenaEditorWorkspaceLayout';
+import {
+  countArenaSelectedReferenceItems,
+  getArenaReferenceRemainingCapacity,
+  MAX_ARENA_REFERENCE_ITEMS,
+} from '@/lib/arena/resource-budget';
 
 const ArenaMultiplayerPanel = dynamic(
   () => import('./multiplayer/ArenaMultiplayerPanel').then((module) => (
     module.ArenaMultiplayerContextPanel
+  )),
+  { ssr: false },
+);
+
+const ArenaMultiplayerResult = dynamic(
+  () => import('./multiplayer/ArenaMultiplayerPanel').then((module) => (
+    module.ArenaMultiplayerContextResult
   )),
   { ssr: false },
 );
@@ -73,6 +86,7 @@ export function ArenaPage({ multiplayer }: ArenaPageProps = {}) {
   const scenario = useBattleStore((state: BattleStoreState) => state.scenario);
   const auxScenarios = useBattleStore((state: BattleStoreState) => state.auxScenarios);
   const materials = useBattleStore((state: BattleStoreState) => state.materials);
+  const selectedQuestionnaires = useBattleStore((state: BattleStoreState) => state.selectedQuestionnaires);
   const battleMode = useBattleStore((state: BattleStoreState) => state.battleMode);
   const isGenerating = useBattleStore((state: BattleStoreState) => state.isGenerating);
   const isMatching = useBattleStore((state: BattleStoreState) => state.isMatching);
@@ -93,6 +107,16 @@ export function ArenaPage({ multiplayer }: ArenaPageProps = {}) {
     [combatants],
   );
   const characterMaxSelected = hasCombatantLimit(MAX_COMBATANTS) ? MAX_COMBATANTS : undefined;
+  const referenceItemCount = countArenaSelectedReferenceItems({
+    auxScenarios,
+    materials,
+    selectedQuestionnaires,
+  });
+  const referenceRemainingCapacity = getArenaReferenceRemainingCapacity({
+    auxScenarios,
+    materials,
+    selectedQuestionnaires,
+  });
 
   const scenarioSummary = useMemo(() => {
     if (battleMode !== 'scenario') return '当前未启用情景模式';
@@ -199,183 +223,150 @@ export function ArenaPage({ multiplayer }: ArenaPageProps = {}) {
               />
             ) : null}
 
-            <div className="mt-6 grid gap-5 xl:grid-cols-[minmax(320px,420px)_minmax(0,1fr)] 2xl:grid-cols-[minmax(340px,440px)_minmax(0,1fr)] xl:items-start">
-              <div className="min-w-0 space-y-4">
-                <CollapsibleSection
-                  title="🎴 预设角色"
-                  description={`已选 ${formatCombatantCount(presetCombatantCount, MAX_COMBATANTS)}`}
-                  defaultOpen
-                  disabled={isGenerating}
-                  storageKey="arena.section.presetCharacters.open"
-                >
-                  <PresetSelector />
-                </CollapsibleSection>
-
-                <CollapsibleSection
-                  title="🌐 在线角色库 / 随机匹配"
-                  description={`当前已选 ${formatCombatantCount(combatants.length, MAX_COMBATANTS)}`}
-                  defaultOpen
-                  disabled={isGenerating}
-                  storageKey="arena.section.characterDatabase.open"
-                >
-                  <DatabaseSelector
-                    className="!mb-0"
-                    title={null}
-                    onOpenCharacterModal={handleOpenCharacterDataModal}
-                    onRandomMatchCharacter={() => handleRandomMatch('character')}
-                    isAuthenticated={isAuthenticated}
-                    isGenerating={isGenerating}
-                    isMatching={isMatching}
-                    combatantCount={combatants.length}
-                  />
-                  <div className="mt-1 text-xs text-gray-600">
-                    提示：浏览在线角色库可选择公开/私有数据卡；随机匹配仅从公开角色库中抽取。
-                  </div>
-                </CollapsibleSection>
-
-                <CollapsibleSection
-                  title="📁 本地导入（上传 / 粘贴）"
-                  description="支持上传多个 .json 或直接粘贴文本"
-                  defaultOpen
-                  disabled={isGenerating}
-                  keepMounted
-                  storageKey="arena.section.localImport.open"
-                >
-                  <RosterUploader />
-                </CollapsibleSection>
-
-                <CollapsibleSection
-                  title="👥 已选角色 / 分队"
-                  description={`已选 ${formatCombatantCount(combatants.length, MAX_COMBATANTS)}`}
-                  defaultOpen
-                  disabled={isGenerating}
-                  keepMounted
-                  storageKey="arena.section.combatants.open"
-                >
-                  <CombatantList onShowDetails={(combatant) => setSelectedCombatant(combatant)} />
-                </CollapsibleSection>
-              </div>
-
-              <div className="min-w-0 space-y-4">
-                <CollapsibleSection
-                  title="🎮 模式选择"
-                  description="不同模式会影响输出风格与计分规则"
-                  defaultOpen
-                  disabled={isGenerating}
-                  storageKey="arena.section.battleMode.open"
-                >
-                  <BattleModeSwitcher />
-                </CollapsibleSection>
-
-                {battleMode === 'scenario' && (
-                  <CollapsibleSection
-                    title="🎭 情景设置"
-                    description={scenarioSummary}
-                    defaultOpen
-                    autoOpen={scenario.content === null}
-                    disabled={isGenerating}
-                    keepMounted
-                    storageKey="arena.section.scenario.open"
-                  >
-                    <ScenarioPanel
-                      onOpenScenarioModal={handleOpenScenarioDataModal}
-                      onRandomMatchScenario={() => handleRandomMatch('scenario')}
-                      onOpenAuxScenarioModal={handleOpenAuxScenarioDataModal}
-                      isAuthenticated={isAuthenticated}
-                    />
-                  </CollapsibleSection>
-                )}
-
-                <CollapsibleSection
-                  title="📎 素材注入"
-                  description={`已选 ${materials.length}/${MAX_ARENA_MATERIALS}`}
-                  defaultOpen={false}
-                  disabled={isGenerating}
-                  keepMounted
-                  storageKey="arena.section.materials.open"
-                >
-                  <MaterialPanel onOpenMaterialModal={handleOpenMaterialDataModal} />
-                </CollapsibleSection>
-
-                <CollapsibleSection
-                  title="🏁 排位与快速设置"
-                  description="用于排位计分相关的一键检查/修复（高级）"
-                  defaultOpen={false}
-                  disabled={isGenerating}
-                  keepMounted
-                  storageKey="arena.section.rankingQuickActions.open"
-                >
-                  <RankingQuickActions />
-                </CollapsibleSection>
-
-                <CollapsibleSection
-                  title="⚙️ 读写设置（历战 / 当前状态 / 叙事历史）"
-                  description="建议保留默认；上下文过长或失败时可在这里精简"
-                  defaultOpen={false}
-                  disabled={isGenerating}
-                  keepMounted
-                  storageKey="arena.section.battleSettings.open"
-                >
-                  <BattleSettings />
-                </CollapsibleSection>
-
-                <CollapsibleSection
-                  title="🧠 故事引导 / 判定 / AI 模型"
-                  description="这里的设置会直接影响生成风格与稳定性"
-                  defaultOpen
-                  disabled={isGenerating}
-                  keepMounted
-                  storageKey="arena.section.storyOptions.open"
-                >
-                  <StoryOptions
-                    languages={languages}
-                    afterUserGuidance={(
+            <ArenaEditorWorkspaceBoundary>
+              <ArenaEditorWorkspaceLayout
+                disabled={isGenerating}
+                sections={[
+                  {
+                    kind: 'presetCharacters',
+                    description: `已选 ${formatCombatantCount(presetCombatantCount, MAX_COMBATANTS)}`,
+                    defaultOpen: true,
+                    content: <PresetSelector />,
+                  },
+                  {
+                    kind: 'characterDatabase',
+                    description: `当前已选 ${formatCombatantCount(combatants.length, MAX_COMBATANTS)}`,
+                    defaultOpen: true,
+                    content: (
                       <>
-                        <QuestionnaireLorePanel />
-                        <AdjudicatorPanel />
+                        <DatabaseSelector
+                          className="!mb-0"
+                          title={null}
+                          onOpenCharacterModal={handleOpenCharacterDataModal}
+                          onRandomMatchCharacter={() => handleRandomMatch('character')}
+                          isAuthenticated={isAuthenticated}
+                          isGenerating={isGenerating}
+                          isMatching={isMatching}
+                          combatantCount={combatants.length}
+                        />
+                        <div className="mt-1 text-xs text-gray-600">
+                          提示：浏览在线角色库可选择公开/私有数据卡；随机匹配仅从公开角色库中抽取。
+                        </div>
                       </>
-                    )}
-                  />
-                </CollapsibleSection>
-
-                <CollapsibleSection
-                  title="⚡ 生成方式"
-                  description="流式生成可边生成边阅读；非流式适合一次性结果"
-                  defaultOpen={false}
-                  disabled={isGenerating}
-                  storageKey="arena.section.generationMode.open"
-                >
-                  <GenerationModeSwitcher />
-                </CollapsibleSection>
-
-                <CollapsibleSection
-                  title="🚀 开始生成"
-                  description="确认设置后点击按钮生成战报"
-                  collapsible={false}
-                >
-                  <BattleActions />
-                  {error && (
-                    <ErrorMessage
-                      message={error}
-                      className={`p-4 rounded-md mt-3 text-sm ${
-                        error.startsWith('❌') ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800'
-                      }`}
-                    />
-                  )}
-                </CollapsibleSection>
-
-                <CollapsibleSection
-                  title="💬 社区"
-                  description="QQ群 / 腾讯频道"
-                  defaultOpen={false}
-                  storageKey="arena.section.community.open"
-                >
-                  <ArenaCommunitySection />
-                </CollapsibleSection>
-              </div>
-            </div>
+                    ),
+                  },
+                  {
+                    kind: 'localImport',
+                    description: '支持上传多个 .json 或直接粘贴文本',
+                    defaultOpen: true,
+                    keepMounted: true,
+                    content: <RosterUploader />,
+                  },
+                  {
+                    kind: 'roster',
+                    description: `已选 ${formatCombatantCount(combatants.length, MAX_COMBATANTS)}`,
+                    defaultOpen: true,
+                    keepMounted: true,
+                    content: <CombatantList onShowDetails={(combatant) => setSelectedCombatant(combatant)} />,
+                  },
+                  {
+                    kind: 'battleMode',
+                    description: '不同模式会影响输出风格与计分规则',
+                    defaultOpen: true,
+                    content: <BattleModeSwitcher />,
+                  },
+                  ...(battleMode === 'scenario' ? [{
+                    kind: 'scenario' as const,
+                    description: scenarioSummary,
+                    defaultOpen: true,
+                    autoOpen: scenario.content === null,
+                    keepMounted: true,
+                    content: (
+                      <ScenarioPanel
+                        onOpenScenarioModal={handleOpenScenarioDataModal}
+                        onRandomMatchScenario={() => handleRandomMatch('scenario')}
+                        onOpenAuxScenarioModal={handleOpenAuxScenarioDataModal}
+                        isAuthenticated={isAuthenticated}
+                      />
+                    ),
+                  }] : []),
+                  {
+                    kind: 'materials',
+                    description: `已选素材 ${materials.length}；参考项合计 ${referenceItemCount}/${MAX_ARENA_REFERENCE_ITEMS}`,
+                    defaultOpen: false,
+                    keepMounted: true,
+                    content: <MaterialPanel onOpenMaterialModal={handleOpenMaterialDataModal} />,
+                  },
+                  {
+                    kind: 'ranking',
+                    description: '用于排位计分相关的一键检查/修复（高级）',
+                    defaultOpen: false,
+                    keepMounted: true,
+                    content: <RankingQuickActions />,
+                  },
+                  {
+                    kind: 'settings',
+                    description: '建议保留默认；上下文过长或失败时可在这里精简',
+                    defaultOpen: false,
+                    keepMounted: true,
+                    content: <BattleSettings />,
+                  },
+                  {
+                    kind: 'story',
+                    description: '这里的设置会直接影响生成风格与稳定性',
+                    defaultOpen: true,
+                    keepMounted: true,
+                    content: (
+                      <StoryOptions
+                        languages={languages}
+                        afterUserGuidance={(
+                          <>
+                            <QuestionnaireLorePanel />
+                            <AdjudicatorPanel />
+                          </>
+                        )}
+                      />
+                    ),
+                  },
+                  {
+                    kind: 'generationMode',
+                    description: '流式生成可边生成边阅读；非流式适合一次性结果',
+                    defaultOpen: true,
+                    content: <><GenerationModeSwitcher /><ReportFormatSwitcher /></>,
+                  },
+                  {
+                    kind: 'generationActions',
+                    description: '确认设置后点击按钮生成战报',
+                    collapsible: false,
+                    content: (
+                      <>
+                        <BattleActions />
+                        {error && (
+                          <ErrorMessage
+                            message={error}
+                            className={`p-4 rounded-md mt-3 text-sm ${
+                              error.startsWith('❌') ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800'
+                            }`}
+                          />
+                        )}
+                      </>
+                    ),
+                  },
+                  {
+                    kind: 'community',
+                    description: 'QQ群 / 腾讯频道',
+                    defaultOpen: false,
+                    disabled: false,
+                    content: <ArenaCommunitySection />,
+                  },
+                ]}
+              />
+            </ArenaEditorWorkspaceBoundary>
           </div>
 
+          {multiplayer?.enabled ? (
+            <ArenaMultiplayerResult onSaveImage={handleSaveImage} />
+          ) : null}
           <BattleResult onSaveImage={handleSaveImage} />
           <BattleStorySessionPanel onSaveImage={handleSaveImage} />
 
@@ -389,35 +380,23 @@ export function ArenaPage({ multiplayer }: ArenaPageProps = {}) {
         </div>
       </div>
 
-      {showImageModal && savedImageUrl && (
-        <div
-          className="fixed inset-0 bg-black flex items-center justify-center z-50"
-          style={{ backgroundColor: 'rgba(0, 0, 0, 0.7)', paddingLeft: '2rem', paddingRight: '2rem' }}
+      {showImageModal && savedImageUrl ? (
+        <ArenaRoomDialog
+          open
+          titleId="arena-saved-image-dialog-heading"
+          title="保存战报图片"
+          description="长按图片保存到相册。"
+          widthClassName="max-w-lg"
+          onClose={() => {
+            setShowImageModal(false);
+            setSavedImageUrl(null);
+          }}
         >
-          <div className="bg-white rounded-lg max-w-lg w-full max-h-[80vh] overflow-auto relative">
-            <div className="sticky top-0 z-10 bg-white/95 backdrop-blur flex justify-end p-2">
-              <button
-                onClick={() => {
-                  setShowImageModal(false);
-                  setSavedImageUrl(null);
-                }}
-                aria-label="关闭"
-                className="text-gray-500 hover:text-gray-700 text-3xl leading-none"
-              >
-                ×
-              </button>
-            </div>
-            <div className="px-4 pb-4">
-              <p className="text-center text-sm text-gray-600" style={{ marginTop: '0.5rem' }}>
-                📱 长按图片保存到相册
-              </p>
-              <div className="items-center flex flex-col" style={{ padding: '0.5rem' }}>
-                <img src={savedImageUrl} alt="魔法少女战斗报告" className="w-full h-auto rounded-lg mx-auto" />
-              </div>
-            </div>
+          <div aria-label="战报图片" className="items-center flex flex-col p-2">
+            <img src={savedImageUrl} alt="魔法少女战斗报告" className="w-full h-auto rounded-lg mx-auto" />
           </div>
-        </div>
-      )}
+        </ArenaRoomDialog>
+      ) : null}
 
       <BattleDataModal
         isOpen={showBattleDataModal}
@@ -461,7 +440,11 @@ export function ArenaPage({ multiplayer }: ArenaPageProps = {}) {
         maxSelected={
           dataModalType === 'character'
             ? characterMaxSelected
-            : (dataModalType === 'auxScenario' ? MAX_AUX_SCENARIOS : (dataModalType === 'material' ? MAX_ARENA_MATERIALS : undefined))
+            : (
+              dataModalType === 'auxScenario'
+                ? auxScenarios.length + referenceRemainingCapacity
+                : (dataModalType === 'material' ? materials.length + referenceRemainingCapacity : undefined)
+            )
         }
       />
 

@@ -1,11 +1,18 @@
 import {
   ArenaGenerationFinalizationPendingError,
+  type ArenaGenerationPersistenceWarning,
   generationCancelCode,
   isArenaGenerationAuditableRejection,
   isArenaPreparationSeed,
   isGenerationCancelReason,
 } from '@mahoshojo/hosted-api/arena-generation/service';
-import { readSafePublicAiError } from '@mahoshojo/hosted-api/regular-generation';
+import { readSafePublicAiError, createSafePublicAiError, getPublicAiErrorMessage } from '@mahoshojo/hosted-api/regular-generation';
+import {
+  ARENA_RESOURCE_BUDGET,
+  countArenaReferenceItems,
+  evaluateArenaPromptBudget,
+  type ArenaHostedFundingMode,
+} from '@mahoshojo/hosted-api/arena-generation/resource-budget';
 import type {
   ArenaGenerationExecutor,
   ArenaGenerationExecutionInput,
@@ -19,13 +26,12 @@ import type {
   ArenaTrustedPvpContext,
 } from '@mahoshojo/hosted-api/arena-generation/service';
 import { createArenaStreamProjector } from './stream-projector';
+import { assertStreamCompletion } from './completion';
+import { WebPackageRefSchema, type WebPackageArtifact } from '@mahoshojo/contracts/web-package';
+import { createWebPackageOverlay, createWebPackageOverlayFromProjection, isWebPackageTargetError } from '@mahoshojo/web-package';
+import { isWebArenaOutputContract } from './output-contract';
 
-const MAX_ARENA_MATERIALS = 10;
-const MAX_ARENA_AUX_SCENARIOS = 10;
-const MAX_ARENA_ADJUDICATION_EVENTS = 100;
-const MAX_ARENA_QUESTIONNAIRES = 50;
-const MAX_ARENA_NARRATIVE_HISTORY = 50;
-export const MAX_ARENA_COMBATANTS = 32;
+export const MAX_ARENA_COMBATANTS = ARENA_RESOURCE_BUDGET.maxCombatants;
 const PREPARED_PAYLOAD_KEY = '__arenaGenerationRuntimeV1';
 export const ARENA_GENERATION_MATERIALIZATION_VERSION = 'arena-runtime-v1';
 const ARENA_RANDOM_DRAW_BUDGET = 4_096;
@@ -37,6 +43,13 @@ export type ArenaReasoningEvent =
 
 export type ArenaGenerationPrompt = {
   prompt: string;
+  /**
+   * Optional system-role instruction. The task prompt stays self-contained when
+   * this is absent; when present the provider receives it as a real system
+   * message so output discipline is not competing with creative guidance for
+   * attention inside one user turn.
+   */
+  systemPrompt?: string;
   metadata: Record<string, unknown>;
 };
 
@@ -62,6 +75,7 @@ export type ArenaGenerationFinalizationInput = {
 export type ArenaGenerationFinalizationResult = {
   resultRef: string | null;
   ranking: unknown | null;
+  persistenceWarning?: ArenaGenerationPersistenceWarning;
 };
 
 export interface ArenaGenerationRuntimeDependencies {
@@ -85,6 +99,7 @@ export interface ArenaGenerationRuntimeDependencies {
     generationId: string;
     payload: Record<string, unknown>;
     prompt: string;
+    systemPrompt?: string;
     signal: AbortSignal;
     onReasoning(_event: ArenaReasoningEvent): Promise<void>;
   }): Promise<ArenaGenerationUpstream>;
@@ -96,6 +111,7 @@ export interface ArenaGenerationRuntimeDependencies {
 
 type PreparedRuntimePayload = {
   prompt: string;
+  systemPrompt?: string;
   metadata: Record<string, unknown>;
 };
 
@@ -115,6 +131,34 @@ type ArenaPayloadValidationFailure = {
   code: string;
 };
 
+class ArenaOutputBudgetExceededError extends Error {
+  constructor() {
+    super('ARENA_OUTPUT_BUDGET_EXCEEDED');
+    this.name = 'ArenaOutputBudgetExceededError';
+  }
+}
+
+/**
+ * Web 包输出契约失败。两个原因对用户是完全不同的下一步，因此分成两个公开
+ * 错误码：缺少 Arena control trailer（协议没遵守，重试可能仍失败）与目标
+ * 文件未通过格式/schema 校验（包期望的产物没拿到）。两者都不携带模型输出、
+ * 校验细节或 provider 数据。
+ */
+const webPackageOutputError = (
+  code: 'ARENA_WEB_PACKAGE_OUTPUT_INVALID' | 'ARENA_WEB_PACKAGE_TARGET_INVALID'
+    | 'ARENA_WEB_PACKAGE_TARGET_MALFORMED' | 'ARENA_WEB_PACKAGE_TARGET_SCHEMA',
+): Error => createSafePublicAiError({ code, message: getPublicAiErrorMessage(code)! });
+
+/** Shape and schema failures need different copy: the first is a format problem, the second a contract problem. */
+const webPackageTargetFailureCode = (error: unknown): 'ARENA_WEB_PACKAGE_TARGET_INVALID'
+  | 'ARENA_WEB_PACKAGE_TARGET_MALFORMED' | 'ARENA_WEB_PACKAGE_TARGET_SCHEMA' => {
+  if (isWebPackageTargetError(error)) {
+    if (error.failure === 'json-shape') return 'ARENA_WEB_PACKAGE_TARGET_MALFORMED';
+    if (error.failure === 'json-schema') return 'ARENA_WEB_PACKAGE_TARGET_SCHEMA';
+  }
+  return 'ARENA_WEB_PACKAGE_TARGET_INVALID';
+};
+
 const validationFailure = (
   code: string,
   error: string,
@@ -123,6 +167,38 @@ const validationFailure = (
   code,
   response: jsonResponse({ code, error }, status),
 });
+
+const validateInfrastructureBudget = (
+  payload: Record<string, unknown>,
+): ArenaPayloadValidationFailure | null => {
+  const combatants = payload.combatants;
+  if (Array.isArray(combatants) && combatants.length > MAX_ARENA_COMBATANTS) {
+    return validationFailure(
+      'ARENA_PARTICIPANTS_LIMIT',
+      `角色最多 ${MAX_ARENA_COMBATANTS} 位`,
+      413,
+    );
+  }
+  if (
+    Array.isArray(payload.adjudicationEvents)
+    && payload.adjudicationEvents.length > ARENA_RESOURCE_BUDGET.maxAdjudicationEvents
+  ) {
+    return validationFailure(
+      'ARENA_ADJUDICATION_EVENTS_LIMIT',
+      `裁定事件最多 ${ARENA_RESOURCE_BUDGET.maxAdjudicationEvents} 个`,
+      413,
+    );
+  }
+  const referenceItems = countArenaReferenceItems(payload);
+  if (referenceItems > ARENA_RESOURCE_BUDGET.maxReferenceItemsSanity) {
+    return validationFailure(
+      'ARENA_REFERENCE_ITEMS_LIMIT',
+      `辅助情景、素材、问卷与叙事历史合计最多 ${ARENA_RESOURCE_BUDGET.maxReferenceItemsSanity} 项`,
+      413,
+    );
+  }
+  return null;
+};
 
 const validatePayload = (payload: Record<string, unknown>): ArenaPayloadValidationFailure | null => {
   const mode = typeof payload.mode === 'string' ? payload.mode : 'classic';
@@ -133,52 +209,6 @@ const validatePayload = (payload: Record<string, unknown>): ArenaPayloadValidati
       'ARENA_PARTICIPANTS_INVALID',
       `该模式至少需要 ${minimum} 位角色`,
       400,
-    );
-  }
-  if (combatants.length > MAX_ARENA_COMBATANTS) {
-    return validationFailure(
-      'ARENA_PARTICIPANTS_LIMIT',
-      `角色最多 ${MAX_ARENA_COMBATANTS} 位`,
-      413,
-    );
-  }
-  if (
-    Array.isArray(payload.auxScenarios)
-    && payload.auxScenarios.length > MAX_ARENA_AUX_SCENARIOS
-  ) {
-    return validationFailure('ARENA_AUX_SCENARIOS_LIMIT', '辅助情景最多 10 个', 400);
-  }
-  if (Array.isArray(payload.materials) && payload.materials.length > MAX_ARENA_MATERIALS) {
-    return validationFailure('ARENA_MATERIALS_LIMIT', '素材最多 10 个', 400);
-  }
-  if (
-    Array.isArray(payload.adjudicationEvents)
-    && payload.adjudicationEvents.length > MAX_ARENA_ADJUDICATION_EVENTS
-  ) {
-    return validationFailure(
-      'ARENA_ADJUDICATION_EVENTS_LIMIT',
-      `裁定事件最多 ${MAX_ARENA_ADJUDICATION_EVENTS} 个`,
-      413,
-    );
-  }
-  if (
-    Array.isArray(payload.questionnaires)
-    && payload.questionnaires.length > MAX_ARENA_QUESTIONNAIRES
-  ) {
-    return validationFailure(
-      'ARENA_QUESTIONNAIRES_LIMIT',
-      `问卷最多 ${MAX_ARENA_QUESTIONNAIRES} 份`,
-      413,
-    );
-  }
-  if (
-    Array.isArray(payload.narrativeHistory)
-    && payload.narrativeHistory.length > MAX_ARENA_NARRATIVE_HISTORY
-  ) {
-    return validationFailure(
-      'ARENA_NARRATIVE_HISTORY_LIMIT',
-      `叙事历史最多 ${MAX_ARENA_NARRATIVE_HISTORY} 条`,
-      413,
     );
   }
   if (payload.pvpContext !== undefined) {
@@ -196,6 +226,14 @@ const validatePayload = (payload: Record<string, unknown>): ArenaPayloadValidati
     }
   }
   return null;
+};
+
+const resolveFundingMode = (payload: Record<string, unknown>): ArenaHostedFundingMode => {
+  const context = payload.__arenaServerContextV1;
+  if (!context || typeof context !== 'object' || Array.isArray(context)) return 'hosted-system';
+  return (context as { fundingMode?: unknown }).fundingMode === 'hosted-byok'
+    ? 'hosted-byok'
+    : 'hosted-system';
 };
 
 const redactSemanticValue = (value: unknown): unknown => {
@@ -217,7 +255,19 @@ const redactSemanticValue = (value: unknown): unknown => {
 
 export const redactArenaGenerationSemanticPayload = (
   payload: Record<string, unknown>,
-): Record<string, unknown> => redactSemanticValue(payload) as Record<string, unknown>;
+): Record<string, unknown> => {
+  const semantic = redactSemanticValue(payload) as Record<string, unknown>;
+  if (semantic.reportFormat === 'markdown') delete semantic.reportFormat;
+  const snapshot = semantic.multiplayerGenerationSnapshot;
+  if (snapshot && typeof snapshot === 'object' && !Array.isArray(snapshot)) {
+    const config = (snapshot as Record<string, unknown>).sharedConfig;
+    if (config && typeof config === 'object' && !Array.isArray(config)) {
+      const sharedConfig = config as Record<string, unknown>;
+      if (sharedConfig.reportFormat === 'markdown') delete sharedConfig.reportFormat;
+    }
+  }
+  return semantic;
+};
 
 const readAuditablePvpContext = (
   payload: Record<string, unknown>,
@@ -383,6 +433,11 @@ const readPrepared = (payload: Record<string, unknown>): PreparedRuntimePayload 
   }
   return {
     prompt: record.prompt,
+    // Absent for every contract that never had a system role, so this stays
+    // backwards compatible with payloads prepared by older builds.
+    ...(typeof record.systemPrompt === 'string' && record.systemPrompt
+      ? { systemPrompt: record.systemPrompt }
+      : {}),
     metadata: record.metadata as Record<string, unknown>,
   };
 };
@@ -416,6 +471,7 @@ const errorCodeOf = (error: unknown, signal: AbortSignal): string => {
     );
   }
   if (error instanceof Error && error.name === 'AbortError') return 'GENERATION_ABORTED';
+  if (error instanceof ArenaOutputBudgetExceededError) return 'ARENA_OUTPUT_BUDGET_EXCEEDED';
   return 'GENERATION_FAILED';
 };
 
@@ -435,6 +491,8 @@ export const createArenaGenerationRuntime = (
     generationRequestId,
     payload,
   }): Promise<PreflightedArenaGeneration | ArenaGenerationAuditableRejection | Response> => {
+    const infrastructureFailure = validateInfrastructureBudget(payload);
+    if (infrastructureFailure) return infrastructureFailure.response;
     const authorizedPayload = dependencies.preparePayload
       ? await dependencies.preparePayload({
         request,
@@ -542,8 +600,53 @@ export const createArenaGenerationRuntime = (
       });
       throw error;
     }
+    const promptBudget = evaluateArenaPromptBudget({
+      fundingMode: resolveFundingMode(executionPayload),
+      // Count the system role too, otherwise package targets would be budgeted
+      // on strictly less text than actually reaches the provider.
+      prompt: prepared.systemPrompt ? `${prepared.systemPrompt}\n\n${prepared.prompt}` : prepared.prompt,
+    });
+    if (!promptBudget.allowed) {
+      return jsonResponse({
+        code: 'ARENA_PROMPT_BUDGET_EXCEEDED',
+        error: '最终 Prompt 超过当前渠道允许的估算 token 预算',
+        estimatedPromptTokens: promptBudget.estimatedPromptTokens,
+        maxEstimatedPromptTokens: promptBudget.maxEstimatedPromptTokens,
+      }, 413);
+    }
+    prepared = {
+      ...prepared,
+      metadata: {
+        ...prepared.metadata,
+        estimatedPromptTokens: promptBudget.estimatedPromptTokens,
+      },
+    };
     const reporterInfo = prepared.metadata.reporterInfo;
     const streamMeta = {
+      reportFormat: prepared.metadata.reportFormat === 'web' ? 'web' : 'markdown',
+      ...(prepared.metadata.webPackageRef ? { webPackageRef: prepared.metadata.webPackageRef } : {}),
+      ...(typeof executionPayload.mode === 'string' && executionPayload.mode.trim()
+        ? { mode: executionPayload.mode.trim() }
+        : {}),
+      ...(typeof executionPayload.scenarioTitle === 'string'
+        && executionPayload.scenarioTitle.trim()
+        ? { scenarioDisplayName: executionPayload.scenarioTitle.trim() }
+        : {}),
+      ...(typeof executionPayload.language === 'string' && executionPayload.language.trim()
+        ? { language: executionPayload.language.trim() }
+        : {}),
+      ...(typeof executionPayload.customStoryLength === 'string'
+        && executionPayload.customStoryLength.trim()
+        ? { storyLength: executionPayload.customStoryLength.trim() }
+        : typeof executionPayload.storyLength === 'string'
+          && executionPayload.storyLength.trim()
+          ? { storyLength: executionPayload.storyLength.trim() }
+          : {}),
+      ...(isWebArenaOutputContract(prepared.metadata.outputContract)
+        || prepared.metadata.outputContract === 'structured-report'
+        || prepared.metadata.outputContract === 'stream-markdown'
+        ? { outputContract: prepared.metadata.outputContract }
+        : {}),
       ...(reporterInfo && typeof reporterInfo === 'object' && !Array.isArray(reporterInfo)
         ? { reporterInfo }
         : {}),
@@ -602,9 +705,17 @@ export const createArenaGenerationRuntime = (
     const prepared = readPrepared(input.payload);
     const executionMetadata = { ...prepared.metadata };
     const decoder = new TextDecoder();
+    const outputEncoder = new TextEncoder();
+    let outputBytes = 0;
     let markdown = '';
+    let webPackage: WebPackageArtifact | undefined;
     let telemetry: Record<string, unknown> = {};
     let reasoningEnded = false;
+    let reasoningEventCount = 0;
+    let reasoningChars = 0;
+    let reasoningTextSeen = false;
+    let reasoningOperation = Promise.resolve();
+    let reasoningFailure: unknown = null;
     let finalizationStarted = false;
     let durableFinalizationAttempted = false;
     let finalizationClaimIndeterminate = false;
@@ -614,9 +725,69 @@ export const createArenaGenerationRuntime = (
     let providerSettled = false;
     const projector = createArenaStreamProjector({
       expectsMeta: prepared.metadata.expectsMeta === true,
+      strictTrailer: Boolean(prepared.metadata.webPackageRef),
     });
 
+    const consumeOutputBudget = (text: string): void => {
+      outputBytes += outputEncoder.encode(text).byteLength;
+      if (outputBytes > ARENA_RESOURCE_BUDGET.maxOutputBytes) {
+        throw new ArenaOutputBudgetExceededError();
+      }
+    };
+
     const emit = async (event: GenerationEventInput): Promise<void> => input.emit(event);
+    const observeReasoningDiagnostics = (status: 'done' | 'unavailable'): void => {
+      observe({
+        event: 'reasoning',
+        generationId: input.generationId,
+        status,
+        eventCount: reasoningEventCount,
+        chars: reasoningChars,
+      });
+    };
+    const queueReasoningEvent = (event: ArenaReasoningEvent): Promise<void> => {
+      if (reasoningFailure) return Promise.reject(reasoningFailure);
+      let projected: GenerationEventInput;
+      try {
+        if (event.type === 'reasoning-start') {
+          reasoningEventCount += 1;
+          projected = {
+            type: 'reasoning',
+            data: { source: 'sdk', status: 'thinking', chunk: '' },
+          };
+        } else if (event.type === 'reasoning-delta') {
+          reasoningEventCount += 1;
+          consumeOutputBudget(event.text);
+          if (event.text.trim()) reasoningTextSeen = true;
+          reasoningChars += event.text.length;
+          projected = {
+            type: 'reasoning',
+            data: { source: 'sdk', status: 'thinking', chunk: event.text },
+          };
+        } else {
+          reasoningEnded = true;
+          observeReasoningDiagnostics(reasoningTextSeen ? 'done' : 'unavailable');
+          projected = {
+            type: 'reasoning_done',
+            data: { source: 'sdk', status: reasoningTextSeen ? 'done' : 'unavailable' },
+          };
+        }
+      } catch (error) {
+        reasoningFailure = error;
+        return Promise.reject(error);
+      }
+      reasoningOperation = reasoningOperation
+        .then(() => emit(projected))
+        .catch((error: unknown) => {
+          reasoningFailure ??= error;
+          throw error;
+        });
+      return reasoningOperation;
+    };
+    const flushReasoningEvents = async (): Promise<void> => {
+      await reasoningOperation;
+      if (reasoningFailure) throw reasoningFailure;
+    };
     const finalizeOnce = async (
       status: ArenaGenerationFinalizationInput['status'],
       errorCode: string | null,
@@ -628,6 +799,7 @@ export const createArenaGenerationRuntime = (
         const terminal: GenerationTerminal = {
           status,
           ...(errorCode ? { code: errorCode } : {}),
+          ...(status === 'completed' && webPackage ? { webPackage } : {}),
         };
         finalizationClaimIndeterminate = true;
         const claim = await input.claimFinalization(terminal);
@@ -695,37 +867,21 @@ export const createArenaGenerationRuntime = (
         generationId: input.generationId,
         payload: input.payload,
         prompt: prepared.prompt,
+        ...(prepared.systemPrompt ? { systemPrompt: prepared.systemPrompt } : {}),
         signal: input.signal,
-        onReasoning: async (event) => {
-          if (event.type === 'reasoning-start') {
-            await emit({
-              type: 'reasoning',
-              data: { source: 'sdk', status: 'thinking', chunk: '' },
-            });
-            return;
-          }
-          if (event.type === 'reasoning-delta') {
-            await emit({
-              type: 'reasoning',
-              data: { source: 'sdk', status: 'thinking', chunk: event.text },
-            });
-            return;
-          }
-          reasoningEnded = true;
-          await emit({
-            type: 'reasoning_done',
-            data: { source: 'sdk', status: 'done' },
-          });
-        },
+        onReasoning: queueReasoningEvent,
       });
       telemetry = upstream.telemetry;
+      await flushReasoningEvents();
       const reader = upstream.body.getReader();
       try {
         while (true) {
           const next = await readWithAbort(reader, input.signal);
+          await flushReasoningEvents();
           if (next.done) break;
           const chunk = decoder.decode(next.value, { stream: true });
           if (!chunk) continue;
+          consumeOutputBudget(chunk);
           for (const projected of projector.push(chunk)) {
             markdown += projected;
             await emit({ type: 'markdown', data: { chunk: projected } });
@@ -733,11 +889,15 @@ export const createArenaGenerationRuntime = (
         }
         const tail = decoder.decode();
         if (tail) {
+          consumeOutputBudget(tail);
           for (const projected of projector.push(tail)) {
             markdown += projected;
             await emit({ type: 'markdown', data: { chunk: projected } });
           }
         }
+      } catch (error) {
+        await reader.cancel(error).catch(() => undefined);
+        throw error;
       } finally {
         reader.releaseLock();
       }
@@ -745,7 +905,52 @@ export const createArenaGenerationRuntime = (
         markdown += projected;
         await emit({ type: 'markdown', data: { chunk: projected } });
       }
+      await flushReasoningEvents();
       const { metaEvent } = projector.result();
+      assertStreamCompletion(telemetry);
+      if (prepared.metadata.webPackageRef) {
+        const eventData = metaEvent?.type === 'meta' ? metaEvent.data as Record<string, unknown> : null;
+        const meta = eventData?.meta as Record<string, unknown> | undefined;
+        const report = meta?.report as Record<string, unknown> | undefined;
+        if (meta?.version !== 1 || !report || typeof report.headline !== 'string' || !report.headline.trim()
+          || typeof report.winner !== 'string' || !report.winner.trim()) {
+          throw webPackageOutputError('ARENA_WEB_PACKAGE_OUTPUT_INVALID');
+        }
+        try {
+          const projection = prepared.metadata.webPackagePromptProjection;
+          const overlay = projection !== undefined
+            ? await createWebPackageOverlayFromProjection(
+              projection as Parameters<typeof createWebPackageOverlayFromProjection>[0],
+              markdown,
+              { maxBytes: ARENA_RESOURCE_BUDGET.maxOutputBytes },
+            )
+            : await createWebPackageOverlay(
+              WebPackageRefSchema.parse(prepared.metadata.webPackageRef),
+              markdown,
+              { maxBytes: ARENA_RESOURCE_BUDGET.maxOutputBytes },
+            );
+          const expectedRef = WebPackageRefSchema.parse(prepared.metadata.webPackageRef);
+          if (overlay.packageRef.id !== expectedRef.id
+            || overlay.packageRef.version !== expectedRef.version
+            || overlay.packageRef.digest !== expectedRef.digest) {
+            throw new Error('Web Package overlay 与请求 ref 不匹配');
+          }
+          webPackage = {
+            packageRef: overlay.packageRef,
+            targetPath: overlay.targetPath,
+            targetMediaType: overlay.targetMediaType,
+            generatedDigest: overlay.generatedDigest,
+          };
+          executionMetadata.webPackage = webPackage;
+          if (eventData) eventData.webPackage = webPackage;
+        } catch (error) {
+          // The failure kind travels in the code, not in the message: the model
+          // output is already retained as plain text, so routing it through the
+          // error channel would only widen that surface for no new information.
+          executionMetadata.webPackageTargetFailure = isWebPackageTargetError(error) ? error.failure : 'unknown';
+          throw webPackageOutputError(webPackageTargetFailureCode(error));
+        }
+      }
       if (metaEvent) {
         if (
           metaEvent.type === 'meta'
@@ -758,9 +963,13 @@ export const createArenaGenerationRuntime = (
         await emit(metaEvent);
       }
       if (!reasoningEnded) {
+        // 与共享 reasoning bridge（node-runtime/reasoning-sse.ts）保持一致：
+        // Provider 省略 reasoning-end 时，按是否已交付实际文本判定终态。
+        const reasoningStatus = reasoningTextSeen ? 'done' : 'unavailable';
+        observeReasoningDiagnostics(reasoningStatus);
         await emit({
           type: 'reasoning_done',
-          data: { source: 'sdk', status: 'unavailable' },
+          data: { source: 'sdk', status: reasoningStatus },
         });
       }
       if (!markdown.trim()) {
@@ -790,7 +999,14 @@ export const createArenaGenerationRuntime = (
       if (finalization.ranking !== null) {
         await emit({ type: 'ranking', data: finalization.ranking });
       }
-      return { status: 'completed', resultRef: finalization.resultRef };
+      return {
+        status: 'completed',
+        resultRef: finalization.resultRef,
+        ...(webPackage ? { webPackage } : {}),
+        ...(finalization.persistenceWarning
+          ? { persistenceWarning: finalization.persistenceWarning }
+          : {}),
+      };
     } catch (error) {
       if (!providerSettled && providerStartedAt !== null) {
         providerSettled = true;
@@ -800,6 +1016,15 @@ export const createArenaGenerationRuntime = (
           outcome: input.signal.aborted ? 'cancelled' : 'failure',
           durationMs: performance.now() - providerStartedAt,
         });
+      }
+      if (!finalizationStarted && !input.signal.aborted) {
+        // Flush the projector's guarded tail on upstream failure as well as normal EOF.
+        for (const chunk of projector.finish().markdown) {
+          markdown += chunk;
+          await emit({ type: 'markdown', data: { chunk } }).catch(() => undefined);
+        }
+        // A replay transport failure must not prevent durable failed finalization.
+        await emit({ type: 'telemetry', data: telemetry }).catch(() => undefined);
       }
       if (
         (durableFinalizationAttempted || finalizationClaimIndeterminate)

@@ -4,6 +4,11 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./admin": {
+      "types": "./src/admin.ts",
+      "import": "./src/admin.ts",
+      "default": "./src/admin.ts"
+    },
     ".": {
       "types": "./src/index.ts",
       "import": "./src/index.ts",
@@ -14,10 +19,25 @@
       "import": "./src/arena-room.ts",
       "default": "./src/arena-room.ts"
     },
+    "./arena-capabilities": {
+      "types": "./src/arena-capabilities.ts",
+      "import": "./src/arena-capabilities.ts",
+      "default": "./src/arena-capabilities.ts"
+    },
     "./data-cards": {
       "types": "./src/data-cards.ts",
       "import": "./src/data-cards.ts",
       "default": "./src/data-cards.ts"
+    },
+    "./desktop-ipc": {
+      "types": "./src/desktop-ipc.ts",
+      "import": "./src/desktop-ipc.ts",
+      "default": "./src/desktop-ipc.ts"
+    },
+    "./desktop-cloud": {
+      "types": "./src/desktop-cloud.ts",
+      "import": "./src/desktop-cloud.ts",
+      "default": "./src/desktop-cloud.ts"
     },
     "./game-card": {
       "types": "./src/game-card.ts",
@@ -43,6 +63,17 @@
       "types": "./src/json-value.ts",
       "import": "./src/json-value.ts",
       "default": "./src/json-value.ts"
+    },
+    "./admin-arena-observation": "./src/admin-arena-observation.ts",
+    "./web-package": {
+      "types": "./src/web-package.ts",
+      "import": "./src/web-package.ts",
+      "default": "./src/web-package.ts"
+    },
+    "./zip": {
+      "types": "./src/zip.ts",
+      "import": "./src/zip.ts",
+      "default": "./src/zip.ts"
     }
   },
   "scripts": {

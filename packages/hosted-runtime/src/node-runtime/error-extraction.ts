@@ -12,6 +12,10 @@ export type EnhanceUpstreamErrorOptions = Readonly<{
   sensitiveTexts?: readonly string[];
 }>;
 
+export type SanitizePublicErrorMessageOptions = EnhanceUpstreamErrorOptions & Readonly<{
+  fallbackMessage?: string;
+}>;
+
 const safeRead = (value: unknown, key: string): unknown => {
   if (!value || typeof value !== 'object') return undefined;
   try {
@@ -129,7 +133,7 @@ const sharesSensitiveFragment = (
   return false;
 };
 
-const sanitizePublicMessage = (
+const sanitizePublicMessageText = (
   message: string,
   secrets: readonly string[] = [],
   sensitiveTexts: readonly string[] = [],
@@ -138,7 +142,19 @@ const sanitizePublicMessage = (
   if (
     /<(?:!doctype|html|body|script)\b/iu.test(raw)
     || /(?:^|\n)\s*at\s+[^\n]+:\d+(?::\d+)?/u.test(raw)
-    || /\bfile:\/\//iu.test(raw)
+    || /\s+at\s+\S+\s+\([^)]*:\d+(?::\d+)?\)/u.test(raw)
+    || /\bTraceback \(most recent call last\):/u.test(raw)
+    || /(?:^|\n)\s*File\s+"[^"]+",\s+line\s+\d+/u.test(raw)
+    || /\bfile:(?:\/\/)?\//iu.test(raw)
+    || /-----BEGIN [A-Z0-9 ]+-----/u.test(raw)
+    || /\b(?:D1_ERROR|SQLITE_ERROR|SQLSTATE)\b/iu.test(raw)
+    || /\b(?:SELECT\s+.+\s+FROM|INSERT\s+INTO|DELETE\s+FROM|UPDATE\s+.+\s+SET|CREATE\s+(?:TABLE|INDEX)|ALTER\s+TABLE|DROP\s+TABLE|PRAGMA\b)/iu.test(raw)
+    || /\bno such (?:table|column)\b/iu.test(raw)
+    || /\b(?:database|relation|column|table|schema|constraint|role)\s+["`[]?[^\s"`\]]+["`\]]?\s+(?:does not exist|not found|violation|failed)\b/iu.test(raw)
+    || /\btable\s+\S+\s+has no column named\b/iu.test(raw)
+    || /\b(?:duplicate key value violates unique constraint|foreign key constraint|NOT NULL constraint failed|UNIQUE constraint failed)\b/iu.test(raw)
+    || /"(?:table|column|schema|constraint)"\s*:/iu.test(raw)
+    || /\b(?:host|server)\s*=\s*[^;\s]+(?:[;\s]+(?:port|database|dbname|user(?:\s+id)?|uid|password|pwd)\s*=)/iu.test(raw)
   ) return '';
   for (const sensitiveText of sensitiveTexts) {
     const normalized = sensitiveText.trim();
@@ -148,17 +164,40 @@ const sanitizePublicMessage = (
 
   let sanitized = raw
     .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/gu, '')
-    .replace(/\b(authorization|proxy-authorization|x-auth-token|x-api-key|cookie|set-cookie)\s*[:=]\s*[^,\r\n]+/giu, '$1: [REDACTED]')
-    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/giu, 'Bearer [REDACTED]')
-    .replace(/"(?:[^"]*api[_-]?key|access[_-]?token|refresh[_-]?token|token|secret|password|session)"\s*:\s*"[^"]*"/giu, '"credential":"[REDACTED]"')
-    .replace(/\b((?:[a-z0-9]+[_-])?api[_-]?key|access[_-]?token|refresh[_-]?token|token|secret|password|session)\s*[:=]\s*[^&#；;,\s]+/giu, '$1=[REDACTED]')
+    .replace(/(https?:\/\/[^\s?#]+)\?(?=[^\s]*(?:x-amz-|x-goog-|signature=|sig=))[^\s]+/giu, '$1?[REDACTED]')
+    .replace(/\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis|rediss|libsql|sqlite):\/\/[^\s"'<>]+/giu, '[CONNECTION_STRING]')
+    .replace(/\b(authorization|proxy-authorization|x-auth-token|x-api-key|cookie|set-cookie)\s*[:=]\s*[^,，\r\n]+/giu, '$1: [REDACTED]')
+    .replace(/\bBearer\s+[^\s,，;；]+/giu, 'Bearer [REDACTED]')
+    .replace(/"(?:[^"]*api[_-]?key|access[_-]?token|refresh[_-]?token|token|secret|password|session(?:[_-]?id)?|private[_-]?key)"\s*:\s*"[^"]*"/giu, '"credential":"[REDACTED]"')
+    .replace(/\b((?:[a-z0-9]+[_-])*api[_-]?key|access[_-]?token|refresh[_-]?token|token|secret|password|session(?:[_-]?id)?|private[_-]?key|signature|sig)\s*[:=]\s*[^&#；;,，\s]+/giu, '$1=[REDACTED]')
     .replace(/([a-z][a-z0-9+.-]*:\/\/)[^/@\s]+@/giu, '$1[REDACTED]@')
-    .replace(/([?&](?:api[_-]?key|access[_-]?token|refresh[_-]?token|token|secret|password|session)=)[^&#\s]+/giu, '$1[REDACTED]')
-    .replace(/\b(sk|pk|key)-[A-Za-z0-9_-]{12,}\b/gu, '$1-[REDACTED]');
+    .replace(/([?&](?:api[_-]?key|access[_-]?token|refresh[_-]?token|token|secret|password|session|signature|sig|x-amz-[a-z-]+|x-goog-[a-z-]+)=)[^&#\s]+/giu, '$1[REDACTED]')
+    .replace(/\b(sk|pk|key)-[A-Za-z0-9_-]{12,}\b/gu, '$1-[REDACTED]')
+    .replace(/(^|[\s("'=:])\/(?!\/)[^\s),;，'"]+/gu, '$1[PATH]')
+    .replace(/\b[A-Za-z]:\\[^\s),;，'"]+/gu, '[PATH]')
+    .replace(/\\\\[^\\\s]+\\[^\s),;，'"]+/gu, '[PATH]');
 
   for (const secret of secrets) sanitized = redactLiteral(sanitized, secret);
   sanitized = sanitized.replace(/\s+/gu, ' ').trim();
   return sanitized.slice(0, MAX_PUBLIC_ERROR_MESSAGE_LENGTH);
+};
+
+export const sanitizePublicErrorMessage = (
+  value: unknown,
+  options: SanitizePublicErrorMessageOptions = {},
+): string => {
+  const safeProjection = readSafePublicAiError(value);
+  const rawMessage = typeof value === 'string'
+    ? value
+    : safeProjection?.message ?? safeString(safeRead(value, 'message'));
+  const sanitized = sanitizePublicMessageText(
+    rawMessage,
+    options.secrets,
+    options.sensitiveTexts,
+  );
+  return sanitized || (options.fallbackMessage === undefined
+    ? '请求处理失败，请稍后重试'
+    : options.fallbackMessage);
 };
 
 const readUpstreamRequestId = (
@@ -224,10 +263,13 @@ const buildPublicDiagnostic = (
 ): string => {
   if (!isRecognizedUpstreamError(error)) return fallbackMessage;
   const rawMessage = readUpstreamMessage(error);
-  const sanitizedMessage = sanitizePublicMessage(
+  const sanitizedMessage = sanitizePublicErrorMessage(
     rawMessage,
-    options?.secrets,
-    options?.sensitiveTexts,
+    {
+      fallbackMessage: '',
+      secrets: options?.secrets,
+      sensitiveTexts: options?.sensitiveTexts,
+    },
   );
   if (!sanitizedMessage) return fallbackMessage;
   const prefix = readSafeErrorName(error);

@@ -186,6 +186,21 @@ export const resetStrictArenaRatingForDataCard = async (
   }
 };
 
+export const removeStrictArenaRatingForDataCard = async (
+  db: AppDrizzleDb,
+  dataCardId: string,
+): Promise<void> => {
+  await db
+    .delete(arenaRatings)
+    .where(
+      and(
+        eq(arenaRatings.entityType, 'data_card'),
+        eq(arenaRatings.entityId, dataCardId),
+        eq(arenaRatings.queue, 'strict'),
+      ),
+    );
+};
+
 export const countStrictAppliedEventsSince = async (
   db: AppDrizzleDb,
   userId: number,

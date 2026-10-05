@@ -7,6 +7,7 @@ import {
   buildArenaRoomSharedConfig,
   detectProposalConflicts,
   diffArenaSharedConfig,
+  previewArenaProposalApplication,
   validateProposalChanges,
   type ArenaRoomNormalizedSource,
 } from '../src/index';
@@ -37,6 +38,7 @@ const online = (id: string, kind: 'character' | 'scenario' | 'material', version
 
 const baseConfig = () => ({
   battleMode: 'classic' as const,
+  reportFormat: 'markdown' as const,
   combatants: [
     { ...online('c1', 'character'), characterGuidance: '保护队友' },
     online('c2', 'character'),
@@ -303,24 +305,22 @@ describe('Arena shared config diff', () => {
     });
   });
 
-  it('fails closed for team structure, array reorder, language, preset additions, and host-local additions', () => {
+  it('supports team rename/language while failing closed for host-local additions', () => {
     const base = baseConfig();
-    expect(() => diffArenaSharedConfig(base, {
-      ...base,
-      teams: [{ ...base.teams[1] }, { ...base.teams[0] }],
-    })).toThrowError(/array reorder|reorder/i);
-    expect(() => diffArenaSharedConfig(base, {
+    expect(diffArenaSharedConfig(base, {
       ...base,
       teams: [{ ...base.teams[0], displayName: 'renamed' }, base.teams[1]],
-    })).toThrowError(/team/i);
-    expect(() => diffArenaSharedConfig(base, {
+    })).toEqual([expect.objectContaining({ type: 'renameTeam', teamKey: 'team:a', value: 'renamed' })]);
+    expect(diffArenaSharedConfig(base, {
       ...base,
       selectedLanguage: 'en-US',
-    })).toThrowError(/language|unsupported/i);
-    expect(() => diffArenaSharedConfig(base, {
+    })).toEqual([expect.objectContaining({ type: 'setSelectedLanguage', value: 'en-US' })]);
+    expect(diffArenaSharedConfig(base, {
       ...base,
       combatants: [...base.combatants, { key: 'preset:c3', ref: ref('c3', 'character') }],
-    })).toThrowError(/data-card|preset|represent/i);
+    })).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'addCombatant', key: 'preset:c3' }),
+    ]));
     expect(() => diffArenaSharedConfig(base, {
       ...base,
       materials: [...base.materials, {
@@ -332,32 +332,190 @@ describe('Arena shared config diff', () => {
     })).toThrowError(/host-local|represent/i);
   });
 
-  it('fails closed when a collection insertion is not the append position reproducible by apply', () => {
-    const base = baseConfig();
-    expect(() => diffArenaSharedConfig(base, {
+  it('preserves preset namespace through diff and apply for combatant/scenario/auxiliary scenario', () => {
+    const base = { ...baseConfig(), scenario: null };
+    const working = {
       ...base,
-      combatants: [base.combatants[0], online('c3', 'character'), base.combatants[1]],
-    })).toThrowError(/order|reorder|append/i);
-    expect(() => diffArenaSharedConfig(base, {
-      ...base,
-      auxScenarios: [base.auxScenarios[0], online('aux-middle', 'scenario'), base.auxScenarios[1]],
-    })).toThrowError(/order|reorder|append/i);
-    expect(() => diffArenaSharedConfig(base, {
-      ...base,
-      materials: [base.materials[0], online('mat-middle', 'material'), base.materials[1]],
-    })).toThrowError(/order|reorder|append/i);
+      combatants: [
+        ...base.combatants,
+        { key: 'preset:c3', ref: ref('c3', 'character', 'sha256:3') },
+      ],
+      scenario: { key: 'preset:s2', ref: ref('s2', 'scenario', 'sha256:2') },
+      auxScenarios: [{ key: 'preset:aux2', ref: ref('aux2', 'scenario', 'sha256:4') }],
+    };
+    const changes = diffArenaSharedConfig(base, working);
+    expect(changes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'addCombatant', key: 'preset:c3' }),
+      expect.objectContaining({ type: 'setScenario', key: 'preset:s2' }),
+      expect.objectContaining({ type: 'addAuxScenario', key: 'preset:aux2' }),
+    ]));
+    const applied = applyArenaProposal(
+      { roomId: 'room-1', config: base, revision: 7 },
+      makeProposal(changes),
+    );
+    expect(applied.status).toBe('accepted');
+    expect(applied.config).toEqual(working);
   });
 
-  it('fails closed when team assignment append semantics cannot reproduce the working order', () => {
+  it('treats data-card and preset entries with the same id as distinct proposal targets', () => {
+    const current = baseConfig();
+    const change = {
+      changeId: 'add-preset-c1',
+      type: 'addCombatant' as const,
+      key: 'preset:c1',
+      ref: ref('c1', 'character'),
+      expectedBase: { kind: 'absent' as const },
+    };
+    expect(detectProposalConflicts(current, [change])).toEqual([]);
+    const applied = applyArenaProposal(
+      { roomId: 'room-1', config: current, revision: 7 },
+      makeProposal([change], 'proposal-namespace-collision'),
+    );
+    expect(applied.status).toBe('accepted');
+    expect(applied.config.combatants.map((entry) => entry.key)).toContain('preset:c1');
+  });
+
+  it('accepts removal when a present expectedBase preserves the preset namespace', () => {
+    const current = {
+      ...baseConfig(),
+      combatants: [
+        ...baseConfig().combatants,
+        { key: 'preset:c3', ref: ref('c3', 'character', 'sha256:3') },
+      ],
+    };
+    const change = {
+      changeId: 'remove-preset-c3',
+      type: 'removeCombatant' as const,
+      combatantKey: 'preset:c3',
+      expectedBase: {
+        kind: 'present' as const,
+        key: 'preset:c3',
+        ref: ref('c3', 'character', 'sha256:3'),
+      },
+    };
+
+    expect(detectProposalConflicts(current, [change])).toEqual([]);
+    const applied = applyArenaProposal(
+      { roomId: 'room-1', config: current, revision: 7 },
+      makeProposal([change], 'proposal-remove-preset'),
+    );
+    expect(applied.status).toBe('accepted');
+    expect(applied.config.combatants.map((entry) => entry.key)).not.toContain('preset:c3');
+  });
+
+  it('reports the current namespace when a scenario expectedBase points at a different ref namespace', () => {
+    const current = {
+      ...baseConfig(),
+      scenario: { key: 'data-card:s1', ref: ref('s1', 'scenario') },
+    };
+    const change = {
+      changeId: 'replace-preset-s1',
+      type: 'setScenario' as const,
+      key: 'preset:s2',
+      ref: ref('s2', 'scenario'),
+      expectedBase: {
+        kind: 'ref' as const,
+        key: 'preset:s1',
+        ref: ref('s1', 'scenario'),
+      },
+    };
+    expect(detectProposalConflicts(current, [change])).toEqual([
+      expect.objectContaining({
+        code: 'precondition-failed',
+        current: expect.objectContaining({ key: 'data-card:s1' }),
+      }),
+    ]);
+  });
+
+  it('emits dependency-bound reorder changes when collection insertion is not append-only', () => {
     const base = baseConfig();
-    expect(() => diffArenaSharedConfig(base, {
+    const working = {
+      ...base,
+      combatants: [base.combatants[0], online('c3', 'character'), base.combatants[1]],
+      auxScenarios: [base.auxScenarios[0], online('aux-middle', 'scenario'), base.auxScenarios[1]],
+      materials: [base.materials[0], online('mat-middle', 'material'), base.materials[1]],
+    };
+    const changes = diffArenaSharedConfig(base, working);
+    for (const [reorderType, addType] of [
+      ['reorderCombatants', 'addCombatant'],
+      ['reorderAuxScenarios', 'addAuxScenario'],
+      ['reorderMaterials', 'addMaterial'],
+    ] as const) {
+      const reorder = changes.find((change) => change.type === reorderType);
+      const addition = changes.find((change) => change.type === addType);
+      expect(reorder?.dependsOn).toContain(addition?.changeId);
+      expect(validateProposalChanges(changes, reorder ? [reorder.changeId] : []).issues).toEqual(
+        expect.arrayContaining([expect.objectContaining({ code: 'dependency-not-selected' })]),
+      );
+    }
+    expect(changes.find((change) => change.type === 'reorderCombatants')).toMatchObject({
+      value: ['data-card:c1', 'data-card:c3', 'data-card:c2'],
+      expectedBase: { kind: 'value', value: ['data-card:c1', 'data-card:c2', 'data-card:c3'] },
+    });
+    expect(applyArenaProposal(proposalState(base, 7), makeProposal(changes))).toMatchObject({
+      status: 'accepted',
+      config: working,
+      revision: 8,
+    });
+  });
+
+  it('emits staged team-combatant reorder after assignment append', () => {
+    const base = baseConfig();
+    const working = {
       ...base,
       combatants: [...base.combatants, online('c3', 'character')],
       teams: [
         { key: 'team:a', displayName: 'A', combatantKeys: ['data-card:c3', 'data-card:c1'] },
         { key: 'team:b', displayName: 'B', combatantKeys: [] },
       ],
-    })).toThrowError(/order|reorder|append/i);
+    };
+    const changes = diffArenaSharedConfig(base, working);
+    const assignment = changes.find((change) => change.type === 'assignTeam');
+    const reorder = changes.find((change) => change.type === 'reorderTeamCombatants');
+    expect(reorder).toMatchObject({
+      teamKey: 'team:a',
+      value: ['data-card:c3', 'data-card:c1'],
+      expectedBase: { kind: 'value', value: ['data-card:c1', 'data-card:c3'] },
+    });
+    expect(reorder?.dependsOn).toContain(assignment?.changeId);
+    expect(applyArenaProposal(proposalState(base, 7), makeProposal(changes))).toMatchObject({
+      status: 'accepted',
+      config: working,
+      revision: 8,
+    });
+  });
+
+  it('round-trips pure shared collection reorder and conflicts on concurrent order drift', () => {
+    const base = baseConfig();
+    const working = {
+      ...base,
+      combatants: [...base.combatants].reverse(),
+      teams: [...base.teams].reverse(),
+      auxScenarios: [...base.auxScenarios].reverse(),
+      materials: [...base.materials].reverse(),
+    };
+    const changes = diffArenaSharedConfig(base, working);
+    expect(changes.map((change) => change.type)).toEqual([
+      'reorderCombatants',
+      'reorderTeams',
+      'reorderAuxScenarios',
+      'reorderMaterials',
+    ]);
+    expect(applyArenaProposal(proposalState(base, 7), makeProposal(changes))).toMatchObject({
+      status: 'accepted',
+      config: working,
+      revision: 8,
+    });
+    expect(detectProposalConflicts({
+      ...base,
+      combatants: [...base.combatants, online('authority-add', 'character')],
+    }, changes)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        changeId: changes[0]?.changeId,
+        code: 'precondition-failed',
+        target: 'combatants:order',
+      }),
+    ]));
   });
 });
 
@@ -417,7 +575,7 @@ describe('proposal selection and conflicts', () => {
     ]));
   });
 
-  it('distinguishes stale value preconditions from online reference version drift', () => {
+  it('ignores online reference version drift while preserving stale value preconditions', () => {
     const base = baseConfig();
     const changes = diffArenaSharedConfig(base, {
       ...base,
@@ -436,7 +594,7 @@ describe('proposal selection and conflicts', () => {
     };
     const conflicts = detectProposalConflicts(current, changes);
 
-    expect(conflicts.find((conflict) => conflict.target === 'combatant:data-card:c1')).toMatchObject({ code: 'reference-changed' });
+    expect(conflicts.find((conflict) => conflict.target === 'combatant:data-card:c1')).toBeUndefined();
     expect(conflicts.find((conflict) => conflict.target === 'userGuidance')).toMatchObject({ code: 'precondition-failed' });
   });
 });
@@ -646,7 +804,7 @@ describe('proposal application', () => {
     expect(result.config.historySettings).toEqual(nextHistory);
   });
 
-  it('rejects malformed proposals and absent targets without changing config or revision', () => {
+  it('rejects malformed proposals without changing config or revision', () => {
     const current = baseConfig();
     const malformed = applyArenaProposal(proposalState(current, 3), {
       ...makeProposal([{ changeId: 'bad', type: 'setBattleMode', value: 'invalid' }], 'proposal-malformed'),
@@ -654,17 +812,204 @@ describe('proposal application', () => {
     expect(malformed.status).toBe('rejected');
     expect(malformed.revision).toBe(3);
     expect(malformed.config).toEqual(current);
+  });
 
+  it('treats removal of an already-absent target as a satisfied no-op, not a conflict', () => {
+    const current = baseConfig();
     const absentTarget = applyArenaProposal(proposalState(current, 3), makeProposal([{
       changeId: 'remove-missing',
       type: 'removeMaterial' as const,
       materialKey: 'data-card:missing',
       expectedBase: { kind: 'present' as const, ref: ref('missing', 'material') },
     }], 'proposal-absent'));
-    expect(absentTarget.status).toBe('rejected');
-    expect(absentTarget.revision).toBe(3);
+    expect(absentTarget.status).toBe('accepted');
+    expect(absentTarget.satisfiedChangeIds).toEqual(['remove-missing']);
+    expect(absentTarget.acceptedChangeIds).toEqual(['remove-missing']);
+    expect(absentTarget.conflicts).toEqual([]);
     expect(absentTarget.config).toEqual(current);
+    // satisfied no-op 不改变配置，也不允许虚增 config revision。
+    expect(absentTarget.revision).toBe(3);
     expect(current.materials).toHaveLength(2);
+  });
+
+  it('accepts add + dependent guidance + removal of an already-deleted combatant (regression fixture)', () => {
+    // 试玩回归场景：提案基于含 c2 的 BASE 提交（移除 c2 + 新增 c3 + 设置 c3 引导），
+    // 但提交时 c2 已被其他修改删除。整份提案应安全合并：
+    // 新增/引导正常应用，移除项记为 satisfied no-op，而不是整份提案失败。
+    const base = baseConfig();
+    const withoutC2 = {
+      ...base,
+      combatants: base.combatants.filter((entry) => entry.key !== 'data-card:c2'),
+    };
+    const proposal = makeProposal([
+      {
+        changeId: 'add-c3',
+        type: 'addCombatant' as const,
+        ref: ref('c3', 'character'),
+        expectedBase: { kind: 'absent' as const },
+      },
+      {
+        changeId: 'guide-c3',
+        type: 'setCharacterGuidance' as const,
+        combatantKey: 'data-card:c3',
+        value: '这只是张公告',
+        expectedBase: { kind: 'value' as const, value: null },
+        dependsOn: ['add-c3'],
+      },
+      {
+        changeId: 'remove-c2',
+        type: 'removeCombatant' as const,
+        combatantKey: 'data-card:c2',
+        expectedBase: { kind: 'present' as const, ref: ref('c2', 'character') },
+      },
+    ], 'proposal-regression');
+
+    const result = applyArenaProposal(proposalState(withoutC2, 10), proposal);
+    expect(result.status).toBe('accepted');
+    expect(result.satisfiedChangeIds).toEqual(['remove-c2']);
+    expect(result.config.combatants).toContainEqual({
+      key: 'data-card:c3',
+      ref: ref('c3', 'character'),
+      characterGuidance: '这只是张公告',
+    });
+    expect(result.config.combatants.some((entry) => entry.key === 'data-card:c2')).toBe(false);
+  });
+
+  it('reports CURRENT == PROPOSED as satisfied for value changes too', () => {
+    const scenarioCurrent = { ...baseConfig(), battleMode: 'scenario' as const };
+    const satisfied = applyArenaProposal(proposalState(scenarioCurrent, 4), makeProposal([
+      {
+        changeId: 'mode',
+        type: 'setBattleMode' as const,
+        value: 'scenario' as const,
+        expectedBase: { kind: 'value' as const, value: 'classic' as const },
+      },
+    ], 'proposal-already-done'));
+    expect(satisfied.status).toBe('accepted');
+    expect(satisfied.satisfiedChangeIds).toEqual(['mode']);
+    expect(satisfied.config).toEqual(scenarioCurrent);
+    expect(satisfied.revision).toBe(4);
+  });
+
+  it('reports CURRENT == PROPOSED as satisfied for preset references too (regression)', () => {
+    // 回归：preset:<id> 引用的 satisfied 判定曾从 ref.id 重新推导 namespace，
+    // 得到 data-card:<id> 与当前 preset:<id> 不一致而误报冲突。
+    // satisfied 判定必须使用已规范化的 targetKey。
+    const presetRef = (id: string, kind: 'character' | 'scenario', versionToken: string) => ({
+      id,
+      kind,
+      versionToken,
+    });
+    const presetCurrent = {
+      ...baseConfig(),
+      combatants: [
+        { key: 'preset:M00.json', ref: presetRef('M00.json', 'character', 'sha256:m00') },
+        online('c2', 'character'),
+      ],
+      teams: [
+        { key: 'team:a', displayName: 'A', combatantKeys: [] },
+        { key: 'team:b', displayName: 'B', combatantKeys: ['preset:M00.json'] },
+      ],
+      scenario: { key: 'preset:S00.json', ref: presetRef('S00.json', 'scenario', 'sha256:s00') },
+      auxScenarios: [{ key: 'preset:A00.json', ref: presetRef('A00.json', 'scenario', 'sha256:a00') }],
+    };
+    const satisfied = applyArenaProposal(proposalState(presetCurrent, 4), makeProposal([
+      {
+        changeId: 'add-preset-dup',
+        type: 'addCombatant' as const,
+        key: 'preset:M00.json',
+        ref: presetRef('M00.json', 'character', 'sha256:m00'),
+        expectedBase: { kind: 'absent' as const },
+      },
+      {
+        changeId: 'scenario-preset-same',
+        type: 'setScenario' as const,
+        key: 'preset:S00.json',
+        ref: presetRef('S00.json', 'scenario', 'sha256:s00'),
+        expectedBase: { kind: 'ref' as const, ref: ref('s1', 'scenario') },
+      },
+      {
+        changeId: 'aux-preset-dup',
+        type: 'addAuxScenario' as const,
+        key: 'preset:A00.json',
+        ref: presetRef('A00.json', 'scenario', 'sha256:a00'),
+        expectedBase: { kind: 'absent' as const },
+      },
+    ], 'proposal-preset-dup'));
+
+    expect(satisfied.status).toBe('accepted');
+    expect(satisfied.satisfiedChangeIds).toEqual(['add-preset-dup', 'scenario-preset-same', 'aux-preset-dup']);
+    expect(satisfied.conflicts).toEqual([]);
+    expect(satisfied.config).toEqual(presetCurrent);
+    // 全 satisfied 是安全 no-op：终结提案但不产生新 config revision。
+    expect(satisfied.revision).toBe(4);
+
+    const preview = previewArenaProposalApplication(proposalState(presetCurrent, 4), makeProposal([
+      {
+        changeId: 'add-preset-dup',
+        type: 'addCombatant' as const,
+        key: 'preset:M00.json',
+        ref: presetRef('M00.json', 'character', 'sha256:m00'),
+        expectedBase: { kind: 'absent' as const },
+      },
+    ], 'proposal-preset-dup'));
+    const byId = new Map(preview.plan.map((item) => [item.changeId, item] as const));
+    expect(byId.get('add-preset-dup')?.outcome).toBe('satisfied');
+  });
+
+  it('keeps genuine conflicts when CURRENT differs from both BASE and PROPOSED', () => {
+    const driftedCurrent = { ...baseConfig(), battleMode: 'kizuna' as const };
+    const result = applyArenaProposal(proposalState(driftedCurrent, 5), makeProposal([
+      {
+        changeId: 'mode',
+        type: 'setBattleMode' as const,
+        value: 'scenario' as const,
+        expectedBase: { kind: 'value' as const, value: 'classic' as const },
+      },
+    ], 'proposal-conflict'));
+    expect(result.status).toBe('rejected');
+    expect(result.conflicts).toEqual([
+      expect.objectContaining({ changeId: 'mode', code: 'precondition-failed' }),
+    ]);
+    expect(result.config).toEqual(driftedCurrent);
+  });
+
+  it('previews staged application with the same outcome per change as apply', () => {
+    const base = baseConfig();
+    const withoutC2 = {
+      ...base,
+      combatants: base.combatants.filter((entry) => entry.key !== 'data-card:c2'),
+    };
+    const proposal = makeProposal([
+      {
+        changeId: 'add-c3',
+        type: 'addCombatant' as const,
+        ref: ref('c3', 'character'),
+        expectedBase: { kind: 'absent' as const },
+      },
+      {
+        changeId: 'guide-c3',
+        type: 'setCharacterGuidance' as const,
+        combatantKey: 'data-card:c3',
+        value: 'g',
+        expectedBase: { kind: 'value' as const, value: null },
+        dependsOn: ['add-c3'],
+      },
+      {
+        changeId: 'remove-c2',
+        type: 'removeCombatant' as const,
+        combatantKey: 'data-card:c2',
+        expectedBase: { kind: 'present' as const, ref: ref('c2', 'character') },
+      },
+    ], 'proposal-preview');
+
+    const preview = previewArenaProposalApplication(proposalState(withoutC2, 10), proposal);
+    expect(preview.status).toBe('accepted');
+    expect(preview.conflicts).toEqual([]);
+    const byId = new Map(preview.plan.map((item) => [item.changeId, item] as const));
+    expect(byId.get('add-c3')?.outcome).toBe('applicable');
+    expect(byId.get('guide-c3')?.outcome).toBe('applicable');
+    expect(byId.get('remove-c2')?.outcome).toBe('satisfied');
   });
 
   it('returns the original config/revision when an earlier selected change stages before a later conflict', () => {

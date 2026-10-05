@@ -497,6 +497,7 @@ export async function getMessageSummary(input: {
       const summary = await getCrowdReviewSummary({
         db: input.db,
         userId,
+        readOnly: true,
       });
       if (!summary.hasCrowdReviewPending) {
         return { hasCrowdReviewPending: false, crowdReviewPrompt: null };

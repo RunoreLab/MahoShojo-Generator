@@ -1,5 +1,5 @@
 import { type MessageServiceDb, MessagesServiceUnavailableError, markSiteMessagesRead } from '@/lib/messages/service';
-import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
+import { json, readJson, requireAuthUser, withApiErrorBoundary } from '@/lib/api/server';
 
 type RequireAuthResult = Awaited<ReturnType<typeof requireAuthUser>> | { user: { id: number } } | Response;
 
@@ -75,5 +75,5 @@ export const createMessagesSiteReadHandler =
     }
   };
 
-export const appRouteHandler = withPvpErrorBoundary(createMessagesSiteReadHandler());
+export const appRouteHandler = withApiErrorBoundary(createMessagesSiteReadHandler());
 export default appRouteHandler;

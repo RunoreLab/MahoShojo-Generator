@@ -1,8 +1,12 @@
 import {
   ARENA_ROOM_HTTP_BASE_PATH,
+  ARENA_ROOM_ERROR_TAXONOMY_ACCEPT,
   ArenaRoomCreateRequestSchema,
   ArenaRoomEpochMutationRequestSchema,
   ArenaRoomGenerationStartRequestSchema,
+  ArenaRoomGenerationCancelRequestSchema,
+  ArenaRoomGenerationHistoryResponseSchema,
+  ArenaRoomGenerationHistoryViewResponseSchema,
   ArenaRoomGenerationViewResponseSchema,
   ArenaRoomHttpErrorResponseSchema,
   ArenaRoomJoinRequestSchema,
@@ -11,6 +15,8 @@ import {
   ArenaRoomProposalResolveRequestSchema,
   ArenaRoomProposalSubmitRequestSchema,
   ArenaRoomProposalWithdrawRequestSchema,
+  ArenaRoomPublishConfigRequestSchema,
+  ArenaRoomMemberKickRequestSchema,
   ArenaRoomSessionResponseSchema,
   ArenaRoomTicketRequestSchema,
   ArenaRoomTicketResponseSchema,
@@ -18,12 +24,17 @@ import {
   RoomDirectoryPageSchema,
   type ArenaRoomCreateRequest,
   type ArenaRoomGenerationStartRequest,
+  type ArenaRoomGenerationCancelRequest,
+  type ArenaRoomGenerationHistoryResponse,
+  type ArenaRoomGenerationHistoryViewResponse,
   type ArenaRoomGenerationViewResponse,
   type ArenaRoomJoinRequest,
   type ArenaRoomLeaveResponse,
   type ArenaRoomProposalMutationResponse,
   type ArenaRoomProposalResolveRequest,
   type ArenaRoomProposalSubmitRequest,
+  type ArenaRoomPublishConfigRequest,
+  type ArenaRoomMemberKickRequest,
   type ArenaRoomSessionResponse,
   type ArenaRoomTicketRequest,
   type ArenaRoomTicketResponse,
@@ -32,6 +43,7 @@ import {
 } from '@mahoshojo/contracts/arena-room';
 
 import { authStorage } from '@/lib/auth';
+import { areArenaRoomSharedConfigsSemanticallyEqual } from './shared-config-equality';
 
 export type ArenaRoomClientErrorCode =
   | 'ROOM_AUTHENTICATION_REQUIRED'
@@ -56,10 +68,15 @@ export type ArenaRoomClient = {
   discover(query?: Partial<RoomDirectoryPageQuery>): Promise<RoomDirectoryPage>;
   create(request: ArenaRoomCreateRequest): Promise<ArenaRoomSessionResponse>;
   join(roomId: string, request: ArenaRoomJoinRequest): Promise<ArenaRoomSessionResponse>;
-  getSession(roomId: string): Promise<ArenaRoomSessionResponse>;
+  getSession(roomId: string, signal?: AbortSignal): Promise<ArenaRoomSessionResponse>;
   issueTicket(roomId: string, request: ArenaRoomTicketRequest): Promise<ArenaRoomTicketResponse>;
   leave(roomId: string, expectedRoomEpoch: string): Promise<ArenaRoomLeaveResponse>;
   close(roomId: string, expectedRoomEpoch: string): Promise<ArenaRoomLeaveResponse>;
+  kick(
+    roomId: string,
+    targetUserId: string,
+    expectedRoomEpoch: ArenaRoomMemberKickRequest['expectedRoomEpoch'],
+  ): Promise<ArenaRoomSessionResponse>;
   submitProposal(
     roomId: string,
     request: ArenaRoomProposalSubmitRequest,
@@ -74,13 +91,28 @@ export type ArenaRoomClient = {
     proposalId: string,
     expectedRoomEpoch: string,
   ): Promise<ArenaRoomProposalMutationResponse>;
+  publishConfig(
+    roomId: string,
+    request: ArenaRoomPublishConfigRequest,
+  ): Promise<ArenaRoomSessionResponse>;
   startGeneration(
     roomId: string,
     request: ArenaRoomGenerationStartRequest,
   ): Promise<ArenaRoomGenerationViewResponse>;
+  listGenerationHistory(roomId: string): Promise<ArenaRoomGenerationHistoryResponse>;
+  getGenerationHistoryView(
+    roomId: string,
+    generationId: string,
+  ): Promise<ArenaRoomGenerationHistoryViewResponse>;
   getGenerationView(
     roomId: string,
     generationId: string,
+    signal?: AbortSignal,
+  ): Promise<ArenaRoomGenerationViewResponse>;
+  cancelGeneration(
+    roomId: string,
+    generationId: string,
+    expectedRoomEpoch: ArenaRoomGenerationCancelRequest['expectedRoomEpoch'],
   ): Promise<ArenaRoomGenerationViewResponse>;
   buildWebSocketUrl(ticket: ArenaRoomTicketResponse): string;
 };
@@ -126,6 +158,7 @@ export const createArenaRoomClient = (options: ClientOptions): ArenaRoomClient =
     readonly body?: unknown;
     readonly schema: ResponseSchema<T>;
     readonly unknownResult?: boolean;
+    readonly signal?: AbortSignal;
   }): Promise<T> => {
     const authHeader = await getAuthHeader();
     if (!authHeader) {
@@ -141,10 +174,12 @@ export const createArenaRoomClient = (options: ClientOptions): ArenaRoomClient =
         method: input.method ?? 'GET',
         credentials: 'omit',
         headers: {
+          accept: ARENA_ROOM_ERROR_TAXONOMY_ACCEPT,
           authorization: authHeader,
           ...(input.body === undefined ? {} : { 'content-type': 'application/json' }),
         },
         ...(input.body === undefined ? {} : { body: JSON.stringify(input.body) }),
+        ...(input.signal === undefined ? {} : { signal: input.signal }),
       });
     } catch {
       throw new ArenaRoomClientError(
@@ -156,7 +191,18 @@ export const createArenaRoomClient = (options: ClientOptions): ArenaRoomClient =
         undefined,
       );
     }
-    const payload = await response.json().catch(() => null) as unknown;
+    let payload: unknown = null;
+    try {
+      payload = await response.json();
+    } catch {
+      if (input.signal?.aborted) {
+        throw new ArenaRoomClientError(
+          'ROOM_UNAVAILABLE',
+          null,
+          '房间运行时暂不可用',
+        );
+      }
+    }
     if (!response.ok) {
       if (input.unknownResult && response.status >= 500) {
         throw new ArenaRoomClientError(
@@ -248,10 +294,11 @@ export const createArenaRoomClient = (options: ClientOptions): ArenaRoomClient =
       });
     },
 
-    async getSession(roomId) {
+    async getSession(roomId, signal) {
       return request({
         path: pathFor(roomId, 'session'),
         schema: ArenaRoomSessionResponseSchema,
+        signal,
       });
     },
 
@@ -265,21 +312,68 @@ export const createArenaRoomClient = (options: ClientOptions): ArenaRoomClient =
     },
 
     async leave(roomId, expectedRoomEpoch) {
-      return request({
+      const result = await request({
         path: pathFor(roomId, 'leave'),
         method: 'POST',
         body: ArenaRoomEpochMutationRequestSchema.parse({ expectedRoomEpoch }),
         schema: ArenaRoomLeaveResponseSchema,
+        unknownResult: true,
       });
+      if (result.roomId !== roomId || result.outcome !== 'left') {
+        throw new ArenaRoomClientError(
+          'ROOM_RESULT_UNKNOWN',
+          null,
+          '请求可能已提交，请先确认房间状态，不要重复提交',
+        );
+      }
+      return result;
     },
 
     async close(roomId, expectedRoomEpoch) {
-      return request({
+      const result = await request({
         path: pathFor(roomId, 'close'),
         method: 'POST',
         body: ArenaRoomEpochMutationRequestSchema.parse({ expectedRoomEpoch }),
         schema: ArenaRoomLeaveResponseSchema,
+        unknownResult: true,
       });
+      if (result.roomId !== roomId || result.outcome !== 'closed') {
+        throw new ArenaRoomClientError(
+          'ROOM_RESULT_UNKNOWN',
+          null,
+          '请求可能已提交，请先确认房间状态，不要重复提交',
+        );
+      }
+      return result;
+    },
+
+    async kick(roomId, targetUserId, expectedRoomEpoch) {
+      const parsed = ArenaRoomMemberKickRequestSchema.parse({ expectedRoomEpoch });
+      const nextSession = await request({
+        path: pathFor(roomId, `members/${encodeURIComponent(targetUserId)}/kick`),
+        method: 'POST',
+        body: parsed,
+        schema: ArenaRoomSessionResponseSchema,
+        unknownResult: true,
+      });
+      const targetStillActive = nextSession.snapshot.members.some((member) => (
+        member.userId === targetUserId && member.membershipState === 'active'
+      ));
+      if (
+        nextSession.roomId !== roomId
+        || nextSession.roomEpoch !== parsed.expectedRoomEpoch
+        || nextSession.snapshot.roomId !== roomId
+        || nextSession.snapshot.roomEpoch !== parsed.expectedRoomEpoch
+        || nextSession.self.role !== 'host'
+        || targetStillActive
+      ) {
+        throw new ArenaRoomClientError(
+          'ROOM_RESULT_UNKNOWN',
+          null,
+          '请求可能已提交，请先确认房间状态，不要重复提交',
+        );
+      }
+      return nextSession;
     },
 
     async submitProposal(roomId, input) {
@@ -312,6 +406,34 @@ export const createArenaRoomClient = (options: ClientOptions): ArenaRoomClient =
       });
     },
 
+    async publishConfig(roomId, input) {
+      const parsed = ArenaRoomPublishConfigRequestSchema.parse(input);
+      const session = await request({
+        path: pathFor(roomId, 'config'),
+        method: 'POST',
+        body: parsed,
+        schema: ArenaRoomSessionResponseSchema,
+        unknownResult: true,
+      });
+      if (
+        session.roomId !== roomId
+        || session.roomEpoch !== parsed.expectedRoomEpoch
+        || session.self.role !== 'host'
+        || (
+          session.snapshot.revision !== parsed.expectedRevision
+          && session.snapshot.revision !== parsed.expectedRevision + 1
+        )
+        || !areArenaRoomSharedConfigsSemanticallyEqual(session.snapshot.sharedConfig, parsed.sharedConfig)
+      ) {
+        throw new ArenaRoomClientError(
+          'ROOM_RESULT_UNKNOWN',
+          null,
+          '请求可能已提交，请先确认房间状态，不要重复提交',
+        );
+      }
+      return session;
+    },
+
     async startGeneration(roomId, input) {
       const parsed = ArenaRoomGenerationStartRequestSchema.parse(input);
       const view = await request({
@@ -335,12 +457,66 @@ export const createArenaRoomClient = (options: ClientOptions): ArenaRoomClient =
       return view;
     },
 
-    async getGenerationView(roomId, generationId) {
+    async listGenerationHistory(roomId) {
+      const history = await request({
+        path: pathFor(roomId, 'generations'),
+        schema: ArenaRoomGenerationHistoryResponseSchema,
+      });
+      if (history.roomId !== roomId) {
+        throw new ArenaRoomClientError(
+          'ROOM_RESPONSE_INVALID',
+          null,
+          '房间历史响应身份不一致',
+        );
+      }
+      return history;
+    },
+
+    async getGenerationHistoryView(roomId, generationId) {
+      const history = await request({
+        path: `${pathFor(roomId, `generations/${encodeURIComponent(generationId)}`)}?view=history`,
+        schema: ArenaRoomGenerationHistoryViewResponseSchema,
+      });
+      if (history.roomId !== roomId || history.generation.generationId !== generationId) {
+        throw new ArenaRoomClientError(
+          'ROOM_RESPONSE_INVALID',
+          null,
+          '房间历史详情响应身份不一致',
+        );
+      }
+      return history;
+    },
+
+    async getGenerationView(roomId, generationId, signal) {
       const view = await request({
         path: pathFor(roomId, `generations/${encodeURIComponent(generationId)}`),
         schema: ArenaRoomGenerationViewResponseSchema,
+        signal,
       });
       return assertGenerationViewIdentity(view, roomId, generationId);
+    },
+
+    async cancelGeneration(roomId, generationId, expectedRoomEpoch) {
+      const parsed = ArenaRoomGenerationCancelRequestSchema.parse({ expectedRoomEpoch });
+      const view = await request({
+        path: pathFor(roomId, `generations/${encodeURIComponent(generationId)}/cancel`),
+        method: 'POST',
+        body: parsed,
+        schema: ArenaRoomGenerationViewResponseSchema,
+        unknownResult: true,
+      });
+      if (
+        view.roomId !== roomId
+        || view.roomEpoch !== parsed.expectedRoomEpoch
+        || view.generation.generationId !== generationId
+      ) {
+        throw new ArenaRoomClientError(
+          'ROOM_RESULT_UNKNOWN',
+          null,
+          '请求可能已提交，请先确认房间状态，不要重复提交',
+        );
+      }
+      return view;
     },
 
     buildWebSocketUrl(ticket) {

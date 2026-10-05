@@ -1,4 +1,4 @@
-import { normalizeUsage, type UsageLike } from '@mahoshojo/hosted-runtime/node-runtime/usage';
+import { normalizeUsage, type UsageLike } from '@mahoshojo/ai-core/token-usage';
 
 export { normalizeUsage };
 export type { UsageLike };

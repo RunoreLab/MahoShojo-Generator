@@ -92,13 +92,13 @@ const invalidSnapshot = (message: string): ArenaProposalEditorError => (
 );
 
 const normalizeSnapshot = (input: unknown): NormalizedSnapshot => {
-  if (!isRecord(input)) throw invalidSnapshot('projected room snapshot must be an object');
+  if (!isRecord(input)) throw invalidSnapshot('房间快照格式无效');
 
   const roomId = OpaqueKeySchema.safeParse(input.roomId);
   const roomEpoch = OpaqueKeySchema.safeParse(input.roomEpoch);
   const revision = RoomRevisionSchema.safeParse(input.revision);
   if (!roomId.success || !roomEpoch.success || !revision.success) {
-    throw invalidSnapshot('projected room snapshot has invalid room identity or revision');
+    throw invalidSnapshot('房间快照的房间标识或配置版本无效');
   }
 
   try {
@@ -111,7 +111,7 @@ const normalizeSnapshot = (input: unknown): NormalizedSnapshot => {
   } catch {
     throw new ArenaProposalEditorError(
       'invalid-snapshot',
-      'projected room snapshot does not contain a valid safe shared config',
+      '房间快照中缺少有效的可共享配置',
     );
   }
 };
@@ -136,7 +136,7 @@ const workingConfigOrError = (input: unknown): ArenaRoomSharedConfig => {
   } catch {
     throw new ArenaProposalEditorError(
       'invalid-working-config',
-      'working copy must be a valid safe shared config',
+      '当前编辑草稿不是有效的可共享配置',
     );
   }
 };
@@ -189,7 +189,7 @@ export const syncArenaProposalEditor = (
     if (!sameConfig(incoming.sharedConfig, editor.baselineConfig)) {
       throw new ArenaProposalEditorError(
         'revision-inconsistent',
-        'same room revision cannot carry a different shared config',
+        '同一房间配置版本不能对应不同的共享配置',
       );
     }
     return editor;
@@ -218,7 +218,7 @@ export const assertArenaProposalSelection = (
   if (!validation.valid) {
     throw new ArenaProposalEditorError(
       'selection-invalid',
-      validation.issues.map((issue) => issue.message).join('; ') || 'proposal selection is invalid',
+      validation.issues.map((issue) => issue.message).join('；') || '提案选择无效',
       { issues: validation.issues },
     );
   }
@@ -237,7 +237,7 @@ export const previewArenaProposal = (
   if (editor.replacementRequired) {
     throw new ArenaProposalEditorError(
       'replacement-required',
-      'room epoch changed; resync before creating a proposal',
+      '房间实例已变化，请重新同步后再创建提案',
     );
   }
 
@@ -248,17 +248,17 @@ export const previewArenaProposal = (
     if (unsupportedCoreError(error)) {
       throw new ArenaProposalEditorError(
         'unsupported-change',
-        error instanceof Error ? error.message : 'working copy contains an unsupported change',
+        '编辑草稿包含暂不支持的变更',
       );
     }
     throw new ArenaProposalEditorError(
       'invalid-working-config',
-      error instanceof Error ? error.message : 'working copy could not be diffed',
+      '无法比较编辑草稿与当前房间配置',
     );
   }
 
   if (changes.length === 0) {
-    throw new ArenaProposalEditorError('empty-proposal', 'working copy has no changes to submit');
+    throw new ArenaProposalEditorError('empty-proposal', '编辑草稿没有可提交的变更');
   }
 
   const selection = assertArenaProposalSelection(changes, selectedChangeIds);
@@ -276,13 +276,13 @@ export const buildArenaProposalSubmitIntent = (
   if (editor.replacementRequired) {
     throw new ArenaProposalEditorError(
       'replacement-required',
-      'room epoch changed; resync before submitting a proposal',
+      '房间实例已变化，请重新同步后再提交提案',
     );
   }
 
   const parsedProposalId = ArenaProposalIdSchema.safeParse(proposalId);
   if (!parsedProposalId.success || parsedProposalId.data !== proposalId) {
-    throw new ArenaProposalEditorError('invalid-proposal-id', 'proposalId must be a non-empty opaque key');
+    throw new ArenaProposalEditorError('invalid-proposal-id', '提案标识无效');
   }
 
   const preview = previewArenaProposal(editor, selectedChangeIds);

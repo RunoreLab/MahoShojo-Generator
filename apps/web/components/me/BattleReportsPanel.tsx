@@ -15,6 +15,7 @@ type BattleReportRecordSummary = {
   generationMode: string;
   mode: string;
   headline: string | null;
+  displayTitle: string | null;
   winner: string | null;
   hasPreview: boolean;
   canRegenerate: boolean;
@@ -24,6 +25,8 @@ type BattleReportRecordSummary = {
   pvpRoomId: string | null;
   pvpMatchId: string | null;
   pvpRoundId: string | null;
+  sourceKind: 'solo' | 'arena-multiplayer' | 'pvp';
+  arenaParticipantRole: 'host' | 'member' | null;
 };
 
 type ListResponse = {
@@ -62,6 +65,16 @@ const clampInt = (value: unknown, fallback: number, min: number, max: number): n
 const getSingleQueryValue = (value: string | string[] | undefined): string | null => {
   if (Array.isArray(value)) return typeof value[0] === 'string' ? value[0] : null;
   return typeof value === 'string' ? value : null;
+};
+
+const sourceLabel = (record: BattleReportRecordSummary): string => {
+  if (record.sourceKind === 'pvp') return 'PVP';
+  if (record.sourceKind === 'arena-multiplayer') {
+    if (record.arenaParticipantRole === 'host') return '多人 · 房主';
+    if (record.arenaParticipantRole === 'member') return '多人 · 成员';
+    return '多人参与';
+  }
+  return '单人';
 };
 
 const areQueryRecordsEqual = (a: Record<string, string>, b: Record<string, string>): boolean => {
@@ -427,7 +440,7 @@ export function BattleReportsPanel({ isAuthenticated, onOpenDetails, onRegenerat
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
                           <div className="truncate font-semibold text-gray-900">
-                            {r.headline || '（无标题）'}
+                            {r.displayTitle || r.headline || '（无标题）'}
                           </div>
                           {r.contentBlocked ? (
                             <span className="rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-[11px] text-red-800">
@@ -439,6 +452,9 @@ export function BattleReportsPanel({ isAuthenticated, onOpenDetails, onRegenerat
                               含屏蔽词
                             </span>
                           ) : null}
+                          <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[11px] text-indigo-800">
+                            {sourceLabel(r)}
+                          </span>
                         </div>
                         <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-600">
                           <span className="rounded-full border bg-gray-50 px-2 py-0.5">
@@ -452,7 +468,7 @@ export function BattleReportsPanel({ isAuthenticated, onOpenDetails, onRegenerat
                           <span>{formatTime(r.startedAt)}</span>
                           <span className="text-gray-400">·</span>
                           <span>胜者：{r.winner || '（未知）'}</span>
-                          {r.pvpMatchId ? (
+                          {r.sourceKind === 'pvp' && r.pvpMatchId ? (
                             <>
                               <span className="text-gray-400">·</span>
                               <span className="truncate">PVP：{r.pvpMatchId}</span>

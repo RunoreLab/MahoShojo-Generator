@@ -22,7 +22,11 @@ const digestSnapshot = (snapshot: Omit<
   ArenaMultiplayerGenerationSnapshot,
   'snapshotDigest'
 >): string => {
-  const canonical = JSON.stringify(canonicalJsonValue(snapshot));
+  // Omitted legacy format means Markdown. Keep its digest stable when a
+  // normalized client retries an existing generation reservation.
+  const sharedConfig = { ...snapshot.sharedConfig } as Record<string, unknown>;
+  if (sharedConfig.reportFormat === 'markdown') delete sharedConfig.reportFormat;
+  const canonical = JSON.stringify(canonicalJsonValue({ ...snapshot, sharedConfig }));
   return `sha256:${createHash('sha256').update(canonical).digest('hex')}`;
 };
 
@@ -61,11 +65,16 @@ export const createArenaRoomGenerationSnapshot = (
   state: ArenaRoomAuthorityState,
   generationRequestId: string,
 ): ArenaMultiplayerGenerationSnapshot => {
+  const hosts = state.memberAuthority.filter((record) => (
+    record.member.membershipState === 'active' && record.member.role === 'host'
+  ));
+  if (hosts.length !== 1) throw new Error('ROOM_GENERATION_HOST_INVALID');
   const frozen = {
     roomId: state.snapshot.roomId,
     generationRequestId,
     configRevision: state.snapshot.revision,
     collaborativeInfluence: state.collaborativeChanges.length > 0,
+    hostAccountUserId: hosts[0]!.accountUserId,
     participantUserIds: state.memberAuthority
       .filter((record) => record.member.membershipState === 'active')
       .map((record) => record.accountUserId)

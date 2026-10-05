@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./token-usage": "./src/token-usage.ts",
     ".": {
       "types": "./src/index.ts",
       "import": "./src/index.ts",
@@ -23,6 +24,31 @@
       "types": "./src/game-card-generation.ts",
       "import": "./src/game-card-generation.ts",
       "default": "./src/game-card-generation.ts"
+    },
+    "./arena-repair-meta": {
+      "types": "./src/arena-repair-meta.ts",
+      "import": "./src/arena-repair-meta.ts",
+      "default": "./src/arena-repair-meta.ts"
+    },
+    "./provider-catalog": {
+      "types": "./src/provider-catalog.ts",
+      "import": "./src/provider-catalog.ts",
+      "default": "./src/provider-catalog.ts"
+    },
+    "./ai-connections": {
+      "types": "./src/ai-connections.ts",
+      "import": "./src/ai-connections.ts",
+      "default": "./src/ai-connections.ts"
+    },
+    "./generation-settings": {
+      "types": "./src/generation-settings/index.ts",
+      "import": "./src/generation-settings/index.ts",
+      "default": "./src/generation-settings/index.ts"
+    },
+    "./magical-girl-details-generation": {
+      "types": "./src/magical-girl-details-generation.ts",
+      "import": "./src/magical-girl-details-generation.ts",
+      "default": "./src/magical-girl-details-generation.ts"
     }
   },
   "scripts": {
@@ -33,7 +59,8 @@
   "dependencies": {
     "@mahoshojo/contracts": "workspace:*",
     "jsonrepair": "^3.13.1",
-    "zod": "^4.1.13"
+    "zod": "^4.1.13",
+    "@mahoshojo/domain": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^20",

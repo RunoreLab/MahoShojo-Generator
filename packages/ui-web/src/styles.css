@@ -1,0 +1,420 @@
+/*
+ * 共源产品主题：`--app-*` 设计与亮/暗/显式模式三段解析。
+ *
+ * ## 这段 CSS 的所有权
+ *
+ * 它原本逐字住在 `apps/web/styles/globals.css`。D2.5a 把它搬到这里，让 Web 与 Desktop 消费**同一份**
+ * 定义，而不是各留一份再靠人工同步。取值一个字符都没有改动，因此这不是设计变更，是所有权变更。
+ *
+ * `apps/web/styles/globals.css` 通过 `@import "@mahoshojo/ui-web/styles.css"` 回用它；Web 上原有的
+ * `@layer base` / `@layer components` 与本文件无关，仍留在 app 侧。
+ *
+ * ## 三段结构为什么必须原样保留
+ *
+ * `:root` → `@media (prefers-color-scheme: dark) :root:not([data-color-mode])` →
+ * `:root[data-color-mode='dark']` 这三段共同表达的是「系统偏好」与「用户显式选择」的优先级：只有用户
+ * **没有**显式选择时才跟随系统。中间那段 `:not([data-color-mode])` 是整套逻辑的关键，删掉它会让
+ * 显式选择被系统偏好覆盖。
+ *
+ * 这套结构刻意**不**改写成 Tailwind v4 的 `@theme`：Web 侧有 `getColorModeInitScript()` 在首屏前
+ * 写 `data-color-mode`，而 `@theme` 生成的变量由 Tailwind 在 `:root` 单点输出、不参与同样的覆盖解析。
+ * 迁移它是一次独立的、需要双端 production build 比对的设计工作，不属于「抽取共享」。
+ *
+ * 因此共享组件消费这些 token 的方式是任意值工具类（`bg-(--app-surface)`），而不是
+ * `@theme` 注册出的 `bg-app-surface` 命名空间——后者会让 Web 现有页面与共享组件出现两套等价写法。
+ */
+
+/**
+ * Tailwind 源扫描注册。
+ *
+ * Tailwind v4 的自动探测**只看样式表所在目录并向下走，绝不向上**，所以 `packages/ui-web` 对两个 app
+ * 都是不可见的；没有这一行，共享组件里的工具类会被静默丢弃——页面结构与文案都在，唯独没有任何样式，
+ * 而且不报任何错。
+ *
+ * 路径相对**本文件**，由包自己声明（而不是让每个 app 各写一次），这样新增 app 时不会漏。
+ * pnpm 把 workspace 包 symlink 进 `node_modules`，而 `@source` 指向 `node_modules` 是一个已知的
+ * 失效形态（tailwindlabs/tailwindcss#19040）；相对本文件的写法命中真实目录，绕开该问题。
+ * `tests/shared-theme-build-output.test.ts` 用两端真实产物断言这一点，而不是靠注释成立。
+ */
+@source "./**/*.{ts,tsx}";
+
+/*
+ * 共享表单/选择器底座样式。
+ *
+ * 这些类随 `src/ai-provider/` 等共享组件一起从 `apps/web/styles/globals.css` 上移；
+ * 声明逐字保留（`--battle-lite-*` 变量引用在 Web 的 `battle-lite-shell` 里依然生效，
+ * Desktop 下自然落到 `--app-*` 回退）。Web 侧同名定义已删除，本文件是唯一权威。
+ * 通用 `battle-lite-*` 主题面的收敛是独立的 DESK-PROD-009 工作，不在本切片处理。
+ */
+@layer components {
+  .input-group {
+    margin-bottom: 20px;
+  }
+
+  .input-label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: 600;
+    color: var(--app-text-muted);
+  }
+
+  .input-field {
+    width: 100%;
+    padding: 15px;
+    border: 2px solid var(--app-input-border);
+    color: var(--app-text);
+    border-radius: 12px;
+    font-size: 16px;
+    transition: all 0.3s ease;
+    background: var(--app-input-bg);
+  }
+
+  .input-field::placeholder {
+    color: var(--app-text-subtle);
+  }
+
+  .input-field:focus {
+    outline: none;
+    border-color: var(--app-accent);
+    box-shadow: 0 0 0 3px var(--app-focus-ring);
+  }
+
+  .battle-lite-strong-text {
+    color: var(--app-text);
+  }
+
+  .battle-lite-muted-text {
+    color: var(--battle-lite-muted-text, var(--app-text-muted));
+  }
+
+  .battle-lite-subtle-text {
+    color: var(--battle-lite-subtle-text, var(--app-text-subtle));
+  }
+
+  .battle-lite-accent-box {
+    background: var(--battle-lite-accent-bg, var(--app-surface-80));
+    border: 1px solid var(--battle-lite-accent-border, var(--app-border-strong));
+    color: var(--battle-lite-accent-text, var(--app-text));
+  }
+
+  .battle-lite-link {
+    color: var(--battle-lite-link, var(--app-accent-strong));
+  }
+
+  .battle-lite-link:hover {
+    color: var(--battle-lite-link-hover, var(--app-accent));
+    text-decoration: underline;
+  }
+
+  .battle-lite-info-box {
+    background: var(--battle-lite-info-bg, var(--app-surface-80));
+    border: 1px solid var(--battle-lite-info-border, var(--app-border-strong));
+    color: var(--battle-lite-info-text, var(--app-text));
+  }
+
+  .battle-lite-info-pill {
+    background: var(--battle-lite-info-pill-bg, var(--app-surface));
+    color: var(--battle-lite-info-pill-text, var(--app-text));
+  }
+
+  .battle-lite-select-menu {
+    background: var(--battle-lite-modal-bg, var(--app-surface-strong));
+    border: 1px solid var(--battle-lite-subpanel-border, var(--app-border-strong));
+    box-shadow: var(--app-card-shadow);
+  }
+
+  .battle-lite-select-option {
+    color: var(--app-text);
+  }
+
+  .battle-lite-select-option:hover {
+    background: var(--battle-lite-subpanel-bg, var(--app-surface));
+  }
+
+  .battle-lite-select-option-active {
+    background: rgba(244, 114, 182, 0.14);
+    color: var(--app-text);
+  }
+}
+
+/* Shared questionnaire and magical-girl result view details. */
+.result-item {
+  margin-bottom: 20px;
+  padding: 15px;
+  background: var(--app-result-item-bg, rgba(255, 255, 255, 0.1));
+  border-radius: 10px;
+  backdrop-filter: blur(5px);
+}
+
+.result-label {
+  font-weight: bold;
+  font-size: 14px;
+  opacity: 0.9;
+  margin-bottom: 5px;
+}
+
+.result-value {
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.ui-web-questionnaire-answer-group {
+  margin-bottom: 20px;
+}
+
+.ui-web-questionnaire-answer-input {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 15px;
+  border: 2px solid var(--app-input-border, #e0e0e0);
+  border-radius: 12px;
+  color: var(--app-text, #1f2937);
+  background: var(--app-input-bg, rgba(255, 255, 255, 0.85));
+  font-size: 16px;
+  transition: all 0.3s ease;
+}
+
+.ui-web-questionnaire-answer-input::placeholder {
+  color: var(--app-text-subtle, #6b7280);
+}
+
+.ui-web-questionnaire-answer-input:focus {
+  outline: none;
+  border-color: var(--app-accent, #ff6b6b);
+  box-shadow: 0 0 0 3px var(--app-focus-ring, rgba(255, 107, 107, 0.2));
+}
+
+.ui-web-questionnaire-step-button {
+  flex: 1 1 0%;
+  width: 100%;
+  padding: 15px;
+  border: 0;
+  border-radius: 12px;
+  color: white;
+  background: linear-gradient(45deg, var(--app-accent, #ff6b6b), var(--app-accent-strong, #ee5a6f));
+  font-size: 18px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.ui-web-questionnaire-step-button:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 20px var(--app-accent-shadow, rgba(255, 107, 107, 0.3));
+}
+
+.ui-web-questionnaire-step-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-web-questionnaire-answer-input,
+  .ui-web-questionnaire-step-button {
+    transition: none;
+  }
+
+  .ui-web-questionnaire-step-button:hover:not(:disabled) {
+    transform: none;
+  }
+}
+
+:root[data-color-mode='dark'] .details-questionnaire-settings-panel,
+:root[data-color-mode='dark'] .details-questionnaire-surface,
+:root[data-color-mode='dark'] .details-questionnaire-subcard {
+  background-color: rgba(15, 23, 42, 0.82);
+  border-color: rgba(129, 140, 248, 0.28);
+  color: #dbeafe;
+}
+
+:root[data-color-mode='dark'] .details-questionnaire-settings-panel {
+  background-color: rgba(30, 41, 59, 0.72);
+}
+
+:root[data-color-mode='dark'] .details-questionnaire-settings-toggle {
+  color: #c7d2fe;
+}
+
+:root[data-color-mode='dark'] .details-questionnaire-action,
+:root[data-color-mode='dark'] .details-questionnaire-choice {
+  background-color: rgba(15, 23, 42, 0.88);
+  border-color: rgba(244, 114, 182, 0.32);
+  color: #fbcfe8;
+}
+
+:root[data-color-mode='dark'] .details-questionnaire-choice {
+  color: #e5e7eb;
+}
+
+:root[data-color-mode='dark'] .details-questionnaire-action:hover,
+:root[data-color-mode='dark'] .details-questionnaire-choice:hover {
+  background-color: rgba(51, 65, 85, 0.82);
+  border-color: rgba(244, 114, 182, 0.55);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-color-mode]) .details-questionnaire-settings-panel,
+  :root:not([data-color-mode]) .details-questionnaire-surface,
+  :root:not([data-color-mode]) .details-questionnaire-subcard {
+    background-color: rgba(15, 23, 42, 0.82);
+    border-color: rgba(129, 140, 248, 0.28);
+    color: #dbeafe;
+  }
+
+  :root:not([data-color-mode]) .details-questionnaire-settings-panel {
+    background-color: rgba(30, 41, 59, 0.72);
+  }
+
+  :root:not([data-color-mode]) .details-questionnaire-settings-toggle {
+    color: #c7d2fe;
+  }
+
+  :root:not([data-color-mode]) .details-questionnaire-action,
+  :root:not([data-color-mode]) .details-questionnaire-choice {
+    background-color: rgba(15, 23, 42, 0.88);
+    border-color: rgba(244, 114, 182, 0.32);
+    color: #fbcfe8;
+  }
+
+  :root:not([data-color-mode]) .details-questionnaire-choice {
+    color: #e5e7eb;
+  }
+
+  :root:not([data-color-mode]) .details-questionnaire-action:hover,
+  :root:not([data-color-mode]) .details-questionnaire-choice:hover {
+    background-color: rgba(51, 65, 85, 0.82);
+    border-color: rgba(244, 114, 182, 0.55);
+  }
+}
+
+:root {
+  color-scheme: light;
+  --app-page-bg: linear-gradient(135deg, #ffffff 0%, #ffffff 25%, #ffe3f6 86%, #fecfef 100%);
+  --app-magic-bg: linear-gradient(135deg, #ffffff 0%, #ffffff 25%, #ffe3f6 86%, #fecfef 100%);
+  --app-magic-bg-white: linear-gradient(135deg, #ffffff 0%, #ffffff 25%, #ffe3f6 86%, #fecfef 100%);
+  --app-magic-bg-dark: linear-gradient(155deg, #0b1220 0%, #0b1220 42%, #241827 68%, #6f294d 88%, #d8578b 100%);
+  --app-text: #1f2937;
+  --app-text-muted: #4b5563;
+  --app-text-subtle: #6b7280;
+  --app-surface-strong: rgba(255, 255, 255, 0.98);
+  --app-surface: rgba(255, 255, 255, 0.95);
+  --app-surface-95: rgba(255, 255, 255, 0.95);
+  --app-surface-90: rgba(255, 255, 255, 0.9);
+  --app-surface-80: rgba(255, 255, 255, 0.8);
+  --app-surface-70: rgba(255, 255, 255, 0.7);
+  --app-surface-60: rgba(255, 255, 255, 0.6);
+  --app-surface-50: rgba(255, 255, 255, 0.5);
+  --app-surface-40: rgba(255, 255, 255, 0.4);
+  --app-border: rgba(255, 255, 255, 0.3);
+  --app-border-strong: rgba(229, 231, 235, 0.8);
+  --app-input-bg: rgba(255, 255, 255, 0.85);
+  --app-input-border: #e0e0e0;
+  --creator-panel-bg: rgba(255, 255, 255, 0.94);
+  --creator-panel-border: rgba(203, 213, 225, 0.9);
+  --creator-subpanel-bg: rgba(248, 250, 252, 0.92);
+  --creator-subpanel-border: rgba(203, 213, 225, 0.92);
+  --creator-subpanel-emphasis-bg: rgba(255, 255, 255, 0.97);
+  --creator-subpanel-muted-bg: rgba(241, 245, 249, 0.92);
+  --creator-input-bg: rgba(255, 255, 255, 0.98);
+  --creator-input-border: rgba(203, 213, 225, 0.95);
+  --app-card-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+  --app-accent: #ff6b6b;
+  --app-accent-strong: #ee5a6f;
+  --app-accent-shadow: rgba(255, 107, 107, 0.3);
+  --app-focus-ring: rgba(255, 107, 107, 0.2);
+  --app-result-item-bg: rgba(255, 255, 255, 0.1);
+  --app-result-card-bg: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  --app-footer-link: #ff6b6b;
+  --app-footer-link-hover: #ee5a6f;
+  --global-topbar-height: 56px;
+  --global-topbar-z-index: 40;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-color-mode]) {
+    color-scheme: dark;
+    --app-page-bg: linear-gradient(155deg, #0b1220 0%, #0b1220 42%, #241827 68%, #6f294d 88%, #d8578b 100%);
+    --app-magic-bg: linear-gradient(155deg, #0b1220 0%, #0b1220 42%, #241827 68%, #6f294d 88%, #d8578b 100%);
+    --app-magic-bg-white: linear-gradient(155deg, #0b1220 0%, #0b1220 42%, #241827 68%, #6f294d 88%, #d8578b 100%);
+    --app-magic-bg-dark: linear-gradient(155deg, #0b1220 0%, #0b1220 42%, #241827 68%, #6f294d 88%, #d8578b 100%);
+    --app-text: #e5e7eb;
+    --app-text-muted: #d7dde8;
+    --app-text-subtle: #a7b0c0;
+    --app-surface-strong: rgba(15, 23, 42, 0.98);
+    --app-surface: rgba(15, 23, 42, 0.92);
+    --app-surface-95: rgba(15, 23, 42, 0.95);
+    --app-surface-90: rgba(15, 23, 42, 0.9);
+    --app-surface-80: rgba(15, 23, 42, 0.82);
+    --app-surface-70: rgba(15, 23, 42, 0.7);
+    --app-surface-60: rgba(15, 23, 42, 0.6);
+    --app-surface-50: rgba(15, 23, 42, 0.5);
+    --app-surface-40: rgba(15, 23, 42, 0.4);
+    --app-border: rgba(148, 163, 184, 0.25);
+    --app-border-strong: rgba(148, 163, 184, 0.45);
+    --app-input-bg: rgba(15, 23, 42, 0.6);
+    --app-input-border: rgba(148, 163, 184, 0.35);
+    --creator-panel-bg: rgba(15, 23, 42, 0.92);
+    --creator-panel-border: rgba(148, 163, 184, 0.45);
+    --creator-subpanel-bg: rgba(30, 41, 59, 0.86);
+    --creator-subpanel-border: rgba(148, 163, 184, 0.32);
+    --creator-subpanel-emphasis-bg: rgba(51, 65, 85, 0.86);
+    --creator-subpanel-muted-bg: rgba(30, 41, 59, 0.72);
+    --creator-input-bg: rgba(15, 23, 42, 0.7);
+    --creator-input-border: rgba(148, 163, 184, 0.4);
+    --app-card-shadow: 0 20px 40px rgba(0, 0, 0, 0.45);
+    --app-accent: #fb7185;
+    --app-accent-strong: #f43f5e;
+    --app-accent-shadow: rgba(248, 113, 113, 0.45);
+    --app-focus-ring: rgba(248, 113, 113, 0.35);
+    --app-result-item-bg: rgba(255, 255, 255, 0.08);
+    --app-result-card-bg: linear-gradient(135deg, #111827 0%, #1f2937 100%);
+    --app-footer-link: #fda4af;
+    --app-footer-link-hover: #fb7185;
+  }
+}
+
+:root[data-color-mode='light'] {
+  color-scheme: light;
+}
+
+:root[data-color-mode='dark'] {
+  color-scheme: dark;
+  --app-page-bg: linear-gradient(155deg, #0b1220 0%, #0b1220 42%, #241827 68%, #6f294d 88%, #d8578b 100%);
+  --app-magic-bg: linear-gradient(155deg, #0b1220 0%, #0b1220 42%, #241827 68%, #6f294d 88%, #d8578b 100%);
+  --app-magic-bg-white: linear-gradient(155deg, #0b1220 0%, #0b1220 42%, #241827 68%, #6f294d 88%, #d8578b 100%);
+  --app-magic-bg-dark: linear-gradient(155deg, #0b1220 0%, #0b1220 42%, #241827 68%, #6f294d 88%, #d8578b 100%);
+  --app-text: #e5e7eb;
+  --app-text-muted: #d7dde8;
+  --app-text-subtle: #a7b0c0;
+  --app-surface-strong: rgba(15, 23, 42, 0.98);
+  --app-surface: rgba(15, 23, 42, 0.92);
+  --app-surface-95: rgba(15, 23, 42, 0.95);
+  --app-surface-90: rgba(15, 23, 42, 0.9);
+  --app-surface-80: rgba(15, 23, 42, 0.82);
+  --app-surface-70: rgba(15, 23, 42, 0.7);
+  --app-surface-60: rgba(15, 23, 42, 0.6);
+  --app-surface-50: rgba(15, 23, 42, 0.5);
+  --app-surface-40: rgba(15, 23, 42, 0.4);
+  --app-border: rgba(148, 163, 184, 0.25);
+  --app-border-strong: rgba(148, 163, 184, 0.45);
+  --app-input-bg: rgba(15, 23, 42, 0.6);
+  --app-input-border: rgba(148, 163, 184, 0.35);
+  --creator-panel-bg: rgba(15, 23, 42, 0.92);
+  --creator-panel-border: rgba(148, 163, 184, 0.45);
+  --creator-subpanel-bg: rgba(30, 41, 59, 0.86);
+  --creator-subpanel-border: rgba(148, 163, 184, 0.32);
+  --creator-subpanel-emphasis-bg: rgba(51, 65, 85, 0.86);
+  --creator-subpanel-muted-bg: rgba(30, 41, 59, 0.72);
+  --creator-input-bg: rgba(15, 23, 42, 0.7);
+  --creator-input-border: rgba(148, 163, 184, 0.4);
+  --app-card-shadow: 0 20px 40px rgba(0, 0, 0, 0.45);
+  --app-accent: #fb7185;
+  --app-accent-strong: #f43f5e;
+  --app-accent-shadow: rgba(248, 113, 113, 0.45);
+  --app-focus-ring: rgba(248, 113, 113, 0.35);
+  --app-result-item-bg: rgba(255, 255, 255, 0.08);
+  --app-result-card-bg: linear-gradient(135deg, #111827 0%, #1f2937 100%);
+  --app-footer-link: #fda4af;
+  --app-footer-link-hover: #fb7185;
+}

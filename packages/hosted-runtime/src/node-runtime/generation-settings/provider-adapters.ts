@@ -14,6 +14,8 @@
 
 import type { GenerationProviderOptions, ThinkingAdapter, ThinkingEffort } from './types';
 
+export { THINKING_EFFORT_LABELS } from '@mahoshojo/ai-core/generation-settings';
+
 export type ThinkingMode = 'default' | 'disabled' | 'enabled';
 
 /**
@@ -112,12 +114,3 @@ export const buildThinkingOptions = (
   }
 };
 
-/** 仅用于日志 / 诊断：把档位映射为可读标签。 */
-export const THINKING_EFFORT_LABELS: Record<ThinkingEffort, string> = {
-  minimal: '最低',
-  low: '低',
-  medium: '中',
-  high: '高',
-  xhigh: '极高',
-  max: '最大',
-};

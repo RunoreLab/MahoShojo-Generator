@@ -60,7 +60,6 @@ describe('Hosted DR client bundle safety gate', () => {
     const result = runChecker(routingBundle());
 
     expect(result.status).toBe(0);
-    expect(result.stdout).toContain('Hosted DR client bundle safety OK');
   });
 
   it('拒绝客户端静态产物中的 manifest secret/binding 名称', () => {

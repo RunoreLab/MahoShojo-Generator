@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z } from './zod';
 
 import { ArenaContractError, ArenaErrorCodeSchema } from './errors';
 import {
@@ -94,10 +94,15 @@ export const GenerationMirrorSchema = z
     snapshotDigest: OpaqueKeySchema,
     collaborativeInfluence: z.boolean(),
     participantUserIds: ParticipantUserIdsSchema,
+    hostAccountUserId: z.number().int().positive().optional(),
     startedAt: IsoTimestampSchema,
     finishedAt: IsoTimestampSchema.optional(),
   })
-  .strict();
+  .strict()
+  .refine((value) => value.hostAccountUserId === undefined
+    || value.participantUserIds.includes(value.hostAccountUserId), {
+    path: ['hostAccountUserId'], message: 'host must be a frozen participant',
+  });
 export type GenerationMirror = z.infer<typeof GenerationMirrorSchema>;
 
 export const ArenaRoomSnapshotSchema = z
@@ -170,14 +175,19 @@ const GenerationEventPayloadSchema = z
     snapshotDigest: OpaqueKeySchema,
     collaborativeInfluence: z.boolean(),
     participantUserIds: ParticipantUserIdsSchema,
+    hostAccountUserId: z.number().int().positive().optional(),
   })
-  .strict();
+  .strict()
+  .refine((value) => value.hostAccountUserId === undefined
+    || value.participantUserIds.includes(value.hostAccountUserId), {
+    path: ['hostAccountUserId'], message: 'host must be a frozen participant',
+  });
 
-const GenerationCompletedPayloadSchema = GenerationEventPayloadSchema.extend({
+const GenerationCompletedPayloadSchema = GenerationEventPayloadSchema.safeExtend({
   generationRecordId: OpaqueKeySchema,
 }).strict();
 
-const GenerationFailedPayloadSchema = GenerationEventPayloadSchema.extend({
+const GenerationFailedPayloadSchema = GenerationEventPayloadSchema.safeExtend({
   errorCode: ArenaErrorCodeSchema,
 }).strict();
 

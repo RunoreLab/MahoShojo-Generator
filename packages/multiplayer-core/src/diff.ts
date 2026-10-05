@@ -15,13 +15,15 @@ import {
   type DataCardRef,
 } from '@mahoshojo/contracts/arena-room';
 
-import { arrayReorder, unsupportedChange } from './errors';
+import { unsupportedChange } from './errors';
 import {
   arrayEqual,
   deepClone,
   deepEqual,
-  isCanonicalDataCardKey,
+  isCanonicalResourceKey,
   isOnlineRef,
+  isRecord,
+  sameOnlineDataCardIdentity,
 } from './utils';
 
 const entryKey = (entry: { key: string }): string => entry.key;
@@ -40,57 +42,57 @@ const hostEntry = (entry: unknown): boolean => (
   && entry.source === 'host-local'
 );
 
-const assertOrder = (baseKeys: readonly string[], workingKeys: readonly string[], target: string): void => {
-  const baseSet = new Set(baseKeys);
-  const workingSet = new Set(workingKeys);
-  const commonBase = baseKeys.filter((key) => workingSet.has(key));
-  const commonWorking = workingKeys.filter((key) => baseSet.has(key));
-  if (!arrayEqual(commonBase, commonWorking)) arrayReorder(target);
-};
-
-const assertNestedOrder = (
-  base: readonly string[],
-  working: readonly string[],
-  target: string,
-): void => {
-  const baseSet = new Set(base);
-  const workingSet = new Set(working);
-  const commonBase = base.filter((key) => workingSet.has(key));
-  const commonWorking = working.filter((key) => baseSet.has(key));
-  if (!arrayEqual(commonBase, commonWorking)) arrayReorder(target);
+const semanticallyEqualEntry = (left: unknown, right: unknown): boolean => {
+  if (!isRecord(left) || !isRecord(right)) return deepEqual(left, right);
+  const leftKey = left.key;
+  const rightKey = right.key;
+  if (
+    leftKey === rightKey
+    && typeof leftKey === 'string'
+    && leftKey.startsWith('data-card:')
+    && sameOnlineDataCardIdentity(left.ref, right.ref)
+  ) {
+    const normalizedLeft = { ...left, ref: { ...(left.ref as Record<string, unknown>), versionToken: '__latest__' } };
+    const normalizedRight = { ...right, ref: { ...(right.ref as Record<string, unknown>), versionToken: '__latest__' } };
+    return deepEqual(normalizedLeft, normalizedRight);
+  }
+  return deepEqual(left, right);
 };
 
 /**
  * Collection additions are applied by appending and removals by filtering the
- * existing sequence. Validate the exact sequence that those semantics produce,
- * including insertions mixed with retained entries.
+ * existing sequence. Return the exact staged order before a typed reorder.
  */
-const assertAppendApplyOrder = (
+const stagedAppendApplyOrder = (
   baseKeys: readonly string[],
   workingKeys: readonly string[],
-  target: string,
-): void => {
+): string[] => {
   const workingSet = new Set(workingKeys);
   const baseSet = new Set(baseKeys);
-  const simulated = [
+  return [
     ...baseKeys.filter((key) => workingSet.has(key)),
     ...workingKeys.filter((key) => !baseSet.has(key)),
   ];
-  if (!arrayEqual(simulated, workingKeys)) arrayReorder(target);
 };
 
-const assertTeamApplyOrder = (
+const stagedTeamApplyOrder = (
   base: ArenaRoomSharedConfig,
-  working: ArenaRoomSharedConfig,
   removedCombatantKeys: ReadonlySet<string>,
+  structural: readonly Extract<ArenaProposalChange, {
+    type: 'addTeam' | 'removeTeam' | 'renameTeam';
+  }>[],
   assignments: readonly Extract<ArenaProposalChange, { type: 'assignTeam' }>[],
-): void => {
+): Map<string, string[]> => {
   const simulated = new Map(base.teams.map((team) => [team.key, [...team.combatantKeys]]));
   for (const team of simulated.values()) {
     for (const key of removedCombatantKeys) {
       const index = team.indexOf(key);
       if (index >= 0) team.splice(index, 1);
     }
+  }
+  for (const change of structural) {
+    if (change.type === 'addTeam') simulated.set(change.teamKey, []);
+    if (change.type === 'removeTeam') simulated.delete(change.teamKey);
   }
   for (const change of assignments) {
     const target = change.teamKey === null ? undefined : simulated.get(change.teamKey);
@@ -104,12 +106,7 @@ const assertTeamApplyOrder = (
     }
     if (target) target.push(change.combatantKey);
   }
-  for (const team of working.teams) {
-    const result = simulated.get(team.key);
-    if (!result || !arrayEqual(result, team.combatantKeys)) {
-      arrayReorder(`team ${team.key} combatants`);
-    }
-  }
+  return simulated;
 };
 
 const changeIdFactory = (): (() => string) => {
@@ -121,10 +118,13 @@ function requireOnlineAddition(
   entry: unknown,
   target: string,
 ): asserts entry is { key: string; ref: { id: string; kind: string; versionToken: string } } {
-  if (!onlineEntry(entry)) unsupportedChange(`${target} addition is host-local/preset or otherwise not an online data-card entry`);
+  if (!onlineEntry(entry)) unsupportedChange(`${target} addition is host-local or otherwise not a stable ref entry`);
   const online = entry as { key: string; ref: { id: string; kind: string; versionToken: string } };
-  if (!isCanonicalDataCardKey(online.key, online.ref.id)) {
-    unsupportedChange(`${target} addition must use canonical data-card key`);
+  if (!isCanonicalResourceKey(online.key, online.ref.id)) {
+    unsupportedChange(`${target} addition must use canonical data-card or preset key`);
+  }
+  if (target === 'material' && online.key.startsWith('preset:')) {
+    unsupportedChange('material preset additions are not supported without a server registry');
   }
 }
 
@@ -158,7 +158,7 @@ const compareStableEntry = (
     delete baseWithoutGuidance.characterGuidance;
     delete workingWithoutGuidance.characterGuidance;
   }
-  if (!deepEqual(baseWithoutGuidance, workingWithoutGuidance)) {
+  if (!semanticallyEqualEntry(baseWithoutGuidance, workingWithoutGuidance)) {
     unsupportedChange(`${target} has an unrepresentable identity or host-local field change`);
   }
 };
@@ -185,43 +185,67 @@ export const diffArenaSharedConfig = (
   const nextId = changeIdFactory();
   const changes: ArenaProposalChange[] = [];
 
-  if (base.selectedLanguage !== working.selectedLanguage) {
-    unsupportedChange('selectedLanguage changes are not representable by Arena Proposal v1');
-  }
-
   const baseCombatantKeys = base.combatants.map(entryKey);
   const workingCombatantKeys = working.combatants.map(entryKey);
-  assertAppendApplyOrder(baseCombatantKeys, workingCombatantKeys, 'combatants');
   const baseCombatants = new Map(base.combatants.map((entry) => [entry.key, entry]));
   const workingCombatants = new Map(working.combatants.map((entry) => [entry.key, entry]));
   const addedCombatantIds = new Map<string, string>();
+  const combatantOrderDependencies: string[] = [];
+  const teamOrderDependencies = new Map<string, Set<string>>();
+  const dependTeamOrderOn = (teamKey: string | null, changeId: string): void => {
+    if (teamKey === null) return;
+    const dependencies = teamOrderDependencies.get(teamKey) ?? new Set<string>();
+    dependencies.add(changeId);
+    teamOrderDependencies.set(teamKey, dependencies);
+  };
 
   for (const entry of working.combatants) {
     if (baseCombatants.has(entry.key)) continue;
     requireOnlineAddition(entry, 'combatant');
     const changeId = nextId();
     addedCombatantIds.set(entry.key, changeId);
+    combatantOrderDependencies.push(changeId);
     changes.push(makeChange({
       changeId,
       type: 'addCombatant',
       ref: deepClone(entry.ref),
       expectedBase: { kind: 'absent' },
+      ...(entry.key.startsWith('data-card:') ? {} : { key: entry.key }),
     }));
   }
   for (const entry of base.combatants) {
     if (workingCombatants.has(entry.key)) continue;
     const changeId = nextId();
+    combatantOrderDependencies.push(changeId);
+    for (const team of base.teams) {
+      if (team.combatantKeys.includes(entry.key)) dependTeamOrderOn(team.key, changeId);
+    }
     changes.push(makeChange({
       changeId,
       type: 'removeCombatant',
       combatantKey: entry.key,
-      expectedBase: { kind: 'present', ref: expectedCombatantRef(entry) },
+      expectedBase: {
+        kind: 'present',
+        ref: expectedCombatantRef(entry),
+        ...(entry.key.startsWith('data-card:') ? {} : { key: entry.key }),
+      },
     }));
   }
   for (const entry of working.combatants) {
     const previous = baseCombatants.get(entry.key);
     if (!previous) continue;
     compareStableEntry(previous, entry, `combatant ${entry.key}`, true);
+  }
+
+  const stagedCombatantKeys = stagedAppendApplyOrder(baseCombatantKeys, workingCombatantKeys);
+  if (!arrayEqual(stagedCombatantKeys, workingCombatantKeys)) {
+    changes.push(makeChange({
+      changeId: nextId(),
+      type: 'reorderCombatants',
+      value: deepClone(workingCombatantKeys),
+      expectedBase: { kind: 'value', value: stagedCombatantKeys },
+      ...(combatantOrderDependencies.length > 0 ? { dependsOn: combatantOrderDependencies } : {}),
+    }));
   }
 
   for (const entry of working.combatants) {
@@ -243,40 +267,131 @@ export const diffArenaSharedConfig = (
 
   const baseTeamKeys = base.teams.map(entryKey);
   const workingTeamKeys = working.teams.map(entryKey);
-  assertOrder(baseTeamKeys, workingTeamKeys, 'teams');
   const baseTeams = new Map(base.teams.map((team) => [team.key, team]));
   const workingTeams = new Map(working.teams.map((team) => [team.key, team]));
-  if (baseTeams.size !== workingTeams.size || [...baseTeams.keys()].some((key) => !workingTeams.has(key))) {
-    unsupportedChange('team creation, deletion, or renaming is not representable by Arena Proposal v1');
+  const addedTeamIds = new Map<string, string>();
+  const topLevelTeamOrderDependencies: string[] = [];
+  for (const team of working.teams) {
+    if (baseTeams.has(team.key)) continue;
+    const changeId = nextId();
+    addedTeamIds.set(team.key, changeId);
+    topLevelTeamOrderDependencies.push(changeId);
+    dependTeamOrderOn(team.key, changeId);
+    changes.push(makeChange({
+      changeId,
+      type: 'addTeam',
+      teamKey: team.key,
+      displayName: team.displayName,
+      expectedBase: { kind: 'absent' },
+    }));
+  }
+  for (const team of base.teams) {
+    if (workingTeams.has(team.key)) continue;
+    const changeId = nextId();
+    topLevelTeamOrderDependencies.push(changeId);
+    changes.push(makeChange({
+      changeId,
+      type: 'removeTeam',
+      teamKey: team.key,
+      expectedBase: { kind: 'present', ref: deepClone(team) },
+    }));
   }
   for (const baseTeam of base.teams) {
-    const workingTeam = workingTeams.get(baseTeam.key)!;
+    const workingTeam = workingTeams.get(baseTeam.key);
+    if (!workingTeam) continue;
     if (baseTeam.displayName !== workingTeam.displayName) {
-      unsupportedChange(`team ${baseTeam.key} rename is not representable by Arena Proposal v1`);
+      changes.push(makeChange({
+        changeId: nextId(),
+        type: 'renameTeam',
+        teamKey: baseTeam.key,
+        value: workingTeam.displayName,
+        expectedBase: { kind: 'value', value: baseTeam.displayName },
+      }));
     }
-    assertNestedOrder(baseTeam.combatantKeys, workingTeam.combatantKeys, `team ${baseTeam.key} combatants`);
+  }
+  const stagedTeamKeys = stagedAppendApplyOrder(baseTeamKeys, workingTeamKeys);
+  if (!arrayEqual(stagedTeamKeys, workingTeamKeys)) {
+    changes.push(makeChange({
+      changeId: nextId(),
+      type: 'reorderTeams',
+      value: deepClone(workingTeamKeys),
+      expectedBase: { kind: 'value', value: stagedTeamKeys },
+      ...(topLevelTeamOrderDependencies.length > 0 ? { dependsOn: topLevelTeamOrderDependencies } : {}),
+    }));
   }
   for (const entry of working.combatants) {
     const previousAssignment = baseCombatants.has(entry.key) ? assignmentOf(base, entry.key) : null;
     const nextAssignment = assignmentOf(working, entry.key);
     if (previousAssignment === nextAssignment) continue;
+    if (nextAssignment === null && previousAssignment !== null && !workingTeams.has(previousAssignment)) {
+      continue;
+    }
+    const dependencies = [
+      ...(addedCombatantIds.has(entry.key) ? [addedCombatantIds.get(entry.key)!] : []),
+      ...(nextAssignment !== null && addedTeamIds.has(nextAssignment) ? [addedTeamIds.get(nextAssignment)!] : []),
+    ];
+    const changeId = nextId();
+    dependTeamOrderOn(previousAssignment, changeId);
+    dependTeamOrderOn(nextAssignment, changeId);
     changes.push(makeChange({
-      changeId: nextId(),
+      changeId,
       type: 'assignTeam',
       combatantKey: entry.key,
       teamKey: nextAssignment,
       expectedBase: { kind: 'value', value: previousAssignment },
-      ...(addedCombatantIds.has(entry.key) ? { dependsOn: [addedCombatantIds.get(entry.key)!] } : {}),
+      ...(dependencies.length > 0 ? { dependsOn: dependencies } : {}),
     }));
   }
+  const structuralTeamChanges = changes.filter((change): change is Extract<ArenaProposalChange, {
+    type: 'addTeam' | 'removeTeam' | 'renameTeam';
+  }> => change.type === 'addTeam' || change.type === 'removeTeam' || change.type === 'renameTeam');
   const assignmentChanges = changes.filter((change): change is Extract<ArenaProposalChange, { type: 'assignTeam' }> => change.type === 'assignTeam');
-  assertTeamApplyOrder(
+  const stagedTeamCombatants = stagedTeamApplyOrder(
     base,
-    working,
     new Set(base.combatants.filter((entry) => !workingCombatants.has(entry.key)).map((entry) => entry.key)),
+    structuralTeamChanges,
     assignmentChanges,
   );
+  for (const team of working.teams) {
+    const stagedKeys = stagedTeamCombatants.get(team.key);
+    if (!stagedKeys || arrayEqual(stagedKeys, team.combatantKeys)) continue;
+    const dependencies = [...(teamOrderDependencies.get(team.key) ?? [])];
+    changes.push(makeChange({
+      changeId: nextId(),
+      type: 'reorderTeamCombatants',
+      teamKey: team.key,
+      value: deepClone(team.combatantKeys),
+      expectedBase: { kind: 'value', value: deepClone(stagedKeys) },
+      ...(dependencies.length > 0 ? { dependsOn: dependencies } : {}),
+    }));
+  }
 
+  const packageChanged = !deepEqual(base.webPackageRef ?? null, working.webPackageRef ?? null);
+  const webAtomicGroup = packageChanged && base.reportFormat !== working.reportFormat
+    ? { atomicGroupId: 'web-package-format' } : {};
+  const addPackageChange = () => {
+    if (!packageChanged) return;
+    changes.push(makeChange({
+      changeId: nextId(),
+      type: 'setWebPackageRef',
+      value: deepClone(working.webPackageRef ?? null),
+      expectedBase: { kind: 'value', value: deepClone(base.webPackageRef ?? null) },
+      ...webAtomicGroup,
+    }));
+  };
+  // Staged proposal analysis validates every intermediate config.
+  // Remove the Package before leaving Web; enter Web before adding one.
+  if (working.reportFormat !== 'web') addPackageChange();
+  if (base.reportFormat !== working.reportFormat) {
+    changes.push(makeChange({
+      changeId: nextId(),
+      type: 'setReportFormat',
+      value: working.reportFormat,
+      expectedBase: { kind: 'value', value: base.reportFormat },
+      ...webAtomicGroup,
+    }));
+  }
+  if (working.reportFormat === 'web') addPackageChange();
   if (base.battleMode !== working.battleMode) {
     changes.push(makeChange({
       changeId: nextId(),
@@ -285,35 +400,53 @@ export const diffArenaSharedConfig = (
       expectedBase: { kind: 'value', value: base.battleMode },
     }));
   }
+  if (base.selectedLanguage !== working.selectedLanguage) {
+    changes.push(makeChange({
+      changeId: nextId(),
+      type: 'setSelectedLanguage',
+      value: working.selectedLanguage,
+      expectedBase: { kind: 'value', value: base.selectedLanguage },
+    }));
+  }
 
   const baseScenario = base.scenario;
   const workingScenario = working.scenario;
   if (baseScenario === null ? workingScenario !== null : workingScenario === null) {
     const workingScenarioRef = workingScenario !== null && 'ref' in workingScenario ? workingScenario.ref : undefined;
-    if (workingScenario !== null && (!workingScenarioRef || !isCanonicalDataCardKey(workingScenario.key, workingScenarioRef.id))) {
-      unsupportedChange('scenario host-local/preset addition is not representable by Arena Proposal v1');
+    if (workingScenario !== null && (!workingScenarioRef || !isCanonicalResourceKey(workingScenario.key, workingScenarioRef.id))) {
+      unsupportedChange('scenario host-local addition is not representable by Arena Proposal v1');
     }
     changes.push(makeChange({
       changeId: nextId(),
       type: 'setScenario',
       ref: workingScenario === null ? null : deepClone(workingScenarioRef!),
-      expectedBase: { kind: 'ref', ref: baseScenario === null ? null : expectedScenarioRef(baseScenario) },
+      expectedBase: {
+        kind: 'ref',
+        ref: baseScenario === null ? null : expectedScenarioRef(baseScenario),
+        ...(baseScenario !== null && !baseScenario.key.startsWith('data-card:') ? { key: baseScenario.key } : {}),
+      },
+      ...(workingScenario !== null && !workingScenario.key.startsWith('data-card:') ? { key: workingScenario.key } : {}),
     }));
   } else if (baseScenario !== null && workingScenario !== null) {
     if (hostEntry(baseScenario) || hostEntry(workingScenario)) {
       if (!deepEqual(baseScenario, workingScenario)) {
         unsupportedChange('scenario host-local field changes are not representable by Arena Proposal v1');
       }
-    } else if (!deepEqual(baseScenario, workingScenario)) {
+    } else if (!semanticallyEqualEntry(baseScenario, workingScenario)) {
       const workingScenarioRef = ('ref' in workingScenario ? workingScenario.ref : undefined);
-      if (!workingScenarioRef || !isCanonicalDataCardKey(workingScenario.key, workingScenarioRef.id)) {
-        unsupportedChange('scenario reference changes must use canonical data-card key');
+      if (!workingScenarioRef || !isCanonicalResourceKey(workingScenario.key, workingScenarioRef.id)) {
+        unsupportedChange('scenario reference changes must use canonical data-card or preset key');
       }
       changes.push(makeChange({
         changeId: nextId(),
         type: 'setScenario',
         ref: deepClone(workingScenarioRef!),
-        expectedBase: { kind: 'ref', ref: expectedScenarioRef(baseScenario) },
+        expectedBase: {
+          kind: 'ref',
+          ref: expectedScenarioRef(baseScenario),
+          ...(baseScenario.key.startsWith('data-card:') ? {} : { key: baseScenario.key }),
+        },
+        ...(workingScenario.key.startsWith('data-card:') ? {} : { key: workingScenario.key }),
       }));
     }
   }
@@ -330,50 +463,78 @@ export const diffArenaSharedConfig = (
   ): void => {
     const baseKeys = baseEntries.map(entryKey);
     const workingKeys = workingEntries.map(entryKey);
-    assertAppendApplyOrder(baseKeys, workingKeys, `${target}s`);
     const baseMap = new Map(baseEntries.map((entry) => [entry.key, entry]));
     const workingMap = new Map(workingEntries.map((entry) => [entry.key, entry]));
+    const orderDependencies: string[] = [];
     for (const entry of workingEntries) {
       if (baseMap.has(entry.key)) continue;
       requireOnlineAddition(entry, target);
       const entryRef = refOf(entry);
       if (target === 'auxScenario') {
+        const changeId = nextId();
+        orderDependencies.push(changeId);
         changes.push(makeChange({
-          changeId: nextId(),
+          changeId,
           type: 'addAuxScenario',
           ref: deepClone(entryRef) as ScenarioDataCardRef,
           expectedBase: { kind: 'absent' },
+          ...(entry.key.startsWith('data-card:') ? {} : { key: entry.key }),
         }));
       } else {
+        const changeId = nextId();
+        orderDependencies.push(changeId);
         changes.push(makeChange({
-          changeId: nextId(),
+          changeId,
           type: 'addMaterial',
           ref: deepClone(entryRef) as MaterialDataCardRef,
           expectedBase: { kind: 'absent' },
+          ...(entry.key.startsWith('data-card:') ? {} : { key: entry.key }),
         }));
       }
     }
     for (const entry of baseEntries) {
       if (workingMap.has(entry.key)) continue;
       if (target === 'auxScenario') {
+        const changeId = nextId();
+        orderDependencies.push(changeId);
         changes.push(makeChange({
-          changeId: nextId(),
+          changeId,
           type: 'removeAuxScenario',
           scenarioKey: entry.key,
-          expectedBase: { kind: 'present', ref: expectedScenarioRef(entry as AuxiliaryScenarioEntry) },
+          expectedBase: {
+            kind: 'present',
+            ref: expectedScenarioRef(entry as AuxiliaryScenarioEntry),
+            ...(entry.key.startsWith('data-card:') ? {} : { key: entry.key }),
+          },
         }));
       } else {
+        const changeId = nextId();
+        orderDependencies.push(changeId);
         changes.push(makeChange({
-          changeId: nextId(),
+          changeId,
           type: 'removeMaterial',
           materialKey: entry.key,
-          expectedBase: { kind: 'present', ref: expectedMaterialRef(entry as MaterialEntry) },
+          expectedBase: {
+            kind: 'present',
+            ref: expectedMaterialRef(entry as MaterialEntry),
+            ...(entry.key.startsWith('data-card:') ? {} : { key: entry.key }),
+          },
         }));
       }
     }
     for (const entry of workingEntries) {
       const previous = baseMap.get(entry.key);
       if (previous) compareStableEntry(previous, entry, `${target} ${entry.key}`);
+    }
+    const stagedKeys = stagedAppendApplyOrder(baseKeys, workingKeys);
+    if (!arrayEqual(stagedKeys, workingKeys)) {
+      changes.push(makeChange({
+        changeId: nextId(),
+        type: target === 'auxScenario' ? 'reorderAuxScenarios' : 'reorderMaterials',
+        value: deepClone(workingKeys),
+        expectedBase: { kind: 'value', value: stagedKeys },
+        ...(orderDependencies.length > 0 ? { dependsOn: orderDependencies } : {}),
+      }));
     }
   };
 

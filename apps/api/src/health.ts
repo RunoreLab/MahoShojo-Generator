@@ -3,6 +3,7 @@ import { probeD1Readiness } from '#/d1/runtime';
 import type { HonoServerConfig } from '#/config';
 import type { HonoAppVariables } from '#/middleware/request-metadata';
 import type { RedisService } from '#/redis/runtime';
+import type { HonoReadinessObservation, RuntimeTelemetryService } from '#/telemetry/runtime';
 import { HOSTED_DR_CONTRACT_VERSION } from '@mahoshojo/hosted-api/hosted-dr';
 
 const isD1Configured = (): boolean => {
@@ -18,6 +19,7 @@ export const registerHealthRoutes = (
   app: Hono<{ Variables: HonoAppVariables }>,
   config: HonoServerConfig,
   redis: RedisService,
+  telemetry: Pick<RuntimeTelemetryService, 'observeReadiness'> = {},
 ): void => {
   const liveHandler = (path: string) => app.get(path, (context) => context.json({
     ok: true,
@@ -30,37 +32,65 @@ export const registerHealthRoutes = (
   liveHandler('/api/health/live');
 
   const readyHandler = async (context: Context<{ Variables: HonoAppVariables }>) => {
-    const redisConfigured = redis.getStatus().configured;
-    const d1Configured = isD1Configured();
-    const [redisReady, d1Ready] = await Promise.all([
-      redisConfigured ? redis.ping() : Promise.resolve(false),
-      d1Configured ? probeD1Readiness() : Promise.resolve(false),
-    ]);
+    const startedAt = performance.now();
+    let redisConfigured = false;
+    let d1Configured = false;
+    let d1Transport: HonoReadinessObservation['d1Transport'] = 'none';
+    let redisReady = false;
+    let d1Ready = false;
+    let ready = false;
 
-    const redisSatisfied = config.redisRequired ? redisReady : true;
-    const d1Satisfied = config.d1Required ? d1Ready : true;
-    const ready = redisSatisfied && d1Satisfied;
-    context.header('Cache-Control', 'no-store');
-    return context.json({
-      ok: ready,
-      service: 'mahoshojo-hono',
-      placement: 'hono-primary',
-      contractVersion: HOSTED_DR_CONTRACT_VERSION,
-      dependencies: {
-        redis: {
-          configured: redisConfigured,
-          required: config.redisRequired,
-          ready: redisReady,
+    try {
+      redisConfigured = redis.getStatus().configured;
+      d1Configured = isD1Configured();
+      d1Transport = process.env.D1_GATEWAY_URL?.trim()
+        ? 'gateway'
+        : d1Configured
+          ? 'cloudflare-api'
+          : 'none';
+
+      [redisReady, d1Ready] = await Promise.all([
+        redisConfigured ? redis.ping() : Promise.resolve(false),
+        d1Configured ? probeD1Readiness() : Promise.resolve(false),
+      ]);
+
+      const redisSatisfied = config.redisRequired ? redisReady : true;
+      const d1Satisfied = config.d1Required ? d1Ready : true;
+      ready = redisSatisfied && d1Satisfied;
+      context.header('Cache-Control', 'no-store');
+      return context.json({
+        ok: ready,
+        service: 'mahoshojo-hono',
+        placement: 'hono-primary',
+        contractVersion: HOSTED_DR_CONTRACT_VERSION,
+        dependencies: {
+          redis: {
+            configured: redisConfigured,
+            required: config.redisRequired,
+            ready: redisReady,
+          },
+          d1: {
+            configured: d1Configured,
+            required: config.d1Required,
+            ready: d1Ready,
+            transport: d1Transport,
+          },
         },
-        d1: {
-          configured: d1Configured,
-          required: config.d1Required,
-          ready: d1Ready,
-          transport: process.env.D1_GATEWAY_URL?.trim() ? 'gateway' : d1Configured ? 'cloudflare-api' : 'none',
-        },
-      },
-      timestamp: new Date().toISOString(),
-    }, ready ? 200 : 503);
+        timestamp: new Date().toISOString(),
+      }, ready ? 200 : 503);
+    } finally {
+      try {
+        telemetry.observeReadiness?.({
+          outcome: ready ? 'ready' : 'not-ready',
+          durationMs: Math.max(0, performance.now() - startedAt),
+          redisReady,
+          d1Ready,
+          d1Transport,
+        });
+      } catch {
+        // readiness telemetry 失败不得改变 health/readiness contract。
+      }
+    }
   };
 
   app.get('/health/ready', readyHandler);

@@ -1,0 +1,189 @@
+{
+  "systemPromptSha256": "05a7d2ced9f16ca3b74d4a874ab3f738919682e0fd216cce4d38763596638454",
+  "schema": {
+    "type": "ZodObject",
+    "shape": {
+      "codename": {
+        "type": "ZodString",
+        "description": "代号：魔法少女对应的一种花的名字，根据性格、理念匹配合适的花语对应的花名。可以从我提供的花名中选取最合适的一个，也可以生成一个其他的更合适的花名。"
+      },
+      "appearance": {
+        "type": "ZodObject",
+        "shape": {
+          "outfit": {
+            "type": "ZodString",
+            "description": "魔法少女变身后的服装和饰品的详细描述，50字左右"
+          },
+          "accessories": {
+            "type": "ZodString",
+            "description": "变身后的饰品细节描述，50字左右"
+          },
+          "colorScheme": {
+            "type": "ZodString",
+            "description": "参考问卷生成主要色调和配色方案"
+          },
+          "overallLook": {
+            "type": "ZodString",
+            "description": "整体外观风格，包括发色、瞳色、发型、体型、服饰和神态表情，60字左右"
+          }
+        }
+      },
+      "magicConstruct": {
+        "type": "ZodObject",
+        "shape": {
+          "name": {
+            "type": "ZodString",
+            "description": "魔装的名字"
+          },
+          "form": {
+            "type": "ZodString",
+            "description": "魔装的具体形态和外观"
+          },
+          "basicAbilities": {
+            "type": "ZodArray",
+            "description": "魔装的基本能力列表，2-3个核心能力",
+            "element": {
+              "type": "ZodString"
+            }
+          },
+          "description": {
+            "type": "ZodString",
+            "description": "魔装的详细描述和特色"
+          }
+        }
+      },
+      "wonderlandRule": {
+        "type": "ZodObject",
+        "shape": {
+          "name": {
+            "type": "ZodString",
+            "description": "奇境规则的名称"
+          },
+          "description": {
+            "type": "ZodString",
+            "description": "奇境规则的具体内容和效果"
+          },
+          "tendency": {
+            "type": "ZodString",
+            "description": "规则的倾向类型"
+          },
+          "activation": {
+            "type": "ZodString",
+            "description": "规则激活的条件或方式"
+          }
+        }
+      },
+      "blooming": {
+        "type": "ZodObject",
+        "shape": {
+          "name": {
+            "type": "ZodString",
+            "description": "繁开状态魔装名"
+          },
+          "evolvedAbilities": {
+            "type": "ZodArray",
+            "description": "繁开后的进化能力，2-3个强化能力",
+            "element": {
+              "type": "ZodString"
+            }
+          },
+          "evolvedForm": {
+            "type": "ZodString",
+            "description": "繁开后的魔装形态变化"
+          },
+          "evolvedOutfit": {
+            "type": "ZodString",
+            "description": "繁开后的魔法少女衣装样式"
+          },
+          "powerLevel": {
+            "type": "ZodString",
+            "description": "繁开状态的力量等级描述"
+          }
+        }
+      },
+      "analysis": {
+        "type": "ZodObject",
+        "shape": {
+          "personalityAnalysis": {
+            "type": "ZodString",
+            "description": "基于问卷回答的性格分析"
+          },
+          "abilityReasoning": {
+            "type": "ZodString",
+            "description": "能力设定的推理过程和依据"
+          },
+          "coreTraits": {
+            "type": "ZodArray",
+            "description": "核心性格特征，3-4个关键词",
+            "element": {
+              "type": "ZodString"
+            }
+          },
+          "predictionBasis": {
+            "type": "ZodString",
+            "description": "预测的主要依据和逻辑"
+          },
+          "background": {
+            "type": "ZodObject",
+            "description": "角色的背景故事，用以丰富角色的立体形象与人物弧光，体现角色的信念与感情。",
+            "shape": {
+              "belief": {
+                "type": "ZodString",
+                "description": "角色的核心理念、信条或愿望，描述角色为何而战，支撑角色行动的内在动力。"
+              },
+              "bonds": {
+                "type": "ZodString",
+                "description": "角色的情感、羁绊，描述角色与他人（特别是在问卷中出现的人）之间的关系，以及这段关系如何影响了角色，羁绊会如何影响其成长的旅途。"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "cases": [
+    {
+      "input": {
+        "answers": [
+          {
+            "question": "  你为何而战？  ",
+            "answer": "守护同伴",
+            "questionId": "q1",
+            "questionnaireId": "a",
+            "questionnaireTitle": "  起点  "
+          },
+          {
+            "question": "",
+            "answer": "未知",
+            "questionnaireTitle": "起点"
+          },
+          {
+            "question": "选择",
+            "answer": "花",
+            "questionnaireTitle": "进阶"
+          },
+          {
+            "question": "尾声",
+            "answer": "继续",
+            "questionnaireTitle": "起点"
+          }
+        ],
+        "language": "zh-CN",
+        "loreText": "潮汐保存记忆",
+        "flowers": "海棠：温柔"
+      },
+      "structuredPromptSha256": "8bd795b873bcd21fedee6f6cd6e8a96d3314169f4a6f5088a7011ad0f9e86529",
+      "streamPromptSha256": "0c8b390afa3492a8c74286ac1d604e4a158a5c2d811bc06d136e46ae5ed039ab"
+    },
+    {
+      "input": {
+        "answers": [],
+        "language": "English",
+        "loreText": "",
+        "flowers": ""
+      },
+      "structuredPromptSha256": "83907f3a94ac667c9924543ff9c431d3dbf87f4b3c619b838dfdf3025655b239",
+      "streamPromptSha256": "8268a62c58061ceaee69ed6f78af90ecc93a5b2cf52656d64bdd409a24d429a7"
+    }
+  ]
+}

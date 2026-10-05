@@ -43,7 +43,8 @@ export interface ArenaEligibilitySnapshot {
   extraJson: string | null;
 }
 
-export const INITIAL_RATING = 1000;
+import { INITIAL_RATING } from '@mahoshojo/hosted-runtime/admin/arena-policy';
+export { INITIAL_RATING } from '@mahoshojo/hosted-runtime/admin/arena-policy';
 export const STRICT_DEDUP_WINDOW_MS = 360 * 60 * 1000;
 export const FREE_DEDUP_WINDOW_MS = 10 * 60 * 1000;
 export const STRICT_DAILY_LIMIT = 20;
@@ -203,6 +204,7 @@ type ArenaRatingsRepoBundle = {
     initialRating: number,
     nowIso: string,
   ) => Promise<void>;
+  removeStrictArenaRatingForDataCard: (db: unknown, dataCardId: string) => Promise<void>;
   countStrictAppliedEventsSince: (db: unknown, userId: number, sinceIso: string) => Promise<number>;
   getStrictUserPairAppliedStatsSince: (
     db: unknown,
@@ -302,6 +304,7 @@ const readArenaRatingsRepoBundle = async (): Promise<ArenaRatingsRepoBundle | nu
     return {
       db,
       resetStrictArenaRatingForDataCard: repo.resetStrictArenaRatingForDataCard as ArenaRatingsRepoBundle['resetStrictArenaRatingForDataCard'],
+      removeStrictArenaRatingForDataCard: repo.removeStrictArenaRatingForDataCard as ArenaRatingsRepoBundle['removeStrictArenaRatingForDataCard'],
       countStrictAppliedEventsSince: repo.countStrictAppliedEventsSince as ArenaRatingsRepoBundle['countStrictAppliedEventsSince'],
       getStrictUserPairAppliedStatsSince: repo.getStrictUserPairAppliedStatsSince as ArenaRatingsRepoBundle['getStrictUserPairAppliedStatsSince'],
       getStrictQueueDataCardsByIds: repo.getStrictQueueDataCardsByIds as ArenaRatingsRepoBundle['getStrictQueueDataCardsByIds'],
@@ -333,6 +336,19 @@ export async function resetStrictArenaRatingForDataCard(dataCardId: string): Pro
     await bundle.resetStrictArenaRatingForDataCard(bundle.db, id, INITIAL_RATING, nowIso);
   } catch (error) {
     console.warn('重置严格排位分失败（降级为忽略）:', { dataCardId, error });
+  }
+}
+
+export async function removeStrictArenaRatingForDataCard(dataCardId: string): Promise<void> {
+  const id = typeof dataCardId === 'string' ? dataCardId.trim() : '';
+  if (!id) return;
+
+  try {
+    const bundle = await readArenaRatingsRepoBundle();
+    if (!bundle) return;
+    await bundle.removeStrictArenaRatingForDataCard(bundle.db, id);
+  } catch (error) {
+    console.warn('移除严格排位分失败（降级为忽略）:', { dataCardId, error });
   }
 }
 

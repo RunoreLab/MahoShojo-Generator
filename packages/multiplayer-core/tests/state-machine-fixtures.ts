@@ -104,6 +104,7 @@ export const historySettings = () => ({
 
 export const baseConfig = () => ({
   battleMode: 'classic' as const,
+  reportFormat: 'markdown' as const,
   combatants: [{
     key: 'data-card:character-1',
     ref: { id: 'character-1', kind: 'character' as const, versionToken: 'v1' },
@@ -146,6 +147,22 @@ export const joinMemberCommand = () => ({
     joinedAt: NEXT_TIMESTAMP,
   },
   timestamp: NEXT_TIMESTAMP,
+});
+
+export const rejoinMemberCommand = (
+  displayName = 'Member Rejoined',
+  timestamp = '2026-08-27T16:02:00.000Z',
+) => ({
+  type: 'rejoin-member' as const,
+  expectedRoomEpoch: 'epoch-1',
+  displayName,
+  timestamp,
+});
+
+export const leaveMemberCommand = (timestamp = '2026-08-27T16:02:00.000Z') => ({
+  type: 'leave-member' as const,
+  expectedRoomEpoch: 'epoch-1',
+  timestamp,
 });
 
 export const proposal = (

@@ -7,6 +7,12 @@ import type { AIProvider } from '@/lib/config';
 import { enforceTextSafety } from '@/lib/content-safety/server';
 import { createBlankDataCard } from '@/lib/data-card-converter';
 import { getLogger } from '@/lib/logger';
+import {
+  applyMagicTeaPartyMessageLimits,
+  formatMagicTeaPartyTotalOverflowMessage,
+  MAGIC_TEA_PARTY_MAX_TOTAL_CHARS,
+  resolveMagicTeaPartyMessageCharLimit,
+} from '@/lib/magic-tea-party/message-limits';
 import { buildMagicTeaPartyChoicesPrompt, buildWorldbookText } from '@/lib/magic-tea-party/prompts';
 import { getMagicTeaPartyPreset } from '@/lib/magic-tea-party/presets';
 import type { MagicTeaPartyRole, MagicTeaPartyScenario, MagicTeaPartyUpdateDraft } from '@/lib/magic-tea-party/types';
@@ -18,7 +24,6 @@ import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
 const log = getLogger('api-magic-tea-party-generate-choices');
 
 const MAX_SAFETY_TEXT_CHARS = 50_000;
-const MAX_MESSAGE_CHARS = 8_000;
 
 const CustomProviderSchema = z.object({
   providerId: z.string().min(1),
@@ -107,6 +112,8 @@ const SettingsSchema = z
     presetId: z.string().optional(),
     worldbookPresetId: z.string().optional(),
     userDisplayName: z.string().optional(),
+    contextWindowTokens: z.number().int().min(1).optional(),
+    responseReserveTokens: z.number().int().min(0).optional(),
     readArenaHistory: z.boolean().optional(),
     readArenaHistoryLimit: z.number().int().min(1).max(999).optional(),
     isArenaHistoryUnlimited: z.boolean().optional(),
@@ -185,10 +192,26 @@ async function handler(req: NextRequest): Promise<Response> {
 
     const { sessionId, messages, roles, scenario: scenarioInput, auxScenarios, protocolShadow, playerRoleId, summary, settings, customProvider } = parsedBody.data;
 
-    const overMessage = messages.find((message) => typeof message.content === 'string' && message.content.length > MAX_MESSAGE_CHARS);
-    if (overMessage) {
-      return json({ error: `单条消息内容超过 ${MAX_MESSAGE_CHARS} 字，请先精简。` }, { status: 400 });
+    const messageCharLimit = resolveMagicTeaPartyMessageCharLimit(settings.contextWindowTokens);
+    const limitedMessages = applyMagicTeaPartyMessageLimits(messages, messageCharLimit);
+    if (limitedMessages.totalChars > MAGIC_TEA_PARTY_MAX_TOTAL_CHARS) {
+      return json(
+        {
+          error: formatMagicTeaPartyTotalOverflowMessage(limitedMessages.totalChars),
+          meta: { totalChars: limitedMessages.totalChars, limit: MAGIC_TEA_PARTY_MAX_TOTAL_CHARS },
+        },
+        { status: 413 }
+      );
     }
+    if (limitedMessages.clippedMessages.length > 0) {
+      log.info('魔法茶会单条消息超长，已按预算截断', {
+        sessionId,
+        limit: messageCharLimit,
+        clippedCount: limitedMessages.clippedMessages.length,
+        omittedChars: limitedMessages.totalOmittedChars,
+      });
+    }
+    const messagesForPrompt = limitedMessages.messages;
 
     const providerOverrideResult = buildProviderOverride(customProvider);
     if (providerOverrideResult instanceof Response) return providerOverrideResult;
@@ -249,7 +272,7 @@ async function handler(req: NextRequest): Promise<Response> {
       scenario,
       auxScenarios: auxScenarios as unknown as MagicTeaPartyScenario[],
       worldbookText,
-      messages: messages as any,
+      messages: messagesForPrompt as any,
       stylePrompt,
       choiceCount: settings.choiceCount,
     });

@@ -3,7 +3,7 @@ import {
   getBusinessUserProfileById,
   updateBusinessUserSignatureById,
 } from '@/lib/db/repositories/business-users';
-import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
+import { json, readJson, requireAuthUser, withApiErrorBoundary } from '@/lib/api/server';
 
 const MAX_SIGNATURE_LENGTH = 120;
 
@@ -28,7 +28,7 @@ const loadUserProfile = async (
   };
 };
 
-const handler = withPvpErrorBoundary(async function handler(req: Request): Promise<Response> {
+const handler = withApiErrorBoundary(async function handler(req: Request): Promise<Response> {
   const auth = await requireAuthUser(req);
   if ('response' in auth) return auth.response;
 
@@ -58,7 +58,6 @@ const handler = withPvpErrorBoundary(async function handler(req: Request): Promi
 
   return json({ error: 'Method not allowed' }, { status: 405 });
 });
-
 
 export const appRouteHandler = handler;
 export default appRouteHandler;

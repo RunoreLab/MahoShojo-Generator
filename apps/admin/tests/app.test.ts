@@ -59,7 +59,7 @@ describe('independent Admin shell', () => {
     const response = await app.request('/health/live');
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ status: 'ok', scope: 'g3-p0-prework' });
+    expect(await response.json()).toEqual({ status: 'ok', scope: 'admin' });
   });
 
   test('缺失 Access assertion 被拒绝', async () => {

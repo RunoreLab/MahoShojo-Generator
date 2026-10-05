@@ -1,6 +1,10 @@
 import type { BattleReportGenerationCombatantInsert } from '@/lib/database/battle-report-generation-combatants';
 import { getLargeObjectByOwnerRef } from '@/lib/database/large-objects';
 import { getObjectText } from '@/lib/r2';
+import {
+  parseBattleReportRenderSnapshotV1,
+  type BattleReportRenderSnapshotV1,
+} from '@mahoshojo/contracts';
 
 const normalizeOptionalString = (value: unknown): string | null => {
   if (typeof value !== 'string') return null;
@@ -19,6 +23,38 @@ export function extractBattleReportGenerationErrorMessage(extraJson: string | nu
   } catch {
     return null;
   }
+}
+
+export function extractBattleReportRenderSnapshotV1(
+  extraJson: string | null | undefined,
+): BattleReportRenderSnapshotV1 | null {
+  if (typeof extraJson !== 'string' || !extraJson.trim()) return null;
+
+  try {
+    const parsed = JSON.parse(extraJson) as Record<string, unknown>;
+    return parseBattleReportRenderSnapshotV1(parsed?.battleReportRenderSnapshotV1);
+  } catch {
+    return null;
+  }
+}
+
+export function buildBattleReportRenderSnapshotSafetyText(
+  snapshot: BattleReportRenderSnapshotV1 | null | undefined,
+): string {
+  if (!snapshot) return '';
+
+  const text: string[] = [];
+  if (snapshot.reporterInfo) {
+    text.push(snapshot.reporterInfo.name, snapshot.reporterInfo.publication);
+  }
+  if (snapshot.userGuidance) text.push(snapshot.userGuidance);
+  for (const guidance of snapshot.characterGuidances ?? []) {
+    text.push(guidance.characterName, guidance.guidance);
+  }
+  for (const result of snapshot.adjudicationResults ?? []) {
+    text.push(result.description, result.outcome, result.details);
+  }
+  return text.filter(Boolean).join('\n');
 }
 
 export function buildBattleReportGenerationCombatantInserts(
@@ -93,6 +129,15 @@ export async function loadBattleReportGenerationOutputText(input: {
       outputText: r2.data.text,
       source: 'r2',
       hasStoredOutput: true,
+      readError: null,
+    };
+  }
+
+  if (r2.status === 404) {
+    return {
+      outputText: '',
+      source: 'r2',
+      hasStoredOutput: false,
       readError: null,
     };
   }

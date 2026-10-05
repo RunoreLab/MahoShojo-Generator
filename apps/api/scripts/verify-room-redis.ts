@@ -30,10 +30,8 @@ import {
   roomDirectoryPublicIndexMember,
   serializeStoredRoomDirectoryRecord,
 } from '../src/arena-room/room-directory-record';
-import { createArenaRoomMembershipService } from '../src/arena-room/room-membership-service';
 import { createArenaRoomProposalService } from '../src/arena-room/room-proposal-service';
 import { createArenaRoomGenerationService } from '../src/arena-room/room-generation-service';
-import type { ArenaDataCardRefVerifier } from '../src/arena-room/arena-data-card-ref-verifier';
 import type {
   ArenaRoomGenerationEvent,
   ArenaRoomGenerationPort,
@@ -51,6 +49,8 @@ import {
 } from '../src/arena-room/room-websocket-gateway';
 import { RedisRuntime } from '../src/redis/runtime';
 import { requireSafeRoomVerifierPrefix } from './room-verifier-safety';
+import { createRoomGenerationVerifierMaterializer } from './room-generation-verifier-materializer';
+import { createRoomVerifierMembershipService } from './room-verifier-membership';
 
 const redisUrl = process.env.REDIS_URL?.trim();
 if (!redisUrl) throw new Error('Room Redis verifier 需要 REDIS_URL');
@@ -163,9 +163,13 @@ const creationReceiptKey = (accountUserId: number, creationRequestId: string): s
 
 const sharedConfig = () => ({
   battleMode: 'classic' as const,
+  reportFormat: 'markdown' as const,
   combatants: [{
     key: 'data-card:character-1',
     ref: { id: 'character-1', kind: 'character' as const, versionToken: 'v1' },
+  }, {
+    key: 'data-card:character-2',
+    ref: { id: 'character-2', kind: 'character' as const, versionToken: 'v1' },
   }],
   teams: [],
   scenario: null,
@@ -227,6 +231,7 @@ const publish = (state: ArenaRoomAuthorityState): ArenaRoomTransitionSuccess => 
     type: 'publish-config',
     expectedRoomEpoch: state.snapshot.roomEpoch,
     expectedRevision: state.snapshot.revision,
+    expectedControlSeq: state.snapshot.controlSeq,
     sharedConfig: { ...state.snapshot.sharedConfig, userGuidance: 'restart-recovery-acknowledged' },
     timestamp: NEXT_TIMESTAMP,
   }, hostAuthority);
@@ -389,12 +394,16 @@ try {
     if (!created.ok || created.kind !== 'applied') {
       throw new Error('ROOM_ACTOR_RESTART_WRITE_CREATE_FAILED');
     }
+    const actor = registry.get(roomId);
+    const actorState = actor?.getSnapshot();
+    if (!actorState) throw new Error('ROOM_ACTOR_RESTART_WRITE_ACTOR_MISSING');
     const mutated = await registry.execute({
       roomId,
       command: {
         type: 'publish-config',
         expectedRoomEpoch: 'epoch-1',
         expectedRevision: 0,
+        expectedControlSeq: actorState.snapshot.controlSeq,
         sharedConfig: { ...sharedConfig(), userGuidance: 'restart-recovery-acknowledged' },
         timestamp: NEXT_TIMESTAMP,
       },
@@ -959,6 +968,7 @@ try {
         authority: hostAuthority,
       })).result;
       if (!actorCreated.ok) throw new Error('ROOM_ACTOR_CREATE_FAILED');
+      const oldActorSnapshot = oldActorRegistry.get(actorRoomId)?.getSnapshot();
       const recoveredActorRegistry = createRoomActorRegistry({
         store: readerStore,
         createRoomEpoch: () => 'actor-epoch-2',
@@ -975,6 +985,7 @@ try {
           type: 'publish-config',
           expectedRoomEpoch: 'actor-epoch-1',
           expectedRevision: 0,
+          expectedControlSeq: oldActorSnapshot?.snapshot.controlSeq ?? 0,
           sharedConfig: { ...sharedConfig(), userGuidance: 'late-old-actor' },
           timestamp: NEXT_TIMESTAMP,
         },
@@ -995,7 +1006,7 @@ try {
         now: nowAt(THIRD_TIMESTAMP),
       });
       let proposalUserIndex = 0;
-      const proposalMemberships = createArenaRoomMembershipService({
+      const proposalMemberships = createRoomVerifierMembershipService({
         actors: proposalActors,
         createUserId: () => `proposal-user-${++proposalUserIndex}`,
         now: () => NEXT_TIMESTAMP,
@@ -1247,7 +1258,7 @@ try {
         now: () => generationNow,
       });
       let generationUserIndex = 0;
-      const generationMemberships = createArenaRoomMembershipService({
+      const generationMemberships = createRoomVerifierMembershipService({
         actors: generationActors,
         createUserId: () => `generation-user-${++generationUserIndex}`,
         now: () => NEXT_TIMESTAMP,
@@ -1267,7 +1278,7 @@ try {
       const generationSecretCanary = `provider-secret-${token}`;
       let generationStartCount = 0;
       let generationResumeCount = 0;
-      let referenceVerifyCount = 0;
+      let materializationCount = 0;
       let durableProjectionStatus: 'completed' | 'running' = 'running';
       let primaryStreamController: ReadableStreamDefaultController<
         ArenaRoomGenerationEvent
@@ -1282,6 +1293,9 @@ try {
         }),
       };
       const generationPort = {
+        async cancelOwned() {
+          return { kind: 'not-found' as const };
+        },
         async deriveGenerationId() {
           return generationId;
         },
@@ -1318,6 +1332,19 @@ try {
               generationRecordId: durableProjectionStatus === 'completed'
                 ? `generation-record-${token}`
                 : null,
+              ...(durableProjectionStatus === 'completed' ? {
+                roomSafeResult: {
+                  version: 1,
+                  format: 'stream-markdown',
+                  mode: 'classic',
+                  reporterInfo: { name: 'Redis Verifier', publication: 'Room Daily' },
+                  combatantUpdates: [{
+                    combatantKey: 'data-card:character-1',
+                    displayName: 'Verifier character-1',
+                    impact: '完成 Redis 恢复验证',
+                  }],
+                },
+              } : {}),
               errorCode: null,
             },
           };
@@ -1348,28 +1375,29 @@ try {
           };
         },
       } satisfies ArenaRoomGenerationPort;
-      const generationReferences: ArenaDataCardRefVerifier = {
-        async verify(input) {
-          referenceVerifyCount += 1;
-          return input.refs;
-        },
-      };
+      const generationMaterializer = createRoomGenerationVerifierMaterializer(() => {
+        materializationCount += 1;
+      });
       const generationService = createArenaRoomGenerationService({
         memberships: generationMemberships,
-        references: generationReferences,
+        materializer: generationMaterializer,
         generation: generationPort,
         now: () => new Date(generationNow).toISOString(),
       });
       const generationConfig = sharedConfig();
-      generationConfig.userGuidance = 'Redis generation pending config';
+      const generationControlSeq = generationActors.get(generationRoomId)
+        ?.getSnapshot()?.snapshot.controlSeq;
+      if (generationControlSeq === undefined) {
+        throw new Error('ROOM_REDIS_GENERATION_ACTOR_MISSING');
+      }
       const generationRequest = {
         expectedRoomEpoch: generationHost.roomEpoch,
         expectedRevision: 0,
+        expectedControlSeq: generationControlSeq,
         generationRequestId,
         sharedConfig: generationConfig,
+        hostLocalPayloads: [],
         generation: {
-          generationRequestId,
-          internalGuidance: '验证 Redis Room generation publisher',
           customProvider: { apiKey: generationSecretCanary },
         },
       };
@@ -1416,7 +1444,9 @@ try {
       });
       if (
         generationStartCount !== 1
-        || referenceVerifyCount !== 1
+        // 活跃 publisher 已证明同一 reservation 正在执行；duplicate start 应直接读取
+        // 该权威进度，不再依赖 exact-ref resolver 可用性或重复 materialization。
+        || materializationCount !== 1
         || JSON.stringify(await readerStore.load(generationRoomId)).includes(generationSecretCanary)
       ) {
         throw new Error('ROOM_REDIS_GENERATION_DUPLICATE_OR_SECRET_FAILED');
@@ -1448,13 +1478,13 @@ try {
         recoveryTimestamp: () => new Date(generationNow).toISOString(),
         now: () => generationNow,
       });
-      const recoveredMemberships = createArenaRoomMembershipService({
+      const recoveredMemberships = createRoomVerifierMembershipService({
         actors: recoveredGenerationActors,
         now: () => new Date(generationNow).toISOString(),
       });
       const recoveredGenerationService = createArenaRoomGenerationService({
         memberships: recoveredMemberships,
-        references: generationReferences,
+        materializer: generationMaterializer,
         generation: generationPort,
         now: () => new Date(generationNow).toISOString(),
       });
@@ -1537,6 +1567,7 @@ try {
         || !authoritativeFinal.finalAuthoritative
         || authoritativeFinal.generationRecordId !== `generation-record-${token}`
         || authoritativeFinal.markdown !== '# Redis 恢复后的权威终态\n'
+        || authoritativeFinal.result?.combatantUpdates?.[0]?.impact !== '完成 Redis 恢复验证'
         || JSON.stringify(completedGenerationState).includes(generationSecretCanary)
       ) {
         throw new Error('ROOM_REDIS_GENERATION_AUTHORITATIVE_FINAL_FAILED');
@@ -1557,7 +1588,7 @@ try {
         now: () => directoryNow,
         checkpointRefreshIntervalMs: 1_000,
       });
-      const directoryMemberships = createArenaRoomMembershipService({
+      const directoryMemberships = createRoomVerifierMembershipService({
         actors: directoryActors,
         createUserId: () => `directory-user-${++directoryUserIndex}`,
         now: () => NEXT_TIMESTAMP,
@@ -1789,7 +1820,7 @@ try {
         recoveryTimestamp: () => NEXT_TIMESTAMP,
         now: nowAt(TIMESTAMP),
       });
-      const unknownMemberships = createArenaRoomMembershipService({
+      const unknownMemberships = createRoomVerifierMembershipService({
         actors: unknownActors,
         creationReceipts: unknownCountedStore,
         createUserId: () => 'directory-unknown-host',
@@ -1876,7 +1907,7 @@ try {
         createTimestamp: () => TIMESTAMP,
         now: nowAt(TIMESTAMP),
       });
-      const paginationMemberships = createArenaRoomMembershipService({
+      const paginationMemberships = createRoomVerifierMembershipService({
         actors: paginationActors,
         createUserId: () => `directory-page-host-${++paginationUser}`,
         now: () => TIMESTAMP,
@@ -2124,7 +2155,7 @@ try {
         createTimestamp: () => TIMESTAMP,
         now: nowAt(NEXT_TIMESTAMP),
       });
-      const disconnectedMemberships = createArenaRoomMembershipService({
+      const disconnectedMemberships = createRoomVerifierMembershipService({
         actors: disconnectedActors,
         createUserId: () => `directory-disconnected-host-${++disconnectedUserIndex}`,
         now: () => NEXT_TIMESTAMP,
@@ -2273,7 +2304,7 @@ try {
         createTimestamp: () => TIMESTAMP,
         now: nowAt(NEXT_TIMESTAMP),
       });
-      const authorityMemberships = createArenaRoomMembershipService({
+      const authorityMemberships = createRoomVerifierMembershipService({
         actors: authorityActors,
         createUserId: () => 'authority-host-1',
         now: () => NEXT_TIMESTAMP,

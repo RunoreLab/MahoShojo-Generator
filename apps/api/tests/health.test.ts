@@ -4,6 +4,7 @@ import type { HonoServerConfig } from '#/config';
 import { registerHealthRoutes } from '#/health';
 import type { HonoAppVariables } from '#/middleware/request-metadata';
 import type { RedisService } from '#/redis/runtime';
+import type { RuntimeTelemetryService } from '#/telemetry/runtime';
 
 type D1TransportCase = {
   name: string;
@@ -88,15 +89,58 @@ const configureTransport = (transport: D1TransportCase['transport']) => {
   process.env.CLOUDFLARE_API_TOKEN = 'token_x';
 };
 
-const createHealthApp = () => {
+const createHealthApp = (
+  redis: RedisService = redisStub,
+  telemetry: Pick<RuntimeTelemetryService, 'observeReadiness'> = {},
+) => {
   const app = new Hono<{ Variables: HonoAppVariables }>();
-  registerHealthRoutes(app, config, redisStub);
+  registerHealthRoutes(app, config, redis, telemetry);
   return app;
 };
 
 afterEach(() => {
   vi.unstubAllGlobals();
   restoreEnvironment();
+});
+
+describe('Hono liveness', () => {
+  it('不读取 Redis 或 D1', async () => {
+    configureTransport('gateway');
+    const fetchMock = vi.fn(async () => Response.json({ success: true }));
+    const redisPing = vi.fn(async () => true);
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await createHealthApp({ ...redisStub, ping: redisPing })
+      .request('/health/live');
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(redisPing).not.toHaveBeenCalled();
+  });
+});
+
+describe('Hono readiness telemetry', () => {
+  it('记录低基数到达、结果、依赖状态与 transport class', async () => {
+    configureTransport('gateway');
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({
+      success: true,
+      result: [{ success: true, results: [{ ok: 1 }], meta: {} }],
+    })));
+    const observeReadiness = vi.fn();
+
+    const response = await createHealthApp(redisStub, { observeReadiness })
+      .request('/api/health/ready');
+
+    expect(response.status).toBe(200);
+    expect(observeReadiness).toHaveBeenCalledOnce();
+    expect(observeReadiness).toHaveBeenCalledWith(expect.objectContaining({
+      outcome: 'ready',
+      redisReady: false,
+      d1Ready: true,
+      d1Transport: 'gateway',
+      durationMs: expect.any(Number),
+    }));
+  });
 });
 
 describe.each(transportCases)('D1 readiness：$name', ({ transport, expectedUrl }) => {

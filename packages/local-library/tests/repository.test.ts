@@ -1,5 +1,6 @@
 import type {
   CardRepository,
+  CardWriteOutcome,
   LocalCardPage,
   LocalCardQuery,
 } from '@mahoshojo/local-library/repository';
@@ -41,6 +42,20 @@ class InMemoryCardRepository implements CardRepository {
       throw new Error('cannot overwrite a tombstone; use restore');
     }
     this.#records.set(parsed.id, parsed);
+  }
+
+  /**
+   * `CardRepository` 的 `putIfAbsent` 是导入侧 existing-wins 唯一的判定依据
+   * （见 `src/repository.ts` 的说明：与 `put` 的差别是**原子性**，不是覆不覆盖）。
+   * 这个内存实现原先没有它，`tsc` 因此报 `TS2420`——测试替身落后于接口。
+   *
+   * 语义按接口文档实现：id **当前不存在**才写入；已存在（含墓碑）则整条不动并回报已存在。
+   */
+  async putIfAbsent(record: LocalCardRecordV1): Promise<CardWriteOutcome> {
+    const parsed = LocalCardRecordV1Schema.parse(record);
+    if (this.#records.has(parsed.id)) return { alreadyPresent: true };
+    this.#records.set(parsed.id, parsed);
+    return { written: true };
   }
 
   async delete(id: string): Promise<void> {

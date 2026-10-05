@@ -1,0 +1,1426 @@
+//! 本地 Web 包存储（D2.1）。
+//!
+//! V1 的唯一 blob 消费者是 **Web Package 原始 ZIP 字节**（`DESK-054`）。图片、附件等消费者
+//! 等到出现真实需求再扩展，因此本模块不预建 image metadata、缩略图管线或引用角色。
+//!
+//! ## 引用关系用真实外键（`DESK-055`）
+//!
+//! `web_package_archive_ref` 同时对 `local_web_package(id)` 与 `blob(digest)` 建真实外键。
+//! 刻意**不**用 `owner_kind` + `owner_id` 的多态引用：那种形态下数据库只能确认
+//! "digest 存在"，无法确认"owner_kind='web-package'、owner_id='xxx'"真的指向一条记录。
+//!
+//! 第二个 blob 消费者出现时**新增**一张引用表，而不是把已有表泛化。
+//!
+//! ## 写入顺序
+//!
+//! ```text
+//! blob（文件 → sync → rename → metadata）
+//!   ↓ 事务
+//! local_web_package 行 + web_package_archive_ref 行
+//! ```
+//!
+//! 后两行在**同一个事务**里，因此不会出现"有引用行却没有包记录"的中间态；而 blob 先写，
+//! 于是崩溃最多留下孤儿 blob——那是被允许、被审计回收的状态。
+//!
+//! ## 可达性（`DESK-055`）
+//!
+//! - soft delete **不**动引用行，因此 `restore` 能真正恢复可用状态；
+//! - purge 删除包记录，`ON DELETE CASCADE` 顺带移除引用；
+//! - blob 的实际回收由 GC（D2.2）依据引用表统一判断。
+
+use rusqlite::Connection;
+use serde::Deserialize;
+
+use crate::blob::BlobStore;
+use crate::store::{lock_connection, timestamp_sort_key, SharedConnection, StoreError};
+
+/// 本地库当前 schema 版本。版本 4 增加 Web 包记录与它到 blob 的真实外键引用。
+pub const MIGRATION_4: &str = r#"
+CREATE TABLE IF NOT EXISTS local_web_package (
+    id                  TEXT PRIMARY KEY NOT NULL,
+    document            TEXT NOT NULL,
+    -- canonical identity：包 id 由该摘要派生，因此它必须唯一。Web 的 IndexedDB adapter
+    -- 对 contentDigest 建了 unique index；桌面侧缺这一条时，同一个 manifest 摘要能落进
+    -- 两行，而读档入口按摘要查只命中一行——另一行成了用户看不见、GC 也解释不了的行。
+    -- 派生规则本身由 @mahoshojo/local-library 的 deriveLocalWebPackageId 单点实现，
+    -- native 不重算，因此这里只有 UNIQUE 存储约束而没有 CHECK。
+    ref_digest          TEXT NOT NULL UNIQUE,
+
+    updated_at          TEXT NOT NULL,
+    updated_at_sort     INTEGER NOT NULL,
+    deleted_at          TEXT,
+    archive_byte_length INTEGER NOT NULL
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS web_package_archive_ref (
+    package_id TEXT PRIMARY KEY NOT NULL
+        REFERENCES local_web_package(id) ON DELETE CASCADE,
+    digest     TEXT NOT NULL REFERENCES blob(digest)
+) STRICT;
+
+-- keyset 分页；排序列是排序键而非时间戳文本，理由见 store::timestamp_sort_key。
+CREATE INDEX IF NOT EXISTS local_web_package_by_updated
+    ON local_web_package (updated_at_sort DESC, id ASC);
+
+-- 审计与 GC 都要按 digest 反查引用方，因此 digest 侧也需要索引。
+CREATE INDEX IF NOT EXISTS web_package_archive_ref_by_digest
+    ON web_package_archive_ref (digest);
+"#;
+
+/// 一次状态变更的方向。合法组合与本地卡一致。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Transition {
+    Delete,
+    Restore,
+}
+
+/// 调用方声明的索引列。Rust 逐项与 document 中的实际值复核。
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WebPackageIndex {
+    pub id: String,
+    pub updated_at: String,
+    pub deleted_at: Option<String>,
+    /// Web 包 manifest 的内容摘要。必须等于 document 里的 `contentDigest`。
+    pub content_digest: String,
+}
+
+/// 从 document 中提取的索引字段。
+///
+/// 自由载荷 `manifest` 与 `ref` 走 `RawValue`：Web 包的 manifest 字段随预设演进，Rust 不该
+/// 因为出现新字段就拒收一条 TypeScript 侧合法的记录（同 `DESK-062` 的理由）。
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WebPackageIndexProjection {
+    id: String,
+    updated_at: String,
+    #[serde(default)]
+    deleted_at: Option<String>,
+    content_digest: String,
+    /// 记录里声明的归档长度。native 拿它与**实际字节数**复核（见 `save`）。
+    archive_byte_length: i64,
+    #[serde(default, rename = "ref")]
+    _ref: Option<Box<serde_json::value::RawValue>>,
+    #[serde(default, rename = "manifest")]
+    _manifest: Option<Box<serde_json::value::RawValue>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WebPackageCursor {
+    #[serde(default)]
+    pub updated_at_sort: i64,
+    pub updated_at: String,
+    pub id: String,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct WebPackageQuery {
+    pub include_deleted: bool,
+    pub limit: i64,
+    pub cursor: Option<WebPackageCursor>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WebPackagePage {
+    pub documents: Vec<String>,
+    pub next_cursor: Option<WebPackageCursor>,
+}
+
+/// 保存一条本地 Web 包的结果。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SaveWebPackageOutcome {
+    /// blob 写入的结果。`Repaired` 必须透传给调用方，否则存储损坏在 UI 上完全不可见。
+    pub blob: crate::blob::BlobWriteOutcome,
+    pub id: String,
+    /// `insert-if-absent` 下 id 已存在：记录与 archive 字节都没有被动过。
+    ///
+    /// 与 `blob` 的 `AlreadyPresent` 是两件事：后者说的是"那份 ZIP 字节本来就在 blob 库里"，而本字段说的是
+    /// "这个包的记录本来就在"。existing-wins 需要的是后者。
+    pub already_present: bool,
+}
+
+/// 保存一条 Web 包可能失败在两处，因此需要能区分它们。
+///
+/// 两者都是"调用方或存储状态有问题"，但 code 必须能区分：`index-mismatch` 是两侧对记录
+/// 的理解不一致（渲染层 bug），`blob-digest-mismatch` 是交来的字节与声明的摘要不符
+/// （也是渲染层 bug，但成因不同），`blob-corrupt` 是存储损坏。把它们一律压成
+/// `store-failure` 会让诊断信息在 IPC 边界就丢光。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SaveWebPackageError {
+    Store(StoreError),
+    Blob(crate::blob::BlobError),
+}
+
+impl SaveWebPackageError {
+    pub fn code(&self) -> &'static str {
+        match self {
+            SaveWebPackageError::Store(error) => error.code(),
+            SaveWebPackageError::Blob(error) => error.code(),
+        }
+    }
+
+    pub fn message(&self) -> &'static str {
+        match self {
+            SaveWebPackageError::Store(error) => error.message(),
+            SaveWebPackageError::Blob(error) => error.message(),
+        }
+    }
+}
+
+impl From<StoreError> for SaveWebPackageError {
+    fn from(error: StoreError) -> Self {
+        SaveWebPackageError::Store(error)
+    }
+}
+
+impl From<crate::blob::BlobError> for SaveWebPackageError {
+    fn from(error: crate::blob::BlobError) -> Self {
+        SaveWebPackageError::Blob(error)
+    }
+}
+
+impl serde::Serialize for SaveWebPackageError {
+    /// 投影成与其它本地库错误**同一形状**的 `{code, message}`，使渲染层只需一个错误解析器。
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let mut state = serializer.serialize_struct("SaveWebPackageError", 2)?;
+        state.serialize_field("code", self.code())?;
+        state.serialize_field("message", self.message())?;
+        state.end()
+    }
+}
+
+/// 本地 Web 包存储。与 [`LocalCardStore`](crate::local_card::LocalCardStore) 同构，但多一条
+/// 到 blob 的真实外键引用。
+///
+/// 与其它 store 共用一条连接（`DESK-065`）。这一点对本类型尤其关键：[`Self::save`] 的
+/// "写 blob"与"写包事务"是两步，共享连接让两步之间的中间态对任何其它路径不可见。
+pub struct WebPackageStore {
+    connection: SharedConnection,
+}
+
+impl WebPackageStore {
+    pub fn new(connection: SharedConnection) -> Self {
+        Self { connection }
+    }
+
+    fn with_connection<T>(
+        &self,
+        operation: impl FnOnce(&Connection) -> Result<T, StoreError>,
+    ) -> Result<T, StoreError> {
+        let guard = lock_connection(&self.connection)?;
+        operation(&guard)
+    }
+
+    /// 保存一条 Web 包记录及其 ZIP 字节。
+    ///
+    /// 顺序：先落 blob（文件 → metadata），再在一个事务里写包记录与引用行。
+    /// `foreign_keys = ON` 因此能真正约束"引用必须指向存在的 blob 与存在的包"。
+    /// 保存一条 Web 包记录，并把它指向的原始 ZIP 字节落进内容寻址存储。
+    ///
+    /// ## 两种摘要不是一回事
+    ///
+    /// 这里同时出现两个摘要，**它们本来就不相等**，不要试图把它们对齐：
+    ///
+    /// - `contentDigest`（= `ref.digest`）是 **manifest** 的摘要，见
+    ///   `packages/web-package/src/verify.ts` 里 `digest(canonicalize(manifest))`。
+    ///   它是领域身份：Web 端的包 id 由它派生，改一个字节就换一个包。
+    /// - `archive_digest` 是**归档字节自身**的摘要，只用作 blob 的存储地址与完整性校验。
+    ///
+    /// ZIP 里除了 manifest 还有文件，所以两者的值必然不同。归档字节是否真的属于这份 manifest，
+    /// 由 TypeScript 侧 `unpackWebPackageZip` 负责核对（它会重算 `ref.digest` 再比对）——native
+    /// 不做这件事，也不该做：那需要在 Rust 里重建一遍 ZIP 与 manifest 的规范化逻辑
+    /// （同 `DESK-062` 的分工理由）。
+    /// 仅在 id 不存在时写入。已存在时**记录与 archive 字节都不动**。
+    ///
+    /// “都不动”包含 archive：只跳过记录却写了 blob，会留下一份没人引用的副本，而 `reclaim`
+    /// 要等到下一次维护窗口才能收得掉。因此在写 blob **之前**先做存在性预检，
+    /// 真正的判定交给事务里的 `ON CONFLICT DO NOTHING`。
+    pub fn save_if_absent(
+        &self,
+        blobs: &BlobStore,
+        document: &str,
+        index: &WebPackageIndex,
+        archive: &[u8],
+        now: &str,
+    ) -> Result<SaveWebPackageOutcome, SaveWebPackageError> {
+        let ValidatedWebPackage {
+            index: declared,
+            archive_byte_length,
+        } = validate_and_extract(document, index)?;
+        let updated_at_sort = timestamp_sort_key(&declared.updated_at)?;
+        if archive_byte_length != archive.len() as i64 {
+            return Err(SaveWebPackageError::Store(StoreError::IndexMismatch));
+        }
+        if self.existing_state(&declared.id)?.is_some() {
+            return Ok(SaveWebPackageOutcome {
+                id: declared.id.clone(),
+                blob: crate::blob::BlobWriteOutcome::AlreadyPresent,
+                already_present: true,
+            });
+        }
+        self.save_inner(
+            blobs,
+            document,
+            index,
+            archive,
+            now,
+            declared,
+            updated_at_sort,
+            archive_byte_length,
+            true,
+        )
+    }
+
+    pub fn save(
+        &self,
+        blobs: &BlobStore,
+        document: &str,
+        index: &WebPackageIndex,
+        archive: &[u8],
+        now: &str,
+    ) -> Result<SaveWebPackageOutcome, SaveWebPackageError> {
+        let ValidatedWebPackage {
+            index: declared,
+            archive_byte_length,
+        } = validate_and_extract(document, index)?;
+        let updated_at_sort = timestamp_sort_key(&declared.updated_at)?;
+        self.save_inner(
+            blobs,
+            document,
+            index,
+            archive,
+            now,
+            declared,
+            updated_at_sort,
+            archive_byte_length,
+            false,
+        )
+    }
+
+    /// `insert_if_absent` 为真时，幂等预检已经把 id 占位的情况排除并且不会写 blob。
+    #[allow(clippy::too_many_arguments)]
+    fn save_inner(
+        &self,
+        blobs: &BlobStore,
+        document: &str,
+        index: &WebPackageIndex,
+        archive: &[u8],
+        now: &str,
+        declared: WebPackageIndex,
+        updated_at_sort: i64,
+        archive_byte_length: i64,
+        insert_if_absent: bool,
+    ) -> Result<SaveWebPackageOutcome, SaveWebPackageError> {
+        let archive_digest = crate::blob::digest_of(archive);
+
+        // 记录自称的长度必须等于实际字节数。否则"这个包多大"这个问题在详情页和磁盘上会给出
+        // 两个答案，而下载、进度与配额估算都建立在这个数字上。
+        // 此处用参数而不重新调 `validate_and_extract`：两个入口已经验证过一次，重复调用只会多一次拉拟好一份。
+        if archive_byte_length != archive.len() as i64 {
+            return Err(SaveWebPackageError::Store(StoreError::IndexMismatch));
+        }
+
+        if insert_if_absent {
+            // 这里只是为了**不写 blob**：真正的判定在下面事务里的 `DO NOTHING`。预检若误拥有写入权，
+            // 真正的插入会落到 0 行、事务提交后本次报 `already_present`，那时已写的 blob 是孤儿。
+            if self.existing_state(&declared.id)?.is_some() {
+                return Ok(SaveWebPackageOutcome {
+                    id: declared.id.clone(),
+                    blob: crate::blob::BlobWriteOutcome::AlreadyPresent,
+                    already_present: true,
+                });
+            }
+        } else {
+            let existing = self.existing_state(&declared.id)?;
+            if let Some((true, _)) = existing {
+                if index.deleted_at.is_none() {
+                    return Err(SaveWebPackageError::Store(StoreError::Tombstoned));
+                }
+            }
+            if let Some((_, existing_sort)) = existing {
+                if updated_at_sort < existing_sort {
+                    return Err(SaveWebPackageError::Store(
+                        StoreError::NonMonotonicTimestamp,
+                    ));
+                }
+            }
+        }
+
+        // blob 先写。崩溃在这一步之后、事务之前 → 孤儿 blob（允许）。
+        let blob_outcome = blobs.write(&archive_digest, archive, now)?;
+
+        // 插入落空时事务内部提前返回，因此结果先写进这个变量、事务提交后再返回。
+        let mut raced: Option<String> = None;
+        self.with_connection(|connection| {
+            let transaction = connection
+                .unchecked_transaction()
+                .map_err(|_| StoreError::Failure)?;
+            let conflict = if insert_if_absent {
+                "ON CONFLICT(id) DO NOTHING"
+            } else {
+                "ON CONFLICT(id) DO UPDATE SET
+                    document = excluded.document,
+                    ref_digest = excluded.ref_digest,
+                    updated_at = excluded.updated_at,
+                    updated_at_sort = excluded.updated_at_sort,
+                    deleted_at = excluded.deleted_at,
+                    archive_byte_length = excluded.archive_byte_length"
+            };
+            let inserted = transaction
+                .execute(
+                    &format!(
+                        "INSERT INTO local_web_package
+                            (id, document, ref_digest, updated_at, updated_at_sort, deleted_at, archive_byte_length)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                         {conflict}"
+                    ),
+                    rusqlite::params![
+                        declared.id,
+                        document,
+                        declared.content_digest,
+                        declared.updated_at,
+                        updated_at_sort,
+                        declared.deleted_at,
+                        archive.len() as i64,
+                    ],
+                )
+                .map_err(|_| StoreError::Failure)?;
+            // 插入为 0 行就是"插入点之间被别的写者抢先了"。此时不能去动已写的 blob（blob 与记录分属两个资源，
+            // 崩溃落在两者之间被允许，收拾由 `reclaim` 在维护窗口完成），但对调用方而言事实不变，
+            // 因此直接报已存在。
+            if inserted == 0 {
+                raced = Some(declared.id.clone());
+                transaction.commit().map_err(|_| StoreError::Failure)?;
+                return Ok(());
+            }
+            // 引用行覆盖写：重新导入同一份 ZIP 是幂等的，而换 digest 时旧引用必须被替换，
+            // 否则一个包会同时"可达"两个 blob，让 GC 无法判断该删哪个。
+            transaction
+                .execute(
+                    "INSERT INTO web_package_archive_ref (package_id, digest) VALUES (?1, ?2)
+                     ON CONFLICT(package_id) DO UPDATE SET digest = excluded.digest",
+                    rusqlite::params![declared.id, archive_digest],
+                )
+                .map_err(|_| StoreError::Failure)?;
+            transaction.commit().map_err(|_| StoreError::Failure)?;
+            Ok(())
+        })?;
+
+        Ok(match raced {
+            Some(id) => SaveWebPackageOutcome {
+                blob: blob_outcome,
+                id,
+                already_present: true,
+            },
+            None => SaveWebPackageOutcome {
+                blob: blob_outcome,
+                id: declared.id,
+                already_present: false,
+            },
+        })
+    }
+
+    /// (是否有 tombstone, 排序键)
+    fn existing_state(&self, id: &str) -> Result<Option<(bool, i64)>, StoreError> {
+        self.with_connection(|connection| {
+            let row = connection
+                .query_row(
+                    "SELECT deleted_at IS NOT NULL, updated_at_sort FROM local_web_package WHERE id = ?1",
+                    rusqlite::params![id],
+                    |row| Ok((row.get::<_, i64>(0)? != 0, row.get::<_, i64>(1)?)),
+                )
+                .ok();
+            Ok(row)
+        })
+    }
+
+    pub fn get(&self, id: &str) -> Result<Option<String>, StoreError> {
+        if id.trim().is_empty() {
+            return Err(StoreError::InvalidDocument);
+        }
+        self.with_connection(|connection| {
+            let mut statement = connection
+                .prepare("SELECT document FROM local_web_package WHERE id = ?1")
+                .map_err(|_| StoreError::Failure)?;
+            let mut rows = statement
+                .query(rusqlite::params![id])
+                .map_err(|_| StoreError::Failure)?;
+            match rows.next().map_err(|_| StoreError::Failure)? {
+                Some(row) => Ok(Some(
+                    row.get::<_, String>(0).map_err(|_| StoreError::Failure)?,
+                )),
+                None => Ok(None),
+            }
+        })
+    }
+
+    /// 该包当前引用的 blob 摘要。
+    /// 按**包 id** 取它的归档 blob 地址。
+    ///
+    /// 仅供测试断言存储布局；`DESK-063` 意义上的外部读取入口是
+    /// [`Self::archive_digest_for_content_digest`]——共享端口以 manifest 摘要为键。
+    #[cfg(test)]
+    pub fn archive_digest(&self, id: &str) -> Result<Option<String>, StoreError> {
+        self.with_connection(|connection| {
+            let mut statement = connection
+                .prepare("SELECT digest FROM web_package_archive_ref WHERE package_id = ?1")
+                .map_err(|_| StoreError::Failure)?;
+            let mut rows = statement
+                .query(rusqlite::params![id])
+                .map_err(|_| StoreError::Failure)?;
+            match rows.next().map_err(|_| StoreError::Failure)? {
+                Some(row) => Ok(Some(
+                    row.get::<_, String>(0).map_err(|_| StoreError::Failure)?,
+                )),
+                None => Ok(None),
+            }
+        })
+    }
+
+    /// 按 **manifest 摘要**（= `ref.digest` = 记录里的 `contentDigest`）取归档 blob 地址。
+    ///
+    /// 共享端口 `WebPackageRepository.readArchive(digest)` 与 Web 的 IndexedDB adapter 都以
+    /// manifest 摘要为键：业务侧传的是 `record.ref.digest`，而它不是 `wp_…` 形式的包 id。
+    /// 桌面侧要落到同一个键上，就必须经 `local_web_package` → `web_package_archive_ref` 两跳。
+    ///
+    /// `None` 表示"没有这条摘要的记录，或记录已被 purge"——调用方据此返回 `null`，与 Web 一致。
+    pub fn archive_digest_for_content_digest(
+        &self,
+        content_digest: &str,
+    ) -> Result<Option<String>, StoreError> {
+        self.with_connection(|connection| {
+            // 引用表是权威：它只对真实存在的包行有行（真实外键），因此不必再联表查包记录。
+            let mut statement = connection
+                .prepare(
+                    "SELECT ref.digest FROM web_package_archive_ref ref
+                     JOIN local_web_package pkg ON pkg.id = ref.package_id
+                     WHERE pkg.ref_digest = ?1",
+                )
+                .map_err(|_| StoreError::Failure)?;
+            let mut rows = statement
+                .query(rusqlite::params![content_digest])
+                .map_err(|_| StoreError::Failure)?;
+            match rows.next().map_err(|_| StoreError::Failure)? {
+                Some(row) => Ok(Some(
+                    row.get::<_, String>(0).map_err(|_| StoreError::Failure)?,
+                )),
+                None => Ok(None),
+            }
+        })
+    }
+
+    pub fn list(&self, query: &WebPackageQuery) -> Result<WebPackagePage, StoreError> {
+        if query.limit < 1 || query.limit > crate::local_card::MAX_LOCAL_CARD_PAGE_SIZE {
+            return Err(StoreError::InvalidQuery);
+        }
+        let fetch = query.limit + 1;
+        let cursor = query.cursor.as_ref();
+
+        self.with_connection(|connection| {
+            let mut statement = connection
+                .prepare_cached(
+                    "SELECT id, document, updated_at, updated_at_sort FROM local_web_package
+                     WHERE (:include_deleted = 1 OR deleted_at IS NULL)
+                       AND (
+                            :has_cursor = 0
+                            OR (updated_at_sort < :cursor_sort)
+                            OR (updated_at_sort = :cursor_sort AND id > :cursor_id)
+                       )
+                     ORDER BY updated_at_sort DESC, id ASC
+                     LIMIT :fetch",
+                )
+                .map_err(|_| StoreError::Failure)?;
+
+            let rows = statement
+                .query_map(
+                    rusqlite::named_params! {
+                        ":cursor_sort": cursor.map(|value| value.updated_at_sort).unwrap_or(i64::MAX),
+                        ":cursor_id": cursor.map(|value| value.id.as_str()).unwrap_or(""),
+                        ":fetch": fetch,
+                        ":include_deleted": i64::from(query.include_deleted),
+                        ":has_cursor": i64::from(cursor.is_some()),
+                    },
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                            row.get::<_, i64>(3)?,
+                        ))
+                    },
+                )
+                .map_err(|_| StoreError::Failure)?;
+
+            let mut documents: Vec<String> = Vec::new();
+            let mut last_returned: Option<WebPackageCursor> = None;
+            let mut has_more = false;
+            for row in rows {
+                let (id, document, updated_at, updated_at_sort) = row.map_err(|_| StoreError::Failure)?;
+                if documents.len() == query.limit as usize {
+                    has_more = true;
+                    break;
+                }
+                last_returned = Some(WebPackageCursor { updated_at_sort, updated_at, id });
+                documents.push(document);
+            }
+            Ok(WebPackagePage {
+                documents,
+                next_cursor: if has_more { last_returned } else { None },
+            })
+        })
+    }
+
+    /// 幂等软删：整行写入调用方组装好的 tombstone 记录。**不动引用行**，使 restore 能真正恢复。
+    pub fn delete(&self, document: &str, index: &WebPackageIndex) -> Result<(), StoreError> {
+        let ValidatedWebPackage {
+            index: declared, ..
+        } = validate_and_extract(document, index)?;
+        if index.deleted_at.is_none() {
+            return Err(StoreError::TransitionMismatch);
+        }
+        self.write_transition(document, &declared, Transition::Delete)
+    }
+
+    pub fn restore(&self, document: &str, index: &WebPackageIndex) -> Result<(), StoreError> {
+        let ValidatedWebPackage {
+            index: declared, ..
+        } = validate_and_extract(document, index)?;
+        if index.deleted_at.is_some() {
+            return Err(StoreError::TransitionMismatch);
+        }
+        self.write_transition(document, &declared, Transition::Restore)
+    }
+
+    fn write_transition(
+        &self,
+        document: &str,
+        declared: &WebPackageIndex,
+        transition: Transition,
+    ) -> Result<(), StoreError> {
+        let Some((has_tombstone, existing_sort)) = self.existing_state(&declared.id)? else {
+            return Err(StoreError::RecordMissing);
+        };
+        match transition {
+            Transition::Delete if has_tombstone => return Ok(()),
+            Transition::Restore if !has_tombstone => return Ok(()),
+            _ => {}
+        }
+        let updated_at_sort = timestamp_sort_key(&declared.updated_at)?;
+        if updated_at_sort < existing_sort {
+            return Err(StoreError::NonMonotonicTimestamp);
+        }
+        self.upsert_row(document, declared, updated_at_sort)
+    }
+
+    /// 彻底删除一条记录与其引用行。幂等。
+    ///
+    /// 引用行由 `ON DELETE CASCADE` 移除，因此不会出现"包没了但 blob 仍被标记为可达"。
+    pub fn purge(&self, id: &str) -> Result<(), StoreError> {
+        self.with_connection(|connection| {
+            connection
+                .execute(
+                    "DELETE FROM local_web_package WHERE id = ?1",
+                    rusqlite::params![id],
+                )
+                .map_err(|_| StoreError::Failure)?;
+            Ok(())
+        })
+    }
+
+    fn upsert_row(
+        &self,
+        document: &str,
+        declared: &WebPackageIndex,
+        updated_at_sort: i64,
+    ) -> Result<(), StoreError> {
+        let byte_length: i64 = self.with_connection(|connection| {
+            connection
+                .query_row(
+                    "SELECT archive_byte_length FROM local_web_package WHERE id = ?1",
+                    rusqlite::params![declared.id],
+                    |row| row.get(0),
+                )
+                .map_err(|_| StoreError::RecordMissing)
+        })?;
+        self.with_connection(|connection| {
+            connection
+                .execute(
+                    "UPDATE local_web_package SET
+                        document = ?2, ref_digest = ?3, updated_at = ?4,
+                        updated_at_sort = ?5, deleted_at = ?6, archive_byte_length = ?7
+                     WHERE id = ?1",
+                    rusqlite::params![
+                        declared.id,
+                        document,
+                        declared.content_digest,
+                        declared.updated_at,
+                        updated_at_sort,
+                        declared.deleted_at,
+                        byte_length,
+                    ],
+                )
+                .map_err(|_| StoreError::Failure)?;
+            Ok(())
+        })
+    }
+
+    /// 在同一个连接上跑一段原始 SQL。**仅测试使用**：外键约束无法从公开 API 触达，
+    /// 而"外键真的会拒绝"正是选用真实外键而非多态引用的理由，必须能直接验证。
+    #[cfg(test)]
+    pub fn probe(&self, sql: &str, params: &[&dyn rusqlite::ToSql]) -> Result<usize, StoreError> {
+        self.with_connection(|connection| {
+            connection
+                .execute(sql, params)
+                .map_err(|_| StoreError::Failure)
+        })
+    }
+
+    /// schema 版本断言，供集成测试确认迁移阶梯确实落到了 web 包表。
+    #[cfg(test)]
+    pub fn schema_version(&self) -> Result<i64, StoreError> {
+        self.with_connection(|connection| {
+            connection
+                .query_row("PRAGMA user_version", [], |row| row.get(0))
+                .map_err(|_| StoreError::Failure)
+        })
+    }
+}
+
+/// document 中与索引列对应、且 native 需要复核的字段。
+struct ValidatedWebPackage {
+    index: WebPackageIndex,
+    /// 记录自称的归档长度。只在 `save` 里与实际字节数比对。
+    archive_byte_length: i64,
+}
+
+fn validate_and_extract(
+    document: &str,
+    index: &WebPackageIndex,
+) -> Result<ValidatedWebPackage, StoreError> {
+    let projection: WebPackageIndexProjection =
+        serde_json::from_str(document).map_err(|_| StoreError::InvalidDocument)?;
+
+    let extracted = WebPackageIndex {
+        id: projection.id,
+        updated_at: projection.updated_at,
+        deleted_at: projection.deleted_at,
+        content_digest: projection.content_digest,
+    };
+    if extracted != *index {
+        return Err(StoreError::IndexMismatch);
+    }
+    Ok(ValidatedWebPackage {
+        index: extracted,
+        archive_byte_length: projection.archive_byte_length,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{SaveWebPackageOutcome, WebPackageIndex, WebPackageQuery, WebPackageStore};
+    use crate::blob::{digest_of, BlobPaths, BlobStore, BlobWriteOutcome};
+    use crate::store::StoreError;
+
+    const NOW: &str = "2026-09-30T12:00:00Z";
+    const DIGEST: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    /// 绝大多数测试共用的归档字节。长度与 package_of_len 声明的一致。
+    const TEST_ARCHIVE: &[u8] = b"PK\x03\x04zip";
+    /// Web 包记录与它的 blob 存储。
+    ///
+    /// 用**真实临时文件**而不是两个 `open_in_memory()`：`open_in_memory` 给每个连接一份私有
+    /// 数据库，于是 blob 的 metadata 对包记录不可见，外键会误报失败。生产路径里四个存储共享
+    /// 同一个文件，fixture 必须与之一致，否则测的是一个不存在的拓扑。
+    fn fixture() -> (WebPackageStore, BlobStore, std::path::PathBuf) {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+        let unique = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let root = std::env::temp_dir().join(format!(
+            "mahoshojo-webpkg-test-{}-{unique}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let paths = crate::store::LocalStorePaths::under(&root);
+
+        // 与生产路径同构：**一条**连接同时供包记录与 blob metadata 使用（D2.2a）。
+        // 这条 fixture 此前开第二条连接，仅仅是因为生产路径当时也是两条；把它改成共享
+        // 是为了让测试不再依赖一个已经不存在的拓扑。
+        let connection = crate::store::open_shared_connection(&paths).expect("connection");
+        let packages = WebPackageStore::new(std::sync::Arc::clone(&connection));
+        let blobs = crate::blob::open(BlobPaths::under(&root), connection).expect("blobs");
+
+        (packages, blobs, root)
+    }
+
+    /// 造一条 document。`archive_len` 是它**自称**的归档长度，用来测试它与实际字节数的复核。
+    ///
+    /// `digest` 是这条记录的 canonical identity。真实记录里每个包的 manifest 摘要各不相同，
+    /// 而 `ref_digest` 上有 UNIQUE 约束——因此需要多行时必须给出不同摘要，否则测的是
+    /// "两个包抢同一个身份"这条拒绝路径。
+    fn package_document(
+        id: &str,
+        digest: &str,
+        updated_at: &str,
+        tombstone: &str,
+        archive_len: i64,
+    ) -> String {
+        format!(
+            r#"{{"id":"{id}","schemaVersion":1,"storageLocation":"local","entityKind":"web-package","title":"包","summary":"s","ref":{{"digest":"{digest}","id":"local.x","version":"1.0.0"}},"manifest":{{"format":"mahoshojo-web-package","formatVersion":1,"id":"local.x","version":"1.0.0","name":"包","entry":"index.html","capabilities":[],"files":[{{"path":"index.html","mediaType":"text/html","digest":"{digest}","size":2}}]}},"contentDigest":"{digest}","archiveByteLength":{archive_len},"provenance":{{"kind":"unsigned","execution":"imported"}},"createdAt":"{updated_at}","updatedAt":"{updated_at}"{tombstone}}}"#
+        )
+    }
+
+    /// 一条与 `archive` 自洽的记录。
+    ///
+    /// 刻意让归档**先于**记录出现：分开传两个长度时，测试夹具迟早会写下对不上的数字，而
+    /// `save` 会（正确地）拒绝它——那时失败的其实是夹具，不是被测行为。
+    fn package_for(
+        id: &str,
+        updated_at: &str,
+        deleted_at: Option<&str>,
+        archive: &[u8],
+    ) -> (String, WebPackageIndex) {
+        package_for_digest(id, DIGEST, updated_at, deleted_at, archive)
+    }
+
+    /// 指定 canonical identity 的版本。多行场景用它给每行不同摘要。
+    fn package_for_digest(
+        id: &str,
+        digest: &str,
+        updated_at: &str,
+        deleted_at: Option<&str>,
+        archive: &[u8],
+    ) -> (String, WebPackageIndex) {
+        let tombstone = match deleted_at {
+            Some(value) => format!(r#","deletedAt":"{value}""#),
+            None => String::new(),
+        };
+        let document = package_document(id, digest, updated_at, &tombstone, archive.len() as i64);
+        let index = WebPackageIndex {
+            id: id.to_string(),
+            updated_at: updated_at.to_string(),
+            deleted_at: deleted_at.map(str::to_string),
+            content_digest: digest.to_string(),
+        };
+        (document, index)
+    }
+
+    /// 不涉及字节差异的记录（列表、分页、纯状态转移测试用）。
+    ///
+    /// `archiveByteLength` 说的是 `TEST_ARCHIVE` 的长度——把这两者绑在一起，就不可能再写出
+    /// 一条"自称 4 字节、实际 10 字节"的夹具，然后困惑于 `save` 为什么拒绝它。
+    fn package_of_len(
+        id: &str,
+        updated_at: &str,
+        deleted_at: Option<&str>,
+    ) -> (String, WebPackageIndex) {
+        package_for(id, updated_at, deleted_at, TEST_ARCHIVE)
+    }
+
+    fn package(id: &str, updated_at: &str) -> (String, WebPackageIndex) {
+        package_of_len(id, updated_at, None)
+    }
+
+    fn default_query(limit: i64) -> WebPackageQuery {
+        WebPackageQuery {
+            include_deleted: false,
+            limit,
+            cursor: None,
+        }
+    }
+
+    #[test]
+    fn saving_stores_the_record_its_bytes_and_a_real_foreign_key() {
+        let (packages, blobs, _root) = fixture();
+        let archive = TEST_ARCHIVE.to_vec();
+        let (document, index) = package_for("wp_1", NOW, None, &archive);
+
+        // 迁移阶梯确实落到了含 blob 与 web 包表的版本。
+        assert_eq!(
+            packages.schema_version().expect("version"),
+            crate::store::SCHEMA_VERSION,
+        );
+
+        let outcome = packages
+            .save(&blobs, &document, &index, &archive, NOW)
+            .expect("save must succeed");
+
+        assert_eq!(
+            outcome,
+            SaveWebPackageOutcome {
+                blob: BlobWriteOutcome::Stored,
+                id: "wp_1".to_string(),
+                already_present: false
+            }
+        );
+        assert_eq!(
+            packages.get("wp_1").expect("get must succeed"),
+            Some(document)
+        );
+
+        // 引用行指向真实存在的 blob 与包，不是字符串型多态引用。
+        let digest = packages
+            .archive_digest("wp_1")
+            .expect("digest must be readable")
+            .expect("must exist");
+        assert_eq!(digest, digest_of(&archive));
+        assert_eq!(blobs.read(&digest).expect("read must succeed"), archive);
+    }
+
+    #[test]
+    fn re_importing_identical_bytes_is_idempotent_not_a_second_row() {
+        let (packages, blobs, _root) = fixture();
+        let archive = b"PK\x03\x04same".to_vec();
+        let (document, index) = package_for("wp_same", NOW, None, &archive);
+
+        packages
+            .save(&blobs, &document, &index, &archive, NOW)
+            .expect("first");
+        let second = packages
+            .save(&blobs, &document, &index, &archive, "2026-10-01T00:00:00Z")
+            .expect("second");
+
+        assert_eq!(second.blob, BlobWriteOutcome::AlreadyPresent);
+        assert_eq!(
+            packages
+                .list(&default_query(10))
+                .expect("list")
+                .documents
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn save_if_absent_reports_the_second_caller_instead_of_overwriting() {
+        // 这条用例断言的是"第二个写者拿到的是 `already_present` 而不是一份被改写的记录"。它与
+        // `re_importing_identical_bytes_is_idempotent` 的差别在于**字节不同**：`save` 换 digest 时会
+        // 把引用指向新 blob，而 `save_if_absent` 必须两者都不动。
+        let (packages, blobs, _root) = fixture();
+        let first_archive = b"PK\x03\x04first".to_vec();
+        let (first_document, first_index) = package_for("wp_race", NOW, None, &first_archive);
+        assert!(
+            !packages
+                .save_if_absent(&blobs, &first_document, &first_index, &first_archive, NOW)
+                .expect("first")
+                .already_present
+        );
+
+        let second_archive = b"PK\x03\x04second-and-longer".to_vec();
+        let (second_document, second_index) = package_for("wp_race", NOW, None, &second_archive);
+        let outcome = packages
+            .save_if_absent(
+                &blobs,
+                &second_document,
+                &second_index,
+                &second_archive,
+                "2026-10-01T00:00:00Z",
+            )
+            .expect("second must be reported, not fail");
+        assert!(outcome.already_present);
+        assert_eq!(
+            packages.get("wp_race").expect("get"),
+            Some(first_document),
+            "insert-if-absent 不得改写既有记录"
+        );
+    }
+
+    #[test]
+    fn save_if_absent_does_not_write_an_archive_blob_for_an_existing_package() {
+        // "两者都不动"必须包含 archive 字节：否则每个撞名的导入都会留下一份没人引用的副本，
+        // 而 `reclaim` 要等到下一次维护窗口才收得掉。判据是 blob 目录里多出来的那个 digest。
+        let (packages, blobs, _root) = fixture();
+        let first_archive = b"PK\x03\x04kept".to_vec();
+        let (first_document, first_index) = package_for("wp_keep", NOW, None, &first_archive);
+        packages
+            .save_if_absent(&blobs, &first_document, &first_index, &first_archive, NOW)
+            .expect("first");
+        let other_archive = b"PK\x03\x04orphan-candidate".to_vec();
+        let other_digest = crate::blob::digest_of(&other_archive);
+        let (other_document, other_index) = package_for("wp_keep", NOW, None, &other_archive);
+        let outcome = packages
+            .save_if_absent(&blobs, &other_document, &other_index, &other_archive, NOW)
+            .expect("second must be reported, not fail");
+        assert!(outcome.already_present);
+        assert!(
+            blobs.metadata(&other_digest).expect("metadata").is_none(),
+            "已存在时不得写入 archive blob：否则留下的是一份没人引用的副本"
+        );
+    }
+
+    #[test]
+    fn the_foreign_key_actually_rejects_a_reference_to_a_missing_blob() {
+        // 这是"用真实外键而不是多态引用"的全部理由：数据库自己能拦住这种引用。
+        let (packages, blobs, _root) = fixture();
+        let (document, index) = package("wp_fk", NOW);
+        packages
+            .save(&blobs, &document, &index, TEST_ARCHIVE, NOW)
+            .expect("save");
+
+        // 直接把引用指向一个不存在的 blob，必须被外键拒绝。
+        let missing = format!("sha256:{}", "f".repeat(64));
+        let outcome = packages.probe(
+            "INSERT INTO web_package_archive_ref (package_id, digest) VALUES (?1, ?2)
+             ON CONFLICT(package_id) DO UPDATE SET digest = excluded.digest",
+            &[&"wp_fk", &missing],
+        );
+        assert!(outcome.is_err(), "指向不存在 blob 的引用 MUST 被外键拒绝");
+    }
+
+    #[test]
+    fn soft_delete_keeps_the_reference_so_restore_really_restores() {
+        // DESK-055：soft delete MUST NOT 改变 blob 可达性。
+        let (packages, blobs, _root) = fixture();
+        let archive = b"PK\x03\x04soft".to_vec();
+        let (document, index) = package_for("wp_soft", NOW, None, &archive);
+        packages
+            .save(&blobs, &document, &index, &archive, NOW)
+            .expect("save");
+
+        let (tombstone_doc, tombstone_index) = package_of_len(
+            "wp_soft",
+            "2026-09-30T13:00:00Z",
+            Some("2026-09-30T13:00:00Z"),
+        );
+        packages
+            .delete(&tombstone_doc, &tombstone_index)
+            .expect("delete");
+
+        assert!(
+            packages
+                .archive_digest("wp_soft")
+                .expect("digest")
+                .is_some(),
+            "软删 MUST NOT 移除引用，否则 GC 会回收一个仍被记录指向的 blob"
+        );
+        assert!(packages
+            .list(&default_query(10))
+            .expect("list")
+            .documents
+            .is_empty());
+        let including = WebPackageQuery {
+            include_deleted: true,
+            ..default_query(10)
+        };
+        assert_eq!(packages.list(&including).expect("list").documents.len(), 1);
+
+        let (restored_doc, restored_index) = package("wp_soft", "2026-09-30T14:00:00Z");
+        packages
+            .restore(&restored_doc, &restored_index)
+            .expect("restore");
+        assert_eq!(
+            packages
+                .list(&default_query(10))
+                .expect("list")
+                .documents
+                .len(),
+            1
+        );
+        assert_eq!(
+            blobs.read(&digest_of(&archive)).expect("read"),
+            archive,
+            "恢复后字节必须仍在"
+        );
+    }
+
+    #[test]
+    fn purge_removes_the_record_and_its_reference_together() {
+        let (packages, blobs, _root) = fixture();
+        let (document, index) = package("wp_purge", NOW);
+        packages
+            .save(&blobs, &document, &index, TEST_ARCHIVE, NOW)
+            .expect("save");
+
+        packages.purge("wp_purge").expect("purge");
+        assert_eq!(packages.get("wp_purge").expect("get must succeed"), None);
+        assert!(
+            packages
+                .archive_digest("wp_purge")
+                .expect("digest")
+                .is_none(),
+            "CASCADE 必须顺带移除引用行，否则 blob 会被永久标记为可达"
+        );
+        packages
+            .purge("wp_purge")
+            .expect("repeat purge must be idempotent");
+    }
+
+    #[test]
+    fn get_returns_a_tombstone_that_really_carries_deleted_at() {
+        let (packages, blobs, _root) = fixture();
+        let (document, index) = package("wp_tomb", NOW);
+        packages
+            .save(&blobs, &document, &index, TEST_ARCHIVE, NOW)
+            .expect("save");
+
+        let (tombstone_doc, tombstone_index) = package_of_len(
+            "wp_tomb",
+            "2026-09-30T13:00:00Z",
+            Some("2026-09-30T13:00:00Z"),
+        );
+        packages
+            .delete(&tombstone_doc, &tombstone_index)
+            .expect("delete");
+
+        let read_back = packages
+            .get("wp_tomb")
+            .expect("get")
+            .expect("row must exist");
+        let parsed: serde_json::Value = serde_json::from_str(&read_back).expect("json");
+        assert_eq!(
+            parsed.get("deletedAt").and_then(|value| value.as_str()),
+            Some("2026-09-30T13:00:00Z"),
+            "get 返回的 document 必须带 deletedAt（CardRepository 同款契约）"
+        );
+    }
+
+    #[test]
+    fn refuses_a_normal_save_that_would_clear_a_tombstone() {
+        let (packages, blobs, _root) = fixture();
+        let (document, index) = package("wp_revive", NOW);
+        packages
+            .save(&blobs, &document, &index, TEST_ARCHIVE, NOW)
+            .expect("save");
+        let (tombstone_doc, tombstone_index) = package_of_len(
+            "wp_revive",
+            "2026-09-30T13:00:00Z",
+            Some("2026-09-30T13:00:00Z"),
+        );
+        packages
+            .delete(&tombstone_doc, &tombstone_index)
+            .expect("delete");
+
+        let (revived_doc, revived_index) = package("wp_revive", "2026-09-30T15:00:00Z");
+        assert_eq!(
+            packages.save(
+                &blobs,
+                &revived_doc,
+                &revived_index,
+                TEST_ARCHIVE,
+                "2026-09-30T15:00:00Z"
+            ),
+            Err(super::SaveWebPackageError::Store(StoreError::Tombstoned)),
+        );
+    }
+
+    #[test]
+    fn refuses_an_index_that_disagrees_with_the_document() {
+        let (packages, blobs, _root) = fixture();
+        let (document, mut index) = package("wp_mismatch", NOW);
+        index.content_digest = format!("sha256:{}", "b".repeat(64));
+        assert_eq!(
+            packages.save(&blobs, &document, &index, TEST_ARCHIVE, NOW),
+            Err(super::SaveWebPackageError::Store(StoreError::IndexMismatch)),
+        );
+        assert_eq!(packages.get("wp_mismatch").expect("get must succeed"), None);
+    }
+
+    #[test]
+    fn rejects_a_transition_against_the_wrong_direction_or_a_missing_record() {
+        let (packages, blobs, _root) = fixture();
+        let (document, index) = package("wp_dir", NOW);
+        packages
+            .save(&blobs, &document, &index, TEST_ARCHIVE, NOW)
+            .expect("save");
+
+        // 对不带 deletedAt 的记录执行 delete
+        assert_eq!(
+            packages.delete(&document, &index),
+            Err(StoreError::TransitionMismatch),
+        );
+        let (tombstone_doc, tombstone_index) = package_of_len(
+            "wp_dir",
+            "2026-09-30T13:00:00Z",
+            Some("2026-09-30T13:00:00Z"),
+        );
+        packages
+            .delete(&tombstone_doc, &tombstone_index)
+            .expect("delete");
+        // 对带 deletedAt 的记录执行 restore
+        assert_eq!(
+            packages.restore(&tombstone_doc, &tombstone_index),
+            Err(StoreError::TransitionMismatch),
+        );
+        // 转移目标不存在
+        let (ghost_doc, ghost_index) =
+            package_of_len("wp_ghost", NOW, Some("2026-09-30T13:00:00Z"));
+        assert_eq!(
+            packages.delete(&ghost_doc, &ghost_index),
+            Err(StoreError::RecordMissing),
+        );
+    }
+
+    #[test]
+    fn refuses_a_backwards_timestamp() {
+        let (packages, blobs, _root) = fixture();
+        let (document, index) = package("wp_time", "2026-09-30T05:00:00Z");
+        packages
+            .save(&blobs, &document, &index, TEST_ARCHIVE, NOW)
+            .expect("save");
+
+        let (earlier_doc, earlier_index) = package("wp_time", "2026-09-30T01:00:00Z");
+        assert_eq!(
+            packages.save(&blobs, &earlier_doc, &earlier_index, TEST_ARCHIVE, NOW),
+            Err(super::SaveWebPackageError::Store(
+                StoreError::NonMonotonicTimestamp
+            )),
+        );
+    }
+
+    #[test]
+    fn the_archive_address_is_derived_from_the_bytes_not_declared_by_the_caller() {
+        // 与 blob 层不同：Web 包保存路径**自己**算摘要，调用方无处声明地址。因此不存在
+        // "声明与内容不符"这种输入——同一份字节永远落在同一个地址，改一个字节则换地址。
+        let (packages, blobs, _root) = fixture();
+        let archive = b"PK\x03\x04first".to_vec();
+        let (document, index) = package_for("wp_addr", NOW, None, &archive);
+
+        packages
+            .save(&blobs, &document, &index, &archive, NOW)
+            .expect("save");
+        let first = packages
+            .archive_digest("wp_addr")
+            .expect("digest")
+            .expect("must exist");
+        assert_eq!(first, crate::blob::digest_of(&archive));
+
+        // 不同字节 → 不同地址；同一份字节 → 仍是同一地址。
+        let other_archive = b"PK\x03\x04second".to_vec();
+        let (other_doc, other_index) =
+            package_for("wp_addr", "2026-09-30T13:00:00Z", None, &other_archive);
+        packages
+            .save(
+                &blobs,
+                &other_doc,
+                &other_index,
+                &other_archive,
+                "2026-09-30T13:00:00Z",
+            )
+            .expect("save with different bytes");
+        let second = packages
+            .archive_digest("wp_addr")
+            .expect("digest")
+            .expect("must exist");
+        assert_ne!(first, second);
+        assert_eq!(
+            blobs.read(&second).expect("read"),
+            b"PK\x03\x04second".to_vec()
+        );
+    }
+
+    /// 共享端口的读取入口 MUST 以 **manifest 摘要**为键。
+    ///
+    /// 业务侧传的是 `record.ref.digest`，而它不是 `wp_…` 形式的包 id。这里曾把参数当包 id
+    /// 用，于是真实读取路径必然落空：manifest 摘要永远不是包 id，查不到记录就返回 `null`，
+    /// 用户表现为"包打不开"。测试用摘要查、并断言包 id 查不到，把端口语义钉在这里。
+    #[test]
+    fn an_archive_is_found_by_its_manifest_digest_not_by_the_package_id() {
+        let (packages, blobs, _root) = fixture();
+        let archive = b"PK\x03\x04by-digest".to_vec();
+        let (document, index) = package_for("wp_lookup", NOW, None, &archive);
+        packages
+            .save(&blobs, &document, &index, &archive, NOW)
+            .expect("save");
+
+        assert_eq!(
+            packages
+                .archive_digest_for_content_digest(DIGEST)
+                .expect("lookup")
+                .expect("manifest 摘要必须能查到归档"),
+            crate::blob::digest_of(&archive)
+        );
+        // 包 id 不是摘要，拿它查必须落空——否则就是把两种键混为一谈。
+        assert_eq!(
+            packages
+                .archive_digest_for_content_digest("wp_lookup")
+                .expect("lookup"),
+            None
+        );
+        assert_eq!(
+            packages
+                .archive_digest_for_content_digest(&format!("sha256:{}", "d".repeat(64)))
+                .expect("lookup"),
+            None,
+            "不存在的摘要 MUST 返回 None 而不是报错"
+        );
+    }
+
+    /// soft delete 之后归档仍 MUST 可按摘要读到（`DESK-055`：软删不改变可达性），
+    /// purge 之后 MUST 读不到。
+    #[test]
+    fn reachability_by_manifest_digest_follows_the_soft_delete_lifecycle() {
+        let (packages, blobs, _root) = fixture();
+        let archive = b"PK\x03\x04lifecycle".to_vec();
+        let (document, index) = package_for("wp_life", NOW, None, &archive);
+        packages
+            .save(&blobs, &document, &index, &archive, NOW)
+            .expect("save");
+
+        let (tombstone, tombstone_index) = package_of_len(
+            "wp_life",
+            "2026-09-30T13:00:00Z",
+            Some("2026-09-30T13:00:00Z"),
+        );
+        packages
+            .delete(&tombstone, &tombstone_index)
+            .expect("soft delete");
+        assert!(
+            packages
+                .archive_digest_for_content_digest(DIGEST)
+                .expect("lookup")
+                .is_some(),
+            "软删 MUST NOT 切断归档可达性，否则恢复后仍是一个打不开的包"
+        );
+
+        packages.purge("wp_life").expect("purge");
+        assert_eq!(
+            packages
+                .archive_digest_for_content_digest(DIGEST)
+                .expect("lookup"),
+            None,
+            "purge 之后 MUST 读不到归档"
+        );
+    }
+
+    /// canonical identity MUST 唯一。
+    ///
+    /// Web 的 IndexedDB adapter 对 `contentDigest` 建了 unique index；桌面侧缺这一条时，同一个
+    /// manifest 摘要能落进两行，而按摘要读档只命中一行——另一行成了用户看不见、GC 也解释不了
+    /// 的行。记录契约保证 id 由摘要派生，这里保证摘要不能占两行。
+    #[test]
+    fn one_manifest_digest_cannot_occupy_two_rows() {
+        let (packages, blobs, _root) = fixture();
+        let archive = b"PK\x03\x04dup".to_vec();
+        let (document, index) = package_for("wp_dup_a", NOW, None, &archive);
+        packages
+            .save(&blobs, &document, &index, &archive, NOW)
+            .expect("first save");
+
+        let (other, other_index) = package_for("wp_dup_b", NOW, None, &archive);
+        assert!(
+            packages
+                .save(&blobs, &other, &other_index, &archive, NOW)
+                .is_err(),
+            "同一个 manifest 摘要 MUST NOT 能落进两行"
+        );
+        assert_eq!(
+            packages
+                .archive_digest_for_content_digest(DIGEST)
+                .expect("lookup")
+                .expect("must exist"),
+            crate::blob::digest_of(&archive)
+        );
+    }
+
+    #[test]
+    fn keyset_pagination_covers_every_row_once_across_page_sizes() {
+        let (packages, blobs, _root) = fixture();
+        for n in 0..25i64 {
+            let updated_at = format!("2026-09-30T{:02}:{:02}:00Z", n / 60, n % 60);
+            // 每行一份不同字节（因此 blob 地址不同）与不同 manifest 摘要（因此 canonical
+            // identity 不同）——`ref_digest` 上有 UNIQUE 约束，用同一个摘要建 25 行测的
+            // 是拒绝路径，不是分页。
+            let archive = format!("PK{n}").into_bytes();
+            let digest = format!("sha256:{:064x}", n);
+            let (document, index) =
+                package_for_digest(&format!("wp_{n:03}"), &digest, &updated_at, None, &archive);
+            packages
+                .save(&blobs, &document, &index, &archive, &updated_at)
+                .expect("save");
+        }
+
+        for page_size in [1_i64, 4, 100] {
+            let mut seen: Vec<String> = Vec::new();
+            let mut cursor = None;
+            loop {
+                let page = packages
+                    .list(&WebPackageQuery {
+                        cursor: cursor.clone(),
+                        ..default_query(page_size)
+                    })
+                    .expect("list must succeed");
+                for document in &page.documents {
+                    let value: serde_json::Value = serde_json::from_str(document).expect("json");
+                    seen.push(
+                        value
+                            .get("id")
+                            .and_then(|id| id.as_str())
+                            .unwrap_or("?")
+                            .to_string(),
+                    );
+                }
+                match page.next_cursor {
+                    Some(next) => cursor = Some(next),
+                    None => break,
+                }
+            }
+            seen.sort();
+            assert_eq!(seen.len(), 25, "page_size={page_size} 必须覆盖全部行");
+        }
+    }
+
+    #[test]
+    fn rejects_a_page_size_outside_the_contract_range() {
+        let (packages, _blobs, _root) = fixture();
+        for limit in [0_i64, -1, 101] {
+            assert_eq!(
+                packages.list(&default_query(limit)),
+                Err(StoreError::InvalidQuery),
+                "limit={limit} 必须被拒绝"
+            );
+        }
+    }
+
+    #[test]
+    fn the_error_projection_stays_one_shape_across_store_and_blob_failures() {
+        let (packages, blobs, _root) = fixture();
+        let (document, index) = package("wp_err", NOW);
+
+        // 一个 blob 侧失败：archive 超过 blob 上限。
+        //
+        // 记录必须**如实声明**这个长度，否则 `save` 会先在"声明长度 ≠ 实际字节数"上失败，
+        // 那样测到的就不是 blob 的错误投影了。
+        let oversized = vec![0_u8; crate::blob::MAX_BLOB_BYTES + 1];
+        let (big_document, big_index) = package_for("wp_err", NOW, None, &oversized);
+        let blob_failure = packages
+            .save(&blobs, &big_document, &big_index, &oversized, NOW)
+            .expect_err("must fail");
+        // 一个 store 侧失败：索引列与 document 不一致。
+        let mut bad = index.clone();
+        bad.content_digest = format!("sha256:{}", "c".repeat(64));
+        let store_failure = packages
+            .save(&blobs, &document, &bad, TEST_ARCHIVE, NOW)
+            .expect_err("must fail");
+        // 一个 store 侧失败：记录自称的长度与实际字节数不符。
+        let length_failure = packages
+            .save(
+                &blobs,
+                &document,
+                &index,
+                b"PK\x03\x04different length",
+                NOW,
+            )
+            .expect_err("must fail");
+
+        assert!(matches!(blob_failure, super::SaveWebPackageError::Blob(_)));
+        assert!(matches!(
+            store_failure,
+            super::SaveWebPackageError::Store(_)
+        ));
+        assert_eq!(
+            length_failure,
+            super::SaveWebPackageError::Store(StoreError::IndexMismatch)
+        );
+
+        for error in [blob_failure, store_failure] {
+            let value = serde_json::to_value(&error).expect("must serialize");
+            assert_eq!(
+                value.as_object().expect("object").len(),
+                2,
+                "两种来源的错误 MUST 投影成同一形状，渲染层只需一个解析器"
+            );
+            assert!(!value["message"].as_str().expect("message").is_empty());
+        }
+    }
+}

@@ -12,6 +12,7 @@ import {
 } from '@mahoshojo/ai-core/structured-json';
 import { classifySuccess, classifyOutcome } from './outcome-classification';
 import { buildReasoningSummary } from './reasoning-normalizer';
+import { normalizeUsage } from './usage';
 import { createSafeAiRuntimeLogger, silentLogger } from './logger';
 import type {
   AIProvider,
@@ -27,6 +28,7 @@ import {
   createAiUpstreamAttemptRuntime,
   classifyAiUpstreamOutcome,
 } from '../ai-upstream';
+import { markAiRetrySafety } from './retry-safety';
 
 // 延迟函数
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -91,6 +93,40 @@ const isJsonModeNotSupportedError = (error: unknown): boolean => {
   if (lowered.includes('unsupported') && (lowered.includes('json') || lowered.includes('schema') || lowered.includes('structured'))) return true;
 
   return false;
+};
+
+const EXPLICIT_STRUCTURED_CAPABILITY_REJECTION_STATUSES = new Set([400, 422]);
+
+const errorStatusCode = (error: unknown): number | null => {
+  if (!error || typeof error !== 'object') return null;
+  const record = error as { status?: unknown; statusCode?: unknown };
+  const value = typeof record.statusCode === 'number' ? record.statusCode : record.status;
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+};
+
+const errorName = (error: unknown): string => (
+  error && typeof error === 'object' && typeof (error as { name?: unknown }).name === 'string'
+    ? (error as { name: string }).name
+    : ''
+);
+
+const isExplicitStructuredCapabilityRejection = (input: {
+  rawError: unknown;
+  enhancedError: unknown;
+  providerRequestDispatched: boolean;
+}): boolean => {
+  const hasExplicitMessage = isJsonModeNotSupportedError(input.rawError)
+    || isJsonModeNotSupportedError(input.enhancedError);
+  if (!hasExplicitMessage) return false;
+  if (!input.providerRequestDispatched) return true;
+  if (NoObjectGeneratedError.isInstance(input.rawError)) return false;
+
+  const statusCode = errorStatusCode(input.rawError)
+    ?? errorStatusCode(input.enhancedError);
+  const name = errorName(input.rawError) || errorName(input.enhancedError);
+  return name === 'AI_APICallError'
+    && statusCode !== null
+    && EXPLICIT_STRUCTURED_CAPABILITY_REJECTION_STATUSES.has(statusCode);
 };
 
 const shouldForceTextJsonFallback = (modelId: string): boolean => {
@@ -402,14 +438,6 @@ async function generateWithAIUsing<T, I = string>(
             role: 'user' as const,
             content: promptText,
           },
-          {
-            role: 'user' as const,
-            content: (() => {
-              const len = 20;
-              const start = Math.floor(Math.random() * Math.max(1, promptText.length - len));
-              return promptText.substring(start, start + len);
-            })(),
-          },
         ]);
         const resolvedSettings = resolveGenerationSettings({
           providerId: options?.generationSettingsContext?.providerId ?? generationConfig.generationSettingsContext?.providerId ?? provider.providerId ?? provider.type,
@@ -436,7 +464,6 @@ async function generateWithAIUsing<T, I = string>(
         const tryGenerateObject = async () => {
           return await generateObject({
             model,
-            // 应对风控，尝试直接全部放入系统提示词中
             prompt: buildPromptMessages(systemPrompt),
             schema: generationConfig.schema,
             maxRetries: 0,
@@ -475,7 +502,7 @@ async function generateWithAIUsing<T, I = string>(
             });
 
             if (options?.telemetry) {
-              options.telemetry.usage = textResult.usage;
+              options.telemetry.usage = normalizeUsage(textResult.usage) ?? undefined;
               options.telemetry.finishReason = textResult.finishReason;
               options.telemetry.reasoning = buildNonStreamReasoningEnvelope(textResult.reasoningText, textResult.usage);
             }
@@ -541,7 +568,7 @@ async function generateWithAIUsing<T, I = string>(
               });
 
               if (options?.telemetry) {
-                options.telemetry.usage = rawError.usage;
+                options.telemetry.usage = normalizeUsage(rawError.usage) ?? undefined;
                 options.telemetry.finishReason = rawError.finishReason;
                 options.telemetry.reasoning = buildNonStreamReasoningEnvelope(undefined, rawError.usage);
               }
@@ -571,7 +598,15 @@ async function generateWithAIUsing<T, I = string>(
           });
 
           // 2) 上游不支持 JSON 模式：退化为“纯文本生成 JSON + 本地解析/修复”
-          if (!providerRequestDispatched && isJsonModeNotSupportedError(rawError)) {
+          // An explicit capability rejection means the structured request was
+          // rejected before generation. Even when it crossed the fetch boundary,
+          // retrying the same provider/model as text JSON preserves the legacy
+          // compatibility contract without blindly replaying a billable result.
+          if (isExplicitStructuredCapabilityRejection({
+            rawError,
+            enhancedError,
+            providerRequestDispatched,
+          })) {
             runtimeAttempt.finish(classifyAiUpstreamOutcome(enhancedError));
             log.warn('检测到上游不支持 JSON 模式，启用兼容回退（文本生成 JSON + 本地解析）', {
               provider: provider.name,
@@ -623,7 +658,7 @@ async function generateWithAIUsing<T, I = string>(
           );
         }
         if (options?.telemetry) {
-          options.telemetry.usage = usage;
+          options.telemetry.usage = normalizeUsage(usage) ?? undefined;
           options.telemetry.finishReason = finishReason;
           options.telemetry.reasoning = reasoning;
         }
@@ -641,7 +676,10 @@ async function generateWithAIUsing<T, I = string>(
         runtimeAttempt?.finish(
           abortRequested ? 'aborted' : classifyAiUpstreamOutcome(error),
         );
-        lastError = projectedError;
+        lastError = markAiRetrySafety(
+          projectedError,
+          providerRequestDispatched ? 'non-replayable' : 'pre-dispatch-safe',
+        );
         log.error(`提供商 ${provider.name} 第 ${attempt + 1} 次失败`, { error: projectedError });
 
         if (NoObjectGeneratedError.isInstance(error)) {
@@ -671,7 +709,7 @@ async function generateWithAIUsing<T, I = string>(
         }
 
         if (providerRequestDispatched) {
-          throw projectedError;
+          throw lastError;
         }
 
         // 如果不是最后一次尝试，等待后再重试
@@ -687,7 +725,10 @@ async function generateWithAIUsing<T, I = string>(
   }
 
   log.error('所有 AI Provider 尝试均失败');
-  throw enhanceErrorWithUpstreamMessage(lastError);
+  throw markAiRetrySafety(
+    enhanceErrorWithUpstreamMessage(lastError),
+    'pre-dispatch-safe',
+  );
 }
 
 export const createNodeStructuredAiRuntime = (dependencies: NodeAiRuntimeDependencies) => ({

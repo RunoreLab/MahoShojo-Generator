@@ -1,8 +1,8 @@
 import { getDrizzleDbFromRuntime } from '@/lib/db/drizzle';
 import { getAuthMigrationStatusByBusinessUserId } from '@/lib/db/repositories/user-auth-links';
-import { json, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
+import { json, requireAuthUser, withApiErrorBoundary } from '@/lib/api/server';
 
-const handler = withPvpErrorBoundary(async function handler(req: Request): Promise<Response> {
+const handler = withApiErrorBoundary(async function handler(req: Request): Promise<Response> {
   if (req.method !== 'GET') return json({ error: 'Method not allowed' }, { status: 405 });
 
   const auth = await requireAuthUser(req);

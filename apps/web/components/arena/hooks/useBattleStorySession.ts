@@ -44,20 +44,25 @@ import type {
   BattleStorySessionSource,
 } from '@/lib/ai-session/battle-story/types';
 import { authStorage } from '@/lib/auth';
+import { secureRandomUUID } from '@/lib/crypto';
 import { useGenerationApiIntentLatch } from '@/lib/use-generation-api-intent-latch';
 import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
+import { downloadBlob } from '@/lib/client/blobUrl';
 import { useProviderModeCooldown } from '@/lib/cooldown';
-import { extractHeadlineFromMarkdown, extractWinnerFromText } from '@/lib/arena/battle-report-log-utils';
 import {
   captureArenaGenerationActorToken,
   withArenaGenerationActorToken,
 } from '@/lib/arena/resumable-generation-client';
+import {
+  buildArenaReconciliationRetryPayload,
+  type ArenaReconciliationRetryCombatant,
+} from '@/lib/arena/reconciliation-retry';
 import { readScenarioBattleStoryConfig } from '@/lib/scenario-battle-story';
+import { normalizeUsage } from '@/lib/arena/battle-report-log-utils';
 import { readTextAndReasoningStreamFromResponse } from '@/lib/stream/read-text-and-reasoning-stream';
 import { STREAM_ABORT_REASON_USER } from '@/lib/stream/abort';
 import { buildStreamSoftTimeoutMessage } from '@/lib/stream/timeout';
-import { hashArenaCombatantBaseRevision } from '@mahoshojo/domain/arena-reconciliation';
 
 import { useBattleStore } from '../stores/useBattleStore';
 import { BattleStoreState, Combatant, CombatantData } from '../types';
@@ -766,80 +771,74 @@ export function useBattleStorySession() {
       if (!input.seed.settings.writeArenaHistory && !input.seed.settings.writeCurrentState) {
         return { workingCombatants: input.workingCombatants };
       }
-
-      const headline =
-        (typeof input.meta?.report === 'object' && typeof (input.meta.report as any)?.headline === 'string'
-          ? (input.meta.report as any).headline.trim()
-          : '') ||
-        input.digest.chapterTitle.trim() ||
-        extractHeadlineFromMarkdown(input.markdown) ||
-        '魔法少女速报';
-
-      const winner =
-        input.digest.winner?.trim() ||
-        extractWinnerFromText(input.markdown) ||
-        '未知';
-
-      if (input.seed.settings.writeArenaHistory && (!headline || headline === '魔法少女速报' || !winner || winner === '未知')) {
+      if (!input.generationId) {
         return {
           workingCombatants: input.workingCombatants,
-          warning: '⚠️ 本章正文已保存，但未能稳定识别标题或胜利者，角色状态未同步到连续会话。',
+          warning: '⚠️ 本章正文已保存，但缺少服务器 generationId，角色状态未同步到连续会话。',
         };
       }
 
-      const impacts =
-        Array.isArray(input.meta?.impacts) && input.meta?.impacts.length > 0
-          ? input.meta.impacts
-          : (input.digest.impactDigest ?? []);
-
-      const baseRevisionHash = await hashArenaCombatantBaseRevision(input.workingCombatants);
+      const reconciliationPayload = await buildArenaReconciliationRetryPayload(
+        input.generationId,
+        input.workingCombatants as ArenaReconciliationRetryCombatant[],
+      );
       const response = await fetch('/api/arena/update-combatants-after-stream', {
         method: 'POST',
-        headers: withArenaGenerationActorToken({
-          'Content-Type': 'application/json',
-        }),
-        body: JSON.stringify({
-          generationId: input.generationId,
-          baseRevisionHash,
-          combatants: input.workingCombatants,
-          report: {
-            headline,
-            mode: input.mode,
-            officialReport: {
-              winner,
-            },
-          },
-          impacts,
-          userGuidance: input.userGuidance || null,
-          scenario: input.seed.scenario ?? null,
-          writeArenaHistory: input.seed.settings.writeArenaHistory,
-          writeCurrentState: input.seed.settings.writeCurrentState,
-        }),
+        headers: withArenaGenerationActorToken(await buildRequestHeaders(false)),
+        body: JSON.stringify(reconciliationPayload),
       });
 
       if (!response.ok) {
         const { payload } = await readJsonOrTextFromResponse(response);
+        const payloadRecord = payload && typeof payload === 'object' && !Array.isArray(payload)
+          ? payload as Record<string, unknown>
+          : null;
+        const details = Array.isArray(payloadRecord?.errors)
+          ? payloadRecord.errors.flatMap((value) => {
+            if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+            const message = (value as { message?: unknown }).message;
+            return typeof message === 'string' && message.trim() ? [message.trim()] : [];
+          })
+          : [];
+        const baseMessage = resolveApiErrorMessage({
+          payload,
+          fallback: '角色更新失败',
+        });
         return {
           workingCombatants: input.workingCombatants,
-          warning: `⚠️ 本章正文已保存，但角色状态同步失败：${resolveApiErrorMessage({
-            payload,
-            fallback: '角色更新失败',
-          })}`,
+          warning: `⚠️ 本章正文已保存，但角色状态同步失败：${[
+            baseMessage,
+            ...details,
+          ].join('；')}`,
         };
       }
 
       const payload = (await response.json()) as {
-        updatedCombatants?: Array<Record<string, unknown>>;
+        updatedCombatants?: Array<{
+          combatantIndex: number;
+          data: Record<string, unknown>;
+          isNative: boolean;
+        }>;
+        warnings?: Array<{ message?: unknown }>;
       };
+
+      const warningMessage = Array.isArray(payload.warnings)
+        ? payload.warnings.flatMap((warning) => (
+          typeof warning?.message === 'string' && warning.message.trim()
+            ? [warning.message.trim()]
+            : []
+        )).join('；')
+        : '';
 
       return {
         workingCombatants: mergeUpdatedCombatantsIntoWorkingCombatants(
           input.workingCombatants,
           Array.isArray(payload.updatedCombatants) ? payload.updatedCombatants : []
         ),
+        ...(warningMessage ? { warning: `⚠️ ${warningMessage}` } : {}),
       };
     },
-    []
+    [buildRequestHeaders]
   );
 
   const runGeneration = useCallback(
@@ -906,7 +905,7 @@ export function useBattleStorySession() {
           signal: generationController.signal,
           body: JSON.stringify({
             sessionId: input.sessionId,
-            generationRequestId: crypto.randomUUID(),
+            generationRequestId: secureRandomUUID(),
             action: input.action,
             ...(input.sourceChapterId ? { sourceChapterId: input.sourceChapterId } : {}),
             ...(typeof input.chapterIndexHint === 'number' ? { chapterIndex: input.chapterIndexHint } : {}),
@@ -1017,10 +1016,7 @@ export function useBattleStorySession() {
           onTelemetry: (payload) => {
             patchStreamCardSnapshot({
               aiModel: typeof payload.aiModel === 'string' ? payload.aiModel.trim() : null,
-              aiUsage:
-                payload.usage && typeof payload.usage === 'object'
-                  ? (payload.usage as BattleStoryChapterCardSnapshot['aiUsage'])
-                  : null,
+              aiUsage: normalizeUsage(payload.usage),
               narrativeHistoryReadCount:
                 typeof payload.narrativeHistoryReadCount === 'number'
                   ? payload.narrativeHistoryReadCount
@@ -1889,14 +1885,7 @@ export function useBattleStorySession() {
 
     const content = buildBattleStoryExportMarkdown(sessionRecord, chapterRecords);
     const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `${sessionRecord.title || 'battle-story-session'}.md`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    downloadBlob(blob, `${sessionRecord.title || 'battle-story-session'}.md`);
   }, []);
 
   const stopGeneration = useCallback(() => {

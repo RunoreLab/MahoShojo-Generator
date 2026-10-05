@@ -1,25 +1,35 @@
-import { z } from 'zod';
+import { z } from './zod';
 
-import { MAX_OPAQUE_KEY_LENGTH, MAX_PROPOSAL_BYTES, MAX_PROPOSAL_CHANGES } from './limits';
 import {
+  MAX_ARENA_REFERENCE_ITEMS,
+  MAX_COMBATANTS,
+  MAX_OPAQUE_KEY_LENGTH,
+  MAX_PROPOSAL_BYTES,
+  MAX_PROPOSAL_CHANGES,
+} from './limits';
+import {
+  ArenaReportFormatSchema,
   BattleModeSchema,
   CharacterDataCardRefSchema,
   CustomStoryLengthSchema,
+  DisplayNameSchema,
   GuidanceSchema,
   GlobalGuidanceSchema,
   HostLocalCombatantStubSchema,
   HostLocalMaterialStubSchema,
   HostLocalScenarioStubSchema,
   MaterialDataCardRefSchema,
+  LanguageSchema,
   OpaqueKeySchema,
   ScenarioDataCardRefSchema,
   StableObjectKeySchema,
   StoryLengthSchema,
 } from './primitives';
 import { ArenaContractError } from './errors';
-import { SharedHistorySettingsSchema } from './shared-config';
+import { SharedHistorySettingsSchema, TeamAssignmentSchema } from './shared-config';
 import { PROPOSAL_VERSION } from './versions';
 import { jsonUtf8ByteLength } from './wire-size';
+import { WebPackageRefSchema } from './web-package';
 
 const ChangeIdSchema = z.string().trim().min(1).max(MAX_OPAQUE_KEY_LENGTH);
 const AtomicGroupIdSchema = z.string().trim().min(1).max(MAX_OPAQUE_KEY_LENGTH);
@@ -41,7 +51,7 @@ export const ValueExpectedBaseSchema = <T extends z.ZodTypeAny>(valueSchema: T) 
   z.object({ kind: z.literal('value'), value: valueSchema }).strict();
 
 export const PresentExpectedBaseSchema = <T extends z.ZodTypeAny>(valueSchema: T) =>
-  z.object({ kind: z.literal('present'), ref: valueSchema }).strict();
+  z.object({ kind: z.literal('present'), ref: valueSchema, key: StableObjectKeySchema.optional() }).strict();
 
 const ChangeMetadataSchema = z
   .object({
@@ -73,22 +83,54 @@ const targetKeyMatchesExpectedRef = (targetKey: string, expectedRef: unknown): b
   return false;
 };
 
+const targetKeyMatchesExpectedBase = (
+  targetKey: string,
+  expectedBase: { key?: string; ref: unknown },
+): boolean => expectedBase.key === undefined
+  ? !targetKey.startsWith('preset:') && targetKeyMatchesExpectedRef(targetKey, expectedBase.ref)
+  : targetKey === expectedBase.key && targetKeyMatchesExpectedRef(targetKey, expectedBase.ref);
+
+const proposalRefKeyMatches = (
+  key: string | undefined,
+  ref: { id: string },
+  allowPreset: boolean,
+): boolean => key === undefined
+  ? true
+  : (key === `data-card:${ref.id}` || (allowPreset && key === `preset:${ref.id}`));
+
+const proposalRefKeyRefinement = <T extends { key?: string; ref?: { id: string } | null }>(
+  change: T,
+  context: z.RefinementCtx,
+  allowPreset: boolean,
+): void => {
+  if (change.ref === undefined || change.ref === null) {
+    if (change.key !== undefined) {
+      context.addIssue({ code: 'custom', path: ['key'], message: 'null/absent ref cannot carry a namespace key' });
+    }
+    return;
+  }
+  if (!proposalRefKeyMatches(change.key, change.ref, allowPreset)) {
+    context.addIssue({ code: 'custom', path: ['key'], message: 'proposal key must identify its ref namespace and id' });
+  }
+};
+
 export const RefExpectedBaseSchema = z
-  .object({ kind: z.literal('ref'), ref: ScenarioValueSchema })
+  .object({ kind: z.literal('ref'), ref: ScenarioValueSchema, key: StableObjectKeySchema.optional() })
   .strict();
 
 export const AddCombatantChangeSchema = change({
   type: z.literal('addCombatant'),
+  key: StableObjectKeySchema.optional(),
   ref: CharacterRefSchema,
   expectedBase: AbsentExpectedBaseSchema,
-});
+}).superRefine((value, context) => proposalRefKeyRefinement(value, context, true));
 
 export const RemoveCombatantChangeSchema = change({
   type: z.literal('removeCombatant'),
   combatantKey: StableObjectKeySchema,
   expectedBase: PresentExpectedBaseSchema(CharacterPresentValueSchema),
 }).superRefine((change, context) => {
-  if (!targetKeyMatchesExpectedRef(change.combatantKey, change.expectedBase.ref)) {
+  if (!targetKeyMatchesExpectedBase(change.combatantKey, change.expectedBase)) {
     context.addIssue({ code: 'custom', path: ['expectedBase', 'ref'], message: 'expectedBase.ref identity must match combatantKey' });
   }
 });
@@ -107,46 +149,167 @@ export const AssignTeamChangeSchema = change({
   expectedBase: ValueExpectedBaseSchema(OpaqueKeySchema.nullable()),
 });
 
+export const AddTeamChangeSchema = change({
+  type: z.literal('addTeam'),
+  teamKey: OpaqueKeySchema,
+  displayName: DisplayNameSchema,
+  expectedBase: AbsentExpectedBaseSchema,
+});
+
+export const RemoveTeamChangeSchema = change({
+  type: z.literal('removeTeam'),
+  teamKey: OpaqueKeySchema,
+  expectedBase: PresentExpectedBaseSchema(TeamAssignmentSchema),
+}).superRefine((change, context) => {
+  if (change.teamKey !== change.expectedBase.ref.key) {
+    context.addIssue({ code: 'custom', path: ['expectedBase', 'ref', 'key'], message: 'expectedBase.ref identity must match teamKey' });
+  }
+});
+
+export const RenameTeamChangeSchema = change({
+  type: z.literal('renameTeam'),
+  teamKey: OpaqueKeySchema,
+  value: DisplayNameSchema,
+  expectedBase: ValueExpectedBaseSchema(DisplayNameSchema),
+});
+
+const exactOrderSchema = (keySchema: z.ZodType<string>, maximum: number, minimum = 0) => (
+  z.array(keySchema).min(minimum).max(maximum)
+);
+
+const validateExactReorder = (
+  reorder: Readonly<{
+    value: readonly string[];
+    expectedBase: Readonly<{ value: readonly string[] }>;
+  }>,
+  context: z.RefinementCtx,
+): void => {
+  const proposed = reorder.value;
+  const expected = reorder.expectedBase.value;
+  if (new Set(proposed).size !== proposed.length) {
+    context.addIssue({ code: 'custom', path: ['value'], message: 'ordered keys must be unique' });
+  }
+  if (new Set(expected).size !== expected.length) {
+    context.addIssue({ code: 'custom', path: ['expectedBase', 'value'], message: 'expected ordered keys must be unique' });
+  }
+  const expectedSet = new Set(expected);
+  if (proposed.length !== expected.length || proposed.some((key) => !expectedSet.has(key))) {
+    context.addIssue({ code: 'custom', path: ['value'], message: 'proposed and expected orders must contain the exact same keys' });
+  }
+  if (proposed.length === expected.length && proposed.every((key, index) => key === expected[index])) {
+    context.addIssue({ code: 'custom', path: ['value'], message: 'reorder must change key order' });
+  }
+};
+
+const CombatantOrderSchema = exactOrderSchema(StableObjectKeySchema, MAX_COMBATANTS, 1);
+const TeamOrderSchema = exactOrderSchema(OpaqueKeySchema, MAX_COMBATANTS);
+const TeamCombatantOrderSchema = exactOrderSchema(StableObjectKeySchema, MAX_COMBATANTS);
+const AuxScenarioOrderSchema = exactOrderSchema(StableObjectKeySchema, MAX_ARENA_REFERENCE_ITEMS);
+const MaterialOrderSchema = exactOrderSchema(StableObjectKeySchema, MAX_ARENA_REFERENCE_ITEMS);
+
+export const ReorderCombatantsChangeSchema = change({
+  type: z.literal('reorderCombatants'),
+  value: CombatantOrderSchema,
+  expectedBase: ValueExpectedBaseSchema(CombatantOrderSchema),
+}).superRefine(validateExactReorder);
+
+export const ReorderTeamsChangeSchema = change({
+  type: z.literal('reorderTeams'),
+  value: TeamOrderSchema,
+  expectedBase: ValueExpectedBaseSchema(TeamOrderSchema),
+}).superRefine(validateExactReorder);
+
+export const ReorderTeamCombatantsChangeSchema = change({
+  type: z.literal('reorderTeamCombatants'),
+  teamKey: OpaqueKeySchema,
+  value: TeamCombatantOrderSchema,
+  expectedBase: ValueExpectedBaseSchema(TeamCombatantOrderSchema),
+}).superRefine(validateExactReorder);
+
+export const ReorderAuxScenariosChangeSchema = change({
+  type: z.literal('reorderAuxScenarios'),
+  value: AuxScenarioOrderSchema,
+  expectedBase: ValueExpectedBaseSchema(AuxScenarioOrderSchema),
+}).superRefine(validateExactReorder);
+
+export const ReorderMaterialsChangeSchema = change({
+  type: z.literal('reorderMaterials'),
+  value: MaterialOrderSchema,
+  expectedBase: ValueExpectedBaseSchema(MaterialOrderSchema),
+}).superRefine(validateExactReorder);
+
+export const SetReportFormatChangeSchema = change({
+  type: z.literal('setReportFormat'),
+  value: ArenaReportFormatSchema,
+  expectedBase: ValueExpectedBaseSchema(ArenaReportFormatSchema),
+});
+
+export const SetWebPackageRefChangeSchema = change({
+  type: z.literal('setWebPackageRef'),
+  value: WebPackageRefSchema.nullable(),
+  expectedBase: ValueExpectedBaseSchema(WebPackageRefSchema.nullable()),
+});
+
 export const SetBattleModeChangeSchema = change({
   type: z.literal('setBattleMode'),
   value: BattleModeSchema,
   expectedBase: ValueExpectedBaseSchema(BattleModeSchema),
 });
 
+export const SetSelectedLanguageChangeSchema = change({
+  type: z.literal('setSelectedLanguage'),
+  value: LanguageSchema,
+  expectedBase: ValueExpectedBaseSchema(LanguageSchema),
+});
+
 export const SetScenarioChangeSchema = change({
   type: z.literal('setScenario'),
+  key: StableObjectKeySchema.optional(),
   ref: ScenarioProposedValueSchema,
   expectedBase: RefExpectedBaseSchema,
+}).superRefine((value, context) => {
+  proposalRefKeyRefinement(value, context, true);
+  if (value.expectedBase.key !== undefined && !targetKeyMatchesExpectedRef(
+    value.expectedBase.key,
+    value.expectedBase.ref,
+  )) {
+    context.addIssue({ code: 'custom', path: ['expectedBase', 'key'], message: 'expectedBase.key must identify its ref id' });
+  }
 });
 
 export const AddAuxScenarioChangeSchema = change({
   type: z.literal('addAuxScenario'),
+  key: StableObjectKeySchema.optional(),
   ref: ScenarioRefSchema,
   expectedBase: AbsentExpectedBaseSchema,
-});
+}).superRefine((value, context) => proposalRefKeyRefinement(value, context, true));
 
 export const RemoveAuxScenarioChangeSchema = change({
   type: z.literal('removeAuxScenario'),
   scenarioKey: StableObjectKeySchema,
   expectedBase: PresentExpectedBaseSchema(ScenarioPresentValueSchema),
 }).superRefine((change, context) => {
-  if (!targetKeyMatchesExpectedRef(change.scenarioKey, change.expectedBase.ref)) {
+  if (!targetKeyMatchesExpectedBase(change.scenarioKey, change.expectedBase)) {
     context.addIssue({ code: 'custom', path: ['expectedBase', 'ref'], message: 'expectedBase.ref identity must match scenarioKey' });
   }
 });
 
 export const AddMaterialChangeSchema = change({
   type: z.literal('addMaterial'),
+  key: StableObjectKeySchema.optional(),
   ref: MaterialRefSchema,
   expectedBase: AbsentExpectedBaseSchema,
-});
+}).superRefine((value, context) => proposalRefKeyRefinement(value, context, false));
 
 export const RemoveMaterialChangeSchema = change({
   type: z.literal('removeMaterial'),
   materialKey: StableObjectKeySchema,
   expectedBase: PresentExpectedBaseSchema(MaterialPresentValueSchema),
 }).superRefine((change, context) => {
-  if (!targetKeyMatchesExpectedRef(change.materialKey, change.expectedBase.ref)) {
+  if (change.materialKey.startsWith('preset:')) {
+    context.addIssue({ code: 'custom', path: ['materialKey'], message: 'material preset is unsupported without a server registry' });
+  }
+  if (!targetKeyMatchesExpectedBase(change.materialKey, change.expectedBase)) {
     context.addIssue({ code: 'custom', path: ['expectedBase', 'ref'], message: 'expectedBase.ref identity must match materialKey' });
   }
 });
@@ -180,7 +343,18 @@ export const ArenaProposalChangeSchema = z.discriminatedUnion('type', [
   RemoveCombatantChangeSchema,
   SetCharacterGuidanceChangeSchema,
   AssignTeamChangeSchema,
+  AddTeamChangeSchema,
+  RemoveTeamChangeSchema,
+  RenameTeamChangeSchema,
+  ReorderCombatantsChangeSchema,
+  ReorderTeamsChangeSchema,
+  ReorderTeamCombatantsChangeSchema,
+  ReorderAuxScenariosChangeSchema,
+  ReorderMaterialsChangeSchema,
+  SetReportFormatChangeSchema,
+  SetWebPackageRefChangeSchema,
   SetBattleModeChangeSchema,
+  SetSelectedLanguageChangeSchema,
   SetScenarioChangeSchema,
   AddAuxScenarioChangeSchema,
   RemoveAuxScenarioChangeSchema,

@@ -190,11 +190,19 @@ describe('advanced generation settings regressions', () => {
   });
 
   it('AiProviderSelector 校验持久化 overrides，并等待当前模型设置加载后再向外 emit', async () => {
-    const source = await readFile('components/AiProviderSelector.tsx', 'utf8');
+    // 实现已共源到 packages/ui-web/src/ai-provider/（D5.0b），断言跟随权威源码。
+    const selection = await readFile(
+      '../../packages/ui-web/src/ai-provider/selection.ts',
+      'utf8',
+    );
+    const hook = await readFile(
+      '../../packages/ui-web/src/ai-provider/use-ai-provider-selection.ts',
+      'utf8',
+    );
 
-    expect(source).toContain('UserGenerationOverridesSchema.safeParse(JSON.parse(stored))');
-    expect(source).toContain('setLoadedGenerationOverridesKey(currentGenerationOverridesKey)');
-    expect(source).toContain(
+    expect(selection).toContain('UserGenerationOverridesSchema.safeParse(JSON.parse(stored))');
+    expect(hook).toContain('setLoadedGenerationOverridesKey(currentGenerationOverridesKey)');
+    expect(hook).toContain(
       'loadedGenerationOverridesKey !== currentGenerationOverridesKey',
     );
   });
@@ -216,7 +224,11 @@ describe('advanced generation settings regressions', () => {
   });
 
   it('恢复默认会清除 number 输入框残留的浏览器 bad-input 草稿', async () => {
-    const source = await readFile('components/AdvancedGenerationSettings.tsx', 'utf8');
+    // 实现已共源到 packages/ui-web/src/ai-provider/（D5.0b），断言跟随权威源码。
+    const source = await readFile(
+      '../../packages/ui-web/src/ai-provider/advanced-generation-settings.tsx',
+      'utf8',
+    );
 
     expect(source).toContain('const [numericInputRevision, setNumericInputRevision] = useState(0)');
     expect(source).toContain('key={numericInputRevision}');

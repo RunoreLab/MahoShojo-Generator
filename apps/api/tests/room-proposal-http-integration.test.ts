@@ -15,7 +15,10 @@ import {
   type ArenaRoomAuthorityState,
 } from '@mahoshojo/multiplayer-core';
 
-import { createArenaRoomState } from './arena-room-fixtures';
+import {
+  createArenaRoomState,
+  createTestArenaDataCardRefVerifier,
+} from './arena-room-fixtures';
 
 class MemoryRoomStore implements RoomActorCheckpointStore {
   state: ArenaRoomAuthorityState | null = null;
@@ -96,6 +99,7 @@ describe('Arena Proposal Hono authority composition', () => {
     });
     const memberships = createArenaRoomMembershipService({
       actors,
+      references: createTestArenaDataCardRefVerifier(),
       createUserId: () => `server-user-${++userIndex}`,
       now: () => '2026-08-28T00:01:00.000Z',
     });
@@ -125,8 +129,14 @@ describe('Arena Proposal Hono authority composition', () => {
         memberships,
         proposals,
         generations: {
+          cancel: vi.fn(async () => { throw new Error('not used'); }),
+          list: vi.fn(async () => { throw new Error('not used'); }),
           start: vi.fn(async () => { throw new Error('not used'); }),
           read: vi.fn(async () => { throw new Error('not used'); }),
+          readHistory: vi.fn(async () => { throw new Error('not used'); }),
+        },
+        configs: {
+          publish: vi.fn(async () => { throw new Error('not used'); }),
         },
         directory: { discoverPublic: vi.fn(async () => ({ items: [], nextCursor: null })) },
         websocketAuthority: { issue: vi.fn(async () => 'ticket') },
@@ -174,10 +184,18 @@ describe('Arena Proposal Hono authority composition', () => {
     );
 
     expect(resolve.status).toBe(200);
-    expect(await resolve.json()).toMatchObject({
+    const resolveBody = await resolve.json();
+    expect(resolveBody).toMatchObject({
       proposalId,
       status: 'rejected',
       revision: 0,
+    });
+    // resolve 响应携带 mutation 后的完整权威 snapshot。
+    expect(resolveBody.snapshot).toMatchObject({
+      roomId: host.roomId,
+      roomEpoch: host.roomEpoch,
+      revision: 0,
+      proposals: [],
     });
     expect(store.state?.snapshot.proposals).toEqual([]);
     expect(store.state?.terminalProposalIds).toContain(proposalId);

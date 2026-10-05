@@ -2,6 +2,8 @@ import React, { useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { config } from '@/lib/config';
 import { JsonSizeIndicator } from '@/components/shared/JsonSizeIndicator';
+import { getDataCardBaseSlotCostFromBytes } from '@/lib/data-card-quota';
+import { getUtf8ByteLength } from '@/lib/data-card-size';
 
 interface SaveCardModalProps {
   isOpen: boolean;
@@ -15,7 +17,7 @@ interface SaveCardModalProps {
   onPublicChange: (value: number) => void;
   error: string | null;
   isSaving?: boolean;
-  currentCardCount?: number;
+  usedSlots?: number;
   userCapacity?: number;
   data?: unknown;
 }
@@ -32,7 +34,7 @@ export default function SaveCardModal({
   onPublicChange,
   error,
   isSaving = false,
-  currentCardCount = 0,
+  usedSlots = 0,
   userCapacity = config.DEFAULT_DATA_CARD_CAPACITY,
   data
 }: SaveCardModalProps) {
@@ -50,6 +52,11 @@ export default function SaveCardModal({
   }, [isOpen]);
 
   if (!isOpen) return null;
+
+  const estimatedSlots = data == null
+    ? 1
+    : getDataCardBaseSlotCostFromBytes(getUtf8ByteLength(JSON.stringify(data)));
+  const wouldExceedCapacity = usedSlots + estimatedSlots > userCapacity;
 
   const modalContent = (
     <div
@@ -76,19 +83,19 @@ export default function SaveCardModal({
         <div className="flex justify-between items-center mb-4 pr-8">
           <h2 className="text-xl font-bold">保存数据卡</h2>
           <div className="text-sm text-gray-600">
-            {currentCardCount}/{userCapacity}
+            {usedSlots}/{userCapacity} 槽
           </div>
         </div>
 
         {/* 容量警告 */}
-        {currentCardCount >= userCapacity && (
+        {usedSlots >= userCapacity && (
           <div className="mb-4 p-3 bg-red-100 text-red-700 rounded-md text-sm">
-            ⚠️ 数据卡数量已达上限（{userCapacity}个），请先删除部分数据卡
+            ⚠️ 数据卡槽位已达上限（{userCapacity} 槽），请先释放部分槽位
           </div>
         )}
-        {currentCardCount >= userCapacity - 5 && currentCardCount < userCapacity && (
+        {usedSlots >= userCapacity - 5 && usedSlots < userCapacity && (
           <div className="mb-4 p-3 bg-yellow-100 text-yellow-700 rounded-md text-sm">
-            ⚠️ 数据卡容量即将用完（{currentCardCount}/{userCapacity}）
+            ⚠️ 数据卡容量即将用完（{usedSlots}/{userCapacity} 槽）
           </div>
         )}
 
@@ -150,20 +157,25 @@ export default function SaveCardModal({
           )}
 
           {data !== undefined && data !== null && (
-            <JsonSizeIndicator
+            <>
+              <div className="mb-2 text-sm text-gray-600">
+                当前内容预计占 {estimatedSlots} 个槽位，保存后约 {usedSlots + estimatedSlots}/{userCapacity} 槽。
+              </div>
+              <JsonSizeIndicator
               data={data}
               className="mt-0"
-              warningText="⚠️ 接近云端 300KB 上限，保存可能失败，请先精简数据。"
-            />
+              warningText="⚠️ 接近云端 1MiB 单卡上限，保存可能失败，请先精简数据。"
+              />
+            </>
           )}
 
           <div className="flex gap-2">
             <button
               onClick={onSave}
-              disabled={!name.trim() || isSaving || currentCardCount >= userCapacity}
-              className={`flex-1 generate-button ${(!name.trim() || isSaving || currentCardCount >= userCapacity) ? 'opacity-50 cursor-not-allowed' : ''}`}
+              disabled={!name.trim() || isSaving || wouldExceedCapacity}
+              className={`flex-1 generate-button ${(!name.trim() || isSaving || wouldExceedCapacity) ? 'opacity-50 cursor-not-allowed' : ''}`}
             >
-              {isSaving ? '保存中...' : (currentCardCount >= userCapacity ? '容量已满' : '保存')}
+              {isSaving ? '保存中...' : (wouldExceedCapacity ? '槽位不足' : '保存')}
             </button>
             <button
               onClick={onClose}

@@ -1,0 +1,573 @@
+/**
+ * 共源百科目录。
+ *
+ * 它是 53 篇百科的**元数据权威**：标题、摘要、分类与关键词都在这里。Markdown 正文本身不携带
+ * frontmatter，因此正文与目录各有一份标题——`stripLeadingMatchingTitle` 存在的理由正是这个约定，
+ * 而不是它自己是个 hack。
+ *
+ * ## 为什么 `contentFile` 不是 URL
+ *
+ * 它原先是 `markdownPath: '/encyclopedia/site-guide.md'`，也就是一个 public-root 绝对 URL。那是 Web 的
+ * 寻址约定，不是产品事实：Desktop 由 Tauri 自定义协议伺服产物，origin 与路径前缀都不保证同形。目录
+ * 因此只声明**正文的逻辑文件名**，最终 URL 由宿主注入的 `EncyclopediaContentSource` 解析
+ * （`DESK-PROD-004` 要求百科必要资源来自本地产物，两端都要能在自己的服务根上取到它）。
+ *
+ * 引用完整性由 `scripts/generate-encyclopedia-content.mjs --check` 把关：catalog 里写了不存在的文件，
+ * 或者 `content/encyclopedia/` 里有 catalog 没登记的文件，两个方向都会让门禁失败。
+ */
+export type EncyclopediaEntry = {
+  slug: string;
+  title: string;
+  summary: string;
+  /** 相对 `content/encyclopedia/` 的正文文件名，例如 `site-guide.md`。 */
+  contentFile: string;
+  categoryId: EncyclopediaCategoryId;
+  keywords?: string[];
+};
+
+export type EncyclopediaCategoryId =
+  | 'guide'
+  | 'magic-tea-party'
+  | 'troubleshooting'
+  | 'ai'
+  | 'gameplay'
+  | 'mechanics'
+  | 'content'
+  | 'management'
+  | 'community';
+
+export type EncyclopediaCategory = {
+  id: EncyclopediaCategoryId;
+  title: string;
+  description: string;
+};
+
+export const encyclopediaCategories: EncyclopediaCategory[] = [
+  {
+    id: 'guide',
+    title: '快速开始',
+    description: '站内入口、生成流程与新手速查。',
+  },
+  {
+    id: 'magic-tea-party',
+    title: '魔法茶会',
+    description: '长期剧情会话：角色/情景/世界书 + 选项/摘要/更新草案。',
+  },
+  {
+    id: 'troubleshooting',
+    title: '故障排查',
+    description: '网络、Cloudflare、限流、导入解析等问题自救。',
+  },
+  {
+    id: 'ai',
+    title: 'AI 生成与格式',
+    description: '拒答、空输出、格式异常、生成失败与常见自救。',
+  },
+  {
+    id: 'gameplay',
+    title: '对战与计分',
+    description: '竞技场、排位规则、裁判事件与计分口径。',
+  },
+  {
+    id: 'mechanics',
+    title: '系统机制',
+    description: '原生性、技术值、定位标签等站内机制解释。',
+  },
+  {
+    id: 'content',
+    title: '情景与成长',
+    description: '情景卡、长线继承、成长升华等玩法内容。',
+  },
+  {
+    id: 'management',
+    title: '内容管理与风控',
+    description: '档案馆、公开审核、敏感词/屏蔽词与安全提示。',
+  },
+  {
+    id: 'community',
+    title: '社区约定与术语',
+    description: '术语表、礼仪约定与社区提案整理。',
+  },
+];
+
+export const encyclopediaEntries: EncyclopediaEntry[] = [
+  {
+    slug: 'site-guide',
+    title: '站内功能速览（从生成到对战）',
+    summary: '新手从生成到对战的一页速查：入口、流程、常见问题。',
+    contentFile: 'site-guide.md',
+    categoryId: 'guide',
+    keywords: ['新手', '入口', '流程', '速查'],
+  },
+  {
+    slug: 'auth-migration',
+    title: '账号迁移指南（v0.8.0）',
+    summary: '旧密钥用户如何迁移到新版密码登录：状态说明、操作步骤与常见问题。',
+    contentFile: 'auth-migration.md',
+    categoryId: 'management',
+    keywords: ['账号迁移', '旧密钥', '密码登录', '/me', 'settings', 'auth migration'],
+  },
+  {
+    slug: 'magic-tea-party',
+    title: '魔法茶会（功能与快速开始）',
+    summary: '长期剧情对话页：角色/情景自由组合，支持选项、摘要、角色更新与导入导出。',
+    contentFile: 'magic-tea-party.md',
+    categoryId: 'magic-tea-party',
+    keywords: ['/magic-tea-party', '茶会', '长期对话', '互动剧情', '自备 Key'],
+  },
+  {
+    slug: 'magic-tea-party-settings',
+    title: '魔法茶会：设置与参数说明',
+    summary: '输出模式（JSONL/Markdown）、合并输出计划、资料读写与写入策略等设置怎么选。',
+    contentFile: 'magic-tea-party-settings.md',
+    categoryId: 'magic-tea-party',
+    keywords: ['JSONL', 'Markdown', 'outputPlan', '选项', '摘要', '写入', '历战记录', '当前状态'],
+  },
+  {
+    slug: 'magic-tea-party-session-management',
+    title: '魔法茶会：会话管理（分支/合并/备份与导出）',
+    summary: '置顶会话、编辑并分支、合并到原会话、ZIP 归档（含图片）与对话导出图片等常用操作。',
+    contentFile: 'magic-tea-party-session-management.md',
+    categoryId: 'magic-tea-party',
+    keywords: ['会话', '分支', '合并', 'fork', 'merge', '置顶', '导入', '导出', 'ZIP', '图片导出'],
+  },
+  {
+    slug: 'magic-tea-party-card-authoring',
+    title: '魔法茶会：角色卡/情景卡进阶（协议与 mtp_notice）',
+    summary: '如何写更适合茶会的角色卡和情景卡：情景锚点、协议重映射、mtp_notice 自定义提示/报错。',
+    contentFile: 'magic-tea-party-card-authoring.md',
+    categoryId: 'magic-tea-party',
+    keywords: ['协议', '协议附录', 'mtp_notice', 'notice', '情景卡', '世界书', 'SillyTavern'],
+  },
+  {
+    slug: 'magic-tea-party-troubleshooting',
+    title: '魔法茶会：错误排查与 FAQ',
+    summary: '登录提示、缺少 API Key、输出解析失败、敏感词拦截、上下文超载与写入异常的自救清单。',
+    contentFile: 'magic-tea-party-troubleshooting.md',
+    categoryId: 'magic-tea-party',
+    keywords: ['登录', '未登录', 'API Key', '403', 'notice', '解析失败', '敏感词', 'blocked'],
+  },
+  {
+    slug: 'magic-tea-party-context-limits',
+    title: '魔法茶会：上下文与超长消息',
+    summary: '单条消息超长会被自动省略中段、历史总量上限、Token 预算与摘要的正确处理方式。',
+    contentFile: 'magic-tea-party-context-limits.md',
+    categoryId: 'magic-tea-party',
+    keywords: ['超长', '单条消息', '省略中段', '精简长消息', 'Token 预算', '上下文', '413', '摘要'],
+  },
+  {
+    slug: 'troubleshooting-faq',
+    title: '综合故障排查与 FAQ',
+    summary: '下载没反应、复制失败、本地记录消失、战报一直恢复、Web 战报异常、房间卡住等跨功能问题的一页自救入口。',
+    contentFile: 'troubleshooting-faq.md',
+    categoryId: 'troubleshooting',
+    keywords: [
+      'FAQ',
+      '没反应',
+      '卡住',
+      '转圈',
+      '下载不了',
+      '连续下载',
+      '复制失败',
+      '剪贴板',
+      '缓存',
+      '本地数据',
+      'IndexedDB',
+      '恢复生成',
+      '重新连接',
+      'Web 战报',
+      '浏览器',
+    ],
+  },
+  {
+    slug: 'network-errors',
+    title: '网络问题（Failed to fetch / 连接中断）',
+    summary: '浏览器请求发不出去/被中断时的自救步骤与排查清单。',
+    contentFile: 'network-errors.md',
+    categoryId: 'troubleshooting',
+    keywords: ['Failed to fetch', '连接中断', '网络', '浏览器'],
+  },
+  {
+    slug: 'cloudflare-524-timeout',
+    title: '524 Timeout（Cloudflare 超时）',
+    summary: 'Cloudflare 已连上源站但等待太久：为何发生、如何自救、何时该重试。',
+    contentFile: 'cloudflare-524-timeout.md',
+    categoryId: 'troubleshooting',
+    keywords: ['524', 'Cloudflare', '超时'],
+  },
+  {
+    slug: 'cloudflare-errors',
+    title: 'Cloudflare/服务器错误（5xx / 520/522/523…）',
+    summary: '5xx/52x 常见状态码速查：短暂波动 vs 服务端异常，以及排查建议。',
+    contentFile: 'cloudflare-errors.md',
+    categoryId: 'troubleshooting',
+    keywords: ['5xx', '520', '522', '523', 'Cloudflare'],
+  },
+  {
+    slug: 'rate-limit-429',
+    title: '429 Too Many Requests（请求过于频繁）',
+    summary: '触发限流/冷却时该怎么做，以及官方/自备 Key 的常见差异。',
+    contentFile: 'rate-limit-429.md',
+    categoryId: 'troubleshooting',
+    keywords: ['429', '限流', '冷却', 'API Key'],
+  },
+  {
+    slug: 'tachie-auth-errors',
+    title: '立绘渠道鉴权与常见错误排查（LibLib / ModelScope）',
+    summary: '统一排查立绘 401 与常见错误：凭据、签名、Token、限流、任务状态、反馈模板。',
+    contentFile: 'tachie-auth-errors.md',
+    categoryId: 'troubleshooting',
+    keywords: ['立绘', '401', '鉴权失败', '签名验证失败', 'LibLib', 'ModelScope', 'Token', 'Access Key', 'Secret Key'],
+  },
+  {
+    slug: 'ai-errors',
+    title: 'AI 生成失败：常见原因与自救',
+    summary: '高峰期/配置/额度/输入过长等导致的生成失败排查与恢复建议。',
+    contentFile: 'ai-errors.md',
+    categoryId: 'ai',
+    keywords: ['生成失败', '额度', '配置', '高峰期'],
+  },
+  {
+    slug: 'ai-api-call-error',
+    title: 'AI_APICallError（上游 AI 接口调用失败）',
+    summary: '当你看到 AI_APICallError：通常是 Key/权限/额度/模型/封禁/繁忙等上游问题导致。',
+    contentFile: 'ai-api-call-error.md',
+    categoryId: 'ai',
+    keywords: ['AI_APICallError', 'APICallError', 'request id', 'key', 'quota', '封禁', '模型'],
+  },
+  {
+    slug: 'ai-refusal',
+    title: 'AI 拒答与安全策略提示（不是站内设置）',
+    summary: '“身为语言模型…”“安全策略”等拒答模板语：如何判断归因与合规自救。',
+    contentFile: 'ai-refusal.md',
+    categoryId: 'ai',
+    keywords: ['拒答', '安全策略', '合规'],
+  },
+  {
+    slug: 'ai-empty-output',
+    title: 'AI 返回空对象/空内容（{} / [] / 空白）',
+    summary: '生成结果变成 {} / [] / 空白：常见原因、如何区分拒答/超时、以及自救步骤。',
+    contentFile: 'ai-empty-output.md',
+    categoryId: 'ai',
+    keywords: ['{}', '[]', '空白', '超时'],
+  },
+  {
+    slug: 'ai-output-format',
+    title: 'AI 输出格式异常（缺字段/夹带解释/校验失败）',
+    summary: '生成完成但结构不合格：校验失败、JSON 解析失败、输出被截断等问题的自救。',
+    contentFile: 'ai-output-format.md',
+    categoryId: 'ai',
+    keywords: ['JSON', '校验失败', '缺字段', '截断'],
+  },
+  {
+    slug: 'ai-reasoning-visibility',
+    title: 'AI 思考过程查看说明（在哪里看）',
+    summary: '各页面查看 AI 思考摘要与详情的位置、状态含义及常见疑问。',
+    contentFile: 'ai-reasoning-visibility.md',
+    categoryId: 'ai',
+    keywords: ['AI 思考', 'reasoning', '思考过程', '推理内容', '在哪看', '摘要'],
+  },
+  {
+    slug: 'data-card-errors',
+    title: '数据卡问题：导入/解析/格式校验/签名',
+    summary: '导入/解析失败、字段校验、templateId/version 不匹配等问题的排查清单。',
+    contentFile: 'data-card-errors.md',
+    categoryId: 'troubleshooting',
+    keywords: ['导入', '解析', '校验', '签名', 'templateId', 'version'],
+  },
+  {
+    slug: 'character-generator',
+    title: '角色生成（/name、/details、/canshou）',
+    summary: '三种角色生成入口的差异、适用场景，以及 /name 结果的兼容性提醒。',
+    contentFile: 'character-generator.md',
+    categoryId: 'guide',
+    keywords: ['/name', '/details', '/canshou', '角色生成'],
+  },
+  {
+    slug: 'creator',
+    title: '创作工房（/creator）',
+    summary: '组合问卷、自由补充说明与规则车卡的创作工作台，以及角色参数如何进入后续战报。',
+    contentFile: 'creator.md',
+    categoryId: 'guide',
+    keywords: ['/creator', '创作工房', '规则车卡', '车卡规则', '角色参数', 'build rule'],
+  },
+  {
+    slug: 'questionnaire',
+    title: '问卷系统与自定义问卷（编辑器 / 云端问卷库）',
+    summary: '自定义问卷、条件显示/跳题、云端问卷库与字数上限等新功能说明。',
+    contentFile: 'questionnaire.md',
+    categoryId: 'guide',
+    keywords: ['问卷', '自定义问卷', 'questionnaire', '/questionnaire-editor', '条件显示', '跳题', '云端问卷'],
+  },
+  {
+    slug: 'general-cards',
+    title: '通用数据卡（Markdown）：通用角色/通用情景',
+    summary: '用 Markdown 维护角色/情景：最自由、最容错的两种模板与使用技巧。',
+    contentFile: 'general-cards.md',
+    categoryId: 'guide',
+    keywords: ['通用角色', '通用情景', 'Markdown', '长线', '流式'],
+  },
+  {
+    slug: 'free-generator',
+    title: '自由生成（/free）',
+    summary: '任意提示词 + 选择 Schema 生成数据卡（角色/情景），支持参考附件与流式输出。',
+    contentFile: 'free-generator.md',
+    categoryId: 'guide',
+    keywords: ['自由生成', '/free', 'Schema', '附件', '提示词', '流式'],
+  },
+  {
+    slug: 'character-party',
+    title: '角色组队（/character-party）',
+    summary: '把多张角色卡拼成一张“队伍卡”，用于组队出场/打包角色。',
+    contentFile: 'character-party.md',
+    categoryId: 'guide',
+    keywords: ['组队', '队伍卡', '/character-party', '合并', '通用角色'],
+  },
+  {
+    slug: 'local-library',
+    title: '本地库：属于你自己这台设备的数据',
+    summary: '数据卡与 Web 包的本机存储：三个填充入口、去重规则、存储状态、删除导出，以及尚未实现的整库备份。',
+    contentFile: 'local-library.md',
+    categoryId: 'guide',
+    keywords: ['本地库', '本地存储', 'IndexedDB', '离线', '设备数据', '不跨设备', '持久化存储', '配额', '存到本地库'],
+  },
+  {
+    slug: 'arena',
+    title: '竞技场',
+    summary: '竞技场与战报生成的基本概念、模式差异与计分触发点。',
+    contentFile: 'arena.md',
+    categoryId: 'gameplay',
+    keywords: ['战报', '模式', '计分'],
+  },
+  {
+    slug: 'web-report',
+    title: 'Web 战报：让 AI 直接交一份可以点的战报',
+    summary: '竞技场 Web 战报的使用方式：与 Web 包的区别、两种权限模式、三种下载物的区别、兼容边界与失败自查。',
+    contentFile: 'web-report.md',
+    categoryId: 'gameplay',
+    keywords: ['Web战报', 'Web显示', '沙箱', '同源授权', '受限模式', '沉浸显示', 'HTML', '下载', '实验性'],
+  },
+  {
+    slug: 'arena-multiplayer',
+    title: '竞技场多人模式：一起围观、提案与生成',
+    summary: '多人房间玩法指南：快速开始、围观/多人跑团玩法、提案协作、断线恢复与常见问题。',
+    contentFile: 'arena-multiplayer.md',
+    categoryId: 'gameplay',
+    keywords: ['多人', '多人模式', '房间', '房主', '成员', '提案', '围观', '跑团', '房间码', '协作', 'multiplayer', 'room'],
+  },
+  {
+    slug: 'continuous-battle-story',
+    title: '连续战报会话（/arena）',
+    summary: '竞技场里的长线章节模式：新建首章、续写、分支、重写最后一章与本地持久化。',
+    contentFile: 'continuous-battle-story.md',
+    categoryId: 'gameplay',
+    keywords: ['连续战报', '续写', '分支', '重写', 'IndexedDB', '章节摘要'],
+  },
+  {
+    slug: 'guidance',
+    title: '引导 / 判定事件 / 读写状态',
+    summary: 'userGuidance、判定事件、读写历战/状态栏对战报与计分的影响。',
+    contentFile: 'guidance.md',
+    categoryId: 'gameplay',
+    keywords: ['userGuidance', '判定', '历战记录', '状态栏'],
+  },
+  {
+    slug: 'ranking',
+    title: '排位与排行榜',
+    summary: '严格/自由 天梯、段位、风控与排行榜展示口径。',
+    contentFile: 'ranking.md',
+    categoryId: 'gameplay',
+    keywords: ['天梯', '段位', '风控', '排行榜'],
+  },
+  {
+    slug: 'native',
+    title: '原生性（签名）',
+    summary: '什么是原生卡、原生性如何计算，以及为什么可能显示“未知”。',
+    contentFile: 'native.md',
+    categoryId: 'mechanics',
+    keywords: ['原生', '签名', '未知'],
+  },
+  {
+    slug: 'tech-index',
+    title: '技术值（Tech Index）',
+    summary: '技术值的意义、计算口径与“为何不是强度值”。',
+    contentFile: 'tech-index.md',
+    categoryId: 'mechanics',
+    keywords: ['Tech Index', '计算口径'],
+  },
+  {
+    slug: 'tags',
+    title: '定位标签',
+    summary: '标签体系、绑定规则，以及如何在页面里使用标签筛选。',
+    contentFile: 'tags.md',
+    categoryId: 'mechanics',
+    keywords: ['标签', '筛选', '定位'],
+  },
+  {
+    slug: 'community-rules',
+    title: '社区守则与竞技场规范（必读）',
+    summary: '交流礼仪、竞技场红线、引用规范与玩法标签等管理组意见汇总。',
+    contentFile: 'community-rules.md',
+    categoryId: 'community',
+    keywords: ['社区守则', '竞技场守则', '礼仪', '底线', '引用', '玩法标签', '规范'],
+  },
+  {
+    slug: 'code-kill',
+    title: '代码杀（概念与礼仪）',
+    summary: '“代码杀”是什么、为何是风险提示，以及社群礼仪建议。',
+    contentFile: 'code-kill.md',
+    categoryId: 'community',
+    keywords: ['礼仪', '风险提示'],
+  },
+  {
+    slug: 'glossary',
+    title: '术语表（社区提案）',
+    summary: '历战记录、状态栏、优先级、八角笼等术语解释与来源标注。',
+    contentFile: 'glossary.md',
+    categoryId: 'community',
+    keywords: ['术语', '来源标注'],
+  },
+  {
+    slug: 'newbie-guide',
+    title: '新手攻略（强度直觉）',
+    summary: '如何粗略判断对手强度，以及新手学习路线（社区攻略改写）。',
+    contentFile: 'newbie-guide.md',
+    categoryId: 'guide',
+    keywords: ['学习路线', '强度', '直觉'],
+  },
+  {
+    slug: 'scenario-generator',
+    title: '箱庭物语（情景生成器）',
+    summary: '用问卷生成情景 JSON，并在竞技场「情景模式」中使用。',
+    contentFile: 'scenario-generator.md',
+    categoryId: 'content',
+    keywords: ['情景', 'JSON', '问卷', '箱庭物语'],
+  },
+  {
+    slug: 'scenario-advanced',
+    title: '情景卡进阶（继承与长线）',
+    summary: '用历战记录/状态栏做“多回合延续”的情景卡（社区攻略改写）。',
+    contentFile: 'scenario-advanced.md',
+    categoryId: 'content',
+    keywords: ['继承', '长线', '多回合', '历战记录', '状态栏'],
+  },
+  {
+    slug: 'web-data-card-authoring',
+    title: 'Web 战报数据卡创作进阶',
+    summary: '用体验设计、代码范例、Reference Runtime 和媒体资产，把数据卡扩展成互动 Web 玩法。',
+    contentFile: 'web-data-card-authoring.md',
+    categoryId: 'content',
+    keywords: ['Web战报', '数据卡', 'Runtime', 'Galgame', '视觉小说', '小游戏', '媒体资产', '互动'],
+  },
+  {
+    slug: 'web-package-authoring',
+    title: 'Web 包创作指南',
+    summary: '从 web-package.json 到 schema 与示例：让 AI 一次就生成对自定义 Web 包需要的数据文件。',
+    contentFile: 'web-package-authoring.md',
+    categoryId: 'content',
+    keywords: ['Web包', 'web-package.json', 'schema', 'JSON', 'instructions', 'example', '数据文件'],
+  },
+  {
+    slug: 'sublimation',
+    title: '成长升华',
+    summary: '让角色根据经历蜕变成新形态：模板、保留字段、读写历史/状态。',
+    contentFile: 'sublimation.md',
+    categoryId: 'content',
+    keywords: ['升华', '蜕变', '新形态', '模板'],
+  },
+  {
+    slug: 'archive',
+    title: '档案馆（角色管理）',
+    summary: '数据卡导入/编辑/替换、隐私提示，以及敏感词修正建议。',
+    contentFile: 'archive.md',
+    categoryId: 'management',
+    keywords: ['角色管理', '隐私', '编辑', '替换'],
+  },
+  {
+    slug: 'tavern-ecosystem',
+    title: '酒馆生态联动（SillyTavern 导入/导出）',
+    summary: '将 SillyTavern 角色卡 PNG 导入为本站数据卡，或把本站数据卡导出为酒馆 PNG。',
+    contentFile: 'tavern-ecosystem.md',
+    categoryId: 'management',
+    keywords: ['SillyTavern', '酒馆', '/tavern', '导入', '导出', 'PNG', 'ccv3', 'chara'],
+  },
+  {
+    slug: 'wantu-ecosystem',
+    title: '万途生态互通',
+    summary: '万途驿站、万途 Card 导入导出、竞技场素材注入与严格排位边界说明。',
+    contentFile: 'wantu-ecosystem.md',
+    categoryId: 'management',
+    keywords: ['万途', '万途驿站', 'Wantu', 'Waystation', '素材注入', 'Card', '导入', '导出', '废土行迹'],
+  },
+  {
+    slug: 'review',
+    title: '公开与审核机制',
+    summary: 'review_status、公开展示口径，以及“提交审核/待审核”的含义。',
+    contentFile: 'review.md',
+    categoryId: 'management',
+    keywords: ['review_status', '审核', '公开'],
+  },
+  {
+    slug: 'sensitive-words',
+    title: '敏感词与逮捕',
+    summary: '什么会触发逮捕页、为什么会拦截，以及如何自救恢复内容。',
+    contentFile: 'sensitive-words.md',
+    categoryId: 'management',
+    keywords: ['逮捕', '拦截', '敏感词'],
+  },
+  {
+    slug: 'shield-words',
+    title: '屏蔽词（和谐替换）',
+    summary: '屏蔽词不会逮捕：只会对输出做遮罩或替换，减少误伤。',
+    contentFile: 'shield-words.md',
+    categoryId: 'management',
+    keywords: ['屏蔽词', '和谐', '遮罩', '替换'],
+  },
+];
+
+export const getEncyclopediaEntry = (slug: string | undefined) => {
+  if (!slug) return null;
+  const normalizedSlug = encyclopediaSlugAliasMap.get(slug) ?? slug;
+  return encyclopediaEntryBySlug.get(normalizedSlug) ?? null;
+};
+
+export const getEncyclopediaCategory = (id: EncyclopediaCategoryId | undefined) => {
+  if (!id) return null;
+  return encyclopediaCategories.find((item) => item.id === id) ?? null;
+};
+
+export const normalizeEncyclopediaSearchText = (value: string) =>
+  value.trim().toLowerCase();
+
+export const matchEncyclopediaEntry = (entry: EncyclopediaEntry, query: string) => {
+  const q = normalizeEncyclopediaSearchText(query);
+  if (!q) return true;
+
+  const keywords = entry.keywords?.join(' ') ?? '';
+  const haystack = `${entry.title} ${entry.summary} ${keywords}`.toLowerCase();
+  return haystack.includes(q);
+};
+
+export const groupEncyclopediaEntries = (entries: EncyclopediaEntry[]) => {
+  const categoriesWithEntries = encyclopediaCategories
+    .map((category) => ({
+      category,
+      entries: entries.filter((entry) => entry.categoryId === category.id),
+    }))
+    .filter((item) => item.entries.length > 0);
+
+  const uncategorized = entries.filter(
+    (entry) => !encyclopediaCategories.some((category) => category.id === entry.categoryId),
+  );
+
+  return { categoriesWithEntries, uncategorized };
+};
+
+const encyclopediaEntryBySlug = new Map<string, EncyclopediaEntry>(
+  encyclopediaEntries.map((entry) => [entry.slug, entry]),
+);
+
+const encyclopediaSlugAliasMap = new Map<string, string>([
+  ['modelscope-auth-401', 'tachie-auth-errors'],
+  ['liblib-auth-401', 'tachie-auth-errors'],
+]);

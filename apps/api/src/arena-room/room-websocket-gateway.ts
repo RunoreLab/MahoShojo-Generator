@@ -1,6 +1,6 @@
 import {
   ARENA_ROOM_WEBSOCKET_PATH,
-  ARENA_ROOM_WEBSOCKET_PROTOCOL,
+  selectArenaRoomWebSocketProtocol,
   MAX_CONTROL_FRAME_BYTES,
   parseRoomClientTransportFrame,
   type RoomClientTransportMessage,
@@ -484,7 +484,7 @@ export class RoomWebSocketGateway {
     if (!protocols) {
       return createRejection(400, 'ROOM_WEBSOCKET_INVALID_PROTOCOL_HEADER');
     }
-    if (!protocols.has(ARENA_ROOM_WEBSOCKET_PROTOCOL)) {
+    if (!selectArenaRoomWebSocketProtocol(protocols)) {
       return createRejection(426, 'ROOM_WEBSOCKET_PROTOCOL_REQUIRED');
     }
     const origin = request.headers.get('origin');

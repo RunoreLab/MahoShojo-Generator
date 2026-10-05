@@ -6,20 +6,28 @@ import {
   ARENA_ROOM_WEBSOCKET_PATH,
   ArenaRoomCreateRequestSchema,
   ArenaRoomEpochMutationRequestSchema,
+  ArenaRoomGenerationCancelRequestSchema,
+  ArenaRoomGenerationHistoryResponseSchema,
+  ArenaRoomGenerationHistoryViewResponseSchema,
   ArenaRoomHttpErrorResponseSchema,
   ArenaRoomJoinRequestSchema,
   ArenaRoomLeaveResponseSchema,
+  ArenaRoomMemberKickRequestSchema,
   ArenaRoomGenerationStartRequestSchema,
   ArenaRoomGenerationViewResponseSchema,
   ArenaRoomProposalMutationResponseSchema,
   ArenaRoomProposalResolveRequestSchema,
   ArenaRoomProposalSubmitRequestSchema,
   ArenaRoomProposalWithdrawRequestSchema,
+  ArenaRoomPublishConfigRequestSchema,
   ArenaRoomSessionResponseSchema,
+  ArenaRoomSnapshotSchema,
   ArenaRoomTicketRequestSchema,
   ArenaRoomTicketResponseSchema,
 } from '../src/arena-room';
-import canonicalRoomSnapshot from './fixtures/arena-room-v1.json';
+import legacyRoomSnapshot from './fixtures/arena-room-v1.json';
+
+const canonicalRoomSnapshot = ArenaRoomSnapshotSchema.parse(legacyRoomSnapshot);
 
 const session = {
   protocolVersion: 1,
@@ -43,24 +51,81 @@ describe('Arena Room HTTP product contract', () => {
       proposals: '/api/arena/rooms/v1/:roomId/proposals',
       proposalResolve: '/api/arena/rooms/v1/:roomId/proposals/:proposalId/resolve',
       proposalWithdraw: '/api/arena/rooms/v1/:roomId/proposals/:proposalId/withdraw',
+      config: '/api/arena/rooms/v1/:roomId/config',
       generations: '/api/arena/rooms/v1/:roomId/generations',
       generation: '/api/arena/rooms/v1/:roomId/generations/:generationId',
+      generationCancel: '/api/arena/rooms/v1/:roomId/generations/:generationId/cancel',
+      memberKick: '/api/arena/rooms/v1/:roomId/members/:targetUserId/kick',
     });
+  });
+
+  it('kick/cancel DTO 只接受 room epoch fence，不接受客户端 authority 镜像', () => {
+    const request = { expectedRoomEpoch: 'epoch-1' };
+    expect(ArenaRoomMemberKickRequestSchema.parse(request)).toEqual(request);
+    expect(ArenaRoomGenerationCancelRequestSchema.parse(request)).toEqual(request);
+    for (const injected of [
+      { role: 'host' },
+      { accountUserId: 101 },
+      { actorUserId: 'host-1' },
+      { targetMembershipState: 'active' },
+      { generationState: 'running' },
+      { actorKey: 'pvp-room:room-1' },
+      { secret: 'secret-canary' },
+    ]) {
+      expect(ArenaRoomMemberKickRequestSchema.safeParse({ ...request, ...injected }).success)
+        .toBe(false);
+      expect(ArenaRoomGenerationCancelRequestSchema.safeParse({ ...request, ...injected }).success)
+        .toBe(false);
+    }
+  });
+
+  it('配置发布 DTO 只接受 exact authority fence 与 Shared Config', () => {
+    const request = {
+      expectedRoomEpoch: canonicalRoomSnapshot.roomEpoch,
+      expectedRevision: canonicalRoomSnapshot.revision,
+      expectedControlSeq: canonicalRoomSnapshot.controlSeq,
+      sharedConfig: canonicalRoomSnapshot.sharedConfig,
+    };
+    expect(ArenaRoomPublishConfigRequestSchema.parse(request)).toEqual(request);
+    expect(ArenaRoomPublishConfigRequestSchema.safeParse({
+      ...request,
+      expectedControlSeq: undefined,
+    }).success).toBe(false);
+    for (const injected of [
+      { roomId: canonicalRoomSnapshot.roomId },
+      { accountUserId: 7 },
+      { actorUserId: canonicalRoomSnapshot.members[0]?.userId },
+      { payload: { providerApiKey: 'secret-canary' } },
+      { secret: 'secret-canary' },
+    ]) {
+      expect(ArenaRoomPublishConfigRequestSchema.safeParse({ ...request, ...injected }).success)
+        .toBe(false);
+    }
   });
 
   it('多人生成 DTO 严格分离 client intent、完整临时 payload 与安全成员投影', () => {
     const request = {
       expectedRoomEpoch: 'epoch-1',
       expectedRevision: 3,
+      expectedControlSeq: 7,
       generationRequestId: 'request-1234',
       sharedConfig: canonicalRoomSnapshot.sharedConfig,
+      hostLocalPayloads: [{
+        key: 'host-local:character:0:test',
+        kind: 'character' as const,
+        payload: { name: '本地角色' },
+      }],
       generation: {
-        mode: 'classic',
-        combatants: [{ name: '角色' }],
         customProvider: { apiKey: 'request-only-secret' },
+        narrativeHistory: [{ content: '只在本次请求内' }],
+        arenaFreeRankingEnabled: true,
       },
     };
     expect(ArenaRoomGenerationStartRequestSchema.parse(request)).toEqual(request);
+    expect(ArenaRoomGenerationStartRequestSchema.safeParse({
+      ...request,
+      expectedControlSeq: undefined,
+    }).success).toBe(false);
     for (const injected of [
       { roomId: 'spoofed' },
       { generationId: 'spoofed' },
@@ -79,6 +144,35 @@ describe('Arena Room HTTP product contract', () => {
     expect(ArenaRoomGenerationStartRequestSchema.safeParse({
       ...request,
       generation: [],
+    }).success).toBe(false);
+    for (const forbiddenSharedSemantic of [
+      { mode: 'scenario' },
+      { combatants: [{ data: { name: '伪造角色' } }] },
+      { scenario: { title: '伪造情景' } },
+      { materials: [{ content: '伪造素材' }] },
+      { language: 'en-US' },
+      { readArenaHistory: false },
+    ]) {
+      expect(ArenaRoomGenerationStartRequestSchema.safeParse({
+        ...request,
+        generation: { ...request.generation, ...forbiddenSharedSemantic },
+      }).success).toBe(false);
+    }
+    expect(ArenaRoomGenerationStartRequestSchema.safeParse({
+      ...request,
+      hostLocalPayloads: [{
+        key: 'host-local:character:0:test',
+        kind: 'character',
+        payload: { constructor: { polluted: true } },
+      }],
+    }).success).toBe(false);
+    expect(ArenaRoomGenerationStartRequestSchema.safeParse({
+      ...request,
+      hostLocalPayloads: [{
+        key: 'host-local:character:0:test',
+        kind: 'character',
+        payload: ['not-an-object'],
+      }],
     }).success).toBe(false);
 
     const response = {
@@ -123,6 +217,144 @@ describe('Arena Room HTTP product contract', () => {
       finalAuthoritative: false,
       generationRecordId: 'r2:record',
     }).success).toBe(false);
+
+    const completed = {
+      ...response,
+      status: 'completed' as const,
+      generation: { ...response.generation, state: 'completed' as const },
+      markdown: '# 权威终态正文',
+      nextChunkSeq: 0,
+      finalAuthoritative: true,
+      generationRecordId: 'generation-1',
+      result: {
+        version: 1 as const,
+        format: 'stream-markdown' as const,
+        reporterInfo: { name: '测试记者', publication: 'A.R.E.N.A.' },
+        mode: 'classic',
+        scenarioDisplayName: '雨夜车站',
+        sharedGuidance: '保持克制',
+        characterGuidances: [{ combatantKey: 'data-card:1', displayName: '角色甲', guidance: '保护队友' }],
+        language: 'zh-CN',
+        storyLength: 'standard',
+        adjudicationResults: [{
+          depth: 0,
+          description: '攻击是否命中？',
+          type: 'binary' as const,
+          roll: 42,
+          outcome: '成功',
+          details: '掷骰(42) vs 成功率(65%)',
+        }],
+        narrativeHistoryReadCount: 3,
+        report: { headline: '雨夜决战', winner: '角色甲' },
+        ai: {
+          model: 'gpt-safe',
+          usage: { promptTokens: 10, completionTokens: 20, totalTokens: 30 },
+        },
+        combatantUpdates: [{
+          combatantKey: 'data-card:1',
+          displayName: '角色甲',
+          impact: '受轻伤',
+          currentStateSummary: '仍可行动',
+        }],
+      },
+    };
+    expect(ArenaRoomGenerationViewResponseSchema.parse(completed)).toEqual(completed);
+    expect(ArenaRoomGenerationViewResponseSchema.safeParse({
+      ...response,
+      result: completed.result,
+    }).success).toBe(false);
+    for (const leakedResultField of [
+      { extra_json: { providerApiKey: 'secret' } },
+      { reasoning: 'hidden chain of thought' },
+      { providerDiagnostic: { requestId: 'upstream-secret' } },
+      { ai: { ...completed.result.ai, providerName: 'must-not-pass' } },
+      { ai: { ...completed.result.ai, providerType: 'must-not-pass' } },
+      { updatedCombatants: [{ data: { private: true } }] },
+    ]) {
+      expect(ArenaRoomGenerationViewResponseSchema.safeParse({
+        ...completed,
+        result: { ...completed.result, ...leakedResultField },
+      }).success).toBe(false);
+    }
+  });
+
+  it('生成历史只暴露有界的房间安全摘要', () => {
+    const response = {
+      protocolVersion: 1,
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      items: [{
+        generationId: 'generation-1',
+        state: 'completed' as const,
+        configRevision: 3,
+        collaborativeInfluence: true,
+        startedAt: '2026-08-28T00:00:00.000Z',
+        finishedAt: '2026-08-28T00:03:00.000Z',
+      }],
+    };
+
+    expect(ArenaRoomGenerationHistoryResponseSchema.parse(response)).toEqual(response);
+    for (const leaked of [
+      { generationRequestId: 'request-1234' },
+      { snapshotDigest: `sha256:${'a'.repeat(64)}` },
+      { participantUserIds: [101, 202] },
+      { generationPayloadDigest: `sha256:${'b'.repeat(64)}` },
+      { generationRecordId: 'record-1' },
+      { provider: 'private-provider' },
+      { prompt: 'private-prompt' },
+      { secret: 'secret-canary' },
+    ]) {
+      expect(ArenaRoomGenerationHistoryResponseSchema.safeParse({
+        ...response,
+        items: [{ ...response.items[0], ...leaked }],
+      }).success).toBe(false);
+    }
+    expect(ArenaRoomGenerationHistoryResponseSchema.safeParse({
+      ...response,
+      items: Array.from({ length: 65 }, (_, index) => ({
+        ...response.items[0],
+        generationId: `generation-${index}`,
+      })),
+    }).success).toBe(false);
+  });
+
+  it('历史详情只暴露终态安全摘要，并显式表示正文过期', () => {
+    const completed = {
+      protocolVersion: 1 as const,
+      roomId: 'room-1',
+      roomEpoch: 'epoch-1',
+      generation: {
+        generationId: 'generation-1',
+        state: 'completed' as const,
+        configRevision: 3,
+        collaborativeInfluence: true,
+        startedAt: '2026-08-28T00:00:00.000Z',
+        finishedAt: '2026-08-28T00:03:00.000Z',
+      },
+      status: 'completed' as const,
+      contentStatus: 'available' as const,
+      markdown: '# 安全战报',
+      result: { version: 1 as const, format: 'stream-markdown' as const, mode: 'classic' as const },
+    };
+    expect(ArenaRoomGenerationHistoryViewResponseSchema.parse(completed)).toEqual(completed);
+    expect(ArenaRoomGenerationHistoryViewResponseSchema.parse({
+      ...completed,
+      contentStatus: 'expired',
+      markdown: '',
+      result: undefined,
+    })).toMatchObject({ contentStatus: 'expired' });
+
+    for (const leakedGenerationField of [
+      { generationRequestId: 'request-1234' },
+      { snapshotDigest: `sha256:${'a'.repeat(64)}` },
+      { participantUserIds: [101, 202] },
+      { generationRecordId: 'record-1' },
+    ]) {
+      expect(ArenaRoomGenerationHistoryViewResponseSchema.safeParse({
+        ...completed,
+        generation: { ...completed.generation, ...leakedGenerationField },
+      }).success).toBe(false);
+    }
   });
 
   it('Proposal mutation DTO 只接受 client intent 与 typed changes，并保持 strict', () => {
@@ -259,6 +491,21 @@ describe('Arena Room HTTP product contract', () => {
       result: 'applied' as const,
     };
     expect(ArenaRoomProposalMutationResponseSchema.parse(response)).toEqual(response);
+    // resolve 响应可以携带 mutation 后的权威 sharedConfig 与完整权威 snapshot；
+    // 不改变配置的 mutation 省略这两个字段。
+    const authoritativeSnapshot = {
+      ...canonicalRoomSnapshot,
+      roomId: response.roomId,
+      roomEpoch: response.roomEpoch,
+      controlSeq: response.controlSeq,
+      revision: response.revision,
+    };
+    const withAuthority = {
+      ...response,
+      sharedConfig: canonicalRoomSnapshot.sharedConfig,
+      snapshot: authoritativeSnapshot,
+    };
+    expect(ArenaRoomProposalMutationResponseSchema.parse(withAuthority)).toEqual(withAuthority);
     for (const internal of [
       { accountUserId: 7 },
       { deadlines: { hostOfflineDeadline: null } },
@@ -268,6 +515,18 @@ describe('Arena Room HTTP product contract', () => {
     ]) {
       expect(ArenaRoomProposalMutationResponseSchema.safeParse({ ...response, ...internal }).success)
         .toBe(false);
+    }
+    // snapshot 与响应公共身份/游标字段矛盾时必须拒绝。
+    for (const mismatch of [
+      { roomId: 'room-other' },
+      { roomEpoch: 'epoch-other' },
+      { controlSeq: response.controlSeq + 1 },
+      { revision: response.revision + 1 },
+    ]) {
+      expect(ArenaRoomProposalMutationResponseSchema.safeParse({
+        ...withAuthority,
+        snapshot: { ...authoritativeSnapshot, ...mismatch },
+      }).success).toBe(false);
     }
   });
 

@@ -1,0 +1,194 @@
+{
+  "$comment": "Desktop IPC 本地卡契约的跨运行时 fixture。TypeScript 侧用 zod 校验它，Rust 侧 include_str! 后反序列化并断言自身常量与之逐项一致。任一侧改了形状而未更新本文件，两侧都必须失败。依据 SPEC-desktop-client-v1 DESK-033 / DESK-062。",
+  "limits": {
+    "maxDocumentBytes": 4194304,
+    "maxPageSize": 100
+  },
+  "errorCodes": [
+    "store-unavailable",
+    "invalid-document",
+    "document-too-large",
+    "index-mismatch",
+    "record-tombstoned",
+    "transition-mismatch",
+    "record-missing",
+    "non-monotonic-timestamp",
+    "invalid-query",
+    "maintenance-busy",
+    "store-failure"
+  ],
+  "cardTypes": ["character", "scenario", "history", "questionnaire"],
+  "blobErrorCodes": [
+    "blob-unavailable",
+    "blob-digest-mismatch",
+    "blob-corrupt",
+    "blob-too-large",
+    "blob-not-found",
+    "blob-failure"
+  ],
+  "blobWriteOutcomes": ["stored", "alreadyPresent", "repaired"],
+  "maxPackageArchiveBytes": 67108864,
+  "webPackageIndex": {
+    "id": "wp_0123456789abcdef0123456789abcdef",
+    "updatedAt": "2026-09-30T12:00:00.000Z",
+    "contentDigest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+  },
+  "webPackageIdentity": {
+    "$case": "canonical identity：包 id MUST 由 contentDigest 派生。Web 与 Desktop 共用同一份派生规则，native 只做存储约束而不重算。",
+    "id": "wp_0123456789abcdef0123456789abcdef",
+    "contentDigest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+  },
+  "blobArchive": {
+    "$case": "一份最小 ZIP 的 base64 载荷；len 记录解码后长度，两侧都必须核对",
+    "b64": "UEsDBA==",
+    "len": 4
+  },
+  "readArchiveRequest": {
+    "$case": "读取归档的**请求**形状：参数是 manifest 摘要（record.ref.digest），不是包 id。两者混用会让真实读取路径必然落空。",
+    "contentDigest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+  },
+  "maintenance": {
+    "$comment": "D2.2 完整性审计与 GC 的跨运行时契约。TypeScript 侧用 zod 校验，Rust 侧 include_str! 后断言自身枚举与之逐项一致。",
+    "auditKinds": [
+      "reference-file-missing",
+      "reference-bytes-mismatch",
+      "unreferenced-metadata",
+      "orphan-file",
+      "record-without-reference",
+      "foreign-key-violation"
+    ],
+    "auditDamageKinds": [
+      "reference-file-missing",
+      "reference-bytes-mismatch",
+      "record-without-reference"
+    ],
+    "auditErrorCodes": ["audit-unavailable", "audit-failure"],
+    "gcErrorCodes": ["gc-unavailable", "gc-failure"],
+    "gcReport": {
+      "$case": "一次回收了两个孤儿：filesRemoved MUST 与 reclaimed 相等——它们不等意味着有些行的文件本来就不在。",
+      "scanned": 2,
+      "reclaimed": 2,
+      "filesRemoved": 2,
+      "bytesReclaimed": 4096,
+      "filesFailed": 0
+    },
+    "auditReport": {
+      "$case": "一次干净审计的报告：findings 为空但**必须**给出规模分母——来自空库与来自满库的『0 个问题』含义完全不同。",
+      "findings": [],
+      "schemaVersion": 4,
+      "referencedBlobCount": 0,
+      "blobMetadataCount": 0,
+      "webPackageCount": 0
+    },
+    "auditFindingReferenceFileMissing": {
+      "$case": "桶一：引用存在但文件缺失。用户看得见这个包、点开打不开。",
+      "kind": "reference-file-missing",
+      "packageId": "wp_0123456789abcdef0123456789abcdef",
+      "digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    },
+    "auditFindingBytesMismatchEqualLength": {
+      "$case": "桶二最难的一种：长度相同但内容被改写。lengthMatches 让 UI 能把它与截断区分开。",
+      "kind": "reference-bytes-mismatch",
+      "packageId": "wp_0123456789abcdef0123456789abcdef",
+      "digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "expectedByteLength": 1024,
+      "actualByteLength": 1024,
+      "lengthMatches": true
+    },
+    "auditFindingBytesMismatchTruncated": {
+      "$case": "同一桶的另一种形态：被截断。lengthMatches=false。",
+      "kind": "reference-bytes-mismatch",
+      "packageId": "wp_0123456789abcdef0123456789abcdef",
+      "digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "expectedByteLength": 1024,
+      "actualByteLength": 512,
+      "lengthMatches": false
+    },
+    "auditFindingUnreferencedMetadata": {
+      "$case": "桶三：purge 之后的可回收候选。不是损坏——用户没有少看到任何东西。",
+      "kind": "unreferenced-metadata",
+      "digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    },
+    "auditFindingOrphanFile": {
+      "$case": "桶四：崩溃窗口产物，允许存在，因此不算用户可见损坏。",
+      "kind": "orphan-file",
+      "digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "byteLength": 2048
+    },
+    "auditFindingRecordWithoutReference": {
+      "$case": "桶五：外键方向是 引用行→包记录，因此数据库不约束这个方向。它对用户表现为『打不开』，与字节损坏无法区分。",
+      "kind": "record-without-reference",
+      "packageId": "wp_0123456789abcdef0123456789abcdef"
+    },
+    "auditFindingForeignKeyViolation": {
+      "$case": "桶六：PRAGMA foreign_key_check 的输出。rowId 是 SQLite 的 rowid，不是业务 id。",
+      "kind": "foreign-key-violation",
+      "table": "web_package_archive_ref",
+      "rowId": 2,
+      "parent": "blob",
+      "foreignKeyId": 0
+    }
+  },
+  "validIndex": {
+    "id": "lc_0123456789abcdef0123456789abcdef",
+    "cardType": "character",
+    "updatedAt": "2026-09-30T12:00:00.000Z",
+    "contentDigest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+  },
+  "tombstonedIndex": {
+    "id": "lc_0123456789abcdef0123456789abcdef",
+    "cardType": "character",
+    "updatedAt": "2026-09-30T12:00:00.000Z",
+    "deletedAt": "2026-09-30T13:00:00.000Z",
+    "contentDigest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+  },
+  "cursor": {
+    "updatedAtSort": 1788072000000,
+    "updatedAt": "2026-09-30T12:00:00.000Z",
+    "id": "lc_0123456789abcdef0123456789abcdef"
+  },
+  "timestampCases": [
+    {
+      "name": "文本更大但实际更早",
+      "why": "12:00+14:00 等于前一天 22:00Z。字符串比较会把它排到后面，keyset 因此漏读。",
+      "id": "lc_ts_text_later",
+      "updatedAt": "2026-09-30T12:00:00+14:00"
+    },
+    {
+      "name": "文本更小但实际更晚",
+      "why": "01:00Z 晚于前一天 22:00Z。字符串比较会把它排到后面，因此顺序被反转。",
+      "id": "lc_ts_text_smaller",
+      "updatedAt": "2026-09-30T01:00:00Z"
+    },
+    {
+      "name": "同一时刻、不同 offset",
+      "why": "排序键必须相等并退回按 id 升序；同时不得被判为时间回退。",
+      "id": "lc_ts_same_instant",
+      "updatedAt": "2026-09-30T15:00:00+14:00"
+    }
+  ],  "cases": [
+    {
+      "name": "孤立代理项载荷必须被接受且逐字节保留",
+      "why": "JSON.stringify 会产出 \\ud800，Web 的 IndexedDB 照常保存它。若 native 用 serde_json::Value 解析 document 就会静默拒收 Web 已有的合法数据，因此 document 的自由载荷走 RawValue。",
+      "index": {
+        "id": "lc_00000000000000000000000000000001",
+        "cardType": "scenario",
+        "updatedAt": "2026-09-30T12:00:00.000Z",
+        "contentDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "document": "{\"id\":\"lc_00000000000000000000000000000001\",\"schemaVersion\":1,\"storageLocation\":\"local\",\"cardType\":\"scenario\",\"title\":\"孤立代理项\",\"data\":{\"note\":\"\\ud800\"},\"contentDigest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"provenance\":{\"kind\":\"unsigned\",\"execution\":\"imported\"},\"createdAt\":\"2026-09-30T12:00:00.000Z\",\"updatedAt\":\"2026-09-30T12:00:00.000Z\"}"
+    },
+    {
+      "name": "索引列与 document 不一致时必须拒绝",
+      "why": "两侧对同一条记录的理解不一致时不得落盘，否则会写入一行 updated_at 与 document 矛盾的数据，让 keyset 分页永久漏读该行。",
+      "index": {
+        "id": "lc_00000000000000000000000000000002",
+        "cardType": "history",
+        "updatedAt": "2026-09-30T12:00:00.000Z",
+        "contentDigest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "document": "{\"id\":\"lc_00000000000000000000000000000002\",\"schemaVersion\":1,\"storageLocation\":\"local\",\"cardType\":\"questionnaire\",\"title\":\"类型被改过\",\"data\":{},\"contentDigest\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"provenance\":{\"kind\":\"unsigned\",\"execution\":\"imported\"},\"createdAt\":\"2026-09-30T12:00:00.000Z\",\"updatedAt\":\"2026-09-30T12:00:00.000Z\"}",
+      "expectReject": true
+    }
+  ]
+}

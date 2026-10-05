@@ -1,7 +1,15 @@
 import type { Metadata } from 'next';
 
-import { EncyclopediaEntryPage } from '@/components/encyclopedia/EncyclopediaEntryPage';
-import { encyclopediaEntries, getEncyclopediaEntry } from '@/lib/encyclopedia';
+import { WebEncyclopediaEntry } from '@/components/encyclopedia/WebEncyclopediaEntry';
+import { encyclopediaEntries, getEncyclopediaEntry } from '@mahoshojo/ui-web/encyclopedia';
+
+/**
+ * 百科条目路由。
+ *
+ * 这里只剩 Next 特有的东西：`metadata` 与 `generateStaticParams`。页面视图是 `@mahoshojo/ui-web/encyclopedia`
+ * 的共享实现，Desktop 读同一份——`DESK-PROD-002` 要求两端回用同一实现，而不是共享包留一份、
+ * Web 另留一份。
+ */
 
 type RouteParams = {
   slug?: string | string[];
@@ -36,5 +44,5 @@ export function generateStaticParams() {
 export default async function EncyclopediaEntryRoute({ params }: EncyclopediaEntryRouteProps) {
   const resolvedParams = params ? await params : {};
 
-  return <EncyclopediaEntryPage slug={getSlugFromParams(resolvedParams)} />;
+  return <WebEncyclopediaEntry slug={getSlugFromParams(resolvedParams)} />;
 }

@@ -5,6 +5,7 @@ import type {
 } from '@mahoshojo/hosted-api/arena-generation/service';
 import { parseGenerationSseBlock } from '@mahoshojo/hosted-api/arena-generation/sse';
 import type { SignatureService } from '../src/signature';
+import { buildArenaGenerationPrompt } from '../src/arena-generation/prompt';
 import {
   buildArenaSessionUpstreamRequestBody,
   createArenaSessionCompanionService,
@@ -52,16 +53,61 @@ const parseEvents = (text: string) => text.trim().split(/\n\n/gu).map((block) =>
 });
 
 describe('Arena session companion service', () => {
+  it('允许引用集合超过旧的每类上限并交给统一聚合预算校验', async () => {
+    const createSubscription = vi.fn(async () => new Response(null, { status: 418 }));
+    const service = createArenaSessionCompanionService({
+      generationService: {
+        createSubscription,
+        create: () => response(),
+        cancelRequest: () => response(),
+        lookup: () => response(),
+        resume: () => response(),
+        status: () => response(),
+        cancel: () => response(),
+      },
+      signatures: {
+        generateSignature: async () => 'guidance-signature',
+        verifySignature: async () => true,
+      },
+      acquireRateLimit: () => ({
+        allowed: true,
+        retryAfterSeconds: 0,
+        release: vi.fn(),
+      }),
+    });
+    const body = requestBody() as ReturnType<typeof requestBody> & {
+      seed: ReturnType<typeof requestBody>['seed'] & {
+        auxScenarios: Array<Record<string, unknown>>;
+        materials: unknown[];
+      };
+    };
+    body.seed.auxScenarios = Array.from({ length: 12 }, () => ({}));
+    body.seed.materials = Array.from({ length: 12 }, () => ({}));
+
+    const result = await service.generateNext(new Request(
+      'https://example.test/api/arena/session/generate-next',
+      { method: 'POST', body: JSON.stringify(body) },
+    ));
+
+    expect(result.status).toBe(418);
+    expect(createSubscription).toHaveBeenCalledTimes(1);
+  });
+
   it('直接消费 typed subscription、签名内部引导并保留上游事件 id', async () => {
     const captured: Array<{ headers: Headers; body: Record<string, unknown> }> = [];
+    const createSubscription = vi.fn();
     const release = vi.fn();
     const observeLifecycle = vi.fn();
     const generationService: ArenaGenerationService = {
-      createSubscription: async (request) => {
+      createSubscription,
+      createParsedSubscription: async (request, command) => {
         captured.push({
           headers: request.headers,
-          body: await request.json() as Record<string, unknown>,
+          body: command.payload,
         });
+        expect(command.generationRequestId).toBe('story-request-1234');
+        expect(command.bodyBytes).toBeGreaterThan(0);
+        expect(request.body).toBeNull();
         return {
           generationId: 'arena_story_generation',
           generationRequestId: 'story-request-1234',
@@ -118,10 +164,20 @@ describe('Arena session companion service', () => {
     expect(captured[0]!.headers.get('x-mahoshojo-arena-internal-guidance-signature'))
       .toBe('guidance-signature');
     expect(captured[0]!.body).toMatchObject({
-      generationRequestId: 'story-request-1234',
       forceStreamMeta: true,
       internalGuidance: expect.stringContaining('连续战报会话'),
     });
+    const guidance = String(captured[0]!.body.internalGuidance);
+    expect(guidance).not.toContain('角色甲');
+    expect(guidance).not.toContain('推进剧情');
+    expect(captured[0]!.body.combatants).toEqual(requestBody().chapterContext.workingCombatants);
+    const finalPrompt = await buildArenaGenerationPrompt({
+      actorKey: 'test', payload: captured[0]!.body,
+    });
+    expect(finalPrompt.prompt).toContain('角色甲');
+    expect(finalPrompt.prompt.split('推进剧情').length - 1).toBe(1);
+    expect(finalPrompt.prompt).toContain('第 1 章 / 共 3 章');
+    expect(createSubscription).not.toHaveBeenCalled();
     expect(events.map(({ event, id }) => [event, id])).toEqual([
       ['session_meta', null],
       ['markdown', '10-0'],
@@ -385,8 +441,49 @@ describe('Arena session companion service', () => {
     ));
 
     expect(result.status).toBe(500);
+    await expect(result.json()).resolves.toMatchObject({
+      error: '生成失败',
+      message: 'chapter id unavailable',
+    });
     expect(rateRelease).toHaveBeenCalledTimes(1);
     expect(createSubscription).not.toHaveBeenCalled();
+  });
+
+  it('subscription 建立失败时只返回经清洗的可行动诊断', async () => {
+    const service = createArenaSessionCompanionService({
+      generationService: {
+        createSubscription: vi.fn(),
+        createParsedSubscription: async () => {
+          throw new Error(
+            'AI_APICallError: 余额不足，请更换 Provider；Authorization: Bearer companion-secret-canary',
+          );
+        },
+        create: () => response(),
+        cancelRequest: () => response(),
+        lookup: () => response(),
+        resume: () => response(),
+        status: () => response(),
+        cancel: () => response(),
+      },
+      signatures: {
+        generateSignature: async () => 'guidance-signature',
+        verifySignature: async () => true,
+      },
+      acquireRateLimit: () => ({ allowed: true, retryAfterSeconds: 0, release: vi.fn() }),
+    });
+
+    const result = await service.generateNext(new Request(
+      'https://example.test/api/arena/session/generate-next',
+      { method: 'POST', body: JSON.stringify(requestBody()) },
+    ));
+
+    expect(result.status).toBe(500);
+    const body = await result.text();
+    expect(JSON.parse(body)).toMatchObject({
+      error: '生成失败',
+      message: expect.stringContaining('余额不足，请更换 Provider'),
+    });
+    expect(body).not.toContain('companion-secret-canary');
   });
 
   it('subscription stream 已锁定时 fail closed 并释放 lease', async () => {

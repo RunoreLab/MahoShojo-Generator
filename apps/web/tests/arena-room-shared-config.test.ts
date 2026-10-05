@@ -1,9 +1,20 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { WebPackageRef } from '@mahoshojo/contracts/web-package';
+import { BUILTIN_ARENA_NEWS_PACKAGE_REF, isBuiltinWebPackageRef } from '@mahoshojo/web-package';
 
 import {
+  ArenaRoomShareabilityError,
+  buildArenaRoomHostWorkspaceBundleFromBattleState,
   buildArenaRoomSharedConfigFromBattleState,
+  computeArenaRoomContentDigest,
+  tryBuildArenaRoomHostWorkspaceBundleFromBattleState,
   type ArenaRoomBattleStateSource,
 } from '@/lib/arena-room/shared-config';
+import { mapSharedConfigToArenaEditorView } from '@/components/arena/editor/shared-config-mapper';
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 const settings = {
   readArenaHistory: true,
@@ -81,6 +92,42 @@ const source = (): ArenaRoomBattleStateSource => ({
 });
 
 describe('Arena Room Battle store projection', () => {
+  it('includes a Web package revision in the shared generation config only in Web mode', async () => {
+    const state = { ...source(), reportFormat: 'web' as const, webPackageRef: BUILTIN_ARENA_NEWS_PACKAGE_REF };
+    expect((await buildArenaRoomSharedConfigFromBattleState(state)).webPackageRef).toEqual(BUILTIN_ARENA_NEWS_PACKAGE_REF);
+    expect((await buildArenaRoomSharedConfigFromBattleState({ ...state, reportFormat: 'markdown' })).webPackageRef).toBeUndefined();
+  });
+
+  it('非 builtin 的本地 Web 包引用不得进入多人共享配置或提案投影', async () => {
+    const localRef: WebPackageRef = {
+      id: 'local.side-package',
+      version: '1.0.0',
+      digest: `sha256:${'a'.repeat(64)}`,
+    };
+    expect(isBuiltinWebPackageRef(localRef)).toBe(false);
+    const config = await buildArenaRoomSharedConfigFromBattleState({
+      ...source(),
+      reportFormat: 'web',
+      webPackageRef: localRef,
+    });
+    expect(config.webPackageRef).toBeUndefined();
+    const projected = mapSharedConfigToArenaEditorView({
+      ...config,
+      webPackageRef: localRef,
+    });
+    expect(projected.webPackageRef).toBeUndefined();
+  });
+
+  it('在 SubtleCrypto 缺失时仍生成兼容的内容摘要', async () => {
+    vi.stubGlobal('crypto', {
+      getRandomValues: (array: Uint8Array) => array,
+    });
+
+    await expect(computeArenaRoomContentDigest({ value: 'abc' })).resolves.toBe(
+      'sha256:afef793fc69ce78450c4c66b8d52dd7c7779bfa4871c521469741f22d5dde564',
+    );
+  });
+
   it('只构造 allowlist refs/stubs，绝不复制本地 payload 或 provider secret', async () => {
     const input = source();
     const before = structuredClone(input);
@@ -163,29 +210,337 @@ describe('Arena Room Battle store projection', () => {
     expect(changedVersion).not.toBe(firstVersion);
   });
 
-  it('在线 ref 缺 version、random placeholder、重复 key 与超限 roster 均拒绝', async () => {
+  it('host workspace bundle 只携带 frozen config 实际引用的本地正文与内容摘要', async () => {
+    const bundle = await buildArenaRoomHostWorkspaceBundleFromBattleState(source());
+
+    expect(bundle.hostLocalPayloads).toEqual([
+      {
+        key: expect.stringMatching(/^host-local:character:/u),
+        kind: 'character',
+        payload: { name: '本地残兽', secret: 'host-only-payload' },
+      },
+      {
+        key: expect.stringMatching(/^host-local:scenario:/u),
+        kind: 'scenario',
+        payload: { title: '本地情景', hidden: 'host-only' },
+      },
+      {
+        key: expect.stringMatching(/^host-local:material:/u),
+        kind: 'material',
+        payload: { secret: 'host-only-material' },
+      },
+    ]);
+    expect(bundle.hostLocalContentDigests).toHaveLength(3);
+    expect(bundle.hostLocalContentDigests.every((entry) => (
+      /^sha256:[0-9a-f]{64}$/u.test(entry.digest)
+    ))).toBe(true);
+    expect(JSON.stringify(bundle.sharedConfig)).not.toContain('host-only');
+    expect(JSON.stringify(bundle.hostLocalPayloads)).not.toContain('provider-secret');
+  });
+
+  it('本地正文变化会改变公开内容版本与 workspace digest，但不会偷渡正文', async () => {
+    const first = await buildArenaRoomHostWorkspaceBundleFromBattleState(source());
+    const changedSource = source();
+    if ('data' in changedSource.combatants[2]!) {
+      changedSource.combatants[2]!.data = { name: '本地残兽', secret: '已修改正文' };
+    }
+    const changed = await buildArenaRoomHostWorkspaceBundleFromBattleState(changedSource);
+
+    const localKey = first.hostLocalPayloads[0]!.key;
+    const firstDigest = first.hostLocalContentDigests.find((entry) => entry.key === localKey)?.digest;
+    const changedDigest = changed.hostLocalContentDigests.find((entry) => entry.key === localKey)?.digest;
+    expect(changedDigest).not.toBe(firstDigest);
+    expect(changed.sharedConfig).not.toEqual(first.sharedConfig);
+    expect(changed.sharedConfig.combatants[2]).toMatchObject({
+      key: localKey,
+      contentVersion: changedDigest,
+    });
+    expect(JSON.stringify(changed.sharedConfig)).not.toContain('已修改正文');
+  });
+
+  it('允许空角色草稿和未签名的本地角色进入普通多人房间', async () => {
+    const empty = source();
+    empty.battleMode = 'classic';
+    empty.combatants = [];
+    empty.teams = [];
+    empty.scenario = { content: null, fileName: null, isNative: false };
+    expect((await buildArenaRoomSharedConfigFromBattleState(empty)).combatants).toEqual([]);
+
+    const unsignedLocal = source();
+    unsignedLocal.combatants = [{
+      type: 'magical-girl',
+      data: { name: '未签名本地角色' },
+      filename: 'unsigned-local.json',
+      isValid: false,
+      isPreset: false,
+    }];
+    await expect(buildArenaRoomSharedConfigFromBattleState(unsignedLocal))
+      .resolves.toMatchObject({ combatants: [{ displayName: '未签名本地角色' }] });
+  });
+
+  it('验签结果不代表预设来源，签名本地情景和素材仍投影为 host-local', async () => {
+    const signedLocal = source();
+    signedLocal.scenario = {
+      content: { title: '已验签本地主情景' },
+      fileName: 'signed-local-scenario.json',
+      isNative: true,
+      isPreset: false,
+    };
+    signedLocal.auxScenarios = [{
+      id: 'signed-local-aux',
+      content: { title: '已验签本地辅助情景' },
+      fileName: 'signed-local-aux.json',
+      isNative: true,
+      isPreset: false,
+    }];
+    signedLocal.materials = [{
+      id: 'signed-local-material',
+      name: '已验签本地素材',
+      content: { title: '已验签本地素材' },
+      fileName: 'signed-local-material.json',
+      sourceKind: 'raw-json',
+      sourceType: 'raw-json',
+      isNative: true,
+      isPreset: false,
+    }];
+
+    const bundle = await buildArenaRoomHostWorkspaceBundleFromBattleState(signedLocal);
+
+    expect(bundle.sharedConfig.scenario).toMatchObject({
+      key: expect.stringMatching(/^host-local:scenario:/u),
+      source: 'host-local',
+    });
+    expect(bundle.sharedConfig.auxScenarios[0]).toMatchObject({
+      key: expect.stringMatching(/^host-local:scenario:/u),
+      source: 'host-local',
+    });
+    expect(bundle.sharedConfig.materials[0]).toMatchObject({
+      key: expect.stringMatching(/^host-local:material:/u),
+      source: 'host-local',
+    });
+    expect(bundle.hostLocalPayloads.map((entry) => entry.key)).toEqual(expect.arrayContaining([
+      bundle.sharedConfig.scenario!.key,
+      bundle.sharedConfig.auxScenarios[0]!.key,
+      bundle.sharedConfig.materials[0]!.key,
+    ]));
+  });
+
+  it('显式标记的内置情景才投影为 preset，不依赖 isNative', async () => {
+    const preset = source();
+    preset.scenario = {
+      content: { title: '显式预设情景' },
+      fileName: 'explicit-preset.json',
+      isNative: false,
+      isPreset: true,
+    };
+
+    const bundle = await buildArenaRoomHostWorkspaceBundleFromBattleState(preset);
+
+    expect(bundle.sharedConfig.scenario).toMatchObject({
+      key: 'preset:explicit-preset.json',
+      ref: { id: 'explicit-preset.json', kind: 'scenario' },
+    });
+    expect(bundle.hostLocalPayloads.some((entry) => (
+      entry.key === 'preset:explicit-preset.json'
+    ))).toBe(false);
+  });
+
+  it('随机占位符不是可共享性问题，其他引用问题仍能稳定定位', async () => {
     const missingVersion = source();
     if ('data' in missingVersion.combatants[1]!) {
       delete missingVersion.combatants[1]!.sourceDataCardUpdatedAt;
     }
-    await expect(buildArenaRoomSharedConfigFromBattleState(missingVersion)).rejects.toThrow();
-
-    const random = source();
-    random.combatants = [{
+    missingVersion.combatants.unshift({
       type: 'random-magical-girl',
       id: 'random-1',
       filename: 'random',
-    }];
-    await expect(buildArenaRoomSharedConfigFromBattleState(random)).rejects.toThrow(/随机占位符/u);
+    });
 
-    const overflow = source();
-    overflow.combatants = Array.from({ length: 11 }, (_, index) => ({
+    const result = await tryBuildArenaRoomHostWorkspaceBundleFromBattleState(missingVersion);
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('expected shareability issues');
+    expect(result.issues).toEqual([
+      expect.objectContaining({
+        code: 'ROOM_REFERENCE_VERSION_REQUIRED',
+        target: 'combatants[2]',
+        message: expect.stringContaining('缺少版本'),
+        action: expect.any(String),
+      }),
+    ]);
+    await expect(buildArenaRoomSharedConfigFromBattleState(missingVersion)).rejects.toMatchObject({
+      name: 'ArenaRoomShareabilityError',
+      message: expect.stringContaining('缺少版本'),
+      issues: [expect.objectContaining({ code: 'ROOM_REFERENCE_VERSION_REQUIRED' })],
+    } satisfies Partial<ArenaRoomShareabilityError>);
+  });
+
+  it('混合角色投影只省略随机占位符，保留正常角色、队伍引用与其他设置', async () => {
+    const mixed = source();
+    mixed.combatants = [{
+      type: 'random-magical-girl',
+      id: 'random-first',
+      filename: '随机魔法少女',
+      teamId: 1,
+    }, {
+      type: 'canshou',
+      data: { name: '可共享的正常角色' },
+      filename: 'normal.json',
+      isValid: false,
+      isPreset: false,
+      teamId: 1,
+    }, {
+      type: 'random-canshou',
+      id: 'random-last',
+      filename: '随机残兽',
+      teamId: 1,
+    }];
+    mixed.settings.userGuidance = '保留本地设置';
+
+    const bundle = await buildArenaRoomHostWorkspaceBundleFromBattleState(mixed);
+
+    expect(bundle.sharedConfig).toMatchObject({
+      battleMode: 'scenario',
+      combatants: [{
+        key: expect.stringMatching(/^host-local:character:/u),
+        displayName: '可共享的正常角色',
+      }],
+      teams: [{
+        key: 'team:1',
+        combatantKeys: [expect.stringMatching(/^host-local:character:/u)],
+      }],
+      scenario: expect.objectContaining({ displayName: '本地情景' }),
+      userGuidance: '保留本地设置',
+    });
+    expect(bundle.sharedConfig.teams[0]!.combatantKeys).toEqual([
+      bundle.sharedConfig.combatants[0]!.key,
+    ]);
+    expect(bundle.hostLocalPayloads).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        key: bundle.sharedConfig.combatants[0]!.key,
+        kind: 'character',
+        payload: { name: '可共享的正常角色' },
+      }),
+    ]));
+  });
+
+  it('纯随机角色草稿也可建房，投影为空角色但不丢失模式和设置', async () => {
+    const randomOnly = source();
+    randomOnly.combatants = [{
+      type: 'random-magical-girl',
+      id: 'random-only',
+      filename: '随机魔法少女',
+      teamId: 1,
+    }];
+    randomOnly.settings.userGuidance = '建房后再生成角色';
+
+    const bundle = await buildArenaRoomHostWorkspaceBundleFromBattleState(randomOnly);
+
+    expect(bundle.sharedConfig).toMatchObject({
+      battleMode: 'scenario',
+      combatants: [],
+      teams: [{ key: 'team:1', combatantKeys: [] }],
+      scenario: expect.objectContaining({ displayName: '本地情景' }),
+      userGuidance: '建房后再生成角色',
+    });
+    expect(bundle.hostLocalPayloads.some((entry) => entry.kind === 'character')).toBe(false);
+  });
+
+  it('角色数与 canonical runtime 的 32 位容量一致', async () => {
+    const atLimit = source();
+    atLimit.battleMode = 'daily';
+    atLimit.teams = [];
+    atLimit.settings.userGuidance = '保留 32 位实体的草稿设置';
+    atLimit.combatants = [...Array.from({ length: 32 }, (_, index) => ({
       type: 'magical-girl' as const,
       data: { name: `本地 ${index}` },
       filename: `local-${index}.json`,
       isValid: true,
       isPreset: false,
-    }));
-    await expect(buildArenaRoomSharedConfigFromBattleState(overflow)).rejects.toThrow();
+    })), {
+      type: 'random-canshou',
+      id: 'random-over-shareability-boundary',
+      filename: '随机残兽',
+    }];
+    const atLimitProjection = await buildArenaRoomSharedConfigFromBattleState(atLimit);
+    expect(atLimitProjection.combatants).toHaveLength(32);
+    expect(atLimitProjection.userGuidance).toBe('保留 32 位实体的草稿设置');
+
+    const overflow = source();
+    overflow.combatants = [...Array.from({ length: 33 }, (_, index) => ({
+      type: 'magical-girl' as const,
+      data: { name: `本地 ${index}` },
+      filename: `local-${index}.json`,
+      isValid: true,
+      isPreset: false,
+    })), {
+      type: 'random-canshou',
+      id: 'random-after-overflow',
+      filename: '随机残兽',
+    }];
+    const result = await tryBuildArenaRoomHostWorkspaceBundleFromBattleState(overflow);
+    expect(result).toMatchObject({
+      ok: false,
+      issues: [expect.objectContaining({
+        code: 'ROOM_COMBATANT_LIMIT',
+        target: 'combatants',
+        message: expect.stringContaining('当前有 33 位可共享角色'),
+      })],
+    });
   });
+
+  it('辅助情景与素材不再各自限制 10 个，而是共享 256 个引用的累计预算', async () => {
+    const withinBudget = source();
+    withinBudget.auxScenarios = Array.from({ length: 11 }, (_, index) => ({
+      id: `aux-${index}`,
+      content: { title: `辅助情景 ${index}` },
+      fileName: `aux-${index}.json`,
+      isNative: false,
+    }));
+    withinBudget.materials = Array.from({ length: 11 }, (_, index) => ({
+      id: `material-${index}`,
+      name: `素材 ${index}`,
+      content: {},
+      fileName: null,
+      sourceKind: 'raw-json',
+      sourceType: 'raw-json',
+      isNative: false,
+    }));
+    await expect(buildArenaRoomSharedConfigFromBattleState(withinBudget)).resolves.toMatchObject({
+      auxScenarios: expect.arrayContaining([expect.any(Object)]),
+      materials: expect.arrayContaining([expect.any(Object)]),
+    });
+
+    const overflow = source();
+    overflow.auxScenarios = Array.from({ length: 128 }, (_, index) => ({
+      id: `aux-${index}`,
+      content: { title: `辅助情景 ${index}` },
+      fileName: `aux-${index}.json`,
+      isNative: false,
+    }));
+    overflow.materials = Array.from({ length: 129 }, (_, index) => ({
+      id: `material-${index}`,
+      name: `素材 ${index}`,
+      content: {},
+      fileName: null,
+      sourceKind: 'raw-json',
+      sourceType: 'raw-json',
+      isNative: false,
+    }));
+    const result = await tryBuildArenaRoomHostWorkspaceBundleFromBattleState(overflow);
+    expect(result).toMatchObject({
+      ok: false,
+      issues: [expect.objectContaining({
+        code: 'ROOM_REFERENCE_LIMIT',
+        target: 'auxScenarios,materials',
+      })],
+    });
+  });
+});
+
+
+it('publishes explicit report format while normalizing old local drafts to Markdown', async () => {
+  const legacy = await buildArenaRoomSharedConfigFromBattleState(source());
+  const web = await buildArenaRoomSharedConfigFromBattleState({ ...source(), reportFormat: 'web' });
+  expect(legacy.reportFormat).toBe('markdown');
+  expect(web.reportFormat).toBe('web');
 });

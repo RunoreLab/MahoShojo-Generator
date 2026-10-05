@@ -29,6 +29,8 @@ import {
     classifyAiUpstreamOutcome,
     createAiUpstreamAttemptRuntime,
 } from '../ai-upstream';
+import { markAiRetrySafety } from './retry-safety';
+import { createSafePublicAiError } from '@mahoshojo/hosted-api/regular-generation';
 
 export const classifyStreamRuntimeOutcome = classifyAiUpstreamOutcome;
 
@@ -306,6 +308,9 @@ async function generateWithStreamAIUsing(
 	                        ...resolvedSettings.diagnostics,
 	                    });
 	                }
+	                const thinkingDisabledApplied =
+	                    resolvedSettings.thinkingResolution.requestedMode === 'disabled' &&
+	                    resolvedSettings.thinkingResolution.disposition === 'applied';
 
 		                const looksLikeTrivialEmptyOutput = (text: string) => {
 		                    const trimmed = text.trim().replace(/^\uFEFF/, '');
@@ -325,6 +330,9 @@ async function generateWithStreamAIUsing(
 	                const result = streamText({
 	                    model: provider.type === 'openai' ? llm.chat(selectedModel) : llm(selectedModel),
                     prompt: [
+                        ...(generationConfig.systemPrompt
+                            ? [{ role: 'system' as const, content: generationConfig.systemPrompt }]
+                            : []),
                         {
                             role: 'user',
                             content: generationConfig.prompt,
@@ -346,15 +354,37 @@ async function generateWithStreamAIUsing(
                     },
 	                });
 
+                    const streamStartedAt = performance.now();
+                    const streamCompletion: Record<string, unknown> = {
+                        sdkFinishEvent: false,
+                        streamError: false,
+                        textChars: 0,
+                        maxOutputTokens: resolvedSettings.standardOptions.maxOutputTokens,
+                        thinkingMode: resolvedSettings.thinkingResolution.requestedMode,
+                        thinkingDisposition: resolvedSettings.thinkingResolution.disposition,
+                    };
+                    if (options?.telemetry) options.telemetry.streamCompletion = streamCompletion;
 	                const mapToUnifiedChunk = (part: unknown): RawUnifiedStreamChunk | null => {
 	                    if (!part || typeof part !== 'object') return null;
 	                    const type = (part as any).type;
+                        if (type === 'error') {
+                            streamCompletion.streamError = true;
+                            capturedError = (part as { error?: unknown }).error ?? new Error('AI_STREAM_ERROR');
+                            throw capturedError;
+                        }
+                        if (type === 'finish') streamCompletion.sdkFinishEvent = true;
 
 	                    if (type === 'text-delta') {
 	                        const text =
 	                            typeof (part as any).text === 'string'
 	                                ? (part as any).text
 	                                : (typeof (part as any).delta === 'string' ? (part as any).delta : '');
+                            if (text) {
+                                const elapsed = Math.floor(performance.now() - streamStartedAt);
+                                streamCompletion.firstTextMs ??= elapsed;
+                                streamCompletion.lastTextMs = elapsed;
+                                streamCompletion.textChars = Number(streamCompletion.textChars) + text.length;
+                            }
 	                        return { type: 'text-delta', id: typeof (part as any).id === 'string' ? (part as any).id : undefined, text };
 	                    }
 	                    if (type === 'reasoning-start') {
@@ -373,15 +403,12 @@ async function generateWithStreamAIUsing(
 	                    return null;
 	                };
 
-	                const emitReasoningEvent = (chunk: RawUnifiedStreamChunk) => {
+	                const emitReasoningEvent = async (chunk: RawUnifiedStreamChunk): Promise<void> => {
 	                    if (chunk.type !== 'reasoning-start' && chunk.type !== 'reasoning-delta' && chunk.type !== 'reasoning-end') {
 	                        return;
 	                    }
-	                    try {
-	                        options?.onReasoningEvent?.(chunk);
-	                    } catch (reasoningError) {
-	                        log.warn('reasoning 回调执行失败（已忽略）', { reasoningError });
-	                    }
+	                    if (thinkingDisabledApplied) return;
+	                    await options?.onReasoningEvent?.(chunk);
 	                };
 
 	                // 预检流：仅做“连接可用”探测，避免等待正文首字导致流式首屏阻塞。
@@ -413,6 +440,8 @@ async function generateWithStreamAIUsing(
 	                });
 	                const prefetchedChunks: RawUnifiedStreamChunk[] = [];
 	                let prefetchedText = '';
+	                let textChars = 0;
+	                let reasoningChars = 0;
 	                let prefetchedDone = false;
 	                let trivialCandidate = '';
 	                let pendingWhitespace = false;
@@ -463,7 +492,10 @@ async function generateWithStreamAIUsing(
 	                    prefetchedChunks.push(mapped);
 	                    if (mapped.type === 'text-delta') {
 	                        prefetchedText += mapped.text;
+                            textChars += mapped.text.replace(/[\s\uFEFF]/gu, '').length;
                             observeTextForEmptyOutput(mapped.text);
+	                    } else if (mapped.type === 'reasoning-delta') {
+	                        reasoningChars += mapped.text.length;
 	                    }
                     runtimeAttempt.recordTtfb();
 	                    // 低延迟优先：拿到首个有效 chunk（文本或 reasoning）后立即交由上层持续消费。
@@ -486,16 +518,30 @@ async function generateWithStreamAIUsing(
 		                }
 
 	                // 创建一个新的 ReadableStream，将已预取 part 与剩余流合并；正文走 text-delta，reasoning 走回调。
-	                const combinedStream = new ReadableStream<RawUnifiedStreamChunk>({
-                    start(controller) {
-                        for (const chunk of prefetchedChunks) {
-                            emitReasoningEvent(chunk);
-                            controller.enqueue(chunk);
+	                const cancelUpstream = async (reason: unknown): Promise<void> => {
+                        try {
+                            await reader.cancel(reason);
+                        } catch {
+                            // reader 可能已经关闭或失败
                         }
-                        // 预取已耗尽且上游已结束：在首包路径上完成 attempt
-                        if (prefetchedDone) {
-                            outcomeRecorder.recordSuccess();
-                            runtimeAttempt.finish('success');
+                    };
+
+	                const combinedStream = new ReadableStream<RawUnifiedStreamChunk>({
+                    async start(controller) {
+                        try {
+                            for (const chunk of prefetchedChunks) {
+                                await emitReasoningEvent(chunk);
+                                controller.enqueue(chunk);
+                            }
+                            // 预取已耗尽且上游已结束：在首包路径上完成 attempt
+                            if (prefetchedDone) {
+                                outcomeRecorder.recordSuccess();
+                                runtimeAttempt.finish('success');
+                            }
+                        } catch (reasoningError) {
+                            await cancelUpstream(reasoningError);
+                            finishAttemptFromError(reasoningError);
+                            controller.error(reasoningError);
                         }
                     },
                     async pull(controller) {
@@ -503,11 +549,41 @@ async function generateWithStreamAIUsing(
                             while (true) {
                                 const { done, value } = await readWithTimeout(reader);
                                 if (done) {
+                                    if (capturedError) {
+                                        streamCompletion.streamError = true;
+                                        throw capturedError;
+                                    }
                                     if (isTrivialAtTerminal()) {
-                                        const emptyOutputError = new Error(EMPTY_OUTPUT_ERROR_MESSAGE);
+                                        const isThinkingDisabledReasoningOnly =
+                                            thinkingDisabledApplied && textChars === 0 && reasoningChars > 0;
+                                        const emptyOutputError = isThinkingDisabledReasoningOnly
+                                            ? createSafePublicAiError({
+                                                code: 'THINKING_DISABLED_REASONING_ONLY',
+                                                message: '模型在已关闭思考的情况下未返回可安全显示的正文，请重试或切换模型。',
+                                            })
+                                            : new Error(EMPTY_OUTPUT_ERROR_MESSAGE);
+                                        if (isThinkingDisabledReasoningOnly) {
+                                            if (options?.telemetry) {
+                                                options.telemetry.reasoning = {
+                                                    status: 'error',
+                                                    source: 'sdk',
+                                                    anomalyFlags: ['thinking_disabled_reasoning_only'],
+                                                    errorMessage: 'THINKING_DISABLED_REASONING_ONLY',
+                                                };
+                                            }
+                                            log.warn('关闭思考后上游仅返回 reasoning 通道', {
+                                                code: 'THINKING_DISABLED_REASONING_ONLY',
+                                                provider: provider.name,
+                                                model: selectedModel,
+                                                reasoningChars,
+                                                textChars,
+                                            });
+                                        }
                                         outcomeRecorder.recordClassification({
                                             outcome: 'failure',
-                                            errorClass: 'empty_output',
+                                            errorClass: isThinkingDisabledReasoningOnly
+                                                ? 'reasoning_only'
+                                                : 'empty_output',
                                         });
                                         runtimeAttempt.finish('error');
                                         controller.error(emptyOutputError);
@@ -523,13 +599,25 @@ async function generateWithStreamAIUsing(
                                 if (!mapped) continue;
                                 runtimeAttempt.recordTtfb();
                                 if (mapped.type === 'text-delta') {
+                                    textChars += mapped.text.replace(/[\s\uFEFF]/gu, '').length;
                                     observeTextForEmptyOutput(mapped.text);
+	                            } else if (mapped.type === 'reasoning-delta') {
+	                                reasoningChars += mapped.text.length;
                                 }
-                                emitReasoningEvent(mapped);
+                                try {
+                                    await emitReasoningEvent(mapped);
+                                } catch (reasoningError) {
+                                    await cancelUpstream(reasoningError);
+                                    finishAttemptFromError(reasoningError);
+                                    controller.error(reasoningError);
+                                    return;
+                                }
                                 controller.enqueue(mapped);
                                 return;
                             }
                         } catch (streamError) {
+                            streamCompletion.streamError = true;
+                            await cancelUpstream(streamError);
                             const interrupted = finishAttemptFromError(streamError);
                             const projectedStreamError = enhanceErrorWithUpstreamMessage(
                                 capturedError ?? streamError,
@@ -591,7 +679,10 @@ async function generateWithStreamAIUsing(
                     secrets: [provider.apiKey, provider.baseUrl],
                     sensitiveTexts: [generationConfig.prompt],
                 });
-                lastError = enhancedError;
+                lastError = markAiRetrySafety(
+                    enhancedError,
+                    providerRequestDispatched ? 'non-replayable' : 'pre-dispatch-safe',
+                );
                 log.error(`提供商 ${provider.name} 第 ${attempt + 1} 次失败`, { error: enhancedError });
 
                 if (NoObjectGeneratedError.isInstance(error)) {
@@ -610,7 +701,7 @@ async function generateWithStreamAIUsing(
                 }
 
                 if (providerRequestDispatched) {
-                    throw enhancedError;
+                    throw lastError;
                 }
 
                 // 如果不是最后一次尝试，等待后再重试
@@ -626,7 +717,10 @@ async function generateWithStreamAIUsing(
     }
 
     log.error('所有 AI Provider 尝试均失败');
-    throw enhanceErrorWithUpstreamMessage(lastError);
+    throw markAiRetrySafety(
+        enhanceErrorWithUpstreamMessage(lastError),
+        'pre-dispatch-safe',
+    );
 }
 
 export const createNodeRawStreamAiRuntime = (dependencies: NodeAiRuntimeDependencies) => ({

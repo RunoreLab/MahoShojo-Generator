@@ -19,10 +19,30 @@ export type RoomGenerationPublisherProgress = Readonly<{
 
 export type RoomGenerationPublishResult =
   | Readonly<{ kind: 'completed'; generationRecordId: string }>
-  | Readonly<{ kind: 'failed'; errorCode: 'generation-failed' }>
+  | Readonly<{ kind: 'failed'; errorCode: RoomGenerationFailureCode }>
   | Readonly<{ kind: 'cancelled' }>
   | Readonly<{ kind: 'stream-ended' }>
   | Readonly<{ kind: 'rejected'; reason: string }>;
+
+/**
+ * 房间只区分「重试可能成功」与「重试不会改变结果」。Web 包输出契约失败属于后者：
+ * 塌缩成 generation-failed 会让用户反复重试同一次必然失败的生成。
+ */
+export type RoomGenerationFailureCode = 'generation-failed' | 'web-package-output-invalid';
+
+const WEB_PACKAGE_OUTPUT_ERROR_CODES: ReadonlySet<string> = new Set([
+  'ARENA_WEB_PACKAGE_OUTPUT_INVALID',
+  'ARENA_WEB_PACKAGE_TARGET_INVALID',
+  'ARENA_WEB_PACKAGE_TARGET_MALFORMED',
+  'ARENA_WEB_PACKAGE_TARGET_SCHEMA',
+]);
+
+/** 未知或非 Web 包的上游失败码一律保持 generation-failed，不新增 wire 面。 */
+export const roomGenerationFailureCodeOf = (upstreamCode: unknown): RoomGenerationFailureCode => (
+  typeof upstreamCode === 'string' && WEB_PACKAGE_OUTPUT_ERROR_CODES.has(upstreamCode)
+    ? 'web-package-output-invalid'
+    : 'generation-failed'
+);
 
 export type RoomGenerationPublisher = Readonly<{
   attach(subscription: ArenaRoomGenerationSubscription): Promise<RoomGenerationPublishResult>;
@@ -85,7 +105,7 @@ export const createRoomGenerationPublisher = (
 
   const mirror = async (
     state: 'cancelled' | 'completed' | 'failed' | 'running',
-    terminal?: { readonly generationRecordId?: string; readonly errorCode?: 'generation-failed' },
+    terminal?: { readonly generationRecordId?: string; readonly errorCode?: RoomGenerationFailureCode },
   ): Promise<RoomGenerationPublishResult | null> => {
     const issuedAt = timestamp();
     const result = await options.actor.execute({
@@ -191,15 +211,26 @@ export const createRoomGenerationPublisher = (
             continue;
           }
           if (event.type === 'error') {
-            const terminalFailure = await mirror('failed', { errorCode: 'generation-failed' });
-            return terminalFailure ?? { kind: 'failed', errorCode: 'generation-failed' };
+            // 真实 SSE 帧把 code 放在 data 里；顶层 code 只作为防御性回退。
+            const data = typeof event.data === 'object' && event.data !== null && !Array.isArray(event.data)
+              ? event.data as Record<string, unknown>
+              : {};
+            const errorCode = roomGenerationFailureCodeOf(data.code ?? event.code);
+            const terminalFailure = await mirror('failed', { errorCode });
+            return terminalFailure ?? { kind: 'failed', errorCode };
           }
           if (event.type !== 'done') continue;
           if (
             event.status === 'completed'
-            && event.resultAvailable === true
             && typeof event.generationRecordId === 'string'
             && event.generationRecordId.length > 0
+            && (
+              event.resultAvailable === true
+              || (
+                event.persistenceWarning === 'OUTPUT_NOT_ARCHIVED'
+                && event.replayUnavailable === true
+              )
+            )
           ) {
             const terminalFailure = await mirror('completed', {
               generationRecordId: event.generationRecordId,

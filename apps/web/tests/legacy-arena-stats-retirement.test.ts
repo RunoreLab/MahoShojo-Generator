@@ -112,7 +112,7 @@ describe('legacy Arena stats retirement boundary', () => {
 
   it('preserves historical tables and the current rating/ranking implementation', () => {
     const legacySqlSchema = readFileSync(join(webRoot, 'lib/database/schema.sql'), 'utf8');
-    const drizzleSchema = readFileSync(join(webRoot, 'lib/db/schema/business.ts'), 'utf8');
+    const drizzleSchema = readFileSync(join(workspaceRoot, 'packages/hosted-runtime/src/db/schema/business.ts'), 'utf8');
 
     expect(legacySqlSchema).toMatch(/CREATE TABLE IF NOT EXISTS characters/u);
     expect(legacySqlSchema).toMatch(/CREATE TABLE IF NOT EXISTS battles/u);

@@ -1,35 +1,24 @@
 import 'server-only';
 import { getCloudflareContext } from '@opennextjs/cloudflare';
-import { drizzle, type DrizzleD1Database } from 'drizzle-orm/d1';
-import * as schema from '@/lib/db/schema';
+import {
+  createDrizzleDb as createUncachedDrizzleDb,
+  isD1LikeClient,
+  type AppDrizzleDb,
+  type DrizzleD1Client,
+} from '@mahoshojo/hosted-runtime/db/drizzle';
 import { createHttpD1ClientFromEnv } from '@/lib/db/d1-http-client';
 import { parseHostedApiDeploymentTarget } from '@mahoshojo/hosted-api/hosted-dr';
 
-export type AppDrizzleDb = DrizzleD1Database<typeof schema>;
-
-type DrizzleD1Client = Parameters<typeof drizzle>[0];
+export type { AppDrizzleDb } from '@mahoshojo/hosted-runtime/db/drizzle';
 
 const dbCache = new WeakMap<object, AppDrizzleDb>();
-
-const isObject = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null;
-
-const isD1LikeClient = (value: unknown): value is DrizzleD1Client => {
-  if (!isObject(value)) return false;
-
-  const prepare = value.prepare;
-  const batch = value.batch;
-  const exec = value.exec;
-
-  return typeof prepare === 'function' && typeof batch === 'function' && typeof exec === 'function';
-};
 
 const getCachedDb = (client: DrizzleD1Client): AppDrizzleDb => {
   const cacheKey = client as object;
   const cached = dbCache.get(cacheKey);
   if (cached) return cached;
 
-  const db = drizzle(client, { schema });
+  const db = createUncachedDrizzleDb(client);
   dbCache.set(cacheKey, db);
   return db;
 };

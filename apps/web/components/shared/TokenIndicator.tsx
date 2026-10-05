@@ -9,6 +9,7 @@ type TokenIndicatorProps = {
   maxTokens?: number;
   warnTokens?: number;
   warningText?: string;
+  budgetLabel?: string;
   estimatedTokens?: number;
   estimateMultiplier?: number;
   className?: string;
@@ -19,6 +20,7 @@ export function TokenIndicator({
   maxTokens = 16000,
   warnTokens = 12000,
   warningText,
+  budgetLabel,
   estimatedTokens: estimatedTokensOverride,
   estimateMultiplier = 1,
   className,
@@ -43,17 +45,25 @@ export function TokenIndicator({
           ? 'bg-orange-500'
           : 'bg-red-600';
   const shouldWarn = estimatedTokens >= warnTokens;
+  const estimateTitle = '近似估算，不等同于当前模型的真实 tokenizer 结果';
 
   return (
     <div className={['mt-2', className].filter(Boolean).join(' ')}>
       <div className="flex items-center justify-center gap-2">
-        <div className="h-2 w-40 bg-gray-200 rounded-full overflow-hidden" title="估算仅供参考（约 ±20%），不等同于真实 Token">
+        <div className="h-2 w-40 bg-gray-200 rounded-full overflow-hidden" title={estimateTitle}>
           <div className={`h-full ${barColor}`} style={{ width: `${Math.round(ratio * 100)}%` }} />
         </div>
-        <div className="text-xs text-gray-600 tabular-nums" title="估算仅供参考（约 ±20%），不等同于真实 Token">
-          ~{estimatedTokens.toLocaleString()} tokens
+        <div className="text-xs text-gray-600 tabular-nums" title={estimateTitle}>
+          {budgetLabel
+            ? `预计上下文：约 ${estimatedTokens.toLocaleString()} / ${maxTokens.toLocaleString()} tokens`
+            : `~${estimatedTokens.toLocaleString()} tokens`}
         </div>
       </div>
+      {budgetLabel ? (
+        <div className="mt-1 text-center text-xs text-gray-500">
+          {budgetLabel}；Token 为近似估算，最终完整 Prompt 由服务端检查；实际模型仍可能因自身上下文限制拒绝请求。
+        </div>
+      ) : null}
       {shouldWarn && warningText && (
         <div className="mt-1 text-xs text-orange-600 text-center">{warningText}</div>
       )}

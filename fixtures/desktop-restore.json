@@ -1,0 +1,11 @@
+{
+  "request": {"backupId": "local-library-20261003T040000Z"},
+  "response": {
+    "restoreId": "restore-1790990400000-1234-0",
+    "backupId": "local-library-20261003T040000Z",
+    "preRestoreBackupId": "local-library-20261003T040000Z-2"
+  },
+  "validIds": ["restore-1790990400000-1234-0", "restore-0-1-2"],
+  "invalidIds": ["", "../restore", "restore-1-2", "restore-1-2-3/other", "restore-1-2-a", "restore-1-🪄-0"],
+  "errorCodes": ["invalid-backup-id", "backup-incomplete", "backup-unsupported-version", "backup-corrupt", "backup-source-unavailable", "backup-failed", "maintenance-busy", "restore-pending", "restore-invalid-intent", "restore-failed"]
+}

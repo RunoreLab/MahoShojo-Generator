@@ -1,7 +1,8 @@
-import { z } from 'zod';
+import { z } from './zod';
 
 import { SafeJsonValueSchema } from './json-value';
 import { IsoTimestampSchema, OpaqueKeySchema } from './primitives';
+import { SecretRefSchema } from './secret-ref';
 import { jsonUtf8ByteLength } from './wire-size';
 
 export const DIRECT_PROVIDER_PROFILE_VERSION = 1 as const;
@@ -108,8 +109,10 @@ const addCanonicalDuplicateHeaderIssues = (
   }
 };
 
+const SecretRefValueSchema = SecretRefSchema;
+
 const SecretHeaderRefsSchema = z
-  .record(HeaderNameSchema, OpaqueKeySchema)
+  .record(HeaderNameSchema, SecretRefValueSchema)
   .superRefine((headers, context) => {
     if (Object.keys(headers).length > MAX_DIRECT_PROVIDER_PROFILE_HEADERS) {
       context.addIssue({ code: 'custom', message: `must contain at most ${MAX_DIRECT_PROVIDER_PROFILE_HEADERS} headers` });
@@ -158,7 +161,75 @@ const GenerationDefaultsSchema = z
     }
   });
 
-export const DirectProviderProfileV1Schema = z
+const LOOPBACK_HOSTNAMES = new Set(['localhost', '::1', '[::1]']);
+
+export const isLoopbackHost = (hostname: string): boolean => {
+  const normalized = hostname.toLowerCase();
+  if (LOOPBACK_HOSTNAMES.has(normalized)) return true;
+  return /^127(?:\.\d{1,3}){3}$/u.test(normalized);
+};
+
+/**
+ * 明文 HTTP 的判定。
+ *
+ * loopback（`localhost` / `127.0.0.0/8` / `::1`）默认允许，因为它对应用户自己机器上的
+ * Ollama、LM Studio、llama.cpp server 等本地推理服务；其余主机的明文 HTTP 必须由
+ * `transport.allowPublicHttp` 显式记录用户确认。
+ */
+export const requiresExplicitPublicHttpConfirmation = (baseUrl: string): boolean => {
+  let url: URL;
+  try {
+    url = new URL(baseUrl);
+  } catch {
+    // 非法 URL 由 DirectProviderBaseUrlSchema 单独报错，这里不做重复判断。
+    return false;
+  }
+  if (url.protocol !== 'http:') return false;
+  return !isLoopbackHost(url.hostname);
+};
+
+/**
+ * Profile 级别的跨字段规则。
+ *
+ * 单独抽成函数而不是只写在 `superRefine` 里，是因为 Zod 4 的 `.pick()` **不会**携带对象级
+ * 检查：完整 Profile 与 Rust 侧的窄投影都必须显式挂上同一份规则，否则投影会静默放宽。
+ */
+const addProfileWideIssues = (
+  profile: {
+    baseUrl: string;
+    secretHeaderRefs?: Record<string, unknown>;
+    publicHeaders?: Record<string, unknown>;
+    transport?: { allowPublicHttp?: boolean } | undefined;
+  },
+  context: z.RefinementCtx,
+): void => {
+  const publicHeaderNames = new Set(
+    Object.keys(profile.publicHeaders ?? {}).map((headerName) => headerName.toLowerCase()),
+  );
+  for (const secretHeaderName of Object.keys(profile.secretHeaderRefs ?? {})) {
+    if (publicHeaderNames.has(secretHeaderName.toLowerCase())) {
+      context.addIssue({
+        code: 'custom',
+        path: ['secretHeaderRefs', secretHeaderName],
+        message: 'HTTP header names are case-insensitive and cannot overlap publicHeaders',
+      });
+    }
+  }
+
+  if (
+    requiresExplicitPublicHttpConfirmation(profile.baseUrl)
+    && profile.transport?.allowPublicHttp !== true
+  ) {
+    context.addIssue({
+      code: 'custom',
+      path: ['transport', 'allowPublicHttp'],
+      message:
+        'cleartext HTTP to a non-loopback host requires explicit user confirmation via transport.allowPublicHttp',
+    });
+  }
+};
+
+export const DirectProviderProfileObjectSchema = z
   .object({
     version: DirectProviderProfileVersionSchema,
     id: OpaqueKeySchema,
@@ -166,7 +237,7 @@ export const DirectProviderProfileV1Schema = z
     adapter: DirectProviderAdapterSchema,
     baseUrl: DirectProviderBaseUrlSchema,
     modelId: nonBlankString(256),
-    apiKeyRef: OpaqueKeySchema.optional(),
+    apiKeyRef: SecretRefValueSchema.optional(),
     secretHeaderRefs: SecretHeaderRefsSchema.optional(),
     publicHeaders: PublicHeadersSchema.optional(),
     generationDefaults: GenerationDefaultsSchema.optional(),
@@ -180,20 +251,11 @@ export const DirectProviderProfileV1Schema = z
     createdAt: IsoTimestampSchema,
     updatedAt: IsoTimestampSchema,
   })
-  .strict()
-  .superRefine((profile, context) => {
-    const publicHeaderNames = new Set(
-      Object.keys(profile.publicHeaders ?? {}).map((headerName) => headerName.toLowerCase()),
-    );
-    for (const secretHeaderName of Object.keys(profile.secretHeaderRefs ?? {})) {
-      if (publicHeaderNames.has(secretHeaderName.toLowerCase())) {
-        context.addIssue({
-          code: 'custom',
-          path: ['secretHeaderRefs', secretHeaderName],
-          message: 'HTTP header names are case-insensitive and cannot overlap publicHeaders',
-        });
-      }
-    }
+  .strict();
+
+export const DirectProviderProfileV1Schema = DirectProviderProfileObjectSchema.superRefine(
+  (profile, context) => {
+    addProfileWideIssues(profile, context);
 
     if (jsonUtf8ByteLength(profile) > MAX_DIRECT_PROVIDER_PROFILE_BYTES) {
       context.addIssue({
@@ -204,5 +266,47 @@ export const DirectProviderProfileV1Schema = z
         message: `provider profile must not exceed ${MAX_DIRECT_PROVIDER_PROFILE_BYTES} UTF-8 bytes`,
       });
     }
-  });
+  },
+);
 export type DirectProviderProfileV1 = z.infer<typeof DirectProviderProfileV1Schema>;
+
+/**
+ * Rust 侧执行 Direct AI 时真正需要的字段子集。
+ *
+ * 完整 Profile 的权威校验始终是 `DirectProviderProfileV1Schema`；本投影只承载"Rust 必须
+ * 自己解析出来的部分"，因为出站 endpoint 只能来自已保存 Profile，而 renderer 不得参与
+ * 出站请求的构造。
+ *
+ * 两条必须知道的性质：
+ *
+ * - 投影是 `strict` 的，只接受下列字段。这让 renderer 无法借同一通道把
+ *   `generationDefaults` 之类 Rust 不解析的字段塞进执行路径。
+ * - Zod 4 的 `.pick()` 不携带对象级检查，因此 `addProfileWideIssues` 在这里**显式**重复
+ *   挂载。跨语言 fixture 会同时覆盖完整 Profile 与本投影，任何一侧漏挂规则都会失败。
+ */
+export const DirectProviderExecutionProfileSchema = DirectProviderProfileObjectSchema.pick({
+  id: true,
+  name: true,
+  adapter: true,
+  baseUrl: true,
+  modelId: true,
+  apiKeyRef: true,
+  secretHeaderRefs: true,
+  publicHeaders: true,
+  transport: true,
+}).superRefine(addProfileWideIssues);
+export type DirectProviderExecutionProfile = z.infer<typeof DirectProviderExecutionProfileSchema>;
+
+export const toDirectProviderExecutionProfile = (
+  profile: DirectProviderProfileV1,
+): DirectProviderExecutionProfile => ({
+  id: profile.id,
+  name: profile.name,
+  adapter: profile.adapter,
+  baseUrl: profile.baseUrl,
+  modelId: profile.modelId,
+  ...(profile.apiKeyRef === undefined ? {} : { apiKeyRef: profile.apiKeyRef }),
+  ...(profile.secretHeaderRefs === undefined ? {} : { secretHeaderRefs: profile.secretHeaderRefs }),
+  ...(profile.publicHeaders === undefined ? {} : { publicHeaders: profile.publicHeaders }),
+  ...(profile.transport === undefined ? {} : { transport: profile.transport }),
+});

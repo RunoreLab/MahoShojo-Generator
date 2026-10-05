@@ -1,4 +1,13 @@
-import type { ArenaRoomSharedConfig } from '@mahoshojo/contracts/arena-room';
+import {
+  ArenaRoomGenerationStartRequestSchema,
+  type ArenaRoomHostLocalPayload,
+  type ArenaRoomHostRuntimeGeneration,
+  type ArenaRoomSharedConfig,
+} from '@mahoshojo/contracts/arena-room';
+import {
+  evaluateArenaGenerationReadiness,
+  type ArenaGenerationReadinessIssue,
+} from '@mahoshojo/multiplayer-core';
 
 import type {
   ArenaRoomController,
@@ -9,7 +18,24 @@ export type ArenaRoomGenerationAction = {
   readonly inRoom: boolean;
   readonly canStart: boolean;
   readonly canRetry: boolean;
-  readonly reason: 'active' | 'connection' | 'member' | 'recovery' | 'unknown' | null;
+  readonly reason: 'active' | 'config-unknown' | 'connection' | 'member' | 'recovery' | 'unknown' | null;
+};
+
+export class ArenaRoomGenerationReadinessError extends Error {
+  public readonly issues: readonly ArenaGenerationReadinessIssue[];
+
+  public constructor(issues: readonly ArenaGenerationReadinessIssue[]) {
+    super(issues.map((issue) => issue.userAction).join(' '));
+    this.name = 'ArenaRoomGenerationReadinessError';
+    this.issues = Object.freeze([...issues]);
+  }
+}
+
+export const assertArenaRoomGenerationReady = (
+  sharedConfig: ArenaRoomSharedConfig,
+): void => {
+  const evaluation = evaluateArenaGenerationReadiness(sharedConfig);
+  if (!evaluation.ready) throw new ArenaRoomGenerationReadinessError(evaluation.issues);
 };
 
 export const resolveArenaRoomGenerationAction = (
@@ -22,6 +48,9 @@ export const resolveArenaRoomGenerationAction = (
   }
   if (state.phase !== 'connected') {
     return { inRoom: true, canStart: false, canRetry: false, reason: 'connection' };
+  }
+  if (state.configPublishResultUnknown) {
+    return { inRoom: true, canStart: false, canRetry: false, reason: 'config-unknown' };
   }
   const retryableUnknown = state.generation.startResultUnknown
     && state.generation.phase === 'unknown'
@@ -69,9 +98,10 @@ type DispatchArenaRoomGenerationStartOptions = {
   readonly controller: ArenaRoomController;
   readonly state: ArenaRoomControllerState;
   readonly sharedConfig: ArenaRoomSharedConfig;
+  readonly hostLocalPayloads: readonly ArenaRoomHostLocalPayload[];
   readonly generationRequestId: string;
-  /** Request-scoped full payload; this function never stores it in Room state. */
-  readonly generation: Record<string, unknown>;
+  /** Request-scoped host-only runtime fields; Room-shared semantics are materialized server-side. */
+  readonly generation: ArenaRoomHostRuntimeGeneration;
 };
 
 export const dispatchArenaRoomGenerationStart = async (
@@ -97,12 +127,16 @@ export const dispatchArenaRoomGenerationStart = async (
     return 'stale';
   }
 
-  await options.controller.startGeneration({
+  assertArenaRoomGenerationReady(options.sharedConfig);
+
+  await options.controller.startGeneration(ArenaRoomGenerationStartRequestSchema.parse({
     expectedRoomEpoch: captured.roomEpoch,
     expectedRevision: captured.snapshot.revision,
+    expectedControlSeq: captured.snapshot.controlSeq,
     generationRequestId: options.generationRequestId,
     sharedConfig: options.sharedConfig,
+    hostLocalPayloads: options.hostLocalPayloads,
     generation: options.generation,
-  });
+  }));
   return 'submitted';
 };

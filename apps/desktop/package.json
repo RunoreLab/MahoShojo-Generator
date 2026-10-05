@@ -1,0 +1,45 @@
+{
+  "name": "@mahoshojo/desktop",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm run generate:content && vite",
+    "build": "pnpm run generate:content && pnpm run typecheck:build && vite build",
+    "typecheck:build": "tsc --noEmit --pretty false -p tsconfig.build.json",
+    "preview": "vite preview",
+    "test": "vitest run --config vitest.config.ts",
+    "lint": "eslint src tests vite.config.ts --config eslint.config.mjs",
+    "tauri": "tauri",
+    "dev:tauri": "tauri dev",
+    "build:tauri": "tauri build",
+    "check:rust": "cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check && cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings && cargo test --manifest-path src-tauri/Cargo.toml",
+    "generate:content": "node ../../scripts/generate-encyclopedia-content.mjs --target desktop"
+  },
+  "dependencies": {
+    "@mahoshojo/domain": "workspace:*",
+    "@mahoshojo/ai-core": "workspace:*",
+    "@mahoshojo/ai-direct": "workspace:*",
+    "@mahoshojo/contracts": "workspace:*",
+    "@mahoshojo/local-library": "workspace:*",
+    "@mahoshojo/ui-web": "workspace:*",
+    "@mahoshojo/web-package": "workspace:*",
+    "@tanstack/react-router": "1.170.41",
+    "@tauri-apps/api": "^2.12.0",
+    "react": "^19.2.1",
+    "react-dom": "^19.2.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@tauri-apps/cli": "^2.12.0",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@typescript-eslint/eslint-plugin": "^8.50.0",
+    "@typescript-eslint/parser": "^8.50.0",
+    "eslint": "^9",
+    "tailwindcss": "^4",
+    "typescript": "^5",
+    "vite": "^8.0.16",
+    "vitest": "^4.1.7"
+  }
+}

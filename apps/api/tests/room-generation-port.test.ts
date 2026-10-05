@@ -139,7 +139,17 @@ describe('Arena Room generation internal port', () => {
         return {
           generationId: 'arena_generation_1',
           generationRequestId,
-          headers: { 'x-private-provider-diagnostic': 'must-not-escape' },
+          headers: {
+            'X-Mahoshojo-Stream-Meta': encodeURIComponent(JSON.stringify({
+              mode: 'classic',
+              reporterInfo: { name: '测试记者', publication: 'A.R.E.N.A.' },
+              userGuidance: '保持克制',
+              narrativeHistoryReadCount: 3,
+              rawReasoning: 'must-not-escape',
+              providerDiagnostic: { requestId: 'must-not-escape' },
+            })),
+            'x-private-provider-diagnostic': 'must-not-escape',
+          },
           events: eventStream([
             { id: '1-0', type: 'markdown', data: { chunk: '安全正文' } },
             { id: '1-1', type: 'reasoning', data: { chunk: 'private reasoning' } },
@@ -231,6 +241,17 @@ describe('Arena Room generation internal port', () => {
     expect(receivedRequest!.signal.aborted).toBe(true);
 
     if (result.kind !== 'subscribed') throw new Error('expected subscription');
+    expect(result.subscription.roomSafeMetadata).toEqual({
+      version: 1,
+      format: 'stream-markdown',
+      mode: 'classic',
+      reporterInfo: { name: '测试记者', publication: 'A.R.E.N.A.' },
+      sharedGuidance: '保持克制',
+      narrativeHistoryReadCount: 3,
+    });
+    expect(JSON.stringify(result.subscription.roomSafeMetadata)).not.toMatch(
+      /rawReasoning|providerDiagnostic|must-not-escape/u,
+    );
     const events = await readAll(result.subscription.events);
     expect(events).toEqual([
       { id: '1-0', type: 'markdown', chunk: '安全正文' },
@@ -255,6 +276,7 @@ describe('Arena Room generation internal port', () => {
 
   it('fixes actor ownership for deterministic id, read, and resume without exposing diagnostics', async () => {
     const generationService = {
+      cancelOwned: vi.fn(async () => ({ kind: 'accepted' as const, cancelReason: 'user' as const })),
       readOwnedProjection: vi.fn(async () => ({
         kind: 'found' as const,
         projection: {
@@ -268,6 +290,14 @@ describe('Arena Room generation internal port', () => {
           resultAvailable: false,
           generationRecordId: null,
           errorCode: null,
+          roomSafeResult: {
+            version: 1,
+            format: 'stream-markdown',
+            mode: 'classic',
+            reporterInfo: { name: '测试记者', publication: 'A.R.E.N.A.' },
+            report: { headline: '安全标题' },
+            ai: { model: 'gpt-safe', usage: { totalTokens: 30 } },
+          },
           reasoning: 'hidden reasoning despite an unsound adapter',
           providerDiagnostic: { requestId: 'hidden-provider-request' },
         },
@@ -281,6 +311,17 @@ describe('Arena Room generation internal port', () => {
           events: eventStream([
             { id: '5-0', type: 'telemetry', data: { providerRequestId: 'hidden' } },
             { id: '5-1', type: 'markdown', data: { chunk: 'resumed' } },
+            {
+              id: '5-2',
+              type: 'done',
+              data: {
+                status: 'completed',
+                ok: true,
+                persistenceWarning: 'OUTPUT_NOT_ARCHIVED',
+                replayUnavailable: true,
+                resultAvailable: false,
+              },
+            },
           ]),
         },
       })),
@@ -303,7 +344,12 @@ describe('Arena Room generation internal port', () => {
       generationId: 'arena_generation_1',
     });
     expect(projection).toMatchObject({ kind: 'found', projection: { markdown: 'baseline' } });
+    expect(projection).not.toHaveProperty('projection.roomSafeResult');
     expect(JSON.stringify(projection)).not.toMatch(/reasoning|provider/u);
+    await expect(port.cancelOwned({
+      roomId: 'room-1',
+      generationId: 'arena_generation_1',
+    })).resolves.toEqual({ kind: 'accepted', cancelReason: 'user' });
     const resumed = await port.resumeOwnedSubscription({
       roomId: 'room-1',
       generationId: 'arena_generation_1',
@@ -318,6 +364,11 @@ describe('Arena Room generation internal port', () => {
       actorKey: 'pvp-room:room-1',
       generationId: 'arena_generation_1',
     });
+    expect(generationService.cancelOwned).toHaveBeenCalledWith({
+      actorKey: 'pvp-room:room-1',
+      generationId: 'arena_generation_1',
+      reason: 'user',
+    });
     expect(generationService.resumeOwnedSubscription).toHaveBeenCalledWith({
       actorKey: 'pvp-room:room-1',
       generationId: 'arena_generation_1',
@@ -326,6 +377,151 @@ describe('Arena Room generation internal port', () => {
     if (resumed.kind !== 'subscribed') throw new Error('expected subscription');
     await expect(readAll(resumed.subscription.events)).resolves.toEqual([
       { id: '5-1', type: 'markdown', chunk: 'resumed' },
+      {
+        id: '5-2',
+        type: 'done',
+        status: 'completed',
+        generationRecordId: 'arena_generation_1',
+        resultAvailable: false,
+        persistenceWarning: 'OUTPUT_NOT_ARCHIVED',
+        replayUnavailable: true,
+      },
     ]);
+  });
+
+  it('maps trusted cancel failures to a stable unavailable result', async () => {
+    const generationService = {
+      cancelOwned: vi.fn(async () => {
+        throw new Error('provider/internal cancel diagnostic');
+      }),
+    } as unknown as ArenaGenerationApplicationService;
+    const port = createArenaRoomGenerationPort({
+      generationService,
+      pvpAuthority: { sign: vi.fn() },
+      internalGuidanceAuthority: { sign: vi.fn() },
+      deriveGenerationId: vi.fn(async () => 'arena_generation_1'),
+      canonicalizeSemanticPayload,
+    });
+
+    await expect(port.cancelOwned({
+      roomId: 'room-1',
+      generationId: 'arena_generation_1',
+    })).resolves.toEqual({ kind: 'unavailable', code: 'GENERATION_STATE_UNAVAILABLE' });
+  });
+
+  it.each(['markdown', 'package'])('strictly projects only the completed durable Room-safe result allowlist (%s)', async (format) => {
+    const packageFields = format === 'package' ? {
+      webPackage: {
+        packageRef: { id: 'test.fixture', version: '1.0.0', digest: `sha256:${'a'.repeat(64)}` },
+        targetPath: 'data/report.json', targetMediaType: 'application/json' as const, generatedDigest: `sha256:${'b'.repeat(64)}`,
+      },
+    } : {};
+    const generationService = {
+      readOwnedProjection: vi.fn(async () => ({
+        kind: 'found' as const,
+        projection: {
+          generationId: 'arena_generation_1',
+          generationRequestId: 'request-room-completed-1',
+          status: 'completed' as const,
+          markdown: '# 权威终态正文',
+          resumeCursor: '9-0',
+          updatedAt: '2026-08-28T11:00:00.000Z',
+          finalAuthoritative: true,
+          resultAvailable: true,
+          generationRecordId: 'arena_generation_1',
+          errorCode: null,
+          roomSafeResult: {
+            version: 1,
+            format: format === 'package' ? 'stream-web' : 'stream-markdown',
+            ...packageFields,
+            mode: 'classic',
+            reporterInfo: { name: '测试记者', publication: 'A.R.E.N.A.' },
+            report: { headline: '安全标题' },
+            ai: { model: 'gpt-safe', usage: { totalTokens: 30 } },
+          },
+          reasoning: 'hidden reasoning despite an unsound adapter',
+          extra_json: { apiKey: 'hidden-provider-key' },
+          updatedCombatants: [{ data: { private: true } }],
+        },
+      })),
+    } as unknown as ArenaGenerationApplicationService;
+    const port = createArenaRoomGenerationPort({
+      generationService,
+      pvpAuthority: { sign: vi.fn() },
+      internalGuidanceAuthority: { sign: vi.fn() },
+      deriveGenerationId: vi.fn(async () => 'arena_generation_1'),
+      canonicalizeSemanticPayload,
+    });
+
+    const result = await port.readOwnedProjection({
+      roomId: 'room-1',
+      generationId: 'arena_generation_1',
+    });
+
+    expect(result).toMatchObject({
+      kind: 'found',
+      projection: {
+        status: 'completed',
+        roomSafeResult: {
+          version: 1,
+          format: format === 'package' ? 'stream-web' : 'stream-markdown',
+          ...packageFields,
+          mode: 'classic',
+          reporterInfo: { name: '测试记者', publication: 'A.R.E.N.A.' },
+          report: { headline: '安全标题' },
+          ai: { model: 'gpt-safe', usage: { totalTokens: 30 } },
+        },
+      },
+    });
+    expect(JSON.stringify(result)).not.toMatch(
+      /extra_json|hidden-provider-key|reasoning|updatedCombatants|private/u,
+    );
+  });
+
+  it.each([
+    [
+      'expired',
+      { contentRetention: 'expired' as const },
+      { contentRetention: 'expired' },
+    ],
+    [
+      'not-archived',
+      { persistenceWarning: 'OUTPUT_NOT_ARCHIVED' as const, replayUnavailable: true as const },
+      { persistenceWarning: 'OUTPUT_NOT_ARCHIVED', replayUnavailable: true },
+    ],
+  ])('only projects the %s historical availability marker', async (_label, marker, expected) => {
+    const generationService = {
+      readOwnedProjection: vi.fn(async () => ({
+        kind: 'found' as const,
+        projection: {
+          generationId: 'arena_generation_1',
+          generationRequestId: 'request-room-completed-1',
+          status: 'completed' as const,
+          markdown: '',
+          resumeCursor: null,
+          updatedAt: '2026-08-28T11:00:00.000Z',
+          finalAuthoritative: true,
+          resultAvailable: false,
+          generationRecordId: null,
+          errorCode: null,
+          ...marker,
+          providerDiagnostic: 'must-not-pass',
+        },
+      })),
+    } as unknown as ArenaGenerationApplicationService;
+    const port = createArenaRoomGenerationPort({
+      generationService,
+      pvpAuthority: { sign: vi.fn() },
+      internalGuidanceAuthority: { sign: vi.fn() },
+      deriveGenerationId: vi.fn(async () => 'arena_generation_1'),
+      canonicalizeSemanticPayload,
+    });
+
+    const result = await port.readOwnedProjection({
+      roomId: 'room-1',
+      generationId: 'arena_generation_1',
+    });
+    expect(result).toMatchObject({ kind: 'found', projection: expected });
+    expect(JSON.stringify(result)).not.toContain('providerDiagnostic');
   });
 });

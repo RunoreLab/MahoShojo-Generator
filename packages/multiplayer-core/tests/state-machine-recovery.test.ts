@@ -72,6 +72,7 @@ describe('Arena Room recovery transition', () => {
       type: 'reserve-generation',
       expectedRoomEpoch: 'epoch-1',
       expectedRevision: 1,
+      expectedControlSeq: pending.nextState.snapshot.controlSeq,
       generationRequestId: 'request-1',
       generationId: 'generation-1',
       attempt: 1,

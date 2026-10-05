@@ -3,15 +3,27 @@ import {
   updateBattleReportGenerationOutputHasSensitiveWords,
 } from '@/lib/database/battle-report-generations';
 import {
+  buildBattleReportRenderSnapshotSafetyText,
+  extractBattleReportRenderSnapshotV1,
   extractBattleReportGenerationErrorMessage,
   loadBattleReportGenerationOutputText,
 } from '@/lib/arena/battle-report-record-utils';
-import { isUserInPvpMatch } from '@/lib/database/pvp';
+import { resolveBattleReportAccess } from '@/lib/arena/battle-report-access';
 import { hydrateBattleReportCardFromGenerationRecord } from '@/lib/arena/battle-report-card-fallback';
-import { json, readJson, requireAuthUser } from '@/lib/pvp/server';
+import { json, readJson, requireAuthUser } from '@/lib/api/server';
 import { quickCheck } from '@/lib/sensitive-word-filter';
+import type { BattleReportRenderSnapshotV1 } from '@mahoshojo/contracts';
 
 type RegenerateBody = { userGuidance?: unknown };
+
+const projectArenaParticipantRenderSnapshot = (
+  snapshot: BattleReportRenderSnapshotV1 | null,
+): BattleReportRenderSnapshotV1 | null => {
+  if (!snapshot) return null;
+  const sharedSnapshot = { ...snapshot };
+  delete sharedSnapshot.characterGuidances;
+  return sharedSnapshot;
+};
 
 const getGenerationIdFromUrl = (url: string): string | null => {
   try {
@@ -37,13 +49,18 @@ async function handler(req: Request): Promise<Response> {
   const record = await getBattleReportGenerationByIdLite(generationId);
   if (!record) return json({ error: '记录不存在' }, { status: 404 });
 
-  const isOwner = record.user_id === auth.user.id;
-  const canReadByPvp = record.pvp_match_id ? await isUserInPvpMatch(record.pvp_match_id, auth.user.id) : false;
-  if (!isOwner && !canReadByPvp) return json({ error: '记录不存在' }, { status: 404 });
+  const access = await resolveBattleReportAccess(generationId, auth.user.id);
+  if (!access) return json({ error: '记录不存在' }, { status: 404 });
 
+  const renderSnapshot = extractBattleReportRenderSnapshotV1(record.extra_json);
+  const projectedRenderSnapshot = access.scope === 'arena-participant'
+    ? projectArenaParticipantRenderSnapshot(renderSnapshot)
+    : renderSnapshot;
+  const isWeb = projectedRenderSnapshot?.reportFormat === 'web';
   const output = await loadBattleReportGenerationOutputText({
     generationId: record.id,
-    outputPreview: record.output_preview,
+    // Web 必须读取完整存档，D1 preview 可能截断，不能作为可执行文档。
+    outputPreview: isWeb ? null : record.output_preview,
   });
   const outputPreview = output.outputText;
   if (!outputPreview.trim()) {
@@ -51,17 +68,22 @@ async function handler(req: Request): Promise<Response> {
     if (output.readError) {
       return json({ error: `战报正文读取失败：${output.readError}` }, { status: 502 });
     }
+    if (output.source === 'r2' && !output.hasStoredOutput) {
+      return json({ error: '战报正文已超过保留期，无法还原。' }, { status: 409 });
+    }
     if (errorMessage) {
       return json({ error: `该战报未生成可重生正文：${errorMessage}` }, { status: 409 });
     }
     return json({ error: '该战报未保存可重生正文，可能已失败或已被清理。' }, { status: 409 });
   }
   const flaggedSensitive = record.output_has_sensitive_words;
-
   const hasPreviewText = Boolean(outputPreview && outputPreview.trim());
   let contentBlocked = flaggedSensitive === 1;
   if (hasPreviewText) {
-    const sensitiveCheck = await quickCheck(outputPreview);
+    const snapshotSafetyText = buildBattleReportRenderSnapshotSafetyText(renderSnapshot);
+    const sensitiveCheck = await quickCheck(
+      snapshotSafetyText ? `${outputPreview}\n${snapshotSafetyText}` : outputPreview,
+    );
     contentBlocked = Boolean(sensitiveCheck.hasSensitiveWords);
     await updateBattleReportGenerationOutputHasSensitiveWords(record.id, contentBlocked);
   }
@@ -83,12 +105,18 @@ async function handler(req: Request): Promise<Response> {
     winner: record.winner,
     outputPreview: outputPreview,
     aiModel: record.ai_model,
+    usageDetails: (() => {
+      try { return JSON.parse(record.extra_json ?? '{}')?.usageDetails; }
+      catch { return undefined; }
+    })(),
     promptTokens: record.prompt_tokens,
     completionTokens: record.completion_tokens,
     totalTokens: record.total_tokens,
     cachedTokens: record.cached_tokens,
     reasoningTokens: record.reasoning_tokens,
     userGuidance,
+    renderSnapshot: projectedRenderSnapshot,
+    authoritativeWebContent: isWeb && record.status === 'completed' && output.source === 'r2' && !output.readError,
   });
 
   return json({
@@ -97,6 +125,8 @@ async function handler(req: Request): Promise<Response> {
     liveBody: hydrated.liveBody,
     generationId,
     generationMode: record.generation_mode,
+    accessScope: access.scope,
+    arenaParticipantRole: access.arenaParticipantRole,
   });
 }
 

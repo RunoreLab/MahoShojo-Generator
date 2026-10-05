@@ -1,6 +1,9 @@
 import 'fake-indexeddb/auto';
 import { expect } from 'vitest';
 
+// 手动使用 React act 的测试共享同一环境声明，保留未包裹更新的诊断。
+(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
 type GlobalWithWindow = typeof globalThis & {
   window?: Window & typeof globalThis;
 };

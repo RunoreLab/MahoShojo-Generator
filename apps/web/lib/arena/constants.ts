@@ -67,10 +67,9 @@ export const SYSTEM_PROMPTS = {
 3.  能力运用：
     * 使用能力可能会付出情报暴露的代价，因此在非必要的情况下，角色通常不使用过于强大的能力。例如，留给决战的王牌能力（如奇境和繁开）通常只在死斗时才会考虑使用。
     * 反制手段：没有无敌的能力，无论是什么能力都可能被对方【抵消】，或被强大的力量直接【破坏】。
-    * 强度限制：任何能力都必须是【有代价、可被理解和应对的】，绝不能是无法破解的必胜技能。严禁使用干涉命运、时间、世界等过于强大的必杀技。
+    * 强度限制：任何能力都必须是【有代价、可被理解和应对的】，绝不能是无法破解的必胜技能。
 
 请严格遵守以上战斗规则进行推演，构建一场强弱关系合理、有来有回、充满战术博弈的精彩战斗，而不是一场单纯的能力碾压。
-注意，正义并不是必然战胜邪恶。反派有时候也能胜过正派。而且，正义与邪恶之间互有胜负才能创造出更精彩的故事。
 `,
   magicalGirlVsCanshou: `你是一名战地记者，负责报道魔法少女与残兽之间的战斗。
   --- 能力边界与强度设定 ---
@@ -117,10 +116,9 @@ export const SYSTEM_PROMPTS = {
 2.  能力运用：
     * 使用能力可能会付出情报暴露的代价，因此在非必要的情况下，角色通常不使用过于强大的能力。例如，留给决战的王牌能力（如奇境和繁开）通常只在死斗时才会考虑使用。
     * 反制手段：没有无敌的能力，无论是什么能力都可能被对方【抵消】，或被强大的力量直接【破坏】。
-    * 强度限制：任何能力都必须是【有代价、可被理解和应对的】，绝不能是无法破解的必胜技能。严禁使用干涉命运、时间、世界等过于强大的必杀技。
+    * 强度限制：任何能力都必须是【有代价、可被理解和应对的】，绝不能是无法破解的必胜技能。
 
 请严格遵守以上战斗规则进行推演，构建一场强弱关系合理、有来有回、充满战术博弈的精彩战斗，而不是一场单纯的能力碾压。
-注意，正义并不是必然战胜邪恶。反派有时候也能胜过正派。而且，正义与邪恶之间互有胜负才能创造出更精彩的故事。
 `,
   scenario: `
 你的任务是基于用户提供的【情景设定】和【角色档案】，创作一篇故事。
@@ -139,20 +137,4 @@ export const SYSTEM_PROMPTS = {
 
 现在，请你开始创作。
 `,
-};
-
-export const getSystemPrompt = (mode: string, combatants: any[]): string => {
-  if (mode === 'daily') return SYSTEM_PROMPTS.daily;
-  if (mode === 'kizuna') return SYSTEM_PROMPTS.kizuna;
-  if (mode === 'scenario') return SYSTEM_PROMPTS.scenario;
-
-  const participantTypes = new Set(combatants.map((c: any) => c.type));
-  const hasOnlyMagicalGirls = participantTypes.size === 1 && participantTypes.has('magical-girl');
-  const hasOnlyCanshou = participantTypes.size === 1 && participantTypes.has('canshou');
-  const hasMagicalAndCanshouOnly = participantTypes.has('magical-girl') && participantTypes.has('canshou') && participantTypes.size === 2;
-
-  if (hasOnlyMagicalGirls) return SYSTEM_PROMPTS.classic;
-  if (hasOnlyCanshou) return SYSTEM_PROMPTS.canshouVsCanshou;
-  if (hasMagicalAndCanshouOnly) return SYSTEM_PROMPTS.magicalGirlVsCanshou;
-  return SYSTEM_PROMPTS.fallback;
 };

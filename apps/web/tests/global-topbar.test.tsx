@@ -25,6 +25,7 @@ vi.mock('next/link', () => ({
   default: function LinkMock({
     children,
     href,
+    prefetch,
     ...props
   }: {
     children?: React.ReactNode;
@@ -32,7 +33,7 @@ vi.mock('next/link', () => ({
     [key: string]: unknown;
   }) {
     return (
-      <a href={href} {...props}>
+      <a href={href} data-prefetch={String(prefetch)} {...props}>
         {children}
       </a>
     );
@@ -81,6 +82,7 @@ describe('topbar leaf components', () => {
 
     expect(html).toContain('消息');
     expect(html).toContain('href="/messages"');
+    expect(html).toContain('data-prefetch="false"');
     expect(html).toContain('5');
     expect(html).not.toContain('disabled');
   });

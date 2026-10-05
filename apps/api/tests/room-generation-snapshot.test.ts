@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -8,6 +9,70 @@ import {
 import { createArenaRoomState } from './arena-room-fixtures';
 
 describe('Arena Room frozen generation snapshot', () => {
+  it('旧 checkpoint 不猜测 host，新快照拒绝不属于参与者的 host', () => {
+    const snapshot = createArenaRoomGenerationSnapshot(createArenaRoomState(), 'legacy-host');
+    const { snapshotDigest, hostAccountUserId, ...legacy } = snapshot;
+    expect(snapshotDigest).toMatch(/^sha256:/u);
+    expect(hostAccountUserId).toBe(101);
+    const restored = createArenaRoomGenerationSnapshotFromFrozen(legacy);
+    expect(restored.hostAccountUserId).toBeUndefined();
+    expect(restored.snapshotDigest).not.toBe(snapshotDigest);
+    expect(createArenaRoomGenerationSnapshotFromFrozen(legacy)).toEqual(restored);
+    expect(() => createArenaRoomGenerationSnapshotFromFrozen({ ...legacy, hostAccountUserId: 999 }))
+      .toThrow();
+    const state = createArenaRoomState();
+    state.memberAuthority[0]!.member.membershipState = 'revoked';
+    expect(() => createArenaRoomGenerationSnapshot(state, 'invalid-host')).toThrow();
+  });
+
+  it('normalized Markdown retains the digest of old snapshots without reportFormat', () => {
+    const snapshot = createArenaRoomGenerationSnapshot(createArenaRoomState(), 'legacy-request');
+    const { snapshotDigest, ...frozen } = snapshot;
+    const legacyConfig = Object.fromEntries(Object.entries(frozen.sharedConfig)
+      .filter(([key]) => key !== 'reportFormat'));
+    const canonical = (value: unknown): unknown => {
+      if (Array.isArray(value)) return value.map(canonical);
+      if (!value || typeof value !== 'object') return value;
+      return Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b))
+        .map(([key, entry]) => [key, canonical(entry)]));
+    };
+    const legacyDigest = `sha256:${createHash('sha256')
+      .update(JSON.stringify(canonical({ ...frozen, sharedConfig: legacyConfig }))).digest('hex')}`;
+    expect(snapshotDigest).toBe(legacyDigest);
+    expect(createArenaRoomGenerationSnapshotFromFrozen(frozen).snapshotDigest).toBe(legacyDigest);
+  });
+
+  it('format is frozen into the snapshot digest and later room edits cannot change it', () => {
+    const state = createArenaRoomState();
+    const markdown = createArenaRoomGenerationSnapshot(state, 'request-format');
+    expect(markdown.sharedConfig.reportFormat).toBe('markdown');
+    state.snapshot.sharedConfig.reportFormat = 'web';
+    const web = createArenaRoomGenerationSnapshot(state, 'request-format');
+    expect(web.snapshotDigest).not.toBe(markdown.snapshotDigest);
+    expect(web.sharedConfig.reportFormat).toBe('web');
+    state.snapshot.sharedConfig.reportFormat = 'markdown';
+    expect(web.sharedConfig.reportFormat).toBe('web');
+    const { snapshotDigest, ...frozen } = web;
+    expect(snapshotDigest).toMatch(/^sha256:/u);
+    expect(createArenaRoomGenerationSnapshotFromFrozen(frozen)).toEqual(web);
+  });
+
+  it('Package revision participates in snapshot identity and remains pinned after room edits', () => {
+    const state = createArenaRoomState();
+    state.snapshot.sharedConfig.reportFormat = 'web';
+    const generatedWeb = createArenaRoomGenerationSnapshot(state, 'package-request');
+    const ref = { id: 'test.fixture', version: '1.0.0', digest: `sha256:${'a'.repeat(64)}` };
+    state.snapshot.sharedConfig.webPackageRef = ref;
+    const packageWeb = createArenaRoomGenerationSnapshot(state, 'package-request');
+    expect(packageWeb.snapshotDigest).not.toBe(generatedWeb.snapshotDigest);
+    expect(packageWeb.sharedConfig.webPackageRef).toEqual(ref);
+    state.snapshot.sharedConfig.webPackageRef = { ...ref, digest: `sha256:${'b'.repeat(64)}` };
+    expect(createArenaRoomGenerationSnapshot(state, 'package-request').snapshotDigest).not.toBe(packageWeb.snapshotDigest);
+    expect(packageWeb.sharedConfig.webPackageRef).toEqual(ref);
+    const { snapshotDigest, ...frozen } = packageWeb;
+    expect(createArenaRoomGenerationSnapshotFromFrozen(frozen).snapshotDigest).toBe(snapshotDigest);
+  });
+
   it('冻结当前 revision/config/active account participants 与 collaborative provenance', () => {
     const state = createArenaRoomState();
     state.memberAuthority.push({
@@ -36,6 +101,7 @@ describe('Arena Room frozen generation snapshot', () => {
       configRevision: state.snapshot.revision,
       collaborativeInfluence: true,
       participantUserIds: [9, 101],
+      hostAccountUserId: 101,
       sharedConfig: state.snapshot.sharedConfig,
     });
     expect(snapshot.snapshotDigest).toMatch(/^sha256:[0-9a-f]{64}$/u);
@@ -45,6 +111,7 @@ describe('Arena Room frozen generation snapshot', () => {
       configRevision: snapshot.configRevision,
       collaborativeInfluence: snapshot.collaborativeInfluence,
       participantUserIds: snapshot.participantUserIds,
+      hostAccountUserId: snapshot.hostAccountUserId,
       sharedConfig: snapshot.sharedConfig,
     })).toEqual(snapshot);
 

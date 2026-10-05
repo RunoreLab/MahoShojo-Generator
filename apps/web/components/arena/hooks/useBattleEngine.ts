@@ -1,7 +1,12 @@
 'use client';
 
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
+import { ArenaRoomHostRuntimeGenerationSchema } from '@mahoshojo/contracts/arena-room';
+import {
+  ARENA_CANONICAL_CAPABILITIES,
+  evaluateArenaBasicGenerationReadiness,
+} from '@mahoshojo/contracts/arena-capabilities';
 
 import type { NewsReport } from '@/components/BattleReportCard';
 import { persistArrestedBackup, type ArrestedBackupDraftItem, type ArrestedBackupTriggerSource } from '@/lib/arrested-backup';
@@ -19,8 +24,8 @@ import { BattleAiImpact, BattleApiResponse, BattleStoreState, CombatantData } fr
 import { useBattleActions } from './useBattleActions';
 import { useStreamCombatantUpdater } from './useStreamCombatantUpdater';
 import { toBattleReportMarkdown } from '../utils/battleReportMarkdown';
-import { precheckBattleReportForRedo } from '@/lib/arena/redo-updates';
 import { extractStreamTelemetryMeta, extractStreamUpdateMeta, stripStreamUpdateMetaComment } from '@/lib/arena/stream-meta';
+import { normalizeUsage } from '@/lib/arena/battle-report-log-utils';
 import {
   buildStreamSoftTimeoutMessage,
   createStreamReadWithTimeout,
@@ -29,8 +34,19 @@ import {
   StreamReadTimeoutError,
 } from '@/lib/stream/timeout';
 import { authStorage } from '@/lib/auth';
+import { secureRandomUUID } from '@/lib/crypto';
+import { normalizeAdjudicationEvents } from '@/lib/adjudicator/normalize';
+import { buildArenaQuestionnaireRequest } from '../utils/questionnaireRequest';
 import {
+  buildWebPackagePromptProjection,
+  isBuiltinWebPackageRef,
+  resolveWebPackage,
+} from '@mahoshojo/web-package';
+import type { WebPackagePromptProjection } from '@mahoshojo/contracts/web-package';
+import {
+  createPinnedGenerationApiSafeReadDispatcher,
   createGenerationApiIntent,
+  isGenerationApiClientErrorCode,
   type GenerationApiIntent,
 } from '@/lib/hono-api-client';
 import { useGenerationApiIntentLatch } from '@/lib/use-generation-api-intent-latch';
@@ -38,7 +54,10 @@ import { useNarrativeHistoryStore } from '../stores/useNarrativeHistoryStore';
 import { resolveApiErrorMessage } from '@/lib/client/apiError';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { appendReasoningDelta, normalizeReasoningSource, updateReasoningStatus } from '@/lib/ai/reasoning-normalizer';
-import { limitNarrativeHistoryEntriesForPrompt } from '@/lib/narrative-history';
+import {
+  appendArenaNarrativeHistoryResult,
+  materializeArenaNarrativeHistoryForRequest,
+} from '@/lib/arena-room/narrative-history-runtime';
 import type { AIReasoningSource } from '@/types/ai-reasoning';
 import {
   ARENA_PROVIDER_COOLDOWN_BASE_KEY,
@@ -46,21 +65,53 @@ import {
 } from '../utils/providerCooldown';
 import { normalizeCustomStoryLength } from '@/lib/story-length';
 import { buildCustomProviderRequestPayload } from '@/lib/ai/custom-provider';
-import type { GenerationRankingResponse } from '@/lib/arena/generation-ranking';
+import {
+  parseGenerationRankingResponse,
+  type GenerationRankingResponse,
+} from '@/lib/arena/generation-ranking';
 import {
   arenaGenerationConnectionNotice,
+  captureArenaGenerationActorToken,
+  isArenaGenerationRecoveryState,
+  mergeArenaGenerationSnapshotMarkdown,
   openArenaGenerationStream,
   type ArenaGenerationConnectionState,
+  withArenaGenerationActorToken,
 } from '@/lib/arena/resumable-generation-client';
-import { buildArenaRoomSharedConfigFromBattleState } from '@/lib/arena-room/shared-config';
+import { buildArenaRoomHostWorkspaceBundleFromBattleState } from '@/lib/arena-room/shared-config';
 import {
+  areArenaRoomSharedConfigsEqual,
+  arenaRoomHostWorkspaceAuthorityFromSession,
+  type ArenaRoomGenerationStartInputs,
+  type ArenaRoomHostWorkspaceDirtyReason,
+} from '@/lib/arena-room/host-workspace';
+import {
+  assertArenaRoomGenerationReady,
   dispatchArenaRoomGenerationRetry,
   dispatchArenaRoomGenerationStart,
   resolveArenaRoomGenerationAction,
 } from '../multiplayer/generation-bridge';
 import { useArenaRoomContext } from '../multiplayer/useArenaRoom';
+import {
+  arenaRoomGenerationSyncGateMessage,
+  canAutoPublishArenaRoomHostDraft,
+  canPublishArenaRoomGenerationDraft,
+  isArenaRoomGenerationFenceCurrent,
+  isArenaRoomGenerationSyncSettled,
+  pendingProposalFingerprint,
+} from '../multiplayer/generation-preflight';
 
 const sanitizeTextByShieldWords = (text: string): string => applyShieldWords(text).filteredText;
+
+export type ArenaRoomGenerationPreflightChoice = 'cancel' | 'publish' | 'sync-room' | 'confirm-start';
+
+export type ArenaRoomGenerationPreflightPrompt = Readonly<{
+  reasons: readonly ArenaRoomHostWorkspaceDirtyReason[];
+  canPublish: boolean;
+  canConfirmStart: boolean;
+  pendingProposalCount: number;
+  busy: boolean;
+}>;
 
 let sharedGenerationAbortController: AbortController | null = null;
 
@@ -74,6 +125,7 @@ const isStreamInterruptedError = (error: unknown): boolean => {
   if (message.includes('流式读取超时') || message.includes('流式生成超时')) return true;
   if (message.includes('timeout') || message.includes('timed out')) return true;
   if (message.includes('aborted') || message.includes('中断')) return true;
+  if (message.includes('arena_resume_attempts_exhausted')) return true;
   return false;
 };
 
@@ -123,78 +175,6 @@ const normalizeBattleAiImpacts = (input: unknown): BattleAiImpact[] => {
   return Array.from(deduped.values());
 };
 
-const normalizeNameTokenForImpact = (name: string): string => {
-  return name
-    .trim()
-    .replace(/^[“”"'「」『』《》【】\[\]（）()]+|[“”"'「」『』《》【】\[\]（）()]+$/g, '')
-    .replace(/\s+/g, '')
-    .toLowerCase();
-};
-
-const getUniqueRosterNames = (roster: CombatantData[]): string[] => {
-  const names = roster
-    .map((item) => (item?.data?.codename || item?.data?.name || '').toString().trim())
-    .filter(Boolean);
-  return Array.from(new Set(names));
-};
-
-const validateManualMetaImpacts = (
-  impacts: BattleAiImpact[],
-  roster: CombatantData[],
-  settings: { writeArenaHistory: boolean }
-): string | null => {
-  if (!Array.isArray(impacts) || impacts.length === 0) {
-    return '未解析到有效 impacts，请至少提供包含 characterName 的 impacts 数组。';
-  }
-
-  const rosterNames = getUniqueRosterNames(roster);
-  if (rosterNames.length === 0) {
-    return '当前没有可更新的参战角色。';
-  }
-
-  const rosterTokenToName = new Map<string, string>();
-  for (const name of rosterNames) {
-    const token = normalizeNameTokenForImpact(name);
-    if (token) rosterTokenToName.set(token, name);
-  }
-
-  const impactTokenToImpact = new Map<string, BattleAiImpact>();
-  const unknownNames: string[] = [];
-
-  for (const impact of impacts) {
-    const token = normalizeNameTokenForImpact(impact.characterName);
-    if (!token) continue;
-    if (!rosterTokenToName.has(token)) {
-      unknownNames.push(impact.characterName);
-      continue;
-    }
-    if (!impactTokenToImpact.has(token)) {
-      impactTokenToImpact.set(token, impact);
-    }
-  }
-
-  const missingNames = rosterNames.filter((name) => !impactTokenToImpact.has(normalizeNameTokenForImpact(name)));
-  if (missingNames.length > 0) {
-    return `impacts 未覆盖全部参战角色，缺少：${missingNames.join('、')}。`;
-  }
-
-  if (unknownNames.length > 0) {
-    const uniqueUnknownNames = Array.from(new Set(unknownNames));
-    return `impacts 包含不在本场参战名单中的角色：${uniqueUnknownNames.join('、')}。`;
-  }
-
-  if (settings.writeArenaHistory) {
-    const missingImpactText = Array.from(impactTokenToImpact.values())
-      .filter((item) => !item.impact || !item.impact.trim())
-      .map((item) => item.characterName);
-    if (missingImpactText.length > 0) {
-      return `已开启历战写入时，每位角色都必须提供 impact，缺少：${missingImpactText.join('、')}。`;
-    }
-  }
-
-  return null;
-};
-
 const isServerInterruptedPayload = (payload: any, fallbackMessage: string): boolean => {
   const status = typeof payload?.status === 'string' ? payload.status.trim().toLowerCase() : '';
   if (status === 'aborted' || status === 'interrupted') return true;
@@ -212,34 +192,6 @@ const extractTitleFromBattleMarkdown = (markdown: string): string => {
     return line.slice(0, 120);
   }
   return '未命名战报';
-};
-
-const appendNarrativeHistoryIfEnabled = async (payload: {
-  enabled: boolean;
-  title: string;
-  contentMarkdown: string;
-  generationId?: string | null;
-}): Promise<void> => {
-  try {
-    if (!payload.enabled) return;
-    const title = (payload.title ?? '').toString().trim();
-    const content = (payload.contentMarkdown ?? '').toString().trim();
-    if (!content) return;
-
-    const [titleCheck, contentCheck] = await Promise.all([
-      quickCheck(title || '未命名战报'),
-      quickCheck(content),
-    ]);
-
-    useNarrativeHistoryStore.getState().appendEntry({
-      title: (titleCheck.filteredText || title || '未命名战报').trim(),
-      content: (contentCheck.filteredText || content).trim(),
-      generationId: payload.generationId,
-    });
-  } catch (error) {
-    // 叙事历史是“增强功能”，失败不应影响战报生成主流程（localStorage 配额/浏览器异常等）
-    console.warn('写入叙事历史失败（已忽略）', error);
-  }
 };
 
 const sanitizeReportByShieldWords = (report: NewsReport): NewsReport => ({
@@ -426,10 +378,15 @@ export const useBattleEngine = () => {
   const generationApiIntentLatch = useGenerationApiIntentLatch();
   const queryClient = useQueryClient();
   const router = useClientRouteAdapter();
-  const { updateFromMarkdown } = useStreamCombatantUpdater();
+  const { updateFromMarkdown, retryGenerationUpdate } = useStreamCombatantUpdater();
   const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
   const combatants = useBattleSelector((state) => state.combatants);
   const battleMode = useBattleSelector((state) => state.battleMode);
+  const reportFormat = useBattleSelector((state) => state.reportFormat);
+  const webPackageRef = useBattleSelector((state) => state.webPackageRef);
+  const setResultWebPackage = useBattleSelector((state) => state.setResultWebPackage);
+  const setResultReportFormat = useBattleSelector((state) => state.setResultReportFormat);
+  const setResultWebReady = useBattleSelector((state) => state.setResultWebReady);
   const generationMode = useBattleSelector((state) => state.generationMode);
   const arenaFreeRankingEnabled = useBattleSelector((state) => state.arenaFreeRankingEnabled);
   const scenario = useBattleSelector((state) => state.scenario);
@@ -447,6 +404,8 @@ export const useBattleEngine = () => {
   const setUpdatedCombatants = useBattleSelector((state) => state.setUpdatedCombatants);
   const setAdjudicationResults = useBattleSelector((state) => state.setAdjudicationResults);
   const setIsGenerating = useBattleSelector((state) => state.setIsGenerating);
+  const arenaGenerationConnectionState = useBattleSelector((state) => state.arenaGenerationConnectionState);
+  const setArenaGenerationConnectionState = useBattleSelector((state) => state.setArenaGenerationConnectionState);
   const setIsRedoingUpdates = useBattleSelector((state) => state.setIsRedoingUpdates);
   const setIsStreaming = useBattleSelector((state) => state.setIsStreaming);
   const setStreamingMarkdown = useBattleSelector((state) => state.setStreamingMarkdown);
@@ -460,13 +419,58 @@ export const useBattleEngine = () => {
   const setStreamUpdateMetaDebug = useBattleSelector((state) => state.setStreamUpdateMetaDebug);
   const setStreamSoftTimeoutWarning = useBattleSelector((state) => state.setStreamSoftTimeoutWarning);
   const setLatestAiImpacts = useBattleSelector((state) => state.setLatestAiImpacts);
-  const setLastGenerationId = useBattleSelector((state) => state.setLastGenerationId);
+  const setLastGenerationRepairContext = useBattleSelector(
+    (state) => state.setLastGenerationRepairContext,
+  );
   const setCombatants = useBattleSelector((state) => state.setCombatants);
   const isGenerating = useBattleSelector((state) => state.isGenerating);
   const streamSoftTimeoutWarning = useBattleSelector((state) => state.streamSoftTimeoutWarning);
   const isRedoingUpdates = useBattleSelector((state) => state.isRedoingUpdates);
   const { handleResolveRandomPlaceholders } = useBattleActions();
   const arenaRoomRuntime = useArenaRoomContext();
+  const [arenaRoomGenerationPreflight, setArenaRoomGenerationPreflight] = useState<ArenaRoomGenerationPreflightPrompt | null>(null);
+  const pendingArenaRoomGenerationPreflight = useRef<{
+    resolve: (choice: ArenaRoomGenerationPreflightChoice) => void;
+  } | null>(null);
+
+  const requestArenaRoomGenerationPreflight = useCallback((
+    input: Readonly<{
+      reasons: readonly ArenaRoomHostWorkspaceDirtyReason[];
+      canPublish: boolean;
+      canConfirmStart?: boolean;
+      pendingProposalCount?: number;
+    }>,
+  ): Promise<ArenaRoomGenerationPreflightChoice> => {
+    pendingArenaRoomGenerationPreflight.current?.resolve('cancel');
+    return new Promise((resolve) => {
+      pendingArenaRoomGenerationPreflight.current = { resolve };
+      setArenaRoomGenerationPreflight({
+        reasons: input.reasons,
+        canPublish: input.canPublish,
+        canConfirmStart: input.canConfirmStart ?? false,
+        pendingProposalCount: input.pendingProposalCount ?? 0,
+        busy: false,
+      });
+    });
+  }, []);
+
+  const resolveArenaRoomGenerationPreflight = useCallback((choice: ArenaRoomGenerationPreflightChoice) => {
+    const pending = pendingArenaRoomGenerationPreflight.current;
+    if (!pending) return;
+    pendingArenaRoomGenerationPreflight.current = null;
+    if (choice === 'publish') {
+      setArenaRoomGenerationPreflight((current) => current ? { ...current, busy: true } : null);
+    } else {
+      setArenaRoomGenerationPreflight(null);
+    }
+    pending.resolve(choice);
+  }, []);
+
+  useEffect(() => () => {
+    const pending = pendingArenaRoomGenerationPreflight.current;
+    pendingArenaRoomGenerationPreflight.current = null;
+    pending?.resolve('cancel');
+  }, []);
 
   const providerCooldownConfig = resolveArenaProviderCooldownConfig(userProviderConfig);
   const { currentMode: providerCooldownMode } = providerCooldownConfig;
@@ -503,7 +507,6 @@ export const useBattleEngine = () => {
 
   const handleGenerate = useCallback(async () => {
     let lastArenaConnectionState: ArenaGenerationConnectionState | null = null;
-    let recoveryNoticeActive = false;
     const roomAction = arenaRoomRuntime
       ? resolveArenaRoomGenerationAction(arenaRoomRuntime.state)
       : { inRoom: false, canStart: true, canRetry: false, reason: null } as const;
@@ -522,6 +525,8 @@ export const useBattleEngine = () => {
     if (roomAction.inRoom && !roomAction.canStart) {
       const message = roomAction.reason === 'member'
         ? '⚠️ 多人房间仅房主可以启动生成，请等待房主操作。'
+        : roomAction.reason === 'config-unknown'
+          ? '⚠️ 上一次房间配置发布结果尚未确认，请先重新确认权威快照。'
         : roomAction.reason === 'unknown'
           ? '⚠️ 上一次多人生成启动结果尚未确认，请等待服务器状态恢复，不要重复提交。'
           : roomAction.reason === 'connection'
@@ -535,18 +540,30 @@ export const useBattleEngine = () => {
       return;
     }
 
-    const minParticipants = battleMode === 'daily' || battleMode === 'scenario' ? 1 : 2;
     const shouldUseScenario = battleMode === 'scenario' && Boolean(scenario.content);
 
     // 计算总角色数（包括占位符，因为它们会被解析为真实角色）
     const totalCombatants = combatants.length;
+    const basicReadinessIssues = evaluateArenaBasicGenerationReadiness({
+      battleMode,
+      combatantCount: totalCombatants,
+      hasScenario: Boolean(scenario.content),
+    });
 
-    if (totalCombatants < minParticipants) {
-      setError(`⚠️ 该模式至少需要 ${minParticipants} 位角色。`);
+    const combatantIssue = basicReadinessIssues.find((issue) => (
+      issue.code === 'GENERATION_COMBATANTS_EMPTY'
+      || issue.code === 'GENERATION_COMBATANTS_INSUFFICIENT'
+    ));
+    if (!roomAction.inRoom && combatantIssue) {
+      const required = ARENA_CANONICAL_CAPABILITIES.minCombatantsByMode[battleMode];
+      setError(`⚠️ 该模式至少需要 ${required} 位角色。`);
       return;
     }
 
-    if (battleMode === 'scenario' && !scenario.content) {
+    if (
+      !roomAction.inRoom
+      && basicReadinessIssues.some((issue) => issue.code === 'GENERATION_SCENARIO_REQUIRED')
+    ) {
       setError('⚠️ 情景模式下，请先上传一个情景文件。');
       return;
     }
@@ -557,7 +574,11 @@ export const useBattleEngine = () => {
     }
 
     setIsGenerating(true);
+    setArenaGenerationConnectionState(null);
     setIsStreaming(false);
+    setResultReportFormat(reportFormat);
+    setResultWebPackage(null);
+    setResultWebReady(false);
     setStreamingMarkdown(null);
     setError(null);
     setNewsReport(null);
@@ -572,9 +593,11 @@ export const useBattleEngine = () => {
     setStreamUpdateMetaDebug(null);
     setStreamSoftTimeoutWarning(null);
     setLatestAiImpacts(null);
-    setLastGenerationId(null);
+    setLastGenerationRepairContext(null);
 
     try {
+      // 房间房主与单人模式共用随机角色解析；随后的 bundle 对比会把
+      // 新角色视为本地草稿，只有权威 revision/提案/冲突门禁均满足时才自动发布。
       await handleResolveRandomPlaceholders();
 
       const freshCombatants = useBattleStore.getState().combatants.filter((item): item is CombatantData => 'data' in item);
@@ -592,9 +615,11 @@ export const useBattleEngine = () => {
         materials.length > 0 ? JSON.stringify(materials.map((item) => item.content)) : '',
       ];
 
-      for (const payload of sensitiveTargets) {
-        if (payload && (await checkSensitivePayload(payload, { onRedirect: redirectToArrested }))) {
-          return;
+      if (!roomAction.inRoom) {
+        for (const payload of sensitiveTargets) {
+          if (payload && (await checkSensitivePayload(payload, { onRedirect: redirectToArrested }))) {
+            return;
+          }
         }
       }
 
@@ -620,28 +645,55 @@ export const useBattleEngine = () => {
 
       const numericLimit = settings.isArenaHistoryUnlimited ? null : Math.max(1, settings.readArenaHistoryLimit);
       const arenaHistoryReadLimit = settings.readArenaHistory ? numericLimit ?? null : undefined;
-      const narrativeHistoryReadLimit = settings.readNarrativeHistory
-        ? (settings.isNarrativeHistoryUnlimited ? null : Math.max(1, settings.readNarrativeHistoryLimit))
-        : undefined;
-      const narrativeHistoryForRequest = settings.readNarrativeHistory
-        ? (() => {
-          const ordered = useNarrativeHistoryStore
-            .getState()
-            .entries.filter((entry) => typeof entry?.content === 'string' && entry.content.trim());
-          const limited = limitNarrativeHistoryEntriesForPrompt(ordered, narrativeHistoryReadLimit);
+      const localNarrativeHistory = materializeArenaNarrativeHistoryForRequest(
+        settings,
+        useNarrativeHistoryStore.getState().entries,
+      );
+      const narrativeHistoryReadLimit = localNarrativeHistory.readLimit;
+      const narrativeHistoryForRequest = localNarrativeHistory.entries;
 
-          return limited.map((entry) => ({
-            title: entry.title,
-            content: entry.content,
-            createdAt: entry.createdAt,
-            updatedAt: entry.updatedAt,
-          }));
-        })()
-        : undefined;
-
-      const generationRequestId = crypto.randomUUID();
-      const requestBody: Record<string, unknown> = {
+      const generationRequestId = secureRandomUUID();
+      const { questionnaireSelections, questionnaires } = buildArenaQuestionnaireRequest(selectedQuestionnaires);
+      const customProviderPayload = buildCustomProviderRequestPayload(userProviderConfig);
+      const generationProviderSnapshot = customProviderPayload ? {
+        ...customProviderPayload,
+        ...(customProviderPayload.generationOverrides ? {
+          generationOverrides: {
+            ...customProviderPayload.generationOverrides,
+            ...(customProviderPayload.generationOverrides.thinking ? {
+              thinking: { ...customProviderPayload.generationOverrides.thinking },
+            } : {}),
+          },
+        } : {}),
+      } : null;
+      let capturedGenerationId: string | null = null;
+      const captureGenerationRepairContext = (generationId: string): void => {
+        const normalizedGenerationId = generationId.trim();
+        if (!normalizedGenerationId) return;
+        if (capturedGenerationId && capturedGenerationId !== normalizedGenerationId) {
+          throw new Error('生成响应返回了冲突的 generationId，已拒绝保存角色修复上下文。');
+        }
+        capturedGenerationId = normalizedGenerationId;
+        setLastGenerationRepairContext({
+          generationId: normalizedGenerationId,
+          customProvider: generationProviderSnapshot,
+        });
+      };
+      let webPackagePromptProjection: WebPackagePromptProjection | undefined;
+      if (reportFormat === 'web' && webPackageRef && !isBuiltinWebPackageRef(webPackageRef)) {
+        try {
+          const base = await resolveWebPackage(webPackageRef);
+          webPackagePromptProjection = buildWebPackagePromptProjection(base);
+        } catch {
+          setError('本地 Web 包未加载或已损坏，请重新导入后再生成。');
+          return;
+        }
+      }
+      const requestBody = roomAction.inRoom ? null : {
         generationRequestId,
+        reportFormat,
+        ...(reportFormat === 'web' && webPackageRef ? { webPackageRef } : {}),
+        ...(webPackagePromptProjection ? { webPackagePromptProjection } : {}),
         combatants: freshCombatants.map((combatant) => ({
           type: combatant.type,
           data: combatant.data,
@@ -679,59 +731,239 @@ export const useBattleEngine = () => {
         adjudicationEvents,
         storyLength,
         customStoryLength: normalizeCustomStoryLength(customStoryLength) || undefined,
+        questionnaireSelections,
+        questionnaires,
+        customProvider: customProviderPayload ?? undefined,
       };
 
-      if (selectedQuestionnaires.length > 0) {
-        requestBody.questionnaireSelections = selectedQuestionnaires.map((selection) => ({
-          source: selection.source,
-          kind: selection.questionnaire.kind,
-          presetId: selection.source === 'preset' ? selection.questionnaire.id : undefined,
-          dataCardId: selection.source === 'database' ? selection.dataCardId : undefined,
-          useLore: selection.useLore === false ? false : undefined,
-        }));
-        requestBody.questionnaires = selectedQuestionnaires.map((selection) => ({
-          id: selection.questionnaire.id,
-          title: selection.questionnaire.title,
-          kind: selection.questionnaire.kind,
-          useLore: selection.useLore === false ? false : undefined,
-          loreMarkdown: selection.questionnaire.loreMarkdown ?? undefined,
-        }));
-      }
-
-      const customProviderPayload = buildCustomProviderRequestPayload(userProviderConfig);
-      if (customProviderPayload) {
-        requestBody.customProvider = customProviderPayload;
-      }
-
       if (roomAction.inRoom && arenaRoomRuntime) {
-        const sharedConfig = await buildArenaRoomSharedConfigFromBattleState(
-          useBattleStore.getState(),
+        if (!isArenaRoomGenerationSyncSettled(arenaRoomRuntime.hostReconciliation.state.kind)) {
+          throw new Error(arenaRoomGenerationSyncGateMessage(arenaRoomRuntime.hostReconciliation.state.kind));
+        }
+        const capturedAuthority = arenaRoomHostWorkspaceAuthorityFromSession(
+          arenaRoomRuntime.state.session,
         );
+        if (!capturedAuthority) {
+          throw new Error('当前房间权威已变化，请同步后重试。');
+        }
+        let bundle: Awaited<ReturnType<typeof buildArenaRoomHostWorkspaceBundleFromBattleState>> | null = null;
+        try {
+          bundle = await buildArenaRoomHostWorkspaceBundleFromBattleState(useBattleStore.getState());
+        } catch {
+          // A stale or partial local draft must not prevent the host from selecting
+          // an already-published Room baseline.
+        }
+        const preflightState = arenaRoomRuntime.controller.getSnapshot();
+        const authority = arenaRoomHostWorkspaceAuthorityFromSession(preflightState.session);
+        if (
+          !authority
+          || authority.roomId !== capturedAuthority.roomId
+          || authority.roomEpoch !== capturedAuthority.roomEpoch
+          || authority.ownerUserId !== capturedAuthority.ownerUserId
+          || authority.revision !== capturedAuthority.revision
+        ) {
+          throw new Error('构建多人生成输入时房间权威已变化，请确认最新状态后重试。');
+        }
+        const proposalFingerprint = pendingProposalFingerprint(
+          preflightState.session?.snapshot.proposals ?? [],
+        );
+        const pendingProposalCount = preflightState.session?.snapshot.proposals.length ?? 0;
+
+        let startInputs: ArenaRoomGenerationStartInputs | null = null;
+        let startAuthority = authority;
+        if (!bundle) {
+          const choice = await requestArenaRoomGenerationPreflight({
+            reasons: ['working-copy-invalid'],
+            canPublish: false,
+            pendingProposalCount,
+          });
+          if (choice === 'cancel') return;
+          if (choice === 'sync-room') {
+            // 本地草稿无法安全投影：放弃本地草稿方向，把房间权威同步到
+            // Arena 编辑区；不自动开始生成，房主确认眼前配置后再次点击。
+            await arenaRoomRuntime.hostReconciliation.syncRoom();
+            return;
+          }
+          throw new Error('本地编辑草稿无法发布，已取消本次生成。');
+        } else {
+          const comparison = arenaRoomRuntime.hostWorkspace.compare(authority, bundle);
+          startInputs = comparison.kind === 'clean' ? comparison.start : null;
+          if (comparison.kind === 'clean' && pendingProposalCount > 0) {
+            const choice = await requestArenaRoomGenerationPreflight({
+              reasons: [],
+              canPublish: false,
+              canConfirmStart: true,
+              pendingProposalCount,
+            });
+            if (choice === 'cancel') return;
+            if (choice !== 'confirm-start') {
+              throw new Error('请先确认待处理提案，再选择是否开始生成。');
+            }
+          }
+          if (comparison.kind === 'dirty') {
+            const automaticallyPublish = canAutoPublishArenaRoomHostDraft({
+              pendingProposalCount,
+              reconciliationKind: arenaRoomRuntime.hostReconciliation.state.kind,
+              workspaceAllows: arenaRoomRuntime.hostWorkspace.canAutoPublish(authority, bundle),
+            });
+            const generationPublishReady = () => canPublishArenaRoomGenerationDraft({
+              reconciliationKind: arenaRoomRuntime.hostReconciliation.state.kind,
+              authority,
+              // settledAuthority 读取 workspace 内部基线（非 React 状态）：
+              // 即使本闭包捕获的 reconciliation kind 已过期，也能同步判定
+              // 「落定基线是否已追上当前权威」，封死 render→effect 微窗口。
+              settledAuthority: arenaRoomRuntime.hostWorkspace.settledAuthority(),
+            });
+            const choice = automaticallyPublish
+              ? 'publish'
+              : await requestArenaRoomGenerationPreflight({
+                  reasons: comparison.reasons,
+                  // reconciliation error 期间本地与房间权威的关系不可信：
+                  // 此时禁止把本地 working copy 发布出去覆盖房间权威，
+                  // 只允许显式同步房间配置或取消。
+                  canPublish: generationPublishReady(),
+                  pendingProposalCount,
+                });
+            if (choice === 'cancel') return;
+            if (choice === 'sync-room') {
+              // 眼—手一致硬不变量：本地与房间权威不一致时不得直接生成。
+              // 同步把房间权威物化到 Arena 编辑区（放弃未发布本地修改），
+              // 完成后由房主再次点击生成。
+              await arenaRoomRuntime.hostReconciliation.syncRoom();
+              return;
+            }
+            if (!generationPublishReady()) {
+              // Preflight 打开期间同步可能已开始或已失败，或权威已前进到
+              // 落定基线之外；此时发布本地草稿会覆盖尚未安装/关系不明的
+              // 房间权威，必须拒绝并让 reconciliation 先落定。
+              throw new Error(arenaRoomGenerationSyncGateMessage(arenaRoomRuntime.hostReconciliation.state.kind));
+            }
+            const beforePublishState = arenaRoomRuntime.controller.getSnapshot();
+            const beforePublishAuthority = arenaRoomHostWorkspaceAuthorityFromSession(
+              beforePublishState.session,
+            );
+            const beforePublishProposalFingerprint = pendingProposalFingerprint(
+              beforePublishState.session?.snapshot.proposals ?? [],
+            );
+            const beforePublishControlSeq = beforePublishState.session?.snapshot.controlSeq;
+            if (
+              beforePublishState.configPublishPending
+              || beforePublishState.configPublishResultUnknown
+              || beforePublishControlSeq === undefined
+              || !beforePublishAuthority
+              || beforePublishAuthority.roomId !== authority.roomId
+              || beforePublishAuthority.roomEpoch !== authority.roomEpoch
+              || beforePublishAuthority.ownerUserId !== authority.ownerUserId
+              || beforePublishAuthority.revision !== authority.revision
+              || beforePublishProposalFingerprint !== proposalFingerprint
+            ) {
+              throw new Error('房间配置或提案列表已变化，请确认最新状态后重试。');
+            }
+            await arenaRoomRuntime.controller.publishConfig({
+              expectedRoomEpoch: authority.roomEpoch,
+              expectedRevision: authority.revision,
+              expectedControlSeq: beforePublishControlSeq,
+              sharedConfig: comparison.current.sharedConfig,
+            });
+            const publishedState = arenaRoomRuntime.controller.getSnapshot();
+            const publishedAuthority = arenaRoomHostWorkspaceAuthorityFromSession(publishedState.session);
+            if (
+              publishedState.configPublishPending
+              || publishedState.configPublishResultUnknown
+              || !publishedAuthority
+              || publishedAuthority.roomId !== authority.roomId
+              || publishedAuthority.roomEpoch !== authority.roomEpoch
+              || publishedAuthority.ownerUserId !== authority.ownerUserId
+              || publishedAuthority.revision !== authority.revision + 1
+              || !areArenaRoomSharedConfigsEqual(
+                publishedAuthority.sharedConfig,
+                comparison.current.sharedConfig,
+              )
+            ) {
+              throw new Error('房间配置发布结果无法确认，请先同步房间权威状态。');
+            }
+            arenaRoomRuntime.hostWorkspace.capturePublished(publishedAuthority, bundle);
+            arenaRoomRuntime.hostReconciliation.reconcilePublished();
+            startInputs = comparison.current;
+            startAuthority = publishedAuthority;
+          }
+        }
+        if (!startInputs) throw new Error('无法读取多人生成所需的当前房间配置。');
+        const beforeStartState = arenaRoomRuntime.controller.getSnapshot();
+        const beforeStartProposalFingerprint = pendingProposalFingerprint(
+          beforeStartState.session?.snapshot.proposals ?? [],
+        );
+        if (beforeStartProposalFingerprint !== proposalFingerprint) {
+          throw new Error('待处理提案列表已变化，请重新确认后再开始生成。');
+        }
+        assertArenaRoomGenerationReady(startInputs.sharedConfig);
+        const roomNarrativeHistory = materializeArenaNarrativeHistoryForRequest(
+          startInputs.sharedConfig.historySettings,
+          useNarrativeHistoryStore.getState().entries,
+        );
+
+        const selectedSensitiveTargets = [
+          JSON.stringify(startInputs.sharedConfig),
+          ...startInputs.hostLocalPayloads.map((payload) => JSON.stringify(payload.payload)),
+          roomNarrativeHistory.entries ? JSON.stringify(roomNarrativeHistory.entries) : '',
+          adjudicationEvents.length > 0 ? JSON.stringify(adjudicationEvents) : '',
+          questionnaires ? JSON.stringify(questionnaires) : '',
+        ];
+        for (const payload of selectedSensitiveTargets) {
+          if (payload && await checkSensitivePayload(payload, { onRedirect: redirectToArrested })) {
+            return;
+          }
+        }
+
+        const generation = ArenaRoomHostRuntimeGenerationSchema.parse({
+          arenaFreeRankingEnabled,
+          customProvider: customProviderPayload,
+          isDowngrade: false,
+          narrativeHistory: roomNarrativeHistory.entries,
+          adjudicationEvents: normalizeAdjudicationEvents(adjudicationEvents),
+          questionnaireSelections,
+          questionnaires,
+        });
+        const dispatchState = arenaRoomRuntime.controller.getSnapshot();
+        const dispatchAuthority = arenaRoomHostWorkspaceAuthorityFromSession(dispatchState.session);
+        if (!isArenaRoomGenerationFenceCurrent({
+          expectedAuthority: startAuthority,
+          currentAuthority: dispatchAuthority,
+          proposals: dispatchState.session?.snapshot.proposals ?? [],
+          proposalFingerprint,
+        })) {
+          throw new Error('房间配置或待处理提案已变化，请重新确认后再开始生成。');
+        }
         const outcome = await dispatchArenaRoomGenerationStart({
           controller: arenaRoomRuntime.controller,
-          state: arenaRoomRuntime.state,
-          sharedConfig,
+          state: dispatchState,
+          sharedConfig: startInputs.sharedConfig,
+          hostLocalPayloads: startInputs.hostLocalPayloads,
           generationRequestId,
-          generation: requestBody,
+          generation,
         });
         if (outcome !== 'submitted') {
           throw new Error(
             outcome === 'stale'
-              ? '房间 epoch 或配置 revision 已变化，请确认最新房间状态后再试。'
+              ? '房间实例或配置版本已变化，请确认最新房间状态后再试。'
               : '当前房间状态不允许启动生成。',
           );
         }
         return;
       }
+      if (!requestBody) throw new Error('无法构造单人生成请求。');
 
       const authHeader = await authStorage.getAuthHeader();
-      const requestHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (authHeader) requestHeaders.Authorization = authHeader;
-      Object.assign(requestHeaders, await authStorage.getActivityHeaders());
+      const baseRequestHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (authHeader) baseRequestHeaders.Authorization = authHeader;
+      Object.assign(baseRequestHeaders, await authStorage.getActivityHeaders());
+      const requestHeaders = Object.fromEntries(
+        withArenaGenerationActorToken(baseRequestHeaders).entries(),
+      );
 
       const applyBattleResult = async (result: BattleApiResponse, origin: 'battle' | 'battle-stream') => {
         if (typeof result.generationId === 'string' && result.generationId.trim()) {
-          setLastGenerationId(result.generationId.trim());
+          captureGenerationRepairContext(result.generationId);
         }
 
         const backupItems = buildBattleBackupItems(
@@ -767,7 +999,7 @@ export const useBattleEngine = () => {
         const safeScenarioDisplayName = scenarioDisplayName ? sanitizeTextByShieldWords(scenarioDisplayName) : null;
 
         const reportWithScenario: NewsReport = {
-          ...sanitizeReportByShieldWords(result.report),
+          ...(result.report.reportFormat === 'web' ? result.report : sanitizeReportByShieldWords(result.report)),
           adjudicationResults: result.adjudicationResults,
         };
 
@@ -779,6 +1011,9 @@ export const useBattleEngine = () => {
           delete (reportWithScenario as any).scenario;
         }
 
+        setResultReportFormat(result.report.reportFormat === 'web' ? 'web' : 'markdown');
+        setResultWebPackage(result.report.webPackage ?? null);
+        setResultWebReady(result.report.reportFormat === 'web' && (Boolean(result.report.webPackage) || typeof result.report.webHtml === 'string'));
         setNewsReport(reportWithScenario);
         const normalizedImpacts = normalizeBattleAiImpacts(result.impacts);
         setLatestAiImpacts(normalizedImpacts.length > 0 ? normalizedImpacts : null);
@@ -795,15 +1030,12 @@ export const useBattleEngine = () => {
         });
         setCombatants(updatedRoster);
 
-        try {
-          await appendNarrativeHistoryIfEnabled({
-            enabled: settings.writeNarrativeHistory,
+        if (settings.writeNarrativeHistory) {
+          await appendArenaNarrativeHistoryResult({
             title: reportWithScenario.headline,
             contentMarkdown: toBattleReportMarkdown(reportWithScenario),
-            generationId: result.generationId,
+            generationId: result.generationId ?? null,
           });
-        } catch (error) {
-          console.warn('写入叙事历史失败（已忽略）', error);
         }
 
         return false;
@@ -837,36 +1069,47 @@ export const useBattleEngine = () => {
               const endpoint = `/api/arena/generate-stream${query.toString() ? `?${query.toString()}` : ''}`;
               requestHeaders.Accept = 'text/event-stream';
               let generationIntent: GenerationApiIntent | null = null;
-                const response = await openArenaGenerationStream({
+              let pinnedReadDispatcher: {
+                placement: 'hono-primary' | 'next-dr';
+                dispatcher: ReturnType<typeof createPinnedGenerationApiSafeReadDispatcher>;
+              } | null = null;
+              const response = await openArenaGenerationStream({
                   endpoint,
                   body: requestBody,
                   generationRequestId,
                   headers: requestHeaders,
                   signal: abortController.signal,
-                  fetcher: (input, init) => {
+                  fetcher: (input, init, routePin, onRoutePinSelected) => {
+                    if (routePin) {
+                      if (pinnedReadDispatcher?.placement !== routePin.placement) {
+                        pinnedReadDispatcher = {
+                          placement: routePin.placement,
+                          dispatcher: createPinnedGenerationApiSafeReadDispatcher(routePin),
+                        };
+                      }
+                      return pinnedReadDispatcher.dispatcher.dispatch(input, init);
+                    }
                     if (input === endpoint && (init?.method ?? 'GET').toUpperCase() === 'POST') {
                       generationIntent ??= generationApiIntentLatch.tryAcquire();
                       if (!generationIntent) {
                         throw new Error('已有生成请求正在处理中，请勿重复提交。');
                       }
-                      return generationIntent.dispatch(input, init);
+                      const unsubscribe = onRoutePinSelected
+                        ? generationIntent.subscribeRoutePinSelected(onRoutePinSelected)
+                        : null;
+                      const dispatched = generationIntent.dispatch(input, init);
+                      return unsubscribe ? dispatched.finally(unsubscribe) : dispatched;
                     }
                     return createGenerationApiIntent().dispatch(input, init);
                   },
+                  isInitialCreateOutcomeAmbiguous: (error) => (
+                    isGenerationApiClientErrorCode(error, 'AMBIGUOUS_OPERATION_OUTCOME')
+                  ),
+                  getInitialRoutePin: () => generationIntent?.getRoutePin() ?? null,
                   onStateChange: (state) => {
-                    const previousState = lastArenaConnectionState;
                     lastArenaConnectionState = state;
-                    if (
-                      state === 'generating'
-                      && previousState
-                      && ['recovering_initial', 'reconnecting', 'resuming'].includes(previousState)
-                    ) {
-                      recoveryNoticeActive = true;
-                      setError('连接已恢复，继续接收同一场战报。');
-                      return;
-                    }
-                    if (state === 'completed' && recoveryNoticeActive) {
-                      recoveryNoticeActive = false;
+                    setArenaGenerationConnectionState(state);
+                    if (isArenaGenerationRecoveryState(state) || state === 'cancelling') {
                       setError(null);
                       return;
                     }
@@ -906,7 +1149,7 @@ export const useBattleEngine = () => {
               const resumableGenerationId = response.headers
                 .get('x-mahoshojo-generation-id')
                 ?.trim();
-              if (resumableGenerationId) setLastGenerationId(resumableGenerationId);
+              if (resumableGenerationId) captureGenerationRepairContext(resumableGenerationId);
 	          if (debugSseEnabled) {
 	            console.info('SSE 调试：响应信息', {
 	              status: response.status,
@@ -917,13 +1160,19 @@ export const useBattleEngine = () => {
 	            });
 	          }
 
+          let authoritativeWebContract = false;
+          let authoritativePackage = false;
 	          const metaHeader = response.headers.get('x-mahoshojo-stream-meta');
           if (metaHeader) {
             try {
               const parsed = JSON.parse(decodeURIComponent(metaHeader));
+              const contract = parsed?.outputContract;
+              authoritativeWebContract = (contract === 'web-document' || contract === 'web-package-target') && parsed?.reportFormat === 'web';
+              authoritativePackage = authoritativeWebContract && Boolean(parsed?.webPackageRef);
+              setResultReportFormat(authoritativeWebContract ? 'web' : 'markdown');
               const generationId = typeof parsed?.generationId === 'string' ? parsed.generationId.trim() : '';
               if (generationId) {
-                setLastGenerationId(generationId);
+                captureGenerationRepairContext(generationId);
               }
 
               const reporterInfo = parsed?.reporterInfo;
@@ -992,6 +1241,10 @@ export const useBattleEngine = () => {
 	          let isInterruptedAbort = false;
 	          let interruptedMessage: string | null = null;
 	          let sseEndedWithoutDone = false;
+          let authoritativeStreamDone = false;
+          const presentGeneratedContent = (content: string) => authoritativeWebContract || reportFormat === 'web'
+            ? content
+            : sanitizeTextByShieldWords(content);
 	          let metaOverrideFromSse:
 	            | {
 	              report?: { headline?: string; winner?: string };
@@ -1143,14 +1396,44 @@ export const useBattleEngine = () => {
               accumulatedText = accumulatedText.slice(0, cutIndex);
               accumulatedText += buildStreamSensitiveArrestWarrantMarkdown('使用危险符文');
 
-              setStreamingMarkdown(sanitizeTextByShieldWords(accumulatedText));
+              setStreamingMarkdown(presentGeneratedContent(accumulatedText));
 
               shouldAbort = true;
               abortController.abort(STREAM_ABORT_REASON_CONTENT_POLICY);
               return true;
             };
 
-	            const handleSseEvent = async (event: string, data: string) => {
+	            const applyTelemetryPayload = (telemetryPayload: any) => {
+              const usage = normalizeUsage(telemetryPayload?.usage ?? null);
+              setStreamAiUsage(usage);
+              if (usage && typeof usage.reasoningTokens === 'number') {
+                const previous = useBattleStore.getState().streamReasoning;
+                if (previous) {
+                  const next = {
+                    ...previous,
+                    reasoningTokens: usage.reasoningTokens,
+                  };
+                  setStreamReasoning(next);
+                }
+              }
+              const narrativeCount =
+                typeof telemetryPayload?.narrativeHistoryReadCount === 'number'
+                  ? telemetryPayload.narrativeHistoryReadCount
+                  : null;
+              setStreamNarrativeHistoryReadCount(narrativeCount);
+              // 兼容过渡期：新契约字段为 aiModel；旧 replay 存量/未升级 origin 仍可能发内部字段 model
+              const aiModelRaw = typeof telemetryPayload?.aiModel === 'string' && telemetryPayload.aiModel.trim()
+                ? telemetryPayload.aiModel
+                : typeof telemetryPayload?.model === 'string'
+                  ? telemetryPayload.model
+                  : '';
+              const aiModel = aiModelRaw.trim();
+              if (aiModel) {
+                setStreamAiModel(sanitizeTextByShieldWords(aiModel));
+              }
+            };
+
+            const handleSseEvent = async (event: string, data: string) => {
               let payload: any = null;
               try {
                 payload = data ? JSON.parse(data) : null;
@@ -1198,7 +1481,7 @@ export const useBattleEngine = () => {
                 if (chunk) {
                   accumulatedText += chunk;
                   if (await handleSensitiveIfNeeded()) return;
-                  setStreamingMarkdown(sanitizeTextByShieldWords(accumulatedText));
+                  setStreamingMarkdown(presentGeneratedContent(accumulatedText));
                 }
                 return;
               }
@@ -1206,42 +1489,41 @@ export const useBattleEngine = () => {
               if (event === 'snapshot') {
                 const markdown = typeof payload?.markdown === 'string' ? payload.markdown : '';
                 const reasoning = typeof payload?.reasoning === 'string' ? payload.reasoning : '';
-                accumulatedText = markdown;
-                lastCheckedLength = 0;
-                setStreamingMarkdown(sanitizeTextByShieldWords(markdown));
+                const mergedMarkdown = mergeArenaGenerationSnapshotMarkdown(
+                  accumulatedText,
+                  markdown,
+                );
+                if (mergedMarkdown !== accumulatedText || !accumulatedText) {
+                  accumulatedText = mergedMarkdown;
+                  lastCheckedLength = 0;
+                  if (await handleSensitiveIfNeeded()) return;
+                  setStreamingMarkdown(presentGeneratedContent(mergedMarkdown));
+                }
                 setStreamReasoning(reasoning
                   ? appendReasoningDelta(null, sanitizeTextByShieldWords(reasoning), {
                     source: 'sdk',
                     status: payload?.status === 'completed' ? 'done' : 'thinking',
                   })
                   : null);
+                // snapshot bootstrap 与 telemetry 事件共用同一份公开契约字段，恢复 model/usage/narrative 计数
+                if (payload?.telemetry && typeof payload.telemetry === 'object') {
+                  applyTelemetryPayload(payload.telemetry);
+                }
                 return;
               }
 
               if (event === 'telemetry') {
-                const usage = payload?.usage ?? null;
-                setStreamAiUsage((usage ?? null) as NewsReport['aiUsage'] | null);
-                if (usage && typeof usage === 'object' && typeof usage.reasoningTokens === 'number') {
-                  const previous = useBattleStore.getState().streamReasoning;
-                  if (previous) {
-                    const next = {
-                      ...previous,
-                      reasoningTokens: usage.reasoningTokens,
-                    };
-                    setStreamReasoning(next);
-                  }
-                }
-                const narrativeCount =
-                  typeof payload?.narrativeHistoryReadCount === 'number' ? payload.narrativeHistoryReadCount : null;
-                setStreamNarrativeHistoryReadCount(narrativeCount);
-                const aiModel = typeof payload?.aiModel === 'string' ? payload.aiModel.trim() : '';
-                if (aiModel) {
-                  setStreamAiModel(sanitizeTextByShieldWords(aiModel));
-                }
+                applyTelemetryPayload(payload);
                 return;
               }
 
               if (event === 'meta') {
+                if (payload?.webPackage) {
+                  authoritativeWebContract = true;
+                  authoritativePackage = true;
+                  setResultReportFormat('web');
+                  setResultWebPackage(payload.webPackage);
+                }
                 if (payload?.parseOk && payload?.meta && typeof payload.meta === 'object') {
                   const meta = payload.meta as any;
                   const impacts = normalizeBattleAiImpacts(meta.impacts);
@@ -1277,13 +1559,8 @@ export const useBattleEngine = () => {
               }
 
               if (event === 'ranking') {
-                const ranking = payload as GenerationRankingResponse | null;
-                if (
-                  ranking
-                  && typeof ranking === 'object'
-                  && typeof ranking.generationId === 'string'
-                  && ranking.generationId.trim()
-                ) {
+                const ranking = parseGenerationRankingResponse(payload);
+                if (ranking) {
                   queryClient.setQueryData<GenerationRankingResponse>(
                     ['arenaGenerationRanking', ranking.generationId],
                     ranking,
@@ -1329,6 +1606,22 @@ export const useBattleEngine = () => {
               }
 
               if (event === 'done') {
+                if (payload?.webPackage) {
+                  authoritativeWebContract = true;
+                  authoritativePackage = true;
+                  setResultReportFormat('web');
+                  setResultWebPackage(payload.webPackage);
+                }
+                authoritativeStreamDone = payload?.status === 'completed' && payload?.ok !== false;
+                if (!authoritativeStreamDone) {
+                  shouldAbort = true;
+                  setError(payload?.status === 'cancelled'
+                    ? '生成已取消，当前内容仅供普通显示。'
+                    : '生成未成功完成，当前内容仅供普通显示。');
+                }
+                if (typeof payload?.persistenceWarning === 'string') {
+                  setError('⚠️ 战报已生成并保留当前正文，但保存或断线恢复能力暂时不可用。');
+                }
                 const currentReasoning = useBattleStore.getState().streamReasoning;
                 if (!currentReasoning) {
                   markReasoningStatusInStore('unavailable', { source: 'sdk' });
@@ -1456,14 +1749,14 @@ export const useBattleEngine = () => {
                 accumulatedText = accumulatedText.slice(0, cutIndex);
                 accumulatedText += buildStreamSensitiveArrestWarrantMarkdown('使用危险符文');
 
-                setStreamingMarkdown(sanitizeTextByShieldWords(accumulatedText));
+                setStreamingMarkdown(presentGeneratedContent(accumulatedText));
 
                 shouldAbort = true;
                 abortController.abort(STREAM_ABORT_REASON_CONTENT_POLICY);
                 break;
               }
 
-              setStreamingMarkdown(sanitizeTextByShieldWords(accumulatedText));
+              setStreamingMarkdown(presentGeneratedContent(accumulatedText));
 
                 if (shouldTerminateByTelemetry(accumulatedText)) {
                   try {
@@ -1481,7 +1774,8 @@ export const useBattleEngine = () => {
 	          }
 
 	          if (sseEndedWithoutDone) {
-	            setError(buildStreamInterruptedMessage('连接结束但未收到 done 事件'));
+	            setError(arenaGenerationConnectionNotice(lastArenaConnectionState ?? 'unknown')
+	              ?? buildStreamInterruptedMessage('连接结束但未收到 done 事件'));
 	            startCooldown();
 	            return;
 	          }
@@ -1504,7 +1798,7 @@ export const useBattleEngine = () => {
           if (!isSseResponse) {
             // flush TextDecoder：避免最后一个 chunk 以多字节字符结尾时丢字
             accumulatedText += decoder.decode();
-            setStreamingMarkdown(sanitizeTextByShieldWords(accumulatedText));
+            setStreamingMarkdown(presentGeneratedContent(accumulatedText));
 
             // 流式正文末尾可能包含 HTML 注释 JSON 元数据（用于角色更新的 impacts/currentStateSummary）。
             // 此处尽量提取并修复解析；失败时回退到仅基于 Markdown 的更新逻辑。
@@ -1514,12 +1808,12 @@ export const useBattleEngine = () => {
               // 先移除并提取系统追加的 telemetry 注释（token/叙事历史读取条数），避免影响后续更新元数据解析。
               const telemetryExtracted = await extractStreamTelemetryMeta(accumulatedText);
               if (telemetryExtracted?.meta) {
-                const usage = telemetryExtracted.meta.usage ?? null;
+                const usage = normalizeUsage(telemetryExtracted.meta.usage ?? null);
                 const narrativeCount =
                   typeof telemetryExtracted.meta.narrativeHistoryReadCount === 'number'
                     ? telemetryExtracted.meta.narrativeHistoryReadCount
                     : null;
-                setStreamAiUsage((usage ?? null) as NewsReport['aiUsage'] | null);
+                setStreamAiUsage(usage);
                 setStreamNarrativeHistoryReadCount(narrativeCount);
                 const aiModel = typeof telemetryExtracted.meta.aiModel === 'string' ? telemetryExtracted.meta.aiModel.trim() : '';
                 if (aiModel) {
@@ -1586,7 +1880,7 @@ export const useBattleEngine = () => {
                 });
               }
             }
-          } else {
+          } else if (!authoritativePackage) {
             // SSE 模式下：正文与 meta/telemetry 已分通道，但仍做一次兜底剥离（防止异常情况下 meta 泄漏进正文）
             const stripped = stripStreamUpdateMetaComment(markdownForUi);
             if (stripped && typeof stripped.strippedMarkdown === 'string') {
@@ -1594,14 +1888,14 @@ export const useBattleEngine = () => {
             }
           }
 
-          setStreamingMarkdown(sanitizeTextByShieldWords(markdownForUi));
+          setStreamingMarkdown(presentGeneratedContent(markdownForUi));
 
           const trimmedForValidation = markdownForUi.trim();
           const allowStreamMeta = settings.writeArenaHistory || settings.writeCurrentState;
           const hasMetaImpacts = allowStreamMeta && Boolean(metaOverride?.impacts?.length);
-          const looksLikeCompleteReport = hasMetaImpacts
-            ? true
-            : trimmedForValidation.length >= 120 && /^#{2,6}\s*/m.test(trimmedForValidation);
+          const looksLikeCompleteReport = reportFormat === 'web' || authoritativeWebContract
+            ? authoritativeWebContract && authoritativeStreamDone && Boolean(trimmedForValidation) && (!authoritativePackage || Boolean(useBattleStore.getState().resultWebPackage))
+            : authoritativeStreamDone && (hasMetaImpacts || Boolean(trimmedForValidation));
 
           // 与非流式保持一致：生成失败/中断时不进入冷却，并优先展示“生成失败”而不是“角色更新失败”。
           if (!looksLikeCompleteReport) {
@@ -1609,33 +1903,25 @@ export const useBattleEngine = () => {
               setStreamingMarkdown(null);
               setError('✨ 魔法失效了！服务端响应为空，未收到有效内容。');
             } else {
-              // 尝试判断内容是否是一段纯文本报错（通常比较短，且不包含 Markdown 标题符）
-              const isLikelyErrorMessage = trimmedForValidation.length < 300 && !trimmedForValidation.includes('# ');
-
-              if (isLikelyErrorMessage) {
-                // 直接显示服务端返回的错误文字
-                setError(`✨ 生成失败，服务端返回信息：${trimmedForValidation}`);
-              } else {
-                // 内容很长但格式不对，或者是半截战报
-                setError(`✨ 魔法失效了！战报生成中断或格式校验失败（当前长度 ${trimmedForValidation.length} 字符）。`);
-              }
+              setError(`⚠️ 未确认战报正常完成，已保留 ${trimmedForValidation.length} 字符。请检查生成状态后再决定是否重试。`);
             }
             return;
           }
+
+          setResultWebReady(authoritativeWebContract && authoritativeStreamDone);
 
           if (hasMetaImpacts && !trimmedForValidation) {
             setError('⚠️ 战报正文为空，但检测到角色更新元数据，已尝试继续更新角色数据。');
           }
 
-          try {
-            await appendNarrativeHistoryIfEnabled({
-              enabled: settings.writeNarrativeHistory,
-              title: extractTitleFromBattleMarkdown(markdownForUi),
+          if (settings.writeNarrativeHistory) {
+            await appendArenaNarrativeHistoryResult({
+              title: authoritativeWebContract
+                ? metaOverride?.report?.headline?.trim() || 'Web 战报'
+                : extractTitleFromBattleMarkdown(markdownForUi),
               contentMarkdown: markdownForUi,
-              generationId: resumableGenerationId,
+              generationId: resumableGenerationId ?? null,
             });
-          } catch (error) {
-            console.warn('写入叙事历史失败（已忽略）', error);
           }
 
           startCooldown();
@@ -1681,6 +1967,7 @@ export const useBattleEngine = () => {
         headers: requestHeaders,
         body: JSON.stringify(requestBody),
       });
+      captureArenaGenerationActorToken(response);
       if (!response.ok) {
         const text = await response.text();
         let json: any = null;
@@ -1726,7 +2013,9 @@ export const useBattleEngine = () => {
 	        setNewsReport(null);
 	      }
 	    } finally {
-        sharedGenerationAbortController = null;
+          sharedGenerationAbortController = null;
+          setArenaGenerationConnectionState(null);
+	      setArenaRoomGenerationPreflight(null);
 	      setIsGenerating(false);
 	      setIsStreaming(false);
 	      setStreamSoftTimeoutWarning(null);
@@ -1738,6 +2027,11 @@ export const useBattleEngine = () => {
     remainingTime,
     battleMode,
     generationMode,
+    reportFormat,
+    webPackageRef,
+    setResultWebPackage,
+    setResultReportFormat,
+    setResultWebReady,
     arenaFreeRankingEnabled,
     combatants,
     scenario,
@@ -1756,6 +2050,7 @@ export const useBattleEngine = () => {
     setUpdatedCombatants,
     setAdjudicationResults,
     setIsGenerating,
+    setArenaGenerationConnectionState,
     setIsStreaming,
     setStreamingMarkdown,
     setStreamReporterInfo,
@@ -1768,245 +2063,94 @@ export const useBattleEngine = () => {
     setStreamUpdateMetaDebug,
     setStreamSoftTimeoutWarning,
     setLatestAiImpacts,
-    setLastGenerationId,
+    setLastGenerationRepairContext,
     setCombatants,
     handleResolveRandomPlaceholders,
     arenaRoomRuntime,
+    requestArenaRoomGenerationPreflight,
     redirectToArrested,
     startCooldown,
     updateFromMarkdown,
   ]);
 
   const stopGeneration = useCallback(() => {
+    if (sharedGenerationAbortController) {
+      setArenaGenerationConnectionState('cancelling');
+    }
     sharedGenerationAbortController?.abort(STREAM_ABORT_REASON_USER);
-  }, []);
+  }, [setArenaGenerationConnectionState]);
 
-  const handleRedoUpdates = useCallback(async () => {
-    if (isCooldown) {
-      setError(`冷却中，请等待 ${remainingTime} 秒后再重做更新。`);
+  const handleRetryUpdates = useCallback(async () => {
+    const state = useBattleStore.getState();
+    const lastGenerationId = state.lastGenerationId?.trim();
+    const roster = state.combatants.filter((item): item is CombatantData => 'data' in item);
+
+    if (arenaRoomRuntime?.controller.getSnapshot().session) {
+      setError('⚠️ 多人房间内的角色更新由 Room 权威流程处理，不能在本地重试。');
       return;
     }
-
-    const shouldUseScenario = battleMode === 'scenario' && Boolean(scenario.content);
-    const roster = useBattleStore.getState().combatants.filter((item): item is CombatantData => 'data' in item);
-
     if (roster.length === 0) {
       setError('⚠️ 没有可更新的参战角色。');
       return;
     }
-
-    if (!(settings.writeArenaHistory || settings.writeCurrentState)) {
-      setError('⚠️ 已关闭历战记录/当前状态写入，本次无需重做角色更新。');
+    if (!lastGenerationId) {
+      setError('⚠️ 本次战报缺少 generationId，无法安全重试角色更新。');
       return;
     }
-
-    const state = useBattleStore.getState();
-    const reportMarkdown =
-      generationMode === 'stream'
-        ? (state.streamingMarkdown ?? '').trim()
-        : (state.newsReport ? toBattleReportMarkdown(state.newsReport) : '').trim();
-
-    const redoPrecheck = precheckBattleReportForRedo(reportMarkdown, battleMode);
-    if (!redoPrecheck.ok) {
-      setError(`⚠️ ${redoPrecheck.error}`);
+    if (state.repairAppliedGenerationId === lastGenerationId) {
+      setError('⚠️ 当前角色已应用本次战报的自定义修复，基线已变化，无法再执行同 generation 的服务器权威重试。');
+      return;
+    }
+    if (!state.tryBeginCombatantMutation()) {
+      setError('⚠️ 角色更新正在进行，请等待当前操作完成后再试。');
       return;
     }
 
     setIsRedoingUpdates(true);
     setError(null);
-
     try {
-      const requestBody: Record<string, unknown> = {
-        combatants: roster.map((combatant) => ({
-          type: combatant.type,
-          data: combatant.data,
-          isNative: combatant.isValid,
-          isPreset: combatant.isPreset,
-        })),
-        battleReportMarkdown: reportMarkdown,
-        mode: battleMode,
-        userGuidance: settings.userGuidance,
-        scenario: shouldUseScenario ? scenario.content : undefined,
-        writeArenaHistory: settings.writeArenaHistory,
-        writeCurrentState: settings.writeCurrentState,
-      };
-
-      const customProviderPayload = buildCustomProviderRequestPayload(userProviderConfig);
-      if (customProviderPayload) {
-        requestBody.customProvider = customProviderPayload;
-      }
-
-      const response = await fetch('/api/arena/redo-combatant-updates', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestBody),
-      });
-
-      if (!response.ok) {
-        const text = await response.text();
-        let json: any = null;
-        try {
-          json = JSON.parse(text);
-        } catch {
-          if (response.status === 524) {
-            throw new Error('Cloudflare 超时（HTTP 524），请稍后重试。');
-          }
-          const serverMessage = resolveApiErrorMessage({ payload: text, fallback: '服务器响应异常' });
-          throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: '服务器响应异常' }));
-        }
-
-        if (json.shouldRedirect) {
-          redirectToArrested(json.reason || '使用危险符文');
-          return;
-        }
-        const serverMessage = resolveApiErrorMessage({ payload: json, fallback: '生成失败' });
-        throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: '生成失败' }));
-      }
-
-      const result = await response.json();
-      const updated = Array.isArray(result.updatedCombatants) ? result.updatedCombatants : [];
-
-      setUpdatedCombatants(updated);
-      const updatedRoster = roster.map((combatant) => {
-        const next = updated.find(
-          (item: any) => (item.codename || item.name) === (combatant.data.codename || combatant.data.name)
+      await retryGenerationUpdate(lastGenerationId, roster, () => {
+        if (arenaRoomRuntime?.controller.getSnapshot().session) return false;
+        const currentState = useBattleStore.getState();
+        if (currentState.lastGenerationId?.trim() !== lastGenerationId) return false;
+        if (currentState.repairAppliedGenerationId === lastGenerationId) return false;
+        if (!currentState.isCombatantMutationPending) return false;
+        const currentRoster = currentState.combatants.filter(
+          (item): item is CombatantData => 'data' in item,
         );
-        return next ? { ...combatant, data: next } : combatant;
+        return currentRoster.length === roster.length
+          && currentRoster.every((combatant, index) => combatant === roster[index]);
       });
-      setCombatants(updatedRoster);
-
-      startCooldown();
     } catch (error) {
-      setError(`⚠️ 重做角色更新失败：${error instanceof Error ? error.message : '发生未知错误，请重试。'}`);
+      setError(`⚠️ 重试角色更新失败：${error instanceof Error ? error.message : '发生未知错误，请重试。'}`);
     } finally {
+      useBattleStore.getState().endCombatantMutation();
       setIsRedoingUpdates(false);
     }
   }, [
-    isCooldown,
-    remainingTime,
-    battleMode,
-    generationMode,
-    scenario.content,
-    settings.userGuidance,
-    settings.writeArenaHistory,
-    settings.writeCurrentState,
-    userProviderConfig,
-    setCombatants,
-    setError,
-    setUpdatedCombatants,
-    setIsRedoingUpdates,
-    redirectToArrested,
-    startCooldown,
-  ]);
-
-  const handleApplyManualMetaUpdates = useCallback(async (manualMetaInput: string): Promise<boolean> => {
-    const input = typeof manualMetaInput === 'string' ? manualMetaInput.trim() : '';
-    if (!input) {
-      setError('⚠️ 请先输入可解析的 meta 数据。');
-      return false;
-    }
-
-    const shouldUseScenario = battleMode === 'scenario' && Boolean(scenario.content);
-    const roster = useBattleStore.getState().combatants.filter((item): item is CombatantData => 'data' in item);
-
-    if (roster.length === 0) {
-      setError('⚠️ 没有可更新的参战角色。');
-      return false;
-    }
-
-    if (!(settings.writeArenaHistory || settings.writeCurrentState)) {
-      setError('⚠️ 已关闭历战记录/当前状态写入，本次无需应用手动更新。');
-      return false;
-    }
-
-    const state = useBattleStore.getState();
-    const reportMarkdown =
-      generationMode === 'stream'
-        ? (state.streamingMarkdown ?? '').trim()
-        : (state.newsReport ? toBattleReportMarkdown(state.newsReport) : '').trim();
-
-    setIsRedoingUpdates(true);
-    setError(null);
-
-    try {
-      const wrappedInput = `<!-- MAHOSHOJO_ARENA_META ${input} -->`;
-      const extracted = await extractStreamUpdateMeta(wrappedInput);
-      if (!extracted?.meta) {
-        throw new Error('无法解析输入内容，请确认是 JSON 对象/数组或 MAHOSHOJO_ARENA_META 注释。');
-      }
-
-      const impacts = normalizeBattleAiImpacts(extracted.meta.impacts);
-      const impactsValidationError = validateManualMetaImpacts(impacts, roster, {
-        writeArenaHistory: settings.writeArenaHistory,
-      });
-      if (impactsValidationError) {
-        throw new Error(impactsValidationError);
-      }
-
-      const metaOverride = {
-        ...(extracted.meta.report ? { report: extracted.meta.report } : {}),
-        impacts,
-      };
-
-      await updateFromMarkdown(
-        reportMarkdown,
-        roster,
-        battleMode,
-        {
-          userGuidance: settings.userGuidance,
-          writeArenaHistory: settings.writeArenaHistory,
-          writeCurrentState: settings.writeCurrentState,
-        },
-        shouldUseScenario ? scenario.content : null,
-        metaOverride
-      );
-
-      const rawMax = 8_000;
-      setStreamUpdateMetaDebug({
-        source: 'inline',
-        parseOk: true,
-        error: null,
-        meta: {
-          ...extracted.meta,
-          impacts,
-        },
-        raw: input.length > rawMax ? input.slice(0, rawMax) : input,
-        rawTruncated: input.length > rawMax,
-      });
-      setLatestAiImpacts(impacts);
-
-      return true;
-    } catch (error) {
-      setError(`⚠️ 手动应用更新失败：${error instanceof Error ? error.message : '发生未知错误，请重试。'}`);
-      return false;
-    } finally {
-      setIsRedoingUpdates(false);
-    }
-  }, [
-    battleMode,
-    generationMode,
-    scenario.content,
-    settings.userGuidance,
-    settings.writeArenaHistory,
-    settings.writeCurrentState,
+    arenaRoomRuntime,
+    retryGenerationUpdate,
     setError,
     setIsRedoingUpdates,
-    setLatestAiImpacts,
-    setStreamUpdateMetaDebug,
-    updateFromMarkdown,
   ]);
 
   return {
     handleGenerate,
     stopGeneration,
-    handleRedoUpdates,
-    handleApplyManualMetaUpdates,
+    handleRetryUpdates,
     isGenerating,
+    arenaGenerationConnectionState,
+    isRecoveringArenaGeneration: isArenaGenerationRecoveryState(arenaGenerationConnectionState),
+    arenaGenerationStatusNotice: arenaGenerationConnectionState
+      ? arenaGenerationConnectionNotice(arenaGenerationConnectionState)
+      : null,
     isRedoingUpdates,
     isCooldown,
     remainingTime,
     providerCooldownMode,
     otherRemainingTime,
     streamSoftTimeoutWarning,
+    arenaRoomGenerationPreflight,
+    resolveArenaRoomGenerationPreflight,
   };
 };

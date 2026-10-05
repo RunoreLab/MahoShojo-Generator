@@ -18,6 +18,7 @@ export const INFRASTRUCTURE_ERROR_MESSAGES = {
   GENERATION_FINALIZATION_IN_PROGRESS: '战报正在完成最终保存，请稍后查看；请勿重复生成。',
   GENERATION_TERMINAL_RECONCILIATION_PENDING: '战报正在恢复最终状态，请稍后查看；请勿重复生成。',
   GENERATION_TERMINAL_CONTENT_UNAVAILABLE: '战报已结束，但正文暂时不可读取，请稍后查看。',
+  GENERATION_TERMINAL_CONTENT_EXPIRED: '战报已结束，但正文已超过保留期，无法继续恢复。',
   PRODUCER_OWNERSHIP_UNAVAILABLE: '生成进程已丢失，无法安全自动重试。',
   PRODUCER_OWNERSHIP_LOST: '生成进程已丢失，无法安全自动重试。',
   PRODUCER_LEASE_EXPIRED: '生成进程已丢失，无法安全自动重试。',

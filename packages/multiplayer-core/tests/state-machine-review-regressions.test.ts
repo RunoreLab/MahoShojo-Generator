@@ -53,6 +53,7 @@ const createJoinedState = (): ArenaRoomAuthorityState => {
 };
 
 const reserveCommand = (
+  state: ArenaRoomAuthorityState,
   request = 'request-1',
   generation = 'generation-1',
   timestamp = '2026-08-27T16:04:00.000Z',
@@ -60,6 +61,7 @@ const reserveCommand = (
   type: 'reserve-generation' as const,
   expectedRoomEpoch: 'epoch-1',
   expectedRevision: 0,
+  expectedControlSeq: state.snapshot.controlSeq,
   generationRequestId: request,
   generationId: generation,
   attempt: 1,
@@ -99,7 +101,7 @@ const mirror = (
 describe('GMR-01 independent review regressions', () => {
   it('keeps snapshot digests and generation capabilities behind a scoped server-only boundary', () => {
     const state = createJoinedState();
-    const command = reserveCommand();
+    const command = reserveCommand(state);
 
     expect(failure(transitionArenaRoomAt(state, {
       ...command,
@@ -266,9 +268,10 @@ describe('GMR-01 independent review regressions', () => {
   });
 
   it('fences historical request IDs and generation IDs for the entire room lifetime', () => {
+    const joined = createJoinedState();
     const first = success(transitionArenaRoomAt(
-      createJoinedState(),
-      reserveCommand(),
+      joined,
+      reserveCommand(joined),
       generationReservationAuthority(),
     )).nextState;
     const firstDone = mirror(first, 'request-1', 'generation-1', {
@@ -277,7 +280,7 @@ describe('GMR-01 independent review regressions', () => {
     });
     const second = success(transitionArenaRoomAt(
       firstDone,
-      reserveCommand('request-2', 'generation-2', '2026-08-27T16:07:00.000Z'),
+      reserveCommand(firstDone, 'request-2', 'generation-2', '2026-08-27T16:07:00.000Z'),
       generationReservationAuthority('request-2', 'generation-2'),
     )).nextState;
     const secondDone = mirror(second, 'request-2', 'generation-2', {
@@ -287,17 +290,17 @@ describe('GMR-01 independent review regressions', () => {
 
     expect(failure(transitionArenaRoomAt(
       secondDone,
-      reserveCommand('request-1', 'generation-1', '2026-08-27T16:10:00.000Z'),
+      reserveCommand(secondDone, 'request-1', 'generation-1', '2026-08-27T16:10:00.000Z'),
       generationReservationAuthority(),
     ))).toMatchObject({ code: 'conflict', reason: 'generation-terminal-conflict' });
     expect(failure(transitionArenaRoomAt(secondDone, {
-      ...reserveCommand('request-1', 'generation-1', '2026-08-27T16:10:00.000Z'),
+      ...reserveCommand(secondDone, 'request-1', 'generation-1', '2026-08-27T16:10:00.000Z'),
       generationId: 'generation-3',
     }, generationReservationAuthority('request-1', 'generation-3'))))
       .toMatchObject({ code: 'conflict', reason: 'generation-terminal-conflict' });
     expect(failure(transitionArenaRoomAt(
       secondDone,
-      reserveCommand('request-3', 'generation-1', '2026-08-27T16:10:00.000Z'),
+      reserveCommand(secondDone, 'request-3', 'generation-1', '2026-08-27T16:10:00.000Z'),
       generationReservationAuthority('request-3', 'generation-1'),
     )))
       .toMatchObject({ code: 'conflict', reason: 'generation-id-conflict' });
@@ -321,7 +324,7 @@ describe('GMR-01 independent review regressions', () => {
     }));
     expect(failure(transitionArenaRoomAt(
       generationExhausted,
-      reserveCommand('next-request', 'next-generation'),
+      reserveCommand(generationExhausted, 'next-request', 'next-generation'),
       generationReservationAuthority('next-request', 'next-generation'),
     ))).toMatchObject({ code: 'capability-denied', reason: 'generation-history-limit-reached' });
 
@@ -379,30 +382,33 @@ describe('GMR-01 independent review regressions', () => {
   });
 
   it('recognizes an exact reservation retry before comparing the room current revision', () => {
+    const joined = createJoinedState();
     const reserved = success(transitionArenaRoomAt(
-      createJoinedState(),
-      reserveCommand('request-1', 'generation-1', '2026-08-27T16:06:00.000Z'),
+      joined,
+      reserveCommand(joined, 'request-1', 'generation-1', '2026-08-27T16:06:00.000Z'),
       generationReservationAuthority(),
     )).nextState;
     const published = success(transitionArenaRoomAt(reserved, {
       type: 'publish-config',
       expectedRoomEpoch: 'epoch-1',
       expectedRevision: 0,
+      expectedControlSeq: reserved.snapshot.controlSeq,
       sharedConfig: { ...baseConfig(), userGuidance: '只影响下一次生成' },
       timestamp: '2026-08-27T16:07:00.000Z',
     }, hostAuthority())).nextState;
 
     expect(success(transitionArenaRoomAt(
       published,
-      reserveCommand('request-1', 'generation-1', '2026-08-27T16:08:00.000Z'),
+      reserveCommand(published, 'request-1', 'generation-1', '2026-08-27T16:08:00.000Z'),
       generationReservationAuthority(),
     )).kind).toBe('idempotent');
   });
 
   it('rejects conflicting terminal metadata and direct starting-to-completed jumps', () => {
+    const joined = createJoinedState();
     const reserved = success(transitionArenaRoomAt(
-      createJoinedState(),
-      reserveCommand(),
+      joined,
+      reserveCommand(joined),
       generationReservationAuthority(),
     )).nextState;
     expect(failure(transitionArenaRoomAt(reserved, {
@@ -431,9 +437,10 @@ describe('GMR-01 independent review regressions', () => {
       timestamp: '2026-08-27T16:07:00.000Z',
     }, generationPublisherAuthority()))).toMatchObject({ code: 'conflict', reason: 'generation-terminal-conflict' });
 
+    const failedJoined = createJoinedState();
     const failedReserved = success(transitionArenaRoomAt(
-      createJoinedState(),
-      reserveCommand('request-failed', 'generation-failed'),
+      failedJoined,
+      reserveCommand(failedJoined, 'request-failed', 'generation-failed'),
       generationReservationAuthority('request-failed', 'generation-failed'),
     )).nextState;
     const failed = mirror(failedReserved, 'request-failed', 'generation-failed', {
@@ -473,6 +480,7 @@ describe('GMR-01 independent review regressions', () => {
       type: 'publish-config',
       expectedRoomEpoch: 'epoch-1',
       expectedRevision: 0,
+      expectedControlSeq: joined.nextState.snapshot.controlSeq,
       sharedConfig: { ...baseConfig(), battleMode: 'kizuna' },
       timestamp: '2026-08-27T16:02:00.000Z',
     }, hostAuthority()));
@@ -503,7 +511,7 @@ describe('GMR-01 independent review regressions', () => {
     expect(resolved.predecessor).toEqual(predecessorOf(submitted.nextState));
     sequences.push(...resolved.events.map((event) => event.controlSeq));
     const reserved = success(transitionArenaRoomAt(resolved.nextState, {
-      ...reserveCommand('request-chain', 'generation-chain', '2026-08-27T16:05:00.000Z'),
+      ...reserveCommand(resolved.nextState, 'request-chain', 'generation-chain', '2026-08-27T16:05:00.000Z'),
       expectedRevision: 2,
     }, generationReservationAuthority('request-chain', 'generation-chain', 2)));
     expect(reserved.predecessor).toEqual(predecessorOf(resolved.nextState));
@@ -614,6 +622,7 @@ describe('GMR-01 independent review regressions', () => {
       type: 'publish-config',
       expectedRoomEpoch: 'epoch-1',
       expectedRevision: 0,
+      expectedControlSeq: compatible.snapshot.controlSeq,
       sharedConfig: compatible.snapshot.sharedConfig,
       timestamp: NEXT_TIMESTAMP,
     }, hostAuthority()))).toMatchObject({ code: 'validation-failed', reason: 'invalid-state' });
@@ -657,6 +666,7 @@ describe('GMR-01 independent review regressions', () => {
       type: 'publish-config' as const,
       expectedRoomEpoch: 'epoch-1',
       expectedRevision: 0,
+      expectedControlSeq: initial.snapshot.controlSeq,
       sharedConfig: { ...baseConfig(), userGuidance: 'publish-once' },
       timestamp: NEXT_TIMESTAMP,
     };
@@ -775,8 +785,8 @@ describe('GMR-01 independent review regressions', () => {
       expect.objectContaining({ code: 'invalid-input' }),
     );
     expect(oversizedHydrate).toEqual(hydrateBefore);
-    expect(() => transitionArenaRoomAt(state, reserveCommand(), generationReservationAuthority())).not.toThrow();
-    expect(transitionArenaRoomAt(state, reserveCommand(), generationReservationAuthority()).ok).toBe(true);
+    expect(() => transitionArenaRoomAt(state, reserveCommand(state), generationReservationAuthority())).not.toThrow();
+    expect(transitionArenaRoomAt(state, reserveCommand(state), generationReservationAuthority()).ok).toBe(true);
   });
 });
 
@@ -789,7 +799,7 @@ describe('GMR-09 mixed-version checkpoint gate', () => {
 
   it('keeps pre-digest checkpoints readable but fails their historical retry closed', () => {
     const state = createJoinedState();
-    const command = reserveCommand();
+    const command = reserveCommand(state);
     const reserved = success(transitionArenaRoomAt(
       state,
       command,
@@ -814,7 +824,7 @@ describe('GMR-09 mixed-version checkpoint gate', () => {
     const state = createJoinedState();
     const reserved = success(transitionArenaRoomAt(
       state,
-      reserveCommand(),
+      reserveCommand(state),
       generationReservationAuthority(),
     )).nextState;
 

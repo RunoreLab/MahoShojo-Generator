@@ -15,9 +15,33 @@ const preparationSeed = '11'.repeat(32);
 const preparationVersion = 'arena-runtime-v1';
 const now = '2026-08-25T04:00:00.000Z';
 const leaseExpiresAt = '2026-08-25T04:01:00.000Z';
+const originalConsoleError = console.error;
+let blockingPoolErrorObserved = false;
+console.error = (...args: unknown[]) => {
+  if (args[0] === '[hono][redis] generation 阻塞读连接异常') {
+    blockingPoolErrorObserved = true;
+  }
+  originalConsoleError(...args);
+};
 const redis = new RedisRuntime(redisUrl, true);
 const redisWriter = new RedisRuntime(redisUrl, true);
 const cleanup = createClient({ url: redisUrl });
+
+const withDeadline = <T>(promise: Promise<T>, deadlineMs: number, errorCode: string): Promise<T> => (
+  new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error(errorCode)), deadlineMs);
+    void promise.then(
+      (value) => {
+        clearTimeout(timeout);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timeout);
+        reject(error);
+      },
+    );
+  })
+);
 
 try {
   await redis.connect();
@@ -108,13 +132,77 @@ try {
   if (replay.kind !== 'events' || replay.events.length !== 1) {
     throw new Error('ARENA_REDIS_REPLAY_CONTRACT_FAILED');
   }
+  const isolationCursor = appended.events.at(-1)?.id;
+  if (!isolationCursor) throw new Error('ARENA_REDIS_ISOLATION_CURSOR_MISSING');
+  const isolationRead = store.readAfter({
+    generationId,
+    after: isolationCursor,
+    blockMs: 1_000,
+  });
+  let isolationReadSettled = false;
+  void isolationRead.then(
+    () => {
+      isolationReadSettled = true;
+    },
+    () => {
+      isolationReadSettled = true;
+    },
+  );
+  await new Promise<void>((resolve) => setTimeout(resolve, 25));
+  if (isolationReadSettled) {
+    throw new Error('ARENA_REDIS_SAME_RUNTIME_READ_NOT_BLOCKING');
+  }
+  const isolationAppend = await withDeadline(store.appendEvents({
+    generationId,
+    producerToken,
+    events: [{ type: 'markdown', data: { chunk: 'same-runtime' } }],
+    now,
+  }), 500, 'ARENA_REDIS_SAME_RUNTIME_APPEND_TIMEOUT');
+  const isolationEventId = isolationAppend.events[0]?.id;
+  if (!isolationAppend.owned || !isolationEventId) {
+    throw new Error('ARENA_REDIS_SAME_RUNTIME_APPEND_FAILED');
+  }
+  const isolationReplay = await withDeadline(
+    isolationRead,
+    500,
+    'ARENA_REDIS_SAME_RUNTIME_READ_WAKE_TIMEOUT',
+  );
+  if (
+    isolationReplay.kind !== 'events'
+    || isolationReplay.events[0]?.id !== isolationEventId
+  ) {
+    throw new Error('ARENA_REDIS_SAME_RUNTIME_READ_WRITE_ISOLATION_FAILED');
+  }
+  const rankingAppend = await store.appendEvents({
+    generationId,
+    producerToken,
+    events: [{
+      type: 'ranking',
+      data: {
+        success: true,
+        generationId,
+        state: 'ready',
+        snapshot: { status: 'completed', combatantCount: 5 },
+        participants: [],
+      },
+    }],
+    now,
+  });
+  const rankingEventId = rankingAppend.events[0]?.id;
+  const rankingEvent = rankingEventId
+    ? await store.readEvent({ generationId, eventId: rankingEventId })
+    : null;
+  const rankingData = rankingEvent?.data as { participants?: unknown } | undefined;
+  if (!Array.isArray(rankingData?.participants) || rankingData.participants.length !== 0) {
+    throw new Error('ARENA_REDIS_RANKING_ARRAY_ROUND_TRIP_FAILED');
+  }
   const trimEvents = Array.from({ length: 2_050 }, (_, index) => ({
     type: 'markdown',
     data: { chunk: String(index % 10) },
   }));
   const trimRace = store.readAfter({
     generationId,
-    after: appended.events.at(-1)?.id ?? null,
+    after: rankingEventId ?? null,
     blockMs: 1_000,
   });
   await new Promise<void>((resolve) => setTimeout(resolve, 25));
@@ -137,11 +225,19 @@ try {
   await cleanup.unlink(eventsKey);
   const missing = await store.readAfter({
     generationId,
-    after: appended.events.at(-1)?.id ?? null,
+    after: rankingEventId ?? null,
     blockMs: 10,
   });
   if (missing.kind !== 'stream-missing') {
     throw new Error('ARENA_REDIS_STREAM_MISSING_CONTRACT_FAILED');
+  }
+  await new Promise<void>((resolve) => setTimeout(resolve, 3_500));
+  if (blockingPoolErrorObserved) {
+    throw new Error('ARENA_REDIS_BLOCKING_POOL_IDLE_ERROR');
+  }
+  const blockingPoolPing = await redis.ping();
+  if (!blockingPoolPing || !redis.getStatus().ready) {
+    throw new Error('ARENA_REDIS_BLOCKING_POOL_IDLE_UNHEALTHY');
   }
   const hidden = await store.readState({ generationId, actorKey: 'anonymous:other' });
   if (hidden !== null) throw new Error('ARENA_REDIS_OWNER_SCOPE_FAILED');
@@ -258,6 +354,7 @@ try {
     arenaRedis: true,
     reservation: true,
     replay: true,
+    rankingArrayRoundTrip: true,
     ownerScope: true,
     cancel: true,
     terminalCas: true,
@@ -266,11 +363,14 @@ try {
     fencing: true,
     exactTrim: true,
     blockingTrimRace: true,
+    sameRuntimeReadWriteIsolation: true,
+    blockingPoolIdleStable: true,
     expiredProducerFencing: true,
     streamMissing: true,
     terminalTtl: true,
   }));
 } finally {
+  console.error = originalConsoleError;
   await redis.close();
   await redisWriter.close();
   if (!cleanup.isOpen) await cleanup.connect();

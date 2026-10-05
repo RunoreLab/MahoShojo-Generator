@@ -1,8 +1,72 @@
 import { describe, expect, it } from 'vitest';
 
 import { hydrateBattleReportCardFromGenerationRecord } from '@/lib/arena/battle-report-card-fallback';
+import { BUILTIN_ARENA_NEWS_PACKAGE_REF, createWebPackageOverlay } from '@mahoshojo/web-package';
 
 describe('hydrateBattleReportCardFromGenerationRecord', () => {
+  it('preserves explicit non-reasoning token details when restoring a saved card', async () => {
+    const result = await hydrateBattleReportCardFromGenerationRecord({
+      generationMode: 'stream', endpoint: 'api/arena/generate-stream', mode: 'daily',
+      scenarioTitle: null, headline: null, winner: null, outputPreview: '# 正文',
+      promptTokens: 13967, completionTokens: 11568, reasoningTokens: 8273,
+      totalTokens: null, cachedTokens: null, usageDetails: { textTokens: 3295 },
+    });
+    expect(result.report.aiUsage).toMatchObject({ textTokens: 3295, completionTokens: 11568, reasoningTokens: 8273 });
+  });
+  it.each([
+    ['stream', '# 快照战报\n\n正文。\n\n## 胜利者\n角色甲'],
+    ['non-stream', JSON.stringify({
+      headline: '快照战报',
+      reporterInfo: { name: '模型记者', publication: '模型来源' },
+      article: { body: '正文。', analysis: '' },
+      officialReport: { winner: '角色甲', conclusion: '' },
+    })],
+  ] as const)('restores the %s render snapshot without rerolling adjudication results', async (
+    generationMode,
+    outputPreview,
+  ) => {
+    const adjudicationResults = [{
+      depth: 0,
+      description: '攻击是否命中？',
+      type: 'binary' as const,
+      roll: 42,
+      outcome: '成功',
+      details: '掷骰(42) vs 成功率(65%)',
+    }];
+
+    const result = await hydrateBattleReportCardFromGenerationRecord({
+      generationMode,
+      endpoint: generationMode === 'stream' ? 'api/arena/generate-stream' : 'api/arena/generate',
+      mode: 'classic',
+      scenarioTitle: null,
+      headline: null,
+      winner: null,
+      outputPreview,
+      aiModel: null,
+      promptTokens: null,
+      completionTokens: null,
+      totalTokens: null,
+      cachedTokens: null,
+      reasoningTokens: null,
+      renderSnapshot: {
+        version: 1,
+        reporterInfo: { name: '即时记者', publication: 'A.R.E.N.A.' },
+        userGuidance: '保持克制',
+        characterGuidances: [{ characterName: '角色甲', guidance: '保护队友' }],
+        adjudicationResults,
+        narrativeHistoryReadCount: 3,
+      },
+    });
+
+    expect(result.report).toMatchObject({
+      reporterInfo: { name: '即时记者', publication: 'A.R.E.N.A.' },
+      userGuidance: '保持克制',
+      characterGuidances: [{ characterName: '角色甲', guidance: '保护队友' }],
+      adjudicationResults,
+      narrativeHistoryReadCount: 3,
+    });
+  });
+
   it('hydrates stream preview and strips telemetry meta', async () => {
     const markdown = `
 # 破晓之战
@@ -78,6 +142,37 @@ describe('hydrateBattleReportCardFromGenerationRecord', () => {
     expect(result.liveBody).toContain('这里是正文第一段');
     expect(result.liveBody).not.toContain('MAHOSHOJO_ARENA_META');
     expect(result.liveBody).not.toContain('MAHOSHOJO_TELEMETRY_META');
+  });
+
+  it('normalizes legacy raw SDK usage fields inside telemetry meta comments', async () => {
+    const markdown = [
+      '正文第一段。',
+      '',
+      '<!-- MAHOSHOJO_TELEMETRY_META {"version":1,"usage":{"inputTokens":100,"outputTokens":20,"reasoningTokens":5,"totalTokens":120}} -->',
+    ].join('\n');
+
+    const result = await hydrateBattleReportCardFromGenerationRecord({
+      generationMode: 'stream',
+      endpoint: 'api/arena/generate-stream',
+      mode: 'classic',
+      scenarioTitle: null,
+      headline: null,
+      winner: null,
+      outputPreview: markdown,
+      aiModel: null,
+      promptTokens: null,
+      completionTokens: null,
+      totalTokens: null,
+      cachedTokens: null,
+      reasoningTokens: null,
+    });
+
+    expect(result.report.aiUsage).toMatchObject({
+      promptTokens: 100,
+      completionTokens: 20,
+      reasoningTokens: 5,
+      totalTokens: 120,
+    });
   });
 
   it('prefers authoritative stream meta over poisoned record winner/headline', async () => {
@@ -313,5 +408,41 @@ winner: 假赢家
 
     expect(result.report.article.body).toContain('{传闻并非事实}');
     expect(result.report.officialReport.winner).toBe('角色丙');
+  });
+});
+
+
+describe('Web generation record hydration', () => {
+  it('restores exact package overlay bytes and the immutable revision without inferring authority from HTML', async () => {
+    const content = '\n' + '<!doctype html><html><head><title>故事标题</title></head><body>故事</body></html>' + '  ';
+    const { generatedContent: _content, ...webPackage } = await createWebPackageOverlay(BUILTIN_ARENA_NEWS_PACKAGE_REF, content);
+    expect(_content).toBe(content);
+    const result = await hydrateBattleReportCardFromGenerationRecord({
+      generationMode: 'stream', endpoint: 'api/arena/generate-stream', mode: 'classic',
+      scenarioTitle: null, headline: '权威标题', winner: '权威胜者', outputPreview: content,
+      promptTokens: null, completionTokens: null, totalTokens: null, cachedTokens: null, reasoningTokens: null,
+      authoritativeWebContent: true,
+      renderSnapshot: { version: 1, reportFormat: 'web', webPackage },
+    });
+    expect(result.report).toMatchObject({ webReady: true, webPackage, headline: '权威标题', officialReport: { winner: '权威胜者' } });
+    expect(result.liveBody).toBe(content);
+    expect(result.report.article.body).toBe(content);
+  });
+
+  it.each(['stream', 'non-stream'])('restores %s Web bytes and authoritative facts without reading HTML DOM', async (generationMode) => {
+    const content = '<!doctype html><html><body><h1>伪标题</h1><script>const x = "原文";</script></body></html>';
+    const result = await hydrateBattleReportCardFromGenerationRecord({
+      generationMode, endpoint: 'api/arena/generate', mode: 'classic',
+      scenarioTitle: null, headline: '权威标题', winner: '权威胜者',
+      outputPreview: `${content}<!-- MAHOSHOJO_ARENA_META {"version":1,"report":{"winner":"权威胜者"}} -->`,
+      promptTokens: null, completionTokens: null, totalTokens: null, cachedTokens: null, reasoningTokens: null,
+      renderSnapshot: { version: 1, reportFormat: 'web' },
+    });
+    expect(result.report.reportFormat).toBe('web');
+    expect(result.report.webReady).toBe(false);
+    expect(result.report.webHtml).toBe(content);
+    expect(result.liveBody).toBe(content);
+    expect(result.report.headline).toBe('权威标题');
+    expect(result.report.officialReport.winner).toBe('权威胜者');
   });
 });

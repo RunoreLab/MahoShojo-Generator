@@ -59,4 +59,12 @@ describe('online data-card metadata contract', () => {
     expect(RootDataCardReviewStatusSchema).toBe(DataCardReviewStatusSchema);
     expect(RootOnlineDataCardVisibilitySchema).toBe(OnlineDataCardVisibilitySchema);
   });
+
+  it('validates the questionnaire type repair request', async () => {
+    const { RepairQuestionnaireDataCardTypeRequestSchema } = await import('@mahoshojo/contracts/data-cards');
+
+    expect(RepairQuestionnaireDataCardTypeRequestSchema.parse({ id: 'card-1' })).toEqual({ id: 'card-1' });
+    expect(RepairQuestionnaireDataCardTypeRequestSchema.safeParse({ id: '   ' }).success).toBe(false);
+    expect(RepairQuestionnaireDataCardTypeRequestSchema.safeParse({ id: 'card-1', type: 'questionnaire' }).success).toBe(false);
+  });
 });

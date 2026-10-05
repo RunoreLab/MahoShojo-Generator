@@ -20,28 +20,14 @@ vi.mock('@/components/redeem/RedeemPage', () => ({
   },
 }));
 
-vi.mock('@/components/encyclopedia/EncyclopediaIndexPage', () => ({
-  EncyclopediaIndexPage: function EncyclopediaIndexPageMock({
-    initialQuery,
-    initialCategoryId,
-  }: {
-    initialQuery?: string;
-    initialCategoryId?: string;
-  }) {
-    return (
-      <main
-        data-page="encyclopedia-index"
-        data-query={initialQuery ?? ''}
-        data-category={initialCategoryId ?? ''}
-      >
-        百科目录
-      </main>
-    );
+vi.mock('@/components/encyclopedia/WebEncyclopediaViews', () => ({
+  WebEncyclopediaIndex: function WebEncyclopediaIndexMock() {
+    return <main data-page="encyclopedia-index">百科目录</main>;
   },
 }));
 
-vi.mock('@/components/encyclopedia/EncyclopediaEntryPage', () => ({
-  EncyclopediaEntryPage: function EncyclopediaEntryPageMock({ slug }: { slug?: string }) {
+vi.mock('@/components/encyclopedia/WebEncyclopediaEntry', () => ({
+  WebEncyclopediaEntry: function WebEncyclopediaEntryMock({ slug }: { slug?: string }) {
     return <main data-page="encyclopedia-entry" data-slug={slug ?? ''}>百科条目</main>;
   },
 }));

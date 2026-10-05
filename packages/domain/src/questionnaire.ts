@@ -272,3 +272,34 @@ export const isAnswerOverLimit = (
   const { limit } = getAnswerLimitInfo(questionMaxLength);
   return Boolean(limit && limit > 0 && normalized.length > limit);
 };
+
+export const formatQuestionnaireAnswers = (
+  answers: QuestionnaireAnswerItem[],
+): string => {
+  if (answers.length === 0) return '';
+  const grouped = new Map<string, QuestionnaireAnswerItem[]>();
+  for (const item of answers) {
+    const groupKey = item.questionnaireTitle?.trim() || '';
+    if (!grouped.has(groupKey)) grouped.set(groupKey, []);
+    grouped.get(groupKey)!.push(item);
+  }
+
+  const blocks: string[] = [];
+  for (const [groupTitle, items] of grouped.entries()) {
+    if (groupTitle) blocks.push(`【${groupTitle}】`);
+    items.forEach((item, index) => {
+      const label = item.question?.trim() || `问题 ${index + 1}`;
+      blocks.push(`Q: ${label}`, `A: ${item.answer}`);
+    });
+  }
+  return blocks.join('\n');
+};
+
+export const compactQuestionnaireAnswerItems = (
+  answers: QuestionnaireAnswerItem[],
+): QuestionnaireAnswerItem[] => answers.map((item) => {
+  const compacted = { ...item };
+  delete compacted.questionnaireId;
+  delete compacted.questionnaireTitle;
+  return compacted;
+});

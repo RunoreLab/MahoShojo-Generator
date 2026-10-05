@@ -8,10 +8,12 @@ import {
 } from '../src/hosted-dr';
 
 const repositoryRoot = path.resolve(import.meta.dirname, '../../..');
-const clientProjection = readFileSync(
-  path.join(repositoryRoot, 'apps/web/config/hosted-dr-client.generated.ts'),
+const clientRouting = JSON.parse(readFileSync(
+  path.join(repositoryRoot, 'config/hosted-routing.json'),
   'utf8',
-);
+)) as {
+  origins: { stable: string; preview: string; primary: string; dr: string };
+};
 
 const createProvider = (
   id: 'hono-d1-primary' | 'cloudflare-d1-binding',
@@ -45,11 +47,12 @@ describe('G25E-2 Hosted DR fault matrix: selector/readiness/cutback', () => {
       hasDurableIdempotencyProof: false,
     });
     expect(selected).toBe('next-dr');
-    expect(clientProjection).toContain('https://api.mahoshojo.colanns.me');
-    expect(clientProjection).toContain('"defaultMode": "client-preflight"');
-    expect(clientProjection).toContain('"primaryOrigin": "https://homura.colanns.me"');
-    expect(clientProjection).toContain('"drOrigin": "https://mahoshojo.colanns.me"');
-    expect(clientProjection).not.toContain('SIGNATURE_SECRET_KEY');
+    expect(clientRouting.origins).toEqual({
+      stable: 'https://api.mahoshojo.colanns.me',
+      primary: 'https://homura.colanns.me',
+      dr: 'https://mahoshojo.colanns.me',
+      preview: 'https://homura-preview.colanns.me',
+    });
 
     const dr = createHostedDrReadinessService({
       placement: 'next-dr',

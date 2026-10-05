@@ -36,6 +36,7 @@ const createPorts = (
   completeTerminal: vi.fn(async () => undefined),
   failTerminal: vi.fn(async () => undefined),
   persistCombatants: vi.fn(async () => undefined),
+  persistParticipants: vi.fn(async () => undefined),
   applyStoryImpacts: vi.fn(async () => undefined),
   settleRatings: vi.fn(async () => undefined),
   readRanking: vi.fn(async () => ({ success: true })),
@@ -43,6 +44,28 @@ const createPorts = (
 });
 
 describe('Arena generation finalization', () => {
+  it.each([
+    { status: 'cancelled' as const, errorCode: 'CONTENT_POLICY_CANCELLED', metadata: {} },
+    { status: 'failed' as const, errorCode: 'AI_OUTPUT_FILTERED', metadata: {} },
+    { status: 'failed' as const, errorCode: 'AI_OUTPUT_TRUNCATED', metadata: { outputContract: 'web-document' } },
+    { status: 'failed' as const, errorCode: 'AI_OUTPUT_TRUNCATED', metadata: { outputContract: 'web-package-target' } },
+  ])('does not archive policy or executable partial output: $errorCode $metadata', async (failure) => {
+    const ports = createPorts();
+    await createArenaGenerationFinalizer(ports)({ ...input, ...failure, markdown: 'partial' });
+    expect(ports.storeOutput).not.toHaveBeenCalled();
+    expect(ports.applyStoryImpacts).not.toHaveBeenCalled();
+    expect(ports.settleRatings).not.toHaveBeenCalled();
+  });
+  it('archives truncated markdown without applying ratings or story updates', async () => {
+    const ports = createPorts();
+    const result = await createArenaGenerationFinalizer(ports)({
+      ...input, status: 'failed', errorCode: 'AI_OUTPUT_TRUNCATED', markdown: 'partial body',
+    });
+    expect(ports.storeOutput).toHaveBeenCalledWith(expect.objectContaining({ markdown: 'partial body' }));
+    expect(result.resultRef).toBe('r2://battle/generation-1');
+    expect(ports.applyStoryImpacts).not.toHaveBeenCalled();
+    expect(ports.settleRatings).not.toHaveBeenCalled();
+  });
   it('D1 terminal claim 是 rating/history 等权威副作用的唯一门禁', async () => {
     const order: string[] = [];
     const ports = createPorts({
@@ -59,6 +82,7 @@ describe('Arena generation finalization', () => {
         };
       }),
       persistCombatants: vi.fn(async () => { order.push('combatants'); }),
+      persistParticipants: vi.fn(async () => { order.push('participants'); }),
       applyStoryImpacts: vi.fn(async () => { order.push('impacts'); }),
       settleRatings: vi.fn(async () => { order.push('ratings'); }),
       completeTerminal: vi.fn(async () => { order.push('complete'); }),
@@ -75,7 +99,7 @@ describe('Arena generation finalization', () => {
     });
 
     expect(order).toEqual([
-      'r2', 'claim', 'combatants', 'impacts', 'ratings', 'complete', 'ranking',
+      'r2', 'claim', 'combatants', 'participants', 'impacts', 'ratings', 'complete', 'ranking',
     ]);
     expect(ports.claimTerminal).toHaveBeenCalledWith(expect.objectContaining({
       generationId: 'generation-1',
@@ -91,6 +115,48 @@ describe('Arena generation finalization', () => {
     }));
     expect(ports.settleRatings).toHaveBeenCalledWith(expect.objectContaining({
       idempotencyKey: 'arena-terminal:generation-1:ratings',
+    }));
+  });
+
+  it('ranking 读取失败降级为 null，不推翻已完成的 generation', async () => {
+    const ports = createPorts({
+      readRanking: vi.fn(async () => { throw new Error('RANKING_READ_UNAVAILABLE'); }),
+    });
+    const finalize = createArenaGenerationFinalizer(ports);
+
+    await expect(finalize(input)).resolves.toEqual({
+      resultRef: 'r2://battle/generation-1',
+      ranking: null,
+    });
+    expect(ports.completeTerminal).toHaveBeenCalledOnce();
+  });
+
+  it('按输出契约为 R2 标注 Markdown 或 structured JSON', async () => {
+    const markdownPorts = createPorts();
+    await createArenaGenerationFinalizer(markdownPorts)(input);
+    expect(markdownPorts.storeOutput).toHaveBeenCalledWith(expect.objectContaining({
+      contentType: 'text/markdown; charset=utf-8',
+    }));
+
+    const structuredPorts = createPorts();
+    await createArenaGenerationFinalizer(structuredPorts)({
+      ...input,
+      metadata: { ...input.metadata, outputContract: 'structured-report' },
+      markdown: JSON.stringify({ headline: '结构化战报' }),
+    });
+    expect(structuredPorts.storeOutput).toHaveBeenCalledWith(expect.objectContaining({
+      contentType: 'application/json; charset=utf-8',
+    }));
+  });
+
+  it('Web raw source 使用非主动执行 MIME 保存', async () => {
+    const ports = createPorts();
+    const content = '<!doctype html><script>const x = "a < b";</script>';
+    await createArenaGenerationFinalizer(ports)({
+      ...input, markdown: content, metadata: { ...input.metadata, outputContract: 'web-document' },
+    });
+    expect(ports.storeOutput).toHaveBeenCalledWith(expect.objectContaining({
+      markdown: content, contentType: 'text/plain; charset=utf-8',
     }));
   });
 
@@ -138,7 +204,11 @@ describe('Arena generation finalization', () => {
     const failed = createArenaGenerationFinalizer(failedPorts, {
       observer: { observeArenaGeneration },
     });
-    await expect(failed(input)).rejects.toThrow('r2-secret-canary');
+    await expect(failed(input)).resolves.toEqual({
+      resultRef: null,
+      ranking: { success: true },
+      persistenceWarning: 'OUTPUT_NOT_ARCHIVED',
+    });
     expect(observeArenaGeneration).toHaveBeenCalledWith(expect.objectContaining({
       event: 'storage',
       storage: 'r2',
@@ -149,16 +219,17 @@ describe('Arena generation finalization', () => {
     expect(failedPorts.storeOutput).toHaveBeenCalledTimes(3);
     expect(failedPorts.claimTerminal).toHaveBeenCalledWith(expect.objectContaining({
       generationId: input.generationId,
-      status: 'failed',
-      errorCode: 'ARENA_R2_STORAGE_FAILED',
+      status: 'completed',
+      errorCode: null,
       resultRef: null,
-      markdown: '',
+      markdown: input.markdown,
+      persistenceWarning: 'OUTPUT_NOT_ARCHIVED',
     }));
-    expect(JSON.stringify(vi.mocked(failedPorts.claimTerminal).mock.calls)).not.toContain(
-      input.markdown,
-    );
     expect(failedPorts.completeTerminal).toHaveBeenCalledOnce();
-    expect(failedPorts.settleRatings).not.toHaveBeenCalled();
+    expect(failedPorts.persistCombatants).toHaveBeenCalledOnce();
+    expect(failedPorts.applyStoryImpacts).toHaveBeenCalledOnce();
+    expect(failedPorts.settleRatings).toHaveBeenCalledOnce();
+    expect(failedPorts.failTerminal).not.toHaveBeenCalled();
   });
 
   it('retries a transient post-claim failure through the idempotent D1 terminal claim', async () => {
@@ -183,7 +254,33 @@ describe('Arena generation finalization', () => {
     expect(ports.completeTerminal).toHaveBeenCalledTimes(1);
   });
 
-  it.each(['completed', 'failed', 'cancelled'] as const)(
+  it('keeps completed output successful when auxiliary D1 finalization is unavailable', async () => {
+    const ports = createPorts({
+      claimTerminal: vi.fn(async () => { throw new Error('ARENA_D1_UNAVAILABLE'); }),
+    });
+    const finalize = createArenaGenerationFinalizer(ports);
+
+    await expect(finalize(input)).resolves.toEqual({
+      resultRef: 'r2://battle/generation-1',
+      ranking: null,
+      persistenceWarning: 'PERSISTENCE_UNAVAILABLE',
+    });
+    expect(ports.claimTerminal).toHaveBeenCalledTimes(3);
+    expect(ports.persistCombatants).not.toHaveBeenCalled();
+    expect(ports.readRanking).not.toHaveBeenCalled();
+  });
+
+  it('keeps a durable terminal identity conflict fail closed', async () => {
+    const ports = createPorts({
+      claimTerminal: vi.fn(async () => { throw new Error('ARENA_TERMINAL_CLAIM_CONFLICT'); }),
+    });
+    const finalize = createArenaGenerationFinalizer(ports);
+
+    await expect(finalize(input)).rejects.toThrow('ARENA_TERMINAL_CLAIM_CONFLICT');
+    expect(ports.claimTerminal).toHaveBeenCalledTimes(3);
+  });
+
+  it.each(['failed', 'cancelled'] as const)(
     '%s terminal 在 post-claim finalization 重试耗尽后保留真实终态并保持 pending',
     async (status) => {
       const failure = new Error('D1_POST_CLAIM_UNAVAILABLE');
@@ -195,7 +292,7 @@ describe('Arena generation finalization', () => {
       await expect(finalize({
         ...input,
         status,
-        errorCode: status === 'completed' ? null : `GENERATION_${status.toUpperCase()}`,
+        errorCode: `GENERATION_${status.toUpperCase()}`,
       })).rejects.toThrow('D1_POST_CLAIM_UNAVAILABLE');
       expect(ports.claimTerminal).toHaveBeenCalledTimes(3);
       expect(ports.failTerminal).not.toHaveBeenCalled();

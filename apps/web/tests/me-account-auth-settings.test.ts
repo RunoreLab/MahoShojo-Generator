@@ -39,7 +39,7 @@ const state = {
   updatedEmails: [] as string[],
 };
 
-vi.mock('@/lib/pvp/server', () => ({
+vi.mock('@/lib/api/server', () => ({
   json: (payload: unknown, init?: ResponseInit) =>
     new Response(JSON.stringify(payload), {
       status: init?.status ?? 200,
@@ -59,7 +59,7 @@ vi.mock('@/lib/pvp/server', () => ({
       username: 'alice',
     },
   }),
-  withPvpErrorBoundary: (handler: (req: Request) => Promise<Response>) => handler,
+  withApiErrorBoundary: (handler: (req: Request) => Promise<Response>) => handler,
 }));
 
 vi.mock('@/lib/auth/better-auth-subrequest', () => ({

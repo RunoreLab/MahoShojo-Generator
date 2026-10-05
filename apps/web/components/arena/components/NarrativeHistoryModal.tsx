@@ -7,6 +7,7 @@ import BattleDataModal from '@/components/BattleDataModal';
 import SaveToCloudButton from '@/components/SaveToCloudButton';
 import { JsonSizeIndicator } from '@/components/shared/JsonSizeIndicator';
 import { formatDateTime } from '@/lib/constants';
+import { downloadBlob } from '@/lib/client/blobUrl';
 import { randomUUID } from '@/lib/crypto';
 import {
   extractNarrativeHistoryImportEntries,
@@ -347,14 +348,7 @@ export function NarrativeHistoryModal({ isOpen, onClose }: Props) {
     }
     const json = JSON.stringify(historyCardData, null, 2);
     const blob = new Blob([json], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `叙事历史_${formatDateTime(new Date()).replace(/[:\\s]/g, '-')}.json`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    downloadBlob(blob, `叙事历史_${formatDateTime(new Date()).replace(/[:\\s]/g, '-')}.json`);
   };
 
   const handlePickFile = () => {
@@ -420,7 +414,7 @@ export function NarrativeHistoryModal({ isOpen, onClose }: Props) {
   const modal = (
     <div className="fixed inset-0 z-40 bg-black/50 flex items-center justify-center p-4" onClick={handleBackdropClick}>
       <div
-        className="bg-white rounded-lg shadow-xl p-0 w-[96vw] max-w-[90rem] h-[85vh] max-h-[90vh] overflow-hidden flex flex-col"
+        className="bg-white rounded-lg shadow-xl p-0 w-full max-w-[90rem] h-[85dvh] max-h-[90dvh] overflow-hidden flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between p-4 border-b gap-3">

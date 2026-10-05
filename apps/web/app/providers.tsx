@@ -1,12 +1,14 @@
 'use client';
 
+import '@/lib/zod-jitless';
+
 import { GoogleAnalytics } from '@next/third-parties/google';
 import { usePathname } from 'next/navigation';
 import type { ReactNode } from 'react';
 
 import AnnouncementTicker from '@/components/Announcement/AnnouncementTicker';
 import { GlobalTopBar } from '@/components/navigation/GlobalTopBar';
-import { getTopbarCanonicalPathname, isTopbarCoveredPath } from '@/lib/navigation';
+import { getTopbarCanonicalPathname, isTopbarCoveredPath } from '@mahoshojo/ui-web/navigation';
 
 interface AppProvidersProps {
   children: ReactNode;

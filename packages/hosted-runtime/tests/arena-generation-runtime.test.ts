@@ -60,6 +60,75 @@ const createDependencies = (
 });
 
 describe('Arena generation runtime', () => {
+  it.each([false, true])('retains the guarded tail on upstream failure with replay unavailable=%s', async (replayUnavailable) => {
+    let pulls = 0;
+    const dependencies = createDependencies({
+      buildPrompt: vi.fn(async () => ({ prompt: 'test', metadata: { expectsMeta: true } })),
+      generate: vi.fn(async () => ({
+        body: new ReadableStream<Uint8Array>({
+          pull(controller) {
+            if (pulls++ === 0) controller.enqueue(new TextEncoder().encode('short buffered partial'));
+            else controller.error(createSafePublicAiError({ code: 'AI_UPSTREAM_REQUEST_FAILED', message: '连接中断' }));
+          },
+        }),
+        telemetry: { usage: { completionTokens: 20 } },
+      })),
+    });
+    const runtime = createArenaGenerationRuntime(dependencies);
+    const prepared = await runtime.prepare!({
+      request: new Request('https://example.test/api/arena/generate-stream'),
+      actorKey: 'user:42', generationRequestId: 'request-tail', payload,
+    });
+    if (prepared instanceof Response || isArenaGenerationAuditableRejection(prepared)) throw new Error('prepare failed');
+    const events: unknown[] = [];
+    const terminal = await runtime.execute({
+      generationId: 'generation-tail', generationRequestId: 'request-tail', actorKey: 'user:42',
+      producerToken: 'producer', payloadHash: 'hash', payload: prepared.executionPayload,
+      signal: new AbortController().signal, emit: async (event) => {
+        events.push(event);
+        if (replayUnavailable && ['markdown', 'telemetry'].includes(event.type)) throw new Error('replay unavailable');
+      },
+      claimFinalization: async () => ({ kind: 'claimed' as const }),
+    });
+    expect(terminal.status).toBe('failed');
+    expect(dependencies.finalize).toHaveBeenCalledWith(expect.objectContaining({
+      markdown: 'short buffered partial', status: 'failed', errorCode: 'AI_UPSTREAM_REQUEST_FAILED',
+    }));
+    expect(events).toContainEqual({ type: 'markdown', data: { chunk: 'short buffered partial' } });
+  });
+  it.each([
+    ['length', 'AI_OUTPUT_TRUNCATED'],
+    ['content-filter', 'AI_OUTPUT_FILTERED'],
+    ['unknown', 'AI_STREAM_INCOMPLETE'],
+    ['error', 'AI_STREAM_INCOMPLETE'],
+  ])('does not mark nonempty %s output as completed', async (finishReason, code) => {
+    const dependencies = createDependencies({
+      generate: vi.fn(async () => ({
+        body: stream('# partial body'),
+        telemetry: { finishReason, usage: { completionTokens: 20, reasoningTokens: 15 } },
+      })),
+    });
+    const runtime = createArenaGenerationRuntime(dependencies);
+    const prepared = await runtime.prepare!({
+      request: new Request('https://example.test/api/arena/generate-stream'),
+      actorKey: 'user:42', generationRequestId: 'request-finish', payload,
+    });
+    if (prepared instanceof Response || isArenaGenerationAuditableRejection(prepared)) throw new Error('prepare failed');
+    const emitted: unknown[] = [];
+    const terminal = await runtime.execute({
+      generationId: 'generation-finish', generationRequestId: 'request-finish',
+      actorKey: 'user:42', producerToken: 'producer', payloadHash: 'hash',
+      payload: prepared.executionPayload, signal: new AbortController().signal,
+      emit: async (event) => { emitted.push(event); },
+      claimFinalization: async () => ({ kind: 'claimed' as const }),
+    });
+    expect(terminal).toMatchObject({ status: 'failed', code });
+    expect(dependencies.finalize).toHaveBeenCalledWith(expect.objectContaining({
+      status: 'failed', errorCode: code, markdown: '# partial body',
+    }));
+    expect(emitted).toContainEqual(expect.objectContaining({ type: 'telemetry' }));
+    expect(dependencies.generate).toHaveBeenCalledTimes(1);
+  });
   it('materializes adjudication and prompt deterministically from the reserved seed', async () => {
     const buildPrompt = vi.fn(async ({ payload: input, random }) => ({
       prompt: `prompt:${JSON.stringify(input.adjudicationResults)}:${random()}`,
@@ -117,6 +186,9 @@ describe('Arena generation runtime', () => {
     expect(first.responseHeaders?.['X-Mahoshojo-Stream-Meta']).toBe(
       second.responseHeaders?.['X-Mahoshojo-Stream-Meta'],
     );
+    expect(JSON.parse(decodeURIComponent(
+      first.responseHeaders?.['X-Mahoshojo-Stream-Meta'] ?? '',
+    ))).toMatchObject({ mode: 'classic' });
     expect(JSON.stringify(preflight.semanticPayload)).not.toContain('byok-secret');
     expect(JSON.stringify(first.executionPayload)).toContain('byok-secret');
   });
@@ -300,6 +372,193 @@ describe('Arena generation runtime', () => {
     expect(dependencies.generate).not.toHaveBeenCalled();
   });
 
+  it('rejects aggregate reference collections above the infrastructure sanity budget before safety', async () => {
+    const dependencies = createDependencies();
+    const runtime = createArenaGenerationRuntime(dependencies);
+
+    const prepared = await runtime.prepare!({
+      request: new Request('https://example.test/api/arena/generate-stream'),
+      actorKey: 'user:42',
+      generationRequestId: 'request-reference-sanity',
+      payload: {
+        ...payload,
+        materials: Array.from({ length: 257 }, (_, index) => ({ id: `material-${index}` })),
+      },
+    });
+
+    expect(prepared).toBeInstanceOf(Response);
+    expect((prepared as Response).status).toBe(413);
+    expect(await (prepared as Response).json()).toMatchObject({
+      code: 'ARENA_REFERENCE_ITEMS_LIMIT',
+    });
+    expect(dependencies.checkSafety).not.toHaveBeenCalled();
+    expect(dependencies.generate).not.toHaveBeenCalled();
+  });
+
+  it('applies the system prompt budget while allowing the same hosted BYOK prompt', async () => {
+    const oversizedForSystem = '界'.repeat(130_000);
+    const buildPrompt = vi.fn(async () => ({
+      prompt: oversizedForSystem,
+      metadata: {},
+    }));
+    const runtime = createArenaGenerationRuntime(createDependencies({ buildPrompt }));
+    const request = new Request('https://example.test/api/arena/generate-stream');
+    const prepare = (fundingMode: 'hosted-system' | 'hosted-byok') => runtime.prepare!({
+      request,
+      actorKey: 'user:42',
+      generationRequestId: `request-${fundingMode}`,
+      payload: {
+        ...payload,
+        __arenaServerContextV1: { fundingMode },
+      },
+    });
+
+    const system = await prepare('hosted-system');
+    const byok = await prepare('hosted-byok');
+
+    expect(system).toBeInstanceOf(Response);
+    expect((system as Response).status).toBe(413);
+    expect(await (system as Response).json()).toMatchObject({
+      code: 'ARENA_PROMPT_BUDGET_EXCEEDED',
+      estimatedPromptTokens: 130_000,
+      maxEstimatedPromptTokens: 128_000,
+    });
+    expect(byok).not.toBeInstanceOf(Response);
+  });
+
+  it('fails generation when combined reasoning and markdown exceed the shared output byte budget', async () => {
+    const output = 'X'.repeat(4 * 1_024 * 1_024 + 1);
+    const dependencies = createDependencies({
+      generate: vi.fn(async () => ({ body: stream(output), telemetry: {} })),
+    });
+    const runtime = createArenaGenerationRuntime(dependencies);
+    const prepared = await runtime.prepare!({
+      request: new Request('https://example.test/api/arena/generate-stream'),
+      actorKey: 'user:42',
+      generationRequestId: 'request-output-budget',
+      payload,
+    });
+    if (prepared instanceof Response || isArenaGenerationAuditableRejection(prepared)) {
+      throw new Error('unexpected response');
+    }
+
+    const terminal = await runtime.execute({
+      generationId: 'generation-output-budget',
+      generationRequestId: 'request-output-budget',
+      actorKey: 'user:42',
+      producerToken: 'producer-output-budget',
+      payloadHash: 'payload-output-budget',
+      payload: prepared.executionPayload,
+      signal: new AbortController().signal,
+      emit: vi.fn(async () => undefined),
+      claimFinalization: vi.fn(async () => ({ kind: 'claimed' as const })),
+    });
+
+    expect(terminal).toMatchObject({
+      status: 'failed',
+      code: 'ARENA_OUTPUT_BUDGET_EXCEEDED',
+    });
+    expect(dependencies.finalize).toHaveBeenCalledWith(expect.objectContaining({
+      status: 'failed',
+      errorCode: 'ARENA_OUTPUT_BUDGET_EXCEEDED',
+    }));
+  });
+
+  it('counts hidden stream metadata against the provider output byte budget', async () => {
+    const hiddenMeta = `<!-- MAHOSHOJO_ARENA_META ${'X'.repeat(4 * 1_024 * 1_024)}`;
+    const dependencies = createDependencies({
+      buildPrompt: vi.fn(async () => ({
+        prompt: 'system\n\nuser',
+        metadata: { expectsMeta: true },
+      })),
+      generate: vi.fn(async () => ({ body: stream('visible body', hiddenMeta), telemetry: {} })),
+    });
+    const runtime = createArenaGenerationRuntime(dependencies);
+    const prepared = await runtime.prepare!({
+      request: new Request('https://example.test/api/arena/generate-stream'),
+      actorKey: 'user:42',
+      generationRequestId: 'request-hidden-meta-budget',
+      payload,
+    });
+    if (prepared instanceof Response || isArenaGenerationAuditableRejection(prepared)) {
+      throw new Error('unexpected response');
+    }
+
+    const terminal = await runtime.execute({
+      generationId: 'generation-hidden-meta-budget',
+      generationRequestId: 'request-hidden-meta-budget',
+      actorKey: 'user:42',
+      producerToken: 'producer-hidden-meta-budget',
+      payloadHash: 'payload-hidden-meta-budget',
+      payload: prepared.executionPayload,
+      signal: new AbortController().signal,
+      emit: vi.fn(async () => undefined),
+      claimFinalization: vi.fn(async () => ({ kind: 'claimed' as const })),
+    });
+
+    expect(terminal).toMatchObject({
+      status: 'failed',
+      code: 'ARENA_OUTPUT_BUDGET_EXCEEDED',
+    });
+  });
+
+  it('propagates a late asynchronously bridged reasoning budget failure before finalization', async () => {
+    const generate = vi.fn(async (input: Parameters<ArenaGenerationRuntimeDependencies['generate']>[0]) => {
+      const encoder = new TextEncoder();
+      let pullCount = 0;
+      return {
+        telemetry: {},
+        body: new ReadableStream<Uint8Array>({
+          async pull(controller) {
+            pullCount += 1;
+            if (pullCount === 1) {
+              controller.enqueue(encoder.encode('visible body'));
+              return;
+            }
+            await new Promise((resolve) => setTimeout(resolve, 0));
+            void input.onReasoning({
+              type: 'reasoning-delta',
+              text: 'R'.repeat(4 * 1_024 * 1_024 + 1),
+            }).catch(() => undefined);
+            controller.close();
+          },
+        }),
+      };
+    });
+    const dependencies = createDependencies({ generate });
+    const runtime = createArenaGenerationRuntime(dependencies);
+    const prepared = await runtime.prepare!({
+      request: new Request('https://example.test/api/arena/generate-stream'),
+      actorKey: 'user:42',
+      generationRequestId: 'request-late-reasoning-budget',
+      payload,
+    });
+    if (prepared instanceof Response || isArenaGenerationAuditableRejection(prepared)) {
+      throw new Error('unexpected response');
+    }
+
+    const terminal = await runtime.execute({
+      generationId: 'generation-late-reasoning-budget',
+      generationRequestId: 'request-late-reasoning-budget',
+      actorKey: 'user:42',
+      producerToken: 'producer-late-reasoning-budget',
+      payloadHash: 'payload-late-reasoning-budget',
+      payload: prepared.executionPayload,
+      signal: new AbortController().signal,
+      emit: vi.fn(async () => undefined),
+      claimFinalization: vi.fn(async () => ({ kind: 'claimed' as const })),
+    });
+
+    expect(terminal).toMatchObject({
+      status: 'failed',
+      code: 'ARENA_OUTPUT_BUDGET_EXCEEDED',
+    });
+    expect(dependencies.finalize).toHaveBeenCalledWith(expect.objectContaining({
+      status: 'failed',
+      errorCode: 'ARENA_OUTPUT_BUDGET_EXCEEDED',
+    }));
+  });
+
   it('slow Provider stream emits compatible deltas and finalizes exactly once', async () => {
     const dependencies = createDependencies();
     const runtime = createArenaGenerationRuntime(dependencies);
@@ -446,6 +705,146 @@ describe('Arena generation runtime', () => {
       'telemetry',
       'ranking',
     ]);
+  });
+
+  it('marks reasoning_done as done only when reasoning text was actually delivered', async () => {
+    const dependencies = createDependencies({
+      generate: vi.fn(async (input) => {
+        await input.onReasoning({ type: 'reasoning-start' });
+        await input.onReasoning({ type: 'reasoning-delta', text: '思考' });
+        await input.onReasoning({ type: 'reasoning-end' });
+        return { body: stream('正文'), telemetry: {} };
+      }),
+    });
+    const runtime = createArenaGenerationRuntime(dependencies);
+    const prepared = await runtime.prepare!({
+      request: new Request('https://example.test/api/arena/generate-stream'),
+      actorKey: 'user:42',
+      generationRequestId: 'request-direct-runtime',
+      payload,
+    });
+    if (
+      prepared instanceof Response
+      || isArenaGenerationAuditableRejection(prepared)
+    ) throw new Error('unexpected response');
+    const doneEvents: Array<Record<string, unknown>> = [];
+
+    await runtime.execute({
+      generationId: 'generation-1',
+      generationRequestId: 'request-1',
+      actorKey: 'user:42',
+      producerToken: 'producer-token-1',
+      payloadHash: 'payload-hash-1',
+      payload: prepared.executionPayload,
+      signal: new AbortController().signal,
+      emit: async (event) => {
+        if (event.type === 'reasoning_done') doneEvents.push(event.data as Record<string, unknown>);
+      },
+      claimFinalization: vi.fn(async () => ({ kind: 'claimed' as const })),
+    });
+
+    expect(doneEvents).toEqual([{ source: 'sdk', status: 'done' }]);
+  });
+
+  it('marks reasoning_done as unavailable when the provider ends reasoning without text', async () => {
+    const dependencies = createDependencies({
+      generate: vi.fn(async (input) => {
+        await input.onReasoning({ type: 'reasoning-start' });
+        await input.onReasoning({ type: 'reasoning-delta', text: '   ' });
+        await input.onReasoning({ type: 'reasoning-end' });
+        return { body: stream('正文'), telemetry: {} };
+      }),
+    });
+    const doneEvents: Array<Record<string, unknown>> = [];
+    const observations: Array<Record<string, unknown>> = [];
+    const runtime = createArenaGenerationRuntime({
+      ...dependencies,
+      observer: {
+        observeArenaGeneration: (observation) => { observations.push(observation as Record<string, unknown>); },
+      },
+    });
+    const prepared = await runtime.prepare!({
+      request: new Request('https://example.test/api/arena/generate-stream'),
+      actorKey: 'user:42',
+      generationRequestId: 'request-direct-runtime',
+      payload,
+    });
+    if (
+      prepared instanceof Response
+      || isArenaGenerationAuditableRejection(prepared)
+    ) throw new Error('unexpected response');
+
+    await runtime.execute({
+      generationId: 'generation-1',
+      generationRequestId: 'request-1',
+      actorKey: 'user:42',
+      producerToken: 'producer-token-1',
+      payloadHash: 'payload-hash-1',
+      payload: prepared.executionPayload,
+      signal: new AbortController().signal,
+      emit: async (event) => {
+        if (event.type === 'reasoning_done') doneEvents.push(event.data as Record<string, unknown>);
+      },
+      claimFinalization: vi.fn(async () => ({ kind: 'claimed' as const })),
+    });
+
+    expect(doneEvents).toEqual([{ source: 'sdk', status: 'unavailable' }]);
+    expect(observations).toContainEqual(expect.objectContaining({
+      event: 'reasoning',
+      status: 'unavailable',
+      eventCount: 2,
+      chars: 3,
+    }));
+  });
+
+  it('marks reasoning_done as done when reasoning text was delivered without an explicit end event', async () => {
+    const dependencies = createDependencies({
+      generate: vi.fn(async (input) => {
+        await input.onReasoning({ type: 'reasoning-start' });
+        await input.onReasoning({ type: 'reasoning-delta', text: '思考' });
+        return { body: stream('正文'), telemetry: {} };
+      }),
+    });
+    const doneEvents: Array<Record<string, unknown>> = [];
+    const observations: Array<Record<string, unknown>> = [];
+    const runtime = createArenaGenerationRuntime({
+      ...dependencies,
+      observer: {
+        observeArenaGeneration: (observation) => { observations.push(observation as Record<string, unknown>); },
+      },
+    });
+    const prepared = await runtime.prepare!({
+      request: new Request('https://example.test/api/arena/generate-stream'),
+      actorKey: 'user:42',
+      generationRequestId: 'request-direct-runtime',
+      payload,
+    });
+    if (
+      prepared instanceof Response
+      || isArenaGenerationAuditableRejection(prepared)
+    ) throw new Error('unexpected response');
+
+    await runtime.execute({
+      generationId: 'generation-1',
+      generationRequestId: 'request-1',
+      actorKey: 'user:42',
+      producerToken: 'producer-token-1',
+      payloadHash: 'payload-hash-1',
+      payload: prepared.executionPayload,
+      signal: new AbortController().signal,
+      emit: async (event) => {
+        if (event.type === 'reasoning_done') doneEvents.push(event.data as Record<string, unknown>);
+      },
+      claimFinalization: vi.fn(async () => ({ kind: 'claimed' as const })),
+    });
+
+    expect(doneEvents).toEqual([{ source: 'sdk', status: 'done' }]);
+    expect(observations).toContainEqual(expect.objectContaining({
+      event: 'reasoning',
+      status: 'done',
+      eventCount: 2,
+      chars: 2,
+    }));
   });
 
   it('does not manufacture a failed terminal when durable finalization remains incomplete', async () => {

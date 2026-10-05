@@ -44,6 +44,7 @@ export type ArenaDataCardRefVerifierErrorCode =
   | 'ARENA_DATA_CARD_REF_INPUT_INVALID'
   | 'ARENA_DATA_CARD_REF_METADATA_INVALID'
   | 'ARENA_DATA_CARD_REF_NOT_READABLE'
+  /** @deprecated Built-in verification now resolves the latest readable row. */
   | 'ARENA_DATA_CARD_REF_VERSION_MISMATCH';
 
 export class ArenaDataCardRefVerifierError extends Error {
@@ -116,8 +117,8 @@ const parseCanonicalRef = (value: unknown): DataCardRef => {
   const inputRef = value;
 
   // The shared schema trims opaque strings for ordinary wire parsing. This
-  // adapter receives canonical refs and must not silently change the value
-  // that is checked against the D1 version fence.
+  // adapter receives canonical refs and must not silently change the id or
+  // caller-provided version metadata before resolving the latest row.
   if (inputRef.id !== parsedRef.id || inputRef.versionToken !== parsedRef.versionToken) {
     return fail('ARENA_DATA_CARD_REF_INPUT_INVALID');
   }
@@ -240,16 +241,14 @@ const verifyOne = async (
   client: ArenaDataCardRefVerifierD1Client,
   ref: DataCardRef,
   hostAccountUserId: number,
-): Promise<void> => {
+): Promise<DataCardRef> => {
   const metadata = await readMetadata(client, ref);
   if (
     metadata.id !== ref.id
     || !typeMatches(ref, metadata)
     || !isReadableByHost(metadata, hostAccountUserId)
   ) fail('ARENA_DATA_CARD_REF_NOT_READABLE');
-  if (metadata.updatedAt !== ref.versionToken) {
-    fail('ARENA_DATA_CARD_REF_VERSION_MISMATCH');
-  }
+  return Object.freeze({ ...ref, versionToken: metadata.updatedAt });
 };
 
 export const createArenaDataCardRefVerifier = (
@@ -268,10 +267,11 @@ export const createArenaDataCardRefVerifier = (
     if (client === null) return fail('ARENA_DATA_CARD_REF_D1_UNAVAILABLE');
 
     // Keep reads sequential and bounded. No partial result is returned if a
-    // later ref is missing, stale, unauthorized, or has malformed metadata.
+    // later ref is missing, unauthorized, or has malformed metadata.
+    const resolved: DataCardRef[] = [];
     for (const ref of parsed.refs) {
-      await verifyOne(client, ref, parsed.hostAccountUserId);
+      resolved.push(await verifyOne(client, ref, parsed.hostAccountUserId));
     }
-    return Object.freeze(parsed.refs.map((ref) => Object.freeze({ ...ref })));
+    return Object.freeze(resolved);
   },
 });

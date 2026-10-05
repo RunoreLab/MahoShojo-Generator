@@ -29,6 +29,16 @@
       "name": "ARENA_RANKING_IP_LIMITER",
       "namespace_id": "73003",
       "simple": { "limit": 120, "period": 60 }
+    },
+    {
+      "name": "HOSTED_DR_TELEMETRY_SOURCE_LIMITER",
+      "namespace_id": "73004",
+      "simple": { "limit": 120, "period": 60 }
+    },
+    {
+      "name": "HOSTED_DR_TELEMETRY_AGGREGATE_LIMITER",
+      "namespace_id": "73005",
+      "simple": { "limit": 2048, "period": 60 }
     }
   ],
   "assets": {
@@ -69,6 +79,9 @@
           "ARENA_FINALIZATION_HMAC_SECRET"
         ]
       },
+      "vars": {
+        "HONO_CORS_ORIGINS": "https://mahoshojo.colanns.me"
+      },
       "ratelimits": [
         {
           "name": "ARENA_RANKING_ACTOR_LIMITER",
@@ -84,6 +97,16 @@
           "name": "ARENA_RANKING_IP_LIMITER",
           "namespace_id": "73003",
           "simple": { "limit": 120, "period": 60 }
+        },
+        {
+          "name": "HOSTED_DR_TELEMETRY_SOURCE_LIMITER",
+          "namespace_id": "73004",
+          "simple": { "limit": 120, "period": 60 }
+        },
+        {
+          "name": "HOSTED_DR_TELEMETRY_AGGREGATE_LIMITER",
+          "namespace_id": "73005",
+          "simple": { "limit": 2048, "period": 60 }
         }
       ],
       "services": [
@@ -117,6 +140,9 @@
           "ARENA_FINALIZATION_HMAC_SECRET"
         ]
       },
+      "vars": {
+        "HONO_CORS_ORIGINS": "https://mahoshojo.colanns.me,https://*.colanns.me,https://mahoshojo-next-preview.719147538.workers.dev"
+      },
       "ratelimits": [
         {
           "name": "ARENA_RANKING_ACTOR_LIMITER",
@@ -132,6 +158,16 @@
           "name": "ARENA_RANKING_IP_LIMITER",
           "namespace_id": "73103",
           "simple": { "limit": 120, "period": 60 }
+        },
+        {
+          "name": "HOSTED_DR_TELEMETRY_SOURCE_LIMITER",
+          "namespace_id": "73104",
+          "simple": { "limit": 120, "period": 60 }
+        },
+        {
+          "name": "HOSTED_DR_TELEMETRY_AGGREGATE_LIMITER",
+          "namespace_id": "73105",
+          "simple": { "limit": 2048, "period": 60 }
         }
       ],
       "services": [
@@ -191,6 +227,16 @@
           "name": "ARENA_RANKING_IP_LIMITER",
           "namespace_id": "73203",
           "simple": { "limit": 120, "period": 60 }
+        },
+        {
+          "name": "HOSTED_DR_TELEMETRY_SOURCE_LIMITER",
+          "namespace_id": "73204",
+          "simple": { "limit": 120, "period": 60 }
+        },
+        {
+          "name": "HOSTED_DR_TELEMETRY_AGGREGATE_LIMITER",
+          "namespace_id": "73205",
+          "simple": { "limit": 2048, "period": 60 }
         }
       ],
       "services": [

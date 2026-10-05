@@ -1,15 +1,13 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 type Target = {
-  logicalOrigin: string;
-  provisioning: 'not-provisioned' | 'provisioned';
   allowedWebOrigins: string[];
 };
 
-describe('Arena Room logical-origin contract', () => {
+describe('Arena Room ingress policy contract', () => {
   const manifest = JSON.parse(readFileSync(
     resolve(process.cwd(), 'config/arena-room-origins.json'),
     'utf8',
@@ -19,39 +17,50 @@ describe('Arena Room logical-origin contract', () => {
     targets: { production: Target; preview: Target };
   };
 
-  it('keeps Room authority outside Hosted DR while provisioning preview independently', () => {
+  it('只保留 caller-origin policy，Room service origin 复用 Hosted Hono ingress', () => {
     const hostedDr = JSON.parse(readFileSync(
-      resolve(process.cwd(), 'config/hosted-dr-capabilities.json'),
+      resolve(process.cwd(), 'config/hosted-routing.json'),
       'utf8',
-    )) as { controlPlane: { provisioning: string } };
+    )) as {
+      origins: {
+        primary: string;
+        preview: string;
+        stable: string;
+      };
+    };
 
     expect(manifest.authority).toBe('hono-redis-single-writer');
     expect(manifest.cloudflareDr).toBe('excluded');
-    expect(hostedDr.controlPlane.provisioning).toBe('not-provisioned');
-    expect(manifest.targets.production).toMatchObject({
-      logicalOrigin: 'https://api.mahoshojo.colanns.me',
-      provisioning: 'not-provisioned',
-    });
-    expect(manifest.targets.preview).toMatchObject({
-      logicalOrigin: 'https://homura-preview.colanns.me',
-      provisioning: 'provisioned',
-    });
+    for (const origin of [
+      hostedDr.origins.primary,
+      hostedDr.origins.preview,
+    ]) {
+      const parsed = new URL(origin);
+      expect(parsed.protocol).toBe('https:');
+      expect(parsed.origin).toBe(origin);
+    }
+    expect(hostedDr.origins.primary).not.toBe(hostedDr.origins.stable);
+    expect(Object.keys(manifest.targets.production)).toEqual(['allowedWebOrigins']);
+    expect(Object.keys(manifest.targets.preview)).toEqual(['allowedWebOrigins']);
+    expect(JSON.stringify(manifest)).not.toContain('logicalOrigin');
+    expect(JSON.stringify(manifest)).not.toContain('provisioning');
   });
 
-  it('projects only client-safe Room origin state without drift', () => {
+  it('验证 caller-origin policy 且不再生成 Room service-origin client projection', () => {
     const result = spawnSync(
       process.execPath,
-      ['scripts/generate-arena-room-client-config.mjs'],
+      ['scripts/check-arena-room-origin-policy.mjs'],
       { cwd: process.cwd(), encoding: 'utf8' },
     );
     expect(result.status, result.stderr).toBe(0);
-    const generated = readFileSync(
-      resolve(process.cwd(), 'apps/web/config/arena-room-origins.generated.ts'),
-      'utf8',
-    );
-    expect(generated).toContain(manifest.targets.preview.logicalOrigin);
-    expect(generated).not.toContain('allowedWebOrigins');
-    expect(generated).not.toContain('cloudflareDr');
+    expect(existsSync(resolve(
+      process.cwd(),
+      'apps/web/config/arena-room-origins.generated.ts',
+    ))).toBe(false);
+    expect(existsSync(resolve(
+      process.cwd(),
+      'scripts/generate-arena-room-client-config.mjs',
+    ))).toBe(false);
   });
 
   it('uses exact Preview Web origins and covers workers.dev in Hono CORS', () => {
@@ -72,10 +81,12 @@ describe('Arena Room logical-origin contract', () => {
     expect(manifest.targets.preview.allowedWebOrigins).toContain(
       'https://mahoshojo-next-preview.719147538.workers.dev',
     );
-    expect(previewWorkflow).toContain('PREVIEW_ARENA_ROOM_WRITER_ACTIVATION: enabled');
-    expect(previewWorkflow).toContain('scripts/prepare-arena-room-release-gate.mjs');
-    expect(previewWorkflow).toContain('for room_web_origin in "${room_web_origins[@]}"');
-    expect(previewWorkflow).toContain('Access-Control-Allow-Origin: $room_web_origin');
+    expect(previewWorkflow).not.toContain('PREVIEW_ARENA_ROOM_WRITER_ACTIVATION');
+    expect(previewWorkflow).not.toContain('arena-room-release-gate');
+    expect(previewWorkflow).not.toContain('Verify Arena Room backend activation');
+    expect(previewWorkflow).toContain(
+      'Hono runtime 由服务器 ARENA_MULTIPLAYER_ENABLED 控制',
+    );
     expect(deployScript).toContain(
       'validate_arena_room_runtime_allowed_origins "$release_dir"',
     );

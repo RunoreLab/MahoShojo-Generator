@@ -1,6 +1,7 @@
 import {
   LocalCardProvenanceSchema,
   LocalCardRecordV1Schema,
+  nextLocalTimestamp,
 } from '@mahoshojo/local-library/record';
 
 import { createLocalCardRecord } from './fixtures';
@@ -103,5 +104,35 @@ describe('LocalCardProvenance', () => {
     },
   ])('accepts legacy signature evidence without version or key ID: $kind', (provenance) => {
     expect(LocalCardProvenanceSchema.safeParse(provenance).success).toBe(true);
+  });
+});
+
+describe('nextLocalTimestamp', () => {
+  it('没有既有时间戳时直接取当前时刻', () => {
+    expect(nextLocalTimestamp(undefined, () => Date.parse('2026-09-30T12:00:00.000Z')))
+      .toBe('2026-09-30T12:00:00.000Z');
+  });
+
+  it('当前时刻更晚时原样使用', () => {
+    expect(nextLocalTimestamp('2026-09-30T12:00:00.000Z', () => Date.parse('2026-09-30T13:00:00.000Z')))
+      .toBe('2026-09-30T13:00:00.000Z');
+  });
+
+  it('时钟回拨时抬到既有时间戳，而不是写出更早的时间', () => {
+    // 抬到"相等"而不是"更晚"：声称一个比现在更晚的时刻是编造数据，而相等既满足
+    // createdAt <= updatedAt <= deletedAt，也保证 keyset 排序不会倒退。
+    expect(nextLocalTimestamp('2026-09-30T12:00:00.000Z', () => Date.parse('2026-09-30T11:00:00.000Z')))
+      .toBe('2026-09-30T12:00:00.000Z');
+  });
+
+  it('既有时间戳无法解析时不抬升，把"数据已损坏"留给下游暴露', () => {
+    expect(nextLocalTimestamp('not-a-timestamp', () => Date.parse('2026-09-30T12:00:00.000Z')))
+      .toBe('2026-09-30T12:00:00.000Z');
+  });
+
+  it('抬升后的时间戳仍是合法的 ISO 8601，可直接作为记录字段', () => {
+    const raised = nextLocalTimestamp('2026-09-30T12:00:00.000Z', () => Date.parse('2020-01-01T00:00:00.000Z'));
+    const record = createLocalCardRecord({ updatedAt: raised });
+    expect(LocalCardRecordV1Schema.safeParse(record).success).toBe(true);
   });
 });

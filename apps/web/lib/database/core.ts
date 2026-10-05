@@ -137,26 +137,12 @@ export async function queryFromD1(
   return queryD1Payload(sql, params, options);
 }
 
-const TABLE_NAME_RE = /^[A-Za-z0-9_]+$/;
-
-const assertSafeTableName = (table: string): string => {
-  if (!TABLE_NAME_RE.test(table)) throw new Error('非法 table 名称');
-  return table;
-};
-
 const fillRandomBytes = (arr: Uint8Array): Uint8Array => {
   const cryptoObj = typeof globalThis !== 'undefined' ? globalThis.crypto : undefined;
   if (cryptoObj?.getRandomValues) return cryptoObj.getRandomValues(arr);
   for (let i = 0; i < arr.length; i += 1) arr[i] = Math.floor(Math.random() * 256);
   return arr;
 };
-
-// 生成 32 位包含大小写字母和数字的随机字符串
-export function generateRandomId(): string {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  const bytes = fillRandomBytes(new Uint8Array(32));
-  return Array.from(bytes, (value) => chars.charAt(value % chars.length)).join('');
-}
 
 // 生成 UUID v4 格式的字符串 (xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx)
 export function generateUUID(): string {
@@ -165,88 +151,4 @@ export function generateUUID(): string {
   bytes[8] = (bytes[8]! & 0x3f) | 0x80;
   const hex = Array.from(bytes, (value) => value.toString(16).padStart(2, '0')).join('');
   return [hex.slice(0, 8), hex.slice(8, 12), hex.slice(12, 16), hex.slice(16, 20), hex.slice(20)].join('-');
-}
-
-type D1Envelope = {
-  success?: boolean;
-  result?: Array<{ results?: Array<Record<string, unknown>>; meta?: Record<string, unknown> }>;
-};
-
-const envelope = (payload: D1HttpPayload): D1Envelope => payload as D1Envelope;
-
-// 保存数据到 D1 数据库，使用自定义 32 位随机字符串 ID 并返回 ID
-export async function createWithCustomId(data: string, table: string): Promise<string | null> {
-  try {
-    if (!getD1Config()) {
-      console.warn('缺少 Cloudflare 配置信息，跳过 D1 保存');
-      return null;
-    }
-
-    const safeTable = assertSafeTableName(table);
-    const customId = generateRandomId();
-    const timestamp = new Date().toISOString();
-    const result = envelope(await queryD1Payload(
-      `INSERT INTO ${safeTable} (id, data, created_at, updated_at) VALUES (?, ?, ?, ?)`,
-      [customId, data, timestamp, timestamp],
-    ));
-    return result.success ? customId : null;
-  } catch (error) {
-    if (error instanceof D1IndeterminateOutcomeError) throw error;
-    console.error('保存到 D1 数据库失败:', error instanceof Error ? error.message : 'unknown error');
-    return null;
-  }
-}
-
-// 根据 ID 更新数据库记录的函数
-export async function updateById(id: string, data: string, table: string): Promise<boolean> {
-  try {
-    if (!getD1Config()) {
-      console.warn('缺少 Cloudflare 配置信息，跳过 D1 更新');
-      return false;
-    }
-
-    const safeTable = assertSafeTableName(table);
-    const result = envelope(await queryD1Payload(
-      `UPDATE ${safeTable} SET data = ?, updated_at = ? WHERE id = ?`,
-      [data, new Date().toISOString(), id],
-    ));
-    const meta = result.result?.[0]?.meta ?? {};
-    return Number(meta.rows_written ?? meta.changes ?? 0) > 0;
-  } catch (error) {
-    if (error instanceof D1IndeterminateOutcomeError) throw error;
-    console.error('更新 D1 数据库失败:', error instanceof Error ? error.message : 'unknown error');
-    return false;
-  }
-}
-
-export async function getRecordById(id: string, table: string): Promise<unknown> {
-  try {
-    const safeTable = assertSafeTableName(table);
-    const result = envelope(await queryD1Payload(`SELECT * FROM ${safeTable} WHERE id = ?`, [id]));
-    return result.result?.[0]?.results?.[0] ?? null;
-  } catch (error) {
-    console.error('从 D1 数据库查询失败:', error instanceof Error ? error.message : 'unknown error');
-    throw error;
-  }
-}
-
-// @deprecated 保存到 D1 数据库的函数
-export async function saveToD1(data: unknown): Promise<boolean> {
-  try {
-    if (!getD1Config()) {
-      console.warn('缺少 Cloudflare 配置信息，跳过 D1 保存');
-      return false;
-    }
-
-    const result = envelope(await queryD1Payload(
-      'INSERT INTO shojo (data, created_at) VALUES (?, ?)',
-      [JSON.stringify(data), new Date().toISOString()],
-    ));
-    return result.success === true;
-  } catch (error) {
-    if (error instanceof D1IndeterminateOutcomeError) throw error;
-    console.error('保存到 D1 数据库失败:', error instanceof Error ? error.message : 'unknown error');
-    // 不抛出错误，避免影响主要生成流程
-    return false;
-  }
 }

@@ -8,7 +8,9 @@ const json = (payload: unknown, status = 200): Response =>
 
 export async function GET(): Promise<Response> {
   try {
-    return json(SCENARIO_PRESET_LIST);
+    const response = json(SCENARIO_PRESET_LIST);
+    response.headers.set('Cache-Control', 'public, max-age=300, s-maxage=3600');
+    return response;
   } catch (error) {
     console.error('获取预设情景失败:', error);
     return json({ error: '无法加载预设情景列表' }, 500);

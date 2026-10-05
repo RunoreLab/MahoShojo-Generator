@@ -199,8 +199,8 @@ export const insertUserBadgeIgnore = async (
   db: AppDrizzleDb,
   userId: number,
   badgeId: string,
-): Promise<void> => {
-  await db
+): Promise<boolean> => {
+  const insertedRows = await db
     .insert(userBadges)
     .values({
       userId,
@@ -209,7 +209,10 @@ export const insertUserBadgeIgnore = async (
       displayOrder: 0,
       obtainedAt: sql`CURRENT_TIMESTAMP`,
     })
-    .onConflictDoNothing();
+    .onConflictDoNothing()
+    .returning({ id: userBadges.id });
+
+  return insertedRows.length > 0;
 };
 
 export const deleteUserBadge = async (

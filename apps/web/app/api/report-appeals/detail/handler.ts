@@ -1,6 +1,6 @@
 import { getRequestUrl } from '@/lib/request-url';
 import { getReportAppealDetail, ReportAppealForbiddenError, ReportAppealNotFoundError, ReportAppealServiceUnavailableError, ReportAppealUnprocessableError, ReportAppealValidationError } from '@/lib/report-appeals/service';
-import { json, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
+import { json, requireAuthUser, withApiErrorBoundary } from '@/lib/api/server';
 
 type HandlerDeps = {
   requireAuthUser: typeof requireAuthUser;
@@ -57,5 +57,5 @@ export const createReportAppealDetailHandler =
     }
   };
 
-export const appRouteHandler = withPvpErrorBoundary(createReportAppealDetailHandler());
+export const appRouteHandler = withApiErrorBoundary(createReportAppealDetailHandler());
 export default appRouteHandler;

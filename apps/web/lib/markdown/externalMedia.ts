@@ -233,24 +233,31 @@ export const isLikelyVideoUrl = (value: string | null | undefined) => {
   return VIDEO_FILE_EXTENSIONS.some((ext) => withoutQuery.endsWith(ext));
 };
 
-export const formatMarkdownImage = (
-  altText: string | null | undefined,
-  src: string | null | undefined,
-  title: string | null | undefined
-) => {
-  const alt = typeof altText === 'string' ? altText : '';
-  const url = typeof src === 'string' ? src : '';
-  const titlePart = typeof title === 'string' && title ? ` "${title}"` : '';
-  return `![${alt}](${url}${titlePart})`;
-};
+/**
+ * 纯文本格式化函数已搬到 `@mahoshojo/ui-web/markdown-text`，因为它们是渲染机制而不是 Web 策略。
+ *
+ * 必须走 `-text` 那个入口而不是 `@mahoshojo/ui-web/markdown`：本文件被 Route Handler
+ * （`app/api/media-proxy/route.ts`）经由这条 re-export 间接导入，而 `markdown` 入口里有 React hook
+ * ——Server 侧导入链上出现 hook 会被 Next 在构建期拒绝。
+ *
+ * 这里保留 re-export：`AnnouncementTicker`、`StreamingBattleReportCard` 与 `BattleReportCard`
+ * 都从这里导入，搬迁它们的导入路径属于与 D3.0 无关的改动。
+ */
+export { formatMarkdownImage, formatMarkdownLink } from '@mahoshojo/ui-web/markdown-text';
 
-export const formatMarkdownLink = (
-  text: string | null | undefined,
-  href: string | null | undefined,
-  title: string | null | undefined
-) => {
-  const label = typeof text === 'string' ? text : '';
-  const url = typeof href === 'string' ? href : '';
-  const titlePart = typeof title === 'string' && title ? ` "${title}"` : '';
-  return `[${label}](${url}${titlePart})`;
+/**
+ * Web 的站外媒体策略。
+ *
+ * 三段知识都在这个对象里：怎么认出音频（网易云外链播放器不以音频扩展名结尾）、允不允许加载（域名
+ * 白名单）、以及可播放地址怎么得（外链转换与 http→https 升级）。共享渲染层只消费这个形状，因此
+ * Desktop 侧注入 `DENY_EXTERNAL_MEDIA` 就得到"零站外请求"的产品旅程（`DESK-PROD-004`）。
+ */
+export const webExternalMediaPolicy = {
+  detectKind: (url: string): 'image' | 'video' | 'audio' | null => {
+    if (isLikelyAudioUrl(url)) return 'audio';
+    if (isLikelyVideoUrl(url)) return 'video';
+    return null;
+  },
+  isAllowed: (url: string, kind: 'image' | 'video' | 'audio') => isAllowedExternalMediaUrl(url, kind),
+  resolve: (url: string, kind: 'image' | 'video' | 'audio') => resolveExternalMediaUrl(url, kind),
 };

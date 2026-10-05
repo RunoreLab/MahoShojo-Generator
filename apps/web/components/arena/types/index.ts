@@ -1,16 +1,20 @@
 import type { NewsReport } from '@/components/BattleReportCard';
 import type { UserAIProviderConfig } from '@/components/AiProviderSelector';
+import type { CustomProviderPayload } from '@/lib/ai/custom-provider';
 import type { Preset } from '@/lib/presets';
 import type { AdjudicatorEvent, AdjudicationResult, CharacterCurrentState } from '@/types/arena';
 import type { NormalizedStreamUpdateMeta } from '@/lib/arena/stream-meta';
 import type { QuestionnaireDefinition } from '@/lib/questionnaires';
 import type { AIReasoningEnvelope } from '@/types/ai-reasoning';
 import type { ArenaMaterialState } from '@/lib/arena/materials';
+import type { ArenaGenerationConnectionState } from '@/lib/arena/resumable-generation-client';
 import { MAX_ARENA_MATERIALS } from '@/lib/arena/materials';
+import { MAX_ARENA_REFERENCE_ITEMS } from '@/lib/arena/resource-budget';
 
 /** 参战角色上限；为 null 代表不限制数量。 */
 export const MAX_COMBATANTS: number | null = null;
-export const MAX_AUX_SCENARIOS = 10;
+/** 单人 Arena 中辅助情景可独占的最大引用项数；实际与素材、问卷共享总预算。 */
+export const MAX_AUX_SCENARIOS = MAX_ARENA_REFERENCE_ITEMS;
 export { MAX_ARENA_MATERIALS };
 export const ARENA_STATE_PREF_KEY = 'arena-history-state-preferences-v1';
 export type { ArenaMaterialState };
@@ -54,6 +58,8 @@ export type StreamUpdateMetaDebug = {
 
 export interface BattleTeam {
   id: number;
+  /** 多人 authority 中的 opaque team key；存在时发布必须原样保留。 */
+  roomKey?: string;
   /** 分队名称（会传递给 AI）。 */
   name: string;
   /** 是否在列表中折叠。 */
@@ -69,6 +75,15 @@ export interface UpdatedCombatantData {
   [key: string]: any;
 }
 
+/**
+ * 只在当前页面进程中保留的生成时 Provider 快照。
+ * BYOK apiKey 不得进入 Zustand persist、D1、日志或遥测。
+ */
+export type ArenaGenerationRepairContext = Readonly<{
+  generationId: string;
+  customProvider: CustomProviderPayload | null;
+}>;
+
 export interface CombatantData {
   type: CombatantType;
   data: any;
@@ -78,6 +93,8 @@ export interface CombatantData {
   isNonStandard?: boolean;
   wasCorrected?: boolean;
   teamId?: number;
+  /** 从多人 authority materialize 后保留原始 opaque resource key。 */
+  arenaRoomKey?: string;
   adjudicationSourceKey?: string;
   /** 用户对该角色的行动/想法引导（可选，最多 100 字）。 */
   characterGuidance?: string;
@@ -105,7 +122,12 @@ export type Combatant = CombatantData | RandomCombatantPlaceholder;
 export interface ScenarioState {
   content: Record<string, unknown> | null;
   fileName: string | null;
+  /** 内容签名验证结果，不代表其来自内置预设。 */
   isNative: boolean;
+  /** 仅当内容由当前应用的内置情景目录选入时为 true。 */
+  isPreset?: boolean;
+  /** 从多人 authority materialize 后保留原始 opaque resource key。 */
+  arenaRoomKey?: string;
   adjudicationSourceKey?: string;
   sourceDataCardId?: string;
   sourceDataCardDescription?: string;
@@ -176,6 +198,11 @@ export interface BattleStoreState {
   selectedQuestionnaires: QuestionnaireSelection[];
   battleMode: BattleMode;
   generationMode: GenerationMode;
+  reportFormat: 'markdown' | 'web';
+  webPackageRef: import('@mahoshojo/contracts/web-package').WebPackageRef | null;
+  resultReportFormat: 'markdown' | 'web';
+  resultWebPackage: import('@mahoshojo/contracts/web-package').WebPackageArtifact | null;
+  resultWebReady: boolean;
   /** 是否启用“自由排位”计分（默认关闭；仅影响 free 队列）。 */
   arenaFreeRankingEnabled: boolean;
   isStreaming: boolean;
@@ -199,6 +226,10 @@ export interface BattleStoreState {
   selectedLanguage: string;
   /** 最近一次生成战报的 generationId（用于排位结算展示）。 */
   lastGenerationId: string | null;
+  /** 当前 generation 对应的原始 Provider 请求快照；只允许内存态。 */
+  lastGenerationRepairContext: ArenaGenerationRepairContext | null;
+  /** 当前 roster 已应用非权威 repair 的 generation；同 generation 权威重试必须禁用。 */
+  repairAppliedGenerationId: string | null;
   settings: BattleSettings;
   adjudicationEvents: AdjudicatorEvent[];
   adjudicationResults: AdjudicationResult[] | null;
@@ -206,13 +237,22 @@ export interface BattleStoreState {
   updatedCombatants: UpdatedCombatantData[];
   error: string | null;
   isGenerating: boolean;
+  /** 当前可恢复生成的连接生命周期状态；仅保留在内存，不持久化。 */
+  arenaGenerationConnectionState: ArenaGenerationConnectionState | null;
   isRedoingUpdates: boolean;
+  /** 权威角色更新与本地 repair 共用的进程内写入锁。 */
+  isCombatantMutationPending: boolean;
   isMatching: 'character' | 'scenario' | null;
   loadingPreset: string | null;
   userProviderConfig: UserAIProviderConfig | null;
 
   setBattleMode: (mode: BattleMode) => void;
   setGenerationMode: (mode: GenerationMode) => void;
+  setReportFormat: (format: 'markdown' | 'web') => void;
+  setWebPackageRef: (ref: import('@mahoshojo/contracts/web-package').WebPackageRef | null) => void;
+  setResultWebPackage: (artifact: import('@mahoshojo/contracts/web-package').WebPackageArtifact | null) => void;
+  setResultReportFormat: (format: 'markdown' | 'web') => void;
+  setResultWebReady: (ready: boolean) => void;
   setArenaFreeRankingEnabled: (enabled: boolean) => void;
   setIsStreaming: (state: boolean) => void;
   setStreamingMarkdown: (markdown: string | null) => void;
@@ -230,6 +270,8 @@ export interface BattleStoreState {
   setCustomStoryLength: (length: string) => void;
   setSelectedLanguage: (language: string) => void;
   setLastGenerationId: (generationId: string | null) => void;
+  setLastGenerationRepairContext: (context: ArenaGenerationRepairContext | null) => void;
+  setRepairAppliedGenerationId: (generationId: string | null) => void;
   updateSettings: (settings: Partial<BattleSettings>) => void;
 
   addCombatant: (combatant: Combatant) => void;
@@ -273,7 +315,10 @@ export interface BattleStoreState {
 
   setError: (message: string | null) => void;
   setIsGenerating: (state: boolean) => void;
+  setArenaGenerationConnectionState: (state: ArenaGenerationConnectionState | null) => void;
   setIsRedoingUpdates: (state: boolean) => void;
+  tryBeginCombatantMutation: () => boolean;
+  endCombatantMutation: () => void;
   setIsMatching: (target: 'character' | 'scenario' | null) => void;
   setLoadingPreset: (filename: string | null) => void;
   setUserProviderConfig: (config: UserAIProviderConfig | null) => void;

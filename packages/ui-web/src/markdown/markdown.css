@@ -1,0 +1,22 @@
+/*
+ * 共享 Markdown 渲染层的样式入口。
+ *
+ * ## 为什么 KaTeX CSS 由这里拥有
+ *
+ * `apps/web/app/layout.tsx` 曾经直接 `import 'katex/dist/katex.min.css'`。D3.0 起两端都渲染
+ * Markdown，Desktop 端没有第二条路径去拿这份 CSS——于是它必须属于共享层，否则共享组件会在
+ * Desktop 上渲染出没有公式样式的数学内容，而 Web 侧看起来完全正常。
+ *
+ * 同时只能有**一个**所有者：KaTeX 的 CSS 用相对 `url()` 引用 `fonts/KaTeX_*.woff2`，而 Vite 与
+ * webpack 都会在打包时把这些 `url()` 重写到产物中的实际发射路径。Web 的全局 import 若与本文件
+ * 同时存在，同一份字体会被以两个不同 base 各发射一次。
+ *
+ * ## 为什么不手工拷 `katex/dist`
+ *
+ * 官方明确要求 `fonts/` 必须与 CSS 文件同级（katex.org/docs/browser）。把目录整个拷进
+ * `frontendDist` 是在依赖这条隐式契约；让打包器处理 `@import` 才是它的正常工作方式。
+ *
+ * Desktop 的 CSP 是 `font-src 'self' data:`，Web 是同一串，因此无论字体落盘还是被 base64 内联都
+ * 不需要改 CSP。Vite 默认的 `assetsInlineLimit` 会把最小的 KaTeX 字体内联，这里保留默认。
+ */
+@import "katex/dist/katex.min.css";
