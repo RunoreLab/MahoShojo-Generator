@@ -121,13 +121,16 @@ export const AccountPanel = () => {
       const online = await probeCloudOnlineStatus(invoke);
       if (!online.reachable) {
         setError('项目服务暂不可达。本地功能不受影响。');
+      } else if (online.compatible === true) {
+        setNotice(`项目服务在线（契约 ${online.contractVersion ?? '未声明'}，兼容）。`);
       } else if (online.compatible === false) {
         setError(
           `在线契约版本不兼容（服务端 ${online.contractVersion ?? '未知'}）。`
           + '本次在线操作已被阻止，请升级桌面客户端后再试。',
         );
       } else {
-        setNotice(`项目服务在线（契约 ${online.contractVersion ?? '未声明'}，兼容）。`);
+        // 可达但未声明契约版本：fail-closed，不得按「兼容」提示。
+        setError('项目服务在线但未声明契约版本，无法确认兼容性；为安全起见在线操作已被阻止。');
       }
     } catch (cause) {
       setError(describeError(cause));

@@ -11,7 +11,8 @@
 //!   `provider-key:*` 完全隔离；不存在读取凭据的 IPC。
 //! - `unreachable`（网络/服务不可用）**不会**删除本地凭据——它与"服务端明确拒绝
 //!   会话"是两个不同状态，否则一次断网就等于登出。
-//! - 兼容探测只发生在主动使用在线能力时，不阻塞离线启动。
+//! - 兼容探测只发生在主动使用在线能力时，不阻塞离线启动；hosted 生成在
+//!   dispatch 前由 native 强制过这道门禁，而不是靠调用方先自查（DESK-094）。
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -91,8 +92,11 @@ const HOSTED_EVENT_NAMES: &[&str] = &[
 
 /// 登录流程总时限。用户需要在浏览器里完成登录/授权，15 分钟是宽松上限。
 const LOGIN_DEADLINE: Duration = Duration::from_secs(15 * 60);
-/// 单次 HTTP 请求超时：状态查询/交换都是小请求。
-const HTTP_TIMEOUT: Duration = Duration::from_secs(15);
+/// 短请求（exchange / 状态 / 注销 / 探测）的总请求超时，兼作 client 连接超时。
+/// 绝不能套用到 hosted SSE：reqwest 的 `timeout` 是从连接一直到 response
+/// body 完成的总 deadline，长流会被强制截断；流的时限由服务端 idle/total
+/// 上限与取消令牌负责。
+const SHORT_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 /// loopback 回调请求的最大读取量。合法请求只有一行 GET + 少量 header。
 const CALLBACK_MAX_BYTES: usize = 16 * 1024;
 /// 单次回调读取超时：防本地进程占着连接不发数据。
@@ -112,10 +116,6 @@ pub enum CloudErrorCode {
     ServerUnavailable,
     InvalidResponse,
     StorageUnavailable,
-    // `missing-secret` 仍在共享契约中：native Provider 绑定落地后，凭据解析
-    // 缺失的路径会重新产出它（当前系统通道不解析任何 Provider 凭据）。
-    #[allow(dead_code)]
-    MissingSecret,
     InvalidRequest,
     InternalError,
 }
@@ -291,7 +291,10 @@ fn build_cloud_client() -> Result<reqwest::Client, CloudError> {
         .no_proxy()
         // 项目 API 不应发生重定向；跟随重定向可能把 cookie 带到未审计目标。
         .redirect(reqwest::redirect::Policy::none())
-        .timeout(HTTP_TIMEOUT)
+        // 只保留连接超时。client 级 `timeout` 是「连接 + 整个 response body」
+        // 的总 deadline——hosted SSE 超过它会被 reqwest 主动截断；短请求的
+        // 总时限在各 RequestBuilder 上显式设置（SHORT_REQUEST_TIMEOUT）。
+        .connect_timeout(SHORT_REQUEST_TIMEOUT)
         .build()
         .map_err(|error| {
             CloudError::new(
@@ -615,6 +618,7 @@ async fn exchange_grant(
     )
     .header(reqwest::header::CONTENT_TYPE, "application/json")
     .json(&body)
+    .timeout(SHORT_REQUEST_TIMEOUT)
     .send()
     .await
     .map_err(|error| CloudError::network("会话交换", &error))?;
@@ -834,6 +838,7 @@ pub async fn cloud_auth_status(
         GET_SESSION_PATH,
         &session,
     )
+    .timeout(SHORT_REQUEST_TIMEOUT)
     .send()
     .await;
 
@@ -885,6 +890,7 @@ pub async fn cloud_sign_out(
         )
         .header(reqwest::header::CONTENT_TYPE, "application/json")
         .json(&serde_json::json!({}))
+        .timeout(SHORT_REQUEST_TIMEOUT)
         .send()
         .await;
         revoked = response.map(|r| r.status().is_success()).unwrap_or(false);
@@ -914,13 +920,26 @@ pub fn is_hosted_contract_compatible(runtime_version: &str, client_version: &str
     }
 }
 
-/// `cloud_online_status`：主动使用在线能力时的最小探测（`/api/hosted/dr-readiness`）。
-pub async fn cloud_online_status(
+/// `dr-readiness` 探测的内部结论。`cloud_online_status` 只把它投影给 UI；
+/// `stream_hosted_ai` 在 dispatch 前用它做强制门禁（DESK-094：探测不可达或
+/// 契约不兼容时对应在线操作 MUST 停止），调用方不能只靠 UI 先自查。
+enum HostedCompatibility {
+    /// 传输失败或非 2xx：不可达，不下兼容结论。
+    Unreachable,
+    /// 可达且服务端声明的契约版本与客户端兼容。
+    Ready { contract_version: String },
+    /// 可达但声明的契约版本与客户端不兼容。
+    Incompatible { contract_version: String },
+    /// 可达但未声明 `contractVersion`（或字段不是字符串）：无法确认兼容性，
+    /// 所有消费方必须按 fail-closed 处理，不能当作「兼容」。
+    VersionUnknown,
+}
+
+async fn probe_hosted_compatibility(
     state: &CloudState,
-    secrets: &dyn SecretStore,
-) -> Result<CloudOnlineStatus, CloudError> {
-    let session = load_session(secrets)?;
-    let request = match &session {
+    session: Option<&StoredSession>,
+) -> Result<HostedCompatibility, CloudError> {
+    let request = match session {
         Some(session) => authed_request(
             &state.http,
             reqwest::Method::GET,
@@ -936,23 +955,13 @@ pub async fn cloud_online_status(
         ),
     };
 
-    let response = match request.send().await {
+    let response = match request.timeout(SHORT_REQUEST_TIMEOUT).send().await {
         Ok(response) => response,
-        Err(_) => {
-            return Ok(CloudOnlineStatus {
-                reachable: false,
-                contract_version: None,
-                compatible: None,
-            })
-        }
+        Err(_) => return Ok(HostedCompatibility::Unreachable),
     };
 
     if !response.status().is_success() {
-        return Ok(CloudOnlineStatus {
-            reachable: false,
-            contract_version: None,
-            compatible: None,
-        });
+        return Ok(HostedCompatibility::Unreachable);
     }
 
     let payload = response
@@ -965,15 +974,50 @@ pub async fn cloud_online_status(
         .and_then(|value| value.as_str())
         .map(|value| value.to_string());
 
-    let compatible = contract_version
-        .as_deref()
-        .map(|runtime| is_hosted_contract_compatible(runtime, HOSTED_CONTRACT_VERSION));
-
-    Ok(CloudOnlineStatus {
-        reachable: true,
-        contract_version,
-        compatible,
+    Ok(match contract_version {
+        None => HostedCompatibility::VersionUnknown,
+        Some(version) if is_hosted_contract_compatible(&version, HOSTED_CONTRACT_VERSION) => {
+            HostedCompatibility::Ready {
+                contract_version: version,
+            }
+        }
+        Some(version) => HostedCompatibility::Incompatible {
+            contract_version: version,
+        },
     })
+}
+
+/// `cloud_online_status`：主动使用在线能力时的最小探测（`/api/hosted/dr-readiness`）。
+/// 只是 `probe_hosted_compatibility` 的 UI 投影——探测本身不改变任何本地数据。
+pub async fn cloud_online_status(
+    state: &CloudState,
+    secrets: &dyn SecretStore,
+) -> Result<CloudOnlineStatus, CloudError> {
+    let session = load_session(secrets)?;
+    Ok(
+        match probe_hosted_compatibility(state, session.as_ref()).await? {
+            HostedCompatibility::Unreachable => CloudOnlineStatus {
+                reachable: false,
+                contract_version: None,
+                compatible: None,
+            },
+            HostedCompatibility::VersionUnknown => CloudOnlineStatus {
+                reachable: true,
+                contract_version: None,
+                compatible: None,
+            },
+            HostedCompatibility::Ready { contract_version } => CloudOnlineStatus {
+                reachable: true,
+                contract_version: Some(contract_version),
+                compatible: Some(true),
+            },
+            HostedCompatibility::Incompatible { contract_version } => CloudOnlineStatus {
+                reachable: true,
+                contract_version: Some(contract_version),
+                compatible: Some(false),
+            },
+        },
+    )
 }
 
 /* ── hosted 生成适配（当前只开放系统默认通道） ────────────────────────────
@@ -1179,6 +1223,34 @@ pub async fn stream_hosted_ai(
     }
     let body = build_hosted_request_body(&request)?;
     let session = load_session(secrets)?;
+
+    // DESK-094 门禁收在 dispatch 本身：任何调用方发起 hosted 生成前都必须先过
+    // 契约兼容探测，而不是依赖 UI 自觉先点「检查连通性」。探测只发生在用户主动
+    // 开始在线生成时，符合「冷启动零项目请求」的冻结原则；不可达 / 已声明不兼容
+    // / 未声明版本一律 fail-closed，不发送生成请求。
+    match probe_hosted_compatibility(state, session.as_ref()).await? {
+        HostedCompatibility::Ready { .. } => {}
+        HostedCompatibility::Unreachable => {
+            return Err(CloudError::new(
+                CloudErrorCode::ServerUnavailable,
+                "项目服务暂不可达，在线生成已停止",
+            ));
+        }
+        HostedCompatibility::Incompatible { contract_version } => {
+            return Err(CloudError::new(
+                CloudErrorCode::ProtocolMismatch,
+                format!(
+                    "服务端契约版本 {contract_version} 与客户端 {HOSTED_CONTRACT_VERSION} 不兼容，请升级客户端"
+                ),
+            ));
+        }
+        HostedCompatibility::VersionUnknown => {
+            return Err(CloudError::new(
+                CloudErrorCode::ProtocolMismatch,
+                "服务端未声明 hosted 契约版本，无法确认兼容性，在线生成已停止",
+            ));
+        }
+    }
 
     let token = registry
         .register(&request.request_id)
@@ -1536,6 +1608,8 @@ mod tests {
         last_generate_headers: Mutex<Option<String>>,
         get_session_ok: std::sync::atomic::AtomicBool,
         hosted_sse_body: Mutex<Option<String>>,
+        /// `Some((status, body))` 时 readiness 路由返回覆盖响应（测门禁分支）。
+        readiness_override: Mutex<Option<(u16, String)>>,
         shutdown: CancellationToken,
     }
 
@@ -1550,6 +1624,7 @@ mod tests {
             last_generate_headers: Mutex::new(None),
             get_session_ok: std::sync::atomic::AtomicBool::new(true),
             hosted_sse_body: Mutex::new(None),
+            readiness_override: Mutex::new(None),
             shutdown: CancellationToken::new(),
         });
         let handle = server.clone();
@@ -1683,10 +1758,23 @@ mod tests {
                     }
                 }
                 SIGN_OUT_PATH => json(serde_json::json!({"success": true})),
-                DR_READINESS_PATH => json(serde_json::json!({
-                    "ok": true,
-                    "contractVersion": "g25e1-v1"
-                })),
+                DR_READINESS_PATH => {
+                    let override_response = self.readiness_override.lock().unwrap().clone();
+                    match override_response {
+                        Some((status, body)) => MockResponse {
+                            status,
+                            headers: vec![(
+                                "Content-Type".to_string(),
+                                "application/json".to_string(),
+                            )],
+                            body,
+                        },
+                        None => json(serde_json::json!({
+                            "ok": true,
+                            "contractVersion": "g25e1-v1"
+                        })),
+                    }
+                }
                 HOSTED_GENERATE_DETAILS_STREAM_PATH => {
                     *self.last_generate_headers.lock().unwrap() = Some(head.to_string());
                     *self.last_generate_body.lock().unwrap() = serde_json::from_slice(body).ok();
@@ -1965,7 +2053,6 @@ mod tests {
             CloudErrorCode::ServerUnavailable,
             CloudErrorCode::InvalidResponse,
             CloudErrorCode::StorageUnavailable,
-            CloudErrorCode::MissingSecret,
             CloudErrorCode::InvalidRequest,
             CloudErrorCode::InternalError,
         ]
@@ -2305,7 +2392,7 @@ mod tests {
     }
 
     #[test]
-    fn hosted_stream_rejects_unknown_route_and_replays_request_id() {
+    fn hosted_stream_rejects_unknown_route_and_duplicate_inflight_request_id() {
         rt().block_on(async {
             let server = spawn_mock_server();
             let state = CloudState::with_origin(&server.origin);
@@ -2334,6 +2421,72 @@ mod tests {
             stream_hosted_ai(&state, &secrets, &registry, first, &sink)
                 .await
                 .unwrap();
+        });
+    }
+
+    /// DESK-094：hosted dispatch 前必须过契约兼容门禁。不可达 / 已声明不兼容 /
+    /// 未声明版本都 fail-closed，生成请求不得发出；门禁失败不得占用 requestId。
+    #[test]
+    fn hosted_stream_requires_compatible_contract_before_dispatch() {
+        rt().block_on(async {
+            let server = spawn_mock_server();
+            let state = CloudState::with_origin(&server.origin);
+            let secrets = MemorySecrets::new();
+            let registry = crate::ai::RequestRegistry::default();
+            let sink = VecSink::new();
+
+            // 已声明但不兼容的版本 → protocol-mismatch，生成请求未发出。
+            *server.readiness_override.lock().unwrap() = Some((
+                200,
+                serde_json::json!({"ok": true, "contractVersion": "g99e9-v9"}).to_string(),
+            ));
+            let error = stream_hosted_ai(&state, &secrets, &registry, hosted_request(), &sink)
+                .await
+                .unwrap_err();
+            assert_eq!(error.code, CloudErrorCode::ProtocolMismatch);
+            assert!(
+                server.last_generate_body.lock().unwrap().is_none(),
+                "incompatible contract must stop before dispatch"
+            );
+
+            // 可达但未声明 contractVersion → 同样 fail-closed，不能当兼容放行。
+            *server.readiness_override.lock().unwrap() =
+                Some((200, serde_json::json!({"ok": true}).to_string()));
+            let error = stream_hosted_ai(&state, &secrets, &registry, hosted_request(), &sink)
+                .await
+                .unwrap_err();
+            assert_eq!(error.code, CloudErrorCode::ProtocolMismatch);
+            assert!(server.last_generate_body.lock().unwrap().is_none());
+            // UI 投影同样如实表达「无法确认」而不是「兼容」。
+            let online = cloud_online_status(&state, &secrets).await.unwrap();
+            assert!(online.reachable);
+            assert_eq!(online.contract_version, None);
+            assert_eq!(online.compatible, None);
+
+            // readiness 非 2xx → 不可达。
+            *server.readiness_override.lock().unwrap() = Some((503, "{}".to_string()));
+            let error = stream_hosted_ai(&state, &secrets, &registry, hosted_request(), &sink)
+                .await
+                .unwrap_err();
+            assert_eq!(error.code, CloudErrorCode::ServerUnavailable);
+            assert!(server.last_generate_body.lock().unwrap().is_none());
+
+            // 服务完全不可达（已关闭端口）→ 同样 server-unavailable。
+            let dead = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let dead_origin = format!("http://127.0.0.1:{}", dead.local_addr().unwrap().port());
+            drop(dead);
+            let dead_state = CloudState::with_origin(&dead_origin);
+            let error = stream_hosted_ai(&dead_state, &secrets, &registry, hosted_request(), &sink)
+                .await
+                .unwrap_err();
+            assert_eq!(error.code, CloudErrorCode::ServerUnavailable);
+            assert!(sink.events.lock().unwrap().is_empty());
+
+            // 门禁失败不产生 requestId 残留：同名请求可重新发起。
+            *server.readiness_override.lock().unwrap() = None;
+            stream_hosted_ai(&state, &secrets, &registry, hosted_request(), &sink)
+                .await
+                .expect("compatible probe must let the request through");
         });
     }
 }

@@ -64,7 +64,7 @@ const toCloudError = (command: string, cause: unknown): DesktopCloudError => {
   ) {
     const { code, message } = cause as { code: string; message: string };
     // 错误码以共享 contract 为唯一事实源，不再手抄列表；未知 code 归一为
-    // internal-error，已声明的 code（missing-secret/invalid-request 等）原样透出。
+    // internal-error，已声明的 code（invalid-request 等）原样透出。
     const parsedCode = DesktopCloudErrorCodeSchema.safeParse(code);
     return new DesktopCloudError(
       command,

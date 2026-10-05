@@ -99,8 +99,8 @@ describe('cloud bridge', () => {
     });
   });
 
-  it('契约内的错误码（missing-secret/invalid-request）原样透出，未知 code 归一为 internal-error', async () => {
-    for (const code of ['missing-secret', 'invalid-request', 'flow-in-progress']) {
+  it('契约内的错误码（invalid-request 等）原样透出，未知 code 归一为 internal-error', async () => {
+    for (const code of ['invalid-request', 'flow-in-progress', 'protocol-mismatch']) {
       const invoke = vi.fn(async () => {
         throw { code, message: `native ${code}` };
       });

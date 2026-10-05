@@ -242,7 +242,6 @@ export const DesktopCloudErrorCodeSchema = z.enum([
   'server-unavailable',
   'invalid-response',
   'storage-unavailable',
-  'missing-secret',
   'invalid-request',
   'internal-error',
 ]);
