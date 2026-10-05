@@ -42,7 +42,8 @@ const SRC = path.join(PACKAGE_ROOT, 'src');
  * - `./capability` 是纯数据，被两端注入能力快照；
  * - `./encyclopedia` 被百科路由的 `generateStaticParams` / `generateMetadata` 读；
  * - `./markdown-text` 被 `app/api/media-proxy/route.ts` 经由 `lib/markdown/externalMedia.ts` 读；
- * - `./home` 被 `app/page.tsx` 读功能目录与 preload 列表。
+ * - `./home` 被 `app/page.tsx` 读功能目录与 preload 列表；
+ * - `./color-mode-init` 被 `app/layout.tsx` 读首屏防闪烁脚本——它必须是零 hook 的纯数据模块。
  *
  * `./local-archive` 与 `./local-cards` 的控制器是客户端状态机，`./markdown` 与 `./encyclopedia-views` 与
  * `./shell` 只在 Client Component 里用，因此不在此列。
@@ -56,6 +57,7 @@ const SERVER_SAFE_ENTRYPOINTS: Readonly<Record<string, string>> = {
   './encyclopedia': 'encyclopedia/index.ts',
   './markdown-text': 'markdown/text/index.ts',
   './home': 'home/index.ts',
+  './color-mode-init': 'color-mode/init.ts',
 };
 
 /**
@@ -169,10 +171,13 @@ describe('server-safe shared entrypoints stay free of React hooks', () => {
     // 这条断言会先提醒把它登记进来并验证。问卷与角色结果入口分别由客户端交互面板和结果卡使用，
     // 本地数据卡列表只在客户端读设备存储，字段编辑器只在客户端编辑页使用，AI Provider 选择器是
     // 带 hook 的客户端状态机，因此保持在这里作为显式的客户端专属登记。
+    // `./color-mode` 承载 `useColorModePreference` 与 DOM 应用逻辑，是刻意的客户端入口；
+    // RSC 只消费同目录的 `./color-mode-init`。
     expect(unlisted.sort()).toEqual([
       './ai-provider',
       './card-editor',
       './character-result',
+      './color-mode',
       './encyclopedia-views',
       './local-archive',
       './local-cards',

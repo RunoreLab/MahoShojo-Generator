@@ -20,6 +20,16 @@
       "import": "./src/capability/index.ts",
       "default": "./src/capability/index.ts"
     },
+    "./color-mode": {
+      "types": "./src/color-mode/index.ts",
+      "import": "./src/color-mode/index.ts",
+      "default": "./src/color-mode/index.ts"
+    },
+    "./color-mode-init": {
+      "types": "./src/color-mode/init.ts",
+      "import": "./src/color-mode/init.ts",
+      "default": "./src/color-mode/init.ts"
+    },
     "./encyclopedia": {
       "types": "./src/encyclopedia/index.ts",
       "import": "./src/encyclopedia/index.ts",
@@ -86,6 +96,7 @@
     "@mahoshojo/ai-core": "workspace:*",
     "@mahoshojo/local-library": "workspace:*",
     "katex": "^0.16.27",
+    "lucide-react": "^0.511.0",
     "react-markdown": "^10.1.0",
     "rehype-katex": "^7.0.1",
     "remark-gfm": "^4.0.1",

@@ -2,7 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
 
 import { AppProviders } from '@/app/providers';
-import { getColorModeInitScript } from '@/lib/color-mode-init';
+import { getColorModeInitScript } from '@mahoshojo/ui-web/color-mode-init';
 import '@/styles/globals.css';
 import '@/styles/blue-theme.css';
 import '@/styles/gradient-buttons.css';

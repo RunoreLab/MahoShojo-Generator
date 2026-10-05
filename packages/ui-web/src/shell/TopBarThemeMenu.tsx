@@ -1,7 +1,6 @@
 import { Monitor, Moon, Palette, Sun } from 'lucide-react';
 
-import type { ColorModePreference } from '@/lib/color-mode';
-import { COLOR_MODE_OPTIONS, useColorModePreference } from '@/lib/color-mode';
+import { COLOR_MODE_OPTIONS, useColorModePreference, type ColorModePreference } from '../color-mode/index';
 
 const getIcon = (value: ColorModePreference) => {
   const className = 'h-4 w-4';
@@ -11,6 +10,13 @@ const getIcon = (value: ColorModePreference) => {
   return <Monitor className={className} aria-hidden="true" />;
 };
 
+/**
+ * 顶栏外观菜单（自 `apps/web` 上移，DOM/文案/hover 展开逻辑逐字保留）。
+ *
+ * 偏好的读取、持久化与 `data-color-mode` 应用全走 `../color-mode`——存储键与属性名
+ * 是产品级契约；Web `layout.tsx` 内联脚本与 Desktop `index.html` 内联脚本消费同一个
+ * `getColorModeInitScript()` 生成器，两端切换器因此天然一致。
+ */
 export function TopBarThemeMenu() {
   const { preference, setPreference, isHydrated } = useColorModePreference();
   const current = COLOR_MODE_OPTIONS.find((option) => option.value === preference) ?? COLOR_MODE_OPTIONS[0];

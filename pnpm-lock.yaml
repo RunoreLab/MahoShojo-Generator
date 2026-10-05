@@ -803,6 +803,9 @@ importers:
       katex:
         specifier: ^0.16.27
         version: 0.16.47
+      lucide-react:
+        specifier: ^0.511.0
+        version: 0.511.0(react@19.2.3)
       react-markdown:
         specifier: ^10.1.0
         version: 10.1.0(@types/react@19.2.15)(react@19.2.3)

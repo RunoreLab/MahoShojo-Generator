@@ -1,11 +1,18 @@
+/**
+ * 共源亮暗偏好 hook 与 DOM 应用逻辑（客户端专属）。
+ *
+ * 自 `apps/web/lib/color-mode.ts` 上移，逻辑逐字保留：localStorage 持久化、
+ * `document.documentElement.dataset.colorMode` 三段解析与系统偏好监听都在同一处，
+ * Web 的顶栏外观菜单、ColorModeSwitcher 与 Desktop 顶栏消费同一份。
+ */
 import { useEffect, useState } from 'react';
 
-import { COLOR_MODE_STORAGE_KEY } from '@/lib/color-mode-init';
+import { COLOR_MODE_STORAGE_KEY } from './init';
 
 export type ColorModePreference = 'system' | 'light' | 'dark';
 export type ResolvedColorMode = 'light' | 'dark';
 
-export { COLOR_MODE_STORAGE_KEY } from '@/lib/color-mode-init';
+export { COLOR_MODE_STORAGE_KEY } from './init';
 
 export const COLOR_MODE_OPTIONS: Array<{ value: ColorModePreference; label: string }> = [
   { value: 'system', label: '跟随系统' },

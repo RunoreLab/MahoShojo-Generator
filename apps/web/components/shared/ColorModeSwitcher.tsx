@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { GripVertical, Monitor, Moon, Sun, X } from 'lucide-react';
 
-import type { ColorModePreference } from '@/lib/color-mode';
-import { COLOR_MODE_OPTIONS, useColorModePreference } from '@/lib/color-mode';
+import type { ColorModePreference } from '@mahoshojo/ui-web/color-mode';
+import { COLOR_MODE_OPTIONS, useColorModePreference } from '@mahoshojo/ui-web/color-mode';
 
 type Position = { x: number; y: number };
 

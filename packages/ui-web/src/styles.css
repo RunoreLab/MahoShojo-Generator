@@ -418,3 +418,104 @@
   --app-footer-link: #fda4af;
   --app-footer-link-hover: #fb7185;
 }
+
+/*
+ * 共源顶栏面板/下拉/入口样式。
+ *
+ * 自 `apps/web/styles/globals.css` 上移（D5.0d / DESK-ONLINE-008）：声明逐字保留，
+ * 亮暗两套取值与 `--global-topbar-height` / `--global-topbar-z-index` token 配套。
+ * Web 侧同名定义已删除，本文件是唯一权威——Desktop 顶栏直接消费同一份玻璃拟态外观。
+ */
+.global-topbar {
+  color: #111827;
+}
+
+.global-topbar-panel {
+  border: 1px solid rgba(255, 255, 255, 0.82);
+  border-radius: 28px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.78), rgba(255, 255, 255, 0.58));
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  backdrop-filter: blur(24px) saturate(180%);
+  box-shadow:
+    0 0 22px rgba(236, 72, 153, 0.04),
+    0 14px 40px rgba(244, 114, 182, 0.06),
+    0 14px 34px rgba(244, 114, 182, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.35);
+}
+
+.global-topbar-logo-link {
+  color: #111827;
+}
+
+.global-topbar-logo-link:hover,
+.global-topbar-nav-trigger:hover,
+.global-topbar-mobile-button:hover {
+  background: rgba(255, 255, 255, 0.75);
+}
+
+.global-topbar-nav-trigger {
+  color: #374151;
+}
+
+.global-topbar-dropdown {
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  background: rgba(255, 255, 255, 0.95);
+}
+
+.global-topbar-dropdown-link {
+  color: #1f2937;
+}
+
+.global-topbar-dropdown-link:hover {
+  background: #fdf2f8;
+}
+
+.global-topbar-mobile-button {
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  background: rgba(255, 255, 255, 0.7);
+  color: #1f2937;
+}
+
+:root[data-color-mode='dark'] .global-topbar {
+  color: #f8fafc;
+}
+
+:root[data-color-mode='dark'] .global-topbar-panel {
+  border-color: rgba(255, 255, 255, 0.16);
+  background: linear-gradient(135deg, rgba(15, 23, 42, 0.76), rgba(2, 6, 23, 0.58));
+  box-shadow:
+    0 14px 34px rgba(244, 114, 182, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.04);
+}
+
+:root[data-color-mode='dark'] .global-topbar-logo-link,
+:root[data-color-mode='dark'] .global-topbar-nav-trigger {
+  color: #f1f5f9;
+}
+
+:root[data-color-mode='dark'] .global-topbar-logo-link:hover,
+:root[data-color-mode='dark'] .global-topbar-nav-trigger:hover,
+:root[data-color-mode='dark'] .global-topbar-mobile-button:hover {
+  background: rgba(15, 23, 42, 0.82);
+}
+
+:root[data-color-mode='dark'] .global-topbar-dropdown {
+  border-color: rgba(71, 85, 105, 0.6);
+  background: rgba(2, 6, 23, 0.96);
+}
+
+:root[data-color-mode='dark'] .global-topbar-dropdown-link {
+  color: #f1f5f9;
+}
+
+:root[data-color-mode='dark'] .global-topbar-dropdown-link:hover {
+  background: rgba(30, 41, 59, 0.9);
+}
+
+:root[data-color-mode='dark'] .global-topbar-mobile-button {
+  border-color: rgba(71, 85, 105, 0.6);
+  background: rgba(15, 23, 42, 0.72);
+  color: #f1f5f9;
+}
