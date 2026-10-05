@@ -4,7 +4,6 @@ import type { CustomProviderPayload } from '@/lib/ai/custom-provider';
 import type { Preset } from '@/lib/presets';
 import type { AdjudicatorEvent, AdjudicationResult, CharacterCurrentState } from '@/types/arena';
 import type { NormalizedStreamUpdateMeta } from '@/lib/arena/stream-meta';
-import type { QuestionnaireDefinition } from '@/lib/questionnaires';
 import type { AIReasoningEnvelope } from '@/types/ai-reasoning';
 import type { ArenaMaterialState } from '@/lib/arena/materials';
 import type { ArenaGenerationConnectionState } from '@/lib/arena/resumable-generation-client';
@@ -35,17 +34,11 @@ export type GenerationMode = 'non-stream' | 'stream';
 export type StreamTransportMode = 'sse';
 export type BattleReportCardWidthMode = 'auto' | 'manual';
 
-export type QuestionnaireSelectionSource = 'preset' | 'upload' | 'database';
-
-export type QuestionnaireSelection = {
-  source: QuestionnaireSelectionSource;
-  questionnaire: QuestionnaireDefinition;
-  dataCardId?: string;
-  dataCardName?: string;
-  dataCardAuthor?: string;
-  selectionId?: string;
-  useLore?: boolean;
-};
+import type {
+  QuestionnaireSelection,
+  QuestionnaireSelectionSource,
+} from '@mahoshojo/domain/questionnaire-selection';
+export type { QuestionnaireSelection, QuestionnaireSelectionSource };
 
 export type StreamUpdateMetaDebug = {
   source: 'sse' | 'inline';

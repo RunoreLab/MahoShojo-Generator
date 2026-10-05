@@ -50,6 +50,31 @@
       "import": "./src/questionnaire-definition.ts",
       "default": "./src/questionnaire-definition.ts"
     },
+    "./questionnaire-selection": {
+      "types": "./src/questionnaire-selection.ts",
+      "import": "./src/questionnaire-selection.ts",
+      "default": "./src/questionnaire-selection.ts"
+    },
+    "./questionnaire-bulk-parser": {
+      "types": "./src/questionnaire-bulk-parser.ts",
+      "import": "./src/questionnaire-bulk-parser.ts",
+      "default": "./src/questionnaire-bulk-parser.ts"
+    },
+    "./questionnaire-answer-import": {
+      "types": "./src/questionnaire-answer-import.ts",
+      "import": "./src/questionnaire-answer-import.ts",
+      "default": "./src/questionnaire-answer-import.ts"
+    },
+    "./markdown-card": {
+      "types": "./src/markdown-card.ts",
+      "import": "./src/markdown-card.ts",
+      "default": "./src/markdown-card.ts"
+    },
+    "./token-estimate": {
+      "types": "./src/token-estimate.ts",
+      "import": "./src/token-estimate.ts",
+      "default": "./src/token-estimate.ts"
+    },
     "./external-media": {
       "types": "./src/external-media.ts",
       "import": "./src/external-media.ts",
@@ -87,6 +112,7 @@
   },
   "devDependencies": {
     "@types/node": "^20",
+    "@typescript-eslint/eslint-plugin": "^8.50.0",
     "@typescript-eslint/parser": "^8.50.0",
     "esbuild": "^0.28.1",
     "eslint": "^9",

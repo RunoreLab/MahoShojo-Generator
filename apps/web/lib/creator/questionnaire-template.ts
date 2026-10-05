@@ -1,4 +1,5 @@
 import type { QuestionnairePresetEntry } from '@/lib/questionnaires';
+import { pickDefaultQuestionnairePresetEntry } from '@mahoshojo/domain/questionnaire-selection';
 
 import type { CreatorTemplateId } from './templates';
 
@@ -27,8 +28,9 @@ export function pickDefaultCreatorQuestionnairePresetEntry(
   template: CreatorTemplateId,
   presetEntries: QuestionnairePresetEntry[]
 ): QuestionnairePresetEntry | null {
-  const filtered = filterCreatorQuestionnairePresetEntries(template, presetEntries);
-  return filtered.find((entry) => entry.isDefault) ?? filtered[0] ?? null;
+  return pickDefaultQuestionnairePresetEntry(
+    filterCreatorQuestionnairePresetEntries(template, presetEntries),
+  );
 }
 
 export function reconcileQuestionnaireSelectionsForTemplate<T extends QuestionnaireSelectionLike>({

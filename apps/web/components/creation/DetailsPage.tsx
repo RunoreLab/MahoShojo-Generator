@@ -14,7 +14,6 @@ import { useAppRouterAdapter } from '@/lib/app-router-adapter';
 import BattleDataModal from '@/components/BattleDataModal';
 import DataCardDetailsModal from '@/components/DataCardDetailsModal';
 import {
-  buildQuestionKey,
   buildQuestionnaireAnswerLookup,
   buildQuestionnaireFlow,
   collectStoredQuestionnaireAnswerItems,
@@ -27,11 +26,24 @@ import {
   resolveQuestionnaireReferences,
   type QuestionnaireAnswerItem,
   type QuestionnaireAnswerMatchTarget,
-  type QuestionnaireDefinition,
   type QuestionnairePresetEntry,
-  type QuestionnaireQuestion,
   type StoredQuestionnaireAnswerItem,
 } from '@/lib/questionnaires';
+import {
+  applyQuestionnaireSelection,
+  buildQuestionnaireContextItems,
+  buildQuestionnaireSelectionLoreText,
+  createStoredQuestionnaireSelectionNormalizer,
+  ensureQuestionnaireSelectionId,
+  isQuestionnaireSelectionNativeAllowed,
+  pickDefaultQuestionnairePresetEntry,
+  reconcileQuestionnaireSelectionsForSingleMode,
+  remapAnswersToQuestionnaireChange,
+  removeQuestionnaireSelection,
+  setQuestionnaireSelectionLore,
+  type QuestionnaireContextItem,
+  type QuestionnaireSelection,
+} from '@mahoshojo/domain/questionnaire-selection';
 import { persistArrestedBackup, type ArrestedBackupDraftItem, type ArrestedBackupTriggerSource } from '@/lib/arrested-backup';
 import AiProviderSelector, { type UserAIProviderConfig } from '@/components/AiProviderSelector';
 import AiReasoningPanel from '@/components/ai/AiReasoningPanel';
@@ -70,26 +82,10 @@ import { STREAM_ABORT_REASON_USER } from '@/lib/stream/abort';
 import type { AIReasoningEnvelope } from '@/types/ai-reasoning';
 import type { CharacterCardPortraitAsset } from '@/types/visual-asset';
 
-type QuestionnaireSelectionSource = 'preset' | 'upload' | 'database';
-
-type QuestionnaireSelection = {
-  source: QuestionnaireSelectionSource;
-  questionnaire: QuestionnaireDefinition;
-  dataCardId?: string;
-  dataCardName?: string;
-  dataCardAuthor?: string;
-  selectionId?: string;
-  useLore?: boolean;
-};
-
-type QuestionnaireContextItem = {
-  key: string;
-  questionnaireId: string;
-  questionnaireScopeId: string;
-  questionnaireTitle: string;
-  indexInQuestionnaire: number;
-  question: QuestionnaireQuestion;
-};
+const normalizeStoredSelection = createStoredQuestionnaireSelectionNormalizer({
+  fallbackKind: 'magical-girl',
+  normalize: (value, fallback) => normalizeQuestionnaireDefinition(value, fallback),
+});
 
 type JsonSaveMode = 'download' | 'text';
 type ImageSaveMode = 'download' | 'modal';
@@ -321,35 +317,15 @@ export const DetailsPage: React.FC = () => {
     return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   }, []);
   const ensureSelectionId = useCallback(
-    (selection: QuestionnaireSelection, used: Set<string>) => {
-      const base = selection.questionnaire.id || 'questionnaire';
-      let nextId = typeof selection.selectionId === 'string' ? selection.selectionId.trim() : '';
-      if (!nextId) {
-        nextId = used.has(base) ? `${base}::${createSelectionSuffix()}` : base;
-      } else if (used.has(nextId)) {
-        nextId = `${base}::${createSelectionSuffix()}`;
-      }
-      used.add(nextId);
-      return { ...selection, selectionId: nextId };
-    },
+    (selection: QuestionnaireSelection, used: Set<string>) =>
+      ensureQuestionnaireSelectionId(selection, used, createSelectionSuffix),
     [createSelectionSuffix]
   );
 
-  const questionnaireItems = useMemo<QuestionnaireContextItem[]>(() => {
-    return selectedQuestionnaires.flatMap((selection) =>
-      selection.questionnaire.questions.map((question, index) => {
-        const questionnaireScopeId = selection.selectionId ?? selection.questionnaire.id;
-        return {
-          key: buildQuestionKey(questionnaireScopeId, question.id, index),
-          questionnaireId: selection.questionnaire.id,
-          questionnaireScopeId,
-          questionnaireTitle: selection.questionnaire.title,
-          indexInQuestionnaire: index,
-          question,
-        };
-      })
-    );
-  }, [selectedQuestionnaires]);
+  const questionnaireItems = useMemo<QuestionnaireContextItem[]>(
+    () => buildQuestionnaireContextItems(selectedQuestionnaires),
+    [selectedQuestionnaires]
+  );
 
   const resolvedQuestionItems = useMemo(
     () => resolveQuestionnaireReferences(questionnaireItems),
@@ -427,28 +403,15 @@ export const DetailsPage: React.FC = () => {
   const overLimitItems = useMemo(() => buildOverLimitItems(answersByKey), [answersByKey, buildOverLimitItems]);
   const hasOverLimitAnswer = overLimitItems.length > 0;
 
-  const isQuestionnaireNativeAllowed = useMemo(() => {
-    if (selectedQuestionnaires.length === 0) return false;
-    return selectedQuestionnaires.every((selection) => {
-      const hasQuestions = selection.questionnaire.questions.length > 0;
-      const hasLore = Boolean(selection.questionnaire.loreMarkdown?.trim());
-      const usesLore = hasLore && selection.useLore !== false;
-      if (!hasQuestions && !usesLore) return true;
-      return selection.questionnaire.nativeAllowed === true;
-    });
-  }, [selectedQuestionnaires]);
+  const isQuestionnaireNativeAllowed = useMemo(
+    () => isQuestionnaireSelectionNativeAllowed(selectedQuestionnaires),
+    [selectedQuestionnaires]
+  );
 
-  const questionnaireLoreText = useMemo(() => {
-    const blocks = selectedQuestionnaires
-      .filter((selection) => selection.useLore !== false)
-      .map((selection) => ({
-        title: selection.questionnaire.title,
-        lore: selection.questionnaire.loreMarkdown?.trim() ?? '',
-      }))
-      .filter((item) => Boolean(item.lore))
-      .map((item) => `【设定来源：${item.title}】\n${item.lore}`);
-    return blocks.length > 0 ? blocks.join('\n\n') : '';
-  }, [selectedQuestionnaires]);
+  const questionnaireLoreText = useMemo(
+    () => buildQuestionnaireSelectionLoreText(selectedQuestionnaires),
+    [selectedQuestionnaires]
+  );
 
   const tokenEstimateText = useMemo(() => {
     const answerText = formatQuestionnaireAnswers(answerItems);
@@ -564,37 +527,8 @@ export const DetailsPage: React.FC = () => {
       if (Array.isArray(parsed?.questionnaireSelections)) {
         const usedSelectionIds = new Set<string>();
         const restored = (parsed.questionnaireSelections as unknown[])
-          .map((raw): QuestionnaireSelection | null => {
-            if (!raw || typeof raw !== 'object') return null;
-            const rawRecord = raw as Record<string, unknown>;
-            const source: QuestionnaireSelectionSource =
-              rawRecord.source === 'upload' || rawRecord.source === 'database' || rawRecord.source === 'preset'
-                ? rawRecord.source
-                : 'preset';
-            const rawQuestionnaire = rawRecord.questionnaire as { id?: unknown; title?: unknown; nativeAllowed?: unknown } | null;
-            const fallbackNativeAllowed = source === 'preset'
-              ? (typeof rawQuestionnaire?.nativeAllowed === 'boolean' ? rawQuestionnaire.nativeAllowed : true)
-              : source === 'upload'
-                ? false
-                : (typeof rawQuestionnaire?.nativeAllowed === 'boolean' ? rawQuestionnaire.nativeAllowed : false);
-            const normalized = normalizeQuestionnaireDefinition(rawRecord.questionnaire, {
-              fallbackKind: 'magical-girl',
-              fallbackId: typeof rawQuestionnaire?.id === 'string' ? rawQuestionnaire.id : 'magical-girl-custom',
-              fallbackTitle: typeof rawQuestionnaire?.title === 'string' ? rawQuestionnaire.title : '未命名问卷',
-              nativeAllowed: fallbackNativeAllowed,
-            });
-            if (!normalized) return null;
-            if (source === 'database' && normalized.nativeAllowed == null) normalized.nativeAllowed = false;
-            return {
-              source,
-              questionnaire: normalized,
-              dataCardId: typeof rawRecord.dataCardId === 'string' ? rawRecord.dataCardId : undefined,
-              dataCardName: typeof rawRecord.dataCardName === 'string' ? rawRecord.dataCardName : undefined,
-              dataCardAuthor: typeof rawRecord.dataCardAuthor === 'string' ? rawRecord.dataCardAuthor : undefined,
-              selectionId: typeof rawRecord.selectionId === 'string' ? rawRecord.selectionId : undefined,
-              useLore: typeof rawRecord.useLore === 'boolean' ? rawRecord.useLore : undefined,
-            } satisfies QuestionnaireSelection;
-          })
+          .map((raw): QuestionnaireSelection | null =>
+            normalizeStoredSelection(raw))
           .filter((item): item is QuestionnaireSelection => Boolean(item))
           .map((item) => ensureSelectionId(item, usedSelectionIds));
         if (restored.length > 0) {
@@ -656,20 +590,8 @@ export const DetailsPage: React.FC = () => {
 
   useEffect(() => {
     if (allowMultipleQuestionnaires) return;
-    if (selectedQuestionnaires.length <= 1) return;
-
-    const firstAnswerableIndex = selectedQuestionnaires.findIndex((selection) => selection.questionnaire.questions.length > 0);
-    if (firstAnswerableIndex < 0) return;
-
-    const hasExtraAnswerable = selectedQuestionnaires.some(
-      (selection, index) => index !== firstAnswerableIndex && selection.questionnaire.questions.length > 0
-    );
-    if (!hasExtraAnswerable) return;
-
-    const nextSelections = selectedQuestionnaires.filter(
-      (selection, index) => selection.questionnaire.questions.length === 0 || index === firstAnswerableIndex
-    );
-
+    const nextSelections = reconcileQuestionnaireSelectionsForSingleMode(selectedQuestionnaires);
+    if (!nextSelections) return;
     setSelectedQuestionnaires(nextSelections);
     setCurrentQuestionIndex(0);
   }, [allowMultipleQuestionnaires, selectedQuestionnaires]);
@@ -727,7 +649,7 @@ export const DetailsPage: React.FC = () => {
     if (presetEntries.length === 0) return;
     let cancelled = false;
     const loadDefaultPreset = async () => {
-      const defaultPreset = presetEntries.find((item) => item.isDefault) ?? presetEntries[0];
+      const defaultPreset = pickDefaultQuestionnairePresetEntry(presetEntries);
       if (!defaultPreset) {
         if (!cancelled) setSelectionReady(true);
         return;
@@ -777,53 +699,22 @@ export const DetailsPage: React.FC = () => {
       return;
     }
 
-    setAnswersByKey((prev) => {
-      const previousEntries = collectStoredQuestionnaireAnswerItems(previousTargets, prev);
-      if (previousEntries.length === 0) return {};
-
-      const nextAnswers: Record<string, string> = {};
-      previousEntries.forEach((entry, index) => {
-        const target = resolveQuestionnaireAnswerTarget(
-          questionAnswerLookup,
-          { ...entry, index },
-          { allowIndexFallback: false }
-        );
-        if (!target) return;
-        nextAnswers[target.key] = entry.answer;
-      });
-      return nextAnswers;
-    });
+    setAnswersByKey((prev) =>
+      remapAnswersToQuestionnaireChange({
+        previousTargets,
+        answersByKey: prev,
+        lookup: questionAnswerLookup,
+      }),
+    );
   }, [allQuestionTargets, questionAnswerLookup, questionTargetSignature]);
 
   const applySelection = (selection: QuestionnaireSelection) => {
-    const hasQuestions = selection.questionnaire.questions.length > 0;
-    const hasLore = Boolean(selection.questionnaire.loreMarkdown?.trim());
-    const isLoreOnly = !hasQuestions && hasLore;
-
-    setSelectedQuestionnaires((prev) => {
-      const usedSelectionIds = new Set<string>();
-      prev.forEach((item) => {
-        const existingId = item.selectionId || item.questionnaire.id;
-        if (existingId) usedSelectionIds.add(existingId);
-      });
-
-      const normalizedSelection = ensureSelectionId(selection, usedSelectionIds);
-
-      if (allowMultipleQuestionnaires) {
-        return [...prev, normalizedSelection];
-      }
-
-      if (hasQuestions) {
-        const preservedLoreOnly = prev.filter((item) => item.questionnaire.questions.length === 0);
-        return [normalizedSelection, ...preservedLoreOnly];
-      }
-
-      if (isLoreOnly && prev.length > 0) {
-        return [...prev, normalizedSelection];
-      }
-
-      return [normalizedSelection];
-    });
+    setSelectedQuestionnaires((prev) =>
+      applyQuestionnaireSelection(prev, selection, {
+        allowMultiple: allowMultipleQuestionnaires,
+        createSuffix: createSelectionSuffix,
+      }),
+    );
     setPasteQuestionnaireError(null);
     setPasteQuestionnaireText('');
     setShowPasteImport(false);
@@ -834,15 +725,11 @@ export const DetailsPage: React.FC = () => {
   const handleRemoveSelection = (selectionId: string) => {
     clearTransitionTimers();
     setIsTransitioning(false);
-    setSelectedQuestionnaires((prev) => prev.filter((item) => (item.selectionId ?? item.questionnaire.id) !== selectionId));
+    setSelectedQuestionnaires((prev) => removeQuestionnaireSelection(prev, selectionId));
   };
 
   const handleToggleSelectionLore = (selectionId: string, enabled: boolean) => {
-    setSelectedQuestionnaires((prev) => prev.map((item) => {
-      const id = item.selectionId ?? item.questionnaire.id;
-      if (id !== selectionId) return item;
-      return { ...item, useLore: enabled };
-    }));
+    setSelectedQuestionnaires((prev) => setQuestionnaireSelectionLore(prev, selectionId, enabled));
   };
 
   const handleOpenQuestionnaireDetails = useCallback((selection: QuestionnaireSelection) => {

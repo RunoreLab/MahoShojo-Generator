@@ -28,23 +28,8 @@ export const countArenaReferenceItems = (
   total + (Array.isArray(payload[key]) ? payload[key].length : 0)
 ), 0);
 
-export const estimateTokensFromText = (text: string): number => {
-  if (!text) return 0;
-  let ascii = 0;
-  let nonAsciiEstimate = 0;
-  for (const character of text) {
-    const codePoint = character.codePointAt(0) ?? 0;
-    if (codePoint <= 0x7f) {
-      ascii += 1;
-    } else {
-      // 这是跨 Provider 共用的轻量近似，不代表任一模型的真实 tokenizer。
-      // BMP 非 ASCII 按一 code point 一 token；astral symbol（常见于 emoji）
-      // 按四 token 保守估算。
-      nonAsciiEstimate += codePoint > 0xffff ? 4 : 1;
-    }
-  }
-  return Math.max(1, Math.ceil(nonAsciiEstimate + ascii / 4));
-};
+export { estimateTokensFromText } from '@mahoshojo/domain/token-estimate';
+import { estimateTokensFromText } from '@mahoshojo/domain/token-estimate';
 
 export type ArenaPromptBudgetEvaluation = Readonly<{
   allowed: boolean;

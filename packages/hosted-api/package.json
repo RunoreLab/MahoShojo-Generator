@@ -92,6 +92,7 @@
   },
   "dependencies": {
     "@mahoshojo/contracts": "workspace:*",
+    "@mahoshojo/domain": "workspace:*",
     "zod": "^4.1.13"
   },
   "devDependencies": {

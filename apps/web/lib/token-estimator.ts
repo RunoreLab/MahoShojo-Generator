@@ -1,1 +1,1 @@
-export { estimateTokensFromText } from '@mahoshojo/hosted-api/arena-generation/resource-budget';
+export { estimateTokensFromText } from '@mahoshojo/domain/token-estimate';

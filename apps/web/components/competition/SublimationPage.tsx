@@ -49,9 +49,17 @@ import { mapDataCardSourceMeta } from '@/lib/data-card-read-mappers';
 import {
   normalizeQuestionnaireDefinition,
   parseQuestionnaireDataCardPayload,
-  type QuestionnaireDefinition,
   type QuestionnairePresetEntry,
 } from '@/lib/questionnaires';
+import {
+  buildQuestionnaireSelectionLoreText,
+  collectUsedQuestionnaireSelectionIds,
+  createStoredQuestionnaireSelectionNormalizer,
+  ensureQuestionnaireSelectionId,
+  removeQuestionnaireSelection,
+  setQuestionnaireSelectionLore,
+  type QuestionnaireSelection,
+} from '@mahoshojo/domain/questionnaire-selection';
 import type { AIReasoningEnvelope } from '@/types/ai-reasoning';
 import {
 	    inferTemplate,
@@ -94,17 +102,19 @@ const TARGET_TEMPLATE_LABELS: Record<SupportedTargetTemplate, string> = {
     'general': TEMPLATE_LABELS['general'],
 };
 
-type QuestionnaireSelectionSource = 'preset' | 'upload' | 'database';
+const createQuestionnaireSelectionSuffix = () =>
+    typeof crypto !== 'undefined' && 'randomUUID' in crypto
+        ? crypto.randomUUID()
+        : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
-type QuestionnaireSelection = {
-    source: QuestionnaireSelectionSource;
-    questionnaire: QuestionnaireDefinition;
-    dataCardId?: string;
-    dataCardName?: string;
-    dataCardAuthor?: string;
-    selectionId?: string;
-    useLore?: boolean;
-};
+const normalizeStoredSelection = createStoredQuestionnaireSelectionNormalizer({
+    fallbackKind: (rawQuestionnaire) =>
+        rawQuestionnaire && typeof rawQuestionnaire === 'object' &&
+        (rawQuestionnaire as { kind?: unknown }).kind === 'canshou'
+            ? 'canshou'
+            : 'magical-girl',
+    normalize: (value, fallback) => normalizeQuestionnaireDefinition(value, fallback),
+});
 
 type RateLimitError = Error & {
     retryAfterSeconds?: number;
@@ -300,36 +310,16 @@ export const SublimationPage: React.FC = () => {
     const [pasteQuestionnaireText, setPasteQuestionnaireText] = useState('');
     const [pasteQuestionnaireError, setPasteQuestionnaireError] = useState<string | null>(null);
 
-    const createSelectionSuffix = useCallback(() => {
-        if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
-            return crypto.randomUUID();
-        }
-        return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-    }, []);
+    const ensureSelectionId = useCallback(
+        (selection: QuestionnaireSelection, used: Set<string>) =>
+            ensureQuestionnaireSelectionId(selection, used, createQuestionnaireSelectionSuffix),
+        [],
+    );
 
-    const ensureSelectionId = useCallback((selection: QuestionnaireSelection, used: Set<string>) => {
-        const base = selection.questionnaire.id || 'questionnaire';
-        let nextId = typeof selection.selectionId === 'string' ? selection.selectionId.trim() : '';
-        if (!nextId) {
-            nextId = used.has(base) ? `${base}::${createSelectionSuffix()}` : base;
-        } else if (used.has(nextId)) {
-            nextId = `${base}::${createSelectionSuffix()}`;
-        }
-        used.add(nextId);
-        return { ...selection, selectionId: nextId };
-    }, [createSelectionSuffix]);
-
-    const questionnaireLoreText = useMemo(() => {
-        const blocks = selectedQuestionnaires
-            .filter((selection) => selection.useLore !== false)
-            .map((selection) => ({
-                title: selection.questionnaire.title,
-                lore: selection.questionnaire.loreMarkdown?.trim() ?? '',
-            }))
-            .filter((item) => Boolean(item.lore))
-            .map((item) => `【设定来源：${item.title}】\n${item.lore}`);
-        return blocks.join('\n\n');
-    }, [selectedQuestionnaires]);
+    const questionnaireLoreText = useMemo(
+        () => buildQuestionnaireSelectionLoreText(selectedQuestionnaires),
+        [selectedQuestionnaires],
+    );
 
     const streamedGeneralCardForDisplay = useMemo(() => {
         if (generationMode !== 'stream') return null;
@@ -421,41 +411,7 @@ export const SublimationPage: React.FC = () => {
             if (Array.isArray(parsed?.questionnaireSelections)) {
                 const usedSelectionIds = new Set<string>();
                 const restored = (parsed.questionnaireSelections as unknown[])
-                    .map((raw): QuestionnaireSelection | null => {
-                        if (!raw || typeof raw !== 'object') return null;
-                        const rawRecord = raw as Record<string, unknown>;
-                        const source: QuestionnaireSelectionSource =
-                            rawRecord.source === 'upload' || rawRecord.source === 'database' || rawRecord.source === 'preset'
-                                ? rawRecord.source
-                                : 'preset';
-                        const rawQuestionnaire = rawRecord.questionnaire as { id?: unknown; title?: unknown; kind?: unknown; nativeAllowed?: unknown } | null;
-                        const fallbackKind =
-                            rawQuestionnaire?.kind === 'canshou'
-                                ? 'canshou'
-                                : 'magical-girl';
-                        const fallbackNativeAllowed = source === 'preset'
-                            ? (typeof rawQuestionnaire?.nativeAllowed === 'boolean' ? rawQuestionnaire.nativeAllowed : true)
-                            : source === 'upload'
-                                ? false
-                                : (typeof rawQuestionnaire?.nativeAllowed === 'boolean' ? rawQuestionnaire.nativeAllowed : false);
-                        const normalized = normalizeQuestionnaireDefinition(rawRecord.questionnaire, {
-                            fallbackKind,
-                            fallbackId: typeof rawQuestionnaire?.id === 'string' ? rawQuestionnaire.id : `${fallbackKind}-custom`,
-                            fallbackTitle: typeof rawQuestionnaire?.title === 'string' ? rawQuestionnaire.title : '未命名问卷',
-                            nativeAllowed: fallbackNativeAllowed,
-                        });
-                        if (!normalized) return null;
-                        if (source === 'database' && normalized.nativeAllowed == null) normalized.nativeAllowed = false;
-                        return {
-                            source,
-                            questionnaire: normalized,
-                            dataCardId: typeof rawRecord.dataCardId === 'string' ? rawRecord.dataCardId : undefined,
-                            dataCardName: typeof rawRecord.dataCardName === 'string' ? rawRecord.dataCardName : undefined,
-                            dataCardAuthor: typeof rawRecord.dataCardAuthor === 'string' ? rawRecord.dataCardAuthor : undefined,
-                            selectionId: typeof rawRecord.selectionId === 'string' ? rawRecord.selectionId : undefined,
-                            useLore: typeof rawRecord.useLore === 'boolean' ? rawRecord.useLore : undefined,
-                        } satisfies QuestionnaireSelection;
-                    })
+                    .map((raw): QuestionnaireSelection | null => normalizeStoredSelection(raw))
                     .filter((item): item is QuestionnaireSelection => Boolean(item))
                     .map((item) => ensureSelectionId(item, usedSelectionIds));
                 setSelectedQuestionnaires(restored);
@@ -707,12 +663,7 @@ export const SublimationPage: React.FC = () => {
             const nextKey = buildQuestionnaireSelectionKey(normalizedSelection);
             if (existingKeys.has(nextKey)) return prev;
 
-            const usedSelectionIds = new Set<string>();
-            prev.forEach((item) => {
-                const existingId = item.selectionId ?? item.questionnaire.id;
-                if (existingId) usedSelectionIds.add(existingId);
-            });
-            return [...prev, ensureSelectionId(normalizedSelection, usedSelectionIds)];
+            return [...prev, ensureSelectionId(normalizedSelection, collectUsedQuestionnaireSelectionIds(prev))];
         });
 
         setQuestionnaireLoadError(null);
@@ -722,15 +673,11 @@ export const SublimationPage: React.FC = () => {
     }, [buildQuestionnaireSelectionKey, ensureSelectionId]);
 
     const handleRemoveQuestionnaireSelection = (selectionId: string) => {
-        setSelectedQuestionnaires((prev) => prev.filter((item) => (item.selectionId ?? item.questionnaire.id) !== selectionId));
+        setSelectedQuestionnaires((prev) => removeQuestionnaireSelection(prev, selectionId));
     };
 
     const handleToggleQuestionnaireLore = (selectionId: string, enabled: boolean) => {
-        setSelectedQuestionnaires((prev) => prev.map((item) => {
-            const id = item.selectionId ?? item.questionnaire.id;
-            if (id !== selectionId) return item;
-            return { ...item, useLore: enabled };
-        }));
+        setSelectedQuestionnaires((prev) => setQuestionnaireSelectionLore(prev, selectionId, enabled));
     };
 
     const handleOpenQuestionnaireDetails = useCallback((selection: QuestionnaireSelection) => {

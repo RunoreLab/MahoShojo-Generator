@@ -26,6 +26,12 @@ import {
 import { canAddArenaReferenceItems } from '@/lib/arena/resource-budget';
 import { randomUUID } from '@/lib/crypto';
 import { createHydrationSafeJsonStorage } from '@/lib/zustand-persist-storage';
+import {
+  collectUsedQuestionnaireSelectionIds,
+  ensureQuestionnaireSelectionId,
+  removeQuestionnaireSelection,
+  setQuestionnaireSelectionLore,
+} from '@mahoshojo/domain/questionnaire-selection';
 
 const normalizeSourceKey = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
 
@@ -527,11 +533,7 @@ export const useBattleStore = create<BattleStoreState>()(
           if (isDuplicate) return state;
           if (!canAddArenaReferenceItems(state)) return state;
 
-          const usedSelectionIds = new Set<string>();
-          state.selectedQuestionnaires.forEach((item) => {
-            const existingId = item.selectionId || item.questionnaire.id;
-            if (existingId) usedSelectionIds.add(existingId);
-          });
+          const usedSelectionIds = collectUsedQuestionnaireSelectionIds(state.selectedQuestionnaires);
 
           const createSelectionSuffix = () => {
             try {
@@ -542,22 +544,13 @@ export const useBattleStore = create<BattleStoreState>()(
             return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
           };
 
-          const base = questionnaireId || 'questionnaire';
-          let selectionId = typeof incoming.selectionId === 'string' ? incoming.selectionId.trim() : '';
-          if (!selectionId) {
-            selectionId = usedSelectionIds.has(base) ? `${base}::${createSelectionSuffix()}` : base;
-          } else if (usedSelectionIds.has(selectionId)) {
-            selectionId = `${base}::${createSelectionSuffix()}`;
-          }
-
-          return { selectedQuestionnaires: [...state.selectedQuestionnaires, { ...incoming, selectionId }] };
+          const ensured = ensureQuestionnaireSelectionId(incoming, usedSelectionIds, createSelectionSuffix);
+          return { selectedQuestionnaires: [...state.selectedQuestionnaires, ensured] };
         }),
 
       removeQuestionnaireSelection: (selectionId) =>
         set((state) => ({
-          selectedQuestionnaires: state.selectedQuestionnaires.filter(
-            (item) => (item.selectionId ?? item.questionnaire.id) !== selectionId
-          ),
+          selectedQuestionnaires: removeQuestionnaireSelection(state.selectedQuestionnaires, selectionId),
         })),
 
       setQuestionnaireSelections: (selections) =>
@@ -569,11 +562,7 @@ export const useBattleStore = create<BattleStoreState>()(
 
       toggleQuestionnaireSelectionLore: (selectionId, enabled) =>
         set((state) => ({
-          selectedQuestionnaires: state.selectedQuestionnaires.map((item) => {
-            const id = item.selectionId ?? item.questionnaire.id;
-            if (id !== selectionId) return item;
-            return { ...item, useLore: enabled };
-          }),
+          selectedQuestionnaires: setQuestionnaireSelectionLore(state.selectedQuestionnaires, selectionId, enabled),
         })),
     }),
     {

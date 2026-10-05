@@ -6,6 +6,7 @@ import {
   resolveQuestionnaireAnswerTarget,
   type QuestionnaireAnswerItem,
 } from '@mahoshojo/domain/questionnaire';
+import { buildQuestionnaireLoreText as buildSharedQuestionnaireLoreText } from '@mahoshojo/domain/questionnaire-selection';
 
 export type RequestQuestion = {
   id: string;
@@ -147,12 +148,7 @@ export const normalizeQuestionnaires = (raw: unknown): RequestQuestionnaire[] =>
 
 export const buildQuestionnaireLoreText = (
   questionnaires: RequestQuestionnaire[],
-): string => questionnaires
-  .flatMap((questionnaire) => {
-    const lore = questionnaire.loreMarkdown?.trim() ?? '';
-    return lore ? [`【设定来源：${questionnaire.title}】\n${lore}`] : [];
-  })
-  .join('\n\n');
+): string => buildSharedQuestionnaireLoreText(questionnaires);
 
 export const extractAnswerQuestionnaireIds = (rawAnswers: unknown): Set<string> => {
   const ids = new Set<string>();
