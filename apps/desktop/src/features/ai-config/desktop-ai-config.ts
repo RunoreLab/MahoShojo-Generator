@@ -57,7 +57,7 @@ export const DESKTOP_EDITABLE_PROFILE_ADAPTERS: ReadonlySet<DirectProviderAdapte
  * 由解析层诊断，绝不自动换成另一条连接。
  */
 export interface DesktopAiSelection {
-  /** 执行位置偏好；'server' 在接入在线能力前是禁用占位。 */
+  /** 执行位置偏好；'server' 走 hosted System Default（不要求登录，DESK-094 在 dispatch 时校验）。 */
   executionPreference: 'client' | 'server';
   /** 客户端连接选择；null = 尚未选择。 */
   clientConnectionId: string | null;
@@ -203,8 +203,9 @@ export const resolveDesktopAiTarget = (
       mode: null,
       modelId: null,
       generationOverrides: undefined,
-      // 诚实标注：服务器执行需要项目在线能力，Desktop 尚未接入。
-      unavailableReason: '服务器执行将在接入在线能力后开放',
+      // hosted 通路已接入：可执行性由 dispatch 时 DESK-094 兼容/可达性门禁裁决，
+      // 登录与否只影响会话 cookie 是否附带，不是前置条件。
+      unavailableReason: null,
     };
   }
 

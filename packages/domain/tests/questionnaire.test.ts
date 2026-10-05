@@ -2,6 +2,7 @@ import {
   QUESTIONNAIRE_NATIVE_MAX_ANSWER_CHARS,
   buildQuestionnaireAnswerLookup,
   getAnswerLimitInfo,
+  hasOverLimitQuestionnaireAnswers,
   isAnswerOverLimit,
   normalizeUserAnswers,
   resolveQuestionnaireAnswerTarget,
@@ -39,5 +40,18 @@ describe('questionnaire domain policy', () => {
     expect(getAnswerLimitInfo(800)).toEqual({ limit: 500, source: 'global' });
     expect(isAnswerOverLimit('12345', 4)).toBe(true);
     expect(isAnswerOverLimit('   ', 1)).toBe(false);
+  });
+
+  test('hasOverLimitQuestionnaireAnswers 按可见流程 key 判定任一超限', () => {
+    const items = [
+      { key: 'q::one', question: { maxLength: 5 } },
+      { key: 'q::two', question: { maxLength: null } },
+    ];
+    expect(hasOverLimitQuestionnaireAnswers(items, { 'q::one': '123456' })).toBe(true);
+    // maxLength 为 null 时回落 500 字全局上限。
+    expect(hasOverLimitQuestionnaireAnswers(items, { 'q::two': '字'.repeat(501) })).toBe(true);
+    expect(hasOverLimitQuestionnaireAnswers(items, { 'q::one': '12345', 'q::two': '正常' })).toBe(false);
+    // 非字符串值与缺失 key 一律按未超限计，不抛错。
+    expect(hasOverLimitQuestionnaireAnswers(items, { 'q::one': 123 })).toBe(false);
   });
 });

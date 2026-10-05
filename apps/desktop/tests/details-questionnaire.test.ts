@@ -95,6 +95,17 @@ describe('Desktop default questionnaire', () => {
     expect(buildDetailsAnswers(flow, { [flow[0].key]: suggestion })[0].answer).toBe(suggestion);
   });
 
+  it('内置预设未声明 nativeAllowed 时按 preset 语义归一化为 true', async () => {
+    const parsed = await loadFixture(fixture({}));
+    expect(parsed.nativeAllowed).toBe(true);
+  });
+
+  it('显式声明 nativeAllowed:false 的预设仍加载成功，只是无签名资格', async () => {
+    const parsed = await loadFixture({ ...fixture({}), nativeAllowed: false });
+    expect(parsed.nativeAllowed).toBe(false);
+    expect(parsed.questions).toHaveLength(1);
+  });
+
   it('loads the bundled same-origin asset without credentials or redirect fallback', async () => {
     const fetch = vi.fn(async () => ({ ok: true, json: async () => source() }));
     vi.stubGlobal('fetch', fetch);
@@ -142,11 +153,28 @@ describe('parseQuestionnaireSelection', () => {
     expect(parsed.source.cardId).toBeUndefined();
   });
 
-  it.each([undefined, false])('数据卡问卷未声明 nativeAllowed === true 时拒绝在本机执行：%j', (nativeAllowed) => {
-    expect(parseQuestionnaireSelection({
+  it.each([undefined, false])('数据卡问卷 nativeAllowed=%j 仍可选择与生成，仅失去签名资格', (nativeAllowed) => {
+    // `nativeAllowed` 不是可用性门禁：未声明/显式 false 的云端卡按 database
+    // 语义归一化为 false，生成照常、hosted 请求携带 allowNativeSignature=false。
+    const parsed = parseQuestionnaireSelection({
       ...basePayload, nativeAllowed,
       _cardType: 'questionnaire', _storageLocation: 'cloud', _cardName: '云端问卷',
-    } as never)).toEqual({ error: '这张问卷数据卡未声明允许在客户端原生运行。' });
+    } as never);
+    if ('error' in parsed) throw new Error(`unexpected parse error: ${parsed.error}`);
+    expect(parsed.questionnaire.nativeAllowed).toBe(false);
+  });
+
+  it.each([
+    ['cloud', { _cardType: 'questionnaire', _storageLocation: 'cloud', _cardName: '云端问卷' }, true],
+    // 本地库卡按 upload 语义恒 false——即便正文声称 nativeAllowed 也不可信。
+    ['local', { _cardType: 'questionnaire', _storageLocation: 'local', _cardName: '本地问卷' }, false],
+  ] as const)('来源=%s 的数据卡问卷 nativeAllowed 归一化为 %j', (_kind, meta, expected) => {
+    const parsed = parseQuestionnaireSelection({
+      ...basePayload, nativeAllowed: true,
+      ...meta,
+    } as never);
+    if ('error' in parsed) throw new Error(`unexpected parse error: ${parsed.error}`);
+    expect(parsed.questionnaire.nativeAllowed).toBe(expected);
   });
 
   it('非问卷卡与空题问卷被拒绝', () => {

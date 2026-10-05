@@ -192,7 +192,12 @@ export const buildQuestionnaireContextItems = (
     }),
   );
 
-/** 所有可作答/被引用的问卷都声明 `nativeAllowed === true` 时才允许原生签名路径。 */
+/**
+ * 所有可作答/被引用的问卷都声明 `nativeAllowed === true` 时才允许原生签名路径。
+ *
+ * 只判定**签名资格**，不是可用性门禁：`nativeAllowed !== true` 的问卷仍然可以
+ * 正常选择与生成，只是结果不会获得官方/原生签名（`DESK-ONLINE-009` 语义）。
+ */
 export const isQuestionnaireSelectionNativeAllowed = (
   selections: readonly QuestionnaireSelection[],
 ): boolean => {
@@ -205,6 +210,16 @@ export const isQuestionnaireSelectionNativeAllowed = (
     return selection.questionnaire.nativeAllowed === true;
   });
 };
+
+/**
+ * 提交时的原生签名资格 = 选择集 native 许可 ∧ 无超限回答。
+ * Web 与 Desktop 共用同一表达式；`hasOverLimitAnswers` 由宿主用可见流程与
+ * `isAnswerOverLimit` 求值（隐藏题不参与，与答案收集同口径）。
+ */
+export const isQuestionnaireGenerationNativeSignatureAllowed = (
+  selections: readonly QuestionnaireSelection[],
+  hasOverLimitAnswers: boolean,
+): boolean => isQuestionnaireSelectionNativeAllowed(selections) && !hasOverLimitAnswers;
 
 /** 选择级 Lore 拼接：「使用设定」为 false 的卡不进入提示词。 */
 export const buildQuestionnaireSelectionLoreText = (

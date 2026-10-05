@@ -275,6 +275,20 @@ export const isAnswerOverLimit = (
   return Boolean(limit && limit > 0 && normalized.length > limit);
 };
 
+/**
+ * 提交前超限判定：可见流程条目（displayIf/jump 已按回答求值）中任一回答
+ * 超限即为 true。Web 与 Desktop 同口径——只用于关闭原生签名资格，
+ * 不阻止生成（`DESK-ONLINE-009`）。
+ */
+export const hasOverLimitQuestionnaireAnswers = (
+  items: readonly { key: string; question: { maxLength?: number | null } }[],
+  answersByKey: Readonly<Record<string, unknown>>,
+): boolean =>
+  items.some((item) => {
+    const raw = answersByKey[item.key];
+    return isAnswerOverLimit(typeof raw === 'string' ? raw : '', item.question.maxLength ?? null);
+  });
+
 export const formatQuestionnaireAnswers = (
   answers: QuestionnaireAnswerItem[],
 ): string => {

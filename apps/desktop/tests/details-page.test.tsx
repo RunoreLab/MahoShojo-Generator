@@ -249,4 +249,42 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
     expect(window.location.hash).toBe('#/details');
     expect(textarea.value).toBe('尚未保存的回答');
   });
+
+  it('dispatches hosted System Default while signed out, hiding direct-only advanced settings', async () => {
+    window.localStorage.setItem(DESKTOP_AI_CONFIG_STORAGE_KEY, JSON.stringify({
+      version: 2,
+      // 服务器偏好与已选客户端连接正交共存；hosted dispatch 不消费 profile。
+      selection: { executionPreference: 'server', clientConnectionId: 'local' },
+      hiddenPresetIds: [],
+    }));
+    window.localStorage.setItem(DETAILS_DRAFT_KEY, JSON.stringify(draft()));
+    await mount(); await click('恢复草稿');
+    expect(container.textContent).toContain('服务器 · 云端');
+    expect(container.textContent).not.toContain('高级生成设置');
+    expect(container.textContent).not.toContain('服务器执行需要先登录');
+    expect(button('发送问卷并生成').disabled).toBe(false);
+    await click('发送问卷并生成');
+    expect(mocks.execute).toHaveBeenCalledTimes(1);
+    expect(mocks.execute.mock.calls[0]![0].profileId).toBe('');
+    expect(mocks.execute.mock.calls[0]![2]).toMatchObject({ mode: 'hosted-json' });
+    expect(mocks.execute.mock.calls[0]![1].hosted).toMatchObject({
+      allowNativeSignature: true,
+      fields: { questionnaireSelections: [{ source: 'preset', kind: 'magical-girl', presetId: 'magical-girl-default' }] },
+    });
+  });
+
+  it('sends allowNativeSignature=false on hosted dispatch when an answer exceeds the limit', async () => {
+    window.localStorage.setItem(DESKTOP_AI_CONFIG_STORAGE_KEY, JSON.stringify({
+      version: 2,
+      selection: { executionPreference: 'server', clientConnectionId: null },
+      hiddenPresetIds: [],
+    }));
+    window.localStorage.setItem(DETAILS_DRAFT_KEY, JSON.stringify({
+      ...draft(),
+      answers: { [`${builtinSelectionId(questionnaire.id)}::${questionnaire.questions[0].id}`]: '字'.repeat(501) },
+    }));
+    await mount(); await click('恢复草稿'); await click('发送问卷并生成');
+    expect(mocks.execute).toHaveBeenCalledTimes(1);
+    expect(mocks.execute.mock.calls[0]![1].hosted.allowNativeSignature).toBe(false);
+  });
 });

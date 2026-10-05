@@ -533,9 +533,10 @@ const ConnectionsPanelBody = ({ aiConfig }: { aiConfig: UseDesktopAiConfigResult
 
       <AiExecutionLocationField
         value={target.location}
-        // 执行位置偏好不依赖能力：客户端被偏好但没有连接时，由不可用说明引导配置。
+        // 执行位置偏好不依赖能力：客户端被偏好但没有连接时，由不可用说明引导配置；
+        // 服务器执行走 hosted System Default，匿名可选、DESK-094 在 dispatch 时校验。
         client={{ enabled: true }}
-        server={{ enabled: false, reason: '服务器执行将在接入在线能力后开放' }}
+        server={{ enabled: true }}
         onChange={(location) => store.selectExecutionLocation(location)}
       />
 

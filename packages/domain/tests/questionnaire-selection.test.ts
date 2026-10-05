@@ -13,6 +13,7 @@ import {
   collectUsedQuestionnaireSelectionIds,
   createStoredQuestionnaireSelectionNormalizer,
   ensureQuestionnaireSelectionId,
+  isQuestionnaireGenerationNativeSignatureAllowed,
   isQuestionnaireSelectionNativeAllowed,
   pickDefaultQuestionnairePresetEntry,
   reconcileQuestionnaireSelectionsForSingleMode,
@@ -215,6 +216,15 @@ describe('isQuestionnaireSelectionNativeAllowed / pickDefault', () => {
     expect(isQuestionnaireSelectionNativeAllowed([makeSelection()])).toBe(false);
     const allowed = makeSelection({ questionnaire: makeQuestionnaire({ nativeAllowed: true }) });
     expect(isQuestionnaireSelectionNativeAllowed([allowed])).toBe(true);
+  });
+
+  test('生成签名资格 = 全选择 native 许可且无超限回答', () => {
+    const allowed = [makeSelection({ questionnaire: makeQuestionnaire({ nativeAllowed: true }) })];
+    const blocked = [makeSelection()];
+    expect(isQuestionnaireGenerationNativeSignatureAllowed(allowed, false)).toBe(true);
+    // 超限回答关闭签名资格但不影响可生成性——调用方自行决定是否生成。
+    expect(isQuestionnaireGenerationNativeSignatureAllowed(allowed, true)).toBe(false);
+    expect(isQuestionnaireGenerationNativeSignatureAllowed(blocked, false)).toBe(false);
   });
 
   test('优先 isDefault 预设，可 kind 过滤', () => {

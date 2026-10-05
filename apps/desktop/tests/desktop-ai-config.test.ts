@@ -207,15 +207,17 @@ describe('parseDesktopAiConfigOverlay', () => {
 describe('resolveDesktopAiTarget', () => {
   const profile = profileFixture();
 
-  it('server preference is an unavailable placeholder until hosted lands', () => {
+  it('server preference resolves to an executable hosted target without requiring login', () => {
     const target = resolveDesktopAiTarget(
       { executionPreference: 'server', clientConnectionId: 'p_local' },
       [profile],
       {},
     );
     expect(target.location).toBe('server');
+    // hosted 通路不消费客户端连接；可执行性由 dispatch 时 DESK-094 门禁裁决。
     expect(target.profile).toBeNull();
-    expect(target.unavailableReason).toContain('服务器执行');
+    expect(target.mode).toBeNull();
+    expect(target.unavailableReason).toBeNull();
   });
 
   it('guides configuration when no client connection is selected', () => {

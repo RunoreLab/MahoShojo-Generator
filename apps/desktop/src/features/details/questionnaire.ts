@@ -5,9 +5,10 @@ import {
   type QuestionnaireQuestion,
 } from '@mahoshojo/domain/questionnaire-definition';
 import type { QuestionnaireAnswerItem } from '@mahoshojo/domain/questionnaire';
-import type {
-  QuestionnaireSelection,
-  QuestionnaireSelectionSource,
+import {
+  resolveQuestionnaireSelectionNativeAllowedFallback,
+  type QuestionnaireSelection,
+  type QuestionnaireSelectionSource,
 } from '@mahoshojo/domain/questionnaire-selection';
 import type { BattleSelectionPayload, CardLibrarySelectionContext } from '@mahoshojo/ui-web/card-library';
 
@@ -78,20 +79,25 @@ export const parseQuestionnaireSelection = (
   const cardName = typeof payload._cardName === 'string' && payload._cardName.trim()
     ? payload._cardName.trim()
     : '未命名问卷';
+  const isLocal = payload._storageLocation === 'local';
+  // `nativeAllowed` 只决定签名资格、不决定可用性：本地副本按 upload 语义恒 false，
+  // 云端卡按 database 语义取声明值（未声明 false），与 Web/hosted-runtime 同一口径。
   const questionnaire = normalizeQuestionnaireDefinition(payload, {
     fallbackId: typeof payload._cardId === 'string' && payload._cardId ? `card-${payload._cardId}` : 'custom-questionnaire',
     fallbackKind: 'magical-girl',
     fallbackTitle: cardName,
+    nativeAllowed: resolveQuestionnaireSelectionNativeAllowedFallback(
+      isLocal ? 'upload' : 'database',
+      payload,
+    ),
   });
   if (!questionnaire || questionnaire.questions.length === 0) {
     return { error: '这张问卷数据卡没有可用题目。' };
   }
-  // 与 hosted-runtime 同一口径：数据卡来源的问卷必须显式声明 nativeAllowed === true
-  // 才允许在本机原生执行；未声明/显式拒绝一律 fail closed。
-  if (questionnaire.nativeAllowed !== true) {
-    return { error: '这张问卷数据卡未声明允许在客户端原生运行。' };
-  }
-  const isLocal = payload._storageLocation === 'local';
+  // `normalizeQuestionnaireDefinition` dá precedência ao valor declarado no registro;
+  // uma cópia local não tem servidor para atestar, então o upload é SEMPRE não-nativo —
+  // reforço pós-normalize contra card editado declarando nativeAllowed:true.
+  if (isLocal) questionnaire.nativeAllowed = false;
   // selectionId 是宿主给的权威实例作用域（`local:<recordId>`/`cloud:<cardId>`）；
   // 缺上下文时按来源种类 + canonical id 兜底，仍保证云/本地副本互不错投。
   const fallbackScopeId = isLocal
@@ -115,11 +121,14 @@ export const parseQuestionnaireSelection = (
 export const loadDefaultQuestionnaire = async (signal: AbortSignal): Promise<DetailsQuestionnaire> => {
   const response = await fetch('/questionnaires/presets/magical-girl-default.json', { signal, credentials: 'omit', redirect: 'error' });
   if (!response.ok) throw new Error('内置问卷加载失败，请重试。');
-  const questionnaire = normalizeQuestionnaireDefinition(await response.json(), {
+  const raw: unknown = await response.json();
+  const questionnaire = normalizeQuestionnaireDefinition(raw, {
     fallbackId: 'magical-girl-default',
     fallbackKind: 'magical-girl',
+    // 内置预设与 Web preset 同源口径：未声明 nativeAllowed 按原生许可计。
+    nativeAllowed: resolveQuestionnaireSelectionNativeAllowedFallback('preset', raw),
   });
-  if (!questionnaire || questionnaire.id !== 'magical-girl-default' || questionnaire.nativeAllowed === false) {
+  if (!questionnaire || questionnaire.id !== 'magical-girl-default') {
     throw new Error('内置问卷无法读取，请重新安装或更新客户端。');
   }
   return questionnaire;

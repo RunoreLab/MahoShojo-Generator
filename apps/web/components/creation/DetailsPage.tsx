@@ -41,11 +41,13 @@ import {
   buildQuestionnaireSelectionLoreText,
   createStoredQuestionnaireSelectionNormalizer,
   ensureQuestionnaireSelectionId,
+  isQuestionnaireGenerationNativeSignatureAllowed,
   isQuestionnaireSelectionNativeAllowed,
   pickDefaultQuestionnairePresetEntry,
   reconcileQuestionnaireSelectionsForSingleMode,
   remapAnswersToQuestionnaireChange,
   removeQuestionnaireSelection,
+  resolveQuestionnaireSelectionNativeAllowedFallback,
   setQuestionnaireSelectionLore,
   type QuestionnaireContextItem,
   type QuestionnaireSelection,
@@ -590,12 +592,11 @@ export const DetailsPage: React.FC = () => {
         const response = await fetch(defaultPreset.path);
         if (!response.ok) throw new Error('加载预设问卷失败');
         const data = await response.json();
-        const nativeAllowed = typeof (data as any)?.nativeAllowed === 'boolean' ? Boolean((data as any).nativeAllowed) : true;
         const normalized = normalizeQuestionnaireDefinition(data, {
           fallbackId: defaultPreset.id,
           fallbackKind: defaultPreset.kind,
           fallbackTitle: defaultPreset.title,
-          nativeAllowed,
+          nativeAllowed: resolveQuestionnaireSelectionNativeAllowedFallback('preset', data),
         });
         if (!normalized) throw new Error('预设问卷解析失败');
         if (cancelled) return;
@@ -704,7 +705,7 @@ export const DetailsPage: React.FC = () => {
         fallbackKind: 'magical-girl',
         fallbackId: typeof rawData?.id === 'string' ? rawData.id : `magical-girl-card-${card?.id ?? ''}`,
         fallbackTitle: typeof rawData?.title === 'string' ? rawData.title : card?.name || '未命名问卷',
-        nativeAllowed: typeof rawData?.nativeAllowed === 'boolean' ? rawData.nativeAllowed : false,
+        nativeAllowed: resolveQuestionnaireSelectionNativeAllowedFallback('database', rawData),
       });
       if (!normalized) throw new Error('问卷数据卡解析失败');
       applySelection({
@@ -728,9 +729,11 @@ export const DetailsPage: React.FC = () => {
         fallbackKind: 'magical-girl',
         fallbackId: typeof parsed?.id === 'string' ? parsed.id : 'magical-girl-upload',
         fallbackTitle: typeof parsed?.title === 'string' ? parsed.title : file.name.replace(/\.[^.]+$/, ''),
-        nativeAllowed: false,
+        nativeAllowed: resolveQuestionnaireSelectionNativeAllowedFallback('upload', parsed),
       });
       if (!normalized) throw new Error('问卷文件解析失败');
+      // 上传件没有服务器身份可验证，nativeAllowed 恒 false（即使文件声明 true）。
+      normalized.nativeAllowed = false;
       applySelection({
         source: 'upload',
         questionnaire: normalized,
@@ -753,9 +756,11 @@ export const DetailsPage: React.FC = () => {
         fallbackKind: 'magical-girl',
         fallbackId: typeof parsed?.id === 'string' ? parsed.id : 'magical-girl-paste',
         fallbackTitle: typeof parsed?.title === 'string' ? parsed.title : '未命名问卷',
-        nativeAllowed: false,
+        nativeAllowed: resolveQuestionnaireSelectionNativeAllowedFallback('upload', parsed),
       });
       if (!normalized) throw new Error('问卷 JSON 无法识别，请检查格式');
+      // 上传件没有服务器身份可验证，nativeAllowed 恒 false（即使文件声明 true）。
+      normalized.nativeAllowed = false;
       applySelection({
         source: 'upload',
         questionnaire: normalized,
@@ -774,12 +779,11 @@ export const DetailsPage: React.FC = () => {
       const response = await fetch(preset.path);
       if (!response.ok) throw new Error('加载预设问卷失败');
       const data = await response.json();
-      const nativeAllowed = typeof (data as any)?.nativeAllowed === 'boolean' ? Boolean((data as any).nativeAllowed) : true;
       const normalized = normalizeQuestionnaireDefinition(data, {
         fallbackId: preset.id,
         fallbackKind: preset.kind,
         fallbackTitle: preset.title,
-        nativeAllowed,
+        nativeAllowed: resolveQuestionnaireSelectionNativeAllowedFallback('preset', data),
       });
       if (!normalized) throw new Error('预设问卷解析失败');
       applySelection({ source: 'preset', questionnaire: normalized });
@@ -1198,7 +1202,10 @@ export const DetailsPage: React.FC = () => {
     }
 
     const overLimitForSubmit = buildOverLimitItems(snapshot);
-    const allowNativeSignatureForSubmit = isQuestionnaireNativeAllowed && overLimitForSubmit.length === 0;
+    const allowNativeSignatureForSubmit = isQuestionnaireGenerationNativeSignatureAllowed(
+      selectedQuestionnaires,
+      overLimitForSubmit.length > 0,
+    );
 
     setSubmitting(true);
     setError(null);

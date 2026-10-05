@@ -3,7 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { Link } from '@tanstack/react-router';
 import { getModelGenerationCapabilities } from '@mahoshojo/ai-core/generation-settings';
 import { getRandomFlowers } from '@mahoshojo/domain/flowers';
-import { getAnswerLimitInfo, isAnswerOverLimit, type QuestionnaireAnswerMatchTarget } from '@mahoshojo/domain/questionnaire';
+import { getAnswerLimitInfo, hasOverLimitQuestionnaireAnswers, isAnswerOverLimit, type QuestionnaireAnswerMatchTarget } from '@mahoshojo/domain/questionnaire';
 import { buildQuestionnaireFlow, resolveQuestionnaireReferences } from '@mahoshojo/domain/questionnaire-definition';
 import {
   buildQuestionnaireAnswerExportText,
@@ -12,6 +12,7 @@ import {
 import {
   buildQuestionnaireGenerationRequestFields,
   buildQuestionnaireSelectionLoreText,
+  isQuestionnaireGenerationNativeSignatureAllowed,
   isQuestionnaireSelectionNativeAllowed,
   type QuestionnaireSelection,
 } from '@mahoshojo/domain/questionnaire-selection';
@@ -62,9 +63,8 @@ function DetailsForm({ session }: { session: DetailsSession }) {
   const profilesLoading = aiState.profilesState === 'idle' || aiState.profilesState === 'loading';
   const profilesError = aiState.profilesState === 'failed' ? aiState.profilesError : null;
   const cardLibraryHost = useDesktopCardLibraryHost();
-  const { state: cloudSessionState, store: cloudSessionStore } = useDesktopCloudSession();
-  const cloudSignedIn = cloudSessionState.phase.kind === 'ready'
-    && cloudSessionState.phase.session.state === 'active';
+  // 登录只决定是否附带会话/活动身份；System Default 公开路由对匿名放行（DESK-ONLINE-009）。
+  const { store: cloudSessionStore } = useDesktopCloudSession();
   const [generationMode, setGenerationMode] = useState<GenerationMode>('non-stream');
   const [languages, setLanguages] = useState<{ code: string; name: string }[]>([]);
   const [questionnaire, setQuestionnaire] = useState<DetailsQuestionnaire | null>(null);
@@ -188,12 +188,13 @@ function DetailsForm({ session }: { session: DetailsSession }) {
       : []),
     [questionnaire, questionnaireSource],
   );
+  // `nativeAllowed` 是签名资格而非可用性：非原生问卷照常生成，只是不获官方签名。
+  const isNativeSignatureEligible = isQuestionnaireSelectionNativeAllowed(selections);
   // 「客户端｜服务器」与「流式｜非流式」两个维度共同决定执行模式（DESK-ONLINE-009）。
   const hostedMode: DetailsExecutionMode = generationMode === 'stream' ? 'hosted-stream' : 'hosted-json';
   const executionMode: DetailsExecutionMode | null = target.location === 'server' ? hostedMode : mode;
   const generate = (discardUnsavedResult = false) => {
     if (!guard.ready || busy || !executionMode || !questionnaire || questionnaireLoading || profilesLoading || profilesError || questionnaireError || state.pendingRestore || session.isDraftBlocked()) return;
-    if (target.location === 'server' && !cloudSignedIn) { setActionError('服务器执行需要先登录云端账号。'); return; }
     if (target.location === 'client' && !selected) return;
     if (session.hasUnsavedResult() && !discardUnsavedResult) { setConfirmRegenerate(true); return; }
     try {
@@ -208,7 +209,10 @@ function DetailsForm({ session }: { session: DetailsSession }) {
           loreText: buildQuestionnaireSelectionLoreText(selections),
           hosted: {
             fields: buildQuestionnaireGenerationRequestFields(selections),
-            allowNativeSignature: isQuestionnaireSelectionNativeAllowed(selections),
+            allowNativeSignature: isQuestionnaireGenerationNativeSignatureAllowed(
+              selections,
+              hasOverLimitQuestionnaireAnswers(flow, session.getSnapshot().draft.answers),
+            ),
           },
         },
         { mode: executionMode, modelId: selected?.modelId, flowers: getRandomFlowers(), overrides: target.generationOverrides },
@@ -277,6 +281,11 @@ function DetailsForm({ session }: { session: DetailsSession }) {
             </span>
           )}
         </p>
+        {!isNativeSignatureEligible && questionnaire && (
+          <p role="status" className="mt-1 text-sm text-(--app-text-muted)">
+            该问卷未声明可在客户端原生运行；可正常生成，但结果不会获得官方签名。
+          </p>
+        )}
         <p className="mt-1 text-sm text-(--app-text-muted)">
           云端来源需要你已登录且服务可用；本地库来源离线可用。切换问卷不会删除已填写的回答。
         </p>
@@ -287,7 +296,7 @@ function DetailsForm({ session }: { session: DetailsSession }) {
         <AiExecutionLocationField
           value={target.location}
           client={{ enabled: true }}
-          server={{ enabled: cloudSignedIn, reason: '服务器执行需要先登录云端账号' }}
+          server={{ enabled: true }}
           onChange={(location) => aiStore.selectExecutionLocation(location)}
         />
         <GenerationModeSwitcher value={generationMode} onChange={setGenerationMode} />
@@ -312,7 +321,7 @@ function DetailsForm({ session }: { session: DetailsSession }) {
         {!profilesLoading && !aiState.profiles.length && !profilesError && <p>请先在<Link to="/settings" className="underline">设置</Link>中保存 Provider。问卷可以先填写，配置加载后再生成。</p>}
         {target.location === 'server' && <div className="rounded border border-(--app-border) p-3">
           <p>服务器 · 云端：由项目服务在服务器侧生成，{generationMode === 'stream' ? 'Markdown 流式输出（未签名）' : '结构化 JSON 输出（问卷原生许可时可获官方签名）'}。</p>
-          <p>切换执行位置不会丢失已填写的问卷回答。</p>
+          <p>不使用客户端连接与高级模型参数（由服务器侧 System Default 解析）。切换执行位置不会丢失已填写的问卷回答。</p>
         </div>}
         {target.location === 'client' && target.unavailableReason && <p role="status">{target.unavailableReason}</p>}
         {target.location === 'client' && selected && mode && <div className="rounded border border-(--app-border) p-3">
@@ -320,8 +329,9 @@ function DetailsForm({ session }: { session: DetailsSession }) {
           <p className="break-all">接收方：{selected.baseUrl}</p>
           <p>模型：{selected.modelId}。点击生成会发送已填写的问卷回答；结果不带官方签名。</p>
         </div>}
-        {/* 未实现 adapter 的连接不展示高级参数——不显示无实际发送效果的控件。 */}
-        {selected && mode && <AdvancedGenerationSettings
+        {/* 高级参数只随 direct 通路下发（hosted 在服务器侧解析）：仅客户端执行时展示，
+            未实现 adapter 的连接同样不显示无实际发送效果的控件。 */}
+        {target.location === 'client' && selected && mode && <AdvancedGenerationSettings
           value={target.generationOverrides}
           onChange={(next) => aiStore.setGenerationOverrides(selected.id, selected.modelId, next)}
           temperatureSupported={targetCapabilities ? targetCapabilities.temperature.support !== 'unsupported' : true}
@@ -397,7 +407,7 @@ function DetailsForm({ session }: { session: DetailsSession }) {
         disabled={busy}
       />
       <div className="flex flex-wrap gap-2">
-        <button className={actionClass} disabled={!guard.ready || busy || questionnaireLoading || profilesLoading || !questionnaire || !executionMode || (target.location === 'server' ? !cloudSignedIn : !selected) || blockedDraft || !!questionnaireError || !!profilesError} onClick={() => generate()}>{state.phase === 'generating' ? '正在生成…' : state.phase === 'idle' ? '发送问卷并生成' : '重新生成'}</button>
+        <button className={actionClass} disabled={!guard.ready || busy || questionnaireLoading || profilesLoading || !questionnaire || !executionMode || (target.location === 'client' && !selected) || blockedDraft || !!questionnaireError || !!profilesError} onClick={() => generate()}>{state.phase === 'generating' ? '正在生成…' : state.phase === 'idle' ? '发送问卷并生成' : '重新生成'}</button>
         {state.phase === 'generating' && <button className={actionClass} onClick={() => session.cancel()}>取消生成</button>}
       </div>
       <dialog ref={regenerateDialog} aria-labelledby="regenerate-title" aria-describedby="regenerate-description" className="m-auto max-w-lg rounded-lg border border-(--app-border) bg-(--app-surface) p-5 text-(--app-text) backdrop:bg-black/40" onCancel={(event) => { event.preventDefault(); if (!session.isBusy()) setConfirmRegenerate(false); }}>
