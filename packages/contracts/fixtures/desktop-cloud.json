@@ -8,6 +8,7 @@
     "signOut": "/api/auth/sign-out",
     "hostedDrReadiness": "/api/hosted/dr-readiness",
     "hostedGenerateDetailsStream": "/api/generate-magical-girl-details-stream",
+    "hostedGenerateDetails": "/api/generate-magical-girl-details",
     "loopbackCallback": "/callback"
   },
   "limits": {
@@ -52,6 +53,9 @@
   ],
   "hostedGenerationRouteIds": [
     "generate-magical-girl-details-stream"
+  ],
+  "hostedJsonRouteIds": [
+    "generate-magical-girl-details"
   ],
   "cardLibrary": {
     "routes": {

@@ -73,6 +73,8 @@ const SIGN_OUT_PATH: &str = "/api/auth/sign-out";
 const DR_READINESS_PATH: &str = "/api/hosted/dr-readiness";
 const HOSTED_GENERATE_DETAILS_STREAM_PATH: &str = "/api/generate-magical-girl-details-stream";
 const HOSTED_ROUTE_DETAILS_STREAM: &str = "generate-magical-girl-details-stream";
+const HOSTED_GENERATE_DETAILS_PATH: &str = "/api/generate-magical-girl-details";
+const HOSTED_ROUTE_DETAILS: &str = "generate-magical-girl-details";
 const PROTOCOL_VERSION: &str = "desktop-auth-v1";
 const LOOPBACK_CALLBACK_PATH: &str = "/callback";
 const HOSTED_CONTRACT_VERSION: &str = "g25e1-v1";
@@ -1038,6 +1040,15 @@ const HOSTED_SSE_MAX_FRAME_BYTES: usize = 512 * 1024;
 const HOSTED_SSE_MAX_BUFFER_BYTES: usize = 1024 * 1024;
 /// 非 SSE 错误响应体的最大读取量。
 const HOSTED_ERROR_BODY_MAX_BYTES: usize = 64 * 1024;
+/// hosted 非流式 JSON 响应正文上限：生成卡 + aiMeta 包装远小于它。
+const HOSTED_JSON_RESPONSE_MAX_BYTES: usize = 4 * 1024 * 1024;
+/// 非流式生成的传输总时限：模型生成是秒级到分钟级操作，不能套用
+/// SHORT_REQUEST_TIMEOUT；仍保持有界——挂死连接不能永久占用 requestId。
+const HOSTED_JSON_REQUEST_TIMEOUT: Duration = Duration::from_secs(300);
+/// 要求服务端在 JSON 响应里携带 `{data, aiMeta}` 包装的请求头（与 Web
+/// 客户端一致），让非流式结果也能带模型/用量/推理信息。
+const HOSTED_AI_META_HEADER: &str = "x-mahoshojo-ai-meta";
+const HOSTED_AI_META_VALUE: &str = "1";
 
 /// hosted SSE 事件：名称 + JSON 载荷，与 `HostedGenerationEventSchema` 同形。
 #[derive(Debug, Clone, Serialize)]
@@ -1201,33 +1212,29 @@ impl HostedEventSink for tauri::ipc::Channel<HostedSseEvent> {
     }
 }
 
-/// `stream_hosted_ai`：固定路由的 hosted 生成流（当前只开放系统默认通道）。
+/// hosted 生成的公共 dispatch 前导：路由白名单、requestId 形态、body 边界
+/// 校验（`customProvider` 注入拒绝 + 大小上限）、会话装载与 DESK-094 契约
+/// 兼容门禁。流式与非流式两条命令共用——门禁失败在 requestId 注册之前返回，
+/// 不产生注册表残留。
 ///
-/// - 会话 cookie 只在已登录时附加（该路由对匿名也按公开规则放行）；
-/// - 取消经 `ai::RequestRegistry`，drop 上游连接立即生效；
-/// - 单一终态：服务端 `done`/`error` 或传输失败合成的 `error`，之后不再发事件；
-///   首个终态到达后立即停止读取上游；EOF 前未见终态是上游协议异常，
-///   合成一个 `invalid-response` error 而不是静默按成功结束。
-pub async fn stream_hosted_ai(
+/// DESK-094 门禁收在 dispatch 本身：任何调用方发起 hosted 生成前都必须先过
+/// 契约兼容探测，而不是依赖 UI 自觉先点「检查连通性」。探测只发生在用户主动
+/// 开始在线生成时，符合「冷启动零项目请求」的冻结原则；不可达 / 已声明不兼容
+/// / 未声明版本一律 fail-closed，不发送生成请求。
+async fn prepare_hosted_dispatch(
     state: &CloudState,
     secrets: &dyn SecretStore,
-    registry: &crate::ai::RequestRegistry,
-    request: CloudHostedGenerateRequest,
-    on_event: &dyn HostedEventSink,
-) -> Result<(), CloudError> {
-    if request.route_id != HOSTED_ROUTE_DETAILS_STREAM {
+    request: &CloudHostedGenerateRequest,
+    allowed_route: &str,
+) -> Result<(serde_json::Value, Option<StoredSession>), CloudError> {
+    if request.route_id != allowed_route {
         return Err(invalid_request("未知的 hosted 生成路由"));
     }
     if request.request_id.is_empty() || request.request_id.len() > 128 {
         return Err(invalid_request("requestId 非法"));
     }
-    let body = build_hosted_request_body(&request)?;
+    let body = build_hosted_request_body(request)?;
     let session = load_session(secrets)?;
-
-    // DESK-094 门禁收在 dispatch 本身：任何调用方发起 hosted 生成前都必须先过
-    // 契约兼容探测，而不是依赖 UI 自觉先点「检查连通性」。探测只发生在用户主动
-    // 开始在线生成时，符合「冷启动零项目请求」的冻结原则；不可达 / 已声明不兼容
-    // / 未声明版本一律 fail-closed，不发送生成请求。
     match probe_hosted_compatibility(state, session.as_ref()).await? {
         HostedCompatibility::Ready { .. } => {}
         HostedCompatibility::Unreachable => {
@@ -1251,6 +1258,25 @@ pub async fn stream_hosted_ai(
             ));
         }
     }
+    Ok((body, session))
+}
+
+/// `stream_hosted_ai`：固定路由的 hosted 生成流（当前只开放系统默认通道）。
+///
+/// - 会话 cookie 只在已登录时附加（该路由对匿名也按公开规则放行）；
+/// - 取消经 `ai::RequestRegistry`，drop 上游连接立即生效；
+/// - 单一终态：服务端 `done`/`error` 或传输失败合成的 `error`，之后不再发事件；
+///   首个终态到达后立即停止读取上游；EOF 前未见终态是上游协议异常，
+///   合成一个 `invalid-response` error 而不是静默按成功结束。
+pub async fn stream_hosted_ai(
+    state: &CloudState,
+    secrets: &dyn SecretStore,
+    registry: &crate::ai::RequestRegistry,
+    request: CloudHostedGenerateRequest,
+    on_event: &dyn HostedEventSink,
+) -> Result<(), CloudError> {
+    let (body, session) =
+        prepare_hosted_dispatch(state, secrets, &request, HOSTED_ROUTE_DETAILS_STREAM).await?;
 
     let token = registry
         .register(&request.request_id)
@@ -1417,6 +1443,88 @@ pub async fn stream_hosted_ai(
     outcome
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloudHostedJsonResponse {
+    pub status: u16,
+    pub body: serde_json::Value,
+}
+
+/// `hosted_ai_request`：hosted 非流式 JSON 生成（D5.1a，`/details` 双执行的
+/// 服务器端非流式通路）。与 `stream_hosted_ai` 同一边界：固定 origin/路由、
+/// 凭据字段 IPC 层拒绝、`customProvider` 注入拒绝、DESK-094 门禁、
+/// RequestRegistry 取消。
+///
+/// 差别只在传输形态：请求/响应代替 SSE。native 返回「HTTP 状态 + JSON 正文」
+/// 透传——`{data, aiMeta}` 解包、`{error, retryAfterSeconds}` 诊断与签名结果
+/// 识别都在 renderer 适配层完成。2xx 必须给出 JSON 正文（否则视为协议异常）；
+/// 非 2xx 允许非 JSON 错误页（网关 524 HTML 等），此时 body 投影为 null，
+/// HTTP status 本身就是诊断信号，绝不合成业务成功。
+///
+/// `x-mahoshojo-ai-meta: 1` 请求头与 Web 客户端一致：服务端据此回
+/// `{data, aiMeta}` 包装，使非流式结果也能携带模型/用量/推理信息。
+pub async fn hosted_ai_request(
+    state: &CloudState,
+    secrets: &dyn SecretStore,
+    registry: &crate::ai::RequestRegistry,
+    request: CloudHostedGenerateRequest,
+) -> Result<CloudHostedJsonResponse, CloudError> {
+    let (body, session) =
+        prepare_hosted_dispatch(state, secrets, &request, HOSTED_ROUTE_DETAILS).await?;
+
+    let token = registry
+        .register(&request.request_id)
+        .map_err(|_| CloudError::new(CloudErrorCode::InvalidRequest, "requestId 已在执行中"))?;
+
+    let outcome = async {
+        let builder = match &session {
+            Some(session) => authed_request(
+                &state.http,
+                reqwest::Method::POST,
+                &state.origin,
+                HOSTED_GENERATE_DETAILS_PATH,
+                session,
+            ),
+            None => base_request(
+                &state.http,
+                reqwest::Method::POST,
+                &state.origin,
+                HOSTED_GENERATE_DETAILS_PATH,
+            ),
+        };
+        let request_builder = builder
+            .header(HOSTED_AI_META_HEADER, HOSTED_AI_META_VALUE)
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .body(serde_json::to_vec(&body).map_err(|_| {
+                CloudError::new(CloudErrorCode::InternalError, "生成请求序列化失败")
+            })?);
+
+        let response = tokio::select! {
+            biased;
+            _ = token.cancelled() => {
+                return Err(CloudError::new(CloudErrorCode::Cancelled, "已取消"));
+            }
+            result = request_builder
+                .timeout(HOSTED_JSON_REQUEST_TIMEOUT)
+                .send() => result,
+        };
+        let response = response.map_err(|error| CloudError::network("生成请求", &error))?;
+
+        let status = response.status().as_u16();
+        let body = if (200..300).contains(&status) {
+            read_bounded_json(response, "生成请求", HOSTED_JSON_RESPONSE_MAX_BYTES).await?
+        } else {
+            let text = read_bounded_text(response, HOSTED_JSON_RESPONSE_MAX_BYTES).await;
+            serde_json::from_str::<serde_json::Value>(&text).unwrap_or(serde_json::Value::Null)
+        };
+        Ok(CloudHostedJsonResponse { status, body })
+    }
+    .await;
+
+    registry.finish(&request.request_id);
+    outcome
+}
+
 /* ── 数据卡库固定路由通路（D5.0e，`DESK-ONLINE-010`） ────────────────────
  *
  * 数据卡列表/详情/收藏/标签/统计/上传副本都是「窄 HTTP + JSON 正文」的服务端
@@ -1559,6 +1667,7 @@ pub struct CloudCardLibraryResponse {
 async fn read_bounded_json(
     response: reqwest::Response,
     context: &str,
+    max_bytes: usize,
 ) -> Result<serde_json::Value, CloudError> {
     use futures_util::StreamExt;
 
@@ -1566,7 +1675,7 @@ async fn read_bounded_json(
     let mut buffer = Vec::new();
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|error| CloudError::network(context, &error))?;
-        if buffer.len() + chunk.len() > CARD_LIBRARY_RESPONSE_MAX_BYTES {
+        if buffer.len() + chunk.len() > max_bytes {
             return Err(CloudError::new(
                 CloudErrorCode::InvalidResponse,
                 format!("{context} 响应正文超出大小上限"),
@@ -1666,7 +1775,7 @@ pub async fn cloud_card_library_request(
         clear_session(secrets)?;
     }
 
-    let body = read_bounded_json(response, "数据卡请求").await?;
+    let body = read_bounded_json(response, "数据卡请求", CARD_LIBRARY_RESPONSE_MAX_BYTES).await?;
     Ok(CloudCardLibraryResponse { status, body })
 }
 
@@ -1863,6 +1972,8 @@ mod tests {
         hosted_sse_body: Mutex<Option<String>>,
         /// `Some((status, body))` 时 readiness 路由返回覆盖响应（测门禁分支）。
         readiness_override: Mutex<Option<(u16, String)>>,
+        /// `Some((status, body))` 时非流式生成路由返回覆盖响应（测错误页/透传分支）。
+        hosted_json_response: Mutex<Option<(u16, String)>>,
         /// 最近一次命中数据卡路由表路径的请求（target、原始 head、JSON body）。
         last_card_request: Mutex<Option<(String, String, Option<serde_json::Value>)>>,
         /// `Some((status, body))` 时卡库路由返回覆盖响应（测 401/错误分支）。
@@ -1882,6 +1993,7 @@ mod tests {
             get_session_ok: std::sync::atomic::AtomicBool::new(true),
             hosted_sse_body: Mutex::new(None),
             readiness_override: Mutex::new(None),
+            hosted_json_response: Mutex::new(None),
             last_card_request: Mutex::new(None),
             card_response_override: Mutex::new(None),
             shutdown: CancellationToken::new(),
@@ -2091,6 +2203,26 @@ mod tests {
                         ],
                         body: sse,
                     }
+                }
+                HOSTED_GENERATE_DETAILS_PATH => {
+                    *self.last_generate_headers.lock().unwrap() = Some(head.to_string());
+                    *self.last_generate_body.lock().unwrap() = serde_json::from_slice(body).ok();
+                    if let Some((status, override_body)) =
+                        self.hosted_json_response.lock().unwrap().clone()
+                    {
+                        return MockResponse {
+                            status,
+                            headers: vec![(
+                                "Content-Type".to_string(),
+                                "application/json".to_string(),
+                            )],
+                            body: override_body,
+                        };
+                    }
+                    json(serde_json::json!({
+                        "data": {"codename": "homura", "signature": "sig.v1"},
+                        "aiMeta": {"aiModel": "glm-5.3-flash", "aiReasoning": {"status": "done", "source": "sdk"}}
+                    }))
                 }
                 _ => MockResponse {
                     status: 404,
@@ -2309,6 +2441,10 @@ mod tests {
             fixture["paths"]["hostedGenerateDetailsStream"].as_str(),
             Some(HOSTED_GENERATE_DETAILS_STREAM_PATH)
         );
+        assert_eq!(
+            fixture["paths"]["hostedGenerateDetails"].as_str(),
+            Some(HOSTED_GENERATE_DETAILS_PATH)
+        );
         let event_names: Vec<&str> = fixture["hostedGenerationEventNames"]
             .as_array()
             .unwrap()
@@ -2319,6 +2455,15 @@ mod tests {
             assert!(event_names.contains(name), "fixture 缺少事件名 {name}");
         }
         assert_eq!(event_names.len(), HOSTED_EVENT_NAMES.len());
+
+        // 非流式路由白名单与 fixture `hostedJsonRouteIds` 同源对拍。
+        let json_routes: Vec<&str> = fixture["hostedJsonRouteIds"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|value| value.as_str().unwrap())
+            .collect();
+        assert_eq!(json_routes, [HOSTED_ROUTE_DETAILS]);
 
         // Rust `CloudErrorCode` 全量序列化值与共享 contract 错误码枚举逐一相等——
         // 防止两侧各自手抄一份列表发生漂移。
@@ -2809,6 +2954,163 @@ mod tests {
             stream_hosted_ai(&state, &secrets, &registry, hosted_request(), &sink)
                 .await
                 .expect("compatible probe must let the request through");
+        });
+    }
+
+    /* ── hosted 非流式 JSON 生成（D5.1a） ────────────────────────────── */
+
+    fn hosted_json_request() -> CloudHostedGenerateRequest {
+        CloudHostedGenerateRequest {
+            request_id: "req-json-1".to_string(),
+            route_id: HOSTED_ROUTE_DETAILS.to_string(),
+            body: serde_json::json!({
+                "answers": [{"questionId": "q1", "answer": "a"}],
+                "allowNativeSignature": true,
+            }),
+        }
+    }
+
+    #[test]
+    fn hosted_json_end_to_end() {
+        rt().block_on(async {
+            let server = spawn_mock_server();
+            let state = CloudState::with_origin(&server.origin);
+            let secrets = MemorySecrets::new();
+            let registry = crate::ai::RequestRegistry::default();
+            store_session(
+                &secrets,
+                &StoredSession {
+                    cookie: "better-auth.session_token=native.tok".to_string(),
+                    session_expires_at: None,
+                    account: CloudAccountRecord {
+                        user_id: 7,
+                        username: "homura".to_string(),
+                        display_name: None,
+                    },
+                },
+            )
+            .unwrap();
+
+            let response = hosted_ai_request(&state, &secrets, &registry, hosted_json_request())
+                .await
+                .expect("request must complete");
+            assert_eq!(response.status, 200);
+            // `{data, aiMeta}` 包装原样透传——签名结果与推理元数据都在 body 里。
+            assert_eq!(response.body["data"]["codename"], "homura");
+            assert_eq!(response.body["data"]["signature"], "sig.v1");
+            assert_eq!(response.body["aiMeta"]["aiModel"], "glm-5.3-flash");
+
+            // 服务端视角：aiMeta 请求头、会话 cookie、无 customProvider、
+            // allowNativeSignature 业务字段原样上行。
+            let headers = server
+                .last_generate_headers
+                .lock()
+                .unwrap()
+                .clone()
+                .unwrap()
+                .to_lowercase();
+            assert!(headers.contains("x-mahoshojo-ai-meta: 1"));
+            assert!(headers.contains("cookie: better-auth.session_token=native.tok"));
+            let sent = server.last_generate_body.lock().unwrap().clone().unwrap();
+            assert!(!sent.as_object().unwrap().contains_key("customProvider"));
+            assert_eq!(sent["allowNativeSignature"], true);
+        });
+    }
+
+    #[test]
+    fn hosted_json_rejects_unknown_route_and_duplicate_inflight() {
+        rt().block_on(async {
+            let server = spawn_mock_server();
+            let state = CloudState::with_origin(&server.origin);
+            let secrets = MemorySecrets::new();
+            let registry = crate::ai::RequestRegistry::default();
+
+            // 流式路由不属于非流式白名单——两侧枚举独立钉死。
+            let mut bad_route = hosted_json_request();
+            bad_route.route_id = HOSTED_ROUTE_DETAILS_STREAM.to_string();
+            let error = hosted_ai_request(&state, &secrets, &registry, bad_route)
+                .await
+                .unwrap_err();
+            assert_eq!(error.code, CloudErrorCode::InvalidRequest);
+            assert!(server.last_generate_body.lock().unwrap().is_none());
+
+            registry.register("req-json-1").unwrap();
+            let error = hosted_ai_request(&state, &secrets, &registry, hosted_json_request())
+                .await
+                .unwrap_err();
+            assert_eq!(error.code, CloudErrorCode::InvalidRequest);
+            registry.finish("req-json-1");
+        });
+    }
+
+    /// DESK-094 对非流式通路同样强制：契约不兼容在 dispatch 前 fail-closed。
+    #[test]
+    fn hosted_json_requires_compatible_contract_before_dispatch() {
+        rt().block_on(async {
+            let server = spawn_mock_server();
+            let state = CloudState::with_origin(&server.origin);
+            let secrets = MemorySecrets::new();
+            let registry = crate::ai::RequestRegistry::default();
+
+            *server.readiness_override.lock().unwrap() = Some((
+                200,
+                serde_json::json!({"ok": true, "contractVersion": "g99e9-v9"}).to_string(),
+            ));
+            let error = hosted_ai_request(&state, &secrets, &registry, hosted_json_request())
+                .await
+                .unwrap_err();
+            assert_eq!(error.code, CloudErrorCode::ProtocolMismatch);
+            assert!(
+                server.last_generate_body.lock().unwrap().is_none(),
+                "incompatible contract must stop before dispatch"
+            );
+        });
+    }
+
+    /// 非 2xx 不做业务解读：JSON 错误体原样透传，非 JSON 错误页（网关 HTML）
+    /// 投影为 null 正文——HTTP status 本身就是诊断信号。
+    #[test]
+    fn hosted_json_error_status_passthrough() {
+        rt().block_on(async {
+            let server = spawn_mock_server();
+            let state = CloudState::with_origin(&server.origin);
+            let secrets = MemorySecrets::new();
+            let registry = crate::ai::RequestRegistry::default();
+
+            *server.hosted_json_response.lock().unwrap() = Some((
+                429,
+                serde_json::json!({"error": "rate limited", "retryAfterSeconds": 60}).to_string(),
+            ));
+            let response = hosted_ai_request(&state, &secrets, &registry, hosted_json_request())
+                .await
+                .expect("non-2xx is a business projection, not a transport failure");
+            assert_eq!(response.status, 429);
+            assert_eq!(response.body["retryAfterSeconds"], 60);
+
+            *server.hosted_json_response.lock().unwrap() =
+                Some((524, "<html><body>Origin Time-out</body></html>".to_string()));
+            let response = hosted_ai_request(&state, &secrets, &registry, hosted_json_request())
+                .await
+                .unwrap();
+            assert_eq!(response.status, 524);
+            assert!(response.body.is_null());
+        });
+    }
+
+    /// 2xx 必须是 JSON——成功状态却读不出正文是协议异常，不能投影为成功。
+    #[test]
+    fn hosted_json_success_requires_json_body() {
+        rt().block_on(async {
+            let server = spawn_mock_server();
+            let state = CloudState::with_origin(&server.origin);
+            let secrets = MemorySecrets::new();
+            let registry = crate::ai::RequestRegistry::default();
+
+            *server.hosted_json_response.lock().unwrap() = Some((200, "not-json".to_string()));
+            let error = hosted_ai_request(&state, &secrets, &registry, hosted_json_request())
+                .await
+                .unwrap_err();
+            assert_eq!(error.code, CloudErrorCode::InvalidResponse);
         });
     }
 

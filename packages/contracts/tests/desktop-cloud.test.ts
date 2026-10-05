@@ -28,8 +28,11 @@ import {
   DesktopCloudSessionStatusSchema,
   DesktopCloudSignOutResultSchema,
   DesktopHostedGenerateRequestSchema,
+  DesktopHostedJsonRequestSchema,
+  DesktopHostedJsonResponseSchema,
   HostedGenerationEventNameSchema,
   HostedGenerationRouteIdSchema,
+  HostedJsonGenerationRouteIdSchema,
   MAX_DESKTOP_AUTH_CODE_VERIFIER_LENGTH,
   MAX_DESKTOP_AUTH_STATE_LENGTH,
   MIN_DESKTOP_AUTH_CODE_VERIFIER_LENGTH,
@@ -48,6 +51,7 @@ type DesktopCloudFixture = {
   ipcErrorCodes: string[];
   hostedGenerationEventNames: string[];
   hostedGenerationRouteIds: string[];
+  hostedJsonRouteIds: string[];
   validRedirectUris: string[];
   invalidRedirectUris: string[];
   validAuthorizeQuery: Record<string, unknown>;
@@ -84,6 +88,7 @@ describe('desktop-cloud 协议常量与 fixture 同步', () => {
     expect(DesktopCloudErrorCodeSchema.options).toEqual(fixture.ipcErrorCodes);
     expect(HostedGenerationEventNameSchema.options).toEqual(fixture.hostedGenerationEventNames);
     expect(HostedGenerationRouteIdSchema.options).toEqual(fixture.hostedGenerationRouteIds);
+    expect(HostedJsonGenerationRouteIdSchema.options).toEqual(fixture.hostedJsonRouteIds);
   });
 });
 
@@ -273,6 +278,50 @@ describe('renderer IPC 投影', () => {
       requestId: 'req-3',
       routeId: 'some-other-route',
       body: {},
+    }).success).toBe(false);
+  });
+
+  it('hosted 非流式请求：独立路由白名单，凭据字段同样 fail-closed', () => {
+    expect(DesktopHostedJsonRequestSchema.safeParse({
+      requestId: 'req-1',
+      routeId: 'generate-magical-girl-details',
+      body: { answers: [], allowNativeSignature: true },
+    }).success).toBe(true);
+
+    // 流式路由不属于非流式白名单（两侧枚举分开钉死）。
+    expect(DesktopHostedJsonRequestSchema.safeParse({
+      requestId: 'req-2',
+      routeId: 'generate-magical-girl-details-stream',
+      body: {},
+    }).success).toBe(false);
+    expect(DesktopHostedJsonRequestSchema.safeParse({
+      requestId: 'req-3',
+      routeId: 'some-other-route',
+      body: {},
+    }).success).toBe(false);
+    expect(DesktopHostedJsonRequestSchema.safeParse({
+      requestId: 'req-4',
+      routeId: 'generate-magical-girl-details',
+      body: {},
+      secretRef: 'provider-key:abc',
+    }).success).toBe(false);
+  });
+
+  it('hosted 非流式响应：HTTP 状态 + JSON 正文透传，错误页可投影为 null 正文', () => {
+    expect(DesktopHostedJsonResponseSchema.safeParse({
+      status: 200,
+      body: { data: { codename: 'homura' }, aiMeta: { aiModel: 'glm' } },
+    }).success).toBe(true);
+    expect(DesktopHostedJsonResponseSchema.safeParse({
+      status: 524,
+      body: null,
+    }).success).toBe(true);
+    expect(DesktopHostedJsonResponseSchema.safeParse({
+      status: 99,
+      body: {},
+    }).success).toBe(false);
+    expect(DesktopHostedJsonResponseSchema.safeParse({
+      status: 200,
     }).success).toBe(false);
   });
 

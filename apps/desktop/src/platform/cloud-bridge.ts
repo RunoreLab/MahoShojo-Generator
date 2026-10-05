@@ -7,6 +7,8 @@ import {
   DesktopCloudSessionStatusSchema,
   DesktopCloudSignOutResultSchema,
   DesktopHostedGenerateRequestSchema,
+  DesktopHostedJsonRequestSchema,
+  DesktopHostedJsonResponseSchema,
   HostedGenerationEventSchema,
 } from '@mahoshojo/contracts/desktop-cloud';
 import type {
@@ -17,6 +19,8 @@ import type {
   DesktopCloudSessionStatus,
   DesktopCloudSignOutResult,
   DesktopHostedGenerateRequest,
+  DesktopHostedJsonRequest,
+  DesktopHostedJsonResponse,
   HostedGenerationEvent,
 } from '@mahoshojo/contracts/desktop-cloud';
 
@@ -37,6 +41,7 @@ export const CLOUD_AUTH_STATUS_COMMAND = 'cloud_auth_status' as const;
 export const CLOUD_SIGN_OUT_COMMAND = 'cloud_sign_out' as const;
 export const CLOUD_ONLINE_STATUS_COMMAND = 'cloud_online_status' as const;
 export const STREAM_HOSTED_AI_COMMAND = 'stream_hosted_ai' as const;
+export const HOSTED_AI_REQUEST_COMMAND = 'hosted_ai_request' as const;
 export const CANCEL_HOSTED_AI_COMMAND = 'cancel_hosted_ai' as const;
 
 export interface InvokeFn {
@@ -230,6 +235,27 @@ export const streamHostedAi = (
     .catch((cause: unknown) => {
       throw toCloudError(STREAM_HOSTED_AI_COMMAND, cause);
     });
+};
+
+/**
+ * 发起一次 hosted 非流式 JSON 生成（D5.1a，`/details` 双执行的服务器非流式
+ * 通路）。与 `streamHostedAi` 同一套窄边界：renderer 只给路由标识 + 非秘密
+ * 业务载荷；native 返回「HTTP 状态 + JSON 正文」透传——`{data, aiMeta}`
+ * 解包、`{error, retryAfterSeconds}` 诊断与签名识别在调用方完成。
+ * 取消走 `cancelHostedAi`（同一 RequestRegistry）。
+ */
+export const hostedAiRequest = async (
+  invoke: InvokeFn,
+  request: DesktopHostedJsonRequest,
+): Promise<DesktopHostedJsonResponse> => {
+  const parsedRequest = DesktopHostedJsonRequestSchema.parse(request);
+  let raw: unknown;
+  try {
+    raw = await invoke(HOSTED_AI_REQUEST_COMMAND, { request: parsedRequest });
+  } catch (cause) {
+    throw toCloudError(HOSTED_AI_REQUEST_COMMAND, cause);
+  }
+  return parseResult(HOSTED_AI_REQUEST_COMMAND, DesktopHostedJsonResponseSchema, raw);
 };
 
 /** 取消一次在途 hosted 生成；返回是否确有请求被取消。 */

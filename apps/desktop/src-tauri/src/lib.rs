@@ -1021,6 +1021,20 @@ async fn stream_hosted_ai(
     .await
 }
 
+/// hosted 非流式 JSON 生成：与 `stream_hosted_ai` 同一套窄边界的请求/响应形态
+/// （D5.1a，`/details` 双执行的服务器非流式通路）。native 返回「HTTP 状态 +
+/// JSON 正文」透传；`{data, aiMeta}` 解包与错误诊断在 renderer 适配层完成。
+/// 取消复用 `cancel_hosted_ai`（同一 RequestRegistry）。
+#[tauri::command]
+async fn hosted_ai_request(
+    cloud: State<'_, cloud::CloudState>,
+    secrets: State<'_, SharedSecretStore>,
+    registry: State<'_, ai::RequestRegistry>,
+    request: cloud::CloudHostedGenerateRequest,
+) -> Result<cloud::CloudHostedJsonResponse, cloud::CloudError> {
+    cloud::hosted_ai_request(&cloud, secrets.inner().as_ref(), &registry, request).await
+}
+
 /// 取消一次在途 hosted 生成。
 #[tauri::command]
 fn cancel_hosted_ai(registry: State<'_, ai::RequestRegistry>, request_id: String) -> bool {
@@ -1187,6 +1201,7 @@ pub fn run() {
             cloud_sign_out,
             cloud_online_status,
             stream_hosted_ai,
+            hosted_ai_request,
             cloud_card_library_request,
             cancel_hosted_ai
         ])

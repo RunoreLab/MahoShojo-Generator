@@ -293,6 +293,41 @@ export const DesktopHostedGenerateRequestSchema = z.object({
 }).strict();
 export type DesktopHostedGenerateRequest = z.infer<typeof DesktopHostedGenerateRequestSchema>;
 
+/* ── hosted 非流式 JSON 生成（D5.1a，`/details` 双执行的服务器端非流式通路） ── */
+
+/**
+ * hosted 非流式 JSON 生成允许的路由标识白名单。与流式路由分开枚举：
+ * 两条命令各自的合法 routeId 集合不同，单侧扩张不会顺带放宽另一侧。
+ */
+export const HostedJsonGenerationRouteIdSchema = z.enum([
+  'generate-magical-girl-details',
+]);
+export type HostedJsonGenerationRouteId = z.infer<typeof HostedJsonGenerationRouteIdSchema>;
+
+/**
+ * hosted 非流式生成 IPC 输入。与 `DesktopHostedGenerateRequestSchema` 同形、
+ * 同一套凭据边界：`body` 不得携带 `customProvider`（native 是唯一注入方），
+ * `byok`/`secretRef`/`providerId`/`modelId` 等字段由 strict 校验拒绝。
+ */
+export const DesktopHostedJsonRequestSchema = z.object({
+  requestId: z.string().min(1).max(128),
+  routeId: HostedJsonGenerationRouteIdSchema,
+  body: SafeJsonValueSchema,
+}).strict();
+export type DesktopHostedJsonRequest = z.infer<typeof DesktopHostedJsonRequestSchema>;
+
+/**
+ * hosted 非流式生成 IPC 输出：「HTTP 状态 + JSON 正文」透传。
+ * native 只做传输——`{data, aiMeta}` 解包与 `{error, retryAfterSeconds}`
+ * 诊断映射在 renderer 适配层完成；非 JSON 错误页（如网关 524 HTML）投影为
+ * `body: null`，HTTP status 本身就是诊断信号。
+ */
+export const DesktopHostedJsonResponseSchema = z.object({
+  status: z.number().int().min(100).max(599),
+  body: SafeJsonValueSchema,
+}).strict();
+export type DesktopHostedJsonResponse = z.infer<typeof DesktopHostedJsonResponseSchema>;
+
 /* ── 数据卡库云端通路（D5.0e，`DESK-ONLINE-010`） ────────────────────────
  *
  * 与 hosted 生成同一套边界：renderer 只能给「路由标识 + 业务参数」，method、

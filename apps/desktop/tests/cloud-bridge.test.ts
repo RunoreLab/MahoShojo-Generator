@@ -7,12 +7,14 @@ import {
   CLOUD_LOGIN_CANCEL_COMMAND,
   CLOUD_ONLINE_STATUS_COMMAND,
   CLOUD_SIGN_OUT_COMMAND,
+  HOSTED_AI_REQUEST_COMMAND,
   STREAM_HOSTED_AI_COMMAND,
   DesktopCloudError,
   awaitCloudLogin,
   beginCloudLogin,
   cancelCloudLogin,
   cancelHostedAi,
+  hostedAiRequest,
   probeCloudOnlineStatus,
   readCloudAuthStatus,
   signOutCloud,
@@ -202,6 +204,76 @@ describe('cloud bridge', () => {
       ),
     ).toThrow();
     expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it('hosted json：请求过契约后透传，「HTTP 状态 + JSON 正文」原样返回', async () => {
+    const invoke = vi.fn(async () => ({
+      status: 200,
+      body: { data: { codename: 'homura' }, aiMeta: { aiModel: 'glm' } },
+    }));
+    const result = await hostedAiRequest(invoke, {
+      requestId: 'req-1',
+      routeId: 'generate-magical-girl-details',
+      body: { answers: [], allowNativeSignature: true },
+    });
+    expect(invoke).toHaveBeenCalledWith(HOSTED_AI_REQUEST_COMMAND, {
+      request: {
+        requestId: 'req-1',
+        routeId: 'generate-magical-girl-details',
+        body: { answers: [], allowNativeSignature: true },
+      },
+    });
+    expect(result.status).toBe(200);
+    expect(result.body).toMatchObject({ data: { codename: 'homura' } });
+
+    // 非 2xx 是业务投影而非传输失败：状态与正文原样回到调用方。
+    const rejected = vi.fn(async () => ({ status: 429, body: { error: 'rate limited' } }));
+    await expect(hostedAiRequest(rejected, {
+      requestId: 'req-2',
+      routeId: 'generate-magical-girl-details',
+      body: {},
+    })).resolves.toMatchObject({ status: 429 });
+    // 网关错误页 → body: null，status 仍携带诊断信息。
+    const timeout = vi.fn(async () => ({ status: 524, body: null }));
+    await expect(hostedAiRequest(timeout, {
+      requestId: 'req-3',
+      routeId: 'generate-magical-girl-details',
+      body: {},
+    })).resolves.toEqual({ status: 524, body: null });
+  });
+
+  it('hosted json：路由白名单与凭据字段在 invoke 前被契约拦下', async () => {
+    const invoke = vi.fn(async () => ({ status: 200, body: {} }));
+    // 流式路由不属于非流式白名单。
+    await expect(hostedAiRequest(invoke, {
+      requestId: 'r',
+      routeId: 'generate-magical-girl-details-stream',
+      body: {},
+    } as never)).rejects.toThrow();
+    await expect(hostedAiRequest(invoke, {
+      requestId: 'r',
+      routeId: 'generate-magical-girl-details',
+      body: {},
+      secretRef: 'provider-key:abc',
+    } as never)).rejects.toThrow();
+    expect(invoke).not.toHaveBeenCalled();
+
+    // native 契约违例 → bridge-invalid。
+    const bad = vi.fn(async () => ({ status: 200 /* 缺 body */ }));
+    await expect(hostedAiRequest(bad, {
+      requestId: 'r',
+      routeId: 'generate-magical-girl-details',
+      body: {},
+    })).rejects.toMatchObject({ code: 'bridge-invalid' });
+    // native 错误原样投影。
+    const failed = vi.fn(async () => {
+      throw { code: 'protocol-mismatch', message: '服务端契约版本不兼容' };
+    });
+    await expect(hostedAiRequest(failed, {
+      requestId: 'r',
+      routeId: 'generate-magical-girl-details',
+      body: {},
+    })).rejects.toMatchObject({ code: 'protocol-mismatch' });
   });
 
   it('hosted cancel：只接受布尔回值并按 requestId 透传', async () => {
