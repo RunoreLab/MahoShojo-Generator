@@ -52,6 +52,10 @@ import {
   QuestionnaireQuestionPanel,
 } from '@/components/questionnaire/QuestionnaireQuestionPanel';
 import { QuestionnaireAnswerExportPanel } from '@/components/questionnaire/QuestionnaireAnswerExportPanel';
+import {
+  buildQuestionnaireAnswerExportText,
+  collectQuestionnaireAnswerExportItems,
+} from '@mahoshojo/domain/questionnaire-answer-export';
 import { CharacterPortraitAssetPanel } from '@/components/shared/CharacterPortraitAssetPanel';
 import { CollapsibleSection } from '@/components/shared/CollapsibleSection';
 import { TemplateSelector } from '@/components/creator/TemplateSelector';
@@ -1531,39 +1535,23 @@ export const CreatorPage: React.FC = () => {
   };
 
   const buildAnswerExportText = useCallback(() => {
-    const now = new Date();
-    const answered = mergedQuestions.flatMap((item, index) => {
-      const raw = answersByKey[item.key];
-      const trimmed = typeof raw === 'string' ? raw.trim() : '';
-      if (!trimmed) return [];
-      return [{
-        index,
-        questionnaireTitle: item.questionnaireTitle,
-        question: item.question.question,
-        answer: raw,
-      }];
-    });
-
     const selectedTitles = selectedQuestionnaires
       .map((selection) => selection.questionnaire.title?.trim())
       .filter((title): title is string => Boolean(title));
     const questionnaireLabel = selectedTitles.length > 0 ? selectedTitles.join(' + ') : '';
-
-    const lines: string[] = [];
-    lines.push('【创作问卷答案备份】');
-    lines.push(`导出时间：${now.toLocaleString()}`);
-    lines.push(`已填写：${answered.length} / ${mergedQuestions.length}`);
-    if (questionnaireLabel) lines.push(`问卷：${questionnaireLabel}`);
-    lines.push('');
-
-    answered.forEach((item) => {
-      const title = item.questionnaireTitle ? `（${item.questionnaireTitle}）` : '';
-      lines.push(`Q${item.index + 1}${title}: ${item.question}`);
-      lines.push(`A: ${item.answer}`);
-      lines.push('');
+    return buildQuestionnaireAnswerExportText({
+      title: '创作问卷答案备份',
+      items: collectQuestionnaireAnswerExportItems(
+        mergedQuestions.map((item) => ({
+          key: item.key,
+          question: item.question.question,
+          questionnaireTitle: item.questionnaireTitle,
+        })),
+        answersByKey,
+      ),
+      total: mergedQuestions.length,
+      questionnaireLabel,
     });
-
-    return lines.join('\n').trimEnd();
   }, [answersByKey, mergedQuestions, selectedQuestionnaires]);
 
   const handleSubmit = async (answersSnapshot?: Record<string, string>) => {

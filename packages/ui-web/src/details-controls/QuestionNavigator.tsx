@@ -5,7 +5,7 @@ export interface QuestionNavigatorItem {
   label: string;
 }
 
-export type QuestionNavigatorTheme = 'pink' | 'violet' | 'dark';
+export type QuestionNavigatorTheme = 'pink' | 'violet' | 'dark' | 'app';
 
 interface QuestionNavigatorProps {
   items: QuestionNavigatorItem[];
@@ -15,27 +15,51 @@ interface QuestionNavigatorProps {
   theme?: QuestionNavigatorTheme;
 }
 
-const themeStyles: Record<QuestionNavigatorTheme, { container: string; progress: string; current: string; answered: string; unanswered: string; }> = {
+const themeStyles: Record<QuestionNavigatorTheme, { container: string; progress: string; current: string; answered: string; unanswered: string; label: string; muted: string; selectLabel: string; track: string; }> = {
   pink: {
     container: 'border-pink-200 bg-pink-50/80',
     progress: 'bg-pink-400',
     current: 'bg-pink-500 text-white shadow-sm',
     answered: 'bg-white text-pink-600 border border-pink-200',
-    unanswered: 'bg-white/70 text-gray-500 border border-pink-100'
+    unanswered: 'bg-white/70 text-gray-500 border border-pink-100',
+    label: 'text-gray-700',
+    muted: 'text-gray-500',
+    selectLabel: 'text-gray-600',
+    track: 'bg-white/60'
   },
   violet: {
     container: 'border-purple-200 bg-purple-50/80',
     progress: 'bg-purple-500',
     current: 'bg-purple-600 text-white shadow-sm',
     answered: 'bg-white text-purple-600 border border-purple-200',
-    unanswered: 'bg-white/70 text-gray-500 border border-purple-100'
+    unanswered: 'bg-white/70 text-gray-500 border border-purple-100',
+    label: 'text-gray-700',
+    muted: 'text-gray-500',
+    selectLabel: 'text-gray-600',
+    track: 'bg-white/60'
   },
   dark: {
     container: 'border-slate-600 bg-slate-900/70',
     progress: 'bg-emerald-400',
     current: 'bg-emerald-500 text-white shadow-sm',
     answered: 'bg-slate-800 text-emerald-300 border border-slate-600',
-    unanswered: 'bg-slate-800/60 text-slate-400 border border-slate-700'
+    unanswered: 'bg-slate-800/60 text-slate-400 border border-slate-700',
+    label: 'text-slate-200',
+    muted: 'text-slate-300',
+    selectLabel: 'text-slate-300',
+    track: 'bg-slate-800'
+  },
+  // 「app」用共享产品 token，随 data-color-mode 自动适配亮/暗（Desktop 与壳化 Web 面板）。
+  app: {
+    container: 'border-(--app-border) bg-(--app-surface)',
+    progress: 'bg-(--app-accent)',
+    current: 'bg-(--app-accent) text-white shadow-sm',
+    answered: 'bg-(--app-surface) text-(--app-text) border border-(--app-border)',
+    unanswered: 'bg-(--app-surface)/70 text-(--app-text-muted) border border-(--app-border)',
+    label: 'text-(--app-text)',
+    muted: 'text-(--app-text-muted)',
+    selectLabel: 'text-(--app-text-muted)',
+    track: 'bg-(--app-surface-strong)'
   }
 };
 
@@ -53,10 +77,10 @@ const QuestionNavigator: React.FC<QuestionNavigatorProps> = ({
 }) => {
   const styles = themeStyles[theme];
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const labelClass = theme === 'dark' ? 'text-slate-200' : 'text-gray-700';
-  const mutedClass = theme === 'dark' ? 'text-slate-300' : 'text-gray-500';
-  const selectLabelClass = theme === 'dark' ? 'text-slate-300' : 'text-gray-600';
-  const trackBackgroundClass = theme === 'dark' ? 'bg-slate-800' : 'bg-white/60';
+  const labelClass = styles.label;
+  const mutedClass = styles.muted;
+  const selectLabelClass = styles.selectLabel;
+  const trackBackgroundClass = styles.track;
 
   const answeredCount = useMemo(() => {
     return items.reduce((count, _, index) => count + (isAnswered(index) ? 1 : 0), 0);

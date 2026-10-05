@@ -5,7 +5,7 @@ import { buildSafeFileName } from '../client/fileName';
 import { copyTextToClipboard } from '../client/clipboard';
 
 type CopyStatus = 'idle' | 'success' | 'error';
-type PanelVariant = 'light' | 'dark';
+type PanelVariant = 'light' | 'dark' | 'app';
 
 export type QuestionnaireAnswerExportPanelProps = {
   variant: PanelVariant;
@@ -67,30 +67,44 @@ export function QuestionnaireAnswerExportPanel({
 
   const cardClassName = variant === 'dark'
     ? 'my-4 rounded-lg border border-slate-700 bg-slate-900/60 p-3'
-    : 'my-4 rounded-lg border border-slate-200 bg-slate-50 p-3';
+    : variant === 'app'
+      ? 'my-4 rounded-lg border border-(--app-border) bg-(--app-surface) p-3'
+      : 'my-4 rounded-lg border border-slate-200 bg-slate-50 p-3';
 
   const titleClassName = variant === 'dark'
     ? 'text-sm font-semibold text-slate-100'
-    : 'text-sm font-semibold text-slate-700';
+    : variant === 'app'
+      ? 'text-sm font-semibold text-(--app-text)'
+      : 'text-sm font-semibold text-slate-700';
 
   const metaClassName = variant === 'dark'
     ? 'mt-1 text-xs text-slate-400'
-    : 'mt-1 text-xs text-slate-500';
+    : variant === 'app'
+      ? 'mt-1 text-xs text-(--app-text-muted)'
+      : 'mt-1 text-xs text-slate-500';
 
   const buttonBase = 'rounded-lg border px-3 py-1.5 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50';
   const downloadButtonClassName = variant === 'dark'
     ? `${buttonBase} border-emerald-500/40 bg-emerald-500/10 text-emerald-200 hover:border-emerald-300 hover:bg-emerald-500/20`
-    : `${buttonBase} border-indigo-200 bg-white text-indigo-700 hover:border-indigo-400`;
+    : variant === 'app'
+      ? `${buttonBase} border-(--app-border) bg-(--app-surface) text-(--app-text) hover:opacity-80`
+      : `${buttonBase} border-indigo-200 bg-white text-indigo-700 hover:border-indigo-400`;
   const copyButtonClassName = variant === 'dark'
     ? `${buttonBase} border-slate-600 bg-slate-950/40 text-slate-200 hover:border-slate-400 hover:text-white`
-    : `${buttonBase} border-slate-200 bg-white text-slate-700 hover:border-slate-400`;
+    : variant === 'app'
+      ? `${buttonBase} border-(--app-border) bg-(--app-surface) text-(--app-text) hover:opacity-80`
+      : `${buttonBase} border-slate-200 bg-white text-slate-700 hover:border-slate-400`;
   const toggleButtonClassName = variant === 'dark'
     ? `${buttonBase} border-slate-700 bg-transparent text-slate-300 hover:border-slate-500`
-    : `${buttonBase} border-slate-200 bg-transparent text-slate-600 hover:border-slate-400`;
+    : variant === 'app'
+      ? `${buttonBase} border-(--app-border) bg-transparent text-(--app-text-muted) hover:opacity-80`
+      : `${buttonBase} border-slate-200 bg-transparent text-slate-600 hover:border-slate-400`;
 
   const textareaClassName = variant === 'dark'
     ? 'mt-3 h-60 w-full rounded-lg border border-slate-700 bg-slate-950/40 p-3 text-xs text-slate-100'
-    : 'mt-3 h-60 w-full rounded-lg border border-slate-200 bg-white p-3 text-xs text-slate-900';
+    : variant === 'app'
+      ? 'mt-3 h-60 w-full rounded-lg border border-(--app-border) bg-(--app-surface) p-3 text-xs text-(--app-text)'
+      : 'mt-3 h-60 w-full rounded-lg border border-slate-200 bg-white p-3 text-xs text-slate-900';
 
   return (
     <div className={cardClassName}>

@@ -10,7 +10,11 @@ import { generateRandomMagicalGirl } from '@/lib/random-character-generator';
 import SaveToCloudButton from '@/components/SaveToCloudButton';
 import Footer from '@/components/Footer';
 import QuestionNavigator from '@/components/QuestionNavigator';
-import { SaveJsonButton } from '@mahoshojo/ui-web/details-controls';
+import { AnswerReviewList, BulkAnswerTools, SaveJsonButton } from '@mahoshojo/ui-web/details-controls';
+import {
+  buildQuestionnaireAnswerExportText,
+  collectQuestionnaireAnswerExportItems,
+} from '@mahoshojo/domain/questionnaire-answer-export';
 import { useAppRouterAdapter } from '@/lib/app-router-adapter';
 import BattleDataModal from '@/components/BattleDataModal';
 import DataCardDetailsModal from '@/components/DataCardDetailsModal';
@@ -49,12 +53,6 @@ import {
 import { persistArrestedBackup, type ArrestedBackupDraftItem, type ArrestedBackupTriggerSource } from '@/lib/arrested-backup';
 import AiProviderSelector, { type UserAIProviderConfig } from '@/components/AiProviderSelector';
 import AiReasoningPanel from '@/components/ai/AiReasoningPanel';
-import { parseBulkQuestionnaireAnswers } from '@/lib/questionnaire-bulk-parser';
-import {
-  applyQuestionnaireAnswerImportEntries,
-  extractQuestionnaireAnswersFromCharacterCard,
-  type QuestionnaireAnswerMergeMode,
-} from '@/lib/questionnaire-answer-import';
 import { ErrorMessage } from '@/components/ErrorMessage';
 import { EncyclopediaLinks } from '@/components/encyclopedia/EncyclopediaLinks';
 import { GenerationModeSwitcher, type GenerationMode } from '@/components/shared/GenerationModeSwitcher';
@@ -197,8 +195,6 @@ export const DetailsPage: React.FC = () => {
     systemDurationMs: 60000,
     customDurationMs: 3000,
   });
-  const [bulkAnswers, setBulkAnswers] = useState(''); // 用于"一键填充"的textarea
-  const [characterImportMergeMode, setCharacterImportMergeMode] = useState<QuestionnaireAnswerMergeMode>('fill-empty');
   const [showLanguageSection, setShowLanguageSection] = useState(false); // 控制生成语言区域的折叠状态
   const [showBulkFillSection, setShowBulkFillSection] = useState(false); // 控制一键填充区域的折叠状态
   const [isGenerating, setIsGenerating] = useState(false);
@@ -285,6 +281,19 @@ export const DetailsPage: React.FC = () => {
     flow: mergedQuestions,
     indexByKey: mergedQuestionIndexByKey,
   } = useMemo(() => getQuestionnaireFlow(answersByKey), [answersByKey, getQuestionnaireFlow]);
+
+  // 可见流序的目标集：无元数据批量条目按页面展示序号回落（与原 handleBulkFill 同口径）。
+  const mergedQuestionTargets = useMemo<QuestionnaireAnswerMatchTarget[]>(
+    () => mergedQuestions.map((item, index) => ({
+      key: item.key,
+      index,
+      question: item.question.question,
+      questionId: item.question.id,
+      questionnaireId: item.questionnaireId,
+      questionnaireTitle: item.questionnaireTitle,
+    })),
+    [mergedQuestions]
+  );
 
   const answerItems = useMemo<QuestionnaireAnswerItem[]>(() => {
     const items: QuestionnaireAnswerItem[] = [];
@@ -1119,142 +1128,32 @@ export const DetailsPage: React.FC = () => {
     }
   };
 
-  const handleBulkFill = () => {
-    if (allQuestionTargets.length === 0) {
-      setError('⚠️ 当前没有可填充的题目，请先选择问卷。');
-      return;
-    }
-    const parsed = parseBulkQuestionnaireAnswers(bulkAnswers, {
-      expectedCount: allQuestionTargets.length,
-      orderedQuestionIds: allQuestionTargets.map((item) => item.questionId ?? ''),
-      orderedQuestionKeys: allQuestionTargets.map((item) => item.key),
-    });
-
-    if (parsed.entries.length === 0) {
-      setError('⚠️ 未识别到可填充的答案。支持逐行答案、Q/A 格式、编号列表，以及 JSON（数组/含 userAnswers/问卷回答）。');
-      return;
-    }
-
-    const nextAnswers = { ...answersByKey };
-    let appliedCount = 0;
-    let ignoredCount = 0;
-    parsed.entries.forEach(entry => {
-      const hasMetadata = Boolean(
-        entry.key || entry.question || entry.questionId || entry.questionnaireId || entry.questionnaireTitle
-      );
-      const target = hasMetadata
-        ? resolveQuestionnaireAnswerTarget(questionAnswerLookup, entry, { allowIndexFallback: false })
-        : mergedQuestions[entry.index] ?? null;
-      if (!target) {
-        ignoredCount += 1;
-        return;
-      }
-      const trimmed = entry.value.trim();
-      if (!trimmed) {
-        ignoredCount += 1;
-        return;
-      }
-      nextAnswers[target.key] = entry.value;
-      appliedCount += 1;
-    });
-    setAnswersByKey(nextAnswers);
+  // 批量填充/角色卡导入成功后统一写回：同步当前题输入框并清错误态。
+  const handleApplyImportedAnswers = (next: Record<string, string>) => {
+    setAnswersByKey(next);
     const currentKey = mergedQuestions[currentQuestionIndex]?.key;
-    setCurrentAnswer(currentKey ? nextAnswers[currentKey] || '' : '');
+    setCurrentAnswer(currentKey ? next[currentKey] || '' : '');
     setError(null);
-    const formatLabel = parsed.format === 'qa'
-      ? 'Q/A'
-      : parsed.format === 'json'
-        ? 'JSON'
-        : parsed.format === 'paragraphs'
-          ? '段落'
-          : '逐行';
-    alert(`成功填充了 ${appliedCount} 个答案（识别格式：${formatLabel}${ignoredCount > 0 ? `，忽略了 ${ignoredCount} 条无效或超出范围的内容` : ''}）！`);
-    setBulkAnswers('');
-  };
-
-  const handleCharacterCardAnswerImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    event.target.value = '';
-    if (!file) return;
-    if (allQuestionTargets.length === 0) {
-      setError('⚠️ 当前没有可填充的题目，请先选择问卷。');
-      return;
-    }
-
-    try {
-      const text = await file.text();
-      const parsed = JSON.parse(text) as unknown;
-      const extracted = extractQuestionnaireAnswersFromCharacterCard(parsed);
-      if (!extracted.success) {
-        setError(`⚠️ ${extracted.error}`);
-        return;
-      }
-
-      const applied = applyQuestionnaireAnswerImportEntries({
-        currentAnswersByKey: answersByKey,
-        targets: allQuestionTargets,
-        lookup: questionAnswerLookup,
-        entries: extracted.entries,
-        mergeMode: characterImportMergeMode,
-      });
-
-      setAnswersByKey(applied.answersByKey);
-      const currentKey = mergedQuestions[currentQuestionIndex]?.key;
-      setCurrentAnswer(currentKey ? applied.answersByKey[currentKey] || '' : '');
-      setError(null);
-
-      const skippedExisting = extracted.entries.length - applied.appliedCount - applied.ignoredCount;
-      const modeLabel = characterImportMergeMode === 'overwrite' ? '覆盖匹配题' : '只填空题';
-      alert(
-        `已从${extracted.sourceLabel}导入问卷答案（${modeLabel}）：成功填充 ${applied.appliedCount} 条` +
-        `${applied.overwrittenCount > 0 ? `，覆盖 ${applied.overwrittenCount} 条` : ''}` +
-        `${skippedExisting > 0 ? `，保留已有 ${skippedExisting} 条` : ''}` +
-        `${applied.ignoredCount > 0 ? `，忽略 ${applied.ignoredCount} 条未匹配内容` : ''}。`
-      );
-    } catch (error) {
-      const message = error instanceof SyntaxError
-        ? '角色卡 JSON 无法解析：请检查文件内容是否为有效 JSON。'
-        : error instanceof Error
-          ? error.message
-          : '导入角色卡答案失败。';
-      setError(`⚠️ ${message}`);
-    }
   };
 
   const buildAnswerExportText = useCallback(() => {
-    const now = new Date();
-    const answered = mergedQuestions.flatMap((item, index) => {
-      const raw = answersByKey[item.key];
-      const trimmed = typeof raw === 'string' ? raw.trim() : '';
-      if (!trimmed) return [];
-      return [{
-        index,
-        questionnaireTitle: item.questionnaireTitle,
-        question: item.question.question,
-        answer: raw,
-      }];
-    });
-
     const selectedTitles = selectedQuestionnaires
       .map((selection) => selection.questionnaire.title?.trim())
       .filter((title): title is string => Boolean(title));
     const questionnaireLabel = selectedTitles.length > 0 ? selectedTitles.join(' + ') : '';
-
-    const lines: string[] = [];
-    lines.push('【魔法少女问卷答案备份】');
-    lines.push(`导出时间：${now.toLocaleString()}`);
-    lines.push(`已填写：${answered.length} / ${mergedQuestions.length}`);
-    if (questionnaireLabel) lines.push(`问卷：${questionnaireLabel}`);
-    lines.push('');
-
-    answered.forEach((item) => {
-      const title = item.questionnaireTitle ? `（${item.questionnaireTitle}）` : '';
-      lines.push(`Q${item.index + 1}${title}: ${item.question}`);
-      lines.push(`A: ${item.answer}`);
-      lines.push('');
+    return buildQuestionnaireAnswerExportText({
+      title: '魔法少女问卷答案备份',
+      items: collectQuestionnaireAnswerExportItems(
+        mergedQuestions.map((item) => ({
+          key: item.key,
+          question: item.question.question,
+          questionnaireTitle: item.questionnaireTitle,
+        })),
+        answersByKey,
+      ),
+      total: mergedQuestions.length,
+      questionnaireLabel,
     });
-
-    return lines.join('\n').trimEnd();
   }, [answersByKey, mergedQuestions, selectedQuestionnaires]);
 
   const handleSubmit = async (answersSnapshot?: Record<string, string>) => {
@@ -2035,93 +1934,33 @@ export const DetailsPage: React.FC = () => {
                   />
                 </div>
 
-                {/* 批量回答问卷 */}
-                <div className="my-4 bg-gray-100 rounded-lg p-3">
-                  <button
-                    onClick={() => setShowBulkFillSection(!showBulkFillSection)}
-                    className="flex items-center justify-between w-full text-left font-medium text-gray-700 hover:text-blue-600"
-                  >
-                    <span>一键填充答案</span>
-                    <span className="ml-2">{showBulkFillSection ? '▼' : '▶'}</span>
-                  </button>
-                  {showBulkFillSection && (
-                    <div className="mt-3">
-                      <textarea
-                        id="bulk-answers"
-                        value={bulkAnswers}
-                        onChange={(e) => setBulkAnswers(e.target.value)}
-                        placeholder="在此处粘贴所有答案：支持每行一个、Q/A 复制内容、编号列表、JSON。"
-                        className="input-field h-20"
-                        rows={4}
-                      />
-                      <div className="flex justify-between items-center mt-2">
-                        <button onClick={handleBulkFill} className="text-sm text-blue-600 hover:underline">填充</button>
-                        <button onClick={handleClearDraft} className="text-sm text-red-600 hover:underline">清空存档</button>
-                      </div>
-                      <div className="mt-4 rounded-lg border border-blue-100 bg-white p-3">
-                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                          <div>
-                            <p className="text-sm font-medium text-gray-700">从角色卡 JSON 导入答案</p>
-                            <p className="mt-1 text-xs text-gray-500">支持本仓库角色 JSON、万途互通 JSON 与万途往返 JSON。</p>
-                          </div>
-                          <select
-                            value={characterImportMergeMode}
-                            onChange={(event) => setCharacterImportMergeMode(event.target.value as QuestionnaireAnswerMergeMode)}
-                            className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-700"
-                          >
-                            <option value="fill-empty">只填空题</option>
-                            <option value="overwrite">覆盖匹配题</option>
-                          </select>
-                        </div>
-                        <label className="mt-3 inline-flex cursor-pointer items-center rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 hover:border-blue-300 hover:bg-blue-100">
-                          选择角色卡 JSON
-                          <input
-                            type="file"
-                            accept="application/json,.json"
-                            className="sr-only"
-                            onChange={handleCharacterCardAnswerImport}
-                          />
-                        </label>
-                      </div>
-                    </div>
-                  )}
-                </div>
+                {/* 批量回答问卷 + 角色卡导入（与 Desktop 同一共享区段） */}
+                <BulkAnswerTools
+                  variant="light"
+                  targets={allQuestionTargets}
+                  indexFallbackTargets={mergedQuestionTargets}
+                  answersByKey={answersByKey}
+                  onApplyAnswers={handleApplyImportedAnswers}
+                  onInfo={(message) => alert(message)}
+                  onError={(message) => setError(`⚠️ ${message}`)}
+                  onClearDraft={handleClearDraft}
+                  open={showBulkFillSection}
+                  onOpenChange={setShowBulkFillSection}
+                />
 
-                <div className="my-4 bg-blue-50 border border-blue-200 rounded-lg p-3">
-                  <button
-                    onClick={() => setShowAnswerReview(!showAnswerReview)}
-                    className="flex w-full items-center justify-between text-left text-sm font-semibold text-blue-700"
-                  >
-                    <span>答案概览</span>
-                    <span>{showAnswerReview ? '▲' : '▼'}</span>
-                  </button>
-                  {showAnswerReview && (
-                    <div className="mt-3 max-h-56 space-y-2 overflow-y-auto pr-1 text-sm">
-                      {mergedQuestions.map((item, index) => (
-                        <div key={`answer-review-${item.key}`} className="rounded-lg bg-white/90 p-3 shadow-sm">
-                          <div className="text-xs font-semibold text-pink-600">Q{index + 1}</div>
-                          <div className="mt-1 text-xs text-gray-500">
-                            {item.questionnaireTitle ? `(${item.questionnaireTitle}) ` : ''}{item.question.question}
-                          </div>
-                          <div className="mt-2 text-gray-800 whitespace-pre-wrap">
-                            {answersByKey[item.key] && answersByKey[item.key].trim().length > 0
-                              ? answersByKey[item.key]
-                              : <span className="text-gray-400">尚未填写</span>}
-                          </div>
-                          <div className="mt-2 text-right">
-                            <button
-                              type="button"
-                              onClick={() => handleNavigateToQuestion(index)}
-                              className="text-xs text-pink-500 hover:underline"
-                            >
-                              编辑此题
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                <AnswerReviewList
+                  variant="light"
+                  items={mergedQuestionTargets.map((item) => ({
+                    key: item.key,
+                    index: item.index,
+                    question: item.question,
+                    questionnaireTitle: item.questionnaireTitle,
+                    answer: answersByKey[item.key] ?? '',
+                  }))}
+                  onEdit={handleNavigateToQuestion}
+                  open={showAnswerReview}
+                  onOpenChange={setShowAnswerReview}
+                />
 
                 {/* 错误信息显示 */}
                 {error && (

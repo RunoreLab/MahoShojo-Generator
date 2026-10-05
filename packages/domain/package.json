@@ -75,6 +75,11 @@
       "import": "./src/questionnaire-answer-import.ts",
       "default": "./src/questionnaire-answer-import.ts"
     },
+    "./questionnaire-answer-export": {
+      "types": "./src/questionnaire-answer-export.ts",
+      "import": "./src/questionnaire-answer-export.ts",
+      "default": "./src/questionnaire-answer-export.ts"
+    },
     "./markdown-card": {
       "types": "./src/markdown-card.ts",
       "import": "./src/markdown-card.ts",

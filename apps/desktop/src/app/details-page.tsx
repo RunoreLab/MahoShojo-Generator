@@ -3,8 +3,12 @@ import { invoke } from '@tauri-apps/api/core';
 import { Link } from '@tanstack/react-router';
 import { getModelGenerationCapabilities } from '@mahoshojo/ai-core/generation-settings';
 import { getRandomFlowers } from '@mahoshojo/domain/flowers';
-import { getAnswerLimitInfo, isAnswerOverLimit } from '@mahoshojo/domain/questionnaire';
+import { getAnswerLimitInfo, isAnswerOverLimit, type QuestionnaireAnswerMatchTarget } from '@mahoshojo/domain/questionnaire';
 import { buildQuestionnaireFlow, resolveQuestionnaireReferences } from '@mahoshojo/domain/questionnaire-definition';
+import {
+  buildQuestionnaireAnswerExportText,
+  collectQuestionnaireAnswerExportItems,
+} from '@mahoshojo/domain/questionnaire-answer-export';
 import {
   buildQuestionnaireGenerationRequestFields,
   buildQuestionnaireSelectionLoreText,
@@ -12,8 +16,15 @@ import {
   type QuestionnaireSelection,
 } from '@mahoshojo/domain/questionnaire-selection';
 import { AiExecutionLocationField, AdvancedGenerationSettings } from '@mahoshojo/ui-web/ai-provider';
-import { AiReasoningPanel } from '@mahoshojo/ui-web/details-controls';
-import { GenerationModeSwitcher, type GenerationMode } from '@mahoshojo/ui-web/details-controls';
+import {
+  AiReasoningPanel,
+  AnswerReviewList,
+  BulkAnswerTools,
+  GenerationModeSwitcher,
+  QuestionNavigator,
+  QuestionnaireAnswerExportPanel,
+  type GenerationMode,
+} from '@mahoshojo/ui-web/details-controls';
 import { DETAILS_QUESTIONNAIRE_THEME, QuestionnaireQuestionPanel } from '@mahoshojo/ui-web/questionnaire';
 import { MagicalGirlResultBody, type MagicalGirlResultData } from '@mahoshojo/ui-web/character-result';
 import { GeneralCharacterCard, type GeneralCharacterCardData } from '@mahoshojo/ui-web/character-card';
@@ -63,6 +74,7 @@ function DetailsForm({ session }: { session: DetailsSession }) {
   const [questionIndex, setQuestionIndex] = useState(0);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [actionInfo, setActionInfo] = useState<string | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const [confirmRegenerate, setConfirmRegenerate] = useState(false);
   const regenerateDialog = useRef<HTMLDialogElement>(null);
@@ -117,6 +129,40 @@ function DetailsForm({ session }: { session: DetailsSession }) {
     () => buildQuestionnaireFlow(flowItems, answersByKey).flow,
     [flowItems, answersByKey],
   );
+  // 全题目目标（含条件隐藏题）：批量解析与卡导入的元数据解析以全集为准；
+  // 无元数据条目按可见流序回落——与 Web `/details` 同一口径。
+  const allQuestionTargets = useMemo<QuestionnaireAnswerMatchTarget[]>(
+    () => flowItems.map((item, index) => ({
+      key: item.key,
+      index,
+      question: item.question.question,
+      questionId: item.question.id,
+      questionnaireId: item.questionnaireId,
+      questionnaireTitle: item.questionnaireTitle,
+    })),
+    [flowItems],
+  );
+  const visibleQuestionTargets = useMemo<QuestionnaireAnswerMatchTarget[]>(
+    () => flow.map((item, index) => ({
+      key: item.key,
+      index,
+      question: item.question.question,
+      questionId: item.question.id,
+      questionnaireId: item.questionnaireId,
+      questionnaireTitle: item.questionnaireTitle,
+    })),
+    [flow],
+  );
+  const applyImportedAnswers = (next: Record<string, string>) => {
+    session.updateDraft({ ...state.draft, answers: next });
+    setActionError(null);
+  };
+  const buildAnswerExportText = () => buildQuestionnaireAnswerExportText({
+    title: '魔法少女问卷答案备份',
+    items: collectQuestionnaireAnswerExportItems(visibleQuestionTargets, answersByKey),
+    total: flow.length,
+    questionnaireLabel: questionnaire?.title ?? '',
+  });
   const currentIndex = Math.min(questionIndex, Math.max(0, flow.length - 1));
   const flowItem = flow[currentIndex];
   const question = flowItem?.question;
@@ -143,6 +189,7 @@ function DetailsForm({ session }: { session: DetailsSession }) {
     try {
       const answers = buildDetailsAnswers(flow, session.getSnapshot().draft.answers);
       setActionError(null);
+      setActionInfo(null);
       void session.generate(
         { invoke, profileId: selected?.id ?? '' },
         {
@@ -281,6 +328,13 @@ function DetailsForm({ session }: { session: DetailsSession }) {
             {['简体中文', '繁體中文', 'English', '日本語'].map((language) => <option key={language}>{language}</option>)}
           </select>
         </label>
+        {flow.length > 0 && <QuestionNavigator
+          theme="app"
+          items={flow.map((item) => ({ id: item.key, label: item.question.question }))}
+          currentIndex={currentIndex}
+          onNavigate={setQuestionIndex}
+          isAnswered={(index) => Boolean(answersByKey[flow[index]!.key]?.trim())}
+        />}
         {flowItem && question && questionnaire && <QuestionnaireQuestionPanel
           theme={DETAILS_QUESTIONNAIRE_THEME} progressLabel={`第 ${currentIndex + 1} / ${flow.length} 题`} progressPercent={(currentIndex + 1) / flow.length * 100}
           questionText={question.question} questionnaireTitle={questionnaire.title} noticeText="至少回答一题即可生成，其他题目可以跳过。" helperText={question.helperText}
@@ -299,6 +353,36 @@ function DetailsForm({ session }: { session: DetailsSession }) {
           disablePrev={currentIndex === 0} disableNext={currentIndex >= flow.length - 1} prevButtonClass={actionClass} nextButtonClass={actionClass}
         />}
       </fieldset>
+      {/* 批量填充/卡导入/答案概览/备份导出——与 Web `/details` 同一套共享区段。 */}
+      {!blockedDraft && <BulkAnswerTools
+        variant="app"
+        targets={allQuestionTargets}
+        indexFallbackTargets={visibleQuestionTargets}
+        answersByKey={answersByKey}
+        onApplyAnswers={applyImportedAnswers}
+        onInfo={setActionInfo}
+        onError={(message) => setActionError(`⚠️ ${message}`)}
+        disabled={busy}
+      />}
+      {!blockedDraft && <AnswerReviewList
+        variant="app"
+        items={visibleQuestionTargets.map((item) => ({
+          key: item.key,
+          index: item.index,
+          question: item.question,
+          questionnaireTitle: item.questionnaireTitle,
+          answer: answersByKey[item.key] ?? '',
+        }))}
+        onEdit={setQuestionIndex}
+      />}
+      <QuestionnaireAnswerExportPanel
+        variant="app"
+        title="生成前备份问卷答案"
+        filenameBase="魔法少女问卷_答案备份"
+        hasContent={visibleQuestionTargets.some((item) => Boolean(answersByKey[item.key]?.trim()))}
+        buildContent={buildAnswerExportText}
+        disabled={busy}
+      />
       <div className="flex flex-wrap gap-2">
         <button className={actionClass} disabled={!guard.ready || busy || questionnaireLoading || profilesLoading || !questionnaire || !executionMode || (target.location === 'server' ? !cloudSignedIn : !selected) || blockedDraft || !!questionnaireError || !!profilesError} onClick={() => generate()}>{state.phase === 'generating' ? '正在生成…' : state.phase === 'idle' ? '发送问卷并生成' : '重新生成'}</button>
         {state.phase === 'generating' && <button className={actionClass} onClick={() => session.cancel()}>取消生成</button>}
@@ -314,6 +398,7 @@ function DetailsForm({ session }: { session: DetailsSession }) {
         </div>
       </dialog>
       {actionError && <p role="alert">{actionError}</p>}
+      {actionInfo && <p role="status">{actionInfo}</p>}
       {state.message && <p role="status">{state.message}</p>}
       {state.reasoning && <AiReasoningPanel reasoning={state.reasoning} />}
       {state.card && <section aria-label="生成结果" className="flex flex-col gap-3">
