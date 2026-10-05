@@ -30,7 +30,9 @@
 // 一律不取消它。发起入口对 UI 只有 `requestAuth`（先验证身份再按需
 // `startLogin`），外部拿不到 `startLogin`，因此不存在「绕过身份确认直接
 // 建 flow」的路径；整条链经 `statusPromise`/`loginPromise` 收敛为
-// single-flight，两个 surface 并发请求只会产生一条 native flow。
+// single-flight：授权在途（含 `begin` 未返回的窗口）内 `requestAuth` 搭上
+// 同一条授权、`refresh` 只读授权前快照——两个 surface 并发请求只会产生一条
+// native flow，状态机也不会被迟到的 status read 覆盖。
 
 import type {
   DesktopCloudLoginOutcome,
@@ -84,9 +86,12 @@ export class DesktopCloudSessionStore {
   private readonly listeners = new Set<() => void>();
   private statusPromise: Promise<DesktopCloudSessionStatus> | null = null;
   /**
-   * 授权流程 single-flight。不能只查 `phase === 'authenticating'`：`begin`
-   * 返回前 phase 还不是 authenticating，两个调用会在那条窗口里各自创建
-   * listener/PKCE/flowId——native 并没有「全局只允许一条 flow」的限制。
+   * 授权流程 single-flight 兼状态机门禁。不能只查 `phase === 'authenticating'`：
+   * `begin` 返回前 phase 还不是 authenticating，两个调用会在那条窗口里各自
+   * 创建 listener/PKCE/flowId——native 并没有「全局只允许一条 flow」的限制。
+   * 同一窗口里 `refresh` 也不得新发 `cloud_auth_status`：迟到的 signed-out
+   * 会在 authenticating 建立后把它覆盖回去，让 renderer 在 native 仍在授权时
+   * 忘记自己正在登录（D5.0d-r2）。
    */
   private loginPromise: Promise<DesktopCloudLoginOutcome | null> | null = null;
   /** `authenticating` 期间记住进入前的会话，取消授权时原样恢复而不是猜。 */
@@ -108,10 +113,11 @@ export class DesktopCloudSessionStore {
 
   /**
    * 主动查询一次会话状态（含服务端确认）。在途查询复用同一个 promise；
-   * `authenticating` 期间不并发查询——返回进入授权前的已知快照。
+   * 授权在途期间（含 `begin` 未返回、phase 尚未进入 `authenticating` 的
+   * 窗口）不再发起新查询——返回进入授权前保存的快照。
    */
   refresh = async (): Promise<DesktopCloudSessionStatus> => {
-    if (this.state.phase.kind === 'authenticating') {
+    if (this.loginPromise) {
       return this.sessionBeforeLogin ?? { state: 'unreachable' };
     }
     if (this.statusPromise) return this.statusPromise;
@@ -144,11 +150,15 @@ export class DesktopCloudSessionStore {
    * - 已有 active 会话：什么都不做（顶栏此时已渲染头像菜单，不该走到这）；
    * - signed-out / expired：开始系统浏览器授权；
    * - unreachable：什么都不做——UI 投影成「服务不可用」，再次点击会重试；
-   * - `authenticating` 在途：搭上同一条 `loginPromise`，不新建第二条 flow。
+   * - 授权在途（含 `begin` 未返回窗口）：搭上同一条 `loginPromise`，不新建
+   *   第二条 flow。
    */
   requestAuth = async (): Promise<DesktopCloudLoginOutcome | null> => {
-    if (this.state.phase.kind === 'authenticating') return this.loginPromise ?? null;
+    if (this.loginPromise) return this.loginPromise;
     const session = await this.refresh();
+    // 等 refresh 期间授权可能已被另一入口发起（refresh 也可能只返回授权前
+    // 快照）——动手前再确认一次，才真正不存在第二条 flow。
+    if (this.loginPromise) return this.loginPromise;
     if (session.state === 'signed-out' || session.state === 'expired') {
       return this.startLogin();
     }

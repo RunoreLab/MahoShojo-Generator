@@ -19,6 +19,9 @@ const EXPIRES = '2026-10-12T00:00:00.000Z';
 interface NativeStub {
   invoke: InvokeFn;
   calls: Array<{ command: string; args?: Record<string, unknown> }>;
+  /** 让 `cloud_login_begin` 保持挂起——用于覆盖「begin 在途」窗口的竞态。 */
+  holdBegin: () => void;
+  releaseBegin: () => void;
   /** 让 `cloud_login_await` 保持挂起——用于断言 authenticating 期间的行为。 */
   holdAwait: () => void;
   releaseAwait: (outcome: unknown) => void;
@@ -28,10 +31,17 @@ interface NativeStub {
  * 按 command 分发的 invoke 桩。桥对返回值做契约校验，因此桩必须给出合法负载——
  * 这与 `cloud-bridge.test.ts` 的形状一致，只是按 command 查表。
  */
+const BEGIN_RESULT = {
+  flowId: 'flow-1',
+  authorizeUrl: 'https://example.test/auth/desktop?state=s',
+};
+
 const createNativeStub = (session: unknown = { state: 'signed-out' }): NativeStub => {
   const calls: NativeStub['calls'] = [];
   let awaitResolve: ((value: unknown) => void) | null = null;
   let awaitHeld = false;
+  let beginResolve: (() => void) | null = null;
+  let beginHeld = false;
 
   const invoke = (async (command: string, args?: Record<string, unknown>) => {
     calls.push({ command, args });
@@ -39,7 +49,12 @@ const createNativeStub = (session: unknown = { state: 'signed-out' }): NativeStu
       case CLOUD_AUTH_STATUS_COMMAND:
         return session;
       case CLOUD_LOGIN_BEGIN_COMMAND:
-        return { flowId: 'flow-1', authorizeUrl: 'https://example.test/auth/desktop?state=s' };
+        if (beginHeld) {
+          return new Promise((resolve) => {
+            beginResolve = () => resolve(BEGIN_RESULT);
+          });
+        }
+        return BEGIN_RESULT;
       case CLOUD_LOGIN_AWAIT_COMMAND:
         if (awaitHeld) {
           return new Promise((resolve) => {
@@ -57,6 +72,12 @@ const createNativeStub = (session: unknown = { state: 'signed-out' }): NativeStu
   return {
     invoke,
     calls,
+    holdBegin: () => {
+      beginHeld = true;
+    },
+    releaseBegin: () => {
+      beginResolve?.();
+    },
     holdAwait: () => {
       awaitHeld = true;
     },
@@ -247,6 +268,55 @@ describe('DesktopCloudSessionStore', () => {
     expect(
       native.calls.filter((call) => call.command === CLOUD_LOGIN_AWAIT_COMMAND),
     ).toHaveLength(1);
+  });
+
+  it('gates refresh and requestAuth while cloud_login_begin is still in flight', async () => {
+    // D5.0d-r2：`begin` 未返回时 phase 仍是 ready/signed-out——此时 AccountPanel
+    // mount 的 refresh() 若再发 `cloud_auth_status`，迟到的 signed-out 会在
+    // authenticating 投影建立后把它覆盖回去，renderer 在 native 仍在授权时
+    // 「忘记」自己正在登录。`loginPromise` 必须同时门禁 refresh 与 requestAuth。
+    const native = createNativeStub({ state: 'signed-out' });
+    const store = new DesktopCloudSessionStore({ invoke: native.invoke });
+    await store.refresh();
+    native.holdBegin();
+    native.holdAwait();
+
+    const first = store.requestAuth();
+    await vi.waitFor(() => {
+      expect(native.calls.map((call) => call.command)).toContain(CLOUD_LOGIN_BEGIN_COMMAND);
+    });
+    // requestAuth 的身份验证 + 初始 refresh 各产生一条 status read；从这里起
+    // 进入「begin 在途、phase 尚未 authenticating」的窗口。
+    const callsBeforeWindow = native.calls.length;
+
+    // 窗口内：第二个入口的 requestAuth 与面板 mount 的 refresh 都必须搭上同一条
+    // 授权流程，一条新 IPC 都不能产生。
+    const second = store.requestAuth();
+    await expect(store.refresh()).resolves.toEqual({ state: 'signed-out' });
+    expect(native.calls).toHaveLength(callsBeforeWindow);
+
+    native.releaseBegin();
+    await vi.waitFor(() => {
+      expect(store.getSnapshot().phase.kind).toBe('authenticating');
+    });
+
+    native.releaseAwait({ status: 'cancelled' });
+    const [firstOutcome, secondOutcome] = await Promise.all([first, second]);
+    expect(firstOutcome).toEqual({ status: 'cancelled' });
+    expect(secondOutcome).toEqual(firstOutcome);
+    // 窗口内没有产生新 IPC：整串交互只有 begin 前的两条 status read 与一条
+    // login flow；授权取消后落回进入授权前的会话，而不是被窗口内迟到的查询
+    // 覆盖成的状态。
+    expect(native.calls.map((call) => call.command)).toEqual([
+      CLOUD_AUTH_STATUS_COMMAND,
+      CLOUD_AUTH_STATUS_COMMAND,
+      CLOUD_LOGIN_BEGIN_COMMAND,
+      CLOUD_LOGIN_AWAIT_COMMAND,
+    ]);
+    expect(store.getSnapshot().phase).toEqual({
+      kind: 'ready',
+      session: { state: 'signed-out' },
+    });
   });
 
   it('clears a prior session error when a later refresh succeeds', async () => {
