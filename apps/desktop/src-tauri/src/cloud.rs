@@ -31,12 +31,13 @@ use crate::secret::{SecretStore, SecretStoreError};
 /// 项目服务的固定生产 origin。renderer 与本模块内任何命令都不能改写它。
 const CLOUD_ORIGIN_PRODUCTION: &str = "https://mahoshojo.colanns.me";
 
-/// 开发构建允许经编译期环境变量把 origin 指向 loopback 联调环境；
-/// release 构建永远使用生产 origin，环境变量不生效。
+/// 开发构建允许经编译期环境变量 `MAHOSHOJO_CLOUD_ORIGIN` 覆盖 origin（DESK-093）。
+/// `option_env!` 在构建时把值固化进二进制，运行中设置同名变量不生效；
+/// release 构建永远使用生产 origin。
 fn cloud_origin() -> String {
     #[cfg(debug_assertions)]
     {
-        if let Ok(origin) = std::env::var("MAHOSHOJO_CLOUD_ORIGIN") {
+        if let Some(origin) = option_env!("MAHOSHOJO_CLOUD_ORIGIN") {
             let trimmed = origin.trim();
             if is_allowed_dev_origin(trimmed) {
                 return trimmed.to_string();
@@ -78,10 +79,6 @@ const HOSTED_CONTRACT_VERSION: &str = "g25e1-v1";
 /// 账号会话凭据的 keyring 引用。与 `provider-key:*` 命名空间完全隔离（DESK-092）。
 const ACCOUNT_SESSION_REF: &str = "account-session:web-v1";
 
-/// BYOK 允许解析的 secretRef 命名空间前缀。`account-session:*` 或其他任意
-/// 命名空间的引用一律拒绝——BYOK 只解析用户 Provider Key。
-const BYOK_SECRET_REF_PREFIX: &str = "provider:";
-
 /// hosted 流允许转发的事件名（与 fixture `hostedGenerationEventNames` 同源）。
 const HOSTED_EVENT_NAMES: &[&str] = &[
     "markdown",
@@ -115,6 +112,9 @@ pub enum CloudErrorCode {
     ServerUnavailable,
     InvalidResponse,
     StorageUnavailable,
+    // `missing-secret` 仍在共享契约中：native Provider 绑定落地后，凭据解析
+    // 缺失的路径会重新产出它（当前系统通道不解析任何 Provider 凭据）。
+    #[allow(dead_code)]
     MissingSecret,
     InvalidRequest,
     InternalError,
@@ -742,13 +742,14 @@ pub async fn cloud_login_await(
 ) -> Result<CloudLoginOutcome, CloudError> {
     let flow = state.lookup_flow(flow_id)?;
 
+    // 只有取到 receiver 的消费者才有资格在 terminal path 移除 flow——重复 await
+    // 只返回 FlowInProgress，不得碰仍在进行的登录（否则后续 cancel 找不到 flow）。
     let receiver = {
-        let mut slot = flow.receiver.lock().map_err(|_| {
-            state.remove_flow(flow_id);
-            CloudError::new(CloudErrorCode::InternalError, "登录流程状态不可用")
-        })?;
+        let mut slot = flow
+            .receiver
+            .lock()
+            .map_err(|_| CloudError::new(CloudErrorCode::InternalError, "登录流程状态不可用"))?;
         slot.take().ok_or_else(|| {
-            state.remove_flow(flow_id);
             CloudError::new(CloudErrorCode::FlowInProgress, "该登录流程已在等待中")
         })?
     };
@@ -975,13 +976,24 @@ pub async fn cloud_online_status(
     })
 }
 
-/* ── hosted 生成适配（DESK-ONLINE-005 的 BYOK 专用通路） ─────────────────
+/* ── hosted 生成适配（当前只开放系统默认通道） ────────────────────────────
  *
- * renderer 只能声明 routeId / providerId / modelId / secretRef / body：
+ * renderer 只能声明 requestId / routeId / body：
  * - `body` 不得携带 `customProvider`——native 是唯一注入方；
- * - `secretRef` 只允许 `provider:*` 命名空间，解析失败即 `missing-secret`；
- * - 解析出的 Key 只进入 `customProvider.apiKey` 这一个位置，普通请求路径不携带。
+ * - 服务器 BYOK 在 native 持有并校验的 Provider 绑定落地前保持关闭（DESK-093）：
+ *   `byok`/`secretRef`/`providerId`/`modelId` 等字段由 `deny_unknown_fields`
+ *   在 IPC 反序列化时直接拒绝，renderer 没有自选服务端凭据的通道。
+ * - native 不依赖 renderer 侧的 schema 校验，输入在 Rust 侧独立 fail-closed。
  */
+
+/// hosted 生成请求 body 序列化后的字节上限（bounded input）。
+const HOSTED_BODY_MAX_BYTES: usize = 256 * 1024;
+/// hosted SSE 单帧上限：帧超过即视为上游协议异常。
+const HOSTED_SSE_MAX_FRAME_BYTES: usize = 512 * 1024;
+/// hosted SSE 待解析缓冲上限（未闭合残帧不得无限堆积）。
+const HOSTED_SSE_MAX_BUFFER_BYTES: usize = 1024 * 1024;
+/// 非 SSE 错误响应体的最大读取量。
+const HOSTED_ERROR_BODY_MAX_BYTES: usize = 64 * 1024;
 
 /// hosted SSE 事件：名称 + JSON 载荷，与 `HostedGenerationEventSchema` 同形。
 #[derive(Debug, Clone, Serialize)]
@@ -992,89 +1004,58 @@ pub struct HostedSseEvent {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct HostedByokRequest {
-    pub provider_id: String,
-    pub model_id: String,
-    pub secret_ref: String,
-    #[serde(default)]
-    pub max_output_tokens: Option<u32>,
-    #[serde(default)]
-    pub generation_overrides: Option<serde_json::Value>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CloudHostedGenerateRequest {
     pub request_id: String,
     pub route_id: String,
     pub body: serde_json::Value,
-    #[serde(default)]
-    pub byok: Option<HostedByokRequest>,
 }
 
 fn invalid_request(message: impl Into<String>) -> CloudError {
     CloudError::new(CloudErrorCode::InvalidRequest, message)
 }
 
-/// 组装最终请求体：业务 body + native 注入的 customProvider。
-/// renderer 提供的 body 里出现 `customProvider` 一律拒绝（防止绕过 secretRef 边界）。
+/// 组装最终请求体：校验业务 body 形态与大小。
+/// renderer 提供的 body 里出现 `customProvider` 一律拒绝（凭据注入只发生在
+/// native 侧，当前无开放通道，更不允许 renderer 预置）。
 fn build_hosted_request_body(
     request: &CloudHostedGenerateRequest,
-    secrets: &dyn SecretStore,
 ) -> Result<serde_json::Value, CloudError> {
-    let mut body = match &request.body {
-        serde_json::Value::Object(map) => map.clone(),
-        _ => return Err(invalid_request("生成请求 body 必须是 JSON 对象")),
+    let serde_json::Value::Object(body) = &request.body else {
+        return Err(invalid_request("生成请求 body 必须是 JSON 对象"));
     };
     if body.contains_key("customProvider") {
         return Err(invalid_request(
             "customProvider 只能由 native 注入，renderer 不得携带",
         ));
     }
-
-    if let Some(byok) = &request.byok {
-        if byok.provider_id == "system" {
-            return Err(invalid_request(
-                "system 不是合法的 BYOK 目标；系统默认通道应省略 byok",
-            ));
-        }
-        if !byok.secret_ref.starts_with(BYOK_SECRET_REF_PREFIX) {
-            return Err(invalid_request(
-                "secretRef 只允许 provider:* 命名空间的凭据引用",
-            ));
-        }
-        let api_key = secrets
-            .resolve(&byok.secret_ref)
-            .map_err(|error| CloudError::from_secret_store(&error))?
-            .ok_or_else(|| {
-                CloudError::new(
-                    CloudErrorCode::MissingSecret,
-                    "所选连接的凭据不存在，请先在设置中重新录入",
-                )
-            })?;
-        let mut custom_provider = serde_json::json!({
-            "providerId": byok.provider_id,
-            "modelId": byok.model_id,
-            "apiKey": api_key,
-        });
-        if let Some(max_output_tokens) = byok.max_output_tokens {
-            custom_provider["maxOutputTokens"] = serde_json::json!(max_output_tokens);
-        }
-        if let Some(overrides) = &byok.generation_overrides {
-            custom_provider["generationOverrides"] = overrides.clone();
-        }
-        body.insert("customProvider".to_string(), custom_provider);
+    let size = serde_json::to_vec(&request.body)
+        .map_err(|_| invalid_request("生成请求 body 无法序列化"))?
+        .len();
+    if size > HOSTED_BODY_MAX_BYTES {
+        return Err(invalid_request("生成请求 body 超出大小上限"));
     }
-
-    Ok(serde_json::Value::Object(body))
+    Ok(request.body.clone())
 }
 
-/// 增量 SSE 帧解析器：按 `\n\n` 切帧，每帧取 `event:`/`data:` 两行。
+/// 增量 SSE 帧解析器：按 `\n\n` 或 `\r\n\r\n` 切帧，每帧取 `event:`/`data:` 行。
 /// 只转发 `HOSTED_EVENT_NAMES` 中的事件名；未知事件按契约忽略，
 /// data 非 JSON 的帧跳过（不强行接受未来格式，也不中断整条流）。
+/// 缓冲与单帧均有上限：对端不发送帧边界的流不能无限占用内存。
 struct HostedSseParser {
     buffer: String,
+}
+
+/// 查找最早的帧边界（标准 SSE 允许 `\n\n` 与 `\r\n\r\n` 两种分隔）。
+/// 返回 `(帧尾偏移, 分隔符长度)`。
+fn find_sse_frame_boundary(buffer: &str) -> Option<(usize, usize)> {
+    let lf = buffer.find("\n\n").map(|index| (index, 2));
+    let crlf = buffer.find("\r\n\r\n").map(|index| (index, 4));
+    match (lf, crlf) {
+        (Some(a), Some(b)) => Some(if a.0 <= b.0 { a } else { b }),
+        (a, None) => a,
+        (None, b) => b,
+    }
 }
 
 impl HostedSseParser {
@@ -1084,11 +1065,17 @@ impl HostedSseParser {
         }
     }
 
-    fn push(&mut self, chunk: &str, sink: &mut Vec<HostedSseEvent>) {
+    fn push(&mut self, chunk: &str, sink: &mut Vec<HostedSseEvent>) -> Result<(), CloudError> {
         self.buffer.push_str(chunk);
-        while let Some(end) = self.buffer.find("\n\n") {
+        while let Some((end, delimiter)) = find_sse_frame_boundary(&self.buffer) {
+            if end > HOSTED_SSE_MAX_FRAME_BYTES {
+                return Err(CloudError::new(
+                    CloudErrorCode::InvalidResponse,
+                    "生成流单帧超出大小上限",
+                ));
+            }
             let frame = self.buffer[..end].to_string();
-            self.buffer.drain(..end + 2);
+            self.buffer.drain(..end + delimiter);
             let mut event_name = None;
             let mut data_lines: Vec<&str> = Vec::new();
             for line in frame.lines() {
@@ -1107,14 +1094,22 @@ impl HostedSseParser {
                 sink.push(HostedSseEvent { event: name, data });
             }
         }
+        if self.buffer.len() > HOSTED_SSE_MAX_BUFFER_BYTES {
+            return Err(CloudError::new(
+                CloudErrorCode::InvalidResponse,
+                "生成流缓冲超出大小上限",
+            ));
+        }
+        Ok(())
     }
 
-    /// 流尾可能有一帧没有结尾 `\n\n` 的残帧——按同样规则尝试消费。
-    fn finish(&mut self, sink: &mut Vec<HostedSseEvent>) {
+    /// 流尾可能有一帧没有结尾分隔符的残帧——按同样规则尝试消费。
+    fn finish(&mut self, sink: &mut Vec<HostedSseEvent>) -> Result<(), CloudError> {
         if !self.buffer.trim().is_empty() {
             self.buffer.push('\n');
-            self.push("\n", sink);
+            self.push("\n", sink)?;
         }
+        Ok(())
     }
 }
 
@@ -1129,6 +1124,27 @@ fn hosted_error_event(message: &str, code: &str) -> HostedSseEvent {
     }
 }
 
+/// 服务端 `done`/`error` 是流上唯一的两种终态。
+fn is_hosted_terminal_event(event: &HostedSseEvent) -> bool {
+    matches!(event.event.as_str(), "done" | "error")
+}
+
+/// 有界读取错误响应体：诊断信息不需要完整 body，超限部分直接截断。
+async fn read_bounded_text(response: reqwest::Response, max_bytes: usize) -> String {
+    use futures_util::StreamExt;
+    let mut stream = response.bytes_stream();
+    let mut buffer = Vec::new();
+    while buffer.len() < max_bytes {
+        let Some(chunk) = stream.next().await else {
+            break;
+        };
+        let Ok(chunk) = chunk else { break };
+        let remaining = max_bytes - buffer.len();
+        buffer.extend_from_slice(&chunk[..chunk.len().min(remaining)]);
+    }
+    String::from_utf8_lossy(&buffer).to_string()
+}
+
 /// hosted 事件汇。与 `ai::EventSink` 同模式：IPC Channel 只是实现之一，
 /// 测试用内存 sink 驱动整条流而不需要 Tauri 运行时。
 pub(crate) trait HostedEventSink: Sync {
@@ -1141,12 +1157,13 @@ impl HostedEventSink for tauri::ipc::Channel<HostedSseEvent> {
     }
 }
 
-/// `stream_hosted_ai`：固定路由的 hosted 生成流。
+/// `stream_hosted_ai`：固定路由的 hosted 生成流（当前只开放系统默认通道）。
 ///
 /// - 会话 cookie 只在已登录时附加（该路由对匿名也按公开规则放行）；
-/// - BYOK Key 由 `secretRef` 在本函数内解析，只存在于本地变量与出站 body 中；
 /// - 取消经 `ai::RequestRegistry`，drop 上游连接立即生效；
-/// - 单一终态：服务端 `done`/`error` 或传输失败合成的 `error`，之后不再发事件。
+/// - 单一终态：服务端 `done`/`error` 或传输失败合成的 `error`，之后不再发事件；
+///   首个终态到达后立即停止读取上游；EOF 前未见终态是上游协议异常，
+///   合成一个 `invalid-response` error 而不是静默按成功结束。
 pub async fn stream_hosted_ai(
     state: &CloudState,
     secrets: &dyn SecretStore,
@@ -1160,7 +1177,7 @@ pub async fn stream_hosted_ai(
     if request.request_id.is_empty() || request.request_id.len() > 128 {
         return Err(invalid_request("requestId 非法"));
     }
-    let body = build_hosted_request_body(&request, secrets)?;
+    let body = build_hosted_request_body(&request)?;
     let session = load_session(secrets)?;
 
     let token = registry
@@ -1222,7 +1239,8 @@ pub async fn stream_hosted_ai(
             .unwrap_or_default()
             .to_string();
         if !status.is_success() || !content_type.contains("text/event-stream") {
-            let text = response.text().await.unwrap_or_default();
+            // 错误 body 只用于诊断信息提取，读取必须有界——异常响应不得撑爆内存。
+            let text = read_bounded_text(response, HOSTED_ERROR_BODY_MAX_BYTES).await;
             let message = serde_json::from_str::<serde_json::Value>(&text)
                 .ok()
                 .and_then(|value| {
@@ -1241,6 +1259,8 @@ pub async fn stream_hosted_ai(
         let mut stream = response.bytes_stream();
         use futures_util::StreamExt;
 
+        // 终态机：Streaming → Done | Error。首个 done/error 到达即终态——
+        // 直接返回（不落入 EOF 残帧处理），后续帧不再转发，上游连接随 body drop 关闭。
         loop {
             let next = tokio::select! {
                 biased;
@@ -1270,10 +1290,17 @@ pub async fn stream_hosted_ai(
                 }
             };
             let mut events = Vec::new();
-            parser.push(&text, &mut events);
+            if let Err(error) = parser.push(&text, &mut events) {
+                emit(hosted_error_event(&error.message, "invalid-response"));
+                return Ok(());
+            }
             for event in events {
+                let terminal = is_hosted_terminal_event(&event);
                 if emit(event).is_none() {
                     // renderer 已断开：视同取消，中止上游。
+                    return Ok(());
+                }
+                if terminal {
                     return Ok(());
                 }
             }
@@ -1287,12 +1314,29 @@ pub async fn stream_hosted_ai(
             return Ok(());
         }
         let mut events = Vec::new();
-        parser.finish(&mut events);
-        for event in events {
-            let _ = emit(event);
+        if parser.finish(&mut events).is_err() {
+            emit(hosted_error_event(
+                "生成流残帧超出大小上限",
+                "invalid-response",
+            ));
+            return Ok(());
         }
-        // 服务端协议保证 done/error 关闭流；连接正常结束但未收到终态也如实结束
-        // （不合成假 done——丢失终态是可诊断的上游异常）。
+        // 终态检查只覆盖正常 EOF 路径（上面遇到终态已提前退出循环）。
+        let mut terminal_seen = false;
+        for event in events {
+            terminal_seen |= is_hosted_terminal_event(&event);
+            if emit(event).is_none() {
+                return Ok(());
+            }
+        }
+        if !terminal_seen {
+            // 服务端协议保证 done/error 关闭流；EOF 前没有终态是可诊断的上游异常，
+            // 合成 error 让 UI 能收敛——不合成假 done 冒充成功。
+            emit(hosted_error_event(
+                "生成流未送达终态事件",
+                "invalid-response",
+            ));
+        }
         Ok(())
     }
     .await;
@@ -1491,6 +1535,7 @@ mod tests {
         last_generate_body: Mutex<Option<serde_json::Value>>,
         last_generate_headers: Mutex<Option<String>>,
         get_session_ok: std::sync::atomic::AtomicBool,
+        hosted_sse_body: Mutex<Option<String>>,
         shutdown: CancellationToken,
     }
 
@@ -1504,6 +1549,7 @@ mod tests {
             last_generate_body: Mutex::new(None),
             last_generate_headers: Mutex::new(None),
             get_session_ok: std::sync::atomic::AtomicBool::new(true),
+            hosted_sse_body: Mutex::new(None),
             shutdown: CancellationToken::new(),
         });
         let handle = server.clone();
@@ -1644,19 +1690,27 @@ mod tests {
                 HOSTED_GENERATE_DETAILS_STREAM_PATH => {
                     *self.last_generate_headers.lock().unwrap() = Some(head.to_string());
                     *self.last_generate_body.lock().unwrap() = serde_json::from_slice(body).ok();
-                    let mut sse = String::new();
-                    for (name, data) in [
-                        (
-                            "reasoning",
-                            r#"{"source":"sdk","status":"thinking","chunk":"让我想想"}"#,
-                        ),
-                        ("reasoning_done", r#"{"source":"sdk","status":"done"}"#),
-                        ("markdown", r#"{"chunk":"一段正文"}"#),
-                        ("telemetry", r#"{"version":1,"aiModel":"glm-5.3-flash"}"#),
-                        ("done", r#"{"ok":true}"#),
-                    ] {
-                        sse.push_str(&format!("event: {name}\ndata: {data}\n\n"));
-                    }
+                    let sse = self
+                        .hosted_sse_body
+                        .lock()
+                        .unwrap()
+                        .clone()
+                        .unwrap_or_else(|| {
+                            let mut sse = String::new();
+                            for (name, data) in [
+                                (
+                                    "reasoning",
+                                    r#"{"source":"sdk","status":"thinking","chunk":"让我想想"}"#,
+                                ),
+                                ("reasoning_done", r#"{"source":"sdk","status":"done"}"#),
+                                ("markdown", r#"{"chunk":"一段正文"}"#),
+                                ("telemetry", r#"{"version":1,"aiModel":"glm-5.3-flash"}"#),
+                                ("done", r#"{"ok":true}"#),
+                            ] {
+                                sse.push_str(&format!("event: {name}\ndata: {data}\n\n"));
+                            }
+                            sse
+                        });
                     MockResponse {
                         status: 200,
                         headers: vec![
@@ -1896,6 +1950,41 @@ mod tests {
             assert!(event_names.contains(name), "fixture 缺少事件名 {name}");
         }
         assert_eq!(event_names.len(), HOSTED_EVENT_NAMES.len());
+
+        // Rust `CloudErrorCode` 全量序列化值与共享 contract 错误码枚举逐一相等——
+        // 防止两侧各自手抄一份列表发生漂移。
+        let rust_codes: Vec<String> = [
+            CloudErrorCode::NotAuthenticated,
+            CloudErrorCode::FlowNotFound,
+            CloudErrorCode::FlowInProgress,
+            CloudErrorCode::Cancelled,
+            CloudErrorCode::Timeout,
+            CloudErrorCode::StateMismatch,
+            CloudErrorCode::ProtocolMismatch,
+            CloudErrorCode::NetworkError,
+            CloudErrorCode::ServerUnavailable,
+            CloudErrorCode::InvalidResponse,
+            CloudErrorCode::StorageUnavailable,
+            CloudErrorCode::MissingSecret,
+            CloudErrorCode::InvalidRequest,
+            CloudErrorCode::InternalError,
+        ]
+        .iter()
+        .map(|code| {
+            serde_json::to_value(code)
+                .unwrap()
+                .as_str()
+                .unwrap()
+                .to_string()
+        })
+        .collect();
+        let fixture_codes: Vec<String> = fixture["ipcErrorCodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|value| value.as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(rust_codes, fixture_codes);
     }
 
     /* ── hosted 生成适配 ─────────────────────────────────────────────── */
@@ -1919,99 +2008,105 @@ mod tests {
         }
     }
 
-    fn hosted_request(byok: Option<HostedByokRequest>) -> CloudHostedGenerateRequest {
+    fn hosted_request() -> CloudHostedGenerateRequest {
         CloudHostedGenerateRequest {
             request_id: "req-1".to_string(),
             route_id: HOSTED_ROUTE_DETAILS_STREAM.to_string(),
             body: serde_json::json!({"answers": [{"questionId": "q1", "answer": "a"}]}),
-            byok,
         }
+    }
+
+    /// 完整登录链路里重复 await 的竞态：第二次 await 只应得到 FlowInProgress，
+    /// 不得把仍在进行的 flow 从注册表删掉（后续 cancel 必须仍然找得到它）。
+    #[test]
+    fn duplicate_await_keeps_flow_cancellable() {
+        rt().block_on(async {
+            let server = spawn_mock_server();
+            let state = CloudState::with_origin(&server.origin);
+            let secrets = MemorySecrets::new();
+            let begin = cloud_login_begin(&state).await.unwrap();
+
+            let (first_outcome, second_result, _) = tokio::join!(
+                cloud_login_await(&state, &begin.flow_id, &secrets),
+                async {
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    cloud_login_await(&state, &begin.flow_id, &secrets).await
+                },
+                async {
+                    tokio::time::sleep(Duration::from_millis(80)).await;
+                    assert!(
+                        cloud_login_cancel(&state, &begin.flow_id),
+                        "重复 await 不得移除仍可取消的 flow"
+                    );
+                }
+            );
+            assert_eq!(
+                second_result.unwrap_err().code,
+                CloudErrorCode::FlowInProgress
+            );
+            match first_outcome.unwrap() {
+                CloudLoginOutcome::Cancelled => {}
+                other => panic!("expected cancelled outcome, got {other:?}"),
+            }
+        });
     }
 
     #[test]
     fn hosted_body_injection_guards() {
-        let secrets = MemorySecrets::new();
-        secrets
-            .set("provider:conn_1:api-key", "sk-live-key")
-            .unwrap();
-
         // renderer 预置 customProvider → 拒绝（native 是唯一注入方）。
-        let mut smuggled = hosted_request(None);
+        let mut smuggled = hosted_request();
         smuggled.body = serde_json::json!({
             "answers": [],
             "customProvider": {"providerId": "deepseek", "apiKey": "stolen"}
         });
-        let error = build_hosted_request_body(&smuggled, &secrets).unwrap_err();
+        let error = build_hosted_request_body(&smuggled).unwrap_err();
         assert_eq!(error.code, CloudErrorCode::InvalidRequest);
 
-        // system 不是 BYOK 目标。
-        let system = hosted_request(Some(HostedByokRequest {
-            provider_id: "system".to_string(),
-            model_id: "default".to_string(),
-            secret_ref: "provider:conn_1:api-key".to_string(),
-            max_output_tokens: None,
-            generation_overrides: None,
-        }));
+        // body 必须是 JSON 对象。
+        let mut non_object = hosted_request();
+        non_object.body = serde_json::json!("not-an-object");
         assert_eq!(
-            build_hosted_request_body(&system, &secrets)
-                .unwrap_err()
-                .code,
+            build_hosted_request_body(&non_object).unwrap_err().code,
             CloudErrorCode::InvalidRequest
         );
 
-        // account-session 命名空间不可被 BYOK 解析。
-        let account_ref = hosted_request(Some(HostedByokRequest {
-            provider_id: "deepseek".to_string(),
-            model_id: "deepseek-v4-flash".to_string(),
-            secret_ref: ACCOUNT_SESSION_REF.to_string(),
-            max_output_tokens: None,
-            generation_overrides: None,
-        }));
+        // body 序列化超限 → 拒绝（bounded input，不依赖 renderer schema）。
+        let mut oversized = hosted_request();
+        oversized.body = serde_json::json!({"pad": "x".repeat(HOSTED_BODY_MAX_BYTES)});
         assert_eq!(
-            build_hosted_request_body(&account_ref, &secrets)
-                .unwrap_err()
-                .code,
+            build_hosted_request_body(&oversized).unwrap_err().code,
             CloudErrorCode::InvalidRequest
         );
 
-        // 凭据不存在 → missing-secret（与「凭据存储不可用」区分）。
-        let missing = hosted_request(Some(HostedByokRequest {
-            provider_id: "deepseek".to_string(),
-            model_id: "deepseek-v4-flash".to_string(),
-            secret_ref: "provider:ghost:api-key".to_string(),
-            max_output_tokens: None,
-            generation_overrides: None,
-        }));
-        assert_eq!(
-            build_hosted_request_body(&missing, &secrets)
-                .unwrap_err()
-                .code,
-            CloudErrorCode::MissingSecret
-        );
-
-        // 合法 BYOK：apiKey 注入且只见于此处。
-        let ok = hosted_request(Some(HostedByokRequest {
-            provider_id: "deepseek".to_string(),
-            model_id: "deepseek-v4-flash".to_string(),
-            secret_ref: "provider:conn_1:api-key".to_string(),
-            max_output_tokens: Some(4096),
-            generation_overrides: Some(serde_json::json!({"temperature": 0.5})),
-        }));
-        let body = build_hosted_request_body(&ok, &secrets).unwrap();
-        assert_eq!(body["customProvider"]["apiKey"], "sk-live-key");
-        assert_eq!(body["customProvider"]["providerId"], "deepseek");
-        assert_eq!(body["customProvider"]["maxOutputTokens"], 4096);
-        assert_eq!(
-            body["customProvider"]["generationOverrides"]["temperature"],
-            0.5
-        );
-        // 业务字段原样保留。
-        assert!(body["answers"].is_array());
-
-        // 无 BYOK：不携带 customProvider。
-        let plain = hosted_request(None);
-        let body = build_hosted_request_body(&plain, &secrets).unwrap();
+        // 系统默认通道：不携带 customProvider，业务字段原样保留。
+        let body = build_hosted_request_body(&hosted_request()).unwrap();
         assert!(!body.as_object().unwrap().contains_key("customProvider"));
+        assert!(body["answers"].is_array());
+    }
+
+    /// BYOK 在 native Provider 绑定落地前保持关闭：`deny_unknown_fields`
+    /// 让任何凭据字段在 IPC 反序列化阶段就 fail-closed，进不了命令体。
+    #[test]
+    fn hosted_request_denies_credential_fields() {
+        let with_byok = serde_json::json!({
+            "requestId": "req-1",
+            "routeId": HOSTED_ROUTE_DETAILS_STREAM,
+            "body": {"answers": []},
+            "byok": {
+                "providerId": "deepseek",
+                "modelId": "deepseek-v4-flash",
+                "secretRef": "provider-key:abc"
+            }
+        });
+        assert!(serde_json::from_value::<CloudHostedGenerateRequest>(with_byok).is_err());
+
+        let with_secret_ref = serde_json::json!({
+            "requestId": "req-1",
+            "routeId": HOSTED_ROUTE_DETAILS_STREAM,
+            "body": {"answers": []},
+            "secretRef": "provider-key:abc"
+        });
+        assert!(serde_json::from_value::<CloudHostedGenerateRequest>(with_secret_ref).is_err());
     }
 
     #[test]
@@ -2019,20 +2114,65 @@ mod tests {
         let mut parser = HostedSseParser::new();
         let mut events = Vec::new();
         // 分片到达 + 未知事件名 + 非 JSON data 都不得中断流。
-        parser.push("event: markdown\ndata: {\"chunk\":\"一", &mut events);
-        parser.push(
-            "段\"}\n\nevent: unknown_future\ndata: {}\n\nevent: markdown\ndata: not-json\n\n",
-            &mut events,
-        );
-        parser.push("event: done\ndata: {\"ok\":true}\n\n", &mut events);
-        parser.finish(&mut events);
+        parser
+            .push("event: markdown\ndata: {\"chunk\":\"一", &mut events)
+            .unwrap();
+        parser
+            .push(
+                "段\"}\n\nevent: unknown_future\ndata: {}\n\nevent: markdown\ndata: not-json\n\n",
+                &mut events,
+            )
+            .unwrap();
+        parser
+            .push("event: done\ndata: {\"ok\":true}\n\n", &mut events)
+            .unwrap();
+        parser.finish(&mut events).unwrap();
         let names: Vec<&str> = events.iter().map(|e| e.event.as_str()).collect();
         assert_eq!(names, ["markdown", "done"]);
         assert_eq!(events[0].data["chunk"], "一段");
     }
 
+    /// 标准 SSE 的 CRLF 帧边界与行尾同样必须被消费。
     #[test]
-    fn hosted_stream_end_to_end_byok() {
+    fn hosted_sse_parser_accepts_crlf() {
+        let mut parser = HostedSseParser::new();
+        let mut events = Vec::new();
+        parser
+            .push(
+                "event: markdown\r\ndata: {\"chunk\":\"一\"}\r\n\r\n",
+                &mut events,
+            )
+            .unwrap();
+        parser
+            .push("event: done\r\ndata: {\"ok\":true}\r\n\r\n", &mut events)
+            .unwrap();
+        let names: Vec<&str> = events.iter().map(|e| e.event.as_str()).collect();
+        assert_eq!(names, ["markdown", "done"]);
+        assert_eq!(events[0].data["chunk"], "一");
+    }
+
+    /// 缓冲与单帧上限：不发送帧边界的流不得无限占用内存。
+    #[test]
+    fn hosted_sse_parser_bounds_buffer_and_frame() {
+        let mut parser = HostedSseParser::new();
+        let mut events = Vec::new();
+        // 无帧边界的超大分片 → 缓冲超限。
+        let flood = "x".repeat(HOSTED_SSE_MAX_BUFFER_BYTES + 1);
+        let error = parser.push(&flood, &mut events).unwrap_err();
+        assert_eq!(error.code, CloudErrorCode::InvalidResponse);
+
+        // 有边界但单帧超限 → 同样拒绝。
+        let mut parser = HostedSseParser::new();
+        let frame = format!(
+            "event: markdown\ndata: \"{}\"\n\n",
+            "y".repeat(HOSTED_SSE_MAX_FRAME_BYTES)
+        );
+        let error = parser.push(&frame, &mut events).unwrap_err();
+        assert_eq!(error.code, CloudErrorCode::InvalidResponse);
+    }
+
+    #[test]
+    fn hosted_stream_end_to_end() {
         rt().block_on(async {
             let server = spawn_mock_server();
             let state = CloudState::with_origin(&server.origin);
@@ -2040,9 +2180,6 @@ mod tests {
             let registry = crate::ai::RequestRegistry::default();
             let sink = VecSink::new();
 
-            secrets
-                .set("provider:conn_1:api-key", "sk-live-key")
-                .unwrap();
             // 已登录会话：cookie 应随生成请求一起发出。
             store_session(
                 &secrets,
@@ -2058,21 +2195,13 @@ mod tests {
             )
             .unwrap();
 
-            let request = hosted_request(Some(HostedByokRequest {
-                provider_id: "deepseek".to_string(),
-                model_id: "deepseek-v4-flash".to_string(),
-                secret_ref: "provider:conn_1:api-key".to_string(),
-                max_output_tokens: None,
-                generation_overrides: None,
-            }));
-            stream_hosted_ai(&state, &secrets, &registry, request, &sink)
+            stream_hosted_ai(&state, &secrets, &registry, hosted_request(), &sink)
                 .await
                 .expect("stream must complete");
 
-            // 服务端视角：BYOK Key 出现在 customProvider，账号 cookie 在 header。
+            // 服务端视角：系统通道不带 customProvider，账号 cookie 在 header。
             let sent = server.last_generate_body.lock().unwrap().clone().unwrap();
-            assert_eq!(sent["customProvider"]["apiKey"], "sk-live-key");
-            assert_eq!(sent["customProvider"]["providerId"], "deepseek");
+            assert!(!sent.as_object().unwrap().contains_key("customProvider"));
             let headers = server
                 .last_generate_headers
                 .lock()
@@ -2098,10 +2227,55 @@ mod tests {
                 ]
             );
             assert_eq!(events.last().unwrap().data["ok"], true);
-            // Key 不出现在任何事件里。
-            assert!(!events.iter().any(|e| serde_json::to_string(&e.data)
-                .unwrap_or_default()
-                .contains("sk-live-key")));
+        });
+    }
+
+    /// 首个终态到达后立即停止：done 之后的上游帧不再转发。
+    #[test]
+    fn hosted_stream_stops_after_terminal() {
+        rt().block_on(async {
+            let server = spawn_mock_server();
+            *server.hosted_sse_body.lock().unwrap() = Some(
+                concat!(
+                    "event: done\ndata: {\"ok\":true}\n\n",
+                    "event: markdown\ndata: {\"chunk\":\"迟到\"}\n\n",
+                )
+                .to_string(),
+            );
+            let state = CloudState::with_origin(&server.origin);
+            let secrets = MemorySecrets::new();
+            let registry = crate::ai::RequestRegistry::default();
+            let sink = VecSink::new();
+
+            stream_hosted_ai(&state, &secrets, &registry, hosted_request(), &sink)
+                .await
+                .unwrap();
+            let events = sink.events.lock().unwrap();
+            let names: Vec<&str> = events.iter().map(|e| e.event.as_str()).collect();
+            assert_eq!(names, ["done"]);
+        });
+    }
+
+    /// EOF 前未收到 done/error 是上游协议异常：合成 invalid-response error，
+    /// 不合成假 done 冒充成功。
+    #[test]
+    fn hosted_stream_eof_without_terminal_is_diagnosed() {
+        rt().block_on(async {
+            let server = spawn_mock_server();
+            *server.hosted_sse_body.lock().unwrap() =
+                Some("event: markdown\ndata: {\"chunk\":\"半段\"}\n\n".to_string());
+            let state = CloudState::with_origin(&server.origin);
+            let secrets = MemorySecrets::new();
+            let registry = crate::ai::RequestRegistry::default();
+            let sink = VecSink::new();
+
+            stream_hosted_ai(&state, &secrets, &registry, hosted_request(), &sink)
+                .await
+                .unwrap();
+            let events = sink.events.lock().unwrap();
+            let names: Vec<&str> = events.iter().map(|e| e.event.as_str()).collect();
+            assert_eq!(names, ["markdown", "error"]);
+            assert_eq!(events.last().unwrap().data["code"], "invalid-response");
         });
     }
 
@@ -2114,8 +2288,8 @@ mod tests {
             let registry = crate::ai::RequestRegistry::default();
             let sink = VecSink::new();
 
-            // 未登录 + 无 BYOK（系统默认通道）：不带 cookie、不带 customProvider。
-            stream_hosted_ai(&state, &secrets, &registry, hosted_request(None), &sink)
+            // 未登录 + 系统默认通道：不带 cookie、不带 customProvider。
+            stream_hosted_ai(&state, &secrets, &registry, hosted_request(), &sink)
                 .await
                 .unwrap();
             let sent = server.last_generate_body.lock().unwrap().clone().unwrap();
@@ -2139,7 +2313,7 @@ mod tests {
             let registry = crate::ai::RequestRegistry::default();
             let sink = VecSink::new();
 
-            let mut bad_route = hosted_request(None);
+            let mut bad_route = hosted_request();
             bad_route.route_id = "arbitrary-internal-route".to_string();
             let error = stream_hosted_ai(&state, &secrets, &registry, bad_route, &sink)
                 .await
@@ -2147,8 +2321,8 @@ mod tests {
             assert_eq!(error.code, CloudErrorCode::InvalidRequest);
 
             // 同一 requestId 并发 → 第二次被拒绝。
-            let first = hosted_request(None);
-            let mut second = hosted_request(None);
+            let first = hosted_request();
+            let mut second = hosted_request();
             second.request_id = "req-1".to_string();
             registry.register("req-1").unwrap();
             let error = stream_hosted_ai(&state, &secrets, &registry, second, &sink)

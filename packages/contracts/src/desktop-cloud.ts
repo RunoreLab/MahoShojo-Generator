@@ -243,6 +243,7 @@ export const DesktopCloudErrorCodeSchema = z.enum([
   'invalid-response',
   'storage-unavailable',
   'missing-secret',
+  'invalid-request',
   'internal-error',
 ]);
 export type DesktopCloudErrorCode = z.infer<typeof DesktopCloudErrorCodeSchema>;
@@ -278,31 +279,17 @@ export const HostedGenerationRouteIdSchema = z.enum([
 export type HostedGenerationRouteId = z.infer<typeof HostedGenerationRouteIdSchema>;
 
 /**
- * 服务器 BYOK 选择（`DESK-ONLINE-005`）：renderer 只声明「用哪条凭据引用 + 目录
- * providerId/modelId」；`secretRef` 由 native 在 `provider:*` 命名空间内解析成
- * 明文 Key 后注入 `customProvider`，明文永不回传。
- */
-export const DesktopHostedByokSchema = z.object({
-  /** 服务器 Provider 目录 ID；`'system'` 不是合法 BYOK 目标（系统通道即缺省）。 */
-  providerId: z.string().min(1).max(64),
-  modelId: z.string().min(1).max(200),
-  secretRef: z.string().min(1).max(256),
-  maxOutputTokens: z.number().int().positive().optional(),
-  /** 透传 `UserGenerationOverridesRequest`；native 不解释、仅原样注入。 */
-  generationOverrides: SafeJsonValueSchema.optional(),
-}).strict();
-export type DesktopHostedByok = z.infer<typeof DesktopHostedByokSchema>;
-
-/**
  * hosted 生成 IPC 输入。`body` 是目标路由的业务载荷（如
  * `{answers, questionnaires, language}`），**不得**携带 `customProvider`——
  * native 是唯一注入方，renderer 注入的字段一律拒绝。
- * `byok` 缺省即系统默认通道（服务器策略选模型，不携带任何 Provider Key）。
+ *
+ * 服务器 BYOK 在 native 持有并校验的 Provider 绑定落地前保持关闭（DESK-093）：
+ * 本契约不提供 `byok`/`secretRef`/`providerId`/`modelId` 等凭据字段，renderer
+ * 携带这些字段即被 strict 校验拒绝。当前只开放系统默认通道。
  */
 export const DesktopHostedGenerateRequestSchema = z.object({
   requestId: z.string().min(1).max(128),
   routeId: HostedGenerationRouteIdSchema,
   body: SafeJsonValueSchema,
-  byok: DesktopHostedByokSchema.optional(),
 }).strict();
 export type DesktopHostedGenerateRequest = z.infer<typeof DesktopHostedGenerateRequestSchema>;

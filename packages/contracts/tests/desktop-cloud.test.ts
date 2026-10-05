@@ -242,7 +242,15 @@ describe('renderer IPC 投影', () => {
     expect(DesktopCloudSignOutResultSchema.safeParse({}).success).toBe(false);
   });
 
-  it('hosted 生成请求：BYOK 只携带引用与非秘密字段', () => {
+  it('hosted 生成请求：系统默认通道，BYOK 字段一律拒绝', () => {
+    // 系统默认通道：routeId + 业务 body。
+    expect(DesktopHostedGenerateRequestSchema.safeParse({
+      requestId: 'req-2',
+      routeId: 'generate-magical-girl-details-stream',
+      body: { answers: [] },
+    }).success).toBe(true);
+
+    // BYOK 在 native Provider 绑定落地前保持关闭：任何凭据字段都 fail-closed。
     expect(DesktopHostedGenerateRequestSchema.safeParse({
       requestId: 'req-1',
       routeId: 'generate-magical-girl-details-stream',
@@ -252,14 +260,13 @@ describe('renderer IPC 投影', () => {
         modelId: 'deepseek-v4-flash',
         secretRef: 'provider:conn_1:api-key',
       },
-    }).success).toBe(true);
-
-    // 系统默认通道：无 byok。
+    }).success).toBe(false);
     expect(DesktopHostedGenerateRequestSchema.safeParse({
-      requestId: 'req-2',
+      requestId: 'req-4',
       routeId: 'generate-magical-girl-details-stream',
-      body: { answers: [] },
-    }).success).toBe(true);
+      body: {},
+      secretRef: 'provider:conn_1:api-key',
+    }).success).toBe(false);
 
     // 白名单外路由拒绝。
     expect(DesktopHostedGenerateRequestSchema.safeParse({

@@ -99,6 +99,26 @@ describe('cloud bridge', () => {
     });
   });
 
+  it('契约内的错误码（missing-secret/invalid-request）原样透出，未知 code 归一为 internal-error', async () => {
+    for (const code of ['missing-secret', 'invalid-request', 'flow-in-progress']) {
+      const invoke = vi.fn(async () => {
+        throw { code, message: `native ${code}` };
+      });
+      await expect(readCloudAuthStatus(invoke)).rejects.toMatchObject({
+        name: 'DesktopCloudError',
+        code,
+      });
+    }
+    const unknown = vi.fn(async () => {
+      throw { code: 'brand-new-code', message: 'future error' };
+    });
+    await expect(readCloudAuthStatus(unknown)).rejects.toMatchObject({
+      name: 'DesktopCloudError',
+      code: 'internal-error',
+      message: 'future error',
+    });
+  });
+
   it('sign-out：本地无条件删除 + revoked 回显', async () => {
     const invoke = vi.fn(async () => ({ revoked: true }));
     await expect(signOutCloud(invoke)).resolves.toEqual({ revoked: true });
@@ -146,7 +166,6 @@ describe('cloud bridge', () => {
         requestId: 'req-1',
         routeId: 'generate-magical-girl-details-stream',
         body: { answers: {}, language: 'zh-CN' },
-        byok: { providerId: 'openai', modelId: 'gpt-5', secretRef: 'provider:openai' },
       },
       (event) => seen.push(event),
       { createChannel: () => channel },
@@ -157,7 +176,6 @@ describe('cloud bridge', () => {
         requestId: 'req-1',
         routeId: 'generate-magical-girl-details-stream',
         body: { answers: {}, language: 'zh-CN' },
-        byok: { providerId: 'openai', modelId: 'gpt-5', secretRef: 'provider:openai' },
       },
       onEvent: channel,
     });

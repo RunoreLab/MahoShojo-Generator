@@ -1,12 +1,10 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 
-import {
-  DESKTOP_AUTH_GRANT_PATH,
-  DesktopAuthorizeQuerySchema,
-  type DesktopAuthGrantResponse,
-  type DesktopAuthorizeQuery,
+import type {
+  DesktopAuthGrantResponse,
+  DesktopAuthorizeQuery,
 } from '@mahoshojo/contracts/desktop-cloud';
 
 import AuthModal from '@/components/CharManager/AuthModal';
@@ -16,7 +14,8 @@ import { useAuth } from '@/lib/useAuth';
  * `desktop-auth-v1` 的浏览器授权页。
  *
  * 只负责「确认登录身份 → 调用 grant 端点 → 跳回 loopback」三步：
- * - 参数非法时明确报错，绝不静默放行（native 侧用同一 schema 校验，错配即协议错）；
+ * - 参数非法时明确报错，绝不静默放行（协议校验由 Server Component 完成；
+ *   本组件对 contracts 只有 type import，loopback schema 不进客户端 bundle）；
  * - 未登录时打开复用登录弹层，登录成功后留在本页继续；
  * - 跳转地址完全由服务端 grant 响应给出，本页不自行拼接 code/state。
  */
@@ -28,27 +27,16 @@ type AuthorizePhase =
   | { kind: 'failed'; message: string };
 
 interface DesktopAuthorizePageProps {
-  query: Record<string, string | string[] | undefined>;
+  /** Server Component 已按 `desktop-auth-v1` 校验过的授权参数；null 表示参数非法。 */
+  grant: DesktopAuthorizeQuery | null;
+  /** grant 签发端点的同源相对路径（由服务端注入，客户端不依赖契约运行时代码）。 */
+  grantPath: string;
 }
 
 const INVALID_PARAMS_MESSAGE = '授权参数无效或不完整。请回到桌面应用重新发起登录。';
 
-export function DesktopAuthorizePage({ query }: DesktopAuthorizePageProps) {
+export function DesktopAuthorizePage({ grant, grantPath }: DesktopAuthorizePageProps) {
   const { isAuthenticated, loading, user, login, register } = useAuth();
-
-  const parsed = useMemo(() => {
-    const flat = {
-      state: query.state,
-      code_challenge: query.code_challenge,
-      code_challenge_method: query.code_challenge_method,
-      redirect_uri: query.redirect_uri,
-    };
-    if (Object.values(flat).some((value) => value === undefined || Array.isArray(value))) {
-      return null;
-    }
-    const result = DesktopAuthorizeQuerySchema.safeParse(flat);
-    return result.success ? result.data : null;
-  }, [query]);
 
   const [phase, setPhase] = useState<AuthorizePhase>({ kind: 'confirm' });
   const [authMessage, setAuthMessage] = useState<{ type: 'error' | 'success'; text: string } | null>(null);
@@ -57,7 +45,7 @@ export function DesktopAuthorizePage({ query }: DesktopAuthorizePageProps) {
   const confirmGrant = async (grant: DesktopAuthorizeQuery) => {
     setPhase({ kind: 'submitting' });
     try {
-      const response = await fetch(DESKTOP_AUTH_GRANT_PATH, {
+      const response = await fetch(grantPath, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -88,7 +76,7 @@ export function DesktopAuthorizePage({ query }: DesktopAuthorizePageProps) {
     </div>
   );
 
-  if (!parsed) {
+  if (!grant) {
     return renderCard(
       <>
         <h1 className="mb-4 text-xl font-bold text-gray-800">桌面端授权</h1>
@@ -183,7 +171,7 @@ export function DesktopAuthorizePage({ query }: DesktopAuthorizePageProps) {
         type="button"
         className={`generate-button w-full ${phase.kind === 'submitting' ? 'cursor-not-allowed opacity-50' : ''}`}
         disabled={phase.kind === 'submitting'}
-        onClick={() => void confirmGrant(parsed)}
+        onClick={() => void confirmGrant(grant)}
       >
         {phase.kind === 'submitting' ? '正在授权…' : '授权并返回应用'}
       </button>

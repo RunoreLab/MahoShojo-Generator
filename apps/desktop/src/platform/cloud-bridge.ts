@@ -1,5 +1,6 @@
 import { Channel } from '@tauri-apps/api/core';
 import {
+  DesktopCloudErrorCodeSchema,
   DesktopCloudLoginBeginResponseSchema,
   DesktopCloudLoginOutcomeSchema,
   DesktopCloudOnlineStatusSchema,
@@ -54,22 +55,6 @@ export class DesktopCloudError extends Error {
   }
 }
 
-const isDesktopCloudErrorCode = (value: string): value is DesktopCloudErrorCode =>
-  [
-    'not-authenticated',
-    'flow-not-found',
-    'flow-in-progress',
-    'cancelled',
-    'timeout',
-    'state-mismatch',
-    'protocol-mismatch',
-    'network-error',
-    'server-unavailable',
-    'invalid-response',
-    'storage-unavailable',
-    'internal-error',
-  ].includes(value);
-
 const toCloudError = (command: string, cause: unknown): DesktopCloudError => {
   if (
     cause !== null
@@ -78,9 +63,12 @@ const toCloudError = (command: string, cause: unknown): DesktopCloudError => {
     && typeof (cause as { message?: unknown }).message === 'string'
   ) {
     const { code, message } = cause as { code: string; message: string };
+    // 错误码以共享 contract 为唯一事实源，不再手抄列表；未知 code 归一为
+    // internal-error，已声明的 code（missing-secret/invalid-request 等）原样透出。
+    const parsedCode = DesktopCloudErrorCodeSchema.safeParse(code);
     return new DesktopCloudError(
       command,
-      isDesktopCloudErrorCode(code) ? code : 'internal-error',
+      parsedCode.success ? parsedCode.data : 'internal-error',
       message,
     );
   }
@@ -207,11 +195,12 @@ export interface StreamHostedAiOptions {
 }
 
 /**
- * 打开一次 hosted 生成流（`DESK-ONLINE-005`）。
+ * 打开一次 hosted 生成流（当前只开放系统默认通道）。
  *
- * renderer 只给「路由标识 + 非秘密业务载荷 + byok.secretRef」：endpoint、会话
- * cookie、Provider Key 明文全部由 native 解析注入。事件经 `HostedGenerationEventSchema`
- * 过滤——未知名/非法载荷的事件不进入 UI，统一投影为一个 bridge-invalid error 事件。
+ * renderer 只给「路由标识 + 非秘密业务载荷」：endpoint、会话 cookie 与凭据注入
+ * 全部在 native 侧；服务器 BYOK 在 native Provider 绑定落地前没有 IPC 通道
+ * （DESK-093）。事件经 `HostedGenerationEventSchema` 过滤——未知名/非法载荷的
+ * 事件不进入 UI，统一投影为一个 bridge-invalid error 事件。
  */
 export const streamHostedAi = (
   invoke: InvokeFn,
