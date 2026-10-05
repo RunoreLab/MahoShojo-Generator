@@ -95,6 +95,11 @@
       "import": "./src/card-library/index.ts",
       "default": "./src/card-library/index.ts"
     },
+    "./card-library-visibility": {
+      "types": "./src/card-library/visibility.ts",
+      "import": "./src/card-library/visibility.ts",
+      "default": "./src/card-library/visibility.ts"
+    },
     "./modal": {
       "types": "./src/modal/index.ts",
       "import": "./src/modal/index.ts",

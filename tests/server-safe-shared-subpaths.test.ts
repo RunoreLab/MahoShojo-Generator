@@ -44,6 +44,8 @@ const SRC = path.join(PACKAGE_ROOT, 'src');
  * - `./markdown-text` 被 `app/api/media-proxy/route.ts` 经由 `lib/markdown/externalMedia.ts` 读；
  * - `./home` 被 `app/page.tsx` 读功能目录与 preload 列表；
  * - `./color-mode-init` 被 `app/layout.tsx` 读首屏防闪烁脚本——它必须是零 hook 的纯数据模块。
+ * - `./card-library-visibility` 被 `lib/data-card-visibility.ts` 经 `app/api/data-cards` 读——
+ *   纯数据可见性归一化，不得经由含客户端组件的 `./card-library` 桶出口。
  *
  * `./local-archive` 与 `./local-cards` 的控制器是客户端状态机，`./markdown` 与 `./encyclopedia-views` 与
  * `./shell` 只在 Client Component 里用，因此不在此列。
@@ -58,6 +60,7 @@ const SERVER_SAFE_ENTRYPOINTS: Readonly<Record<string, string>> = {
   './markdown-text': 'markdown/text/index.ts',
   './home': 'home/index.ts',
   './color-mode-init': 'color-mode/init.ts',
+  './card-library-visibility': 'card-library/visibility.ts',
 };
 
 /**
@@ -175,12 +178,17 @@ describe('server-safe shared entrypoints stay free of React hooks', () => {
     // RSC 只消费同目录的 `./color-mode-init`。
     // `./card-library` 是 D5.0e 抽出的卡库模态框与客户端状态机，`./modal` 是客户端弹窗
     // 基件；两者都只在 Client Component/宿主适配层消费，不进入 Server Component 导入链。
+    // `./client`、`./details-controls`、`./character-card` 是 D5.1a 下沉的 details 页
+    // 交互/结果区段，均为客户端专用。
     expect(unlisted.sort()).toEqual([
       './ai-provider',
       './card-editor',
       './card-library',
+      './character-card',
       './character-result',
+      './client',
       './color-mode',
+      './details-controls',
       './encyclopedia-views',
       './local-archive',
       './local-cards',
