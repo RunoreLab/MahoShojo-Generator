@@ -75,6 +75,16 @@
       "import": "./src/ai-provider/index.ts",
       "default": "./src/ai-provider/index.ts"
     },
+    "./card-library": {
+      "types": "./src/card-library/index.ts",
+      "import": "./src/card-library/index.ts",
+      "default": "./src/card-library/index.ts"
+    },
+    "./modal": {
+      "types": "./src/modal/index.ts",
+      "import": "./src/modal/index.ts",
+      "default": "./src/modal/index.ts"
+    },
     "./local-cards": {
       "types": "./src/local-cards/index.ts",
       "import": "./src/local-cards/index.ts",
@@ -94,13 +104,17 @@
   },
   "dependencies": {
     "@mahoshojo/ai-core": "workspace:*",
+    "@mahoshojo/contracts": "workspace:*",
+    "@mahoshojo/domain": "workspace:*",
     "@mahoshojo/local-library": "workspace:*",
+    "clsx": "^2.1.1",
     "katex": "^0.16.27",
     "lucide-react": "^0.511.0",
     "react-markdown": "^10.1.0",
     "rehype-katex": "^7.0.1",
     "remark-gfm": "^4.0.1",
-    "remark-math": "^6.0.0"
+    "remark-math": "^6.0.0",
+    "tailwind-merge": "^3.3.0"
   },
   "peerDependencies": {
     "react": "^19.2.1",

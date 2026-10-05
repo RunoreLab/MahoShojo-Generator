@@ -38,6 +38,7 @@ vi.mock('@/lib/auth', () => ({
 }));
 
 vi.mock('@/lib/localStorage', () => ({
+  addLikedCard: vi.fn(() => true),
   addUsedCard: vi.fn(),
   isCardLiked: vi.fn(() => false),
   isCardUsed: vi.fn(() => true),

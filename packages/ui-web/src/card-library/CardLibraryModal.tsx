@@ -1,0 +1,1982 @@
+// card-library/CardLibraryModal.tsx
+//
+// 共享数据卡选择器（原 apps/web/components/BattleDataModal.tsx，D5.0e 抽取）。
+// 运行地能力全部由 `host` 端口注入：在线请求、本地库仓储、设备标记、链接组件、
+// 详情/卡组插槽。本文件不得 import 任何 apps/* 源码或宿主传输层。
+
+import React, { useState, useEffect, useCallback, useMemo, useRef, useId } from 'react';
+import { createPortal } from 'react-dom';
+import { inferCharacterKind } from '@mahoshojo/domain/data-cards';
+import DataCard from './DataCard';
+import SortSelector from './SortSelector';
+import { useCardLibrarySummaryPage } from './use-card-library-summary-page';
+import { isDefinitiveClientTerminalStatus } from './net-status';
+import {
+  isPublicVisibility,
+  mapPublicDataCardRowToBattleSelectionPayload,
+  normalizePublicVisibilityValue,
+} from './read-mappers';
+import { isLocalDataCardRow, mapLocalCardRecordToDetailsCard, type LocalDataCardRow } from './rows';
+import { useLocalDataCards } from './use-local-data-cards';
+import { useLocalLibraryAutoSave } from './use-local-library-auto-save';
+import { ChevronDown, Filter } from 'lucide-react';
+import { BaseModal } from '../modal/BaseModal';
+import { ModalTabs, modalTabIds, type ModalTabItem } from '../modal/ModalTabs';
+import { buttonClassName } from './Button';
+import { DataCardEmptyState } from './DataCardEmptyState';
+import { getDataCardStatus } from './status';
+import type { BadgeDefinition } from './badge-types';
+import type { CardLibraryHost } from './host';
+import {
+  ONLINE_DATA_CARD_TYPES,
+  OnlineDataCardTypeSchema,
+  type OnlineDataCardType,
+} from '@mahoshojo/contracts/data-cards';
+
+type DataCardType = OnlineDataCardType;
+type BattleDataSelectedType = DataCardType | 'all';
+
+/** 同时喂给 ModalTabs 的 idPrefix 和下方 tabpanel 的 id，两边必须同源。 */
+const TAB_ID_PREFIX = 'battle-data-source';
+const TAB_ARIA_LABEL = '数据卡来源';
+
+export interface CardLibraryModalProps {
+  host: CardLibraryHost;
+  isOpen: boolean;
+  onClose: () => void;
+  onSelectCard?: (card: any) => void;
+  onToggleCard?: (card: any, nextSelected: boolean) => void;
+  selectedType: BattleDataSelectedType;
+  allowedTypes?: DataCardType[];
+  initialTab?: BattleDataTab;
+  visibleTabs?: BattleDataTab[];
+  titleOverride?: string;
+  selectionMode?: 'single' | 'multi';
+  selectedCardIds?: string[];
+  selectedCountOverride?: number;
+  maxSelected?: number;
+  externalError?: string | null;
+  /** 是否允许从私有卡组批量导入；默认保持既有 Arena 行为。 */
+  allowDeckImport?: boolean;
+  /** 是否允许打开数据卡详情（以及详情中的举报等嵌套入口）；默认保持既有行为。 */
+  allowCardDetails?: boolean;
+}
+
+export type BattleDataTab = 'my' | 'public' | 'recommended' | 'favorites' | 'local';
+
+const normalizeCardTypeForLibrary = (card: unknown): DataCardType => {
+  const parsed = OnlineDataCardTypeSchema.safeParse((card as { type?: unknown })?.type);
+  return parsed.success ? parsed.data : 'character';
+};
+
+const normalizeTagIds = (value: unknown): string[] => {
+  const rawList: string[] = [];
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      if (typeof item === 'string') rawList.push(item);
+    }
+  } else if (typeof value === 'string') {
+    rawList.push(...value.split(','));
+  }
+
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const item of rawList) {
+    const trimmed = item.trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    out.push(trimmed);
+  }
+  return out;
+};
+
+const getCardTagIds = (card: any): string[] => {
+  if (!card) return [];
+  if (Array.isArray(card.tagIds)) return normalizeTagIds(card.tagIds);
+  if (Array.isArray(card.tag_ids)) return normalizeTagIds(card.tag_ids);
+  if (typeof card.tag_ids === 'string') return normalizeTagIds(card.tag_ids);
+  return [];
+};
+
+const resolveQuestionnaireNativeAllowed = (card: any): boolean => {
+  if (!card || card.type !== 'questionnaire') return false;
+  if (typeof card.nativeAllowed === 'boolean') return card.nativeAllowed;
+  if (typeof card.native_allowed === 'boolean') return card.native_allowed;
+
+  let payload = card.data;
+  if (typeof payload === 'string') {
+    try {
+      payload = JSON.parse(payload);
+    } catch {
+      return false;
+    }
+  }
+
+  if (!payload || typeof payload !== 'object') return false;
+  if (typeof (payload as any).nativeAllowed === 'boolean') return (payload as any).nativeAllowed;
+  if (typeof (payload as any).native_allowed === 'boolean') return (payload as any).native_allowed;
+  return false;
+};
+
+// 【新增】筛选条件的状态接口
+interface Filters {
+  author: string;
+  minLikes: string;
+  maxLikes: string;
+  minUsage: string;
+  maxUsage: string;
+  minFavorites: string;
+  maxFavorites: string;
+  recommendedOnly: boolean;
+  roleType: '' | 'magical-girl' | 'canshou' | 'general';
+  nativeOnly: boolean;
+  nativeAllowedOnly: boolean;
+}
+
+type ApiTag = {
+  id: string;
+  name: string;
+  description: string | null;
+  category: string | null;
+  scope: 'user' | 'system' | 'admin';
+  isActive: boolean;
+};
+
+export function CardLibraryModal({
+  host,
+  isOpen,
+  onClose,
+  onSelectCard,
+  onToggleCard,
+  selectedType,
+  allowedTypes,
+  initialTab,
+  visibleTabs,
+  titleOverride,
+  selectionMode = 'single',
+  selectedCardIds,
+  selectedCountOverride,
+  maxSelected,
+  externalError,
+  allowDeckImport = true,
+  allowCardDetails = true,
+}: CardLibraryModalProps) {
+  const { isAuthenticated, userId, userBadges } = host.auth;
+  const modalTitleId = useId();
+  const modalRef = useRef<HTMLDivElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  const isComposingSearchRef = useRef(false);
+  const publicFetchAbortControllerRef = useRef<AbortController | null>(null);
+  const metaFetchAbortControllerRef = useRef<AbortController | null>(null);
+  const badgeFetchAbortControllerRef = useRef<AbortController | null>(null);
+  const selectingCardIdsRef = useRef<Set<string>>(new Set());
+  const cardReadController = useRef<AbortController>(new AbortController());
+  // 详情按“每次动作”创建：新的详情点击会中止上一次未完成的详情读取（last-click-wins）。
+  const cardDetailControllerRef = useRef<AbortController | null>(null);
+  const isSingleSelectingRef = useRef(false);
+  const [publicDataCards, setPublicDataCards] = useState<any[]>([]);
+  // 记录当前 publicDataCards 展示结果所属的查询；只有相同查询的刷新失败才允许保留 stale 数据。
+  const publicLoadedRequestKeyRef = useRef<string | null>(null);
+  const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
+  const [isLoading, setIsLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState<BattleDataTab>('public');
+  const [showDecksModal, setShowDecksModal] = useState(false);
+  // 记录用户是否主动切换过 Tab，防止排序等状态变动时被意外重置
+  const hasUserSelectedTabRef = React.useRef(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
+  const [sortBy, setSortBy] = useState<'likes' | 'usage' | 'favorites' | 'created_at'>('created_at');
+  const [selectedCard, setSelectedCard] = useState<any | null>(null);
+  const [showDetailsModal, setShowDetailsModal] = useState(false);
+  const detailsModalOpenRef = useRef(false);
+  detailsModalOpenRef.current = allowCardDetails && Boolean(host.slots.CardDetailsModal) && showDetailsModal && selectedCard !== null;
+  const [selectError, setSelectError] = useState<string | null>(null);
+  const cardsPerPage = 12;
+  const [cardMetaById, setCardMetaById] = useState<Record<string, { techScore: number | null; techLevel: string | null; strictTier: string | null; isNative: boolean | null }>>({});
+  const [authorBadgesById, setAuthorBadgesById] = useState<Record<number, BadgeDefinition[]>>({});
+  const effectiveAllowedTypes = useMemo<DataCardType[]>(() => {
+    const candidates = selectedType === 'all'
+      ? (Array.isArray(allowedTypes) && allowedTypes.length > 0 ? allowedTypes : ONLINE_DATA_CARD_TYPES)
+      : [selectedType];
+    const seen = new Set<DataCardType>();
+    return candidates.filter((type): type is DataCardType => {
+      const result = OnlineDataCardTypeSchema.safeParse(type);
+      if (!result.success || seen.has(result.data)) return false;
+      seen.add(result.data);
+      return true;
+    });
+  }, [allowedTypes, selectedType]);
+  const effectiveAllowedTypeSet = useMemo(() => new Set<DataCardType>(effectiveAllowedTypes), [effectiveAllowedTypes]);
+
+  // 【新增】高级筛选的状态
+  const initialFilters = useMemo<Filters>(() => ({
+    author: '',
+    minLikes: '',
+    maxLikes: '',
+    minUsage: '',
+    maxUsage: '',
+    minFavorites: '',
+    maxFavorites: '',
+    recommendedOnly: false,
+    roleType: '',
+    nativeOnly: false,
+    nativeAllowedOnly: false,
+  }), []);
+  const [filters, setFilters] = useState<Filters>(initialFilters);
+  const [activeFilters, setActiveFilters] = useState<Filters>(initialFilters);
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+  const [tagSearch, setTagSearch] = useState('');
+  const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
+  const [tagMatchMode, setTagMatchMode] = useState<'any' | 'all'>('any');
+  const [tagOptions, setTagOptions] = useState<ApiTag[]>([]);
+  const [tagOptionsLoading, setTagOptionsLoading] = useState(false);
+  const [tagOptionsError, setTagOptionsError] = useState<string | null>(null);
+  /**
+   * 「已经取过标签库」必须显式记一份，不能用 `tagOptions.length > 0` 代替：
+   * 标签库为空时长度恒为 0，旧实现会把它当成「还没取过」，于是每次渲染都重新请求，
+   * loading true/false 交替触发无限重渲染。用 ref 承载以保持 callback 身份稳定。
+   */
+  const tagOptionsSettledRef = useRef(false);
+  const tagOptionsInFlightRef = useRef(false);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const previouslyFocused = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    const previousBodyOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    closeButtonRef.current?.focus();
+
+    const focusableSelector = [
+      'button:not([disabled])',
+      'a[href]',
+      'input:not([disabled])',
+      'select:not([disabled])',
+      'textarea:not([disabled])',
+      '[tabindex]:not([tabindex="-1"])',
+    ].join(',');
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (detailsModalOpenRef.current) return;
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+
+      const focusable = [...(modalRef.current?.querySelectorAll<HTMLElement>(focusableSelector) ?? [])]
+        .filter((element) => !element.hidden && element.getAttribute('aria-hidden') !== 'true');
+      if (focusable.length === 0) {
+        event.preventDefault();
+        modalRef.current?.focus();
+        return;
+      }
+
+      const first = focusable[0]!;
+      const last = focusable.at(-1)!;
+      const current = document.activeElement;
+      if (event.shiftKey && (current === first || !modalRef.current?.contains(current))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (current === last || !modalRef.current?.contains(current))) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      document.body.style.overflow = previousBodyOverflow;
+      if (previouslyFocused && document.contains(previouslyFocused)) {
+        previouslyFocused.focus();
+      }
+    };
+  }, [isOpen]);
+
+  const buildPublicFilters = useCallback((source: Filters, tab: BattleDataTab) => {
+    if (tab === 'recommended') {
+      return { ...source, recommendedOnly: true };
+    }
+    if (source.recommendedOnly) {
+      return { ...source, recommendedOnly: false };
+    }
+    return source;
+  }, []);
+
+  const publicFilters = useMemo(() => buildPublicFilters(activeFilters, activeTab), [activeFilters, activeTab, buildPublicFilters]);
+  // 公开库请求键覆盖 page/search/filter/tab/UUID 语义；任一变化都让旧结果先失效。
+  const buildPublicRequestKey = useCallback((
+    kind: 'list' | 'id',
+    args: { page?: number; sort?: string; search?: string; filters?: Filters | null; tagIds?: string[]; tagMatch?: string; cardId?: string } = {},
+  ) => JSON.stringify({
+    kind,
+    tab: activeTab,
+    page: args.page ?? null,
+    sort: args.sort ?? null,
+    search: args.search ?? '',
+    filters: args.filters ?? null,
+    tagIds: args.tagIds ?? [],
+    tagMatch: args.tagMatch ?? 'any',
+    cardId: args.cardId ?? null,
+    selectedType,
+    types: effectiveAllowedTypes,
+  }), [activeTab, effectiveAllowedTypes, selectedType]);
+  const normalizeFiltersBySelectedType = useCallback((source: Filters): Filters => {
+    let next = source;
+
+    if (selectedType !== 'character' && next.roleType) {
+      next = { ...next, roleType: '' };
+    }
+    if (selectedType === 'questionnaire' && next.nativeOnly) {
+      next = { ...next, nativeOnly: false };
+    }
+    if (selectedType !== 'questionnaire' && next.nativeAllowedOnly) {
+      next = { ...next, nativeAllowedOnly: false };
+    }
+
+    return next;
+  }, [selectedType]);
+
+  const effectiveTabs = useMemo<BattleDataTab[]>(() => {
+    const candidates = Array.isArray(visibleTabs) && visibleTabs.length > 0
+      ? visibleTabs
+      : ([
+        ...(isAuthenticated ? (['my'] as const) : []),
+        'local' as const,
+        'public' as const,
+        'recommended' as const,
+        ...(isAuthenticated ? (['favorites'] as const) : []),
+      ] as const);
+
+    const seen = new Set<BattleDataTab>();
+    const out: BattleDataTab[] = [];
+    for (const tab of candidates as BattleDataTab[]) {
+      if ((tab === 'my' || tab === 'favorites') && !isAuthenticated) continue;
+      if (seen.has(tab)) continue;
+      seen.add(tab);
+      out.push(tab);
+    }
+    return out.length > 0 ? out : ['public'];
+  }, [visibleTabs, isAuthenticated]);
+
+  const isPublicTab = activeTab === 'public' || activeTab === 'recommended';
+  // 私有/收藏摘要只继承这些 Tab 上实际可见且有语义的条件。
+  // 公开库高级筛选（author/数值/roleType/native*/recommendedOnly）只随公开列表请求发送，
+  // 避免切换 Tab 后界面已隐藏的筛选继续污染 my/favorites 查询（例如 owner=Alice 且 author=Bob 恒为空）。
+  const summaryQuery = {
+    limit: cardsPerPage, offset: (currentPage - 1) * cardsPerPage,
+    search: debouncedSearchQuery.trim() || undefined, sortBy, types: effectiveAllowedTypes,
+    tagIds: selectedTagIds, tagMatch: tagMatchMode,
+  };
+  const myPage = useCardLibrarySummaryPage(host.online.fetchSummaryPage, 'my', isAuthenticated ? userId : null, isOpen && activeTab === 'my', summaryQuery);
+  const favoritesPage = useCardLibrarySummaryPage(host.online.fetchSummaryPage, 'favorites', isAuthenticated ? userId : null, isOpen && activeTab === 'favorites', summaryQuery);
+  const { cards: rawUserDataCards, setCards: setUserDataCards, reload: loadUserDataCards } = myPage;
+  const { setCards: setFavoriteCards } = favoritesPage;
+  const [publicError, setPublicError] = useState<string | null>(null);
+  const isLocalTab = activeTab === 'local';
+  const localCards = useLocalDataCards(host.local.repository, isOpen && isLocalTab, effectiveAllowedTypes, debouncedSearchQuery);
+  const localRecordById = useMemo(
+    () => new Map(localCards.records.map((record) => [record.id, record])),
+    [localCards.records],
+  );
+  const [localActionError, setLocalActionError] = useState<string | null>(null);
+  const [removingLocalId, setRemovingLocalId] = useState<string | null>(null);
+  const [pendingLocalRemoval, setPendingLocalRemoval] = useState<LocalDataCardRow | null>(null);
+  const libraryAutoSave = useLocalLibraryAutoSave(host.local.repository);
+  const [libraryCopyMessage, setLibraryCopyMessage] = useState<string | null>(null);
+
+  const listLoading = activeTab === 'my' ? myPage.loading : activeTab === 'favorites' ? favoritesPage.loading : isLocalTab ? localCards.loading : isLoading;
+  const listError = activeTab === 'my' ? myPage.error : activeTab === 'favorites' ? favoritesPage.error : isLocalTab ? localCards.error : publicError;
+  const listIdle = activeTab === 'my' ? myPage.status === 'idle' : activeTab === 'favorites' ? favoritesPage.status === 'idle' : false;
+  const { reload: reloadFavorites } = favoritesPage;
+  useEffect(() => {
+    cardReadController.current = new AbortController();
+    return () => {
+      cardReadController.current.abort();
+      cardDetailControllerRef.current?.abort();
+      cardDetailControllerRef.current = null;
+    };
+  }, [isOpen, activeTab, userId]);
+  useEffect(() => {
+    if (!isOpen || isPublicTab) return;
+    const status = activeTab === 'my' ? myPage.status : activeTab === 'favorites' ? favoritesPage.status : null;
+    const total = activeTab === 'my' ? myPage.total : favoritesPage.total;
+    if (status === 'success' && currentPage > Math.max(1, Math.ceil(total / cardsPerPage))) {
+      setCurrentPage(Math.max(1, Math.ceil(total / cardsPerPage)));
+    }
+  }, [isOpen, isPublicTab, activeTab, myPage.status, myPage.total, favoritesPage.status, favoritesPage.total, currentPage, cardsPerPage]);
+  useEffect(() => {
+    if (!isOpen || !isAuthenticated) return;
+    let cancelled = false;
+    void host.online.listFavoriteIds().then((result) => {
+      if (!cancelled && result.success) setFavoriteIds(new Set(result.favorites as string[]));
+    }).catch(() => {
+      // 收藏标记是纯装饰：失败时保持空集，列表照常渲染。
+    });
+    return () => { cancelled = true; };
+  }, [isOpen, isAuthenticated, userId, host.online]);
+
+  const inferRoleType = useCallback((card: any): 'magical-girl' | 'canshou' | 'general' | null => {
+    if (!card || card.type !== 'character') return null;
+    if (card.roleType) return card.roleType;
+
+    let payload = card.data;
+    if (typeof payload === 'string') {
+      try {
+        payload = JSON.parse(payload);
+      } catch {
+        payload = {};
+      }
+    }
+
+    // 与 Web `inferTemplate` 在角色推断上等价：`inferCharacterKind` 覆盖
+    // magical-girl/canshou/general，'unknown' 与原实现走同一条模板文本回退。
+    const tpl = inferCharacterKind(payload);
+    if (tpl === 'magical-girl' || tpl === 'canshou' || tpl === 'general') return tpl;
+
+    // 回退：按 templateId 字段文本判断
+    const templateId: unknown = payload?.templateId || payload?.template || payload?.template_id;
+    const templateText = typeof templateId === 'string' ? templateId.toLowerCase() : '';
+    if (templateText.includes('魔法少女') || templateText.includes('magical-girl') || templateText.includes('magical')) {
+      return 'magical-girl';
+    }
+    if (templateText.includes('残兽') || templateText.includes('canshou')) {
+      return 'canshou';
+    }
+    if (templateText.includes('通用') || templateText.includes('general')) {
+      return 'general';
+    }
+
+    // 最终兜底：codename -> 魔法少女；name -> 残兽；否则通用
+    if (payload?.codename) return 'magical-girl';
+    if (payload?.name) return 'canshou';
+    return 'general';
+  }, []);
+
+  const mapWithRoleType = useCallback((cards: any[]): any[] => {
+    return cards.map((card) => ({
+      ...card,
+      roleType: inferRoleType(card) || undefined,
+    }));
+  }, [inferRoleType]);
+
+  const loadTagOptions = useCallback(async (options: { force?: boolean } = {}) => {
+    if (tagOptionsInFlightRef.current) return;
+    if (!options.force && tagOptionsSettledRef.current) return;
+    tagOptionsInFlightRef.current = true;
+    setTagOptionsLoading(true);
+    setTagOptionsError(null);
+    try {
+      const result = await host.online.listTags(new AbortController().signal);
+      if (!result.ok) {
+        setTagOptionsError(result.error);
+        return;
+      }
+      setTagOptions(Array.isArray(result.tags) ? result.tags : []);
+      // 空标签库同样是成功结果：记为已取过，避免"永远在加载"。
+      tagOptionsSettledRef.current = true;
+    } catch (error) {
+      setTagOptionsError(String(error));
+    } finally {
+      tagOptionsInFlightRef.current = false;
+      setTagOptionsLoading(false);
+    }
+  }, [host.online]);
+
+  const ensureTagOptions = useCallback(() => {
+    void loadTagOptions();
+  }, [loadTagOptions]);
+
+  const userDataCards = useMemo(() => mapWithRoleType(
+    rawUserDataCards.filter((card: any) => effectiveAllowedTypeSet.has(card.type)),
+  ), [rawUserDataCards, effectiveAllowedTypeSet, mapWithRoleType]);
+  const favoriteCards = useMemo(() => mapWithRoleType(favoritesPage.cards), [favoritesPage.cards, mapWithRoleType]);
+
+  // 通过 ID 获取数据卡并显示在列表中
+  const loadCardByIdForDisplay = useCallback(async (cardId: string) => {
+    const requestKey = buildPublicRequestKey('id', { cardId });
+    publicFetchAbortControllerRef.current?.abort();
+    const abortController = new AbortController();
+    publicFetchAbortControllerRef.current = abortController;
+    if (publicLoadedRequestKeyRef.current !== requestKey) {
+      // 查询语义变化（含 UUID 切换）：旧结果不得冒充新查询结果。
+      publicLoadedRequestKeyRef.current = null;
+      setPublicDataCards([]);
+    }
+    let failedStatus: number | null = null;
+    try {
+      setIsLoading(true);
+      setPublicError(null);
+      const result = await host.online.fetchPublicCardById(cardId, abortController.signal);
+      if (result.ok) {
+        if (abortController.signal.aborted) return;
+        const card = result.data.success && result.data.card && effectiveAllowedTypeSet.has(result.data.card.type) ? result.data.card : null;
+        publicLoadedRequestKeyRef.current = requestKey;
+        setPublicDataCards(card ? mapWithRoleType([card]) : []);
+      } else {
+        failedStatus = result.status;
+        throw new Error(`获取数据卡失败（HTTP ${result.status}）`);
+      }
+    } catch (error) {
+      if (abortController.signal.aborted || (error instanceof Error && error.name === 'AbortError')) {
+        return;
+      }
+      // 同 requestKey 的 5xx/timeout 保留 stale 单卡；4xx 业务终态（卡被转私有/删除）必须清掉。
+      const keepStale = publicLoadedRequestKeyRef.current === requestKey
+        && !(failedStatus !== null && isDefinitiveClientTerminalStatus(failedStatus));
+      if (!keepStale) {
+        publicLoadedRequestKeyRef.current = null;
+        setPublicDataCards([]);
+      }
+      setPublicError(error instanceof Error ? error.message : '获取数据卡失败');
+    } finally {
+      if (publicFetchAbortControllerRef.current === abortController) {
+        publicFetchAbortControllerRef.current = null;
+        setIsLoading(false);
+      }
+    }
+  }, [host.online, buildPublicRequestKey, effectiveAllowedTypeSet, mapWithRoleType]);
+
+  // 【修改】获取公开数据卡，现在会接收所有筛选条件
+  const loadPublicDataCards = useCallback(async (
+    page: number = 1,
+    currentSortBy: 'likes' | 'usage' | 'favorites' | 'created_at',
+    currentSearchTerm?: string,
+    currentFilters?: Filters,
+    currentTagIds?: string[],
+    currentTagMatch?: 'any' | 'all'
+  ) => {
+    const requestKey = buildPublicRequestKey('list', {
+      page, sort: currentSortBy, search: currentSearchTerm, filters: currentFilters ?? null,
+      tagIds: currentTagIds ?? [], tagMatch: currentTagMatch,
+    });
+    publicFetchAbortControllerRef.current?.abort();
+    const abortController = new AbortController();
+    publicFetchAbortControllerRef.current = abortController;
+    if (publicLoadedRequestKeyRef.current !== requestKey) {
+      // 翻页/搜索/筛选/Tab 变化：旧查询结果不得冒充新查询结果。
+      publicLoadedRequestKeyRef.current = null;
+      setPublicDataCards([]);
+    }
+    try {
+      setIsLoading(true);
+      setPublicError(null);
+      const useRoleTypeFilter = Boolean(currentFilters?.roleType && selectedType === 'character');
+      const effectiveLimit = useRoleTypeFilter ? 500 : cardsPerPage;
+      const offset = useRoleTypeFilter ? 0 : (page - 1) * cardsPerPage;
+      const fetchType = async (type: DataCardType): Promise<any[]> => {
+        const result = await host.online.fetchPublicCards({
+          type,
+          limit: effectiveLimit,
+          offset,
+          sortBy: currentSortBy,
+          search: currentSearchTerm,
+          tagIds: currentTagIds && currentTagIds.length > 0 ? currentTagIds : undefined,
+          tagMatch: currentTagMatch,
+          author: currentFilters?.author || undefined,
+          minLikes: currentFilters?.minLikes || undefined,
+          maxLikes: currentFilters?.maxLikes || undefined,
+          minUsage: currentFilters?.minUsage || undefined,
+          maxUsage: currentFilters?.maxUsage || undefined,
+          minFavorites: currentFilters?.minFavorites || undefined,
+          maxFavorites: currentFilters?.maxFavorites || undefined,
+          recommendedOnly: currentFilters?.recommendedOnly || undefined,
+          nativeOnly: currentFilters?.nativeOnly || undefined,
+          nativeAllowedOnly: currentFilters?.nativeAllowedOnly || undefined,
+        }, abortController.signal);
+        if (!result.ok) throw new Error(`获取公开数据卡失败（HTTP ${result.status}）`);
+        if (!result.data.success || !Array.isArray(result.data.cards)) {
+          throw new Error(result.data.error || '列表响应无效');
+        }
+        return result.data.cards;
+      };
+
+      const batches = await Promise.all(effectiveAllowedTypes.map((type) => fetchType(type)));
+      if (abortController.signal.aborted) return;
+      let cards = mapWithRoleType(batches.flat());
+      if (currentFilters?.roleType && selectedType === 'character') {
+        cards = cards.filter((card: any) => card.roleType === currentFilters.roleType);
+      }
+      publicLoadedRequestKeyRef.current = requestKey;
+      setPublicDataCards(cards);
+    } catch (error) {
+      if (abortController.signal.aborted || (error instanceof Error && error.name === 'AbortError')) {
+        return;
+      }
+      if (publicLoadedRequestKeyRef.current !== requestKey) {
+        publicLoadedRequestKeyRef.current = null;
+        setPublicDataCards([]);
+      }
+      setPublicError(error instanceof Error ? error.message : '获取公开数据卡失败');
+    } finally {
+      if (publicFetchAbortControllerRef.current === abortController) {
+        publicFetchAbortControllerRef.current = null;
+        setIsLoading(false);
+      }
+    }
+  }, [host.online, buildPublicRequestKey, selectedType, effectiveAllowedTypes, cardsPerPage, mapWithRoleType]);
+
+  // 公开查询的显式重放入口：始终使用当前 debouncedSearchQuery + publicFilters，
+  // 页码由调用方显式传入（不读取 currentPage，避免翻页 → callback identity → effect 的间接依赖），
+  // 供 effect、重试按钮、翻页与“再次点击当前 Tab”复用，避免 closure 里的过期查询语义。
+  const reloadPublicCurrentQuery = useCallback((page: number) => {
+    if (!isPublicTab) return;
+    const trimmed = debouncedSearchQuery.trim();
+    const uuidMatch = trimmed.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+    if (uuidMatch) {
+      loadCardByIdForDisplay(uuidMatch[0]);
+      return;
+    }
+    loadPublicDataCards(page, sortBy, trimmed || undefined, publicFilters, selectedTagIds, tagMatchMode);
+  }, [isPublicTab, debouncedSearchQuery, sortBy, publicFilters, selectedTagIds, tagMatchMode, loadCardByIdForDisplay, loadPublicDataCards]);
+
+  const sortFavorites = useCallback((items: any[], criteria: 'likes' | 'usage' | 'favorites' | 'created_at') => {
+    const sorted = [...items];
+    switch (criteria) {
+      case 'likes':
+        sorted.sort((a, b) => (b.like_count ?? 0) - (a.like_count ?? 0));
+        break;
+      case 'usage':
+        sorted.sort((a, b) => (b.usage_count ?? 0) - (a.usage_count ?? 0));
+        break;
+      case 'favorites':
+        sorted.sort((a, b) => (b.favorite_count ?? 0) - (a.favorite_count ?? 0));
+        break;
+      case 'created_at':
+      default:
+        sorted.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    }
+    return sorted;
+  }, []);
+
+  const adjustFavoriteCount = useCallback((cards: any[], cardId: string, delta: number) => {
+    return cards.map((card) => {
+      if (card.id !== cardId) return card;
+      const nextCount = Math.max(0, (card.favorite_count ?? 0) + delta);
+      return { ...card, favorite_count: nextCount };
+    });
+  }, []);
+
+  // 防抖功能 - 延迟500ms执行搜索（兼容 IME：组词期不触发，结束后会继续等待并触发）
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const schedule = () => {
+      timer = setTimeout(() => {
+        if (isComposingSearchRef.current) {
+          schedule();
+          return;
+        }
+        setDebouncedSearchQuery(searchQuery);
+      }, 500);
+    };
+
+    schedule();
+
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
+  }, [searchQuery]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    void loadTagOptions();
+  }, [isOpen, loadTagOptions]);
+
+  useEffect(() => {
+    if (!isOpen || !isPublicTab) {
+      publicFetchAbortControllerRef.current?.abort();
+      publicFetchAbortControllerRef.current = null;
+    }
+  }, [isOpen, isPublicTab]);
+
+  // 公开查询的唯一请求 owner：防抖搜索、Tab、排序、筛选、标签变化都从这里发起。
+  // 翻页不在其中：reloadPublicCurrentQuery 不读取 currentPage（页码显式传参），
+  // 本 effect 依赖链也不含 currentPage，翻页由 handlePageChange 独占发起。
+  useEffect(() => {
+    if (!isOpen) return;
+
+    setCurrentPage(1);
+    if (!isPublicTab) return;
+
+    reloadPublicCurrentQuery(1);
+  }, [debouncedSearchQuery, isOpen, activeTab, isPublicTab, sortBy, publicFilters, selectedTagIds, tagMatchMode, reloadPublicCurrentQuery]);
+
+  useEffect(() => {
+    return () => {
+      publicFetchAbortControllerRef.current?.abort();
+    };
+  }, []);
+
+  // 当模态框打开时加载数据
+  useEffect(() => {
+    if (!isOpen) return;
+
+    setCurrentPage(1);
+    setSearchQuery('');
+    setSelectError(null);
+    setFilters(initialFilters); // 清空高级筛选
+    setActiveFilters(initialFilters);
+    setTagSearch('');
+    setSelectedTagIds([]);
+    setTagMatchMode('any');
+    setTagOptionsError(null);
+    tagOptionsSettledRef.current = false;
+    tagOptionsInFlightRef.current = false;
+
+    const fallbackTab: BattleDataTab = effectiveTabs[0] ?? 'public';
+    const canUseInitialTab = Boolean(initialTab && effectiveTabs.includes(initialTab));
+    const desiredDefaultTab: BattleDataTab = isAuthenticated ? 'my' : 'public';
+
+    const nextTab: BattleDataTab = (() => {
+      if (canUseInitialTab) return initialTab as BattleDataTab;
+      if (!hasUserSelectedTabRef.current) {
+        return effectiveTabs.includes(desiredDefaultTab) ? desiredDefaultTab : fallbackTab;
+      }
+      if (!isAuthenticated && !isPublicTab && effectiveTabs.includes('public')) return 'public';
+      return effectiveTabs.includes(activeTab) ? activeTab : fallbackTab;
+    })();
+
+    setActiveTab(nextTab);
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, selectedType, isAuthenticated]);
+
+  // 切换数据卡类型时，清除不适配当前类型的筛选项，避免误筛
+  useEffect(() => {
+    setFilters((prev) => normalizeFiltersBySelectedType(prev));
+    setActiveFilters((prev) => normalizeFiltersBySelectedType(prev));
+  }, [normalizeFiltersBySelectedType]);
+
+  const selectedIdSet = useMemo(() => new Set((selectedCardIds || []).filter((x): x is string => typeof x === 'string' && Boolean(x))), [selectedCardIds]);
+  const selectedCount = typeof selectedCountOverride === 'number' ? selectedCountOverride : selectedIdSet.size;
+  const atLimit = selectionMode === 'multi' && typeof maxSelected === 'number' && maxSelected > 0 && selectedCount >= maxSelected;
+  const canToggle = selectionMode === 'multi' && typeof onToggleCard === 'function';
+  const canImportDeck = allowDeckImport && Boolean(host.slots.DecksModal) && isAuthenticated && selectionMode === 'multi' && selectedType === 'character' && (typeof onToggleCard === 'function' || typeof onSelectCard === 'function');
+
+  // 处理卡片选择
+  const handleSelectCard = async (card: any) => {
+    const cardId = typeof card?.id === 'string' ? card.id : '';
+    if (!cardId) return;
+
+    setSelectError(null);
+
+    if (selectionMode === 'single' && isSingleSelectingRef.current) return;
+    if (selectingCardIdsRef.current.has(cardId)) return;
+    selectingCardIdsRef.current.add(cardId);
+    if (selectionMode === 'single') isSingleSelectingRef.current = true;
+
+    try {
+      const isSelected = selectedIdSet.has(cardId);
+      const nextSelected = !isSelected;
+
+      if (selectionMode === 'multi') {
+        if (!nextSelected && !canToggle) {
+          return;
+        }
+        if (nextSelected && atLimit) {
+          return;
+        }
+      }
+
+      const signal = cardReadController.current.signal;
+      // 本地库记录本来就带着完整正文；走 host.online.loadFullCard 只会得到一次注定 404 的请求。
+      const full = isLocalDataCardRow(card)
+        ? card
+        : typeof card.data === 'string' ? card : await host.online.loadFullCard(card, activeTab === 'my' ? 'my' : 'public', signal);
+      if (signal.aborted) return;
+      const payload = mapPublicDataCardRowToBattleSelectionPayload(full);
+
+      if (selectionMode === 'multi') {
+        if (canToggle) {
+          onToggleCard?.(payload, nextSelected);
+        } else if (nextSelected) {
+          onSelectCard?.(payload);
+        }
+      } else {
+        onSelectCard?.(payload);
+        onClose();
+      }
+
+      // 如果是公开卡片且未使用过，增加使用次数（仅在「加入」时触发）
+      if (nextSelected && isPublicVisibility(payload._isPublic) && !host.platform.marks.isUsed(cardId)) {
+        void (async () => {
+          try {
+            if (await host.online.reportCardStat(cardId, 'usage')) {
+              // 服务端确认后才写入本地使用标记
+              host.platform.marks.markUsed(cardId);
+            }
+          } catch (error) {
+            console.error('增加使用次数失败:', error);
+          }
+        })();
+      }
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') return;
+      console.error('解析数据卡失败:', error);
+      setSelectError(error instanceof Error ? error.message : '解析数据卡失败，请稍后重试。');
+    } finally {
+      selectingCardIdsRef.current.delete(cardId);
+      if (selectionMode === 'single') isSingleSelectingRef.current = false;
+    }
+  };
+
+  const handleImportDeck = useCallback(async (deckId: string) => {
+    if (!deckId) return;
+    if (!allowDeckImport) return;
+    if (selectionMode !== 'multi') return;
+
+    try {
+      const detail = await host.online.getDeckCards(deckId);
+      const entries = Array.isArray(detail?.cards) ? detail.cards : [];
+
+      let remaining = typeof maxSelected === 'number' && maxSelected > 0 ? Math.max(0, maxSelected - selectedCount) : Number.POSITIVE_INFINITY;
+      const nextSelectedIds = new Set(selectedIdSet);
+
+      for (const entry of entries) {
+        if (remaining <= 0) break;
+        if (!entry?.isAccessible || !entry?.card) continue;
+
+        const card = entry.card;
+        if (!effectiveAllowedTypeSet.has(card.type)) continue;
+
+        const cardId = typeof card?.id === 'string' ? card.id : '';
+        if (!cardId || nextSelectedIds.has(cardId)) continue;
+
+        try {
+          const payload = mapPublicDataCardRowToBattleSelectionPayload(card);
+
+          if (canToggle) {
+            onToggleCard?.(payload, true);
+          } else {
+            onSelectCard?.(payload);
+          }
+
+          nextSelectedIds.add(cardId);
+          remaining -= 1;
+
+          if (isPublicVisibility(payload._isPublic) && !host.platform.marks.isUsed(cardId)) {
+            void (async () => {
+              try {
+                if (await host.online.reportCardStat(cardId, 'usage')) host.platform.marks.markUsed(cardId);
+              } catch (error) {
+                console.error('增加使用次数失败:', error);
+              }
+            })();
+          }
+        } catch (error) {
+          console.error('解析数据卡失败:', error);
+        }
+      }
+    } catch (error) {
+      console.error('导入卡组失败:', error);
+    }
+  }, [allowDeckImport, canToggle, effectiveAllowedTypeSet, host.online, host.platform, maxSelected, onSelectCard, onToggleCard, selectedCount, selectedIdSet, selectionMode]);
+
+  const handleDownloadCard = useCallback(async (card: any) => {
+    const downloadJson = host.platform.downloadJson;
+    if (!downloadJson) return;
+    try {
+      const signal = cardReadController.current.signal;
+      const full = isLocalDataCardRow(card)
+        ? card
+        : typeof card.data === 'string' ? card : await host.online.loadFullCard(card, activeTab === 'my' ? 'my' : 'public', signal);
+      if (signal.aborted) return;
+      let cardPayload = full.data;
+      if (typeof cardPayload === 'string') {
+        cardPayload = JSON.parse(cardPayload);
+      }
+      const sanitizedName = (card.name || '数据卡').replace(/[\\/:*?"<>|]/g, '_');
+      downloadJson(`${sanitizedName}.json`, JSON.stringify(cardPayload, null, 2));
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') return;
+      setSelectError(error instanceof Error ? error.message : '保存数据卡失败');
+    }
+  }, [activeTab, host.online, host.platform]);
+
+  /**
+   * 从本机本地库删除一张数据卡。
+   *
+   * 与"取消选择"是两件事：删除后本地库不再保留这条记录，而取消选择只影响本次会话。
+   * 这里刻意不做静默删除——tombstone 由仓储负责，UI 只负责把后果说清楚。
+   */
+  const handleRemoveLocalCard = useCallback(async (card: LocalDataCardRow) => {
+    setLocalActionError(null);
+    setRemovingLocalId(card.id);
+    try {
+      await host.local.repository.delete(card.id);
+      localCards.reload();
+    } catch (error) {
+      setLocalActionError(error instanceof Error ? error.message : '本地库删除失败，请重试。');
+    } finally {
+      setRemovingLocalId((current) => (current === card.id ? null : current));
+    }
+  }, [localCards, host.local.repository]);
+
+  /**
+   * LIB-007「下载本地副本」：把线上数据卡复制一份进本机本地库。
+   *
+   * 复制而非移动：线上记录不受影响，本地副本通过 `cloudRef` 与它保持可辨认的对应关系。
+   * 内容相同则整卡更新，用户不会因为多点一次就多出一张几乎一样的卡。
+   */
+  const handleSaveCardToLibrary = useCallback(async (card: any) => {
+    setLocalActionError(null);
+    // 详情弹窗用 `void onSaveCopyToLocalLibrary()` 调用：这里抛出去就是未处理
+    // rejection，用户既看不到提示，弹窗也不会关。
+    let payload: unknown;
+    try {
+      payload = typeof card?.data === 'string' ? JSON.parse(card.data) : card?.data;
+    } catch {
+      setLocalActionError('这张数据卡的正文不是合法 JSON，无法保存到本地库。');
+      return;
+    }
+    if (payload === undefined || payload === null) {
+      setLocalActionError('这张数据卡没有可保存的正文。');
+      return;
+    }
+    const summary = await libraryAutoSave.save([{
+      cardType: normalizeCardTypeForLibrary(card),
+      title: typeof card?.name === 'string' && card.name.trim() ? card.name : '未命名数据卡',
+      payload,
+    }]);
+    if (libraryAutoSave.error) setLocalActionError(libraryAutoSave.error);
+    setLibraryCopyMessage(summary.saved > 0
+      ? `已保存到本地库：${summary.saved} 张。`
+      : summary.updated > 0
+        ? '本地库中已有内容相同的数据卡，已更新原卡。'
+        : summary.inRecycleBin > 0
+          ? '内容相同的数据卡在本地库回收站中，未重复保存；可在「本地库」页面恢复。'
+          : summary.failed > 0
+            ? '保存到本地库失败。'
+            : null);
+  }, [libraryAutoSave]);
+
+  const handleSaveSelectedCardToLibrary = useCallback(async () => {
+    if (!selectedCard) return;
+    await handleSaveCardToLibrary(selectedCard);
+    if (isLocalTab) localCards.reload();
+  }, [selectedCard, handleSaveCardToLibrary, isLocalTab, localCards]);
+
+  // 查看详情：与 DataCardsModal.withFullCard 一致，新动作 abort 旧动作，
+  // 避免连续点击 A、B 时先返回的 A 覆盖最后点击的 B。
+  const openCardDetails = useCallback(async (card: any) => {
+    cardDetailControllerRef.current?.abort();
+    const controller = new AbortController();
+    cardDetailControllerRef.current = controller;
+    const { signal } = controller;
+    try {
+      if (isLocalDataCardRow(card)) {
+        const record = localRecordById.get(card.id);
+        if (!record) throw new Error('本地库中的这张数据卡已不可用。');
+        if (signal.aborted) return;
+        setSelectedCard(mapLocalCardRecordToDetailsCard(record));
+        setShowDetailsModal(true);
+        return;
+      }
+      const full = await host.online.loadFullCard(card, activeTab === 'my' ? 'my' : 'public', signal);
+      if (signal.aborted) return;
+      setSelectedCard(full);
+      setShowDetailsModal(true);
+    } catch (error) {
+      if (signal.aborted) return;
+      setSelectError(error instanceof Error ? error.message : '读取数据卡失败');
+    } finally {
+      if (cardDetailControllerRef.current === controller) cardDetailControllerRef.current = null;
+    }
+  }, [activeTab, host.online, localRecordById]);
+
+  // 【新增】处理高级筛选输入变化
+  const handleFilterChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    const { name } = e.target;
+    let nextValue: string | boolean = (e.target as HTMLInputElement).value;
+
+    if (e.target instanceof HTMLInputElement && e.target.type === 'checkbox') {
+      nextValue = e.target.checked;
+    }
+
+    setFilters(prev => ({ ...prev, [name]: nextValue } as Filters));
+  };
+
+  // 【新增】应用高级筛选
+  const applyFilters = () => {
+    const nextFilters = normalizeFiltersBySelectedType(filters);
+    if (nextFilters !== filters) {
+      setFilters(nextFilters);
+    }
+    setCurrentPage(1);
+    setActiveFilters(nextFilters);
+  };
+
+  // 【新增】重置高级筛选
+  const resetFilters = () => {
+    setFilters(initialFilters);
+    setActiveFilters(initialFilters);
+    setCurrentPage(1);
+  };
+
+  // 【新增】处理作者点击事件
+  const handleAuthorClick = (authorName: string) => {
+    if (!isPublicTab) return;
+    const newFilters = { ...initialFilters, author: authorName };
+    setFilters(newFilters);
+    setActiveFilters(newFilters);
+    setCurrentPage(1);
+    setShowAdvancedFilters(true); // 展开筛选器让用户看到
+  };
+
+  const handleFavoriteToggleForCard = useCallback(async (card: any, nextState: boolean) => {
+    if (!isAuthenticated) {
+      return false;
+    }
+
+    if (nextState) {
+      const result = await host.online.addFavorite(card.id);
+      if (!result.success && !result.alreadyExists) {
+        return false;
+      }
+
+      const delta = result.alreadyExists ? 0 : 1;
+
+      setFavoriteIds((prev) => {
+        const next = new Set(prev);
+        next.add(card.id);
+        return next;
+      });
+
+      if (delta !== 0) {
+        setPublicDataCards((prev) => adjustFavoriteCount(prev, card.id, delta));
+        setUserDataCards((prev) => adjustFavoriteCount(prev, card.id, delta));
+      }
+
+      setFavoriteCards((prev) => {
+        const exists = prev.some((item) => item.id === card.id);
+        let nextList = prev;
+        if (exists) {
+          nextList = delta !== 0 ? adjustFavoriteCount(prev, card.id, delta) : [...prev];
+        } else {
+          const newCard = {
+            ...card,
+            favorite_count: (card.favorite_count ?? 0) + delta,
+            favorited_at: new Date().toISOString()
+          };
+          nextList = [...prev, newCard];
+        }
+        return sortFavorites(nextList, sortBy);
+      });
+
+      return true;
+    }
+
+    const result = await host.online.removeFavorite(card.id);
+    if (!result.success) {
+      return false;
+    }
+
+    setFavoriteIds((prev) => {
+      const next = new Set(prev);
+      next.delete(card.id);
+      return next;
+    });
+
+    setPublicDataCards((prev) => adjustFavoriteCount(prev, card.id, -1));
+    setUserDataCards((prev) => adjustFavoriteCount(prev, card.id, -1));
+    setFavoriteCards((prev) => prev.filter((item) => item.id !== card.id));
+    reloadFavorites();
+
+    return true;
+  }, [isAuthenticated, host.online, adjustFavoriteCount, sortFavorites, sortBy, setUserDataCards, setFavoriteCards, reloadFavorites]);
+
+  // 处理页码变化：翻页请求的显式 owner；roleType 高级筛选走本地 500 条分页，只切页不请求。
+  const handlePageChange = (newPage: number) => {
+    setCurrentPage(newPage);
+    if (isPublicTab && !(publicFilters.roleType && selectedType === 'character')) {
+      reloadPublicCurrentQuery(newPage);
+    }
+  };
+
+  // 处理排序变化：只更新 state，由公开查询 effect 统一发起请求
+  const handleSortChange = (newSortBy: 'likes' | 'usage' | 'favorites' | 'created_at') => {
+    setSortBy(newSortBy);
+    setCurrentPage(1);
+  };
+
+  const tagById = useMemo(() => {
+    const map = new Map<string, ApiTag>();
+    for (const tag of tagOptions) {
+      if (!tag?.id) continue;
+      map.set(tag.id, tag);
+    }
+    return map;
+  }, [tagOptions]);
+
+  const selectedTagChips = useMemo(() => {
+    return selectedTagIds.map((id) => {
+      const tag = tagById.get(id);
+      return {
+        id,
+        label: tag?.name ?? id,
+        description: tag?.description ?? null,
+      };
+    });
+  }, [selectedTagIds, tagById]);
+
+  const filteredTagOptions = useMemo(() => {
+    const keyword = tagSearch.trim().toLowerCase();
+    if (!keyword) return [];
+    return tagOptions
+      .filter((tag) => {
+        const name = (tag.name || '').toLowerCase();
+        const id = (tag.id || '').toLowerCase();
+        const category = (tag.category || '').toLowerCase();
+        const description = (tag.description || '').toLowerCase();
+        return (
+          name.includes(keyword) ||
+          id.includes(keyword) ||
+          category.includes(keyword) ||
+          description.includes(keyword)
+        );
+      })
+      .filter((tag) => !selectedTagIds.includes(tag.id))
+      .slice(0, 8);
+  }, [tagOptions, tagSearch, selectedTagIds]);
+
+  const toggleTagFilter = useCallback((tagId: string) => {
+    setSelectedTagIds((prev) => {
+      if (prev.includes(tagId)) return prev.filter((id) => id !== tagId);
+      return [...prev, tagId];
+    });
+  }, []);
+
+  const clearTagFilters = useCallback(() => {
+    setTagSearch('');
+    setSelectedTagIds([]);
+  }, []);
+
+  const tagFilterSet = useMemo(() => new Set(selectedTagIds), [selectedTagIds]);
+  const applyTagFilter = useCallback((cards: any[]) => {
+    if (selectedTagIds.length === 0) return cards;
+    return cards.filter((card) => {
+      const tagIds = getCardTagIds(card);
+      if (tagMatchMode === 'all') {
+        if (tagIds.length === 0) return false;
+        const tagSet = new Set(tagIds);
+        return selectedTagIds.every((id) => tagSet.has(id));
+      }
+      return tagIds.some((id) => tagFilterSet.has(id));
+    });
+  }, [selectedTagIds, tagFilterSet, tagMatchMode]);
+
+  const filteredPublicCards = useMemo(() => applyTagFilter(publicDataCards), [applyTagFilter, publicDataCards]);
+  const userTotalPages = Math.max(1, Math.ceil(myPage.total / cardsPerPage));
+
+  const favoritesTotalPages = Math.max(1, Math.ceil(favoritesPage.total / cardsPerPage));
+  const paginatedUserCards = userDataCards;
+  const paginatedFavoriteCards = favoriteCards;
+
+  const publicPaginatedCards = useMemo(() => {
+    if (publicFilters.roleType && selectedType === 'character') {
+      return filteredPublicCards.slice((currentPage - 1) * cardsPerPage, currentPage * cardsPerPage);
+    }
+    return filteredPublicCards;
+  }, [filteredPublicCards, publicFilters.roleType, selectedType, currentPage, cardsPerPage]);
+
+  const localPaginatedCards = useMemo(
+    () => localCards.rows.slice((currentPage - 1) * cardsPerPage, currentPage * cardsPerPage),
+    [localCards.rows, currentPage, cardsPerPage],
+  );
+  const localTotalPages = Math.max(1, Math.ceil(localCards.total / cardsPerPage));
+
+  const displayCards = useMemo(() => {
+    if (activeTab === 'my') return paginatedUserCards;
+    if (activeTab === 'favorites') return paginatedFavoriteCards;
+    if (isLocalTab) return localPaginatedCards;
+    if (isPublicTab) return publicPaginatedCards;
+    return [];
+  }, [activeTab, isLocalTab, isPublicTab, paginatedUserCards, paginatedFavoriteCards, localPaginatedCards, publicPaginatedCards]);
+
+  // 「搜索/筛选无命中」和「这个库里本来就没有」对用户是两件事，空状态必须分开说。
+  // 标签是与关键词、高级筛选各自独立的状态，且在每一个页签上都渲染，
+  // 只看关键词和 Filters 会把「只按标签筛出了 0 条」误判成「库里本来就没有」。
+  const hasActiveQuery = useMemo(() => (
+    debouncedSearchQuery.trim().length > 0
+    || selectedTagIds.length > 0
+    || JSON.stringify(activeFilters) !== JSON.stringify(initialFilters)
+  ), [debouncedSearchQuery, selectedTagIds, activeFilters, initialFilters]);
+
+  const reloadActiveList = useCallback(() => {
+    if (activeTab === 'my') { loadUserDataCards(); return; }
+    if (activeTab === 'favorites') { favoritesPage.reload(); return; }
+    if (isLocalTab) { localCards.reload(); return; }
+    reloadPublicCurrentQuery(currentPage);
+  }, [activeTab, isLocalTab, localCards, favoritesPage, reloadPublicCurrentQuery, currentPage, loadUserDataCards]);
+
+  const displayCardIds = useMemo(() => {
+    const out: string[] = [];
+    const seen = new Set<string>();
+    for (const card of displayCards as any[]) {
+      // 本地库记录不参与服务器侧的批量元数据请求：它们没有技术值、段位或审核状态。
+      if (isLocalDataCardRow(card)) continue;
+      const id = typeof card?.id === 'string' ? card.id.trim() : '';
+      if (!id) continue;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      out.push(id);
+    }
+    return out;
+  }, [displayCards]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    if (displayCardIds.length === 0) return;
+    const fetchCardMetaBatch = host.online.fetchCardMetaBatch;
+    // 宿主未提供元数据批量查询时整体降级为不显示，不产生空请求。
+    if (!fetchCardMetaBatch) return;
+
+    // 本地库记录没有服务器侧技术值/段位；为它们发批量请求只会得到空响应。
+    const pendingIds = displayCardIds.filter((id) => !Object.prototype.hasOwnProperty.call(cardMetaById, id));
+    if (pendingIds.length === 0) return;
+
+    metaFetchAbortControllerRef.current?.abort();
+    const abortController = new AbortController();
+    metaFetchAbortControllerRef.current = abortController;
+
+    const run = async () => {
+      try {
+        const items = await fetchCardMetaBatch(pendingIds, abortController.signal);
+        if (!items) return;
+
+        setCardMetaById((prev) => ({ ...prev, ...items }));
+      } catch (error) {
+        if (abortController.signal.aborted || (error instanceof Error && error.name === 'AbortError')) {
+          return;
+        }
+        console.warn('加载数据卡技术值/段位失败（降级为不显示）:', error);
+      } finally {
+        if (metaFetchAbortControllerRef.current === abortController) {
+          metaFetchAbortControllerRef.current = null;
+        }
+      }
+    };
+
+    void run();
+
+    return () => {
+      abortController.abort();
+    };
+  }, [isOpen, displayCardIds, cardMetaById, host.online]);
+
+  // 批量获取作者佩戴的徽章
+  const currentUserEquippedBadges = useMemo(() => {
+    return (Array.isArray(userBadges) ? userBadges : [])
+      .filter((ub) => ub.isEquipped)
+      .sort((a, b) => a.displayOrder - b.displayOrder)
+      .map((ub) => ub.badge);
+  }, [userBadges]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    if (displayCards.length === 0) return;
+    const fetchAuthorBadgesBatch = host.online.fetchAuthorBadgesBatch;
+
+    // "我的" 标签页直接使用当前用户的徽章
+    if (activeTab === 'my' && userId) {
+      setAuthorBadgesById((prev) => {
+        if (prev[userId]) return prev;
+        return { ...prev, [userId]: currentUserEquippedBadges };
+      });
+      return;
+    }
+    // 宿主未提供徽章批量查询时整体降级为不显示，不产生空请求。
+    if (!fetchAuthorBadgesBatch) return;
+
+    // 提取需要获取徽章的用户 ID
+    const pendingUserIds = new Set<number>();
+    for (const card of displayCards as any[]) {
+      const uid = typeof card?.user_id === 'number' ? card.user_id : 0;
+      if (uid > 0 && !Object.prototype.hasOwnProperty.call(authorBadgesById, uid)) {
+        pendingUserIds.add(uid);
+      }
+    }
+    if (pendingUserIds.size === 0) return;
+
+    badgeFetchAbortControllerRef.current?.abort();
+    const abortController = new AbortController();
+    badgeFetchAbortControllerRef.current = abortController;
+
+    const run = async () => {
+      try {
+        const items = await fetchAuthorBadgesBatch([...pendingUserIds], abortController.signal);
+        if (!items) return;
+
+        setAuthorBadgesById((prev) => ({ ...prev, ...items }));
+      } catch (error) {
+        if (abortController.signal.aborted || (error instanceof Error && error.name === 'AbortError')) {
+          return;
+        }
+        console.warn('加载作者徽章失败（降级为不显示）:', error);
+      } finally {
+        if (badgeFetchAbortControllerRef.current === abortController) {
+          badgeFetchAbortControllerRef.current = null;
+        }
+      }
+    };
+
+    void run();
+
+    return () => {
+      abortController.abort();
+    };
+  }, [isOpen, activeTab, displayCards, userId, currentUserEquippedBadges, authorBadgesById, host.online]);
+
+  const publicTotalPages = publicFilters.roleType && selectedType === 'character'
+    ? Math.max(1, Math.ceil(filteredPublicCards.length / cardsPerPage))
+    : null;
+
+  const currentTabTotalPages = activeTab === 'my'
+    ? userTotalPages
+    : activeTab === 'favorites'
+      ? favoritesTotalPages
+    : isLocalTab
+      ? localTotalPages
+    : isPublicTab
+        ? publicTotalPages
+        : null;
+  const typeLabelMap: Record<BattleDataSelectedType, string> = {
+    character: '角色',
+    scenario: '情景',
+    history: '叙事历史',
+    questionnaire: '问卷',
+    all: '素材',
+  };
+  const typeLabel = typeLabelMap[selectedType] ?? '数据';
+  const modalTitle = titleOverride || `选择${typeLabel}数据卡`;
+  const isFilterActive = useMemo(() => {
+    return Boolean(
+      publicFilters.author ||
+      publicFilters.minLikes ||
+      publicFilters.maxLikes ||
+      publicFilters.minUsage ||
+      publicFilters.maxUsage ||
+      publicFilters.minFavorites ||
+      publicFilters.maxFavorites ||
+      publicFilters.recommendedOnly ||
+      publicFilters.roleType ||
+      publicFilters.nativeOnly ||
+      publicFilters.nativeAllowedOnly
+    );
+  }, [publicFilters]);
+
+  const { tabId: activeTabTabId, panelId: activeTabPanelId } = modalTabIds(TAB_ID_PREFIX, activeTab);
+
+  /**
+   * 页签定义。顺序即 effectiveTabs 的声明顺序，直接决定 rail 上的左右次序。
+   *
+   * 数量交给 ModalTabs 的 `count` 渲染成 `tabular-nums` 片段，而不是拼进 label：
+   * 切换页签时数字变化不该把整条 rail 的宽度顶得跳动。
+   */
+  const tabItems: ModalTabItem<BattleDataTab>[] = [];
+  if (effectiveTabs.includes('my')) {
+    tabItems.push({ value: 'my', label: `我的${typeLabel}`, count: myPage.hasLoaded ? myPage.total : '—' });
+  }
+  if (effectiveTabs.includes('local')) {
+    tabItems.push({
+      value: 'local',
+      label: '本地库',
+      count: localCards.status === 'success' ? localCards.libraryTotal : '—',
+      title: '本机本地库，无需登录；清除站点数据会一并删除',
+    });
+  }
+  if (effectiveTabs.includes('public')) {
+    tabItems.push({ value: 'public', label: `公开${typeLabel}` });
+  }
+  if (effectiveTabs.includes('recommended')) {
+    tabItems.push({ value: 'recommended', label: '管理员推荐' });
+  }
+  if (effectiveTabs.includes('favorites')) {
+    tabItems.push({ value: 'favorites', label: '我的收藏', count: favoritesPage.hasLoaded ? favoritesPage.total : '—' });
+  }
+
+  /**
+   * 页签切换统一入口：原先每个按钮各自内联一套 onClick，现在按「是否当前页签」分派。
+   *
+   * 再次点击当前页签 = 用当前查询刷新，这是既有交互，不因为收敛到 ModalTabs 而丢掉；
+   * 各页签的刷新入口本来就不同，切换页签只改 state、请求仍由 effect 发起。
+   */
+  const handleTabChange = (next: BattleDataTab) => {
+    hasUserSelectedTabRef.current = true;
+    if (next === activeTab) {
+      setCurrentPage(1);
+      if (next === 'my') loadUserDataCards();
+      else if (next === 'local') localCards.reload();
+      else if (next === 'favorites') favoritesPage.reload();
+      else if (next === 'public' || next === 'recommended') reloadPublicCurrentQuery(1);
+      return;
+    }
+    setActiveTab(next);
+    setCurrentPage(1);
+  };
+
+  if (!isOpen) {
+    return null;
+  }
+
+  const modal = (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div
+        ref={modalRef}
+        role="dialog"
+        aria-modal={detailsModalOpenRef.current ? undefined : 'true'}
+        aria-hidden={detailsModalOpenRef.current ? 'true' : undefined}
+        aria-labelledby={modalTitleId}
+        aria-label={modalTitle}
+        tabIndex={-1}
+        className="bg-white rounded-xl p-4 shadow-2xl sm:p-6 w-full max-w-[90rem] h-[85dvh] max-h-[90dvh] overflow-hidden flex flex-col relative"
+      >
+        <button
+          type="button"
+          ref={closeButtonRef}
+          onClick={onClose}
+          aria-label={`关闭${modalTitle}`}
+          className="absolute right-4 top-4 z-10 inline-flex min-h-10 min-w-10 items-center justify-center text-gray-400 hover:text-gray-600 text-2xl"
+        >×</button>
+		        <h2 id={modalTitleId} className="text-xl font-bold pr-8">{modalTitle}</h2>
+          {selectError && (
+            <div className="mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              {selectError}
+            </div>
+          )}
+          {localActionError && (
+            <div className="mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
+              {localActionError}
+            </div>
+          )}
+          {externalError && (
+            <div className="mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              {externalError}
+            </div>
+          )}
+          {selectionMode === 'multi' && typeof maxSelected === 'number' && maxSelected > 0 ? (
+            <div className="mt-1 mb-4 text-sm text-gray-600">
+              已选 {selectedCount}/{maxSelected}
+              {canToggle ? '（再次点击已选卡可取消）' : ''}
+              {atLimit ? '，已达到上限' : ''}
+            </div>
+          ) : (
+            <div className="mb-4" />
+          )}
+
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          {/* 筛选和排序区域 */}
+          <div className="mb-2">
+            <div className="flex flex-wrap gap-2 mb-2 items-center">
+              <div className="flex-1 relative min-w-[250px]">
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onCompositionStart={() => {
+                    isComposingSearchRef.current = true;
+                  }}
+                  onCompositionEnd={() => {
+	                    isComposingSearchRef.current = false;
+	                  }}
+	                  placeholder={`搜索${typeLabel}名称或粘贴分享链接...`}
+	                  className="w-full input-field pr-10"
+	                />
+	                {searchQuery && searchQuery !== debouncedSearchQuery && <div className="absolute right-3 top-1/2 -translate-y-1/2"><div className="w-4 h-4 border-2 border-pink-500 border-t-transparent rounded-full animate-spin"></div></div>}
+	              </div>
+	              <SortSelector value={sortBy} onChange={handleSortChange} />
+              {isPublicTab && (
+                <button
+                  onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
+                  className={`flex items-center gap-1 px-3 py-2 text-sm rounded-lg transition-colors ${isFilterActive ? 'bg-purple-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+                >
+                  <Filter className="w-4 h-4" /> 高级筛选 <ChevronDown className={`w-4 h-4 transition-transform ${showAdvancedFilters ? 'rotate-180' : ''}`} />
+                </button>
+              )}
+            </div>
+            {(
+              <div className="mb-2 rounded-lg border border-gray-200 bg-gray-50/60 px-3 py-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="text-xs font-semibold text-gray-600">标签过滤</div>
+                  <div className="relative flex-1 min-w-[180px]">
+                    <input
+                      type="text"
+                      value={tagSearch}
+                      onChange={(e) => setTagSearch(e.target.value)}
+                      onFocus={ensureTagOptions}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Escape') {
+                          e.preventDefault();
+                          setTagSearch('');
+                          return;
+                        }
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          if (filteredTagOptions.length > 0) {
+                            toggleTagFilter(filteredTagOptions[0].id);
+                            setTagSearch('');
+                          }
+                        }
+                      }}
+                      placeholder="搜索/添加标签"
+                      className="input-field h-8 text-xs pr-8"
+                    />
+                    {tagOptionsLoading && (
+                      <div className="absolute right-2 top-1/2 -translate-y-1/2">
+                        <div className="w-3 h-3 border-2 border-pink-500 border-t-transparent rounded-full animate-spin" />
+                      </div>
+                    )}
+                  </div>
+                  {selectedTagIds.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={clearTagFilters}
+                      className="text-xs text-gray-500 hover:text-gray-700 hover:underline"
+                    >
+                      清空
+                    </button>
+                  )}
+                  <div className="flex items-center gap-1 text-[11px] text-gray-500">
+                    <span>匹配</span>
+                    <div className="inline-flex rounded-full border border-gray-200 bg-white overflow-hidden">
+                      <button
+                        type="button"
+                        onClick={() => setTagMatchMode('any')}
+                        className={`px-2 py-0.5 text-[11px] transition-colors ${
+                          tagMatchMode === 'any' ? 'bg-pink-500 text-white' : 'text-gray-600 hover:bg-gray-100'
+                        }`}
+                      >
+                        任一
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setTagMatchMode('all')}
+                        className={`px-2 py-0.5 text-[11px] transition-colors ${
+                          tagMatchMode === 'all' ? 'bg-pink-500 text-white' : 'text-gray-600 hover:bg-gray-100'
+                        }`}
+                      >
+                        全部
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {selectedTagChips.length === 0 ? (
+                    <div className="text-[11px] text-gray-500">未选择标签</div>
+                  ) : (
+                    selectedTagChips.map((chip) => (
+                      <span
+                        key={chip.id}
+                        className="inline-flex items-center gap-2 rounded-full bg-pink-50 px-3 py-1 text-xs text-pink-800"
+                        title={chip.description ?? chip.label}
+                      >
+                        {chip.label}
+                        <button
+                          type="button"
+                          className="text-pink-700 hover:text-pink-900"
+                          onClick={() => toggleTagFilter(chip.id)}
+                        >
+                          ×
+                        </button>
+                      </span>
+                    ))
+                  )}
+                </div>
+                {tagSearch.trim() && (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {tagOptionsLoading ? (
+                      <div className="text-[11px] text-gray-500">正在加载标签库...</div>
+                    ) : filteredTagOptions.length === 0 ? (
+                      <div className="text-[11px] text-gray-500">未找到匹配标签</div>
+                    ) : (
+                      filteredTagOptions.map((tag) => (
+                        <button
+                          key={tag.id}
+                          type="button"
+                          onClick={() => {
+                            toggleTagFilter(tag.id);
+                            setTagSearch('');
+                          }}
+                          className="rounded-full border border-gray-200 bg-white px-3 py-1 text-xs text-gray-700 hover:bg-gray-100"
+                          title={tag.description ?? tag.name}
+                        >
+                          {tag.name}
+                        </button>
+                      ))
+                    )}
+                  </div>
+                )}
+                {tagOptionsError && (
+                  <div className="mt-1 text-[11px] text-red-600">{tagOptionsError}</div>
+                )}
+              </div>
+            )}
+            {/* 【新增】高级筛选面板 */}
+            {showAdvancedFilters && isPublicTab && (
+              <div className="p-4 bg-gray-50 rounded-lg border space-y-3 mb-2 animate-fade-in-down">
+                <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-gray-600">作者</label>
+                    <input type="text" name="author" value={filters.author} onChange={handleFilterChange} placeholder="输入作者名" className="input-field" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-gray-600">点赞数</label>
+                    <div className="flex gap-2">
+                      <input type="number" name="minLikes" value={filters.minLikes} onChange={handleFilterChange} placeholder="最少" className="input-field w-1/2" />
+                      <input type="number" name="maxLikes" value={filters.maxLikes} onChange={handleFilterChange} placeholder="最多" className="input-field w-1/2" />
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-gray-600">使用数</label>
+                    <div className="flex gap-2">
+                      <input type="number" name="minUsage" value={filters.minUsage} onChange={handleFilterChange} placeholder="最少" className="input-field w-1/2" />
+                      <input type="number" name="maxUsage" value={filters.maxUsage} onChange={handleFilterChange} placeholder="最多" className="input-field w-1/2" />
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-gray-600">收藏数</label>
+                    <div className="flex gap-2">
+                      <input type="number" name="minFavorites" value={filters.minFavorites} onChange={handleFilterChange} placeholder="最少" className="input-field w-1/2" />
+                      <input type="number" name="maxFavorites" value={filters.maxFavorites} onChange={handleFilterChange} placeholder="最多" className="input-field w-1/2" />
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-gray-600">角色类型</label>
+                    <select
+                      name="roleType"
+                      value={filters.roleType}
+                      onChange={handleFilterChange}
+                      className="input-field disabled:bg-gray-100 disabled:text-gray-400"
+                      disabled={selectedType !== 'character'}
+                    >
+                      <option value="">全部</option>
+                      <option value="magical-girl">魔法少女</option>
+                      <option value="canshou">残兽</option>
+                      <option value="general">通用</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-4">
+                  <label className="inline-flex items-center gap-2 text-xs text-gray-700">
+                    <input
+                      type="checkbox"
+                      name="nativeOnly"
+                      checked={filters.nativeOnly}
+                      onChange={handleFilterChange}
+                      disabled={selectedType === 'questionnaire'}
+                    />
+                    <span className={selectedType === 'questionnaire' ? 'text-gray-400' : ''}>仅看原生</span>
+                  </label>
+                  <label className="inline-flex items-center gap-2 text-xs text-gray-700">
+                    <input
+                      type="checkbox"
+                      name="nativeAllowedOnly"
+                      checked={filters.nativeAllowedOnly}
+                      onChange={handleFilterChange}
+                      disabled={selectedType !== 'questionnaire'}
+                    />
+                    <span className={selectedType !== 'questionnaire' ? 'text-gray-400' : ''}>仅看原生许可</span>
+                  </label>
+                </div>
+                <div className="flex justify-end gap-2 pt-2">
+                  <button onClick={resetFilters} className="px-3 py-1.5 text-xs bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300">重置</button>
+                  <button onClick={applyFilters} className="px-3 py-1.5 text-xs bg-purple-600 text-white rounded-md hover:bg-purple-700">应用筛选</button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {listError && <div role="alert" className="mb-3 rounded-lg bg-red-50 p-3 text-sm text-red-700">
+            {displayCards.length ? `刷新失败，当前显示上次成功结果：${listError}` : `数据卡加载失败：${listError}`}
+            <button type="button" disabled={listLoading} className="ml-3 px-3 py-2 rounded bg-white disabled:opacity-50"
+              onClick={reloadActiveList}>重试</button>
+          </div>}
+          {/* 标签页切换。窄屏由 ModalTabs 内部横向滚动承载，不再让 flex 收缩把中文标签压成竖排。
+              整行 sticky：卡片网格在滚动容器里，往下翻页时页签必须留在视野内，
+              否则手机上滚到列表底部就再也切不了页签，只能一路滚回顶部。
+              z-10 只在「下方内容区已自成一个层叠上下文」时成立——卡片网格的 `isolate` 是
+              这个前提，两处必须一起改，否则卡内浮层会穿透上来。 */}
+          <div className="sticky top-0 z-10 mb-4 flex flex-wrap items-center justify-between gap-2 bg-white py-1">
+            <ModalTabs
+              idPrefix={TAB_ID_PREFIX}
+              ariaLabel={TAB_ARIA_LABEL}
+              items={tabItems}
+              value={activeTab}
+              onValueChange={handleTabChange}
+              className="max-w-full"
+            />
+
+            {/* 卡组导入不是页签，必须留在滚动 rail 之外，否则它会被一起卷走。 */}
+            {canImportDeck && (
+              <button
+                onClick={() => setShowDecksModal(true)}
+                className="px-4 py-2 rounded text-sm font-medium bg-purple-600 text-white hover:bg-purple-700"
+              >
+                卡组导入
+              </button>
+            )}
+          </div>
+
+	          {/* 内容区域 */}
+          <div
+            role="tabpanel"
+            id={activeTabPanelId}
+            aria-labelledby={activeTabTabId}
+          >
+            {isLocalTab ? (
+              <div className="mb-3">
+                {host.slots.renderLocalLibraryBanner?.()}
+              </div>
+            ) : null}
+	            {(listLoading || listIdle) && displayCards.length === 0 ? (
+	              <div className="flex justify-center items-center min-h-[40vh]"><div className="text-gray-500">加载中...</div></div>
+	            ) : displayCards.length === 0 ? (
+	              <DataCardEmptyState
+	                tab={activeTab}
+	                typeLabel={typeLabel}
+	                error={Boolean(listError)}
+	                hasActiveSearch={hasActiveQuery}
+	                onRetry={listError ? reloadActiveList : undefined}
+	                localLibraryLink={host.slots.localLibraryLink}
+	                renderLocalEmpty={host.slots.renderLocalLibraryEmpty}
+	              />
+	            ) : (
+		              <div
+                        // `isolate` 让网格自成一个层叠上下文。卡片右上角的 +/- 浮层是
+                        // `absolute z-20`，而卡片容器只是 `relative`（z-index 为 auto，不构成
+                        // 层叠上下文），于是这个 z-20 直接和弹窗的 chrome 参与比较，压过上方
+                        // `z-10` 的 sticky 页签行——卡片被遮住了，浮层按钮却还浮在页签行上。
+                        // 隔离后 z-20 只在网格内部生效，sticky 行仍然盖住整片列表。
+                        className="isolate grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4"
+                      >
+		                {displayCards.map((card: any) => {
+		                  const isFavorited = favoriteIds.has(card.id);
+		                  const enableFavorite = isAuthenticated && activeTab !== 'my';
+	                    const isSelected = selectedIdSet.has(card.id);
+	                    const itemDisabled = selectionMode === 'multi' && !isSelected && atLimit;
+	                    const showQuickToggle = selectionMode === 'multi';
+	                    const quickToggleDisabled = isSelected ? !canToggle : itemDisabled;
+	                    const quickToggleTitle = isSelected
+	                      ? (canToggle ? '移除' : '当前模式不支持移除')
+	                      : (itemDisabled ? '已达到上限' : '加入');
+                      const questionnaireNativeAllowed = resolveQuestionnaireNativeAllowed(card);
+
+		                  return (
+		                    <div
+                        key={card.id}
+                        className={`relative h-full ${itemDisabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                        {...(selectionMode === 'single' ? {
+                          role: 'button',
+                          tabIndex: itemDisabled ? -1 : 0,
+                          'aria-label': `选择${card.name || typeLabel}`,
+                          'aria-disabled': itemDisabled || undefined,
+                          onKeyDown: (event: React.KeyboardEvent<HTMLDivElement>) => {
+                            if (itemDisabled) return;
+                            if (event.key !== 'Enter' && event.key !== ' ') return;
+                            event.preventDefault();
+                            void handleSelectCard(card);
+                          },
+                        } : {})}
+                        onClick={() => {
+                          if (itemDisabled) return;
+                          void handleSelectCard(card);
+                        }}
+                      >
+                      {showQuickToggle && (
+		                        <button
+		                          type="button"
+		                          className={`absolute top-2 right-2 z-20 inline-flex h-8 w-8 items-center justify-center rounded-full border-2 text-lg font-bold leading-none shadow-sm transition-colors after:absolute after:rounded-full after:content-[''] focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 after:-inset-1 ${
+	                            quickToggleDisabled
+	                              ? 'cursor-not-allowed border-gray-200 bg-gray-100 text-gray-400'
+	                              : isSelected
+	                                ? 'border-transparent bg-red-500 text-white hover:bg-red-600 focus-visible:ring-red-500'
+	                                : 'border-transparent bg-emerald-500 text-white hover:bg-emerald-600 focus-visible:ring-emerald-500'
+	                          }`}
+	                          onClick={(e) => {
+	                            e.stopPropagation();
+	                            if (quickToggleDisabled) return;
+	                            void handleSelectCard(card);
+	                          }}
+	                          disabled={quickToggleDisabled}
+	                          title={quickToggleTitle}
+	                          aria-label={quickToggleTitle}
+	                        >
+	                          {isSelected ? '-' : '+'}
+	                        </button>
+	                      )}
+	                      <DataCard
+	                        platform={{
+	                          Link: host.platform.Link,
+	                          reviewHref: '/encyclopedia/review',
+	                          marks: host.platform.marks,
+	                          copyText: host.platform.copyText,
+	                          reportStat: host.online.reportCardStat,
+	                        }}
+	                        storageLocation={isLocalDataCardRow(card) ? 'local' : 'cloud'}
+	                        onRemoveFromLibrary={isLocalDataCardRow(card) ? () => setPendingLocalRemoval(card) : undefined}
+	                        removePending={removingLocalId === card.id}
+	                        localLibraryOriginHint={isLocalDataCardRow(card) ? '仅保存在本机，不会上传' : null}
+	                        id={card.id}
+	                        name={card.name}
+	                        description={card.description}
+	                        type={card.type}
+	                        roleType={card.roleType}
+	                        isPublic={normalizePublicVisibilityValue(card)}
+                          isSelected={isSelected}
+	                        reviewStatus={card.review_status}
+	                        usageCount={card.usage_count}
+	                        likeCount={card.like_count}
+	                        favoriteCount={card.favorite_count}
+                          techScore={cardMetaById[card.id]?.techScore ?? null}
+                          techLevel={cardMetaById[card.id]?.techLevel ?? null}
+                          strictTier={cardMetaById[card.id]?.strictTier ?? null}
+                          isNative={cardMetaById[card.id]?.isNative ?? null}
+                          questionnaireNativeAllowed={questionnaireNativeAllowed}
+	                        isFavorited={isFavorited}
+	                        canFavorite={enableFavorite}
+	                        isRecommended={card.is_recommended === 1}
+	                        author={activeTab === 'my' ? '我' : (card.username || '未知')}
+	                        authorBadges={activeTab === 'my' ? currentUserEquippedBadges : (authorBadgesById[card.user_id] ?? [])}
+		                        onViewDetails={allowCardDetails && host.slots.CardDetailsModal ? () => { void openCardDetails(card); } : undefined}
+	                        onAuthorClick={handleAuthorClick}
+	                        onToggleFavorite={enableFavorite ? (next) => handleFavoriteToggleForCard(card, next) : undefined}
+	                        onDownload={host.platform.downloadJson ? () => { void handleDownloadCard(card); } : undefined}
+	                      />
+	                    </div>
+	                  );
+	                })}
+	              </div>
+      )}
+
+	      {allowDeckImport && host.slots.DecksModal ? (
+	        <host.slots.DecksModal
+	          isOpen={showDecksModal}
+	          onClose={() => setShowDecksModal(false)}
+	          onImportDeck={(deckId) => void handleImportDeck(deckId)}
+	        />
+	      ) : null}
+
+          {/* 分页与底部 */}
+          {(
+            (activeTab === 'my' && myPage.total > cardsPerPage) ||
+            (activeTab === 'favorites' && favoritesPage.total > cardsPerPage) ||
+            (isPublicTab && (
+              (publicFilters.roleType && selectedType === 'character')
+                ? publicPaginatedCards.length > 0 || publicTotalPages! > 1
+                : (displayCards.length >= cardsPerPage || currentPage > 1)
+            ))
+          ) &&
+            <div className="flex justify-center items-center gap-2 pt-4 border-t mt-4">
+              <button
+                onClick={() => handlePageChange(currentPage - 1)}
+                disabled={currentPage === 1}
+                className={buttonClassName({ variant: 'secondary', size: 'md' })}
+              >
+                上一页
+              </button>
+              <span className="text-sm text-gray-600">
+                第 {currentPage} 页
+                {currentTabTotalPages ? ` / ${currentTabTotalPages}` : ''}
+              </span>
+              <button
+                onClick={() => handlePageChange(currentPage + 1)}
+                disabled={
+                  activeTab === 'my'
+                    ? currentPage >= userTotalPages
+                    : activeTab === 'favorites'
+                      ? currentPage >= favoritesTotalPages
+                      : isLocalTab
+                        ? currentPage >= localTotalPages
+                        : publicTotalPages
+                          ? currentPage >= publicTotalPages
+                          : displayCards.length < cardsPerPage
+                }
+                className={buttonClassName({ variant: 'secondary', size: 'md' })}
+              >
+                下一页
+              </button>
+            </div>
+          }
+            </div>
+	    </div>
+	  </div>
+
+	  {/* 本地库删除二次确认：删除只影响本机，但不可从选择弹窗里撤销，措辞必须说清楚 */}
+      <BaseModal
+        isOpen={pendingLocalRemoval !== null}
+        title="从本地库删除这张数据卡？"
+        maxWidthClassName="max-w-md"
+        closeOnBackdrop={!removingLocalId}
+        onClose={() => { if (!removingLocalId) setPendingLocalRemoval(null); }}
+        footer={(
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              className="px-4 py-2 rounded text-sm border border-gray-300 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:hover:bg-gray-800"
+              disabled={removingLocalId !== null}
+              onClick={() => setPendingLocalRemoval(null)}
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              className="px-4 py-2 rounded text-sm bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+              disabled={removingLocalId !== null}
+              onClick={() => {
+                if (pendingLocalRemoval) void handleRemoveLocalCard(pendingLocalRemoval).then(() => setPendingLocalRemoval(null));
+              }}
+            >
+              {removingLocalId !== null ? '正在删除…' : '删除'}
+            </button>
+          </div>
+        )}
+      >
+        <p className="text-sm text-gray-700 dark:text-gray-200">
+          「{pendingLocalRemoval?.name}」只会从这台设备的本地库中移除，不影响任何线上数据卡，
+          也不会同步到其他设备。删除后会移入本地库回收站，可在「本地库」页面恢复或彻底删除。
+        </p>
+      </BaseModal>
+
+	  {/* 详情模态框 */}
+      {allowCardDetails && selectedCard && host.slots.CardDetailsModal && (
+        <host.slots.CardDetailsModal
+          onSaveCopyToLocalLibrary={isLocalDataCardRow(selectedCard) ? undefined : handleSaveSelectedCardToLibrary}
+          localLibrarySaveState={{ busy: libraryAutoSave.busy, message: libraryCopyMessage }}
+          isOpen={showDetailsModal}
+          fallbackFocusRef={closeButtonRef}
+          onClose={() => {
+            setShowDetailsModal(false);
+            setSelectedCard(null);
+            closeButtonRef.current?.focus();
+          }}
+          card={{
+            id: selectedCard.id,
+            name: selectedCard.name,
+            description: selectedCard.description,
+            type: selectedCard.type,
+            data: selectedCard.data,
+            isPublic: getDataCardStatus(selectedCard).status === 'public',
+            usageCount: selectedCard.usage_count,
+            likeCount: selectedCard.like_count,
+            favoriteCount: selectedCard.favorite_count,
+            author: activeTab === 'my' ? '我' : (selectedCard.username || '未知'),
+            authorBadges: activeTab === 'my' ? currentUserEquippedBadges : (authorBadgesById[selectedCard.user_id] ?? []),
+            createdAt: selectedCard.created_at,
+            updatedAt: selectedCard.updated_at
+          }}
+        />
+	  )}
+    </div>
+  );
+
+  if (typeof document !== 'undefined') {
+    return createPortal(modal, document.body);
+  }
+  return modal;
+}

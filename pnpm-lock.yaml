@@ -797,9 +797,18 @@ importers:
       '@mahoshojo/ai-core':
         specifier: workspace:*
         version: link:../ai-core
+      '@mahoshojo/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@mahoshojo/domain':
+        specifier: workspace:*
+        version: link:../domain
       '@mahoshojo/local-library':
         specifier: workspace:*
         version: link:../local-library
+      clsx:
+        specifier: ^2.1.1
+        version: 2.1.1
       katex:
         specifier: ^0.16.27
         version: 0.16.47
@@ -818,6 +827,9 @@ importers:
       remark-math:
         specifier: ^6.0.0
         version: 6.0.0
+      tailwind-merge:
+        specifier: ^3.3.0
+        version: 3.4.0
     devDependencies:
       '@types/node':
         specifier: ^20

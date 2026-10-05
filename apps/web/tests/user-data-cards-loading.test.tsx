@@ -9,7 +9,8 @@ import type { DataCardSummary, DataCardSummaryPage } from '@mahoshojo/contracts/
 import DataCardsModal from '@/components/CharManager/DataCardsModal';
 import BattleDataModal from '@/components/BattleDataModal';
 vi.mock('@/lib/useAuth', () => ({ useAuth: () => ({ isAuthenticated: true, user: { id: 1, username: 'test' }, userBadges: [] }) }));
-vi.mock('@/components/DataCard', () => ({ default: (props: any) => (
+// 卡片块的实现已迁入 ui-web（D5.0e）：mock 打在共享模块的解析路径上。
+vi.mock('../../../packages/ui-web/src/card-library/DataCard', () => ({ default: (props: any) => (
   <button data-author={props.author} onClick={(event) => { event.stopPropagation(); (props.onEditData || props.onViewDetails)?.(); }}>{props.name}</button>
 ) }));
 vi.mock('@/components/DataCardDetailsModal', () => ({ default: (props: any) => (props.isOpen ? <div data-testid="card-details">{props.card?.name}</div> : null) }));

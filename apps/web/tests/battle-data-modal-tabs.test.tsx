@@ -15,7 +15,8 @@ vi.mock('@/lib/useAuth', () => ({ useAuth: () => ({
   user: null,
   userBadges: [],
 }) }));
-vi.mock('@/components/DataCard', () => ({ default: (props: any) => (
+// 卡片块的实现已迁入 ui-web（D5.0e）：mock 打在共享模块的解析路径上。
+vi.mock('../../../packages/ui-web/src/card-library/DataCard', () => ({ default: (props: any) => (
   <div data-testid={`card-${props.id}`}><span>{props.name}</span></div>
 ) }));
 vi.mock('@/components/DataCardDetailsModal', () => ({ default: () => null }));

@@ -1,12 +1,2 @@
-import {
-  OnlineDataCardVisibilitySchema,
-  type OnlineDataCardVisibility,
-} from '@mahoshojo/contracts/data-cards';
-
-export const normalizeOnlineDataCardVisibilityCompat = (
-  value: unknown,
-): OnlineDataCardVisibility | null => {
-  if (typeof value === 'boolean') return value ? 1 : 0;
-  const result = OnlineDataCardVisibilitySchema.safeParse(value);
-  return result.success ? result.data : null;
-};
+// 已迁入 @mahoshojo/ui-web/card-library（D5.0e 共源）；本文件保留既有导入路径。
+export { normalizeOnlineDataCardVisibilityCompat } from '@mahoshojo/ui-web/card-library';

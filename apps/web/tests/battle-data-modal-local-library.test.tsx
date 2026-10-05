@@ -11,7 +11,9 @@ import { saveLocalDataCard } from '@/lib/local-library/save-local-data-card';
 import { mapDataCardRuntimeSourceInfo } from '@/lib/data-card-read-mappers';
 
 vi.mock('@/lib/useAuth', () => ({ useAuth: () => ({ isAuthenticated: false, user: null, userBadges: [] }) }));
-vi.mock('@/components/DataCard', () => ({ default: (props: any) => (
+// 卡片块的实现已迁入 ui-web（D5.0e）：mock 必须打在共享模块的解析路径上，
+// `@/components/DataCard` 现在只是它的薄包装。
+vi.mock('../../../packages/ui-web/src/card-library/DataCard', () => ({ default: (props: any) => (
   <div
     data-testid={`card-${props.id}`}
     data-storage={props.storageLocation}
