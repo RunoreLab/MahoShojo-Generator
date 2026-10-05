@@ -207,8 +207,11 @@ describe('G25D Web workspace app ownership', () => {
       };
     };
 
-    expect(rootTsconfig.compilerOptions?.baseUrl).toBe('.');
-    expect(rootTsconfig.compilerOptions?.paths?.['@/*']).toEqual(['apps/web/*']);
+    // TS 4.1 起 `paths` 不再依赖 `baseUrl`（见 8b0a7728：移除它以消除新版 TS 弃用告警，
+    // 映射值同时改为 `./` 前缀的相对写法）。真正要守的不变量是「`@/*` 仍解析到
+    // `apps/web/*`」，而不是 `baseUrl` 这个实现细节——钉回 baseUrl 会把弃用告警请回来。
+    expect(rootTsconfig.compilerOptions?.baseUrl).toBeUndefined();
+    expect(rootTsconfig.compilerOptions?.paths?.['@/*']).toEqual(['./apps/web/*']);
   });
 });
 
