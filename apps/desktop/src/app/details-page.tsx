@@ -5,17 +5,28 @@ import { getModelGenerationCapabilities } from '@mahoshojo/ai-core/generation-se
 import { getRandomFlowers } from '@mahoshojo/domain/flowers';
 import { getAnswerLimitInfo, isAnswerOverLimit } from '@mahoshojo/domain/questionnaire';
 import { buildQuestionnaireFlow, resolveQuestionnaireReferences } from '@mahoshojo/domain/questionnaire-definition';
+import {
+  buildQuestionnaireGenerationRequestFields,
+  buildQuestionnaireSelectionLoreText,
+  isQuestionnaireSelectionNativeAllowed,
+  type QuestionnaireSelection,
+} from '@mahoshojo/domain/questionnaire-selection';
 import { AiExecutionLocationField, AdvancedGenerationSettings } from '@mahoshojo/ui-web/ai-provider';
+import { AiReasoningPanel } from '@mahoshojo/ui-web/details-controls';
+import { GenerationModeSwitcher, type GenerationMode } from '@mahoshojo/ui-web/details-controls';
 import { DETAILS_QUESTIONNAIRE_THEME, QuestionnaireQuestionPanel } from '@mahoshojo/ui-web/questionnaire';
-import { MagicalGirlResultBody } from '@mahoshojo/ui-web/character-result';
+import { MagicalGirlResultBody, type MagicalGirlResultData } from '@mahoshojo/ui-web/character-result';
+import { GeneralCharacterCard, type GeneralCharacterCardData } from '@mahoshojo/ui-web/character-card';
 import { CardLibraryModal, type BattleSelectionPayload, type CardLibrarySelectionContext } from '@mahoshojo/ui-web/card-library';
 import { DetailsSession } from '../features/details/session';
+import type { DetailsExecutionMode } from '../features/details/generation';
 import {
   buildDetailsAnswers,
   buildDetailsFlowItems,
   builtinQuestionnaireSource,
   loadDefaultQuestionnaire,
   parseQuestionnaireSelection,
+  toQuestionnaireSelection,
   type DetailsQuestionnaire,
   type QuestionnaireSource,
 } from '../features/details/questionnaire';
@@ -40,7 +51,10 @@ function DetailsForm({ session }: { session: DetailsSession }) {
   const profilesLoading = aiState.profilesState === 'idle' || aiState.profilesState === 'loading';
   const profilesError = aiState.profilesState === 'failed' ? aiState.profilesError : null;
   const cardLibraryHost = useDesktopCardLibraryHost();
-  const { store: cloudSessionStore } = useDesktopCloudSession();
+  const { state: cloudSessionState, store: cloudSessionStore } = useDesktopCloudSession();
+  const cloudSignedIn = cloudSessionState.phase.kind === 'ready'
+    && cloudSessionState.phase.session.state === 'active';
+  const [generationMode, setGenerationMode] = useState<GenerationMode>('non-stream');
   const [questionnaire, setQuestionnaire] = useState<DetailsQuestionnaire | null>(null);
   const [questionnaireSource, setQuestionnaireSource] = useState<QuestionnaireSource | null>(null);
   const [questionnaireError, setQuestionnaireError] = useState<string | null>(null);
@@ -111,13 +125,38 @@ function DetailsForm({ session }: { session: DetailsSession }) {
     if (!flowItem) return;
     session.updateDraft({ ...state.draft, answers: { ...answersByKey, [flowItem.key]: value } });
   };
+  // 当前选择集（单问卷形态；多问卷选择 UI 随 C6 装配落地，会话/执行层已按数组建模）。
+  const selections: QuestionnaireSelection[] = useMemo(
+    () => (questionnaire && questionnaireSource
+      ? [toQuestionnaireSelection(questionnaireSource, questionnaire)]
+      : []),
+    [questionnaire, questionnaireSource],
+  );
+  // 「客户端｜服务器」与「流式｜非流式」两个维度共同决定执行模式（DESK-ONLINE-009）。
+  const hostedMode: DetailsExecutionMode = generationMode === 'stream' ? 'hosted-stream' : 'hosted-json';
+  const executionMode: DetailsExecutionMode | null = target.location === 'server' ? hostedMode : mode;
   const generate = (discardUnsavedResult = false) => {
-    if (!guard.ready || busy || !selected || !mode || !questionnaire || questionnaireLoading || profilesLoading || profilesError || questionnaireError || state.pendingRestore || session.isDraftBlocked()) return;
+    if (!guard.ready || busy || !executionMode || !questionnaire || questionnaireLoading || profilesLoading || profilesError || questionnaireError || state.pendingRestore || session.isDraftBlocked()) return;
+    if (target.location === 'server' && !cloudSignedIn) { setActionError('服务器执行需要先登录云端账号。'); return; }
+    if (target.location === 'client' && !selected) return;
     if (session.hasUnsavedResult() && !discardUnsavedResult) { setConfirmRegenerate(true); return; }
     try {
       const answers = buildDetailsAnswers(flow, session.getSnapshot().draft.answers);
       setActionError(null);
-      void session.generate({ invoke, profileId: selected.id }, { answers, language: session.getSnapshot().draft.language, loreText: questionnaire.loreMarkdown?.trim() ?? '' }, { mode, modelId: selected.modelId, flowers: getRandomFlowers(), overrides: target.generationOverrides }, discardUnsavedResult);
+      void session.generate(
+        { invoke, profileId: selected?.id ?? '' },
+        {
+          answers,
+          language: session.getSnapshot().draft.language,
+          loreText: buildQuestionnaireSelectionLoreText(selections),
+          hosted: {
+            fields: buildQuestionnaireGenerationRequestFields(selections),
+            allowNativeSignature: isQuestionnaireSelectionNativeAllowed(selections),
+          },
+        },
+        { mode: executionMode, modelId: selected?.modelId, flowers: getRandomFlowers(), overrides: target.generationOverrides },
+        discardUnsavedResult,
+      );
     } catch (error) { setActionError(error instanceof Error ? error.message : '问卷无法生成。'); }
   };
 
@@ -191,9 +230,10 @@ function DetailsForm({ session }: { session: DetailsSession }) {
         <AiExecutionLocationField
           value={target.location}
           client={{ enabled: true }}
-          server={{ enabled: false, reason: '服务器执行将在接入在线能力后开放' }}
+          server={{ enabled: cloudSignedIn, reason: '服务器执行需要先登录云端账号' }}
           onChange={(location) => aiStore.selectExecutionLocation(location)}
         />
+        <GenerationModeSwitcher value={generationMode} onChange={setGenerationMode} />
         <label className="flex flex-col gap-1">AI 连接
           <select
             aria-label="AI 连接"
@@ -213,8 +253,12 @@ function DetailsForm({ session }: { session: DetailsSession }) {
           </select>
         </label>
         {!profilesLoading && !aiState.profiles.length && !profilesError && <p>请先在<Link to="/settings" className="underline">设置</Link>中保存 Provider。问卷可以先填写，配置加载后再生成。</p>}
-        {target.unavailableReason && <p role="status">{target.unavailableReason}</p>}
-        {selected && mode && <div className="rounded border border-(--app-border) p-3">
+        {target.location === 'server' && <div className="rounded border border-(--app-border) p-3">
+          <p>服务器 · 云端：由项目服务在服务器侧生成，{generationMode === 'stream' ? 'Markdown 流式输出（未签名）' : '结构化 JSON 输出（问卷原生许可时可获官方签名）'}。</p>
+          <p>切换执行位置不会丢失已填写的问卷回答。</p>
+        </div>}
+        {target.location === 'client' && target.unavailableReason && <p role="status">{target.unavailableReason}</p>}
+        {target.location === 'client' && selected && mode && <div className="rounded border border-(--app-border) p-3">
           <p>{mode === 'direct-local' ? '客户端 · 本机：发送到本机模型服务' : '客户端 · 远端：发送到你指定的外部模型服务'}</p>
           <p className="break-all">接收方：{selected.baseUrl}</p>
           <p>模型：{selected.modelId}。点击生成会发送已填写的问卷回答；结果不带官方签名。</p>
@@ -256,7 +300,7 @@ function DetailsForm({ session }: { session: DetailsSession }) {
         />}
       </fieldset>
       <div className="flex flex-wrap gap-2">
-        <button className={actionClass} disabled={!guard.ready || busy || questionnaireLoading || profilesLoading || !questionnaire || !selected || !mode || blockedDraft || !!questionnaireError || !!profilesError} onClick={() => generate()}>{state.phase === 'generating' ? '正在生成…' : state.phase === 'idle' ? '发送问卷并生成' : '重新生成'}</button>
+        <button className={actionClass} disabled={!guard.ready || busy || questionnaireLoading || profilesLoading || !questionnaire || !executionMode || (target.location === 'server' ? !cloudSignedIn : !selected) || blockedDraft || !!questionnaireError || !!profilesError} onClick={() => generate()}>{state.phase === 'generating' ? '正在生成…' : state.phase === 'idle' ? '发送问卷并生成' : '重新生成'}</button>
         {state.phase === 'generating' && <button className={actionClass} onClick={() => session.cancel()}>取消生成</button>}
       </div>
       <dialog ref={regenerateDialog} aria-labelledby="regenerate-title" aria-describedby="regenerate-description" className="m-auto max-w-lg rounded-lg border border-(--app-border) bg-(--app-surface) p-5 text-(--app-text) backdrop:bg-black/40" onCancel={(event) => { event.preventDefault(); if (!session.isBusy()) setConfirmRegenerate(false); }}>
@@ -271,9 +315,17 @@ function DetailsForm({ session }: { session: DetailsSession }) {
       </dialog>
       {actionError && <p role="alert">{actionError}</p>}
       {state.message && <p role="status">{state.message}</p>}
+      {state.reasoning && <AiReasoningPanel reasoning={state.reasoning} />}
       {state.card && <section aria-label="生成结果" className="flex flex-col gap-3">
-        <h2 className="text-xl font-semibold">{state.card.codename || '未命名魔法少女'} · 未签名</h2>
-        <MagicalGirlResultBody magicalGirl={state.card} />
+        <h2 className="text-xl font-semibold">
+          {state.cardKind === 'general'
+            ? (typeof state.card.name === 'string' && state.card.name ? state.card.name : '未命名角色')
+            : (typeof state.card.codename === 'string' && state.card.codename ? state.card.codename : '未命名魔法少女')}
+          {' · '}{typeof state.card.signature === 'string' && state.card.signature ? '官方签名' : '未签名'}
+        </h2>
+        {state.cardKind === 'general'
+          ? <GeneralCharacterCard general={state.card as GeneralCharacterCardData} />
+          : <MagicalGirlResultBody magicalGirl={state.card as unknown as MagicalGirlResultData} />}
         <button className={actionClass} disabled={!guard.ready || busy || state.saveStatus === 'saved' || state.saveStatus === 'already-present'} onClick={() => { if (guard.ready) void session.saveResult(); }}>{state.saving ? '正在保存…' : '保存到本地卡库'}</button>
         {state.saveStatus === 'saved' && <p role="status">已保存到本地卡库。</p>}
         {state.saveStatus === 'already-present' && <p role="status">本地卡库已存在相同内容，原记录保持不变。</p>}

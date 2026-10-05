@@ -310,6 +310,74 @@ export const resolveQuestionnaireSelectionNativeAllowedFallback = (
   return typeof declared === 'boolean' ? declared : false;
 };
 
+/** hosted 生成请求 `questionnaireSelections[]` 的 wire 字段。 */
+export interface QuestionnaireGenerationSelectionField {
+  source: QuestionnaireSelectionSource;
+  kind: QuestionnaireDefinition['kind'];
+  presetId?: string;
+  dataCardId?: string;
+  useLore?: boolean;
+}
+
+/** hosted 生成请求 `questionnaires[].questions[]` 的 wire 字段。 */
+export interface QuestionnaireGenerationQuestionField {
+  id: string;
+  question: string;
+  required: boolean;
+  maxLength: number | null;
+}
+
+/** hosted 生成请求 `questionnaires[]` 的 wire 字段。 */
+export interface QuestionnaireGenerationQuestionnaireField {
+  id: string;
+  title: string;
+  kind: QuestionnaireDefinition['kind'];
+  useLore?: boolean;
+  loreMarkdown?: string;
+  questions: QuestionnaireGenerationQuestionField[];
+}
+
+/**
+ * `generate-*-details(-stream)` 请求体中问卷相关的两段字段。
+ * 服务端 `normalizeQuestionnaireSelections`/`normalizeQuestionnaires` 的消费契约；
+ * Web 与 Desktop 共用同一构造，保证同一问卷夹具在两个宿主产生一致业务请求。
+ * 缺省字段一律省略而非置 `undefined`：Desktop IPC 的 `SafeJsonValueSchema`
+ * 在序列化前校验对象图，显式 `undefined` 会被拒绝。
+ */
+export interface QuestionnaireGenerationRequestFields {
+  questionnaireSelections: QuestionnaireGenerationSelectionField[];
+  questionnaires: QuestionnaireGenerationQuestionnaireField[];
+}
+
+export const buildQuestionnaireGenerationRequestFields = (
+  selections: readonly QuestionnaireSelection[],
+): QuestionnaireGenerationRequestFields => ({
+  questionnaireSelections: selections.map((selection) => ({
+    source: selection.source,
+    kind: selection.questionnaire.kind,
+    ...(selection.source === 'preset' ? { presetId: selection.questionnaire.id } : {}),
+    ...(selection.source === 'database' && selection.dataCardId !== undefined
+      ? { dataCardId: selection.dataCardId }
+      : {}),
+    ...(selection.useLore === false ? { useLore: false } : {}),
+  })),
+  questionnaires: selections.map((selection) => ({
+    id: selection.questionnaire.id,
+    title: selection.questionnaire.title,
+    kind: selection.questionnaire.kind,
+    ...(selection.useLore === false ? { useLore: false } : {}),
+    ...(selection.questionnaire.loreMarkdown !== undefined
+      ? { loreMarkdown: selection.questionnaire.loreMarkdown }
+      : {}),
+    questions: selection.questionnaire.questions.map((question) => ({
+      id: question.id,
+      question: question.question,
+      required: question.required === true,
+      maxLength: question.maxLength ?? null,
+    })),
+  })),
+});
+
 /** 默认预设挑选：优先 `isDefault`，否则第一个；可选 `kind` 过滤。 */
 export const pickDefaultQuestionnairePresetEntry = <T extends { kind: string; isDefault?: boolean }>(
   entries: readonly T[],

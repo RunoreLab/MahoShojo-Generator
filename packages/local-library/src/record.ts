@@ -27,6 +27,7 @@ export const LocalCardExecutionProvenanceSchema = z.enum([
   'downloaded',
   'direct-local',
   'direct-remote',
+  'hosted',
   'imported',
   'edited',
 ]);

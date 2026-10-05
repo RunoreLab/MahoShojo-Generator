@@ -5,6 +5,10 @@ import {
   type QuestionnaireQuestion,
 } from '@mahoshojo/domain/questionnaire-definition';
 import type { QuestionnaireAnswerItem } from '@mahoshojo/domain/questionnaire';
+import type {
+  QuestionnaireSelection,
+  QuestionnaireSelectionSource,
+} from '@mahoshojo/domain/questionnaire-selection';
 import type { BattleSelectionPayload, CardLibrarySelectionContext } from '@mahoshojo/ui-web/card-library';
 
 /**
@@ -126,6 +130,40 @@ export const builtinQuestionnaireSource = (questionnaire: DetailsQuestionnaire):
   title: questionnaire.title,
   selectionId: builtinSelectionId(questionnaire.id),
 });
+
+/**
+ * Desktop 选择来源 → wire `source` 语义。
+ * - `builtin` → `preset`（内置即官方预设，服务端按 presetId 回读核对）；
+ * - `cloud` → `database`（携带 `dataCardId`，服务器可回读核对 nativeAllowed）；
+ * - `local` → `upload`（本地库卡没有服务器身份，走 untrusted 嵌入路径）。
+ */
+export const detailsSelectionSource = (source: QuestionnaireSource): QuestionnaireSelectionSource =>
+  source.kind === 'builtin' ? 'preset' : source.kind === 'cloud' ? 'database' : 'upload';
+
+/**
+ * Desktop 选择来源 → 共源 `QuestionnaireSelection`（D5.1a）。
+ * hosted 请求字段经 `buildQuestionnaireGenerationRequestFields` 投影，
+ * 与 Web `DetailsPage` 同一构造器。
+ */
+export const toQuestionnaireSelection = (
+  source: QuestionnaireSource,
+  questionnaire: DetailsQuestionnaire,
+  useLore?: boolean,
+): QuestionnaireSelection => ({
+  source: detailsSelectionSource(source),
+  questionnaire,
+  ...(source.kind === 'cloud' && source.cardId ? { dataCardId: source.cardId } : {}),
+  ...(source.kind !== 'builtin' ? { dataCardName: source.title } : {}),
+  selectionId: source.selectionId,
+  ...(useLore !== undefined ? { useLore } : {}),
+});
+
+/** 多问卷展平后的逐题流条目：各 selection 用自己的实例作用域产 key。 */
+export const buildSelectionFlowItems = (
+  entries: ReadonlyArray<{ source: QuestionnaireSource; questionnaire: DetailsQuestionnaire }>,
+): DetailsFlowItem[] =>
+  entries.flatMap(({ source, questionnaire }) =>
+    buildDetailsFlowItems(questionnaire, source.selectionId));
 
 const isOptionAllowed = (question: QuestionnaireQuestion, answer: string): boolean =>
   question.options?.some((option) =>

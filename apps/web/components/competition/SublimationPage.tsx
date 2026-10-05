@@ -52,6 +52,7 @@ import {
   type QuestionnairePresetEntry,
 } from '@/lib/questionnaires';
 import {
+  buildQuestionnaireGenerationRequestFields,
   buildQuestionnaireSelectionLoreText,
   collectUsedQuestionnaireSelectionIds,
   createStoredQuestionnaireSelectionNormalizer,
@@ -931,26 +932,7 @@ export const SublimationPage: React.FC = () => {
                 writeCurrentState,
                 arenaHistoryRetentionStrategy,
                 customProvider: buildCustomProviderRequestPayload(userProviderConfig),
-                questionnaireSelections: selectedQuestionnaires.map((selection) => ({
-                    source: selection.source,
-                    kind: selection.questionnaire.kind,
-                    presetId: selection.source === 'preset' ? selection.questionnaire.id : undefined,
-                    dataCardId: selection.source === 'database' ? selection.dataCardId : undefined,
-                    useLore: selection.useLore === false ? false : undefined,
-                })),
-                questionnaires: selectedQuestionnaires.map((selection) => ({
-                    id: selection.questionnaire.id,
-                    title: selection.questionnaire.title,
-                    kind: selection.questionnaire.kind,
-                    useLore: selection.useLore === false ? false : undefined,
-                    loreMarkdown: selection.questionnaire.loreMarkdown ?? undefined,
-                    questions: selection.questionnaire.questions.map((question) => ({
-                        id: question.id,
-                        question: question.question,
-                        required: question.required === true,
-                        maxLength: question.maxLength ?? null,
-                    })),
-                })),
+                ...buildQuestionnaireGenerationRequestFields(selectedQuestionnaires),
             };
 
             if (sourceTemplate !== 'unknown') {

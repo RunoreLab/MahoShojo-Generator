@@ -3,8 +3,10 @@ import { describe, expect, it, vi } from 'vitest';
 import { createMagicalGirlDetailsGenerationConfig, type MagicalGirlDetailsGenerationInput } from '@mahoshojo/ai-core/magical-girl-details-generation';
 import type { AiExecutionRequest, AiExecutionResult } from '@mahoshojo/contracts/ai-execution';
 import type { AiStreamEvent } from '@mahoshojo/ai-core/stream-events';
-import { executeDetailsGeneration } from '../src/features/details/generation';
+import type { HostedGenerationEvent } from '@mahoshojo/contracts/desktop-cloud';
+import { executeDetailsGeneration, type DetailsGenerationInput } from '../src/features/details/generation';
 import { CANCEL_DIRECT_AI_COMMAND, STREAM_DIRECT_AI_COMMAND } from '../src/platform/direct-ai-bridge';
+import { CANCEL_HOSTED_AI_COMMAND, HOSTED_AI_REQUEST_COMMAND, STREAM_HOSTED_AI_COMMAND } from '../src/platform/cloud-bridge';
 
 const legacy = JSON.parse(readFileSync(new URL('../../../packages/ai-core/fixtures/magical-girl-details-legacy.json', import.meta.url), 'utf8'));
 const input: MagicalGirlDetailsGenerationInput = legacy.cases[0].input;
@@ -54,9 +56,10 @@ describe('Desktop Details generation seam', () => {
     expect(outcome.status).toBe('completed');
     if (outcome.status !== 'completed') throw new Error('expected completed');
     expect(outcome.card).toMatchObject(generated);
-    expect(outcome.card.userAnswers[0]!.answer).toBe(input.answers[0]!.answer);
+    const userAnswers = outcome.card.userAnswers as Array<{ answer: string }>;
+    expect(userAnswers[0]!.answer).toBe(input.answers[0]!.answer);
     expect(outcome.card).not.toHaveProperty('signature');
-    expect(outcome.card.userAnswers[0]).not.toHaveProperty('questionnaireId');
+    expect(userAnswers[0]).not.toHaveProperty('questionnaireId');
     expect(native.invoke).toHaveBeenCalledTimes(1);
     expect(native.request).not.toHaveProperty('thinking');
   });
@@ -124,5 +127,141 @@ describe('Desktop Details generation seam', () => {
     if (ending === 'disconnect') await expect(pending).rejects.toMatchObject({ rawText: '已收到的部分角色正文' });
     else await expect(pending).resolves.toMatchObject({ status: ending === 'cancel' ? 'cancelled' : 'failed', rawText: '已收到的部分角色正文' });
     expect(invoke.mock.calls.filter(([command]) => command === STREAM_DIRECT_AI_COMMAND)).toHaveLength(1);
+  });
+});
+
+const hostedInput: DetailsGenerationInput = {
+  answers: [{ question: '信念', answer: '守护', questionId: 'MG-1', questionnaireId: 'q-1', questionnaireTitle: '默认问卷' }],
+  language: '简体中文',
+  loreText: '设定正文',
+  hosted: {
+    fields: {
+      questionnaireSelections: [{ source: 'preset', kind: 'magical-girl', presetId: 'q-1' }],
+      questionnaires: [{ id: 'q-1', title: '默认问卷', kind: 'magical-girl', loreMarkdown: '设定正文', questions: [] }],
+    },
+    allowNativeSignature: true,
+  },
+};
+const hostedStreamIntent = { requestId: 'hosted-stream-1', mode: 'hosted-stream' as const, flowers: '百合' };
+const hostedJsonIntent = { requestId: 'hosted-json-1', mode: 'hosted-json' as const, flowers: '百合' };
+
+const hostedStreamHarness = () => {
+  let request: { requestId: string; routeId: string; body: Record<string, unknown> } | undefined;
+  let send: ((event: HostedGenerationEvent) => void) | undefined;
+  let finish: (() => void) | undefined;
+  const cancelled: string[] = [];
+  const invoke = vi.fn(async (command: string, args?: Record<string, unknown>) => {
+    if (command === CANCEL_HOSTED_AI_COMMAND) {
+      cancelled.push(String((args as { requestId: string }).requestId));
+      finish?.();
+      return true;
+    }
+    if (command !== STREAM_HOSTED_AI_COMMAND) throw new Error(`unexpected command: ${command}`);
+    request = args!.request as typeof request;
+    send = (args!.onEvent as { onmessage: (event: HostedGenerationEvent) => void }).onmessage;
+    await new Promise<void>((resolve) => { finish = resolve; });
+  });
+  return { invoke, get request() { return request; }, send: (event: HostedGenerationEvent) => send?.(event), finish: () => finish?.(), cancelled };
+};
+
+describe('Desktop Details hosted generation', () => {
+  it('routes hosted-stream through the stream command with business body and builds a general card', async () => {
+    const native = hostedStreamHarness();
+    const onPartialText = vi.fn();
+    const pending = executeDetailsGeneration({ invoke: native.invoke, profileId: '', createChannel: () => ({}) }, hostedInput, hostedStreamIntent, new AbortController().signal, onPartialText);
+    expect(native.request).toMatchObject({ requestId: 'hosted-stream-1', routeId: 'generate-magical-girl-details-stream' });
+    expect(native.request!.body).toMatchObject({
+      allowNativeSignature: true,
+      language: '简体中文',
+      questionnaireSelections: [{ source: 'preset', kind: 'magical-girl', presetId: 'q-1' }],
+    });
+    expect(native.request!.body).not.toHaveProperty('customProvider');
+    native.send({ event: 'reasoning', data: { source: 'sdk', status: 'thinking', chunk: '思考' } });
+    native.send({ event: 'markdown', data: { chunk: '名字：潮汐花\n\n## 角色介绍\n\n守护' } });
+    native.send({ event: 'reasoning_done', data: { source: 'sdk', status: 'done' } });
+    native.send({ event: 'done', data: { ok: true } });
+    native.finish();
+    const outcome = await pending;
+    expect(outcome.status).toBe('completed');
+    if (outcome.status !== 'completed') throw new Error('expected completed');
+    expect(outcome.cardKind).toBe('general');
+    expect(outcome.card).toMatchObject({ name: '潮汐花' });
+    expect(outcome.card.userAnswers).toEqual([{ question: '信念', answer: '守护', questionId: 'MG-1' }]);
+    expect(outcome.reasoning).toMatchObject({ status: 'done', source: 'sdk', text: '思考' });
+    expect(onPartialText).toHaveBeenCalled();
+  });
+
+  it('maps hosted-stream server error event to failed with message and keeps markdown', async () => {
+    const native = hostedStreamHarness();
+    const pending = executeDetailsGeneration({ invoke: native.invoke, profileId: '', createChannel: () => ({}) }, hostedInput, hostedStreamIntent, new AbortController().signal);
+    native.send({ event: 'markdown', data: { chunk: '半截正文' } });
+    native.send({ event: 'error', data: { ok: false, error: '上游过载', code: 'service-unavailable' } });
+    native.finish();
+    await expect(pending).resolves.toMatchObject({ status: 'failed', mode: 'hosted-stream', rawText: '半截正文', message: '上游过载', code: 'service-unavailable' });
+  });
+
+  it('aborts hosted-stream via cancel command and keeps received markdown', async () => {
+    const native = hostedStreamHarness();
+    const controller = new AbortController();
+    const pending = executeDetailsGeneration({ invoke: native.invoke, profileId: '', createChannel: () => ({}) }, hostedInput, hostedStreamIntent, controller.signal);
+    native.send({ event: 'markdown', data: { chunk: '已收到正文' } });
+    controller.abort();
+    await expect(pending).resolves.toMatchObject({ status: 'cancelled', rawText: '已收到正文' });
+    expect(native.cancelled).toEqual(['hosted-stream-1']);
+  });
+
+  it('routes hosted-json through the json command and preserves server signature and aiMeta reasoning', async () => {
+    const card = {
+      ...generated,
+      templateId: '魔法少女/心之花/魔法少女（问卷生成）',
+      userAnswers: [{ question: '信念', answer: '守护' }],
+      signature: 'server-issued-signature',
+    };
+    const invoke = vi.fn(async (command: string, args?: Record<string, unknown>) => {
+      if (command !== HOSTED_AI_REQUEST_COMMAND) throw new Error(`unexpected command: ${command}`);
+      expect(args!.request).toMatchObject({ requestId: 'hosted-json-1', routeId: 'generate-magical-girl-details' });
+      expect((args!.request as { body: Record<string, unknown> }).body).not.toHaveProperty('customProvider');
+      return { status: 200, body: { data: card, aiMeta: { aiReasoning: { status: 'done', source: 'sdk', text: '推理' } } } };
+    });
+    const outcome = await executeDetailsGeneration({ invoke, profileId: '' }, hostedInput, hostedJsonIntent, new AbortController().signal);
+    expect(outcome.status).toBe('completed');
+    if (outcome.status !== 'completed') throw new Error('expected completed');
+    expect(outcome.cardKind).toBe('magical-girl');
+    expect(outcome.card).toMatchObject({ codename: '潮汐花', signature: 'server-issued-signature' });
+    expect(outcome.reasoning).toMatchObject({ status: 'done', text: '推理' });
+  });
+
+  it.each([
+    [429, { error: '请求过于频繁', retryAfterSeconds: 30 }, 30],
+    [500, null, undefined],
+  ] as const)('maps hosted-json HTTP %i to failed without retry', async (status, body, retryAfterSeconds) => {
+    const invoke = vi.fn(async () => ({ status, body }));
+    await expect(executeDetailsGeneration({ invoke, profileId: '' }, hostedInput, hostedJsonIntent, new AbortController().signal))
+      .resolves.toMatchObject({ status: 'failed', mode: 'hosted-json', ...(retryAfterSeconds ? { retryAfterSeconds } : {}) });
+    expect(invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports invalid-output when hosted-json data fails card validation', async () => {
+    const invoke = vi.fn(async () => ({ status: 200, body: { data: { bogus: true }, aiMeta: null } }));
+    await expect(executeDetailsGeneration({ invoke, profileId: '' }, hostedInput, hostedJsonIntent, new AbortController().signal))
+      .resolves.toMatchObject({ status: 'invalid-output', mode: 'hosted-json' });
+  });
+
+  it('cancels a pending hosted-json request through the shared registry', async () => {
+    const cancelled: string[] = [];
+    let resolveRequest: ((value: { status: number; body: null }) => void) | undefined;
+    const invoke = vi.fn(async (command: string, args?: Record<string, unknown>) => {
+      if (command === CANCEL_HOSTED_AI_COMMAND) {
+        cancelled.push(String((args as { requestId: string }).requestId));
+        return true;
+      }
+      return new Promise<{ status: number; body: null }>((resolve) => { resolveRequest = resolve; });
+    });
+    const controller = new AbortController();
+    const pending = executeDetailsGeneration({ invoke, profileId: '' }, hostedInput, hostedJsonIntent, controller.signal);
+    controller.abort();
+    resolveRequest?.({ status: 200, body: null });
+    await expect(pending).resolves.toMatchObject({ status: 'cancelled' });
+    expect(cancelled).toEqual(['hosted-json-1']);
   });
 });

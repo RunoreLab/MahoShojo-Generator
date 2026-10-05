@@ -1,9 +1,17 @@
-import { buildUnsignedMagicalGirlDetailsCard, MAGICAL_GIRL_DETAILS_SCHEMA, type MagicalGirlDetailsGenerationInput } from '@mahoshojo/ai-core/magical-girl-details-generation';
+import type { AIReasoningEnvelope } from '@mahoshojo/contracts/ai-reasoning';
 import { deriveLocalDataCardIdV1, digestLocalCardPayloadV1 } from '@mahoshojo/local-library/digest';
-import { LocalCardRecordV1Schema } from '@mahoshojo/local-library/record';
+import { LocalCardRecordV1Schema, type LocalCardExecutionProvenance } from '@mahoshojo/local-library/record';
 import type { CardRepository } from '@mahoshojo/local-library/repository';
 import type { DesktopAiExecutionOptions } from '../../platform/desktop-ai-execution';
-import { DetailsGenerationError, executeDetailsGeneration, type DetailsGenerationIntent } from './generation';
+import {
+  DetailsGenerationError,
+  executeDetailsGeneration,
+  normalizeMagicalGirlDetailsResultCard,
+  type DetailsGenerationInput,
+  type DetailsGenerationIntent,
+  type DetailsResultCardData,
+  type DetailsResultCardKind,
+} from './generation';
 
 export const DETAILS_DRAFT_KEY = 'mahoshojo.desktop.details.draft.v1';
 const MAX_DRAFT_CHARACTERS = 4 * 1024 * 1024;
@@ -14,7 +22,8 @@ export interface DetailsDraftStorage {
   removeItem(key: string): void;
 }
 export interface DetailsDraft { answers: Record<string, string>; language: string }
-type Card = ReturnType<typeof buildUnsignedMagicalGirlDetailsCard>;
+type Card = DetailsResultCardData;
+type CardKind = DetailsResultCardKind;
 type Mode = DetailsGenerationIntent['mode'];
 type Phase = 'idle' | 'generating' | 'completed' | 'failed' | 'cancelled';
 export interface DetailsSessionState {
@@ -25,6 +34,8 @@ export interface DetailsSessionState {
   phase: Phase;
   rawText: string;
   card: Card | null;
+  cardKind: CardKind;
+  reasoning: AIReasoningEnvelope | null;
   message: string | null;
   saving: boolean;
   saveStatus: 'idle' | 'saved' | 'already-present' | 'failed';
@@ -32,17 +43,23 @@ export interface DetailsSessionState {
 }
 interface StoredDraft extends DetailsDraft {
   version: 1;
-  output?: { mode: Mode; card: Card | null; rawText: string; phase: Exclude<Phase, 'generating'> };
+  // `cardKind` 在 D5.1a 引入；缺省按 'magical-girl' 解析（此前只有一种卡）。
+  output?: { mode: Mode; cardKind?: CardKind; card: Card | null; rawText: string; phase: Exclude<Phase, 'generating'> };
 }
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
-const validateCard = (value: unknown): Card => {
-  if (!object(value) || !Array.isArray(value.userAnswers)) throw new Error('角色卡无问卷记录');
-  const answers = value.userAnswers.map((answer: unknown) => {
-    if (!object(answer) || typeof answer.question !== 'string' || typeof answer.answer !== 'string') throw new Error('问卷记录损坏');
-    return { question: answer.question, answer: answer.answer, ...(typeof answer.questionId === 'string' ? { questionId: answer.questionId } : {}) };
-  });
-  return buildUnsignedMagicalGirlDetailsCard(MAGICAL_GIRL_DETAILS_SCHEMA.parse(value), answers);
+const EXECUTION_MODES: readonly Mode[] = ['direct-local', 'direct-remote', 'hosted-stream', 'hosted-json'];
+const isAnswerList = (value: unknown): boolean =>
+  Array.isArray(value) && value.every((answer) => object(answer) && typeof answer.question === 'string' && typeof answer.answer === 'string');
+const validateCard = (kind: CardKind, value: unknown): Card => {
+  if (kind === 'general') {
+    if (!object(value) || typeof value.name !== 'string' || typeof value.content !== 'string') throw new Error('角色卡损坏');
+    if (value.userAnswers !== undefined && !isAnswerList(value.userAnswers)) throw new Error('角色卡无问卷记录');
+    return { ...value };
+  }
+  const card = normalizeMagicalGirlDetailsResultCard(value);
+  if (!isAnswerList(card.userAnswers)) throw new Error('角色卡无问卷记录');
+  return card;
 };
 const parseDraft = (raw: string): StoredDraft => {
   if (raw.length > MAX_DRAFT_CHARACTERS) throw new Error('草稿超过大小限制');
@@ -51,13 +68,19 @@ const parseDraft = (raw: string): StoredDraft => {
   const draft: StoredDraft = { version: 1, answers: value.answers as Record<string, string>, language: value.language };
   if (value.output !== undefined) {
     const output = value.output;
-    if (!object(output) || (output.mode !== 'direct-local' && output.mode !== 'direct-remote') || typeof output.rawText !== 'string' || !['idle', 'completed', 'failed', 'cancelled'].includes(String(output.phase))) throw new Error('草稿输出损坏');
-    const card = output.card === null ? null : validateCard(output.card);
+    if (!object(output) || !EXECUTION_MODES.includes(output.mode as Mode) || typeof output.rawText !== 'string' || !['idle', 'completed', 'failed', 'cancelled'].includes(String(output.phase))) throw new Error('草稿输出损坏');
+    const cardKind: CardKind = output.cardKind === 'general' ? 'general' : 'magical-girl';
+    const card = output.card === null ? null : validateCard(cardKind, output.card);
+    // 签名只可能来自 hosted 非流式通路；direct/流式草稿中混入的 signature 一律剥除。
+    if (card && output.mode !== 'hosted-json' && 'signature' in card) delete card.signature;
     if ((output.phase === 'completed') !== (card !== null)) throw new Error('草稿结果状态不一致');
-    draft.output = { mode: output.mode, card, rawText: output.rawText, phase: output.phase as Exclude<Phase, 'generating'> };
+    draft.output = { mode: output.mode as Mode, cardKind, card, rawText: output.rawText, phase: output.phase as Exclude<Phase, 'generating'> };
   }
   return draft;
 };
+/** 执行模式 → 本地卡库 provenance execution（hosted 两通路统一记 'hosted'）。 */
+const modeExecutionProvenance = (mode: Mode): LocalCardExecutionProvenance =>
+  mode === 'hosted-stream' || mode === 'hosted-json' ? 'hosted' : mode;
 
 /** 单个页面生命周期中的意图所有者；同步上锁，异步完成后才释放。 */
 export class DetailsSession {
@@ -76,7 +99,7 @@ export class DetailsSession {
     execute?: typeof executeDetailsGeneration;
     requestId?: () => string;
   }) {
-    this.state = { draft: clone(dependencies.initialDraft), pendingRestore: false, draftError: null, draftSaved: true, phase: 'idle', rawText: '', card: null, message: null, saving: false, saveStatus: 'idle', saveError: null };
+    this.state = { draft: clone(dependencies.initialDraft), pendingRestore: false, draftError: null, draftSaved: true, phase: 'idle', rawText: '', card: null, cardKind: 'magical-girl', reasoning: null, message: null, saving: false, saveStatus: 'idle', saveError: null };
     try {
       const raw = dependencies.storage.getItem(DETAILS_DRAFT_KEY);
       if (raw !== null) { this.pending = parseDraft(raw); this.state.pendingRestore = true; }
@@ -107,7 +130,7 @@ export class DetailsSession {
     const saved = this.pending;
     this.pending = null;
     if (saved.output) this.mode = saved.output.mode;
-    this.publish({ draft: { answers: clone(saved.answers), language: saved.language }, pendingRestore: false, draftSaved: true, phase: saved.output?.phase ?? 'idle', card: saved.output?.card ?? null, rawText: saved.output?.rawText ?? '', message: saved.output ? '已恢复草稿；不会自动重新生成。' : null });
+    this.publish({ draft: { answers: clone(saved.answers), language: saved.language }, pendingRestore: false, draftSaved: true, phase: saved.output?.phase ?? 'idle', card: saved.output?.card ?? null, cardKind: saved.output?.card ? saved.output.cardKind ?? 'magical-girl' : 'magical-girl', reasoning: null, rawText: saved.output?.rawText ?? '', message: saved.output ? '已恢复草稿；不会自动重新生成。' : null });
   }
   discardDraft(): void {
     if (this.disposed || this.controller || this.state.saving) return;
@@ -115,15 +138,15 @@ export class DetailsSession {
       this.dependencies.storage.removeItem(DETAILS_DRAFT_KEY);
       this.pending = null;
       this.blocked = false;
-      this.publish({ draft: clone(this.dependencies.initialDraft), pendingRestore: false, draftError: null, draftSaved: true, phase: 'idle', rawText: '', card: null, message: null, saveStatus: 'idle', saveError: null });
+      this.publish({ draft: clone(this.dependencies.initialDraft), pendingRestore: false, draftError: null, draftSaved: true, phase: 'idle', rawText: '', card: null, cardKind: 'magical-girl', reasoning: null, message: null, saveStatus: 'idle', saveError: null });
     } catch { this.publish({ draftError: '清除草稿失败，原草稿保护仍生效。', draftSaved: false }); }
   }
   retryDraftSave(): void {
     if (this.draftSaveTimer !== null) clearTimeout(this.draftSaveTimer);
     this.draftSaveTimer = null;
     if (this.disposed || this.blocked || this.state.pendingRestore) return;
-    const { draft, card, rawText, phase } = this.state;
-    const stored: StoredDraft = { version: 1, ...draft, output: { mode: this.mode, card, rawText, phase: phase === 'generating' ? 'cancelled' : phase } };
+    const { draft, card, cardKind, rawText, phase } = this.state;
+    const stored: StoredDraft = { version: 1, ...draft, output: { mode: this.mode, cardKind, card, rawText, phase: phase === 'generating' ? 'cancelled' : phase } };
     try {
       const raw = JSON.stringify(stored);
       if (raw.length > MAX_DRAFT_CHARACTERS) throw new Error('草稿超过大小限制');
@@ -136,13 +159,13 @@ export class DetailsSession {
     if (this.draftSaveTimer !== null) return;
     this.draftSaveTimer = setTimeout(() => this.retryDraftSave(), STREAM_DRAFT_SAVE_INTERVAL_MS);
   }
-  async generate(options: DesktopAiExecutionOptions, input: MagicalGirlDetailsGenerationInput, intent: Omit<DetailsGenerationIntent, 'requestId'>, discardUnsavedResult = false): Promise<void> {
+  async generate(options: DesktopAiExecutionOptions, input: DetailsGenerationInput, intent: Omit<DetailsGenerationIntent, 'requestId'>, discardUnsavedResult = false): Promise<void> {
     if (this.disposed || this.controller || this.state.saving || this.blocked || this.state.pendingRestore) return;
     if (this.hasUnsavedResult() && !discardUnsavedResult) return;
     const controller = new AbortController();
     this.controller = controller;
     this.mode = intent.mode;
-    this.publish({ phase: 'generating', card: null, rawText: '', message: null, saveStatus: 'idle', saveError: null, draftSaved: false });
+    this.publish({ phase: 'generating', card: null, cardKind: 'magical-girl', reasoning: null, rawText: '', message: null, saveStatus: 'idle', saveError: null, draftSaved: false });
     this.retryDraftSave();
     try {
       const outcome = await (this.dependencies.execute ?? executeDetailsGeneration)(options, clone(input), { ...intent, requestId: (this.dependencies.requestId ?? (() => crypto.randomUUID()))() }, controller.signal, (text: string) => {
@@ -152,12 +175,12 @@ export class DetailsSession {
       });
       if (this.disposed) return;
       if (outcome.status === 'completed' && !controller.signal.aborted) {
-        this.publish({ phase: 'completed', card: validateCard(outcome.card), rawText: outcome.result.output.text ?? '', message: '生成完成，可保存到本地卡库。' });
+        this.publish({ phase: 'completed', card: validateCard(outcome.cardKind, outcome.card), cardKind: outcome.cardKind, reasoning: outcome.reasoning ?? null, rawText: outcome.rawText, message: '生成完成，可保存到本地卡库。' });
       } else {
-        this.publish({ phase: controller.signal.aborted || outcome.status === 'cancelled' ? 'cancelled' : 'failed', rawText: outcome.status === 'completed' ? outcome.result.output.text ?? '' : outcome.rawText, message: outcome.status === 'invalid-output' ? outcome.message : '生成未完成，已保留收到的正文。' });
+        this.publish({ phase: controller.signal.aborted || outcome.status === 'cancelled' ? 'cancelled' : 'failed', rawText: outcome.rawText, reasoning: null, message: outcome.status === 'invalid-output' || outcome.status === 'failed' ? outcome.message : '生成未完成，已保留收到的正文。' });
       }
     } catch (error) {
-      this.publish({ phase: controller.signal.aborted ? 'cancelled' : 'failed', rawText: error instanceof DetailsGenerationError ? error.rawText : this.state.rawText, message: error instanceof Error ? error.message : '生成失败。' });
+      this.publish({ phase: controller.signal.aborted ? 'cancelled' : 'failed', rawText: error instanceof DetailsGenerationError ? error.rawText : this.state.rawText, reasoning: null, message: error instanceof Error ? error.message : '生成失败。' });
     } finally {
       this.controller = null;
       if (!this.disposed) this.retryDraftSave();
@@ -169,20 +192,28 @@ export class DetailsSession {
   }
   clearOutput(): void {
     if (this.disposed || this.isBusy() || this.blocked || this.state.pendingRestore) return;
-    this.publish({ phase: 'idle', rawText: '', card: null, message: null, saveStatus: 'idle', saveError: null, draftSaved: false });
+    this.publish({ phase: 'idle', rawText: '', card: null, cardKind: 'magical-girl', reasoning: null, message: null, saveStatus: 'idle', saveError: null, draftSaved: false });
     this.retryDraftSave();
   }
   async saveResult(): Promise<boolean> {
     if (this.disposed || this.state.saving || this.controller || this.state.phase !== 'completed' || !this.state.card) return false;
     const card = clone(this.state.card);
+    const cardKind = this.state.cardKind;
     const mode = this.mode;
     this.publish({ saving: true, saveError: null });
     try {
-      const data = validateCard(card);
+      const data = validateCard(cardKind, card);
       const digest = await digestLocalCardPayloadV1(data);
       if (this.disposed) return false;
       const now = new Date().toISOString();
-      const record = LocalCardRecordV1Schema.parse({ id: deriveLocalDataCardIdV1(digest), schemaVersion: 1, storageLocation: 'local', cardType: 'character', title: data.codename.trim() || '未命名魔法少女', data, contentDigest: digest, provenance: { kind: 'unsigned', execution: mode }, createdAt: now, updatedAt: now });
+      const execution = modeExecutionProvenance(mode);
+      const signature = cardKind === 'magical-girl' && mode === 'hosted-json' && typeof data.signature === 'string' && data.signature.trim()
+        ? data.signature
+        : undefined;
+      const title = cardKind === 'general'
+        ? (typeof data.name === 'string' && data.name.trim() ? data.name.trim() : '未命名角色')
+        : (typeof data.codename === 'string' && data.codename.trim() ? data.codename.trim() : '未命名魔法少女');
+      const record = LocalCardRecordV1Schema.parse({ id: deriveLocalDataCardIdV1(digest), schemaVersion: 1, storageLocation: 'local', cardType: 'character', title, data, contentDigest: digest, provenance: signature ? { kind: 'official-signed', signature, execution } : { kind: 'unsigned', execution }, createdAt: now, updatedAt: now });
       const result = await this.dependencies.repository.putIfAbsent(record);
       this.publish({ saveStatus: 'written' in result ? 'saved' : 'already-present' });
       return !this.disposed;

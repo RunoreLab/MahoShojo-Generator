@@ -16,7 +16,14 @@ const card = buildUnsignedMagicalGirlDetailsCard({
   blooming: { name: '', evolvedAbilities: [], evolvedForm: '', evolvedOutfit: '', powerLevel: '' },
   analysis: { personalityAnalysis: '', abilityReasoning: '', coreTraits: [], predictionBasis: '', background: { belief: '', bonds: '' } },
 }, answers);
-const completed: DetailsGenerationOutcome = { status: 'completed', card, result: { status: 'completed', requestId: 'r', contractVersion: 1, mode: 'direct-local', output: { text: JSON.stringify(card) }, finishReason: 'stop' } };
+const completed: DetailsGenerationOutcome = {
+  status: 'completed',
+  mode: 'direct-local',
+  card,
+  cardKind: 'magical-girl',
+  rawText: JSON.stringify(card),
+  result: { status: 'completed', requestId: 'r', contractVersion: 1, mode: 'direct-local', output: { text: JSON.stringify(card) }, finishReason: 'stop' },
+};
 const harness = (initial: string | null = null, execute?: typeof executeDetailsGeneration) => {
   let raw = initial;
   const storage: DetailsDraftStorage = { getItem: vi.fn(() => raw), setItem: vi.fn((_key, value) => { raw = value; }), removeItem: vi.fn(() => { raw = null; }) };
@@ -41,7 +48,7 @@ describe('Details session intent ownership', () => {
     expect(session.getSnapshot().rawText).toBe('半段正文');
     session.cancel();
     expect(execute.mock.calls[0]![3].aborted).toBe(true);
-    finish({ status: 'cancelled', requestId: 'request-1', mode: 'direct-local', contractVersion: 1, rawText: '半段正文', reason: 'aborted' });
+    finish({ status: 'cancelled', mode: 'direct-local', rawText: '半段正文', reason: 'aborted' });
     await first;
     expect(session.getSnapshot()).toMatchObject({ phase: 'cancelled', rawText: '半段正文' });
     const second = session.generate(options, input, intent);
@@ -74,7 +81,7 @@ describe('Details session intent ownership', () => {
     const { session, repository } = harness(null, async () => new Promise((resolve) => { finish = resolve; }));
     const pending = session.generate(options, input, intent);
     session.cancel(); finish(completed); await pending;
-    expect(session.getSnapshot()).toMatchObject({ phase: 'cancelled', card: null, rawText: completed.result.output.text });
+    expect(session.getSnapshot()).toMatchObject({ phase: 'cancelled', card: null, rawText: completed.rawText });
     await session.saveResult();
     expect(repository.putIfAbsent).not.toHaveBeenCalled();
   });
@@ -117,7 +124,7 @@ describe('Details draft protection and restoration', () => {
     expect(session.getSnapshot().draftError).toBeTruthy();
     partial('取消时最新正文'); session.cancel();
     expect(JSON.parse(raw()!).output).toMatchObject({ phase: 'cancelled', rawText: '取消时最新正文' });
-    finish({ status: 'cancelled', contractVersion: 1, requestId: 'r', mode: 'direct-local', rawText: '取消时最新正文', reason: 'aborted' });
+    finish({ status: 'cancelled', mode: 'direct-local', rawText: '取消时最新正文', reason: 'aborted' });
     await pending;
   });
   it('requires explicit restoration, never writes over pending data or auto-generates', () => {
@@ -231,5 +238,51 @@ describe('Details local card save', () => {
     await session.saveResult();
     expect(repository.putIfAbsent).not.toHaveBeenCalled();
     expect(JSON.parse(raw()!).output).toMatchObject({ phase: 'idle', rawText: '', card: null });
+  });
+});
+
+describe('Details hosted execution outcomes', () => {
+  it('saves a hosted-json signed card as official-signed with hosted execution provenance', async () => {
+    const signedCard = { ...card, signature: 'server-issued-signature' };
+    const execute = vi.fn<typeof executeDetailsGeneration>(async () => ({
+      status: 'completed', mode: 'hosted-json', card: signedCard, cardKind: 'magical-girl',
+      rawText: JSON.stringify(signedCard), reasoning: { status: 'done', source: 'sdk', text: '推理' },
+    }));
+    const { session, repository } = harness(null, execute);
+    await session.generate(options, input, { mode: 'hosted-json', flowers: '百合' });
+    expect(session.getSnapshot()).toMatchObject({ phase: 'completed', cardKind: 'magical-girl' });
+    expect(session.getSnapshot().reasoning).toMatchObject({ status: 'done', text: '推理' });
+    await session.saveResult();
+    expect(repository.putIfAbsent).toHaveBeenCalledWith(expect.objectContaining({
+      provenance: { kind: 'official-signed', signature: 'server-issued-signature', execution: 'hosted' },
+    }));
+  });
+
+  it('saves a hosted-stream general card as unsigned hosted and survives draft round-trip', async () => {
+    const generalCard = { templateId: '通用角色', name: '潮汐花', content: '## 介绍\n守护', userAnswers: [{ question: '信念', answer: '守护' }] };
+    const execute = vi.fn<typeof executeDetailsGeneration>(async () => ({
+      status: 'completed', mode: 'hosted-stream', card: generalCard, cardKind: 'general', rawText: generalCard.content,
+    }));
+    const { session, repository, raw } = harness(null, execute);
+    await session.generate(options, input, { mode: 'hosted-stream', flowers: '百合' });
+    expect(session.getSnapshot().cardKind).toBe('general');
+    await session.saveResult();
+    expect(repository.putIfAbsent).toHaveBeenCalledWith(expect.objectContaining({
+      title: '潮汐花',
+      provenance: { kind: 'unsigned', execution: 'hosted' },
+    }));
+    // 草稿持久化带 cardKind；恢复时按 general 校验，不做问卷 schema 检查。
+    const stored = JSON.parse(raw()!);
+    expect(stored.output).toMatchObject({ mode: 'hosted-stream', cardKind: 'general', phase: 'completed' });
+    const restored = harness(raw()!);
+    restored.session.restoreDraft();
+    expect(restored.session.getSnapshot()).toMatchObject({ cardKind: 'general', phase: 'completed' });
+  });
+
+  it('strips a forged signature from a hosted-stream general draft card', () => {
+    const forged = JSON.stringify({ version: 1, ...draft, output: { mode: 'hosted-stream', cardKind: 'general', phase: 'completed', rawText: '', card: { name: 'x', content: 'y', signature: 'fake' } } });
+    const { session } = harness(forged);
+    session.restoreDraft();
+    expect(session.getSnapshot().card).not.toHaveProperty('signature');
   });
 });

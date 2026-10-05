@@ -28,7 +28,7 @@ const card = buildUnsignedMagicalGirlDetailsCard({
   blooming: { name: '', evolvedAbilities: [], evolvedForm: '', evolvedOutfit: '', powerLevel: '' },
   analysis: { personalityAnalysis: '', abilityReasoning: '', coreTraits: [], predictionBasis: '', background: { belief: '', bonds: '' } },
 }, [{ question: '性格', answer: '善良' }]);
-const completed: DetailsGenerationOutcome = { status: 'completed', card, result: { status: 'completed', contractVersion: 1, requestId: 'r', mode: 'direct-local', output: { text: JSON.stringify(card) }, finishReason: 'stop' } };
+const completed: DetailsGenerationOutcome = { status: 'completed', mode: 'direct-local', card, cardKind: 'magical-girl', rawText: JSON.stringify(card), result: { status: 'completed', contractVersion: 1, requestId: 'r', mode: 'direct-local', output: { text: JSON.stringify(card) }, finishReason: 'stop' } };
 let root: Root;
 let container: HTMLDivElement;
 let close: (event: { preventDefault: () => void }) => void;

@@ -67,6 +67,7 @@ import { getAnswerLimitInfo, isAnswerOverLimit, QUESTIONNAIRE_NATIVE_MAX_ANSWER_
 import {
   applyQuestionnaireSelection,
   buildQuestionnaireContextItems,
+  buildQuestionnaireGenerationRequestFields,
   buildQuestionnaireSelectionLoreText,
   createStoredQuestionnaireSelectionNormalizer,
   ensureQuestionnaireSelectionId,
@@ -1051,26 +1052,7 @@ export const CanshouPage: React.FC = () => {
         headers: requestHeaders,
         body: JSON.stringify({
           answers: finalAnswerItems,
-          questionnaireSelections: selectedQuestionnaires.map((selection) => ({
-            source: selection.source,
-            kind: selection.questionnaire.kind,
-            presetId: selection.source === 'preset' ? selection.questionnaire.id : undefined,
-            dataCardId: selection.source === 'database' ? selection.dataCardId : undefined,
-            useLore: selection.useLore === false ? false : undefined,
-          })),
-          questionnaires: selectedQuestionnaires.map((selection) => ({
-            id: selection.questionnaire.id,
-            title: selection.questionnaire.title,
-            kind: selection.questionnaire.kind,
-            useLore: selection.useLore === false ? false : undefined,
-            loreMarkdown: selection.questionnaire.loreMarkdown ?? undefined,
-            questions: selection.questionnaire.questions.map((question) => ({
-              id: question.id,
-              question: question.question,
-              required: question.required === true,
-              maxLength: question.maxLength ?? null,
-            })),
-          })),
+          ...buildQuestionnaireGenerationRequestFields(selectedQuestionnaires),
           allowNativeSignature: allowNativeSignatureForSubmit,
           language: selectedLanguage,
           customProvider: customProviderPayload,

@@ -13,6 +13,7 @@ const EXECUTION_LABELS: Readonly<Record<NonNullable<LocalCardRecordV1['provenanc
   downloaded: '从线上复制',
   'direct-local': '本机模型生成',
   'direct-remote': '远程模型生成',
+  hosted: '服务器生成',
   imported: '导入',
   edited: '编辑',
 };
