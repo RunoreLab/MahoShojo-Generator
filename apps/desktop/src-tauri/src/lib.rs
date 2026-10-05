@@ -17,6 +17,7 @@ mod ai_e2e_tests;
 mod audit;
 mod backup;
 mod blob;
+mod cloud;
 mod export;
 mod gc;
 mod library;
@@ -936,6 +937,66 @@ async fn prepare_local_restore(
     .map_err(|_| restore::RestoreError::Failed)?
 }
 
+/* ── 项目服务云通路（D5.0c） ─────────────────────────────────────────────
+ *
+ * renderer 只得到非秘密的账号摘要与状态枚举；会话 cookie 永不进 IPC。
+ * 所有命令都通过 `cloud.rs` 的固定 origin/固定路由实现，不存在任意 URL 请求能力。
+ */
+
+/// 开始 `desktop-auth-v1` 登录：打开系统浏览器授权页并返回 flowId。
+#[tauri::command]
+async fn cloud_login_begin(
+    cloud: State<'_, cloud::CloudState>,
+) -> Result<cloud::CloudLoginBeginResponse, cloud::CloudError> {
+    cloud::cloud_login_begin(&cloud).await
+}
+
+/// 等待一次登录流程的回跳+交换完成。同一 flowId 只能 await 一次。
+#[tauri::command]
+async fn cloud_login_await(
+    cloud: State<'_, cloud::CloudState>,
+    secrets: State<'_, SharedSecretStore>,
+    flow_id: String,
+) -> Result<cloud::CloudLoginOutcome, cloud::CloudError> {
+    cloud::cloud_login_await(&cloud, &flow_id, secrets.inner().as_ref()).await
+}
+
+/// 取消一个进行中的登录流程。
+#[tauri::command]
+fn cloud_login_cancel(cloud: State<'_, cloud::CloudState>, flow_id: String) -> bool {
+    cloud::cloud_login_cancel(&cloud, &flow_id)
+}
+
+/// 查询账号会话状态：signed-out / active / expired / unreachable。
+/// `expired` 表示服务端明确拒绝会话（本地凭据随之清除）；`unreachable` 只是
+/// 服务暂时联系不上，凭据保留。
+#[tauri::command]
+async fn cloud_auth_status(
+    cloud: State<'_, cloud::CloudState>,
+    secrets: State<'_, SharedSecretStore>,
+) -> Result<cloud::CloudSessionStatus, cloud::CloudError> {
+    cloud::cloud_auth_status(&cloud, secrets.inner().as_ref()).await
+}
+
+/// 登出：本地凭据无条件删除；`revoked` 反映服务端会话是否同步作废。
+#[tauri::command]
+async fn cloud_sign_out(
+    cloud: State<'_, cloud::CloudState>,
+    secrets: State<'_, SharedSecretStore>,
+) -> Result<cloud::CloudSignOutResult, cloud::CloudError> {
+    cloud::cloud_sign_out(&cloud, secrets.inner().as_ref()).await
+}
+
+/// 主动使用在线能力时的最小探测：服务可达性 + hosted 契约版本兼容。
+/// 不携带任何 Provider Key；仅账号 cookie（若已登录）。
+#[tauri::command]
+async fn cloud_online_status(
+    cloud: State<'_, cloud::CloudState>,
+    secrets: State<'_, SharedSecretStore>,
+) -> Result<cloud::CloudOnlineStatus, cloud::CloudError> {
+    cloud::cloud_online_status(&cloud, secrets.inner().as_ref()).await
+}
+
 /// 仅在 native 已写恢复 intent 后允许退出，不向 renderer 开放通用进程控制。
 #[tauri::command]
 fn exit_after_local_restore(app: tauri::AppHandle) -> Result<(), restore::RestoreError> {
@@ -1027,6 +1088,14 @@ pub fn run() {
                 eprintln!("mahoshojo: {stuck} 个未完成的导出临时文件删不掉（磁盘或权限？）");
             }
 
+            // 云通路 state 在 setup 里注册而不是 Builder 顶层：CloudState 的初始化
+            // 失败（HTTP client 构建）应让启动明确失败，而不是静默降级——DESK-090 要求
+            // 云通路是一个确定的边界。
+            app.manage(
+                cloud::CloudState::new()
+                    .map_err(|error| format!("cannot initialize the cloud client: {}", error.message))?,
+            );
+
             app.manage(instance);
             app.manage(library);
             app.manage(archive_export);
@@ -1067,7 +1136,13 @@ pub fn run() {
             list_local_backups,
             prepare_local_restore,
             exit_after_local_restore,
-            collect_local_garbage
+            collect_local_garbage,
+            cloud_login_begin,
+            cloud_login_await,
+            cloud_login_cancel,
+            cloud_auth_status,
+            cloud_sign_out,
+            cloud_online_status
         ])
         .run(tauri::generate_context!())
         .expect("error while running MahoShojo Generator desktop app");

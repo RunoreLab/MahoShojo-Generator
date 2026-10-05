@@ -26,6 +26,7 @@ import {
   DesktopCloudLoginOutcomeSchema,
   DesktopCloudOnlineStatusSchema,
   DesktopCloudSessionStatusSchema,
+  DesktopCloudSignOutResultSchema,
   HostedGenerationEventNameSchema,
   HostedGenerationRouteIdSchema,
   MAX_DESKTOP_AUTH_CODE_VERIFIER_LENGTH,
@@ -54,7 +55,7 @@ type DesktopCloudFixture = {
 
 const fixture: DesktopCloudFixture = JSON.parse(
   readFileSync(
-    path.join(import.meta.dirname, 'fixtures', 'desktop-cloud.json'),
+    path.join(import.meta.dirname, '..', 'fixtures', 'desktop-cloud.json'),
     'utf8',
   ),
 );
@@ -232,6 +233,12 @@ describe('renderer IPC 投影', () => {
       state: 'unreachable',
       account,
     }).success).toBe(false);
+  });
+
+  it('登出结果', () => {
+    expect(DesktopCloudSignOutResultSchema.safeParse({ revoked: true }).success).toBe(true);
+    expect(DesktopCloudSignOutResultSchema.safeParse({ revoked: false }).success).toBe(true);
+    expect(DesktopCloudSignOutResultSchema.safeParse({}).success).toBe(false);
   });
 
   it('在线探测结果', () => {

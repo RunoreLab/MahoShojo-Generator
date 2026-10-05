@@ -673,6 +673,12 @@ describe('desktop workspace app ownership', () => {
       'prepare_local_restore',
       'exit_after_local_restore',
       'collect_local_garbage',
+      'cloud_login_begin',
+      'cloud_login_await',
+      'cloud_login_cancel',
+      'cloud_auth_status',
+      'cloud_sign_out',
+      'cloud_online_status',
     ]);
 
     // renderer 可用的 secret 能力只有写入与存在性；任何读取形态都会让

@@ -60,6 +60,8 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"
 tokio-util = { version = "0.7", features = ["rt"] }
 url = "2"
 http-range = "0.1.5"
+open = "5"
+getrandom = "0.3"
 
 [profile.dev]
 incremental = true

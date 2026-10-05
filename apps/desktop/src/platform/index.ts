@@ -55,6 +55,23 @@ export type {
 } from './local-library-audit';
 
 export {
+  CLOUD_AUTH_STATUS_COMMAND,
+  CLOUD_LOGIN_AWAIT_COMMAND,
+  CLOUD_LOGIN_BEGIN_COMMAND,
+  CLOUD_LOGIN_CANCEL_COMMAND,
+  CLOUD_ONLINE_STATUS_COMMAND,
+  CLOUD_SIGN_OUT_COMMAND,
+  DesktopCloudError,
+  awaitCloudLogin,
+  beginCloudLogin,
+  cancelCloudLogin,
+  probeCloudOnlineStatus,
+  readCloudAuthStatus,
+  signOutCloud,
+} from './cloud-bridge';
+export type { InvokeFn as CloudInvokeFn } from './cloud-bridge';
+
+export {
   DELETE_LOCAL_CARD_COMMAND,
   GET_LOCAL_CARD_COMMAND,
   LIST_LOCAL_CARDS_COMMAND,

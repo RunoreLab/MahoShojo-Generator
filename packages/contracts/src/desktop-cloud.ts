@@ -215,6 +215,12 @@ export const DesktopCloudSessionStatusSchema = z.discriminatedUnion('state', [
 ]);
 export type DesktopCloudSessionStatus = z.infer<typeof DesktopCloudSessionStatusSchema>;
 
+/** 登出结果：本地凭据无条件删除，`revoked` 只反映服务端会话是否同步作废。 */
+export const DesktopCloudSignOutResultSchema = z.object({
+  revoked: z.boolean(),
+}).strict();
+export type DesktopCloudSignOutResult = z.infer<typeof DesktopCloudSignOutResultSchema>;
+
 /** 在线能力探测结果（只覆盖本次主动使用的操作，DESK-ONLINE-013）。 */
 export const DesktopCloudOnlineStatusSchema = z.object({
   reachable: z.boolean(),

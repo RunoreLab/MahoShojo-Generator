@@ -41,6 +41,12 @@
     "allow-list-local-backups",
     "allow-prepare-local-restore",
     "allow-exit-after-local-restore",
-    "allow-collect-local-garbage"
+    "allow-collect-local-garbage",
+    "allow-cloud-login-begin",
+    "allow-cloud-login-await",
+    "allow-cloud-login-cancel",
+    "allow-cloud-auth-status",
+    "allow-cloud-sign-out",
+    "allow-cloud-online-status"
   ]
 }
