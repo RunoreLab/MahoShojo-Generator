@@ -26,7 +26,7 @@ import { buttonClassName } from './Button';
 import { DataCardEmptyState } from './DataCardEmptyState';
 import { getDataCardStatus } from './status';
 import type { BadgeDefinition } from './badge-types';
-import type { CardLibraryHost } from './host';
+import type { CardLibraryHost, CardLibrarySelectionContext } from './host';
 import {
   ONLINE_DATA_CARD_TYPES,
   OnlineDataCardTypeSchema,
@@ -44,8 +44,8 @@ export interface CardLibraryModalProps {
   host: CardLibraryHost;
   isOpen: boolean;
   onClose: () => void;
-  onSelectCard?: (card: any) => void;
-  onToggleCard?: (card: any, nextSelected: boolean) => void;
+  onSelectCard?: (card: any, context: CardLibrarySelectionContext) => void;
+  onToggleCard?: (card: any, nextSelected: boolean, context: CardLibrarySelectionContext) => void;
   selectedType: BattleDataSelectedType;
   allowedTypes?: DataCardType[];
   initialTab?: BattleDataTab;
@@ -161,7 +161,10 @@ export function CardLibraryModal({
   allowDeckImport = true,
   allowCardDetails = true,
 }: CardLibraryModalProps) {
-  const { isAuthenticated, userId, userBadges } = host.auth;
+  const { status: authStatus, userId, userBadges } = host.auth;
+  // `unknown`（未确认登录态）一律不当成「已登出」：账号页签不出现、账号绑定
+  // 状态不清理——只有确认过的 `unauthenticated` 才走登出语义。
+  const isAuthenticated = authStatus === 'authenticated';
   const modalTitleId = useId();
   const modalRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
@@ -179,7 +182,25 @@ export function CardLibraryModal({
   const [publicDataCards, setPublicDataCards] = useState<any[]>([]);
   // 记录当前 publicDataCards 展示结果所属的查询；只有相同查询的刷新失败才允许保留 stale 数据。
   const publicLoadedRequestKeyRef = useRef<string | null>(null);
-  const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
+  const [publicTotalPages, setPublicTotalPages] = useState<number | null>(null);
+
+  /**
+   * 账号身份纪元（D5.0e-r1）：`authenticated` 按 userId 区分，其余状态按
+   * status 本身区分（unknown ↔ unauthenticated ↔ authenticated 之间互不同纪）。
+   * 所有账号绑定的异步操作发起时捕获 `accountEpochRef.current.epoch`，await
+   * 返回后若 epoch 已前进则一律不得写回 UI。
+   */
+  const accountEpochRef = useRef({ key: '', epoch: 0 });
+  const accountKey = isAuthenticated ? `account:${userId}` : `session:${authStatus}`;
+  if (accountEpochRef.current.key !== accountKey) {
+    accountEpochRef.current = { key: accountKey, epoch: accountEpochRef.current.epoch + 1 };
+  }
+  const accountEpoch = accountEpochRef.current.epoch;
+
+  // 收藏集合按纪元持有一份：渲染只投影当前纪元的值，旧纪元的迟到写入天然失效。
+  const EMPTY_FAVORITE_IDS = useRef(new Set<string>()).current;
+  const [favoriteView, setFavoriteView] = useState<{ epoch: number; ids: Set<string> }>({ epoch: accountEpoch, ids: EMPTY_FAVORITE_IDS });
+  const favoriteIds = favoriteView.epoch === accountEpoch ? favoriteView.ids : EMPTY_FAVORITE_IDS;
   const [isLoading, setIsLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<BattleDataTab>('public');
   const [showDecksModal, setShowDecksModal] = useState(false);
@@ -342,27 +363,31 @@ export function CardLibraryModal({
     return next;
   }, [selectedType]);
 
+  // 认证三态（DESK-ONLINE-010）：'unknown'（idle/checking/authenticating）不是"已登出"——
+  // 账号页签在 unknown 期间保持可见，数据 hooks 因 owner=null 暂不取数，待会话解析后自动
+  // 补齐；只有明确 unauthenticated 才收起 my/favorites。
+  const accountTabsVisible = authStatus !== 'unauthenticated';
   const effectiveTabs = useMemo<BattleDataTab[]>(() => {
     const candidates = Array.isArray(visibleTabs) && visibleTabs.length > 0
       ? visibleTabs
       : ([
-        ...(isAuthenticated ? (['my'] as const) : []),
+        ...(accountTabsVisible ? (['my'] as const) : []),
         'local' as const,
         'public' as const,
         'recommended' as const,
-        ...(isAuthenticated ? (['favorites'] as const) : []),
+        ...(accountTabsVisible ? (['favorites'] as const) : []),
       ] as const);
 
     const seen = new Set<BattleDataTab>();
     const out: BattleDataTab[] = [];
     for (const tab of candidates as BattleDataTab[]) {
-      if ((tab === 'my' || tab === 'favorites') && !isAuthenticated) continue;
+      if ((tab === 'my' || tab === 'favorites') && !accountTabsVisible) continue;
       if (seen.has(tab)) continue;
       seen.add(tab);
       out.push(tab);
     }
     return out.length > 0 ? out : ['public'];
-  }, [visibleTabs, isAuthenticated]);
+  }, [visibleTabs, accountTabsVisible]);
 
   const isPublicTab = activeTab === 'public' || activeTab === 'recommended';
   // 私有/收藏摘要只继承这些 Tab 上实际可见且有语义的条件。
@@ -392,6 +417,21 @@ export function CardLibraryModal({
   const libraryAutoSave = useLocalLibraryAutoSave(host.local.repository);
   const [libraryCopyMessage, setLibraryCopyMessage] = useState<string | null>(null);
 
+  /**
+   * 账号纪元切换的清场（render-phase adjust）：渲染途中发现纪元已前进时，
+   * 把「上个账号留下的可辨认痕迹」在本帧同步清掉，不等 effect——否则
+   * 下一个绘制帧之前新账号界面仍会短暂显示旧账号的通知/错误。
+   * 本地库操作状态（pendingLocalRemoval 等）属于设备动作，不在此列。
+   */
+  const [appliedAccountEpoch, setAppliedAccountEpoch] = useState(accountEpoch);
+  if (appliedAccountEpoch !== accountEpoch) {
+    setAppliedAccountEpoch(accountEpoch);
+    setLocalActionError(null);
+    setLocalActionNotice(null);
+    setLibraryCopyMessage(null);
+    setSelectError(null);
+  }
+
   const listLoading = activeTab === 'my' ? myPage.loading : activeTab === 'favorites' ? favoritesPage.loading : isLocalTab ? localCards.loading : isLoading;
   const listError = activeTab === 'my' ? myPage.error : activeTab === 'favorites' ? favoritesPage.error : isLocalTab ? localCards.error : publicError;
   const listIdle = activeTab === 'my' ? myPage.status === 'idle' : activeTab === 'favorites' ? favoritesPage.status === 'idle' : false;
@@ -414,14 +454,17 @@ export function CardLibraryModal({
   }, [isOpen, isPublicTab, activeTab, myPage.status, myPage.total, favoritesPage.status, favoritesPage.total, currentPage, cardsPerPage]);
   useEffect(() => {
     if (!isOpen || !isAuthenticated) return;
+    // 收藏 id 是账号私有偏好：写入打发起时的纪元标签，渲染只投影当前纪元——
+    // 切账号/登出后，旧账号迟到的响应不可能投影进新会话。
+    const epoch = accountEpoch;
     let cancelled = false;
     void host.online.listFavoriteIds().then((result) => {
-      if (!cancelled && result.success) setFavoriteIds(new Set(result.favorites as string[]));
+      if (!cancelled && result.success) setFavoriteView({ epoch, ids: new Set(result.favorites as string[]) });
     }).catch(() => {
       // 收藏标记是纯装饰：失败时保持空集，列表照常渲染。
     });
     return () => { cancelled = true; };
-  }, [isOpen, isAuthenticated, userId, host.online]);
+  }, [isOpen, isAuthenticated, userId, host.online, accountEpoch]);
 
   const inferRoleType = useCallback((card: any): 'magical-girl' | 'canshou' | 'general' | null => {
     if (!card || card.type !== 'character') return null;
@@ -509,6 +552,7 @@ export function CardLibraryModal({
       // 查询语义变化（含 UUID 切换）：旧结果不得冒充新查询结果。
       publicLoadedRequestKeyRef.current = null;
       setPublicDataCards([]);
+      setPublicTotalPages(null);
     }
     let failedStatus: number | null = null;
     try {
@@ -520,6 +564,7 @@ export function CardLibraryModal({
         const card = result.data.success && result.data.card && effectiveAllowedTypeSet.has(result.data.card.type) ? result.data.card : null;
         publicLoadedRequestKeyRef.current = requestKey;
         setPublicDataCards(card ? mapWithRoleType([card]) : []);
+        setPublicTotalPages(1);
       } else {
         failedStatus = result.status;
         throw new Error(`获取数据卡失败（HTTP ${result.status}）`);
@@ -534,6 +579,7 @@ export function CardLibraryModal({
       if (!keepStale) {
         publicLoadedRequestKeyRef.current = null;
         setPublicDataCards([]);
+        setPublicTotalPages(null);
       }
       setPublicError(error instanceof Error ? error.message : '获取数据卡失败');
     } finally {
@@ -564,18 +610,19 @@ export function CardLibraryModal({
       // 翻页/搜索/筛选/Tab 变化：旧查询结果不得冒充新查询结果。
       publicLoadedRequestKeyRef.current = null;
       setPublicDataCards([]);
+      setPublicTotalPages(null);
     }
     try {
       setIsLoading(true);
       setPublicError(null);
-      const useRoleTypeFilter = Boolean(currentFilters?.roleType && selectedType === 'character');
-      const effectiveLimit = useRoleTypeFilter ? 500 : cardsPerPage;
-      const offset = useRoleTypeFilter ? 0 : (page - 1) * cardsPerPage;
-      const fetchType = async (type: DataCardType): Promise<any[]> => {
+      // 摘要分页：每页数量即卡片上限，列表不含正文；roleType 等筛选全部
+      // 在服务端完成——不再先取一大批回客户端过滤（旧 limit=500 在服务端
+      // MAX_LIMIT=100 下本来就截断，筛选结果不完整）。
+      const fetchType = async (type: DataCardType): Promise<{ cards: any[]; total: number | null }> => {
         const result = await host.online.fetchPublicCards({
           type,
-          limit: effectiveLimit,
-          offset,
+          limit: cardsPerPage,
+          offset: (page - 1) * cardsPerPage,
           sortBy: currentSortBy,
           search: currentSearchTerm,
           tagIds: currentTagIds && currentTagIds.length > 0 ? currentTagIds : undefined,
@@ -587,6 +634,7 @@ export function CardLibraryModal({
           maxUsage: currentFilters?.maxUsage || undefined,
           minFavorites: currentFilters?.minFavorites || undefined,
           maxFavorites: currentFilters?.maxFavorites || undefined,
+          roleType: currentFilters?.roleType && selectedType === 'character' ? currentFilters.roleType : undefined,
           recommendedOnly: currentFilters?.recommendedOnly || undefined,
           nativeOnly: currentFilters?.nativeOnly || undefined,
           nativeAllowedOnly: currentFilters?.nativeAllowedOnly || undefined,
@@ -595,17 +643,23 @@ export function CardLibraryModal({
         if (!result.data.success || !Array.isArray(result.data.cards)) {
           throw new Error(result.data.error || '列表响应无效');
         }
-        return result.data.cards;
+        const total = typeof result.data.total === 'number' && Number.isFinite(result.data.total)
+          ? result.data.total
+          : null;
+        return { cards: result.data.cards, total };
       };
 
       const batches = await Promise.all(effectiveAllowedTypes.map((type) => fetchType(type)));
       if (abortController.signal.aborted) return;
-      let cards = mapWithRoleType(batches.flat());
-      if (currentFilters?.roleType && selectedType === 'character') {
-        cards = cards.filter((card: any) => card.roleType === currentFilters.roleType);
-      }
+      const cards = mapWithRoleType(batches.flatMap((batch) => batch.cards));
       publicLoadedRequestKeyRef.current = requestKey;
       setPublicDataCards(cards);
+      // 多类型并行请求时总页数取各类型最大（与 Web 旧行为一致：跨类型分页各自独立）。
+      setPublicTotalPages(
+        batches.every((batch) => batch.total !== null)
+          ? Math.max(1, ...batches.map((batch) => Math.ceil((batch.total as number) / cardsPerPage)))
+          : null,
+      );
     } catch (error) {
       if (abortController.signal.aborted || (error instanceof Error && error.name === 'AbortError')) {
         return;
@@ -613,6 +667,7 @@ export function CardLibraryModal({
       if (publicLoadedRequestKeyRef.current !== requestKey) {
         publicLoadedRequestKeyRef.current = null;
         setPublicDataCards([]);
+        setPublicTotalPages(null);
       }
       setPublicError(error instanceof Error ? error.message : '获取公开数据卡失败');
     } finally {
@@ -636,6 +691,15 @@ export function CardLibraryModal({
     }
     loadPublicDataCards(page, sortBy, trimmed || undefined, publicFilters, selectedTagIds, tagMatchMode);
   }, [isPublicTab, debouncedSearchQuery, sortBy, publicFilters, selectedTagIds, tagMatchMode, loadCardByIdForDisplay, loadPublicDataCards]);
+
+  // 公开页签的服务端分页越界回收：total 已知而当前页超出时（并发删卡、筛选收紧等）
+  // 回收到最后一页并重新拉取。
+  useEffect(() => {
+    if (!isOpen || !isPublicTab || publicTotalPages === null || currentPage <= publicTotalPages) return;
+    const next = Math.max(1, publicTotalPages);
+    setCurrentPage(next);
+    reloadPublicCurrentQuery(next);
+  }, [isOpen, isPublicTab, publicTotalPages, currentPage, reloadPublicCurrentQuery]);
 
   const sortFavorites = useCallback((items: any[], criteria: 'likes' | 'usage' | 'favorites' | 'created_at') => {
     const sorted = [...items];
@@ -740,14 +804,15 @@ export function CardLibraryModal({
       if (!hasUserSelectedTabRef.current) {
         return effectiveTabs.includes(desiredDefaultTab) ? desiredDefaultTab : fallbackTab;
       }
-      if (!isAuthenticated && !isPublicTab && effectiveTabs.includes('public')) return 'public';
+      // 只有"确认未登录"才强收回 public；unknown 期间保留用户所在页签等待会话解析。
+      if (authStatus === 'unauthenticated' && !isPublicTab && effectiveTabs.includes('public')) return 'public';
       return effectiveTabs.includes(activeTab) ? activeTab : fallbackTab;
     })();
 
     setActiveTab(nextTab);
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, selectedType, isAuthenticated]);
+  }, [isOpen, selectedType, isAuthenticated, authStatus]);
 
   // 切换数据卡类型时，清除不适配当前类型的筛选项，避免误筛
   useEffect(() => {
@@ -788,20 +853,26 @@ export function CardLibraryModal({
 
       const signal = cardReadController.current.signal;
       // 本地库记录本来就带着完整正文；走 host.online.loadFullCard 只会得到一次注定 404 的请求。
-      const full = isLocalDataCardRow(card)
+      const isLocalRow = isLocalDataCardRow(card);
+      const full = isLocalRow
         ? card
         : typeof card.data === 'string' ? card : await host.online.loadFullCard(card, activeTab === 'my' ? 'my' : 'public', signal);
       if (signal.aborted) return;
       const payload = mapPublicDataCardRowToBattleSelectionPayload(full);
+      // 选中上下文：canonical 卡 id 相同的不同来源副本（云端卡 vs 本地副本）
+      // 必须产出不同 selectionId，下游问卷作用域据此隔离（D5.0e-r1）。
+      const selectionContext: CardLibrarySelectionContext = isLocalRow
+        ? { selectionId: `local:${cardId}`, storageLocation: 'local' }
+        : { selectionId: `cloud:${cardId}`, storageLocation: 'cloud', cloudCardId: cardId };
 
       if (selectionMode === 'multi') {
         if (canToggle) {
-          onToggleCard?.(payload, nextSelected);
+          onToggleCard?.(payload, nextSelected, selectionContext);
         } else if (nextSelected) {
-          onSelectCard?.(payload);
+          onSelectCard?.(payload, selectionContext);
         }
       } else {
-        onSelectCard?.(payload);
+        onSelectCard?.(payload, selectionContext);
         onClose();
       }
 
@@ -852,11 +923,16 @@ export function CardLibraryModal({
 
         try {
           const payload = mapPublicDataCardRowToBattleSelectionPayload(card);
+          const selectionContext: CardLibrarySelectionContext = {
+            selectionId: `cloud:${cardId}`,
+            storageLocation: 'cloud',
+            cloudCardId: cardId,
+          };
 
           if (canToggle) {
-            onToggleCard?.(payload, true);
+            onToggleCard?.(payload, true, selectionContext);
           } else {
-            onSelectCard?.(payload);
+            onSelectCard?.(payload, selectionContext);
           }
 
           nextSelectedIds.add(cardId);
@@ -936,16 +1012,22 @@ export function CardLibraryModal({
     setLocalActionError(null);
     setLocalActionNotice(null);
     setUploadingLocalId(card.id);
+    // 上传是账号绑定的写操作：await 返回时账号可能已切换，迟到的成功/失败
+    // 提示都不得投影到新账号会话（DESK-ONLINE-010 stale-result rejection）。
+    const epoch = accountEpochRef.current.epoch;
     try {
       const result = await upload(record);
+      if (accountEpochRef.current.epoch !== epoch) return;
       if (result.ok) {
         setLocalActionNotice('已上传为云端新数据卡（默认私有）。');
       } else {
         setLocalActionError(result.error);
       }
     } catch (error) {
+      if (accountEpochRef.current.epoch !== epoch) return;
       setLocalActionError(error instanceof Error ? error.message : '上传到云端失败，请重试。');
     } finally {
+      // spinner 是本行本地状态，不属于账号投影：无论纪元是否前进都要复位。
       setUploadingLocalId((current) => (current === card.id ? null : current));
     }
   }, [host.online, localRecordById]);
@@ -971,10 +1053,17 @@ export function CardLibraryModal({
       setLocalActionError('这张数据卡没有可保存的正文。');
       return;
     }
+    // cloudRef 只记录权威出处：云端行写 cardId；本地行没有线上身份，不写。
+    // 服务端目前没有对外暴露 revision token，不用 updated_at 之类的时间戳冒充。
+    const isLocalRow = isLocalDataCardRow(card);
+    const cloudCardId = !isLocalRow && typeof card?.id === 'string' && card.id ? card.id : undefined;
     const summary = await libraryAutoSave.save([{
       cardType: normalizeCardTypeForLibrary(card),
       title: typeof card?.name === 'string' && card.name.trim() ? card.name : '未命名数据卡',
       payload,
+      // 该入口只对云端行暴露（本地行 details 卡不提供），固定为下载副本语义。
+      execution: 'downloaded',
+      cloudRef: cloudCardId ? { cardId: cloudCardId } : undefined,
     }]);
     if (libraryAutoSave.error) setLocalActionError(libraryAutoSave.error);
     setLibraryCopyMessage(summary.saved > 0
@@ -1065,19 +1154,27 @@ export function CardLibraryModal({
     if (!isAuthenticated) {
       return false;
     }
+    // 账号纪元捕获：await 之后账号可能已切换——旧账号的迟到结果绝不能写回
+    // 新账号的 UI（收藏集合、列表计数、收藏列表内容一律拒绝投影）。
+    const epoch = accountEpochRef.current.epoch;
+    const isCurrentSession = () => accountEpochRef.current.epoch === epoch;
 
     if (nextState) {
       const result = await host.online.addFavorite(card.id);
+      if (!isCurrentSession()) {
+        return false;
+      }
       if (!result.success && !result.alreadyExists) {
         return false;
       }
 
       const delta = result.alreadyExists ? 0 : 1;
 
-      setFavoriteIds((prev) => {
-        const next = new Set(prev);
+      setFavoriteView((prev) => {
+        if (prev.epoch !== epoch) return prev;
+        const next = new Set(prev.ids);
         next.add(card.id);
-        return next;
+        return { epoch, ids: next };
       });
 
       if (delta !== 0) {
@@ -1105,14 +1202,18 @@ export function CardLibraryModal({
     }
 
     const result = await host.online.removeFavorite(card.id);
+    if (!isCurrentSession()) {
+      return false;
+    }
     if (!result.success) {
       return false;
     }
 
-    setFavoriteIds((prev) => {
-      const next = new Set(prev);
+    setFavoriteView((prev) => {
+      if (prev.epoch !== epoch) return prev;
+      const next = new Set(prev.ids);
       next.delete(card.id);
-      return next;
+      return { epoch, ids: next };
     });
 
     setPublicDataCards((prev) => adjustFavoriteCount(prev, card.id, -1));
@@ -1123,10 +1224,10 @@ export function CardLibraryModal({
     return true;
   }, [isAuthenticated, host.online, adjustFavoriteCount, sortFavorites, sortBy, setUserDataCards, setFavoriteCards, reloadFavorites]);
 
-  // 处理页码变化：翻页请求的显式 owner；roleType 高级筛选走本地 500 条分页，只切页不请求。
+  // 处理页码变化：翻页请求的显式 owner；公开页签无论筛选如何都重新发起服务端分页请求。
   const handlePageChange = (newPage: number) => {
     setCurrentPage(newPage);
-    if (isPublicTab && !(publicFilters.roleType && selectedType === 'character')) {
+    if (isPublicTab) {
       reloadPublicCurrentQuery(newPage);
     }
   };
@@ -1210,12 +1311,7 @@ export function CardLibraryModal({
   const paginatedUserCards = userDataCards;
   const paginatedFavoriteCards = favoriteCards;
 
-  const publicPaginatedCards = useMemo(() => {
-    if (publicFilters.roleType && selectedType === 'character') {
-      return filteredPublicCards.slice((currentPage - 1) * cardsPerPage, currentPage * cardsPerPage);
-    }
-    return filteredPublicCards;
-  }, [filteredPublicCards, publicFilters.roleType, selectedType, currentPage, cardsPerPage]);
+  const publicPaginatedCards = filteredPublicCards;
 
   const localPaginatedCards = useMemo(
     () => localCards.rows.slice((currentPage - 1) * cardsPerPage, currentPage * cardsPerPage),
@@ -1364,10 +1460,6 @@ export function CardLibraryModal({
       abortController.abort();
     };
   }, [isOpen, activeTab, displayCards, userId, currentUserEquippedBadges, authorBadgesById, host.online]);
-
-  const publicTotalPages = publicFilters.roleType && selectedType === 'character'
-    ? Math.max(1, Math.ceil(filteredPublicCards.length / cardsPerPage))
-    : null;
 
   const currentTabTotalPages = activeTab === 'my'
     ? userTotalPages
@@ -1794,7 +1886,9 @@ export function CardLibraryModal({
                       >
 		                {displayCards.map((card: any) => {
 		                  const isFavorited = favoriteIds.has(card.id);
-		                  const enableFavorite = isAuthenticated && activeTab !== 'my';
+		                  // unknown（会话探测中）不等于已登出：入口保持可用，真正拒绝由
+		                  // handleFavoriteToggleForCard 的 authenticated 检查兜底。
+		                  const enableFavorite = authStatus !== 'unauthenticated' && activeTab !== 'my';
 	                    const isSelected = selectedIdSet.has(card.id);
 	                    const itemDisabled = selectionMode === 'multi' && !isSelected && atLimit;
 	                    const showQuickToggle = selectionMode === 'multi';
@@ -1910,8 +2004,8 @@ export function CardLibraryModal({
             (activeTab === 'my' && myPage.total > cardsPerPage) ||
             (activeTab === 'favorites' && favoritesPage.total > cardsPerPage) ||
             (isPublicTab && (
-              (publicFilters.roleType && selectedType === 'character')
-                ? publicPaginatedCards.length > 0 || publicTotalPages! > 1
+              publicTotalPages !== null
+                ? publicTotalPages > 1 || currentPage > 1
                 : (displayCards.length >= cardsPerPage || currentPage > 1)
             ))
           ) &&

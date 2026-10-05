@@ -13,6 +13,8 @@ export type DataCardDetailsModalCard = {
   type: OnlineDataCardType;
   data: string;
   isPublic: boolean;
+  /** 本地库记录映射的详情卡携带该标记，消费端可用 `isLocalDataCardRow` 判定来源。 */
+  storageLocation?: 'local';
   usageCount?: number;
   likeCount?: number;
   favoriteCount?: number;

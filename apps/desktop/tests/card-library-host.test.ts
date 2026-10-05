@@ -7,8 +7,11 @@ const signal = () => new AbortController().signal;
 
 const summaryPage = { success: true as const, cards: [], total: 0, nextOffset: null };
 
-const makeInvoke = (impl: (request: { routeId: string; query?: Record<string, string>; body?: unknown }) => unknown) =>
-  vi.fn(async (_command: string, args: { request: { routeId: string; query?: Record<string, string>; body?: unknown } }) => impl(args.request));
+type CardRequest = { routeId: string; query?: Record<string, string>; body?: unknown };
+
+const makeInvoke = (impl: (request: CardRequest) => unknown) =>
+  vi.fn(async (_command: string, args?: Record<string, unknown>) =>
+    impl((args as { request: CardRequest }).request));
 
 describe('createDesktopCardLibraryOnlinePort', () => {
   it('「我的/收藏」摘要分页走对应固定路由并透传查询', async () => {
@@ -41,9 +44,11 @@ describe('createDesktopCardLibraryOnlinePort', () => {
       expect(request.routeId).toBe('public-data-cards.query');
       expect(request.query).toMatchObject({
         type: 'questionnaire', limit: '12', offset: '0', sortBy: 'likes',
+        // 列表固定走摘要视图；正文按需单卡拉取（D5.0e-r1）。
+        view: 'summary',
         nativeAllowedOnly: '1', recommendedOnly: '1', tagIds: 't1,t2', tagMatch: 'all',
       });
-      return { status: 200, body: { success: true, cards: [{ id: 'c1' }] } };
+      return { status: 200, body: { success: true, cards: [{ id: 'c1' }], total: 1 } };
     });
     const port = createDesktopCardLibraryOnlinePort(invoke);
     const result = await port.fetchPublicCards({
@@ -52,6 +57,20 @@ describe('createDesktopCardLibraryOnlinePort', () => {
     }, signal());
     expect(result.ok).toBe(true);
     expect((result.data as { cards: unknown[] }).cards).toHaveLength(1);
+  });
+
+  it('公开列表的 roleType 作为服务端过滤参数透传', async () => {
+    const invoke = makeInvoke((request) => {
+      expect(request.query).toMatchObject({
+        type: 'character', view: 'summary', roleType: 'magical-girl',
+      });
+      return { status: 200, body: { success: true, cards: [], total: 0 } };
+    });
+    const port = createDesktopCardLibraryOnlinePort(invoke);
+    const result = await port.fetchPublicCards({
+      type: 'character', limit: 12, offset: 0, sortBy: 'created_at', roleType: 'magical-girl',
+    }, signal());
+    expect(result.ok).toBe(true);
   });
 
   it('loadFullCard：列表行已带正文时不发起 IPC', async () => {

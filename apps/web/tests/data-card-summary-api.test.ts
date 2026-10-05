@@ -14,6 +14,7 @@ vi.mock('@/lib/auth/server', () => ({ requireAuthUser: async () => runtime.userI
   : { user: { id: runtime.userId, username: 'alice' } } }));
 import cardsHandler from '@/app/api/data-cards/handler';
 import favoritesHandler from '@/app/api/favorites/handler';
+import publicHandler from '@/app/api/public-data-cards/handler';
 let sqlite: Database;
 let db: AppDrizzleDb;
 beforeEach(() => {
@@ -42,7 +43,12 @@ beforeEach(() => {
     INSERT INTO favorites SELECT 2,id,'2026-09-23' FROM data_cards;
     INSERT INTO data_cards (id,user_id,type,name,data) VALUES ('other',2,'character','其他用户','{}');`);
 });
-afterEach(() => sqlite.close());
+afterEach(async () => {
+  sqlite.close();
+  // withEdgeCache 的内存回写是 fire-and-forget 的 Response.clone().text()，flush 一次
+  // macrotask 让该 promise 在 worker 拆卸前 settle，避免 better-sqlite3 销毁期断言。
+  await new Promise((resolve) => setImmediate(resolve));
+});
 
 test('200 张卡首屏仅 12 条摘要，不含正文；翻页稳定、总数正确', async () => {
   const first = await listDataCardSummaries(db, 1, 'my', DataCardSummaryQuerySchema.parse({}));
@@ -112,4 +118,65 @@ test('损坏 JSON 不影响摘要；问卷库保留旧误标问卷发现与原�
 test.each(['limit=25','offset=-1','roleType=no','types=bad','nativeOnly=bad','minLikes=-1'])('拒绝无效摘要查询 %s', async (query) => {
   expect(readDataCardSummaryQuery(new URLSearchParams(query))).toBeNull();
   expect((await cardsHandler(new Request(`https://test/api/data-cards?view=summary&${query}`))).status).toBe(400);
+});
+
+describe('public 摘要源（D5.0e-r1）', () => {
+  test('公开摘要只含 public+approved 行的元数据，分页有界且无正文', async () => {
+    sqlite.exec(`UPDATE data_cards SET is_public=0 WHERE id='card-199';
+      UPDATE data_cards SET review_status='pending' WHERE id='card-198';
+      UPDATE data_cards SET deleted_at='today' WHERE id='card-197';`);
+    const result = await listDataCardSummaries(db, null, 'public', DataCardSummaryQuerySchema.parse({}));
+    expect(result.total).toBe(197);
+    expect(result.cards).toHaveLength(12);
+    expect(result.nextOffset).toBe(12);
+    for (const card of result.cards) {
+      expect(card).not.toHaveProperty('data');
+      expect(card.is_public).toBe(1);
+      expect(card.review_status).toBe('approved');
+      expect(card.has_pending_update).toBe(false);
+      expect(card.favorited_at).toBeNull();
+    }
+  });
+
+  test('公开摘要 roleType 在 SQL 侧过滤，total 与过滤后一致', async () => {
+    sqlite.prepare(`UPDATE data_cards SET data=? WHERE id='card-100'`).run(JSON.stringify({
+      templateId: '魔法少女/心之花/魔法少女（问卷生成）', content: '正文',
+    }));
+    const magical = await listDataCardSummaries(db, null, 'public', DataCardSummaryQuerySchema.parse({ roleType: 'magical-girl' }));
+    expect(magical.total).toBe(1);
+    expect(magical.cards[0]).toMatchObject({ id: 'card-100', roleType: 'magical-girl' });
+    // 其余 199 张 templateId='通用角色' → general；角色过滤不放大结果集。
+    const general = await listDataCardSummaries(db, null, 'public', DataCardSummaryQuerySchema.parse({ roleType: 'general' }));
+    expect(general.total).toBe(199);
+    const canshou = await listDataCardSummaries(db, null, 'public', DataCardSummaryQuerySchema.parse({ roleType: 'canshou' }));
+    expect(canshou.total).toBe(0);
+  });
+
+  test('公开摘要的作者筛选是精确匹配（与旧公开列表语义一致）', async () => {
+    const exact = await listDataCardSummaries(db, null, 'public', DataCardSummaryQuerySchema.parse({ author: 'alice' }));
+    expect(exact.total).toBe(200);
+    const partial = await listDataCardSummaries(db, null, 'public', DataCardSummaryQuerySchema.parse({ author: 'ali' }));
+    expect(partial.total).toBe(0);
+  });
+
+  test('handler view=summary 返回摘要页契约；?id= 仍回完整正文', async () => {
+    const summary = await publicHandler(new Request('https://test/api/public-data-cards?view=summary&limit=5&type=character&sortBy=created_at'));
+    expect(summary.status).toBe(200);
+    const body = await summary.json();
+    expect(body).toMatchObject({ success: true, total: 200 });
+    expect(body.cards).toHaveLength(5);
+    expect(body.nextOffset).toBe(5);
+    for (const card of body.cards) expect(card).not.toHaveProperty('data');
+
+    const filtered = await publicHandler(new Request('https://test/api/public-data-cards?view=summary&roleType=canshou'));
+    expect(((await filtered.json()).cards)).toHaveLength(0);
+
+    const single = await publicHandler(new Request('https://test/api/public-data-cards?id=card-199'));
+    expect((await single.json()).card).toMatchObject({ id: 'card-199', data: expect.any(String) });
+  });
+
+  test('handler view=summary 拒绝非法筛选值', async () => {
+    expect((await publicHandler(new Request('https://test/api/public-data-cards?view=summary&roleType=nope'))).status).toBe(400);
+    expect((await publicHandler(new Request('https://test/api/public-data-cards?view=summary&limit=999'))).status).toBe(400);
+  });
 });

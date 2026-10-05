@@ -1428,9 +1428,11 @@ pub async fn stream_hosted_ai(
 
 /// 卡库响应正文上限：列表页与单卡正文都远小于它，超限视为异常流量。
 const CARD_LIBRARY_RESPONSE_MAX_BYTES: usize = 4 * 1024 * 1024;
-/// 请求 body 上限：上传副本即 `{type,name,description,data,isPublic}`，
-/// 与本地库单卡记录同一量级，512 KiB 足够且能拦住畸形大载荷。
-const CARD_LIBRARY_BODY_MAX_BYTES: usize = 512 * 1024;
+/// 请求 body 传输上限：服务端的产品级正文限制是 `MAX_DATA_CARD_BYTES`（1 MiB，
+/// 权威校验在服务端）。这里是 transport 上限——JSON 包装（type/name/description/
+/// isPublic + 转义开销）叠在 1 MiB 正文之上，取 ~2 MiB 既不放行明显畸形载荷，
+/// 也不会把服务端仍在受理的边界请求拦在 IPC 层（D5.0e-r1）。
+const CARD_LIBRARY_BODY_MAX_BYTES: usize = 2 * 1024 * 1024;
 const CARD_LIBRARY_QUERY_MAX_PAIRS: usize = 32;
 const CARD_LIBRARY_QUERY_KEY_MAX: usize = 64;
 const CARD_LIBRARY_QUERY_VALUE_MAX: usize = 1024;
@@ -2975,7 +2977,30 @@ mod tests {
                 .unwrap_err();
             assert_eq!(error.code, CloudErrorCode::InvalidRequest);
 
+            // 1 MiB 产品上限内的正文连同 JSON 包装必须放行——服务端是唯一权威裁决者
+            //（D5.0e-r1：native transport cap 对齐 1MiB 产品限制 + 包装余量）。
+            *server.card_response_override.lock().unwrap() =
+                Some((200, r#"{"success":true}"#.to_string()));
+            let response = cloud_card_library_request(
+                &state,
+                &secrets,
+                CloudCardLibraryRequest {
+                    route_id: "data-cards.create".to_string(),
+                    query: None,
+                    body: Some(serde_json::json!({
+                        "type": "character", "name": "n", "description": "",
+                        "data": "x".repeat(1024 * 1024), "isPublic": 0,
+                    })),
+                },
+            )
+            .await
+            .expect("1MiB 正文加 JSON 包装必须能透传到服务端");
+            assert_eq!(response.status, 200);
+            assert!(server.last_card_request.lock().unwrap().is_some());
+
             // 超限 body 拒绝。
+            *server.card_response_override.lock().unwrap() = None;
+            *server.last_card_request.lock().unwrap() = None;
             let error = cloud_card_library_request(
                 &state,
                 &secrets,

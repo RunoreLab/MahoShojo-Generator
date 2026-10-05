@@ -60,7 +60,13 @@ const repository = (items: LocalCardRecordV1[]): CardRepository => ({
   restore: vi.fn(async () => {}),
 });
 
-const createHost = (items: LocalCardRecordV1[]) => {
+const createHost = (
+  items: LocalCardRecordV1[],
+  overrides: {
+    auth?: CardLibraryHost['auth'];
+    online?: Partial<CardLibraryHost['online']>;
+  } = {},
+) => {
   const online = {
     fetchSummaryPage: vi.fn(async () => ({ success: true as const, cards: [], total: 0, nextOffset: null })),
     fetchPublicCards: vi.fn(async () => { throw new Error('offline'); }),
@@ -72,10 +78,11 @@ const createHost = (items: LocalCardRecordV1[]) => {
     removeFavorite: vi.fn(async () => ({ success: true })),
     getDeckCards: vi.fn(async () => null),
     reportCardStat: vi.fn(async () => false),
+    ...overrides.online,
   };
   const store = new Set<string>();
   const host: CardLibraryHost = {
-    auth: { isAuthenticated: false, userId: null, userBadges: [] },
+    auth: overrides.auth ?? { status: 'unauthenticated', userId: null, userBadges: [] },
     online,
     local: { repository: repository(items) },
     platform: {
@@ -166,7 +173,7 @@ test('提供详情插槽后出现详情入口', async () => {
 
 test('本地行出现「上传到云端」入口；失败保留本地记录并显示错误', async () => {
   const { host } = createHost([record('a')]);
-  const uploadLocalRecord = vi.fn(async () => ({ ok: false as const, error: '需要登录云端账号' }));
+  const uploadLocalRecord = vi.fn(async (_record: LocalCardRecordV1) => ({ ok: false as const, error: '需要登录云端账号' }));
   host.online.uploadLocalRecord = uploadLocalRecord;
   await render({
     host, isOpen: true, onClose: vi.fn(), onSelectCard: vi.fn(),
@@ -180,7 +187,7 @@ test('本地行出现「上传到云端」入口；失败保留本地记录并�
   await settle();
 
   expect(uploadLocalRecord).toHaveBeenCalledTimes(1);
-  expect(uploadLocalRecord.mock.calls[0]![0].id).toBe('a');
+  expect((uploadLocalRecord.mock.calls[0]![0] as LocalCardRecordV1).id).toBe('a');
   expect(document.body.textContent).toContain('需要登录云端账号');
   // 上传失败不回滚：本地行仍在，可再次选择。
   expect(document.body.textContent).toContain('本地角色 a');
@@ -230,4 +237,120 @@ test('云端列表失败只影响公开页签，切到本地仍可选', async ()
   await click(document.body.querySelector('[role="button"][aria-label="选择本地角色 a"]')!);
   await settle();
   expect(onSelectCard).toHaveBeenCalledTimes(1);
+});
+
+/** 受控 promise：用于编排「请求在飞 → 账号已切换 → 迟到响应到达」的竞态。 */
+const deferred = <T,>() => {
+  let resolve!: (value: T) => void;
+  let reject!: (cause: unknown) => void;
+  const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej; });
+  return { promise, resolve, reject };
+};
+
+const publicCard = (id: string) => ({
+  id, type: 'character', name: `公开角色 ${id}`, description: '公开描述',
+  is_public: 1, review_status: 'approved', created_at: '2026-01-01T00:00:00Z',
+  updated_at: '2026-01-01T00:00:00Z', usage_count: 0, like_count: 0, favorite_count: 0,
+  is_recommended: 0, username: 'author', roleType: 'magical-girl', nativeAllowed: false,
+  has_pending_update: false, tag_ids: [] as string[], favorited_at: null,
+});
+
+/** 星标收藏按钮的「已收藏」投影：`取消收藏` title 只在 isFavorited 时出现。 */
+const isFavoritedRendered = () =>
+  [...document.body.querySelectorAll('button')].some((b) => b.title === '取消收藏');
+
+test('迟到的收藏 id 列表不得投影进切换后的账号会话', async () => {
+  const listA = deferred<{ success: boolean; favorites?: string[] }>();
+  const listB = deferred<{ success: boolean; favorites?: string[] }>();
+  const fetchPublicCards = vi.fn(async () => ({
+    ok: true as const, status: 200,
+    data: { success: true, cards: [publicCard('card-1')], total: 1, nextOffset: null },
+  }));
+  const { host: hostA } = createHost([], {
+    auth: { status: 'authenticated', userId: 1, userBadges: [] },
+    online: { fetchPublicCards, listFavoriteIds: vi.fn(() => listA.promise) },
+  });
+  await render({
+    host: hostA, isOpen: true, onClose: vi.fn(), onSelectCard: vi.fn(),
+    selectedType: 'character', initialTab: 'public',
+  });
+  await settle();
+  expect(document.body.textContent).toContain('公开角色 card-1');
+
+  // 账号 A → B：B 的列表请求挂起期间，A 的迟到响应不应落进 UI。
+  const { host: hostB } = createHost([], {
+    auth: { status: 'authenticated', userId: 2, userBadges: [] },
+    online: { fetchPublicCards, listFavoriteIds: vi.fn(() => listB.promise) },
+  });
+  await act(async () => {
+    root.render(<CardLibraryModal
+      host={hostB} isOpen onClose={vi.fn()} onSelectCard={vi.fn()}
+      selectedType="character" initialTab="public"
+    />);
+  });
+  await settle();
+
+  listA.resolve({ success: true, favorites: ['card-1'] });
+  await settle();
+  expect(isFavoritedRendered()).toBe(false);
+
+  // B 自己的集合正常投影。
+  listB.resolve({ success: true, favorites: ['card-1'] });
+  await settle();
+  expect(isFavoritedRendered()).toBe(true);
+});
+
+test('迟到的收藏 mutation 不得投影进切换后的账号会话', async () => {
+  const addA = deferred<{ success: boolean }>();
+  const fetchPublicCards = vi.fn(async () => ({
+    ok: true as const, status: 200,
+    data: { success: true, cards: [publicCard('card-1')], total: 1, nextOffset: null },
+  }));
+  const { host: hostA } = createHost([], {
+    auth: { status: 'authenticated', userId: 1, userBadges: [] },
+    online: { fetchPublicCards, addFavorite: vi.fn(() => addA.promise) },
+  });
+  await render({
+    host: hostA, isOpen: true, onClose: vi.fn(), onSelectCard: vi.fn(),
+    selectedType: 'character', initialTab: 'public',
+  });
+  await settle();
+
+  const favoriteButton = [...document.body.querySelectorAll('button')].find((b) => b.title === '收藏')!;
+  await click(favoriteButton);
+  await settle();
+  expect(isFavoritedRendered()).toBe(false);
+
+  const { host: hostB } = createHost([], {
+    auth: { status: 'authenticated', userId: 2, userBadges: [] },
+    online: { fetchPublicCards },
+  });
+  await act(async () => {
+    root.render(<CardLibraryModal
+      host={hostB} isOpen onClose={vi.fn()} onSelectCard={vi.fn()}
+      selectedType="character" initialTab="public"
+    />);
+  });
+  await settle();
+
+  // A 的 addFavorite 迟到完成——绝不能把 card-1 标成 B 的已收藏。
+  addA.resolve({ success: true });
+  await settle();
+  expect(isFavoritedRendered()).toBe(false);
+});
+
+test('选中回调携带来源实例上下文（local:<recordId> / cloud:<cardId>）', async () => {
+  const { host } = createHost([record('a')]);
+  const onSelectCard = vi.fn();
+  await render({
+    host, isOpen: true, onClose: vi.fn(), onSelectCard,
+    selectedType: 'character', initialTab: 'local', visibleTabs: ['local'],
+  });
+  await settle();
+  await click(document.body.querySelector('[role="button"][aria-label="选择本地角色 a"]')!);
+  await settle();
+  expect(onSelectCard).toHaveBeenCalledTimes(1);
+  expect(onSelectCard.mock.calls[0]![1]).toEqual({
+    selectionId: 'local:a', storageLocation: 'local',
+  });
 });

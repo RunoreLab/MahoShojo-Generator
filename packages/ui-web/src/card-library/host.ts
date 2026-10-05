@@ -58,7 +58,7 @@ export type CardLibraryRemoteResult<T> =
   | { ok: false; status: number; data?: unknown };
 
 /**
- * 公开库列表查询参数。与 `/api/public-data-cards` 的 query 一一对应；
+ * 公开库列表查询参数。与 `/api/public-data-cards?view=summary` 的 query 一一对应；
  * 宿主负责把它序列化到自己的传输层（URLSearchParams 或 IPC 载荷）。
  */
 export interface CardLibraryPublicListQuery {
@@ -76,16 +76,23 @@ export interface CardLibraryPublicListQuery {
   maxUsage?: string;
   minFavorites?: string;
   maxFavorites?: string;
+  /** 角色类型服务端过滤（仅 `type=character` 时有意义）。 */
+  roleType?: 'magical-girl' | 'canshou' | 'general';
   recommendedOnly?: boolean;
   nativeOnly?: boolean;
   nativeAllowedOnly?: boolean;
 }
 
-/** `/api/public-data-cards` 的业务响应面（success 语义由 API 契约决定，不在这里收窄）。 */
+/**
+ * `/api/public-data-cards?view=summary` 的业务响应面（success 语义由 API 契约决定，
+ * 不在这里收窄）。列表行是摘要投影——不携带 `data` 正文；`total`/`nextOffset`
+ * 供服务端分页使用，旧式无分页响应可能缺省。
+ */
 export interface CardLibraryPublicListBody {
   success?: boolean;
-  // 列表行是服务器返回的宽对象，消费侧按字段探测；沿用 Web 实现的 `any` 形状。
   cards?: any[];
+  total?: number;
+  nextOffset?: number | null;
   error?: string;
 }
 
@@ -175,12 +182,36 @@ export interface CardLibraryOnlinePort {
   ): Promise<{ ok: true } | { ok: false; error: string }>;
 }
 
-/** 宿主提供的登录/账号投影。`userId` 是业务 users.id（数值型）。 */
+/**
+ * 宿主提供的登录/账号投影。
+ *
+ * 三个取值有明确区分——`unknown` 表示「宿主尚未确认登录态」（Desktop 冷启动
+ * `idle`/探测在途/授权在途/服务不可达），**不得**按「已登出」渲染或据此清理
+ * 账号绑定状态；只有 `unauthenticated` 才是确认过的登出。`userId` 是业务
+ * users.id（数值型），仅在 `authenticated` 时有值。
+ */
+export type CardLibraryAuthStatus = 'unknown' | 'authenticated' | 'unauthenticated';
 export interface CardLibraryAuthState {
-  isAuthenticated: boolean;
+  status: CardLibraryAuthStatus;
   userId: number | null;
   /** 当前用户佩戴的徽章（未登录为空数组）。 */
   userBadges: readonly UserBadge[];
+}
+
+/**
+ * 卡片「这一次被选中」的来源身份（`onSelectCard`/`onToggleCard` 第二参数）。
+ *
+ * 只承担 UI/草稿答案的隔离语义——不是服务器凭据，也不得据此推断本地行拥有
+ * 线上身份。同一 canonical 问卷/卡 id 的不同来源副本必须产出不同的
+ * `selectionId`，否则宿主会把不同来源的草稿回答错投到同一份记录上
+ * （与 Web 各页的 `selectionId` 语义统一；D5.0e-r1）。
+ */
+export interface CardLibrarySelectionContext {
+  /** 稳定且按来源隔离的标识：`cloud:<线上卡id>` / `local:<本机记录id>`。 */
+  selectionId: string;
+  storageLocation: 'local' | 'cloud';
+  /** 仅云端行有值；本地行 MUST NOT 产出（与 `_cardId === ''` 同一不变量）。 */
+  cloudCardId?: string;
 }
 
 /** 本机本地库通路：设备拥有，不要求登录、不依赖网络。 */

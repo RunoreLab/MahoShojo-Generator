@@ -58,6 +58,7 @@ export type { LocalLibraryAutoSaveInput, LocalLibraryAutoSaveResult } from './us
 
 export type {
   CardLibraryAuthState,
+  CardLibraryAuthStatus,
   CardLibraryCardMeta,
   CardLibraryDeckDetail,
   CardLibraryDetailsCard,
@@ -74,6 +75,7 @@ export type {
   CardLibraryPublicListBody,
   CardLibraryPublicListQuery,
   CardLibraryRemoteResult,
+  CardLibrarySelectionContext,
   CardLibrarySlots,
   CardLibraryStatKind,
   CardLibraryTag,

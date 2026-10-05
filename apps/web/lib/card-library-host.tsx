@@ -37,6 +37,9 @@ const serializePublicListQuery = (query: CardLibraryPublicListQuery): string => 
     limit: query.limit.toString(),
     offset: query.offset.toString(),
     sortBy: query.sortBy,
+    // 列表只要摘要投影：正文按需经 loadFullCard/fetchPublicCardById 单独取，
+    // 与 Desktop native 4MiB 响应上限兼容（D5.0e-r1）。
+    view: 'summary',
   });
   if (query.search) params.append('search', query.search);
   if (query.tagIds && query.tagIds.length > 0) {
@@ -50,6 +53,7 @@ const serializePublicListQuery = (query: CardLibraryPublicListQuery): string => 
   if (query.maxUsage) params.append('maxUsage', query.maxUsage);
   if (query.minFavorites) params.append('minFavorites', query.minFavorites);
   if (query.maxFavorites) params.append('maxFavorites', query.maxFavorites);
+  if (query.roleType) params.append('roleType', query.roleType);
   if (query.recommendedOnly) params.append('recommendedOnly', '1');
   if (query.nativeOnly) params.append('nativeOnly', '1');
   if (query.nativeAllowedOnly) params.append('nativeAllowedOnly', '1');
@@ -181,11 +185,14 @@ const webSlots: CardLibrarySlots = {
 
 /** 组装 Web 运行地的数据卡选择器宿主。`auth` 每次渲染重取，其余通路是模块级常量。 */
 export function useWebCardLibraryHost(): CardLibraryHost {
-  const { isAuthenticated, user, userBadges } = useAuth();
+  const { isAuthenticated, user, userBadges, loading } = useAuth();
+  // 三态投影（D5.0e-r1）：auth store 还在恢复/校验会话时是 `unknown`，
+  // 不能把它折叠成「已登出」——否则开启校验中的账号页签与收藏态会被误清。
+  const authStatus = loading ? 'unknown' : isAuthenticated ? 'authenticated' : 'unauthenticated';
   return useMemo(
     () => ({
       auth: {
-        isAuthenticated,
+        status: authStatus,
         userId: user?.id ?? null,
         userBadges: userBadges ?? [],
       },
@@ -194,6 +201,6 @@ export function useWebCardLibraryHost(): CardLibraryHost {
       platform: webPlatform,
       slots: webSlots,
     }),
-    [isAuthenticated, user?.id, userBadges],
+    [authStatus, user?.id, userBadges],
   );
 }

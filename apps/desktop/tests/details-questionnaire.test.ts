@@ -3,6 +3,8 @@ import { describe, expect, it, vi, afterEach } from 'vitest';
 import {
   buildDetailsAnswers,
   buildDetailsFlowItems,
+  builtinQuestionnaireSource,
+  builtinSelectionId,
   loadDefaultQuestionnaire,
   parseQuestionnaireSelection,
 } from '../src/features/details/questionnaire';
@@ -28,7 +30,9 @@ describe('Desktop default questionnaire', () => {
     expect(parsed.id).toBe('magical-girl-default');
     expect(parsed.kind).toBe('magical-girl');
     expect(parsed.questions).toHaveLength(16);
-    expect(parsed.questions.map((question) => question.id)).toEqual(canonical.questions.map((question) => question.id));
+    expect(parsed.questions.map((question) => question.id)).toEqual(
+      (canonical.questions as Array<{ id: string }>).map((question) => question.id),
+    );
     expect(new Set(parsed.questions.map((question) => question.id)).size).toBe(16);
   });
 
@@ -109,6 +113,7 @@ describe('Desktop default questionnaire', () => {
 
 describe('parseQuestionnaireSelection', () => {
   const basePayload = {
+    id: 'shared-questionnaire',
     kind: 'magical-girl',
     title: '卡内问卷',
     nativeAllowed: true,
@@ -122,7 +127,7 @@ describe('parseQuestionnaireSelection', () => {
       _storageLocation: 'cloud', _author: 'someone',
     } as never);
     if ('error' in parsed) throw new Error(parsed.error);
-    expect(parsed.source).toEqual({ kind: 'cloud', title: '云端问卷', cardId: 'card-9' });
+    expect(parsed.source).toMatchObject({ kind: 'cloud', title: '云端问卷', cardId: 'card-9' });
     expect(parsed.questionnaire.questions).toHaveLength(1);
   });
 
@@ -151,5 +156,69 @@ describe('parseQuestionnaireSelection', () => {
       kind: 'magical-girl', nativeAllowed: true, questions: [],
       _cardType: 'questionnaire', _storageLocation: 'local', _cardName: '空',
     } as never)).toEqual({ error: '这张问卷数据卡没有可用题目。' });
+  });
+
+  describe('selectionId 实例作用域（D5.0e-r1）', () => {
+    const cloudPayload = {
+      ...basePayload, _cardId: 'card-9', _cardName: '云端问卷',
+      _cardType: 'questionnaire', _isPublic: 0, _storageLocation: 'cloud', _author: 'someone',
+    } as never;
+    const localPayload = {
+      ...basePayload, _cardId: '', _cardName: '本地问卷',
+      _cardType: 'questionnaire', _isPublic: false, _storageLocation: 'local', _author: '',
+    } as never;
+
+    it('采用宿主 selectionContext 作为权威实例标识', () => {
+      const cloud = parseQuestionnaireSelection(cloudPayload, {
+        selectionId: 'cloud:card-9', storageLocation: 'cloud', cloudCardId: 'card-9',
+      });
+      const local = parseQuestionnaireSelection(localPayload, {
+        selectionId: 'local:rec-42', storageLocation: 'local',
+      });
+      if ('error' in cloud || 'error' in local) throw new Error('unexpected parse error');
+      expect(cloud.source.selectionId).toBe('cloud:card-9');
+      expect(local.source.selectionId).toBe('local:rec-42');
+    });
+
+    it('缺上下文时按来源兜底，云端与本地副本仍互不错投', () => {
+      const cloud = parseQuestionnaireSelection(cloudPayload);
+      const local = parseQuestionnaireSelection(localPayload);
+      if ('error' in cloud || 'error' in local) throw new Error('unexpected parse error');
+      expect(cloud.source.selectionId).toBe('cloud:card-9');
+      expect(local.source.selectionId).toContain('local:');
+      expect(local.source.selectionId).not.toBe(cloud.source.selectionId);
+    });
+
+    it('同一问卷的云端与本地实例产出不同答案键，canonical id 保持问卷身份', () => {
+      const cloud = parseQuestionnaireSelection(cloudPayload);
+      const local = parseQuestionnaireSelection(localPayload);
+      if ('error' in cloud || 'error' in local) throw new Error('unexpected parse error');
+      // 两份正文共享同一个 canonical questionnaire.id（normalizeQuestionnaireDefinition 同源）。
+      const cloudFlow = buildDetailsFlowItems(cloud.questionnaire, cloud.source.selectionId);
+      const localFlow = buildDetailsFlowItems(local.questionnaire, local.source.selectionId);
+      expect(cloud.questionnaire.id).toBe(local.questionnaire.id);
+      expect(cloudFlow[0].questionnaireId).toBe(localFlow[0].questionnaireId);
+      expect(cloudFlow[0].key).not.toBe(localFlow[0].key);
+      expect(cloudFlow[0].key).toBe(`cloud:card-9::q1`);
+      expect(localFlow[0].key).toContain('local:');
+      // 重复选中同一云端实例得到同一 scope；不同实例互不串答。
+      const again = buildDetailsFlowItems(cloud.questionnaire, 'cloud:card-9');
+      expect(again[0].key).toBe(cloudFlow[0].key);
+      const answers = { [cloudFlow[0].key]: '云端回答', [localFlow[0].key]: '本地回答' };
+      expect(buildDetailsAnswers(cloudFlow, answers)[0].answer).toBe('云端回答');
+      expect(buildDetailsAnswers(localFlow, answers)[0].answer).toBe('本地回答');
+    });
+
+    it('内置问卷使用 builtin:<id> 作用域', async () => {
+      const questionnaire = await loadFixture(fixture({}));
+      const source = builtinQuestionnaireSource(questionnaire);
+      expect(source.selectionId).toBe(builtinSelectionId(questionnaire.id));
+      const flow = buildDetailsFlowItems(questionnaire, source.selectionId);
+      expect(flow[0].key).toBe(`${builtinSelectionId(questionnaire.id)}::belief`);
+      expect(flow[0].questionnaireScopeId).toBe(source.selectionId);
+      // 不传 scopeId 时回落到 canonical id（兼容旧调用形态）。
+      const legacy = buildDetailsFlowItems(questionnaire);
+      expect(legacy[0].key).toBe(`${questionnaire.id}::belief`);
+    });
   });
 });

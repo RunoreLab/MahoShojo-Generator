@@ -8,7 +8,7 @@ import { buildQuestionnaireFlow, resolveQuestionnaireReferences } from '@mahosho
 import { AiExecutionLocationField, AdvancedGenerationSettings } from '@mahoshojo/ui-web/ai-provider';
 import { DETAILS_QUESTIONNAIRE_THEME, QuestionnaireQuestionPanel } from '@mahoshojo/ui-web/questionnaire';
 import { MagicalGirlResultBody } from '@mahoshojo/ui-web/character-result';
-import { CardLibraryModal, type BattleSelectionPayload } from '@mahoshojo/ui-web/card-library';
+import { CardLibraryModal, type BattleSelectionPayload, type CardLibrarySelectionContext } from '@mahoshojo/ui-web/card-library';
 import { DetailsSession } from '../features/details/session';
 import {
   buildDetailsAnswers,
@@ -90,9 +90,13 @@ function DetailsForm({ session }: { session: DetailsSession }) {
   // 写入失败仍允许编辑/重试；读取失败由 session 拒绝覆盖，页面明确要求清除。
   // 问卷流程与 Web 同一套领域语义：optionsFrom/suggestionsFrom 先解析，
   // displayIf/jump 随当前回答求值（`questionnaire-definition` 共享模块）。
+  // 答案键按「选中实例」隔离（selectionId）：同一问卷的云端卡与本地副本、
+  // 或切换来源后重选，各自持有独立的草稿答案（D5.0e-r1，与 Web scopeId 同口径）。
   const flowItems = useMemo(
-    () => (questionnaire ? resolveQuestionnaireReferences(buildDetailsFlowItems(questionnaire)) : []),
-    [questionnaire],
+    () => (questionnaire
+      ? resolveQuestionnaireReferences(buildDetailsFlowItems(questionnaire, questionnaireSource?.selectionId))
+      : []),
+    [questionnaire, questionnaireSource],
   );
   const answersByKey = state.draft.answers;
   const flow = useMemo(
@@ -123,8 +127,8 @@ function DetailsForm({ session }: { session: DetailsSession }) {
     setPickerOpen(true);
   };
 
-  const handleSelectQuestionnaireCard = (payload: BattleSelectionPayload) => {
-    const parsed = parseQuestionnaireSelection(payload);
+  const handleSelectQuestionnaireCard = (payload: BattleSelectionPayload, context: CardLibrarySelectionContext) => {
+    const parsed = parseQuestionnaireSelection(payload, context);
     if ('error' in parsed) {
       setActionError(parsed.error);
       return;

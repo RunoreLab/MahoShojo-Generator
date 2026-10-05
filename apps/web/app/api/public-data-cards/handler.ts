@@ -7,6 +7,9 @@ import {
   getPublicDataCardsStrict,
   isDatabaseUnavailableError,
 } from '@/lib/database/data-cards';
+import { readDataCardSummaryQuery } from '@/lib/data-card-summary-query';
+import { listDataCardSummaries } from '@/lib/db/repositories/data-card-summaries';
+import { getDrizzleDbFromRuntime } from '@/lib/db/drizzle';
 import { withEdgeCache } from '@/lib/edge-cache';
 
 const MAX_LIMIT = 100;
@@ -131,6 +134,31 @@ async function handler(req: Request): Promise<Response> {
             headers: { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=15' },
           },
         );
+      }
+
+      // 摘要模式（D5.0e-r1）：列表传输只含元数据，正文一律走 `?id=` 单卡按需读取。
+      // 与 `/api/data-cards`/`/api/favorites` 同一契约；公开面固定 public+approved，
+      // roleType 等筛选在 SQL 侧完成——不再由客户端拿 500 条自行过滤。
+      if (url.searchParams.get('view') === 'summary') {
+        const query = readDataCardSummaryQuery(url.searchParams);
+        if (!query) {
+          return new Response(
+            JSON.stringify({ success: false, error: '无效的列表查询参数' }),
+            { status: 400, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
+        const db = getDrizzleDbFromRuntime();
+        if (!db) {
+          return new Response(
+            JSON.stringify({ success: false, error: '数据卡存储暂不可用' }),
+            { status: 503, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
+        const result = await listDataCardSummaries(db, null, 'public', query);
+        return new Response(JSON.stringify(result), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=15' },
+        });
       }
 
       // 获取公开数据卡列表，支持搜索和类型过滤

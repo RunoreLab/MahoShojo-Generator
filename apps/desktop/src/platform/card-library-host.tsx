@@ -13,6 +13,7 @@ import { normalizeQuestionnaireDataCard } from '@mahoshojo/domain/questionnaire-
 import {
   createLocalStorageCardLibraryMarks,
   type BadgeDefinition,
+  type CardLibraryAuthState,
   type CardLibraryCardMeta,
   type CardLibraryHost,
   type CardLibraryLinkProps,
@@ -86,6 +87,8 @@ const serializePublicListQuery = (query: CardLibraryPublicListQuery): Record<str
     limit: String(query.limit),
     offset: String(query.offset),
     sortBy: query.sortBy,
+    // 列表只要摘要投影，正文按需经 loadFullCard/单卡路由单独取（D5.0e-r1）。
+    view: 'summary',
   };
   if (query.search) params.search = query.search;
   if (query.tagIds && query.tagIds.length > 0) {
@@ -99,6 +102,7 @@ const serializePublicListQuery = (query: CardLibraryPublicListQuery): Record<str
   if (query.maxUsage) params.maxUsage = query.maxUsage;
   if (query.minFavorites) params.minFavorites = query.minFavorites;
   if (query.maxFavorites) params.maxFavorites = query.maxFavorites;
+  if (query.roleType) params.roleType = query.roleType;
   if (query.recommendedOnly) params.recommendedOnly = '1';
   if (query.nativeOnly) params.nativeOnly = '1';
   if (query.nativeAllowedOnly) params.nativeAllowedOnly = '1';
@@ -312,7 +316,13 @@ export const createDesktopCardLibraryOnlinePort = (invokeFn: InvokeFn): CardLibr
   };
 };
 
-const DesktopCardLibraryLink = ({ href, className, title, target, rel, onClick, children }: CardLibraryLinkProps) => {
+/**
+ * Desktop 侧链接组件：只接管「无修饰键的主键点击」这一种 router 内导航；
+ * Ctrl/Cmd/Shift/Alt、中键/右键、`target=_blank` 与已 defaultPrevented 的点击
+ * 一律交回 WebView 原生锚点语义，与 Web `GlobalTopBar`/`WebCardLibraryLink` 对齐
+ *（D5.0e-r1）。
+ */
+export const DesktopCardLibraryLink = ({ href, className, title, target, rel, onClick, children }: CardLibraryLinkProps) => {
   const router = useRouter();
   return (
     <a
@@ -324,6 +334,9 @@ const DesktopCardLibraryLink = ({ href, className, title, target, rel, onClick, 
       onClick={(event) => {
         onClick?.(event);
         if (event.defaultPrevented) return;
+        if (event.button !== 0) return;
+        if (target === '_blank') return;
+        if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
         event.preventDefault();
         void router.navigate({ to: href });
       }}
@@ -409,11 +422,27 @@ const desktopSlots: CardLibrarySlots = {
  */
 export function useDesktopCardLibraryHost(): CardLibraryHost {
   const { state } = useDesktopCloudSession();
-  const session = state.phase.kind === 'ready' ? state.phase.session : null;
+  /**
+   * 三态投影（D5.0e-r1）：
+   * - `idle`/`checking`/`authenticating`：会话尚未确认 → `unknown`，不得按登出清理；
+   * - `ready+unreachable`：服务不可达但本地凭据保留 → `unknown`（不可误判为注销）；
+   * - `ready+expired`/`signed-out`：确认过的登出 → `unauthenticated`；
+   * - `ready+active`：`authenticated`。
+   */
+  const phase = state.phase;
+  const session = phase.kind === 'ready' ? phase.session : null;
+  const authStatus: CardLibraryAuthState['status'] =
+    phase.kind !== 'ready'
+      ? 'unknown'
+      : session?.state === 'active'
+        ? 'authenticated'
+        : session?.state === 'unreachable'
+          ? 'unknown'
+          : 'unauthenticated';
   return useMemo(
     () => ({
       auth: {
-        isAuthenticated: session?.state === 'active',
+        status: authStatus,
         userId: session?.state === 'active' ? session.account.userId : null,
         userBadges: [],
       },
@@ -424,6 +453,6 @@ export function useDesktopCardLibraryHost(): CardLibraryHost {
       platform: desktopPlatform,
       slots: desktopSlots,
     }),
-    [session],
+    [session, authStatus],
   );
 }

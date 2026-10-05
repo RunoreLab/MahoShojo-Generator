@@ -5,7 +5,7 @@ import {
   type QuestionnaireQuestion,
 } from '@mahoshojo/domain/questionnaire-definition';
 import type { QuestionnaireAnswerItem } from '@mahoshojo/domain/questionnaire';
-import type { BattleSelectionPayload } from '@mahoshojo/ui-web/card-library';
+import type { BattleSelectionPayload, CardLibrarySelectionContext } from '@mahoshojo/ui-web/card-library';
 
 /**
  * /details 问卷定义（D5.0e）。
@@ -18,37 +18,55 @@ export type DetailsQuestionnaire = QuestionnaireDefinition;
 export type DetailsQuestion = QuestionnaireQuestion;
 
 /**
- * 逐题流条目：key 由 `buildQuestionKey` 产出（`questionnaireId::questionId`），
- * 草稿回答、条件判定与最终答案收集都以它为锚——切换问卷来源后旧 key 自然失配，
- * 不会把上一张问卷的回答错投到新问卷的题目上。
+ * 逐题流条目：key 由 `buildQuestionKey` 产出（`questionnaireScopeId::questionId`）。
+ * scopeId 是「这一次选中」的实例标识（`CardLibrarySelectionContext.selectionId`），
+ * 与 Web `DetailsPage`/`CreatorPage`/`CanshouPage` 的 `questionnaireScopeId` 同一口径——
+ * 同一 canonical 问卷的云端卡与本地副本、或重复选中，各产各的答案键，
+ * 草稿回答、条件判定与最终答案收集都按实例隔离（D5.0e-r1）。
  */
 export interface DetailsFlowItem {
   key: string;
   questionnaireId: string;
+  questionnaireScopeId: string;
   questionnaireTitle: string;
   question: QuestionnaireQuestion;
 }
 
-export const buildDetailsFlowItems = (questionnaire: DetailsQuestionnaire): DetailsFlowItem[] =>
-  questionnaire.questions.map((question, index) => ({
-    key: buildQuestionKey(questionnaire.id, question.id, index),
+export const buildDetailsFlowItems = (
+  questionnaire: DetailsQuestionnaire,
+  questionnaireScopeId?: string,
+): DetailsFlowItem[] => {
+  const scopeId = questionnaireScopeId?.trim() || questionnaire.id;
+  return questionnaire.questions.map((question, index) => ({
+    key: buildQuestionKey(scopeId, question.id, index),
     questionnaireId: questionnaire.id,
+    questionnaireScopeId: scopeId,
     questionnaireTitle: questionnaire.title,
     question,
   }));
+};
 
-/** 问卷数据卡的当前选择来源；`cardId` 只存在于云端卡——本地卡没有服务器身份。 */
+/**
+ * 问卷数据卡的当前选择来源；`cardId` 只存在于云端卡——本地卡没有服务器身份。
+ * `selectionId` 是选中实例的作用域标识（`cloud:<id>` / `local:<recordId>` /
+ * `builtin:<questionnaireId>`），决定答案键的隔离边界。
+ */
 export interface QuestionnaireSource {
   kind: 'builtin' | 'local' | 'cloud';
   title: string;
   cardId?: string;
+  selectionId: string;
 }
 
-const DEFAULT_SOURCE: QuestionnaireSource = { kind: 'builtin', title: '' };
+/** 内置问卷的选中作用域：与云/本地副本的稳定 key 形态一致（`builtin:<id>`）。 */
+export const builtinSelectionId = (questionnaireId: string): string => `builtin:${questionnaireId}`;
+
+const DEFAULT_SOURCE: Omit<QuestionnaireSource, 'selectionId'> = { kind: 'builtin', title: '' };
 
 /** 数据卡选择载荷 → 问卷定义；非法正文返回错误文案而不是静默回退。 */
 export const parseQuestionnaireSelection = (
   payload: BattleSelectionPayload,
+  context?: CardLibrarySelectionContext,
 ): { questionnaire: DetailsQuestionnaire; source: QuestionnaireSource } | { error: string } => {
   if (payload._cardType !== 'questionnaire') {
     return { error: '这张数据卡不是问卷。' };
@@ -70,6 +88,14 @@ export const parseQuestionnaireSelection = (
     return { error: '这张问卷数据卡未声明允许在客户端原生运行。' };
   }
   const isLocal = payload._storageLocation === 'local';
+  // selectionId 是宿主给的权威实例作用域（`local:<recordId>`/`cloud:<cardId>`）；
+  // 缺上下文时按来源种类 + canonical id 兜底，仍保证云/本地副本互不错投。
+  const fallbackScopeId = isLocal
+    ? `local:${questionnaire.id}`
+    : `cloud:${String(payload._cardId ?? '') || questionnaire.id}`;
+  const selectionId = (typeof context?.selectionId === 'string' && context.selectionId.trim())
+    ? context.selectionId.trim()
+    : fallbackScopeId;
   return {
     questionnaire,
     source: {
@@ -77,6 +103,7 @@ export const parseQuestionnaireSelection = (
       title: cardName,
       // 本地选择绝不携带服务器身份（DESK-ONLINE-010）。
       ...(isLocal ? {} : { cardId: String(payload._cardId ?? '') }),
+      selectionId,
     },
   };
 };
@@ -97,6 +124,7 @@ export const loadDefaultQuestionnaire = async (signal: AbortSignal): Promise<Det
 export const builtinQuestionnaireSource = (questionnaire: DetailsQuestionnaire): QuestionnaireSource => ({
   ...DEFAULT_SOURCE,
   title: questionnaire.title,
+  selectionId: builtinSelectionId(questionnaire.id),
 });
 
 const isOptionAllowed = (question: QuestionnaireQuestion, answer: string): boolean =>

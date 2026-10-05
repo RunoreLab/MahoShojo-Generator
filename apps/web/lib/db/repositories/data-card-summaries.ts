@@ -23,19 +23,27 @@ const legacyQuestionnaire = sql<boolean>`(${dataCards.type} = 'character'
   AND ${fieldType('questions')} = 'array'
   AND (json_array_length(${payload}, '$.questions') > 0 OR length(trim(${field('loreMarkdown')})) > 0))`;
 
-export async function listDataCardSummaries(db: AppDrizzleDb, userId: number, source: 'my' | 'favorites', query: DataCardSummaryQuery) {
+export async function listDataCardSummaries(
+  db: AppDrizzleDb,
+  userId: number | null,
+  source: 'my' | 'favorites' | 'public',
+  query: DataCardSummaryQuery,
+) {
   const conditions: SQL[] = [isNull(dataCards.deletedAt)];
-  if (source === 'my') conditions.push(eq(dataCards.userId, userId));
-  else conditions.push(eq(favorites.userId, userId), eq(dataCards.isPublic, true), eq(dataCards.reviewStatus, 'approved'));
+  if (source === 'my') conditions.push(eq(dataCards.userId, userId!));
+  else if (source === 'favorites') conditions.push(eq(favorites.userId, userId!), eq(dataCards.isPublic, true), eq(dataCards.reviewStatus, 'approved'));
+  else conditions.push(eq(dataCards.isPublic, true), eq(dataCards.reviewStatus, 'approved'));
   if (query.types?.length) conditions.push(query.includeLegacyQuestionnaires && query.types.includes('questionnaire')
     ? or(inArray(dataCards.type, query.types), legacyQuestionnaire)! : inArray(dataCards.type, query.types));
-  if (query.visibility) conditions.push(sql`CAST(${dataCards.isPublic} AS INTEGER) = ${{ private: 0, public: 1, banned: -1 }[query.visibility]}`);
+  // 可见性过滤只对「我的」列表有意义：收藏与公开面在源条件里已经钉死 public+approved。
+  if (query.visibility && source === 'my') conditions.push(sql`CAST(${dataCards.isPublic} AS INTEGER) = ${{ private: 0, public: 1, banned: -1 }[query.visibility]}`);
   if (query.roleType) conditions.push(eq(roleType, query.roleType));
   if (query.search) {
     const keyword = `%${query.search}%`;
     conditions.push(or(like(dataCards.name, keyword), like(dataCards.description, keyword), like(dataCards.id, keyword))!);
   }
-  if (query.author) conditions.push(like(users.username, `%${query.author}%`));
+  // 公开面的作者筛选沿用旧列表的精确匹配语义；私有面（我的/收藏）保留子串匹配。
+  if (query.author) conditions.push(source === 'public' ? eq(users.username, query.author) : like(users.username, `%${query.author}%`));
   for (const [column, min, max] of [
     [dataCards.likeCount, query.minLikes, query.maxLikes],
     [dataCards.usageCount, query.minUsage, query.maxUsage],
@@ -57,13 +65,14 @@ export async function listDataCardSummaries(db: AppDrizzleDb, userId: number, so
   const sortColumn = {
     updated_at: updated, created_at: sql`COALESCE(${dataCards.createdAt}, ${dataCards.updatedAt})`,
     likes: sql`COALESCE(${dataCards.likeCount}, 0)`, usage: sql`COALESCE(${dataCards.usageCount}, 0)`, favorites: sql`COALESCE(${dataCards.favoriteCount}, 0)`,
-    favorited_at: favorites.createdAt,
+    // 公开面没有登录用户，`favorited_at` 退化为 updated 排序。
+    favorited_at: source === 'favorites' ? favorites.createdAt : updated,
   }[query.sortBy];
   const from = <T extends ReturnType<AppDrizzleDb['select']>>(select: T) => select.from(dataCards)
     .innerJoin(users, eq(users.id, dataCards.userId))
     .leftJoin(dataCardUpdates, eq(dataCardUpdates.dataCardId, dataCards.id))
     .leftJoin(dataCardMetrics, eq(dataCardMetrics.dataCardId, dataCards.id))
-    .leftJoin(favorites, and(eq(favorites.dataCardId, dataCards.id), eq(favorites.userId, userId)))
+    .leftJoin(favorites, and(eq(favorites.dataCardId, dataCards.id), eq(favorites.userId, userId ?? -1)))
     .where(and(...conditions));
   const [totals, rows] = await Promise.all([
     from(db.select({ total: count(),

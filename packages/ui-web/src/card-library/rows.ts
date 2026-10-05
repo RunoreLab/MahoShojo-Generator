@@ -47,6 +47,9 @@ export const mapLocalCardRecordToDetailsCard = (record: LocalCardRecordV1): Data
   description: readDescription(record),
   type: record.cardType,
   data: JSON.stringify(record.data, null, 2),
+  // 详情卡同样可被 `isLocalDataCardRow` 识别——「存到本地库」与 cloudRef
+  // 出处写入都靠它区分本地行与云端行。
+  storageLocation: 'local',
   isPublic: false,
   author: '本机',
   createdAt: record.createdAt,

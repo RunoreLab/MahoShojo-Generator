@@ -8,6 +8,14 @@ export interface LocalLibraryAutoSaveInput {
   cardType: OnlineDataCardType;
   title: string;
   payload: unknown;
+  /** 来源语义；缺省 'imported'（导入文件）。云端副本下载应显式传 'downloaded'。 */
+  execution?: 'imported' | 'downloaded' | 'direct-local' | 'edited';
+  /**
+   * 线上出处的可辨认引用（仅 provenance，不产生任何同步/授权语义）。
+   * 当前线上没有权威 revision token，`cloudRevision` 一律留空——
+   * 追溯字段宁可为空，也不得赋予它不存在的并发控制语义。
+   */
+  cloudRef?: { cardId?: string; cloudRevision?: string };
 }
 
 export interface LocalLibraryAutoSaveResult {
@@ -41,7 +49,7 @@ export const useLocalLibraryAutoSave = (repository: Pick<CardRepository, 'get' |
       const summary: LocalLibraryAutoSaveResult = { ...empty };
       for (const entry of entries) {
         try {
-          const outcome = await saveLocalDataCard(repository, { ...entry, execution: 'imported' });
+          const outcome = await saveLocalDataCard(repository, { ...entry, execution: entry.execution ?? 'imported' });
           if (outcome.inRecycleBin) summary.inRecycleBin += 1;
           else if (outcome.updated) summary.updated += 1;
           else summary.saved += 1;

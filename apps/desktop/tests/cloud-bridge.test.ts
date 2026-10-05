@@ -181,7 +181,8 @@ describe('cloud bridge', () => {
     });
 
     channel.onmessage?.({ event: 'markdown', data: { chunk: '一段' } });
-    channel.onmessage?.({ event: 'unknown_future', data: {} });
+    // 故意注入契约外事件名：验证桥层白名单过滤（类型上断言，运行时才是被测对象）。
+    channel.onmessage?.({ event: 'unknown_future', data: {} } as never);
     channel.onmessage?.({ event: 'done', data: { ok: true } });
     expect(seen).toEqual([
       { event: 'markdown', data: { chunk: '一段' } },
