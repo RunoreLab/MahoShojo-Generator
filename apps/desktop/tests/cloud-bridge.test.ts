@@ -1,19 +1,24 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+  CANCEL_HOSTED_AI_COMMAND,
   CLOUD_LOGIN_AWAIT_COMMAND,
   CLOUD_LOGIN_BEGIN_COMMAND,
   CLOUD_LOGIN_CANCEL_COMMAND,
   CLOUD_ONLINE_STATUS_COMMAND,
   CLOUD_SIGN_OUT_COMMAND,
+  STREAM_HOSTED_AI_COMMAND,
   DesktopCloudError,
   awaitCloudLogin,
   beginCloudLogin,
   cancelCloudLogin,
+  cancelHostedAi,
   probeCloudOnlineStatus,
   readCloudAuthStatus,
   signOutCloud,
+  streamHostedAi,
 } from '../src/platform/cloud-bridge';
+import type { HostedAiChannel } from '../src/platform/cloud-bridge';
 
 const account = { userId: 7, username: 'homura', displayName: 'homura' };
 
@@ -128,5 +133,64 @@ describe('cloud bridge', () => {
     });
     await expect(beginCloudLogin(invoke)).rejects.toBeInstanceOf(DesktopCloudError);
     await expect(beginCloudLogin(invoke)).rejects.toMatchObject({ code: 'internal-error' });
+  });
+
+  it('hosted stream：请求过契约后随 Channel 交给 native，事件按白名单过滤', async () => {
+    const channel: HostedAiChannel = {};
+    const invoke = vi.fn(async () => undefined);
+    const seen: unknown[] = [];
+
+    await streamHostedAi(
+      invoke,
+      {
+        requestId: 'req-1',
+        routeId: 'generate-magical-girl-details-stream',
+        body: { answers: {}, language: 'zh-CN' },
+        byok: { providerId: 'openai', modelId: 'gpt-5', secretRef: 'provider:openai' },
+      },
+      (event) => seen.push(event),
+      { createChannel: () => channel },
+    );
+
+    expect(invoke).toHaveBeenCalledWith(STREAM_HOSTED_AI_COMMAND, {
+      request: {
+        requestId: 'req-1',
+        routeId: 'generate-magical-girl-details-stream',
+        body: { answers: {}, language: 'zh-CN' },
+        byok: { providerId: 'openai', modelId: 'gpt-5', secretRef: 'provider:openai' },
+      },
+      onEvent: channel,
+    });
+
+    channel.onmessage?.({ event: 'markdown', data: { chunk: '一段' } });
+    channel.onmessage?.({ event: 'unknown_future', data: {} });
+    channel.onmessage?.({ event: 'done', data: { ok: true } });
+    expect(seen).toEqual([
+      { event: 'markdown', data: { chunk: '一段' } },
+      { event: 'error', data: { ok: false, code: 'bridge-invalid', message: 'native 推送了契约外事件' } },
+      { event: 'done', data: { ok: true } },
+    ]);
+  });
+
+  it('hosted stream：请求自身违例在 invoke 前就被契约拦下', async () => {
+    const invoke = vi.fn(async () => undefined);
+    expect(() =>
+      streamHostedAi(
+        invoke,
+        { requestId: 'r', routeId: 'not-a-route', body: {} } as never,
+        () => {},
+        { createChannel: () => ({}) },
+      ),
+    ).toThrow();
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it('hosted cancel：只接受布尔回值并按 requestId 透传', async () => {
+    const invoke = vi.fn(async () => true);
+    await expect(cancelHostedAi(invoke, 'req-1')).resolves.toBe(true);
+    expect(invoke).toHaveBeenCalledWith(CANCEL_HOSTED_AI_COMMAND, { requestId: 'req-1' });
+    await expect(cancelHostedAi(vi.fn(async () => 'yes'), 'r')).rejects.toMatchObject({
+      name: 'DesktopBridgeError',
+    });
   });
 });

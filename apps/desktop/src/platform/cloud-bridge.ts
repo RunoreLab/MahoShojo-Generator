@@ -1,9 +1,12 @@
+import { Channel } from '@tauri-apps/api/core';
 import {
   DesktopCloudLoginBeginResponseSchema,
   DesktopCloudLoginOutcomeSchema,
   DesktopCloudOnlineStatusSchema,
   DesktopCloudSessionStatusSchema,
   DesktopCloudSignOutResultSchema,
+  DesktopHostedGenerateRequestSchema,
+  HostedGenerationEventSchema,
 } from '@mahoshojo/contracts/desktop-cloud';
 import type {
   DesktopCloudErrorCode,
@@ -12,6 +15,8 @@ import type {
   DesktopCloudOnlineStatus,
   DesktopCloudSessionStatus,
   DesktopCloudSignOutResult,
+  DesktopHostedGenerateRequest,
+  HostedGenerationEvent,
 } from '@mahoshojo/contracts/desktop-cloud';
 
 import { DesktopBridgeError } from './desktop-bridge';
@@ -30,6 +35,8 @@ export const CLOUD_LOGIN_CANCEL_COMMAND = 'cloud_login_cancel' as const;
 export const CLOUD_AUTH_STATUS_COMMAND = 'cloud_auth_status' as const;
 export const CLOUD_SIGN_OUT_COMMAND = 'cloud_sign_out' as const;
 export const CLOUD_ONLINE_STATUS_COMMAND = 'cloud_online_status' as const;
+export const STREAM_HOSTED_AI_COMMAND = 'stream_hosted_ai' as const;
+export const CANCEL_HOSTED_AI_COMMAND = 'cancel_hosted_ai' as const;
 
 export interface InvokeFn {
   (command: string, args?: Record<string, unknown>): Promise<unknown>;
@@ -187,4 +194,68 @@ export const probeCloudOnlineStatus = async (
     throw toCloudError(CLOUD_ONLINE_STATUS_COMMAND, cause);
   }
   return parseResult(CLOUD_ONLINE_STATUS_COMMAND, DesktopCloudOnlineStatusSchema, raw);
+};
+
+/** Channel 的最小结构。Tauri 的 `Channel` 满足它。 */
+export interface HostedAiChannel {
+  onmessage?: (event: HostedGenerationEvent) => void;
+}
+
+export interface StreamHostedAiOptions {
+  /** Channel 工厂，默认使用 Tauri 的 `Channel`；测试可注入替身（同 direct-ai-bridge）。 */
+  createChannel?: () => HostedAiChannel;
+}
+
+/**
+ * 打开一次 hosted 生成流（`DESK-ONLINE-005`）。
+ *
+ * renderer 只给「路由标识 + 非秘密业务载荷 + byok.secretRef」：endpoint、会话
+ * cookie、Provider Key 明文全部由 native 解析注入。事件经 `HostedGenerationEventSchema`
+ * 过滤——未知名/非法载荷的事件不进入 UI，统一投影为一个 bridge-invalid error 事件。
+ */
+export const streamHostedAi = (
+  invoke: InvokeFn,
+  request: DesktopHostedGenerateRequest,
+  onEvent: (event: HostedGenerationEvent) => void,
+  options?: StreamHostedAiOptions,
+): Promise<void> => {
+  const parsedRequest = DesktopHostedGenerateRequestSchema.parse(request);
+  const channel = (options?.createChannel ?? (() => new Channel<HostedGenerationEvent>()))();
+  channel.onmessage = (raw) => {
+    const parsed = HostedGenerationEventSchema.safeParse(raw);
+    onEvent(
+      parsed.success
+        ? parsed.data
+        : {
+            event: 'error',
+            data: { ok: false, code: 'bridge-invalid', message: 'native 推送了契约外事件' },
+          },
+    );
+  };
+
+  return invoke(STREAM_HOSTED_AI_COMMAND, {
+    request: parsedRequest,
+    onEvent: channel,
+  })
+    .then(() => undefined)
+    .catch((cause: unknown) => {
+      throw toCloudError(STREAM_HOSTED_AI_COMMAND, cause);
+    });
+};
+
+/** 取消一次在途 hosted 生成；返回是否确有请求被取消。 */
+export const cancelHostedAi = async (
+  invoke: InvokeFn,
+  requestId: string,
+): Promise<boolean> => {
+  let raw: unknown;
+  try {
+    raw = await invoke(CANCEL_HOSTED_AI_COMMAND, { requestId });
+  } catch (cause) {
+    throw toCloudError(CANCEL_HOSTED_AI_COMMAND, cause);
+  }
+  if (typeof raw !== 'boolean') {
+    throw new DesktopBridgeError(CANCEL_HOSTED_AI_COMMAND, 'cancel result must be a boolean');
+  }
+  return raw;
 };

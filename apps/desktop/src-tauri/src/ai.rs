@@ -657,13 +657,16 @@ fn emit_terminal(
 }
 
 /// HTTP chunk 不保证落在字符边界，只保留尚未完整的 UTF-8 尾部（最多 3 字节）。
+///
+/// `pub(crate)`：hosted 生成通路（cloud.rs）同样按 SSE over HTTP 消费文本帧，
+/// 同一份解码器保持两条通路对截断多字节字符的行为一致。
 #[derive(Default)]
-struct Utf8StreamDecoder {
+pub(crate) struct Utf8StreamDecoder {
     pending: Vec<u8>,
 }
 
 impl Utf8StreamDecoder {
-    fn push(&mut self, chunk: &[u8]) -> Result<String, DirectAiError> {
+    pub(crate) fn push(&mut self, chunk: &[u8]) -> Result<String, DirectAiError> {
         let bytes = if self.pending.is_empty() {
             std::borrow::Cow::Borrowed(chunk)
         } else {
@@ -687,7 +690,7 @@ impl Utf8StreamDecoder {
         }
     }
 
-    fn finish(&self) -> Result<(), DirectAiError> {
+    pub(crate) fn finish(&self) -> Result<(), DirectAiError> {
         if self.pending.is_empty() {
             Ok(())
         } else {

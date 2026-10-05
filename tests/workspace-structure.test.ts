@@ -679,6 +679,8 @@ describe('desktop workspace app ownership', () => {
       'cloud_auth_status',
       'cloud_sign_out',
       'cloud_online_status',
+      'stream_hosted_ai',
+      'cancel_hosted_ai',
     ]);
 
     // renderer 可用的 secret 能力只有写入与存在性；任何读取形态都会让

@@ -55,21 +55,29 @@ export type {
 } from './local-library-audit';
 
 export {
+  CANCEL_HOSTED_AI_COMMAND,
   CLOUD_AUTH_STATUS_COMMAND,
   CLOUD_LOGIN_AWAIT_COMMAND,
   CLOUD_LOGIN_BEGIN_COMMAND,
   CLOUD_LOGIN_CANCEL_COMMAND,
   CLOUD_ONLINE_STATUS_COMMAND,
   CLOUD_SIGN_OUT_COMMAND,
+  STREAM_HOSTED_AI_COMMAND,
   DesktopCloudError,
   awaitCloudLogin,
   beginCloudLogin,
   cancelCloudLogin,
+  cancelHostedAi,
   probeCloudOnlineStatus,
   readCloudAuthStatus,
   signOutCloud,
+  streamHostedAi,
 } from './cloud-bridge';
-export type { InvokeFn as CloudInvokeFn } from './cloud-bridge';
+export type {
+  HostedAiChannel,
+  InvokeFn as CloudInvokeFn,
+  StreamHostedAiOptions,
+} from './cloud-bridge';
 
 export {
   DELETE_LOCAL_CARD_COMMAND,

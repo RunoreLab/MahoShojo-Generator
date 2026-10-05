@@ -53,6 +53,8 @@ fn main() {
             "cloud_auth_status",
             "cloud_sign_out",
             "cloud_online_status",
+            "stream_hosted_ai",
+            "cancel_hosted_ai",
         ]),
     ))
     .expect("failed to run tauri build script");

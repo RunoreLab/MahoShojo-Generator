@@ -27,6 +27,7 @@ import {
   DesktopCloudOnlineStatusSchema,
   DesktopCloudSessionStatusSchema,
   DesktopCloudSignOutResultSchema,
+  DesktopHostedGenerateRequestSchema,
   HostedGenerationEventNameSchema,
   HostedGenerationRouteIdSchema,
   MAX_DESKTOP_AUTH_CODE_VERIFIER_LENGTH,
@@ -239,6 +240,33 @@ describe('renderer IPC 投影', () => {
     expect(DesktopCloudSignOutResultSchema.safeParse({ revoked: true }).success).toBe(true);
     expect(DesktopCloudSignOutResultSchema.safeParse({ revoked: false }).success).toBe(true);
     expect(DesktopCloudSignOutResultSchema.safeParse({}).success).toBe(false);
+  });
+
+  it('hosted 生成请求：BYOK 只携带引用与非秘密字段', () => {
+    expect(DesktopHostedGenerateRequestSchema.safeParse({
+      requestId: 'req-1',
+      routeId: 'generate-magical-girl-details-stream',
+      body: { answers: [], questionnaires: [], language: 'zh-CN' },
+      byok: {
+        providerId: 'deepseek',
+        modelId: 'deepseek-v4-flash',
+        secretRef: 'provider:conn_1:api-key',
+      },
+    }).success).toBe(true);
+
+    // 系统默认通道：无 byok。
+    expect(DesktopHostedGenerateRequestSchema.safeParse({
+      requestId: 'req-2',
+      routeId: 'generate-magical-girl-details-stream',
+      body: { answers: [] },
+    }).success).toBe(true);
+
+    // 白名单外路由拒绝。
+    expect(DesktopHostedGenerateRequestSchema.safeParse({
+      requestId: 'req-3',
+      routeId: 'some-other-route',
+      body: {},
+    }).success).toBe(false);
   });
 
   it('在线探测结果', () => {

@@ -997,6 +997,34 @@ async fn cloud_online_status(
     cloud::cloud_online_status(&cloud, secrets.inner().as_ref()).await
 }
 
+/// hosted 生成流（DESK-ONLINE-005）：唯一允许携带 Provider Key 的项目请求。
+/// renderer 传 `routeId/body/byok.secretRef`；native 校验路由白名单、拒绝 body 中
+/// 预置的 `customProvider`，并在 `provider:*` 命名空间内解析 secretRef 注入 Key。
+/// 事件按 hosted SSE 契约（`HostedGenerationEvent`）经 Channel 原样转发。
+#[tauri::command]
+async fn stream_hosted_ai(
+    cloud: State<'_, cloud::CloudState>,
+    secrets: State<'_, SharedSecretStore>,
+    registry: State<'_, ai::RequestRegistry>,
+    request: cloud::CloudHostedGenerateRequest,
+    on_event: tauri::ipc::Channel<cloud::HostedSseEvent>,
+) -> Result<(), cloud::CloudError> {
+    cloud::stream_hosted_ai(
+        &cloud,
+        secrets.inner().as_ref(),
+        &registry,
+        request,
+        &on_event,
+    )
+    .await
+}
+
+/// 取消一次在途 hosted 生成。
+#[tauri::command]
+fn cancel_hosted_ai(registry: State<'_, ai::RequestRegistry>, request_id: String) -> bool {
+    registry.cancel(&request_id)
+}
+
 /// 仅在 native 已写恢复 intent 后允许退出，不向 renderer 开放通用进程控制。
 #[tauri::command]
 fn exit_after_local_restore(app: tauri::AppHandle) -> Result<(), restore::RestoreError> {
@@ -1142,7 +1170,9 @@ pub fn run() {
             cloud_login_cancel,
             cloud_auth_status,
             cloud_sign_out,
-            cloud_online_status
+            cloud_online_status,
+            stream_hosted_ai,
+            cancel_hosted_ai
         ])
         .run(tauri::generate_context!())
         .expect("error while running MahoShojo Generator desktop app");

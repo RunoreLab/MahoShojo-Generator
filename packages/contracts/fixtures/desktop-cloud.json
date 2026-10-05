@@ -7,6 +7,7 @@
     "getSession": "/api/auth/get-session",
     "signOut": "/api/auth/sign-out",
     "hostedDrReadiness": "/api/hosted/dr-readiness",
+    "hostedGenerateDetailsStream": "/api/generate-magical-girl-details-stream",
     "loopbackCallback": "/callback"
   },
   "limits": {
@@ -38,6 +39,7 @@
     "server-unavailable",
     "invalid-response",
     "storage-unavailable",
+    "missing-secret",
     "internal-error"
   ],
   "hostedGenerationEventNames": [
