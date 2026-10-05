@@ -1,5 +1,6 @@
 import {
   buildQuestionKey,
+  collectQuestionnaireFlowAnswerItems,
   normalizeQuestionnaireDefinition,
   type QuestionnaireDefinition,
   type QuestionnaireQuestion,
@@ -181,28 +182,21 @@ const isOptionAllowed = (question: QuestionnaireQuestion, answer: string): boole
 /**
  * 从流程条目与按键回答收集生成载荷。
  *
- * 只收集当前可见流程内的题目（displayIf/jump 已按回答求值），与 Web
- * `collectStoredQuestionnaireAnswerItems` 同一口径；`allowCustom === false`
- * 的题只接受可用选项，避免把键盘输入混进封闭题。
+ * 只收集当前可见流程内的题目（displayIf/jump 已按回答求值），答案投影与
+ * Web 共用 `collectQuestionnaireFlowAnswerItems`（D5.1a-r1 对拍口径）；
+ * `allowCustom === false` 的题只接受可用选项，避免把键盘输入混进封闭题。
  */
 export const buildDetailsAnswers = (
   flow: readonly DetailsFlowItem[],
   answersByKey: Record<string, string>,
 ): QuestionnaireAnswerItem[] => {
-  const items = flow.flatMap((item) => {
+  flow.forEach((item) => {
     const answer = answersByKey[item.key]?.trim() ?? '';
-    if (!answer) return [];
-    if (item.question.allowCustom === false && !isOptionAllowed(item.question, answer)) {
+    if (answer && item.question.allowCustom === false && !isOptionAllowed(item.question, answer)) {
       throw new Error(`“${item.question.question}”请选择一个可用选项。`);
     }
-    return [{
-      question: item.question.question,
-      answer,
-      questionId: item.question.id,
-      questionnaireId: item.questionnaireId,
-      questionnaireTitle: item.questionnaireTitle,
-    }];
   });
+  const items = collectQuestionnaireFlowAnswerItems(flow, answersByKey);
   if (!items.length) throw new Error('请至少填写一题后再生成。');
   return items;
 };

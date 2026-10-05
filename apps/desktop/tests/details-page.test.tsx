@@ -269,7 +269,7 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
     expect(mocks.execute.mock.calls[0]![2]).toMatchObject({ mode: 'hosted-json' });
     expect(mocks.execute.mock.calls[0]![1].hosted).toMatchObject({
       allowNativeSignature: true,
-      fields: { questionnaireSelections: [{ source: 'preset', kind: 'magical-girl', presetId: 'magical-girl-default' }] },
+      selections: [{ source: 'preset', questionnaire: { id: 'magical-girl-default' } }],
     });
   });
 

@@ -26,6 +26,7 @@ export type {
 export {
   buildQuestionKey,
   buildQuestionnaireFlow,
+  collectQuestionnaireFlowAnswerItems,
   collectStoredQuestionnaireAnswerItems,
   normalizeQuestionnaireDefinition,
   parseQuestionnaireDataCardPayload,

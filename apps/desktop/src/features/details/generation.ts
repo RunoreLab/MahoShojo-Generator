@@ -20,7 +20,10 @@ import type { UserGenerationOverrides } from '@mahoshojo/ai-core/generation-sett
 import { collectAiStreamResult, type AiStreamEvent } from '@mahoshojo/ai-core/stream-events';
 import { compactQuestionnaireAnswerItems } from '@mahoshojo/domain/questionnaire';
 import { buildGeneralCharacterCardFromMarkdown } from '@mahoshojo/domain/markdown-card';
-import type { QuestionnaireGenerationRequestFields } from '@mahoshojo/domain/questionnaire-selection';
+import {
+  buildQuestionnaireGenerationRequestBody,
+  type QuestionnaireSelection,
+} from '@mahoshojo/domain/questionnaire-selection';
 
 import {
   createDesktopAiExecutionPort,
@@ -51,9 +54,10 @@ export interface DetailsGenerationIntent {
   overrides?: UserGenerationOverrides;
 }
 
-/** hosted 生成请求所需的问卷投影；direct 通路忽略。 */
+/** hosted 生成请求所需的问卷语义输入；direct 通路忽略。 */
 export interface DetailsHostedRequestInput {
-  fields: QuestionnaireGenerationRequestFields;
+  /** 当前选择集；请求字段投影统一走 domain `buildQuestionnaireGenerationRequestBody`。 */
+  selections: readonly QuestionnaireSelection[];
   allowNativeSignature: boolean;
 }
 
@@ -211,12 +215,14 @@ const buildHostedBody = (input: DetailsGenerationInput): Record<string, JsonValu
   if (!input.hosted) {
     throw new Error('服务器执行需要问卷请求字段。');
   }
-  return {
-    answers: input.answers as unknown as JsonValue,
-    ...input.hosted.fields,
-    allowNativeSignature: input.hosted.allowNativeSignature === true,
+  // 业务请求体与 Web `/details` 共用同一组装器（D5.1a-r1 对拍基准）；
+  // Desktop 宿主无 customProvider 等附加字段。
+  return buildQuestionnaireGenerationRequestBody({
+    answers: input.answers,
+    selections: input.hosted.selections,
+    allowNativeSignature: input.hosted.allowNativeSignature,
     language: input.language,
-  } as unknown as Record<string, JsonValue>;
+  }) as unknown as Record<string, JsonValue>;
 };
 
 /** renderer abort → native RequestRegistry 取消（同一 requestId 门禁）。 */

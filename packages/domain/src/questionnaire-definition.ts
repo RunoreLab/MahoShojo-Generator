@@ -129,6 +129,36 @@ export const collectStoredQuestionnaireAnswerItems = <T extends QuestionnaireAns
   });
 };
 
+/**
+ * 可见流程 → 提交用 `QuestionnaireAnswerItem[]`：裁剪空白、跳过未答与
+ * displayIf/jump 隐藏题（调用方传入的 flow 已完成条件求值，隐藏题即使
+ * 草稿里残留回答也不进入提交载荷）。
+ *
+ * Web `/details` 与 Desktop `buildDetailsAnswers` 共用同一投影，保证同源
+ * `answersByKey` 在两宿主产出顺序与字段完全一致的 `answers`（D5.1a-r1）。
+ */
+export const collectQuestionnaireFlowAnswerItems = <T extends {
+  key: string;
+  question: { question: string; id?: string };
+  questionnaireId?: string;
+  questionnaireTitle?: string;
+}>(
+  flow: readonly T[],
+  answersByKey: Readonly<Record<string, unknown>>,
+): QuestionnaireAnswerItem[] =>
+  flow.flatMap((item) => {
+    const raw = answersByKey[item.key];
+    const answer = typeof raw === 'string' ? raw.trim() : '';
+    if (!answer) return [];
+    return [{
+      question: item.question.question,
+      answer,
+      questionId: item.question.id,
+      questionnaireId: item.questionnaireId,
+      questionnaireTitle: item.questionnaireTitle,
+    }];
+  });
+
 type QuestionFlowItem = {
   key: string;
   questionnaireId: string;

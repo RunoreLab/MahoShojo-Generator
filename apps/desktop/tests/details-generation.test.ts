@@ -135,10 +135,16 @@ const hostedInput: DetailsGenerationInput = {
   language: '简体中文',
   loreText: '设定正文',
   hosted: {
-    fields: {
-      questionnaireSelections: [{ source: 'preset', kind: 'magical-girl', presetId: 'q-1' }],
-      questionnaires: [{ id: 'q-1', title: '默认问卷', kind: 'magical-girl', loreMarkdown: '设定正文', questions: [] }],
-    },
+    selections: [{
+      source: 'preset' as const,
+      questionnaire: {
+        id: 'q-1',
+        title: '默认问卷',
+        kind: 'magical-girl' as const,
+        loreMarkdown: '设定正文',
+        questions: [],
+      },
+    }],
     allowNativeSignature: true,
   },
 };

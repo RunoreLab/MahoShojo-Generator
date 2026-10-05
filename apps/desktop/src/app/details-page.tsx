@@ -10,7 +10,6 @@ import {
   collectQuestionnaireAnswerExportItems,
 } from '@mahoshojo/domain/questionnaire-answer-export';
 import {
-  buildQuestionnaireGenerationRequestFields,
   buildQuestionnaireSelectionLoreText,
   isQuestionnaireGenerationNativeSignatureAllowed,
   isQuestionnaireSelectionNativeAllowed,
@@ -212,7 +211,7 @@ function DetailsForm({ session }: { session: DetailsSession }) {
           language: session.getSnapshot().draft.language,
           loreText: buildQuestionnaireSelectionLoreText(selections),
           hosted: {
-            fields: buildQuestionnaireGenerationRequestFields(selections),
+            selections,
             allowNativeSignature: isQuestionnaireGenerationNativeSignatureAllowed(
               selections,
               hasOverLimitQuestionnaireAnswers(flow, session.getSnapshot().draft.answers),

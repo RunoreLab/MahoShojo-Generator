@@ -1,0 +1,195 @@
+{
+  "version": 1,
+  "kind": "details-generation-request-parity",
+  "description": "跨宿主 golden：同一 QuestionnaireSelection[] + 同源 answersByKey → 同一 hosted 生成请求体。Web（/details handleSubmit）与 Desktop（executeDetailsGeneration hosted 通路）都必须产出 expectedBody；宿主特有字段仅允许 Web 追加 customProvider（无自定义供应商时为 undefined，序列化省略）。夹具为权威 expected，改动投影语义须连同本文件一起评审。",
+  "language": "zh-CN",
+  "hostSpecificFields": {
+    "web": ["customProvider"],
+    "desktop": []
+  },
+  "questionnaires": {
+    "parity-preset": {
+      "id": "parity-preset",
+      "kind": "magical-girl",
+      "title": "对拍·花信预设",
+      "nativeAllowed": true,
+      "loreMarkdown": "花信纪元设定正文",
+      "questions": [
+        { "id": "P-1", "question": "你的信念是什么？", "type": "text", "required": true, "maxLength": 20 },
+        { "id": "P-2", "question": "选一种契约花。", "type": "select", "required": true, "allowCustom": false, "options": ["百合", "蔷薇"], "maxLength": null },
+        { "id": "P-3", "question": "为什么选蔷薇？", "type": "text", "required": false, "maxLength": null, "displayIf": { "questionId": "P-2", "operator": "equals", "value": "蔷薇" } }
+      ]
+    },
+    "parity-cloud": {
+      "id": "parity-cloud",
+      "kind": "magical-girl",
+      "title": "对拍·云端问卷",
+      "nativeAllowed": true,
+      "questions": [
+        { "id": "C-1", "question": "守护的对象？", "type": "text", "required": true, "maxLength": 30 }
+      ]
+    },
+    "parity-local": {
+      "id": "parity-local",
+      "kind": "magical-girl",
+      "title": "对拍·本地问卷",
+      "nativeAllowed": false,
+      "questions": [
+        { "id": "L-1", "question": "随手写点什么。", "type": "text", "required": false, "maxLength": 50 }
+      ]
+    }
+  },
+  "cases": [
+    {
+      "id": "preset-native-allowed",
+      "note": "原生许可预设 + 正常回答 → allowNativeSignature true。P-2 答“百合”使 displayIf 条件未命中：P-3 不可见，其残留回答不得进入载荷。",
+      "selections": [
+        { "ref": "parity-preset", "source": "preset", "selectionId": "builtin:parity-preset", "useLore": true }
+      ],
+      "answersByKey": {
+        "builtin:parity-preset::P-1": "  守护大家  ",
+        "builtin:parity-preset::P-2": "百合",
+        "builtin:parity-preset::P-3": "隐藏题的残留回答不得上送"
+      },
+      "expectedBody": {
+        "answers": [
+          { "question": "你的信念是什么？", "answer": "守护大家", "questionId": "P-1", "questionnaireId": "parity-preset", "questionnaireTitle": "对拍·花信预设" },
+          { "question": "选一种契约花。", "answer": "百合", "questionId": "P-2", "questionnaireId": "parity-preset", "questionnaireTitle": "对拍·花信预设" }
+        ],
+        "questionnaireSelections": [
+          { "source": "preset", "kind": "magical-girl", "presetId": "parity-preset" }
+        ],
+        "questionnaires": [
+          {
+            "id": "parity-preset",
+            "title": "对拍·花信预设",
+            "kind": "magical-girl",
+            "loreMarkdown": "花信纪元设定正文",
+            "questions": [
+              { "id": "P-1", "question": "你的信念是什么？", "required": true, "maxLength": 20 },
+              { "id": "P-2", "question": "选一种契约花。", "required": true, "maxLength": null },
+              { "id": "P-3", "question": "为什么选蔷薇？", "required": false, "maxLength": null }
+            ]
+          }
+        ],
+        "allowNativeSignature": true,
+        "language": "zh-CN"
+      }
+    },
+    {
+      "id": "database-use-lore-off",
+      "note": "云端数据卡选择：dataCardId 与 useLore:false 必须原样上线路；问卷自身声明 nativeAllowed:true → 签名资格保留。",
+      "selections": [
+        { "ref": "parity-cloud", "source": "database", "dataCardId": "card-42", "dataCardName": "对拍·云端问卷", "selectionId": "cloud:card-42", "useLore": false }
+      ],
+      "answersByKey": {
+        "cloud:card-42::C-1": "伙伴"
+      },
+      "expectedBody": {
+        "answers": [
+          { "question": "守护的对象？", "answer": "伙伴", "questionId": "C-1", "questionnaireId": "parity-cloud", "questionnaireTitle": "对拍·云端问卷" }
+        ],
+        "questionnaireSelections": [
+          { "source": "database", "kind": "magical-girl", "dataCardId": "card-42", "useLore": false }
+        ],
+        "questionnaires": [
+          {
+            "id": "parity-cloud",
+            "title": "对拍·云端问卷",
+            "kind": "magical-girl",
+            "useLore": false,
+            "questions": [
+              { "id": "C-1", "question": "守护的对象？", "required": true, "maxLength": 30 }
+            ]
+          }
+        ],
+        "allowNativeSignature": true,
+        "language": "zh-CN"
+      }
+    },
+    {
+      "id": "upload-non-native",
+      "note": "多问卷混选：preset + upload（本地卡 nativeAllowed:false）→ 生成照常但签名资格关闭；答案顺序按选择集展平的可见流序。",
+      "selections": [
+        { "ref": "parity-preset", "source": "preset", "selectionId": "builtin:parity-preset", "useLore": true },
+        { "ref": "parity-local", "source": "upload", "dataCardName": "对拍·本地问卷", "selectionId": "local:rec-7" }
+      ],
+      "answersByKey": {
+        "builtin:parity-preset::P-1": "花与誓言",
+        "builtin:parity-preset::P-2": "百合",
+        "local:rec-7::L-1": "本地草稿"
+      },
+      "expectedBody": {
+        "answers": [
+          { "question": "你的信念是什么？", "answer": "花与誓言", "questionId": "P-1", "questionnaireId": "parity-preset", "questionnaireTitle": "对拍·花信预设" },
+          { "question": "选一种契约花。", "answer": "百合", "questionId": "P-2", "questionnaireId": "parity-preset", "questionnaireTitle": "对拍·花信预设" },
+          { "question": "随手写点什么。", "answer": "本地草稿", "questionId": "L-1", "questionnaireId": "parity-local", "questionnaireTitle": "对拍·本地问卷" }
+        ],
+        "questionnaireSelections": [
+          { "source": "preset", "kind": "magical-girl", "presetId": "parity-preset" },
+          { "source": "upload", "kind": "magical-girl" }
+        ],
+        "questionnaires": [
+          {
+            "id": "parity-preset",
+            "title": "对拍·花信预设",
+            "kind": "magical-girl",
+            "loreMarkdown": "花信纪元设定正文",
+            "questions": [
+              { "id": "P-1", "question": "你的信念是什么？", "required": true, "maxLength": 20 },
+              { "id": "P-2", "question": "选一种契约花。", "required": true, "maxLength": null },
+              { "id": "P-3", "question": "为什么选蔷薇？", "required": false, "maxLength": null }
+            ]
+          },
+          {
+            "id": "parity-local",
+            "title": "对拍·本地问卷",
+            "kind": "magical-girl",
+            "questions": [
+              { "id": "L-1", "question": "随手写点什么。", "required": false, "maxLength": 50 }
+            ]
+          }
+        ],
+        "allowNativeSignature": false,
+        "language": "zh-CN"
+      }
+    },
+    {
+      "id": "over-limit-disables-signature",
+      "note": "回答超限不阻止生成，只关闭签名资格（D5.1a-r1）。P-2 答“蔷薇”命中 displayIf：P-3 可见且回答进入载荷。",
+      "selections": [
+        { "ref": "parity-preset", "source": "preset", "selectionId": "builtin:parity-preset", "useLore": true }
+      ],
+      "answersByKey": {
+        "builtin:parity-preset::P-1": "这段回答故意写得比二十个字的上限还要长一些",
+        "builtin:parity-preset::P-2": "蔷薇",
+        "builtin:parity-preset::P-3": "因为它带刺也开花"
+      },
+      "expectedBody": {
+        "answers": [
+          { "question": "你的信念是什么？", "answer": "这段回答故意写得比二十个字的上限还要长一些", "questionId": "P-1", "questionnaireId": "parity-preset", "questionnaireTitle": "对拍·花信预设" },
+          { "question": "选一种契约花。", "answer": "蔷薇", "questionId": "P-2", "questionnaireId": "parity-preset", "questionnaireTitle": "对拍·花信预设" },
+          { "question": "为什么选蔷薇？", "answer": "因为它带刺也开花", "questionId": "P-3", "questionnaireId": "parity-preset", "questionnaireTitle": "对拍·花信预设" }
+        ],
+        "questionnaireSelections": [
+          { "source": "preset", "kind": "magical-girl", "presetId": "parity-preset" }
+        ],
+        "questionnaires": [
+          {
+            "id": "parity-preset",
+            "title": "对拍·花信预设",
+            "kind": "magical-girl",
+            "loreMarkdown": "花信纪元设定正文",
+            "questions": [
+              { "id": "P-1", "question": "你的信念是什么？", "required": true, "maxLength": 20 },
+              { "id": "P-2", "question": "选一种契约花。", "required": true, "maxLength": null },
+              { "id": "P-3", "question": "为什么选蔷薇？", "required": false, "maxLength": null }
+            ]
+          }
+        ],
+        "allowNativeSignature": false,
+        "language": "zh-CN"
+      }
+    }
+  ]
+}

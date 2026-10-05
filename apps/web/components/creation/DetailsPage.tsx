@@ -21,6 +21,7 @@ import DataCardDetailsModal from '@/components/DataCardDetailsModal';
 import {
   buildQuestionnaireAnswerLookup,
   buildQuestionnaireFlow,
+  collectQuestionnaireFlowAnswerItems,
   collectStoredQuestionnaireAnswerItems,
   compactQuestionnaireAnswerItems,
   formatQuestionnaireAnswers,
@@ -37,7 +38,7 @@ import {
 import {
   applyQuestionnaireSelection,
   buildQuestionnaireContextItems,
-  buildQuestionnaireGenerationRequestFields,
+  buildQuestionnaireGenerationRequestBody,
   buildQuestionnaireSelectionLoreText,
   createStoredQuestionnaireSelectionNormalizer,
   ensureQuestionnaireSelectionId,
@@ -1177,19 +1178,8 @@ export const DetailsPage: React.FC = () => {
     }
 
     const snapshot = answersSnapshot ?? answersByKey;
-    const finalAnswerItems: QuestionnaireAnswerItem[] = [];
-    mergedQuestions.forEach((item) => {
-      const raw = snapshot[item.key];
-      const answer = typeof raw === 'string' ? raw.trim() : '';
-      if (!answer) return;
-      finalAnswerItems.push({
-        question: item.question.question,
-        answer,
-        questionId: item.question.id,
-        questionnaireId: item.questionnaireId,
-        questionnaireTitle: item.questionnaireTitle,
-      });
-    });
+    // 与 Desktop `buildDetailsAnswers` 共用同一投影（D5.1a-r1 对拍口径）。
+    const finalAnswerItems = collectQuestionnaireFlowAnswerItems(mergedQuestions, snapshot);
 
     if (finalAnswerItems.length === 0) {
       setError('⚠️ 请至少填写一题后再生成');
@@ -1244,10 +1234,14 @@ export const DetailsPage: React.FC = () => {
         method: 'POST',
         headers: requestHeaders,
         body: JSON.stringify({
-          answers: finalAnswerItems,
-          ...buildQuestionnaireGenerationRequestFields(selectedQuestionnaires),
-          allowNativeSignature: allowNativeSignatureForSubmit,
-          language: selectedLanguage,
+          // 业务请求体与 Desktop hosted 通路共用同一组装器（D5.1a-r1 对拍基准）；
+          // `customProvider` 是 Web 宿主特有字段，无自定义供应商时为 undefined 被序列化省略。
+          ...buildQuestionnaireGenerationRequestBody({
+            answers: finalAnswerItems,
+            selections: selectedQuestionnaires,
+            allowNativeSignature: allowNativeSignatureForSubmit,
+            language: selectedLanguage,
+          }),
           customProvider: customProviderPayload,
         }),
         ...(streamController ? { signal: streamController.signal } : {}),

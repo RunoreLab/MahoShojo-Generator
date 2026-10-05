@@ -12,6 +12,7 @@ import {
 } from './questionnaire-definition';
 import {
   resolveQuestionnaireAnswerTarget,
+  type QuestionnaireAnswerItem,
   type QuestionnaireAnswerLookup,
   type QuestionnaireAnswerMatchTarget,
 } from './questionnaire';
@@ -391,6 +392,35 @@ export const buildQuestionnaireGenerationRequestFields = (
       maxLength: question.maxLength ?? null,
     })),
   })),
+});
+
+/**
+ * `generate-*-details(-stream)` 业务请求体的共源组装（D5.1a-r1 对拍基准）。
+ *
+ * Web `/details` 与 Desktop hosted 通路都从「可见流程答案 + 选择集 +
+ * 签名资格 + 语言」产出同一 JSON 投影——键序固定为
+ * answers → questionnaireSelections → questionnaires → allowNativeSignature
+ * → language。宿主特有字段由调用方在展开后追加：Web 追加 `customProvider`
+ * （无自定义供应商时为 `undefined`，序列化省略）；Desktop 不追加任何字段。
+ * golden 夹具 `packages/contracts/fixtures/details-generation-request-parity.json`
+ * 以本函数输出为权威 expected。
+ */
+export interface QuestionnaireGenerationRequestBody extends QuestionnaireGenerationRequestFields {
+  answers: QuestionnaireAnswerItem[];
+  allowNativeSignature: boolean;
+  language: string;
+}
+
+export const buildQuestionnaireGenerationRequestBody = (input: {
+  answers: readonly QuestionnaireAnswerItem[];
+  selections: readonly QuestionnaireSelection[];
+  allowNativeSignature: boolean;
+  language: string;
+}): QuestionnaireGenerationRequestBody => ({
+  answers: input.answers.map((answer) => ({ ...answer })),
+  ...buildQuestionnaireGenerationRequestFields(input.selections),
+  allowNativeSignature: input.allowNativeSignature === true,
+  language: input.language,
 });
 
 /** 默认预设挑选：优先 `isDefault`，否则第一个；可选 `kind` 过滤。 */
