@@ -17,8 +17,8 @@ import {
   type GeneralScenarioData,
   GENERAL_SCENARIO_TEMPLATE_ID,
 } from './general-scenario';
-import { NarrativeHistorySchema, type NarrativeHistoryData } from './narrative-history';
-import { QuestionnaireSchema, type QuestionnaireData } from './questionnaire';
+import { NarrativeHistorySchema, type NarrativeHistoryData } from '@mahoshojo/domain/narrative-history';
+import { QuestionnaireSchema, type QuestionnaireData } from '@mahoshojo/domain/questionnaire';
 import {
   inferCharacterKind,
   inferTemplateId,

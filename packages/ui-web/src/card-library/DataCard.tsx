@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Download, Heart, Share, Info, Ban, AlertTriangle, Clock, XCircle, Star, BadgeCheck, Trash2, HardDrive } from 'lucide-react';
+import { Download, Heart, Share, Info, Ban, AlertTriangle, Clock, XCircle, Star, BadgeCheck, Trash2, HardDrive, UploadCloud } from 'lucide-react';
 import { getDataCardStatus } from './status';
 import { TechBadge } from './TechBadge';
 import { TierBadge } from './TierBadge';
@@ -68,6 +68,9 @@ interface DataCardProps {
   /** 仅本地库卡片：删除本地库记录。 */
   onRemoveFromLibrary?: () => void;
   removePending?: boolean;
+  /** 仅本地库卡片：显式「上传到云端」副本入口；宿主不提供时按钮不出现。 */
+  onUploadToCloud?: () => void;
+  uploadPending?: boolean;
   /** 仅本地库卡片：来源说明（来自本地文件 / 线上副本 / 本机生成）。 */
   localLibraryOriginHint?: string | null;
 }
@@ -130,6 +133,8 @@ export default function DataCard({
   storageLocation = 'cloud',
   onRemoveFromLibrary,
   removePending = false,
+  onUploadToCloud,
+  uploadPending = false,
   localLibraryOriginHint,
   platform,
 }: DataCardProps) {
@@ -472,6 +477,24 @@ export default function DataCard({
                 <Download className="w-4 h-4" />
                 <span className="text-xs">导出</span>
               </button>
+
+              {onUploadToCloud ? (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onUploadToCloud();
+                  }}
+                  className={`flex items-center gap-1 transition-colors ${
+                    uploadPending ? 'text-gray-400 cursor-not-allowed' : 'text-gray-500 hover:text-emerald-600'
+                  }`}
+                  disabled={uploadPending}
+                  title="把这份本地数据卡作为新记录上传到云端（默认私有）"
+                  aria-label="上传本地数据卡到云端"
+                >
+                  <UploadCloud className="w-4 h-4" />
+                  <span className="text-xs">{uploadPending ? '上传中…' : '上传到云端'}</span>
+                </button>
+              ) : null}
 
               {onViewDetails ? (
                 <button

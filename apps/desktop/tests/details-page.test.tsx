@@ -34,7 +34,7 @@ let close: (event: { preventDefault: () => void }) => void;
 const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 120)); });
 const button = (name: string) => [...container.querySelectorAll('button')].find((item) => item.textContent === name)!;
 const click = async (name: string) => { await act(async () => button(name).click()); await settle(); };
-const draft = () => ({ version: 1, answers: { [questionnaire.questions[0].id]: '善良' }, language: '简体中文' });
+const draft = () => ({ version: 1, answers: { [`magical-girl-default::${questionnaire.questions[0].id}`]: '善良' }, language: '简体中文' });
 beforeEach(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   vi.clearAllMocks(); window.localStorage.clear();

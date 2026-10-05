@@ -164,6 +164,53 @@ test('提供详情插槽后出现详情入口', async () => {
   expect(detailsButtons.length).toBeGreaterThan(0);
 });
 
+test('本地行出现「上传到云端」入口；失败保留本地记录并显示错误', async () => {
+  const { host } = createHost([record('a')]);
+  const uploadLocalRecord = vi.fn(async () => ({ ok: false as const, error: '需要登录云端账号' }));
+  host.online.uploadLocalRecord = uploadLocalRecord;
+  await render({
+    host, isOpen: true, onClose: vi.fn(), onSelectCard: vi.fn(),
+    selectedType: 'character', initialTab: 'local', visibleTabs: ['local'],
+  });
+  await settle();
+
+  const uploadButton = document.body.querySelector<HTMLButtonElement>('[aria-label="上传本地数据卡到云端"]');
+  expect(uploadButton).not.toBeNull();
+  await click(uploadButton!);
+  await settle();
+
+  expect(uploadLocalRecord).toHaveBeenCalledTimes(1);
+  expect(uploadLocalRecord.mock.calls[0]![0].id).toBe('a');
+  expect(document.body.textContent).toContain('需要登录云端账号');
+  // 上传失败不回滚：本地行仍在，可再次选择。
+  expect(document.body.textContent).toContain('本地角色 a');
+});
+
+test('宿主不提供 uploadLocalRecord 时本地行没有上传入口', async () => {
+  const { host } = createHost([record('a')]);
+  await render({
+    host, isOpen: true, onClose: vi.fn(), onSelectCard: vi.fn(),
+    selectedType: 'character', initialTab: 'local', visibleTabs: ['local'],
+  });
+  await settle();
+  expect(document.body.querySelector('[aria-label="上传本地数据卡到云端"]')).toBeNull();
+});
+
+test('上传成功后显示提示且本地记录不变', async () => {
+  const { host } = createHost([record('a')]);
+  host.online.uploadLocalRecord = vi.fn(async () => ({ ok: true as const }));
+  await render({
+    host, isOpen: true, onClose: vi.fn(), onSelectCard: vi.fn(),
+    selectedType: 'character', initialTab: 'local', visibleTabs: ['local'],
+  });
+  await settle();
+
+  await click(document.body.querySelector('[aria-label="上传本地数据卡到云端"]')!);
+  await settle();
+  expect(document.body.textContent).toContain('已上传为云端新数据卡');
+  expect(document.body.textContent).toContain('本地角色 a');
+});
+
 test('云端列表失败只影响公开页签，切到本地仍可选', async () => {
   const { host } = createHost([record('a')]);
   const onSelectCard = vi.fn();

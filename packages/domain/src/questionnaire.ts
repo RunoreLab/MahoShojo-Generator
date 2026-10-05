@@ -1,3 +1,5 @@
+import { z } from 'zod/v3';
+
 export interface QuestionnaireAnswerItem {
   question: string;
   answer: string;
@@ -303,3 +305,101 @@ export const compactQuestionnaireAnswerItems = (
   delete compacted.questionnaireTitle;
   return compacted;
 });
+
+/* ── 问卷数据卡 payload schema（D5.0e 自 apps/web/lib/schemas 迁入） ────
+ *
+ * 这是数据卡 `data` 正文的领域形状，跨 runtime 共用（Web 校验、Desktop
+ * 旧卡归一化）。保持与 Web 原 schema 逐字等价；schema 变更等同协议变更。
+ */
+
+const QuestionnaireOptionSchema = z.union([
+  z.string(),
+  z.object({
+    value: z.string(),
+    label: z.string(),
+    disabled: z.boolean().optional(),
+  }),
+]);
+
+const QuestionnaireQuestionSchema = z.object({
+  id: z.string(),
+  question: z.string(),
+  type: z.string().optional(),
+  options: z.array(QuestionnaireOptionSchema).optional(),
+  optionsFrom: z.union([
+    z.string(),
+    z.object({
+      key: z.string().optional(),
+      questionId: z.string().optional(),
+      questionnaireId: z.string().optional(),
+    }),
+  ]).optional(),
+  placeholder: z.string().optional(),
+  suggestions: z.array(z.string()).optional(),
+  suggestionsFrom: z.union([
+    z.string(),
+    z.object({
+      key: z.string().optional(),
+      questionId: z.string().optional(),
+      questionnaireId: z.string().optional(),
+    }),
+  ]).optional(),
+  allowCustom: z.boolean().optional(),
+  helperText: z.string().optional(),
+  maxLength: z.union([z.number().int().nonnegative(), z.null()]).optional(),
+  required: z.boolean().optional(),
+  displayIf: z.union([
+    z.object({
+      any: z.array(z.any()).optional(),
+      all: z.array(z.any()).optional(),
+      not: z.any().optional(),
+      key: z.string().optional(),
+      questionId: z.string().optional(),
+      questionnaireId: z.string().optional(),
+      operator: z.string().optional(),
+      value: z.union([z.string(), z.array(z.string())]).optional(),
+    }),
+    z.array(z.any()),
+  ]).optional(),
+  jump: z.union([
+    z.object({
+      when: z.any(),
+      to: z.union([
+        z.string(),
+        z.object({
+          key: z.string().optional(),
+          questionId: z.string().optional(),
+          questionnaireId: z.string().optional(),
+        }),
+      ]).optional(),
+      toEnd: z.boolean().optional(),
+    }),
+    z.array(z.any()),
+  ]).optional(),
+});
+
+export const QuestionnaireSchema = z.object({
+  templateId: z.string().optional(),
+  kind: z.enum(['magical-girl', 'canshou']),
+  title: z.string(),
+  description: z.string().optional(),
+  loreMarkdown: z.string().optional(),
+  logoUrl: z.string().optional(),
+  version: z.string().optional(),
+  nativeAllowed: z.boolean().optional(),
+  questions: z.array(QuestionnaireQuestionSchema),
+})
+  .catchall(z.unknown())
+  .superRefine((data, ctx) => {
+    const hasQuestions = Array.isArray(data.questions) && data.questions.length > 0;
+    const hasLore = typeof data.loreMarkdown === 'string' && data.loreMarkdown.trim().length > 0;
+    if (!hasQuestions && !hasLore) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['questions'],
+        message: '问卷至少需要 1 个题目，或提供 loreMarkdown 设定内容',
+      });
+    }
+  });
+
+export type QuestionnaireData = z.infer<typeof QuestionnaireSchema>;

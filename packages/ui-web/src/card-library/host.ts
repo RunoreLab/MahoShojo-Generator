@@ -1,5 +1,6 @@
 import type { ComponentType, MouseEvent as ReactMouseEvent, ReactNode, RefObject } from 'react';
 import type { CardRepository } from '@mahoshojo/local-library/repository';
+import type { LocalCardRecordV1 } from '@mahoshojo/local-library/record';
 import type {
   DataCardSummaryPage,
   DataCardSummaryQueryInput,
@@ -163,6 +164,15 @@ export interface CardLibraryOnlinePort {
     userIds: readonly number[],
     signal: AbortSignal,
   ): Promise<Record<number, BadgeDefinition[]> | null>;
+  /**
+   * 「本地 → 线上副本」显式上传。宿主不提供时本地行不出现该入口（D5.0e
+   * 双向副本语义）。实现 MUST 创建**新的**线上记录并把可见性默认私有——
+   * 本地记录没有服务器身份，这里不存在「更新线上原卡」的语义。
+   * 失败必须返回 `{ok:false, error}`，不得删除或改写本地记录。
+   */
+  uploadLocalRecord?(
+    record: LocalCardRecordV1,
+  ): Promise<{ ok: true } | { ok: false; error: string }>;
 }
 
 /** 宿主提供的登录/账号投影。`userId` 是业务 users.id（数值型）。 */

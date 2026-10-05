@@ -35,6 +35,26 @@
       "import": "./src/questionnaire.ts",
       "default": "./src/questionnaire.ts"
     },
+    "./questionnaire-card": {
+      "types": "./src/questionnaire-card.ts",
+      "import": "./src/questionnaire-card.ts",
+      "default": "./src/questionnaire-card.ts"
+    },
+    "./narrative-history": {
+      "types": "./src/narrative-history.ts",
+      "import": "./src/narrative-history.ts",
+      "default": "./src/narrative-history.ts"
+    },
+    "./questionnaire-definition": {
+      "types": "./src/questionnaire-definition.ts",
+      "import": "./src/questionnaire-definition.ts",
+      "default": "./src/questionnaire-definition.ts"
+    },
+    "./external-media": {
+      "types": "./src/external-media.ts",
+      "import": "./src/external-media.ts",
+      "default": "./src/external-media.ts"
+    },
     "./sublimation": {
       "types": "./src/sublimation.ts",
       "import": "./src/sublimation.ts",

@@ -385,6 +385,8 @@ export function CardLibraryModal({
     [localCards.records],
   );
   const [localActionError, setLocalActionError] = useState<string | null>(null);
+  const [localActionNotice, setLocalActionNotice] = useState<string | null>(null);
+  const [uploadingLocalId, setUploadingLocalId] = useState<string | null>(null);
   const [removingLocalId, setRemovingLocalId] = useState<string | null>(null);
   const [pendingLocalRemoval, setPendingLocalRemoval] = useState<LocalDataCardRow | null>(null);
   const libraryAutoSave = useLocalLibraryAutoSave(host.local.repository);
@@ -917,6 +919,36 @@ export function CardLibraryModal({
       setRemovingLocalId((current) => (current === card.id ? null : current));
     }
   }, [localCards, host.local.repository]);
+
+  /**
+   * 「本地 → 线上副本」显式上传（D5.0e）。
+   * 端口存在才接线；失败只显示错误，本地记录绝不被删除或改写。
+   * 上传的是一份**新**线上记录（默认私有），本地卡仍没有服务器身份。
+   */
+  const handleUploadLocalCard = useCallback(async (card: LocalDataCardRow) => {
+    const upload = host.online.uploadLocalRecord;
+    if (!upload) return;
+    const record = localRecordById.get(card.id);
+    if (!record) {
+      setLocalActionError('本地库中的这张数据卡已不可用。');
+      return;
+    }
+    setLocalActionError(null);
+    setLocalActionNotice(null);
+    setUploadingLocalId(card.id);
+    try {
+      const result = await upload(record);
+      if (result.ok) {
+        setLocalActionNotice('已上传为云端新数据卡（默认私有）。');
+      } else {
+        setLocalActionError(result.error);
+      }
+    } catch (error) {
+      setLocalActionError(error instanceof Error ? error.message : '上传到云端失败，请重试。');
+    } finally {
+      setUploadingLocalId((current) => (current === card.id ? null : current));
+    }
+  }, [host.online, localRecordById]);
 
   /**
    * LIB-007「下载本地副本」：把线上数据卡复制一份进本机本地库。
@@ -1455,6 +1487,11 @@ export function CardLibraryModal({
               {localActionError}
             </div>
           )}
+          {localActionNotice && (
+            <div className="mt-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700" role="status">
+              {localActionNotice}
+            </div>
+          )}
           {externalError && (
             <div className="mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
               {externalError}
@@ -1821,6 +1858,12 @@ export function CardLibraryModal({
 	                        storageLocation={isLocalDataCardRow(card) ? 'local' : 'cloud'}
 	                        onRemoveFromLibrary={isLocalDataCardRow(card) ? () => setPendingLocalRemoval(card) : undefined}
 	                        removePending={removingLocalId === card.id}
+	                        onUploadToCloud={
+	                          isLocalDataCardRow(card) && host.online.uploadLocalRecord
+	                            ? () => void handleUploadLocalCard(card)
+	                            : undefined
+	                        }
+	                        uploadPending={uploadingLocalId === card.id}
 	                        localLibraryOriginHint={isLocalDataCardRow(card) ? '仅保存在本机，不会上传' : null}
 	                        id={card.id}
 	                        name={card.name}

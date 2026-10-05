@@ -1,16 +1,28 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Link } from '@tanstack/react-router';
 import { getModelGenerationCapabilities } from '@mahoshojo/ai-core/generation-settings';
 import { getRandomFlowers } from '@mahoshojo/domain/flowers';
 import { getAnswerLimitInfo, isAnswerOverLimit } from '@mahoshojo/domain/questionnaire';
+import { buildQuestionnaireFlow, resolveQuestionnaireReferences } from '@mahoshojo/domain/questionnaire-definition';
 import { AiExecutionLocationField, AdvancedGenerationSettings } from '@mahoshojo/ui-web/ai-provider';
 import { DETAILS_QUESTIONNAIRE_THEME, QuestionnaireQuestionPanel } from '@mahoshojo/ui-web/questionnaire';
 import { MagicalGirlResultBody } from '@mahoshojo/ui-web/character-result';
+import { CardLibraryModal, type BattleSelectionPayload } from '@mahoshojo/ui-web/card-library';
 import { DetailsSession } from '../features/details/session';
-import { buildDetailsAnswers, loadDefaultQuestionnaire, type DetailsQuestionnaire } from '../features/details/questionnaire';
+import {
+  buildDetailsAnswers,
+  buildDetailsFlowItems,
+  builtinQuestionnaireSource,
+  loadDefaultQuestionnaire,
+  parseQuestionnaireSelection,
+  type DetailsQuestionnaire,
+  type QuestionnaireSource,
+} from '../features/details/questionnaire';
 import { resolveDesktopAiTarget } from '../features/ai-config/desktop-ai-config';
 import { useDesktopAiConfig } from '../features/ai-config/use-desktop-ai-config';
+import { useDesktopCloudSession } from '../features/account/use-desktop-cloud-session';
+import { useDesktopCardLibraryHost } from '../platform/card-library-host';
 import { IpcLocalCardRepository } from '../platform/local-card-bridge';
 import { useLeaveGuard } from './useLeaveGuard';
 
@@ -27,11 +39,15 @@ function DetailsForm({ session }: { session: DetailsSession }) {
   );
   const profilesLoading = aiState.profilesState === 'idle' || aiState.profilesState === 'loading';
   const profilesError = aiState.profilesState === 'failed' ? aiState.profilesError : null;
+  const cardLibraryHost = useDesktopCardLibraryHost();
+  const { store: cloudSessionStore } = useDesktopCloudSession();
   const [questionnaire, setQuestionnaire] = useState<DetailsQuestionnaire | null>(null);
+  const [questionnaireSource, setQuestionnaireSource] = useState<QuestionnaireSource | null>(null);
   const [questionnaireError, setQuestionnaireError] = useState<string | null>(null);
   const [questionnaireLoading, setQuestionnaireLoading] = useState(true);
   const [reload, setReload] = useState(0);
   const [questionIndex, setQuestionIndex] = useState(0);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const [confirmRegenerate, setConfirmRegenerate] = useState(false);
@@ -58,7 +74,10 @@ function DetailsForm({ session }: { session: DetailsSession }) {
     setQuestionnaireLoading(true);
     setQuestionnaireError(null);
     void loadDefaultQuestionnaire(controller.signal).then((questions) => {
-      if (!controller.signal.aborted) setQuestionnaire(questions);
+      if (!controller.signal.aborted) {
+        setQuestionnaire(questions);
+        setQuestionnaireSource(builtinQuestionnaireSource(questions));
+      }
     }).catch(() => {
       if (!controller.signal.aborted) setQuestionnaireError('内置问卷加载失败，请重试。');
     }).finally(() => { if (!controller.signal.aborted) setQuestionnaireLoading(false); });
@@ -69,20 +88,53 @@ function DetailsForm({ session }: { session: DetailsSession }) {
   const busy = state.phase === 'generating' || state.saving;
   const blockedDraft = state.pendingRestore || session.isDraftBlocked();
   // 写入失败仍允许编辑/重试；读取失败由 session 拒绝覆盖，页面明确要求清除。
-  const question = questionnaire?.questions[questionIndex];
-  const answer = question ? state.draft.answers[question.id] ?? '' : '';
+  // 问卷流程与 Web 同一套领域语义：optionsFrom/suggestionsFrom 先解析，
+  // displayIf/jump 随当前回答求值（`questionnaire-definition` 共享模块）。
+  const flowItems = useMemo(
+    () => (questionnaire ? resolveQuestionnaireReferences(buildDetailsFlowItems(questionnaire)) : []),
+    [questionnaire],
+  );
+  const answersByKey = state.draft.answers;
+  const flow = useMemo(
+    () => buildQuestionnaireFlow(flowItems, answersByKey).flow,
+    [flowItems, answersByKey],
+  );
+  const currentIndex = Math.min(questionIndex, Math.max(0, flow.length - 1));
+  const flowItem = flow[currentIndex];
+  const question = flowItem?.question;
+  const answer = flowItem ? answersByKey[flowItem.key] ?? '' : '';
   const updateAnswer = (value: string) => {
-    if (!question) return;
-    session.updateDraft({ ...state.draft, answers: { ...state.draft.answers, [question.id]: value } });
+    if (!flowItem) return;
+    session.updateDraft({ ...state.draft, answers: { ...answersByKey, [flowItem.key]: value } });
   };
   const generate = (discardUnsavedResult = false) => {
     if (!guard.ready || busy || !selected || !mode || !questionnaire || questionnaireLoading || profilesLoading || profilesError || questionnaireError || state.pendingRestore || session.isDraftBlocked()) return;
     if (session.hasUnsavedResult() && !discardUnsavedResult) { setConfirmRegenerate(true); return; }
     try {
-      const answers = buildDetailsAnswers(questionnaire, session.getSnapshot().draft.answers);
+      const answers = buildDetailsAnswers(flow, session.getSnapshot().draft.answers);
       setActionError(null);
-      void session.generate({ invoke, profileId: selected.id }, { answers, language: session.getSnapshot().draft.language, loreText: '' }, { mode, modelId: selected.modelId, flowers: getRandomFlowers(), overrides: target.generationOverrides }, discardUnsavedResult);
+      void session.generate({ invoke, profileId: selected.id }, { answers, language: session.getSnapshot().draft.language, loreText: questionnaire.loreMarkdown?.trim() ?? '' }, { mode, modelId: selected.modelId, flowers: getRandomFlowers(), overrides: target.generationOverrides }, discardUnsavedResult);
     } catch (error) { setActionError(error instanceof Error ? error.message : '问卷无法生成。'); }
+  };
+
+  /** 打开问卷选择器：一次主动使用 → 顺手探测会话（DESK-ONLINE-013），失败只影响云端页签。 */
+  const openPicker = () => {
+    void cloudSessionStore.refresh();
+    setPickerOpen(true);
+  };
+
+  const handleSelectQuestionnaireCard = (payload: BattleSelectionPayload) => {
+    const parsed = parseQuestionnaireSelection(payload);
+    if ('error' in parsed) {
+      setActionError(parsed.error);
+      return;
+    }
+    // 切换问卷不清空已填回答：key 失配的旧回答留在草稿里但不参与生成；
+    // 「切换保留」指草稿本身不丢，而不是把旧问卷的回答错投到新题。
+    setQuestionnaire(parsed.questionnaire);
+    setQuestionnaireSource(parsed.source);
+    setQuestionIndex(0);
+    setActionError(null);
   };
   const targetCapabilities = selected
     ? getModelGenerationCapabilities(selected.id, selected.modelId)
@@ -91,7 +143,7 @@ function DetailsForm({ session }: { session: DetailsSession }) {
     <section data-testid="page-details" className="flex flex-col gap-5">
       <header>
         <h1 className="text-2xl font-semibold">魔法少女问卷生成</h1>
-        <p className="mt-2 text-sm text-(--app-text-muted)">填写内置问卷后，直接向你配置的模型发送回答，生成未签名角色卡。当前支持默认问卷，不提供自定义问卷或账号存档。</p>
+        <p className="mt-2 text-sm text-(--app-text-muted)">填写问卷后，直接向你配置的模型发送回答，生成未签名角色卡。问卷可以是内置默认，也可以从本地库或云端数据卡选择。</p>
       </header>
       <section aria-label="草稿" className="rounded-lg border border-(--app-border) p-4">
         <p>问卷、结果与中断正文自动保存在本机页面草稿中，恢复草稿不会自动重新生成。</p>
@@ -116,6 +168,20 @@ function DetailsForm({ session }: { session: DetailsSession }) {
       {profilesLoading && <p role="status">正在读取本地 Provider 配置…</p>}
       {profilesError && <p role="alert">{profilesError}</p>}
       <button className={`${actionClass} self-start`} disabled={busy} onClick={() => { setReload((value) => value + 1); void aiStore.refreshProfiles(); }}>重新加载问卷与配置</button>
+      <section aria-label="问卷来源" className="rounded-lg border border-(--app-border) p-4">
+        <p>
+          当前问卷：{questionnaire ? questionnaire.title : '—'}
+          {questionnaireSource && questionnaireSource.kind !== 'builtin' && (
+            <span className="text-sm text-(--app-text-muted)">
+              {' '}（{questionnaireSource.kind === 'local' ? '本地库' : '云端数据卡'}）
+            </span>
+          )}
+        </p>
+        <p className="mt-1 text-sm text-(--app-text-muted)">
+          云端来源需要你已登录且服务可用；本地库来源离线可用。切换问卷不会删除已填写的回答。
+        </p>
+        <button className={`${actionClass} mt-2`} disabled={busy || blockedDraft} onClick={openPicker}>选择问卷</button>
+      </section>
       <fieldset disabled={busy || blockedDraft || questionnaireLoading || !guard.ready} className="flex min-w-0 flex-col gap-4">
         <legend className="mb-2 font-semibold">生成设置</legend>
         <AiExecutionLocationField
@@ -167,14 +233,22 @@ function DetailsForm({ session }: { session: DetailsSession }) {
             {['简体中文', '繁體中文', 'English', '日本語'].map((language) => <option key={language}>{language}</option>)}
           </select>
         </label>
-        {question && questionnaire && <QuestionnaireQuestionPanel
-          theme={DETAILS_QUESTIONNAIRE_THEME} progressLabel={`第 ${questionIndex + 1} / ${questionnaire.questions.length} 题`} progressPercent={(questionIndex + 1) / questionnaire.questions.length * 100}
+        {flowItem && question && questionnaire && <QuestionnaireQuestionPanel
+          theme={DETAILS_QUESTIONNAIRE_THEME} progressLabel={`第 ${currentIndex + 1} / ${flow.length} 题`} progressPercent={(currentIndex + 1) / flow.length * 100}
           questionText={question.question} questionnaireTitle={questionnaire.title} noticeText="至少回答一题即可生成，其他题目可以跳过。" helperText={question.helperText}
-          isRequired={false} skipText="可跳过本题" options={question.options} optionsHintText="点击选项填写回答" onOptionSelect={updateAnswer} suggestions={question.suggestions} onSuggestionSelect={updateAnswer}
+          isRequired={question.required === true} skipText={question.required === true ? '本题为必答' : '可跳过本题'} options={question.options} optionsHintText="点击选项填写回答" onOptionSelect={updateAnswer} suggestions={question.suggestions} onSuggestionSelect={updateAnswer}
           showTextInput={question.allowCustom !== false} answer={answer} onAnswerChange={updateAnswer} placeholder={question.placeholder} answerLength={answer.trim().length}
           showLimitLabel limitLabel={`建议不超过 ${getAnswerLimitInfo(question.maxLength).limit ?? 500} 字，不限制生成`} isOverLimit={isAnswerOverLimit(answer, question.maxLength)} overLimitText="回答超过建议长度，仍可生成未签名角色卡。"
-          prevLabel="上一题" nextButtonContent="下一题" onPrev={() => setQuestionIndex((index) => Math.max(0, index - 1))} onNext={() => setQuestionIndex((index) => Math.min(questionnaire.questions.length - 1, index + 1))}
-          disablePrev={questionIndex === 0} disableNext={questionIndex === questionnaire.questions.length - 1} prevButtonClass={actionClass} nextButtonClass={actionClass}
+          prevLabel="上一题" nextButtonContent="下一题" onPrev={() => setQuestionIndex((index) => Math.max(0, index - 1))}
+          onNext={() => {
+            if (question.required === true && !answer.trim()) {
+              setActionError('本题为必答，请填写后再继续。');
+              return;
+            }
+            setActionError(null);
+            setQuestionIndex((index) => Math.min(flow.length - 1, index + 1));
+          }}
+          disablePrev={currentIndex === 0} disableNext={currentIndex >= flow.length - 1} prevButtonClass={actionClass} nextButtonClass={actionClass}
         />}
       </fieldset>
       <div className="flex flex-wrap gap-2">
@@ -202,6 +276,18 @@ function DetailsForm({ session }: { session: DetailsSession }) {
         {state.saveError && <p role="alert">{state.saveError}</p>}
       </section>}
       {state.rawText && <details open={state.phase !== 'completed'}><summary>原始输出正文</summary><pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded border p-3">{state.rawText}</pre></details>}
+      <CardLibraryModal
+        host={cardLibraryHost}
+        isOpen={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        onSelectCard={handleSelectQuestionnaireCard}
+        selectedType="questionnaire"
+        allowedTypes={['questionnaire']}
+        titleOverride="选择问卷数据卡"
+        // 本地页签离线可用且不要求登录，作为默认落点；云端页签失败只影响自身。
+        initialTab="local"
+        allowDeckImport={false}
+      />
     </section>
   );
 }
