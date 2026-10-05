@@ -117,6 +117,19 @@ export function GlobalTopBar({ pathname, defaultMobileOpen = false }: GlobalTopB
           isAuthenticated ? { unreadTotal, hasCrowdReviewPending } : undefined
         }
         onNavigate={(href, event) => {
+          // 只接管普通主键点击：修饰键（Ctrl/Cmd/Shift/Alt）与非主键点击
+          // 必须落回浏览器原生锚点语义（新标签/新窗口）——共源前 next/link
+          // 在这些情况下从不执行客户端导航，接管它们是一次行为回归。
+          if (
+            event.defaultPrevented ||
+            event.button !== 0 ||
+            event.metaKey ||
+            event.ctrlKey ||
+            event.shiftKey ||
+            event.altKey
+          ) {
+            return;
+          }
           event.preventDefault();
           router.push(href);
         }}

@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import { Outlet, createRootRoute, createRoute, lazyRouteComponent, useRouter } from '@tanstack/react-router';
+import { Outlet, createRootRoute, createRoute, lazyRouteComponent, useLocation, useRouter } from '@tanstack/react-router';
 import { AppShell, ProductTopBar } from '@mahoshojo/ui-web/shell';
 import {
   HomeEncyclopediaCard,
@@ -64,13 +64,17 @@ const CAPABILITIES = buildCapabilitySnapshot();
  */
 const DesktopShell = () => {
   const router = useRouter();
+  // `router.state` 始终是最新值但不是响应式——只在这里读它不会让壳在导航/
+  // 前进后退后重渲染，active group 会停在旧分组。当前路径必须走订阅式
+  // `useLocation`（TanStack 对「渲染依赖路由状态」的官方入口）。
+  const pathname = useLocation({ select: (location) => location.pathname });
   const { state: cloudSession, store: cloudSessionStore } = useDesktopCloudSession();
 
   return (
     <AppShell
       topBar={
         <ProductTopBar
-          pathname={router.state.location.pathname}
+          pathname={pathname}
           capabilities={CAPABILITIES}
           logoSrc="/logo.svg"
           account={projectTopBarAccount(cloudSession.phase)}

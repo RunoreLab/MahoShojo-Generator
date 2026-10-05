@@ -7,7 +7,10 @@ import {
   CLOUD_AUTH_STATUS_COMMAND,
   type InvokeFn,
 } from '../src/platform/cloud-bridge';
-import { DesktopCloudSessionStore } from '../src/features/account/cloud-session-store';
+import {
+  DesktopCloudSessionStore,
+  type DesktopCloudSessionDeps,
+} from '../src/features/account/cloud-session-store';
 import { projectTopBarAccount } from '../src/features/account/topbar-projection';
 
 const ACCOUNT = { userId: 7, username: 'homura', displayName: 'homura' };
@@ -176,7 +179,7 @@ describe('DesktopCloudSessionStore', () => {
     const store = new DesktopCloudSessionStore({ invoke: native.invoke });
     await store.refresh();
 
-    const pending = store.startLogin();
+    const pending = store.requestAuth();
     // `begin` 是异步的：authenticating 投影要等 begin 的 microtask 结算后才可见——
     // 等待它本身就在断言「在途状态对订阅者可见」。
     await vi.waitFor(() => {
@@ -204,7 +207,7 @@ describe('DesktopCloudSessionStore', () => {
     native.holdAwait();
     const store = new DesktopCloudSessionStore({ invoke: native.invoke });
 
-    const pending = store.startLogin();
+    const pending = store.requestAuth();
     // 同样要等 authenticating 到位——await 命令此时才真正发出，releaseAwait 才能生效。
     await vi.waitFor(() => {
       expect(store.getSnapshot().phase.kind).toBe('authenticating');
@@ -217,6 +220,57 @@ describe('DesktopCloudSessionStore', () => {
       session: { state: 'signed-out' },
     });
     expect(store.getSnapshot().lastError).toBe('登录未完成（state-mismatch）：回跳不匹配');
+  });
+
+  it('coalesces concurrent auth requests into a single native login flow', async () => {
+    // 顶栏与设置页可能同时请求认证（双击/两 surface 并发）：`begin` 在途窗口内
+    // 第二次调用必须搭上同一条 loginPromise——native 对每次 `cloud_login_begin`
+    // 都新建 listener/PKCE/flowId，没有「全局只允许一条 flow」的限制，所以这个
+    // single-flight 必须由 renderer 提供（D5.0d-r1）。
+    const native = createNativeStub({ state: 'signed-out' });
+    native.holdAwait();
+    const store = new DesktopCloudSessionStore({ invoke: native.invoke });
+
+    const first = store.requestAuth();
+    const second = store.requestAuth();
+    await vi.waitFor(() => {
+      expect(store.getSnapshot().phase.kind).toBe('authenticating');
+    });
+    native.releaseAwait({ status: 'cancelled' });
+    const [firstOutcome, secondOutcome] = await Promise.all([first, second]);
+
+    expect(firstOutcome).toEqual({ status: 'cancelled' });
+    expect(secondOutcome).toEqual(firstOutcome);
+    expect(
+      native.calls.filter((call) => call.command === CLOUD_LOGIN_BEGIN_COMMAND),
+    ).toHaveLength(1);
+    expect(
+      native.calls.filter((call) => call.command === CLOUD_LOGIN_AWAIT_COMMAND),
+    ).toHaveLength(1);
+  });
+
+  it('clears a prior session error when a later refresh succeeds', async () => {
+    // 失败后再成功：UI 不该同时显示「已登录/服务正常」和上一次的
+    // 「会话状态读取失败」（D5.0d-r1）。deps 对象由 store 持有引用，
+    // 运行中替换 `deps.invoke` 即模拟网络恢复。
+    const deps: DesktopCloudSessionDeps = {
+      invoke: (async () => {
+        throw new Error('network down');
+      }) as InvokeFn,
+    };
+    const store = new DesktopCloudSessionStore(deps);
+    await store.refresh();
+    expect(store.getSnapshot().lastError).toContain('会话状态读取失败');
+
+    const recovered = createNativeStub({
+      state: 'active',
+      account: ACCOUNT,
+      sessionExpiresAt: EXPIRES,
+    });
+    deps.invoke = recovered.invoke;
+    const session = await store.refresh();
+    expect(session.state).toBe('active');
+    expect(store.getSnapshot().lastError).toBeNull();
   });
 
   it('signOut clears to signed-out and reports the revoked flag verbatim', async () => {

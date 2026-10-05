@@ -1,5 +1,7 @@
+// @vitest-environment jsdom
 import { afterAll, beforeEach, describe, expect, vi, test } from 'vitest';
-import React from 'react';
+import React, { act } from 'react';
+import { createRoot } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 /**
@@ -198,6 +200,52 @@ describe('GlobalTopBar adapter', () => {
 
     expect(html).toContain('data-auth-modal="true"');
     expect(html).toContain('data-auth-modal-open="false"');
+  });
+
+  test('leaves modifier clicks on internal links to native anchor semantics', async () => {
+    // D5.0d-r1：共源前 Web 用 next/link——Ctrl/Cmd/Shift+Click 走浏览器
+    // 新标签/新窗口，客户端导航回调不执行。adapter 只能接管普通主键点击；
+    // modifier click 被 preventDefault + push 是一次真实行为回归。
+    const { GlobalTopBar } = await import('@/components/navigation/GlobalTopBar');
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => {
+        root.render(<GlobalTopBar pathname="/" />);
+      });
+      const link = container.querySelector<HTMLAnchorElement>('a[href="/character-manager"]');
+      expect(link).not.toBeNull();
+
+      for (const init of [{ ctrlKey: true }, { metaKey: true }, { shiftKey: true }] as const) {
+        const event = new MouseEvent('click', {
+          bubbles: true,
+          cancelable: true,
+          button: 0,
+          ...init,
+        });
+        await act(async () => {
+          link?.dispatchEvent(event);
+        });
+        expect(routerPushMock).not.toHaveBeenCalled();
+        expect(event.defaultPrevented).toBe(false);
+      }
+
+      // 对照组：普通主键点击仍由 Next Router 接管并阻止默认整页导航。
+      const plainClick = new MouseEvent('click', {
+        bubbles: true,
+        cancelable: true,
+        button: 0,
+      });
+      await act(async () => {
+        link?.dispatchEvent(plainClick);
+      });
+      expect(routerPushMock).toHaveBeenCalledWith('/character-manager');
+      expect(plainClick.defaultPrevented).toBe(true);
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
   });
 });
 

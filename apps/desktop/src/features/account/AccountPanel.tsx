@@ -5,6 +5,12 @@
 // 私有的交互状态：在线探针 busy 结果、授权 URL 的「已复制」提示与退出后的
 // revoked 说明。
 //
+// 面板按 `phase.kind` 做穷尽投影而不是折叠成布尔值：`idle` 是「尚未验证」，
+// `authenticating` 是「授权进行中」——两者都不能显示成「未登录」（未验证不
+// 冒称已登出，DESK-ONLINE-008 的另一面）。登录入口统一走 `requestAuth`：
+// 先经 `cloud_auth_status` 验证身份再按需开授权流，没有绕过确认直达
+// `startLogin` 的路径。
+//
 // `refresh()` 在进入设置页时主动触发一次：这不是后台轮询，而是「用户打开了
 // 账号面板」这一动作的结果——DESK-ONLINE-012 禁止的是无用户动作的在线探测。
 
@@ -27,9 +33,8 @@ export const AccountPanel = () => {
   const { state: sessionState, store: sessionStore } = useDesktopCloudSession();
   const phase = sessionState.phase;
   const session = phase.kind === 'ready' ? phase.session : null;
-  const checking = phase.kind === 'checking';
   const attempt = phase.kind === 'authenticating' ? phase : null;
-  const busy = checking || attempt !== null;
+  const busy = phase.kind === 'checking' || attempt !== null;
 
   // 面板私有状态：退出结果说明、在线探针、授权 URL 复制提示。
   const [notice, setNotice] = useState<string | null>(null);
@@ -40,19 +45,16 @@ export const AccountPanel = () => {
 
   useEffect(() => {
     void sessionStore.refresh();
-    // 离开设置页时取消在途授权：flowId 只在 native 进程里有效，用户离开面板
-    // 意味着放弃了这次「手动复制 URL」的机会——继续挂着只会留一条孤儿流程。
-    return () => {
-      const latest = sessionStore.getSnapshot();
-      if (latest.phase.kind === 'authenticating') void sessionStore.cancelLogin();
-    };
+    // 不在卸载时取消在途授权：flow 是进程级会话（顶栏发起的登录同样流经
+    // 这个 store），只有显式「取消登录」、native deadline 或应用生命周期
+    // 结束才终止它——离开设置页不等于放弃授权。
   }, [sessionStore]);
 
   const login = async () => {
     setError(null);
     setNotice(null);
     setCopied(false);
-    await sessionStore.startLogin();
+    await sessionStore.requestAuth();
   };
 
   const signOut = async () => {
@@ -106,26 +108,38 @@ export const AccountPanel = () => {
 
       <div className="flex flex-wrap items-center gap-2 text-sm">
         <span>会话状态：</span>
-        {checking && <span>正在读取…</span>}
-        {!checking && (!session || session.state === 'signed-out') && (
+        {phase.kind === 'idle' && (
+          <StatusChip
+            label="尚未验证"
+            className="border-(--app-border) text-(--app-text-muted)"
+          />
+        )}
+        {phase.kind === 'checking' && <span>正在读取…</span>}
+        {attempt && (
+          <StatusChip
+            label="授权进行中"
+            className="border-(--app-accent) text-(--app-accent-strong)"
+          />
+        )}
+        {session?.state === 'signed-out' && (
           <StatusChip
             label="未登录"
             className="border-(--app-border) text-(--app-text-muted)"
           />
         )}
-        {!checking && session?.state === 'active' && (
+        {session?.state === 'active' && (
           <StatusChip
             label={`已登录 · ${session.account.displayName ?? session.account.username}`}
             className="border-(--app-accent) text-(--app-accent-strong)"
           />
         )}
-        {!checking && session?.state === 'expired' && (
+        {session?.state === 'expired' && (
           <StatusChip
             label="会话已过期"
             className="border-(--app-accent) text-(--app-accent-strong)"
           />
         )}
-        {!checking && session?.state === 'unreachable' && (
+        {session?.state === 'unreachable' && (
           <StatusChip
             label="服务不可用（本地凭据保留）"
             className="border-(--app-border) text-(--app-text-muted)"

@@ -22,6 +22,15 @@
 // - `authenticating`：授权流程在途（flowId + 授权 URL 供面板展示与取消）。
 //
 // `lastError` 只承载最近一次会话级操作的可读错误；成功操作会清空它。
+//
+// ## 授权流程的所有权
+//
+// 登录 flow 是**进程级**会话操作：顶栏与设置页共享同一条，终止条件只有
+// 显式 `cancelLogin`、native deadline 或应用生命周期结束——React 页面卸载
+// 一律不取消它。发起入口对 UI 只有 `requestAuth`（先验证身份再按需
+// `startLogin`），外部拿不到 `startLogin`，因此不存在「绕过身份确认直接
+// 建 flow」的路径；整条链经 `statusPromise`/`loginPromise` 收敛为
+// single-flight，两个 surface 并发请求只会产生一条 native flow。
 
 import type {
   DesktopCloudLoginOutcome,
@@ -74,6 +83,12 @@ export class DesktopCloudSessionStore {
   private state: DesktopCloudSessionState = INITIAL_STATE;
   private readonly listeners = new Set<() => void>();
   private statusPromise: Promise<DesktopCloudSessionStatus> | null = null;
+  /**
+   * 授权流程 single-flight。不能只查 `phase === 'authenticating'`：`begin`
+   * 返回前 phase 还不是 authenticating，两个调用会在那条窗口里各自创建
+   * listener/PKCE/flowId——native 并没有「全局只允许一条 flow」的限制。
+   */
+  private loginPromise: Promise<DesktopCloudLoginOutcome | null> | null = null;
   /** `authenticating` 期间记住进入前的会话，取消授权时原样恢复而不是猜。 */
   private sessionBeforeLogin: DesktopCloudSessionStatus | null = null;
 
@@ -105,7 +120,9 @@ export class DesktopCloudSessionStore {
       this.publish({ phase: { kind: 'checking' } });
       try {
         const session = await readCloudAuthStatus(this.deps.invoke);
-        this.publish({ phase: { kind: 'ready', session } });
+        // 成功必须清掉旧错误：一次失败后的成功读取不该让 UI 同时显示
+        // 「已登录/服务正常」与上一次的「会话状态读取失败」。
+        this.publish({ phase: { kind: 'ready', session }, lastError: null });
         return session;
       } catch (cause) {
         this.publish({
@@ -122,29 +139,39 @@ export class DesktopCloudSessionStore {
   };
 
   /**
-   * 顶栏账号区的「登录」语义：先验证当前身份，需要时才打开授权流。
+   * 授权的唯一入口：先验证当前身份，需要时才打开系统浏览器授权流。
    *
    * - 已有 active 会话：什么都不做（顶栏此时已渲染头像菜单，不该走到这）；
    * - signed-out / expired：开始系统浏览器授权；
-   * - unreachable：什么都不做——UI 投影成「服务不可用」，再次点击会重试。
+   * - unreachable：什么都不做——UI 投影成「服务不可用」，再次点击会重试；
+   * - `authenticating` 在途：搭上同一条 `loginPromise`，不新建第二条 flow。
    */
-  requestAuth = async (): Promise<void> => {
-    if (this.state.phase.kind === 'authenticating') return;
+  requestAuth = async (): Promise<DesktopCloudLoginOutcome | null> => {
+    if (this.state.phase.kind === 'authenticating') return this.loginPromise ?? null;
     const session = await this.refresh();
     if (session.state === 'signed-out' || session.state === 'expired') {
-      await this.startLogin();
+      return this.startLogin();
     }
+    return null;
   };
 
   /**
-   * 开始一次系统浏览器授权。
+   * 开始一次系统浏览器授权——私有实现细节，UI 一律走 `requestAuth`。
    *
+   * 收敛在这里而不是每个调用方：所有「需要登录」的入口都必须先过身份确认，
+   * single-flight 也只需要维护一份。
+   */
+  private startLogin = (): Promise<DesktopCloudLoginOutcome | null> => {
+    this.loginPromise ??= this.runLogin();
+    return this.loginPromise;
+  };
+
+  /**
    * `cancelled`/`failed` 是正常终态：恢复进入授权前的会话快照（而不是一律
    * 标成 signed-out——授权流并不消费也不创建凭据）。`signed-in` 直接构造
    * active 投影，省去一次本不必要的二次查询。
    */
-  startLogin = async (): Promise<DesktopCloudLoginOutcome | null> => {
-    if (this.state.phase.kind === 'authenticating') return null;
+  private runLogin = async (): Promise<DesktopCloudLoginOutcome | null> => {
     const priorSession =
       this.state.phase.kind === 'ready' ? this.state.phase.session : null;
     this.sessionBeforeLogin = priorSession;
@@ -188,6 +215,8 @@ export class DesktopCloudSessionStore {
         lastError: describeCloudSessionError(cause),
       });
       return null;
+    } finally {
+      this.loginPromise = null;
     }
   };
 

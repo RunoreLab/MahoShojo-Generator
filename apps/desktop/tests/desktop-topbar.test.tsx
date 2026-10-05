@@ -38,7 +38,12 @@ const { invokeMock, defaultInvokeImpl } = vi.hoisted(() => {
   return { invokeMock: vi.fn(impl), defaultInvokeImpl: impl };
 });
 
-vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeMock }));
+// 懒加载页面会实例化 useLeaveGuard：缺 `isTauri` 时渲染抛错、根 CatchBoundary
+// 整树替换，topbar 会消失——jsdom 不是 Tauri，返回 false 即走纯 Web 路径。
+vi.mock('@tauri-apps/api/core', () => ({ isTauri: () => false, invoke: invokeMock }));
+vi.mock('@tauri-apps/api/window', () => ({
+  getCurrentWindow: () => ({ onCloseRequested: async () => () => {} }),
+}));
 
 // 顶栏依赖 lazy 路由的页面内容不影响壳断言；直接复用真实路由树，让「已交付入口可点
 // 且真的导航」与路由事实保持同一来源。
@@ -72,6 +77,18 @@ const settle = async (): Promise<void> => {
   await act(async () => {
     await Promise.resolve();
     await new Promise((resolve) => setTimeout(resolve, 20));
+  });
+};
+
+/**
+ * back/forward 专属等待：jsdom 的 `popstate` 派发在宏任务里，量级约 100ms
+ * （`desktop-router-history.test.tsx` 的实测口径）。20ms 的 `settle` 会让
+ * traversal 断言落在事件之前，看起来像「高亮没跟上」的假象。
+ */
+const settleTraversal = async (): Promise<void> => {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    await Promise.resolve();
   });
 };
 
@@ -135,6 +152,87 @@ describe('desktop shared topbar', () => {
     expect(router.state.location.pathname).toBe('/character-manager');
     // hash history：产品路径在 # 之后（`router.ts` 的选型理由）。
     expect(window.location.hash).toBe('#/character-manager');
+  });
+
+  it('keeps the topbar active group in sync across navigation and traversal', async () => {
+    const router = await mount();
+    const activeGroup = () =>
+      container.querySelector('header.global-topbar')?.getAttribute('data-active-group');
+
+    // `router.state.location` 始终最新但不是响应式——旧的读法让 active
+    // group 停在壳上次渲染时的值（D5.0d-r1）。这里断言的是 DOM 而不是
+    // router 状态：导航、前进、后退三个方向都必须同步高亮。
+    expect(activeGroup()).toBe('');
+
+    await click(container.querySelector('header.global-topbar a[href="/character-manager"]'));
+    expect(activeGroup()).toBe('character');
+
+    await act(async () => {
+      await router.navigate({ to: '/encyclopedia' });
+    });
+    await settle();
+    expect(activeGroup()).toBe('knowledge');
+
+    // 用本用例自己产生的两条栈记录做 traversal——jsdom session history
+    // 跨用例共享，从更早条目 pop 回来的路径不可预测（router-history 测试
+    // 记录了同一限制）。
+    await act(async () => {
+      router.history.back();
+    });
+    await settleTraversal();
+    expect(router.state.location.pathname).toBe('/character-manager');
+    expect(activeGroup()).toBe('character');
+
+    await act(async () => {
+      router.history.forward();
+    });
+    await settleTraversal();
+    expect(router.state.location.pathname).toBe('/encyclopedia');
+    expect(activeGroup()).toBe('knowledge');
+  });
+
+  it('does not cancel a topbar-initiated login when the settings panel unmounts', async () => {
+    // 授权 flow 是进程级会话（顶栏与设置页共享同一条）：离开设置页只卸载
+    // 面板，不得取消顶栏发起的全局登录——D5.0d-r1 修复的 ownership 边界。
+    let releaseAwait: ((outcome: unknown) => void) | null = null;
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'cloud_auth_status') return { state: 'signed-out' as const };
+      if (command === 'cloud_login_begin') {
+        return { flowId: 'flow-1', authorizeUrl: 'https://example.test/auth/desktop?state=s' };
+      }
+      if (command === 'cloud_login_await') {
+        return new Promise((resolve) => {
+          releaseAwait = resolve;
+        });
+      }
+      return undefined;
+    });
+    const router = await mount();
+
+    // 进入设置页挂载 AccountPanel（它自己会 refresh 一次），再从顶栏发起授权。
+    await act(async () => {
+      await router.navigate({ to: '/settings' });
+    });
+    await settle();
+    expect(container.querySelector('[data-testid="account-panel"]')).not.toBeNull();
+
+    await click(accountButton());
+    expect(accountButton()?.textContent).toBe('登录中…');
+
+    // 离开设置页：面板卸载，但授权 flow 不属于面板——不得发出取消命令。
+    await act(async () => {
+      await router.navigate({ to: '/' });
+    });
+    await settle();
+    expect(container.querySelector('[data-testid="account-panel"]')).toBeNull();
+    expect(
+      invokeMock.mock.calls.some((call) => call[0] === 'cloud_login_cancel'),
+    ).toBe(false);
+    expect(accountButton()?.textContent).toBe('登录中…');
+
+    // 收尾：释放在途 await，让 flow 走到 cancelled 终态，不给下一个用例留挂起 IPC。
+    releaseAwait?.({ status: 'cancelled' });
+    await settle();
   });
 
   it('clicking the account slot verifies identity then completes the native login round trip', async () => {
