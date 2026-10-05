@@ -25,6 +25,11 @@
       "import": "./src/data-card-size.ts",
       "default": "./src/data-card-size.ts"
     },
+    "./arena-types": {
+      "types": "./src/arena-types.ts",
+      "import": "./src/arena-types.ts",
+      "default": "./src/arena-types.ts"
+    },
     "./game-card": {
       "types": "./src/game-card.ts",
       "import": "./src/game-card.ts",

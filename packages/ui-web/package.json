@@ -70,6 +70,11 @@
       "import": "./src/character-result/index.ts",
       "default": "./src/character-result/index.ts"
     },
+    "./character-card": {
+      "types": "./src/character-card/index.ts",
+      "import": "./src/character-card/index.ts",
+      "default": "./src/character-card/index.ts"
+    },
     "./local-archive": {
       "types": "./src/local-archive/index.ts",
       "import": "./src/local-archive/index.ts",
@@ -117,6 +122,7 @@
     "@mahoshojo/contracts": "workspace:*",
     "@mahoshojo/domain": "workspace:*",
     "@mahoshojo/local-library": "workspace:*",
+    "@zumer/snapdom": "^1.9.7",
     "clsx": "^2.1.1",
     "katex": "^0.16.27",
     "lucide-react": "^0.511.0",

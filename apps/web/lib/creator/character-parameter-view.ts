@@ -1,41 +1,24 @@
 import { tryLoadBuildRulePresetById } from '@/lib/creator/build-rules';
 import { getFieldDisplayName } from '@/lib/fieldTranslations';
+import type {
+  CharacterParameterEntry,
+  CharacterParameterRuleSection,
+  CharacterParameterRuleView,
+  CharacterParameterSourceKey,
+  CharacterParameterSourceView,
+  CharacterParameterView,
+} from '@mahoshojo/ui-web/character-card';
 
-export type CharacterParameterSourceKey = 'initial' | 'current';
-
-export interface CharacterParameterEntry {
-  key: string;
-  label: string;
-  value: string;
-}
-
-export interface CharacterParameterRuleSection {
-  key: string;
-  title: string;
-  entries: CharacterParameterEntry[];
-  note?: string;
-}
-
-export interface CharacterParameterRuleView {
-  ruleId: string;
-  title: string;
-  version: string;
-  sections: CharacterParameterRuleSection[];
-  valid: boolean;
-  statusLabel: string;
-  issues: string[];
-}
-
-export interface CharacterParameterSourceView {
-  key: CharacterParameterSourceKey;
-  label: string;
-  rules: CharacterParameterRuleView[];
-}
-
-export interface CharacterParameterView {
-  activeSource: CharacterParameterSourceKey;
-  sources: CharacterParameterSourceView[];
-}
+// 视图类型 canonical 定义在 @mahoshojo/ui-web/character-card；此处回导保持
+// 既有 `@/lib/creator/character-parameter-view` 调用点不变。
+export type {
+  CharacterParameterEntry,
+  CharacterParameterRuleSection,
+  CharacterParameterRuleView,
+  CharacterParameterSourceKey,
+  CharacterParameterSourceView,
+  CharacterParameterView,
+};
 
 type CharacterParameterViewInput = {
   creationInputs?: unknown;

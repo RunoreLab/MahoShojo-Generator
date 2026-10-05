@@ -812,6 +812,9 @@ importers:
       '@mahoshojo/local-library':
         specifier: workspace:*
         version: link:../local-library
+      '@zumer/snapdom':
+        specifier: ^1.9.7
+        version: 1.9.14
       clsx:
         specifier: ^2.1.1
         version: 2.1.1

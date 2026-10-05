@@ -1,95 +1,22 @@
 // components/MagicalGirlCard.tsx
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { flushSync } from 'react-dom';
-import { ArenaHistory, ArenaHistoryEntry, CharacterCurrentState } from '@/types/arena';
-import { CurrentStatePanel } from '@/components/CurrentStatePanel';
-import { MarkdownBlock } from '@/components/MarkdownBlock';
-import { capturePngBlob } from '@/lib/client/snapdomCapture';
-import { createBlobUrl, downloadBlob } from '@/lib/client/blobUrl';
-import { GeneratedByUserBadge } from '@/components/shared/GeneratedByUserBadge';
-import { CharacterParameterSection } from '@/components/shared/CharacterParameterSection';
+// canonical 实现在 @mahoshojo/ui-web/character-card；本文件是 Web 宿主包装：
+// 注入 Web 的 MarkdownBlock（百科链接/媒体策略）、GeneratedByUserBadge、
+// WEB_SNAPDOM_MEDIA 截图媒体策略，并用 buildCharacterParameterView 计算参数区。
+import React, { useMemo } from 'react';
+
 import {
-  buildCharacterParameterView,
-  type CharacterParameterSourceKey,
-} from '@/lib/creator/character-parameter-view';
-import type { CharacterCardPortraitAsset } from '@/types/visual-asset';
-import { MagicalGirlResultBody } from '@mahoshojo/ui-web/character-result';
+  MagicalGirlCard as SharedMagicalGirlCard,
+  type MagicalGirlCardProps as SharedMagicalGirlCardProps,
+} from '@mahoshojo/ui-web/character-card';
+import { WEB_SNAPDOM_MEDIA } from '@mahoshojo/ui-web/client';
 
-interface MagicalGirlCardProps {
-  magicalGirl: {
-    codename: string;
-    appearance: {
-      outfit: string;
-      accessories: string;
-      colorScheme: string;
-      overallLook: string;
-    };
-    magicConstruct: {
-      name: string;
-      form: string | object; // 允许 form 是字符串或对象
-      basicAbilities: Array<string | Record<string, unknown>> | string;
-      description: string;
-    };
-    wonderlandRule: {
-      name: string;
-      description: string;
-      tendency: string;
-      activation: string;
-    };
-    blooming: {
-      name: string | object; // 允许 name 是字符串或对象
-      evolvedAbilities: string[] | string;
-      evolvedForm: string;
-      evolvedOutfit: string;
-      powerLevel: string;
-    };
-    analysis: {
-      personalityAnalysis: string;
-      abilityReasoning: string;
-      coreTraits: string[] | string;
-      predictionBasis: string;
-      background?: {
-        belief: string;
-        bonds: string;
-      };
-    };
-  arena_history?: ArenaHistory;
-  current_state?: CharacterCurrentState | null;
-  creationInputs?: unknown;
-  buildState?: unknown;
-  };
-  gradientStyle: string;
-  isStreaming?: boolean;
-  onStopGeneration?: () => void;
-  onSaveImage?: (imageUrl: string) => void;
-  imageSaveMode?: 'auto' | 'modal' | 'download';
-  saveButtonLabel?: string;
-  portraitAsset?: CharacterCardPortraitAsset | null;
-}
+import { MarkdownBlock } from '@/components/MarkdownBlock';
+import { GeneratedByUserBadge } from '@/components/shared/GeneratedByUserBadge';
+import { buildCharacterParameterView } from '@/lib/creator/character-parameter-view';
 
-const waitForNextPaint = async () => {
-  if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') {
-    return;
-  }
+type MagicalGirlCardProps = Omit<SharedMagicalGirlCardProps, 'Markdown' | 'generatedByBadge' | 'captureMediaAdapter' | 'parameterView'>;
 
-  await new Promise<void>((resolve) => {
-    window.requestAnimationFrame(() => resolve());
-  });
-};
-
-const MagicalGirlCard: React.FC<MagicalGirlCardProps> = ({
-  magicalGirl,
-  gradientStyle,
-  isStreaming = false,
-  onStopGeneration,
-  onSaveImage,
-  imageSaveMode = 'auto',
-  saveButtonLabel,
-  portraitAsset = null,
-}) => {
-  const resultRef = useRef<HTMLDivElement>(null);
-  const [isHistoryVisible, setIsHistoryVisible] = useState(false);
-  const [isSavingImage, setIsSavingImage] = useState(false);
+const MagicalGirlCard: React.FC<MagicalGirlCardProps> = ({ magicalGirl, ...rest }) => {
   const parameterView = useMemo(
     () =>
       buildCharacterParameterView({
@@ -98,196 +25,16 @@ const MagicalGirlCard: React.FC<MagicalGirlCardProps> = ({
       }),
     [magicalGirl]
   );
-  const [parameterSourceKey, setParameterSourceKey] = useState<CharacterParameterSourceKey>(
-    parameterView?.activeSource ?? 'current'
-  );
-  const [isExportingImage, setIsExportingImage] = useState(false);
-  const portraitImageUrl = typeof portraitAsset?.imageUrl === 'string' ? portraitAsset.imageUrl.trim() : '';
-  const uploadedPortraitNote =
-    portraitAsset?.source === 'uploaded'
-      ? (typeof portraitAsset.note === 'string' && portraitAsset.note.trim() ? portraitAsset.note.trim() : '用户自行上传')
-      : '';
-
-  useEffect(() => {
-    setParameterSourceKey((currentSourceKey) => {
-      if (!parameterView) return 'current';
-      return parameterView.sources.some((source) => source.key === currentSourceKey)
-        ? currentSourceKey
-        : parameterView.activeSource;
-    });
-  }, [parameterView]);
-
-  /**
-   * 对卡片内容进行截图，并根据 imageSaveMode 选择保存策略。
-   * - auto：自动检测终端类型，移动端触发回调弹窗，桌面端直接下载。
-   * - modal：始终调用 onSaveImage，由父组件控制后续交互。
-   * - download：始终触发本地下载。
-   */
-  const handleSaveImage = async () => {
-    if (!resultRef.current) return;
-    if (isSavingImage) return;
-
-    const saveButton = resultRef.current.querySelector('.save-button') as HTMLElement;
-    const logoPlaceholder = resultRef.current.querySelector('.logo-placeholder') as HTMLElement;
-    try {
-      setIsSavingImage(true);
-      flushSync(() => setIsExportingImage(true));
-      await waitForNextPaint();
-      if (saveButton) saveButton.style.display = 'none';
-      if (logoPlaceholder) logoPlaceholder.style.display = 'flex';
-
-      const blob = await capturePngBlob(resultRef.current, {
-        scale: 1,
-        dprMax: 2,
-        fast: false,
-        exclude: ['audio', 'video'],
-        excludeMode: 'remove',
-      });
-
-      const resolvedMode: 'modal' | 'download' = imageSaveMode === 'modal' || imageSaveMode === 'download'
-        ? imageSaveMode
-        : (/Mobi/i.test(window.navigator.userAgent) ? 'modal' : 'download');
-      const sanitizedTitle = magicalGirl.codename.replace(/[^a-z0-9\u4e00-\u9fa5]/gi, '_');
-      const filename = `魔法少女_${sanitizedTitle}.png`;
-
-      if (resolvedMode === 'modal') {
-        const imageUrl = createBlobUrl(blob);
-        if (onSaveImage) {
-          onSaveImage(imageUrl);
-        } else {
-          const previewWindow = window.open(imageUrl, '_blank');
-          if (!previewWindow) {
-            alert('图片已生成，请长按或右键保存。');
-          }
-        }
-      } else {
-        downloadBlob(blob, filename);
-      }
-    } catch (err) {
-      alert('生成图片失败，请重试');
-      console.error("Image generation failed:", err);
-    } finally {
-      flushSync(() => setIsExportingImage(false));
-      if (saveButton) saveButton.style.display = 'block';
-      if (logoPlaceholder) logoPlaceholder.style.display = 'none';
-      setIsSavingImage(false);
-    }
-  };
 
   return (
-    <div
-      ref={resultRef}
-      className="result-card"
-      style={{ background: gradientStyle }}
-    >
-      <div className="result-content">
-        <div className="flex justify-center items-center" style={{ marginBottom: '1rem', background: 'transparent' }}>
-          <img src="/questionnaire-title.svg" width={300} height={70} alt="Logo" style={{ display: 'block', background: 'transparent' }} />
-        </div>
-
-        {portraitImageUrl && (
-          <div className="result-item" style={{ borderLeft: '4px solid #f9a8d4', background: 'rgba(0,0,0,0.2)' }}>
-            <div className="result-label">🖼️ 角色立绘</div>
-            <div className="result-value">
-              <img
-                src={portraitImageUrl}
-                alt={`${magicalGirl.codename || '角色'} 立绘`}
-                className="w-full max-h-[560px] object-contain rounded-lg border border-white/15 bg-black/15"
-                loading="eager"
-                decoding="async"
-              />
-              {uploadedPortraitNote && (
-                <p className="mt-2 text-[11px] text-gray-300 text-right">
-                  注：{uploadedPortraitNote}
-                </p>
-              )}
-            </div>
-          </div>
-        )}
-
-        <MagicalGirlResultBody
-          magicalGirl={magicalGirl}
-          renderMarkdown={(content) => <MarkdownBlock content={content} variant="dark" mode="compact" />}
-        />
-
-        {parameterView ? (
-          <CharacterParameterSection
-            view={parameterView}
-            sourceKey={parameterSourceKey}
-            renderMode={isExportingImage ? 'export' : 'interactive'}
-            onChangeSource={setParameterSourceKey}
-          />
-        ) : null}
-
-        <CurrentStatePanel state={magicalGirl.current_state} variant="dark" />
-
-        {/* --- 历战记录展示区 --- */}
-        {/*
-          【健壮性修复】
-          在访问 .entries 之前，增加 Array.isArray() 检查。
-          这可以防止因数据格式不规范（如 arena_history 存在但 entries 缺失或不是数组）而导致的页面崩溃。
-        */}
-        {magicalGirl.arena_history && Array.isArray(magicalGirl.arena_history.entries) && magicalGirl.arena_history.entries.length > 0 && (
-          <div className="result-item">
-            <button onClick={() => setIsHistoryVisible(!isHistoryVisible)} className="result-label w-full text-left bg-transparent border-none cursor-pointer">
-              {isHistoryVisible ? '▼' : '▶'} 📜 历战记录
-            </button>
-            {isHistoryVisible && (
-              <div className="result-value mt-2 space-y-2 text-xs">
-                {magicalGirl.arena_history.entries.slice().reverse().map((entry: ArenaHistoryEntry) => {
-                  // [UI改进] 从 gradientStyle 中提取起始颜色，用作历战记录条目的背景
-                  const startColor = gradientStyle.startsWith('linear-gradient(to right, ')
-                    ? gradientStyle.split(', ')[1].trim()
-                    : 'rgba(0, 0, 0, 0.05)'; // 默认颜色
-
-                  // 可以根据需要调整透明度或混合模式
-                  const historyItemBackground = `${startColor}20`; // 添加一些透明度
-
-                  return (
-                    <div key={entry.id} className="p-2 rounded" style={{ backgroundColor: historyItemBackground }}>
-                      <p><strong>{entry.title}</strong></p>
-                      <p><strong>类型:</strong> {entry.type} | <strong>胜利者:</strong> {entry.winner}</p>
-                      <div className="mt-1">
-                        <p className="font-semibold">影响:</p>
-                        <MarkdownBlock content={entry.impact || '暂无影响描述'} variant="dark" />
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        )}
-
-        <div className="mt-4 flex flex-col gap-2 sm:flex-row">
-          <button
-            onClick={isStreaming && onStopGeneration ? onStopGeneration : handleSaveImage}
-            className="save-button flex-1"
-            disabled={isSavingImage}
-          >
-            {isStreaming && onStopGeneration ? '⏹ 停止生成' : isSavingImage ? '生成中...' : (saveButtonLabel ?? '📱 保存为图片')}
-          </button>
-        </div>
-
-        <div
-          className="logo-placeholder"
-          style={{ display: 'none', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', marginTop: '1rem' }}
-        >
-          <img
-            src="/logo-white-qrcode.svg"
-            width={280}
-            height={280}
-            alt="Logo"
-            style={{
-              display: 'block',
-              maxWidth: '100%',
-              height: 'auto'
-            }}
-          />
-          <GeneratedByUserBadge variant="dark" className="mt-3" />
-        </div>
-      </div>
-    </div>
+    <SharedMagicalGirlCard
+      magicalGirl={magicalGirl}
+      parameterView={parameterView}
+      Markdown={MarkdownBlock}
+      generatedByBadge={<GeneratedByUserBadge variant="dark" className="mt-3" />}
+      captureMediaAdapter={WEB_SNAPDOM_MEDIA}
+      {...rest}
+    />
   );
 };
 
