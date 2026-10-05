@@ -46,7 +46,12 @@ MahoShojo Generator 的本地桌面客户端 runtime。它是独立 app，不是
   把 `DirectProviderProfileV1` 投影为 display-only 的 `AiConnectionListItem`——
   不含 headers/defaults/transport，持久化权威始终是完整 Profile；端点相同不会把
   自定义连接认领为预设（不提供端点到预设的匹配 API）。
-  Desktop 尚未消费这些 API，成熟 Provider 配置界面与 Direct 执行接线属后续切片。
+- **D5.0b** Web 选择器已共源到 `@mahoshojo/ui-web/ai-provider` 并由 Web 薄封装回用；
+  Desktop 侧 `features/ai-config` 落地统一配置层：overlay（当前选择/隐藏预设/按
+  `profileId::modelId` 的生成覆盖，fail-closed 持久化到 localStorage）+
+  Profile 列表/凭据存在性的单一 store，设置页 `AiConnectionsPanel` 与 `/details`
+  生成入口消费同一份 `resolveDesktopAiTarget` 结果。预设只作复制模板，
+  `DESKTOP_DIRECT_ADAPTERS = { openai-compatible }` 是唯一的宿主能力注入点。
 
 ## 权威边界
 
@@ -171,8 +176,9 @@ Profile 草稿
 
 D5.0a 起，预设/连接语义在 `@mahoshojo/ai-core`：`provider-catalog` 区分服务器策略项
 `system`（`SYSTEM_PROVIDER_OPTION`，不可直连）与项目预设集合 `AI_PROVIDER_PRESETS`，
-`ai-connections` 把 Profile 投影为 display-only 的自定义连接列表项。上面这个面板仍是
-D1 调试面板，尚未接入这些 API；成熟配置交互属于后续切片。
+`ai-connections` 把 Profile 投影为 display-only 的自定义连接列表项。D5.0b 起设置页
+由 `AiConnectionsPanel`（统一 `DesktopAiConfigStore`）承载预设隐藏/恢复/复制与自定义
+连接 CRUD，D1 的 `ProviderProfilesPanel` 调试面板已移除。
 
 已知边界：
 

@@ -97,6 +97,26 @@
     color: var(--battle-lite-accent-text, var(--app-text));
   }
 
+  .battle-lite-link {
+    color: var(--battle-lite-link, var(--app-accent-strong));
+  }
+
+  .battle-lite-link:hover {
+    color: var(--battle-lite-link-hover, var(--app-accent));
+    text-decoration: underline;
+  }
+
+  .battle-lite-info-box {
+    background: var(--battle-lite-info-bg, var(--app-surface-80));
+    border: 1px solid var(--battle-lite-info-border, var(--app-border-strong));
+    color: var(--battle-lite-info-text, var(--app-text));
+  }
+
+  .battle-lite-info-pill {
+    background: var(--battle-lite-info-pill-bg, var(--app-surface));
+    color: var(--battle-lite-info-pill-text, var(--app-text));
+  }
+
   .battle-lite-select-menu {
     background: var(--battle-lite-modal-bg, var(--app-surface-strong));
     border: 1px solid var(--battle-lite-subpanel-border, var(--app-border-strong));

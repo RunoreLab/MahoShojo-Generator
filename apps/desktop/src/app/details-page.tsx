@@ -1,14 +1,16 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Link } from '@tanstack/react-router';
-import { isLoopbackHost, type DirectProviderProfileV1 } from '@mahoshojo/contracts/provider-profile';
+import { getModelGenerationCapabilities } from '@mahoshojo/ai-core/generation-settings';
 import { getRandomFlowers } from '@mahoshojo/domain/flowers';
 import { getAnswerLimitInfo, isAnswerOverLimit } from '@mahoshojo/domain/questionnaire';
+import { AiExecutionLocationField, AdvancedGenerationSettings } from '@mahoshojo/ui-web/ai-provider';
 import { DETAILS_QUESTIONNAIRE_THEME, QuestionnaireQuestionPanel } from '@mahoshojo/ui-web/questionnaire';
 import { MagicalGirlResultBody } from '@mahoshojo/ui-web/character-result';
 import { DetailsSession } from '../features/details/session';
 import { buildDetailsAnswers, loadDefaultQuestionnaire, type DetailsQuestionnaire } from '../features/details/questionnaire';
-import { getProviderProfile, listProviderProfileIds } from '../platform/provider-profile-bridge';
+import { resolveDesktopAiTarget } from '../features/ai-config/desktop-ai-config';
+import { useDesktopAiConfig } from '../features/ai-config/use-desktop-ai-config';
 import { IpcLocalCardRepository } from '../platform/local-card-bridge';
 import { useLeaveGuard } from './useLeaveGuard';
 
@@ -16,13 +18,18 @@ const actionClass = 'rounded-lg border border-(--app-border) px-4 py-2 disabled:
 
 function DetailsForm({ session }: { session: DetailsSession }) {
   const state = useSyncExternalStore(session.subscribe, session.getSnapshot);
+  // AI 连接与执行位置与设置页共用同一份 overlay/profiles 状态（D5.0b）。
+  const { state: aiState, store: aiStore } = useDesktopAiConfig();
+  const target = resolveDesktopAiTarget(
+    aiState.selection,
+    aiState.profiles,
+    aiState.generationOverrides,
+  );
+  const profilesLoading = aiState.profilesState === 'idle' || aiState.profilesState === 'loading';
+  const profilesError = aiState.profilesState === 'failed' ? aiState.profilesError : null;
   const [questionnaire, setQuestionnaire] = useState<DetailsQuestionnaire | null>(null);
-  const [profiles, setProfiles] = useState<DirectProviderProfileV1[]>([]);
-  const [profileId, setProfileId] = useState('');
   const [questionnaireError, setQuestionnaireError] = useState<string | null>(null);
-  const [profilesError, setProfilesError] = useState<string | null>(null);
   const [questionnaireLoading, setQuestionnaireLoading] = useState(true);
-  const [profilesLoading, setProfilesLoading] = useState(true);
   const [reload, setReload] = useState(0);
   const [questionIndex, setQuestionIndex] = useState(0);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -48,27 +55,17 @@ function DetailsForm({ session }: { session: DetailsSession }) {
   );
   useEffect(() => {
     const controller = new AbortController();
-    setQuestionnaireLoading(true); setProfilesLoading(true);
-    setQuestionnaireError(null); setProfilesError(null);
+    setQuestionnaireLoading(true);
+    setQuestionnaireError(null);
     void loadDefaultQuestionnaire(controller.signal).then((questions) => {
       if (!controller.signal.aborted) setQuestionnaire(questions);
     }).catch(() => {
       if (!controller.signal.aborted) setQuestionnaireError('内置问卷加载失败，请重试。');
     }).finally(() => { if (!controller.signal.aborted) setQuestionnaireLoading(false); });
-    void listProviderProfileIds(invoke)
-      .then((ids) => Promise.all(ids.map((id) => getProviderProfile(invoke, id))))
-      .then((loaded) => {
-        if (controller.signal.aborted) return;
-        const available = loaded.filter((profile): profile is DirectProviderProfileV1 => profile !== null);
-        setProfiles(available);
-        setProfileId((previous) => available.some((profile) => profile.id === previous) ? previous : available[0]?.id ?? '');
-      }).catch(() => {
-        if (!controller.signal.aborted) setProfilesError('本地 Provider 配置加载失败，可以稍后重试。');
-      }).finally(() => { if (!controller.signal.aborted) setProfilesLoading(false); });
     return () => controller.abort();
   }, [reload]);
-  const selected = profiles.find((profile) => profile.id === profileId);
-  const mode = selected && isLoopbackHost(new URL(selected.baseUrl).hostname) ? 'direct-local' : 'direct-remote';
+  const selected = target.profile;
+  const mode = target.mode;
   const busy = state.phase === 'generating' || state.saving;
   const blockedDraft = state.pendingRestore || session.isDraftBlocked();
   // 写入失败仍允许编辑/重试；读取失败由 session 拒绝覆盖，页面明确要求清除。
@@ -79,14 +76,17 @@ function DetailsForm({ session }: { session: DetailsSession }) {
     session.updateDraft({ ...state.draft, answers: { ...state.draft.answers, [question.id]: value } });
   };
   const generate = (discardUnsavedResult = false) => {
-    if (!guard.ready || busy || !selected || selected.adapter !== 'openai-compatible' || !questionnaire || questionnaireLoading || profilesLoading || profilesError || questionnaireError || state.pendingRestore || session.isDraftBlocked()) return;
+    if (!guard.ready || busy || !selected || !mode || !questionnaire || questionnaireLoading || profilesLoading || profilesError || questionnaireError || state.pendingRestore || session.isDraftBlocked()) return;
     if (session.hasUnsavedResult() && !discardUnsavedResult) { setConfirmRegenerate(true); return; }
     try {
       const answers = buildDetailsAnswers(questionnaire, session.getSnapshot().draft.answers);
       setActionError(null);
-      void session.generate({ invoke, profileId: selected.id }, { answers, language: session.getSnapshot().draft.language, loreText: '' }, { mode, modelId: selected.modelId, flowers: getRandomFlowers() }, discardUnsavedResult);
+      void session.generate({ invoke, profileId: selected.id }, { answers, language: session.getSnapshot().draft.language, loreText: '' }, { mode, modelId: selected.modelId, flowers: getRandomFlowers(), overrides: target.generationOverrides }, discardUnsavedResult);
     } catch (error) { setActionError(error instanceof Error ? error.message : '问卷无法生成。'); }
   };
+  const targetCapabilities = selected
+    ? getModelGenerationCapabilities(selected.id, selected.modelId)
+    : undefined;
   return (
     <section data-testid="page-details" className="flex flex-col gap-5">
       <header>
@@ -115,22 +115,53 @@ function DetailsForm({ session }: { session: DetailsSession }) {
       {questionnaireError && <p role="alert">{questionnaireError}</p>}
       {profilesLoading && <p role="status">正在读取本地 Provider 配置…</p>}
       {profilesError && <p role="alert">{profilesError}</p>}
-      <button className={`${actionClass} self-start`} disabled={busy} onClick={() => setReload((value) => value + 1)}>重新加载问卷与配置</button>
+      <button className={`${actionClass} self-start`} disabled={busy} onClick={() => { setReload((value) => value + 1); void aiStore.refreshProfiles(); }}>重新加载问卷与配置</button>
       <fieldset disabled={busy || blockedDraft || questionnaireLoading || !guard.ready} className="flex min-w-0 flex-col gap-4">
         <legend className="mb-2 font-semibold">生成设置</legend>
-        <label className="flex flex-col gap-1">AI Provider
-          <select aria-label="AI Provider" className="w-full rounded border border-(--app-border) bg-(--app-surface) px-3 py-2 text-(--app-text)" value={profileId} onChange={(event) => setProfileId(event.target.value)}>
-            {!profiles.length && <option value="">尚无配置</option>}
-            {profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name} · {profile.modelId}{profile.adapter === 'openai-compatible' ? '' : ` · 当前客户端不支持 ${profile.adapter}`}</option>)}
+        <AiExecutionLocationField
+          value={target.location}
+          client={{
+            enabled: aiState.profiles.length > 0,
+            reason: '尚无可用连接：请先在设置中新增或复制一个连接',
+          }}
+          server={{ enabled: false, reason: '服务器执行将在接入在线能力后开放' }}
+          onChange={(location) => {
+            if (location === 'client' && aiState.profiles[0]) {
+              aiStore.selectConnection(aiState.profiles[0].id);
+            }
+          }}
+        />
+        <label className="flex flex-col gap-1">AI 连接
+          <select
+            aria-label="AI 连接"
+            className="w-full rounded border border-(--app-border) bg-(--app-surface) px-3 py-2 text-(--app-text)"
+            value={aiState.selection.kind === 'connection' ? aiState.selection.profileId : ''}
+            disabled={aiState.overlayState !== 'ready'}
+            onChange={(event) => { if (event.target.value) aiStore.selectConnection(event.target.value); }}
+          >
+            {aiState.selection.kind !== 'connection' && <option value="">未选择连接（当前为服务器策略）</option>}
+            {aiState.profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name} · {profile.modelId}</option>)}
           </select>
         </label>
-        {!profilesLoading && !profiles.length && !profilesError && <p>请先在<Link to="/settings" className="underline">设置</Link>中保存 Provider。问卷可以先填写，配置加载后再生成。</p>}
-        {selected && selected.adapter !== 'openai-compatible' && <p role="status">此配置使用 {selected.adapter} 适配器；当前桌面客户端尚不支持该适配器。请在设置中选择 OpenAI-compatible 配置后生成。</p>}
-        {selected && <div className="rounded border border-(--app-border) p-3">
-          <p>{mode === 'direct-local' ? 'Direct-local：发送到本机模型服务' : 'Direct-remote：发送到你指定的外部模型服务'}</p>
+        {!profilesLoading && !aiState.profiles.length && !profilesError && <p>请先在<Link to="/settings" className="underline">设置</Link>中保存 Provider。问卷可以先填写，配置加载后再生成。</p>}
+        {target.unavailableReason && <p role="status">{target.unavailableReason}</p>}
+        {selected && mode && <div className="rounded border border-(--app-border) p-3">
+          <p>{mode === 'direct-local' ? '客户端 · 本机：发送到本机模型服务' : '客户端 · 远端：发送到你指定的外部模型服务'}</p>
           <p className="break-all">接收方：{selected.baseUrl}</p>
           <p>模型：{selected.modelId}。点击生成会发送已填写的问卷回答；结果不带官方签名。</p>
         </div>}
+        {selected && <AdvancedGenerationSettings
+          value={target.generationOverrides}
+          onChange={(next) => aiStore.setGenerationOverrides(selected.id, selected.modelId, next)}
+          temperatureSupported={targetCapabilities ? targetCapabilities.temperature.support !== 'unsupported' : true}
+          temperatureMax={targetCapabilities?.temperature.max}
+          maxOutputTokensMax={targetCapabilities?.maxOutputTokens.max}
+          thinkingSupport={targetCapabilities?.thinking.support ?? 'unknown'}
+          thinkingEfforts={targetCapabilities?.thinking.efforts}
+          canDisableThinking={targetCapabilities
+            ? targetCapabilities.thinking.support === 'supported' && targetCapabilities.thinking.canDisable !== false
+            : true}
+        />}
         <label className="flex flex-col gap-1">输出语言
           <select aria-label="输出语言" className="w-full rounded border border-(--app-border) bg-(--app-surface) px-3 py-2 text-(--app-text)" value={state.draft.language} onChange={(event) => session.updateDraft({ ...state.draft, language: event.target.value })}>
             {['简体中文', '繁體中文', 'English', '日本語'].map((language) => <option key={language}>{language}</option>)}
@@ -147,7 +178,7 @@ function DetailsForm({ session }: { session: DetailsSession }) {
         />}
       </fieldset>
       <div className="flex flex-wrap gap-2">
-        <button className={actionClass} disabled={!guard.ready || busy || questionnaireLoading || profilesLoading || !questionnaire || !selected || selected.adapter !== 'openai-compatible' || blockedDraft || !!questionnaireError || !!profilesError} onClick={() => generate()}>{state.phase === 'generating' ? '正在生成…' : state.phase === 'idle' ? '发送问卷并生成' : '重新生成'}</button>
+        <button className={actionClass} disabled={!guard.ready || busy || questionnaireLoading || profilesLoading || !questionnaire || !selected || !mode || blockedDraft || !!questionnaireError || !!profilesError} onClick={() => generate()}>{state.phase === 'generating' ? '正在生成…' : state.phase === 'idle' ? '发送问卷并生成' : '重新生成'}</button>
         {state.phase === 'generating' && <button className={actionClass} onClick={() => session.cancel()}>取消生成</button>}
       </div>
       <dialog ref={regenerateDialog} aria-labelledby="regenerate-title" aria-describedby="regenerate-description" className="m-auto max-w-lg rounded-lg border border-(--app-border) bg-(--app-surface) p-5 text-(--app-text) backdrop:bg-black/40" onCancel={(event) => { event.preventDefault(); if (!session.isBusy()) setConfirmRegenerate(false); }}>

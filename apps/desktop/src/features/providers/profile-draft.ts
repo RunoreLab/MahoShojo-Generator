@@ -54,6 +54,11 @@ export interface ProfileDraft {
   name: string;
   baseUrl: string;
   modelId: string;
+  /**
+   * 非 loopback 明文 HTTP 的显式用户确认（`transport.allowPublicHttp`）。
+   * loopback 地址不需要；缺省按 schema 规则拒绝。
+   */
+  allowPublicHttp?: boolean;
   /** 明文。只在保存那一刻使用，不进入任何状态之外的持久化路径。 */
   apiKey?: string;
 }
@@ -99,6 +104,7 @@ export const buildProfile = (
     adapter: 'openai-compatible' as const,
     baseUrl: draft.baseUrl.trim(),
     modelId: draft.modelId.trim(),
+    ...(draft.allowPublicHttp === true ? { transport: { allowPublicHttp: true as const } } : {}),
     ...(draft.apiKey !== undefined && draft.apiKey.length > 0
       ? { apiKeyRef: deriveApiKeyRef(draft.id) }
       : {}),

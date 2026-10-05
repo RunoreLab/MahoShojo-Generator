@@ -8,6 +8,7 @@ import {
   parseStructuredJsonWithSchema,
 } from '@mahoshojo/ai-core/structured-json';
 import type { AiExecutionRequest, AiExecutionResult } from '@mahoshojo/contracts/ai-execution';
+import type { UserGenerationOverrides } from '@mahoshojo/ai-core/generation-settings';
 import { collectAiStreamResult, type AiStreamEvent } from '@mahoshojo/ai-core/stream-events';
 
 import {
@@ -20,6 +21,13 @@ export interface DetailsGenerationIntent {
   mode: 'direct-local' | 'direct-remote';
   flowers: string;
   modelId?: string;
+  /**
+   * 连接级高级生成设置（D5.0b 统一配置状态）。
+   * 逐项覆盖任务默认值。`thinking` 可持久化但当前不下发：native
+   * `AiExecutionRequest` 标了 `deny_unknown_fields` 且尚无 thinking 字段，
+   * 携带会让整次请求反序列化失败。
+   */
+  overrides?: UserGenerationOverrides;
 }
 
 type CompletedResult = Extract<AiExecutionResult, { status: 'completed' }>;
@@ -58,7 +66,10 @@ export const executeDetailsGeneration = async (
       { role: 'system', content: `${config.systemPrompt}\n\n${buildStructuredJsonInstructionFromZodSchema(config.schema)}` },
       { role: 'user', content: config.promptBuilder(snapshot) },
     ],
-    temperature: config.temperature,
+    temperature: intent.overrides?.temperature ?? config.temperature,
+    ...(intent.overrides?.maxOutputTokens !== undefined
+      ? { maxOutputTokens: intent.overrides.maxOutputTokens }
+      : {}),
     // schema 指令与解析复用 Hosted 的 text JSON 路径，无二次 Provider 修复或自动回退。
     responseFormat: 'text',
   };

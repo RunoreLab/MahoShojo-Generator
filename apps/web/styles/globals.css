@@ -456,28 +456,10 @@ body.announcement-visible {
 
   /*
    * `.battle-lite-strong-text` / `-muted-text` / `-subtle-text` / `-accent-box` /
-   * `-select-menu` / `-select-option(-active)` 与 `.input-group/-label/-field`
-   * 已上移至 `@mahoshojo/ui-web/styles.css`（D5.0b 共源选择器底座）。
+   * `-link` / `-info-box` / `-info-pill` / `-select-menu` / `-select-option(-active)`
+   * 与 `.input-group/-label/-field` 已上移至 `@mahoshojo/ui-web/styles.css`
+   *（D5.0b 共源选择器/连接面板底座）。
    */
-  .battle-lite-link {
-    color: var(--battle-lite-link, var(--app-accent-strong));
-  }
-
-  .battle-lite-link:hover {
-    color: var(--battle-lite-link-hover, var(--app-accent));
-    text-decoration: underline;
-  }
-
-  .battle-lite-info-box {
-    background: var(--battle-lite-info-bg, var(--app-surface-80));
-    border: 1px solid var(--battle-lite-info-border, var(--app-border-strong));
-    color: var(--battle-lite-info-text, var(--app-text));
-  }
-
-  .battle-lite-info-pill {
-    background: var(--battle-lite-info-pill-bg, var(--app-surface));
-    color: var(--battle-lite-info-pill-text, var(--app-text));
-  }
 
   .battle-lite-danger-button {
     border: 1px solid var(--battle-lite-danger-border, var(--app-border-strong));

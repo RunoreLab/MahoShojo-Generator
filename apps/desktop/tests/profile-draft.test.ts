@@ -96,6 +96,19 @@ describe('buildProfile', () => {
     expect(() => buildProfile(draft({ baseUrl: PRESET_OLLAMA.baseUrl }), now)).not.toThrow();
     expect(() => buildProfile(draft({ baseUrl: PRESET_LM_STUDIO.baseUrl }), now)).not.toThrow();
   });
+
+  it('records explicit user confirmation for non-loopback plaintext HTTP', () => {
+    const profile = buildProfile(
+      draft({ baseUrl: 'http://203.0.113.10:8080/v1', allowPublicHttp: true }),
+      now,
+    );
+    expect(DirectProviderProfileV1Schema.safeParse(profile).success).toBe(true);
+    expect(profile.transport).toEqual({ allowPublicHttp: true });
+
+    expect(() => buildProfile(draft({ baseUrl: 'http://203.0.113.10:8080/v1' }), now)).toThrow(
+      ProfileDraftError,
+    );
+  });
 });
 
 const isValidSecretRefFor = (ref: string): boolean =>

@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildUnsignedMagicalGirlDetailsCard } from '@mahoshojo/ai-core/magical-girl-details-generation';
 import type { DetailsGenerationOutcome } from '../src/features/details/generation';
 import { DETAILS_DRAFT_KEY } from '../src/features/details/session';
+import { resetDesktopAiConfigStoreForTests } from '../src/features/ai-config/use-desktop-ai-config';
 import { createDesktopRouter } from '../src/app/router';
 
 const mocks = vi.hoisted(() => ({ execute: vi.fn(), save: vi.fn(), listen: vi.fn(), profiles: vi.fn() }));
@@ -36,6 +37,7 @@ const draft = () => ({ version: 1, answers: { [questionnaire.questions[0].id]: '
 beforeEach(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   vi.clearAllMocks(); window.localStorage.clear();
+  resetDesktopAiConfigStoreForTests();
   mocks.profiles.mockResolvedValue({ id: 'local', name: '本地模型', adapter: 'openai-compatible', baseUrl: 'http://127.0.0.1:11434/v1', modelId: 'model' });
   mocks.execute.mockResolvedValue(completed); mocks.save.mockResolvedValue({ written: true });
   mocks.listen.mockImplementation(async (handler) => { close = handler; return vi.fn(); });
@@ -180,7 +182,7 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
     mocks.profiles.mockResolvedValue({ id: 'local', name: '外部模型', adapter: 'openai-compatible', baseUrl: 'https://model.example/v1', modelId: 'model' });
     window.localStorage.setItem(DETAILS_DRAFT_KEY, JSON.stringify({ ...draft(), output: { mode: 'direct-remote', phase: 'cancelled', card: null, rawText: '上次中断' } }));
     await mount(); await click('恢复草稿');
-    expect(container.textContent).toContain('Direct-remote');
+    expect(container.textContent).toContain('客户端 · 远端');
     expect(container.textContent).toContain('https://model.example/v1');
     expect(container.querySelector('pre')?.textContent).toBe('上次中断');
     expect(mocks.execute).not.toHaveBeenCalled();
@@ -204,8 +206,8 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
   it('loads and shows unsupported adapters instead of hiding them', async () => {
     mocks.profiles.mockResolvedValue({ id: 'local', name: 'Anthropic profile', adapter: 'anthropic', baseUrl: 'https://model.example/v1', modelId: 'model' });
     await mount();
-    expect(container.querySelector('select[aria-label="AI Provider"]')?.textContent).toContain('当前客户端不支持 anthropic');
-    expect(container.textContent).toContain('当前桌面客户端尚不支持该适配器');
+    expect(container.querySelector('select[aria-label="AI 连接"]')?.textContent).toContain('Anthropic profile');
+    expect(container.textContent).toContain('当前客户端尚未实现 anthropic 适配器');
     expect(button('发送问卷并生成').disabled).toBe(true);
   });
 
