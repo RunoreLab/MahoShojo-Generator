@@ -130,7 +130,13 @@ function DetailsForm({ session }: { session: DetailsSession }) {
             className="w-full rounded border border-(--app-border) bg-(--app-surface) px-3 py-2 text-(--app-text)"
             value={aiState.selection.clientConnectionId ?? ''}
             disabled={aiState.overlayState !== 'ready'}
-            onChange={(event) => { if (event.target.value) aiStore.selectConnection(event.target.value); }}
+            onChange={(event) => {
+              // 生成入口选连接=立即用它执行：两个维度一起显式落定。
+              if (event.target.value) {
+                aiStore.selectClientConnection(event.target.value);
+                aiStore.selectExecutionLocation('client');
+              }
+            }}
           >
             {aiState.selection.clientConnectionId === null && <option value="">未选择连接</option>}
             {aiState.profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name} · {profile.modelId}</option>)}

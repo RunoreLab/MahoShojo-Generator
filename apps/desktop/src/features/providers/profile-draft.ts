@@ -27,7 +27,8 @@ import {
  *
  * - secret 引用在保存前就按凭据目标名规则校验，避免写进库才发现不可用；
  * - 明文只在录入那一刻经过这里，随后立即交给 native 写入操作系统凭据存储，**永不**回读；
- * - 先写凭据再存 Profile：反过来的话会出现"Profile 已存在但凭据缺失"的坏状态。
+ * - 保存走 staged secretRef：先把候选 Profile（指向一次性 ref）过 native 校验，
+ *   再写凭据、最后落盘；任一失败删除 staged ref 回滚，不留孤儿引用或半成品凭据。
  */
 
 export const PRESET_OLLAMA = {
@@ -134,22 +135,26 @@ export const saveProfileDraft = async (
   draft: ProfileDraft,
   now?: () => string,
 ): Promise<SaveProfileOutcome> => {
-  const profile = buildProfile(draft, now);
+  const built = buildProfile(draft, now);
   const secretWritten = draft.apiKey !== undefined && draft.apiKey.length > 0;
+  // staged secretRef：候选 Profile 指向一次性凭据名，校验、写凭据、落盘依次进行；
+  // save_provider_profile 失败时删掉 staged ref，旧 Profile + 旧凭据原样不动。
+  // ref 不带长 profileId，避免撞凭据目标名的 256 字符上限。
+  const stagedRef = secretWritten ? `provider-key:${crypto.randomUUID()}` : undefined;
+  const profile = stagedRef !== undefined ? { ...built, apiKeyRef: stagedRef } : built;
 
-  // 顺序：先让 native 校验 Profile（含投影回显），再写凭据，最后落盘。
-  // 凭据先于 Profile 落盘保证不会留下"引用存在但取不到值"的 Profile；
-  // 校验先于凭据写入保证校验失败不会悄悄改掉旧连接正在使用的 Key。
-  await validateProviderExecutionProfile(tauriInvoke, profile);
-  if (secretWritten) {
-    await setProviderSecret(
-      tauriInvoke,
-      profile.apiKeyRef as string,
-      draft.apiKey as string,
-    );
+  try {
+    await validateProviderExecutionProfile(tauriInvoke, profile);
+    if (stagedRef !== undefined) {
+      await setProviderSecret(tauriInvoke, stagedRef, draft.apiKey as string);
+    }
+    await saveProviderProfile(tauriInvoke, profile);
+  } catch (cause) {
+    if (stagedRef !== undefined) {
+      await deleteProviderSecret(tauriInvoke, stagedRef).catch(() => undefined);
+    }
+    throw cause;
   }
-
-  await saveProviderProfile(tauriInvoke, profile);
   return { profile, secretWritten };
 };
 

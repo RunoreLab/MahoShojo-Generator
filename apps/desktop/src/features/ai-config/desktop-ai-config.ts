@@ -41,6 +41,15 @@ export const DESKTOP_DIRECT_ADAPTERS: ReadonlySet<DirectProviderAdapter> = new S
 ]);
 
 /**
+ * 简化连接编辑器能表达的 adapter 集合——**独立于** `DESKTOP_DIRECT_ADAPTERS`。
+ * 「native 能执行什么」与「编辑器能编辑什么」是两件事：native 将来新增 adapter 后
+ * 不能让旧 Profile 自动变成可编辑（编辑器会静默改写 adapter 字段）。
+ */
+export const DESKTOP_EDITABLE_PROFILE_ADAPTERS: ReadonlySet<DirectProviderAdapter> = new Set([
+  'openai-compatible',
+]);
+
+/**
  * 用户当前的 AI 执行偏好。
  *
  * 执行位置与客户端连接是**正交**的两个维度（DESK-ONLINE-001/002）：
@@ -105,7 +114,11 @@ export const parseDesktopAiConfigOverlay = (raw: string): DesktopAiConfigOverlay
   ) {
     throw new Error('AI 配置的隐藏预设列表损坏');
   }
-  const overrides: Record<string, Record<string, UserGenerationOverrides>> = {};
+  // 字典一律 null-prototype：profileId/modelId 都可能合法地是 "__proto__"
+  // 这类标识符，普通对象上的 `record[key] = value` 会走原型 setter 造成污染或
+  // 静默丢数据。仓库的 GenerationDefaultKeySchema 已采用同一防动态键原则。
+  const overrides: Record<string, Record<string, UserGenerationOverrides>> =
+    Object.create(null) as Record<string, Record<string, UserGenerationOverrides>>;
   if (value.generationOverrides !== undefined) {
     if (!isObject(value.generationOverrides)) {
       throw new Error('AI 配置的生成覆盖损坏');
@@ -114,7 +127,7 @@ export const parseDesktopAiConfigOverlay = (raw: string): DesktopAiConfigOverlay
       if (profileId.trim().length === 0 || !isObject(modelMap)) {
         throw new Error('AI 配置的生成覆盖损坏');
       }
-      const entries: Record<string, UserGenerationOverrides> = {};
+      const entries = Object.create(null) as Record<string, UserGenerationOverrides>;
       for (const [modelId, entry] of Object.entries(modelMap)) {
         const parsed = UserGenerationOverridesSchema.safeParse(entry);
         if (!parsed.success) {

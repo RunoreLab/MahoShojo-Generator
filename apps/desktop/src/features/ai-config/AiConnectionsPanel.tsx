@@ -28,7 +28,7 @@ import {
 } from '../providers/profile-draft';
 
 import {
-  DESKTOP_DIRECT_ADAPTERS,
+  DESKTOP_EDITABLE_PROFILE_ADAPTERS,
   describeDesktopPresetModelSupport,
   listDesktopPresetEntries,
   resolveDesktopAiTarget,
@@ -221,29 +221,31 @@ const secretStatusLabel = (
 
 const ConnectionRow = ({
   profile,
-  selected,
+  referenced,
   secretStatus,
   onSelect,
   onEdit,
   onDelete,
 }: {
   profile: DirectProviderProfileV1;
-  selected: boolean;
+  /** 该 Profile 是否为记忆里选中的客户端连接（与当前执行位置无关）。 */
+  referenced: boolean;
   secretStatus: DesktopSecretPresence | undefined;
   onSelect: () => void;
   onEdit: () => void;
   onDelete: () => void;
 }) => {
   const [confirming, setConfirming] = useState(false);
-  // 简化编辑器只表达 openai-compatible；其他 adapter 的旧 Profile 只读展示，
-  // 避免保存时把 adapter 静默改写（DESK-ONLINE-003/004）。
-  const editable = DESKTOP_DIRECT_ADAPTERS.has(profile.adapter);
+  // 编辑器 capability 独立于执行 capability：简化编辑器只表达
+  // openai-compatible，其他 adapter 的旧 Profile 只读展示，避免保存时把
+  // adapter 静默改写（DESK-ONLINE-003/004）。
+  const editable = DESKTOP_EDITABLE_PROFILE_ADAPTERS.has(profile.adapter);
   return (
     <li className="flex flex-col gap-1 rounded-lg border border-(--app-border) p-3 text-sm">
       <div className="flex flex-wrap items-center gap-2">
         <span className="battle-lite-strong-text font-semibold">{profile.name}</span>
-        {selected && (
-          <span className="battle-lite-info-pill rounded px-1.5 py-0.5 text-xs">当前使用</span>
+        {referenced && (
+          <span className="battle-lite-info-pill rounded px-1.5 py-0.5 text-xs">当前客户端连接</span>
         )}
         <span className="battle-lite-subtle-text ml-auto text-xs">
           {secretStatusLabel(secretStatus, profile.apiKeyRef !== undefined)}
@@ -253,7 +255,7 @@ const ConnectionRow = ({
         {profile.baseUrl} · {profile.modelId} · {profile.adapter}
       </p>
       <div className="flex flex-wrap gap-2 text-xs">
-        {!selected && (
+        {!referenced && (
           <button type="button" className="battle-lite-link underline" onClick={onSelect}>
             设为当前
           </button>
@@ -269,6 +271,11 @@ const ConnectionRow = ({
         )}
         {confirming ? (
           <>
+            {referenced && (
+              <p className="battle-lite-subtle-text basis-full text-xs">
+                此连接是当前保存的客户端连接，删除后客户端连接将变为「未选择」，不会自动切换其他供应商。
+              </p>
+            )}
             <button
               type="button"
               className="text-(--app-accent-strong) underline"
@@ -388,6 +395,8 @@ const ConnectionsPanelBody = ({ aiConfig }: { aiConfig: UseDesktopAiConfigResult
     | { status: 'failed'; message: string }
   >({ status: 'idle' });
   const testAbortRef = useRef<AbortController | null>(null);
+  // run identity：切换目标时 revision++，旧 run 的迟到终态不得再写 UI。
+  const testRevisionRef = useRef(0);
 
   const target = resolveDesktopAiTarget(
     state.selection,
@@ -428,9 +437,12 @@ const ConnectionsPanelBody = ({ aiConfig }: { aiConfig: UseDesktopAiConfigResult
     const profile = target.profile;
     const mode = target.mode;
     if (!profile || !mode || testState.status === 'running') return;
+    const revision = ++testRevisionRef.current;
     setTestState({ status: 'running' });
     const controller = new AbortController();
     testAbortRef.current = controller;
+    // 目标已切换时迟到的结果直接丢弃——新旧目标之间的状态不串台。
+    const isCurrentRun = () => revision === testRevisionRef.current;
     try {
       const result = await createDesktopAiExecutionPort({
         invoke,
@@ -445,6 +457,7 @@ const ConnectionsPanelBody = ({ aiConfig }: { aiConfig: UseDesktopAiConfigResult
         },
         controller.signal,
       );
+      if (!isCurrentRun()) return;
       setTestState(
         result.status === 'completed'
           ? { status: 'done', text: result.output.text ?? '' }
@@ -453,6 +466,7 @@ const ConnectionsPanelBody = ({ aiConfig }: { aiConfig: UseDesktopAiConfigResult
             : { status: 'failed', message: result.error.message ?? result.error.code },
       );
     } catch (cause) {
+      if (!isCurrentRun()) return;
       setTestState(
         controller.signal.aborted
           ? { status: 'cancelled' }
@@ -481,10 +495,17 @@ const ConnectionsPanelBody = ({ aiConfig }: { aiConfig: UseDesktopAiConfigResult
   const testTargetId = target.profile?.id ?? null;
   const testTargetModel = target.profile?.modelId ?? null;
   useEffect(() => {
+    testRevisionRef.current += 1;
     testAbortRef.current?.abort();
     setTestState({ status: 'idle' });
   }, [testTargetId, testTargetModel]);
-  useEffect(() => () => testAbortRef.current?.abort(), []);
+  useEffect(
+    () => () => {
+      testRevisionRef.current += 1;
+      testAbortRef.current?.abort();
+    },
+    [],
+  );
 
   const blockedOverlay = state.overlayState === 'blocked';
 
@@ -527,7 +548,11 @@ const ConnectionsPanelBody = ({ aiConfig }: { aiConfig: UseDesktopAiConfigResult
             disabled={blockedOverlay}
             value={state.selection.clientConnectionId ?? ''}
             onChange={(event) => {
-              if (event.target.value) store.selectConnection(event.target.value);
+              // 「当前连接」下拉=立即用它执行：连接选择与执行位置一起显式落定。
+              if (event.target.value) {
+                store.selectClientConnection(event.target.value);
+                store.selectExecutionLocation('client');
+              }
             }}
           >
             {state.selection.clientConnectionId === null && (
@@ -680,12 +705,13 @@ const ConnectionsPanelBody = ({ aiConfig }: { aiConfig: UseDesktopAiConfigResult
             <ConnectionRow
               key={profile.id}
               profile={profile}
-              selected={
-                state.selection.executionPreference === 'client' &&
-                state.selection.clientConnectionId === profile.id
-              }
+              referenced={state.selection.clientConnectionId === profile.id}
               secretStatus={state.secretStatus[profile.id]}
-              onSelect={() => store.selectConnection(profile.id)}
+              onSelect={() => {
+                // 「设为当前」明确含义是立即用它执行。
+                store.selectClientConnection(profile.id);
+                store.selectExecutionLocation('client');
+              }}
               onEdit={() =>
                 setEditing({ draft: draftFromProfile(profile), presetModels: null, isExisting: true })
               }

@@ -86,7 +86,11 @@ const clientSelection = (profileId: string | null) => ({
 /** 按真实 bridge 的 IPC 形状模拟 native：投影回显 + opaque 文档存取 + 只写凭据库。 */
 const createNativeStub = (
   initial: DirectProviderProfileV1[] = [],
-  options: { failSecretProbe?: boolean; failValidation?: boolean } = {},
+  options: {
+    failSecretProbe?: boolean;
+    failValidation?: boolean;
+    failProfileSave?: boolean;
+  } = {},
 ) => {
   const profiles = new Map(initial.map((profile) => [profile.id, profile]));
   const secrets = new Set<string>();
@@ -104,6 +108,9 @@ const createNativeStub = (
         }
         return args?.document;
       case 'save_provider_profile': {
+        if (options.failProfileSave) {
+          throw { code: 'store-failure', message: 'disk full' };
+        }
         const document = args?.document as DirectProviderProfileV1;
         profiles.set(document.id, document);
         return undefined;
@@ -367,7 +374,7 @@ describe('DesktopAiConfigStore', () => {
     const store = createStore(storage, native.invoke);
     store.init();
     await vi.waitFor(() => expect(store.getSnapshot().profilesState).toBe('ready'));
-    store.selectConnection('p_local');
+    store.selectClientConnection('p_local');
     expect(store.getSnapshot().selection).toEqual(clientSelection('p_local'));
 
     store.selectExecutionLocation('server');
@@ -380,6 +387,19 @@ describe('DesktopAiConfigStore', () => {
     expect(store.getSnapshot().selection).toEqual(clientSelection('p_local'));
   });
 
+  it('selectClientConnection does not flip an explicit server preference', () => {
+    const store = createStore();
+    store.init();
+
+    store.selectExecutionLocation('server');
+    store.selectClientConnection('p_local');
+    // 选择客户端连接与执行位置正交：服务器偏好不被偷改（D5.0c 开放后有现实意义）。
+    expect(store.getSnapshot().selection).toEqual({
+      executionPreference: 'server',
+      clientConnectionId: 'p_local',
+    });
+  });
+
   it('blocks on corrupt overlay: refuses writes until explicit reset', async () => {
     const storage = createStorage();
     storage.setItem(DESKTOP_AI_CONFIG_STORAGE_KEY, '{broken');
@@ -388,7 +408,7 @@ describe('DesktopAiConfigStore', () => {
     store.init();
 
     expect(store.getSnapshot().overlayState).toBe('blocked');
-    store.selectConnection('p_local');
+    store.selectClientConnection('p_local');
     store.selectExecutionLocation('server');
     store.hidePreset('deepseek');
     expect(store.getSnapshot().selection).toEqual(clientSelection(null));
@@ -440,8 +460,9 @@ describe('DesktopAiConfigStore', () => {
     expect(validateIndex).toBeGreaterThanOrEqual(0);
     expect(validateIndex).toBeLessThan(secretIndex);
     expect(secretIndex).toBeLessThan(saveIndex);
-    // 写入的是凭据目标名，Profile 内只有 apiKeyRef。
-    expect(native.profiles.get('p_new')?.apiKeyRef).toBe('provider:p_new:api-key');
+    // 写入的是 staged 凭据目标名（一次性 ref），Profile 内只有 apiKeyRef。
+    expect(native.profiles.get('p_new')?.apiKeyRef).toMatch(/^provider-key:[0-9a-f-]{36}$/u);
+    expect(native.secrets.has(native.profiles.get('p_new')!.apiKeyRef!)).toBe(true);
     expect(JSON.stringify(native.profiles.get('p_new'))).not.toContain('sk-secret');
     expect(storage.data.get(DESKTOP_AI_CONFIG_STORAGE_KEY)!).not.toContain('sk-secret');
     // 保存后自动选中。
@@ -470,6 +491,54 @@ describe('DesktopAiConfigStore', () => {
     expect(native.calls).toContain('validate_provider_execution_profile');
     expect(native.calls).not.toContain('set_provider_secret');
     expect(native.profiles.get('p_local')?.name).toBe('本地模型');
+  });
+
+  it('save_provider_profile failure leaves the old profile and credential untouched', async () => {
+    // staged secretRef 的核心回归：Profile 落盘失败不得让旧 Profile 静默换用新 Key。
+    const storage = createStorage();
+    const native = createNativeStub([profileFixture()], { failProfileSave: true });
+    native.secrets.add('provider:p_local:api-key');
+    const store = createStore(storage, native.invoke);
+    store.init();
+    await vi.waitFor(() => expect(store.getSnapshot().profilesState).toBe('ready'));
+
+    await expect(
+      store.saveConnection({
+        id: 'p_local',
+        name: '改名',
+        baseUrl: 'http://127.0.0.1:11434/v1',
+        modelId: 'qwen3:8b',
+        apiKey: 'sk-new-key',
+      }),
+    ).rejects.toThrow();
+
+    const persisted = native.profiles.get('p_local')!;
+    expect(persisted.name).toBe('本地模型');
+    expect(persisted.apiKeyRef).toBe('provider:p_local:api-key');
+    // staged ref 已回滚删除，凭据库只剩旧 ref——旧 Profile 仍指向旧凭据。
+    expect([...native.secrets]).toEqual(['provider:p_local:api-key']);
+    expect(native.calls).toContain('delete_provider_secret');
+  });
+
+  it('new-connection save failure leaves no orphan credential behind', async () => {
+    const storage = createStorage();
+    const native = createNativeStub([], { failProfileSave: true });
+    const store = createStore(storage, native.invoke);
+    store.init();
+    await vi.waitFor(() => expect(store.getSnapshot().profilesState).toBe('ready'));
+
+    await expect(
+      store.saveConnection({
+        id: 'p_new',
+        name: '新连接',
+        baseUrl: 'http://127.0.0.1:1234/v1',
+        modelId: 'm',
+        apiKey: 'sk-orphan-risk',
+      }),
+    ).rejects.toThrow();
+
+    expect(native.profiles.size).toBe(0);
+    expect(native.secrets.size).toBe(0);
   });
 
   it('refuses to edit a legacy profile whose adapter the editor cannot express', async () => {
@@ -550,7 +619,7 @@ describe('DesktopAiConfigStore', () => {
     const store = createStore(createStorage(), native.invoke);
     store.init();
     await vi.waitFor(() => expect(store.getSnapshot().profilesState).toBe('ready'));
-    store.selectConnection('p_local');
+    store.selectClientConnection('p_local');
 
     await store.deleteConnection('p_local');
 
@@ -611,6 +680,43 @@ describe('DesktopAiConfigStore', () => {
     });
     store.setGenerationOverrides('p_local', 'qwen3:8b::vision', undefined);
     expect(store.getSnapshot().generationOverrides).toEqual({});
+  });
+
+  it('round-trips overrides for keys like __proto__ without prototype pollution', async () => {
+    // JS 原型键是合法 profileId/modelId：字典必须按 own-property 语义存取。
+    const storage = createStorage();
+    const protoProfile = profileFixture({ id: '__proto__', modelId: '__proto__' });
+    const store = createStore(storage, createNativeStub([protoProfile]).invoke);
+    store.init();
+    await vi.waitFor(() => expect(store.getSnapshot().profilesState).toBe('ready'));
+
+    store.setGenerationOverrides('__proto__', '__proto__', { temperature: 0.7 });
+    const stored = store.getSnapshot().generationOverrides;
+    expect(Object.getPrototypeOf(stored)).toBeNull();
+    expect(Object.keys(stored)).toEqual(['__proto__']);
+    expect(stored['__proto__']?.['__proto__']).toEqual({ temperature: 0.7 });
+    // 落盘 JSON 里 __proto__ 是真实 own property（注意 {__proto__: x} 字面量是
+    // 原型 setter 语义，不能拿它做期望值——这里逐层读 own property 断言）。
+    const persisted = JSON.parse(storage.data.get(DESKTOP_AI_CONFIG_STORAGE_KEY)!)
+      .generationOverrides as Record<string, Record<string, unknown>>;
+    expect(Object.keys(persisted)).toEqual(['__proto__']);
+    expect(Object.keys(persisted['__proto__']!)).toEqual(['__proto__']);
+    expect(persisted['__proto__']!['__proto__']).toEqual({ temperature: 0.7 });
+
+    // 重启读取不丢数据、不污染原型。
+    const reopened = createStore(storage, createNativeStub([protoProfile]).invoke);
+    reopened.init();
+    await vi.waitFor(() => expect(reopened.getSnapshot().profilesState).toBe('ready'));
+    expect(reopened.getSnapshot().generationOverrides['__proto__']?.['__proto__']).toEqual({
+      temperature: 0.7,
+    });
+    expect(
+      resolveDesktopAiTarget(
+        clientSelection('__proto__'),
+        reopened.getSnapshot().profiles,
+        reopened.getSnapshot().generationOverrides,
+      ).generationOverrides,
+    ).toEqual({ temperature: 0.7 });
   });
 
   it('never issues a secret-read command: only set/has/delete exist', async () => {

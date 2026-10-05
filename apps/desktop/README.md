@@ -47,11 +47,15 @@ MahoShojo Generator 的本地桌面客户端 runtime。它是独立 app，不是
   不含 headers/defaults/transport，持久化权威始终是完整 Profile；端点相同不会把
   自定义连接认领为预设（不提供端点到预设的匹配 API）。
 - **D5.0b** Web 选择器已共源到 `@mahoshojo/ui-web/ai-provider` 并由 Web 薄封装回用；
-  Desktop 侧 `features/ai-config` 落地统一配置层：overlay（当前选择/隐藏预设/按
-  `profileId::modelId` 的生成覆盖，fail-closed 持久化到 localStorage）+
+  Desktop 侧 `features/ai-config` 落地统一配置层：overlay（执行位置偏好
+  `executionPreference` 与客户端连接 `clientConnectionId` 正交、隐藏预设、按
+  `profileId → modelId` 嵌套的生成覆盖，fail-closed 持久化到 localStorage）+
   Profile 列表/凭据存在性的单一 store，设置页 `AiConnectionsPanel` 与 `/details`
-  生成入口消费同一份 `resolveDesktopAiTarget` 结果。预设只作复制模板，
-  `DESKTOP_DIRECT_ADAPTERS = { openai-compatible }` 是唯一的宿主能力注入点。
+  生成入口消费同一份 `resolveDesktopAiTarget` 结果。预设只作复制模板；
+  悬空连接保留 ID 交由解析层诊断、不静默 fallback；凭据更新走 staged
+  secretRef 事务，Profile 落盘失败不会让旧配置静默换用新 Key。
+  `DESKTOP_DIRECT_ADAPTERS = { openai-compatible }` 是宿主执行能力注入点，
+  编辑器可表达能力由独立的 `DESKTOP_EDITABLE_PROFILE_ADAPTERS` 决定。
 
 ## 权威边界
 

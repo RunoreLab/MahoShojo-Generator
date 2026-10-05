@@ -28,12 +28,12 @@ import {
 import {
   ProfileDraftError,
   buildProfile,
-  deriveApiKeyRef,
   type ProfileDraft,
 } from '../providers/profile-draft';
 
 import {
   DESKTOP_AI_CONFIG_DEFAULT_OVERLAY,
+  DESKTOP_EDITABLE_PROFILE_ADAPTERS,
   parseDesktopAiConfigOverlay,
   serializeDesktopAiConfigOverlay,
   type DesktopAiConfigOverlay,
@@ -118,7 +118,12 @@ export class DesktopAiConfigStore {
     this.publish({
       selection: this.overlay.selection,
       hiddenPresetIds: new Set(this.overlay.hiddenPresetIds),
-      generationOverrides: { ...this.overlay.generationOverrides },
+      // 字典保持 null-prototype：profileId/modelId 可能是 "__proto__" 这类合法
+      // 标识符，普通对象消费它们时会碰到原型语义。
+      generationOverrides: Object.assign(
+        Object.create(null) as Record<string, Record<string, UserGenerationOverrides>>,
+        this.overlay.generationOverrides,
+      ),
     });
   }
 
@@ -244,12 +249,18 @@ export class DesktopAiConfigStore {
     this.publishOverlay();
   };
 
-  /** 选择一条客户端连接；同时把执行偏好落到 client——选中即表示要用它执行。 */
-  selectConnection = (profileId: string): void => {
+  /**
+   * 只改记忆里的客户端连接，**不**顺带切换执行位置。
+   * 「选一条连接准备给客户端用」与「现在用客户端执行」是两件事：
+   * 服务器偏好下编辑/选择连接不应偷改执行偏好（D5.0c 开放 server 后才有
+   * 现实意义，但解耦现在就冻结进 API）。UI 上「设为当前」这类明确含义
+   * 「立即用它执行」的操作，应同时再调 `selectExecutionLocation('client')`。
+   */
+  selectClientConnection = (profileId: string): void => {
     if (!this.overlayWritable) return;
     this.overlay = {
       ...this.overlay,
-      selection: { executionPreference: 'client', clientConnectionId: profileId },
+      selection: { ...this.overlay.selection, clientConnectionId: profileId },
     };
     this.persistOverlay();
     this.publishOverlay();
@@ -290,9 +301,18 @@ export class DesktopAiConfigStore {
     overrides: UserGenerationOverrides | undefined,
   ): void => {
     if (!this.overlayWritable) return;
-    const next = { ...this.overlay.generationOverrides };
+    // null-prototype 字典：profileId/modelId 允许任意合法标识符（含 "__proto__"），
+    // 直接往普通对象写 untrustedKey 会走原型 setter。computed key 的 {...} literal
+    // 与 Object.assign 往 null-proto 目标写入均为 own-property 语义。
+    const next = Object.assign(
+      Object.create(null) as Record<string, Record<string, UserGenerationOverrides>>,
+      this.overlay.generationOverrides,
+    );
     if (overrides === undefined) {
-      const models = { ...(next[profileId] ?? {}) };
+      const models = Object.assign(
+        Object.create(null) as Record<string, UserGenerationOverrides>,
+        next[profileId],
+      );
       delete models[modelId];
       if (Object.keys(models).length === 0) {
         delete next[profileId];
@@ -300,7 +320,11 @@ export class DesktopAiConfigStore {
         next[profileId] = models;
       }
     } else {
-      next[profileId] = { ...(next[profileId] ?? {}), [modelId]: overrides };
+      next[profileId] = Object.assign(
+        Object.create(null) as Record<string, UserGenerationOverrides>,
+        next[profileId],
+        { [modelId]: overrides },
+      );
     }
     this.overlay = { ...this.overlay, generationOverrides: next };
     this.persistOverlay();
@@ -308,20 +332,27 @@ export class DesktopAiConfigStore {
   };
 
   /**
-   * 保存连接草稿：先做 native 校验，再写凭据，最后落 Profile（顺序与
-   * `saveProfileDraft` 注释一致），随后刷新列表。`ProfileDraftError.field` 供 UI
-   * 定位失败字段。
+   * 保存连接草稿：`ProfileDraftError.field` 供 UI 定位失败字段。
    *
    * 编辑既有连接时保留编辑器不管理的字段：未提供新明文就沿用旧 `apiKeyRef`，
    * `createdAt` 与编辑器未暴露的 header/默认参数也不被静默清掉。
+   *
+   * 带新 Key 的保存走 **staged secretRef** 事务：
+   *   validate(带新 ref 的候选) → set(新 ref, 明文) → save(候选)
+   *   ├─ 任一步失败：删除新 ref 回滚，旧 Profile + 旧凭据完全不受影响；
+   *   └─ 成功：删除旧 ref。
+   * 若直接往旧 `apiKeyRef` 写新 Key，`save_provider_profile` 失败会让旧 Profile
+   * 静默开始使用新凭据；staged ref 即使回滚清理也失败，最多只留下一个没有任何
+   * Profile 引用的孤儿 secret。ref 不拼长 profileId，避免撞 256 字符上限。
    */
   saveConnection = async (draft: ProfileDraft): Promise<void> => {
     this.publish({ savingConnection: true });
     try {
       const existing = this.state.profiles.find((item) => item.id === draft.id);
-      // 简化编辑器只表达 openai-compatible；其他 adapter 的旧 Profile 只读展示，
-      // 不得借保存把 adapter 静默改写（DESK-ONLINE-003/004）。
-      if (existing && existing.adapter !== 'openai-compatible') {
+      // 编辑器 capability 独立于执行 capability：简化编辑器只表达
+      // openai-compatible，其他 adapter 的旧 Profile 只读展示，不得借保存把
+      // adapter 静默改写（DESK-ONLINE-003/004）。
+      if (existing && !DESKTOP_EDITABLE_PROFILE_ADAPTERS.has(existing.adapter)) {
         throw new ProfileDraftError(
           'adapter',
           `当前版本的连接编辑器仅支持 openai-compatible；该连接为 ${existing.adapter}`,
@@ -332,6 +363,8 @@ export class DesktopAiConfigStore {
       const plaintextApiKey = draft.apiKey !== undefined && draft.apiKey.length > 0
         ? draft.apiKey
         : undefined;
+      const stagedApiKeyRef =
+        plaintextApiKey !== undefined ? `provider-key:${crypto.randomUUID()}` : undefined;
 
       const transport = (() => {
         const rest = { ...(existing?.transport ?? {}) };
@@ -349,20 +382,28 @@ export class DesktopAiConfigStore {
             modelId: built.modelId,
             adapter: existing.adapter,
             transport,
-            apiKeyRef: plaintextApiKey !== undefined ? built.apiKeyRef : existing.apiKeyRef,
+            apiKeyRef: stagedApiKeyRef ?? existing.apiKeyRef,
             updatedAt: built.updatedAt,
           }
-        : built;
+        : stagedApiKeyRef !== undefined
+          ? { ...built, apiKeyRef: stagedApiKeyRef }
+          : built;
 
-      // Profile 先过 native 校验（含投影回显），凭据写入放到校验之后：否则编辑既有
-      // 连接时会出现「凭据已更新但 Profile 保存失败」的部分成功窗口，旧 Profile 会
-      // 静默开始使用新 Key。
-      await validateProviderExecutionProfile(this.deps.invoke, profile);
-      if (plaintextApiKey !== undefined) {
-        await setProviderSecret(this.deps.invoke, deriveApiKeyRef(built.id), plaintextApiKey);
+      try {
+        // Profile 先过 native 校验（含投影回显）再写凭据：校验失败不动凭据。
+        await validateProviderExecutionProfile(this.deps.invoke, profile);
+        if (stagedApiKeyRef !== undefined && plaintextApiKey !== undefined) {
+          await setProviderSecret(this.deps.invoke, stagedApiKeyRef, plaintextApiKey);
+        }
+        await saveProviderProfile(this.deps.invoke, profile);
+      } catch (cause) {
+        // 回滚 staged 凭据：旧 Profile 与其 apiKeyRef 指向的凭据保持原样。
+        if (stagedApiKeyRef !== undefined) {
+          await deleteProviderSecret(this.deps.invoke, stagedApiKeyRef).catch(() => undefined);
+        }
+        throw cause;
       }
-      await saveProviderProfile(this.deps.invoke, profile);
-      // apiKeyRef 因重输 Key 而更换时清理旧凭据，避免孤儿 secret 留在系统钥匙串。
+      // 保存成功后旧凭据变为孤儿，尽力清理（失败只留下不可达 secret）。
       if (
         existing?.apiKeyRef !== undefined &&
         existing.apiKeyRef !== profile.apiKeyRef
@@ -370,8 +411,8 @@ export class DesktopAiConfigStore {
         await deleteProviderSecret(this.deps.invoke, existing.apiKeyRef).catch(() => undefined);
       }
       await this.refreshProfiles();
-      // 新建的连接直接成为当前选择——用户保存它就是为了用它。
-      this.selectConnection(profile.id);
+      // 记住刚保存的连接作为客户端连接；不替用户切换执行位置偏好。
+      this.selectClientConnection(profile.id);
     } finally {
       this.publish({ savingConnection: false });
     }
