@@ -93,6 +93,8 @@ const DesktopShellInner = () => {
 
   return (
     <AppShell
+      // DESK-PARITY-002：品牌已由顶栏 favicon 圆形标志承担，壳不再渲染默认文字品牌。
+      brand={null}
       topBar={
         <ProductTopBar
           pathname={pathname}

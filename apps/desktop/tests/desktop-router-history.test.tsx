@@ -143,6 +143,11 @@ describe('desktop router keeps the product path inside the hash', () => {
     // TopBar logo 用 favicon 圆形标志（双端产品对齐决策）；页面骨架与 Web 同构——
     // `magic-background* > .container > .card` 共源 class 提供渐变底与白色限宽卡。
     expect(container.querySelector('img[src="/favicon.svg"]')).not.toBeNull();
+    // DESK-PARITY-002：品牌由顶栏 favicon 承担，`brand={null}` 使壳不再渲染默认
+    // 文字品牌「MahoShojo Generator」（顶栏/favicon 自身的 'MahoShojo' 不含该串）。
+    expect(container.querySelector('[data-testid="product-shell"]')?.textContent).not.toContain(
+      'MahoShojo Generator',
+    );
     expect(home.classList.contains('magic-background-white')).toBe(true);
     expect(home.querySelector(':scope > .container > .card')).not.toBeNull();
     expect(home.textContent).toContain('欢迎来到魔法国度！选择一个项目开始玩耍吧！');
