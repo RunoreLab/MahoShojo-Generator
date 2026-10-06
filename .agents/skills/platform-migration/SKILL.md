@@ -5,6 +5,8 @@ description: Use for platform-rearchitecture, runtime migration, hosted/local ro
 
 # Platform Migration
 
+Web/Desktop 产品共源迁移同时使用[双端共源切片模板与验收指南](../../../docs/runbooks/2026-10-06_084500_双端共源切片模板与验收指南.md)：先对照实际页面、状态、CSS/资源与副作用，再分共享层和宿主适配；按风险裁剪模板，不增加全站清单/hash/报告 marker 门禁。阶段与进度仍只维护唯一 Desktop 计划。
+
 ## Workflow
 
 1. Read `docs/AGENTS.md`, `docs/README.md`, the relevant topic page, accepted architecture/ADR/spec, migration plan and current code/CI facts.
