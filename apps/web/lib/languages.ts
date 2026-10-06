@@ -1,9 +1,11 @@
-import languageCatalogJson from '@/public/languages.json';
+import languageCatalogJson from '../../../content/languages.json';
 
 export type LanguageCatalogEntry = Readonly<{ code: string; name: string }>;
 
 /**
- * 仓库正式语言目录：与 public/languages.json 同源（本模块即由其导入生成），
+ * 仓库正式语言目录：权威源是根 `content/languages.json`，`public/` 副本只是构建期
+ * 生成物。直接 import 权威源而不是生成副本——测试与 lint 流程不跑内容生成器，
+ * 依赖 `public/` 会在干净检出上拿不到文件（MONO-006 也据此拦截）。
  * 展示层直接同步使用，不得再手抄语言列表。
  */
 export const LANGUAGE_CATALOG: readonly LanguageCatalogEntry[] = languageCatalogJson;
