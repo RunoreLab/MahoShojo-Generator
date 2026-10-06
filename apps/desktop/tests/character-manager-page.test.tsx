@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act } from 'react';
+import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { RouterProvider } from '@tanstack/react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -126,6 +126,48 @@ const mount = async () => {
   await act(async () => { root.render(<RouterProvider router={router} />); });
   await settle();
   return router;
+};
+
+/** Desktop 真实入口启用 StrictMode（双挂载 effect），仲裁路径必须幂等。 */
+const mountStrict = async () => {
+  const router = createDesktopRouter();
+  await router.load();
+  await act(async () => { root.render(<StrictMode><RouterProvider router={router} /></StrictMode>); });
+  await settle();
+  return router;
+};
+
+/** 预置一份 attached 页面草稿（originalId 指向 `original`）。 */
+const seedAttachedDraft = (data: Record<string, unknown> = { codename: '草稿角色', appearance: { outfit: '黑裙' } }) => {
+  window.localStorage.setItem(DESKTOP_CHARACTER_MANAGER_DRAFT_KEY, JSON.stringify({
+    version: 1,
+    updatedAt: Date.now(),
+    payload: {
+      pastedJson: '',
+      draft: {
+        cardType: 'character',
+        title: '草稿标题',
+        data,
+        originalId: original.id,
+        originalData: original.data,
+      },
+    },
+  }));
+};
+
+/** 挂起 `GET_LOCAL_CARD_COMMAND`：返回所有挂起点，逐一放行后仲裁才落定。 */
+const deferCardGet = () => {
+  const pendingGets: Array<() => void> = [];
+  const fallback = bridge.invoke.getMockImplementation()!;
+  bridge.invoke.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+    if (command === GET_LOCAL_CARD_COMMAND) {
+      const found = rows.get(args?.id as string);
+      await new Promise<void>((resolve) => { pendingGets.push(resolve); });
+      return found === undefined ? null : serializeLocalLibraryRecord(found);
+    }
+    return fallback(command, args);
+  });
+  return async () => { await act(async () => { pendingGets.forEach((resolve) => resolve()); }); };
 };
 
 describe('Desktop 本地角色管理（IPC mock，仍需真机重启验收）', () => {
@@ -418,6 +460,42 @@ describe('Desktop 本地角色管理（IPC mock，仍需真机重启验收）', 
       const stored = JSON.parse(raw) as { payload?: { draft?: { originalId?: string | null } | null } };
       return stored.payload?.draft?.originalId === original.id;
     });
+  });
+
+  it('草稿仲裁在途时不开放工作区入口，迟到的恢复不会覆盖任何新操作', async () => {
+    seedAttachedDraft();
+    const releaseGets = deferCardGet();
+    window.location.hash = '#/character-manager';
+    await mount();
+    await settle();
+
+    // 仲裁未完成：模板选择、导入、本地卡列表与「我的数据卡」一律不可达，
+    // 用户无法在旧草稿落定前开始新操作。
+    expect(container.textContent).toContain('正在恢复页面草稿或读取目标数据卡');
+    expect(button('我的数据卡')).toBeUndefined();
+    expect(button('▶ 展开文本粘贴区域 (手机端推荐)')).toBeUndefined();
+    expect(button('编辑')).toBeUndefined();
+    expect(container.textContent).not.toContain('内容模板');
+
+    // 仲裁落定后恢复草稿，工作区入口随之开放。
+    await releaseGets();
+    await waitFor(() => container.textContent?.includes('编辑角色: 草稿角色') === true);
+    expect(container.textContent).toContain('已恢复浏览器内的编辑草稿');
+    expect(button('我的数据卡')).not.toBeUndefined();
+  });
+
+  it('StrictMode 双挂载下仲裁结论仍唯一生效', async () => {
+    seedAttachedDraft();
+    const releaseGets = deferCardGet();
+    window.location.hash = '#/character-manager';
+    await mountStrict();
+    await settle();
+    expect(container.textContent).toContain('正在恢复页面草稿或读取目标数据卡');
+
+    await releaseGets();
+    await waitFor(() => container.textContent?.includes('编辑角色: 草稿角色') === true);
+    expect(container.textContent).toContain('已恢复浏览器内的编辑草稿');
+    expect(fieldByLabel('记录标题').value).toBe('草稿标题');
   });
 
   it('自动保存写失败时草稿条如实报告，不再声称会自动保存', async () => {

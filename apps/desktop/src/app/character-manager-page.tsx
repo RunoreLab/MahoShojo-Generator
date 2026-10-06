@@ -482,6 +482,8 @@ export function DesktopCharacterManager() {
   // 「我的数据卡」：本地行直接以 `?card=` 打开记录（走既有加载与离开保护），
   // 云端行按内容副本载入为未保存草稿——不持有云端身份，不做写回。
   const handleSelectLibraryCard = useCallback((payload: BattleSelectionPayload, context: CardLibrarySelectionContext) => {
+    // 仲裁在途时入口本应不可达；此处兜底，避免迟到恢复覆盖刚选入的内容。
+    if (!draftRestoreReady) return;
     if (context.storageLocation === 'local') {
       const id = context.selectionId.startsWith('local:') ? context.selectionId.slice('local:'.length) : null;
       if (id !== null) openRecord(id);
@@ -498,7 +500,7 @@ export function DesktopCharacterManager() {
       data,
     });
     setNotice({ tone: 'status', text: '已从云端载入数据卡副本，尚未保存到本地库；副本不携带云端身份。' });
-  }, [open, openRecord]);
+  }, [open, openRecord, draftRestoreReady]);
 
   const save = async () => {
     if (draft === null || savingRef.current || !guard.ready) return;
@@ -611,7 +613,7 @@ export function DesktopCharacterManager() {
                   退出登录
                 </button>
               )}
-              myDataCards={{
+              myDataCards={draftRestoreReady ? {
                 // 主动使用 = 探测时机（DESK-ONLINE-013，与 /details 同一模式）：
                 // 冷启动 `idle` 下机器上可能已有有效凭据，先 refresh 再开选择器，
                 // 确认 active 后「我的数据卡」默认落到 `my` 页签而不是本地库。
@@ -620,7 +622,7 @@ export function DesktopCharacterManager() {
                   setLibraryOpen(true);
                 },
                 label: '我的数据卡',
-              }}
+              } : undefined}
               signedOut={{
                 text: cloudUnreachable
                   ? '云端服务暂时不可用；本地编辑与本地库不受影响，可稍后重试登录。'
@@ -654,6 +656,13 @@ export function DesktopCharacterManager() {
             )}
           />
 
+          {!draftRestoreReady ? (
+            // 草稿仲裁在途（旧草稿/目标记录的异步读取未落定）：不挂载任何会改变
+            // 工作区的入口——模板选择、导入区、本地卡列表与「我的数据卡」一律暂不
+            // 提供，避免迟到的恢复覆盖用户在此期间的新操作（D5.1-P2-r5-r3）。
+            <p role="status" className="mb-4 text-sm">正在恢复页面草稿或读取目标数据卡…</p>
+          ) : (
+            <>
           <CharacterManagerTemplateSelect
             value={selectedTemplate}
             hasContent={draft !== null}
@@ -822,6 +831,8 @@ export function DesktopCharacterManager() {
                 </details>
               )}
             </section>
+          )}
+            </>
           )}
         </div>
         {/* 「我的数据卡」选择器：本地页签离线可用；确认会话 active 后默认落到
