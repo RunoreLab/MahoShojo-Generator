@@ -1,4 +1,5 @@
 import { isAllowedExternalMediaUrl } from './external-media';
+import { exceedsUtf8ByteLimit, MAX_DATA_CARD_BYTES } from './data-card-size';
 import {
   type QuestionnaireAnswerItem,
   type QuestionnaireAnswerMatchTarget,
@@ -15,6 +16,19 @@ import {
  * 网站专属的问卷 logo 预设常量与站点素材路径仍留在 Web 文件里；
  * `logoUrl` 的站外地址准入走 domain 的媒体白名单（与 Web 原口径一致）。
  */
+
+/**
+ * 问卷 JSON 文件/粘贴导入在 `JSON.parse` 前的 UTF-8 字节预算（D5.1-P2-r2）。
+ *
+ * 这是问卷自己的预算口径，不复用本地卡单条记录 4 MiB（那是本地库存储上限）。
+ * 取云端数据卡硬上限：超过 1 MiB 的问卷本来就不可能作为数据卡在云端或经本地
+ * 库数据卡流通；当前最大内置预设约 71 KiB，预算留有约 14 倍余量。
+ *
+ * 使用方式：文件侧在读内容前直接比较 `File.size`；粘贴侧用
+ * `exceedsUtf8ByteLimit`（`@mahoshojo/domain/data-card-size`）逐码点计数；
+ * 数据卡字符串 payload 在本文件的 `parseQuestionnairePayloadValue` 内统一执行。
+ */
+export const MAX_QUESTIONNAIRE_IMPORT_BYTES = MAX_DATA_CARD_BYTES;
 
 export type QuestionnaireKind = 'magical-girl' | 'canshou';
 
@@ -220,7 +234,9 @@ const QUESTIONNAIRE_CARD_PAYLOAD_ERROR = '问卷数据卡内容为空或格式�
 const parseQuestionnairePayloadValue = (value: unknown): Record<string, unknown> => {
   if (typeof value === 'string') {
     const trimmed = value.trim();
-    if (!trimmed) throw new Error(QUESTIONNAIRE_CARD_PAYLOAD_ERROR);
+    if (!trimmed || exceedsUtf8ByteLimit(trimmed, MAX_QUESTIONNAIRE_IMPORT_BYTES)) {
+      throw new Error(QUESTIONNAIRE_CARD_PAYLOAD_ERROR);
+    }
     const parsed = JSON.parse(trimmed) as unknown;
     if (!isRecord(parsed)) throw new Error(QUESTIONNAIRE_CARD_PAYLOAD_ERROR);
     return parsed;

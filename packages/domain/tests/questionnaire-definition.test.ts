@@ -4,11 +4,13 @@ import {
   buildQuestionKey,
   buildQuestionnaireFlow,
   collectStoredQuestionnaireAnswerItems,
+  MAX_QUESTIONNAIRE_IMPORT_BYTES,
   normalizeQuestionnaireDefinition,
   parseQuestionnaireDataCardPayload,
   resolveQuestionnaireReferences,
   type QuestionnaireDefinition,
 } from '@mahoshojo/domain/questionnaire-definition';
+import { MAX_DATA_CARD_BYTES } from '@mahoshojo/domain/data-card-size';
 import { isAllowedExternalMediaUrl } from '@mahoshojo/domain/external-media';
 
 const toItems = (definition: QuestionnaireDefinition) =>
@@ -157,6 +159,22 @@ describe('parseQuestionnaireDataCardPayload', () => {
     expect(() => parseQuestionnaireDataCardPayload(null)).toThrow('问卷数据卡内容为空或格式不受支持');
     expect(() => parseQuestionnaireDataCardPayload({ unrelated: 1 })).toThrow('问卷数据卡内容为空或格式不受支持');
     expect(() => parseQuestionnaireDataCardPayload({ data: 42 })).toThrow('问卷数据卡内容为空或格式不受支持');
+  });
+
+  test('字符串 payload 在 JSON.parse 前执行导入字节预算（D5.1-P2-r2）', () => {
+    // 超预算的字符串（直接 source 或 data 字段内嵌）在 parse 前抛领域错误，
+    // 而不是先为超大输入分配解析缓冲；预算内合法 JSON 不受影响。
+    const oversized = `{"a":"${'x'.repeat(MAX_QUESTIONNAIRE_IMPORT_BYTES)}"}`;
+    expect(() => parseQuestionnaireDataCardPayload(oversized)).toThrow('问卷数据卡内容为空或格式不受支持');
+    expect(() => parseQuestionnaireDataCardPayload({ data: oversized })).toThrow('问卷数据卡内容为空或格式不受支持');
+    expect(parseQuestionnaireDataCardPayload(JSON.stringify(inner)).questions).toHaveLength(1);
+  });
+});
+
+describe('MAX_QUESTIONNAIRE_IMPORT_BYTES', () => {
+  // 全部内置预设都在预算内的断言放在宿主侧测试（domain 测试禁 node:fs）。
+  test('与云端数据卡上限同口径（D5.1-P2-r2）', () => {
+    expect(MAX_QUESTIONNAIRE_IMPORT_BYTES).toBe(MAX_DATA_CARD_BYTES);
   });
 });
 

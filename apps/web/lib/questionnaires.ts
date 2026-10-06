@@ -28,6 +28,7 @@ export {
   buildQuestionnaireFlow,
   collectQuestionnaireFlowAnswerItems,
   collectStoredQuestionnaireAnswerItems,
+  MAX_QUESTIONNAIRE_IMPORT_BYTES,
   normalizeQuestionnaireDefinition,
   parseQuestionnaireDataCardPayload,
   resolveQuestionnaireReferences,

@@ -4,6 +4,7 @@ import { LocalCardRecordV1Schema, nextLocalTimestamp, type LocalCardRecordV1 } f
 import { localLibraryRecordBytes } from '@mahoshojo/local-library/archive-export';
 import type { CardRepository } from '@mahoshojo/local-library/repository';
 import { MAX_DESKTOP_LOCAL_CARD_DOCUMENT_BYTES } from '@mahoshojo/contracts/desktop-ipc';
+import { exceedsUtf8ByteLimit } from '@mahoshojo/domain/data-card-size';
 import { SafeJsonValueSchema } from '@mahoshojo/contracts/json-value';
 import type { MagicalGirlResultData } from '@mahoshojo/ui-web/character-result';
 import type { CanshouDetails, GeneralCharacterCardData } from '@mahoshojo/ui-web/character-card';
@@ -27,34 +28,9 @@ export const isEditableLocalCard = (record: LocalCardRecordV1): boolean =>
 /** 单个导入文件/粘贴文本的读取上限，与 native 单条 document 上限同一量级。 */
 export const MAX_IMPORT_FILE_BYTES = MAX_DESKTOP_LOCAL_CARD_DOCUMENT_BYTES;
 
-/**
- * 文本的 UTF-8 编码字节数是否超限：逐码点累加、超限即返回。
- *
- * 不用 `TextEncoder().encode(text)`：那会为超大输入先分配一份等长缓冲，而字节上限的意义
- * 正是赶在 `JSON.parse` 与任何 buffering 之前拦住这种输入（bounded-input）。孤立代理项按
- * `TextEncoder` 语义计作 U+FFFD 的 3 字节，保证与落盘/IPC 侧的字节口径一致。
- */
-export const exceedsUtf8ByteLimit = (text: string, maxBytes: number): boolean => {
-  // UTF-8 字节数恒不小于 UTF-16 码元数：先用 O(1) 拦住最明显的大输入。
-  if (text.length > maxBytes) return true;
-  let bytes = 0;
-  for (let index = 0; index < text.length; index += 1) {
-    const unit = text.charCodeAt(index);
-    if (unit < 0x80) {
-      bytes += 1;
-    } else if (unit < 0x800) {
-      bytes += 2;
-    } else if (unit >= 0xd800 && unit <= 0xdbff && index + 1 < text.length
-      && text.charCodeAt(index + 1) >= 0xdc00 && text.charCodeAt(index + 1) <= 0xdfff) {
-      bytes += 4;
-      index += 1;
-    } else {
-      bytes += 3;
-    }
-    if (bytes > maxBytes) return true;
-  }
-  return false;
-};
+// UTF-8 字节早检实现已上移共享域层 `@mahoshojo/domain/data-card-size`（D5.1-P2-r2），
+// 此处保留原导出供既有调用点/测试直接使用。
+export { exceedsUtf8ByteLimit };
 
 export interface CardDraft {
   /** 编辑既有本地记录时为该记录；导入时为 `null`。 */

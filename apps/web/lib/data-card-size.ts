@@ -3,6 +3,7 @@
 
 export {
   DATA_CARD_SLOT_BYTES,
+  exceedsUtf8ByteLimit,
   formatKilobytes,
   getUtf8ByteLength,
   MAX_DATA_CARD_BYTES,

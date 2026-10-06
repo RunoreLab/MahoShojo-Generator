@@ -14,6 +14,7 @@ import { JsonSizeIndicator } from '@/components/shared/JsonSizeIndicator';
 import {
   DEFAULT_QUESTIONNAIRE_LOGO_BY_KIND,
   QUESTIONNAIRE_LOGO_PRESETS,
+  MAX_QUESTIONNAIRE_IMPORT_BYTES,
   normalizeQuestionnaireDefinition,
   sanitizeQuestionnaireLogoUrl,
   type QuestionnaireConditionOperator,
@@ -31,6 +32,7 @@ import { config } from '@/lib/config';
 import { getDataCardVisibilityValue } from '@/lib/data-card-status';
 import { useDataCardSummaryPage } from '@/lib/use-data-card-summary-page';
 import { normalizeQuestionnaireDataCard } from '@/lib/questionnaire-data-card';
+import { exceedsUtf8ByteLimit } from '@/lib/data-card-size';
 
 type EditableSuggestionItem = {
   uid: string;
@@ -663,6 +665,11 @@ export const QuestionnaireEditorPage: React.FC = () => {
       setEditorError('请先粘贴或上传问卷 JSON');
       return;
     }
+    // parse 前预算：逐码点计 UTF-8 字节、超限即停（与问卷选择导入同一上限）。
+    if (exceedsUtf8ByteLimit(sourceText, MAX_QUESTIONNAIRE_IMPORT_BYTES)) {
+      setEditorError(`问卷 JSON 超过大小上限（${MAX_QUESTIONNAIRE_IMPORT_BYTES / 1024 / 1024} MiB）。`);
+      return;
+    }
     try {
       const parsed = JSON.parse(sourceText);
       const normalized = normalizeQuestionnaireDefinition(parsed, {
@@ -737,6 +744,11 @@ export const QuestionnaireEditorPage: React.FC = () => {
 
   const handleImportFile = async (file: File | null) => {
     if (!file) return;
+    // `File.size` 不读内容即可拿到字节数：先于 file.text() 拦截超大输入。
+    if (file.size > MAX_QUESTIONNAIRE_IMPORT_BYTES) {
+      setEditorError(`问卷文件超过大小上限（${MAX_QUESTIONNAIRE_IMPORT_BYTES / 1024 / 1024} MiB）。`);
+      return;
+    }
     try {
       const text = await file.text();
       setImportText(text);

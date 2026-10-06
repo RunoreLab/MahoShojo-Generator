@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { describe, expect, it, vi, afterEach } from 'vitest';
 import {
   buildDetailsAnswers,
@@ -8,7 +8,10 @@ import {
   loadDefaultQuestionnaire,
   parseQuestionnaireSelection,
 } from '../src/features/details/questionnaire';
-import { buildQuestionKey } from '@mahoshojo/domain/questionnaire-definition';
+import {
+  buildQuestionKey,
+  MAX_QUESTIONNAIRE_IMPORT_BYTES,
+} from '@mahoshojo/domain/questionnaire-definition';
 
 const source = () => JSON.parse(readFileSync(new URL('../../../content/questionnaires/presets/magical-girl-default.json', import.meta.url), 'utf8'));
 const fixture = (question: Record<string, unknown>) => ({
@@ -269,5 +272,15 @@ describe('parseQuestionnaireSelection', () => {
       const legacy = buildDetailsFlowItems(questionnaire);
       expect(legacy[0].key).toBe(`${questionnaire.id}::belief`);
     });
+  });
+});
+
+describe('问卷导入预算（D5.1-P2-r2）', () => {
+  it('全部内置预设在 parse 前字节预算内', () => {
+    // 导入预算必须装得下每个随包分发的内置预设，否则预设会无法经导入路径使用。
+    const dir = new URL('../../../content/questionnaires/presets/', import.meta.url);
+    for (const name of readdirSync(dir).filter((entry) => entry.endsWith('.json'))) {
+      expect(statSync(new URL(name, dir)).size, name).toBeLessThanOrEqual(MAX_QUESTIONNAIRE_IMPORT_BYTES);
+    }
   });
 });

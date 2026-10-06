@@ -25,6 +25,7 @@ import {
   collectStoredQuestionnaireAnswerItems,
   compactQuestionnaireAnswerItems,
   formatQuestionnaireAnswers,
+  MAX_QUESTIONNAIRE_IMPORT_BYTES,
   normalizeQuestionnaireDefinition,
   parseQuestionnaireDataCardPayload,
   normalizeUserAnswers,
@@ -69,6 +70,7 @@ import { AI_META_REQUEST_HEADER, AI_META_REQUEST_VALUE, readJsonWithAiMeta } fro
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { downloadBlob } from '@/lib/client/blobUrl';
 import { getAnswerLimitInfo, isAnswerOverLimit, QUESTIONNAIRE_NATIVE_MAX_ANSWER_CHARS } from '@/lib/questionnaire-limits';
+import { exceedsUtf8ByteLimit } from '@/lib/data-card-size';
 import { authStorage } from '@/lib/auth';
 import { useGenerationApiIntentLatch } from '@/lib/use-generation-api-intent-latch';
 import { useResultAutoScroll } from '@/lib/use-result-auto-scroll';
@@ -711,6 +713,11 @@ export const DetailsPage: React.FC = () => {
 
   const handleUploadQuestionnaire = async (file: File | null) => {
     if (!file) return;
+    // `File.size` 不读内容即可拿到字节数：parse 前预算先行拦截超大输入（bounded-input）。
+    if (file.size > MAX_QUESTIONNAIRE_IMPORT_BYTES) {
+      setError(`问卷文件超过大小上限（${MAX_QUESTIONNAIRE_IMPORT_BYTES / 1024 / 1024} MiB）。`);
+      return;
+    }
     try {
       const text = await file.text();
       const parsed = JSON.parse(text);
@@ -737,6 +744,11 @@ export const DetailsPage: React.FC = () => {
   const handlePasteQuestionnaireImport = () => {
     if (!pasteQuestionnaireText.trim()) {
       setPasteQuestionnaireError('请先粘贴问卷 JSON');
+      return;
+    }
+    // 粘贴路径没有 File.size 可用：逐码点计 UTF-8 字节、超限即停的同一预算。
+    if (exceedsUtf8ByteLimit(pasteQuestionnaireText, MAX_QUESTIONNAIRE_IMPORT_BYTES)) {
+      setPasteQuestionnaireError(`问卷 JSON 超过大小上限（${MAX_QUESTIONNAIRE_IMPORT_BYTES / 1024 / 1024} MiB）。`);
       return;
     }
     try {
