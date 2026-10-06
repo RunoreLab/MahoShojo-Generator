@@ -56,7 +56,8 @@ export const sortAnnouncements = (list: readonly Announcement[]): Announcement[]
  * 结构、滚动条与详情弹窗逐字复刻 Web 形态；变化只有三条：
  *
  * 1. 数据注入——Web 自己在 effect 里 `fetch('/announcements.json')`，那是宿主决定，
- *    共享层不内置任何请求（`DESK-PROD-004`：Desktop 冷启动不发项目请求）；
+ *    共享层不内置任何请求；宿主的获取节奏按 `DESK-PARITY-003` 策略注入
+ *    （Desktop 默认 `on-launch` 每次启动检查一次）；
  * 2. styled-jsx 动画换成 `product-shell.css` 里的 `announcement-*` 类（Next 私有机制
  *    不能出现在共享包）；
  * 3. 正文渲染换成共源 `MarkdownBlock`，站外媒体与外链策略由宿主注入——Desktop 注入

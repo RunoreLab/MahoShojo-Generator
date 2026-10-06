@@ -27,7 +27,8 @@ const render = (node: ReactNode): void => {
 describe('AppShell', () => {
   it('renders the product frame without any online bootstrap', () => {
     // Web 的 AppProviders 挂着公告轮询、账号探测、统计与挑战页。共源壳保留布局外观，但不含其中任何
-    // 一个——DESK-PROD-004 要求本地启动不自动发起项目请求，而"布局一样"并不证明离线启动已达成。
+    // 一个——DESK-PROD-004 要求共享页面不因复用 Web bootstrap 隐式挂载这些项目请求，
+    // 而"布局一样"并不证明离线启动已达成。
     render(<AppShell>内容</AppShell>);
 
     const shell = container.querySelector('[data-testid="product-shell"]');

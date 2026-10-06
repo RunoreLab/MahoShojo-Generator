@@ -1221,8 +1221,9 @@ impl HostedEventSink for tauri::ipc::Channel<HostedSseEvent> {
 ///
 /// DESK-094 门禁收在 dispatch 本身：任何调用方发起 hosted 生成前都必须先过
 /// 契约兼容探测，而不是依赖 UI 自觉先点「检查连通性」。探测只发生在用户主动
-/// 开始在线生成时，符合「冷启动零项目请求」的冻结原则；不可达 / 已声明不兼容
-/// / 未声明版本一律 fail-closed，不发送生成请求。
+/// 开始在线生成时——「主动进入在线能力的请求按该能力独立授权」的边界
+///（`DESK-PROD-004` r2 口径）；不可达 / 已声明不兼容 / 未声明版本一律
+/// fail-closed，不发送生成请求。
 async fn prepare_hosted_dispatch(
     state: &CloudState,
     secrets: &dyn SecretStore,

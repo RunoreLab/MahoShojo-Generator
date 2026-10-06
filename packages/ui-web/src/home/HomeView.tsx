@@ -26,7 +26,7 @@ export interface HomeHeroProps {
  * 共源品牌区。
  *
  * 它只渲染 logo 与一句产品语。账号欢迎语、Footer、远端图片与统计**不在这里**——那些是 Web 在线
- * bootstrap 的一部分，`DESK-PROD-004` 明确禁止本地壳自动发起项目请求。
+ * bootstrap 的一部分，`DESK-PROD-004` 要求共享页面不因复用隐式挂载这些启动行为。
  */
 export function HomeHero({
   assetSource,

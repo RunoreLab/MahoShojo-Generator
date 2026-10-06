@@ -80,8 +80,9 @@ const FULL_BLEED_PATHS = new Set(['/', '/details', '/character-manager']);
  * 壳。
  *
  * 这是 Desktop 唯一的装配点，职责只有三件：给共源顶栏喂宿主投影、把导航点击交给 router、把页面
- * 内容放进共源外框。**它不挂载任何在线 bootstrap**——公告轮询、账号探测、统计、消息摘要与远端
- * 图片都不在这里（`DESK-PROD-004` 要求本地启动与本地旅程不自动请求项目服务）：
+ * 内容放进共源外框。**它不把 Web 在线 bootstrap 搬进壳里**——登录探测、统计、消息摘要与远端
+ * 图片不在这里；允许的后台在线请求由各自宿主 adapter 按「离线可用、不阻塞、有界、不泄漏」
+ * 原则发起（`DESK-PROD-004` r2 口径，不再要求冷启动零项目请求）：
  *
  * - 账号投影来自 `DesktopCloudSessionStore` 的当前快照；冷启动是 `idle → 'unknown'` 的
  *   中性「账号」占位，点按经 `requestAuth` 才触发第一次 `cloud_auth_status`；
