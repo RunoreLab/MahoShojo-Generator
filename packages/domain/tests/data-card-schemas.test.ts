@@ -39,6 +39,26 @@ describe('parseDataCardByTemplate', () => {
     expect('name' in parsed).toBe(false);
   });
 
+  it('arena_history 存在时 Canshou 的 entries 必填、MagicalGirl 的 entries 可缺省（迁移前各自语义）', () => {
+    // 两类卡的 arena_history 形状共源，但 entries 必填性保持迁移前判定：
+    // Canshou 的 `arena_history: {}` 旧实现拒绝；MagicalGirl 本就允许。
+    expect(() => parseDataCardByTemplate('canshou', {
+      name: '噬梦',
+      arena_history: {},
+    })).toThrow();
+    expect(() => parseDataCardByTemplate('canshou', {
+      name: '噬梦',
+      arena_history: { entries: [{ title: '一战' }] },
+    })).not.toThrow();
+    expect(() => parseDataCardByTemplate('canshou', {
+      name: '噬梦',
+    })).not.toThrow();
+    expect(() => parseDataCardByTemplate('magical-girl', {
+      codename: '星光',
+      arena_history: {},
+    })).not.toThrow();
+  });
+
   it('角色模板拒绝目标之外的顶层键（schema 门禁不是宽容透传）', () => {
     expect(() => parseDataCardByTemplate('magical-girl', {
       codename: '星光',
