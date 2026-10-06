@@ -1,27 +1,12 @@
-import { z } from 'zod/v3';
-
-export const CreatorBuildRuleSnapshotSchema = z.object({
-  ruleId: z.string(),
-  version: z.string().optional(),
-  blockResults: z.record(z.unknown()).default({}),
-  derived: z.record(z.unknown()).default({}),
-  validationSummary: z.record(z.unknown()).default({}),
-});
-
-export const CreationInputsSchema = z.object({
-  template: z.string(),
-  freeformBrief: z.string().nullable().optional(),
-  questionnaires: z.array(z.unknown()).default([]),
-  questionnaireAnswers: z.array(z.unknown()).default([]),
-  buildRules: z.array(CreatorBuildRuleSnapshotSchema).default([]),
-  primaryRuleId: z.string().nullable().optional(),
-});
-
-export const BuildStateSchema = z.object({
-  primaryRuleId: z.string().nullable().optional(),
-  rules: z.array(CreatorBuildRuleSnapshotSchema).default([]),
-});
-
-export type CreatorBuildRuleSnapshot = z.infer<typeof CreatorBuildRuleSnapshotSchema>;
-export type CreationInputs = z.infer<typeof CreationInputsSchema>;
-export type BuildState = z.infer<typeof BuildStateSchema>;
+// 数据卡正文 schema 已迁入共享域层（D5.1-P2-r5-r1）：@mahoshojo/domain/data-card-schemas。
+// 本文件保留原路径作为 barrel，既有调用点无需改 import。
+export {
+  BuildStateSchema,
+  CreationInputsSchema,
+  CreatorBuildRuleSnapshotSchema,
+} from '@mahoshojo/domain/data-card-schemas';
+export type {
+  BuildState,
+  CreationInputs,
+  CreatorBuildRuleSnapshot,
+} from '@mahoshojo/domain/data-card-schemas';

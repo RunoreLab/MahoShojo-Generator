@@ -1,21 +1,5 @@
-import { z } from 'zod/v3';
-import { GENERAL_CHARACTER_TEMPLATE_ID } from '@mahoshojo/domain/data-cards';
-import { CurrentStateSchema } from './current-state';
-
+// 数据卡正文 schema 已迁入共享域层（D5.1-P2-r5-r1）：@mahoshojo/domain/data-card-schemas。
+// 本文件保留原路径作为 barrel，既有调用点无需改 import。
+export { GeneralCharacterSchema } from '@mahoshojo/domain/data-card-schemas';
+export type { GeneralCharacterData } from '@mahoshojo/domain/data-card-schemas';
 export { GENERAL_CHARACTER_TEMPLATE_ID } from '@mahoshojo/domain/data-cards';
-
-/**
- * 通用角色数据卡的 Zod Schema
- * - templateId 固定为 “通用角色”
- * - name 为角色名
- * - content 使用 Markdown 或其他自由文本，承载角色设定
- * 允许携带额外字段以兼容未来扩展（如签名、作者信息等）
- */
-export const GeneralCharacterSchema = z.object({
-  templateId: z.literal(GENERAL_CHARACTER_TEMPLATE_ID).default(GENERAL_CHARACTER_TEMPLATE_ID),
-  name: z.string(),
-  content: z.string(),
-  current_state: CurrentStateSchema.optional(),
-}).catchall(z.unknown());
-
-export type GeneralCharacterData = z.infer<typeof GeneralCharacterSchema>;

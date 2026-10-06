@@ -1,16 +1,3 @@
-import { z } from 'zod/v3';
-
-export const AdjudicatorEventSchema: z.ZodType<any> = z.lazy(() => z.object({
-  id: z.string().optional(),
-  description: z.string().optional(),
-  type: z.enum(['binary', 'custom']).optional(),
-  probability: z.number().min(0).max(100).optional(),
-  onSuccess: z.object({ event: AdjudicatorEventSchema }).optional(),
-  onFailure: z.object({ event: AdjudicatorEventSchema }).optional(),
-  outcomes: z.array(z.object({
-    id: z.string().optional(),
-    name: z.string().optional(),
-    probability: z.number().min(0).max(100).optional(),
-    chainedEvent: z.object({ event: AdjudicatorEventSchema }).optional()
-  })).optional()
-}));
+// 数据卡正文 schema 已迁入共享域层（D5.1-P2-r5-r1）：@mahoshojo/domain/data-card-schemas。
+// 本文件保留原路径作为 barrel，既有调用点无需改 import。
+export { AdjudicatorEventSchema } from '@mahoshojo/domain/data-card-schemas';

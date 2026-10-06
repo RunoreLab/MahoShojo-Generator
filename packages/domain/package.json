@@ -20,6 +20,11 @@
       "import": "./src/data-cards.ts",
       "default": "./src/data-cards.ts"
     },
+    "./data-card-schemas": {
+      "types": "./src/data-card-schemas.ts",
+      "import": "./src/data-card-schemas.ts",
+      "default": "./src/data-card-schemas.ts"
+    },
     "./data-card-size": {
       "types": "./src/data-card-size.ts",
       "import": "./src/data-card-size.ts",
