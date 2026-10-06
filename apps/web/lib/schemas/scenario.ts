@@ -1,7 +1,7 @@
 import { z } from 'zod/v3';
 import { AdjudicatorEventSchema } from './adjudicator';
 import { BuildStateSchema, CreationInputsSchema } from './creator-metadata';
-import { ScenarioBattleStoryExtensionSchema } from '@/lib/scenario-battle-story';
+import { ScenarioBattleStoryExtensionSchema } from '@mahoshojo/domain/scenario-battle-story';
 
 // 情景数据卡的 Zod Schema
 export const ScenarioSchema = z.object({

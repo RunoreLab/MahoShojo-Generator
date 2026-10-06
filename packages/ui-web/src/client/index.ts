@@ -7,6 +7,12 @@ export {
 export { buildSafeFileName } from './fileName';
 export { copyTextToClipboard } from './clipboard';
 export {
+  clearPageDraft,
+  readPageDraft,
+  writePageDraft,
+  type StoredPageDraft,
+} from './pageDraft';
+export {
   capturePngBlob,
   getSafeDpr,
   getSnapdomProxyUrl,

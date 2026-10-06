@@ -1,4 +1,4 @@
-import type { AdjudicatorEvent } from '@/types/arena';
+import type { AdjudicatorEvent } from './arena-types';
 
 type IdFactory = (prefix: 'event' | 'outcome') => string;
 

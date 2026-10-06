@@ -1,6 +1,6 @@
 import { z } from 'zod/v3';
 import { GENERAL_SCENARIO_TEMPLATE_ID } from '@mahoshojo/domain/data-cards';
-import { ScenarioBattleStoryExtensionSchema } from '@/lib/scenario-battle-story';
+import { ScenarioBattleStoryExtensionSchema } from '@mahoshojo/domain/scenario-battle-story';
 
 export { GENERAL_SCENARIO_TEMPLATE_ID } from '@mahoshojo/domain/data-cards';
 

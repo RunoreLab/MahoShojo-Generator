@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'vitest';
 import { ArenaRoomHostRuntimeGenerationSchema } from '@mahoshojo/contracts/arena-room';
 
-import type { AdjudicatorEvent } from '@/types/arena';
-import { normalizeAdjudicationEvents } from '@/lib/adjudicator/normalize';
+import type { AdjudicatorEvent } from '../src/arena-types';
+import { normalizeAdjudicationEvents } from '../src/adjudicator-normalize';
 
 const createDeterministicIdFactory = () => {
   let counter = 0;
@@ -40,16 +40,19 @@ describe('normalizeAdjudicationEvents', () => {
     expect(normalizeAdjudicationEvents(normalized)).toBe(normalized);
   });
 
-  test.each([
-    { constructor: 'unsafe' },
-    { extra: undefined },
-    { extra: new Date() },
-    { probability: Number.NaN },
-  ])('规范化不会静默吞掉其他非法数据：%j', (invalid) => {
-    const events = [{ id: 'root', description: '', type: 'binary' as const, ...invalid }];
-    expect(ArenaRoomHostRuntimeGenerationSchema.safeParse({
-      adjudicationEvents: normalizeAdjudicationEvents(events),
-    }).success).toBe(false);
+  test('规范化不会静默吞掉其他非法数据', () => {
+    const invalidCases: Record<string, unknown>[] = [
+      { constructor: 'unsafe' },
+      { extra: undefined },
+      { extra: new Date() },
+      { probability: Number.NaN },
+    ];
+    for (const invalid of invalidCases) {
+      const events = [{ id: 'root', description: '', type: 'binary' as const, ...invalid }];
+      expect(ArenaRoomHostRuntimeGenerationSchema.safeParse({
+        adjudicationEvents: normalizeAdjudicationEvents(events),
+      }).success).toBe(false);
+    }
   });
 
   test('输入已规范时返回原引用', () => {

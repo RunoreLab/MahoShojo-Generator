@@ -17,7 +17,7 @@ import type {
   BattleStorySessionRecord,
 } from '@/lib/ai-session/battle-story/types';
 import { formatDateTime } from '@/lib/constants';
-import { SCENARIO_BATTLE_STORY_MAX_TOTAL_CHAPTERS } from '@/lib/scenario-battle-story';
+import { SCENARIO_BATTLE_STORY_MAX_TOTAL_CHAPTERS } from '@mahoshojo/domain/scenario-battle-story';
 
 import { BattleStoryBranchChainModal } from './BattleStoryBranchChainModal';
 import { useBattleStorySession } from '../hooks/useBattleStorySession';

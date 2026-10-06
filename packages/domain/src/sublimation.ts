@@ -2,7 +2,14 @@ import {
   GENERAL_CHARACTER_TEMPLATE_ID,
   GENERAL_SCENARIO_TEMPLATE_ID,
   inferCharacterKind,
+  inferDataCardTemplate,
+  type DataCardTemplate,
+  type InferableDataCardTemplate,
 } from './data-cards';
+import {
+  readScenarioBattleStoryConfig,
+  toScenarioBattleStoryExtension,
+} from './scenario-battle-story';
 
 export type SublimationCharacterTemplate = 'magical-girl' | 'canshou' | 'general';
 export type SublimationSourceTemplate =
@@ -367,6 +374,233 @@ export const convertSublimationCharacterCard = (
   if (target === 'general') return convertToGeneral(sanitized);
   if (target === 'magical-girl') return convertToMagicalGirl(sanitized, sourceTemplate);
   return convertToCanshou(sanitized, sourceTemplate);
+};
+
+// ============================================================================
+// 五模板「内容模板」转换（原 Web `lib/data-card-converter`）。
+//
+// 角色三个目标复用上面的升华转换实现；情景两个目标是结构化映射，逻辑自 Web 端
+// 逐行迁移。产出与 Web 的 zod `Schema.parse` 输入完全相同——schemas 均为
+// `.catchall` passthrough，parse 只做校验不做裁剪，因此本实现不需要 schema。
+// ============================================================================
+
+const SCENARIO_META: Record<string, FieldMeta> = {
+  title: { type: 'string' },
+  scenario_type: { type: 'string' },
+  description: { type: 'string' },
+  adjudicationEvents: { type: 'array' },
+  elements: {
+    type: 'object',
+    children: {
+      scene: {
+        type: 'object',
+        children: {
+          time: { type: 'string' },
+          place: { type: 'string' },
+          features: { type: 'string' },
+        },
+      },
+      roles: { type: 'array' },
+      events: { type: 'string' },
+      atmosphere: { type: 'string' },
+      development: { type: 'array' },
+    },
+  },
+  metadata: {
+    type: 'object',
+    children: {
+      created_at: { type: 'string' },
+      signature: { type: 'string' },
+    },
+  },
+  _battle_story: { type: 'unknown' },
+};
+
+const DEFAULT_SCENARIO: Record<string, unknown> = {
+  title: '未命名情景',
+  description: '',
+  elements: {
+    scene: {
+      time: '',
+      place: '',
+      features: '',
+    },
+    roles: [],
+    events: '',
+    atmosphere: '',
+    development: [],
+  },
+  metadata: {},
+  adjudicationEvents: [],
+};
+
+const DEFAULT_GENERAL_SCENARIO: Record<string, unknown> = {
+  templateId: GENERAL_SCENARIO_TEMPLATE_ID,
+  title: '未命名情景',
+  content: '请在此处补充情景设定，建议使用 Markdown 书写。',
+};
+
+const toMarkdownContent = (rest: Record<string, unknown>): string => {
+  const markdown = valueToMarkdown(rest);
+  return markdown.trim() || '暂无附加设定。';
+};
+
+/**
+ * 五模板空白数据卡。与 Web `createBlankDataCard` 语义一致：角色三个模板出自
+ * `createBlankSublimationCharacterCard`，两个情景模板出自各自的默认结构。
+ */
+export const createBlankDataCard = (template: DataCardTemplate): Record<string, unknown> => {
+  switch (template) {
+    case 'magical-girl':
+      return createBlankSublimationCharacterCard('magical-girl');
+    case 'canshou':
+      return createBlankSublimationCharacterCard('canshou');
+    case 'general':
+      return createBlankSublimationCharacterCard('general');
+    case 'scenario':
+      return cloneJson(DEFAULT_SCENARIO);
+    case 'general-scenario':
+      return cloneJson(DEFAULT_GENERAL_SCENARIO);
+  }
+};
+
+const convertToGeneralScenario = (
+  data: Record<string, unknown>,
+  sourceTemplate: InferableDataCardTemplate,
+): SublimationCharacterConversionResult => {
+  const title = data.title || data.name || data.codename || '未命名情景';
+  const rest = { ...data };
+  const battleStoryExtension = toScenarioBattleStoryExtension(readScenarioBattleStoryConfig(data));
+  for (const key of [
+    'codename', 'name', 'title', 'content', 'templateId', 'signature', 'metadata',
+    'creationInputs', 'buildState', 'arena_history', 'current_state',
+    'adjudicationEvents', '_battle_story',
+  ]) {
+    delete rest[key];
+  }
+
+  const markdownBase =
+    (sourceTemplate === 'general' || sourceTemplate === 'general-scenario') && typeof data.content === 'string'
+      ? data.content
+      : '';
+
+  const appendix = toMarkdownContent(rest);
+  const content = markdownBase
+    ? (appendix && appendix !== '暂无附加设定。' ? `${markdownBase.trim()}\n\n---\n\n${appendix}` : markdownBase.trim())
+    : appendix;
+
+  const result: Record<string, unknown> = {
+    templateId: GENERAL_SCENARIO_TEMPLATE_ID,
+    title,
+    content,
+    ...(battleStoryExtension ? { _battle_story: battleStoryExtension } : {}),
+  };
+
+  if (data.adjudicationEvents) {
+    result.adjudicationEvents = cloneJson(data.adjudicationEvents);
+  }
+  copyKnownMetadata(data, result);
+
+  return { data: result, warnings: [] };
+};
+
+const convertToScenario = (
+  data: Record<string, unknown>,
+  sourceTemplate: InferableDataCardTemplate,
+): SublimationCharacterConversionResult => {
+  const base = cloneJson(DEFAULT_SCENARIO);
+  base.title = data.title || data.codename || data.name || base.title;
+  const battleStoryExtension = toScenarioBattleStoryExtension(readScenarioBattleStoryConfig(data));
+
+  const source = { ...data };
+  for (const key of [
+    'codename', 'name', 'title', 'signature', 'templateId', 'creationInputs',
+    'buildState', 'arena_history', 'current_state', '_battle_story',
+  ]) {
+    delete source[key];
+  }
+  if (sourceTemplate === 'general-scenario') {
+    delete source.content;
+  }
+
+  const unmatched = assignWithMeta(source, base, SCENARIO_META);
+
+  if (sourceTemplate === 'general-scenario') {
+    const markdown = typeof data.content === 'string'
+      ? data.content
+      : toMarkdownContent({ ...data, templateId: undefined, name: undefined, codename: undefined, title: undefined });
+    base.description = `${String(base.description ?? '').trim() || ''}\n${markdown}`.trim();
+  } else if (sourceTemplate === 'magical-girl' || sourceTemplate === 'canshou' || sourceTemplate === 'general') {
+    const roleName = data.codename || data.name || base.title;
+    let description = '';
+    if (sourceTemplate === 'general') {
+      description = typeof data.content === 'string'
+        ? data.content
+        : toMarkdownContent({ ...data, templateId: undefined, name: undefined, codename: undefined, title: undefined });
+    } else {
+      const rest = { ...data };
+      delete rest.codename;
+      delete rest.name;
+      delete rest.templateId;
+      description = toMarkdownContent(rest);
+    }
+    const elements = isObject(base.elements) ? base.elements : {};
+    const roles = Array.isArray(elements.roles) ? elements.roles : [];
+    roles.push({
+      name: roleName,
+      description,
+    });
+    elements.roles = roles;
+    base.elements = elements;
+  }
+
+  const appendix = formatUnmatchedFields(unmatched);
+  if (appendix) {
+    base.description = `${String(base.description ?? '').trim() || ''}\n${appendix}`.trim();
+  }
+
+  if (data.adjudicationEvents) {
+    base.adjudicationEvents = cloneJson(data.adjudicationEvents);
+  }
+  if (battleStoryExtension) {
+    base._battle_story = battleStoryExtension;
+  }
+  copyKnownMetadata(data, base);
+
+  return { data: base, warnings: unmatched.length ? ['部分字段已合并至情景描述。'] : [] };
+};
+
+/**
+ * 五模板数据卡转换。与 Web `convertDataCard` 语义一致：先剥签名/模板标记，
+ * 再按目标模板分发；`warnings` 记录被合并/丢弃的字段提示。
+ *
+ * 注意本实现不做 zod 校验——Web 调用方如需保持 schema 门禁，应在结果上
+ * 再跑各自的 `Schema.parse`（两端 schema 均为 catchall passthrough）。
+ */
+export const convertDataCard = (
+  data: unknown,
+  target: DataCardTemplate,
+  sourceTemplate: InferableDataCardTemplate = inferDataCardTemplate(data),
+): SublimationCharacterConversionResult => {
+  if (!isObject(data)) {
+    throw new Error('无法转换：数据格式无效。');
+  }
+
+  const sanitized = sanitizeForConversion(data);
+  if (!isObject(sanitized)) throw new Error('无法转换：数据格式无效。');
+
+  switch (target) {
+    case 'general':
+      return convertToGeneral(sanitized);
+    case 'general-scenario':
+      return convertToGeneralScenario(sanitized, sourceTemplate);
+    case 'magical-girl':
+      return convertToMagicalGirl(sanitized, sourceTemplate);
+    case 'canshou':
+      return convertToCanshou(sanitized, sourceTemplate);
+    case 'scenario':
+      return convertToScenario(sanitized, sourceTemplate);
+  }
 };
 
 export type ArenaHistoryRetentionStrategy = 'keep-all' | 'keep-sublimation-only' | 'reset-all';

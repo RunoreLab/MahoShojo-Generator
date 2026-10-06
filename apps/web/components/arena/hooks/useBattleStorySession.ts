@@ -58,7 +58,7 @@ import {
   buildArenaReconciliationRetryPayload,
   type ArenaReconciliationRetryCombatant,
 } from '@/lib/arena/reconciliation-retry';
-import { readScenarioBattleStoryConfig } from '@/lib/scenario-battle-story';
+import { readScenarioBattleStoryConfig } from '@mahoshojo/domain/scenario-battle-story';
 import { normalizeUsage } from '@/lib/arena/battle-report-log-utils';
 import { readTextAndReasoningStreamFromResponse } from '@/lib/stream/read-text-and-reasoning-stream';
 import { STREAM_ABORT_REASON_USER } from '@/lib/stream/abort';

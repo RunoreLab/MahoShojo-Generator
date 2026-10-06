@@ -119,6 +119,16 @@
       "types": "./src/arena-battle-story-session.ts",
       "import": "./src/arena-battle-story-session.ts",
       "default": "./src/arena-battle-story-session.ts"
+    },
+    "./scenario-battle-story": {
+      "types": "./src/scenario-battle-story.ts",
+      "import": "./src/scenario-battle-story.ts",
+      "default": "./src/scenario-battle-story.ts"
+    },
+    "./adjudicator-normalize": {
+      "types": "./src/adjudicator-normalize.ts",
+      "import": "./src/adjudicator-normalize.ts",
+      "default": "./src/adjudicator-normalize.ts"
     }
   },
   "scripts": {

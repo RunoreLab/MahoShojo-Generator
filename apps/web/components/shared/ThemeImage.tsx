@@ -1,18 +1,4 @@
-import React from 'react';
+// 共享实现迁至 `@mahoshojo/ui-web/media`（D5.1-P2-r5，Desktop 角色管理页头同源）；
+// 此文件仅保留历史 import 路径的转发。
 
-export interface ThemeImageProps extends Omit<React.ImgHTMLAttributes<HTMLImageElement>, 'src' | 'alt'> {
-  lightSrc: string;
-  darkSrc: string;
-  alt: string;
-}
-
-export function ThemeImage({ lightSrc, darkSrc, alt, className, ...rest }: ThemeImageProps) {
-  const mergedClassName = className ? ` ${className}` : '';
-
-  return (
-    <>
-      <img src={lightSrc} alt={alt} className={`theme-image-light${mergedClassName}`} {...rest} />
-      <img src={darkSrc} alt={alt} className={`theme-image-dark${mergedClassName}`} {...rest} />
-    </>
-  );
-}
+export { ThemeImage, type ThemeImageProps } from '@mahoshojo/ui-web/media';

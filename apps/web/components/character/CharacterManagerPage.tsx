@@ -8,7 +8,6 @@ import { quickCheck, type FilterResult, type SensitiveMatchDetail } from '@/lib/
 import { randomChooseOneHanaName } from '@/lib/random-choose-hana-name';
 import { config } from '@/lib/config';
 import { validateDataCard, ValidationResult } from '@/lib/schemas';
-import { randomUUID } from '@/lib/crypto';
 import { downloadBlob } from '@/lib/client/blobUrl';
 import {
     buildWantuCharacterExportPayload,
@@ -24,7 +23,6 @@ import MagicalGirlCard from '@/components/MagicalGirlCard';
 import CanshouCard from '@/components/CanshouCard';
 import GeneralCharacterCard from '@/components/GeneralCharacterCard';
 import { CharacterPortraitAssetPanel } from '@/components/shared/CharacterPortraitAssetPanel';
-import { ThemeImage } from '@/components/shared/ThemeImage';
 import { JsonSizeIndicator } from '@/components/shared/JsonSizeIndicator';
 import { MainColor } from '@/lib/main-color';
 import { useAuth } from '@/lib/useAuth';
@@ -33,9 +31,6 @@ import { loadAuthMigrationStatus, type AuthMigrationStatus } from '@/components/
 import { getDataCardVisibilityValue } from '@/lib/data-card-status';
 import { isQuestionnaireDataCard } from '@/lib/questionnaire-data-card';
 
-// 引入 AdjudicatorEditor 和新类型
-import AdjudicatorEditor from '@/components/AdjudicatorEditor';
-
 // 导入拆分的组件
 import AuthModal from '@/components/CharManager/AuthModal';
 import SaveCardModal from '@/components/CharManager/SaveCardModal';
@@ -43,11 +38,27 @@ import DataCardsModal from '@/components/CharManager/DataCardsModal';
 import RecycleBinModal from '@/components/CharManager/RecycleBinModal';
 import NarrativeHistoryCardEditorModal from '@/components/CharManager/NarrativeHistoryCardEditorModal';
 import QuestionnaireCompatModal, { type QuestionnaireCompatTargetCard } from '@/components/CharManager/QuestionnaireCompatModal';
-import ScenarioEditor from '@/components/ScenarioEditor';
-import ScenarioBattleStoryPlanEditor from '@/components/ScenarioBattleStoryPlanEditor';
 import { UserWithTitle } from '@/components/UserTitle';
 import type { UserBadge } from '@/types/badge';
-import type { CharacterCurrentState, CurrentStateField, NarrativeHistoryDataCardV1 } from '@/types/arena';
+import type { NarrativeHistoryDataCardV1 } from '@/types/arena';
+import {
+    CharacterManagerAccountPanel,
+    CharacterManagerDraftBar,
+    CharacterManagerEditorBody,
+    CharacterManagerGuide,
+    CharacterManagerImportSection,
+    CharacterManagerPageHeader,
+    CharacterManagerTemplateSelect,
+    DEFAULT_NATIVENESS_REPLACE_HINT,
+    NAME_REPLACE_NATIVE_MAX_CHARS,
+    cardTopName,
+    characterManagerNameFieldAddon,
+    extractCardBaseName,
+    getDisplayCharCount,
+    nameReplacePreservesNativeness,
+    replaceAllNamesInData,
+    type CharacterManagerCapabilities,
+} from '@mahoshojo/ui-web/character-manager';
 import {
     inferTemplate,
     createBlankDataCard,
@@ -63,7 +74,6 @@ import {
 } from '@/lib/character-manager-page-draft';
 import type { CharacterCardPortraitAsset } from '@/types/visual-asset';
 import {
-    DataCardFieldEditor,
     setDataCardFieldValue,
     type DataCardFieldAddon,
     type DataCardFieldEditorClasses,
@@ -90,15 +100,8 @@ const NATIVE_PRESERVING_PATHS = new Set([
     'appearance.colorScheme' // 允许修改配色方案
 ]);
 
-// “一键替换曾用名”用于批量替换数据中的名称引用。
-// 为避免滥用该能力伪造“魔改原生卡”，当替换用的新基础名称过长时，允许替换，但会导致原生性丧失（保存时移除原生签名）。
-const NAME_REPLACE_NATIVE_MAX_CHARS = 32;
 const LEGACY_MIGRATION_DEFER_COUNT_STORAGE_KEY = 'mahoshojo_auth_migration_defer_count';
 const LEGACY_MIGRATION_SOFT_BLOCK_THRESHOLD = 3;
-
-const getDisplayCharCount = (text: string): number => {
-    return Array.from((text ?? '').trim()).length;
-};
 
 const getArrestedHref = (reason?: string): string => {
     const trimmedReason = typeof reason === 'string' ? reason.trim() : '';
@@ -113,46 +116,6 @@ const getArrestedHref = (reason?: string): string => {
  */
 const isObject = (item: any): boolean => {
     return (item && typeof item === 'object' && !Array.isArray(item));
-};
-
-/**
- * 辅助函数：转义正则表达式特殊字符。
- * @param str - 需要转义的字符串。
- * @returns {string} 转义后的字符串。
- */
-const escapeRegExp = (str: string): string => {
-    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-};
-
-/**
- * 辅助函数：递归地在数据对象中替换所有出现的旧名称。
- * @param data - 要进行替换操作的数据对象或数组。
- * @param oldBaseName - 原始的基础名称（不带称号）。
- * @param newBaseName - 新的基础名称。
- * @returns {any} 返回一个经过名称替换后的新数据对象。
- */
-const replaceAllNamesInData = (data: any, oldBaseName: string, newBaseName: string): any => {
-    if (typeof data === 'string') {
-        // 使用正则表达式进行替换。
-        // 这个表达式会匹配 "旧基础名称" 或 "旧基础名称「称号」" 两种形式。
-        // (「[^」]+」)? 是一个捕获组，用于匹配并保留称号部分。
-        const regex = new RegExp(escapeRegExp(oldBaseName) + '(「[^」]+」)?', 'g');
-        return data.replace(regex, `${newBaseName}$1`);
-    }
-    if (Array.isArray(data)) {
-        // 如果是数组，则递归遍历数组中的每一项。
-        return data.map(item => replaceAllNamesInData(item, oldBaseName, newBaseName));
-    }
-    if (isObject(data)) {
-        // 如果是对象，则递归遍历对象的每一个值。
-        const newData: { [key: string]: any } = {};
-        for (const key in data) {
-            newData[key] = replaceAllNamesInData(data[key], oldBaseName, newBaseName);
-        }
-        return newData;
-    }
-    // 对于非字符串、数组、对象类型的值，直接返回原值。
-    return data;
 };
 
 type SensitiveIssue = {
@@ -308,8 +271,16 @@ const gradientColors: Record<string, { first: string; second: string }> = {
     [MainColor.Green]: { first: '#51cf66', second: '#8ce99a' }
 };
 
-const TEMPLATE_PLACEHOLDER_VALUE = '__unknown__';
-const TEMPLATE_ORDER: DataCardTemplate[] = ['magical-girl', 'canshou', 'general', 'scenario', 'general-scenario'];
+/** Web 端角色管理页能力快照：全量功能均已交付（DESK-PARITY-001 的投影基准）。 */
+const WEB_CHARACTER_MANAGER_CAPABILITIES: CharacterManagerCapabilities = {
+    cloudCards: 'manage',
+    tachie: true,
+    questionnaireEditor: true,
+    templateSelect: true,
+    nativenessInfo: true,
+    sensitiveWords: true,
+    scenarioEditors: true,
+};
 
 export const CharacterManagerPage: React.FC = () => {
     const router = useRouter();
@@ -369,12 +340,6 @@ export const CharacterManagerPage: React.FC = () => {
     // 【新增】图片保存模态框的状态
     const [showImageModal, setShowImageModal] = useState(false);
     const [savedImageUrl, setSavedImageUrl] = useState<string | null>(null);
-
-    // 用于控制说明区域的显示与隐藏，默认为 true
-    const [isGuideVisible, setIsGuideVisible] = useState(true);
-
-    // 控制“一键替换曾用名”按钮的显示状态
-    const [showNameReplaceButton, setShowNameReplaceButton] = useState(false);
 
     // 用于控制粘贴区域折叠/展开的状态，默认为折叠
     const [isPasteAreaVisible, setIsPasteAreaVisible] = useState(false);
@@ -875,8 +840,7 @@ export const CharacterManagerPage: React.FC = () => {
         loadUserBadges();
     };
 
-    // 检测是否为情景文件
-    const isStructuredScenarioData = (data: any): boolean => inferTemplate(data) === 'scenario';
+    // 检测是否为情景文件（结构化情景/通用情景的统一判定）
     const isScenarioData = (data: any): boolean => {
         const template = inferTemplate(data);
         return template === 'scenario' || template === 'general-scenario';
@@ -1058,31 +1022,6 @@ export const CharacterManagerPage: React.FC = () => {
     }, [characterData, currentTemplate]);
 
     /**
-     * 专门用于控制“一键替换名称”按钮的显示逻辑。
-     * 这个 Hook 不关心角色是否为原生，只关心名称字段是否发生了变化。
-     * 这样就解决了非原生角色无法显示此按钮的问题。
-     */
-    useEffect(() => {
-        // 确保原始数据和当前编辑数据都存在
-        if (!originalData || !characterData) {
-            setShowNameReplaceButton(false);
-            return;
-        }
-
-        // 获取原始名称和当前名称
-        const originalName = originalData.codename || originalData.name;
-        const currentName = characterData.codename || characterData.name;
-
-        // 如果名称发生了变化，则显示替换按钮，否则隐藏
-        if (originalName !== currentName) {
-            setShowNameReplaceButton(true);
-        } else {
-            setShowNameReplaceButton(false);
-        }
-    }, [characterData, originalData]); // 依赖项只包含 characterData 和 originalData
-
-
-    /**
      * 现在只负责追踪“原生性”是否因核心数据被修改而丧失。
      * 移除了原有的名称比较和按钮显示逻辑，使其职责更单一、逻辑更清晰。
      */
@@ -1262,19 +1201,6 @@ export const CharacterManagerPage: React.FC = () => {
         }
     };
 
-    // 文件上传处理
-    const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-        const file = event.target.files?.[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            const text = e.target?.result as string;
-            processJsonData(text);
-        };
-        reader.readAsText(file);
-        event.target.value = ''; // 允许重复上传
-    };
-
     // 粘贴加载处理
     const handlePasteAndLoad = () => {
         if (!pastedJson.trim()) {
@@ -1284,11 +1210,7 @@ export const CharacterManagerPage: React.FC = () => {
         processJsonData(pastedJson);
     };
 
-    const handleTemplateOptionChange = useCallback((event: React.ChangeEvent<HTMLSelectElement>) => {
-        const value = event.target.value;
-        if (value === TEMPLATE_PLACEHOLDER_VALUE) return;
-        const targetTemplate = value as DataCardTemplate;
-
+    const handleTemplateSelect = useCallback((targetTemplate: DataCardTemplate) => {
         try {
             setCharacterPortraitAsset(null);
             if (!characterData) {
@@ -1331,17 +1253,18 @@ export const CharacterManagerPage: React.FC = () => {
     const handleReplaceAllNames = useCallback(() => {
         if (!characterData || !originalData) return;
 
-        const oldName = originalData.codename || originalData.name;
-        const newName = characterData.codename || characterData.name;
+        const oldName = cardTopName(originalData);
+        const newName = cardTopName(characterData);
+        if (!oldName || !newName) return;
 
         // 从完整名称中提取基础名称（去除称号）
-        const oldBaseName = oldName.split('「')[0];
-        const newBaseName = newName.split('「')[0];
+        const oldBaseName = extractCardBaseName(oldName);
+        const newBaseName = extractCardBaseName(newName);
 
         if (oldBaseName === newBaseName) return;
 
         const newBaseNameCharCount = getDisplayCharCount(newBaseName);
-        const shouldPreserveNativeness = newBaseNameCharCount <= NAME_REPLACE_NATIVE_MAX_CHARS;
+        const shouldPreserveNativeness = nameReplacePreservesNativeness(newBaseName);
 
         // 始终替换当前编辑数据
         const updatedCharacterData = replaceAllNamesInData(characterData, oldBaseName, newBaseName);
@@ -1366,8 +1289,7 @@ export const CharacterManagerPage: React.FC = () => {
         setCharacterData(updatedCharacterData);
         setOriginalData(updatedOriginalData);
 
-        // 隐藏按钮并显示成功消息
-        setShowNameReplaceButton(false);
+        // 隐藏按钮（名称一致后条件不再满足）并显示成功消息
         if (!shouldPreserveNativeness && isNative && !hasLostNativeness) {
             setHasLostNativeness(true);
             setMessage({
@@ -1432,44 +1354,23 @@ export const CharacterManagerPage: React.FC = () => {
                 </span>
             </p>
         ) : null;
-        const isNameField = currentPath.length === 1 && (currentPath[0] === 'codename' || currentPath[0] === 'name');
+        const nameAddon = characterManagerNameFieldAddon(currentPath, {
+            data: characterData,
+            originalData,
+            onRandomCodename: handleRandomCodename,
+            onReplaceAllNames: handleReplaceAllNames,
+            replaceHint: DEFAULT_NATIVENESS_REPLACE_HINT,
+        });
         return {
             invalid: hasIssue,
-            inline: currentPath.length === 1 && currentPath[0] === 'codename' ? (
-                <button onClick={handleRandomCodename} type="button" className="ml-2 px-3 py-1.5 text-xs font-semibold text-white bg-pink-500 rounded-lg hover:bg-pink-600">随机</button>
-            ) : null,
+            inline: nameAddon.inline,
             below: (
                 <>
-                    {/* 条件渲染“一键替换”按钮 */}
-                    {showNameReplaceButton && isNameField && (
-                        <div className="mt-2">
-                            <button
-                                onClick={handleReplaceAllNames}
-                                className="text-sm text-white bg-green-500 hover:bg-green-600 rounded-md px-3 py-1 w-full"
-                            >
-                                点击将所有“{originalData.codename || originalData.name}”替换为“{characterData.codename || characterData.name}”
-                            </button>
-                            <p className="text-xs text-gray-500 mt-1">
-                                提示：若新基础名称超过 {NAME_REPLACE_NATIVE_MAX_CHARS} 字，替换仍可执行，但会视为“衍生数据”并移除原生签名。
-                            </p>
-                        </div>
-                    )}
+                    {nameAddon.below}
                     {issueHint}
                 </>
             ),
         };
-    };
-
-    const renderFormFields = (data: any): React.ReactNode => {
-        if (!isObject(data)) return null;
-        return (
-            <DataCardFieldEditor
-                data={data}
-                onFieldChange={handleFieldChange}
-                classes={CHARACTER_MANAGER_FIELD_CLASSES}
-                renderFieldAddon={renderFieldAddon}
-            />
-        );
     };
 
     const handleRandomCodename = () => {
@@ -1569,127 +1470,6 @@ export const CharacterManagerPage: React.FC = () => {
         setManualCheckText('');
         setManualCheckResult(null);
     }, []);
-
-    // ===================================
-    // 历战记录管理函数 (SRS 3.7.2)
-    // ===================================
-    const handleDeleteHistoryEntry = (id: number) => {
-        setCharacterData((prev: any) => {
-            const newHistory = { ...prev.arena_history };
-            newHistory.entries = newHistory.entries.filter((entry: any) => entry.id !== id);
-            return { ...prev, arena_history: newHistory };
-        });
-    };
-
-    const handleResetHistoryAttributes = () => {
-        setCharacterData((prev: any) => {
-            const newHistory = { ...prev.arena_history };
-            newHistory.attributes.world_line_id = randomUUID();
-            newHistory.attributes.created_at = new Date().toISOString();
-            return { ...prev, arena_history: newHistory };
-        });
-    };
-
-    const handleClearHistory = () => {
-        if (window.confirm('确定要清除所有历战记录吗？此操作将清空 entries 数组。')) {
-            setCharacterData((prev: any) => {
-                const newHistory = { ...prev.arena_history };
-                newHistory.entries = [];
-                return { ...prev, arena_history: newHistory };
-            });
-        }
-    };
-
-    const getCurrentStateSnapshot = useCallback((): CharacterCurrentState => {
-        const base = characterData?.current_state;
-        return {
-            summary: base?.summary ?? '',
-            fields: Array.isArray(base?.fields) ? [...base.fields] : [],
-            updated_at: base?.updated_at ?? null,
-        };
-    }, [characterData]);
-
-    const commitCurrentState = useCallback((next: CharacterCurrentState) => {
-        handleFieldChange('current_state', {
-            ...next,
-            fields: Array.isArray(next.fields) ? next.fields : [],
-            updated_at: new Date().toISOString(),
-        });
-    }, [handleFieldChange]);
-
-    const handleCurrentStateSummaryChange = useCallback((value: string) => {
-        const snapshot = getCurrentStateSnapshot();
-        commitCurrentState({ ...snapshot, summary: value });
-    }, [commitCurrentState, getCurrentStateSnapshot]);
-
-    const handleAddCurrentStateField = useCallback(() => {
-        const snapshot = getCurrentStateSnapshot();
-        const fields = snapshot.fields ?? [];
-        const newField: CurrentStateField = {
-            id: randomUUID(),
-            label: `字段 ${fields.length + 1}`,
-            type: 'string',
-            value: '',
-        };
-        commitCurrentState({ ...snapshot, fields: [...fields, newField] });
-    }, [commitCurrentState, getCurrentStateSnapshot]);
-
-    const handleRemoveCurrentStateField = useCallback((fieldId: string) => {
-        const snapshot = getCurrentStateSnapshot();
-        const fields = snapshot.fields ?? [];
-        commitCurrentState({ ...snapshot, fields: fields.filter(field => field.id !== fieldId) });
-    }, [commitCurrentState, getCurrentStateSnapshot]);
-
-    const handleCurrentStateFieldLabelChange = useCallback((fieldId: string, label: string) => {
-        const snapshot = getCurrentStateSnapshot();
-        const fields = snapshot.fields ?? [];
-        commitCurrentState({
-            ...snapshot,
-            fields: fields.map(field => field.id === fieldId ? { ...field, label } : field),
-        });
-    }, [commitCurrentState, getCurrentStateSnapshot]);
-
-    const handleCurrentStateFieldTypeChange = useCallback((fieldId: string, type: CurrentStateField['type']) => {
-        const snapshot = getCurrentStateSnapshot();
-        const fields = snapshot.fields ?? [];
-        commitCurrentState({
-            ...snapshot,
-            fields: fields.map(field => {
-                if (field.id !== fieldId) return field;
-                let nextValue: string | number | boolean;
-                if (type === 'boolean') {
-                    nextValue = Boolean(field.value);
-                } else if (type === 'number') {
-                    const numeric = Number(field.value);
-                    nextValue = Number.isFinite(numeric) ? numeric : 0;
-                } else {
-                    nextValue = field.value?.toString() ?? '';
-                }
-                return { ...field, type, value: nextValue };
-            }),
-        });
-    }, [commitCurrentState, getCurrentStateSnapshot]);
-
-    const handleCurrentStateFieldValueChange = useCallback((fieldId: string, rawValue: string) => {
-        const snapshot = getCurrentStateSnapshot();
-        const fields = snapshot.fields ?? [];
-        commitCurrentState({
-            ...snapshot,
-            fields: fields.map(field => {
-                if (field.id !== fieldId) return field;
-                let nextValue: string | number | boolean = rawValue;
-                if (field.type === 'boolean') {
-                    nextValue = rawValue === 'true';
-                } else if (field.type === 'number') {
-                    const numeric = Number(rawValue);
-                    nextValue = Number.isFinite(numeric) ? numeric : 0;
-                } else {
-                    nextValue = rawValue;
-                }
-                return { ...field, value: nextValue };
-            }),
-        });
-    }, [commitCurrentState, getCurrentStateSnapshot]);
 
     // ===================================
     // 保存与输出 (SRS 3.7.4 & 3.7.5)
@@ -1815,22 +1595,18 @@ export const CharacterManagerPage: React.FC = () => {
             <div className="magic-background-white">
                 <div className="container">
                     <div className="card">
-                        <div className="text-center mb-4">
-                            <div className="flex justify-center items-center mt-4" style={{ marginBottom: '1rem' }}>
-                                <ThemeImage lightSrc="/character-manager.svg" darkSrc="/character-manager-white.svg" width={320} height={40} alt="角色数据管理" />
-                            </div>
-                            <p className="subtitle mt-2">在这里查看、编辑和维护你的角色档案</p>
-                            {/* 实验性警告 */}
-                            <div className="flex mb-3 p-2 bg-yellow-50 border border-yellow-200 rounded text-xs text-yellow-800 text-left">
-                                <div className="mr-2">⚠️ </div>
-                                <div>用户系统仍处于测试阶段，可能存在功能不稳定的情况，敬请谅解。当前处于账号迁移期，请尽快在个人页设置密码完成迁移。</div>
-                            </div>
-                            {/* 账户状态显示区域 */}
-                            <div className="mt-4 p-3 bg-pink-50 rounded-lg">
-                                {authLoading ? (
-                                    <p className="text-sm text-gray-600">加载中...</p>
-                                ) : isAuthenticated ? (
-                                    <div className="space-y-4">
+                        <CharacterManagerPageHeader
+                            notice={(
+                                <div className="flex mb-3 p-2 bg-yellow-50 border border-yellow-200 rounded text-xs text-yellow-800 text-left">
+                                    <div className="mr-2">⚠️ </div>
+                                    <div>用户系统仍处于测试阶段，可能存在功能不稳定的情况，敬请谅解。当前处于账号迁移期，请尽快在个人页设置密码完成迁移。</div>
+                                </div>
+                            )}
+                        >
+                            <CharacterManagerAccountPanel
+                                status={authLoading ? 'loading' : isAuthenticated ? 'authenticated' : 'unauthenticated'}
+                                banner={(
+                                    <>
                                         {authMigrationLoading ? (
                                             <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800 text-left">
                                                 正在检查账号迁移状态...
@@ -1879,175 +1655,91 @@ export const CharacterManagerPage: React.FC = () => {
                                                 </div>
                                             </div>
                                         ) : null}
-                                        {/* 操作按钮行 */}
-                                        <div className="flex items-center justify-between">
-                                            <div className="font-semibold text-pink-800 leading-[28px]">
-                                                用户中心
-                                            </div>
-                                            <div>
-                                                <Link
-                                                    href="/badge-manager"
-                                                    className="mr-2 px-3 py-1.5 text-xs bg-pink-200 text-gray-700 rounded-lg hover:bg-pink-300 transition-colors"
-                                                >
-                                                    徽章管理
-                                                </Link>
-                                                <Link
-                                                    href="/redeem"
-                                                    className="mr-2 px-3 py-1.5 text-xs bg-pink-200 text-gray-700 rounded-lg hover:bg-pink-300 transition-colors"
-                                                >
-                                                    兑换
-                                                </Link>
-                                                <button
-                                                    onClick={handleLogout}
-                                                    className="px-3 py-1.5 text-xs bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
-                                                >
-                                                    退出登录
-                                                </button>
-                                            </div>
-                                        </div>
-                                        {/* 用户信息行 */}
-                                        <div className="flex items-center justify-between">
-                                            <div className="flex items-center gap-2">
-                                                <span className="text-sm text-gray-600">欢迎回来，</span>
-                                                <div className="flex flex-col">
-                                                    <UserWithTitle
-                                                        username={user?.username || ''}
-                                                        prefix={user?.prefix}
-                                                        usernameClassName="text-sm text-pink-700"
-                                                        titleClassName="text-xs"
-                                                        badges={userBadges}
-                                                        showBadges={true}
-                                                    />
-                                                </div>
-                                            </div>
-                                        </div>
-
-                                        {/* 操作按钮行 */}
-                                        <div className="flex items-end justify-between">
-                                            <button
-                                                onClick={() => setShowDataCardsModal(true)}
-                                                className="flex items-center cursor-pointer justify-center w-full gap-2 px-8 py-2.5 bg-pink-600 text-white rounded-lg hover:bg-pink-700 transition-colors font-medium"
-                                            >
-                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-                                                </svg>
-                                                <span className="text-sm">
-                                                    我的数据卡 <span className="font-bold">({userUsedSlots}/{userCapacity} 槽)</span>
-                                                </span>
-                                            </button>
-                                        </div>
-                                    </div>
-                                ) : (
-                                    <div className="text-center">
-                                        <p className="text-sm text-gray-600 mb-2">登录后可以保存和管理您的角色数据卡</p>
-                                        <button
-                                            onClick={() => setShowAuthModal(true)}
-                                            className="px-4 py-2 bg-pink-600 text-white rounded hover:bg-pink-700"
+                                    </>
+                                )}
+                                actions={(
+                                    <div>
+                                        <Link
+                                            href="/badge-manager"
+                                            className="mr-2 px-3 py-1.5 text-xs bg-pink-200 text-gray-700 rounded-lg hover:bg-pink-300 transition-colors"
                                         >
-                                            登录 / 注册
+                                            徽章管理
+                                        </Link>
+                                        <Link
+                                            href="/redeem"
+                                            className="mr-2 px-3 py-1.5 text-xs bg-pink-200 text-gray-700 rounded-lg hover:bg-pink-300 transition-colors"
+                                        >
+                                            兑换
+                                        </Link>
+                                        <button
+                                            onClick={handleLogout}
+                                            className="px-3 py-1.5 text-xs bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
+                                        >
+                                            退出登录
                                         </button>
+                                    </div>
+                                )}
+                                userDisplay={(
+                                    <UserWithTitle
+                                        username={user?.username || ''}
+                                        prefix={user?.prefix}
+                                        usernameClassName="text-sm text-pink-700"
+                                        titleClassName="text-xs"
+                                        badges={userBadges}
+                                        showBadges={true}
+                                    />
+                                )}
+                                myDataCards={isAuthenticated ? {
+                                    onOpen: () => setShowDataCardsModal(true),
+                                    usedSlots: userUsedSlots,
+                                    capacity: userCapacity,
+                                } : undefined}
+                                signedOut={{
+                                    actionLabel: '登录 / 注册',
+                                    onAction: () => setShowAuthModal(true),
+                                    extra: (
                                         <Link
                                             href="/password-recovery"
                                             className="ml-3 text-sm text-purple-600 hover:text-purple-700 underline"
                                         >
                                             找回密码
                                         </Link>
-                                    </div>
-                                )}
-                            </div>
-                        </div>
+                                    ),
+                                }}
+                            />
+                        </CharacterManagerPageHeader>
 
-                        <div className="mb-6 p-4 bg-gray-100 border border-gray-300 rounded-lg text-sm text-gray-800">
-                            <button
-                                onClick={() => setIsGuideVisible(!isGuideVisible)}
-                                className="w-full text-left font-bold text-gray-700 mb-2 focus:outline-none"
-                            >
-                                {isGuideVisible ? '▼' : '▶'} 使用指南
-                            </button>
-                            {isGuideVisible && (
-                                <div className="mt-2 space-y-3">
-                                    <div>
-                                        <h4 className="font-semibold text-gray-800">核心功能：</h4>
-                                        <ul className="list-disc list-inside space-y-1 mt-1 pl-2">
-                                            <li><span className="font-semibold">加载角色：</span>通过上传 <code>.json</code> 文件或直接粘贴文本内容来加载你的角色档案。</li>
-                                            <li><span className="font-semibold">编辑数据：</span>可视化地查看并修改角色的各项设定，包括调整历战记录和新增的“内嵌随机事件”。</li>
-                                            <li><span className="font-semibold">一键换名：</span>修改名称后，可一键替换档案中所有旧名称。</li>
-                                            <li><span className="font-semibold">生成立绘：</span>加载角色后，展开下方的“立绘生成”模块，可为你的角色创建立绘。</li>
-                                            <li><span className="font-semibold">编辑情景：</span>响应用户呼声，现在可以在这里编辑情景文件了。</li>
-                                            <li><span className="font-semibold">问卷编辑器：</span><Link href="/questionnaire-editor" className="text-purple-600 hover:text-purple-700 underline">创建与调整自定义问卷</Link>，可导出或保存为云端问卷数据卡。</li>
-                                            <li><span className="font-semibold">保存与导出：</span>完成修改后，可下载新的 <code>.json</code> 文件或将内容复制到剪贴板。</li>
-                                        </ul>
-                                    </div>
-                                    <div>
-                                        <h4 className="font-semibold text-gray-800">关于“原生数据”：</h4>
-                                        <ul className="list-disc list-inside space-y-1 mt-1 pl-2">
-                                            <li>“原生数据”指由本生成器直接产出、未经核心修改的角色文件。它包含一个数字签名，用于验证其真实性。</li>
-                                            <li>在竞技场等功能中，系统会更信任原生数据。对非原生数据可能会启用更严格的内容安全检查。</li>
-                                        </ul>
-                                    </div>
-                                    <div>
-                                        <h4 className="font-semibold text-gray-800">如何保持角色“原生性”：</h4>
-                                        <p className="mt-1">
-                                            请注意：对角色档案的<span className="font-bold text-red-600">绝大多数修改</span>都会使其失去“原生性”，保存后数字签名将被移除。
-                                        </p>
-                                        <p className="mt-2">
-                                            以下是<span className="font-bold text-green-600">唯一允许</span>在保持原生性的前提下进行的操作：
-                                        </p>
-                                        <ul className="list-disc list-inside space-y-1 mt-1 pl-2">
-                                            <li>修改角色的 <code className="bg-gray-200 px-1 rounded text-xs">codename</code> (魔法少女) 或 <code className="bg-gray-200 px-1 rounded text-xs">name</code> (残兽) 字段。</li>
-                                            <li>在“历战记录管理”中<span className="font-semibold">删除</span>一条或多条历史记录。</li>
-                                            <li>在“历战记录管理”中点击<span className="font-semibold">“重置属性”或“清除所有记录”</span>按钮。</li>
-                                            <li><span className="font-semibold">添加、编辑或删除</span>内嵌的随机事件。</li>
-                                        </ul>
-                                        <p className="text-xs text-gray-500 mt-2">（注：新增或修改历战记录、编辑除上述豁免字段外的任何字段，都会导致原生性丧失。）</p>
-                                    </div>
-                                </div>
+                        <CharacterManagerGuide
+                            capabilities={WEB_CHARACTER_MANAGER_CAPABILITIES}
+                            linkComponent={Link}
+                            saveAndExportText={(
+                                <>
+                                    完成修改后，可下载新的 <code>.json</code> 文件或将内容复制到剪贴板。
+                                </>
                             )}
-                        </div>
+                        />
 
-                        <div className="mb-6">
-                            <label className="block text-sm font-semibold text-gray-700 mb-1">内容模板</label>
-                            <select
-                                value={selectedTemplate === 'unknown' ? TEMPLATE_PLACEHOLDER_VALUE : selectedTemplate}
-                                onChange={handleTemplateOptionChange}
-                                className="input-field"
-                            >
-                                <option value={TEMPLATE_PLACEHOLDER_VALUE} disabled>
-                                    {characterData ? '未知类型（请选择转换目标）' : '选择模板以创建空白内容'}
-                                </option>
-                                {TEMPLATE_ORDER.map((template) => (
-                                    <option key={template} value={template}>
-                                        {TEMPLATE_LABELS[template]}
-                                    </option>
-                                ))}
-                            </select>
-                            <p className="text-xs text-gray-500 mt-1">
-                                {characterData
-                                    ? '切换模板会尝试根据规则转换当前内容，原生性状态不会因此改变。'
-                                    : '未加载内容时，选择模板将创建对应的空白数据卡，初始即为非原生。'}
-                            </p>
-                        </div>
+                        <CharacterManagerTemplateSelect
+                            value={selectedTemplate}
+                            hasContent={characterData !== null}
+                            onSelect={handleTemplateSelect}
+                        />
 
-                        <div className="mb-6 flex flex-col gap-2 rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-xs text-amber-900 sm:flex-row sm:items-center sm:justify-between">
-                            <span>
-                                {autoSaveTimestamp
-                                    ? `已自动保存于 ${new Date(autoSaveTimestamp).toLocaleTimeString()}`
-                                    : '当前输入会自动保存到浏览器，刷新后仍可恢复。'}
-                            </span>
-                            <button
-                                type="button"
-                                onClick={handleClearCharacterManagerDraft}
-                                className="text-left font-semibold text-amber-800 hover:text-amber-950 sm:text-right"
-                            >
-                                清空本地草稿
-                            </button>
-                        </div>
+                        <CharacterManagerDraftBar
+                            savedAt={autoSaveTimestamp}
+                            onClear={handleClearCharacterManagerDraft}
+                        />
 
                         {!characterData ? (
-                            <>
-                                <div className="input-group">
-                                    <label htmlFor="file-upload" className="input-label">上传 .json 设定文件（支持角色、情景、万途通用卡）</label>
-                                    <input id="file-upload" type="file" accept=".json" onChange={handleFileChange} className="input-field file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0" />
+                            <CharacterManagerImportSection
+                                onFile={(file) => {
+                                    const reader = new FileReader();
+                                    reader.onload = (e) => {
+                                        processJsonData(e.target?.result as string);
+                                    };
+                                    reader.readAsText(file);
+                                }}
+                                fileExtra={(
                                     <label className="mt-2 flex items-start gap-2 text-xs text-gray-600">
                                         <input
                                             type="checkbox"
@@ -2057,245 +1749,94 @@ export const CharacterManagerPage: React.FC = () => {
                                         />
                                         <span>导入万途往返卡时恢复本仓库原始模板</span>
                                     </label>
-                                </div>
-                                <div className="text-center my-4 text-gray-500">或</div>
-                                {/* 可折叠的粘贴区域 */}
-                                <div className="mb-6">
-                                    <button
-                                        onClick={() => setIsPasteAreaVisible(!isPasteAreaVisible)}
-                                        className="text-pink-700 hover:underline cursor-pointer mb-2 font-semibold text-sm"
-                                    >
-                                        {isPasteAreaVisible ? '▼ 折叠文本粘贴区域' : '▶ 展开文本粘贴区域 (手机端推荐)'}
-                                    </button>
-                                    {isPasteAreaVisible && (
-                                        <div className="input-group mt-2">
-                                            <textarea
-                                                value={pastedJson}
-                                                onChange={(e) => setPastedJson(e.target.value)}
-                                                placeholder="在此处粘贴角色、情景等数据卡的 .json 内容..."
-                                                className="input-field resize-y h-32"
-                                                disabled={isLoading}
-                                            />
-                                            <button onClick={handlePasteAndLoad} disabled={isLoading || !pastedJson.trim()} className="generate-button mt-2 mb-0">
-                                                {isLoading ? '加载中...' : '从文本加载数据'}
-                                            </button>
-                                        </div>
-                                    )}
-                                </div>
-                            </>
+                                )}
+                                pasteOpen={isPasteAreaVisible}
+                                onPasteOpenChange={setIsPasteAreaVisible}
+                                pasteValue={pastedJson}
+                                onPasteChange={setPastedJson}
+                                onPasteLoad={handlePasteAndLoad}
+                                pasteBusy={isLoading}
+                            />
                         ) : (
-                            <div>
-                                <div className="flex justify-between items-center mb-4">
-                                    <h2 className="text-xl font-bold">
-                                        {isScenarioData(characterData) ?
-                                            `编辑情景: ${characterData.title || characterData.name || '未命名情景'}` :
-                                            `编辑角色: ${originalData.codename || originalData.name}`
-                                        }
-                                    </h2>
-                                    {isNative && !hasLostNativeness ? (
-                                        <span className="px-3 py-1 text-xs font-semibold text-green-800 bg-green-100 rounded-full">原生数据</span>
-                                    ) : (
-                                        <span className="px-3 py-1 text-xs font-semibold text-yellow-800 bg-yellow-100 rounded-full">衍生数据</span>
-                                    )}
-                                </div>
-
-                                {/* 按文件类型显示不同的编辑界面 */}
-                                {isStructuredScenarioData(characterData) ? (
-                                    <ScenarioEditor
-                                        data={characterData}
-                                        onChange={handleFieldChange}
-                                    />
+                            <CharacterManagerEditorBody
+                                data={characterData}
+                                onFieldChange={handleFieldChange}
+                                title={isScenarioData(characterData)
+                                    ? `编辑情景: ${characterData.title || characterData.name || '未命名情景'}`
+                                    : `编辑角色: ${originalData.codename || originalData.name}`}
+                                badge={isNative && !hasLostNativeness ? (
+                                    <span className="px-3 py-1 text-xs font-semibold text-green-800 bg-green-100 rounded-full">原生数据</span>
                                 ) : (
-                                    <div className="space-y-4">
-                                        {currentTemplate === 'general-scenario' ? (
-                                            <ScenarioBattleStoryPlanEditor
-                                                data={characterData}
-                                                onChange={handleFieldChange}
-                                            />
-                                        ) : null}
-                                        {renderFormFields(characterData)}
-                                    </div>
+                                    <span className="px-3 py-1 text-xs font-semibold text-yellow-800 bg-yellow-100 rounded-full">衍生数据</span>
                                 )}
-
-                                {/* 历战记录管理模块 - 只对角色数据显示 */}
-                                {!isScenarioData(characterData) && characterData.arena_history && (
-                                    <fieldset className="border border-gray-300 p-4 rounded-lg mt-4">
-                                        <legend className="text-sm font-semibold px-2 text-gray-600">历战记录管理</legend>
-                                        <div className="space-y-4">
-                                            {characterData.arena_history.entries?.map((entry: any) => (
-                                                <div key={entry.id} className="flex items-start justify-between bg-gray-50 p-2 rounded">
-                                                    <p className="text-xs" title={entry.title}>{entry.id}: {entry.title}</p>
-                                                    <button onClick={() => handleDeleteHistoryEntry(entry.id)} className="text-red-500 hover:text-red-700 text-xs font-bold px-2">删除</button>
-                                                </div>
-                                            ))}
-                                            <div className="flex flex-wrap gap-2 pt-2 border-t">
-                                                <button onClick={handleResetHistoryAttributes} className="text-xs bg-yellow-100 text-yellow-800 px-3 py-1 rounded hover:bg-yellow-200">重置属性</button>
-                                                <button onClick={handleClearHistory} className="text-xs bg-red-100 text-red-800 px-3 py-1 rounded hover:bg-red-200">清除所有记录</button>
-                                            </div>
-                                        </div>
-                                    </fieldset>
-                                )}
-
-                                {!isScenarioData(characterData) && (
-                                    <fieldset className="border border-gray-300 p-4 rounded-lg mt-4">
-                                        <legend className="text-sm font-semibold px-2 text-gray-600">当前状态</legend>
-                                        <div className="space-y-4">
-                                            <div>
-                                                <label className="block text-xs font-semibold text-gray-600 mb-1">状态摘要</label>
-                                                <textarea
-                                                    value={characterData.current_state?.summary ?? ''}
-                                                    onChange={(e) => handleCurrentStateSummaryChange(e.target.value)}
-                                                    className="input-field"
-                                                    rows={3}
-                                                    placeholder="记录角色身体状况、情绪、物品等即时状态..."
-                                                />
-                                                <p className="text-[11px] text-gray-500 mt-1">修改当前状态将使原生签名失效。请尽量统一使用状态摘要，避免随意增加自定义字段。</p>
-                                            </div>
-                                            <div>
-                                                <div className="flex items-center justify-between mb-2">
-                                                    <span className="text-xs font-semibold text-gray-600">自定义字段</span>
+                                classes={CHARACTER_MANAGER_FIELD_CLASSES}
+                                renderFieldAddon={renderFieldAddon}
+                                bottomActions={(
+                                    <div className="mt-8 pt-4 border-t space-y-2">
+                                        {isAuthenticated && characterData && (
+                                            validationResult?.success ? (
+                                                <div className="space-y-2">
                                                     <button
-                                                        type="button"
-                                                        onClick={handleAddCurrentStateField}
-                                                        className="text-xs text-purple-700 font-semibold hover:underline"
+                                                        onClick={handleSaveAsDataCard}
+                                                        className="generate-button w-full"
+                                                        style={{ backgroundColor: '#10b981', backgroundImage: 'linear-gradient(to right, #10b981, #059669)' }}
                                                     >
-                                                        + 新增字段
+                                                        保存到云端
                                                     </button>
+                                                    <JsonSizeIndicator
+                                                        data={characterData}
+                                                        className="mt-0"
+                                                        warningText="⚠️ 接近云端 300KB 上限，保存可能失败，请先精简数据。"
+                                                    />
                                                 </div>
-                                                {Array.isArray(characterData.current_state?.fields) && characterData.current_state.fields.length > 0 ? (
-                                                    <div className="space-y-3">
-                                                        {characterData.current_state.fields.map((field: CurrentStateField) => (
-                                                            <div key={field.id} className="border border-gray-200 rounded-md p-3 space-y-2">
-                                                                <div className="flex flex-col gap-2 md:flex-row">
-                                                                    <input
-                                                                        type="text"
-                                                                        className="input-field flex-1"
-                                                                        value={field.label}
-                                                                        onChange={(e) => handleCurrentStateFieldLabelChange(field.id, e.target.value)}
-                                                                        placeholder="字段名称"
-                                                                    />
-                                                                    <select
-                                                                        className="input-field md:w-32"
-                                                                        value={field.type}
-                                                                        onChange={(e) => handleCurrentStateFieldTypeChange(field.id, e.target.value as CurrentStateField['type'])}
-                                                                    >
-                                                                        <option value="string">字符串</option>
-                                                                        <option value="number">数值</option>
-                                                                        <option value="boolean">布尔</option>
-                                                                    </select>
-                                                                </div>
-                                                                <div className="flex items-center gap-2">
-                                                                    {field.type === 'boolean' ? (
-                                                                        <select
-                                                                            className="input-field"
-                                                                            value={String(field.value)}
-                                                                            onChange={(e) => handleCurrentStateFieldValueChange(field.id, e.target.value)}
-                                                                        >
-                                                                            <option value="true">是</option>
-                                                                            <option value="false">否</option>
-                                                                        </select>
-                                                                    ) : (
-                                                                        <input
-                                                                            type={field.type === 'number' ? 'number' : 'text'}
-                                                                            className="input-field"
-                                                                            value={field.value?.toString() ?? ''}
-                                                                            onChange={(e) => handleCurrentStateFieldValueChange(field.id, e.target.value)}
-                                                                        />
-                                                                    )}
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={() => handleRemoveCurrentStateField(field.id)}
-                                                                        className="text-xs text-red-500 font-semibold hover:underline"
-                                                                    >
-                                                                        删除
-                                                                    </button>
-                                                                </div>
-                                                            </div>
-                                                        ))}
-                                                    </div>
-                                                ) : (
-                                                    <p className="text-xs text-gray-500">暂无自定义字段，点击“新增字段”以记录独特的资源或计数。</p>
-                                                )}
-                                            </div>
-                                        </div>
-                                    </fieldset>
-                                )}
-
-                                {/* [新增] 内嵌随机事件管理模块 - 角色/通用情景 */}
-                                {(currentTemplate === 'general-scenario' || !isScenarioData(characterData)) && (
-                                    <fieldset className="border border-gray-300 p-4 rounded-lg mt-4">
-                                        <legend className="text-sm font-semibold px-2 text-gray-600">🎲 内嵌随机事件管理</legend>
-                                        <AdjudicatorEditor
-                                            events={characterData.adjudicationEvents || []}
-                                            onEventsChange={(newEvents) => handleFieldChange('adjudicationEvents', newEvents)}
-                                        />
-                                    </fieldset>
-                                )}
-
-                                <div className="mt-8 pt-4 border-t space-y-2">
-                                    {isAuthenticated && characterData && (
-                                        validationResult?.success ? (
+                                            ) : validationResult?.error && (
+                                                <div className="w-full p-3 bg-red-50 border border-yellow-200 rounded-lg text-yellow-700 text-sm text-center">
+                                                    该文件疑似包含额外字段，暂时不可上传云端 <br /> {validationResult?.error}
+                                                </div>
+                                            )
+                                        )}
+                                        <button onClick={() => handleSaveChanges('download')} disabled={message?.type === 'error' || isLoading} className="generate-button w-full">
+                                            {isLoading ? '处理中...' : '保存修改并下载'}
+                                        </button>
+                                        <button onClick={() => handleSaveChanges('copy')} disabled={message?.type === 'error' || isLoading} className="generate-button w-full" style={{ backgroundColor: '#3b82f6', backgroundImage: 'linear-gradient(to right, #3b82f6, #2563eb)' }}>
+                                            {isLoading ? '处理中...' : copiedStatus ? '已复制！' : '复制到剪贴板'}
+                                        </button>
+                                        {!isScenarioData(characterData) && (
                                             <div className="space-y-2">
                                                 <button
-                                                    onClick={handleSaveAsDataCard}
-                                                    className="generate-button w-full"
-                                                    style={{ backgroundColor: '#10b981', backgroundImage: 'linear-gradient(to right, #10b981, #059669)' }}
+                                                    type="button"
+                                                    onClick={handleExportWantuCharacter}
+                                                    disabled={message?.type === 'error' || isLoading}
+                                                    className="generate-button mb-0 flex w-full items-center justify-center gap-2"
+                                                    style={{ backgroundColor: '#0f766e', backgroundImage: 'linear-gradient(to right, #0f766e, #0d9488)' }}
                                                 >
-                                                    保存到云端
+                                                    <Download className="h-4 w-4" aria-hidden="true" />
+                                                    <span>导出万途 JSON</span>
                                                 </button>
-                                                <JsonSizeIndicator
-                                                    data={characterData}
-                                                    className="mt-0"
-                                                    warningText="⚠️ 接近云端 300KB 上限，保存可能失败，请先精简数据。"
-                                                />
+                                                <label
+                                                    htmlFor="wantu-round-trip-export"
+                                                    className="flex items-start gap-2 rounded-lg border border-teal-100 bg-teal-50 px-3 py-2 text-xs text-teal-900"
+                                                >
+                                                    <input
+                                                        id="wantu-round-trip-export"
+                                                        type="checkbox"
+                                                        checked={exportWantuRoundTrip}
+                                                        onChange={(event) => handleWantuRoundTripExportPreferenceChange(event.target.checked)}
+                                                        className="mt-0.5 accent-teal-700"
+                                                    />
+                                                    <span>
+                                                        <span className="font-semibold">导出可往返 JSON：</span>
+                                                        额外加 <code>_mahoshojo</code>，保存原始信息
+                                                    </span>
+                                                </label>
                                             </div>
-                                        ) : validationResult?.error && (
-                                            <div className="w-full p-3 bg-red-50 border border-yellow-200 rounded-lg text-yellow-700 text-sm text-center">
-                                                该文件疑似包含额外字段，暂时不可上传云端 <br /> {validationResult?.error}
-                                            </div>
-                                        )
-                                    )}
-                                    <button onClick={() => handleSaveChanges('download')} disabled={message?.type === 'error' || isLoading} className="generate-button w-full">
-                                        {isLoading ? '处理中...' : '保存修改并下载'}
-                                    </button>
-                                    <button onClick={() => handleSaveChanges('copy')} disabled={message?.type === 'error' || isLoading} className="generate-button w-full" style={{ backgroundColor: '#3b82f6', backgroundImage: 'linear-gradient(to right, #3b82f6, #2563eb)' }}>
-                                        {isLoading ? '处理中...' : copiedStatus ? '已复制！' : '复制到剪贴板'}
-                                    </button>
-                                    {!isScenarioData(characterData) && (
-                                        <div className="space-y-2">
-                                            <button
-                                                type="button"
-                                                onClick={handleExportWantuCharacter}
-                                                disabled={message?.type === 'error' || isLoading}
-                                                className="generate-button mb-0 flex w-full items-center justify-center gap-2"
-                                                style={{ backgroundColor: '#0f766e', backgroundImage: 'linear-gradient(to right, #0f766e, #0d9488)' }}
-                                            >
-                                                <Download className="h-4 w-4" aria-hidden="true" />
-                                                <span>导出万途 JSON</span>
-                                            </button>
-                                            <label
-                                                htmlFor="wantu-round-trip-export"
-                                                className="flex items-start gap-2 rounded-lg border border-teal-100 bg-teal-50 px-3 py-2 text-xs text-teal-900"
-                                            >
-                                                <input
-                                                    id="wantu-round-trip-export"
-                                                    type="checkbox"
-                                                    checked={exportWantuRoundTrip}
-                                                    onChange={(event) => handleWantuRoundTripExportPreferenceChange(event.target.checked)}
-                                                    className="mt-0.5 accent-teal-700"
-                                                />
-                                                <span>
-                                                    <span className="font-semibold">导出可往返 JSON：</span>
-                                                    额外加 <code>_mahoshojo</code>，保存原始信息
-                                                </span>
-                                            </label>
-                                        </div>
-                                    )}
-                                    <button onClick={handleLoadOtherData} className="footer-link mt-4 w-full text-center">
-                                        加载其他数据
-                                    </button>
-                                </div>
-                            </div>
+                                        )}
+                                        <button onClick={handleLoadOtherData} className="footer-link mt-4 w-full text-center">
+                                            加载其他数据
+                                        </button>
+                                    </div>
+                                )}
+                            />
                         )}
 
                         {message && (

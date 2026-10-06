@@ -35,7 +35,7 @@ import {
 } from '@/lib/stream/timeout';
 import { authStorage } from '@/lib/auth';
 import { secureRandomUUID } from '@/lib/crypto';
-import { normalizeAdjudicationEvents } from '@/lib/adjudicator/normalize';
+import { normalizeAdjudicationEvents } from '@mahoshojo/domain/adjudicator-normalize';
 import { buildArenaQuestionnaireRequest } from '../utils/questionnaireRequest';
 import {
   buildWebPackagePromptProjection,
