@@ -8,6 +8,7 @@ import {
   LocalRestoreError,
   prepareLocalRestore,
 } from '../../platform/local-backup-bridge';
+import { formatBytes } from '../../platform/format-bytes';
 
 interface LocalBackupsPanelProps {
   readonly enabled: boolean;
@@ -19,18 +20,6 @@ interface BackupListState {
   readonly backups: readonly DesktopBackupSummary[];
   readonly invalidCount: number;
 }
-
-const formatBytes = (bytes: number): string => {
-  if (bytes < 1024) return `${bytes} B`;
-  const units = ['KiB', 'MiB', 'GiB', 'TiB'];
-  let value = bytes / 1024;
-  let unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit += 1;
-  }
-  return `${value.toFixed(1)} ${units[unit]}`;
-};
 
 const describeBackupError = (cause: unknown): string =>
   cause instanceof LocalBackupError ? cause.message : '本地备份操作失败，请重试。';

@@ -4,6 +4,7 @@ import type { LocalCardRecordV1 } from '@mahoshojo/local-library/record';
 import type { CardWriteOutcome } from '@mahoshojo/local-library/repository';
 
 import {
+  asCharacterCardPreview,
   asMagicalGirlPreview,
   draftFromRecord,
   exceedsUtf8ByteLimit,
@@ -173,5 +174,47 @@ describe('魔法少女预览', () => {
     expect(asMagicalGirlPreview(draftFromRecord(record))).not.toBeNull();
     expect(asMagicalGirlPreview({ ...draftFromRecord(record), data: { codename: '星光', appearance: {} } })).toBeNull();
     expect(asMagicalGirlPreview({ ...draftFromRecord(record), cardType: 'scenario' })).toBeNull();
+  });
+});
+
+describe('角色卡预览（三模板判别）', () => {
+  const canshouData = {
+    name: '噬梦',
+    coreConcept: '吞噬梦境',
+    coreEmotion: '恐惧',
+    evolutionStage: '幼体',
+    appearance: '雾状身躯',
+    materialAndSkin: '暗色薄膜',
+    featuresAndAppendages: '细长触肢',
+    attackMethod: '精神侵蚀',
+    specialAbility: '梦境抽取',
+    origin: '废弃剧场',
+    birthEnvironment: '深夜',
+    researcherNotes: '观察记录',
+  };
+
+  it('按正文特征分发：general 卡要名字与正文，canshou 卡要全部必填段', async () => {
+    const general = await storedRecord({ name: '调查员', content: '背景正文' });
+    expect(asCharacterCardPreview(draftFromRecord(general))).toMatchObject({ kind: 'general' });
+
+    const canshou = await storedRecord(canshouData);
+    expect(asCharacterCardPreview(draftFromRecord(canshou))).toMatchObject({ kind: 'canshou' });
+
+    const magical = await storedRecord({ codename: '星光', appearance: {}, magicConstruct: {}, wonderlandRule: {}, blooming: {}, analysis: {} });
+    expect(asCharacterCardPreview(draftFromRecord(magical))).toMatchObject({ kind: 'magical-girl' });
+  });
+
+  it('残缺数据不渲染预览：宁缺毋假', async () => {
+    // general 缺 content；canshou 缺 researcherNotes——都不允许半成品进整卡组件。
+    const brokenGeneral = await storedRecord({ name: '调查员' });
+    expect(asCharacterCardPreview(draftFromRecord(brokenGeneral))).toBeNull();
+
+    const { researcherNotes: _drop, ...brokenCanshou } = canshouData;
+    const record = await storedRecord(brokenCanshou);
+    expect(asCharacterCardPreview(draftFromRecord(record))).toBeNull();
+
+    // 情景卡没有对应的整卡组件——和 Web 侧一样不预览。
+    const scenario = await storedRecord({ title: '雾港' }, { cardType: 'scenario' });
+    expect(asCharacterCardPreview({ ...draftFromRecord(scenario), cardType: 'scenario' })).toBeNull();
   });
 });

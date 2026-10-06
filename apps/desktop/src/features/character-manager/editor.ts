@@ -6,6 +6,7 @@ import type { CardRepository } from '@mahoshojo/local-library/repository';
 import { MAX_DESKTOP_LOCAL_CARD_DOCUMENT_BYTES } from '@mahoshojo/contracts/desktop-ipc';
 import { SafeJsonValueSchema } from '@mahoshojo/contracts/json-value';
 import type { MagicalGirlResultData } from '@mahoshojo/ui-web/character-result';
+import type { CanshouDetails, GeneralCharacterCardData } from '@mahoshojo/ui-web/character-card';
 
 /**
  * Desktop 本地角色编辑的业务规则（D3.2b-2）。
@@ -198,4 +199,50 @@ export const asMagicalGirlPreview = (draft: CardDraft): MagicalGirlResultData | 
   if (typeof data.codename !== 'string') return null;
   const sections = ['appearance', 'magicConstruct', 'wonderlandRule', 'blooming', 'analysis'] as const;
   return sections.every((key) => isPlainObject(data[key])) ? (data as unknown as MagicalGirlResultData) : null;
+};
+
+/** 编辑器「角色卡预览」的判别 union——模板由正文特征决定，与 Web 角色管理同一判定函数。 */
+export type CharacterCardPreview =
+  | { readonly kind: 'magical-girl'; readonly data: MagicalGirlResultData }
+  | { readonly kind: 'general'; readonly data: GeneralCharacterCardData }
+  | { readonly kind: 'canshou'; readonly data: CanshouDetails };
+
+/** `GeneralCharacterCardData` 的最小形状：名字与正文必填，其余字段宽松透传。 */
+const GENERAL_REQUIRED_KEYS = ['name', 'content'] as const;
+
+/** `CanshouDetails` 的全部必填字段——缺任何一段就不渲染整卡，与 magical-girl 同一口径。 */
+const CANSHOU_REQUIRED_KEYS = [
+  'name',
+  'coreConcept',
+  'coreEmotion',
+  'evolutionStage',
+  'appearance',
+  'materialAndSkin',
+  'featuresAndAppendages',
+  'attackMethod',
+  'specialAbility',
+  'origin',
+  'birthEnvironment',
+  'researcherNotes',
+] as const;
+
+/**
+ * 把草稿投影成可渲染的角色卡预览。情景卡与无法识别的数据返回 `null`——预览只表达
+ * 「这段正文真的能渲染成一张卡」，残缺数据宁可不预览也不让组件在半截输入上抛错。
+ */
+export const asCharacterCardPreview = (draft: CardDraft): CharacterCardPreview | null => {
+  if (draft.cardType !== 'character') return null;
+  const kind = inferCharacterKind(draft.data);
+  if (kind === 'general') {
+    return GENERAL_REQUIRED_KEYS.every((key) => typeof draft.data[key] === 'string')
+      ? { kind: 'general', data: draft.data as unknown as GeneralCharacterCardData }
+      : null;
+  }
+  if (kind === 'canshou') {
+    return CANSHOU_REQUIRED_KEYS.every((key) => typeof draft.data[key] === 'string')
+      ? { kind: 'canshou', data: draft.data as unknown as CanshouDetails }
+      : null;
+  }
+  const magical = asMagicalGirlPreview(draft);
+  return magical === null ? null : { kind: 'magical-girl', data: magical };
 };

@@ -73,6 +73,7 @@ import { resolveDesktopAiTarget } from '../features/ai-config/desktop-ai-config'
 import { useDesktopAiConfig } from '../features/ai-config/use-desktop-ai-config';
 import { useDesktopCloudSession } from '../features/account/use-desktop-cloud-session';
 import { useDesktopCardLibraryHost } from '../platform/card-library-host';
+import { downloadTextFile } from '../platform/download-text-file';
 import { IpcLocalCardRepository } from '../platform/local-card-bridge';
 import { resolveInternalHrefForHashHistory } from './hash-history-fragment';
 import { useLeaveGuard } from './useLeaveGuard';
@@ -93,19 +94,6 @@ const resolveResultJsonFileName = (card: Record<string, unknown>, cardKind: 'mag
   return cardKind === 'general'
     ? `通用魔法少女角色_${sanitizeFileNamePart(rawName)}.json`
     : `魔法少女_${sanitizeFileNamePart(rawName)}.json`;
-};
-
-const downloadJsonText = (fileName: string, jsonText: string): void => {
-  const blob = new Blob([jsonText], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = fileName;
-  anchor.rel = 'noopener';
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
 };
 
 const createSelectionSuffix = (): string =>
@@ -860,7 +848,7 @@ function DetailsForm({ session }: { session: DetailsSession }) {
             <div className="mt-3 flex flex-col gap-3">
               {state.cardKind === 'general' ? (
                 <>
-                  <button className={actionClass} onClick={() => downloadJsonText(resolveResultJsonFileName(resolvedResultPayload as Record<string, unknown>, 'general'), JSON.stringify(resolvedResultPayload, null, 2))}>下载通用角色卡</button>
+                  <button className={actionClass} onClick={() => downloadTextFile(resolveResultJsonFileName(resolvedResultPayload as Record<string, unknown>, 'general'), JSON.stringify(resolvedResultPayload, null, 2))}>下载通用角色卡</button>
                   <button className={actionClass} onClick={() => { void navigator.clipboard?.writeText(JSON.stringify(resolvedResultPayload, null, 2)).then(() => setActionInfo('✅ 通用角色卡 JSON 已复制到剪贴板')).catch(() => setActionError('复制失败，请手动选择 JSON 内容后复制。')); }}>复制到剪贴板</button>
                 </>
               ) : (

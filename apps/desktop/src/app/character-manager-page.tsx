@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core';
 import { useRouter, useSearch } from '@tanstack/react-router';
 import { DataCardFieldEditor, setDataCardFieldValue } from '@mahoshojo/ui-web/card-editor';
+import { CanshouCard, GeneralCharacterCard } from '@mahoshojo/ui-web/character-card';
 import { MagicalGirlResultBody } from '@mahoshojo/ui-web/character-result';
 import { LOCAL_CARD_TYPE_LABELS, LocalCardsPanel, useLocalCardsController, type LocalCardsHost } from '@mahoshojo/ui-web/local-cards';
 
@@ -9,7 +10,7 @@ import { useLeaveGuard } from './useLeaveGuard';
 import {
   EDITABLE_CARD_TYPES,
   MAX_IMPORT_FILE_BYTES,
-  asMagicalGirlPreview,
+  asCharacterCardPreview,
   draftFromRecord,
   isEditableLocalCard,
   parseImportedCard,
@@ -18,6 +19,7 @@ import {
   type LocalCardType,
   type SaveOutcome,
 } from '../features/character-manager/editor';
+import { downloadTextFile } from '../platform/download-text-file';
 import { IpcLocalCardRepository, describeLocalCardError } from '../platform/local-card-bridge';
 
 const actionClass =
@@ -25,6 +27,10 @@ const actionClass =
 const inputClass = 'min-h-11 w-full rounded-lg border border-(--app-border-strong) bg-transparent px-3 py-2 text-sm';
 
 const snapshotOf = (draft: CardDraft): string => JSON.stringify([draft.cardType, draft.title, draft.data]);
+
+/** 单卡导出文件名——与共享卡库 `handleDownloadCard` 同一口径（只剥文件名非法字符，保留中文）。 */
+const cardExportFileName = (title: string): string =>
+  `${(title.trim() || '数据卡').replace(/[\\/:*?"<>|]/g, '_')}.json`;
 
 type Notice = { readonly tone: 'status' | 'alert'; readonly text: string };
 
@@ -193,7 +199,7 @@ export function DesktopCharacterManager() {
     }
   };
 
-  const preview = draft === null ? null : asMagicalGirlPreview(draft);
+  const preview = draft === null ? null : asCharacterCardPreview(draft);
 
   return (
     <section data-testid="page-character-manager" className="flex flex-col gap-4">
@@ -289,8 +295,12 @@ export function DesktopCharacterManager() {
           />
           {preview !== null && (
             <details>
-              <summary className="cursor-pointer text-sm font-medium">角色正文预览</summary>
-              <div className="mt-2"><MagicalGirlResultBody magicalGirl={preview} /></div>
+              <summary className="cursor-pointer text-sm font-medium">角色卡预览</summary>
+              <div className="mt-2">
+                {preview.kind === 'magical-girl' && <MagicalGirlResultBody magicalGirl={preview.data} />}
+                {preview.kind === 'general' && <GeneralCharacterCard general={preview.data} />}
+                {preview.kind === 'canshou' && <CanshouCard canshou={preview.data} />}
+              </div>
             </details>
           )}
           <div className="flex flex-wrap gap-2">
@@ -301,6 +311,15 @@ export function DesktopCharacterManager() {
               onClick={() => void save()}
             >
               {saving ? '正在保存…' : '保存到本地库'}
+            </button>
+            <button
+              type="button"
+              className={actionClass}
+              disabled={saving}
+              title="导出的是当前编辑中的内容，不要求先保存到本地库"
+              onClick={() => downloadTextFile(cardExportFileName(draft.title), JSON.stringify(draft.data, null, 2))}
+            >
+              导出为 JSON 文件
             </button>
             <button type="button" className={actionClass} disabled={saving} onClick={leaveEditor}>
               {dirty ? '放弃修改并关闭' : '关闭'}

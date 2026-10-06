@@ -5,6 +5,7 @@ import { LocalArchivePanel, createLocalArchiveController } from '@mahoshojo/ui-w
 import { LocalCardsPanel, useLocalCardsController, type LocalCardsActions, type LocalCardsHost } from '@mahoshojo/ui-web/local-cards';
 
 import { useLeaveGuard } from './useLeaveGuard';
+import { LocalLibraryAuditPanel } from '../features/audit/LocalLibraryAuditPanel';
 import { LocalBackupsPanel } from '../features/backups/LocalBackupsPanel';
 import { isEditableLocalCard } from '../features/character-manager/editor';
 import {
@@ -123,12 +124,13 @@ export function DesktopLocalLibrary() {
       <fieldset disabled={!guard.ready || maintenanceBusy} className="min-w-0">
         <LocalArchivePanel model={model} actions={archiveActions} limits={{ maxArchiveBytes: DESKTOP_LIBRARY_ARCHIVE_LIMITS.fileBytes }} />
       </fieldset>
+      <LocalLibraryAuditPanel enabled={guard.ready} acquireOperation={acquireOperation} releaseOperation={releaseOperation} />
       <LocalBackupsPanel enabled={guard.ready} acquireOperation={acquireOperation} releaseOperation={releaseOperation} />
       <section className="rounded-lg border border-(--app-border) bg-(--app-surface) p-4">
         <h2 className="mb-1 text-sm font-medium text-(--app-text-muted)">还没有的</h2>
         <ul className="flex list-disc flex-col gap-1 pl-5 text-sm text-(--app-text-muted)">
           <li>
-            <strong className="font-medium">单张数据卡导出与 Web 包管理</strong>：目前只能通过整库归档与备份携带。角色与情景卡的编辑和单卡导入在“角色管理”。
+            <strong className="font-medium">Web 包管理</strong>：Web 包目前只能通过整库归档与备份携带；角色与情景卡的编辑、单卡导入导出在“角色管理”。
           </li>
         </ul>
       </section>

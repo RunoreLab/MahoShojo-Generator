@@ -195,6 +195,33 @@ describe('Desktop 本地角色管理（IPC mock，仍需真机重启验收）', 
     expect(container.textContent).toContain('编辑：星光');
   });
 
+  it('导出为 JSON 文件走 WebView 下载通道，导出的是草稿内容且不要求先保存', async () => {
+    const createObjectURL = vi.fn(() => 'blob:mock-url');
+    const revokeObjectURL = vi.fn();
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, writable: true, value: createObjectURL });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, writable: true, value: revokeObjectURL });
+    const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+
+    window.location.hash = '#/character-manager';
+    await mount();
+    await waitFor(() => container.querySelector('textarea') !== null);
+    const imported = { codename: '导出角色', appearance: { outfit: '白裙' } };
+    await type(container.querySelector<HTMLTextAreaElement>('textarea')!, JSON.stringify(imported));
+    await click(button('从文本载入'));
+    await waitFor(() => container.textContent?.includes('编辑导入的数据卡') === true);
+
+    await click(button('导出为 JSON 文件'));
+    expect(createObjectURL).toHaveBeenCalledOnce();
+    expect(anchorClick).toHaveBeenCalledOnce();
+    // 文件名按记录标题生成（与共享卡库下载同一口径）。
+    const anchor = anchorClick.mock.instances[0] as unknown as HTMLAnchorElement;
+    expect(anchor.download).toBe('导出角色.json');
+    // Blob 里装着的是当前草稿正文，不是已保存记录。
+    const blob = createObjectURL.mock.calls[0][0] as Blob;
+    expect(JSON.parse(await blob.text())).toEqual(imported);
+    expect(rows.size).toBe(1);
+  });
+
   it('非法导入给出原因且不进入编辑', async () => {
     window.location.hash = '#/character-manager';
     await mount();

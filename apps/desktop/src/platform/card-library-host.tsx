@@ -28,6 +28,7 @@ import type { LocalCardRecordV1 } from '@mahoshojo/local-library/record';
 
 import { requestCardLibraryRoute } from './card-library-bridge';
 import { DesktopCloudError, type InvokeFn } from './cloud-bridge';
+import { downloadTextFile } from './download-text-file';
 import { IpcLocalCardRepository } from './local-card-bridge';
 import { useDesktopCloudSession } from '../features/account/use-desktop-cloud-session';
 import type {
@@ -367,29 +368,11 @@ const copyCardText = async (text: string): Promise<void> => {
   }
 };
 
-/**
- * WebView 的 `<a download>` 走 WebView2 原生下载流程（保存对话框由系统弹出），
- * 不需要新增 native command 或文件系统权限——与导入侧 `<input type="file">`
- * 不扩张 command ACL 的口径一致（`DESK-071b`）。
- */
-const downloadJsonFile = (fileName: string, jsonText: string): void => {
-  const blob = new Blob([jsonText], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = fileName;
-  anchor.rel = 'noopener';
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
-};
-
 const desktopPlatform: CardLibraryPlatform = {
   Link: DesktopCardLibraryLink,
   marks: createLocalStorageCardLibraryMarks(),
   copyText: copyCardText,
-  downloadJson: downloadJsonFile,
+  downloadJson: downloadTextFile,
 };
 
 const desktopSlots: CardLibrarySlots = {
