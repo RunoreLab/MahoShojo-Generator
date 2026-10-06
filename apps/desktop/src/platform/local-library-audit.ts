@@ -1,5 +1,6 @@
 import {
   DESKTOP_LOCAL_LIBRARY_AUDIT_DAMAGE_KINDS,
+  DESKTOP_MAINTENANCE_BUSY_CODE,
   DESKTOP_LOCAL_LIBRARY_AUDIT_KINDS,
   DesktopLocalLibraryAuditErrorSchema,
   DesktopLocalLibraryAuditReportSchema,
@@ -112,9 +113,11 @@ export const summarizeLocalLibraryAudit = (
 /**
  * 维护冲突重试。
  *
- * 审计与 GC 都在 native 侧持有维护窗口，因此它们运行期间**并发写入会被拒**
- * （`maintenance-busy`）。重试不是可有可无的礼貌：用户点一下"检查本地库"或"清理空间"时
- * 若恰好在保存一张卡，直接把错误弹出来会让他以为操作失败与那张卡有关。
+ * `maintenance-busy` 对审计/GC 的含义是「另一个维护窗口正被持有」——`enter_maintenance`
+ * 对已在跑的维护（含恢复备份跨 IPC 持有的 pending 许可，以及并发的审计/GC/备份）
+ * 立即拒绝而不是排队（`maintenance.rs`）；并发写入则相反，维护者会等它们排空，不会
+ * 因此收到 busy。重试不是可有可无的礼貌：用户点"检查本地库"撞上正在等待的恢复或
+ * 正在跑的清理时，直接弹错会让他以为操作本身失败了。
  *
  * 退避固定而非指数：维护窗口通常在几百毫秒内结束，而 UI 正在等这个结果——指数退避会把
  * 一个 300ms 的窗口拖成好几秒。
@@ -159,7 +162,7 @@ export const runLocalLibraryAudit = async (
 /**
  * 回收无引用的 blob。
  *
- * 与审计共用维护重试：GC 同样持有窗口，同样会对并发写入说 `maintenance-busy`。
+ * 与审计共用维护重试：GC 同样先取维护窗口，撞上另一个在跑的维护时同样被拒。
  */
 export const collectLocalLibraryGarbage = async (
   invoke: InvokeFn,
@@ -187,8 +190,7 @@ export const gcReclaimedSomething = (report: DesktopLocalLibraryGcReport): boole
 const isMaintenanceBusy = (cause: unknown): boolean =>
   cause !== null &&
   typeof cause === 'object' &&
-  typeof (cause as { code?: unknown }).code === 'string' &&
-  (cause as { code: string }).code === 'maintenance-busy';
+  (cause as { code?: unknown }).code === DESKTOP_MAINTENANCE_BUSY_CODE;
 
 const toAuditError = (cause: unknown): DesktopLocalLibraryAuditError => {
   if (

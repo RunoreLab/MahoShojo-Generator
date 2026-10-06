@@ -237,6 +237,16 @@ export const DesktopListLocalCardsResponseSchema = z
 export type DesktopListLocalCardsResponse = z.infer<typeof DesktopListLocalCardsResponseSchema>;
 
 /**
+ * 维护窗口冲突的统一错误码字面量。
+ *
+ * 它在多个 schema（store / backup / restore）里是同一个枚举值；native 的
+ * `MaintenanceRejection::MaintenanceBusy` 与各渲染层桥接的「可重试」判定共用这一个
+ * 字面量——需要与错误 code 比较时用常量而不是再写一遍裸字符串（schema 枚举列表
+ * 保持字面量写法，契约文本必须直接可读）。
+ */
+export const DESKTOP_MAINTENANCE_BUSY_CODE = 'maintenance-busy';
+
+/**
  * 本地库失败的公开投影。
  *
  * 与 secret 的错误投影同规则：`message` 是固定文案，**MUST NOT** 回显用户数据或 SQLite /

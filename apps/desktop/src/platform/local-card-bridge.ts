@@ -1,4 +1,5 @@
 import {
+  DESKTOP_MAINTENANCE_BUSY_CODE,
   DesktopListLocalCardsRequestSchema,
   DesktopListLocalCardsResponseSchema,
   DesktopLocalCardCursorSchema,
@@ -92,6 +93,7 @@ const NATIVE_ERROR_CODES: readonly DesktopStoreErrorCode[] = [
   'non-monotonic-timestamp',
   'invalid-query',
   // 维护窗口内的写入被拒（D2.2a / DESK-065）：可重试的时机问题，不是数据损坏。
+  // 白名单条目保持字面量写法；比较处统一用 DESKTOP_MAINTENANCE_BUSY_CODE。
   'maintenance-busy',
   'store-failure',
 ];
@@ -105,7 +107,7 @@ const NATIVE_ERROR_CODES: readonly DesktopStoreErrorCode[] = [
  */
 export const isRetryableLocalLibraryError = (
   code: DesktopLocalLibraryErrorCode,
-): boolean => code === 'maintenance-busy';
+): boolean => code === DESKTOP_MAINTENANCE_BUSY_CODE;
 
 /**
  * 页面展示用的本地库错误文案。

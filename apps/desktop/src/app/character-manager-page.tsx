@@ -5,6 +5,7 @@ import { DataCardFieldEditor, setDataCardFieldValue } from '@mahoshojo/ui-web/ca
 import { CanshouCard, GeneralCharacterCard } from '@mahoshojo/ui-web/character-card';
 import { MagicalGirlResultBody } from '@mahoshojo/ui-web/character-result';
 import { LOCAL_CARD_TYPE_LABELS, LocalCardsPanel, useLocalCardsController, type LocalCardsHost } from '@mahoshojo/ui-web/local-cards';
+import { buildSafeFileName } from '@mahoshojo/ui-web/client';
 
 import { useLeaveGuard } from './useLeaveGuard';
 import {
@@ -28,9 +29,8 @@ const inputClass = 'min-h-11 w-full rounded-lg border border-(--app-border-stron
 
 const snapshotOf = (draft: CardDraft): string => JSON.stringify([draft.cardType, draft.title, draft.data]);
 
-/** 单卡导出文件名——与共享卡库 `handleDownloadCard` 同一口径（只剥文件名非法字符，保留中文）。 */
-const cardExportFileName = (title: string): string =>
-  `${(title.trim() || '数据卡').replace(/[\\/:*?"<>|]/g, '_')}.json`;
+/** 单卡导出文件名——与共享卡库 `handleDownloadCard` 同一共享实现（剥非法字符、基名截断 80 字符、保留中文）。 */
+const cardExportFileName = (title: string): string => buildSafeFileName(title, 'json', '数据卡');
 
 type Notice = { readonly tone: 'status' | 'alert'; readonly text: string };
 

@@ -12,6 +12,8 @@ import { formatBytes } from '../../platform/format-bytes';
 
 interface LocalBackupsPanelProps {
   readonly enabled: boolean;
+  /** 页面级维护互斥正被其他操作持有（含本面板自己的——自身繁忙已先行覆盖）。 */
+  readonly maintenanceBusy: boolean;
   readonly acquireOperation: () => boolean;
   readonly releaseOperation: () => void;
 }
@@ -25,7 +27,7 @@ const describeBackupError = (cause: unknown): string =>
   cause instanceof LocalBackupError ? cause.message : '本地备份操作失败，请重试。';
 
 /** Native 专属整库备份入口。Portable archive 仍由上方共享区块负责。 */
-export const LocalBackupsPanel = ({ enabled, acquireOperation, releaseOperation }: LocalBackupsPanelProps) => {
+export const LocalBackupsPanel = ({ enabled, maintenanceBusy, acquireOperation, releaseOperation }: LocalBackupsPanelProps) => {
   const [list, setList] = useState<BackupListState>({ backups: [], invalidCount: 0 });
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -163,10 +165,10 @@ export const LocalBackupsPanel = ({ enabled, acquireOperation, releaseOperation 
           </p>
         </div>
         <div className="flex gap-2">
-          <button type="button" className="rounded border border-(--app-border) px-3 py-2 text-sm" disabled={!enabled || busy || restorePending || selectedBackup !== null} onClick={() => void run('refresh')}>
+          <button type="button" className="rounded border border-(--app-border) px-3 py-2 text-sm" disabled={!enabled || busy || restorePending || selectedBackup !== null || maintenanceBusy} onClick={() => void run('refresh')}>
             刷新列表
           </button>
-          <button type="button" className="rounded bg-(--app-accent-strong) px-3 py-2 text-sm text-white" disabled={!enabled || busy || restorePending || selectedBackup !== null} onClick={() => void run('create')}>
+          <button type="button" className="rounded bg-(--app-accent-strong) px-3 py-2 text-sm text-white" disabled={!enabled || busy || restorePending || selectedBackup !== null || maintenanceBusy} onClick={() => void run('create')}>
             创建备份
           </button>
         </div>
@@ -193,7 +195,7 @@ export const LocalBackupsPanel = ({ enabled, acquireOperation, releaseOperation 
               <button
                 type="button"
                 className="mt-3 rounded border border-(--app-border) px-3 py-2 text-sm"
-                disabled={!enabled || busy || restorePending || selectedBackup !== null}
+                disabled={!enabled || busy || restorePending || selectedBackup !== null || maintenanceBusy}
                 onClick={(event) => {
                   restoreTriggerRef.current = event.currentTarget;
                   setSelectedBackup(backup);
@@ -228,7 +230,7 @@ export const LocalBackupsPanel = ({ enabled, acquireOperation, releaseOperation 
               >
                 取消
               </button>
-              <button type="button" className="rounded bg-(--app-accent-strong) px-3 py-2 text-sm text-white" onClick={() => void confirmRestore()}>
+              <button type="button" className="rounded bg-(--app-accent-strong) px-3 py-2 text-sm text-white" disabled={!enabled || maintenanceBusy} onClick={() => void confirmRestore()}>
                 确认整体替换并退出
               </button>
             </div>

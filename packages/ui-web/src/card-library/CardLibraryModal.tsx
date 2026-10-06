@@ -17,6 +17,7 @@ import {
   normalizePublicVisibilityValue,
 } from './read-mappers';
 import { isLocalDataCardRow, mapLocalCardRecordToDetailsCard, type LocalDataCardRow } from './rows';
+import { buildSafeFileName } from '../client/fileName';
 import { useLocalDataCards } from './use-local-data-cards';
 import { useLocalLibraryAutoSave } from './use-local-library-auto-save';
 import { ChevronDown, Filter } from 'lucide-react';
@@ -1000,8 +1001,8 @@ export function CardLibraryModal({
       if (typeof cardPayload === 'string') {
         cardPayload = JSON.parse(cardPayload);
       }
-      const sanitizedName = (card.name || '数据卡').replace(/[\\/:*?"<>|]/g, '_');
-      downloadJson(`${sanitizedName}.json`, JSON.stringify(cardPayload, null, 2));
+      // buildSafeFileName 一并把基名截断到 80 字符：超长卡名导出不会撞上文件系统文件名上限。
+      downloadJson(buildSafeFileName(card.name ?? '', 'json', '数据卡'), JSON.stringify(cardPayload, null, 2));
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') return;
       setSelectError(error instanceof Error ? error.message : '保存数据卡失败');

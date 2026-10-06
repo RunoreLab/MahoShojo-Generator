@@ -106,7 +106,15 @@ describe('local backup page integration', () => {
 
     expect(host.runExport).toHaveBeenCalledOnce();
     expect(bridge.invoke).not.toHaveBeenCalledWith(CREATE_LOCAL_BACKUP_COMMAND, undefined);
+    // 互斥必须可见：归档持锁期间，备份与审计入口都呈现禁用而不是"看起来可点"。
+    await settle();
+    expect(button('创建备份').disabled).toBe(true);
+    expect(button('刷新列表').disabled).toBe(true);
+    expect(button('检查完整性').disabled).toBe(true);
     await act(async () => { finish({ location: 'archive.zip', byteLength: 1, entryCount: 1 }); });
+    await settle();
+    expect(button('创建备份').disabled).toBe(false);
+    expect(button('检查完整性').disabled).toBe(false);
   });
 
   it('cancelling the second confirmation makes no restore or exit IPC call', async () => {

@@ -75,11 +75,12 @@ const lock = () => {
   };
 };
 
-const mount = async (theLock = lock(), enabled = true) => {
+const mount = async (theLock = lock(), enabled = true, maintenanceBusy = false) => {
   await act(async () => {
     root.render(
       <LocalLibraryAuditPanel
       enabled={enabled}
+      maintenanceBusy={maintenanceBusy}
       acquireOperation={theLock.acquireOperation}
       releaseOperation={theLock.releaseOperation}
       />,
@@ -206,5 +207,14 @@ describe('本地库完整性面板（IPC mock）', () => {
     await mount(lock(), false);
     expect(button('检查完整性')?.disabled).toBe(true);
     expect(button('清理可回收空间')?.disabled).toBe(true);
+  });
+
+  it('页面级维护忙态下入口禁用且不可点出 IPC——互斥要有可见反馈', async () => {
+    const theLock = await mount(lock(), true, true);
+    expect(button('检查完整性')?.disabled).toBe(true);
+    await click(button('检查完整性'));
+    await settle();
+    expect(bridge.invoke).not.toHaveBeenCalled();
+    expect(theLock.acquireOperation).not.toHaveBeenCalled();
   });
 });

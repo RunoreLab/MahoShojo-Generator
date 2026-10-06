@@ -15,6 +15,40 @@ import {
 import { IpcLocalCardRepository, describeLocalCardError } from '../platform/local-card-bridge';
 
 /**
+ * 在维护互斥内触发一个同步置位的操作，并在它的控制器回到空闲时释放互斥。
+ *
+ * 三条出口都必须放锁：`action` 同步抛异常、动作完成后控制器已空闲（无需订阅）、
+ * 以及订阅回调观察到控制器回到空闲。少任何一条，一次异常或竞态都会让整页维护
+ * 操作永久锁死——互斥是行为保证，不是按钮装饰。
+ */
+export const runMaintenanceExclusive = (
+  acquireOperation: () => boolean,
+  releaseOperation: () => void,
+  action: () => void,
+  isBusy: () => boolean,
+  subscribe: (listener: () => void) => () => void,
+): void => {
+  if (!acquireOperation()) return;
+  try {
+    action();
+  } catch (cause) {
+    releaseOperation();
+    throw cause;
+  }
+  if (!isBusy()) {
+    releaseOperation();
+    return;
+  }
+  let unsubscribe = (): void => {};
+  unsubscribe = subscribe(() => {
+    if (!isBusy()) {
+      unsubscribe();
+      releaseOperation();
+    }
+  });
+};
+
+/**
  * 设备级本地库页面。
  *
  * 路径 `/local-library` 与 Web 共用同一个产品路径（`DESK-059`）：它是设备级页面而不是账号级页面，
@@ -54,26 +88,12 @@ export function DesktopLocalLibrary() {
     const current = controller.model;
     return current.exporting || current.inspecting || current.applying;
   };
-  /** 在维护互斥内触发一个同步置位的操作，并在它的控制器回到空闲时释放互斥。 */
   const runExclusive = (
     action: () => void,
     isBusy: () => boolean,
     subscribe: (listener: () => void) => () => void,
-  ): void => {
-    if (!acquireOperation()) return;
-    action();
-    if (!isBusy()) {
-      releaseOperation();
-      return;
-    }
-    let unsubscribe = (): void => {};
-    unsubscribe = subscribe(() => {
-      if (!isBusy()) {
-        unsubscribe();
-        releaseOperation();
-      }
-    });
-  };
+  ): void =>
+    runMaintenanceExclusive(acquireOperation, releaseOperation, action, isBusy, subscribe);
   const runArchiveAction = (action: () => void): void => runExclusive(action, archiveBusy, controller.subscribe);
   const runCardAction = (action: () => void): void =>
     runExclusive(action, cards.controller.isBusy, cards.controller.subscribe);
@@ -124,8 +144,8 @@ export function DesktopLocalLibrary() {
       <fieldset disabled={!guard.ready || maintenanceBusy} className="min-w-0">
         <LocalArchivePanel model={model} actions={archiveActions} limits={{ maxArchiveBytes: DESKTOP_LIBRARY_ARCHIVE_LIMITS.fileBytes }} />
       </fieldset>
-      <LocalLibraryAuditPanel enabled={guard.ready} acquireOperation={acquireOperation} releaseOperation={releaseOperation} />
-      <LocalBackupsPanel enabled={guard.ready} acquireOperation={acquireOperation} releaseOperation={releaseOperation} />
+      <LocalLibraryAuditPanel enabled={guard.ready} maintenanceBusy={maintenanceBusy} acquireOperation={acquireOperation} releaseOperation={releaseOperation} />
+      <LocalBackupsPanel enabled={guard.ready} maintenanceBusy={maintenanceBusy} acquireOperation={acquireOperation} releaseOperation={releaseOperation} />
       <section className="rounded-lg border border-(--app-border) bg-(--app-surface) p-4">
         <h2 className="mb-1 text-sm font-medium text-(--app-text-muted)">还没有的</h2>
         <ul className="flex list-disc flex-col gap-1 pl-5 text-sm text-(--app-text-muted)">

@@ -18,6 +18,8 @@ import {
 
 interface LocalLibraryAuditPanelProps {
   readonly enabled: boolean;
+  /** 页面级维护互斥正被其他操作持有（含本面板自己的——`busy` 已先行覆盖）。 */
+  readonly maintenanceBusy: boolean;
   readonly acquireOperation: () => boolean;
   readonly releaseOperation: () => void;
 }
@@ -95,7 +97,7 @@ const describeGcReport = (report: DesktopLocalLibraryGcReport): { readonly tone:
  * 用户入口：审计只报告不修复，GC 只回收无引用 blob。两者都在 native 侧持有维护窗口——
  * 因此面板操作一律包在页面级维护互斥里，且桥接层会对 `maintenance-busy` 做有界重试。
  */
-export const LocalLibraryAuditPanel = ({ enabled, acquireOperation, releaseOperation }: LocalLibraryAuditPanelProps) => {
+export const LocalLibraryAuditPanel = ({ enabled, maintenanceBusy, acquireOperation, releaseOperation }: LocalLibraryAuditPanelProps) => {
   const [summary, setSummary] = useState<LocalLibraryAuditSummary | null>(null);
   const [gcOutcome, setGcOutcome] = useState<{ readonly tone: 'status' | 'alert'; readonly text: string } | null>(null);
   const [busy, setBusy] = useState<'audit' | 'gc' | null>(null);
@@ -155,13 +157,13 @@ export const LocalLibraryAuditPanel = ({ enabled, acquireOperation, releaseOpera
           </p>
         </div>
         <div className="flex gap-2">
-          <button type="button" className={actionClass} disabled={!enabled || busy !== null} onClick={handleAudit}>
+          <button type="button" className={actionClass} disabled={!enabled || busy !== null || maintenanceBusy} onClick={handleAudit}>
             {busy === 'audit' ? '正在检查…' : '检查完整性'}
           </button>
           <button
             type="button"
             className={actionClass}
-            disabled={!enabled || busy !== null || summary === null || !summary.hasReclaimableSpace}
+            disabled={!enabled || busy !== null || maintenanceBusy || summary === null || !summary.hasReclaimableSpace}
             title={summary === null ? '先检查完整性' : undefined}
             onClick={handleCollect}
           >
