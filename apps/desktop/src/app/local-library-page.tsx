@@ -122,7 +122,7 @@ export function DesktopLocalLibrary() {
   };
 
   return (
-    <section data-testid="page-local-library" className="flex flex-col gap-4">
+    <section data-testid="page-local-library" className="mx-auto flex w-full max-w-4xl flex-col gap-4">
       <header className="flex flex-col gap-1">
         <h1 className="text-lg font-semibold">本地库</h1>
         <p className="text-sm text-(--app-text-muted)">

@@ -6,6 +6,8 @@ import { CanshouCard, GeneralCharacterCard } from '@mahoshojo/ui-web/character-c
 import { MagicalGirlResultBody } from '@mahoshojo/ui-web/character-result';
 import { LOCAL_CARD_TYPE_LABELS, LocalCardsPanel, useLocalCardsController, type LocalCardsHost } from '@mahoshojo/ui-web/local-cards';
 import { buildSafeFileName } from '@mahoshojo/ui-web/client';
+import { ProductFooter } from '@mahoshojo/ui-web/shell';
+import type { HomeAssetSource } from '@mahoshojo/ui-web/home';
 
 import { useLeaveGuard } from './useLeaveGuard';
 import {
@@ -22,6 +24,14 @@ import {
 } from '../features/character-manager/editor';
 import { downloadTextFile } from '../platform/download-text-file';
 import { IpcLocalCardRepository, describeLocalCardError } from '../platform/local-card-bridge';
+import { useExternalLinks } from '../features/external-links/external-links-provider';
+import { navigateByProductHref, resolveInternalHrefForHashHistory } from './hash-history-fragment';
+
+/**
+ * Desktop 的资源服务根（与 `routes.tsx` 中同名常量同义）：Tauri 自定义协议伺服 `dist/`，
+ * 品牌资源位于 origin 根。宿主事实按文件各自声明，不跨页面共享易变常量。
+ */
+const DESKTOP_ASSET_SOURCE: HomeAssetSource = { baseUrl: '/' };
 
 const actionClass =
   'min-h-11 rounded-lg border border-(--app-border-strong) px-4 py-2 text-sm hover:bg-(--app-surface-90) disabled:cursor-not-allowed disabled:opacity-50';
@@ -44,6 +54,7 @@ type Notice = { readonly tone: 'status' | 'alert'; readonly text: string };
  */
 export function DesktopCharacterManager() {
   const router = useRouter();
+  const { openFixed } = useExternalLinks();
   const search = useSearch({ strict: false });
   const cardParam = typeof search.card === 'string' ? search.card : undefined;
   const repository = useMemo(() => new IpcLocalCardRepository((command, args) => invoke(command, args as never)), []);
@@ -202,160 +213,171 @@ export function DesktopCharacterManager() {
   const preview = draft === null ? null : asCharacterCardPreview(draft);
 
   return (
-    <section data-testid="page-character-manager" className="flex flex-col gap-4">
-      <header className="flex flex-col gap-1">
-        <h1 className="text-lg font-semibold">角色管理</h1>
-        <p className="text-sm text-(--app-text-muted)">
-          编辑本地库中的角色与情景卡，或导入单个 JSON 数据卡。不需要账号，也不会访问项目服务器；云端保存、原生性校验与敏感词检测目前只在网页版提供。
-        </p>
-      </header>
-      {!guard.ready && !guard.message && <p role="status">正在初始化窗口关闭保护…</p>}
-      {guard.message && <p role="alert">{guard.message}</p>}
-      {notice && <p role={notice.tone} className="text-sm">{notice.text}</p>}
-      {loading && <p role="status" className="text-sm">正在读取本地数据卡…</p>}
+    <section data-testid="page-character-manager" className="magic-background-white">
+      <div className="container">
+        <div className="card flex flex-col gap-4">
+            <header className="flex flex-col gap-1">
+              <h1 className="text-lg font-semibold">角色管理</h1>
+              <p className="text-sm text-(--app-text-muted)">
+                编辑本地库中的角色与情景卡，或导入单个 JSON 数据卡。不需要账号，也不会访问项目服务器；云端保存、原生性校验与敏感词检测目前只在网页版提供。
+              </p>
+            </header>
+            {!guard.ready && !guard.message && <p role="status">正在初始化窗口关闭保护…</p>}
+            {guard.message && <p role="alert">{guard.message}</p>}
+            {notice && <p role={notice.tone} className="text-sm">{notice.text}</p>}
+            {loading && <p role="status" className="text-sm">正在读取本地数据卡…</p>}
 
-      {draft === null ? (
-        <>
-          <section className="rounded-lg border border-(--app-border) bg-(--app-surface) p-4" aria-labelledby="character-import-heading">
-            <h2 id="character-import-heading" className="text-sm font-medium">导入单个数据卡</h2>
-            <p className="mt-1 text-sm text-(--app-text-muted)">
-              选择 .json 文件或粘贴内容。载入后可先编辑，确认保存后才写入本地库；同内容的卡不会重复保存。
-            </p>
-            <input
-              type="file"
-              accept=".json,application/json"
-              aria-label="选择数据卡 JSON 文件"
-              className="mt-3 block text-sm"
-              onChange={(event) => {
-                const file = event.target.files?.[0];
-                event.target.value = '';
-                if (!file) return;
-                if (file.size > MAX_IMPORT_FILE_BYTES) {
-                  setNotice({ tone: 'alert', text: '文件超过单张数据卡的大小上限（4 MiB）。' });
-                  return;
-                }
-                void file.text().then(importText, () => setNotice({ tone: 'alert', text: '读取文件失败，请重试。' }));
-              }}
-            />
-            <label htmlFor={pasteId} className="mt-3 block text-sm">或粘贴 JSON</label>
-            <textarea id={pasteId} value={pasted} onChange={(event) => setPasted(event.target.value)} rows={5} className={inputClass} />
-            <button type="button" className={`${actionClass} mt-2`} disabled={pasted.trim() === ''} onClick={() => importText(pasted)}>
-              从文本载入
-            </button>
-          </section>
-          <LocalCardsPanel
-            model={cards.model}
-            actions={cards.controller.actions}
-            onEdit={(record) => openRecord(record.id)}
-            canEdit={isEditableLocalCard}
-          />
-        </>
-      ) : (
-        <section className="flex flex-col gap-4 rounded-lg border border-(--app-border) bg-(--app-surface) p-4" aria-labelledby="character-editor-heading">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <h2 id="character-editor-heading" className="text-base font-semibold">
-              {draft.original === null ? '编辑导入的数据卡' : `编辑：${draft.original.title}`}
-            </h2>
-            <span className="text-xs text-(--app-text-muted)">
-              {draft.original === null ? '尚未保存到本地库' : '本地库记录'}{dirty ? ' · 有未保存的修改' : ''}
-            </span>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-[1fr,auto]">
-            <label htmlFor={titleId} className="flex flex-col gap-1 text-sm">
-              记录标题
-              <input id={titleId} value={draft.title} maxLength={512} onChange={(event) => setDraft({ ...draft, title: event.target.value })} className={inputClass} />
-            </label>
-            <label htmlFor={typeId} className="flex flex-col gap-1 text-sm">
-              类型{draft.original === null ? '' : '（创建后不可修改）'}
-              {draft.original === null ? (
-                <select
-                  id={typeId}
-                  value={draft.cardType}
-                  onChange={(event) => setDraft({ ...draft, cardType: event.target.value as LocalCardType })}
-                  className={inputClass}
-                >
-                  {EDITABLE_CARD_TYPES.map((type) => <option key={type} value={type}>{LOCAL_CARD_TYPE_LABELS[type]}</option>)}
-                </select>
-              ) : (
-                <input
-                  id={typeId}
-                  value={LOCAL_CARD_TYPE_LABELS[draft.cardType]}
-                  readOnly
-                  className={`${inputClass} cursor-not-allowed opacity-70`}
+            {draft === null ? (
+              <>
+                <section className="rounded-lg border border-(--app-border) bg-(--app-surface) p-4" aria-labelledby="character-import-heading">
+                  <h2 id="character-import-heading" className="text-sm font-medium">导入单个数据卡</h2>
+                  <p className="mt-1 text-sm text-(--app-text-muted)">
+                    选择 .json 文件或粘贴内容。载入后可先编辑，确认保存后才写入本地库；同内容的卡不会重复保存。
+                  </p>
+                  <input
+                    type="file"
+                    accept=".json,application/json"
+                    aria-label="选择数据卡 JSON 文件"
+                    className="mt-3 block text-sm"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      event.target.value = '';
+                      if (!file) return;
+                      if (file.size > MAX_IMPORT_FILE_BYTES) {
+                        setNotice({ tone: 'alert', text: '文件超过单张数据卡的大小上限（4 MiB）。' });
+                        return;
+                      }
+                      void file.text().then(importText, () => setNotice({ tone: 'alert', text: '读取文件失败，请重试。' }));
+                    }}
+                  />
+                  <label htmlFor={pasteId} className="mt-3 block text-sm">或粘贴 JSON</label>
+                  <textarea id={pasteId} value={pasted} onChange={(event) => setPasted(event.target.value)} rows={5} className={inputClass} />
+                  <button type="button" className={`${actionClass} mt-2`} disabled={pasted.trim() === ''} onClick={() => importText(pasted)}>
+                    从文本载入
+                  </button>
+                </section>
+                <LocalCardsPanel
+                  model={cards.model}
+                  actions={cards.controller.actions}
+                  onEdit={(record) => openRecord(record.id)}
+                  canEdit={isEditableLocalCard}
                 />
-              )}
-            </label>
-          </div>
-          <p className="text-xs text-(--app-text-muted)">
-            标题与既有记录的类型不影响内容身份。修改正文会另存为一条新记录，原记录保留；正文中已有的签名字段原样保存，本机不校验签名，新记录标记为无签名。
-          </p>
-          <DataCardFieldEditor
-            data={draft.data}
-            onFieldChange={(path, value) => setDraft((current) => (current === null ? current : { ...current, data: setDataCardFieldValue(current.data, path, value) }))}
-          />
-          {preview !== null && (
-            <details>
-              <summary className="cursor-pointer text-sm font-medium">角色卡预览</summary>
-              <div className="mt-2">
-                {preview.kind === 'magical-girl' && <MagicalGirlResultBody magicalGirl={preview.data} />}
-                {preview.kind === 'general' && <GeneralCharacterCard general={preview.data} />}
-                {preview.kind === 'canshou' && <CanshouCard canshou={preview.data} />}
-              </div>
-            </details>
-          )}
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              className={actionClass}
-              disabled={!guard.ready || saving || (draft.original !== null && !dirty)}
-              onClick={() => void save()}
-            >
-              {saving ? '正在保存…' : '保存到本地库'}
-            </button>
-            <button
-              type="button"
-              className={actionClass}
-              disabled={saving}
-              title="导出的是当前编辑中的内容，不要求先保存到本地库"
-              onClick={() => downloadTextFile(cardExportFileName(draft.title), JSON.stringify(draft.data, null, 2))}
-            >
-              导出为 JSON 文件
-            </button>
-            <button type="button" className={actionClass} disabled={saving} onClick={leaveEditor}>
-              {dirty ? '放弃修改并关闭' : '关闭'}
-            </button>
-          </div>
-          {outcome?.kind === 'unchanged' && <p role="status" className="text-sm">没有需要保存的修改。</p>}
-          {outcome?.kind === 'updated' && <p role="status" className="text-sm">已更新本地库中的记录。</p>}
-          {outcome?.kind === 'created' && (
-            <div role="status" className="text-sm">
-              <p>{replacedOriginalId === null ? '已保存到本地库。' : '正文已改变，已另存为一条新记录；原记录仍在本地库。'}</p>
-              {replacedOriginalId !== null && (
-                <button type="button" className={`${actionClass} mt-2`} onClick={() => void moveOriginalToRecycleBin(replacedOriginalId)}>
-                  将原记录移入回收站
-                </button>
-              )}
-            </div>
-          )}
-          {outcome?.kind === 'exists' && (
-            <div role="status" className="text-sm">
-              <p>本地库已有内容相同的记录，未重复保存。</p>
-              <button type="button" className={`${actionClass} mt-2`} onClick={() => openRecord(outcome.id)}>打开已有记录</button>
-            </div>
-          )}
-          {outcome?.kind === 'in-recycle-bin' && (
-            <div role="status" className="text-sm">
-              <p>内容相同的记录在回收站中。保存不会自动恢复它。</p>
-              <button type="button" className={`${actionClass} mt-2`} onClick={() => void restoreFromRecycleBin(outcome.id)}>
-                从回收站恢复并打开
-              </button>
-            </div>
-          )}
-          {outcome?.kind === 'document-too-large' && (
-            <p role="alert" className="text-sm">保存后的本地库记录超过大小上限（4 MiB），请精简正文后重试。</p>
-          )}
-        </section>
-      )}
+              </>
+            ) : (
+              <section className="flex flex-col gap-4 rounded-lg border border-(--app-border) bg-(--app-surface) p-4" aria-labelledby="character-editor-heading">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h2 id="character-editor-heading" className="text-base font-semibold">
+                    {draft.original === null ? '编辑导入的数据卡' : `编辑：${draft.original.title}`}
+                  </h2>
+                  <span className="text-xs text-(--app-text-muted)">
+                    {draft.original === null ? '尚未保存到本地库' : '本地库记录'}{dirty ? ' · 有未保存的修改' : ''}
+                  </span>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-[1fr,auto]">
+                  <label htmlFor={titleId} className="flex flex-col gap-1 text-sm">
+                    记录标题
+                    <input id={titleId} value={draft.title} maxLength={512} onChange={(event) => setDraft({ ...draft, title: event.target.value })} className={inputClass} />
+                  </label>
+                  <label htmlFor={typeId} className="flex flex-col gap-1 text-sm">
+                    类型{draft.original === null ? '' : '（创建后不可修改）'}
+                    {draft.original === null ? (
+                      <select
+                        id={typeId}
+                        value={draft.cardType}
+                        onChange={(event) => setDraft({ ...draft, cardType: event.target.value as LocalCardType })}
+                        className={inputClass}
+                      >
+                        {EDITABLE_CARD_TYPES.map((type) => <option key={type} value={type}>{LOCAL_CARD_TYPE_LABELS[type]}</option>)}
+                      </select>
+                    ) : (
+                      <input
+                        id={typeId}
+                        value={LOCAL_CARD_TYPE_LABELS[draft.cardType]}
+                        readOnly
+                        className={`${inputClass} cursor-not-allowed opacity-70`}
+                      />
+                    )}
+                  </label>
+                </div>
+                <p className="text-xs text-(--app-text-muted)">
+                  标题与既有记录的类型不影响内容身份。修改正文会另存为一条新记录，原记录保留；正文中已有的签名字段原样保存，本机不校验签名，新记录标记为无签名。
+                </p>
+                <DataCardFieldEditor
+                  data={draft.data}
+                  onFieldChange={(path, value) => setDraft((current) => (current === null ? current : { ...current, data: setDataCardFieldValue(current.data, path, value) }))}
+                />
+                {preview !== null && (
+                  <details>
+                    <summary className="cursor-pointer text-sm font-medium">角色卡预览</summary>
+                    <div className="mt-2">
+                      {preview.kind === 'magical-girl' && <MagicalGirlResultBody magicalGirl={preview.data} />}
+                      {preview.kind === 'general' && <GeneralCharacterCard general={preview.data} />}
+                      {preview.kind === 'canshou' && <CanshouCard canshou={preview.data} />}
+                    </div>
+                  </details>
+                )}
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    className={actionClass}
+                    disabled={!guard.ready || saving || (draft.original !== null && !dirty)}
+                    onClick={() => void save()}
+                  >
+                    {saving ? '正在保存…' : '保存到本地库'}
+                  </button>
+                  <button
+                    type="button"
+                    className={actionClass}
+                    disabled={saving}
+                    title="导出的是当前编辑中的内容，不要求先保存到本地库"
+                    onClick={() => downloadTextFile(cardExportFileName(draft.title), JSON.stringify(draft.data, null, 2))}
+                  >
+                    导出为 JSON 文件
+                  </button>
+                  <button type="button" className={actionClass} disabled={saving} onClick={leaveEditor}>
+                    {dirty ? '放弃修改并关闭' : '关闭'}
+                  </button>
+                </div>
+                {outcome?.kind === 'unchanged' && <p role="status" className="text-sm">没有需要保存的修改。</p>}
+                {outcome?.kind === 'updated' && <p role="status" className="text-sm">已更新本地库中的记录。</p>}
+                {outcome?.kind === 'created' && (
+                  <div role="status" className="text-sm">
+                    <p>{replacedOriginalId === null ? '已保存到本地库。' : '正文已改变，已另存为一条新记录；原记录仍在本地库。'}</p>
+                    {replacedOriginalId !== null && (
+                      <button type="button" className={`${actionClass} mt-2`} onClick={() => void moveOriginalToRecycleBin(replacedOriginalId)}>
+                        将原记录移入回收站
+                      </button>
+                    )}
+                  </div>
+                )}
+                {outcome?.kind === 'exists' && (
+                  <div role="status" className="text-sm">
+                    <p>本地库已有内容相同的记录，未重复保存。</p>
+                    <button type="button" className={`${actionClass} mt-2`} onClick={() => openRecord(outcome.id)}>打开已有记录</button>
+                  </div>
+                )}
+                {outcome?.kind === 'in-recycle-bin' && (
+                  <div role="status" className="text-sm">
+                    <p>内容相同的记录在回收站中。保存不会自动恢复它。</p>
+                    <button type="button" className={`${actionClass} mt-2`} onClick={() => void restoreFromRecycleBin(outcome.id)}>
+                      从回收站恢复并打开
+                    </button>
+                  </div>
+                )}
+                {outcome?.kind === 'document-too-large' && (
+                  <p role="alert" className="text-sm">保存后的本地库记录超过大小上限（4 MiB），请精简正文后重试。</p>
+                )}
+              </section>
+            )}
+        </div>
+        {/* 页脚与 Web 角色管理页同一共享组件；站外链接走受控外链确认。 */}
+        <ProductFooter
+          assetSource={DESKTOP_ASSET_SOURCE}
+          onNavigateInternal={(href) => navigateByProductHref(router, href)}
+          resolveInternalHref={resolveInternalHrefForHashHistory}
+          onNavigateExternal={openFixed}
+        />
+      </div>
     </section>
   );
 }

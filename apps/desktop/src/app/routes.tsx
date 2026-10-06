@@ -97,7 +97,7 @@ const DesktopShellInner = () => {
         <ProductTopBar
           pathname={pathname}
           capabilities={CAPABILITIES}
-          logoSrc="/logo.svg"
+          logoSrc="/favicon.svg"
           account={projectTopBarAccount(cloudSession.phase)}
           onNavigate={(href, event) => {
             // 共享顶栏渲染真实 `<a href>`，因此这里必须阻止默认行为，否则会触发一次整页加载。
@@ -178,75 +178,80 @@ const indexRoute = createRoute({
           : { state: 'anonymous' };
 
     return (
-      <section data-testid="page-home" className="flex flex-col gap-6">
-        <HomeHero
-          assetSource={DESKTOP_ASSET_SOURCE}
-          width={220}
-          height={140}
-          subtitle="本地浏览百科、导入与导出不需要账号，也不访问项目服务器。"
-        />
-        <p className="text-center text-sm text-(--app-text-muted)">
-          桌面版的功能与网页版存在差异，各项功能预计将逐步开放。
-        </p>
-        <HomeAccountWelcome
-          state={welcome.state}
-          name={welcome.name}
-          primaryHref="/character-manager"
-          onNavigate={navigate}
-          resolveInternalHref={resolveInternalHrefForHashHistory}
-        />
-        <HomeEncyclopediaCard
-          assetSource={DESKTOP_ASSET_SOURCE}
-          onNavigate={navigate}
-          resolveInternalHref={resolveInternalHrefForHashHistory}
-          recommended={HOME_RECOMMENDED_ENTRIES}
-        />
-        <HomeFeatureGrid
-          assetSource={DESKTOP_ASSET_SOURCE}
-          categories={HOME_FEATURE_CATEGORIES}
-          capabilities={CAPABILITIES}
-          onNavigate={navigate}
-          resolveInternalHref={resolveInternalHrefForHashHistory}
-          unavailable="hide"
-        />
-        <section className="rounded-lg border border-(--app-border) bg-(--app-surface) p-4">
-          <h2 className="mb-1 text-sm font-medium text-(--app-text-muted)">本机工具</h2>
-          <ul className="flex flex-col gap-1 text-sm">
-            <li>
-              <a
-                href="#/local-library"
-                onClick={(event) => {
-                  event.preventDefault();
-                  navigate('/local-library');
-                }}
-                className="text-(--app-accent-strong) underline"
-              >
-                本地库
-              </a>
-              ：本机数据卡与 Web 包的整库导入导出。
-            </li>
-            <li>
-              <a
-                href="#/settings"
-                onClick={(event) => {
-                  event.preventDefault();
-                  navigate('/settings');
-                }}
-                className="text-(--app-accent-strong) underline"
-              >
-                设置
-              </a>
-              ：AI Provider、凭据与运行时信息。
-            </li>
-          </ul>
-        </section>
-        <ProductFooter
-          assetSource={DESKTOP_ASSET_SOURCE}
-          onNavigateInternal={navigate}
-          resolveInternalHref={resolveInternalHrefForHashHistory}
-          onNavigateExternal={openFixed}
-        />
-      </section>
+      <div data-testid="page-home" className="magic-background-white">
+        <div className="container">
+          <div className="card flex flex-col gap-6">
+            <HomeHero
+              assetSource={DESKTOP_ASSET_SOURCE}
+              subtitle="欢迎来到魔法国度！选择一个项目开始玩耍吧！"
+            />
+            <p className="text-center text-sm text-(--app-text-muted)">
+              桌面版的功能与网页版存在差异，各项功能预计将逐步开放。
+            </p>
+            <HomeAccountWelcome
+              state={welcome.state}
+              name={welcome.name}
+              primaryHref="/character-manager"
+              onNavigate={navigate}
+              resolveInternalHref={resolveInternalHrefForHashHistory}
+            />
+            <HomeEncyclopediaCard
+              assetSource={DESKTOP_ASSET_SOURCE}
+              onNavigate={navigate}
+              resolveInternalHref={resolveInternalHrefForHashHistory}
+              recommended={HOME_RECOMMENDED_ENTRIES}
+            />
+            <HomeFeatureGrid
+              assetSource={DESKTOP_ASSET_SOURCE}
+              categories={HOME_FEATURE_CATEGORIES}
+              capabilities={CAPABILITIES}
+              onNavigate={navigate}
+              resolveInternalHref={resolveInternalHrefForHashHistory}
+              unavailable="hide"
+            />
+            <div className="mt-8 text-center">
+              <p className="text-sm italic text-gray-500">设定来源于小说《下班，然后变成魔法少女》</p>
+            </div>
+            <section className="rounded-lg border border-(--app-border) bg-(--app-surface) p-4">
+              <h2 className="mb-1 text-sm font-medium text-(--app-text-muted)">本机工具</h2>
+              <ul className="flex flex-col gap-1 text-sm">
+                <li>
+                  <a
+                    href="#/local-library"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      navigate('/local-library');
+                    }}
+                    className="text-(--app-accent-strong) underline"
+                  >
+                    本地库
+                  </a>
+                  ：本机数据卡与 Web 包的整库导入导出。
+                </li>
+                <li>
+                  <a
+                    href="#/settings"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      navigate('/settings');
+                    }}
+                    className="text-(--app-accent-strong) underline"
+                  >
+                    设置
+                  </a>
+                  ：AI Provider、凭据与运行时信息。
+                </li>
+              </ul>
+            </section>
+          </div>
+          <ProductFooter
+            assetSource={DESKTOP_ASSET_SOURCE}
+            onNavigateInternal={navigate}
+            resolveInternalHref={resolveInternalHrefForHashHistory}
+            onNavigateExternal={openFixed}
+          />
+        </div>
+      </div>
     );
   },
 });

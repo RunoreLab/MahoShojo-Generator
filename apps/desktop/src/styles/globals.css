@@ -25,15 +25,16 @@
   --color-accent: oklch(0.78 0.16 350);
 }
 
-html,
-body,
-#root {
-  height: 100%;
-}
-
+/* `height: 100%` 链不再存在：body 背景会传播到 canvas，body 高度被钉死在视口时，
+   传播图以 body 盒为图幅按默认 repeat 平铺——长页面在每一屏边界出现断层/循环。
+   壳的 min-height 改由 AppShell 的 `min-h-screen` 直接承担，不再依赖祖先高度链。 */
 body {
   margin: 0;
+  /* 与 Web `globals.css` 同一组声明：fixed + cover 把渐变钉在视口上，滚动时不再平铺。 */
   background: var(--app-page-bg);
+  background-attachment: fixed;
+  background-size: cover;
+  min-height: 100vh;
   color: var(--app-text);
   font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
 }

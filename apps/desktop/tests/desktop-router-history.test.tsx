@@ -140,6 +140,12 @@ describe('desktop router keeps the product path inside the hash', () => {
     // hash-history 宿主的 <a href> 一律是 `#/产品路径`——裸 `/path` 会让复制链接与
     // 脚本失败后的原生跳转落在 Tauri 自定义协议伺服不了的路径上。
     expect(home.querySelector('[data-testid="home-feature-grid"]')).not.toBeNull();
+    // TopBar logo 用 favicon 圆形标志（双端产品对齐决策）；页面骨架与 Web 同构——
+    // `magic-background* > .container > .card` 共源 class 提供渐变底与白色限宽卡。
+    expect(container.querySelector('img[src="/favicon.svg"]')).not.toBeNull();
+    expect(home.classList.contains('magic-background-white')).toBe(true);
+    expect(home.querySelector(':scope > .container > .card')).not.toBeNull();
+    expect(home.textContent).toContain('欢迎来到魔法国度！选择一个项目开始玩耍吧！');
     expect(hrefs).toContain('#/details');
     expect(hrefs).toContain('#/character-manager');
     expect(hrefs).toContain('#/encyclopedia');
@@ -163,6 +169,25 @@ describe('desktop router keeps the product path inside the hash', () => {
       });
       await settle();
       expect(pageTestId(), `${to} 应当渲染 ${expected}`).toBe(expected);
+    }
+
+    // 卡片页与 Web 同构：`magic-background* > .container > .card` 共源骨架
+    // （DESK-PARITY：白色限宽容器）。裸 section 的百科/本地库不在此约束内——
+    // Web 对应页面同样不套 card。
+    for (const [to, expected, backgroundClass] of [
+      ['/details', 'page-details', 'magic-background'],
+      ['/character-manager', 'page-character-manager', 'magic-background-white'],
+    ] as const) {
+      await act(async () => {
+        await router.navigate({ to });
+      });
+      await settle();
+      const page = container.querySelector(`[data-testid="${expected}"]`)!;
+      expect(
+        page.classList.contains(backgroundClass),
+        `${to} 应当使用 ${backgroundClass} 页面骨架`,
+      ).toBe(true);
+      expect(page.querySelector(':scope > .container > .card')).not.toBeNull();
     }
 
     for (const [to, expected] of [

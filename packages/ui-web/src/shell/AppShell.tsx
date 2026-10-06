@@ -15,8 +15,11 @@ export interface AppShellProps {
   /**
    * 页面内容是否已经是全宽滚动容器。
    *
-   * 共享壳只负责**背景、层级与内容宽度**三件事，不负责页面内部布局。让每个页面自己再套一层滚动容器
-   * 的后果是出现双滚动条，而双滚动条在桌面窗口里尤其容易被误认为布局错乱。
+   * 共享壳只负责**层级与内容宽度**两件事，不负责页面内部布局。页面背景由 body 的传播背景
+   * （`--app-page-bg`，fixed 到视口）与各页面的 `magic-background*` 变体提供——壳自身不再
+   * 另刷一层（`bg-(--app-page-bg)` 编译为 `background-color`，渐变值对它非法，本就是死
+   * 规则）。让每个页面自己再套一层滚动容器的后果是出现双滚动条，而双滚动条在桌面窗口里
+   * 尤其容易被误认为布局错乱。
    */
   readonly bleedContent?: boolean;
   readonly className?: string;
@@ -43,7 +46,7 @@ export const AppShell = ({
 }: AppShellProps) => (
   <div
     data-testid="product-shell"
-    className={['flex min-h-full flex-col bg-(--app-page-bg) text-(--app-text)', className]
+    className={['flex min-h-screen flex-col text-(--app-text)', className]
       .filter((value): value is string => typeof value === 'string' && value.length > 0)
       .join(' ')}
     style={style}
