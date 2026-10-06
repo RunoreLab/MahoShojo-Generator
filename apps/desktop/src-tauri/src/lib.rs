@@ -1097,6 +1097,22 @@ fn exit_after_local_restore(app: tauri::AppHandle) -> Result<(), restore::Restor
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // 启动时间观测（D5.2）：`MAHOSHOJO_BOOT_TIMING=1` 时把 setup 各阶段打到
+    // stderr（`mahoshojo-boot <阶段> +<ms>`），与 renderer 侧
+    // `performance.mark`（src/platform/boot-timing.ts）拼出完整启动时间线。
+    // 纯观测——不设 env 时零成本，绝不改变任何初始化顺序或语义。
+    let boot_clock = std::time::Instant::now();
+    let boot_timing = std::env::var_os("MAHOSHOJO_BOOT_TIMING").is_some();
+    let boot_mark = move |label: &str| {
+        if boot_timing {
+            eprintln!(
+                "mahoshojo-boot {label} +{}ms",
+                boot_clock.elapsed().as_millis()
+            );
+        }
+    };
+    boot_mark("process-start");
+
     tauri::Builder::default()
         .manage(default_secret_store())
         .manage(ai::RequestRegistry::default())
@@ -1120,7 +1136,8 @@ pub fn run() {
                 &request,
             )
         })
-        .setup(|app| {
+        .setup(move |app| {
+            boot_mark("setup-begin");
             // 应用数据目录只能在 Builder 内部解析，因此本地库在 setup 阶段打开。
             // 路径完全由 native 侧产生：renderer 既不能指定目录，也不能指定文件名或 SQL。
             let data_root = app.path().app_data_dir().map_err(|error| {
@@ -1139,6 +1156,7 @@ pub fn run() {
                     rejection.message()
                 )
             })?;
+            boot_mark("instance-lock-acquired");
 
             restore::recover_pending(&data_root).map_err(|error| {
                 format!(
@@ -1146,8 +1164,10 @@ pub fn run() {
                     error.code(), error.message()
                 )
             })?;
+            boot_mark("recovery-done");
             let library = LocalLibrary::open(&data_root)
                 .map_err(|error| format!("cannot open the local store: {}", error.message()))?;
+            boot_mark("local-library-opened");
 
             let archive_export =
                 export::ArchiveExport::open(export::ExportPaths::under(&data_root)).map_err(
@@ -1155,6 +1175,7 @@ pub fn run() {
                         format!("cannot prepare the export directory: {error}")
                     },
                 )?;
+            boot_mark("archive-export-opened");
             // 清理上一次进程留下的未完成 temp。顺序在 `InstanceGuard` 之后，与"先抢锁再动磁盘"
             // 一致。
             //
@@ -1186,6 +1207,7 @@ pub fn run() {
             app.manage(instance);
             app.manage(library);
             app.manage(archive_export);
+            boot_mark("setup-done");
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

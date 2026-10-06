@@ -21,9 +21,72 @@
   } catch (e) {}
 })();
     </script>
+    <!--
+      品牌首帧（D5.2）：WebView 解析完 HTML 到 React 首次 commit 之间 #root 是空的，
+      先内联一份极轻的品牌画面盖住这段窗口——React createRoot 渲染时自然接管并
+      清空这些节点，不需要额外状态机/计时器。配色镜像 `--app-magic-bg-white` 的
+      亮/暗两个值（此刻共享样式表尚未加载，只能写字面量，两侧改动须同步）；
+      亮暗由上面 init 脚本写入的 `data-color-mode` 选择。
+    -->
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+      }
+      .desktop-boot {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 14px;
+        background: linear-gradient(135deg, #ffffff 0%, #ffffff 25%, #ffe3f6 86%, #fecfef 100%);
+        color: #3f4653;
+        font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+      }
+      html[data-color-mode='dark'] .desktop-boot {
+        background: linear-gradient(155deg, #0b1220 0%, #0b1220 42%, #241827 68%, #6f294d 88%, #d8578b 100%);
+        color: #e2e8f0;
+      }
+      .desktop-boot-logo {
+        width: 72px;
+        height: 72px;
+        border-radius: 50%;
+        box-shadow: 0 10px 32px rgba(216, 87, 139, 0.28);
+        animation: desktop-boot-pulse 1.6s ease-in-out infinite;
+      }
+      .desktop-boot-name {
+        font-size: 15px;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+      }
+      @keyframes desktop-boot-pulse {
+        0%,
+        100% {
+          opacity: 1;
+          transform: scale(1);
+        }
+        50% {
+          opacity: 0.85;
+          transform: scale(0.97);
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .desktop-boot-logo {
+          animation: none;
+        }
+      }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div class="desktop-boot" aria-hidden="true">
+        <img class="desktop-boot-logo" src="/favicon.svg" alt="" />
+        <div class="desktop-boot-name">MahoShojo Generator</div>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
