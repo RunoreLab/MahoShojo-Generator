@@ -648,8 +648,10 @@ function DetailsForm({ session }: { session: DetailsSession }) {
             {guard.message && <p role="alert">{guard.message}</p>}
             {questionnaireLoading && <p role="status">正在读取内置问卷…</p>}
             {questionnaireError && <p role="alert">{questionnaireError}</p>}
-            {profilesLoading && <p role="status">正在读取本地 Provider 配置…</p>}
-            {profilesError && <p role="alert">{profilesError}</p>}
+            {/* 本地 Provider 状态只与客户端执行相关：服务器模式照常可生成，加载中提示收窄、
+                失败提示改为如实说明影响范围，避免被读成「服务器生成也被封死」（D5.1-P2-r4）。 */}
+            {profilesLoading && target.location === 'client' && <p role="status">正在读取本地 Provider 配置…</p>}
+            {profilesError && <p role="alert">{target.location === 'server' ? '本地 Provider 配置加载失败，仅影响客户端执行。' : profilesError}</p>}
             <button className={`${actionClass} self-start`} disabled={busy} onClick={() => { setReload((value) => value + 1); void aiStore.refreshProfiles(); }}>重新加载问卷与配置</button>
             {showIntroduction && !state.pendingRestore ? (
               <section aria-label="介绍" className="rounded-lg border border-(--app-border) p-4">
@@ -742,7 +744,7 @@ function DetailsForm({ session }: { session: DetailsSession }) {
                       {aiState.profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name} · {profile.modelId}</option>)}
                     </select>
                   </label>
-                  {!profilesLoading && !aiState.profiles.length && !profilesError && <p>请先在<Link to="/settings" className="underline">设置</Link>中保存 Provider。问卷可以先填写，配置加载后再生成。</p>}
+                  {target.location === 'client' && !profilesLoading && !aiState.profiles.length && !profilesError && <p>请先在<Link to="/settings" className="underline">设置</Link>中保存 Provider。问卷可以先填写，配置加载后再生成。</p>}
                   {target.location === 'server' && <div className="rounded border border-(--app-border) p-3">
                     <p>服务器 · 云端：由项目服务在服务器侧生成，{generationMode === 'stream' ? 'Markdown 流式输出（未签名）' : '结构化 JSON 输出（问卷原生许可时可获官方签名）'}。</p>
                     <p>不使用客户端连接与高级模型参数（由服务器侧 System Default 解析）。切换执行位置不会丢失已填写的问卷回答。</p>

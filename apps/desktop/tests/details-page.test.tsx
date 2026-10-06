@@ -235,7 +235,9 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
     mocks.profiles.mockRejectedValue(new Error('profile bridge unavailable'));
     window.localStorage.setItem(DETAILS_DRAFT_KEY, JSON.stringify(draft()));
     await mount(); await click('恢复草稿');
-    expect(container.textContent).toContain('本地 Provider 配置加载失败');
+    // 服务器模式下如实标注影响范围而不是无条件告警原文（D5.1-P2-r4）。
+    expect(container.textContent).toContain('本地 Provider 配置加载失败，仅影响客户端执行');
+    expect(container.textContent).not.toContain('可以稍后重试');
     expect(container.textContent).toContain('服务器 · 云端');
     expect(button('发送问卷并生成').disabled).toBe(false);
     await click('发送问卷并生成');
