@@ -391,7 +391,7 @@ body {
 
 }
 
-/* 暗色兼容层（text-*/bg-*/border-* remap）整段已上移至
+/* 暗色兼容层（text-* / bg-* / border-* remap）整段已上移至
    `@mahoshojo/ui-web/product-shell.css` 的 `@layer utilities`。
    共享组件在两端渲染同一批 utility class，缺了它 Desktop 暗色下会读错颜色。 */
 
