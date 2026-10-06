@@ -2,7 +2,7 @@ import React from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 
-import { qqGroups } from '@/lib/communityGroups';
+import { qqGroups } from '@mahoshojo/ui-web/community';
 
 interface FooterProps {
   className?: string;

@@ -4,7 +4,7 @@ import rehypeKatex from 'rehype-katex';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 
-import { interpolateWithQQGroups } from '@/lib/communityGroups';
+import { interpolateWithQQGroups } from '@mahoshojo/ui-web/community';
 import { formatMarkdownImage, formatMarkdownLink, isAllowedExternalMediaUrl, isLikelyVideoUrl } from '@/lib/markdown/externalMedia';
 
 interface Announcement {

@@ -4,7 +4,10 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AVAILABLE, unavailable, type CapabilitySnapshot } from '../src/capability/index';
+import { encyclopediaEntries } from '../src/encyclopedia/index';
 import {
+  HOME_FEATURE_CATEGORIES,
+  HOME_RECOMMENDED_ENTRIES,
   HomeEncyclopediaCard,
   HomeFeatureGrid,
   HomeHero,
@@ -175,5 +178,29 @@ describe('HomeFeatureGrid', () => {
     const titles = [...container.querySelectorAll('h2')].map((h) => h.textContent);
     expect(titles).toHaveLength(1);
     expect(titles[0]).toContain('内容生成');
+  });
+});
+
+describe('HOME_FEATURE_CATEGORIES', () => {
+  // 目录是产品事实的唯一定义处：结构缺陷（重复 id、站外产品路径、缺渐变 class）会让两个
+  // 宿主同时出错，因此在这里断言形状而不是靠生成脚本兜底。
+  it('keeps unique feature ids and internal product hrefs', () => {
+    const ids = HOME_FEATURE_CATEGORIES.flatMap((category) => category.features.map((f) => f.id));
+    expect(new Set(ids).size).toBe(ids.length);
+    for (const category of HOME_FEATURE_CATEGORIES) {
+      for (const feature of category.features) {
+        expect(feature.href.startsWith('/')).toBe(true);
+        expect(feature.assetFile.length).toBeGreaterThan(0);
+        expect(feature.className).toBeTruthy();
+      }
+    }
+  });
+
+  it('keeps every recommended slug inside the encyclopedia catalog', () => {
+    // 推荐位是固定产品选位；指向不存在的 slug 会被渲染层静默丢掉，等于推荐位悄悄失效。
+    const known = new Set(encyclopediaEntries.map((entry) => entry.slug));
+    for (const entry of HOME_RECOMMENDED_ENTRIES) {
+      expect(known.has(entry.slug)).toBe(true);
+    }
   });
 });

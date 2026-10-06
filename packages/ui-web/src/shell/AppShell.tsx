@@ -1,7 +1,12 @@
 import type { CSSProperties, ReactNode } from 'react';
 
 export interface AppShellProps {
-  /** 品牌区。默认渲染产品名；传入 `null` 可完全隐藏（归档等工具页）。 */
+  /**
+   * 品牌区三态（DESK-PARITY-002）：
+   * - `undefined`：渲染默认文字品牌；
+   * - `null`：完全隐藏（产品壳已由顶栏 logo 承担品牌，不再重复文字）；
+   * - 其它 ReactNode：原样渲染宿主自定义品牌。
+   */
   readonly brand?: ReactNode;
   /** 顶栏。位置与品牌区并列，因此在导航之前渲染。 */
   readonly topBar?: ReactNode;
@@ -43,10 +48,12 @@ export const AppShell = ({
       .join(' ')}
     style={style}
   >
-    {brand ?? (
+    {brand === undefined ? (
       <header className="flex items-center gap-3 px-4 py-3 sm:px-6 lg:px-10">
         <span className="text-base font-semibold">MahoShojo Generator</span>
       </header>
+    ) : (
+      brand
     )}
     {topBar}
     {navigation}

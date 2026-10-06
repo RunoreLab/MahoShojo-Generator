@@ -1,3 +1,13 @@
+/**
+ * 社群入口数据（D5.1-P1 自 `apps/web/lib/communityGroups.ts` 迁入）。
+ *
+ * 这是产品内容而不是宿主事实：QQ 群列表、频道与加群链接在 Web 页脚、公告占位展开、
+ * 竞技场社群区与 Desktop 页脚是同一份。放进共源包的唯一原因是它已被四个消费点引用，
+ * 各持一份就会漂移（`DESK-PARITY-001/003`）。
+ *
+ * 这里只有数据与纯文本展开，没有任何导航/打开能力——把链接变成可点动作是宿主的事。
+ */
+
 export interface QQGroupInfo {
   groupCode: string;
   name: string;

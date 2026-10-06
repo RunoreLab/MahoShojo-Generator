@@ -81,11 +81,20 @@ const TARGETS = [
 const SYNC_MANIFEST = path.join(CONTENT_ROOT, 'sync-manifest.json');
 
 /**
- * Web 首页资源引用。
+ * 共源首页功能目录的资源引用。
  *
- * 各宿主拥有自己的首页 inventory；这里仅验证 Web catalog 引用的资源确实会被同步。
+ * D5.1-P1 后目录本身就是共源事实（`@mahoshojo/ui-web/home` 的 `HOME_FEATURE_CATEGORIES`）：
+ * 两端都消费它，再由各自的能力快照投影出可执行子集。这里验证的是目录引用的每个
+ * `assetFile` 真的存在于 `content/brand/` 且登记进了对应宿主的同步清单。
  */
-const HOME_FEATURE_CATALOG = path.join(root, 'apps', 'web', 'config', 'features.ts');
+const HOME_FEATURE_CATALOG = path.join(
+  root,
+  'packages',
+  'ui-web',
+  'src',
+  'home',
+  'feature-catalog.ts',
+);
 
 const readManifest = async () => {
   const manifest = JSON.parse(await readFile(SYNC_MANIFEST, 'utf8'));

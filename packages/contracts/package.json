@@ -39,6 +39,11 @@
       "import": "./src/desktop-cloud.ts",
       "default": "./src/desktop-cloud.ts"
     },
+    "./announcements": {
+      "types": "./src/announcements.ts",
+      "import": "./src/announcements.ts",
+      "default": "./src/announcements.ts"
+    },
     "./game-card": {
       "types": "./src/game-card.ts",
       "import": "./src/game-card.ts",

@@ -1,4 +1,4 @@
-import { qqGroups, qqGroupJoinButtonImageUrl } from '@/lib/communityGroups';
+import { qqGroups, qqGroupJoinButtonImageUrl } from '@mahoshojo/ui-web/community';
 
 interface QqGroupJoinSectionProps {
   className?: string;

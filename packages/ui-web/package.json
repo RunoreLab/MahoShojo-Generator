@@ -115,6 +115,11 @@
       "import": "./src/home/index.ts",
       "default": "./src/home/index.ts"
     },
+    "./community": {
+      "types": "./src/community/index.ts",
+      "import": "./src/community/index.ts",
+      "default": "./src/community/index.ts"
+    },
     "./markdown.css": "./src/markdown/markdown.css"
   },
   "scripts": {

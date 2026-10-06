@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import type { MouseEvent, ReactNode } from 'react';
 
 import { readCapability, type CapabilitySnapshot } from '../capability/index';
 // 直接指向模块而不是 views 的 barrel：barrel 会把该 feature 下所有 hook 一起拖进来，而首页
@@ -57,6 +57,77 @@ export function HomeHero({
         className="hidden dark:block"
       />
       {subtitle ? <p className="subtitle text-center">{subtitle}</p> : null}
+    </div>
+  );
+}
+
+export interface HomeAccountWelcomeLink {
+  readonly href: string;
+  readonly label: string;
+}
+
+export interface HomeAccountWelcomeProps {
+  /**
+   * 账号区状态机：宿主**已验证**才给 `'signed-in'`；`'anonymous'` 渲染为空而不是
+   * 显示「未登录」文案——未验证的凭据不冒称已注销（DESK-ONLINE-008 同一句话）。
+   */
+  readonly state: 'loading' | 'signed-in' | 'anonymous';
+  /** signed-in 时注入的展示名节点（Web 可挂徽章，Desktop 为纯文本）。 */
+  readonly name?: ReactNode;
+  /** signed-in 的主入口（档案馆）。 */
+  readonly primaryHref: string;
+  /** 次级入口；宿主按真实交付投影，不给就不渲染。 */
+  readonly secondaryLinks?: readonly HomeAccountWelcomeLink[];
+  readonly onNavigate: (href: string) => void;
+}
+
+/**
+ * 首页账号欢迎区。
+ *
+ * 结构共源、身份宿主投影：共享层只摆放「欢迎回来，<谁> 点击进入档案馆」这一产品形态，
+ * 至于这个「谁」是带徽章的用户组件还是纯文本用户名，由宿主在已验证身份后注入。
+ */
+export function HomeAccountWelcome({
+  state,
+  name,
+  primaryHref,
+  secondaryLinks,
+  onNavigate,
+}: HomeAccountWelcomeProps) {
+  if (state === 'anonymous') return null;
+
+  const navigate = (href: string) => (event: MouseEvent<HTMLAnchorElement>) => {
+    event.preventDefault();
+    onNavigate(href);
+  };
+
+  return (
+    <div className="mb-4 flex justify-center" data-testid="home-account-welcome">
+      {state === 'loading' ? (
+        <span className="text-sm text-gray-600">加载中...</span>
+      ) : (
+        <div className="flex flex-col items-center gap-2">
+          <a
+            href={primaryHref}
+            onClick={navigate(primaryHref)}
+            className="inline-flex items-center rounded-lg bg-pink-100 px-4 py-2 text-sm text-pink-700 transition-colors hover:bg-pink-200"
+          >
+            <span>欢迎回来，</span>
+            {name}
+            <span className="ml-2">点击进入档案馆</span>
+          </a>
+          {secondaryLinks?.map((link) => (
+            <a
+              key={link.href}
+              href={link.href}
+              onClick={navigate(link.href)}
+              className="text-sm text-blue-600 hover:underline"
+            >
+              {link.label}
+            </a>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

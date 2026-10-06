@@ -1,6 +1,6 @@
 'use client';
 
-import { qqGroups } from '@/lib/communityGroups';
+import { qqGroups } from '@mahoshojo/ui-web/community';
 
 type ArenaCommunitySectionProps = {
   className?: string;
