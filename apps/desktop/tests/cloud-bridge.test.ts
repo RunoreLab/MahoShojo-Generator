@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   CANCEL_HOSTED_AI_COMMAND,
+  CLOUD_CACHED_ACCOUNT_COMMAND,
   CLOUD_LOGIN_AWAIT_COMMAND,
   CLOUD_LOGIN_BEGIN_COMMAND,
   CLOUD_LOGIN_CANCEL_COMMAND,
@@ -16,6 +17,7 @@ import {
   cancelHostedAi,
   hostedAiRequest,
   probeCloudOnlineStatus,
+  readCachedCloudAccount,
   readCloudAuthStatus,
   signOutCloud,
   streamHostedAi,
@@ -73,6 +75,23 @@ describe('cloud bridge', () => {
     const invoke = vi.fn(async () => true);
     await cancelCloudLogin(invoke, 'f-9');
     expect(invoke).toHaveBeenCalledWith(CLOUD_LOGIN_CANCEL_COMMAND, { flowId: 'f-9' });
+  });
+
+  it('cached account：null / 摘要投影过契约；cookie 形状一律按违例拦下', async () => {
+    await expect(readCachedCloudAccount(vi.fn(async () => null))).resolves.toBeNull();
+
+    const cached = { account, sessionExpiresAt: '2026-10-12T00:00:00.000Z' };
+    const invoke = vi.fn(async () => cached);
+    await expect(readCachedCloudAccount(invoke)).resolves.toEqual(cached);
+    expect(invoke).toHaveBeenCalledWith(CLOUD_CACHED_ACCOUNT_COMMAND);
+
+    // 契约是 strict：native 若意外把 cookie/verifier 塞进投影，桥按
+    // bridge-invalid 拦下而不是放行到 renderer 状态。
+    const leaky = vi.fn(async () => ({ ...cached, cookie: 'session=tok' }));
+    await expect(readCachedCloudAccount(leaky)).rejects.toMatchObject({
+      code: 'bridge-invalid',
+      command: CLOUD_CACHED_ACCOUNT_COMMAND,
+    });
   });
 
   it('status：四种状态投影都过契约；unreachable 不带账号', async () => {

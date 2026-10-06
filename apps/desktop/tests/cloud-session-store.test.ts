@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+  CLOUD_CACHED_ACCOUNT_COMMAND,
   CLOUD_LOGIN_AWAIT_COMMAND,
   CLOUD_LOGIN_BEGIN_COMMAND,
   CLOUD_SIGN_OUT_COMMAND,
@@ -25,6 +26,9 @@ interface NativeStub {
   /** 让 `cloud_login_await` 保持挂起——用于断言 authenticating 期间的行为。 */
   holdAwait: () => void;
   releaseAwait: (outcome: unknown) => void;
+  /** 让 `cloud_auth_status` 保持挂起——用于断言「cached 身份先于验证结论可见」。 */
+  holdStatus: () => void;
+  releaseStatus: () => void;
 }
 
 /**
@@ -36,17 +40,29 @@ const BEGIN_RESULT = {
   authorizeUrl: 'https://example.test/auth/desktop?state=s',
 };
 
-const createNativeStub = (session: unknown = { state: 'signed-out' }): NativeStub => {
+const createNativeStub = (
+  session: unknown = { state: 'signed-out' },
+  cached: unknown = null,
+): NativeStub => {
   const calls: NativeStub['calls'] = [];
   let awaitResolve: ((value: unknown) => void) | null = null;
   let awaitHeld = false;
   let beginResolve: (() => void) | null = null;
   let beginHeld = false;
+  let statusResolve: (() => void) | null = null;
+  let statusHeld = false;
 
   const invoke = (async (command: string, args?: Record<string, unknown>) => {
     calls.push({ command, args });
     switch (command) {
+      case CLOUD_CACHED_ACCOUNT_COMMAND:
+        return cached;
       case CLOUD_AUTH_STATUS_COMMAND:
+        if (statusHeld) {
+          return new Promise((resolve) => {
+            statusResolve = () => resolve(session);
+          });
+        }
         return session;
       case CLOUD_LOGIN_BEGIN_COMMAND:
         if (beginHeld) {
@@ -84,25 +100,155 @@ const createNativeStub = (session: unknown = { state: 'signed-out' }): NativeStu
     releaseAwait: (outcome: unknown) => {
       awaitResolve?.(outcome);
     },
+    holdStatus: () => {
+      statusHeld = true;
+    },
+    releaseStatus: () => {
+      statusResolve?.();
+    },
   };
 };
 
+const commands = (stub: NativeStub): string[] => stub.calls.map((call) => call.command);
+
 describe('DesktopCloudSessionStore', () => {
-  it('starts idle and fires zero IPC before any explicit user action', () => {
-    // DESK-PROD-004 / DESK-ONLINE-012：冷启动顶栏读取的是 idle 投影，store 构造与订阅
-    // 都不发请求——「顶栏渲染了」与「已经查过会话」是两件事。
+  it('construction and subscription fire zero IPC — bootstrap is what starts the reads', () => {
+    // r2 口径后「冷启动零 IPC」收缩为「渲染前零 IPC」：store 构造与订阅本身仍不
+    // 发请求，由首个挂载消费者的 `bootstrap()` 触发 cached-first 装载。
     const native = createNativeStub();
     const store = new DesktopCloudSessionStore({ invoke: native.invoke });
     const listener = vi.fn();
     const unsubscribe = store.subscribe(listener);
 
-    expect(store.getSnapshot().phase).toEqual({ kind: 'idle' });
+    const snapshot = store.getSnapshot();
+    expect(snapshot.account).toBeNull();
+    expect(snapshot.bootstrapped).toBe(false);
+    expect(snapshot.verification).toBe('idle');
     expect(native.calls).toEqual([]);
-    expect(projectTopBarAccount(store.getSnapshot().phase)).toEqual({ kind: 'unknown' });
+    expect(projectTopBarAccount(snapshot)).toEqual({ kind: 'unknown' });
     unsubscribe();
   });
 
-  it('refresh publishes checking → ready and returns the native session projection', async () => {
+  it('bootstrap with no cached account settles signed-out without touching the network', () => {
+    // 本机凭据存储为空：没有 cookie 可供服务端确认，`cloud_auth_status` 也只可能
+    // 是 signed-out——省掉一次注定无果的网络往返（DESK-ONLINE-008 r2 的「有界」）。
+    const native = createNativeStub({ state: 'active', account: ACCOUNT }, null);
+    const store = new DesktopCloudSessionStore({ invoke: native.invoke });
+
+    return store.bootstrap().then(() => {
+      const snapshot = store.getSnapshot();
+      expect(snapshot.bootstrapped).toBe(true);
+      expect(snapshot.account).toBeNull();
+      expect(snapshot.verification).toBe('signed-out');
+      expect(commands(native)).toEqual([CLOUD_CACHED_ACCOUNT_COMMAND]);
+      expect(projectTopBarAccount(snapshot)).toEqual({ kind: 'signed-out' });
+    });
+  });
+
+  it('bootstrap projects the cached identity before background verification completes', async () => {
+    // cached-first 的关键不变量：本机凭据一到就显示用户名，不等服务端——
+    // 「账号 → 用户 → 用户名」三段式由此消失。
+    const native = createNativeStub(
+      { state: 'active', account: ACCOUNT, sessionExpiresAt: EXPIRES },
+      { account: ACCOUNT, sessionExpiresAt: EXPIRES },
+    );
+    native.holdStatus();
+    const store = new DesktopCloudSessionStore({ invoke: native.invoke });
+
+    const pending = store.bootstrap();
+    // auth_status 仍挂起：身份已经投影，verification 如实表达「在途」。
+    await vi.waitFor(() => {
+      expect(store.getSnapshot().account?.username).toBe('homura');
+    });
+    const during = store.getSnapshot();
+    expect(during.verification).toBe('checking');
+    expect(projectTopBarAccount(during)).toMatchObject({
+      kind: 'signed-in',
+      username: 'homura',
+    });
+
+    native.releaseStatus();
+    await pending;
+    expect(store.getSnapshot().verification).toBe('verified');
+    expect(commands(native)).toEqual([
+      CLOUD_CACHED_ACCOUNT_COMMAND,
+      CLOUD_AUTH_STATUS_COMMAND,
+    ]);
+  });
+
+  it('bootstrap keeps the cached identity when verification is unreachable', async () => {
+    // DESK-ONLINE-012：unreachable 时凭据仍在——身份保留，只更新验证结论；
+    // 顶栏渲染 signed-in + 离线徽标，而不是把已保存身份说成已注销。
+    const native = createNativeStub(
+      { state: 'unreachable' },
+      { account: ACCOUNT, sessionExpiresAt: EXPIRES },
+    );
+    const store = new DesktopCloudSessionStore({ invoke: native.invoke });
+
+    await store.bootstrap();
+
+    const snapshot = store.getSnapshot();
+    expect(snapshot.account?.username).toBe('homura');
+    expect(snapshot.verification).toBe('unreachable');
+    const projection = projectTopBarAccount(snapshot);
+    expect(projection.kind).toBe('signed-in');
+    if (projection.kind === 'signed-in') {
+      expect(projection.username).toBe('homura');
+      // unreachable + 身份 → 「离线」徽标注入 title 插槽。
+      expect(projection.title).toBeTruthy();
+    }
+  });
+
+  it('bootstrap clears the identity only when the server confirms expired', async () => {
+    const native = createNativeStub(
+      { state: 'expired' },
+      { account: ACCOUNT, sessionExpiresAt: EXPIRES },
+    );
+    const store = new DesktopCloudSessionStore({ invoke: native.invoke });
+
+    await store.bootstrap();
+
+    const snapshot = store.getSnapshot();
+    expect(snapshot.account).toBeNull();
+    expect(snapshot.verification).toBe('expired');
+    expect(projectTopBarAccount(snapshot)).toEqual({ kind: 'expired' });
+  });
+
+  it('bootstrap treats a credential-store read failure as unreachable, not signed-out', async () => {
+    // 凭据读取失败 ≠ 已登出：凭据可能存在但读不出，如实按不可达处理。
+    const deps: DesktopCloudSessionDeps = {
+      invoke: (async () => {
+        throw new Error('keyring locked');
+      }) as InvokeFn,
+    };
+    const store = new DesktopCloudSessionStore(deps);
+
+    await store.bootstrap();
+
+    const snapshot = store.getSnapshot();
+    expect(snapshot.bootstrapped).toBe(true);
+    expect(snapshot.account).toBeNull();
+    expect(snapshot.verification).toBe('unreachable');
+    expect(snapshot.lastError).toContain('账号信息读取失败');
+    expect(projectTopBarAccount(snapshot)).toEqual({ kind: 'unreachable' });
+  });
+
+  it('bootstrap is single-flight — repeated calls share one load cycle', async () => {
+    const native = createNativeStub(
+      { state: 'active', account: ACCOUNT, sessionExpiresAt: EXPIRES },
+      { account: ACCOUNT, sessionExpiresAt: EXPIRES },
+    );
+    const store = new DesktopCloudSessionStore({ invoke: native.invoke });
+
+    await Promise.all([store.bootstrap(), store.bootstrap()]);
+
+    expect(commands(native)).toEqual([
+      CLOUD_CACHED_ACCOUNT_COMMAND,
+      CLOUD_AUTH_STATUS_COMMAND,
+    ]);
+  });
+
+  it('refresh publishes checking and returns the native session projection', async () => {
     const native = createNativeStub({
       state: 'active',
       account: ACCOUNT,
@@ -111,12 +257,15 @@ describe('DesktopCloudSessionStore', () => {
     const store = new DesktopCloudSessionStore({ invoke: native.invoke });
 
     const pending = store.refresh();
-    expect(store.getSnapshot().phase).toEqual({ kind: 'checking' });
+    expect(store.getSnapshot().verification).toBe('checking');
 
     const session = await pending;
     expect(session).toMatchObject({ state: 'active', account: ACCOUNT });
-    expect(store.getSnapshot().phase).toEqual({ kind: 'ready', session });
-    expect(native.calls.map((call) => call.command)).toEqual([CLOUD_AUTH_STATUS_COMMAND]);
+    const snapshot = store.getSnapshot();
+    expect(snapshot.account).toEqual(ACCOUNT);
+    expect(snapshot.sessionExpiresAt).toBe(EXPIRES);
+    expect(snapshot.verification).toBe('verified');
+    expect(commands(native)).toEqual([CLOUD_AUTH_STATUS_COMMAND]);
   });
 
   it('coalesces concurrent refreshes into a single status read', async () => {
@@ -139,12 +288,11 @@ describe('DesktopCloudSessionStore', () => {
 
     const session = await store.refresh();
     expect(session).toEqual({ state: 'unreachable' });
-    expect(store.getSnapshot().phase).toEqual({
-      kind: 'ready',
-      session: { state: 'unreachable' },
-    });
-    expect(store.getSnapshot().lastError).toContain('会话状态读取失败');
-    expect(projectTopBarAccount(store.getSnapshot().phase)).toEqual({ kind: 'unreachable' });
+    const snapshot = store.getSnapshot();
+    expect(snapshot.account).toBeNull();
+    expect(snapshot.verification).toBe('unreachable');
+    expect(snapshot.lastError).toContain('会话状态读取失败');
+    expect(projectTopBarAccount(snapshot)).toEqual({ kind: 'unreachable' });
   });
 
   it('requestAuth verifies identity first, then begins the native login flow', async () => {
@@ -153,19 +301,17 @@ describe('DesktopCloudSessionStore', () => {
 
     await store.requestAuth();
 
-    expect(native.calls.map((call) => call.command)).toEqual([
+    expect(commands(native)).toEqual([
       CLOUD_AUTH_STATUS_COMMAND,
       CLOUD_LOGIN_BEGIN_COMMAND,
       CLOUD_LOGIN_AWAIT_COMMAND,
     ]);
     expect(native.calls[2]?.args).toEqual({ flowId: 'flow-1' });
 
-    const phase = store.getSnapshot().phase;
-    expect(phase.kind).toBe('ready');
-    if (phase.kind === 'ready') {
-      expect(phase.session).toMatchObject({ state: 'active', account: ACCOUNT });
-    }
-    expect(projectTopBarAccount(store.getSnapshot().phase)).toMatchObject({
+    const snapshot = store.getSnapshot();
+    expect(snapshot.account).toEqual(ACCOUNT);
+    expect(snapshot.verification).toBe('verified');
+    expect(projectTopBarAccount(snapshot)).toMatchObject({
       kind: 'signed-in',
       username: 'homura',
     });
@@ -181,7 +327,7 @@ describe('DesktopCloudSessionStore', () => {
 
     await store.requestAuth();
 
-    expect(native.calls.map((call) => call.command)).toEqual([CLOUD_AUTH_STATUS_COMMAND]);
+    expect(commands(native)).toEqual([CLOUD_AUTH_STATUS_COMMAND]);
   });
 
   it('requestAuth on unreachable stops there — retry is the next click, not an automatic loop', async () => {
@@ -190,11 +336,11 @@ describe('DesktopCloudSessionStore', () => {
 
     await store.requestAuth();
 
-    expect(native.calls.map((call) => call.command)).toEqual([CLOUD_AUTH_STATUS_COMMAND]);
-    expect(projectTopBarAccount(store.getSnapshot().phase)).toEqual({ kind: 'unreachable' });
+    expect(commands(native)).toEqual([CLOUD_AUTH_STATUS_COMMAND]);
+    expect(projectTopBarAccount(store.getSnapshot())).toEqual({ kind: 'unreachable' });
   });
 
-  it('publishes authenticating while the native flow is held and restores the prior session on cancel', async () => {
+  it('publishes authenticating while the native flow is held and restores the prior identity on cancel', async () => {
     const native = createNativeStub({ state: 'expired' });
     native.holdAwait();
     const store = new DesktopCloudSessionStore({ invoke: native.invoke });
@@ -204,23 +350,22 @@ describe('DesktopCloudSessionStore', () => {
     // `begin` 是异步的：authenticating 投影要等 begin 的 microtask 结算后才可见——
     // 等待它本身就在断言「在途状态对订阅者可见」。
     await vi.waitFor(() => {
-      expect(store.getSnapshot().phase).toEqual({
+      expect(store.getSnapshot().authFlow).toEqual({
         kind: 'authenticating',
         flowId: 'flow-1',
         authorizeUrl: 'https://example.test/auth/desktop?state=s',
       });
     });
-    const phase = store.getSnapshot().phase;
-    expect(projectTopBarAccount(phase)).toEqual({ kind: 'authenticating' });
+    expect(projectTopBarAccount(store.getSnapshot())).toEqual({ kind: 'authenticating' });
 
     native.releaseAwait({ status: 'cancelled' });
     const outcome = await pending;
     expect(outcome).toEqual({ status: 'cancelled' });
     // 取消不创建也不消费凭据：恢复进入授权前的 expired，而不是一律标成 signed-out。
-    expect(store.getSnapshot().phase).toEqual({
-      kind: 'ready',
-      session: { state: 'expired' },
-    });
+    const snapshot = store.getSnapshot();
+    expect(snapshot.account).toBeNull();
+    expect(snapshot.verification).toBe('expired');
+    expect(snapshot.authFlow).toEqual({ kind: 'idle' });
   });
 
   it('publishes the readable failure when the native outcome is failed', async () => {
@@ -231,16 +376,15 @@ describe('DesktopCloudSessionStore', () => {
     const pending = store.requestAuth();
     // 同样要等 authenticating 到位——await 命令此时才真正发出，releaseAwait 才能生效。
     await vi.waitFor(() => {
-      expect(store.getSnapshot().phase.kind).toBe('authenticating');
+      expect(store.getSnapshot().authFlow.kind).toBe('authenticating');
     });
     native.releaseAwait({ status: 'failed', code: 'state-mismatch', message: '回跳不匹配' });
     await pending;
 
-    expect(store.getSnapshot().phase).toEqual({
-      kind: 'ready',
-      session: { state: 'signed-out' },
-    });
-    expect(store.getSnapshot().lastError).toBe('登录未完成（state-mismatch）：回跳不匹配');
+    const snapshot = store.getSnapshot();
+    expect(snapshot.verification).toBe('signed-out');
+    expect(snapshot.authFlow).toEqual({ kind: 'idle' });
+    expect(snapshot.lastError).toBe('登录未完成（state-mismatch）：回跳不匹配');
   });
 
   it('coalesces concurrent auth requests into a single native login flow', async () => {
@@ -255,7 +399,7 @@ describe('DesktopCloudSessionStore', () => {
     const first = store.requestAuth();
     const second = store.requestAuth();
     await vi.waitFor(() => {
-      expect(store.getSnapshot().phase.kind).toBe('authenticating');
+      expect(store.getSnapshot().authFlow.kind).toBe('authenticating');
     });
     native.releaseAwait({ status: 'cancelled' });
     const [firstOutcome, secondOutcome] = await Promise.all([first, second]);
@@ -271,10 +415,10 @@ describe('DesktopCloudSessionStore', () => {
   });
 
   it('gates refresh and requestAuth while cloud_login_begin is still in flight', async () => {
-    // D5.0d-r2：`begin` 未返回时 phase 仍是 ready/signed-out——此时 AccountPanel
-    // mount 的 refresh() 若再发 `cloud_auth_status`，迟到的 signed-out 会在
-    // authenticating 投影建立后把它覆盖回去，renderer 在 native 仍在授权时
-    // 「忘记」自己正在登录。`loginPromise` 必须同时门禁 refresh 与 requestAuth。
+    // D5.0d-r2：`begin` 未返回时 authFlow 仍是 idle——此时 AccountPanel mount 的
+    // refresh() 若再发 `cloud_auth_status`，迟到的 signed-out 会在 authenticating
+    // 投影建立后把它覆盖回去，renderer 在 native 仍在授权时「忘记」自己正在登录。
+    // `loginPromise` 必须同时门禁 refresh 与 requestAuth。
     const native = createNativeStub({ state: 'signed-out' });
     const store = new DesktopCloudSessionStore({ invoke: native.invoke });
     await store.refresh();
@@ -283,10 +427,10 @@ describe('DesktopCloudSessionStore', () => {
 
     const first = store.requestAuth();
     await vi.waitFor(() => {
-      expect(native.calls.map((call) => call.command)).toContain(CLOUD_LOGIN_BEGIN_COMMAND);
+      expect(commands(native)).toContain(CLOUD_LOGIN_BEGIN_COMMAND);
     });
     // requestAuth 的身份验证 + 初始 refresh 各产生一条 status read；从这里起
-    // 进入「begin 在途、phase 尚未 authenticating」的窗口。
+    // 进入「begin 在途、authFlow 尚未 authenticating」的窗口。
     const callsBeforeWindow = native.calls.length;
 
     // 窗口内：第二个入口的 requestAuth 与面板 mount 的 refresh 都必须搭上同一条
@@ -297,7 +441,7 @@ describe('DesktopCloudSessionStore', () => {
 
     native.releaseBegin();
     await vi.waitFor(() => {
-      expect(store.getSnapshot().phase.kind).toBe('authenticating');
+      expect(store.getSnapshot().authFlow.kind).toBe('authenticating');
     });
 
     native.releaseAwait({ status: 'cancelled' });
@@ -307,16 +451,15 @@ describe('DesktopCloudSessionStore', () => {
     // 窗口内没有产生新 IPC：整串交互只有 begin 前的两条 status read 与一条
     // login flow；授权取消后落回进入授权前的会话，而不是被窗口内迟到的查询
     // 覆盖成的状态。
-    expect(native.calls.map((call) => call.command)).toEqual([
+    expect(commands(native)).toEqual([
       CLOUD_AUTH_STATUS_COMMAND,
       CLOUD_AUTH_STATUS_COMMAND,
       CLOUD_LOGIN_BEGIN_COMMAND,
       CLOUD_LOGIN_AWAIT_COMMAND,
     ]);
-    expect(store.getSnapshot().phase).toEqual({
-      kind: 'ready',
-      session: { state: 'signed-out' },
-    });
+    const snapshot = store.getSnapshot();
+    expect(snapshot.verification).toBe('signed-out');
+    expect(snapshot.authFlow).toEqual({ kind: 'idle' });
   });
 
   it('clears a prior session error when a later refresh succeeds', async () => {
@@ -343,21 +486,19 @@ describe('DesktopCloudSessionStore', () => {
     expect(store.getSnapshot().lastError).toBeNull();
   });
 
-  it('signOut clears to signed-out and reports the revoked flag verbatim', async () => {
-    const native = createNativeStub({
-      state: 'active',
-      account: ACCOUNT,
-      sessionExpiresAt: EXPIRES,
-    });
+  it('signOut clears identity to signed-out and reports the revoked flag verbatim', async () => {
+    const native = createNativeStub(
+      { state: 'active', account: ACCOUNT, sessionExpiresAt: EXPIRES },
+      { account: ACCOUNT, sessionExpiresAt: EXPIRES },
+    );
     const store = new DesktopCloudSessionStore({ invoke: native.invoke });
-    await store.refresh();
+    await store.bootstrap();
 
     const result = await store.signOut();
     expect(result).toEqual({ revoked: true });
-    expect(store.getSnapshot().phase).toEqual({
-      kind: 'ready',
-      session: { state: 'signed-out' },
-    });
+    const snapshot = store.getSnapshot();
+    expect(snapshot.account).toBeNull();
+    expect(snapshot.verification).toBe('signed-out');
     expect(native.calls.at(-1)?.command).toBe(CLOUD_SIGN_OUT_COMMAND);
   });
 

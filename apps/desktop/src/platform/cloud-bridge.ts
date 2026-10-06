@@ -1,5 +1,6 @@
 import { Channel } from '@tauri-apps/api/core';
 import {
+  DesktopCloudCachedAccountSchema,
   DesktopCloudErrorCodeSchema,
   DesktopCloudLoginBeginResponseSchema,
   DesktopCloudLoginOutcomeSchema,
@@ -12,6 +13,7 @@ import {
   HostedGenerationEventSchema,
 } from '@mahoshojo/contracts/desktop-cloud';
 import type {
+  DesktopCloudCachedAccount,
   DesktopCloudErrorCode,
   DesktopCloudLoginBeginResponse,
   DesktopCloudLoginOutcome,
@@ -37,6 +39,7 @@ import { DesktopBridgeError } from './desktop-bridge';
 export const CLOUD_LOGIN_BEGIN_COMMAND = 'cloud_login_begin' as const;
 export const CLOUD_LOGIN_AWAIT_COMMAND = 'cloud_login_await' as const;
 export const CLOUD_LOGIN_CANCEL_COMMAND = 'cloud_login_cancel' as const;
+export const CLOUD_CACHED_ACCOUNT_COMMAND = 'cloud_cached_account' as const;
 export const CLOUD_AUTH_STATUS_COMMAND = 'cloud_auth_status' as const;
 export const CLOUD_SIGN_OUT_COMMAND = 'cloud_sign_out' as const;
 export const CLOUD_ONLINE_STATUS_COMMAND = 'cloud_online_status' as const;
@@ -148,6 +151,27 @@ export const cancelCloudLogin = async (
     throw new DesktopBridgeError(CLOUD_LOGIN_CANCEL_COMMAND, 'cancel result must be a boolean');
   }
   return raw;
+};
+
+/**
+ * 读取本机凭据存储中的账号摘要（未经服务端确认）。零网络、零凭据——返回
+ * `null` 即本机没有已保存账号，此时 `cloud_auth_status` 也只可能是
+ * signed-out，不需要再问服务端。
+ */
+export const readCachedCloudAccount = async (
+  invoke: InvokeFn,
+): Promise<DesktopCloudCachedAccount | null> => {
+  let raw: unknown;
+  try {
+    raw = await invoke(CLOUD_CACHED_ACCOUNT_COMMAND);
+  } catch (cause) {
+    throw toCloudError(CLOUD_CACHED_ACCOUNT_COMMAND, cause);
+  }
+  return parseResult(
+    CLOUD_CACHED_ACCOUNT_COMMAND,
+    DesktopCloudCachedAccountSchema.nullable(),
+    raw,
+  );
 };
 
 /** 查询账号会话状态（含服务端确认；unreachable 不代表已注销）。 */

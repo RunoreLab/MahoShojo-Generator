@@ -402,34 +402,31 @@ const desktopSlots: CardLibrarySlots = {
 /**
  * 组装 Desktop 运行地的数据卡选择器宿主。
  *
- * `auth` 来自共享 `DesktopCloudSessionStore` 的当前快照（惰性：冷启动是
- * `idle → 未登录投影`，调用方在用户主动打开选择器时 `refresh()`——
- * `DESK-ONLINE-013` 只在主动使用时探测）。本地面不依赖登录态。
+ * `auth` 来自共享 `DesktopCloudSessionStore` 的当前快照（cached-first：本机
+ * 凭据即线上身份；选择器打开时调用方仍 `refresh()` 一次——`DESK-ONLINE-013`
+ * 的主动使用探测）。本地面不依赖登录态。
  */
 export function useDesktopCardLibraryHost(): CardLibraryHost {
   const { state } = useDesktopCloudSession();
   /**
-   * 三态投影（D5.0e-r1）：
-   * - `idle`/`checking`/`authenticating`：会话尚未确认 → `unknown`，不得按登出清理；
-   * - `ready+unreachable`：服务不可达但本地凭据保留 → `unknown`（不可误判为注销）；
-   * - `ready+expired`/`signed-out`：确认过的登出 → `unauthenticated`；
-   * - `ready+active`：`authenticated`。
+   * 三态投影（D5.0e-r1 → D5.2 正交会话后口径不变）：
+   * - `account != null`（cached 或已验证）：`authenticated`——本机凭据即线上
+   *   请求会用的身份，unreachable 不改写它（凭据保留，DESK-ONLINE-012）；
+   * - `account == null` 且 signed-out/expired：确认过的登出 → `unauthenticated`；
+   * - 其余（未 bootstrap / checking / authenticating / unreachable 无账号）：
+   *   `unknown`——尚未确认或服务不可达，不按登出清理。
    */
-  const phase = state.phase;
-  const session = phase.kind === 'ready' ? phase.session : null;
   const authStatus: CardLibraryAuthState['status'] =
-    phase.kind !== 'ready'
-      ? 'unknown'
-      : session?.state === 'active'
-        ? 'authenticated'
-        : session?.state === 'unreachable'
-          ? 'unknown'
-          : 'unauthenticated';
+    state.account !== null
+      ? 'authenticated'
+      : state.verification === 'signed-out' || state.verification === 'expired'
+        ? 'unauthenticated'
+        : 'unknown';
   return useMemo(
     () => ({
       auth: {
         status: authStatus,
-        userId: session?.state === 'active' ? session.account.userId : null,
+        userId: state.account?.userId ?? null,
         userBadges: [],
       },
       online: createDesktopCardLibraryOnlinePort((command, args) => invoke(command, args as never)),
@@ -439,6 +436,6 @@ export function useDesktopCardLibraryHost(): CardLibraryHost {
       platform: desktopPlatform,
       slots: desktopSlots,
     }),
-    [session, authStatus],
+    [state.account, authStatus],
   );
 }

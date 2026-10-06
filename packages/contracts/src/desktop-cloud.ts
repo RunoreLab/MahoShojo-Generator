@@ -215,6 +215,20 @@ export const DesktopCloudSessionStatusSchema = z.discriminatedUnion('state', [
 ]);
 export type DesktopCloudSessionStatus = z.infer<typeof DesktopCloudSessionStatusSchema>;
 
+/**
+ * `cloud_cached_account` 的返回：本机凭据存储中的账号摘要投影。
+ *
+ * 这是 cached-first 启动身份：OS credential store 里 `StoredSession` 保存的
+ * 非秘密摘要，**未经服务端确认**——renderer 据此先把顶栏画成已登录用户名，
+ * 再由后台 `cloud_auth_status` 给出验证结论。载荷不含 cookie 或任何可重放
+ * 凭据；native 返回 `null` 表示本机没有已保存账号（确认可显示登录入口）。
+ */
+export const DesktopCloudCachedAccountSchema = z.object({
+  account: DesktopCloudAccountSummarySchema,
+  sessionExpiresAt: z.string().datetime({ offset: true }).optional(),
+}).strict();
+export type DesktopCloudCachedAccount = z.infer<typeof DesktopCloudCachedAccountSchema>;
+
 /** 登出结果：本地凭据无条件删除，`revoked` 只反映服务端会话是否同步作废。 */
 export const DesktopCloudSignOutResultSchema = z.object({
   revoked: z.boolean(),

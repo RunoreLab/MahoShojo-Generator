@@ -4,7 +4,7 @@
 // 消费**同一份**会话投影与同一个授权流程；各自 new 一份 store 就会得到
 // 两个互不认识的 `authenticating` 状态与两份独立的 `checking` 在途查询。
 
-import { useSyncExternalStore } from 'react';
+import { useEffect, useSyncExternalStore } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 
 import {
@@ -34,5 +34,10 @@ export const useDesktopCloudSession = (
   store: DesktopCloudSessionStore = getDesktopCloudSessionStore(),
 ): UseDesktopCloudSessionResult => {
   const state = useSyncExternalStore(store.subscribe, store.getSnapshot);
+  // 首个挂载的消费者触发 cached-first 装载：本机凭据→立即身份投影→后台
+  // cloud_auth_status 验证。重挂载只搭上同一个 bootstrapPromise，不发重复请求。
+  useEffect(() => {
+    void store.bootstrap();
+  }, [store]);
   return { state, store };
 };

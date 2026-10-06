@@ -4,17 +4,17 @@
  *
  * 这组测试守三条边界：
  *
- * 1. **壳挂载不探测账号/消息。** 顶栏挂在壳上的每一帧都属于本地旅程——`DESK-PROD-004`
- *    （r2 口径）与 `DESK-ONLINE-012` 要求不因复用共享壳隐式挂载在线探测：挂载后除公告
- *    窄通道（`on-launch` 检查，spec 认可的启动行为）外 `invoke` 一次都不能被调用；
- *    账号区投影的是 `idle → 'unknown'` 的中性占位。
+ * 1. **壳挂载不做网络探测。** `DESK-PROD-004`（r2 口径）允许「本机凭据只读 +
+ *    后台验证」：挂载后除公告窄通道（`on-launch` 检查）与 `cloud_cached_account`
+ *    （OS 凭据存储只读、零网络）外 `invoke` 一次都不能被调用；本机没有已保存账号时
+ *    `cloud_auth_status` 也不能发——没有 cookie 的验证注定 signed-out，不花这次往返。
  * 2. **能力快照即真相。** 未交付入口（`/battle`、`/messages`、个人页 `/me`）在
  *    `hide` 策略下不渲染——尤其 `/messages` 必须整条消失，而不是挂着一个伪造
  *    未读数的铃铛；站外入口由 `open_external_url` 变成真实能力，点击走 native
  *    校验通道而不是 WebView 导航。
- * 3. **账号动作走原生桥。** 点击账号区经 `requestAuth → cloud_auth_status →
- *    cloud_login_begin/await` 完成授权往返；投影到顶栏的只有契约快照（active 显示
- *    用户名），unreachable 如实显示「服务不可用」而不是已登出。
+ * 3. **账号动作走原生桥。** 本机有凭据时顶栏直接渲染 cached 用户名、后台再验证；
+ *    未登录时点击经 `requestAuth → cloud_auth_status → cloud_login_begin/await`
+ *    完成授权往返；unreachable 保留已保存身份并标注「离线」，绝不显示成已登出。
  */
 
 import { act } from 'react';
@@ -24,6 +24,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { invokeMock, defaultInvokeImpl } = vi.hoisted(() => {
   const impl = async (command: string): Promise<unknown> => {
+    if (command === 'cloud_cached_account') return null;
     if (command === 'cloud_auth_status') return { state: 'signed-out' as const };
     if (command === 'cloud_login_begin') {
       return { flowId: 'flow-1', authorizeUrl: 'https://example.test/auth/desktop?state=s' };
@@ -130,21 +131,54 @@ const accountButton = (): HTMLButtonElement | null =>
   ) ?? null;
 
 describe('desktop shared topbar', () => {
-  it('mounts the shared chrome without probing services — the account slot is the neutral placeholder', async () => {
+  it('mounts the shared chrome without network probing — the cached read is the only account IPC', async () => {
     await mount();
 
-    // DESK-PROD-004 / DESK-ONLINE-012：壳挂载不做账号探测或消息摘要。P1 后
-    // 唯一的例外是公告窄通道——`announcements.checkPolicy="on-launch"` 是
-    // spec 认可的启动检查（读缓存 + 一次条件刷新），除此之外一条 IPC 都不能有。
+    // r2 口径：挂载允许本机凭据只读（`cloud_cached_account`，OS keyring、零网络）
+    // 与公告窄通道；本机没有已保存账号时 `cloud_auth_status` 一次都不能有——
+    // 没有 cookie 的服务端验证注定 signed-out，省掉这次注定无果的往返（有界）。
     const commands = invokeMock.mock.calls.map((call) => call[0]);
     expect(commands).not.toContain('cloud_auth_status');
     for (const command of commands) {
-      expect(['announcements_get_cached', 'announcements_refresh']).toContain(command);
+      expect(['announcements_get_cached', 'announcements_refresh', 'cloud_cached_account']).toContain(command);
     }
     expect(container.querySelector('header.global-topbar')).not.toBeNull();
-    expect(accountButton()?.textContent).toBe('账号');
+    // 本机无已保存账号 = 已确认未登录：直接渲染登录入口，没有「账号」占位过渡。
+    expect(accountButton()?.textContent).toBe('登录 / 注册');
     // 冷启动也绝不能有消息角标——Desktop 不注入消息摘要。
     expect(container.textContent).not.toContain('条未读');
+  });
+
+  it('projects the saved account name at mount and keeps it through unreachable verification', async () => {
+    // cached-first 的产品断言：本机凭据一到就渲染用户名（不经「账号→用户→名字」
+    // 三段式），后台 `cloud_auth_status` 同时发起；unreachable 时身份保留并
+    // 标注「离线」——不把已保存凭据说成已注销（DESK-ONLINE-012）。
+    let releaseStatus: ((value: unknown) => void) | null = null;
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'cloud_cached_account') {
+        return {
+          account: { userId: 7, username: 'homura', displayName: 'homura' },
+          sessionExpiresAt: '2026-10-12T00:00:00.000Z',
+        };
+      }
+      if (command === 'cloud_auth_status') {
+        return new Promise((resolve) => {
+          releaseStatus = resolve;
+        });
+      }
+      return defaultInvokeImpl(command);
+    });
+    await mount();
+
+    // 验证仍在途：用户名已经挂上，同时 auth_status 确已后台发起。
+    expect(container.querySelector('header.global-topbar')?.textContent).toContain('homura');
+    expect(invokeMock.mock.calls.map((call) => call[0])).toContain('cloud_auth_status');
+
+    releaseStatus?.({ state: 'unreachable' });
+    await settle();
+    const topbar = container.querySelector('header.global-topbar');
+    expect(topbar?.textContent).toContain('homura');
+    expect(topbar?.textContent).toContain('离线');
   });
 
   it('renders only delivered entries: /messages and /me are absent, external sites open via the controlled command', async () => {
@@ -224,6 +258,7 @@ describe('desktop shared topbar', () => {
     // 面板，不得取消顶栏发起的全局登录——D5.0d-r1 修复的 ownership 边界。
     let releaseAwait: ((outcome: unknown) => void) | null = null;
     invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'cloud_cached_account') return null;
       if (command === 'cloud_auth_status') return { state: 'signed-out' as const };
       if (command === 'cloud_login_begin') {
         return { flowId: 'flow-1', authorizeUrl: 'https://example.test/auth/desktop?state=s' };
@@ -268,11 +303,12 @@ describe('desktop shared topbar', () => {
 
     await click(accountButton());
 
-    // 点击 → status → begin → await → signed-in：整条链路都是用户这一次点按的后果。
+    // 挂载 cached 读 → 点击 → status → begin → await → signed-in：
+    // 整条链路都是这一次点按的后果（bootstrap 的凭据读取发生在挂载时，不是点击）。
     // 公告窄通道的启动检查与登录链路无关，断言只看 cloud_* 命令的相对顺序。
     expect(
       invokeMock.mock.calls.map((call) => call[0]).filter((command) => command.startsWith('cloud_')),
-    ).toEqual(['cloud_auth_status', 'cloud_login_begin', 'cloud_login_await']);
+    ).toEqual(['cloud_cached_account', 'cloud_auth_status', 'cloud_login_begin', 'cloud_login_await']);
     // 顶栏投影到 active：显示用户名，且出现「退出登录」入口（菜单 DOM 常挂在 hover
     // group 里，不需要先悬停就能断言）。
     expect(container.querySelector('header.global-topbar')?.textContent).toContain('homura');
@@ -284,9 +320,11 @@ describe('desktop shared topbar', () => {
   });
 
   it('shows 服务不可用 when the bridge reports unreachable — never signed-out', async () => {
-    invokeMock.mockImplementation(async (command: string) =>
-      command === 'cloud_auth_status' ? { state: 'unreachable' as const } : undefined,
-    );
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'cloud_cached_account') return null;
+      if (command === 'cloud_auth_status') return { state: 'unreachable' as const };
+      return undefined;
+    });
     await mount();
 
     await click(accountButton());

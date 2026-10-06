@@ -45,6 +45,7 @@
     "allow-cloud-login-begin",
     "allow-cloud-login-await",
     "allow-cloud-login-cancel",
+    "allow-cloud-cached-account",
     "allow-cloud-auth-status",
     "allow-cloud-sign-out",
     "allow-cloud-online-status",

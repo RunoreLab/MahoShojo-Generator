@@ -969,6 +969,15 @@ fn cloud_login_cancel(cloud: State<'_, cloud::CloudState>, flow_id: String) -> b
     cloud::cloud_login_cancel(&cloud, &flow_id)
 }
 
+/// 本机凭据存储的账号摘要（未经服务端确认）：cached-first 启动身份。
+/// 零网络——`None` 即本机没有已保存账号。
+#[tauri::command]
+fn cloud_cached_account(
+    secrets: State<'_, SharedSecretStore>,
+) -> Result<Option<cloud::CloudCachedAccount>, cloud::CloudError> {
+    cloud::cloud_cached_account(secrets.inner().as_ref())
+}
+
 /// 查询账号会话状态：signed-out / active / expired / unreachable。
 /// `expired` 表示服务端明确拒绝会话（本地凭据随之清除）；`unreachable` 只是
 /// 服务暂时联系不上，凭据保留。
@@ -1249,6 +1258,7 @@ pub fn run() {
             cloud_login_begin,
             cloud_login_await,
             cloud_login_cancel,
+            cloud_cached_account,
             cloud_auth_status,
             cloud_sign_out,
             cloud_online_status,

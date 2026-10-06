@@ -561,22 +561,20 @@ export function DesktopCharacterManager() {
 
   const preview = draft === null ? null : asCharacterCardPreview(draft);
 
-  // 云会话 → 共享账号面板投影（与顶栏/卡库宿主同一三态口径，D5.1-P2-r5-r1）：
-  // `idle` 与 `unreachable` 都是 `unknown`——「从未查询过」和「服务不可达」都不是
-  // 确认登出；只有 ready+signed-out/expired 才投影 `unauthenticated`。
-  const cloudPhase = cloudSession.phase;
-  const activeCloudAccount =
-    cloudPhase.kind === 'ready' && cloudPhase.session.state === 'active' ? cloudPhase.session.account : null;
+  // 云会话 → 共享账号面板投影（与顶栏/卡库宿主同一口径，D5.1-P2-r5-r1 → D5.2）：
+  // `account` 是本机认识的身份（cached 或已验证）→ authenticated；确认过的
+  // signed-out/expired → unauthenticated；checking/未 bootstrap/unreachable
+  // → loading/unknown——「验证在途」与「服务不可达」都不是确认登出。
+  const activeCloudAccount = cloudSession.account;
   const accountStatus: CharacterManagerAccountStatus =
-    cloudPhase.kind === 'checking' || cloudPhase.kind === 'authenticating'
+    cloudSession.verification === 'checking' || cloudSession.authFlow.kind === 'authenticating'
       ? 'loading'
       : activeCloudAccount !== null
         ? 'authenticated'
-        : cloudPhase.kind === 'ready' &&
-            (cloudPhase.session.state === 'signed-out' || cloudPhase.session.state === 'expired')
+        : cloudSession.verification === 'signed-out' || cloudSession.verification === 'expired'
           ? 'unauthenticated'
           : 'unknown';
-  const cloudUnreachable = cloudPhase.kind === 'ready' && cloudPhase.session.state === 'unreachable';
+  const cloudUnreachable = cloudSession.verification === 'unreachable';
 
   const draftTemplate = draft === null ? 'unknown' : inferDataCardTemplate(draft.data);
   const editorTitle = draft === null

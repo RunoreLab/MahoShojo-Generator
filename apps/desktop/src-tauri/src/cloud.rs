@@ -826,6 +826,29 @@ struct GetSessionResponse {
     user: Option<serde_json::Value>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloudCachedAccount {
+    pub account: CloudAccountSummary,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_expires_at: Option<String>,
+}
+
+/// `cloud_cached_account`：本机凭据存储里的账号摘要（未经服务端确认）。
+///
+/// cached-first 启动身份——renderer 据此在后台 `cloud_auth_status` 给出验证
+/// 结论之前先把顶栏画成已登录用户名。只读 OS 凭据存储、不发网络请求；
+/// 返回 `None` 即本机没有已保存账号（此时 `cloud_auth_status` 也只可能是
+/// signed-out，不需要再问服务端）。
+pub fn cloud_cached_account(
+    secrets: &dyn SecretStore,
+) -> Result<Option<CloudCachedAccount>, CloudError> {
+    Ok(load_session(secrets)?.map(|session| CloudCachedAccount {
+        account: CloudAccountSummary::from(&session.account),
+        session_expires_at: session.session_expires_at,
+    }))
+}
+
 /// `cloud_auth_status`：本地凭据 + 服务端确认，区分 unreachable / expired。
 pub async fn cloud_auth_status(
     state: &CloudState,
@@ -2413,6 +2436,38 @@ mod tests {
             assert!(!online.reachable);
             assert_eq!(online.compatible, None);
         });
+    }
+
+    #[test]
+    fn cached_account_projects_only_public_summary_fields() {
+        // cached-first 启动身份：无会话 → None；有会话 → 只给公开摘要，
+        // cookie 等可重放凭据绝不离开 native。
+        let secrets = MemorySecrets::new();
+        assert!(cloud_cached_account(&secrets).unwrap().is_none());
+
+        store_session(&secrets, &stored_test_session()).unwrap();
+        let cached = cloud_cached_account(&secrets)
+            .unwrap()
+            .expect("stored session");
+        assert_eq!(cached.account.username, "homura");
+        assert_eq!(cached.account.user_id, 7);
+        assert_eq!(
+            cached.session_expires_at.as_deref(),
+            Some("2026-10-12T00:00:00Z")
+        );
+
+        let wire = serde_json::to_value(&cached).unwrap();
+        assert_eq!(wire["account"]["username"].as_str(), Some("homura"));
+        assert_eq!(
+            wire["sessionExpiresAt"].as_str(),
+            Some("2026-10-12T00:00:00Z")
+        );
+        for marker in ["cookie", "token", "verifier", "grant"] {
+            assert!(
+                !wire.to_string().to_lowercase().contains(marker),
+                "cached projection must not leak {marker}"
+            );
+        }
     }
 
     /// fixture 一致性门禁：路径/协议常量与 `desktop-cloud.json` 同源。

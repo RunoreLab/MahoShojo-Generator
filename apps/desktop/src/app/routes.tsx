@@ -90,8 +90,9 @@ const isFullBleedPath = (pathname: string) =>
  * 图片不在这里；允许的后台在线请求由各自宿主 adapter 按「离线可用、不阻塞、有界、不泄漏」
  * 原则发起（`DESK-PROD-004` r2 口径，不再要求冷启动零项目请求）：
  *
- * - 账号投影来自 `DesktopCloudSessionStore` 的当前快照；冷启动是 `idle → 'unknown'` 的
- *   中性「账号」占位，点按经 `requestAuth` 才触发第一次 `cloud_auth_status`；
+ * - 账号投影来自 `DesktopCloudSessionStore` 的当前快照：cached-first——本机凭据
+ *   读到账号就立即渲染用户名（不经过「账号 → 用户 → 用户名」三段式），随后一次
+ *   `cloud_auth_status` 后台验证给出服务端结论；不可达时身份保留并标注「离线」；
  * - 消息摘要不注入：Desktop 没有消息中心，`/messages` 在快照里是 not-implemented，
  *   按 `hide` 策略整条入口不出现——也不会有任何未读角标的伪造；
  * - 公告轮播挂在壳上但数据不轮询：`DesktopAnnouncementsStore` 启动只读内置快照 +
@@ -118,7 +119,7 @@ const DesktopShellInner = () => {
           pathname={pathname}
           capabilities={CAPABILITIES}
           logoSrc="/favicon.svg"
-          account={projectTopBarAccount(cloudSession.phase)}
+          account={projectTopBarAccount(cloudSession)}
           onNavigate={(href, event) => {
             // 共享顶栏渲染真实 `<a href>`，因此这里必须阻止默认行为，否则会触发一次整页加载。
             // Web 侧同理接 `router.push`——「宿主负责路由」这件事在两端是同一种形状。
@@ -184,17 +185,19 @@ const indexRoute = createRoute({
     const { state: cloudSession } = useDesktopCloudSession();
     const { openFixed } = useExternalLinks();
 
-    // 欢迎区只投影「已验证」会话：冷启动 idle 与 signed-out/unreachable 一律按
-    // 匿名渲染——DESK-ONLINE-008 要求未验证身份不显示已登录承诺。
-    const phase = cloudSession.phase;
+    // 欢迎区投影本机身份：cached account 存在即显示名字（与顶栏同一事实源，
+    // unreachable 时身份同样保留）；无身份且仍在 bootstrap/验证/授权时显示
+    // loading，其余（含 signed-out/expired/unreachable 无账号）按匿名渲染。
     const welcome: { state: 'loading' | 'signed-in' | 'anonymous'; name?: string } =
-      phase.kind === 'checking' || phase.kind === 'authenticating'
-        ? { state: 'loading' }
-        : phase.kind === 'ready' && phase.session.state === 'active'
-          ? {
-              state: 'signed-in',
-              name: phase.session.account.displayName ?? phase.session.account.username,
-            }
+      cloudSession.account !== null
+        ? {
+            state: 'signed-in',
+            name: cloudSession.account.displayName ?? cloudSession.account.username,
+          }
+        : !cloudSession.bootstrapped ||
+            cloudSession.verification === 'checking' ||
+            cloudSession.authFlow.kind === 'authenticating'
+          ? { state: 'loading' }
           : { state: 'anonymous' };
 
     return (

@@ -93,6 +93,8 @@ beforeEach(async () => {
   original = await makeRecord({ codename: '星光', appearance: { outfit: '白裙' } });
   rows = new Map([[original.id, original]]);
   bridge.invoke.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+    if (command === 'cloud_cached_account') return null;
+    if (command === 'cloud_auth_status') return { state: 'signed-out' };
     if (command === LIST_LOCAL_BACKUPS_COMMAND) return { backups: [], invalidCount: 0 };
     if (command === LIST_LOCAL_CARDS_COMMAND) {
       const includeDeleted = (args?.request as { includeDeleted: boolean }).includeDeleted;
