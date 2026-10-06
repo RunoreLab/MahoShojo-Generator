@@ -35,6 +35,11 @@
       "import": "./src/encyclopedia/index.ts",
       "default": "./src/encyclopedia/index.ts"
     },
+    "./encyclopedia-frame": {
+      "types": "./src/encyclopedia/views/EncyclopediaPageFrame.tsx",
+      "import": "./src/encyclopedia/views/EncyclopediaPageFrame.tsx",
+      "default": "./src/encyclopedia/views/EncyclopediaPageFrame.tsx"
+    },
     "./encyclopedia-views": {
       "types": "./src/encyclopedia/views/index.ts",
       "import": "./src/encyclopedia/views/index.ts",

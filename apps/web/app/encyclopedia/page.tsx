@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { Suspense } from 'react';
 
 import { WebEncyclopediaIndex } from '@/components/encyclopedia/WebEncyclopediaViews';
+import { EncyclopediaPageFrame } from '@mahoshojo/ui-web/encyclopedia-frame';
 
 export const metadata: Metadata = {
   title: '百科 - MahoShojo Generator',
@@ -12,15 +13,14 @@ export default function EncyclopediaRoute() {
   return (
     <Suspense
       fallback={
-        // 骨架与共享 `EncyclopediaPageFrame` 同构：hydrate 时不再发生「限宽→全宽」的
-        // layout shift（RSC 不能经 encyclopedia-views 入口拿到组件，这里按同一套类手写）。
-        <div className="magic-background-white">
-          <div className="mx-auto w-full max-w-6xl px-4 pb-10 pt-4 sm:px-6 lg:px-10">
-            <div className="rounded-2xl bg-white/95 px-6 py-6 text-sm text-gray-500 shadow-[0_20px_40px_rgba(0,0,0,0.10)] ring-1 ring-white/50 backdrop-blur sm:px-8">
-              正在加载百科目录...
-            </div>
-          </div>
-        </div>
+        // 骨架直接渲染共源 frame 本体：`encyclopedia-views` 桶出口挂有 hook，RSC 不能
+        // 经它取组件，因此给无 hook 的 frame 单独开 `./encyclopedia-frame` 子路径——
+        // 手写一份同构 class 会让骨架漂移再次变成静默回归。
+        <EncyclopediaPageFrame
+          header={<h1 className="text-xl font-bold text-gray-900">百科</h1>}
+        >
+          <div className="text-sm text-gray-500">正在加载百科目录...</div>
+        </EncyclopediaPageFrame>
       }
     >
       <WebEncyclopediaIndex />

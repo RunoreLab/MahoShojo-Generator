@@ -41,6 +41,8 @@ const SRC = path.join(PACKAGE_ROOT, 'src');
  * - `./navigation` 被 TopBar 覆盖率逻辑在服务端读；
  * - `./capability` 是纯数据，被两端注入能力快照；
  * - `./encyclopedia` 被百科路由的 `generateStaticParams` / `generateMetadata` 读；
+ * - `./encyclopedia-frame` 被 `app/encyclopedia/page.tsx` 的 Suspense fallback 读——
+ *   frame 本体零 hook，但 `encyclopedia-views` 桶出口挂着 hook，RSC 只能走这条叶子入口；
  * - `./markdown-text` 被 `app/api/media-proxy/route.ts` 经由 `lib/markdown/externalMedia.ts` 读；
  * - `./home` 被 `app/page.tsx` 读功能目录与 preload 列表；
  * - `./color-mode-init` 被 `app/layout.tsx` 读首屏防闪烁脚本——它必须是零 hook 的纯数据模块。
@@ -57,6 +59,7 @@ const SERVER_SAFE_ENTRYPOINTS: Readonly<Record<string, string>> = {
   './navigation': 'navigation.ts',
   './capability': 'capability/index.ts',
   './encyclopedia': 'encyclopedia/index.ts',
+  './encyclopedia-frame': 'encyclopedia/views/EncyclopediaPageFrame.tsx',
   './markdown-text': 'markdown/text/index.ts',
   './home': 'home/index.ts',
   './color-mode-init': 'color-mode/init.ts',
