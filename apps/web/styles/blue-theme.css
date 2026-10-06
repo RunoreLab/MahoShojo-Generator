@@ -3,13 +3,13 @@
   * {
     box-sizing: border-box;
   }
-  
+
   /* 只重置基础元素的margin和padding */
   html, body {
     margin: 0;
     padding: 0;
   }
-  
+
   /* 重置其他基础元素，但避免影响组件 */
   h1, h2, h3, h4, h5, h6, p, blockquote, pre, ul, ol, li, figure, figcaption, dl, dt, dd {
     margin: 0;
@@ -24,10 +24,6 @@ body {
   font-family: 'Arial', sans-serif;
 }
 
-.blue-theme {
-  --app-result-card-bg: linear-gradient(135deg, #3b82f6 0%, #1e40af 100%);
-}
-
 body {
   background: var(--app-page-bg);
   background-attachment: fixed;
@@ -38,14 +34,6 @@ body {
 @media (prefers-color-scheme: dark) {
   :root:not([data-color-mode]) {
     color-scheme: dark;
-  }
-
-  :root:not([data-color-mode]) .blue-theme {
-    --app-result-card-bg: linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%);
-  }
-
-  :root:not([data-color-mode]) .blue-theme .magic-background {
-    background: var(--app-magic-bg);
   }
 
   :root:not([data-color-mode]) body {
@@ -59,278 +47,25 @@ body {
   color-scheme: dark;
 }
 
-:root[data-color-mode='dark'] .blue-theme {
-  --app-result-card-bg: linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%);
-}
-
-:root[data-color-mode='dark'] .blue-theme .magic-background {
-  background: var(--app-magic-bg);
-}
-
 :root[data-color-mode='dark'] body {
   background: var(--app-page-bg);
   background-attachment: fixed;
   background-size: cover;
 }
 
-.container {
-  max-width: 500px;
-  margin: 0 auto;
-  padding: 20px;
-  position: relative;
-  z-index: 1;
-}
-
-.card {
-  background: var(--app-surface);
-  border-radius: 20px;
-  padding: 30px;
-  box-shadow: var(--app-card-shadow);
-  backdrop-filter: blur(10px);
-  border: 1px solid var(--app-border);
-  max-width: 500px;
-  color: var(--app-text);
-}
-
-@layer components {
-  /* 蓝色主题样式 - 只在 .blue-theme 容器内生效 */
-  .blue-theme .magic-background {
-    background: var(--app-magic-bg);
-    background-attachment: fixed;
-    background-size: cover;
-    min-height: 100vh;
-    position: relative;
-    overflow: hidden;
-  }
-
-  .magic-background::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background-image: radial-gradient(circle at 20% 50%, rgba(255, 255, 255, 0.2) 2px, transparent 2px), radial-gradient(circle at 80% 20%, rgba(255, 255, 255, 0.15) 1px, transparent 1px), radial-gradient(circle at 40% 80%, rgba(255, 255, 255, 0.1) 1px, transparent 1px);
-    background-size: 50px 50px, 30px 30px, 40px 40px;
-    animation: sparkle 6s ease-in-out infinite;
-  }
-
-  @keyframes sparkle {
-    0%,
-    100% {
-      opacity: 1;
-    }
-    50% {
-      opacity: 0.7;
-    }
-  }
-
-  .blue-theme .title {
-    text-align: center;
-    font-size: 2rem;
-    font-weight: bold;
-    background: linear-gradient(45deg, #3b82f6, #1d4ed8, #1e40af);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-    margin-bottom: 30px;
-  }
-
-  .input-group {
-    margin-bottom: 20px;
-  }
-
-  .input-label {
-    display: block;
-    margin-bottom: 8px;
-    font-weight: 600;
-    color: var(--app-text-muted);
-  }
-
-  .input-field {
-    width: 100%;
-    padding: 15px;
-    border: 2px solid var(--app-input-border);
-    color: var(--app-text);
-    border-radius: 12px;
-    font-size: 16px;
-    transition: all 0.3s ease;
-    background: var(--app-input-bg);
-  }
-
-  .input-field::placeholder {
-    color: var(--app-text-subtle);
-  }
-
-  .blue-theme .input-field:focus {
-    outline: none;
-    border-color: #3b82f6;
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
-  }
-
-  .blue-theme .generate-button {
-    width: 100%;
-    padding: 15px;
-    background: linear-gradient(45deg, #3b82f6, #1d4ed8);
-    color: white;
-    border: none;
-    border-radius: 12px;
-    font-size: 18px;
-    font-weight: bold;
-    cursor: pointer;
-    transition: all 0.3s ease;
-    margin-bottom: 20px;
-  }
-
-  .blue-theme .generate-button:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 10px 20px rgba(59, 130, 246, 0.35);
-  }
-
-  .generate-button:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-    transform: none;
-  }
-
-  .blue-theme .result-card {
-    background: var(--app-result-card-bg);
-    color: white;
-    border-radius: 15px;
-    padding: 25px;
-    margin-top: 20px;
-    position: relative;
-    overflow: hidden;
-  }
-
-  .result-card::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    pointer-events: none;
-    background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="25" cy="25" r="2" fill="rgba(255,255,255,0.1)"/><circle cx="75" cy="75" r="1.5" fill="rgba(255,255,255,0.1)"/><circle cx="80" cy="20" r="1" fill="rgba(255,255,255,0.1)"/></svg>');
-    background-size: 100px 100px;
-  }
-
-  .title-container {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    margin-bottom: 1rem;
-    background: transparent;
-  }
-
-  .result-content {
-    position: relative;
-    z-index: 1;
-  }
-
-  .level-badge {
-    display: inline-block;
-    padding: 8px 16px;
-    background: rgba(255, 255, 255, 0.2);
-    border-radius: 20px;
-    font-weight: bold;
-    font-size: 18px;
-  }
-
-  .save-button {
-    width: 100%;
-    padding: 12px;
-    background: rgba(255, 255, 255, 0.2);
-    color: white;
-    border: 2px solid rgba(255, 255, 255, 0.3);
-    border-radius: 10px;
-    font-size: 16px;
-    cursor: pointer;
-    transition: all 0.3s ease;
-    margin-top: 15px;
-  }
-
-  .save-button:hover {
-    background: rgba(255, 255, 255, 0.3);
-  }
-
-  .save-instructions {
-    text-align: center;
-    margin-top: 10px;
-    font-size: 12px;
-    opacity: 0.8;
-  }
-
-@media (max-width: 600px) {
-    .container {
-        padding: 15px;
-    }
-    .card {
-        padding: 20px;
-    }
-    .blue-theme .title {
-        font-size: 1.5rem;
-    }
-}
-
-  .subtitle {
-    text-align: center;
-    font-size: 1rem;
-    color: var(--app-text-muted);
-    margin-bottom: 25px;
-    font-style: italic;
-  }
-
-  .blue-theme .error-message {
-    background: linear-gradient(135deg, #3b82f6, #1d4ed8);
-    color: white;
-    padding: 15px;
-    border-radius: 10px;
-    margin: 15px 0;
-    text-align: center;
-    font-weight: 500;
-    animation: fadeIn 0.3s ease-in-out;
-  }
-
-  @keyframes fadeIn {
-    from {
-      opacity: 0;
-      transform: translateY(-10px);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
-  }
-
-  .footer {
-    text-align: center;
-    padding: 20px 0;
-    margin-top: 30px;
-    color: var(--app-text-muted);
-    font-size: 14px;
-  }
-
-  .blue-theme .footer-link {
-    color: #abcbff;
-    font-weight: 600;
-    text-decoration: none;
-    transition: all 0.3s ease;
-  }
-
-  .blue-theme .footer-link:hover {
-    color: #8298d6;
-    text-decoration: underline;
-  }
-}
-@media (max-width: 600px) {
-  .container {
-    padding: 15px;
-  }
-  .card {
-    padding: 20px;
-  }
-  .blue-theme .title {
-    font-size: 1.5rem;
-  }
+/*
+ * 页脚垂直留白：与 product-shell.css 的 `.footer` 基座（margin-top:20px）
+ * 相差 10px——本文件全站加载，Web 现行效果是 30px；删掉它会把所有页面的
+ * 页脚向上拉，因此按现状保留（所有权仍是 Web 私有页面留白，不是主题）。
+ * 其余 `.container`/`.card`/`.magic-background*`/`.result-card*`/`.save-*`/
+ * `.level-badge`/`.subtitle`/`.input-*`/`.title-container` 与 `.blue-theme`
+ * 作用域规则已上移 `@mahoshojo/ui-web/product-shell.css`（D5.1-P2，
+ * 声明逐字一致），此处不重复登记。
+ */
+.footer {
+  text-align: center;
+  padding: 20px 0;
+  margin-top: 30px;
+  color: var(--app-text-muted);
+  font-size: 14px;
 }

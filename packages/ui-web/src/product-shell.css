@@ -13,12 +13,15 @@
  * `.theme-image-*`、`.feature-*`、渐变按钮、`body.announcement-visible` 与公告滚动动画、
  * `@layer utilities` 暗色 remap——共享组件（AppShell/HomeView/ProductFooter/公告中心/
  * ErrorMessageBox/CardLibraryModal）渲染出的 class 在这里有且只有一处权威定义。
- * `.generate-button`/`.result-card`/`.save-button` 同样在本闭包：共享的
- * character-card 与 details-controls 今天就渲染它们，留在 Web 等于让 Desktop 的
- * /details 结果卡裸奔。
+ * `.generate-button`/`.result-card`/`.save-button`/`.input-*`/`.title-container` 同样在
+ * 本闭包：共享的 character-card、details-controls 与 ai-provider 今天就渲染它们，
+ * 留在 Web 等于让 Desktop 的 /details 结果卡与问卷设置面板裸奔。
  *
- * 留下的仍是 Web 私有：竞技场 `battle-lite-*`/`arena-*`、卡牌工坊 `gc-*` 与页面级
- * `.title-container` 等，随 P2 旅程切片各自迁移。
+ * `/details` 的 `.blue-theme` 作用域覆盖（D5.1-P2 / DESK-PARITY-004）也在本文件：
+ * 它只改写本闭包已有类的变量与配色，作用域选择器保证不外泄到其他页面。
+ *
+ * 留下的仍是 Web 私有：竞技场 `battle-lite-*`/`arena-*`、卡牌工坊 `gc-*` 等，
+ * 随各自旅程切片再迁移。
  *
  * ## 与 styles.css 的分工
  *
@@ -33,13 +36,20 @@
  * 避免与全局 `.animate-fade-in` 撞名；行为取值不变。
  */
 
+/*
+ * `fadeIn`：Web 历史上有两份同名定义——本文件最初只有透明度版本，
+ * `blue-theme.css` 里那一份带 translateY 且在加载顺序上靠后，因此 Web
+ * 现行生效的是带位移的版本。共源后以此为准（`.error-message` 的入场动画）。
+ */
 @keyframes fadeIn {
   from {
     opacity: 0;
+    transform: translateY(-10px);
   }
 
   to {
     opacity: 1;
+    transform: translateY(0);
   }
 }
 
@@ -144,6 +154,22 @@ body.announcement-visible {
 :root[data-color-mode='dark'] input::placeholder,
 :root[data-color-mode='dark'] textarea::placeholder {
   color: var(--app-text-subtle);
+}
+
+/* /details 蓝色主题：结果卡底色 token 只在 .blue-theme 容器内改写（DESK-PARITY-004）。
+   规则逐字自 `apps/web/styles/blue-theme.css` 上移，所有权变更而非设计变更。 */
+.blue-theme {
+  --app-result-card-bg: linear-gradient(135deg, #3b82f6 0%, #1e40af 100%);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-color-mode]) .blue-theme {
+    --app-result-card-bg: linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%);
+  }
+}
+
+:root[data-color-mode='dark'] .blue-theme {
+  --app-result-card-bg: linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%);
 }
 
 @layer components {
@@ -372,6 +398,78 @@ body.announcement-visible {
     color: var(--app-text-subtle);
     font-weight: 600;
     cursor: not-allowed;
+  }
+
+  /* 表单输入底座：共享 ai-provider/CardLibraryModal/问卷设置面板都渲染
+     `.input-field`——原来只存在于 Web `blue-theme.css`，Desktop 上是裸元素。 */
+  .input-group {
+    margin-bottom: 20px;
+  }
+
+  .input-label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: 600;
+    color: var(--app-text-muted);
+  }
+
+  .input-field {
+    width: 100%;
+    padding: 15px;
+    border: 2px solid var(--app-input-border);
+    color: var(--app-text);
+    border-radius: 12px;
+    font-size: 16px;
+    transition: all 0.3s ease;
+    background: var(--app-input-bg);
+  }
+
+  .input-field::placeholder {
+    color: var(--app-text-subtle);
+  }
+
+  .title-container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin-bottom: 1rem;
+    background: transparent;
+  }
+
+  /* ── /details 蓝色主题作用域（DESK-PARITY-004）─────────────────────────
+     只改写本闭包已有类：未作用域的 `.magic-background`/`.result-card` 基座
+     定义已在上方（`.blue-theme` 作用域版与基座取值一致，不重复登记）。 */
+  .blue-theme .title {
+    background: linear-gradient(45deg, #3b82f6, #1d4ed8, #1e40af);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .blue-theme .input-field:focus {
+    outline: none;
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+  }
+
+  .blue-theme .generate-button {
+    background: linear-gradient(45deg, #3b82f6, #1d4ed8);
+  }
+
+  .blue-theme .generate-button:hover {
+    box-shadow: 0 10px 20px rgba(59, 130, 246, 0.35);
+  }
+
+  .blue-theme .error-message {
+    background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+  }
+
+  .blue-theme .footer-link {
+    color: #abcbff;
+  }
+
+  .blue-theme .footer-link:hover {
+    color: #8298d6;
   }
 
   /* 分类功能导航样式 */
