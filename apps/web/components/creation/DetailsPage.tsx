@@ -1178,8 +1178,15 @@ export const DetailsPage: React.FC = () => {
     }
 
     const snapshot = answersSnapshot ?? answersByKey;
-    // 与 Desktop `buildDetailsAnswers` 共用同一投影（D5.1a-r1 对拍口径）。
-    const finalAnswerItems = collectQuestionnaireFlowAnswerItems(mergedQuestions, snapshot);
+    // 与 Desktop `buildDetailsAnswers` 共用同一投影（D5.1a-r1 对拍口径）；
+    // 封闭题选项外取值（批量导入等旁路可写入）由共源投影拒绝，两宿主同样拦在生成前。
+    let finalAnswerItems: QuestionnaireAnswerItem[];
+    try {
+      finalAnswerItems = collectQuestionnaireFlowAnswerItems(mergedQuestions, snapshot);
+    } catch (cause) {
+      setError(`⚠️ ${cause instanceof Error ? cause.message : '问卷回答无效，请检查后重试'}`);
+      return;
+    }
 
     if (finalAnswerItems.length === 0) {
       setError('⚠️ 请至少填写一题后再生成');

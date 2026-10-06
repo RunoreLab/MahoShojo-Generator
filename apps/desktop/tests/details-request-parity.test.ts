@@ -46,7 +46,9 @@ const fixture = JSON.parse(
       useLore?: boolean;
     }>;
     answersByKey: Record<string, string>;
-    expectedBody: unknown;
+    expectedBody?: unknown;
+    /** 拒绝用例：两宿主投影必须抛出包含该子串的错误，不产出请求体。 */
+    expectedError?: string;
   }>;
 };
 
@@ -67,7 +69,7 @@ const toDesktopSource = (entry: (typeof fixture.cases)[number]['selections'][num
 });
 
 describe('details 生成请求 golden（Desktop hosted-json 通路）', () => {
-  it.each(fixture.cases)('$id → 上线路 body 等于 expectedBody', async (fixtureCase) => {
+  it.each(fixture.cases)('$id → expectedBody/expectedError', async (fixtureCase) => {
     const entries = fixtureCase.selections.map((entry) => ({
       source: toDesktopSource(entry),
       questionnaire: fixture.questionnaires[entry.ref]!,
@@ -78,6 +80,12 @@ describe('details 生成请求 golden（Desktop hosted-json 通路）', () => {
 
     const flowItems = resolveQuestionnaireReferences(buildSelectionFlowItems(entries));
     const { flow } = buildQuestionnaireFlow(flowItems, fixtureCase.answersByKey);
+    if (fixtureCase.expectedError !== undefined) {
+      // 拒绝用例在答案投影阶段就已抛出——生成意图根本不会形成，更谈不上 invoke。
+      expect(() => buildDetailsAnswers(flow, fixtureCase.answersByKey))
+        .toThrow(fixtureCase.expectedError);
+      return;
+    }
     const answers = buildDetailsAnswers(flow, fixtureCase.answersByKey);
     const allowNativeSignature = isQuestionnaireGenerationNativeSignatureAllowed(
       selections,

@@ -190,6 +190,18 @@
         "allowNativeSignature": false,
         "language": "zh-CN"
       }
+    },
+    {
+      "id": "closed-option-rejected",
+      "note": "封闭题（allowCustom:false）收到选项外取值：批量文本/JSON/角色卡导入等旁路可写入任意字符串，Web 与 Desktop 必须在生成前同样拒绝，不产出请求体。",
+      "selections": [
+        { "ref": "parity-preset", "source": "preset", "selectionId": "builtin:parity-preset", "useLore": true }
+      ],
+      "answersByKey": {
+        "builtin:parity-preset::P-1": "守护大家",
+        "builtin:parity-preset::P-2": "彼岸花"
+      },
+      "expectedError": "请选择一个可用选项"
     }
   ]
 }

@@ -175,27 +175,18 @@ export const buildSelectionFlowItems = (
   entries.flatMap(({ source, questionnaire }) =>
     buildDetailsFlowItems(questionnaire, source.selectionId));
 
-const isOptionAllowed = (question: QuestionnaireQuestion, answer: string): boolean =>
-  question.options?.some((option) =>
-    typeof option === 'string' ? option === answer : !option.disabled && option.value === answer) ?? false;
-
 /**
  * 从流程条目与按键回答收集生成载荷。
  *
  * 只收集当前可见流程内的题目（displayIf/jump 已按回答求值），答案投影与
  * Web 共用 `collectQuestionnaireFlowAnswerItems`（D5.1a-r1 对拍口径）；
- * `allowCustom === false` 的题只接受可用选项，避免把键盘输入混进封闭题。
+ * `allowCustom === false` 封闭题的选项外取值由该共源投影拒绝（D5.1a-r1 复审），
+ * 批量导入等旁路写入的非法答案在两宿主同样无法进入提交载荷。
  */
 export const buildDetailsAnswers = (
   flow: readonly DetailsFlowItem[],
   answersByKey: Record<string, string>,
 ): QuestionnaireAnswerItem[] => {
-  flow.forEach((item) => {
-    const answer = answersByKey[item.key]?.trim() ?? '';
-    if (answer && item.question.allowCustom === false && !isOptionAllowed(item.question, answer)) {
-      throw new Error(`“${item.question.question}”请选择一个可用选项。`);
-    }
-  });
   const items = collectQuestionnaireFlowAnswerItems(flow, answersByKey);
   if (!items.length) throw new Error('请至少填写一题后再生成。');
   return items;

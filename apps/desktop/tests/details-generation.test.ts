@@ -274,11 +274,13 @@ describe('Desktop Details hosted generation', () => {
   });
 
   it.each([
-    ['cancelled', 'native select 取消'],
+    ['cancelled', 'native select 取消时 send 可能已在飞行中'],
     ['network-error', '网络中断/超时'],
     ['invalid-response', '响应不可信'],
     ['bridge-invalid', 'native 返回契约外载荷'],
-  ] as const)('maps post-dispatch %s failure to uncertain without replay', async (code, _label) => {
+    ['internal-error', '未分类 IPC/native 失败的归一码，不能证明未 dispatch'],
+    ['not-authenticated', '本命令不会产生的登录流程码，真出现也不可信'],
+  ] as const)('maps unprovable-stage %s failure to uncertain without replay', async (code, _label) => {
     const invoke = vi.fn(async (command: string) => {
       if (command === HOSTED_AI_REQUEST_COMMAND) {
         if (code === 'bridge-invalid') return { unexpected: 'shape' };
@@ -296,7 +298,6 @@ describe('Desktop Details hosted generation', () => {
     'protocol-mismatch',
     'server-unavailable',
     'storage-unavailable',
-    'internal-error',
   ] as const)('keeps pre-dispatch %s failure as an ordinary failed outcome', async (code) => {
     const invoke = vi.fn(async (command: string) => {
       if (command === HOSTED_AI_REQUEST_COMMAND) throw { code, message: `${code} happened` };
@@ -304,6 +305,22 @@ describe('Desktop Details hosted generation', () => {
     });
     const outcome = await executeDetailsGeneration({ invoke, profileId: '' }, hostedInput, hostedJsonIntent, new AbortController().signal);
     expect(outcome).toMatchObject({ status: 'failed', mode: 'hosted-json', code });
+  });
+
+  it.each(['hosted-stream', 'hosted-json'] as const)('does not dispatch a pre-aborted %s intent', async (mode) => {
+    const invoke = vi.fn(async () => { throw new Error('unexpected invoke'); });
+    const controller = new AbortController();
+    controller.abort();
+    const intent = mode === 'hosted-stream' ? hostedStreamIntent : hostedJsonIntent;
+    await expect(
+      executeDetailsGeneration(
+        { invoke, profileId: '', createChannel: () => ({}) },
+        hostedInput,
+        intent,
+        controller.signal,
+      ),
+    ).resolves.toMatchObject({ status: 'cancelled', mode, reason: 'aborted' });
+    expect(invoke).not.toHaveBeenCalled();
   });
 
   it('keeps an abort that raced a pre-dispatch failure as honest cancelled', async () => {

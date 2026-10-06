@@ -2,6 +2,10 @@ import { OnlineDataCardTypeSchema } from '@mahoshojo/contracts/data-cards';
 import { SafeJsonValueSchema, type JsonValue } from '@mahoshojo/contracts/json-value';
 import { z } from './zod';
 
+// V1 的 provenance 取值域在首个发布版本之前已补齐到 ADR 定义的全集
+// （含 `signature-unverified`），不构成对已发布读取方的兼容破坏。
+// 首个发布版本之后，任何取值域或结构扩展 MUST 单调升 schemaVersion 并
+// 提供 V1/V2 双读迁移（LIB-011），不得原地修改已发布版本的取值域。
 export const LOCAL_CARD_SCHEMA_VERSION = 1 as const;
 export const LocalCardSchemaVersionSchema = z.literal(LOCAL_CARD_SCHEMA_VERSION);
 

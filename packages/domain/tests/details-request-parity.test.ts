@@ -36,7 +36,9 @@ const fixture = fixtureJson as unknown as {
       useLore?: boolean;
     }>;
     answersByKey: Record<string, string>;
-    expectedBody: unknown;
+    expectedBody?: unknown;
+    /** 拒绝用例：两宿主投影必须抛出包含该子串的错误，不产出请求体。 */
+    expectedError?: string;
   }>;
 };
 
@@ -51,10 +53,15 @@ const buildSelections = (entries: (typeof fixture.cases)[number]['selections']):
   }));
 
 describe('details 生成请求 golden（domain 共源管线）', () => {
-  it.each(fixture.cases)('$id → expectedBody', (fixtureCase) => {
+  it.each(fixture.cases)('$id → expectedBody/expectedError', (fixtureCase) => {
     const selections = buildSelections(fixtureCase.selections);
     const items = resolveQuestionnaireReferences(buildQuestionnaireContextItems(selections));
     const { flow } = buildQuestionnaireFlow(items, fixtureCase.answersByKey);
+    if (fixtureCase.expectedError !== undefined) {
+      expect(() => collectQuestionnaireFlowAnswerItems(flow, fixtureCase.answersByKey))
+        .toThrow(fixtureCase.expectedError);
+      return;
+    }
     const answers = collectQuestionnaireFlowAnswerItems(flow, fixtureCase.answersByKey);
     const allowNativeSignature = isQuestionnaireGenerationNativeSignatureAllowed(
       selections,

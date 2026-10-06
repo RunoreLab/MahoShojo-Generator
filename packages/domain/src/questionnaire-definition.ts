@@ -129,24 +129,49 @@ export const collectStoredQuestionnaireAnswerItems = <T extends QuestionnaireAns
   });
 };
 
+const isQuestionnaireOptionAllowed = (
+  options: readonly QuestionnaireOption[] | undefined,
+  answer: string,
+): boolean =>
+  options?.some((option) =>
+    typeof option === 'string' ? option === answer : !option.disabled && option.value === answer) ?? false;
+
 /**
  * 可见流程 → 提交用 `QuestionnaireAnswerItem[]`：裁剪空白、跳过未答与
  * displayIf/jump 隐藏题（调用方传入的 flow 已完成条件求值，隐藏题即使
  * 草稿里残留回答也不进入提交载荷）。
  *
+ * `allowCustom === false` 的封闭题只接受声明的可用选项（含 disabled 检查）：
+ * 正常点选不会产生选项外取值，但批量文本/JSON/角色卡导入等宿主旁路可以
+ * 写入任意字符串——投影在收集阶段直接拒绝，而不是把非法答案带进提交
+ * 载荷（D5.1a-r1 复审）。
+ *
  * Web `/details` 与 Desktop `buildDetailsAnswers` 共用同一投影，保证同源
- * `answersByKey` 在两宿主产出顺序与字段完全一致的 `answers`（D5.1a-r1）。
+ * `answersByKey` 在两宿主产出顺序与字段完全一致的 `answers`，且对非法
+ * 封闭题答案同样拒绝（D5.1a-r1）。
  */
 export const collectQuestionnaireFlowAnswerItems = <T extends {
   key: string;
-  question: { question: string; id?: string };
+  question: {
+    question: string;
+    id?: string;
+    allowCustom?: boolean;
+    options?: readonly QuestionnaireOption[];
+  };
   questionnaireId?: string;
   questionnaireTitle?: string;
 }>(
   flow: readonly T[],
   answersByKey: Readonly<Record<string, unknown>>,
-): QuestionnaireAnswerItem[] =>
-  flow.flatMap((item) => {
+): QuestionnaireAnswerItem[] => {
+  flow.forEach((item) => {
+    const raw = answersByKey[item.key];
+    const answer = typeof raw === 'string' ? raw.trim() : '';
+    if (answer && item.question.allowCustom === false && !isQuestionnaireOptionAllowed(item.question.options, answer)) {
+      throw new Error(`“${item.question.question}”请选择一个可用选项。`);
+    }
+  });
+  return flow.flatMap((item) => {
     const raw = answersByKey[item.key];
     const answer = typeof raw === 'string' ? raw.trim() : '';
     if (!answer) return [];
@@ -158,6 +183,7 @@ export const collectQuestionnaireFlowAnswerItems = <T extends {
       questionnaireTitle: item.questionnaireTitle,
     }];
   });
+};
 
 type QuestionFlowItem = {
   key: string;

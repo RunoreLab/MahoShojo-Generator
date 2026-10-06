@@ -379,9 +379,17 @@ const readErrorMessage = (payload: unknown, status: number): string => {
 };
 
 /**
- * dispatch 前错误码：这些失败发生在 generation 请求上线路之前（请求校验、
- * DESK-094 契约兼容探测、凭据装载、requestId 注册），可以诚实按普通
+ * dispatch 前错误码：`hosted_ai_request` 中只有这些失败可证明发生在生成
+ * 请求上线路之前——`prepare_hosted_dispatch`（路由/requestId/body 校验、
+ * 凭据装载、DESK-094 契约探测）与 requestId 注册。可以诚实按普通
  * failed/cancelled 处理——服务器绝不可能执行过这次生成。
+ *
+ * `internal-error` 不在此列：`toCloudError` 把一切无法识别的 IPC/invoke
+ * 失败（含未来版本 native 返回的未知 structured code）归一为它，拿到它
+ * 只能说明「不知道 native 执行到了哪一步」，不能当作未 dispatch 的证据。
+ * 同理，不属于本命令阶段词汇的错误码（not-authenticated/state-mismatch/
+ * flow-not-found/flow-in-progress 等登录流程码）不登记为「已证明未
+ * dispatch」——真出现时也按不可信处理。
  *
  * 其余错误（`cancelled`：native select 取消时 send 可能已在飞行中；
  * `network-error`：含 reqwest 超时；`invalid-response`/`bridge-invalid`：
@@ -393,11 +401,6 @@ const HOSTED_JSON_PRE_DISPATCH_CODES: ReadonlySet<DesktopCloudError['code']> = n
   'protocol-mismatch',
   'server-unavailable',
   'storage-unavailable',
-  'internal-error',
-  'not-authenticated',
-  'state-mismatch',
-  'flow-not-found',
-  'flow-in-progress',
 ]);
 
 const HOSTED_JSON_UNCERTAIN_MESSAGE =
@@ -484,6 +487,11 @@ export const executeDetailsGeneration = async (
   signal: AbortSignal,
   onPartialText?: (text: string) => void,
 ): Promise<DetailsGenerationOutcome> => {
+  // cancelled intent 不 dispatch：下游的 abort listener 只覆盖注册之后的
+  // 事件，进入时已经中止的 signal 必须在这里直接结算（D5.1a-r1 复审）。
+  if (signal.aborted) {
+    return { status: 'cancelled', mode: intent.mode, rawText: '', reason: 'aborted' };
+  }
   if (input.answers.length === 0) throw new Error('请先填写问卷。');
   if (intent.mode === 'hosted-stream') {
     return executeHostedStreamGeneration(options, input, intent, signal, onPartialText);
