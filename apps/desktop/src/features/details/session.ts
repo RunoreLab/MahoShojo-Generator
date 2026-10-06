@@ -1,4 +1,10 @@
 import type { AIReasoningEnvelope } from '@mahoshojo/contracts/ai-reasoning';
+import { normalizeQuestionnaireDefinition } from '@mahoshojo/domain/questionnaire-definition';
+import {
+  normalizeStoredQuestionnaireSelection,
+  resolveQuestionnaireSelectionNativeAllowedFallback,
+  type QuestionnaireSelection,
+} from '@mahoshojo/domain/questionnaire-selection';
 import { deriveLocalDataCardIdV1, digestLocalCardPayloadV1 } from '@mahoshojo/local-library/digest';
 import { LocalCardRecordV1Schema, type LocalCardExecutionProvenance } from '@mahoshojo/local-library/record';
 import type { CardRepository } from '@mahoshojo/local-library/repository';
@@ -21,7 +27,19 @@ export interface DetailsDraftStorage {
   setItem(key: string, value: string): void;
   removeItem(key: string): void;
 }
-export interface DetailsDraft { answers: Record<string, string>; language: string }
+export interface DetailsDraft {
+  answers: Record<string, string>;
+  language: string;
+  /** 多问卷选择集（含 Lore 开关与来源元数据；与 Web 草稿 `questionnaireSelections` 同口径）。 */
+  questionnaireSelections?: QuestionnaireSelection[];
+  /** 「允许同时回答多份问卷」偏好（与 Web 草稿 `allowMultipleQuestionnaires` 同口径）。 */
+  allowMultipleQuestionnaires?: boolean;
+  /** 保存方式偏好（与 Web 草稿字段同名；缺省由页面按终端推导）。 */
+  imageSaveMode?: 'download' | 'modal';
+  jsonSaveMode?: 'download' | 'text';
+  /** 「设定说明」抽屉展开状态。 */
+  showDetails?: boolean;
+}
 type Card = DetailsResultCardData;
 type CardKind = DetailsResultCardKind;
 type Mode = DetailsGenerationIntent['mode'];
@@ -68,6 +86,28 @@ const parseDraft = (raw: string): StoredDraft => {
   const value: unknown = JSON.parse(raw);
   if (!object(value) || value.version !== 1 || !object(value.answers) || typeof value.language !== 'string' || !Object.values(value.answers).every((answer) => typeof answer === 'string')) throw new Error('草稿版本不受支持或内容损坏');
   const draft: StoredDraft = { version: 1, answers: value.answers as Record<string, string>, language: value.language };
+  // 选择集逐条经共源归一化：损坏条目丢弃而不是让整个草稿报废（D5.1-P2）。
+  const questionnaireSelections = (Array.isArray(value.questionnaireSelections) ? value.questionnaireSelections : [])
+    .map((entry) => normalizeStoredQuestionnaireSelection(entry, {
+      normalize: normalizeQuestionnaireDefinition,
+      resolveFallback: (rawQuestionnaire, source) => {
+        const record = rawQuestionnaire && typeof rawQuestionnaire === 'object'
+          ? rawQuestionnaire as Record<string, unknown>
+          : {};
+        return {
+          fallbackKind: record.kind === 'canshou' ? 'canshou' : 'magical-girl',
+          fallbackId: typeof record.id === 'string' ? record.id : 'questionnaire',
+          fallbackTitle: typeof record.title === 'string' ? record.title : '未命名问卷',
+          nativeAllowed: resolveQuestionnaireSelectionNativeAllowedFallback(source, rawQuestionnaire),
+        };
+      },
+    }))
+    .filter((selection): selection is QuestionnaireSelection => selection !== null);
+  if (questionnaireSelections.length) draft.questionnaireSelections = questionnaireSelections;
+  if (value.allowMultipleQuestionnaires === true) draft.allowMultipleQuestionnaires = true;
+  if (value.imageSaveMode === 'download' || value.imageSaveMode === 'modal') draft.imageSaveMode = value.imageSaveMode;
+  if (value.jsonSaveMode === 'download' || value.jsonSaveMode === 'text') draft.jsonSaveMode = value.jsonSaveMode;
+  if (value.showDetails === true) draft.showDetails = true;
   if (value.output !== undefined) {
     const output = value.output;
     if (!object(output) || !EXECUTION_MODES.includes(output.mode as Mode) || typeof output.rawText !== 'string' || !['idle', 'completed', 'failed', 'cancelled', 'uncertain'].includes(String(output.phase))) throw new Error('草稿输出损坏');
@@ -132,7 +172,16 @@ export class DetailsSession {
     const saved = this.pending;
     this.pending = null;
     if (saved.output) this.mode = saved.output.mode;
-    this.publish({ draft: { answers: clone(saved.answers), language: saved.language }, pendingRestore: false, draftSaved: true, phase: saved.output?.phase ?? 'idle', card: saved.output?.card ?? null, cardKind: saved.output?.card ? saved.output.cardKind ?? 'magical-girl' : 'magical-girl', resultRestored: saved.output?.card != null, reasoning: null, rawText: saved.output?.rawText ?? '', message: saved.output?.phase === 'uncertain' ? '已恢复草稿；上次生成的服务器执行结果未能确认，不会自动重新生成。' : saved.output ? '已恢复草稿；不会自动重新生成。' : null });
+    const restoredDraft: DetailsDraft = {
+      answers: clone(saved.answers),
+      language: saved.language,
+      ...(saved.questionnaireSelections?.length ? { questionnaireSelections: clone(saved.questionnaireSelections) } : {}),
+      ...(saved.allowMultipleQuestionnaires ? { allowMultipleQuestionnaires: true } : {}),
+      ...(saved.imageSaveMode ? { imageSaveMode: saved.imageSaveMode } : {}),
+      ...(saved.jsonSaveMode ? { jsonSaveMode: saved.jsonSaveMode } : {}),
+      ...(saved.showDetails ? { showDetails: true } : {}),
+    };
+    this.publish({ draft: restoredDraft, pendingRestore: false, draftSaved: true, phase: saved.output?.phase ?? 'idle', card: saved.output?.card ?? null, cardKind: saved.output?.card ? saved.output.cardKind ?? 'magical-girl' : 'magical-girl', resultRestored: saved.output?.card != null, reasoning: null, rawText: saved.output?.rawText ?? '', message: saved.output?.phase === 'uncertain' ? '已恢复草稿；上次生成的服务器执行结果未能确认，不会自动重新生成。' : saved.output ? '已恢复草稿；不会自动重新生成。' : null });
   }
   discardDraft(): void {
     if (this.disposed || this.controller || this.state.saving) return;
@@ -200,6 +249,18 @@ export class DetailsSession {
   cancel(): void {
     this.controller?.abort();
     if (!this.state.draftSaved) this.retryDraftSave();
+  }
+  /**
+   * 本地即时产出（「快速随机生成」）：不经任何模型通路，结果与 generate 完成相位
+   * 一致——可保存到本地卡库、随草稿恢复、触发未保存确认。执行 provenance 记
+   * `direct-local`（纯本机产出，无远端参与者）。
+   */
+  applyLocalResult(card: Card, cardKind: CardKind, discardUnsavedResult = false): void {
+    if (this.disposed || this.controller || this.state.saving || this.blocked || this.state.pendingRestore) return;
+    if (this.hasUnsavedResult() && !discardUnsavedResult) return;
+    this.mode = 'direct-local';
+    this.publish({ phase: 'completed', card: validateCard(cardKind, clone(card)), cardKind, resultRestored: false, reasoning: null, rawText: '', message: '已在本机生成，可保存到本地卡库。', saveStatus: 'idle', saveError: null, draftSaved: false });
+    this.retryDraftSave();
   }
   clearOutput(): void {
     if (this.disposed || this.isBusy() || this.blocked || this.state.pendingRestore) return;

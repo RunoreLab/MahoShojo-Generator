@@ -1,45 +1,73 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { Link } from '@tanstack/react-router';
+import { Link, useRouter } from '@tanstack/react-router';
 import { getModelGenerationCapabilities } from '@mahoshojo/ai-core/generation-settings';
 import { getRandomFlowers } from '@mahoshojo/domain/flowers';
-import { getAnswerLimitInfo, hasOverLimitQuestionnaireAnswers, isAnswerOverLimit, type QuestionnaireAnswerMatchTarget } from '@mahoshojo/domain/questionnaire';
-import { buildQuestionnaireFlow, resolveQuestionnaireReferences } from '@mahoshojo/domain/questionnaire-definition';
+import { generateRandomMagicalGirl } from '@mahoshojo/domain/random-character';
+import {
+  buildQuestionnaireAnswerLookup,
+  getAnswerLimitInfo,
+  hasOverLimitQuestionnaireAnswers,
+  isAnswerOverLimit,
+  type QuestionnaireAnswerMatchTarget,
+} from '@mahoshojo/domain/questionnaire';
+import {
+  buildQuestionnaireFlow,
+  normalizeQuestionnaireDefinition,
+  resolveQuestionnaireReferences,
+  type QuestionnairePresetEntry,
+} from '@mahoshojo/domain/questionnaire-definition';
 import {
   buildQuestionnaireAnswerExportText,
   collectQuestionnaireAnswerExportItems,
 } from '@mahoshojo/domain/questionnaire-answer-export';
 import {
+  applyQuestionnaireSelection,
+  buildQuestionnaireContextItems,
   buildQuestionnaireSelectionLoreText,
   isQuestionnaireGenerationNativeSignatureAllowed,
   isQuestionnaireSelectionNativeAllowed,
+  reconcileQuestionnaireSelectionsForSingleMode,
+  remapAnswersToQuestionnaireChange,
+  removeQuestionnaireSelection,
+  setQuestionnaireSelectionLore,
   type QuestionnaireSelection,
 } from '@mahoshojo/domain/questionnaire-selection';
 import { AiExecutionLocationField, AdvancedGenerationSettings } from '@mahoshojo/ui-web/ai-provider';
 import {
   AiReasoningPanel,
   AnswerReviewList,
+  APP_FIELD_GUIDE_THEME,
+  APP_SAVE_PREFERENCES_THEME,
   BulkAnswerTools,
+  DetailsFieldGuidePanel,
+  DetailsIntroSection,
+  DetailsSavePreferencesPanel,
   GenerationModeSwitcher,
-  QuestionNavigator,
+  JsonSizeIndicator,
   QuestionnaireAnswerExportPanel,
+  QuestionNavigator,
+  SaveJsonButton,
+  useResultAutoScroll,
   type GenerationMode,
 } from '@mahoshojo/ui-web/details-controls';
-import { DETAILS_QUESTIONNAIRE_THEME, QuestionnaireQuestionPanel } from '@mahoshojo/ui-web/questionnaire';
-import { MagicalGirlResultBody, type MagicalGirlResultData } from '@mahoshojo/ui-web/character-result';
-import { GeneralCharacterCard, type GeneralCharacterCardData } from '@mahoshojo/ui-web/character-card';
+import {
+  APP_SELECTION_THEME,
+  DETAILS_QUESTIONNAIRE_THEME,
+  QuestionnaireQuestionPanel,
+  QuestionnaireSelectionPanel,
+} from '@mahoshojo/ui-web/questionnaire';
+import { MagicalGirlCard, GeneralCharacterCard, type GeneralCharacterCardData, type MagicalGirlCardData } from '@mahoshojo/ui-web/character-card';
 import { CardLibraryModal, type BattleSelectionPayload, type CardLibrarySelectionContext } from '@mahoshojo/ui-web/card-library';
 import { DetailsSession } from '../features/details/session';
 import type { DetailsExecutionMode } from '../features/details/generation';
 import {
   buildDetailsAnswers,
-  buildDetailsFlowItems,
   builtinQuestionnaireSource,
   loadDefaultQuestionnaire,
   parseQuestionnaireSelection,
   toQuestionnaireSelection,
   type DetailsQuestionnaire,
-  type QuestionnaireSource,
 } from '../features/details/questionnaire';
 import { resolveDesktopAiTarget } from '../features/ai-config/desktop-ai-config';
 import { useDesktopAiConfig } from '../features/ai-config/use-desktop-ai-config';
@@ -50,8 +78,43 @@ import { useLeaveGuard } from './useLeaveGuard';
 
 const actionClass = 'rounded-lg border border-(--app-border) px-4 py-2 disabled:opacity-50';
 
+type DeviceType = 'mobile' | 'desktop' | 'unknown';
+
+const RESULT_CARD_GRADIENT = 'linear-gradient(135deg, #9775fa 0%, #b197fc 100%)';
+
+const sanitizeFileNamePart = (value: string): string =>
+  value.replace(/[^a-z0-9一-龥]/gi, '_').slice(0, 80) || 'data';
+
+const resolveResultJsonFileName = (card: Record<string, unknown>, cardKind: 'magical-girl' | 'general'): string => {
+  const rawName = cardKind === 'general'
+    ? (typeof card.name === 'string' && card.name ? card.name : '未命名角色')
+    : (typeof card.codename === 'string' && card.codename ? card.codename : '未命名魔法少女');
+  return cardKind === 'general'
+    ? `通用魔法少女角色_${sanitizeFileNamePart(rawName)}.json`
+    : `魔法少女_${sanitizeFileNamePart(rawName)}.json`;
+};
+
+const downloadJsonText = (fileName: string, jsonText: string): void => {
+  const blob = new Blob([jsonText], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = fileName;
+  anchor.rel = 'noopener';
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+};
+
+const createSelectionSuffix = (): string =>
+  (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
+    ? crypto.randomUUID()
+    : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
 function DetailsForm({ session }: { session: DetailsSession }) {
   const state = useSyncExternalStore(session.subscribe, session.getSnapshot);
+  const router = useRouter();
   // AI 连接与执行位置与设置页共用同一份 overlay/profiles 状态（D5.0b）。
   const { state: aiState, store: aiStore } = useDesktopAiConfig();
   const target = resolveDesktopAiTarget(
@@ -66,23 +129,45 @@ function DetailsForm({ session }: { session: DetailsSession }) {
   const { store: cloudSessionStore } = useDesktopCloudSession();
   const [generationMode, setGenerationMode] = useState<GenerationMode>('non-stream');
   const [languages, setLanguages] = useState<{ code: string; name: string }[]>([]);
-  const [questionnaire, setQuestionnaire] = useState<DetailsQuestionnaire | null>(null);
-  const [questionnaireSource, setQuestionnaireSource] = useState<QuestionnaireSource | null>(null);
+  const [presetEntries, setPresetEntries] = useState<QuestionnairePresetEntry[]>([]);
+  const [presetError, setPresetError] = useState<string | null>(null);
   const [questionnaireError, setQuestionnaireError] = useState<string | null>(null);
   const [questionnaireLoading, setQuestionnaireLoading] = useState(true);
+  const [selectionReady, setSelectionReady] = useState(false);
+  const [provisionalBuiltin, setProvisionalBuiltin] = useState<QuestionnaireSelection | null>(null);
   const [reload, setReload] = useState(0);
   const [questionIndex, setQuestionIndex] = useState(0);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerError, setPickerError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionInfo, setActionInfo] = useState<string | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const [confirmRegenerate, setConfirmRegenerate] = useState<false | 'unsaved' | 'uncertain'>(false);
+  const pendingActionRef = useRef<'generate' | 'quick-random'>('generate');
+  const [showIntroduction, setShowIntroduction] = useState(true);
+  const [showQuestionnaireSettings, setShowQuestionnaireSettings] = useState(false);
+  const [showPasteImport, setShowPasteImport] = useState(false);
+  const [pasteText, setPasteText] = useState('');
+  const [pasteError, setPasteError] = useState<string | null>(null);
+  const [detailsSelection, setDetailsSelection] = useState<QuestionnaireSelection | null>(null);
+  const [savedImageUrl, setSavedImageUrl] = useState<string | null>(null);
+  const [showImageModal, setShowImageModal] = useState(false);
+  const [deviceType, setDeviceType] = useState<DeviceType>('unknown');
   const regenerateDialog = useRef<HTMLDialogElement>(null);
+  const detailsDialog = useRef<HTMLDialogElement>(null);
+  const resultSectionRef = useRef<HTMLDivElement | null>(null);
+  const previousTargetsRef = useRef<QuestionnaireAnswerMatchTarget[] | null>(null);
+  const previousSignatureRef = useRef<string | null>(null);
   useEffect(() => {
     const dialog = regenerateDialog.current;
     if (confirmRegenerate && !dialog?.open) dialog?.showModal();
     else if (!confirmRegenerate && dialog?.open) dialog.close();
   }, [confirmRegenerate]);
+  useEffect(() => {
+    const dialog = detailsDialog.current;
+    if (detailsSelection && !dialog?.open) dialog?.showModal();
+    else if (!detailsSelection && dialog?.open) dialog.close();
+  }, [detailsSelection]);
   const guard = useLeaveGuard(
     () => session.isBusy() || (!session.getSnapshot().draftSaved && !session.getSnapshot().pendingRestore && !session.isDraftBlocked()),
     '生成或保存尚未完成，或当前草稿未能保存。请等待、取消生成，或重试保存草稿后再离开。也可以确认清除草稿以放弃当前内容。',
@@ -104,34 +189,82 @@ function DetailsForm({ session }: { session: DetailsSession }) {
       .catch(() => undefined);
     return () => controller.abort();
   }, []);
+  // 终端形态决定「保存方式」推荐项与缺省值（与 Web 同一 UA 判定）。
   useEffect(() => {
+    if (typeof navigator === 'undefined') return;
+    const isMobileDevice = /mobile|android|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(navigator.userAgent.toLowerCase());
+    setDeviceType(isMobileDevice ? 'mobile' : 'desktop');
+  }, []);
+  // 预设问卷索引：只服务「选择预设问卷」下拉；失败不影响内置问卷与本地功能。
+  useEffect(() => {
+    const controller = new AbortController();
+    setPresetError(null);
+    void fetch('/questionnaires/presets/index.json', { signal: controller.signal, credentials: 'omit', redirect: 'error' })
+      .then((response) => (response.ok ? response.json() : Promise.reject(new Error('加载预设问卷索引失败'))))
+      .then((data) => {
+        if (controller.signal.aborted) return;
+        const list = Array.isArray(data?.presets) ? (data.presets as QuestionnairePresetEntry[]) : [];
+        setPresetEntries(list.filter((item) => item.kind === 'magical-girl'));
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) {
+          setPresetEntries([]);
+          setPresetError('预设问卷索引加载失败，预设下拉暂不可用；内置问卷与本地功能不受影响。');
+        }
+      });
+    return () => controller.abort();
+  }, [reload]);
+  // 草稿里的问卷选择集：随 answers/language 一起持久化与恢复（D5.1-P2，
+  // 与 Web `questionnaireSelections`/`allowMultipleQuestionnaires` 草稿口径一致）。
+  const draftSelections = state.draft.questionnaireSelections;
+  const selections: readonly QuestionnaireSelection[] = draftSelections ?? [];
+  const allowMultiple = state.draft.allowMultipleQuestionnaires === true;
+  const updateDraft = (patch: Partial<typeof state.draft>) => {
+    session.updateDraft({ ...session.getSnapshot().draft, ...patch });
+  };
+  const updateSelections = useCallback((next: QuestionnaireSelection[]) => {
+    session.updateDraft({ ...session.getSnapshot().draft, questionnaireSelections: next });
+  }, [session]);
+  // 默认内置问卷：进入页面就加载（含待恢复期间——预览用，不写草稿）；
+  // 待恢复期间严禁把默认选择写进草稿，否则会在用户点「恢复/清除」前覆盖 pending 数据。
+  useEffect(() => {
+    if (selectionReady) {
+      setQuestionnaireLoading(false);
+      return;
+    }
     const controller = new AbortController();
     setQuestionnaireLoading(true);
     setQuestionnaireError(null);
-    void loadDefaultQuestionnaire(controller.signal).then((questions) => {
-      if (!controller.signal.aborted) {
-        setQuestionnaire(questions);
-        setQuestionnaireSource(builtinQuestionnaireSource(questions));
-      }
+    void loadDefaultQuestionnaire(controller.signal).then((questionnaire) => {
+      if (controller.signal.aborted) return;
+      setProvisionalBuiltin(toQuestionnaireSelection(builtinQuestionnaireSource(questionnaire), questionnaire));
     }).catch(() => {
       if (!controller.signal.aborted) setQuestionnaireError('内置问卷加载失败，请重试。');
     }).finally(() => { if (!controller.signal.aborted) setQuestionnaireLoading(false); });
     return () => controller.abort();
-  }, [reload]);
+  }, [reload, selectionReady]);
+  // 落盘条件：无待恢复草稿 + 尚无选择集——此时默认内置选择才写进草稿。
+  // 用户主动清空选择集后不自动回填（`selectionReady` 闩锁与 Web 一致）。
+  useEffect(() => {
+    if (selectionReady || state.pendingRestore || selections.length > 0 || !provisionalBuiltin) return;
+    updateSelections([provisionalBuiltin]);
+    setSelectionReady(true);
+  }, [selectionReady, state.pendingRestore, selections.length, provisionalBuiltin, updateSelections]);
+  // 展示口径：草稿选择集优先，加载中/待恢复期间以默认内置预览。
+  const effectiveSelections = useMemo<readonly QuestionnaireSelection[]>(
+    () => (draftSelections?.length ? draftSelections : (provisionalBuiltin ? [provisionalBuiltin] : [])),
+    [draftSelections, provisionalBuiltin],
+  );
   const selected = target.profile;
   const mode = target.mode;
   const busy = state.phase === 'generating' || state.saving;
   const blockedDraft = state.pendingRestore || session.isDraftBlocked();
-  // 写入失败仍允许编辑/重试；读取失败由 session 拒绝覆盖，页面明确要求清除。
-  // 问卷流程与 Web 同一套领域语义：optionsFrom/suggestionsFrom 先解析，
-  // displayIf/jump 随当前回答求值（`questionnaire-definition` 共享模块）。
-  // 答案键按「选中实例」隔离（selectionId）：同一问卷的云端卡与本地副本、
-  // 或切换来源后重选，各自持有独立的草稿答案（D5.0e-r1，与 Web scopeId 同口径）。
+  // 问卷流程与 Web 同一套领域语义：多问卷经 `buildQuestionnaireContextItems`
+  // 展平（key 按选中实例 selectionId 隔离），optionsFrom/suggestionsFrom 先解析，
+  // displayIf/jump 随当前回答求值——与 Web `/details` 同一实现路径（D5.1-P2）。
   const flowItems = useMemo(
-    () => (questionnaire
-      ? resolveQuestionnaireReferences(buildDetailsFlowItems(questionnaire, questionnaireSource?.selectionId))
-      : []),
-    [questionnaire, questionnaireSource],
+    () => resolveQuestionnaireReferences(buildQuestionnaireContextItems(effectiveSelections)),
+    [effectiveSelections],
   );
   const answersByKey = state.draft.answers;
   const flow = useMemo(
@@ -162,15 +295,41 @@ function DetailsForm({ session }: { session: DetailsSession }) {
     })),
     [flow],
   );
+  const questionAnswerLookup = useMemo(
+    () => buildQuestionnaireAnswerLookup(allQuestionTargets),
+    [allQuestionTargets],
+  );
+  const questionTargetSignature = useMemo(
+    () => allQuestionTargets.map((item) => `${item.key}::${item.questionId ?? ''}::${item.question}`).join('\n'),
+    [allQuestionTargets],
+  );
+  // 问卷集合变化后的答案重映射：旧 key 失配的回答按元数据匹配到新 key，
+  // 无法匹配的不进入新集合——与 Web `/details` 同一 effect 语义。
+  useEffect(() => {
+    const previousTargets = previousTargetsRef.current;
+    const previousSignature = previousSignatureRef.current;
+    previousTargetsRef.current = allQuestionTargets;
+    previousSignatureRef.current = questionTargetSignature;
+    if (!previousTargets || previousSignature === null || previousSignature === questionTargetSignature) return;
+    const remapped = remapAnswersToQuestionnaireChange({
+      previousTargets,
+      answersByKey: session.getSnapshot().draft.answers,
+      lookup: questionAnswerLookup,
+    });
+    session.updateDraft({ ...session.getSnapshot().draft, answers: remapped });
+  }, [allQuestionTargets, questionAnswerLookup, questionTargetSignature, session]);
+  // 生成完成（含快速随机）：仅当结果整体仍在视口下方时自动滚动定位一次
+  //（语义见共享 useResultAutoScroll）。
+  useResultAutoScroll(resultSectionRef, Boolean(state.card));
   const applyImportedAnswers = (next: Record<string, string>) => {
-    session.updateDraft({ ...state.draft, answers: next });
+    updateDraft({ answers: next });
     setActionError(null);
   };
   const buildAnswerExportText = () => buildQuestionnaireAnswerExportText({
     title: '魔法少女问卷答案备份',
     items: collectQuestionnaireAnswerExportItems(visibleQuestionTargets, answersByKey),
     total: flow.length,
-    questionnaireLabel: questionnaire?.title ?? '',
+    questionnaireLabel: effectiveSelections.map((selection) => selection.questionnaire.title).join(' + '),
   });
   const currentIndex = Math.min(questionIndex, Math.max(0, flow.length - 1));
   const flowItem = flow[currentIndex];
@@ -183,27 +342,48 @@ function DetailsForm({ session }: { session: DetailsSession }) {
   const showTextInput = question?.allowCustom !== false || !questionHasOptions;
   const updateAnswer = (value: string) => {
     if (!flowItem) return;
-    session.updateDraft({ ...state.draft, answers: { ...answersByKey, [flowItem.key]: value } });
+    updateDraft({ answers: { ...answersByKey, [flowItem.key]: value } });
   };
-  // 当前选择集（单问卷形态；多问卷选择 UI 随 C6 装配落地，会话/执行层已按数组建模）。
-  const selections: QuestionnaireSelection[] = useMemo(
-    () => (questionnaire && questionnaireSource
-      ? [toQuestionnaireSelection(questionnaireSource, questionnaire)]
-      : []),
-    [questionnaire, questionnaireSource],
-  );
+  const applySelection = (selection: QuestionnaireSelection) => {
+    updateSelections(applyQuestionnaireSelection(selections, selection, {
+      allowMultiple,
+      createSuffix: createSelectionSuffix,
+    }));
+    setSelectionReady(true);
+    setPasteError(null);
+    setPasteText('');
+    setShowPasteImport(false);
+    setShowIntroduction(false);
+    setShowQuestionnaireSettings(false);
+    setActionError(null);
+  };
+  const handleRemoveSelection = (selectionId: string) => {
+    setSelectionReady(true);
+    updateSelections(removeQuestionnaireSelection(selections, selectionId));
+  };
+  const handleToggleSelectionLore = (selectionId: string, enabled: boolean) => {
+    updateSelections(setQuestionnaireSelectionLore(selections, selectionId, enabled));
+  };
+  const handleAllowMultipleChange = (next: boolean) => {
+    setSelectionReady(true);
+    const nextSelections = next
+      ? [...selections]
+      : (reconcileQuestionnaireSelectionsForSingleMode(selections) ?? [...selections]);
+    updateDraft({ allowMultipleQuestionnaires: next, questionnaireSelections: nextSelections });
+  };
   // `nativeAllowed` 是签名资格而非可用性：非原生问卷照常生成，只是不获官方签名。
-  const isNativeSignatureEligible = isQuestionnaireSelectionNativeAllowed(selections);
+  const isNativeSignatureEligible = isQuestionnaireSelectionNativeAllowed(effectiveSelections);
+  const hasOverLimitAnswer = hasOverLimitQuestionnaireAnswers(flow, answersByKey);
   // 「客户端｜服务器」与「流式｜非流式」两个维度共同决定执行模式（DESK-ONLINE-009）。
   const hostedMode: DetailsExecutionMode = generationMode === 'stream' ? 'hosted-stream' : 'hosted-json';
   const executionMode: DetailsExecutionMode | null = target.location === 'server' ? hostedMode : mode;
   const generate = (discardUnsavedResult = false) => {
-    if (!guard.ready || busy || !executionMode || !questionnaire || questionnaireLoading || profilesLoading || profilesError || questionnaireError || state.pendingRestore || session.isDraftBlocked()) return;
+    if (!guard.ready || busy || !executionMode || effectiveSelections.length === 0 || flow.length === 0 || questionnaireLoading || profilesLoading || profilesError || questionnaireError || state.pendingRestore || session.isDraftBlocked()) return;
     if (target.location === 'client' && !selected) return;
     if (!discardUnsavedResult) {
-      if (session.hasUnsavedResult()) { setConfirmRegenerate('unsaved'); return; }
+      if (session.hasUnsavedResult()) { pendingActionRef.current = 'generate'; setConfirmRegenerate('unsaved'); return; }
       // hosted-json 结果不确定时再次生成 = 可能的第二次调用，必须显式确认（D5.1a-r1）。
-      if (state.phase === 'uncertain') { setConfirmRegenerate('uncertain'); return; }
+      if (state.phase === 'uncertain') { pendingActionRef.current = 'generate'; setConfirmRegenerate('uncertain'); return; }
     }
     try {
       const answers = buildDetailsAnswers(flow, session.getSnapshot().draft.answers);
@@ -214,12 +394,12 @@ function DetailsForm({ session }: { session: DetailsSession }) {
         {
           answers,
           language: session.getSnapshot().draft.language,
-          loreText: buildQuestionnaireSelectionLoreText(selections),
+          loreText: buildQuestionnaireSelectionLoreText(effectiveSelections),
           hosted: {
-            selections,
+            selections: [...effectiveSelections],
             allowNativeSignature: isQuestionnaireGenerationNativeSignatureAllowed(
-              selections,
-              hasOverLimitQuestionnaireAnswers(flow, session.getSnapshot().draft.answers),
+              effectiveSelections,
+              hasOverLimitAnswer,
             ),
           },
         },
@@ -229,8 +409,46 @@ function DetailsForm({ session }: { session: DetailsSession }) {
     } catch (error) { setActionError(error instanceof Error ? error.message : '问卷无法生成。'); }
   };
 
+  /** 快速随机：纯本机产出（不经模型），结果走与生成完成相同的相位与保存通路。 */
+  const runQuickRandom = useCallback(() => {
+    try {
+      const data = generateRandomMagicalGirl();
+      session.applyLocalResult(data, 'magical-girl', true);
+      setShowIntroduction(false);
+      setActionError(null);
+    } catch (error) {
+      console.error('随机生成失败: ', error);
+      setActionError('随机生成失败，请稍后再试。');
+    }
+  }, [session]);
+
+  const handleQuickRandom = () => {
+    if (!guard.ready || busy || state.pendingRestore || session.isDraftBlocked()) return;
+    if (session.hasUnsavedResult()) {
+      pendingActionRef.current = 'quick-random';
+      setConfirmRegenerate('unsaved');
+      return;
+    }
+    if (state.phase === 'uncertain') {
+      pendingActionRef.current = 'quick-random';
+      setConfirmRegenerate('uncertain');
+      return;
+    }
+    runQuickRandom();
+  };
+
+  /** 确认对话框「确定/保存后继续」：generate 与 quick-random 共用同一确认语义。 */
+  const runPendingAction = (discardUnsavedResult: boolean) => {
+    if (pendingActionRef.current === 'quick-random') {
+      runQuickRandom();
+      return;
+    }
+    generate(discardUnsavedResult);
+  };
+
   /** 打开问卷选择器：一次主动使用 → 顺手探测会话（DESK-ONLINE-013），失败只影响云端页签。 */
   const openPicker = () => {
+    setPickerError(null);
     void cloudSessionStore.refresh();
     setPickerOpen(true);
   };
@@ -238,29 +456,115 @@ function DetailsForm({ session }: { session: DetailsSession }) {
   const handleSelectQuestionnaireCard = (payload: BattleSelectionPayload, context: CardLibrarySelectionContext) => {
     const parsed = parseQuestionnaireSelection(payload, context);
     if ('error' in parsed) {
-      setActionError(parsed.error);
+      setPickerError(parsed.error);
       return;
     }
-    // 切换问卷不清空已填回答：key 失配的旧回答留在草稿里但不参与生成；
-    // 「切换保留」指草稿本身不丢，而不是把旧问卷的回答错投到新题。
-    setQuestionnaire(parsed.questionnaire);
-    setQuestionnaireSource(parsed.source);
-    setQuestionIndex(0);
-    setActionError(null);
+    // 追加/切换问卷不清空已填回答：key 失配的旧回答由答案重映射按元数据
+    // 匹配到新 key，无法匹配的不再保留（与 Web 同一口径）。
+    applySelection(toQuestionnaireSelection(parsed.source, parsed.questionnaire));
+    setPickerError(null);
+    setPickerOpen(false);
   };
+
+  const handleAddPreset = async (presetId: string) => {
+    const preset = presetEntries.find((item) => item.id === presetId);
+    if (!preset) return;
+    try {
+      const response = await fetch(preset.path, { credentials: 'omit', redirect: 'error' });
+      if (!response.ok) throw new Error('加载预设问卷失败');
+      const data: unknown = await response.json();
+      const normalized = normalizeQuestionnaireDefinition(data, {
+        fallbackId: preset.id,
+        fallbackKind: preset.kind,
+        fallbackTitle: preset.title,
+        nativeAllowed: true,
+      });
+      if (!normalized) throw new Error('预设问卷解析失败');
+      applySelection({ source: 'preset', questionnaire: normalized });
+    } catch (error) {
+      setPresetError(error instanceof Error ? error.message : '加载预设问卷失败');
+    }
+  };
+
+  const normalizeUpload = (parsed: unknown, fallbackTitle: string): DetailsQuestionnaire | null => {
+    const normalized = normalizeQuestionnaireDefinition(parsed, {
+      fallbackKind: 'magical-girl',
+      fallbackId:
+        parsed && typeof parsed === 'object' && typeof (parsed as { id?: unknown }).id === 'string'
+          ? (parsed as { id: string }).id
+          : 'magical-girl-upload',
+      fallbackTitle,
+      nativeAllowed: false,
+    });
+    if (!normalized) return null;
+    // 上传件没有服务器身份可验证，nativeAllowed 恒 false（即使文件声明 true）。
+    normalized.nativeAllowed = false;
+    return normalized;
+  };
+
+  const handleUploadQuestionnaire = async (file: File) => {
+    try {
+      const text = await file.text();
+      const parsed: unknown = JSON.parse(text);
+      const fallbackTitle =
+        parsed && typeof parsed === 'object' && typeof (parsed as { title?: unknown }).title === 'string'
+          ? (parsed as { title: string }).title
+          : file.name.replace(/\.[^.]+$/, '');
+      const normalized = normalizeUpload(parsed, fallbackTitle);
+      if (!normalized) throw new Error('问卷文件解析失败');
+      applySelection({ source: 'upload', questionnaire: normalized });
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : '问卷文件解析失败');
+    }
+  };
+
+  const handlePasteQuestionnaireImport = () => {
+    if (!pasteText.trim()) {
+      setPasteError('请先粘贴问卷 JSON');
+      return;
+    }
+    try {
+      const parsed: unknown = JSON.parse(pasteText);
+      const fallbackTitle =
+        parsed && typeof parsed === 'object' && typeof (parsed as { title?: unknown }).title === 'string'
+          ? (parsed as { title: string }).title
+          : '未命名问卷';
+      const normalized = normalizeUpload(parsed, fallbackTitle);
+      if (!normalized) throw new Error('问卷 JSON 无法识别，请检查格式');
+      applySelection({ source: 'upload', questionnaire: normalized });
+    } catch (error) {
+      setPasteError(error instanceof Error ? error.message : '问卷 JSON 解析失败');
+    }
+  };
+
   const targetCapabilities = selected
     ? getModelGenerationCapabilities(selected.id, selected.modelId)
     : undefined;
+  const recommendedImageMode = deviceType === 'mobile' ? 'modal' : 'download';
+  const recommendedJsonMode = deviceType === 'mobile' ? 'text' : 'download';
+  const imageSaveMode = state.draft.imageSaveMode ?? recommendedImageMode;
+  const jsonSaveMode = state.draft.jsonSaveMode ?? recommendedJsonMode;
+  const showDetails = state.draft.showDetails === true;
+  const imageSaveButtonLabel = imageSaveMode === 'download'
+    ? '💾 一键保存长图'
+    : '📱 打开长按保存弹窗';
+  const handleSaveImage = (imageUrl: string) => {
+    setSavedImageUrl(imageUrl);
+    setShowImageModal(true);
+  };
+  const resolvedResultPayload = state.card;
+  const hasLoreOnly = effectiveSelections.length > 0 && flowItems.length === 0
+    && effectiveSelections.some((selection) => Boolean(selection.questionnaire.loreMarkdown?.trim()));
   return (
     <section data-testid="page-details" className="flex flex-col gap-5">
       <header>
         <h1 className="text-2xl font-semibold">魔法少女问卷生成</h1>
-        <p className="mt-2 text-sm text-(--app-text-muted)">填写问卷后，直接向你配置的模型发送回答，生成未签名角色卡。问卷可以是内置默认，也可以从本地库或云端数据卡选择。</p>
+        <p className="mt-2 text-sm text-(--app-text-muted)">填写问卷后，直接向你配置的模型发送回答，生成未签名角色卡。问卷可以是内置预设，也可以从本地库或云端数据卡选择。</p>
       </header>
       <section aria-label="草稿" className="rounded-lg border border-(--app-border) p-4">
         <p>问卷、结果与中断正文自动保存在本机页面草稿中，恢复草稿不会自动重新生成。</p>
         <p className="text-sm text-(--app-text-muted)">草稿不参与本地库整库备份或归档；保存到本地卡库的角色卡参与。草稿上限为序列化后 4 Mi 字符，超出或写入失败时请保留当前页面。</p>
-        {state.pendingRestore && <div role="status" className="mt-2 flex flex-wrap items-center gap-2"><span>发现上次草稿，请选择恢复或清除。</span><button className={actionClass} onClick={() => session.restoreDraft()}>恢复草稿</button></div>}
+        {state.pendingRestore && <div role="status" className="mt-2 flex flex-wrap items-center gap-2"><span>发现上次草稿，请选择恢复或清除。</span><button className={actionClass} onClick={() => { session.restoreDraft(); setShowIntroduction(false); setSelectionReady(true); }}>恢复草稿</button></div>}
         {state.draftError && <p role="alert">{state.draftError}</p>}
         {!state.pendingRestore && <p role="status">{state.draftSaved ? '当前内容已保存或无待保存变更。' : '当前内容尚未保存到草稿。'}</p>}
         <div className="mt-2 flex flex-wrap gap-2">
@@ -269,7 +573,7 @@ function DetailsForm({ session }: { session: DetailsSession }) {
         </div>
         {confirmClear && <div role="group" aria-label="确认清除草稿" className="mt-3 rounded border p-3">
           <p>确认清除本页回答、生成结果和中断正文？已保存的本地卡不受影响。此操作无法撤销。</p>
-          <button className={actionClass} disabled={busy} onClick={() => { session.discardDraft(); setConfirmClear(false); setQuestionIndex(0); }}>确认清除</button>
+          <button className={actionClass} disabled={busy} onClick={() => { session.discardDraft(); setConfirmClear(false); setQuestionIndex(0); setShowIntroduction(true); setSelectionReady(false); }}>确认清除</button>
           <button className={actionClass} onClick={() => setConfirmClear(false)}>保留草稿</button>
         </div>}
       </section>
@@ -280,146 +584,192 @@ function DetailsForm({ session }: { session: DetailsSession }) {
       {profilesLoading && <p role="status">正在读取本地 Provider 配置…</p>}
       {profilesError && <p role="alert">{profilesError}</p>}
       <button className={`${actionClass} self-start`} disabled={busy} onClick={() => { setReload((value) => value + 1); void aiStore.refreshProfiles(); }}>重新加载问卷与配置</button>
-      <section aria-label="问卷来源" className="rounded-lg border border-(--app-border) p-4">
-        <p>
-          当前问卷：{questionnaire ? questionnaire.title : '—'}
-          {questionnaireSource && questionnaireSource.kind !== 'builtin' && (
-            <span className="text-sm text-(--app-text-muted)">
-              {' '}（{questionnaireSource.kind === 'local' ? '本地库' : '云端数据卡'}）
-            </span>
-          )}
-        </p>
-        {!isNativeSignatureEligible && questionnaire && (
-          <p role="status" className="mt-1 text-sm text-(--app-text-muted)">
-            该问卷未声明可在客户端原生运行；可正常生成，但结果不会获得官方签名。
-          </p>
-        )}
-        <p className="mt-1 text-sm text-(--app-text-muted)">
-          云端来源需要你已登录且服务可用；本地库来源离线可用。切换问卷不会删除已填写的回答。
-        </p>
-        <button className={`${actionClass} mt-2`} disabled={busy || blockedDraft} onClick={openPicker}>选择问卷</button>
-      </section>
-      <fieldset disabled={busy || blockedDraft || questionnaireLoading || !guard.ready} className="flex min-w-0 flex-col gap-4">
-        <legend className="mb-2 font-semibold">生成设置</legend>
-        <AiExecutionLocationField
-          value={target.location}
-          client={{ enabled: true }}
-          server={{ enabled: true }}
-          onChange={(location) => aiStore.selectExecutionLocation(location)}
-        />
-        <GenerationModeSwitcher value={generationMode} onChange={setGenerationMode} />
-        <label className="flex flex-col gap-1">AI 连接
-          <select
-            aria-label="AI 连接"
-            className="w-full rounded border border-(--app-border) bg-(--app-surface) px-3 py-2 text-(--app-text)"
-            value={aiState.selection.clientConnectionId ?? ''}
-            disabled={aiState.overlayState !== 'ready'}
-            onChange={(event) => {
-              // 生成入口选连接=立即用它执行：两个维度一起显式落定。
-              if (event.target.value) {
-                aiStore.selectClientConnection(event.target.value);
-                aiStore.selectExecutionLocation('client');
-              }
-            }}
-          >
-            {aiState.selection.clientConnectionId === null && <option value="">未选择连接</option>}
-            {aiState.profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name} · {profile.modelId}</option>)}
-          </select>
-        </label>
-        {!profilesLoading && !aiState.profiles.length && !profilesError && <p>请先在<Link to="/settings" className="underline">设置</Link>中保存 Provider。问卷可以先填写，配置加载后再生成。</p>}
-        {target.location === 'server' && <div className="rounded border border-(--app-border) p-3">
-          <p>服务器 · 云端：由项目服务在服务器侧生成，{generationMode === 'stream' ? 'Markdown 流式输出（未签名）' : '结构化 JSON 输出（问卷原生许可时可获官方签名）'}。</p>
-          <p>不使用客户端连接与高级模型参数（由服务器侧 System Default 解析）。切换执行位置不会丢失已填写的问卷回答。</p>
-        </div>}
-        {target.location === 'client' && target.unavailableReason && <p role="status">{target.unavailableReason}</p>}
-        {target.location === 'client' && selected && mode && <div className="rounded border border-(--app-border) p-3">
-          <p>{mode === 'direct-local' ? '客户端 · 本机：发送到本机模型服务' : '客户端 · 远端：发送到你指定的外部模型服务'}</p>
-          <p className="break-all">接收方：{selected.baseUrl}</p>
-          <p>模型：{selected.modelId}。点击生成会发送已填写的问卷回答；结果不带官方签名。</p>
-        </div>}
-        {/* 高级参数只随 direct 通路下发（hosted 在服务器侧解析）：仅客户端执行时展示，
-            未实现 adapter 的连接同样不显示无实际发送效果的控件。 */}
-        {target.location === 'client' && selected && mode && <AdvancedGenerationSettings
-          value={target.generationOverrides}
-          onChange={(next) => aiStore.setGenerationOverrides(selected.id, selected.modelId, next)}
-          temperatureSupported={targetCapabilities ? targetCapabilities.temperature.support !== 'unsupported' : true}
-          temperatureMax={targetCapabilities?.temperature.max}
-          maxOutputTokensMax={targetCapabilities?.maxOutputTokens.max}
-          thinkingSupport={targetCapabilities?.thinking.support ?? 'unknown'}
-          thinkingEfforts={targetCapabilities?.thinking.efforts}
-          canDisableThinking={targetCapabilities
-            ? targetCapabilities.thinking.support === 'supported' && targetCapabilities.thinking.canDisable !== false
-            : true}
-        />}
-        <label className="flex flex-col gap-1">输出语言
-          <select aria-label="输出语言" className="w-full rounded border border-(--app-border) bg-(--app-surface) px-3 py-2 text-(--app-text)" value={state.draft.language} onChange={(event) => session.updateDraft({ ...state.draft, language: event.target.value })}>
-            {/* languages.json 未加载完成前先呈现当前值，避免选择态回空。 */}
-            {(languages.length ? languages : [{ code: state.draft.language, name: state.draft.language }]).map((lang) => (
-              <option key={lang.code} value={lang.code}>{lang.name}</option>
-            ))}
-          </select>
-        </label>
-        {flow.length > 0 && <QuestionNavigator
-          theme="app"
-          items={flow.map((item) => ({ id: item.key, label: item.question.question }))}
-          currentIndex={currentIndex}
-          onNavigate={setQuestionIndex}
-          isAnswered={(index) => Boolean(answersByKey[flow[index]!.key]?.trim())}
-        />}
-        {flowItem && question && questionnaire && <QuestionnaireQuestionPanel
-          theme={DETAILS_QUESTIONNAIRE_THEME} progressLabel={`第 ${currentIndex + 1} / ${flow.length} 题`} progressPercent={(currentIndex + 1) / flow.length * 100}
-          questionText={question.question} questionnaireTitle={questionnaire.title} noticeText="至少回答一题即可生成，其他题目可以跳过。" helperText={question.helperText}
-          isRequired={question.required === true} skipText={question.required === true ? '本题为必答' : '可跳过本题'} options={question.options} optionsHintText="点击选项填写回答" onOptionSelect={updateAnswer} suggestions={showTextInput ? question.suggestions : undefined} onSuggestionSelect={updateAnswer}
-          showTextInput={showTextInput} answer={answer} onAnswerChange={updateAnswer} placeholder={question.placeholder} answerLength={answer.trim().length}
-          showLimitLabel limitLabel={`建议不超过 ${getAnswerLimitInfo(question.maxLength).limit ?? 500} 字，不限制生成`} isOverLimit={isAnswerOverLimit(answer, question.maxLength)} overLimitText="回答超过建议长度，仍可生成未签名角色卡。"
-          prevLabel="上一题" nextButtonContent="下一题" onPrev={() => setQuestionIndex((index) => Math.max(0, index - 1))}
-          onNext={() => {
-            if (question.required === true && !answer.trim()) {
-              setActionError('本题为必答，请填写后再继续。');
-              return;
-            }
-            setActionError(null);
-            setQuestionIndex((index) => Math.min(flow.length - 1, index + 1));
-          }}
-          disablePrev={currentIndex === 0} disableNext={currentIndex >= flow.length - 1} prevButtonClass={actionClass} nextButtonClass={actionClass}
-        />}
-      </fieldset>
-      {/* 批量填充/卡导入/答案概览/备份导出——与 Web `/details` 同一套共享区段。 */}
-      {!blockedDraft && <BulkAnswerTools
-        variant="app"
-        targets={allQuestionTargets}
-        indexFallbackTargets={visibleQuestionTargets}
-        answersByKey={answersByKey}
-        onApplyAnswers={applyImportedAnswers}
-        onInfo={setActionInfo}
-        onError={(message) => setActionError(`⚠️ ${message}`)}
-        disabled={busy}
-      />}
-      {!blockedDraft && <AnswerReviewList
-        variant="app"
-        items={visibleQuestionTargets.map((item) => ({
-          key: item.key,
-          index: item.index,
-          question: item.question,
-          questionnaireTitle: item.questionnaireTitle,
-          answer: answersByKey[item.key] ?? '',
-        }))}
-        onEdit={setQuestionIndex}
-      />}
-      <QuestionnaireAnswerExportPanel
-        variant="app"
-        title="生成前备份问卷答案"
-        filenameBase="魔法少女问卷_答案备份"
-        hasContent={visibleQuestionTargets.some((item) => Boolean(answersByKey[item.key]?.trim()))}
-        buildContent={buildAnswerExportText}
-        disabled={busy}
-      />
-      <div className="flex flex-wrap gap-2">
-        <button className={actionClass} disabled={!guard.ready || busy || questionnaireLoading || profilesLoading || !questionnaire || !executionMode || (target.location === 'client' && !selected) || blockedDraft || !!questionnaireError || !!profilesError} onClick={() => generate()}>{state.phase === 'generating' ? '正在生成…' : state.phase === 'idle' ? '发送问卷并生成' : '重新生成'}</button>
-        {state.phase === 'generating' && <button className={actionClass} onClick={() => session.cancel()}>取消生成</button>}
-      </div>
+      {showIntroduction && !state.pendingRestore ? (
+        <section aria-label="介绍" className="rounded-lg border border-(--app-border) p-4">
+          <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', marginBottom: '1rem' }}>
+            <img src="/questionnaire-logo.svg" width={250} height={160} alt="Questionnaire Logo" />
+          </div>
+          <DetailsIntroSection
+            introStyle={{ color: 'var(--app-text)' }}
+            onStart={() => setShowIntroduction(false)}
+            onQuickRandom={handleQuickRandom}
+            quickRandomBusy={busy}
+            onNavigateEntry={(href) => { void router.navigate({ to: href }); }}
+            backHome={(
+              <button type="button" className="footer-link" onClick={() => void router.navigate({ to: '/' })}>
+                返回首页
+              </button>
+            )}
+          />
+        </section>
+      ) : (
+        <>
+          <section aria-label="问卷来源" className="rounded-lg border border-(--app-border) p-4">
+            <QuestionnaireSelectionPanel
+              theme={APP_SELECTION_THEME}
+              expanded={showQuestionnaireSettings}
+              onToggleExpanded={() => setShowQuestionnaireSettings(!showQuestionnaireSettings)}
+              allowMultiple={allowMultiple}
+              onAllowMultipleChange={handleAllowMultipleChange}
+              selections={effectiveSelections}
+              shouldDisableRemove={effectiveSelections.length <= 1}
+              onRemoveSelection={handleRemoveSelection}
+              onToggleLore={handleToggleSelectionLore}
+              onShowDetails={setDetailsSelection}
+              nativeAllowed={isNativeSignatureEligible}
+              hasOverLimitAnswer={hasOverLimitAnswer}
+              nativeMaxAnswerChars={500}
+              presets={presetEntries}
+              onSelectPreset={(presetId) => void handleAddPreset(presetId)}
+              onUploadFile={(file) => void handleUploadQuestionnaire(file)}
+              onOpenPicker={openPicker}
+              pickerLabel="从问卷数据卡选择"
+              description="你可以选择预设、上传或从本地库/云端数据卡挑选。多问卷只影响题目顺序；设定（Lore）可单独启用/禁用。"
+              pasteExpanded={showPasteImport}
+              onTogglePasteExpanded={() => {
+                setPasteError(null);
+                setShowPasteImport((prev) => !prev);
+              }}
+              pasteText={pasteText}
+              onPasteTextChange={setPasteText}
+              onApplyPaste={handlePasteQuestionnaireImport}
+              onClearPaste={() => {
+                setPasteText('');
+                setPasteError(null);
+              }}
+              pasteError={pasteError}
+              error={presetError}
+              disabled={busy || blockedDraft}
+            />
+            {hasLoreOnly && (
+              <p role="status" className="mt-2 text-sm text-(--app-text-muted)">
+                当前所选问卷仅包含设定（无题目），请在「问卷设置」中再添加一份有题目的问卷。
+              </p>
+            )}
+          </section>
+          <fieldset disabled={busy || blockedDraft || questionnaireLoading || !guard.ready} className="flex min-w-0 flex-col gap-4">
+            <legend className="mb-2 font-semibold">生成设置</legend>
+            <AiExecutionLocationField
+              value={target.location}
+              client={{ enabled: true }}
+              server={{ enabled: true }}
+              onChange={(location) => aiStore.selectExecutionLocation(location)}
+            />
+            <GenerationModeSwitcher value={generationMode} onChange={setGenerationMode} />
+            <label className="flex flex-col gap-1">AI 连接
+              <select
+                aria-label="AI 连接"
+                className="w-full rounded border border-(--app-border) bg-(--app-surface) px-3 py-2 text-(--app-text)"
+                value={aiState.selection.clientConnectionId ?? ''}
+                disabled={aiState.overlayState !== 'ready'}
+                onChange={(event) => {
+                  // 生成入口选连接=立即用它执行：两个维度一起显式落定。
+                  if (event.target.value) {
+                    aiStore.selectClientConnection(event.target.value);
+                    aiStore.selectExecutionLocation('client');
+                  }
+                }}
+              >
+                {aiState.selection.clientConnectionId === null && <option value="">未选择连接</option>}
+                {aiState.profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name} · {profile.modelId}</option>)}
+              </select>
+            </label>
+            {!profilesLoading && !aiState.profiles.length && !profilesError && <p>请先在<Link to="/settings" className="underline">设置</Link>中保存 Provider。问卷可以先填写，配置加载后再生成。</p>}
+            {target.location === 'server' && <div className="rounded border border-(--app-border) p-3">
+              <p>服务器 · 云端：由项目服务在服务器侧生成，{generationMode === 'stream' ? 'Markdown 流式输出（未签名）' : '结构化 JSON 输出（问卷原生许可时可获官方签名）'}。</p>
+              <p>不使用客户端连接与高级模型参数（由服务器侧 System Default 解析）。切换执行位置不会丢失已填写的问卷回答。</p>
+            </div>}
+            {target.location === 'client' && target.unavailableReason && <p role="status">{target.unavailableReason}</p>}
+            {target.location === 'client' && selected && mode && <div className="rounded border border-(--app-border) p-3">
+              <p>{mode === 'direct-local' ? '客户端 · 本机：发送到本机模型服务' : '客户端 · 远端：发送到你指定的外部模型服务'}</p>
+              <p className="break-all">接收方：{selected.baseUrl}</p>
+              <p>模型：{selected.modelId}。点击生成会发送已填写的问卷回答；结果不带官方签名。</p>
+            </div>}
+            {/* 高级参数只随 direct 通路下发（hosted 在服务器侧解析）：仅客户端执行时展示，
+                未实现 adapter 的连接同样不显示无实际发送效果的控件。 */}
+            {target.location === 'client' && selected && mode && <AdvancedGenerationSettings
+              value={target.generationOverrides}
+              onChange={(next) => aiStore.setGenerationOverrides(selected.id, selected.modelId, next)}
+              temperatureSupported={targetCapabilities ? targetCapabilities.temperature.support !== 'unsupported' : true}
+              temperatureMax={targetCapabilities?.temperature.max}
+              maxOutputTokensMax={targetCapabilities?.maxOutputTokens.max}
+              thinkingSupport={targetCapabilities?.thinking.support ?? 'unknown'}
+              thinkingEfforts={targetCapabilities?.thinking.efforts}
+              canDisableThinking={targetCapabilities
+                ? targetCapabilities.thinking.support === 'supported' && targetCapabilities.thinking.canDisable !== false
+                : true}
+            />}
+            <label className="flex flex-col gap-1">输出语言
+              <select aria-label="输出语言" className="w-full rounded border border-(--app-border) bg-(--app-surface) px-3 py-2 text-(--app-text)" value={state.draft.language} onChange={(event) => updateDraft({ language: event.target.value })}>
+                {/* languages.json 未加载完成前先呈现当前值，避免选择态回空。 */}
+                {(languages.length ? languages : [{ code: state.draft.language, name: state.draft.language }]).map((lang) => (
+                  <option key={lang.code} value={lang.code}>{lang.name}</option>
+                ))}
+              </select>
+            </label>
+            {flow.length > 0 && <QuestionNavigator
+              theme="app"
+              items={flow.map((item) => ({ id: item.key, label: item.question.question }))}
+              currentIndex={currentIndex}
+              onNavigate={setQuestionIndex}
+              isAnswered={(index) => Boolean(answersByKey[flow[index]!.key]?.trim())}
+            />}
+            {flowItem && question && <QuestionnaireQuestionPanel
+              theme={DETAILS_QUESTIONNAIRE_THEME} progressLabel={`第 ${currentIndex + 1} / ${flow.length} 题`} progressPercent={(currentIndex + 1) / flow.length * 100}
+              questionText={question.question} questionnaireTitle={flowItem.questionnaireTitle} noticeText="至少回答一题即可生成，其他题目可以跳过。" helperText={question.helperText}
+              isRequired={question.required === true} skipText={question.required === true ? '本题为必答' : '可跳过本题'} options={question.options} optionsHintText="点击选项填写回答" onOptionSelect={updateAnswer} suggestions={showTextInput ? question.suggestions : undefined} onSuggestionSelect={updateAnswer}
+              showTextInput={showTextInput} answer={answer} onAnswerChange={updateAnswer} placeholder={question.placeholder} answerLength={answer.trim().length}
+              showLimitLabel limitLabel={`建议不超过 ${getAnswerLimitInfo(question.maxLength).limit ?? 500} 字，不限制生成`} isOverLimit={isAnswerOverLimit(answer, question.maxLength)} overLimitText="回答超过建议长度，仍可生成未签名角色卡。"
+              prevLabel="上一题" nextButtonContent="下一题" onPrev={() => setQuestionIndex((index) => Math.max(0, index - 1))}
+              onNext={() => {
+                if (question.required === true && !answer.trim()) {
+                  setActionError('本题为必答，请填写后再继续。');
+                  return;
+                }
+                setActionError(null);
+                setQuestionIndex((index) => Math.min(flow.length - 1, index + 1));
+              }}
+              disablePrev={currentIndex === 0} disableNext={currentIndex >= flow.length - 1} prevButtonClass={actionClass} nextButtonClass={actionClass}
+            />}
+          </fieldset>
+          {/* 批量填充/卡导入/答案概览/备份导出——与 Web `/details` 同一套共享区段。 */}
+          {!blockedDraft && <BulkAnswerTools
+            variant="app"
+            targets={allQuestionTargets}
+            indexFallbackTargets={visibleQuestionTargets}
+            answersByKey={answersByKey}
+            onApplyAnswers={applyImportedAnswers}
+            onInfo={setActionInfo}
+            onError={(message) => setActionError(`⚠️ ${message}`)}
+            disabled={busy}
+          />}
+          {!blockedDraft && <AnswerReviewList
+            variant="app"
+            items={visibleQuestionTargets.map((item) => ({
+              key: item.key,
+              index: item.index,
+              question: item.question,
+              questionnaireTitle: item.questionnaireTitle,
+              answer: answersByKey[item.key] ?? '',
+            }))}
+            onEdit={setQuestionIndex}
+          />}
+          <QuestionnaireAnswerExportPanel
+            variant="app"
+            title="生成前备份问卷答案"
+            filenameBase="魔法少女问卷_答案备份"
+            hasContent={visibleQuestionTargets.some((item) => Boolean(answersByKey[item.key]?.trim()))}
+            buildContent={buildAnswerExportText}
+            disabled={busy}
+          />
+          <div className="flex flex-wrap gap-2">
+            <button className={actionClass} disabled={!guard.ready || busy || questionnaireLoading || profilesLoading || effectiveSelections.length === 0 || flow.length === 0 || !executionMode || (target.location === 'client' && !selected) || blockedDraft || !!questionnaireError || !!profilesError} onClick={() => generate()}>{state.phase === 'generating' ? '正在生成…' : state.phase === 'idle' ? '发送问卷并生成' : '重新生成'}</button>
+            {state.phase === 'generating' && <button className={actionClass} onClick={() => session.cancel()}>取消生成</button>}
+          </div>
+        </>
+      )}
       <dialog ref={regenerateDialog} aria-labelledby="regenerate-title" aria-describedby="regenerate-description" className="m-auto max-w-lg rounded-lg border border-(--app-border) bg-(--app-surface) p-5 text-(--app-text) backdrop:bg-black/40" onCancel={(event) => { event.preventDefault(); if (!session.isBusy()) setConfirmRegenerate(false); }}>
-        <h2 id="regenerate-title" className="text-xl font-semibold">重新生成？</h2>
+        <h2 id="regenerate-title" className="text-xl font-semibold">{pendingActionRef.current === 'quick-random' ? '重新随机生成？' : '重新生成？'}</h2>
         {confirmRegenerate === 'uncertain' ? (
           <p id="regenerate-description" className="my-3">无法确认上次请求是否在服务器执行——它可能已经完成并计费。再次生成会发起新的请求，可能产生重复调用与费用。</p>
         ) : (
@@ -428,32 +778,134 @@ function DetailsForm({ session }: { session: DetailsSession }) {
         {state.saveError && <p role="alert">{state.saveError}</p>}
         <div className="flex flex-wrap gap-2">
           <button autoFocus className={actionClass} disabled={busy} onClick={() => setConfirmRegenerate(false)}>取消</button>
-          {confirmRegenerate === 'unsaved' && <button className={actionClass} disabled={busy} onClick={async () => { if (await session.saveResult()) { setConfirmRegenerate(false); generate(); } }}>{state.saving ? '正在保存…' : '保存后重新生成'}</button>}
-          <button className={actionClass} disabled={busy} onClick={() => { setConfirmRegenerate(false); generate(true); }}>确定重新生成</button>
+          {confirmRegenerate === 'unsaved' && <button className={actionClass} disabled={busy} onClick={async () => { if (await session.saveResult()) { setConfirmRegenerate(false); runPendingAction(true); } }}>{state.saving ? '正在保存…' : '保存后重新生成'}</button>}
+          <button className={actionClass} disabled={busy} onClick={() => { setConfirmRegenerate(false); runPendingAction(true); }}>确定重新生成</button>
+        </div>
+      </dialog>
+      <dialog ref={detailsDialog} aria-labelledby="selection-details-title" className="m-auto max-w-2xl rounded-lg border border-(--app-border) bg-(--app-surface) p-5 text-(--app-text) backdrop:bg-black/40" onCancel={() => setDetailsSelection(null)}>
+        <h2 id="selection-details-title" className="text-xl font-semibold">
+          {detailsSelection?.questionnaire.title ?? '问卷详情'}
+        </h2>
+        {detailsSelection && (
+          <>
+            <p className="mt-2 text-sm text-(--app-text-muted)">
+              来源：{detailsSelection.source === 'preset' ? '预设' : detailsSelection.source === 'upload' ? '本地上传/本地库' : '云端数据卡'}
+              {detailsSelection.dataCardAuthor ? ` · 作者：${detailsSelection.dataCardAuthor}` : ''}
+              {detailsSelection.questionnaire.nativeAllowed ? ' · 原生许可' : ' · 非原生'}
+              {` · 题目 ${detailsSelection.questionnaire.questions.length} 道`}
+              {detailsSelection.questionnaire.loreMarkdown?.trim() ? ' · 含设定' : ''}
+            </p>
+            {detailsSelection.questionnaire.description?.trim() && (
+              <p className="mt-2 text-sm">{detailsSelection.questionnaire.description}</p>
+            )}
+            <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded border p-3 text-xs">{JSON.stringify(detailsSelection.questionnaire, null, 2)}</pre>
+          </>
+        )}
+        <div className="mt-4 flex justify-end">
+          <button autoFocus className={actionClass} onClick={() => setDetailsSelection(null)}>关闭</button>
         </div>
       </dialog>
       {actionError && <p role="alert">{actionError}</p>}
       {actionInfo && <p role="status">{actionInfo}</p>}
       {state.message && <p role={state.phase === 'uncertain' ? 'alert' : 'status'}>{state.message}</p>}
       {state.reasoning && <AiReasoningPanel reasoning={state.reasoning} />}
-      {state.card && <section aria-label="生成结果" className="flex flex-col gap-3">
-        <h2 className="text-xl font-semibold">
+      <div ref={resultSectionRef}>
+        {state.card && <section aria-label="生成结果" className="flex flex-col gap-3">
+          <h2 className="text-xl font-semibold">
+            {state.cardKind === 'general'
+              ? (typeof state.card.name === 'string' && state.card.name ? state.card.name : '未命名角色')
+              : (typeof state.card.codename === 'string' && state.card.codename ? state.card.codename : '未命名魔法少女')}
+            {' · '}{typeof state.card.signature === 'string' && state.card.signature
+              ? (state.resultRestored ? '含签名字段（本机未验证）' : '官方签名')
+              : '未签名'}
+          </h2>
           {state.cardKind === 'general'
-            ? (typeof state.card.name === 'string' && state.card.name ? state.card.name : '未命名角色')
-            : (typeof state.card.codename === 'string' && state.card.codename ? state.card.codename : '未命名魔法少女')}
-          {' · '}{typeof state.card.signature === 'string' && state.card.signature
-            ? (state.resultRestored ? '含签名字段（本机未验证）' : '官方签名')
-            : '未签名'}
-        </h2>
-        {state.cardKind === 'general'
-          ? <GeneralCharacterCard general={state.card as GeneralCharacterCardData} />
-          : <MagicalGirlResultBody magicalGirl={state.card as unknown as MagicalGirlResultData} />}
-        <button className={actionClass} disabled={!guard.ready || busy || state.saveStatus === 'saved' || state.saveStatus === 'already-present'} onClick={() => { if (guard.ready) void session.saveResult(); }}>{state.saving ? '正在保存…' : '保存到本地卡库'}</button>
-        {state.saveStatus === 'saved' && <p role="status">已保存到本地卡库。</p>}
-        {state.saveStatus === 'already-present' && <p role="status">本地卡库已存在相同内容，原记录保持不变。</p>}
-        {state.saveError && <p role="alert">{state.saveError}</p>}
-      </section>}
+            ? <GeneralCharacterCard
+                general={state.card as GeneralCharacterCardData}
+                onSaveImage={handleSaveImage}
+                imageSaveMode={imageSaveMode}
+                saveButtonLabel={imageSaveButtonLabel}
+              />
+            : <MagicalGirlCard
+                magicalGirl={state.card as unknown as MagicalGirlCardData}
+                gradientStyle={RESULT_CARD_GRADIENT}
+                onSaveImage={handleSaveImage}
+                imageSaveMode={imageSaveMode}
+                saveButtonLabel={imageSaveButtonLabel}
+              />}
+          <button className={actionClass} disabled={!guard.ready || busy || state.saveStatus === 'saved' || state.saveStatus === 'already-present'} onClick={() => { if (guard.ready) void session.saveResult(); }}>{state.saving ? '正在保存…' : '保存到本地卡库'}</button>
+          {state.saveStatus === 'saved' && <p role="status">已保存到本地卡库。</p>}
+          {state.saveStatus === 'already-present' && <p role="status">本地卡库已存在相同内容，原记录保持不变。</p>}
+          {state.saveError && <p role="alert">{state.saveError}</p>}
+          <DetailsSavePreferencesPanel
+            theme={APP_SAVE_PREFERENCES_THEME}
+            imageSaveMode={imageSaveMode}
+            onImageSaveModeChange={(next) => updateDraft({ imageSaveMode: next })}
+            recommendedImageMode={recommendedImageMode}
+            jsonSaveMode={jsonSaveMode}
+            onJsonSaveModeChange={(next) => updateDraft({ jsonSaveMode: next })}
+            recommendedJsonMode={recommendedJsonMode}
+            footerNote="提示：偏好设置已保存在本机草稿中，下次打开仍会保留；切换不会丢失生成结果。"
+          />
+          <DetailsFieldGuidePanel
+            theme={APP_FIELD_GUIDE_THEME}
+            expanded={showDetails}
+            onToggle={() => updateDraft({ showDetails: !showDetails })}
+          />
+          {/* 保存原始数据——与 Web `/details` 同一共享控件（下载 JSON / 复制文本）。 */}
+          {resolvedResultPayload && <section aria-label="保存原始数据" className="rounded-lg border border-(--app-border) p-4">
+            <h3 className="text-lg font-medium">保存人物设定</h3>
+            <div className="mt-3 flex flex-col gap-3">
+              {state.cardKind === 'general' ? (
+                <>
+                  <button className={actionClass} onClick={() => downloadJsonText(resolveResultJsonFileName(resolvedResultPayload as Record<string, unknown>, 'general'), JSON.stringify(resolvedResultPayload, null, 2))}>下载通用角色卡</button>
+                  <button className={actionClass} onClick={() => { void navigator.clipboard?.writeText(JSON.stringify(resolvedResultPayload, null, 2)).then(() => setActionInfo('✅ 通用角色卡 JSON 已复制到剪贴板')).catch(() => setActionError('复制失败，请手动选择 JSON 内容后复制。')); }}>复制到剪贴板</button>
+                </>
+              ) : (
+                <SaveJsonButton
+                  data={resolvedResultPayload}
+                  mode={jsonSaveMode}
+                  recommendedMode={recommendedJsonMode}
+                  resolveFileName={(data) => resolveResultJsonFileName(data as Record<string, unknown>, 'magical-girl')}
+                />
+              )}
+            </div>
+            <JsonSizeIndicator
+              data={resolvedResultPayload}
+              warningText="⚠️ 接近云端 300KB 上限，保存/替换可能失败，请先精简数据。"
+            />
+          </section>}
+        </section>}
+      </div>
       {state.rawText && <details open={state.phase !== 'completed'}><summary>原始输出正文</summary><pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded border p-3">{state.rawText}</pre></details>}
+      {/* 长按保存弹窗：与 Web `/details` 同一交互——图片预览 + 手动保存提示。 */}
+      {showImageModal && savedImageUrl && (
+        <div className="fixed inset-0 flex items-center justify-center" style={{ backgroundColor: 'rgba(0, 0, 0, 0.7)', paddingLeft: '2rem', paddingRight: '2rem', zIndex: 1000 }}>
+          <div className="bg-white rounded-lg max-w-lg w-full max-h-[80vh] overflow-auto relative">
+            <div className="sticky top-0 z-10 bg-white/95 backdrop-blur flex justify-end p-2">
+              <button
+                onClick={() => setShowImageModal(false)}
+                aria-label="关闭"
+                className="text-gray-500 hover:text-gray-700 text-3xl leading-none"
+              >
+                ×
+              </button>
+            </div>
+            <div className="px-4 pb-4">
+              <p className="text-center text-sm text-gray-600" style={{ marginTop: '0.5rem' }}>
+                💫 长按图片保存到相册
+              </p>
+              <div className="items-center flex flex-col" style={{ padding: '0.5rem' }}>
+                <img
+                  src={savedImageUrl}
+                  alt="魔法少女详细档案"
+                  className="w-1/2 h-auto rounded-lg mx-auto"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       <CardLibraryModal
         host={cardLibraryHost}
         isOpen={pickerOpen}
@@ -462,6 +914,7 @@ function DetailsForm({ session }: { session: DetailsSession }) {
         selectedType="questionnaire"
         allowedTypes={['questionnaire']}
         titleOverride="选择问卷数据卡"
+        externalError={pickerError}
         // 本地页签离线可用且不要求登录，作为默认落点；云端页签失败只影响自身。
         initialTab="local"
         allowDeckImport={false}

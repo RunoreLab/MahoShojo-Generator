@@ -181,7 +181,18 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
     expect(window.localStorage.getItem(DETAILS_DRAFT_KEY)).toBe('{broken');
     await click('保留草稿');
     await click('清除草稿'); await click('确认清除');
-    expect(window.localStorage.getItem(DETAILS_DRAFT_KEY)).toBeNull();
+    // 「清除草稿」= 内容清空：清后可立即落一份干净初始草稿（空回答+默认内置问卷
+    // 选择；落盘格式恒带 output 头，须为 idle/空卡），语义等价于空——D5.1-P2
+    // 选择集入草稿后默认问卷会作为新草稿的一部分被持续保存。
+    const clearedRaw = window.localStorage.getItem(DETAILS_DRAFT_KEY);
+    const cleared = clearedRaw === null
+      ? null
+      : JSON.parse(clearedRaw) as { answers?: Record<string, string>; output?: { phase?: string; card?: unknown; rawText?: string } };
+    expect(cleared === null || (
+      (cleared.output === undefined || (cleared.output.phase === 'idle' && cleared.output.card === null && cleared.output.rawText === ''))
+      && Object.keys(cleared.answers ?? {}).length === 0
+    )).toBe(true);
+    await click('开始回答问卷');
     expect(button('发送问卷并生成').disabled).toBe(true);
     await act(async () => ready(vi.fn())); await settle();
     expect(button('发送问卷并生成').disabled).toBe(false);
@@ -206,7 +217,7 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
 
   it('keeps the questionnaire editable while Provider loading fails independently', async () => {
     mocks.profiles.mockRejectedValue(new Error('profile bridge unavailable'));
-    await mount();
+    await mount(); await click('开始回答问卷');
     expect(container.querySelector('textarea')).toBeTruthy();
     expect(container.textContent).toContain('本地 Provider 配置加载失败');
     expect(button('发送问卷并生成').disabled).toBe(true);
@@ -214,7 +225,7 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
 
   it('loads and shows unsupported adapters instead of hiding them', async () => {
     mocks.profiles.mockResolvedValue({ id: 'local', name: 'Anthropic profile', adapter: 'anthropic', baseUrl: 'https://model.example/v1', modelId: 'model' });
-    await mount();
+    await mount(); await click('开始回答问卷');
     expect(container.querySelector('select[aria-label="AI 连接"]')?.textContent).toContain('Anthropic profile');
     expect(container.textContent).toContain('当前客户端尚未实现 anthropic 适配器');
     expect(button('发送问卷并生成').disabled).toBe(true);
@@ -222,7 +233,7 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
 
   it('preserves corrupt drafts and permits leaving until new content becomes dirty', async () => {
     window.localStorage.setItem(DETAILS_DRAFT_KEY, '{broken');
-    const router = await mount();
+    const router = await mount(); await click('开始回答问卷');
     expect(container.querySelector('textarea')?.closest('fieldset')?.disabled).toBe(true);
     await act(async () => { await router.navigate({ to: '/' }); });
     await settle();
@@ -231,7 +242,7 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
   });
 
   it('blocks route navigation when editing cannot persist the draft', async () => {
-    const router = await mount();
+    const router = await mount(); await click('开始回答问卷');
     const original = Storage.prototype.setItem;
     vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (key, value) {
       if (key === DETAILS_DRAFT_KEY) throw new Error('quota exceeded');
