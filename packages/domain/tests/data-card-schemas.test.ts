@@ -4,7 +4,11 @@ import {
   createBlankDataCard,
   convertDataCard,
 } from '@mahoshojo/domain/sublimation';
-import { parseDataCardByTemplate } from '@mahoshojo/domain/data-card-schemas';
+import {
+  parseDataCardByTemplate,
+  type CanshouData,
+  type MagicalGirlData,
+} from '@mahoshojo/domain/data-card-schemas';
 
 /**
  * 五模板 schema 门禁（D5.1-P2-r5-r1）：Web `data-card-converter` 与 Desktop
@@ -57,6 +61,16 @@ describe('parseDataCardByTemplate', () => {
       codename: '星光',
       arena_history: {},
     })).not.toThrow();
+  });
+
+  it('arena_history 的 entries 必填性在推导类型上与运行时一致', () => {
+    // 运行时语义之外的类型契约：不能出现「运行 required、编译 optional」的漂移。
+    type CanshouHistory = NonNullable<CanshouData['arena_history']>;
+    type MagicalHistory = NonNullable<MagicalGirlData['arena_history']>;
+    const canshouEntriesRequired: Pick<CanshouHistory, 'entries'> extends { entries: unknown[] } ? true : never = true;
+    const magicalEntriesOptional: Partial<Pick<MagicalHistory, 'entries'>> extends Pick<MagicalHistory, 'entries'> ? true : never = true;
+    expect(canshouEntriesRequired).toBe(true);
+    expect(magicalEntriesOptional).toBe(true);
   });
 
   it('角色模板拒绝目标之外的顶层键（schema 门禁不是宽容透传）', () => {

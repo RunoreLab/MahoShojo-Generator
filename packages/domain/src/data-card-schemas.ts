@@ -147,20 +147,28 @@ const arenaHistoryEntrySchema = z.object({
   }).optional(),
 });
 
+const arenaHistoryAttributesSchema = z.object({
+  world_line_id: z.string().optional(),
+  created_at: z.string().optional(),
+  updated_at: z.string().optional(),
+  sublimation_count: z.number().optional(),
+  last_sublimation_at: z.string().nullable().optional(),
+}).optional();
+
+const arenaHistoryEntryArray = z.array(arenaHistoryEntrySchema);
+
 // 两类角色卡的 arena_history 共用同一形状，但 `entries` 必填性在旧实现中不同：
 // Canshou 只要出现 arena_history 就必须带 entries；MagicalGirl 的 entries 本就
-// optional。迁移保持各自判定（D5.1-P2-r5-r2），不因共源悄悄放宽 Canshou 校验。
-const arenaHistoryShape = (entriesRequired: boolean) => z.object({
-  attributes: z.object({
-    world_line_id: z.string().optional(),
-    created_at: z.string().optional(),
-    updated_at: z.string().optional(),
-    sublimation_count: z.number().optional(),
-    last_sublimation_at: z.string().nullable().optional(),
-  }).optional(),
-  entries: entriesRequired
-    ? z.array(arenaHistoryEntrySchema)
-    : z.array(arenaHistoryEntrySchema).optional(),
+// optional。保持为两个显式 schema 而不是 boolean 参数化——条件返回会把 entries
+// 推导成 union，造成「运行时 required、编译期 optional」的类型漂移（D5.1-P2-r5-r3）。
+const magicalGirlArenaHistorySchema = z.object({
+  attributes: arenaHistoryAttributesSchema,
+  entries: arenaHistoryEntryArray.optional(),
+}).optional();
+
+const canshouArenaHistorySchema = z.object({
+  attributes: arenaHistoryAttributesSchema,
+  entries: arenaHistoryEntryArray,
 }).optional();
 
 const rejectUnknownTopLevelKeys = (allowedKeys: readonly string[]) =>
@@ -221,7 +229,7 @@ export const MagicalGirlSchema = z.object({
   current_state: CurrentStateSchema.optional(),
   creationInputs: CreationInputsSchema.optional(),
   buildState: BuildStateSchema.optional(),
-  arena_history: arenaHistoryShape(false),
+  arena_history: magicalGirlArenaHistorySchema,
   adjudicationEvents: z.array(AdjudicatorEventSchema).optional(),
 }).catchall(z.unknown())
   .superRefine(rejectUnknownTopLevelKeys(MAGICAL_GIRL_KEYS));
@@ -250,7 +258,7 @@ export const CanshouSchema = z.object({
   current_state: CurrentStateSchema.optional(),
   creationInputs: CreationInputsSchema.optional(),
   buildState: BuildStateSchema.optional(),
-  arena_history: arenaHistoryShape(true),
+  arena_history: canshouArenaHistorySchema,
 }).catchall(z.unknown())
   .superRefine(rejectUnknownTopLevelKeys(CANSHOU_KEYS));
 
