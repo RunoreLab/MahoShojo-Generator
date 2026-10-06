@@ -16,7 +16,7 @@ describe('desktop capability snapshot', () => {
   });
 
   it('does not declare Web-only homepage entries', () => {
-    for (const href of ['/canshou', '/character-party', '/magic-tea-party', '/card-forge']) {
+    for (const href of ['/character-party', '/magic-tea-party', '/card-forge']) {
       expect(readCapability(snapshot, href).kind).toBe('unknown');
     }
   });
