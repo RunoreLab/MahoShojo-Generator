@@ -109,6 +109,9 @@ export const LocalLibraryAuditPanel = ({ enabled, maintenanceBusy, acquireOperat
       setSummary(result);
       return true;
     } catch (cause) {
+      // 失败必须失效旧报告：GC 已经成功改变库状态后还把回收前的 findings
+      // 留在界面上，等于拿旧事实冒充当前状态（D5.1-P2-r2）。
+      setSummary(null);
       setError(describeAuditError(cause));
       return false;
     }

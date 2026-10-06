@@ -180,6 +180,31 @@ describe('本地库完整性面板（IPC mock）', () => {
     expect(alerts.some((item) => item.textContent?.includes('会保留为无记录文件'))).toBe(true);
   });
 
+  it('GC 后重审计失败时旧报告失效，不把回收前状态冒充当前状态', async () => {
+    // 首轮审计发现可回收项 → GC 入口开放。
+    bridge.invoke.mockResolvedValue({
+      ...cleanReport,
+      findings: [finding('auditFindingOrphanFile')],
+    });
+    await mount();
+    await click(button('检查完整性'));
+    await waitFor(() => button('清理可回收空间')?.disabled === false);
+    expect(container.textContent).toContain('无记录的文件（可回收空间）（1 条）');
+
+    // GC 成功（库状态已改变）但随后的重审计失败：旧 summary 必须失效，
+    // 只留下错误与本次 GC 的真实结果（D5.1-P2-r2）。
+    bridge.invoke.mockImplementation(async (command: string) => {
+      if (command === COLLECT_LOCAL_GARBAGE_COMMAND) return stripCase(fixture.gcReport);
+      return Promise.reject({ code: 'audit-unavailable', message: '审计通道不可用' });
+    });
+    await click(button('清理可回收空间'));
+    await waitFor(() => container.textContent?.includes('审计通道不可用') === true);
+    expect(container.textContent).toContain('已清理');
+    expect(container.textContent).not.toContain('无记录的文件（可回收空间）');
+    expect(container.textContent).not.toContain('本次检查覆盖');
+    expect(button('清理可回收空间')?.disabled).toBe(true);
+  });
+
   it('审计失败显示可诊断错误并释放锁，可重试', async () => {
     bridge.invoke.mockRejectedValueOnce({ code: 'audit-unavailable', message: '审计通道不可用' });
     const theLock = await mount();
