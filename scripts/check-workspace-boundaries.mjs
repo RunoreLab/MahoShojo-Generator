@@ -1,4 +1,5 @@
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import parser from '@typescript-eslint/parser';
@@ -158,6 +159,14 @@ const CORE_GENERATED_PUBLIC_PATHS = Object.freeze({
   web: new Set(['flowers.json', 'questionnaires/presets/magical-girl-default.json']),
   desktop: new Set(['questionnaires/presets/magical-girl-default.json']),
 });
+
+/**
+ * 生成器以 exclusive 模式整目录维护的 public 子树，以及非 manifest 的生成根文件。
+ * 与 `generatedPublicPaths`（import 边界用的文件级清单）不同，这里要覆盖到目录本身——
+ * Git 护栏按路径前缀判定。
+ */
+const GENERATED_PUBLIC_DIRECTORIES = Object.freeze(['encyclopedia', 'questionnaires/presets']);
+const GENERATED_PUBLIC_ROOT_FILES = Object.freeze(['languages.json', 'announcements.json']);
 
 /**
  * @typedef {'apps' | 'packages'} WorkspaceKind
@@ -695,6 +704,67 @@ function generatedPublicPaths(rootDirectory) {
   return pathsByApp;
 }
 
+/**
+ * 生成物必须满足两条 Git 不变量：被 .gitignore 覆盖、且未留在索引里。
+ *
+ * `content/` 是权威源，`apps/<a>/public/` 副本由内容生成器在 dev/build 时重写。
+ * tracked 副本允许「改了 content/ 但旧副本仍被提交、或直接改副本」的双源漂移；
+ * 而 gitignore 对**已经 tracked** 的文件不生效——所以两条要分别用
+ * `git check-ignore`（规则覆盖）与 `git ls-files`（索引残留）验证。
+ *
+ * 检查的根目录必须是 git worktree 根：fixture/临时根（`git rev-parse --show-toplevel`
+ * 返回的是外层仓库或不成立）整组跳过，避免把宿主仓库的状态误记到 fixture 上。
+ *
+ * @param {string} rootDirectory
+ * @param {Map<string, Set<string>>} pathsByApp
+ * @returns {BoundaryViolation[]}
+ */
+function checkGeneratedPublicGitState(rootDirectory, pathsByApp) {
+  let gitRoot;
+  try {
+    gitRoot = execFileSync('git', ['rev-parse', '--show-toplevel'], {
+      cwd: rootDirectory,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+  } catch {
+    return [];
+  }
+  if (!gitRoot || path.resolve(gitRoot) !== rootDirectory) return [];
+
+  const violations = [];
+  const git = (args) => spawnSync('git', args, { cwd: rootDirectory, encoding: 'utf8' });
+  for (const [app, names] of pathsByApp) {
+    const entries = [
+      ...GENERATED_PUBLIC_DIRECTORIES.map((directory) => ({ path: directory, directory: true })),
+      ...GENERATED_PUBLIC_ROOT_FILES.map((file) => ({ path: file, directory: false })),
+      ...[...names].map((file) => ({ path: file, directory: false })),
+    ];
+    for (const entry of entries) {
+      const relativeTarget = `apps/${app}/public/${entry.path}`;
+      const ignoreProbe = entry.directory ? `${relativeTarget}/` : relativeTarget;
+      if (git(['check-ignore', '-q', '--', ignoreProbe]).status !== 0) {
+        violations.push({
+          rule: 'MONO-006-GENERATED-PUBLIC-IGNORE',
+          file: relativeTarget,
+          module: '<gitignore>',
+          message: 'generated public path lacks a .gitignore rule; generated copies must be ignored and recreated by the content generator',
+        });
+        continue;
+      }
+      if (git(['ls-files', '--', relativeTarget]).stdout.trim().length > 0) {
+        violations.push({
+          rule: 'MONO-006-GENERATED-PUBLIC-TRACKED',
+          file: relativeTarget,
+          module: '<git-index>',
+          message: 'generated public copy is still git-tracked; remove it from the index (the canonical source lives under content/)',
+        });
+      }
+    }
+  }
+  return violations;
+}
+
 function resolveLocalImportTarget(rootDirectory, sourceFile, moduleSpecifier, apps) {
   const cleanSpecifier = moduleSpecifier.split(/[?#]/u, 1)[0];
   let unresolvedTarget;
@@ -750,7 +820,7 @@ export function checkWorkspaceBoundaries(rootDirectory = process.cwd()) {
   const units = [...apps, ...packages];
   const rootAliases = readManifest(path.join(normalizedRoot, 'tsconfig.json'))?.compilerOptions?.paths;
   const generatedPublicPathMap = generatedPublicPaths(normalizedRoot);
-  const violations = [];
+  const violations = checkGeneratedPublicGitState(normalizedRoot, generatedPublicPathMap);
   for (const unit of units) {
     if (!unit.manifest || !unit.packageJsonPath) continue;
     const scripts = unit.manifest.scripts;
