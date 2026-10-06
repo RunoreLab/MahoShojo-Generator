@@ -1,0 +1,93 @@
+{
+  "fixtureLore": "【夹具世界观】残兽吞噬记忆为生。",
+  "systemPromptSha256": "95e30f11c93281c6bc5c888e6094b98dc35595c7d1074c5f01a466cb78830f9e",
+  "canshouLoreSha256": "9ce92083ec21aa2d664992c48c85ca62263388feef11fd5757eabc7e6ff741d7",
+  "schema": {
+    "type": "ZodObject",
+    "shape": {
+      "name": {
+        "type": "ZodString",
+        "description": "残兽的名称，应体现其核心概念和特征"
+      },
+      "coreConcept": {
+        "type": "ZodString",
+        "description": "对残兽核心概念的概括"
+      },
+      "coreEmotion": {
+        "type": "ZodString",
+        "description": "对残兽核心情感/欲望的概括"
+      },
+      "evolutionStage": {
+        "type": "ZodString",
+        "description": "残兽所处的进化阶段（卵/蠖/蛹/半蜕/蜕/王蜕/羽）"
+      },
+      "appearance": {
+        "type": "ZodString",
+        "description": "外貌形态的详细描述，整合用户输入并进行扩展"
+      },
+      "materialAndSkin": {
+        "type": "ZodString",
+        "description": "材质与表皮的详细描述，整合用户输入并进行扩展"
+      },
+      "featuresAndAppendages": {
+        "type": "ZodString",
+        "description": "特征与附属物的详细描述，整合用户输入并进行扩展"
+      },
+      "attackMethod": {
+        "type": "ZodString",
+        "description": "主要攻击方式的详细描述"
+      },
+      "specialAbility": {
+        "type": "ZodString",
+        "description": "特殊能力的详细描述和运作机制"
+      },
+      "origin": {
+        "type": "ZodString",
+        "description": "起源故事的详细阐述"
+      },
+      "birthEnvironment": {
+        "type": "ZodString",
+        "description": "诞生环境的详细描述"
+      },
+      "researcherNotes": {
+        "type": "ZodString",
+        "description": "作为研究员的分析、预测和警告"
+      }
+    }
+  },
+  "cases": [
+    {
+      "input": {
+        "answers": [],
+        "language": "中文",
+        "loreText": ""
+      },
+      "structuredPromptSha256": "8a6d1fb300b4e674306b0253731e3348681acef6e41fbffddfd38ef1cf067241",
+      "streamPromptSha256": "afab652354d85d895aa5c49570ad827a11e36ab46a491cc9fa9c855484e8a414"
+    },
+    {
+      "input": {
+        "answers": [
+          {
+            "question": "残兽的捕食对象是什么？",
+            "answer": "深夜加班的人",
+            "questionId": "q1",
+            "questionnaireId": "canshou-default",
+            "questionnaireTitle": "残兽调查报告"
+          },
+          {
+            "question": "残兽的进化阶段？",
+            "answer": "蛹级",
+            "questionId": "q2",
+            "questionnaireId": "canshou-default"
+          }
+        ],
+        "language": "English",
+        "loreText": "【参考资料】巢穴周边常有低频嗡鸣。",
+        "creatorPromptText": "【缔造者指令】偏好隐秘型残兽。"
+      },
+      "structuredPromptSha256": "c6f49f1ed7d348861fef1a551b58bf75f6cb17f9810e85a64aadffdad785108b",
+      "streamPromptSha256": "f5cff46603f0fa7e30d7b503d817a4bf5b78a25672e7b80027cc07a3d6ea2160"
+    }
+  ]
+}

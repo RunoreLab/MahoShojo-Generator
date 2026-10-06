@@ -49,6 +49,11 @@
       "types": "./src/magical-girl-details-generation.ts",
       "import": "./src/magical-girl-details-generation.ts",
       "default": "./src/magical-girl-details-generation.ts"
+    },
+    "./canshou-generation": {
+      "types": "./src/canshou-generation.ts",
+      "import": "./src/canshou-generation.ts",
+      "default": "./src/canshou-generation.ts"
     }
   },
   "scripts": {

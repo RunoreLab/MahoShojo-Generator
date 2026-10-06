@@ -15,6 +15,11 @@
       "import": "./src/story-prompt-data.ts",
       "default": "./src/story-prompt-data.ts"
     },
+    "./canshou-lore": {
+      "types": "./src/canshou-lore.ts",
+      "import": "./src/canshou-lore.ts",
+      "default": "./src/canshou-lore.ts"
+    },
     "./data-cards": {
       "types": "./src/data-cards.ts",
       "import": "./src/data-cards.ts",

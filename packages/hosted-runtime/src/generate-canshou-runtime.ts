@@ -6,6 +6,7 @@ import {
 import { completeStep, respondStep } from '@mahoshojo/hosted-api/regular-generation';
 
 import {
+  buildUnsignedCanshouCard,
   createCanshouGenerationConfig,
   type CanshouGeneratedData,
   type CanshouGenerationInput,
@@ -32,7 +33,6 @@ import {
   type RequestQuestionnaire,
 } from './questionnaire-generation-runtime';
 import {
-  compactQuestionnaireAnswerItems,
   resolveLegacyQuestionnaireProviderRuntime,
   type LegacyProviderRuntimeLogger,
 } from './questionnaire-composition-runtime-shared';
@@ -226,11 +226,10 @@ export const createGenerateCanshouRuntime = (
     },
     recordActivity: ports.recordActivity,
     buildResponse: async (request, input, output) => {
-      const dataToSign: Record<string, unknown> = {
-        ...output.canshouDetails,
-        templateId: '魔法少女/心之花/残兽（问卷生成）',
-        userAnswers: compactQuestionnaireAnswerItems(input.normalizedAnswers),
-      };
+      const dataToSign: Record<string, unknown> = buildUnsignedCanshouCard(
+        output.canshouDetails,
+        input.normalizedAnswers,
+      );
       const data = input.allowNativeSignature
         ? { ...dataToSign, signature: await ports.sign(dataToSign) }
         : dataToSign;
