@@ -67,6 +67,16 @@ const DESKTOP_ASSET_SOURCE: HomeAssetSource = { baseUrl: '/' };
 const CAPABILITIES = buildCapabilitySnapshot();
 
 /**
+ * 自带全幅页面背景的产品路径（`magic-background*` 图层自己铺到视口）。
+ *
+ * 这些页面与 Web 同构的骨架是 `magic-background* > .container > .card`：页面背景必须
+ * 横向铺满，`main` 再套一层限宽内边距只是把背景裁进栏盒（渐变同源时肉眼看不出接缝，
+ * 但骨架不同构）。`bleedContent` 让壳的 `main` 退化为 `flex-1` 全宽容器；无背景的
+ * 裸 section 页面（百科、本地库、设置）继续走受限宽 `main`（D5.1-P2-r4）。
+ */
+const FULL_BLEED_PATHS = new Set(['/', '/details', '/character-manager']);
+
+/**
  * 壳。
  *
  * 这是 Desktop 唯一的装配点，职责只有三件：给共源顶栏喂宿主投影、把导航点击交给 router、把页面
@@ -95,6 +105,7 @@ const DesktopShellInner = () => {
     <AppShell
       // DESK-PARITY-002：品牌已由顶栏 favicon 圆形标志承担，壳不再渲染默认文字品牌。
       brand={null}
+      bleedContent={FULL_BLEED_PATHS.has(pathname)}
       topBar={
         <ProductTopBar
           pathname={pathname}

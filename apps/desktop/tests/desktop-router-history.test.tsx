@@ -148,6 +148,9 @@ describe('desktop router keeps the product path inside the hash', () => {
     expect(container.querySelector('[data-testid="product-shell"]')?.textContent).not.toContain(
       'MahoShojo Generator',
     );
+    // 首页自带 magic-background-white 全幅背景：main 退化为全宽容器，与 Web 同构
+    //（D5.1-P2-r4 的 full-bleed 规则；无背景裸 section 页面的对照断言见下方循环）。
+    expect(container.querySelector('main')?.className).toBe('flex-1');
     expect(home.classList.contains('magic-background-white')).toBe(true);
     expect(home.querySelector(':scope > .container > .card')).not.toBeNull();
     expect(home.textContent).toContain('欢迎来到魔法国度！选择一个项目开始玩耍吧！');
@@ -163,17 +166,24 @@ describe('desktop router keeps the product path inside the hash', () => {
     expect(hrefs.some((href) => href?.startsWith('https://'))).toBe(true);
     expect(home.textContent).not.toContain('PVP');
 
-    for (const [to, expected] of [
-      ['/details', 'page-details'],
-      ['/character-manager', 'page-character-manager'],
-      ['/local-library', 'page-local-library'],
-      ['/settings', 'page-settings'],
+    for (const [to, expected, fullBleed] of [
+      ['/details', 'page-details', true],
+      ['/character-manager', 'page-character-manager', true],
+      ['/local-library', 'page-local-library', false],
+      ['/settings', 'page-settings', false],
     ] as const) {
       await act(async () => {
         await router.navigate({ to });
       });
       await settle();
       expect(pageTestId(), `${to} 应当渲染 ${expected}`).toBe(expected);
+      // 自带 magic-background* 的产品页 full-bleed；无背景裸 section 页面留在限宽 main。
+      const mainClass = container.querySelector('main')?.className ?? '';
+      if (fullBleed) {
+        expect(mainClass, `${to} 应为全幅 bleed 容器`).toBe('flex-1');
+      } else {
+        expect(mainClass, `${to} 应保留限宽 main`).toContain('max-w-6xl');
+      }
     }
 
     // 卡片页与 Web 同构：`magic-background* > .container > .card` 共源骨架
