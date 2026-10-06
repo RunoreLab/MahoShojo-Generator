@@ -180,14 +180,20 @@ describe('server-safe shared entrypoints stay free of React hooks', () => {
     // 基件；两者都只在 Client Component/宿主适配层消费，不进入 Server Component 导入链。
     // `./client`、`./details-controls`、`./character-card` 是 D5.1a 下沉的 details 页
     // 交互/结果区段，均为客户端专用。
+    // `./community` 是 D5.1-P1 迁入的纯数据（QQ 群列表），消费方是页脚、公告与竞技场社群区
+    // 等客户端组件；它本身零 hook，但目前没有 RSC 消费者，按「无 RSC 消费者不登记为
+    // server-safe」的规则留在客户端专属列。`./announcement` 同为 D5.1-P1 新增：公告中心是
+    // 带轮询的客户端状态机，只在客户端挂载。
     expect(unlisted.sort()).toEqual([
       './ai-provider',
+      './announcement',
       './card-editor',
       './card-library',
       './character-card',
       './character-result',
       './client',
       './color-mode',
+      './community',
       './details-controls',
       './encyclopedia-views',
       './local-archive',
