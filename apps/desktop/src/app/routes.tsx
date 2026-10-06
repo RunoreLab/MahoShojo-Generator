@@ -13,6 +13,7 @@ import {
 
 import { projectTopBarAccount } from '../features/account/topbar-projection';
 import { useDesktopCloudSession } from '../features/account/use-desktop-cloud-session';
+import { useTopbarAvatar } from '../features/account/use-topbar-avatar';
 import { DesktopAnnouncementCenter } from '../features/announcements/desktop-announcement-center';
 import { ExternalLinksProvider, useExternalLinks } from '../features/external-links/external-links-provider';
 import { buildCapabilitySnapshot } from './capabilities';
@@ -107,7 +108,12 @@ const DesktopShellInner = () => {
   // `useLocation`（TanStack 对「渲染依赖路由状态」的官方入口）。
   const pathname = useLocation({ select: (location) => location.pathname });
   const { state: cloudSession, store: cloudSessionStore } = useDesktopCloudSession();
+  // 头像是有身份后的后台资料刷新（`cloud_me_profile` 固定路由）：不在启动
+  // 关键路径，取不到就回退首字母——共享顶栏的 avatarDataUrl 插槽本就如此。
+  const avatarDataUrl = useTopbarAvatar(cloudSession.account);
   const { openFixed } = useExternalLinks();
+
+  const topBarAccount = projectTopBarAccount(cloudSession);
 
   return (
     <AppShell
@@ -119,7 +125,11 @@ const DesktopShellInner = () => {
           pathname={pathname}
           capabilities={CAPABILITIES}
           logoSrc="/favicon.svg"
-          account={projectTopBarAccount(cloudSession)}
+          account={
+            topBarAccount.kind === 'signed-in'
+              ? { ...topBarAccount, avatarDataUrl }
+              : topBarAccount
+          }
           onNavigate={(href, event) => {
             // 共享顶栏渲染真实 `<a href>`，因此这里必须阻止默认行为，否则会触发一次整页加载。
             // Web 侧同理接 `router.push`——「宿主负责路由」这件事在两端是同一种形状。

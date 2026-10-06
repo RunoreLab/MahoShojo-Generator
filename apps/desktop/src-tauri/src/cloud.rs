@@ -72,6 +72,7 @@ const AUTHORIZE_PATH: &str = "/auth/desktop";
 const EXCHANGE_PATH: &str = "/api/auth/native/exchange";
 const GET_SESSION_PATH: &str = "/api/auth/get-session";
 const SIGN_OUT_PATH: &str = "/api/auth/sign-out";
+const ME_PROFILE_PATH: &str = "/api/me/profile";
 const DR_READINESS_PATH: &str = "/api/hosted/dr-readiness";
 const HOSTED_GENERATE_DETAILS_STREAM_PATH: &str = "/api/generate-magical-girl-details-stream";
 const HOSTED_ROUTE_DETAILS_STREAM: &str = "generate-magical-girl-details-stream";
@@ -898,6 +899,118 @@ pub async fn cloud_auth_status(
             Ok(CloudSessionStatus::Expired)
         }
     }
+}
+
+/// `/api/me/profile` 响应边界（P3 顶栏头像）。服务端头像已处理成 webp，
+/// 但 native 不给 renderer 传任意字符串：正文有界读取、data URL 形状与
+/// 字段长度双侧校验，违例一律 invalid-response。
+const ME_PROFILE_RESPONSE_MAX_BYTES: usize = 768 * 1024;
+const ME_PROFILE_AVATAR_MAX_CHARS: usize = 512 * 1024;
+/// 服务端 `MAX_SIGNATURE_LENGTH` 是 120；上限放宽到 1024 仅为防御性边界，
+/// 不是协议承诺。
+const ME_PROFILE_SIGNATURE_MAX_CHARS: usize = 1024;
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloudMeProfile {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signature: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avatar_data_url: Option<String>,
+}
+
+/// `data:image/<subtype>;base64,<payload>` 的形状门禁——只接受图片族 +
+/// base64 字母表，其余（`data:text/html`、`javascript:` 变体等）一律拒绝。
+fn is_image_data_url(url: &str) -> bool {
+    let Some(rest) = url.strip_prefix("data:image/") else {
+        return false;
+    };
+    let Some((subtype, payload)) = rest.split_once(";base64,") else {
+        return false;
+    };
+    !subtype.is_empty()
+        && subtype
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
+        && !payload.is_empty()
+        && payload
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '/' | '='))
+}
+
+/// `cloud_me_profile`：`/api/me/profile` 固定路由窄查询（顶栏头像/资料刷新）。
+///
+/// - renderer 拿不到 URL/method/cookie——全部是 native 常量与凭据存储；
+/// - 无本地会话直接 `not-authenticated`，不产生网络请求；服务端 401 与
+///   `cloud_auth_status` 同一语义（清本地凭据）；
+/// - 响应有界读取 + 形状校验；头像只投影 `data:image/*;base64,*`。
+pub async fn cloud_me_profile(
+    state: &CloudState,
+    secrets: &dyn SecretStore,
+) -> Result<CloudMeProfile, CloudError> {
+    let session = load_session(secrets)?.ok_or_else(|| {
+        CloudError::new(CloudErrorCode::NotAuthenticated, "该操作需要登录云端账号")
+    })?;
+
+    let response = authed_request(
+        &state.http,
+        reqwest::Method::GET,
+        &state.origin,
+        ME_PROFILE_PATH,
+        &session,
+    )
+    .timeout(SHORT_REQUEST_TIMEOUT)
+    .send()
+    .await
+    .map_err(|error| CloudError::network("账号资料查询", &error))?;
+
+    let status = response.status();
+    if status == reqwest::StatusCode::UNAUTHORIZED {
+        // 服务端明确否认会话：与 `cloud_auth_status` 一致清除本地凭据。
+        clear_session(secrets)?;
+        return Err(CloudError::new(
+            CloudErrorCode::NotAuthenticated,
+            "会话已被服务端否认",
+        ));
+    }
+    if !status.is_success() {
+        return Err(CloudError::new(
+            CloudErrorCode::ServerUnavailable,
+            format!("账号资料查询返回 {status}"),
+        ));
+    }
+
+    let body = read_bounded_json(response, "账号资料查询", ME_PROFILE_RESPONSE_MAX_BYTES).await?;
+    if body.get("success") != Some(&serde_json::Value::Bool(true)) {
+        return Err(CloudError::invalid_response("账号资料查询"));
+    }
+    let profile = body
+        .get("profile")
+        .ok_or_else(|| CloudError::invalid_response("账号资料查询"))?;
+
+    let signature = match profile.get("signature") {
+        None | Some(serde_json::Value::Null) => None,
+        Some(serde_json::Value::String(value))
+            if value.chars().count() <= ME_PROFILE_SIGNATURE_MAX_CHARS =>
+        {
+            Some(value.clone())
+        }
+        _ => return Err(CloudError::invalid_response("账号资料查询")),
+    };
+    let avatar_data_url = match profile.get("avatarDataUrl") {
+        None | Some(serde_json::Value::Null) => None,
+        Some(serde_json::Value::String(value))
+            if value.len() <= ME_PROFILE_AVATAR_MAX_CHARS && is_image_data_url(value) =>
+        {
+            Some(value.clone())
+        }
+        _ => return Err(CloudError::invalid_response("账号资料查询")),
+    };
+
+    Ok(CloudMeProfile {
+        signature,
+        avatar_data_url,
+    })
 }
 
 /// `cloud_sign_out`：本地凭据无条件删除；服务端注销失败只影响 `revoked` 标记。
@@ -2004,6 +2117,10 @@ mod tests {
         last_card_request: Mutex<Option<(String, String, Option<serde_json::Value>)>>,
         /// `Some((status, body))` 时卡库路由返回覆盖响应（测 401/错误分支）。
         card_response_override: Mutex<Option<(u16, String)>>,
+        /// 最近一次 `/api/me/profile` 请求的原始 head（断言 cookie 注入）。
+        last_me_profile_head: Mutex<Option<String>>,
+        /// `Some((status, body))` 时资料路由返回覆盖响应（测 401/越界分支）。
+        me_profile_override: Mutex<Option<(u16, String)>>,
         shutdown: CancellationToken,
     }
 
@@ -2022,6 +2139,8 @@ mod tests {
             hosted_json_response: Mutex::new(None),
             last_card_request: Mutex::new(None),
             card_response_override: Mutex::new(None),
+            last_me_profile_head: Mutex::new(None),
+            me_profile_override: Mutex::new(None),
             shutdown: CancellationToken::new(),
         });
         let handle = server.clone();
@@ -2155,6 +2274,28 @@ mod tests {
                     }
                 }
                 SIGN_OUT_PATH => json(serde_json::json!({"success": true})),
+                ME_PROFILE_PATH => {
+                    *self.last_me_profile_head.lock().unwrap() = Some(head.to_string());
+                    if let Some((status, override_body)) =
+                        self.me_profile_override.lock().unwrap().clone()
+                    {
+                        return MockResponse {
+                            status,
+                            headers: vec![(
+                                "Content-Type".to_string(),
+                                "application/json".to_string(),
+                            )],
+                            body: override_body,
+                        };
+                    }
+                    json(serde_json::json!({
+                        "success": true,
+                        "profile": {
+                            "signature": "圆焰",
+                            "avatarDataUrl": "data:image/webp;base64,QUJD"
+                        }
+                    }))
+                }
                 // 数据卡路由表里的所有 path：记录请求后回 `{"success": true}`，
                 // 覆盖响应优先（测 401 / 错误分支）。
                 path if CARD_LIBRARY_ROUTES.iter().any(|route| route.path == path) => {
@@ -2470,6 +2611,75 @@ mod tests {
         }
     }
 
+    #[test]
+    fn me_profile_projects_bounded_public_fields() {
+        rt().block_on(async {
+            let server = spawn_mock_server();
+            let state = CloudState::with_origin(&server.origin);
+            let secrets = MemorySecrets::new();
+            store_session(&secrets, &stored_test_session()).unwrap();
+
+            let profile = cloud_me_profile(&state, &secrets).await.unwrap();
+            assert_eq!(profile.signature.as_deref(), Some("圆焰"));
+            assert_eq!(
+                profile.avatar_data_url.as_deref(),
+                Some("data:image/webp;base64,QUJD")
+            );
+            // 会话 cookie 由 native 注入固定路由；renderer 从未经手。
+            let head = server.last_me_profile_head.lock().unwrap().clone().unwrap();
+            assert!(head.to_lowercase().contains("cookie:"));
+            assert!(head.contains("better-auth.session_token=native.tok"));
+        });
+    }
+
+    #[test]
+    fn me_profile_requires_session_and_401_clears_it() {
+        rt().block_on(async {
+            let server = spawn_mock_server();
+            let state = CloudState::with_origin(&server.origin);
+            let secrets = MemorySecrets::new();
+
+            // 无会话：fail closed，不产生网络请求。
+            let error = cloud_me_profile(&state, &secrets).await.unwrap_err();
+            assert_eq!(error.code, CloudErrorCode::NotAuthenticated);
+            assert!(server.last_me_profile_head.lock().unwrap().is_none());
+
+            // 服务端 401：与 `cloud_auth_status` 同语义清本地凭据。
+            store_session(&secrets, &stored_test_session()).unwrap();
+            *server.me_profile_override.lock().unwrap() =
+                Some((401, r#"{"error":"unauthorized"}"#.to_string()));
+            let error = cloud_me_profile(&state, &secrets).await.unwrap_err();
+            assert_eq!(error.code, CloudErrorCode::NotAuthenticated);
+            assert!(!secrets.exists(ACCOUNT_SESSION_REF).unwrap());
+        });
+    }
+
+    #[test]
+    fn me_profile_rejects_oversize_and_non_image_avatar() {
+        rt().block_on(async {
+            let server = spawn_mock_server();
+            let state = CloudState::with_origin(&server.origin);
+            let secrets = MemorySecrets::new();
+            store_session(&secrets, &stored_test_session()).unwrap();
+
+            // `data:text/html` 等非图片 data URL 一律 invalid-response——
+            // 顶栏 `<img>` 只消费 `data:image/*`。
+            *server.me_profile_override.lock().unwrap() = Some((
+                200,
+                r#"{"success":true,"profile":{"avatarDataUrl":"data:text/html;base64,PGI+"}}"#
+                    .to_string(),
+            ));
+            let error = cloud_me_profile(&state, &secrets).await.unwrap_err();
+            assert_eq!(error.code, CloudErrorCode::InvalidResponse);
+
+            // 越界正文同上。
+            *server.me_profile_override.lock().unwrap() =
+                Some((200, "x".repeat(ME_PROFILE_RESPONSE_MAX_BYTES + 8)));
+            let error = cloud_me_profile(&state, &secrets).await.unwrap_err();
+            assert_eq!(error.code, CloudErrorCode::InvalidResponse);
+        });
+    }
+
     /// fixture 一致性门禁：路径/协议常量与 `desktop-cloud.json` 同源。
     #[test]
     fn protocol_constants_match_shared_fixture() {
@@ -2486,6 +2696,10 @@ mod tests {
             Some(GET_SESSION_PATH)
         );
         assert_eq!(fixture["paths"]["signOut"].as_str(), Some(SIGN_OUT_PATH));
+        assert_eq!(
+            fixture["paths"]["meProfile"].as_str(),
+            Some(ME_PROFILE_PATH)
+        );
         assert_eq!(
             fixture["paths"]["hostedDrReadiness"].as_str(),
             Some(DR_READINESS_PATH)

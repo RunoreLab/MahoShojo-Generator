@@ -6,6 +6,7 @@
     "exchange": "/api/auth/native/exchange",
     "getSession": "/api/auth/get-session",
     "signOut": "/api/auth/sign-out",
+    "meProfile": "/api/me/profile",
     "hostedDrReadiness": "/api/hosted/dr-readiness",
     "hostedGenerateDetailsStream": "/api/generate-magical-girl-details-stream",
     "hostedGenerateDetails": "/api/generate-magical-girl-details",

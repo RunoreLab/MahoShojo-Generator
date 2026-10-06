@@ -4,6 +4,7 @@ import {
   DesktopCloudErrorCodeSchema,
   DesktopCloudLoginBeginResponseSchema,
   DesktopCloudLoginOutcomeSchema,
+  DesktopCloudMeProfileSchema,
   DesktopCloudOnlineStatusSchema,
   DesktopCloudSessionStatusSchema,
   DesktopCloudSignOutResultSchema,
@@ -17,6 +18,7 @@ import type {
   DesktopCloudErrorCode,
   DesktopCloudLoginBeginResponse,
   DesktopCloudLoginOutcome,
+  DesktopCloudMeProfile,
   DesktopCloudOnlineStatus,
   DesktopCloudSessionStatus,
   DesktopCloudSignOutResult,
@@ -40,6 +42,7 @@ export const CLOUD_LOGIN_BEGIN_COMMAND = 'cloud_login_begin' as const;
 export const CLOUD_LOGIN_AWAIT_COMMAND = 'cloud_login_await' as const;
 export const CLOUD_LOGIN_CANCEL_COMMAND = 'cloud_login_cancel' as const;
 export const CLOUD_CACHED_ACCOUNT_COMMAND = 'cloud_cached_account' as const;
+export const CLOUD_ME_PROFILE_COMMAND = 'cloud_me_profile' as const;
 export const CLOUD_AUTH_STATUS_COMMAND = 'cloud_auth_status' as const;
 export const CLOUD_SIGN_OUT_COMMAND = 'cloud_sign_out' as const;
 export const CLOUD_ONLINE_STATUS_COMMAND = 'cloud_online_status' as const;
@@ -172,6 +175,21 @@ export const readCachedCloudAccount = async (
     DesktopCloudCachedAccountSchema.nullable(),
     raw,
   );
+};
+
+/**
+ * 读取当前会话账号的资料投影（`/api/me/profile` 固定路由——native 注入会话
+ * cookie，renderer 拿不到 URL/method/凭据）。无会话返回 `not-authenticated`
+ * 错误；头像只允许 `data:image/*` data URL，其余形状桥层一律拦下。
+ */
+export const readMyProfile = async (invoke: InvokeFn): Promise<DesktopCloudMeProfile> => {
+  let raw: unknown;
+  try {
+    raw = await invoke(CLOUD_ME_PROFILE_COMMAND);
+  } catch (cause) {
+    throw toCloudError(CLOUD_ME_PROFILE_COMMAND, cause);
+  }
+  return parseResult(CLOUD_ME_PROFILE_COMMAND, DesktopCloudMeProfileSchema, raw);
 };
 
 /** 查询账号会话状态（含服务端确认；unreachable 不代表已注销）。 */

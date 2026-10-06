@@ -26,6 +26,9 @@ const { invokeMock, defaultInvokeImpl } = vi.hoisted(() => {
   const impl = async (command: string): Promise<unknown> => {
     if (command === 'cloud_cached_account') return null;
     if (command === 'cloud_auth_status') return { state: 'signed-out' as const };
+    if (command === 'cloud_me_profile') {
+      return { signature: '焰', avatarDataUrl: 'data:image/webp;base64,QUJD' };
+    }
     if (command === 'cloud_login_begin') {
       return { flowId: 'flow-1', authorizeUrl: 'https://example.test/auth/desktop?state=s' };
     }
@@ -62,6 +65,7 @@ vi.mock('@tauri-apps/api/window', () => ({
 // 且真的导航」与路由事实保持同一来源。
 import { createDesktopRouter } from '../src/app/router';
 import { resetDesktopCloudSessionStoreForTests } from '../src/features/account/use-desktop-cloud-session';
+import { resetTopbarAvatarForTests } from '../src/features/account/use-topbar-avatar';
 import { resetDesktopAnnouncementsStoreForTests } from '../src/features/announcements/use-desktop-announcements';
 
 let container: HTMLDivElement;
@@ -77,6 +81,7 @@ beforeEach(() => {
   invokeMock.mockClear();
   invokeMock.mockImplementation(defaultInvokeImpl);
   resetDesktopCloudSessionStoreForTests();
+  resetTopbarAvatarForTests();
   resetDesktopAnnouncementsStoreForTests();
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -173,6 +178,14 @@ describe('desktop shared topbar', () => {
     // 验证仍在途：用户名已经挂上，同时 auth_status 确已后台发起。
     expect(container.querySelector('header.global-topbar')?.textContent).toContain('homura');
     expect(invokeMock.mock.calls.map((call) => call[0])).toContain('cloud_auth_status');
+
+    // 有身份后头像走 `cloud_me_profile` 固定路由后台刷新——`<img>` 以
+    // `data:image/*` 注入顶栏；取不到时回退首字母，不阻塞身份显示。
+    await vi.waitFor(() => {
+      expect(
+        container.querySelector('header.global-topbar img[src^="data:image/"]'),
+      ).not.toBeNull();
+    });
 
     releaseStatus?.({ state: 'unreachable' });
     await settle();
@@ -303,12 +316,12 @@ describe('desktop shared topbar', () => {
 
     await click(accountButton());
 
-    // 挂载 cached 读 → 点击 → status → begin → await → signed-in：
-    // 整条链路都是这一次点按的后果（bootstrap 的凭据读取发生在挂载时，不是点击）。
-    // 公告窄通道的启动检查与登录链路无关，断言只看 cloud_* 命令的相对顺序。
+    // 挂载 cached 读 → 点击 → status → begin → await → signed-in → 头像资料
+    // 后台刷新：整条链路都是这一次点按的后果（bootstrap 的凭据读取发生在挂载时，
+    // 不是点击）。公告窄通道的启动检查与登录链路无关，断言只看 cloud_* 顺序。
     expect(
       invokeMock.mock.calls.map((call) => call[0]).filter((command) => command.startsWith('cloud_')),
-    ).toEqual(['cloud_cached_account', 'cloud_auth_status', 'cloud_login_begin', 'cloud_login_await']);
+    ).toEqual(['cloud_cached_account', 'cloud_auth_status', 'cloud_login_begin', 'cloud_login_await', 'cloud_me_profile']);
     // 顶栏投影到 active：显示用户名，且出现「退出登录」入口（菜单 DOM 常挂在 hover
     // group 里，不需要先悬停就能断言）。
     expect(container.querySelector('header.global-topbar')?.textContent).toContain('homura');

@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   CANCEL_HOSTED_AI_COMMAND,
   CLOUD_CACHED_ACCOUNT_COMMAND,
+  CLOUD_ME_PROFILE_COMMAND,
   CLOUD_LOGIN_AWAIT_COMMAND,
   CLOUD_LOGIN_BEGIN_COMMAND,
   CLOUD_LOGIN_CANCEL_COMMAND,
@@ -19,6 +20,7 @@ import {
   probeCloudOnlineStatus,
   readCachedCloudAccount,
   readCloudAuthStatus,
+  readMyProfile,
   signOutCloud,
   streamHostedAi,
 } from '../src/platform/cloud-bridge';
@@ -92,6 +94,26 @@ describe('cloud bridge', () => {
       code: 'bridge-invalid',
       command: CLOUD_CACHED_ACCOUNT_COMMAND,
     });
+  });
+
+  it('me profile：资料投影过契约；非图片头像与多余字段一律拦下', async () => {
+    const profile = { signature: '圆焰', avatarDataUrl: 'data:image/webp;base64,QUJD' };
+    const invoke = vi.fn(async () => profile);
+    await expect(readMyProfile(invoke)).resolves.toEqual(profile);
+    expect(invoke).toHaveBeenCalledWith(CLOUD_ME_PROFILE_COMMAND);
+
+    // `data:text/html` 等非图片 data URL 不得进入顶栏 `<img>`。
+    const htmlAvatar = vi.fn(async () => ({
+      avatarDataUrl: 'data:text/html;base64,PGI+',
+    }));
+    await expect(readMyProfile(htmlAvatar)).rejects.toMatchObject({
+      code: 'bridge-invalid',
+      command: CLOUD_ME_PROFILE_COMMAND,
+    });
+
+    // strict schema：夹带任何额外字段（凭据/任意键）按违例拦下。
+    const leaky = vi.fn(async () => ({ ...profile, cookie: 'session=tok' }));
+    await expect(readMyProfile(leaky)).rejects.toMatchObject({ code: 'bridge-invalid' });
   });
 
   it('status：四种状态投影都过契约；unreachable 不带账号', async () => {

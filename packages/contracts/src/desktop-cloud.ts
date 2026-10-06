@@ -229,6 +229,32 @@ export const DesktopCloudCachedAccountSchema = z.object({
 }).strict();
 export type DesktopCloudCachedAccount = z.infer<typeof DesktopCloudCachedAccountSchema>;
 
+/**
+ * `cloud_me_profile` 的字段边界（native 侧另有独立形状校验）。
+ * 服务端 `MAX_SIGNATURE_LENGTH` 是 120，这里放宽到 1024 仅作防御性上限；
+ * 头像只接受 `data:image/*` 的 data URL，长度有界。
+ */
+export const DESKTOP_ME_PROFILE_SIGNATURE_MAX_CHARS = 1024;
+export const DESKTOP_ME_PROFILE_AVATAR_MAX_CHARS = 512 * 1024;
+
+/**
+ * `cloud_me_profile` 的返回：当前会话账号的资料投影（`/api/me/profile`
+ * 固定路由，native 注入会话 cookie）。`avatarDataUrl` 供顶栏直接使用；
+ * 无头像/字段缺省为 `undefined`，由 UI 回退首字母。
+ */
+export const DesktopCloudMeProfileSchema = z.object({
+  signature: z
+    .string()
+    .max(DESKTOP_ME_PROFILE_SIGNATURE_MAX_CHARS)
+    .optional(),
+  avatarDataUrl: z
+    .string()
+    .max(DESKTOP_ME_PROFILE_AVATAR_MAX_CHARS)
+    .startsWith('data:image/')
+    .optional(),
+}).strict();
+export type DesktopCloudMeProfile = z.infer<typeof DesktopCloudMeProfileSchema>;
+
 /** 登出结果：本地凭据无条件删除，`revoked` 只反映服务端会话是否同步作废。 */
 export const DesktopCloudSignOutResultSchema = z.object({
   revoked: z.boolean(),

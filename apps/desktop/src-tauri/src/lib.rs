@@ -978,6 +978,16 @@ fn cloud_cached_account(
     cloud::cloud_cached_account(secrets.inner().as_ref())
 }
 
+/// 当前会话账号的资料投影（`/api/me/profile` 固定路由）：顶栏头像与资料
+/// 刷新共用。native 注入会话 cookie，renderer 拿不到 URL 或凭据。
+#[tauri::command]
+async fn cloud_me_profile(
+    cloud: State<'_, cloud::CloudState>,
+    secrets: State<'_, SharedSecretStore>,
+) -> Result<cloud::CloudMeProfile, cloud::CloudError> {
+    cloud::cloud_me_profile(&cloud, secrets.inner().as_ref()).await
+}
+
 /// 查询账号会话状态：signed-out / active / expired / unreachable。
 /// `expired` 表示服务端明确拒绝会话（本地凭据随之清除）；`unreachable` 只是
 /// 服务暂时联系不上，凭据保留。
@@ -1259,6 +1269,7 @@ pub fn run() {
             cloud_login_await,
             cloud_login_cancel,
             cloud_cached_account,
+            cloud_me_profile,
             cloud_auth_status,
             cloud_sign_out,
             cloud_online_status,
