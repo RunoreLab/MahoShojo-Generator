@@ -101,9 +101,14 @@ describe('workspace dependency boundaries', () => {
       'apps/web/src/index.ts': [
         "import magicalQuestionnaire from '../public/questionnaires/presets/magical-girl-default.json';",
         "import flowers from '@/public/flowers.json';",
+        // 整个 questionnaires/presets/ 目录与 languages.json 都已是生成物（canshou 随
+        // 问卷迁入 content/ 后，目录级与根文件级规则必须同样拦下它们）。
         "import canshouQuestionnaire from '../public/questionnaires/presets/canshou-default.json';",
+        "import languages from '@/public/languages.json';",
+        "import appOwnedData from '@/public/journalists.json';",
         "import canonicalQuestionnaire from '../../../content/questionnaires/presets/magical-girl-default.json';",
-        'void magicalQuestionnaire; void flowers; void canshouQuestionnaire; void canonicalQuestionnaire;',
+        'void magicalQuestionnaire; void flowers; void canshouQuestionnaire;',
+        'void languages; void appOwnedData; void canonicalQuestionnaire;',
       ].join('\n'),
     });
 
@@ -111,10 +116,12 @@ describe('workspace dependency boundaries', () => {
       (violation) => violation.rule === 'MONO-006-GENERATED-PUBLIC-IMPORT',
     );
 
-    expect(violations).toHaveLength(2);
+    expect(violations).toHaveLength(4);
     expect(violations.map((violation) => violation.module)).toEqual([
       '../public/questionnaires/presets/magical-girl-default.json',
       '@/public/flowers.json',
+      '../public/questionnaires/presets/canshou-default.json',
+      '@/public/languages.json',
     ]);
   });
 

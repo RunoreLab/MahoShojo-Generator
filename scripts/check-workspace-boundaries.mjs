@@ -792,7 +792,20 @@ function generatorOwnedPublicImport(rootDirectory, sourceFile, moduleSpecifier, 
   if (relativeTarget.split('/')[0] !== 'apps' || publicDirectory !== 'public') return null;
 
   const publicPath = publicPathParts.join('/');
-  if (publicPath === 'encyclopedia' || publicPath.startsWith('encyclopedia/')) return publicPath;
+  // 生成器持有的内容分三层，import 拦截必须覆盖全部三层而不只是文件级清单：
+  // GENERATED_PUBLIC_ROOT_FILES（languages.json/announcements.json 等共享根 JSON）、
+  // GENERATED_PUBLIC_DIRECTORIES（encyclopedia/、questionnaires/presets/ 等整目录）、
+  // 以及 pathsByApp 里按 app 登记的散文件（flowers.json、品牌资源）。只查文件级会漏掉
+  // `public/questionnaires/presets/canshou-default.json` 这类"后迁入 content/ 的预设"——
+  // 生成物在测试/lint 流程里并不存在，import 它会在干净检出上解析失败。
+  if (GENERATED_PUBLIC_ROOT_FILES.includes(publicPath)) return publicPath;
+  if (
+    GENERATED_PUBLIC_DIRECTORIES.some(
+      (directory) => publicPath === directory || publicPath.startsWith(`${directory}/`),
+    )
+  ) {
+    return publicPath;
+  }
   return pathsByApp.get(appName)?.has(publicPath) ? publicPath : null;
 }
 
