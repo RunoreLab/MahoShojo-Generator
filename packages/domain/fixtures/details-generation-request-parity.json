@@ -37,6 +37,15 @@
       "questions": [
         { "id": "L-1", "question": "随手写点什么。", "type": "text", "required": false, "maxLength": 50 }
       ]
+    },
+    "parity-edge": {
+      "id": "parity-edge",
+      "kind": "magical-girl",
+      "title": "对拍·边缘问卷",
+      "nativeAllowed": true,
+      "questions": [
+        { "id": "E-1", "question": "写一句誓约。", "type": "select", "required": true, "allowCustom": false, "maxLength": null }
+      ]
     }
   },
   "cases": [
@@ -202,6 +211,36 @@
         "builtin:parity-preset::P-2": "彼岸花"
       },
       "expectedError": "请选择一个可用选项"
+    },
+    {
+      "id": "closed-no-options-free-text",
+      "note": "allowCustom:false 但未声明任何选项：normalizer 接受此形态，Web 既有 UI 对该题回退为文本输入。封闭校验只作用于真实存在的非空选项集，自由文本照常进入请求体（D5.1a-r2 复审）；否则 UI 放行的回答会在提交时才报错。",
+      "selections": [
+        { "ref": "parity-edge", "source": "preset", "selectionId": "builtin:parity-edge", "useLore": true }
+      ],
+      "answersByKey": {
+        "builtin:parity-edge::E-1": "以花与誓言之名"
+      },
+      "expectedBody": {
+        "answers": [
+          { "question": "写一句誓约。", "answer": "以花与誓言之名", "questionId": "E-1", "questionnaireId": "parity-edge", "questionnaireTitle": "对拍·边缘问卷" }
+        ],
+        "questionnaireSelections": [
+          { "source": "preset", "kind": "magical-girl", "presetId": "parity-edge" }
+        ],
+        "questionnaires": [
+          {
+            "id": "parity-edge",
+            "title": "对拍·边缘问卷",
+            "kind": "magical-girl",
+            "questions": [
+              { "id": "E-1", "question": "写一句誓约。", "required": true, "maxLength": null }
+            ]
+          }
+        ],
+        "allowNativeSignature": true,
+        "language": "zh-CN"
+      }
     }
   ]
 }

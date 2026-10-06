@@ -176,6 +176,11 @@ function DetailsForm({ session }: { session: DetailsSession }) {
   const flowItem = flow[currentIndex];
   const question = flowItem?.question;
   const answer = flowItem ? answersByKey[flowItem.key] ?? '' : '';
+  // 与 Web DetailsPage 同一口径：封闭题（allowCustom:false）没有任何可点选
+  // 选项时回退为文本输入；灵感提示只在文本输入可用时出现——点击 suggestion
+  // 即写入自由文本，封闭题展示它会产生提交时必遭拒绝的答案（D5.1a-r2）。
+  const questionHasOptions = (question?.options?.length ?? 0) > 0;
+  const showTextInput = question?.allowCustom !== false || !questionHasOptions;
   const updateAnswer = (value: string) => {
     if (!flowItem) return;
     session.updateDraft({ ...state.draft, answers: { ...answersByKey, [flowItem.key]: value } });
@@ -364,8 +369,8 @@ function DetailsForm({ session }: { session: DetailsSession }) {
         {flowItem && question && questionnaire && <QuestionnaireQuestionPanel
           theme={DETAILS_QUESTIONNAIRE_THEME} progressLabel={`第 ${currentIndex + 1} / ${flow.length} 题`} progressPercent={(currentIndex + 1) / flow.length * 100}
           questionText={question.question} questionnaireTitle={questionnaire.title} noticeText="至少回答一题即可生成，其他题目可以跳过。" helperText={question.helperText}
-          isRequired={question.required === true} skipText={question.required === true ? '本题为必答' : '可跳过本题'} options={question.options} optionsHintText="点击选项填写回答" onOptionSelect={updateAnswer} suggestions={question.suggestions} onSuggestionSelect={updateAnswer}
-          showTextInput={question.allowCustom !== false} answer={answer} onAnswerChange={updateAnswer} placeholder={question.placeholder} answerLength={answer.trim().length}
+          isRequired={question.required === true} skipText={question.required === true ? '本题为必答' : '可跳过本题'} options={question.options} optionsHintText="点击选项填写回答" onOptionSelect={updateAnswer} suggestions={showTextInput ? question.suggestions : undefined} onSuggestionSelect={updateAnswer}
+          showTextInput={showTextInput} answer={answer} onAnswerChange={updateAnswer} placeholder={question.placeholder} answerLength={answer.trim().length}
           showLimitLabel limitLabel={`建议不超过 ${getAnswerLimitInfo(question.maxLength).limit ?? 500} 字，不限制生成`} isOverLimit={isAnswerOverLimit(answer, question.maxLength)} overLimitText="回答超过建议长度，仍可生成未签名角色卡。"
           prevLabel="上一题" nextButtonContent="下一题" onPrev={() => setQuestionIndex((index) => Math.max(0, index - 1))}
           onNext={() => {

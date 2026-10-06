@@ -88,6 +88,14 @@ describe('Desktop default questionnaire', () => {
     }
   });
 
+  it.each([undefined, []])('allowCustom:false + options=%j 回退为文本题，自由回答照常收集', async (options) => {
+    // Web 既有口径：封闭题没有任何可点选选项时显示文本框；投影与 UI 一致，
+    // 不把一个无法点选的题目变成提交时才报错的陷阱（D5.1a-r2）。
+    const parsed = await loadFixture(fixture({ allowCustom: false, options }));
+    const flow = buildDetailsFlowItems(parsed);
+    expect(buildDetailsAnswers(flow, { [flow[0].key]: ' 自定义誓约 ' })[0].answer).toBe('自定义誓约');
+  });
+
   it('allows accepted suggestions longer than the editing hint to be generated intact', async () => {
     const suggestion = '曾经为了守护同伴，选择承担所有后果。';
     const parsed = await loadFixture(fixture({ maxLength: 5, suggestions: [suggestion] }));

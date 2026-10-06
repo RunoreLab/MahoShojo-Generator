@@ -146,6 +146,13 @@ const isQuestionnaireOptionAllowed = (
  * 写入任意字符串——投影在收集阶段直接拒绝，而不是把非法答案带进提交
  * 载荷（D5.1a-r1 复审）。
  *
+ * 封闭校验只在题目真实声明了非空选项集时生效：`allowCustom === false`
+ * 但没有任何选项的问卷形态为 normalizer 所接受，Web 既有 UI 对它回退为
+ * 文本输入（`showTextInput = allowCustom || !hasOptions`）——投影沿用同一
+ * 口径按文本题收集自由回答，而不是在提交时才报「请选择一个可用选项」
+ * （D5.1a-r2 复审）。若未来要求 `allowCustom === false` 必须携带选项，
+ * 应在 normalize/schema 阶段拒绝问卷，而不是让 UI 放行后提交报错。
+ *
  * Web `/details` 与 Desktop `buildDetailsAnswers` 共用同一投影，保证同源
  * `answersByKey` 在两宿主产出顺序与字段完全一致的 `answers`，且对非法
  * 封闭题答案同样拒绝（D5.1a-r1）。
@@ -167,7 +174,12 @@ export const collectQuestionnaireFlowAnswerItems = <T extends {
   flow.forEach((item) => {
     const raw = answersByKey[item.key];
     const answer = typeof raw === 'string' ? raw.trim() : '';
-    if (answer && item.question.allowCustom === false && !isQuestionnaireOptionAllowed(item.question.options, answer)) {
+    if (
+      answer
+      && item.question.allowCustom === false
+      && (item.question.options?.length ?? 0) > 0
+      && !isQuestionnaireOptionAllowed(item.question.options, answer)
+    ) {
       throw new Error(`“${item.question.question}”请选择一个可用选项。`);
     }
   });
