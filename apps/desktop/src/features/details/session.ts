@@ -1,350 +1,49 @@
-import type { AIReasoningEnvelope } from '@mahoshojo/contracts/ai-reasoning';
-import { normalizeQuestionnaireDefinition } from '@mahoshojo/domain/questionnaire-definition';
-import {
-  normalizeStoredQuestionnaireSelection,
-  questionnaireSelectionScopeId,
-  resolveQuestionnaireSelectionNativeAllowedFallback,
-  type QuestionnaireSelection,
-} from '@mahoshojo/domain/questionnaire-selection';
-import { deriveLocalDataCardIdV1, digestLocalCardPayloadV1 } from '@mahoshojo/local-library/digest';
-import { LocalCardRecordV1Schema, type LocalCardExecutionProvenance } from '@mahoshojo/local-library/record';
 import type { CardRepository } from '@mahoshojo/local-library/repository';
-import type { DesktopAiExecutionOptions } from '../../platform/desktop-ai-execution';
 import {
-  DetailsGenerationError,
   executeDetailsGeneration,
   normalizeMagicalGirlDetailsResultCard,
-  type DetailsGenerationInput,
   type DetailsGenerationIntent,
-  type DetailsResultCardData,
-  type DetailsResultCardKind,
 } from './generation';
 import { BUILTIN_DEFAULT_QUESTIONNAIRE_ID } from './questionnaire';
+import {
+  QuestionnaireGenerationSession,
+  type QuestionnaireDraft,
+  type QuestionnaireDraftStorage,
+  type QuestionnaireExecutor,
+  type QuestionnaireSessionFamily,
+  type QuestionnaireSessionState,
+} from '../questionnaire/session';
 
 export const DETAILS_DRAFT_KEY = 'mahoshojo.desktop.details.draft.v1';
-const MAX_DRAFT_CHARACTERS = 4 * 1024 * 1024;
-const STREAM_DRAFT_SAVE_INTERVAL_MS = 1000;
-export interface DetailsDraftStorage {
-  getItem(key: string): string | null;
-  setItem(key: string, value: string): void;
-  removeItem(key: string): void;
-}
-export interface DetailsDraft {
-  answers: Record<string, string>;
-  language: string;
-  /** 多问卷选择集（含 Lore 开关与来源元数据；与 Web 草稿 `questionnaireSelections` 同口径）。 */
-  questionnaireSelections?: QuestionnaireSelection[];
-  /** 「允许同时回答多份问卷」偏好（与 Web 草稿 `allowMultipleQuestionnaires` 同口径）。 */
-  allowMultipleQuestionnaires?: boolean;
-  /** 保存方式偏好（与 Web 草稿字段同名；缺省由页面按终端推导）。 */
-  imageSaveMode?: 'download' | 'modal';
-  jsonSaveMode?: 'download' | 'text';
-  /** 「设定说明」抽屉展开状态。 */
-  showDetails?: boolean;
-}
-type Card = DetailsResultCardData;
-type CardKind = DetailsResultCardKind;
-type Mode = DetailsGenerationIntent['mode'];
-type Phase = 'idle' | 'generating' | 'completed' | 'failed' | 'cancelled' | 'uncertain';
-export interface DetailsSessionState {
-  draft: DetailsDraft;
-  pendingRestore: boolean;
-  draftError: string | null;
-  draftSaved: boolean;
-  phase: Phase;
-  rawText: string;
-  card: Card | null;
-  cardKind: CardKind;
-  /** 当前卡来自可编辑 localStorage 草稿恢复（而非本次会话的新响应），签名可信度要降级表述。 */
-  resultRestored: boolean;
-  reasoning: AIReasoningEnvelope | null;
-  message: string | null;
-  saving: boolean;
-  saveStatus: 'idle' | 'saved' | 'already-present' | 'failed';
-  saveError: string | null;
-}
-interface StoredDraft extends DetailsDraft {
-  version: 1;
-  // `cardKind` 在 D5.1a 引入；缺省按 'magical-girl' 解析（此前只有一种卡）。
-  output?: { mode: Mode; cardKind?: CardKind; card: Card | null; rawText: string; phase: Exclude<Phase, 'generating'> };
-}
-const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
-const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
-const EXECUTION_MODES: readonly Mode[] = ['direct-local', 'direct-remote', 'hosted-stream', 'hosted-json'];
-const isAnswerList = (value: unknown): boolean =>
-  Array.isArray(value) && value.every((answer) => object(answer) && typeof answer.question === 'string' && typeof answer.answer === 'string');
-const validateCard = (kind: CardKind, value: unknown): Card => {
-  if (kind === 'general') {
-    if (!object(value) || typeof value.name !== 'string' || typeof value.content !== 'string') throw new Error('角色卡损坏');
-    if (value.userAnswers !== undefined && !isAnswerList(value.userAnswers)) throw new Error('角色卡无问卷记录');
-    return { ...value };
-  }
-  const card = normalizeMagicalGirlDetailsResultCard(value);
-  if (!isAnswerList(card.userAnswers)) throw new Error('角色卡无问卷记录');
-  return card;
+
+export type DetailsDraftStorage = QuestionnaireDraftStorage;
+export type DetailsDraft = QuestionnaireDraft;
+export type DetailsSessionState = QuestionnaireSessionState<'magical-girl'>;
+
+const DETAILS_SESSION_FAMILY: QuestionnaireSessionFamily<'magical-girl', DetailsGenerationIntent> = {
+  draftKey: DETAILS_DRAFT_KEY,
+  builtinQuestionnaireId: BUILTIN_DEFAULT_QUESTIONNAIRE_ID,
+  draftFallbackKind: 'magical-girl',
+  structuredCardKind: 'magical-girl',
+  structuredTitleField: 'codename',
+  structuredTitleFallback: '未命名魔法少女',
+  normalizeStructuredCard: normalizeMagicalGirlDetailsResultCard,
+  executeGeneration: executeDetailsGeneration,
 };
-const parseDraft = (raw: string): StoredDraft => {
-  if (raw.length > MAX_DRAFT_CHARACTERS) throw new Error('草稿超过大小限制');
-  const value: unknown = JSON.parse(raw);
-  if (!object(value) || value.version !== 1 || !object(value.answers) || typeof value.language !== 'string' || !Object.values(value.answers).every((answer) => typeof answer === 'string')) throw new Error('草稿版本不受支持或内容损坏');
-  const draft: StoredDraft = { version: 1, answers: value.answers as Record<string, string>, language: value.language };
-  // 选择集逐条经共源归一化：损坏条目丢弃而不是让整个草稿报废（D5.1-P2）。
-  const seenScopes = new Set<string>();
-  const questionnaireSelections = (Array.isArray(value.questionnaireSelections) ? value.questionnaireSelections : [])
-    .map((entry) => normalizeStoredQuestionnaireSelection(entry, {
-      normalize: normalizeQuestionnaireDefinition,
-      resolveFallback: (rawQuestionnaire, source) => {
-        const record = rawQuestionnaire && typeof rawQuestionnaire === 'object'
-          ? rawQuestionnaire as Record<string, unknown>
-          : {};
-        return {
-          fallbackKind: record.kind === 'canshou' ? 'canshou' : 'magical-girl',
-          fallbackId: typeof record.id === 'string' ? record.id : 'questionnaire',
-          fallbackTitle: typeof record.title === 'string' ? record.title : '未命名问卷',
-          nativeAllowed: resolveQuestionnaireSelectionNativeAllowedFallback(source, rawQuestionnaire),
-        };
-      },
-    }))
-    .filter((selection): selection is QuestionnaireSelection => selection !== null)
-    // 篡改的草稿可以把本地副本（wire 'upload'）内嵌 questionnaire.nativeAllowed 写成 true：
-    // 归一化优先采纳声明值，这里与卡库选择器对本地卡的强制口径保持一致（D5.1-P2-r1）。
-    .map((selection) => selection.source === 'upload'
-      ? { ...selection, questionnaire: { ...selection.questionnaire, nativeAllowed: false } }
-      : selection)
-    // 同一作用域的重复选择会让两份问卷的答案键互相覆盖——保留第一条，丢弃其余。
-    .filter((selection) => {
-      const scope = questionnaireSelectionScopeId(selection);
-      if (seenScopes.has(scope)) return false;
-      seenScopes.add(scope);
-      return true;
-    });
-  if (questionnaireSelections.length) draft.questionnaireSelections = questionnaireSelections;
-  if (value.allowMultipleQuestionnaires === true) draft.allowMultipleQuestionnaires = true;
-  if (value.imageSaveMode === 'download' || value.imageSaveMode === 'modal') draft.imageSaveMode = value.imageSaveMode;
-  if (value.jsonSaveMode === 'download' || value.jsonSaveMode === 'text') draft.jsonSaveMode = value.jsonSaveMode;
-  if (value.showDetails === true) draft.showDetails = true;
-  if (value.output !== undefined) {
-    const output = value.output;
-    if (!object(output) || !EXECUTION_MODES.includes(output.mode as Mode) || typeof output.rawText !== 'string' || !['idle', 'completed', 'failed', 'cancelled', 'uncertain'].includes(String(output.phase))) throw new Error('草稿输出损坏');
-    const cardKind: CardKind = output.cardKind === 'general' ? 'general' : 'magical-girl';
-    const card = output.card === null ? null : validateCard(cardKind, output.card);
-    // 签名只可能来自 hosted 非流式通路；direct/流式草稿中混入的 signature 一律剥除。
-    if (card && output.mode !== 'hosted-json' && 'signature' in card) delete card.signature;
-    if ((output.phase === 'completed') !== (card !== null)) throw new Error('草稿结果状态不一致');
-    draft.output = { mode: output.mode as Mode, cardKind, card, rawText: output.rawText, phase: output.phase as Exclude<Phase, 'generating'> };
-  }
-  return draft;
-};
+
 /**
- * 「残余草稿」：自动写回的空壳——没有非空回答、没有生成结果或中断正文、
- * 选择集恰为默认内置问卷。它由「进页面即注入默认选择并落盘」产生，不携带
- * 任何用户内容；对这类草稿弹「发现上次草稿」属于噪声。这类草稿直接静默应用，
- * 而不是走 pending 门禁（D5.1-P2-r1）。注意判定只看用户内容——残留的偏好字段
- * （语言/保存方式等）仍照常恢复。
+ * /details 会话（D5.1-G1 泛化）：草稿门禁、取消/uncertain 投影与保存
+ * provenance 的通用实现上移至 `features/questionnaire/session.ts`；
+ * 本类只注入 magical-girl 家族参数，API 与既有导出面保持兼容。
  */
-const isResidueDraft = (draft: StoredDraft): boolean => {
-  if (Object.values(draft.answers).some((answer) => answer.trim() !== '')) return false;
-  const output = draft.output;
-  if (output !== undefined && (output.phase !== 'idle' || output.card !== null || output.rawText !== '')) return false;
-  const selections = draft.questionnaireSelections ?? [];
-  return selections.length <= 1
-    && selections.every(
-      (selection) => selection.source === 'preset' && selection.questionnaire.id === BUILTIN_DEFAULT_QUESTIONNAIRE_ID,
-    );
-};
-
-/** 执行模式 → 本地卡库 provenance execution（hosted 两通路统一记 'hosted'）。 */
-const modeExecutionProvenance = (mode: Mode): LocalCardExecutionProvenance =>
-  mode === 'hosted-stream' || mode === 'hosted-json' ? 'hosted' : mode;
-
-/** 单个页面生命周期中的意图所有者；同步上锁，异步完成后才释放。 */
-export class DetailsSession {
-  private state: DetailsSessionState;
-  private listeners = new Set<() => void>();
-  private pending: StoredDraft | null = null;
-  private blocked = false;
-  private disposed = false;
-  private controller: AbortController | null = null;
-  private mode: Mode = 'direct-local';
-  private draftSaveTimer: ReturnType<typeof setTimeout> | null = null;
-  constructor(private readonly dependencies: {
+export class DetailsSession extends QuestionnaireGenerationSession<'magical-girl', DetailsGenerationIntent> {
+  constructor(dependencies: {
     storage: DetailsDraftStorage;
     repository: CardRepository;
     initialDraft: DetailsDraft;
-    execute?: typeof executeDetailsGeneration;
+    execute?: QuestionnaireExecutor<DetailsGenerationIntent, 'magical-girl'>;
     requestId?: () => string;
   }) {
-    this.state = { draft: clone(dependencies.initialDraft), pendingRestore: false, draftError: null, draftSaved: true, phase: 'idle', rawText: '', card: null, cardKind: 'magical-girl', resultRestored: false, reasoning: null, message: null, saving: false, saveStatus: 'idle', saveError: null };
-    try {
-      const raw = dependencies.storage.getItem(DETAILS_DRAFT_KEY);
-      if (raw !== null) {
-        const saved = parseDraft(raw);
-        // 残余草稿（空壳自动写回）直接应用，不占用「恢复/清除」门禁。
-        if (isResidueDraft(saved)) this.applyRestoredDraft(saved, false);
-        else { this.pending = saved; this.state.pendingRestore = true; }
-      }
-    } catch {
-      this.blocked = true;
-      this.state.draftSaved = false;
-      this.state.draftError = '无法读取草稿，可能已损坏或版本不受支持。确认清除前不会覆盖原数据。';
-    }
+    super(DETAILS_SESSION_FAMILY, dependencies);
   }
-  getSnapshot = (): DetailsSessionState => this.state;
-  isBusy = (): boolean => this.controller !== null || this.state.saving;
-  hasUnsavedResult = (): boolean => this.state.card !== null && this.state.saveStatus !== 'saved' && this.state.saveStatus !== 'already-present';
-  /** Corrupt or future-version storage is preserved until the user explicitly clears it. */
-  isDraftBlocked = (): boolean => this.blocked;
-  subscribe = (listener: () => void): (() => void) => { this.listeners.add(listener); return () => this.listeners.delete(listener); };
-  private publish(patch: Partial<DetailsSessionState>): void {
-    if (this.disposed) return;
-    this.state = { ...this.state, ...patch };
-    this.listeners.forEach((listener) => listener());
-  }
-  updateDraft(draft: DetailsDraft): void {
-    if (this.disposed || this.blocked || this.state.pendingRestore || this.controller || this.state.saving) return;
-    this.publish({ draft: clone(draft), draftSaved: false });
-    this.retryDraftSave();
-  }
-  restoreDraft(): void {
-    if (this.disposed || !this.pending) return;
-    const saved = this.pending;
-    this.pending = null;
-    this.applyRestoredDraft(saved, true);
-  }
-  /**
-   * 应用一份已解析草稿。`announce` 控制「已恢复草稿」提示：显式点按「恢复草稿」
-   * 时如实播报；构造期的残余草稿静默应用，不制造提示噪声。
-   */
-  private applyRestoredDraft(saved: StoredDraft, announce: boolean): void {
-    if (saved.output) this.mode = saved.output.mode;
-    const restoredDraft: DetailsDraft = {
-      answers: clone(saved.answers),
-      language: saved.language,
-      ...(saved.questionnaireSelections?.length ? { questionnaireSelections: clone(saved.questionnaireSelections) } : {}),
-      ...(saved.allowMultipleQuestionnaires ? { allowMultipleQuestionnaires: true } : {}),
-      ...(saved.imageSaveMode ? { imageSaveMode: saved.imageSaveMode } : {}),
-      ...(saved.jsonSaveMode ? { jsonSaveMode: saved.jsonSaveMode } : {}),
-      ...(saved.showDetails ? { showDetails: true } : {}),
-    };
-    this.publish({ draft: restoredDraft, pendingRestore: false, draftSaved: true, phase: saved.output?.phase ?? 'idle', card: saved.output?.card ?? null, cardKind: saved.output?.card ? saved.output.cardKind ?? 'magical-girl' : 'magical-girl', resultRestored: saved.output?.card != null, reasoning: null, rawText: saved.output?.rawText ?? '', message: !announce ? null : saved.output?.phase === 'uncertain' ? '已恢复草稿；上次生成的服务器执行结果未能确认，不会自动重新生成。' : saved.output ? '已恢复草稿；不会自动重新生成。' : null });
-  }
-  discardDraft(): void {
-    if (this.disposed || this.controller || this.state.saving) return;
-    try {
-      this.dependencies.storage.removeItem(DETAILS_DRAFT_KEY);
-      this.pending = null;
-      this.blocked = false;
-      this.publish({ draft: clone(this.dependencies.initialDraft), pendingRestore: false, draftError: null, draftSaved: true, phase: 'idle', rawText: '', card: null, cardKind: 'magical-girl', resultRestored: false, reasoning: null, message: null, saveStatus: 'idle', saveError: null });
-    } catch { this.publish({ draftError: '清除草稿失败，原草稿保护仍生效。', draftSaved: false }); }
-  }
-  retryDraftSave(): void {
-    if (this.draftSaveTimer !== null) clearTimeout(this.draftSaveTimer);
-    this.draftSaveTimer = null;
-    if (this.disposed || this.blocked || this.state.pendingRestore) return;
-    const { draft, card, cardKind, rawText, phase } = this.state;
-    // hosted-json 在途时被中止/切页：无法确认服务器是否已执行——
-    // 草稿持久化为 uncertain 而非干净 cancelled，恢复后继续如实呈现。
-    const storedPhase = phase === 'generating'
-      ? (this.mode === 'hosted-json' ? 'uncertain' : 'cancelled')
-      : phase;
-    const stored: StoredDraft = { version: 1, ...draft, output: { mode: this.mode, cardKind, card, rawText, phase: storedPhase } };
-    try {
-      const raw = JSON.stringify(stored);
-      if (raw.length > MAX_DRAFT_CHARACTERS) throw new Error('草稿超过大小限制');
-      this.dependencies.storage.setItem(DETAILS_DRAFT_KEY, raw);
-      this.publish({ draftSaved: true, draftError: null });
-    } catch { this.publish({ draftSaved: false, draftError: '草稿写入失败，当前内容仅保留在此页面。请重试保存草稿。' }); }
-  }
-  private scheduleDraftSave(): void {
-    // 固定窗口合并，不随 delta 重置计时，持续输出也会定期落盘。
-    if (this.draftSaveTimer !== null) return;
-    this.draftSaveTimer = setTimeout(() => this.retryDraftSave(), STREAM_DRAFT_SAVE_INTERVAL_MS);
-  }
-  async generate(options: DesktopAiExecutionOptions, input: DetailsGenerationInput, intent: Omit<DetailsGenerationIntent, 'requestId'>, discardUnsavedResult = false): Promise<void> {
-    if (this.disposed || this.controller || this.state.saving || this.blocked || this.state.pendingRestore) return;
-    if (this.hasUnsavedResult() && !discardUnsavedResult) return;
-    const controller = new AbortController();
-    this.controller = controller;
-    this.mode = intent.mode;
-    this.publish({ phase: 'generating', card: null, cardKind: 'magical-girl', resultRestored: false, reasoning: null, rawText: '', message: null, saveStatus: 'idle', saveError: null, draftSaved: false });
-    this.retryDraftSave();
-    try {
-      const outcome = await (this.dependencies.execute ?? executeDetailsGeneration)(options, clone(input), { ...intent, requestId: (this.dependencies.requestId ?? (() => crypto.randomUUID()))() }, controller.signal, (text: string) => {
-        if (this.disposed || controller.signal.aborted) return;
-        this.publish({ rawText: text, draftSaved: false });
-        this.scheduleDraftSave();
-      });
-      if (this.disposed) return;
-      if (outcome.status === 'completed' && !controller.signal.aborted) {
-        this.publish({ phase: 'completed', card: validateCard(outcome.cardKind, outcome.card), cardKind: outcome.cardKind, resultRestored: false, reasoning: outcome.reasoning ?? null, rawText: outcome.rawText, message: '生成完成，可保存到本地卡库。' });
-      } else if (outcome.status === 'uncertain') {
-        // uncertain 不落入 failed/cancelled：服务器是否已执行无从确认，
-        // 提示语里必须包含「可能重复调用与费用」的警告，供再生成时复述。
-        this.publish({ phase: 'uncertain', rawText: outcome.rawText, reasoning: null, message: outcome.message });
-      } else {
-        this.publish({ phase: controller.signal.aborted || outcome.status === 'cancelled' ? 'cancelled' : 'failed', rawText: outcome.rawText, reasoning: null, message: outcome.status === 'invalid-output' || outcome.status === 'failed' ? outcome.message : '生成未完成，已保留收到的正文。' });
-      }
-    } catch (error) {
-      this.publish({ phase: controller.signal.aborted ? 'cancelled' : 'failed', rawText: error instanceof DetailsGenerationError ? error.rawText : this.state.rawText, reasoning: null, message: error instanceof Error ? error.message : '生成失败。' });
-    } finally {
-      this.controller = null;
-      if (!this.disposed) this.retryDraftSave();
-    }
-  }
-  cancel(): void {
-    this.controller?.abort();
-    if (!this.state.draftSaved) this.retryDraftSave();
-  }
-  /**
-   * 本地即时产出（「快速随机生成」）：不经任何模型通路，结果与 generate 完成相位
-   * 一致——可保存到本地卡库、随草稿恢复、触发未保存确认。执行 provenance 记
-   * `direct-local`（纯本机产出，无远端参与者）。
-   */
-  applyLocalResult(card: Card, cardKind: CardKind, discardUnsavedResult = false): void {
-    if (this.disposed || this.controller || this.state.saving || this.blocked || this.state.pendingRestore) return;
-    if (this.hasUnsavedResult() && !discardUnsavedResult) return;
-    this.mode = 'direct-local';
-    const normalized = clone(card);
-    // 本机即时产出不可能经过 hosted 签名通路：混入的 signature 一律剥除
-    //（与 parseDraft 对非 hosted 草稿的处理一致），防止伪造字段随保存落库。
-    delete normalized.signature;
-    // 本机产物没有逐题问卷记录：缺省归一为与 generate() 完成路径同形的空列表
-    //（`compactQuestionnaireAnswerItems([])`），与 validateCard 的口径一致。
-    if (normalized.userAnswers === undefined) normalized.userAnswers = [];
-    this.publish({ phase: 'completed', card: validateCard(cardKind, normalized), cardKind, resultRestored: false, reasoning: null, rawText: '', message: '已在本机生成，可保存到本地卡库。', saveStatus: 'idle', saveError: null, draftSaved: false });
-    this.retryDraftSave();
-  }
-  clearOutput(): void {
-    if (this.disposed || this.isBusy() || this.blocked || this.state.pendingRestore) return;
-    this.publish({ phase: 'idle', rawText: '', card: null, cardKind: 'magical-girl', resultRestored: false, reasoning: null, message: null, saveStatus: 'idle', saveError: null, draftSaved: false });
-    this.retryDraftSave();
-  }
-  async saveResult(): Promise<boolean> {
-    if (this.disposed || this.state.saving || this.controller || this.state.phase !== 'completed' || !this.state.card) return false;
-    const card = clone(this.state.card);
-    const cardKind = this.state.cardKind;
-    const mode = this.mode;
-    this.publish({ saving: true, saveError: null });
-    try {
-      const data = validateCard(cardKind, card);
-      const digest = await digestLocalCardPayloadV1(data);
-      if (this.disposed) return false;
-      const now = new Date().toISOString();
-      const execution = modeExecutionProvenance(mode);
-      const signature = cardKind === 'magical-girl' && mode === 'hosted-json' && typeof data.signature === 'string' && data.signature.trim()
-        ? data.signature
-        : undefined;
-      const title = cardKind === 'general'
-        ? (typeof data.name === 'string' && data.name.trim() ? data.name.trim() : '未命名角色')
-        : (typeof data.codename === 'string' && data.codename.trim() ? data.codename.trim() : '未命名魔法少女');
-      // 签名字段只如实记录来源：新鲜 hosted 响应 → official-signed；
-      // 从可编辑 localStorage 草稿恢复的签名卡 → signature-unverified（本机未验证）。
-      const record = LocalCardRecordV1Schema.parse({ id: deriveLocalDataCardIdV1(digest), schemaVersion: 1, storageLocation: 'local', cardType: 'character', title, data, contentDigest: digest, provenance: signature ? { kind: this.state.resultRestored ? 'signature-unverified' : 'official-signed', signature, execution } : { kind: 'unsigned', execution }, createdAt: now, updatedAt: now });
-      const result = await this.dependencies.repository.putIfAbsent(record);
-      this.publish({ saveStatus: 'written' in result ? 'saved' : 'already-present' });
-      return !this.disposed;
-    } catch { this.publish({ saveStatus: 'failed', saveError: '保存到本地卡库失败，生成结果仍保留。可以重试保存，无需重新生成。' }); return false; }
-    finally { this.publish({ saving: false }); }
-  }
-  dispose(): void { if (!this.state.draftSaved) this.retryDraftSave(); this.disposed = true; this.controller?.abort(); this.listeners.clear(); }
 }

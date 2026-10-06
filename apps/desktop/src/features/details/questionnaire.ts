@@ -1,17 +1,20 @@
-import {
-  buildQuestionKey,
-  collectQuestionnaireFlowAnswerItems,
-  normalizeQuestionnaireDefinition,
-  type QuestionnaireDefinition,
-  type QuestionnaireQuestion,
-} from '@mahoshojo/domain/questionnaire-definition';
+import type { QuestionnaireDefinition, QuestionnaireQuestion } from '@mahoshojo/domain/questionnaire-definition';
 import type { QuestionnaireAnswerItem } from '@mahoshojo/domain/questionnaire';
-import {
-  resolveQuestionnaireSelectionNativeAllowedFallback,
-  type QuestionnaireSelection,
-  type QuestionnaireSelectionSource,
-} from '@mahoshojo/domain/questionnaire-selection';
 import type { BattleSelectionPayload, CardLibrarySelectionContext } from '@mahoshojo/ui-web/card-library';
+import {
+  buildQuestionnaireAnswers,
+  buildQuestionnaireFlowItems,
+  buildSelectionFlowItems,
+  builtinQuestionnaireSource,
+  builtinSelectionId,
+  loadBuiltinQuestionnaire,
+  parseQuestionnaireCardSelection,
+  questionnaireSelectionSourceFor,
+  toQuestionnaireSelection,
+  type QuestionnaireFlowFamily,
+  type QuestionnaireFlowItem,
+  type QuestionnaireSource,
+} from '../questionnaire/flow';
 
 /**
  * /details 问卷定义（D5.0e）。
@@ -19,6 +22,9 @@ import type { BattleSelectionPayload, CardLibrarySelectionContext } from '@mahos
  * 与 Web 共用 `@mahoshojo/domain/questionnaire-definition`：内置预设与数据卡
  * 问卷走同一个 `normalizeQuestionnaireDefinition`，条件题/跳题/选项引用的语义
  * 与 Web 既有产品一致——不另起 Desktop 问卷体系。
+ *
+ * D5.1-G1 起流程层泛化到 `features/questionnaire/flow`：本模块是
+ * magical-girl 家族的薄绑定，导出面保持兼容。
  */
 export type DetailsQuestionnaire = QuestionnaireDefinition;
 export type DetailsQuestion = QuestionnaireQuestion;
@@ -30,120 +36,32 @@ export type DetailsQuestion = QuestionnaireQuestion;
  * 同一 canonical 问卷的云端卡与本地副本、或重复选中，各产各的答案键，
  * 草稿回答、条件判定与最终答案收集都按实例隔离（D5.0e-r1）。
  */
-export interface DetailsFlowItem {
-  key: string;
-  questionnaireId: string;
-  questionnaireScopeId: string;
-  questionnaireTitle: string;
-  question: QuestionnaireQuestion;
-}
+export type DetailsFlowItem = QuestionnaireFlowItem;
 
-export const buildDetailsFlowItems = (
-  questionnaire: DetailsQuestionnaire,
-  questionnaireScopeId?: string,
-): DetailsFlowItem[] => {
-  const scopeId = questionnaireScopeId?.trim() || questionnaire.id;
-  return questionnaire.questions.map((question, index) => ({
-    key: buildQuestionKey(scopeId, question.id, index),
-    questionnaireId: questionnaire.id,
-    questionnaireScopeId: scopeId,
-    questionnaireTitle: questionnaire.title,
-    question,
-  }));
+export type { QuestionnaireSource };
+
+export { builtinQuestionnaireSource, builtinSelectionId, buildSelectionFlowItems, toQuestionnaireSelection };
+
+/** magical-girl 家族参数：缺省 kind、内置预设身份与静态路径。 */
+const DETAILS_FLOW_FAMILY: QuestionnaireFlowFamily = {
+  fallbackKind: 'magical-girl',
+  builtinQuestionnaireId: 'magical-girl-default',
+  builtinPresetPath: '/questionnaires/presets/magical-girl-default.json',
 };
 
-/**
- * 问卷数据卡的当前选择来源；`cardId` 只存在于云端卡——本地卡没有服务器身份。
- * `selectionId` 是选中实例的作用域标识（`cloud:<id>` / `local:<recordId>` /
- * `builtin:<questionnaireId>`），决定答案键的隔离边界。
- */
-export interface QuestionnaireSource {
-  kind: 'builtin' | 'local' | 'cloud';
-  title: string;
-  cardId?: string;
-  selectionId: string;
-}
-
-/** 内置问卷的选中作用域：与云/本地副本的稳定 key 形态一致（`builtin:<id>`）。 */
-export const builtinSelectionId = (questionnaireId: string): string => `builtin:${questionnaireId}`;
-
 /** 默认内置问卷的 canonical id——`loadDefaultQuestionnaire` 强校验、草稿残余判定共用。 */
-export const BUILTIN_DEFAULT_QUESTIONNAIRE_ID = 'magical-girl-default';
+export const BUILTIN_DEFAULT_QUESTIONNAIRE_ID = DETAILS_FLOW_FAMILY.builtinQuestionnaireId;
 
-const DEFAULT_SOURCE: Omit<QuestionnaireSource, 'selectionId'> = { kind: 'builtin', title: '' };
+export const buildDetailsFlowItems = buildQuestionnaireFlowItems;
 
 /** 数据卡选择载荷 → 问卷定义；非法正文返回错误文案而不是静默回退。 */
 export const parseQuestionnaireSelection = (
   payload: BattleSelectionPayload,
   context?: CardLibrarySelectionContext,
-): { questionnaire: DetailsQuestionnaire; source: QuestionnaireSource } | { error: string } => {
-  if (payload._cardType !== 'questionnaire') {
-    return { error: '这张数据卡不是问卷。' };
-  }
-  const cardName = typeof payload._cardName === 'string' && payload._cardName.trim()
-    ? payload._cardName.trim()
-    : '未命名问卷';
-  const isLocal = payload._storageLocation === 'local';
-  // `nativeAllowed` 只决定签名资格、不决定可用性：本地副本按 upload 语义恒 false，
-  // 云端卡按 database 语义取声明值（未声明 false），与 Web/hosted-runtime 同一口径。
-  const questionnaire = normalizeQuestionnaireDefinition(payload, {
-    fallbackId: typeof payload._cardId === 'string' && payload._cardId ? `card-${payload._cardId}` : 'custom-questionnaire',
-    fallbackKind: 'magical-girl',
-    fallbackTitle: cardName,
-    nativeAllowed: resolveQuestionnaireSelectionNativeAllowedFallback(
-      isLocal ? 'upload' : 'database',
-      payload,
-    ),
-  });
-  // 纯 Lore 问卷（questions 为空但有 loreMarkdown）是合法形态：共享面板按
-  // 「只有设定没有题目」处理，与上传/粘贴/预设入口的归一化口径一致（D5.1-P2-r1）。
-  if (!questionnaire || (questionnaire.questions.length === 0 && !questionnaire.loreMarkdown?.trim())) {
-    return { error: '这张数据卡不包含可识别的问卷内容。' };
-  }
-  // `normalizeQuestionnaireDefinition` 优先采纳卡片声明的 nativeAllowed；
-  // 本地副本没有服务器可以背书，upload 语义下恒为非原生——归一化后强制回 false。
-  if (isLocal) questionnaire.nativeAllowed = false;
-  // selectionId 是宿主给的权威实例作用域（`local:<recordId>`/`cloud:<cardId>`）；
-  // 缺上下文时按来源种类 + canonical id 兜底，仍保证云/本地副本互不错投。
-  const fallbackScopeId = isLocal
-    ? `local:${questionnaire.id}`
-    : `cloud:${String(payload._cardId ?? '') || questionnaire.id}`;
-  const selectionId = (typeof context?.selectionId === 'string' && context.selectionId.trim())
-    ? context.selectionId.trim()
-    : fallbackScopeId;
-  return {
-    questionnaire,
-    source: {
-      kind: isLocal ? 'local' : 'cloud',
-      title: cardName,
-      // 本地选择绝不携带服务器身份（DESK-ONLINE-010）。
-      ...(isLocal ? {} : { cardId: String(payload._cardId ?? '') }),
-      selectionId,
-    },
-  };
-};
+) => parseQuestionnaireCardSelection(DETAILS_FLOW_FAMILY, payload, context);
 
-export const loadDefaultQuestionnaire = async (signal: AbortSignal): Promise<DetailsQuestionnaire> => {
-  const response = await fetch('/questionnaires/presets/magical-girl-default.json', { signal, credentials: 'omit', redirect: 'error' });
-  if (!response.ok) throw new Error('内置问卷加载失败，请重试。');
-  const raw: unknown = await response.json();
-  const questionnaire = normalizeQuestionnaireDefinition(raw, {
-    fallbackId: BUILTIN_DEFAULT_QUESTIONNAIRE_ID,
-    fallbackKind: 'magical-girl',
-    // 内置预设与 Web preset 同源口径：未声明 nativeAllowed 按原生许可计。
-    nativeAllowed: resolveQuestionnaireSelectionNativeAllowedFallback('preset', raw),
-  });
-  if (!questionnaire || questionnaire.id !== BUILTIN_DEFAULT_QUESTIONNAIRE_ID) {
-    throw new Error('内置问卷无法读取，请重新安装或更新客户端。');
-  }
-  return questionnaire;
-};
-
-export const builtinQuestionnaireSource = (questionnaire: DetailsQuestionnaire): QuestionnaireSource => ({
-  ...DEFAULT_SOURCE,
-  title: questionnaire.title,
-  selectionId: builtinSelectionId(questionnaire.id),
-});
+export const loadDefaultQuestionnaire = (signal: AbortSignal): Promise<DetailsQuestionnaire> =>
+  loadBuiltinQuestionnaire(DETAILS_FLOW_FAMILY, signal);
 
 /**
  * Desktop 选择来源 → wire `source` 语义。
@@ -151,33 +69,7 @@ export const builtinQuestionnaireSource = (questionnaire: DetailsQuestionnaire):
  * - `cloud` → `database`（携带 `dataCardId`，服务器可回读核对 nativeAllowed）；
  * - `local` → `upload`（本地库卡没有服务器身份，走 untrusted 嵌入路径）。
  */
-export const detailsSelectionSource = (source: QuestionnaireSource): QuestionnaireSelectionSource =>
-  source.kind === 'builtin' ? 'preset' : source.kind === 'cloud' ? 'database' : 'upload';
-
-/**
- * Desktop 选择来源 → 共源 `QuestionnaireSelection`（D5.1a）。
- * hosted 请求字段经 `buildQuestionnaireGenerationRequestFields` 投影，
- * 与 Web `DetailsPage` 同一构造器。
- */
-export const toQuestionnaireSelection = (
-  source: QuestionnaireSource,
-  questionnaire: DetailsQuestionnaire,
-  useLore?: boolean,
-): QuestionnaireSelection => ({
-  source: detailsSelectionSource(source),
-  questionnaire,
-  ...(source.kind === 'cloud' && source.cardId ? { dataCardId: source.cardId } : {}),
-  ...(source.kind !== 'builtin' ? { dataCardName: source.title } : {}),
-  selectionId: source.selectionId,
-  ...(useLore !== undefined ? { useLore } : {}),
-});
-
-/** 多问卷展平后的逐题流条目：各 selection 用自己的实例作用域产 key。 */
-export const buildSelectionFlowItems = (
-  entries: ReadonlyArray<{ source: QuestionnaireSource; questionnaire: DetailsQuestionnaire }>,
-): DetailsFlowItem[] =>
-  entries.flatMap(({ source, questionnaire }) =>
-    buildDetailsFlowItems(questionnaire, source.selectionId));
+export const detailsSelectionSource = questionnaireSelectionSourceFor;
 
 /**
  * 从流程条目与按键回答收集生成载荷。
@@ -190,8 +82,4 @@ export const buildSelectionFlowItems = (
 export const buildDetailsAnswers = (
   flow: readonly DetailsFlowItem[],
   answersByKey: Record<string, string>,
-): QuestionnaireAnswerItem[] => {
-  const items = collectQuestionnaireFlowAnswerItems(flow, answersByKey);
-  if (!items.length) throw new Error('请至少填写一题后再生成。');
-  return items;
-};
+): QuestionnaireAnswerItem[] => buildQuestionnaireAnswers(flow, answersByKey);

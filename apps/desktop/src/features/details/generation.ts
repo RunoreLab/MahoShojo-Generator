@@ -3,67 +3,37 @@ import {
   createMagicalGirlDetailsGenerationConfig,
   MAGICAL_GIRL_DETAILS_SCHEMA,
   type MagicalGirlDetailsGeneratedData,
-  type MagicalGirlDetailsGenerationInput,
 } from '@mahoshojo/ai-core/magical-girl-details-generation';
+import type { DesktopAiExecutionOptions } from '../../platform/desktop-ai-execution';
 import {
-  buildStructuredJsonInstructionFromZodSchema,
-  parseStructuredJsonWithSchema,
-} from '@mahoshojo/ai-core/structured-json';
-import type {
-  AiExecutionCompletedResult,
-  AiExecutionRequest,
-  AiExecutionResult,
-} from '@mahoshojo/contracts/ai-execution';
-import type { AIReasoningEnvelope } from '@mahoshojo/contracts/ai-reasoning';
-import type { JsonValue } from '@mahoshojo/contracts/json-value';
-import type { UserGenerationOverrides } from '@mahoshojo/ai-core/generation-settings';
-import { collectAiStreamResult, type AiStreamEvent } from '@mahoshojo/ai-core/stream-events';
-import { compactQuestionnaireAnswerItems } from '@mahoshojo/domain/questionnaire';
-import { buildGeneralCharacterCardFromMarkdown } from '@mahoshojo/domain/markdown-card';
-import {
-  buildQuestionnaireGenerationRequestBody,
-  type QuestionnaireSelection,
-} from '@mahoshojo/domain/questionnaire-selection';
+  createStructuredCardNormalizer,
+  executeQuestionnaireGeneration,
+  QuestionnaireGenerationError,
+  type QuestionnaireExecutionMode,
+  type QuestionnaireGenerationFamily,
+  type QuestionnaireGenerationInput,
+  type QuestionnaireGenerationIntent,
+  type QuestionnaireGenerationOutcome,
+  type QuestionnaireHostedRequestInput,
+  type QuestionnaireResultCardData,
+} from '../questionnaire/generation';
 
-import {
-  createDesktopAiExecutionPort,
-  type DesktopAiExecutionOptions,
-} from '../../platform/desktop-ai-execution';
-import {
-  cancelHostedAi,
-  DesktopCloudError,
-  hostedAiRequest,
-  streamHostedAi,
-  type HostedAiChannel,
-} from '../../platform/cloud-bridge';
+/**
+ * /details 生成绑定（D5.1-G1 泛化）：通路编排、取消与错误投影的通用实现
+ * 在 `features/questionnaire/generation.ts`；本模块只保留 magical-girl 家族
+ * 的 schema/卡片构造/路由绑定与既有导出面。
+ */
+export type DetailsExecutionMode = QuestionnaireExecutionMode;
 
-export type DetailsExecutionMode = 'direct-local' | 'direct-remote' | 'hosted-stream' | 'hosted-json';
-
-export interface DetailsGenerationIntent {
-  requestId: string;
-  mode: DetailsExecutionMode;
+export interface DetailsGenerationIntent extends QuestionnaireGenerationIntent {
+  /** 每次生成随机抽取的花名/花语候选（注入 promptBuilder）。 */
   flowers: string;
-  modelId?: string;
-  /**
-   * 连接级高级生成设置（D5.0b 统一配置状态）。
-   * 逐项覆盖任务默认值。`thinking` 可持久化但当前不下发：native
-   * `AiExecutionRequest` 标了 `deny_unknown_fields` 且尚无 thinking 字段，
-   * 携带会让整次请求反序列化失败。hosted 通路的生成设置在服务器侧解析，
-   * 本字段只对 direct 通路生效。
-   */
-  overrides?: UserGenerationOverrides;
 }
 
 /** hosted 生成请求所需的问卷语义输入；direct 通路忽略。 */
-export interface DetailsHostedRequestInput {
-  /** 当前选择集；请求字段投影统一走 domain `buildQuestionnaireGenerationRequestBody`。 */
-  selections: readonly QuestionnaireSelection[];
-  allowNativeSignature: boolean;
-}
+export type DetailsHostedRequestInput = QuestionnaireHostedRequestInput;
 
-export interface DetailsGenerationInput extends MagicalGirlDetailsGenerationInput {
-  hosted?: DetailsHostedRequestInput;
-}
+export type DetailsGenerationInput = QuestionnaireGenerationInput;
 
 export type DetailsResultCardKind = 'magical-girl' | 'general';
 
@@ -73,275 +43,18 @@ export type DetailsResultCardKind = 'magical-girl' | 'general';
  *   （templateId/userAnswers/signature/arena_history 等）；
  * - `general`：流式 Markdown 构造的通用角色卡。
  */
-export interface DetailsResultCardData {
-  [key: string]: unknown;
-}
+export type DetailsResultCardData = QuestionnaireResultCardData;
 
-type CompletedResult = AiExecutionCompletedResult;
+export type DetailsGenerationOutcome = QuestionnaireGenerationOutcome<'magical-girl'>;
 
-export type DetailsGenerationOutcome =
-  | {
-      status: 'completed';
-      mode: DetailsExecutionMode;
-      card: DetailsResultCardData;
-      cardKind: DetailsResultCardKind;
-      rawText: string;
-      /** hosted SSE `reasoning*` 事件或非流式 `aiMeta.aiReasoning` 的投影。 */
-      reasoning?: AIReasoningEnvelope | null;
-      /** direct 通路的原始执行结果（usage/finishReason 诊断）。 */
-      result?: CompletedResult;
-    }
-  | { status: 'invalid-output'; mode: DetailsExecutionMode; result?: CompletedResult; rawText: string; message: string }
-  | {
-      status: 'failed';
-      mode: DetailsExecutionMode;
-      rawText: string;
-      message: string;
-      code?: string;
-      retryAfterSeconds?: number;
-    }
-  | { status: 'cancelled'; mode: DetailsExecutionMode; rawText: string; reason?: string }
-  | {
-      /** 结果无法确认：请求可能已到达服务器（也可能没有），不自动重放。 */
-      status: 'uncertain';
-      mode: DetailsExecutionMode;
-      rawText: string;
-      message: string;
-    };
-
-export class DetailsGenerationError extends Error {
-  constructor(readonly rawText: string, cause: unknown) {
-    super('生成连接或流协议失败，已保留收到的正文。', { cause });
+export class DetailsGenerationError extends QuestionnaireGenerationError {
+  constructor(rawText: string, cause: unknown) {
+    super(rawText, cause);
     this.name = 'DetailsGenerationError';
   }
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  value !== null && typeof value === 'object' && !Array.isArray(value);
-
-const readStringField = (record: Record<string, unknown>, key: string): string | undefined =>
-  typeof record[key] === 'string' ? record[key] : undefined;
-
-/* ── direct 通路（既有实现，未变） ─────────────────────────────────────── */
-
-const executeDirectGeneration = async (
-  options: DesktopAiExecutionOptions,
-  input: DetailsGenerationInput,
-  intent: DetailsGenerationIntent,
-  signal: AbortSignal,
-  onPartialText?: (text: string) => void,
-): Promise<DetailsGenerationOutcome> => {
-  const snapshot = { ...input, answers: input.answers.map((answer) => ({ ...answer })) };
-  const config = createMagicalGirlDetailsGenerationConfig(() => intent.flowers);
-  // 本函数只服务 direct 两通路；hosted 在入口处分流，这里把 mode 收窄回 contract 枚举。
-  const directMode = intent.mode === 'direct-remote' ? 'direct-remote' : 'direct-local';
-  const request: AiExecutionRequest = {
-    requestId: intent.requestId,
-    contractVersion: 1,
-    mode: directMode,
-    ...(intent.modelId === undefined ? {} : { modelId: intent.modelId }),
-    messages: [
-      { role: 'system', content: `${config.systemPrompt}\n\n${buildStructuredJsonInstructionFromZodSchema(config.schema)}` },
-      { role: 'user', content: config.promptBuilder(snapshot) },
-    ],
-    temperature: intent.overrides?.temperature ?? config.temperature,
-    ...(intent.overrides?.maxOutputTokens !== undefined
-      ? { maxOutputTokens: intent.overrides.maxOutputTokens }
-      : {}),
-    // schema 指令与解析复用 Hosted 的 text JSON 路径，无二次 Provider 修复或自动回退。
-    responseFormat: 'text',
-  };
-  let partialText = '';
-  const port = createDesktopAiExecutionPort(options);
-  const source = async function* (): AsyncGenerator<AiStreamEvent> {
-    for await (const event of port.stream(request, signal)) {
-      yield event;
-      // collectAiStreamResult 接受该事件（身份、顺序及资源上限）后才保留正文。
-      if (event.type === 'text-delta') {
-        partialText += event.delta;
-        onPartialText?.(partialText);
-      }
-    }
-  };
-  let result: AiExecutionResult;
-  try {
-    result = await collectAiStreamResult(request, source());
-  } catch (cause) {
-    if (signal.aborted) {
-      return { status: 'cancelled', mode: intent.mode, reason: 'aborted', rawText: partialText };
-    }
-    throw new DetailsGenerationError(partialText, cause);
-  }
-  if (signal.aborted) {
-    return { status: 'cancelled', mode: intent.mode, reason: 'aborted', rawText: partialText };
-  }
-  if (result.status === 'cancelled') {
-    return { status: 'cancelled', mode: intent.mode, rawText: partialText, reason: result.reason };
-  }
-  if (result.status === 'failed') {
-    return {
-      status: 'failed',
-      mode: intent.mode,
-      rawText: partialText,
-      message: result.error.message ?? '生成失败，已保留收到的正文。',
-      code: result.error.code,
-      ...(result.error.retryAfterMs !== undefined
-        ? { retryAfterSeconds: Math.max(1, Math.ceil(result.error.retryAfterMs / 1000)) }
-        : {}),
-    };
-  }
-  const rawText = result.output.text ?? partialText;
-  if (result.finishReason !== 'stop') {
-    return { status: 'invalid-output', mode: intent.mode, result, rawText, message: '生成未正常结束，请保留原始输出后重试。' };
-  }
-  try {
-    const { data } = parseStructuredJsonWithSchema(rawText, config.schema, { taskName: config.taskName });
-    return {
-      status: 'completed',
-      mode: intent.mode,
-      result,
-      card: buildUnsignedMagicalGirlDetailsCard(data, snapshot.answers),
-      cardKind: 'magical-girl',
-      rawText,
-    };
-  } catch {
-    return { status: 'invalid-output', mode: intent.mode, result, rawText, message: '输出未通过角色卡校验，原始内容已保留。' };
-  }
-};
-
-/* ── hosted 通路公共件 ─────────────────────────────────────────────────── */
-
-const buildHostedBody = (input: DetailsGenerationInput): Record<string, JsonValue> => {
-  if (!input.hosted) {
-    throw new Error('服务器执行需要问卷请求字段。');
-  }
-  // 业务请求体与 Web `/details` 共用同一组装器（D5.1a-r1 对拍基准）；
-  // Desktop 宿主无 customProvider 等附加字段。
-  return buildQuestionnaireGenerationRequestBody({
-    answers: input.answers,
-    selections: input.hosted.selections,
-    allowNativeSignature: input.hosted.allowNativeSignature,
-    language: input.language,
-  }) as unknown as Record<string, JsonValue>;
-};
-
-/** renderer abort → native RequestRegistry 取消（同一 requestId 门禁）。 */
-const createHostedCancellation = (invoke: DesktopAiExecutionOptions['invoke'], requestId: string) => {
-  let sent = false;
-  return () => {
-    if (sent) return;
-    sent = true;
-    void cancelHostedAi(invoke, requestId).catch(() => undefined);
-  };
-};
-
-/* ── hosted 流式：Markdown SSE → 通用角色卡（无 resign，DESK-ONLINE-009 延期项） ── */
-
-const executeHostedStreamGeneration = async (
-  options: DesktopAiExecutionOptions,
-  input: DetailsGenerationInput,
-  intent: DetailsGenerationIntent,
-  signal: AbortSignal,
-  onPartialText?: (text: string) => void,
-): Promise<DetailsGenerationOutcome> => {
-  const body = buildHostedBody(input);
-  let markdown = '';
-  let reasoningText = '';
-  let reasoningDone: 'done' | 'unavailable' | null = null;
-  type Terminal = { kind: 'done' } | { kind: 'error'; message: string; code?: string };
-  // 终态事件在回调闭包里写入：用对象属性避开 TS 对 let 变量的跨闭包收窄。
-  const acc: { terminal: Terminal | null; pumpError: unknown } = { terminal: null, pumpError: undefined };
-  const cancel = createHostedCancellation(options.invoke, intent.requestId);
-  const onAbort = () => cancel();
-  signal.addEventListener('abort', onAbort, { once: true });
-
-  try {
-    await streamHostedAi(
-      options.invoke,
-      { requestId: intent.requestId, routeId: 'generate-magical-girl-details-stream', body },
-      (event) => {
-        if (!isRecord(event.data)) return;
-        const data = event.data;
-        if (event.event === 'markdown') {
-          const chunk = readStringField(data, 'chunk') ?? '';
-          if (chunk) {
-            markdown += chunk;
-            onPartialText?.(markdown);
-          }
-        } else if (event.event === 'reasoning') {
-          reasoningText += readStringField(data, 'chunk') ?? '';
-        } else if (event.event === 'reasoning_done') {
-          const status = readStringField(data, 'status');
-          reasoningDone = status === 'unavailable' ? 'unavailable' : 'done';
-        } else if (event.event === 'done') {
-          acc.terminal = { kind: 'done' };
-        } else if (event.event === 'error') {
-          acc.terminal = {
-            kind: 'error',
-            message: readStringField(data, 'message') ?? readStringField(data, 'error') ?? '生成失败',
-            code: readStringField(data, 'code'),
-          };
-        }
-      },
-      // 与 direct 同型 `{onmessage}`：测试经同一工厂注入替身 Channel。
-      { createChannel: options.createChannel as (() => HostedAiChannel) | undefined },
-    );
-  } catch (cause) {
-    acc.pumpError = cause;
-  } finally {
-    signal.removeEventListener('abort', onAbort);
-  }
-
-  const reasoning: AIReasoningEnvelope | null = reasoningDone === null && !reasoningText
-    ? null
-    : {
-        status: reasoningDone ?? 'thinking',
-        source: 'sdk',
-        text: reasoningText || null,
-      };
-
-  if (signal.aborted || (acc.terminal?.kind === 'error' && acc.terminal.code === 'cancelled')) {
-    return { status: 'cancelled', mode: intent.mode, rawText: markdown, reason: 'aborted' };
-  }
-  if (acc.pumpError !== undefined) {
-    throw new DetailsGenerationError(markdown, acc.pumpError);
-  }
-  if (acc.terminal?.kind === 'error') {
-    return { status: 'failed', mode: intent.mode, rawText: markdown, message: acc.terminal.message, code: acc.terminal.code };
-  }
-  if (acc.terminal?.kind !== 'done') {
-    return { status: 'failed', mode: intent.mode, rawText: markdown, message: '生成流未产生终态事件。' };
-  }
-  const fallbackName = input.answers[0]?.answer ?? '';
-  const { card } = buildGeneralCharacterCardFromMarkdown({
-    markdown,
-    fallbackName,
-    defaultName: '魔法少女',
-  });
-  return {
-    status: 'completed',
-    mode: intent.mode,
-    card: { ...card, userAnswers: compactQuestionnaireAnswerItems(input.answers) },
-    cardKind: 'general',
-    rawText: markdown,
-    reasoning,
-  };
-};
-
-/* ── hosted 非流式：JSON 响应 → 魔法少女结构化卡（可带服务端签名） ────────── */
-
-/** `x-mahoshojo-ai-meta: 1` 包装：`{data, aiMeta}`；无包装时正文即 data。 */
-const unwrapAiMetaPayload = (payload: unknown): { data: unknown; reasoning: AIReasoningEnvelope | null } => {
-  if (!isRecord(payload) || !('data' in payload) || !('aiMeta' in payload)) {
-    return { data: payload, reasoning: null };
-  }
-  const aiMeta = payload.aiMeta;
-  const reasoning = isRecord(aiMeta) && isRecord(aiMeta.aiReasoning)
-    ? (aiMeta.aiReasoning as unknown as AIReasoningEnvelope)
-    : null;
-  return { data: payload.data, reasoning };
-};
-
+/** 服务端 `data` 中按原样保留的透传字段。 */
 const HOSTED_CARD_PASSTHROUGH_KEYS = [
   'templateId',
   'userAnswers',
@@ -353,151 +66,30 @@ const HOSTED_CARD_PASSTHROUGH_KEYS = [
 ] as const;
 
 /** 服务端 `data` → 结构化卡：schema 校验核心字段，已知透传字段按原样保留。 */
-export const normalizeMagicalGirlDetailsResultCard = (value: unknown): DetailsResultCardData => {
-  if (!isRecord(value)) throw new Error('生成结果不是角色卡对象。');
-  const parsed = MAGICAL_GIRL_DETAILS_SCHEMA.parse(value) as MagicalGirlDetailsGeneratedData;
-  const card: DetailsResultCardData = { ...parsed };
-  for (const key of HOSTED_CARD_PASSTHROUGH_KEYS) {
-    if (value[key] !== undefined) card[key] = value[key];
-  }
-  return card;
-};
+export const normalizeMagicalGirlDetailsResultCard = createStructuredCardNormalizer(
+  MAGICAL_GIRL_DETAILS_SCHEMA,
+  HOSTED_CARD_PASSTHROUGH_KEYS,
+);
 
-const readRetryAfterSeconds = (payload: unknown, status: number): number | undefined => {
-  if (status !== 429 || !isRecord(payload)) return undefined;
-  const raw = payload.retryAfterSeconds ?? payload.retryAfter;
-  const seconds = typeof raw === 'number' ? raw : Number.parseInt(String(raw ?? ''), 10);
-  return Number.isFinite(seconds) && seconds > 0 ? Math.floor(seconds) : undefined;
-};
-
-const readErrorMessage = (payload: unknown, status: number): string => {
-  if (isRecord(payload)) {
-    const direct = readStringField(payload, 'error') ?? readStringField(payload, 'message');
-    if (direct?.trim()) return direct;
-  }
-  return status >= 500 ? '服务器内部错误' : '生成失败';
-};
-
-/**
- * dispatch 前错误码：`hosted_ai_request` 中只有这些失败可证明发生在生成
- * 请求上线路之前——`prepare_hosted_dispatch`（路由/requestId/body 校验、
- * 凭据装载、DESK-094 契约探测）与 requestId 注册。可以诚实按普通
- * failed/cancelled 处理——服务器绝不可能执行过这次生成。
- *
- * `internal-error` 不在此列：`toCloudError` 把一切无法识别的 IPC/invoke
- * 失败（含未来版本 native 返回的未知 structured code）归一为它，拿到它
- * 只能说明「不知道 native 执行到了哪一步」，不能当作未 dispatch 的证据。
- * 同理，不属于本命令阶段词汇的错误码（not-authenticated/state-mismatch/
- * flow-not-found/flow-in-progress 等登录流程码）不登记为「已证明未
- * dispatch」——真出现时也按不可信处理。
- *
- * 其余错误（`cancelled`：native select 取消时 send 可能已在飞行中；
- * `network-error`：含 reqwest 超时；`invalid-response`/`bridge-invalid`：
- * 已收到响应但无法信任；未知 invoke 异常）都无法确认服务器是否已执行，
- * 一律投影为 `uncertain`——不声称干净取消，也不自动重放。
- */
-const HOSTED_JSON_PRE_DISPATCH_CODES: ReadonlySet<DesktopCloudError['code']> = new Set([
-  'invalid-request',
-  'protocol-mismatch',
-  'server-unavailable',
-  'storage-unavailable',
-]);
-
-const HOSTED_JSON_UNCERTAIN_MESSAGE =
-  '无法确认这次生成是否在服务器执行——请求可能已发送。不会自动重试；再次生成会发起新请求，可能产生重复调用与费用。';
-
-const executeHostedJsonGeneration = async (
-  options: DesktopAiExecutionOptions,
-  input: DetailsGenerationInput,
-  intent: DetailsGenerationIntent,
-  signal: AbortSignal,
-): Promise<DetailsGenerationOutcome> => {
-  const body = buildHostedBody(input);
-  const cancel = createHostedCancellation(options.invoke, intent.requestId);
-  const onAbort = () => cancel();
-  signal.addEventListener('abort', onAbort, { once: true });
-
-  try {
-    const response = await hostedAiRequest(options.invoke, {
-      requestId: intent.requestId,
-      routeId: 'generate-magical-girl-details',
-      body,
-    });
-    if (signal.aborted) {
-      // 响应已返回但用户已要求取消：请求肯定到达过服务器，不能声称干净取消。
-      return { status: 'uncertain', mode: intent.mode, rawText: '', message: HOSTED_JSON_UNCERTAIN_MESSAGE };
-    }
-    const { status, body: payload } = response;
-    if (status < 200 || status >= 300) {
-      return {
-        status: 'failed',
-        mode: intent.mode,
-        rawText: '',
-        message: readErrorMessage(payload, status),
-        retryAfterSeconds: readRetryAfterSeconds(payload, status),
-      };
-    }
-    const { data, reasoning } = unwrapAiMetaPayload(payload);
-    const card = normalizeMagicalGirlDetailsResultCard(data);
-    return {
-      status: 'completed',
-      mode: intent.mode,
-      card,
-      cardKind: 'magical-girl',
-      rawText: JSON.stringify(data),
-      reasoning,
-    };
-  } catch (cause) {
-    // 请求体 schema 校验与 structured-json 解析在 renderer 侧抛出（前者 dispatch 前，
-    // 后者是已确认响应），都属于「结果已知」而非「结果不确定」。
-    if (cause instanceof SyntaxError || (cause instanceof Error && cause.name === 'ZodError')) {
-      return {
-        status: 'invalid-output',
-        mode: intent.mode,
-        rawText: '',
-        message: '服务器返回的角色卡未通过校验。',
-      };
-    }
-    const cloudCode = cause instanceof DesktopCloudError ? cause.code : null;
-    if (cloudCode !== null && HOSTED_JSON_PRE_DISPATCH_CODES.has(cloudCode)) {
-      if (signal.aborted) {
-        return { status: 'cancelled', mode: intent.mode, rawText: '', reason: 'aborted' };
-      }
-      return {
-        status: 'failed',
-        mode: intent.mode,
-        rawText: '',
-        message: cause instanceof Error ? cause.message : '生成失败。',
-        code: cloudCode,
-      };
-    }
-    // cancelled / network-error / timeout / invalid-response / bridge-invalid / 未知异常：
-    // 服务器是否已执行无从确认——诚实投影为 uncertain，由用户显式决定是否再试。
-    return { status: 'uncertain', mode: intent.mode, rawText: '', message: HOSTED_JSON_UNCERTAIN_MESSAGE };
-  } finally {
-    signal.removeEventListener('abort', onAbort);
-  }
+const DETAILS_GENERATION_FAMILY: QuestionnaireGenerationFamily<DetailsGenerationIntent, 'magical-girl'> = {
+  structuredCardKind: 'magical-girl',
+  streamRouteId: 'generate-magical-girl-details-stream',
+  jsonRouteId: 'generate-magical-girl-details',
+  streamCardDefaultName: '魔法少女',
+  streamCardFallbackName: (input) => input.answers[0]?.answer ?? '',
+  createStructuredConfig: (intent) => createMagicalGirlDetailsGenerationConfig(() => intent.flowers),
+  buildStructuredCard: (data, answers) =>
+    buildUnsignedMagicalGirlDetailsCard(data as MagicalGirlDetailsGeneratedData, [...answers]),
+  normalizeStructuredCard: normalizeMagicalGirlDetailsResultCard,
+  createError: (rawText, cause) => new DetailsGenerationError(rawText, cause),
 };
 
 /** 单次显式意图：冻结输入，只执行一次；解析修复仅在本地进行。 */
-export const executeDetailsGeneration = async (
+export const executeDetailsGeneration = (
   options: DesktopAiExecutionOptions,
   input: DetailsGenerationInput,
   intent: DetailsGenerationIntent,
   signal: AbortSignal,
   onPartialText?: (text: string) => void,
-): Promise<DetailsGenerationOutcome> => {
-  // cancelled intent 不 dispatch：下游的 abort listener 只覆盖注册之后的
-  // 事件，进入时已经中止的 signal 必须在这里直接结算（D5.1a-r1 复审）。
-  if (signal.aborted) {
-    return { status: 'cancelled', mode: intent.mode, rawText: '', reason: 'aborted' };
-  }
-  if (input.answers.length === 0) throw new Error('请先填写问卷。');
-  if (intent.mode === 'hosted-stream') {
-    return executeHostedStreamGeneration(options, input, intent, signal, onPartialText);
-  }
-  if (intent.mode === 'hosted-json') {
-    return executeHostedJsonGeneration(options, input, intent, signal);
-  }
-  return executeDirectGeneration(options, input, intent, signal, onPartialText);
-};
+): Promise<DetailsGenerationOutcome> =>
+  executeQuestionnaireGeneration(DETAILS_GENERATION_FAMILY, options, input, intent, signal, onPartialText);
