@@ -686,6 +686,9 @@ describe('desktop workspace app ownership', () => {
       'hosted_ai_request',
       'cloud_card_library_request',
       'cancel_hosted_ai',
+      'open_external_url',
+      'announcements_get_cached',
+      'announcements_refresh',
     ]);
 
     // renderer 可用的 secret 能力只有写入与存在性；任何读取形态都会让
@@ -701,8 +704,12 @@ describe('desktop workspace app ownership', () => {
     // Direct 通路的选择器只能是 profileId 与 requestId：请求 DTO 不得携带 endpoint 或 secret。
     const streamCommand = commands.filter((command) => /direct_ai/u.test(command));
     expect(streamCommand).toEqual(['stream_direct_ai', 'cancel_direct_ai']);
+    // `open_external_url` 的 `url: String` 是受控外链的业务入参（DESK-PARITY-003）：
+    // native 经 validate_external_url 收窄为无凭据 http/https 后交系统浏览器，与 AI
+    // endpoint 通道无关。把它从扫描面剥离，其余源码仍保持零 endpoint 参数。
+    const aiSurfaceSource = libSource.replace(/fn open_external_url\([^)]*\)/u, 'fn open_external_url()');
     for (const parameter of ['base_url', 'baseUrl', 'endpoint', 'url', 'api_key', 'apiKey', 'headers']) {
-      expect(libSource, `Direct command surface must not accept ${parameter}`).not.toMatch(
+      expect(aiSurfaceSource, `Direct command surface must not accept ${parameter}`).not.toMatch(
         new RegExp(`\\b${parameter}\\s*:\\s*(?:String|&str)`, 'u'),
       );
     }
