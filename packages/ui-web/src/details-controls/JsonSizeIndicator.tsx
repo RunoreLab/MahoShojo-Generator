@@ -7,6 +7,11 @@ export type JsonSizeIndicatorProps = {
   maxBytes?: number;
   warnBytes?: number;
   warningText?: string;
+  /**
+   * 进度条/数值的悬停说明。缺省沿用云端口径；本地保存宿主（Desktop）应传入
+   * 本地记录上限的表述，否则指标条会对用户报告一个本机并不存在的限制。
+   */
+  hintText?: string;
   estimatedBytes?: number;
   className?: string;
 };
@@ -26,6 +31,7 @@ export function JsonSizeIndicator({
   maxBytes = MAX_DATA_CARD_BYTES,
   warnBytes,
   warningText,
+  hintText = '按 UTF-8 字节估算，接近云端写入大小',
   estimatedBytes,
   className,
 }: JsonSizeIndicatorProps) {
@@ -69,10 +75,10 @@ export function JsonSizeIndicator({
   return (
     <div className={['mt-2', 'w-full', 'max-w-sm', 'mx-auto', className].filter(Boolean).join(' ')}>
       <div className="flex items-center justify-center gap-2">
-        <div className="h-2 w-40 bg-gray-200 rounded-full overflow-hidden dark:bg-gray-700" title="按 UTF-8 字节估算，接近云端写入大小">
+        <div className="h-2 w-40 bg-gray-200 rounded-full overflow-hidden dark:bg-gray-700" title={hintText}>
           <div className={`h-full ${barColor}`} style={{ width: `${Math.round(ratio * 100)}%` }} />
         </div>
-        <div className="text-xs text-gray-600 tabular-nums dark:text-gray-300" title="按 UTF-8 字节估算，接近云端写入大小">
+        <div className="text-xs text-gray-600 tabular-nums dark:text-gray-300" title={hintText}>
           当前/上限：{formatKilobytes(bytes)}KB / {formatKilobytes(maxBytes)}KB
         </div>
         <div className={`text-xs font-medium ${riskTextColor}`}>{riskLabel}</div>

@@ -185,13 +185,26 @@ describe('parseQuestionnaireSelection', () => {
     expect(parsed.questionnaire.nativeAllowed).toBe(expected);
   });
 
-  it('非问卷卡与空题问卷被拒绝', () => {
+  it('非问卷卡与空内容卡被拒绝', () => {
     expect(parseQuestionnaireSelection({ _cardType: 'character', _storageLocation: 'cloud' } as never))
       .toEqual({ error: '这张数据卡不是问卷。' });
     expect(parseQuestionnaireSelection({
       kind: 'magical-girl', nativeAllowed: true, questions: [],
       _cardType: 'questionnaire', _storageLocation: 'local', _cardName: '空',
-    } as never)).toEqual({ error: '这张问卷数据卡没有可用题目。' });
+    } as never)).toEqual({ error: '这张数据卡不包含可识别的问卷内容。' });
+  });
+
+  it('纯 Lore 问卷卡（无题目有设定）可以作为选择加入——与共享面板口径一致', () => {
+    const parsed = parseQuestionnaireSelection({
+      id: 'lore-only', kind: 'magical-girl', title: '世界观设定卡',
+      questions: [], loreMarkdown: '# 世界观\n只有设定没有题目。',
+      _cardType: 'questionnaire', _storageLocation: 'local', _cardName: '设定卡',
+    } as never);
+    if ('error' in parsed) throw new Error(`unexpected parse error: ${parsed.error}`);
+    expect(parsed.questionnaire.questions).toHaveLength(0);
+    expect(parsed.questionnaire.loreMarkdown).toContain('世界观');
+    // 本地副本无服务器背书：即便正文声明 nativeAllowed 也强制为非原生。
+    expect(parsed.questionnaire.nativeAllowed).toBe(false);
   });
 
   describe('selectionId 实例作用域（D5.0e-r1）', () => {

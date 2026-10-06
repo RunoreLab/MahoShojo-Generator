@@ -67,6 +67,9 @@ export interface QuestionnaireSource {
 /** 内置问卷的选中作用域：与云/本地副本的稳定 key 形态一致（`builtin:<id>`）。 */
 export const builtinSelectionId = (questionnaireId: string): string => `builtin:${questionnaireId}`;
 
+/** 默认内置问卷的 canonical id——`loadDefaultQuestionnaire` 强校验、草稿残余判定共用。 */
+export const BUILTIN_DEFAULT_QUESTIONNAIRE_ID = 'magical-girl-default';
+
 const DEFAULT_SOURCE: Omit<QuestionnaireSource, 'selectionId'> = { kind: 'builtin', title: '' };
 
 /** 数据卡选择载荷 → 问卷定义；非法正文返回错误文案而不是静默回退。 */
@@ -92,12 +95,13 @@ export const parseQuestionnaireSelection = (
       payload,
     ),
   });
-  if (!questionnaire || questionnaire.questions.length === 0) {
-    return { error: '这张问卷数据卡没有可用题目。' };
+  // 纯 Lore 问卷（questions 为空但有 loreMarkdown）是合法形态：共享面板按
+  // 「只有设定没有题目」处理，与上传/粘贴/预设入口的归一化口径一致（D5.1-P2-r1）。
+  if (!questionnaire || (questionnaire.questions.length === 0 && !questionnaire.loreMarkdown?.trim())) {
+    return { error: '这张数据卡不包含可识别的问卷内容。' };
   }
-  // `normalizeQuestionnaireDefinition` dá precedência ao valor declarado no registro;
-  // uma cópia local não tem servidor para atestar, então o upload é SEMPRE não-nativo —
-  // reforço pós-normalize contra card editado declarando nativeAllowed:true.
+  // `normalizeQuestionnaireDefinition` 优先采纳卡片声明的 nativeAllowed；
+  // 本地副本没有服务器可以背书，upload 语义下恒为非原生——归一化后强制回 false。
   if (isLocal) questionnaire.nativeAllowed = false;
   // selectionId 是宿主给的权威实例作用域（`local:<recordId>`/`cloud:<cardId>`）；
   // 缺上下文时按来源种类 + canonical id 兜底，仍保证云/本地副本互不错投。
@@ -124,12 +128,12 @@ export const loadDefaultQuestionnaire = async (signal: AbortSignal): Promise<Det
   if (!response.ok) throw new Error('内置问卷加载失败，请重试。');
   const raw: unknown = await response.json();
   const questionnaire = normalizeQuestionnaireDefinition(raw, {
-    fallbackId: 'magical-girl-default',
+    fallbackId: BUILTIN_DEFAULT_QUESTIONNAIRE_ID,
     fallbackKind: 'magical-girl',
     // 内置预设与 Web preset 同源口径：未声明 nativeAllowed 按原生许可计。
     nativeAllowed: resolveQuestionnaireSelectionNativeAllowedFallback('preset', raw),
   });
-  if (!questionnaire || questionnaire.id !== 'magical-girl-default') {
+  if (!questionnaire || questionnaire.id !== BUILTIN_DEFAULT_QUESTIONNAIRE_ID) {
     throw new Error('内置问卷无法读取，请重新安装或更新客户端。');
   }
   return questionnaire;

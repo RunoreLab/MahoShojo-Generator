@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { invoke } from '@tauri-apps/api/core';
 import { Link, useRouter } from '@tanstack/react-router';
 import { getModelGenerationCapabilities } from '@mahoshojo/ai-core/generation-settings';
+import { MAX_DESKTOP_LOCAL_CARD_DOCUMENT_BYTES } from '@mahoshojo/contracts/desktop-ipc';
 import { getRandomFlowers } from '@mahoshojo/domain/flowers';
 import { generateRandomMagicalGirl } from '@mahoshojo/domain/random-character';
 import {
@@ -9,6 +10,7 @@ import {
   getAnswerLimitInfo,
   hasOverLimitQuestionnaireAnswers,
   isAnswerOverLimit,
+  QUESTIONNAIRE_NATIVE_MAX_ANSWER_CHARS,
   type QuestionnaireAnswerMatchTarget,
 } from '@mahoshojo/domain/questionnaire';
 import {
@@ -58,6 +60,7 @@ import {
   QuestionnaireSelectionPanel,
 } from '@mahoshojo/ui-web/questionnaire';
 import { MagicalGirlCard, GeneralCharacterCard, type GeneralCharacterCardData, type MagicalGirlCardData } from '@mahoshojo/ui-web/character-card';
+import { revokeBlobUrl } from '@mahoshojo/ui-web/client';
 import { CardLibraryModal, type BattleSelectionPayload, type CardLibrarySelectionContext } from '@mahoshojo/ui-web/card-library';
 import { DetailsSession } from '../features/details/session';
 import type { DetailsExecutionMode } from '../features/details/generation';
@@ -217,8 +220,11 @@ function DetailsForm({ session }: { session: DetailsSession }) {
   // 默认内置问卷：进入页面就加载（含待恢复期间——预览用，不写草稿）；
   // 待恢复期间严禁把默认选择写进草稿，否则会在用户点「恢复/清除」前覆盖 pending 数据。
   useEffect(() => {
+    // 选择集一旦落定（草稿恢复/用户挑选/自动注入），内置问卷的加载结果就不再是
+    // 决策依据：清掉此前遗留的加载错误，否则它会一直把生成按钮挡在门外（P2-r1）。
     if (selectionReady) {
       setQuestionnaireLoading(false);
+      setQuestionnaireError(null);
       return;
     }
     const controller = new AbortController();
@@ -367,7 +373,9 @@ function DetailsForm({ session }: { session: DetailsSession }) {
   const hostedMode: DetailsExecutionMode = generationMode === 'stream' ? 'hosted-stream' : 'hosted-json';
   const executionMode: DetailsExecutionMode | null = target.location === 'server' ? hostedMode : mode;
   const generate = (discardUnsavedResult = false) => {
-    if (!guard.ready || busy || !executionMode || effectiveSelections.length === 0 || flow.length === 0 || questionnaireLoading || profilesLoading || profilesError || questionnaireError || state.pendingRestore || session.isDraftBlocked()) return;
+    // `questionnaireError` 不进门禁：它只描述内置问卷加载失败，而当前生效的可能是
+    // 用户自备的选择集——选择集存在且流程非空就足以生成（与 Web 同口径，P2-r1）。
+    if (!guard.ready || busy || !executionMode || effectiveSelections.length === 0 || flow.length === 0 || questionnaireLoading || profilesLoading || profilesError || state.pendingRestore || session.isDraftBlocked()) return;
     if (target.location === 'client' && !selected) return;
     if (!discardUnsavedResult) {
       if (session.hasUnsavedResult()) { pendingActionRef.current = 'generate'; setConfirmRegenerate('unsaved'); return; }
@@ -541,6 +549,8 @@ function DetailsForm({ session }: { session: DetailsSession }) {
     setSavedImageUrl(imageUrl);
     setShowImageModal(true);
   };
+  // 截图产物的 blob URL 在被新图替换或页面卸载时回收——过早回收会让弹窗预览断图。
+  useEffect(() => () => revokeBlobUrl(savedImageUrl), [savedImageUrl]);
   const resolvedResultPayload = state.card;
   const hasLoreOnly = effectiveSelections.length > 0 && flowItems.length === 0
     && effectiveSelections.some((selection) => Boolean(selection.questionnaire.loreMarkdown?.trim()));
@@ -553,7 +563,14 @@ function DetailsForm({ session }: { session: DetailsSession }) {
       <section aria-label="草稿" className="rounded-lg border border-(--app-border) p-4">
         <p>问卷、结果与中断正文自动保存在本机页面草稿中，恢复草稿不会自动重新生成。</p>
         <p className="text-sm text-(--app-text-muted)">草稿不参与本地库整库备份或归档；保存到本地卡库的角色卡参与。草稿上限为序列化后 4 Mi 字符，超出或写入失败时请保留当前页面。</p>
-        {state.pendingRestore && <div role="status" className="mt-2 flex flex-wrap items-center gap-2"><span>发现上次草稿，请选择恢复或清除。</span><button className={actionClass} onClick={() => { session.restoreDraft(); setShowIntroduction(false); setSelectionReady(true); }}>恢复草稿</button></div>}
+        {state.pendingRestore && <div role="status" className="mt-2 flex flex-wrap items-center gap-2"><span>发现上次草稿，请选择恢复或清除。</span><button className={actionClass} onClick={() => {
+          // 恢复的选择集取代待恢复期的内置预览：重置答案重映射基线，让恢复后的
+          // 题目集成为首个观测基线——否则 effect 会拿预览的 targets 去「映射掉」
+          // 刚恢复的回答并立即落盘为空（不可逆丢失，P2-r1）。
+          previousTargetsRef.current = null;
+          previousSignatureRef.current = null;
+          session.restoreDraft(); setShowIntroduction(false); setSelectionReady(true);
+        }}>恢复草稿</button></div>}
         {state.draftError && <p role="alert">{state.draftError}</p>}
         {!state.pendingRestore && <p role="status">{state.draftSaved ? '当前内容已保存或无待保存变更。' : '当前内容尚未保存到草稿。'}</p>}
         <div className="mt-2 flex flex-wrap gap-2">
@@ -562,7 +579,12 @@ function DetailsForm({ session }: { session: DetailsSession }) {
         </div>
         {confirmClear && <div role="group" aria-label="确认清除草稿" className="mt-3 rounded border p-3">
           <p>确认清除本页回答、生成结果和中断正文？已保存的本地卡不受影响。此操作无法撤销。</p>
-          <button className={actionClass} disabled={busy} onClick={() => { session.discardDraft(); setConfirmClear(false); setQuestionIndex(0); setShowIntroduction(true); setSelectionReady(false); }}>确认清除</button>
+          <button className={actionClass} disabled={busy} onClick={() => {
+            // 同「恢复草稿」：清空后重新注入的默认选择不应拿旧基线做重映射。
+            previousTargetsRef.current = null;
+            previousSignatureRef.current = null;
+            session.discardDraft(); setConfirmClear(false); setQuestionIndex(0); setShowIntroduction(true); setSelectionReady(false);
+          }}>确认清除</button>
           <button className={actionClass} onClick={() => setConfirmClear(false)}>保留草稿</button>
         </div>}
       </section>
@@ -608,7 +630,7 @@ function DetailsForm({ session }: { session: DetailsSession }) {
               onShowDetails={setDetailsSelection}
               nativeAllowed={isNativeSignatureEligible}
               hasOverLimitAnswer={hasOverLimitAnswer}
-              nativeMaxAnswerChars={500}
+              nativeMaxAnswerChars={QUESTIONNAIRE_NATIVE_MAX_ANSWER_CHARS}
               presets={presetEntries}
               onSelectPreset={(presetId) => void handleAddPreset(presetId)}
               onUploadFile={(file) => void handleUploadQuestionnaire(file)}
@@ -753,7 +775,7 @@ function DetailsForm({ session }: { session: DetailsSession }) {
             disabled={busy}
           />
           <div className="flex flex-wrap gap-2">
-            <button className={actionClass} disabled={!guard.ready || busy || questionnaireLoading || profilesLoading || effectiveSelections.length === 0 || flow.length === 0 || !executionMode || (target.location === 'client' && !selected) || blockedDraft || !!questionnaireError || !!profilesError} onClick={() => generate()}>{state.phase === 'generating' ? '正在生成…' : state.phase === 'idle' ? '发送问卷并生成' : '重新生成'}</button>
+            <button className={actionClass} disabled={!guard.ready || busy || questionnaireLoading || profilesLoading || effectiveSelections.length === 0 || flow.length === 0 || !executionMode || (target.location === 'client' && !selected) || blockedDraft || !!profilesError} onClick={() => generate()}>{state.phase === 'generating' ? '正在生成…' : state.phase === 'idle' ? '发送问卷并生成' : '重新生成'}</button>
             {state.phase === 'generating' && <button className={actionClass} onClick={() => session.cancel()}>取消生成</button>}
           </div>
         </>
@@ -862,7 +884,9 @@ function DetailsForm({ session }: { session: DetailsSession }) {
             </div>
             <JsonSizeIndicator
               data={resolvedResultPayload}
-              warningText="⚠️ 接近云端 300KB 上限，保存/替换可能失败，请先精简数据。"
+              maxBytes={MAX_DESKTOP_LOCAL_CARD_DOCUMENT_BYTES}
+              hintText="按 UTF-8 字节估算，对照本地卡单条记录上限"
+              warningText="⚠️ 接近本地卡单条上限（4 MiB），保存到本地卡库可能失败，请先精简数据。"
             />
           </section>}
         </section>}

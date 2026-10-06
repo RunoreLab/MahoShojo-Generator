@@ -299,6 +299,72 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
     expect(mocks.execute.mock.calls[0]![1].hosted.allowNativeSignature).toBe(false);
   });
 
+  it('quick-random produces a saveable card without touching the model path', async () => {
+    await mount();
+    await click('快速随机生成');
+    // 本机产物归一化后携带空 userAnswers——与 generate() 完成路径同形，
+    // 不因缺字段被 validateCard 拒掉（D5.1-P2-r1 回归：此前入口 100% 报错）。
+    expect(container.textContent).toContain('已在本机生成');
+    expect(mocks.execute).not.toHaveBeenCalled();
+    expect(button('保存到本地卡库').disabled).toBe(false);
+    const stored = JSON.parse(window.localStorage.getItem(DETAILS_DRAFT_KEY)!) as {
+      output?: { card?: { userAnswers?: unknown } };
+    };
+    expect(stored.output?.card?.userAnswers).toEqual([]);
+  });
+
+  it('restores a pending draft with non-default selections without dropping its answers', async () => {
+    // 待恢复草稿携带非默认选择集：恢复前页面以默认内置问卷做预览，恢复后目标集变化
+    // 触发答案重映射——基线必须重置，否则恢复的回答会被映射为空并落盘（D5.1-P2-r1）。
+    const custom = { id: 'preset-extra', kind: 'magical-girl', title: '自定义问卷', description: 'd', questions: [{ id: 'q1', question: '自定义问题' }] };
+    window.localStorage.setItem(DETAILS_DRAFT_KEY, JSON.stringify({
+      version: 1,
+      answers: { 'preset:preset-extra::q1': '保留的回答' },
+      language: '简体中文',
+      questionnaireSelections: [{ source: 'preset', questionnaire: custom, selectionId: 'preset:preset-extra' }],
+    }));
+    await mount();
+    await click('恢复草稿');
+    expect(container.querySelector('textarea')?.value).toBe('保留的回答');
+    const stored = JSON.parse(window.localStorage.getItem(DETAILS_DRAFT_KEY)!) as { answers: Record<string, string> };
+    expect(stored.answers['preset:preset-extra::q1']).toBe('保留的回答');
+  });
+
+  it('clears a stale builtin load error once a custom selection set is committed', async () => {
+    // 内置问卷加载失败不应成为生成门禁：草稿恢复出用户自备选择集后错误清除、
+    // 可以直接生成（D5.1-P2-r1 回归：此前错误永远清不掉，形成死锁）。
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, json: async () => ({}) })));
+    const custom = { id: 'preset-extra', kind: 'magical-girl', title: '自定义问卷', description: 'd', questions: [{ id: 'q1', question: '自定义问题' }] };
+    window.localStorage.setItem(DETAILS_DRAFT_KEY, JSON.stringify({
+      version: 1,
+      answers: { 'preset:preset-extra::q1': '保留的回答' },
+      language: '简体中文',
+      questionnaireSelections: [{ source: 'preset', questionnaire: custom, selectionId: 'preset:preset-extra' }],
+    }));
+    await mount();
+    expect(container.textContent).toContain('内置问卷加载失败');
+    await click('恢复草稿');
+    expect(container.textContent).not.toContain('内置问卷加载失败');
+    await click('发送问卷并生成');
+    expect(mocks.execute).toHaveBeenCalledTimes(1);
+  });
+
+  it('applies a residue draft silently instead of showing the restore prompt', async () => {
+    // 自动写回的空壳草稿（无回答/无结果/默认内置选择）不弹恢复提示、直接进入可用态
+    //（D5.1-P2-r1：此前每次进页面都会拦一次「发现上次草稿」）。
+    window.localStorage.setItem(DETAILS_DRAFT_KEY, JSON.stringify({
+      version: 1,
+      answers: {},
+      language: '简体中文',
+      questionnaireSelections: [{ source: 'preset', questionnaire, selectionId: builtinSelectionId(questionnaire.id) }],
+      output: { mode: 'direct-local', cardKind: 'magical-girl', card: null, rawText: '', phase: 'idle' },
+    }));
+    await mount();
+    expect(container.textContent).not.toContain('发现上次草稿');
+    await click('开始回答问卷');
+    expect(container.textContent).toContain('第 1 / 16 题');
+  });
+
   it('warns about possible duplicate cost before regenerating after an uncertain hosted-json outcome', async () => {
     window.localStorage.setItem(DESKTOP_AI_CONFIG_STORAGE_KEY, JSON.stringify({
       version: 2,
