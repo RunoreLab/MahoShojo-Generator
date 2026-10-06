@@ -120,7 +120,13 @@
       "import": "./src/community/index.ts",
       "default": "./src/community/index.ts"
     },
-    "./markdown.css": "./src/markdown/markdown.css"
+    "./announcement": {
+      "types": "./src/announcement/index.ts",
+      "import": "./src/announcement/index.ts",
+      "default": "./src/announcement/index.ts"
+    },
+    "./markdown.css": "./src/markdown/markdown.css",
+    "./product-shell.css": "./src/product-shell.css"
   },
   "scripts": {
     "test": "vitest run --config vitest.config.ts",

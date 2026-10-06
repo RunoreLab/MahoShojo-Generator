@@ -5,7 +5,6 @@ import { AppProviders } from '@/app/providers';
 import { getColorModeInitScript } from '@mahoshojo/ui-web/color-mode-init';
 import '@/styles/globals.css';
 import '@/styles/blue-theme.css';
-import '@/styles/gradient-buttons.css';
 import '@mahoshojo/ui-web/markdown.css';
 
 export const metadata: Metadata = {

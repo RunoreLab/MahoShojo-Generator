@@ -38,8 +38,14 @@ const BRAND_DIR = path.join(CONTENT_ROOT, 'brand');
 const ENCYCLOPEDIA_DIR = path.join(CONTENT_ROOT, 'encyclopedia');
 const QUESTIONNAIRE_DIR = path.join(CONTENT_ROOT, 'questionnaires', 'presets');
 const QUESTIONNAIRE_CATALOG_FILE = 'index.json';
-/** 双端同源的根级 JSON 资产：languages.json 由问卷页语言选择直接 fetch。 */
-const SHARED_ROOT_JSON = ['languages.json'];
+/**
+ * 双端同源的根级 JSON 资产。
+ *
+ * `languages.json` 由问卷页语言选择直接 fetch；`announcements.json` 是公告内容权威源：
+ * Web 由 `public/` 同源伺服，Desktop 的同源副本是**内置快照**——renderer fetch 它不发
+ * 任何网络请求，远端刷新走 native 受控通道（DESK-PARITY-003）。
+ */
+const SHARED_ROOT_JSON = ['languages.json', 'announcements.json'];
 
 /**
  * 目录数据的权威位置。

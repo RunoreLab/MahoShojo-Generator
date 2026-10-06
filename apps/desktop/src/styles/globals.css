@@ -1,5 +1,6 @@
 @import 'tailwindcss';
 @import '@mahoshojo/ui-web/styles.css';
+@import '@mahoshojo/ui-web/product-shell.css';
 @import '@mahoshojo/ui-web/markdown.css';
 
 /* 与 Web `globals.css` 同一行：dark: 变体挂在 `data-color-mode` 上，由共源

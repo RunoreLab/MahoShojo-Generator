@@ -89,6 +89,14 @@ current_state.md
 /apps/web/public/flowers.json
 /apps/web/public/languages.json
 /apps/desktop/public/languages.json
+/apps/web/public/announcements.json
+/apps/desktop/public/announcements.json
+/apps/web/public/favicon.svg
+/apps/desktop/public/favicon.svg
+/apps/web/public/afdian.svg
+/apps/desktop/public/afdian.svg
+/apps/web/public/afdian-white.svg
+/apps/desktop/public/afdian-white.svg
 /apps/web/public/questionnaires/presets/
 /apps/desktop/public/questionnaires/presets/
 /apps/web/public/encyclopedia/

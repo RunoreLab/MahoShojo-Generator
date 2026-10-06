@@ -1,0 +1,1465 @@
+/*
+ * 共源产品壳样式：首页/页脚/公告/功能网格与暗色兼容层。
+ *
+ * ## 所有权
+ *
+ * 规则逐字自 `apps/web/styles/globals.css` 与 `apps/web/styles/gradient-buttons.css` 上移
+ * （D5.1-P1 / DESK-PARITY-002）：它们只被共享产品壳与首页消费，不再是 Web 私有。
+ * 声明一个字符都没有改动（重命名除外，见下）——这是所有权变更，不是设计变更。
+ *
+ * ## 抽的是哪个消费闭包
+ *
+ * `.container`/`.card`/`.title`/`.subtitle`、`.magic-background*`、`.footer`、`.error-message`、
+ * `.theme-image-*`、`.feature-*`、渐变按钮、`body.announcement-visible` 与公告滚动动画、
+ * `@layer utilities` 暗色 remap——共享组件（AppShell/HomeView/ProductFooter/公告中心/
+ * ErrorMessageBox/CardLibraryModal）渲染出的 class 在这里有且只有一处权威定义。
+ * `.generate-button`/`.result-card`/`.save-button` 同样在本闭包：共享的
+ * character-card 与 details-controls 今天就渲染它们，留在 Web 等于让 Desktop 的
+ * /details 结果卡裸奔。
+ *
+ * 留下的仍是 Web 私有：竞技场 `battle-lite-*`/`arena-*`、卡牌工坊 `gc-*` 与页面级
+ * `.title-container` 等，随 P2 旅程切片各自迁移。
+ *
+ * ## 与 styles.css 的分工
+ *
+ * `styles.css` 是 token 层（`--app-*` 三段解析、输入/选择器/顶栏底座）；本文件是产品壳
+ * 消费闭包层。两端 `globals.css` 都以 `@import` 回用，顺序固定为 tailwind → styles →
+ * 本文件，再是宿主私有规则。
+ *
+ * ## 唯一的非逐字改动
+ *
+ * 公告组件原用 styled-jsx 在运行时注入 keyframes（`.animate-scroll-left` 等）——那是
+ * Next 私有机制，共享组件不能依赖。动画与类名移入本文件并加 `announcement-` 前缀，
+ * 避免与全局 `.animate-fade-in` 撞名；行为取值不变。
+ */
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+/* 披露式面板自上而下展开。BattleDataModal 的高级筛选面板一直在引用
+   `animate-fade-in-down`，但这条 keyframes 从未定义，展开实际是瞬间弹出。 */
+@keyframes fadeInDown {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@layer components {
+  .animate-fade-in-down {
+    animation: fadeInDown 0.18s ease-out;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .animate-fade-in-down {
+      animation: none;
+    }
+  }
+}
+
+.container {
+  max-width: 500px;
+  margin: 0 auto;
+  padding: 20px;
+  position: relative;
+  z-index: 1;
+}
+
+.card {
+  background: var(--app-surface);
+  border-radius: 20px;
+  padding: 30px;
+  box-shadow: var(--app-card-shadow);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--app-border);
+  max-width: 500px;
+  color: var(--app-text);
+}
+
+.title {
+  text-align: center;
+  font-size: 2rem;
+  font-weight: bold;
+  background: linear-gradient(45deg, #ff6b6b, #ee5a6f, #d63384);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  margin-bottom: 30px;
+}
+
+/* 当公告栏显示时，为页面主体增加底部内边距，防止遮挡 */
+body.announcement-visible {
+  padding-bottom: 50px;
+  /* 这个值约等于公告栏的高度 */
+}
+
+/* 原生表单控件跟随产品主题（暗色）：共享 ai-provider/设置页直接渲染原生
+   input/select，两端需要同一份规则而不是各自维护。 */
+@media (prefers-color-scheme: dark) {
+
+  :root:not([data-color-mode]) input[type='text'],
+  :root:not([data-color-mode]) input[type='password'],
+  :root:not([data-color-mode]) input[type='email'],
+  :root:not([data-color-mode]) input[type='search'],
+  :root:not([data-color-mode]) input[type='url'],
+  :root:not([data-color-mode]) input[type='number'],
+  :root:not([data-color-mode]) textarea,
+  :root:not([data-color-mode]) select {
+    color: var(--app-text);
+    background-color: var(--app-input-bg);
+    border-color: var(--app-input-border);
+  }
+
+  :root:not([data-color-mode]) input::placeholder,
+  :root:not([data-color-mode]) textarea::placeholder {
+    color: var(--app-text-subtle);
+  }
+}
+
+:root[data-color-mode='dark'] input[type='text'],
+:root[data-color-mode='dark'] input[type='password'],
+:root[data-color-mode='dark'] input[type='email'],
+:root[data-color-mode='dark'] input[type='search'],
+:root[data-color-mode='dark'] input[type='url'],
+:root[data-color-mode='dark'] input[type='number'],
+:root[data-color-mode='dark'] textarea,
+:root[data-color-mode='dark'] select {
+  color: var(--app-text);
+  background-color: var(--app-input-bg);
+  border-color: var(--app-input-border);
+}
+
+:root[data-color-mode='dark'] input::placeholder,
+:root[data-color-mode='dark'] textarea::placeholder {
+  color: var(--app-text-subtle);
+}
+
+@layer components {
+
+  /* 魔法少女主题样式 */
+  .magic-background {
+    background: var(--app-magic-bg);
+    background-attachment: fixed;
+    background-size: cover;
+    min-height: 100vh;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .magic-background-white {
+    background: var(--app-magic-bg-white);
+    background-attachment: fixed;
+    background-size: cover;
+    min-height: 100vh;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .magic-background-dark {
+    background: var(--app-magic-bg-dark);
+    background-attachment: fixed;
+    background-size: cover;
+    min-height: 100vh;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .magic-background::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    pointer-events: none;
+    background-image: radial-gradient(circle at 20% 50%, rgba(255, 255, 255, 0.2) 2px, transparent 2px), radial-gradient(circle at 80% 20%, rgba(255, 255, 255, 0.15) 1px, transparent 1px), radial-gradient(circle at 40% 80%, rgba(255, 255, 255, 0.1) 1px, transparent 1px);
+    background-size: 50px 50px, 30px 30px, 40px 40px;
+    animation: sparkle 6s ease-in-out infinite;
+  }
+
+  @keyframes sparkle {
+
+    0%,
+    100% {
+      opacity: 1;
+    }
+
+    50% {
+      opacity: 0.7;
+    }
+  }
+
+  .theme-image-light {
+    display: inline-block;
+  }
+
+  .theme-image-dark {
+    display: none;
+  }
+
+  :root[data-color-mode='dark'] .theme-image-light {
+    display: none;
+  }
+
+  :root[data-color-mode='dark'] .theme-image-dark {
+    display: inline-block;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-color-mode]) .theme-image-light {
+      display: none;
+    }
+
+    :root:not([data-color-mode]) .theme-image-dark {
+      display: inline-block;
+    }
+  }
+
+  @media (max-width: 600px) {
+    .container {
+      padding: 15px;
+    }
+
+    .card {
+      padding: 20px;
+    }
+
+    .title {
+      font-size: 1.5rem;
+    }
+  }
+
+  .subtitle {
+    text-align: center;
+    font-size: 1rem;
+    color: var(--app-text-muted);
+    margin-bottom: 25px;
+    font-style: italic;
+  }
+
+  .error-message {
+    background: linear-gradient(135deg, #ff6b6b, #ee5a6f);
+    color: white;
+    padding: 15px;
+    border-radius: 10px;
+    margin: 15px 0;
+    text-align: center;
+    font-weight: 500;
+    animation: fadeIn 0.3s ease-in-out;
+  }
+
+  .generate-button {
+    width: 100%;
+    padding: 15px;
+    background: linear-gradient(45deg, var(--app-accent), var(--app-accent-strong));
+    color: white;
+    border: none;
+    border-radius: 12px;
+    font-size: 18px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    margin-bottom: 20px;
+  }
+
+  .generate-button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 20px var(--app-accent-shadow);
+  }
+
+  .generate-button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+  }
+
+  .result-card {
+    background: var(--app-result-card-bg);
+    color: white;
+    border-radius: 15px;
+    padding: 25px;
+    margin-top: 20px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .result-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    pointer-events: none;
+    background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="25" cy="25" r="2" fill="rgba(255,255,255,0.1)"/><circle cx="75" cy="75" r="1.5" fill="rgba(255,255,255,0.1)"/><circle cx="80" cy="20" r="1" fill="rgba(255,255,255,0.1)"/></svg>');
+    background-size: 100px 100px;
+  }
+
+  .result-content {
+    position: relative;
+    z-index: 1;
+  }
+
+  .level-badge {
+    display: inline-block;
+    padding: 8px 16px;
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 20px;
+    font-weight: bold;
+    font-size: 18px;
+  }
+
+  .save-button {
+    width: 100%;
+    padding: 12px;
+    background: rgba(255, 255, 255, 0.2);
+    color: white;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    border-radius: 10px;
+    font-size: 16px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    margin-top: 15px;
+  }
+
+  .save-button:hover {
+    background: rgba(255, 255, 255, 0.3);
+  }
+
+  .save-instructions {
+    text-align: center;
+    margin-top: 10px;
+    font-size: 12px;
+    opacity: 0.8;
+  }
+
+  .footer {
+    text-align: center;
+    padding: 20px 0;
+    margin-top: 20px;
+    margin-bottom: 20px;
+    color: var(--app-text-muted);
+    font-size: 14px;
+  }
+
+  .footer-link {
+    color: var(--app-footer-link);
+    font-weight: 600;
+    text-decoration: none;
+    transition: all 0.3s ease;
+  }
+
+  .footer-link:hover {
+    color: var(--app-footer-link-hover);
+    text-decoration: underline;
+  }
+
+  /* 宿主没有系统浏览器能力时，站外入口降级为「说明而不可点」的文案
+     （与共源顶栏同一形状，DESK-PROD-001）。 */
+  .footer-link-disabled {
+    color: var(--app-text-subtle);
+    font-weight: 600;
+    cursor: not-allowed;
+  }
+
+  /* 分类功能导航样式 */
+  .feature-category {
+    margin-bottom: 2rem;
+  }
+
+  .feature-grid {
+    display: grid;
+    gap: 1rem;
+  }
+
+  /* 默认单列 */
+  .feature-grid.grid-cols-1 {
+    grid-template-columns: 1fr;
+  }
+
+  /* 响应式2列网格 */
+  @media (min-width: 768px) {
+    .feature-grid.md\:grid-cols-2 {
+      grid-template-columns: repeat(2, 1fr);
+      gap: 1.5rem;
+    }
+  }
+}
+
+/* 流动渐变按钮样式 - 性能优化版本 */
+
+/* 使用transform代替background-position，性能更好 */
+@keyframes gradientFlow {
+  0% {
+    background-position: 0% 50%;
+  }
+
+  50% {
+    background-position: 100% 50%;
+  }
+
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+/* 优化的快速流动动画 */
+@keyframes gradientFlowFast {
+  0% {
+    background-position: 0% 0%;
+  }
+
+  25% {
+    background-position: 100% 0%;
+  }
+
+  50% {
+    background-position: 100% 100%;
+  }
+
+  75% {
+    background-position: 0% 100%;
+  }
+
+  100% {
+    background-position: 0% 0%;
+  }
+}
+
+/* 闪烁效果 */
+@keyframes sparkle {
+
+  0%,
+  100% {
+    opacity: 0.3;
+    transform: scale(1);
+  }
+
+  50% {
+    opacity: 0.8;
+    transform: scale(1.05);
+  }
+}
+
+.feature-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  border-radius: 20px;
+  padding: 1.5rem;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+  /* 添加回模糊效果，但使用性能更好的方式 */
+  backdrop-filter: blur(5px);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  /* 优化：使用transform和opacity的transition，性能更好 */
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+    box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 0.3s ease;
+  text-decoration: none;
+  color: inherit;
+  overflow: hidden;
+  /* 开启硬件加速 */
+  will-change: transform, opacity;
+}
+
+.gradient-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  opacity: 1;
+  border-radius: 20px;
+  /* 恢复动画效果，但使用较小的背景尺寸减少GPU负担 */
+  background-size: 200% 200%;
+  /* 使用transform触发GPU加速 */
+  transform: translateZ(0);
+  /* 开启硬件加速 */
+  will-change: background-position, transform;
+  z-index: 1;
+}
+
+/* 只在非移动设备上启用动画 */
+@media (min-width: 768px) {
+  .gradient-overlay {
+    animation: gradientFlow 8s ease-in-out infinite;
+  }
+}
+
+.magical-generator .gradient-overlay {
+  /* 恢复原始渐变，但优化停止点 */
+  background: linear-gradient(45deg,
+      #ff9a9e 0%,
+      #fecfef 30%,
+      #fecfef 50%,
+      #ff6b6b 70%,
+      #ee5a6f 100%);
+}
+
+.fairy-quest .gradient-overlay {
+  /* 恢复原始渐变，但优化停止点 */
+  background: linear-gradient(45deg,
+      #667eea 0%,
+      #764ba2 30%,
+      #5c7cfa 50%,
+      #748ffc 70%,
+      #9775fa 100%);
+}
+
+.battle-arena {
+  padding: 3em 0 3em 0;
+}
+
+.battle-arena .gradient-overlay {
+  background: linear-gradient(45deg,
+      #434343 0%,
+      #000000 25%,
+      #757F9A 50%,
+      #D7DDE8 75%,
+      #434343 100%);
+}
+
+.canshou-generator .gradient-overlay {
+  background: linear-gradient(45deg,
+      #8E2DE2 0%,
+      #4A00E0 25%,
+      #240b36 50%,
+      #c31432 75%,
+      #8E2DE2 100%);
+}
+
+.scenario-generator .gradient-overlay {
+  background: linear-gradient(45deg,
+      #A8E6C1 0%,
+      #81E3D3 25%,
+      #7DD3C0 50%,
+      #8FE5B7 75%,
+      #A8E6C1 100%);
+}
+
+.free-generator .gradient-overlay {
+  background: linear-gradient(45deg,
+      #fdf2f8 0%,
+      #e0f2fe 25%,
+      #ddd6fe 50%,
+      #fce7f3 75%,
+      #fdf2f8 100%);
+}
+
+.tavern-ecosystem .gradient-overlay {
+  background: linear-gradient(45deg,
+      #fff7ed 0%,
+      #fed7aa 25%,
+      #fb7185 50%,
+      #c084fc 75%,
+      #38bdf8 100%);
+}
+
+.magic-tea-party .gradient-overlay {
+  background: linear-gradient(45deg,
+      #0ea5e9 0%,
+      #22c55e 25%,
+      #a855f7 50%,
+      #fb7185 75%,
+      #0ea5e9 100%);
+}
+
+.character-party .gradient-overlay {
+  background: linear-gradient(45deg,
+      #e0f2fe 0%,
+      #a7f3d0 25%,
+      #fce7f3 50%,
+      #ddd6fe 75%,
+      #e0f2fe 100%);
+}
+
+.sublimation .gradient-overlay {
+  background: linear-gradient(45deg,
+      #FFD700 0%,
+      #FFA500 25%,
+      #FF8C00 50%,
+      #FFB347 75%,
+      #FFD700 100%);
+}
+
+.character-manager .gradient-overlay {
+  background: linear-gradient(45deg,
+      #5D4E75 0%,
+      #8B7BA8 25%,
+      #B19CD9 50%,
+      #9A89B4 75%,
+      #6B5B95 100%);
+}
+
+.card-forge .gradient-overlay {
+  background: linear-gradient(45deg,
+      #fbbf24 0%,
+      #f472b6 25%,
+      #a78bfa 50%,
+      #60a5fa 75%,
+      #34d399 100%);
+}
+
+.feature-button:hover .gradient-overlay {
+  /* 恢复原始动画，但使用GPU加速 */
+  animation: gradientFlowFast 4s ease-in-out infinite;
+  background-size: 300% 300%;
+  transform: translateZ(0);
+  opacity: 1;
+}
+
+.feature-button:hover {
+  /* 恢复原始效果，但优化transform */
+  transform: translateY(-8px);
+  box-shadow: 0 25px 50px rgba(0, 0, 0, 0.2);
+  /* 确保硬件加速 */
+  will-change: transform, box-shadow;
+}
+
+.feature-button-content {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  border-radius: 16px;
+}
+
+.feature-title-container {
+  font-size: 1.5rem;
+  font-weight: bold;
+  background: linear-gradient(45deg, #333, #666);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  display: flex;
+  align-items: center;
+}
+
+.magical-generator .feature-title-container {
+  background: linear-gradient(45deg, #ff6b6b, #ee5a6f, #d63384);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.feature-title-svg {
+  max-width: 100%;
+  height: auto;
+  filter: drop-shadow(2px 2px 4px rgba(0, 0, 0, 0.1));
+}
+
+.feature-description {
+  color: #555;
+  font-size: 0.95rem;
+  line-height: 1.5;
+  margin: 0;
+  font-weight: 500;
+}
+
+/* 魔法粒子效果 - 性能优化版 */
+.feature-button::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  /* 恢复原始效果，但优化背景图案 */
+  background-image:
+    radial-gradient(circle at 20% 20%, rgba(255, 255, 255, 0.3) 2px, transparent 2px),
+    radial-gradient(circle at 80% 80%, rgba(255, 255, 255, 0.2) 1px, transparent 1px),
+    radial-gradient(circle at 40% 60%, rgba(255, 255, 255, 0.15) 1px, transparent 1px);
+  background-size: 40px 40px, 25px 25px, 35px 35px;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  z-index: 3;
+  pointer-events: none;
+  border-radius: 20px;
+  /* 开启硬件加速 */
+  will-change: opacity;
+  transform: translateZ(0);
+}
+
+.feature-button:hover::before {
+  opacity: 0.8;
+  /* 恢复原始动画，但只在hover时运行 */
+  animation: sparkle 4s ease-in-out infinite;
+}
+
+/* Loading状态样式 */
+.feature-button.loading {
+  pointer-events: none;
+  opacity: 0.8;
+}
+
+.feature-button.loading .gradient-overlay {
+  animation: none;
+  opacity: 0.7;
+}
+
+/* 性能优化：减少不必要的重绘 */
+.feature-button * {
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+/* 响应式设计 */
+@media (max-width: 600px) {
+  .feature-button {
+    /* 移动端减少transform效果 */
+    will-change: auto;
+  }
+
+  .feature-button:hover {
+    transform: translateY(-2px);
+  }
+
+  .feature-button-content {
+    padding: 0;
+  }
+
+  .feature-title-container {
+    font-size: 1.25rem;
+  }
+
+  .feature-description {
+    font-size: 0.85rem;
+  }
+
+  /* 移动端优化 */
+  .feature-button::before {
+    /* 简化移动端效果 */
+    background-image:
+      radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.2) 1px, transparent 1px);
+    background-size: 30px 30px;
+  }
+
+  /* 移动端减少动画 */
+  .gradient-overlay {
+    animation: none !important;
+    background-size: 100% 100% !important;
+  }
+
+  .feature-button:hover .gradient-overlay {
+    animation: none !important;
+    background-size: 100% 100% !important;
+    transform: none;
+  }
+}
+
+/* 减少动画的偏好设置支持 */
+@media (prefers-reduced-motion: reduce) {
+  .feature-button {
+    transition: none;
+  }
+
+  .feature-button:hover {
+    transform: none;
+    animation: none;
+  }
+
+  .feature-button::before {
+    animation: none;
+  }
+
+  .gradient-overlay {
+    animation: none;
+  }
+}
+
+/* ==================== 公告栏 ==================== */
+
+@keyframes announcement-scroll-left {
+  0% {
+    transform: translateX(100vw);
+  }
+
+  100% {
+    transform: translateX(-100%);
+  }
+}
+
+@keyframes announcement-fade-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes announcement-slide-up {
+  from {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.announcement-scroll {
+  animation: announcement-scroll-left 15s linear infinite;
+  will-change: transform;
+}
+
+.announcement-fade {
+  animation: announcement-fade-in 0.3s ease-out;
+}
+
+.announcement-rise {
+  animation: announcement-slide-up 0.3s ease-out;
+}
+
+.announcement-pause-on-hover:hover .announcement-scroll,
+.announcement-pause-on-hover .announcement-scroll:hover {
+  animation-play-state: paused;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .announcement-scroll,
+  .announcement-fade,
+  .announcement-rise {
+    animation: none;
+  }
+}
+
+@layer utilities {
+
+  :root[data-color-mode='dark'] .text-gray-900,
+  :root[data-color-mode='dark'] .text-gray-800,
+  :root[data-color-mode='dark'] .text-gray-700 {
+    color: var(--app-text);
+  }
+
+  :root[data-color-mode='dark'] .text-gray-600 {
+    color: var(--app-text-muted);
+  }
+
+  :root[data-color-mode='dark'] .text-gray-500 {
+    color: var(--app-text-subtle);
+  }
+
+  :root[data-color-mode='dark'] .text-gray-400 {
+    color: #94a3b8;
+  }
+
+  :root[data-color-mode='dark'] .text-slate-900,
+  :root[data-color-mode='dark'] .text-slate-800,
+  :root[data-color-mode='dark'] .text-slate-700 {
+    color: var(--app-text);
+  }
+
+  :root[data-color-mode='dark'] .text-slate-600 {
+    color: var(--app-text-muted);
+  }
+
+  :root[data-color-mode='dark'] .text-slate-500 {
+    color: var(--app-text-subtle);
+  }
+
+  :root[data-color-mode='dark'] .text-slate-400 {
+    color: #94a3b8;
+  }
+
+  :root[data-color-mode='dark'] .text-black {
+    color: var(--app-text);
+  }
+
+  :root[data-color-mode='dark'] .text-blue-500,
+  :root[data-color-mode='dark'] .text-blue-600,
+  :root[data-color-mode='dark'] .text-blue-700,
+  :root[data-color-mode='dark'] .text-blue-800,
+  :root[data-color-mode='dark'] .text-blue-900 {
+    color: #93c5fd;
+  }
+
+  :root[data-color-mode='dark'] .text-indigo-500,
+  :root[data-color-mode='dark'] .text-indigo-600,
+  :root[data-color-mode='dark'] .text-indigo-700,
+  :root[data-color-mode='dark'] .text-indigo-800,
+  :root[data-color-mode='dark'] .text-indigo-900 {
+    color: #a5b4fc;
+  }
+
+  :root[data-color-mode='dark'] .text-purple-500,
+  :root[data-color-mode='dark'] .text-purple-600,
+  :root[data-color-mode='dark'] .text-purple-700,
+  :root[data-color-mode='dark'] .text-purple-800,
+  :root[data-color-mode='dark'] .text-purple-900,
+  :root[data-color-mode='dark'] .text-purple-950 {
+    color: #d8b4fe;
+  }
+
+  :root[data-color-mode='dark'] .text-violet-600,
+  :root[data-color-mode='dark'] .text-violet-700,
+  :root[data-color-mode='dark'] .text-violet-800 {
+    color: #c4b5fd;
+  }
+
+  :root[data-color-mode='dark'] .text-pink-500,
+  :root[data-color-mode='dark'] .text-pink-600,
+  :root[data-color-mode='dark'] .text-pink-700,
+  :root[data-color-mode='dark'] .text-pink-800,
+  :root[data-color-mode='dark'] .text-pink-900 {
+    color: #f9a8d4;
+  }
+
+  :root[data-color-mode='dark'] .text-rose-600,
+  :root[data-color-mode='dark'] .text-rose-700,
+  :root[data-color-mode='dark'] .text-rose-800 {
+    color: #fda4af;
+  }
+
+  :root[data-color-mode='dark'] .text-red-500,
+  :root[data-color-mode='dark'] .text-red-600,
+  :root[data-color-mode='dark'] .text-red-700,
+  :root[data-color-mode='dark'] .text-red-800,
+  :root[data-color-mode='dark'] .text-red-900 {
+    color: #fca5a5;
+  }
+
+  :root[data-color-mode='dark'] .text-orange-600,
+  :root[data-color-mode='dark'] .text-orange-700,
+  :root[data-color-mode='dark'] .text-orange-800 {
+    color: #fdba74;
+  }
+
+  :root[data-color-mode='dark'] .text-amber-600,
+  :root[data-color-mode='dark'] .text-amber-700,
+  :root[data-color-mode='dark'] .text-amber-800,
+  :root[data-color-mode='dark'] .text-amber-900,
+  :root[data-color-mode='dark'] .text-amber-950 {
+    color: #fcd34d;
+  }
+
+  :root[data-color-mode='dark'] .text-yellow-600,
+  :root[data-color-mode='dark'] .text-yellow-700,
+  :root[data-color-mode='dark'] .text-yellow-800,
+  :root[data-color-mode='dark'] .text-yellow-900 {
+    color: #fde047;
+  }
+
+  :root[data-color-mode='dark'] .text-green-600,
+  :root[data-color-mode='dark'] .text-green-700,
+  :root[data-color-mode='dark'] .text-green-800 {
+    color: #86efac;
+  }
+
+  :root[data-color-mode='dark'] .text-emerald-600,
+  :root[data-color-mode='dark'] .text-emerald-700,
+  :root[data-color-mode='dark'] .text-emerald-800 {
+    color: #6ee7b7;
+  }
+
+  :root[data-color-mode='dark'] .text-teal-600,
+  :root[data-color-mode='dark'] .text-teal-700,
+  :root[data-color-mode='dark'] .text-teal-800 {
+    color: #5eead4;
+  }
+
+  :root[data-color-mode='dark'] .text-sky-600,
+  :root[data-color-mode='dark'] .text-sky-700,
+  :root[data-color-mode='dark'] .text-sky-800 {
+    color: #7dd3fc;
+  }
+
+  :root[data-color-mode='dark'] .bg-white {
+    background-color: var(--app-surface-strong);
+  }
+
+  :root[data-color-mode='dark'] .bg-white\/95 {
+    background-color: var(--app-surface-95);
+  }
+
+  :root[data-color-mode='dark'] .bg-white\/90 {
+    background-color: var(--app-surface-90);
+  }
+
+  :root[data-color-mode='dark'] .bg-white\/80 {
+    background-color: var(--app-surface-80);
+  }
+
+  :root[data-color-mode='dark'] .bg-white\/70 {
+    background-color: var(--app-surface-70);
+  }
+
+  :root[data-color-mode='dark'] .bg-white\/60 {
+    background-color: var(--app-surface-60);
+  }
+
+  :root[data-color-mode='dark'] .bg-white\/50 {
+    background-color: var(--app-surface-50);
+  }
+
+  :root[data-color-mode='dark'] .bg-gray-50 {
+    background-color: var(--app-surface-80);
+  }
+
+  :root[data-color-mode='dark'] .bg-gray-100 {
+    background-color: var(--app-surface-70);
+  }
+
+  :root[data-color-mode='dark'] .bg-gray-200 {
+    background-color: var(--app-surface-60);
+  }
+
+  :root[data-color-mode='dark'] .bg-gray-300 {
+    background-color: var(--app-surface-50);
+  }
+
+  :root[data-color-mode='dark'] .bg-gray-50\/70 {
+    background-color: var(--app-surface-70);
+  }
+
+  :root[data-color-mode='dark'] .bg-gray-50\/60 {
+    background-color: var(--app-surface-60);
+  }
+
+  :root[data-color-mode='dark'] .bg-gray-50\/40 {
+    background-color: var(--app-surface-40);
+  }
+
+  :root[data-color-mode='dark'] .bg-gray-50\/80 {
+    background-color: var(--app-surface-80);
+  }
+
+  :root[data-color-mode='dark'] .bg-slate-50 {
+    background-color: var(--app-surface-80);
+  }
+
+  :root[data-color-mode='dark'] .bg-slate-100 {
+    background-color: var(--app-surface-70);
+  }
+
+  :root[data-color-mode='dark'] .bg-slate-200 {
+    background-color: var(--app-surface-60);
+  }
+
+  :root[data-color-mode='dark'] .bg-pink-50,
+  :root[data-color-mode='dark'] .bg-pink-50\/70,
+  :root[data-color-mode='dark'] .bg-pink-50\/40,
+  :root[data-color-mode='dark'] .bg-pink-50\/80,
+  :root[data-color-mode='dark'] .bg-pink-100,
+  :root[data-color-mode='dark'] .bg-purple-50,
+  :root[data-color-mode='dark'] .bg-purple-50\/40,
+  :root[data-color-mode='dark'] .bg-purple-100,
+  :root[data-color-mode='dark'] .bg-blue-50,
+  :root[data-color-mode='dark'] .bg-blue-50\/50,
+  :root[data-color-mode='dark'] .bg-blue-100,
+  :root[data-color-mode='dark'] .bg-indigo-50,
+  :root[data-color-mode='dark'] .bg-indigo-100,
+  :root[data-color-mode='dark'] .bg-emerald-50,
+  :root[data-color-mode='dark'] .bg-green-50,
+  :root[data-color-mode='dark'] .bg-green-100,
+  :root[data-color-mode='dark'] .bg-yellow-50,
+  :root[data-color-mode='dark'] .bg-yellow-100,
+  :root[data-color-mode='dark'] .bg-amber-50,
+  :root[data-color-mode='dark'] .bg-amber-50\/80,
+  :root[data-color-mode='dark'] .bg-amber-100,
+  :root[data-color-mode='dark'] .bg-orange-100,
+  :root[data-color-mode='dark'] .bg-red-50,
+  :root[data-color-mode='dark'] .bg-rose-50,
+  :root[data-color-mode='dark'] .bg-violet-50,
+  :root[data-color-mode='dark'] .bg-sky-50,
+  :root[data-color-mode='dark'] .bg-teal-50,
+  :root[data-color-mode='dark'] .bg-teal-100 {
+    background-color: var(--app-surface-70);
+  }
+
+  :root[data-color-mode='dark'] .bg-pink-200,
+  :root[data-color-mode='dark'] .bg-purple-200,
+  :root[data-color-mode='dark'] .bg-blue-200,
+  :root[data-color-mode='dark'] .bg-indigo-200,
+  :root[data-color-mode='dark'] .bg-emerald-100,
+  :root[data-color-mode='dark'] .bg-green-200,
+  :root[data-color-mode='dark'] .bg-yellow-200,
+  :root[data-color-mode='dark'] .bg-amber-200,
+  :root[data-color-mode='dark'] .bg-orange-200,
+  :root[data-color-mode='dark'] .bg-red-100,
+  :root[data-color-mode='dark'] .bg-red-200,
+  :root[data-color-mode='dark'] .bg-rose-100,
+  :root[data-color-mode='dark'] .bg-violet-100,
+  :root[data-color-mode='dark'] .bg-sky-100 {
+    background-color: var(--app-surface-60);
+  }
+
+  :root[data-color-mode='dark'] .bg-pink-300,
+  :root[data-color-mode='dark'] .bg-purple-300,
+  :root[data-color-mode='dark'] .bg-red-300,
+  :root[data-color-mode='dark'] .bg-gray-400 {
+    background-color: var(--app-surface-50);
+  }
+
+  :root[data-color-mode='dark'] .border-gray-200,
+  :root[data-color-mode='dark'] .border-gray-300,
+  :root[data-color-mode='dark'] .border-gray-400 {
+    border-color: var(--app-border);
+  }
+
+  :root[data-color-mode='dark'] .border-gray-100 {
+    border-color: var(--app-border-strong);
+  }
+
+  :root[data-color-mode='dark'] .border-pink-100,
+  :root[data-color-mode='dark'] .border-pink-200,
+  :root[data-color-mode='dark'] .border-pink-300,
+  :root[data-color-mode='dark'] .border-purple-100,
+  :root[data-color-mode='dark'] .border-purple-200,
+  :root[data-color-mode='dark'] .border-blue-200,
+  :root[data-color-mode='dark'] .border-indigo-200,
+  :root[data-color-mode='dark'] .border-emerald-200,
+  :root[data-color-mode='dark'] .border-green-200,
+  :root[data-color-mode='dark'] .border-yellow-200,
+  :root[data-color-mode='dark'] .border-amber-200,
+  :root[data-color-mode='dark'] .border-orange-200,
+  :root[data-color-mode='dark'] .border-red-200,
+  :root[data-color-mode='dark'] .border-rose-200,
+  :root[data-color-mode='dark'] .border-violet-200,
+  :root[data-color-mode='dark'] .border-sky-200,
+  :root[data-color-mode='dark'] .border-teal-200 {
+    border-color: var(--app-border);
+  }
+
+  :root[data-color-mode='dark'] .border-slate-200,
+  :root[data-color-mode='dark'] .border-slate-300 {
+    border-color: var(--app-border);
+  }
+
+  :root[data-color-mode='dark'] .ring-gray-200 {
+    --tw-ring-color: var(--app-border);
+  }
+
+  :root[data-color-mode='dark'] .divide-gray-200> :not([hidden])~ :not([hidden]) {
+    border-color: var(--app-border);
+  }
+
+  @media (prefers-color-scheme: dark) {
+
+    :root:not([data-color-mode]) .text-gray-900,
+    :root:not([data-color-mode]) .text-gray-800,
+    :root:not([data-color-mode]) .text-gray-700 {
+      color: var(--app-text);
+    }
+
+    :root:not([data-color-mode]) .text-gray-600 {
+      color: var(--app-text-muted);
+    }
+
+    :root:not([data-color-mode]) .text-gray-500 {
+      color: var(--app-text-subtle);
+    }
+
+    :root:not([data-color-mode]) .text-gray-400 {
+      color: #94a3b8;
+    }
+
+    :root:not([data-color-mode]) .text-slate-900,
+    :root:not([data-color-mode]) .text-slate-800,
+    :root:not([data-color-mode]) .text-slate-700 {
+      color: var(--app-text);
+    }
+
+    :root:not([data-color-mode]) .text-slate-600 {
+      color: var(--app-text-muted);
+    }
+
+    :root:not([data-color-mode]) .text-slate-500 {
+      color: var(--app-text-subtle);
+    }
+
+    :root:not([data-color-mode]) .text-slate-400 {
+      color: #94a3b8;
+    }
+
+    :root:not([data-color-mode]) .text-black {
+      color: var(--app-text);
+    }
+
+    :root:not([data-color-mode]) .text-blue-500,
+    :root:not([data-color-mode]) .text-blue-600,
+    :root:not([data-color-mode]) .text-blue-700,
+    :root:not([data-color-mode]) .text-blue-800,
+    :root:not([data-color-mode]) .text-blue-900 {
+      color: #93c5fd;
+    }
+
+    :root:not([data-color-mode]) .text-indigo-500,
+    :root:not([data-color-mode]) .text-indigo-600,
+    :root:not([data-color-mode]) .text-indigo-700,
+    :root:not([data-color-mode]) .text-indigo-800,
+    :root:not([data-color-mode]) .text-indigo-900 {
+      color: #a5b4fc;
+    }
+
+    :root:not([data-color-mode]) .text-purple-500,
+    :root:not([data-color-mode]) .text-purple-600,
+    :root:not([data-color-mode]) .text-purple-700,
+    :root:not([data-color-mode]) .text-purple-800,
+    :root:not([data-color-mode]) .text-purple-900,
+    :root:not([data-color-mode]) .text-purple-950 {
+      color: #d8b4fe;
+    }
+
+    :root:not([data-color-mode]) .text-violet-600,
+    :root:not([data-color-mode]) .text-violet-700,
+    :root:not([data-color-mode]) .text-violet-800 {
+      color: #c4b5fd;
+    }
+
+    :root:not([data-color-mode]) .text-pink-500,
+    :root:not([data-color-mode]) .text-pink-600,
+    :root:not([data-color-mode]) .text-pink-700,
+    :root:not([data-color-mode]) .text-pink-800,
+    :root:not([data-color-mode]) .text-pink-900 {
+      color: #f9a8d4;
+    }
+
+    :root:not([data-color-mode]) .text-rose-600,
+    :root:not([data-color-mode]) .text-rose-700,
+    :root:not([data-color-mode]) .text-rose-800 {
+      color: #fda4af;
+    }
+
+    :root:not([data-color-mode]) .text-red-500,
+    :root:not([data-color-mode]) .text-red-600,
+    :root:not([data-color-mode]) .text-red-700,
+    :root:not([data-color-mode]) .text-red-800,
+    :root:not([data-color-mode]) .text-red-900 {
+      color: #fca5a5;
+    }
+
+    :root:not([data-color-mode]) .text-orange-600,
+    :root:not([data-color-mode]) .text-orange-700,
+    :root:not([data-color-mode]) .text-orange-800 {
+      color: #fdba74;
+    }
+
+    :root:not([data-color-mode]) .text-amber-600,
+    :root:not([data-color-mode]) .text-amber-700,
+    :root:not([data-color-mode]) .text-amber-800,
+    :root:not([data-color-mode]) .text-amber-900,
+    :root:not([data-color-mode]) .text-amber-950 {
+      color: #fcd34d;
+    }
+
+    :root:not([data-color-mode]) .text-yellow-600,
+    :root:not([data-color-mode]) .text-yellow-700,
+    :root:not([data-color-mode]) .text-yellow-800,
+    :root:not([data-color-mode]) .text-yellow-900 {
+      color: #fde047;
+    }
+
+    :root:not([data-color-mode]) .text-green-600,
+    :root:not([data-color-mode]) .text-green-700,
+    :root:not([data-color-mode]) .text-green-800 {
+      color: #86efac;
+    }
+
+    :root:not([data-color-mode]) .text-emerald-600,
+    :root:not([data-color-mode]) .text-emerald-700,
+    :root:not([data-color-mode]) .text-emerald-800 {
+      color: #6ee7b7;
+    }
+
+    :root:not([data-color-mode]) .text-teal-600,
+    :root:not([data-color-mode]) .text-teal-700,
+    :root:not([data-color-mode]) .text-teal-800 {
+      color: #5eead4;
+    }
+
+    :root:not([data-color-mode]) .text-sky-600,
+    :root:not([data-color-mode]) .text-sky-700,
+    :root:not([data-color-mode]) .text-sky-800 {
+      color: #7dd3fc;
+    }
+
+    :root:not([data-color-mode]) .bg-white {
+      background-color: var(--app-surface-strong);
+    }
+
+    :root:not([data-color-mode]) .bg-white\/95 {
+      background-color: var(--app-surface-95);
+    }
+
+    :root:not([data-color-mode]) .bg-white\/90 {
+      background-color: var(--app-surface-90);
+    }
+
+    :root:not([data-color-mode]) .bg-white\/80 {
+      background-color: var(--app-surface-80);
+    }
+
+    :root:not([data-color-mode]) .bg-white\/70 {
+      background-color: var(--app-surface-70);
+    }
+
+    :root:not([data-color-mode]) .bg-white\/60 {
+      background-color: var(--app-surface-60);
+    }
+
+    :root:not([data-color-mode]) .bg-white\/50 {
+      background-color: var(--app-surface-50);
+    }
+
+    :root:not([data-color-mode]) .bg-gray-50 {
+      background-color: var(--app-surface-80);
+    }
+
+    :root:not([data-color-mode]) .bg-gray-100 {
+      background-color: var(--app-surface-70);
+    }
+
+    :root:not([data-color-mode]) .bg-gray-200 {
+      background-color: var(--app-surface-60);
+    }
+
+    :root:not([data-color-mode]) .bg-gray-300 {
+      background-color: var(--app-surface-50);
+    }
+
+    :root:not([data-color-mode]) .bg-gray-50\/70 {
+      background-color: var(--app-surface-70);
+    }
+
+    :root:not([data-color-mode]) .bg-gray-50\/60 {
+      background-color: var(--app-surface-60);
+    }
+
+    :root:not([data-color-mode]) .bg-gray-50\/40 {
+      background-color: var(--app-surface-40);
+    }
+
+    :root:not([data-color-mode]) .bg-gray-50\/80 {
+      background-color: var(--app-surface-80);
+    }
+
+    :root:not([data-color-mode]) .bg-slate-50 {
+      background-color: var(--app-surface-80);
+    }
+
+    :root:not([data-color-mode]) .bg-slate-100 {
+      background-color: var(--app-surface-70);
+    }
+
+    :root:not([data-color-mode]) .bg-slate-200 {
+      background-color: var(--app-surface-60);
+    }
+
+    :root:not([data-color-mode]) .bg-pink-50,
+    :root:not([data-color-mode]) .bg-pink-50\/70,
+    :root:not([data-color-mode]) .bg-pink-50\/40,
+    :root:not([data-color-mode]) .bg-pink-50\/80,
+    :root:not([data-color-mode]) .bg-pink-100,
+    :root:not([data-color-mode]) .bg-purple-50,
+    :root:not([data-color-mode]) .bg-purple-50\/40,
+    :root:not([data-color-mode]) .bg-purple-100,
+    :root:not([data-color-mode]) .bg-blue-50,
+    :root:not([data-color-mode]) .bg-blue-50\/50,
+    :root:not([data-color-mode]) .bg-blue-100,
+    :root:not([data-color-mode]) .bg-indigo-50,
+    :root:not([data-color-mode]) .bg-indigo-100,
+    :root:not([data-color-mode]) .bg-emerald-50,
+    :root:not([data-color-mode]) .bg-green-50,
+    :root:not([data-color-mode]) .bg-green-100,
+    :root:not([data-color-mode]) .bg-yellow-50,
+    :root:not([data-color-mode]) .bg-yellow-100,
+    :root:not([data-color-mode]) .bg-amber-50,
+    :root:not([data-color-mode]) .bg-amber-50\/80,
+    :root:not([data-color-mode]) .bg-amber-100,
+    :root:not([data-color-mode]) .bg-orange-100,
+    :root:not([data-color-mode]) .bg-red-50,
+    :root:not([data-color-mode]) .bg-rose-50,
+    :root:not([data-color-mode]) .bg-violet-50,
+    :root:not([data-color-mode]) .bg-sky-50,
+    :root:not([data-color-mode]) .bg-teal-50,
+    :root:not([data-color-mode]) .bg-teal-100 {
+      background-color: var(--app-surface-70);
+    }
+
+    :root:not([data-color-mode]) .bg-pink-200,
+    :root:not([data-color-mode]) .bg-purple-200,
+    :root:not([data-color-mode]) .bg-blue-200,
+    :root:not([data-color-mode]) .bg-indigo-200,
+    :root:not([data-color-mode]) .bg-emerald-100,
+    :root:not([data-color-mode]) .bg-green-200,
+    :root:not([data-color-mode]) .bg-yellow-200,
+    :root:not([data-color-mode]) .bg-amber-200,
+    :root:not([data-color-mode]) .bg-orange-200,
+    :root:not([data-color-mode]) .bg-red-100,
+    :root:not([data-color-mode]) .bg-red-200,
+    :root:not([data-color-mode]) .bg-rose-100,
+    :root:not([data-color-mode]) .bg-violet-100,
+    :root:not([data-color-mode]) .bg-sky-100 {
+      background-color: var(--app-surface-60);
+    }
+
+    :root:not([data-color-mode]) .bg-pink-300,
+    :root:not([data-color-mode]) .bg-purple-300,
+    :root:not([data-color-mode]) .bg-red-300,
+    :root:not([data-color-mode]) .bg-gray-400 {
+      background-color: var(--app-surface-50);
+    }
+
+    :root:not([data-color-mode]) .border-gray-200,
+    :root:not([data-color-mode]) .border-gray-300,
+    :root:not([data-color-mode]) .border-gray-400 {
+      border-color: var(--app-border);
+    }
+
+    :root:not([data-color-mode]) .border-gray-100 {
+      border-color: var(--app-border-strong);
+    }
+
+    :root:not([data-color-mode]) .border-pink-100,
+    :root:not([data-color-mode]) .border-pink-200,
+    :root:not([data-color-mode]) .border-pink-300,
+    :root:not([data-color-mode]) .border-purple-100,
+    :root:not([data-color-mode]) .border-purple-200,
+    :root:not([data-color-mode]) .border-blue-200,
+    :root:not([data-color-mode]) .border-indigo-200,
+    :root:not([data-color-mode]) .border-emerald-200,
+    :root:not([data-color-mode]) .border-green-200,
+    :root:not([data-color-mode]) .border-yellow-200,
+    :root:not([data-color-mode]) .border-amber-200,
+    :root:not([data-color-mode]) .border-orange-200,
+    :root:not([data-color-mode]) .border-red-200,
+    :root:not([data-color-mode]) .border-rose-200,
+    :root:not([data-color-mode]) .border-violet-200,
+    :root:not([data-color-mode]) .border-sky-200,
+    :root:not([data-color-mode]) .border-teal-200 {
+      border-color: var(--app-border);
+    }
+
+    :root:not([data-color-mode]) .border-slate-200,
+    :root:not([data-color-mode]) .border-slate-300 {
+      border-color: var(--app-border);
+    }
+
+    :root:not([data-color-mode]) .ring-gray-200 {
+      --tw-ring-color: var(--app-border);
+    }
+
+    :root:not([data-color-mode]) .divide-gray-200> :not([hidden])~ :not([hidden]) {
+      border-color: var(--app-border);
+    }
+  }
+}

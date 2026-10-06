@@ -1,5 +1,7 @@
 export { AppShell } from './AppShell';
 export type { AppShellProps } from './AppShell';
+export { ProductFooter } from './ProductFooter';
+export type { ProductFooterProps } from './ProductFooter';
 export { ProductTopBar } from './ProductTopBar';
 export type { ProductTopBarProps } from './ProductTopBar';
 export { TopBarMessageButton } from './TopBarMessageButton';
