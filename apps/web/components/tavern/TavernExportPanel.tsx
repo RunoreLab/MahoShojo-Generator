@@ -175,7 +175,7 @@ type ExportAction =
   | { type: 'done' };
 
 const DEFAULT_CREATOR_NOTES = '来源：MahoShojo-Generator / 魔法少女竞技场 A.R.E.N.A.';
-const DEFAULT_TAVERN_CREATOR = 'github.com/colasama/MahoShojo-Generator';
+const DEFAULT_TAVERN_CREATOR = 'github.com/RunoreLab/MahoShojo-Generator';
 const DEFAULT_TAVERN_BASE_NAME = 'mahoshojo-logo.png';
 
 const initialFields: ExportFields = {

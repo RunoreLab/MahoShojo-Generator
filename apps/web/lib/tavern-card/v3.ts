@@ -2,7 +2,7 @@ import { encodeBytesToBase64, decodeBase64ToBytes } from './base64';
 import { replacePngTextChunks } from './png';
 import type { TavernCardV3, TavernCardV3Data, TavernWriteOptions } from './types';
 
-const DEFAULT_CREATOR = 'github.com/colasama/MahoShojo-Generator';
+const DEFAULT_CREATOR = 'github.com/RunoreLab/MahoShojo-Generator';
 const DEFAULT_CHARACTER_VERSION = '0.6.0';
 
 const asString = (value: unknown): string => (typeof value === 'string' ? value : '');

@@ -618,7 +618,7 @@ PNG 文件结构固定：
     "system_prompt": "",
     "post_history_instructions": "",
     "tags": [],
-    "creator": "github.com/colasama/MahoShojo-Generator",
+    "creator": "github.com/RunoreLab/MahoShojo-Generator",
     "character_version": "0.6.0",
     "alternate_greetings": [],
     "group_only_greetings": [],

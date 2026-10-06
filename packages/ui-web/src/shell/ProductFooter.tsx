@@ -124,7 +124,7 @@ export function ProductFooter({
       </p>
       <p>{external('https://docs.qq.com/form/page/DYmdrdWFQdmZCSGdZ', '反馈问题')}</p>
       <p>{internal('/encyclopedia', '百科')}</p>
-      <p>{external('https://github.com/colasama/MahoShojo-Generator', 'colasama/MahoShojo-Generator')}</p>
+      <p>{external('https://github.com/RunoreLab/MahoShojo-Generator', 'RunoreLab/MahoShojo-Generator')}</p>
     </footer>
   );
 }

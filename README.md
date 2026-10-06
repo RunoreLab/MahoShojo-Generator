@@ -8,7 +8,7 @@
   <!-- markdownlint-disable-next-line MD036 -->
   <div>✨ 基于 AI 结构化生成的生成器 ✨</div>
   <a href="https://mahoshojo.colanns.me">在线试玩</a> |
-  <a href="https://github.com/colasama/MahoShojo-Generator/discussions">交流反馈</a> |
+  <a href="https://github.com/RunoreLab/MahoShojo-Generator/discussions">交流反馈</a> |
   <a href="https://pd.qq.com/s/brisxifbl">加入腾讯频道</a>
 </div>
 
@@ -202,7 +202,7 @@ Cloudflare Pages 部署环境变量需显式设置 `PNPM_VERSION=11.3.0`，避�
 
 ## 📊 统计
 
-[![Stargazers over time](https://starchart.cc/colasama/MahoShojo-Generator.svg?variant=adaptive)](https://starchart.cc/colasama/MahoShojo-Generator)
+[![Stargazers over time](https://starchart.cc/RunoreLab/MahoShojo-Generator.svg?variant=adaptive)](https://starchart.cc/RunoreLab/MahoShojo-Generator)
 
 ## 🧡 致谢
 <div align="center">

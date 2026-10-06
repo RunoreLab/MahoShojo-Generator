@@ -40,7 +40,7 @@ describe('ProductFooter', () => {
     expect(text).toContain('末伏之夜');
     expect(text).toContain('Colanns');
     expect(text).toContain('KouriChat');
-    expect(text).toContain('colasama/MahoShojo-Generator');
+    expect(text).toContain('RunoreLab/MahoShojo-Generator');
   });
 
   it('renders external links as non-clickable notes when the host gives no opener', () => {

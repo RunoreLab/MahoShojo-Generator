@@ -27,7 +27,7 @@
 
   * **方式一 (推荐):** 直接下载 ZIP 压缩包。
 
-    1.  访问项目 GitHub 页面: [https://github.com/colasama/MahoShojo-Generator](https://github.com/colasama/MahoShojo-Generator)
+    1.  访问项目 GitHub 页面: [https://github.com/RunoreLab/MahoShojo-Generator](https://github.com/RunoreLab/MahoShojo-Generator)
     2.  点击绿色的 **`< > Code`** 按钮，然后选择 **`Download ZIP`**。
     3.  下载后，将文件解压到一个你喜欢的位置。
 
@@ -35,7 +35,7 @@
 
       * 打开你的终端，输入以下命令并回车：
         ```bash
-        git clone https://github.com/colasama/MahoShojo-Generator.git
+        git clone https://github.com/RunoreLab/MahoShojo-Generator.git
         ```
       * 这会在当前目录下创建一个名为 `MahoShojo-Generator` 的文件夹。
 
