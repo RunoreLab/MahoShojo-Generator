@@ -60,15 +60,13 @@ pub fn validate_external_url(raw: &str) -> Result<url::Url, ExternalLinkError> {
         return Err(ExternalLinkError::invalid("URL 含非法字符"));
     }
 
-    let url = url::Url::parse(trimmed)
-        .map_err(|_| ExternalLinkError::invalid("无法解析为合法 URL"))?;
+    let url =
+        url::Url::parse(trimmed).map_err(|_| ExternalLinkError::invalid("无法解析为合法 URL"))?;
 
     match url.scheme() {
         "http" | "https" => {}
         other => {
-            return Err(ExternalLinkError::invalid(format!(
-                "不允许的协议：{other}"
-            )));
+            return Err(ExternalLinkError::invalid(format!("不允许的协议：{other}")));
         }
     }
     if url.host_str().is_none() {
@@ -139,7 +137,10 @@ mod tests {
 
     #[test]
     fn rejects_oversized_urls() {
-        let url = format!("https://example.com/{}", "a".repeat(MAX_EXTERNAL_URL_LENGTH));
+        let url = format!(
+            "https://example.com/{}",
+            "a".repeat(MAX_EXTERNAL_URL_LENGTH)
+        );
         assert!(validate_external_url(&url).is_err());
     }
 }

@@ -100,7 +100,10 @@ fn validate_announcement(record: &AnnouncementRecord) -> bool {
         && record.title.len() <= 500
         && !record.content.is_empty()
         && record.content.len() <= 100_000
-        && record.publisher.as_ref().is_none_or(|p| !p.is_empty() && p.len() <= 200)
+        && record
+            .publisher
+            .as_ref()
+            .is_none_or(|p| !p.is_empty() && p.len() <= 200)
 }
 
 /// 把远端 JSON 解析成已校验的公告数组。结构与字段校验都在这一步，返回 `None`
@@ -163,8 +166,11 @@ fn read_cache(data_root: &Path) -> Option<CachedFile> {
     if file.version != 1
         || file.announcements.len() > MAX_ANNOUNCEMENTS
         || !file.announcements.iter().all(validate_announcement)
-        || time::OffsetDateTime::parse(&file.fetched_at, &time::format_description::well_known::Rfc3339)
-            .is_err()
+        || time::OffsetDateTime::parse(
+            &file.fetched_at,
+            &time::format_description::well_known::Rfc3339,
+        )
+        .is_err()
     {
         return None;
     }
@@ -265,7 +271,11 @@ pub async fn refresh(
 
     let mut request = state
         .client
-        .get(format!("{}{}", crate::cloud::cloud_origin(), ANNOUNCEMENTS_PATH))
+        .get(format!(
+            "{}{}",
+            crate::cloud::cloud_origin(),
+            ANNOUNCEMENTS_PATH
+        ))
         .header(reqwest::header::ACCEPT, "application/json")
         .timeout(ANNOUNCEMENTS_REQUEST_TIMEOUT);
     if let Some(etag) = cached.as_ref().and_then(|file| file.etag.clone()) {
@@ -375,9 +385,7 @@ mod tests {
         ] {
             let mut value = serde_json::to_value(record("a")).unwrap();
             mutate(&mut value);
-            assert!(
-                parse_announcement_list(&serde_json::to_vec(&vec![value]).unwrap()).is_none()
-            );
+            assert!(parse_announcement_list(&serde_json::to_vec(&vec![value]).unwrap()).is_none());
         }
     }
 
@@ -411,11 +419,7 @@ mod tests {
             etag: None,
             announcements: vec![record("x")],
         };
-        fs::write(
-            cache_path(dir.path()),
-            serde_json::to_vec(&file).unwrap(),
-        )
-        .unwrap();
+        fs::write(cache_path(dir.path()), serde_json::to_vec(&file).unwrap()).unwrap();
         assert!(read_cache(dir.path()).is_none());
     }
 }
