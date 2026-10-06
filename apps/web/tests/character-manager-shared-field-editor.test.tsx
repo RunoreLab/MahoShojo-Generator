@@ -15,8 +15,10 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 describe('角色管理回用共源字段编辑器（D3.2b-1）', () => {
   test('递归表单与路径写入不再在 Web 内另有一份实现', () => {
+    // 字段编辑器经共源 `CharacterManagerEditorBody` 渲染（D5.1-P2-r5 起
+    // `DataCardFieldEditor` 收在共享组件内部）；Web 只保留路径写入与样式注入。
     expect(characterManagerSource).toContain("from '@mahoshojo/ui-web/card-editor'");
-    expect(characterManagerSource).toContain('<DataCardFieldEditor');
+    expect(characterManagerSource).toContain('<CharacterManagerEditorBody');
     expect(characterManagerSource).toContain('setDataCardFieldValue(prev, segments, value)');
     expect(characterManagerSource).not.toContain('isNextKeyNumeric');
     expect(characterManagerSource).not.toContain('const keyOrder = [');

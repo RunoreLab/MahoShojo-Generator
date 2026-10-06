@@ -1,4 +1,15 @@
-import { GENERAL_SCENARIO_TEMPLATE_ID, inferCharacterKind } from '@mahoshojo/domain/data-cards';
+import {
+  inferCharacterKind,
+  inferDataCardTemplate,
+  type DataCardTemplate,
+  type InferableDataCardTemplate,
+} from '@mahoshojo/domain/data-cards';
+import { parseDataCardByTemplate } from '@mahoshojo/domain/data-card-schemas';
+import {
+  convertDataCard,
+  createBlankDataCard,
+  type SublimationCharacterConversionResult,
+} from '@mahoshojo/domain/sublimation';
 import { deriveLocalDataCardIdV1, digestLocalCardPayloadV1 } from '@mahoshojo/local-library/digest';
 import { LocalCardRecordV1Schema, nextLocalTimestamp, type LocalCardRecordV1 } from '@mahoshojo/local-library/record';
 import { localLibraryRecordBytes } from '@mahoshojo/local-library/archive-export';
@@ -13,8 +24,9 @@ import type { CanshouDetails, GeneralCharacterCardData } from '@mahoshojo/ui-web
  * Desktop 本地角色编辑的业务规则（D3.2b-2）。
  *
  * 只依赖本地库契约与共源摘要：身份由正文摘要决定、标题不进摘要（`SPEC-local-library-web-landing-v1`
- * §2.3），因此“只改标题”与“改了正文”是两种不同的写入。模板转换、schema 校验、原生性与敏感词仍是 Web
- * 的能力，这里不复制。
+ * §2.3），因此“只改标题”与“改了正文”是两种不同的写入。模板转换与 schema 门禁经
+ * `@mahoshojo/domain` 共源（`createBlankEditableCardData`/`convertEditableCardData`）；
+ * 原生性与敏感词仍是 Web 的能力，这里不复制。
  */
 
 export type LocalCardType = LocalCardRecordV1['cardType'];
@@ -51,11 +63,35 @@ const stringField = (data: Record<string, unknown>, key: string): string | undef
 export const defaultCardTitle = (data: Record<string, unknown>): string =>
   (stringField(data, 'codename') ?? stringField(data, 'name') ?? stringField(data, 'title') ?? '未命名数据卡').slice(0, 512);
 
-/** 只做可解释的最小推断，用户可在界面上改。 */
-export const inferEditableCardType = (data: Record<string, unknown>): LocalCardType =>
-  data.templateId === GENERAL_SCENARIO_TEMPLATE_ID || (inferCharacterKind(data) === 'unknown' && Array.isArray(data.elements))
-    ? 'scenario'
-    : 'character';
+/** 目标模板所属的本地库分类：两个情景模板 → `scenario`，三个角色模板 → `character`。 */
+export const cardTypeForTemplate = (template: DataCardTemplate): LocalCardType =>
+  template === 'scenario' || template === 'general-scenario' ? 'scenario' : 'character';
+
+/**
+ * 只做可解释的最小推断（与 Web 共用同一个 `inferDataCardTemplate`），用户可在界面上改。
+ * `unknown` 兜底为 `character`——通用角色是最宽松的编辑形态。
+ */
+export const inferEditableCardType = (data: Record<string, unknown>): LocalCardType => {
+  const template = inferDataCardTemplate(data);
+  return template === 'unknown' ? 'character' : cardTypeForTemplate(template);
+};
+
+/**
+ * 五模板空白卡/转换的共享 schema 门禁（与 Web `data-card-converter` 同一组
+ * `Schema.parse`）：domain 的转换实现自身不做校验，「非法结构即抛」的失败
+ * 路径由这里收口，保证两端转换语义一致（D5.1-P2-r5-r1）。
+ */
+export const createBlankEditableCardData = (template: DataCardTemplate): Record<string, unknown> =>
+  parseDataCardByTemplate(template, createBlankDataCard(template));
+
+export const convertEditableCardData = (
+  data: Record<string, unknown>,
+  target: DataCardTemplate,
+  sourceTemplate?: InferableDataCardTemplate,
+): SublimationCharacterConversionResult => {
+  const { data: converted, warnings } = convertDataCard(data, target, sourceTemplate);
+  return { data: parseDataCardByTemplate(target, converted), warnings };
+};
 
 export type ParsedImport =
   | { readonly ok: true; readonly draft: CardDraft }

@@ -79,12 +79,32 @@ export const readDesktopCharacterManagerDraft = (): StoredDesktopCharacterManage
   return { ...stored, payload };
 };
 
+/**
+ * 自动保存写结果（与 Web `writeCharacterManagerPageDraft` 同一产品语义）：
+ * - `cleared`：当前页面状态没有值得持久化的内容（无草稿、粘贴区为空）——
+ *   删除已存草稿，绝不把空状态写成一份「空草稿」；
+ * - `written`：草稿已落盘；
+ * - `failed`：写入抛错（quota 满、存储不可用等）——调用方不得继续展示
+ *   「已自动保存」（DESK-PROD-007：落盘失败必须报告）。
+ */
+export type DesktopCharacterManagerDraftWriteResult =
+  | { readonly kind: 'cleared' }
+  | { readonly kind: 'written'; readonly stored: StoredDesktopCharacterManagerDraft }
+  | { readonly kind: 'failed' };
+
 export const writeDesktopCharacterManagerDraft = (
   state: DesktopCharacterManagerDraftState,
-): StoredPageDraft<DesktopCharacterManagerDraftState> | null =>
-  writePageDraft(DESKTOP_CHARACTER_MANAGER_DRAFT_KEY, state, {
+): DesktopCharacterManagerDraftWriteResult => {
+  const payload = normalizeDesktopDraftPayload(state);
+  if (payload === null) {
+    clearPageDraft(DESKTOP_CHARACTER_MANAGER_DRAFT_KEY);
+    return { kind: 'cleared' };
+  }
+  const stored = writePageDraft(DESKTOP_CHARACTER_MANAGER_DRAFT_KEY, payload, {
     version: DESKTOP_CHARACTER_MANAGER_DRAFT_VERSION,
   });
+  return stored === null ? { kind: 'failed' } : { kind: 'written', stored };
+};
 
 export const clearDesktopCharacterManagerDraft = (): void =>
   clearPageDraft(DESKTOP_CHARACTER_MANAGER_DRAFT_KEY);

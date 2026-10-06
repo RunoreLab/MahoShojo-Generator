@@ -25,11 +25,11 @@ import {
   characterManagerNameFieldAddon,
   extractCardBaseName,
   replaceAllNamesInData,
+  type CharacterManagerAccountStatus,
   type CharacterManagerCapabilities,
   type CharacterManagerFieldPath,
 } from '@mahoshojo/ui-web/character-manager';
 import { inferDataCardTemplate, type DataCardTemplate } from '@mahoshojo/domain/data-cards';
-import { convertDataCard, createBlankDataCard } from '@mahoshojo/domain/sublimation';
 import { randomChooseOneHanaName } from '@mahoshojo/domain/flowers';
 import type { LocalCardRecordV1 } from '@mahoshojo/local-library/record';
 
@@ -38,6 +38,9 @@ import {
   EDITABLE_CARD_TYPES,
   MAX_IMPORT_FILE_BYTES,
   asCharacterCardPreview,
+  cardTypeForTemplate,
+  convertEditableCardData,
+  createBlankEditableCardData,
   defaultCardTitle,
   draftFromRecord,
   inferEditableCardType,
@@ -148,22 +151,29 @@ export function DesktopCharacterManager() {
   const [pasteOpen, setPasteOpen] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [autoSaveTimestamp, setAutoSaveTimestamp] = useState<number | null>(null);
+  const [autoSaveFailed, setAutoSaveFailed] = useState(false);
+  const [draftRestoreReady, setDraftRestoreReady] = useState(false);
   const titleId = useId();
   const typeId = useId();
 
-  const dirty = draft !== null && baseline !== snapshotOf(draft);
-  const dirtyRef = useRef(false);
-  dirtyRef.current = dirty;
+  // 「未保存」是两个分开的概念（D5.1-P2-r5-r1）：
+  // - hasUnsavedLocalRecord：草稿从未写入本地库（导入/云端副本/空白模板/跨类别转换产物）；
+  // - hasUnsavedChanges：当前内容与打开基线不一致。
+  // 离开保护覆盖两者——「清空本地草稿」只清 localStorage 副本，不该让未入库内容裸奔离开。
+  const hasUnsavedChanges = draft !== null && baseline !== snapshotOf(draft);
+  const hasUnsavedLocalRecord = draft !== null && draft.original === null;
+  const needsLeaveGuard = hasUnsavedChanges || hasUnsavedLocalRecord;
+  const unsavedGuardRef = useRef(false);
+  unsavedGuardRef.current = needsLeaveGuard;
   const savingRef = useRef(false);
   const loadedIdRef = useRef<string | null>(null);
   const requestRef = useRef(0);
-  const draftRestoreCheckedRef = useRef(false);
 
   const guard = useLeaveGuard(
-    () => savingRef.current || dirtyRef.current,
-    '有尚未保存的修改，或保存仍在进行。请保存、等待完成，或确认放弃修改后再离开。',
+    () => savingRef.current || unsavedGuardRef.current,
+    '有尚未保存到本地库的内容或未保存的修改，或保存仍在进行。请保存、等待完成，或确认放弃后再离开。',
     '窗口关闭保护初始化失败，保存暂不可用。请重新打开页面后重试。',
-    () => !savingRef.current && window.confirm('有尚未保存的修改。确认放弃修改并离开？'),
+    () => !savingRef.current && window.confirm('有尚未保存到本地库的内容或未保存的修改。确认放弃并离开？'),
   );
 
   const open = useCallback((next: CardDraft) => {
@@ -185,12 +195,20 @@ export function DesktopCharacterManager() {
   }, [cards.controller.actions]);
 
   // 页面草稿恢复：仅在没有 `?card=` 直达意图时执行一次（URL 打开是显式意图，优先）。
+  // `draftRestoreReady` 是自动保存的闸门（与 Web `draftRestoreReady` 同一模式）——
+  // 本地记录的异步回取也结束后才置 true，此前自动保存不启动，空初始态不会盖掉
+  // 待恢复的草稿。
   useEffect(() => {
-    if (draftRestoreCheckedRef.current) return;
-    draftRestoreCheckedRef.current = true;
-    if (cardParam !== undefined) return;
+    if (draftRestoreReady) return;
+    if (cardParam !== undefined) {
+      setDraftRestoreReady(true);
+      return;
+    }
     const stored = readDesktopCharacterManagerDraft();
-    if (stored === null) return;
+    if (stored === null) {
+      setDraftRestoreReady(true);
+      return;
+    }
     const { pastedJson, draft: storedDraft } = stored.payload;
     if (pastedJson.trim() !== '') {
       setPasted(pastedJson);
@@ -198,9 +216,12 @@ export function DesktopCharacterManager() {
     }
     if (storedDraft === null) {
       setAutoSaveTimestamp(stored.updatedAt);
+      setDraftRestoreReady(true);
       return;
     }
+    let cancelled = false;
     const apply = (original: LocalCardRecordV1 | null) => {
+      if (cancelled) return;
       open({
         original,
         cardType: original?.cardType ?? storedDraft.cardType,
@@ -215,6 +236,7 @@ export function DesktopCharacterManager() {
           ? '已恢复浏览器内的编辑草稿；原本地库记录已不可用，草稿按未保存的导入卡处理。'
           : '已恢复浏览器内的编辑草稿。',
       });
+      setDraftRestoreReady(true);
     };
     if (storedDraft.originalId !== null) {
       void repository.get(storedDraft.originalId).then(
@@ -224,13 +246,14 @@ export function DesktopCharacterManager() {
     } else {
       apply(null);
     }
-  }, [cardParam, open, repository]);
+    return () => { cancelled = true; };
+  }, [cardParam, draftRestoreReady, open, repository]);
 
-  // 页面草稿自动持久化：每次编辑后落 localStorage（同 Web 的产品语义），
-  // 仅在恢复检查完成后才开始写，避免空初始态盖掉待恢复的草稿。
+  // 页面草稿自动持久化：每次编辑后落 localStorage（同 Web 的产品语义）。
+  // 空态清除、失败显式报告——不能静默沿用旧时间戳伪装「已自动保存」。
   useEffect(() => {
-    if (!draftRestoreCheckedRef.current) return;
-    const stored = writeDesktopCharacterManagerDraft({
+    if (!draftRestoreReady) return;
+    const result = writeDesktopCharacterManagerDraft({
       pastedJson: pasted,
       draft: draft === null ? null : {
         cardType: draft.cardType,
@@ -240,8 +263,17 @@ export function DesktopCharacterManager() {
         originalData,
       },
     });
-    if (stored !== null) setAutoSaveTimestamp(stored.updatedAt);
-  }, [draft, originalData, pasted]);
+    if (result.kind === 'written') {
+      setAutoSaveTimestamp(result.stored.updatedAt);
+      setAutoSaveFailed(false);
+    } else if (result.kind === 'cleared') {
+      setAutoSaveTimestamp(null);
+      setAutoSaveFailed(false);
+    } else {
+      setAutoSaveTimestamp(null);
+      setAutoSaveFailed(true);
+    }
+  }, [draft, originalData, pasted, draftRestoreReady]);
 
   // `?card=` 是打开记录的唯一入口；切换记录时由离开保护先确认是否放弃当前修改。
   useEffect(() => {
@@ -282,7 +314,7 @@ export function DesktopCharacterManager() {
       void router.navigate({ to: '/character-manager', search: {} });
       return;
     }
-    if (dirty && !window.confirm('有尚未保存的修改。确认放弃修改？')) return;
+    if (needsLeaveGuard && !window.confirm('当前内容尚未写入本地库，或有未保存的修改。确认放弃并关闭？')) return;
     closeEditor();
   };
 
@@ -336,18 +368,29 @@ export function DesktopCharacterManager() {
   const handleTemplateSelect = useCallback((target: DataCardTemplate) => {
     try {
       if (draft === null) {
-        const data = createBlankDataCard(target);
-        open({ original: null, cardType: inferEditableCardType(data), title: defaultCardTitle(data), data });
+        const data = createBlankEditableCardData(target);
+        open({ original: null, cardType: cardTypeForTemplate(target), title: defaultCardTitle(data), data });
         setNotice({ tone: 'status', text: '已按所选模板创建空白数据卡，尚未保存到本地库。' });
         return;
       }
       const source = inferDataCardTemplate(draft.data);
-      const result = convertDataCard(draft.data, target, source === 'unknown' ? undefined : source);
+      const result = convertEditableCardData(draft.data, target, source === 'unknown' ? undefined : source);
       const converted = result.data as Record<string, unknown>;
-      setDraft((current) => (current === null ? current : { ...current, data: converted }));
+      const warnings = result.warnings.length > 0 ? `（${result.warnings.join('；')}）` : '';
+      const targetCardType = cardTypeForTemplate(target);
+      if (draft.original !== null && targetCardType !== draft.cardType) {
+        // 跨类别转换 = 显式重新分类：产出一份新的未保存草稿（新 cardType），
+        // 原本地记录不被原地重分类——既有记录的 cardType 创建后不可改。
+        open({ original: null, cardType: targetCardType, title: draft.title, data: converted });
+        setNotice({
+          tone: 'status',
+          text: `已转换为目标模板${warnings}并脱离原本地库记录：保存将写入一条新记录，原记录保持不变。`,
+        });
+        return;
+      }
+      setDraft((current) => (current === null ? current : { ...current, cardType: targetCardType, data: converted }));
       // 与 Web 一致：模板转换重置名称替换基线，避免对旧名称做整文替换。
       setOriginalData(deepCopyData(converted));
-      const warnings = result.warnings.length > 0 ? `（${result.warnings.join('；')}）` : '';
       setNotice({ tone: 'status', text: `已转换当前内容为目标模板${warnings}，尚未保存到本地库。` });
     } catch (cause) {
       setNotice({ tone: 'alert', text: cause instanceof Error ? cause.message : '模板转换失败。' });
@@ -357,6 +400,7 @@ export function DesktopCharacterManager() {
   const handleClearDraft = useCallback(() => {
     clearDesktopCharacterManagerDraft();
     setAutoSaveTimestamp(null);
+    setAutoSaveFailed(false);
     setNotice({ tone: 'status', text: '浏览器内的本地草稿已清空（当前编辑内容与本地库记录不受影响）。' });
   }, []);
 
@@ -368,7 +412,7 @@ export function DesktopCharacterManager() {
       if (id !== null) openRecord(id);
       return;
     }
-    if (dirtyRef.current && !window.confirm('载入新数据卡将放弃当前未保存的修改。继续？')) return;
+    if (unsavedGuardRef.current && !window.confirm('载入新数据卡将放弃当前尚未保存到本地库的内容。继续？')) return;
     const data = cloudPayloadToCardData(payload);
     open({
       original: null,
@@ -395,7 +439,7 @@ export function DesktopCharacterManager() {
         if (result.kind === 'created' && draft.original !== null) setReplacedOriginalId(draft.original.id);
         loadedIdRef.current = result.record.id;
         // 同步清掉未保存标记：随后的 URL 替换不该被离开保护当成“放弃修改”。
-        dirtyRef.current = false;
+        unsavedGuardRef.current = false;
         setDraft(saved);
         setBaseline(snapshotOf(saved));
         // 名称替换基线跟随保存后的记录：「原始」即本地库当前内容。
@@ -420,7 +464,7 @@ export function DesktopCharacterManager() {
       await repository.restore(id);
       cards.controller.actions.reload();
       // 恢复的就是当前正文（同一摘要），直接打开恢复后的记录，不再把草稿当成待放弃的修改。
-      dirtyRef.current = false;
+      unsavedGuardRef.current = false;
       openRecord(id);
     } catch (cause) {
       setNotice({ tone: 'alert', text: describeLocalCardError(cause) });
@@ -440,17 +484,21 @@ export function DesktopCharacterManager() {
 
   const preview = draft === null ? null : asCharacterCardPreview(draft);
 
-  // 云会话 → 共享账号面板投影：idle 是「从未查询过」（惰性原则，冷启动不探测），
-  // 渲染为可登录的未登录分支而不是永久加载中；unreachable 同理由、文案不同。
+  // 云会话 → 共享账号面板投影（与顶栏/卡库宿主同一三态口径，D5.1-P2-r5-r1）：
+  // `idle` 与 `unreachable` 都是 `unknown`——「从未查询过」和「服务不可达」都不是
+  // 确认登出；只有 ready+signed-out/expired 才投影 `unauthenticated`。
   const cloudPhase = cloudSession.phase;
   const activeCloudAccount =
     cloudPhase.kind === 'ready' && cloudPhase.session.state === 'active' ? cloudPhase.session.account : null;
-  const accountStatus: 'loading' | 'authenticated' | 'unauthenticated' =
+  const accountStatus: CharacterManagerAccountStatus =
     cloudPhase.kind === 'checking' || cloudPhase.kind === 'authenticating'
       ? 'loading'
       : activeCloudAccount !== null
         ? 'authenticated'
-        : 'unauthenticated';
+        : cloudPhase.kind === 'ready' &&
+            (cloudPhase.session.state === 'signed-out' || cloudPhase.session.state === 'expired')
+          ? 'unauthenticated'
+          : 'unknown';
   const cloudUnreachable = cloudPhase.kind === 'ready' && cloudPhase.session.state === 'unreachable';
 
   const draftTemplate = draft === null ? 'unknown' : inferDataCardTemplate(draft.data);
@@ -489,13 +537,21 @@ export function DesktopCharacterManager() {
                 </button>
               )}
               myDataCards={{
-                onOpen: () => setLibraryOpen(true),
+                // 主动使用 = 探测时机（DESK-ONLINE-013，与 /details 同一模式）：
+                // 冷启动 `idle` 下机器上可能已有有效凭据，先 refresh 再开选择器，
+                // 确认 active 后「我的数据卡」默认落到 `my` 页签而不是本地库。
+                onOpen: () => {
+                  void cloudSessionStore.refresh();
+                  setLibraryOpen(true);
+                },
                 label: '我的数据卡',
               }}
               signedOut={{
                 text: cloudUnreachable
                   ? '云端服务暂时不可用；本地编辑与本地库不受影响，可稍后重试登录。'
-                  : '本页无需登录即可编辑本地数据卡；登录后可浏览并载入你的云端数据卡。',
+                  : accountStatus === 'unknown'
+                    ? '本页无需登录即可编辑本地数据卡；尚未查询云端账号状态。'
+                    : '本页无需登录即可编辑本地数据卡；登录后可浏览并载入你的云端数据卡。',
                 actionLabel: cloudUnreachable ? '重试' : '登录',
                 onAction: () => void (cloudUnreachable ? cloudSessionStore.refresh() : cloudSessionStore.requestAuth()),
               }}
@@ -533,6 +589,11 @@ export function DesktopCharacterManager() {
           />
 
           <CharacterManagerDraftBar savedAt={autoSaveTimestamp} onClear={handleClearDraft} />
+          {autoSaveFailed && (
+            <p role="alert" className="mb-4 text-sm text-red-700">
+              页面草稿自动保存失败（可能超出浏览器存储上限）：当前修改只在内存中，请及时保存到本地库或导出。
+            </p>
+          )}
 
           {notice && <p role={notice.tone} className="mb-4 text-sm">{notice.text}</p>}
           {loading && <p role="status" className="mb-4 text-sm">正在读取本地数据卡…</p>}
@@ -574,8 +635,8 @@ export function DesktopCharacterManager() {
                 onFieldChange={handleFieldChange}
                 title={<span id="character-editor-heading">{editorTitle}</span>}
                 badge={(
-                  <span className={`px-3 py-1 text-xs font-semibold rounded-full ${draft.original === null ? 'text-yellow-800 bg-yellow-100' : dirty ? 'text-amber-800 bg-amber-100' : 'text-green-800 bg-green-100'}`}>
-                    {draft.original === null ? '尚未保存到本地库' : '本地库记录'}{dirty ? ' · 有未保存的修改' : ''}
+                  <span className={`px-3 py-1 text-xs font-semibold rounded-full ${draft.original === null ? 'text-yellow-800 bg-yellow-100' : hasUnsavedChanges ? 'text-amber-800 bg-amber-100' : 'text-green-800 bg-green-100'}`}>
+                    {draft.original === null ? '尚未保存到本地库' : '本地库记录'}{hasUnsavedChanges ? ' · 有未保存的修改' : ''}
                   </span>
                 )}
                 headerExtra={(
@@ -619,7 +680,7 @@ export function DesktopCharacterManager() {
                       <button
                         type="button"
                         className={actionClass}
-                        disabled={!guard.ready || saving || (draft.original !== null && !dirty)}
+                        disabled={!guard.ready || saving || (draft.original !== null && !hasUnsavedChanges)}
                         onClick={() => void save()}
                       >
                         {saving ? '正在保存…' : '保存到本地库'}
@@ -634,7 +695,7 @@ export function DesktopCharacterManager() {
                         导出为 JSON 文件
                       </button>
                       <button type="button" className={actionClass} disabled={saving} onClick={leaveEditor}>
-                        {dirty ? '放弃修改并关闭' : '关闭'}
+                        {needsLeaveGuard ? '放弃修改并关闭' : '关闭'}
                       </button>
                     </div>
                     {outcome?.kind === 'unchanged' && <p role="status" className="text-sm">没有需要保存的修改。</p>}
@@ -682,7 +743,8 @@ export function DesktopCharacterManager() {
             </section>
           )}
         </div>
-        {/* 「我的数据卡」选择器：本地页签离线可用为默认落点；云端行载入为副本。 */}
+        {/* 「我的数据卡」选择器：本地页签离线可用；确认会话 active 后默认落到
+            「我的数据卡」页签（入口名称与所有权一致），本地库保持显式页签。 */}
         <CardLibraryModal
           host={cardLibraryHost}
           isOpen={libraryOpen}
@@ -690,7 +752,7 @@ export function DesktopCharacterManager() {
           onSelectCard={handleSelectLibraryCard}
           selectedType="all"
           allowedTypes={['character', 'scenario']}
-          initialTab="local"
+          initialTab={activeCloudAccount !== null ? 'my' : 'local'}
           titleOverride="我的数据卡"
           allowDeckImport={false}
         />

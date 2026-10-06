@@ -138,7 +138,9 @@ describe('Desktop 本地角色管理（IPC mock，仍需真机重启验收）', 
     expect(container.textContent).toContain('使用指南');
     expect(button('我的数据卡')).not.toBeUndefined();
     expect(container.textContent).toContain('内容模板');
-    expect(container.textContent).toContain('已自动保存');
+    // 空页面没有可持久化的内容：不写「空草稿」，也就不显示「已自动保存」。
+    expect(container.textContent).not.toContain('已自动保存');
+    expect(window.localStorage.getItem(DESKTOP_CHARACTER_MANAGER_DRAFT_KEY)).toBeNull();
     // 未交付能力不渲染入口：立绘、敏感词、原生性徽章、问卷编辑器均不出现。
     expect(container.textContent).not.toContain('立绘');
     expect(container.textContent).not.toContain('敏感词检测控制台');
@@ -150,6 +152,8 @@ describe('Desktop 本地角色管理（IPC mock，仍需真机重启验收）', 
     await mount();
     await waitFor(() => button('我的数据卡') !== undefined);
     await click(button('我的数据卡'));
+    // 打开选择器是一次主动使用：顺手探测一次会话（DESK-ONLINE-013）。
+    await waitFor(() => bridge.invoke.mock.calls.some((call) => call[0] === 'cloud_auth_status'));
     // Modal 内容渲染在页面 DOM 中（非 portal），等待本地列表出现记录标题。
     await waitFor(() => document.body.textContent?.includes('星光') === true);
     expect(document.body.textContent).toContain('本地');
@@ -317,5 +321,65 @@ describe('Desktop 本地角色管理（IPC mock，仍需真机重启验收）', 
     expect(window.localStorage.getItem(DESKTOP_CHARACTER_MANAGER_DRAFT_KEY)).toBeNull();
     // 当前编辑内容不因为清空草稿而消失（同 Web 语义：只清持久化副本）。
     expect(container.textContent).toContain('编辑角色: 草稿角色');
+
+    // 真正 remount（模拟重启）：已清空的草稿不得复活。
+    act(() => root.unmount());
+    container.remove();
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    window.location.hash = '#/character-manager';
+    await mount();
+    await waitFor(() => button('我的数据卡') !== undefined);
+    await settle();
+    expect(container.textContent).not.toContain('编辑角色: 草稿角色');
+    expect(container.textContent).not.toContain('已恢复浏览器内的编辑草稿');
+    expect(window.localStorage.getItem(DESKTOP_CHARACTER_MANAGER_DRAFT_KEY)).toBeNull();
+  });
+
+  it('结构化情景卡导入归类为 scenario，跨类别模板转换脱离原记录', async () => {
+    window.location.hash = '#/character-manager';
+    await mount();
+    await expandPasteArea();
+    // `elements` 是对象而非数组——按正文特征（`inferDataCardTemplate`）判为情景。
+    const scenarioCard = { title: '雾港', elements: { scene: { time: '夜' } }, description: '雨夜' };
+    await type(container.querySelector<HTMLTextAreaElement>('textarea')!, JSON.stringify(scenarioCard));
+    await click(button('从文本加载数据'));
+    await waitFor(() => container.textContent?.includes('编辑情景: 雾港') === true);
+    const typeLabel = [...container.querySelectorAll('label')].find((item) => item.textContent?.trim().startsWith('类型'))!;
+    expect(container.querySelector<HTMLSelectElement>(`#${CSS.escape(typeLabel.htmlFor)}`)?.value).toBe('scenario');
+
+    // 已有记录跨类别转换（character → scenario）：脱离原记录成为新的未保存草稿。
+    act(() => root.unmount());
+    container.remove();
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    window.localStorage.clear();
+    window.location.hash = `#/character-manager?card=${original.id}`;
+    await mount();
+    await waitFor(() => container.textContent?.includes('编辑角色: 星光') === true);
+
+    const templateLabel = [...container.querySelectorAll('label')].find((item) => item.textContent?.trim().startsWith('内容模板'))!;
+    const templateSelect = templateLabel.parentElement!.querySelector('select')!;
+    const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(templateSelect), 'value')!.set!;
+    await act(async () => {
+      setter.call(templateSelect, 'scenario');
+      templateSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await settle();
+    expect(container.textContent).toContain('已转换为目标模板');
+    expect(container.textContent).toContain('脱离原本地库记录');
+    expect(container.textContent).toContain('尚未保存到本地库');
+
+    // 保存写入一条新 scenario 记录；原记录不被原地重分类。
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    await click(button('保存到本地库'));
+    await waitFor(() => container.textContent?.includes('已保存到本地库') === true);
+    expect(rows.size).toBe(2);
+    expect(rows.get(original.id)?.cardType).toBe('character');
+    const created = [...rows.values()].find((item) => item.id !== original.id)!;
+    expect(created.cardType).toBe('scenario');
+    confirm.mockRestore();
   });
 });

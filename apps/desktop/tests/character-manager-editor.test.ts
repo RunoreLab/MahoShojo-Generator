@@ -6,6 +6,9 @@ import type { CardWriteOutcome } from '@mahoshojo/local-library/repository';
 import {
   asCharacterCardPreview,
   asMagicalGirlPreview,
+  cardTypeForTemplate,
+  convertEditableCardData,
+  createBlankEditableCardData,
   draftFromRecord,
   exceedsUtf8ByteLimit,
   inferEditableCardType,
@@ -53,7 +56,28 @@ describe('单卡导入解析', () => {
   it('接受 JSON 对象并推断类型与标题', () => {
     const parsed = parseImportedCard(JSON.stringify({ codename: '星光', appearance: {} }));
     expect(parsed).toMatchObject({ ok: true, draft: { original: null, cardType: 'character', title: '星光' } });
-    expect(inferEditableCardType({ templateId: '通用情景', title: '雾港' })).toBe('scenario');
+    expect(inferEditableCardType({ templateId: '通用情景', title: '雾港', content: 'x' })).toBe('scenario');
+  });
+
+  it('inferEditableCardType 按共源 inferDataCardTemplate 判定：elements 是对象即情景', () => {
+    // 结构化情景卡的 elements 是对象（不是数组）——旧实现按 Array.isArray 判定是错的。
+    expect(inferEditableCardType({ title: '雾港', elements: { scene: { time: '夜' } } })).toBe('scenario');
+    // 缺 templateId 的 legacy 通用情景（title+content、无 name）也是情景。
+    expect(inferEditableCardType({ title: '雾港', content: '设定' })).toBe('scenario');
+    // 显式模板标记的角色/情景卡。
+    expect(inferEditableCardType({ templateId: '通用角色', name: '调查员', content: 'x' })).toBe('character');
+    expect(inferEditableCardType({ templateId: '通用情景', title: '雾港', content: 'x' })).toBe('scenario');
+    // 角色特征与 unknown 都落到宽松的 character。
+    expect(inferEditableCardType({ codename: '星光' })).toBe('character');
+    expect(inferEditableCardType({})).toBe('character');
+  });
+
+  it('cardTypeForTemplate：两个情景模板归 scenario，三个角色模板归 character', () => {
+    expect(cardTypeForTemplate('scenario')).toBe('scenario');
+    expect(cardTypeForTemplate('general-scenario')).toBe('scenario');
+    expect(cardTypeForTemplate('magical-girl')).toBe('character');
+    expect(cardTypeForTemplate('canshou')).toBe('character');
+    expect(cardTypeForTemplate('general')).toBe('character');
   });
 
   it('拒绝非法 JSON、非对象、叙事历史与危险键', () => {
@@ -164,6 +188,27 @@ describe('保存规则', () => {
     expect(repository.put).not.toHaveBeenCalled();
     expect(repository.putIfAbsent).not.toHaveBeenCalled();
     expect(repository.map.size).toBe(0);
+  });
+});
+
+describe('模板转换 schema 门禁（与 Web 同一组 parse）', () => {
+  it('空白卡按目标模板过 schema：情景含 elements 对象、通用情景含 templateId', () => {
+    const scenario = createBlankEditableCardData('scenario');
+    expect(scenario.title).toBe('未命名情景');
+    expect(typeof scenario.elements).toBe('object');
+    const generalScenario = createBlankEditableCardData('general-scenario');
+    expect(generalScenario.templateId).toBe('通用情景');
+    const general = createBlankEditableCardData('general');
+    expect(general.templateId).toBe('通用角色');
+  });
+
+  it('角色转情景产出合法情景结构（title/elements），情景转角色产出 codename', () => {
+    const toScenario = convertEditableCardData({ codename: '星光', appearance: { outfit: '白裙' } }, 'scenario', 'magical-girl');
+    expect(toScenario.data.title).toBe('星光');
+    expect(typeof toScenario.data.elements).toBe('object');
+    // 反向转换同样过门禁——若实现回归产出非法结构，这里会直接抛错。
+    const back = convertEditableCardData(toScenario.data, 'magical-girl', 'scenario');
+    expect(back.data.codename).toBe('星光');
   });
 });
 

@@ -1,7 +1,12 @@
 import type { ReactNode } from 'react';
 
-/** 账号区三态：`loading` 覆盖「尚未确认」，`unauthenticated` 必须是确认过的登出。 */
-export type CharacterManagerAccountStatus = 'loading' | 'authenticated' | 'unauthenticated';
+/**
+ * 账号区状态：`loading` 覆盖「查询/授权在途」，`unauthenticated` 必须是确认过的
+ * 登出，`unknown` 是「尚未查询或服务不可达」——宿主不得把未知压扁成登出
+ *（Desktop `idle`/`unreachable` 都属此类）。`unknown` 与 `unauthenticated` 渲染
+ * 同一块宿主注入区，文案与动作由 `signedOut` 按实际语义给出。
+ */
+export type CharacterManagerAccountStatus = 'loading' | 'authenticated' | 'unauthenticated' | 'unknown';
 
 export interface CharacterManagerMyDataCardsAction {
   readonly onOpen: () => void;
