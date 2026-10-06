@@ -3,22 +3,22 @@ import { parseEncyclopediaFilter, type EncyclopediaContentSource } from '@mahosh
 import { EncyclopediaEntryView, EncyclopediaIndexView } from '@mahoshojo/ui-web/encyclopedia-views';
 
 import { useExternalLinks } from '../features/external-links/external-links-provider';
-import { getRouteFragmentFromHashHistory, resolveInternalHrefForHashHistory } from './hash-history-fragment';
+import {
+  getRouteFragmentFromHashHistory,
+  navigateByProductHref,
+  resolveInternalHrefForHashHistory,
+  type ProductHrefNavigateOptions,
+} from './hash-history-fragment';
 
 const DESKTOP_CONTENT_SOURCE: EncyclopediaContentSource = { baseUrl: '/' };
 
 /**
- * 共源视图回传的是产品路径（`/encyclopedia?q=x` 这类字符串）。hash history 下的
- * `router.navigate` 需要把 search 拆成结构化参数——整个字符串塞进 `to` 只会被当成
- * pathname，query 部分随之丢失。
+ * 共源视图回传的是产品路径（`/encyclopedia?q=x`、`/encyclopedia/foo#锚`、同页 `#锚` 这类
+ * 字符串）。`navigateByProductHref` 统一拆 `?`/`#` 并支持筛选写回的 `replace` 语义，
+ * 不再在本文件重复拆分逻辑（D5.1-P2-r1）。
  */
-const createDesktopNavigate = (router: ReturnType<typeof useRouter>) => (href: string) => {
-  const queryIndex = href.indexOf('?');
-  const pathname = queryIndex < 0 ? href : href.slice(0, queryIndex);
-  const search =
-    queryIndex < 0 ? {} : Object.fromEntries(new URLSearchParams(href.slice(queryIndex + 1)));
-  void router.navigate({ to: pathname, search });
-};
+const createDesktopNavigate = (router: ReturnType<typeof useRouter>) =>
+  (href: string, options?: ProductHrefNavigateOptions) => navigateByProductHref(router, href, options);
 
 const homeLink = (router: ReturnType<typeof useRouter>) => (
   <a

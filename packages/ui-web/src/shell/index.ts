@@ -20,5 +20,6 @@ export type {
   TopBarAccountState,
   TopBarMessagesSummary,
   TopBarNavigate,
+  TopBarResolveInternalHref,
   TopBarUnavailablePolicy,
 } from './topbar-contract';

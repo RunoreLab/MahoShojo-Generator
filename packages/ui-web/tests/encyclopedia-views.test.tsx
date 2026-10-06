@@ -124,7 +124,37 @@ describe('EncyclopediaIndexView', () => {
       reset!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
     });
     // 筛选状态要变成可分享的 URL，否则用户没法把「只看某一类」发给同事。
-    expect(onNavigate).toHaveBeenCalledWith('/encyclopedia');
+    // 写回用 `replace`——逐按键 push 会让一次输入占满历史栈（D5.1-P2-r1）。
+    expect(onNavigate).toHaveBeenCalledWith('/encyclopedia', { replace: true });
+  });
+
+  it('syncs the filter when the host feeds a different initial (back/forward)', () => {
+    const onNavigate = vi.fn();
+    render(<EncyclopediaIndexView onNavigate={onNavigate} path="/encyclopedia" initialQuery="甲" />);
+    expect(container.querySelector<HTMLInputElement>('input')!.value).toBe('甲');
+
+    // 宿主侧 back/forward 把路由 search 改到别的值：筛选框必须跟上，
+    // 而不是停在旧值（此前 useState(initial) 只在挂载时生效，D5.1-P2-r1）。
+    render(<EncyclopediaIndexView onNavigate={onNavigate} path="/encyclopedia" initialQuery="乙" />);
+    expect(container.querySelector<HTMLInputElement>('input')!.value).toBe('乙');
+  });
+
+  it('does not clobber the in-flight edit with its own URL echo', () => {
+    const onNavigate = vi.fn();
+    render(<EncyclopediaIndexView onNavigate={onNavigate} path="/encyclopedia" />);
+
+    const input = container.querySelector<HTMLInputElement>('input')!;
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, '限流');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(onNavigate).toHaveBeenLastCalledWith('/encyclopedia?q=%E9%99%90%E6%B5%81', { replace: true });
+
+    // 回声：宿主把刚 commit 的值喂回 initial——与本组件 commit 值相等时必须跳过，
+    // 否则正在输入的后续字符会被自己的回声打回。
+    render(<EncyclopediaIndexView onNavigate={onNavigate} path="/encyclopedia" initialQuery="限流" />);
+    const inputAfter = container.querySelector<HTMLInputElement>('input')!;
+    expect(inputAfter.value).toBe('限流');
   });
 });
 

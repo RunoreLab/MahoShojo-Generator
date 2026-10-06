@@ -16,7 +16,18 @@ import { useDesktopCloudSession } from '../features/account/use-desktop-cloud-se
 import { DesktopAnnouncementCenter } from '../features/announcements/desktop-announcement-center';
 import { ExternalLinksProvider, useExternalLinks } from '../features/external-links/external-links-provider';
 import { buildCapabilitySnapshot } from './capabilities';
-import { resolveInternalHrefForHashHistory } from './hash-history-fragment';
+import { navigateByProductHref, resolveInternalHrefForHashHistory } from './hash-history-fragment';
+
+/**
+ * `parseSearch` 会把 JSON 可解析的查询值物化成 number/boolean（`?q=429` → `429`），
+ * 而搜索框语义上只有文本。这里把标量统一归一回字符串；对象/数组一律丢弃——
+ * 它们不是合法的关键词形态，留着只会让下游拿到非预期类型。
+ */
+const searchParamText = (value: unknown): string | undefined => {
+  if (typeof value === 'string') return value === '' ? undefined : value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return undefined;
+};
 
 /**
  * Desktop 的产品路由树（code-based）。
@@ -92,7 +103,7 @@ const DesktopShellInner = () => {
             // 共享顶栏渲染真实 `<a href>`，因此这里必须阻止默认行为，否则会触发一次整页加载。
             // Web 侧同理接 `router.push`——「宿主负责路由」这件事在两端是同一种形状。
             event.preventDefault();
-            void router.navigate({ to: href });
+            navigateByProductHref(router, href);
           }}
           resolveInternalHref={resolveInternalHrefForHashHistory}
           onNavigateExternal={(href, event) => {
@@ -146,9 +157,10 @@ const indexRoute = createRoute({
   path: '/',
   component: () => {
     const router = useRouter();
-    const navigate = useCallback((href: string) => {
-      void router.navigate({ to: href });
-    }, [router]);
+    const navigate = useCallback(
+      (href: string) => navigateByProductHref(router, href),
+      [router],
+    );
     const { state: cloudSession } = useDesktopCloudSession();
     const { openFixed } = useExternalLinks();
 
@@ -245,8 +257,10 @@ const encyclopediaIndexRoute = createRoute({
   path: '/encyclopedia',
   validateSearch: (search: Record<string, unknown>): { q?: string; c?: string } => {
     const validated: { q?: string; c?: string } = {};
-    if (typeof search.q === 'string' && search.q !== '') validated.q = search.q;
-    if (typeof search.c === 'string' && search.c !== '') validated.c = search.c;
+    const q = searchParamText(search.q);
+    const c = searchParamText(search.c);
+    if (q !== undefined) validated.q = q;
+    if (c !== undefined) validated.c = c;
     return validated;
   },
   component: lazyRouteComponent(() => import('./encyclopedia-pages'), 'DesktopEncyclopediaIndex'),
@@ -276,8 +290,10 @@ const settingsRoute = createRoute({
 const characterManagerRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/character-manager',
-  validateSearch: (search: Record<string, unknown>): { card?: string } =>
-    typeof search.card === 'string' && search.card !== '' ? { card: search.card } : {},
+  validateSearch: (search: Record<string, unknown>): { card?: string } => {
+    const card = searchParamText(search.card);
+    return card === undefined ? {} : { card };
+  },
   component: lazyRouteComponent(() => import('./character-manager-page'), 'DesktopCharacterManager'),
 });
 

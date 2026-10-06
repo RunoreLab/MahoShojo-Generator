@@ -8,7 +8,7 @@ import { DENY_EXTERNAL_MEDIA } from '@mahoshojo/ui-web/markdown';
 
 import { useDesktopAnnouncements } from './use-desktop-announcements';
 import { useExternalLinks } from '../external-links/external-links-provider';
-import { resolveInternalHrefForHashHistory } from '../../app/hash-history-fragment';
+import { navigateByProductHref, resolveInternalHrefForHashHistory } from '../../app/hash-history-fragment';
 
 const DISMISS_KEY_PREFIX = 'announcement_dismissed_';
 
@@ -48,9 +48,9 @@ export function DesktopAnnouncementCenter() {
       announcements={state.announcements}
       dismissal={dismissal}
       externalMediaPolicy={DENY_EXTERNAL_MEDIA}
-      onNavigateInternal={(href) => {
-        void router.navigate({ to: href });
-      }}
+      // 公告正文可远端更新，可能携带 `?`/`#` 后缀或同页锚点——统一经共享拆分器，
+      // 而不是把整串塞进 `to` 让后缀静默丢失（D5.1-P2-r1）。
+      onNavigateInternal={(href) => navigateByProductHref(router, href)}
       resolveInternalHref={resolveInternalHrefForHashHistory}
       onNavigateExternal={openContent}
       toolbar={

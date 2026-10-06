@@ -2,11 +2,15 @@ import type { ReactNode } from 'react';
 
 import { encyclopediaCategories } from '../catalog';
 import { ALL_CATEGORY, type EncyclopediaCategoryFilter } from '../filter';
-import { useEncyclopediaFilter, useFilteredEncyclopediaEntries } from './use-encyclopedia-filter';
+import {
+  useEncyclopediaFilter,
+  useFilteredEncyclopediaEntries,
+  type EncyclopediaNavigate,
+} from './use-encyclopedia-filter';
 
 export interface EncyclopediaIndexViewProps {
   /** 条目链接的目标。Web 交给 Next router，Desktop 交给 hash router。 */
-  readonly onNavigate: (href: string) => void;
+  readonly onNavigate: EncyclopediaNavigate;
   /** 渲染 `<a href>` 时把产品路径解析成运行时 href（Desktop hash history 传 `#` 前缀）。 */
   readonly resolveInternalHref?: ((href: string) => string) | undefined;
   /** 当前页面的基础路径，用于把筛选状态写回 URL。缺省时筛选只改本地状态。 */
@@ -45,7 +49,8 @@ export function EncyclopediaIndexView({
       if (categoryId !== ALL_CATEGORY) params.set('c', categoryId);
       if (query.trim()) params.set('q', query.trim());
       const search = params.toString();
-      onNavigate(search ? `${path}?${search}` : path);
+      // 筛选写回同页 URL：逐按键 push 会撑爆历史栈，replace 保持「后退一次回到进入前」。
+      onNavigate(search ? `${path}?${search}` : path, { replace: true });
     },
   });
 

@@ -325,6 +325,73 @@ describe('encyclopedia index filter and links under hash history', () => {
     // 未知 slug 的返回入口仍然可用且是 #/ 形态。
     expect(container.querySelector('a[href="#/encyclopedia"]')).not.toBeNull();
   });
+
+  it('normalizes a JSON-parseable ?q back into a keyword', async () => {
+    // `parseSearch` 把 `?q=429` 物化成 number 429——「429」「true」都是真实关键词，
+    // `validateSearch` 必须归一回字符串而不是整条丢弃（D5.1-P2-r1）。
+    window.location.hash = '#/encyclopedia?q=429';
+    await mount();
+
+    // `location.search` 是 parseSearch 的原始产物（number）；validateSearch 的归一结果
+    // 落在路由 match 上——页面经 `useSearch` 读到的是后者，也就是输入框里的 '429'。
+    const input = container.querySelector<HTMLInputElement>('input[aria-label="搜索百科条目"]');
+    expect(input?.value).toBe('429');
+  });
+
+  it('writes ?q in the web-compatible raw form without JSON quoting', async () => {
+    // 默认 stringify 会给字符串值套 JSON 引号（`?q=%22429%22`），与 Web 的 `?q=429`
+    // 双向失真；自定义 stringifySearch 必须让两端 URL 可互贴（D5.1-P2-r1）。
+    const router = await mount();
+    await act(async () => {
+      await router.navigate({ to: '/encyclopedia' });
+    });
+    await settle();
+
+    await typeSearch('429');
+    expect(window.location.hash).toContain('q=429');
+    expect(window.location.hash).not.toContain('%22');
+    // 同一条 URL 读回来时（reload/分享粘贴），number 会被归一回关键词文本。
+    const input = container.querySelector<HTMLInputElement>('input[aria-label="搜索百科条目"]');
+    expect(input?.value).toBe('429');
+  });
+
+  it('syncs the filter input on same-page back/forward and keeps typing out of the history stack', async () => {
+    const router = await mount();
+    await act(async () => {
+      await router.navigate({ to: '/encyclopedia' });
+    });
+    await settle();
+
+    // 两条不同的筛选状态入栈（直接 navigate 是 push——用户分享的链接语义）。
+    await act(async () => {
+      await router.navigate({ to: '/encyclopedia', search: { q: '甲' } });
+    });
+    await settle();
+    await act(async () => {
+      await router.navigate({ to: '/encyclopedia', search: { q: '乙' } });
+    });
+    await settle();
+    const input = container.querySelector<HTMLInputElement>('input[aria-label="搜索百科条目"]');
+    expect(input?.value).toBe('乙');
+
+    // back：URL 回到 ?q=甲，筛选框必须跟上——此前 useState(initial) 只在挂载时生效。
+    await act(async () => {
+      router.history.back();
+    });
+    await settle();
+    expect(router.state.location.search).toEqual({ q: '甲' });
+    expect(input?.value).toBe('甲');
+
+    // 组件内输入写回用 replace：不产生新历史条目，forward 仍是 ?q=乙。
+    await typeSearch('丙');
+    expect(router.state.location.search).toEqual({ q: '丙' });
+    await act(async () => {
+      router.history.forward();
+    });
+    await settle();
+    expect(router.state.location.search).toEqual({ q: '乙' });
+    expect(input?.value).toBe('乙');
+  });
 });
 
 describe('back/forward round trip on the locked version', () => {

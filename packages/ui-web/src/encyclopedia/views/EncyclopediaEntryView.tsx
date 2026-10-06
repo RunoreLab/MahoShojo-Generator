@@ -3,7 +3,11 @@ import type { ReactNode } from 'react';
 import { encyclopediaCategories, getEncyclopediaCategory } from '../catalog';
 import type { EncyclopediaContentSource } from '../content-source';
 import { ALL_CATEGORY } from '../filter';
-import { useEncyclopediaFilter, useFilteredEncyclopediaEntries } from './use-encyclopedia-filter';
+import {
+  useEncyclopediaFilter,
+  useFilteredEncyclopediaEntries,
+  type EncyclopediaNavigate,
+} from './use-encyclopedia-filter';
 import {
   MarkdownBlock,
   slugifyHeading,
@@ -17,7 +21,7 @@ import { useEncyclopediaContent } from './use-encyclopedia-content';
 export interface EncyclopediaEntryViewProps {
   readonly slug: string | undefined;
   readonly contentSource: EncyclopediaContentSource;
-  readonly onNavigate: (href: string) => void;
+  readonly onNavigate: EncyclopediaNavigate;
   /** 渲染 `<a href>` 时把产品路径解析成运行时 href（Desktop hash history 传 `#` 前缀）。 */
   readonly resolveInternalHref?: ((href: string) => string) | undefined;
   /**

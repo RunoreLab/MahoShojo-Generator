@@ -1,4 +1,9 @@
-import { createHashHistory, createRouter } from '@tanstack/react-router';
+import {
+  createHashHistory,
+  createRouter,
+  parseSearchWith,
+  stringifySearchWith,
+} from '@tanstack/react-router';
 
 import { routeTree } from './routes';
 
@@ -28,6 +33,11 @@ export const createDesktopRouter = () =>
     defaultPreload: false,
     defaultPreloadStaleTime: 0,
     history: createHashHistory(),
+    // 与 Web 的 `?q=429` 同形：默认 stringify 会对字符串值再套一层 JSON.stringify，
+    // 写出 `?q=%22429%22`，跨端互贴链接双向失真。parse 侧保留 JSON 解析
+    // （`?q=429` → number，由路由 validateSearch 归一回字符串）。
+    parseSearch: parseSearchWith(JSON.parse),
+    stringifySearch: stringifySearchWith(JSON.stringify),
   });
 
 declare module '@tanstack/react-router' {

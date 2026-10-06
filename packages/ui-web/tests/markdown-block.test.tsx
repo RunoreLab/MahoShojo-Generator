@@ -144,6 +144,21 @@ describe('MarkdownBlock navigation policy', () => {
     expect(onNavigateInternal).toHaveBeenCalledWith('/local-library');
   });
 
+  it('routes same-page #anchors through internal navigation instead of a raw href', () => {
+    // hash-history 宿主（Desktop）里裸 `#frag` 会被当成名为 frag 的路由；锚点必须
+    // 交给宿主的内部导航层，由它决定「留在当前路由只改 fragment」（D5.1-P2-r1）。
+    const onNavigateInternal = vi.fn();
+    renderMarkdown('[跳到定义](#术语定义)', { onNavigateInternal });
+
+    const anchor = container.querySelector<HTMLAnchorElement>('a');
+    // normalizeMarkdownHref 对 CJK fragment 做 percent-encoding，解码是宿主侧的事。
+    expect(anchor?.getAttribute('href')).toBe('#%E6%9C%AF%E8%AF%AD%E5%AE%9A%E4%B9%89');
+    act(() => {
+      anchor!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+    expect(onNavigateInternal).toHaveBeenCalledWith('#%E6%9C%AF%E8%AF%AD%E5%AE%9A%E4%B9%89');
+  });
+
   it('lets the host replace the internal anchor entirely', () => {
     renderMarkdown('[本地库](/local-library)', {
       renderInternalLink: ({ href, children }: InternalLinkRenderProps) => (

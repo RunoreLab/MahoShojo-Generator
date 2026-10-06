@@ -30,6 +30,7 @@ import { requestCardLibraryRoute } from './card-library-bridge';
 import { DesktopCloudError, type InvokeFn } from './cloud-bridge';
 import { downloadTextFile } from './download-text-file';
 import { IpcLocalCardRepository } from './local-card-bridge';
+import { navigateByProductHref, resolveInternalHrefForHashHistory } from '../app/hash-history-fragment';
 import { useDesktopCloudSession } from '../features/account/use-desktop-cloud-session';
 import type {
   DesktopCardLibraryRouteId,
@@ -327,7 +328,9 @@ export const DesktopCardLibraryLink = ({ href, className, title, target, rel, on
   const router = useRouter();
   return (
     <a
-      href={href}
+      // hash history 下渲染真实 `#` 前缀 href：Ctrl/中键点击、复制链接与脚本失败后的
+      // 原生跳转都会落到这个地址上，裸产品路径伺服不到（D5.1-P2-r1）。
+      href={resolveInternalHrefForHashHistory(href)}
       className={className}
       title={title}
       target={target}
@@ -339,7 +342,7 @@ export const DesktopCardLibraryLink = ({ href, className, title, target, rel, on
         if (target === '_blank') return;
         if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
         event.preventDefault();
-        void router.navigate({ to: href });
+        navigateByProductHref(router, href);
       }}
     >
       {children}

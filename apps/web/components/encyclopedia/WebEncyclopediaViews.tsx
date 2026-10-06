@@ -18,9 +18,12 @@ export const WEB_ENCYCLOPEDIA_CONTENT_SOURCE: EncyclopediaContentSource = { base
 /** 目录页把筛选状态写回 URL，从而让 `?q=&c=` 可分享。 */
 export const useWebEncyclopediaNavigate = () => {
   const router = useRouter();
-  return (href: string) => {
+  return (href: string, options?: { readonly replace?: boolean }) => {
     // `scroll: false` 是既有行为：切换筛选不应该把页面滚回顶部，用户往往正在比对结果。
-    void router.push(href, { scroll: false });
+    // 筛选写回走 `replace`（共享层传入）：逐按键 push 会让一次输入占满历史栈。
+    void (options?.replace === true
+      ? router.replace(href, { scroll: false })
+      : router.push(href, { scroll: false }));
   };
 };
 

@@ -338,7 +338,9 @@ export function MarkdownBlock({
         return externalLink(normalizedHref, children, linkClassName, title);
       }
 
-      if (normalizedHref.startsWith('/')) {
+      // 同页锚点 `#frag` 也是站内链接：它必须由宿主的导航层处理（Desktop 的 hash history
+      // 里裸 `#frag` 会被当成名为 frag 的路由；Web 由 Next <Link> 做同页滚动）。
+      if (normalizedHref.startsWith('/') || normalizedHref.startsWith('#')) {
         return internalLink(normalizedHref, children, title, linkClassName);
       }
 

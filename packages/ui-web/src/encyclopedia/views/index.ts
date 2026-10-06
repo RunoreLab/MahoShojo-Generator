@@ -15,6 +15,7 @@
 export {
   useEncyclopediaFilter,
   useFilteredEncyclopediaEntries,
+  type EncyclopediaNavigate,
 } from './use-encyclopedia-filter';
 
 export {

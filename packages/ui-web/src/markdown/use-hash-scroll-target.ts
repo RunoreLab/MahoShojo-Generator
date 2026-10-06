@@ -26,7 +26,9 @@ export interface HashScrollTargetOptions {
   /**
    * 当前 fragment，含或不含 `#` 均可。
    *
-   * 由宿主注入：Web 传路由 hash，Desktop 传 `router.state.location.hash`。
+   * 由宿主注入：Web 传路由 hash（`useLocationHash`）；Desktop 的 TanStack 解析结果
+   * 没有 `hash` 字段，传的是 `getRouteFragmentFromHashHistory(router.state.location.href)`
+   * 从路由 href 里切出的 fragment。
    */
   readonly hash?: string | undefined;
   /**
