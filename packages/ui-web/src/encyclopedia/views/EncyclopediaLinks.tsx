@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 
 import { getEncyclopediaEntry, type EncyclopediaEntry } from '../catalog';
+import { shouldInterceptInternalLinkClick } from './internal-link-click';
 
 export interface EncyclopediaLinkItem {
   readonly slug: string;
@@ -52,6 +53,7 @@ export function EncyclopediaLinks({
             key={item.slug}
             href={resolveInternalHref?.(href) ?? href}
             onClick={(event) => {
+              if (!shouldInterceptInternalLinkClick(event)) return;
               event.preventDefault();
               onNavigate(href);
             }}

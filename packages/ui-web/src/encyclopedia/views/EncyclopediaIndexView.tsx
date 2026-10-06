@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { encyclopediaCategories, getEncyclopediaCategory, type EncyclopediaEntry } from '../catalog';
 import { ALL_CATEGORY, type EncyclopediaCategoryFilter } from '../filter';
 import { EncyclopediaPageFrame } from './EncyclopediaPageFrame';
+import { shouldInterceptInternalLinkClick } from './internal-link-click';
 import {
   useEncyclopediaFilter,
   useFilteredEncyclopediaEntries,
@@ -91,6 +92,7 @@ export function EncyclopediaIndexView({
         key={entry.slug}
         href={resolveInternalHref?.(entryHref(entry.slug)) ?? entryHref(entry.slug)}
         onClick={(event) => {
+          if (!shouldInterceptInternalLinkClick(event)) return;
           event.preventDefault();
           onNavigate(entryHref(entry.slug));
         }}

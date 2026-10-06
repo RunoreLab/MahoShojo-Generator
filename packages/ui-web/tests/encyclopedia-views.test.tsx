@@ -115,6 +115,27 @@ describe('EncyclopediaIndexView', () => {
     expect(onNavigate).toHaveBeenCalledWith(first!.getAttribute('href'));
   });
 
+  /**
+   * 修饰键/非主键点击必须保留运行时原生锚点语义（Web 的新标签/新窗口），
+   * 与 GlobalTopBar 的拦截规则同源——共源前这些位置是 next/link，它从不接管
+   * 这类点击（D5.1 百科 UI compatibility 收口）。
+   */
+  it.each([
+    ['Ctrl', { ctrlKey: true }],
+    ['Cmd/Meta', { metaKey: true }],
+    ['Shift', { shiftKey: true }],
+    ['Alt', { altKey: true }],
+    ['中键', { button: 1 }],
+  ])('leaves %s clicks on entry cards to native anchor semantics', (_label, init) => {
+    const onNavigate = vi.fn();
+    renderIndex({ onNavigate });
+    const anchor = container.querySelector<HTMLAnchorElement>('a[href^="/encyclopedia/"]')!;
+    const event = new MouseEvent('click', { bubbles: true, cancelable: true, ...init });
+    act(() => anchor.dispatchEvent(event));
+    expect(onNavigate).not.toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(false);
+  });
+
   it('writes the filter back to the URL only when a path is provided', () => {
     const onNavigate = vi.fn();
     render(<EncyclopediaIndexView onNavigate={onNavigate} path="/encyclopedia" initialCategoryId="ai" />);
@@ -231,6 +252,24 @@ describe('EncyclopediaLinks', () => {
     // 全部无效时留一个空容器，比渲染一排死链好。
     render(<EncyclopediaLinks items={[{ slug: 'no-such-entry' }]} onNavigate={() => {}} />);
     expect(container.innerHTML).toBe('');
+  });
+
+  it.each([
+    ['Ctrl', { ctrlKey: true }],
+    ['Cmd/Meta', { metaKey: true }],
+    ['Shift', { shiftKey: true }],
+    ['Alt', { altKey: true }],
+    ['中键', { button: 1 }],
+  ])('leaves %s clicks on link-strip items to native anchor semantics', (_label, init) => {
+    // EncyclopediaLinks 被首页/创作入口/竞技场等约 9 个 Web 页面复用，是这批修饰键
+    // 回归里曝光面最大的一处。
+    const onNavigate = vi.fn();
+    render(<EncyclopediaLinks items={[{ slug: 'site-guide' }]} onNavigate={onNavigate} />);
+    const anchor = container.querySelector<HTMLAnchorElement>('a')!;
+    const event = new MouseEvent('click', { bubbles: true, cancelable: true, ...init });
+    act(() => anchor.dispatchEvent(event));
+    expect(onNavigate).not.toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(false);
   });
 });
 
@@ -368,6 +407,38 @@ describe('EncyclopediaEntryView', () => {
     renderEntry({ hash: '#不存在的锚点' });
     await flush();
     expect(container.textContent).toContain(getEncyclopediaEntry('site-guide')?.title);
+  });
+
+  it.each([
+    ['Ctrl', { ctrlKey: true }],
+    ['Cmd/Meta', { metaKey: true }],
+    ['Shift', { shiftKey: true }],
+    ['Alt', { altKey: true }],
+    ['中键', { button: 1 }],
+  ])('leaves %s clicks on sidebar and back-to-index links to native anchor semantics', async (_label, init) => {
+    const onNavigate = vi.fn();
+    renderEntry({ onNavigate });
+    await flush();
+
+    for (const selector of ['a[href="/encyclopedia"]', 'aside a[href^="/encyclopedia/"]']) {
+      const anchor = container.querySelector<HTMLAnchorElement>(selector)!;
+      const event = new MouseEvent('click', { bubbles: true, cancelable: true, ...init });
+      act(() => anchor.dispatchEvent(event));
+      expect(onNavigate).not.toHaveBeenCalled();
+      expect(event.defaultPrevented).toBe(false);
+    }
+  });
+
+  it('routes sidebar and back-to-index clicks through the host handler', async () => {
+    const onNavigate = vi.fn();
+    renderEntry({ onNavigate });
+    await flush();
+
+    const backToIndex = container.querySelector<HTMLAnchorElement>('a[href="/encyclopedia"]')!;
+    act(() => {
+      backToIndex.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+    expect(onNavigate).toHaveBeenCalledWith('/encyclopedia');
   });
 
   it('keeps the shared reading frame around the entry content', async () => {

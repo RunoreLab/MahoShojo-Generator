@@ -4,6 +4,7 @@ import { encyclopediaCategories, getEncyclopediaCategory } from '../catalog';
 import type { EncyclopediaContentSource } from '../content-source';
 import { ALL_CATEGORY } from '../filter';
 import { EncyclopediaPageFrame } from './EncyclopediaPageFrame';
+import { shouldInterceptInternalLinkClick } from './internal-link-click';
 import {
   useEncyclopediaFilter,
   useFilteredEncyclopediaEntries,
@@ -85,6 +86,7 @@ export function EncyclopediaEntryView({
         <a
           href={resolveInternalHref?.('/encyclopedia') ?? '/encyclopedia'}
           onClick={(event) => {
+            if (!shouldInterceptInternalLinkClick(event)) return;
             event.preventDefault();
             onNavigate('/encyclopedia');
           }}
@@ -132,6 +134,7 @@ export function EncyclopediaEntryView({
                     key={item.slug}
                     href={resolveInternalHref?.(entryHref(item.slug)) ?? entryHref(item.slug)}
                     onClick={(event) => {
+                      if (!shouldInterceptInternalLinkClick(event)) return;
                       event.preventDefault();
                       onNavigate(entryHref(item.slug));
                     }}
@@ -162,6 +165,7 @@ export function EncyclopediaEntryView({
                   key={item.slug}
                   href={resolveInternalHref?.(entryHref(item.slug)) ?? entryHref(item.slug)}
                   onClick={(event) => {
+                    if (!shouldInterceptInternalLinkClick(event)) return;
                     event.preventDefault();
                     onNavigate(entryHref(item.slug));
                   }}
@@ -196,6 +200,7 @@ export function EncyclopediaEntryView({
               <a
                 href={resolveInternalHref?.('/encyclopedia') ?? '/encyclopedia'}
                 onClick={(event) => {
+                  if (!shouldInterceptInternalLinkClick(event)) return;
                   event.preventDefault();
                   onNavigate('/encyclopedia');
                 }}
