@@ -77,7 +77,7 @@ const CAPABILITIES = buildCapabilitySnapshot();
  * 裸 section 页面（本地库、设置）继续走受限宽 `main`（D5.1-P2-r4；百科骨架见 D5.1
  * 百科 UI compatibility 收口）。
  */
-const FULL_BLEED_PATHS = new Set(['/', '/details', '/character-manager', '/encyclopedia']);
+const FULL_BLEED_PATHS = new Set(['/', '/details', '/canshou', '/character-manager', '/encyclopedia']);
 
 /** 条目页是前缀而不是字面路径：`/encyclopedia/<slug>`。 */
 const isFullBleedPath = (pathname: string) =>
@@ -341,9 +341,16 @@ const detailsRoute = createRoute({
   component: lazyRouteComponent(() => import('./details-page'), 'DesktopDetails'),
 });
 
+const canshouRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/canshou',
+  component: lazyRouteComponent(() => import('./canshou-page'), 'DesktopCanshou'),
+});
+
 export const routeTree = rootRoute.addChildren([
   indexRoute,
   detailsRoute,
+  canshouRoute,
   characterManagerRoute,
   encyclopediaIndexRoute,
   encyclopediaEntryRoute,

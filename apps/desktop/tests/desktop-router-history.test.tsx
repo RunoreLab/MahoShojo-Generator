@@ -139,8 +139,8 @@ describe('desktop router keeps the product path inside the hash', () => {
     const home = container.querySelector('[data-testid="page-home"]')!;
     const hrefs = [...home.querySelectorAll('a')].map((anchor) => anchor.getAttribute('href'));
 
-    // 共源首页目录在 hide 策略下只渲染已交付入口：/details 与 /character-manager
-    // 可点；/canshou、/battle 等 Web-only 或未交付路径整条不出现（DESK-PROD-001）。
+    // 共源首页目录在 hide 策略下只渲染已交付入口：/details、/canshou 与 /character-manager
+    // 可点；/battle 等 Web-only 或未交付路径整条不出现（DESK-PROD-001）。
     // hash-history 宿主的 <a href> 一律是 `#/产品路径`——裸 `/path` 会让复制链接与
     // 脚本失败后的原生跳转落在 Tauri 自定义协议伺服不了的路径上。
     expect(home.querySelector('[data-testid="home-feature-grid"]')).not.toBeNull();
@@ -159,12 +159,12 @@ describe('desktop router keeps the product path inside the hash', () => {
     expect(home.querySelector(':scope > .container > .card')).not.toBeNull();
     expect(home.textContent).toContain('欢迎来到魔法国度！选择一个项目开始玩耍吧！');
     expect(hrefs).toContain('#/details');
+    expect(hrefs).toContain('#/canshou');
     expect(hrefs).toContain('#/character-manager');
     expect(hrefs).toContain('#/encyclopedia');
     expect(hrefs).toContain('#/local-library');
     expect(hrefs).toContain('#/settings');
     expect(hrefs).not.toContain('/battle');
-    expect(hrefs).not.toContain('/canshou');
     // 页脚站外链接经 onNavigateExternal 渲染为真实 <a href>（点击被拦截走
     // open_external_url），而不是不可点的占位。
     expect(hrefs.some((href) => href?.startsWith('https://'))).toBe(true);
@@ -172,6 +172,7 @@ describe('desktop router keeps the product path inside the hash', () => {
 
     for (const [to, expected, fullBleed] of [
       ['/details', 'page-details', true],
+      ['/canshou', 'page-canshou', true],
       ['/character-manager', 'page-character-manager', true],
       ['/local-library', 'page-local-library', false],
       ['/settings', 'page-settings', false],
@@ -195,6 +196,7 @@ describe('desktop router keeps the product path inside the hash', () => {
     // 白卡骨架由共源 `EncyclopediaPageFrame` 自带，见下方百科断言（D5.1 百科 UI 收口）。
     for (const [to, expected, backgroundClass] of [
       ['/details', 'page-details', 'magic-background'],
+      ['/canshou', 'page-canshou', 'magic-background-dark'],
       ['/character-manager', 'page-character-manager', 'magic-background-white'],
     ] as const) {
       await act(async () => {

@@ -5,6 +5,7 @@
       "afdian-white.svg",
       "afdian.svg",
       "beast-logo.svg",
+      "beast-logo-white.svg",
       "beast-title.svg",
       "character-manager-white.svg",
       "character-manager.svg",
@@ -19,7 +20,6 @@
     "web": [
       "arena-card-white.webp",
       "arena-white.svg",
-      "beast-logo-white.svg",
       "card-forge-white.svg",
       "free-generator-white.svg",
       "magic-tea-party-white.svg",
