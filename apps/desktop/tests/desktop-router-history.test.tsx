@@ -109,9 +109,13 @@ const pageTestId = (): string | null | undefined =>
  *
  * 它们由 `@mahoshojo/ui-web/encyclopedia` 提供，用的是自己的命名而不是 Desktop 的 `page-` 前缀——
  * 共享组件不该采用某个 app 的测试约定。因此这里按前缀分别取，而不是让 `pageTestId` 兼管。
+ * 选择器点名 index/entry 而不是裸前缀：`encyclopedia-page-frame`/`encyclopedia-page-card`
+ * 这些骨架 testid 在 DOM 里先于视图出现，裸前缀会先命中骨架。
  */
 const encyclopediaTestId = (): string | null | undefined =>
-  container.querySelector('[data-testid^="encyclopedia-"]')?.getAttribute('data-testid');
+  container
+    .querySelector('[data-testid="encyclopedia-index"], [data-testid="encyclopedia-entry"]')
+    ?.getAttribute('data-testid');
 
 describe('desktop router keeps the product path inside the hash', () => {
   it('never writes the product path before the hash', async () => {
@@ -187,8 +191,8 @@ describe('desktop router keeps the product path inside the hash', () => {
     }
 
     // 卡片页与 Web 同构：`magic-background* > .container > .card` 共源骨架
-    // （DESK-PARITY：白色限宽容器）。裸 section 的百科/本地库不在此约束内——
-    // Web 对应页面同样不套 card。
+    // （DESK-PARITY：白色限宽容器）。裸 section 的本地库/设置不在此约束内；百科的
+    // 白卡骨架由共源 `EncyclopediaPageFrame` 自带，见下方百科断言（D5.1 百科 UI 收口）。
     for (const [to, expected, backgroundClass] of [
       ['/details', 'page-details', 'magic-background'],
       ['/character-manager', 'page-character-manager', 'magic-background-white'],
@@ -214,6 +218,12 @@ describe('desktop router keeps the product path inside the hash', () => {
       });
       await settle();
       expect(encyclopediaTestId(), `${to} 应当渲染 ${expected}`).toBe(expected);
+      // 百科自带 `magic-background-white` 页面骨架：路由登记为 full-bleed，frame 提供
+      // 渐变底 → 限宽容器 → 白卡的分层，与 Web 同构（D5.1 百科 UI compatibility 收口）。
+      expect(container.querySelector('main')?.className, `${to} 应为全幅 bleed 容器`).toBe('flex-1');
+      const frame = container.querySelector('[data-testid="encyclopedia-page-frame"]');
+      expect(frame?.classList.contains('magic-background-white'), `${to} 应有页面背景`).toBe(true);
+      expect(frame?.querySelector('[data-testid="encyclopedia-page-card"]')).not.toBeNull();
     }
   });
 });

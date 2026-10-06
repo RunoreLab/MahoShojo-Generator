@@ -124,8 +124,9 @@ describe('EncyclopediaIndexView', () => {
       reset!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
     });
     // 筛选状态要变成可分享的 URL，否则用户没法把「只看某一类」发给同事。
-    // 写回用 `replace`——逐按键 push 会让一次输入占满历史栈（D5.1-P2-r1）。
-    expect(onNavigate).toHaveBeenCalledWith('/encyclopedia', { replace: true });
+    // 写回用 `replace`——逐按键 push 会让一次输入占满历史栈（D5.1-P2-r1）；
+    // `preserveScroll` 让用户在比对结果时不被滚回顶部（D5.1 百科 UI compatibility 收口）。
+    expect(onNavigate).toHaveBeenCalledWith('/encyclopedia', { replace: true, preserveScroll: true });
   });
 
   it('syncs the filter when the host feeds a different initial (back/forward)', () => {
@@ -148,13 +149,63 @@ describe('EncyclopediaIndexView', () => {
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, '限流');
       input.dispatchEvent(new Event('input', { bubbles: true }));
     });
-    expect(onNavigate).toHaveBeenLastCalledWith('/encyclopedia?q=%E9%99%90%E6%B5%81', { replace: true });
+    expect(onNavigate).toHaveBeenLastCalledWith('/encyclopedia?q=%E9%99%90%E6%B5%81', {
+      replace: true,
+      preserveScroll: true,
+    });
 
     // 回声：宿主把刚 commit 的值喂回 initial——与本组件 commit 值相等时必须跳过，
     // 否则正在输入的后续字符会被自己的回声打回。
     render(<EncyclopediaIndexView onNavigate={onNavigate} path="/encyclopedia" initialQuery="限流" />);
     const inputAfter = container.querySelector<HTMLInputElement>('input')!;
     expect(inputAfter.value).toBe('限流');
+  });
+
+  /**
+   * 页面骨架门禁：frame → 限宽容器 → 白卡 → view 的层次必须仍在。
+   *
+   * 共源抽取（`c7f3421f`）把这套骨架当宿主包装删掉、Web 侧又没补回来，是纯视觉回归——
+   * 功能断言全绿但页面铺满屏幕（D5.1 百科 UI compatibility 收口）。
+   */
+  const expectPageFrame = (viewTestId: string) => {
+    const frame = container.querySelector('[data-testid="encyclopedia-page-frame"]');
+    expect(frame?.classList.contains('magic-background-white')).toBe(true);
+    const bounded = frame?.querySelector(':scope > .max-w-6xl');
+    expect(bounded).not.toBeNull();
+    const card = bounded?.querySelector(':scope > [data-testid="encyclopedia-page-card"]');
+    expect(card?.className).toContain('rounded-2xl');
+    // header 与内容在卡内分层（border-b 分隔），不是裸 section 直贴卡片。
+    expect(card?.querySelector(':scope > header')).not.toBeNull();
+    expect(card?.querySelector(`[data-testid="${viewTestId}"]`)).not.toBeNull();
+  };
+
+  it('keeps the shared reading frame around the index content', () => {
+    renderIndex();
+    expectPageFrame('encyclopedia-index');
+  });
+
+  it('renders a neutral subtitle unless the host injects its own', () => {
+    // 「随应用离线可用」是 Desktop 的宿主事实，不应成为共享层的默认文案（D5.1 收口）。
+    renderIndex();
+    expect(container.textContent).toContain('涵盖使用说明、规则、故障排查与进阶内容');
+    expect(container.textContent).not.toContain('离线');
+    expect(container.textContent).not.toContain('PR');
+  });
+
+  it('renders the host-provided subtitle', () => {
+    renderIndex({ subtitle: '宿主自定义简介' });
+    expect(container.textContent).toContain('宿主自定义简介');
+  });
+
+  it('keeps the selected-category heading and per-card badges in the filtered state', () => {
+    renderIndex({ initialCategoryId: 'ai' });
+    const main = container.querySelector('main')!;
+    // 分类标题、说明与「N 篇」计数是筛选态的信息层级，共源抽取曾把它们削成裸卡片墙。
+    expect(main.querySelector('h2')?.textContent).toBe('AI 生成与格式');
+    expect(main.textContent).toContain('拒答、空输出、格式异常、生成失败与常见自救。');
+    expect(main.textContent).toContain('篇');
+    // 筛选态的条目卡片带分类 badge。
+    expect(main.querySelectorAll('.bg-purple-50').length).toBeGreaterThan(0);
   });
 });
 
@@ -317,5 +368,27 @@ describe('EncyclopediaEntryView', () => {
     renderEntry({ hash: '#不存在的锚点' });
     await flush();
     expect(container.textContent).toContain(getEncyclopediaEntry('site-guide')?.title);
+  });
+
+  it('keeps the shared reading frame around the entry content', async () => {
+    renderEntry();
+    await flush();
+    const frame = container.querySelector('[data-testid="encyclopedia-page-frame"]');
+    expect(frame?.classList.contains('magic-background-white')).toBe(true);
+    const card = frame?.querySelector('[data-testid="encyclopedia-page-card"]');
+    expect(card?.querySelector(':scope > header')).not.toBeNull();
+    expect(card?.querySelector('[data-testid="encyclopedia-entry"]')).not.toBeNull();
+  });
+
+  it('keeps the matched-count row under the sidebar search', async () => {
+    renderEntry();
+    await flush();
+    const input = container.querySelector('aside input[type="search"]')!;
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, '限流');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(container.textContent).toContain('匹配 ');
+    expect(container.textContent).toContain('清除');
   });
 });

@@ -19,12 +19,15 @@ import {
 /**
  * 宿主侧「跳到某个产品 href」的导航回调。
  *
- * `replace` 供筛选写回 URL 这类高频、不应产生历史条目的变更使用——逐按键 `push`
- * 会让一次输入占十几条历史记录，后退键要按很久才能离开目录页。
+ * - `replace` 供筛选写回 URL 这类高频、不应产生历史条目的变更使用——逐按键 `push`
+ *   会让一次输入占十几条历史记录，后退键要按很久才能离开目录页。
+ * - `preserveScroll` 供同页高频改动使用：搜索时不应把用户正在比对的结果滚回顶部。
+ *   缺省时是「进入另一页」，宿主应恢复平台默认语义——回到页面顶部从头阅读（Web 旧
+ *   `<Link>` 的行为）。
  */
 export type EncyclopediaNavigate = (
   href: string,
-  options?: { readonly replace?: boolean },
+  options?: { readonly replace?: boolean; readonly preserveScroll?: boolean },
 ) => void;
 
 export const useFilteredEncyclopediaEntries = ({

@@ -69,12 +69,18 @@ const CAPABILITIES = buildCapabilitySnapshot();
 /**
  * 自带全幅页面背景的产品路径（`magic-background*` 图层自己铺到视口）。
  *
- * 这些页面与 Web 同构的骨架是 `magic-background* > .container > .card`：页面背景必须
+ * 这些页面与 Web 同构的骨架是 `magic-background* > .container > .card`（百科为共源
+ * `EncyclopediaPageFrame` 的 `magic-background-white > max-w-6xl > 白卡`）：页面背景必须
  * 横向铺满，`main` 再套一层限宽内边距只是把背景裁进栏盒（渐变同源时肉眼看不出接缝，
  * 但骨架不同构）。`bleedContent` 让壳的 `main` 退化为 `flex-1` 全宽容器；无背景的
- * 裸 section 页面（百科、本地库、设置）继续走受限宽 `main`（D5.1-P2-r4）。
+ * 裸 section 页面（本地库、设置）继续走受限宽 `main`（D5.1-P2-r4；百科骨架见 D5.1
+ * 百科 UI compatibility 收口）。
  */
-const FULL_BLEED_PATHS = new Set(['/', '/details', '/character-manager']);
+const FULL_BLEED_PATHS = new Set(['/', '/details', '/character-manager', '/encyclopedia']);
+
+/** 条目页是前缀而不是字面路径：`/encyclopedia/<slug>`。 */
+const isFullBleedPath = (pathname: string) =>
+  FULL_BLEED_PATHS.has(pathname) || pathname.startsWith('/encyclopedia/');
 
 /**
  * 壳。
@@ -106,7 +112,7 @@ const DesktopShellInner = () => {
     <AppShell
       // DESK-PARITY-002：品牌已由顶栏 favicon 圆形标志承担，壳不再渲染默认文字品牌。
       brand={null}
-      bleedContent={FULL_BLEED_PATHS.has(pathname)}
+      bleedContent={isFullBleedPath(pathname)}
       topBar={
         <ProductTopBar
           pathname={pathname}

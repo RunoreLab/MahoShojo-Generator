@@ -1,11 +1,17 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
-import { useSearchParams } from 'next/navigation';
-
-import { parseEncyclopediaFilter, type EncyclopediaContentSource } from '@mahoshojo/ui-web/encyclopedia';
-import { EncyclopediaIndexView } from '@mahoshojo/ui-web/encyclopedia-views';
 import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
+
+import {
+  encyclopediaEntries,
+  parseEncyclopediaFilter,
+  type EncyclopediaContentSource,
+} from '@mahoshojo/ui-web/encyclopedia';
+import {
+  EncyclopediaIndexView,
+  type EncyclopediaNavigate,
+} from '@mahoshojo/ui-web/encyclopedia-views';
 
 /**
  * Web 的百科正文服务根。
@@ -15,15 +21,26 @@ import Link from 'next/link';
  */
 export const WEB_ENCYCLOPEDIA_CONTENT_SOURCE: EncyclopediaContentSource = { baseUrl: '/' };
 
-/** 目录页把筛选状态写回 URL，从而让 `?q=&c=` 可分享。 */
-export const useWebEncyclopediaNavigate = () => {
+/** Web 百科的目录简介：站内事实（条目数与投稿入口），由共享视图的 `subtitle` 注入。 */
+const WEB_INDEX_SUBTITLE = `${encyclopediaEntries.length} 篇条目 · 涵盖使用说明 / 规则 / 进阶等内容，助你更好地了解和使用本站功能。如有补充，欢迎提交 PR 或反馈投稿！`;
+
+/**
+ * 目录页把筛选状态写回 URL，从而让 `?q=&c=` 可分享。
+ *
+ * 滚动语义按用途拆开：`preserveScroll` 只用于筛选写回——用户输入搜索词时当然不应滚回顶部；
+ * 其余调用是「进入另一页」（条目、目录往返），保持默认 scroll 行为回到页面顶部，恢复共源前
+ * `<Link>` 的语义。
+ */
+export const useWebEncyclopediaNavigate = (): EncyclopediaNavigate => {
   const router = useRouter();
-  return (href: string, options?: { readonly replace?: boolean }) => {
-    // `scroll: false` 是既有行为：切换筛选不应该把页面滚回顶部，用户往往正在比对结果。
-    // 筛选写回走 `replace`（共享层传入）：逐按键 push 会让一次输入占满历史栈。
-    void (options?.replace === true
-      ? router.replace(href, { scroll: false })
-      : router.push(href, { scroll: false }));
+  return (href, options) => {
+    if (options?.replace === true) {
+      if (options?.preserveScroll === true) void router.replace(href, { scroll: false });
+      else void router.replace(href);
+      return;
+    }
+    if (options?.preserveScroll === true) void router.push(href, { scroll: false });
+    else void router.push(href);
   };
 };
 
@@ -53,6 +70,7 @@ export function WebEncyclopediaIndex() {
       path="/encyclopedia"
       initialQuery={initial.query}
       initialCategoryId={initial.categoryId}
+      subtitle={WEB_INDEX_SUBTITLE}
       headerLinks={<WebEncyclopediaHeaderLinks />}
     />
   );

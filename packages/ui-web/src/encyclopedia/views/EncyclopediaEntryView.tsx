@@ -1,8 +1,9 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 
 import { encyclopediaCategories, getEncyclopediaCategory } from '../catalog';
 import type { EncyclopediaContentSource } from '../content-source';
 import { ALL_CATEGORY } from '../filter';
+import { EncyclopediaPageFrame } from './EncyclopediaPageFrame';
 import {
   useEncyclopediaFilter,
   useFilteredEncyclopediaEntries,
@@ -73,6 +74,7 @@ export function EncyclopediaEntryView({
 
   useHashScrollTarget({ ready: !loading && entry !== null, hash });
 
+  const [mobileNavOpen, setMobileNavOpen] = useState(true);
   const sidebarFilter = useEncyclopediaFilter({ initial: { query: '', categoryId: ALL_CATEGORY } });
   const { entries: navEntries, grouped: groupedNavEntries } = useFilteredEncyclopediaEntries(sidebarFilter);
 
@@ -101,6 +103,18 @@ export function EncyclopediaEntryView({
           aria-label="在百科条目间搜索"
           className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 shadow-sm placeholder:text-gray-400 focus:border-purple-400 focus:outline-none focus:ring-2 focus:ring-purple-200"
         />
+        {sidebarFilter.query.trim() ? (
+          <div className="mt-2 flex items-center justify-between text-xs text-gray-500">
+            <span>匹配 {navEntries.length} 篇</span>
+            <button
+              type="button"
+              onClick={() => sidebarFilter.setQuery('')}
+              className="rounded-md px-2 py-1 text-gray-600 hover:bg-gray-50"
+            >
+              清除
+            </button>
+          </div>
+        ) : null}
       </div>
 
       <div className="mt-3 space-y-2">
@@ -170,85 +184,97 @@ export function EncyclopediaEntryView({
   );
 
   return (
-    <section data-testid="encyclopedia-entry" className="flex flex-col gap-6">
-      <header className="flex flex-wrap items-start justify-between gap-4 border-b border-gray-100 pb-5">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            {/* 这个 id 让「指向文章标题本身」的 deep link 在正文 H1 被剥离后仍然有效。 */}
-            <h1 id={titleSlug || undefined} className="truncate text-xl font-bold text-gray-900">
-              {entry?.title ?? '未找到条目'}
-            </h1>
-            <a
-              href={resolveInternalHref?.('/encyclopedia') ?? '/encyclopedia'}
-              onClick={(event) => {
-                event.preventDefault();
-                onNavigate('/encyclopedia');
-              }}
-              className="text-sm text-blue-600 hover:underline"
-            >
-              返回百科目录
-            </a>
-          </div>
-          {entry?.summary ? <div className="mt-1 text-sm text-gray-600">{entry.summary}</div> : null}
-          {category ? (
-            <div className="mt-2">
-              <span className="inline-flex items-center rounded-full bg-purple-50 px-2 py-0.5 text-xs font-medium text-purple-700 ring-1 ring-purple-100">
-                分类：{category.title}
-              </span>
+    <EncyclopediaPageFrame
+      header={
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              {/* 这个 id 让「指向文章标题本身」的 deep link 在正文 H1 被剥离后仍然有效。 */}
+              <h1 id={titleSlug || undefined} className="truncate text-xl font-bold text-gray-900">
+                {entry?.title ?? '未找到条目'}
+              </h1>
+              <a
+                href={resolveInternalHref?.('/encyclopedia') ?? '/encyclopedia'}
+                onClick={(event) => {
+                  event.preventDefault();
+                  onNavigate('/encyclopedia');
+                }}
+                className="text-sm text-blue-600 hover:underline"
+              >
+                返回百科目录
+              </a>
             </div>
-          ) : null}
-        </div>
-        {headerLinks ? <div className="flex items-center gap-4 text-sm">{headerLinks}</div> : null}
-      </header>
-
-      <div className="flex flex-col gap-6 lg:flex-row lg:gap-10">
-        <nav className="lg:hidden">
-          <details open className="rounded-xl border border-gray-200 bg-white p-3">
-            <summary className="flex cursor-pointer list-none items-center justify-between text-sm font-semibold text-gray-800 [&::-webkit-details-marker]:hidden">
-              <span className="min-w-0 truncate">条目目录</span>
-              <span className="text-xs font-normal text-gray-500">{entry ? '切换条目' : '请选择条目'}</span>
-            </summary>
-            <div className="mt-3">{sidebar}</div>
-          </details>
-        </nav>
-
-        <aside className="hidden shrink-0 lg:block lg:w-72">
-          <div className="sticky top-6 rounded-xl border border-gray-200 bg-white p-3">{sidebar}</div>
-        </aside>
-
-        <main className="min-w-0 flex-1">
-          <div className="mx-auto w-full max-w-3xl">
-            {loading ? (
-              <div role="status" className="text-sm text-gray-500">
-                正在加载内容…
+            {entry?.summary ? <div className="mt-1 text-sm text-gray-600">{entry.summary}</div> : null}
+            {category ? (
+              <div className="mt-2">
+                <span className="inline-flex items-center rounded-full bg-purple-50 px-2 py-0.5 text-xs font-medium text-purple-700 ring-1 ring-purple-100">
+                  分类：{category.title}
+                </span>
               </div>
-            ) : error ? (
-              <div role="alert" className="text-sm text-red-600">
-                加载失败：{error}
-              </div>
-            ) : entry ? (
-              <>
-                <MarkdownBlock
-                  content={displayContent}
-                  variant="light"
-                  mode="article"
-                  headingIds="github"
-                  reservedHeadingIds={[titleSlug]}
-                  onNavigateInternal={onNavigate}
-                  {...(resolveInternalHref ? { resolveInternalHref } : {})}
-                  {...(onNavigateExternal ? { onNavigateExternal } : {})}
-                  {...(renderExternalLink ? { renderExternalLink } : {})}
-                  {...(renderInternalLink ? { renderInternalLink } : {})}
-                />
-                {extraPanel}
-              </>
-            ) : (
-              <div className="text-sm text-gray-600">该百科条目不存在，可能是链接已过期或版本尚未同步。</div>
-            )}
+            ) : null}
           </div>
-        </main>
-      </div>
-    </section>
+          {headerLinks ? <div className="flex items-center gap-4 text-sm">{headerLinks}</div> : null}
+        </div>
+      }
+    >
+      <section data-testid="encyclopedia-entry">
+        <div className="flex flex-col gap-6 lg:flex-row lg:gap-10">
+          <nav className="lg:hidden">
+            {/* `open` 必须由状态控制：非受控写法里用户收起后任意重渲染都会把它重新展开。 */}
+            <details
+              open={mobileNavOpen}
+              onToggle={(event) => setMobileNavOpen(event.currentTarget.open)}
+              className="rounded-xl border border-gray-200 bg-white p-3"
+            >
+              <summary className="flex cursor-pointer list-none items-center justify-between text-sm font-semibold text-gray-800 [&::-webkit-details-marker]:hidden">
+                <span className="min-w-0 truncate">条目目录</span>
+                <span className="text-xs font-normal text-gray-500">{entry ? '切换条目' : '请选择条目'}</span>
+              </summary>
+              <div className="mt-3">{sidebar}</div>
+              <div className="mt-2 text-xs text-gray-500">
+                小技巧：用上方搜索可快速定位；切换条目后会回到页面顶部，方便从头阅读。
+              </div>
+            </details>
+          </nav>
+
+          <aside className="hidden shrink-0 lg:block lg:w-72">
+            <div className="sticky top-6 rounded-xl border border-gray-200 bg-white p-3">{sidebar}</div>
+          </aside>
+
+          <main className="min-w-0 flex-1">
+            <div className="mx-auto w-full max-w-3xl">
+              {loading ? (
+                <div role="status" className="text-sm text-gray-500">
+                  正在加载内容…
+                </div>
+              ) : error ? (
+                <div role="alert" className="text-sm text-red-600">
+                  加载失败：{error}
+                </div>
+              ) : entry ? (
+                <>
+                  <MarkdownBlock
+                    content={displayContent}
+                    variant="light"
+                    mode="article"
+                    headingIds="github"
+                    reservedHeadingIds={[titleSlug]}
+                    onNavigateInternal={onNavigate}
+                    {...(resolveInternalHref ? { resolveInternalHref } : {})}
+                    {...(onNavigateExternal ? { onNavigateExternal } : {})}
+                    {...(renderExternalLink ? { renderExternalLink } : {})}
+                    {...(renderInternalLink ? { renderInternalLink } : {})}
+                  />
+                  {extraPanel}
+                </>
+              ) : (
+                <div className="text-sm text-gray-600">该百科条目不存在，可能是链接已过期或版本尚未同步。</div>
+              )}
+            </div>
+          </main>
+        </div>
+      </section>
+    </EncyclopediaPageFrame>
   );
 }
 

@@ -55,6 +55,11 @@ export const resolveInternalHrefForHashHistory = (href: string): string => {
 export type ProductHrefNavigateOptions = {
   /** `true` 时替换当前历史条目而不是新增——筛选写回 URL 这类高频改动应使用。 */
   readonly replace?: boolean;
+  /**
+   * `true` 时不做滚动复位——搜索输入这类同页高频改动不应把页面滚回顶部。
+   * 缺省时路径跳转恢复 Web `<Link>` 的默认语义：回到页面顶部从头阅读。
+   */
+  readonly preserveScroll?: boolean;
 };
 
 type DesktopRouter = ReturnType<typeof useRouter>;
@@ -90,5 +95,19 @@ export const navigateByProductHref = (
   const to = queryIndex < 0 ? beforeHash : beforeHash.slice(0, queryIndex);
   const search =
     queryIndex < 0 ? {} : Object.fromEntries(new URLSearchParams(beforeHash.slice(queryIndex + 1)));
-  void router.navigate({ to, search, ...(fragment !== undefined ? { hash: fragment } : {}), replace });
+  const navigation = router.navigate({
+    to,
+    search,
+    ...(fragment !== undefined ? { hash: fragment } : {}),
+    replace,
+  });
+  // TanStack 不托管滚动：路径级跳转须显式回到顶部，否则在长百科底部切条目会停在旧纵深。
+  // 同页 `#frag` 与 `preserveScroll` 的筛选写回已在上面分流；带 fragment 的跨页跳转随后由
+  // `useHashScrollTarget` 把目标 heading 滚进视野，先回顶部是它生效前的正确兜底位置。
+  if (options?.preserveScroll !== true && typeof window !== 'undefined') {
+    void navigation.then(
+      () => window.scrollTo(0, 0),
+      () => undefined,
+    );
+  }
 };

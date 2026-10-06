@@ -1,5 +1,9 @@
 import { useParams, useRouter, useSearch } from '@tanstack/react-router';
-import { parseEncyclopediaFilter, type EncyclopediaContentSource } from '@mahoshojo/ui-web/encyclopedia';
+import {
+  encyclopediaEntries,
+  parseEncyclopediaFilter,
+  type EncyclopediaContentSource,
+} from '@mahoshojo/ui-web/encyclopedia';
 import { EncyclopediaEntryView, EncyclopediaIndexView } from '@mahoshojo/ui-web/encyclopedia-views';
 
 import { useExternalLinks } from '../features/external-links/external-links-provider';
@@ -11,6 +15,9 @@ import {
 } from './hash-history-fragment';
 
 const DESKTOP_CONTENT_SOURCE: EncyclopediaContentSource = { baseUrl: '/' };
+
+/** Desktop 的目录简介：离线可用是本端事实（`DESK-PROD-004`），「提交 PR」这类站点事实不出现。 */
+const DESKTOP_INDEX_SUBTITLE = `${encyclopediaEntries.length} 篇条目 · 涵盖使用说明、规则、故障排查与进阶内容，随应用离线可用。`;
 
 /**
  * 共源视图回传的是产品路径（`/encyclopedia?q=x`、`/encyclopedia/foo#锚`、同页 `#锚` 这类
@@ -55,6 +62,7 @@ export function DesktopEncyclopediaIndex() {
       path="/encyclopedia"
       initialQuery={initial.query}
       initialCategoryId={initial.categoryId}
+      subtitle={DESKTOP_INDEX_SUBTITLE}
       headerLinks={homeLink(router)}
     />
   );

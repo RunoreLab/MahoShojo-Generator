@@ -39,3 +39,8 @@ export {
   type EncyclopediaLinkItem,
   type EncyclopediaLinksProps,
 } from './EncyclopediaLinks';
+
+export {
+  EncyclopediaPageFrame,
+  type EncyclopediaPageFrameProps,
+} from './EncyclopediaPageFrame';
