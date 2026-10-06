@@ -55,6 +55,7 @@ import {
   clearDesktopCharacterManagerDraft,
   readDesktopCharacterManagerDraft,
   writeDesktopCharacterManagerDraft,
+  type StoredDesktopCardDraft,
 } from '../features/character-manager/draft-persistence';
 import { useDesktopCloudSession } from '../features/account/use-desktop-cloud-session';
 import { useDesktopCardLibraryHost } from '../platform/card-library-host';
@@ -168,6 +169,8 @@ export function DesktopCharacterManager() {
   const savingRef = useRef(false);
   const loadedIdRef = useRef<string | null>(null);
   const requestRef = useRef(0);
+  /** 启动时与 `?card=` 无关的已存草稿：先挂起，由 URL 加载结果决定恢复还是放弃。 */
+  const pendingStoredDraftRef = useRef<{ draft: StoredDesktopCardDraft; updatedAt: number } | null>(null);
 
   const guard = useLeaveGuard(
     () => savingRef.current || unsavedGuardRef.current,
@@ -184,8 +187,68 @@ export function DesktopCharacterManager() {
     setReplacedOriginalId(null);
   }, []);
 
+  // 恢复未提交的工作区草稿——baseline 语义与 `open` 不同（D5.1-P2-r5-r2）：
+  // - 原记录仍在本地库：baseline = 最新记录，current = 草稿——恢复出的草稿
+  //   保持 dirty、可保存、受离开保护，而不是以草稿自身为基线误判成「无修改」；
+  // - detached（导入/云端副本/原记录已不可用）：baseline = 草稿自身——整份内容
+  //   按未入库处理，离开保护由 `hasUnsavedLocalRecord` 承担；
+  // - 标题一律取草稿的：它可能带有未保存的标题修改。
+  const restore = useCallback((storedDraft: StoredDesktopCardDraft, original: LocalCardRecordV1 | null) => {
+    const next: CardDraft = {
+      original,
+      cardType: original?.cardType ?? storedDraft.cardType,
+      title: storedDraft.title,
+      data: storedDraft.data,
+    };
+    setDraft(next);
+    setBaseline(snapshotOf(original === null ? next : draftFromRecord(original)));
+    setOriginalData(storedDraft.originalData ?? deepCopyData(storedDraft.data));
+    setOutcome(null);
+    setReplacedOriginalId(null);
+  }, []);
+
+  /**
+   * 回取 stored draft 指向的原记录并恢复草稿；原记录已删除/不可编辑/读取失败
+   * 时按 detached 草稿降级，绝不把陈旧副本当成本地库事实。
+   * `prefix` 非空时以 alert 叠加展示（用于「URL 记录读取失败 + 已恢复草稿」）；
+   * `shouldAbort` 供调用方丢弃过期结果（对应 cleanup/新请求抢占）。
+   */
+  const restoreStoredDraft = useCallback(
+    (
+      storedDraft: StoredDesktopCardDraft,
+      updatedAt: number,
+      prefix: string | null = null,
+      shouldAbort: () => boolean = () => false,
+    ) => {
+      const apply = (original: LocalCardRecordV1 | null) => {
+        if (shouldAbort()) return;
+        restore(storedDraft, original);
+        setAutoSaveTimestamp(updatedAt);
+        const restoredText = original === null && storedDraft.originalId !== null
+          ? '已恢复浏览器内的编辑草稿；原本地库记录已不可用，草稿按未保存的导入卡处理。'
+          : '已恢复浏览器内的编辑草稿。';
+        setNotice(prefix === null
+          ? { tone: 'status', text: restoredText }
+          : { tone: 'alert', text: `${prefix} ${restoredText}` });
+        setDraftRestoreReady(true);
+      };
+      if (storedDraft.originalId !== null) {
+        void repository.get(storedDraft.originalId).then(
+          (record) => apply(record !== null && record.deletedAt === undefined && isEditableLocalCard(record) ? record : null),
+          () => apply(null),
+        );
+        return;
+      }
+      apply(null);
+    },
+    [restore, repository],
+  );
+
   const closeEditor = useCallback(() => {
     loadedIdRef.current = null;
+    // 作废在途的 `?card` 读取，避免关闭后又被迟到的响应重新打开。
+    requestRef.current += 1;
+    setLoading(false);
     setDraft(null);
     setOriginalData(null);
     setBaseline(null);
@@ -194,60 +257,44 @@ export function DesktopCharacterManager() {
     cards.controller.actions.reload();
   }, [cards.controller.actions]);
 
-  // 页面草稿恢复：仅在没有 `?card=` 直达意图时执行一次（URL 打开是显式意图，优先）。
+  // 页面草稿恢复：与 `?card=` 直达按身份裁决（D5.1-P2-r5-r2）——
+  // - `storedDraft.originalId === cardParam`：同一编辑会话的刷新，恢复草稿叠到
+  //   最新 original 上；预占 `loadedIdRef` 让 URL 加载 effect 跳过（草稿才是
+  //   未提交的最新工作区，重新载入记录会丢修改）；
+  // - 草稿与 cardParam 无关：URL 是显式新意图——先挂起旧草稿，等 URL 加载落定
+  //   再由加载 effect 处置；读取失败必须把旧草稿恢复回来，绝不能让自动保存的
+  //   空态顺手销毁它；
+  // - 无 cardParam：直接恢复草稿。
   // `draftRestoreReady` 是自动保存的闸门（与 Web `draftRestoreReady` 同一模式）——
-  // 本地记录的异步回取也结束后才置 true，此前自动保存不启动，空初始态不会盖掉
-  // 待恢复的草稿。
+  // 待恢复/待裁决的草稿尚未落定前自动保存不启动，空初始态不会盖掉它。
   useEffect(() => {
     if (draftRestoreReady) return;
-    if (cardParam !== undefined) {
-      setDraftRestoreReady(true);
-      return;
-    }
     const stored = readDesktopCharacterManagerDraft();
-    if (stored === null) {
-      setDraftRestoreReady(true);
-      return;
-    }
-    const { pastedJson, draft: storedDraft } = stored.payload;
+    const storedDraft = stored?.payload.draft ?? null;
+    const pastedJson = stored?.payload.pastedJson ?? '';
     if (pastedJson.trim() !== '') {
       setPasted(pastedJson);
       setPasteOpen(true);
     }
-    if (storedDraft === null) {
-      setAutoSaveTimestamp(stored.updatedAt);
+    if (cardParam !== undefined && storedDraft?.originalId !== cardParam) {
+      pendingStoredDraftRef.current = storedDraft !== null && stored !== null
+        ? { draft: storedDraft, updatedAt: stored.updatedAt }
+        : null;
+      // 无挂起草稿时立即可 armed；有挂起草稿时 ready 由 URL 加载 effect 在
+      // 落定后翻转——否则自动保存先以空态清掉旧草稿，加载失败便无可恢复。
+      if (storedDraft === null) setDraftRestoreReady(true);
+      return;
+    }
+    if (cardParam !== undefined) loadedIdRef.current = cardParam;
+    if (storedDraft === null || stored === null) {
+      if (stored !== null) setAutoSaveTimestamp(stored.updatedAt);
       setDraftRestoreReady(true);
       return;
     }
     let cancelled = false;
-    const apply = (original: LocalCardRecordV1 | null) => {
-      if (cancelled) return;
-      open({
-        original,
-        cardType: original?.cardType ?? storedDraft.cardType,
-        title: original?.title ?? storedDraft.title,
-        data: storedDraft.data,
-      });
-      setOriginalData(storedDraft.originalData ?? deepCopyData(storedDraft.data));
-      setAutoSaveTimestamp(stored.updatedAt);
-      setNotice({
-        tone: 'status',
-        text: original === null && storedDraft.originalId !== null
-          ? '已恢复浏览器内的编辑草稿；原本地库记录已不可用，草稿按未保存的导入卡处理。'
-          : '已恢复浏览器内的编辑草稿。',
-      });
-      setDraftRestoreReady(true);
-    };
-    if (storedDraft.originalId !== null) {
-      void repository.get(storedDraft.originalId).then(
-        (record) => apply(record !== null && record.deletedAt === undefined && isEditableLocalCard(record) ? record : null),
-        () => apply(null),
-      );
-    } else {
-      apply(null);
-    }
+    restoreStoredDraft(storedDraft, stored.updatedAt, null, () => cancelled);
     return () => { cancelled = true; };
-  }, [cardParam, draftRestoreReady, open, repository]);
+  }, [cardParam, draftRestoreReady, restoreStoredDraft]);
 
   // 页面草稿自动持久化：每次编辑后落 localStorage（同 Web 的产品语义）。
   // 空态清除、失败显式报告——不能静默沿用旧时间戳伪装「已自动保存」。
@@ -276,9 +323,22 @@ export function DesktopCharacterManager() {
   }, [draft, originalData, pasted, draftRestoreReady]);
 
   // `?card=` 是打开记录的唯一入口；切换记录时由离开保护先确认是否放弃当前修改。
+  // 启动时若挂起了与 cardParam 无关的旧草稿，本 effect 在加载落定后处置并翻转
+  // `draftRestoreReady`：成功则以新记录接管编辑器（旧 scratch 由自动保存自然覆盖）；
+  // 失败则把挂起草稿恢复回编辑器——URL 打不开不是销毁旧草稿的理由。
   useEffect(() => {
     if (cardParam === undefined) {
-      if (loadedIdRef.current !== null) closeEditor();
+      const pending = pendingStoredDraftRef.current;
+      pendingStoredDraftRef.current = null;
+      const hadLoaded = loadedIdRef.current !== null;
+      if (hadLoaded) closeEditor();
+      if (pending !== null) {
+        // 恢复期间再进入新的 `?card` 时，由 request 序号丢弃过期的恢复结果。
+        const request = ++requestRef.current;
+        restoreStoredDraft(pending.draft, pending.updatedAt, null, () => request !== requestRef.current);
+      } else if (hadLoaded) {
+        setDraftRestoreReady(true);
+      }
       return;
     }
     if (loadedIdRef.current === cardParam) return;
@@ -286,25 +346,36 @@ export function DesktopCharacterManager() {
     const request = ++requestRef.current;
     setLoading(true);
     setNotice(null);
-    void repository.get(cardParam).then((record) => {
-      if (request !== requestRef.current) return;
-      if (record === null) setNotice({ tone: 'alert', text: '本地库中没有这张数据卡，它可能已被彻底删除。' });
-      else if (record.deletedAt !== undefined) setNotice({ tone: 'alert', text: '这张数据卡在回收站中，恢复后才能编辑。' });
-      else if (!isEditableLocalCard(record)) setNotice({ tone: 'alert', text: '本页只编辑角色与情景卡；问卷与叙事历史卡暂不支持。' });
-      else {
-        open(draftFromRecord(record));
+    const fail = (text: string) => {
+      loadedIdRef.current = null;
+      const pending = pendingStoredDraftRef.current;
+      pendingStoredDraftRef.current = null;
+      if (pending === null) {
+        setDraft(null);
+        setNotice({ tone: 'alert', text });
+        setDraftRestoreReady(true);
         return;
       }
-      loadedIdRef.current = null;
-      setDraft(null);
+      // 恢复旧草稿时保留加载失败的原因。
+      restoreStoredDraft(pending.draft, pending.updatedAt, text, () => request !== requestRef.current);
+    };
+    void repository.get(cardParam).then((record) => {
+      if (request !== requestRef.current) return;
+      if (record === null) fail('本地库中没有这张数据卡，它可能已被彻底删除。');
+      else if (record.deletedAt !== undefined) fail('这张数据卡在回收站中，恢复后才能编辑。');
+      else if (!isEditableLocalCard(record)) fail('本页只编辑角色与情景卡；问卷与叙事历史卡暂不支持。');
+      else {
+        pendingStoredDraftRef.current = null;
+        open(draftFromRecord(record));
+        setDraftRestoreReady(true);
+      }
     }).catch((cause: unknown) => {
       if (request !== requestRef.current) return;
-      loadedIdRef.current = null;
-      setNotice({ tone: 'alert', text: describeLocalCardError(cause) });
+      fail(describeLocalCardError(cause));
     }).finally(() => {
       if (request === requestRef.current) setLoading(false);
     });
-  }, [cardParam, closeEditor, open, repository]);
+  }, [cardParam, closeEditor, open, repository, restoreStoredDraft]);
 
   const openRecord = (id: string) => {
     void router.navigate({ to: '/character-manager', search: { card: id } });
@@ -398,7 +469,11 @@ export function DesktopCharacterManager() {
   }, [draft, open]);
 
   const handleClearDraft = useCallback(() => {
-    clearDesktopCharacterManagerDraft();
+    // 清除失败不能报成已清空（与自动保存 `written/cleared/failed` 同一诚实口径）。
+    if (!clearDesktopCharacterManagerDraft()) {
+      setNotice({ tone: 'alert', text: '清空浏览器内草稿失败：本地存储不可用，草稿仍保留。' });
+      return;
+    }
     setAutoSaveTimestamp(null);
     setAutoSaveFailed(false);
     setNotice({ tone: 'status', text: '浏览器内的本地草稿已清空（当前编辑内容与本地库记录不受影响）。' });
@@ -588,7 +663,13 @@ export function DesktopCharacterManager() {
               : '切换模板会尝试根据规则转换当前内容；转换结果保存后写入本地库。'}
           />
 
-          <CharacterManagerDraftBar savedAt={autoSaveTimestamp} onClear={handleClearDraft} />
+          <CharacterManagerDraftBar
+            savedAt={autoSaveTimestamp}
+            onClear={handleClearDraft}
+            pendingText={autoSaveFailed
+              ? '页面草稿自动保存暂不可用，当前修改不会被持久化。'
+              : undefined}
+          />
           {autoSaveFailed && (
             <p role="alert" className="mb-4 text-sm text-red-700">
               页面草稿自动保存失败（可能超出浏览器存储上限）：当前修改只在内存中，请及时保存到本地库或导出。

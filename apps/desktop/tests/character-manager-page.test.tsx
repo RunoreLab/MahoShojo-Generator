@@ -282,7 +282,7 @@ describe('Desktop 本地角色管理（IPC mock，仍需真机重启验收）', 
     expect(container.textContent).not.toContain('编辑角色:');
   });
 
-  it('页面草稿自动持久化并在下次访问时恢复；`?card=` 直达优先于草稿', async () => {
+  it('页面草稿自动持久化并在下次访问时恢复', async () => {
     window.location.hash = '#/character-manager';
     await mount();
     await expandPasteArea();
@@ -335,6 +335,106 @@ describe('Desktop 本地角色管理（IPC mock，仍需真机重启验收）', 
     expect(container.textContent).not.toContain('编辑角色: 草稿角色');
     expect(container.textContent).not.toContain('已恢复浏览器内的编辑草稿');
     expect(window.localStorage.getItem(DESKTOP_CHARACTER_MANAGER_DRAFT_KEY)).toBeNull();
+  });
+
+  it('同一 `?card` 刷新恢复未提交修改：恢复后仍 dirty、保留草稿标题且可保存', async () => {
+    window.location.hash = `#/character-manager?card=${original.id}`;
+    await mount();
+    await waitFor(() => container.textContent?.includes('编辑角色: 星光') === true);
+    await type(fieldByLabel('记录标题'), '星光·草稿');
+    await type(container.querySelector<HTMLInputElement>('#editor-field-appearance__outfit')!, '黑裙');
+    await waitFor(() => container.textContent?.includes('已自动保存') === true);
+
+    // 模拟刷新：URL 仍是同一条记录的 `?card`——草稿必须恢复而不是被直达清掉。
+    act(() => root.unmount());
+    container.remove();
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    window.location.hash = `#/character-manager?card=${original.id}`;
+    await mount();
+    await waitFor(() => container.textContent?.includes('已恢复浏览器内的编辑草稿') === true);
+    // baseline 是本地库原记录而不是草稿自身：恢复出的草稿保持 dirty 与离开保护。
+    expect(container.textContent).toContain('本地库记录 · 有未保存的修改');
+    expect(fieldByLabel('记录标题').value).toBe('星光·草稿');
+    expect(container.querySelector<HTMLInputElement>('#editor-field-appearance__outfit')!.value).toBe('黑裙');
+
+    const saveButton = button('保存到本地库');
+    expect(saveButton).not.toBeUndefined();
+    expect(saveButton!.disabled).toBe(false);
+    await click(saveButton);
+    await waitFor(() => container.textContent?.includes('已另存为一条新记录') === true);
+    expect(rows.size).toBe(2);
+  });
+
+  it('`?card` 指向不存在的记录时不销毁无关草稿：旧草稿恢复并保留失败原因', async () => {
+    window.location.hash = '#/character-manager';
+    await mount();
+    await expandPasteArea();
+    const imported = { codename: '草稿角色', appearance: { outfit: '白裙' } };
+    await type(container.querySelector<HTMLTextAreaElement>('textarea')!, JSON.stringify(imported));
+    await click(button('从文本加载数据'));
+    await waitFor(() => container.textContent?.includes('编辑角色: 草稿角色') === true);
+    await waitFor(() => window.localStorage.getItem(DESKTOP_CHARACTER_MANAGER_DRAFT_KEY) !== null);
+
+    // 带着无关草稿以无效 `?card` 重新进入：URL 打不开不能顺手清掉旧草稿。
+    act(() => root.unmount());
+    container.remove();
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    window.location.hash = '#/character-manager?card=missing-record-id';
+    await mount();
+    await waitFor(() => container.textContent?.includes('本地库中没有这张数据卡') === true);
+    await waitFor(() => container.textContent?.includes('编辑角色: 草稿角色') === true);
+    expect(container.textContent).toContain('已恢复浏览器内的编辑草稿');
+    expect(window.localStorage.getItem(DESKTOP_CHARACTER_MANAGER_DRAFT_KEY)).not.toBeNull();
+  });
+
+  it('`?card` 指向其它记录时 URL 显式意图优先，旧草稿由新编辑会话接管', async () => {
+    window.location.hash = '#/character-manager';
+    await mount();
+    await expandPasteArea();
+    const imported = { codename: '草稿角色', appearance: { outfit: '白裙' } };
+    await type(container.querySelector<HTMLTextAreaElement>('textarea')!, JSON.stringify(imported));
+    await click(button('从文本加载数据'));
+    await waitFor(() => container.textContent?.includes('编辑角色: 草稿角色') === true);
+    await waitFor(() => window.localStorage.getItem(DESKTOP_CHARACTER_MANAGER_DRAFT_KEY) !== null);
+
+    act(() => root.unmount());
+    container.remove();
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    window.location.hash = `#/character-manager?card=${original.id}`;
+    await mount();
+    await waitFor(() => container.textContent?.includes('编辑角色: 星光') === true);
+    // 显式打开的记录正常进入编辑；旧草稿卡被自动保存的新会话状态接管
+    // （pastedJson 是独立的暂存字段，不受此约束）。
+    expect(container.textContent).toContain('本地库记录');
+    await waitFor(() => {
+      const raw = window.localStorage.getItem(DESKTOP_CHARACTER_MANAGER_DRAFT_KEY);
+      if (raw === null) return false;
+      const stored = JSON.parse(raw) as { payload?: { draft?: { originalId?: string | null } | null } };
+      return stored.payload?.draft?.originalId === original.id;
+    });
+  });
+
+  it('自动保存写失败时草稿条如实报告，不再声称会自动保存', async () => {
+    window.location.hash = '#/character-manager';
+    await mount();
+    await expandPasteArea();
+    const imported = { codename: '草稿角色', appearance: { outfit: '白裙' } };
+    await type(container.querySelector<HTMLTextAreaElement>('textarea')!, JSON.stringify(imported));
+    await click(button('从文本加载数据'));
+    await waitFor(() => container.textContent?.includes('编辑角色: 草稿角色') === true);
+    await waitFor(() => container.textContent?.includes('已自动保存') === true);
+
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('quota'); });
+    await type(fieldByLabel('记录标题'), '草稿角色·改');
+    await waitFor(() => container.textContent?.includes('页面草稿自动保存失败') === true);
+    expect(container.textContent).toContain('页面草稿自动保存暂不可用');
+    expect(container.textContent).not.toContain('当前输入会自动保存到浏览器');
   });
 
   it('结构化情景卡导入归类为 scenario，跨类别模板转换脱离原记录', async () => {

@@ -97,8 +97,8 @@ export const writeDesktopCharacterManagerDraft = (
 ): DesktopCharacterManagerDraftWriteResult => {
   const payload = normalizeDesktopDraftPayload(state);
   if (payload === null) {
-    clearPageDraft(DESKTOP_CHARACTER_MANAGER_DRAFT_KEY);
-    return { kind: 'cleared' };
+    // 「空态清除」同样是写操作：removeItem 失败不能报成已清除（与 `failed` 同一口径）。
+    return clearPageDraft(DESKTOP_CHARACTER_MANAGER_DRAFT_KEY) ? { kind: 'cleared' } : { kind: 'failed' };
   }
   const stored = writePageDraft(DESKTOP_CHARACTER_MANAGER_DRAFT_KEY, payload, {
     version: DESKTOP_CHARACTER_MANAGER_DRAFT_VERSION,
@@ -106,5 +106,5 @@ export const writeDesktopCharacterManagerDraft = (
   return stored === null ? { kind: 'failed' } : { kind: 'written', stored };
 };
 
-export const clearDesktopCharacterManagerDraft = (): void =>
+export const clearDesktopCharacterManagerDraft = (): boolean =>
   clearPageDraft(DESKTOP_CHARACTER_MANAGER_DRAFT_KEY);

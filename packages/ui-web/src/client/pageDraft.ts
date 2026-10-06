@@ -31,18 +31,21 @@ const getLocalStorage = (): StorageLike | null => {
   }
 };
 
-const clearDraftWithStorage = (storage: StorageLike, key: string) => {
+const clearDraftWithStorage = (storage: StorageLike, key: string): boolean => {
   try {
     storage.removeItem(key);
+    return true;
   } catch {
-    // localStorage 在受限环境下可能不可用，忽略即可
+    // localStorage 在受限环境下可能不可用
+    return false;
   }
 };
 
-export const clearPageDraft = (key: string) => {
+/** 返回是否确认清除成功——存储不可用或 removeItem 抛错时为 `false`，调用方不得报告「已清空」。 */
+export const clearPageDraft = (key: string): boolean => {
   const storage = getLocalStorage();
-  if (!storage) return;
-  clearDraftWithStorage(storage, key);
+  if (!storage) return false;
+  return clearDraftWithStorage(storage, key);
 };
 
 export const writePageDraft = <T>(key: string, payload: T, options: WritePageDraftOptions): StoredPageDraft<T> | null => {
