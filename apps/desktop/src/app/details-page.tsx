@@ -15,10 +15,12 @@ import {
 } from '@mahoshojo/domain/questionnaire';
 import {
   buildQuestionnaireFlow,
+  MAX_QUESTIONNAIRE_IMPORT_BYTES,
   normalizeQuestionnaireDefinition,
   resolveQuestionnaireReferences,
   type QuestionnairePresetEntry,
 } from '@mahoshojo/domain/questionnaire-definition';
+import { exceedsUtf8ByteLimit } from '@mahoshojo/domain/data-card-size';
 import {
   buildQuestionnaireAnswerExportText,
   collectQuestionnaireAnswerExportItems,
@@ -104,6 +106,29 @@ const createSelectionSuffix = (): string =>
     ? crypto.randomUUID()
     : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
+type PendingRegenerateAction = 'generate' | 'quick-random';
+type ConfirmRegenerateKind = 'unsaved' | 'uncertain';
+
+/**
+ * 「重新生成」确认对话框的标题/说明文案。
+ *
+ * uncertain（hosted 终态无法确认服务器是否已执行）下两个挂起动作的语义不同：
+ * generate 确实可能产生第二次服务器调用与计费，必须如实告警；quick-random 是
+ * 纯本机生成、不发起模型请求，需要确认的理由只是「覆盖尚未确认的结果」
+ * （D5.1-P2-r2：此前共用一个确认态，quick-random 会误报重复计费）。
+ */
+export const describeRegenerateConfirm = (
+  action: PendingRegenerateAction,
+  kind: ConfirmRegenerateKind,
+): { title: string; description: string } => ({
+  title: action === 'quick-random' ? '重新随机生成？' : '重新生成？',
+  description: kind === 'unsaved'
+    ? '当前结果尚未保存到本地卡库。重新生成将替换当前结果；即使新生成失败或取消，也无法恢复。可以先保存当前结果再生成。'
+    : action === 'quick-random'
+      ? '上次生成的服务器执行结果尚未确认，残留正文仍保留在本机草稿中。快速随机生成完全在本机进行，不发起模型请求也不产生费用；确定后会覆盖这份尚未确认的内容，且无法恢复。'
+      : '无法确认上次请求是否在服务器执行——它可能已经完成并计费。再次生成会发起新的请求，可能产生重复调用与费用。',
+});
+
 function DetailsForm({ session }: { session: DetailsSession }) {
   const state = useSyncExternalStore(session.subscribe, session.getSnapshot);
   const router = useRouter();
@@ -134,8 +159,8 @@ function DetailsForm({ session }: { session: DetailsSession }) {
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionInfo, setActionInfo] = useState<string | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
-  const [confirmRegenerate, setConfirmRegenerate] = useState<false | 'unsaved' | 'uncertain'>(false);
-  const pendingActionRef = useRef<'generate' | 'quick-random'>('generate');
+  const [confirmRegenerate, setConfirmRegenerate] = useState<false | ConfirmRegenerateKind>(false);
+  const pendingActionRef = useRef<PendingRegenerateAction>('generate');
   const [showIntroduction, setShowIntroduction] = useState(true);
   const [showQuestionnaireSettings, setShowQuestionnaireSettings] = useState(false);
   const [showPasteImport, setShowPasteImport] = useState(false);
@@ -372,10 +397,15 @@ function DetailsForm({ session }: { session: DetailsSession }) {
   // 「客户端｜服务器」与「流式｜非流式」两个维度共同决定执行模式（DESK-ONLINE-009）。
   const hostedMode: DetailsExecutionMode = generationMode === 'stream' ? 'hosted-stream' : 'hosted-json';
   const executionMode: DetailsExecutionMode | null = target.location === 'server' ? hostedMode : mode;
+  // 本地 Provider 配置只门禁客户端执行：server 偏好由 hosted System Default 解析、
+  // 不消费本地 profile——Profile bridge 故障不得把服务器生成一起封死
+  //（两个执行位置正交，DESK-ONLINE-001/009，D5.1-P2-r2）。
+  const clientProfilesBlocked =
+    target.location === 'client' && (profilesLoading || profilesError !== null);
   const generate = (discardUnsavedResult = false) => {
     // `questionnaireError` 不进门禁：它只描述内置问卷加载失败，而当前生效的可能是
     // 用户自备的选择集——选择集存在且流程非空就足以生成（与 Web 同口径，P2-r1）。
-    if (!guard.ready || busy || !executionMode || effectiveSelections.length === 0 || flow.length === 0 || questionnaireLoading || profilesLoading || profilesError || state.pendingRestore || session.isDraftBlocked()) return;
+    if (!guard.ready || busy || !executionMode || effectiveSelections.length === 0 || flow.length === 0 || questionnaireLoading || clientProfilesBlocked || state.pendingRestore || session.isDraftBlocked()) return;
     if (target.location === 'client' && !selected) return;
     if (!discardUnsavedResult) {
       if (session.hasUnsavedResult()) { pendingActionRef.current = 'generate'; setConfirmRegenerate('unsaved'); return; }
@@ -500,6 +530,11 @@ function DetailsForm({ session }: { session: DetailsSession }) {
   };
 
   const handleUploadQuestionnaire = async (file: File) => {
+    // `File.size` 不读内容即可拿到字节数：parse 前预算先行拦截超大输入（bounded-input）。
+    if (file.size > MAX_QUESTIONNAIRE_IMPORT_BYTES) {
+      setActionError(`问卷文件超过大小上限（${MAX_QUESTIONNAIRE_IMPORT_BYTES / 1024 / 1024} MiB）。`);
+      return;
+    }
     try {
       const text = await file.text();
       const parsed: unknown = JSON.parse(text);
@@ -518,6 +553,11 @@ function DetailsForm({ session }: { session: DetailsSession }) {
   const handlePasteQuestionnaireImport = () => {
     if (!pasteText.trim()) {
       setPasteError('请先粘贴问卷 JSON');
+      return;
+    }
+    // 粘贴路径没有 File.size 可用：逐码点计 UTF-8 字节、超限即停的同一预算。
+    if (exceedsUtf8ByteLimit(pasteText, MAX_QUESTIONNAIRE_IMPORT_BYTES)) {
+      setPasteError(`问卷 JSON 超过大小上限（${MAX_QUESTIONNAIRE_IMPORT_BYTES / 1024 / 1024} MiB）。`);
       return;
     }
     try {
@@ -554,11 +594,14 @@ function DetailsForm({ session }: { session: DetailsSession }) {
   const resolvedResultPayload = state.card;
   const hasLoreOnly = effectiveSelections.length > 0 && flowItems.length === 0
     && effectiveSelections.some((selection) => Boolean(selection.questionnaire.loreMarkdown?.trim()));
+  const confirmCopy = confirmRegenerate === false
+    ? null
+    : describeRegenerateConfirm(pendingActionRef.current, confirmRegenerate);
   return (
     <section data-testid="page-details" className="flex flex-col gap-5">
       <header>
         <h1 className="text-2xl font-semibold">魔法少女问卷生成</h1>
-        <p className="mt-2 text-sm text-(--app-text-muted)">填写问卷后，直接向你配置的模型发送回答，生成未签名角色卡。问卷可以是内置预设，也可以从本地库或云端数据卡选择。</p>
+        <p className="mt-2 text-sm text-(--app-text-muted)">填写问卷后，可选择客户端连接或项目服务器生成；签名状态以实际生成结果为准。问卷可以是内置预设，也可以从本地库或云端数据卡选择。</p>
       </header>
       <section aria-label="草稿" className="rounded-lg border border-(--app-border) p-4">
         <p>问卷、结果与中断正文自动保存在本机页面草稿中，恢复草稿不会自动重新生成。</p>
@@ -775,18 +818,14 @@ function DetailsForm({ session }: { session: DetailsSession }) {
             disabled={busy}
           />
           <div className="flex flex-wrap gap-2">
-            <button className={actionClass} disabled={!guard.ready || busy || questionnaireLoading || profilesLoading || effectiveSelections.length === 0 || flow.length === 0 || !executionMode || (target.location === 'client' && !selected) || blockedDraft || !!profilesError} onClick={() => generate()}>{state.phase === 'generating' ? '正在生成…' : state.phase === 'idle' ? '发送问卷并生成' : '重新生成'}</button>
+            <button className={actionClass} disabled={!guard.ready || busy || questionnaireLoading || clientProfilesBlocked || effectiveSelections.length === 0 || flow.length === 0 || !executionMode || (target.location === 'client' && !selected) || blockedDraft} onClick={() => generate()}>{state.phase === 'generating' ? '正在生成…' : state.phase === 'idle' ? '发送问卷并生成' : '重新生成'}</button>
             {state.phase === 'generating' && <button className={actionClass} onClick={() => session.cancel()}>取消生成</button>}
           </div>
         </>
       )}
       <dialog ref={regenerateDialog} aria-labelledby="regenerate-title" aria-describedby="regenerate-description" className="m-auto max-w-lg rounded-lg border border-(--app-border) bg-(--app-surface) p-5 text-(--app-text) backdrop:bg-black/40" onCancel={(event) => { event.preventDefault(); if (!session.isBusy()) setConfirmRegenerate(false); }}>
-        <h2 id="regenerate-title" className="text-xl font-semibold">{pendingActionRef.current === 'quick-random' ? '重新随机生成？' : '重新生成？'}</h2>
-        {confirmRegenerate === 'uncertain' ? (
-          <p id="regenerate-description" className="my-3">无法确认上次请求是否在服务器执行——它可能已经完成并计费。再次生成会发起新的请求，可能产生重复调用与费用。</p>
-        ) : (
-          <p id="regenerate-description" className="my-3">当前结果尚未保存到本地卡库。重新生成将替换当前结果；即使新生成失败或取消，也无法恢复。可以先保存当前结果再生成。</p>
-        )}
+        <h2 id="regenerate-title" className="text-xl font-semibold">{confirmCopy?.title ?? '重新生成？'}</h2>
+        <p id="regenerate-description" className="my-3">{confirmCopy?.description}</p>
         {state.saveError && <p role="alert">{state.saveError}</p>}
         <div className="flex flex-wrap gap-2">
           <button autoFocus className={actionClass} disabled={busy} onClick={() => setConfirmRegenerate(false)}>取消</button>

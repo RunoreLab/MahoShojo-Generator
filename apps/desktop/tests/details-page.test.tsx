@@ -12,6 +12,7 @@ import { builtinSelectionId } from '../src/features/details/questionnaire';
 import { resetDesktopAiConfigStoreForTests } from '../src/features/ai-config/use-desktop-ai-config';
 import { DESKTOP_AI_CONFIG_STORAGE_KEY } from '../src/features/ai-config/desktop-ai-config-store';
 import { createDesktopRouter } from '../src/app/router';
+import { describeRegenerateConfirm } from '../src/app/details-page';
 
 const mocks = vi.hoisted(() => ({ execute: vi.fn(), save: vi.fn(), listen: vi.fn(), profiles: vi.fn() }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(), isTauri: () => true }));
@@ -223,6 +224,25 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
     expect(button('发送问卷并生成').disabled).toBe(true);
   });
 
+  it('keeps hosted generation available when the local Provider bridge fails', async () => {
+    // 服务器执行不消费本地 profile：Profile bridge 故障只能门禁客户端通路，
+    // 不得把 hosted System Default 一起封死（DESK-ONLINE-001/009 正交，D5.1-P2-r2）。
+    window.localStorage.setItem(DESKTOP_AI_CONFIG_STORAGE_KEY, JSON.stringify({
+      version: 2,
+      selection: { executionPreference: 'server', clientConnectionId: 'local' },
+      hiddenPresetIds: [],
+    }));
+    mocks.profiles.mockRejectedValue(new Error('profile bridge unavailable'));
+    window.localStorage.setItem(DETAILS_DRAFT_KEY, JSON.stringify(draft()));
+    await mount(); await click('恢复草稿');
+    expect(container.textContent).toContain('本地 Provider 配置加载失败');
+    expect(container.textContent).toContain('服务器 · 云端');
+    expect(button('发送问卷并生成').disabled).toBe(false);
+    await click('发送问卷并生成');
+    expect(mocks.execute).toHaveBeenCalledTimes(1);
+    expect(mocks.execute.mock.calls[0]![2]).toMatchObject({ mode: 'hosted-json' });
+  });
+
   it('loads and shows unsupported adapters instead of hiding them', async () => {
     mocks.profiles.mockResolvedValue({ id: 'local', name: 'Anthropic profile', adapter: 'anthropic', baseUrl: 'https://model.example/v1', modelId: 'model' });
     await mount(); await click('开始回答问卷');
@@ -389,6 +409,20 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
     expect(mocks.execute).toHaveBeenCalledTimes(1);
     await click('重新生成'); await click('确定重新生成');
     expect(mocks.execute).toHaveBeenCalledTimes(2);
+  });
+
+  it('describes quick-random over an unconfirmed result as local overwrite, not billed retry', () => {
+    // quick-random 是纯本机生成：uncertain 残留上确认的理由是「覆盖尚未确认的结果」，
+    // 不得声称会再次发起模型请求或计费（D5.1-P2-r2；当前 UI 中 uncertain 与 Intro
+    // 不同屏，该分支为防御性语义，直接对文案决策函数断言）。
+    const copy = describeRegenerateConfirm('quick-random', 'uncertain');
+    expect(copy.title).toBe('重新随机生成？');
+    expect(copy.description).not.toContain('重复调用与费用');
+    expect(copy.description).not.toContain('可能已经完成并计费');
+    expect(copy.description).toContain('不产生费用');
+    expect(copy.description).toContain('尚未确认');
+    expect(describeRegenerateConfirm('generate', 'uncertain').description).toContain('重复调用与费用');
+    expect(describeRegenerateConfirm('generate', 'unsaved').description).toContain('尚未保存到本地卡库');
   });
 
   it('shows a restored signed card as unverified evidence instead of official-signed', async () => {
