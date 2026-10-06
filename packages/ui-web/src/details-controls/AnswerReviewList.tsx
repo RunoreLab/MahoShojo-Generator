@@ -48,9 +48,9 @@ const THEMES: Record<AnswerReviewListVariant, ThemeClasses> = {
   dark: {
     container: 'my-4 rounded-lg border border-slate-700 bg-slate-900/60 p-3',
     toggle: 'flex w-full items-center justify-between text-left text-sm font-semibold text-emerald-300',
-    card: 'rounded-lg border border-slate-700 bg-slate-950/40 p-3',
-    questionIndex: 'text-xs font-semibold text-emerald-400',
-    questionText: 'mt-1 text-xs text-slate-400',
+    card: 'rounded-lg border border-slate-700 bg-slate-900/80 p-3',
+    questionIndex: 'text-xs font-semibold text-emerald-300',
+    questionText: 'mt-1 text-xs text-slate-300',
     answer: 'mt-2 text-slate-100 whitespace-pre-wrap',
     emptyAnswer: 'text-slate-500',
     editButton: 'text-xs text-emerald-300 hover:underline',

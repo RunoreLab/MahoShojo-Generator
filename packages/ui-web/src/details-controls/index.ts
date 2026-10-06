@@ -54,7 +54,15 @@ export {
 } from './AnswerReviewList';
 export { useResultAutoScroll } from './use-result-auto-scroll';
 export {
+  CANSHOU_LORE_PANEL_APP_THEME,
+  CANSHOU_LORE_PANEL_WEB_THEME,
+  CanshouLorePanel,
+  type CanshouLorePanelProps,
+  type CanshouLorePanelTheme,
+} from './CanshouLorePanel';
+export {
   APP_SAVE_PREFERENCES_THEME,
+  CANSHOU_SAVE_PREFERENCES_THEME,
   DETAILS_SAVE_PREFERENCES_THEME,
   DetailsSavePreferencesPanel,
   type DetailsImageSaveMode,

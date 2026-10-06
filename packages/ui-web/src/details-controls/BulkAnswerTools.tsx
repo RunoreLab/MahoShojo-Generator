@@ -11,7 +11,7 @@ import {
   type QuestionnaireAnswerMergeMode,
 } from '@mahoshojo/domain/questionnaire-answer-import';
 
-export type BulkAnswerToolsVariant = 'light' | 'dark' | 'app';
+export type BulkAnswerToolsVariant = 'light' | 'dark' | 'contrast' | 'app';
 
 export interface BulkAnswerToolsProps<T extends QuestionnaireAnswerMatchTarget = QuestionnaireAnswerMatchTarget> {
   /**
@@ -75,6 +75,19 @@ const THEMES: Record<BulkAnswerToolsVariant, ThemeClasses> = {
     importTitle: 'text-sm font-medium text-slate-200',
     importHint: 'mt-1 text-xs text-slate-400',
     mergeSelect: 'rounded-lg border border-slate-600 bg-slate-950/40 px-3 py-2 text-xs text-slate-200',
+    fileLabel: 'mt-3 inline-flex cursor-pointer items-center rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm font-medium text-emerald-200 hover:border-emerald-300 hover:bg-emerald-500/20',
+  },
+  /** Web `/canshou` 现行观感：浅色折叠外壳套深色导入盒。 */
+  contrast: {
+    container: 'my-4 bg-gray-100 rounded-lg p-3',
+    toggle: 'flex items-center justify-between w-full text-left font-medium text-gray-700 hover:text-blue-600',
+    textarea: 'input-field h-20',
+    fillButton: 'text-sm text-blue-600 hover:underline',
+    clearButton: 'text-sm text-red-600 hover:underline',
+    importBox: 'mt-4 rounded-lg border border-slate-700 bg-slate-950/40 p-3',
+    importTitle: 'text-sm font-medium text-slate-100',
+    importHint: 'mt-1 text-xs text-slate-400',
+    mergeSelect: 'rounded-lg border border-slate-600 bg-slate-900 px-3 py-2 text-xs text-slate-100',
     fileLabel: 'mt-3 inline-flex cursor-pointer items-center rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm font-medium text-emerald-200 hover:border-emerald-300 hover:bg-emerald-500/20',
   },
   app: {

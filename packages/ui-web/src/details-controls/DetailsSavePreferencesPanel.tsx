@@ -37,6 +37,19 @@ export const DETAILS_SAVE_PREFERENCES_THEME: DetailsSavePreferencesTheme = {
   footerText: 'text-xs text-gray-400 text-center',
 };
 
+/** Web `/canshou` 现行 rose/slate 主题（原样保留页面观感）。 */
+export const CANSHOU_SAVE_PREFERENCES_THEME: DetailsSavePreferencesTheme = {
+  panel: 'card',
+  groupTitle: 'font-medium text-gray-800',
+  groupMeta: 'text-xs text-gray-500',
+  optionsRow: 'flex flex-col sm:flex-row gap-2 mt-2',
+  optionButton: 'flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition border-slate-200 text-slate-600 hover:border-rose-300 hover:text-rose-600',
+  optionButtonActive: 'flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition border-rose-500 bg-rose-50 text-rose-700 shadow-sm',
+  recommendedBadge: 'ml-2 inline-flex items-center rounded-full bg-rose-100 px-2 text-[10px] font-semibold text-rose-600',
+  hintText: 'mt-2 text-xs text-gray-500',
+  footerText: 'text-xs text-gray-400 text-center',
+};
+
 /** Desktop app-token 主题。 */
 export const APP_SAVE_PREFERENCES_THEME: DetailsSavePreferencesTheme = {
   panel: 'card',
@@ -62,6 +75,12 @@ export interface DetailsSavePreferencesPanelProps {
   imageHint?: ReactNode;
   jsonHint?: ReactNode;
   footerNote?: ReactNode;
+  /** 组标题可覆盖（如 Web `/canshou` 的「JSON 保存方式」）。 */
+  imageGroupTitle?: ReactNode;
+  jsonGroupTitle?: ReactNode;
+  /** 「推荐：xxx」文案按模式取值，可按页面口径覆盖。 */
+  imageRecommendLabels?: { download: string; modal: string };
+  jsonRecommendLabels?: { download: string; text: string };
   style?: CSSProperties;
 }
 
@@ -101,6 +120,10 @@ export function DetailsSavePreferencesPanel({
   imageHint,
   jsonHint,
   footerNote,
+  imageGroupTitle = '设定长图保存方式',
+  jsonGroupTitle = '设定文件保存方式',
+  imageRecommendLabels = { download: '一键下载', modal: '长按保存弹窗' },
+  jsonRecommendLabels = { download: '直接下载 JSON', text: '复制原始数据' },
   style,
 }: DetailsSavePreferencesPanelProps) {
   return (
@@ -108,9 +131,9 @@ export function DetailsSavePreferencesPanel({
       <div className="space-y-5 text-left">
         <div>
           <div className="flex items-center justify-between text-sm">
-            <span className={theme.groupTitle}>设定长图保存方式</span>
+            <span className={theme.groupTitle}>{imageGroupTitle}</span>
             <span className={theme.groupMeta}>
-              推荐：{recommendedImageMode === 'download' ? '一键下载' : '长按保存弹窗'}
+              推荐：{recommendedImageMode === 'download' ? imageRecommendLabels.download : imageRecommendLabels.modal}
             </span>
           </div>
           <div className={theme.optionsRow}>
@@ -137,9 +160,9 @@ export function DetailsSavePreferencesPanel({
         </div>
         <div>
           <div className="flex items-center justify-between text-sm">
-            <span className={theme.groupTitle}>设定文件保存方式</span>
+            <span className={theme.groupTitle}>{jsonGroupTitle}</span>
             <span className={theme.groupMeta}>
-              推荐：{recommendedJsonMode === 'download' ? '直接下载 JSON' : '复制原始数据'}
+              推荐：{recommendedJsonMode === 'download' ? jsonRecommendLabels.download : jsonRecommendLabels.text}
             </span>
           </div>
           <div className={theme.optionsRow}>

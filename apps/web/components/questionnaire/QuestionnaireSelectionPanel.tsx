@@ -5,6 +5,7 @@
 
 export {
   APP_SELECTION_THEME,
+  CANSHOU_SELECTION_THEME,
   DETAILS_SELECTION_THEME,
   QuestionnaireSelectionPanel,
   type QuestionnairePresetOption,

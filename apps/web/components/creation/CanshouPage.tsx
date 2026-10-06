@@ -5,26 +5,30 @@ import { useProviderModeCooldown } from '@/lib/cooldown';
 import Link from 'next/link';
 import CanshouCard, { CanshouDetails } from '@/components/CanshouCard';
 import GeneralCharacterCard from '@/components/GeneralCharacterCard';
-import { CANSHOU_LORE } from '@/lib/canshou-lore';
 import { generateRandomCanshou } from '@/lib/random-character-generator';
 import SaveToCloudButton from '@/components/SaveToCloudButton';
 import Footer from '@/components/Footer';
 import QuestionNavigator from '@/components/QuestionNavigator';
-import { SaveJsonButton } from '@mahoshojo/ui-web/details-controls';
+import {
+  AnswerReviewList,
+  BulkAnswerTools,
+  CANSHOU_SAVE_PREFERENCES_THEME,
+  CanshouLorePanel,
+  DetailsSavePreferencesPanel,
+  SaveJsonButton,
+} from '@mahoshojo/ui-web/details-controls';
+import { DetailsIntroSection } from '@/components/shared/DetailsIntroSection';
+import {
+  CANSHOU_SELECTION_THEME,
+  QuestionnaireSelectionPanel,
+} from '@/components/questionnaire/QuestionnaireSelectionPanel';
 import { useAppRouterAdapter } from '@/lib/app-router-adapter';
 import BattleDataModal from '@/components/BattleDataModal';
 import DataCardDetailsModal from '@/components/DataCardDetailsModal';
 import AiProviderSelector, { type UserAIProviderConfig } from '@/components/AiProviderSelector';
 import AiReasoningPanel from '@/components/ai/AiReasoningPanel';
 import { ProviderCooldownNotice } from '@/components/ai/ProviderCooldownNotice';
-import { parseBulkQuestionnaireAnswers } from '@/lib/questionnaire-bulk-parser';
-import {
-  applyQuestionnaireAnswerImportEntries,
-  extractQuestionnaireAnswersFromCharacterCard,
-  type QuestionnaireAnswerMergeMode,
-} from '@/lib/questionnaire-answer-import';
 import { ErrorMessage } from '@/components/ErrorMessage';
-import { EncyclopediaLinks } from '@/components/encyclopedia/EncyclopediaLinks';
 import { GenerationModeSwitcher, type GenerationMode } from '@/components/shared/GenerationModeSwitcher';
 import { TokenIndicator } from '@/components/shared/TokenIndicator';
 import { JsonSizeIndicator } from '@/components/shared/JsonSizeIndicator';
@@ -168,8 +172,6 @@ export const CanshouPage: React.FC = () => {
     systemDurationMs: 60000,
     customDurationMs: 3000,
   });
-  const [bulkAnswers, setBulkAnswers] = useState(''); // 用于"一键填充"的textarea
-  const [characterImportMergeMode, setCharacterImportMergeMode] = useState<QuestionnaireAnswerMergeMode>('fill-empty');
   const [languages, setLanguages] = useState<{ code: string; name: string }[]>([]);
   const [selectedLanguage, setSelectedLanguage] = useState('zh-CN');
   const [showLanguageSection, setShowLanguageSection] = useState(false); // 控制生成语言区域的折叠状态
@@ -188,7 +190,6 @@ export const CanshouPage: React.FC = () => {
   const [autoSaveTimestamp, setAutoSaveTimestamp] = useState<number | null>(null);
   const recommendedImageMode: ImageSaveMode = deviceType === 'mobile' ? 'modal' : 'download';
   const recommendedJsonMode: JsonSaveMode = deviceType === 'mobile' ? 'text' : 'download';
-  const preferenceButtonClass = (active: boolean) => `flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition ${active ? 'border-rose-500 bg-rose-50 text-rose-700 shadow-sm' : 'border-slate-200 text-slate-600 hover:border-rose-300 hover:text-rose-600'}`;
   const clearTransitionTimers = useCallback(() => {
     if (transitionTimerRef.current) {
       clearTimeout(transitionTimerRef.current);
@@ -253,6 +254,19 @@ export const CanshouPage: React.FC = () => {
     indexByKey: mergedQuestionIndexByKey,
   } = useMemo(() => getQuestionnaireFlow(answersByKey), [answersByKey, getQuestionnaireFlow]);
 
+  // 可见流序的目标集：无元数据批量条目按页面展示序号回落（与 DetailsPage 同口径）。
+  const mergedQuestionTargets = useMemo<QuestionnaireAnswerMatchTarget[]>(
+    () => mergedQuestions.map((item, index) => ({
+      key: item.key,
+      index,
+      question: item.question.question,
+      questionId: item.question.id,
+      questionnaireId: item.questionnaireId,
+      questionnaireTitle: item.questionnaireTitle,
+    })),
+    [mergedQuestions]
+  );
+
   const answerItems = useMemo<QuestionnaireAnswerItem[]>(() => {
     const items: QuestionnaireAnswerItem[] = [];
     mergedQuestions.forEach((item) => {
@@ -309,16 +323,6 @@ export const CanshouPage: React.FC = () => {
   }, [answerItems, questionnaireLoreText]);
 
   const shouldDisableRemove = selectedQuestionnaires.length <= 1;
-
-  const answerableSelections = useMemo(
-    () => selectedQuestionnaires.filter((selection) => selection.questionnaire.questions.length > 0),
-    [selectedQuestionnaires]
-  );
-
-  const loreSelections = useMemo(
-    () => selectedQuestionnaires.filter((selection) => Boolean(selection.questionnaire.loreMarkdown?.trim())),
-    [selectedQuestionnaires]
-  );
 
   const resolvedResultPayload = useMemo(() => {
     if (!canshouDetails) return null;
@@ -1221,106 +1225,12 @@ export const CanshouPage: React.FC = () => {
     }
   };
 
-  const handleBulkFill = () => {
-    if (allQuestionTargets.length === 0) {
-      setError('⚠️ 当前没有可填充的题目，请先选择问卷。');
-      return;
-    }
-    const parsed = parseBulkQuestionnaireAnswers(bulkAnswers, {
-      expectedCount: allQuestionTargets.length,
-      orderedQuestionIds: allQuestionTargets.map((item) => item.questionId ?? ''),
-      orderedQuestionKeys: allQuestionTargets.map((item) => item.key),
-    });
-
-    if (parsed.entries.length === 0) {
-      setError('⚠️ 未识别到可填充的答案。支持逐行答案、Q/A 格式、编号列表，以及 JSON（数组/含 userAnswers/问卷回答）。');
-      return;
-    }
-
-    const newAnswers = { ...answersByKey };
-    let appliedCount = 0;
-    let ignoredCount = 0;
-    parsed.entries.forEach(entry => {
-      const hasMetadata = Boolean(
-        entry.key || entry.question || entry.questionId || entry.questionnaireId || entry.questionnaireTitle
-      );
-      const target = hasMetadata
-        ? resolveQuestionnaireAnswerTarget(questionAnswerLookup, entry, { allowIndexFallback: false })
-        : mergedQuestions[entry.index] ?? null;
-      if (!target) {
-        ignoredCount += 1;
-        return;
-      }
-      const trimmed = entry.value.trim();
-      if (!trimmed) {
-        ignoredCount += 1;
-        return;
-      }
-      newAnswers[target.key] = entry.value;
-      appliedCount += 1;
-    });
-    setAnswersByKey(newAnswers);
+  // 批量填充/角色卡导入成功后统一写回：同步当前题输入框并清错误态。
+  const handleApplyImportedAnswers = (next: Record<string, string>) => {
+    setAnswersByKey(next);
     const currentKey = mergedQuestions[currentQuestionIndex]?.key;
-    setCurrentAnswer(currentKey ? newAnswers[currentKey] || '' : '');
+    setCurrentAnswer(currentKey ? next[currentKey] || '' : '');
     setError(null);
-    const formatLabel = parsed.format === 'qa'
-      ? 'Q/A'
-      : parsed.format === 'json'
-        ? 'JSON'
-        : parsed.format === 'paragraphs'
-          ? '段落'
-          : '逐行';
-    alert(`成功填充了 ${appliedCount} 个答案（识别格式：${formatLabel}${ignoredCount > 0 ? `，忽略了 ${ignoredCount} 条超出范围的内容` : ''}）！`);
-    setBulkAnswers('');
-  };
-
-  const handleCharacterCardAnswerImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    event.target.value = '';
-    if (!file) return;
-    if (allQuestionTargets.length === 0) {
-      setError('⚠️ 当前没有可填充的题目，请先选择问卷。');
-      return;
-    }
-
-    try {
-      const text = await file.text();
-      const parsed = JSON.parse(text) as unknown;
-      const extracted = extractQuestionnaireAnswersFromCharacterCard(parsed);
-      if (!extracted.success) {
-        setError(`⚠️ ${extracted.error}`);
-        return;
-      }
-
-      const applied = applyQuestionnaireAnswerImportEntries({
-        currentAnswersByKey: answersByKey,
-        targets: allQuestionTargets,
-        lookup: questionAnswerLookup,
-        entries: extracted.entries,
-        mergeMode: characterImportMergeMode,
-      });
-
-      setAnswersByKey(applied.answersByKey);
-      const currentKey = mergedQuestions[currentQuestionIndex]?.key;
-      setCurrentAnswer(currentKey ? applied.answersByKey[currentKey] || '' : '');
-      setError(null);
-
-      const skippedExisting = extracted.entries.length - applied.appliedCount - applied.ignoredCount;
-      const modeLabel = characterImportMergeMode === 'overwrite' ? '覆盖匹配题' : '只填空题';
-      alert(
-        `已从${extracted.sourceLabel}导入问卷答案（${modeLabel}）：成功填充 ${applied.appliedCount} 条` +
-        `${applied.overwrittenCount > 0 ? `，覆盖 ${applied.overwrittenCount} 条` : ''}` +
-        `${skippedExisting > 0 ? `，保留已有 ${skippedExisting} 条` : ''}` +
-        `${applied.ignoredCount > 0 ? `，忽略 ${applied.ignoredCount} 条未匹配内容` : ''}。`
-      );
-    } catch (error) {
-      const message = error instanceof SyntaxError
-        ? '角色卡 JSON 无法解析：请检查文件内容是否为有效 JSON。'
-        : error instanceof Error
-          ? error.message
-          : '导入角色卡答案失败。';
-      setError(`⚠️ ${message}`);
-    }
   };
 
   const buildAnswerExportText = useCallback(() => {
@@ -1446,52 +1356,38 @@ export const CanshouPage: React.FC = () => {
             </div>
 
             {showIntroduction ? (
-              <div className="text-center">
-                {/* 注意事项 */}
-                <div className="mb-6 p-3 bg-yellow-100 border-l-4 border-yellow-500 text-yellow-800 text-sm text-left rounded-r-lg">
-                  <p className="font-bold">⚠️ 注意事项</p>
-                  <p className="mt-1">请勿在问卷中输入任何真实的隐私信息，或任何不适宜、攻击性、不符合公序良俗的内容。所有回答将被用于生成虚拟角色，并且将会被储存在角色信息中。</p>
-                </div>
-                <EncyclopediaLinks
-                  items={[{ slug: 'character-generator', text: '百科：角色生成（/name、/details、/canshou）' }]}
-                  linkClassName="text-blue-200 hover:underline"
-                  labelClassName="text-slate-300"
-                />
-                <div className="flex flex-col sm:flex-row gap-4 justify-center">
-                  <button onClick={() => setShowIntroduction(false)} className="generate-button text-lg flex-1">开始调查</button>
-                  <button
-                    onClick={() => { // 移除 async
-                      setSubmitting(true);
-                      setError(null);
-                      try {
-                        // 直接同步调用，移除 await
-                        const data = generateRandomCanshou();
-                        setCanshouDetails(data);
-                        setShowIntroduction(false);
-                      } catch (err) {
-                        console.error('随机生成失败: ', err);
-                        setError('随机生成失败，请稍后再试。');
-                      } finally {
-                        setSubmitting(false);
-                      }
-                    }}
-                    disabled={submitting}
-                    className="generate-button text-lg flex-1"
-                    style={{ background: 'linear-gradient(to right, #7e22ce, #a855f7)' }}
-                  >
-                    {submitting ? '生成中...' : '快速随机生成'}
-                  </button>
-                </div>
-                <div className="mt-4 text-center">
+              <DetailsIntroSection
+                description={null}
+                onStart={() => setShowIntroduction(false)}
+                startLabel="开始调查"
+                onQuickRandom={() => {
+                  setSubmitting(true);
+                  setError(null);
+                  try {
+                    const data = generateRandomCanshou();
+                    setCanshouDetails(data);
+                    setShowIntroduction(false);
+                  } catch (err) {
+                    console.error('随机生成失败: ', err);
+                    setError('随机生成失败，请稍后再试。');
+                  } finally {
+                    setSubmitting(false);
+                  }
+                }}
+                quickRandomBusy={submitting}
+                quickRandomStyle={{ background: 'linear-gradient(to right, #7e22ce, #a855f7)' }}
+                encyclopediaItems={[{ slug: 'character-generator', text: '百科：角色生成（/name、/details、/canshou）' }]}
+                onNavigateEntry={(href) => router.push(href)}
+                encyclopediaLinkClassName="text-blue-200 hover:underline"
+                encyclopediaLabelClassName="text-slate-300"
+                extraLink={(
                   <CreatorEntryLink
                     className="text-sm text-slate-300"
                     linkClassName="font-semibold text-emerald-300 hover:underline"
                   />
-                </div>
-                <div className="mt-8">
-                  <Link href="/" className="footer-link">返回首页</Link>
-                </div>
-              </div>
+                )}
+                backHome={<Link href="/" className="footer-link">返回首页</Link>}
+              />
             ) : (!canshouDetails && !streamedGeneralCard) ? (
               <>
                 <QuestionNavigator
@@ -1505,223 +1401,47 @@ export const CanshouPage: React.FC = () => {
                   theme="dark"
                 />
 
-                <div className="my-4 rounded-xl border border-slate-700 bg-slate-900/70 p-4 text-sm text-slate-200">
-                  <button
-                    type="button"
-                    onClick={() => setShowQuestionnaireSettings(!showQuestionnaireSettings)}
-                    className="flex w-full items-center justify-between font-semibold text-emerald-300"
-                  >
-                    <span>问卷设置</span>
-                    <span>{showQuestionnaireSettings ? '▲' : '▼'}</span>
-                  </button>
-	                  {showQuestionnaireSettings && (
-	                    <div className="mt-3 space-y-3 text-xs text-slate-400">
-	                      <p>你可以选择预设、上传或从云端问卷库挑选。多问卷只影响题目顺序；设定（Lore）可单独启用/禁用。</p>
-	                      <div className="flex flex-wrap items-center gap-3">
-	                        <label className="flex items-center gap-2">
-	                          <input
-	                            type="checkbox"
-	                            checked={allowMultipleQuestionnaires}
-	                            onChange={(e) => setAllowMultipleQuestionnaires(e.target.checked)}
-	                          />
-	                          允许同时回答多份问卷
-	                        </label>
-	                        {!allowMultipleQuestionnaires && (
-	                          <span className="text-[11px] text-slate-500">关闭时：仅允许 1 份可作答问卷，但仍可叠加纯设定卡。</span>
-	                        )}
-	                        {!isQuestionnaireNativeAllowed && (
-	                          <span className="text-rose-400">提示：当前问卷未获得原生许可，生成结果将不具备原生性。</span>
-	                        )}
-	                        {isQuestionnaireNativeAllowed && hasOverLimitAnswer && (
-	                          <span className="text-amber-300">提示：已有答案超过字数上限（原生统一上限 {QUESTIONNAIRE_NATIVE_MAX_ANSWER_CHARS} 字），生成结果将不具备原生性。</span>
-	                        )}
-	                      </div>
-	                      <div className="space-y-2">
-	                        <div className="text-[11px] font-semibold text-slate-500">可作答问卷（题目）</div>
-	                        {answerableSelections.length === 0 ? (
-	                          <div className="rounded-lg border border-slate-700 bg-slate-900/80 px-3 py-2 text-[11px] text-slate-500">
-	                            暂无可作答问卷
-	                          </div>
-	                        ) : (
-	                          answerableSelections.map((selection) => {
-	                            const selectionId = selection.selectionId ?? selection.questionnaire.id;
-	                            const hasLore = Boolean(selection.questionnaire.loreMarkdown?.trim());
-	                            const loreStatus = hasLore ? (selection.useLore !== false ? ' · 设定：启用' : ' · 设定：关闭') : '';
-	                            return (
-	                              <div key={selectionId} className="flex items-center justify-between rounded-lg border border-slate-700 bg-slate-900/80 px-3 py-2">
-	                                <div>
-	                                  <div className="font-semibold text-emerald-200">{selection.questionnaire.title}</div>
-	                                  <div className="text-[11px] text-slate-500">
-	                                    来源：{selection.source === 'preset' ? '预设' : selection.source === 'upload' ? '本地上传' : '云端问卷'}
-	                                    {selection.dataCardAuthor ? ` · 作者：${selection.dataCardAuthor}` : ''}
-	                                    {selection.questionnaire.nativeAllowed ? ' · 原生许可' : ' · 非原生'}
-	                                    {loreStatus}
-	                                  </div>
-	                                </div>
-	                                <div className="flex items-center gap-3">
-	                                  <button
-	                                    type="button"
-	                                    onClick={() => handleOpenQuestionnaireDetails(selection)}
-	                                    className="text-xs text-emerald-300 hover:underline"
-	                                  >
-	                                    详情
-	                                  </button>
-	                                  <button
-	                                    type="button"
-	                                    disabled={shouldDisableRemove}
-	                                    onClick={() => handleRemoveSelection(selectionId)}
-	                                    className={`text-xs ${shouldDisableRemove ? 'text-slate-700' : 'text-rose-400 hover:underline'}`}
-	                                  >
-	                                    移除
-	                                  </button>
-	                                </div>
-	                              </div>
-	                            );
-	                          })
-	                        )}
-	                      </div>
-	                      <div className="space-y-2">
-	                        <div className="text-[11px] font-semibold text-slate-500">设定（Lore）注入</div>
-	                        {loreSelections.length === 0 ? (
-	                          <div className="rounded-lg border border-slate-700 bg-slate-900/80 px-3 py-2 text-[11px] text-slate-500">
-	                            暂无设定来源
-	                          </div>
-	                        ) : (
-	                          loreSelections.map((selection) => {
-	                            const selectionId = selection.selectionId ?? selection.questionnaire.id;
-	                            const isLoreOnly = selection.questionnaire.questions.length === 0;
-	                            return (
-	                              <div key={selectionId} className="flex items-center justify-between rounded-lg border border-slate-700 bg-slate-900/80 px-3 py-2">
-	                                <div>
-	                                  <div className="font-semibold text-emerald-200">{selection.questionnaire.title}</div>
-	                                  <div className="text-[11px] text-slate-500">
-	                                    来源：{selection.source === 'preset' ? '预设' : selection.source === 'upload' ? '本地上传' : '云端问卷'}
-	                                    {selection.dataCardAuthor ? ` · 作者：${selection.dataCardAuthor}` : ''}
-	                                    {selection.questionnaire.nativeAllowed ? ' · 原生许可' : ' · 非原生'}
-	                                    {isLoreOnly ? ' · 仅设定' : ' · 来自问卷'}
-	                                  </div>
-	                                </div>
-	                                <div className="flex items-center gap-3">
-	                                  <label className="flex items-center gap-2 text-[11px] text-emerald-200">
-	                                    <input
-	                                      type="checkbox"
-	                                      checked={selection.useLore !== false}
-	                                      onChange={(e) => handleToggleSelectionLore(selectionId, e.target.checked)}
-	                                    />
-	                                    使用设定
-	                                  </label>
-	                                  <button
-	                                    type="button"
-	                                    onClick={() => handleOpenQuestionnaireDetails(selection)}
-	                                    className="text-xs text-emerald-300 hover:underline"
-	                                  >
-	                                    详情
-	                                  </button>
-	                                  {isLoreOnly && (
-	                                    <button
-	                                      type="button"
-	                                      disabled={shouldDisableRemove}
-	                                      onClick={() => handleRemoveSelection(selectionId)}
-	                                      className={`text-xs ${shouldDisableRemove ? 'text-slate-700' : 'text-rose-400 hover:underline'}`}
-	                                    >
-	                                      移除
-	                                    </button>
-	                                  )}
-	                                </div>
-	                              </div>
-	                            );
-	                          })
-	                        )}
-	                      </div>
-	                      <div className="flex flex-wrap items-center gap-2">
-	                        <select
-	                          className="input-field text-xs"
-	                          onChange={(e) => {
-                            if (e.target.value) {
-                              void handleAddPreset(e.target.value);
-                              e.currentTarget.value = '';
-                            }
-                          }}
-                          defaultValue=""
-                        >
-                          <option value="" disabled>选择预设问卷</option>
-                          {presetEntries.map((preset) => (
-                            <option key={preset.id} value={preset.id}>{preset.title}</option>
-                          ))}
-                        </select>
-                        <label className="inline-flex items-center gap-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-200 hover:border-emerald-300 hover:bg-emerald-500/20 cursor-pointer">
-                          上传问卷 JSON
-                          <input
-                            type="file"
-                            accept="application/json"
-                            onChange={(e) => void handleUploadQuestionnaire(e.target.files?.[0] ?? null)}
-                            className="hidden"
-                          />
-                        </label>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setQuestionnairePickerError(null);
-                            setShowQuestionnairePicker(true);
-                          }}
-                          className="rounded-lg border border-emerald-500/40 bg-slate-900 px-3 py-1 text-xs text-emerald-300 hover:border-emerald-400"
-                        >
-                          从云端问卷库选择
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setPasteQuestionnaireError(null);
-                            setShowPasteImport((prev) => !prev);
-                          }}
-                          className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-1 text-xs text-emerald-200 hover:border-emerald-300 hover:bg-emerald-500/20"
-                        >
-                          {showPasteImport ? '收起粘贴导入' : '粘贴导入 JSON'}
-                        </button>
-                        <Link href="/questionnaire-editor" className="text-xs text-emerald-300 hover:underline">
-                          打开问卷编辑器
-                        </Link>
-                      </div>
-                      {showPasteImport && (
-                        <div className="rounded-lg border border-slate-700 bg-slate-900/80 p-3 text-xs text-slate-300">
-                          <label className="text-xs text-slate-500">粘贴问卷 JSON</label>
-                          <textarea
-                            value={pasteQuestionnaireText}
-                            onChange={(e) => setPasteQuestionnaireText(e.target.value)}
-                            placeholder="在此粘贴问卷 JSON"
-                            className="input-field mt-2 h-28"
-                            rows={6}
-                          />
-                          <div className="mt-2 flex items-center justify-between">
-                            <button
-                              type="button"
-                              onClick={handlePasteQuestionnaireImport}
-                              className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-1 text-xs text-emerald-200 hover:border-emerald-300 hover:bg-emerald-500/20"
-                            >
-                              解析并载入
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setPasteQuestionnaireText('');
-                                setPasteQuestionnaireError(null);
-                              }}
-                              className="text-xs text-slate-500 hover:text-slate-200"
-                            >
-                              清空
-                            </button>
-                          </div>
-                          {pasteQuestionnaireError && (
-                            <p className="mt-2 text-rose-400">{pasteQuestionnaireError}</p>
-                          )}
-                        </div>
-                      )}
-                      {questionnaireLoadError && (
-                        <p className="text-rose-400">{questionnaireLoadError}</p>
-                      )}
-                    </div>
+                <QuestionnaireSelectionPanel
+                  theme={CANSHOU_SELECTION_THEME}
+                  expanded={showQuestionnaireSettings}
+                  onToggleExpanded={() => setShowQuestionnaireSettings(!showQuestionnaireSettings)}
+                  allowMultiple={allowMultipleQuestionnaires}
+                  onAllowMultipleChange={setAllowMultipleQuestionnaires}
+                  selections={selectedQuestionnaires}
+                  shouldDisableRemove={shouldDisableRemove}
+                  onRemoveSelection={handleRemoveSelection}
+                  onToggleLore={handleToggleSelectionLore}
+                  onShowDetails={handleOpenQuestionnaireDetails}
+                  nativeAllowed={isQuestionnaireNativeAllowed}
+                  hasOverLimitAnswer={hasOverLimitAnswer}
+                  nativeMaxAnswerChars={QUESTIONNAIRE_NATIVE_MAX_ANSWER_CHARS}
+                  presets={presetEntries}
+                  onSelectPreset={(presetId) => void handleAddPreset(presetId)}
+                  onUploadFile={(file) => void handleUploadQuestionnaire(file)}
+                  onOpenPicker={() => {
+                    setQuestionnairePickerError(null);
+                    setShowQuestionnairePicker(true);
+                  }}
+                  editorLink={(
+                    <Link href="/questionnaire-editor" className="text-xs text-emerald-300 hover:underline">
+                      打开问卷编辑器
+                    </Link>
                   )}
-                </div>
+                  pasteExpanded={showPasteImport}
+                  onTogglePasteExpanded={() => {
+                    setPasteQuestionnaireError(null);
+                    setShowPasteImport((prev) => !prev);
+                  }}
+                  pasteText={pasteQuestionnaireText}
+                  onPasteTextChange={setPasteQuestionnaireText}
+                  onApplyPaste={handlePasteQuestionnaireImport}
+                  onClearPaste={() => {
+                    setPasteQuestionnaireText('');
+                    setPasteQuestionnaireError(null);
+                  }}
+                  pasteError={pasteQuestionnaireError}
+                  error={questionnaireLoadError}
+                />
 
                 <QuestionnaireQuestionPanel
                   theme={CANSHOU_QUESTIONNAIRE_THEME}
@@ -1837,92 +1557,33 @@ export const CanshouPage: React.FC = () => {
                   />
                 </div>
 
-                <div className="my-4 bg-gray-100 rounded-lg p-3">
-                  <button
-                    onClick={() => setShowBulkFillSection(!showBulkFillSection)}
-                    className="flex items-center justify-between w-full text-left font-medium text-gray-700 hover:text-blue-600"
-                  >
-                    <span>一键填充答案</span>
-                    <span className="ml-2">{showBulkFillSection ? '▼' : '▶'}</span>
-                  </button>
-                  {showBulkFillSection && (
-                    <div className="mt-3">
-                      <textarea
-                        id="bulk-answers"
-                        value={bulkAnswers}
-                        onChange={(e) => setBulkAnswers(e.target.value)}
-                        placeholder="在此处粘贴所有答案：支持每行一个、Q/A 复制内容、编号列表、JSON。"
-                        className="input-field h-20"
-                        rows={4}
-                      />
-                      <div className="flex justify-between items-center mt-2">
-                        <button onClick={handleBulkFill} className="text-sm text-blue-600 hover:underline">填充</button>
-                        <button onClick={handleClearDraft} className="text-sm text-red-600 hover:underline">清空存档</button>
-                      </div>
-                      <div className="mt-4 rounded-lg border border-slate-700 bg-slate-950/40 p-3">
-                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                          <div>
-                            <p className="text-sm font-medium text-slate-100">从角色卡 JSON 导入答案</p>
-                            <p className="mt-1 text-xs text-slate-400">支持本仓库角色 JSON、万途互通 JSON 与万途往返 JSON。</p>
-                          </div>
-                          <select
-                            value={characterImportMergeMode}
-                            onChange={(event) => setCharacterImportMergeMode(event.target.value as QuestionnaireAnswerMergeMode)}
-                            className="rounded-lg border border-slate-600 bg-slate-900 px-3 py-2 text-xs text-slate-100"
-                          >
-                            <option value="fill-empty">只填空题</option>
-                            <option value="overwrite">覆盖匹配题</option>
-                          </select>
-                        </div>
-                        <label className="mt-3 inline-flex cursor-pointer items-center rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm font-medium text-emerald-200 hover:border-emerald-300 hover:bg-emerald-500/20">
-                          选择角色卡 JSON
-                          <input
-                            type="file"
-                            accept="application/json,.json"
-                            className="sr-only"
-                            onChange={handleCharacterCardAnswerImport}
-                          />
-                        </label>
-                      </div>
-                    </div>
-                  )}
-                </div>
+                {/* 批量回答问卷 + 角色卡导入（与 /details 同一共享区段） */}
+                <BulkAnswerTools
+                  variant="contrast"
+                  targets={allQuestionTargets}
+                  indexFallbackTargets={mergedQuestionTargets}
+                  answersByKey={answersByKey}
+                  onApplyAnswers={handleApplyImportedAnswers}
+                  onInfo={(message) => alert(message)}
+                  onError={(message) => setError(`⚠️ ${message}`)}
+                  onClearDraft={handleClearDraft}
+                  open={showBulkFillSection}
+                  onOpenChange={setShowBulkFillSection}
+                />
 
-                <div className="my-4 rounded-lg border border-slate-700 bg-slate-900/60 p-3">
-                  <button
-                    onClick={() => setShowAnswerReview(!showAnswerReview)}
-                    className="flex w-full items-center justify-between text-left text-sm font-semibold text-emerald-300"
-                  >
-                    <span>答案概览</span>
-                    <span>{showAnswerReview ? '▲' : '▼'}</span>
-                  </button>
-                  {showAnswerReview && (
-                    <div className="mt-3 max-h-52 space-y-2 overflow-y-auto pr-1 text-sm">
-                      {mergedQuestions.map((item, index) => (
-                        <div key={`canshou-review-${item.key}`} className="rounded-lg border border-slate-700 bg-slate-900/80 p-3">
-                          <div className="text-xs font-semibold text-emerald-300">Q{index + 1}</div>
-                          <div className="mt-1 text-xs text-slate-300">
-                            {item.questionnaireTitle ? `(${item.questionnaireTitle}) ` : ''}{item.question.question}
-                          </div>
-                          <div className="mt-2 text-slate-100 whitespace-pre-wrap">
-                            {answersByKey[item.key] && answersByKey[item.key].trim().length > 0
-                              ? answersByKey[item.key]
-                              : <span className="text-slate-500">尚未填写</span>}
-                          </div>
-                          <div className="mt-2 text-right">
-                            <button
-                              type="button"
-                              onClick={() => handleNavigateToQuestion(index)}
-                              className="text-xs text-emerald-300 hover:underline"
-                            >
-                              编辑此题
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                <AnswerReviewList
+                  variant="dark"
+                  items={mergedQuestionTargets.map((item) => ({
+                    key: item.key,
+                    index: item.index,
+                    question: item.question,
+                    questionnaireTitle: item.questionnaireTitle,
+                    answer: answersByKey[item.key] ?? '',
+                  }))}
+                  onEdit={handleNavigateToQuestion}
+                  open={showAnswerReview}
+                  onOpenChange={setShowAnswerReview}
+                />
 
                 {error && <ErrorMessage message={error} />}
                 {streamNotice ? <div className="mt-3 text-center text-sm text-amber-700">{streamNotice}</div> : null}
@@ -2026,71 +1687,20 @@ export const CanshouPage: React.FC = () => {
                       imageSaveMode={imageSaveMode}
                       saveButtonLabel={imageSaveButtonLabel}
                     />
-                    <div className="card" style={{ marginTop: '1rem' }}>
-                      <div className="space-y-5 text-left">
-                        <div>
-                          <div className="flex items-center justify-between text-sm">
-                            <span className="font-medium text-gray-800">设定长图保存方式</span>
-                            <span className="text-xs text-gray-500">推荐：{recommendedImageMode === 'download' ? '一键下载' : '长按保存弹窗'}</span>
-                          </div>
-                          <div className="flex flex-col sm:flex-row gap-2 mt-2">
-                            <button
-                              type="button"
-                              className={preferenceButtonClass(imageSaveMode === 'download')}
-                              onClick={() => setImageSaveMode('download')}
-                            >
-                              一键下载长图
-                              {recommendedImageMode === 'download' && (
-                                <span className="ml-2 inline-flex items-center rounded-full bg-rose-100 px-2 text-[10px] font-semibold text-rose-600">推荐</span>
-                              )}
-                            </button>
-                            <button
-                              type="button"
-                              className={preferenceButtonClass(imageSaveMode === 'modal')}
-                              onClick={() => setImageSaveMode('modal')}
-                            >
-                              长按保存弹窗
-                              {recommendedImageMode === 'modal' && (
-                                <span className="ml-2 inline-flex items-center rounded-full bg-rose-100 px-2 text-[10px] font-semibold text-rose-600">推荐</span>
-                              )}
-                            </button>
-                          </div>
-                          <p className="mt-2 text-xs text-gray-500">如果当前浏览器阻止下载，可切换为弹窗模式再手动保存。</p>
-                        </div>
-
-                        <div>
-                          <div className="flex items-center justify-between text-sm">
-                            <span className="font-medium text-gray-800">JSON 保存方式</span>
-                            <span className="text-xs text-gray-500">推荐：{recommendedJsonMode === 'download' ? '直接下载' : '复制 JSON'}</span>
-                          </div>
-                          <div className="flex flex-col sm:flex-row gap-2 mt-2">
-                            <button
-                              type="button"
-                              className={preferenceButtonClass(jsonSaveMode === 'download')}
-                              onClick={() => setJsonSaveMode('download')}
-                            >
-                              直接下载 JSON
-                              {recommendedJsonMode === 'download' && (
-                                <span className="ml-2 inline-flex items-center rounded-full bg-rose-100 px-2 text-[10px] font-semibold text-rose-600">推荐</span>
-                              )}
-                            </button>
-                            <button
-                              type="button"
-                              className={preferenceButtonClass(jsonSaveMode === 'text')}
-                              onClick={() => setJsonSaveMode('text')}
-                            >
-                              复制原始数据
-                              {recommendedJsonMode === 'text' && (
-                                <span className="ml-2 inline-flex items-center rounded-full bg-rose-100 px-2 text-[10px] font-semibold text-rose-600">推荐</span>
-                              )}
-                            </button>
-                          </div>
-                          <p className="mt-2 text-xs text-gray-500">两种方式都可跨终端使用，可随时切换体验。</p>
-                        </div>
-
-                        <p className="text-xs text-gray-400 text-center">提示：偏好设置已保存到浏览器，刷新后仍会保留；切换不会触发重新生成。</p>
-                      </div>
-                    </div>
+                    <DetailsSavePreferencesPanel
+                      theme={CANSHOU_SAVE_PREFERENCES_THEME}
+                      imageSaveMode={imageSaveMode}
+                      jsonSaveMode={jsonSaveMode}
+                      recommendedImageMode={recommendedImageMode}
+                      recommendedJsonMode={recommendedJsonMode}
+                      onImageSaveModeChange={setImageSaveMode}
+                      onJsonSaveModeChange={setJsonSaveMode}
+                      imageHint="如果当前浏览器阻止下载，可切换为弹窗模式再手动保存。"
+                      jsonHint="两种方式都可跨终端使用，可随时切换体验。"
+                      jsonGroupTitle="JSON 保存方式"
+                      jsonRecommendLabels={{ download: '直接下载', text: '复制 JSON' }}
+                      footerNote="提示：偏好设置已保存到浏览器，刷新后仍会保留；切换不会触发重新生成。"
+                    />
                     <div className="card" style={{ marginTop: '1rem' }}>
                       <div className="text-center">
                         <h3 className="text-lg font-medium text-gray-800" style={{ marginBottom: '1rem' }}>后续操作</h3>
@@ -2138,16 +1748,7 @@ export const CanshouPage: React.FC = () => {
                     </div>
                   </>
                 )}
-                <div className="card">
-                  <button onClick={() => setShowLore(!showLore)} className="text-lg font-medium text-gray-800 w-full text-left">
-                    {showLore ? '▼ ' : '▶ '}残兽设定说明
-                  </button>
-                  {showLore && (
-                    <div className="mt-4 text-sm text-gray-700 whitespace-pre-wrap font-mono bg-gray-100 p-4 rounded-lg">
-                      {CANSHOU_LORE}
-                    </div>
-                  )}
-                </div>
+                <CanshouLorePanel open={showLore} onOpenChange={setShowLore} />
                 <div className="mt-8 text-center">
                   <Link href="/" className="footer-link">返回首页</Link>
                 </div>

@@ -108,6 +108,37 @@ export const DETAILS_SELECTION_THEME: QuestionnaireSelectionTheme = {
   errorText: 'text-rose-500',
 };
 
+/** Web `/canshou` 现行 slate/emerald 深色主题（原样保留页面观感）。 */
+export const CANSHOU_SELECTION_THEME: QuestionnaireSelectionTheme = {
+  panel: 'my-4 rounded-xl border border-slate-700 bg-slate-900/70 p-4 text-sm text-slate-200',
+  toggleButton: 'flex w-full items-center justify-between font-semibold text-emerald-300',
+  body: 'mt-3 space-y-3 text-xs text-slate-400',
+  introText: '',
+  optionsRow: 'flex flex-wrap items-center gap-3',
+  mutedHint: 'text-[11px] text-slate-500',
+  warnText: 'text-rose-400',
+  cautionText: 'text-amber-300',
+  listLabel: 'text-[11px] font-semibold text-slate-500',
+  subcard: 'flex items-center justify-between rounded-lg border border-slate-700 bg-slate-900/80 px-3 py-2',
+  emptyCard: 'rounded-lg border border-slate-700 bg-slate-900/80 px-3 py-2 text-[11px] text-slate-500',
+  entryTitle: 'font-semibold text-emerald-200',
+  entryMeta: 'text-[11px] text-slate-500',
+  entryActions: 'flex items-center gap-3',
+  textLink: 'text-xs text-emerald-300 hover:underline',
+  removeButton: 'text-xs text-rose-400 hover:underline',
+  removeButtonDisabled: 'text-xs text-slate-700',
+  loreToggleLabel: 'flex items-center gap-2 text-[11px] text-emerald-200',
+  actionsRow: 'flex flex-wrap items-center gap-2',
+  actionButton: 'rounded-lg border border-emerald-500/40 bg-slate-900 px-3 py-1 text-xs text-emerald-300 hover:border-emerald-400',
+  pasteToggleButton: 'rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-1 text-xs text-emerald-200 hover:border-emerald-300 hover:bg-emerald-500/20',
+  uploadLabel: 'inline-flex items-center gap-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-200 hover:border-emerald-300 hover:bg-emerald-500/20 cursor-pointer',
+  pasteCard: 'rounded-lg border border-slate-700 bg-slate-900/80 p-3 text-xs text-slate-300',
+  pasteLabel: 'text-xs text-slate-500',
+  pasteApplyButton: 'rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-1 text-xs text-emerald-200 hover:border-emerald-300 hover:bg-emerald-500/20',
+  pasteClearButton: 'text-xs text-slate-500 hover:text-slate-200',
+  errorText: 'text-rose-400',
+};
+
 /**
  * Desktop app-token 主题。`details-questionnaire-*` 标记类与 Web 一致——
  * 共享 `styles.css` 里的暗色 remap 对两端生效。
