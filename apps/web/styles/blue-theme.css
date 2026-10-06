@@ -58,9 +58,10 @@ body {
  * 相差 10px——本文件全站加载，Web 现行效果是 30px；删掉它会把所有页面的
  * 页脚向上拉，因此按现状保留（所有权仍是 Web 私有页面留白，不是主题）。
  * 其余 `.container`/`.card`/`.magic-background*`/`.result-card*`/`.save-*`/
- * `.level-badge`/`.subtitle`/`.input-*`/`.title-container` 与 `.blue-theme`
+ * `.level-badge`/`.subtitle`/`.input-*` 与 `.blue-theme`
  * 作用域规则已上移 `@mahoshojo/ui-web/product-shell.css`（D5.1-P2，
- * 声明逐字一致），此处不重复登记。
+ * 声明逐字一致），此处不重复登记。`.title-container` 无任何消费方，
+ * 是死规则，已随 D5.1-P2-r1 从全部三个副本中删除（未上移）。
  */
 .footer {
   text-align: center;

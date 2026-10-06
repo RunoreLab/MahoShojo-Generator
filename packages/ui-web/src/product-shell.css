@@ -13,9 +13,11 @@
  * `.theme-image-*`、`.feature-*`、渐变按钮、`body.announcement-visible` 与公告滚动动画、
  * `@layer utilities` 暗色 remap——共享组件（AppShell/HomeView/ProductFooter/公告中心/
  * ErrorMessageBox/CardLibraryModal）渲染出的 class 在这里有且只有一处权威定义。
- * `.generate-button`/`.result-card`/`.save-button`/`.input-*`/`.title-container` 同样在
- * 本闭包：共享的 character-card、details-controls 与 ai-provider 今天就渲染它们，
- * 留在 Web 等于让 Desktop 的 /details 结果卡与问卷设置面板裸奔。
+ * `.generate-button`/`.result-card`/`.save-button` 同样在本闭包：共享的 character-card、
+ * details-controls 与 ai-provider 今天就渲染它们，留在 Web 等于让 Desktop 的 /details
+ * 结果卡与问卷设置面板裸奔。`.input-*` 的权威定义在 `styles.css`（共享表单底座，D5.0b
+ * 上移），本文件不重复登记；`.title-container` 在全部消费方中都不存在，是随迁移
+ * 带入的死规则，已删除（D5.1-P2-r1）。
  *
  * `/details` 的 `.blue-theme` 作用域覆盖（D5.1-P2 / DESK-PARITY-004）也在本文件：
  * 它只改写本闭包已有类的变量与配色，作用域选择器保证不外泄到其他页面。
@@ -29,11 +31,16 @@
  * 消费闭包层。两端 `globals.css` 都以 `@import` 回用，顺序固定为 tailwind → styles →
  * 本文件，再是宿主私有规则。
  *
- * ## 唯一的非逐字改动
+ * ## 非逐字改动（两处）
  *
- * 公告组件原用 styled-jsx 在运行时注入 keyframes（`.animate-scroll-left` 等）——那是
- * Next 私有机制，共享组件不能依赖。动画与类名移入本文件并加 `announcement-` 前缀，
- * 避免与全局 `.animate-fade-in` 撞名；行为取值不变。
+ * 1. 公告组件原用 styled-jsx 在运行时注入 keyframes（`.animate-scroll-left` 等）——那是
+ *    Next 私有机制，共享组件不能依赖。动画与类名移入本文件并加 `announcement-` 前缀，
+ *    避免与全局 `.animate-fade-in` 撞名；行为取值不变。
+ * 2. `sparkle` keyframes 曾同名撞车（D5.1-P2-r1）：`.magic-background::before` 旁边的
+ *    透明度脉冲与 `.feature-button:hover::before` 的缩放脉冲同名，后者按序覆盖前者，
+ *    背景实际跑的是为按钮设计的缩放版。现拆为 `sparkle-fade`（背景）与
+ *    `sparkle-scale`（按钮），恢复各自的作者意图——两端背景闪烁从缩放脉冲回到
+ *    透明度脉冲，是刻意的可见修正而非回归。
  */
 
 /*
@@ -212,10 +219,10 @@ body.announcement-visible {
     pointer-events: none;
     background-image: radial-gradient(circle at 20% 50%, rgba(255, 255, 255, 0.2) 2px, transparent 2px), radial-gradient(circle at 80% 20%, rgba(255, 255, 255, 0.15) 1px, transparent 1px), radial-gradient(circle at 40% 80%, rgba(255, 255, 255, 0.1) 1px, transparent 1px);
     background-size: 50px 50px, 30px 30px, 40px 40px;
-    animation: sparkle 6s ease-in-out infinite;
+    animation: sparkle-fade 6s ease-in-out infinite;
   }
 
-  @keyframes sparkle {
+  @keyframes sparkle-fade {
 
     0%,
     100% {
@@ -400,42 +407,6 @@ body.announcement-visible {
     cursor: not-allowed;
   }
 
-  /* 表单输入底座：共享 ai-provider/CardLibraryModal/问卷设置面板都渲染
-     `.input-field`——原来只存在于 Web `blue-theme.css`，Desktop 上是裸元素。 */
-  .input-group {
-    margin-bottom: 20px;
-  }
-
-  .input-label {
-    display: block;
-    margin-bottom: 8px;
-    font-weight: 600;
-    color: var(--app-text-muted);
-  }
-
-  .input-field {
-    width: 100%;
-    padding: 15px;
-    border: 2px solid var(--app-input-border);
-    color: var(--app-text);
-    border-radius: 12px;
-    font-size: 16px;
-    transition: all 0.3s ease;
-    background: var(--app-input-bg);
-  }
-
-  .input-field::placeholder {
-    color: var(--app-text-subtle);
-  }
-
-  .title-container {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    margin-bottom: 1rem;
-    background: transparent;
-  }
-
   /* ── /details 蓝色主题作用域（DESK-PARITY-004）─────────────────────────
      只改写本闭包已有类：未作用域的 `.magic-background`/`.result-card` 基座
      定义已在上方（`.blue-theme` 作用域版与基座取值一致，不重复登记）。 */
@@ -536,8 +507,8 @@ body.announcement-visible {
   }
 }
 
-/* 闪烁效果 */
-@keyframes sparkle {
+/* 闪烁效果（feature-button hover 用；与背景的 sparkle-fade 不再共用名，避免互相覆盖） */
+@keyframes sparkle-scale {
 
   0%,
   100% {
@@ -796,7 +767,7 @@ body.announcement-visible {
 .feature-button:hover::before {
   opacity: 0.8;
   /* 恢复原始动画，但只在hover时运行 */
-  animation: sparkle 4s ease-in-out infinite;
+  animation: sparkle-scale 4s ease-in-out infinite;
 }
 
 /* Loading状态样式 */

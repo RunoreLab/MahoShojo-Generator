@@ -191,8 +191,7 @@ body {
   margin-top: 1rem;
 }
 
-.creator-workbench-shell .result-card,
-.creator-workbench-shell .title-container {
+.creator-workbench-shell .result-card {
   max-width: none;
 }
 
@@ -319,7 +318,7 @@ body {
     filter: brightness(1.05);
   }
 
-  /* `.theme-image-*`、`.magic-background::before`/`sparkle`、`.generate-button`
+  /* `.theme-image-*`、`.magic-background::before`（`sparkle-fade`）、`.generate-button`
      已上移至 product-shell.css。 */
 
   .arena-cta-button {
@@ -374,15 +373,8 @@ body {
 
   /* `.result-card`/`::before`、`.result-content`、`.level-badge`、`.save-button`、
      `.save-instructions`、`.subtitle`、`.error-message`、`.footer`、`.feature-*`
-     已上移至 product-shell.css。 */
-
-  .title-container {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    margin-bottom: 1rem;
-    background: transparent;
-  }
+     已上移至 product-shell.css。`.title-container` 无任何消费方，是死规则，
+     已随 D5.1-P2-r1 删除（未上移）。 */
 
   /* 问题切换动画 */
   @keyframes slideInFromRight {
