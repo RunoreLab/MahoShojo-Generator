@@ -169,6 +169,14 @@ describe('parseQuestionnaireDataCardPayload', () => {
     expect(() => parseQuestionnaireDataCardPayload({ data: oversized })).toThrow('问卷数据卡内容为空或格式不受支持');
     expect(parseQuestionnaireDataCardPayload(JSON.stringify(inner)).questions).toHaveLength(1);
   });
+
+  test('字节预算针对原始输入：超预算空白包裹的合法 JSON 同样被拒（D5.1-P2-r4）', () => {
+    // 「大量空白 + 小合法 JSON」裁剪后完全在预算内，但原始串已超预算——
+    // trim 前的预算检查保证无界空白不先被整串扫描。
+    const padded = `${' '.repeat(MAX_QUESTIONNAIRE_IMPORT_BYTES)}${JSON.stringify(inner)}`;
+    expect(() => parseQuestionnaireDataCardPayload(padded)).toThrow('问卷数据卡内容为空或格式不受支持');
+    expect(() => parseQuestionnaireDataCardPayload({ data: padded })).toThrow('问卷数据卡内容为空或格式不受支持');
+  });
 });
 
 describe('MAX_QUESTIONNAIRE_IMPORT_BYTES', () => {

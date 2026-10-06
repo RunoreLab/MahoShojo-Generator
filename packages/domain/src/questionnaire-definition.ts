@@ -233,8 +233,14 @@ const QUESTIONNAIRE_CARD_PAYLOAD_ERROR = '问卷数据卡内容为空或格式�
 
 const parseQuestionnairePayloadValue = (value: unknown): Record<string, unknown> => {
   if (typeof value === 'string') {
+    // 预算落在原始输入上而不是 trim 之后：`.trim()` 本身就要扫描整串，
+    // 「数 MiB 空白 + 小合法 JSON」会先付完全部扫描成本再被拒（bounded-input，
+    // D5.1-P2-r4）。先拒超预算原始串，再裁剪空白并拒空。
+    if (exceedsUtf8ByteLimit(value, MAX_QUESTIONNAIRE_IMPORT_BYTES)) {
+      throw new Error(QUESTIONNAIRE_CARD_PAYLOAD_ERROR);
+    }
     const trimmed = value.trim();
-    if (!trimmed || exceedsUtf8ByteLimit(trimmed, MAX_QUESTIONNAIRE_IMPORT_BYTES)) {
+    if (!trimmed) {
       throw new Error(QUESTIONNAIRE_CARD_PAYLOAD_ERROR);
     }
     const parsed = JSON.parse(trimmed) as unknown;
