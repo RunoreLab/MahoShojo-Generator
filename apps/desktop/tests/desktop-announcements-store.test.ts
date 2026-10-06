@@ -17,7 +17,6 @@ import {
   DesktopAnnouncementsStore,
   type DesktopAnnouncementsState,
 } from '../src/features/announcements/desktop-announcements-store';
-import type { InvokeFn } from '../src/platform/announcements-bridge';
 
 const makeAnnouncement = (id: string, date: string, pinned = false): Announcement => ({
   id,
@@ -32,7 +31,9 @@ const remoteSnapshot = (announcements: Announcement[], fetchedAt = '2026-10-11T0
   announcements,
 });
 
-const makeInvoke = (impl: (command: string) => Promise<unknown>): InvokeFn =>
+// 返回值不注解为 InvokeFn——注解会把 vi.fn 的 Mock 类型擦成纯函数签名，
+// 断言处的 .mock.calls 就不可用（dev tsconfig 对 tests 的既有报错）。
+const makeInvoke = (impl: (command: string) => Promise<unknown>) =>
   vi.fn((command: string) => impl(command));
 
 const stateOf = (store: DesktopAnnouncementsStore): DesktopAnnouncementsState =>
