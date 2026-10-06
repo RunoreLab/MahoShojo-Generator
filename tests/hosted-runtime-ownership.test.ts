@@ -91,7 +91,9 @@ const readPackageManifest = () => JSON.parse(readFileSync(PACKAGE_MANIFEST_PATH,
 describe('hosted-runtime ownership boundary', () => {
   beforeAll(() => {
     workspaceBoundaryViolations = checkWorkspaceBoundaries(ROOT_DIRECTORY);
-  }, 30_000);
+    // 真实仓库根的边界扫描要按生成物清单逐条 shell git（check-ignore/ls-files），
+    // Windows 本机实测 ~30s——30s 超时零余量必然 flaky，放宽到 120s。
+  }, 120_000);
 
   test('hosted-runtime 持有全部新旧 composition runtime 子路径', () => {
     const manifest = readPackageManifest();
