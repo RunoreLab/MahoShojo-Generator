@@ -53,8 +53,9 @@ describe('desktop capability snapshot', () => {
     }
   });
 
-  it('marks undelivered product pages as not implemented rather than unknown', () => {
+  it('marks undelivered internal product pages as not implemented rather than unknown', () => {
     const undelivered = NAV_GROUPS.flatMap((group) => group.items)
+      .filter((item) => item.isExternal !== true)
       .map((item) => item.href)
       .filter((href) => !DELIVERED_ROUTES.includes(href));
 
@@ -71,19 +72,16 @@ describe('desktop capability snapshot', () => {
     }
   });
 
-  it('gives external entries the reason that actually applies to them', () => {
+  it('marks external entries available — open_external_url makes them real capabilities', () => {
     const externalHrefs = NAV_GROUPS.flatMap((group) => group.items)
       .filter((item) => item.isExternal === true)
       .map((item) => item.href);
 
+    // 受控外链命令交付后，站外入口经 native 校验 + 系统浏览器打开是真实能力：
+    // 标可用并交给 `onNavigateExternal`，而不是伪装不可点或放行 WebView 导航。
     expect(externalHrefs.length).toBeGreaterThan(0);
     for (const href of externalHrefs) {
-      const availability = readCapability(snapshot, href);
-      expect(availability.kind).toBe('unavailable');
-      if (availability.kind === 'unavailable' && availability.reason === 'not-implemented') {
-        // 站外入口的理由必须说清是「宿主缺能力」，而不是「页面没做」——两者对用户的下一步完全不同。
-        expect(availability.detail).toContain('系统浏览器');
-      }
+      expect(readCapability(snapshot, href)).toEqual({ kind: 'available' });
     }
   });
 

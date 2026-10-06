@@ -35,7 +35,9 @@ const CLOUD_ORIGIN_PRODUCTION: &str = "https://mahoshojo.colanns.me";
 /// 开发构建允许经编译期环境变量 `MAHOSHOJO_CLOUD_ORIGIN` 覆盖 origin（DESK-093）。
 /// `option_env!` 在构建时把值固化进二进制，运行中设置同名变量不生效；
 /// release 构建永远使用生产 origin。
-fn cloud_origin() -> String {
+///
+/// `pub(crate)`：公告刷新的固定远端也是这个 origin——它同样不得由 renderer 改写。
+pub(crate) fn cloud_origin() -> String {
     #[cfg(debug_assertions)]
     {
         if let Some(origin) = option_env!("MAHOSHOJO_CLOUD_ORIGIN") {

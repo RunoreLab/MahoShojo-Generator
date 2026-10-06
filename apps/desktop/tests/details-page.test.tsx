@@ -169,7 +169,7 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
     expect(container.querySelector('pre')?.textContent).toBe('取消刷新后仍继续收到正文');
     await act(async () => { void router.navigate({ to: '/' }); }); await settle();
     expect(router.state.location.pathname).toBe('/');
-    expect(container.querySelector('a[href="#/details"]')).toBeTruthy();
+    expect(container.querySelector('a[href="/details"]')).toBeTruthy();
   });
   it('requires confirmation before discarding corrupt draft, and blocks generation until native guard is ready', async () => {
     window.localStorage.setItem(DETAILS_DRAFT_KEY, '{broken');

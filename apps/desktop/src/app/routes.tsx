@@ -1,14 +1,20 @@
 import { useCallback } from 'react';
 import { Outlet, createRootRoute, createRoute, lazyRouteComponent, useLocation, useRouter } from '@tanstack/react-router';
-import { AppShell, ProductTopBar } from '@mahoshojo/ui-web/shell';
+import { AppShell, ProductFooter, ProductTopBar } from '@mahoshojo/ui-web/shell';
 import {
+  HOME_FEATURE_CATEGORIES,
+  HOME_RECOMMENDED_ENTRIES,
+  HomeAccountWelcome,
   HomeEncyclopediaCard,
+  HomeFeatureGrid,
   HomeHero,
   type HomeAssetSource,
 } from '@mahoshojo/ui-web/home';
 
 import { projectTopBarAccount } from '../features/account/topbar-projection';
 import { useDesktopCloudSession } from '../features/account/use-desktop-cloud-session';
+import { DesktopAnnouncementCenter } from '../features/announcements/desktop-announcement-center';
+import { ExternalLinksProvider, useExternalLinks } from '../features/external-links/external-links-provider';
 import { buildCapabilitySnapshot } from './capabilities';
 
 /**
@@ -59,16 +65,19 @@ const CAPABILITIES = buildCapabilitySnapshot();
  *   中性「账号」占位，点按经 `requestAuth` 才触发第一次 `cloud_auth_status`；
  * - 消息摘要不注入：Desktop 没有消息中心，`/messages` 在快照里是 not-implemented，
  *   按 `hide` 策略整条入口不出现——也不会有任何未读角标的伪造；
- * - 站外入口不提供 `onNavigateExternal`：系统浏览器能力尚未接入（DESK-ONLINE-014），
- *   共源组件会把它们按「需系统浏览器」禁用/隐藏，而不是给点了没反应的链接。
+ * - 公告轮播挂在壳上但数据不轮询：`DesktopAnnouncementsStore` 启动只读内置快照 +
+ *   native 落盘缓存，on-launch 策略下随后做一次受控刷新（`DESK-PARITY-003`）；
+ * - 站外入口经 `open_external_url` 交给系统浏览器：固定产品链接直接开，内容链接
+ *   默认先确认（`ExternalLinksProvider`，DESK-PARITY-003）。
  */
-const DesktopShell = () => {
+const DesktopShellInner = () => {
   const router = useRouter();
   // `router.state` 始终是最新值但不是响应式——只在这里读它不会让壳在导航/
   // 前进后退后重渲染，active group 会停在旧分组。当前路径必须走订阅式
   // `useLocation`（TanStack 对「渲染依赖路由状态」的官方入口）。
   const pathname = useLocation({ select: (location) => location.pathname });
   const { state: cloudSession, store: cloudSessionStore } = useDesktopCloudSession();
+  const { openFixed } = useExternalLinks();
 
   return (
     <AppShell
@@ -84,6 +93,12 @@ const DesktopShell = () => {
             event.preventDefault();
             void router.navigate({ to: href });
           }}
+          onNavigateExternal={(href, event) => {
+            // 顶栏的站外入口是固定产品链接：阻止 WebView 导航，交给 native 校验 +
+            // 系统浏览器打开。
+            event.preventDefault();
+            openFixed(href);
+          }}
           onRequestAuth={() => {
             void cloudSessionStore.requestAuth();
           }}
@@ -93,10 +108,21 @@ const DesktopShell = () => {
         />
       }
     >
+      <DesktopAnnouncementCenter />
       <Outlet />
     </AppShell>
   );
 };
+
+/**
+ * 受控外链是壳级能力：顶栏、公告、百科与页脚共用同一个确认弹窗与同一个
+ * `open_external_url` 通道，因此 provider 包在最外层。
+ */
+const DesktopShell = () => (
+  <ExternalLinksProvider>
+    <DesktopShellInner />
+  </ExternalLinksProvider>
+);
 
 const rootRoute = createRootRoute({
   component: DesktopShell,
@@ -121,6 +147,21 @@ const indexRoute = createRoute({
     const navigate = useCallback((href: string) => {
       void router.navigate({ to: href });
     }, [router]);
+    const { state: cloudSession } = useDesktopCloudSession();
+    const { openFixed } = useExternalLinks();
+
+    // 欢迎区只投影「已验证」会话：冷启动 idle 与 signed-out/unreachable 一律按
+    // 匿名渲染——DESK-ONLINE-008 要求未验证身份不显示已登录承诺。
+    const phase = cloudSession.phase;
+    const welcome: { state: 'loading' | 'signed-in' | 'anonymous'; name?: string } =
+      phase.kind === 'checking' || phase.kind === 'authenticating'
+        ? { state: 'loading' }
+        : phase.kind === 'ready' && phase.session.state === 'active'
+          ? {
+              state: 'signed-in',
+              name: phase.session.account.displayName ?? phase.session.account.username,
+            }
+          : { state: 'anonymous' };
 
     return (
       <section data-testid="page-home" className="flex flex-col gap-6">
@@ -133,12 +174,27 @@ const indexRoute = createRoute({
         <p className="text-center text-sm text-(--app-text-muted)">
           桌面版的功能与网页版存在差异，各项功能预计将逐步开放。
         </p>
-        <HomeEncyclopediaCard assetSource={DESKTOP_ASSET_SOURCE} onNavigate={navigate} />
+        <HomeAccountWelcome
+          state={welcome.state}
+          name={welcome.name}
+          primaryHref="/character-manager"
+          onNavigate={navigate}
+        />
+        <HomeEncyclopediaCard
+          assetSource={DESKTOP_ASSET_SOURCE}
+          onNavigate={navigate}
+          recommended={HOME_RECOMMENDED_ENTRIES}
+        />
+        <HomeFeatureGrid
+          assetSource={DESKTOP_ASSET_SOURCE}
+          categories={HOME_FEATURE_CATEGORIES}
+          capabilities={CAPABILITIES}
+          onNavigate={navigate}
+          unavailable="hide"
+        />
         <section className="rounded-lg border border-(--app-border) bg-(--app-surface) p-4">
-          <h2 className="mb-1 text-sm font-medium text-(--app-text-muted)">本机数据</h2>
+          <h2 className="mb-1 text-sm font-medium text-(--app-text-muted)">本机工具</h2>
           <ul className="flex flex-col gap-1 text-sm">
-            <li><a href="#/details" className="text-(--app-accent-strong) underline" onClick={(event) => { event.preventDefault(); navigate('/details'); }}>问卷生成魔法少女</a>：使用你的模型生成角色，并保存到本地卡库。</li>
-            <li><a href="#/character-manager" className="text-(--app-accent-strong) underline" onClick={(event) => { event.preventDefault(); navigate('/character-manager'); }}>角色管理</a>：编辑本地角色与情景卡，导入单个 JSON 数据卡。</li>
             <li>
               <a
                 href="#/local-library"
@@ -167,6 +223,11 @@ const indexRoute = createRoute({
             </li>
           </ul>
         </section>
+        <ProductFooter
+          assetSource={DESKTOP_ASSET_SOURCE}
+          onNavigateInternal={navigate}
+          onNavigateExternal={openFixed}
+        />
       </section>
     );
   },

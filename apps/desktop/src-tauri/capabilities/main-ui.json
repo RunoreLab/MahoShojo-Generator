@@ -51,6 +51,9 @@
     "allow-stream-hosted-ai",
     "allow-hosted-ai-request",
     "allow-cloud-card-library-request",
-    "allow-cancel-hosted-ai"
+    "allow-cancel-hosted-ai",
+    "allow-open-external-url",
+    "allow-announcements-get-cached",
+    "allow-announcements-refresh"
   ]
 }

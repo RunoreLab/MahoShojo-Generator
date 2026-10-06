@@ -14,11 +14,13 @@ mod ai;
 mod ai_contract_tests;
 #[cfg(test)]
 mod ai_e2e_tests;
+mod announcements;
 mod audit;
 mod backup;
 mod blob;
 mod cloud;
 mod export;
+mod external_link;
 mod gc;
 mod library;
 mod local_card;
@@ -1054,6 +1056,30 @@ async fn cloud_card_library_request(
     cloud::cloud_card_library_request(&cloud, secrets.inner().as_ref(), request).await
 }
 
+/// 受控外链打开（DESK-PARITY-003 / DESK-ONLINE-014）。只接受 http/https、
+/// 不带凭据的合法 URL；scheme 之外的任何「链接形态」都不是这个命令能表达的。
+#[tauri::command]
+fn open_external_url(url: String) -> Result<(), external_link::ExternalLinkError> {
+    let validated = external_link::validate_external_url(&url)?;
+    external_link::open_validated_url(&validated)
+}
+
+/// 公告快照：上次成功刷新的落盘结果；没有或损坏返回 `None`，
+/// renderer 据此回退内置快照。
+#[tauri::command]
+fn announcements_get_cached(app: tauri::AppHandle) -> Option<announcements::AnnouncementsSnapshot> {
+    announcements::get_cached(&app)
+}
+
+/// 公告受控刷新：固定 origin + 条件请求；成功才原子替换本地快照。
+#[tauri::command]
+async fn announcements_refresh(
+    app: tauri::AppHandle,
+    state: State<'_, announcements::AnnouncementsState>,
+) -> Result<announcements::AnnouncementsRefreshResult, announcements::AnnouncementsError> {
+    announcements::refresh(&app, &state).await
+}
+
 /// 仅在 native 已写恢复 intent 后允许退出，不向 renderer 开放通用进程控制。
 #[tauri::command]
 fn exit_after_local_restore(app: tauri::AppHandle) -> Result<(), restore::RestoreError> {
@@ -1152,6 +1178,10 @@ pub fn run() {
                 cloud::CloudState::new()
                     .map_err(|error| format!("cannot initialize the cloud client: {}", error.message))?,
             );
+            app.manage(
+                announcements::AnnouncementsState::new()
+                    .map_err(|error| format!("cannot initialize the announcements client: {}", error.message))?,
+            );
 
             app.manage(instance);
             app.manage(library);
@@ -1203,7 +1233,10 @@ pub fn run() {
             stream_hosted_ai,
             hosted_ai_request,
             cloud_card_library_request,
-            cancel_hosted_ai
+            cancel_hosted_ai,
+            open_external_url,
+            announcements_get_cached,
+            announcements_refresh
         ])
         .run(tauri::generate_context!())
         .expect("error while running MahoShojo Generator desktop app");

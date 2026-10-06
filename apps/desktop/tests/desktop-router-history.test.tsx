@@ -133,10 +133,21 @@ describe('desktop router keeps the product path inside the hash', () => {
     const router = await mount();
     expect(pageTestId()).toBe('page-home');
     const home = container.querySelector('[data-testid="page-home"]')!;
-    expect([...home.querySelectorAll('a')].map((anchor) => anchor.getAttribute('href'))).toEqual([
-      '/encyclopedia', '#/details', '#/character-manager', '#/local-library', '#/settings',
-    ]);
-    expect(home.querySelector('[data-testid="home-feature-grid"]')).toBeNull();
+    const hrefs = [...home.querySelectorAll('a')].map((anchor) => anchor.getAttribute('href'));
+
+    // 共源首页目录在 hide 策略下只渲染已交付入口：/details 与 /character-manager
+    // 可点；/canshou、/battle 等 Web-only 或未交付路径整条不出现（DESK-PROD-001）。
+    expect(home.querySelector('[data-testid="home-feature-grid"]')).not.toBeNull();
+    expect(hrefs).toContain('/details');
+    expect(hrefs).toContain('/character-manager');
+    expect(hrefs).toContain('/encyclopedia');
+    expect(hrefs).toContain('#/local-library');
+    expect(hrefs).toContain('#/settings');
+    expect(hrefs).not.toContain('/battle');
+    expect(hrefs).not.toContain('/canshou');
+    // 页脚站外链接经 onNavigateExternal 渲染为真实 <a href>（点击被拦截走
+    // open_external_url），而不是不可点的占位。
+    expect(hrefs.some((href) => href?.startsWith('https://'))).toBe(true);
     expect(home.textContent).not.toContain('PVP');
 
     for (const [to, expected] of [

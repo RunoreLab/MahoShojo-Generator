@@ -27,8 +27,10 @@ describe('desktop capability snapshot', () => {
     }
   });
 
-  it('marks undelivered product pages as not implemented rather than unknown', () => {
-    const undelivered = DECLARED_PRODUCT_PATHS.filter((href) => !DELIVERED_ROUTES.includes(href));
+  it('marks undelivered internal product pages as not implemented rather than unknown', () => {
+    const undelivered = DECLARED_PRODUCT_PATHS.filter(
+      (href) => !href.startsWith('http') && !DELIVERED_ROUTES.includes(href),
+    );
     expect(undelivered.length).toBeGreaterThan(0);
 
     for (const href of undelivered) {
@@ -40,15 +42,12 @@ describe('desktop capability snapshot', () => {
     }
   });
 
-  it('marks external entries as blocked by the missing opener capability', () => {
-    // 站外入口的问题不是「本仓库没声明」，是宿主没有打开外部站点的能力。理由不同，文案也不同。
+  it('marks external entries available — open_external_url makes them real capabilities', () => {
+    // 受控外链命令（D5.1-P1）交付后，站外入口经 native 校验 + 系统浏览器打开
+    // 已是真实能力：标可用交给 `onNavigateExternal`，而不是伪装不可点。
     const external = ['https://wantu-waystation.pages.dev/'];
     for (const href of external) {
-      const availability = readCapability(snapshot, href);
-      expect(availability.kind, `${href} 不应是未声明`).toBe('unavailable');
-      if (availability.kind === 'unavailable') {
-        expect(availability.detail).toContain('系统浏览器');
-      }
+      expect(readCapability(snapshot, href)).toEqual({ kind: 'available' });
     }
   });
 

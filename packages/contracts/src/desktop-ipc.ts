@@ -1,5 +1,6 @@
 import { z } from './zod';
 
+import { AnnouncementListSchema } from './announcements';
 import { MAX_SECRET_REF_LENGTH, SECRET_REF_PATTERN, SecretRefSchema, isSecretRef } from './secret-ref';
 import { WebPackageMediaTypeSchema, WebPackagePathSchema } from './web-package';
 import { utf8ByteLimitedStringSchema } from './wire-size';
@@ -900,4 +901,97 @@ export const DesktopWebPackageInstanceErrorSchema = z
   .strict();
 export type DesktopWebPackageInstanceError = z.infer<
   typeof DesktopWebPackageInstanceErrorSchema
+>;
+
+/* ── 受控外链（D5.1-P1，DESK-PARITY-003 / DESK-ONLINE-014）────────────── */
+
+/**
+ * `open_external_url` 的请求。renderer 只能给一个 URL 字符串——固定产品链接与
+ * Markdown/公告内容链接走同一条窄命令；「按标识映射固定链接」在 native 校验层
+ * 同样成立（destination 校验是 URL 解析，不是 renderer 自报）。
+ *
+ * native 侧是最终裁决者：scheme 只允许 http/https，拒绝 `file:`、`javascript:`、
+ * 任意自定义协议、含凭据（userinfo）的 URL。renderer 的确认弹窗是产品语义，
+ * native 校验是安全语义，两者不互相替代。
+ */
+export const MAX_DESKTOP_EXTERNAL_URL_LENGTH = 2048;
+export const DesktopOpenExternalUrlRequestSchema = z
+  .object({ url: z.string().min(1).max(MAX_DESKTOP_EXTERNAL_URL_LENGTH) })
+  .strict();
+export type DesktopOpenExternalUrlRequest = z.infer<
+  typeof DesktopOpenExternalUrlRequestSchema
+>;
+
+export const DesktopExternalLinkErrorCodeSchema = z.enum([
+  'invalid-url',
+  'open-failed',
+]);
+export type DesktopExternalLinkErrorCode = z.infer<
+  typeof DesktopExternalLinkErrorCodeSchema
+>;
+
+export const DesktopExternalLinkErrorSchema = z
+  .object({
+    code: DesktopExternalLinkErrorCodeSchema,
+    message: z.string().min(1).max(512),
+  })
+  .strict();
+export type DesktopExternalLinkError = z.infer<typeof DesktopExternalLinkErrorSchema>;
+
+/* ── 公告快照与受控刷新（D5.1-P1，DESK-PARITY-003）──────────────────── */
+
+/**
+ * native 缓存的公告快照。
+ *
+ * `fetchedAt` 是**快照时间**——native 成功拿到远端响应那一刻的 RFC3339 时刻，
+ * 而不是公告自身的发布日期。渲染层用它向用户标注「这份内容是什么时候取到的」，
+ * 缓存与远端响应用同一个字段，形状不变。
+ */
+export const DesktopAnnouncementsSnapshotSchema = z
+  .object({
+    fetchedAt: z.string().datetime({ offset: true }),
+    announcements: AnnouncementListSchema,
+  })
+  .strict();
+export type DesktopAnnouncementsSnapshot = z.infer<
+  typeof DesktopAnnouncementsSnapshotSchema
+>;
+
+/**
+ * `announcements_refresh` 的响应。
+ *
+ * - `updated`：远端返回了新内容，native 已原子替换本地快照后回显；
+ * - `not-modified`：条件请求命中 304，native 回显既有快照（fetchedAt 不变）。
+ *
+ * 失败不在这份类型里表达——网络失败、校验失败与缓存写失败都以
+ * `DesktopAnnouncementsError` 走 IPC 异常通道，渲染层据此保留旧快照。
+ */
+export const DesktopAnnouncementsRefreshResultSchema = z
+  .object({
+    status: z.enum(['updated', 'not-modified']),
+    snapshot: DesktopAnnouncementsSnapshotSchema,
+  })
+  .strict();
+export type DesktopAnnouncementsRefreshResult = z.infer<
+  typeof DesktopAnnouncementsRefreshResultSchema
+>;
+
+export const DesktopAnnouncementsErrorCodeSchema = z.enum([
+  'network-error',
+  'invalid-response',
+  'storage-unavailable',
+  'internal-error',
+]);
+export type DesktopAnnouncementsErrorCode = z.infer<
+  typeof DesktopAnnouncementsErrorCodeSchema
+>;
+
+export const DesktopAnnouncementsErrorSchema = z
+  .object({
+    code: DesktopAnnouncementsErrorCodeSchema,
+    message: z.string().min(1).max(512),
+  })
+  .strict();
+export type DesktopAnnouncementsError = z.infer<
+  typeof DesktopAnnouncementsErrorSchema
 >;

@@ -57,6 +57,9 @@ fn main() {
             "hosted_ai_request",
             "cloud_card_library_request",
             "cancel_hosted_ai",
+            "open_external_url",
+            "announcements_get_cached",
+            "announcements_refresh",
         ]),
     ))
     .expect("failed to run tauri build script");

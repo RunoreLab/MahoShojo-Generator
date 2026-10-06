@@ -46,12 +46,11 @@ export const buildCapabilitySnapshot = (): CapabilitySnapshot => {
 
   for (const { href, isExternal } of declared) {
     if (delivered.has(href)) continue;
-    snapshot[href] = unavailable(
-      'not-implemented',
-      isExternal
-        ? '打开站外站点需要系统浏览器能力，Desktop 尚未接入'
-        : '该页面尚未在 Desktop 交付',
-    );
+    // 受控外链打开命令（`open_external_url`）交付后，站外入口经 native 校验 +
+    // 系统浏览器打开已是真实能力，标可用；产品路径仍按交付状态判定。
+    snapshot[href] = isExternal
+      ? AVAILABLE
+      : unavailable('not-implemented', '该页面尚未在 Desktop 交付');
   }
 
   return snapshot;

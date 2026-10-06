@@ -7,9 +7,10 @@
  * 1. **冷启动零请求。** 顶栏挂在壳上的每一帧都属于本地旅程——`DESK-PROD-004` 与
  *    `DESK-ONLINE-012` 要求不自动探测项目服务，因此挂载后 `invoke` 一次都不能被
  *    调用；账号区投影的是 `idle → 'unknown'` 的中性占位。
- * 2. **能力快照即真相。** 未交付入口（`/battle`、`/messages`、站外链接、个人页
- *    `/me`）在 `hide` 策略下不渲染——尤其 `/messages` 必须整条消失，而不是挂着
- *    一个伪造未读数的铃铛。
+ * 2. **能力快照即真相。** 未交付入口（`/battle`、`/messages`、个人页 `/me`）在
+ *    `hide` 策略下不渲染——尤其 `/messages` 必须整条消失，而不是挂着一个伪造
+ *    未读数的铃铛；站外入口由 `open_external_url` 变成真实能力，点击走 native
+ *    校验通道而不是 WebView 导航。
  * 3. **账号动作走原生桥。** 点击账号区经 `requestAuth → cloud_auth_status →
  *    cloud_login_begin/await` 完成授权往返；投影到顶栏的只有契约快照（active 显示
  *    用户名），unreachable 如实显示「服务不可用」而不是已登出。
@@ -33,6 +34,16 @@ const { invokeMock, defaultInvokeImpl } = vi.hoisted(() => {
         sessionExpiresAt: '2026-10-12T00:00:00.000Z',
       };
     }
+    // 壳挂载会触发公告窄通道（读缓存 + on-launch 刷新）：给合法空响应，
+    // 让「公告通道存在」与「壳不发起其他探测」两个断言互不干扰。
+    if (command === 'announcements_get_cached') return null;
+    if (command === 'announcements_refresh') {
+      return {
+        status: 'not-modified',
+        snapshot: { fetchedAt: '2026-10-10T00:00:00Z', announcements: [] },
+      };
+    }
+    if (command === 'open_external_url') return undefined;
     return undefined;
   };
   return { invokeMock: vi.fn(impl), defaultInvokeImpl: impl };
@@ -49,6 +60,7 @@ vi.mock('@tauri-apps/api/window', () => ({
 // 且真的导航」与路由事实保持同一来源。
 import { createDesktopRouter } from '../src/app/router';
 import { resetDesktopCloudSessionStoreForTests } from '../src/features/account/use-desktop-cloud-session';
+import { resetDesktopAnnouncementsStoreForTests } from '../src/features/announcements/use-desktop-announcements';
 
 let container: HTMLDivElement;
 let root: Root;
@@ -63,6 +75,7 @@ beforeEach(() => {
   invokeMock.mockClear();
   invokeMock.mockImplementation(defaultInvokeImpl);
   resetDesktopCloudSessionStoreForTests();
+  resetDesktopAnnouncementsStoreForTests();
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -116,24 +129,29 @@ const accountButton = (): HTMLButtonElement | null =>
   ) ?? null;
 
 describe('desktop shared topbar', () => {
-  it('mounts the shared chrome with zero IPC — the account slot is the neutral placeholder', async () => {
+  it('mounts the shared chrome without probing services — the account slot is the neutral placeholder', async () => {
     await mount();
 
-    // DESK-PROD-004 / DESK-ONLINE-012：壳挂载期间一条 IPC 都不能有。账号区渲染的
-    // 是「未验证」占位而不是「已登出」——已保存身份不冒称未验证（DESK-ONLINE-008）。
-    expect(invokeMock).not.toHaveBeenCalled();
+    // DESK-PROD-004 / DESK-ONLINE-012：壳挂载不做账号探测或消息摘要。P1 后
+    // 唯一的例外是公告窄通道——`announcements.checkPolicy="on-launch"` 是
+    // spec 认可的启动检查（读缓存 + 一次条件刷新），除此之外一条 IPC 都不能有。
+    const commands = invokeMock.mock.calls.map((call) => call[0]);
+    expect(commands).not.toContain('cloud_auth_status');
+    for (const command of commands) {
+      expect(['announcements_get_cached', 'announcements_refresh']).toContain(command);
+    }
     expect(container.querySelector('header.global-topbar')).not.toBeNull();
     expect(accountButton()?.textContent).toBe('账号');
     // 冷启动也绝不能有消息角标——Desktop 不注入消息摘要。
     expect(container.textContent).not.toContain('条未读');
   });
 
-  it('renders only delivered entries: /messages, /me and external sites are absent, not dead links', async () => {
+  it('renders only delivered entries: /messages and /me are absent, external sites open via the controlled command', async () => {
     await mount();
+    invokeMock.mockClear();
 
-    const hrefs = [...container.querySelectorAll('header.global-topbar a')].map((a) =>
-      a.getAttribute('href'),
-    );
+    const topbarLinks = [...container.querySelectorAll<HTMLAnchorElement>('header.global-topbar a')];
+    const hrefs = topbarLinks.map((a) => a.getAttribute('href'));
     expect(hrefs).toContain('/');
     expect(hrefs).toContain('/character-manager');
     expect(hrefs).toContain('/encyclopedia');
@@ -142,7 +160,14 @@ describe('desktop shared topbar', () => {
     expect(hrefs).not.toContain('/messages');
     expect(hrefs).not.toContain('/me');
     expect(hrefs).not.toContain('/battle');
-    expect(hrefs.every((href) => !href?.startsWith('http'))).toBe(true);
+
+    // 站外入口在 `open_external_url` 交付后是真实能力：渲染为真实链接，点击
+    // 走 native 校验通道而不是 WebView 导航。
+    const externalLink = topbarLinks.find((a) => a.getAttribute('href')?.startsWith('https://'));
+    expect(externalLink).toBeDefined();
+    const externalHref = externalLink!.getAttribute('href')!;
+    await click(externalLink ?? null);
+    expect(invokeMock.mock.calls).toContainEqual(['open_external_url', { url: externalHref }]);
   });
 
   it('routes internal clicks through the desktop router instead of reloading', async () => {
@@ -241,11 +266,10 @@ describe('desktop shared topbar', () => {
     await click(accountButton());
 
     // 点击 → status → begin → await → signed-in：整条链路都是用户这一次点按的后果。
-    expect(invokeMock.mock.calls.map((call) => call[0])).toEqual([
-      'cloud_auth_status',
-      'cloud_login_begin',
-      'cloud_login_await',
-    ]);
+    // 公告窄通道的启动检查与登录链路无关，断言只看 cloud_* 命令的相对顺序。
+    expect(
+      invokeMock.mock.calls.map((call) => call[0]).filter((command) => command.startsWith('cloud_')),
+    ).toEqual(['cloud_auth_status', 'cloud_login_begin', 'cloud_login_await']);
     // 顶栏投影到 active：显示用户名，且出现「退出登录」入口（菜单 DOM 常挂在 hover
     // group 里，不需要先悬停就能断言）。
     expect(container.querySelector('header.global-topbar')?.textContent).toContain('homura');

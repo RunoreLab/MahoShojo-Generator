@@ -2,6 +2,7 @@ import { useParams, useRouter } from '@tanstack/react-router';
 import type { EncyclopediaContentSource } from '@mahoshojo/ui-web/encyclopedia';
 import { EncyclopediaEntryView, EncyclopediaIndexView } from '@mahoshojo/ui-web/encyclopedia-views';
 
+import { useExternalLinks } from '../features/external-links/external-links-provider';
 import { getRouteFragmentFromHashHistory } from './hash-history-fragment';
 
 const DESKTOP_CONTENT_SOURCE: EncyclopediaContentSource = { baseUrl: '/' };
@@ -39,12 +40,13 @@ export function DesktopEncyclopediaIndex() {
  * 落空；而 `@tanstack/react-router` 解析后的 `location` 根本没有 `hash` 字段。因此由
  * `getRouteFragmentFromHashHistory` 从路由 href 里提取 fragment。
  *
- * 站内链接交给 router，站外链接不提供处理器：Desktop 没有 opener 能力，于是它们渲染成不可执行
- * 并说明原因，而不是留一个点了没反应的链接。
+ * 站内链接交给 router；站外链接经 `openContent` 默认先确认域名，再由
+ * `open_external_url` 交给系统浏览器（DESK-PARITY-003）。
  */
 export function DesktopEncyclopediaEntry() {
   const router = useRouter();
   const { slug } = useParams({ strict: false }) as { slug?: string };
+  const { openContent } = useExternalLinks();
   // 使用路由 href，使同页 fragment 变化也触发锚点更新。
   const fragment = getRouteFragmentFromHashHistory(router.state.location.href);
 
@@ -56,6 +58,7 @@ export function DesktopEncyclopediaEntry() {
       onNavigate={(href) => {
         void router.navigate({ to: href });
       }}
+      onNavigateExternal={openContent}
       headerLinks={
         <a
           href="#/"
