@@ -18,6 +18,13 @@ import { unavailable, type CapabilityAvailability } from '../capability/index';
  */
 export type TopBarNavigate = (href: string, event: MouseEvent<HTMLAnchorElement>) => void;
 
+/**
+ * 渲染 `<a href>` 时把产品路径解析成运行时 href——hash-history 宿主（Desktop）
+ * 传 `(href) => '#' + href`，使「复制链接/新标签打开」落到正确地址。导航回调
+ * 仍收到未解析的产品路径；站外 URL 不经过本函数。
+ */
+export type TopBarResolveInternalHref = (href: string) => string;
+
 /** 不可用入口的处置策略，与产品导航一致。 */
 export type TopBarUnavailablePolicy = 'hide' | 'explain';
 

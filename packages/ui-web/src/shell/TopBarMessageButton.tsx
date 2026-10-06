@@ -6,6 +6,7 @@ import {
   describeUnavailableReason,
   TOPBAR_MESSAGES_HREF,
   type TopBarNavigate,
+  type TopBarResolveInternalHref,
 } from './topbar-contract';
 
 interface TopBarMessageButtonProps {
@@ -18,6 +19,8 @@ interface TopBarMessageButtonProps {
    */
   summary?: { readonly unreadTotal: number; readonly hasCrowdReviewPending: boolean };
   onNavigate: TopBarNavigate;
+  /** 渲染 `<a href>` 时把产品路径解析成运行时 href（Desktop hash history 传 `#` 前缀）。 */
+  resolveInternalHref?: TopBarResolveInternalHref;
   /** 不可用处置：`'hide'` 整个隐藏、`'explain'` 置灰保留并说明原因（与导航入口同策略）。 */
   unavailable?: 'hide' | 'explain';
 }
@@ -28,7 +31,7 @@ interface TopBarMessageButtonProps {
  * 与 Web 版唯一差别是数据来源：`useTopBarMessages` 变成宿主注入的 `summary`；
  * 路由未交付时按能力快照渲染禁用入口而非死链。
  */
-export function TopBarMessageButton({ availability, summary, onNavigate, unavailable = 'hide' }: TopBarMessageButtonProps) {
+export function TopBarMessageButton({ availability, summary, onNavigate, resolveInternalHref, unavailable = 'hide' }: TopBarMessageButtonProps) {
   const linkClassName =
     'inline-flex h-9 items-center gap-1.5 rounded-full border border-white/50 bg-white/70 px-3 text-sm font-medium text-gray-700 shadow-sm backdrop-blur transition hover:bg-white/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink-200 dark:border-slate-600/60 dark:bg-slate-900/70 dark:text-slate-100';
 
@@ -52,7 +55,7 @@ export function TopBarMessageButton({ availability, summary, onNavigate, unavail
 
   return (
     <a
-      href={TOPBAR_MESSAGES_HREF}
+      href={resolveInternalHref?.(TOPBAR_MESSAGES_HREF) ?? TOPBAR_MESSAGES_HREF}
       onClick={(event) => onNavigate(TOPBAR_MESSAGES_HREF, event)}
       aria-label="消息中心"
       title="消息中心"

@@ -8,6 +8,7 @@ import { DENY_EXTERNAL_MEDIA } from '@mahoshojo/ui-web/markdown';
 
 import { useDesktopAnnouncements } from './use-desktop-announcements';
 import { useExternalLinks } from '../external-links/external-links-provider';
+import { resolveInternalHrefForHashHistory } from '../../app/hash-history-fragment';
 
 const DISMISS_KEY_PREFIX = 'announcement_dismissed_';
 
@@ -50,6 +51,7 @@ export function DesktopAnnouncementCenter() {
       onNavigateInternal={(href) => {
         void router.navigate({ to: href });
       }}
+      resolveInternalHref={resolveInternalHrefForHashHistory}
       onNavigateExternal={openContent}
       toolbar={
         <div className="flex items-center justify-between gap-3 border-b border-gray-200 bg-gray-50 px-6 py-3 text-sm">

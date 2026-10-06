@@ -26,6 +26,8 @@ export interface AnnouncementCenterProps {
   /** 站外媒体策略。缺省拒绝一切站外媒体——公告里的图片/视频地址不自动加载。 */
   readonly externalMediaPolicy?: ExternalMediaPolicy;
   readonly onNavigateInternal?: (href: string) => void;
+  /** 渲染内部 `<a href>` 时把产品路径解析成运行时 href（Desktop hash history 传 `#` 前缀）。 */
+  readonly resolveInternalHref?: (href: string) => string;
   readonly onNavigateExternal?: (href: string) => void;
   readonly renderExternalLink?: (link: ExternalLinkRenderProps) => ReactNode;
   /**
@@ -66,6 +68,7 @@ export function AnnouncementCenter({
   dismissal,
   externalMediaPolicy = DENY_EXTERNAL_MEDIA,
   onNavigateInternal,
+  resolveInternalHref,
   onNavigateExternal,
   renderExternalLink,
   toolbar,
@@ -224,6 +227,7 @@ export function AnnouncementCenter({
                     mode="article"
                     externalMediaPolicy={externalMediaPolicy}
                     onNavigateInternal={onNavigateInternal}
+                    resolveInternalHref={resolveInternalHref}
                     onNavigateExternal={onNavigateExternal}
                     renderExternalLink={renderExternalLink}
                   />

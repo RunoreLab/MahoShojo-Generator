@@ -12,6 +12,7 @@ import {
   type TopBarAccountState,
   type TopBarMessagesSummary,
   type TopBarNavigate,
+  type TopBarResolveInternalHref,
   type TopBarUnavailablePolicy,
 } from './topbar-contract';
 import { TopBarMessageButton } from './TopBarMessageButton';
@@ -33,6 +34,8 @@ export interface ProductTopBarProps {
   capabilities: CapabilitySnapshot;
   /** 站内导航接管：Web 用 Next Router，Desktop 用 TanStack（各自 `preventDefault`）。 */
   onNavigate: TopBarNavigate;
+  /** 渲染站内 `<a href>` 时把产品路径解析成运行时 href（Desktop hash history 传 `#` 前缀）。 */
+  resolveInternalHref?: TopBarResolveInternalHref;
   /**
    * 站外入口接管。缺省时站外项按"需系统浏览器"禁用——这是 Desktop 在接入
    * 系统浏览器前的诚实降级路径。
@@ -65,6 +68,7 @@ export function ProductTopBar({
   pathname,
   capabilities,
   onNavigate,
+  resolveInternalHref,
   onNavigateExternal,
   unavailable = 'hide',
   logoSrc,
@@ -89,7 +93,7 @@ export function ProductTopBar({
       >
         <div className="global-topbar-panel pointer-events-auto mx-auto flex min-h-[var(--global-topbar-height)] w-full max-w-screen-2xl items-center gap-3 px-3 backdrop-blur-2xl backdrop-saturate-150 sm:px-4 lg:px-6">
           <a
-            href={TOPBAR_HOME_HREF}
+            href={resolveInternalHref?.(TOPBAR_HOME_HREF) ?? TOPBAR_HOME_HREF}
             onClick={(event) => onNavigate(TOPBAR_HOME_HREF, event)}
             aria-label="返回首页"
             className="global-topbar-logo-link inline-flex min-w-0 items-center gap-2 rounded-full px-2 py-1.5 transition"
@@ -192,7 +196,7 @@ export function ProductTopBar({
                         return (
                           <a
                             key={item.href}
-                            href={item.href}
+                            href={item.isExternal ? item.href : (resolveInternalHref?.(item.href) ?? item.href)}
                             target={item.isExternal ? '_blank' : undefined}
                             rel={item.isExternal ? 'noopener noreferrer' : undefined}
                             onClick={(event) => {
@@ -227,6 +231,7 @@ export function ProductTopBar({
               availability={readCapability(capabilities, TOPBAR_MESSAGES_HREF)}
               summary={messages}
               onNavigate={onNavigate}
+              resolveInternalHref={resolveInternalHref}
               unavailable={unavailable}
             />
             <div className="hidden items-center gap-2 md:flex">
@@ -234,6 +239,7 @@ export function ProductTopBar({
                 account={account}
                 capabilities={capabilities}
                 onNavigate={onNavigate}
+                resolveInternalHref={resolveInternalHref}
                 onRequestAuth={onRequestAuth}
                 onSignOut={onSignOut}
                 unavailable={unavailable}
@@ -260,6 +266,7 @@ export function ProductTopBar({
         activeGroupId={activeGroupId}
         capabilities={capabilities}
         onNavigate={onNavigate}
+        resolveInternalHref={resolveInternalHref}
         onNavigateExternal={onNavigateExternal}
         onClose={() => setIsMobileOpen(false)}
         account={account}

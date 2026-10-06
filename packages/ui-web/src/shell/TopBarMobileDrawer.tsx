@@ -9,6 +9,7 @@ import {
   topBarEntryAvailability,
   type TopBarAccountState,
   type TopBarNavigate,
+  type TopBarResolveInternalHref,
   type TopBarUnavailablePolicy,
 } from './topbar-contract';
 import { TopBarUserMenu } from './TopBarUserMenu';
@@ -18,6 +19,7 @@ interface TopBarMobileDrawerProps {
   activeGroupId: NavGroupId | null;
   capabilities: CapabilitySnapshot;
   onNavigate: TopBarNavigate;
+  resolveInternalHref?: TopBarResolveInternalHref;
   onNavigateExternal?: TopBarNavigate;
   onClose: () => void;
   account: TopBarAccountState;
@@ -37,6 +39,7 @@ export function TopBarMobileDrawer({
   activeGroupId,
   capabilities,
   onNavigate,
+  resolveInternalHref,
   onNavigateExternal,
   onClose,
   account,
@@ -148,7 +151,7 @@ export function TopBarMobileDrawer({
                     return (
                       <a
                         key={item.href}
-                        href={item.href}
+                        href={item.isExternal ? item.href : (resolveInternalHref?.(item.href) ?? item.href)}
                         target={item.isExternal ? '_blank' : undefined}
                         rel={item.isExternal ? 'noopener noreferrer' : undefined}
                         onClick={(event) => {
@@ -184,6 +187,7 @@ export function TopBarMobileDrawer({
             account={account}
             capabilities={capabilities}
             onNavigate={onNavigate}
+            resolveInternalHref={resolveInternalHref}
             onRequestAuth={onRequestAuth}
             onSignOut={onSignOut}
             unavailable={unavailable}

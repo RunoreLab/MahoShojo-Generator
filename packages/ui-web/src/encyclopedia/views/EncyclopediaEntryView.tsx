@@ -18,6 +18,8 @@ export interface EncyclopediaEntryViewProps {
   readonly slug: string | undefined;
   readonly contentSource: EncyclopediaContentSource;
   readonly onNavigate: (href: string) => void;
+  /** 渲染 `<a href>` 时把产品路径解析成运行时 href（Desktop hash history 传 `#` 前缀）。 */
+  readonly resolveInternalHref?: ((href: string) => string) | undefined;
   /**
    * 当前 URL 的 fragment，由宿主注入。
    *
@@ -51,6 +53,7 @@ export function EncyclopediaEntryView({
   slug,
   contentSource,
   onNavigate,
+  resolveInternalHref,
   hash,
   onNavigateExternal,
   renderExternalLink,
@@ -74,7 +77,7 @@ export function EncyclopediaEntryView({
       <div className="flex items-center justify-between gap-2">
         <div className="text-xs font-semibold text-gray-700">条目</div>
         <a
-          href="/encyclopedia"
+          href={resolveInternalHref?.('/encyclopedia') ?? '/encyclopedia'}
           onClick={(event) => {
             event.preventDefault();
             onNavigate('/encyclopedia');
@@ -109,7 +112,7 @@ export function EncyclopediaEntryView({
                 {entries.map((item) => (
                   <a
                     key={item.slug}
-                    href={entryHref(item.slug)}
+                    href={resolveInternalHref?.(entryHref(item.slug)) ?? entryHref(item.slug)}
                     onClick={(event) => {
                       event.preventDefault();
                       onNavigate(entryHref(item.slug));
@@ -139,7 +142,7 @@ export function EncyclopediaEntryView({
               {groupedNavEntries.uncategorized.map((item) => (
                 <a
                   key={item.slug}
-                  href={entryHref(item.slug)}
+                  href={resolveInternalHref?.(entryHref(item.slug)) ?? entryHref(item.slug)}
                   onClick={(event) => {
                     event.preventDefault();
                     onNavigate(entryHref(item.slug));
@@ -172,7 +175,7 @@ export function EncyclopediaEntryView({
               {entry?.title ?? '未找到条目'}
             </h1>
             <a
-              href="/encyclopedia"
+              href={resolveInternalHref?.('/encyclopedia') ?? '/encyclopedia'}
               onClick={(event) => {
                 event.preventDefault();
                 onNavigate('/encyclopedia');
@@ -228,6 +231,7 @@ export function EncyclopediaEntryView({
                   headingIds="github"
                   reservedHeadingIds={[titleSlug]}
                   onNavigateInternal={onNavigate}
+                  {...(resolveInternalHref ? { resolveInternalHref } : {})}
                   {...(onNavigateExternal ? { onNavigateExternal } : {})}
                   {...(renderExternalLink ? { renderExternalLink } : {})}
                   {...(renderInternalLink ? { renderInternalLink } : {})}

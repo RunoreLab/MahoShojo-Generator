@@ -16,6 +16,7 @@ import { useDesktopCloudSession } from '../features/account/use-desktop-cloud-se
 import { DesktopAnnouncementCenter } from '../features/announcements/desktop-announcement-center';
 import { ExternalLinksProvider, useExternalLinks } from '../features/external-links/external-links-provider';
 import { buildCapabilitySnapshot } from './capabilities';
+import { resolveInternalHrefForHashHistory } from './hash-history-fragment';
 
 /**
  * Desktop 的产品路由树（code-based）。
@@ -93,6 +94,7 @@ const DesktopShellInner = () => {
             event.preventDefault();
             void router.navigate({ to: href });
           }}
+          resolveInternalHref={resolveInternalHrefForHashHistory}
           onNavigateExternal={(href, event) => {
             // 顶栏的站外入口是固定产品链接：阻止 WebView 导航，交给 native 校验 +
             // 系统浏览器打开。
@@ -179,10 +181,12 @@ const indexRoute = createRoute({
           name={welcome.name}
           primaryHref="/character-manager"
           onNavigate={navigate}
+          resolveInternalHref={resolveInternalHrefForHashHistory}
         />
         <HomeEncyclopediaCard
           assetSource={DESKTOP_ASSET_SOURCE}
           onNavigate={navigate}
+          resolveInternalHref={resolveInternalHrefForHashHistory}
           recommended={HOME_RECOMMENDED_ENTRIES}
         />
         <HomeFeatureGrid
@@ -190,6 +194,7 @@ const indexRoute = createRoute({
           categories={HOME_FEATURE_CATEGORIES}
           capabilities={CAPABILITIES}
           onNavigate={navigate}
+          resolveInternalHref={resolveInternalHrefForHashHistory}
           unavailable="hide"
         />
         <section className="rounded-lg border border-(--app-border) bg-(--app-surface) p-4">
@@ -226,6 +231,7 @@ const indexRoute = createRoute({
         <ProductFooter
           assetSource={DESKTOP_ASSET_SOURCE}
           onNavigateInternal={navigate}
+          resolveInternalHref={resolveInternalHrefForHashHistory}
           onNavigateExternal={openFixed}
         />
       </section>
@@ -233,10 +239,16 @@ const indexRoute = createRoute({
   },
 });
 
-/** 百科代码随导航加载；首页不解析 Markdown 与数学排版引擎。 */
+/** 百科代码随导航加载；首页不解析 Markdown 与数学排版引擎。`?q`/`?c` 是可分享的筛选状态。 */
 const encyclopediaIndexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/encyclopedia',
+  validateSearch: (search: Record<string, unknown>): { q?: string; c?: string } => {
+    const validated: { q?: string; c?: string } = {};
+    if (typeof search.q === 'string' && search.q !== '') validated.q = search.q;
+    if (typeof search.c === 'string' && search.c !== '') validated.c = search.c;
+    return validated;
+  },
   component: lazyRouteComponent(() => import('./encyclopedia-pages'), 'DesktopEncyclopediaIndex'),
 });
 

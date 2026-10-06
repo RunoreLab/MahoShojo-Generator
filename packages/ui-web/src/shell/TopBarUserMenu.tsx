@@ -7,6 +7,7 @@ import {
   TOPBAR_ACCOUNT_LINK_HREFS,
   type TopBarAccountState,
   type TopBarNavigate,
+  type TopBarResolveInternalHref,
   type TopBarUnavailablePolicy,
 } from './topbar-contract';
 
@@ -18,6 +19,8 @@ interface TopBarUserMenuProps {
   /** 账号入口的能力快照（个人页/角色管理）；与产品导航同源同策略。 */
   capabilities: CapabilitySnapshot;
   onNavigate: TopBarNavigate;
+  /** 渲染 `<a href>` 时把产品路径解析成运行时 href（Desktop hash history 传 `#` 前缀）。 */
+  resolveInternalHref?: TopBarResolveInternalHref;
   /** 点击登录/账号区域——宿主决定"打开登录框"还是"先验证已保存身份再登录"。 */
   onRequestAuth: () => void;
   onSignOut: () => void;
@@ -71,6 +74,7 @@ export function TopBarUserMenu({
   account,
   capabilities,
   onNavigate,
+  resolveInternalHref,
   onRequestAuth,
   onSignOut,
   unavailable = 'hide',
@@ -107,7 +111,7 @@ export function TopBarUserMenu({
     return (
       <a
         key={entry.href}
-        href={entry.href}
+        href={resolveInternalHref?.(entry.href) ?? entry.href}
         onClick={(event) => {
           onNavigate(entry.href, event);
           onNavigateItem?.();

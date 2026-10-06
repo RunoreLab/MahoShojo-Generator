@@ -17,7 +17,7 @@
  * ## 它是复制，不是转换
  *
  * 正文逐字节复制。目录数据（标题/摘要/分类/关键词）仍然是 `packages/ui-web/src/encyclopedia/catalog.ts`
- * 里的 typed catalog，由本脚本**校验引用完整性**而不是生成它——把那 53 条元数据改成从 Markdown
+ * 里的 typed catalog，由本脚本**校验引用完整性**而不是生成它——把那 52 条元数据改成从 Markdown
  * frontmatter 推导，是一次独立的格式迁移，不属于 D3.0。
  *
  * 用法：`node scripts/generate-encyclopedia-content.mjs [--target web|desktop] [--check|--check-output]`

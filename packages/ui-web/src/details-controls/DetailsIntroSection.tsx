@@ -26,6 +26,8 @@ export interface DetailsIntroSectionProps {
   /** 百科条目链接（slug + 文案）；`onNavigateEntry` 收到的是 `/encyclopedia/<slug>` 产品路径。 */
   encyclopediaItems?: readonly EncyclopediaLinkItem[];
   onNavigateEntry?: (href: string) => void;
+  /** 渲染百科链接 `<a href>` 时把产品路径解析成运行时 href（Desktop hash history 传 `#` 前缀）。 */
+  resolveInternalHref?: (href: string) => string;
   /** 创作工坊等补充链接节点（宿主自行决定内跳/外部打开）。 */
   extraLink?: ReactNode;
   /** 返回入口节点；缺省不渲染返回行。 */
@@ -44,6 +46,7 @@ export function DetailsIntroSection({
     { slug: 'archive', text: '百科：档案馆（角色管理）' },
   ],
   onNavigateEntry,
+  resolveInternalHref,
   extraLink,
   backHome,
   introStyle,
@@ -63,7 +66,11 @@ export function DetailsIntroSection({
         <p className="mt-1">请勿在问卷中输入任何真实的隐私信息，或任何不适宜、攻击性、不符合公序良俗的内容。所有回答将被用于生成虚拟角色，并且将会被储存在角色信息中。</p>
       </div>
       {onNavigateEntry && (
-        <EncyclopediaLinks items={encyclopediaItems} onNavigate={onNavigateEntry} />
+        <EncyclopediaLinks
+          items={encyclopediaItems}
+          onNavigate={onNavigateEntry}
+          {...(resolveInternalHref ? { resolveInternalHref } : {})}
+        />
       )}
       <div className="flex flex-col sm:flex-row gap-4 justify-center">
         <button type="button" onClick={onStart} className="generate-button text-lg flex-1">

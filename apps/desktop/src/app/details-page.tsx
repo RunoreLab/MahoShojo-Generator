@@ -74,6 +74,7 @@ import { useDesktopAiConfig } from '../features/ai-config/use-desktop-ai-config'
 import { useDesktopCloudSession } from '../features/account/use-desktop-cloud-session';
 import { useDesktopCardLibraryHost } from '../platform/card-library-host';
 import { IpcLocalCardRepository } from '../platform/local-card-bridge';
+import { resolveInternalHrefForHashHistory } from './hash-history-fragment';
 import { useLeaveGuard } from './useLeaveGuard';
 
 const actionClass = 'rounded-lg border border-(--app-border) px-4 py-2 disabled:opacity-50';
@@ -595,6 +596,7 @@ function DetailsForm({ session }: { session: DetailsSession }) {
             onQuickRandom={handleQuickRandom}
             quickRandomBusy={busy}
             onNavigateEntry={(href) => { void router.navigate({ to: href }); }}
+            resolveInternalHref={resolveInternalHrefForHashHistory}
             backHome={(
               <button type="button" className="footer-link" onClick={() => void router.navigate({ to: '/' })}>
                 返回首页

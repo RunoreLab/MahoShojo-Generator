@@ -1,33 +1,61 @@
-import { useParams, useRouter } from '@tanstack/react-router';
-import type { EncyclopediaContentSource } from '@mahoshojo/ui-web/encyclopedia';
+import { useParams, useRouter, useSearch } from '@tanstack/react-router';
+import { parseEncyclopediaFilter, type EncyclopediaContentSource } from '@mahoshojo/ui-web/encyclopedia';
 import { EncyclopediaEntryView, EncyclopediaIndexView } from '@mahoshojo/ui-web/encyclopedia-views';
 
 import { useExternalLinks } from '../features/external-links/external-links-provider';
-import { getRouteFragmentFromHashHistory } from './hash-history-fragment';
+import { getRouteFragmentFromHashHistory, resolveInternalHrefForHashHistory } from './hash-history-fragment';
 
 const DESKTOP_CONTENT_SOURCE: EncyclopediaContentSource = { baseUrl: '/' };
 
-/** 百科目录。离线可用，不等待任何远端请求（`DESK-PROD-004`）。 */
+/**
+ * 共源视图回传的是产品路径（`/encyclopedia?q=x` 这类字符串）。hash history 下的
+ * `router.navigate` 需要把 search 拆成结构化参数——整个字符串塞进 `to` 只会被当成
+ * pathname，query 部分随之丢失。
+ */
+const createDesktopNavigate = (router: ReturnType<typeof useRouter>) => (href: string) => {
+  const queryIndex = href.indexOf('?');
+  const pathname = queryIndex < 0 ? href : href.slice(0, queryIndex);
+  const search =
+    queryIndex < 0 ? {} : Object.fromEntries(new URLSearchParams(href.slice(queryIndex + 1)));
+  void router.navigate({ to: pathname, search });
+};
+
+const homeLink = (router: ReturnType<typeof useRouter>) => (
+  <a
+    href="#/"
+    onClick={(event) => {
+      event.preventDefault();
+      void router.navigate({ to: '/' });
+    }}
+    className="text-blue-600 hover:underline"
+  >
+    返回首页
+  </a>
+);
+
+/**
+ * 百科目录。离线可用，不等待任何远端请求（`DESK-PROD-004`）。
+ *
+ * `?q` / `?c` 是可分享的筛选状态，语义与 Web 一致：写入由共享视图经 `onNavigate` 完成，
+ * 恢复由这里把路由 search 喂回 `initialQuery` / `initialCategoryId`。
+ */
 export function DesktopEncyclopediaIndex() {
   const router = useRouter();
+  const search = useSearch({ strict: false }) as { q?: string; c?: string };
+
+  const params = new URLSearchParams();
+  if (typeof search.q === 'string') params.set('q', search.q);
+  if (typeof search.c === 'string') params.set('c', search.c);
+  const initial = parseEncyclopediaFilter(params.toString());
+
   return (
     <EncyclopediaIndexView
-      onNavigate={(href) => {
-        void router.navigate({ to: href });
-      }}
+      onNavigate={createDesktopNavigate(router)}
+      resolveInternalHref={resolveInternalHrefForHashHistory}
       path="/encyclopedia"
-      headerLinks={
-        <a
-          href="#/"
-          onClick={(event) => {
-            event.preventDefault();
-            void router.navigate({ to: '/' });
-          }}
-          className="text-blue-600 hover:underline"
-        >
-          返回首页
-        </a>
-      }
+      initialQuery={initial.query}
+      initialCategoryId={initial.categoryId}
+      headerLinks={homeLink(router)}
     />
   );
 }
@@ -54,24 +82,11 @@ export function DesktopEncyclopediaEntry() {
     <EncyclopediaEntryView
       slug={slug}
       contentSource={DESKTOP_CONTENT_SOURCE}
+      resolveInternalHref={resolveInternalHrefForHashHistory}
       hash={fragment}
-      onNavigate={(href) => {
-        void router.navigate({ to: href });
-      }}
+      onNavigate={createDesktopNavigate(router)}
       onNavigateExternal={openContent}
-      headerLinks={
-        <a
-          href="#/"
-          onClick={(event) => {
-            event.preventDefault();
-            void router.navigate({ to: '/' });
-          }}
-          className="text-blue-600 hover:underline"
-        >
-          返回首页
-        </a>
-      }
+      headerLinks={homeLink(router)}
     />
   );
 }
-

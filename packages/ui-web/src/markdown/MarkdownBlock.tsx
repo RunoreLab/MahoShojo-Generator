@@ -56,6 +56,12 @@ export type ExternalLinkRenderProps = InternalLinkRenderProps;
 export type MarkdownNavigationPolicy = {
   readonly onNavigateInternal?: ((href: string) => void) | undefined;
   readonly renderInternalLink?: ((link: InternalLinkRenderProps) => ReactNode) | undefined;
+  /**
+   * 渲染 `<a href>` 时把产品路径解析成运行时 href——hash-history 宿主（Desktop）传
+   * `(href) => '#' + href`，使「复制链接/新标签打开」落到正确地址。导航回调
+   * 仍收到未解析的产品路径。
+   */
+  readonly resolveInternalHref?: ((href: string) => string) | undefined;
   readonly onNavigateExternal?: ((href: string) => void) | undefined;
   readonly renderExternalLink?: ((link: ExternalLinkRenderProps) => ReactNode) | undefined;
   readonly externalBlockedReason?: string;
@@ -128,6 +134,7 @@ export function MarkdownBlock({
   externalMediaPolicy = DENY_EXTERNAL_MEDIA,
   onNavigateInternal,
   renderInternalLink,
+  resolveInternalHref,
   onNavigateExternal,
   renderExternalLink,
   externalBlockedReason = DEFAULT_EXTERNAL_BLOCKED_REASON,
@@ -212,7 +219,7 @@ export function MarkdownBlock({
     if (onNavigateInternal) {
       return (
         <a
-          href={href}
+          href={resolveInternalHref?.(href) ?? href}
           title={title}
           className={className}
           onClick={(event) => {
@@ -226,7 +233,7 @@ export function MarkdownBlock({
     }
 
     return (
-      <a href={href} title={title} className={className}>
+      <a href={resolveInternalHref?.(href) ?? href} title={title} className={className}>
         {children}
       </a>
     );

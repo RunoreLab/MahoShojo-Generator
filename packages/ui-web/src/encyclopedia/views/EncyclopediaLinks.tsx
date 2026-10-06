@@ -10,6 +10,8 @@ export interface EncyclopediaLinkItem {
 export interface EncyclopediaLinksProps {
   readonly items: readonly EncyclopediaLinkItem[];
   readonly onNavigate: (href: string) => void;
+  /** 渲染 `<a href>` 时把产品路径解析成运行时 href（Desktop hash history 传 `#` 前缀）。 */
+  readonly resolveInternalHref?: ((href: string) => string) | undefined;
   readonly className?: string;
   readonly label?: ReactNode;
   readonly labelClassName?: string;
@@ -25,6 +27,7 @@ export interface EncyclopediaLinksProps {
 export function EncyclopediaLinks({
   items,
   onNavigate,
+  resolveInternalHref,
   className = 'flex flex-wrap justify-center gap-3 text-xs',
   label = null,
   labelClassName = 'text-gray-500',
@@ -47,7 +50,7 @@ export function EncyclopediaLinks({
         return (
           <a
             key={item.slug}
-            href={href}
+            href={resolveInternalHref?.(href) ?? href}
             onClick={(event) => {
               event.preventDefault();
               onNavigate(href);

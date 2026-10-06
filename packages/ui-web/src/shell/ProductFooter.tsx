@@ -22,6 +22,8 @@ export interface ProductFooterProps {
   readonly assetSource: HomeAssetSource;
   readonly onNavigateInternal?: (href: string) => void;
   readonly renderInternalLink?: (link: InternalLinkRenderProps) => ReactNode;
+  /** 渲染 `<a href>` 时把产品路径解析成运行时 href（Desktop hash history 传 `#` 前缀）。 */
+  readonly resolveInternalHref?: (href: string) => string;
   readonly onNavigateExternal?: (href: string) => void;
   readonly renderExternalLink?: (link: ExternalLinkRenderProps) => ReactNode;
   readonly externalBlockedReason?: string;
@@ -35,6 +37,7 @@ export function ProductFooter({
   assetSource,
   onNavigateInternal,
   renderInternalLink,
+  resolveInternalHref,
   onNavigateExternal,
   renderExternalLink,
   externalBlockedReason = DEFAULT_BLOCKED_REASON,
@@ -70,7 +73,7 @@ export function ProductFooter({
     if (onNavigateInternal) {
       return (
         <a
-          href={href}
+          href={resolveInternalHref?.(href) ?? href}
           className="footer-link"
           onClick={(event) => {
             event.preventDefault();
@@ -82,7 +85,7 @@ export function ProductFooter({
       );
     }
     return (
-      <a href={href} className="footer-link">
+      <a href={resolveInternalHref?.(href) ?? href} className="footer-link">
         {label}
       </a>
     );

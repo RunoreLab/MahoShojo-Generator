@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { decodeFragmentId } from '@mahoshojo/ui-web/markdown';
 
-import { getRouteFragmentFromHashHistory } from '../src/app/hash-history-fragment';
+import { getRouteFragmentFromHashHistory, resolveInternalHrefForHashHistory } from '../src/app/hash-history-fragment';
 
 /**
  * hash history 的 fragment 切分。
@@ -45,5 +45,20 @@ describe('getRouteFragmentFromHashHistory', () => {
   it('does not mistake a query separator for a fragment', () => {
     // `?c=ai#分类` 里第一个 `#` 才是 fragment 的起点；query 里的 `=` 不是。
     expect(getRouteFragmentFromHashHistory('#/encyclopedia?c=ai#ai')).toBe('ai');
+  });
+});
+
+/**
+ * hash history 下共源 `<a href>` 的产品路径 → 运行时 href 解析。
+ *
+ * 共源组件渲染的是产品路径（`/encyclopedia/foo`）；Desktop 地址栏里它们必须带 `#` 前缀，
+ * 否则「复制链接」「新标签打开」与脚本失败后的原生跳转都会落在 Tauri 自定义协议伺服不
+ * 到的裸路径上。导航回调拿到的仍是不带 `#` 的产品路径，因此解析只发生在渲染层。
+ */
+describe('resolveInternalHrefForHashHistory', () => {
+  it('prefixes product paths with the hash marker', () => {
+    expect(resolveInternalHrefForHashHistory('/encyclopedia')).toBe('#/encyclopedia');
+    expect(resolveInternalHrefForHashHistory('/encyclopedia?q=x&c=y')).toBe('#/encyclopedia?q=x&c=y');
+    expect(resolveInternalHrefForHashHistory('/')).toBe('#/');
   });
 });

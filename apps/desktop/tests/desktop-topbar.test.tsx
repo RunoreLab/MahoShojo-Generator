@@ -152,10 +152,12 @@ describe('desktop shared topbar', () => {
 
     const topbarLinks = [...container.querySelectorAll<HTMLAnchorElement>('header.global-topbar a')];
     const hrefs = topbarLinks.map((a) => a.getAttribute('href'));
-    expect(hrefs).toContain('/');
-    expect(hrefs).toContain('/character-manager');
-    expect(hrefs).toContain('/encyclopedia');
-    expect(hrefs).toContain('/local-library');
+    // 站内 href 一律是 `#/产品路径`：hash-history 下裸 `/path` 会让复制链接落到
+    // 自定义协议伺服不到的路径。
+    expect(hrefs).toContain('#/');
+    expect(hrefs).toContain('#/character-manager');
+    expect(hrefs).toContain('#/encyclopedia');
+    expect(hrefs).toContain('#/local-library');
     // hide 策略：未交付入口整条消失——铃铛连同伪造未读的可能一起不存在。
     expect(hrefs).not.toContain('/messages');
     expect(hrefs).not.toContain('/me');
@@ -173,7 +175,7 @@ describe('desktop shared topbar', () => {
   it('routes internal clicks through the desktop router instead of reloading', async () => {
     const router = await mount();
 
-    await click(container.querySelector('header.global-topbar a[href="/character-manager"]'));
+    await click(container.querySelector('header.global-topbar a[href="#/character-manager"]'));
     expect(router.state.location.pathname).toBe('/character-manager');
     // hash history：产品路径在 # 之后（`router.ts` 的选型理由）。
     expect(window.location.hash).toBe('#/character-manager');
@@ -189,7 +191,7 @@ describe('desktop shared topbar', () => {
     // router 状态：导航、前进、后退三个方向都必须同步高亮。
     expect(activeGroup()).toBe('');
 
-    await click(container.querySelector('header.global-topbar a[href="/character-manager"]'));
+    await click(container.querySelector('header.global-topbar a[href="#/character-manager"]'));
     expect(activeGroup()).toBe('character');
 
     await act(async () => {
@@ -276,7 +278,7 @@ describe('desktop shared topbar', () => {
     expect(container.textContent).toContain('退出登录');
     // 已登录后账号入口按能力快照渲染：角色管理可点，个人页未交付则不出现。
     const menuHrefs = [...container.querySelectorAll('a')].map((a) => a.getAttribute('href'));
-    expect(menuHrefs).toContain('/character-manager');
+    expect(menuHrefs).toContain('#/character-manager');
     expect(menuHrefs).not.toContain('/me');
   });
 

@@ -79,6 +79,8 @@ export interface HomeAccountWelcomeProps {
   /** 次级入口；宿主按真实交付投影，不给就不渲染。 */
   readonly secondaryLinks?: readonly HomeAccountWelcomeLink[];
   readonly onNavigate: (href: string) => void;
+  /** 渲染 `<a href>` 时把产品路径解析成运行时 href（Desktop hash history 传 `#` 前缀）。 */
+  readonly resolveInternalHref?: ((href: string) => string) | undefined;
 }
 
 /**
@@ -93,6 +95,7 @@ export function HomeAccountWelcome({
   primaryHref,
   secondaryLinks,
   onNavigate,
+  resolveInternalHref,
 }: HomeAccountWelcomeProps) {
   if (state === 'anonymous') return null;
 
@@ -108,7 +111,7 @@ export function HomeAccountWelcome({
       ) : (
         <div className="flex flex-col items-center gap-2">
           <a
-            href={primaryHref}
+            href={resolveInternalHref?.(primaryHref) ?? primaryHref}
             onClick={navigate(primaryHref)}
             className="inline-flex items-center rounded-lg bg-pink-100 px-4 py-2 text-sm text-pink-700 transition-colors hover:bg-pink-200"
           >
@@ -119,7 +122,7 @@ export function HomeAccountWelcome({
           {secondaryLinks?.map((link) => (
             <a
               key={link.href}
-              href={link.href}
+              href={resolveInternalHref?.(link.href) ?? link.href}
               onClick={navigate(link.href)}
               className="text-sm text-blue-600 hover:underline"
             >
@@ -135,6 +138,8 @@ export function HomeAccountWelcome({
 export interface HomeEncyclopediaCardProps {
   readonly assetSource: HomeAssetSource;
   readonly onNavigate: (href: string) => void;
+  /** 渲染 `<a href>` 时把产品路径解析成运行时 href（Desktop hash history 传 `#` 前缀）。 */
+  readonly resolveInternalHref?: ((href: string) => string) | undefined;
   /** 首页推荐位。要素 slug 变化时由宿主给出新的文案。 */
   readonly recommended?: readonly { readonly slug: string; readonly text?: string }[];
 }
@@ -145,20 +150,21 @@ export interface HomeEncyclopediaCardProps {
  * 它值得单独成为一个组件而不是目录页的附属品：Desktop 首屏能打开的页面只有百科与本地库，
  * 百科因此是本地运行时**唯一**能读完全部产品文档的入口（`DESK-PROD-004`）。
  */
-export function HomeEncyclopediaCard({ assetSource, onNavigate, recommended }: HomeEncyclopediaCardProps) {
+export function HomeEncyclopediaCard({ assetSource, onNavigate, resolveInternalHref, recommended }: HomeEncyclopediaCardProps) {
   return (
     <div className="flex flex-col gap-3">
       {recommended ? (
         <EncyclopediaLinks
           items={recommended}
           onNavigate={onNavigate}
+          {...(resolveInternalHref ? { resolveInternalHref } : {})}
           label="新手推荐："
           className="flex flex-wrap justify-center gap-3 text-xs"
         />
       ) : null}
       <div className="flex justify-center">
         <a
-          href="/encyclopedia"
+          href={resolveInternalHref?.('/encyclopedia') ?? '/encyclopedia'}
           onClick={(event) => {
             event.preventDefault();
             onNavigate('/encyclopedia');
@@ -189,6 +195,8 @@ export interface HomeFeatureGridProps {
   readonly assetSource: HomeAssetSource;
   readonly capabilities: CapabilitySnapshot;
   readonly onNavigate: (href: string) => void;
+  /** 渲染 `<a href>` 时把产品路径解析成运行时 href（Desktop hash history 传 `#` 前缀）。 */
+  readonly resolveInternalHref?: ((href: string) => string) | undefined;
   /** 不可用入口的处置方式，与共源顶栏同一套语义。 */
   readonly unavailable?: 'hide' | 'explain';
   /** 宿主提供实际功能清单，共享层不预设 Web 或 Desktop inventory。 */
@@ -200,6 +208,7 @@ export function HomeFeatureGrid({
   assetSource,
   capabilities,
   onNavigate,
+  resolveInternalHref,
   unavailable = 'hide',
   categories,
 }: HomeFeatureGridProps) {
@@ -243,7 +252,7 @@ export function HomeFeatureGrid({
     return (
       <a
         key={feature.id}
-        href={feature.href}
+        href={resolveInternalHref?.(feature.href) ?? feature.href}
         onClick={(event) => {
           event.preventDefault();
           onNavigate(feature.href);

@@ -137,10 +137,12 @@ describe('desktop router keeps the product path inside the hash', () => {
 
     // 共源首页目录在 hide 策略下只渲染已交付入口：/details 与 /character-manager
     // 可点；/canshou、/battle 等 Web-only 或未交付路径整条不出现（DESK-PROD-001）。
+    // hash-history 宿主的 <a href> 一律是 `#/产品路径`——裸 `/path` 会让复制链接与
+    // 脚本失败后的原生跳转落在 Tauri 自定义协议伺服不了的路径上。
     expect(home.querySelector('[data-testid="home-feature-grid"]')).not.toBeNull();
-    expect(hrefs).toContain('/details');
-    expect(hrefs).toContain('/character-manager');
-    expect(hrefs).toContain('/encyclopedia');
+    expect(hrefs).toContain('#/details');
+    expect(hrefs).toContain('#/character-manager');
+    expect(hrefs).toContain('#/encyclopedia');
     expect(hrefs).toContain('#/local-library');
     expect(hrefs).toContain('#/settings');
     expect(hrefs).not.toContain('/battle');
@@ -218,6 +220,110 @@ describe('encyclopedia anchors under hash history', () => {
     expect(window.location.hash).toBe('#/encyclopedia/site-guide#scoring');
     expect(router.state.location.pathname).toBe('/encyclopedia/site-guide');
     expect(getRouteFragmentFromHashHistory(router.state.location.href)).toBe('scoring');
+  });
+});
+
+/**
+ * 百科目录的 `?q`/`?c` 与 `<a href>` 在 hash history 下的口径。
+ *
+ * 两件事都必须成立才算「可分享」：筛选写回地址栏、以及地址栏恢复筛选。前者依赖宿主把
+ * 共源视图回传的 `/encyclopedia?q=x` 拆成 `to + search`——整个字符串塞进 `to` 会被当成
+ * pathname，query 无声丢失。后者依赖路由 `validateSearch` 把 q/c 保留给页面。
+ */
+describe('encyclopedia index filter and links under hash history', () => {
+  const typeSearch = async (value: string): Promise<void> => {
+    const input = container.querySelector<HTMLInputElement>('input[aria-label="搜索百科条目"]');
+    expect(input, '找不到百科搜索框').not.toBeNull();
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value);
+      input!.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await settle();
+  };
+
+  it('restores ?q and ?c from the route search', async () => {
+    const router = await mount();
+    await act(async () => {
+      await router.navigate({ to: '/encyclopedia', search: { q: '限流', c: 'troubleshooting' } });
+    });
+    await settle();
+
+    const input = container.querySelector<HTMLInputElement>('input[aria-label="搜索百科条目"]');
+    expect(input?.value).toBe('限流');
+    // 分类筛选已恢复：故障排查高亮，结果只剩该分类里匹配「限流」的条目。
+    // aria-pressed 的选择器必须锚在百科区块内——顶栏主题菜单也用 aria-pressed。
+    const index = container.querySelector('[data-testid="encyclopedia-index"]')!;
+    const activeCategory = index.querySelector('button[aria-pressed="true"]');
+    expect(activeCategory?.textContent).toContain('故障排查');
+    expect(container.textContent).toContain('429');
+    expect(container.querySelector('a[href="#/encyclopedia/rate-limit-429"]')).not.toBeNull();
+    // 不在筛选内的条目不渲染。
+    expect(container.querySelector('a[href="#/encyclopedia/site-guide"]')).toBeNull();
+  });
+
+  it('writes filter changes back to the hash route query', async () => {
+    const router = await mount();
+    await act(async () => {
+      await router.navigate({ to: '/encyclopedia' });
+    });
+    await settle();
+
+    await typeSearch('限流');
+    // 产品路径留在 # 之后，query 以真实 search 形式进入地址栏而不是拼进 pathname。
+    expect(router.state.location.pathname).toBe('/encyclopedia');
+    expect(router.state.location.search).toEqual({ q: '限流' });
+    expect(window.location.hash).toContain('/encyclopedia?');
+    expect(window.location.hash).toContain('q=');
+
+    const categoryButton = [...container.querySelectorAll('button[aria-pressed]')].find((button) =>
+      button.textContent?.includes('故障排查'),
+    );
+    expect(categoryButton, '找不到故障排查分类按钮').not.toBeUndefined();
+    await act(async () => {
+      categoryButton!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+    await settle();
+
+    expect(router.state.location.search).toEqual({ q: '限流', c: 'troubleshooting' });
+    expect(window.location.hash).toContain('c=troubleshooting');
+  });
+
+  it('renders runtime hrefs as #/… on index cards and entry chrome', async () => {
+    const router = await mount();
+    await act(async () => {
+      await router.navigate({ to: '/encyclopedia' });
+    });
+    await settle();
+
+    const indexHrefs = [...container.querySelectorAll('a')].map((anchor) => anchor.getAttribute('href'));
+    // 卡片与返回首页都必须是 `#/` 形态——裸 `/path` 的复制链接会落在伺服不了的路径上。
+    expect(indexHrefs.some((href) => href === '#/encyclopedia/site-guide')).toBe(true);
+    expect(indexHrefs).toContain('#/');
+    expect(indexHrefs.filter((href) => href?.startsWith('/') && !href.startsWith('//'))).toEqual([]);
+
+    await act(async () => {
+      await router.navigate({ to: '/encyclopedia/site-guide' });
+    });
+    await settle();
+
+    const entryHrefs = [...container.querySelectorAll('a')].map((anchor) => anchor.getAttribute('href'));
+    // 条目页 chrome（「返回百科目录」、侧栏条目）同样走 #/ 解析。
+    expect(entryHrefs).toContain('#/encyclopedia');
+    expect(entryHrefs.filter((href) => href?.startsWith('/') && !href.startsWith('//'))).toEqual([]);
+  });
+
+  it('renders the shared not-found state for an unknown slug', async () => {
+    const router = await mount();
+    await act(async () => {
+      await router.navigate({ to: '/encyclopedia/does-not-exist' });
+    });
+    await settle();
+
+    expect(encyclopediaTestId()).toBe('encyclopedia-entry');
+    expect(container.textContent).toContain('未找到条目');
+    expect(container.textContent).toContain('该百科条目不存在');
+    // 未知 slug 的返回入口仍然可用且是 #/ 形态。
+    expect(container.querySelector('a[href="#/encyclopedia"]')).not.toBeNull();
   });
 });
 

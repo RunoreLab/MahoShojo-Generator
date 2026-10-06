@@ -7,6 +7,8 @@ import { useEncyclopediaFilter, useFilteredEncyclopediaEntries } from './use-enc
 export interface EncyclopediaIndexViewProps {
   /** 条目链接的目标。Web 交给 Next router，Desktop 交给 hash router。 */
   readonly onNavigate: (href: string) => void;
+  /** 渲染 `<a href>` 时把产品路径解析成运行时 href（Desktop hash history 传 `#` 前缀）。 */
+  readonly resolveInternalHref?: ((href: string) => string) | undefined;
   /** 当前页面的基础路径，用于把筛选状态写回 URL。缺省时筛选只改本地状态。 */
   readonly path?: string;
   readonly initialQuery?: string;
@@ -28,6 +30,7 @@ const entryHref = (slug: string) => `/encyclopedia/${slug}`;
  */
 export function EncyclopediaIndexView({
   onNavigate,
+  resolveInternalHref,
   path,
   initialQuery = '',
   initialCategoryId = ALL_CATEGORY,
@@ -67,7 +70,7 @@ export function EncyclopediaIndexView({
   const entryCard = (slug: string, title: string, summary: string) => (
     <a
       key={slug}
-      href={entryHref(slug)}
+      href={resolveInternalHref?.(entryHref(slug)) ?? entryHref(slug)}
       onClick={(event) => {
         event.preventDefault();
         onNavigate(entryHref(slug));

@@ -26,3 +26,12 @@ export const getRouteFragmentFromHashHistory = (rawHash: string | undefined): st
   const separatorIndex = withoutLeadingHash.indexOf('#');
   return separatorIndex < 0 ? '' : withoutLeadingHash.slice(separatorIndex + 1);
 };
+
+/**
+ * 把共源组件渲染 `<a href>` 用的产品路径解析成 hash history 下的运行时 href。
+ *
+ * 共源层只认识 `/encyclopedia/foo` 这类产品路径；hash history 宿主的地址栏真实形态是
+ * `#/encyclopedia/foo`。导航回调始终走产品路径，本函数只补 `href` 属性——否则「复制链接」
+ * 或脚本失败后的原生跳转会落在不存在的裸路径上。
+ */
+export const resolveInternalHrefForHashHistory = (href: string): string => `#${href}`;
