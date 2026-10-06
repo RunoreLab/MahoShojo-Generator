@@ -10,6 +10,8 @@
     "hostedDrReadiness": "/api/hosted/dr-readiness",
     "hostedGenerateDetailsStream": "/api/generate-magical-girl-details-stream",
     "hostedGenerateDetails": "/api/generate-magical-girl-details",
+    "hostedGenerateCanshouStream": "/api/generate-canshou-stream",
+    "hostedGenerateCanshou": "/api/generate-canshou",
     "loopbackCallback": "/callback"
   },
   "limits": {
@@ -53,10 +55,12 @@
     "error"
   ],
   "hostedGenerationRouteIds": [
-    "generate-magical-girl-details-stream"
+    "generate-magical-girl-details-stream",
+    "generate-canshou-stream"
   ],
   "hostedJsonRouteIds": [
-    "generate-magical-girl-details"
+    "generate-magical-girl-details",
+    "generate-canshou"
   ],
   "cardLibrary": {
     "routes": {

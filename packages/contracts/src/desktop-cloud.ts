@@ -311,9 +311,10 @@ export const HostedGenerationEventSchema = z.object({
 }).strict();
 export type HostedGenerationEvent = z.infer<typeof HostedGenerationEventSchema>;
 
-/** hosted 适配层允许选择的路由标识白名单（D5.0c 最小集）。 */
+/** hosted 适配层允许选择的路由标识白名单（D5.0c 起，D5.1-G1 增残兽）。 */
 export const HostedGenerationRouteIdSchema = z.enum([
   'generate-magical-girl-details-stream',
+  'generate-canshou-stream',
 ]);
 export type HostedGenerationRouteId = z.infer<typeof HostedGenerationRouteIdSchema>;
 
@@ -341,6 +342,7 @@ export type DesktopHostedGenerateRequest = z.infer<typeof DesktopHostedGenerateR
  */
 export const HostedJsonGenerationRouteIdSchema = z.enum([
   'generate-magical-girl-details',
+  'generate-canshou',
 ]);
 export type HostedJsonGenerationRouteId = z.infer<typeof HostedJsonGenerationRouteIdSchema>;
 

@@ -78,6 +78,33 @@ const HOSTED_GENERATE_DETAILS_STREAM_PATH: &str = "/api/generate-magical-girl-de
 const HOSTED_ROUTE_DETAILS_STREAM: &str = "generate-magical-girl-details-stream";
 const HOSTED_GENERATE_DETAILS_PATH: &str = "/api/generate-magical-girl-details";
 const HOSTED_ROUTE_DETAILS: &str = "generate-magical-girl-details";
+const HOSTED_GENERATE_CANSHOU_STREAM_PATH: &str = "/api/generate-canshou-stream";
+const HOSTED_ROUTE_CANSHOU_STREAM: &str = "generate-canshou-stream";
+const HOSTED_GENERATE_CANSHOU_PATH: &str = "/api/generate-canshou";
+const HOSTED_ROUTE_CANSHOU: &str = "generate-canshou";
+
+/// hosted 流式生成命令开放的 routeId 集合（renderer 传入，native 校验）。
+const HOSTED_STREAM_ROUTES: &[&str] = &[HOSTED_ROUTE_DETAILS_STREAM, HOSTED_ROUTE_CANSHOU_STREAM];
+/// hosted 非流式 JSON 生成命令开放的 routeId 集合。
+const HOSTED_JSON_ROUTES: &[&str] = &[HOSTED_ROUTE_DETAILS, HOSTED_ROUTE_CANSHOU];
+
+/// routeId → 固定上游路径（仅流式生成；`?format=sse` 由调用方追加）。
+fn hosted_stream_path(route_id: &str) -> Option<&'static str> {
+    match route_id {
+        HOSTED_ROUTE_DETAILS_STREAM => Some(HOSTED_GENERATE_DETAILS_STREAM_PATH),
+        HOSTED_ROUTE_CANSHOU_STREAM => Some(HOSTED_GENERATE_CANSHOU_STREAM_PATH),
+        _ => None,
+    }
+}
+
+/// routeId → 固定上游路径（非流式 JSON 生成）。
+fn hosted_json_path(route_id: &str) -> Option<&'static str> {
+    match route_id {
+        HOSTED_ROUTE_DETAILS => Some(HOSTED_GENERATE_DETAILS_PATH),
+        HOSTED_ROUTE_CANSHOU => Some(HOSTED_GENERATE_CANSHOU_PATH),
+        _ => None,
+    }
+}
 const PROTOCOL_VERSION: &str = "desktop-auth-v1";
 const LOOPBACK_CALLBACK_PATH: &str = "/callback";
 const HOSTED_CONTRACT_VERSION: &str = "g25e1-v1";
@@ -1364,9 +1391,9 @@ async fn prepare_hosted_dispatch(
     state: &CloudState,
     secrets: &dyn SecretStore,
     request: &CloudHostedGenerateRequest,
-    allowed_route: &str,
+    allowed_routes: &[&str],
 ) -> Result<(serde_json::Value, Option<StoredSession>), CloudError> {
-    if request.route_id != allowed_route {
+    if !allowed_routes.contains(&request.route_id.as_str()) {
         return Err(invalid_request("未知的 hosted 生成路由"));
     }
     if request.request_id.is_empty() || request.request_id.len() > 128 {
@@ -1415,7 +1442,7 @@ pub async fn stream_hosted_ai(
     on_event: &dyn HostedEventSink,
 ) -> Result<(), CloudError> {
     let (body, session) =
-        prepare_hosted_dispatch(state, secrets, &request, HOSTED_ROUTE_DETAILS_STREAM).await?;
+        prepare_hosted_dispatch(state, secrets, &request, HOSTED_STREAM_ROUTES).await?;
 
     let token = registry
         .register(&request.request_id)
@@ -1423,10 +1450,14 @@ pub async fn stream_hosted_ai(
 
     let emit = |event: HostedSseEvent| on_event.send(event).ok();
 
+    // allowed_routes 门禁已保证 route_id 在表内；unwrap 不会触发。
+    let upstream_path = hosted_stream_path(&request.route_id)
+        .ok_or_else(|| CloudError::new(CloudErrorCode::InvalidRequest, "未知的 hosted 生成路由"))?;
+
     let outcome = async {
-        // SSE 模式由 `?format=sse` 选定（与 Web `DetailsPage` 一致），
+        // SSE 模式由 `?format=sse` 选定（与 Web 各问卷页一致），
         // query 作为固定路由的一部分，不由 renderer 提供。
-        let path = format!("{HOSTED_GENERATE_DETAILS_STREAM_PATH}?format=sse");
+        let path = format!("{upstream_path}?format=sse");
         let builder = match &session {
             Some(session) => authed_request(
                 &state.http,
@@ -1609,11 +1640,15 @@ pub async fn hosted_ai_request(
     request: CloudHostedGenerateRequest,
 ) -> Result<CloudHostedJsonResponse, CloudError> {
     let (body, session) =
-        prepare_hosted_dispatch(state, secrets, &request, HOSTED_ROUTE_DETAILS).await?;
+        prepare_hosted_dispatch(state, secrets, &request, HOSTED_JSON_ROUTES).await?;
 
     let token = registry
         .register(&request.request_id)
         .map_err(|_| CloudError::new(CloudErrorCode::InvalidRequest, "requestId 已在执行中"))?;
+
+    // allowed_routes 门禁已保证 route_id 在表内；unwrap 不会触发。
+    let upstream_path = hosted_json_path(&request.route_id)
+        .ok_or_else(|| CloudError::new(CloudErrorCode::InvalidRequest, "未知的 hosted 生成路由"))?;
 
     let outcome = async {
         let builder = match &session {
@@ -1621,14 +1656,14 @@ pub async fn hosted_ai_request(
                 &state.http,
                 reqwest::Method::POST,
                 &state.origin,
-                HOSTED_GENERATE_DETAILS_PATH,
+                upstream_path,
                 session,
             ),
             None => base_request(
                 &state.http,
                 reqwest::Method::POST,
                 &state.origin,
-                HOSTED_GENERATE_DETAILS_PATH,
+                upstream_path,
             ),
         };
         let request_builder = builder
@@ -2335,7 +2370,9 @@ mod tests {
                         })),
                     }
                 }
-                HOSTED_GENERATE_DETAILS_STREAM_PATH => {
+                path if path == HOSTED_GENERATE_DETAILS_STREAM_PATH
+                    || path == HOSTED_GENERATE_CANSHOU_STREAM_PATH =>
+                {
                     *self.last_generate_headers.lock().unwrap() = Some(head.to_string());
                     *self.last_generate_body.lock().unwrap() = serde_json::from_slice(body).ok();
                     let sse = self
@@ -2371,7 +2408,9 @@ mod tests {
                         body: sse,
                     }
                 }
-                HOSTED_GENERATE_DETAILS_PATH => {
+                path if path == HOSTED_GENERATE_DETAILS_PATH
+                    || path == HOSTED_GENERATE_CANSHOU_PATH =>
+                {
                     *self.last_generate_headers.lock().unwrap() = Some(head.to_string());
                     *self.last_generate_body.lock().unwrap() = serde_json::from_slice(body).ok();
                     if let Some((status, override_body)) =
@@ -2717,6 +2756,14 @@ mod tests {
             fixture["paths"]["hostedGenerateDetails"].as_str(),
             Some(HOSTED_GENERATE_DETAILS_PATH)
         );
+        assert_eq!(
+            fixture["paths"]["hostedGenerateCanshouStream"].as_str(),
+            Some(HOSTED_GENERATE_CANSHOU_STREAM_PATH)
+        );
+        assert_eq!(
+            fixture["paths"]["hostedGenerateCanshou"].as_str(),
+            Some(HOSTED_GENERATE_CANSHOU_PATH)
+        );
         let event_names: Vec<&str> = fixture["hostedGenerationEventNames"]
             .as_array()
             .unwrap()
@@ -2728,6 +2775,15 @@ mod tests {
         }
         assert_eq!(event_names.len(), HOSTED_EVENT_NAMES.len());
 
+        // 流式路由白名单与 fixture `hostedGenerationRouteIds` 同源对拍。
+        let stream_routes: Vec<&str> = fixture["hostedGenerationRouteIds"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|value| value.as_str().unwrap())
+            .collect();
+        assert_eq!(stream_routes, HOSTED_STREAM_ROUTES);
+
         // 非流式路由白名单与 fixture `hostedJsonRouteIds` 同源对拍。
         let json_routes: Vec<&str> = fixture["hostedJsonRouteIds"]
             .as_array()
@@ -2735,7 +2791,7 @@ mod tests {
             .iter()
             .map(|value| value.as_str().unwrap())
             .collect();
-        assert_eq!(json_routes, [HOSTED_ROUTE_DETAILS]);
+        assert_eq!(json_routes, HOSTED_JSON_ROUTES);
 
         // Rust `CloudErrorCode` 全量序列化值与共享 contract 错误码枚举逐一相等——
         // 防止两侧各自手抄一份列表发生漂移。
