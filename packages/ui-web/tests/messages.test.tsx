@@ -87,6 +87,32 @@ describe('classifyMessageActionUrl', () => {
     expect(classifyMessageActionUrl('https://example.com/\nSet-Cookie: x=1').kind).toBe('unsafe');
     expect(classifyMessageActionUrl('https://example.com/ok').kind).toBe('external');
   });
+
+  it('external 与 native 同口径：先 trim 再校验，回传 trim 后的 href', () => {
+    // native `validate_external_url` 第一步就是 trim——首尾空白折叠后放行。
+    expect(classifyMessageActionUrl('  https://example.com/x  ')).toEqual({
+      kind: 'external',
+      href: 'https://example.com/x',
+    });
+    expect(classifyMessageActionUrl('   ').kind).toBe('unsafe');
+  });
+
+  it('external 与 native 同口径：长度按 UTF-8 字节 ≤ 2048', () => {
+    // `https://example.com/` 恰 20 字节：总长 2048 放行、2049 拒绝。
+    expect(classifyMessageActionUrl(`https://example.com/${'a'.repeat(2028)}`).kind).toBe('external');
+    expect(classifyMessageActionUrl(`https://example.com/${'a'.repeat(2029)}`).kind).toBe('unsafe');
+    // 680 个「中」= 2040 字节，码元长度远低于 2048——按字节计仍超限。
+    expect(classifyMessageActionUrl(`https://example.com/${'中'.repeat(680)}`).kind).toBe('unsafe');
+  });
+
+  it('external 与 native 同口径：非 ASCII 空白/控制字符一律 unsafe', () => {
+    // Rust `is_whitespace`/`is_control` ↔ Unicode `White_Space`/`Cc`：
+    // NBSP、NEL、U+2028、U+3000 与 C1 控制字符都不得进入链接类别。
+    const nonAsciiForbidden = [0x00a0, 0x0085, 0x2028, 0x3000, 0x009f].map((cp) => String.fromCodePoint(cp));
+    for (const bad of nonAsciiForbidden) {
+      expect(classifyMessageActionUrl(`https://example.com/${bad}x`).kind).toBe('unsafe');
+    }
+  });
 });
 
 describe('MessageCard', () => {

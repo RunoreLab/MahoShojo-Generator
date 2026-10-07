@@ -75,10 +75,11 @@ export interface MessageLinkHandlers {
  * 外链而不是站内路径；反斜杠会被浏览器折叠成 `/`（`/\evil.example` →
  * `//evil.example`），控制字符/空白/DEL 一律不放行。
  *
- * 站外与 Desktop native `validate_external_url` 同语义：http(s) + 有
- * host + 无凭据（`https://user:pass@host/` 会把凭据写进浏览器历史）；
- * 含空白/控制字符的串先拒再解析——WHATWG URL 会静默折叠 tab/换行，
- * 展示给用户的与最终打开的必须是同一个 URL。
+ * 站外与 Desktop native `validate_external_url` 同语义：trim 后长度
+ * ≤ 2048（UTF-8 字节，同契约 `MAX_DESKTOP_EXTERNAL_URL_LENGTH`）、
+ * http(s) + 有 host + 无凭据（`https://user:pass@host/` 会把凭据写进
+ * 浏览器历史）；含 Unicode 空白/控制字符的串先拒再解析——WHATWG URL
+ * 会静默折叠 tab/换行，展示给用户的与最终打开的必须是同一个 URL。
  */
 export type MessageActionTarget =
   | { readonly kind: 'internal'; readonly href: string }
@@ -89,9 +90,15 @@ const INTERNAL_PATH_PATTERN = /^\/(?!\/)/u;
 // 站内：与服务端 admin action 同一 regex——反斜杠会被浏览器折叠成 `/`
 //（`/\evil.example` → `//evil.example`），与控制字符/空白/DEL 一并拒收。
 const FORBIDDEN_INTERNAL_CHARS = /[\\\u0000-\u0020\u007f]/u;
-// 站外：与 native `validate_external_url` 同一口径——先拒空白/控制字符
-//（WHATWG 会静默折叠 tab/换行），再按结构判定。
-const FORBIDDEN_EXTERNAL_CHARS = /[\u0000-\u0020\u007f]/u;
+// 站外：与 native `validate_external_url` 同一口径——先拒 Unicode 空白/
+// 控制字符（Rust `is_whitespace`/`is_control` ↔ `White_Space`/`Cc`，覆盖
+// NBSP、NEL、C1 控制等非 ASCII 字符；WHATWG 会静默折叠 tab/换行），再按
+// 结构判定。
+const FORBIDDEN_EXTERNAL_CHARS = /[\p{White_Space}\p{Cc}]/u;
+// 与契约 `MAX_DESKTOP_EXTERNAL_URL_LENGTH`、native `MAX_EXTERNAL_URL_LENGTH`
+// 同源；native 对 trim 后的 UTF-8 字节数计长，这里同样按字节比对。
+const MAX_MESSAGE_ACTION_URL_LENGTH = 2048;
+const UTF8_ENCODER = new TextEncoder();
 
 export const classifyMessageActionUrl = (actionUrl: string | null): MessageActionTarget => {
   if (typeof actionUrl !== 'string' || actionUrl === '') return { kind: 'unsafe' };
@@ -100,20 +107,28 @@ export const classifyMessageActionUrl = (actionUrl: string | null): MessageActio
       ? { kind: 'unsafe' }
       : { kind: 'internal', href: actionUrl };
   }
-  if (FORBIDDEN_EXTERNAL_CHARS.test(actionUrl)) return { kind: 'unsafe' };
+  // native 同序：trim → 字节长度 → 字符集 → 结构解析；external href 回传
+  // trim 后的值，即最终交给浏览器/native 打开的同一个串。
+  const trimmed = actionUrl.trim();
+  if (
+    trimmed === '' ||
+    UTF8_ENCODER.encode(trimmed).length > MAX_MESSAGE_ACTION_URL_LENGTH ||
+    FORBIDDEN_EXTERNAL_CHARS.test(trimmed)
+  ) {
+    return { kind: 'unsafe' };
+  }
   try {
-    const url = new URL(actionUrl);
+    const url = new URL(trimmed);
     if (
       (url.protocol === 'http:' || url.protocol === 'https:') &&
       url.hostname !== '' &&
       url.username === '' &&
       url.password === ''
     ) {
-      return { kind: 'external', href: actionUrl };
+      return { kind: 'external', href: trimmed };
     }
   } catch {
     // 非 URL 原文不渲染链接。
   }
   return { kind: 'unsafe' };
 };
-
